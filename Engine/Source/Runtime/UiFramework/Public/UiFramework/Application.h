@@ -4,6 +4,7 @@
 #include <UiCore/HitGrid.h>
 #include <UiFramework/Commands.h>
 #include <UiFramework/AccessibleNode.h>
+#include <UiFramework/FocusCause.h>
 #include <UiFramework/UiTimer.h>
 
 namespace rocks::ui {
@@ -72,10 +73,16 @@ public:
     bool HasPointerCapture(PointerSource source, uint32 user, uint32 pointer) const noexcept;
     bool HasMouseCapture(const Element& element, uint32 user, uint32 pointer) const noexcept;
     SharedPtr<Element> GetFocus(uint32 userId) const noexcept;
-    Result<void> SetFocus(uint32 userId, const SharedPtr<Element>& target) noexcept;
+    // cause가 Navigation이면 대상에 초점 외곽선을 켠다(9.1절 UW4f1). 같은 대상에 다시 부르면
+    // 원인과 외곽선만 바꾼다(키보드로 옮긴 초점을 마우스로 누르면 외곽선이 꺼진다).
+    Result<void> SetFocus(uint32 userId, const SharedPtr<Element>& target,
+                          FocusCause cause = FocusCause::Direct) noexcept;
 
     // 직접 소유자가 보관한 참조를 찾아 같은 포커스 검사를 적용한다.
-    Result<void> SetFocus(uint32 userId, Element& target) noexcept;
+    Result<void> SetFocus(uint32 userId, Element& target,
+                          FocusCause cause = FocusCause::Direct) noexcept;
+    // 사용자 초점의 원인이다. 초점이 없으면 Direct다.
+    FocusCause GetFocusCause(uint32 userId) const noexcept;
 
     // focus 경로의 키·문자 이벤트를 전달한다. 문자와 키 해제는 미리보기 없이 전달한다.
     bool RouteGamepadButtons(uint32 user, uint32 pressed,
@@ -122,6 +129,9 @@ private:
     struct Focus {
         uint32 userId;
         WeakPtr<Element> target;
+        FocusCause cause;
+        // 이 항목이 대상의 초점 외곽선을 켰는지다.
+        bool outline;
     };
 
     struct Capture {

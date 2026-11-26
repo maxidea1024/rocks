@@ -27,19 +27,19 @@ GalleryGrid::GalleryGrid(GalleryContext& context) noexcept
     grid_ = Move(grid.Value());
 }
 
-void GalleryGrid::AddRow(StringView name, StringView rocksName,
-                         Span<const SharedPtr<Element>> widgets, float spacing) noexcept {
+void GalleryGrid::AddRow(StringView name, StringView usage, Span<const SharedPtr<Element>> widgets,
+                         float spacing) noexcept {
     if (status_) {
-        status_ = TryAddRow(name, rocksName, widgets, spacing);
+        status_ = TryAddRow(name, usage, widgets, spacing);
     }
 }
 
-void GalleryGrid::AddRow(StringView name, StringView rocksName,
+void GalleryGrid::AddRow(StringView name, StringView usage,
                          const SharedPtr<Element>& widget) noexcept {
-    AddRow(name, rocksName, Span<const SharedPtr<Element>>(&widget, 1));
+    AddRow(name, usage, Span<const SharedPtr<Element>>(&widget, 1));
 }
 
-Result<void> GalleryGrid::TryAddRow(StringView name, StringView rocksName,
+Result<void> GalleryGrid::TryAddRow(StringView name, StringView usage,
                                     Span<const SharedPtr<Element>> widgets,
                                     float spacing) noexcept {
     Allocator& allocator = context_.allocator;
@@ -47,7 +47,7 @@ Result<void> GalleryGrid::TryAddRow(StringView name, StringView rocksName,
     auto toggle = SharedPtr<CheckBox>::TryMake(allocator, allocator);
     auto names = SharedPtr<VerticalStack>::TryMake(allocator, allocator);
     auto label = MakeText(context_, name, NormalFont, ColorRef::Specified(LabelColor));
-    auto rocks = MakeText(context_, rocksName, SmallFont, ColorRef::FromTheme(ThemeSlot::White25));
+    auto rocks = MakeText(context_, usage, SmallFont, ColorRef::FromTheme(ThemeSlot::White25));
     if (const ErrorCode error = FirstError(row, toggle, names, label, rocks);
         error != ErrorCode::None) {
         return Result<void>::Failure(error);

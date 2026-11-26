@@ -93,6 +93,20 @@ Result<BehaviorPage> BuildBehaviorPage(GalleryContext& context) noexcept {
     GalleryGrid& rows = *grid.Value();
     BuildStatus status;
 
+    // 초점 외곽선(9.1절 UW4f1): Tab·방향키로 옮기면 외곽선이 보이고, 눌러서 옮긴 초점에는 없다.
+    {
+        auto first = MakeTextButton(context, "First", DefaultButtonStyle());
+        auto second = MakeTextButton(context, "Second", DefaultButtonStyle());
+        auto primary = MakeTextButton(context, "Primary", PrimaryButtonStyle());
+        auto slider = MakeSlider(context, 0.5f, [](float) noexcept {});
+        if (status.Take(first) && status.Take(second) && status.Take(primary) &&
+            status.Take(slider)) {
+            const SharedPtr<Element> parts[] = {first.Value(), second.Value(), primary.Value(),
+                                                slider.Value()};
+            rows.AddRow("Focus Outline", "Tab, arrows: outline / click: none", parts);
+        }
+    }
+
     // 렌더 변환: 회전(슬라이더), 배율, 기울기. 변환은 원하는 크기를 바꾸지 않고, hit도 변환을
     // 따른다.
     {

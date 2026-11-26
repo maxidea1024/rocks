@@ -27,6 +27,7 @@ public:
     Result<void> Arrange(const Geometry& geometry) noexcept override;
     Vec2 ComputeDesiredSize(float scale) const noexcept override;
     bool SupportsKeyboardFocus() const noexcept override;
+    const StyleBrush* FocusOutlineBrush() const noexcept override;
     void OnFocusReceived(uint32 user) noexcept override;
     void OnFocusLost(uint32 user) noexcept override;
     bool OnPreviewKeyChord(uint32 user, const input::InputEvent& event,

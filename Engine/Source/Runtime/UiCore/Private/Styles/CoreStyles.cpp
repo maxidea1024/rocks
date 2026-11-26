@@ -160,6 +160,16 @@ const ScrollBarStyle& DefaultScrollBarStyle() noexcept {
     return style;
 }
 
+const StyleBrush& FocusOutlineStyle() noexcept {
+    static const StyleBrush style = [] {
+        StyleBrush brush = StyleBrush::RoundedBox(ThemeSlot::Primary, FocusOutlineRadius,
+                                                  ThemeSlot::Primary, ControlOutlineThickness);
+        brush.fill = ColorRef::Specified({0, 0, 0, 0});
+        return brush;
+    }();
+    return style;
+}
+
 const TextStyle& NormalTextStyle() noexcept {
     static const TextStyle style{{Typeface::Regular, NormalFontSize}, {ColorSource::Foreground}};
     return style;

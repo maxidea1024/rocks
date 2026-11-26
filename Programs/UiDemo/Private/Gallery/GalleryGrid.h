@@ -5,7 +5,7 @@
 #include <UiFramework/Grid.h>
 
 // 위젯 탭의 행 격자다(UE SStarshipGallery::ConstructWidgetGallery의 NextSlot, 742–784행). 한 행은
-// [활성 체크 상자][이름 — UE 이름표와 그 아래 Rocks 이름][위젯 줄]이고, 체크 상자를 끄면 그 행의
+// [활성 체크 상자][이름 — 부품 이름과 그 아래 쓰는 법]이고, 체크 상자를 끄면 그 행의
 // 위젯 줄을 비활성으로 만든다(UE가 비활성 상태를 보여 주는 방법). RowsPerColumn 행마다 오른쪽 열
 // 묶음으로 넘긴다(Docs/Design/UiToolkit 16.1절).
 //
@@ -27,9 +27,9 @@ public:
     explicit GalleryGrid(GalleryContext& context) noexcept;
 
     // 위젯들을 가로로 놓은 행을 더한다. 첫 실패를 보존하고, 그 뒤 호출은 아무것도 하지 않는다.
-    void AddRow(StringView name, StringView rocksName, Span<const SharedPtr<Element>> widgets,
+    void AddRow(StringView name, StringView usage, Span<const SharedPtr<Element>> widgets,
                 float spacing = WidgetSpacing) noexcept;
-    void AddRow(StringView name, StringView rocksName, const SharedPtr<Element>& widget) noexcept;
+    void AddRow(StringView name, StringView usage, const SharedPtr<Element>& widget) noexcept;
 
     // 격자를 스크롤 영역에 담아 돌려준다. 행을 더하다 실패했으면 그 오류다.
     Result<SharedPtr<Element>> Finish() noexcept;
@@ -40,7 +40,7 @@ public:
     SharedPtr<Element> RowToggle(usize row) const noexcept;
 
 private:
-    Result<void> TryAddRow(StringView name, StringView rocksName,
+    Result<void> TryAddRow(StringView name, StringView usage,
                            Span<const SharedPtr<Element>> widgets, float spacing) noexcept;
 
     GalleryContext& context_;

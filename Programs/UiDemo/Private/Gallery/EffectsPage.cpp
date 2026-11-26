@@ -172,14 +172,14 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
             auto sized = Sized(context, slider.Value(), SliderSize);
             if (status.Take(set) && status.Take(sized)) {
                 const SharedPtr<Element> parts[] = {stage, sized.Value()};
-                rows.AddRow("SBackgroundBlur", "BackgroundBlur::SetStrength", parts);
+                rows.AddRow("Background Blur", "BackgroundBlur::SetStrength", parts);
             }
         }
 
         SharedPtr<Element> lowStage;
         auto low = MakeBlur(context, true, lowStage);
         if (status.Take(low)) {
-            rows.AddRow("SBackgroundBlur (low quality)", "BackgroundBlur lowQuality + fallback",
+            rows.AddRow("Background Blur (low quality)", "BackgroundBlur lowQuality + fallback",
                         lowStage);
         }
     }
@@ -194,7 +194,7 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
             auto stage = built ? MakeStage(context, retainer.Value())
                                : Result<SharedPtr<Element>>::Failure(built.Error());
             if (status.Take(stage)) {
-                rows.AddRow("SRetainerBox", "RetainerBox (effect tint)", stage.Value());
+                rows.AddRow("Retainer Box", "RetainerBox (effect tint)", stage.Value());
             }
         }
     }
@@ -208,7 +208,7 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
             auto stage = added ? MakeStage(context, cache.Value())
                                : Result<SharedPtr<Element>>::Failure(added.Error());
             if (status.Take(stage)) {
-                rows.AddRow("SInvalidationPanel", "CachePanel", stage.Value());
+                rows.AddRow("Cache Panel", "CachePanel (cached paint list)", stage.Value());
             }
         }
     }
@@ -233,7 +233,7 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
             auto stage = built ? MakeStage(context, viewport.Value())
                                : Result<SharedPtr<Element>>::Failure(built.Error());
             if (status.Take(stage)) {
-                rows.AddRow("SViewport", "Viewport (scene texture + UI)", stage.Value());
+                rows.AddRow("Viewport", "Viewport (scene texture + UI)", stage.Value());
             }
         }
     }

@@ -220,6 +220,10 @@ void EditableTextElement::PositionCompositionWindow() const noexcept {
     }
 }
 
+const StyleBrush* EditableTextElement::FocusOutlineBrush() const noexcept {
+    return nullptr;
+}
+
 bool EditableTextElement::SupportsKeyboardFocus() const noexcept {
     return true;
 }

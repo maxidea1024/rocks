@@ -95,10 +95,10 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
 
     GalleryGrid& rows = *grid.Value();
     BuildStatus status;
-    const auto one = [&](StringView name, StringView rocksName,
+    const auto one = [&](StringView name, StringView usage,
                          Result<SharedPtr<Element>> widget) noexcept {
         if (status.Take(widget, name)) {
-            rows.AddRow(name, rocksName, widget.Value());
+            rows.AddRow(name, usage, widget.Value());
         }
     };
 
@@ -147,7 +147,7 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
                      })});
             if (status.Take(built)) {
                 const SharedPtr<Element> parts[] = {combo.Value(), chosen.Value()};
-                rows.AddRow("ComboBox", "ComboBox (MenuAnchor)", parts);
+                rows.AddRow("Combo Box", "ComboBox (MenuAnchor)", parts);
             }
         }
     }
@@ -162,10 +162,10 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
             auto set = progress.Value()->SetValue(ProgressValue);
             if (status.Take(set)) {
                 marquee.Value()->SetMarquee(true);
-                one("SCircularThrobber", "ActivityIndicator",
+                one("Activity Indicator", "ActivityIndicator",
                     Result<SharedPtr<Element>>::Success(throbber.Value()));
-                one("SProgressBar", "ProgressBar", Sized(context, progress.Value(), BarSize));
-                one("SProgressBar marquee", "ProgressBar::SetMarquee",
+                one("Progress Bar", "ProgressBar", Sized(context, progress.Value(), BarSize));
+                one("Progress Bar (marquee)", "ProgressBar::SetMarquee",
                     Sized(context, marquee.Value(), BarSize));
             }
         }
@@ -183,8 +183,8 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
 
             if (status.Take(set)) {
                 flat.Value()->SetIndentHandle(false);
-                one("SSlider", "Slider", Sized(context, slider.Value(), BarSize));
-                one("SSlider (no indentation)", "Slider::SetIndentHandle(false)",
+                one("Slider", "Slider", Sized(context, slider.Value(), BarSize));
+                one("Slider (no indentation)", "Slider::SetIndentHandle(false)",
                     Sized(context, flat.Value(), BarSize));
             }
         }
@@ -197,7 +197,7 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         auto spacer = Sized(context, {}, SpacerSize);
         if (status.Take(left) && status.Take(right) && status.Take(spacer)) {
             const SharedPtr<Element> parts[] = {left.Value(), spacer.Value(), right.Value()};
-            rows.AddRow("SSpacer", "SizeBox", parts, 0);
+            rows.AddRow("Spacer", "SizeBox (fixed size)", parts, 0);
         }
     }
 
@@ -213,7 +213,7 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
                                                   .content = label.Value(),
                                                   .caption = Caption(context, label.Value())});
             if (status.Take(built)) {
-                one("SSpinBox", "SpinBox", Sized(context, spin.Value(), SpinSize));
+                one("Spin Box", "SpinBox", Sized(context, spin.Value(), SpinSize));
             }
         }
     }

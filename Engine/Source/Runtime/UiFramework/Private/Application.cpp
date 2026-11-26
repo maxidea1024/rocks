@@ -228,14 +228,25 @@ SharedPtr<Element> Application::GetFocus(uint32 userId) const noexcept {
     return {};
 }
 
-Result<void> Application::SetFocus(uint32 userId, Element& target) noexcept {
+FocusCause Application::GetFocusCause(uint32 userId) const noexcept {
+    for (const auto& focus : focus_) {
+        if (focus.userId == userId) {
+            return focus.cause;
+        }
+    }
+
+    return FocusCause::Direct;
+}
+
+Result<void> Application::SetFocus(uint32 userId, Element& target, FocusCause cause) noexcept {
     auto owned = root_.Get() == &target ? root_
                                         : (target.Parent() ? target.Parent()->FindChild(&target)
                                                            : SharedPtr<Element>{});
-    return owned ? SetFocus(userId, owned) : Result<void>::Failure(ErrorCode::NotFound);
+    return owned ? SetFocus(userId, owned, cause) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& target) noexcept {
+Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& target,
+                                   FocusCause cause) noexcept {
     if (focusChanging_ || cancelling_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
@@ -254,19 +265,38 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
 
     SharedPtr<Element> previous =
         index < focus_.Size() ? focus_[index].target.Lock() : SharedPtr<Element>();
+    // 외곽선은 키보드·게임패드 이동으로 옮긴 초점에만 보인다(UE SetUserFocus의 ShowFocus).
+    const bool outline = target && cause == FocusCause::Navigation;
     if (previous.Get() == target.Get() && (target || index == focus_.Size())) {
+        if (target) {
+            focus_[index].cause = cause;
+            if (focus_[index].outline != outline) {
+                focus_[index].outline = outline;
+                target->SetFocusOutlineVisible(outline);
+            }
+        }
+
         return Result<void>::Success();
     }
 
+    const bool hadOutline = index < focus_.Size() && focus_[index].outline;
     if (target && index == focus_.Size()) {
-        auto added = focus_.TryPushBack({userId, WeakPtr<Element>(target)});
+        auto added = focus_.TryPushBack({userId, WeakPtr<Element>(target), cause, outline});
         if (!added) {
             return added;
         }
     } else if (target) {
-        focus_[index].target = WeakPtr<Element>(target);
+        focus_[index] = {userId, WeakPtr<Element>(target), cause, outline};
     } else if (index < focus_.Size()) {
         (void)focus_.TryRemoveAt(index);
+    }
+
+    if (hadOutline && previous) {
+        previous->SetFocusOutlineVisible(false);
+    }
+
+    if (outline) {
+        target->SetFocusOutlineVisible(true);
     }
 
     ++focusVersion_;
@@ -599,7 +629,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
     if (event.type == PointerEventType::Down && focusVersion_ == focusBefore) {
         for (usize i = 0; i < path.Size(); ++i) {
             if (path[i]->SupportsKeyboardFocus() && IsFocusablePath(path[i].Get())) {
-                auto focused = SetFocus(event.userId, path[i]);
+                auto focused = SetFocus(event.userId, path[i], FocusCause::Pointer);
                 if (!focused) {
                     return Result<bool>::Failure(focused.Error());
                 }
@@ -656,7 +686,12 @@ void Application::ClearAllFocus() noexcept {
     while (focus_.Size() != 0) {
         const uint32 userId = focus_[0].userId;
         SharedPtr<Element> previous = focus_[0].target.Lock();
+        const bool outline = focus_[0].outline;
         (void)focus_.TryRemoveAt(0);
+        if (previous && outline) {
+            previous->SetFocusOutlineVisible(false);
+        }
+
         if (previous) {
             previous->OnFocusLost(userId);
         }
@@ -698,8 +733,13 @@ void Application::ReleaseInactiveTargets(const Element* releasing) noexcept {
         }
 
         const uint32 userId = focus_[i].userId;
+        const bool outline = focus_[i].outline;
         (void)focus_.TryRemoveAt(i);
         ++focusVersion_;
+        if (target && outline) {
+            target->SetFocusOutlineVisible(false);
+        }
+
         if (target) {
             target->OnFocusLost(userId);
         }

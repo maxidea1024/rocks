@@ -20,7 +20,9 @@ enum Failure : int {
     HoverForegroundMissing = 45,
     TabSwitchFailed = 46,
     DockingMissing = 47,
-    TabDragFailed = 48
+    TabDragFailed = 48,
+    FocusOutlineMissing = 49,
+    FocusOutlineNotCleared = 50
 };
 
 Optional<Vec2> Center(const Element* element) noexcept {
@@ -53,6 +55,27 @@ bool Drag(Application& app, Vec2 from, Vec2 to) noexcept {
     auto move = app.RoutePointer({PointerEventType::Move, to});
     auto up = app.RoutePointer({PointerEventType::Up, to});
     return step && move && up && up.Value();
+}
+
+// within 안에 초점 외곽선(투명 채움 + Primary 외곽선 둥근 상자)이 있는지 본다.
+bool HasFocusOutline(const CacheRoot& cache, const Element& within,
+                     const ThemeColors& theme) noexcept {
+    auto bounds = within.GetGeometry().WindowBounds();
+    if (!bounds) {
+        return false;
+    }
+
+    for (const PaintBox& box : cache.List().Boxes()) {
+        auto boxBounds = box.geometry.WindowBounds();
+        if (box.roundedBox && box.color.a == 0 &&
+            box.outlineColor == theme.Get(ThemeSlot::Primary) && boxBounds &&
+            boxBounds.Value().min.x >= bounds.Value().min.x &&
+            boxBounds.Value().max.x <= bounds.Value().max.x) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // bounds 안에 color(알파까지 같은) 상자가 있는지 본다.
@@ -132,6 +155,25 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     cache = app.UpdatePaintCache(viewport, 1);
     if (!cache || !HasBox(*cache.Value(), *simpleRow, theme.Get(ThemeSlot::ForegroundHover))) {
         return HoverForegroundMissing;
+    }
+
+    // 행 0 안으로 Tab 이동하면 Primary Button에 초점 외곽선이 보이고, 누르면 사라진다(UW4f1).
+    const SharedPtr<Element> primaryRow = widgets->RowContent(0);
+    auto moved = app.MoveFocusWithin(0, primaryRow, true, true);
+    cache = app.UpdatePaintCache(viewport, 1);
+    if (!moved || !moved.Value() || !cache ||
+        !HasFocusOutline(*cache.Value(), *primaryRow, theme)) {
+        return FocusOutlineMissing;
+    }
+
+    const auto primary = Center(app.GetFocus(0).Get());
+    if (!primary || !Click(app, *primary)) {
+        return FocusOutlineNotCleared;
+    }
+
+    cache = app.UpdatePaintCache(viewport, 1);
+    if (!cache || HasFocusOutline(*cache.Value(), *primaryRow, theme)) {
+        return FocusOutlineNotCleared;
     }
 
     // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다.

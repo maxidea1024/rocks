@@ -58,7 +58,7 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             return Result<bool>::Success(false);
         }
 
-        auto moved = SetFocus(userId, target);
+        auto moved = SetFocus(userId, target, FocusCause::Navigation);
         return moved ? Result<bool>::Success(true) : Result<bool>::Failure(moved.Error());
     };
     if (!focus || !focus->IsInputPathActive(*root, false)) {

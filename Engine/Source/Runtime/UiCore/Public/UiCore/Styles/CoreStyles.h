@@ -75,6 +75,10 @@ ROCKS_UICORE_API const ProgressBarStyle& DefaultProgressBarStyle() noexcept;
 // 4), 트랙 없음, 두께 8).
 ROCKS_UICORE_API const ScrollBarStyle& DefaultScrollBarStyle() noexcept;
 
+// 키보드 초점 외곽선이다(UE 핵심 스타일 "FocusRectangle" — StarshipCoreStyle.cpp 217행: 투명 채움,
+// 반경 FocusOutlineRadius, 외곽선 Primary·ControlOutlineThickness).
+ROCKS_UICORE_API const StyleBrush& FocusOutlineStyle() noexcept;
+
 // 보통 텍스트 스타일이다(UE "NormalText" — 1252–1258행: Regular 10, 상속 전경색).
 ROCKS_UICORE_API const TextStyle& NormalTextStyle() noexcept;
 

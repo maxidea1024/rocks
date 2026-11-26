@@ -252,13 +252,13 @@ Result<SharedPtr<Element>> MakeParagraphTable(GalleryContext& context) noexcept 
 
     uint32 row = 0;
     BuildStatus status;
-    const auto add = [&](StringView name, StringView rocksName,
+    const auto add = [&](StringView name, StringView usage,
                          Result<SharedPtr<TextLabel>> sample) noexcept {
         if (!status.Take(sample)) {
             return;
         }
 
-        auto spec = MakeText(context, rocksName, SmallFont, ColorRef::Specified(LabelColor));
+        auto spec = MakeText(context, usage, SmallFont, ColorRef::Specified(LabelColor));
         if (!status.Take(spec)) {
             return;
         }

@@ -1,5 +1,6 @@
 #include <UiCore/Element.h>
 #include <UiCore/CacheRoot.h>
+#include <UiCore/Styles/CoreStyles.h>
 #include <Base/NumericLimits.h>
 
 namespace rocks::ui {
@@ -302,6 +303,45 @@ Result<void> Element::OnPaint(PaintList&, int32) const noexcept {
     return Result<void>::Success();
 }
 
+void Element::SetFocusOutlineVisible(bool visible) noexcept {
+    const bool before = focusOutlines_ != 0;
+    if (visible) {
+        focusOutlines_ = focusOutlines_ == NumericLimits<uint8>::Max()
+                             ? focusOutlines_
+                             : static_cast<uint8>(focusOutlines_ + 1);
+    } else if (focusOutlines_ != 0) {
+        --focusOutlines_;
+    }
+
+    if (before != (focusOutlines_ != 0)) {
+        InvalidatePaint();
+    }
+}
+
+bool Element::IsFocusOutlineVisible() const noexcept {
+    return focusOutlines_ != 0;
+}
+
+const StyleBrush* Element::FocusOutlineBrush() const noexcept {
+    return &FocusOutlineStyle();
+}
+
+Result<void> Element::PaintOverlayPass(PaintList& list, int32 layer) const noexcept {
+    auto overlay = OnPaintOverlay(list, layer);
+    if (!overlay || focusOutlines_ == 0) {
+        return overlay;
+    }
+
+    const StyleBrush* brush = FocusOutlineBrush();
+    if (!brush || brush->mode == BrushMode::None) {
+        return overlay;
+    }
+
+    // 내용 위에 요소 크기 그대로 그린다(UE SWidget::Paint의 초점 brush).
+    return list.TryAddBrush(geometry_, brush->Resolve(list.Theme(), list.ColorContext()),
+                            LinearColor{1, 1, 1, 1}, layer);
+}
+
 Result<void> Element::OnPaintOverlay(PaintList&, int32) const noexcept {
     return Result<void>::Success();
 }
@@ -437,7 +477,7 @@ Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest
 
     const usize overlayStart = list.Boxes().Size();
     auto overlay = cache ? cache->Record(*this, highest, true, inheritedVolatile, highest)
-                         : OnPaintOverlay(list, highest);
+                         : PaintOverlayPass(list, highest);
     if (!overlay) {
         return overlay;
     }

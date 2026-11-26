@@ -584,10 +584,10 @@ Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
 
     GalleryGrid& rows = *grid.Value();
     BuildStatus status;
-    const auto one = [&](StringView name, StringView rocksName,
+    const auto one = [&](StringView name, StringView usage,
                          Result<SharedPtr<Element>> sample) noexcept {
         if (status.Take(sample, name)) {
-            rows.AddRow(name, rocksName, sample.Value());
+            rows.AddRow(name, usage, sample.Value());
         }
     };
     // 도킹은 에디터의 바탕이라 맨 위에 둔다(self-test도 화면 안에서 끈다).
@@ -597,43 +597,43 @@ Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
             MakeStage(context, docking.Value(), DockStage));
     }
 
-    one("SHorizontalBox", "HorizontalStack (Auto, Fill)", MakeStack(context, true));
-    one("SVerticalBox", "VerticalStack (Auto, Fill)", MakeStack(context, false));
-    one("SGridPanel", "Grid (span, fill weights)", MakeGrid(context));
-    one("SUniformGridPanel", "UniformGrid", MakeUniformGrid(context));
-    one("SWrapBox", "WrapStack", MakeWrap(context));
-    one("SOverlay", "Overlay (z order)", MakeOverlay(context));
+    one("Horizontal Stack", "HorizontalStack (Auto, Fill)", MakeStack(context, true));
+    one("Vertical Stack", "VerticalStack (Auto, Fill)", MakeStack(context, false));
+    one("Grid", "Grid (span, fill weights)", MakeGrid(context));
+    one("Uniform Grid", "UniformGrid", MakeUniformGrid(context));
+    one("Wrap Stack", "WrapStack", MakeWrap(context));
+    one("Overlay", "Overlay (z order)", MakeOverlay(context));
     {
         auto fit = MakeFit(context, FitMode::Fit, "Fit");
         auto cover = MakeFit(context, FitMode::Cover, "Cover");
         auto fill = MakeFit(context, FitMode::Fill, "Fill");
-        if (status.Take(fit, "SScaleBox") && status.Take(cover, "SScaleBox") &&
-            status.Take(fill, "SScaleBox")) {
+        if (status.Take(fit, "Fit Box") && status.Take(cover, "Fit Box") &&
+            status.Take(fill, "Fit Box")) {
             const SharedPtr<Element> parts[] = {fit.Value(), cover.Value(), fill.Value()};
-            rows.AddRow("SScaleBox", "FitBox (Fit, Cover, Fill)", parts);
+            rows.AddRow("Fit Box", "FitBox (Fit, Cover, Fill)", parts);
         }
     }
 
     {
         auto small = MakeScaled(context, SmallScale, "x0.75");
         auto large = MakeScaled(context, LargeScale, "x1.25");
-        if (status.Take(small, "SDPIScaler") && status.Take(large, "SDPIScaler")) {
+        if (status.Take(small, "Scale Layer") && status.Take(large, "Scale Layer")) {
             const SharedPtr<Element> parts[] = {small.Value(), large.Value()};
-            rows.AddRow("SDPIScaler", "ScaleLayer", parts);
+            rows.AddRow("Scale Layer", "ScaleLayer", parts);
         }
     }
 
-    one("SConstraintCanvas", "AnchorCanvas (anchors, alignment)", MakeCanvas(context));
+    one("Anchor Canvas", "AnchorCanvas (anchors, alignment)", MakeCanvas(context));
     {
         auto vertical = MakeScroll(context, false);
         auto horizontal = MakeScroll(context, true);
-        if (status.Take(vertical, "SScrollBox") && status.Take(horizontal, "SScrollBox")) {
+        if (status.Take(vertical, "Scroll View") && status.Take(horizontal, "Scroll View")) {
             const SharedPtr<Element> parts[] = {vertical.Value(), horizontal.Value()};
-            rows.AddRow("SScrollBox", "ScrollView (vertical, horizontal)", parts);
+            rows.AddRow("Scroll View", "ScrollView (vertical, horizontal)", parts);
         }
     }
 
-    one("SWidgetSwitcher", "Switcher", MakeSwitchRow<Switcher>(context, false));
+    one("Switcher", "Switcher", MakeSwitchRow<Switcher>(context, false));
     one("Carousel", "Carousel + CarouselPage", MakeSwitchRow<Carousel>(context, true));
     one("Window Title Bar Area", "WindowTitleBarArea", MakeTitleBar(context));
 

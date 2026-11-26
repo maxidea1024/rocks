@@ -9,6 +9,7 @@
 #include <Core/Text/String.h>
 #include <UiCore/ColorRef.h>
 #include <UiCore/PaintList.h>
+#include <UiCore/Styles/StyleBrush.h>
 
 namespace rocks::ui {
 
@@ -192,6 +193,16 @@ public:
 
     virtual void OnFocusLost(uint32) noexcept;
 
+    // 키보드 초점 외곽선을 켜고 끈다(Docs/Design/UiToolkit 9.1절 UW4f1). Application이 키보드·
+    // 게임패드 이동으로 옮긴 초점에만 켠다. 여러 사용자가 같은 요소에 켤 수 있어 켠 수를 센다.
+    // 켜져 있으면 자식과 OnPaintOverlay 뒤에 FocusOutlineBrush()를 요소 크기로 그린다.
+    void SetFocusOutlineVisible(bool visible) noexcept;
+    bool IsFocusOutlineVisible() const noexcept;
+
+    // 초점 외곽선 brush다. 기본은 FocusOutlineStyle()이다. 테두리 색으로 초점을 보이는 부품(편집
+    // 텍스트)이나 외곽선이 어울리지 않는 부품(뷰포트)은 nullptr을 돌려 그리지 않는다.
+    virtual const StyleBrush* FocusOutlineBrush() const noexcept;
+
     // 자기 자신을 그리기 목록에 기록한다. 기본 Element는 그리지 않는다.
     virtual Result<void> OnPaint(PaintList&, int32) const noexcept;
 
@@ -314,6 +325,8 @@ private:
                               bool inheritedVolatile) const noexcept;
     Result<void> PaintContents(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
                                bool inheritedVolatile) const noexcept;
+    // OnPaintOverlay와 그 위의 초점 외곽선이다(cache 기록도 이 경로를 탄다).
+    Result<void> PaintOverlayPass(PaintList& list, int32 layer) const noexcept;
 
     Array<SharedPtr<Element>> children_;
     Element* parent_ = nullptr;
@@ -339,6 +352,8 @@ private:
     Visibility visibility_ = Visibility::Visible;
     bool enabled_ = true;
     bool clipToBounds_ = false;
+    // 초점 외곽선을 켠 사용자 수다.
+    uint8 focusOutlines_ = 0;
 };
 
 } // namespace rocks::ui

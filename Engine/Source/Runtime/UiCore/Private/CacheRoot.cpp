@@ -104,7 +104,7 @@ Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay
     }
 
     auto result =
-        overlay ? element.OnPaintOverlay(scratch_, layer) : element.OnPaint(scratch_, layer);
+        overlay ? element.PaintOverlayPass(scratch_, layer) : element.OnPaint(scratch_, layer);
     if (!result) {
         return result;
     }
