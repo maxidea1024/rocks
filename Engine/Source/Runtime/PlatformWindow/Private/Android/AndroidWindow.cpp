@@ -3,6 +3,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Launch/AndroidActivity.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
 #include <Input/TouchIndexAllocator.h>
@@ -15,6 +16,8 @@
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <jni.h>
+
+#include "../Common/GamepadMotorMapping.h"
 
 // Android 창이다(Docs/Design/AndroidPlatform.ko.md 4·5절). 앱의 그 창 하나이며, Launch 액티비티
 // 층의 listener로 창·포커스·입력 큐 콜백(UI 스레드)을 받는다. 입력은 이 창이 띄운 입력 스레드의
@@ -47,6 +50,15 @@ constexpr char InputThreadName[] = "InputThread";
 
 // 압력 지원 여부를 기억하는 입력 장치 수다(넘치면 가장 오래된 칸부터 덮는다).
 constexpr uint32 MaxPressureDevices = 8;
+
+// 패드 진동 JNI 호출 한 번이 만드는 지역 참조 수의 상한이다(PushLocalFrame).
+constexpr jint VibrationLocalReferences = 32;
+
+// 패드 하나에서 쓰는 진동자 수다(UE는 첫 두 진동자를 왼쪽·오른쪽으로 쓴다 — 6.4절).
+constexpr uint32 MaxPadVibrators = 2;
+
+// MonotonicNanoseconds를 진동 판단 시각(ms)으로 바꾼다.
+constexpr uint64 NanosecondsPerMillisecond = 1000000;
 
 // 입력 이벤트를 처리했다고(1) 또는 시스템에 넘긴다고(0) AInputQueue_finishEvent에 알리는 값이다.
 constexpr int EventHandled = 1;
@@ -159,9 +171,19 @@ bool GamepadButtonFromKeyCode(int32_t code, input::GamepadButton& button) noexce
     }
 }
 
+// 입력 스레드가 처리할 패드 진동 쓰기 하나다(Docs/Design/InputActions 6.4절).
+struct VibrationRequest {
+    bool pending = false;
+    int32_t deviceId = 0;
+    gamepad::AndroidVibratorPair intensities;
+};
+
 // 입력 스레드가 모으고 GamepadBackend::Poll(게임 스레드)이 읽는 패드 상태다(Docs/Design/
 // AndroidPlatform.ko.md 5절). 패드는 입력 장치 ID 순서로 가장 작은 빈 슬롯에 앉는다. 연결 해제
 // 감지는 InputManager 리스너(Java)가 필요해 후속이다 — 그때까지 앉은 패드는 연결된 채로 남는다.
+//
+// 진동(InputActions 6.4절): 게임 스레드는 JavaVM에 붙어 있지 않으므로 SetMotors가 슬롯의 요청 칸에
+// 쓰고 입력 스레드 looper를 깨운다. JavaVM에 붙은 입력 스레드가 요청을 가져가 JNI로 쓴다.
 class AndroidGamepadStore {
 public:
     // 장치의 슬롯이다. 처음 보는 장치면 빈 슬롯을 준다. 자리가 없으면 MaxGamepads다.
@@ -241,6 +263,64 @@ public:
         pad.state.buttons = (pad.state.buttons & ~hatMask) | hat;
     }
 
+    // 진동을 쓸 입력 스레드 looper다(JavaVM에 붙은 입력 스레드가 시작할 때 걸고 끝날 때 뗀다 —
+    // nullptr이면 진동 없음).
+    void SetVibrationLooper(ALooper* looper) noexcept {
+        LockGuard guard(mutex_);
+        vibrationLooper_ = looper;
+    }
+
+    // 앱 창 포커스다(UI 스레드 OnFocusChanged가 쓴다 — 포커스가 없으면 진동을 끈다).
+    void SetFocused(bool focused) noexcept {
+        LockGuard guard(mutex_);
+        focused_ = focused;
+    }
+
+    bool Focused() const noexcept {
+        LockGuard guard(mutex_);
+        return focused_;
+    }
+
+    // 그 슬롯에 진동을 쓸 수 있는지다: 패드가 없으면 NotFound, 진동을 쓸 입력 스레드가 없으면(창
+    // 없음·입력 스레드의 JavaVM 붙이기 실패) Unsupported, 되면 None이다.
+    ErrorCode VibrationAvailability(uint32 slot) const noexcept {
+        LockGuard guard(mutex_);
+        if (!pads_[slot].used) {
+            return ErrorCode::NotFound;
+        }
+
+        return vibrationLooper_ != nullptr ? ErrorCode::None : ErrorCode::Unsupported;
+    }
+
+    // 그 슬롯의 진동 요청을 두고(처리 전 요청은 덮는다) 입력 스레드를 깨운다. 패드나 입력 스레드가
+    // 없으면 아무것도 하지 않는다.
+    void RequestVibration(uint32 slot, gamepad::AndroidVibratorPair intensities) noexcept {
+        LockGuard guard(mutex_);
+        if (!pads_[slot].used || vibrationLooper_ == nullptr) {
+            return;
+        }
+
+        VibrationRequest& request = vibrationRequests_[slot];
+        request.pending = true;
+        request.deviceId = pads_[slot].deviceId;
+        request.intensities = intensities;
+        ALooper_wake(vibrationLooper_);
+    }
+
+    // 처리할 요청을 out에 옮기고 비운다(입력 스레드 — JNI는 잠금 밖에서 한다). 옮긴 수다.
+    uint32 TakeVibrationRequests(VibrationRequest (&out)[input::MaxGamepads]) noexcept {
+        LockGuard guard(mutex_);
+        uint32 count = 0;
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if (vibrationRequests_[slot].pending) {
+                out[count++] = vibrationRequests_[slot];
+                vibrationRequests_[slot] = VibrationRequest{};
+            }
+        }
+
+        return count;
+    }
+
     // 바뀐 패드를 큐에 넣는다. 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 넣어 edge를
     // 잃지 않는다(입력 스레드는 이벤트로 받지만 backend 계약은 폴링이다).
     void Poll(input::InputQueue& queue,
@@ -298,8 +378,11 @@ private:
         return true;
     }
 
-    Mutex mutex_;
+    mutable Mutex mutex_;
     Pad pads_[input::MaxGamepads];
+    VibrationRequest vibrationRequests_[input::MaxGamepads];
+    ALooper* vibrationLooper_ = nullptr;
+    bool focused_ = false;
 };
 
 // 프로세스에 하나다(창과 GamepadBackend가 같이 쓴다). 파괴하지 않는다.
@@ -309,15 +392,53 @@ AndroidGamepadStore& GamepadStore() noexcept {
     return *store;
 }
 
-// 게임 스레드의 패드 backend다(Poll이 저장소를 읽는다).
+// 게임 스레드의 패드 backend다(Poll이 저장소를 읽는다). 진동은 저장소 요청 칸으로 입력 스레드에
+// 넘긴다(InputActions 6.4절).
 class AndroidGamepads final : public GamepadBackend {
 public:
+    AndroidGamepads() noexcept = default;
+    AndroidGamepads(const AndroidGamepads&) = delete;
+    AndroidGamepads& operator=(const AndroidGamepads&) = delete;
+
+    // 0이 아닌 값을 쓴 슬롯을 멈춘다.
+    ~AndroidGamepads() override {
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if (!(vibration_[slot].written == gamepad::AndroidVibratorPair{})) {
+                GamepadStore().RequestVibration(slot, gamepad::AndroidVibratorPair{});
+            }
+        }
+    }
+
     void Poll(input::InputQueue& queue) noexcept override {
         GamepadStore().Poll(queue, last_);
     }
 
+    // 바뀐 세기(또는 1초가 지난 같은 세기)만 입력 스레드에 넘긴다. 쓰기 결과는 비동기라 넘기면
+    // 성공이다.
+    Result<void> SetMotors(uint32 index, const input::MotorValues& values) noexcept override {
+        if (index >= input::MaxGamepads || !gamepad::MotorValuesAreFinite(values)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        AndroidGamepadStore& store = GamepadStore();
+        if (const ErrorCode available = store.VibrationAvailability(index);
+            available != ErrorCode::None) {
+            return Result<void>::Failure(available);
+        }
+
+        const uint64 now = MonotonicNanoseconds() / NanosecondsPerMillisecond;
+        gamepad::AndroidVibratorPair intensities;
+        if (gamepad::NextAndroidVibration(vibration_[index], values, store.Focused(), now,
+                                          intensities)) {
+            store.RequestVibration(index, intensities);
+        }
+
+        return Result<void>::Success();
+    }
+
 private:
     input::GamepadSnapshot last_[input::MaxGamepads];
+    gamepad::AndroidVibrationState vibration_[input::MaxGamepads];
 };
 
 bool IsGamepadSource(int32_t source) noexcept {
@@ -525,6 +646,7 @@ public:
     }
 
     void OnFocusChanged(bool focused) noexcept override {
+        GamepadStore().SetFocused(focused);
         LockGuard guard(mutex_);
         focused_ = focused;
         if (!focused) {
@@ -594,16 +716,26 @@ private:
             self.env_ = nullptr;
         }
 
+        // 진동은 JNI가 있어야 쓴다(InputActions 6.4절).
+        if (self.env_ != nullptr) {
+            GamepadStore().SetVibrationLooper(self.looper_);
+        }
+
         self.looperReady_.Signal();
         while (AtomicLoad(&self.stopInput_) == 0) {
             int events = 0;
             void* data = nullptr;
             const int ident = ALooper_pollOnce(-1, nullptr, &events, &data);
             self.ServiceQueueRequests();
+            self.ServiceVibrationRequests();
             if (ident == LooperIdInput) {
                 self.DrainInputQueue();
             }
         }
+
+        // 남은 요청(backend 소멸의 0 포함)을 쓰고 뗀다.
+        GamepadStore().SetVibrationLooper(nullptr);
+        self.ServiceVibrationRequests();
 
         // 종료 때 붙어 있던 큐를 뗀다.
         if (self.queue_ != nullptr) {
@@ -864,6 +996,177 @@ private:
         return reports;
     }
 
+    // 저장소의 진동 요청을 JNI로 쓴다(입력 스레드).
+    void ServiceVibrationRequests() noexcept {
+        VibrationRequest requests[input::MaxGamepads];
+        const uint32 count = GamepadStore().TakeVibrationRequests(requests);
+        for (uint32 index = 0; index < count; ++index) {
+            WriteVibrators(requests[index].deviceId, requests[index].intensities);
+        }
+    }
+
+    // 패드의 진동자에 쓴다(UE GameActivity AndroidThunkJava_SetInputDeviceVibrators — 6.4절).
+    // getVibratorManager(API 31)가 있으면 진동자가 하나면 max, 둘 이상이면 첫째 왼쪽·둘째 오른쪽,
+    // 없으면 getVibrator 하나에 max다. 장치·진동자가 없거나 Java 예외면 버린다(예외는 지우고 한 번
+    // 경고한다). 예외가 남은 채로 다음 JNI를 부르지 않는다(CheckJNI abort) — 던질 수 있는 호출마다
+    // 확인하고 멈춘다.
+    void WriteVibrators(int32_t deviceId, gamepad::AndroidVibratorPair intensities) noexcept {
+        JNIEnv* env = env_;
+        if (env == nullptr || env->PushLocalFrame(VibrationLocalReferences) != JNI_OK) {
+            return;
+        }
+
+        WriteDeviceVibrators(env, deviceId, intensities);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            if (!vibrationWarned_) {
+                vibrationWarned_ = true;
+                Log::Warning(LogAndroidWindow,
+                             "Gamepad vibration failed on the Java side; the request was dropped");
+            }
+        }
+
+        (void)env->PopLocalFrame(nullptr);
+    }
+
+    // WriteVibrators의 본문이다. 예외가 나면 남긴 채 돌아온다(호출자가 지운다).
+    static void WriteDeviceVibrators(JNIEnv* env, int32_t deviceId,
+                                     gamepad::AndroidVibratorPair intensities) noexcept {
+        const uint8 larger =
+            intensities.left > intensities.right ? intensities.left : intensities.right;
+        jclass deviceClass = env->FindClass("android/view/InputDevice");
+        if (deviceClass == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jmethodID getDevice =
+            env->GetStaticMethodID(deviceClass, "getDevice", "(I)Landroid/view/InputDevice;");
+        if (getDevice == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jobject device = env->CallStaticObjectMethod(deviceClass, getDevice, deviceId);
+        if (device == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jmethodID getManager =
+            env->GetMethodID(deviceClass, "getVibratorManager", "()Landroid/os/VibratorManager;");
+        if (getManager != nullptr) {
+            jobject manager = env->CallObjectMethod(device, getManager);
+            if (manager != nullptr && !env->ExceptionCheck()) {
+                WriteManagedVibrators(env, manager, intensities, larger);
+            }
+
+            return;
+        }
+
+        // API 31 미만(NoSuchMethodError) — 진동자 하나다.
+        env->ExceptionClear();
+        jmethodID getVibrator =
+            env->GetMethodID(deviceClass, "getVibrator", "()Landroid/os/Vibrator;");
+        if (getVibrator == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jobject vibrator = env->CallObjectMethod(device, getVibrator);
+        if (vibrator != nullptr && !env->ExceptionCheck()) {
+            ApplyVibrator(env, vibrator, larger);
+        }
+    }
+
+    // VibratorManager의 진동자에 쓴다(하나면 larger, 둘 이상이면 첫째 왼쪽·둘째 오른쪽 — 셋째부터는
+    // 쓰지 않는다).
+    static void WriteManagedVibrators(JNIEnv* env, jobject manager,
+                                      gamepad::AndroidVibratorPair intensities,
+                                      uint8 larger) noexcept {
+        jclass managerClass = env->GetObjectClass(manager);
+        jmethodID getIds = env->GetMethodID(managerClass, "getVibratorIds", "()[I");
+        if (getIds == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jmethodID getVibrator =
+            env->GetMethodID(managerClass, "getVibrator", "(I)Landroid/os/Vibrator;");
+        if (getVibrator == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        auto ids = static_cast<jintArray>(env->CallObjectMethod(manager, getIds));
+        if (ids == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        const jsize count = env->GetArrayLength(ids);
+        if (count <= 0) {
+            return;
+        }
+
+        jint vibratorIds[MaxPadVibrators] = {};
+        const jsize used = count < static_cast<jsize>(MaxPadVibrators)
+                               ? count
+                               : static_cast<jsize>(MaxPadVibrators);
+        env->GetIntArrayRegion(ids, 0, used, vibratorIds);
+        if (env->ExceptionCheck()) {
+            return;
+        }
+
+        const uint8 strengths[MaxPadVibrators] = {used == 1 ? larger : intensities.left,
+                                                  intensities.right};
+        for (jsize index = 0; index < used; ++index) {
+            jobject vibrator = env->CallObjectMethod(manager, getVibrator, vibratorIds[index]);
+            if (env->ExceptionCheck()) {
+                return;
+            }
+
+            if (vibrator != nullptr) {
+                ApplyVibrator(env, vibrator, strengths[index]);
+                if (env->ExceptionCheck()) {
+                    return;
+                }
+            }
+        }
+    }
+
+    // 세기가 1 이상이면 1초 one-shot, 0이면 cancel이다(UE VibrateRunnable). vibrator는 null이
+    // 아니고 예외가 없는 상태에서 부른다.
+    static void ApplyVibrator(JNIEnv* env, jobject vibrator, uint8 intensity) noexcept {
+        jclass vibratorClass = env->GetObjectClass(vibrator);
+        if (intensity == 0) {
+            jmethodID cancel = env->GetMethodID(vibratorClass, "cancel", "()V");
+            if (cancel != nullptr && !env->ExceptionCheck()) {
+                env->CallVoidMethod(vibrator, cancel);
+            }
+
+            return;
+        }
+
+        jclass effectClass = env->FindClass("android/os/VibrationEffect");
+        if (effectClass == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jmethodID createOneShot = env->GetStaticMethodID(effectClass, "createOneShot",
+                                                         "(JI)Landroid/os/VibrationEffect;");
+        if (createOneShot == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jmethodID vibrate =
+            env->GetMethodID(vibratorClass, "vibrate", "(Landroid/os/VibrationEffect;)V");
+        if (vibrate == nullptr || env->ExceptionCheck()) {
+            return;
+        }
+
+        jobject effect = env->CallStaticObjectMethod(
+            effectClass, createOneShot,
+            static_cast<jlong>(gamepad::AndroidVibrationPulseMilliseconds),
+            static_cast<jint>(intensity));
+        if (effect != nullptr && !env->ExceptionCheck()) {
+            env->CallVoidMethod(vibrator, vibrate, effect);
+        }
+    }
+
     // 0–1 압력이다(AMotionEvent_getPressure — 장치 단위가 1을 넘을 수 있어 자른다).
     static float Pressure(const AInputEvent* event, size_t pointer) noexcept {
         const float pressure = AMotionEvent_getPressure(event, pointer);
@@ -899,6 +1202,8 @@ private:
     uint32 pressureDeviceCount_ = 0;
     uint32 pressureDeviceNext_ = 0;
     JNIEnv* env_ = nullptr;
+    // 진동 Java 예외 경고를 한 번 냈다(입력 스레드 전용).
+    bool vibrationWarned_ = false;
     uint32 closing_ = 0;
     uint32 stopInput_ = 0;
     // 입력 스레드만 만진다(looper_는 Start에서 준비된 뒤 읽기만 한다).

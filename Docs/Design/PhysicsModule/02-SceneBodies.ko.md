@@ -73,10 +73,10 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 | 실효 충돌 켬(`SetCollisionEnabled`·profile 이름) | `NoCollision`과 그 밖 사이를 넘으면 만들기·지우기, 그 밖이면 필터만 갱신(`UpdateBody`) | `PrimitiveComponentPhysics.cpp:1376–1393`·`1410–1418` |
 | 응답·object type | 필터만 갱신 | 같음(필터 데이터 갱신) |
 | `simulatePhysics` | 다시 만들지 않고 Kinematic ↔ Dynamic 전환(`UpdateBody`). 참으로 켜면(그리고 BeginPlay 때 이미 참이면) **부모에서 뗀다**(월드 transform 유지, 떼기의 overlap 갱신은 하지 않음) — 시뮬레이션하는 컴포넌트는 부착될 수 없다. weld 자식에게 `ApplyWeldOnChildren`(2.8절) | `:176–179`, `BodyInstance.cpp:2669–2724`·`2676–2686`, `PrimitiveComponent.cpp:4378–4392` |
-| Mobility | 컴포넌트 재등록(시스템 상태 전부 다시 — UE `FComponentReregisterContext`) | `SceneComponent.cpp:3098–3103` |
-| scale | 다시 만들지 않고 형상 scale 갱신(Jolt `SetShape` + scaled shape) | `SceneComponent.cpp:1865–1883`, `PrimitiveComponent.cpp:1079–1083` |
-| 형상 값(Box 크기 등) | 형상 갱신(`UpdateBody`) | `UBoxComponent::SetBoxExtent` → `UpdateBodySetup` + 재생성 |
-| `BodySettings`의 질량·감쇠·DOF·CCD 등 | 해당 속성만 갱신 | 각 setter |
+| Mobility | 시스템 상태 전부 즉시 다시 만들기(UE는 컴포넌트 재등록 `FComponentReregisterContext` — Rocks는 등록 hook을 다시 부르지 않는다, 7.1.5절). Movable이 되면 자식도 Movable | `SceneComponent.cpp:3098–3116` |
+| scale | 다시 만들지 않고 형상 갱신(Jolt `SetShape` — 깨움, 질량은 `updateMassWhenScaleChanges`면 다시 계산) | `SceneComponent.cpp:1865–1883`, `PrimitiveComponent.cpp:1079–1083`, `BodyInstance.cpp:2545–2575` |
+| 형상 값(Box 크기 등) | scale과 같은 형상 갱신 | `UBoxComponent::SetBoxExtent` → `UpdateBodyScale(scale, true)` — `BoxComponent.cpp:28–47` |
+| `BodySettings`의 질량·감쇠·DOF·CCD 등 | 해당 속성만 갱신(setter와 함께 PH5) | 각 setter |
 
 ## 2.4 형상
 

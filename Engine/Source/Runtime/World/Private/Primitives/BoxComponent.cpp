@@ -27,6 +27,7 @@ Result<void> BoxComponent::SetBoxExtent(const Vec3d& extent) noexcept {
         boxExtent_ = extent;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();

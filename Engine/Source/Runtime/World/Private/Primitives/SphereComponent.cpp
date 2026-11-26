@@ -29,6 +29,7 @@ Result<void> SphereComponent::SetSphereRadius(float radius) noexcept {
         sphereRadius_ = radius;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();

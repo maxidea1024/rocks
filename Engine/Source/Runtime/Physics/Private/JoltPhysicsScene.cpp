@@ -163,6 +163,10 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     slot.component = desc.component;
     slot.motion = desc.motion;
     slot.live = true;
+    slot.geometry = desc.geometry;
+    slot.scale = desc.worldTransform.scale;
+    slot.updateMassOnShapeChange =
+        desc.settings == nullptr || desc.settings->updateMassWhenScaleChanges;
     slot.pendingResult = false;
     slot.queuedTarget = false;
     slot.hasTarget = false;
@@ -198,6 +202,15 @@ void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform&
     }
 
     BodySlot& slot = slots_[body.index];
+    // scale이 바뀌면 형상부터 바꾼다(UE UpdateBodyScale — 7.1.5절, 비교는 UE Scale3D.Equals처럼
+    // 성분마다 KindaSmallNumber 허용 오차). 유효한 transform이라 실패하지 않는다.
+    const Vec3d scaleChange = worldTransform.scale - slot.scale;
+    const double tolerance = math::KindaSmallNumber<double>;
+    if (math::Abs(scaleChange.x) > tolerance || math::Abs(scaleChange.y) > tolerance ||
+        math::Abs(scaleChange.z) > tolerance) {
+        (void)ReplaceShape(slot, slot.geometry, worldTransform.scale);
+    }
+
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
     const JPH::RVec3 position = ToJoltPosition(worldTransform.translation, origin_);
     const JPH::Quat rotation = ToJoltRotation(worldTransform.rotation);
@@ -243,6 +256,78 @@ void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform&
     // SetGlobalPose가 잠든 입자를 깨운다 — ChaosEngineInterface.cpp:2559, Jolt는 Static이면
     // 무시한다).
     bodies.SetPositionAndRotation(slot.body, position, rotation, JPH::EActivation::Activate);
+}
+
+void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
+                                     bool wake) noexcept {
+    if (FindSlot(body) == nullptr) {
+        return;
+    }
+
+    BodySlot& slot = slots_[body.index];
+    // Static이 끼는 전환은 Mobility 변경이라 body를 다시 만든다(2.5절 — Jolt Static body는 운동
+    // 속성이 없다).
+    if (slot.motion == motion || slot.motion == BodyMotion::Static ||
+        motion == BodyMotion::Static) {
+        return;
+    }
+
+    // 대기 Kinematic 목표·정지 표지는 Kinematic에만 뜻이 있다(목록에 남은 칸은 다음 step이
+    // 건너뛴다). 결과 목록 표지는 둔다: Dynamic이던 step의 자세가 아직 컴포넌트에 가지 않았을 수
+    // 있다.
+    slot.hasTarget = false;
+    slot.movedLastStep = false;
+    slot.motion = motion;
+    JPH::BodyInterface& bodies = system_.GetBodyInterface();
+    if (motion == BodyMotion::Kinematic) {
+        // UE SetIsKinematic은 Kinematic 전환 때 속도를 0으로
+        // 둔다(ChaosEngineInterface.cpp:536-541). Jolt Kinematic은 남은 속도로 계속 움직이므로
+        // 반드시 지운다.
+        bodies.SetMotionType(slot.body, JPH::EMotionType::Kinematic,
+                             JPH::EActivation::DontActivate);
+        bodies.SetLinearAndAngularVelocity(slot.body, JPH::Vec3::sZero(), JPH::Vec3::sZero());
+        return;
+    }
+
+    bodies.SetMotionType(slot.body, JPH::EMotionType::Dynamic,
+                         wake ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+}
+
+void JoltPhysicsScene::SetBodyCollision(PhysicsBodyHandle body,
+                                        const ResolvedCollision& collision) noexcept {
+    if (FindSlot(body) == nullptr) {
+        return;
+    }
+
+    const BodySlot& slot = slots_[body.index];
+    // broadphase 층이 바뀌면 Jolt가 body를 옮긴다. 깨우지 않는다.
+    system_.GetBodyInterface().SetObjectLayer(slot.body, ObjectLayerFor(collision, slot.motion));
+}
+
+Result<void> JoltPhysicsScene::SetBodyGeometry(PhysicsBodyHandle body,
+                                               const BodyGeometry& geometry) noexcept {
+    if (FindSlot(body) == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    BodySlot& slot = slots_[body.index];
+    return ReplaceShape(slot, geometry, slot.scale);
+}
+
+Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
+                                            const Vec3d& scale) noexcept {
+    auto shape = MakeJoltShape(geometry, scale);
+    if (!shape) {
+        return Result<void>::Failure(shape.Error());
+    }
+
+    // UE UpdateBodyScale: 형상을 바꾸고 깨우며, updateMassWhenScaleChanges면 질량을 다시 계산한다
+    // (BodyInstance.cpp:2545-2575). Jolt는 Static을 깨우지 않는다.
+    system_.GetBodyInterface().SetShape(slot.body, shape.Value().GetPtr(),
+                                        slot.updateMassOnShapeChange, JPH::EActivation::Activate);
+    slot.geometry = geometry;
+    slot.scale = scale;
+    return Result<void>::Success();
 }
 
 Result<BodyKinematics> JoltPhysicsScene::ReadKinematics(PhysicsBodyHandle body) const noexcept {
@@ -382,12 +467,10 @@ Result<Span<const MovedBody>> JoltPhysicsScene::TakeMovedBodies() noexcept {
             continue;
         }
 
+        // 그 사이 Kinematic이 된 칸도 쓴다(Dynamic이던 step의 자세 — Kinematic은 컴포넌트 자세와
+        // 같으므로 써도 바뀌지 않는다).
         BodySlot& slot = slots_[handle.index];
         slot.pendingResult = false;
-        if (slot.motion != BodyMotion::Dynamic) {
-            continue;
-        }
-
         MovedBody moved;
         moved.component = slot.component;
         moved.location = FromJoltPosition(bodies.GetPosition(slot.body), origin_);

@@ -64,8 +64,9 @@ inline constexpr LogCategory LogSandboxHost{"Sandbox"};
 // 6.3절 출력). PlayerController가 없거나 끊겼으면 0이다. ControllerId가 음수인 플레이어는 쓰지
 // 않는다(입력은 패드 0을 읽지만 패드 0의 진동 주인은 ControllerId 0이다 — 둘이 번갈아 쓰지 않게).
 // 지난 프레임에 0이 아닌 값을 썼는데 이번에 아무도 쓰지 않은 패드(LocalPlayer 제거·인스턴스 정지)는
-// 0으로 멈춘다. 연결되지 않은 패드(NotFound)·진동 없는 backend(Unsupported)는 조용히 넘긴다(바뀐
-// 값만 장치에 쓰므로 프레임마다 불러도 된다). 돌려주는 값은 이번에 0이 아닌 값을 쓴 패드 비트다.
+// 0으로 멈춘다. 연결되지 않은 패드(NotFound)·진동 없는 backend(Unsupported)는 조용히 넘긴다.
+// 프레임마다 부른다(backend는 바뀐 값만 장치에 쓰고, Android는 이 호출에서 1초 one-shot을 다시
+// 건다). 돌려주는 값은 이번에 0이 아닌 값을 쓴 패드 비트다.
 uint32 WriteLocalPlayerMotors(GameInstanceClient& client, platform::GamepadBackend& gamepads,
                               uint32 previousActivePads) noexcept {
     uint32 writtenPads = 0;
