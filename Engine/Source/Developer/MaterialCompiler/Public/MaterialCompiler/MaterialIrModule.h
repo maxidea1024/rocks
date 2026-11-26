@@ -37,6 +37,13 @@ enum class IrEntry : uint8 {
 // 진입점 수다(마지막 값 + 1).
 inline constexpr uint32 IrEntryCount = 8;
 
+// 모듈이 참조하는 파라미터 컬렉션 하나다(6.10절 MS2c2).
+struct IrCollection {
+    Guid asset;
+    // 컬렉션 layout의 float4 수다(9.7절).
+    uint32 vectors = 0;
+};
+
 // 진입점 결과 칸 하나다. slot은 출력 핀 키(정적 원문 — 예: "WorldPositionOffset")다. 한 모듈 안에서
 // (entry, slot)은 유일하다.
 struct IrResult {
@@ -47,7 +54,8 @@ struct IrResult {
 
 class ROCKS_MATERIALCOMPILER_API IrModule {
 public:
-    explicit IrModule(Allocator& allocator) noexcept : values_(allocator), results_(allocator) {
+    explicit IrModule(Allocator& allocator) noexcept
+        : values_(allocator), results_(allocator), parameters_(allocator), collections_(allocator) {
     }
 
     IrModule(const IrModule&) = delete;
@@ -73,6 +81,16 @@ public:
         return index < IrEntryCount ? entryFeatures_[index] : NoMaterialContextFeatures;
     }
 
+    // 진입점에서 닿는 수 파라미터다(ParameterId 순 — Parameter 즉시값 [3]이 이 번호다, 6.10절).
+    Span<const IrParameter> Parameters() const noexcept {
+        return parameters_.View();
+    }
+
+    // 진입점에서 닿는 파라미터 컬렉션이다(asset id 순 — 생성 원문의 MaterialCollection<k>).
+    Span<const IrCollection> Collections() const noexcept {
+        return collections_.View();
+    }
+
     // 보간 값(Interpolate) 성분 수의 합이다(6.9절 MS2b4a — 보간 배정).
     uint32 InterpolantComponents() const noexcept {
         return interpolantComponents_;
@@ -87,6 +105,8 @@ public:
     void Clear() noexcept {
         values_.Clear();
         results_.Clear();
+        parameters_.Clear();
+        collections_.Clear();
         hash_ = Sha256Digest{};
         for (MaterialContextFeatureMask& features : entryFeatures_) {
             features = NoMaterialContextFeatures;
@@ -102,6 +122,8 @@ private:
 
     Array<IrValue> values_;
     Array<IrResult> results_;
+    Array<IrParameter> parameters_;
+    Array<IrCollection> collections_;
     Sha256Digest hash_{};
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};
     MaterialCapabilityTier requiredTier_ = MaterialCapabilityTier::Mobile;

@@ -6,7 +6,9 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
+#include <MaterialCompiler/MaterialCollectionLayout.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
+#include <MaterialCompiler/MaterialStaticParameterValue.h>
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
@@ -70,6 +72,18 @@ public:
     // 번역 대상이다. field를 읽은 항목으로 기록한다(6.9절 MS2b3 — 쿠킹 번역 키).
     const MaterialTranslationTarget& Target(MaterialTargetField field) noexcept;
 
+    // 번역 입력의 static 파라미터 값이다(6.10절 MS2c2). id·종류가 같은 값이 없으면 nullptr이다(노드
+    // 기본값을 쓴다).
+    const MaterialStaticParameterValue*
+    FindStaticParameter(Guid id, MaterialStaticParameterKind kind) const noexcept;
+
+    // 번역 입력의 컬렉션 layout이다. 없으면 nullptr이다.
+    const MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
+
+    // 컬렉션 하나를 참조한다(6.10절 MS2c2). 머티리얼당 상한(MaxMaterialCollections)을 넘으면 이
+    // 노드 위치에 V9를 진단하고 false다.
+    Result<bool> UseCollection(Guid asset) noexcept;
+
     // 문맥 값 표(19.3.2절)의 name 값이다(IR Extern — 6.9절). 이전 정점 문맥에서 이전 변형이 있는
     // 값은 이전 프레임 값이다. arguments는 함수형 값의 인자(표의 argumentCount개)이고, 하나라도
     // NoIrValue면 진단 없이 NoIrValue다. 오류: 표에 없는 이름이나 인자 수 불일치는 lowering 함수의
@@ -93,6 +107,10 @@ public:
     Result<bool> ReadGuid(StringView field, Guid& out) noexcept;
     // LinearColor 칸(r·g·b·a)이다.
     Result<bool> ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept;
+    // Vec4d 칸(x·y·z·w)이다.
+    Result<bool> ReadDoubleVector(StringView field, double (&out)[MaxIrComponents]) noexcept;
+    // MaterialAssetReference 칸의 AssetId Guid다(null이면 0).
+    Result<bool> ReadAssetReference(StringView field, Guid& out) noexcept;
 
     // 동적 핀(정의의 동적 핀 함수 결과)이다. 함수가 없으면 비어 있다. 계산이 실패하면
     // InvalidProperty를 진단하고 비어 있다.

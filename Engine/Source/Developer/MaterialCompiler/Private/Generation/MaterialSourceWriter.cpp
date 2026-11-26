@@ -1,3 +1,4 @@
+#include <MaterialCompiler/MaterialConstants.h>
 #include <Base/NumericLimits.h>
 #include <Core/Text/StringBuilder.h>
 #include <DeterministicMath/DeterministicMath.h>
@@ -292,7 +293,8 @@ public:
     SourceWriter(Allocator& allocator, const IrModule& module, const MaterialTraitsDesc& traits,
                  Guid asset, Guid graph, MaterialGeneratedSource& out) noexcept
         : allocator_(allocator), module_(module), traits_(traits), asset_(asset), graph_(graph),
-          out_(out), text_(allocator), reached_(allocator) {
+          out_(out), text_(allocator), reached_(allocator), constants_(allocator),
+          constantMember_(allocator) {
     }
 
     Result<void> Run() noexcept;
@@ -325,6 +327,20 @@ private:
     Result<void> Surface() noexcept;
     Result<void> ScalarFunction(StringView signature, IrEntry entry, StringView slot,
                                 StringView fallback) noexcept;
+    // 상수 블록·컬렉션 선언이다(6.10절 MS2c2).
+    Result<void> ConstantBlocks() noexcept;
+    // 상수 블록 멤버 member의 float 칸 읽기다(materialFloats[k].<성분>).
+    Result<void> ConstantSlot(const MaterialConstantMember& member) noexcept;
+    // 상수 블록 출력 id의 읽기다(Double은 tile·offset 두 칸).
+    Result<void> ConstantRead(IrValueId id) noexcept;
+    Result<void> Collection(const IrValue& value) noexcept;
+
+    bool IsConstantOutput(usize id) const noexcept {
+        return constantMember_[id] != NoConstantMember;
+    }
+
+    // 멤버가 없는 값이다.
+    static constexpr uint32 NoConstantMember = NumericLimits<uint32>::Max();
 
     Allocator& allocator_;
     const IrModule& module_;
@@ -334,6 +350,9 @@ private:
     MaterialGeneratedSource& out_;
     StringBuilder<> text_;
     Array<bool> reached_;
+    MaterialConstants constants_;
+    // 값 번호 → 첫 상수 블록 멤버 번호다(출력이 아니면 NoConstantMember).
+    Array<uint32> constantMember_;
     uint32 line_ = 1;
     bool unsupported_ = false;
 };
@@ -754,7 +773,182 @@ Result<void> SourceWriter::DoubleExpression(const IrValue& value) noexcept {
     return Call(name, value);
 }
 
+Result<void> SourceWriter::ConstantSlot(const MaterialConstantMember& member) noexcept {
+    static constexpr char Channels[] = {'x', 'y', 'z', 'w'};
+    if (auto head = Raw("materialFloats["); !head) {
+        return head;
+    }
+
+    if (auto index = Uint(member.vector); !index) {
+        return index;
+    }
+
+    if (auto close = Raw("]"); !close) {
+        return close;
+    }
+
+    if (member.firstComponent == 0 && member.components == MaxIrComponents) {
+        return Result<void>::Success();
+    }
+
+    char mask[MaxIrComponents + 1] = {'.', 0, 0, 0, 0};
+    for (uint8 index = 0; index < member.components; ++index) {
+        mask[index + 1] = Channels[member.firstComponent + index];
+    }
+
+    return Raw(StringView(mask, member.components + usize{1}));
+}
+
+Result<void> SourceWriter::ConstantRead(IrValueId id) noexcept {
+    const uint32 first = constantMember_[id];
+    const IrValue& value = module_.Values()[id];
+    if (value.type.scalar != IrScalar::Double) {
+        return ConstantSlot(constants_.members[first]);
+    }
+
+    // Make<Double 타입>(tile 칸, offset 칸)이다(멤버는 tile 다음 offset).
+    if (first + 1 >= constants_.members.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto make = Raw("Make"); !make) {
+        return make;
+    }
+
+    if (auto type = TypeName(value.type); !type) {
+        return type;
+    }
+
+    if (auto open = Raw("("); !open) {
+        return open;
+    }
+
+    if (auto tile = ConstantSlot(constants_.members[first]); !tile) {
+        return tile;
+    }
+
+    if (auto comma = Raw(", "); !comma) {
+        return comma;
+    }
+
+    if (auto offset = ConstantSlot(constants_.members[first + 1]); !offset) {
+        return offset;
+    }
+
+    return Raw(")");
+}
+
+Result<void> SourceWriter::Collection(const IrValue& value) noexcept {
+    // materialCollection<k>Vectors[i]다(k는 모듈 컬렉션 표 번호 — asset id 순).
+    const Guid asset{value.immediate[0], value.immediate[1]};
+    const Span<const IrCollection> collections = module_.Collections();
+    usize slot = collections.Size();
+    for (usize index = 0; index < collections.Size(); ++index) {
+        if (collections[index].asset == asset) {
+            slot = index;
+        }
+    }
+
+    if (slot == collections.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto head = Raw("materialCollection"); !head) {
+        return head;
+    }
+
+    if (auto index = Uint(slot); !index) {
+        return index;
+    }
+
+    if (auto member = Raw("Vectors["); !member) {
+        return member;
+    }
+
+    if (auto vector = Uint(value.immediate[2]); !vector) {
+        return vector;
+    }
+
+    return Raw("]");
+}
+
+Result<void> SourceWriter::ConstantBlocks() noexcept {
+    // cbuffer MaterialConstants { float4 materialFloats[N]; }와 컬렉션마다 cbuffer
+    // MaterialCollection<k> { float4 materialCollection<k>Vectors[N]; }다(6.10절 MS2c2).
+    StringBuilder<> vectors(allocator_);
+    vectors << constants_.floatVectors;
+    StringBuilder<> collections(allocator_);
+    collections << module_.Collections().Size();
+    if (auto status = vectors.Status(); !status) {
+        return status;
+    }
+
+    if (auto status = collections.Status(); !status) {
+        return status;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_CONSTANT_VECTORS", vectors.View()); !defined) {
+        return defined;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_COLLECTIONS", collections.View()); !defined) {
+        return defined;
+    }
+
+    if (constants_.floatVectors > 0) {
+        if (auto head = Raw("\ncbuffer MaterialConstants\n{\n    float4 materialFloats["); !head) {
+            return head;
+        }
+
+        if (auto count = Uint(constants_.floatVectors); !count) {
+            return count;
+        }
+
+        if (auto tail = Raw("];\n};\n"); !tail) {
+            return tail;
+        }
+    }
+
+    const Span<const IrCollection> table = module_.Collections();
+    for (usize index = 0; index < table.Size(); ++index) {
+        const StringView parts[] = {"\ncbuffer MaterialCollection",
+                                    "\n{\n    float4 materialCollection", "Vectors["};
+        for (usize part = 0; part < 2; ++part) {
+            if (auto written = Raw(parts[part]); !written) {
+                return written;
+            }
+
+            if (auto number = Uint(index); !number) {
+                return number;
+            }
+        }
+
+        if (auto member = Raw(parts[2]); !member) {
+            return member;
+        }
+
+        if (auto count = Uint(table[index].vectors); !count) {
+            return count;
+        }
+
+        if (auto tail = Raw("];\n};\n"); !tail) {
+            return tail;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
+    const usize id = static_cast<usize>(&value - module_.Values().Data());
+    if (id < constantMember_.Size() && IsConstantOutput(id)) {
+        return ConstantRead(static_cast<IrValueId>(id));
+    }
+
+    if (value.op == IrOp::CollectionValue) {
+        return Collection(value);
+    }
+
     if (InvolvesDouble(value)) {
         return DoubleExpression(value);
     }
@@ -942,8 +1136,9 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
     // 피연산자 번호는 늘 그 값보다 작으므로 큰 번호부터 내려가며 퍼뜨리면 한 번에 끝난다.
     for (usize index = values.Size(); index > 0; --index) {
         const IrValue& value = values[index - 1];
-        if (!reached_[index - 1] || value.op == IrOp::Interpolate) {
-            // 보간 값 아래(정점 값)는 정점 함수가 낸다(6.9절 MS2b4a).
+        if (!reached_[index - 1] || value.op == IrOp::Interpolate || IsConstantOutput(index - 1)) {
+            // 보간 값 아래(정점 값)는 정점 함수가 낸다(6.9절 MS2b4a). 상수 블록 출력 아래는 상수 식
+            // 프로그램이 계산한다(6.10절 MS2c2).
             continue;
         }
 
@@ -1061,8 +1256,31 @@ Result<void> SourceWriter::CheckSupported() noexcept {
     // Double이 끼는 연산은 LWC 표현이 있는 것만 낸다(6.9절). WorldPositionTile은 UE IR 전용
     // 연산이라 노드가 만들지 않는다. 그 밖은 원인 노드마다 NotYetLowered 하나다.
     const Span<const IrValue> values = module_.Values();
+    // 원문에 나오는 값이다: 결과에서 닿되 상수 블록 출력에서 멈춘다(6.10절 MS2c2).
+    for (bool& item : reached_) {
+        item = false;
+    }
+
+    for (const IrResult& result : module_.Results()) {
+        reached_[result.value] = true;
+    }
+
+    for (usize index = values.Size(); index > 0; --index) {
+        if (!reached_[index - 1] || IsConstantOutput(index - 1)) {
+            continue;
+        }
+
+        for (uint8 operand = 0; operand < values[index - 1].operandCount; ++operand) {
+            reached_[values[index - 1].operands[operand]] = true;
+        }
+    }
+
     for (usize index = 0; index < values.Size(); ++index) {
         const IrValue& value = values[index];
+        if (!reached_[index] || IsConstantOutput(index)) {
+            continue;
+        }
+
         const bool structural = value.op == IrOp::Splat || value.op == IrOp::Swizzle ||
                                 value.op == IrOp::Append || value.op == IrOp::Convert ||
                                 value.op == IrOp::Constant || value.op == IrOp::Branch ||
@@ -1432,6 +1650,25 @@ Result<void> SourceWriter::Run() noexcept {
         return sized;
     }
 
+    if (auto built = BuildMaterialConstants(module_, constants_); !built) {
+        return built;
+    }
+
+    if (auto sized = constantMember_.TryResize(module_.Values().Size()); !sized) {
+        return sized;
+    }
+
+    for (uint32& member : constantMember_) {
+        member = NoConstantMember;
+    }
+
+    for (usize index = 0; index < constants_.members.Size(); ++index) {
+        const IrValueId value = constants_.members[index].value;
+        if (constantMember_[value] == NoConstantMember) {
+            constantMember_[value] = static_cast<uint32>(index);
+        }
+    }
+
     if (auto checked = CheckSupported(); !checked) {
         return checked;
     }
@@ -1593,6 +1830,10 @@ Result<void> SourceWriter::Run() noexcept {
 
     if (auto usage = UsageDefines(); !usage) {
         return usage;
+    }
+
+    if (auto blocks = ConstantBlocks(); !blocks) {
+        return blocks;
     }
 
     if (auto vertex = Vertex(); !vertex) {

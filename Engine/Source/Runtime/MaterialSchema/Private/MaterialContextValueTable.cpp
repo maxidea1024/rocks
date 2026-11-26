@@ -1157,6 +1157,17 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Function, 3, MaterialContextFeature::SpeedTree,
                  AllMaterialDomains, MaterialVertexStage, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::NotAware, {}, false),
+    // UE GetPrimitiveData(Parameters).CustomPrimitiveData의 float 하나(인자: float 번호 — Scalar
+    // Parameter의 useCustomPrimitiveData, HLSLMaterialTranslator.cpp CustomPrimitiveData).
+    ContextValue("CustomPrimitiveData1", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // 같은 자료의 연속 float 넷(인자: 첫 float 번호 — 36을 넘는 성분은 0, Vector Parameter).
+    ContextValue("CustomPrimitiveData4", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
 };
 
 } // namespace

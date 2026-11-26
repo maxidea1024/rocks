@@ -44,6 +44,10 @@ enum class EvaluationContext : uint8 {
 // GraphTooDeep). 계획된 번역은 재귀하지 않는다.
 inline constexpr uint32 MaxLoweringDepth = 256;
 
+// 머티리얼 하나가 참조할 수 있는 파라미터 컬렉션 수다(9.7절 — UE
+// MaxNumParameterCollectionsPerMaterial, RE/Public/ParameterCollection.h:13–18).
+inline constexpr usize MaxMaterialCollections = 2;
+
 class Translator {
 public:
     Translator(Allocator& allocator, const MaterialTranslationInput& input,
@@ -123,6 +127,10 @@ public:
         out_.consultedTarget |= ToMask(field);
         return input_.target;
     }
+
+    // 컬렉션 asset을 참조 목록에 넣는다. 이미 있으면 그대로 참이고, 상한을 넘으면 넣지 않고
+    // 거짓이다.
+    Result<bool> ReferenceCollection(Guid asset) noexcept;
 
     // 종류 이름의 lowering 함수다. 없으면 nullptr이다.
     LoweringFn FindLowering(Name type) const noexcept;
@@ -234,6 +242,9 @@ private:
     HashMap<PinKey, bool, PinKeyHash> cutInputs_;
     Name namedRerouteUsage_;
     Array<IrResult> results_;
+    // 참조한 파라미터 컬렉션이다(처음 참조 순 — 상한 검사용, 모듈 표는 asset id 순으로 따로
+    // 만든다).
+    Array<Guid> collections_;
     Name rerouteType_;
     Name rerouteIn_;
     Name rerouteOut_;

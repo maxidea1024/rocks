@@ -531,6 +531,8 @@ struct MaterialInputs {
 #define MaterialContextPreviousTransformInstancePositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformInstancePositionToTranslatedWorld(c, a0)
 #define MaterialContextTransformInstanceVectorToTranslatedWorld(c, a0) MaterialPassTransformInstanceVectorToTranslatedWorld(c, a0)
 #define MaterialContextPreviousTransformInstanceVectorToTranslatedWorld(c, a0) MaterialPassPreviousTransformInstanceVectorToTranslatedWorld(c, a0)
+#define MaterialContextCustomPrimitiveData1(c, a0) MaterialPassCustomPrimitiveData1(c, a0)
+#define MaterialContextCustomPrimitiveData4(c, a0) MaterialPassCustomPrimitiveData4(c, a0)
 #else
 #define MaterialContextObjectBounds(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextObjectOrientation(c) float3(0.0, 0.0, 0.0)
@@ -597,6 +599,8 @@ struct MaterialInputs {
 #define MaterialContextPreviousTransformInstancePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextTransformInstanceVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextPreviousTransformInstanceVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextCustomPrimitiveData1(c, a0) (0.0)
+#define MaterialContextCustomPrimitiveData4(c, a0) float4(0.0, 0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_SKIN

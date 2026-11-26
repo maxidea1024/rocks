@@ -12,6 +12,12 @@
 #include <MaterialSchema/Nodes/Math/CosineProperties.h>
 #include <MaterialSchema/Nodes/Math/OperatorProperties.generated.h>
 #include <MaterialSchema/Nodes/Math/OperatorProperties.h>
+#include <MaterialSchema/Nodes/Parameters/DoubleVectorParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/DoubleVectorParameterProperties.h>
+#include <MaterialSchema/Nodes/Parameters/ScalarParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/ScalarParameterProperties.h>
+#include <MaterialSchema/Nodes/Parameters/VectorParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/VectorParameterProperties.h>
 
 #include "MaterialGraphFixture.h"
 
@@ -569,6 +575,54 @@ TEST(MaterialSourceWriter_ContextSourceMatchesTable) {
     CHECK(first.View() == second.View());
     CHECK(MatchesSourceTreeFile(
         env.allocator, "Engine/Shaders/Private/Material/MaterialContext.rsh", first.View()));
+}
+
+// MS2c2: 파라미터 그래프의 생성 원문(상수 블록 선언·출력 읽기·Double 두 칸·프로그램 아래 값 생략·
+// 접지 않는 Lerp는 원문에 남음).
+TEST(MaterialSourceWriter_ParametersGolden) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    ScalarParameterProperties roughness;
+    roughness.parameterName = env.Intern("Roughness");
+    roughness.parameterId = Guid{0x50415241ull, 1};
+    roughness.defaultValue = 0.5f;
+    const Guid scalar = fixture.Add("Material.ScalarParameter", env.Save(roughness));
+    VectorParameterProperties tint(env.allocator);
+    tint.parameterName = env.Intern("Tint");
+    tint.parameterId = Guid{0x50415241ull, 2};
+    const Guid vector = fixture.Add("Material.VectorParameter", env.Save(tint));
+    DoubleVectorParameterProperties origin;
+    origin.parameterName = env.Intern("Origin");
+    origin.parameterId = Guid{0x50415241ull, 3};
+    const Guid wide = fixture.Add("Material.DoubleVectorParameter", env.Save(origin));
+    // (Roughness + 1) × Tint.R은 프로그램이 접는다(출력 하나).
+    const Guid plus = fixture.Add("Material.Add");
+    fixture.Connect(scalar, "Result", plus, "A");
+    fixture.Connect(AddConstant(fixture, 1.0f), "Result", plus, "B");
+    const Guid folded = fixture.Add("Material.Multiply");
+    fixture.Connect(plus, "Result", folded, "A");
+    fixture.Connect(vector, "R", folded, "B");
+    // lerp(folded, Tint.G, sin(0.5))는 셰이더가 계산한다.
+    const Guid lerp = fixture.Add("Material.LinearInterpolate");
+    fixture.Connect(folded, "Result", lerp, "A");
+    fixture.Connect(vector, "G", lerp, "B");
+    fixture.Connect(AddVarying(fixture, 0.5f), "Result", lerp, "Alpha");
+    // length(WorldPosition − Origin.XYZ)는 Double 출력 두 칸을 읽는다.
+    const Guid world = fixture.Add("Material.WorldPosition");
+    const Guid relative = fixture.Add("Material.Subtract");
+    fixture.Connect(world, "XYZ", relative, "A");
+    fixture.Connect(wide, "XYZ", relative, "B");
+    const Guid distance = fixture.Add("Material.Length");
+    fixture.Connect(relative, "Result", distance, "Input");
+    const Guid total = fixture.Add("Material.Add");
+    fixture.Connect(lerp, "Result", total, "A");
+    fixture.Connect(distance, "Result", total, "B");
+    fixture.Connect(total, "Result", OutputNodeId, "AmbientOcclusion");
+    Generated generated(env.allocator);
+    REQUIRE(Generate(fixture, Traits(), generated));
+    CHECK(MatchesGolden(env.allocator, "MaterialSource_Parameters.txt",
+                        generated.source.text.View()));
 }
 
 } // namespace material_source_writer_tests_file

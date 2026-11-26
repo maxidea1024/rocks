@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Guid.h>
 #include <Core/Text/Name.h>
 #include <MaterialSchema/MaterialAssetReference.h>
 #include <MaterialSchema/Nodes/Parameters/ParametersNodeEnums.h>
@@ -18,6 +19,8 @@ struct ParameterCollectionTransformProperties {
     // 기대 클래스는 ParameterCollection다(19.4.3절).
     ROCKS_PROPERTY() MaterialAssetReference collection;
     ROCKS_PROPERTY() Name parameterName;
+    // 컬렉션 파라미터를 찾는 id다(UE ParameterId — 이름은 진단 문구에만 쓴다).
+    ROCKS_PROPERTY() Guid parameterId {};
     ROCKS_PROPERTY() CollectionTransformType transformType = CollectionTransformType::Position;
 };
 

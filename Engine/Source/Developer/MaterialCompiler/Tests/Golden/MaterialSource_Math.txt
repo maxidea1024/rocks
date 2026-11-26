@@ -26,6 +26,8 @@
 #define MATERIAL_NUM_INTERPOLANT_VECTORS 0
 #define MATERIAL_NUM_CUSTOMIZED_UVS 0
 #define MATERIAL_OPACITY_MASK_CLIP 0.3333
+#define MATERIAL_NUM_CONSTANT_VECTORS 0
+#define MATERIAL_NUM_COLLECTIONS 0
 
 void EvaluateMaterialVertex(in MaterialVertexInputs c, inout MaterialVertexResult r) {
     const float m1 = sin(0.5);

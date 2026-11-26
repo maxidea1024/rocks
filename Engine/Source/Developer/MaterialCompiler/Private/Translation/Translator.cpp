@@ -132,7 +132,8 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
       edges_(allocator), outputsVertex_(allocator), outputsPrevious_(allocator),
       outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
       statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
-      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator) {
+      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
+      collections_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -187,6 +188,24 @@ bool Translator::HasConnection(const nodegraph::GraphNode& consumer, Name pin) c
     }
 
     return false;
+}
+
+Result<bool> Translator::ReferenceCollection(Guid asset) noexcept {
+    for (const Guid& existing : collections_) {
+        if (existing == asset) {
+            return Result<bool>::Success(true);
+        }
+    }
+
+    if (collections_.Size() >= MaxMaterialCollections) {
+        return Result<bool>::Success(false);
+    }
+
+    if (auto added = collections_.TryPushBack(asset); !added) {
+        return Result<bool>::Failure(added.Error());
+    }
+
+    return Result<bool>::Success(true);
 }
 
 LoweringFn Translator::FindLowering(Name type) const noexcept {
@@ -282,9 +301,9 @@ Result<void> Translator::BuildIndex() noexcept {
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
     const Span<const LoweringEntry> groups[] = {
-        ConstantLowerings(),     MathLowerings(),         FlowLowerings(),
-        ContextValueLowerings(), CoordinateLowerings(),   TransformLowerings(),
-        SwitchLowerings(),       InterpolatorLowerings(), SupplyLowerings()};
+        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),   ContextValueLowerings(),
+        CoordinateLowerings(), TransformLowerings(), SwitchLowerings(), InterpolatorLowerings(),
+        SupplyLowerings(),     ParameterLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);

@@ -3,6 +3,8 @@
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
 #include <CoreTypeBindings/CoreValueTypes.h>
 #include <Core/Text/String.h>
+#include <MaterialSchema/MaterialAssetReference.generated.h>
+#include <MaterialSchema/MaterialAssetReference.h>
 #include <MaterialSchema/MaterialContextValue.h>
 #include <MaterialSchema/MaterialPinValue.generated.h>
 #include <MaterialSchema/MaterialPinValue.h>
@@ -117,6 +119,43 @@ const MaterialTraitsDesc& LoweringContext::Traits() const noexcept {
 
 const MaterialTranslationTarget& LoweringContext::Target(MaterialTargetField field) noexcept {
     return translator_.Target(field);
+}
+
+const MaterialStaticParameterValue*
+LoweringContext::FindStaticParameter(Guid id, MaterialStaticParameterKind kind) const noexcept {
+    for (const MaterialStaticParameterValue& value : translator_.Input().staticParameters) {
+        if (value.parameterId == id && value.kind == kind) {
+            return &value;
+        }
+    }
+
+    return nullptr;
+}
+
+const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) const noexcept {
+    for (const MaterialCollectionLayout& layout : translator_.Input().collections) {
+        if (layout.asset == asset) {
+            return &layout;
+        }
+    }
+
+    return nullptr;
+}
+
+Result<bool> LoweringContext::UseCollection(Guid asset) noexcept {
+    auto admitted = translator_.ReferenceCollection(asset);
+    if (!admitted || admitted.Value()) {
+        return admitted;
+    }
+
+    if (auto reported = Error(MaterialDiagnosticCode::BudgetExceeded, StringView(),
+                              "Material references too many MaterialParameterCollections!  A "
+                              "material may only reference 2 different collections.");
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
 }
 
 Result<IrValueId> LoweringContext::ContextValue(StringView name,
@@ -411,6 +450,83 @@ Result<bool> LoweringContext::ReadColor(StringView field, float (&out)[MaxIrComp
         return Result<bool>::Success(false);
     }
 
+    return Result<bool>::Success(true);
+}
+
+Result<bool> LoweringContext::ReadDoubleVector(StringView field,
+                                               double (&out)[MaxIrComponents]) noexcept {
+    for (double& component : out) {
+        component = 0.0;
+    }
+
+    auto properties = Properties();
+    if (!properties) {
+        return Result<bool>::Failure(properties.Error());
+    }
+
+    if (properties.Value() == nullptr) {
+        return Result<bool>::Success(false);
+    }
+
+    auto vector = properties.Value()->OpenStruct(field, GeneratedType<Vec4d>::Schema());
+    Result<void> read = vector ? Result<void>::Success() : Result<void>::Failure(vector.Error());
+    static constexpr StringView Axes[MaxIrComponents] = {"x", "y", "z", "w"};
+    for (usize index = 0; read && index < MaxIrComponents; ++index) {
+        auto axis = vector.Value().ReadDouble(Axes[index], 0.0);
+        if (!axis) {
+            read = Result<void>::Failure(axis.Error());
+        } else {
+            out[index] = axis.Value();
+        }
+    }
+
+    if (!read) {
+        if (read.Error() == ErrorCode::OutOfMemory) {
+            return Result<bool>::Failure(read.Error());
+        }
+
+        if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                  "Node vector property cannot be read");
+            !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        return Result<bool>::Success(false);
+    }
+
+    return Result<bool>::Success(true);
+}
+
+Result<bool> LoweringContext::ReadAssetReference(StringView field, Guid& out) noexcept {
+    out = Guid{};
+    auto properties = Properties();
+    if (!properties) {
+        return Result<bool>::Failure(properties.Error());
+    }
+
+    if (properties.Value() == nullptr) {
+        return Result<bool>::Success(false);
+    }
+
+    auto reference =
+        properties.Value()->OpenStruct(field, GeneratedType<MaterialAssetReference>::Schema());
+    Result<Guid> asset = reference ? reference.Value().ReadGuid("assetId", Guid{})
+                                   : Result<Guid>::Failure(reference.Error());
+    if (!asset) {
+        if (asset.Error() == ErrorCode::OutOfMemory) {
+            return Result<bool>::Failure(asset.Error());
+        }
+
+        if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                  "Node asset reference property cannot be read");
+            !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        return Result<bool>::Success(false);
+    }
+
+    out = asset.Value();
     return Result<bool>::Success(true);
 }
 

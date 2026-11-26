@@ -116,11 +116,18 @@ enum class IrOp : uint8 {
 
     // 늦은 진단의 자리 값이다(6.10절 MS2c1 — TODO 노드·모르는 노드). 즉시값 [0]은 종류
     // (IrPendingKind), [1]은 선행 ID 번호, [2]·[3]은 노드 NodeId(high·low)다.
-    Pending = 84
+    Pending = 84,
+
+    // 수 파라미터 읽기다(6.10절 MS2c2). 즉시값 [0]·[1]은 ParameterId(high·low), [2]는
+    // IrParameterKind, [3]은 파라미터 표 번호(빌더 표 → 모듈이 ParameterId 순으로 다시 매긴다).
+    Parameter = 85,
+    // 파라미터 컬렉션 벡터 하나다(6.10절 MS2c2). 즉시값 [0]·[1]은 컬렉션 asset id, [2]는 벡터 번호,
+    // [3]은 그 컬렉션의 벡터 수다.
+    CollectionValue = 86
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 85;
+inline constexpr uint32 IrOpCount = 87;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

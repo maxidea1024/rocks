@@ -5,6 +5,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <MaterialCompiler/MaterialIrParameter.h>
 #include <MaterialCompiler/MaterialIrValue.h>
 
 // 머티리얼 IR 빌더다(Docs/Design/MaterialSystem 6.5·6.8절). 값을 만들 때 (타입, 연산, 피연산자,
@@ -72,6 +73,16 @@ public:
     // 않는다). 오류: type이 규칙 밖이면 InvalidArgument.
     Result<IrValueId> Pending(IrType type, IrPendingKind kind, uint8 prerequisite,
                               Guid node) noexcept;
+    // 수 파라미터 읽기다(6.10절 MS2c2). 같은 ParameterId는 한 값·한 표 항목이다(처음 기본값이
+    // 남는다). 빈도 Uniform. 오류: type이 종류와 맞지 않으면 InvalidArgument.
+    Result<IrValueId> Parameter(const IrParameter& parameter) noexcept;
+    // 파라미터 컬렉션 벡터 하나다(Float4, 빈도 Instance). 오류: index ≥ vectors면 InvalidArgument.
+    Result<IrValueId> CollectionValue(Guid collection, uint32 index, uint32 vectors) noexcept;
+
+    // 파라미터 표다(Parameter 값의 즉시값 [3]이 가리킨다).
+    Span<const IrParameter> Parameters() const noexcept {
+        return parameters_.View();
+    }
 
     const IrValue& Value(IrValueId id) const noexcept;
 
@@ -105,6 +116,7 @@ private:
     bool IsValid(IrValueId id) const noexcept;
 
     Array<IrValue> values_;
+    Array<IrParameter> parameters_;
     HashMap<Key, IrValueId, KeyHash, KeyEqual> lookup_;
     IrSite site_;
 };

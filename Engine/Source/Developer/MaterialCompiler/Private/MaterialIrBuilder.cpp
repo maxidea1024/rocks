@@ -405,7 +405,8 @@ uint64 IrBuilder::KeyHash::operator()(const Key& key) const noexcept {
     return hash;
 }
 
-IrBuilder::IrBuilder(Allocator& allocator) noexcept : values_(allocator), lookup_(allocator) {
+IrBuilder::IrBuilder(Allocator& allocator) noexcept
+    : values_(allocator), parameters_(allocator), lookup_(allocator) {
 }
 
 const IrValue& IrBuilder::Value(IrValueId id) const noexcept {
@@ -464,7 +465,10 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
 Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     // 빈도는 피연산자 빈도의 최대다(6.2절). 상수는 Constant다. 미분은 Pixel이다. 문맥 값은 표가
     // 정한 빈도에서 시작한다(6.9절).
-    IrFrequency frequency = value.op == IrOp::Extern ? value.frequency : IrFrequency::Constant;
+    IrFrequency frequency =
+        value.op == IrOp::Extern || value.op == IrOp::Parameter || value.op == IrOp::CollectionValue
+            ? value.frequency
+            : IrFrequency::Constant;
     for (uint8 index = 0; index < value.operandCount; ++index) {
         const IrFrequency operand = values_[value.operands[index]].frequency;
         frequency =
@@ -1114,6 +1118,56 @@ Result<IrValueId> IrBuilder::Pending(IrType type, IrPendingKind kind, uint8 prer
     value.immediate[1] = prerequisite;
     value.immediate[2] = node.high;
     value.immediate[3] = node.low;
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::Parameter(const IrParameter& parameter) noexcept {
+    const IrType expected = parameter.kind == IrParameterKind::Scalar   ? IrFloat(1)
+                            : parameter.kind == IrParameterKind::Vector ? IrFloat(MaxIrComponents)
+                                                                        : IrDouble(MaxIrComponents);
+    if (!(parameter.type == expected)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    usize slot = parameters_.Size();
+    for (usize index = 0; index < parameters_.Size(); ++index) {
+        if (parameters_[index].id == parameter.id) {
+            slot = index;
+            break;
+        }
+    }
+
+    if (slot == parameters_.Size()) {
+        if (auto added = parameters_.TryPushBack(parameter); !added) {
+            return Result<IrValueId>::Failure(added.Error());
+        }
+    }
+
+    IrValue value;
+    value.type = parameters_[slot].type;
+    value.op = IrOp::Parameter;
+    value.frequency = IrFrequency::Uniform;
+    value.immediate[0] = parameter.id.high;
+    value.immediate[1] = parameter.id.low;
+    value.immediate[2] = static_cast<uint64>(parameters_[slot].kind);
+    value.immediate[3] = slot;
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::CollectionValue(Guid collection, uint32 index,
+                                             uint32 vectors) noexcept {
+    if (index >= vectors) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = IrFloat(MaxIrComponents);
+    value.op = IrOp::CollectionValue;
+    value.frequency = IrFrequency::Instance;
+    value.immediate[0] = collection.high;
+    value.immediate[1] = collection.low;
+    value.immediate[2] = index;
+    value.immediate[3] = vectors;
     return Intern(value);
 }
 

@@ -234,6 +234,72 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
     }
 
+    // 파라미터 표: 닿는 Parameter의 표 항목을 ParameterId 순으로 모으고 즉시값 [3]을 다시 매긴다.
+    // 컬렉션 표: 닿는 CollectionValue의 asset id 순(6.10절 MS2c2 — 결정적 layout).
+    const Span<const IrParameter> sourceParameters = builder.Parameters();
+    for (const IrValue& value : out.values_) {
+        if (value.op == IrOp::Parameter) {
+            const IrParameter& parameter = sourceParameters[static_cast<usize>(value.immediate[3])];
+            bool known = false;
+            for (const IrParameter& existing : out.parameters_) {
+                known = known || existing.id == parameter.id;
+            }
+
+            if (!known) {
+                if (auto added = out.parameters_.TryPushBack(parameter); !added) {
+                    return FailBuild(out, Move(added));
+                }
+            }
+        } else if (value.op == IrOp::CollectionValue) {
+            const Guid asset{value.immediate[0], value.immediate[1]};
+            bool known = false;
+            for (const IrCollection& existing : out.collections_) {
+                known = known || existing.asset == asset;
+            }
+
+            if (!known) {
+                const IrCollection collection{asset, static_cast<uint32>(value.immediate[3])};
+                if (auto added = out.collections_.TryPushBack(collection); !added) {
+                    return FailBuild(out, Move(added));
+                }
+            }
+        }
+    }
+
+    const auto less = [](Guid left, Guid right) noexcept {
+        return left.high < right.high || (left.high == right.high && left.low < right.low);
+    };
+    for (usize index = 1; index < out.parameters_.Size(); ++index) {
+        for (usize at = index; at > 0 && less(out.parameters_[at].id, out.parameters_[at - 1].id);
+             --at) {
+            const IrParameter swap = out.parameters_[at];
+            out.parameters_[at] = out.parameters_[at - 1];
+            out.parameters_[at - 1] = swap;
+        }
+    }
+
+    for (usize index = 1; index < out.collections_.Size(); ++index) {
+        for (usize at = index;
+             at > 0 && less(out.collections_[at].asset, out.collections_[at - 1].asset); --at) {
+            const IrCollection swap = out.collections_[at];
+            out.collections_[at] = out.collections_[at - 1];
+            out.collections_[at - 1] = swap;
+        }
+    }
+
+    for (IrValue& value : out.values_) {
+        if (value.op != IrOp::Parameter) {
+            continue;
+        }
+
+        const Guid id{value.immediate[0], value.immediate[1]};
+        for (usize index = 0; index < out.parameters_.Size(); ++index) {
+            if (out.parameters_[index].id == id) {
+                value.immediate[3] = index;
+            }
+        }
+    }
+
     Sha256 hasher;
     WriteU32(hasher, IrHashFormatVersion);
     WriteU32(hasher, static_cast<uint32>(out.values_.Size()));

@@ -53,11 +53,11 @@ constexpr StringView DoubleVectorParameterNonSemantic[] = {"group", "sortPriorit
 constexpr MaterialPropertyTextDefault DoubleVectorParameterTextDefaults[] = {
     {"parameterName", "Param"}};
 constexpr MaterialPinDefinition DoubleVectorParameterPins[] = {
-    MaterialOutput("XYZ", MaterialPinType::Float3, "XYZ"),
-    MaterialOutput("X", MaterialPinType::Float1, "X"),
-    MaterialOutput("Y", MaterialPinType::Float1, "Y"),
-    MaterialOutput("Z", MaterialPinType::Float1, "Z"),
-    MaterialOutput("W", MaterialPinType::Float1, "W"),
+    MaterialOutput("XYZ", MaterialPinType::Double3, "XYZ"),
+    MaterialOutput("X", MaterialPinType::Double1, "X"),
+    MaterialOutput("Y", MaterialPinType::Double1, "Y"),
+    MaterialOutput("Z", MaterialPinType::Double1, "Z"),
+    MaterialOutput("W", MaterialPinType::Double1, "W"),
 };
 
 constexpr StringView ChannelMaskParameterNonSemantic[] = {"group", "sortPriority", "defaultValue",

@@ -2362,6 +2362,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::ParameterCollectionTransformProperties::parameterId",
+      "id": "3ea8ee63ee9c4b889d6292638b11fe89",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::ParameterCollectionTransformProperties::parameterName",
       "id": "7a76ea847dc24bb49a038474b30042e3",
       "aliases": [],
