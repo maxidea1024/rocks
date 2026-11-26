@@ -11,6 +11,8 @@
 #include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderType.h>
 
+#include <SandboxShaderParameters.shaderparams.h>
+
 // Sandbox 셰이더다(Docs/Design/ShaderSystem 16.1절 SSD19·SH2f). 원문은 Programs/Sandbox/Shaders이고
 // /Plugin/Sandbox로 mount한다(엔진 셰이더가 아니므로 Engine/Shaders에 두지 않는다). 셰이더 타입은
 // self-test 호스트만 등록하고 쿠킹하지 않는다(엔진 실행은 등록하지 않는다 — SSD48).
@@ -102,6 +104,24 @@ constexpr ShaderTypeDesc DevelopmentOnly(ShaderTypeDesc desc) noexcept {
 #undef SANDBOX_VERTEX_IF
 #undef SANDBOX_PIXEL_IF
 #undef SANDBOX_PIXEL_DEV_IF
+
+// 생성 셰이더 파라미터 구조체 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 두 단계가 같은
+// 원문을 include하므로 둘 다 표를 가진다(VS에는 쓰는 버퍼가 없어 대조하지 않는다).
+inline constexpr rocks::shader::ShaderParameterLayout GeneratedParameterLayouts[] = {
+    rocks::shader::ShaderParameterLayoutOf<GeneratedProbeParameters>(),
+    rocks::shader::ShaderParameterLayoutOf<GeneratedProbeDraw>()};
+
+constexpr ShaderTypeDesc WithGeneratedLayouts(ShaderTypeDesc desc) noexcept {
+    desc.parameterLayouts = GeneratedParameterLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GeneratedParametersVS = WithGeneratedLayouts(
+    SandboxType("SandboxGeneratedParametersVS", "/Plugin/Sandbox/GeneratedParameters.rsf",
+                "GeneratedParametersVS", rocks::shader::ShaderStageVertex));
+inline constexpr ShaderTypeDesc GeneratedParametersPS = WithGeneratedLayouts(
+    SandboxType("SandboxGeneratedParametersPS", "/Plugin/Sandbox/GeneratedParameters.rsf",
+                "GeneratedParametersPS", rocks::shader::ShaderStagePixel));
 
 // 엔진 셰이더 SL0 probe 타입이다(Docs/Design/EngineShaders 7.6절, 결정 SLD19). 원문은
 // Programs/Sandbox/EngineShaderTests를 /Plugin/EngineShaderTests로 mount한 시험 루트이고 쿠킹하지
