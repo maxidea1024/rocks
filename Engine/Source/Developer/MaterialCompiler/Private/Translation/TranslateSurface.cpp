@@ -2,6 +2,8 @@
 #include <MaterialSchema/MaterialContextValue.h>
 
 #include "LoweringContext.h"
+#include "SurfaceExporter.h"
+#include "SurfaceShadingModels.h"
 #include "Translator.h"
 
 // 출력 노드 Surface 핀의 접기·내보내기와 대표 노멀 순환 검사다(Docs/Design/MaterialSystem 6.11절
@@ -57,20 +59,6 @@ bool UsageFitsDomain(const SurfaceRecord& record, MaterialDomain domain) noexcep
 
     return false;
 }
-
-// Renderer 14.2절 번호표의 비트 전부다(번호가 정해지지 않은 shading model 값이 섞일 때).
-constexpr uint32 AllShadingModelBits =
-    (1u << static_cast<uint32>(rocks::ShadingModel::Unlit)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::DefaultLit)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::Subsurface)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::ClearCoat)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::SubsurfaceProfile)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::TwoSidedFoliage)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::Hair)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::Cloth)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::Eye)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::SingleLayerWater)) |
-    (1u << static_cast<uint32>(rocks::ShadingModel::ThinTranslucent));
 
 constexpr uint32 UnlitShadingModelBit = 1u << static_cast<uint32>(rocks::ShadingModel::Unlit);
 
@@ -150,32 +138,11 @@ Result<void> Translator::TranslateSurface(LoweringContext& context) noexcept {
                           "Surface node is not valid for the material domain");
         }
 
-        exported = *record;
-        if (record->kind == SurfaceKind::Decal) {
-            // UE SubstrateWeightParameterBlending: coverage가 opacity에 곱해진다.
-            const SurfaceRecord* inner = FindSurface(record->child);
-            if (inner == nullptr) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            exported = *inner;
-            auto coverage = context.Unary(IrOp::Saturate, record->coverage, NumberRule::FloatOnly);
-            if (!coverage) {
-                return Result<void>::Failure(coverage.Error());
-            }
-
-            IrValueId opacity = coverage.Value();
-            if (inner->Field(SurfaceField::Opacity) != NoIrValue) {
-                auto scaled = context.Binary(IrOp::Multiply, inner->Field(SurfaceField::Opacity),
-                                             coverage.Value(), NumberRule::FloatOnly);
-                if (!scaled) {
-                    return Result<void>::Failure(scaled.Error());
-                }
-
-                opacity = scaled.Value();
-            }
-
-            exported.Field(SurfaceField::Opacity) = opacity;
+        // 트리를 closure 하나로 접어 고전 칸으로 내보낸다(6.11절 MS2d2).
+        SurfaceExporter exporter(*this, context);
+        auto done = exporter.Export(surface, exported);
+        if (!done || !done.Value()) {
+            return done ? Result<void>::Success() : Result<void>::Failure(done.Error());
         }
     }
 
@@ -276,39 +243,32 @@ Result<void> Translator::TranslateSurface(LoweringContext& context) noexcept {
         hasOpacity = hasOpacity || result.entry == IrEntry::Opacity;
     }
 
-    if (!hasOpacity && IsSurfaceTranslucent(input_.traits.blendMode) &&
-        exported.Field(SurfaceField::Opacity) != NoIrValue) {
-        if (auto added = results_.TryPushBack(
-                IrResult{IrEntry::Opacity, "Opacity", exported.Field(SurfaceField::Opacity)});
+    // 내보낸 coverage(slab·연산 — UE Substrate coverage)가 있으면 그것, 없으면 opacity 칸이다.
+    // opacity 칸은 위에서 이미 saturate했다.
+    IrValueId coverage = exported.Field(SurfaceField::Opacity);
+    if (exported.coverage != NoIrValue) {
+        auto clamped = context.Unary(IrOp::Saturate, exported.coverage, NumberRule::FloatOnly);
+        if (!clamped) {
+            return Result<void>::Failure(clamped.Error());
+        }
+
+        coverage = clamped.Value();
+    }
+
+    if (!hasOpacity && IsSurfaceTranslucent(input_.traits.blendMode) && coverage != NoIrValue) {
+        if (auto added = results_.TryPushBack(IrResult{IrEntry::Opacity, "Opacity", coverage});
             !added) {
             return added;
         }
     }
 
     // shading model 집합(UE ShadingModelsFromCompilation): static으로 닿는 상수의 합집합이다.
-    shadingModels_ = 0;
-    SystemAllocator scratch;
-    Array<IrValueId> pending(scratch);
-    if (auto pushed = pending.TryPushBack(exported.Field(SurfaceField::ShadingModel)); !pushed) {
-        return pushed;
+    auto reached = ReachableShadingModels(builder_, exported.Field(SurfaceField::ShadingModel));
+    if (!reached) {
+        return Result<void>::Failure(reached.Error());
     }
 
-    while (!pending.IsEmpty()) {
-        const IrValueId id = pending[pending.Size() - 1];
-        (void)pending.TryPopBack();
-        const IrValue& value = builder_.Value(id);
-        if (value.op == IrOp::Constant && value.immediate[0] < MaxShadingModelCount) {
-            shadingModels_ |= 1u << static_cast<uint32>(value.immediate[0]);
-        } else if (value.op == IrOp::Select || value.op == IrOp::Branch) {
-            for (uint8 operand = 1; operand < value.operandCount; ++operand) {
-                if (auto pushed = pending.TryPushBack(value.operands[operand]); !pushed) {
-                    return pushed;
-                }
-            }
-        } else {
-            shadingModels_ |= AllShadingModelBits;
-        }
-    }
+    shadingModels_ = reached.Value();
 
     // AO는 lit shading model만 쓴다(UE Material.cpp:7929–7930 — Unlit 하나면 비활성, V5).
     if (shadingModels_ == UnlitShadingModelBit) {

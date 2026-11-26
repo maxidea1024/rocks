@@ -298,7 +298,8 @@ TEST(MaterialSurface_UnsupportedShadingModel) {
     CHECK(HasMessage(out, "Shading model is not supported: PreintegratedSkin"));
 }
 
-// 선행 없는 것: 값이 있는 subsurfaceProfile 속성, Toon 노드, Unlit 색 투과는 그 노드의 늦은 진단이다.
+// 선행 없는 것: 값이 있는 subsurfaceProfile 속성, Toon 노드, Unlit 색 투과는 그 노드의 늦은
+// 진단이다.
 TEST(MaterialSurface_PrerequisiteMissing) {
     TranslatorEnv env;
     REQUIRE(env.ready);

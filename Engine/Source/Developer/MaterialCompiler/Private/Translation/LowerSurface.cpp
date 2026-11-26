@@ -1,9 +1,11 @@
 #include <Core/Text/String.h>
 #include <MaterialSchema/MaterialPrerequisite.h>
 #include <MaterialSchema/MaterialTraitEnums.h>
+#include <MaterialSchema/Nodes/Surface/SurfaceNodeEnums.h>
 
 #include "LoweringContext.h"
 #include "LoweringTable.h"
+#include "SurfaceShadingModels.h"
 #include "Translator.h"
 
 // 표면 노드 lowering이다(Docs/Design/MaterialSystem 6.11절 MS2d1). 표면 노드는 표면
@@ -18,6 +20,13 @@ constexpr float SurfaceDefaultSpecular = 0.5f;
 constexpr float SurfaceDefaultRoughness = 0.5f;
 constexpr float SurfaceDefaultClearCoat = 1.0f;
 constexpr float SurfaceDefaultClearCoatRoughness = 0.1f;
+// Slab 기본값이다(UE SubstrateSlabBSDF::Compile — MES:882–896). F0는 DielectricSpecularToF0(0.5)다.
+constexpr float SurfaceDefaultDiffuseAlbedo = 0.18f;
+constexpr float SurfaceDefaultF0 = 0.04f;
+// Eye의 F0(UE SUBSTRATE_EYE_DEFAULT_F0 — S:170)를 고전 specular로 바꾼 값(0.028/0.08)이다.
+constexpr float SurfaceEyeSpecular = 0.028f / 0.08f;
+constexpr bool SurfaceFalse = false;
+constexpr bool SurfaceTrue = true;
 
 // 셰이딩 모델 preset의 Renderer 14.2절 번호다(번호표에 없으면 false — PreintegratedSkin·
 // FromMaterialExpression).
@@ -145,6 +154,42 @@ Result<IrValueId> BasisOr(LoweringContext& context, StringView key, StringView v
     return context.Unary(IrOp::Normalize, world, NumberRule::FloatOnly);
 }
 
+// static shading model 하나인 고전 preset의 흐르는 종류다(UE MES:632–773).
+uint16 ClassicFlow(rocks::ShadingModel model) noexcept {
+    switch (model) {
+    case rocks::ShadingModel::Unlit:
+        return SurfaceFlowBit(SurfaceFlow::Unlit);
+    case rocks::ShadingModel::Hair:
+        return SurfaceFlowBit(SurfaceFlow::Hair);
+    case rocks::ShadingModel::Eye:
+        return SurfaceFlowBit(SurfaceFlow::Eye);
+    case rocks::ShadingModel::SingleLayerWater:
+        return SurfaceFlowBit(SurfaceFlow::SingleLayerWater);
+    default:
+        return SurfaceFlowBit(SurfaceFlow::Slab);
+    }
+}
+
+// 영역 쓰임의 흐르는 종류다.
+uint16 UsageFlow(SurfaceUsage usage) noexcept {
+    switch (usage) {
+    case SurfaceUsage::LightFunction:
+        return SurfaceFlowBit(SurfaceFlow::LightFunction);
+    case SurfaceUsage::PostProcess:
+        return SurfaceFlowBit(SurfaceFlow::PostProcess);
+    case SurfaceUsage::UserInterface:
+        return SurfaceFlowBit(SurfaceFlow::UserInterface);
+    case SurfaceUsage::Decal:
+        return SurfaceFlowBit(SurfaceFlow::Decal);
+    case SurfaceUsage::Volume:
+        return SurfaceFlowBit(SurfaceFlow::VolumetricFogCloud);
+    case SurfaceUsage::Surface:
+        break;
+    }
+
+    return SurfaceFlowBit(SurfaceFlow::Unlit);
+}
+
 // 표면 출력이다.
 Result<void> EmitSurface(LoweringContext& context, const SurfaceRecord& record) noexcept {
     auto surface = context.MakeSurface(record);
@@ -155,8 +200,10 @@ Result<void> EmitSurface(LoweringContext& context, const SurfaceRecord& record) 
     return context.Output("Result", surface.Value());
 }
 
-// 값이 있는 profile 속성은 선행(MPQ-SubsurfaceProfile)이 없어 그 노드 자리의 늦은 진단이다.
-Result<bool> ProfilePending(LoweringContext& context, StringView field) noexcept {
+// 값이 있는 profile 속성은 선행(MPQ-SubsurfaceProfile·MPQ-SpecularProfile)이 없어 그 노드 자리의
+// 늦은 진단이다.
+Result<bool> ProfilePending(LoweringContext& context, StringView field,
+                            MaterialPrerequisite prerequisite) noexcept {
     Guid profile;
     auto read = context.ReadAssetReference(field, profile);
     if (!read) {
@@ -168,9 +215,10 @@ Result<bool> ProfilePending(LoweringContext& context, StringView field) noexcept
     }
 
     // TODO(MPQ-SubsurfaceProfile): subsurface profile 에셋이 생기면 profile id를 파라미터로 낸다.
-    auto pending = context.Builder().Pending(
-        IrSurfaceType(), IrPendingKind::PrerequisiteMissing,
-        static_cast<uint8>(MaterialPrerequisite::SubsurfaceProfile), context.Node().id);
+    // TODO(MPQ-SpecularProfile): specular profile 에셋이 생기면 F0·F90에 굽는다(UE
+    // SubstrateBakeSpecularProfileToReflectivity).
+    auto pending = context.Builder().Pending(IrSurfaceType(), IrPendingKind::PrerequisiteMissing,
+                                             static_cast<uint8>(prerequisite), context.Node().id);
     if (!pending) {
         return Result<bool>::Failure(pending.Error());
     }
@@ -195,7 +243,8 @@ Result<void> LowerShadingModel(LoweringContext& context) noexcept {
 
 // UE SubstrateShadingModels(MES:183–796) — 고전 입력이 그대로 지나가는 preset이다(10.3절).
 Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
-    auto profiled = ProfilePending(context, "subsurfaceProfile");
+    auto profiled =
+        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
     if (!profiled || profiled.Value()) {
         return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
     }
@@ -215,6 +264,21 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
         }
 
         record.Field(SurfaceField::ShadingModel) = model.Value();
+        // 픽셀마다 고르는 shading model은 slab 최악 경우이고(UE MES:632–773), 닿는 후보의 전용
+        // BSDF(Hair·Eye·SingleLayerWater)는 연산 아래에서 막는다(6.11절 MS2d2).
+        auto reached = ReachableShadingModels(context.Builder(), model.Value());
+        if (!reached) {
+            return Result<void>::Failure(reached.Error());
+        }
+
+        record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
+        const rocks::ShadingModel special[] = {rocks::ShadingModel::Hair, rocks::ShadingModel::Eye,
+                                               rocks::ShadingModel::SingleLayerWater};
+        for (rocks::ShadingModel candidate : special) {
+            if ((reached.Value() & (1u << static_cast<uint32>(candidate))) != 0) {
+                record.flow |= ClassicFlow(candidate);
+            }
+        }
     } else {
         bool read = false;
         auto model = ShadingModelConstant(context, "shadingModelOverride", read);
@@ -226,6 +290,13 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
         const IrValue& constant = context.Builder().Value(model.Value());
         foliage =
             constant.immediate[0] == static_cast<uint64>(rocks::ShadingModel::TwoSidedFoliage);
+        record.flow = ClassicFlow(static_cast<rocks::ShadingModel>(constant.immediate[0]));
+    }
+
+    if (record.flow == 0) {
+        // 픽셀마다 고르는 shading model은 slab 최악 경우다(UE MES:632–773 — 후보 검사는 연산이
+        // 한다, 6.11절 MS2d2).
+        record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
     }
 
     struct Input {
@@ -269,6 +340,32 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
 
     record.Field(SurfaceField::Normal) = normal.Value();
     record.Field(SurfaceField::Tangent) = tangent.Value();
+    // 얇은 투과·clear coat 아래 노멀이다(UE CompileCommon 기본 0.5·1 — 연산 아래 slab 변환과 MS2d3
+    // 출력이 쓴다).
+    auto transmittance = FloatOr(context, "TransmittanceColor", 3, 0.5f);
+    auto thinCoverage = FloatOr(context, "ThinTranslucentSurfaceCoverage", 1, 1.0f);
+    auto coatConnected = context.IsConnected("ClearCoatNormal");
+    if (!transmittance || !thinCoverage || !coatConnected) {
+        return Result<void>::Failure(!transmittance  ? transmittance.Error()
+                                     : !thinCoverage ? thinCoverage.Error()
+                                                     : coatConnected.Error());
+    }
+
+    if (transmittance.Value() == NoIrValue || thinCoverage.Value() == NoIrValue) {
+        return Result<void>::Success();
+    }
+
+    record.thinTransmittance = transmittance.Value();
+    record.thinCoverage = thinCoverage.Value();
+    if (coatConnected.Value()) {
+        auto coat = BasisOr(context, "ClearCoatNormal", "VertexNormal");
+        if (!coat || coat.Value() == NoIrValue) {
+            return coat ? Result<void>::Success() : Result<void>::Failure(coat.Error());
+        }
+
+        record.secondNormal = coat.Value();
+    }
+
     return EmitSurface(context, record);
 }
 
@@ -279,6 +376,7 @@ Result<void> LowerUnlitSurface(LoweringContext& context, SurfaceUsage usage, Str
     SurfaceRecord record;
     record.kind = SurfaceKind::Unlit;
     record.usage = usage;
+    record.flow = UsageFlow(usage);
     const uint32 unlit = static_cast<uint32>(rocks::ShadingModel::Unlit);
     auto model = context.Builder().UIntConstant(Span<const uint32>(&unlit, 1));
     if (!model) {
@@ -374,6 +472,7 @@ Result<void> LowerSurfaceVolumetricFogCloud(LoweringContext& context) noexcept {
     SurfaceRecord record;
     record.kind = SurfaceKind::VolumetricFogCloud;
     record.usage = SurfaceUsage::Volume;
+    record.flow = UsageFlow(SurfaceUsage::Volume);
     const uint32 number = static_cast<uint32>(emissiveOnly ? rocks::ShadingModel::Unlit
                                                            : rocks::ShadingModel::DefaultLit);
     auto model = context.Builder().UIntConstant(Span<const uint32>(&number, 1));
@@ -438,7 +537,14 @@ Result<void> LowerSurfaceToDecal(LoweringContext& context) noexcept {
     }
 
     const SurfaceRecord* inner = context.SurfaceOf(child.Value());
-    if (inner == nullptr || inner->kind != SurfaceKind::Classic) {
+    if (inner != nullptr && (inner->flow & SurfaceFlowBit(SurfaceFlow::Decal)) != 0) {
+        return context.Error(MaterialDiagnosticCode::UnsupportedCapability, "DecalMaterial",
+                             "Substrate Convert To Decal node must be the root of a parameter "
+                             "blending sub tree: no more Substrate operations can be applied a "
+                             "over its output.");
+    }
+
+    if (inner == nullptr || inner->flow != SurfaceFlowBit(SurfaceFlow::Slab)) {
         return context.Error(MaterialDiagnosticCode::UnsupportedCapability, "DecalMaterial",
                              "Substrate Convert To Decal node must receive SubstrateData a "
                              "parameter blended Substrate material sub tree.");
@@ -452,8 +558,398 @@ Result<void> LowerSurfaceToDecal(LoweringContext& context) noexcept {
     SurfaceRecord record;
     record.kind = SurfaceKind::Decal;
     record.usage = SurfaceUsage::Decal;
-    record.child = child.Value();
-    record.coverage = coverage.Value();
+    record.flow = UsageFlow(SurfaceUsage::Decal);
+    record.children[0] = child.Value();
+    record.operand = coverage.Value();
+    return EmitSurface(context, record);
+}
+
+// 입력 묶음 하나를 FloatOr로 읽는다. 위쪽 오류면 false다.
+struct SurfaceInput {
+    StringView key;
+    uint8 width;
+    float fallback;
+    IrValueId* out;
+};
+
+Result<bool> ReadSurfaceInputs(LoweringContext& context, Span<const SurfaceInput> inputs) noexcept {
+    for (const SurfaceInput& input : inputs) {
+        auto value = FloatOr(context, input.key, input.width, input.fallback);
+        if (!value) {
+            return Result<bool>::Failure(value.Error());
+        }
+
+        if (value.Value() == NoIrValue) {
+            return Result<bool>::Success(false);
+        }
+
+        *input.out = value.Value();
+    }
+
+    return Result<bool>::Success(true);
+}
+
+// 기저 입력 둘(노멀·tangent)을 읽는다.
+Result<bool> ReadBasis(LoweringContext& context, StringView normalKey, StringView normalDefault,
+                       IrValueId& normal, StringView tangentKey, IrValueId& tangent) noexcept {
+    auto n = BasisOr(context, normalKey, normalDefault);
+    if (!n) {
+        return Result<bool>::Failure(n.Error());
+    }
+
+    if (n.Value() == NoIrValue) {
+        return Result<bool>::Success(false);
+    }
+
+    normal = n.Value();
+    if (tangentKey.IsEmpty()) {
+        return Result<bool>::Success(true);
+    }
+
+    auto t = BasisOr(context, tangentKey, "VertexTangent");
+    if (!t) {
+        return Result<bool>::Failure(t.Error());
+    }
+
+    if (t.Value() == NoIrValue) {
+        return Result<bool>::Success(false);
+    }
+
+    tangent = t.Value();
+    return Result<bool>::Success(true);
+}
+
+// 연결된 때만 기저 값(secondNormal)이다.
+Result<bool> ReadSecondNormal(LoweringContext& context, StringView key, IrValueId& out) noexcept {
+    auto connected = context.IsConnected(key);
+    if (!connected) {
+        return Result<bool>::Failure(connected.Error());
+    }
+
+    if (!connected.Value()) {
+        return Result<bool>::Success(true);
+    }
+
+    auto normal = BasisOr(context, key, "VertexNormal");
+    if (!normal) {
+        return Result<bool>::Failure(normal.Error());
+    }
+
+    out = normal.Value();
+    return Result<bool>::Success(normal.Value() != NoIrValue);
+}
+
+// shading model 상수 칸이다.
+Result<IrValueId> ModelConstant(LoweringContext& context, rocks::ShadingModel model) noexcept {
+    const uint32 number = static_cast<uint32>(model);
+    return context.Builder().UIntConstant(Span<const uint32>(&number, 1));
+}
+
+// UE SubstrateSlabBSDF(MES:815–1314) — 입력에 UE 단순화를 적용한 slab 기록이다(접을 때 두께·층
+// 위치로 slab이 된다, 6.11절 MS2d2).
+Result<void> LowerSurfaceSlab(LoweringContext& context) noexcept {
+    auto profiled =
+        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
+    if (!profiled || profiled.Value()) {
+        return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
+    }
+
+    auto specular =
+        ProfilePending(context, "specularProfile", MaterialPrerequisite::SpecularProfile);
+    if (!specular || specular.Value()) {
+        return specular ? Result<void>::Success() : Result<void>::Failure(specular.Error());
+    }
+
+    int64 type = static_cast<int64>(SubsurfaceType::Diffusion);
+    auto typeRead = context.ReadInteger("subSurfaceType", type, type);
+    if (!typeRead || !typeRead.Value()) {
+        return typeRead ? Result<void>::Success() : Result<void>::Failure(typeRead.Error());
+    }
+
+    SurfaceRecord record;
+    record.kind = SurfaceKind::Slab;
+    record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
+    SurfaceSlab& slab = record.slab;
+    const SurfaceInput inputs[] = {
+        {"DiffuseAlbedo", 3, SurfaceDefaultDiffuseAlbedo, &slab[SlabValue::DiffuseAlbedo]},
+        {"F0", 3, SurfaceDefaultF0, &slab[SlabValue::F0]},
+        {"F90", 3, 1.0f, &slab[SlabValue::F90]},
+        {"Roughness", 1, SurfaceDefaultRoughness, &slab[SlabValue::Roughness]},
+        {"Anisotropy", 1, 0.0f, &slab[SlabValue::Anisotropy]},
+        {"SSSMFPScale", 1, 1.0f, &slab[SlabValue::RadiusScale]},
+        {"SSSPhaseAnisotropy", 1, 0.0f, &slab[SlabValue::PhaseAnisotropy]},
+        {"EmissiveColor", 3, 0.0f, &slab[SlabValue::Emissive]},
+        {"SecondRoughness", 1, 0.0f, &slab[SlabValue::HazeRoughness]},
+        {"SecondRoughnessWeight", 1, 0.0f, &slab[SlabValue::HazeWeight]},
+        {"FuzzAmount", 1, 0.0f, &slab[SlabValue::FuzzAmount]},
+        {"FuzzColor", 3, 0.0f, &slab[SlabValue::FuzzColor]},
+    };
+    auto read = ReadSurfaceInputs(context, inputs);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    // MFP는 subSurfaceType이 None이면 0이다(MES:898–926). 연결되지 않았으면 SSS가 없다.
+    auto mfpConnected = context.IsConnected("SSSMFP");
+    if (!mfpConnected) {
+        return Result<void>::Failure(mfpConnected.Error());
+    }
+
+    const bool sss = mfpConnected.Value() && type != static_cast<int64>(SubsurfaceType::None);
+    auto mfp = FloatOr(context, "SSSMFP", 3, 0.0f);
+    if (mfp && !sss) {
+        const float zeros[] = {0.0f, 0.0f, 0.0f};
+        mfp = context.FloatConstant(Span<const float>(zeros, 3), StringView());
+    }
+
+    if (!mfp || mfp.Value() == NoIrValue) {
+        return mfp ? Result<void>::Success() : Result<void>::Failure(mfp.Error());
+    }
+
+    slab[SlabValue::MeanFreePath] = mfp.Value();
+    record.subsurfaceType = sss ? static_cast<uint32>(type) : 0u;
+    // FuzzRoughness는 연결이 없으면 Roughness다(MES:893).
+    auto fuzzConnected = context.IsConnected("FuzzRoughness");
+    if (!fuzzConnected) {
+        return Result<void>::Failure(fuzzConnected.Error());
+    }
+
+    slab[SlabValue::FuzzRoughness] = slab[SlabValue::Roughness];
+    if (fuzzConnected.Value()) {
+        auto fuzz = FloatOr(context, "FuzzRoughness", 1, SurfaceDefaultRoughness);
+        if (!fuzz || fuzz.Value() == NoIrValue) {
+            return fuzz ? Result<void>::Success() : Result<void>::Failure(fuzz.Error());
+        }
+
+        slab[SlabValue::FuzzRoughness] = fuzz.Value();
+    }
+
+    auto basis = ReadBasis(context, "Normal", "VertexNormal", slab[SlabValue::Normal], "Tangent",
+                           slab[SlabValue::Tangent]);
+    if (!basis || !basis.Value()) {
+        return basis ? Result<void>::Success() : Result<void>::Failure(basis.Error());
+    }
+
+    // glint는 Rocks 렌더러에 없으므로 UE 미지원 경로처럼 F0·F90에 굽는다(S:1758–1768).
+    auto glintConnected = context.IsConnected("GlintValue");
+    if (!glintConnected) {
+        return Result<void>::Failure(glintConnected.Error());
+    }
+
+    if (glintConnected.Value()) {
+        auto glint = FloatOr(context, "GlintValue", 1, 1.0f);
+        if (!glint || glint.Value() == NoIrValue) {
+            return glint ? Result<void>::Success() : Result<void>::Failure(glint.Error());
+        }
+
+        auto coverage = context.Unary(IrOp::Saturate, glint.Value(), NumberRule::FloatOnly);
+        if (!coverage) {
+            return Result<void>::Failure(coverage.Error());
+        }
+
+        const SlabValue baked[] = {SlabValue::F0, SlabValue::F90};
+        for (SlabValue value : baked) {
+            auto scaled = context.Binary(IrOp::Multiply, slab[value], coverage.Value(),
+                                         NumberRule::FloatOnly);
+            if (!scaled) {
+                return Result<void>::Failure(scaled.Error());
+            }
+
+            slab[value] = scaled.Value();
+        }
+    }
+
+    auto simple = context.Builder().BoolConstant(Span<const bool>(&SurfaceFalse, 1));
+    if (!simple) {
+        return Result<void>::Failure(simple.Error());
+    }
+
+    slab[SlabValue::SimpleClearCoat] = simple.Value();
+    return EmitSurface(context, record);
+}
+
+// UE SubstrateSimpleClearCoatBSDF(MES:1318–1513) — HazeRoughness·HazeWeight가 clear coat인
+// slab이다.
+Result<void> LowerSurfaceSimpleClearCoat(LoweringContext& context) noexcept {
+    SurfaceRecord record;
+    record.kind = SurfaceKind::Slab;
+    record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
+    SurfaceSlab& slab = record.slab;
+    const SurfaceInput inputs[] = {
+        {"DiffuseAlbedo", 3, SurfaceDefaultDiffuseAlbedo, &slab[SlabValue::DiffuseAlbedo]},
+        {"F0", 3, SurfaceDefaultF0, &slab[SlabValue::F0]},
+        {"Roughness", 1, SurfaceDefaultRoughness, &slab[SlabValue::Roughness]},
+        {"ClearCoatCoverage", 1, 1.0f, &slab[SlabValue::HazeWeight]},
+        {"ClearCoatRoughness", 1, SurfaceDefaultClearCoatRoughness,
+         &slab[SlabValue::HazeRoughness]},
+        {"EmissiveColor", 3, 0.0f, &slab[SlabValue::Emissive]},
+    };
+    auto read = ReadSurfaceInputs(context, inputs);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    IrValueId unused = NoIrValue;
+    auto basis =
+        ReadBasis(context, "Normal", "VertexNormal", slab[SlabValue::Normal], StringView(), unused);
+    if (!basis || !basis.Value()) {
+        return basis ? Result<void>::Success() : Result<void>::Failure(basis.Error());
+    }
+
+    auto second = ReadSecondNormal(context, "BottomNormal", record.secondNormal);
+    if (!second || !second.Value()) {
+        return second ? Result<void>::Success() : Result<void>::Failure(second.Error());
+    }
+
+    const float ones[] = {1.0f, 1.0f, 1.0f};
+    const float zeros[] = {0.0f, 0.0f, 0.0f};
+    auto one3 = context.FloatConstant(Span<const float>(ones, 3), StringView());
+    auto zero3 = context.FloatConstant(Span<const float>(zeros, 3), StringView());
+    auto one = context.FloatScalar(1.0f);
+    auto zero = context.FloatScalar(0.0f);
+    auto tangent = context.ContextValue("VertexTangent");
+    auto simple = context.Builder().BoolConstant(Span<const bool>(&SurfaceTrue, 1));
+    if (!one3 || !zero3 || !one || !zero || !tangent || !simple) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    slab[SlabValue::F90] = one3.Value();
+    slab[SlabValue::Anisotropy] = zero.Value();
+    slab[SlabValue::Tangent] = tangent.Value();
+    slab[SlabValue::MeanFreePath] = zero3.Value();
+    slab[SlabValue::RadiusScale] = one.Value();
+    slab[SlabValue::PhaseAnisotropy] = zero.Value();
+    slab[SlabValue::FuzzAmount] = zero.Value();
+    slab[SlabValue::FuzzColor] = zero3.Value();
+    slab[SlabValue::FuzzRoughness] = slab[SlabValue::Roughness];
+    slab[SlabValue::SimpleClearCoat] = simple.Value();
+    return EmitSurface(context, record);
+}
+
+// UE SubstrateHairBSDF(MES:2120–2220) — 고전 Hair 칸이다(normal은 hair tangent — MES:2137).
+Result<void> LowerSurfaceHair(LoweringContext& context) noexcept {
+    SurfaceRecord record;
+    record.kind = SurfaceKind::Hair;
+    record.flow = SurfaceFlowBit(SurfaceFlow::Hair);
+    const SurfaceInput inputs[] = {
+        {"BaseColor", 3, 0.0f, &record.Field(SurfaceField::BaseColor)},
+        {"Scatter", 1, 0.0f, &record.Field(SurfaceField::Metallic)},
+        {"Specular", 1, SurfaceDefaultSpecular, &record.Field(SurfaceField::Specular)},
+        {"Roughness", 1, SurfaceDefaultRoughness, &record.Field(SurfaceField::Roughness)},
+        {"Backlit", 1, 0.0f, &record.Field(SurfaceField::CustomData0)},
+        {"EmissiveColor", 3, 0.0f, &record.Field(SurfaceField::Emissive)},
+    };
+    auto read = ReadSurfaceInputs(context, inputs);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    IrValueId unused = NoIrValue;
+    auto basis = ReadBasis(context, "Tangent", "VertexTangent", record.Field(SurfaceField::Normal),
+                           StringView(), unused);
+    if (!basis || !basis.Value()) {
+        return basis ? Result<void>::Success() : Result<void>::Failure(basis.Error());
+    }
+
+    auto model = ModelConstant(context, rocks::ShadingModel::Hair);
+    if (!model) {
+        return Result<void>::Failure(model.Error());
+    }
+
+    record.Field(SurfaceField::ShadingModel) = model.Value();
+    return EmitSurface(context, record);
+}
+
+// UE SubstrateEyeBSDF(MES:2222–2342) — 고전 Eye 칸이다(CorneaNormal 기본은 UE처럼 정점
+// tangent — MES:2237, IrisNormal은 MS2d3 ClearCoatBottomNormal 출력).
+Result<void> LowerSurfaceEye(LoweringContext& context) noexcept {
+    auto profiled =
+        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
+    if (!profiled || profiled.Value()) {
+        return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
+    }
+
+    SurfaceRecord record;
+    record.kind = SurfaceKind::Eye;
+    record.flow = SurfaceFlowBit(SurfaceFlow::Eye);
+    const SurfaceInput inputs[] = {
+        {"DiffuseColor", 3, 0.0f, &record.Field(SurfaceField::BaseColor)},
+        {"Roughness", 1, SurfaceDefaultRoughness, &record.Field(SurfaceField::Roughness)},
+        {"IrisMask", 1, 0.0f, &record.Field(SurfaceField::CustomData0)},
+        {"IrisDistance", 1, 0.0f, &record.Field(SurfaceField::CustomData1)},
+        {"EmissiveColor", 3, 0.0f, &record.Field(SurfaceField::Emissive)},
+    };
+    auto read = ReadSurfaceInputs(context, inputs);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    IrValueId unused = NoIrValue;
+    auto cornea = ReadBasis(context, "CorneaNormal", "VertexTangent",
+                            record.Field(SurfaceField::Normal), StringView(), unused);
+    if (!cornea || !cornea.Value()) {
+        return cornea ? Result<void>::Success() : Result<void>::Failure(cornea.Error());
+    }
+
+    auto plane = ReadBasis(context, "IrisPlaneNormal", "VertexNormal",
+                           record.Field(SurfaceField::Tangent), StringView(), unused);
+    if (!plane || !plane.Value()) {
+        return plane ? Result<void>::Success() : Result<void>::Failure(plane.Error());
+    }
+
+    auto iris = ReadSecondNormal(context, "IrisNormal", record.secondNormal);
+    if (!iris || !iris.Value()) {
+        return iris ? Result<void>::Success() : Result<void>::Failure(iris.Error());
+    }
+
+    auto specular = context.FloatScalar(SurfaceEyeSpecular);
+    auto metallic = context.FloatScalar(0.0f);
+    auto model = ModelConstant(context, rocks::ShadingModel::Eye);
+    if (!specular || !metallic || !model) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    record.Field(SurfaceField::Specular) = specular.Value();
+    record.Field(SurfaceField::Metallic) = metallic.Value();
+    record.Field(SurfaceField::ShadingModel) = model.Value();
+    return EmitSurface(context, record);
+}
+
+// UE SubstrateSingleLayerWaterBSDF(MES:2345–2465) — 고전 SingleLayerWater 칸이다(metallic은 UE
+// 내보내기처럼 0 — S:3965, 물 계수는 MS2d3 출력).
+Result<void> LowerSurfaceSingleLayerWater(LoweringContext& context) noexcept {
+    SurfaceRecord record;
+    record.kind = SurfaceKind::SingleLayerWater;
+    record.flow = SurfaceFlowBit(SurfaceFlow::SingleLayerWater);
+    IrValueId metallic = NoIrValue;
+    const SurfaceInput inputs[] = {
+        {"BaseColor", 3, 0.0f, &record.Field(SurfaceField::BaseColor)},
+        {"Metallic", 1, 0.0f, &metallic},
+        {"Specular", 1, SurfaceDefaultSpecular, &record.Field(SurfaceField::Specular)},
+        {"Roughness", 1, SurfaceDefaultRoughness, &record.Field(SurfaceField::Roughness)},
+        {"EmissiveColor", 3, 0.0f, &record.Field(SurfaceField::Emissive)},
+        {"TopMaterialOpacity", 1, 0.0f, &record.Field(SurfaceField::Opacity)},
+    };
+    auto read = ReadSurfaceInputs(context, inputs);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    IrValueId unused = NoIrValue;
+    auto basis = ReadBasis(context, "Normal", "VertexNormal", record.Field(SurfaceField::Normal),
+                           StringView(), unused);
+    if (!basis || !basis.Value()) {
+        return basis ? Result<void>::Success() : Result<void>::Failure(basis.Error());
+    }
+
+    auto zero = context.FloatScalar(0.0f);
+    auto model = ModelConstant(context, rocks::ShadingModel::SingleLayerWater);
+    if (!zero || !model) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    record.Field(SurfaceField::Metallic) = zero.Value();
+    record.Field(SurfaceField::ShadingModel) = model.Value();
     return EmitSurface(context, record);
 }
 
@@ -466,6 +962,11 @@ constexpr LoweringEntry SurfaceEntries[] = {
     {"Material.SurfaceUserInterface", &LowerSurfaceUserInterface},
     {"Material.SurfaceVolumetricFogCloud", &LowerSurfaceVolumetricFogCloud},
     {"Material.SurfaceToDecal", &LowerSurfaceToDecal},
+    {"Material.SurfaceSlab", &LowerSurfaceSlab},
+    {"Material.SurfaceSimpleClearCoat", &LowerSurfaceSimpleClearCoat},
+    {"Material.SurfaceHair", &LowerSurfaceHair},
+    {"Material.SurfaceEye", &LowerSurfaceEye},
+    {"Material.SurfaceSingleLayerWater", &LowerSurfaceSingleLayerWater},
 };
 
 } // namespace
