@@ -273,6 +273,10 @@ const char* ClipIssueName(ClipIssue issue) noexcept {
         return "TargetFrameRateTooHigh";
     case ClipIssue::IncompatibleTargetFrameRate:
         return "IncompatibleTargetFrameRate";
+    case ClipIssue::TrackBoneIndex:
+        return "TrackBoneIndex";
+    case ClipIssue::DuplicateTrackBone:
+        return "DuplicateTrackBone";
     case ClipIssue::UnknownBoneTrack:
         return "UnknownBoneTrack";
     }

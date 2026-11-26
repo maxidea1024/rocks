@@ -114,7 +114,10 @@ enum class ClipIssue : uint8 {
                             // 덮어쓰기 번호, 기본이면 ClipNoIndex)
     // 쿠킹 변환(BuildClipPlayback).
     IncompatibleTargetFrameRate, // frameCount × 목표/원본이 정수가 아니거나 표본이 상한 초과
-    UnknownBoneTrack             // 경고: 트랙 본이 스켈레톤 본·가상 본에 없음
+    UnknownBoneTrack,            // 경고: 트랙 본이 스켈레톤 본·가상 본에 없음
+    // 쿠킹 로드의 스켈레톤 대조(ValidateCookedAnimationClip — 7.6.1절 4, CorruptPackage).
+    TrackBoneIndex,    // trackToBone 본 번호가 스켈레톤 본 수 이상(index = 트랙)
+    DuplicateTrackBone // trackToBone의 같은 본이 두 트랙에 있음(index = 트랙, related = 앞 트랙)
 };
 
 // 클립 진단이 위치를 가리키지 않을 때의 번호다.

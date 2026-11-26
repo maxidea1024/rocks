@@ -59,10 +59,12 @@ public:
 
     ~AudioRenderThread() noexcept;
 
-    // 명령 링과 pending 배열을 할당한다. mixer·ring은 이 객체보다 오래 살아야 한다. 실패: 이미
-    // 초기화됨은 InvalidArgument, 그 밖은 allocator 오류(상태는 그대로).
-    Result<void> Initialize(Allocator& allocator, AudioMixer& mixer,
-                            AudioOutputRing& ring) noexcept;
+    // 명령 링과 pending 배열을 할당한다. mixer·ring은 이 객체보다 오래 살아야 한다.
+    // commandCapacity는 명령 링·pending 칸 수다(2의 거듭제곱 2 이상 — 시험이 포화를 재현할 때만
+    // 줄인다). 실패: 이미 초기화됨·잘못된 용량은 InvalidArgument, 그 밖은 allocator 오류(상태는
+    // 그대로).
+    Result<void> Initialize(Allocator& allocator, AudioMixer& mixer, AudioOutputRing& ring,
+                            uint32 commandCapacity = AudioRtCommandCapacity) noexcept;
 
     // 할당을 돌려준다(스레드가 멈춘 뒤).
     void Shutdown() noexcept;
@@ -106,6 +108,7 @@ private:
     BoundedSpscQueue<AudioRtCommand> commands_;
     AudioRtCommand* pending_ = nullptr;
     uint32 pendingCount_ = 0;
+    uint32 pendingCapacity_ = 0;
     Allocator* allocator_ = nullptr;
     AudioMixer* mixer_ = nullptr;
     AudioOutputRing* ring_ = nullptr;

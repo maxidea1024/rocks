@@ -32,6 +32,9 @@ struct AudioOutputDeviceOptions {
     NullAudioOutputMode nullMode = NullAudioOutputMode::Timer;
     // 출력 링 칸 수 요청값이다(0이면 계산값, 3.2절 audio.mixer.buffercount).
     uint32 requestedBufferCount = 0;
+    // AudioRT 명령 링 칸 수다(2의 거듭제곱, 기본 AudioRtCommandCapacity). 시험이 링 포화를 재현할
+    // 때만 줄인다.
+    uint32 commandCapacity = AudioRtCommandCapacity;
 };
 
 // 열린 장치 정보다(로그·진단).
