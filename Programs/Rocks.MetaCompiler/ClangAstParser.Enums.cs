@@ -188,6 +188,7 @@ internal sealed partial class ClangAstParser
             IsEnum = true,
             Underlying = underlying,
             FlagsEnum = spec.Flags,
+            Script = spec.ScriptType ? new(true, false, false, false) : ScriptTypeSpec.None,
             ToolPrefix = spec.ToolPrefix,
             Enumerators = enumerators,
             BindsSpelling = spec.Binds,

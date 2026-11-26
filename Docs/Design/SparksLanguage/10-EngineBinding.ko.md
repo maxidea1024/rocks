@@ -33,7 +33,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 예시의 이름 | 현재 상태 | 선행 |
 |---|---|---|
 | `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_GENERATED_BODY`, `SaveGame`·`ReadOnly`·`Name =` | 있음 | — |
-| `ScriptType`·`NotScriptType`, `ScriptExtensible`·`NotScriptExtensible`, `ScriptReadOnly`·`ScriptWritable`, `ScriptName` | 없음 | 신설(EI1a — SparksBinding 2절 B1) |
+| `ScriptType`·`NotScriptType`, `ScriptExtensible`·`NotScriptExtensible`, `ScriptReadOnly`·`ScriptWritable`, `ScriptName` | 있음(EI1a — SparksBinding 2절 B1·6절) | — |
 | `Edit`(편집 메타), `Params` | 없음 | UiToolkit CU1·CU3 |
 | `ROCKS_FUNCTION`과 `Lane`·`Effects` 등 | 없음 | CU2(CVar 문서의 `Cheat`·`Authority`·`Help`와 지정자 이름 공간을 함께 정한다) |
 | `Replicated` | 없음 | 네트워크 단계(RX 0절 범위 밖) |

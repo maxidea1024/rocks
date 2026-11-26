@@ -456,7 +456,8 @@ private:
         if (knownKind) {
             const SchemaTypeKind k = type.kind;
             const bool objectLike = k == SchemaTypeKind::Object || k == SchemaTypeKind::Asset;
-            allowBase = objectLike || k == SchemaTypeKind::Interface;
+            // struct 기반은 필드만 물려준다(변환·대입 없음 — SL 10.2절 EI1a).
+            allowBase = objectLike || k == SchemaTypeKind::Interface || k == SchemaTypeKind::Struct;
             allowExtensible = objectLike;
             allowConstructible = k == SchemaTypeKind::Struct;
             allowFields = objectLike || k == SchemaTypeKind::Struct;
@@ -469,7 +470,7 @@ private:
             }
 
             if (!allowBase) {
-                RejectKey(object, "base", "object, asset and interface");
+                RejectKey(object, "base", "object, asset, interface and struct");
             }
 
             if (!allowExtensible) {

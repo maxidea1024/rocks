@@ -371,6 +371,65 @@ TEST(SparksTypes_EngineStructDefaults) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 엔진 struct의 `base`(SL 10.2절 — EI1a): 기반 struct의 필드를 읽고, 생성과 기본값 판정은 기반
+// 필드까지 본다(`Thin`은 자기 필드에 기본값이 있어도 기반 `Owner` 때문에 기본값이 없다). struct
+// 사이에는 변환이 없고, 기반 종류가 다르거나 순환이면 S1120이다.
+TEST(SparksTypes_EngineStructBase) {
+    SystemAllocator allocator;
+    constexpr StringView Schema =
+        R"({ "format": 1, "package": "Rocks", "module": "Engine", "types": [
+{ "name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object" },
+{ "name": "Base", "id": "5a7e0000000000000000000000000002", "kind": "struct", "fields": [ { "name": "Count", "id": "5a7e0000000000000000000000000201", "type": "int32" }, { "name": "Owner", "id": "5a7e0000000000000000000000000202", "type": "Actor" } ] },
+{ "name": "Leaf", "id": "5a7e0000000000000000000000000003", "kind": "struct", "base": "Base", "fields": [ { "name": "Weight", "id": "5a7e0000000000000000000000000301", "type": "float32" }, { "name": "Tip", "id": "5a7e0000000000000000000000000302", "type": "Actor" } ] },
+{ "name": "Holder", "id": "5a7e0000000000000000000000000004", "kind": "object", "fields": [ { "name": "Item", "id": "5a7e0000000000000000000000000401", "type": "Leaf" } ] },
+{ "name": "Wrong", "id": "5a7e0000000000000000000000000005", "kind": "struct", "base": "Holder" },
+{ "name": "Thin", "id": "5a7e0000000000000000000000000006", "kind": "struct", "base": "Base", "fields": [ { "name": "Scale", "id": "5a7e0000000000000000000000000601", "type": "float32" } ] },
+{ "name": "LoopA", "id": "5a7e0000000000000000000000000007", "kind": "struct", "base": "LoopB" },
+{ "name": "LoopB", "id": "5a7e0000000000000000000000000008", "kind": "struct", "base": "LoopA" }
+] })";
+    {
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Schema(Schema));
+        const uint32 game = fixture.Package("Game");
+        fixture.Module(game, "Game", "Main.spark",
+                       "fn Read(h: Holder): int32 {\n"            // 1
+                       "    let leaf: Leaf = h.Item;\n"           // 2
+                       "    let weight: float32 = leaf.Weight;\n" // 3
+                       "    let owner: Actor = leaf.Owner;\n"     // 4
+                       "    _ = weight; _ = owner;\n"             // 5
+                       "    return leaf.Count;\n"                 // 6
+                       "}\n"                                      // 7
+                       "fn Make(a: Actor): Leaf {\n"              // 8
+                       "    return Leaf(Owner: a, Tip: a);\n"     // 9
+                       "}\n"                                      // 10
+                       "fn Missing(): Leaf {\n"                   // 11
+                       "    return Leaf(Weight: 1.0);\n"          // 12
+                       "}\n"                                      // 13
+                       "fn Upcast(l: Leaf): Base {\n"             // 14
+                       "    return l;\n"                          // 15
+                       "}\n"                                      // 16
+                       "struct Box { var Inner: Thin; }\n"        // 17
+                       "fn MakeBox(): Box {\n"                    // 18
+                       "    return Box();\n"                      // 19
+                       "}\n");                                    // 20
+        REQUIRE(fixture.Check());
+        REQUIRE(fixture.diagnostics.Count() == 5);
+        CHECK(fixture.Says(0, C::ArgumentForm, 12, 12, "Fields 'Owner', 'Tip' must be given.",
+                           "Pass it, as in 'Field: value'."));
+        CHECK(fixture.Says(1, C::TypeMismatch, 15, 12,
+                           "A value of type 'Leaf' cannot be used as 'Base'.",
+                           "Use a value of that type."));
+        CHECK(fixture.Says(2, C::ArgumentForm, 19, 12, "Field 'Inner' must be given.",
+                           "Pass it, as in 'Field: value'."));
+        CHECK(fixture.Says(3, C::InvalidBindingSchema, 6, 88,
+                           "Base type 'Holder' is not a binding schema type of the same kind.",
+                           "Regenerate the binding schema; do not edit it by hand."));
+        CHECK(fixture.Says(4, C::InvalidBindingSchema, 8, 88, "The base types form a cycle.",
+                           "Regenerate the binding schema; do not edit it by hand."));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // 두 번째 시험 프로그램은 진단이 없다(퍼즈의 출발점이 올바른 프로그램이다).
 TEST(SparksTypes_LiteralProgramIsClean) {
     SystemAllocator allocator;
