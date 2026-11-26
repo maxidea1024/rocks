@@ -110,7 +110,21 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 - `AInputQueue_finishEvent`에 처리한 이벤트는 1, 처리하지 않은 것은 0을 준다. 볼륨 키는 0이어서 OS가 처리한다. Back은 1(소비 — TouchInput 4.2절)이다.
 - `Window::PumpEvents`(게임 스레드)는 데스크톱과 같은 모양으로 큐를 호스트 `InputQueue`로 옮긴다. 넘쳐서 버린 수는 손실로 센다.
 - **터치(TI1 반영, 2026-11-24):** `ACTION_DOWN`·`POINTER_DOWN`은 `TouchIndexAllocator`가 `pointerId`에 번호를 배정해 `TouchBegan`, `MOVE`는 그 이벤트의 모든 포인터의 `TouchMoved`, `UP`·`POINTER_UP`은 `TouchEnded`, `CANCEL`은 닿아 있던 모든 손가락의 취소 끝이다. 배정기의 프레임 경계는 `PumpEvents`다. 압력은 `AMotionEvent_getPressure`를 0–1로 자른 값이다. `hasForce`는 입력 장치마다 한 번 `InputDevice.getDevice(id).getMotionRange(AXIS_PRESSURE)`를 JNI로 물어(입력 스레드를 JavaVM에 붙인다) 범위가 있고 폭이 0보다 크면 참이다. 결과는 장치 ID별로 8칸까지 기억한다. adb 주입 이벤트(장치 -1)는 거짓으로 판정되는 것을 확인했고, 실제 터치 장치는 사람 확인이 남았다. 마우스 소스(`AINPUT_SOURCE_MOUSE`)는 마우스 이벤트다. Back은 `Key::Back`으로 넘기고 소비한다.
-- 게임패드(2026-11-24 구현): 입력 스레드가 `AINPUT_SOURCE_GAMEPAD`·`JOYSTICK`의 버튼 키와 축을 프로세스 공용 패드 저장소에 모으고, `GamepadBackend::Poll`(게임 스레드)이 바뀐 패드만 `GamepadState`로 낸다(XInput과 같은 계약). 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 내 edge를 잃지 않는다. 배치는 UE `AndroidGameControllerMapper` 표준이다: A·B·X·Y → South·East·West·North, L1·R1, SELECT → Back, START, THUMBL·THUMBR, DPAD 키·HAT 축 → 방향 버튼, 스틱 X·Y와 Z·RZ(Y는 뒤집음), 트리거는 LTRIGGER·BRAKE와 RTRIGGER·GAS 중 큰 값. 슬롯은 장치 ID 순서다. 연결 해제 감지는 `InputManager` 리스너(Java)가 필요해 남았다 — 그때까지 앉은 패드는 연결된 채다. 에뮬레이터에서 `adb shell input gamepad keyevent KEYCODE_BUTTON_A/B`가 South·East로 Pawn까지 오는 것을 확인했다.
+- 게임패드(2026-11-24 구현): 입력 스레드가 `AINPUT_SOURCE_GAMEPAD`·`JOYSTICK`의 버튼 키와 축을 프로세스 공용 패드 저장소에 모으고, `GamepadBackend::Poll`(게임 스레드)이 바뀐 패드만 `GamepadState`로 낸다(XInput과 같은 계약). 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 내 edge를 잃지 않는다. 배치는 UE `AndroidGameControllerMapper` 표준이다: A·B·X·Y → South·East·West·North, L1·R1, SELECT → Back, START, THUMBL·THUMBR, DPAD 키·HAT 축 → 방향 버튼, 스틱 X·Y와 Z·RZ(Y는 뒤집음), 트리거는 LTRIGGER·BRAKE와 RTRIGGER·GAS 중 큰 값. 슬롯은 장치의 첫 이벤트 때 아래 연결 해제·다시 연결 규칙으로 정한다. 에뮬레이터에서 `adb shell input gamepad keyevent KEYCODE_BUTTON_A/B`가 South·East로 Pawn까지 오는 것을 확인했다.
+- 패드 연결 해제·다시 연결(2026-11-26, AD12):
+  - 확인 요청: 게임 스레드 `GamepadBackend::Poll`이 1초(`GamepadDeviceCheckIntervalMilliseconds` — XInput의 빈 슬롯 확인 간격과 같다)마다 입력 스레드에 장치 확인을 요청하고 looper를 깨운다. 연결된 패드가 없으면 요청하지 않는다.
+  - 확인: JavaVM에 붙은 입력 스레드가 JNI `InputDevice.getDeviceIds()`로 지금 장치 ID 목록을 읽는다. 목록에 없는 연결된 패드는 끊긴 것으로 둔다. 상태는 비우고 `connected = false`다. 다음 `Poll`이 XInput 해제와 같은 `GamepadState` 이벤트를 낸다. 목록을 읽지 못하면(Java 예외·JNI 없음) 아무것도 끊지 않는다.
+  - 다시 연결: 슬롯은 `InputDevice.getDescriptor()`(다시 연결·재부팅에도 같은 값) 해시를 기억한다. 새 장치는 다음 순서로 앉는다.
+    1. 같은 descriptor의 슬롯이다. 연결 중인 슬롯이 먼저다 — 옛 장치가 빠졌는데 장치 확인 전에 새 장치 ID의 이벤트가 왔다. 이어받는다(UE `AndroidInputInterface.cpp` ~1138-1150 "Found input device with same descriptor"가 옛 장치를 지우는 것과 같다). 같은 descriptor는 한 슬롯에만 남는다(앉을 때 늘 그 슬롯을 먼저 찾는다).
+    2. 한 번도 쓰지 않은 슬롯
+    3. 가장 작은 끊긴 슬롯
+  - UE와 다른 점: UE의 ControllerId는 가장 작은 비워진 번호를 다시 쓰고(`AddPendingInputDevice` ~1640-1650), "같은 패드는 같은 플레이어"는 `FInputDeviceId`·`IPlatformInputDeviceMapper`(`MapControllerToPlayer`)가 지킨다. Rocks는 장치 매퍼가 없어 슬롯에 descriptor를 묶고, 다른 패드가 돌아올 자리를 남기려고 빈 슬롯을 먼저 쓴다.
+  - descriptor를 읽지 못하면 "모름"이고 어느 슬롯과도 짝짓지 않는다.
+  - 해제는 최대 약 1초 늦게 보인다. UE 리스너는 바로 알린다 — 다른 점.
+  - 끊긴 슬롯의 진동 상태는 지운다(다시 연결되면 처음부터 쓴다 — XInput과 같다).
+  - 배정 규칙은 순수 클래스 `GamepadSlotTable`(Common)이고 EngineTests로 시험한다.
+  - 해제 뒤 늦게 온 그 장치의 이벤트는 앉히지 않는다(`getDevice`가 null이면 버린다). 앉지 못한 장치 ID(표가 꽉 참·이미 없는 장치)는 기억해 그 장치의 이벤트마다 JNI를 다시 하지 않는다(8개, 슬롯이 끊기면 잊는다).
+  - 한 `Poll` 사이에 끊김과 다시 앉기(이어받기 포함)가 겹치면 슬롯 세대가 바뀐 것으로 알아채고 끊김 상태를 먼저 한 번 낸다(입력 계층이 해제를 놓치지 않게). 그 슬롯의 진동 상태도 지운다. 연결·해제는 Info 로그다(`Gamepad {Slot} connected (input device {Device})`·`Gamepad {Slot} disconnected` — UE도 장치 추가·제거를 로그로 남긴다).
 
 ## 6. 로그·경로·명령줄
 
@@ -165,7 +179,7 @@ mobile은 Android를 먼저 한다(PlatformLayer "모바일 플랫폼"). 지금 
 진행(2026-11-24, x86_64 에뮬레이터 API 35에서 확인):
 - AP1·AP3·AP4: `Sandbox.apk`(Gradle 없이 aapt2·zipalign·apksigner)가 설치·실행되고, 게임 스레드에서 엔진이 돌며 로그가 logcat(tag Rocks)으로 나온다. extra 없이 띄우면 `--engine --window`다.
 - AP2: 창 listener·입력 스레드·창 파괴 gate(호스트 확인)·빈 프레임. 홈 → 복귀(pause·stop·start·resume)에서 gate 시간 초과와 ANR이 없다.
-- AP5: 터치(TI1)·Back·키·게임패드 버튼이 Pawn까지 온다. 패드 연결 해제 감지(Java 리스너)만 남았다.
+- AP5: 터치(TI1)·Back·키·게임패드 버튼이 Pawn까지 온다. 패드 연결 해제·다시 연결은 JNI 장치 목록 확인으로 한다(2026-11-26, 5절). 에뮬레이터에서 `adb shell uinput`으로 만든 USB 패드(장치 15)가 슬롯 0에 앉고, 장치를 없애면 1초 안에 끊기며, 같은 패드가 새 장치 ID(16)로 오면 슬롯 0으로 돌아오는 것을 확인했다. `adb shell input gamepad`의 가상 장치(-1)는 장치 목록에 있어 끊기지 않는다. 실제 패드는 기기가 없어 확인하지 않았다. 패드 진동(2026-11-26)은 입력 스레드가 JNI로 패드 진동자에 쓴다([입력 액션](InputActions/06-Haptics.ko.md) 6.4절, manifest `VIBRATE` 권한).
 - AP6 플랫폼 층: `platform::ApkFileSystem()`(읽기 전용 — Open·Read·Seek·Size·FileExists·Stat·DirectoryExists·파일만 열거, 쓰기 Unsupported, Android 밖은 Unsupported)과 `RegisterApkAssetManager`(Launch 액티비티 층이 onCreate에서 등록), 패키저의 `AndroidPackage.AssetsDirectory` → `assets/` 비압축 저장. Sandbox가 `assets/SandboxProbe.txt`를 읽어 로그로 남기는 것을 확인했다. fd·오프셋 비동기 읽기(`AAsset_openFileDescriptor64`)와 쿠킹 데이터 연결(EngineAssets가 APK에서 매니페스트·패키지를 읽기)은 AssetSystem "VFS(APK)" 후속 항목이 맡는다.
 
 ShaderSystem P13이 막는 SH6(Android 셰이더·그래픽 실행)은 AP4까지 끝나면 시작할 수 있다.
@@ -184,4 +198,5 @@ ShaderSystem P13이 막는 SH6(Android 셰이더·그래픽 실행)은 AP4까지
 | AD8 | `onDestroy`에서 게임 스레드 join 뒤 프로세스를 끝낸다 | 같은 프로세스에서 `onCreate`가 다시 불릴 수 있는데 Rocks 정적 상태는 재진입을 전제로 하지 않는다 |
 | AD10 | `android_native_app_glue` 대신 `ANativeActivity` 콜백을 Launch가 직접 받는다 | glue는 ThirdParty 반입(출처·해시)이 필요하고, glue 스레드가 콜백을 다른 스레드로 넘기는 구조는 Rocks 배치(게임 스레드 분리·제한 시간 있는 창 gate)와 겹친다. looper가 필요한 입력만 입력 스레드에 둔다 |
 | AD11 | APK는 Gradle 없이 SDK 도구(aapt2·zipalign·apksigner)로 만든다 | Java 코드가 없어 Gradle·Android Gradle Plugin(네트워크 내려받기·느린 시작)이 필요 없다. UE는 Gradle을 쓴다. Java가 들어오면 javac·d8 단계를 더한다 |
+| AD12 | 패드 연결 해제는 1초마다 JNI `getDeviceIds`로 확인하고, 다시 연결은 descriptor로 같은 슬롯에 앉힌다(5절) | APK에 Java 코드가 없다(AD11 — 리스너 `InputManager.InputDeviceListener`는 Java 클래스가 필요하다). 확인 주기는 XInput 빈 슬롯 확인과 같다. 버린 대안: Java 리스너(javac·d8 단계와 Java glue — 늦은 알림 1초가 그 비용보다 작다), 입력 스레드 시간 제한 poll(입력 스레드에 시계를 둔다 — 게임 스레드 Poll 주기에 묶는 편이 단순하다) |
 | AD9 | `Window`의 Android 계약 변경(크기 무시 `Create`·세대가 바뀌는 `NativeHandle`·`AcknowledgeSurfaceLost`·surface 알림)은 AP2에서 `Window.h`에 적는다 | 데스크톱 계약(`Window.h:46–47` — 창보다 오래 보관하지 않는 고정 핸들)과 달라지는 부분을 공개 헤더에 명시해야 한다 |
