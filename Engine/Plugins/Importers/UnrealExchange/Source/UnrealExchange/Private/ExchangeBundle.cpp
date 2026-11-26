@@ -6,7 +6,7 @@
 #include <Platform/Memory.h>
 #include <UnrealExchange/ExchangePaths.h>
 
-// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange.ko.md 3절, 10.4절 2–12·16·17번). bundle.json을
+// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange 3절, 10.4절 2–12·16·17번). bundle.json을
 // 묶음 수준으로, 에셋 JSON과 blob을 에셋 수준으로 검증한다.
 
 namespace rocks {

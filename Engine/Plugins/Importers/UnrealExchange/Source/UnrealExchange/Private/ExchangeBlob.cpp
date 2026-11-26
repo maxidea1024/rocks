@@ -5,7 +5,7 @@
 #include <Object/NameField.h>
 #include <Platform/Memory.h>
 
-// blob 파일 검사와 읽기다(Docs/Design/UnrealExchange.ko.md 3.3절, 10.4절 12번). 크기를 먼저 보고,
+// blob 파일 검사와 읽기다(Docs/Design/UnrealExchange 3.3절, 10.4절 12번). 크기를 먼저 보고,
 // 읽는 모든 byte를 SHA-256에 넣으면서 가변 배치(MeshAnimationAssets 3.4.1절)를 함께 파싱한다.
 
 namespace rocks {

@@ -5,7 +5,7 @@
 #include <Core/Text/Unicode.h>
 #include <UnrealExchange/ExchangePaths.h>
 
-// Unreal 교환 임포트 순서다(Docs/Design/UnrealExchange.ko.md 9.1·9.3절, 10.4절 13–15번, 10.5절):
+// Unreal 교환 임포트 순서다(Docs/Design/UnrealExchange 9.1·9.3절, 10.4절 13–15번, 10.5절):
 // --only 닫힘, 기존 에셋 조회, 경로 대응과 겹침, Hard·Build 그래프의 SCC(Core 공용 반복 Tarjan),
 // 단위 깊이·실패 전파.
 

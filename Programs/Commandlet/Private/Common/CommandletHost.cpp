@@ -211,7 +211,7 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 쿠킹 처리기다(텍스처 12.14절, 정적·스킨 메시·애니메이션 클립 — MeshAnimationAssets 13.1절 1).
     ProductCookProcessors cookProcessors;
     assetContext.cookProcessors = {&RegisterProductCookProcessors, &cookProcessors};
-    // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
+    // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);
     // 노드 그래프 명령 문맥은 registry보다 먼저 만들어 오래 산다(헤더 계약).

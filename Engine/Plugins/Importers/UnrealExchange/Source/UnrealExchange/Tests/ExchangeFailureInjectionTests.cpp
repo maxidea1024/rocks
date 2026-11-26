@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 리더·순서의 실패 주입 시험이다(Docs/Design/UnrealExchange.ko.md 12.1절, 10.4절 끝
+// Unreal 교환 리더·순서의 실패 주입 시험이다(Docs/Design/UnrealExchange 12.1절, 10.4절 끝
 // coverage 문단): 진단 목록 할당 실패를 진단을 내는 모든 자리에서 일으키고, 긴 묶음 경로의 경로
 // 조립 할당 실패, 조각 경계 뒤의 읽기 실패, blob 사용 중복·충돌의 조합, 순서 계산의 경계 그래프를
 // 본다.

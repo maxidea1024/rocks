@@ -7,7 +7,7 @@
 #include <UnrealExchange/ExchangeBundle.h>
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 묶음의 임포트 순서다(Docs/Design/UnrealExchange.ko.md 9.3절, 10.4절 13–15번, 10.5절).
+// Unreal 교환 묶음의 임포트 순서다(Docs/Design/UnrealExchange 9.3절, 10.4절 13–15번, 10.5절).
 // 읽은 묶음의 Hard·Build 참조 그래프를 강한 연결 요소(SCC)로 묶어 위상 정렬하고, 에셋마다 Rocks
 // 논리 경로(9.1절)와 기존 에셋(재임포트 대상, 9.2절)을 정한다. 저장 단위(SCC 하나 또는 에셋 하나)는
 // 실행(ExchangeImportRun.h)이 순서대로 임포트한다.

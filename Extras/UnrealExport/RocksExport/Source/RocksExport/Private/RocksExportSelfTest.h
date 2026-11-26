@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-// 플러그인 자기 시험이다(UnrealExchange.ko.md 12.2절). commandlet -SelfTest와 UE Automation 시험
+// 플러그인 자기 시험이다(UnrealExchange 12.2절). commandlet -SelfTest와 UE Automation 시험
 // (RocksExport.*)이 같은 함수를 부른다. 각 함수는 실패 설명을 Errors에 더한다(비어 있으면 통과).
 namespace RocksExportSelfTest
 {

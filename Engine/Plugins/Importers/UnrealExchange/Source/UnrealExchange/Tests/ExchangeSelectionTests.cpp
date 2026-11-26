@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 임포트 계획의 선택·기존 에셋 시험이다(Docs/Design/UnrealExchange.ko.md 10.5절 2–6번):
+// Unreal 교환 임포트 계획의 선택·기존 에셋 시험이다(Docs/Design/UnrealExchange 10.5절 2–6번):
 // --only 닫힘(Hard만, redirect, 범위 밖 직접 선택, 없는 값), 선택과 무관한 경로·겹침(결정성)과 고른
 // 에셋만의 진단·단위, 잘못된 선택, 기존 에셋 대상 경로·길이·겹침 제외, 모호함과 전파, 옛 경로
 // 전달, 조회 오류, 할당 실패.

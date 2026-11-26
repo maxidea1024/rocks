@@ -9,7 +9,7 @@
 #include <UnrealExchange/ExchangeIndexLookup.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// AssetIndex 태그 기반 기존 에셋 조회 시험이다(Docs/Design/UnrealExchange.ko.md 9.2절, 10.5절
+// AssetIndex 태그 기반 기존 에셋 조회 시험이다(Docs/Design/UnrealExchange 9.2절, 10.5절
 // 4번): 지금 경로 태그, 옛 경로로 남은 경로 태그, 옛 경로 목록 태그(지금·옛 경로), 첫 단계 우선,
 // 같은 에셋이 여러 키로 맞음, 모호함(두 에셋·같은 id 두 파일·둘째 단계), 없음, 할당 실패.
 using namespace rocks;

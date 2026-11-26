@@ -70,7 +70,7 @@ enum class AssetDiagnosticCode : uint16 {
     InvalidClipData,
     UnknownBoneTrack,
     EventPropertiesDropped,
-    // Unreal 교환 묶음(UnrealExchange.ko.md 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
+    // Unreal 교환 묶음(UnrealExchange 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
     // CorruptBundle·UnsupportedBundleVersion·UnrealPathTooLong·UnrealPathCollision, 경고
     // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed.
     CorruptBundle,

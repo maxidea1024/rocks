@@ -9,7 +9,7 @@
 #include <Platform/File.h>
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange.ko.md 3절, 10.4절). UE 쪽 RocksExport가 쓴
+// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange 3절, 10.4절). UE 쪽 RocksExport가 쓴
 // `<이름>.rxbundle/` 디렉터리의 bundle.json과 에셋 JSON을 읽어 공통 스키마(3.4·3.5절)·정렬·blob
 // 참조(3.3절)를 검증하고, 에셋마다 종류별 단계(UX2–UX8)가 읽을 settings·data JSON을 넘긴다.
 //

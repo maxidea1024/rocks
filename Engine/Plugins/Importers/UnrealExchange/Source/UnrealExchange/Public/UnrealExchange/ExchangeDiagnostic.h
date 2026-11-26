@@ -7,7 +7,7 @@
 #include <Core/Text/String.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// Unreal 교환 묶음 진단이다(Docs/Design/UnrealExchange.ko.md 10.3·10.4절). 리더(ExchangeBundle.h)와
+// Unreal 교환 묶음 진단이다(Docs/Design/UnrealExchange 10.3·10.4절). 리더(ExchangeBundle.h)와
 // 임포트 순서(ExchangeImportOrder.h)가 진단을 하나씩 쌓고, 호출자(명령·시험)는 끝난 뒤 목록을 본다.
 //
 // 사용 예:

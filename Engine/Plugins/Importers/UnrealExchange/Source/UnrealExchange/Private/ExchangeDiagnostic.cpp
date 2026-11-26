@@ -1,6 +1,6 @@
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 진단 목록이다(Docs/Design/UnrealExchange.ko.md 10.3·10.4절 3번).
+// Unreal 교환 진단 목록이다(Docs/Design/UnrealExchange 10.3·10.4절 3번).
 
 namespace rocks {
 

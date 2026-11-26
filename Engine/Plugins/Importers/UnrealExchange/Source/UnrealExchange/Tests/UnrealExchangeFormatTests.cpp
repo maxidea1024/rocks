@@ -6,7 +6,7 @@
 #include <UnrealExchange/ExchangeDiagnostic.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// Unreal 교환 묶음 형식의 이름표·상수·진단 목록·실수 읽기 시험이다(Docs/Design/UnrealExchange.ko.md
+// Unreal 교환 묶음 형식의 이름표·상수·진단 목록·실수 읽기 시험이다(Docs/Design/UnrealExchange
 // 3.2·3.3·10.3·10.4절). EngineTests가 이 플러그인을 켜고 Tests/를 모은다(BuildTargets 3.9절 BD40).
 using namespace rocks;
 namespace unreal_exchange_format_tests_file {
