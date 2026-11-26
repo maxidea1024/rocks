@@ -100,7 +100,7 @@ SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 
 | SM7 | 다섯 차원·형식별 쿠킹 텍스처 장면 대조(18.1절 완료 기준 3항) | — | 구현(18.5절 7항, 설계 개정 48·구현 개정 49): 6.5절 업로드(RenderBase `CookedTexture.h`), swizzle 셰이더 복제, TextureInspector 정수 엔트리, Sandbox 표시 목록·쿠킹 시험 콘텐츠·장면 대조 — **구현 개정 49** | 6 |
 | SM8 | WorldIntegration 텍스처 컴포넌트(`RenderHandle` 예약 → 프레임 packet) | 모듈 없음 | 다음 단계: 컴포넌트가 참조할 텍스처 에셋 타입이 에셋 세션 산출물로 생긴다. 그 전에 모듈을 만들면 참조 없는 자리표시가 된다(엔진 층 원칙). 이번 단계의 Sandbox 장면은 실행 파일이 직접 만든다 | — |
 | SM9 | RR12 `ParameterBatch` 자원 부분·장치 다중 텍스처 slot | 18.3절 후속 | 구현(9.13절, 설계 개정 50·구현 개정 51): 렌더러 RS0 전에 당겼다(2026-11-26 렌더 세션 순서) | 7 |
-| SM10 | RR13 공유 상수 slot 표 | 18.3절 후속 | 후속 유지(RS0): view 상수 slot이 첫 소비자다 | — |
+| SM10 | RR13 공유 상수 slot 표 | 18.3절 후속 | 기반(표·파이프라인 지도·묶음, 9.14절 개정 52)은 SH3a 뒤에 한다. 렌더러 slot 등록·view마다 묶기는 RS0(view 상수 slot이 첫 소비자다) | — |
 | SM11 | 셰이더 시스템 SH3(파라미터 구조체 P7·생성 HLSL·그래프 파라미터 수집기) | 손으로 쓴 레이아웃 표 | 렌더러 RS0 전으로 옮김: 마일스톤 셰이더(유틸리티·tone map·텍스처 표시)는 루트 상수와 텍스처 하나라 손으로 쓴 표(셰이더 시스템 7.2절 5항)로 충분하다. 생성 구조체의 첫 소비자는 view 상수(SM10)와 머티리얼(MS)이다 | — |
 | SM12 | 셰이더 시스템 SH4(감시 재컴파일 → `ShaderSetSlot::Propose`, 오류 위치, 디버그 심볼) | 런타임 교체(RR8)만 | 렌더러 RS0 전으로 옮김: 교체 경로(RR8)는 끝났고, 감시·재컴파일은 개발 반복 편의라 화면 완료 기준(픽셀 대조·검증 오류 0·Release 컴파일러 없음)에 들지 않는다. 셰이더 수가 늘어나는 RS0에서 이득이 크다 | — |
 | SM13 | 엔진 셰이더 SL1 나머지: `GenerateMips`·`ClearResources`(RR17)·`CopyDepth`·`PlaceholderShaders`·`TextureSamplingHelpers`·`ComputeDispatch`·`WaveOperations` probe·`LutCoordinates`·`ColorMaps` | 없음 | 후속: 쿠킹 텍스처는 mip을 갖고 오므로 밉 생성은 런타임 생성 텍스처가 생길 때, LUT 좌표는 SL8, 자리표시는 MS MSR10과 함께. SM6이 쓰는 깊이·정수 시각화는 SM6에서 그 셰이더 안에 둔다 | — |

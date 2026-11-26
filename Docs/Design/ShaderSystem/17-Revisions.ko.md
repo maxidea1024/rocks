@@ -111,3 +111,4 @@
 - 개정 51(2026-11-25): SH2g(SL0) 구현 메모(16.1절 — 완료 기준 충족, FXC X4000이 도구 실패로 분류되어 대체 경로를 타지 않는 사실(후속 확인), HLSL 2018 `static_assert` 없음).
 - 개정 52(2026-11-25): SH2d 구현 설계(16.1절 SSD44–SSD48 — 단계 위치·등록, 단계 흐름, cookKey byte, 런타임 열기·형식 선택·장치 요구 비트, Sandbox 엔진 전용 실행). SSD10의 `shaderFormats` JSON 모양을 구현(`{"D3D12": {"formats": [...]}}`, `ShaderFormatList`)에 맞췄다(12.3절 예시·12.3.1절).
 - 개정 53(2026-11-25): SH2d 구현 메모(16.1절 — 쿠킹 단계·cookKey·모듈 시작 등록, 생산 호스트 사전 판정, 장치 요구 비트, 매니페스트 원천·형식 선택, BS10 Commandlet 모듈 집합·정책, Sandbox 엔진 전용 실행의 EngineAssets·쿠킹 라이브러리·쿠킹 화면 self-test, 한계).
+- 개정 54(2026-11-26): SH3 설계(16.2절 SSD49–SSD58 — MetaCompiler 셰이더 파라미터 모드를 리플렉션 메타 단계와 따로 둠, 선언 문법·허용 타입·명시 padding, 생성 C++ 표와 HLSL, 생성 원문을 실행 파일에 넣어 job 메모리 원문으로, `ShaderParameterLayout` 중첩·identity·원문 칸, 바인딩 layout v4 identity(SX8 앞부분), 워커 중첩 대조, 엔진 셰이더 이관 범위, 하위 단계 SH3a–SH3c, 시험). 13절에 SH3 설계 연결과 TypeSchema 등록의 RR14 이연을 적었다. 발견: 손으로 쓴 tone map·텍스처 표시 표의 이름이 HLSL 변수 이름과 달라 워커 대조가 빠지고 있었다(SSD55).
