@@ -26,6 +26,12 @@ bool PlayerActionInput::HasContext(const Guid& contextId) const noexcept {
     return FindContext(contextId) < contexts_.Size();
 }
 
+uint64 PlayerActionInput::ContextSerial(const Guid& contextId) const noexcept {
+    const usize existing = FindContext(contextId);
+    // order는 0부터 매기므로 1을 더해 0을 "없음"으로 남긴다.
+    return existing < contexts_.Size() ? contexts_[existing].order + 1 : 0;
+}
+
 Result<void> PlayerActionInput::RequestRebuild(const ContextOptions& options) noexcept {
     rebuildPending_ = true;
     // 예약된 요청들의 무시 옵션은 AND로 합친다(UE cpp:433).

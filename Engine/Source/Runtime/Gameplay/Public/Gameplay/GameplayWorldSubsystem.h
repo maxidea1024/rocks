@@ -1,9 +1,12 @@
 #pragma once
 
+#include <Object/AssetId.h>
 #include <Core/TypeKey.h>
 #include <Gameplay/GameplayTypes.h>
 
 namespace rocks {
+
+class AssetManager;
 
 // 게임 World와 게임플레이 프레임워크를 잇는 WorldSubsystem이다(Docs/Design/EngineRuntime 19.5절).
 // GameInstance OpenWorld가 만드는 World에만 생긴다(World 종류만으로 기본 생성하지 않는다 —
@@ -56,6 +59,17 @@ public:
     ObjectHandle Director() const noexcept {
         return director_;
     }
+
+    // asset 컨텍스트를 쥔 모든 PlayerController가 다시 모으게 한다(UE
+    // UEnhancedInputLibrary::RequestRebuildControlMappingsUsingContext — Docs/Design/InputActions
+    // 5.4절). 에셋 데이터(키 바꾸기 등)를 고친 뒤 부른다. 등록 순서로 모두 시도하고 첫 실패를
+    // 돌려준다(오류는 PlayerController::RefreshInputContext와 같다). 쥔 플레이어가 없으면 성공이다.
+    // 게임 스레드 전용이다.
+    //
+    // 사용 예:
+    //   (void)gameplay->RefreshInputContext(world, assets, contextAsset);
+    Result<void> RefreshInputContext(World& world, AssetManager& assets, AssetId asset,
+                                     bool forceImmediately = false) noexcept;
 
     // 이 World의 GameState다(없으면 null).
     ObjectHandle GameStateHandle() const noexcept {
