@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 25(초안) | 2026-11-26 | 6.11절 MS2d 설계: 표면 기록 트리·IR `SurfaceRef`, 늘 closure 하나로 접기(UE Blendable parameter blending 식), 내보내기 대상은 고전 픽셀 속성(`subsurfaceColor` 추가 — MRD17)·UE 우선순위 사슬, shading model 집합 정의, 대표 노멀 진입점 `EvaluateMaterialNormal`과 넓힌 순환 검사, AO 활성 좁히기, 영역 표면, custom 출력 번호별 함수·존재 정의·정점 빈도, `SurfaceFromAttributes`는 MS2e로(15장), 7.3절 표 |
 | 24(초안) | 2026-11-26 | MS2c 리뷰 반영(6.10·9.4절): 가상 샘플 종류(꺼진 형식은 비가상 처리 함수), gather는 mip 없음·정점에서도 같음, AA 마스크 전용 TextureIsValid, 지연 진단(SceneTexture Color 검사 — 결과에 닿을 때만), 잘못된 enum 값 InvalidProperty, 같은 ParameterId 다른 종류 V8, 문맥 값 인자 텍스처 V1, mip·미분은 Float·Double만, 미분 폭 편차, 이름 없는 파라미터 샘플은 TextureSample 경로, ParticleSubUv 문구, 9.4 텍스처 slot 순서·layout 표 정정 |
 | 23(초안) | 2026-11-26 | 6.10절 MS2c: 네 묶음 계획, MS2c1 늦은 진단(Pending 자리 값 — DCE 뒤 살아 있는 TODO·모르는 노드만, 조건 값 가지는 경고), MS2c2 파라미터·상수 식(번역 입력 static 값·컬렉션 layout(배치는 컬렉션 에셋이 계산, parameterId로 찾음), IR Parameter·CollectionValue, 상수 식 프로그램은 모듈 번호 순 명령열(스택 기계 버림)·출력은 Uniform 빈도만, 크기 순 float4 layout·Double 두 칸, `materialFloats`·`materialCollection<k>Vectors` cbuffer, 노드 9종 lowering·UE 문구·진단 코드, CustomPrimitiveData1·4 문맥 값, CollectionTransform parameterId·DoubleVectorParameter Double 출력 핀) |
 | 22(초안) | 2026-11-26 | MS2b 리뷰 반영(6.9·7.3·7.7절): 정점 함수는 루트를 모아 값을 한 번에 낸다(공유 부분식 중복 선언 제거), 연결된 위치 입력도 원점 종류 타입으로 맞춤, PerInstanceCustomData는 공급 없으면 기본값 인자, 번역 때 고르는 스위치는 고른 입력만 번역, 실행 중 스위치·PathTracingQualitySwitch 필수 입력 검사, SpeedTree는 UV 8채널, V4는 결과에서 닿는 보간기만·V15는 WPO만, 진단 위치 한계와 보간기 순환 문구를 적었다, 7장 MS2a 문장 정리 |

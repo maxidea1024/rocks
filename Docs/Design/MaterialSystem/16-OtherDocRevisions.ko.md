@@ -57,6 +57,7 @@
 | MRD13 | (개정 10) pass 셰이더 타입이 채우는 문맥 공급 기능 집합(previous 부분 포함)과 기능별 렌더러 자원 수를 선언한다. pass는 자기가 부르는 진입점의 `MATERIAL_<진입점>_USES_*` 합집합으로 `MATERIAL_CONTEXT_<기능>`을 정의하고 그 필드를 채운다. 공급하지 않는 기능은 문맥 값 표의 UE 기본값을 쓴다(19.3.1절, 결정 MD15) | 미처리(Renderer 담당) |
 | MRD14 | (개정 10) Toon shading model(UE `SubstrateToonBSDF`·`UToonProfile`)을 14.2절 목록에 둘지와 GBuffer 배치. 정해지면 `MPQ-ToonShading`을 푼다 | 미처리(Renderer 담당) |
 | MRD15 | (개정 10) MS3b가 `RenderData` 모듈을 번호표 세 열거(`MaterialDomain`·`BlendMode`·`ShadingModel`)만으로 먼저 만든다(4.6절). 리플렉션 열거라 의존이 Core·MetaSchema에 ObjectRuntime이 더해진다. `BlendMode`에 `TranslucentColoredTransmittance`를 TODO 값으로 끝에 둔다(UE 값 전부 — 사용자 지시). Renderer 3.2절 의존과 14.2절 목록을 이에 맞춰 고친다 | 미처리(Renderer 담당) |
+| MRD17 | (개정 25) `SurfaceAttributes`(14.1절)에 `subsurfaceColor`(float3, 기본 1 — UE `MP_SubsurfaceColor`)를 더하고, 칸을 UE 고전 픽셀 속성(`FPixelMaterialInputs`)과 같게 둔다(6.11절 — GBuffer 배치는 렌더러가 UE `SetGBufferForShadingModel` 규칙으로). customData0·1은 고전 MP_CustomData0·1 뜻(ClearCoat 강도·거칠기, Cloth fuzz 양, Eye IrisMask·IrisDistance, Hair Backlit), Subsurface·TwoSidedFoliage·SubsurfaceProfile은 opacity가 SSS 값이다. 대표 노멀 진입점 `EvaluateMaterialNormal`을 pass가 먼저 부른다(7.3절) | 미처리(Renderer 담당) |
 | MRD16 | (개정 18) `SurfaceAttributes`(14.1절)에 굴절(`refraction` float3)·표면 두께(`surfaceThickness` float, cm) 칸을 더한다. 머티리얼 번역은 MS2a부터 두 값을 IR로 내지만(6.8절) 칸이 없어 생성 원문에 쓰지 않는다(7.7절). UE 기본값은 굴절 (1, 0, 0)·두께 0.01 cm다 | 미처리(Renderer 담당) |
 
 **에셋 시스템(AssetSystem)**

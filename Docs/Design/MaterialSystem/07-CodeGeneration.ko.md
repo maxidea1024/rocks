@@ -40,11 +40,12 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 | `MATERIAL_OPACITY_MASK_CLIP` | 마스크 기준값(기본 속성 상수) |
 | `void EvaluateMaterialVertex(in MaterialVertexInputs c, inout MaterialVertexResult r)` | WPO(cm, world 공간 오프셋)·customized UV·보간 값 |
 | `void EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout MaterialVertexResult r)` | 이전 프레임 WPO(계획 14.7절 current/previous 계약). 문맥의 이전 시간·이전 instance 데이터로 평가한다 |
+| `float3 EvaluateMaterialNormal(in MaterialInputs c)` | 대표 노멀(world, 정규화 — 6.11절). pass가 다른 함수보다 먼저 불러 `c.pixelNormal`을 채운다(UE `CalcPixelMaterialInputs` 순서) |
 | `SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c)` | 표면 속성(Renderer 14.1절 함수 이름) |
 | `float EvaluateMaterialOpacity(in MaterialInputs c)` | 반투명 coverage(`SurfaceAttributes.opacity`와 같은 값, 표면 전체 없이) |
 | `float EvaluateMaterialOpacityMask(in MaterialInputs c)` | 마스크 값. depth·shadow pass가 표면 전체를 계산하지 않게 따로 둔다(10.4절 D8) |
 | `float EvaluateMaterialPixelDepthOffset(in MaterialInputs c)` | PDO(cm) |
-| `float4 EvaluateMaterialCustomOutput_<이름>(in MaterialInputs c)` | 머티리얼이 정의한 custom 출력 |
+| `float4 EvaluateMaterialCustomOutput_<이름><i>(in MaterialInputs c)` | 머티리얼이 정의한 custom 출력의 번호 i(6.11절 MS2d3 — UE `<Fn><i>`). 정점 빈도 출력은 `(in MaterialVertexInputs c)`와 `EvaluateMaterialCustomOutputPrevious_<이름><i>`. 존재 정의 `MATERIAL_CUSTOM_OUTPUT_<NAME>`(출력 수)·`MATERIAL_HAS_CUSTOM_OUTPUT_<NAME><i>` |
 | `float4 EvaluateMaterialPreview(in MaterialInputs c)` | 노드 미리보기 번역에서만 의미가 있다(11.4절) |
 
 함수 사이에는 계산이 겹칠 수 있다(예: 마스크 계산과 표면 계산이 같은 텍스처를 읽는다). 진입점마다 필요한 값만 내므로, 한 pass가 쓰는 함수는 필요한 계산만 한다. 한 pass에서 두 함수를 부르면 겹치는 계산의 제거는 하위 컴파일러(DXC·FXC)의 CSE에 맡긴다.
