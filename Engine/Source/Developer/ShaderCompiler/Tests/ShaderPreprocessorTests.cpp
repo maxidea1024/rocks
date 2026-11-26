@@ -523,9 +523,8 @@ TEST(ShaderPreprocessor_GeneratedIncludeReadsTheMappedSource) {
     REQUIRE(test.File("Main.rsf", "#include \"/Engine/Generated/VertexInput.rsh\"\n"
                                   "int b = VERTEX_VALUE;\n"));
     REQUIRE(test.File("InputA.rsh", "#pragma once\n#define VERTEX_VALUE 7\nint fromInput;\n"));
-    const ShaderGeneratedInclude mapped[] = {
-        {StringView("/Engine/Generated/VertexInput.rsh"), StringView("/Plugin/Test/InputA.rsh"),
-         StringView()}};
+    const ShaderGeneratedInclude mapped[] = {{StringView("/Engine/Generated/VertexInput.rsh"),
+                                              StringView("/Plugin/Test/InputA.rsh"), StringView()}};
     const ShaderSourceStatus status =
         PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), test.shader, {}, mapped);
     PrintStatus("generated", status);
@@ -546,9 +545,8 @@ TEST(ShaderPreprocessor_GeneratedIncludeReadsTheMappedSource) {
     CHECK(unmapped.code == ShaderSourceError::GeneratedSource && unmapped.line == 1);
 
     // 연결 대상이 가상 경로 규칙 밖이면 include 줄의 InvalidPath다.
-    const ShaderGeneratedInclude invalid[] = {
-        {StringView("/Engine/Generated/VertexInput.rsh"), StringView("Plugin/Test/InputA.rsh"),
-         StringView()}};
+    const ShaderGeneratedInclude invalid[] = {{StringView("/Engine/Generated/VertexInput.rsh"),
+                                               StringView("Plugin/Test/InputA.rsh"), StringView()}};
     const ShaderSourceStatus rejected =
         PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), test.shader, {}, invalid);
     CHECK(rejected.code == ShaderSourceError::InvalidPath && rejected.line == 1);
@@ -561,7 +559,8 @@ TEST(ShaderPreprocessor_GeneratedIncludeReadsMemoryContents) {
     REQUIRE(test.Make("generatedmemory"));
     REQUIRE(test.File("Main.rsf", "#include \"/Engine/Generated/Probe/Params.rsh\"\n"
                                   "int b = PARAM_VALUE;\n"));
-    constexpr StringView Contents("#pragma once\n#define PARAM_VALUE 11\ncbuffer Params { float4 v; };\n");
+    constexpr StringView Contents(
+        "#pragma once\n#define PARAM_VALUE 11\ncbuffer Params { float4 v; };\n");
     const ShaderGeneratedInclude memory[] = {
         {StringView("/Engine/Generated/Probe/Params.rsh"), StringView(), Contents}};
     const ShaderSourceStatus status =

@@ -18,12 +18,12 @@
 //       ShaderFloat2 uvBias;        // offset 72
 //   };
 //   static_assert(offsetof(BlitConstants, uvBias) == 72);
-// 셰이더 파라미터 구조체 표지다(Docs/Design/ShaderSystem 16.2절 SSD50). 바로 뒤에 이름공간 범위의 비템플릿
-// struct 정의가 와야 한다. 빌드가 줄 첫머리의 이 표지로 헤더를 찾아 MetaCompiler 셰이더 파라미터 모드를
-// 돌리고, <헤더>.shaderparams.h(ShaderParameterStruct<T> — 레이아웃 표·identity·생성 HLSL)와
-// /Engine/Generated/<모듈>/<C++ 이름>.rsh(생성 HLSL)를 만든다. 비정적 데이터 멤버 전부가 파라미터이고
-// 타입은 float·int32·uint32, 이 헤더의 정렬 타입, 같은 모듈의 다른 파라미터 구조체(중첩 1단), 그 1차원
-// 배열(원소 16 byte 배수)만 받는다. 크기는 16 byte 배수다.
+// 셰이더 파라미터 구조체 표지다(Docs/Design/ShaderSystem 16.2절 SSD50). 바로 뒤에 이름공간 범위의
+// 비템플릿 struct 정의가 와야 한다. 빌드가 줄 첫머리의 이 표지로 헤더를 찾아 MetaCompiler 셰이더
+// 파라미터 모드를 돌리고, <헤더>.shaderparams.h(ShaderParameterStruct<T> — 레이아웃
+// 표·identity·생성 HLSL)와 /Engine/Generated/<모듈>/<C++ 이름>.rsh(생성 HLSL)를 만든다. 비정적
+// 데이터 멤버 전부가 파라미터이고 타입은 float·int32·uint32, 이 헤더의 정렬 타입, 같은 모듈의 다른
+// 파라미터 구조체(중첩 1단), 그 1차원 배열(원소 16 byte 배수)만 받는다. 크기는 16 byte 배수다.
 //
 // 지정자: Name = "…"(HLSL cbuffer·루트 상수 변수 이름 = 레이아웃 표 이름, 없으면 C++ 이름),
 // RootConstants(그리기별 상수 — 128 byte 이하, 중첩 구조체 없음).
@@ -37,7 +37,11 @@
 //   // HLSL: #include "/Engine/Generated/RenderBase/TonemapConstants.rsh" → Tonemap.exposure
 #define ROCKS_SHADER_PARAMETERS_JOIN_INNER(left, right) left##right
 #define ROCKS_SHADER_PARAMETERS_JOIN(left, right) ROCKS_SHADER_PARAMETERS_JOIN_INNER(left, right)
-#define ROCKS_SHADER_PARAMETERS(...)                                                                   enum {                                                                                                 ROCKS_SHADER_PARAMETERS_JOIN(rocksShaderParametersMarker_, __COUNTER__)                            [[clang::annotate("rocks", "rocks.shaderparams.marker", #__VA_ARGS__)]] = 0                    };
+#define ROCKS_SHADER_PARAMETERS(...)                                                               \
+    enum {                                                                                         \
+        ROCKS_SHADER_PARAMETERS_JOIN(rocksShaderParametersMarker_, __COUNTER__)                    \
+        [[clang::annotate("rocks", "rocks.shaderparams.marker", #__VA_ARGS__)]] = 0                \
+    };
 
 namespace rocks::shader {
 

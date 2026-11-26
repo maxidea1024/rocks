@@ -510,9 +510,9 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     CHECK(memcmp(bytes.Data(), header, sizeof(header)) == 0);
     // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 구조체 identity(v4), 출처 0, 공유 0, 모양 0,
     // 원소 0, stride 0, 멤버 2.
-    const uint8 first[] = {0,    0,    0,    4,    'V', 'i', 'e', 'w', 32, 0, 0, 0, 0x18,
-                           0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0,  0, 0, 0, 0, 0,
-                           0,    0,    2,    0};
+    const uint8 first[] = {0, 0, 0,    4,    'V',  'i',  'e',  'w',  32,   0,
+                           0, 0, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11,
+                           0, 0, 0,    0,    0,    0,    0,    0,    2,    0};
     CHECK(memcmp(bytes.Data() + sizeof(header), first, sizeof(first)) == 0);
 
     ShaderBindingLayout decoded(TestAllocator());
@@ -1053,8 +1053,8 @@ TEST(ShaderCore_ParameterLayoutNestedAndIdentityRules) {
         {"a", ShaderParameterType::Float, 0, 0},
         {"inner", ShaderParameterType::Struct, 8, 0, &InnerLayout}};
     CHECK(!Accepts(ShaderParameterLayout("Outer", false, 48, misaligned)));
-    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 32,
-                                         Span<const ShaderParameterMember>(outer, 2))));
+    CHECK(!Accepts(
+        ShaderParameterLayout("Outer", false, 32, Span<const ShaderParameterMember>(outer, 2))));
     // 2단 중첩.
     const ShaderParameterLayout middle("Middle", false, 48, outer);
     const ShaderParameterMember twice[] = {{"middle", ShaderParameterType::Struct, 0, 0, &middle}};
@@ -1109,15 +1109,15 @@ TEST(ShaderCore_ParameterLayoutNestedAndIdentityRules) {
                                             static_cast<uint32>(index * 16), 0);
     }
 
-    CHECK(Accepts(ShaderParameterLayout("Many", false, MaxShaderParameterMembers * 16,
-                                        Span<const ShaderParameterMember>(
-                                            many, MaxShaderParameterMembers))));
-    CHECK(!Accepts(ShaderParameterLayout("Many", false, (MaxShaderParameterMembers + 1) * 16,
-                                         Span<const ShaderParameterMember>(
-                                             many, MaxShaderParameterMembers + 1))));
+    CHECK(Accepts(
+        ShaderParameterLayout("Many", false, MaxShaderParameterMembers * 16,
+                              Span<const ShaderParameterMember>(many, MaxShaderParameterMembers))));
+    CHECK(!Accepts(ShaderParameterLayout(
+        "Many", false, (MaxShaderParameterMembers + 1) * 16,
+        Span<const ShaderParameterMember>(many, MaxShaderParameterMembers + 1))));
     // 루트 상수 128 byte 초과.
-    CHECK(!Accepts(ShaderParameterLayout("Root", true, 144,
-                                         Span<const ShaderParameterMember>(many, 9))));
+    CHECK(!Accepts(
+        ShaderParameterLayout("Root", true, 144, Span<const ShaderParameterMember>(many, 9))));
 
     // 정규 byte 왕복: 중첩 표와 구조체 이름이 돌아오고 서명이 같다.
     const ShaderParameterLayout list[] = {good};

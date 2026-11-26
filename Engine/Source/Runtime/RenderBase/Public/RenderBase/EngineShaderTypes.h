@@ -47,11 +47,11 @@ ROCKS_SHADER_TYPE_NAME(TonemapPixelType, "TonemapPixel");
 // TonemapPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char TonemapSceneColorName[] = "SceneColor";
 
-// TonemapPixel의 그리기별 상수다(48 byte, 생성 HLSL /Engine/Generated/RenderBase/TonemapConstants.rsh —
-// 셰이더는 Tonemap.<멤버>로 읽는다, ShaderSystem 16.2절). 기본값은 UE 5.8
-// FPostProcessSettings 기본값(Engine/Private/Scene.cpp — BlueCorrection 0.6, ExpandGamut 1,
-// ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder 0.26, FilmBlackClip 0,
-// FilmWhiteClip 0.04)과 노출 배율 1이다.
+// TonemapPixel의 그리기별 상수다(48 byte, 생성 HLSL
+// /Engine/Generated/RenderBase/TonemapConstants.rsh — 셰이더는 Tonemap.<멤버>로 읽는다,
+// ShaderSystem 16.2절). 기본값은 UE 5.8 FPostProcessSettings 기본값(Engine/Private/Scene.cpp —
+// BlueCorrection 0.6, ExpandGamut 1, ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder
+// 0.26, FilmBlackClip 0, FilmWhiteClip 0.04)과 노출 배율 1이다.
 //
 // 사용 예:
 //   render::TonemapConstants tonemap;
@@ -139,9 +139,9 @@ struct alignas(16) TextureInspectorConstants {
     shader::ShaderFloat4 exposure = {
         TonemapConstants::DefaultExposureScale, TonemapConstants::DefaultBlueCorrection,
         TonemapConstants::DefaultExpandGamut, TonemapConstants::DefaultToneCurveAmount};
-    shader::ShaderFloat4 film = {TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
-                                 TonemapConstants::DefaultFilmShoulder,
-                                 TonemapConstants::DefaultFilmBlackClip};
+    shader::ShaderFloat4 film = {
+        TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
+        TonemapConstants::DefaultFilmShoulder, TonemapConstants::DefaultFilmBlackClip};
     shader::ShaderFloat4 filmWhite = {TonemapConstants::DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
     // mip·층·고른 mip의 volume 깊이·표시 방식이다.
     shader::ShaderFloat4 selection = {0.0f, 0.0f, 1.0f, 0.0f};

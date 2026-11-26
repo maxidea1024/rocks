@@ -472,8 +472,8 @@ private:
             return;
         }
 
-        // 정점 입력 연결 하나와 레이아웃 표의 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체 정의는
-        // 바깥 원문 안에 있다)이다.
+        // 정점 입력 연결 하나와 레이아웃 표의 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체
+        // 정의는 바깥 원문 안에 있다)이다.
         ShaderGeneratedInclude includes[MaxShaderParameterLayouts + 1];
         usize includeCount = 0;
         if (!job.vertexInputSource.IsEmpty()) {

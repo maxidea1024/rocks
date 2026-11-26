@@ -22,7 +22,8 @@ constexpr bool BuiltinVertexInputOnly(shader::VertexInputTypeId vertexInputType,
     return vertexInputType == BuiltinVertexInputName.hash;
 }
 
-// BuiltinMeshConstants의 생성 표다(ShaderSystem 16.2절 — C++ 구조체는 RenderBase/BuiltinResources.h).
+// BuiltinMeshConstants의 생성 표다(ShaderSystem 16.2절 — C++ 구조체는
+// RenderBase/BuiltinResources.h).
 constexpr shader::ShaderParameterLayout BuiltinMeshLayouts[] = {
     shader::ShaderParameterLayoutOf<BuiltinMeshConstants>()};
 

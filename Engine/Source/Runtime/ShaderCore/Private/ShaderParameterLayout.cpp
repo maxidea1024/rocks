@@ -423,8 +423,8 @@ struct LayoutRange {
     usize count = 0;
 };
 
-// Struct 멤버 하나의 연결 대기다: out.members[member]가 out.nested[nested]를 가리켜야 한다. 배열이 다
-// 자란 뒤 포인터로 잇는다.
+// Struct 멤버 하나의 연결 대기다: out.members[member]가 out.nested[nested]를 가리켜야 한다. 배열이
+// 다 자란 뒤 포인터로 잇는다.
 struct NestedLink {
     usize member = 0;
     usize nested = 0;
@@ -440,7 +440,8 @@ struct DecodeState {
     Array<NestedLink> links;
 };
 
-// 표 byte 하나를 읽는다. nested가 참이면 중첩 표(Struct 멤버를 받지 않는다)다. 실패하면 영어 이유다.
+// 표 byte 하나를 읽는다. nested가 참이면 중첩 표(Struct 멤버를 받지 않는다)다. 실패하면 영어
+// 이유다.
 const char* ReadLayout(ByteReader& reader, bool nested, ShaderParameterLayoutSet& out,
                        DecodeState& state, ShaderParameterLayout& layout,
                        LayoutRange& range) noexcept {

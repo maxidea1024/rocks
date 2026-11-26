@@ -35,8 +35,9 @@ bool IsSlotName(StringView name) noexcept {
 Result<uint32> SharedConstantSlotTable::Register(const SharedConstantSlotDesc& desc,
                                                  const char** reason) noexcept {
     if (IsFrozen()) {
-        return RejectSlot(reason, "shared constant slots are registered before the shader host "
-                                  "freezes",
+        return RejectSlot(reason,
+                          "shared constant slots are registered before the shader host "
+                          "freezes",
                           ErrorCode::ScopeClosed);
     }
 

@@ -199,11 +199,11 @@ ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
                                const char** reason = nullptr) noexcept;
 
 // 표 목록의 서명이다(SSD27·SSD53). 목록이 비면 0(모든 byte 0)이다. 아니면 정규 byte의 SHA-256이다:
-//   u32 표 수, 표마다 표 byte. 표 byte = [u8 이름 byte 수, 이름 byte, u8 구조체 이름 byte 수, 구조체
-//   이름 byte, u8 루트 상수(0·1), u32 totalBytes, u32 멤버 수, 멤버마다 (u8 이름 byte 수, 이름 byte,
-//   u8 타입 값, u32 오프셋, u32 원소 수, Struct면 중첩 표의 표 byte)] — 모두 little-endian, 목록
-//   순서 그대로. identity는 이름에서 다시 계산되므로 넣지 않고, 생성 원문과 그 경로도 넣지 않는다
-//   (원문은 include 폐포로 job 키에 들어간다).
+//   u32 표 수, 표마다 표 byte. 표 byte = [u8 이름 byte 수, 이름 byte, u8 구조체 이름 byte 수,
+//   구조체 이름 byte, u8 루트 상수(0·1), u32 totalBytes, u32 멤버 수, 멤버마다 (u8 이름 byte 수,
+//   이름 byte, u8 타입 값, u32 오프셋, u32 원소 수, Struct면 중첩 표의 표 byte)] — 모두
+//   little-endian, 목록 순서 그대로. identity는 이름에서 다시 계산되므로 넣지 않고, 생성 원문과 그
+//   경로도 넣지 않는다 (원문은 include 폐포로 job 키에 들어간다).
 // 목록은 ValidateShaderParameterLayouts를 통과해야 한다(이름 byte 수가 u8 안이다).
 ROCKS_SHADERCORE_API Sha256Digest
 ShaderParameterLayoutSignature(Span<const ShaderParameterLayout> layouts) noexcept;

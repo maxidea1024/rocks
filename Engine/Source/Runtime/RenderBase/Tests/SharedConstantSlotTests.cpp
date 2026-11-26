@@ -11,8 +11,8 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 
-// 공유 상수 slot 표 기반 시험이다(Docs/Design/RenderBase 9.14절 RR13 완료 기준): 표 등록 규칙, 구조체
-// identity로 찾는 파이프라인 지도, 묶음의 identity 대조·미묶음 거부·장치 호출 열.
+// 공유 상수 slot 표 기반 시험이다(Docs/Design/RenderBase 9.14절 RR13 완료 기준): 표 등록 규칙,
+// 구조체 identity로 찾는 파이프라인 지도, 묶음의 identity 대조·미묶음 거부·장치 호출 열.
 using namespace rocks;
 using namespace rocks::render;
 using namespace rocks::shader;
@@ -26,17 +26,21 @@ SystemAllocator& Allocator_() noexcept {
 }
 
 // 생성 표와 같은 모양(identity 있음)의 시험 표다.
-constexpr ShaderParameterMember ViewMembers[] = {{"viewToClip", ShaderParameterType::Float4x4, 0, 0},
-                                                 {"time", ShaderParameterType::Float4, 64, 0}};
-constexpr ShaderParameterLayout ViewLayout("View", false, 80, ViewMembers, "rocks::test::ViewParameters",
+constexpr ShaderParameterMember ViewMembers[] = {
+    {"viewToClip", ShaderParameterType::Float4x4, 0, 0},
+    {"time", ShaderParameterType::Float4, 64, 0}};
+constexpr ShaderParameterLayout ViewLayout("View", false, 80, ViewMembers,
+                                           "rocks::test::ViewParameters",
                                            "/Engine/Generated/Test/ViewParameters.rsh",
                                            "cbuffer View { float4x4 viewToClip; float4 time; };");
 constexpr ShaderParameterMember FogMembers[] = {{"density", ShaderParameterType::Float4, 0, 0}};
-constexpr ShaderParameterLayout FogLayout("Fog", false, 16, FogMembers, "rocks::test::FogParameters",
+constexpr ShaderParameterLayout FogLayout("Fog", false, 16, FogMembers,
+                                          "rocks::test::FogParameters",
                                           "/Engine/Generated/Test/FogParameters.rsh",
                                           "cbuffer Fog { float4 density; };");
 // 같은 크기·멤버지만 다른 구조체다(identity가 달라 slot이 아니다).
-constexpr ShaderParameterLayout OtherFogLayout("Fog", false, 16, FogMembers, "rocks::test::OtherFog",
+constexpr ShaderParameterLayout OtherFogLayout("Fog", false, 16, FogMembers,
+                                               "rocks::test::OtherFog",
                                                "/Engine/Generated/Test/OtherFog.rsh",
                                                "cbuffer Fog { float4 density; };");
 constexpr ShaderParameterLayout HandLayout{"Hand", false, 16, FogMembers};
@@ -133,10 +137,10 @@ TEST(SharedConstantSlots_TableRegistrationRules) {
     for (usize index = 0; index <= MaxSharedConstantSlots; ++index) {
         (void)snprintf(names[index], sizeof(names[index]), "Slot%zu", index);
         (void)snprintf(structs[index], sizeof(structs[index]), "rocks::test::Slot%zu", index);
-        layouts[index] = ShaderParameterLayout("Slot", false, 16, FogMembers, StringView(structs[index]),
-                                               StringView(), StringView());
-        const auto added =
-            full.Register({StringView(names[index]), &layouts[index], ConstantBlockLifetime::PerFrame});
+        layouts[index] = ShaderParameterLayout(
+            "Slot", false, 16, FogMembers, StringView(structs[index]), StringView(), StringView());
+        const auto added = full.Register(
+            {StringView(names[index]), &layouts[index], ConstantBlockLifetime::PerFrame});
         CHECK(index < MaxSharedConstantSlots ? added.IsOk()
                                              : added.Error() == ErrorCode::CapacityExceeded);
     }

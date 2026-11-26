@@ -4,9 +4,10 @@
 #include <ShaderCore/ShaderParameterTypes.h>
 
 // Sandbox의 생성 셰이더 파라미터 구조체다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 빌드가
-// SandboxShaderParameters.shaderparams.h(생성 표)와 /Engine/Generated/Sandbox/<이름>.rsh(생성 HLSL)를
-// 만든다. 셰이더는 Shaders/GeneratedParameters.rsf이고 self-test(ShaderParameterSelfTest.cpp)가 이
-// 구조체를 그대로 올려 그린 픽셀을 CPU 식과 대조한다 — 오프셋이 하나라도 어긋나면 값이 크게 바뀐다.
+// SandboxShaderParameters.shaderparams.h(생성 표)와 /Engine/Generated/Sandbox/<이름>.rsh(생성
+// HLSL)를 만든다. 셰이더는 Shaders/GeneratedParameters.rsf이고
+// self-test(ShaderParameterSelfTest.cpp)가 이 구조체를 그대로 올려 그린 픽셀을 CPU 식과 대조한다 —
+// 오프셋이 하나라도 어긋나면 값이 크게 바뀐다.
 namespace sandbox::shaders {
 
 // 중첩 구조체다(3성분 뒤 스칼라 — 생성 HLSL이 padding을 넣는다).

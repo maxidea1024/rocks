@@ -118,8 +118,8 @@ struct BuiltinMeshBuffers {
 };
 
 // fallback 메시 셰이더의 그리기별 상수다(80 byte, 생성 HLSL
-// /Engine/Generated/RenderBase/BuiltinMeshConstants.rsh — 셰이더는 Draw.<멤버>, ShaderSystem 16.2절).
-// 변환은 행 벡터 p·M(행 우선)이다.
+// /Engine/Generated/RenderBase/BuiltinMeshConstants.rsh — 셰이더는 Draw.<멤버>,
+// ShaderSystem 16.2절). 변환은 행 벡터 p·M(행 우선)이다.
 ROCKS_SHADER_PARAMETERS(Name = "Draw", RootConstants)
 struct alignas(16) BuiltinMeshConstants {
     shader::ShaderFloat4x4 localToClip;

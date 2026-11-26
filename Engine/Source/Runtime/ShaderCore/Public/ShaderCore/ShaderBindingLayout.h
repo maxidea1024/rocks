@@ -23,10 +23,10 @@
 //   u32 render target 마스크(SV_Target0–7 — PS만), u32 단계 사이 마스크(TEXCOORD0–15 — VS 출력·PS
 //   입력, v2), u32 자원 수, 자원 표. 자원 하나: u8 종류, u16 순번, u8 이름 byte 수, 이름 byte, u32
 //   상수 버퍼 byte 수(상수 버퍼만, 아니면 0), u64 파라미터 구조체 identity(상수 버퍼만, 0 = 없음 —
-//   RenderBase SX8, ShaderSystem 16.2절 SSD54, v4), u8 샘플러 출처(SRV 텍스처만, 아니면 None), u8 공유
-//   샘플러 표시(샘플러만, 0·1), u8 모양(ShaderResourceShape, v3), u8 원소 타입(ShaderComponentType
-//   — typed 자원만, v3), u32 구조화 원소 byte(구조화 버퍼만, v3), u16 멤버 수(상수 버퍼만),
-//   멤버마다 (u8 이름 byte 수, 이름 byte, u32 오프셋, u32 byte 수).
+//   RenderBase SX8, ShaderSystem 16.2절 SSD54, v4), u8 샘플러 출처(SRV 텍스처만, 아니면 None), u8
+//   공유 샘플러 표시(샘플러만, 0·1), u8 모양(ShaderResourceShape, v3), u8 원소
+//   타입(ShaderComponentType — typed 자원만, v3), u32 구조화 원소 byte(구조화 버퍼만, v3), u16 멤버
+//   수(상수 버퍼만), 멤버마다 (u8 이름 byte 수, 이름 byte, u32 오프셋, u32 byte 수).
 // 자원 표는 (종류, 순번) 오름차순이고 같은 (종류, 순번)은 하나다. 멤버는 오프셋 오름차순이고 겹치지
 // 않으며 상수 버퍼 안에 있다. 이름은 64 byte 이하 식별자다.
 //

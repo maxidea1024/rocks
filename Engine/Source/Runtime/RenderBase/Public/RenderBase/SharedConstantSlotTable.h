@@ -8,17 +8,20 @@
 #include <RenderBase/ShaderParameters.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 공유 상수 slot 표 기반이다(Docs/Design/RenderBase 9.5·9.14절 RR13, UE 정적 uniform buffer slot 대응).
+// 공유 상수 slot 표 기반이다(Docs/Design/RenderBase 9.5·9.14절 RR13, UE 정적 uniform buffer slot
+// 대응).
 //
 // slot 하나는 (이름, 생성 파라미터 구조체 표, 수명)이다. 셰이더 쪽은 바인딩 layout의 상수 버퍼
 // identity(SX8 — ShaderSystem 16.2절 SSD54)로 slot을 찾는다: 파이프라인마다 SharedConstantSlotMap을
-// 만들고, 기록 객체가 가진 SharedConstantBindings(slot → 상수 블록)를 그 지도대로 묶는다. 렌더러 slot
-// 다섯(View·Scene·ForwardLight·Shadow·Fog)의 선언과 view마다 다시 묶기는 렌더러 RS0이다(9.14절 4항).
+// 만들고, 기록 객체가 가진 SharedConstantBindings(slot → 상수 블록)를 그 지도대로 묶는다. 렌더러
+// slot 다섯(View·Scene·ForwardLight·Shadow·Fog)의 선언과 view마다 다시 묶기는 렌더러 RS0이다(9.14절
+// 4항).
 //
 // 사용 예:
 //   // 시작(로더 스레드, EngineShaderHost::Freeze 전):
 //   auto view = host.SharedConstantSlots().Register(
-//       {"View", &shader::ShaderParameterLayoutOf<ViewParameters>(), ConstantBlockLifetime::PerFrame});
+//       {"View", &shader::ShaderParameterLayoutOf<ViewParameters>(),
+//       ConstantBlockLifetime::PerFrame});
 //   // 파이프라인마다(Freeze 뒤 어느 스레드에서나):
 //   const shader::ShaderBindingLayout* stages[] = {vertexLayout, pixelLayout};
 //   auto map = SharedConstantSlotMap::Build(host.SharedConstantSlots(), stages);

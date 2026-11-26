@@ -92,8 +92,8 @@ void Expected(const GeneratedProbeParameters& p, const GeneratedProbeDraw& d,
     out[1] = Unorm(static_cast<double>(p.weights[1].z) + p.weights[2].w +
                    static_cast<double>(p.offsets.y + p.layer) / IntegerScale +
                    static_cast<double>(d.select.z) / SelectScale);
-    out[2] = Unorm(static_cast<double>(p.light.color.x) * p.light.intensity +
-                   p.light.direction.z + p.tail);
+    out[2] = Unorm(static_cast<double>(p.light.color.x) * p.light.intensity + p.light.direction.z +
+                   p.tail);
 }
 
 bool Near(uint8 actual, uint8 expected) noexcept {
@@ -127,10 +127,10 @@ uint32 RunShaderParameterChecks(const char* name, Device& device, Allocator& all
     Check(slot.IsOk(), "the generated cbuffer is in the pixel binding layout");
     bool identity = false;
     for (const shader::ShaderBindingResource& resource : pixel->resources) {
-        identity = identity || (resource.kind == shader::ShaderResourceKind::ConstantBuffer &&
-                                resource.name == probe.name &&
-                                resource.structId == probe.structId &&
-                                resource.constantBufferBytes == sizeof(GeneratedProbeParameters));
+        identity =
+            identity || (resource.kind == shader::ShaderResourceKind::ConstantBuffer &&
+                         resource.name == probe.name && resource.structId == probe.structId &&
+                         resource.constantBufferBytes == sizeof(GeneratedProbeParameters));
     }
 
     Check(identity, "the binding layout carries the generated struct identity and size");
@@ -166,18 +166,18 @@ uint32 RunShaderParameterChecks(const char* name, Device& device, Allocator& all
         commands.SetPipeline(pipeline.Value());
         Check(commands.SetDrawConstants(BytesOf(&draw, sizeof(draw))).IsOk(),
               "generated root constants are set as C++ bytes");
-        Check(commands
-                  .SetConstantData(ShaderStage::Pixel, slot.Value(),
-                                   BytesOf(&values, sizeof(values)))
-                  .IsOk(),
-              "the generated cbuffer is bound as C++ bytes");
+        Check(
+            commands
+                .SetConstantData(ShaderStage::Pixel, slot.Value(), BytesOf(&values, sizeof(values)))
+                .IsOk(),
+            "the generated cbuffer is bound as C++ bytes");
         commands.Draw(3);
         Array<uint8> pixels(allocator);
-        Check(device.EndFrame().IsOk() &&
-                  pixels.TryResize(static_cast<usize>(TargetSize) * TargetSize * PixelBytes)
-                      .IsOk() &&
-                  device.ReadPixels(target.Value(), pixels.View()).IsOk(),
-              "the frame is drawn and read back");
+        Check(
+            device.EndFrame().IsOk() &&
+                pixels.TryResize(static_cast<usize>(TargetSize) * TargetSize * PixelBytes).IsOk() &&
+                device.ReadPixels(target.Value(), pixels.View()).IsOk(),
+            "the frame is drawn and read back");
         uint8 expected[3] = {};
         Expected(values, draw, expected);
         const usize offset =

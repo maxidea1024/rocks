@@ -460,8 +460,7 @@ private:
                 uint32 bytes = 0;
                 uint32 alignment = 0;
                 ShaderParameterType type = ShaderParameterType::Float;
-                same = same && Describe(reflected, bytes, alignment, type) &&
-                       expected.type == type;
+                same = same && Describe(reflected, bytes, alignment, type) && expected.type == type;
             }
 
             if (!same) {

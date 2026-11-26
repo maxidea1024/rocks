@@ -75,8 +75,8 @@ ShaderBindingMap::Build(const shader::ShaderParameterLayout& layout,
         }
 
         for (const shader::ShaderBindingResource& resource : stage->resources) {
-            // 생성 표(identity 있음)는 구조체 identity로, 손으로 쓴 표는 이름으로 찾는다(SX8 — 값 1 v4,
-            // RenderBase 9.14절).
+            // 생성 표(identity 있음)는 구조체 identity로, 손으로 쓴 표는 이름으로 찾는다(SX8 — 값 1
+            // v4, RenderBase 9.14절).
             const bool matches = layout.structId != 0 ? resource.structId == layout.structId
                                                       : resource.name == layout.name;
             if (resource.kind != shader::ShaderResourceKind::ConstantBuffer || !matches) {
@@ -89,10 +89,12 @@ ShaderBindingMap::Build(const shader::ShaderParameterLayout& layout,
 
             for (const shader::ShaderBindingMember& member : stage->MembersOf(resource)) {
                 const shader::ShaderParameterMember* table = FindLayoutMember(layout, member.name);
-                // 중첩 구조체의 byte 수는 형식 리플렉션마다 끝 padding 포함 여부가 달라 오프셋만 본다.
+                // 중첩 구조체의 byte 수는 형식 리플렉션마다 끝 padding 포함 여부가 달라 오프셋만
+                // 본다.
                 const bool sizeMatches =
-                    table != nullptr && (table->type == shader::ShaderParameterType::Struct ||
-                                         shader::ShaderParameterMemberBytes(*table) == member.bytes);
+                    table != nullptr &&
+                    (table->type == shader::ShaderParameterType::Struct ||
+                     shader::ShaderParameterMemberBytes(*table) == member.bytes);
                 if (table == nullptr || table->offset != member.offset || !sizeMatches) {
                     return Reject(reason, "stage constant buffer member differs from the layout "
                                           "table (name, offset or size)");

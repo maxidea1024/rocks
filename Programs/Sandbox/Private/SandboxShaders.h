@@ -105,8 +105,8 @@ constexpr ShaderTypeDesc DevelopmentOnly(ShaderTypeDesc desc) noexcept {
 #undef SANDBOX_PIXEL_IF
 #undef SANDBOX_PIXEL_DEV_IF
 
-// 생성 셰이더 파라미터 구조체 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 두 단계가 같은
-// 원문을 include하므로 둘 다 표를 가진다(VS에는 쓰는 버퍼가 없어 대조하지 않는다).
+// 생성 셰이더 파라미터 구조체 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 두
+// 단계가 같은 원문을 include하므로 둘 다 표를 가진다(VS에는 쓰는 버퍼가 없어 대조하지 않는다).
 inline constexpr rocks::shader::ShaderParameterLayout GeneratedParameterLayouts[] = {
     rocks::shader::ShaderParameterLayoutOf<GeneratedProbeParameters>(),
     rocks::shader::ShaderParameterLayoutOf<GeneratedProbeDraw>()};
