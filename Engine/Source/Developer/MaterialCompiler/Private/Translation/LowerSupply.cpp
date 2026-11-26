@@ -64,7 +64,14 @@ Result<IrValueId> PositionOrDefault(LoweringContext& context, StringView key,
     }
 
     if (connected.Value()) {
-        return context.Input(key);
+        // 연결된 위치도 원점 종류의 타입으로 맞춘다(Absolute → Double3, CameraRelative → Float3 —
+        // UE CoerceParameter).
+        auto input = context.Input(key);
+        if (!input || input.Value() == NoIrValue) {
+            return input;
+        }
+
+        return context.CoerceTo(input.Value(), absolute ? IrDouble(3) : IrFloat(3), key);
     }
 
     return context.ContextValue(absolute ? StringView("WorldPosition")

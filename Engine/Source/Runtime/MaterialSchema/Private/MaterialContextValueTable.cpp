@@ -32,8 +32,8 @@ ContextValue(StringView name, StringView unrealName, MaterialPinType type,
     return value;
 }
 
-// value가 공급하지 않을 때 argument 번호 인자를 돌려주게 한다(UE DynamicParameter의 노드 기본값 —
-// MaterialTemplate.ush:302–354).
+// value가 공급하지 않을 때 argument 번호 인자를 돌려주게 한다(UE DynamicParameter·
+// GetPerInstanceCustomData의 노드 기본값 — MaterialTemplate.ush:302–354, 1501–1593).
 constexpr MaterialContextValue WithDefaultArgument(MaterialContextValue value,
                                                    int8 argument) noexcept {
     value.defaultArgument = argument;
@@ -287,15 +287,19 @@ constexpr MaterialContextValue ContextValues[] = {
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::Valid, {}, false),
     // UE GetPerInstanceCustomData.
-    ContextValue("PerInstanceCustomData", "GetPerInstanceCustomData", MaterialPinType::Float1,
-                 MaterialContextValueForm::Function, 2, MaterialContextFeature::Primitive,
-                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::Zero, {}, false),
+    WithDefaultArgument(ContextValue("PerInstanceCustomData", "GetPerInstanceCustomData",
+                                     MaterialPinType::Float1, MaterialContextValueForm::Function, 2,
+                                     MaterialContextFeature::Primitive, AllMaterialDomains,
+                                     AllMaterialStages, MaterialCapabilityTier::Mobile,
+                                     MaterialDerivative::Zero, {}, false),
+                        1),
     // UE GetPerInstanceCustomData3Vector.
-    ContextValue("PerInstanceCustomData3Vector", "GetPerInstanceCustomData3Vector",
-                 MaterialPinType::Float3, MaterialContextValueForm::Function, 2,
-                 MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    WithDefaultArgument(
+        ContextValue("PerInstanceCustomData3Vector", "GetPerInstanceCustomData3Vector",
+                     MaterialPinType::Float3, MaterialContextValueForm::Function, 2,
+                     MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,
+                     MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+        1),
     // UE GetPerInstanceFadeAmount.
     ContextValue("PerInstanceFadeAmount", "GetPerInstanceFadeAmount", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::Primitive,

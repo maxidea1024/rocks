@@ -915,8 +915,12 @@ Result<void> Translator::CheckContextValues() noexcept {
     }
 
     Array<IrValueId> stack(scratch);
+    // 픽셀 단계를 먼저 보며 닿는 보간 값을 모으고, 정점 단계는 정점 진입점 결과와 그 보간 값의 정점
+    // 쪽을 본다(DCE 뒤 — 결과에서 빠진 보간기는 진단하지 않는다, UE
+    // HLSLMaterialTranslator.cpp:771–809).
+    Array<IrValueId> interpolated(scratch);
     for (uint32 stage = 0; stage < 2; ++stage) {
-        const bool vertex = stage == 0;
+        const bool vertex = stage == 1;
         for (bool& item : visited) {
             item = false;
         }
@@ -933,12 +937,9 @@ Result<void> Translator::CheckContextValues() noexcept {
 
         if (vertex) {
             // 픽셀 진입점이 보간하는 정점 값도 정점 단계다.
-            for (usize id = 0; id < builder_.Count(); ++id) {
-                const IrValue& value = builder_.Value(static_cast<IrValueId>(id));
-                if (value.op == IrOp::Interpolate) {
-                    if (auto pushed = stack.TryPushBack(value.operands[0]); !pushed) {
-                        return pushed;
-                    }
+            for (IrValueId operand : interpolated) {
+                if (auto pushed = stack.TryPushBack(operand); !pushed) {
+                    return pushed;
                 }
             }
         }
@@ -958,6 +959,10 @@ Result<void> Translator::CheckContextValues() noexcept {
             const IrValue& value = builder_.Value(id);
             if (value.op == IrOp::Interpolate) {
                 // 보간 값 아래는 정점 단계다(정점 단계 차례에 본다 — 6.9절 MS2b4a).
+                if (auto added = interpolated.TryPushBack(value.operands[0]); !added) {
+                    return added;
+                }
+
                 continue;
             }
 
@@ -1040,6 +1045,10 @@ Result<void> Translator::CheckContextValues() noexcept {
         for (IrEntry entry : depthEntries) {
             depth = depth || result.entry == entry;
         }
+
+        // 정점 진입점은 WPO만 깊이에 닿는다(CustomizedUv는 아니다).
+        depth = depth &&
+                (!IsVertexEntry(result.entry) || result.slot == StringView("WorldPositionOffset"));
 
         if (depth) {
             if (auto pushed = stack.TryPushBack(result.value); !pushed) {

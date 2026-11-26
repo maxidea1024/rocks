@@ -366,4 +366,52 @@ TEST(MaterialSwitch_LazyBranchCycle) {
     CHECK(CountErrors(out) == 1);
 }
 
+// 리뷰 반영: QualitySwitch는 고른 입력만 번역한다(고르지 않은 Default의 오류는 없다). 실행 중
+// 스위치의 필수 입력은 UE 문구로 검사한다. CustomizedUv에 닿는 렌더 경로는 V15가 아니다.
+TEST(MaterialSwitch_ReviewRegressions) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    {
+        GraphFixture fixture(env);
+        const Guid select = fixture.Add("Material.QualitySwitch");
+        fixture.Connect(AddBroken(fixture), "Result", select, "Default");
+        fixture.Connect(AddConstant(fixture, 0.4f), "Result", select, "Epic");
+        fixture.Connect(select, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslationTarget epic;
+        epic.quality = MaterialQualityLevel::Epic;
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, Traits(), out, epic));
+        CHECK(out.succeeded);
+        CHECK(IsFloat(EntryValue(out, IrEntry::Surface, "AmbientOcclusion"), 0.4f));
+    }
+
+    {
+        GraphFixture fixture(env);
+        const Guid select = fixture.Add("Material.ShadowPassSwitch");
+        fixture.Connect(AddConstant(fixture, 0.1f), "Result", select, "Default");
+        fixture.Connect(select, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, Traits(), out));
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::MissingInput, select));
+    }
+
+    {
+        GraphFixture fixture(env);
+        const Guid select = fixture.Add("Material.RenderPathSwitch");
+        fixture.Connect(AddConstant(fixture, 0.1f), "Result", select, "Default");
+        fixture.Connect(AddConstant(fixture, 0.2f), "Result", select, "Deferred");
+        const Guid append = fixture.Add("Material.Append");
+        fixture.Connect(select, "Result", append, "A");
+        fixture.Connect(select, "Result", append, "B");
+        fixture.Connect(append, "Result", OutputNodeId, "CustomizedUv0");
+        const Guid uv = fixture.Add("Material.TextureCoordinate");
+        fixture.Connect(uv, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTraitsDesc traits = Traits();
+        traits.customizedUvCount = 1;
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, traits, out));
+        CHECK(CountErrors(out) == 0);
+    }
+}
+
 } // namespace material_switch_lowering_tests_file

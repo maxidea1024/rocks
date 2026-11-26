@@ -1,4 +1,5 @@
 #include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
 #include <MaterialSchema/Nodes/Vectors/VectorsNodeEnums.h>
 #include <Platform/Memory.h>
 
@@ -406,9 +407,26 @@ Result<IrValueId> PrepareTransformInput(LoweringContext& context, Basis from, Ba
     }
 
     if (type.components < 3 || type.IsMatrix()) {
-        if (auto reported = context.Error(MaterialDiagnosticCode::TypeMismatch, "Input",
-                                          "input must be a 3-component vector or a scalar (if "
-                                          "source is Tangent)");
+        // UE "input must be a 3-component vector (current: %s: %s) or a scalar (if source is
+        // Tangent)"(HLSLMaterialTranslator.cpp:11133–11136 — current는 타입 이름).
+        constexpr StringView Scalars[] = {"float", "int", "uint", "bool", "double"};
+        SystemAllocator scratch;
+        StringBuilder<> message(scratch);
+        message << "input must be a 3-component vector (current: "
+                << Scalars[static_cast<uint8>(type.scalar)];
+        if (type.IsMatrix()) {
+            message << type.rows << "x" << type.components;
+        } else if (type.components > 1) {
+            message << type.components;
+        }
+
+        message << ") or a scalar (if source is Tangent)";
+        if (auto status = message.Status(); !status) {
+            return Result<IrValueId>::Failure(status.Error());
+        }
+
+        if (auto reported =
+                context.Error(MaterialDiagnosticCode::TypeMismatch, "Input", message.View());
             !reported) {
             return Result<IrValueId>::Failure(reported.Error());
         }

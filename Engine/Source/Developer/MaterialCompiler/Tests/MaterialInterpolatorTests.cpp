@@ -3,6 +3,8 @@
 #include <MaterialSchema/Nodes/Constants/Constant2Properties.h>
 #include <MaterialSchema/Nodes/Constants/StaticBoolProperties.generated.h>
 #include <MaterialSchema/Nodes/Constants/StaticBoolProperties.h>
+#include <MaterialSchema/Nodes/Constants/TimeProperties.generated.h>
+#include <MaterialSchema/Nodes/Constants/TimeProperties.h>
 #include <MaterialSchema/Nodes/Coordinates/TextureCoordinateProperties.generated.h>
 #include <MaterialSchema/Nodes/Coordinates/TextureCoordinateProperties.h>
 #include <MaterialSchema/Nodes/Math/ComponentMaskProperties.generated.h>
@@ -210,6 +212,129 @@ TEST(MaterialInterpolator_CustomizedUvs) {
     CHECK(HasText(text, "r.customizedUvs[0] = float2(0.25, 0.5);"));
     CHECK(HasText(text, "r.customizedUvs[1] = m"));
     CHECK(HasText(text, "MaterialContextTexCoord(c, 1u)"));
+}
+
+// 리뷰 반영: 정점 함수는 WPO·CustomizedUv·보간 값이 함께 쓰는 부분식을 한 번만 선언한다.
+TEST(MaterialInterpolator_SharedVertexValuesDeclaredOnce) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid time = fixture.Add("Material.Time", env.Save(TimeProperties{}));
+    fixture.Connect(time, "Result", OutputNodeId, "WorldPositionOffset");
+    const Guid scale = fixture.Add("Material.Multiply");
+    fixture.Connect(time, "Result", scale, "A");
+    fixture.Connect(AddConstant(fixture, 2.0f), "Result", scale, "B");
+    const Guid interpolator = fixture.Add("Material.VertexInterpolator");
+    fixture.Connect(scale, "Result", interpolator, "Input");
+    const Guid uv =
+        fixture.Add("Material.TextureCoordinate", env.Save(TextureCoordinateProperties{}));
+    const Guid second = fixture.Add("Material.VertexInterpolator");
+    fixture.Connect(uv, "Result", second, "Input");
+    const Guid mask = AddMask(fixture, true, false, false);
+    fixture.Connect(second, "PS", mask, "Input");
+    const Guid add = fixture.Add("Material.Add");
+    fixture.Connect(interpolator, "PS", add, "A");
+    fixture.Connect(mask, "Result", add, "B");
+    // 픽셀도 TexCoord(0)을 직접 읽어 CustomizedUv0 통과 결과가 생긴다.
+    const Guid direct = AddMask(fixture, false, true, false);
+    fixture.Connect(uv, "Result", direct, "Input");
+    const Guid total = fixture.Add("Material.Add");
+    fixture.Connect(add, "Result", total, "A");
+    fixture.Connect(direct, "Result", total, "B");
+    fixture.Connect(total, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, Traits(), out, source));
+    const StringView text = source.text.View();
+    // EvaluateMaterialVertex 안에서 Time·TexCoord(0)은 한 번씩만 선언된다(CustomizedUv0 통과 값과
+    // 보간기 입력이 같은 TexCoord(0)이다).
+    const StringView vertexHead = "void EvaluateMaterialVertex(";
+    usize start = 0;
+    while (start + vertexHead.ByteCount() <= text.ByteCount() &&
+           !(StringView(text.Data() + start, vertexHead.ByteCount()) == vertexHead)) {
+        ++start;
+    }
+
+    usize end = start;
+    while (end < text.ByteCount() && text.Data()[end] != '}') {
+        ++end;
+    }
+
+    const StringView body(text.Data() + start, end - start);
+    const auto count = [&](StringView part) noexcept {
+        usize found = 0;
+        for (usize at = 0; at + part.ByteCount() <= body.ByteCount(); ++at) {
+            found += StringView(body.Data() + at, part.ByteCount()) == part ? 1 : 0;
+        }
+
+        return found;
+    };
+
+    CHECK(count("= MaterialContextTime(c);") == 1);
+    CHECK(count("= MaterialContextTexCoord(c, 0u);") == 1);
+    CHECK(HasText(body, "r.customizedUvs[0] = m"));
+}
+
+// 리뷰 반영: 결과에서 빠진 보간기(상수 alpha Lerp의 고르지 않은 쪽)의 정점 쪽은 검사하지 않는다(DCE
+// 뒤).
+TEST(MaterialInterpolator_DeadInterpolatorNotChecked) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid derivative = fixture.Add("Material.Ddx");
+    fixture.Connect(AddVarying(fixture, 0.5f), "Result", derivative, "Value");
+    const Guid interpolator = fixture.Add("Material.VertexInterpolator");
+    fixture.Connect(derivative, "Result", interpolator, "Input");
+    const Guid lerp = fixture.Add("Material.LinearInterpolate");
+    fixture.Connect(AddConstant(fixture, 0.25f), "Result", lerp, "A");
+    fixture.Connect(interpolator, "PS", lerp, "B");
+    fixture.Connect(AddConstant(fixture, 0.0f), "Result", lerp, "Alpha");
+    fixture.Connect(lerp, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(Translate(fixture, Traits(), out));
+    CHECK(out.succeeded);
+    CHECK(CountErrors(out) == 0);
+}
+
+// 보간 배정은 간선 저장 순서와 무관하다(모듈 번호 순 — 6.6절).
+TEST(MaterialInterpolator_PackingIsDeterministic) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto build = [&](GraphFixture& fixture) noexcept {
+        const Guid normal = fixture.Add("Material.VertexNormal");
+        const Guid first = fixture.Add("Material.VertexInterpolator");
+        fixture.Connect(normal, "Result", first, "Input");
+        const Guid color = fixture.Add("Material.VertexColor");
+        const Guid second = fixture.Add("Material.VertexInterpolator");
+        fixture.Connect(color, "Result", second, "Input");
+        const Guid firstMask = AddMask(fixture, true, false, false);
+        const Guid secondMask = AddMask(fixture, false, true, false);
+        fixture.Connect(first, "PS", firstMask, "Input");
+        fixture.Connect(second, "PS", secondMask, "Input");
+        const Guid add = fixture.Add("Material.Add");
+        fixture.Connect(firstMask, "Result", add, "A");
+        fixture.Connect(secondMask, "Result", add, "B");
+        fixture.Connect(add, "Result", OutputNodeId, "AmbientOcclusion");
+    };
+
+    GraphFixture forward(env);
+    build(forward);
+    GraphFixture backward(env);
+    build(backward);
+    nodegraph::Graph& graph = backward.Main();
+    for (usize low = 0, high = graph.edges.Size() - 1; low < high; ++low, --high) {
+        const nodegraph::GraphEdge swap = graph.edges[low];
+        graph.edges[low] = graph.edges[high];
+        graph.edges[high] = swap;
+    }
+
+    MaterialTranslation a(env.allocator);
+    MaterialTranslation b(env.allocator);
+    MaterialGeneratedSource sourceA(env.allocator);
+    MaterialGeneratedSource sourceB(env.allocator);
+    REQUIRE(Generate(forward, Traits(), a, sourceA));
+    REQUIRE(Generate(backward, Traits(), b, sourceB));
+    CHECK(sourceA.text.View() == sourceB.text.View());
 }
 
 } // namespace material_interpolator_tests_file

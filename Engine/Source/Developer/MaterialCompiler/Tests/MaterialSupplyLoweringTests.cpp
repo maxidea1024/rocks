@@ -313,4 +313,26 @@ TEST(MaterialSupply_Misc) {
     CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::TypeMismatch, level));
 }
 
+// 리뷰 반영: 연결된 위치는 원점 종류의 타입(Absolute → Double3)으로 맞추고, PerInstanceCustomData는
+// 공급하지 않으면 기본값 인자를 돌려준다.
+TEST(MaterialSupply_ReviewRegressions) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid sky = fixture.Add("Material.SkyAtmosphereAerialPerspective");
+    fixture.Connect(fixture.Add("Material.VertexNormal"), "Result", sky, "WorldPosition");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateToAo(fixture, sky, "Result", out));
+    REQUIRE(out.succeeded);
+    const IrValue* value = FindExtern(out, "SkyAtmosphereAerialPerspective");
+    REQUIRE(value != nullptr);
+    CHECK(ValueOf(out, value->operands[0]).type == IrDouble(3));
+
+    String text(env.allocator);
+    REQUIRE(WriteMaterialContextSource(env.allocator, text));
+    CHECK(HasText(text.View(), "#define MaterialContextPerInstanceCustomData(c, a0, a1) (a1)\n"));
+    CHECK(HasText(text.View(),
+                  "#define MaterialContextPerInstanceCustomData3Vector(c, a0, a1) (a1)\n"));
+}
+
 } // namespace material_supply_lowering_tests_file

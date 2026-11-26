@@ -21,6 +21,8 @@ constexpr uint64 WriterSwizzleMask = (uint64{1} << WriterSwizzleBits) - 1;
 constexpr uint32 WriterFloatMagnitudeMask = static_cast<uint32>(NumericLimits<int32>::Max());
 // DefaultLit shading model 번호다(Renderer 14.2절 — SurfaceAttributes.rsh ShadingModelDefaultLit).
 constexpr uint32 WriterDefaultLitShadingModel = 1;
+// SpeedTree가 쓰는 정점 UV 채널 수다(UV 2–7 — 6.9절 MS2b4b).
+constexpr uint64 WriterSpeedTreeTexCoords = 8;
 // 보간 벡터(float4) 하나의 성분 수다(6.9절 MS2b4a).
 constexpr uint64 WriterInterpolantComponents = 4;
 // 함수 몸체 들여쓰기다.
@@ -1176,17 +1178,13 @@ Result<void> SourceWriter::Interpolated(const IrValue& value) noexcept {
 }
 
 Result<void> SourceWriter::WriteInterpolants() noexcept {
-    // 정점 함수가 보간 값의 정점 쪽을 계산해 r.interpolants에 쓴다(성분마다 — 6.9절 MS2b4a).
+    // 보간 값의 정점 쪽을 r.interpolants에 쓴다(성분마다 — 6.9절 MS2b4a). 값 선언은
+    // VertexFunction이 함수 루트를 모아 한 번에 냈다.
     static constexpr char Channels[] = {'x', 'y', 'z', 'w'};
     const Span<const IrValue> values = module_.Values();
     for (const IrValue& value : values) {
         if (value.op != IrOp::Interpolate) {
             continue;
-        }
-
-        const IrValueId roots[] = {value.operands[0]};
-        if (auto body = Values(roots); !body) {
-            return body;
         }
 
         for (uint8 index = 0; index < value.type.components; ++index) {
@@ -1236,12 +1234,32 @@ Result<void> SourceWriter::VertexFunction(StringView signature, IrEntry entry) n
         }
     }
 
-    if (const IrResult* offset = FindResult(entry, "WorldPositionOffset")) {
-        const IrValueId roots[] = {offset->value};
-        if (auto body = Values(roots); !body) {
-            return body;
+    // 함수의 루트(WPO, Vertex 진입점은 CustomizedUv 결과와 보간 값의 정점 쪽까지)를 모아 값을 한
+    // 번에 낸다. 루트마다 따로 내면 함께 쓰는 부분식이 같은 함수에서 두 번 선언된다.
+    Array<IrValueId> roots(allocator_);
+    for (const IrResult& result : module_.Results()) {
+        if (result.entry == entry) {
+            if (auto added = roots.TryPushBack(result.value); !added) {
+                return added;
+            }
         }
+    }
 
+    if (entry == IrEntry::Vertex) {
+        for (const IrValue& value : module_.Values()) {
+            if (value.op == IrOp::Interpolate) {
+                if (auto added = roots.TryPushBack(value.operands[0]); !added) {
+                    return added;
+                }
+            }
+        }
+    }
+
+    if (auto body = Values(roots.View()); !body) {
+        return body;
+    }
+
+    if (const IrResult* offset = FindResult(entry, "WorldPositionOffset")) {
         if (auto assign = Raw("    r.worldPositionOffset = "); !assign) {
             return assign;
         }
@@ -1261,11 +1279,6 @@ Result<void> SourceWriter::VertexFunction(StringView signature, IrEntry entry) n
             if (result.entry != IrEntry::Vertex ||
                 result.slot == StringView("WorldPositionOffset")) {
                 continue;
-            }
-
-            const IrValueId roots[] = {result.value};
-            if (auto body = Values(roots); !body) {
-                return body;
             }
 
             const StringView digit(result.slot.Data() + result.slot.ByteCount() - 1, 1);
@@ -1496,6 +1509,18 @@ Result<void> SourceWriter::Run() noexcept {
         const IrValue& index = module_.Values()[value.operands[0]];
         if (index.op == IrOp::Constant && index.immediate[0] + 1 > texCoords) {
             texCoords = index.immediate[0] + 1;
+        }
+    }
+
+    // SpeedTree 바람은 정점 UV 2–7을 읽는다(UE AllocateSlot(AllocatedUserVertexTexCoords, 2, 6) —
+    // HLSLMaterialTranslator.cpp:14699–14720).
+    const MaterialContextValue* speedTree = FindMaterialContextValue("SpeedTreeVertexOffset");
+    const uint64 speedTreeIndex =
+        speedTree == nullptr ? NumericLimits<uint64>::Max()
+                             : static_cast<uint64>(speedTree - MaterialContextValues().Data());
+    for (const IrValue& value : module_.Values()) {
+        if (value.op == IrOp::Extern && value.immediate[0] == speedTreeIndex) {
+            texCoords = texCoords > WriterSpeedTreeTexCoords ? texCoords : WriterSpeedTreeTexCoords;
         }
     }
 

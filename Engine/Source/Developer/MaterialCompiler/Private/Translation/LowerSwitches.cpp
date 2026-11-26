@@ -61,6 +61,39 @@ Result<bool> RequireBoth(LoweringContext& context, StringView first, StringView 
     return Result<bool>::Success(all);
 }
 
+// 번역 때 고르는 스위치의 고른 입력 하나다: Default 연결이 없으면 message로 MissingInput, chosen이
+// 연결되면 그것, 아니면 Default만 번역한다(UE GetEffectiveInput —
+// MaterialExpressions.cpp:9067–9107).
+Result<IrValueId> ChosenOrDefault(LoweringContext& context, StringView chosen,
+                                  StringView message) noexcept {
+    auto hasDefault = context.IsConnected("Default");
+    if (!hasDefault) {
+        return Result<IrValueId>::Failure(hasDefault.Error());
+    }
+
+    if (!hasDefault.Value()) {
+        if (auto reported = context.Error(MaterialDiagnosticCode::MissingInput, "Default", message);
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (!chosen.IsEmpty()) {
+        auto connected = context.IsConnected(chosen);
+        if (!connected) {
+            return Result<IrValueId>::Failure(connected.Error());
+        }
+
+        if (connected.Value()) {
+            return context.Input(chosen);
+        }
+    }
+
+    return context.Input("Default");
+}
+
 // key가 연결되면 그 값, 아니면 fallback이다(UE "연결되지 않은 입력은 Default").
 Result<IrValueId> InputOr(LoweringContext& context, StringView key, IrValueId fallback) noexcept {
     auto connected = context.IsConnected(key);
@@ -137,18 +170,14 @@ Result<void> LowerStaticSwitch(LoweringContext& context) noexcept {
 // UE QualitySwitch(MaterialExpressions.cpp:9067–9087).
 Result<void> LowerQualitySwitch(LoweringContext& context) noexcept {
     constexpr StringView Levels[] = {"Low", "High", "Medium", "Epic"};
-    auto fallback = RequiredInput(context, "Default", "Quality switch missing default input");
-    if (!fallback || fallback.Value() == NoIrValue) {
-        return fallback ? Result<void>::Success() : Result<void>::Failure(fallback.Error());
-    }
-
     const MaterialQualityLevel quality = context.Target(MaterialTargetField::Quality).quality;
     const uint32 level = static_cast<uint32>(quality);
-    if (quality == MaterialQualityLevel::None || level >= sizeof(Levels) / sizeof(Levels[0])) {
-        return context.Output("Result", fallback.Value());
-    }
-
-    return EmitSwitch(context, InputOr(context, Levels[level], fallback.Value()));
+    const StringView chosen =
+        quality == MaterialQualityLevel::None || level >= sizeof(Levels) / sizeof(Levels[0])
+            ? StringView()
+            : Levels[level];
+    return EmitSwitch(context,
+                      ChosenOrDefault(context, chosen, "Quality switch missing default input"));
 }
 
 // 렌더 경로(6.3절 3항 — 조건 값). Mobile 입력은 Rocks 렌더 경로에 없어 쓰지 않는다.
@@ -176,16 +205,18 @@ Result<void> LowerRenderPathSwitch(LoweringContext& context) noexcept {
 // 기능 등급(19.3.4절 — 조건 값). Low 품질 모바일 흉내면 Mobile 입력만(UE
 // MaterialExpressions.cpp:9224–9229).
 Result<void> LowerCapabilityTierSwitch(LoweringContext& context) noexcept {
-    auto fallback = RequiredInput(context, "Default", "Feature Level switch missing default input");
-    if (!fallback || fallback.Value() == NoIrValue) {
-        return fallback ? Result<void>::Success() : Result<void>::Failure(fallback.Error());
-    }
-
     const bool simulate = context.Target(MaterialTargetField::SimulateMobileForLowQuality)
                               .simulateMobileForLowQuality;
     if (simulate &&
         context.Target(MaterialTargetField::Quality).quality == MaterialQualityLevel::Low) {
-        return EmitSwitch(context, InputOr(context, "ES3_1", fallback.Value()));
+        // 번역 때 고른다(고른 입력 하나만 — UE MaterialExpressions.cpp:9224–9243).
+        return EmitSwitch(context, ChosenOrDefault(context, "ES3_1",
+                                                   "Feature Level switch missing default input"));
+    }
+
+    auto fallback = RequiredInput(context, "Default", "Feature Level switch missing default input");
+    if (!fallback || fallback.Value() == NoIrValue) {
+        return fallback ? Result<void>::Success() : Result<void>::Failure(fallback.Error());
     }
 
     auto mobile = InputOr(context, "ES3_1", fallback.Value());
@@ -387,7 +418,13 @@ Result<void> LowerRuntimeVirtualTexturePassSwitch(LoweringContext& context) noex
 
 // 두 입력을 모두 번역하는 실행 중 값 스위치(UE GenericSwitch)다.
 Result<void> LowerRuntimeSwitch(LoweringContext& context, StringView condition,
-                                StringView alternative) noexcept {
+                                StringView alternative, StringView alternativeMessage) noexcept {
+    auto both =
+        RequireBoth(context, "Default", "Missing input Default", alternative, alternativeMessage);
+    if (!both || !both.Value()) {
+        return both ? Result<void>::Success() : Result<void>::Failure(both.Error());
+    }
+
     auto fallback = context.Input("Default");
     auto chosen = context.Input(alternative);
     if (!fallback || !chosen) {
@@ -400,15 +437,17 @@ Result<void> LowerRuntimeSwitch(LoweringContext& context, StringView condition,
 // UE ShadowReplace·ReflectionCapturePassSwitch·MeshPaintTextureReplace
 // (HLSLMaterialTranslator.cpp:11670–11688, 9142–9145).
 Result<void> LowerShadowPassSwitch(LoweringContext& context) noexcept {
-    return LowerRuntimeSwitch(context, "ShadowPass", "Shadow");
+    return LowerRuntimeSwitch(context, "ShadowPass", "Shadow", "Missing input Shadow");
 }
 
 Result<void> LowerReflectionCaptureSwitch(LoweringContext& context) noexcept {
-    return LowerRuntimeSwitch(context, "ReflectionCapturePass", "Reflection");
+    return LowerRuntimeSwitch(context, "ReflectionCapturePass", "Reflection",
+                              "Missing input Reflection");
 }
 
 Result<void> LowerMeshPaintTextureSwitch(LoweringContext& context) noexcept {
-    return LowerRuntimeSwitch(context, "MeshPaintTextureValid", "MeshPaintTexture");
+    return LowerRuntimeSwitch(context, "MeshPaintTextureValid", "MeshPaintTexture",
+                              "Missing input MeshPaintTexture");
 }
 
 // UE NaniteReplace(MaterialExpressions.cpp:18637–18648): 지원하지 않는 대상은 Default만.
@@ -423,7 +462,7 @@ Result<void> LowerVirtualizedGeometryPassSwitch(LoweringContext& context) noexce
         return EmitSwitch(context, context.Input("Default"));
     }
 
-    return LowerRuntimeSwitch(context, "VirtualizedGeometryPass", "Nanite");
+    return LowerRuntimeSwitch(context, "VirtualizedGeometryPass", "Nanite", "Missing input Nanite");
 }
 
 // UE LightmassReplace(MaterialExpressions.cpp:17570–17601).
@@ -501,6 +540,12 @@ Result<void> LowerRayTracingQualitySwitch(LoweringContext& context) noexcept {
 
 // UE PathTracingQualitySwitch(MaterialExpressions.cpp:17812–17838).
 Result<void> LowerPathTracingQualitySwitch(LoweringContext& context) noexcept {
+    auto both = RequireBoth(context, "Normal", "Missing PathTracingQualitySwitch input 'Normal'",
+                            "PathTraced", "Missing PathTracingQualitySwitch input 'PathTraced'");
+    if (!both || !both.Value()) {
+        return both ? Result<void>::Success() : Result<void>::Failure(both.Error());
+    }
+
     auto normal = context.Input("Normal");
     auto traced = context.Input("PathTraced");
     if (!normal || !traced) {
