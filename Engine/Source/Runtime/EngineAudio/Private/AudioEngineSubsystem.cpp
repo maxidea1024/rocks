@@ -1,6 +1,7 @@
 #include "AudioDeviceContext.h"
 #include "AudioEngineSettingsInternal.h"
 #include "ControlBatch.h"
+#include "ValueRange.h"
 
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -57,10 +58,6 @@ uint32 NearestBlockFrames(int32 requested) noexcept {
     return best;
 }
 
-bool InRange(float value, float low, float high) noexcept {
-    return math::IsFinite(value) && value >= low && value <= high;
-}
-
 } // namespace
 
 struct AudioEngineSubsystem::Control {
@@ -76,7 +73,8 @@ struct AudioEngineSubsystem::Control {
 
 AudioEngineSubsystem::AudioEngineSubsystem(Allocator& allocator) noexcept
     : allocator_(allocator), playbacks_(allocator), freeSlots_(allocator), ignored_(allocator),
-      delivering_(allocator), freeBatches_(allocator) {
+      delivering_(allocator), scenes_(allocator), sceneEpochs_(allocator), emitters_(allocator),
+      freeEmitters_(allocator), freeBatches_(allocator) {
 }
 
 AudioEngineSubsystem::~AudioEngineSubsystem() {
@@ -95,8 +93,21 @@ Result<void> AudioEngineSubsystem::Initialize(Engine& engine) noexcept {
     traits_ = options_.traits.HasValue() ? options_.traits.Value() : CurrentAudioRunTraits();
     if (!playbacks_.TryResize(MaxPlaybacks) || !freeSlots_.TryReserve(MaxPlaybacks) ||
         !ignored_.TryReserve(MaxPlaybacks) || !delivering_.TryReserve(DeliveringCapacity) ||
-        !freeBatches_.TryReserve(ControlBatchCount)) {
+        !freeBatches_.TryReserve(ControlBatchCount) || !scenes_.TryResize(MaxAudioScenes) ||
+        !sceneEpochs_.TryResize(MaxAudioScenes) || !emitters_.TryResize(MaxAudioEmitters) ||
+        !freeEmitters_.TryReserve(MaxAudioEmitters)) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (uint32& epoch : sceneEpochs_) {
+        epoch = 0;
+    }
+
+    // 엔진 scene은 종료까지 산다(엔진 소유 재생).
+    scenes_[EngineSceneIndex].epoch = EngineSceneEpoch;
+    sceneEpochs_[EngineSceneIndex] = EngineSceneEpoch;
+    for (uint32 slot = MaxAudioEmitters; slot > 0; --slot) {
+        (void)freeEmitters_.TryPushBack(slot - 1);
     }
 
     // 낮은 슬롯부터 쓴다(시험 재현성).
@@ -185,6 +196,9 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
     deviceOptions.renderMode = options_.renderMode;
     deviceOptions.nullMode = options_.nullMode;
     deviceOptions.requestedBufferCount = static_cast<uint32>(bufferSetting < 0 ? 0 : bufferSetting);
+    if (options_.commandCapacity != 0) {
+        deviceOptions.commandCapacity = options_.commandCapacity;
+    }
     auto opened = audio::AudioOutputDevice::TryOpen(mixerConfig, Move(backend), request,
                                                     deviceOptions, allocator_);
     if (!opened) {
@@ -261,6 +275,8 @@ void AudioEngineSubsystem::OnFrameBegin(Engine& engine) noexcept {
                 (void)delivering_.TryPushBack(event);
             }
 
+            lastControlStats_ = batch->stats;
+
             batch->Recycle();
             (void)freeBatches_.TryPushBack(batch);
             ++stats_.returnedBatches;
@@ -296,6 +312,7 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
     }
 
     current_->masterGain = MasterGainTarget(engine);
+    SnapshotScenes();
     SubmitCurrent();
 }
 
@@ -323,7 +340,232 @@ void AudioEngineSubsystem::Deinitialize(Engine& engine) noexcept {
 
 Result<PlaybackHandle> AudioEngineSubsystem::Play2D(const SoundSourceRef& sound,
                                                     PlayOptions options) noexcept {
-    return Accept(sound, options, 0);
+    return Accept(sound, options, AudioSceneId{EngineSceneIndex, EngineSceneEpoch}, Placement{});
+}
+
+Result<PlaybackHandle> AudioEngineSubsystem::Play2DInScene(AudioSceneId scene,
+                                                           const SoundSourceRef& sound,
+                                                           PlayOptions options) noexcept {
+    return Accept(sound, options, scene, Placement{});
+}
+
+Result<PlaybackHandle> AudioEngineSubsystem::PlayAtInScene(AudioSceneId scene,
+                                                           const SoundSourceRef& sound,
+                                                           const Vec3d& position,
+                                                           PlayOptions options) noexcept {
+    if (!position.IsFinite()) {
+        return Result<PlaybackHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Placement placement;
+    placement.kind = static_cast<uint8>(PlayPlacement::Fixed);
+    placement.position = position;
+    return Accept(sound, options, scene, placement);
+}
+
+Result<PlaybackHandle> AudioEngineSubsystem::PlayAttachedInScene(AudioSceneId scene,
+                                                                 AudioEmitterId emitter,
+                                                                 const SoundSourceRef& sound,
+                                                                 PlayOptions options) noexcept {
+    if (!emitter.IsValid()) {
+        return Result<PlaybackHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Placement placement;
+    placement.kind = static_cast<uint8>(PlayPlacement::Emitter);
+    placement.emitter = emitter;
+    return Accept(sound, options, scene, placement);
+}
+
+AudioSceneId AudioEngineSubsystem::RegisterScene() noexcept {
+    if (scenes_.IsEmpty()) {
+        return {};
+    }
+
+    for (uint32 index = 0; index < MaxAudioScenes; ++index) {
+        if (index == EngineSceneIndex || scenes_[index].epoch != 0) {
+            continue;
+        }
+
+        uint32 epoch = sceneEpochs_[index] + 1;
+        if (epoch == 0) {
+            epoch = 1;
+        }
+
+        sceneEpochs_[index] = epoch;
+        GameScene& scene = scenes_[index];
+        scene.epoch = epoch;
+        scene.listenerPosition = Vec3d();
+        scene.listenerRotation = Quatd::Identity();
+        // 제어 쪽에 새 epoch를 알린다(다음 묶음 스냅숏).
+        scene.listenerDirty = true;
+        return AudioSceneId{index, epoch};
+    }
+
+    return {};
+}
+
+void AudioEngineSubsystem::UnregisterScene(AudioSceneId scene) noexcept {
+    if (!IsLiveScene(scene) || scene.index == EngineSceneIndex) {
+        return;
+    }
+
+    scenes_[scene.index] = GameScene{};
+    // 콜백을 이 자리에서 끊는다. 슬롯은 제어 쪽 Ended(또는 Ignored 끝)가 온 뒤 놓는다.
+    for (GamePlayback& playback : playbacks_) {
+        if (playback.live && playback.scene == scene.index && playback.sceneEpoch == scene.epoch) {
+            playback.onEvent = PlaybackEventCallback{};
+            playback.status = PlaybackStatus::Finished;
+        }
+    }
+
+    if (control_ != nullptr && !drained_) {
+        ControlCommand command;
+        command.type = ControlCommandType::RemoveScene;
+        command.scene = scene.index;
+        command.sceneEpoch = scene.epoch;
+        // 할당 실패면 제어 쪽 재생이 scene 해제를 모르고 남는다 — emitter 해제가 부착 재생을
+        // 끝내고, 고정 위치 재생은 종료 drain이 끝낸다.
+        (void)current_->commands.TryPushBack(Move(command));
+    }
+
+    for (uint32 slot = 0; slot < emitters_.Size(); ++slot) {
+        const GameEmitter& emitter = emitters_[slot];
+        if (emitter.live && emitter.scene == scene.index && emitter.sceneEpoch == scene.epoch) {
+            UnregisterEmitter(AudioEmitterId{slot, emitter.generation});
+        }
+    }
+}
+
+void AudioEngineSubsystem::SetSceneListener(AudioSceneId scene, const Vec3d& position,
+                                            const Quatd& rotation) noexcept {
+    auto normalized = rotation.TryNormalize();
+    if (!IsLiveScene(scene) || !position.IsFinite() || !normalized) {
+        return;
+    }
+
+    GameScene& target = scenes_[scene.index];
+    target.listenerPosition = position;
+    target.listenerRotation = normalized.Value();
+    target.listenerDirty = true;
+}
+
+Result<AudioEmitterId> AudioEngineSubsystem::RegisterEmitter(AudioSceneId scene,
+                                                             const Vec3d& position) noexcept {
+    using Registered = Result<AudioEmitterId>;
+    if (!IsLiveScene(scene) || !position.IsFinite()) {
+        return Registered::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (freeEmitters_.IsEmpty()) {
+        return Registered::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    const uint32 slot = freeEmitters_[freeEmitters_.Size() - 1];
+    (void)freeEmitters_.TryPopBack();
+    GameEmitter& emitter = emitters_[slot];
+    emitter.live = true;
+    emitter.scene = scene.index;
+    emitter.sceneEpoch = scene.epoch;
+    emitter.position = position;
+    emitter.updateBatch = 0;
+    PushEmitterUpdate(slot);
+    return Registered::Success(AudioEmitterId{slot, emitter.generation});
+}
+
+void AudioEngineSubsystem::UpdateEmitter(AudioEmitterId id, const Vec3d& position) noexcept {
+    if (id.slot >= emitters_.Size() || !position.IsFinite()) {
+        return;
+    }
+
+    GameEmitter& emitter = emitters_[id.slot];
+    if (!emitter.live || emitter.generation != id.generation) {
+        return;
+    }
+
+    emitter.position = position;
+    PushEmitterUpdate(id.slot);
+}
+
+void AudioEngineSubsystem::UnregisterEmitter(AudioEmitterId id) noexcept {
+    if (id.slot >= emitters_.Size()) {
+        return;
+    }
+
+    GameEmitter& emitter = emitters_[id.slot];
+    if (!emitter.live || emitter.generation != id.generation) {
+        return;
+    }
+
+    if (control_ != nullptr && !drained_) {
+        ControlCommand command;
+        command.type = ControlCommandType::RemoveEmitter;
+        command.emitter = id;
+        (void)current_->commands.TryPushBack(Move(command));
+    }
+
+    emitter.live = false;
+    emitter.updateBatch = 0;
+    ++emitter.generation;
+    if (emitter.generation == 0) {
+        emitter.generation = 1;
+    }
+
+    (void)freeEmitters_.TryPushBack(id.slot);
+}
+
+bool AudioEngineSubsystem::IsLiveScene(AudioSceneId scene) const noexcept {
+    return scene.IsValid() && scene.index < scenes_.Size() &&
+           scenes_[scene.index].epoch == scene.epoch;
+}
+
+void AudioEngineSubsystem::PushEmitterUpdate(uint32 slot) noexcept {
+    if (control_ == nullptr || drained_) {
+        return;
+    }
+
+    GameEmitter& emitter = emitters_[slot];
+    // 같은 묶음 안에서는 최신 위치 하나로 합친다.
+    if (emitter.updateBatch == batchSerial_ && emitter.updateIndex != 0) {
+        current_->emitters[emitter.updateIndex - 1].position = emitter.position;
+        return;
+    }
+
+    EmitterUpdate update;
+    update.emitter = AudioEmitterId{slot, emitter.generation};
+    update.position = emitter.position;
+    if (current_->emitters.TryPushBack(update)) {
+        emitter.updateBatch = batchSerial_;
+        emitter.updateIndex = static_cast<uint32>(current_->emitters.Size());
+    }
+}
+
+void AudioEngineSubsystem::SnapshotScenes() noexcept {
+    for (uint32 index = 0; index < scenes_.Size(); ++index) {
+        GameScene& scene = scenes_[index];
+        if (scene.epoch == 0 || !scene.listenerDirty) {
+            continue;
+        }
+
+        SceneUpdate update;
+        update.index = index;
+        update.epoch = scene.epoch;
+        update.position = scene.listenerPosition;
+        update.rotation = scene.listenerRotation;
+        // 묶음을 보내지 못한 프레임이 이어져도 scene마다 하나만 둔다.
+        bool merged = false;
+        for (SceneUpdate& existing : current_->scenes) {
+            if (existing.index == index) {
+                existing = update;
+                merged = true;
+                break;
+            }
+        }
+
+        if (merged || current_->scenes.TryPushBack(update)) {
+            scene.listenerDirty = false;
+        }
+    }
 }
 
 Result<void> AudioEngineSubsystem::Stop(PlaybackHandle handle, uint32 fadeFrames) noexcept {
@@ -332,7 +574,8 @@ Result<void> AudioEngineSubsystem::Stop(PlaybackHandle handle, uint32 fadeFrames
     }
 
     GamePlayback* playback = FindLive(handle);
-    if (playback == nullptr || playback->status == PlaybackStatus::Ignored || drained_) {
+    if (playback == nullptr || playback->status == PlaybackStatus::Ignored ||
+        playback->status == PlaybackStatus::Finished || drained_) {
         return Result<void>::Success();
     }
 
@@ -349,20 +592,22 @@ Result<void> AudioEngineSubsystem::Stop(PlaybackHandle handle, uint32 fadeFrames
 
 Result<void> AudioEngineSubsystem::SetParameter(PlaybackHandle handle, PlaybackParameter parameter,
                                                 float value, uint32 rampFrames) noexcept {
-    const bool valid = parameter == PlaybackParameter::Volume
-                           ? InRange(value, 0.0f, audio::MaxVoiceGain)
-                           : InRange(value, audio::MinPitch, audio::MaxPitch);
+    const bool valid =
+        parameter == PlaybackParameter::Volume
+            ? engine_audio_detail::IsFiniteInRange(value, 0.0f, audio::MaxVoiceGain)
+            : engine_audio_detail::IsFiniteInRange(value, audio::MinPitch, audio::MaxPitch);
     if (!handle.IsValid() || !valid) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     GamePlayback* playback = FindLive(handle);
-    if (playback == nullptr || playback->status == PlaybackStatus::Ignored || drained_) {
+    if (playback == nullptr || playback->status == PlaybackStatus::Ignored ||
+        playback->status == PlaybackStatus::Finished || drained_) {
         return Result<void>::Success();
     }
 
     // 같은 묶음 안의 같은 파라미터는 최신값 하나로 합친다(3.35.5절).
-    const uint32 kind = parameter == PlaybackParameter::Volume ? 0 : 1;
+    const uint32 kind = PlaybackParameterIndex(parameter);
     if (playback->parameterBatch == batchSerial_ && playback->parameterCommand[kind] != 0) {
         ControlCommand& merged = current_->commands[playback->parameterCommand[kind] - 1];
         merged.value = value;
@@ -382,8 +627,9 @@ Result<void> AudioEngineSubsystem::SetParameter(PlaybackHandle handle, PlaybackP
 
     if (playback->parameterBatch != batchSerial_) {
         playback->parameterBatch = batchSerial_;
-        playback->parameterCommand[0] = 0;
-        playback->parameterCommand[1] = 0;
+        for (uint32& index : playback->parameterCommand) {
+            index = 0;
+        }
     }
 
     playback->parameterCommand[kind] = static_cast<uint32>(current_->commands.Size());
@@ -411,29 +657,25 @@ void AudioEngineSubsystem::FlushControl() noexcept {
     }
 }
 
-AudioEngineSubsystem::ContextStats AudioEngineSubsystem::ControlStats() const noexcept {
-    ContextStats out;
+AudioControlStats AudioEngineSubsystem::ControlStats() const noexcept {
     if (context_ == nullptr) {
-        return out;
+        return AudioControlStats{};
     }
 
-    const AudioDeviceContextStats stats = context_->Stats();
-    out.activeVoices = stats.activeVoices;
-    out.releasingVoices = stats.releasingVoices;
-    out.registeredClips = stats.registeredClips;
-    out.pendingDeferred = stats.pendingDeferred;
-    out.deferredPlays = stats.deferredPlays;
-    out.voiceLimitRejects = stats.voiceLimitRejects;
-    out.failedPlays = stats.failedPlays;
-    out.masterGainCommands = stats.masterGainCommands;
-    return out;
+    // Inline 방식·drain 뒤에는 제어 쪽이 이 스레드뿐이라 바로 읽는다.
+    if (drained_ || options_.controlMode == AudioControlMode::Inline) {
+        return context_->Stats();
+    }
+
+    return lastControlStats_;
 }
 
 Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
                                                    const PlayOptions& options) const noexcept {
     const SoundPlayable* playable = sound.Get();
-    if (playable == nullptr || !InRange(options.volume, 0.0f, audio::MaxVoiceGain) ||
-        !InRange(options.pitch, audio::MinPitch, audio::MaxPitch) ||
+    if (playable == nullptr ||
+        !engine_audio_detail::IsFiniteInRange(options.volume, 0.0f, audio::MaxVoiceGain) ||
+        !engine_audio_detail::IsFiniteInRange(options.pitch, audio::MinPitch, audio::MaxPitch) ||
         options.startFrame >= playable->pcm->FrameCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -446,7 +688,8 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
 }
 
 Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
-                                                    PlayOptions& options, uint32 scene) noexcept {
+                                                    PlayOptions& options, AudioSceneId scene,
+                                                    const Placement& placement) noexcept {
     using Accepted = Result<PlaybackHandle>;
     if (!accepting_) {
         return Accepted::Failure(ErrorCode::ShuttingDown);
@@ -463,7 +706,14 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
     const uint32 slot = freeSlots_[freeSlots_.Size() - 1];
     GamePlayback& playback = playbacks_[slot];
     const PlaybackHandle handle{slot, playback.generation};
-    if (control_ == nullptr) {
+    bool live = IsLiveScene(scene);
+    if (live && placement.kind == static_cast<uint8>(PlayPlacement::Emitter)) {
+        const AudioEmitterId id = placement.emitter;
+        live = id.slot < emitters_.Size() && emitters_[id.slot].live &&
+               emitters_[id.slot].generation == id.generation;
+    }
+
+    if (control_ == nullptr || !live) {
         // 장치 없음: 유효 handle을 주고 다음 프레임에 Ended(Ignored)를 낸다(3.8.3절).
         (void)ignored_.TryPushBack(handle);
         playback.status = PlaybackStatus::Ignored;
@@ -472,7 +722,11 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.type = ControlCommandType::Play;
         command.handle = handle;
         command.sound = sound;
-        command.scene = scene;
+        command.scene = scene.index;
+        command.sceneEpoch = scene.epoch;
+        command.placement = static_cast<PlayPlacement>(placement.kind);
+        command.position = placement.position;
+        command.emitter = placement.emitter;
         command.volume = options.volume;
         command.pitch = options.pitch;
         command.startFrame = options.startFrame;
@@ -485,6 +739,8 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
     }
 
     (void)freeSlots_.TryPopBack();
+    playback.scene = scene.index;
+    playback.sceneEpoch = scene.epoch;
     playback.live = true;
     playback.onEvent = Move(options.onEvent);
     return Accepted::Success(handle);
@@ -594,6 +850,10 @@ void AudioEngineSubsystem::SubmitCurrent() noexcept {
 
 void AudioEngineSubsystem::ProcessBatch(ControlBatch* batch) noexcept {
     // 제어 pipe 스레드(Inline이면 게임 스레드)다. 묶음은 반환 큐에 넣을 때까지 이쪽만 만진다.
+    if (options_.beforeControlBatch != nullptr) {
+        options_.beforeControlBatch(options_.beforeControlBatchContext);
+    }
+
     context_->Process(*batch);
     const bool pushed = returned_.TryPush(batch);
     ROCKS_ASSERT(pushed);
@@ -610,7 +870,11 @@ void AudioEngineSubsystem::Drain() noexcept {
     if (control_ != nullptr && control_->laneStarted) {
         // 보낸 묶음을 모두 처리시킨다. 이 뒤로 제어 쪽 작업이 없으므로 게임 스레드가 context를
         // 쓴다.
-        (void)control_->lane.Shutdown();
+        const bool stopped = control_->lane.Shutdown().IsOk();
+        // 게임 스레드에서만 부르므로 WrongThread가 될 수 없다. 실패하면 lane이 도는 채로 context를
+        // 쓰게 된다.
+        ROCKS_ASSERT(stopped);
+        (void)stopped;
         control_->laneStarted = false;
         ControlBatch* batch = nullptr;
         while (returned_.TryPop(batch)) {
@@ -630,15 +894,18 @@ void AudioEngineSubsystem::Drain() noexcept {
                 const uint64 deadline = platform::MonotonicNanoseconds() +
                                         ShutdownDrainTimeoutMs * NanosecondsPerMillisecond;
                 bool idle = false;
+                uint64 target = 0;
                 while (platform::MonotonicNanoseconds() < deadline) {
                     if (!idle) {
                         context_->Process(*current_);
                         current_->Recycle();
                         idle = context_->IsIdle();
+                        // AudioRT는 빈 칸마다 무음 블록도 계속 렌더하므로 목표는 idle을 본 순간 한
+                        // 번 잡는다(그 뒤 렌더한 것은 무음이다).
+                        target = device_->Mixer().CompletedMixFrame();
                     }
 
-                    if (idle && device_->RingCountersSnapshot().consumedFrames >=
-                                    device_->Mixer().CompletedMixFrame()) {
+                    if (idle && IsOutputTailPlayed(device_->RingCountersSnapshot(), target)) {
                         break;
                     }
 
@@ -664,6 +931,14 @@ void AudioEngineSubsystem::Drain() noexcept {
 
     ignored_.Clear();
     delivering_.Clear();
+}
+
+bool IsOutputTailPlayed(const audio::AudioOutputRingCounters& counters,
+                        uint64 renderedFrames) noexcept {
+    const uint64 played = counters.consumedFrames >= counters.underrunFrames
+                              ? counters.consumedFrames - counters.underrunFrames
+                              : 0;
+    return played >= renderedFrames;
 }
 
 EngineSubsystemType AudioEngineSubsystemType() noexcept {

@@ -24,18 +24,19 @@ AudioRenderThread::~AudioRenderThread() noexcept {
 }
 
 Result<void> AudioRenderThread::Initialize(Allocator& allocator, AudioMixer& mixer,
-                                           AudioOutputRing& ring) noexcept {
-    if (pending_ != nullptr) {
+                                           AudioOutputRing& ring, uint32 commandCapacity) noexcept {
+    const bool powerOfTwo = commandCapacity >= 2 && (commandCapacity & (commandCapacity - 1)) == 0;
+    if (pending_ != nullptr || !powerOfTwo || commandCapacity > AudioRtCommandCapacity) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto memory = allocator.Allocate(sizeof(AudioRtCommand) * AudioRtPendingCapacity,
-                                     alignof(AudioRtCommand));
+    auto memory =
+        allocator.Allocate(sizeof(AudioRtCommand) * commandCapacity, alignof(AudioRtCommand));
     if (!memory) {
         return Result<void>::Failure(memory.Error());
     }
 
-    if (auto queue = commands_.Initialize(allocator, AudioRtCommandCapacity); !queue) {
+    if (auto queue = commands_.Initialize(allocator, commandCapacity); !queue) {
         if (!allocator.Deallocate(memory.Value())) {
             platform::Fatal("AudioRenderThread pending deallocation was refused");
         }
@@ -45,6 +46,7 @@ Result<void> AudioRenderThread::Initialize(Allocator& allocator, AudioMixer& mix
 
     pending_ = static_cast<AudioRtCommand*>(memory.Value());
     pendingCount_ = 0;
+    pendingCapacity_ = commandCapacity;
     // 다시 초기화하면(장치가 Null로 다시 열 때) 앞 시도의 계수·우선순위를 남기지 않는다.
     priorityKnown_.Store<MemoryOrder::Relaxed>(0);
     appliedPriority_.Store<MemoryOrder::Relaxed>(0);
@@ -178,7 +180,7 @@ void AudioRenderThread::InsertPending(const AudioRtCommand& command) noexcept {
 // 뒤에 갇히지 않게 — 3.22.1절). pending이 차면 남은 명령은 링에 둔다.
 void AudioRenderThread::DrainCommands() noexcept {
     const uint64 blockStart = mixer_->MixFrame();
-    while (pendingCount_ < AudioRtPendingCapacity) {
+    while (pendingCount_ < pendingCapacity_) {
         AudioRtCommand command;
         if (!commands_.TryPop(command)) {
             return;

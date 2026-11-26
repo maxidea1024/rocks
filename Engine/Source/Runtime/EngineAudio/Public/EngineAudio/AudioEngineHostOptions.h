@@ -34,6 +34,13 @@ struct AudioEngineHostOptions {
     bool useBackend = true;
     // 있으면 실행 판정(CurrentAudioRunTraits) 대신 쓴다.
     Optional<AudioRunTraits> traits;
+    // 시험: AudioRT 명령 링 칸 수다(2의 거듭제곱 — 0이면 기본). 링 포화(Deferred)를 재현할 때만
+    // 줄인다.
+    uint32 commandCapacity = 0;
+    // 시험: 제어 쪽이 묶음을 처리하기 직전에 부른다(제어 스레드). 이벤트 gate로 제어 쪽을 멈춰 묶음
+    // 부족(deferredFrames)을 재현한다. 보통은 nullptr이다.
+    void (*beforeControlBatch)(void* context) noexcept = nullptr;
+    void* beforeControlBatchContext = nullptr;
 };
 
 } // namespace rocks

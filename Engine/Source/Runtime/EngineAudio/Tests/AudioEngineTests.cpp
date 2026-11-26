@@ -1,8 +1,12 @@
+#include "AudioEngineTestSupport.h"
+
+#include <Config/Tests/ConfigTestSupport.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
 #include <Engine/Engine.h>
 #include <EngineAudio/AttenuationSettings.generated.h>
+#include <EngineAudio/AudioEngineSettings.h>
 #include <EngineAudio/AudioEngineSubsystem.h>
 #include <EngineAudio/EngineAudioTypes.h>
 #include <EngineAudio/SoundClip.generated.h>
@@ -10,6 +14,7 @@
 #include <ModuleLoader/HostServices.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/PlatformMath.h>
+#include <Platform/Sync.h>
 #include <TestSupport/Test.h>
 
 // AU3a1 시험(Docs/Design/AudioSystem 3.35.12절): Inline 제어 + Manual render + Null Manual 장치로
@@ -19,45 +24,7 @@ namespace audio_engine_tests_file {
 
 namespace {
 
-constexpr uint32 TestRate = audio::DefaultMixSampleRate;
-// 프레임마다 장치 콜백이 가져가는 frame 수다(블록 256의 배수).
-constexpr uint32 PumpFrames = 512;
-constexpr uint32 MaxTestFrames = 64;
-
-AudioEngineHostOptions DeterministicOptions(bool output, bool muted = false) {
-    AudioEngineHostOptions options;
-    options.controlMode = AudioControlMode::Inline;
-    options.renderMode = audio::AudioRenderMode::Manual;
-    options.nullMode = audio::NullAudioOutputMode::Manual;
-    options.useBackend = false;
-    AudioRunTraits traits;
-    traits.audioOutput = output;
-    traits.audioMuted = muted;
-    options.traits = traits;
-    return options;
-}
-
-// 호스트 선택값을 엔진 수명 동안만 등록한다(HostServices는 프로세스 공유 — 3.35.9절).
-class HostOptionsScope {
-public:
-    explicit HostOptionsScope(const AudioEngineHostOptions& options) : options_(options) {
-        registered_ = test::ProcessModules().Services().Register(options_).IsOk();
-    }
-
-    ~HostOptionsScope() {
-        if (registered_) {
-            (void)test::ProcessModules().Services().Unregister(options_);
-        }
-    }
-
-    bool Registered() const noexcept {
-        return registered_;
-    }
-
-private:
-    AudioEngineHostOptions options_;
-    bool registered_ = false;
-};
+using namespace rocks::engine_audio_test;
 
 class FailingSubsystem final : public EngineSubsystem {
 public:
@@ -66,130 +33,44 @@ public:
     }
 };
 
-struct AudioEngine {
-    explicit AudioEngine(const AudioEngineHostOptions& options)
-        : scope(options), engine(allocator) {
-        subsystems[0] = AudioEngineSubsystemType();
-        EngineConfig config;
-        config.modules = &test::ProcessModules();
-        config.subsystems = Span<const EngineSubsystemType>(subsystems, 1);
-        config.fixedFrameDeltaSeconds = 1.0 / 60.0;
-        initialized = scope.Registered() && engine.Initialize(config).IsOk();
-        audio = initialized ? engine.GetSubsystem<AudioEngineSubsystem>() : nullptr;
+// 제어 쪽을 멈추는 gate다(beforeControlBatch — 이벤트로만 순서를 만든다).
+struct ControlGate {
+    platform::ManualResetEvent open{false};
+
+    static void Wait(void* context) noexcept {
+        (void)static_cast<ControlGate*>(context)->open.Wait();
     }
-
-    ~AudioEngine() {
-        (void)engine.Shutdown();
-    }
-
-    // 프레임 하나: 엔진 프레임(결과 전달 → 묶음 처리) → 렌더 → 장치 콜백 소비 → 다시 렌더.
-    bool Frame(uint32 pumpFrames = PumpFrames) {
-        if (!engine.RunFrame()) {
-            return false;
-        }
-
-        PumpDevice(audio, pumpFrames);
-        return true;
-    }
-
-    // 장치 콜백을 frames만큼 부른다. Null Pump는 콜백 크기 이하만 받으므로 나눠 부르고, 그 사이에
-    // 렌더해 링을 채운다.
-    static void PumpDevice(AudioEngineSubsystem* audio, uint32 frames) {
-        audio::AudioOutputDevice* device = audio->Device();
-        if (device == nullptr) {
-            return;
-        }
-
-        device->RenderAvailable();
-        const uint32 callback = device->Info().format.callbackFrames;
-        while (frames != 0 && device->NullOutput() != nullptr) {
-            const uint32 chunk = frames < callback ? frames : callback;
-            device->NullOutput()->Pump(chunk);
-            device->RenderAvailable();
-            frames -= chunk;
-        }
-    }
-
-    // 제어 쪽이 voice·clip을 모두 놓을 때까지 프레임을 돈다.
-    bool RunUntilIdle() {
-        for (uint32 frame = 0; frame < MaxTestFrames; ++frame) {
-            const auto stats = audio->ControlStats();
-            if (stats.activeVoices == 0 && stats.releasingVoices == 0 &&
-                stats.registeredClips == 0) {
-                return true;
-            }
-
-            if (!Frame()) {
-                return false;
-            }
-        }
-
-        return false;
-    }
-
-    SystemAllocator allocator;
-    EngineSubsystemType subsystems[1];
-    HostOptionsScope scope;
-    Engine engine;
-    AudioEngineSubsystem* audio = nullptr;
-    bool initialized = false;
 };
 
-SharedPtr<const SoundPcm> MakeConstantPcm(Allocator& allocator, float value, uint32 frames) {
-    auto pcm = SoundPcm::TryAllocate(allocator, 1, frames, TestRate);
-    if (!pcm) {
-        return {};
-    }
-
-    for (float& sample : pcm.Value()->MutableChannel(0)) {
-        sample = value;
-    }
-
-    return SharedPtr<const SoundPcm>(Move(pcm.Value()));
-}
-
-SoundSourceRef MakeSound(Allocator& allocator, const SharedPtr<const SoundPcm>& pcm, bool looping,
-                         uint32 loopBegin = 0, uint32 loopEnd = 0) {
-    SoundPlayable playable;
-    playable.pcm = pcm;
-    playable.looping = looping;
-    playable.loopBegin = loopBegin;
-    playable.loopEnd = loopEnd;
-    auto made = SoundSourceRef::TryCreate(allocator, playable);
-    return made ? made.Value() : SoundSourceRef{};
-}
-
-// 결과 콜백이 쓰는 기록이다.
-struct EventLog {
-    explicit EventLog(Allocator& allocator) : events(allocator) {
-    }
-
-    PlaybackEventCallback Callback(Allocator& allocator) {
-        auto made = PlaybackEventCallback::TryCreate(
-            allocator,
-            [this](const PlaybackEvent& event) noexcept { (void)events.TryPushBack(event); });
-        return made ? Move(made.Value()) : PlaybackEventCallback{};
-    }
-
-    uint32 Count(PlaybackEventKind kind) const {
-        uint32 count = 0;
-        for (const PlaybackEvent& event : events) {
-            count += event.kind == kind ? 1 : 0;
+// 같은 입력을 두 제어 방식으로 돌려 결과 열(kind, reason, mixFrame)을 얻는다.
+void RunReferencePlay(AudioControlMode mode, Array<PlaybackEvent>& out) {
+    AudioEngineHostOptions options = DeterministicOptions(true);
+    options.controlMode = mode;
+    AudioEngine fixture(options);
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 700);
+    const SharedPtr<const SoundPcm> loopPcm = MakeConstantPcm(fixture.allocator, 0.2f, 300);
+    EventLog log(fixture.allocator);
+    PlayOptions first;
+    first.onEvent = log.Callback(fixture.allocator);
+    PlayOptions second;
+    second.onEvent = log.Callback(fixture.allocator);
+    REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, false), Move(first)));
+    auto loop = fixture.audio->Play2D(MakeSound(fixture.allocator, loopPcm, true), Move(second));
+    REQUIRE(loop);
+    for (uint32 frame = 0; frame < 12; ++frame) {
+        if (frame == 6) {
+            REQUIRE(fixture.audio->Stop(loop.Value(), 128));
         }
 
-        return count;
+        REQUIRE(fixture.engine.RunFrame());
+        fixture.audio->FlushControl();
+        PumpDevice(fixture.audio, PumpFrames);
     }
 
-    Array<PlaybackEvent> events;
-};
-
-float MaxAbs(Span<const float> samples) {
-    float peak = 0.0f;
-    for (const float sample : samples) {
-        peak = platform::PlatformMath::Max(peak, platform::PlatformMath::Abs(sample));
+    for (const PlaybackEvent& event : log.events) {
+        REQUIRE(out.TryPushBack(event));
     }
-
-    return peak;
 }
 
 } // namespace
@@ -357,15 +238,18 @@ TEST(EngineAudio_PlayStartsRendersAndEndsNaturally) {
     CHECK(log.events[1].mixFrame > log.events[0].mixFrame);
     CHECK(fixture.audio->Status(played.Value()) == PlaybackStatus::Finished);
 
-    // mono Direct는 양쪽 같은 값이고, 1500 frame 동안만 소리가 난다.
+    // mono Direct는 양쪽 0.5 × 0.5 = 0.25이고(UE Linear 업믹스), 1500 frame 동안만 소리가 난다.
+    // 시작 블록 이후 값은 정확히 0.25다(gain 1, 마스터 1, limiter 문턱 아래).
     uint32 loud = 0;
+    uint32 exact = 0;
     for (usize frame = 0; frame + 1 < capture.Size(); frame += 2) {
         CHECK(capture[frame] == capture[frame + 1]);
         loud += capture[frame] > 0.1f ? 1 : 0;
+        exact += capture[frame] == 0.25f ? 1 : 0;
     }
 
-    CHECK(loud >= 1400);
-    CHECK(loud <= 1500);
+    CHECK(loud == 1500);
+    CHECK(exact == 1500);
     REQUIRE(fixture.RunUntilIdle());
     // clip 등록이 풀리고 PCM 참조는 시험과 스냅숏만 남는다.
     CHECK(pcm.UseCount() == 2);
@@ -492,8 +376,10 @@ TEST(EngineAudio_VoiceLimitEndsExtraPlays) {
         REQUIRE(fixture.audio->Stop(handle));
     }
 
-    // terminal이 나온 직후(아직 놓기 대기 — ACK 전)의 새 재생은 놓기 대기 voice에 막히지 않는다
-    // (믹서 표 여유 MixerVoiceHeadroomFactor).
+    // 놓기 대기(ACK 전) voice가 새 재생을 막지 않도록 믹서 표는 상한의 두 배다. Manual render에서는
+    // terminal과 ACK가 같은 블록 끝에 게시되어 놓기가 바로 되므로(놓기 대기는 Thread render의
+    // 경합에서만 생긴다) 표 크기로 여유를 확인한다.
+    CHECK(fixture.audio->Device()->Mixer().Config().maxVoices == 64);
     for (uint32 frame = 0; frame < MaxTestFrames && fixture.audio->ControlStats().activeVoices != 0;
          ++frame) {
         REQUIRE(fixture.Frame());
@@ -677,27 +563,267 @@ TEST(EngineAudio_InitializeFailureOfLaterSubsystemCleansUp) {
     CHECK(engine.Initialize(config).Error() == ErrorCode::Unsupported);
 }
 
-TEST(EngineAudio_ThreadControlProducesSameEvents) {
+} // namespace audio_engine_tests_file
+
+namespace audio_engine_tests_file {
+
+TEST(EngineAudio_OutputTailUsesPlayedFrames) {
+    audio::AudioOutputRingCounters counters;
+    counters.consumedFrames = 1000;
+    counters.underrunFrames = 0;
+    CHECK(IsOutputTailPlayed(counters, 1000));
+    CHECK(!IsOutputTailPlayed(counters, 1001));
+    // underrun 무음은 렌더한 소리를 낸 것이 아니다.
+    counters.underrunFrames = 200;
+    CHECK(!IsOutputTailPlayed(counters, 1000));
+    CHECK(IsOutputTailPlayed(counters, 800));
+}
+
+TEST(EngineAudio_DeferredPlaysKeepOrderAndHonourStop) {
     AudioEngineHostOptions options = DeterministicOptions(true);
-    options.controlMode = AudioControlMode::Thread;
+    // 명령 링 4칸: 묶음 처리 순서가 명령 → 마스터 gain이라 Play 넷이 링을 채우고, 나머지 Play 둘은
+    // Deferred, 첫 마스터 gain은 다음 묶음으로 밀린다.
+    options.commandCapacity = 4;
     AudioEngine fixture(options);
     REQUIRE(fixture.initialized);
-    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 700);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.01f, 480);
+    const SoundSourceRef loop = MakeSound(fixture.allocator, pcm, true);
     EventLog log(fixture.allocator);
+    Array<PlaybackHandle> handles(fixture.allocator);
+    for (uint32 index = 0; index < 6; ++index) {
+        PlayOptions play;
+        play.onEvent = log.Callback(fixture.allocator);
+        auto played = fixture.audio->Play2D(loop, Move(play));
+        REQUIRE(played);
+        REQUIRE(handles.TryPushBack(played.Value()));
+    }
+
+    // 렌더하지 않고 프레임만 돌려 링을 채운 채로 둔다.
+    REQUIRE(fixture.engine.RunFrame());
+    CHECK(fixture.audio->ControlStats().pendingDeferred == 2);
+    CHECK(fixture.audio->ControlStats().deferredPlays == 2);
+    CHECK(fixture.audio->ControlStats().masterGainRetries == 1);
+    // 보내기 전 Stop은 fade만 적어 두었다가 제출 직후 낸다.
+    REQUIRE(fixture.audio->Stop(handles[5], 0));
+    // 링이 찬 동안 마스터 gain 변화는 다음 묶음으로 밀린다.
+    fixture.audio->SetApplicationForeground(false);
+    REQUIRE(fixture.engine.RunFrame());
+    CHECK(fixture.audio->ControlStats().masterGainRetries == 2);
+    REQUIRE(fixture.Frames(8));
+    CHECK(fixture.audio->ControlStats().pendingDeferred == 0);
+    // 밀린 첫 마스터 gain은 링이 빈 뒤 그때의 목표(비활성 창 0)로 한 번 나간다.
+    CHECK(fixture.audio->ControlStats().masterGainCommands == 1);
+    // 미룬 Play는 받은 순서대로 시작한다(시작 frame이 줄지 않는다).
+    uint64 previousStart = 0;
+    for (uint32 index = 0; index < 5; ++index) {
+        bool found = false;
+        for (const PlaybackEvent& event : log.events) {
+            if (event.handle == handles[index] && event.kind == PlaybackEventKind::Started) {
+                CHECK(event.mixFrame >= previousStart);
+                previousStart = event.mixFrame;
+                found = true;
+            }
+        }
+
+        CHECK(found);
+    }
+
+    uint32 stoppedEnds = 0;
+    for (const PlaybackEvent& event : log.events) {
+        if (event.handle == handles[5] && event.kind == PlaybackEventKind::Ended) {
+            CHECK(event.reason == PlaybackEndReason::Stopped);
+            ++stoppedEnds;
+        }
+    }
+
+    CHECK(stoppedEnds == 1);
+}
+
+TEST(EngineAudio_ShutdownSubmitsDeferredPlays) {
+    SystemAllocator allocator;
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(allocator, 0.01f, 480);
+    const SoundSourceRef loop = MakeSound(allocator, pcm, true);
+    {
+        AudioEngineHostOptions options = DeterministicOptions(true);
+        options.commandCapacity = 2;
+        AudioEngine fixture(options);
+        REQUIRE(fixture.initialized);
+        for (uint32 index = 0; index < 4; ++index) {
+            REQUIRE(fixture.audio->Play2D(loop));
+        }
+
+        REQUIRE(fixture.engine.RunFrame());
+        CHECK(fixture.audio->ControlStats().pendingDeferred != 0);
+        REQUIRE(fixture.engine.Shutdown());
+    }
+
+    // RT에 닿지 못한 Play의 clip 등록은 믹서와 함께 사라지고 참조는 시험 쪽만 남는다.
+    CHECK(pcm.UseCount() == 2);
+    CHECK(loop.UseCount() == 1);
+}
+
+TEST(EngineAudio_SetParameterRampsAndMerges) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    auto played = fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true));
+    REQUIRE(played);
+    REQUIRE(fixture.Frames(4));
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    // 긴 ramp는 묶음마다 중간값으로 게시된다(2D도 같은 경로 — 3.35.6절).
+    REQUIRE(fixture.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 0.0f,
+                                        PumpFrames * 8));
+    float previous = 1.0f;
+    uint32 between = 0;
+    for (uint32 frame = 0; frame < 12; ++frame) {
+        const StereoPeak peak = CapturePeak(fixture, chunk);
+        CHECK(peak.left <= previous + 1.0e-6f);
+        between += peak.left > 0.01f && peak.left < 0.24f ? 1 : 0;
+        previous = peak.left;
+    }
+
+    CHECK(between >= 3);
+    CHECK(previous == 0.0f);
+    // 같은 프레임의 두 번 호출은 마지막 값 하나로 합친다.
+    REQUIRE(fixture.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 2.0f, 0));
+    REQUIRE(fixture.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 1.0f, 0));
+    REQUIRE(fixture.Frames(3));
+    const StereoPeak settled = CapturePeak(fixture, chunk);
+    CHECK(platform::PlatformMath::Abs(settled.left - 0.25f) < 1.0e-4f);
+}
+
+TEST(EngineAudio_CallbackMayStopItsPlayback) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.1f, 480);
+    AudioEngineSubsystem* audio = fixture.audio;
+    EventLog log(fixture.allocator);
+    auto callback = PlaybackEventCallback::TryCreate(
+        fixture.allocator, [&](const PlaybackEvent& event) noexcept {
+            (void)log.events.TryPushBack(event);
+            if (event.kind == PlaybackEventKind::Started) {
+                (void)audio->Stop(event.handle, 0);
+            }
+        });
+    REQUIRE(callback);
+    PlayOptions options;
+    options.onEvent = Move(callback.Value());
+    REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true), Move(options)));
+    REQUIRE(fixture.Frames(8));
+    REQUIRE(log.events.Size() == 2);
+    CHECK(log.events[1].kind == PlaybackEventKind::Ended);
+    CHECK(log.events[1].reason == PlaybackEndReason::Stopped);
+}
+
+TEST(EngineAudio_LoopRangePlaysOnlyItsRange) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    // 값이 frame/1000인 PCM: 전체 loop는 0.999까지, [200, 400) loop는 0.4 미만만 낸다.
+    const SharedPtr<const SoundPcm> pcm = MakeRampPcm(fixture.allocator, 0.001f, 1000);
+    PlayOptions silent;
+    silent.volume = 0.0f;
+    REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true), Move(silent)));
+    PlayOptions middle;
+    middle.startFrame = 200;
+    REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true, 200, 400), Move(middle)));
+    REQUIRE(fixture.Frames(2));
+    CHECK(fixture.audio->ControlStats().registeredClips == 2);
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2 * 4));
+    fixture.audio->Device()->NullOutput()->CaptureTo(Span<float>(chunk.Data(), chunk.Size()));
+    REQUIRE(fixture.Frames(4));
+    const StereoPeak peak = PeakOf(Span<const float>(chunk.Data(), chunk.Size()));
+    // mono Direct 0.5배: 구간 끝 0.399 × 0.5 ≈ 0.2.
+    CHECK(peak.left > 0.15f);
+    CHECK(peak.left < 0.2001f);
+}
+
+TEST(EngineAudio_SettingsDriveMasterVolumeAndBootValues) {
+    test::config::ConfigFixture settings(test::config::DevelopmentRules());
+    config::ConfigContext& context = settings.Context();
+    REQUIRE(RegisterEngineAudioSettings(context));
+    REQUIRE(
+        context.AddAssignment(config::ConfigLayer::Session, "test", "audio.master.volume", "0.5"));
+    // 허용값이 아닌 블록 크기는 가장 가까운 값으로 보정한다(Warning).
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Session, "test", "audio.mixer.blockframes",
+                                  "300"));
+    REQUIRE(context.Sync());
+    REQUIRE(context.CompleteStartup());
+    AudioEngine fixture(DeterministicOptions(true), &context);
+    REQUIRE(fixture.initialized);
+    CHECK(fixture.audio->Device()->Mixer().Config().blockFrames == 256);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true)));
+    REQUIRE(fixture.Frames(4));
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    const StereoPeak peak = CapturePeak(fixture, chunk);
+    CHECK(platform::PlatformMath::Abs(peak.left - 0.125f) < 1.0e-4f);
+}
+
+TEST(EngineAudio_StalledControlDefersFramesWithoutLosingCommands) {
+    ControlGate gate;
+    AudioEngineHostOptions options = DeterministicOptions(true);
+    options.controlMode = AudioControlMode::Thread;
+    options.beforeControlBatch = &ControlGate::Wait;
+    options.beforeControlBatchContext = &gate;
+    AudioEngine fixture(options);
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.1f, 300);
+    EventLog log(fixture.allocator);
+    // 제어 쪽이 gate에 멈춘 동안 묶음이 바닥나면 그 프레임은 보내지 않고 명령을 다음 묶음에 남긴다.
+    for (uint32 frame = 0; frame < 4; ++frame) {
+        REQUIRE(fixture.engine.RunFrame());
+    }
+
+    CHECK(fixture.audio->Stats().deferredFrames >= 1);
     PlayOptions play;
     play.onEvent = log.Callback(fixture.allocator);
     REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, false), Move(play)));
-    for (uint32 frame = 0; frame < MaxTestFrames && log.Count(PlaybackEventKind::Ended) == 0;
-         ++frame) {
-        REQUIRE(fixture.engine.RunFrame());
-        // 보낸 묶음 처리를 Flush로 기다린 뒤 렌더한다(시간 대기 없음).
+    REQUIRE(fixture.engine.RunFrame());
+    gate.open.Signal();
+    for (uint32 frame = 0; frame < 16 && log.Count(PlaybackEventKind::Ended) == 0; ++frame) {
         fixture.audio->FlushControl();
-        AudioEngine::PumpDevice(fixture.audio, PumpFrames);
+        PumpDevice(fixture.audio, PumpFrames);
+        REQUIRE(fixture.engine.RunFrame());
     }
 
-    REQUIRE(log.events.Size() == 2);
-    CHECK(log.events[0].kind == PlaybackEventKind::Started);
-    CHECK(log.events[1].reason == PlaybackEndReason::NaturalEnd);
+    CHECK(log.Count(PlaybackEventKind::Started) == 1);
+    CHECK(log.Count(PlaybackEventKind::Ended) == 1);
+}
+
+TEST(EngineAudio_InitializeFailureCleansUpThreadControl) {
+    SystemAllocator allocator;
+    AudioEngineHostOptions options = DeterministicOptions(true);
+    options.controlMode = AudioControlMode::Thread;
+    HostOptionsScope scope(options);
+    REQUIRE(scope.Registered());
+    const EngineSubsystemType subsystems[] = {
+        AudioEngineSubsystemType(), MakeSubsystemType<EngineSubsystem, FailingSubsystem>("Fail")};
+    EngineConfig config;
+    config.modules = &test::ProcessModules();
+    config.subsystems = subsystems;
+    config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+    Engine engine(allocator);
+    // 실행 중인 lane 스레드가 Deinitialize의 drain에서 닫힌다(실행 중 파괴 Fatal 없음).
+    CHECK(engine.Initialize(config).Error() == ErrorCode::Unsupported);
+}
+
+TEST(EngineAudio_ThreadAndInlineControlProduceSameEvents) {
+    SystemAllocator allocator;
+    Array<PlaybackEvent> inlineEvents(allocator);
+    Array<PlaybackEvent> threadEvents(allocator);
+    RunReferencePlay(AudioControlMode::Inline, inlineEvents);
+    RunReferencePlay(AudioControlMode::Thread, threadEvents);
+    REQUIRE(inlineEvents.Size() == 4);
+    REQUIRE(threadEvents.Size() == inlineEvents.Size());
+    for (usize index = 0; index < inlineEvents.Size(); ++index) {
+        CHECK(threadEvents[index].kind == inlineEvents[index].kind);
+        CHECK(threadEvents[index].reason == inlineEvents[index].reason);
+        CHECK(threadEvents[index].mixFrame == inlineEvents[index].mixFrame);
+        CHECK(threadEvents[index].handle == inlineEvents[index].handle);
+    }
 }
 
 } // namespace audio_engine_tests_file

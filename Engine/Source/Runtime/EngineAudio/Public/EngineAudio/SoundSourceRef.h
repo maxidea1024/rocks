@@ -52,9 +52,10 @@ class ROCKS_ENGINEAUDIO_API SoundSourceRef {
 public:
     SoundSourceRef() noexcept = default;
 
-    // 스냅숏을 검사해 공유 참조로 만든다. pcm이 없거나 유한하지 않은 표본이 있거나, loop 구간이
-    // 잘못됐거나(끝 ≤ 시작, 끝 > frame 수), volume·pitch·감쇠 값이 범위 밖·비유한이면
-    // InvalidArgument다. 할당 실패는 OutOfMemory다.
+    // 스냅숏을 검사해 공유 참조로 만든다. 제어 pipe가 마지막 참조를 놓을 수 있으므로 allocator는
+    // 스레드 안전해야 한다(엔진 기본 할당자·SystemAllocator — SoundPcm과 같은 조건). pcm이 없거나
+    // 유한하지 않은 표본이 있거나, loop 구간이 잘못됐거나(끝 ≤ 시작, 끝 > frame 수),
+    // volume·pitch·감쇠 값이 범위 밖·비유한이면 InvalidArgument다. 할당 실패는 OutOfMemory다.
     [[nodiscard]] static Result<SoundSourceRef> TryCreate(Allocator& allocator,
                                                           const SoundPlayable& playable) noexcept;
 

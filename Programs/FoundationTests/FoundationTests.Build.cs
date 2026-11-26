@@ -121,6 +121,8 @@ public abstract class TestsModule : ModuleRules
         // Gameplay diagnostics tests drive the console commands through the Config test fixture context.
         ["Gameplay"] = ["ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
+        // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars).
+        ["EngineAudio"] = ["ConfigTestFixtures"],
         ["ImageCodec"] = ["Compression"],
         // MemoryFileSystem.h(AssetDatabase Tests — header only): the profile tests read layered JSON from memory.
         ["TargetProfiles"] = ["AssetDatabase"],

@@ -5,6 +5,8 @@
 #include <Audio/AudioMixer.h>
 #include <Audio/AudioOutputDevice.h>
 #include <Core/Containers/Array.h>
+#include <EngineAudio/AudioControlStats.h>
+#include <EngineAudio/AudioSpatialization.h>
 
 // 제어 쪽 재생 상태다(Docs/Design/AudioSystem 3.35.6절). 제어 pipe 한 스레드만 부른다(Inline이면
 // 게임 스레드, 종료 drain에서는 lane이 멈춘 뒤 게임 스레드). 믹서 제어 면과 장치 Submit을 혼자
@@ -14,23 +16,6 @@
 // 되면(ACK ≥ releaseMixFrame) clip 사용 수를 줄임 → 사용 0이면 UnregisterClip → 성공하면 PCM 참조를
 // 놓는다. 그래서 AudioRT가 읽을 수 있는 PCM은 해제되지 않는다.
 namespace rocks {
-
-// 진단·시험용 계수다.
-struct AudioDeviceContextStats {
-    // 지금 voice를 쥔 재생 수(놓기 대기 제외)와 놓기 대기 voice 수.
-    uint32 activeVoices = 0;
-    uint32 releasingVoices = 0;
-    // 등록된 clip 수(해제 대기 포함).
-    uint32 registeredClips = 0;
-    // 명령 링이 차서 미룬 Play 수(누계)와 지금 미룬 수.
-    uint64 deferredPlays = 0;
-    uint32 pendingDeferred = 0;
-    // voice 상한·clip 실패로 끝낸 재생 수(누계).
-    uint64 voiceLimitRejects = 0;
-    uint64 failedPlays = 0;
-    // 보낸 마스터 gain 명령 수(누계).
-    uint64 masterGainCommands = 0;
-};
 
 class AudioDeviceContext {
 public:
@@ -55,7 +40,7 @@ public:
     // 장치를 닫은 뒤(AudioRT·콜백이 끝난 뒤) 모든 참조를 놓는다. 믹서는 부르지 않는다.
     void Abandon() noexcept;
 
-    AudioDeviceContextStats Stats() const noexcept;
+    AudioControlStats Stats() const noexcept;
 
 private:
     enum class RecordState : uint8 {
@@ -93,7 +78,13 @@ private:
         ValueRamp volume;
         ValueRamp pitch;
         uint32 scene = 0;
+        uint32 sceneEpoch = 0;
         PlayPlacement placement = PlayPlacement::NonSpatial;
+        Vec3d position;
+        AudioEmitterId emitter;
+        // 고정 위치·emitter 재생이면서 감쇠 스냅숏이 있으면 묶음마다 공간 값을 다시 계산한다.
+        bool spatialized = false;
+        SpatialParams spatial;
         bool started = false;
         bool paramsDirty = false;
         // 보내기 전에 받은 Stop의 fade다(NoPendingStop이면 없음).
@@ -112,6 +103,17 @@ private:
         bool registered = false;
     };
 
+    struct ControlScene {
+        uint32 epoch = 0;
+        Vec3d listenerPosition;
+        Quatd listenerRotation = Quatd::Identity();
+    };
+
+    struct ControlEmitter {
+        uint32 generation = 0;
+        Vec3d position;
+    };
+
     struct ReleasingVoice {
         audio::AudioVoiceHandle voice;
         uint32 clip = 0;
@@ -121,6 +123,10 @@ private:
     void ApplyPlay(ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplyStop(const ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplySetParameter(const ControlCommand& command, uint64 now) noexcept;
+    void ApplyRemoveScene(const ControlCommand& command) noexcept;
+    void ApplyRemoveEmitter(const ControlCommand& command) noexcept;
+    void ApplySnapshots(const ControlBatch& batch) noexcept;
+    void UpdateSpatial(Record& record) noexcept;
     void ApplyMasterGain(float gain) noexcept;
     void PublishParams(uint64 now) noexcept;
     void CollectStarted(ControlBatch& batch) noexcept;
@@ -145,6 +151,8 @@ private:
     // voice 색인 → 재생 슬롯 + 1(0 = 없음).
     Array<uint32> voiceOwners_;
     Array<ClipEntry> clips_;
+    Array<ControlScene> scenes_;
+    Array<ControlEmitter> emitters_;
     Array<ReleasingVoice> releasing_;
     // 미룬 Play의 슬롯(받은 순서 — 순서를 지키려고 앞이 남아 있으면 뒤도 미룬다).
     Array<uint32> deferred_;
@@ -154,7 +162,7 @@ private:
     float masterGain_ = audio::DefaultMasterGain;
     // 첫 마스터 gain은 ramp 0으로 보낸다(음소거·비활성 시작에서 처음 블록이 새지 않게).
     bool masterGainSent_ = false;
-    AudioDeviceContextStats stats_;
+    AudioControlStats stats_;
 };
 
 } // namespace rocks

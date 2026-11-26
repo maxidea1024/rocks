@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Math/Quaternion.h>
 #include <Core/Math/Vector3.h>
+#include <EngineAudio/AudioControlStats.h>
 #include <EngineAudio/AudioPlayback.h>
 #include <EngineAudio/SoundSourceRef.h>
 
@@ -13,7 +15,11 @@ namespace rocks {
 enum class ControlCommandType : uint8 {
     Play,
     Stop,
-    SetParameter
+    SetParameter,
+    // scene(World) 해제: 그 scene 재생을 SceneRemoved로 끝낸다(scene·sceneEpoch).
+    RemoveScene,
+    // emitter 해제: 붙은 재생을 EmitterRemoved로 끝낸다(emitter).
+    RemoveEmitter
 };
 
 // 재생 위치 원천이다.
@@ -32,6 +38,7 @@ struct ControlCommand {
     // Play.
     SoundSourceRef sound;
     uint32 scene = 0;
+    uint32 sceneEpoch = 0;
     PlayPlacement placement = PlayPlacement::NonSpatial;
     Vec3d position;
     AudioEmitterId emitter;
@@ -47,18 +54,39 @@ struct ControlCommand {
     uint32 rampFrames = 0;
 };
 
+// scene 리스너 스냅숏이다(바뀐 프레임에만).
+struct SceneUpdate {
+    uint32 index = 0;
+    uint32 epoch = 0;
+    Vec3d position;
+    Quatd rotation = Quatd::Identity();
+};
+
+// emitter 위치 스냅숏이다(등록·이동한 프레임에만).
+struct EmitterUpdate {
+    AudioEmitterId emitter;
+    Vec3d position;
+};
+
 struct ControlBatch {
-    explicit ControlBatch(Allocator& allocator) noexcept : commands(allocator), events(allocator) {
+    explicit ControlBatch(Allocator& allocator) noexcept
+        : scenes(allocator), emitters(allocator), commands(allocator), events(allocator) {
     }
 
-    // 게임 → 제어.
+    // 게임 → 제어. 스냅숏(scenes·emitters)을 명령보다 먼저 적용한다(같은 프레임에 등록하고 재생한
+    // emitter가 위치를 가진다).
+    Array<SceneUpdate> scenes;
+    Array<EmitterUpdate> emitters;
     Array<ControlCommand> commands;
     float masterGain = 1.0f;
     // 제어 → 게임.
     Array<PlaybackEvent> events;
+    AudioControlStats stats;
 
     // 돌려받은 묶음을 다음 프레임에 쓰도록 비운다(용량은 둔다 — 사운드 참조는 여기서 놓는다).
     void Recycle() noexcept {
+        scenes.Clear();
+        emitters.Clear();
         commands.Clear();
         events.Clear();
     }

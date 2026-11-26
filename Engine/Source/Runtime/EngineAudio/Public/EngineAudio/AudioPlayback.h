@@ -10,6 +10,17 @@ namespace rocks {
 // 게임 쪽 재생 표의 용량이다(3.5.1절 — 차면 CapacityExceeded).
 inline constexpr uint32 MaxPlaybacks = 1024;
 
+// scene 표 용량(엔진 scene 0 포함)과 엔진 scene의 색인·epoch다(3.35.7절). World마다 scene 하나다.
+inline constexpr uint32 MaxAudioScenes = 64;
+inline constexpr uint32 EngineSceneIndex = 0;
+inline constexpr uint32 EngineSceneEpoch = 1;
+
+// emitter 표 용량(엔진 전체)이다(3.35.7절 — 차면 CapacityExceeded).
+inline constexpr uint32 MaxAudioEmitters = 4096;
+
+// scene 해제(World 파괴)가 그 scene 재생에 쓰는 fade다(3.35.7절).
+inline constexpr uint32 SceneRemoveFadeFrames = 256;
+
 // 게임이 시작한 재생 하나다. generation 0은 무효다. 슬롯은 Ended 결과를 전달한 뒤 재사용되며
 // generation이 올라가므로, 이전 handle의 명령은 아무 일도 하지 않는다.
 struct PlaybackHandle {
@@ -92,6 +103,12 @@ enum class PlaybackParameter : uint8 {
     Volume,
     Pitch
 };
+
+inline constexpr uint32 PlaybackParameterCount = 2;
+
+inline constexpr uint32 PlaybackParameterIndex(PlaybackParameter parameter) noexcept {
+    return static_cast<uint32>(parameter);
+}
 
 // 엔진 소유 재생(World 교체를 넘는 음악 등)과 World 소유 재생을 가른다.
 enum class PlaybackOwnership : uint8 {

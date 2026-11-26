@@ -58,8 +58,8 @@ void AudioDeviceContext::ValueRamp::StartFrom(float current, float value, uint64
 AudioDeviceContext::AudioDeviceContext(Allocator& allocator,
                                        audio::AudioOutputDevice& device) noexcept
     : device_(device), mixer_(device.Mixer()), records_(allocator), voiceOwners_(allocator),
-      clips_(allocator), releasing_(allocator), deferred_(allocator), awaitingStart_(allocator),
-      terminalScratch_(allocator) {
+      clips_(allocator), scenes_(allocator), emitters_(allocator), releasing_(allocator),
+      deferred_(allocator), awaitingStart_(allocator), terminalScratch_(allocator) {
 }
 
 AudioDeviceContext::~AudioDeviceContext() noexcept = default;
@@ -70,9 +70,13 @@ Result<void> AudioDeviceContext::Initialize(uint32 maxActiveVoices) noexcept {
     if (!records_.TryResize(MaxPlaybacks) || !voiceOwners_.TryResize(mixerVoices) ||
         !clips_.TryReserve(mixerClips) || !releasing_.TryReserve(mixerVoices) ||
         !deferred_.TryReserve(MaxPlaybacks) || !awaitingStart_.TryReserve(MaxPlaybacks) ||
-        !terminalScratch_.TryResize(TerminalBatch)) {
+        !terminalScratch_.TryResize(TerminalBatch) || !scenes_.TryResize(MaxAudioScenes) ||
+        !emitters_.TryResize(MaxAudioEmitters)) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
+
+    // 엔진 scene은 종료까지 산다(엔진 소유 재생 — 리스너 원점·항등 회전).
+    scenes_[EngineSceneIndex].epoch = EngineSceneEpoch;
 
     for (uint32& owner : voiceOwners_) {
         owner = 0;
@@ -84,6 +88,7 @@ Result<void> AudioDeviceContext::Initialize(uint32 maxActiveVoices) noexcept {
 
 void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     const uint64 now = mixer_.CompletedMixFrame();
+    ApplySnapshots(batch);
     RetryDeferred();
     for (ControlCommand& command : batch.commands) {
         switch (command.type) {
@@ -96,6 +101,18 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
         case ControlCommandType::SetParameter:
             ApplySetParameter(command, now);
             break;
+        case ControlCommandType::RemoveScene:
+            ApplyRemoveScene(command);
+            break;
+        case ControlCommandType::RemoveEmitter:
+            ApplyRemoveEmitter(command);
+            break;
+        }
+    }
+
+    for (Record& record : records_) {
+        if (record.state != RecordState::Inactive && record.spatialized) {
+            UpdateSpatial(record);
         }
     }
 
@@ -105,6 +122,8 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     CollectTerminals(batch);
     ReclaimVoices();
     ReclaimClips();
+    // 게임 스레드가 원자값 없이 읽도록 사본을 묶음에 싣는다.
+    batch.stats = Stats();
 }
 
 void AudioDeviceContext::StopAll(uint32 fadeFrames) noexcept {
@@ -135,6 +154,14 @@ void AudioDeviceContext::Abandon() noexcept {
         entry = ClipEntry{};
     }
 
+    for (ControlScene& scene : scenes_) {
+        scene = ControlScene{};
+    }
+
+    for (ControlEmitter& emitter : emitters_) {
+        emitter = ControlEmitter{};
+    }
+
     for (uint32& owner : voiceOwners_) {
         owner = 0;
     }
@@ -145,8 +172,8 @@ void AudioDeviceContext::Abandon() noexcept {
     stats_.activeVoices = 0;
 }
 
-AudioDeviceContextStats AudioDeviceContext::Stats() const noexcept {
-    AudioDeviceContextStats stats = stats_;
+AudioControlStats AudioDeviceContext::Stats() const noexcept {
+    AudioControlStats stats = stats_;
     stats.releasingVoices = static_cast<uint32>(releasing_.Size());
     stats.pendingDeferred = static_cast<uint32>(deferred_.Size());
     stats.registeredClips = 0;
@@ -182,6 +209,22 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     // 게임은 Ended를 받은 슬롯만 다시 쓴다(Ended는 기록을 비운 뒤에 나간다).
     ROCKS_ASSERT(record.state == RecordState::Inactive);
     const SoundPlayable& playable = *command.sound.Get();
+    // 보내는 사이에 scene·emitter가 사라졌으면 소리 없이 끝낸다(게임은 죽은 scene에 재생을 보내지
+    // 않지만, 같은 묶음 안의 해제 순서를 지킨다).
+    if (command.scene >= scenes_.Size() || scenes_[command.scene].epoch != command.sceneEpoch) {
+        Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::SceneRemoved,
+             audio::UnsetMixFrame);
+        return;
+    }
+
+    if (command.placement == PlayPlacement::Emitter &&
+        (command.emitter.slot >= emitters_.Size() ||
+         emitters_[command.emitter.slot].generation != command.emitter.generation)) {
+        Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::EmitterRemoved,
+             audio::UnsetMixFrame);
+        return;
+    }
+
     if (stats_.activeVoices >= maxActiveVoices_) {
         ++stats_.voiceLimitRejects;
         Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::VoiceLimit,
@@ -221,10 +264,21 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
 
     record.pitch.Set(command.pitch);
     record.scene = command.scene;
+    record.sceneEpoch = command.sceneEpoch;
     record.placement = command.placement;
+    record.position = command.position;
+    record.emitter = command.emitter;
+    // Play2D(NonSpatial)는 감쇠가 있어도 2D다(UE PlaySound2D). 위치 재생에 감쇠가 없으면 2D다.
+    record.spatialized =
+        command.placement != PlayPlacement::NonSpatial && playable.attenuation.HasValue();
+    record.spatial = SpatialParams{};
+    if (record.spatialized) {
+        UpdateSpatial(record);
+    }
+
     record.started = false;
-    // ramp 중 재생(공간 재생은 AU3a2)은 묶음마다 다시 게시한다(PublishParams).
-    record.paramsDirty = command.fadeInFrames != 0;
+    // 공간 재생과 ramp 중 재생은 묶음마다 다시 게시한다(PublishParams).
+    record.paramsDirty = record.spatialized || command.fadeInFrames != 0;
     record.pendingStopFade = NoPendingStop;
     record.stopRequested = false;
     record.stopReason = PlaybackEndReason::Stopped;
@@ -275,6 +329,82 @@ void AudioDeviceContext::ApplySetParameter(const ControlCommand& command, uint64
     record->paramsDirty = true;
 }
 
+void AudioDeviceContext::ApplySnapshots(const ControlBatch& batch) noexcept {
+    for (const SceneUpdate& update : batch.scenes) {
+        if (update.index < scenes_.Size()) {
+            ControlScene& scene = scenes_[update.index];
+            scene.epoch = update.epoch;
+            scene.listenerPosition = update.position;
+            scene.listenerRotation = update.rotation;
+        }
+    }
+
+    for (const EmitterUpdate& update : batch.emitters) {
+        if (update.emitter.slot < emitters_.Size()) {
+            ControlEmitter& emitter = emitters_[update.emitter.slot];
+            emitter.generation = update.emitter.generation;
+            emitter.position = update.position;
+        }
+    }
+}
+
+void AudioDeviceContext::ApplyRemoveScene(const ControlCommand& command) noexcept {
+    if (command.scene >= scenes_.Size()) {
+        return;
+    }
+
+    // 같은 묶음에서 그 칸을 새 World가 받았으면(스냅숏이 새 epoch를 먼저 적용) 칸은 두고 옛 재생만
+    // 끝낸다.
+    if (scenes_[command.scene].epoch == command.sceneEpoch) {
+        scenes_[command.scene] = ControlScene{};
+    }
+
+    for (Record& record : records_) {
+        if (record.state != RecordState::Inactive && record.scene == command.scene &&
+            record.sceneEpoch == command.sceneEpoch) {
+            RequestStop(record, SceneRemoveFadeFrames, PlaybackEndReason::SceneRemoved);
+        }
+    }
+}
+
+void AudioDeviceContext::ApplyRemoveEmitter(const ControlCommand& command) noexcept {
+    const AudioEmitterId id = command.emitter;
+    if (id.slot >= emitters_.Size()) {
+        return;
+    }
+
+    if (emitters_[id.slot].generation == id.generation) {
+        emitters_[id.slot] = ControlEmitter{};
+    }
+
+    for (Record& record : records_) {
+        if (record.state != RecordState::Inactive && record.placement == PlayPlacement::Emitter &&
+            record.emitter.slot == id.slot && record.emitter.generation == id.generation) {
+            RequestStop(record, audio::DefaultStopFadeFrames, PlaybackEndReason::EmitterRemoved);
+        }
+    }
+}
+
+void AudioDeviceContext::UpdateSpatial(Record& record) noexcept {
+    const SoundPlayable& playable = *record.sound.Get();
+    const ControlScene& scene = scenes_[record.scene];
+    Vec3d source = record.position;
+    if (record.placement == PlayPlacement::Emitter) {
+        const ControlEmitter& emitter = emitters_[record.emitter.slot];
+        // emitter가 사라졌으면 마지막 위치를 그대로 쓴다(재생은 RemoveEmitter가 끝낸다).
+        if (emitter.generation == record.emitter.generation) {
+            record.position = emitter.position;
+        }
+
+        source = record.position;
+    }
+
+    record.spatial =
+        ComputeSpatialParams(playable.attenuation.Value(), playable.pcm->ChannelCount(),
+                             scene.listenerPosition, scene.listenerRotation, source);
+    record.paramsDirty = true;
+}
+
 void AudioDeviceContext::ApplyMasterGain(float gain) noexcept {
     if (gain == masterGain_ && masterGainSent_) {
         return;
@@ -291,6 +421,8 @@ void AudioDeviceContext::ApplyMasterGain(float gain) noexcept {
         masterGain_ = gain;
         masterGainSent_ = true;
         ++stats_.masterGainCommands;
+    } else {
+        ++stats_.masterGainRetries;
     }
 }
 
@@ -301,8 +433,9 @@ void AudioDeviceContext::PublishParams(uint64 now) noexcept {
         }
 
         (void)mixer_.PublishParams(record.voice, ParamsFor(record, now));
-        // ramp가 끝날 때까지 묶음마다 중간값을 다시 낸다.
-        record.paramsDirty = record.volume.IsRamping(now) || record.pitch.IsRamping(now);
+        // 공간 재생과 ramp 중 재생은 묶음마다 다시 낸다.
+        record.paramsDirty =
+            record.spatialized || record.volume.IsRamping(now) || record.pitch.IsRamping(now);
     }
 }
 
@@ -424,9 +557,15 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     const SoundPlayable& playable = *record.sound.Get();
     audio::AudioVoiceParams params;
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
-    params.gain = ClampGain(record.volume.At(frame) * playable.volume);
+    params.gain =
+        ClampGain(record.volume.At(frame) * playable.volume * record.spatial.attenuationGain);
     params.pitch = ClampPitch(record.pitch.At(frame) * playable.pitch);
     params.panMode = audio::AudioPanMode::Direct;
+    if (record.spatial.azimuthPan) {
+        params.panMode = audio::AudioPanMode::Azimuth;
+        params.azimuthDegrees = record.spatial.azimuthDegrees;
+        params.nonSpatializedAmount = record.spatial.nonSpatializedAmount;
+    }
     return params;
 }
 
