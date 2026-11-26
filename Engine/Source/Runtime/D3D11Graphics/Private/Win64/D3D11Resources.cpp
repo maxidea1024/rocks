@@ -980,4 +980,32 @@ D3D11Device::GetTextureSubresources(TextureHandle texture) const noexcept {
         TextureSubresources{record->mipLevels, record->slices});
 }
 
+Result<TextureViewInfo> D3D11Device::GetTextureViewInfo(TextureHandle texture) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->uav ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = record->srv.Get() != nullptr;
+    info.comparison = record->comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> D3D11Device::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
+}
+
 } // namespace rocks::graphics::d3d11

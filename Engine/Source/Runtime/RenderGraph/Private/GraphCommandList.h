@@ -41,7 +41,10 @@ public:
                           Span<const graphics::VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
                         uint64 offset) noexcept override;
-    void SetTexture(graphics::TextureHandle texture) noexcept override;
+    void SetTexture(graphics::ShaderStage stage, uint32 slot,
+                    graphics::TextureHandle texture) noexcept override;
+    Result<void> SetSampler(graphics::ShaderStage stage, uint32 slot,
+                            const graphics::SamplerDesc* sampler) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
@@ -82,6 +85,7 @@ private:
         SetVertexBuffers,
         SetIndexBuffer,
         SetTexture,
+        SetSampler,
         SetBufferView,
         SetDrawConstants,
         SetConstantBuffer,

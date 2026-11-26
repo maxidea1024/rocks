@@ -3,6 +3,7 @@
 #include "CommandSelfTest.h"
 #include "ComputeSelfTest.h"
 #include "ConstantSelfTest.h"
+#include "MultiTextureSelfTest.h"
 #include "CullingSelfTest.h"
 #include "EngineShaderSelfTest.h"
 #include "RenderGraphSelfTest.h"
@@ -768,6 +769,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
     // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.
     failures += RunConstantChecks(name, device, result.triangle.GetAllocator());
+    // 다중 텍스처·샘플러 slot과 자원 묶음(RR12, RenderBase 9.13절): VS·PS 텍스처 다섯, 샘플러 값
+    // 지정, 공유 샘플러, 파이프라인 전환 뒤 묶음 유지.
+    failures += RunMultiTextureChecks(name, device, result.triangle.GetAllocator());
     // RenderBase 그리기 유틸리티(RB6, RenderBase 11.4절): 엔진 셰이더 전체화면 복사(장치·그래프).
     failures += RunRenderUtilityChecks(name, device, result.triangle.GetAllocator());
     // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.

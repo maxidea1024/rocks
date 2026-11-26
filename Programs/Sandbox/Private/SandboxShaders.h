@@ -215,6 +215,16 @@ const rocks::render::BuiltinResources* ActiveBuiltins() noexcept;
 // 없으면 null이다.
 const rocks::shader::ShaderBindingLayout* Layout(const ShaderTypeDesc& type) noexcept;
 
+// layout의 텍스처 slot(Graphics FindTextureSlot — Docs/Design/RenderBase 9.13절)이다. layout이
+// 없거나 이름이 없으면 graphics::MaxResourceSlots(SetTexture가 무시하는 범위 밖 slot)다.
+rocks::uint32 TextureSlot(const rocks::shader::ShaderBindingLayout* layout,
+                          StringView name) noexcept;
+
+// 활성 집합에서 타입의 텍스처 slot이다(위와 같다).
+inline rocks::uint32 TextureSlot(const ShaderTypeDesc& type, StringView name) noexcept {
+    return TextureSlot(Layout(type), name);
+}
+
 // 활성 집합의 장치 셰이더(첫 사용 생성)다. 활성 집합이 없으면 NotReady다.
 rocks::Result<rocks::graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept;
 

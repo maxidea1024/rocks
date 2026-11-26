@@ -246,6 +246,10 @@ private:
     render::GraphicsPipelineRequest tonemapRequest_;
     // 차원·성분 계열마다의 텍스처 표시 요청이다(ScreenRenderer.cpp InspectorKinds 순서).
     render::GraphicsPipelineRequest inspectorRequests_[InspectorKindCount];
+    // 요청마다 PS 텍스처 slot이다(값 1 위치 — Docs/Design/RenderBase 9.13절).
+    uint32 meshTextureSlot_ = graphics::MaxResourceSlots;
+    uint32 tonemapTextureSlot_ = graphics::MaxResourceSlots;
+    uint32 inspectorTextureSlots_[InspectorKindCount] = {};
     Array<Array<uint8>> captured_;
     uint32 captureWidth_ = 0;
     uint32 captureHeight_ = 0;

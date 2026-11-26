@@ -104,6 +104,8 @@ private:
     // 뒤면 컬(일반) 파이프라인과 앞면 컬(반전) 파이프라인이다.
     graphics::PipelineHandle pipeline_;
     graphics::PipelineHandle reversedPipeline_;
+    // Sample.rsf PS의 Albedo 텍스처 slot이다(값 1 위치).
+    uint32 albedoSlot_ = graphics::MaxResourceSlots;
     graphics::BufferHandle triangle_;
     graphics::BufferHandle quad_;
     RenderStats stats_;

@@ -370,25 +370,58 @@ bool GlesDevice::BufferViewsBound(const PipelineRecord& pipeline) const noexcept
     return DrawBufferSlotsSatisfied(pipeline.bufferSlots, bound);
 }
 
-void GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
+const TextureRecord* GlesDevice::BoundTexture(uint32 stage, uint32 unit) const noexcept {
+    const TextureRecord* texture =
+        unit < MaxResourceSlots ? textures_.Find(boundTextures_[stage][unit]) : nullptr;
+    if (texture == nullptr || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
+bool GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
+    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
+        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
+        if (binding.role == PipelineSlotRole::SharedSampler &&
+            boundSamplers_[ConstantBufferStageIndex(binding.stage)][binding.location] ==
+                NoBoundSampler) {
+            return false;
+        }
+    }
+
     for (uint32 index = 0; index < pipeline.slots.count; ++index) {
         const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
         const GLuint location = binding.location;
+        const uint32 stage = ConstantBufferStageIndex(binding.stage);
         switch (binding.role) {
         case PipelineSlotRole::Texture: {
-            const TextureRecord* texture = textures_.Find(boundTexture_);
-            if (texture == nullptr || texture->writable) {
-                texture = textures_.Find(white_.slot);
+            const TextureRecord* texture = BoundTexture(stage, location);
+            if (texture == nullptr) {
+                break;
             }
 
-            if (texture != nullptr) {
-                BindPassTexture(*texture, location);
+            BindPassTexture(*texture, location);
+            // 유닛의 샘플러 출처(자기·공유 샘플러 slot, pair)에 준 값이 있으면 그 객체로 바꾼다.
+            // 없으면 텍스처 desc 샘플러 그대로다(RenderBase 9.13절 3항).
+            const uint16 given =
+                binding.pair != NoPairedSlot ? boundSamplers_[stage][binding.pair] : NoBoundSampler;
+            if (given != NoBoundSampler) {
+                const SamplerCacheEntry& entry = samplerCache_[given];
+                const PixelFormatKind kind = GetPixelFormatInfo(texture->format).kind;
+                const bool depth =
+                    kind == PixelFormatKind::Depth || kind == PixelFormatKind::DepthStencil;
+                const bool filterable = HasPixelFormatCaps(GetPixelFormatCaps(texture->format),
+                                                           PixelFormatCaps::Filterable) ||
+                                        (entry.desc.comparison && depth);
+                gl_.BindSampler(location, filterable ? entry.filtering : entry.point);
             }
 
             break;
         }
         case PipelineSlotRole::Sampler:
-            // GLES 샘플러는 텍스처 유닛의 샘플러 객체다(BindPassTexture).
+        case PipelineSlotRole::SharedSampler:
+            // GLES 샘플러는 텍스처 유닛의 샘플러 객체다(위 Texture 항, BindPassTexture).
             break;
         case PipelineSlotRole::BufferView: {
             const BufferViewRecord* view = bufferViews_.Find(boundViews_[binding.slot].slot);
@@ -456,6 +489,8 @@ void GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
         }
         }
     }
+
+    return true;
 }
 
 } // namespace rocks::graphics::gles
