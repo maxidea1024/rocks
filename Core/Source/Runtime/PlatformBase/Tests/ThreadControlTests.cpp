@@ -1,4 +1,5 @@
 #include <TestSupport/Test.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
 
@@ -201,4 +202,24 @@ TEST(PlatformCurrentThreadStackRangeContainsLocalsOnly) {
     CHECK(!range.Contains(probe.local));
     CHECK(!probe.range.Contains(&local));
 }
+
+TEST(Platform_PreciseSleeper_SleepsAtLeastRequested) {
+    // 정밀 대기는 요청보다 크게 일찍 깨지 않는다(OS timer의 반올림 여유로 절반을 하한으로 본다).
+    // 늦음은 OS 스케줄링 몫이라 상한은 보지 않는다.
+    PreciseSleeper sleeper;
+    CHECK(sleeper.Initialize());
+    CHECK(sleeper.Initialize());
+    constexpr uint64 Requested = 2000000;
+    const uint64 before = MonotonicNanoseconds();
+    sleeper.SleepNanoseconds(Requested);
+    CHECK(MonotonicNanoseconds() - before >= Requested / 2);
+    sleeper.SleepNanoseconds(0);
+
+    // 초기화하지 않은 객체도 millisecond 올림으로 잔다.
+    PreciseSleeper coarse;
+    const uint64 coarseBefore = MonotonicNanoseconds();
+    coarse.SleepNanoseconds(Requested);
+    CHECK(MonotonicNanoseconds() - coarseBefore >= Requested / 2);
+}
+
 } // namespace thread_control_tests_file

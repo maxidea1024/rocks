@@ -34,6 +34,9 @@ public:
     // 반 크기 |extent × scale|의 회전 상자다(28.3절).
     Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
 
+    // 반폭 boxExtent의 상자다(Docs/Design/PhysicsModule 2.4절 — scale은 Physics가 굽는다).
+    bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+
 protected:
     // 지역 (0, E, |E|)다(UE BoxComponent.cpp:122).
     bool TryLocalBounds(ComponentBounds& local) const noexcept override;

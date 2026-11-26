@@ -72,8 +72,9 @@ Result<void> AddNumberOption(AssetImportTranslation& out, StringView field, uint
 }
 
 // 이스케이프 문자(`\` 뒤 `,`·`;`)를 건너뛰며 separator로 나눈 원문 구간을 out에 더한다(이스케이프는
-// 그대로 둔다 — Unescape가 푼다). 빈 구간은 거짓이다.
-bool SplitRaw(StringView text, char separator, Array<StringView>& out) noexcept {
+// 그대로 둔다 — Unescape가 푼다). 빈 구간은 거짓이다(사용법 위반). 오류: 할당 실패(사용법 위반과
+// 가른다 — 14.1.119 할당 실패 전수가 찾음).
+Result<bool> SplitRaw(StringView text, char separator, Array<StringView>& out) noexcept {
     usize start = 0;
     for (usize index = 0; index <= text.ByteCount(); ++index) {
         if (index < text.ByteCount()) {
@@ -90,14 +91,18 @@ bool SplitRaw(StringView text, char separator, Array<StringView>& out) noexcept 
             }
         }
 
-        if (index == start || !out.TryPushBack(text.SliceBytes(start, index - start))) {
-            return false;
+        if (index == start) {
+            return Result<bool>::Success(false);
+        }
+
+        if (auto pushed = out.TryPushBack(text.SliceBytes(start, index - start)); !pushed) {
+            return Result<bool>::Failure(pushed.Error());
         }
 
         start = index + 1;
     }
 
-    return true;
+    return Result<bool>::Success(true);
 }
 
 // raw의 `\,`·`\;`를 푼 새 문자열을 out.strings에 둔다(그 밖의 `\`는 글자 그대로 — 13절).
@@ -133,7 +138,11 @@ Result<StringView> Unescape(StringView raw, AssetImportTranslation& out) noexcep
 Result<bool> ParseCube(StringView text, Allocator& allocator, AssetImportTranslation& out,
                        Array<StringView>& files) noexcept {
     Array<StringView> items(allocator);
-    if (!SplitRaw(text, ListSeparator, items) || items.Size() != TextureCubeFaces) {
+    if (auto split = SplitRaw(text, ListSeparator, items); !split || !split.Value()) {
+        return split;
+    }
+
+    if (items.Size() != TextureCubeFaces) {
         return Result<bool>::Success(false);
     }
 
@@ -175,8 +184,8 @@ Result<bool> ParseCube(StringView text, Allocator& allocator, AssetImportTransla
 Result<bool> ParseFileList(StringView text, Allocator& allocator, AssetImportTranslation& out,
                            Array<StringView>& files) noexcept {
     Array<StringView> items(allocator);
-    if (!SplitRaw(text, ListSeparator, items)) {
-        return Result<bool>::Success(false);
+    if (auto split = SplitRaw(text, ListSeparator, items); !split || !split.Value()) {
+        return split;
     }
 
     for (StringView item : items) {
@@ -420,8 +429,9 @@ Result<bool> TranslateTextureImportArguments(void* state, Allocator& allocator,
         } else if (multi->name == "cube-array") {
             spec.kind = TextureImportKind::CubeArray;
             Array<StringView> cubes(allocator);
-            if (!SplitRaw(multi->value, CubeSeparator, cubes)) {
-                return Result<bool>::Success(false);
+            if (auto split = SplitRaw(multi->value, CubeSeparator, cubes);
+                !split || !split.Value()) {
+                return split;
             }
 
             for (usize index = 0; index < cubes.Size() && parsed && parsed.Value(); ++index) {

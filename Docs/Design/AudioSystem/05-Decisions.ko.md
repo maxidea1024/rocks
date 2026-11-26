@@ -30,3 +30,4 @@
 | AD26 | 장치 콜백 → AudioRT 깨우기는 잠금 없는 단일 대기자 신호(`RealtimeWakeSignal`: Windows `WaitOnAddress`, Android futex, macOS Mach semaphore) | 권장안 |
 | AD27 | 리버브 bypass·없음으로 전환해도 꼬리 에너지가 임계 아래로 머문 뒤에 끄고 이력을 지운다(UE는 즉시 지움) | 권장안 |
 | AD28 | Opus 청크는 앞 청크 끝 320 ms(개정 27, 처음 80 ms) 패킷을 복제해 독립 디코드, looping clip은 loop 머리 PCM을 미리 디코드해 둔다 | 권장안 |
+| AD29 | Sound Cue 대응(`SoundEvent`)을 두지 않는다. 랜덤·레이어·switch·지연·loop 같은 합성은 MetaSounds 대응 `SoundGraph`의 노드로만 만든다 | 사용자 결정(2026-11-25) |

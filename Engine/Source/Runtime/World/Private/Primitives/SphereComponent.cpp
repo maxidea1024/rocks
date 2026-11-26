@@ -46,4 +46,10 @@ Result<VolumeShape> SphereComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TrySphere(WorldLocation(), static_cast<double>(ScaledSphereRadius()));
 }
 
+bool SphereComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Sphere;
+    geometry.radius = static_cast<double>(sphereRadius_);
+    return true;
+}
+
 } // namespace rocks

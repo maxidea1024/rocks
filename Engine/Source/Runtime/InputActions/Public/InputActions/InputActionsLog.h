@@ -17,5 +17,11 @@ inline constexpr char DiagInputBindingKeyUnknown[] = "InputBindingKeyUnknown";
 // - InputActionSettingsConflict: 같은 id 액션의 설정이 컨텍스트마다 달라 정렬 순 첫 사본을
 //   썼다(Warning).
 inline constexpr char DiagInputActionSettingsConflict[] = "InputActionSettingsConflict";
+// - InputUserSettingsEntrySkipped: 사용자 설정을 불러올 때 모르는 키 이름·범위 밖 slot의 매핑을
+//   건너뛰었다(Warning — 5.3절).
+inline constexpr char DiagInputUserSettingsEntrySkipped[] = "InputUserSettingsEntrySkipped";
+// - InputMappingSlotOverflow: 한 컨텍스트에서 같은 매핑 이름의 바인딩이 KeySlotCount개를 넘어 넘친
+//   바인딩을 리바인딩 행에 넣지 않았다(Warning — 5.2절).
+inline constexpr char DiagInputMappingSlotOverflow[] = "InputMappingSlotOverflow";
 
 } // namespace rocks::input

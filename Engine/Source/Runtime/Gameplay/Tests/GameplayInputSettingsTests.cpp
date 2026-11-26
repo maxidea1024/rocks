@@ -100,4 +100,52 @@ TEST(GameplayInputSettings_GestureRecognizerFollowsTheSetting) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// Docs/Design/InputActions 6.3절: input.haptic_scale·input.enable_haptics를 GameInstance가
+// 프레임마다 PlayerController 진동 합성에 넣는다.
+TEST(GameplayInputSettings_HapticsFollowTheSettings) {
+    ConfigFixture fixture(DevelopmentRules());
+    config::ConfigContext& settings = fixture.Context();
+    REQUIRE(input::RegisterInputSettings(settings));
+    REQUIRE(
+        settings.AddAssignment(config::ConfigLayer::Session, "test", "input.haptic_scale", "0.5"));
+    REQUIRE(settings.Sync());
+    SystemAllocator allocator;
+    {
+        GameInstanceConfig game;
+        game.timeStep = {1.0 / 60.0, 0.25, 8};
+        game.defaultMap.name = "Arena";
+        GameInstanceClient client(allocator, game);
+        EngineConfig config;
+        config.modules = &test::ProcessModules();
+        config.client = &client;
+        config.settings = &settings;
+        config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        REQUIRE(engine.RunFrame());
+        CHECK(input::HapticScaleSetting() == 0.5f && input::EnableHapticsSetting());
+        World* world = engine.WorldAt(0);
+        REQUIRE(world != nullptr);
+        REQUIRE(WithFirstController(client, *world, [](PlayerController& pc) noexcept {
+            CHECK(pc.Haptics().StartDynamicHaptic({}).IsOk());
+        }));
+        REQUIRE(engine.RunFrame());
+        input::MotorValues motors;
+        REQUIRE(WithFirstController(
+            client, *world, [&](PlayerController& pc) noexcept { motors = pc.MotorOutput(); }));
+        CHECK(motors.leftLarge == 0.5f && motors.rightSmall == 0.5f);
+
+        REQUIRE(settings.AddAssignment(config::ConfigLayer::Session, "test", "input.enable_haptics",
+                                       "false"));
+        REQUIRE(settings.Sync());
+        REQUIRE(engine.RunFrame());
+        REQUIRE(WithFirstController(
+            client, *world, [&](PlayerController& pc) noexcept { motors = pc.MotorOutput(); }));
+        CHECK(motors == input::MotorValues{});
+        REQUIRE(engine.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace gameplay_input_settings_tests_file

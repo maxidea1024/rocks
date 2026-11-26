@@ -62,4 +62,12 @@ Result<VolumeShape> CapsuleComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TryCapsule(WorldLocation(), WorldQuaternion(), radius, halfHeight);
 }
 
+bool CapsuleComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Capsule;
+    geometry.radius = static_cast<double>(capsuleRadius_);
+    // 반높이는 반경 이상이다(UE Length = 2·max(HalfHeight − Radius, 0) — 데이터 로드 값도 맞춘다).
+    geometry.halfHeight = static_cast<double>(math::Max(capsuleHalfHeight_, capsuleRadius_));
+    return true;
+}
+
 } // namespace rocks

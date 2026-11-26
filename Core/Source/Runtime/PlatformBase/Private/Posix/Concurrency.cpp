@@ -27,6 +27,33 @@ void SleepFor(uint32 milliseconds) noexcept {
     }
 }
 
+namespace {
+
+constexpr uint64 NanosecondsPerSecondForSleep = 1000000000;
+
+} // namespace
+
+PreciseSleeper::~PreciseSleeper() noexcept = default;
+
+// POSIX nanosleep은 이미 ns 해상도라 만들 OS 객체가 없다.
+bool PreciseSleeper::Initialize() noexcept {
+    return true;
+}
+
+void PreciseSleeper::SleepNanoseconds(uint64 nanoseconds) noexcept {
+    if (nanoseconds == 0) {
+        return;
+    }
+
+    timespec remaining{static_cast<time_t>(nanoseconds / NanosecondsPerSecondForSleep),
+                       static_cast<long>(nanoseconds % NanosecondsPerSecondForSleep)};
+    while (nanosleep(&remaining, &remaining) != 0) {
+        if (errno != EINTR) {
+            Fatal("nanosleep failed");
+        }
+    }
+}
+
 void YieldThread() noexcept {
     sched_yield();
 }
@@ -147,6 +174,14 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
         PosixSetCurrentThreadPriority(state.priority);
     }
 }
+
+} // namespace detail
+
+bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    return detail::PosixGetCurrentThreadPriority(priority);
+}
+
+namespace detail {
 
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(pthread_t) <= sizeof(state.native));

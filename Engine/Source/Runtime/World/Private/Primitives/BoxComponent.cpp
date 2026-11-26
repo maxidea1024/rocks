@@ -47,4 +47,10 @@ Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
         Vec3d(math::Abs(extent.x), math::Abs(extent.y), math::Abs(extent.z)));
 }
 
+bool BoxComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Box;
+    geometry.halfExtent = boxExtent_;
+    return true;
+}
+
 } // namespace rocks

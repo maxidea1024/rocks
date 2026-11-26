@@ -1,4 +1,5 @@
 #include <InputActions/InputContextCollect.h>
+#include <InputActions/InputUserSettings.h>
 #include <InputActions/PlayerActionInput.h>
 
 // 평가기의 컨텍스트 목록이다(Docs/Design/InputActions 4.1절 — UE
@@ -44,7 +45,21 @@ Result<void> PlayerActionInput::AddContext(InputContextBundle&& bundle, int32 pr
         return validated;
     }
 
+    // 새 id면 칸을 먼저 확보한다(뒤의 설정 등록이 성공하면 넣기는 실패하지 않는다 — 원자적이다).
     const usize existing = FindContext(bundle.id);
+    if (existing >= contexts_.Size()) {
+        if (auto reserved = contexts_.TryEnsureCapacity(contexts_.Size() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    // 사용자 설정 등록(실패면 그대로 — 등록도 원자적이다, UE AddMappingContext :344-350).
+    if (options.notifyUserSettings && settings_ != nullptr) {
+        if (auto registered = settings_->RegisterContext(bundle); !registered) {
+            return registered;
+        }
+    }
+
     if (existing < contexts_.Size()) {
         ContextEntry& entry = contexts_[existing];
         // 같은 id: 데이터는 그대로다(UE cpp:273-285).
@@ -56,10 +71,6 @@ Result<void> PlayerActionInput::AddContext(InputContextBundle&& bundle, int32 pr
 
         entry.priority = priority;
         return RequestRebuild(options);
-    }
-
-    if (auto reserved = contexts_.TryEnsureCapacity(contexts_.Size() + 1); !reserved) {
-        return reserved;
     }
 
     ContextEntry entry(*allocator_);
@@ -81,6 +92,14 @@ Result<void> PlayerActionInput::UpdateContext(InputContextBundle&& bundle,
         return validated;
     }
 
+    // 설정에 등록한 사본도 새 데이터로 바꾼다(뒤에 만드는 프로필이 새 데이터로 채워진다 — UE는
+    // IMC를 가리킨다). 행은 다시 매기지 않는다(UE도 등록 때만 매긴다).
+    if (settings_ != nullptr) {
+        if (auto refreshed = settings_->RefreshContext(bundle); !refreshed) {
+            return refreshed;
+        }
+    }
+
     contexts_[existing].bundle = Move(bundle);
     ContextOptions options;
     options.forceImmediately = forceImmediately;
@@ -99,6 +118,10 @@ Result<void> PlayerActionInput::RemoveContext(const Guid& contextId,
         entry.registrations > 1) {
         --entry.registrations;
         return Result<void>::Success();
+    }
+
+    if (options.notifyUserSettings && settings_ != nullptr) {
+        settings_->UnregisterContext(contextId);
     }
 
     // 안정 제거다(남은 순서 값은 그대로 — 정렬은 순서 값으로 한다).
@@ -123,8 +146,18 @@ Result<void> PlayerActionInput::SetKeyProfile(StringView profileId) noexcept {
     return RequestRebuild(ContextOptions{});
 }
 
+void PlayerActionInput::SetUserSettings(InputUserSettings* settings) noexcept {
+    settings_ = settings;
+    rebuildPending_ = true;
+}
+
 Result<void> PlayerActionInput::ApplyPendingChanges(const InputState& state,
                                                     uint32 gamepad) noexcept {
+    // 사용자 설정이 바뀌었으면 다시 만든다(UE OnSettingsChanged → RequestRebuildControlMappings).
+    if (settings_ != nullptr && settings_->Revision() != settingsRevision_) {
+        rebuildPending_ = true;
+    }
+
     if (!rebuildPending_) {
         return Result<void>::Success();
     }

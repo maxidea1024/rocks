@@ -103,7 +103,7 @@ UE의 GameplayTag 입력 모드 필터는 7.4절이다.
 | 0 id 액션·컨텍스트, 범위 밖 enum, 비유한 매개변수, DeadZone lower ≥ upper(UE `IsDataValid`와 같다) | `InvalidArgument` |
 | `ParseInputKey`가 모르는 이름 | `NotFound` |
 | 할당 실패 | `OutOfMemory`(상태는 그대로 — 모디파이어 복사도 커브 셋을 임시본에 먼저 복사한다) |
-| 사용자 설정 JSON 파손 | `CorruptData`. 모르는 이름은 진단만 하고 건너뛴다 |
+| 사용자 설정 JSON 파손 | `InvalidArgument`(높은 version은 `Unsupported`). 모르는 이름은 진단만 하고 건너뛴다 |
 
 스레드: 모든 타입은 게임 스레드 전용이다. 데이터(액션·컨텍스트)는 평가 중 바꾸지 않는다(바꾸면 다음 다시 만들기에서 반영 — 4.2절).
 

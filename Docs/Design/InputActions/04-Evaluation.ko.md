@@ -23,7 +23,8 @@ API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, for
 동작:
 - 추가·제거는 다시 만들기를 **예약**하고, 다음 평가 처음에 한 번 한다(UE 모듈 Tick — `EnhancedInputModule.cpp:298-328`).
 - 예약된 요청들의 `ignorePressedKeysUntilRelease`는 AND로 합친다. 다시 만든 뒤 참으로 되돌린다(UE cpp:433·1201).
-- `UpdateContext`는 있는 id의 사본만 바꾸고 다시 만들기를 예약한다(우선순위·등록 횟수 그대로, 없는 id면 `NotFound` — 2.7절).
+- `UpdateContext`는 있는 id의 사본만 바꾸고 다시 만들기를 예약한다(우선순위·등록 횟수 그대로, 없는 id면 `NotFound` — 2.7절). 사용자 설정이 붙어 있으면 그 설정에 등록한 사본도 바꾼다(`InputUserSettings::RefreshContext` — 행은 다시 매기지 않는다, 5.2절).
+- `AddContext`의 `notifyUserSettings` 등록은 새 id의 칸을 확보한 뒤 한다(등록이 성공하면 넣기는 실패하지 않는다 — 실패하면 설정·평가기 모두 그대로).
 - 이미 있는 컨텍스트(같은 id)를 다시 추가할 때 데이터는 건드리지 않는다(UE와 같다):
   - `Untracked`면 우선순위를 바꾸고 다시 만든다.
   - `CountRegistrations`면 횟수만 늘린다(우선순위 변경·다시 만들기 없음 — UE cpp:273-285). 제거는 횟수가 0이 될 때 빠진다.
@@ -43,6 +44,7 @@ API: `AddContext(bundle, priority, ContextOptions)` / `UpdateContext(bundle, for
    - 앞(상위) 컨텍스트들이 이미 쓴 키의 바인딩은 넣지 않는다.
    - 액션이 `consumeInput`이고 chord 트리거가 없을 때만 키를 차단 집합에 넣는다.
    - 차단 집합은 컨텍스트 하나를 다 처리한 뒤 합친다. 그래서 같은 컨텍스트 안에서는 같은 키를 여러 바인딩이 쓸 수 있다(UE :966-967·1041·1052-1055·1091).
+   - **겹침 합치기**: 이미 넣은 항목과 액션·키·트리거 종류 열·모디파이어 종류 열이 같으면 넣지 않는다(UE `AddMapping`의 `Equals` — `EnhancedPlayerInput.cpp:1088-1101`, 값은 비교하지 않는다). 사용자 키(5.2절)로 같은 이름의 바인딩들이 같은 키 목록을 받거나 데이터가 겹쳐도 한 번만 평가한다(Cumulative 액션이 두 번 더하지 않는다). UE는 뒤 바인딩의 모디파이어·트리거 값으로 앞 항목을 다시 만든다. Rocks는 정렬 순 첫 것을 둔다(2.7절 첫 사본 규칙과 같다 — 다른 점, 7.3절). 소비 판정은 합치기와 무관하다(UE도 AddMapping 전에 정한다).
 4. **chord 복제**: 액션 수준 `ChordAction` 트리거를 그 액션의 바인딩 수준에도 복제한다(UE :1076-1085).
 5. **ChordBlocker**: 모든 컨텍스트를 합친 전체 바인딩 목록에서 처리한다(UE `InjectChordBlockers` :579-612).
    - chord 바인딩보다 뒤에 있고 같은 키를 쓰는 바인딩에 그 chord 바인딩의 액션을 대상으로 한 ChordBlocker를 넣는다. 그래서 뒤쪽 컨텍스트에도 들어간다.
