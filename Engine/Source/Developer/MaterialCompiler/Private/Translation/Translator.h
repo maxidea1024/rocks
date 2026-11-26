@@ -9,6 +9,7 @@
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialIrModule.h>
 #include <MaterialCompiler/MaterialTranslation.h>
+#include <MaterialCompiler/MaterialTargetField.h>
 #include <MaterialCompiler/MaterialTranslationInput.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 
@@ -106,6 +107,12 @@ public:
         return context_;
     }
 
+    // 번역 대상이다. field를 읽은 항목으로 기록한다(6.9절 MS2b3).
+    const MaterialTranslationTarget& Target(MaterialTargetField field) noexcept {
+        out_.consultedTarget |= ToMask(field);
+        return input_.target;
+    }
+
     // 종류 이름의 lowering 함수다. 없으면 nullptr이다.
     LoweringFn FindLowering(Name type) const noexcept;
 
@@ -150,9 +157,16 @@ private:
     Result<void> CheckContextValues() noexcept;
     // node가 기대는 노드들이다(들어오는 간선의 출발 노드, 이름 있는 재경유의 선언).
     Result<void> CollectDependencies(usize node, Array<Dependency>& out) noexcept;
-    // 출력 노드의 roots 핀(활성 핀)에서 닿는 노드의 의존 후위 순서를 만들고 순환 간선을 진단한다.
-    Result<void> PlanOrder(const nodegraph::GraphNode& output, Span<const Name> roots,
-                           Array<usize>& order) noexcept;
+    // 출력 노드 roots 핀(활성 핀)에 들어오는 간선의 출발 노드다(간선 저장 순서).
+    Result<void> RootStarts(const nodegraph::GraphNode& output, Span<const Name> roots,
+                            Array<usize>& starts) noexcept;
+    // starts에서 닿는 노드의 의존 후위 순서를 만들고 순환 간선을 진단한다. 이미 번역한 노드는
+    // 건너뛰고, 번역 중인 노드에 닿으면 순환이다(늦은 입력 계획 — 6.9절 MS2b3).
+    Result<void> PlanOrder(Span<const usize> starts, Array<usize>& order) noexcept;
+    // order대로 아직 번역하지 않은 노드를 번역한다.
+    Result<void> LowerPlanned(Span<const usize> order) noexcept;
+    // consumer 노드의 입력 pin이 계획에 들어가는가(늦은 입력이 아니다).
+    bool IsEagerInput(const nodegraph::GraphNode& consumer, Name pin) const noexcept;
     Result<void> LowerNodeOnce(const nodegraph::GraphNode& node) noexcept;
 
     Allocator& allocator_;
@@ -165,6 +179,8 @@ private:
     HashMap<PinKey, IrValueId, PinKeyHash> outputs_;
     HashMap<Guid, NodeState> states_;
     HashMap<Name, LoweringFn> lowerings_;
+    // 늦은 입력 노드 종류 → 계획에 넣는 입력 키 원문이다.
+    HashMap<Name, Span<const StringView>> lazyNodes_;
     // 노드 색인마다 들어오는 간선 색인이다(CSR — incomingStart_[i]…incomingStart_[i + 1]).
     Array<usize> incomingStart_;
     Array<usize> incoming_;

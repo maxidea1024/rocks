@@ -111,6 +111,10 @@ EvaluationContext LoweringContext::Context() const noexcept {
     return translator_.Context();
 }
 
+const MaterialTranslationTarget& LoweringContext::Target(MaterialTargetField field) noexcept {
+    return translator_.Target(field);
+}
+
 Result<IrValueId> LoweringContext::ContextValue(StringView name,
                                                 Span<const IrValueId> arguments) noexcept {
     const Span<const MaterialContextValue> table = MaterialContextValues();

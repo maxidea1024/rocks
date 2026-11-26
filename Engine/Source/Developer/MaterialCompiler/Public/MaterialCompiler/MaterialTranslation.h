@@ -2,6 +2,7 @@
 
 #include <Core/Memory/Allocator.h>
 #include <MaterialCompiler/MaterialIrModule.h>
+#include <MaterialCompiler/MaterialTargetField.h>
 #include <NodeGraph/GraphDiagnostic.h>
 
 // 머티리얼 그래프 번역의 결과다(Docs/Design/MaterialSystem 6.8절). 오류 진단이 하나라도 있으면
@@ -20,6 +21,8 @@ struct MaterialTranslation {
 
     IrModule module;
     nodegraph::GraphDiagnosticList diagnostics;
+    // 번역이 읽은 번역 대상 항목이다(6.9절 MS2b3 — 쿠킹이 번역 키에 넣는다).
+    MaterialTargetFieldMask consultedTarget = NoMaterialTargetFields;
     bool succeeded = false;
 };
 

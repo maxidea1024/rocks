@@ -124,7 +124,8 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
                        MaterialTranslation& out) noexcept
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), nodes_(allocator),
       edges_(allocator), outputs_(allocator), states_(allocator), lowerings_(allocator),
-      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator) {
+      lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator),
+      results_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -273,9 +274,9 @@ Result<void> Translator::BuildIndex() noexcept {
     }
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
-    const Span<const LoweringEntry> groups[] = {ConstantLowerings(),   MathLowerings(),
-                                                FlowLowerings(),       ContextValueLowerings(),
-                                                CoordinateLowerings(), TransformLowerings()};
+    const Span<const LoweringEntry> groups[] = {
+        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),  ContextValueLowerings(),
+        CoordinateLowerings(), TransformLowerings(), SwitchLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -289,6 +290,12 @@ Result<void> Translator::BuildIndex() noexcept {
 
             if (auto added = lowerings_.Insert(name.Value(), entry.fn); !added) {
                 return Result<void>::Failure(added.Error());
+            }
+
+            if (entry.lazyInputs) {
+                if (auto added = lazyNodes_.Insert(name.Value(), entry.eagerInputs); !added) {
+                    return Result<void>::Failure(added.Error());
+                }
             }
         }
     }
@@ -400,8 +407,19 @@ Result<IrValueId> Translator::LowerNodeOutput(const nodegraph::GraphNode& node, 
             return Result<IrValueId>::Success(NoIrValue);
         }
 
+        // 늦은 입력(번역 때 고르는 스위치의 가지)이다. 그 노드에서 닿는 노드로 작은 번역 순서를
+        // 만들어 반복으로 번역한다(재귀는 스위치가 겹친 깊이만큼 — 6.9절 MS2b3).
+        const usize* index = nodes_.Find(node.id);
+        if (index == nullptr) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        SystemAllocator scratch;
+        Array<usize> order(scratch);
+        const usize starts[] = {*index};
         ++depth_;
-        auto lowered = LowerNodeOnce(node);
+        auto planned = PlanOrder(starts, order);
+        auto lowered = planned ? LowerPlanned(order.View()) : Move(planned);
         --depth_;
         if (!lowered) {
             return Result<IrValueId>::Failure(lowered.Error());
@@ -514,6 +532,11 @@ Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out)
             : nullptr;
     for (usize at = incomingStart_[node]; at < incomingStart_[node + 1]; ++at) {
         const nodegraph::GraphEdge& edge = graph_->edges[incoming_[at]];
+        if (consumer.enableState != nodegraph::NodeEnableState::Disabled &&
+            !IsEagerInput(consumer, edge.toPin)) {
+            continue;
+        }
+
         if (consumer.enableState == nodegraph::NodeEnableState::Disabled) {
             // 비활성 노드는 통과 쌍의 입력만 넘긴다(그 밖의 위쪽은 번역하지 않는다 —
             // NodeGraph 6.5절).
@@ -563,9 +586,63 @@ Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out)
     return Result<void>::Success();
 }
 
-Result<void> Translator::PlanOrder(const nodegraph::GraphNode& output, Span<const Name> roots,
-                                   Array<usize>& order) noexcept {
-    // 반복 깊이 우선(회색 = 방문 중, 검정 = 끝). 출력 노드의 활성 핀에서만 시작한다.
+bool Translator::IsEagerInput(const nodegraph::GraphNode& consumer, Name pin) const noexcept {
+    const Span<const StringView>* eager = lazyNodes_.Find(consumer.type);
+    if (eager == nullptr) {
+        return true;
+    }
+
+    for (StringView key : *eager) {
+        auto name = input_.names.TryFind(key);
+        if (name && name.Value() == pin) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Result<void> Translator::RootStarts(const nodegraph::GraphNode& output, Span<const Name> roots,
+                                    Array<usize>& starts) noexcept {
+    starts.Clear();
+    for (const nodegraph::GraphEdge& edge : graph_->edges) {
+        bool active = false;
+        for (Name root : roots) {
+            active = active || edge.toPin == root;
+        }
+
+        if (!(edge.toNode == output.id) || !active) {
+            continue;
+        }
+
+        if (const usize* source = nodes_.Find(edge.fromNode)) {
+            if (auto added = starts.TryPushBack(*source); !added) {
+                return added;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> Translator::LowerPlanned(Span<const usize> order) noexcept {
+    for (usize index : order) {
+        const nodegraph::GraphNode& node = graph_->nodes[index];
+        if (node.enableState == nodegraph::NodeEnableState::Disabled || states_.Contains(node.id)) {
+            continue;
+        }
+
+        if (auto lowered = LowerNodeOnce(node); !lowered) {
+            return lowered;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> Translator::PlanOrder(Span<const usize> starts, Array<usize>& order) noexcept {
+    // 반복 깊이 우선(회색 = 방문 중, 검정 = 끝). 이미 번역한 노드는 검정, 번역 중인 노드(늦은
+    // 입력을 요청한 스위치와 그 위 — 6.9절)는 회색으로 시작한다.
     enum class Mark : uint8 {
         White = 0,
         Gray = 1,
@@ -585,8 +662,11 @@ Result<void> Translator::PlanOrder(const nodegraph::GraphNode& output, Span<cons
         return sized;
     }
 
-    for (Mark& mark : marks) {
-        mark = Mark::White;
+    for (usize index = 0; index < marks.Size(); ++index) {
+        const NodeState* state = states_.Find(graph_->nodes[index].id);
+        marks[index] = state == nullptr                ? Mark::White
+                       : *state == NodeState::Visiting ? Mark::Gray
+                                                       : Mark::Black;
     }
 
     // 프레임마다 의존 목록을 한 배열에 이어 둔다(프레임이 끝나면 그 꼬리를 버린다).
@@ -612,22 +692,12 @@ Result<void> Translator::PlanOrder(const nodegraph::GraphNode& output, Span<cons
         return stack.TryPushBack(frame);
     };
 
-    for (const nodegraph::GraphEdge& edge : graph_->edges) {
-        bool active = false;
-        for (Name root : roots) {
-            active = active || edge.toPin == root;
-        }
-
-        if (!(edge.toNode == output.id) || !active) {
+    for (usize start : starts) {
+        if (marks[start] != Mark::White) {
             continue;
         }
 
-        const usize* source = nodes_.Find(edge.fromNode);
-        if (source == nullptr || marks[*source] != Mark::White) {
-            continue;
-        }
-
-        if (auto pushed = push(*source); !pushed) {
+        if (auto pushed = push(start); !pushed) {
             return pushed;
         }
 
@@ -929,6 +999,62 @@ Result<void> Translator::CheckContextValues() noexcept {
         }
     }
 
+    // V15(6.9절 MS2b3): 깊이에 닿는 진입점(WPO·OpacityMask·PDO)에서 렌더 경로 조건 값이 닿으면
+    // 오류다(공통 depth pass와 경로 전용 base pass의 깊이가 달라진다 — 5장 V15).
+    const IrEntry depthEntries[] = {IrEntry::Vertex, IrEntry::VertexPrevious, IrEntry::OpacityMask,
+                                    IrEntry::PixelDepthOffset};
+    const MaterialContextValue* deferred = FindMaterialContextValue("RenderPathDeferred");
+    const MaterialContextValue* forward = FindMaterialContextValue("RenderPathForwardPlus");
+    for (bool& item : visited) {
+        item = false;
+    }
+
+    for (const IrResult& result : results_) {
+        bool depth = false;
+        for (IrEntry entry : depthEntries) {
+            depth = depth || result.entry == entry;
+        }
+
+        if (depth) {
+            if (auto pushed = stack.TryPushBack(result.value); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    while (!stack.IsEmpty()) {
+        auto popped = stack.TryPopBack();
+        if (!popped) {
+            return Result<void>::Failure(popped.Error());
+        }
+
+        const IrValueId id = popped.Value();
+        if (visited[id]) {
+            continue;
+        }
+
+        visited[id] = true;
+        const IrValue& value = builder_.Value(id);
+        if (value.op == IrOp::Extern && value.immediate[0] < table.Size() &&
+            (&table[static_cast<usize>(value.immediate[0])] == deferred ||
+             &table[static_cast<usize>(value.immediate[0])] == forward)) {
+            if (auto reported =
+                    Report(nodegraph::GraphDiagnosticSeverity::Error,
+                           MaterialDiagnosticCode::RenderPathDepth, value.site.node, Name(),
+                           "Render path switch reaches WorldPositionOffset, "
+                           "OpacityMask or PixelDepthOffset");
+                !reported) {
+                return reported;
+            }
+        }
+
+        for (uint8 index = 0; index < value.operandCount; ++index) {
+            if (auto pushed = stack.TryPushBack(value.operands[index]); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -936,6 +1062,7 @@ Result<void> Translator::Run() noexcept {
     out_.module.Clear();
     out_.diagnostics.items.Clear();
     out_.succeeded = false;
+    out_.consultedTarget = NoMaterialTargetFields;
     auto domain = input_.names.TryFind(MaterialDomainName);
     if (!domain || !(input_.document.domain == domain.Value())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -979,6 +1106,7 @@ Result<void> Translator::Run() noexcept {
     // 문맥이 WPO 결과를 냈을 때만 번역한다(UE HLSLMaterialTranslator.cpp:1663–1667).
     SystemAllocator scratch;
     Array<Name> roots(scratch);
+    Array<usize> starts(scratch);
     Array<usize> order(scratch);
     const EvaluationContext contexts[] = {
         EvaluationContext::Vertex, EvaluationContext::VertexPrevious, EvaluationContext::Pixel};
@@ -1001,21 +1129,17 @@ Result<void> Translator::Run() noexcept {
             return rooted;
         }
 
+        if (auto rooted = RootStarts(*output, roots.View(), starts); !rooted) {
+            return rooted;
+        }
+
         order.Clear();
-        if (auto planned = PlanOrder(*output, roots.View(), order); !planned) {
+        if (auto planned = PlanOrder(starts.View(), order); !planned) {
             return planned;
         }
 
-        for (usize index : order) {
-            const nodegraph::GraphNode& node = graph_->nodes[index];
-            if (node.enableState == nodegraph::NodeEnableState::Disabled ||
-                states_.Contains(node.id)) {
-                continue;
-            }
-
-            if (auto lowered = LowerNodeOnce(node); !lowered) {
-                return lowered;
-            }
+        if (auto lowered = LowerPlanned(order.View()); !lowered) {
+            return lowered;
         }
 
         if (auto translated = TranslateOutputs(*output); !translated) {

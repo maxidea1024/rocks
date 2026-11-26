@@ -321,6 +321,12 @@ struct MaterialInputs {
 #define MaterialContextPreviousTransformViewVectorToTranslatedWorld(c, a0) MaterialPassPreviousTransformViewVectorToTranslatedWorld(c, a0)
 #define MaterialContextPeriodicWorldOrigin(c, a0) MaterialPassPeriodicWorldOrigin(c, a0)
 #define MaterialContextPeriodicWorldOriginPow2(c, a0) MaterialPassPeriodicWorldOriginPow2(c, a0)
+#define MaterialContextRenderPathDeferred(c) MaterialPassRenderPathDeferred(c)
+#define MaterialContextRenderPathForwardPlus(c) MaterialPassRenderPathForwardPlus(c)
+#define MaterialContextCapabilityTierSm5(c) MaterialPassCapabilityTierSm5(c)
+#define MaterialContextCapabilityTierSm6(c) MaterialPassCapabilityTierSm6(c)
+#define MaterialContextGlobalIlluminationPass(c) MaterialPassGlobalIlluminationPass(c)
+#define MaterialContextRayTracingPass(c) MaterialPassRayTracingPass(c)
 #else
 #define MaterialContextCameraVector(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextDeltaTime(c) (0.0)
@@ -396,6 +402,12 @@ struct MaterialInputs {
 #define MaterialContextPreviousTransformViewVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextPeriodicWorldOrigin(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextPeriodicWorldOriginPow2(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextRenderPathDeferred(c) (false)
+#define MaterialContextRenderPathForwardPlus(c) (false)
+#define MaterialContextCapabilityTierSm5(c) (false)
+#define MaterialContextCapabilityTierSm6(c) (false)
+#define MaterialContextGlobalIlluminationPass(c) (false)
+#define MaterialContextRayTracingPass(c) (false)
 #endif
 
 #if MATERIAL_SUPPLY_VERTEX
@@ -766,6 +778,20 @@ struct MaterialInputs {
 #else
 #define MaterialContextXrPassthroughCameraUv0(c) float4(0.0, 0.0, 0.0, 0.0)
 #define MaterialContextXrPassthroughCameraUv1(c) float4(0.0, 0.0, 0.0, 0.0)
+#endif
+
+#if MATERIAL_SUPPLY_PATH_TRACING
+#define MaterialContextPathTracingPass(c) MaterialPassPathTracingPass(c)
+#define MaterialContextPathTracingShadowRay(c) MaterialPassPathTracingShadowRay(c)
+#define MaterialContextPathTracingIndirectDiffuseRay(c) MaterialPassPathTracingIndirectDiffuseRay(c)
+#define MaterialContextPathTracingIndirectSpecularRay(c) MaterialPassPathTracingIndirectSpecularRay(c)
+#define MaterialContextPathTracingIndirectVolumeRay(c) MaterialPassPathTracingIndirectVolumeRay(c)
+#else
+#define MaterialContextPathTracingPass(c) (false)
+#define MaterialContextPathTracingShadowRay(c) (false)
+#define MaterialContextPathTracingIndirectDiffuseRay(c) (false)
+#define MaterialContextPathTracingIndirectSpecularRay(c) (false)
+#define MaterialContextPathTracingIndirectVolumeRay(c) (false)
 #endif
 
 #if MATERIAL_SUPPLY_USER_INTERFACE

@@ -17,15 +17,20 @@ using LoweringFn = Result<void> (*)(LoweringContext& context) noexcept;
 struct LoweringEntry {
     StringView type;
     LoweringFn fn = nullptr;
+    // 참이면 eagerInputs 밖의 입력은 번역 순서 계획에 넣지 않고 lowering 함수가 요청할 때
+    // 번역한다(번역 때 고르는 스위치의 가지 — 6.9절 MS2b3).
+    bool lazyInputs = false;
+    Span<const StringView> eagerInputs = {};
 };
 
 // 묶음별 표다(파일마다 하나 —
-// LowerConstants·LowerMath·LowerFlow·LowerContextValues·LowerCoordinates·LowerTransforms).
+// LowerConstants·LowerMath·LowerFlow·LowerContextValues·LowerCoordinates·LowerTransforms·LowerSwitches).
 Span<const LoweringEntry> ConstantLowerings() noexcept;
 Span<const LoweringEntry> MathLowerings() noexcept;
 Span<const LoweringEntry> FlowLowerings() noexcept;
 Span<const LoweringEntry> ContextValueLowerings() noexcept;
 Span<const LoweringEntry> CoordinateLowerings() noexcept;
 Span<const LoweringEntry> TransformLowerings() noexcept;
+Span<const LoweringEntry> SwitchLowerings() noexcept;
 
 } // namespace rocks::material::detail

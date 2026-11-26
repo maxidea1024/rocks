@@ -7,6 +7,8 @@
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
+#include <MaterialCompiler/MaterialTargetField.h>
+#include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 #include <MaterialSchema/NodePropertyReader.h>
 #include <NodeGraph/GraphDiagnostic.h>
@@ -60,6 +62,9 @@ public:
 
     // 지금 번역 중인 평가 문맥이다(6.9절).
     EvaluationContext Context() const noexcept;
+
+    // 번역 대상이다. field를 읽은 항목으로 기록한다(6.9절 MS2b3 — 쿠킹 번역 키).
+    const MaterialTranslationTarget& Target(MaterialTargetField field) noexcept;
 
     // 문맥 값 표(19.3.2절)의 name 값이다(IR Extern — 6.9절). 이전 정점 문맥에서 이전 변형이 있는
     // 값은 이전 프레임 값이다. arguments는 함수형 값의 인자(표의 argumentCount개)이고, 하나라도

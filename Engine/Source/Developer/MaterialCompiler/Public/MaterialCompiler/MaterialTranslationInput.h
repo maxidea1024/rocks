@@ -2,6 +2,7 @@
 
 #include <Base/Guid.h>
 #include <Core/Text/NamePool.h>
+#include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <NodeGraph/GraphDocument.h>
@@ -24,6 +25,8 @@ struct MaterialTranslationInput {
     const MaterialTraitsDesc& traits;
     // 진단에 넣는 자산 id(AssetId의 Guid 값)다.
     Guid asset;
+    // 번역 대상(품질·형식 사실·프로필 기능 — 6.9절 MS2b3)이다. 기본값은 UE 기본이다.
+    MaterialTranslationTarget target{};
 };
 
 } // namespace rocks::material

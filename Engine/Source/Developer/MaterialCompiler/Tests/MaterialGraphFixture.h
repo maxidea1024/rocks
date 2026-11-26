@@ -148,9 +148,10 @@ inline MaterialTraitsDesc Traits(BlendMode blend = BlendMode::Opaque,
 }
 
 inline Result<void> Translate(GraphFixture& fixture, const MaterialTraitsDesc& traits,
-                              MaterialTranslation& out) noexcept {
+                              MaterialTranslation& out,
+                              const MaterialTranslationTarget& target = {}) noexcept {
     const MaterialTranslationInput input{fixture.document, fixture.env.catalog, fixture.env.names,
-                                         traits, TestAssetId};
+                                         traits,           TestAssetId,         target};
     return TranslateMaterial(fixture.env.allocator, input, out);
 }
 

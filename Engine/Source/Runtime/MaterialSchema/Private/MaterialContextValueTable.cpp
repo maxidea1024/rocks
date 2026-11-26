@@ -946,6 +946,57 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Function, 2, MaterialContextFeature::FirstPerson,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::NotAware, {}, true),
+    // 조건 값: Deferred 경로 pass(RENDER_PATH_DEFERRED — 6.3절 3항).
+    ContextValue("RenderPathDeferred", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // 조건 값: Forward+ 경로 pass(RENDER_PATH_FORWARD_PLUS).
+    ContextValue("RenderPathForwardPlus", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // 조건 값: 형식 기능 등급 SM5 이상(Capability Tier Switch).
+    ContextValue("CapabilityTierSm5", "", MaterialPinType::Bool, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // 조건 값: 형식 기능 등급 SM6.
+    ContextValue("CapabilityTierSm6", "", MaterialPinType::Bool, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE GetGIReplaceState()(REFLECTIVE_SHADOW_MAP — Common.ush:2152).
+    ContextValue("GlobalIlluminationPass", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetRayTracingQualitySwitch()(Common.ush:2171).
+    ContextValue("RayTracingPass", "", MaterialPinType::Bool, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE GetPathTracingQualitySwitch()(Common.ush:2181).
+    ContextValue("PathTracingPass", "", MaterialPinType::Bool, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::PathTracing, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE GetPathTracingIsShadow()(PathTracingShaderUtils.ush).
+    ContextValue("PathTracingShadowRay", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetPathTracingIsIndirectDiffuse().
+    ContextValue("PathTracingIndirectDiffuseRay", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetPathTracingIsIndirectSpecular().
+    ContextValue("PathTracingIndirectSpecularRay", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetPathTracingIsIndirectVolume().
+    ContextValue("PathTracingIndirectVolumeRay", "", MaterialPinType::Bool,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
 };
 
 } // namespace
