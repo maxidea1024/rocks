@@ -2,6 +2,7 @@
 
 이 문서는 Sparks 언어 코어의 LC8(도구)을 정한다: CLI `sparks`(`check`·`dump`·`build`·`ids`·`fmt`·`test`), 공식 formatter, `@test` 실행기, 언어 서버 `sparks-lsp`(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식). 언어 의미·진단 형식은 SparksLanguage(SL) §8.1·§13이 정본이고, 이 문서는 그것을 어떤 모듈·프로그램·형식으로 실현하는지 정한다. 선행은 표준 입출력 API(SparksEngineIntegration SE-B7)뿐이며 LC8a가 함께 만든다.
 
+- 개정 19(2026-11-26): LC8 묶음 끝 문서 리뷰 반영 — 1절 완료 표시, 2절 T2·T4·T9–T13을 구현에 맞춤(표준 스트림 서명, 취소·arena 없음, 리터럴 자동완성은 EI), 5절 정리, 10.3절 최종 capabilities, 단일 파일 모드 결정을 12.3.2절로, 미룬 것을 13절에 모음, 참조 정정(SL 8.2·1.3·3.6절). SL 18.1 모듈 표·18.2 LC8 행과 SparksEngineIntegration 2.6절에 도구 쪽 연동 항목 안내를 함께 고쳤다.
 - 개정 18(2026-11-26): LC8g 구현(12.6절 — 소스 넷(`extension`·`serverController`·`serverLocation`·`serverSlots`), 출력 창은 `LogOutputChannel`(languageclient 11 요구), 정리 지우기는 비동기·재시도이고 칸 만들기와 같은 작업 줄, node 교체 확인).
 - 개정 17(2026-11-25): LC8g 설계(12절 — 위치 `Tools/VSCode/sparks`(`Extras/`는 다른 엔진 코드 자리), 의존 고정·`vscode-languageclient`, 서버 찾기(설정 → Rocks 출력 폴더의 가장 최근 것), 서버 교체 구조(빌드 출력은 원본만 — 내용 해시 칸의 복사본을 실행, 다시 빌드하면 새 칸으로 교체), 단일 파일 모드는 넣지 않음, TextMate 문법 범위, 시험: C# manifest 검사 + C++ 키워드 대조, 영어 정책을 `Tools/`로 넓힘).
 - 개정 16(2026-11-25): LC8f3 구현(11.11절 — `LspCodeActions.cpp`, 수정마다 편집 하나, 진단 객체 공용, `SimilarHook`·`SimilarAttribute` 공개).
@@ -29,25 +30,27 @@
 | LC8b build·ids | `build`(모듈마다 `.sparkc` — 출력 폴더), `ids`(발급 대기 안정 ID를 `.rocksids.json`에 GUID로 발급) | 출력 byte golden, manifest 왕복 시험 — 완료(개정 4, 7절) |
 | LC8c formatter·fmt | lexer의 주석 보존 모드, 공식 서식 규칙(3절)의 token 기반 formatter(SparksCompiler), `fmt`·`fmt --check` | corpus 전체에서 멱등(fmt(fmt(x)) = fmt(x))·token 열 보존, 서식 golden — 완료(개정 6, 8절) |
 | LC8d @test·test | `@test fn` 실행기(headless 가짜 host — 엔진 함수는 "엔진 필요" 실패), 결과를 진단 형식으로 | 실행기 시험(통과·Assert 실패·fault·엔진 필요·끝나지 않음) — 완료(개정 8, 9절) |
-| LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) — 10절 |
-| LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·리터럴·경로·Unity 이름 제시), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz, 빠른 수정 golden |
-| LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사), 문법 키워드 = 컴파일러 키워드(C++ 시험) — 12절 |
+| LC8e 언어 서버 기본 | `sparks-lsp`: JSON-RPC(stdio, Content-Length), 문서 저장소(열린 문서 덮어쓰기·버전), 진단 발행, 의미 강조(semanticTokens/full) | CLI와 언어 서버의 진단 동등성, 프로토콜 시험(메시지 golden) — 완료(개정 11, 10.9절) |
+| LC8f 언어 서버 편집 | 자동완성(멤버·hook·attribute·경로·Unity 이름 제시 — 리터럴은 EI, 11.1절), hover, 정의 이동, 빠른 수정(SL §13 목록), 문서 서식 | 자동완성 후보 golden, prefix fuzz(사례 원문), 빠른 수정 golden — 완료(개정 13·14·16, 11.9–11.11절) |
+| LC8g VS Code 확장 | `Tools/VSCode/sparks`(TypeScript — 언어 등록·문법 강조·`sparks-lsp` 시작·서버 교체) | 확장 패키징 시험(C# 도구 시험에서 manifest 검사), 문법 키워드 = 컴파일러 키워드(C++ 시험) — 구현(개정 18, 12.6절), VS Code 안 사람 확인 대기 |
+
+LC8은 LC8g의 사람 확인만 남기고 끝났다(2026-11-26 — 묶음 끝 문서 리뷰, 개정 19). 미룬 것은 13절에 모았다.
 
 ## 2. 구조
 
 - **모듈(T1):** formatter는 `SparksCompiler`(SL 18.1 — 컴파일러 라이브러리가 같은 규칙을 쓴다). `@test` 실행기는 `SparksTestHost`(SL 18.1 — conformance와 `@test`가 같은 가짜 host에서 돈다, 공개 API `SparksTestHost/TestRunner.h`). 작업 공간 적재·명령 실행·언어 서버 핵심은 `Engine/Source/Developer/SparksTools`(Developer — 출시 실행 파일에 링크하지 않는다, 시험은 EngineTests에서 같은 프로세스로 부른다). 프로그램 `Programs/SparksCli`(실행 파일 `SparksCli` — 설치 이름 `sparks`는 배포 도구의 몫, 사용법 문장은 `sparks`)와 `Programs/SparksLsp`(`SparksLsp` — 설치 이름 `sparks-lsp`)는 Launch 진입(CrashHandlingAndLaunch)과 명령 함수 호출만 한다(Commandlet과 같은 배치).
-- **표준 입출력(T2 — SE-B7):** `Platform/StandardStream.h` — `WriteStandardOutput(StringView utf8)`·`WriteStandardError(StringView utf8)`(콘솔이면 Windows는 UTF-16 `WriteConsoleW`, 리디렉션·pipe는 byte 그대로 — Commandlet 구현과 같은 규칙), `ReadStandardInput(Span<char> buffer)` → 읽은 byte 수(0은 끝, pipe·파일은 byte 그대로 — 언어 서버의 Content-Length 틀), 실패는 `DependencyFailed`(handle 없음·쓰기 실패)·`InvalidArgument`(UTF-8 아님 — 출력만). Windows는 `GetStdHandle`+`ReadFile`/`WriteFile`/`WriteConsoleW`, macOS·Linux는 `read`/`write`(EINTR 재시도). CRT stdio를 쓰지 않는다(text 모드 변환이 Content-Length를 깨지 않게). Commandlet의 전용 구현은 이 API로 옮길 수 있다(그 세션의 일 — 알림).
+- **표준 입출력(T2 — SE-B7, 서명은 개정 2 — 6절):** `Platform/StandardStream.h` — `WriteStandardStream(StandardStream, const char* bytes, usize count)`(표준 출력·오류 — 콘솔이면 Windows는 UTF-16 `WriteConsoleW`, 리디렉션·pipe는 byte 그대로 — Commandlet 구현과 같은 규칙), `ReadStandardInput(void* buffer, usize capacity)`(pipe·파일은 byte 그대로 — 언어 서버의 Content-Length 틀). 둘 다 PlatformBase 규약의 `FileTransfer`(상태와 byte 수)를 돌려준다 — 입력 끝은 `EndOfFile`과 0, 스트림 없음은 `NotOpen`, 빈 buffer는 `InvalidArgument`, 그 밖은 OS 오류. Windows는 `GetStdHandle`+`ReadFile`/`WriteFile`/`WriteConsoleW`, macOS·Linux는 `read`/`write`(EINTR 재시도). CRT stdio를 쓰지 않는다(text 모드 변환이 Content-Length를 깨지 않게). Commandlet의 전용 구현은 이 API로 옮길 수 있다(그 세션의 일 — 알림).
 - **작업 공간(T3):** 명령 인자의 경로(폴더)마다 아래를 훑어 `SparksPackage.json5`가 있는 폴더를 패키지 뿌리로, 그 아래 `.spark`를 모듈로 넣는다(conformance 폴더 사례와 같은 규칙 — 모듈 경로는 패키지 뿌리 기준). schema는 `--schema <폴더>`(여러 번 — `*.sparkbind.json`), ID manifest는 패키지 뿌리의 `.rocksids.json`. 설정 파일(`SparksWorkspace.json5`)은 엔진 연동(EI — 엔진이 schema 위치를 안다)에서 더한다. 파일 읽기는 PlatformBase `FileSystem`.
-- **출력(T4):** 진단은 SL §8.1 텍스트(`AppendDiagnostics`)를 표준 출력에, 요약 한 줄(`N errors in M files`)을 끝에. 명령 사용법 오류는 표준 오류. 종료 코드: 0 성공(진단 없음·시험 통과·서식 같음), 1 진단·시험 실패·`fmt --check`의 다름, 2 사용법 오류, 3 입출력·할당 실패. 출력은 결정적이다(경로 byte 순, 진단은 §8.1 순서).
+- **출력(T4):** 진단은 SL §8.1 텍스트(`AppendDiagnostics`)를 표준 출력에, 요약 한 줄(`N errors in M modules` — `fmt`는 `N errors in M files (not formatted)`, 8.3절)을 끝에. 명령 사용법 오류는 표준 오류. 종료 코드: 0 성공(진단 없음·시험 통과·서식 같음), 1 진단·시험 실패·`fmt --check`의 다름·작업 공간 배치 오류(6절), 2 사용법 오류, 3 입출력·할당 실패. 출력은 결정적이다(경로 byte 순, 진단은 §8.1 순서).
 - **명령 인자(T5):** 명령 이름 뒤 `--이름 값`·`--플래그`·위치 인자만(AppInfoCommandLine의 생성 바인더는 설계만이라 `SparksTools`의 작은 자체 분해기 — 그 모듈이 생기면 옮긴다). 알 수 없는 옵션은 사용법 오류(2)다.
 - **dump(T6):** `sparks dump --ast|--names|--types|--ir|--bytecode <파일 또는 폴더>` — conformance golden과 같은 덤프 함수(`AppendSyntaxDump`·`AppendNameDump`·`AppendTypeDump`·`AppendIrDump`·`AppendBytecodeDump`)를 쓴다. 폴더면 모듈마다 `== <경로>` 줄을 앞에(경로 byte 순).
 - **build(T7):** `sparks build <경로> --out <폴더>` — 진단 없으면 모듈마다 `<출력>/<패키지 이름>/<모듈 경로의 .spark를 .sparkc로>`(SparksBytecode `.sparkc` 형식). 진단이 있으면 아무것도 쓰지 않는다(1). 파일마다 원자적으로 쓰고 내용이 같으면 쓰지 않는다(7절).
 - **ids(T8):** `sparks ids <경로>` — 컴파일의 발급 대기 목록(`PendingIds`)마다 새 GUID(Core `TryNewGuid` — OS 보안 난수 UUID v4, C# `Guid.NewGuid`와 같은 종류)를 그 패키지 ID manifest에 더하고, 옛 이름이 있는 대기는 C# `StableIdManifest.Rename`과 같은 규칙으로 옮긴다(옛 이름은 aliases, type rename은 멤버 항목도 함께). 출력 byte는 C# `StableIdManifest`의 직렬화와 같다(항목은 kind·name ordinal 순, aliases ordinal 순 — C# 도구가 다시 써도 바뀌지 않는다. 기존 항목의 원문 순서는 지키지 않는다). 쓰기 전에 새 manifest로 다시 컴파일해 진단·대기가 0인지 보고, C#과 같은 잠금 파일·임시 파일 교체로 쓴다(7절).
-- **formatter(T9 — 3절):** token 기반이다. lexer의 주석 보존 모드가 주석을 trivia 목록(종류·범위)으로 따로 돌려주고, formatter는 token 열과 trivia를 원래 순서로 걸으며 공백·줄바꿈·들여쓰기만 정한다(token 글자는 바꾸지 않는다 — 의미 보존을 token 열 비교로 시험). 구문 오류(S02xx)가 있는 파일은 서식하지 않는다(그대로 — 진단). 설정이 없다(SL §3.1 R21).
-- **@test(T10 — 개정 7):** `@test fn`(최상위 — 인자 없음, `async`도 된다 — SL 3.13 표)을 시험마다 새 VM session의 최상위 진입(`VmSession::CallFunction`)으로 돌린다. 클래스 안 `@test`는 없다(SL 3.13 — 클래스는 시험 함수가 만들어 쓴다, 객체 생성은 엔진 fixture가 필요하다). 시계는 결정적 프레임으로 진행(정지한 시험은 `--max-frames`(기본 600)까지 프레임을 진행하고 남으면 "did not finish"). 결과: 통과, `Assert` 실패·fault(진단 형식 — 원문 위치), 엔진 기능 사용(객체·필드·native 함수·문맥·로드 — "needs the engine" — 실패로 센다). headless World fixture(SL §13.1)는 엔진 연동(EI)이 host를 바꿔 끼운다(9절).
-- **언어 서버(T11):** LSP 3.17, JSON-RPC 2.0, stdio Content-Length 틀(Core JSON reader·writer). 문서 동기화는 전체 내용(`TextDocumentSyncKind.Full`) — 증분은 측정 뒤. 분석은 작업 공간 원문에 열린 문서 내용을 덮은 snapshot으로 전체를 컴파일한다(SL §13 "문서 버전별 arena" — snapshot마다 새 allocator 영역). 진단은 같은 `Compilation`이라 CLI와 같다(동등성 시험). 위치는 LSP 규약대로 UTF-16 code unit 열(컴파일러 위치는 byte·code point — 변환 함수와 시험). 처리 중 들어온 같은 문서의 새 변경은 이전 분석 결과를 버린다(취소 — 순서는 메시지 순서로 결정적).
-- **의미 강조(T12):** semanticTokens/full — 이름 해석 결과로 type·class·struct·enum·enumMember·event·function·method·property(필드)·parameter·variable·namespace(모듈) + modifier(declaration·readonly(`let`)·static(최상위)·async·defaultLibrary(엔진 schema)).
-- **편집 기능(T13 — LC8f):** 자동완성 후보는 위치의 문법 자리(멤버 접근·`on`·attribute·리터럴 인자·import 경로)와 이름 해석 범위에서 만든다. 리터럴(태그·에셋 경로)은 컴파일 검증과 같은 사전(엔진 연동 전에는 schema·manifest만). Unity 이름(`Update` 등)은 Rocks 이름 후보에 별칭으로 붙인다. core 패키지는 full 후보를 숨긴다. hover는 타입·문서 주석·선언 위치(엔진 native는 schema 위치), 빠른 수정은 진단 코드별 편집 생성기(SL §13 목록 — 해당 진단이 있는 것부터).
+- **formatter(T9 — 3절):** token 기반이다. lexer의 주석 보존 모드가 주석을 trivia 목록(종류·범위)으로 따로 돌려주고, formatter는 token 열과 trivia를 원래 순서로 걸으며 공백·줄바꿈·들여쓰기만 정한다(token 글자는 바꾸지 않는다 — 의미 보존을 token 열 비교로 시험). 어휘·구문 오류(S01xx·S02xx)가 있는 파일은 서식하지 않는다(그대로 — 진단). 설정이 없다(SL §3.1 R21).
+- **@test(T10 — 개정 7):** `@test fn`(최상위 — 인자·반환 타입 없음(반환 타입은 S0621 — 개정 8), `async`도 된다 — SL 3.13 표)을 시험마다 새 VM session의 최상위 진입(`VmSession::CallFunction`)으로 돌린다. 클래스 안 `@test`는 없다(SL 3.13 — 클래스는 시험 함수가 만들어 쓴다, 객체 생성은 엔진 fixture가 필요하다). 시계는 결정적 프레임으로 진행(정지한 시험은 `--max-frames`(기본 600)까지 프레임을 진행하고 남으면 "did not finish"). 결과: 통과, `Assert` 실패·fault(진단 형식 — 원문 위치), 엔진 기능 사용(객체·필드·native 함수·문맥·로드 — "needs the engine" — 실패로 센다). headless World fixture(SL §13.1)는 엔진 연동(EI)이 host를 바꿔 끼운다(9절).
+- **언어 서버(T11):** LSP 3.17, JSON-RPC 2.0, stdio Content-Length 틀(Core JSON reader·writer). 문서 동기화는 전체 내용(`TextDocumentSyncKind.Full`) — 증분은 측정 뒤. 분석은 작업 공간 원문에 열린 문서 내용을 덮은 snapshot으로 전체를 컴파일한다(서버 allocator 하나 — SL §13의 "문서 버전별 arena"는 증분 분석과 함께 후속, 13절). 진단은 같은 `Compilation`이라 CLI와 같다(동등성 시험). 위치는 LSP 규약대로 UTF-16 code unit 열(컴파일러 위치는 byte·code point — 변환 함수와 시험). 메시지는 받은 순서로 하나씩 끝까지 처리하고 취소는 없다(10.2·10.4절 — 문서 알림마다 곧바로 분석하므로 결정적이다).
+- **의미 강조(T12):** semanticTokens/full — 이름 해석 결과로 type·class·struct·enum·enumMember·event·function·method·property(필드)·parameter·variable·namespace(모듈) + modifier(declaration·readonly(`let`)·static(최상위)·async·defaultLibrary(엔진 schema)). 최종 목록(`interface`·`typeParameter` 포함 14종류, modifier 범위)은 10.7절이 정본이다.
+- **편집 기능(T13 — LC8f):** 자동완성 후보는 위치의 문법 자리(멤버 접근·`on`·`emit`·attribute·import 경로)와 이름 해석 범위에서 만든다. 리터럴 인자(태그·에셋 경로)는 컴파일 검증과 같은 사전이 먼저라 EI로 미룬다(11.1절 — 컴파일러에 사전이 아직 없다). Unity 이름(`Update` 등)은 Rocks 이름 후보에 별칭으로 붙인다. core 패키지는 full 후보를 숨긴다. hover는 타입·문서 주석·선언 위치(엔진 native는 schema 위치), 빠른 수정은 진단 코드별 편집 생성기(SL §13 목록 — 해당 진단이 있는 것부터).
 - **VS Code(T14):** 확장은 언어 id `sparks`, `.spark`, TextMate 문법(키워드·주석·문자열 — 의미 강조가 덮는다), 서버 경로 설정(`sparks.server.path`, 기본은 Rocks 출력 폴더). 배포·마켓 등록은 하지 않는다(저장소 안 개발용).
 
 ## 3. 공식 서식(LC8c)
@@ -72,7 +75,9 @@
 
 ## 5. 시험
 
-- 명령은 `SparksTools`의 `RunSparksCommand(arguments, 입출력 객체)`를 EngineTests에서 같은 프로세스로 부르고 출력·종료 코드를 golden과 비교한다(입출력 객체가 표준 스트림 대신 버퍼에 쓴다). 프로그램 `sparks`는 이 함수와 표준 스트림을 잇기만 한다.
+이 절은 묶음 전체의 원칙이고, 단계마다 실제 시험 이름과 범위는 6–12절의 "시험" 항목이 정본이다.
+
+- 명령은 `SparksTools`의 `RunCommand(allocator, files, arguments, CommandOutput&)`(6절)를 EngineTests에서 같은 프로세스로 부르고 출력·종료 코드를 golden과 비교한다(`CommandOutput`이 표준 스트림 대신 버퍼에 쓴다). 프로그램 `SparksCli`는 이 함수와 표준 스트림을 잇기만 한다. 언어 서버도 같다(`RunLanguageServer` + 각본 채널 — 10.1절).
 - 진단 동등성: conformance corpus의 폴더·파일 사례를 임시 폴더에 쓰고 `sparks check`의 진단이 `.expect`와 같은지(LC8a), 언어 서버의 진단이 CLI와 같은지(LC8e).
 - 할당 실패 전수: 작업 공간 적재, 명령 실행(작은 사례), formatter, 언어 서버 메시지 하나의 처리.
 - formatter: corpus 전체 멱등·token 보존, `Formatting/` 서식 golden(입력 → 기대 출력).
@@ -101,7 +106,7 @@
 - **편집(패키지마다):** 대기 이름 키의 첫 `/` 앞이 패키지 이름이다. 기존 manifest(작업 공간의 `*.rocksids.json` — 컴파일러가 S1006 없이 읽은 것)를 Core JSON reader로 항목 목록(kind·name·id·aliases·retired)으로 읽고 대기를 세 차례로 적용한다. (1) 옛 이름이 있는 type 대기: 활성 `type` 항목 `옛 이름`을 `새 이름`으로 바꾸고 옛 이름을 aliases에 더한다. 주인이 `옛 이름`인 멤버 항목(field·subobject·function·rpc·enumCase — 은퇴 항목 포함, C# `Rename`과 같다)도 주인 부분을 바꾸고 옛 이름을 aliases에 더한다. (2) 옛 이름이 있는 멤버 대기: 같은 규칙으로 그 항목만(옛 이름과 새 이름의 주인이 다르면 실패 — C#의 "explicit migration"). (3) 옛 이름이 없는 대기: 새 항목(새 GUID, aliases 없음, 활성). 주인(owner)은 C# `StableIdManifest.Owner`와 같다(마지막 `/` 뒤 첫 `.`의 다음 `.` 앞까지). 옮길 항목이 없거나(활성 항목 없음) 겹치면 내부 불일치로 실패한다(1 — 컴파일러가 대기를 냈다면 일어나지 않는다).
 - **직렬화:** `{"schema": 1, "entries": [...]}` — 항목은 kind, 같으면 name의 byte(ordinal) 순, 항목 안 키 순서는 `kind`·`name`·`id`·`aliases`·`retired`, aliases는 byte 순, 들여쓰기 2칸·LF·끝 LF 하나(Core `JsonWriter` 기본 형식 = C# `System.Text.Json` `WriteIndented` + `"\n"`). 이름은 ASCII 식별자·`/`·`.`·`(`·`)`뿐이라 두 writer의 escape가 같다(C# 기본 encoder가 escape하는 비 ASCII·`<>&'+`는 Sparks 키에 없다). 16 MiB(C# `MaximumIdentityBytes`)를 넘으면 실패.
 - **확인:** 새 manifest 원문들로 작업 공간을 다시 컴파일해 진단 0·대기 0이어야 쓴다(아니면 쓰지 않고 1 — `issuing the IDs did not settle the packages`).
-- **쓰기(C# `StableIdManifest.Update`와 같은 규약):** 대상은 기존 manifest 경로, 없으면 패키지 뿌리의 `<패키지 이름>.rocksids.json`. `<대상>.lock`을 CreateNew로 만든다(있으면 `<대상>.lock: the manifest is locked by another tool` — 1, 비정상 종료로 남은 잠금은 사람이 지운다). 잠금 아래에서 대상을 다시 읽어 적재 때 byte와 같은지(없던 파일은 여전히 없는지) 본다(다르면 `the manifest changed while the IDs were issued` — 1). 임시 파일 `<대상>.<GUID 32자>.tmp`(CreateNew)에 쓰고 Flush·Close·`Replace`, 끝에 잠금을 지운다(실패 경로 포함). 패키지 사이는 원자적이지 않다.
+- **쓰기(C# `StableIdManifest.Update`와 같은 규약):** 대상은 기존 manifest 경로, 없으면 패키지 뿌리의 `<패키지 이름>.rocksids.json`. `<대상>.lock`을 CreateNew로 만든다(있으면 `<대상>.lock: the manifest is locked by another tool (delete the lock file if no tool is running)` — 1, 비정상 종료로 남은 잠금은 사람이 지운다). 잠금 아래에서 대상을 다시 읽어 적재 때 byte와 같은지(없던 파일은 여전히 없는지) 본다(다르면 `the manifest changed while the IDs were issued` — 1). 임시 파일 `<대상>.<GUID 32자>.tmp`(CreateNew)에 쓰고 Flush·Close·`Replace`, 끝에 잠금을 지운다(실패 경로 포함). 패키지 사이는 원자적이지 않다.
 - **출력:** 쓴 manifest마다(manifest 진단 경로 byte 순 — 쓰기 순서도 같다) `<manifest 진단 경로>: N new, R renamed`(R은 type·멤버 rename 대기 수 — 멤버 승계로 함께 옮긴 항목은 세지 않는다), 종료 0.
 
 ### 7.3 시험(LC8b)
@@ -126,7 +131,7 @@
 
 ### 8.1 API와 입력
 
-- `SparksCompiler/Formatter.h` — `Result<bool> FormatSource(const SourceSet&, SourceId, DiagnosticList&, StringBuilderBase& out)`: 원문 하나의 공식 서식을 out에 붙인다. 값 false는 어휘·구문 진단(S01xx·S02xx — `ParseFile`이 내는 것)이 있어 서식하지 않음이다(진단은 diagnostics에, out은 그대로). 의미 진단(이름·타입 등)은 보지 않는다(서식은 파일 하나의 구문만 쓴다).
+- `SparksCompiler/Formatter.h` — `Result<bool> FormatSource(Allocator&, const SourceSet&, SourceId, DiagnosticList&, StringBuilderBase& out)`: 원문 하나의 공식 서식을 out에 붙인다. 값 false는 어휘·구문 진단(S01xx·S02xx — `ParseFile`이 내는 것)이 있어 서식하지 않음이다(진단은 diagnostics에, out은 그대로). 의미 진단(이름·타입 등)은 보지 않는다(서식은 파일 하나의 구문만 쓴다).
 - **주석 수집:** lexer에 주석 범위 수집(`TokenizeWithComments` — 공개, 언어 서버도 쓴다)을 더한다. 일반 줄 주석(`//`, 문서 주석 `///`는 이미 토큰)과 닫힌 블록 주석의 범위를 원문 순서로 돌려준다. 컴파일 경로(`Tokenize`)는 그대로다(주석 배열을 만들지 않는다).
 - **구문 정보:** 토큰은 `ParseFile`의 트리 토큰을 쓴다. 트리에서 가린다: 타입 인자의 `<`·`>`(`Type`·`Identifier`·`Member` 노드의 타입 인자 목록 — 여는 `<`는 이름 토큰 다음, 닫는 `>`는 깊이를 세어 찾는다. 타입 인자를 닫는 `>=`는 트리 토큰에서 `=`로 바뀌어 있으므로 그 앞 한 글자 `>`를 닫는 토큰으로 되살린다), 단항 `!`·`-`(`Unary` 노드), attribute의 끝 토큰(`Attribute` 노드 범위의 끝), enum 본문의 `{`(`Enum` 노드).
 - **문자열:** 문자열 리터럴(`"`부터 닫는 `"`까지, 보간 포함)과 verbatim 문자열은 원문 그대로 하나의 단위다(보간 안은 서식하지 않는다 — 값 보존이 확실하다. 보간 서식은 요구 시).
@@ -145,7 +150,7 @@
 
 - `sparks fmt [--check] <경로>...` — 작업 공간(T3)의 모듈 원문 중 인자 아래 모듈(폴더 인자는 그 폴더 아래 — 패키지 안 하위 폴더면 그 아래만, 파일 인자는 그 파일, 섞어도 합집합)을 서식한다. `dump`도 같은 대상 규칙이다. 컴파일하지 않는다(패키지 manifest·schema 진단은 보지 않는다).
 - `fmt`: 서식이 다른 파일을 원자적으로 바꾼다(LC8b `ReplaceFile`). 출력 `formatted K of M files`. `--check`: 쓰지 않고 다른 파일마다 `<경로>: not formatted`, 출력 `K of M files need formatting`.
-- 어휘·구문 진단이 있는 파일은 진단을 쓰고 건드리지 않는다. 종료: 0(모두 서식됨·바꿈), 1(진단 있음, `--check`에서 다른 파일 있음), 2(사용법), 3(입출력·할당). `--check`는 `fmt`에만.
+- 어휘·구문 진단이 있는 파일은 진단을 쓰고 건드리지 않는다(요약 `N errors in M files (not formatted)`). 종료: 0(모두 서식됨·바꿈), 1(진단 있음, `--check`에서 다른 파일 있음), 2(사용법), 3(입출력·할당). `--check`는 `fmt`에만.
 
 ### 8.4 시험(LC8c)
 
@@ -167,7 +172,7 @@
 
 - `SparksTestHost/TestRunner.h`(공개): `Result<void> RunTests(Allocator&, const Compilation&, const SourceSet& sources, Span<const uint32> modules, const TestOptions&, TestReport& out)`. compilation은 진단 없이 끝난 것(모든 단계 — `ModuleBytecode`가 모든 모듈에 있다)이고, modules는 시험을 찾을 모듈 번호(진단 경로 byte 순으로 호출자가 정한다)다. 링크는 compilation의 모든 모듈을 한 host로 묶고 `LinkImports`로 모듈 사이 호출을 푼다(시험 모듈이 다른 모듈 함수를 부른다). 실패: 링크 거부(InvalidArgument — 사유는 `out.reason`), 할당 실패(OutOfMemory). 시험 하나의 실패는 실행기 실패가 아니라 결과다.
 - **시험 찾기:** 모듈마다 `Symbols()` 중 그 모듈의 최상위 `Function`이고 `@test` attribute가 있는 것을 선언 순서(원문 위치)로. `@test`는 인자와 반환 타입이 없는 함수다(개정 8 — 반환 타입이 있으면 S0621: 실행기가 반환 값을 보지 않으므로 `Result` 오류 반환이 조용히 통과하지 않게. SL 3.13 표도 "인자·반환 타입 없는 최상위 함수"로 고쳤다 — 개정 9). 컴파일러 공개 API `Compilation::HasAttribute(symbol, name)`(언어 서버도 쓴다)을 더한다. bytecode 함수는 같은 이름의 최상위 함수(이름에 `.`가 없는 것)다.
-- **결과(`TestResult`):** 모듈·시험 심볼·결과 종류·위치(SourceId와 byte 범위 — 없으면 시험 이름)·상세 글자·진행한 프레임 수. 종류: `Passed`, `Faulted`(VM fault 종류 — `AssertFailed` 포함), `EndedWithError`(`Result`가 아닌 시험의 `try` 실패 — SL 8.4, 오류 코드), `NeedsEngine`(엔진 기능 이름), `DidNotFinish`(프레임 상한).
+- **결과(`TestResult`):** 모듈·시험 심볼·결과 종류·위치(SourceId와 byte 범위 — 없으면 시험 이름)·상세 글자·진행한 프레임 수. 종류: `Passed`, `Faulted`(VM fault 종류 — `AssertFailed` 포함), `EndedWithError`(`Result`가 아닌 시험의 `try` 실패 — SL 8.2절, 오류 코드), `NeedsEngine`(엔진 기능 이름), `DidNotFinish`(프레임 상한).
 - **옵션(`TestOptions`):** `maxFrames`(기본 `DefaultTestMaxFrames` = 600 — 60 Hz 10초), 시험 프레임 시간은 `TestFrameSeconds` = 1/60.
 
 ### 9.2 headless host
@@ -224,8 +229,8 @@
 
 ### 10.3 수명
 
-- `initialize` 전의 요청은 ServerNotInitialized(-32002), 알림은 버린다(`exit` 제외). `initialize` 결과: `capabilities` = `positionEncoding: "utf-16"`, `textDocumentSync: { openClose: true, change: 1 }`(전체 내용 — T11), `semanticTokensProvider: { legend, full: true }`, `serverInfo: { name: "sparks-lsp" }`. 두 번째 `initialize`는 InvalidRequest.
-- 작업 공간 뿌리: `workspaceFolders`(있으면 전부), 없으면 `rootUri`, 둘 다 없으면 작업 공간 없음 — 분석하지 않는다(진단·강조 없음, initialize 때 표준 오류에 한 줄). 편집기는 폴더를 열고 쓰는 것이 기본이고, 단일 파일 모드(열린 문서의 패키지를 찾아 올라가기)는 저장 전 문서·패키지 밖 문서가 섞이면 작업 공간 읽기 전체가 실패하므로 넣지 않는다(LC8g 결정 — 12.3절). `file` URI만 받는다(다른 scheme 폴더는 무시).
+- `initialize` 전의 요청은 ServerNotInitialized(-32002), 알림은 버린다(`exit` 제외). `initialize` 결과: `capabilities` = `positionEncoding: "utf-16"`, `textDocumentSync: { openClose: true, change: 1 }`(전체 내용 — T11), `semanticTokensProvider: { legend, full: true }`, `serverInfo: { name: "sparks-lsp" }`. 두 번째 `initialize`는 InvalidRequest. LC8f가 더한 것까지 최종 capabilities는 위 넷에 `hoverProvider: true`·`definitionProvider: true`·`documentFormattingProvider: true`(11.5절), `completionProvider: { triggerCharacters: [".", "@"] }`(11.6절), `codeActionProvider: { codeActionKinds: ["quickfix"] }`(11.11절)다(lifecycle golden이 전체를 본다).
+- 작업 공간 뿌리: `workspaceFolders`(있으면 전부), 없으면 `rootUri`, 둘 다 없으면 작업 공간 없음 — 분석하지 않는다(진단·강조 없음, initialize 때 표준 오류에 한 줄). 편집기는 폴더를 열고 쓰는 것이 기본이고, 단일 파일 모드는 넣지 않는다(결정과 이유는 12.3.2절). `file` URI만 받는다(다른 scheme 폴더는 무시).
 - `shutdown` → null 결과, 그 뒤 요청은 InvalidRequest. `exit` 알림 → shutdown을 받았으면 0, 아니면 1로 끝난다. `exit` 없이 입력이 끝나면 1.
 
 ### 10.4 문서 저장소와 분석
@@ -320,7 +325,7 @@
   - `import |`·`import A.|`: 같은 패키지와 의존 패키지 모듈의 import 경로에서 다음 segment.
   - 그 밖(식·문장 자리): 보이는 지역·매개변수(같은 함수, 커서 앞 선언, 선언 노드의 부모 범위가 커서를 담음 — 블록 범위 근사), 자기 class 멤버와 기반 체인, 모듈 최상위 선언, import 별칭과 import한 모듈의 최상위 선언, prelude 타입·값, 문맥 이름, 엔진 타입, 키워드(컴파일러 키워드 목록). 타입 자리(앞 토큰이 `:`·`<`·`->`가 아닌 `as?` 뒤)는 타입만. 기반 목록(SL 3.9절)의 첫 자리는 `scriptExtensible`인 엔진 object·asset과 Sparks `open class`(선언 중인 class 자신은 아니다), 뒤 자리는 interface다.
 - **컴파일러 공개 목록(새 공개 헤더 `SparksCompiler/LanguageCatalog.h`):** hook(이름·매개변수 모양·full 전용), attribute(이름·full 전용), 키워드(이름·full 전용 — `interface`·`open`). 컴파일러 검사가 쓰는 표를 그대로 내보낸다(사본 표를 두지 않는다).
-- **core 숨김:** core 패키지 모듈에서는 full 전용 hook(`Validate`)·attribute(1.3절 full 목록)·키워드와 `Class` prelude 타입, Sparks class·interface를 기반 목록 후보에서 뺀다(S1113과 같은 규칙).
+- **core 숨김:** core 패키지 모듈에서는 full 전용 hook(`Validate`)·attribute(SL 1.3절 full 목록)·키워드와 `Class` prelude 타입, Sparks class·interface를 기반 목록 후보에서 뺀다(S1113과 같은 규칙).
 - **Unity 별칭:** `Update`→`Tick`, `FixedUpdate`→`FixedTick`, `LateUpdate`→`LateTick`, `OnEnable`→`Enable`(그리고 Unity에 같은 이름이 있는 hook — `OnDisable`·`OnDestroy`·`OnTriggerEnter`·`OnTriggerExit`·`OnCollisionEnter`·`OnCollisionExit`·`OnValidate`), `GetComponent`→`Find`(엔진 함수 후보만) — Rocks 이름이 후보일 때 같은 항목을 하나 더 낸다(label은 Rocks 이름, `filterText`는 Unity 이름, detail `Unity: Update`). 표는 컴파일러 공개 목록(`UnityAliases`)이며 수명 클래스 멤버 이름 진단(`HookForMemberName`)도 같은 표를 쓴다.
 - **항목:** `label`, `kind`(LSP CompletionItemKind — class 7·struct 22·enum 13·enumMember 20·interface 8·function 3·method 2·field 5·property 10·event 23·variable 6·constant 21·module 9·keyword 14·typeParameter 25), `detail`(hover의 선언 모양 한 줄), `sortText`(가까움 순위 숫자 + 이름: 지역·매개변수 0, 멤버 1, 모듈 2, import 3, prelude·문맥 4, 엔진 타입 5, 키워드 6). 접두(ASCII 대소문자 무시 — Unity 별칭 항목은 Unity 이름으로)로 서버가 거르고, label·kind·filterText가 같은 것은 순위와 무관하게 하나만(가까운 순위, 같으면 기반 체인에서 가까운 것), 상한 `MaxLspCompletionItems`(1,000 — 넘으면 `isIncomplete: true`).
 - capabilities `completionProvider: { triggerCharacters: [".", "@"] }`.
@@ -342,7 +347,7 @@
 | Q6 S0817·S0622 자리가 틀린·겹친 attribute | `Remove the attribute` | 그 attribute를 지운다(편집 규칙) |
 | Q7 S0714·S0303·S0304·S0305 쓰지 않는·겹친·자기·Rocks import | `Remove the import` | 그 import 문을 지운다(별칭이 있는 겹친 import는 그 별칭이 쓰일 수 있어 수정 없음) |
 | Q8 S0713 버린 결과 | `Discard the result with '_ ='` | 식 앞에 `_ = ` |
-| Q9 S0601 `async` 밖의 `await`·최상위 `async fn` | `Declare the function 'async'` · `Remove 'async'` | class·struct 함수(`override`·`open`·`@rpc`·interface 구현은 `async`가 시그니처를 바꿔 다른 오류라 뺀다)와 최상위 `@test` 함수면 `fn` 앞에 `async `(`open`·`override` 뒤 — 3.6절). 대기가 없는 최상위 함수의 `async`는 그 토큰과 뒤 공백을 지운다(대기가 있으면 수정 없음) |
+| Q9 S0601 `async` 밖의 `await`·최상위 `async fn` | `Declare the function 'async'` · `Remove 'async'` | class·struct 함수(`override`·`open`·`@rpc`·interface 구현은 `async`가 시그니처를 바꿔 다른 오류라 뺀다)와 최상위 `@test` 함수면 `fn` 앞에 `async `(`open`·`override` 뒤 — SL 3.6절). 대기가 없는 최상위 함수의 `async`는 그 토큰과 뒤 공백을 지운다(대기가 있으면 수정 없음) |
 | Q10 S0803·S0620 모르는 hook·attribute | `Change to '<이름>'` | 컴파일러가 수정 예에 쓰는 같은 제안(`SimilarHook`·`SimilarAttribute` — 편집 거리 2 이하, 같으면 표 순서)이 있으면 이름 토큰을 바꾼다. hook은 인자가 없는 handler만(인자 모양이 hook마다 다르다 — 인자 없음은 모든 hook에 맞다), 그 hook이 이미 있는 class(S0806)와 자기 class 체인의 Sparks 이벤트를 hook으로 쓴 경우(컴파일러도 제안하지 않는다)는 수정이 없다 |
 
 - **제안 이름 공용:** hook·attribute 이름 제안을 컴파일러 공개 목록(`LanguageCatalog.h`)의 `SimilarHook`·`SimilarAttribute`로 내보내고 검사기(S0803·S0620의 수정 예)도 그것을 부른다(사본 없음 — T13).
@@ -361,7 +366,7 @@
 - **함께 고친 것:** 엔진 필드의 읽기 전용(schema `access` 기본 `read`)을 hover(`let`)와 의미 강조(`readonly`)가 보지 않았다 — `LspIsReadOnly`로 둘 다(의미 강조 golden의 `Owner`가 `property readonly defaultLibrary`로).
 - **시험(`SparksToolsLspQueryTests`):** `SparksLsp_HoverAndDefinitionGolden`(30자리 — import·class 선언·엔진 기반·필드·`let` 필드·이벤트·이벤트 매개변수·async 메서드·매개변수·지역 선언/사용(추론 타입)·prelude 함수·타입·case·엔진 필드·prelude 값·언어 함수·import한 함수·enum·case·const·최상위 fn·타입 사용·멤버·이름 끝 자리·키워드·문자열 — 정의 자리와 hover 전문 golden, 문서 주석 두 줄), `SparksLsp_Formatting`(바뀜·같음·구문 오류·CRLF → LF·열지 않음·manifest), `SparksLsp_PositionsToOffsets`(BOM·CRLF·이모지 뒤·서로게이트 가운데·줄 끝 넘음·마지막 줄 넘음·이름 끝, 위치 인자 틀림 4가지 -32602), `SparksLsp_QueryAllocationFailure`(hover·정의 5자리·서식 — 3이거나 같은 출력). lifecycle golden의 "지원하지 않는 요청"은 `textDocument/references`(L3)로.
 - **리뷰 반영:** 사용자 함수·이벤트의 매개변수를 심볼에서 모아 버린 매개변수(`_` — 심볼 없음)가 빠짐 → 선언의 매개변수 목록에서(`event Door.Opened(by: Actor, _: int)`). 반환 타입의 void 판정이 임시 글자를 만들어 그 할당 실패를 삼킴 → 타입 표의 내장 심볼로. 지역 타입의 초기값 추론 대체 → 뺌(검사기가 추론 타입을 심볼에 둔다 — 오류 자리에서 틀린 타입을 보이지 않게). import 경로 앞부분 이름도 대상 모듈로(11.4절). `LspOffsetOf`가 외톨이 CR에서 멈춰 `LspPositionOf`와 왕복이 어긋남 → CRLF의 CR에서만. BOM 문서의 서식이 늘 편집을 냄 → BOM 뒤 내용과 비교. 선언 위치 줄의 schema 판정을 "모듈이 아님"에서 "schema 원문"으로. 엔진 기반에도 `Rocks.` 접두. prelude 함수의 async 판정을 함수 갈래와 같게. 시험: hover golden 47자리(struct·interface·interface 메서드·interface 기반·별칭 선언/사용·import 경로 앞 이름·선택 타입·`Array<T>`·`int`·엔진 함수·엔진 enum·엔진 case·문맥 이름·버린 매개변수 더함), 위치 역변환에 줄 끝 clamp가 이름으로 드러나는 자리·외톨이 CR, 서식 BOM, 정수 아닌 위치(-32602).
-- **한계:** `this`·attribute 이름·`on` 경로의 hook 이름(`on Tick`)은 심볼이 없어 hover·정의가 없다(hook 목록이 공개되는 LC8f2에서 hook 설명을 더할지 본다). 엔진 schema에 문서가 없다(EI). hover 위치 줄은 열린 문서의 저장 전 내용 기준이다. 외톨이 CR을 줄 끝으로 보는 LSP 클라이언트와는 그 줄 뒤 위치가 어긋난다(10.6절 — 원문 줄은 LF 기준). 엔진 이벤트(`Owner.Damaged`)는 `on` 경로 뒤 이름에 심볼이 없어 hover가 없다. 서로게이트 가운데 위치의 보정(글자 시작)은 문자열 안이라 이름 질의로는 드러나지 않는다.
+- **한계:** `this`·attribute 이름·`on` 경로의 hook 이름(`on Tick`)은 심볼이 없어 hover·정의가 없다(LC8f2에서도 hook hover는 넣지 않았다 — 자동완성 detail이 hook의 매개변수 모양을 보인다, 요구 시 13절). 엔진 schema에 문서가 없다(EI). hover 위치 줄은 열린 문서의 저장 전 내용 기준이다. 외톨이 CR을 줄 끝으로 보는 LSP 클라이언트와는 그 줄 뒤 위치가 어긋난다(10.6절 — 원문 줄은 LF 기준). 엔진 이벤트(`Owner.Damaged`)는 `on` 경로 뒤 이름에 심볼이 없어 hover가 없다. 서로게이트 가운데 위치의 보정(글자 시작)은 문자열 안이라 이름 질의로는 드러나지 않는다.
 
 ### 11.10 구현(LC8f2)
 
@@ -390,7 +395,7 @@
 ### 12.1 배치와 구성
 
 - **위치:** `Tools/VSCode/sparks`(새 최상위 `Tools/` — 편집기 연동). UE는 편집기 보조물을 `Engine/Extras`에 두지만 Rocks의 `Extras/`는 다른 엔진(UE)의 코드 자리라(foreign-engine-boundary — UnrealExchange 11.1절) 쓰지 않는다. `Programs/`는 Rocks 빌드 규칙이 훑는 C++·C# 프로그램 자리라 node 프로젝트를 섞지 않는다.
-- **파일:** `package.json`(manifest), `package-lock.json`(의존 고정 — 판마다 integrity hash), `tsconfig.json`, `src/extension.ts`(활성화·클라이언트·명령), `src/serverLocation.ts`(서버 찾기 — 12.3절), `language-configuration.json`, `syntaxes/sparks.tmLanguage.json`, `README.md`(설치·사용 — 한국어 문서). 빌드 결과 `out/`과 `node_modules/`는 저장소 `.gitignore`가 뺀다.
+- **파일:** `package.json`(manifest), `package-lock.json`(의존 고정 — 판마다 integrity hash), `tsconfig.json`, `src/extension.ts`(활성화·클라이언트·명령), `src/serverLocation.ts`(서버 찾기 — 12.3절), `language-configuration.json`, `syntaxes/sparks.tmLanguage.json`, `README.md`(설치·사용 — 한국어 문서). 구현에서 나눈 소스(`serverController`·`serverSlots`)와 `.vscode/launch.json`은 12.6절. 빌드 결과 `out/`과 `node_modules/`는 저장소 `.gitignore`가 뺀다.
 - **의존(정확한 판, 범위 없음):** `vscode-languageclient` 11.0.0(MIT — LSP 클라이언트: JSON-RPC·capabilities·진단·의미 강조·자동완성·빠른 수정 공급자를 VS Code API에 잇는다, 직접 구현은 그 전부를 다시 만든다 — 외부 라이브러리 원칙), 개발 의존 `typescript` 6.0.3·`@types/vscode` 1.91.0(= `engines.vscode` 하한 `^1.91.0` — languageclient 11의 요구)·`@types/node` 20.19.43(VS Code 1.91의 Node 20). 전이 의존은 lock 파일이 고정한다. 판은 공개 뒤 2주 넘은 것을 고른다.
 - **빌드:** `npm ci` → `npm run compile`(`tsc -p .` → `out/`). Rocks 빌드(`Rocks.proj`)와 CI에는 넣지 않는다 — node는 Rocks 필수 도구가 아니고(Setup이 설치하지 않는다) 확장은 개발용이다(T14 — 배포·마켓 등록 없음). 설치는 VS Code `Developer: Install Extension from Location...`에 이 폴더를 주거나 확장 개발 창(F5 — `.vscode/launch.json`)으로 띄운다.
 
@@ -399,7 +404,7 @@
 - `name` `sparks`, `displayName` `Sparks`, `publisher` `rocks`, `private: true`, `license` `UNLICENSED`, `main` `./out/extension.js`, `engines.vscode` `^1.91.0`.
 - `activationEvents`: `onLanguage:sparks`, `workspaceContains:**/SparksPackage.json5`(파일을 열기 전에도 작업 공간 진단이 보인다).
 - `contributes.languages`: id `sparks`, aliases `Sparks`, extensions `.spark`, configuration `./language-configuration.json`. `contributes.grammars`: language `sparks`, scopeName `source.sparks`, path `./syntaxes/sparks.tmLanguage.json`.
-- `contributes.configuration`: `sparks.server.path`(string, 기본 빈 글자 = 자동 찾기), `sparks.server.schemas`(string 배열, 기본 `[]` → `initializationOptions.schemas` — 10.1절, 상대 경로는 서버가 첫 뿌리 기준으로 바꾼다), `sparks.trace.server`(`off`·`messages`·`verbose` — languageclient가 읽는 이름). 설정이 바뀌면 서버를 다시 시작한다.
+- `contributes.configuration`: `sparks.server.path`(string, 기본 빈 글자 = 자동 찾기), `sparks.server.schemas`(string 배열, 기본 `[]` → `initializationOptions.schemas` — 10.1절, 상대 경로는 서버가 첫 뿌리 기준으로 바꾼다), `sparks.trace.server`(`off`·`messages`·`verbose` — languageclient가 읽는 이름). `sparks.server.*` 설정이나 작업 공간 폴더가 바뀌면 서버를 다시 시작한다(`sparks.trace.server`는 languageclient가 바로 반영한다).
 - `contributes.commands`: `sparks.restartServer`(`Sparks: Restart Language Server`).
 - `contributes.configurationDefaults` `[sparks]`: `editor.insertSpaces: true`·`editor.tabSize: 4`(공식 서식 3절), `editor.semanticHighlighting.enabled: true`(T12 — 테마 기본값과 무관하게 의미 강조를 켠다). 의미 토큰 종류·modifier는 모두 LSP 표준 이름이라 `semanticTokenScopes`가 필요 없다.
 - 클라이언트 문서 선택: `{ scheme: "file", language: "sparks" }`와 `{ scheme: "file", pattern: "**/SparksPackage.json5" }`(저장 전 manifest 편집도 분석 — 10.4절 overlay). 다른 scheme(`untitled` 등)은 보내지 않는다(서버가 `file`만 받는다 — 10.6절).
@@ -419,7 +424,10 @@
 - **정리:** 시작과 교체 뒤에 자기 pid 폴더에서 실행 중인 칸 밖의 칸을 지우고(옛 서버가 아직 끝나지 않아 잠겼으면 실패 — 오류 아님, 다음 정리 때), 다른 pid 폴더는 그 프로세스가 없을 때만 지운다(`process.kill(pid, 0)`이 ESRCH — 살아 있는 창의 폴더는 건드리지 않는다. pid가 다른 프로세스에 재사용됐으면 남겨 두며 그 프로세스가 끝난 뒤 지운다). 확장이 끝날 때(`deactivate`) 서버를 멈춘 뒤 자기 pid 폴더 전체를 지운다(실패하면 다음 창이 지운다).
 - **대안(버린 것):** (1) 빌드가 링크 전에 잠긴 출력의 이름을 바꿔 치우기 — 모든 도구에 통하지만 빌드 출력 폴더에 옛 파일 찌꺼기가 쌓이고 증분 key·정리 규칙(Rocks.Build)을 바꿔야 하며, 실행 중인 서버는 여전히 옛 파일이라 교체 시점을 정하는 쪽이 따로 필요하다. (2) 수정 시각만 보고 바로 다시 시작 — 쓰는 도중의 파일을 실행할 수 있다. (3) 서버가 스스로 다시 실행 — 서버는 편집기 수명을 모르고 문서 상태를 다시 받을 길이 클라이언트에 있다.
 - **한계:** 감시는 VS Code 파일 감시(`FileSystemWatcher` + 원본 폴더의 `RelativePattern` — 작업 공간 밖도 된다)라 네트워크 드라이브 등에서 알림이 빠지면 `Sparks: Restart Language Server` 명령이 같은 교체를 한다(칸 만들기 → 다르면 교체).
-- **단일 파일 모드는 넣지 않는다:** 폴더 없이 연 `.spark`는 서버가 분석하지 않는다(10.3절 — 진단·강조 없음, 서식은 된다). 대안(열린 문서에서 위로 패키지 뿌리를 찾아 작업 공간으로 삼기)은 패키지 밖 문서·여러 패키지 문서가 섞이면 작업 공간이 문서마다 달라져 진단 동등성(CLI와 같은 `Compilation`)이 흐려진다. 필요가 보이면 서버 쪽 결정으로 다시 연다.
+
+### 12.3.2 단일 파일 모드(넣지 않음)
+
+- 폴더 없이 연 `.spark`는 서버가 분석하지 않는다(10.3절 — 진단·강조 없음, 서식은 된다). 대안(열린 문서에서 위로 패키지 뿌리를 찾아 작업 공간으로 삼기)은 두 가지로 나쁘다: 작업 공간이 문서마다 달라져 진단 동등성(CLI와 같은 `Compilation`)이 흐려지고, 패키지 밖 문서·저장 전 문서가 섞이면 작업 공간 읽기 전체가 실패해(10.4절) 다른 문서의 진단까지 지워진다. 필요가 보이면 서버 쪽 결정으로 다시 연다.
 
 ### 12.4 TextMate 문법과 언어 설정
 
@@ -448,3 +456,12 @@
 - **교체 확인(node, VS Code 밖):** 빌드 출력에서 원본을 찾고 칸을 만들어(같은 원본은 같은 칸) 복사본을 실행한 채 원본을 덮어쓰면 성공하고, 새 칸이 생기며, 실행 중인 옛 칸은 정리가 건너뛰고 서버가 끝난 뒤 지워진다. VS Code 안의 확인(강조·진단·자동완성·hover·정의·빠른 수정·서식, 켠 채 `RocksTarget=SparksLsp` 재빌드 → 자동 교체)은 사용자 확인으로 남는다(12.5절).
 - **리뷰 반영:** 칸 쪽 실패(staging 쓰기·이름 바꾸기 — 백신이 새 exe를 잡아 EPERM)를 "원본이 바뀜"으로 보던 것 → 원본 읽기 단계와 칸 단계를 나눠 칸 쪽은 오류, 이름 바꾸기는 재시도(rm과 같은 상수), 서버가 없을 때의 "원본이 바뀜"은 3번 다시 시도한 뒤 알림. 감시를 원본 경로가 바뀔 때만 만들던 것 → 다시 시작마다 다시 만든다(감시 폴더가 지워지면 알림이 끊긴다). `start()`에 상한이 없어 답하지 않는 서버가 작업 줄을 막던 것 → 30 s 상한, 넘으면 멈추고 알림. 같은 칸을 다시 켜도 "updated"를 알리던 것 → 칸이 바뀔 때만. 시작 실패 뒤 stop의 예상된 거부를 기록하던 것 → 뺌. `deactivate`가 빈 pid 폴더를 남기던 것 → 폴더째 지움. 보간이 줄을 넘던 것 → 줄 끝에서 끝남. 정책의 `.ts` 주석 제거가 백틱 템플릿 안의 `//` 뒤를 주석으로 지우던 것 → `WithoutTypeScriptComments`(템플릿을 여러 줄 리터럴로), self 대조에 템플릿 사례. manifest 시험에 표시 이름·publisher·license·별칭·명령 제목.
 - **한계:** 링크가 원본을 직접 덮어쓰는 도구에서 쓰기를 멈춘 틈에 복사가 끝나면 불완전한 칸을 게시할 수 있다(쓰기가 이어지면 다음 알림이 다시 교체한다). 감시 알림이 빠지는 파일 체계에서는 명령으로 교체한다. 확장 자체는 자동 시험 밖이다.
+
+## 13. 미룬 것(LC8 묶음 끝 — 개정 19)
+
+각 항목의 이유·한계는 괄호의 절이 정본이다. 엔진 쪽 항목이 필요한 것은 SparksEngineIntegration 2.6절 안내 문단에서 이 절을 가리킨다.
+
+- **엔진 연동(EI) 때:** 작업 공간 설정 파일 `SparksWorkspace.json5`(T3 — 엔진이 schema 위치를 안다), headless World fixture host와 `TestOptions`의 host 선택(9.2절), `@test` 문맥 규칙의 SL 개정(9.7절 — headless에서 `World` 사용), EI host의 enum 표기(9.7절), 리터럴 인자 자동완성(11.1절 — 태그·에셋 사전, SE-A5·SE-G2), 엔진 schema의 `doc` 칸과 hover 표시(11.3·11.9절 — schema 생성 EI1).
+- **측정 뒤:** 증분 문서 동기화·증분 분석·디스크 결과 보관·문서 버전별 arena(T11, 10.4·11.10절), 덮기 경로 key 색인(10.9절), 서식의 자동 줄바꿈(3절·T9 — 사용자 의견도). SL §13의 응답 목표(진단 p95 300 ms·자동완성 100 ms)를 재는 측정은 증분 분석을 착수할 때 그 단계의 첫 일로 정한다(LC7c3처럼).
+- **요구 시·후속:** 명령 인자 분해를 AppInfoCommandLine 바인더로 옮기기(T5 — SE-B4), Commandlet의 표준 출력을 SE-B7 API로 옮기기(T2 — 그 프로그램의 일), 보간 `${ }` 안 서식(8.1절), `sparks test --verbose`의 Log 출력(9.7절), 편집기 명령의 최상위 진입(9.4절), manifest 잠금의 배타 열기 모드(7.4절 — PlatformBase), stage 지시 corpus 사례의 CLI 비교(6절), hook·attribute·`this`의 hover(11.9절), 빠른 수정의 handler 골격·`Soft` 로드·`@formerly`·rename(L3)(11.7절), 편집의 `documentChanges`(문서 버전 — 11.11절), 단일 파일 모드(12.3.2절), 확장의 자동 시험 하니스(12.5절).
+- **SL §13에 있고 LC8이 하지 않은 것:** hover의 단위·하드 의존 크기·bundle·이벤트 발행 측 표시, 디버거(DAP — SE-B10, EI7), SL 13.1절의 test 패키지 배치(지금은 일반 패키지의 `@test` — EI의 World fixture와 함께 정한다).
