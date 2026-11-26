@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Span.h>
+#include <ShaderCore/ShaderParameterTypes.h>
 #include <ShaderCore/ShaderType.h>
 
 // RenderBase가 등록하는 엔진 셰이더 타입이다(Docs/Design/RenderBase 11.4절 2항). UE도 화면 VS·
@@ -46,16 +47,18 @@ ROCKS_SHADER_TYPE_NAME(TonemapPixelType, "TonemapPixel");
 // TonemapPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char TonemapSceneColorName[] = "SceneColor";
 
-// TonemapPixel의 그리기별 상수다(48 byte, TonemapPass.rsf TonemapConstants). 기본값은 UE 5.8
+// TonemapPixel의 그리기별 상수다(48 byte, 생성 HLSL /Engine/Generated/RenderBase/TonemapConstants.rsh —
+// 셰이더는 Tonemap.<멤버>로 읽는다, ShaderSystem 16.2절). 기본값은 UE 5.8
 // FPostProcessSettings 기본값(Engine/Private/Scene.cpp — BlueCorrection 0.6, ExpandGamut 1,
 // ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder 0.26, FilmBlackClip 0,
 // FilmWhiteClip 0.04)과 노출 배율 1이다.
 //
 // 사용 예:
 //   render::TonemapConstants tonemap;
-//   tonemap.exposure[0] = exposureScale;
+//   tonemap.exposure.x = exposureScale;
 //   commands.SetDrawConstants(Span<const uint8>(reinterpret_cast<const uint8*>(&tonemap),
 //                                               sizeof(tonemap)));
+ROCKS_SHADER_PARAMETERS(Name = "Tonemap", RootConstants)
 struct alignas(16) TonemapConstants {
     static constexpr float DefaultExposureScale = 1.0f;
     static constexpr float DefaultBlueCorrection = 0.6f;
@@ -68,15 +71,14 @@ struct alignas(16) TonemapConstants {
     static constexpr float DefaultFilmWhiteClip = 0.04f;
 
     // 노출 배율·blue correction·색역 확장·곡선 양이다.
-    float exposure[4] = {DefaultExposureScale, DefaultBlueCorrection, DefaultExpandGamut,
-                         DefaultToneCurveAmount};
+    shader::ShaderFloat4 exposure = {DefaultExposureScale, DefaultBlueCorrection,
+                                     DefaultExpandGamut, DefaultToneCurveAmount};
     // 기울기·toe·shoulder·black clip이다.
-    float film[4] = {DefaultFilmSlope, DefaultFilmToe, DefaultFilmShoulder, DefaultFilmBlackClip};
+    shader::ShaderFloat4 film = {DefaultFilmSlope, DefaultFilmToe, DefaultFilmShoulder,
+                                 DefaultFilmBlackClip};
     // white clip(나머지는 0)이다.
-    float filmWhite[4] = {DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
+    shader::ShaderFloat4 filmWhite = {DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
 };
-
-static_assert(sizeof(TonemapConstants) == 48, "TonemapConstants must match TonemapPass.rsf");
 
 // 텍스처 표시 PS다(/Engine/Private/Debug/TextureInspector.rsf, Docs/Design/RenderBase 18.5절
 // 6·7항). FullscreenTriangleVertex와 짝이고 차원(과 정수 성분 계열)마다 타입 하나다. 텍스처 이름은
@@ -118,7 +120,9 @@ enum class TextureInspectorDisplay : uint8 {
     Depth
 };
 
-// TextureInspector*Pixel의 그리기별 상수다(96 byte). 앞 셋은 TonemapConstants와 같은 배치다.
+// TextureInspector*Pixel의 그리기별 상수다(96 byte, 생성 HLSL
+// /Engine/Generated/RenderBase/TextureInspectorConstants.rsh — 셰이더는 Inspector.<멤버>). 앞 셋은
+// TonemapConstants와 같은 배치다.
 //
 // 사용 예:
 //   render::TextureInspectorConstants inspector;
@@ -130,23 +134,22 @@ enum class TextureInspectorDisplay : uint8 {
 //   inspector.integer[0] = 1.0f / 255.0f;           // 정수 형식: 값 → 표시 배율
 //   inspector.integer[1] = mipWidth;                // 정수 형식: 고른 mip 크기(texel)
 //   inspector.integer[2] = mipHeight;
+ROCKS_SHADER_PARAMETERS(Name = "Inspector", RootConstants)
 struct alignas(16) TextureInspectorConstants {
-    float exposure[4] = {
+    shader::ShaderFloat4 exposure = {
         TonemapConstants::DefaultExposureScale, TonemapConstants::DefaultBlueCorrection,
         TonemapConstants::DefaultExpandGamut, TonemapConstants::DefaultToneCurveAmount};
-    float film[4] = {TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
-                     TonemapConstants::DefaultFilmShoulder, TonemapConstants::DefaultFilmBlackClip};
-    float filmWhite[4] = {TonemapConstants::DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
+    shader::ShaderFloat4 film = {TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
+                                 TonemapConstants::DefaultFilmShoulder,
+                                 TonemapConstants::DefaultFilmBlackClip};
+    shader::ShaderFloat4 filmWhite = {TonemapConstants::DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
     // mip·층·고른 mip의 volume 깊이·표시 방식이다.
-    float selection[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+    shader::ShaderFloat4 selection = {0.0f, 0.0f, 1.0f, 0.0f};
     // 쿠킹 swizzle 출처 번호 넷(graphics::SwizzleSource — 기본 항등)이다.
-    float swizzle[4] = {0.0f, 1.0f, 2.0f, 3.0f};
+    shader::ShaderFloat4 swizzle = {0.0f, 1.0f, 2.0f, 3.0f};
     // 정수 형식의 값 → 표시 배율, 고른 mip의 폭·높이(texel), 0이다.
-    float integer[4] = {1.0f, 1.0f, 1.0f, 0.0f};
+    shader::ShaderFloat4 integer = {1.0f, 1.0f, 1.0f, 0.0f};
 };
-
-static_assert(sizeof(TextureInspectorConstants) == 96,
-              "TextureInspectorConstants must match TextureInspector.rsf");
 
 // 엔진 기본 정점 입력 타입이다(Docs/Design/RenderBase 10.6절 3항,
 // /Engine/Private/VertexInput/BuiltinVertexInput.rsh — 위치·UV·색, 배치는 BuiltinVertexLayout).

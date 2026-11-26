@@ -9,8 +9,9 @@
 #include <ShaderCore/ShaderBindingLayout.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase 9.3·9.4절 RB4)이다. 입력은 손으로 쓴
-// 레이아웃 표다(ShaderSystem 7.2절 5항, ShaderCore ShaderParameterLayout.h — 생성 표는 SH3). 장치로
+// 파라미터 바인딩 지도와 상수 블록(Docs/Design/RenderBase 9.3·9.4절 RB4)이다. 입력은 레이아웃 표다
+// (ShaderCore ShaderParameterLayout.h — 생성 표 ShaderParameterLayoutOf<T>() 또는 손으로 쓴 표,
+// ShaderSystem 16.2절). 장치로
 // 가는 경로는 둘이다: 루트 상수 표는 그리기별 상수(ApplyDrawConstants), 그 밖의 표는 상수 버퍼
 // (ConstantBlock::Commit·ApplyConstantBlock, 9.11절 GX6).
 namespace rocks::render {
@@ -40,7 +41,8 @@ inline constexpr usize MaxShaderConstantPlacements = 3;
 class ROCKS_RENDERBASE_API ShaderBindingMap {
 public:
     // 표와 단계 layout들(null은 건너뛴다)로 만든다. 표가 루트 상수면 루트 상수를 읽는 단계마다,
-    // 아니면 표 이름과 같은 상수 버퍼를 선언한 단계마다 자리를 만든다. 규칙 위반은 InvalidArgument
+    // 아니면 표의 상수 버퍼를 선언한 단계마다 자리를 만든다(생성 표는 구조체 identity로, 손으로 쓴
+    // 표는 이름으로 찾는다 — SX8, 9.14절). 규칙 위반은 InvalidArgument
     // 이며 reason에 영어 이유를 둔다: 표 자체 위반(ValidateShaderParameterLayout), 단계 블록이
     // 표보다 큼, 상수 버퍼 멤버가 표에 없거나 오프셋·크기가 다름, 어느 단계도 표를 쓰지 않음.
     static Result<ShaderBindingMap> Build(const shader::ShaderParameterLayout& layout,

@@ -143,8 +143,9 @@ public abstract class TestsModule : ModuleRules
             "Serialization", "TraceAnalysis", "World"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
-        // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers.
-        ["ShaderCompiler"] = ["DeterministicMath", "RenderBase"],
+        // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers; the shader
+        // parameter struct tests compile the generated fixture structs (Docs/Design/ShaderSystem section 16.2 SSD58).
+        ["ShaderCompiler"] = ["DeterministicMath", "RenderBase", "ShaderParameterTestFixtures"],
         ["SparksCompiler"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTestHost"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
         ["SparksTools"] = ["Config", "HostConfig", "MetaSchema", "ModuleLoader", "ObjectRuntime", "ReflectionText"],
@@ -245,12 +246,13 @@ public abstract class TestsModule : ModuleRules
 
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
         // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
-        // test types that derive from World types) and the asset fixture (AssetTestFixtures: test asset classes that derive from AssetRuntime's Asset).
+        // test types that derive from World types), the asset fixture (AssetTestFixtures: test asset classes that derive from AssetRuntime's Asset) and the
+        // shader parameter fixture (ShaderParameterTestFixtures: generated shader parameter structs, Docs/Design/ShaderSystem section 16.2).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
             TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures"],
-            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures"]
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures", "ShaderParameterTestFixtures"]
         };
         return new()
         {
