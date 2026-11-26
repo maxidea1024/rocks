@@ -1,4 +1,5 @@
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Memory.h>
 #include <MaterialCompiler/MaterialConstants.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
 #include <MaterialSchema/MaterialContextValue.h>
@@ -874,6 +875,142 @@ TEST(MaterialParameter_CollectionTransform) {
     // 컬렉션이 입력에 없으면 "invalid Collection"이 파라미터 검사보다 먼저다.
     CHECK(run(CollectionTransformType::Position, OriginId, "Ghost", true,
               "CollectionTransform has invalid Collection!", TranslateOptions{}, type));
+}
+
+// 같은 ParameterId를 다른 종류(Scalar·Vector)가 쓰면 V8이다(엉뚱한 V1이 아니다).
+TEST(MaterialParameter_SameIdOtherKind) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid scalar = AddScalar(fixture, RoughnessId, 0.5f, "Rough");
+    VectorParameterProperties vector(env.allocator);
+    vector.parameterName = env.Intern("Tint");
+    vector.parameterId = RoughnessId;
+    const Guid tint = fixture.Add("Material.VectorParameter", env.Save(vector));
+    const Guid sum = fixture.Add("Material.Add");
+    fixture.Connect(scalar, "Result", sum, "A");
+    fixture.Connect(tint, "R", sum, "B");
+    fixture.Connect(sum, "Result", OutputNodeId, "AmbientOcclusion");
+    REQUIRE(fixture.ready);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWith(fixture, Traits(), out, {}));
+    CHECK(!out.succeeded);
+    CHECK(CountErrors(out) == 1);
+    CHECK(CountDiagnostics(out, MaterialDiagnosticCode::ParameterConflict,
+                           nodegraph::GraphDiagnosticSeverity::Error) == 1);
+    CHECK(HasMessage(out, "Parameter is used with another parameter type"));
+}
+
+// 상수 식 프로그램: 공유 부분식은 명령 하나·출력 하나이고, Double1 출력은 같은 float4의 두 칸이다.
+TEST(MaterialParameter_ProgramSharingAndDoubleScalar) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid scalar = AddScalar(fixture, RoughnessId, 0.5f);
+    const Guid plus = fixture.Add("Material.Add");
+    fixture.Connect(scalar, "Result", plus, "A");
+    fixture.Connect(AddConstant(fixture, 1.0f), "Result", plus, "B");
+    const Guid uv = fixture.Add("Material.TextureCoordinate");
+    const Guid u = AddMask(fixture, true);
+    fixture.Connect(uv, "Result", u, "Input");
+    const Guid first = fixture.Add("Material.Multiply");
+    fixture.Connect(plus, "Result", first, "A");
+    fixture.Connect(u, "Result", first, "B");
+    const Guid second = fixture.Add("Material.Subtract");
+    fixture.Connect(plus, "Result", second, "A");
+    fixture.Connect(u, "Result", second, "B");
+    DoubleVectorParameterProperties origin;
+    origin.parameterName = env.Intern("Origin");
+    origin.parameterId = OriginId;
+    origin.defaultValue = Vec4d(3.0e7, 0.0, 0.0, 0.0);
+    const Guid wide = fixture.Add("Material.DoubleVectorParameter", env.Save(origin));
+    const Guid world = fixture.Add("Material.WorldPosition");
+    const Guid x = AddMask(fixture, true);
+    fixture.Connect(world, "XYZ", x, "Input");
+    const Guid offset = fixture.Add("Material.Subtract");
+    fixture.Connect(x, "Result", offset, "A");
+    fixture.Connect(wide, "X", offset, "B");
+    const Guid sum = fixture.Add("Material.Add");
+    fixture.Connect(first, "Result", sum, "A");
+    fixture.Connect(second, "Result", sum, "B");
+    const Guid total = fixture.Add("Material.Add");
+    fixture.Connect(sum, "Result", total, "A");
+    fixture.Connect(offset, "Result", total, "B");
+    fixture.Connect(total, "Result", OutputNodeId, "AmbientOcclusion");
+    REQUIRE(fixture.ready);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWith(fixture, Traits(), out, {}));
+    REQUIRE(out.succeeded);
+    MaterialConstants constants(env.allocator);
+    REQUIRE(BuildMaterialConstants(out.module, constants));
+    usize adds = 0;
+    for (const IrValue& step : constants.steps) {
+        adds += step.op == IrOp::Add ? 1 : 0;
+    }
+
+    CHECK(adds == 1);
+    // float1 출력(p + 1)과 Double1 X의 tile·offset 셋이 한 float4에 들어간다.
+    REQUIRE(constants.members.Size() == 3);
+    CHECK(constants.floatVectors == 1);
+    usize doubles = 0;
+    for (const MaterialConstantMember& member : constants.members) {
+        CHECK(member.vector == 0);
+        CHECK(member.components == 1);
+        doubles += member.kind != MaterialConstantSlotKind::Value ? 1 : 0;
+    }
+
+    CHECK(doubles == 2);
+}
+
+// CollectionTransform 식 구조: LocalToWorld는 tile × 2097152(Double 상수)를 더하고, Projection은
+// 입력 .xyzz를 쓴다.
+TEST(MaterialParameter_CollectionTransformStructure) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const MaterialCollectionLayout layouts[] = {{CollectionA, TestEntries, 7}};
+    TranslateOptions options;
+    options.collections = layouts;
+    const auto build = [&](CollectionTransformType type, MaterialTranslation& out) noexcept {
+        GraphFixture fixture(env);
+        const Guid node = AddCollectionTransform(fixture, CollectionA, MatrixId, type);
+        const Guid uv = fixture.Add("Material.TextureCoordinate");
+        const Guid append = fixture.Add("Material.Append");
+        fixture.Connect(uv, "Result", append, "A");
+        fixture.Connect(AddConstant(fixture, 1.0f), "Result", append, "B");
+        fixture.Connect(append, "Result", node, "Input");
+        const Guid dot = fixture.Add("Material.DotProduct");
+        fixture.Connect(node, "Result", dot, "A");
+        fixture.Connect(node, "Result", dot, "B");
+        fixture.Connect(dot, "Result", OutputNodeId, "AmbientOcclusion");
+        return fixture.ready && TranslateWith(fixture, Traits(), out, options) && out.succeeded;
+    };
+
+    MaterialTranslation world(env.allocator);
+    REQUIRE(build(CollectionTransformType::LocalToWorld, world));
+    bool tile = false;
+    for (const IrValue& value : world.module.Values()) {
+        if (value.op != IrOp::Constant || value.type.scalar != IrScalar::Double) {
+            continue;
+        }
+
+        for (uint8 component = 0; component < value.type.components; ++component) {
+            double number = 0.0;
+            const uint64 bits = value.immediate[component];
+            platform::MemoryCopy(&number, &bits, sizeof(number));
+            tile = tile || number == IrDoubleTileSize;
+        }
+    }
+
+    CHECK(tile);
+    MaterialTranslation projection(env.allocator);
+    REQUIRE(build(CollectionTransformType::Projection, projection));
+    bool spread = false;
+    for (const IrValue& value : projection.module.Values()) {
+        spread = spread || (value.op == IrOp::Swizzle && value.type == IrFloat(4) &&
+                            value.immediate[0] == (0u | (1u << 2) | (2u << 4) | (2u << 6)));
+    }
+
+    CHECK(spread);
 }
 
 } // namespace material_parameter_lowering_tests_file

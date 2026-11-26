@@ -142,6 +142,11 @@ public:
     // UserSceneTexture 이름을 번호로 바꾼다(처음 참조 순). 상한을 넘으면 거짓이다(6.10절 MS2c4).
     Result<bool> ReferenceUserSceneTexture(StringView name, uint32& index) noexcept;
 
+    // value가 결과에 닿을 때만 낼 오류를 둔다(지연 진단 — 6.10절 MS2c4). message는 번역이 끝날
+    // 때까지 살아 있어야 한다(문자열 상수).
+    Result<void> DeferError(IrValueId value, MaterialDiagnosticCode code, Guid node,
+                            StringView message) noexcept;
+
     // 컬렉션 asset을 참조 목록에 넣는다. 이미 있으면 그대로 참이고, 상한을 넘으면 넣지 않고
     // 거짓이다.
     Result<bool> ReferenceCollection(Guid asset) noexcept;
@@ -194,6 +199,8 @@ private:
     Result<void> TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept;
     // 보간 성분 수 V9 검사다(모듈을 만든 뒤).
     Result<void> CheckInterpolantBudget() noexcept;
+    // 결과에서 닿는 값에 묶인 지연 진단을 낸다(6.10절 MS2c4).
+    Result<void> CheckDeferred() noexcept;
     // 결과에서 닿는 Pending 자리 값의 늦은 진단이다(6.10절 MS2c1 — DCE 뒤, 조건 값 가지는 경고).
     Result<void> CheckPending() noexcept;
     // node의 pin 출력 자리 값을 만든다(처음 요청 때).
@@ -266,6 +273,16 @@ private:
     };
 
     Array<SamplerSlot> samplers_;
+
+    // 지연 진단 하나다.
+    struct DeferredError {
+        IrValueId value = NoIrValue;
+        MaterialDiagnosticCode code = MaterialDiagnosticCode::UnsupportedCapability;
+        Guid node;
+        StringView message;
+    };
+
+    Array<DeferredError> deferred_;
     Name rerouteType_;
     Name rerouteIn_;
     Name rerouteOut_;

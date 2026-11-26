@@ -65,10 +65,6 @@ constexpr NamedBlend BlendNames[] = {
      "MATERIAL_BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE"},
 };
 
-// Double 값(LWC) tile 한 칸의 크기(cm)다(MaterialDouble.rsh MaterialDoubleTileSize — UE
-// UE_LWC_RENDER_TILE_SIZE).
-constexpr double WriterDoubleTileSize = 2097152.0;
-
 double WriterDouble(uint64 bits) noexcept {
     double value = 0.0;
     platform::MemoryCopy(&value, &bits, sizeof(value));
@@ -611,10 +607,10 @@ Result<void> SourceWriter::DoubleLiteral(const IrValue& value) noexcept {
     offsets.type.scalar = IrScalar::Float;
     for (uint8 index = 0; index < value.type.components; ++index) {
         const double number = WriterDouble(value.immediate[index]);
-        const double tile = deterministic::Floor(number / WriterDoubleTileSize + 0.5);
+        const double tile = deterministic::Floor(number / IrDoubleTileSize + 0.5);
         tiles.immediate[index] = WriterFloatBits(static_cast<float>(tile));
         offsets.immediate[index] =
-            WriterFloatBits(static_cast<float>(number - tile * WriterDoubleTileSize));
+            WriterFloatBits(static_cast<float>(number - tile * IrDoubleTileSize));
     }
 
     if (auto make = Raw("Make"); !make) {
@@ -975,6 +971,10 @@ Result<void> SourceWriter::TextureDeclarations() noexcept {
 Result<void> SourceWriter::TextureSample(const IrValue& value) noexcept {
     // MaterialProcess<종류>Lookup(MaterialSample<자원><방식>(텍스처, 샘플러, uv[, mip…]))(6.10절
     // MS2c3).
+    // 샘플 종류 0–16(MaterialSchema SamplerType)의 처리 함수다(UE ApplyMaterialSamplerType —
+    // MaterialTexture.ush:207–228). Virtual 종류는 같은 비가상 처리를 쓴다(가상 텍스처를 끈 형식 —
+    // 켠 형식의 Virtual 샘플은 lowering이 늦은 진단으로 바꾼다). External(9)은 lowering이 늦은
+    // 진단으로 바꾸므로 오지 않는다.
     static constexpr StringView Process[] = {"MaterialProcessColorLookup(",
                                              "MaterialProcessGrayscaleLookup(",
                                              "MaterialProcessAlphaLookup(",
@@ -983,15 +983,23 @@ Result<void> SourceWriter::TextureSample(const IrValue& value) noexcept {
                                              "MaterialProcessAlphaLookup(",
                                              "MaterialProcessLinearColorLookup(",
                                              "MaterialProcessLinearGrayscaleLookup(",
-                                             "("};
+                                             "(",
+                                             "MaterialProcessColorLookup(",
+                                             "MaterialProcessColorLookup(",
+                                             "MaterialProcessGrayscaleLookup(",
+                                             "MaterialProcessAlphaLookup(",
+                                             "MaterialUnpackNormalMap(",
+                                             "(",
+                                             "MaterialProcessLinearColorLookup(",
+                                             "MaterialProcessLinearGrayscaleLookup("};
     static constexpr StringView Gathers[] = {"", "GatherRed", "GatherGreen", "GatherBlue",
                                              "GatherAlpha"};
     static constexpr StringView Modes[] = {"", "Level", "Bias", "Grad"};
     const IrValue& texture = module_.Values()[value.operands[0]];
     const usize type = static_cast<usize>(value.immediate[0]);
     const usize mode = static_cast<usize>(value.immediate[1]);
-    const usize gather = static_cast<usize>(value.immediate[3] & 0xF);
-    const bool decal = ((value.immediate[3] >> 4) & 1) != 0;
+    const usize gather = static_cast<usize>(value.immediate[3] & IrTextureGatherMask);
+    const bool decal = ((value.immediate[3] >> IrTextureDecalShift) & 1) != 0;
     if (type >= sizeof(Process) / sizeof(Process[0]) || mode >= sizeof(Modes) / sizeof(Modes[0]) ||
         gather >= sizeof(Gathers) / sizeof(Gathers[0])) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -1075,7 +1083,9 @@ Result<void> SourceWriter::AddressDemote(const IrValue& value) noexcept {
 
     for (uint8 component = 0; component < value.type.components; ++component) {
         StringBuilder<> mode(allocator_);
-        mode << ", " << ((value.immediate[0] >> (component * 2)) & 3) << "u";
+        mode << ", "
+             << ((value.immediate[0] >> (component * IrAddressModeBits)) & IrAddressModeMask)
+             << "u";
         if (auto status = mode.Status(); !status) {
             return status;
         }

@@ -17,10 +17,6 @@ namespace {
 // custom primitive data의 float 수다(UE FCustomPrimitiveData::NumCustomPrimitiveDataFloats).
 constexpr int64 MaxCustomPrimitiveDataFloats = 36;
 
-// LWC tile 한 칸의 크기(cm)다(MaterialDouble.rsh MaterialDoubleTileSize — UE
-// UE_LWC_RENDER_TILE_SIZE).
-constexpr double CollectionTileSize = 2097152.0;
-
 // 컬렉션 변환 종류마다 필요한 연속 벡터 수다(UE MaterialExpressions.cpp:17366–17405).
 constexpr uint32 PositionMatrixVectors = 4;
 constexpr uint32 DirectionMatrixVectors = 3;
@@ -84,6 +80,20 @@ Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kin
     if (!read || !read.Value()) {
         return read ? Result<IrValueId>::Success(NoIrValue)
                     : Result<IrValueId>::Failure(read.Error());
+    }
+
+    // 같은 ParameterId가 다른 종류로 이미 쓰였으면 V8이다(6.10절 — 표가 첫 항목의 타입을 쓰므로).
+    for (const IrParameter& existing : context.Builder().Parameters()) {
+        if (existing.id == id && existing.kind != kind) {
+            if (auto reported =
+                    context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(),
+                                  "Parameter is used with another parameter type");
+                !reported) {
+                return Result<IrValueId>::Failure(reported.Error());
+            }
+
+            return Result<IrValueId>::Success(NoIrValue);
+        }
     }
 
     IrParameter parameter;
@@ -613,7 +623,7 @@ Result<IrValueId> TileOffset(LoweringContext& context, IrValueId row, uint8 widt
         return promoted;
     }
 
-    auto size = context.DoubleConstant(CollectionTileSize, StringView());
+    auto size = context.DoubleConstant(IrDoubleTileSize, StringView());
     if (!size) {
         return size;
     }

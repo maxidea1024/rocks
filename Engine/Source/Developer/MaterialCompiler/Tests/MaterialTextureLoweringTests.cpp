@@ -42,6 +42,8 @@ constexpr Guid NormalId{0x54455854ull, 2};
 constexpr Guid SkyId{0x54455854ull, 3};
 constexpr Guid MaskId{0x54455854ull, 4};
 constexpr Guid MissingId{0x54455854ull, 9};
+constexpr Guid MovieId{0x54455854ull, 5};
+constexpr Guid ClampedId{0x54455854ull, 6};
 constexpr Guid ParameterId{0x50415254ull, 1};
 
 MaterialTextureFacts
@@ -56,11 +58,22 @@ Facts(Guid asset, IrTextureKind kind = IrTextureKind::Texture2D,
     return facts;
 }
 
+// 축마다 주소 모드가 다른 텍스처다(X Clamp, Y Mirror, Z Wrap).
+MaterialTextureFacts ClampedFacts() noexcept {
+    MaterialTextureFacts facts = Facts(ClampedId);
+    facts.address[0] = TextureAddress::Clamp;
+    facts.address[1] = TextureAddress::Mirror;
+    facts.address[2] = TextureAddress::Wrap;
+    return facts;
+}
+
 const MaterialTextureFacts TestTextures[] = {
     Facts(BrickId),
     Facts(NormalId, IrTextureKind::Texture2D, TextureCompressionSettings::Normalmap, false),
     Facts(SkyId, IrTextureKind::TextureCube),
     Facts(MaskId, IrTextureKind::Texture2D, TextureCompressionSettings::Normalmap, true),
+    Facts(MovieId, IrTextureKind::External),
+    ClampedFacts(),
 };
 
 bool TranslateTextures(GraphFixture& fixture, MaterialTranslation& out,
@@ -774,6 +787,206 @@ TEST(MaterialTexture_AntialiasedTextureMask) {
     MaterialTranslation missing(env.allocator);
     REQUIRE(TranslateTextures(empty, missing));
     CHECK(HasMessage(missing, "UMaterialExpressionAntialiasedTextureMask> Missing input texture"));
+}
+
+// 가상 샘플 종류: 가상 텍스처를 끈 형식은 비가상 처리 함수로 샘플하고(UE ApplyMaterialSamplerType),
+// 켠 형식은 늦은 진단이다. Param2D는 비가상 텍스처에 가상 종류면 UE 문구다.
+TEST(MaterialTexture_VirtualSamplerTypes) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.TextureSample",
+                                  env.Save(SampleOf(env, BrickId, SamplerType::VirtualColor)));
+    ToAo(fixture, node);
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    CHECK(HasText(source.text.View(), "MaterialProcessColorLookup(MaterialSample2DBias("));
+    CHECK((out.consultedTarget & ToMask(MaterialTargetField::VirtualTexturing)) != 0);
+
+    MaterialTranslationTarget virtualTarget;
+    virtualTarget.virtualTexturing = true;
+    MaterialTranslation pending(env.allocator);
+    REQUIRE(TranslateTextures(fixture, pending, Traits(), virtualTarget));
+    CHECK(HasOnlyErrorAt(pending, MaterialDiagnosticCode::PrerequisiteMissing, node));
+
+    TextureSampleParameter2DProperties albedo(env.allocator);
+    albedo.parameterName = env.Intern("Albedo");
+    albedo.parameterId = ParameterId;
+    albedo.texture.assetId = AssetId{BrickId};
+    albedo.samplerType = SamplerType::VirtualColor;
+    GraphFixture parameter(env);
+    const Guid param = parameter.Add("Material.TextureSampleParameter2D", env.Save(albedo));
+    ToAo(parameter, param);
+    MaterialTranslation rejected(env.allocator);
+    REQUIRE(TranslateTextures(parameter, rejected));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::InvalidProperty, param));
+    CHECK(HasMessage(rejected, "Sampler requires VirtualTexture"));
+
+    // 비가상 샘플은 가상 텍스처 항목을 읽지 않는다(번역 키가 갈리지 않는다).
+    GraphFixture plain(env);
+    ToAo(plain, plain.Add("Material.TextureSample", env.Save(SampleOf(env, BrickId))));
+    MaterialTranslation normal(env.allocator);
+    REQUIRE(TranslateTextures(plain, normal));
+    CHECK((normal.consultedTarget & ToMask(MaterialTargetField::VirtualTexturing)) == 0);
+}
+
+// 정점 문맥 gather: mip 피연산자 없이 첫 mip을 읽고 픽셀 빈도로 고정하지 않는다(UE HT:7708–7711).
+TEST(MaterialTexture_VertexGather) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    TextureSampleProperties properties = SampleOf(env, BrickId);
+    properties.gatherMode = TextureGatherMode::Red;
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.TextureSample", env.Save(properties));
+    fixture.Connect(node, "RGB", OutputNodeId, "WorldPositionOffset");
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    const IrValue* sample = FindSample(out);
+    REQUIRE(sample != nullptr);
+    CHECK(sample->operandCount == 2);
+    CHECK(sample->frequency != IrFrequency::Pixel);
+    CHECK(HasText(source.text.View(),
+                  "MaterialSample2DGatherRed(MaterialTexture0, MaterialTexture0Sampler, "));
+    CHECK(!HasText(source.text.View(), "MaterialSample2DLevel("));
+}
+
+// Numeric 핀(SphericalParticleOpacity Density)에 텍스처를 이으면 문맥 값 인자에서 V1이다.
+TEST(MaterialTexture_TextureIntoContextValueArgument) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    TextureObjectProperties object;
+    object.texture.assetId = AssetId{BrickId};
+    const Guid texture = fixture.Add("Material.TextureObject", env.Save(object));
+    const Guid sphere = fixture.Add("Material.SphericalParticleOpacity");
+    fixture.Connect(texture, "Result", sphere, "Density");
+    fixture.Connect(sphere, "Result", OutputNodeId, "Opacity");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateTextures(fixture, out, Traits(BlendMode::AlphaComposite)));
+    CHECK(!out.succeeded);
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::TypeMismatch, sphere));
+}
+
+// AntialiasedTextureMask는 UE 전용 TextureIsValid대로 외부 텍스처를 받지 않는다.
+TEST(MaterialTexture_AntialiasedTextureMaskRejectsExternal) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    AntialiasedTextureMaskProperties properties(env.allocator);
+    properties.texture.assetId = AssetId{MovieId};
+    properties.samplerType = SamplerType::External;
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.AntialiasedTextureMask", env.Save(properties));
+    fixture.Connect(node, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateTextures(fixture, out));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::InvalidProperty, node));
+    CHECK(HasMessage(out, "Found MediaTexture, requires Texture2D"));
+}
+
+// view mip bias가 꺼지는 조건: 모바일 형식, Surface·Decal 밖 영역(하드웨어 미분 샘플이 된다).
+TEST(MaterialTexture_ViewMipBiasConditions) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.TextureSample", env.Save(SampleOf(env, BrickId)));
+    fixture.Connect(node, "R", OutputNodeId, "Opacity");
+    MaterialTranslationTarget mobile;
+    mobile.isMobile = true;
+    mobile.isPc = false;
+    MaterialTranslation small(env.allocator);
+    REQUIRE(TranslateTextures(fixture, small, Traits(BlendMode::AlphaComposite), mobile));
+    REQUIRE(small.succeeded);
+    REQUIRE(FindSample(small) != nullptr);
+    CHECK(FindSample(small)->immediate[1] == static_cast<uint64>(IrTextureMipMode::Implicit));
+
+    MaterialTranslation post(env.allocator);
+    REQUIRE(TranslateTextures(fixture, post,
+                              Traits(BlendMode::AlphaComposite, MaterialDomain::PostProcess)));
+    REQUIRE(post.succeeded);
+    REQUIRE(FindSample(post) != nullptr);
+    CHECK(FindSample(post)->immediate[1] == static_cast<uint64>(IrTextureMipMode::Implicit));
+    CHECK((post.consultedTarget & ToMask(MaterialTargetField::IsMobile)) == 0);
+}
+
+// 큰 좌표 uv의 주소 모드: 자기 샘플러는 텍스처 사실의 축별 모드, 공유 Clamp는 모두 Clamp다.
+TEST(MaterialTexture_AddressModeBits) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto modes = [&](SamplerSourceMode source, uint64& bits) noexcept {
+        TextureSampleProperties properties = SampleOf(env, ClampedId);
+        properties.samplerSource = source;
+        GraphFixture fixture(env);
+        const Guid node = fixture.Add("Material.TextureSample", env.Save(properties));
+        fixture.Connect(fixture.Add("Material.WorldPosition"), "XY", node, "Coordinates");
+        ToAo(fixture, node);
+        MaterialTranslation out(env.allocator);
+        if (!TranslateTextures(fixture, out) || !out.succeeded) {
+            return false;
+        }
+
+        for (const IrValue& value : out.module.Values()) {
+            if (value.op == IrOp::AddressDemote) {
+                bits = value.immediate[0];
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    uint64 own = 0;
+    REQUIRE(modes(SamplerSourceMode::FromTextureAsset, own));
+    CHECK(own == (IrAddressModeClamp | (IrAddressModeMirror << IrAddressModeBits) |
+                  (IrAddressModeWrap << (2 * IrAddressModeBits))));
+    uint64 shared = 1;
+    REQUIRE(modes(SamplerSourceMode::ClampWorldGroupSettings, shared));
+    CHECK(shared == 0);
+}
+
+// 이름 없는 파라미터 샘플은 UE처럼 TextureSample 경로라 gather를 쓴다(ME:4022–4025).
+TEST(MaterialTexture_UnnamedParameterSampleUsesGather) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    TextureSampleParameter2DProperties properties(env.allocator);
+    properties.texture.assetId = AssetId{BrickId};
+    properties.gatherMode = TextureGatherMode::Blue;
+    GraphFixture fixture(env);
+    ToAo(fixture, fixture.Add("Material.TextureSampleParameter2D", env.Save(properties)));
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    CHECK(out.module.Textures()[0].source == IrTextureSource::Asset);
+    CHECK(HasText(source.text.View(), "MaterialSample2DGatherBlue("));
+
+    properties.parameterName = env.Intern("Albedo");
+    properties.parameterId = ParameterId;
+    GraphFixture named(env);
+    ToAo(named, named.Add("Material.TextureSampleParameter2D", env.Save(properties)));
+    MaterialTranslation parameter(env.allocator);
+    MaterialGeneratedSource text(env.allocator);
+    REQUIRE(Generate(named, parameter, text));
+    CHECK(!HasText(text.text.View(), "Gather"));
+}
+
+// 잘못된 enum 값(저장 손상)은 시스템 실패가 아니라 그 노드 위치의 오류 하나다(속성 읽기가 거르거나
+// lowering이 InvalidProperty로 거른다).
+TEST(MaterialTexture_OutOfRangeEnum) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    TextureSampleProperties properties = SampleOf(env, BrickId);
+    properties.gatherMode = static_cast<TextureGatherMode>(9);
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.TextureSample", env.Save(properties));
+    ToAo(fixture, node);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateTextures(fixture, out));
+    CHECK(!out.succeeded);
+    CHECK(CountErrors(out) == 1);
+    for (const nodegraph::GraphDiagnostic& diagnostic : out.diagnostics.items) {
+        CHECK(diagnostic.node == node);
+    }
 }
 
 } // namespace material_texture_lowering_tests_file

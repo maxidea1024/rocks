@@ -35,60 +35,8 @@ bool LoweringIsFinite(double value) noexcept {
     return value == value && value - value == 0.0;
 }
 
-// 진단 문구용 HLSL 철자 타입 이름이다(영어).
-StringView LoweringTypeName(IrType type) noexcept {
-    static constexpr StringView Floats[] = {"float", "float2", "float3", "float4"};
-    static constexpr StringView Ints[] = {"int", "int2", "int3", "int4"};
-    static constexpr StringView UInts[] = {"uint", "uint2", "uint3", "uint4"};
-    static constexpr StringView Bools[] = {"bool", "bool2", "bool3", "bool4"};
-    static constexpr StringView Doubles[] = {"double", "double2", "double3", "double4"};
-    if (type.IsMatrix()) {
-        return type.rows == 3 ? StringView("float3x3") : StringView("float4x4");
-    }
+} // namespace
 
-    if (type.IsTexture()) {
-        // UE DescribeType 이름이다.
-        switch (type.texture) {
-        case IrTextureKind::TextureCube:
-            return "textureCube";
-        case IrTextureKind::Texture2DArray:
-            return "texture2DArray";
-        case IrTextureKind::TextureCubeArray:
-            return "textureCubeArray";
-        case IrTextureKind::Texture3D:
-            return "volumeTexture";
-        case IrTextureKind::External:
-            return "textureExternal";
-        default:
-            return "texture2D";
-        }
-    }
-
-    if (type.components < 1 || type.components > MaxIrComponents) {
-        return "unknown";
-    }
-
-    const usize index = type.components - 1;
-    switch (type.scalar) {
-    case IrScalar::Texture:
-        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
-        break;
-    case IrScalar::Float:
-        return Floats[index];
-    case IrScalar::Int:
-        return Ints[index];
-    case IrScalar::UInt:
-        return UInts[index];
-    case IrScalar::Bool:
-        return Bools[index];
-    case IrScalar::Double:
-        return Doubles[index];
-    }
-
-    return "unknown";
-}
-
-// 핀 타입이 정하는 IR 타입이다(수·Bool 타입만). 아니면 false다.
 bool LoweringPinIrType(MaterialPinType pin, IrType& out) noexcept {
     const uint32 value = static_cast<uint32>(pin);
     if (value >= static_cast<uint32>(MaterialPinType::Float1) &&
@@ -124,7 +72,57 @@ bool LoweringPinIrType(MaterialPinType pin, IrType& out) noexcept {
     return false;
 }
 
-} // namespace
+StringView LoweringTypeName(IrType type) noexcept {
+    static constexpr StringView Floats[] = {"float", "float2", "float3", "float4"};
+    static constexpr StringView Ints[] = {"int", "int2", "int3", "int4"};
+    static constexpr StringView UInts[] = {"uint", "uint2", "uint3", "uint4"};
+    static constexpr StringView Bools[] = {"bool", "bool2", "bool3", "bool4"};
+    static constexpr StringView Doubles[] = {"double", "double2", "double3", "double4"};
+    if (type.IsMatrix()) {
+        return type.rows == 3 ? StringView("float3x3") : StringView("float4x4");
+    }
+
+    if (type.IsTexture()) {
+        // UE DescribeType 이름이다.
+        switch (type.texture) {
+        case IrTextureKind::TextureCube:
+            return "textureCube";
+        case IrTextureKind::Texture2DArray:
+            return "texture2DArray";
+        case IrTextureKind::TextureCubeArray:
+            return "textureCubeArray";
+        case IrTextureKind::Texture3D:
+            return "volumeTexture";
+        case IrTextureKind::External:
+            return "TextureExternal";
+        default:
+            return "texture2D";
+        }
+    }
+
+    if (type.components < 1 || type.components > MaxIrComponents) {
+        return "unknown";
+    }
+
+    const usize index = type.components - 1;
+    switch (type.scalar) {
+    case IrScalar::Texture:
+        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+        break;
+    case IrScalar::Float:
+        return Floats[index];
+    case IrScalar::Int:
+        return Ints[index];
+    case IrScalar::UInt:
+        return UInts[index];
+    case IrScalar::Bool:
+        return Bools[index];
+    case IrScalar::Double:
+        return Doubles[index];
+    }
+
+    return "unknown";
+}
 
 LoweringContext::LoweringContext(Translator& translator, const nodegraph::GraphNode& node,
                                  const MaterialNodeDefinition& definition) noexcept
@@ -164,19 +162,9 @@ const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) cons
     return nullptr;
 }
 
-Result<bool> LoweringContext::IsOutputUsed(StringView key) noexcept {
-    auto name = PinName(key);
-    if (!name) {
-        return Result<bool>::Failure(name.Error());
-    }
-
-    for (const nodegraph::GraphEdge& edge : translator_.Graph().edges) {
-        if (edge.fromNode == node_.id && edge.fromPin == name.Value()) {
-            return Result<bool>::Success(true);
-        }
-    }
-
-    return Result<bool>::Success(false);
+Result<void> LoweringContext::DeferError(IrValueId value, MaterialDiagnosticCode code,
+                                         StringView message) noexcept {
+    return translator_.DeferError(value, code, node_.id, message);
 }
 
 Result<bool> LoweringContext::UseUserSceneTexture(StringView name, uint32& index) noexcept {
@@ -185,10 +173,15 @@ Result<bool> LoweringContext::UseUserSceneTexture(StringView name, uint32& index
         return admitted;
     }
 
-    if (auto reported =
-            Error(MaterialDiagnosticCode::BudgetExceeded, StringView(),
-                  "Too many unique UserSceneTexture inputs in the post process material "
-                  "-- max allowed is 5");
+    StringBuilder<> message(scratch_);
+    message << "Too many unique UserSceneTexture inputs in the post process material -- max "
+               "allowed is "
+            << MaxUserSceneTextures;
+    if (auto status = message.Status(); !status) {
+        return Result<bool>::Failure(status.Error());
+    }
+
+    if (auto reported = Error(MaterialDiagnosticCode::BudgetExceeded, StringView(), message.View());
         !reported) {
         return Result<bool>::Failure(reported.Error());
     }
@@ -262,6 +255,13 @@ Result<IrValueId> LoweringContext::ContextValue(StringView name,
     for (IrValueId argument : arguments) {
         if (argument == NoIrValue) {
             return Result<IrValueId>::Success(NoIrValue);
+        }
+    }
+
+    // 텍스처 값은 문맥 값 인자가 될 수 없다(V1 — Numeric 핀에 텍스처를 이은 경우, 6.10절 MS2c3).
+    for (IrValueId argument : arguments) {
+        if (auto refused = RejectTexture(argument, textureRefused_); !refused || textureRefused_) {
+            return refused;
         }
     }
 

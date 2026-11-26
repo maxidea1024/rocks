@@ -40,21 +40,36 @@ Result<IrValueId> Float2Of(LoweringContext& context, IrValueId value, StringView
     return context.CoerceTo(value, IrFloat(2), pin);
 }
 
-// 오류를 내고 계속한다(UE Errorf는 번역을 멈추지 않는다). 시스템 실패만 돌려준다.
-Result<void> Complain(LoweringContext& context, StringView message) noexcept {
+// 오류를 내고 계속한다(UE Errorf는 번역을 멈추지 않는다). bound가 있으면 그 값이 결과에 닿을 때만
+// 낸다(지연 진단 — UE는 쓰이는 출력만 컴파일한다). 시스템 실패만 돌려준다. message는 문자열 상수다.
+Result<void> Complain(LoweringContext& context, StringView message,
+                      IrValueId bound = NoIrValue) noexcept {
+    if (bound != NoIrValue) {
+        return context.DeferError(bound, MaterialDiagnosticCode::UnsupportedCapability, message);
+    }
+
     return context.Error(MaterialDiagnosticCode::UnsupportedCapability, StringView(), message);
 }
 
+// Single Layer Water 셰이딩 모델을 쓰는가다. 셰이딩 모델 집합은 MS2d BSDF 트리가 정하므로 그 전에는
+// 없는 것으로 본다(6.10절 MS2c4).
+bool UsesSingleLayerWater(const LoweringContext& context) noexcept {
+    (void)context;
+    return false;
+}
+
 // scene depth를 읽는 노드의 머티리얼 조건이다(UE HT:1796–1799·SceneDepth). 문제가 없으면 true다.
-Result<bool> CheckSceneDepth(LoweringContext& context, bool velocity) noexcept {
+Result<bool> CheckSceneDepth(LoweringContext& context, bool velocity,
+                             IrValueId bound = NoIrValue) noexcept {
     const MaterialTraitsDesc& traits = context.Traits();
     bool ok = true;
     if (velocity && IsSceneTranslucent(traits.blendMode) && traits.outputTranslucentVelocity) {
         ok = false;
-        if (auto reported =
-                Complain(context, "Translucenct material with 'Output Velocity' enabled "
-                                  "will write to depth buffer, therefore cannot read "
-                                  "from depth buffer at the same time.");
+        if (auto reported = Complain(context,
+                                     "Translucenct material with 'Output Velocity' enabled "
+                                     "will write to depth buffer, therefore cannot read "
+                                     "from depth buffer at the same time.",
+                                     bound);
             !reported) {
             return Result<bool>::Failure(reported.Error());
         }
@@ -63,7 +78,8 @@ Result<bool> CheckSceneDepth(LoweringContext& context, bool velocity) noexcept {
     if (traits.domain != MaterialDomain::PostProcess && !IsSceneTranslucent(traits.blendMode)) {
         ok = false;
         if (auto reported = Complain(
-                context, "Only transparent or postprocess materials can read from scene depth.");
+                context, "Only transparent or postprocess materials can read from scene depth.",
+                bound);
             !reported) {
             return Result<bool>::Failure(reported.Error());
         }
@@ -226,8 +242,7 @@ Result<void> LowerSceneDepthWithoutWater(LoweringContext& context) noexcept {
 
     const MaterialTraitsDesc& traits = context.Traits();
     if (traits.domain != MaterialDomain::PostProcess) {
-        constexpr bool UsesSingleLayerWater = false;
-        if (!UsesSingleLayerWater) {
+        if (!UsesSingleLayerWater(context)) {
             return Complain(context, "Can only read scene depth below water when material Shading "
                                      "Model is Single Layer Water or when material Domain is "
                                      "PostProcess.");
@@ -267,14 +282,15 @@ Result<void> LowerSceneDepthWithoutWater(LoweringContext& context) noexcept {
 
 // scene color를 읽는 노드의 FinalCompileValidation 조건이다(MaterialShared.cpp
 // RequiresSceneColorCopy).
-Result<void> CheckSceneColorCopy(LoweringContext& context) noexcept {
+Result<void> CheckSceneColorCopy(LoweringContext& context, IrValueId bound = NoIrValue) noexcept {
     const MaterialTraitsDesc& traits = context.Traits();
     if (traits.domain != MaterialDomain::Surface) {
-        return Complain(context, "Only 'surface' material domain can use the scene color node.");
+        return Complain(context, "Only 'surface' material domain can use the scene color node.",
+                        bound);
     }
 
     if (!IsSceneTranslucent(traits.blendMode)) {
-        return Complain(context, "Only translucent materials can use the scene color node.");
+        return Complain(context, "Only translucent materials can use the scene color node.", bound);
     }
 
     return Result<void>::Success();
@@ -327,13 +343,14 @@ bool IsPostProcessInput(uint32 id) noexcept {
 
 // UE UseSceneTextureId와 머티리얼 단위 scene texture 검사(HT:8262–8352, 1807–1823)다. lookup을 막는
 // 오류가 있으면 false다(그 밖은 진단만 하고 계속 — UE Errorf).
-Result<bool> CheckSceneTexture(LoweringContext& context, uint32 id) noexcept {
+Result<bool> CheckSceneTexture(LoweringContext& context, uint32 id, IrValueId bound) noexcept {
     const MaterialTraitsDesc& traits = context.Traits();
     if (id == static_cast<uint32>(SceneTextureId::DecalMask)) {
-        if (auto reported =
-                Complain(context, "Decal Mask bit was moved from GBuffer to the Stencil "
-                                  "Buffer for performance optimisation so therefore no "
-                                  "longer available.");
+        if (auto reported = Complain(context,
+                                     "Decal Mask bit was moved from GBuffer to the Stencil "
+                                     "Buffer for performance optimisation so therefore no "
+                                     "longer available.",
+                                     bound);
             !reported) {
             return Result<bool>::Failure(reported.Error());
         }
@@ -344,8 +361,9 @@ Result<bool> CheckSceneTexture(LoweringContext& context, uint32 id) noexcept {
     bool ok = true;
     const auto complain = [&](StringView message) noexcept {
         ok = false;
-        return Complain(context, message);
+        return Complain(context, message, bound);
     };
+
     if (traits.domain == MaterialDomain::DeferredDecal &&
         id != static_cast<uint32>(SceneTextureId::SceneDepth) &&
         id != static_cast<uint32>(SceneTextureId::WorldNormal) &&
@@ -402,14 +420,14 @@ Result<bool> CheckSceneTexture(LoweringContext& context, uint32 id) noexcept {
     if (sceneColor) {
         if (traits.domain != MaterialDomain::Surface || !IsSceneTranslucent(traits.blendMode)) {
             ok = false;
-            if (auto checked = CheckSceneColorCopy(context); !checked) {
+            if (auto checked = CheckSceneColorCopy(context, bound); !checked) {
                 return Result<bool>::Failure(checked.Error());
             }
         }
     }
 
     if (id == static_cast<uint32>(SceneTextureId::SceneDepth)) {
-        auto depth = CheckSceneDepth(context, false);
+        auto depth = CheckSceneDepth(context, false, bound);
         if (!depth) {
             return depth;
         }
@@ -443,17 +461,6 @@ Result<void> EmitSceneTexture(LoweringContext& context, uint32 id, bool filtered
 
     if (auto written = EmitScene(context, "InvSize", context.Swizzle(size.Value(), Zw)); !written) {
         return written;
-    }
-
-    // Color는 쓰일 때만 lookup한다(UE는 Color 출력을 컴파일할 때만 lookup·검사한다).
-    auto used = context.IsOutputUsed("Color");
-    if (!used || !used.Value()) {
-        return used ? Result<void>::Success() : Result<void>::Failure(used.Error());
-    }
-
-    auto checked = CheckSceneTexture(context, id);
-    if (!checked || !checked.Value()) {
-        return checked ? Result<void>::Success() : Result<void>::Failure(checked.Error());
     }
 
     auto connected = context.IsConnected("Coordinates");
@@ -539,6 +546,12 @@ Result<void> EmitSceneTexture(LoweringContext& context, uint32 id, bool filtered
         }
 
         color = scaled.Value();
+    }
+
+    // 검사는 Color 값에 묶는다(지연 진단 — 결과에 닿을 때만, UE는 Color 출력을 컴파일할 때만
+    // lookup·검사한다).
+    if (auto checked = CheckSceneTexture(context, id, color); !checked) {
+        return Result<void>::Failure(checked.Error());
     }
 
     return context.Output("Color", color);

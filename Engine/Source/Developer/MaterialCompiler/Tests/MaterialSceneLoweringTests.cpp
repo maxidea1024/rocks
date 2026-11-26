@@ -420,4 +420,20 @@ TEST(MaterialScene_BufferTextures) {
     CHECK(FindExtern(postOut, "PathTracingBufferDefaultUv") != nullptr);
 }
 
+// 지연 진단: 결과에 닿지 않는 SceneTexture Color 간선은 불투명 Surface에서도 오류가 없다(UE는
+// 쓰이는 출력만 컴파일한다).
+TEST(MaterialScene_UnreachedColorIsNotChecked) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid node = AddSceneTexture(fixture, SceneTextureId::BaseColor);
+    const Guid dangling = fixture.Add("Material.Multiply");
+    fixture.Connect(node, "Color", dangling, "A");
+    fixture.Connect(AddConstant(fixture, 0.5f), "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(Run(fixture, Traits(), out));
+    CHECK(out.succeeded);
+    CHECK(CountErrors(out) == 0);
+}
+
 } // namespace material_scene_lowering_tests_file

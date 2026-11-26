@@ -269,6 +269,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     const auto less = [](Guid left, Guid right) noexcept {
         return left.high < right.high || (left.high == right.high && left.low < right.low);
     };
+
     for (usize index = 1; index < out.parameters_.Size(); ++index) {
         for (usize at = index; at > 0 && less(out.parameters_[at].id, out.parameters_[at - 1].id);
              --at) {
@@ -329,6 +330,7 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         return left.id.high < right.id.high ||
                (left.id.high == right.id.high && left.id.low < right.id.low);
     };
+
     for (usize index = 1; index < out.textures_.Size(); ++index) {
         for (usize at = index; at > 0 && earlier(out.textures_[at], out.textures_[at - 1]); --at) {
             const IrTexture swap = out.textures_[at];
@@ -343,7 +345,8 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
 
         const Guid id{value.immediate[0], value.immediate[1]};
-        const IrTextureSource source = static_cast<IrTextureSource>(value.immediate[2] & 0xFF);
+        const IrTextureSource source =
+            static_cast<IrTextureSource>(value.immediate[2] & IrTextureSourceMask);
         for (usize index = 0; index < out.textures_.Size(); ++index) {
             if (out.textures_[index].source == source && out.textures_[index].id == id) {
                 value.immediate[3] = index;

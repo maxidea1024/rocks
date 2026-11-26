@@ -163,11 +163,17 @@ MATERIAL_DOUBLE_OPERATIONS(MaterialDouble4, float4, bool4)
 
 #undef MATERIAL_DOUBLE_OPERATIONS
 
+// 큰 좌표 uv의 주소 모드 값이다(MaterialIrTextureSample.h IrAddressMode*와 같다 — UE
+// LWCADDRESSMODE_*).
+#define MATERIAL_ADDRESS_MODE_CLAMP 0u
+#define MATERIAL_ADDRESS_MODE_WRAP 1u
+#define MATERIAL_ADDRESS_MODE_MIRROR 2u
+
 // 큰 좌표 uv 성분 하나를 주소 모드대로 낮춘다(UE MaterialTemplate.ush LWCApplyAddressMode — 6.10절
 // MS2c3). Wrap(1)은 tile의 소수부만 남기고(텍스처 장치가 마지막 wrap을 하므로 tile 경계 밖에서 미분이
 // 맞다), Clamp(0)·Mirror(2)는 그냥 낮춘다.
 float MaterialDoubleApplyAddressMode(MaterialDouble1 value, uint mode) {
-    if (mode == 1u) {
+    if (mode == MATERIAL_ADDRESS_MODE_WRAP) {
         return frac(value.tile * MaterialDoubleTileSize) + value.offset;
     }
 

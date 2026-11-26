@@ -28,6 +28,12 @@ namespace rocks::material::detail {
 
 class Translator;
 
+// 핀 타입이 정하는 IR 타입이다(수·Bool 타입만 — 텍스처·Numeric·Any는 false).
+bool LoweringPinIrType(MaterialPinType pin, IrType& out) noexcept;
+
+// 진단 문구용 타입 이름이다(HLSL 철자, 텍스처는 UE DescribeType 이름 — 영어).
+StringView LoweringTypeName(IrType type) noexcept;
+
 enum class EvaluationContext : uint8;
 
 // 연산 묶음별 수 종류 규칙이다(6.8절 "연산 묶음별 수 종류").
@@ -81,8 +87,10 @@ public:
     // 번역 입력의 컬렉션 layout이다. 없으면 nullptr이다.
     const MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
 
-    // 이 노드의 출력 key에 나가는 간선이 있는가(UE처럼 쓰이는 출력만 검사하는 노드 — 6.10절 MS2c4).
-    Result<bool> IsOutputUsed(StringView key) noexcept;
+    // value가 결과에 닿을 때만 이 노드 위치에 낼 오류다(지연 진단 — UE처럼 쓰이는 출력의 검사만
+    // 남긴다, 6.10절 MS2c4). message는 문자열 상수여야 한다(번역 끝까지 산다).
+    Result<void> DeferError(IrValueId value, MaterialDiagnosticCode code,
+                            StringView message) noexcept;
 
     // UserSceneTexture 이름을 번호로 바꾼다. 상한을 넘으면 UE 문구로 진단하고 false다(6.10절
     // MS2c4).

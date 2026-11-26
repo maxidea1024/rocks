@@ -474,7 +474,8 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     // 빈도는 피연산자 빈도의 최대다(6.2절). 상수는 Constant다. 미분은 Pixel이다. 문맥 값은 표가
     // 정한 빈도에서 시작한다(6.9절).
     IrFrequency frequency = value.op == IrOp::Extern || value.op == IrOp::Parameter ||
-                                    value.op == IrOp::CollectionValue || value.op == IrOp::Texture
+                                    value.op == IrOp::CollectionValue ||
+                                    value.op == IrOp::Texture || value.op == IrOp::Pending
                                 ? value.frequency
                                 : IrFrequency::Constant;
     for (uint8 index = 0; index < value.operandCount; ++index) {
@@ -487,8 +488,11 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
         frequency = IrFrequency::Pixel;
     }
 
-    // 하드웨어 미분 샘플(Implicit·Bias·gather)은 픽셀 문맥 값이다(6.10절 MS2c3).
-    if (value.op == IrOp::TextureSample &&
+    // 하드웨어 미분 샘플(Implicit·Bias)은 픽셀 문맥 값이다. gather는 첫 mip을 읽어 미분을 쓰지
+    // 않는다(6.10절 MS2c3).
+    const bool gathered =
+        value.op == IrOp::TextureSample && (value.immediate[3] & IrTextureGatherMask) != 0;
+    if (value.op == IrOp::TextureSample && !gathered &&
         (value.immediate[1] == static_cast<uint64>(IrTextureMipMode::Implicit) ||
          value.immediate[1] == static_cast<uint64>(IrTextureMipMode::Bias))) {
         frequency = IrFrequency::Pixel;
@@ -1219,28 +1223,11 @@ Result<IrValueId> IrBuilder::Texture(const IrTexture& texture, uint8 samplerType
     value.frequency = IrFrequency::Uniform;
     value.immediate[0] = texture.id.high;
     value.immediate[1] = texture.id.low;
-    value.immediate[2] = static_cast<uint64>(texture.source) | (uint64{samplerType} << 8);
+    value.immediate[2] =
+        static_cast<uint64>(texture.source) | (uint64{samplerType} << IrTextureSamplerTypeShift);
     value.immediate[3] = slot;
     return Intern(value);
 }
-
-namespace {
-
-// 텍스처 종류의 uv 폭이다(UE TextureSample의 ForceCast 대상).
-uint8 TextureUvComponents(IrTextureKind kind) noexcept {
-    switch (kind) {
-    case IrTextureKind::TextureCubeArray:
-        return 4;
-    case IrTextureKind::TextureCube:
-    case IrTextureKind::Texture2DArray:
-    case IrTextureKind::Texture3D:
-        return 3;
-    default:
-        return 2;
-    }
-}
-
-} // namespace
 
 Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
                                            IrValueId uv, IrValueId first,
@@ -1253,7 +1240,7 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
     }
 
     const IrTextureKind kind = values_[texture].type.texture;
-    const uint8 width = TextureUvComponents(kind);
+    const uint8 width = IrTextureUvComponents(kind);
     if (!(values_[uv].type == IrFloat(width))) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -1272,9 +1259,7 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
         value.operandCount = 3;
         value.operands[2] = first;
     } else if (desc.mipMode == IrTextureMipMode::Gradient) {
-        const uint8 gradient = kind == IrTextureKind::TextureCubeArray ? 3
-                               : kind == IrTextureKind::Texture2DArray ? 2
-                                                                       : width;
+        const uint8 gradient = IrTextureGradientComponents(kind);
         if (!IsNumeric(first) || !IsNumeric(second) ||
             !(values_[first].type == IrFloat(gradient)) ||
             !(values_[second].type == IrFloat(gradient))) {
@@ -1288,10 +1273,16 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // gather는 mip 피연산자가 없다(첫 mip — UE HT:7708–7711).
+    if (desc.gather != IrTextureGather::None && desc.mipMode != IrTextureMipMode::Implicit) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
     value.immediate[0] = desc.samplerType;
     value.immediate[1] = static_cast<uint64>(desc.mipMode);
     value.immediate[2] = static_cast<uint64>(desc.samplerSource);
-    value.immediate[3] = static_cast<uint64>(desc.gather) | (uint64{desc.decal ? 1u : 0u} << 4);
+    value.immediate[3] =
+        static_cast<uint64>(desc.gather) | (uint64{desc.decal ? 1u : 0u} << IrTextureDecalShift);
     return Intern(value);
 }
 

@@ -133,7 +133,7 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
       outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
       statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
       incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
-      collections_(allocator), samplers_(allocator) {
+      collections_(allocator), samplers_(allocator), deferred_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -234,6 +234,61 @@ Result<bool> Translator::ReferenceUserSceneTexture(StringView name, uint32& inde
     }
 
     return Result<bool>::Success(true);
+}
+
+Result<void> Translator::DeferError(IrValueId value, MaterialDiagnosticCode code, Guid node,
+                                    StringView message) noexcept {
+    if (value == NoIrValue) {
+        return Result<void>::Success();
+    }
+
+    return deferred_.TryPushBack(DeferredError{value, code, node, message});
+}
+
+Result<void> Translator::CheckDeferred() noexcept {
+    // 피연산자 번호는 늘 그 값보다 작으므로 큰 번호부터 내려가며 퍼뜨리면 한 번에 끝난다.
+    if (deferred_.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    const Span<const IrValue> values = builder_.Values();
+    SystemAllocator scratch;
+    Array<bool> reached(scratch);
+    if (auto sized = reached.TryResize(values.Size()); !sized) {
+        return sized;
+    }
+
+    for (bool& item : reached) {
+        item = false;
+    }
+
+    for (const IrResult& result : results_) {
+        reached[result.value] = true;
+    }
+
+    for (usize index = values.Size(); index > 0; --index) {
+        if (!reached[index - 1]) {
+            continue;
+        }
+
+        for (uint8 operand = 0; operand < values[index - 1].operandCount; ++operand) {
+            reached[values[index - 1].operands[operand]] = true;
+        }
+    }
+
+    for (const DeferredError& error : deferred_) {
+        if (error.value >= values.Size() || !reached[error.value]) {
+            continue;
+        }
+
+        if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error, error.code,
+                                   error.node, Name(), error.message);
+            !reported) {
+            return reported;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<bool> Translator::ReferenceCollection(Guid asset) noexcept {
@@ -1262,8 +1317,32 @@ Result<void> Translator::CheckInterpolantBudget() noexcept {
                   Guid{}, Name(), "Maximum number of custom vertex interpolators exceeded");
 }
 
+namespace {
+
+// 텍스처 핀 타입의 IR 텍스처 종류다(아니면 None).
+IrTextureKind PendingTextureKind(MaterialPinType pin) noexcept {
+    switch (pin) {
+    case MaterialPinType::Texture2D:
+        return IrTextureKind::Texture2D;
+    case MaterialPinType::TextureCube:
+        return IrTextureKind::TextureCube;
+    case MaterialPinType::Texture2DArray:
+        return IrTextureKind::Texture2DArray;
+    case MaterialPinType::TextureCubeArray:
+        return IrTextureKind::TextureCubeArray;
+    case MaterialPinType::Texture3D:
+        return IrTextureKind::Texture3D;
+    case MaterialPinType::TextureExternal:
+        return IrTextureKind::External;
+    default:
+        return IrTextureKind::None;
+    }
+}
+
+} // namespace
+
 Result<IrValueId> Translator::PendingOutput(const nodegraph::GraphNode& node, Name pin) noexcept {
-    // 타입은 정의 출력 핀의 수 타입이고, Numeric·Any·모르는 노드는 Float4다.
+    // 타입은 정의 출력 핀의 타입(수·Bool·텍스처)이고, Numeric·Any·모르는 노드는 Float4다.
     IrType type = IrFloat(MaxIrComponents);
     IrPendingKind kind = IrPendingKind::UnknownNode;
     uint8 prerequisite = 0;
@@ -1277,11 +1356,13 @@ Result<IrValueId> Translator::PendingOutput(const nodegraph::GraphNode& node, Na
                 continue;
             }
 
-            const uint32 value = static_cast<uint32>(definitionPin.type);
-            const uint32 first = static_cast<uint32>(MaterialPinType::Float1);
-            const uint32 last = static_cast<uint32>(MaterialPinType::Float4);
-            if (value >= first && value <= last) {
-                type = IrFloat(static_cast<uint8>(value - first + 1));
+            // 수·Bool 핀은 그 타입, 텍스처 핀은 그 텍스처 종류다(받는 쪽 검사가 덧붙지 않게).
+            IrType pinType;
+            if (LoweringPinIrType(definitionPin.type, pinType)) {
+                type = pinType;
+            } else if (const IrTextureKind texture = PendingTextureKind(definitionPin.type);
+                       texture != IrTextureKind::None) {
+                type = IrTextureType(texture);
             }
         }
     }
@@ -1499,6 +1580,10 @@ Result<void> Translator::Run() noexcept {
 
     if (auto pending = CheckPending(); !pending) {
         return pending;
+    }
+
+    if (auto deferred = CheckDeferred(); !deferred) {
+        return deferred;
     }
 
     if (failed_) {

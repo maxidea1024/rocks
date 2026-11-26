@@ -112,6 +112,41 @@ constexpr bool IsValidIrType(IrType type) noexcept {
 }
 
 // 같은 스칼라 종류의 성분 수만 바꾼 벡터 타입이다.
+// Double 값(LWC) tile 한 칸의 크기(cm)다(MaterialDouble.rsh MaterialDoubleTileSize — UE
+// UE_LWC_RENDER_TILE_SIZE, Core/Public/Misc/LargeWorldRenderPosition.h:14).
+inline constexpr double IrDoubleTileSize = 2097152.0;
+
+// 텍스처 종류의 uv 폭이다(UE TextureSample의 ForceCast 대상 — CubeArray 4, Cube·2DArray·3D 3,
+// 그 밖 2). None이면 0이다.
+constexpr uint8 IrTextureUvComponents(IrTextureKind kind) noexcept {
+    switch (kind) {
+    case IrTextureKind::None:
+        return 0;
+    case IrTextureKind::TextureCubeArray:
+        return 4;
+    case IrTextureKind::TextureCube:
+    case IrTextureKind::Texture2DArray:
+    case IrTextureKind::Texture3D:
+        return 3;
+    default:
+        return 2;
+    }
+}
+
+// 명시 미분(SampleGrad) 폭이다(HLSL 서명 — 2D·2DArray·External 2, Cube·CubeArray·3D 3).
+constexpr uint8 IrTextureGradientComponents(IrTextureKind kind) noexcept {
+    switch (kind) {
+    case IrTextureKind::None:
+        return 0;
+    case IrTextureKind::TextureCube:
+    case IrTextureKind::TextureCubeArray:
+    case IrTextureKind::Texture3D:
+        return 3;
+    default:
+        return 2;
+    }
+}
+
 constexpr IrType WithComponents(IrType type, uint8 components) noexcept {
     return IrType{type.scalar, components, 1};
 }

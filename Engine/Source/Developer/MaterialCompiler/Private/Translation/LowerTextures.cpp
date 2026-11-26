@@ -15,12 +15,6 @@ namespace rocks::material::detail {
 
 namespace {
 
-// 큰 좌표 uv의 주소 모드 값이다(UE LWCADDRESSMODE_* — 성분마다 2 bit).
-constexpr uint32 AddressModeClamp = 0;
-constexpr uint32 AddressModeWrap = 1;
-constexpr uint32 AddressModeMirror = 2;
-constexpr uint32 AddressModeBits = 2;
-
 // UE EMaterialSamplerType 표시 이름이다(EngineTypes.h:946–970 — V10 문구).
 constexpr StringView SamplerTypeNames[] = {"Color",
                                            "Grayscale",
@@ -101,11 +95,11 @@ Result<void> AppendAsset(StringBuilder<>& out, Guid asset) noexcept {
 // V10(UE VerifySamplerType)이다. 맞으면 true다.
 Result<bool> VerifySamplerType(LoweringContext& context, const MaterialTextureFacts& facts,
                                uint8 samplerType) noexcept {
-    const bool virtualTexturing =
-        context.Target(MaterialTargetField::VirtualTexturing).virtualTexturing;
     const SamplerType expected = ExpectedSamplerType(facts, false);
     uint8 used = samplerType;
-    if (IsVirtualSamplerType(used) && !virtualTexturing) {
+    // 가상 종류일 때만 번역 대상 항목을 읽는다(쿠킹 번역 키가 필요 이상으로 갈리지 않게).
+    if (IsVirtualSamplerType(used) &&
+        !context.Target(MaterialTargetField::VirtualTexturing).virtualTexturing) {
         // UE: 가상 텍스처를 끈 형식은 비가상 기대 종류와 비교한다.
         used = static_cast<uint8>(ExpectedSamplerType(facts, true));
     }
@@ -141,6 +135,12 @@ Result<bool> VerifySamplerType(LoweringContext& context, const MaterialTextureFa
     return Result<bool>::Success(false);
 }
 
+// enum 칸이 정의 범위 밖이다(InvalidProperty).
+Result<void> OutOfRange(LoweringContext& context) noexcept {
+    return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                         "Node property value is out of range");
+}
+
 Result<bool> ReadSampleSettings(LoweringContext& context, SampleSettings& out) noexcept {
     int64 samplerType = 0;
     int64 mipMode = 0;
@@ -164,6 +164,18 @@ Result<bool> ReadSampleSettings(LoweringContext& context, SampleSettings& out) n
         if (!read.Value()) {
             return Result<bool>::Success(false);
         }
+    }
+
+    // 저장 값이 enum 범위 밖이면 손상이다(진단 — 6.10절 MS2c3).
+    if (samplerType < 0 || samplerType >= static_cast<int64>(SamplerTypeCount) || mipMode < 0 ||
+        mipMode > static_cast<int64>(TextureMipValueMode::Derivative) || samplerSource < 0 ||
+        samplerSource > static_cast<int64>(SamplerSourceMode::ClampWorldGroupSettings) ||
+        gather < 0 || gather > static_cast<int64>(TextureGatherMode::Alpha)) {
+        if (auto reported = OutOfRange(context); !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        return Result<bool>::Success(false);
     }
 
     out.samplerType = static_cast<uint8>(samplerType);
@@ -222,7 +234,7 @@ Result<IrValueId> ParameterTexture(LoweringContext& context, Guid parameter, Gui
             existing.kind != facts->kind) {
             if (auto reported =
                     context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(),
-                                  "Texture parameter is used with another texture type");
+                                  "Parameter is used with another parameter type");
                 !reported) {
                 return Result<IrValueId>::Failure(reported.Error());
             }
@@ -253,11 +265,15 @@ const MaterialTextureFacts* FactsOf(LoweringContext& context, IrValueId texture,
 }
 
 // value를 Float width 폭으로 맞춘다(UE ForceCast — 스칼라 복제, 짧으면 0, 길면 앞). Double은
-// addressModes로 낮춘다(UE WSApplyAddressMode).
+// addressModes로 낮춘다(UE WSApplyAddressMode — 좌표만, 그 밖 Double은 그냥 낮춘다).
 Result<IrValueId> FitFloat(LoweringContext& context, IrValueId value, uint8 width,
-                           uint32 addressModes, StringView pin, StringView invalid) noexcept {
+                           uint32 addressModes, StringView pin, StringView invalid,
+                           bool coordinate) noexcept {
     const IrType type = context.TypeOf(value);
-    if (type.IsMatrix() || type.IsTexture() || type.scalar == IrScalar::Bool) {
+    // 좌표 밖(mip 값·미분)은 UE IsFloatNumericType처럼 Float·Double만 받는다.
+    const bool integer = type.scalar == IrScalar::Int || type.scalar == IrScalar::UInt;
+    if (type.IsMatrix() || type.IsTexture() || type.scalar == IrScalar::Bool ||
+        (!coordinate && integer)) {
         if (auto reported = context.Error(MaterialDiagnosticCode::TypeMismatch, pin, invalid);
             !reported) {
             return Result<IrValueId>::Failure(reported.Error());
@@ -267,7 +283,7 @@ Result<IrValueId> FitFloat(LoweringContext& context, IrValueId value, uint8 widt
     }
 
     IrValueId current = value;
-    if (type.scalar == IrScalar::Double) {
+    if (type.scalar == IrScalar::Double && coordinate) {
         auto demoted = context.Builder().AddressDemote(current, addressModes);
         if (!demoted) {
             return demoted;
@@ -304,28 +320,15 @@ Result<IrValueId> FitFloat(LoweringContext& context, IrValueId value, uint8 widt
     return context.Append(current, padding.Value());
 }
 
-uint8 UvWidth(IrTextureKind kind) noexcept {
-    switch (kind) {
-    case IrTextureKind::TextureCubeArray:
-        return 4;
-    case IrTextureKind::TextureCube:
-    case IrTextureKind::Texture2DArray:
-    case IrTextureKind::Texture3D:
-        return 3;
-    default:
-        return 2;
-    }
-}
-
 uint32 AddressModeOf(TextureAddress address) noexcept {
     switch (address) {
     case TextureAddress::Wrap:
-        return AddressModeWrap;
+        return IrAddressModeWrap;
     case TextureAddress::Mirror:
-        return AddressModeMirror;
+        return IrAddressModeMirror;
     default:
         // Border(Rocks 확장)는 Clamp처럼 낮춘다(범위 밖은 장치가 경계색으로 바꾼다).
-        return AddressModeClamp;
+        return IrAddressModeClamp;
     }
 }
 
@@ -333,14 +336,14 @@ uint32 AddressModeOf(TextureAddress address) noexcept {
 uint32 AddressModes(const MaterialTextureFacts* facts, SamplerSourceMode source) noexcept {
     uint32 modes = 0;
     for (usize axis = 0; axis < MaterialTextureAddressAxes; ++axis) {
-        uint32 mode = AddressModeWrap;
+        uint32 mode = IrAddressModeWrap;
         if (source == SamplerSourceMode::ClampWorldGroupSettings) {
-            mode = AddressModeClamp;
+            mode = IrAddressModeClamp;
         } else if (source == SamplerSourceMode::FromTextureAsset && facts != nullptr) {
             mode = AddressModeOf(facts->address[axis]);
         }
 
-        modes |= mode << (axis * AddressModeBits);
+        modes |= mode << (axis * IrAddressModeBits);
     }
 
     return modes;
@@ -512,19 +515,17 @@ Result<IrValueId> SampleAt(LoweringContext& context, IrValueId texture, IrValueI
         return Result<IrValueId>::Success(NoIrValue);
     }
 
-    const uint8 width = UvWidth(kind);
+    const uint8 width = IrTextureUvComponents(kind);
     const uint32 modes = AddressModes(facts, settings.samplerSource);
     if (mode == IrTextureMipMode::Gradient) {
-        const uint8 gradientWidth = kind == IrTextureKind::TextureCubeArray ? 3
-                                    : kind == IrTextureKind::Texture2DArray ? 2
-                                                                            : width;
+        const uint8 gradientWidth = IrTextureGradientComponents(kind);
         static constexpr StringView Invalid[] = {"Invalid DDX(UVs) parameter",
                                                  "Invalid DDY(UVs) parameter"};
         IrValueId* targets[] = {&first, &second};
         static constexpr StringView Keys[] = {"CoordinatesDX", "CoordinatesDY"};
         for (usize index = 0; index < 2; ++index) {
             auto fitted = FitFloat(context, *targets[index], gradientWidth, modes, Keys[index],
-                                   Invalid[index]);
+                                   Invalid[index], false);
             if (!fitted || fitted.Value() == NoIrValue) {
                 return fitted;
             }
@@ -532,7 +533,8 @@ Result<IrValueId> SampleAt(LoweringContext& context, IrValueId texture, IrValueI
             *targets[index] = fitted.Value();
         }
     } else {
-        auto fitted = FitFloat(context, first, 1, modes, "MipValue", "Invalid mip map parameter");
+        auto fitted =
+            FitFloat(context, first, 1, modes, "MipValue", "Invalid mip map parameter", false);
         if (!fitted || fitted.Value() == NoIrValue) {
             return fitted;
         }
@@ -573,8 +575,9 @@ Result<IrValueId> SampleAt(LoweringContext& context, IrValueId texture, IrValueI
     // 정점 문맥은 하드웨어 미분이 없으므로 Implicit을 Level(mip 값 = constMipValue 상수)로 바꾼다
     // (HT:7090–7099). 편차: UE는 Derivative도 Level로 바꾸고 ddx 값을 mip으로 쓰지만, 명시 미분
     // 샘플은 모든 단계에서 되므로 Rocks는 Gradient를 그대로 둔다(6.10절).
+    // gather는 mip 없이 첫 mip을 읽으므로 그대로 둔다(UE HT:7708–7711).
     if (!pixel) {
-        if (mode == IrTextureMipMode::Implicit) {
+        if (mode == IrTextureMipMode::Implicit && gather == IrTextureGather::None) {
             mode = IrTextureMipMode::Level;
         }
 
@@ -584,14 +587,15 @@ Result<IrValueId> SampleAt(LoweringContext& context, IrValueId texture, IrValueI
     const MaterialTraitsDesc& traits = context.Traits();
     const bool surfaceOrDecal =
         traits.domain == MaterialDomain::Surface || traits.domain == MaterialDomain::DeferredDecal;
-    if (!surfaceOrDecal || context.Target(MaterialTargetField::IsMobile).isMobile ||
-        kind != IrTextureKind::Texture2D) {
+    // 모바일 항목은 마지막에 읽는다(이미 꺼졌으면 번역 키에 기록하지 않는다).
+    if (viewMipBias && (!surfaceOrDecal || kind != IrTextureKind::Texture2D ||
+                        context.Target(MaterialTargetField::IsMobile).isMobile)) {
         viewMipBias = false;
     }
 
     // 좌표를 종류의 폭으로 맞춘다.
-    auto fittedUv =
-        FitFloat(context, uv, width, modes, "Coordinates", "Texture coordinates must be numeric");
+    auto fittedUv = FitFloat(context, uv, width, modes, "Coordinates",
+                             "Texture coordinates must be numeric", true);
     if (!fittedUv || fittedUv.Value() == NoIrValue) {
         return fittedUv;
     }
@@ -699,26 +703,6 @@ Result<IrValueId> Sample(LoweringContext& context, IrValueId texture,
     return SampleAt(context, texture, uv.Value(), settings, samplerType, useViewMipBias);
 }
 
-// UE DescribeType의 텍스처 이름이다(TextureProperty 문구).
-StringView DescribeTextureType(IrType type) noexcept {
-    switch (type.texture) {
-    case IrTextureKind::TextureCube:
-        return "textureCube";
-    case IrTextureKind::TextureCubeArray:
-        return "textureCubeArray";
-    case IrTextureKind::External:
-        return "textureExternal";
-    case IrTextureKind::Texture2DArray:
-        return "texture2DArray";
-    case IrTextureKind::Texture3D:
-        return "volumeTexture";
-    case IrTextureKind::Texture2D:
-        return "texture2D";
-    default:
-        return "unknown";
-    }
-}
-
 // 샘플 종류가 선행 없는 종류(External·가상)면 그 자리 값이다. 아니면 NoIrValue다.
 Result<IrValueId> UnsupportedSamplerType(LoweringContext& context, uint8 samplerType) noexcept {
     if (samplerType == static_cast<uint8>(SamplerType::External)) {
@@ -778,7 +762,7 @@ Result<void> LowerTextureSample(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(value.immediate[2] >> 8);
+        samplerType = static_cast<uint8>(value.immediate[2] >> IrTextureSamplerTypeShift);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
@@ -862,8 +846,6 @@ Result<void> LowerParameterSample(LoweringContext& context,
         return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
     }
 
-    // 파라미터 샘플은 UE처럼 gather·AutomaticViewMipBias 입력을 쓰지 않는다(속성만).
-    settings.gather = TextureGatherMode::None;
     SystemAllocator scratch;
     StringBuilder<> message(scratch);
     const MaterialTextureFacts* facts =
@@ -925,6 +907,18 @@ Result<void> LowerParameterSample(LoweringContext& context,
         return idRead ? Result<void>::Success() : Result<void>::Failure(idRead.Error());
     }
 
+    // 이름이 있는 파라미터 샘플은 UE처럼 gather·AutomaticViewMipBiasValue 입력을 쓰지
+    // 않는다(속성만). 이름이 없으면 UE처럼 TextureSample 경로라 둘 다 쓴다(ME:4022–4025).
+    bool viewMipBias = settings.viewMipBias;
+    if (name.IsEmpty()) {
+        if (auto overridden = StaticBoolOverride(context, "AutomaticViewMipBiasValue", viewMipBias);
+            !overridden) {
+            return Result<void>::Failure(overridden.Error());
+        }
+    } else {
+        settings.gather = TextureGatherMode::None;
+    }
+
     auto texture = name.IsEmpty() ? AssetTexture(context, settings.texture, settings.samplerType)
                                   : ParameterTexture(context, parameter, settings.texture,
                                                      settings.samplerType);
@@ -932,8 +926,7 @@ Result<void> LowerParameterSample(LoweringContext& context,
         return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
     }
 
-    auto sample =
-        Sample(context, texture.Value(), settings, settings.samplerType, settings.viewMipBias);
+    auto sample = Sample(context, texture.Value(), settings, settings.samplerType, viewMipBias);
     if (!sample) {
         return Result<void>::Failure(sample.Error());
     }
@@ -977,6 +970,10 @@ Result<void> LowerTextureObjectNode(LoweringContext& context, bool parameter) no
 
     if (!assetRead.Value() || !typeRead.Value()) {
         return Result<void>::Success();
+    }
+
+    if (samplerType < 0 || samplerType >= static_cast<int64>(SamplerTypeCount)) {
+        return OutOfRange(context);
     }
 
     if (asset == Guid{}) {
@@ -1046,7 +1043,7 @@ Result<void> LowerTextureProperty(LoweringContext& context) noexcept {
         StringBuilder<> message(scratch);
         message << "Texture size only available for Texture2D, TextureVirtual, Texture2DArray, "
                    "VolumeTexture and SparseVolumeTexture, not "
-                << DescribeTextureType(context.TypeOf(input.Value()));
+                << LoweringTypeName(context.TypeOf(input.Value()));
         if (auto status = message.Status(); !status) {
             return status;
         }
@@ -1112,10 +1109,10 @@ Result<void> LowerRecordTextureStreamingInfo(LoweringContext& context) noexcept 
                              "Missing input TextureObject");
     }
 
-    bool pending = false;
-    auto texture = TextureInput(context, "TextureObject input requires a texture value", pending);
-    if (!texture || texture.Value() == NoIrValue) {
-        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
+    // UE 순서: 텍스처 번역 → Coordinates 없음 → 텍스처 값 검사(ME:23097–23125).
+    auto raw = context.Input("TextureObject");
+    if (!raw || raw.Value() == NoIrValue) {
+        return raw ? Result<void>::Success() : Result<void>::Failure(raw.Error());
     }
 
     auto hasCoordinates = context.IsConnected("Coordinates");
@@ -1131,6 +1128,12 @@ Result<void> LowerRecordTextureStreamingInfo(LoweringContext& context) noexcept 
     auto coordinates = context.Input("Coordinates");
     if (!coordinates || coordinates.Value() == NoIrValue) {
         return coordinates ? Result<void>::Success() : Result<void>::Failure(coordinates.Error());
+    }
+
+    bool pending = false;
+    auto texture = TextureInput(context, "TextureObject input requires a texture value", pending);
+    if (!texture || texture.Value() == NoIrValue) {
+        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
     }
 
     return context.Output("Tex", texture.Value());
@@ -1221,7 +1224,8 @@ Result<void> LowerParticleSubUv(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(context.Builder().Value(texture).immediate[2] >> 8);
+        samplerType = static_cast<uint8>(context.Builder().Value(texture).immediate[2] >>
+                                         IrTextureSamplerTypeShift);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
@@ -1384,12 +1388,24 @@ Result<void> LowerAntialiasedTextureMask(LoweringContext& context) noexcept {
             "UMaterialExpressionAntialiasedTextureMask> Virtual textures are not supported");
     }
 
-    const MaterialTextureFacts* facts = nullptr;
-    auto valid = CheckParameter2DTexture(context, settings, facts);
-    if (!valid || !valid.Value()) {
-        return valid ? Result<void>::Success() : Result<void>::Failure(valid.Error());
+    // AA 마스크 전용 TextureIsValid(UE ME:19614–19628 — 가상·외부 금지, Texture2D만).
+    if (known == nullptr) {
+        auto made = AssetTexture(context, settings.texture, settings.samplerType);
+        return made ? Result<void>::Success() : Result<void>::Failure(made.Error());
     }
 
+    if (known->kind != IrTextureKind::Texture2D) {
+        SystemAllocator scratch;
+        StringBuilder<> message(scratch);
+        message << "Found " << ClassName(known->kind) << ", requires Texture2D";
+        if (auto status = message.Status(); !status) {
+            return status;
+        }
+
+        return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), message.View());
+    }
+
+    const MaterialTextureFacts* facts = known;
     auto texture = NamedTexture(context, settings);
     if (!texture || texture.Value() == NoIrValue) {
         return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());

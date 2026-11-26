@@ -39,6 +39,18 @@ enum class IrTextureGather : uint8 {
     Alpha = 4
 };
 
+// TextureSample 값 즉시값 [3]의 묶음이다(하위 4 bit gather 채널, bit 4 decal).
+inline constexpr uint64 IrTextureGatherMask = 0xF;
+inline constexpr uint32 IrTextureDecalShift = 4;
+
+// AddressDemote 즉시값의 성분당 주소 모드다(UE LWCADDRESSMODE_* — MaterialDouble.rsh
+// MATERIAL_ADDRESS_MODE_*와 같은 값).
+inline constexpr uint32 IrAddressModeClamp = 0;
+inline constexpr uint32 IrAddressModeWrap = 1;
+inline constexpr uint32 IrAddressModeMirror = 2;
+inline constexpr uint32 IrAddressModeBits = 2;
+inline constexpr uint64 IrAddressModeMask = 3;
+
 struct IrTextureSampleDesc {
     // 샘플 종류 처리다(MaterialSchema SamplerType 값 — 생성 원문 MaterialProcess*Lookup).
     uint8 samplerType = 0;

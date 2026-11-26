@@ -7,6 +7,7 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
+#include <MaterialCompiler/MaterialIrCollection.h>
 #include <MaterialSchema/MaterialContextFeature.h>
 #include <MaterialSchema/MaterialContextValue.h>
 
@@ -36,13 +37,6 @@ enum class IrEntry : uint8 {
 
 // 진입점 수다(마지막 값 + 1).
 inline constexpr uint32 IrEntryCount = 8;
-
-// 모듈이 참조하는 파라미터 컬렉션 하나다(6.10절 MS2c2).
-struct IrCollection {
-    Guid asset;
-    // 컬렉션 layout의 float4 수다(9.7절).
-    uint32 vectors = 0;
-};
 
 // 진입점 결과 칸 하나다. slot은 출력 핀 키(정적 원문 — 예: "WorldPositionOffset")다. 한 모듈 안에서
 // (entry, slot)은 유일하다.

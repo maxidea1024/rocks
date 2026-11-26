@@ -22,6 +22,10 @@ enum class IrTextureSource : uint8 {
     Parameter = 1
 };
 
+// Texture 값 즉시값 [2]의 묶음이다(하위 8 bit 출처, 그 위 샘플 종류).
+inline constexpr uint64 IrTextureSourceMask = 0xFF;
+inline constexpr uint32 IrTextureSamplerTypeShift = 8;
+
 struct IrTexture {
     IrTextureSource source = IrTextureSource::Asset;
     Guid id;
