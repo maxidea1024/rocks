@@ -1934,6 +1934,18 @@ try
     ReportCook("asset-cook usage", usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-cook", StringComparison.Ordinal), usage);
     ProcessResult help = await RunCook("asset-cook", "--help");
     ReportCook("asset-cook help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-cook", StringComparison.Ordinal), help);
+
+    // 제품 쿠킹 처리기 연결(MeshAnimationAssets 13.1절 2): 빈 StaticMesh·SkeletalMesh·AnimationClip은 각 처리기가 거부한다
+    // (메시 둘은 쓸 LOD가 없어 InvalidSource, 클립은 스켈레톤이 없어 MissingDependency). 기본 처리기였다면 모두 성공한다.
+    ProcessResult rock = await RunCook("asset-new", "StaticMesh", "/Game/Rock", projectOption);
+    ProcessResult body = await RunCook("asset-new", "SkeletalMesh", "/Game/Body", projectOption);
+    ProcessResult walk = await RunCook("asset-new", "AnimationClip", "/Game/Walk", projectOption);
+    ReportCook("asset-new mesh and clip types", rock.ExitCode == 0 && body.ExitCode == 0 && walk.ExitCode == 0, walk);
+    ProcessResult wired = await RunCook("asset-cook", "--profile=Windows", projectOption);
+    ReportCook("asset-cook mesh and clip processors", wired.ExitCode == 1 &&
+        wired.StdErr.Contains("InvalidSource: /Game/Rock: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("InvalidSource: /Game/Body: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("MissingDependency: /Game/Walk: error", StringComparison.Ordinal), wired);
 }
 finally
 {

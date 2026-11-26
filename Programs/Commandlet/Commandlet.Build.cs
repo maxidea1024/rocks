@@ -30,6 +30,8 @@ public sealed class CommandletHost : ModuleRules
         // ShaderCompiler (Developer): the shader-compile command (Docs/Design/ShaderSystem section 11.1 SC13).
         // TextureTools (Developer): the texture importers, the settings normalization hook and the asset-import argument translator
         // (Docs/Design/AssetSystem section 12.12).
+        // MeshTools and AnimationTools (Developer): the static mesh, skeletal mesh and animation clip cook processors and the animation
+        // Build dependency hook (Docs/Design/MeshAnimationAssets section 13.1 item 1).
         // Collision: owns the Engine.json Collision section (Docs/Design/CollisionData.ko.md section 3); a program that reads the engine config
         // must register every section's settings struct (an unknown section is a config error), as Sandbox does.
         // Cooker module set (Docs/Design/BuildTargets section 3.10, BS10 item 1 and 4): the engine Runtime and ClientOnly modules that the engine
@@ -39,7 +41,7 @@ public sealed class CommandletHost : ModuleRules
         // Audio, AudioMiniaudio and EngineAudio come from the Sandbox audio modes (Docs/Design/AudioSystem sections 3.34.5 and 3.35.11); without an
         // AudioOutputBackendRegistry host service the AudioMiniaudio module lifetime object stays idle in the cooker.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
-            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision",
+            "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "MeshTools", "AnimationTools", "Collision",
             "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
             "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "EngineAudio"]
     };

@@ -153,7 +153,7 @@ private:
 
 // 에셋 명령이 시작하는 에셋 타입 모듈들이다(차례로 시작 — 각 의존 폐포의 타입이 등록된다,
 // Docs/Design/AssetSystem 12.8절). 시험은 AssetCommandContext::typeModule로 모듈 하나를 준다.
-inline constexpr StringView AssetTypeModules[] = {"Animation", "Texture"};
+inline constexpr StringView AssetTypeModules[] = {"Animation", "Mesh", "Texture"};
 
 // 대입 진단 줄의 진단 이름이다(AS 13절 `<command>: <진단>: <경로>: <설명>`). 숨김 열거자 입력
 // (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다
