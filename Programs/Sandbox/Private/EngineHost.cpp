@@ -17,6 +17,7 @@
 #include <AssetRuntime/CookedManifest.h>
 #include <Engine/Engine.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
+#include <EngineAudio/AudioEngineSubsystem.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstance.h>
 #include <Gameplay/GameInstanceClient.h>
@@ -33,6 +34,7 @@
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
 #include <LogHost/LogHost.h>
+#include <ModuleLoader/HostServices.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
@@ -192,6 +194,11 @@ public:
 
         if (options_.window != nullptr) {
             options_.window->PumpEvents(queue_);
+            // 창 포커스가 비활성 창 볼륨(audio.unfocused.volume)을 정한다(3.35.9절).
+            if (auto* audio = engine.GetSubsystem<AudioEngineSubsystem>()) {
+                audio->SetApplicationForeground(options_.window->HasFocus());
+            }
+
             const bool rendering = screen_ != nullptr && screen_->IsRunning();
             // 잃은 surface는 렌더 lane이 스왑체인을 놓은 뒤(handshake) 놓았다고 알린다(Android 창
             // 파괴 gate — Docs/Design/AndroidPlatform.ko.md 4절).
@@ -472,6 +479,31 @@ private:
     UniquePtr<render::CookedManifestShaderLibraries> source_;
 };
 
+// 출력 backend 등록부를 엔진 수명 동안 호스트 서비스에 올린다(Docs/Design/AudioSystem 3.35.11절).
+// AudioMiniaudio 모듈 Startup이 엔진 묶음 시작(엔진 Initialize) 때 여기에 factory를 넣는다.
+// RunEngine의 중간 반환에서도 떼도록 소멸자가 Unregister한다(엔진보다 먼저 선언해 엔진 뒤에
+// 소멸한다).
+class AudioBackendRegistration {
+public:
+    explicit AudioBackendRegistration(HostServices& services) noexcept : services_(services) {
+        registered_ = services_.Register(registry_).IsOk();
+    }
+
+    ~AudioBackendRegistration() noexcept {
+        if (registered_) {
+            (void)services_.Unregister(registry_);
+        }
+    }
+
+    AudioBackendRegistration(const AudioBackendRegistration&) = delete;
+    AudioBackendRegistration& operator=(const AudioBackendRegistration&) = delete;
+
+private:
+    HostServices& services_;
+    audio::AudioOutputBackendRegistry registry_;
+    bool registered_ = false;
+};
+
 // 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
 // (Docs/Design/EngineRuntime 21.5절). 헤드리스는 고정 delta로 options.frames만큼, 창 모드는 실제
 // 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
@@ -485,7 +517,11 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     // 개발 트리는 쿠킹 없이 공급자로 돈다).
     EngineAssetsSubsystem::SetEngineOnlyDirectory(engineDirectory);
     const bool engineCook = HasEngineCook(allocator, engineDirectory, settings);
-    const EngineSubsystemType engineAssets[] = {EngineAssetsSubsystemType()};
+    // 오디오는 늘 넣고(장치가 없으면 Null — 3.35.9절), EngineAssets는 엔진 쿠킹이 있을 때만 넣는다.
+    const EngineSubsystemType withAssets[] = {EngineAssetsSubsystemType(),
+                                              AudioEngineSubsystemType()};
+    const EngineSubsystemType audioOnly[] = {AudioEngineSubsystemType()};
+    AudioBackendRegistration audioBackends(modules.Services());
     CookedShaderAttachment cooked(shaders::Host());
     UniquePtr<platform::Window> window;
     UniquePtr<platform::GamepadBackend> gamepads;
@@ -530,9 +566,8 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = options.window ? 0.0 : HeadlessFrameSeconds;
     config.registerTypes = &RegisterSandboxTypes;
-    if (engineCook) {
-        config.subsystems = Span<const EngineSubsystemType>(engineAssets);
-    }
+    config.subsystems = engineCook ? Span<const EngineSubsystemType>(withAssets)
+                                   : Span<const EngineSubsystemType>(audioOnly);
 
     Engine engine(allocator);
     if (!engine.Initialize(config)) {

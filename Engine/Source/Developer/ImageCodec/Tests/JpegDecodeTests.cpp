@@ -1,3 +1,5 @@
+#include "ImageFuzz.h"
+
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
 #include <Platform/Memory.h>
@@ -572,6 +574,39 @@ TEST(JpegDecode_AllocationAndThreads) {
     CHECK(solo[0].ok && solo[1].ok && jobs[0].ok && jobs[1].ok);
     CHECK(sharedFirst.Attempts() == soloFirst.Attempts() &&
           sharedSecond.Attempts() == soloSecond.Attempts());
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): JPEG(기준 RGB 8×8,
+// 점진, 재시작 간격, 회색) 씨앗. 변조한 파일은 결과가 서로 맞는 성공이거나 다섯 분류의 실패이고,
+// 할당 블록을 다 돌려준다.
+TEST(JpegDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    const RgbPicture picture;
+    JpegSpec spec;
+    spec.pixels = picture.samples;
+    const Array<uint8> baseline = EncodeJpeg(allocator, spec);
+    JpegSpec progressive = spec;
+    progressive.progressive = true;
+    const Array<uint8> steps = EncodeJpeg(allocator, progressive);
+    JpegSpec restart = spec;
+    restart.restartInterval = 1;
+    const Array<uint8> markers = EncodeJpeg(allocator, restart);
+    JpegSpec gray = spec;
+    gray.components = 1;
+    gray.input = JCS_GRAYSCALE;
+    gray.pixels = Span<const uint8>(picture.samples, 64);
+    const Array<uint8> mono = EncodeJpeg(allocator, gray);
+    const Span<const uint8> seeds[] = {baseline.View(), steps.View(), markers.View(), mono.View()};
+    for (const Span<const uint8>& seed : seeds) {
+        REQUIRE(!seed.IsEmpty());
+    }
+
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Jpeg, 0x5EED0EE6ull, 3000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace jpeg_decode_tests_file

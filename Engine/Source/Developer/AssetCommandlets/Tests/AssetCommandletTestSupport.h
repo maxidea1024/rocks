@@ -18,6 +18,11 @@ struct Captured {
 
     static Result<void> Write(void* context, CommandletStream stream, StringView text) noexcept {
         Captured& captured = *static_cast<Captured*>(context);
+        ++captured.writes;
+        if (captured.writes == captured.failAtWrite) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
         if (stream == captured.failStream && captured.failWrites) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
@@ -34,6 +39,10 @@ struct Captured {
     // 참이면 failStream 쓰기가 Busy로 실패한다(출력 실패 시험).
     bool failWrites = false;
     CommandletStream failStream = CommandletStream::Output;
+    // 두 스트림을 합친 쓰기 수다(출력 실패 전수 — 시험이 0으로 되돌린다).
+    uint64 writes = 0;
+    // 0이 아니면 writes가 이 값이 되는 쓰기가 Busy로 실패한다(그 한 번만).
+    uint64 failAtWrite = 0;
 };
 
 // 시험 임포터 등록 상태다(failWith가 None이 아니면 등록이 그 오류로 실패한다).
