@@ -1,7 +1,11 @@
 """템플릿(게임 프로젝트) 스플래시: 해 질 녘 사암 바위산(뷰트·첨탑) key art. make_splash.py가 import한다."""
 import numpy as np
 
-from make_splash import (BAND_TOP, LOGICAL_H, LOGICAL_W, load_logo, smoothstep, to_image)
+from make_splash import (LOGICAL_H, LOGICAL_W, TEXT_BAND_HEIGHT, load_logo, smoothstep, to_image)
+
+# 그림 좌표계의 높이다. 산·해·띠는 이 높이로 그리고, 마지막에 위쪽 하늘을 잘라 LOGICAL_H로 맞춘다(구도 유지).
+ART_H = 432
+ART_BAND_TOP = ART_H - TEXT_BAND_HEIGHT
 
 
 def midpoint_profile(n_samples, rng, roughness, octaves=10):
@@ -55,7 +59,7 @@ def piecewise_gradient(y, stops):
 
 
 def make_template(repo, out, scale):
-    w, h = LOGICAL_W * scale, LOGICAL_H * scale
+    w, h = LOGICAL_W * scale, ART_H * scale
     yy, xx = np.mgrid[0:h, 0:w] / scale  # 논리 좌표
     xs = np.arange(w) / scale
     rng = np.random.default_rng(20261126)
@@ -135,7 +139,7 @@ def make_template(repo, out, scale):
 
 
     # 아래 띠: 엔진 글자 자리라 거의 검은색으로
-    band = smoothstep(BAND_TOP - 36, BAND_TOP + 6, yy)
+    band = smoothstep(ART_BAND_TOP - 36, ART_BAND_TOP + 6, yy)
     band_color = np.array([13, 11, 15], dtype=np.float64)
     image = image * (1 - band[:, :, None] * 0.94) + band_color * band[:, :, None] * 0.94
     # 비네트와 미세 grain(그라데이션 밴딩 방지)
@@ -144,8 +148,10 @@ def make_template(repo, out, scale):
     image = image + rng.normal(0, 1.0, image.shape)
 
     result = to_image(image)
+    # 위쪽 하늘을 잘라 논리 높이로 맞춘다(글자 띠는 아래에 그대로 남는다).
+    result = result.crop((0, (ART_H - LOGICAL_H) * scale, w, ART_H * scale))
     # "Powered by" 표시: 띠 오른쪽 아래에 심볼만(가로형 로고 최소 폭 240 px보다 작은 자리 — 지침 6절)
     symbol = load_logo(repo / "Assets/Branding/PNG/rocks-symbol-white.png", 24 * scale)
     symbol.putalpha(symbol.getchannel("A").point(lambda a: int(a * 0.85)))
-    result.paste(symbol, (w - symbol.width - 32 * scale, 352 * scale), symbol)  # 제목 줄 오른쪽(저작권 자리와 겹치지 않게)
+    result.paste(symbol, (w - symbol.width - 32 * scale, (LOGICAL_H - TEXT_BAND_HEIGHT + 16) * scale), symbol)  # 제목 줄 오른쪽(저작권 자리와 겹치지 않게)
     result.save(out / f"Splash{'' if scale == 1 else '@2x'}.png", optimize=True)
