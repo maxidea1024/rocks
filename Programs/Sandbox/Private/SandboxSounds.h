@@ -2,7 +2,7 @@
 
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 // Sandbox 오디오 확인용 소리다(Docs/Design/AudioSystem 3.35.11절 — AU3a3). 에셋 없이 메모리 PCM으로
 // 만든다(쿠킹·임포트는 AU4·AU5).

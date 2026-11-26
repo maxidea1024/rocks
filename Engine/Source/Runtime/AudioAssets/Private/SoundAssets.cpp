@@ -1,6 +1,6 @@
-#include <EngineAudio/AttenuationSettings.generated.h>
-#include <EngineAudio/SoundClip.generated.h>
-#include <EngineAudio/SoundSource.generated.h>
+#include <AudioAssets/AttenuationSettings.generated.h>
+#include <AudioAssets/SoundClip.generated.h>
+#include <AudioAssets/SoundSource.generated.h>
 #include <Object/ObjectRegistry.h>
 
 // 사운드 에셋 클래스의 스냅숏 만들기다(Docs/Design/AudioSystem 3.35.3절).

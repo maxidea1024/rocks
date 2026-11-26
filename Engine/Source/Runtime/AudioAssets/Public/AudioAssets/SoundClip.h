@@ -1,7 +1,7 @@
 #pragma once
 
-#include <EngineAudio/SoundPcm.h>
-#include <EngineAudio/SoundSource.h>
+#include <AudioAssets/SoundPcm.h>
+#include <AudioAssets/SoundSource.h>
 
 // PCM 사운드 에셋이다(Docs/Design/AudioSystem 3.9·3.35.3절, UE USoundWave 대응). AU3의 PCM은 실행
 // 중 메모리 생성뿐이다(SetPcm — 시험·Sandbox). 에디터 원본 bulk·플랫폼 데이터는 AU4·AU5가 더하고
@@ -17,7 +17,7 @@
 namespace rocks {
 
 ROCKS_CLASS()
-class ROCKS_ENGINEAUDIO_API SoundClip final : public SoundSource {
+class ROCKS_AUDIOASSETS_API SoundClip final : public SoundSource {
     ROCKS_GENERATED_BODY()
 
 public:

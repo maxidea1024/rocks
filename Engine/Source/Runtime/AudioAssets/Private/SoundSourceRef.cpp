@@ -1,11 +1,13 @@
-#include "ValueRange.h"
-
 #include <Core/Math/MathUtility.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 namespace rocks {
 
 namespace {
+
+bool IsFiniteWithin(float value, float low, float high) noexcept {
+    return math::IsFinite(value) && value >= low && value <= high;
+}
 
 bool NonNegative(float value) noexcept {
     return math::IsFinite(value) && value >= 0.0f;
@@ -32,8 +34,8 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
     using Created = Result<SoundSourceRef>;
     const SoundPcm* pcm = playable.pcm.Get();
     if (pcm == nullptr || !pcm->IsFinite() ||
-        !engine_audio_detail::IsFiniteInRange(playable.volume, 0.0f, audio::MaxVoiceGain) ||
-        !engine_audio_detail::IsFiniteInRange(playable.pitch, audio::MinPitch, audio::MaxPitch)) {
+        !IsFiniteWithin(playable.volume, 0.0f, audio::MaxVoiceGain) ||
+        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch)) {
         return Created::Failure(ErrorCode::InvalidArgument);
     }
 

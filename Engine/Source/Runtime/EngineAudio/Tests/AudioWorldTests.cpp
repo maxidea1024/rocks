@@ -1,8 +1,8 @@
 #include "AudioEngineTestSupport.h"
 
 #include <Core/Module/ModuleEntry.h>
-#include <EngineAudio/EngineAudioTypes.h>
-#include <EngineAudio/SoundClip.generated.h>
+#include <AudioAssets/AudioAssetsTypes.h>
+#include <AudioAssets/SoundClip.generated.h>
 #include <Object/ObjectRegistry.h>
 
 #include <Core/Math/MathUtility.h>
@@ -574,7 +574,7 @@ TEST(EngineAudioWorld_PlaybackOutlivesCollectedSoundAsset) {
         // 에셋 객체 Registry에 SoundClip을 만들어 스냅숏을 떠서 재생한 뒤, Registry째 수거한다.
         TypeRegistry types(fixture.allocator);
         ModuleRegistration registration(types, fixture.allocator);
-        REQUIRE(RegisterEngineAudioTypes(registration));
+        REQUIRE(RegisterAudioAssetsTypes(registration));
         {
             ObjectRegistry objects(fixture.allocator, types, {0x45415544474331ull, 1});
             auto clip = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());
