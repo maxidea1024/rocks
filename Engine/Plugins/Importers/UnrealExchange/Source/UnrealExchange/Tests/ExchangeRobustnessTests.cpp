@@ -4,7 +4,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 리더의 할당 실패와 JSON 퍼징 시험이다(Docs/Design/UnrealExchange.ko.md 12.1절
+// Unreal 교환 리더의 할당 실패와 JSON 퍼징 시험이다(Docs/Design/UnrealExchange 12.1절
 // "JSON·blob 퍼징 — 리더는 오류로 끝나거나 통과하고, 통과한 것은 순서 계산이 정상 진단으로
 // 끝난다").
 using namespace rocks;

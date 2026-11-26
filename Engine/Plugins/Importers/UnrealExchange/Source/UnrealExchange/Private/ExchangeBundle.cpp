@@ -6,7 +6,7 @@
 #include <Platform/Memory.h>
 #include <UnrealExchange/ExchangePaths.h>
 
-// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange.ko.md 3절, 10.4절 2–12·16·17번). bundle.json을
+// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange 3절, 10.4절 2–12·16·17번). bundle.json을
 // 묶음 수준으로, 에셋 JSON과 blob을 에셋 수준으로 검증한다.
 
 namespace rocks {
@@ -17,6 +17,8 @@ constexpr StringView BundleManifestFile = "bundle.json";
 constexpr StringView AssetFilePrefix = "assets";
 constexpr StringView AssetFileSuffix = ".json";
 constexpr StringView BlobKey = "blob";
+// 원본 byte로 읽는 에셋 JSON의 진단 text다(파일 이름이 없다 — 10.6절 5번).
+constexpr StringView AssetDocumentText = "asset";
 // blob 사슬의 끝 표지(CollectBlobRefs)와 byte의 비트 수다.
 constexpr uint32 NoBlob = NumericLimits<uint32>::Max();
 constexpr usize BitsPerByte = 8;
@@ -211,6 +213,9 @@ bool IsLess(StringView left, StringView right) noexcept {
     return StringView::CompareBytes(left, right) < 0;
 }
 
+Result<bool> ParseJsonText(ReadScope& scope, StringView text, StringView relative,
+                           JsonDocument& document) noexcept;
+
 // JSON 파일 하나를 읽어 document에 파싱한다. 루트는 객체여야 한다. 일반 파일만 읽고, 읽은 크기를
 // jsonBytes(묶음의 JSON 크기 합)에 더해 jsonLimit을 넘으면 거부한다.
 Result<bool> ReadJsonFile(platform::FileSystem& files, StringView directory, StringView relative,
@@ -268,9 +273,15 @@ Result<bool> ReadJsonFile(platform::FileSystem& files, StringView directory, Str
         }
     }
 
+    return ParseJsonText(scope, StringView(text.Data(), text.Size()), relative, document);
+}
+
+// JSON 텍스트를 document에 파싱한다(구문·BOM·루트 객체 — relative는 진단 text).
+Result<bool> ParseJsonText(ReadScope& scope, StringView text, StringView relative,
+                           JsonDocument& document) noexcept {
     JsonReadOptions options;
     options.maxInputBytes = UnrealExchangeMaxJsonBytes;
-    const JsonError parsed = document.Parse(StringView(text.Data(), text.Size()), options);
+    const JsonError parsed = document.Parse(text, options);
     if (parsed.code == JsonErrorCode::OutOfMemory) {
         return Result<bool>::Failure(ErrorCode::OutOfMemory);
     }
@@ -855,35 +866,25 @@ Result<bool> CheckExporterErrors(ReadScope& scope, JsonValue diagnostics) noexce
     return Accept();
 }
 
-// 에셋 JSON 하나를 읽어 asset을 채운다(10.4절 5–9·11번).
-Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory,
-                               Allocator& allocator, ReadScope& scope, uint64 jsonLimit,
-                               uint64& jsonBytes, ExchangeAsset& asset) noexcept {
-    auto made = UniquePtr<JsonDocument>::TryMake(allocator, allocator);
-    if (!made) {
-        return Result<bool>::Failure(made.Error());
-    }
-
-    JsonDocument& document = *made.Value();
-    auto read = ReadJsonFile(files, directory, asset.file, allocator, scope, jsonLimit, jsonBytes,
-                             document);
-    if (Stopped(read)) {
-        return read;
-    }
-
+// 파싱한 에셋 JSON의 필드를 읽어 asset을 채운다(10.4절 5–9·11번). manifest가 참이면 objectPath·
+// class가 bundle.json 항목(asset.objectPath·className)과 같아야 하고, 거짓이면(10.6절 5번 — 원본
+// byte) 문서 값으로 asset.objectPath·className·exchangeClass를 채운다(objectPath 문법 확인).
+Result<bool> ReadAssetFields(ReadScope& scope, Allocator& allocator, bool manifest,
+                             const JsonDocument& document, ExchangeAsset& asset) noexcept {
     const JsonValue root = document.Root();
-    read = WarnUnknownKeys(scope, root, Span<const StringView>(AssetKeys));
+    auto read = WarnUnknownKeys(scope, root, Span<const StringView>(AssetKeys));
     if (Stopped(read)) {
         return read;
     }
 
     StringView objectPath;
-    read = RequireString(scope, root, "objectPath", objectPath);
+    read = manifest ? RequireString(scope, root, "objectPath", objectPath)
+                    : RequireObjectPath(scope, root, "objectPath", objectPath);
     if (Stopped(read)) {
         return read;
     }
 
-    if (objectPath != asset.objectPath) {
+    if (manifest && objectPath != asset.objectPath) {
         return Corrupt(scope, ExchangeIssue::ManifestMismatch, root.Find("objectPath").Position(),
                        objectPath);
     }
@@ -894,9 +895,15 @@ Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory
         return read;
     }
 
-    if (className != asset.className) {
+    if (manifest && className != asset.className) {
         return Corrupt(scope, ExchangeIssue::ManifestMismatch, root.Find("class").Position(),
                        className);
+    }
+
+    if (!manifest) {
+        asset.objectPath = objectPath;
+        asset.className = className;
+        asset.exchangeClass = FindExchangeClass(className);
     }
 
     read = RequireString(scope, root, "ueClass", asset.ueClass);
@@ -936,7 +943,25 @@ Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory
         return read;
     }
 
-    read = CheckExporterErrors(scope, asset.exporterDiagnostics);
+    return CheckExporterErrors(scope, asset.exporterDiagnostics);
+}
+
+// 에셋 JSON 파일 하나를 읽어 asset을 채운다(10.4절 5–9·11번).
+Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory,
+                               Allocator& allocator, ReadScope& scope, uint64 jsonLimit,
+                               uint64& jsonBytes, ExchangeAsset& asset) noexcept {
+    auto made = UniquePtr<JsonDocument>::TryMake(allocator, allocator);
+    if (!made) {
+        return Result<bool>::Failure(made.Error());
+    }
+
+    auto read = ReadJsonFile(files, directory, asset.file, allocator, scope, jsonLimit, jsonBytes,
+                             *made.Value());
+    if (Stopped(read)) {
+        return read;
+    }
+
+    read = ReadAssetFields(scope, allocator, true, *made.Value(), asset);
     if (Stopped(read)) {
         return read;
     }
@@ -1352,6 +1377,47 @@ Result<void> ReadExchangeBundle(platform::FileSystem& files, StringView director
         return resolved;
     }
 
+    return Result<void>::Success();
+}
+
+Result<void> ReadExchangeAssetDocument(Span<const uint8> bytes, Allocator& allocator,
+                                       ExchangeAsset& out,
+                                       ExchangeDiagnostics& diagnostics) noexcept {
+    FailReadAsset(out);
+    out.objectPath = StringView();
+    out.className = StringView();
+    out.file = StringView();
+    out.exchangeClass = ExchangeClass::Unsupported;
+    ReadScope scope{diagnostics, ExchangeFile::AssetJson};
+    Result<bool> read = Accept();
+    auto made = UniquePtr<JsonDocument>::TryMake(allocator, allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    if (bytes.Size() > UnrealExchangeMaxJsonBytes) {
+        read = OverLimit(scope, {}, AssetDocumentText);
+    } else {
+        const StringView text(reinterpret_cast<const char*>(bytes.Data()), bytes.Size());
+        read = ParseJsonText(scope, text, AssetDocumentText, *made.Value());
+    }
+
+    if (!Stopped(read)) {
+        read = ReadAssetFields(scope, allocator, false, *made.Value(), out);
+    }
+
+    if (Stopped(read)) {
+        // 문서에서 빌린 view(objectPath·className)와 교환 클래스도 놓는다(문서는 이 함수와 함께
+        // 사라진다).
+        FailReadAsset(out);
+        out.objectPath = StringView();
+        out.className = StringView();
+        out.exchangeClass = ExchangeClass::Unsupported;
+        return Result<void>::Failure(read ? scope.rejected : read.Error());
+    }
+
+    out.document = Move(made.Value());
+    out.state = ExchangeAssetState::Ready;
     return Result<void>::Success();
 }
 

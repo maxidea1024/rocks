@@ -7,7 +7,7 @@
 #include <UnrealExchange/ExchangeBundle.h>
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 묶음의 임포트 순서다(Docs/Design/UnrealExchange.ko.md 9.3절, 10.4절 13–15번, 10.5절).
+// Unreal 교환 묶음의 임포트 순서다(Docs/Design/UnrealExchange 9.3절, 10.4절 13–15번, 10.5절).
 // 읽은 묶음의 Hard·Build 참조 그래프를 강한 연결 요소(SCC)로 묶어 위상 정렬하고, 에셋마다 Rocks
 // 논리 경로(9.1절)와 기존 에셋(재임포트 대상, 9.2절)을 정한다. 저장 단위(SCC 하나 또는 에셋 하나)는
 // 실행(ExchangeImportRun.h)이 순서대로 임포트한다.
@@ -126,6 +126,11 @@ public:
     // 임포트할 논리 경로다: 기존 에셋이 있으면 그 경로(9.1절 — 기존 위치 우선), 아니면 대응 경로.
     StringView TargetPath(uint32 asset) const noexcept;
 
+    // 에셋 의존(asset.dependencies 번호)이 묶음 밖 Hard 대상이고 계획이 기존 에셋을 하나 찾았으면
+    // 그 AssetId다(10.6절 4번 — 종류별 임포터가 참조로 건다). 묶음 안 대상·못 찾음·모호함·Soft·범위
+    // 밖 클래스·고르지 않았거나 Ready가 아닌 에셋·범위 밖 번호는 null id다.
+    AssetId ExternalTarget(uint32 asset, uint32 dependency) const noexcept;
+
     void Clear() noexcept;
 
 private:
@@ -142,6 +147,9 @@ private:
     Array<uint32> existingBytes_;
     Array<AssetId> existingId_;
     Array<ExchangeExistingState> existingState_;
+    // 에셋마다 externalId_ 안 첫 의존 번호(에셋 수 + 1개 — CSR)와 의존마다 묶음 밖 기존 대상 id다.
+    Array<uint32> externalStart_;
+    Array<AssetId> externalId_;
     Array<uint8> renamed_;
     Array<uint8> selected_;
     Array<char> pathText_;

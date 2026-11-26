@@ -5,7 +5,7 @@
 #include <Core/Text/Unicode.h>
 #include <UnrealExchange/ExchangePaths.h>
 
-// Unreal 교환 임포트 순서다(Docs/Design/UnrealExchange.ko.md 9.1·9.3절, 10.4절 13–15번, 10.5절):
+// Unreal 교환 임포트 순서다(Docs/Design/UnrealExchange 9.1·9.3절, 10.4절 13–15번, 10.5절):
 // --only 닫힘, 기존 에셋 조회, 경로 대응과 겹침, Hard·Build 그래프의 SCC(Core 공용 반복 Tarjan),
 // 단위 깊이·실패 전파.
 
@@ -62,6 +62,14 @@ struct ExchangePlanAccess {
 
     static Array<char>& PathText(ExchangeImportPlan& plan) noexcept {
         return plan.pathText_;
+    }
+
+    static Array<uint32>& ExternalStart(ExchangeImportPlan& plan) noexcept {
+        return plan.externalStart_;
+    }
+
+    static Array<AssetId>& ExternalId(ExchangeImportPlan& plan) noexcept {
+        return plan.externalId_;
     }
 };
 
@@ -511,10 +519,29 @@ Result<void> CheckTakenPaths(OrderState& state, const ExchangeOrderOptions& opti
     return Result<void>::Success();
 }
 
-// 간선(묶음 안 Hard 대상)을 만들고 묶음에 없는 대상을 분류한다.
-Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) noexcept {
+// 간선(묶음 안 Hard 대상)을 만들고 묶음에 없는 대상을 분류한다. 묶음 밖 대상의 기존 에셋 id는
+// 의존마다 계획에 남긴다(10.6절 4번 — ExternalTarget).
+Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options,
+                        ExchangeImportPlan& out) noexcept {
     Span<const ExchangeAsset> assets = state.bundle->Assets();
     if (auto resized = state.edgeStart.TryResize(assets.Size() + 1); !resized) {
+        return resized;
+    }
+
+    Array<uint32>& externalStart = ExchangePlanAccess::ExternalStart(out);
+    Array<AssetId>& externalId = ExchangePlanAccess::ExternalId(out);
+    if (auto resized = externalStart.TryResize(assets.Size() + 1); !resized) {
+        return resized;
+    }
+
+    usize dependencies = 0;
+    for (usize index = 0; index < assets.Size(); ++index) {
+        externalStart[index] = static_cast<uint32>(dependencies);
+        dependencies += assets[index].dependencies.Size();
+    }
+
+    externalStart[assets.Size()] = static_cast<uint32>(dependencies);
+    if (auto resized = externalId.TryResize(dependencies); !resized) {
         return resized;
     }
 
@@ -526,7 +553,8 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
             continue;
         }
 
-        for (const ExchangeDependency& dependency : asset.dependencies) {
+        for (usize at = 0; at < asset.dependencies.Size(); ++at) {
+            const ExchangeDependency& dependency = asset.dependencies[at];
             if (dependency.kind != ExchangeDependencyKind::Hard ||
                 dependency.targetClass == ExchangeClass::Unsupported) {
                 continue;
@@ -561,6 +589,7 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
 
             const StringView resolved = state.bundle->ResolveRedirect(dependency.objectPath);
             ExchangeExistingState found = ExchangeExistingState::None;
+            AssetId foundId{};
             if (options.existing != nullptr) {
                 auto match = FindExisting(state, *options.existing, resolved);
                 if (!match) {
@@ -568,9 +597,11 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
                 }
 
                 found = match.Value().state;
+                foundId = match.Value().id;
             }
 
             if (found == ExchangeExistingState::Found) {
+                externalId[externalStart[index] + at] = foundId;
                 continue;
             }
 
@@ -833,7 +864,7 @@ Result<void> PlanInto(const ExchangeBundle& bundle, const ExchangeOrderOptions& 
         return checked;
     }
 
-    if (auto built = BuildEdges(state, options); !built) {
+    if (auto built = BuildEdges(state, options, out); !built) {
         return built;
     }
 
@@ -861,7 +892,8 @@ ExchangeImportPlan::ExchangeImportPlan(Allocator& allocator) noexcept
     : allocator_(&allocator), units_(allocator), members_(allocator), unitOf_(allocator),
       pathStart_(allocator), pathBytes_(allocator), existingStart_(allocator),
       existingBytes_(allocator), existingId_(allocator), existingState_(allocator),
-      renamed_(allocator), selected_(allocator), pathText_(allocator) {
+      externalStart_(allocator), externalId_(allocator), renamed_(allocator), selected_(allocator),
+      pathText_(allocator) {
 }
 
 Span<const uint32> ExchangeImportPlan::Members(const ExchangeImportUnit& unit) const noexcept {
@@ -908,6 +940,19 @@ StringView ExchangeImportPlan::TargetPath(uint32 asset) const noexcept {
     return existing.state == ExchangeExistingState::Found ? existing.path : MappedPath(asset);
 }
 
+AssetId ExchangeImportPlan::ExternalTarget(uint32 asset, uint32 dependency) const noexcept {
+    if (externalStart_.IsEmpty() || asset >= externalStart_.Size() - 1) {
+        return AssetId{};
+    }
+
+    const uint32 first = externalStart_[asset];
+    if (dependency >= externalStart_[asset + 1] - first) {
+        return AssetId{};
+    }
+
+    return externalId_[first + dependency];
+}
+
 void ExchangeImportPlan::Clear() noexcept {
     units_.Clear();
     members_.Clear();
@@ -918,6 +963,8 @@ void ExchangeImportPlan::Clear() noexcept {
     existingBytes_.Clear();
     existingId_.Clear();
     existingState_.Clear();
+    externalStart_.Clear();
+    externalId_.Clear();
     renamed_.Clear();
     selected_.Clear();
     pathText_.Clear();

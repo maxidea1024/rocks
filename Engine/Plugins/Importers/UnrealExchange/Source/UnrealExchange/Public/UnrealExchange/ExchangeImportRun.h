@@ -4,7 +4,7 @@
 #include <AssetDatabase/AssetService.h>
 #include <UnrealExchange/ExchangeImportOrder.h>
 
-// Unreal 교환 임포트 실행이다(Docs/Design/UnrealExchange.ko.md 10.5절 7·8번): 계획의 단위 순서대로
+// Unreal 교환 임포트 실행이다(Docs/Design/UnrealExchange 10.5절 7·8번): 계획의 단위 순서대로
 // 교환 클래스마다 등록한 종류별 임포터를 부르고, 실행 중 실패를 Hard 의존자에게 전파한다. 에셋을
 // 실제로 만드는 종류별 임포터는 UX2b 이후 단계가 등록한다.
 //

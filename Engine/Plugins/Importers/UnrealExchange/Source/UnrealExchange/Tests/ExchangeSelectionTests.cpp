@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 임포트 계획의 선택·기존 에셋 시험이다(Docs/Design/UnrealExchange.ko.md 10.5절 2–6번):
+// Unreal 교환 임포트 계획의 선택·기존 에셋 시험이다(Docs/Design/UnrealExchange 10.5절 2–6번):
 // --only 닫힘(Hard만, redirect, 범위 밖 직접 선택, 없는 값), 선택과 무관한 경로·겹침(결정성)과 고른
 // 에셋만의 진단·단위, 잘못된 선택, 기존 에셋 대상 경로·길이·겹침 제외, 모호함과 전파, 옛 경로
 // 전달, 조회 오류, 할당 실패.
@@ -634,6 +634,64 @@ TEST(UnrealExchange_PlanSelectionMatchesFull) {
         // 둘째 단계로 같은 에셋을 찾은 Old는 새 에셋이다(T가 첫 단계).
         CHECK(full.Existing(4).state == ExchangeExistingState::None &&
               full.Existing(1).state == ExchangeExistingState::Found);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 묶음 밖 대상 id(10.6절 4번): 계획이 찾은 묶음 밖 Hard 대상만 의존 번호로 남고, 묶음 안
+// 대상·모호한 대상·못 찾은 대상·Soft·범위 밖 클래스·의존 없는 에셋·범위 밖 번호는 null이다. 다시
+// 계획하면 새 값이다.
+TEST(UnrealExchange_PlanExternalTarget) {
+    SystemAllocator allocator;
+    {
+        const SyntheticDependency onTextures[] = {
+            {"/Game/B/T.T", "Texture2D"},
+            {"/Game/Ext/Amb.Amb", "Texture2D"},
+            {"/Game/Ext/Found.Found", "Texture2D"},
+            {"/Game/Ext/Missing.Missing", "Texture2D"},
+            {"/Game/Ext/Soft.Soft", "Texture2D", true},
+            {"/Game/Ext/World.World", "World"},
+        };
+        const SyntheticAsset assets[] = {
+            {"/Game/A/M.M", "Material", Span<const SyntheticDependency>(onTextures)},
+            {"/Game/B/T.T", "Texture2D", {}},
+        };
+        const TableLookup::Row rows[] = {
+            {"/Game/Ext/Amb.Amb", ExchangeExistingState::Ambiguous, 0, {}},
+            {"/Game/Ext/Found.Found", ExchangeExistingState::Found, 5, "/Game/Rocks/Found"},
+            {"/Game/Ext/Soft.Soft", ExchangeExistingState::Found, 6, "/Game/Rocks/Soft"},
+            {"/Game/Ext/World.World", ExchangeExistingState::Found, 8, "/Game/Rocks/World"},
+        };
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadSynthetic(allocator, Span<const SyntheticAsset>(assets), bundle, diagnostics));
+        TableLookup lookup{Span<const TableLookup::Row>(rows)};
+        ExchangeOrderOptions options;
+        options.existing = &lookup;
+        ExchangeImportPlan plan(allocator);
+        REQUIRE(PlanExchangeImport(bundle, options, plan, diagnostics));
+        // 모호한 대상은 단위를 실패시키지만 계획의 다른 칸은 그대로다.
+        CHECK(plan.ExternalTarget(0, 0).IsNull() && plan.ExternalTarget(0, 1).IsNull());
+        CHECK(plan.ExternalTarget(0, 2) == (AssetId{Guid{0xE1, 5}}));
+        CHECK(plan.ExternalTarget(0, 3).IsNull() && plan.ExternalTarget(0, 4).IsNull() &&
+              plan.ExternalTarget(0, 5).IsNull() && plan.ExternalTarget(0, 6).IsNull());
+        CHECK(plan.ExternalTarget(1, 0).IsNull() && plan.ExternalTarget(2, 0).IsNull() &&
+              plan.ExternalTarget(ExchangeNoIndex, 0).IsNull());
+        CHECK(diagnostics.Count(AssetDiagnosticCode::MissingUnrealDependency) == 1);
+
+        // 조회 없이 다시 계획하면 묶음 밖 대상은 모두 null이다(앞 값을 남기지 않는다).
+        ExchangeOrderOptions plain;
+        REQUIRE(PlanExchangeImport(bundle, plain, plan, diagnostics));
+        CHECK(plan.ExternalTarget(0, 2).IsNull());
+
+        // 고르지 않은 에셋의 의존은 보지 않는다.
+        const uint8 onlyTexture[] = {0, 1};
+        options.selection = Span<const uint8>(onlyTexture);
+        REQUIRE(PlanExchangeImport(bundle, options, plan, diagnostics));
+        CHECK(plan.ExternalTarget(0, 2).IsNull());
+        plan.Clear();
+        CHECK(plan.ExternalTarget(0, 2).IsNull());
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

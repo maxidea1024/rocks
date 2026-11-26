@@ -1,0 +1,31 @@
+## 6. 스켈레톤·스킨 메시
+
+### 6.1 스켈레톤
+
+- `GetReferenceSkeleton()`의 원본 계층(raw — 가상 본 제외): 본 이름·`ExportName`·부모 번호·기준 pose(`FTransform`, double — E/Public/ReferenceSkeleton.h:13-23, 110).
+- 본별 이동 리타깃 방식(`GetBoneTranslationRetargetingMode`), 가상 본, 소켓, 커브 정보(`ForEachCurveMetaData` — 스켈레톤 AssetUserData `UAnimCurveMetaData`에 있다), 슬롯 묶음, 리타깃 원본 pose, 호환 스켈레톤(E/Classes/Animation/Skeleton.h:317-556).
+
+### 6.2 스킨 메시
+
+- LOD별 원본: `HasMeshDescription(i)`·`CloneMeshDescription(i, Out)`(E/Classes/Engine/SkeletalMesh.h:547-556). 스킨 가중치(`SkinWeights`, 이름 있는 profile), morph 속성을 MeshAnimationAssets 3.2절 형식으로 쓴다. 코너 쪽 morph 법선(UE 이름 `Morph-<이름>`, SkeletalMeshAttributes.cpp:194-212)은 `MorphNormal-<이름>`으로 바꿔 쓴다. morph 원본은 이 속성이다(`UMorphTarget`은 빌드 결과 — Dev/MeshBuilder/Private/SkeletalMeshBuilder.cpp:493-497).
+- 메시 자체 계층(`GetRefSkeleton()` raw), 스켈레톤 참조, `FSkeletalMeshLODInfo`·`FSkeletalMeshBuildSettings`·`FSkeletalMaterial`·메시 소켓·`SkinWeightProfiles`.
+- **UE 준비 원본 없음.** 스킨 메시 빌더의 공개 API는 `Build(FSkeletalMeshRenderData&, …)` 하나이고(SkeletalMeshBuilder.h:40), 법선·tangent는 MeshDescription이 아니라 `FSkeletalMeshLODModel`에 계산된다(SkeletalMeshBuilder.cpp:295, 586). 그래서 정적 메시식 사본을 만들 수 없다. 스킨 메시는 `rocks` 모드(순수 원본 + UE 빌드 설정)만 지원한다.
+- **자동 생성 LOD**(`GetMeshDescription`이 nullptr — SkeletalMesh.h:533-538, 또는 원본이 있는 LOD에 축소를 적용하는 inline reduction — `IsReductionActive`, 6.3절 10번): `GetImportedModel()`(E/Classes/Engine/SkinnedAsset.h:299)의 `LODModels[i].Sections[s].SoftVertices`에서 정점·영향(`FSoftSkinVertex::InfluenceBones`·`InfluenceWeights`, uint16 × 12 — SkeletalMeshTypes.h:57-73)을 읽어 `baked`로 쓴다. 본 번호는 섹션 지역 번호라 `Section.BoneMap`으로 메시 본 번호로 바꾼다(SkeletalMeshLODModel.h:61, 75). morph는 `UMorphTarget::GetMorphLODModels()[i]`의 `FMorphTargetDelta`(MorphTarget.h:19-25, 239)에서 읽는다. 정점 색은 8비트라 손실이 있다(`BakedColorQuantized` 정보 진단).
+
+### 6.3 구현에서 정한 점(UX7a)
+
+UX7a(UE 쪽 스켈레톤·스킨 메시 추출, `FRocksSkeletonExtractor`·`FRocksSkeletalMeshExtractor`, `FRocksMeshDescriptionWriter` 확장) 중 6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **본 배열.** 스켈레톤과 스킨 메시의 `data.bones`는 원본 계층(raw — 가상 본 제외)의 본마다 `{ "name", "exportName", "parent", "pose": { "translation": [x, y, z], "rotation": [x, y, z, w], "scale": [x, y, z] } }`다(pose는 UE `FTransform` double — 11.4절 `%.17g`). 스켈레톤만 본마다 `retargetMode`(UE `EBoneTranslationRetargetingMode` 값 이름 `Animation`·`Skeleton`·`AnimationScaled`·`AnimationRelative`·`OrientAndScale` — Rocks `BoneTranslationRetarget`와 같은 이름·순서)를 더한다. 회전은 UE 값 그대로이며 정규화는 Rocks 쪽(MeshAnimationAssets 6.4절 3 — 저장 전 정규화)이 한다.
+2. **스켈레톤 `data`·`settings`.** `data`는 `{ "bones", "curves" }`이고 `curves`는 `ForEachCurveMetaData`의 커브마다 `{ "name", "isMaterial", "isMorphTarget", "linkedBones": [본 이름], "maxLod" }`(이름 UTF-8 byte 순)다. 가상 본·소켓·슬롯 묶음·리타깃 원본·호환 스켈레톤·blend profile은 `settings`(USkeleton UPROPERTY 덤프 — `VirtualBones`·`Sockets`(하위 객체 펼침)·`SlotGroups`·`AnimRetargetSources`·`CompatibleSkeletons`·`BlendProfiles` 등)에 이름 그대로 있다. 같은 값을 `data`에 다시 쓰지 않는다(Rocks 대응은 UX7b).
+3. **스킨 메시 `data`·`settings`.** `data`는 `{ "bones", "lods" }`이고 LOD 항목은 `hasSource`(`HasMeshDescription`)·`source`(메시 설명 사본의 MeshSource 기록)·`generated`(= 원본 없음)·`baked`다. 스킨 메시에는 UE 준비 원본이 없으므로(6.2절) `prepared` 키를 두지 않는다. `settings`는 USkeletalMesh UPROPERTY 덤프(LOD 정보·빌드 설정·머티리얼 슬롯·스켈레톤·물리 에셋 참조·morph target 객체·가중치 프로필 등)다. **덤프는 LOD를 읽은 뒤에 한다.** UE는 메시 설명을 처음 읽을 때 `SourceModels`의 캐시(삼각형·정점 수, bounds, 가중치 프로필·morph 이름)를 채우므로, 먼저 덤프하면 같은 에셋을 이미 읽었는지(에디터 세션)에 따라 bytes가 달라진다.
+4. **스킨 속성(MeshSource 기록, 5.4절 2·3번에 더함).** 정점 `SkinWeights`·`SkinWeights-<profile>`(UE 이름과 같다)은 `BoneInfluences`(`boneInfluences` 배치 — 시작 표 + (본, 가중치) 쌍)이고 본 번호는 UE 원본 계층 번호, 가중치는 UE 16비트 값(`GetRawWeight`, 합 65535) 그대로, 순서는 UE 저장 순서다. 정점 `Morph-<이름>`(위치 변화량)은 그대로, UE 코너 쪽 `Morph-<이름>`(법선 변화량)은 코너 `MorphNormal-<이름>`(6.2절)이며 둘 다 `SparseVec3`(`sparseVec3` 배치 — 비트 단위 +0.0 셋인 항목은 빼고 번호 오름차순)다. 값 타입 `BoneInfluences`·`SparseVec3`를 기록 `type`에 더했다. UE 메시 설명의 본 요소·원본 부분(source geometry part)은 기록에 넣지 않는다(본은 `data.bones`).
+5. **`baked`(생성 LOD).** `GetImportedModel()->LODModels[i]`(6.2절)의 섹션 `SoftVertices`를 정점 = 코너로, `IndexBuffer`를 섹션별 삼각형으로 옮긴다(정적 메시 5.4절 5번과 같은 변환 — 공용 `FRocksBakedMesh`). 영향은 섹션 `BoneMap`으로 메시 본 번호로 바꾸고 가중치 0 칸은 버린다. morph는 각 `UMorphTarget::GetMorphLODModels()[i]`의 `SourceIdx`(렌더 정점 = baked 정점)·`PositionDelta`·`TangentZDelta`를 `Morph-`·`MorphNormal-`로 쓴다(morph 이름 순). 색은 8비트라 info `BakedColorQuantized`다(6.2절).
+6. **자기 시험.** `RocksExport.SkeletalExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 튜토리얼 스킨 메시·스켈레톤을 내보내 본 수·이름·부모·`retargetMode` 존재, LOD 수, LOD 0 스킨 가중치 영향 수(시작 표 마지막 값)를 원본과 대조하고, 추출 전후 덤프가 같은지 본다(원본 메시 설명을 먼저 읽어 둔 상태 — 3번).
+7. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`이 스켈레톤을 MA4a `Skeleton`(본·리타깃 방식·커브)으로 채워 `ValidateSkeleton`을, 스킨 메시는 본 계층 `ValidateBoneHierarchy`, 묶음 안 스켈레톤 의존과의 `MergeBoneHierarchy` 판정, LOD 기록(source·baked)의 MeshSource 적재·`ValidateMeshSource`(본 수)·MA5a `BuildSkinnedMeshLod`를 확인한다.
+8. **수동 검증(2026-11-22).** 엔진 `SkeletalCube`·튜토리얼 `TutorialTPP`(본 68개)와 시험 프로젝트 콘텐츠 — 손으로 만든 glTF(관절 둘의 기둥, 섞인 가중치, morph target `Bulge`, 애니메이션)를 Interchange로 임포트한 스킨 메시·스켈레톤, 튜토리얼 메시 사본에 `regenerate_lod`로 만든 생성 LOD 둘 — 을 내보낸 묶음(에셋 14개, 물리 에셋은 범위 밖 Unsupported)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 스켈레톤 3개 검증, 스킨 메시 4개 병합 판정, LOD 기록 6개(원본 4·baked 2, morph 1개 포함) 적재·검증·스킨 빌드를 모두 통과했다.
+
+9. **원본 복제 실패(개정 15).** 정적 메시 5.4절 10번과 같다(`MeshSourceUnavailable`, baked로 대신하지 않음).
+10. **inline reduction(개정 15).** `generated` = `!HasMeshDescription(i) || IsReductionActive(i)`다(정적 메시 5.1절과 같은 판정, SkeletalMesh.cpp `IsReductionActive` — LOD 정보의 축소 설정이 자기 LOD를 기준으로 하면 원본이 있어도 UE 렌더 기준은 축소한 LOD 모델이다). 참이면 원본이 있어도 `ImportedModel` LOD 모델을 `baked`로 함께 쓴다(5번 변환). `source`는 그대로 쓴다.
+11. **영향 12개 초과(개정 15).** UE 메시 설명은 가중치 설정에 따라 정점당 영향을 12개보다 많이 담을 수 있다. Rocks 원본 상한(`MeshMaxSourceInfluences` = 12)을 넘는 정점은 MA1 값 정리·MA5a 영향 줄이기와 같은 규칙으로 줄인다: 가중치 내림차순(같으면 본 번호 오름차순)으로 12개를 남기고 남은 합으로 비례 배분(내림)해 합을 65535로 맞추며 잔차는 가장 큰 영향에 더한다. 줄인 정점이 있으면 가중치 속성마다 warning `TooManyInfluences`(정점 수)다. 생성 LOD(`baked`)는 UE 렌더 정점이 12칸이라 해당하지 않는다.
+12. **morph 번호 범위·슬롯(개정 15).** `baked`의 morph 변화량 중 `SourceIdx`가 LOD 모델 정점 수 이상인 것은 빼고 warning `MorphDeltaOutOfRange`(morph·LOD·개수)를 단다. `baked` 다각형 묶음의 슬롯은 섹션의 머티리얼 번호로 정한 `ImportedMaterialSlotName`이다. LOD 정보의 `LODMaterialMap`(LOD별 머티리얼 교체)은 `settings`에 있고 적용은 UX7b(임포트)가 한다.

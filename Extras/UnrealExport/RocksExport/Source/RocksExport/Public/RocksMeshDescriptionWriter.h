@@ -45,7 +45,7 @@ struct FRocksMeshAttribute
 	TArray64<uint8> Bytes;
 };
 
-// 교환 형식 MeshSource 기록 하나(UnrealExchange.ko.md 5.2절)의 메모리 형태다. 위상 배열은 MeshAnimationAssets 9.1절
+// 교환 형식 MeshSource 기록 하나(UnrealExchange 5.2절)의 메모리 형태다. 위상 배열은 MeshAnimationAssets 9.1절
 // 일곱 배열이고 번호는 0부터 이어진다. 정점 위치는 속성 Vertex·Position(Vec3)이다(MA1 3.7절 1).
 struct FRocksMeshSourceRecord
 {
@@ -109,7 +109,7 @@ struct FRocksBakedMesh
 // FName). transient·번호 참조 속성은 쓰지 않고, 다른 타입이거나 Rocks 엔진 이름과 겹치는 보존 속성은 빼고
 // SkippedMeshAttribute 진단을 단다. 스킨 메시 속성은 정점 SkinWeights·SkinWeights-<profile>(BoneInfluences — UE 원본
 // 본 번호와 16비트 가중치 그대로), 정점 Morph-<이름>(SparseVec3 위치 변화량), 코너 MorphNormal-<이름>(UE 코너 쪽
-// Morph-<이름>, SparseVec3 법선 변화량)이다(MeshAnimationAssets 3.2절, UnrealExchange.ko.md 6.3절).
+// Morph-<이름>, SparseVec3 법선 변화량)이다(MeshAnimationAssets 3.2절, UnrealExchange 6.3절).
 //
 // 게임 스레드에서 쓴다.
 class ROCKSEXPORT_API FRocksMeshDescriptionWriter

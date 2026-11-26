@@ -480,29 +480,37 @@ private:
     UniquePtr<render::CookedManifestShaderLibraries> source_;
 };
 
-// 출력 backend 등록부를 엔진 수명 동안 호스트 서비스에 올린다(Docs/Design/AudioSystem 3.35.11절).
-// AudioMiniaudio 모듈 Startup이 엔진 묶음 시작(엔진 Initialize) 때 여기에 factory를 넣는다.
+// 출력 backend 등록부와 디코더 등록부를 엔진 수명 동안 호스트 서비스에 올린다
+// (Docs/Design/AudioSystem 3.35.11·3.37.1절). AudioMiniaudio·AudioOpus 모듈 Startup이 엔진 묶음
+// 시작(엔진 Initialize) 때 여기에 factory를 넣으므로 그보다 먼저 올려야 한다(늦으면 조용히 빠진다).
 // RunEngine의 중간 반환에서도 떼도록 소멸자가 Unregister한다(엔진보다 먼저 선언해 엔진 뒤에
 // 소멸한다).
-class AudioBackendRegistration {
+class AudioHostRegistries {
 public:
-    explicit AudioBackendRegistration(HostServices& services) noexcept : services_(services) {
-        registered_ = services_.Register(registry_).IsOk();
+    explicit AudioHostRegistries(HostServices& services) noexcept : services_(services) {
+        backendsRegistered_ = services_.Register(backends_).IsOk();
+        decodersRegistered_ = services_.Register(decoders_).IsOk();
     }
 
-    ~AudioBackendRegistration() noexcept {
-        if (registered_) {
-            (void)services_.Unregister(registry_);
+    ~AudioHostRegistries() noexcept {
+        if (decodersRegistered_) {
+            (void)services_.Unregister(decoders_);
+        }
+
+        if (backendsRegistered_) {
+            (void)services_.Unregister(backends_);
         }
     }
 
-    AudioBackendRegistration(const AudioBackendRegistration&) = delete;
-    AudioBackendRegistration& operator=(const AudioBackendRegistration&) = delete;
+    AudioHostRegistries(const AudioHostRegistries&) = delete;
+    AudioHostRegistries& operator=(const AudioHostRegistries&) = delete;
 
 private:
     HostServices& services_;
-    audio::AudioOutputBackendRegistry registry_;
-    bool registered_ = false;
+    audio::AudioOutputBackendRegistry backends_;
+    audio::AudioDecoderRegistry decoders_;
+    bool backendsRegistered_ = false;
+    bool decodersRegistered_ = false;
 };
 
 // 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
@@ -522,7 +530,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     const EngineSubsystemType withAssets[] = {EngineAssetsSubsystemType(),
                                               AudioEngineSubsystemType()};
     const EngineSubsystemType audioOnly[] = {AudioEngineSubsystemType()};
-    AudioBackendRegistration audioBackends(modules.Services());
+    AudioHostRegistries audioRegistries(modules.Services());
     CookedShaderAttachment cooked(shaders::Host());
     UniquePtr<platform::Window> window;
     UniquePtr<platform::GamepadBackend> gamepads;

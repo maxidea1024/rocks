@@ -5,7 +5,7 @@
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringView.h>
 
-// Unreal 교환 묶음 형식의 공통 상수다(Docs/Design/UnrealExchange.ko.md 3절, 9절, 10.4절). 묶음은 UE
+// Unreal 교환 묶음 형식의 공통 상수다(Docs/Design/UnrealExchange 3절, 9절, 10.4절). 묶음은 UE
 // 쪽 RocksExport 플러그인이 쓰고 이 플러그인의 리더(ExchangeBundle.h)가 읽는다.
 
 namespace rocks {

@@ -1,6 +1,6 @@
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 진단 목록이다(Docs/Design/UnrealExchange.ko.md 10.3·10.4절 3번).
+// Unreal 교환 진단 목록이다(Docs/Design/UnrealExchange 10.3·10.4절 3번).
 
 namespace rocks {
 
@@ -76,6 +76,8 @@ const char* ExchangeIssueName(ExchangeIssue issue) noexcept {
         return "NoKindImporter";
     case ExchangeIssue::PathTaken:
         return "PathTaken";
+    case ExchangeIssue::ServiceFailure:
+        return "ServiceFailure";
     }
 
     return "Unknown";
@@ -86,6 +88,7 @@ ExchangeSeverity ExchangeSeverityOf(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnknownField:
     case AssetDiagnosticCode::UnsupportedAsset:
     case AssetDiagnosticCode::MissingUnrealDependency:
+    case AssetDiagnosticCode::GammaMismatch:
         return ExchangeSeverity::Warning;
     case AssetDiagnosticCode::UnrealPathRenamed:
         return ExchangeSeverity::Info;

@@ -6,7 +6,7 @@ class FRocksBundleWriter;
 class UStaticMesh;
 struct FRocksAssetBody;
 
-// 정적 메시 추출이다(UnrealExchange.ko.md 5절, 5.4절 — 11.6절 FRocksStaticMeshExtractor).
+// 정적 메시 추출이다(UnrealExchange 5절, 5.4절 — 11.6절 FRocksStaticMeshExtractor).
 //
 // - settings: UStaticMesh UPROPERTY 덤프(11.5절). LOD별 빌드·축소·화면 크기(SourceModels), 슬롯, 섹션 정보, 소켓,
 //   Nanite 설정 등이 이름 그대로 들어간다.

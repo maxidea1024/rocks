@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-// 교환 묶음 JSON writer다(UnrealExchange.ko.md 3.2절, 11.4절). UE 기본 JSON writer를 쓰지 않는 이유는
+// 교환 묶음 JSON writer다(UnrealExchange 3.2절, 11.4절). UE 기본 JSON writer를 쓰지 않는 이유는
 // 숫자 서식(%g 6자리)과 비유한값 처리(nan·inf가 그대로 나가 JSON이 깨짐) 때문이다.
 //
 // - 출력은 UTF-8, BOM 없음이다. 문자열은 RFC 8259대로 따옴표·역슬래시·제어 문자(U+0000–U+001F)만
