@@ -11,8 +11,8 @@
 | PR4 | `SerialTaskChain`·`WorkerScheduler`·`TaskLane::Audio` | 구현 | 없음 | — |
 | PR5 | ThirdParty 반입 | 절차 구현, 오디오 라이브러리 없음 | miniaudio(AU2), libFLAC·libvorbis·libogg·libopus·libopusfile·minimp3(AU4), 런타임 libopus(AU5) | AU2, AU4, AU5 |
 | PR6 | 모듈 유형 `ClientOnly`, Server 대상 오디오 제외 | 완료(BS2 0d9c3a8b) | BuildTargets 구현 | AU2(서버 빌드 확인은 AU3) |
-| PR7 | `RunTraits::audioOutput`·`audioMuted` | 설계(AppInfo 개정 4, 10.2절) | AppInfo AP1 구현 또는 AU3 임시 판정 | AU3 |
-| PR8 | Engine 종료 재시도 게이트 | 설계(EngineRuntime 6절, CrashHandlingAndLaunch 개정 13 20절) | 구현(Engine `Shutdown`의 `Busy` 처리·호스트 재시도) | AU3 |
+| PR7 | `RunTraits::audioOutput`·`audioMuted` | 설계(AppInfo 개정 4, 10.2절) | AppInfo AP1 구현 또는 AU3 임시 판정(개정 32: AU3이 `ResolveAudioRunTraits`로 임시 판정 — 3.35.2절) | AU3 |
+| PR8 | Engine 종료 재시도 게이트 | 설계(EngineRuntime 6절, CrashHandlingAndLaunch 개정 13 20절) | 개정 32: 오디오에는 불필요(backend `Stop` 장벽·시간 상한 있는 join — 3.35.9절). 일반 게이트는 쓰는 쪽이 생길 때 | — |
 | PR9 | 앱 수명 이벤트(활성·비활성·백그라운드·오디오 포커스) | 데스크톱 창 포커스는 구현(PlatformWindow), 앱 수준 이벤트는 설계(PlatformLayer "앱 수명 이벤트" 절) | Windows·macOS 활성 이벤트는 AU3과, Android는 AU9와 함께 구현 | AU9 |
 | PR10 | 에셋 A2f 임포트 프레임워크 | A2f1a 구현, A2f1b·A2f2 설계(7.1절 18) | 계획 순서대로 | AU4 |
 | PR11 | 에셋 A3 AssetNugget·A4 AssetCooker | 설계 | 계획 순서대로 | AU5, AU6 |
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | AU1 | `Audio` 모듈: 형식·채널 레이아웃·PCM 버퍼, voice pool, 명령(인자 전달)·파라미터 seqlock·stop mailbox·장치 stop-all epoch·ACK·시작/terminal 슬롯(Mixer2, scene epoch는 AU3), mix clock·블록 안 예약, 리샘플러, source LPF/HPF, gain ramp, 2D·equal-power 패너, 거리 곡선, 마스터 limiter, `OfflineAudioRender`, 메모리 PCM clip | PR1 | 3.19절 PCM·예약·리샘플·click·수명·seqlock 시험(Inline), AudioRT 할당 0 |
 | AU2 | (개정 28: AU2a Audio 모듈 장치 경로 → AU2b miniaudio·`AudioMiniaudio`, 3.33절. 개정 31: AU2b 세부 3.34절) `AudioOutputBackend`, AudioRT 스레드·명령 링(`BoundedSpscQueue`)·정렬 pending 배열(3.22.1절)·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR3, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
-| AU3 | `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7, PR8 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·lease 0, 서버 빌드에 `AudioMiniaudio` 미링크 |
+| AU3 | (개정 32: AU3a1 엔진 쪽 → AU3a2 World·컴포넌트 → AU3a3 Sandbox, 3.35절) `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·PCM 참조 0(개정 32: `AssetLease`는 AU6부터라 lease 0은 AU6 기준), 서버 빌드에 `AudioMiniaudio` 미링크(빌드 규칙 시험 — 3.35.11절) |
 | AU3b | Sparks 바인딩 | AU3, PR18 | Sparks 시험: 재생·정지·`LoopHandle` 수명, 서버 `Ignored` |
 | AU4 | `AudioTools`: `SoundClipImporter`, WAV·AIFF 파서, FLAC·Vorbis·Opus·MP3 디코드(SIMD 고정), ThirdParty 디코더, 에디터 재생용 PCM 플랫폼 데이터 변환(AD25) | AU3, PR10, PR5 | 3.19절 임포트 시험, 디코드 SHA 고정값, 재생 중 재임포트 시 새 재생부터 새 revision |
 | AU5 | `AudioEncoder`·`AudioDecoder`·`AudioDecoderTable`, ADPCM·Opus 인코더·디코더, `AudioOpus`, 플랫폼 데이터·청크 표·플랫폼 재정의, 쿠킹 처리기·AssetNugget 키 | AU4, PR11, PR5 | 같은 입력 같은 byte, 설정 변경 새 키, 디코드 허용오차, 손상 payload 거부 |

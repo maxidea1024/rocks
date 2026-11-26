@@ -1,6 +1,12 @@
 #include "SandboxGame.h"
+#include "SandboxSounds.h"
 
 #include <Core/Diagnostics/Log.h>
+#include <Core/Math/MathUtility.h>
+#include <Engine/Engine.h>
+#include <EngineAudio/AudioComponent.generated.h>
+#include <EngineAudio/AudioEngineSubsystem.h>
+#include <EngineAudio/AudioWorldSubsystem.h>
 #include <Gameplay/Controller.generated.h>
 #include <Gameplay/GameDirector.generated.h>
 #include <Gameplay/GameDirector.h>
@@ -42,6 +48,11 @@ constexpr double PawnTurnRate = 45.0;
 constexpr double PawnMouseDegreesPerPixel = 0.175;
 // pitch 한계(도, UE ViewPitchMin·ViewPitchMax)다.
 constexpr double PawnPitchLimit = 89.9;
+
+// 오디오 확인(Docs/Design/AudioSystem 3.35.11절): 키 1 = UI음, 2 = 플레이어 주위를 도는 loop
+// 켜기·끄기, 3 = 그 loop를 플레이어 오른쪽에 고정·해제. 원 반지름(cm)과 한 바퀴 시간(초)이다.
+constexpr double AudioOrbitRadius = 600.0;
+constexpr double AudioOrbitPeriodSeconds = 4.0;
 
 // 키 둘의 축 값(+1·−1)이다.
 double KeyAxis(const input::InputState& state, input::Key positive, input::Key negative) noexcept {
@@ -90,7 +101,7 @@ class SandboxPawn final : public Pawn {
     ROCKS_NATIVE_TYPE(SandboxPawn, Pawn, 0x6c1f8e3a5d2b4097ull, 0xa3d70e9b1c64f582ull)
 
 public:
-    explicit SandboxPawn(Allocator& allocator) noexcept : Pawn(allocator) {
+    explicit SandboxPawn(Allocator& allocator) noexcept : Pawn(allocator), allocator_(allocator) {
         autoPossessAi = AutoPossessAi::Disabled;
         PrimaryTick().tick = true;
     }
@@ -132,6 +143,7 @@ public:
 
         const input::InputState& state = snapshot.Value().input;
         ApplyMovement(ReadPawnInput(state, context.deltaSeconds), context.deltaSeconds);
+        UpdateAudio(state, context.deltaSeconds);
         LogGestures(snapshot.Value().gestures);
         for (input::Key key : WatchedKeys) {
             if (state.WasPressed(key)) {
@@ -186,6 +198,107 @@ protected:
     }
 
 private:
+    // 리스너를 Pawn 시점(위치·control 회전)으로 두고, 키 1–3을 처리하며, 도는 loop를 옮긴다.
+    void UpdateAudio(const input::InputState& state, double deltaSeconds) noexcept {
+        AudioWorldSubsystem* audio = GetWorld().GetSubsystem<AudioWorldSubsystem>();
+        if (audio == nullptr || RootComponent().IsNull()) {
+            return;
+        }
+
+        Vec3d location;
+        (void)GetWorld().With<SceneComponent>(
+            RootComponent(),
+            [&location](SceneComponent& root) noexcept { location = root.WorldLocation(); });
+        const Rotator<double> view = GetControlRotation();
+        audio->SetListener(location, view.ToQuaternion());
+        if (!sounds_.click.IsValid()) {
+            auto made = MakeSandboxSounds(allocator_);
+            if (!made) {
+                return;
+            }
+
+            sounds_ = made.Value();
+        }
+
+        if (state.WasPressed(input::Key::Digit1)) {
+            if (auto* engineAudio = GetEngineSubsystem<AudioEngineSubsystem>(GetWorld())) {
+                (void)engineAudio->Play2D(sounds_.click);
+                Log::Info(LogSandboxGame, "Audio: UI click (2D)");
+            }
+        }
+
+        if (state.WasPressed(input::Key::Digit2)) {
+            ToggleOrbit(location);
+        }
+
+        if (state.WasPressed(input::Key::Digit3)) {
+            fixedRight_ = !fixedRight_;
+            Log::Info(LogSandboxGame, "Audio: loop {Mode}",
+                      fixedRight_ ? "fixed 600 cm to the right" : "orbiting");
+        }
+
+        if (orbitComponent_.IsNull()) {
+            return;
+        }
+
+        orbitSeconds_ += deltaSeconds;
+        Vec3d offset;
+        if (fixedRight_) {
+            // 시선의 수평 오른쪽(+Y가 오른쪽인 UE 좌표 — pitch는 뺀다).
+            offset = Rotator<double>(0.0, view.yaw, 0.0).RotateVector(Vec3d(0.0, 1.0, 0.0)) *
+                     AudioOrbitRadius;
+        } else {
+            const double angle = math::TwoPi<double> * orbitSeconds_ / AudioOrbitPeriodSeconds;
+            offset = Vec3d(math::Cos(angle), math::Sin(angle), 0.0) * AudioOrbitRadius;
+        }
+
+        (void)GetWorld().With<SceneComponent>(
+            orbitComponent_, [&](SceneComponent& emitter) noexcept {
+                return emitter.SetRelativeLocation(location + offset);
+            });
+    }
+
+    // 도는 loop Actor를 만들거나 없앤다(AudioComponent root — autoActivate로 시작, 파괴로 끝난다).
+    void ToggleOrbit(const Vec3d& location) noexcept {
+        World& world = GetWorld();
+        if (!orbitActor_.IsNull()) {
+            (void)world.DestroyActor(orbitActor_);
+            orbitActor_ = ObjectHandle{};
+            orbitComponent_ = ObjectHandle{};
+            Log::Info(LogSandboxGame, "Audio: loop off");
+            return;
+        }
+
+        auto actor = world.SpawnActorDeferred<Actor>();
+        if (!actor) {
+            return;
+        }
+
+        auto component = world.AddComponent<AudioComponent>(actor.Value());
+        if (!component) {
+            (void)world.DestroyActor(actor.Value());
+            return;
+        }
+
+        (void)world.With<Actor>(actor.Value(), [&](Actor& owner) noexcept {
+            return owner.SetRootComponent(component.Value());
+        });
+        (void)world.With<AudioComponent>(component.Value(), [&](AudioComponent& audio) noexcept {
+            audio.SetSound(sounds_.loop);
+            audio.SetMobility(ComponentMobility::Movable);
+            return audio.SetRelativeLocation(location + Vec3d(AudioOrbitRadius, 0.0, 0.0));
+        });
+        if (!world.FinishSpawning(actor.Value())) {
+            return;
+        }
+
+        orbitActor_ = actor.Value();
+        orbitComponent_ = component.Value();
+        orbitSeconds_ = 0.0;
+        Log::Info(LogSandboxGame, "Audio: loop on (orbit {Radius} cm, {Period} s)",
+                  AudioOrbitRadius, AudioOrbitPeriodSeconds);
+    }
+
     // controlRotation을 돌리고(pitch 한계) 그 방향 기준으로 root를 옮긴다(UE DefaultPawn
     // MoveForward· MoveRight는 control 회전 축, MoveUp은 월드 Z). 입력 벡터는 길이 1로 자른다(UE
     // ConsumeInputVector·GetClampedToMaxSize). 가속·감속은 이동 컴포넌트 단계에서 넣는다.
@@ -237,6 +350,13 @@ private:
             }
         }
     }
+
+    Allocator& allocator_;
+    SandboxSounds sounds_;
+    ObjectHandle orbitActor_;
+    ObjectHandle orbitComponent_;
+    double orbitSeconds_ = 0.0;
+    bool fixedRight_ = false;
 };
 
 // 기본 Pawn을 SandboxPawn으로 두는 GameDirector다.
@@ -259,6 +379,7 @@ Result<void> PopulateMain(World& world, void*) noexcept {
 
 SandboxGame::SandboxGame() noexcept {
     worldSubsystems[0] = rocks::PhysicsWorldSubsystem::Type();
+    worldSubsystems[1] = rocks::AudioWorldSubsystem::Type();
     config.worldSubsystems = rocks::Span<const rocks::WorldSubsystemType>(worldSubsystems);
     config.defaultDirectorType = ObjectTypeIdOf<SandboxDirector>();
     config.defaultMap.name = "Main";

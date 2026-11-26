@@ -36,11 +36,11 @@ public sealed class CommandletHost : ModuleRules
         // repository shipping target (Sandbox, Release) links, so their module lifetime objects register the same shader types in the cooker as in
         // the shipping executable (the shader library cook stage starts the engine group, policy check cooker-module-set). OpenGLGraphics is linked
         // on every platform: Windows shipping targets do not have it, but the rule is a superset and Android and macOS shipping targets do.
-        // Audio and AudioMiniaudio come from the Sandbox --audio-tone mode (Docs/Design/AudioSystem section 3.34.5); without an
+        // Audio, AudioMiniaudio and EngineAudio come from the Sandbox audio modes (Docs/Design/AudioSystem sections 3.34.5 and 3.35.11); without an
         // AudioOutputBackendRegistry host service the AudioMiniaudio module lifetime object stays idle in the cooker.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
             "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "Collision",
             "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
-            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio"]
+            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "EngineAudio"]
     };
 }
