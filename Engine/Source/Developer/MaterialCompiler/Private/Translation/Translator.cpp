@@ -273,8 +273,9 @@ Result<void> Translator::BuildIndex() noexcept {
     }
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
-    const Span<const LoweringEntry> groups[] = {ConstantLowerings(), MathLowerings(),
-                                                FlowLowerings(), ContextValueLowerings()};
+    const Span<const LoweringEntry> groups[] = {ConstantLowerings(),   MathLowerings(),
+                                                FlowLowerings(),       ContextValueLowerings(),
+                                                CoordinateLowerings(), TransformLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);

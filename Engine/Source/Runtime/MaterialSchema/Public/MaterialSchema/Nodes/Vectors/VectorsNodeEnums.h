@@ -35,6 +35,8 @@ enum class PositionTransformSpace : uint8 {
     FirstPersonTranslatedWorld = 4,
     View = 5,
     Camera = 6,
+    // UE TRANSFORMPOSSOURCE_Particle(UMETA(Hidden) — 저장된 에셋에는 나온다).
+    Particle = 7,
     Instance = 8
 };
 
@@ -47,6 +49,8 @@ enum class VectorTransformDestination : uint8 {
     World = 2,
     View = 3,
     Camera = 4,
+    // UE TRANSFORM_ParticleWorld(UMETA(Hidden) — 저장된 에셋에는 나온다).
+    ParticleWorld = 5,
     Instance = 6
 };
 
@@ -59,6 +63,8 @@ enum class VectorTransformSource : uint8 {
     World = 2,
     View = 3,
     Camera = 4,
+    // UE TRANSFORMSOURCE_ParticleWorld(UMETA(Hidden) — 저장된 에셋에는 나온다).
+    ParticleWorld = 5,
     Instance = 6
 };
 

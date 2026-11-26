@@ -133,6 +133,41 @@ struct MaterialVertexInputs {
     MaterialDouble3 actorPosition;
     MaterialDouble3 previousActorPosition;
     float distanceCullFade;
+    float3 primitivePosition;
+    float3 previousPrimitivePosition;
+    float3 objectTranslatedPosition;
+    float3 actorTranslatedPosition;
+    float3 previousActorTranslatedPosition;
+    float4 xrPassthroughCameraUv0;
+    float4 xrPassthroughCameraUv1;
+    float2 viewFieldOfView;
+    float2 previousViewFieldOfView;
+    float2 viewTanHalfFieldOfView;
+    float2 previousViewTanHalfFieldOfView;
+    float2 viewCotanHalfFieldOfView;
+    float2 previousViewCotanHalfFieldOfView;
+    MaterialDouble3 worldViewOrigin;
+    MaterialDouble3 previousWorldViewOrigin;
+    float temporalSampleCount;
+    float temporalSampleIndex;
+    float2 temporalSampleOffset;
+    float runtimeVirtualTextureOutputLevel;
+    float2 runtimeVirtualTextureOutputDerivative;
+    float runtimeVirtualTextureMaxLevel;
+    float preExposure;
+    float oneOverPreExposure;
+    float resolutionFraction;
+    float resolutionFractionInverse;
+    float postVolumeUserFlags;
+    float2 firstPersonFieldOfView;
+    float2 previousFirstPersonFieldOfView;
+    float2 firstPersonTanHalfFieldOfView;
+    float2 previousFirstPersonTanHalfFieldOfView;
+    float2 firstPersonCotanHalfFieldOfView;
+    float2 previousFirstPersonCotanHalfFieldOfView;
+    float firstPersonScale;
+    float previousFirstPersonScale;
+    float nearPlane;
 };
 
 struct MaterialInputs {
@@ -178,6 +213,35 @@ struct MaterialInputs {
     MaterialDouble3 objectPosition;
     MaterialDouble3 actorPosition;
     float distanceCullFade;
+    float3 translatedWorldPositionNoShaderOffsets;
+    float3 localPositionNoShaderOffsets;
+    float3 primitivePosition;
+    float3 primitivePositionNoShaderOffsets;
+    float3 objectTranslatedPosition;
+    float3 actorTranslatedPosition;
+    float unMirrored;
+    float4 xrPassthroughCameraUv0;
+    float4 xrPassthroughCameraUv1;
+    float2 viewFieldOfView;
+    float2 viewTanHalfFieldOfView;
+    float2 viewCotanHalfFieldOfView;
+    MaterialDouble3 worldViewOrigin;
+    float temporalSampleCount;
+    float temporalSampleIndex;
+    float2 temporalSampleOffset;
+    float runtimeVirtualTextureOutputLevel;
+    float2 runtimeVirtualTextureOutputDerivative;
+    float runtimeVirtualTextureMaxLevel;
+    float preExposure;
+    float oneOverPreExposure;
+    float resolutionFraction;
+    float resolutionFractionInverse;
+    float postVolumeUserFlags;
+    float2 firstPersonFieldOfView;
+    float2 firstPersonTanHalfFieldOfView;
+    float2 firstPersonCotanHalfFieldOfView;
+    float firstPersonScale;
+    float nearPlane;
 };
 
 // Accessors (MaterialContext<Name>, previous frame MaterialContextPrevious<Name>).
@@ -213,9 +277,50 @@ struct MaterialInputs {
 #define MaterialContextPreviousCameraPosition(c) ((c).previousCameraPosition)
 #define MaterialContextViewSize(c) ((c).viewSize)
 #define MaterialContextSceneTexelSize(c) ((c).sceneTexelSize)
-#define MaterialContextViewProperty(c, a0) MaterialPassViewProperty(c, a0)
-#define MaterialContextPreviousViewProperty(c, a0) MaterialPassPreviousViewProperty(c, a0)
 #define MaterialContextScreenPosition(c) ((c).screenPosition)
+#define MaterialContextViewFieldOfView(c) ((c).viewFieldOfView)
+#define MaterialContextPreviousViewFieldOfView(c) ((c).previousViewFieldOfView)
+#define MaterialContextViewTanHalfFieldOfView(c) ((c).viewTanHalfFieldOfView)
+#define MaterialContextPreviousViewTanHalfFieldOfView(c) ((c).previousViewTanHalfFieldOfView)
+#define MaterialContextViewCotanHalfFieldOfView(c) ((c).viewCotanHalfFieldOfView)
+#define MaterialContextPreviousViewCotanHalfFieldOfView(c) ((c).previousViewCotanHalfFieldOfView)
+#define MaterialContextWorldViewOrigin(c) ((c).worldViewOrigin)
+#define MaterialContextPreviousWorldViewOrigin(c) ((c).previousWorldViewOrigin)
+#define MaterialContextTemporalSampleCount(c) ((c).temporalSampleCount)
+#define MaterialContextTemporalSampleIndex(c) ((c).temporalSampleIndex)
+#define MaterialContextTemporalSampleOffset(c) ((c).temporalSampleOffset)
+#define MaterialContextPreExposure(c) ((c).preExposure)
+#define MaterialContextOneOverPreExposure(c) ((c).oneOverPreExposure)
+#define MaterialContextResolutionFraction(c) ((c).resolutionFraction)
+#define MaterialContextResolutionFractionInverse(c) ((c).resolutionFractionInverse)
+#define MaterialContextPostVolumeUserFlags(c) ((c).postVolumeUserFlags)
+#define MaterialContextFirstPersonFieldOfView(c) ((c).firstPersonFieldOfView)
+#define MaterialContextPreviousFirstPersonFieldOfView(c) ((c).previousFirstPersonFieldOfView)
+#define MaterialContextFirstPersonTanHalfFieldOfView(c) ((c).firstPersonTanHalfFieldOfView)
+#define MaterialContextPreviousFirstPersonTanHalfFieldOfView(c) ((c).previousFirstPersonTanHalfFieldOfView)
+#define MaterialContextFirstPersonCotanHalfFieldOfView(c) ((c).firstPersonCotanHalfFieldOfView)
+#define MaterialContextPreviousFirstPersonCotanHalfFieldOfView(c) ((c).previousFirstPersonCotanHalfFieldOfView)
+#define MaterialContextFirstPersonScale(c) ((c).firstPersonScale)
+#define MaterialContextPreviousFirstPersonScale(c) ((c).previousFirstPersonScale)
+#define MaterialContextNearPlane(c) ((c).nearPlane)
+#define MaterialContextTransformTranslatedWorldPositionToCamera(c, a0) MaterialPassTransformTranslatedWorldPositionToCamera(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToCamera(c, a0) MaterialPassPreviousTransformTranslatedWorldPositionToCamera(c, a0)
+#define MaterialContextTransformTranslatedWorldVectorToCamera(c, a0) MaterialPassTransformTranslatedWorldVectorToCamera(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToCamera(c, a0) MaterialPassPreviousTransformTranslatedWorldVectorToCamera(c, a0)
+#define MaterialContextTransformTranslatedWorldPositionToView(c, a0) MaterialPassTransformTranslatedWorldPositionToView(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToView(c, a0) MaterialPassPreviousTransformTranslatedWorldPositionToView(c, a0)
+#define MaterialContextTransformTranslatedWorldVectorToView(c, a0) MaterialPassTransformTranslatedWorldVectorToView(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToView(c, a0) MaterialPassPreviousTransformTranslatedWorldVectorToView(c, a0)
+#define MaterialContextTransformCameraPositionToTranslatedWorld(c, a0) MaterialPassTransformCameraPositionToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformCameraPositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformCameraPositionToTranslatedWorld(c, a0)
+#define MaterialContextTransformCameraVectorToTranslatedWorld(c, a0) MaterialPassTransformCameraVectorToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformCameraVectorToTranslatedWorld(c, a0) MaterialPassPreviousTransformCameraVectorToTranslatedWorld(c, a0)
+#define MaterialContextTransformViewPositionToTranslatedWorld(c, a0) MaterialPassTransformViewPositionToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformViewPositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformViewPositionToTranslatedWorld(c, a0)
+#define MaterialContextTransformViewVectorToTranslatedWorld(c, a0) MaterialPassTransformViewVectorToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformViewVectorToTranslatedWorld(c, a0) MaterialPassPreviousTransformViewVectorToTranslatedWorld(c, a0)
+#define MaterialContextPeriodicWorldOrigin(c, a0) MaterialPassPeriodicWorldOrigin(c, a0)
+#define MaterialContextPeriodicWorldOriginPow2(c, a0) MaterialPassPeriodicWorldOriginPow2(c, a0)
 #else
 #define MaterialContextCameraVector(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextDeltaTime(c) (0.0)
@@ -247,9 +352,50 @@ struct MaterialInputs {
 #define MaterialContextPreviousCameraPosition(c) ((MaterialDouble3)0)
 #define MaterialContextViewSize(c) float2(0.0, 0.0)
 #define MaterialContextSceneTexelSize(c) float2(0.0, 0.0)
-#define MaterialContextViewProperty(c, a0) float4(0.0, 0.0, 0.0, 0.0)
-#define MaterialContextPreviousViewProperty(c, a0) float4(0.0, 0.0, 0.0, 0.0)
 #define MaterialContextScreenPosition(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextViewFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousViewFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextViewTanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousViewTanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextViewCotanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousViewCotanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextWorldViewOrigin(c) ((MaterialDouble3)0)
+#define MaterialContextPreviousWorldViewOrigin(c) ((MaterialDouble3)0)
+#define MaterialContextTemporalSampleCount(c) (0.0)
+#define MaterialContextTemporalSampleIndex(c) (0.0)
+#define MaterialContextTemporalSampleOffset(c) float2(0.0, 0.0)
+#define MaterialContextPreExposure(c) (0.0)
+#define MaterialContextOneOverPreExposure(c) (0.0)
+#define MaterialContextResolutionFraction(c) (0.0)
+#define MaterialContextResolutionFractionInverse(c) (0.0)
+#define MaterialContextPostVolumeUserFlags(c) (0.0)
+#define MaterialContextFirstPersonFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousFirstPersonFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextFirstPersonTanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousFirstPersonTanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextFirstPersonCotanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextPreviousFirstPersonCotanHalfFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextFirstPersonScale(c) (0.0)
+#define MaterialContextPreviousFirstPersonScale(c) (0.0)
+#define MaterialContextNearPlane(c) (0.0)
+#define MaterialContextTransformTranslatedWorldPositionToCamera(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToCamera(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldVectorToCamera(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToCamera(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldPositionToView(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToView(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldVectorToView(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToView(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformCameraPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformCameraPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformCameraVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformCameraVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformViewPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformViewPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformViewVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformViewVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPeriodicWorldOrigin(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPeriodicWorldOriginPow2(c, a0) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_VERTEX
@@ -267,11 +413,19 @@ struct MaterialInputs {
 #define MaterialContextLocalPosition(c) ((c).localPosition)
 #define MaterialContextPreviousLocalPosition(c) ((c).previousLocalPosition)
 #define MaterialContextPixelNormal(c) ((c).pixelNormal)
+#define MaterialContextTranslatedWorldPositionNoShaderOffsets(c) ((c).translatedWorldPositionNoShaderOffsets)
+#define MaterialContextLocalPositionNoShaderOffsets(c) ((c).localPositionNoShaderOffsets)
+#define MaterialContextPrimitivePosition(c) ((c).primitivePosition)
+#define MaterialContextPreviousPrimitivePosition(c) ((c).previousPrimitivePosition)
+#define MaterialContextPrimitivePositionNoShaderOffsets(c) ((c).primitivePositionNoShaderOffsets)
+#define MaterialContextUnMirrored(c) ((c).unMirrored)
+#define MaterialContextTransformTangentVectorToWorld(c, a0) MaterialPassTransformTangentVectorToWorld(c, a0)
+#define MaterialContextTransformWorldVectorToTangent(c, a0) MaterialPassTransformWorldVectorToTangent(c, a0)
 #else
 #define MaterialContextTwoSidedSign(c) (0.0)
 #define MaterialContextVertexColor(c) float4(0.0, 0.0, 0.0, 0.0)
-#define MaterialContextVertexNormal(c) float3(0.0, 0.0, 0.0)
-#define MaterialContextVertexTangent(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextVertexNormal(c) float3(0.0, 0.0, 1.0)
+#define MaterialContextVertexTangent(c) float3(1.0, 0.0, 0.0)
 #define MaterialContextTangentToWorld(c) ((float3x3)0)
 #define MaterialContextTexCoord(c, a0) float2(0.0, 0.0)
 #define MaterialContextWorldPosition(c) ((MaterialDouble3)0)
@@ -282,6 +436,14 @@ struct MaterialInputs {
 #define MaterialContextLocalPosition(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextPreviousLocalPosition(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextPixelNormal(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextTranslatedWorldPositionNoShaderOffsets(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextLocalPositionNoShaderOffsets(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextPrimitivePosition(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousPrimitivePosition(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextPrimitivePositionNoShaderOffsets(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextUnMirrored(c) (0.0)
+#define MaterialContextTransformTangentVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldVectorToTangent(c, a0) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_PRIMITIVE
@@ -320,6 +482,36 @@ struct MaterialInputs {
 #define MaterialContextActorPosition(c) ((c).actorPosition)
 #define MaterialContextPreviousActorPosition(c) ((c).previousActorPosition)
 #define MaterialContextDistanceCullFade(c) ((c).distanceCullFade)
+#define MaterialContextObjectTranslatedPosition(c) ((c).objectTranslatedPosition)
+#define MaterialContextActorTranslatedPosition(c) ((c).actorTranslatedPosition)
+#define MaterialContextPreviousActorTranslatedPosition(c) ((c).previousActorTranslatedPosition)
+#define MaterialContextTransformLocalPositionToWorld(c, a0) MaterialPassTransformLocalPositionToWorld(c, a0)
+#define MaterialContextPreviousTransformLocalPositionToWorld(c, a0) MaterialPassPreviousTransformLocalPositionToWorld(c, a0)
+#define MaterialContextTransformLocalVectorToWorld(c, a0) MaterialPassTransformLocalVectorToWorld(c, a0)
+#define MaterialContextPreviousTransformLocalVectorToWorld(c, a0) MaterialPassPreviousTransformLocalVectorToWorld(c, a0)
+#define MaterialContextTransformLocalPositionToTranslatedWorld(c, a0) MaterialPassTransformLocalPositionToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformLocalPositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformLocalPositionToTranslatedWorld(c, a0)
+#define MaterialContextTransformTranslatedWorldPositionToLocal(c, a0) MaterialPassTransformTranslatedWorldPositionToLocal(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToLocal(c, a0) MaterialPassPreviousTransformTranslatedWorldPositionToLocal(c, a0)
+#define MaterialContextTransformTranslatedWorldVectorToLocal(c, a0) MaterialPassTransformTranslatedWorldVectorToLocal(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToLocal(c, a0) MaterialPassPreviousTransformTranslatedWorldVectorToLocal(c, a0)
+#define MaterialContextTransformTranslatedWorldPositionToInstance(c, a0) MaterialPassTransformTranslatedWorldPositionToInstance(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToInstance(c, a0) MaterialPassPreviousTransformTranslatedWorldPositionToInstance(c, a0)
+#define MaterialContextTransformTranslatedWorldVectorToInstance(c, a0) MaterialPassTransformTranslatedWorldVectorToInstance(c, a0)
+#define MaterialContextTransformWorldPositionToLocal(c, a0) MaterialPassTransformWorldPositionToLocal(c, a0)
+#define MaterialContextPreviousTransformWorldPositionToLocal(c, a0) MaterialPassPreviousTransformWorldPositionToLocal(c, a0)
+#define MaterialContextTransformWorldVectorToLocal(c, a0) MaterialPassTransformWorldVectorToLocal(c, a0)
+#define MaterialContextPreviousTransformWorldVectorToLocal(c, a0) MaterialPassPreviousTransformWorldVectorToLocal(c, a0)
+#define MaterialContextTransformWorldPositionToInstance(c, a0) MaterialPassTransformWorldPositionToInstance(c, a0)
+#define MaterialContextTransformWorldVectorToInstance(c, a0) MaterialPassTransformWorldVectorToInstance(c, a0)
+#define MaterialContextTransformInstancePositionToWorld(c, a0) MaterialPassTransformInstancePositionToWorld(c, a0)
+#define MaterialContextPreviousTransformInstancePositionToWorld(c, a0) MaterialPassPreviousTransformInstancePositionToWorld(c, a0)
+#define MaterialContextTransformInstanceVectorToWorld(c, a0) MaterialPassTransformInstanceVectorToWorld(c, a0)
+#define MaterialContextPreviousTransformInstanceVectorToWorld(c, a0) MaterialPassPreviousTransformInstanceVectorToWorld(c, a0)
+#define MaterialContextTransformInstancePositionToTranslatedWorld(c, a0) MaterialPassTransformInstancePositionToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformInstancePositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformInstancePositionToTranslatedWorld(c, a0)
+#define MaterialContextTransformInstanceVectorToTranslatedWorld(c, a0) MaterialPassTransformInstanceVectorToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformInstanceVectorToTranslatedWorld(c, a0) MaterialPassPreviousTransformInstanceVectorToTranslatedWorld(c, a0)
 #else
 #define MaterialContextObjectBounds(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextObjectOrientation(c) float3(0.0, 0.0, 0.0)
@@ -356,6 +548,36 @@ struct MaterialInputs {
 #define MaterialContextActorPosition(c) ((MaterialDouble3)0)
 #define MaterialContextPreviousActorPosition(c) ((MaterialDouble3)0)
 #define MaterialContextDistanceCullFade(c) (0.0)
+#define MaterialContextObjectTranslatedPosition(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextActorTranslatedPosition(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousActorTranslatedPosition(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformLocalPositionToWorld(c, a0) ((MaterialDouble3)0)
+#define MaterialContextPreviousTransformLocalPositionToWorld(c, a0) ((MaterialDouble3)0)
+#define MaterialContextTransformLocalVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformLocalVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformLocalPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformLocalPositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldPositionToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldVectorToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldVectorToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldPositionToInstance(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToInstance(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldVectorToInstance(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldPositionToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformWorldPositionToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldVectorToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformWorldVectorToLocal(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldPositionToInstance(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldVectorToInstance(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformInstancePositionToWorld(c, a0) ((MaterialDouble3)0)
+#define MaterialContextPreviousTransformInstancePositionToWorld(c, a0) ((MaterialDouble3)0)
+#define MaterialContextTransformInstanceVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformInstanceVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformInstancePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformInstancePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformInstanceVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformInstanceVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_SKIN
@@ -447,11 +669,21 @@ struct MaterialInputs {
 #define MaterialContextGetWorldToParticle(c) MaterialPassGetWorldToParticle(c)
 #define MaterialContextParticleToWorld(c) ((c).particleToWorld)
 #define MaterialContextWorldToParticle(c) ((c).worldToParticle)
+#define MaterialContextTransformTranslatedWorldPositionToParticle(c, a0) MaterialPassTransformTranslatedWorldPositionToParticle(c, a0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToParticle(c, a0) MaterialPassPreviousTransformTranslatedWorldPositionToParticle(c, a0)
+#define MaterialContextTransformTranslatedWorldVectorToParticle(c, a0) MaterialPassTransformTranslatedWorldVectorToParticle(c, a0)
+#define MaterialContextTransformWorldPositionToParticle(c, a0) MaterialPassTransformWorldPositionToParticle(c, a0)
+#define MaterialContextTransformWorldVectorToParticle(c, a0) MaterialPassTransformWorldVectorToParticle(c, a0)
+#define MaterialContextTransformParticlePositionToWorld(c, a0) MaterialPassTransformParticlePositionToWorld(c, a0)
+#define MaterialContextTransformParticleVectorToWorld(c, a0) MaterialPassTransformParticleVectorToWorld(c, a0)
+#define MaterialContextTransformParticlePositionToTranslatedWorld(c, a0) MaterialPassTransformParticlePositionToTranslatedWorld(c, a0)
+#define MaterialContextPreviousTransformParticlePositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformParticlePositionToTranslatedWorld(c, a0)
+#define MaterialContextTransformParticleVectorToTranslatedWorld(c, a0) MaterialPassTransformParticleVectorToTranslatedWorld(c, a0)
 #else
 #define MaterialContextParticleColor(c) float4(1.0, 1.0, 1.0, 1.0)
 #define MaterialContextParticleDirection(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextParticleMacroUv(c) float2(0.0, 0.0)
-#define MaterialContextParticleMotionBlurFade(c) (0.0)
+#define MaterialContextParticleMotionBlurFade(c) (1.0)
 #define MaterialContextParticlePositionAbsolute(c) ((MaterialDouble3)0)
 #define MaterialContextPreviousParticlePositionAbsolute(c) ((MaterialDouble3)0)
 #define MaterialContextParticlePositionTranslated(c) float3(0.0, 0.0, 0.0)
@@ -470,6 +702,16 @@ struct MaterialInputs {
 #define MaterialContextGetWorldToParticle(c) ((float4x4)0)
 #define MaterialContextParticleToWorld(c) ((float4x4)0)
 #define MaterialContextWorldToParticle(c) ((float4x4)0)
+#define MaterialContextTransformTranslatedWorldPositionToParticle(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformTranslatedWorldPositionToParticle(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformTranslatedWorldVectorToParticle(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldPositionToParticle(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformWorldVectorToParticle(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformParticlePositionToWorld(c, a0) ((MaterialDouble3)0)
+#define MaterialContextTransformParticleVectorToWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformParticlePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformParticlePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextTransformParticleVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_VOLUME
@@ -490,6 +732,16 @@ struct MaterialInputs {
 #define MaterialContextCloudEmptySpaceSkippingSphereRadius(c) (0.0)
 #endif
 
+#if MATERIAL_SUPPLY_RUNTIME_VIRTUAL_TEXTURE
+#define MaterialContextRuntimeVirtualTextureOutputLevel(c) ((c).runtimeVirtualTextureOutputLevel)
+#define MaterialContextRuntimeVirtualTextureOutputDerivative(c) ((c).runtimeVirtualTextureOutputDerivative)
+#define MaterialContextRuntimeVirtualTextureMaxLevel(c) ((c).runtimeVirtualTextureMaxLevel)
+#else
+#define MaterialContextRuntimeVirtualTextureOutputLevel(c) (0.0)
+#define MaterialContextRuntimeVirtualTextureOutputDerivative(c) float2(0.0, 0.0)
+#define MaterialContextRuntimeVirtualTextureMaxLevel(c) (0.0)
+#endif
+
 #if MATERIAL_SUPPLY_MESH_PAINT
 #define MaterialContextMeshPaintTextureCoordinateIndex(c) MaterialPassMeshPaintTextureCoordinateIndex(c)
 #define MaterialContextMeshPaintTextureValid(c) MaterialPassMeshPaintTextureValid(c)
@@ -500,8 +752,20 @@ struct MaterialInputs {
 
 #if MATERIAL_SUPPLY_FIRST_PERSON
 #define MaterialContextIsFirstPerson(c) MaterialPassIsFirstPerson(c)
+#define MaterialContextTransformToFirstPerson(c, a0, a1) MaterialPassTransformToFirstPerson(c, a0, a1)
+#define MaterialContextPreviousTransformToFirstPerson(c, a0, a1) MaterialPassPreviousTransformToFirstPerson(c, a0, a1)
 #else
 #define MaterialContextIsFirstPerson(c) (0.0)
+#define MaterialContextTransformToFirstPerson(c, a0, a1) float3(0.0, 0.0, 0.0)
+#define MaterialContextPreviousTransformToFirstPerson(c, a0, a1) float3(0.0, 0.0, 0.0)
+#endif
+
+#if MATERIAL_SUPPLY_XR
+#define MaterialContextXrPassthroughCameraUv0(c) ((c).xrPassthroughCameraUv0)
+#define MaterialContextXrPassthroughCameraUv1(c) ((c).xrPassthroughCameraUv1)
+#else
+#define MaterialContextXrPassthroughCameraUv0(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextXrPassthroughCameraUv1(c) float4(0.0, 0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_USER_INTERFACE

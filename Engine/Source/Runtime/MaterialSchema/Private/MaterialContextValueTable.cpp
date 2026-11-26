@@ -147,7 +147,7 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("ParticleMotionBlurFade", "ParticleMotionBlurFade", MaterialPinType::Float1,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::Particle,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::Zero, {}, false),
+                 MaterialDerivative::Zero, {1.0f}, false),
     // UE ParticlePositionWSAbsolute.
     ContextValue("ParticlePositionAbsolute", "ParticlePositionWSAbsolute", MaterialPinType::Double3,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::Particle,
@@ -267,12 +267,12 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("VertexNormal", "VertexNormal", MaterialPinType::Float3,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::Vertex,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::Valid, {}, false),
+                 MaterialDerivative::Valid, {0.0f, 0.0f, 1.0f}, false),
     // UE VertexTangent.
     ContextValue("VertexTangent", "VertexTangent", MaterialPinType::Float3,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::Vertex,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::NotAware, {}, false),
+                 MaterialDerivative::NotAware, {1.0f, 0.0f, 0.0f}, false),
     // UE ViewportUV.
     ContextValue("ViewportUv", "ViewportUV", MaterialPinType::Float2,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::View,
@@ -579,10 +579,6 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("SceneTexelSize", "", MaterialPinType::Float2, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
-    // UE 템플릿 필드 ViewProperty 노드 — 속성 번호 하나.
-    ContextValue("ViewProperty", "", MaterialPinType::Float4, MaterialContextValueForm::Function, 1,
-                 MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE 템플릿 필드 Parameters.TexCoords[i].
     ContextValue("TexCoord", "", MaterialPinType::Float2, MaterialContextValueForm::Function, 1,
                  MaterialContextFeature::Vertex, AllMaterialDomains, AllMaterialStages,
@@ -628,6 +624,328 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("DistanceCullFade", "", MaterialPinType::Float1, MaterialContextValueForm::Field,
                  0, MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE 템플릿 GetTranslatedWorldPosition_NoMaterialOffsets(Parameters)(픽셀 단계).
+    ContextValue("TranslatedWorldPositionNoShaderOffsets", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Vertex,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Valid, {}, false),
+    // UE 템플릿 GetPositionInstanceSpace_NoMaterialOffsets(Parameters)(픽셀 단계).
+    ContextValue("LocalPositionNoShaderOffsets", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Vertex,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Valid, {}, false),
+    // UE 템플릿 GetPositionPrimitiveSpace(Parameters)(이전 프레임 Prev).
+    ContextValue("PrimitivePosition", "", MaterialPinType::Float3, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::Vertex, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, true),
+    // UE 템플릿 GetPositionPrimitiveSpace_NoMaterialOffsets(Parameters)(픽셀 단계).
+    ContextValue("PrimitivePositionNoShaderOffsets", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Vertex,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Valid, {}, false),
+    // UE 템플릿 GetObjectTranslatedWorldPosition(Parameters).
+    ContextValue("ObjectTranslatedPosition", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE 템플릿 GetActorTranslatedWorldPosition(Parameters)(이전 프레임 GetPrevious…).
+    ContextValue("ActorTranslatedPosition", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::DeferredDecal) |
+                     ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
+                 true),
+    // UE 템플릿 Parameters.UnMirrored(UnMirrorU·V — 픽셀 단계).
+    ContextValue("UnMirrored", "", MaterialPinType::Float1, MaterialContextValueForm::Field, 0,
+                 MaterialContextFeature::Vertex, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE ResolvedView.XRPassthroughCameraUVs[0].
+    ContextValue("XrPassthroughCameraUv0", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Xr, AllMaterialDomains,
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
+                 false),
+    // UE ResolvedView.XRPassthroughCameraUVs[1].
+    ContextValue("XrPassthroughCameraUv1", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::Xr, AllMaterialDomains,
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
+                 false),
+    // UE View.<PREV>FieldOfViewWideAngles(ViewProperty FieldOfView).
+    ContextValue("ViewFieldOfView", "", MaterialPinType::Float2, MaterialContextValueForm::Field, 0,
+                 MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
+    // UE Get<PREV>TanHalfFieldOfView().
+    ContextValue("ViewTanHalfFieldOfView", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, true),
+    // UE Get<PREV>CotanHalfFieldOfView().
+    ContextValue("ViewCotanHalfFieldOfView", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, true),
+    // UE Get<PREV>WorldViewOrigin(Parameters).
+    ContextValue("WorldViewOrigin", "", MaterialPinType::Double3, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
+    // UE View.TemporalAAParams.y.
+    ContextValue("TemporalSampleCount", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.TemporalAAParams.x.
+    ContextValue("TemporalSampleIndex", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.TemporalAAParams.zw.
+    ContextValue("TemporalSampleOffset", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetRuntimeVirtualTextureMipLevel().x.
+    ContextValue("RuntimeVirtualTextureOutputLevel", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::RuntimeVirtualTexture,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetRuntimeVirtualTextureMipLevel().zw.
+    ContextValue("RuntimeVirtualTextureOutputDerivative", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::RuntimeVirtualTexture,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE GetRuntimeVirtualTextureMipLevel().y.
+    ContextValue("RuntimeVirtualTextureMaxLevel", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::RuntimeVirtualTexture,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.PreExposure.
+    ContextValue("PreExposure", "", MaterialPinType::Float1, MaterialContextValueForm::Field, 0,
+                 MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE View.OneOverPreExposure.
+    ContextValue("OneOverPreExposure", "", MaterialPinType::Float1, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE View.ResolutionFractionAndInv.x.
+    ContextValue("ResolutionFraction", "", MaterialPinType::Float1, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE View.ResolutionFractionAndInv.y.
+    ContextValue("ResolutionFractionInverse", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.PostVolumeUserFlags.
+    ContextValue("PostVolumeUserFlags", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.<PREV>FirstPersonFieldOfViewWideAngles.
+    ContextValue("FirstPersonFieldOfView", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, true),
+    // UE View.<PREV>FirstPersonTanAndInvTanHalfFOV.xy.
+    ContextValue("FirstPersonTanHalfFieldOfView", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, true),
+    // UE View.<PREV>FirstPersonTanAndInvTanHalfFOV.zw.
+    ContextValue("FirstPersonCotanHalfFieldOfView", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, true),
+    // UE View.<PREV>FirstPersonScale.
+    ContextValue("FirstPersonScale", "", MaterialPinType::Float1, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
+    // UE View.NearPlane.
+    ContextValue("NearPlane", "", MaterialPinType::Float1, MaterialContextValueForm::Field, 0,
+                 MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+    // UE mul(A, Parameters.TangentToWorld).
+    ContextValue("TransformTangentVectorToWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Vertex,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE mul((float3x3)Parameters.TangentToWorld, A)(World·TranslatedWorld → Tangent).
+    ContextValue("TransformWorldVectorToTangent", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Vertex,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE TransformLocalPositionTo<PREV>World.
+    ContextValue("TransformLocalPositionToWorld", "", MaterialPinType::Double3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE TransformLocalVectorTo<PREV>World.
+    ContextValue("TransformLocalVectorToWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Get<PREV>LocalToWorldDF(Parameters)의 translated world 곱.
+    ContextValue("TransformLocalPositionToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>TranslatedWorldToCameraView(위치).
+    ContextValue("TransformTranslatedWorldPositionToCamera", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>TranslatedWorldToCameraView(벡터).
+    ContextValue("TransformTranslatedWorldVectorToCamera", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>TranslatedWorldToView(위치).
+    ContextValue("TransformTranslatedWorldPositionToView", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>TranslatedWorldToView(벡터).
+    ContextValue("TransformTranslatedWorldVectorToView", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Get<PREV>WorldToLocalDF(Parameters)(위치 — Surface·Volume).
+    ContextValue("TransformTranslatedWorldPositionToLocal", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware,
+                 {}, true),
+    // UE Get<PREV>WorldToLocalDF(Parameters)(벡터 — Surface·Volume).
+    ContextValue("TransformTranslatedWorldVectorToLocal", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware,
+                 {}, true),
+    // UE Parameters.Particle.WorldToParticle(위치 — 이전 프레임은 PrevPreViewTranslation).
+    ContextValue("TransformTranslatedWorldPositionToParticle", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Parameters.Particle.WorldToParticle(벡터).
+    ContextValue("TransformTranslatedWorldVectorToParticle", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetWorldToInstanceDF(Parameters)(위치 — 이전 프레임은 PrevPreViewTranslation).
+    ContextValue("TransformTranslatedWorldPositionToInstance", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE GetWorldToInstanceDF(Parameters)(벡터).
+    ContextValue("TransformTranslatedWorldVectorToInstance", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiplyDemote(A, Get<PREV>WorldToLocal(Parameters))(Surface·Volume).
+    ContextValue("TransformWorldPositionToLocal", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware,
+                 {}, true),
+    // UE WSMultiplyVector(A, Get<PREV>WorldToLocal(Parameters))(Surface·Volume).
+    ContextValue("TransformWorldVectorToLocal", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware,
+                 {}, true),
+    // UE WSMultiplyDemote(A, GetWorldToParticle(Parameters)).
+    ContextValue("TransformWorldPositionToParticle", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiplyVector(A, GetWorldToParticle(Parameters)).
+    ContextValue("TransformWorldVectorToParticle", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiplyDemote(A, GetWorldToInstance(Parameters)).
+    ContextValue("TransformWorldPositionToInstance", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiplyVector(A, GetWorldToInstance(Parameters)).
+    ContextValue("TransformWorldVectorToInstance", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE ResolvedView.<PREV>CameraViewToTranslatedWorld(위치).
+    ContextValue("TransformCameraPositionToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>CameraViewToTranslatedWorld(벡터).
+    ContextValue("TransformCameraVectorToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>ViewToTranslatedWorld(위치).
+    ContextValue("TransformViewPositionToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE ResolvedView.<PREV>ViewToTranslatedWorld(벡터).
+    ContextValue("TransformViewVectorToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE WSMultiply(A, GetParticleToWorld(Parameters)).
+    ContextValue("TransformParticlePositionToWorld", "", MaterialPinType::Double3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiplyVector(A, GetParticleToWorld(Parameters)).
+    ContextValue("TransformParticleVectorToWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE Parameters.Particle.ParticleToWorld(위치 — 이전 프레임은 PrevPreViewTranslation).
+    ContextValue("TransformParticlePositionToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Parameters.Particle.ParticleToWorld(벡터).
+    ContextValue("TransformParticleVectorToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE WSMultiply(A, Get<PREV>InstanceToWorld(Parameters)).
+    ContextValue("TransformInstancePositionToWorld", "", MaterialPinType::Double3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE WSMultiplyVector(A, Get<PREV>InstanceToWorld(Parameters)).
+    ContextValue("TransformInstanceVectorToWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Get<PREV>InstanceToWorldDF(Parameters)(위치).
+    ContextValue("TransformInstancePositionToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE Get<PREV>InstanceToWorldDF(Parameters)(벡터).
+    ContextValue("TransformInstanceVectorToTranslatedWorld", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
+    // UE GetPeriodicWorldOrigin(Scale)(MaterialTemplate.ush:1031).
+    ContextValue("PeriodicWorldOrigin", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetPeriodicWorldOrigin_Pow2(Scale)(MaterialTemplate.ush:1041).
+    ContextValue("PeriodicWorldOriginPow2", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE TransformTo<PREVIOUS>FirstPerson(A, alpha).
+    ContextValue("TransformToFirstPerson", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::FirstPerson,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, true),
 };
 
 } // namespace

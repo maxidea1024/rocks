@@ -169,6 +169,16 @@ IrBuilder& LoweringContext::Builder() noexcept {
     return builder;
 }
 
+Result<IrValueId> LoweringContext::NamedDynamicInput(StringView key,
+                                                     Optional<float> fallback) noexcept {
+    auto name = PinName(key);
+    if (!name) {
+        return Result<IrValueId>::Failure(name.Error());
+    }
+
+    return DynamicInput(name.Value(), fallback, false);
+}
+
 Result<Name> LoweringContext::PinName(StringView key) noexcept {
     return translator_.Names().TryIntern(key);
 }
@@ -1002,7 +1012,16 @@ Result<IrValueId> LoweringContext::Binary(IrOp op, IrValueId left, IrValueId rig
         return Result<IrValueId>::Success(NoIrValue);
     }
 
-    return LoweringBuilt(*this, Builder().Binary(op, a.Value(), b.Value()));
+    auto result = LoweringBuilt(*this, Builder().Binary(op, a.Value(), b.Value()));
+    const IrType leftType = TypeOf(left);
+    if (!result || result.Value() == NoIrValue || op != IrOp::Subtract ||
+        leftType.scalar != IrScalar::Double || !(leftType == TypeOf(right))) {
+        return result;
+    }
+
+    // 같은 Double 타입 둘의 뺄셈은 상대 값으로 보고 Float로 자른다(6.9절 — UE Sub의
+    // LWCTruncateMode 기본 2, HLSLMaterialTranslator.cpp:9550–9575).
+    return Convert(result.Value(), IrScalar::Float);
 }
 
 Result<IrValueId> LoweringContext::Ternary(IrOp op, IrValueId first, IrValueId second,

@@ -339,8 +339,9 @@ TEST(MaterialSourceWriter_Definitions) {
         Contains(text, "float EvaluateMaterialOpacity(in MaterialInputs c) {\n    return 1.0;\n}"));
 }
 
-// 생성할 수 없는 값(Double — LWC 표현은 MS2b)은 원인 노드에 NotYetLowered다.
-TEST(MaterialSourceWriter_RejectsDoubleValues) {
+// Double 값은 LWC 표현(tile + offset — 6.9절)으로 생성된다. LWC 표현이 없는 연산(UE IR 전용
+// WorldPositionTile)이 결과에 닿으면 원인 노드에 NotYetLowered 하나이고 원문이 없다.
+TEST(MaterialSourceWriter_DoubleValues) {
     TranslatorEnv env;
     REQUIRE(env.ready);
     GraphFixture fixture(env);
@@ -349,6 +350,7 @@ TEST(MaterialSourceWriter_RejectsDoubleValues) {
     const Guid wide = fixture.Add("Material.ConstantDouble", env.Save(precise));
     const Guid sum = fixture.Add("Material.Add");
     fixture.Connect(wide, "Result", sum, "A");
+    fixture.Connect(AddVarying(fixture, 0.5f), "Result", sum, "B");
     fixture.Connect(sum, "Result", OutputNodeId, "AmbientOcclusion");
     REQUIRE(fixture.ready);
     MaterialTranslation translation(env.allocator);
@@ -357,16 +359,31 @@ TEST(MaterialSourceWriter_RejectsDoubleValues) {
     MaterialGeneratedSource source(env.allocator);
     REQUIRE(WriteMaterialSource(env.allocator, translation.module, Traits(), TestAssetId,
                                 MainGraphId, source));
-    CHECK(!source.succeeded);
-    CHECK(source.text.IsEmpty());
-    bool found = false;
-    for (const nodegraph::GraphDiagnostic& diagnostic : source.diagnostics.items) {
-        found =
-            found || (diagnostic.code == ToDiagnosticCode(MaterialDiagnosticCode::NotYetLowered) &&
-                      (diagnostic.node == wide || diagnostic.node == sum));
-    }
+    REQUIRE(source.succeeded);
+    CHECK(Contains(source.text.View(), "MaterialDoubleAdd(MakeMaterialDouble1(0.0, 2.5), "));
+    CHECK(Contains(source.text.View(), "MaterialDoublePromote("));
+    CHECK(Contains(source.text.View(), "MaterialDoubleDemote("));
 
-    CHECK(found);
+    IrBuilder builder(env.allocator);
+    const Guid site{NodeIdHigh, 77};
+    builder.SetSite(IrSite{site, StringView()});
+    const double components[] = {1.0};
+    auto constant = builder.DoubleConstant(Span<const double>(components, 1));
+    REQUIRE(constant);
+    auto tile = builder.Unary(IrOp::WorldPositionTile, constant.Value());
+    REQUIRE(tile);
+    const IrResult results[] = {{IrEntry::Surface, "AmbientOcclusion", tile.Value()}};
+    IrModule module(env.allocator);
+    REQUIRE(BuildIrModule(builder, results, module));
+    MaterialGeneratedSource rejected(env.allocator);
+    REQUIRE(
+        WriteMaterialSource(env.allocator, module, Traits(), TestAssetId, MainGraphId, rejected));
+    CHECK(!rejected.succeeded);
+    CHECK(rejected.text.IsEmpty());
+    REQUIRE(rejected.diagnostics.items.Size() == 1);
+    CHECK(rejected.diagnostics.items[0].code ==
+          ToDiagnosticCode(MaterialDiagnosticCode::NotYetLowered));
+    CHECK(rejected.diagnostics.items[0].node == site);
 }
 
 // 연산 철자(7.7절): 비트 검사·논리 매크로·부정·역수·sign 감싸기·빠른 역삼각·역쌍곡·uint 변환·-0.0

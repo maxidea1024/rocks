@@ -13,6 +13,7 @@
 
 #include "/Engine/Private/Common/ShaderPrelude.rsh"
 #include "/Engine/Private/Shading/SurfaceAttributes.rsh"
+#include "/Engine/Private/Material/MaterialSelect.rsh"
 
 // 문맥 구조체(MaterialVertexInputs·MaterialInputs)·공급 표지·접근자다(6.9절 — 문맥 값 표에서 만든
 // 파일).
@@ -23,17 +24,6 @@ struct MaterialVertexResult {
     // world 공간 위치 오프셋(cm)이다(UE WorldPositionOffset).
     float3 worldPositionOffset;
 };
-
-// 벡터 조건 선택·논리곱·논리합이다(7.7절). HLSL 2021은 벡터 ?:·&&·||를 막고 select·and·or를 준다.
-#if ROCKS_HLSL2021
-#define MaterialSelect(condition, whenTrue, whenFalse) select(condition, whenTrue, whenFalse)
-#define MaterialAnd(left, right) and(left, right)
-#define MaterialOr(left, right) or(left, right)
-#else
-#define MaterialSelect(condition, whenTrue, whenFalse) ((condition) ? (whenTrue) : (whenFalse))
-#define MaterialAnd(left, right) ((left) && (right))
-#define MaterialOr(left, right) ((left) || (right))
-#endif
 
 // float 비트에서 부호를 뺀 마스크와 지수가 모두 1인 값이다(NaN·Inf 판정).
 static const uint MaterialFloatMagnitudeMask = 0x7fffffffu;

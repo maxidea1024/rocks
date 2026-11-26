@@ -99,6 +99,8 @@ public:
     // 동적 입력 key의 값이다. 연결이 없으면 fallback(있으면 Float 스칼라 상수)이고, 없고 required면
     // MissingInput이다.
     Result<IrValueId> DynamicInput(Name key, Optional<float> fallback, bool required) noexcept;
+    // 키 원문으로 찾는 동적 입력이다(필수 아님 — 연결이 없으면 fallback).
+    Result<IrValueId> NamedDynamicInput(StringView key, Optional<float> fallback) noexcept;
 
     // 출력 하나를 기록한다. NoIrValue는 기록하지 않는다(받는 쪽이 NoIrValue를 본다).
     Result<void> Output(StringView key, IrValueId value) noexcept;

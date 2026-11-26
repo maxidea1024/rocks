@@ -347,7 +347,7 @@ Result<void> LowerPerInstanceCustomData3(LoweringContext& context) noexcept {
     return LowerPerInstanceCustomDataOf(context, "PerInstanceCustomData3Vector", IrFloat(3));
 }
 
-constexpr LoweringEntry Entries[] = {
+constexpr LoweringEntry ContextValueEntries[] = {
     {"Material.DeltaTime", &LowerSingleValue},
     {"Material.IsOrthographic", &LowerSingleValue},
     {"Material.TwoSidedSign", &LowerSingleValue},
@@ -401,7 +401,7 @@ constexpr LoweringEntry Entries[] = {
 } // namespace
 
 Span<const LoweringEntry> ContextValueLowerings() noexcept {
-    return Entries;
+    return ContextValueEntries;
 }
 
 } // namespace rocks::material::detail

@@ -1,5 +1,6 @@
 #include <Base/NumericLimits.h>
 #include <Core/Text/StringBuilder.h>
+#include <DeterministicMath/DeterministicMath.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
 #include <MaterialSchema/MaterialContextValue.h>
@@ -57,6 +58,68 @@ constexpr NamedBlend BlendNames[] = {
     {BlendMode::TranslucentColoredTransmittance,
      "MATERIAL_BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE"},
 };
+
+// Double 값(LWC) tile 한 칸의 크기(cm)다(MaterialDouble.rsh MaterialDoubleTileSize — UE
+// UE_LWC_RENDER_TILE_SIZE).
+constexpr double WriterDoubleTileSize = 2097152.0;
+
+double WriterDouble(uint64 bits) noexcept {
+    double value = 0.0;
+    platform::MemoryCopy(&value, &bits, sizeof(value));
+    return value;
+}
+
+uint64 WriterFloatBits(float value) noexcept {
+    uint32 bits = 0;
+    platform::MemoryCopy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+// Double 값을 쓰는 연산의 MaterialDouble.rsh 함수 이름이다(6.9절 LWC 표현). 없으면 빈 문자열이다.
+StringView DoubleFunction(IrOp op) noexcept {
+    switch (op) {
+    case IrOp::Add:
+        return "MaterialDoubleAdd";
+    case IrOp::Subtract:
+        return "MaterialDoubleSubtract";
+    case IrOp::Multiply:
+        return "MaterialDoubleMultiply";
+    case IrOp::Divide:
+        return "MaterialDoubleDivide";
+    case IrOp::Min:
+        return "MaterialDoubleMin";
+    case IrOp::Max:
+        return "MaterialDoubleMax";
+    case IrOp::Abs:
+        return "MaterialDoubleAbs";
+    case IrOp::Floor:
+        return "MaterialDoubleFloor";
+    case IrOp::Ceil:
+        return "MaterialDoubleCeil";
+    case IrOp::Round:
+        return "MaterialDoubleRound";
+    case IrOp::Truncate:
+        return "MaterialDoubleTruncate";
+    case IrOp::Negate:
+        return "MaterialDoubleNegate";
+    case IrOp::Select:
+        return "MaterialDoubleSelect";
+    case IrOp::LessThan:
+        return "MaterialDoubleLess";
+    case IrOp::LessThanOrEquals:
+        return "MaterialDoubleLessEqual";
+    case IrOp::GreaterThan:
+        return "MaterialDoubleGreater";
+    case IrOp::GreaterThanOrEquals:
+        return "MaterialDoubleGreaterEqual";
+    case IrOp::Equals:
+        return "MaterialDoubleEquals";
+    case IrOp::NotEquals:
+        return "MaterialDoubleNotEquals";
+    default:
+        return {};
+    }
+}
 
 float WriterFloat(uint64 bits) noexcept {
     const uint32 narrow = static_cast<uint32>(bits);
@@ -246,6 +309,10 @@ private:
     const IrResult* FindResult(IrEntry entry, StringView slot) const noexcept;
     bool IsZero(const IrResult* result) const noexcept;
     Result<void> Extern(const IrValue& value) noexcept;
+    bool InvolvesDouble(const IrValue& value) const noexcept;
+    Result<void> DoubleLiteral(const IrValue& value) noexcept;
+    Result<void> DoubleParts(const IrValue& value, StringView part) noexcept;
+    Result<void> DoubleExpression(const IrValue& value) noexcept;
     Result<void> UsageDefines() noexcept;
     Result<void> VertexFunction(StringView signature, IrEntry entry) noexcept;
     Result<void> Vertex() noexcept;
@@ -311,7 +378,8 @@ Result<void> SourceWriter::TypeName(IrType type) noexcept {
         scalar = "bool";
         break;
     case IrScalar::Double:
-        scalar = "double";
+        // LWC 표현이다(6.9절 — MaterialDouble.rsh).
+        scalar = "MaterialDouble";
         break;
     }
 
@@ -328,6 +396,10 @@ Result<void> SourceWriter::TypeName(IrType type) noexcept {
             return separator;
         }
 
+        return Uint(type.components);
+    }
+
+    if (type.scalar == IrScalar::Double) {
         return Uint(type.components);
     }
 
@@ -383,7 +455,7 @@ Result<void> SourceWriter::Literal(const IrValue& value) noexcept {
             written = Raw(bits != 0 ? StringView("true") : StringView("false"));
             break;
         case IrScalar::Double:
-            // CheckSupported가 먼저 막는다.
+            // DoubleLiteral이 먼저 낸다.
             written = Result<void>::Failure(ErrorCode::InvalidArgument);
             break;
         }
@@ -403,7 +475,7 @@ Result<void> SourceWriter::Operand(IrValueId id) noexcept {
 
     const IrValue& value = module_.Values()[id];
     if (value.op == IrOp::Constant) {
-        return Literal(value);
+        return value.type.scalar == IrScalar::Double ? DoubleLiteral(value) : Literal(value);
     }
 
     if (auto prefix = Raw("m"); !prefix) {
@@ -466,7 +538,221 @@ Result<void> SourceWriter::Extern(const IrValue& value) noexcept {
     return Raw(")");
 }
 
+bool SourceWriter::InvolvesDouble(const IrValue& value) const noexcept {
+    if (value.op == IrOp::Extern || value.op == IrOp::Branch) {
+        // 문맥 값은 표 타입 그대로(접근자), 분기는 대입문이라 Double도 같은 철자다.
+        return false;
+    }
+
+    if (value.type.scalar == IrScalar::Double) {
+        return true;
+    }
+
+    for (uint8 index = 0; index < value.operandCount; ++index) {
+        if (module_.Values()[value.operands[index]].type.scalar == IrScalar::Double) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Result<void> SourceWriter::DoubleLiteral(const IrValue& value) noexcept {
+    // tile = floor(v / T + 0.5), offset = float(v − tile × T)(6.9절 — T가 2의 거듭제곱이라 뺄셈은
+    // double에서 정확하다).
+    IrValue tiles = value;
+    IrValue offsets = value;
+    tiles.type.scalar = IrScalar::Float;
+    offsets.type.scalar = IrScalar::Float;
+    for (uint8 index = 0; index < value.type.components; ++index) {
+        const double number = WriterDouble(value.immediate[index]);
+        const double tile = deterministic::Floor(number / WriterDoubleTileSize + 0.5);
+        tiles.immediate[index] = WriterFloatBits(static_cast<float>(tile));
+        offsets.immediate[index] =
+            WriterFloatBits(static_cast<float>(number - tile * WriterDoubleTileSize));
+    }
+
+    if (auto make = Raw("Make"); !make) {
+        return make;
+    }
+
+    if (auto type = TypeName(value.type); !type) {
+        return type;
+    }
+
+    if (auto open = Raw("("); !open) {
+        return open;
+    }
+
+    if (auto tile = Literal(tiles); !tile) {
+        return tile;
+    }
+
+    if (auto comma = Raw(", "); !comma) {
+        return comma;
+    }
+
+    if (auto offset = Literal(offsets); !offset) {
+        return offset;
+    }
+
+    return Raw(")");
+}
+
+Result<void> SourceWriter::DoubleParts(const IrValue& value, StringView part) noexcept {
+    // 구조 연산의 tile·offset 한쪽이다(part = ".tile" 또는 ".offset").
+    static constexpr char Channels[] = {'x', 'y', 'z', 'w'};
+    switch (value.op) {
+    case IrOp::Splat: {
+        if (auto operand = Operand(value.operands[0]); !operand) {
+            return operand;
+        }
+
+        char mask[MaxIrComponents + 1] = {'.', 'x', 'x', 'x', 'x'};
+        if (auto written = Raw(part); !written) {
+            return written;
+        }
+
+        return Raw(StringView(mask, value.type.components + usize{1}));
+    }
+    case IrOp::Swizzle: {
+        if (auto operand = Operand(value.operands[0]); !operand) {
+            return operand;
+        }
+
+        if (auto written = Raw(part); !written) {
+            return written;
+        }
+
+        char mask[MaxIrComponents + 1] = {'.', 0, 0, 0, 0};
+        for (uint8 index = 0; index < value.type.components; ++index) {
+            mask[index + 1] =
+                Channels[(value.immediate[0] >> (index * WriterSwizzleBits)) & WriterSwizzleMask];
+        }
+
+        return Raw(StringView(mask, value.type.components + usize{1}));
+    }
+    case IrOp::Append: {
+        IrType single = value.type;
+        single.scalar = IrScalar::Float;
+        if (auto type = TypeName(single); !type) {
+            return type;
+        }
+
+        for (uint8 side = 0; side < 2; ++side) {
+            if (auto separator = Raw(side == 0 ? StringView("(") : StringView(", ")); !separator) {
+                return separator;
+            }
+
+            if (auto operand = Operand(value.operands[side]); !operand) {
+                return operand;
+            }
+
+            if (auto written = Raw(part); !written) {
+                return written;
+            }
+        }
+
+        return Raw(")");
+    }
+    default:
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+}
+
+Result<void> SourceWriter::DoubleExpression(const IrValue& value) noexcept {
+    // Double이 끼는 연산의 철자다(6.9절 LWC 표현 — CheckSupported가 그 밖의 연산을 막았다).
+    if (value.op == IrOp::Splat || value.op == IrOp::Swizzle || value.op == IrOp::Append) {
+        if (auto make = Raw("Make"); !make) {
+            return make;
+        }
+
+        if (auto type = TypeName(value.type); !type) {
+            return type;
+        }
+
+        if (auto open = Raw("("); !open) {
+            return open;
+        }
+
+        if (auto tile = DoubleParts(value, ".tile"); !tile) {
+            return tile;
+        }
+
+        if (auto comma = Raw(", "); !comma) {
+            return comma;
+        }
+
+        if (auto offset = DoubleParts(value, ".offset"); !offset) {
+            return offset;
+        }
+
+        return Raw(")");
+    }
+
+    if (value.op == IrOp::Convert) {
+        const IrValue& source = module_.Values()[value.operands[0]];
+        if (value.type.scalar == IrScalar::Double) {
+            // Float로 만든 뒤 tile 0으로 올린다(UE WSPromote).
+            if (auto promote = Raw("MaterialDoublePromote("); !promote) {
+                return promote;
+            }
+
+            if (source.type.scalar != IrScalar::Float) {
+                IrType single = value.type;
+                single.scalar = IrScalar::Float;
+                if (auto type = TypeName(single); !type) {
+                    return type;
+                }
+
+                if (auto open = Raw("("); !open) {
+                    return open;
+                }
+            }
+
+            if (auto operand = Operand(value.operands[0]); !operand) {
+                return operand;
+            }
+
+            return Raw(source.type.scalar != IrScalar::Float ? StringView("))") : StringView(")"));
+        }
+
+        // Double → 그 밖: 낮춘 뒤(UE WSDemote) 대상 종류로 바꾼다.
+        const bool toFloat = value.type.scalar == IrScalar::Float;
+        if (!toFloat) {
+            if (auto type = TypeName(value.type); !type) {
+                return type;
+            }
+
+            if (auto open = Raw("("); !open) {
+                return open;
+            }
+        }
+
+        if (auto demote = Raw("MaterialDoubleDemote("); !demote) {
+            return demote;
+        }
+
+        if (auto operand = Operand(value.operands[0]); !operand) {
+            return operand;
+        }
+
+        return Raw(toFloat ? StringView(")") : StringView("))"));
+    }
+
+    const StringView name = DoubleFunction(value.op);
+    if (name.IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Call(name, value);
+}
+
 Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
+    if (InvolvesDouble(value)) {
+        return DoubleExpression(value);
+    }
+
     switch (value.op) {
     case IrOp::Extern:
         return Extern(value);
@@ -751,11 +1037,19 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
 }
 
 Result<void> SourceWriter::CheckSupported() noexcept {
-    // MS2a가 낼 수 없는 값(Double — LWC 표현은 MS2b, WorldPositionTile)이 결과에서 닿으면 진단한다.
+    // Double이 끼는 연산은 LWC 표현이 있는 것만 낸다(6.9절). WorldPositionTile은 UE IR 전용
+    // 연산이라 노드가 만들지 않는다. 그 밖은 원인 노드마다 NotYetLowered 하나다.
     const Span<const IrValue> values = module_.Values();
     for (usize index = 0; index < values.Size(); ++index) {
         const IrValue& value = values[index];
-        if (value.type.scalar != IrScalar::Double && value.op != IrOp::WorldPositionTile) {
+        const bool structural = value.op == IrOp::Splat || value.op == IrOp::Swizzle ||
+                                value.op == IrOp::Append || value.op == IrOp::Convert ||
+                                value.op == IrOp::Constant || value.op == IrOp::Branch ||
+                                value.op == IrOp::Extern;
+        const bool supported =
+            value.op != IrOp::WorldPositionTile &&
+            (!InvolvesDouble(value) || structural || !DoubleFunction(value.op).IsEmpty());
+        if (supported) {
             continue;
         }
 
@@ -773,7 +1067,7 @@ Result<void> SourceWriter::CheckSupported() noexcept {
                 nodegraph::GraphDiagnosticSeverity::Error,
                 ToDiagnosticCode(MaterialDiagnosticCode::NotYetLowered), asset_, graph_,
                 value.site.node, Name(),
-                "Large world coordinate values are not generated in this stage yet");
+                "Large world coordinate operation is not generated in this stage yet");
             !reported) {
             return reported;
         }
@@ -1053,7 +1347,31 @@ Result<void> SourceWriter::Run() noexcept {
         return defined;
     }
 
-    if (auto defined = Define("MATERIAL_NUM_TEXCOORDS", "0"); !defined) {
+    // 진입점에서 닿는 TexCoord의 최대 상수 색인 + 1이다(6.9절 — 정점 입력에서 읽을 UV 채널 수).
+    uint64 texCoords = 0;
+    const MaterialContextValue* texCoord = FindMaterialContextValue("TexCoord");
+    const uint64 texCoordIndex =
+        texCoord == nullptr ? NumericLimits<uint64>::Max()
+                            : static_cast<uint64>(texCoord - MaterialContextValues().Data());
+    for (const IrValue& value : module_.Values()) {
+        if (value.op != IrOp::Extern || value.immediate[0] != texCoordIndex ||
+            value.operandCount != 1) {
+            continue;
+        }
+
+        const IrValue& index = module_.Values()[value.operands[0]];
+        if (index.op == IrOp::Constant && index.immediate[0] + 1 > texCoords) {
+            texCoords = index.immediate[0] + 1;
+        }
+    }
+
+    StringBuilder<> channels(allocator_);
+    channels << texCoords;
+    if (auto status = channels.Status(); !status) {
+        return status;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_TEXCOORDS", channels.View()); !defined) {
         return defined;
     }
 
