@@ -6,7 +6,7 @@
 
 ### 6.1 데이터(UE `RT/Engine/Classes/GameFramework/ForceFeedbackEffect.h:17-154`)
 
-`HapticEffect`(리플렉션 struct, `InputActions` 모듈 — 에셋 감싸기는 IA6, `InputActionData`와 같은 값 모양):
+`HapticEffect`(리플렉션 struct, `InputActions` 모듈 — 에셋은 `HapticEffectAsset`(2.8절 IA6a), `InputActionData`와 같은 값 모양):
 - `id: Guid` — 효과의 정체다(`StopHapticEffect`가 효과를 고른다 — UE는 UObject 포인터). 0이면 무효다.
 - `channels: Array<HapticChannel>`. 기본은 비어 있다(UE 생성자는 채널 하나를 넣는다 — cpp:24-30. Rocks 생성자는 할당하지 않는다. 채널 없는 효과는 길이 0이라 재생하자마자 끝난다).
 - `Duration()`: 모든 채널 커브의 마지막 키 시간 중 최댓값이다(UE cpp:47-70). 키가 없는 커브는 0으로 친다. 채널이 없으면 0이다.

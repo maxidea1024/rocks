@@ -64,6 +64,8 @@
 | `WorldTicks.cpp` | Tick 등록·해제(`RegisterTicks` 등)와 프레임 실행(`ExecuteTick`·`Tick`) | 프레임 단계·Tick 연동 |
 | `WorldDestroys.cpp` | 안전 지점의 파괴 정리(`FlushDestroys`·`DestroyActorNow`·`DestroyComponentNow`·root 비우기) | 파괴 hook·정리 순서 |
 | `WorldTickDependencies.cpp` | Tick 의존 선언 그래프(`AddTickPrerequisite`·`RemoveTickPrerequisite`, 순환 검사, 등록 때 적용, 파괴 정리), 부착 간선, 실행 중 설정 변경(`SetTickPhase` 등), 엔진 단계 자리(`SetEngineStage`·`RunEngineStage`) — 15절 | Tick 의존·엔진 단계 |
+| `WorldLevelAdoption.cpp` | 로드한 Level 그래프 편입(29장) | 편입 규칙 |
+| `WorldTags.cpp` | 태그 값 도우미(`world_tags` — Actor·Component setter가 쓴다)와 태그 찾기(`FindActorsWithTag`·`FindComponentsByTag`, 31장) | 태그 규칙·찾기 |
 | `WorldGarbageCollection.cpp` | GC step(`StepGarbageCollection`), 소유 객체 파괴 요청, 우회 파괴 복구(`RepairBypassedObjects`·Component 색인) | GC 일정·Registry 연동 |
 
 - 파일은 수백 줄 안쪽을 유지한다. 한 파일이 천 줄 가까이 커지면 기능 경계로 다시 나눈다(나눔은 동작 불변 이동 커밋).

@@ -30,6 +30,7 @@
 //       ROCKS_GENERATED_BODY()
 //
 //   public:
+//       using rocks::Component::Component;
 //       ROCKS_FUNCTION() rocks::Result<void> Open(rocks::ObjectHandle opener) noexcept;
 //       ROCKS_FUNCTION(Pure) bool IsOpen() const noexcept;
 //   };

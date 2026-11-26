@@ -15,7 +15,8 @@ internal static class ModuleDescriptor
     // Docs/Design/SparksBinding.ko.md B2).
     // 5: 클래스 functions(리플렉션 함수 — 이름·ID·도구 이름·flags·매개변수·반환, Docs/Design/FunctionReflection.ko.md FD10). 다른 모듈의 상속 함수
     // 이름 겹침 검사(RMC2703)와 Sparks binding이 쓴다.
-    private const int DescriptorSchema = 5;
+    // 6: 함수 flag ScriptCallable과 함수 scriptName(노출 함수의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B15).
+    private const int DescriptorSchema = 6;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -39,9 +40,9 @@ internal static class ModuleDescriptor
         ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles",
             "scriptName"];
 
-    // 클래스의 자기 리플렉션 함수 항목이다(상속 함수는 기반 클래스 항목에 있다). flags는 Static → Const → Pure → EditorOnly → ReturnsResult
-    // 순서다.
-    private static readonly string[] FunctionKeys = ["name", "id", "toolName", "flags", "parameters", "result"];
+    // 클래스의 자기 리플렉션 함수 항목이다(상속 함수는 기반 클래스 항목에 있다). flags는 Static → Const → Pure → EditorOnly → ReturnsResult →
+    // ScriptCallable 순서다.
+    private static readonly string[] FunctionKeys = ["name", "id", "toolName", "flags", "parameters", "result", "scriptName"];
 
     // 함수 매개변수 칸(name과 필드와 같은 형식 칸 넷)과 반환 칸(형식 칸 넷)이다.
     private static readonly string[] ParameterKeys = ["name", "value", "element", "key", "maxElements"];
@@ -305,7 +306,7 @@ internal static class ModuleDescriptor
             json.WriteString("toolName", function.EffectiveToolName);
             json.WriteStartArray("flags");
             foreach ((bool set, string flag) in new[] { (function.IsStatic, "Static"), (function.IsConst, "Const"), (function.Spec.Pure, "Pure"),
-                (function.Spec.EditorOnly, "EditorOnly"), (function.ReturnsResult, "ReturnsResult") })
+                (function.Spec.EditorOnly, "EditorOnly"), (function.ReturnsResult, "ReturnsResult"), (function.Spec.ScriptCallable, "ScriptCallable") })
             {
                 if (set)
                 {
@@ -337,6 +338,8 @@ internal static class ModuleDescriptor
                 json.WriteNull("result");
             }
 
+            // 노출 함수의 최종 Sparks 이름이다(B15 — 파생 모듈이 기반 체인의 멤버 이름 겹침을 본다).
+            json.WriteString("scriptName", SparksBinding.ScriptFunctionName(function));
             json.WriteEndObject();
         }
 
@@ -680,7 +683,7 @@ internal static class ModuleDescriptor
             model.Fields = fields;
             if (!isStruct)
             {
-                model.Functions.AddRange(ReadFunctions(type, name, descriptorPath, Invalid));
+                model.Functions.AddRange(ReadFunctions(type, name, model.ScriptType, descriptorPath, Invalid));
             }
 
             types.Add(model);
@@ -873,7 +876,7 @@ internal static class ModuleDescriptor
 
     // 클래스의 functions 배열을 읽는다(Docs/Design/FunctionReflection.ko.md FD10). 칸 형식은 필드와 같은 규칙에 호출 frame에 둘 수 없는 종류
     // (정적 배열·InstancedStruct·강한 참조와 그것을 담는 컨테이너 — 원본 선언의 RMC2704)를 더 거부한다.
-    private static List<FunctionModel> ReadFunctions(JsonElement type, string owner, string descriptorPath, Func<string, MetadataException> Invalid)
+    private static List<FunctionModel> ReadFunctions(JsonElement type, string owner, bool scriptType, string descriptorPath, Func<string, MetadataException> Invalid)
     {
         List<FunctionModel> functions = [];
         // C++ 이름은 오버로드가 없어 정확히 유일하고, 실효 도구 이름은 대소문자 무시로 유일하다(원본 선언의 RMC2702·RMC2703과 같다).
@@ -895,10 +898,21 @@ internal static class ModuleDescriptor
             }
 
             string[] flags = function.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            if (flags.Any(flag => flag is not ("Static" or "Const" or "Pure" or "EditorOnly" or "ReturnsResult")) ||
+            if (flags.Any(flag => flag is not ("Static" or "Const" or "Pure" or "EditorOnly" or "ReturnsResult" or "ScriptCallable")) ||
                 flags.Distinct(StringComparer.Ordinal).Count() != flags.Length || (flags.Contains("Static") && flags.Contains("Const")))
             {
                 throw Invalid($"unknown, duplicate or conflicting function flag in {owner}::{name}");
+            }
+
+            // 노출 함수는 최종 Sparks 이름(PascalCase)이 있고, 그 밖은 빈 글자다. EditorOnly 함수는 노출되지 않는다(원본 RMC2607).
+            JsonElement scriptNameValue = function.GetProperty("scriptName");
+            string scriptName = scriptNameValue.ValueKind == JsonValueKind.String ? scriptNameValue.GetString() ?? "" : throw Invalid("scriptName of " + owner + "::" + name);
+            bool callable = flags.Contains("ScriptCallable");
+            // 생성기가 만들지 않는 조합(Try 접두 이름, 노출하지 않은 타입의 노출 함수)도 거부한다(원본 선언의 RMC2604·RMC2608).
+            if (callable != (scriptName.Length != 0) || (callable && (!Specifiers.IsScriptName(scriptName) || SparksBinding.StartsWithTry(scriptName) ||
+                    flags.Contains("EditorOnly") || !scriptType)))
+            {
+                throw Invalid($"Sparks exposure of {owner}::{name}");
             }
 
             SourceSite site = new(descriptorPath, 1);
@@ -934,7 +948,11 @@ internal static class ModuleDescriptor
                 Site = site,
                 Name = name,
                 Owner = owner,
-                Spec = new(flags.Contains("Pure"), flags.Contains("EditorOnly"), toolName == name ? "" : toolName),
+                Spec = new(flags.Contains("Pure"), flags.Contains("EditorOnly"), toolName == name ? "" : toolName)
+                {
+                    ScriptCallable = flags.Contains("ScriptCallable"),
+                    ScriptName = scriptName
+                },
                 IsStatic = flags.Contains("Static"),
                 IsConst = flags.Contains("Const"),
                 ReturnsResult = flags.Contains("ReturnsResult"),

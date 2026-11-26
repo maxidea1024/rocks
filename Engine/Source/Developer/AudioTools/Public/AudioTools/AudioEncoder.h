@@ -60,12 +60,6 @@ struct AudioCodecInfo {
     uint32 maxChannels = 0;
 };
 
-// 압축 품질 범위와 기본값이다(3.32.1절, UE USoundWave::CompressionQuality와 같다). 1이 가장 많이
-// 압축하고 100이 가장 좋은 품질이다.
-inline constexpr uint32 MinAudioCompressionQuality = 1;
-inline constexpr uint32 MaxAudioCompressionQuality = 100;
-inline constexpr uint32 DefaultAudioCompressionQuality = 80;
-
 // 인코드 설정이다. PCM16·ADPCM은 쓰지 않는다. Opus는 품질이 범위 밖이면 InvalidArgument다.
 struct AudioEncodeSettings {
     uint32 quality = DefaultAudioCompressionQuality;

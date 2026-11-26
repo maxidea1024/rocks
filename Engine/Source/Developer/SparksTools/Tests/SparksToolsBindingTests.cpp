@@ -100,7 +100,11 @@ TEST(SparksBinding_NamesMatchCompiler) {
         Array<StringView> owned(allocator);
         Array<StringView> hooks(allocator);
         Array<StringView> unity(allocator);
+        Array<StringView> keywords(allocator);
+        Array<StringView> reserved(allocator);
         REQUIRE(Strings(document.Root().Find("languageOwnedNames"), owned));
+        REQUIRE(Strings(document.Root().Find("keywords"), keywords));
+        REQUIRE(Strings(document.Root().Find("reservedNames"), reserved));
         REQUIRE(Strings(document.Root().Find("hooks"), hooks));
         REQUIRE(Strings(document.Root().Find("unityHookAliases"), unity));
 
@@ -125,6 +129,18 @@ TEST(SparksBinding_NamesMatchCompiler) {
         }
 
         CHECK(unity.Size() == unityHooks);
+
+        // 키워드는 함수 매개변수 이름 검사가 쓴다(SparksBinding B13).
+        CHECK(keywords.Size() == LanguageKeywordCount());
+        for (uint32 at = 0; at < LanguageKeywordCount(); ++at) {
+            CHECK(Contains(keywords, LanguageKeywordAt(at).name));
+        }
+
+        // 예약 이름은 노출 멤버 이름 검사가 쓴다(SparksBinding B13).
+        CHECK(reserved.Size() == ReservedNameCount());
+        for (uint32 at = 0; at < ReservedNameCount(); ++at) {
+            CHECK(Contains(reserved, ReservedNameAt(at)));
+        }
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
@@ -176,13 +192,34 @@ TEST(SparksBinding_EngineSchemasCompile) {
                        "&& !fixed && root != null && parent == null && parts.AliveCount() > 0 && "
                        "place.Scale.X > 0.0;\n"
                        "}\n"));
+        // 노출 함수(EI1b — SparksBinding B17)를 부른다: Result<void>·TryX → X·Pure 값·enum 인자.
+        // 상태를 바꾸는 엔진 함수는 hook 문맥에서만 부를 수 있다(S0602 — 최상위 함수는 안 된다).
+        REQUIRE(temp.Write("Pkg/Mover.spark",
+                           "class Mover : Actor {\n"
+                           "    fn Move(s: SceneComponent): Result<void> {\n"
+                           "        try s.SetRelativeLocation(s.WorldLocation());\n"
+                           "        let placed: Transform = try s.WorldTransform();\n"
+                           "        s.SetMobility(ComponentMobility.Movable);\n"
+                           "        let shown: bool = s.IsVisible();\n"
+                           "        _ = placed;\n"
+                           "        _ = shown;\n"
+                           "        return;\n"
+                           "    }\n"
+                           "\n"
+                           "    on Start() {\n"
+                           "        if (let root = RootComponent) {\n"
+                           "            _ = Move(root);\n"
+                           "        }\n"
+                           "    }\n"
+                           "}\n"));
         const String schemas = temp.PathOf("Schemas");
         const String package = temp.PathOf("Pkg");
         BufferOutput result(allocator);
         const StringView arguments[] = {"check", "--schema", schemas.View(), package.View()};
         CHECK(RunCommand(allocator, platform::PhysicalFileSystem(), arguments, result) ==
               ExitSuccess);
-        CHECK(result.output.View() == "0 errors in 1 modules\n");
+        // 원본 파일 하나가 모듈 하나다(Probe·Mover).
+        CHECK(result.output.View() == "0 errors in 2 modules\n");
         CHECK(result.error.View().IsEmpty());
     }
     CHECK(allocator.Stats().liveAllocations == 0);

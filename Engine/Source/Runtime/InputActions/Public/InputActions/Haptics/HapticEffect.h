@@ -12,7 +12,8 @@ namespace rocks::input {
 
 // 게임패드 진동 효과다(UE UForceFeedbackEffect — Docs/Design/InputActions 6.1절). id가 효과의
 // 정체이고(0이면 무효 — StopHapticEffect가 이것으로 고른다), 채널마다 커브 하나다. 기본은 채널이
-// 없다(생성자는 할당하지 않는다 — 길이 0 효과는 재생하자마자 끝난다). 에셋 감싸기는 IA6이다.
+// 없다(생성자는 할당하지 않는다 — 길이 0 효과는 재생하자마자 끝난다). 에셋은 HapticEffectAsset이다
+// (2.8절).
 //
 // 사용 예:
 //   HapticEffect hit(allocator);

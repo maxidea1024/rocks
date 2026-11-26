@@ -12,7 +12,8 @@ class Health : public rocks::Component {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit Health(rocks::Allocator& allocator) noexcept : Died(allocator) {}
+    explicit Health(rocks::Allocator& allocator) noexcept
+        : rocks::Component(allocator), Died(allocator) {}
 
     ROCKS_PROPERTY(Edit, SaveGame, ScriptWritable)  // Edit: CU1 편집 메타(신설), SaveGame: 현재 지정자
     rocks::int32 maxHealth_ = 100;
@@ -20,8 +21,8 @@ public:
     ROCKS_PROPERTY(ReadOnly, ScriptReadOnly, Replicated)  // Replicated: 네트워크 단계에서 신설
     rocks::int32 current_ = 100;
 
-    ROCKS_PROPERTY(Params = "killer")     // CU3: MulticastDelegate 필드 → FieldKind::Event
-    rocks::MulticastDelegate<void(rocks::WeakObjectRef<rocks::Actor>)> Died;
+    ROCKS_PROPERTY(Params = "killer")     // CU3: 이벤트 필드 → FieldKind::Event(EventReflection ED8 — 안쪽이 Core MulticastDelegate)
+    rocks::Event<rocks::WeakObjectRef<rocks::Actor>> Died;
 
     ROCKS_FUNCTION(Lane = Game, Effects = WriteWorld)   // CU2
     rocks::Result<void> ApplyDamage(rocks::int32 amount, rocks::WeakObjectRef<rocks::Actor> instigator);
@@ -59,7 +60,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 타입 | TypeId, 기반 타입, `ScriptExtensible`, 수명 종류(엔진 객체·에셋·값), 외형 전용 여부(준비 mask), 구현한 interface 표(CU9) |
 | 필드 | FieldId, 값 형식, 단위, nullability, 편집·저장·복제·ReadOnly·`ScriptWritable`, 변경 통지 지원(CU5) |
 | 계산 속성 | getter·setter 함수 쌍으로 만든 쓰기 가능한 속성(예: `RelativeLocation` ← `SceneComponent`의 `relativeTransform`과 `SetRelativeLocation`). 손실이 생길 수 있는 왕복(quat 저장값 ↔ `RelativeRotation` Rotator)은 binding이 정규화 규칙을 선언한다. CU5 setter 통지와 함께 정한다 |
-| 함수 | FunctionId, 시그니처와 nullability, 초당 값 인자, lane, `ThreadSafe`, `Deterministic`, 부수 효과, 최대 작업량, 취소 가능 여부, `MaySafepoint`, 권한, 편집기·출시 가용성, 오류 타입, `NoFatalOnInput`(입력 오류로 Fatal하지 않음 — 선언이 없으면 노출 불가, §8.4), PendingDestroy 대상에서의 동작(읽기 허용·쓰기는 효과 없음 또는 `ContractViolation`) |
+| 함수 | FunctionId, 시그니처와 nullability, 초당 값 인자, lane, `ThreadSafe`, `Deterministic`, 부수 효과, 최대 작업량, 취소 가능 여부, `MaySafepoint`, 권한, 편집기·출시 가용성, 오류 타입, `NoFatalOnInput`(입력 오류로 Fatal하지 않음 — 선언이 없으면 노출 불가, §8.4), PendingDestroy 대상에서의 동작(읽기 허용·쓰기는 효과 없음 또는 `ContractViolation`). 노출 지정자 `ScriptCallable`이 `NoFatalOnInput`·Game lane을 함께 약속하고, PendingDestroy 대상에서는 실행 host가 `Const` 함수만 부르고 그 밖은 효과 없이 건너뛴다(EI1b — SparksBinding B12) |
 | 자원 정책 | 반환하는 것의 종류: 유지 자원(로드 요청 `LoadRequest<T>` 포함) / 일회성 효과 / 값. 기다리는 API는 고립 완료 해제 경로를 선언. 선언이 없으면 노출 불가 |
 | 파괴 지연 | 엔진 객체를 파괴하는 함수는 스크립트 단계 끝 deferred command로 처리함을 선언(SD3) |
 | 이벤트 | `FieldKind::Event`, FieldId, 인자 이름(`Params`)·형식, 발행 lane, 발행 측(서버·소유 클라이언트·모든 기기), 스크립트 단계 안 `Broadcast`의 큐 기록, VM 연결 thunk |
@@ -116,7 +117,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 
 ### 10.3 이름·노출과 API 규칙
 
-- 타입 이름은 타입 도구 이름(`Name =` 지정값, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`)이고, 함수·이벤트 이름은 C++ 이름 그대로다. 리플렉션 필드(이벤트 필드 포함)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
+- 타입 이름은 타입 도구 이름(`Name =` 지정값, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`)이고, 함수 이름은 함수 도구 이름(`ROCKS_FUNCTION(Name = …)`, 없으면 C++ 이름 — EI1b, 런타임 조회와 같은 이름), 이벤트 이름은 C++ 이름 그대로다. 리플렉션 필드(이벤트 필드 포함)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
 - `Result`를 돌려주는 C++ 함수 `TryX`는 Sparks에서 자동으로 `X`로 노출한다(SD44). 변환한 이름이 다른 멤버와 겹치면 메타 컴파일 오류이며 `ScriptName`을 요구한다. 엔진 수명 hook 이름과 겹치는 C++ 함수(`Actor::Destroy` 등)는 `ScriptName`(예: `RequestDestroy`)으로 노출한다.
 - 메타 컴파일러는 타입별로 기반 체인을 포함한 최종 Sparks 이름을 계산한다. 이름이 중복되거나 예약 이름(부록 A)·hook 이름(컴파일러 `HookForMemberName`과 같은 집합 — hook, `On` + hook, Unity 별칭)과 같으면 메타 컴파일 오류이며 `ScriptName`을 요구한다(메타 컴파일러가 읽는 이름 표는 컴파일러 목록과 시험으로 대조한다 — SparksBinding B6). 스크립트에 노출하는 함수의 C++ 오버로드도 서로 다른 `ScriptName`이 없으면 메타 컴파일 오류다.
 - C++ 수명 가상 함수(`On*`·`OnRegister`·`OnUnregister`)는 노출하지 않는다. 쓰기 가능한 속성이 있으면 같은 값을 쓰는 `SetX` 함수는 노출하지 않는다.

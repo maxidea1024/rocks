@@ -374,6 +374,15 @@ public:
                                               : Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
+    void ShowAndActivate() noexcept override {
+        // 숨긴 채 만든 창을 보이고 앞으로 가져온다. 같은 프로세스의 창(스플래시)이 전경이면 OS가
+        // 허용하고, 사용자가 다른 앱으로 옮겼으면 SetForegroundWindow가 실패해 작업 표시줄 단추만
+        // 깜빡인다(강제하지 않는다 — Docs/Design/SplashScreen 9.4절).
+        ShowWindow(window_, SW_SHOW);
+        UpdateWindow(window_);
+        (void)SetForegroundWindow(window_);
+    }
+
 private:
     // 실패한 OS 호출과 오류를 기억하고 DependencyFailed를 돌려준다(Window::Create가 report로
     // 옮긴다).

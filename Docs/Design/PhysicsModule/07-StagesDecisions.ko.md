@@ -214,6 +214,119 @@ PC02(질의 결과를 x64와 비교)는 플랫폼별 실행이 필요해 PH3c의
 
 **PH3a 리뷰 반영(2026-11-26).** 치명 0, 중요 2, 경미 5. 닿아 있는 쌍·잠든 body의 응답 변경 시험과 UE의 필터 변경 깨움, step 중 접점 쓰기 Fatal, 묶음 확보 실패 때 나머지 bit는 바꿈, 진단 코드는 용량일 때만, 빈 칸 목록 성장은 `TryEnsureCapacity`, 놓인 칸 재사용 시험.
 
+### 7.1.7 PH3b 구현 세부(2026-11-26)
+
+**World 쪽 타입**(`World/Physics/`, Jolt 없음 — 파일마다 타입 하나):
+
+| 파일 | 내용 |
+|---|---|
+| `QueryFilter.h` | `QueryFilter`(4.2절 — 종류 Channel·ObjectTypes·Profile, 채널, 질의 응답 묶음(기본 모두 Block), object type bit 집합, profile 이름)와 만들기 함수 `ByChannel`·`ByObjectTypes`·`ByProfile`. object type 도우미 `CollisionObjectTypeBit`·`AllObjectTypes`·`AllStaticObjectTypes`·`AllDynamicObjectTypes`(profile 표가 trace 채널·정적 채널을 안다) |
+| `QueryMobility.h` | `QueryMobility { Any, Static, Dynamic }`(UE `EQueryMobilityType` — Dynamic은 Kinematic 포함) |
+| `QueryParams.h` | 4.2절 표의 필드(`traceComplex` 기본 거짓 — PMD9). 무시 목록은 호출자가 가진 `Span<const ObjectHandle>`(컴포넌트·Actor) |
+| `TraceMode.h` | `TraceMode { Test, First, All }` |
+| `HitResult.h` | 4.5절 필드(`faceIndex` 기본 −1). `item`·`boneName`·`physicalMaterial`은 그 단계에서 더한다 |
+
+`OverlapResult`와 질의 형상 `CollisionShape`(Collision 모듈)는 PH3c에서 더한다.
+
+**함수**(`World/Physics/WorldCollision.h` — ROCKS_WORLD_API 자유 함수):
+- `bool LineTraceTest(world, start, end, filter, params)`
+- `bool LineTraceFirst(world, start, end, filter, params, HitResult&)`
+- `Result<bool> LineTraceAll(world, start, end, filter, params, Array<HitResult>&)` — 결과 배열을 늘리다 할당이 실패할 수 있어 `Result`다. Test·First는 할당하지 않는다.
+- 장면이 없거나, 끝점이 비유한이거나, 길이가 0이면 hit 없음이다(UE `SceneQuery.cpp:513–515` — 길이 0 ray는 질의하지 않는다). First는 hit가 없어도 `traceStart`·`traceEnd`를 채우고, All은 배열을 먼저 비운다(UE `ResetOutHits`).
+- 빈 ObjectTypes는 WorldStatic 채널·모두 Block 질의다(UE — 4.2절).
+- Profile 필터는 World가 profile 표에서 채널(= profile object type)과 응답으로 바꿔 장면에 넘긴다. 표에 없으면 Warning(`QueryProfileMissing`)과 `WorldStatic` + 모두 Block이다(UE `World.cpp:2052–2063`).
+
+**장면 접점.** `PhysicsScene::TraceLine(start, end, filter, params, mode, HitResult* first, Array<HitResult>* all) const → Result<bool>`(filter는 Channel·ObjectTypes만 — Profile은 `InvalidArgument`). 반환은 막는 hit가 있는지다. hit의 `actor`는 body를 만든 컴포넌트의 소유 Actor다(`BodyCreateDesc::actor`를 칸에 기억한다 — 무시 목록 판정도 칸 값으로 한다).
+
+**판정**(4.4절, Jolt 질의 필터 6.3절):
+- `ObjectLayerFilter`:
+  - query 표지가 없으면 제외한다.
+  - Channel 질의는 body 응답 묶음의 질의 채널 응답과 질의 응답 묶음의 body object type 응답 가운데 작은 것을 쓴다. ObjectTypes 질의는 object type bit가 집합에 있으면 Block이다.
+  - Ignore, `ignoreTouches`의 Overlap, `ignoreBlocks`의 Block은 제외한다. Test·First는 Overlap도 제외한다(UE `QueryCallback.bIgnoreTouches = true`).
+- `BodyFilter`는 무시 목록(컴포넌트·Actor, 선형 비교)과 `mobility`(Static = Static body만, Dynamic = 그 밖)를 본다. QueryOnly body는 층에 운동 묶음이 없으므로 칸의 운동 종류로 판정한다.
+- **수집기**: Rocks `CastRayCollector`가 hit마다 body 층으로 막음 여부를 다시 계산한다.
+  - Test는 첫 막음에서 끝낸다.
+  - First는 가장 가까운 막음 하나를 고른다. 같은 fraction이면 칸 번호가 작은 것이다(PMD10). early-out은 그 fraction의 다음 float(`NextUp`)로 둔다 — 같은 fraction의 다른 body도 비교하기 위해서다.
+  - All은 모두 모으되, 막음이 생기면 early-out을 그 다음 float로 줄인다. 끝난 뒤 가장 가까운 막음 하나만 남기고, 그보다 먼 hit와 다른 막음은 버린다. 정렬은 time 오름차순, 같은 time이면 겹침이 앞, 그다음 칸 번호 순이다(UE `CollisionConversions.cpp:500–528·930–939`, PMD10).
+  - ObjectTypes All은 모든 hit를 겹침으로 모아 자르지 않고, 결과의 `blockingHit`을 참으로 둔다(4.4절 3). 겹침으로 모으므로 `ignoreTouches`가 그 hit를 버리고 `ignoreBlocks`는 버리지 않는다(UE `CollisionQueryFilterCallback.cpp:36–38·160–168`).
+  - 무시 목록의 null handle은 건너뛴다(UE `AddIgnoredActor`도 null을 넣지 않는다).
+- **결과 변환**(UE `ConvertQueryImpactHit` — `CollisionConversions.cpp:366–445`):
+  - `time` = fraction, `distance` = time × |끝 − 시작|(Rocks 길이 — 어댑터 경계 5절), `location` = 시작 + time·(끝 − 시작).
+  - `impactPoint`는 Jolt hit 점, `normal`·`impactNormal`은 맞은 형상의 바깥 법선(`Body::GetWorldSpaceSurfaceNormal`)이다.
+  - fraction 0(시작점이 볼록 형상 안 — `mTreatConvexAsSolid`)이면 `startPenetrating`이고, `impactPoint` = 시작, 법선 = −(끝 − 시작) 방향, `penetrationDepth` 0이다(UE line trace도 같다 — 시작 겹침 형상 변환은 sweep만 한다).
+- 질의는 게임 thread에서 step 밖에서만 한다(7.1.6절 — `AssertNotStepping`). 결과 모음용 임시 배열은 장면이 재사용한다.
+
+**시험**(공개 API만 — `PhysicsQueryTests.cpp`, 설정 문맥이 있는 고정 장치로 profile 표를 만든다):
+- PA08(line 몫): 바닥을 위에서 아래로 맞힌 `impactNormal`이 +Z다. 수치: time·distance·location·impactPoint.
+- 장면 없는 World·길이 0·비유한은 hit 없음이다.
+- 채널 응답 Ignore·Overlap·Block: First는 막음만, All은 겹침과 막음이다. 질의 쪽 응답 Ignore도 제외다.
+- ObjectTypes: 집합의 type만 맞고, All은 자르지 않으며 모두 막음이다. AllObjects는 trace 채널을 뺀다.
+- Profile: 표의 profile 채널·응답으로 질의하고, 없는 이름은 경고 뒤 WorldStatic·모두 Block이다.
+- 무시 목록(컴포넌트·Actor), mobility, `ignoreTouches`·`ignoreBlocks`.
+- QueryOnly body는 맞고 PhysicsOnly·NoCollision body는 맞지 않는다.
+- 시작 겹침의 값을 확인한다.
+- All의 정렬·자르기: 겹침 둘 → 막음 → 그 뒤 겹침은 버림, 같은 time의 겹침·막음 순서, 같은 time 두 겹침은 칸 순.
+- Editor World(step 없음)에서도 질의한다.
+
+**PH3b 리뷰 반영(2026-11-26).** 치명 0, 중요 3, 경미 7.
+- ObjectTypes All의 `ignoreTouches`·`ignoreBlocks`를 UE와 같게 했다(겹침으로 모으므로 `ignoreTouches`가 버린다).
+- Profile 시험이 profile 응답·대체 채널을 실제로 가르게 했다(profile의 WorldStatic Ignore, 대체 질의의 WorldStatic 채널, `QueryProfileMissing` 경고 수).
+- 시험을 보강했다: First의 같은 fraction 막음은 칸 번호가 작은 쪽(칸 재사용으로 만든 순서와 다르게), 겹침만 있는 Test는 거짓, Static mobility 양성, 겹침 둘 → 막음, 무한대 끝점.
+- 빈 ObjectTypes는 UE처럼 WorldStatic 채널 질의다.
+- 무시 목록의 null은 건너뛴다. 임시 목록은 All만 쓴다.
+- 문구를 고쳤다: 같은 거리 기준은 "먼저 만든 body"가 아니라 body handle 순이다. line의 `location`과 `impactPoint`는 계산이 달라 반올림만큼 다를 수 있다. 6.3절 표를 구현에 맞췄다.
+
+### 7.1.8 PH3c 하위 단계와 PH3c1 구현 세부(2026-11-26)
+
+PH3c는 둘로 나눈다(크기 — "순서대로").
+
+| 하위 단계 | 내용 |
+|---|---|
+| PH3c1 | 질의 형상 `CollisionShape`(Collision 모듈 — 4.3절), shape trace(Test·First·All), 시작 겹침 MTD, 작은 형상의 line 전환, 길이 0 sweep, PA08 sweep |
+| PH3c2 | overlap(Blocking·Any·All)과 `OverlapResult`, 컴포넌트 자기 형상 질의(`ComponentTraceAll`·`ComponentOverlapAll` — 5.1·5.3절이 쓴다) |
+
+**질의 형상**(Collision 모듈, UE `FCollisionShape` — `PhysicsCore/Public/CollisionShape.h`):
+- 파일 둘이다. `CollisionShapeKind.h`는 `{ Line, Box, Sphere, Capsule, Cylinder }`이고, `CollisionShape.h`는 값(cm)과 만들기 함수 `Box(halfExtent)`·`Sphere(radius)`·`Capsule(radius, halfHeight)`·`CapsuleFromExtent(extent)`(반경 = max(x, y), 반높이 = z — UE `SetCapsule`)를 가진다.
+- `IsNearlyZero()`는 UE와 같다(`CollisionShape.h:139–158`): 상자는 세 반폭이 모두 `KindaSmallNumber` 이하, 구·캡슐은 반경이 `KindaSmallNumber` 이하(캡슐은 높이를 보지 않는다), Line은 참.
+- Jolt 형상: 상자는 convex radius 0(질의 형상은 모서리를 둥글리지 않는다 — UE 질의도 정확한 상자다). 구는 그대로다. 캡슐은 원통 반길이 = max(반높이 − 반경, `KindaSmallNumber`)이다(UE `GetCapsuleAxisHalfLength` — `:185–189`).
+- Cylinder 질의는 CY2(Jolt 실린더 convex radius 정책 — Cylinder 4.2절) 전에는 `Unsupported`로 hit 없음이다.
+
+**함수**(`WorldCollision.h`): `ShapeTraceTest(world, start, end, rotation, shape, filter, params)`, `ShapeTraceFirst(…, HitResult&)`, `Result<bool> ShapeTraceAll(…, Array<HitResult>&)`.
+- 형상이 Line이거나 `IsNearlyZero`면 같은 인자의 line trace다(UE `WorldCollision.cpp:151–155`). 이때 길이 0이면 hit 없음이다.
+- 형상 trace는 길이 0도 질의한다(UE `SceneQuery.cpp:515` — sweep은 길이와 상관없이 한다). 길이 0이면 시작 겹침만 나온다. 끝점·회전·형상 값이 비유한이면 hit 없음이다.
+- 장면 접점은 `PhysicsScene::TraceShape(start, end, rotation, shape, filter, params, mode, first, all) const → Result<bool>`이다.
+
+**판정과 모으기**(line의 4.4·6.3절 판정을 그대로 쓰고, 시작 겹침 규칙을 더한다 — UE `CollisionQueryFilterCallback.cpp:203–223`, `SQVisitor.h:418–441`):
+- 시작 겹침(Jolt fraction 0 — `ShapeCastSettings::mReturnDeepestPoint`로 MTD를 받는다)은 `findInitialOverlaps`가 거짓이면 버린다. 멀어지는 방향의 시작 겹침도 찾도록 `mBackFaceModeConvex`를 `CollideWithBackFaces`로 둔다(UE는 방향과 상관없이 시작 겹침을 낸다 — Jolt 기본 `IgnoreBackFaces`는 버린다).
+- Test·First에서는 막는 시작 겹침도 후보다. 순서 key는 Jolt `GetEarlyOutFraction()`(시작 겹침은 −깊이)이므로 시작 겹침이 앞이고, 그중 가장 깊은 것이다. 같은 key면 칸 번호가 작은 쪽이다. early-out은 key의 `NextUp`이다.
+- All에서 막는 시작 겹침은 자르기 기준이 아니다(겹침으로 모은다). 결과에서는 막음·시작 겹침으로 보고한다. 자르기 기준은 시작 겹침이 아닌 가장 가까운 막음이다.
+- 정렬은 time, 그다음 보고된 막음 여부(겹침이 앞), 그다음 칸 번호다(UE `FCompareFHitResultTime`은 보고된 `bBlockingHit`으로 정렬한다). line trace도 같은 key로 맞춘다(결과는 바뀌지 않는다).
+- All의 반환 값은 보고된 막음이 하나라도 있는지다(UE `bHadBlockingHit` — 막는 시작 겹침 포함).
+- 길이 0은 Jolt `CollideShape`(분리 거리 0)로 겹침을 모아 모두 시작 겹침으로 다룬다. Jolt cast의 길이 0 처리에 기대지 않는다.
+
+**결과 변환**:
+- 시작 겹침(UE `ConvertOverlappedShapeToImpactHit` — `CollisionConversions.cpp:582–671`): `time` 0, `distance` 0, `location` = 시작, `impactPoint` = 맞은 body 쪽 MTD 접촉점, `normal` = `impactNormal` = 형상을 밀어낼 방향(Jolt −penetration axis), `penetrationDepth` = MTD 깊이다. MTD 방향을 못 구하면 +Z·0이다.
+- 그 밖: `time` = fraction, `location` = 시작 + time·(끝 − 시작), `impactPoint` = 접촉점이다. `normal`은 쓸고 간 형상 쪽 법선(−penetration axis)이다. `impactNormal`은 UE `FindGeomOpposingNormal`(`CollisionConversions.cpp:115–140`)이다: 구·캡슐 질의가 상자 body를 맞히면 상자 로컬 축 가운데 `normal` 성분이 있는 면들 중 sweep 방향에 가장 맞서는 면의 법선(ChaosCore `AABB::FindGeometryOpposingNormal`), 그 밖(상자 질의, 구·캡슐 body)은 `normal` 그대로다.
+
+**시험**(`PhysicsSweepTests.cpp`):
+- PA08 sweep: 구를 바닥으로 쓸면 `impactNormal`·`normal`이 +Z이고, `location.z`는 반경이다.
+- 회전한 상자의 모서리가 벽면에 닿는 time, 캡슐(축 Z)을 벽으로 쓸 때의 위치를 확인한다.
+- 시작 겹침: 값(깊이·법선·위치)을 확인하고, `findInitialOverlaps` 거짓이면 hit 없음이다. First는 더 깊은 시작 겹침을 고른다.
+- All의 순서: 막는 시작 겹침 → 겹침 → 막음이고, 반환 값은 참이다.
+- 반경 0 구는 line trace와 같은 hit이다.
+- 길이 0 sweep은 겹치면 시작 겹침, 아니면 없음이다.
+- 무시 목록·채널 응답이 sweep에도 적용된다.
+
+**PH3c1 리뷰 반영(2026-11-26).** 치명 0, 중요 2, 경미 7.
+- `impactNormal`을 UE `FindGeomOpposingNormal` 규칙으로 바꿨다(위). 가장 가까운 면을 고르는 Jolt `GetSurfaceNormal`은 모서리에서 UE와 다른 면을 골랐다.
+- 회전 quaternion은 정규화해 쓰고, 0·비유한이면 hit 없음이다. Jolt 회전 assert(Fatal)를 막는다.
+- Jolt 허용 오차 안의 분리(fraction 0, 부호 있는 깊이 < 0)는 시작 겹침이 아니라 time 0의 일반 hit다.
+- MTD가 없을 때의 대체 법선은 UE와 같다: 겹침은 −trace 방향, 막음은 +Z다.
+- 질의 형상은 stack에 만든다(질의마다 힙에 할당하지 않는다).
+- Cylinder는 World가 hit 없음으로 돌려준다(All도 오류가 아니다).
+- 삼각형(메시) 형상의 back-face 모드는 메시 body가 들어오는 PH6에서 정한다.
+- 시험을 보강했다: 구가 상자 모서리를 맞힌 `impactNormal`, 시작 겹침만 있는 All의 반환 값, 길이 0의 값·버리기, ObjectTypes All과 시작 겹침, `ignoreTouches`와 막는 시작 겹침, Test의 시작 겹침, 이름 있는 상수.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -263,6 +376,8 @@ PC02(질의 결과를 x64와 비교)는 플랫폼별 실행이 필요해 PH3c의
 
 ## 7.6 개정 이력
 
+- 개정 13(2026-11-26): PH3b 완료(eff5569c), PH3c 하위 단계와 PH3c1 구현 세부(7.1.8절).
+- 개정 12(2026-11-26): PH3a 완료(79b8779b), PH3b 구현 세부(7.1.7절).
 - 개정 11(2026-11-26): PH2d 완료(05226c41 — PH2 끝), PH3 하위 단계와 PH3a 구현 세부(7.1.6절).
 - 개정 10(2026-11-26): PH2c 완료(e67a082b), PH2d 구현 세부(7.1.5절 — 운동 종류 전환·필터·형상·scale·Mobility, 리뷰 반영).
 - 개정 9(2026-11-26): PH2b 완료(6ba9c214 — 리뷰 반영: 크기 0·shear에서도 body, 옮긴 잠든 body 깨움), PH2c 구현 세부(7.1.4절).

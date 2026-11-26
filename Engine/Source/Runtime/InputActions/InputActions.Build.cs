@@ -13,11 +13,12 @@ public sealed class InputActions : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // Input for the input snapshot and key enums, Curves for the user response curve modifier (TangentCurve), ObjectRuntime for the
-    // InputAction and InputContext classes, CoreTypeBindings for the Vec3d mirror and Localization for display Text.
+    // InputAction and InputContext classes, CoreTypeBindings for the Vec3d mirror, Localization for display Text and AssetRuntime
+    // for the Asset base of the input asset classes and the lease readers (stage IA6a — dedicated servers read action assets too).
     // Generated headers are <InputActions/<Header>.generated.h>, module registration is
     // rocks::generated::InputActions::RegisterModuleTypes (called by RegisterInputActionsTypes), and the identity spec is
     // InputActions.rocksids.json.
-    protected override string[] PublicDependencies => ["Core", "Input", "Curves", "ObjectRuntime", "CoreTypeBindings", "Localization"];
+    protected override string[] PublicDependencies => ["Core", "Input", "Curves", "ObjectRuntime", "CoreTypeBindings", "Localization", "AssetRuntime"];
 
     // Config: the generated module registration also registers the reflected types of Input's private dependency Config.
     protected override string[] PrivateDependencies => ["Config"];

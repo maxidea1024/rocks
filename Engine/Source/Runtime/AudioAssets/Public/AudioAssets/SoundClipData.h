@@ -18,6 +18,16 @@ enum class SoundSourceCodec : uint8 {
     Mp3 = 4
 };
 
+// 쿠킹 압축 형식이다(3.9·3.37.2절, UE ESoundAssetCompressionType 대응 — 독점 Bink·RAD는 없다).
+ROCKS_ENUM()
+enum class SoundCompression : uint8 {
+    // 플랫폼 기본: 원본 길이가 ShortClipSeconds 미만이면 ADPCM, 아니면 Opus(3.11.2절).
+    PlatformDefault = 0,
+    Pcm = 1,
+    Adpcm = 2,
+    Opus = 3
+};
+
 // 원본 bulk의 표본 저장 형식이다(3.10.1절 저장 규칙). planar, little-endian, 헤더 없음.
 ROCKS_ENUM()
 enum class SoundSourceStorage : uint8 {

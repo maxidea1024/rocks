@@ -32,7 +32,9 @@
 //                                  --graphics=<auto|d3d12|d3d11|vulkan|opengl>는 창 렌더 경로의
 //                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES),
 //                                  --graphics-validation은 API 검증 계층을 켜고, --no-render는 렌더
-//                                  없이 창만 연다 (Docs/Design/RenderBase 18.5절)
+//                                  없이 창만 연다 (Docs/Design/RenderBase 18.5절). 창 모드는 엔진이
+//                                  설 때까지 시작 화면(스플래시)을 띄우고 --no-splash는 끈다
+//                                  (Docs/Design/SplashScreen 4절)
 //   Sandbox --audio-tone [--seconds N]
 //                                  기본 출력 장치로 440 Hz 시험음을 N초(기본 3, 최대 60) 재생하고
 //                                  협상값·underrun을 남긴다(Docs/Design/AudioSystem 3.34.5절, 종료
@@ -55,6 +57,7 @@ int Usage() noexcept {
             "--cooked-shader-self-test | --texture-self-test | --audio-tone [--seconds N] | "
             "--engine [--window] [--frames N] "
             "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
+            "[--no-splash] "
             "[--config <file>] "
             "[--set=<target>=<value>]... [--trace=<channels>]... "
             "[--trace-file <path>]\n");
@@ -147,6 +150,8 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
             options.window = true;
+        } else if (Is(argument, "--no-splash")) {
+            options.noSplash = true;
         } else if (Is(argument, "--no-render")) {
             options.render = false;
         } else if (Is(argument, "--graphics-validation")) {

@@ -16,5 +16,6 @@ public sealed class Gameplay : EngineModuleRules
     // Input: a LocalPlayer reads the host's frame input state (section 18.4).
     // InputActions: PlayerController owns the per-player action evaluator and the action bindings (Docs/Design/InputActions
     // section 5.1).
-    protected override string[] PublicDependencies => ["Engine", "World", "Input", "InputActions"];
+    // AssetRuntime: PlayerController holds the leases of the input context assets it applied (Docs/Design/InputActions section 5.4).
+    protected override string[] PublicDependencies => ["Engine", "World", "Input", "InputActions", "AssetRuntime"];
 }

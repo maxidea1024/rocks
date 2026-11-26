@@ -463,7 +463,8 @@ public:
     }
 
     Result<void> AddTag(StringView key, StringView value) noexcept override {
-        if (!IsValidImportTag(info_.name, key, value)) {
+        const StringView prefix = info_.tagPrefix.IsEmpty() ? info_.name : info_.tagPrefix;
+        if (!IsValidImportTag(prefix, key, value)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -1953,6 +1954,7 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
     owned.tags = run.recordTags.View();
     owned.importerId = info.id;
     owned.importerName = info.name;
+    owned.tagPrefix = info.tagPrefix;
     owned.importerVersion = info.version;
     owned.sources = run.recordSources.View();
     owned.options = run.optionsRecord.View();

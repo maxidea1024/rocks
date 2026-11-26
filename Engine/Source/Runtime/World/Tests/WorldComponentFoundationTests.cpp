@@ -71,6 +71,8 @@ class StatefulComponent final : public Component {
     ROCKS_NATIVE_TYPE(StatefulComponent, Component, 0x91c7e3a05d2b4f86ull, 0x5b0f8d2e7a1c4639ull)
 
 public:
+    using Component::Component;
+
     Result<void> OnAwake() noexcept override {
         Record("awake");
         return Result<void>::Success();
@@ -150,6 +152,8 @@ class UniqueComponent : public Component {
     ROCKS_NATIVE_TYPE(UniqueComponent, Component, 0x2e7b4c19a0d6f853ull, 0xd94f1a63c0b8e725ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         ComponentTypeRules rules;
         rules.unique = true;
@@ -164,12 +168,17 @@ public:
 
 class DerivedUnique final : public UniqueComponent {
     ROCKS_NATIVE_TYPE(DerivedUnique, UniqueComponent, 0x7c0a5e2d9b14f368ull, 0x16e9b4d8f2a07c53ull)
+
+public:
+    using UniqueComponent::UniqueComponent;
 };
 
 class NeedsScene final : public Component {
     ROCKS_NATIVE_TYPE(NeedsScene, Component, 0xb3f61d8e2a5c0974ull, 0x48a2e0c7f19d5b36ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         static const TypeId needs[] = {ObjectTypeIdOf<SceneComponent>()};
         ComponentTypeRules rules;
@@ -182,6 +191,8 @@ class Blocker final : public Component {
     ROCKS_NATIVE_TYPE(Blocker, Component, 0x0d8e3b6f1c92a475ull, 0xe57c2a9d4b16f083ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         static const TypeId blocked[] = {ObjectTypeIdOf<NeedsScene>()};
         ComponentTypeRules rules;
@@ -209,6 +220,8 @@ class EditorMarker final : public Component {
     ROCKS_NATIVE_TYPE(EditorMarker, Component, 0x5f19c0e84a7d2b36ull, 0x9b2d6e0f3c48a517ull)
 
 public:
+    using Component::Component;
+
     bool IsEditorOnly() const noexcept override {
         return true;
     }

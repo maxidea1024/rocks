@@ -46,4 +46,4 @@
 
 - 글자는 칸 폭을 넘으면 끝을 말줄임(`…`)으로 자른다(Windows `DT_END_ELLIPSIS`, macOS `NSLineBreakByTruncatingTail`). 줄바꿈은 `Custom` 칸의 `wordWrap`만.
 - 바뀐 칸과 막대 영역만 다시 그린다. 이미지는 창 크기 DIB(macOS `CGImage`) 하나로 미리 만들어 둔다.
-- 칸 배치 덮어쓰기(설정 `layout`, 보이기는 10.1절 `show*`만 정한다): 칸마다 `anchor`·`x`·`fromBottom`·`width`·`size`·`weight`·`color`·`align`·`outline`, 막대의 `margin`·`fromBottom`·`height`·`trackColor`·`fillColor`. 값 범위는 등록 지정자로 막는다(위치는 0–논리 크기, 크기 8–48 px).
+- 칸 배치 덮어쓰기(후속 — SP1은 기본 배치만, 개정 2. 보이기는 10.1절 `show_*`만 정한다): 칸마다 `anchor`·`x`·`fromBottom`·`width`·`size`·`weight`·`color`·`align`·`outline`, 막대의 `margin`·`fromBottom`·`height`·`trackColor`·`fillColor`. 값 범위는 등록 지정자로 막는다(위치는 0–논리 크기, 크기 8–48 px).

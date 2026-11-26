@@ -65,6 +65,8 @@ class ReasonComponent final : public Component {
     ROCKS_NATIVE_TYPE(ReasonComponent, Component, 0x6e0c2b9d41f74a38ull, 0x8f5d13a7c92e0b64ull)
 
 public:
+    using Component::Component;
+
     Result<void> OnAwake() noexcept override {
         Record("c.awake");
         return Result<void>::Success();

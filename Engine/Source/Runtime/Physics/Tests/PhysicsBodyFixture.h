@@ -2,6 +2,9 @@
 
 // Physics 모듈 body 시험의 공용 고정 장치다(PhysicsBodyTests·PhysicsFilterTests — World·컴포넌트
 // 공개 API만 쓴다).
+#include <Collision/CollisionSettings.generated.h>
+#include <Collision/CollisionSettings.h>
+#include <Config/Tests/ConfigTestSupport.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
@@ -52,13 +55,26 @@ public:
     }
 };
 
-// 물리 World 고정 장치다(설정 문맥 없음 — 충돌 profile 표가 비어 형상은 사용자 지정 값
-// QueryAndPhysics·WorldStatic으로 해석된다).
+// 물리 World 고정 장치다. collisionLayer가 없으면 설정 문맥이 없어 충돌 profile 표가 비고, 형상은
+// 사용자 지정 값 QueryAndPhysics·WorldStatic으로 해석된다. collisionLayer는 엔진 층 JSON 텍스트다
+// (`{ "Collision": { "profiles": [...] } }` — profile 표를 만든다).
 struct BodyWorldFixture {
     explicit BodyWorldFixture(bool withPhysics = true, WorldKind kind = WorldKind::Game,
-                              const WorldSubsystemType* after = nullptr) noexcept
+                              const WorldSubsystemType* after = nullptr,
+                              const char* collisionLayer = nullptr) noexcept
         : types(allocator), modules(types, allocator) {
         registered = RegisterWorldTypes(modules).IsOk();
+        if (collisionLayer != nullptr) {
+            registered = registered &&
+                         RegisterCollisionTypes(settingsFixture.registration).IsOk() &&
+                         settingsFixture.Context().RegisterSettings<CollisionSettings>().IsOk() &&
+                         settingsFixture.Context()
+                             .AddLayerText(config::ConfigLayer::Engine, "Engine.json", "Engine",
+                                           "<engine>", StringView(collisionLayer))
+                             .IsOk() &&
+                         settingsFixture.Context().Sync().IsOk();
+        }
+
         auto actorToken = RegisterNativeClass<PhysicsTestActor>(types);
         registered = registered && actorToken.IsOk();
         if (actorToken) {
@@ -76,6 +92,7 @@ struct BodyWorldFixture {
         desc.context = {0x50485953424f4459ull, 1};
         desc.timeStep = {StepSeconds, 0.25, 8};
         desc.kind = kind;
+        desc.settings = collisionLayer != nullptr ? &settingsFixture.Context() : nullptr;
         if (withPhysics) {
             desc.subsystems = Span<const WorldSubsystemType>(subsystems, subsystemCount);
         }
@@ -212,6 +229,8 @@ struct BodyWorldFixture {
         return world->GetPhysicsScene()->Stats().bodies;
     }
 
+    // 설정 문맥은 World보다 오래 산다(먼저 선언).
+    test::config::ConfigFixture settingsFixture;
     SystemAllocator allocator;
     TypeRegistry types;
     ModuleRegistration modules;

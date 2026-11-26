@@ -175,6 +175,13 @@ inline constexpr uint32 MillisecondsPerSecond = 1000;
 // false다.
 ROCKS_ASSETCOMMANDLETS_API bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
 
+// 명령행 경로를 절대 경로로 바꾼다(상대 경로는 현재 작업 디렉터리 기준 — asset-import 원본·
+// asset-import-unreal 묶음, ProjectLayout과 같은 규칙). 절대 경로는 그대로 복사한다.
+// workingFailed(null 가능)는 작업 디렉터리를 읽지 못해 실패했는지다(호출자가 메시지를 고른다).
+// 오류: 작업 디렉터리 읽기 실패(그 파일 오류), 경로 합치기 오류(Path::MakeAbsolute), 할당 실패.
+ROCKS_ASSETCOMMANDLETS_API Result<String>
+AbsoluteCommandPath(Allocator& allocator, StringView path, bool* workingFailed = nullptr) noexcept;
+
 // `--wait` 마감 시각 하나에서 남은 밀리초다(두 잠금이 대기를 나눠 쓴다 — Docs/Design/AssetSystem
 // 10.3.1절 A4f4 1번): startNanoseconds부터 nowNanoseconds까지 지난 시간을 waitMilliseconds에서
 // 빼고, 다 썼으면 0이다(now가 start보다 앞이면 지난 시간 0). 값은 단조
