@@ -407,12 +407,15 @@ public:
     // Dynamic, 그 밖은 Kinematic.
     BodyMotion PhysicsBodyMotion() const noexcept;
 
-    // 물리 시뮬레이션을 켜거나 끈다(UE SetSimulatePhysics — bodySettings.simulatePhysics). PH2b는
-    // 값만 바꾼다: body가 이미 있으면 다음 생성 때 반영된다(있는 body의 즉시 Kinematic ↔ Dynamic
-    // 전환은 재생성 표 PH2d — PhysicsModule 2.3.1절).
-    void SetSimulatePhysics(bool simulate) noexcept {
-        bodySettings_.simulatePhysics = simulate;
-    }
+    // 물리 시뮬레이션을 켜거나 끈다(UE SetSimulatePhysics — bodySettings.simulatePhysics,
+    // PhysicsModule 2.3.1·7.1.5절). 켤 때 등록돼 있고 부모가 있으면 먼저 월드 transform을 유지하며
+    // 뗀다(시뮬레이션하는 컴포넌트는 부착될 수 없다). body가 있으면 다시 만들지 않고 Kinematic ↔
+    // Dynamic으로 바꾼다: 끄면 그 자리에서 속도 0, 켜면 startAwake일 때 깨운다. Movable이 아니면
+    // 값만 바꾸고 Warning SimulateOnStaticBody다(Static body 그대로).
+    //
+    // 사용 예:
+    //   ball.SetSimulatePhysics(true);   // 다음 고정 스텝부터 떨어진다
+    void SetSimulatePhysics(bool simulate) noexcept;
 
     // 물리 결과를 컴포넌트에 쓴다(Docs/Design/PhysicsModule 3.4절 — Physics의 PhysicsResults만
     // 부른다). 월드 위치(cm)·회전으로 옮기되 자기 body로 되돌려 보내지 않는다(UE
@@ -524,12 +527,25 @@ protected:
     void DestroySystemState(SystemStateKind kind) noexcept override;
 
     // body가 있으면 월드 transform으로 옮긴다(3.3절 — UE OnUpdateTransform → SendPhysicsTransform).
-    // 파생이 재정의하면 이것을 부른다.
+    // scale이 바뀌었으면 장면이 형상을 다시 만든다(7.1.5절). 파생이 재정의하면 이것을 부른다.
     void OnTransformUpdated() noexcept override;
+
+    // 시작할 때 simulatePhysics이고 부모가 있으면 월드 transform을 유지하며 뗀다(UE
+    // UPrimitiveComponent::BeginPlay — PhysicsModule 2.3.1절). 파생이 재정의하면 이것을 부른다.
+    void OnStart() noexcept override;
+
+    // 형상 값이 바뀐 뒤 파생 setter가 부른다(UE UpdateBodyScale(scale, true) — 7.1.5절). body가
+    // 있으면 BuildBodyGeometry의 새 값으로 형상을 바꾼다. 실패하면 이전 형상을 두고 Warning
+    // BodyShapeUpdateFailed다.
+    void UpdateBodyGeometry() noexcept;
 
 private:
     // body에 넘기는 월드 transform(위치·회전·scale 따로 — 행렬 분해 없음)이다.
     Transform BodyWorldTransform() const noexcept;
+
+    // 충돌 값이 바뀐 뒤 부른다(2.3.1절): NoCollision 경계를 넘으면 body를 그 자리에서 만들거나
+    // 지우고 (RecreateSystemStateNow), 아니면 body 필터만 바꾼다.
+    void UpdateBodyCollision() noexcept;
 
     // 실효 값을 편집해 바뀌면 "Custom"으로 옮긴다(위 네 setter의 공통 경로).
     template <class Edit>
