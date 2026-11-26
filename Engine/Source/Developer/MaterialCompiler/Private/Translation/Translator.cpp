@@ -3,6 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
+#include <MaterialSchema/MaterialContextValue.h>
 #include <MaterialSchema/MaterialGraphTypes.h>
 #include <MaterialSchema/MaterialPrerequisite.h>
 #include <MaterialSchema/NodePropertyReader.h>
@@ -40,6 +41,36 @@ constexpr StringView PendingOutputPins[] = {
     "CustomizedUv1", "CustomizedUv2", "CustomizedUv3", "CustomizedUv4",
     "CustomizedUv5", "CustomizedUv6", "CustomizedUv7",
 };
+
+// 영역의 진단용 영어 이름이다(V6 문구).
+StringView DomainText(MaterialDomain domain) noexcept {
+    switch (domain) {
+    case MaterialDomain::Surface:
+        return "Surface";
+    case MaterialDomain::DeferredDecal:
+        return "DeferredDecal";
+    case MaterialDomain::LightFunction:
+        return "LightFunction";
+    case MaterialDomain::Volume:
+        return "Volume";
+    case MaterialDomain::PostProcess:
+        return "PostProcess";
+    case MaterialDomain::UserInterface:
+        return "UserInterface";
+    }
+
+    return "unknown";
+}
+
+// 진입점이 정점 문맥 둘 중 하나인가.
+bool IsVertexEntry(IrEntry entry) noexcept {
+    return entry == IrEntry::Vertex || entry == IrEntry::VertexPrevious;
+}
+
+// 출력 슬롯 진입점이 문맥에 속하는가(정점 슬롯은 정점·이전 정점 문맥 둘 다 — 6.9절).
+bool SlotInContext(IrEntry entry, EvaluationContext context) noexcept {
+    return context == EvaluationContext::Pixel ? !IsVertexEntry(entry) : IsVertexEntry(entry);
+}
 
 bool IsTranslucent(BlendMode mode) noexcept {
     return mode != BlendMode::Opaque && mode != BlendMode::Masked;
@@ -163,8 +194,18 @@ Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
         ++errorCount_;
     }
 
-    return out_.diagnostics.Add(severity, ToDiagnosticCode(code), input_.asset, graph_->id, node,
-                                pin, message);
+    // 같은 (코드, 노드, 핀, 문구)는 한 번만 남긴다(여러 문맥에서 번역한 노드 — UE
+    // HLSLMaterialTranslator.cpp:4446–4455). 오류 수는 세므로 노드는 그 문맥에서도 실패다.
+    const uint32 diagnosticCode = ToDiagnosticCode(code);
+    for (const nodegraph::GraphDiagnostic& item : out_.diagnostics.items) {
+        if (item.code == diagnosticCode && item.node == node && item.pin == pin &&
+            item.severity == severity && item.message.View() == message) {
+            return Result<void>::Success();
+        }
+    }
+
+    return out_.diagnostics.Add(severity, diagnosticCode, input_.asset, graph_->id, node, pin,
+                                message);
 }
 
 Result<void> Translator::RecordOutput(Guid node, Name pin, IrValueId value) noexcept {
@@ -233,7 +274,7 @@ Result<void> Translator::BuildIndex() noexcept {
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
     const Span<const LoweringEntry> groups[] = {ConstantLowerings(), MathLowerings(),
-                                                FlowLowerings()};
+                                                FlowLowerings(), ContextValueLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -713,6 +754,10 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
             return Result<void>::Failure(connected.Error());
         }
 
+        if (!SlotInContext(slot.entry, context_)) {
+            continue;
+        }
+
         if (!IsOutputActive(slot.pin, input_.traits)) {
             if (connected.Value()) {
                 if (auto reported = context.Warning(
@@ -740,8 +785,9 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
             continue;
         }
 
-        if (auto added = results_.TryPushBack(IrResult{slot.entry, slot.pin, coerced.Value()});
-            !added) {
+        const IrEntry entry =
+            context_ == EvaluationContext::VertexPrevious ? IrEntry::VertexPrevious : slot.entry;
+        if (auto added = results_.TryPushBack(IrResult{entry, slot.pin, coerced.Value()}); !added) {
             return added;
         }
     }
@@ -753,26 +799,56 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
     return Result<void>::Success();
 }
 
-Result<void> Translator::CheckVertexStage() noexcept {
-    // V4(6.8절): 정점 진입점에서 닿는 값에 픽셀 전용 연산(미분)이 있으면 오류다.
+Result<void> Translator::ContextRoots(Array<Name>& roots) const noexcept {
+    roots.Clear();
+    for (const OutputSlot& slot : OutputSlots) {
+        if (!SlotInContext(slot.entry, context_) || !IsOutputActive(slot.pin, input_.traits)) {
+            continue;
+        }
+
+        auto pin = input_.names.TryFind(slot.pin);
+        if (!pin) {
+            if (pin.Error() == ErrorCode::NotFound) {
+                // 문서에 없는 핀 이름이면 그 핀에 연결도 없다.
+                continue;
+            }
+
+            return Result<void>::Failure(pin.Error());
+        }
+
+        if (auto added = roots.TryPushBack(pin.Value()); !added) {
+            return added;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> Translator::CheckContextValues() noexcept {
+    // 진입점 결과에서 닿는 값만 본다(DCE 뒤 — UE도 활성 속성에서 닿는 식만 컴파일한다). 단계는
+    // 정점(정점·이전 정점 진입점)과 픽셀 둘이다.
+    const Span<const MaterialContextValue> table = MaterialContextValues();
     SystemAllocator scratch;
     Array<bool> visited(scratch);
     if (auto sized = visited.TryResize(builder_.Count()); !sized) {
         return sized;
     }
 
-    for (bool& item : visited) {
-        item = false;
-    }
-
     Array<IrValueId> stack(scratch);
-    for (const IrResult& result : results_) {
-        if (result.entry != IrEntry::Vertex && result.entry != IrEntry::VertexPrevious) {
-            continue;
+    for (uint32 stage = 0; stage < 2; ++stage) {
+        const bool vertex = stage == 0;
+        for (bool& item : visited) {
+            item = false;
         }
 
-        if (auto pushed = stack.TryPushBack(result.value); !pushed) {
-            return pushed;
+        for (const IrResult& result : results_) {
+            if (IsVertexEntry(result.entry) != vertex) {
+                continue;
+            }
+
+            if (auto pushed = stack.TryPushBack(result.value); !pushed) {
+                return pushed;
+            }
         }
 
         while (!stack.IsEmpty()) {
@@ -788,7 +864,7 @@ Result<void> Translator::CheckVertexStage() noexcept {
 
             visited[id] = true;
             const IrValue& value = builder_.Value(id);
-            if (value.op == IrOp::Ddx || value.op == IrOp::Ddy) {
+            if (vertex && (value.op == IrOp::Ddx || value.op == IrOp::Ddy)) {
                 if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
                                            MaterialDiagnosticCode::StageViolation, value.site.node,
                                            Name(), "Pixel-only value reaches a vertex output");
@@ -797,6 +873,51 @@ Result<void> Translator::CheckVertexStage() noexcept {
                 }
 
                 continue;
+            }
+
+            if (value.op == IrOp::Extern && value.immediate[0] < table.Size()) {
+                const MaterialContextValue& context = table[static_cast<usize>(value.immediate[0])];
+                const MaterialStageMask stageMask =
+                    vertex ? MaterialVertexStage : MaterialPixelStage;
+                if ((context.stages & stageMask) == 0) {
+                    SystemAllocator text;
+                    String message(text);
+                    const StringView parts[] = {"'", context.name, "' is not available in the ",
+                                                vertex ? StringView("vertex") : StringView("pixel"),
+                                                " stage"};
+                    for (StringView part : parts) {
+                        if (auto appended = message.TryAppend(part); !appended) {
+                            return appended;
+                        }
+                    }
+
+                    if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
+                                               MaterialDiagnosticCode::StageViolation,
+                                               value.site.node, Name(), message.View());
+                        !reported) {
+                        return reported;
+                    }
+                }
+
+                if ((context.domains & ToMask(input_.traits.domain)) == 0) {
+                    SystemAllocator text;
+                    String message(text);
+                    const StringView parts[] = {"'", context.name, "' is not available in the ",
+                                                DomainText(input_.traits.domain),
+                                                " material domain"};
+                    for (StringView part : parts) {
+                        if (auto appended = message.TryAppend(part); !appended) {
+                            return appended;
+                        }
+                    }
+
+                    if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
+                                               MaterialDiagnosticCode::UnsupportedCapability,
+                                               value.site.node, Name(), message.View());
+                        !reported) {
+                        return reported;
+                    }
+                }
             }
 
             for (uint8 index = 0; index < value.operandCount; ++index) {
@@ -852,41 +973,57 @@ Result<void> Translator::Run() noexcept {
         return checked;
     }
 
-    // 의존 후위 순서로 번역한다(입력이 늘 먼저 — 재귀 없음). 비활성 노드는 번역하지 않는다(받는
-    // 쪽이 통과 쌍을 따른다).
+    // 평가 문맥마다(정점 → 이전 정점 → 픽셀 — 6.9절) 의존 후위 순서로 번역한다(입력이 늘 먼저 —
+    // 재귀 없음). 비활성 노드는 번역하지 않는다(받는 쪽이 통과 쌍을 따른다). 이전 정점 문맥은 정점
+    // 문맥이 WPO 결과를 냈을 때만 번역한다(UE HLSLMaterialTranslator.cpp:1663–1667).
     SystemAllocator scratch;
     Array<Name> roots(scratch);
-    for (const OutputSlot& slot : OutputSlots) {
-        auto pin = input_.names.TryFind(slot.pin);
-        if (pin && IsOutputActive(slot.pin, input_.traits)) {
-            if (auto added = roots.TryPushBack(pin.Value()); !added) {
-                return added;
+    Array<usize> order(scratch);
+    const EvaluationContext contexts[] = {
+        EvaluationContext::Vertex, EvaluationContext::VertexPrevious, EvaluationContext::Pixel};
+    for (EvaluationContext context : contexts) {
+        if (context == EvaluationContext::VertexPrevious) {
+            bool hasOffset = false;
+            for (const IrResult& result : results_) {
+                hasOffset = hasOffset || result.entry == IrEntry::Vertex;
+            }
+
+            if (!hasOffset) {
+                continue;
             }
         }
-    }
 
-    Array<usize> order(scratch);
-    if (auto planned = PlanOrder(*output, roots.View(), order); !planned) {
-        return planned;
-    }
-
-    for (usize index : order) {
-        const nodegraph::GraphNode& node = graph_->nodes[index];
-        if (node.enableState == nodegraph::NodeEnableState::Disabled || states_.Contains(node.id)) {
-            continue;
+        context_ = context;
+        outputs_.Clear();
+        states_.Clear();
+        if (auto rooted = ContextRoots(roots); !rooted) {
+            return rooted;
         }
 
-        if (auto lowered = LowerNodeOnce(node); !lowered) {
-            return lowered;
+        order.Clear();
+        if (auto planned = PlanOrder(*output, roots.View(), order); !planned) {
+            return planned;
+        }
+
+        for (usize index : order) {
+            const nodegraph::GraphNode& node = graph_->nodes[index];
+            if (node.enableState == nodegraph::NodeEnableState::Disabled ||
+                states_.Contains(node.id)) {
+                continue;
+            }
+
+            if (auto lowered = LowerNodeOnce(node); !lowered) {
+                return lowered;
+            }
+        }
+
+        if (auto translated = TranslateOutputs(*output); !translated) {
+            return translated;
         }
     }
 
-    if (auto translated = TranslateOutputs(*output); !translated) {
-        return translated;
-    }
-
-    if (auto staged = CheckVertexStage(); !staged) {
-        return staged;
+    if (auto checked = CheckContextValues(); !checked) {
+        return checked;
     }
 
     if (failed_) {

@@ -3,7 +3,8 @@
 // /Engine/Generated/Material.rsh를 include한다. 머티리얼 pass 셰이더만 include한다(엔진 전역
 // 셰이더가 include하면 생성 파일 연결이 없어 전처리 오류다 — 7.2절).
 //
-// 사용 예(pass 원문):
+// 사용 예(pass 원문 — 공급하는 기능 표지를 include 전에 둔다):
+//   #define MATERIAL_SUPPLY_VIEW 1
 //   #include "/Engine/Private/Material/MaterialCommon.rsh"
 //   MaterialInputs inputs;
 //   inputs.svPosition = position;
@@ -13,22 +14,14 @@
 #include "/Engine/Private/Common/ShaderPrelude.rsh"
 #include "/Engine/Private/Shading/SurfaceAttributes.rsh"
 
-// 정점 단계 문맥이다(7.3절). MS2a는 첫 칸만 있고 MS2b가 문맥 값 표(19.3.2절)대로 채운다.
-struct MaterialVertexInputs {
-    // 카메라 상대 world 위치(cm)다.
-    float3 translatedWorldPosition;
-};
+// 문맥 구조체(MaterialVertexInputs·MaterialInputs)·공급 표지·접근자다(6.9절 — 문맥 값 표에서 만든
+// 파일).
+#include "/Engine/Private/Material/MaterialContext.rsh"
 
 // 정점 함수의 결과다.
 struct MaterialVertexResult {
     // world 공간 위치 오프셋(cm)이다(UE WorldPositionOffset).
     float3 worldPositionOffset;
-};
-
-// 픽셀 단계 문맥이다(Renderer 14.1절 이름). MS2a는 첫 칸만 있다.
-struct MaterialInputs {
-    // 화면 위치(SV_Position)다.
-    float4 svPosition;
 };
 
 // 벡터 조건 선택·논리곱·논리합이다(7.7절). HLSL 2021은 벡터 ?:·&&·||를 막고 select·and·or를 준다.

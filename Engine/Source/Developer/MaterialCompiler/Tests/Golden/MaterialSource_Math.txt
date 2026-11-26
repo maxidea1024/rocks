@@ -35,7 +35,11 @@ void EvaluateMaterialVertex(in MaterialVertexInputs c, inout MaterialVertexResul
 }
 
 void EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout MaterialVertexResult r) {
-    EvaluateMaterialVertex(c, r);
+    const float m1 = sin(0.5);
+    const float2 m2 = float2(m1, m1);
+    const float m3 = cos(m1);
+    const float3 m4 = float3(m2, m3);
+    r.worldPositionOffset = m4;
 }
 
 SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {

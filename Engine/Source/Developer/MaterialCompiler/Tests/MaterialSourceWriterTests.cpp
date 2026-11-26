@@ -1,8 +1,11 @@
 #include <Core/FileRead.h>
 #include <Core/Text/String.h>
+#include <MaterialCompiler/MaterialContextSource.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
 #include <MaterialSchema/Nodes/Constants/ConstantDoubleProperties.generated.h>
 #include <MaterialSchema/Nodes/Constants/ConstantDoubleProperties.h>
+#include <MaterialSchema/Nodes/Constants/TimeProperties.generated.h>
+#include <MaterialSchema/Nodes/Constants/TimeProperties.h>
 #include <MaterialSchema/Nodes/Math/ComponentMaskProperties.generated.h>
 #include <MaterialSchema/Nodes/Math/ComponentMaskProperties.h>
 #include <MaterialSchema/Nodes/Math/CosineProperties.generated.h>
@@ -40,16 +43,32 @@ bool GoldenPath(StringView name, String& out) noexcept {
            out.TryAppend(name);
 }
 
-// text가 기대 원문 name과 byte로 같은가. 다르면 실제 원문을 실패로 남긴다.
-bool MatchesGolden(Allocator& allocator, StringView name, StringView text) noexcept {
-    String path(allocator);
+// 저장소 뿌리 기준 relative 경로다(이 파일은 Engine/Source/Developer/MaterialCompiler/Tests에
+// 있다 — 파일 이름과 디렉터리 다섯을 걷어 낸다).
+bool SourceTreePath(StringView relative, String& out) noexcept {
+    constexpr uint32 LevelsBelowRoot = 6;
+    const StringView source(__FILE__);
+    usize cut = source.ByteCount();
+    for (uint32 level = 0; level < LevelsBelowRoot && cut > 0; ++level) {
+        --cut;
+        while (cut > 0 && source.Data()[cut - 1] != '/' && source.Data()[cut - 1] != '\\') {
+            --cut;
+        }
+    }
+
+    // __FILE__가 상대 경로면(뿌리에서 컴파일) 앞부분이 비고 작업 디렉터리 기준이 된다.
+    return out.TryAssign(StringView(source.Data(), cut)) && out.TryAppend(relative);
+}
+
+// text가 path 파일과 byte로 같은가. 다르면 실제 원문을 실패로 남긴다.
+bool MatchesFile(Allocator& allocator, bool located, StringView path, StringView text) noexcept {
     Array<uint8> bytes(allocator);
     bool existed = false;
-    const bool read = GoldenPath(name, path) &&
-                      ReadWholeFile(platform::PhysicalFileSystem(), path.View(), MaxGoldenFileBytes,
-                                    bytes, existed)
-                          .IsOk() &&
-                      existed;
+    const bool read =
+        located &&
+        ReadWholeFile(platform::PhysicalFileSystem(), path, MaxGoldenFileBytes, bytes, existed)
+            .IsOk() &&
+        existed;
     const bool same =
         read && StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()) == text;
     if (!same) {
@@ -71,6 +90,20 @@ bool MatchesGolden(Allocator& allocator, StringView name, StringView text) noexc
     }
 
     return same;
+}
+
+// text가 기대 원문 name(Golden 폴더)과 byte로 같은가.
+bool MatchesGolden(Allocator& allocator, StringView name, StringView text) noexcept {
+    String path(allocator);
+    const bool located = GoldenPath(name, path);
+    return MatchesFile(allocator, located, path.View(), text);
+}
+
+// text가 저장소 파일 relative와 byte로 같은가.
+bool MatchesSourceTreeFile(Allocator& allocator, StringView relative, StringView text) noexcept {
+    String path(allocator);
+    const bool located = SourceTreePath(relative, path);
+    return MatchesFile(allocator, located, path.View(), text);
 }
 
 struct Generated {
@@ -486,6 +519,39 @@ TEST(MaterialSourceWriter_DeepVaryingChain) {
     REQUIRE(Generate(fixture, Traits(), generated));
     // sin 하나 + 1 − x 4096개가 표면 함수에 나온다.
     CHECK(generated.source.locations.Size() >= ChainLength + 1);
+}
+
+// MS-T3(6.9절): 문맥 값 — 정점·이전 정점 진입점의 Time(이전 변형), 표면의 정점 색 성분, PDO의
+// 미분, 진입점별 사용 정의.
+TEST(MaterialSourceWriter_ContextGolden) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid time = fixture.Add("Material.Time", env.Save(TimeProperties{}));
+    fixture.Connect(time, "Result", OutputNodeId, "WorldPositionOffset");
+    const Guid color = fixture.Add("Material.VertexColor");
+    fixture.Connect(color, "G", OutputNodeId, "AmbientOcclusion");
+    const Guid depth = fixture.Add("Material.PixelDepth");
+    const Guid derivative = fixture.Add("Material.Ddx");
+    fixture.Connect(depth, "Result", derivative, "Value");
+    fixture.Connect(derivative, "Result", OutputNodeId, "PixelDepthOffset");
+    Generated generated(env.allocator);
+    REQUIRE(Generate(fixture, Traits(), generated));
+    CHECK(MatchesGolden(env.allocator, "MaterialSource_Context.txt", generated.source.text.View()));
+}
+
+// 문맥 원문(6.9절): 저장소의 MaterialContext.rsh가 문맥 값 표로 만든 원문과 같다(표를 고치면
+// 파일도 고친다). 같은 표는 두 번 만들어도 같은 byte다.
+TEST(MaterialSourceWriter_ContextSourceMatchesTable) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    String first(env.allocator);
+    String second(env.allocator);
+    REQUIRE(WriteMaterialContextSource(env.allocator, first));
+    REQUIRE(WriteMaterialContextSource(env.allocator, second));
+    CHECK(first.View() == second.View());
+    CHECK(MatchesSourceTreeFile(
+        env.allocator, "Engine/Shaders/Private/Material/MaterialContext.rsh", first.View()));
 }
 
 } // namespace material_source_writer_tests_file

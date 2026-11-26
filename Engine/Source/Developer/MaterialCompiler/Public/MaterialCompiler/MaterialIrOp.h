@@ -3,11 +3,11 @@
 #include <Base/Types.h>
 #include <Core/Text/StringView.h>
 
-// 머티리얼 IR 연산이다(Docs/Design/MaterialSystem 6.2·6.8절). 산술·초월 연산은 UE Operator 노드의
-// 연산 전부(UE EMaterialExpressionOperatorKind —
+// 머티리얼 IR 연산이다(Docs/Design/MaterialSystem 6.2·6.8·6.9절). 산술·초월 연산은 UE Operator
+// 노드의 연산 전부(UE EMaterialExpressionOperatorKind —
 // RE/Public/Materials/MaterialExpressionOperator.h:14–100)와 같은 뜻이고, 그 밖에 구조
-// 연산(상수·복제·성분 선택·이어 붙이기·변환·선택·분기)과 미분을 둔다. 값 번호·hash에 들어가므로
-// 순서를 바꾸지 않고 끝에만 더한다.
+// 연산(상수·복제·성분 선택·이어 붙이기·변환·선택·분기)·미분·문맥 값을 둔다. 값 번호·hash에
+// 들어가므로 순서를 바꾸지 않고 끝에만 더한다.
 namespace rocks::material {
 
 enum class IrOp : uint8 {
@@ -104,13 +104,18 @@ enum class IrOp : uint8 {
     // 삼항(UE Operator 삼항).
     Clamp = 79,
     Lerp = 80,
-    Smoothstep = 81
+    Smoothstep = 81,
+
+    // 문맥 값이다(6.9절). 즉시값 [0]은 문맥 값 표 번호, [1]은 IrExternVariant이고, 피연산자는
+    // 함수형 값의 인자(0–3개)다.
+    Extern = 82
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 82;
+inline constexpr uint32 IrOpCount = 83;
 
-// 연산이 받는 피연산자 수다(Constant 0, 단항 1, 이항 2, 삼항·선택·분기 3, Append 2).
+// 연산이 받는 피연산자 수다(Constant 0, 단항 1, 이항 2, 삼항·선택·분기 3, Append 2). 인자 수가
+// 값마다 다른 Extern은 0이다(값의 operandCount를 본다).
 ROCKS_MATERIALCOMPILER_API uint8 IrOpArity(IrOp op) noexcept;
 
 // 진단·dump용 영어 이름이다. 범위 밖이면 "Invalid"다.

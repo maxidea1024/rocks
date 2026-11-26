@@ -23,7 +23,21 @@
 // 오류 전파: 그래프 오류는 진단으로 남기고 값 자리에 NoIrValue를 돌려준다. NoIrValue를 받은 연산은
 // 다시 진단하지 않고 NoIrValue를 낸다(UE 번역기의 INDEX_NONE과 같다). Result 실패는 할당 같은
 // 시스템 오류뿐이다.
+//
+// 평가 문맥(6.9절): 정점·이전 정점·픽셀 문맥마다 그 진입점의 활성 출력 핀에서 따로 번역한다. 노드
+// 결과는 문맥마다 기억하고(UE 셰이더 단계별 함수 상태·이전 프레임 키와 같다), IR 값은 문맥 사이에
+// 공유한다. 같은 (코드, 노드, 핀, 문구) 진단은 한 번만 남는다.
 namespace rocks::material::detail {
+
+// 평가 문맥이다(6.9절 — 번역 순서와 같다).
+enum class EvaluationContext : uint8 {
+    // Vertex 진입점(UE SF_Vertex).
+    Vertex = 0,
+    // VertexPrevious 진입점(UE bCompilingPreviousFrame).
+    VertexPrevious = 1,
+    // 픽셀 진입점들(UE SF_Pixel).
+    Pixel = 2
+};
 
 // 순서 계획 밖에서 노드를 재귀로 번역할 때(의존을 미리 알 수 없는 요청)의 깊이 상한이다(6.8절
 // GraphTooDeep). 계획된 번역은 재귀하지 않는다.
@@ -87,6 +101,11 @@ public:
         return *graph_;
     }
 
+    // 지금 번역 중인 평가 문맥이다.
+    EvaluationContext Context() const noexcept {
+        return context_;
+    }
+
     // 종류 이름의 lowering 함수다. 없으면 nullptr이다.
     LoweringFn FindLowering(Name type) const noexcept;
 
@@ -122,8 +141,13 @@ private:
 
     Result<void> BuildIndex() noexcept;
     Result<void> CheckParameterNames() noexcept;
+    // 지금 문맥의 진입점 결과를 출력 노드 핀에서 만든다(대기 핀·비활성 핀 진단은 문맥마다 같고
+    // 한 번만 남는다).
     Result<void> TranslateOutputs(const nodegraph::GraphNode& output) noexcept;
-    Result<void> CheckVertexStage() noexcept;
+    // 지금 문맥의 활성 출력 핀이다.
+    Result<void> ContextRoots(Array<Name>& roots) const noexcept;
+    // V4(단계 — 미분·문맥 값 단계 집합)·V6(문맥 값 영역) 검사다(6.9절).
+    Result<void> CheckContextValues() noexcept;
     // node가 기대는 노드들이다(들어오는 간선의 출발 노드, 이름 있는 재경유의 선언).
     Result<void> CollectDependencies(usize node, Array<Dependency>& out) noexcept;
     // 출력 노드의 roots 핀(활성 핀)에서 닿는 노드의 의존 후위 순서를 만들고 순환 간선을 진단한다.
@@ -153,6 +177,7 @@ private:
     Name rerouteOut_;
     uint32 depth_ = 0;
     uint32 errorCount_ = 0;
+    EvaluationContext context_ = EvaluationContext::Vertex;
     bool failed_ = false;
 };
 

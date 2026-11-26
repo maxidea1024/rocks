@@ -41,7 +41,7 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE AtmosphericLightColor.
     ContextValue("AtmosphericLightColor", "AtmosphericLightColor", MaterialPinType::Float3,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::Sky,
-                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::NotAware, {}, false),
     // UE CameraVector.
     ContextValue("CameraVector", "CameraVector", MaterialPinType::Float3,
@@ -115,12 +115,13 @@ constexpr MaterialContextValue ContextValues[] = {
                  ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
                  AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
                  false),
-    // UE ObjectOrientation.
+    // UE ObjectOrientation. UE 기본 번역기는 영역을 검사하지
+    // 않는다(HLSLMaterialTranslator.cpp:11716 —
+    // ini Domains는 IR 경로만 본다. 6.8절 의미 기준).
     ContextValue("ObjectOrientation", "ObjectOrientation", MaterialPinType::Float3,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::Primitive,
-                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::Volume),
-                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
-                 false),
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
     // UE ObjectRadius.
     ContextValue("ObjectRadius", "ObjectRadius", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::Primitive,
@@ -235,8 +236,8 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE ScalarBlueNoise.
     ContextValue("ScalarBlueNoise", "ScalarBlueNoise", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::View,
-                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::NotAware, {}, false),
+                 ToMask(MaterialDomain::Surface), MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SphericalParticleOpacity.
     ContextValue("SphericalParticleOpacity", "SphericalParticleOpacity", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 1, MaterialContextFeature::Particle,
@@ -245,8 +246,8 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE DecalMipmapLevel.
     ContextValue("DecalMipmapLevel", "DecalMipmapLevel", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 1, MaterialContextFeature::Decal,
-                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::NotAware, {}, false),
+                 ToMask(MaterialDomain::DeferredDecal), MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE DepthOfFieldFunction.
     ContextValue("DepthOfFieldFunction", "DepthOfFieldFunction", MaterialPinType::Float1,
                  MaterialContextValueForm::Function, 2, MaterialContextFeature::PostProcess,
@@ -336,7 +337,7 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE SkyAtmosphereAerialPerspective.
     ContextValue("SkyAtmosphereAerialPerspective", "SkyAtmosphereAerialPerspective",
                  MaterialPinType::Float4, MaterialContextValueForm::Function, 1,
-                 MaterialContextFeature::Sky, AllMaterialDomains, AllMaterialStages,
+                 MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SkyAtmosphereDistantLightScatteredLuminance.
     ContextValue("SkyAtmosphereDistantLightScatteredLuminance",
@@ -352,22 +353,22 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE SkyAtmosphereLightDiskLuminance.
     ContextValue("SkyAtmosphereLightDiskLuminance", "SkyAtmosphereLightDiskLuminance",
                  MaterialPinType::Float3, MaterialContextValueForm::Function, 2,
-                 MaterialContextFeature::Sky, AllMaterialDomains, AllMaterialStages,
+                 MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SkyAtmosphereLightIlluminance.
     ContextValue("SkyAtmosphereLightIlluminance", "SkyAtmosphereLightIlluminance",
                  MaterialPinType::Float3, MaterialContextValueForm::Function, 2,
-                 MaterialContextFeature::Sky, AllMaterialDomains, AllMaterialStages,
+                 MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SkyAtmosphereLightIlluminanceOnGround.
     ContextValue("SkyAtmosphereLightIlluminanceOnGround", "SkyAtmosphereLightIlluminanceOnGround",
                  MaterialPinType::Float3, MaterialContextValueForm::Function, 1,
-                 MaterialContextFeature::Sky, AllMaterialDomains, AllMaterialStages,
+                 MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SkyAtmosphereViewLuminance.
     ContextValue("SkyAtmosphereViewLuminance", "SkyAtmosphereViewLuminance",
                  MaterialPinType::Float3, MaterialContextValueForm::Function, 1,
-                 MaterialContextFeature::Sky, AllMaterialDomains, AllMaterialStages,
+                 MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
     // UE SkyLightEnvMapSample.
     ContextValue("SkyLightEnvironmentSample", "SkyLightEnvMapSample", MaterialPinType::Float3,
@@ -561,15 +562,15 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE 템플릿 필드 View.GameTime(Time 노드).
     ContextValue("Time", "", MaterialPinType::Float1, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE 템플릿 필드 View.RealTime(Time 노드 IgnorePause).
     ContextValue("RealTime", "", MaterialPinType::Float1, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE 템플릿 필드 ResolvedView.WorldCameraOrigin(CameraPositionWS).
     ContextValue("CameraPosition", "", MaterialPinType::Double3, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE 템플릿 필드 View.ViewSizeAndInvSize.xy.
     ContextValue("ViewSize", "", MaterialPinType::Float2, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
@@ -581,7 +582,7 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE 템플릿 필드 ViewProperty 노드 — 속성 번호 하나.
     ContextValue("ViewProperty", "", MaterialPinType::Float4, MaterialContextValueForm::Function, 1,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE 템플릿 필드 Parameters.TexCoords[i].
     ContextValue("TexCoord", "", MaterialPinType::Float2, MaterialContextValueForm::Function, 1,
                  MaterialContextFeature::Vertex, AllMaterialDomains, AllMaterialStages,
@@ -618,8 +619,11 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
     // UE 템플릿 필드 GetActorWorldPosition(Parameters).
     ContextValue("ActorPosition", "", MaterialPinType::Double3, MaterialContextValueForm::Field, 0,
-                 MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
+                 MaterialContextFeature::Primitive,
+                 ToMask(MaterialDomain::Surface) | ToMask(MaterialDomain::DeferredDecal) |
+                     ToMask(MaterialDomain::Volume),
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
+                 true),
     // UE 템플릿 필드 GetDistanceCullFade().
     ContextValue("DistanceCullFade", "", MaterialPinType::Float1, MaterialContextValueForm::Field,
                  0, MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,

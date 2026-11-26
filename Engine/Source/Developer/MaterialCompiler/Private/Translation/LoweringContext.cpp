@@ -3,6 +3,7 @@
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
 #include <CoreTypeBindings/CoreValueTypes.h>
 #include <Core/Text/String.h>
+#include <MaterialSchema/MaterialContextValue.h>
 #include <MaterialSchema/MaterialPinValue.generated.h>
 #include <MaterialSchema/MaterialPinValue.h>
 #include <Platform/Memory.h>
@@ -104,6 +105,61 @@ bool LoweringPinIrType(MaterialPinType pin, IrType& out) noexcept {
 LoweringContext::LoweringContext(Translator& translator, const nodegraph::GraphNode& node,
                                  const MaterialNodeDefinition& definition) noexcept
     : translator_(translator), node_(node), definition_(definition), dynamicPins_(scratch_) {
+}
+
+EvaluationContext LoweringContext::Context() const noexcept {
+    return translator_.Context();
+}
+
+Result<IrValueId> LoweringContext::ContextValue(StringView name,
+                                                Span<const IrValueId> arguments) noexcept {
+    const Span<const MaterialContextValue> table = MaterialContextValues();
+    usize index = table.Size();
+    for (usize at = 0; at < table.Size(); ++at) {
+        if (table[at].name == name) {
+            index = at;
+            break;
+        }
+    }
+
+    if (index == table.Size() || arguments.Size() != table[index].argumentCount) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (IrValueId argument : arguments) {
+        if (argument == NoIrValue) {
+            return Result<IrValueId>::Success(NoIrValue);
+        }
+    }
+
+    const MaterialContextValue& value = table[index];
+    IrType type;
+    if (value.type == MaterialPinType::Float3x3) {
+        type = IrFloatMatrix(3, 3);
+    } else if (value.type == MaterialPinType::Float4x4) {
+        type = IrFloatMatrix(4, 4);
+    } else if (!LoweringPinIrType(value.type, type)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 빈도(6.9절): 정점 기원 값은 Vertex, 픽셀 단계 전용 값은 Pixel, 그 밖은 그리기·view 단위
+    // Instance다(상수 식으로 끌어올리지 않는다).
+    const bool vertexOrigin = value.feature == MaterialContextFeature::Vertex ||
+                              value.feature == MaterialContextFeature::Skin ||
+                              value.feature == MaterialContextFeature::Particle ||
+                              value.feature == MaterialContextFeature::SpeedTree;
+    IrFrequency frequency = IrFrequency::Instance;
+    if ((value.stages & MaterialVertexStage) == 0) {
+        frequency = IrFrequency::Pixel;
+    } else if (vertexOrigin) {
+        frequency = IrFrequency::Vertex;
+    }
+
+    const IrExternVariant variant =
+        translator_.Context() == EvaluationContext::VertexPrevious && value.hasPrevious
+            ? IrExternVariant::Previous
+            : IrExternVariant::Current;
+    return Builder().Extern(static_cast<uint32>(index), variant, type, frequency, arguments);
 }
 
 IrBuilder& LoweringContext::Builder() noexcept {

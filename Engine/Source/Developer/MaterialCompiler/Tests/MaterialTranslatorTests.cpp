@@ -10,8 +10,8 @@ namespace material_translator_tests_file {
 
 using namespace material_graph_fixture;
 
-// 출력 노드만 있는 Surface·Opaque: 활성 핀(WPO·AO·PDO)이 기본값으로 진입점에 나간다(7.3절 "쓰지
-// 않는 함수는 기본값"). Opacity·OpacityMask·Refraction·SurfaceThickness는 비활성이다.
+// 출력 노드만 있는 Surface·Opaque: 활성 핀(WPO·이전 WPO·AO·PDO)이 기본값으로 진입점에 나간다(7.3절
+// "쓰지 않는 함수는 기본값"). Opacity·OpacityMask·Refraction·SurfaceThickness는 비활성이다.
 TEST(MaterialTranslator_OutputDefaults) {
     TranslatorEnv env;
     REQUIRE(env.ready);
@@ -21,16 +21,18 @@ TEST(MaterialTranslator_OutputDefaults) {
     REQUIRE(Translate(fixture, Traits(), out));
     REQUIRE(out.succeeded);
     CHECK(out.diagnostics.items.IsEmpty());
-    REQUIRE(out.module.Results().Size() == 3);
+    REQUIRE(out.module.Results().Size() == 4);
     const float zero3[] = {0.0f, 0.0f, 0.0f};
     const float one[] = {1.0f};
     const float zero[] = {0.0f};
     CHECK(IsFloatResult(out, "WorldPositionOffset", zero3));
     CHECK(IsFloatResult(out, "AmbientOcclusion", one));
     CHECK(IsFloatResult(out, "PixelDepthOffset", zero));
+    // WPO가 있으면 이전 정점 문맥도 번역한다(6.9절 — UE HLSLMaterialTranslator.cpp:1663–1667).
     CHECK(out.module.Results()[0].entry == IrEntry::Vertex);
-    CHECK(out.module.Results()[1].entry == IrEntry::Surface);
-    CHECK(out.module.Results()[2].entry == IrEntry::PixelDepthOffset);
+    CHECK(out.module.Results()[1].entry == IrEntry::VertexPrevious);
+    CHECK(out.module.Results()[2].entry == IrEntry::Surface);
+    CHECK(out.module.Results()[3].entry == IrEntry::PixelDepthOffset);
 
     // Masked면 OpacityMask(기본 1)가, AlphaComposite면 Opacity가 더해진다. 반투명은 PDO가 빠진다.
     MaterialTranslation masked(env.allocator);
@@ -275,16 +277,17 @@ TEST(MaterialTranslator_GraphErrors) {
     {
         GraphFixture fixture(env);
         const Guid unknown = fixture.Add("Material.DoesNotExist");
-        const Guid time = fixture.Add("Material.Time");
+        // 아직 번역하지 않는 단계의 노드(MS2f)다.
+        const Guid later = fixture.Add("Material.Desaturation");
         fixture.Connect(unknown, "Result", OutputNodeId, "AmbientOcclusion");
-        fixture.Connect(time, "Result", OutputNodeId, "PixelDepthOffset");
+        fixture.Connect(later, "Result", OutputNodeId, "PixelDepthOffset");
         REQUIRE(fixture.ready);
         MaterialTranslation out(env.allocator);
         REQUIRE(Translate(fixture, Traits(), out));
         CHECK(!out.succeeded);
         CHECK(CountErrors(out) == 2);
         CHECK(HasErrorAt(out, MaterialDiagnosticCode::UnknownNode, unknown));
-        CHECK(HasErrorAt(out, MaterialDiagnosticCode::NotYetLowered, time));
+        CHECK(HasErrorAt(out, MaterialDiagnosticCode::NotYetLowered, later));
     }
 
     {

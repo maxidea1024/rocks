@@ -22,6 +22,8 @@ namespace rocks::material::detail {
 
 class Translator;
 
+enum class EvaluationContext : uint8;
+
 // 연산 묶음별 수 종류 규칙이다(6.8절 "연산 묶음별 수 종류").
 enum class NumberRule : uint8 {
     // (a) Double 허용. 단항은 Int·UInt를 Float로 바꾼다.
@@ -55,6 +57,15 @@ public:
     }
 
     IrBuilder& Builder() noexcept;
+
+    // 지금 번역 중인 평가 문맥이다(6.9절).
+    EvaluationContext Context() const noexcept;
+
+    // 문맥 값 표(19.3.2절)의 name 값이다(IR Extern — 6.9절). 이전 정점 문맥에서 이전 변형이 있는
+    // 값은 이전 프레임 값이다. arguments는 함수형 값의 인자(표의 argumentCount개)이고, 하나라도
+    // NoIrValue면 진단 없이 NoIrValue다. 오류: 표에 없는 이름이나 인자 수 불일치는 lowering 함수의
+    // 잘못이라 InvalidArgument.
+    Result<IrValueId> ContextValue(StringView name, Span<const IrValueId> arguments = {}) noexcept;
 
     // 연결된 입력이 값 없이(오류가 이미 난 위쪽 노드) 들어왔는가. 그러면 이 노드는 실패로 끝나고,
     // 받는 쪽은 "값 없음"을 다시 진단하지 않는다(오류가 한 번만 남는다).

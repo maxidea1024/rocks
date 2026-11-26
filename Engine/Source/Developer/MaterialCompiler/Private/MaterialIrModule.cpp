@@ -48,9 +48,7 @@ Result<void> FailBuild(IrModule& out, Result<void> error) noexcept {
 
 Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> results,
                            IrModule& out) noexcept {
-    out.values_.Clear();
-    out.results_.Clear();
-    out.hash_ = Sha256Digest{};
+    out.Clear();
     const Span<const IrValue> source = builder.Values();
     for (usize index = 0; index < results.Size(); ++index) {
         if (results[index].value >= source.Size() ||
@@ -133,6 +131,57 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     }
 
     out.results_ = Move(ordered);
+
+    // 진입점마다 닿는 문맥 값의 공급 기능과 필요 기능 등급이다(6.9절). 피연산자 번호는 늘 그 값보다
+    // 작으므로 큰 번호부터 내려가며 표시를 퍼뜨리면 한 번에 끝난다.
+    const Span<const MaterialContextValue> table = MaterialContextValues();
+    Array<bool> reached(out.values_.GetAllocator());
+    if (auto sized = reached.TryResize(out.values_.Size()); !sized) {
+        return FailBuild(out, Move(sized));
+    }
+
+    for (uint32 entry = 0; entry < IrEntryCount; ++entry) {
+        for (bool& item : reached) {
+            item = false;
+        }
+
+        bool any = false;
+        for (const IrResult& result : out.results_) {
+            if (static_cast<uint32>(result.entry) == entry) {
+                reached[result.value] = true;
+                any = true;
+            }
+        }
+
+        if (!any) {
+            continue;
+        }
+
+        for (usize index = out.values_.Size(); index > 0; --index) {
+            if (!reached[index - 1]) {
+                continue;
+            }
+
+            const IrValue& value = out.values_[index - 1];
+            for (uint8 operand = 0; operand < value.operandCount; ++operand) {
+                reached[value.operands[operand]] = true;
+            }
+
+            if (value.op != IrOp::Extern) {
+                continue;
+            }
+
+            if (value.immediate[0] >= table.Size()) {
+                return FailBuild(out, Result<void>::Failure(ErrorCode::InvalidArgument));
+            }
+
+            const MaterialContextValue& context = table[static_cast<usize>(value.immediate[0])];
+            out.entryFeatures_[entry] |= ToMask(context.feature);
+            if (static_cast<uint8>(context.minimumTier) > static_cast<uint8>(out.requiredTier_)) {
+                out.requiredTier_ = context.minimumTier;
+            }
+        }
+    }
 
     Sha256 hasher;
     WriteU32(hasher, IrHashFormatVersion);

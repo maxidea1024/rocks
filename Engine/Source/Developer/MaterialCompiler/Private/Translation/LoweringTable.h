@@ -19,9 +19,10 @@ struct LoweringEntry {
     LoweringFn fn = nullptr;
 };
 
-// 묶음별 표다(파일마다 하나 — LowerConstants·LowerMath·LowerFlow).
+// 묶음별 표다(파일마다 하나 — LowerConstants·LowerMath·LowerFlow·LowerContextValues).
 Span<const LoweringEntry> ConstantLowerings() noexcept;
 Span<const LoweringEntry> MathLowerings() noexcept;
 Span<const LoweringEntry> FlowLowerings() noexcept;
+Span<const LoweringEntry> ContextValueLowerings() noexcept;
 
 } // namespace rocks::material::detail

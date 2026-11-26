@@ -462,8 +462,9 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
 }
 
 Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
-    // 빈도는 피연산자 빈도의 최대다(6.2절). 상수는 Constant다. 미분은 Pixel이다.
-    IrFrequency frequency = IrFrequency::Constant;
+    // 빈도는 피연산자 빈도의 최대다(6.2절). 상수는 Constant다. 미분은 Pixel이다. 문맥 값은 표가
+    // 정한 빈도에서 시작한다(6.9절).
+    IrFrequency frequency = value.op == IrOp::Extern ? value.frequency : IrFrequency::Constant;
     for (uint8 index = 0; index < value.operandCount; ++index) {
         const IrFrequency operand = values_[value.operands[index]].frequency;
         frequency =
@@ -1070,6 +1071,32 @@ Result<IrValueId> IrBuilder::Branch(IrValueId condition, IrValueId whenTrue,
         return Move(folded);
     }
 
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::Extern(uint32 index, IrExternVariant variant, IrType type,
+                                    IrFrequency frequency,
+                                    Span<const IrValueId> arguments) noexcept {
+    if (!IsValidIrType(type) || arguments.Size() > MaxIrOperands ||
+        static_cast<uint8>(variant) > static_cast<uint8>(IrExternVariant::Previous)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = type;
+    value.op = IrOp::Extern;
+    value.frequency = frequency;
+    value.operandCount = static_cast<uint8>(arguments.Size());
+    for (usize at = 0; at < arguments.Size(); ++at) {
+        if (!IsValid(arguments[at])) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        value.operands[at] = arguments[at];
+    }
+
+    value.immediate[0] = index;
+    value.immediate[1] = static_cast<uint64>(variant);
     return Intern(value);
 }
 

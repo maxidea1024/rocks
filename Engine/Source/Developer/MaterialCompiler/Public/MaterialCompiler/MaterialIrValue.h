@@ -21,6 +21,13 @@ inline constexpr uint32 MaxIrOperands = 3;
 // 즉시값 칸 수다(상수 성분 넷 — 행렬 상수는 두지 않는다).
 inline constexpr uint32 IrImmediateSlots = 4;
 
+// 문맥 값의 변형이다(Extern 즉시값 [1] — 6.9절, 19.3.5절).
+enum class IrExternVariant : uint8 {
+    Current = 0,
+    // 이전 프레임 값이다(이전 정점 문맥에서 표의 hasPrevious가 참인 값).
+    Previous = 1
+};
+
 // 값이 바뀌는 빈도다(6.2절 격자 — 뒤로 갈수록 자주 바뀐다).
 enum class IrFrequency : uint8 {
     Constant = 0,

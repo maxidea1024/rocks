@@ -60,6 +60,11 @@ public:
     Result<IrValueId> Select(IrValueId condition, IrValueId whenTrue, IrValueId whenFalse) noexcept;
     // Select와 같은 뜻의 동적 분기다(조건은 Bool 스칼라).
     Result<IrValueId> Branch(IrValueId condition, IrValueId whenTrue, IrValueId whenFalse) noexcept;
+    // 문맥 값 표 index의 값이다(6.9절). type·frequency는 표에서 lowering이 정한다(빈도는 인자
+    // 빈도와의 최대가 된다). 접지 않는다. 오류: type이 규칙 밖이거나 인자가 MaxIrOperands개를
+    // 넘거나 빌더 밖이면 InvalidArgument.
+    Result<IrValueId> Extern(uint32 index, IrExternVariant variant, IrType type,
+                             IrFrequency frequency, Span<const IrValueId> arguments) noexcept;
 
     const IrValue& Value(IrValueId id) const noexcept;
 

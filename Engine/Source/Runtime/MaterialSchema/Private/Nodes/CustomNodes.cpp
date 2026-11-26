@@ -26,9 +26,10 @@ constexpr MaterialPinDefinition PerInstanceCustomDataPins[] = {
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 
+// UE 기본값은 Float3 상수다(ConstDefaultValue R·G·B — HLSLMaterialTranslator.cpp:14661).
 constexpr MaterialPinDefinition PerInstanceCustomData3Pins[] = {
     MaterialInput("DefaultValue", MaterialPinType::Numeric, "DefaultValue",
-                  MaterialPinDefault::Vector4(0.0f, 0.0f, 0.0f, 0.0f)),
+                  MaterialPinDefault::Vector3(0.0f, 0.0f, 0.0f)),
     MaterialOutput("Result", MaterialPinType::Numeric, ""),
 };
 

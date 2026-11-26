@@ -2,9 +2,13 @@
 #include <Core/Text/StringBuilder.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
+#include <MaterialSchema/MaterialContextValue.h>
 #include <Platform/Memory.h>
 
-// 생성 원문 작성이다(Docs/Design/MaterialSystem 7.3·7.7절).
+#include "EntryDefineNames.h"
+#include "HlslFloatLiteral.h"
+
+// 생성 원문 작성이다(Docs/Design/MaterialSystem 7.3·7.7·6.9절).
 namespace rocks::material {
 
 namespace {
@@ -241,6 +245,9 @@ private:
     Result<void> CheckSupported() noexcept;
     const IrResult* FindResult(IrEntry entry, StringView slot) const noexcept;
     bool IsZero(const IrResult* result) const noexcept;
+    Result<void> Extern(const IrValue& value) noexcept;
+    Result<void> UsageDefines() noexcept;
+    Result<void> VertexFunction(StringView signature, IrEntry entry) noexcept;
     Result<void> Vertex() noexcept;
     Result<void> Surface() noexcept;
     Result<void> ScalarFunction(StringView signature, IrEntry entry, StringView slot,
@@ -328,25 +335,12 @@ Result<void> SourceWriter::TypeName(IrType type) noexcept {
 }
 
 Result<void> SourceWriter::FloatLiteral(uint64 bits) noexcept {
-    // 최단 왕복 표기(StringBuilder "{}")에 숫자·부호만이면 ".0"을 붙인다(7.7절).
     StringBuilder<> number(allocator_);
-    number << WriterFloat(bits);
-    if (auto status = number.Status(); !status) {
-        return status;
+    if (auto formatted = detail::AppendHlslFloatLiteral(number, WriterFloat(bits)); !formatted) {
+        return formatted;
     }
 
-    const StringView digits = number.View();
-    bool integral = true;
-    for (usize index = 0; index < digits.ByteCount(); ++index) {
-        const char c = digits.Data()[index];
-        integral = integral && ((c >= '0' && c <= '9') || c == '-');
-    }
-
-    if (auto written = Raw(digits); !written) {
-        return written;
-    }
-
-    return integral ? Raw(".0") : Result<void>::Success();
+    return Raw(number.View());
 }
 
 Result<void> SourceWriter::Literal(const IrValue& value) noexcept {
@@ -443,8 +437,39 @@ Result<void> SourceWriter::Call(StringView name, const IrValue& value) noexcept 
     return Raw(")");
 }
 
+Result<void> SourceWriter::Extern(const IrValue& value) noexcept {
+    // MaterialContext<이름>(c, 인자…) — 이전 변형은 MaterialContextPrevious<이름>(c)(6.9절).
+    const Span<const MaterialContextValue> table = MaterialContextValues();
+    if (value.immediate[0] >= table.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const bool previous = value.immediate[1] == static_cast<uint64>(IrExternVariant::Previous);
+    const StringView parts[] = {"MaterialContext", previous ? StringView("Previous") : StringView(),
+                                table[static_cast<usize>(value.immediate[0])].name, "(c"};
+    for (StringView part : parts) {
+        if (auto written = Raw(part); !written) {
+            return written;
+        }
+    }
+
+    for (uint8 index = 0; index < value.operandCount; ++index) {
+        if (auto comma = Raw(", "); !comma) {
+            return comma;
+        }
+
+        if (auto operand = Operand(value.operands[index]); !operand) {
+            return operand;
+        }
+    }
+
+    return Raw(")");
+}
+
 Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
     switch (value.op) {
+    case IrOp::Extern:
+        return Extern(value);
     case IrOp::Splat: {
         if (auto type = TypeName(value.type); !type) {
             return type;
@@ -786,15 +811,39 @@ bool SourceWriter::IsZero(const IrResult* result) const noexcept {
     return true;
 }
 
-Result<void> SourceWriter::Vertex() noexcept {
-    const IrResult* offset = FindResult(IrEntry::Vertex, "WorldPositionOffset");
-    if (auto head = Raw("\nvoid EvaluateMaterialVertex(in MaterialVertexInputs c, inout "
-                        "MaterialVertexResult r) {\n");
-        !head) {
-        return head;
+Result<void> SourceWriter::UsageDefines() noexcept {
+    // 진입점 e가 기능 f를 쓰면 MATERIAL_<E>_USES_<F> 1(쓰지 않는 쌍은 정의하지 않는다 — 6.9절).
+    for (uint32 entry = 0; entry < IrEntryCount; ++entry) {
+        const MaterialContextFeatureMask features =
+            module_.EntryFeatures(static_cast<IrEntry>(entry));
+        for (uint32 feature = 0; feature < MaterialContextFeatureCount; ++feature) {
+            const MaterialContextFeature item = static_cast<MaterialContextFeature>(feature);
+            if (!HasFeature(features, item)) {
+                continue;
+            }
+
+            const StringView parts[] = {"#define MATERIAL_", detail::EntryDefineNames[entry],
+                                        "_USES_", MaterialContextFeatureDefineName(item), " 1\n"};
+            for (StringView part : parts) {
+                if (auto written = Raw(part); !written) {
+                    return written;
+                }
+            }
+        }
     }
 
-    if (offset != nullptr) {
+    return Result<void>::Success();
+}
+
+Result<void> SourceWriter::VertexFunction(StringView signature, IrEntry entry) noexcept {
+    const StringView head[] = {"\n", signature, " {\n"};
+    for (StringView part : head) {
+        if (auto written = Raw(part); !written) {
+            return written;
+        }
+    }
+
+    if (const IrResult* offset = FindResult(entry, "WorldPositionOffset")) {
         const IrValueId roots[] = {offset->value};
         if (auto body = Values(roots); !body) {
             return body;
@@ -813,9 +862,22 @@ Result<void> SourceWriter::Vertex() noexcept {
         }
     }
 
-    // MS2a는 이전 프레임 문맥 값이 없어 이전 함수가 현재 함수와 같다(7.7절).
-    return Raw("}\n\nvoid EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout "
-               "MaterialVertexResult r) {\n    EvaluateMaterialVertex(c, r);\n}\n");
+    return Raw("}\n");
+}
+
+Result<void> SourceWriter::Vertex() noexcept {
+    // 이전 진입점은 이전 정점 문맥의 번역 결과다(이전 프레임 문맥 값 — 6.9절, 19.3.5절).
+    if (auto current =
+            VertexFunction("void EvaluateMaterialVertex(in MaterialVertexInputs c, inout "
+                           "MaterialVertexResult r)",
+                           IrEntry::Vertex);
+        !current) {
+        return current;
+    }
+
+    return VertexFunction("void EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout "
+                          "MaterialVertexResult r)",
+                          IrEntry::VertexPrevious);
 }
 
 Result<void> SourceWriter::Surface() noexcept {
@@ -955,7 +1017,9 @@ Result<void> SourceWriter::Run() noexcept {
         return defined;
     }
 
-    if (auto defined = Flag("MATERIAL_USES_PREVIOUS_WPO", usesOffset); !defined) {
+    const bool usesPreviousOffset =
+        !IsZero(FindResult(IrEntry::VertexPrevious, "WorldPositionOffset"));
+    if (auto defined = Flag("MATERIAL_USES_PREVIOUS_WPO", usesPreviousOffset); !defined) {
         return defined;
     }
 
@@ -1010,6 +1074,10 @@ Result<void> SourceWriter::Run() noexcept {
 
     if (auto end = Raw("\n"); !end) {
         return end;
+    }
+
+    if (auto usage = UsageDefines(); !usage) {
+        return usage;
     }
 
     if (auto vertex = Vertex(); !vertex) {
