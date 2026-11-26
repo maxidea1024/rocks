@@ -21,3 +21,12 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
 
 렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).
+
+### 13.1 MA7 — 명령행·문서·검증 보고
+
+설계일 2026-11-26(사용자 지시 "순서대로" — MA6b 다음). 권장안으로 정했다.
+
+1. **제품 명령 연결.** 제품 명령 실행 파일(`Programs/Commandlet` — `CommandletHost`)은 지금 쿠킹 처리기·타입 hook을 텍스처 하나씩만 건다(`AssetCookProcessorSetup`·`AssetTypeHookSetup`은 함수 하나 + state). 계약은 그대로 두고 제품 쪽 묶음을 둔다: `Programs/Commandlet/Private/Common/ProductAssetSetup.{h,cpp}`의 `ProductCookProcessors{texture, staticMesh, skeletalMesh, animationClip}`과 `RegisterProductCookProcessors(state, table)`(넷을 차례로 등록 — 하나라도 실패하면 그 오류), `RegisterProductTypeHooks(state, table, tokens)`(텍스처 hook + `RegisterAnimationTypeHooks`). `Commandlet.Build.cs`가 `MeshTools`·`AnimationTools`에 의존한다. 에셋 명령이 시작하는 타입 모듈 목록 `AssetTypeModules`(AssetCommandlets — 지금 Animation·Texture)에 `Mesh`를 더한다(그러지 않으면 제품 명령에 StaticMesh·SkeletalMesh 타입이 없다 — Mesh의 의존 폐포로 Material 타입도 등록된다). 메시·클립 임포터는 걸지 않는다 — 파일 형식 임포터(교환 형식 UX3b·UX4b·UX7b, 뒤의 glTF·FBX)가 임포트 서비스를 부르며 그 단계에서 등록한다. 버린 대안: 계약을 처리기 목록으로 넓히기(AssetCommandlets 공개 API 변경 — 제품 쪽 묶음 하나로 충분하다).
+2. **연결 시험(Rocks.Commandlet.Tests).** `asset-new`로 빈 `StaticMesh`·`SkeletalMesh`·`AnimationClip`을 만들고 `asset-cook`하면 각 처리기의 진단이 나온다(정적·스킨 메시는 쓸 LOD가 없어 `InvalidSource`, 클립은 스켈레톤이 없어 `MissingDependency`). 기본 처리기가 쓰였다면 셋 모두 성공했을 것이므로 연결을 단언한다. 클립의 Build hook은 저장 때 불리므로 `asset-new`가 성공하는 것으로 본다(스켈레톤이 비면 의존 없음).
+3. **문서.** 8절 모듈 표(MeshTools·AnimationTools 의존 — AnimationTools → AssetCooker·AssetDatabase, MeshTools → AnimationTools), AssetSystem 13절 `asset-cook` 설명에 제품 처리기 목록을 적는다.
+4. **검증 보고.** 12.7절에 b 단계(MA2b·MA4b·MA5b·MA6b)와 A2f4의 요구 대조표(요구 → 시험 이름)를 두고, coverage를 한 번 잰다(`Build/MeasureCoverage.ps1`, 필터 `StaticMesh`·`SkeletalMesh`·`Skinned`·`Skeleton`·`AnimationClip`·`Clip_`, 대상 MeshTools·AnimationTools·Mesh SkeletalMesh·Animation Clip 파일). 닿지 않은 분기는 사유(할당 실패·방어 분기 등)를 적는다. 전체 시험 체인은 돌리지 않는다(사용자 결정 2026-11-24).
