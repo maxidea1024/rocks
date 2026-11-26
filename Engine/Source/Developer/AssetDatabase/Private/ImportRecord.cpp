@@ -791,7 +791,7 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
         const StringView prefix = ImportTextOf(tagPrefix.Value());
         if (!ImportFieldIs(tagPrefix.Value(), WireType::String, 0) ||
             !ImportValidText(prefix, 1, MaxImporterNameBytes) || prefix == name) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         if (auto assigned = out.tagPrefix.TryAssign(prefix); !assigned) {

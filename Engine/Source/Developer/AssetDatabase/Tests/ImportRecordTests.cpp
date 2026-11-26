@@ -363,7 +363,7 @@ TEST(ImportRecord_TagPrefix) {
         const Array<uint8> list = ListPayload(allocator, items);
         raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
         return ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
-               ErrorCode::InvalidArgument;
+               ErrorCode::CorruptData;
     };
     CHECK(readRejects("TextureImporter", WireType::String, "TextureImporter.A"));
     CHECK(readRejects("", WireType::String, "TextureImporter.A"));
@@ -376,8 +376,7 @@ TEST(ImportRecord_TagPrefix) {
     raw.MakeReference();
     raw.top.Set(ImportRecordTagPrefixField, WireType::String,
                 Span<const uint8>(reinterpret_cast<const uint8*>("Shared"), 6));
-    CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
-          ErrorCode::InvalidArgument);
+    CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() == ErrorCode::CorruptData);
 }
 
 // 임포터 태그(7.1절 19 A2f3a UXR8): 쓰기는 (key, value) byte 순으로 정렬해 필드 8에 쓰고 읽기가 그
