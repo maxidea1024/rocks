@@ -3,6 +3,13 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 행 key는 위 32 bit가 객체 slot, 아래 32 bit가 generation이다.
+constexpr uint32 RowKeySlotShift = 32;
+
+} // namespace
+
 ObjectListRowSource::ObjectListRowSource(ObjectRegistry& objects, ObjectHandle owner,
                                          ListViewWidget::CreateEntry&& create,
                                          ListViewWidget::BindEntry&& bind) noexcept
@@ -26,7 +33,7 @@ uint64 ObjectListRowSource::RootKey(uint32 index) const noexcept {
     }
 
     const auto value = items[index];
-    return (static_cast<uint64>(value.slot) << 32) | value.generation;
+    return (static_cast<uint64>(value.slot) << RowKeySlotShift) | value.generation;
 }
 
 Result<SharedPtr<Element>> ObjectListRowSource::CreateRow(Allocator& allocator) noexcept {
@@ -34,7 +41,7 @@ Result<SharedPtr<Element>> ObjectListRowSource::CreateRow(Allocator& allocator) 
 }
 
 Result<void> ObjectListRowSource::BindRow(Element& row, TableItem item) noexcept {
-    return bind_.Execute(
-        row, {owner_.registry, static_cast<uint32>(item.key >> 32), static_cast<uint32>(item.key)});
+    return bind_.Execute(row, {owner_.registry, static_cast<uint32>(item.key >> RowKeySlotShift),
+                               static_cast<uint32>(item.key)});
 }
 } // namespace rocks::ui

@@ -12,6 +12,9 @@ enum class FocusDirection : uint8 {
     Next,
     Previous
 };
+// 탐색 방향 수다(FocusDirection 값 개수 — 방향마다 규칙 하나).
+inline constexpr usize NavigationDirectionCount = static_cast<usize>(FocusDirection::Previous) + 1;
+
 enum class NavigationRule : uint8 {
     Escape,
     Stop,

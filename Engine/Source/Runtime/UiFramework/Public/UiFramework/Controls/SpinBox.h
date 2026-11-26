@@ -4,6 +4,9 @@
 
 namespace rocks::ui {
 
+// 숫자 입력의 소수 자릿수 상한이다(형식 문자열 "{:.Nf}"의 N은 한 자리).
+inline constexpr int32 MaxSpinBoxFractionalDigits = 9;
+
 // 좌우 드래그와 위·아래 방향키로 숫자를 조정한다. 클릭 후 숫자를 입력하고 Enter로
 // 확정하거나 Escape로 취소할 수 있다. 값의 범위와 한 단계의 변화량은 SetLimits로 설정한다.
 // SetOnChanged는 사용자 조작만 전달한다. SetValue는 모델이 보낸 값을 반영한다.

@@ -5,12 +5,23 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 상자형 편집 칸의 안쪽 여백, 되돌리기 기록 상한이다.
+constexpr float BoxedTextPadding = 4.0f;
+constexpr usize MaxUndoSteps = 64;
+// 글자로 넣지 않는 제어 문자: U+0000–U+001F와 DEL(U+007F)이다.
+constexpr uint32 FirstPrintableCodePoint = 0x20;
+constexpr uint32 DeleteCodePoint = 0x7F;
+
+} // namespace
+
 EditableTextElement::EditableTextElement(Allocator& allocator, ObjectRegistry& registry,
                                          ObjectHandle owner, SharedPtr<WidgetTextShaper> shaper,
                                          Platform platform, bool multiline, bool boxed) noexcept
     : Element(allocator), undo_(allocator), redo_(allocator), registry_(registry), owner_(owner),
       shaper_(Move(shaper)), focusText_(allocator), platform_(platform),
-      padding_(boxed ? 4.0f : 0.0f), multiline_(multiline) {
+      padding_(boxed ? BoxedTextPadding : 0.0f), multiline_(multiline) {
     SetClipToBounds(true);
 }
 
@@ -352,7 +363,7 @@ void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize 
     }
 
     if (!owner.IsPassword()) {
-        if (undo_.Size() == 64) {
+        if (undo_.Size() == MaxUndoSteps) {
             (void)undo_.TryRemoveAt(0);
         }
 
@@ -498,7 +509,7 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
 
     if (event.type == input::InputEventType::Text) {
         // 플랫폼은 Enter·Backspace의 제어 문자도 보낼 수 있다. 편집 명령은 KeyDown에서만 처리한다.
-        if (event.codePoint >= 32 && event.codePoint != 127) {
+        if (event.codePoint >= FirstPrintableCodePoint && event.codePoint != DeleteCodePoint) {
             StringBuilder<> value(registry_.ObjectAllocator());
             if (value.TryAppendCodePoint(event.codePoint)) {
                 Replace(*owner, begin, end, value.View());

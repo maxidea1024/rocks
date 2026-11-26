@@ -57,7 +57,7 @@ Result<void> BackgroundBlur::SetCornerRadius(Vec4 corners) noexcept {
 }
 
 Result<void> BackgroundBlur::SetBlurRadius(int32 kernel) noexcept {
-    if (kernel < -1 || kernel > 255) {
+    if (kernel < AutoBlurKernelSize || kernel > MaxBlurKernelSize) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

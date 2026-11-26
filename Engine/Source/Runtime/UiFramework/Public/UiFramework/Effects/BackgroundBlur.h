@@ -6,6 +6,10 @@
 
 namespace rocks::ui {
 
+// 흐림 커널 크기 범위다(-1은 강도에서 자동, 255가 상한 — UE SBackgroundBlur).
+inline constexpr int32 AutoBlurKernelSize = -1;
+inline constexpr int32 MaxBlurKernelSize = 255;
+
 // 자식 아래까지 그려진 화면을 흐리게 합성한다. 강도는 대상 텍스처의 픽셀 반경이다.
 class ROCKS_UIFRAMEWORK_API BackgroundBlur final : public SizeBox {
 public:

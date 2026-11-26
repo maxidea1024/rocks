@@ -1,3 +1,4 @@
+#include <UiCore/TimeUnits.h>
 #include <Platform/Clock.h>
 #include <UiFramework/Application/UiTimer.h>
 #include <UiFramework/Application/Application.h>
@@ -76,8 +77,9 @@ void Application::SetTimerClock(double (*clock)() noexcept) noexcept {
 }
 
 double Application::TimerTime() const noexcept {
-    return timerClock_ ? timerClock_()
-                       : static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9;
+    return timerClock_
+               ? timerClock_()
+               : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
 }
 
 void UiTimer::Advance(double now, const Element& root) noexcept {

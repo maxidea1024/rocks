@@ -4,6 +4,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 격자 칸 키는 위 32 bit가 x, 아래 32 bit가 y다.
+constexpr uint32 GridKeyShift = 32;
+
 constexpr float CellSize = 128;
 // 전체 화면 배경 하나가 수천 개 셀을 중복 점유하지 않도록 넓은 요소는 별도로 보관한다.
 constexpr int64 MaxCellsPerEntry = 64;
@@ -14,7 +17,7 @@ bool Cell(Vec2 point, int32& x, int32& y) noexcept {
 }
 
 uint64 CellKey(int32 x, int32 y) noexcept {
-    return static_cast<uint64>(static_cast<uint32>(x)) << 32 | static_cast<uint32>(y);
+    return static_cast<uint64>(static_cast<uint32>(x)) << GridKeyShift | static_cast<uint32>(y);
 }
 
 } // namespace

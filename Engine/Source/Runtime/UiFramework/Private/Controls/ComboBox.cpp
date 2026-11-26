@@ -6,9 +6,17 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 콤보 상자 기본 크기와 펼친 목록 행 높이다(UE 에디터 콤보 최소 크기·행 높이).
+constexpr Vec2 ComboDefaultSize{80, 24};
+constexpr float ComboRowHeight = 24;
+
+} // namespace
+
 ComboBox::ComboBox(Allocator& allocator) noexcept
     : MenuAnchor(allocator), allocator_(allocator), rows_(allocator) {
-    SetDesiredSize({80, 24});
+    SetDesiredSize(ComboDefaultSize);
     // 내용은 세로 가운데다(UE SComboButton 기본 VAlign_Center — SComboButton.h 45행).
     SetContentAlignment(StackAlignment::Fill, StackAlignment::Center);
     SetPlacement(MenuPlacement::ComboBox);
@@ -231,7 +239,7 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
         }
 
         content.Value()->SetVisibility(Visibility::HitTestInvisible);
-        row.Value()->SetDesiredSize({0, 24});
+        row.Value()->SetDesiredSize({0, ComboRowHeight});
         auto added = row.Value()->TryAddChild(content.Value());
         if (added) {
             added = stack.Value()->TryAddChild(row.Value());
@@ -277,7 +285,7 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
     }
 
     if (selected_ > 0) {
-        (void)scroll.Value()->SetScrollOffset(static_cast<float>(selected_) * 24.f);
+        (void)scroll.Value()->SetScrollOffset(static_cast<float>(selected_) * ComboRowHeight);
     }
 
     menuBounds_ = WeakPtr<SizeBox>(bounds.Value());

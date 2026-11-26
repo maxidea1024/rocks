@@ -6,6 +6,13 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 기본 탐색 버튼 크기다(factory가 없을 때).
+constexpr Vec2 NavButtonDefaultSize{20, 16};
+
+} // namespace
+
 ObjectHandle CarouselNavBarWidget::LinkedCarousel() const noexcept {
     return linkedCarousel_.Handle();
 }
@@ -63,7 +70,7 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
         }
 
         if (!factory_) {
-            button.Value()->SetDesiredSize({20, 16});
+            button.Value()->SetDesiredSize(NavButtonDefaultSize);
         }
 
         button.Value()->SetColor(i == selected ? LinearColor{0.14f, 0.4f, 0.8f, 1}

@@ -4,6 +4,9 @@
 
 namespace rocks::ui {
 
+// 활동 표시의 조각 수 상한이다(위젯 층 Throbber도 같은 한도).
+inline constexpr uint32 MaxActivityIndicatorPieces = 64;
+
 // 선형 또는 원형으로 놓인 점의 밝기를 순서대로 바꾼다. 애니메이션 중인 이 요소만
 // volatile로 표시한다. 일시 정지하면 현재 위상을 유지하며 캐시한 그리기 결과를 재사용한다.
 class ROCKS_UIFRAMEWORK_API ActivityIndicator final : public Element {

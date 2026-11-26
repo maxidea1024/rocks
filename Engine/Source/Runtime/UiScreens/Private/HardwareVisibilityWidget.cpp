@@ -85,7 +85,8 @@ HardwareVisibilityWidget::SetDeviceState(const SharedPtr<ScreenDeviceState>& sta
 }
 
 Result<void> HardwareVisibilityWidget::SetDeviceMask(uint8 mask, Visibility hidden) noexcept {
-    if (mask > 7 || (hidden != Visibility::Hidden && hidden != Visibility::Collapsed)) {
+    if ((mask & ~AllScreenInputDevices) != 0 ||
+        (hidden != Visibility::Hidden && hidden != Visibility::Collapsed)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

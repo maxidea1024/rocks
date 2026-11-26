@@ -7,6 +7,11 @@ namespace rocks::ui {
 
 namespace {
 
+// 저장 형식의 탭 묶음 한 항목 최소 크기(byte)다.
+constexpr uint32 MinTabRecordBytes = 5;
+// JSON 배치 문서의 형식 버전이다(SaveLayout이 쓰는 formatVersion).
+constexpr uint64 DockLayoutJsonFormat = 1;
+
 // 파일 형식 버전과 에디터가 지정한 배치 버전을 따로 검사한다.
 constexpr uint32 DockLayoutMagic = 0x4b434f44;
 constexpr uint32 DockLayoutFormat = 1;
@@ -18,7 +23,7 @@ Result<void> DockManager::SaveLayout(uint32 version, Array<uint8>& output) const
     JsonWriter writer(text);
     (void)writer.BeginObject();
     (void)writer.Key("formatVersion");
-    (void)writer.UInt64(1);
+    (void)writer.UInt64(DockLayoutJsonFormat);
     (void)writer.Key("layoutVersion");
     (void)writer.UInt64(version);
     (void)writer.Key("root");
@@ -82,16 +87,20 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
     if (!parsed.Succeeded()) {
         return Result<void>::Failure(parsed.code == JsonErrorCode::OutOfMemory
                                          ? ErrorCode::OutOfMemory
-                                         : ErrorCode::InvalidArgument);
+                                         : ErrorCode::CorruptData);
     }
 
     const auto top = document.Root();
     const auto format = top.Find("formatVersion").TryGetUInt64();
     const auto layout = top.Find("layoutVersion").TryGetUInt64();
     const auto rootValue = top.Find("root");
-    if (!format || format.Value() != 1 || !layout || layout.Value() != version ||
-        !rootValue.IsValid()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    if (!format || !layout || !rootValue.IsValid()) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    // 다른 형식·배치 버전은 손상이 아니라 지원하지 않는 변형이다(기존 배치를 유지한다).
+    if (format.Value() != DockLayoutJsonFormat || layout.Value() != version) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     SlotArray<Node> restored(allocator_);
@@ -104,8 +113,8 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
     auto readNode = [&](auto&& self, JsonValue value, SlotHandle parent,
                         uint32 depth) noexcept -> Result<SlotHandle> {
         const auto type = value.Find("type");
-        if (depth > 64 || !type.IsString()) {
-            return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+        if (depth > MaxDockTreeDepth || !type.IsString()) {
+            return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
         }
 
         auto slot = restored.TryEmplace(allocator_);
@@ -121,7 +130,7 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
             const auto active = value.Find("activeTab");
             if (!active.IsString() || !tabs.IsArray() || !tabs.Size() ||
                 tabs.Size() > tabs_.Size()) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
 
             auto& stack = restored[handle];
@@ -129,7 +138,7 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
             for (usize i = 0; i < tabs.Size(); ++i) {
                 const auto id = tabs.At(i);
                 if (!id.IsString()) {
-                    return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                    return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
                 }
 
                 const usize tab = FindTab(id.GetString());
@@ -138,7 +147,7 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
                 }
 
                 if (!locations[tab].IsNull()) {
-                    return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                    return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
                 }
 
                 auto added = stack.tabs.TryPushBack(tab);
@@ -153,17 +162,17 @@ Result<void> DockManager::RestoreLayout(uint32 version, Span<const uint8> bytes)
             }
 
             if (stack.selected == MaxSize) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
         } else {
             const auto ratio = value.Find("fraction");
             if ((kind != "horizontal" && kind != "vertical") || !ratio.IsNumber()) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
 
             const auto fraction = TryParseFloat(ratio.RawNumber());
             if (!fraction || !(fraction.Value() > 0 && fraction.Value() < 1)) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
 
             auto first = self(self, value.Find("first"), handle, depth + 1);
@@ -205,14 +214,20 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
     }
 
     ByteReader reader(bytes);
-    if (reader.ReadU32LE() != DockLayoutMagic || reader.ReadU32LE() != DockLayoutFormat ||
-        reader.ReadU32LE() != version || reader.Failed()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    const uint32 magic = reader.ReadU32LE();
+    const uint32 format = reader.ReadU32LE();
+    const uint32 stored = reader.ReadU32LE();
+    if (reader.Failed() || magic != DockLayoutMagic) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    if (format != DockLayoutFormat || stored != version) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     const uint8 hasRoot = reader.ReadU8();
     if (reader.Failed() || hasRoot > 1) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     SlotArray<Node> restored(allocator_);
@@ -223,13 +238,13 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
     }
 
     auto read = [&](auto&& self, SlotHandle parent, uint32 depth) noexcept -> Result<SlotHandle> {
-        if (depth > 64 || reader.AtEnd()) {
-            return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+        if (depth > MaxDockTreeDepth || reader.AtEnd()) {
+            return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
         }
 
         const uint8 tag = reader.ReadU8();
         if (tag > static_cast<uint8>(Kind::Vertical) || reader.Failed()) {
-            return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+            return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
         }
 
         auto node = restored.TryEmplace(allocator_);
@@ -243,7 +258,7 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
         if (tag != static_cast<uint8>(Kind::Stack)) {
             const float fraction = reader.ReadF32LE();
             if (reader.Failed() || !math::IsFinite(fraction) || fraction <= 0 || fraction >= 1) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
 
             auto first = self(self, handle, depth + 1);
@@ -264,8 +279,8 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
             const uint32 count = reader.ReadU32LE();
             const uint32 selected = reader.ReadU32LE();
             if (reader.Failed() || count == 0 || selected >= count || count > tabs_.Size() ||
-                count > reader.Remaining() / 5) {
-                return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                count > reader.Remaining() / MinTabRecordBytes) {
+                return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
             }
 
             auto& stack = restored[handle];
@@ -279,7 +294,7 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
                 const uint32 length = reader.ReadU32LE();
                 const auto raw = reader.Take(length);
                 if (reader.Failed() || length == 0) {
-                    return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                    return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
                 }
 
                 const usize tab = FindTab({reinterpret_cast<const char*>(raw.Data()), raw.Size()});
@@ -288,7 +303,7 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
                 }
 
                 if (!locations[tab].IsNull()) {
-                    return Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+                    return Result<SlotHandle>::Failure(ErrorCode::CorruptData);
                 }
 
                 locations[tab] = handle;
@@ -310,7 +325,7 @@ Result<void> DockManager::RestoreLegacyLayout(uint32 version, Span<const uint8> 
     }
 
     if (!reader.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return ApplyLayout(Move(restored), locations, root);

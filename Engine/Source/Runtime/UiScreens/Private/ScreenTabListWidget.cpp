@@ -11,6 +11,19 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 탭 상태 flag다(사용 가능·보임). 기본은 둘 다 켬이다.
+constexpr uint8 TabEnabledFlag = 1u << 0;
+constexpr uint8 TabVisibleFlag = 1u << 1;
+constexpr uint8 DefaultTabFlags = TabEnabledFlag | TabVisibleFlag;
+// 탭 버튼 안쪽 여백과 선택·보통 탭 색이다.
+constexpr Vec4 TabButtonPadding{8, 4, 8, 4};
+constexpr LinearColor ActiveTabColor{0.12f, 0.32f, 0.59f, 1};
+constexpr LinearColor InactiveTabColor{0.16f, 0.16f, 0.16f, 1};
+
+} // namespace
+
 ScreenTabListWidget::ScreenTabListWidget(Allocator& allocator) noexcept
     : tabIds_(allocator), contents_(allocator), flags_(allocator) {
 }
@@ -30,7 +43,7 @@ Optional<usize> ScreenTabListWidget::FindTab(Name id) const noexcept {
 }
 
 uint8 ScreenTabListWidget::Flags(usize index) const noexcept {
-    return index < flags_.Size() ? flags_[index] : 3;
+    return index < flags_.Size() ? flags_[index] : DefaultTabFlags;
 }
 
 Optional<uint32> ScreenTabListWidget::PageIndex(ObjectRegistry& objects,
@@ -241,7 +254,7 @@ Result<void> ScreenTabListWidget::SelectTab(ObjectRegistry& objects, Name id) no
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
-    if (Flags(*index) != 3) {
+    if (Flags(*index) != DefaultTabFlags) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -282,7 +295,7 @@ Result<void> ScreenTabListWidget::StepTab(ObjectRegistry& objects, bool forward)
     usize index = active.ValueOr(forward ? n - 1 : 0);
     for (usize i = 0; i < n; ++i) {
         index = forward ? (index + 1) % n : (index ? index - 1 : n - 1);
-        if (Flags(index) == 3) {
+        if (Flags(index) == DefaultTabFlags) {
             return SelectTab(objects, tabIds_[index]);
         }
     }
@@ -301,7 +314,7 @@ Result<void> ScreenTabListWidget::SetFlag(Name id, uint8 bit, bool enabled) noex
         return capacity;
     }
     while (flags_.Size() < tabIds_.Size()) {
-        (void)flags_.TryPushBack(3);
+        (void)flags_.TryPushBack(DefaultTabFlags);
     }
 
     if (enabled) {
@@ -388,9 +401,10 @@ Result<SharedPtr<Button>> ScreenTabListWidget::MakeButton(ObjectRegistry& object
                                                            : button.Error());
     }
 
-    auto result = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(), 16);
+    auto result = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(),
+                                                                  DefaultWidgetFontSize);
     if (result) {
-        result = button.Value()->SetPadding({8, 4, 8, 4});
+        result = button.Value()->SetPadding(TabButtonPadding);
     }
 
     if (result) {
@@ -406,10 +420,10 @@ void ScreenTabListWidget::UpdateButtons(ObjectRegistry& objects, Element& host) 
     for (usize i = 0; row && i < row->ChildCount() && i < tabIds_.Size(); ++i) {
         auto* button = static_cast<Button*>(row->ChildAt(i));
         auto flags = Flags(i);
-        button->SetEnabled(flags & 1);
-        button->SetVisibility((flags & 2) ? Visibility::Visible : Visibility::Collapsed);
-        button->SetColor(tabIds_[i] == active ? LinearColor{0.12f, 0.32f, 0.59f, 1}
-                                              : LinearColor{0.16f, 0.16f, 0.16f, 1});
+        button->SetEnabled((flags & TabEnabledFlag) != 0);
+        button->SetVisibility((flags & TabVisibleFlag) ? Visibility::Visible
+                                                       : Visibility::Collapsed);
+        button->SetColor(tabIds_[i] == active ? ActiveTabColor : InactiveTabColor);
     }
 }
 

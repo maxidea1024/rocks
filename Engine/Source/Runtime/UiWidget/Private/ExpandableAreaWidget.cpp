@@ -6,6 +6,13 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 펼침 머리 버튼의 안쪽 여백이다.
+constexpr Vec4 ExpanderHeaderPadding{4, 4, 4, 4};
+
+} // namespace
+
 ExpandableAreaWidget::ExpandableAreaWidget(Allocator& allocator) noexcept : PanelWidget(allocator) {
 }
 
@@ -72,7 +79,8 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::CreatePanel(Allocator& allocato
 
     ElementBuildScope scope(allocator);
     const StackPanel::SlotArgs slots[] = {
-        {.content = Make<Button>({.style = NoBorderButtonStyle(), .contentPadding = {4, 4, 4, 4}})},
+        {.content = Make<Button>(
+             {.style = NoBorderButtonStyle(), .contentPadding = ExpanderHeaderPadding})},
         {.content = body.Value()},
     };
     auto root = Build<VerticalStack>({.slots = slots});

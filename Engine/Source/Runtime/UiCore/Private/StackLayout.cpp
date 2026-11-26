@@ -4,6 +4,9 @@ namespace rocks::ui {
 
 namespace {
 
+// Fill 슬롯 최소·최대 크기 제한을 다시 나누는 최대 반복 수다(그 안에 수렴한다).
+constexpr int StackResolvePasses = 5;
+
 double ClampSize(const StackSlot& slot, double size) noexcept {
     return math::Clamp(size, static_cast<double>(slot.minSize), static_cast<double>(slot.maxSize));
 }
@@ -21,7 +24,7 @@ double ContentSize(const StackSlot& slot, bool growing, double adjustment) noexc
 // 한계에 닿은 슬롯은 다음 분배에서 제외한다.
 double AdjustContent(Span<const StackSlot> slots, double space, bool growing) noexcept {
     double adjustment = 0;
-    for (int pass = 0; pass < 5; ++pass) {
+    for (int pass = 0; pass < StackResolvePasses; ++pass) {
         double used = 0;
         double weights = 0;
         for (const StackSlot& slot : slots) {

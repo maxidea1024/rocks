@@ -9,6 +9,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 읽어 내는 화소 하나의 byte 수(RGBA8)다.
+constexpr usize RgbaBytesPerPixel = 4;
+
 enum class UiShader {
     Solid,
     Image,
@@ -319,7 +322,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
                                            const DrawBatchBuffers& buffers,
                                            const SlotArray<BrushTexture>& textures, uint32 width,
                                            uint32 height, Array<uint8>& rgba) noexcept {
-    if (width == 0 || height == 0 || uint64(width) * height > MaxSize / 4) {
+    if (width == 0 || height == 0 || uint64(width) * height > MaxSize / RgbaBytesPerPixel) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -352,7 +355,7 @@ Result<void> DrawBatchRenderer::ReadPixels(graphics::Device& device,
         return Result<void>::Failure(ended.Error());
     }
 
-    auto allocated = rgba.TryResize(static_cast<usize>(width) * height * 4);
+    auto allocated = rgba.TryResize(static_cast<usize>(width) * height * RgbaBytesPerPixel);
     if (!allocated) {
         return allocated;
     }

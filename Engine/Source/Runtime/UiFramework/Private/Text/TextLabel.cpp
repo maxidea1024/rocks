@@ -4,6 +4,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 밑줄·취소선 굵기는 줄 높이의 1/16(최소 1 px)이다.
+constexpr float DecorationThicknessDivisor = 16.0f;
+
 float WrapLimit(float requested, bool automatic, float allotted) noexcept {
     if (!automatic || allotted == 0) {
         return requested;
@@ -456,7 +459,8 @@ Result<void> TextLabel::PaintDecorations(PaintList& list, const Geometry& area, 
         return Result<void>::Success();
     }
 
-    const float thickness = math::Min(lineHeight_, math::Max(1.0f, lineHeight_ / 16.0f));
+    const float thickness =
+        math::Min(lineHeight_, math::Max(1.0f, lineHeight_ / DecorationThicknessDivisor));
     const LinearColor color = color_.Resolve(list.Theme(), list.ColorContext());
     const auto visual = layout_.VisualClusters();
     for (usize begin = firstIndex; begin < firstIndex + count;) {

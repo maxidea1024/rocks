@@ -6,6 +6,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 평면은 삼각형 띠 정점 넷이다.
+constexpr uint32 PlaneStripVertexCount = 4;
+
 // 평면 그리기 상수(이번·지난 프레임 원점·u·v — UiWorldPlane.rsf UiPlaneConstants)의 Vec4 수다.
 constexpr uint32 PlaneConstantVectors = 6;
 
@@ -130,7 +133,7 @@ Result<void> WorldWidgetPlane::Draw(graphics::CommandContext& commands,
     const graphics::VertexBufferBinding binding[] = {{quad_, 0}};
     commands.SetVertexBuffers(0, binding);
     commands.SetTexture(graphics::ShaderStage::Pixel, surfaceSlot_, texture);
-    commands.Draw(4);
+    commands.Draw(PlaneStripVertexCount);
     return Result<void>::Success();
 }
 

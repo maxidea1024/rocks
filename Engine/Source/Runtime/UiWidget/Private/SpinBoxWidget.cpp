@@ -49,7 +49,7 @@ Result<void> SpinBoxWidget::SetValue(float value) noexcept {
 }
 
 Result<void> SpinBoxWidget::SetFractionalDigits(int32 minimum, int32 maximum) noexcept {
-    if (minimum < 0 || maximum < minimum || maximum > 9) {
+    if (minimum < 0 || maximum < minimum || maximum > MaxSpinBoxFractionalDigits) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

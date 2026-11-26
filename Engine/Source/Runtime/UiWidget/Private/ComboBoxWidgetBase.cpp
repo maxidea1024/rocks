@@ -111,7 +111,8 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::MakeOption(ObjectRegistry& object
         return Result<SharedPtr<Element>>::Failure(label.Error());
     }
 
-    auto shaped = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(), 16);
+    auto shaped = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(),
+                                                                  DefaultWidgetFontSize);
     return shaped ? Result<SharedPtr<Element>>::Success(Move(label.Value()))
                   : Result<SharedPtr<Element>>::Failure(shaped.Error());
 }

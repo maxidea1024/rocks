@@ -1,3 +1,4 @@
+#include <UiCore/InputMetrics.h>
 #include <UiFramework/Scrolling/ScrollView.h>
 #include <UiFramework/Scrolling/ScrollBar.h>
 #include "TouchPan.h"
@@ -204,8 +205,8 @@ PointerReply ScrollView::OnPointerEvent(const PointerEvent& event) noexcept {
 
     if (event.type == PointerEventType::Wheel && wheelPolicy_ != ConsumeMouseWheel::Never &&
         math::IsFinite(event.wheel)) {
-        const float next =
-            math::Clamp(offset_ - event.wheel * (48.0f * wheelMultiplier_), 0.0f, maxOffset_);
+        const float next = math::Clamp(offset_ - event.wheel * (WheelScrollStep * wheelMultiplier_),
+                                       0.0f, maxOffset_);
         if (next != offset_) {
             SetUserOffset(next);
             return {.handled = true};

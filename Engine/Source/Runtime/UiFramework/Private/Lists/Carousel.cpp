@@ -1,3 +1,4 @@
+#include <UiCore/TimeUnits.h>
 #include <Platform/Clock.h>
 #include <UiFramework/Lists/Carousel.h>
 
@@ -53,7 +54,8 @@ Result<void> Carousel::SetCacheChildren(bool cache) noexcept {
 }
 
 float Carousel::Progress() const noexcept {
-    const double elapsed = static_cast<double>(platform::MonotonicNanoseconds() - start_) * 1.e-9;
+    const double elapsed =
+        static_cast<double>(platform::MonotonicNanoseconds() - start_) * SecondsPerNanosecond;
     return static_cast<float>(math::Min(1.0, elapsed * speed_));
 }
 

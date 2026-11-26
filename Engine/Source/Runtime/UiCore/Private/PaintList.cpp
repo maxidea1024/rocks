@@ -2,6 +2,15 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 9분할 브러시는 3×3 조각이고, 한 축은 경계 위치 넷으로 나뉜다.
+constexpr usize NineSliceAxisCount = 3;
+constexpr usize NineSlicePieceCount = NineSliceAxisCount * NineSliceAxisCount;
+constexpr usize NineSliceEdgeCount = NineSliceAxisCount + 1;
+
+} // namespace
+
 PaintList::PaintList(Allocator& allocator) noexcept : boxes_(allocator), clips_(allocator) {
 }
 
@@ -92,8 +101,8 @@ Result<void> PaintList::TryAddGlyphRun(const Geometry& geometry, Span<const Pain
 namespace {
 
 struct SliceAxis {
-    float positions[4];
-    float uvs[4];
+    float positions[NineSliceEdgeCount];
+    float uvs[NineSliceEdgeCount];
 };
 
 SliceAxis Slice(float length, float original, float before, float after, float uvMin, float uvMax,
@@ -220,11 +229,11 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
     }
 
     // 일부 조각만 목록에 남지 않도록 필요한 공간을 먼저 확보한다.
-    if (boxes_.Size() > MaxSize - 9) {
+    if (boxes_.Size() > MaxSize - NineSlicePieceCount) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
-    auto reserved = boxes_.TryEnsureCapacity(boxes_.Size() + 9);
+    auto reserved = boxes_.TryEnsureCapacity(boxes_.Size() + NineSlicePieceCount);
     if (!reserved) {
         return reserved;
     }
@@ -233,8 +242,8 @@ Result<void> PaintList::TryAddBrushRegion(const Geometry& geometry, const Brush&
                          brush.uv.min.x, brush.uv.max.x, brush.mirrorX);
     const auto y = Slice(geometry.size.y, brush.imageSize.y, brush.margin.y, brush.margin.w,
                          brush.uv.min.y, brush.uv.max.y, brush.mirrorY);
-    for (usize row = 0; row < 3; ++row) {
-        for (usize col = 0; col < 3; ++col) {
+    for (usize row = 0; row < NineSliceAxisCount; ++row) {
+        for (usize col = 0; col < NineSliceAxisCount; ++col) {
             if (brush.mode == BrushMode::Border && row == 1 && col == 1) {
                 continue;
             }

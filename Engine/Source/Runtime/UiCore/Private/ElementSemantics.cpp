@@ -8,7 +8,7 @@ public:
         : name(allocator), summary(allocator), tipText(allocator) {
     }
 
-    NavigationBoundary rules[6]{};
+    NavigationBoundary rules[NavigationDirectionCount]{};
     SharedPtr<NavigationHandler> navigation;
     String name, summary, tipText;
     AccessibleBehavior behavior = AccessibleBehavior::Auto;

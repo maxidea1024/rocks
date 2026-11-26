@@ -4,6 +4,19 @@ namespace rocks::ui {
 
 namespace {
 
+// 시간 막대 기본 크기, 눈금 기본 나눔(큰 눈금·작은 눈금)과 나눔 곱 상한이다.
+constexpr Vec2 TimelineDefaultSize{160, 38};
+constexpr uint32 DefaultMajorDivisions = 4;
+constexpr uint32 DefaultMinorDivisions = 8;
+constexpr uint32 MaxTotalDivisions = 4096;
+// 표지(mark) 막대: 눈금 아래로 3, 폭 4, 높이 6이고 가운데에 맞춘다.
+constexpr float MarkOffsetY = 3;
+constexpr float MarkWidth = 4;
+constexpr float MarkHeight = 6;
+// 재생 위치 손잡이: 폭 8, 높이 5다.
+constexpr float PlayheadWidth = 8;
+constexpr float PlayheadHeight = 5;
+
 Result<void> Rectangle(PaintList& list, const Geometry& geometry, float x, float y, float width,
                        float height, LinearColor color, int32 layer) noexcept {
     if (width <= 0 || height <= 0) {
@@ -44,8 +57,9 @@ public:
 
             result = Rectangle(
                 list, geometry,
-                TrackPosition(mark.time, minimum_, maximum_, geometry.size.x, handle_, indent_) - 2,
-                baseline + 3, 4, 6, mark.color, layer);
+                TrackPosition(mark.time, minimum_, maximum_, geometry.size.x, handle_, indent_) -
+                    MarkWidth * 0.5f,
+                baseline + MarkOffsetY, MarkWidth, MarkHeight, mark.color, layer);
         }
 
         return result;
@@ -56,15 +70,15 @@ public:
     float maximum_;
     // 눈금 색이다(테마 Hover2 — UE 시간 막대 눈금처럼 바탕보다 밝은 회색).
     LinearColor color_ = DefaultThemeColors().Get(ThemeSlot::Hover2);
-    uint32 major_ = 4;
-    uint32 minor_ = 8;
+    uint32 major_ = DefaultMajorDivisions;
+    uint32 minor_ = DefaultMinorDivisions;
     // 값 위치 계산에 쓰는 손잡이 폭·들여쓰기다(Timeline이 배치 때 넘긴다).
     float handle_ = 0;
     bool indent_ = true;
 };
 
 Timeline::Timeline(Allocator& allocator) noexcept : Slider(allocator), allocator_(allocator) {
-    SetDesiredSize({160, 38});
+    SetDesiredSize(TimelineDefaultSize);
     SetClipToBounds(true);
     // 재생 헤드는 Primary다(채움 색 — 기본 슬라이더의 채움은 투명이다).
     SetFillColor(DefaultThemeColors().Get(ThemeSlot::Primary));
@@ -122,7 +136,7 @@ Result<void> Timeline::SetMarks(Span<const TimelineMark> marks) noexcept {
 }
 
 Result<void> Timeline::SetDivisions(uint32 major, uint32 minor) noexcept {
-    if (!major || !minor || major > 4096 / minor) {
+    if (!major || !minor || major > MaxTotalDivisions / minor) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -185,7 +199,8 @@ Result<void> Timeline::OnPaintOverlay(PaintList& list, int32 layer) const noexce
         return drawn;
     }
 
-    return Rectangle(list, geometry, x - 4, 0, 8, 5, FillColor(), layer);
+    return Rectangle(list, geometry, x - PlayheadWidth * 0.5f, 0, PlayheadWidth, PlayheadHeight,
+                     FillColor(), layer);
 }
 
 Result<void> Timeline::TryAddChild(const SharedPtr<Element>&) noexcept {

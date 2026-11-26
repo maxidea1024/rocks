@@ -4,6 +4,13 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 탐색 식별자는 위 32 bit가 위젯 slot, 아래 32 bit가 generation이다.
+constexpr uint32 NavigationIdentitySlotShift = 32;
+
+} // namespace
+
 Result<ObjectHandle> Widget::PresentationTree(ObjectRegistry& objects) const noexcept {
     const auto access = objects.OwnerAccess();
     auto outer = objects.GetOuter(access, Handle());
@@ -119,8 +126,9 @@ Result<void> Widget::ApplySemantics(ObjectRegistry& objects, Element& element) n
     }
 
     const auto tree = outer.Value();
-    element.SetNavigationIdentity({tree.registry, (uint64(tree.slot) << 32) | tree.generation},
-                                  stableId_);
+    element.SetNavigationIdentity(
+        {tree.registry, (uint64(tree.slot) << NavigationIdentitySlotShift) | tree.generation},
+        stableId_);
     for (uint8 i = 0; i <= static_cast<uint8>(FocusDirection::Previous); ++i) {
         auto d = static_cast<FocusDirection>(i);
         auto set = element.SetNavigationRule(d, GetNavigationRule(d));

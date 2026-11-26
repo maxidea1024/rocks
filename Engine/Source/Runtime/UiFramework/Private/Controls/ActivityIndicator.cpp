@@ -1,3 +1,4 @@
+#include <UiCore/TimeUnits.h>
 #include <UiFramework/Controls/ActivityIndicator.h>
 #include <Platform/Clock.h>
 
@@ -5,12 +6,20 @@ namespace rocks::ui {
 
 namespace {
 
+// 원형은 0.75초에 8조각, 막대형은 1.5초에 3조각이다(UE SCircularThrobber·SThrobber 기본).
+constexpr float CircularPeriod = 0.75f;
+constexpr float BarPeriod = 1.5f;
+constexpr uint32 CircularPieces = 8;
+constexpr uint32 BarPieces = 3;
+
 constexpr double PieceDelay = 0.05;
-}
+
+} // namespace
 
 ActivityIndicator::ActivityIndicator(Allocator& allocator, bool circular, Clock clock) noexcept
     : Element(allocator), clock_(clock ? clock : platform::MonotonicNanoseconds),
-      period_(circular ? 0.75f : 1.5f), count_(circular ? 8 : 3), circular_(circular) {
+      period_(circular ? CircularPeriod : BarPeriod), count_(circular ? CircularPieces : BarPieces),
+      circular_(circular) {
     origin_ = clock_();
     SetVisibility(Visibility::HitTestInvisible);
     UpdateVolatility();
@@ -21,8 +30,9 @@ double ActivityIndicator::Cycle() const noexcept {
 }
 
 double ActivityIndicator::Elapsed(uint64 now) const noexcept {
-    const double delta =
-        animating_ && now >= origin_ ? static_cast<double>(now - origin_) * 1.0e-9 : 0.0;
+    const double delta = animating_ && now >= origin_
+                             ? static_cast<double>(now - origin_) * SecondsPerNanosecond
+                             : 0.0;
     return math::Fmod(elapsed_ + delta, Cycle());
 }
 
@@ -43,7 +53,7 @@ void ActivityIndicator::SetAnimating(bool animate) noexcept {
 }
 
 Result<void> ActivityIndicator::SetPieceCount(uint32 count) noexcept {
-    if (count == 0 || count > 64) {
+    if (count == 0 || count > MaxActivityIndicatorPieces) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

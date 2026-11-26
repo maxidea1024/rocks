@@ -6,6 +6,15 @@ namespace rocks::ui {
 
 namespace {
 
+// 도킹 안내 타일: 패널 안 다섯 칸의 간격 상한·나눔, 바깥 칸 반 크기 상한·나눔, 가장자리 판정
+// 폭 상한·비율이다.
+constexpr float GuideStepMax = 32.0f;
+constexpr float GuideStepDivisions = 3.0f;
+constexpr float OuterTileHalfMax = 15.0f;
+constexpr float OuterTileDivisions = 8.0f;
+constexpr float DropEdgeMax = 8.0f;
+constexpr float DropEdgeRatio = 0.05f;
+
 // 탭 머리가 하나도 없을 때의 탭 줄 높이다(Normal 10pt 한 줄 + UE 탭 여백과 비슷한 값).
 constexpr float EmptyTabHeight = 22;
 constexpr float Divider = 5;
@@ -35,7 +44,7 @@ constexpr DockSide GuideSides[] = {DockSide::Center, DockSide::Left, DockSide::R
 Box2<float> GuideTile(Box2<float> bounds, DockSide side, float tabHeight) noexcept {
     bounds.min.y = math::Min(bounds.min.y + tabHeight, bounds.max.y);
     const Vec2 size = bounds.max - bounds.min;
-    const float step = math::Min(32.0f, math::Min(size.x, size.y) / 3.0f);
+    const float step = math::Min(GuideStepMax, math::Min(size.x, size.y) / GuideStepDivisions);
     Vec2 center = bounds.min + size * 0.5f;
     switch (side) {
     case DockSide::Left:
@@ -86,7 +95,7 @@ constexpr DockSide OuterSides[] = {DockSide::Left, DockSide::Right, DockSide::To
                                    DockSide::Bottom};
 
 Box2<float> OuterTile(Vec2 size, DockSide side) noexcept {
-    const float half = math::Min(15.0f, math::Min(size.x, size.y) / 8.0f);
+    const float half = math::Min(OuterTileHalfMax, math::Min(size.x, size.y) / OuterTileDivisions);
     const float inset = half * 1.4f;
     Vec2 center = size * 0.5f;
     switch (side) {
@@ -119,7 +128,7 @@ DockSide OuterSide(Vec2 size, Vec2 point) noexcept {
 
     const float dx = math::Min(point.x, size.x - point.x);
     const float dy = math::Min(point.y, size.y - point.y);
-    const float edge = math::Min(8.0f, math::Min(size.x, size.y) * 0.05f);
+    const float edge = math::Min(DropEdgeMax, math::Min(size.x, size.y) * DropEdgeRatio);
     if (math::Min(dx, dy) >= edge) {
         return DockSide::Center;
     }

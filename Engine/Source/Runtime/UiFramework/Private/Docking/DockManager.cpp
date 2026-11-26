@@ -588,7 +588,8 @@ Result<void> DockManager::Place(usize index, SlotHandle target, DockSide side, u
         }
 
         // 루트를 새 분할로 감싸면 그 아래의 모든 가지가 한 단계 깊어진다.
-        if (depth >= 64 || (target == root_ && !target.IsNull() && SubtreeDepth(target) >= 64)) {
+        if (depth >= MaxDockTreeDepth ||
+            (target == root_ && !target.IsNull() && SubtreeDepth(target) >= MaxDockTreeDepth)) {
             return Result<void>::Failure(ErrorCode::CapacityExceeded);
         }
 

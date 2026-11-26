@@ -1,9 +1,21 @@
+#include <UiCore/TimeUnits.h>
 #include <UiWidget/ViewportWorld.h>
 #include <Core/Guid.h>
 #include <Core/Math/MatrixFactory.h>
 #include <Platform/Clock.h>
 
 namespace rocks::ui {
+
+namespace {
+
+// 시야각(도)을 반각 라디안으로 바꾸는 나눗수다(π / 360 = 도→라디안 × 1/2).
+constexpr float FieldOfViewHalfDegreesDivisor = 360.0f;
+
+// 회전 정규화 허용 오차와 시야각 상한(도 — 180 미만)이다.
+constexpr float ViewportWorldRotationTolerance = 1.0e-3f;
+constexpr float ViewportWorldMaxFieldOfView = 180;
+
+} // namespace
 
 ViewportWorld::ViewportWorld(Allocator& allocator, TypeRegistry& types) noexcept
     : allocator_(allocator), types_(types), registration_(types, allocator) {
@@ -55,8 +67,9 @@ bool ViewportWorld::UsesDepth() const noexcept {
 }
 
 Result<void> ViewportWorld::SetCamera(Vec3 location, Quat rotation, float fieldOfView) noexcept {
-    if (!location.IsFinite() || !rotation.IsNormalized(1.0e-3f) || !math::IsFinite(fieldOfView) ||
-        fieldOfView <= 0 || fieldOfView >= 180) {
+    if (!location.IsFinite() || !rotation.IsNormalized(ViewportWorldRotationTolerance) ||
+        !math::IsFinite(fieldOfView) || fieldOfView <= 0 ||
+        fieldOfView >= ViewportWorldMaxFieldOfView) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -78,8 +91,8 @@ Result<ViewportCameraView> ViewportWorld::Camera(uint32 width, uint32 height) co
     }
 
     auto projection =
-        TryMakePerspective(fieldOfView_ * math::Pi<float> / 360.0f, static_cast<float>(width),
-                           static_cast<float>(height), 0.1f);
+        TryMakePerspective(fieldOfView_ * math::Pi<float> / FieldOfViewHalfDegreesDivisor,
+                           static_cast<float>(width), static_cast<float>(height), 0.1f);
     if (!projection) {
         return Result<ViewportCameraView>::Failure(projection.Error());
     }
@@ -106,8 +119,9 @@ Result<void> ViewportWorld::Advance(uint64 frame) noexcept {
 
     const uint64 now = platform::MonotonicNanoseconds();
     // 숨겨졌다가 돌아온 화면이 보이지 않았던 시간을 한꺼번에 시뮬레이션하지 않는다.
-    const double dt =
-        advanced_ && frame - lastFrame_ == 1 ? static_cast<double>(now - lastTime_) * 1.0e-9 : 0.0;
+    const double dt = advanced_ && frame - lastFrame_ == 1
+                          ? static_cast<double>(now - lastTime_) * SecondsPerNanosecond
+                          : 0.0;
     auto ticked = world_->Tick(dt);
     if (ticked) {
         lastFrame_ = frame;

@@ -4,9 +4,20 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 숫자 입력 기본 크기다.
+constexpr Vec2 SpinBoxDefaultSize{72, 24};
+// 형식 문자열에서 자릿수 글자의 위치다("{:.0f}"의 0).
+constexpr usize DigitsFormatIndex = 3;
+// 끌기에서 값 한 단계에 해당하는 포인터 이동(px)이다.
+constexpr double DragPixelsPerStep = 4;
+
+} // namespace
+
 Result<void> SpinBox::Construct(Args&& args) noexcept {
     auto result = Frame::Construct(
-        {.content = args.content, .color = Move(args.color), .desiredSize = Vec2{72, 24}});
+        {.content = args.content, .color = Move(args.color), .desiredSize = SpinBoxDefaultSize});
     if (result) {
         result = SetLimits(args.minimum, args.maximum, args.step);
     }
@@ -27,7 +38,7 @@ Result<void> SpinBox::Construct(Args&& args) noexcept {
 }
 
 SpinBox::SpinBox(Allocator& allocator) noexcept : Frame(allocator), allocator_(allocator) {
-    SetDesiredSize({72, 24});
+    SetDesiredSize(SpinBoxDefaultSize);
     SetColor({0.12f, 0.12f, 0.12f, 1});
     // 숫자는 세로 가운데다(UE SSpinBox 글자 칸 VAlign_Center — SSpinBox.cpp 183–219행).
     SetContentAlignment(StackAlignment::Fill, StackAlignment::Center);
@@ -41,7 +52,7 @@ Result<void> SpinBox::ShowNumber(float value) noexcept {
     StringBuilder<> label(allocator_);
     char spec[] = "{:.0f}";
     if (maxDigits_ >= 0) {
-        spec[3] = static_cast<char>('0' + maxDigits_);
+        spec[DigitsFormatIndex] = static_cast<char>('0' + maxDigits_);
     }
 
     auto written = label.TryAppendFormat(maxDigits_ >= 0 ? spec : "{}", value);
@@ -134,7 +145,7 @@ float SpinBox::Value() const noexcept {
 }
 
 Result<void> SpinBox::SetFractionalDigits(int32 minimum, int32 maximum) noexcept {
-    if (minimum < 0 || maximum < minimum || maximum > 9) {
+    if (minimum < 0 || maximum < minimum || maximum > MaxSpinBoxFractionalDigits) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -330,7 +341,7 @@ PointerReply SpinBox::OnPointerEvent(const PointerEvent& event) noexcept {
     }
 
     if (tracking_ && sliderEnabled_ && event.type == PointerEventType::Move) {
-        const double steps = math::Trunc((static_cast<double>(x) - dragX_) / 4);
+        const double steps = math::Trunc((static_cast<double>(x) - dragX_) / DragPixelsPerStep);
         if (steps != 0 || dragged_) {
             if (!dragged_) {
                 dragged_ = true;

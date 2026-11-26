@@ -3,11 +3,18 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 키 선택기 기본 크기다.
+constexpr Vec2 KeySelectorDefaultSize{100, 24};
+
+} // namespace
+
 Result<void> InputKeySelector::Construct(Args&& args) noexcept {
     // 모양은 UE SInputKeySelector처럼 핵심 스타일 "Button"이다.
     auto result = Button::Construct({.content = args.content, .color = Move(args.color)});
     if (result) {
-        SetDesiredSize({100, 24});
+        SetDesiredSize(KeySelectorDefaultSize);
         result = SetSelectedKey(args.selectedKey);
     }
 
@@ -26,7 +33,7 @@ Result<void> InputKeySelector::Construct(Args&& args) noexcept {
 
 InputKeySelector::InputKeySelector(Allocator& allocator) noexcept
     : Button(allocator), allocator_(allocator) {
-    SetDesiredSize({100, 24});
+    SetDesiredSize(KeySelectorDefaultSize);
     // 키 이름은 가운데다(UE SInputKeySelector의 ETextJustify::Center).
     SetContentAlignment(StackAlignment::Center, StackAlignment::Center);
 }

@@ -1,3 +1,4 @@
+#include <UiCore/InputMetrics.h>
 #include "TouchPan.h"
 
 namespace rocks::ui {
@@ -19,7 +20,7 @@ bool TryTouchPan(const Geometry& geometry, bool vertical, Vec2 origin, Vec2 posi
     current = vertical ? last.y : last.x;
     const float delta = start - current;
     const float cross = vertical ? last.x - first.x : last.y - first.y;
-    return math::Abs(delta) > 5.f && math::Abs(delta) >= math::Abs(cross) &&
+    return math::Abs(delta) > PointerDragThreshold && math::Abs(delta) >= math::Abs(cross) &&
            ((delta > 0 && offset < maximum) || (delta < 0 && offset > 0));
 }
 } // namespace rocks::ui

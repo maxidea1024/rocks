@@ -9,7 +9,7 @@ Result<SharedPtr<Element>> CircularThrobberWidget::BuildElement(ObjectRegistry& 
 }
 
 Result<void> CircularThrobberWidget::SetPieceCount(uint32 count) noexcept {
-    if (count == 0 || count > 64) {
+    if (count == 0 || count > MaxActivityIndicatorPieces) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

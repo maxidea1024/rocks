@@ -38,11 +38,12 @@ AttachControlCaption(ObjectRegistry& objects, ObjectHandle owner, Element& contr
     return Caption::TryCreateLambda(allocator, [shaper = Move(shaper), label = Move(label.Value()),
                                                 &allocator](StringView caption) noexcept {
         if (caption.IsEmpty()) {
-            return label->SetShapedText({}, {}, {}, 16, false);
+            return label->SetShapedText({}, {}, {}, DefaultWidgetFontSize, false);
         }
 
         auto text = Text::Invariant(allocator, caption);
-        return text ? shaper->Shape(*label, text.Value(), 16) : Result<void>::Failure(text.Error());
+        return text ? shaper->Shape(*label, text.Value(), DefaultWidgetFontSize)
+                    : Result<void>::Failure(text.Error());
     });
 }
 

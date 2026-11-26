@@ -2,6 +2,13 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 한 바퀴 각도다(부채꼴이 한 바퀴보다 작으면 첫 항목을 반 칸 민다).
+constexpr float PatternFullTurnDegrees = 360;
+
+} // namespace
+
 EntryPatternPanel::EntryPatternPanel(Allocator& allocator, bool radial) noexcept
     : Element(allocator), radial_(radial), pattern_(allocator) {
     SetClipToBounds(true);
@@ -88,7 +95,8 @@ Result<void> EntryPatternPanel::Arrange(const Geometry& geometry) noexcept {
                            : settings_.angleBetweenItems;
     const float start =
         -math::UnwindDegrees(settings_.startingAngle) -
-        (settings_.distributeEvenly && settings_.sectorAngle < 360 ? step * 0.5f : 0);
+        (settings_.distributeEvenly && settings_.sectorAngle < PatternFullTurnDegrees ? step * 0.5f
+                                                                                      : 0);
     Vec2 offset{};
     usize index = 0;
     for (const auto& child : ActiveChildren()) {

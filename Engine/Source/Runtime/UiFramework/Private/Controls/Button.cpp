@@ -1,3 +1,4 @@
+#include <UiCore/InputMetrics.h>
 #include <UiFramework/Controls/Button.h>
 
 namespace rocks::ui {
@@ -290,7 +291,7 @@ PointerReply Button::OnPointerEvent(const PointerEvent& event) noexcept {
     }
 
     if (event.type == PointerEventType::Move && activeMethod_ == ButtonClickMethod::Precise &&
-        (event.position - pressOrigin_).Length() > 5.0f) {
+        (event.position - pressOrigin_).Length() > PointerDragThreshold) {
         ReleasePointer();
         return {.handled = true, .releaseCapture = true};
     }

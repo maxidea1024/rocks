@@ -5,6 +5,10 @@ namespace rocks::ui {
 
 namespace {
 
+// 사각형 하나는 정점 넷·index 여섯(삼각형 둘)이다.
+constexpr usize QuadVertexCount = 4;
+constexpr uint32 QuadIndexCount = 6;
+
 Result<void> AppendVertices(const PaintBox& box, Array<DrawVertex>& vertices) noexcept {
     const Vec2 size = box.geometry.size;
     if (!size.IsFinite() || size.x < 0 || size.y < 0 || !box.color.IsFinite() ||
@@ -28,7 +32,7 @@ Result<void> AppendVertices(const PaintBox& box, Array<DrawVertex>& vertices) no
         }
     }
 
-    for (usize i = 0; i < 4; ++i) {
+    for (usize i = 0; i < QuadVertexCount; ++i) {
         const Vec2 position = box.geometry.render.Apply(corners[i]);
         if (!position.IsFinite()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -58,7 +62,8 @@ DrawBatch::DrawBatch(Allocator& allocator) noexcept
 
 Result<void> DrawBatch::Build(const PaintList& list) noexcept {
     const Span<const PaintBox> boxes = list.Boxes();
-    if (boxes.Size() > NumericLimits<uint32>::Max() / 6 || boxes.Size() > MaxSize / 6) {
+    if (boxes.Size() > NumericLimits<uint32>::Max() / QuadIndexCount ||
+        boxes.Size() > MaxSize / QuadIndexCount) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -80,12 +85,12 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
         return orderReserved;
     }
 
-    auto vertexReserved = vertices.TryReserve(boxes.Size() * 4);
+    auto vertexReserved = vertices.TryReserve(boxes.Size() * QuadVertexCount);
     if (!vertexReserved) {
         return vertexReserved;
     }
 
-    auto indexReserved = indices.TryReserve(boxes.Size() * 6);
+    auto indexReserved = indices.TryReserve(boxes.Size() * QuadIndexCount);
     if (!indexReserved) {
         return indexReserved;
     }
@@ -130,14 +135,14 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
         scratchFirstVertex_[order[i].index] = first;
 
         const uint32 quadIndices[] = {first, first + 1, first + 2, first, first + 2, first + 3};
-        for (usize index = 0; index < 6; ++index) {
+        for (usize index = 0; index < QuadIndexCount; ++index) {
             auto added = indices.TryPushBack(quadIndices[index]);
             if (!added) {
                 return added;
             }
         }
 
-        const uint32 firstIndex = static_cast<uint32>(indices.Size() - 6);
+        const uint32 firstIndex = static_cast<uint32>(indices.Size() - QuadIndexCount);
         const auto sameRoundedBox = [&](const DrawCommand& last) noexcept {
             return last.roundedBox == box.roundedBox &&
                    (!box.roundedBox ||
@@ -151,11 +156,11 @@ Result<void> DrawBatch::Build(const PaintList& list) noexcept {
             commands[commands.Size() - 1].resource == box.resource &&
             (!box.hasClip || commands[commands.Size() - 1].clip == box.clip) &&
             sameRoundedBox(commands[commands.Size() - 1])) {
-            commands[commands.Size() - 1].indexCount += 6;
+            commands[commands.Size() - 1].indexCount += QuadIndexCount;
         } else {
             auto added =
-                commands.TryPushBack({firstIndex, 6, box.hasClip, box.clip, box.resource,
-                                      box.operation, box.cornerRadius, box.roundedBox,
+                commands.TryPushBack({firstIndex, QuadIndexCount, box.hasClip, box.clip,
+                                      box.resource, box.operation, box.cornerRadius, box.roundedBox,
                                       box.roundedSize, box.outlineWidth, box.outlineColor});
             if (!added) {
                 return added;
@@ -212,12 +217,12 @@ Result<void> DrawBatch::Update(const CacheRoot& cache) noexcept {
                 if (!scratchRanges_.IsEmpty()) {
                     auto& previous = scratchRanges_[scratchRanges_.Size() - 1];
                     if (previous.first + previous.count == first) {
-                        previous.count += 4;
+                        previous.count += QuadVertexCount;
                         continue;
                     }
                 }
 
-                auto rangeAdded = scratchRanges_.TryPushBack({first, 4});
+                auto rangeAdded = scratchRanges_.TryPushBack({first, QuadVertexCount});
                 if (!rangeAdded) {
                     return rangeAdded;
                 }

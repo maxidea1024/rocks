@@ -128,7 +128,7 @@ Result<void> Widget::SetCursor(input::MouseCursor cursor) noexcept {
 }
 
 void Widget::ResetCursor() noexcept {
-    cursorOverride_ = 255;
+    cursorOverride_ = NoCursorOverride;
     if (auto live = CachedElement()) {
         live->ResetCursorOverride();
     }

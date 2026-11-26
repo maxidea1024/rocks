@@ -4,6 +4,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 이미지 태그 속성의 최소 길이다(id="x"처럼 키 2 + = + 따옴표 둘).
+constexpr usize MinImageAttributeBytes = 5;
+
 bool IsSpace(char c) noexcept {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
@@ -46,7 +49,7 @@ Result<PaintGlyph> RichTextImageDecorator::Resolve(StringView tag, StringView at
 
     const auto count = attributes.ByteCount();
     const auto* data = attributes.Data();
-    if (count < 5 || attributes.SliceBytes(0, 2) != "id") {
+    if (count < MinImageAttributeBytes || attributes.SliceBytes(0, 2) != "id") {
         return Result<PaintGlyph>::Failure(ErrorCode::InvalidArgument);
     }
 

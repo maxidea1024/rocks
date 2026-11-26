@@ -4,6 +4,14 @@
 
 namespace rocks::ui {
 
+namespace {
+
+// 회전 정규화 허용 오차와 시야각 상한(도 — 180 미만)이다.
+constexpr float ViewportWidgetRotationTolerance = 1.0e-3f;
+constexpr float ViewportWidgetMaxFieldOfView = 180;
+
+} // namespace
+
 ViewportWidget::ViewportWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
 }
 
@@ -75,8 +83,9 @@ Result<void> ViewportWidget::SetSceneRenderer(ObjectRegistry&, ViewportWorld::Re
 }
 
 Result<void> ViewportWidget::SetCamera(Vec3 location, Quat rotation, float fieldOfView) noexcept {
-    if (!location.IsFinite() || !rotation.IsNormalized(1.0e-3f) || !math::IsFinite(fieldOfView) ||
-        fieldOfView <= 0 || fieldOfView >= 180) {
+    if (!location.IsFinite() || !rotation.IsNormalized(ViewportWidgetRotationTolerance) ||
+        !math::IsFinite(fieldOfView) || fieldOfView <= 0 ||
+        fieldOfView >= ViewportWidgetMaxFieldOfView) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

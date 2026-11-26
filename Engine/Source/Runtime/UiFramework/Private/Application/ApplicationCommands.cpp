@@ -57,7 +57,7 @@ bool Application::IsAltDown(uint32 userId) const noexcept {
 bool Application::IsShiftDown(uint32 userId) const noexcept {
     for (const auto& user : modifiers_) {
         if (user.userId == userId) {
-            return (user.mask & 3) != 0;
+            return ChordFromModifiers(input::Key::None, user.mask).shift;
         }
     }
 

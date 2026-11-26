@@ -4,6 +4,19 @@ namespace rocks::ui {
 
 namespace {
 
+// 원형 슬라이더 기본 크기·한 바퀴 각도다.
+constexpr Vec2 RadialDefaultSize{48, 48};
+constexpr float FullTurnDegrees = 360;
+// 손잡이·선 굵기 상한과 크기 대비 비율이다.
+constexpr float MaxThumbSize = 9.0f;
+constexpr float ThumbSizeRatio = 0.25f;
+constexpr float MaxArcWidth = 4.0f;
+constexpr float ArcWidthRatio = 0.12f;
+// 호를 나누는 선분 길이(px)와 선분 수 범위다.
+constexpr float ArcSegmentLength = 5.0f;
+constexpr float MinArcSegments = 4.0f;
+constexpr float MaxArcSegments = 128.0f;
+
 Vec2 PointOnArc(Vec2 center, float radius, float degrees) noexcept {
     const float angle = math::DegreesToRadians(degrees);
     return center + Vec2(-math::Sin(angle), math::Cos(angle)) * radius;
@@ -28,7 +41,7 @@ Result<void> DrawLine(PaintList& list, const Geometry& area, Vec2 from, Vec2 to,
 } // namespace
 
 RadialSlider::RadialSlider(Allocator& allocator) noexcept : Slider(allocator) {
-    SetDesiredSize({48, 48});
+    SetDesiredSize(RadialDefaultSize);
     SetColor(DefaultThemeColors().Get(ThemeSlot::Input));
     SetFillColor(DefaultThemeColors().Get(ThemeSlot::Primary));
     SetHandleColor(DefaultThemeColors().Get(ThemeSlot::Foreground));
@@ -67,7 +80,7 @@ Result<void> RadialSlider::Construct(Args&& args) noexcept {
 
 bool RadialSlider::IsValidArc(float start, float end, float offset) noexcept {
     return math::IsFinite(start) && math::IsFinite(end) && math::IsFinite(offset) && start >= 0 &&
-           end <= 360 && end > start;
+           end <= FullTurnDegrees && end > start;
 }
 
 Result<void> RadialSlider::SetArc(float start, float end, float offset) noexcept {
@@ -138,7 +151,7 @@ void RadialSlider::UpdateFromPointer(Vec2 position, bool firstPoint) noexcept {
     float angle =
         math::UnwindDegrees(math::RadiansToDegrees(math::Atan2(-local.x, local.y)) - offset_);
     if (angle < 0) {
-        angle += 360;
+        angle += FullTurnDegrees;
     }
 
     if (!hasAngle_) {
@@ -146,7 +159,7 @@ void RadialSlider::UpdateFromPointer(Vec2 position, bool firstPoint) noexcept {
         const float distanceToEnd = math::Abs(math::FindDeltaAngleDegrees(angle, end_));
         if (angle < start_ || angle > end_) {
             dragAngle_ = distanceToEnd < distanceToStart ? end_ : start_;
-        } else if (angle == 0 && end_ == 360 &&
+        } else if (angle == 0 && end_ == FullTurnDegrees &&
                    GetValue() - Minimum() > (Maximum() - Minimum()) * 0.5f) {
             dragAngle_ = end_;
         } else {
@@ -171,14 +184,15 @@ Result<void> RadialSlider::OnPaint(PaintList& list, int32 layer) const noexcept 
     }
 
     const Vec2 center = area.size * 0.5f;
-    const float thumb = math::Min(9.0f, size * 0.25f);
-    const float width = math::Min(4.0f, size * 0.12f);
+    const float thumb = math::Min(MaxThumbSize, size * ThumbSizeRatio);
+    const float width = math::Min(MaxArcWidth, size * ArcWidthRatio);
     const float radius = (size - thumb) * 0.5f;
     const float span = end_ - start_;
     const float active = start_ + span * ((GetValue() - Minimum()) / (Maximum() - Minimum()));
     // 반지름과 호 길이에 맞춰 선분 수를 고른다. 색이 바뀌는 지점은 손잡이 각도에서 나눈다.
     const uint32 segments = static_cast<uint32>(
-        math::Clamp(math::Ceil(radius * math::DegreesToRadians(span) / 5.0f), 4.0f, 128.0f));
+        math::Clamp(math::Ceil(radius * math::DegreesToRadians(span) / ArcSegmentLength),
+                    MinArcSegments, MaxArcSegments));
     const Vec2 handle = PointOnArc(center, radius, active + offset_);
     Vec2 from = PointOnArc(center, radius, start_ + offset_);
     float previous = start_;

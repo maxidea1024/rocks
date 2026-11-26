@@ -7,6 +7,9 @@
 
 namespace rocks::ui {
 
+// 도킹 트리 깊이 상한이다(저장 배치 읽기·분할이 이보다 깊으면 거부한다).
+inline constexpr uint32 MaxDockTreeDepth = 64;
+
 enum class DockSide : uint8 {
     Center,
     Left,
@@ -94,11 +97,13 @@ public:
     // 묶음 안의 순서와 활성 탭, 분할 방향과 첫 영역의 비율을 보존한다. 빈 창은 root가 null이다.
     // version은 에디터가 정한 배치 버전이다. 저장에 성공한 경우에만 output을 교체한다.
     Result<void> SaveLayout(uint32 version, Array<uint8>& output) const noexcept;
-    // 탭 또는 생성기를 먼저 등록한 뒤 호출한다. 배치 버전이 다르거나 트리가 잘못되면
-    // 기존 배치를 유지한다. 모르는 ID는 NotFound이며, 문서에 없는 등록 탭은 성공 시 닫힌다.
+    // 탭 또는 생성기를 먼저 등록한 뒤 호출한다. 실패하면 기존 배치를 유지한다: 문서가 손상됐으면
+    // CorruptData, 형식·배치 버전이 다르면 Unsupported, 모르는 탭 ID는 NotFound다. 문서에 없는 등록
+    // 탭은 성공 시 닫힌다.
     Result<void> RestoreLayout(uint32 version, Span<const uint8> bytes) noexcept;
 
-    // 이전 바이너리 .layout 파일을 한 번 가져올 때 쓴다. 다음 SaveLayout은 JSON을 생성한다.
+    // 이전 바이너리 .layout 파일을 한 번 가져올 때 쓴다. 다음 SaveLayout은 JSON을 생성한다. 오류는
+    // RestoreLayout과 같다.
     Result<void> RestoreLegacyLayout(uint32 version, Span<const uint8> bytes) noexcept;
 
     Result<void> TryAddChild(const SharedPtr<Element>& child) noexcept override;

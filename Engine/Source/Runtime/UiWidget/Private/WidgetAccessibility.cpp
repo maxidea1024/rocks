@@ -18,7 +18,8 @@ Result<void> ReadDescription(ObjectRegistry& objects, ObjectHandle owner, const 
     auto tree = objects.Resolve<WidgetTree>(objects.OwnerAccess(), owner);
     if (tree && tree.Value().Get().Value()->TextShaper()) {
         TextLabel label(objects.ObjectAllocator());
-        auto shaped = tree.Value().Get().Value()->TextShaper()->Shape(label, value, 16);
+        auto shaped =
+            tree.Value().Get().Value()->TextShaper()->Shape(label, value, DefaultWidgetFontSize);
         if (!shaped) {
             return shaped;
         }

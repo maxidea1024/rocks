@@ -1,3 +1,4 @@
+#include <UiCore/TimeUnits.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Layout/Overlay.h>
 #include <Platform/Clock.h>
@@ -114,8 +115,9 @@ private:
 } // namespace
 
 double Application::ToolTipTime() const noexcept {
-    return toolTipClock_ ? toolTipClock_()
-                         : static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9;
+    return toolTipClock_
+               ? toolTipClock_()
+               : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
 }
 
 usize Application::FindToolTip(uint32 user) const noexcept {

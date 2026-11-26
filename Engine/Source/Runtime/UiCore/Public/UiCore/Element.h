@@ -23,6 +23,9 @@ struct PopupRequest {
     void (*close)(Element&) noexcept = nullptr;
 };
 
+// 요소가 커서를 정하지 않았다는 표지다(cursorOverride_ — 부모나 기본 커서를 쓴다).
+inline constexpr uint8 NoCursorOverride = 255;
+
 // 중립 접근성 역할이다. 플랫폼 어댑터는 제어 이름과 역할을 별개로 전달한다.
 enum class AccessibleRole : uint8 {
     Group,
@@ -369,7 +372,7 @@ private:
     Geometry geometry_{};
     AffineTransform2D renderTransform_{};
     Vec2 renderPivot_{};
-    uint8 cursorOverride_ = 255;
+    uint8 cursorOverride_ = NoCursorOverride;
     float renderOpacity_ = 1;
     ColorRef foregroundColor_{ColorSource::Foreground};
     bool hasRenderTransform_ = false;

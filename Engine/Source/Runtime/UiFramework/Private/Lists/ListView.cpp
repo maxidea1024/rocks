@@ -1,3 +1,4 @@
+#include <UiCore/InputMetrics.h>
 #include "../Scrolling/TouchPan.h"
 #include <Base/NumericLimits.h>
 #include <Core/Containers/HashSet.h>
@@ -800,8 +801,8 @@ PointerReply ListView::OnPointerEvent(const PointerEvent& event) noexcept {
         return {};
     }
 
-    const double next = math::Clamp(offset_ - static_cast<double>(event.wheel) * rowHeight_ * 3.0 *
-                                                  wheelMultiplier_,
+    const double next = math::Clamp(offset_ - static_cast<double>(event.wheel) * rowHeight_ *
+                                                  WheelScrollRows * wheelMultiplier_,
                                     0.0, maxOffset_);
     if (offset_ == next) {
         return {};

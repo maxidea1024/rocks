@@ -246,12 +246,12 @@ void Element::SetCursorOverride(input::MouseCursor cursor) noexcept {
 }
 
 void Element::ResetCursorOverride() noexcept {
-    cursorOverride_ = 255;
+    cursorOverride_ = NoCursorOverride;
 }
 
 input::MouseCursor Element::ResolveMouseCursor(Vec2 position) const noexcept {
     for (auto* node = this; node; node = node->Parent()) {
-        if (node->cursorOverride_ != 255) {
+        if (node->cursorOverride_ != NoCursorOverride) {
             return static_cast<input::MouseCursor>(node->cursorOverride_);
         }
 
