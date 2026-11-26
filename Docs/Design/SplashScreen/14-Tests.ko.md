@@ -15,6 +15,7 @@
 6. **막대 보간**: 가짜 시계로 수렴·단조·settle·불확정 → 비율 전환.
 7. **보정**: 프로필 읽기·지수 평균·바닥 2%·들어가지 않은 단계·없는 단계 채움·깨진 파일·버전 불일치·실패 실행은 안 씀·임시 파일 이름 바꾸기.
 8. **스레드 계약**: 가짜 presenter의 생성 gate에서 스플래시 스레드를 세운 채 `Hide` → gate 해제 → 교착 없이 끝나고 `release`가 한 번 불림(UE 1.4절 경쟁). 생성 실패 presenter → `State() == Failed`, Hide 정상. 여러 스레드 `SetText`와 Hide 겹침.
+8a. **최소 표시 시간**: 주입 시계로 창이 뜬 뒤 1.9초에는 `CanHide()` 거짓, 2.0초에는 참, 최소 0이면 뜨자마자 참, 생성 실패면 참, `Starting` 동안 거짓.
 9. **대화상자 hook**: 등록·해제, 두 번째 등록 `AlreadyExists`, Show 전·Hide 뒤 `NotifySystemDialogOpening`이 아무 일 없음, 가짜 presenter에서 숨김 요청 기록.
 10. **창 연기 시험(Windows, 대화형 데스크톱만)**: 실제 `Show`→갱신 몇 번→`Hide`, 핸들·GDI 객체 수 누수 없음. 데스크톱이 없으면 NOT RUN.
 11. **사람 확인**: `Sandbox --engine --window`에서 스플래시·막대·주 창 전환, `--no-splash`, 배율 100·150·200%, 다중 모니터, 시작 중 다른 앱으로 옮기기, macOS Retina·다른 앱 전환, Studio(생기면) 작업 표시줄 진행.

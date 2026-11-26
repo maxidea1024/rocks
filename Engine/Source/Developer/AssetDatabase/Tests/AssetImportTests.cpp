@@ -368,6 +368,80 @@ TEST(AssetImport_ImporterTags) {
     TestImporter blobImporter(blob);
     auto registered = scene.importers.Register(blobImporter);
     CHECK(registered);
+
+    // 태그 접두(7.1절 21 A2f5): 이름과 다른 접두의 임포터는 그 접두 키만 남기고(기록 필드 9),
+    // 이름 접두 키는 거부한다. 복제는 접두를 옮긴다. 접두 규칙(`Bundle`·문자)은 등록이 거부한다.
+    AssetImporterInfo shared = TestImporterInfo();
+    shared.id = Guid{0x494d50540001ull, 11};
+    shared.name = "SharedImporter";
+    shared.tagPrefix = "Shared";
+    shared.extensions = {};
+    TestImporter sharedImporter(shared);
+    auto sharedToken = scene.importers.Register(sharedImporter);
+    REQUIRE(sharedToken);
+    REQUIRE(scene.PutSource("SourceArt/Shared.trock", "value=1\ntags=Shared.Path|/Game/S"));
+    const String sharedSource = scene.Absolute(env.allocator, "SourceArt/Shared.trock");
+    const AssetImportSourceInput sharedInputs[] = {{DefaultImportSourceRole, sharedSource.View()}};
+    AssetImportResult sharedResult(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/SharedTag", sharedInputs, "SharedImporter", {},
+                           diagnostics, sharedResult));
+    CHECK(tagCount(sharedResult.id, "Shared.Path", "/Game/S") == 1);
+    auto sharedFile = ReadFile(env, scene, "Content/SharedTag.rasset");
+    REQUIRE(sharedFile);
+    auto sharedRecord =
+        ReadImportRecord(env.allocator, sharedResult.id, sharedFile.Value().importRecord);
+    REQUIRE(sharedRecord);
+    CHECK(sharedRecord.Value().tagPrefix.View() == "Shared");
+    // 접두 임포터의 재임포트도 접두를 남긴다(기록 필드 9).
+    AssetImportResult sharedAgain(env.allocator);
+    AssetDiagnostic againFailure;
+    auto reimported = service.Reimport(scene.lock, "/Game/SharedTag", {}, {}, diagnostics,
+                                       sharedAgain, nullptr, &againFailure);
+    CHECK(againFailure.code == AssetDiagnosticCode::None);
+    REQUIRE(reimported);
+    auto againFile = ReadFile(env, scene, "Content/SharedTag.rasset");
+    REQUIRE(againFile);
+    auto againRecord =
+        ReadImportRecord(env.allocator, sharedResult.id, againFile.Value().importRecord);
+    REQUIRE(againRecord);
+    CHECK(againRecord.Value().tagPrefix.View() == "Shared" &&
+          tagCount(sharedResult.id, "Shared.Path", "/Game/S") == 1);
+
+    AssetDuplicateResult sharedCopy(env.allocator);
+    REQUIRE(service.Duplicate(scene.lock, "/Game/SharedTag", "/Game/SharedCopy", sharedCopy));
+    CHECK(tagCount(sharedCopy.id, "Shared.Path", "/Game/S") == 1);
+    auto copyFile = ReadFile(env, scene, "Content/SharedCopy.rasset");
+    REQUIRE(copyFile);
+    auto copyRecord = ReadImportRecord(env.allocator, sharedCopy.id, copyFile.Value().importRecord);
+    REQUIRE(copyRecord);
+    CHECK(copyRecord.Value().tagPrefix.View() == "Shared");
+
+    // 두 임포터가 같은 접두를 쓸 수 있다.
+    AssetImporterInfo sibling = shared;
+    sibling.id = Guid{0x494d50540001ull, 13};
+    sibling.name = "SiblingImporter";
+    TestImporter siblingImporter(sibling);
+    CHECK(scene.importers.Register(siblingImporter));
+
+    REQUIRE(scene.PutSource("SourceArt/Named.trock", "value=1\ntags=SharedImporter.Path|x"));
+    const String named = scene.Absolute(env.allocator, "SourceArt/Named.trock");
+    const AssetImportSourceInput namedInputs[] = {{DefaultImportSourceRole, named.View()}};
+    AssetImportResult namedResult(env.allocator);
+    CHECK(service
+              .Import(scene.lock, "/Game/NamedTag", namedInputs, "SharedImporter", {}, diagnostics,
+                      namedResult)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!scene.files.Has("Content/NamedTag.rasset"));
+
+    for (const StringView prefix : {StringView("bUNDLE"), StringView("bad.prefix")}) {
+        AssetImporterInfo wrong = TestImporterInfo();
+        wrong.id = Guid{0x494d50540001ull, 12};
+        wrong.name = "WrongPrefix";
+        wrong.tagPrefix = prefix;
+        wrong.extensions = {};
+        TestImporter wrongImporter(wrong);
+        CHECK(scene.importers.Register(wrongImporter).Error() == ErrorCode::InvalidArgument);
+    }
 }
 
 // 다른 에셋 참조(7.1절 19 A2f3c UXR10): OpenAsset으로 색인의 에셋(Leaf)을 열어 Hard로 건다 — 저장이

@@ -6,8 +6,8 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Memory.h>
 
-// 사운드 에셋 클래스의 스냅숏 만들기와 에디터 원본 재생 PCM이다(Docs/Design/AudioSystem 3.35.3·
-// 3.36.2·3.36.4절).
+// 사운드 에셋 클래스의 스냅숏 만들기와 재생 PCM(에디터 원본·쿠킹 플랫폼 데이터)이다
+// (Docs/Design/AudioSystem 3.35.3·3.36.2·3.36.4·3.37.4절).
 namespace rocks {
 
 static_assert(static_cast<uint8>(SoundDistanceModel::Linear) ==
@@ -119,7 +119,7 @@ Result<void> SoundClip::SetPcm(SharedPtr<const SoundPcm> pcm) noexcept {
     frameCount = pcm ? pcm->FrameCount() : 0;
     pcm_ = Move(pcm);
     ++pcmRevision_;
-    editorPcmKey_ = SoundEditorPcmKey{};
+    pcmKey_ = SoundPcmKey{};
     return Result<void>::Success();
 }
 
@@ -137,8 +137,6 @@ Result<void> SoundClip::FillPlayable(SoundPlayable& playable) const noexcept {
     playable.revision = pcmRevision_;
     return Result<void>::Success();
 }
-
-#if ROCKS_WITH_EDITOR_DATA
 
 namespace {
 
@@ -174,17 +172,64 @@ float ReadStoredSample(const uint8* bytes, SoundSourceStorage format) noexcept {
     return 0.0f;
 }
 
+// SoundPcm 할당 오류를 손상으로 옮긴다(형식 필드가 SoundPcm 범위 밖이면 데이터가 손상된 것이다).
+ErrorCode PcmAllocationError(ErrorCode error) noexcept {
+    return error == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : error;
+}
+
+bool SameKey(const SoundPcmKey& key, SoundPcmOrigin origin, const BulkDataRef& bulk,
+             SoundSourceStorage format, uint32 channels, uint32 sampleRate,
+             uint32 frames) noexcept {
+    return key.origin == origin && key.bulk.SameContent(bulk) && key.format == format &&
+           key.channels == channels && key.sampleRate == sampleRate && key.frames == frames;
+}
+
 } // namespace
+
+Result<SharedPtr<SoundPcm>> DecodeSoundClipSource(Allocator& allocator, SoundSourceStorage format,
+                                                  uint32 channels, uint32 sampleRate, uint32 frames,
+                                                  Span<const uint8> bytes) noexcept {
+    using Made = Result<SharedPtr<SoundPcm>>;
+    if (channels > audio::MaxClipChannels) {
+        return Made::Failure(ErrorCode::Unsupported);
+    }
+
+    const uint32 bytesPerSample = SoundSourceStorageBytes(format);
+    const uint64 expected = static_cast<uint64>(bytesPerSample) * channels * frames;
+    if (bytesPerSample == 0 || channels == 0 || frames == 0 || bytes.Size() != expected) {
+        return Made::Failure(ErrorCode::CorruptData);
+    }
+
+    auto made = SoundPcm::TryAllocate(allocator, channels, frames, sampleRate);
+    if (!made) {
+        return Made::Failure(PcmAllocationError(made.Error()));
+    }
+
+    for (uint32 channel = 0; channel < channels; ++channel) {
+        Span<float> samples = made.Value()->MutableChannel(channel);
+        const uint8* base = bytes.Data() + static_cast<usize>(channel) * frames * bytesPerSample;
+        for (uint32 frame = 0; frame < frames; ++frame) {
+            samples[frame] =
+                ReadStoredSample(base + static_cast<usize>(frame) * bytesPerSample, format);
+        }
+    }
+
+    if (!made.Value()->IsFinite()) {
+        return Made::Failure(ErrorCode::CorruptData);
+    }
+
+    return made;
+}
+
+#if ROCKS_WITH_EDITOR_DATA
 
 Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& bulk) noexcept {
     if (source.format == SoundSourceStorage::None || source.bulk.IsEmpty() || frameCount == 0) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    const SoundEditorPcmKey& key = editorPcmKey_;
-    if (key.loaded && key.source.format == source.format &&
-        key.source.bulk.SameContent(source.bulk) && key.channels == channelCount &&
-        key.sampleRate == sampleRate && key.frames == frameCount) {
+    if (SameKey(pcmKey_, SoundPcmOrigin::Editor, source.bulk, source.format, channelCount,
+                sampleRate, frameCount)) {
         return Result<void>::Success();
     }
 
@@ -192,33 +237,85 @@ Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& b
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    const uint32 bytesPerSample = SoundSourceStorageBytes(source.format);
-    const uint64 expected = static_cast<uint64>(bytesPerSample) * channelCount * frameCount;
     auto read = bulk.ReadBulk(source.bulk);
     if (!read) {
         return Result<void>::Failure(read.Error());
     }
 
-    const Span<const uint8> bytes = read.Value();
-    if (channelCount == 0 || bytes.Size() != expected) {
+    auto made = DecodeSoundClipSource(allocator, source.format, channelCount, sampleRate,
+                                      frameCount, read.Value());
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
+    ++pcmRevision_;
+    pcmKey_ = SoundPcmKey{SoundPcmOrigin::Editor, source.bulk, source.format,
+                          channelCount,           sampleRate,  frameCount};
+    return Result<void>::Success();
+}
+
+#endif
+
+Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader reader, void* context,
+                                      const audio::AudioDecoderTable& decoders) noexcept {
+    if (platformData.IsEmpty() || reader == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    if (SameKey(pcmKey_, SoundPcmOrigin::Cooked, platformData, SoundSourceStorage::None,
+                channelCount, sampleRate, frameCount)) {
+        return Result<void>::Success();
+    }
+
+    if (channelCount > audio::MaxClipChannels) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto read = reader(context, platformData);
+    if (!read) {
+        return Result<void>::Failure(read.Error());
+    }
+
+    // 형식 위반·모르는 codec id는 손상이다(쿠커가 쓴 byte가 아니다).
+    auto view = audio::AudioPlatformDataView::Parse(read.Value());
+    if (!view) {
+        return Result<void>::Failure(view.Error() == ErrorCode::InvalidArgument ||
+                                             view.Error() == ErrorCode::Unsupported
+                                         ? ErrorCode::CorruptData
+                                         : view.Error());
+    }
+
+    // 머리와 필드가 다르면(필드가 다른 쿠킹의 것) 재생 PCM 차원 검사가 원인 없이 NotReady를 내므로
+    // 여기서 손상으로 알린다.
+    const audio::AudioPlatformDataHeader& header = view.Value().Header();
+    if (header.channels != channelCount || header.sampleRate != sampleRate ||
+        header.frames != frameCount) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    audio::DecodedAudioPcm decoded(allocator);
+    if (auto done = audio::DecodeAudioPlatformData(view.Value(), decoders, allocator, decoded);
+        !done) {
+        return Result<void>::Failure(
+            done.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : done.Error());
+    }
+
+    // 디코드 결과가 머리 차원과 같아야 복사할 수 있다(디코더 결함이 범위 밖 읽기가 되지 않게).
+    if (decoded.ChannelCount() != channelCount || decoded.SampleRate() != sampleRate ||
+        decoded.FrameCount() != frameCount) {
         return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto made = SoundPcm::TryAllocate(allocator, channelCount, frameCount, sampleRate);
     if (!made) {
-        // 형식 필드가 SoundPcm 범위 밖이면(rate·채널) 원본이 손상된 것이다.
-        return Result<void>::Failure(
-            made.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : made.Error());
+        return Result<void>::Failure(PcmAllocationError(made.Error()));
     }
 
     for (uint32 channel = 0; channel < channelCount; ++channel) {
         Span<float> samples = made.Value()->MutableChannel(channel);
-        const uint8* base =
-            bytes.Data() + static_cast<usize>(channel) * frameCount * bytesPerSample;
-        for (uint32 frame = 0; frame < frameCount; ++frame) {
-            samples[frame] =
-                ReadStoredSample(base + static_cast<usize>(frame) * bytesPerSample, source.format);
-        }
+        platform::MemoryCopy(samples.Data(), decoded.Channel(channel),
+                             static_cast<usize>(frameCount) * sizeof(float));
     }
 
     if (!made.Value()->IsFinite()) {
@@ -227,14 +324,9 @@ Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& b
 
     pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
     ++pcmRevision_;
-    editorPcmKey_.loaded = true;
-    editorPcmKey_.source = source;
-    editorPcmKey_.channels = channelCount;
-    editorPcmKey_.sampleRate = sampleRate;
-    editorPcmKey_.frames = frameCount;
+    pcmKey_ = SoundPcmKey{SoundPcmOrigin::Cooked, platformData, SoundSourceStorage::None,
+                          channelCount,           sampleRate,   frameCount};
     return Result<void>::Success();
 }
-
-#endif
 
 } // namespace rocks

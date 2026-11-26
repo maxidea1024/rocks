@@ -20,3 +20,4 @@
 | SPD12 | 스플래시 이미지는 낱개 파일로 배포 | 에셋 시스템 전에 필요(UE `EngineExtraStageFiles`) |
 | SPD13 | 설정은 `Engine` 모듈(모든 대상)이 등록하는 `ui.splash.*` 부팅 CVar, 동작은 ClientOnly 모듈 | 서버도 같은 설정 파일을 읽는다. 설정 struct와 달리 호스트마다 리플렉션 타입 등록이 필요 없다(개정 2) |
 | SPD14 | Windows Show는 스레드만 띄우고 돌아온다 | UE와 같다. 디코딩이 시작 경로에 들어가지 않는다 |
+| SPD15 | 최소 표시 시간 `ui.splash.min_seconds`(기본 2초), 호스트가 `CanHide()`를 보고 넘기며 그동안 엔진은 계속 돈다 | 사용자 요구(개정 4). UE `MinimumLoadingScreenDisplayTime`과 같은 뜻. `Hide`는 막히지 않는다 |

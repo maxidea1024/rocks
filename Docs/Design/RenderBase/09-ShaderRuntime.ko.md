@@ -141,7 +141,7 @@
 | SX5 | 12.2절(라이브러리 형식) | 항목 표에 묶음 id 열(엔진 셰이더 = 0, 머티리얼은 셰이더 집합 id). 라이브러리 형식 버전 1을 확정하기 전에 넣는다 | UE 라이브러리는 셰이더 맵 hash → 셰이더 인덱스 범위로 묶는다(`ShaderCodeArchive.h:48–51, 221–230`) |
 | SX6 | 12.2절 | 항목마다 파라미터 레이아웃 서명. 열 때 검사(9.3절) | — |
 | SX7 | 12.2·12.3절 | 엔진 셰이더 집합 완결성 검사(쿠킹 라이브러리 형식은 시작 때, 필요 시 컴파일 형식은 공급 완료 뒤)를 완료 기준으로(9.2절) | — |
-| SX8 | 7.2절 3항(`ShaderBindingLayout`) | 상수 버퍼 항목에 파라미터 구조체 identity, 자원 항목에 파라미터 구조체 멤버 오프셋. **반영(셰이더 시스템 개정 54·55)**: 상수 버퍼·루트 상수 identity는 바인딩 layout v4(SH3a), 자원 항목 멤버 오프셋은 SH3b | 9.5·9.6절 |
+| SX8 | 7.2절 3항(`ShaderBindingLayout`) | 상수 버퍼 항목에 파라미터 구조체 identity, 자원 항목에 파라미터 구조체 멤버 오프셋. **반영(셰이더 시스템 개정 54·55)**: 상수 버퍼·루트 상수 identity는 바인딩 layout v4(SH3a), 자원 항목 identity·멤버 오프셋은 바인딩 layout v5(SH3b, 셰이더 시스템 개정 57) | 9.5·9.6절 |
 | SX9 | 7.2절 7항(정점 입력) | `ATTRIBUTEn` 상한 n ≤ 15(16개), 정점 배치 ⊇ 셰이더 입력 마스크 검사, 형식 기본 타입과 셰이더 입력 타입 일치 검사(정규화 → float, 정수 → int·uint, GLES 정수 attribute는 `glVertexAttribIPointer`) | 10.2절. 16은 Vulkan `maxVertexInputAttributes` 최소 보장(Vulkan 사양 Required Limits)과 OpenGL ES 3.x `GL_MAX_VERTEX_ATTRIBS` 최소값(glGet 참조 "must be at least 16")이다. UE는 선언당 17개(`RHI/Public/RHIDefinitions.h:269`) |
 | SX10 | 16절 SH2 | SH2 완료 기준에 지연 생성 경쟁 시험(게시 1회, 명시 gate), 완결성 음성 대조, 서명 불일치 음성 대조, 파이프라인 캐시 적중 계수를 더한다. SH2 범위는 결정 R8 | — |
 | SX11 | 6절 4항(구현 순서) | 셰이더 런타임 객체(RB3)를 SH2 안에 넣는다(결정 R8 권장안) | — |
@@ -306,7 +306,7 @@
    - `Validate`(소유 스레드): 값을 주지 않은 텍스처·버퍼 view·공유 샘플러와 null handle은 InvalidArgument, 장치가 모르는 handle은 StaleHandle, 종류 불일치는 InvalidArgument다. 종류 불일치는 텍스처 — SRV 없음·ReadWrite view·view 차원이 셰이더 모양과 다름(2D view를 `Texture2DArray`로 읽기 등)·MSAA 여부·형식 값 계열(float·int·uint)과 원소 타입 — 와 버퍼 view — 종류·typed 값 계열·구조화 원소 byte·ReadWrite — 그리고 자기 샘플러 값의 비교 여부가 짝 텍스처 desc와 다름이다. 장치 질의 `Device::GetTextureViewInfo`·`GetBufferViewInfo`를 쓴다.
    - `Apply`: 자리마다 `SetTexture`·`SetSampler`·`SetBufferView`를 부른다(표 순서, 단계 순서). Release가 아닌 구성에서는 지금 값이 `Validate`를 통과한 값이어야 한다(값을 바꾸면 다시 검증 — 아니면 InvalidArgument). Release는 검증 없이 묶는다. 장치 질의가 없으므로 렌더 그래프 병렬 기록(RG3)의 pass 함수에서도 부를 수 있다.
    - 버린 대안: Apply 때마다 장치 질의 — 병렬 기록 worker가 장치 잠금·소유 스레드 규칙을 건드리고 그리기마다 비용이 든다. 묶음은 여러 프레임 그리는 그리기 항목이 갖는 값이므로 바꿀 때 한 번 검증한다.
-7. **이 절 밖(후속).** 장치 버퍼 view·compute 쓰기 slot의 위치 묶기(이름 표 `bufferViews`·`writableBuffers`·`writableTextures` 제거 — 호출 72곳이라 따로 한다), 렌더 그래프 파라미터 구조체(9.6절, SH3), 바인딩 지도를 스키마로(RR14), 상수 블록 참조를 묶음에 넣기(지금은 `ApplyConstantBlock`), 정적 샘플러(셰이더 시스템 7.2절 9항).
+7. **이 절 밖(후속).** 장치 버퍼 view·compute 쓰기 slot의 위치 묶기(이름 표 `bufferViews`·`writableBuffers`·`writableTextures` 제거 — 호출 72곳이라 따로 한다), 렌더 그래프 파라미터 구조체(9.6절, SH3c — 생성 표 자원 지도와 `ParameterBatch::SetParameters`는 SH3b에서 들어왔다, 셰이더 시스템 16.2절 SSD64), 바인딩 지도를 스키마로(RR14), 상수 블록 참조를 묶음에 넣기(지금은 `ApplyConstantBlock`), 정적 샘플러(셰이더 시스템 7.2절 9항).
 
 **완료 기준.** EngineTests: slot 해석(VS·PS 여러 텍스처, 자기·공유 샘플러 짝, 짝 없는 샘플러·slot 번호·단계 수 상한 초과 거부), 기록 장치의 단계별 묶기와 `SetSampler` 실패 계약, 자원 지도(양성, 종류 불일치·표 누락·쓰지 않는 항목·이름 표 밖 버퍼 view·이름 중복), 묶음(null·미설정·종류 불일치·검증 전 Apply·바뀐 값 재검증·Apply가 낸 장치 호출). Sandbox `--self-test`(여덟 장치): 한 pass에서 VS 텍스처 하나와 PS 텍스처 셋 이상(2D·2D 배열·정수)·자기 샘플러 값 지정·공유 샘플러를 자원 묶음으로 묶어 그린 픽셀 = 기대값, 공유 샘플러를 묶지 않은 그리기 무시, 파이프라인 전환 뒤 묶음 유지 — 장치 사이 결과가 같아야 한다. 기존 소비자(tone map·TextureInspector·전체화면·compute)와 `--texture-self-test`·`--cooked-shader-self-test` 회귀 없음.
 

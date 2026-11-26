@@ -73,6 +73,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundClip::compression",
+      "id": "1d34c5575fc1478a88f6fdb53fde6ceb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::compressionQuality",
+      "id": "238f2656788240b5b6c6851e00df813d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClip::cues",
       "id": "abf5f9b0cded46a6b005b810af885423",
       "aliases": [],
@@ -131,6 +145,13 @@
       "kind": "field",
       "name": "rocks::SoundClip::looping",
       "id": "bc1036687cc74c71b5bca6a5d22e8e14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::platformData",
+      "id": "2657787f5fd444acb6d3dbd434047d93",
       "aliases": [],
       "retired": false
     },
@@ -285,6 +306,13 @@
       "kind": "type",
       "name": "rocks::SoundClipSource",
       "id": "e8b4961d0d084518b41a4deb4bd3fe6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundCompression",
+      "id": "e1fefd6832c049bf9023ae9d551b9ae1",
       "aliases": [],
       "retired": false
     },

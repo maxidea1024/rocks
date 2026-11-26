@@ -414,6 +414,9 @@ TEST(ShaderCore_ParameterLayoutSignatureIsCanonicalBytes) {
             AppendU32(canonical, member.offset);
             AppendU32(canonical, member.arrayCount);
         }
+
+        // 자원 수(손으로 쓴 표는 0 — 16.2절 SSD62).
+        AppendU32(canonical, 0);
     }
 
     const Sha256Digest signature = ShaderParameterLayoutSignature(layouts);
@@ -503,22 +506,25 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     // 머리 golden(버전·단계·루트 상수·attribute·int·uint attribute·render target·단계 사이·자원
     // 수). v2: 단계 사이 마스크(0 — 시험 layout은 정하지 않았다)가 render target 마스크 뒤에 있다.
     // v3: attribute 마스크 뒤에 int·uint attribute 마스크가 있다. v4: 루트 상수 byte 뒤에 u64 루트
-    // 상수 구조체 identity가 있다(ShaderSystem 16.2절 SSD54).
-    const uint8 header[] = {4, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0,
+    // 상수 구조체 identity가 있다(ShaderSystem 16.2절 SSD54). v5: 형식 버전 5.
+    const uint8 header[] = {5, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0,
                             0, 0, 0, 0, 0, 0, 0, 0, 0,  0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0};
     REQUIRE(bytes.Size() > sizeof(header));
     CHECK(memcmp(bytes.Data(), header, sizeof(header)) == 0);
-    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 구조체 identity(v4), 출처 0, 공유 0, 모양 0,
-    // 원소 0, stride 0, 멤버 2.
-    const uint8 first[] = {0, 0, 0,    4,    'V',  'i',  'e',  'w',  32,   0,
-                           0, 0, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11,
-                           0, 0, 0,    0,    0,    0,    0,    0,    2,    0};
+    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 구조체 identity(v4), 멤버 오프셋 없음(v5 —
+    // 상수 버퍼는 NoShaderParameterMember), 출처 0, 공유 0, 모양 0, 원소 0, stride 0, 멤버 2.
+    const uint8 first[] = {0,    0,    0,    4,    'V',  'i',  'e',  'w',  32,   0,    0,    0,
+                           0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0xff, 0xff, 0xff, 0xff,
+                           0,    0,    0,    0,    0,    0,    0,    0,    2,    0};
     CHECK(memcmp(bytes.Data() + sizeof(header), first, sizeof(first)) == 0);
 
     ShaderBindingLayout decoded(TestAllocator());
     REQUIRE(DecodeShaderBindingLayout(bytes.View(), decoded));
     CHECK(decoded.rootConstantStructId == layout.rootConstantStructId);
     CHECK(decoded.resources[0].structId == layout.resources[0].structId);
+    for (usize index = 0; index < layout.resources.Size(); ++index) {
+        CHECK(decoded.resources[index].memberOffset == layout.resources[index].memberOffset);
+    }
     CHECK(decoded.stage == layout.stage && decoded.rootConstantBytes == 64 &&
           decoded.renderTargetMask == 0b101 && decoded.attributeMask == 0);
     REQUIRE(decoded.resources.Size() == layout.resources.Size());
@@ -562,10 +568,10 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::CorruptPackage);
     (void)bytes.TryResize(bytes.Size() - 1);
-    bytes[0] = 3;
+    bytes[0] = 4;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::UnsupportedVersion);
-    bytes[0] = 4;
+    bytes[0] = 5;
     // 종류 byte를 범위 밖으로(첫 자원).
     bytes[sizeof(header)] = 9;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
@@ -1145,14 +1151,238 @@ TEST(ShaderCore_BindingLayoutIdentityRules) {
     layout.rootConstantBytes = 0;
     CHECK(!EncodeShaderBindingLayout(layout, bytes));
     layout.rootConstantBytes = 64;
+    ShaderBindingResource* texture = nullptr;
+    ShaderBindingResource* constants = nullptr;
     for (ShaderBindingResource& resource : layout.resources) {
-        if (resource.kind == ShaderResourceKind::SampledTexture) {
-            resource.structId = 5;
-            break;
-        }
+        texture = texture == nullptr && resource.kind == ShaderResourceKind::SampledTexture
+                      ? &resource
+                      : texture;
+        constants = constants == nullptr && resource.kind == ShaderResourceKind::ConstantBuffer
+                        ? &resource
+                        : constants;
     }
 
+    REQUIRE(texture != nullptr && constants != nullptr);
+    // v5: 자원의 구조체 identity와 멤버 오프셋은 함께 있다(ShaderSystem 16.2절 SSD63).
+    texture->structId = 5;
     CHECK(!EncodeShaderBindingLayout(layout, bytes));
+    texture->memberOffset = 48;
+    Array<uint8> member(TestAllocator());
+    REQUIRE(EncodeShaderBindingLayout(layout, member));
+    ShaderBindingLayout decoded(TestAllocator());
+    REQUIRE(DecodeShaderBindingLayout(member.View(), decoded));
+    bool found = false;
+    for (const ShaderBindingResource& resource : decoded.resources) {
+        found = found || (resource.kind == ShaderResourceKind::SampledTexture &&
+                          resource.structId == 5 && resource.memberOffset == 48);
+    }
+
+    CHECK(found);
+    texture->structId = 0;
+    CHECK(!EncodeShaderBindingLayout(layout, bytes));
+    texture->memberOffset = NoShaderParameterMember;
+    // 상수 버퍼는 멤버 오프셋을 갖지 않는다.
+    constants->memberOffset = 0;
+    CHECK(!EncodeShaderBindingLayout(layout, bytes));
+}
+
+// 자원 멤버 표 규칙이다(ShaderSystem 16.2절 SSD62): 양성(상수 + 자원, 자원만), 규칙마다 음성,
+// 정규 byte 왕복·모든 잘린 길이·서명, 표 사이 이름 겹침.
+TEST(ShaderCore_ParameterLayoutResourceRules) {
+    using Kind = ShaderParameterResourceKind;
+    using Shape = ShaderResourceShape;
+    using Component = ShaderComponentType;
+    using Pair = ShaderParameterSampler;
+    constexpr usize ResourceCount = 6;
+    const ShaderParameterMember constants[] = {{"tint", ShaderParameterType::Float4, 0, 0}};
+    const ShaderParameterResource resources[ResourceCount] = {
+        {"albedo", "albedoSampler", Kind::DeviceTexture, 16, Shape::Texture2D, Component::Float, 0,
+         Pair::Filter},
+        {"codes", "", Kind::GraphTexture, 32, Shape::Texture2D, Component::Uint, 0, Pair::None},
+        {"lights", "", Kind::DeviceBuffer, 48, Shape::StructuredBuffer, Component::None, 16,
+         Pair::None},
+        {"target", "", Kind::GraphTextureUav, 64, Shape::Texture2D, Component::Float, 0,
+         Pair::None},
+        {"history", "", Kind::GraphTextureAccess, 80, Shape::None, Component::None, 0, Pair::None},
+        {"targets", "", Kind::RenderTargets, 96, Shape::None, Component::None, 0, Pair::None}};
+    constexpr StringView StructName("rocks::test::Pass");
+    constexpr StringView SourcePath("/Engine/Generated/Test/Pass.rsh");
+    constexpr StringView Source("cbuffer Pass { float4 tint; };");
+    const ShaderParameterLayout good("Pass", false, 16, constants, resources, StructName,
+                                     SourcePath, Source);
+    CHECK(Accepts(good));
+    CHECK(StringView(ShaderParameterResourceKindName(Kind::GraphBufferUav)) == "GraphBufferUav");
+    CHECK(StringView(ShaderParameterResourceKindName(static_cast<Kind>(10))) == "unknown");
+    CHECK(IsShaderBoundResource(Kind::GraphBufferUav) &&
+          !IsShaderBoundResource(Kind::GraphTextureAccess));
+    CHECK(IsGraphResource(Kind::RenderTargets) && !IsGraphResource(Kind::DeviceBuffer));
+
+    // 자원만 가진 구조체(상수 부분 0).
+    const ShaderParameterLayout only("Only", false, 0, {},
+                                     Span<const ShaderParameterResource>(resources, 2),
+                                     "rocks::test::Only", "/Engine/Generated/Test/Only.rsh", "x");
+    CHECK(Accepts(only));
+    // 상수 멤버가 없는데 크기가 있으면 거부한다.
+    CHECK(!Accepts(ShaderParameterLayout(
+        "Only", false, 16, {}, Span<const ShaderParameterResource>(resources, 2),
+        "rocks::test::Only", "/Engine/Generated/Test/Only.rsh", "x")));
+
+    // 자원 하나를 바꾼 표를 받는가.
+    const auto accepts = [&](usize index, auto change) noexcept {
+        ShaderParameterResource copy[ResourceCount];
+        for (usize at = 0; at < ResourceCount; ++at) {
+            copy[at] = resources[at];
+        }
+
+        change(copy[index]);
+        return Accepts(ShaderParameterLayout("Pass", false, 16, constants, copy, StructName,
+                                             SourcePath, Source));
+    };
+    using Resource = ShaderParameterResource;
+    // 이름: 식별자 아님, 상수 멤버·다른 자원·짝 이름·예약 이름과 겹침.
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.name = "1codes"; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.name = "tint"; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.name = "albedo"; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.name = "albedoSampler"; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.name = "SharedWrap"; }));
+    CHECK(!accepts(2, [](Resource& value) noexcept { value.name = "RocksDebugBuffer"; }));
+    // 오프셋: 상수 부분 안, 16 byte 배수 아님, 오름차순 아님.
+    CHECK(!accepts(0, [](Resource& value) noexcept { value.offset = 0; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.offset = 40; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept { value.offset = 16; }));
+    // 짝: 이름 규칙, float 텍스처의 짝 없음, 정수·MS 텍스처의 짝, 버퍼의 짝.
+    CHECK(!accepts(0, [](Resource& value) noexcept { value.samplerName = "albedoSamp"; }));
+    CHECK(!accepts(0, [](Resource& value) noexcept {
+        value.samplerName = "";
+        value.sampler = Pair::None;
+    }));
+    CHECK(accepts(0, [](Resource& value) noexcept { value.sampler = Pair::Comparison; }));
+    CHECK(!accepts(1, [](Resource& value) noexcept {
+        value.samplerName = "codesSampler";
+        value.sampler = Pair::Filter;
+    }));
+    CHECK(!accepts(0, [](Resource& value) noexcept { value.shape = Shape::Texture2DMultisample; }));
+    CHECK(accepts(0, [](Resource& value) noexcept {
+        value.shape = Shape::Texture2DMultisample;
+        value.samplerName = "";
+        value.sampler = Pair::None;
+    }));
+    CHECK(!accepts(2, [](Resource& value) noexcept {
+        value.samplerName = "lightsSampler";
+        value.sampler = Pair::Filter;
+    }));
+    // 모양·원소·stride가 종류에 맞지 않음.
+    CHECK(!accepts(0, [](Resource& value) noexcept { value.shape = Shape::TypedBuffer; }));
+    CHECK(!accepts(0, [](Resource& value) noexcept { value.component = Component::None; }));
+    CHECK(!accepts(2, [](Resource& value) noexcept { value.component = Component::Float; }));
+    CHECK(!accepts(2, [](Resource& value) noexcept { value.structureStride = 0; }));
+    CHECK(!accepts(2, [](Resource& value) noexcept { value.structureStride = 6; }));
+    CHECK(accepts(2, [](Resource& value) noexcept {
+        value.shape = Shape::TypedBuffer;
+        value.component = Component::Float;
+        value.structureStride = 0;
+    }));
+    CHECK(accepts(2, [](Resource& value) noexcept {
+        value.shape = Shape::RawBuffer;
+        value.structureStride = 0;
+    }));
+    CHECK(!accepts(3, [](Resource& value) noexcept { value.shape = Shape::TextureCube; }));
+    CHECK(!accepts(4, [](Resource& value) noexcept { value.shape = Shape::Texture2D; }));
+    CHECK(!accepts(5, [](Resource& value) noexcept { value.kind = Kind::GraphTexture; }));
+    CHECK(!accepts(4, [](Resource& value) noexcept { value.kind = Kind::RenderTargets; }));
+    CHECK(!accepts(4, [](Resource& value) noexcept { value.kind = static_cast<Kind>(10); }));
+    CHECK(!accepts(4, [](Resource& value) noexcept { value.sampler = static_cast<Pair>(3); }));
+    // 루트 상수·손으로 쓴 표(identity 없음)는 자원을 갖지 않는다.
+    CHECK(!Accepts(ShaderParameterLayout("Pass", true, 16, constants, resources, StructName,
+                                         SourcePath, Source)));
+    CHECK(!Accepts(ShaderParameterLayout("Pass", false, 16, constants, resources, "", "", "")));
+    // 중첩 표의 자원.
+    const ShaderParameterMember nested[] = {{"inner", ShaderParameterType::Struct, 0, 0, &good}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 16, nested)));
+    // 상한 256.
+    constexpr usize Many = MaxShaderParameterResources + 1;
+    constexpr usize NameBytes = 8;
+    static char names[Many][NameBytes];
+    static ShaderParameterResource many[Many];
+    for (usize index = 0; index < Many; ++index) {
+        (void)snprintf(names[index], NameBytes, "r%zu", index);
+        many[index] = {StringView(names[index]),
+                       "",
+                       Kind::GraphTextureAccess,
+                       static_cast<uint32>(16 * (index + 1)),
+                       Shape::None,
+                       Component::None,
+                       0,
+                       Pair::None};
+    }
+
+    CHECK(Accepts(ShaderParameterLayout("Pass", false, 16, constants,
+                                        Span<const ShaderParameterResource>(many, Many - 1),
+                                        StructName, SourcePath, Source)));
+    CHECK(!Accepts(
+        ShaderParameterLayout("Pass", false, 16, constants, many, StructName, SourcePath, Source)));
+
+    // 표 사이: 자원·짝 이름이 겹치면 거부한다.
+    const ShaderParameterResource other[] = {
+        {"albedo", "", Kind::DeviceBuffer, 0, Shape::RawBuffer, Component::None, 0, Pair::None}};
+    const ShaderParameterLayout otherLayout("Other", false, 0, {}, other, "rocks::test::Other",
+                                            "/Engine/Generated/Test/Other.rsh", "y");
+    CHECK(Accepts(otherLayout));
+    const ShaderParameterLayout clash[] = {good, otherLayout};
+    CHECK(!ValidateShaderParameterLayouts(clash));
+    const ShaderParameterResource pairClash[] = {{"albedoSampler", "", Kind::DeviceBuffer, 0,
+                                                  Shape::RawBuffer, Component::None, 0,
+                                                  Pair::None}};
+    const ShaderParameterLayout pairLayout("Other", false, 0, {}, pairClash, "rocks::test::Other",
+                                           "/Engine/Generated/Test/Other.rsh", "y");
+    const ShaderParameterLayout pairList[] = {good, pairLayout};
+    CHECK(!ValidateShaderParameterLayouts(pairList));
+    const ShaderParameterLayout sameNames[] = {good, only};
+    CHECK(!ValidateShaderParameterLayouts(sameNames));
+    const ShaderParameterResource distinct[] = {
+        {"words", "", Kind::DeviceBuffer, 0, Shape::RawBuffer, Component::None, 0, Pair::None}};
+    const ShaderParameterLayout distinctLayout("Other", false, 0, {}, distinct,
+                                               "rocks::test::Other",
+                                               "/Engine/Generated/Test/Other.rsh", "y");
+    const ShaderParameterLayout list[] = {good, distinctLayout};
+    REQUIRE(ValidateShaderParameterLayouts(list));
+
+    // 정규 byte 왕복·서명·모든 잘린 길이.
+    Array<uint8> bytes(TestAllocator());
+    REQUIRE(EncodeShaderParameterLayouts(list, bytes));
+    CHECK(Sha256::Hash(bytes.View()) == ShaderParameterLayoutSignature(list));
+    ShaderParameterLayoutSet decoded(TestAllocator());
+    REQUIRE(DecodeShaderParameterLayouts(bytes.View(), decoded));
+    REQUIRE(decoded.View().Size() == 2);
+    REQUIRE(decoded.layouts[0].resources.Size() == ResourceCount);
+    for (usize index = 0; index < ResourceCount; ++index) {
+        const ShaderParameterResource& a = resources[index];
+        const ShaderParameterResource& b = decoded.layouts[0].resources[index];
+        CHECK(a.name == b.name && a.samplerName == b.samplerName && a.kind == b.kind &&
+              a.offset == b.offset && a.shape == b.shape && a.component == b.component &&
+              a.structureStride == b.structureStride && a.sampler == b.sampler);
+    }
+
+    CHECK(decoded.layouts[1].resources.Size() == 1 && decoded.layouts[1].totalBytes == 0 &&
+          decoded.layouts[1].members.IsEmpty());
+    CHECK(ShaderParameterLayoutSignature(decoded.View()) == ShaderParameterLayoutSignature(list));
+    for (usize length = 1; length < bytes.Size(); ++length) {
+        CHECK(DecodeShaderParameterLayouts(bytes.View().Left(length), decoded).error ==
+              ShaderReadError::CorruptPackage);
+    }
+
+    // 자원 칸 하나가 바뀌면 서명이 바뀐다.
+    ShaderParameterResource retyped[ResourceCount];
+    for (usize index = 0; index < ResourceCount; ++index) {
+        retyped[index] = resources[index];
+    }
+
+    retyped[1].component = Component::Int;
+    const ShaderParameterLayout changed[] = {ShaderParameterLayout("Pass", false, 16, constants,
+                                                                   retyped, StructName, SourcePath,
+                                                                   Source),
+                                             distinctLayout};
+    CHECK(!(ShaderParameterLayoutSignature(changed) == ShaderParameterLayoutSignature(list)));
 }
 
 } // namespace shader_core_format_tests_file

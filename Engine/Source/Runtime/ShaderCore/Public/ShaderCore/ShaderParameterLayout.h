@@ -7,10 +7,14 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <ShaderCore/ShaderBindingLayout.h>
 #include <ShaderCore/ShaderReadStatus.h>
 
 // 셰이더 파라미터 레이아웃 표와 그 서명이다(Docs/Design/ShaderSystem 7.2절 5항, 12.2.1절 SSD27,
-// 13절 P7, 16.2절 SSD53).
+// 13절 P7, 16.2절 SSD53·SSD62).
+//
+// 표는 상수 부분(멤버 — cbuffer·루트 상수)과 자원 부분(resources — 생성 표만, SH3b)을 가진다. 상수
+// 부분은 C++ 구조체의 앞 totalBytes byte이고 자원 멤버는 그 뒤에 있다(16.2절 SSD60).
 //
 // 표의 출처는 셋이다: MetaCompiler가 ROCKS_SHADER_PARAMETERS 구조체에서 만든 생성 표
 // (ShaderParameterLayoutOf<T>() — 구조체 identity와 생성 HLSL 원문을 함께 가진다, SH3), 손으로 쓴
@@ -43,6 +47,8 @@ inline constexpr uint32 MaxShaderConstantBufferBytes = 65'536;
 inline constexpr usize MaxShaderParameterMembers = 256;
 // 셰이더 타입 하나의 최대 레이아웃 표 수다.
 inline constexpr usize MaxShaderParameterLayouts = 16;
+// 구조체 하나의 최대 자원 멤버 수다(포함한 자원 구조체를 펼친 수, 16.2절 SSD62).
+inline constexpr usize MaxShaderParameterResources = 256;
 // 구조체·멤버 이름의 최대 byte 수(NUL 제외)다.
 inline constexpr usize MaxShaderParameterNameBytes = 64;
 // 파라미터 구조체 C++ 정규 이름("rocks::render::TonemapConstants")의 최대 byte 수다.
@@ -89,6 +95,85 @@ enum class ShaderParameterBaseType : uint8 {
 
 struct ShaderParameterLayout;
 
+// 자원 멤버 종류다(16.2절 SSD59). 값은 정규 byte(서명)에 들어가므로 바꾸지 않는다.
+enum class ShaderParameterResourceKind : uint8 {
+    // 장치 SRV 텍스처(RenderBase DeviceTextureParameter)
+    DeviceTexture = 0,
+    // 장치 버퍼 view SRV(RenderBase DeviceBufferParameter)
+    DeviceBuffer = 1,
+    // 그래프 텍스처 전체 SRV(RenderGraph GraphTextureParameter)
+    GraphTexture = 2,
+    // 그래프 텍스처 읽기 view(GraphTextureSrvParameter)
+    GraphTextureSrv = 3,
+    // 그래프 텍스처 쓰기 view(GraphTextureUavParameter)
+    GraphTextureUav = 4,
+    // 그래프 버퍼 읽기 view(GraphBufferSrvParameter)
+    GraphBufferSrv = 5,
+    // 그래프 버퍼 쓰기 view(GraphBufferUavParameter)
+    GraphBufferUav = 6,
+    // 그래프 텍스처 접근만 선언(GraphTextureAccessParameter — 셰이더에 묶지 않는다)
+    GraphTextureAccess = 7,
+    // 그래프 버퍼 접근만 선언(GraphBufferAccessParameter)
+    GraphBufferAccess = 8,
+    // 렌더 타깃 slot 묶음(GraphRenderTargetParameter)
+    RenderTargets = 9
+};
+
+inline constexpr uint32 ShaderParameterResourceKindCount = 10;
+
+// 셰이더에 묶이는 자원(HLSL 선언이 있는 자원)인가. 접근만 선언과 렌더 타깃은 아니다.
+constexpr bool IsShaderBoundResource(ShaderParameterResourceKind kind) noexcept {
+    return kind <= ShaderParameterResourceKind::GraphBufferUav;
+}
+
+// 그래프 자원(렌더 그래프 의존)인가.
+constexpr bool IsGraphResource(ShaderParameterResourceKind kind) noexcept {
+    return kind >= ShaderParameterResourceKind::GraphTexture &&
+           kind <= ShaderParameterResourceKind::RenderTargets;
+}
+
+// 짝 샘플러 종류다(7.2절 9항). 값은 정규 byte에 들어가므로 바꾸지 않는다.
+enum class ShaderParameterSampler : uint8 {
+    None = 0,
+    // SamplerState <이름>Sampler
+    Filter = 1,
+    // SamplerComparisonState <이름>Sampler
+    Comparison = 2
+};
+
+inline constexpr uint32 ShaderParameterSamplerCount = 3;
+
+// 자원 멤버 하나다(16.2절 SSD62). 포함한 자원 구조체의 자원은 펼쳐서 바깥 이름(<멤버>_<자원>)과
+// 바깥 구조체 기준 오프셋으로 둔다. 접근만 선언·렌더 타깃은 name이 C++ 멤버 이름이고 모양·원소가
+// None이다.
+struct ShaderParameterResource {
+    constexpr ShaderParameterResource() noexcept = default;
+
+    constexpr ShaderParameterResource(StringView resourceName, StringView pairName,
+                                      ShaderParameterResourceKind resourceKind,
+                                      uint32 resourceOffset, ShaderResourceShape resourceShape,
+                                      ShaderComponentType resourceComponent, uint32 stride,
+                                      ShaderParameterSampler pair) noexcept
+        : name(resourceName), samplerName(pairName), kind(resourceKind), offset(resourceOffset),
+          shape(resourceShape), component(resourceComponent), structureStride(stride),
+          sampler(pair) {
+    }
+
+    // HLSL 전역 이름이다.
+    StringView name;
+    // 짝 샘플러 HLSL 이름(<name>Sampler)이다. 짝이 없으면 빈 값이다.
+    StringView samplerName;
+    ShaderParameterResourceKind kind = ShaderParameterResourceKind::DeviceTexture;
+    // C++ 오프셋(16 byte 배수, totalBytes 이상)이다.
+    uint32 offset = 0;
+    ShaderResourceShape shape = ShaderResourceShape::None;
+    // typed 자원(텍스처·typed 버퍼)의 원소 기본 타입이다.
+    ShaderComponentType component = ShaderComponentType::None;
+    // 구조화 버퍼의 원소 byte다(그 밖은 0).
+    uint32 structureStride = 0;
+    ShaderParameterSampler sampler = ShaderParameterSampler::None;
+};
+
 // 구조체 멤버 하나다. arrayCount 0은 배열이 아님이다. type이 Struct면 structLayout이 중첩 표다(그
 // 표의 멤버 오프셋은 이 구조체 기준이다).
 struct ShaderParameterMember {
@@ -129,14 +214,28 @@ struct ShaderParameterLayout {
           sourcePath(path), source(text) {
     }
 
+    // 자원 멤버가 있는 생성 표다(16.2절 SSD62).
+    constexpr ShaderParameterLayout(StringView layoutName, bool root, uint32 bytes,
+                                    Span<const ShaderParameterMember> layoutMembers,
+                                    Span<const ShaderParameterResource> layoutResources,
+                                    StringView qualifiedName, StringView path,
+                                    StringView text) noexcept
+        : name(layoutName), rootConstants(root), totalBytes(bytes), members(layoutMembers),
+          resources(layoutResources), structName(qualifiedName),
+          structId(ShaderParameterStructId(qualifiedName)), sourcePath(path), source(text) {
+    }
+
     // 원문의 cbuffer·ROCKS_ROOT_CONSTANTS 이름이다(식별자).
     StringView name;
     // 루트 상수(그리기별 상수, 7.2절 2항)인가.
     bool rootConstants = false;
-    // 구조체 전체 byte 수(16 byte 배수)다.
+    // 상수 부분 byte 수(16 byte 배수 — cbuffer·루트 상수 크기)다. 상수 멤버가 없는 자원 구조체는
+    // 0이다.
     uint32 totalBytes = 0;
-    // 멤버 표(오프셋 오름차순)다.
+    // 상수 멤버 표(오프셋 오름차순)다.
     Span<const ShaderParameterMember> members;
+    // 자원 멤버 표(오프셋 오름차순, 16.2절 SSD62)다. 손으로 쓴 표·동적 layout은 비어 있다.
+    Span<const ShaderParameterResource> resources;
     // 생성 표의 C++ 정규 이름과 그 identity(ShaderParameterStructId)다. 손으로 쓴 표·동적
     // layout은 빈 이름·0이다.
     StringView structName;
@@ -184,16 +283,22 @@ ShaderParameterMemberBytes(const ShaderParameterMember& member) noexcept;
 // 이름이 식별자가 아님, 멤버 수 0 또는 MaxShaderParameterMembers 초과, 타입이 범위 밖, 멤버 정렬
 // 위반, 배열 원소 크기가 16 byte 배수가 아님, 멤버가 오프셋 오름차순이 아니거나 겹침, 16 byte 슬롯
 // 하나에 기본 타입을 섞음, 멤버가 totalBytes를 넘음, totalBytes가 16 byte 배수가 아니거나 0이거나
-// MaxShaderConstantBufferBytes 초과, 루트 상수인데 MaxShaderRootConstantBytes 초과, 멤버 이름 중복,
+// MaxShaderConstantBufferBytes 초과(상수 멤버가 없는 자원 표는 0이어야 한다), 루트 상수인데
+// MaxShaderRootConstantBytes 초과, 멤버 이름 중복,
 // Struct 멤버의 표 없음·2단 중첩·배열·16 byte 정렬 아님·중첩 표가 루트 상수, structName이 정규
 // 이름(::로 이은 식별자, 128 byte 이하)이 아니거나 structId가 그 해시와 다름, 원문 경로가
-// /<루트>/Generated/… 의 .rsh가 아니거나 원문만 있음·원문 크기 초과.
+// /<루트>/Generated/… 의 .rsh가 아니거나 원문만 있음·원문 크기 초과. 자원 멤버(16.2절 SSD62):
+// 루트 상수·중첩 표의 자원, 수 초과, 이름·짝 이름이 식별자가 아니거나 상수 멤버·자원·짝 이름·예약
+// 이름과 겹침, 오프셋이 totalBytes 미만·16 byte 배수 아님·오름차순 아님, 종류에 맞지 않는
+// 모양·원소·stride·짝(짝은 float 원소의 MS 아닌 SRV 텍스처에만, 이름은 <name>Sampler), 렌더 타깃
+// 멤버 둘 이상, 생성 표가 아님(structId 0).
 ROCKS_SHADERCORE_API Result<void>
 ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
                               const char** reason = nullptr) noexcept;
 
 // 셰이더 타입 하나의 표 목록을 검사한다: 표마다 ValidateShaderParameterLayout, 목록 길이
-// MaxShaderParameterLayouts 이하, 구조체 이름 중복 없음, 루트 상수 표는 하나 이하(7.2절 2항).
+// MaxShaderParameterLayouts 이하, 구조체 이름 중복 없음, 루트 상수 표는 하나 이하(7.2절 2항), 표
+// 사이 자원·짝 샘플러 이름 겹침 없음(한 셰이더의 전역 이름이다).
 ROCKS_SHADERCORE_API Result<void>
 ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
                                const char** reason = nullptr) noexcept;
@@ -201,7 +306,9 @@ ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
 // 표 목록의 서명이다(SSD27·SSD53). 목록이 비면 0(모든 byte 0)이다. 아니면 정규 byte의 SHA-256이다:
 //   u32 표 수, 표마다 표 byte. 표 byte = [u8 이름 byte 수, 이름 byte, u8 구조체 이름 byte 수,
 //   구조체 이름 byte, u8 루트 상수(0·1), u32 totalBytes, u32 멤버 수, 멤버마다 (u8 이름 byte 수,
-//   이름 byte, u8 타입 값, u32 오프셋, u32 원소 수, Struct면 중첩 표의 표 byte)] — 모두
+//   이름 byte, u8 타입 값, u32 오프셋, u32 원소 수, Struct면 중첩 표의 표 byte), u32 자원 수,
+//   자원마다 (u8 이름 byte 수, 이름 byte, u8 짝 이름 byte 수, 짝 이름 byte, u8 종류, u32 오프셋,
+//   u8 모양, u8 원소 타입, u32 구조화 원소 byte, u8 짝 종류)] — 모두
 //   little-endian, 목록 순서 그대로. identity는 이름에서 다시 계산되므로 넣지 않고, 생성 원문과 그
 //   경로도 넣지 않는다 (원문은 include 폐포로 job 키에 들어간다).
 // 목록은 ValidateShaderParameterLayouts를 통과해야 한다(이름 byte 수가 u8 안이다).
@@ -215,10 +322,11 @@ ROCKS_SHADERCORE_API Result<void>
 EncodeShaderParameterLayouts(Span<const ShaderParameterLayout> layouts, Array<uint8>& out) noexcept;
 
 // 읽은 표 목록이다. 이름은 원본 byte를 가리키므로 원본이 이 값보다 오래 살아야 한다. 중첩 표는
-// nested에 있고 Struct 멤버가 가리킨다(원문 칸은 정규 byte에 없어 빈 값이다).
+// nested에 있고 Struct 멤버가 가리킨다(원문 칸은 정규 byte에 없어 빈 값이다). 자원 멤버는
+// resources에 있다.
 struct ROCKS_SHADERCORE_API ShaderParameterLayoutSet {
     explicit ShaderParameterLayoutSet(Allocator& allocator) noexcept
-        : layouts(allocator), members(allocator), nested(allocator) {
+        : layouts(allocator), members(allocator), nested(allocator), resources(allocator) {
     }
 
     ShaderParameterLayoutSet(const ShaderParameterLayoutSet&) = delete;
@@ -234,7 +342,12 @@ struct ROCKS_SHADERCORE_API ShaderParameterLayoutSet {
     Array<ShaderParameterLayout> layouts;
     Array<ShaderParameterMember> members;
     Array<ShaderParameterLayout> nested;
+    Array<ShaderParameterResource> resources;
 };
+
+// 종류 이름("DeviceTexture" 등, 정적 수명)이다. 범위 밖이면 "unknown".
+ROCKS_SHADERCORE_API const char*
+ShaderParameterResourceKindName(ShaderParameterResourceKind kind) noexcept;
 
 // 정규 byte를 읽는다(빈 byte는 빈 목록). 잘림·남는 byte·타입 범위 밖·검사
 // (ValidateShaderParameterLayouts) 위반은 CorruptPackage, 할당 실패도 CorruptPackage(이유가

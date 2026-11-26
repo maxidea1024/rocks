@@ -23,6 +23,7 @@ TEST(SplashSettings_DefaultsMatchTheDesign) {
     CHECK(values.gameCopyright.IsEmpty());
     CHECK(values.studioImage.IsEmpty());
     CHECK(values.studioCopyright.IsEmpty());
+    CHECK(values.minimumSeconds == 2.0f);
 }
 
 // 프로젝트·세션 층 값이 읽힌다(부팅 값 — 시작 전 대입).
@@ -38,9 +39,12 @@ TEST(SplashSettings_AssignmentsAreRead) {
                                   "My Game"));
     REQUIRE(context.AddAssignment(config::ConfigLayer::Session, "test", "ui.splash.game.image",
                                   "{ProjectDir}/Art/Splash.png"));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Session, "test", "ui.splash.min_seconds",
+                                  "0.5"));
     REQUIRE(context.Sync());
     REQUIRE(context.CompleteStartup());
     const SplashSettingValues values = ReadSplashSettings();
+    CHECK(values.minimumSeconds == 0.5f);
     CHECK(!values.enabled);
     CHECK(values.gameShowProgressText);
     CHECK(values.gameTitle == "My Game");

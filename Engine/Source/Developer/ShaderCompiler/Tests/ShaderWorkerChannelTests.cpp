@@ -350,29 +350,49 @@ TEST(ShaderWorkerChannel_ReportsVersionMismatches) {
         }
     }
 
-    // 처리기 버전: 형식 정의 processor.version을 5로 올린 요청은 워커의 D3D 처리기(4)와 다르다.
+    // 처리기 버전: 형식 정의 processor.version을 하나 올린 요청은 워커의 D3D 처리기와 다르다(지금
+    // 형식 정의의 버전을 읽어 쓰므로 처리기 버전을 올려도 이 시험은 고치지 않는다).
     {
         RequestBuilder builder;
         auto format = builder.request.formats.TryEmplaceBack(TestAllocator());
         REQUIRE(format && format.Value()->id.TryAssign("D3D12_SM6"));
         Array<uint8> original(TestAllocator());
         REQUIRE(ReadConfig("D3D12_SM6", original));
-        const char needle[] = "\"version\": 4";
-        const char* text = reinterpret_cast<const char*>(original.Data());
+        ShaderFormatDefinition current;
+        REQUIRE(ParseShaderFormatDefinition(original.View(), "D3D12_SM6", current));
+        constexpr usize NeedleBytes = 48;
+        char needle[NeedleBytes];
+        char raised[NeedleBytes];
+        const int needleLength = snprintf(needle, sizeof(needle),
+                                          "\"module\": \"ShaderFormatD3D\", "
+                                          "\"version\": %u",
+                                          static_cast<unsigned>(current.moduleVersion));
+        const int raisedLength = snprintf(raised, sizeof(raised),
+                                          "\"module\": \"ShaderFormatD3D\", "
+                                          "\"version\": %u",
+                                          static_cast<unsigned>(current.moduleVersion + 1));
+        REQUIRE(needleLength > 0 && raisedLength > 0);
+        const StringView text(reinterpret_cast<const char*>(original.Data()), original.Size());
         usize at = IndexNone;
-        for (usize index = 0; index + sizeof(needle) - 1 <= original.Size(); ++index) {
-            if (memcmp(text + index, needle, sizeof(needle) - 1) == 0) {
+        for (usize index = 0; index + static_cast<usize>(needleLength) <= text.ByteCount();
+             ++index) {
+            if (memcmp(text.Data() + index, needle, static_cast<usize>(needleLength)) == 0) {
                 at = index;
                 break;
             }
         }
 
         REQUIRE(at != IndexNone);
-        REQUIRE(format.Value()->bytes.TryAppend(original.View()));
-        format.Value()->bytes[at + sizeof(needle) - 2] = '5';
+        Array<uint8>& edited = format.Value()->bytes;
+        REQUIRE(edited.TryAppend(original.View().Slice(0, at)));
+        REQUIRE(edited.TryAppend(Span<const uint8>(reinterpret_cast<const uint8*>(raised),
+                                                   static_cast<usize>(raisedLength))));
+        REQUIRE(edited.TryAppend(
+            original.View().Slice(at + static_cast<usize>(needleLength),
+                                  original.Size() - at - static_cast<usize>(needleLength))));
         ShaderFormatDefinition definition;
-        REQUIRE(ParseShaderFormatDefinition(format.Value()->bytes.View(), "D3D12_SM6", definition));
-        REQUIRE(definition.moduleVersion == 5);
+        REQUIRE(ParseShaderFormatDefinition(edited.View(), "D3D12_SM6", definition));
+        REQUIRE(definition.moduleVersion == current.moduleVersion + 1);
         const ShaderFormatDefinition* pointers[] = {&definition};
         REQUIRE(MakeShaderWorkerHeader(pointers, builder.request.header));
         Array<uint8> bytes(TestAllocator());

@@ -8,6 +8,7 @@
 #include <Platform/Clock.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 #include <Platform/Sync.h>
 #include <Platform/SystemDialog.h>
 #include <Platform/Thread.h>
@@ -22,6 +23,8 @@ constexpr LogCategory LogSplash{"Splash"};
 // 스플래시 스레드 이름과 스택 크기다(설계 9.2절 — WIC·GDI 호출 여유).
 constexpr const char* SplashThreadName = "Splash";
 constexpr usize SplashThreadStackBytes = usize{256} * 1024;
+
+constexpr double NanosecondsPerSecond = 1'000'000'000.0;
 
 // 프로세스에 스플래시는 하나다(Show가 0 → 1, Hide가 1 → 0).
 platform::Atomic<uint32> SplashActive{0};
@@ -55,6 +58,10 @@ struct SplashScreen::Shared {
     bool threadStarted = false;
     bool hookInstalled = false;
     platform::Atomic<uint32> state{static_cast<uint32>(SplashState::Starting)};
+    // 창이 뜬 시각(스플래시 시계)이다. state를 Shown으로 바꾸기 전에 쓴다.
+    platform::Atomic<uint64> shownAt{0};
+    // 최소 표시 시간(나노초)이다.
+    uint64 minimumNanoseconds = 0;
     platform::Atomic<uint32> closeRequested{0};
     platform::Atomic<uint32> suspendRequested{0};
     // 호스트 스레드·다른 스레드의 SetText와 스플래시 스레드 사이의 칸 글자다.
@@ -141,6 +148,7 @@ void SplashScreen::Shared::Run(void* context) noexcept {
         return;
     }
 
+    shared.shownAt.Store<platform::MemoryOrder::Relaxed>(shared.Now());
     shared.state.Store<platform::MemoryOrder::Release>(static_cast<uint32>(SplashState::Shown));
     uint64 now = shared.Now();
     SplashModel model(now);
@@ -232,7 +240,9 @@ Result<SplashScreen> SplashScreen::ShowWith(Allocator& allocator, const SplashSh
         return Result<SplashScreen>::Failure(code);
     };
     if ((desc.engineDirectory.IsEmpty() && desc.configuredImage.IsEmpty()) ||
-        factory.create == nullptr) {
+        factory.create == nullptr ||
+        !platform::PlatformMath::IsFinite(desc.minimumDisplaySeconds) ||
+        desc.minimumDisplaySeconds < 0.0) {
         return fail(ErrorCode::InvalidArgument);
     }
 
@@ -299,6 +309,11 @@ Result<SplashScreen> SplashScreen::ShowWith(Allocator& allocator, const SplashSh
         shared.clockContext = desc.clockContext;
     }
 
+    const double minimumSeconds = desc.minimumDisplaySeconds > MaxSplashMinimumDisplaySeconds
+                                      ? MaxSplashMinimumDisplaySeconds
+                                      : desc.minimumDisplaySeconds;
+    shared.minimumNanoseconds = static_cast<uint64>(minimumSeconds * NanosecondsPerSecond);
+
     // 원천의 소유를 Shared로 옮긴다(이후 release는 Hide가 부른다).
     shared.source = source;
     source = {};
@@ -328,6 +343,27 @@ void SplashScreen::SetText(SplashTextSlot slot, StringView utf8) noexcept {
 
     shared_->StorePending(slot, utf8);
     shared_->presenter->Wake();
+}
+
+bool SplashScreen::CanHide() const noexcept {
+    if (shared_ == nullptr) {
+        return true;
+    }
+
+    switch (static_cast<SplashState>(shared_->state.Load<platform::MemoryOrder::Acquire>())) {
+    case SplashState::Starting:
+        return false;
+    case SplashState::Shown: {
+        const uint64 shownAt = shared_->shownAt.Load<platform::MemoryOrder::Relaxed>();
+        const uint64 now = shared_->Now();
+        return now >= shownAt && now - shownAt >= shared_->minimumNanoseconds;
+    }
+    case SplashState::Failed:
+    case SplashState::Hidden:
+        return true;
+    }
+
+    return true;
 }
 
 SplashState SplashScreen::State() const noexcept {

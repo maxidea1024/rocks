@@ -78,6 +78,10 @@ public:
     Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                            const QueryParams& params, TraceMode mode, HitResult* first,
                            Array<HitResult>* all) const noexcept override;
+    Result<bool> TraceShape(const Vec3d& start, const Vec3d& end, const Quatd& rotation,
+                            const CollisionShape& shape, const QueryFilter& filter,
+                            const QueryParams& params, TraceMode mode, HitResult* first,
+                            Array<HitResult>* all) const noexcept override;
 
     // 한 step(seconds초, collision step 1)을 진행한다. 오류: seconds가 양의 유한값이 아님
     // (InvalidArgument), Jolt 용량 초과(CapacityExceeded — step은 진행했고 경고 로그를 남긴다).
@@ -171,24 +175,41 @@ private:
 
     const BodySlot* FindSlot(PhysicsBodyHandle body) const noexcept;
 
-    // 질의 수집기가 모은 hit 하나다(7.1.7절). stops는 자르기 기준(막음 — ObjectTypes All은 거짓),
-    // reportBlocking은 결과의 blockingHit이다.
+    // 질의 수집기가 모은 hit 하나다(7.1.7·7.1.8절). stops는 자르기 기준(시작 겹침이 아닌 막음 —
+    // ObjectTypes All은 거짓), reportBlocking은 결과의 blockingHit이다. order는 First의 순서
+    // key(Jolt early-out fraction — 시작 겹침은 −깊이)다. shape hit는 접촉점·penetration
+    // axis·깊이를 더 쓴다.
     struct QueryHitRecord {
         float fraction = 0.0f;
+        float order = 0.0f;
         JPH::BodyID body;
         JPH::SubShapeID subShape;
         uint32 slot = 0;
         bool stops = false;
         bool reportBlocking = false;
+        bool initial = false;
+        JPH::RVec3 contact = JPH::RVec3::sZero();
+        JPH::Vec3 axis = JPH::Vec3::sZero();
+        float depth = 0.0f;
     };
 
     // 질의 Jolt 필터·수집기다(JoltPhysicsSceneQueries.cpp — 칸을 읽는다).
     class QueryBodyFilter;
     class RayHitCollector;
+    template <class CollectorBase>
+    class ShapeHitCollector;
 
-    // 모은 hit 하나를 HitResult로 바꾼다(UE ConvertQueryImpactHit — line).
+    // 모은 hit 하나를 HitResult로 바꾼다(UE ConvertQueryImpactHit — line, shape는 시작 겹침의
+    // ConvertOverlappedShapeToImpactHit 포함).
     HitResult MakeLineHit(const Vec3d& start, const Vec3d& end,
                           const QueryHitRecord& record) const noexcept;
+    HitResult MakeShapeHit(const Vec3d& start, const Vec3d& end, CollisionShapeKind queryKind,
+                           const QueryHitRecord& record) const noexcept;
+
+    // All이 모은 queryHits_를 자르고 정렬해 all 끝에 덧붙이고 비운다(4.5절). queryKind가 Line이면
+    // line hit로 바꾼다. 반환 값은 보고된 막는 hit가 있는지다. 오류: all 할당 실패.
+    Result<bool> FlushAllHits(const Vec3d& start, const Vec3d& end, CollisionShapeKind queryKind,
+                              Array<HitResult>& all) const noexcept;
 
     // 접점 쓰기가 step 밖인지 확인한다(3.2절 — step 안의 job thread가 응답 묶음 표·body를 읽는다,
     // 7.1.6절). step 안에서 부르면 Fatal이다.

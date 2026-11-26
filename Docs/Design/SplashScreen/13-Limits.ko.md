@@ -17,5 +17,6 @@
 | `kMaxSplashLineBytes` | 512 B | 한 줄 문구 |
 | `kMaxCustomSplashTexts` | 6 | UE `User1–6` |
 | `kSplashThreadStackBytes` | 256 KiB | WIC·GDI 호출 여유(UE 128 KiB 예약) |
+| 최소 표시 시간 기본·상한(`ui.splash.min_seconds`) | 2 s · 10 s | 사용자 요구(2초), 상한은 시작을 지나치게 늦추는 값을 막는다 |
 | `kStartupProfileBlend` | 0.5 | 지난 값과 새 값의 반반 |
 | `kStartupStepWeightFloor` | 0.02 | 단계 최소 몫 |

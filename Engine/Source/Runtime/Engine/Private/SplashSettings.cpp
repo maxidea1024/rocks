@@ -46,14 +46,20 @@ constinit BootCVar<String> SplashStudioCopyrightVar =
     cvar::Boot("ui.splash.studio.copyright", "")
         .Help("Copyright text of the Rocks Studio splash. Empty hides it.");
 
+constinit BootCVar<float> SplashMinimumSecondsVar =
+    cvar::Boot("ui.splash.min_seconds", 2.0f)
+        .Help("Minimum time in seconds the splash screen stays visible, even when startup finishes "
+              "sooner. 0 hands over to the main window as soon as it is ready.")
+        .Range(0.0f, 10.0f);
+
 } // namespace splash_settings_detail
 
 Result<void> RegisterSplashSettings(config::ConfigContext& context) noexcept {
     using namespace splash_settings_detail;
-    return context.Register(SplashEnabledVar, SplashGameImageVar, SplashGameShowTitleVar,
-                            SplashGameTitleVar, SplashGameShowProgressTextVar,
-                            SplashGameShowProgressBarVar, SplashGameCopyrightVar,
-                            SplashStudioImageVar, SplashStudioCopyrightVar);
+    return context.Register(
+        SplashEnabledVar, SplashGameImageVar, SplashGameShowTitleVar, SplashGameTitleVar,
+        SplashGameShowProgressTextVar, SplashGameShowProgressBarVar, SplashGameCopyrightVar,
+        SplashStudioImageVar, SplashStudioCopyrightVar, SplashMinimumSecondsVar);
 }
 
 SplashSettingValues ReadSplashSettings() noexcept {
@@ -68,6 +74,7 @@ SplashSettingValues ReadSplashSettings() noexcept {
     values.gameCopyright = SplashGameCopyrightVar.Get();
     values.studioImage = SplashStudioImageVar.Get();
     values.studioCopyright = SplashStudioCopyrightVar.Get();
+    values.minimumSeconds = SplashMinimumSecondsVar.Get();
     return values;
 }
 

@@ -22,6 +22,7 @@
 | `ui.splash.game.copyright` | String | "" | 게임 저작권 칸 글자. 비면 숨김 |
 | `ui.splash.studio.image` | String | "" | Studio 이미지 경로 |
 | `ui.splash.studio.copyright` | String | "" | Studio 저작권 칸 글자 |
+| `ui.splash.min_seconds` | float, 0–10 | 2.0 | 최소 표시 시간(초, 9.7절). 0이면 기다리지 않는다. 게임·Studio 공통 |
 
 ```json5
 // <Project>/Config/Engine.json
