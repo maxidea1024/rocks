@@ -232,3 +232,27 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 
 | 11 `InvalidCollisionData`·`UnsupportedCollisionShape` 등록·이름, 받지 않는 형상 경고 형식(4.8절 6), 4.6절 변환 | `Collision_DiagnosticNames`, `AssetPackage_DiagnosticNames` |
 
 Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 `Collision_`): 시험 8개 모두 통과. `SimpleCollision.cpp` 줄 375/375(100%), 분기 182/182(100%), 함수 27/27, `SimpleCollision.h` 줄 9/9. 측정 중 형상 종류별 템플릿 인스턴스마다 위치 판정 분기가 따로 세어져(구 등 일부 종류에서 회전 비유한을 만들 수 없는 조합) 위치·크기·길이 판정을 템플릿 밖 함수 하나(`CheckSized`)로 모았고, 점·index bulk 추가를 같은 자리에서 실패를 처리하는 반복으로 바꿨다(두 번째 entry 추가 실패는 bulk 원본의 용량이 미리 잡혀 있어 따로 닿지 않는다).
+
+### 12.7 요구 대조표(b 단계 — MA2b·MA4b·MA5b·MA6b·A2f4, MA7 검증 보고)
+
+시험 이름은 접두로 묶는다(파일마다 전부 — 이름은 각 시험 파일 머리 주석이 범위를 적는다).
+
+| 요구(절) | 시험 |
+|---|---|
+| StaticMesh 타입·UE 기본값·생성 LOD 판정·패키지 왕복(5.5.1절) | `StaticMesh_DefaultsMatchUe`·`StaticMesh_ReductionActive`·`StaticMesh_LodGenerated`·`StaticMesh_PackageRoundTripResaveIdentical`·`StaticMesh_ValidateReportsCollisionAndRenderFailures` |
+| 정적 메시 로드 검증(5.5.1절 9) | `StaticMeshValidation_*` 11개(배치·형식·UV·크기·범위·index·섹션·bounds·LOD 수·index 값·확장 bounds·이름) |
+| 정적 패킹(5.5.2절 1) | `StaticMeshPacking_*` 5개(기본 배치·고정밀·색·index 폭·빈 입력·결정성) |
+| 정적 쿠킹 처리기·너겟(5.5.2절) | `StaticMeshCook_*` 10개(쿠킹 패키지·프로파일 값·서버·GL 색·LOD 입력·실패·너겟·머리·자동 화면 크기·키와 경고) |
+| 정적 임포트 서비스(5.5.3절) | `StaticMeshImport_*` 5개(필드·새 임포트 교체·재임포트 보존·거부·bulk 원본 Load) |
+| 메시 컴포넌트(ER 30절 — D2b) | `MeshComponent_*` 7개 |
+| 스켈레톤 임포트·병합 저장(6.6절) | `SkeletonImport_*` 7개 |
+| 스킨 메시 타입·축소 판정·로드 검증(6.7.1절) | `SkeletalMesh_*` 4개(UE 기본값·축소 판정 `SkeletalMesh_ReductionCriteria`·생성 LOD·패키지 왕복), `SkeletalMeshValidation_*` 6개 |
+| 스킨 패킹(6.7.2절 1·7) | `SkinnedMeshPacking_*` 5개(기본·넓은 형식 256/257본·8/16비트·프로필과 morph·반올림 경계·머티리얼 맵·인자 오류·결정성) |
+| 스킨 쿠킹 처리기·너겟(6.7.2절) | `SkeletalMeshCook_*` 11개(쿠킹 패키지·inverse-bind·프로파일 값과 맵·서버·LOD 입력·실패·너겟·프로필과 morph·적중 거절·키·머리 손상·등록) |
+| 스킨 임포트 서비스·스켈레톤 세 경우(6.7.3절) | `SkeletalMeshImport_*` 9개(필드·기존 스켈레톤 참조와 EditAsset 병합·병합 뒤 검증·새 임포트 교체와 섹션·재임포트 본 변화·구성원 스켈레톤·병합 충돌·거부·재임포트 보존) |
+| 다른 에셋 고치기 `EditAsset`(AssetSystem 7.1절 20) | `AssetImport_EditAsset`·`AssetImport_EditAssetRejectsFiles`·`AssetImport_EditAssetAllocationFailures`, 명령 `edited` 줄은 `AssetImportCommand_Imports`(EngineTests의 명령 시험) |
+| 클립 Build 의존·쿠킹 처리기·쿠킹 로드 검증(7.6.1절) | `AnimationClipCook_*` 7개(쿠킹 패키지와 상수 접기·커브·프로파일 비율·경고와 서버·실패와 쓰기 실패 되돌림·스켈레톤 병합 뒤 재쿠킹과 Build hook·로드 검증 음성·등록), `Clip_CookedValidationRotation` |
+| 클립 임포트 서비스(7.6.2절) | `AnimationClipImport_*` 4개(필드와 경고 셋·거부·새 임포트 교체·재임포트 보존과 커브 남김) |
+| 제품 명령 연결(13.1절 1·2) | Rocks.Commandlet.Tests `asset-new mesh and clip types`·`asset-cook mesh and clip processors` |
+
+Coverage(2026-11-26, clang source-based — `Build/MeasureCoverage.ps1`, LLVM 22.1.8, 필터 `StaticMesh`·`SkeletalMesh`·`Skinned`·`Skeleton`·`AnimationClip`·`Clip_`·`MeshComponent`, 대상 MeshTools Private·AnimationTools Private·Mesh Private의 StaticMesh·SkeletalMesh·Animation Private — 스크립트는 디렉터리 접두만 받아 Animation은 디렉터리 전체를 쟀다): 모두 통과. 합계 줄 7084/7832(90.45%), 분기 3374/3939(85.66%), 함수 385/388(99.23%). 런타임 쪽은 거의 다 닿는다: Animation Clip 파일(`AnimationClip.cpp`·`ClipSource.cpp`·`ClipPlayback.cpp` — 쿠킹 로드 검증·bulk 원본 Load 포함) 줄 1005/1009, Skeleton·BoneHierarchy·SkeletonMerge 줄 615/615, `StaticMeshValidation.cpp` 45/47, `SkeletalMeshReductionSettings.cpp` 20/20. 빌드 단계(MeshLodBuild·MeshTangentBasis·MeshOverlappingCorners·MeshMikkTSpace·SkinnedMeshBuilder·StaticMeshBuilder)는 줄 99–100%, 쿠킹·임포트 파일은 줄 75–90%다(예: `SkeletalMeshCook.cpp` 486/627, `StaticMeshCook.cpp` 438/556, `AnimationClipCook.cpp` 126/166, `AnimationClipImport.cpp` 287/369). 닿지 않은 줄·분기의 사유는 (1) 할당 실패 경로(각 `TryPushBack`·`TryReserve` 실패 — 처리기·서비스는 실패 할당기 시험을 두지 않았다. 정적 메시·A2f4는 두었다), (2) Registry·문맥 오류(`Resolve`·`AcquireType`·`GetOuter` 실패, Name pool 없음 — 정상 장면에서 일어나지 않는 방어 분기), (3) required 너겟 캐시의 IO 실패(`IsRequired` 분기 — 원격 캐시 장면이 필요하다), (4) 머리 쓰기 상한(프로필·morph 65535개)이다. 첫 측정에서 드러난 시험 공백 하나(스킨 축소 판정의 Vertices·TrianglesOrVertices·Absolute* 기준과 열거 밖 값 — 그때 `SkeletalMeshReductionSettings.cpp` 줄 12/20)는 `SkeletalMesh_ReductionCriteria`로 채웠고 위 수치는 그 뒤 다시 잰 값이다. 할당 실패 시험(1)은 후속이다.

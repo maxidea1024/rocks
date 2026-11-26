@@ -9,7 +9,7 @@
 | `UE_MERGED_MODULES`(여러 모듈을 라이브러리 하나로) | 실험 기능이다. 지연 해제 방식만 3.7절에서 빌렸다 |
 | `PER_MODULE_BOILERPLATE`의 `operator new` 교체 | Rocks는 전역 `operator new`를 바꾸지 않는다([빌드 타깃](../BuildTargets/README.ko.md) BD29) |
 | `-ModulesBootstrap=`(경로 캐시 직렬화) | 폴더를 훑지 않으므로 필요 없다 |
-| 시작 화면·로딩 화면 단계(`PostSplashScreen`·`PreEarlyLoadingScreen`·`PreLoadingScreen`) | 대응하는 시작 흐름이 생기면 다시 본다 |
+| 시작 화면·로딩 화면 단계(`PostSplashScreen`·`PreEarlyLoadingScreen`·`PreLoadingScreen`) | OS 창 스플래시는 단계 없이 호스트가 띄운다([시작 화면](../SplashScreen/README.ko.md) SPD11). UI 툴킷 기반 사용자 정의 시작·로딩 화면을 설계할 때 다시 본다 |
 | `IsLoadedInCurrentConfiguration`(실행 중 host type 필터) | 빌드가 타깃에 들어갈 모듈을 이미 거른다([빌드 타깃](../BuildTargets/README.ko.md) BD4·BD25). manifest에 있는 모듈은 그 타깃에서 쓸 수 있다 |
 | 콘솔 명령 `Module Load/Unload/Reload` | 편집기 도구가 생기면 다시 본다 |
 

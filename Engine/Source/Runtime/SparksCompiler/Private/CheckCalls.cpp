@@ -53,13 +53,6 @@ bool TypeChecker::HasIncompleteMembers(uint32 type) const noexcept {
     return false;
 }
 
-ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 node) noexcept {
-    // 재귀 경로(`a.b.c ...`)의 frame에는 받는 값만 둔다(CheckBinary 참고).
-    const ExpressionValue receiver =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return MemberOf(context, node, receiver);
-}
-
 ExpressionValue TypeChecker::MemberOf(const CheckContext& context, uint32 node,
                                       const ExpressionValue& receiver) noexcept {
     // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
@@ -333,14 +326,6 @@ void TypeChecker::ReportStaleRead(const CheckContext& context, uint32 objectNode
                "object can be destroyed while the function waits.",
                fix.View());
     }
-}
-
-ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
-                                       uint32 expected) noexcept {
-    // 재귀 경로(`f().g().h() ...`)의 frame에는 부르는 값만 둔다(CheckBinary 참고).
-    const ExpressionValue callee =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return CallValue(context, node, expected, callee);
 }
 
 ExpressionValue TypeChecker::CallValue(const CheckContext& context, uint32 node, uint32 expected,
