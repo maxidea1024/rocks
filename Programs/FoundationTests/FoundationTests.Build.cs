@@ -138,6 +138,7 @@ public abstract class TestsModule : ModuleRules
         ["NodeGraphTools"] = ["ReflectionTestFixtures"],
         ["ObjectRuntime"] = ["CoreTypeBindings", "GcSoak", "ObjectSerialization", "ReflectionTestFixtures"],
         ["ObjectSerialization"] = ["CoreTypeBindings", "ReflectionTestFixtures"],
+        ["Physics"] = ["ConfigTestFixtures"],
         ["PlatformBase"] = ["Core"],
         ["ReflectionText"] = ["CoreTypeBindings", "ReflectionTestFixtures"],
         // The RenderBase tests also cover its integration with the engine (render settings through Config, GPU trace through TraceAnalysis, the
