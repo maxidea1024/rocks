@@ -93,7 +93,7 @@ public:
 // 엔진 프레임(11.8절 5): 프레임 밖(Run 전) LoadBlocking은 디스크에서 끝까지 로드해 lease를 준다.
 // 프레임 안(client Tick)에서는 IsInFrame이 참이고 LoadBlocking이 WrongContext이며, 상주 에셋의
 // 요청 callback은 다음 프레임의 World Tick 전 Pump에서 한 번 불린다. 쿠킹 루트·프로파일은 설정 값
-// 그대로다.
+// 그대로다. 에셋 객체 Registry는 엔진 이름 pool을 같이 쓴다(11.8절 4).
 TEST(EngineAssets_LoadsThroughEngineFrames) {
     DiskScene disk("frames");
     REQUIRE(disk.Write());
@@ -110,6 +110,7 @@ TEST(EngineAssets_LoadsThroughEngineFrames) {
     REQUIRE(assets != nullptr);
     CHECK(assets->CookedRoot() == disk.Root());
     CHECK(assets->RuntimeProfile() == "Windows");
+    CHECK(assets->Manager().Registry().Names() == &engine.Names());
     // 읽은 매니페스트를 그대로 노출한다(10.3절 8항 — 셰이더 쪽이 표를 읽는 곳).
     CHECK(assets->Manifest().profileId.View() == "Windows" &&
           !assets->Manifest().entries.IsEmpty());
