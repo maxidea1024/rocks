@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 27(초안) | 2026-11-27 | 6.11절 MS2d3 구현 세부: custom 출력 표(14종 — 이름·출력 수·기본값·빈도), 정점 진입점 둘(9·10), 하나만 규칙, MaterialCache 늦은 진단, RVT 범위 캐시, 표면이 주는 출력(노드 우선), 존재·속성 정의(IrDefine), 생성 함수 이름, 순환 검사 뿌리, 신경망 입출력·문맥 값, 입력 노드 |
 | 26(초안) | 2026-11-26 | 6.11절 MS2d2 구현 세부: 세 묶음(a BSDF·slab 내보내기, b 연산·허용 표·고전 preset 변환, c 도우미), 표지는 UE 셰이더 식 그대로 IR 값(상수면 접혀 shading model 하나), slab은 접을 때 두께·층 위치로 만든다, Hair·Eye·SLW 고전 칸, 내보내기 사슬·기본값 채움·기능 충돌 경고, 뿌리 Select는 내보낸 뒤 칸마다 선택, 동적 preset은 model 비교 Select, Hair·Eye·SLW 동적 후보는 막음(편차), ThinFilm은 IR로 펼침(ShaderFunction 연산 철회) |
 | 25(초안) | 2026-11-26 | 6.11절 MS2d 설계: 표면 기록 트리·IR `SurfaceRef`, 늘 closure 하나로 접기(UE Blendable parameter blending 식), 내보내기 대상은 고전 픽셀 속성(`subsurfaceColor` 추가 — MRD17)·UE 우선순위 사슬, shading model 집합 정의, 대표 노멀 진입점 `EvaluateMaterialNormal`과 넓힌 순환 검사, AO 활성 좁히기, 영역 표면, custom 출력 번호별 함수·존재 정의·정점 빈도, `SurfaceFromAttributes`는 MS2e로(15장), 7.3절 표 |
 | 24(초안) | 2026-11-26 | MS2c 리뷰 반영(6.10·9.4절): 가상 샘플 종류(꺼진 형식은 비가상 처리 함수), gather는 mip 없음·정점에서도 같음, AA 마스크 전용 TextureIsValid, 지연 진단(SceneTexture Color 검사 — 결과에 닿을 때만), 잘못된 enum 값 InvalidProperty, 같은 ParameterId 다른 종류 V8, 문맥 값 인자 텍스처 V1, mip·미분은 Float·Double만, 미분 폭 편차, 이름 없는 파라미터 샘플은 TextureSample 경로, ParticleSubUv 문구, 9.4 텍스처 slot 순서·layout 표 정정 |

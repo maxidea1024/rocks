@@ -77,4 +77,34 @@
 - **IR.** 진입점은 `IrEntry::CustomOutput`이고 slot은 "<이름><i>"(정적 원문 표)다. 정점 빈도 출력은 `IrEntry::CustomOutputVertex`(새)·이전 프레임은 정점 문맥 둘에서 번역한다. 번역 결과 `customOutputs`(이름 목록 — 8.3절 거르기)에 담는다.
 - 입력 노드처럼 보이는 VolumetricAdvancedInput·CloudSampleAttribute·VolumetricCloudEmptySpaceSkippingInput은 문맥 값(이미 표에 있다)을 읽는 lowering이다. NeuralNetworkInput·Output은 UE 신경망 후처리(`neural` 기능 — profile은 TODO MPQ-NeuralProfile, 19.9절)로 custom 출력 GetNeuralInput과 문맥 값이다. MaterialCacheOutput은 TODO(MPQ-VirtualTexture).
 
+**MS2d3 구현 세부.**
+- **출력 표.** custom 출력 노드는 정적 표 하나가 정한다(번역기와 생성 원문이 같이 쓴다). 칸: 노드 종류, Rocks 이름(UE `GetFunctionName`에서 `Get`을 뗀 것), 출력 수, 빈도, 출력 번호마다 입력 키·폭·기본값(없으면 "없음" — 연결이 없으면 그 번호의 함수를 내지 않는다)·필수 여부("Input missing").
+
+| 노드 | 이름 | 출력(번호: 입력 = 기본값) | 빈도 |
+|---|---|---|---|
+| `BentNormalOutput` | `BentNormal` | 0: Input(float3) 필수 | 픽셀 |
+| `ClearCoatNormalOutput` | `ClearCoatBottomNormal` | 0: Input(float3) 필수 | 픽셀 |
+| `TangentOutput` | `TangentOutput` | 0: Input(float3) 필수 | 픽셀 |
+| `ThinTranslucentOutput` | `ThinTranslucentMaterialOutput` | 0: TransmittanceColor = 0.5, 1: SurfaceCoverage = 1 | 픽셀 |
+| `AbsorptionMediumOutput` | `AbsorptionMediumMaterialOutput` | 0: TransmittanceColor = 1(float3) | 픽셀 |
+| `SubsurfaceMediumOutput` | `SubsurfaceMediumMaterialOutput` | 0: MeanFreePath 없음, 1: ScatteringDistribution 없음 | 픽셀 |
+| `SingleLayerWaterOutput` | `SingleLayerWaterMaterialOutput` | 0: ScatteringCoefficients = 0, 1: AbsorptionCoefficients = 0, 2: PhaseG = 0, 3: ColorScaleBehindWater = 1(float3) | 픽셀 |
+| `VolumetricAdvancedOutput` | `VolumetricAdvancedMaterialOutput` | 0–5: PhaseG·PhaseG2·PhaseBlend·MultiScatteringContribution·MultiScatteringOcclusion·MultiScatteringEccentricity(핀 기본값), 6: ConservativeDensity = (1, 1, 1)(float4로) | 픽셀 |
+| `VolumetricCloudEmptySpaceSkippingOutput` | `VolumetricCloudEmptySpaceSkippingOutput` | 0: ContainsMatter = 1 | 픽셀 |
+| `FirstPersonOutput` | `FirstPersonOutput` | 0: FirstPersonInterpolationAlpha(핀 기본값 1) | 정점·이전 프레임 |
+| `MotionVectorWorldOffsetOutput` | `MotionVectorWorldOffsetOutput` | 0: Input(float3) 없음 | 픽셀 |
+| `TemporalResponsivenessOutput` | `TemporalResponsivenessOutput` | 0: Input(float) 없음 | 픽셀 |
+| `RuntimeVirtualTextureOutput` | `VirtualTextureOutput` | 0: BaseColor = 0(float3), 1: Specular = 0.5, 2: Roughness = 0.5, 3: Normal = (0, 0, 1), 4: WorldHeight = 0, 5: Opacity = 1, 6: Mask = 1, 7: Displacement = 0, 8: Mask4 = 0(float4) | 픽셀 |
+| `NeuralNetworkInput` | `NeuralInput` | 0: Coordinates(아래), 1: Input0 = 0.5(float3), 2: Mask = 1 | 픽셀 |
+
+  기본값·폭은 UE Compile 값이다(MaterialExpressions.cpp:20262–23645, 3054–3129, 22466–22495). 값은 float4로 맞춘다(짧으면 0을 붙인다 — 7.3절 반환 타입). 입력 타입이 Numeric인 핀은 표의 폭으로 맞춘다.
+- **번역.** 출력 노드의 문맥 번역이 끝난 뒤 custom 출력 노드마다(비활성 노드는 건너뛴다) 그 입력에서 닿는 노드를 의존 후위 순서로 번역하고(출력 노드와 같은 계획 규칙), 번호마다 결과를 낸다. 진입점은 픽셀이면 `IrEntry::CustomOutput`, 정점이면 `IrEntry::CustomOutputVertex`(9)와 `IrEntry::CustomOutputVertexPrevious`(10 — 이전 정점 문맥에서 다시 번역, UE `NeedsPreviousFrameEvaluation`)다. slot은 "<이름><번호>"(표의 정적 원문)다. 같은 종류의 노드가 둘이면 둘째부터 그 노드 위치에 UnsupportedCapability "The material can contain only one <표시 이름> node"(UE HT:876–961)이고 번역하지 않는다. 출력 노드처럼 그래프의 뿌리이므로 `MaterialCacheOutput`(TODO `MPQ-VirtualTexture`)은 있으면 그 노드 위치에 PrerequisiteMissing을 낸다(Pending 자리 값이 결과에 닿는 길이 없다).
+- **RVT 범위.** `RuntimeVirtualTextureOutput`의 입력은 RVT 범위에서 번역한다: 픽셀 문맥이지만 노드 결과 캐시를 따로 둔다(UE `PushRuntimeVirtualTextureOutput` — 같은 노드가 범위 안팎에서 다른 값을 낸다). 범위 안에서 `RuntimeVirtualTexturePassSwitch`는 VirtualTextureOutput 입력, `RuntimeVirtualTextureCustomData`는 문맥 값이다(밖은 Default·0 — 6.9절 그대로).
+- **표면이 주는 출력.** 그 종류의 노드가 없으면 뿌리 표면이 준다(UE 고전 변환이 같은 함수를 쓴다 — 노드가 있으면 노드가 이긴다, UE `CompileMaterialAttributesCustomOutputs`의 노드 우선): 고전 preset의 ClearCoatNormal(연결된 때)·SimpleClearCoat BottomNormal·Eye IrisNormal → `ClearCoatBottomNormal`, 고전 preset의 CustomTangent(연결된 때) → `TangentOutput`, ThinTranslucent shading model 고전 preset의 TransmittanceColor·ThinTranslucentSurfaceCoverage와 slab IsThin(T = exp(−0.01/max(ε, MFP)), coverage 1) → `ThinTranslucentMaterialOutput`, SingleLayerWater shading model 고전 preset의 물 계수와 SingleLayerWater BSDF(Scattering = WaterAlbedo·WaterExtinction, Absorption = WaterExtinction − Scattering, PhaseG, ColorScaleBehindWater) → `SingleLayerWaterMaterialOutput`. 연산 아래의 추가 칸은 버린다(접은 closure 하나 — UE Blendable도 haziness 아래 노멀 하나만 남는다). 노멀·tangent 출력은 노드든 표면이든 입력 원값(머티리얼 노멀 공간 — `tangentSpaceNormal`이면 tangent 공간)이다(UE처럼 소비자가 `MATERIAL_TANGENTSPACENORMAL`을 보고 바꾼다 — MT:4913–4925).
+- **정의.** 생성 원문은 출력 종류마다 `#define MATERIAL_CUSTOM_OUTPUT_<NAME> <출력 수>`(NAME은 이름의 대문자 — UE `NUM_MATERIAL_OUTPUTS_`)와 결과가 있는 번호마다 `#define MATERIAL_HAS_CUSTOM_OUTPUT_<NAME><i> 1`(UE `HAVE_`)을 낸다. 노드 속성이 정하는 정의는 IR 모듈의 정의 목록(`IrDefine` — 이름·값, IR hash에 넣는다)으로 낸다: VolumetricAdvancedOutput → `MATERIAL_VOLUMETRIC_ADVANCED` 1, `…_PHASE_PERSAMPLE`(perSamplePhaseEvaluation ∧ PhaseG·PhaseG2·PhaseBlend 중 연결) 또는 `…_PHASE_PERPIXEL`, `…_GRAYSCALE_MATERIAL`·`…_RAYMARCH_VOLUME_SHADOW`·`…_CLAMP_MULTISCATTERING_CONTRIBUTION`·`…_MULTISCATTERING_OCTAVE_COUNT`·`…_CONSERVATIVE_DENSITY`(입력 연결)·`…_OVERRIDE_AMBIENT_OCCLUSION`(출력 AO 연결 또는 표면 AO)·`…_GROUND_CONTRIBUTION`(UE HT:2542–2561, 14965–14985), VolumetricCloudEmptySpaceSkippingOutput → `MATERIAL_VOLUMETRIC_CLOUD_EMPTY_SPACE_SKIPPING_OUTPUT` 1. 번역 결과 `MaterialTranslation.customOutputs`는 결과가 있는 출력 이름(표 순서)이다(8.3절 거르기).
+- **생성 함수.** 픽셀: `float4 EvaluateMaterialCustomOutput_<이름><i>(in MaterialInputs c)`, 정점: `float4 EvaluateMaterialCustomOutput_<이름><i>(in MaterialVertexInputs c)`와 `float4 EvaluateMaterialCustomOutputPrevious_<이름><i>(in MaterialVertexInputs c)`다. 결과가 있는 번호만 낸다(7.3절 예외 — pass는 존재 정의로 고른다).
+- **순환 검사.** `ClearCoatBottomNormal`·`TangentOutput`·`BentNormal` 결과도 대표 노멀 순환 검사 뿌리다(19.3.3절).
+- **신경망.** `NeuralNetworkInput`의 Coordinates는 연결되면 그 값(TextureIndex면 −1과 뒤 세 성분 — UE `AppendVector(-1, yzw)`), 아니면 (TextureIndex면 −1, 아니면 0, 0, ViewportUv)다. `NeuralNetworkOutput`은 문맥 값 `NeuralTextureOutput(uv)`(TextureIndex — Coordinates 없으면 ViewportUv)·`NeuralBufferOutput(index)`(BufferIndex — 없으면 (0, 0, ViewportUv))이고 PostProcess 영역이 아니면 V6 "NNE Output Node are only available on post process material."(UE HT:12770–12806)다. 문맥 값 둘은 표 끝에 더한다(기능 `neural`).
+- **입력 노드.** `VolumetricAdvancedInput`은 VolumeSampleConservativeDensity(0: float3로, 1: 그대로), `CloudSampleAttribute`는 CloudSample 넷, `VolumetricCloudEmptySpaceSkippingInput`은 CloudEmptySpaceSkipping 둘을 낸다(UE ExternalCode 노드).
+
 **편차·한계(요약).** UI 표면의 Modulate·AlphaHoldout 변형은 pass 블렌드가 맡는다. Vertical의 위층 albedo는 ALU 근사다(UE 데스크톱은 4D LUT). Select tangent 결함은 고친다. MFP만 있는 SSS(Diffusion)는 UE Blendable처럼 DefaultLit이다. slab IsThin은 ThinTranslucent로 낸다(UE Blendable DefaultLit). 대표 노멀 순환 규칙은 UE보다 넓다.
