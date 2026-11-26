@@ -33,7 +33,9 @@
   - `GraphSharedData`(7.3절)는 넣지 않았다.
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
-- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 그래프 attachment resolve와 그래프 구간 `GraphScope`·번호 trace 표지는 개정 28에서 넣었다(아래 "RG1 남은 것 설계 2"). attachment 기록·렌더 타깃 없는 기록·풀 desc 확장·`GraphTextureView`·`GraphSharedData`·`SceneTextureTable`(`GraphViewTable`)은 개정 26에서 넣었다(아래 "구현(2026-11-19, RG1 남은 것 A–C부)"). export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+- 남은 것(RG1): 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 그래프 attachment resolve와 그래프 구간 `GraphScope`·번호 trace 표지는 개정 28에서 넣었다(아래 "RG1 남은 것 설계 2"). attachment 기록·렌더 타깃 없는 기록·풀 desc 확장·`GraphTextureView`·`GraphSharedData`·`SceneTextureTable`(`GraphViewTable`)은 개정 26에서 넣었다(아래 "구현(2026-11-19, RG1 남은 것 A–C부)"). export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+
+**파라미터 구조체 수집기(개정 57, 셰이더 시스템 16.2절 SH3c).** 구현했다: `CollectGraphPassAccesses`가 생성 파라미터 구조체의 그래프 멤버를 훑어 명시 선언 builder와 같은 접근 목록을 만들고, 구조체 판 `AddPass`가 그 목록으로 `AddPassWithAccesses`를 부른다(UE `SetupPassResources`). 셰이더가 쓰지 않는 멤버는 자원 지도로 거른다(9.6절). 완료 기준 동치 시험 `RenderGraph_ParameterStructCollectorMatchesExplicitAccesses`(두 경로의 기록 장치 명령 열 동일).
 
 **RG1 남은 것 설계(개정 26).** SH2·RB4·P7·CP4에 기대지 않는 부분을 세 부분으로 나눠 넣는다. 파라미터 구조체 수집기(RB4·SH2·P7)·그래프 설정 변수(CP4)·캡처 도구 수동 기록은 그대로 남는다.
 - **A부: attachment 기록과 풀 desc 확장.**
