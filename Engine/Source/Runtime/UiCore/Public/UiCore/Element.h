@@ -128,6 +128,17 @@ public:
     virtual AccessibleRole GetAccessibleRole() const noexcept;
     virtual StringView DefaultAccessibleText() const noexcept;
 
+    // 팝업 허용 영역 공급자다(Docs/Design/UiToolkit 9.1절 UW7d — 시스템 규칙). 창 좌표 지점을 받아
+    // 그 지점이 놓인 모니터의 작업 영역을 창 좌표로 area에 쓰고 true를 돌려준다(모르면 false).
+    // 창 호스트가 Application::SetPopupWorkArea로 등록하면 Application이 루트에 단다. 팝업
+    // 호스트(Overlay)는 팝업 층마다 앵커 지점으로 물어 층을 그 영역 안에 놓는다.
+    using PopupWorkArea = Delegate<bool(Vec2 window, Box2<float>& area)>;
+    // 이 요소에 공급자를 단다(빈 포인터면 뗀다). 공급자는 여러 루트가 나눠 쓸 수 있게 공유한다.
+    Result<void> SetPopupWorkArea(const SharedPtr<PopupWorkArea>& provider) noexcept;
+    const SharedPtr<PopupWorkArea>& GetPopupWorkArea() const noexcept;
+    // 자신부터 조상으로 올라가 가장 가까운 공급자에게 묻는다. 공급자가 없거나 모르면 false다.
+    bool QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept;
+
     using ToolTipFactory = Delegate<Result<SharedPtr<Element>>()>;
     Result<void> SetToolTipFactory(ToolTipFactory&& factory, StringView description = {},
                                    bool interactive = false) noexcept;

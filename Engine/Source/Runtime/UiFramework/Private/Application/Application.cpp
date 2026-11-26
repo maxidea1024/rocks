@@ -72,6 +72,38 @@ void Application::SetRoot(const SharedPtr<Element>& root) noexcept {
     root_ = root;
     cache_.Reset();
     hitGrid_.Reset();
+    ApplyPopupWorkArea();
+}
+
+Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept {
+    SharedPtr<Element::PopupWorkArea> shared;
+    if (provider.IsBound()) {
+        auto made = SharedPtr<Element::PopupWorkArea>::TryMake(allocator_, Move(provider));
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        shared = Move(made.Value());
+    }
+
+    popupWorkArea_ = Move(shared);
+    if (root_) {
+        auto applied = root_->SetPopupWorkArea(popupWorkArea_);
+        if (!applied) {
+            return applied;
+        }
+
+        root_->InvalidateArrangement();
+    }
+
+    return Result<void>::Success();
+}
+
+void Application::ApplyPopupWorkArea() noexcept {
+    if (root_ && popupWorkArea_) {
+        // 실패(메모리 부족)하면 팝업이 창 경계만 지킨다 — 화면 밖에 걸칠 수는 있어도 동작은 한다.
+        (void)root_->SetPopupWorkArea(popupWorkArea_);
+    }
 }
 
 namespace {

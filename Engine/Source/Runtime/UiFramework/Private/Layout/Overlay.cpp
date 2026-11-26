@@ -131,13 +131,56 @@ Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
             continue;
         }
 
-        auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
+        auto arranged = child->ArrangeIfNeeded(PopupLayerGeometry(*child));
         if (!arranged) {
             return arranged;
         }
     }
 
     return Result<void>::Success();
+}
+
+Geometry Overlay::PopupLayerGeometry(const Element& child) const noexcept {
+    // 팝업 층이 아니거나 허용 영역을 모르면 Overlay 전체다.
+    const Geometry& host = GetGeometry();
+    const Geometry whole = host.MakeChild(host.size, {}, {}, {});
+    SharedPtr<Element> anchor;
+    for (const OpenPopup& popup : popups_) {
+        if (popup.layer == &child) {
+            anchor = popup.anchor.Lock();
+            break;
+        }
+    }
+
+    if (!anchor) {
+        return whole;
+    }
+
+    auto anchorBounds = anchor->GetGeometry().WindowBounds();
+    auto hostBounds = host.WindowBounds();
+    Box2<float> work;
+    AffineTransform2D inverse;
+    if (!anchorBounds || !hostBounds || !host.render.TryInverse(inverse) ||
+        !QueryPopupWorkArea((anchorBounds.Value().min + anchorBounds.Value().max) * 0.5f, work)) {
+        return whole;
+    }
+
+    // 시스템 규칙(Docs/Design/UiToolkit 9.1절 UW7d): 층은 Overlay ∩ 허용 영역이다. 층은 내용을
+    // 자기 경계 안에 놓고(뒤집기·밀어 넣기) 자르므로 어떤 팝업도 모니터 작업 영역을 넘지 않는다.
+    const Vec2 low{math::Max(work.min.x, hostBounds.Value().min.x),
+                   math::Max(work.min.y, hostBounds.Value().min.y)};
+    const Vec2 high{math::Min(work.max.x, hostBounds.Value().max.x),
+                    math::Min(work.max.y, hostBounds.Value().max.y)};
+    if (!(high.x > low.x && high.y > low.y)) {
+        return whole;
+    }
+
+    // 창 좌표 → Overlay 로컬(팝업 호스트는 회전하지 않는다 — 축 정렬 가정).
+    const Vec2 localLow = inverse.Apply(low);
+    const Vec2 localHigh = inverse.Apply(high);
+    const Vec2 origin{math::Min(localLow.x, localHigh.x), math::Min(localLow.y, localHigh.y)};
+    const Vec2 size{math::Abs(localHigh.x - localLow.x), math::Abs(localHigh.y - localLow.y)};
+    return host.MakeChild(size, {1, 0, 0, 1, origin.x, origin.y}, {}, {});
 }
 
 } // namespace rocks::ui

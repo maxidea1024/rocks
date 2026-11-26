@@ -495,6 +495,33 @@ public:
         return Result<IntVec2>::Success({static_cast<int32>(p.x), static_cast<int32>(p.y)});
     }
 
+    Result<IntRect> WorkAreaAt(IntVec2 clientPoint) const noexcept override {
+        POINT p{clientPoint.x, clientPoint.y};
+        if (!::ClientToScreen(window_, &p)) {
+            return Result<IntRect>::Failure(ErrorCode::DependencyFailed);
+        }
+
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        const HMONITOR monitor = ::MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+        if (monitor == nullptr || !::GetMonitorInfoW(monitor, &info)) {
+            return Result<IntRect>::Failure(ErrorCode::DependencyFailed);
+        }
+
+        // 전체 화면 창은 작업 표시줄을 덮으므로 모니터 전체가 팝업 영역이다.
+        RECT area = IsFullscreen() ? info.rcMonitor : info.rcWork;
+        POINT corners[2] = {{area.left, area.top}, {area.right, area.bottom}};
+        // 창이 화면 원점에 있으면 정상 결과도 0이므로 오류 코드로 구분한다.
+        ::SetLastError(0);
+        if (::MapWindowPoints(nullptr, window_, corners, 2) == 0 && ::GetLastError() != 0) {
+            return Result<IntRect>::Failure(ErrorCode::DependencyFailed);
+        }
+
+        return Result<IntRect>::Success(
+            IntRect{{static_cast<int32>(corners[0].x), static_cast<int32>(corners[0].y)},
+                    {static_cast<int32>(corners[1].x), static_cast<int32>(corners[1].y)}});
+    }
+
     Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept override {
         POINT p{point.x, point.y};
         if (!::ScreenToClient(window_, &p)) {

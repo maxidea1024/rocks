@@ -62,6 +62,10 @@ Result<IntVec2> Window::DesktopToClient(IntVec2) const noexcept {
     return Result<IntVec2>::Failure(ErrorCode::Unsupported);
 }
 
+Result<IntRect> Window::WorkAreaAt(IntVec2) const noexcept {
+    return Result<IntRect>::Failure(ErrorCode::Unsupported);
+}
+
 bool Window::IsAtDesktopPoint(IntVec2) const noexcept {
     return false;
 }

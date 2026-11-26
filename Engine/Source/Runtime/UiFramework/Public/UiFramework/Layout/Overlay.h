@@ -23,6 +23,9 @@ private:
     bool StartsPaintLayer(usize previous, usize next) const noexcept override;
 
     void OnDescendantDetached(const Element& subtree) noexcept override;
+    // 자식 배치 영역이다. 품은 팝업 층이면 Overlay ∩ 앵커 지점의 팝업 허용 영역(UW7d), 아니면
+    // Overlay 전체다.
+    Geometry PopupLayerGeometry(const Element& child) const noexcept;
     struct OpenPopup {
         WeakPtr<Element> anchor;
         Element* layer;

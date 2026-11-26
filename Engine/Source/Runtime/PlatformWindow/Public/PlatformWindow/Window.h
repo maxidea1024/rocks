@@ -3,6 +3,7 @@
 #include <Core/Delegate.h>
 #include <Core/Diagnostics/LogCategory.h>
 #include <Core/Math/IntVector.h>
+#include <Core/Math/Rect.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputEvent.h>
@@ -177,6 +178,11 @@ public:
     virtual Result<IntVec2> ClientToDesktop(IntVec2 point) const noexcept;
     virtual Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept;
     virtual bool IsAtDesktopPoint(IntVec2 point) const noexcept;
+    // client 지점이 놓인(가장 가까운) 모니터에서 팝업이 쓸 수 있는 영역을 client 좌표로 돌려준다:
+    // 작업 영역(작업 표시줄 제외), 이 창이 전체 화면이면 모니터 전체(UE GetWorkArea — 팝업 위치
+    // 계산, Docs/Design/UiToolkit 9.1절 UW7d). 창 backend가 없으면 Unsupported, OS 실패는
+    // DependencyFailed다.
+    virtual Result<IntRect> WorkAreaAt(IntVec2 clientPoint) const noexcept;
 
     // 창 동작이다(직접 그린 창 버튼이 부른다). Minimize는 작업 표시줄로 내리고, ToggleMaximize는
     // 최대화와 복원을 바꾸며, RequestClose는 OS 닫기 요청(WM_CLOSE)을 보내 IsCloseRequested 경로를

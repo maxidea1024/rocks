@@ -38,6 +38,26 @@ DockWindows::Surface::Surface(Allocator& allocator, graphics::Device& graphicsDe
       buffers(device, ActiveShaders(), batch),
       surfaces(allocator, device, ActiveShaders(), textures) {
     app.SetRoot(area);
+    // 팝업(메뉴·툴팁·콤보)은 그 앵커가 놓인 모니터의 작업 영역 안에만 놓인다(UW7d). UI 좌표는
+    // client 픽셀과 같다. 등록에 실패하면 팝업이 창 경계만 지킨다.
+    (void)app.SetPopupWorkArea(
+        Element::PopupWorkArea::CreateLambda([this](Vec2 point, Box2<float>& area) noexcept {
+            IntVec2 client;
+            if (!math::TryTruncToInt32(point.x, client.x) ||
+                !math::TryTruncToInt32(point.y, client.y)) {
+                return false;
+            }
+
+            auto work = window->WorkAreaAt(client);
+            if (!work) {
+                return false;
+            }
+
+            const IntRect rect = work.Value();
+            area = {{static_cast<float>(rect.min.x), static_cast<float>(rect.min.y)},
+                    {static_cast<float>(rect.max.x), static_cast<float>(rect.max.y)}};
+            return true;
+        }));
     window->SetRegionHitTest(
         platform::Window::RegionHitTest::CreateLambda([this](IntVec2 point) noexcept {
             return app.QueryWindowRegion(

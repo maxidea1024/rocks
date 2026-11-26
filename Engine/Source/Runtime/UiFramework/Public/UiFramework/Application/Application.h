@@ -28,6 +28,11 @@ public:
     // 창이 먼저 소멸할 수 있는 나중 작업은 이 토큰을 잠근 뒤 Application을 사용한다.
     Result<WeakPtr<Application*>> WeakContext() noexcept;
     void SetRoot(const SharedPtr<Element>& root) noexcept;
+    // 팝업 허용 영역 공급자를 등록한다(Docs/Design/UiToolkit 9.1절 UW7d — 메뉴·하위 메뉴·콤보·툴팁
+    // 등 모든 팝업이 모니터 작업 영역을 넘지 않는 시스템 규칙). 창 호스트가 한 번 부른다(보통
+    // platform::Window::WorkAreaAt을 잇는다). Application은 지금과 이후의 루트(툴팁 임시 호스트
+    // 포함)에 단다. 빈 delegate면 뗀다(팝업은 창 경계만 지킨다).
+    Result<void> SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept;
 
     // 위젯 스타일 색을 풀 테마다(UW3b — 기본은 UE 다크 테마). 바꾸면 그리기 캐시를 모두 다시
     // 만든다. BuildPaintList에 넘긴 목록은 이 Application의 테마를 빌린다.
@@ -241,6 +246,9 @@ private:
     void AdvanceToolTips() noexcept;
     Result<void> AttachToolTip(const PopupRequest& popup) noexcept;
     WeakPtr<Element> toolTipHost_;
+    SharedPtr<Element::PopupWorkArea> popupWorkArea_;
+    // 지금 루트에 공급자를 단다. 할당에 실패하면 팝업이 창 경계만 지키는 것으로 물러난다.
+    void ApplyPopupWorkArea() noexcept;
     usize FindToolTip(uint32 user) const noexcept;
     double ToolTipTime() const noexcept;
     Array<ToolTipState> toolTips_;

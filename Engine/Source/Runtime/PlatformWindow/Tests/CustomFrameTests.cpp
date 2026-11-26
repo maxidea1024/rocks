@@ -134,6 +134,30 @@ TEST(PlatformWindow_CustomFrameCloseRequestAndSystemFrameZones) {
     system.Value()->SetRegionHitTest({});
 }
 
+TEST(PlatformWindow_WorkAreaAtReturnsMonitorWorkAreaInClientSpace) {
+    SystemAllocator allocator;
+    auto window = Window::Create(
+        allocator,
+        {.title = "WorkArea", .width = FrameWidth, .height = FrameHeight, .visible = false});
+    if (!window) {
+        // 창 backend가 없는 플랫폼이다.
+        CHECK(window.Error() == ErrorCode::Unsupported);
+        return;
+    }
+
+    // 팝업 허용 영역(UW7d): 창 client 지점이 놓인 모니터의 작업 영역이다. 비어 있지 않고, 창이
+    // 그 모니터 위에 있으므로 client 원점 둘레를 덮는다.
+    auto area = window.Value()->WorkAreaAt({0, 0});
+    REQUIRE(area);
+    CHECK(!area.Value().IsEmpty());
+    auto desktop = window.Value()->ClientToDesktop({0, 0});
+    REQUIRE(desktop);
+    // 같은 지점을 두 번 물으면 같은 답이다(창을 움직이지 않았다).
+    auto again = window.Value()->WorkAreaAt({1, 1});
+    REQUIRE(again);
+    CHECK(again.Value() == area.Value());
+}
+
 TEST(PlatformWindow_CustomFrameRejectedOnUnsupportedPlatforms) {
     if (Window::SupportsFrame(WindowFrame::Custom)) {
         return;

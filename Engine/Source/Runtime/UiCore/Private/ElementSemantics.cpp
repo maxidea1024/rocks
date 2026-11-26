@@ -17,7 +17,42 @@ public:
     bool interactive = false;
     uint64 tipRevision = 0;
     SharedPtr<Element::ToolTipFactory> tip;
+    SharedPtr<Element::PopupWorkArea> popupWorkArea;
 };
+
+namespace {
+
+const SharedPtr<Element::PopupWorkArea> NoPopupWorkArea{};
+
+} // namespace
+
+Result<void> Element::SetPopupWorkArea(const SharedPtr<PopupWorkArea>& provider) noexcept {
+    if (!semantics_ && !provider) {
+        return Result<void>::Success();
+    }
+
+    auto ready = EnsureSemantics();
+    if (ready) {
+        semantics_->popupWorkArea = provider;
+    }
+
+    return ready;
+}
+
+const SharedPtr<Element::PopupWorkArea>& Element::GetPopupWorkArea() const noexcept {
+    return semantics_ ? semantics_->popupWorkArea : NoPopupWorkArea;
+}
+
+bool Element::QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept {
+    for (const Element* current = this; current; current = current->parent_) {
+        const auto& provider = current->GetPopupWorkArea();
+        if (provider && provider->IsBound()) {
+            return provider->Execute(window, area);
+        }
+    }
+
+    return false;
+}
 
 Result<void> Element::EnsureSemantics() noexcept {
     if (!semantics_) {
