@@ -231,7 +231,7 @@ TEST(Codec_UndeclaredEnumsReportAndReplace) {
         ObjectGraphLoadOptions options;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
                               options)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         options.policy.undeclaredEnum = UndeclaredEnumPolicy::ReportAndDefault;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
                               options)
@@ -315,7 +315,7 @@ TEST(Codec_UnknownFieldsReportOrReject) {
         options.policy.unknownField = UnknownFieldPolicy::Reject;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
                               options)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
 
@@ -359,7 +359,7 @@ TEST(Codec_EditorOnlyFieldIdsWithoutEditorData) {
                     CHECK(hooks.diagnostics[index].kind != FieldDiagnosticKind::UnknownField);
                 }
             } else {
-                CHECK(loaded.Error() == ErrorCode::InvalidArgument);
+                CHECK(loaded.Error() == ErrorCode::CorruptData);
             }
         }
 
@@ -540,7 +540,7 @@ TEST(Codec_ExcludedFlagsOnSaveAndCookedLoad) {
             REQUIRE(editor);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   editor.Value().View(), loadOptions)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
 #endif
             CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
         }
@@ -1086,7 +1086,7 @@ TEST(Codec_UnknownFieldRejectWinsOverNewerVersionSkipping) {
         options.hooks = &hooks;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
                               options)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         CHECK(target.Stats().liveObjects == 0);
         REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
@@ -1189,7 +1189,7 @@ TEST(Codec_WideRegisteredEnumIsCheckedAndCharged) {
         auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
         CHECK(LoadObjectGraph(allocator, wide, wideTypes, wide.OwnerAccess(), graph.Value().View())
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         CHECK(wide.Stats().liveObjects == 0);
 
         // 선언된 값(7)이면 둘 다 복원되고, 넓은 쪽이 열거자 차이의 두 배 이상을 더 쓴다.

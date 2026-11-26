@@ -2,6 +2,7 @@
 
 #include <Base/PlacementNew.h>
 #include <Core/Memory/Allocator.h>
+#include <Meta/GeneratedType.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
@@ -62,6 +63,96 @@ private:
     const RuntimeFunctionOps* ops_;
 };
 
+// 호출 frame 칸 하나의 서술이다: 생성 ParameterSchema와 같은 값 형식(value·element·key — 대상
+// TypeId 포함, rocks::Object 대상은 Guid{}), ParameterFlags 중 형식을 가르는 것(ObjectHandle), 칸
+// C++ 형식의 크기·정렬, frame 안 offset. 실행 이미지마다 다른 NativeTypeKey를 쓰지 않으므로
+// Modular 빌드의 모듈 사이 바인딩에서도 같다.
+struct FrameSlotLayout {
+    ValueType value{};
+    ValueType element{};
+    ValueType key{};
+    uint32 flags = 0;
+    uint32 size = 0;
+    uint32 alignment = 0;
+    uint32 offset = 0;
+};
+
+namespace detail {
+
+// 바인딩 인자 형식의 frame 칸 형식이다(const T&는 T — 생성 frame과 같다).
+template <class T>
+using BindingSlotType = RemoveCvT<RemoveReferenceT<T>>;
+
+// 참조 대상의 schema TypeId다(rocks::Object 대상은 Guid{} — 생성 schema와 같다).
+template <class Target>
+constexpr TypeId BindingTargetIdOf() noexcept {
+    if constexpr (IsSameV<Target, Object>) {
+        return TypeId{};
+    } else {
+        return TypeIdOf<Target>();
+    }
+}
+
+// 단일 값 형식 T(컨테이너 아님)의 ValueType이다.
+template <class T>
+constexpr ValueType BindingValueTypeOf() noexcept {
+    if constexpr (IsSameV<T, ObjectHandle>) {
+        return ValueType{ValueKind::WeakObjectReference, TypeId{}};
+    } else if constexpr (WeakReferenceField<T>::Supported) {
+        return ValueType{ValueKind::WeakObjectReference,
+                         BindingTargetIdOf<typename WeakReferenceField<T>::Target>()};
+    } else if constexpr (SoftReferenceField<T>::Supported) {
+        return ValueType{ValueKind::SoftObjectReference,
+                         BindingTargetIdOf<typename SoftReferenceField<T>::Target>()};
+    } else if constexpr (ClassReferenceField<T>::Supported) {
+        return ValueType{ValueKind::ClassReference,
+                         BindingTargetIdOf<typename ClassReferenceField<T>::Target>()};
+    } else if constexpr (FieldValueKind<T>() == ValueKind::Enum ||
+                         FieldValueKind<T>() == ValueKind::Struct) {
+        return ValueType{FieldValueKind<T>(), TypeIdOf<T>()};
+    } else {
+        return ValueType{FieldValueKind<T>(), TypeId{}};
+    }
+}
+
+// frame 칸 형식 T의 서술이다(offset 제외 — 생성 SlotSchema와 같은 value·element·key 규칙).
+template <class T>
+constexpr FrameSlotLayout BindingSlotLayoutOf() noexcept {
+    FrameSlotLayout slot;
+    if constexpr (ArrayField<T>::Supported) {
+        slot.value = ValueType{ValueKind::Array, TypeId{}};
+        slot.element = BindingValueTypeOf<typename ArrayField<T>::Element>();
+    } else if constexpr (OptionalField<T>::Supported) {
+        slot.value = ValueType{ValueKind::Optional, TypeId{}};
+        slot.element = BindingValueTypeOf<typename OptionalField<T>::Inner>();
+    } else if constexpr (MapField<T>::Supported) {
+        if constexpr (MapField<T>::IsSet) {
+            slot.value = ValueType{ValueKind::Set, TypeId{}};
+            slot.element = BindingValueTypeOf<typename MapField<T>::Key>();
+        } else {
+            slot.value = ValueType{ValueKind::Map, TypeId{}};
+            slot.element = BindingValueTypeOf<typename MapField<T>::Value>();
+            slot.key = BindingValueTypeOf<typename MapField<T>::Key>();
+        }
+    } else {
+        slot.value = BindingValueTypeOf<T>();
+    }
+
+    slot.flags = IsSameV<T, ObjectHandle> ? static_cast<uint32>(ParameterFlags::ObjectHandle) : 0u;
+    // 칸 FrameSlot<T>의 크기·정렬은 T와 같다(정렬된 byte 저장소).
+    slot.size = static_cast<uint32>(sizeof(T));
+    slot.alignment = static_cast<uint32>(alignof(T));
+    return slot;
+}
+
+// 칸 서술이 같은지다(offset 제외 — 값 형식 value·element·key, 형식 flag, 값 ops 크기·정렬). 실행
+// 이미지마다 다른 NativeTypeKey를 쓰지 않는다(Docs/Design/EventReflection.ko.md ED5).
+ROCKS_OBJECTRUNTIME_API bool SlotDescriptionMatches(const ParameterSchema& parameter,
+                                                    const RuntimeValueOps* value,
+                                                    const FrameSlotLayout& expected) noexcept;
+
+} // namespace detail
+
 // 호출 하나다(이동·복사 금지 — frame 주소를 쥔다). Prepare가 frame을 할당하고 모든 칸을 기본값으로
 // 만든다. 쓰지 않은 인자는 그 형식의 기본값이다. Invoke는 여러 번 부를 수 있다(같은 frame — 인자는
 // 남고 결과는 덮어쓴다). 소유 스레드 전용이다.
@@ -91,9 +182,14 @@ public:
     Result<void> SetArgument(ObjectRegistry& registry, const ObjectAccessContext& access,
                              usize index, const FieldValue& value) noexcept;
 
-    // 매개변수 index에 같은 C++ 형식(nativeType = NativeTypeKey<T>())의 값 source를
-    // 복사한다(struct· 컨테이너 — 값 ops의 copy, 단일 값 칸도 된다). 형식이 다르면 TypeMismatch다.
-    Result<void> SetArgumentValue(usize index, const void* source, const void* nativeType) noexcept;
+    // 매개변수 index에 같은 형식의 값 source를 복사한다(struct·컨테이너 — 값 ops의 copy, 단일 값
+    // 칸도 된다). 형식은 칸 서술(값 형식·형식 flag·크기·정렬 — 실행 이미지와 무관하다,
+    // EventReflection ED5)로 대조하며 다르면 TypeMismatch다.
+    template <class T>
+    Result<void> SetArgumentValue(usize index, const T& source) noexcept {
+        return SetArgumentDescribed(index, &source,
+                                    detail::BindingSlotLayoutOf<detail::BindingSlotType<T>>());
+    }
 
     // 대상 self(static 함수는 null)로 함수를 부른다. 대상 해석 실패(WrongThread·WrongContext·
     // StaleHandle·Destroyed·TypeMismatch·Busy·ShuttingDown)는 그 오류이고, static에 handle을 주거나
@@ -105,13 +201,19 @@ public:
     // 단일 값 반환을 value에 읽는다(반환이 없거나 struct·컨테이너면 InvalidArgument — ResultValue).
     Result<void> ReadResult(FieldValue& value) const noexcept;
 
-    // 반환 칸의 주소다(nativeType이 반환 형식과 같을 때 — 아니면·반환 없음·준비 전 nullptr).
-    const void* ResultValue(const void* nativeType) const noexcept;
+    // 반환 칸이다(T가 반환 형식과 같을 때 — 칸 서술 대조, 아니면·반환 없음·준비 전 nullptr).
+    template <class T>
+    const T* ResultValue() const noexcept {
+        return static_cast<const T*>(ResultDescribed(detail::BindingSlotLayoutOf<T>()));
+    }
 
     // 마지막 Invoke에서 함수가 돌려준 실패 코드다(Result 함수가 아니거나 성공이면 None).
     ErrorCode FunctionError() const noexcept;
 
 private:
+    Result<void> SetArgumentDescribed(usize index, const void* source,
+                                      const FrameSlotLayout& expected) noexcept;
+    const void* ResultDescribed(const FrameSlotLayout& expected) const noexcept;
     void Release() noexcept;
 
     Allocator* allocator_;

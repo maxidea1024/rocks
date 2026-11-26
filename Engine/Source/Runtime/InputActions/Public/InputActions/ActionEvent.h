@@ -2,10 +2,13 @@
 
 #include <Base/Types.h>
 #include <InputActions/TriggerTypes.h>
+#include <Meta/Annotations.h>
 
 namespace rocks::input {
 
-// 액션 이벤트다(UE ETriggerEvent — 비트 플래그, 3.4절).
+// 액션 이벤트다(UE ETriggerEvent — 비트 플래그, 3.4절). 리플렉션 Flags enum이다(ActionEventData
+// 필드 — 5.1절 함수 바인딩).
+ROCKS_ENUM(Flags)
 enum class ActionEvent : uint8 {
     None = 0,
     Triggered = 1,

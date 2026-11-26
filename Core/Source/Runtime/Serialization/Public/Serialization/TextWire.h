@@ -7,9 +7,10 @@
 //
 // 형식: u8 형태 + 형태별 내용. 0 = 비어 있음(내용 없음), 1 = Invariant(String 원문), 2 =
 // Localized(Guid textId + U64 sourceRevision + String fallback 원문). 그 밖의 형태 byte는
-// InvalidArgument다. Localized의 textId·sourceRevision은 0이 아니다(Localization Text::Localized와
-// 같은 규칙 — 0이면 InvalidArgument). 필드 값 자리에서는 payload 전체가 값 하나이고, ValueArray
-// 원소·Map 값 자리에서는 같은 byte를 길이 prefix 없이 이어 붙인다. 원문 byte 상한(Localization
+// CorruptData다(읽기 — AssetSystem 19장). Localized의 textId·sourceRevision은 0이
+// 아니다(Localization Text::Localized와 같은 규칙 — 읽은 0은 CorruptData, 쓰기 인자 0은
+// InvalidArgument). 필드 값 자리에서는 payload 전체가 값 하나이고, ValueArray 원소·Map 값
+// 자리에서는 같은 byte를 길이 prefix 없이 이어 붙인다. 원문 byte 상한(Localization
 // TextCreateLimits)은 codec이 보고, 이 계층은 Archive 값 한도(maxValueBytes)만 건다.
 //
 // 사용 예:

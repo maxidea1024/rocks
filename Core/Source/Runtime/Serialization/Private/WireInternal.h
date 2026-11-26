@@ -34,12 +34,12 @@ struct WireAccess {
     // operation 하나를 청구하고, 내용 byte는 단독 reader일 때만 청구한다. Record 트리의 공유 예산
     // reader(RecordReader::OpenValue·각 reader의 OpenField)면 그 입력 byte를 트리의 Open이 이미
     // 청구했다. count가 maxValueBytes를 넘으면 CapacityExceeded, 남은 byte보다 크면
-    // InvalidArgument다.
+    // CorruptData다(읽은 데이터 손상 — AssetSystem 19장).
     static Result<Span<const uint8>> SkipContent(ArchiveReader& reader, usize count) noexcept;
 
     // u64 길이 + 내용 하나를 넘기고 내용 범위를 돌려준다. 청구는 operation 하나와 길이 prefix 8이고
     // 내용 byte는 SkipContent와 같은 규칙이다. 길이 prefix가 잘렸거나 길이가 남은 byte보다 크면
-    // InvalidArgument, maxValueBytes를 넘으면 CapacityExceeded다. cursor는 성공할 때만 옮긴다.
+    // CorruptData, maxValueBytes를 넘으면 CapacityExceeded다. cursor는 성공할 때만 옮긴다.
     static Result<Span<const uint8>> ReadPrefixedContent(ArchiveReader& reader) noexcept;
 
     // parent가 돌려준 field(wire tag가 wire와 같아야 한다)를 parent와 같은 예산·한도의 값 reader로
@@ -90,12 +90,12 @@ bool LengthPrefixMatches(uint32 wire, WireValueShape resolved, const uint8* valu
 // 원소 열 payload(값 하나의 ArchiveReader, 위치 0)의 header(열마다 u32 tag, 그다음 u32 count)를
 // 읽고 검사한다. 검사 순서(모두 할당 전): 열의 기대 tag·shape가 그 자리의 것이 아니거나 모순이거나
 // 열들의 최소 크기 합이 usize를 넘으면 InvalidArgument(이때까지 payload는 옮기지 않아 호출자
-// reader가 그대로다) → payload를 옮긴다 → 저장 tag(들)가 그 자리의 tag가 아니면 InvalidArgument →
+// reader가 그대로다) → payload를 옮긴다 → 저장 tag(들)가 그 자리의 tag가 아니면 CorruptData →
 // 저장 tag가 기대 tag와 다르면 TypeMismatch → count > maxCount면 CapacityExceeded → count × (열마다
-// max(wire 최소, shape 최소)의 합)이 남은 byte보다 크면 InvalidArgument(모든 열이 고정 폭이거나
+// max(wire 최소, shape 최소)의 합)이 남은 byte보다 크면 CorruptData(모든 열이 고정 폭이거나
 // exact면 남은 byte가 정확히 그 값이 아닐 때도) → count만큼 work를 청구(한도면 CapacityExceeded) →
 // 모든 열이 exact이고 길이 prefix가 있는 열이 있으면 원소마다 그 길이 prefix가 크기를 만드는지
-// 본다(InvalidArgument — 할당하지 않는다. 모두 고정 폭이면 훑지 않는다).
+// 본다(CorruptData — 할당하지 않는다. 모두 고정 폭이면 훑지 않는다).
 Result<WireSequence> OpenWireSequence(ArchiveReader&& payload, Span<const WireColumn> columns,
                                       uint32 maxCount) noexcept;
 

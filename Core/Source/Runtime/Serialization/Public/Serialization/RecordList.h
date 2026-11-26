@@ -181,7 +181,7 @@ public:
     usize ItemCount() const noexcept;
     // index번째 항목의 RecordReader(공유 예산). operation 하나를 청구하며 범위 밖 index는
     // InvalidArgument, schema 불일치는 TypeMismatch, 버전 범위 밖은 Unsupported(버전 0은
-    // InvalidArgument), 필드 수가 항목 한도(itemLimits·부모의 maxFields)를 넘으면
+    // CorruptData), 필드 수가 항목 한도(itemLimits·부모의 maxFields)를 넘으면
     // CapacityExceeded다. OpenItem(index, 항목 한도의 maxFields)와 같다.
     Result<RecordReader> OpenItem(usize index) noexcept;
     // 필드 수 한도를 maxFields로 바꿔 연다(그래프가 남은 필드 누계로 열 때). 그 밖은

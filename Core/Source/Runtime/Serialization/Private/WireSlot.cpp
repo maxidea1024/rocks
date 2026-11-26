@@ -168,7 +168,7 @@ Result<Span<const uint8>> WireAccess::SkipContent(ArchiveReader& reader, usize c
     }
 
     if (count > reader.Remaining()) {
-        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
 
     // Record 트리 안의 byte는 트리의 Open이 청구했다. 단독 reader만 내용 byte를 청구한다.
@@ -195,7 +195,7 @@ Result<Span<const uint8>> WireAccess::ReadPrefixedContent(ArchiveReader& reader)
     }
 
     if (length > reader.Remaining() - LengthPrefixBytes) {
-        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
 
     if (!reader.shared_) {

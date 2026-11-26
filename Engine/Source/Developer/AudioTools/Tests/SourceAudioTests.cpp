@@ -638,7 +638,7 @@ TEST(Audio_Source_WavRejectsInvalid) {
     misaligned.blockAlignOverride = 3;
     Bytes misalignedFile(allocator);
     BuildWav(misalignedFile, misaligned, Span<const uint8>(samples));
-    CHECK(WavError(misalignedFile.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(WavError(misalignedFile.View(), allocator) == ErrorCode::CorruptData);
 
     // EXTENSIBLE: fmt가 40 byte보다 짧음, 모르는 GUID, validBits > bits.
     {
@@ -647,7 +647,7 @@ TEST(Audio_Source_WavRejectsInvalid) {
         spec.shortExtensible = true;
         Bytes file(allocator);
         BuildWav(file, spec, Span<const uint8>(samples));
-        CHECK(WavError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(WavError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     {
@@ -665,10 +665,10 @@ TEST(Audio_Source_WavRejectsInvalid) {
         spec.validBits = 20;
         Bytes file(allocator);
         BuildWav(file, spec, Span<const uint8>(samples));
-        CHECK(WavError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(WavError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
-    // float 표본의 NaN·무한대와 float32로 바꾸면 넘치는 float64는 InvalidArgument.
+    // float 표본의 NaN·무한대와 float32로 바꾸면 넘치는 float64는 CorruptData.
     for (const uint32 bits : {0x7FC00000u, 0x7F800000u, 0xFF800000u}) {
         const uint32 values[] = {0, bits};
         WavSpec spec;
@@ -677,7 +677,7 @@ TEST(Audio_Source_WavRejectsInvalid) {
         Bytes file(allocator);
         BuildWav(file, spec,
                  Span<const uint8>(reinterpret_cast<const uint8*>(values), sizeof(values)));
-        CHECK(WavError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(WavError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     {
@@ -688,17 +688,17 @@ TEST(Audio_Source_WavRejectsInvalid) {
         Bytes file(allocator);
         BuildWav(file, spec,
                  Span<const uint8>(reinterpret_cast<const uint8*>(values), sizeof(values)));
-        CHECK(WavError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(WavError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // 빈 data, fmt 없음(fmt chunk 중간에서 파일이 끝남), 머리 없음.
     Bytes empty(allocator);
     BuildWav(empty, WavSpec{}, Span<const uint8>());
-    CHECK(WavError(empty.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(WavError(empty.View(), allocator) == ErrorCode::CorruptData);
     Bytes good(allocator);
     BuildWav(good, WavSpec{}, Span<const uint8>(samples));
-    CHECK(WavError(good.View().Left(30), allocator) == ErrorCode::InvalidArgument);
-    CHECK(WavError(Span<const uint8>(samples), allocator) == ErrorCode::InvalidArgument);
+    CHECK(WavError(good.View().Left(30), allocator) == ErrorCode::CorruptData);
+    CHECK(WavError(Span<const uint8>(samples), allocator) == ErrorCode::CorruptData);
 
     // PCM 상한: float32 기준 MaxSoundClipPcmBytes를 넘는 크기는 할당 전에 CapacityExceeded다. WAV는
     // data 크기로 frame 수를 얻으므로 파일로 이 경로를 타려면 512 MiB 넘는 입력이 든다 — 파일
@@ -725,7 +725,7 @@ TEST(Audio_Source_FailureResetsOutput) {
     spec.bits = 32;
     Bytes nan(allocator);
     BuildWav(nan, spec, Span<const uint8>(reinterpret_cast<const uint8*>(values), sizeof(values)));
-    CHECK(DecodeWav(nan.View(), audio).Error() == ErrorCode::InvalidArgument);
+    CHECK(DecodeWav(nan.View(), audio).Error() == ErrorCode::CorruptData);
     CHECK(audio.ChannelCount() == 0 && audio.FrameCount() == 0 && audio.SampleRate() == 0);
     CHECK(audio.Loops().Size() == 0 && audio.Cues().Size() == 0 && audio.IgnoredChunks() == 0);
 
@@ -735,7 +735,7 @@ TEST(Audio_Source_FailureResetsOutput) {
     aiff.frames = 4;
     Bytes shortData(allocator, true);
     BuildAiff(shortData, aiff, Span<const uint8>(samples));
-    CHECK(DecodeAiff(shortData.View(), audio).Error() == ErrorCode::InvalidArgument);
+    CHECK(DecodeAiff(shortData.View(), audio).Error() == ErrorCode::CorruptData);
     CHECK(audio.FrameCount() == 0 && audio.Cues().Size() == 0 && audio.IgnoredChunks() == 0);
 }
 
@@ -913,7 +913,7 @@ TEST(Audio_Source_AiffRejectsInvalid) {
         spec.frames = 4;
         Bytes file(allocator, true);
         BuildAiff(file, spec, Span<const uint8>(samples));
-        CHECK(AiffError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(AiffError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     {
@@ -922,7 +922,7 @@ TEST(Audio_Source_AiffRejectsInvalid) {
         BuildAiff(file, spec, Span<const uint8>(samples));
         // SSND 본문은 offset(4)·blockSize(4)·표본(2)이다. offset 필드 마지막 byte를 키운다.
         file[file.Size() - 10 + 3] = 0x10;
-        CHECK(AiffError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(AiffError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     {
@@ -930,7 +930,7 @@ TEST(Audio_Source_AiffRejectsInvalid) {
         spec.ssnd = false;
         Bytes file(allocator, true);
         BuildAiff(file, spec, Span<const uint8>());
-        CHECK(AiffError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(AiffError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     {
@@ -938,7 +938,7 @@ TEST(Audio_Source_AiffRejectsInvalid) {
         spec.frames = 0;
         Bytes file(allocator, true);
         BuildAiff(file, spec, Span<const uint8>(samples));
-        CHECK(AiffError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(AiffError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // PCM 상한은 COMM frame 수로 SSND를 보기 전에 판정한다(SSND가 없어도 CapacityExceeded).
@@ -952,13 +952,13 @@ TEST(Audio_Source_AiffRejectsInvalid) {
         CHECK(AiffError(file.View(), allocator) == ErrorCode::CapacityExceeded);
     }
 
-    // FORM 형식 id가 AIFF·AIFC가 아니면 InvalidArgument.
+    // FORM 형식 id가 AIFF·AIFC가 아니면 CorruptData.
     {
         AiffSpec spec;
         spec.form = "AIFX";
         Bytes file(allocator, true);
         BuildAiff(file, spec, Span<const uint8>(samples));
-        CHECK(AiffError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(AiffError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 }
 

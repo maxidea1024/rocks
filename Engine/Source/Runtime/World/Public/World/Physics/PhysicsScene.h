@@ -8,6 +8,8 @@
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/BodyKinematics.h>
 #include <World/Physics/HitResult.h>
+#include <World/Physics/OverlapMode.h>
+#include <World/Physics/OverlapResult.h>
 #include <World/Physics/PhysicsBodyHandle.h>
 #include <World/Physics/QueryFilter.h>
 #include <World/Physics/QueryParams.h>
@@ -105,6 +107,31 @@ public:
                                     const CollisionShape& shape, const QueryFilter& filter,
                                     const QueryParams& params, TraceMode mode, HitResult* first,
                                     Array<HitResult>* all) const noexcept = 0;
+
+    // rotation으로 position에 놓은 shape의 overlap이다(4.4절, 7.1.9절). 값은 유한하고 shape는
+    // Line이 아니어야 한다. mode가 All이면 all 끝에 겹친 컴포넌트를 body handle 순으로
+    // 덧붙인다(같은 컴포넌트는 하나). 반환 값은 Blocking이면 막는 겹침, Any면 겹침 하나라도,
+    // All이면 막는 겹침이 있는지다. 오류: Profile 필터·All에 all 없음·0 rotation(InvalidArgument),
+    // Cylinder(Unsupported), 할당 실패.
+    virtual Result<bool> OverlapShape(const Vec3d& position, const Quatd& rotation,
+                                      const CollisionShape& shape, const QueryFilter& filter,
+                                      const QueryParams& params, OverlapMode mode,
+                                      Array<OverlapResult>* all) const noexcept = 0;
+
+    // body의 형상(scale이 구워진 그대로)으로 하는 shape trace All이다(UE ComponentSweepMulti —
+    // 7.1.9절). 그 body를 가진 컴포넌트의 소유 Actor를 뺀다. 반환 값은 막는 hit가 있는지다. 오류:
+    // 없는 handle·옛 세대(StaleHandle), TraceShape의 오류.
+    virtual Result<bool> TraceBody(PhysicsBodyHandle body, const Vec3d& start, const Vec3d& end,
+                                   const Quatd& rotation, const QueryFilter& filter,
+                                   const QueryParams& params,
+                                   Array<HitResult>& all) const noexcept = 0;
+
+    // body의 형상으로 하는 overlap All이다(UE ComponentOverlapMulti). 그 body의 컴포넌트만 뺀다.
+    // 반환 값은 막는 겹침이 있는지다. 오류: 없는 handle·옛 세대(StaleHandle), OverlapShape의 오류.
+    virtual Result<bool> OverlapBody(PhysicsBodyHandle body, const Vec3d& position,
+                                     const Quatd& rotation, const QueryFilter& filter,
+                                     const QueryParams& params,
+                                     Array<OverlapResult>& all) const noexcept = 0;
 
 protected:
     PhysicsScene() noexcept = default;

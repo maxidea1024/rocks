@@ -28,9 +28,9 @@ bool BytesEqual(Span<const uint8> actual, Span<const uint8> expected) noexcept {
 }
 
 bool ExpectedMalformedError(ErrorCode error) noexcept {
-    return error == ErrorCode::InvalidArgument || error == ErrorCode::Unsupported ||
-           error == ErrorCode::TypeMismatch || error == ErrorCode::CapacityExceeded ||
-           error == ErrorCode::AlreadyExists;
+    // 손상 입력은 CorruptData다(AssetSystem 19장 — 중복 id 포함).
+    return error == ErrorCode::CorruptData || error == ErrorCode::Unsupported ||
+           error == ErrorCode::TypeMismatch || error == ErrorCode::CapacityExceeded;
 }
 } // namespace
 
@@ -97,16 +97,16 @@ TEST(ArchiveFailuresAtNonzeroCursorPreservePreviousSuccessfulReads) {
     CHECK(prefix.Value() == 0x01020304);
     CHECK(reader.Value().Position() == 4);
     auto invalidBool = reader.Value().ReadBool();
-    CHECK(!invalidBool && invalidBool.Error() == ErrorCode::InvalidArgument);
+    CHECK(!invalidBool && invalidBool.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 4);
     auto shortGuid = reader.Value().ReadGuid();
-    CHECK(!shortGuid && shortGuid.Error() == ErrorCode::InvalidArgument);
+    CHECK(!shortGuid && shortGuid.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 4);
     auto shortBytes = reader.Value().ReadBytes();
-    CHECK(!shortBytes && shortBytes.Error() == ErrorCode::InvalidArgument);
+    CHECK(!shortBytes && shortBytes.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 4);
     auto shortString = reader.Value().ReadStringView();
-    CHECK(!shortString && shortString.Error() == ErrorCode::InvalidArgument);
+    CHECK(!shortString && shortString.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 4);
     auto length = reader.Value().ReadU64();
     REQUIRE(length);

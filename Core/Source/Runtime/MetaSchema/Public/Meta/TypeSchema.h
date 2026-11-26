@@ -691,10 +691,22 @@ inline constexpr usize MaxFunctionParameters = 16;
 // 한 타입이 선언하는 리플렉션 함수 수 상한이다(필드 상한과 같다).
 inline constexpr usize MaxTypeFunctions = 4096;
 
+// 함수 매개변수 칸의 flag다(ParameterSchema::flags).
+//   ObjectHandle — 칸 C++ 형식이 ObjectHandle이다(값 형식은 WeakObjectReference(rocks::Object)로
+//                  WeakObjectRef<Object>와 같으므로 바인딩 서명 비교가 이 flag로 가른다 —
+//                  Docs/Design/EventReflection.ko.md ED5).
+enum class ParameterFlags : uint32 {
+    None = 0,
+    ObjectHandle = 1u << 0
+};
+
+// ParameterFlags의 알려진 비트 전부다(등록 검사).
+inline constexpr uint32 KnownParameterFlags = (1u << 1) - 1;
+
 // 함수 매개변수·반환 하나다(Docs/Design/FunctionReflection.ko.md 3절). value·element·key는
-// FieldSchema와 같은 규칙이다(단일 값·컨테이너). flags는 FieldFlags 부분 집합(Required — null 불가
-// 참조), maxElements는 컨테이너 원소 상한(그 밖은 0), offset은 호출 frame 안 위치다. 반환은 name이
-// 비고, 반환이 없는 함수(void·Result<void>)의 result는 value.kind가 Opaque다.
+// FieldSchema와 같은 규칙이다(단일 값·컨테이너). flags는 ParameterFlags, maxElements는 컨테이너
+// 원소 상한(그 밖은 0), offset은 호출 frame 안 위치다. 반환은 name이 비고, 반환이 없는
+// 함수(void·Result<void>)의 result는 value.kind가 Opaque다.
 struct ParameterSchema {
     Span<const char> name;
     ValueType value{};

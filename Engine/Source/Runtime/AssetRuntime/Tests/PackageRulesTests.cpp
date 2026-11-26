@@ -172,7 +172,7 @@ TEST(AssetPackage_PackageArgumentErrors) {
     // 진단 out 인자는 선택이다(null이면 오류 코드만 돌려준다).
     Array<uint8> empty(env.allocator);
     CHECK(ReadPackage(env.allocator, empty.View(), PackageReadOptions{}).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     // 섹션 종류 표: 알려진 kind는 1..9, 모르는 kind의 고정 flags는 0이다.
     CHECK(!IsKnownPackageSection(0));
     CHECK(!IsKnownPackageSection(PackageKnownSectionKinds + 1));

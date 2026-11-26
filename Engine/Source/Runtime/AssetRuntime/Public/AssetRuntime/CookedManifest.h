@@ -306,7 +306,7 @@ WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest, Array<
 // 매니페스트 byte를 검증하고 모델로 푼다(AS 10.1절 2의 순서). 결과는 bytes를 빌리지 않는다.
 //
 // 오류: formatVersion이 2가 아니면(v1 포함) UnsupportedVersion / Unsupported, 그 밖의
-// 위반(magic·CRC·칸·항목 사이 규칙·남는 byte)은 CorruptPackage / InvalidArgument, 할당 실패는 진단
+// 위반(magic·CRC·칸·항목 사이 규칙·남는 byte)은 CorruptPackage / CorruptData, 할당 실패는 진단
 // None과 그 오류다.
 //
 // 사용 예:
@@ -331,7 +331,7 @@ CheckCookedManifestMerge(const CookedManifest& existing, const CookedManifest& i
 // 연 패키지를 항목과 대조한다(AS 10.1절 8): CheckCookedPackageFile(file 길이·SHA-256)을 먼저 하고
 // 그다음 CheckCookedPackageContents(contents — file의 ReadPackage 결과)를 한다.
 //
-// 오류: 다르면 CorruptPackage / InvalidArgument(section = CookedManifestField, detail =
+// 오류: 다르면 CorruptPackage / CorruptData(section = CookedManifestField, detail =
 // CookedManifestNoEntry, asset = entry.asset, related = 의존 칸이면 처음 다른 자리의 대상)다.
 ROCKS_ASSETRUNTIME_API Result<void> CheckCookedPackage(const CookedManifest& manifest,
                                                        const CookedManifestEntry& entry,
@@ -372,7 +372,7 @@ AppendCookedArtifactPath(StringBuilderBase& out, const CookedManifestArtifact& a
 // 연 artifact 파일을 항목과 대조한다(10.3절 8항): 길이 = bytes(ArtifactBytes)를 먼저, 그다음
 // SHA-256 = sha256(ArtifactSha256)을 본다.
 //
-// 오류: 다르면 CorruptPackage / InvalidArgument(section = 그 칸, detail = CookedManifestNoEntry,
+// 오류: 다르면 CorruptPackage / CorruptData(section = 그 칸, detail = CookedManifestNoEntry,
 // asset null)다.
 ROCKS_ASSETRUNTIME_API Result<void>
 CheckCookedArtifactFile(const CookedManifestArtifact& artifact, Span<const uint8> file,

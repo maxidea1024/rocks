@@ -94,7 +94,7 @@ struct PackageLoadOptions {
 // InstantiatePackages(소유 스레드, 한 트랜잭션 — 객체 생성·import 연결·적용·Required·id 설정) →
 // 호출자 Commit.
 //
-// Prepare가 하는 대조(실패는 CorruptPackage / InvalidArgument):
+// Prepare가 하는 대조(실패는 CorruptPackage / CorruptData):
 // - Objects 노드의 저장 버전 = Summary 타입 표의 버전.
 // - 모든 BulkDataRef(관찰)가 BulkIndex 항목과 같은 rawBytes·SHA-256을 가진다.
 // - 모든 BulkIndex entry가 어떤 BulkDataRef에 쓰인다(읽기 전용 열기는 보지 않는다), 빈
@@ -285,7 +285,7 @@ protected:
 // 타입의 파생이 아니거나 Hard 의존 대표 에셋 타입이 expectedType의 파생이 아니면 TypeMismatch /
 // TypeMismatch, import 대상의 타입 조회 실패와
 // 트랜잭션·그래프 단계의 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그 오류, Required
-// 실효 값 누락(쿠킹)은 CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을
+// 실효 값 누락(쿠킹)은 CorruptPackage / CorruptData다. 객체를 만든 뒤의 실패는 트랜잭션을
 // 그 오류로 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
 ROCKS_ASSETRUNTIME_API Result<void>
 InstantiatePackages(ConstructionContext& transaction, Span<PackageLoadState* const> packages,

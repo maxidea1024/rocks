@@ -491,7 +491,7 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
         // 2단계가 입력 때문에 실패하지 않게 정적 선언도 본다.
         if constexpr (ReflectedEnumField<Key>::Supported) {
             if (key.undeclared || !GeneratedType<Key>::IsDeclared(key.signedInteger)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -507,7 +507,7 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
             }
 
             if (added.Value() == InsertOutcome::AlreadyPresent) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -659,7 +659,7 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
                 }
 
                 if (!GeneratedType<Value>::IsDeclared(parsed.signedInteger)) {
-                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                    return Result<void>::Failure(ErrorCode::CorruptData);
                 }
             }
 

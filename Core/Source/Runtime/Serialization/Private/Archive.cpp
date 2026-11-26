@@ -371,7 +371,7 @@ Result<Span<const uint8>> ArchiveReader::Fixed(usize count) noexcept {
     }
 
     if (count > Remaining()) {
-        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
 
     auto spent = Spend(static_cast<uint64>(count));
@@ -399,7 +399,7 @@ Result<Span<const uint8>> ArchiveReader::Variable(bool utf8, bool ownedCopy) noe
     }
 
     if (length > Remaining() - 8) {
-        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
 
     // borrowed bytes도 크기에 비례한 budget을 청구하여 scan/copy 구현 간 한도가 느슨해지지 않는다.
@@ -424,9 +424,9 @@ Result<Span<const uint8>> ArchiveReader::Variable(bool utf8, bool ownedCopy) noe
     const auto count = static_cast<usize>(length);
     const uint8* data = source_.Data() + position_ + 8;
     if (utf8) {
-        auto valid = StringView(reinterpret_cast<const char*>(data), count).ValidateUtf8();
-        if (!valid) {
-            return Result<Span<const uint8>>::Failure(valid.Error());
+        // 읽은 byte의 UTF-8 위반은 손상이다(AssetSystem 19장 — 쓰기 쪽 검사는 InvalidArgument).
+        if (!StringView(reinterpret_cast<const char*>(data), count).ValidateUtf8()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -440,7 +440,7 @@ Result<bool> ArchiveReader::ReadBool() noexcept {
     }
 
     if (bytes.Value()[0] > 1) {
-        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+        return Result<bool>::Failure(ErrorCode::CorruptData);
     }
 
     ++position_;

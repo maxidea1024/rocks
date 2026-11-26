@@ -118,7 +118,7 @@ TEST(AssetManager_DroppedTicketCancelsAndFailureCarriesDiagnostic) {
     REQUIRE(rig.manager->OnReady(corrupt, TaskLane::Game, RecordReady(env.allocator, failed)));
     REQUIRE(rig.Settle());
     CHECK(!rig.IsLoaded(1));
-    CHECK(failed.calls == 1 && failed.error == ErrorCode::InvalidArgument);
+    CHECK(failed.calls == 1 && failed.error == ErrorCode::CorruptData);
     CHECK(failed.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
           failed.diagnostic.asset == FixedId(2));
     CHECK(cancelled.calls == 1);
@@ -305,7 +305,7 @@ TEST(AssetManager_RunWhenReadyPolicies) {
     REQUIRE(rig.Settle());
     CHECK(deferred.runs == 1 && deferred.fails == 0 && deferred.ranAsset == FixedId(1));
     CHECK(promoted.runs == 1 && promoted.fails == 0);
-    CHECK(broken.runs == 0 && broken.fails == 1 && broken.error == ErrorCode::InvalidArgument &&
+    CHECK(broken.runs == 0 && broken.fails == 1 && broken.error == ErrorCode::CorruptData &&
           broken.diagnostic.code == AssetDiagnosticCode::CorruptPackage);
     CHECK(overflow.runs == 0 && overflow.fails == 0);
 

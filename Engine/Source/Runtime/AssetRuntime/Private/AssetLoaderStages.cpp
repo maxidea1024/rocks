@@ -350,10 +350,10 @@ void AssetLoader::Impl::HandleCompletion(LoaderPackageJob* job) noexcept {
 
         if (result.fileBytes != entry.packageBytes) {
             diagnostic.code = AssetDiagnosticCode::CorruptPackage;
-            diagnostic.error = ErrorCode::InvalidArgument;
+            diagnostic.error = ErrorCode::CorruptData;
             diagnostic.section = static_cast<uint32>(CookedManifestField::PackageBytes);
             diagnostic.detail = CookedManifestNoEntry;
-            FailUnit(unit, job->entry, ErrorCode::InvalidArgument, diagnostic);
+            FailUnit(unit, job->entry, ErrorCode::CorruptData, diagnostic);
             return;
         }
 

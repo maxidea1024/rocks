@@ -176,36 +176,36 @@ TEST(ValidateHookGraph_RejectedValueFailsWholeLoad) {
     CHECK(LoadWith(allocator, types, [](ValidHolder&) noexcept {}) == ErrorCode::None);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.box.range = Range(3, 2);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     // 바깥 hook(range.high ≤ limit)의 다른 오류 코드(Overflow)도 InvalidArgument다.
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept { value.box.limit = 1; }) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.ranges[1] = Range(9, 0);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.maybe.Emplace(Range(9, 0));
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               ValidRange* entry = value.byKey.Find(7);
               REQUIRE(entry);
               *entry = Range(9, 0);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               *value.any.Get<ValidRange>() = Range(9, 0);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.fixed[1] = Range(9, 0);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     // base hook(ValidRange)과 파생 hook(ValidDerived) 모두 본다.
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept { value.derived.low = 9; }) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.derived.extra = -1;
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(LoadWith(allocator, types, [](ValidHolder& value) noexcept {
               value.elements[0].range = Range(9, 0);
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
 }
 
 // 거부된 복원은 대상 Registry에 아무것도 남기지 않는다: 같은 Registry에 이어서 유효한 그래프를
@@ -230,7 +230,7 @@ TEST(ValidateHookGraph_RejectedLoadPublishesNothing) {
             const uint32 before = target.Stats().liveObjects;
             auto rejected = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                             invalid.Value().View());
-            CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+            CHECK(!rejected && rejected.Error() == ErrorCode::CorruptData);
             CHECK(target.Stats().liveObjects == before);
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                           valid.Value().View());

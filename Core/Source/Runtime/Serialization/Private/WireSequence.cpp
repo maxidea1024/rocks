@@ -77,7 +77,7 @@ Result<WireSequence> OpenWireSequence(ArchiveReader&& payload, Span<const WireCo
     // 형식 불일치다.
     for (usize index = 0; index < columns.Size(); ++index) {
         if (!WireSlotShape(columns[index].slot, stored[index])) {
-            return Result<WireSequence>::Failure(ErrorCode::InvalidArgument);
+            return Result<WireSequence>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -103,7 +103,7 @@ Result<WireSequence> OpenWireSequence(ArchiveReader&& payload, Span<const WireCo
     usize required = 0;
     if (!ElementBytes(count.Value(), entryBytes, required) || required > archive.Remaining() ||
         (exact && required != archive.Remaining())) {
-        return Result<WireSequence>::Failure(ErrorCode::InvalidArgument);
+        return Result<WireSequence>::Failure(ErrorCode::CorruptData);
     }
 
     // count만큼의 work를 원소 검사·읽기 전에 청구한다(아래 exact 검사의 원소당 비교도 덮는다).
@@ -120,7 +120,7 @@ Result<WireSequence> OpenWireSequence(ArchiveReader&& payload, Span<const WireCo
             usize at = static_cast<usize>(element) * entryBytes;
             for (usize index = 0; index < columns.Size(); ++index) {
                 if (!LengthPrefixMatches(columns[index].wire, resolved[index], entries + at)) {
-                    return Result<WireSequence>::Failure(ErrorCode::InvalidArgument);
+                    return Result<WireSequence>::Failure(ErrorCode::CorruptData);
                 }
 
                 at += resolved[index].minElementBytes;

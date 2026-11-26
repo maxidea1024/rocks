@@ -129,9 +129,13 @@ Result<void> DecodeInstancedStructContent(ConstructionContext* construction, Obj
         auto acquired = context.AcquireInstancedStructType(content.schema);
         if (!acquired) {
             if (acquired.Error() != ErrorCode::NotFound) {
-                return Result<void>::Failure(acquired.Error() == ErrorCode::TypeMismatch
-                                                 ? ErrorCode::InvalidArgument
-                                                 : acquired.Error());
+                // 저장된 schema가 담을 수 없는 struct(InvalidArgument)나 struct가 아님
+                // (TypeMismatch)이면 손상이다(AssetSystem 19장).
+                const ErrorCode error = acquired.Error();
+                return Result<void>::Failure(error == ErrorCode::TypeMismatch ||
+                                                     error == ErrorCode::InvalidArgument
+                                                 ? ErrorCode::CorruptData
+                                                 : error);
             }
 
             if (context.Policy().unknownStructType == UnknownStructTypePolicy::Reject) {
@@ -153,15 +157,18 @@ Result<void> DecodeInstancedStructContent(ConstructionContext* construction, Obj
         }
 
         const StructView view = acquired.Value().Struct();
+        // 저장된 struct를 담을 수 없으면 손상이다(같은 검사가 Emplace에서는 InvalidArgument).
         if (auto allowed = CheckInstancedStructContent(view); !allowed) {
-            return allowed;
+            return Result<void>::Failure(allowed.Error() == ErrorCode::InvalidArgument
+                                             ? ErrorCode::CorruptData
+                                             : allowed.Error());
         }
 
         // InstancedStruct<Base>(리플렉션 B9k)는 Base 자신이나 그 파생만 받는다(정책과 무관하게
-        // InvalidArgument).
+        // CorruptData — 읽은 데이터의 규칙 위반).
         const TypeId base = FieldTargetType(context.Field()).type;
         if (base != TypeId{} && !acquired.Value().IsA(base)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (auto fits = CheckInstancedStructDepth(context.PositionDepth(), view); !fits) {

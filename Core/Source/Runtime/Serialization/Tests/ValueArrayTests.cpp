@@ -297,7 +297,7 @@ TEST(ValueArray_HeaderChecksRunInOrder) {
                                   99u};
     for (uint32 tag : invalidTags) {
         auto bytes = Header(allocator, tag, 1, 4);
-        CHECK(OpenError(bytes.View(), Wire(WireType::U32), 1) == ErrorCode::InvalidArgument);
+        CHECK(OpenError(bytes.View(), Wire(WireType::U32), 1) == ErrorCode::CorruptData);
     }
 
     // 원소 tag끼리 다르면 TypeMismatch다(크기 검사보다 먼저).
@@ -307,35 +307,35 @@ TEST(ValueArray_HeaderChecksRunInOrder) {
     // count > maxCount는 남은 byte가 모자라도 CapacityExceeded다(크기 검사보다 먼저).
     auto tooMany = Header(allocator, Wire(WireType::U32), 3);
     CHECK(OpenError(tooMany.View(), Wire(WireType::U32), 2) == ErrorCode::CapacityExceeded);
-    CHECK(OpenError(tooMany.View(), Wire(WireType::U32), 3) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(tooMany.View(), Wire(WireType::U32), 3) == ErrorCode::CorruptData);
 
     // 가변 원소: count × 최소 크기(String 8)가 남은 byte보다 크면 InvalidArgument다.
     auto shortStrings = Header(allocator, Wire(WireType::String), 2, 15);
-    CHECK(OpenError(shortStrings.View(), Wire(WireType::String), 10) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(shortStrings.View(), Wire(WireType::String), 10) == ErrorCode::CorruptData);
     auto softShort = Header(allocator, Wire(WireType::SoftObjectReference), 1, 23);
     CHECK(OpenError(softShort.View(), Wire(WireType::SoftObjectReference), 10) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // 고정 폭은 남은 byte가 정확히 count × 폭이어야 한다(많아도 InvalidArgument).
     auto extra = Header(allocator, Wire(WireType::U32), 2, 9);
-    CHECK(OpenError(extra.View(), Wire(WireType::U32), 10) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(extra.View(), Wire(WireType::U32), 10) == ErrorCode::CorruptData);
 
     // 스키마 최소 크기가 wire 최소보다 크면 그것을 쓴다(Digest = Bytes 40 exact).
     const WireValueShape digest{40, true};
     auto digestShort = Header(allocator, Wire(WireType::Bytes), 1, 39);
     CHECK(OpenError(digestShort.View(), Wire(WireType::Bytes), 10, digest) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     auto digestLong = Header(allocator, Wire(WireType::Bytes), 1, 41);
     CHECK(OpenError(digestLong.View(), Wire(WireType::Bytes), 10, digest) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(OpenError(digestLong.View(), Wire(WireType::Bytes), 10) == ErrorCode::None);
 
     // header 잘림.
     const uint8 truncated[] = {2, 0, 0, 0, 1, 0, 0};
     CHECK(OpenError(Span<const uint8>(truncated, 3), Wire(WireType::U32), 1) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(OpenError(Span<const uint8>(truncated, 7), Wire(WireType::U32), 1) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // count만큼의 work를 원소 읽기 전에 청구한다: 크기는 맞지만 work 한도가 count보다 작으면
     // CapacityExceeded다.
@@ -368,7 +368,7 @@ TEST(ValueArray_SizePrecheckRunsBeforeAnyAllocation) {
     counting.DisableFailure();
     auto opened = ValueArrayReader::OpenField(parent.Value(), field.Value(), Wire(WireType::String),
                                               NumericLimits<uint32>::Max());
-    CHECK(!opened && opened.Error() == ErrorCode::InvalidArgument);
+    CHECK(!opened && opened.Error() == ErrorCode::CorruptData);
     CHECK(counting.Attempts() == 0);
 }
 
@@ -380,7 +380,7 @@ TEST(ValueArray_ElementContentIsValidatedByReads) {
     auto boolReader = OpenPayload(bools.View(), Wire(WireType::Bool), 2);
     REQUIRE(boolReader);
     CHECK(boolReader.Value().Elements().ReadBool());
-    CHECK(boolReader.Value().Elements().ReadBool().Error() == ErrorCode::InvalidArgument);
+    CHECK(boolReader.Value().Elements().ReadBool().Error() == ErrorCode::CorruptData);
 
     // 잘못된 UTF-8 문자열 원소.
     auto strings = Header(allocator, Wire(WireType::String), 1);
@@ -388,7 +388,7 @@ TEST(ValueArray_ElementContentIsValidatedByReads) {
     REQUIRE(strings.TryPushBack(0xc3) && strings.TryPushBack(0x28));
     auto stringReader = OpenPayload(strings.View(), Wire(WireType::String), 1);
     REQUIRE(stringReader);
-    CHECK(stringReader.Value().Elements().ReadStringView().Error() == ErrorCode::InvalidArgument);
+    CHECK(stringReader.Value().Elements().ReadStringView().Error() == ErrorCode::CorruptData);
 
     // 원소 길이가 남은 byte보다 크면 잘림(InvalidArgument), 원소를 다 읽고 남은 byte는 trailing.
     auto truncated = Header(allocator, Wire(WireType::String), 1);
@@ -396,8 +396,7 @@ TEST(ValueArray_ElementContentIsValidatedByReads) {
     REQUIRE(truncated.TryPushBack('a'));
     auto truncatedReader = OpenPayload(truncated.View(), Wire(WireType::String), 1);
     REQUIRE(truncatedReader);
-    CHECK(truncatedReader.Value().Elements().ReadStringView().Error() ==
-          ErrorCode::InvalidArgument);
+    CHECK(truncatedReader.Value().Elements().ReadStringView().Error() == ErrorCode::CorruptData);
     auto trailing = Header(allocator, Wire(WireType::String), 1);
     AppendU64(trailing, 1);
     REQUIRE(trailing.TryPushBack('a') && trailing.TryPushBack('b'));
@@ -405,14 +404,14 @@ TEST(ValueArray_ElementContentIsValidatedByReads) {
     REQUIRE(trailingReader);
     auto first = trailingReader.Value().Elements().ReadStringView();
     CHECK(first && first.Value() == StringView("a"));
-    CHECK(trailingReader.Value().Finish().Error() == ErrorCode::InvalidArgument);
+    CHECK(trailingReader.Value().Finish().Error() == ErrorCode::CorruptData);
 
     // 원소를 덜 읽어도 Finish가 남은 byte를 거부한다.
     auto numbers = Header(allocator, Wire(WireType::U32), 2, 8);
     auto numberReader = OpenPayload(numbers.View(), Wire(WireType::U32), 2);
     REQUIRE(numberReader);
     REQUIRE(numberReader.Value().Elements().ReadU32());
-    CHECK(numberReader.Value().Finish().Error() == ErrorCode::InvalidArgument);
+    CHECK(numberReader.Value().Finish().Error() == ErrorCode::CorruptData);
     REQUIRE(numberReader.Value().Elements().ReadU32());
     CHECK(numberReader.Value().Finish());
 }
@@ -571,7 +570,7 @@ TEST(ValueArray_ExactVariableElementsCheckEachLength) {
     const usize skewed[] = {0, 64};
     auto bad = BytesElements(allocator, skewed);
     CHECK(bad.Size() == 8 + 80);
-    CHECK(OpenError(bad.View(), Wire(WireType::Bytes), 10, digest) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(bad.View(), Wire(WireType::Bytes), 10, digest) == ErrorCode::CorruptData);
     // 같은 byte도 exact가 아니면 열리고(경계는 Read가 검사한다) 원소를 그대로 읽는다.
     auto loose = OpenPayload(bad.View(), Wire(WireType::Bytes), 10);
     REQUIRE(loose);
@@ -593,7 +592,7 @@ TEST(ValueArray_ExactVariableElementsCheckEachLength) {
     const usize lastWrong[] = {32, 32, 31};
     auto tail = BytesElements(allocator, lastWrong);
     REQUIRE(tail.TryPushBack(0)); // 합계를 count × 40으로 맞춘다
-    CHECK(OpenError(tail.View(), Wire(WireType::Bytes), 10, digest) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(tail.View(), Wire(WireType::Bytes), 10, digest) == ErrorCode::CorruptData);
 
     // SoftObjectReference의 길이 prefix는 Guid 뒤에 있다(exact {24 + 4, true} = 경로 4 byte). 원소
     // 0의 경로 길이 5 + byte 3, 원소 1의 길이 3 + byte 5는 합계가 2 × 28이지만 경계가 어긋난다.
@@ -613,7 +612,7 @@ TEST(ValueArray_ExactVariableElementsCheckEachLength) {
     auto skewedSoft = softElements({5, 3}, {3, 5});
     CHECK(skewedSoft.Size() == 8 + 56);
     CHECK(OpenError(skewedSoft.View(), Wire(WireType::SoftObjectReference), 2, {28, true}) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     auto validSoft = softElements({4, 4}, {4, 4});
     CHECK(OpenError(validSoft.View(), Wire(WireType::SoftObjectReference), 2, {28, true}) ==
           ErrorCode::None);
@@ -651,8 +650,7 @@ TEST(ValueArray_ContradictoryShapesAreRejected) {
     CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {1, true}) ==
           ErrorCode::InvalidArgument);
     CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {1, false}) == ErrorCode::None);
-    CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {2, false}) ==
-          ErrorCode::InvalidArgument);
+    CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {2, false}) == ErrorCode::CorruptData);
 }
 
 TEST(ValueArray_WriterMatchesReaderCountAndShape) {
@@ -833,11 +831,11 @@ TEST(ValueArray_InstancedStructAndTextElements) {
     // count 사전 검사는 원소 최소 크기(InstancedStruct 8·Text 1)로 한다.
     auto shortStructs = Header(allocator, Wire(WireType::InstancedStruct), 2, 15);
     CHECK(OpenError(shortStructs.View(), Wire(WireType::InstancedStruct), 10) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     auto enoughStructs = Header(allocator, Wire(WireType::InstancedStruct), 2, 16);
     CHECK(OpenError(enoughStructs.View(), Wire(WireType::InstancedStruct), 10) == ErrorCode::None);
     auto shortTexts = Header(allocator, Wire(WireType::Text), 3, 2);
-    CHECK(OpenError(shortTexts.View(), Wire(WireType::Text), 10) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(shortTexts.View(), Wire(WireType::Text), 10) == ErrorCode::CorruptData);
     // 원소 tag끼리 다르면 TypeMismatch다.
     CHECK(OpenError(enoughStructs.View(), Wire(WireType::Text), 10) == ErrorCode::TypeMismatch);
 }

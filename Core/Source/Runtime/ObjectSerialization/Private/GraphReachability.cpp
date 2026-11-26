@@ -107,7 +107,7 @@ Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, 
     }
 
     if (queue.Size() != count) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();

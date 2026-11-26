@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "function",
+      "name": "rocks::input_fixture::BindingTarget::OnAction",
+      "id": "b676bd62be0b4e62a696aea161b3f520",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::input_fixture::BindingTarget::OnActionCounted",
+      "id": "7016c8656a2b4050890e352d168cc413",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::input_fixture::BindingTarget::OnNumber",
+      "id": "fcf9d8fd2756415187e2d546e9e1271f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::input_fixture::BindingTarget::OnStaticAction",
+      "id": "ad68622f870a4e57855339da8f5a882c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input_fixture::BindingTarget",
+      "id": "5bf7dc3a97534a2a9311fdee628f4d05",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

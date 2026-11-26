@@ -278,7 +278,7 @@ TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndKeepsDefault) {
                 REQUIRE(editor);
                 CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       editor.Value().View(), load)
-                          .Error() == ErrorCode::InvalidArgument);
+                          .Error() == ErrorCode::CorruptData);
 #endif
             }
 

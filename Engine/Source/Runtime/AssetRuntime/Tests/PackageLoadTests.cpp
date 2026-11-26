@@ -78,7 +78,7 @@ bool CorruptAt(AssetEnv& env, Array<uint8>&& bytes, PackageKind kind, PackageSec
     bool prepared = false;
     const AssetDiagnostic failure = PrepareOf(env, Move(bytes), kind, prepared, customs);
     const bool ok = !prepared && failure.code == AssetDiagnosticCode::CorruptPackage &&
-                    failure.error == ErrorCode::InvalidArgument &&
+                    failure.error == ErrorCode::CorruptData &&
                     failure.section == static_cast<uint32>(section);
     if (!ok) {
         // 실제로 받은 진단 코드를 실패 문구로 남긴다.

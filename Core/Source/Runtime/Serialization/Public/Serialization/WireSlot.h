@@ -14,8 +14,8 @@
 // InstancedStructWire.h), Optional 내부 Record는 길이 prefix 없이 payload의 남은 byte 전부다
 // (OptionalWire.h).
 //
-// 오류는 Archive 규약을 따른다: 그 자리가 받지 않는 tag·잘림·길이 불일치는 InvalidArgument, 크기
-// 한도 초과는 CapacityExceeded다.
+// 오류는 Archive 규약을 따른다: 읽은 데이터의 받지 않는 tag·잘림·길이 불일치는 CorruptData(쓰기
+// 인자는 InvalidArgument), 크기 한도 초과는 CapacityExceeded다.
 namespace rocks {
 
 // 스키마 값 하나의 wire 크기다(ValueArray·Set·Map·Optional reader·writer가 자리의 wire 크기와 합쳐
@@ -118,8 +118,8 @@ private:
 
 // 원소·Map 값 자리의 Record(u64 길이 + Record)를 읽어 Record byte를 돌려준다(원본을 빌린다).
 // cursor는 성공할 때만 옮긴다(실패하면 호출 전 위치). 길이 prefix가 잘렸거나 길이가 남은 byte보다
-// 크면 InvalidArgument, 길이가 reader의 maxValueBytes를 넘으면 CapacityExceeded, 내용이 Record가
-// 아니면 ReadRecordHeader의 오류다(0 byte도 InvalidArgument).
+// 크면 CorruptData, 길이가 reader의 maxValueBytes를 넘으면 CapacityExceeded, 내용이 Record가
+// 아니면 ReadRecordHeader의 오류다(0 byte도 CorruptData).
 //
 // 예산: operation 하나와 길이 prefix 8을 청구한다. 내용 byte는 단독 reader(ArchiveReader::Create)일
 // 때만 청구한다 — Record 트리의 공유 예산 reader(RecordReader::OpenValue·각 reader의 OpenField)면

@@ -94,7 +94,7 @@ TEST(GraphStage_PhaseOrderAndCallChecksKeepState) {
                 ObjectGraphInput bad;
                 bad.bytes = corrupt.View();
                 ObjectGraphStage stage(allocator, registry, types, registry.OwnerAccess());
-                CHECK(stage.Validate(bad).Error() == ErrorCode::InvalidArgument);
+                CHECK(stage.Validate(bad).Error() == ErrorCode::CorruptData);
                 CHECK(stage.Validate(input).Error() == ErrorCode::InvalidArgument);
                 CHECK(stage.StoredVersion(0).Error() == ErrorCode::InvalidArgument);
             }
@@ -230,7 +230,7 @@ TEST(GraphStage_ValidateRunsOnWorkerThread) {
             CHECK(loaded == ErrorCode::WrongThread);
             CHECK(LoadObjectGraph(allocator, registry, types, registry.OwnerAccess(),
                                   Span<const uint8>(garbage, sizeof(garbage)))
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(registry.Stats().liveObjects == 0 && registry.Stats().reservedObjects == 0);
         }
 

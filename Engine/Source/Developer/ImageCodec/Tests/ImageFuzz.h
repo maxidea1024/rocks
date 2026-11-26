@@ -126,7 +126,7 @@ inline void FixPngCrcs(Array<uint8>& file) noexcept {
 inline bool AcceptableFailure(const ImageDecodeFailure& failure, bool capped) noexcept {
     switch (failure.code) {
     case AssetDiagnosticCode::InvalidSource:
-        return failure.error == ErrorCode::InvalidArgument ||
+        return failure.error == ErrorCode::CorruptData ||
                failure.error == ErrorCode::CapacityExceeded;
     case AssetDiagnosticCode::UnsupportedSourceFormat:
     case AssetDiagnosticCode::LossySource:

@@ -148,21 +148,21 @@ TEST(Audio_Flac_Rejects) {
     SystemAllocator allocator;
     // FLAC이 아님·빈 입력·"fLaC"만.
     const uint8 notFlac[] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E'};
-    CHECK(FlacError(Bytes(notFlac), allocator) == ErrorCode::InvalidArgument);
-    CHECK(FlacError(Span<const uint8>(), allocator) == ErrorCode::InvalidArgument);
-    CHECK(FlacError(Span<const uint8>(FlacStereo16, 4), allocator) == ErrorCode::InvalidArgument);
+    CHECK(FlacError(Bytes(notFlac), allocator) == ErrorCode::CorruptData);
+    CHECK(FlacError(Span<const uint8>(), allocator) == ErrorCode::CorruptData);
+    CHECK(FlacError(Span<const uint8>(FlacStereo16, 4), allocator) == ErrorCode::CorruptData);
 
     // audio data 한 byte가 바뀌면 frame CRC가 맞지 않는다.
     Array<uint8> corrupted(allocator);
     REQUIRE(corrupted.TryAppend(Bytes(FlacStereo16)));
     const usize middle = corrupted.Size() - AudioTailBytes / 2;
     corrupted[middle] = static_cast<uint8>(corrupted[middle] ^ CorruptionMask);
-    CHECK(FlacError(corrupted.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(FlacError(corrupted.View(), allocator) == ErrorCode::CorruptData);
 
     // 길이를 아는 파일이 마지막 frame 안에서 잘리면 STREAMINFO 길이·MD5와 맞지 않는다.
     constexpr usize CutBytes = 100;
     CHECK(FlacError(Span<const uint8>(FlacStereo16, sizeof(FlacStereo16) - CutBytes), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // STREAMINFO rate가 범위 밖(4000 Hz)이면 Unsupported.
     Array<uint8> lowRate(allocator);
@@ -188,7 +188,7 @@ TEST(Audio_Flac_StreamInfoChecks) {
         Array<uint8> file(allocator);
         REQUIRE(file.TryAppend(Bytes(FlacStereo16)));
         file[StreamInfoMd5Offset] = static_cast<uint8>(file[StreamInfoMd5Offset] ^ CorruptionMask);
-        CHECK(FlacError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(FlacError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // MD5를 0으로 하고 마지막 frame을 frame 경계에서 떼면 STREAMINFO 길이와 맞지 않는다.
@@ -199,7 +199,7 @@ TEST(Audio_Flac_StreamInfoChecks) {
             file[StreamInfoMd5Offset + index] = 0;
         }
 
-        CHECK(FlacError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(FlacError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // STREAMINFO 길이가 실제보다 짧으면(MD5 0) 그 길이를 넘는 frame에서 실패한다.
@@ -218,7 +218,7 @@ TEST(Audio_Flac_StreamInfoChecks) {
                 static_cast<uint8>(ShortLength >> ((3 - index) * BitsPerByte));
         }
 
-        CHECK(FlacError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(FlacError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // STREAMINFO 길이가 PCM 상한을 넘으면 디코드 전에 CapacityExceeded다(36 bit 최대값).
@@ -245,13 +245,13 @@ TEST(Audio_Flac_StreamInfoChecks) {
     }
 
     // 길이·MD5가 없는 파일에서 가운데 frame의 subframe 머리가 깨지면 libFLAC은 LOST_SYNC를 내고 그
-    // 자리를 무음 frame으로 채운다. 무손실 원본을 조용히 바꾸지 않도록 InvalidArgument다.
+    // 자리를 무음 frame으로 채운다. 무손실 원본을 조용히 바꾸지 않도록 CorruptData다.
     {
         Array<uint8> file(allocator);
         REQUIRE(file.TryAppend(Bytes(FlacMono16Unknown)));
         const usize subframe = FlacMono16UnknownSubframeOffsets[1];
         file[subframe] = static_cast<uint8>(file[subframe] | SubframePaddingBit);
-        CHECK(FlacError(file.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(FlacError(file.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // 길이·MD5가 없는 파일을 frame 경계에서 자르면 알아챌 수단이 없어 짧게 받는다(3.27.2절 한계).
@@ -267,14 +267,14 @@ TEST(Audio_Flac_TruncatedAndCorruptedInputs) {
     SystemAllocator allocator;
     DecodedSourceAudio audio(allocator);
     // 길이를 모르는 파일의 모든 앞부분(41 byte 간격): 받으면 패턴의 앞부분과 같고, 아니면
-    // InvalidArgument다.
+    // CorruptData다.
     constexpr usize PrefixStep = 41;
     for (usize size = 0; size <= sizeof(FlacMono16Unknown); size += PrefixStep) {
         const Result<void> decoded = DecodeFlac(Span<const uint8>(FlacMono16Unknown, size), audio);
         if (decoded) {
             CHECK(audio.FrameCount() <= Mono16Frames && MatchesPattern(audio, Bits16));
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument);
+            CHECK(decoded.Error() == ErrorCode::CorruptData);
         }
     }
 
@@ -308,7 +308,7 @@ TEST(Audio_Flac_TruncatedAndCorruptedInputs) {
 
             CHECK(finite);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument ||
+            CHECK(decoded.Error() == ErrorCode::CorruptData ||
                   decoded.Error() == ErrorCode::Unsupported ||
                   decoded.Error() == ErrorCode::CapacityExceeded ||
                   decoded.Error() == ErrorCode::OutOfMemory);

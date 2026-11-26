@@ -31,15 +31,16 @@ class ROCKS_AUDIO_API AudioDecoder {
 public:
     virtual ~AudioDecoder() = default;
 
-    // 머리와 codec 머리를 확인한다(codec·채널 1–8·rate·bitstream 판). 다르면 InvalidArgument(판은
-    // Unsupported — codec 다음, 다른 규칙보다 먼저 본다)다. 실패하면 앞 상태(열린 청크)를 남기지
-    // 않는다.
+    // 머리와 codec 머리를 확인한다. 머리 codec이 이 디코더가 아니면 InvalidArgument(호출자 오용),
+    // bitstream 판을 모르면 Unsupported(codec 다음, 다른 규칙보다 먼저 본다), 채널 1–8·rate·codec
+    // 머리 규칙 위반은 CorruptData다(3.38절). 실패하면 앞 상태(열린 청크)를 남기지 않는다.
     virtual Result<void> Open(const AudioPlatformDataHeader& header,
                               Span<const uint8> codecHeader) noexcept = 0;
 
     // 청크를 startCodecFrame(∈ [chunk.firstFrame, 끝))부터 디코드할 준비를 한다. 상태를 비우고
-    // payload 단위 경계·크기를 먼저 검사하며(손상은 InvalidArgument), pre-roll과 startCodecFrame 앞
-    // frame은 디코드해 버린다. payload는 청크를 다 낼 때까지 살아 있어야 한다.
+    // payload 단위 경계·크기를 먼저 검사하며(손상은 CorruptData), pre-roll과 startCodecFrame 앞
+    // frame은 디코드해 버린다. Open 전, payload 길이 ≠ chunk.payloadBytes, startCodecFrame이 청크
+    // 밖이면 InvalidArgument다(호출자 오용). payload는 청크를 다 낼 때까지 살아 있어야 한다.
     virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                                     uint64 startCodecFrame) noexcept = 0;
 
@@ -54,7 +55,7 @@ public:
 
     // 다음 단위를 out에 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수,
     // 청크 끝이면 0이다. out 채널 수가 다르거나 frame 용량이 MaxFramesPerCall보다 작거나
-    // Open·BeginChunk 전이면 InvalidArgument다.
+    // Open·BeginChunk 전이면 InvalidArgument, 단위 디코드가 실패하면(손상) CorruptData다.
     virtual Result<uint32> DecodeNext(const PlanarView& out) noexcept = 0;
 
     // DecodeNext 한 번이 쓸 수 있는 최대 frame 수다(PCM16 1024, ADPCM 1012,
@@ -159,7 +160,8 @@ private:
 
 // 플랫폼 데이터 전체를 디코드한다(에디터 미리듣기·도구·시험용, AudioRT는 쓰지 않는다). 할당 전에
 // 모든 청크의 SHA와 단위 경계를 먼저 확인하고, delay·padding을 잘라 유효 frame만 남긴다. 실패하면
-// out을 비운다. 오류: payload가 다 없거나 청크 손상 InvalidArgument, 디코더가 표에 없음 NotFound,
+// out을 비운다. 오류: payload가 다 없는 보기 InvalidArgument(호출자 오용), 청크 SHA·크기·단위
+// 손상과 디코더가 청크 frame 수와 다르게 냄 CorruptData, 디코더가 표에 없음 NotFound,
 // bitstream 판을 모름 Unsupported, 결과가 주소 공간을 넘음 CapacityExceeded, 할당 실패 OutOfMemory.
 ROCKS_AUDIO_API Result<void> DecodeAudioPlatformData(const AudioPlatformDataView& view,
                                                      const AudioDecoderTable& table,

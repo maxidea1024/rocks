@@ -706,7 +706,7 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
             const PackageStoredBulk& copy = stored.Value();
             if (Crc32(copy.stored) != copy.crc32) {
                 return FailAsset<void>(
-                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, self,
+                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, self,
                     static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
             }
 
@@ -744,7 +744,7 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
         if (raw.Value().Size() != draft.original.rawBytes ||
             !(Sha256::Hash(raw.Value()) == draft.original.sha256)) {
             return FailAsset<void>(
-                failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, self,
+                failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, self,
                 static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
         }
 

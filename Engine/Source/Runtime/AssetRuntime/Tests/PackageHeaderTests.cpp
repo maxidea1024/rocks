@@ -76,7 +76,7 @@ struct Expect {
     }
 
     bool Corrupt(const Array<uint8>& bytes, PackageKind kind = PackageKind::Cooked) const noexcept {
-        return Fails(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, kind);
+        return Fails(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, kind);
     }
 
     // 읽기가 성공하고 읽기 전용 여부가 readOnly인지 본다.
