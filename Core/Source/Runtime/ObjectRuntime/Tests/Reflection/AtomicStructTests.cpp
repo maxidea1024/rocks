@@ -7,7 +7,7 @@
 
 // 리플렉션 B9b2 struct Atomic 시험이다(Docs/Design/ReflectionExtensions.ko.md 3.1·3.2절):
 // RegisterStruct의 struct 플래그 mask(Atomic만), 클래스 Atomic 비트 거부, StructView::IsAtomic과
-// 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d·Rotator
+// 비전파, Core 값 타입 미러 19종 중 Transform을 뺀 18종의 Atomic, Transform3f·Transform3d·Rotator
 // 미러와 Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
 using namespace rocks;
 namespace atomic_struct_tests_file {
@@ -252,7 +252,7 @@ TEST(AtomicStruct_IsAtomicIsDeclaredPerStructAndNotPropagated) {
     RuntimeFieldOps fieldOps;
     fieldOps.fieldId = InnerId;
     fieldOps.valueNativeType = Key(0);
-    fieldOps.encode = +[](const RuntimeFieldOps&, ObjectRegistry&, const ObjectAccessContext&,
+    fieldOps.encode = +[](const RuntimeFieldOps&, ObjectRegistry*, const ObjectAccessContext&,
                           ObjectHandle, ArchiveWriter&, FieldEncodeContext&) noexcept {
         return Result<uint32>::Failure(ErrorCode::Unsupported);
     };
@@ -309,7 +309,7 @@ TEST(AtomicStruct_ClassRegistrationRejectsTheAtomicBit) {
     CHECK(types.Shutdown());
 }
 
-// CoreTypeBindings 미러 17종이 등록되고 혼합 정밀도 Transform을 뺀 16종이 Atomic이다. Transform의
+// CoreTypeBindings 미러 19종이 등록되고 혼합 정밀도 Transform을 뺀 18종이 Atomic이다. Transform의
 // 멤버(Vec3d·Quat·Vec3)는 각각 Atomic 미러라 멤버마다 통째다.
 TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
     struct Mirror {
@@ -352,16 +352,18 @@ TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
          "rocks::core_type_bindings::TransformBinding", false},
         {TypeIdOf<FrameRate>(), NativeTypeKey<FrameRate>(),
          "rocks::core_type_bindings::FrameRateBinding", true},
+        {TypeIdOf<Box<double>>(), NativeTypeKey<Box<double>>(),
+         "rocks::core_type_bindings::BoxdBinding", true},
     };
     constexpr usize MirrorCount = sizeof(mirrors) / sizeof(mirrors[0]);
-    static_assert(MirrorCount == 18, "CoreTypeBindings declares 18 Core value type mirrors");
+    static_assert(MirrorCount == 19, "CoreTypeBindings declares 19 Core value type mirrors");
 
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     {
         ModuleRegistration registration(types, allocator);
         REQUIRE(generated::CoreTypeBindings::RegisterModuleTypes(registration));
-        // 모듈이 값 타입 미러 18종과 InterpCurve 미러 11종(enum 1·키 5·커브 5 — CurveData CV9)을
+        // 모듈이 값 타입 미러 19종과 InterpCurve 미러 11종(enum 1·키 5·커브 5 — CurveData CV9)을
         // 등록한다(표의 ID가 모두 다르고 빠진 미러가 없다).
         constexpr usize InterpCurveMirrorCount = 11;
         CHECK(types.Stats().registeredTypes == MirrorCount + InterpCurveMirrorCount);
@@ -376,7 +378,7 @@ TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
             atomic += mirror.atomic ? 1 : 0;
         }
 
-        CHECK(atomic == 17);
+        CHECK(atomic == 18);
         {
             auto transform = types.AcquireValueType(TypeIdOf<Transform>(), TypeKind::Struct);
             REQUIRE(transform);

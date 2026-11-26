@@ -63,7 +63,7 @@ protected:
 | Widget navigation 규칙 | `UWidget::SetNavigationRule*` · `FNavigationMethod`(`Widget.cpp:788-893`) | 방향별 규칙(경계 탈출·명시·순환·정지·사용자 정의)과 명시 대상 ID를 Widget 속성으로 저장하여 Element navigation(3.9절)에 반영 |
 | 확장 | `UWidgetBlueprintGeneratedClassExtension` · `UUserWidgetExtension` | 에셋 확장 자료(예: ViewModel 정의)와 인스턴스 확장 객체(예: 바인딩 실행 view, 변경 통지 저장소) |
 | 검증 | `FWidgetBlueprintCompilerContext`(`UMGEditor/Private/WidgetBlueprintCompiler.cpp:502-600, 1257-1412`) | `rocks validate --ui`와 cook에서 필수 결합 누락·형식 불일치·애니메이션 대상 누락·이름 있는 slot 충돌·ID 중복을 진단 코드로 거부한다. 진단 코드 구간은 [컴파일러 진단](../CompilerDiagnostics.ko.md) 체계에 등록한다 |
-| 화면 추가 | `AddToViewport` · `AddToPlayerScreen` · `UGameViewportSubsystem`(`GameViewportSubsystem.cpp:150-193, 301-333`) | 전체 화면 추가(viewport overlay)와 LocalPlayer별 추가를 구분한다. UiWidget은 화면 layer 등록 interface만 두고, game viewport·LocalPlayer layer·World 제거 시 자동 제거(slot 옵션, 기본 켬)는 WorldIntegration이 구현한다. 소유는 Element 쪽(viewport → canvas → root 유지 Element → UserWidget)이다 |
+| 화면 추가 | `AddToViewport` · `AddToPlayerScreen` · `UGameViewportSubsystem`(`GameViewportSubsystem.cpp:150-193, 301-333`) | 전체 화면 추가(viewport overlay)와 LocalPlayer별 추가를 구분한다. UiWidget은 화면 layer 등록 interface만 두고, game viewport·LocalPlayer layer·World 제거 시 자동 제거(slot 옵션, 기본 켬)는 UiWorld이 구현한다. 소유는 Element 쪽(viewport → canvas → root 유지 Element → UserWidget)이다 |
 
 ### 5.5 ViewModel 바인딩
 
@@ -99,10 +99,10 @@ UE `UWidgetAnimation`은 MovieScene 시퀀스이며 이름(Widget 이름·slot W
 | 입력 장치 추적 | `UCommonInputSubsystem` · `FCommonInputPreprocessor` | 마우스·키보드 / 게임패드 / 터치를 입력 전처리기에서 판별하고 변경을 통지 |
 | 버튼 아이콘 자료 | `UCommonInputBaseControllerData` · `UCommonInputPlatformSettings` | 플랫폼·게임패드 종류별 key → brush 표 |
 | 동작 표시줄 | `UCommonBoundActionBar` | 현재 바인딩된 동작의 버튼 목록 |
-| 기본 입력 모드 | `APlayerController::SetInputMode`(`FInputModeUIOnly`·`GameAndUI`·`GameOnly`, `PlayerController.h:126-212`) | UiScreens를 쓰지 않는 게임의 기본 입력 모드 API. WorldIntegration이 LocalPlayer 단위로 제공 |
+| 기본 입력 모드 | `APlayerController::SetInputMode`(`FInputModeUIOnly`·`GameAndUI`·`GameOnly`, `PlayerController.h:126-212`) | UiScreens를 쓰지 않는 게임의 기본 입력 모드 API. UiWorld이 LocalPlayer 단위로 제공 |
 
 **UE와 다른 점:** CommonUI는 버튼·텍스트 스타일과 컨트롤러 자료를 클래스 기본 객체(CDO)로 공유한다(`CommonButtonBase.cpp:71-77`, `CommonInputBaseTypes.h:290`). Rocks는 Blueprint 클래스가 없으므로 데이터 에셋으로 공유하고, 클래스 상속은 부모 에셋 + 재정의로 대체한다. 입력 동작은 Rocks Input의 action 체계(전체 계획 Enhanced Input 계열 행)를 사용한다.
 
 ### 5.9 월드 공간 Widget
 
-UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 월드 공간(가상 창을 render target에 그려 mesh에 표시) 두 방식을 두고, 월드 공간 입력은 viewport의 사용자 정의 hit 경로 또는 상호작용 component의 가상 사용자로 주입한다(`UMG/Public/Components/WidgetComponent.h:25-95`, `WidgetComponent.cpp:153-191, 1206, 1478`, `WidgetInteractionComponent.cpp:77-535`). UE의 viewport hit 경로는 첫 번째 플레이어만 사용한다(`WidgetComponent.cpp:171`). Rocks는 WorldIntegration에 같은 구조로 두되 LocalPlayer마다 hit 경로를 둔다. 전체 계획 21.4절의 depth·velocity·업스케일 정책을 적용한다.
+UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 월드 공간(가상 창을 render target에 그려 mesh에 표시) 두 방식을 두고, 월드 공간 입력은 viewport의 사용자 정의 hit 경로 또는 상호작용 component의 가상 사용자로 주입한다(`UMG/Public/Components/WidgetComponent.h:25-95`, `WidgetComponent.cpp:153-191, 1206, 1478`, `WidgetInteractionComponent.cpp:77-535`). UE의 viewport hit 경로는 첫 번째 플레이어만 사용한다(`WidgetComponent.cpp:171`). Rocks는 UiWorld에 같은 구조로 두되 LocalPlayer마다 hit 경로를 둔다. 전체 계획 21.4절의 depth·velocity·업스케일 정책을 적용한다.

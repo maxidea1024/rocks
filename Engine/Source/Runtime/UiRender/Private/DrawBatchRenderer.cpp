@@ -57,20 +57,16 @@ Result<graphics::PipelineHandle> CreatePipeline(graphics::Device& device,
     case UiShader::Solid:
         return CreateUiPipeline(device, shaders, UiSolidVertexType, UiSolidPixelType, desc);
     case UiShader::Image:
-        desc.bindings.texture = UiTextureName;
         return CreateUiPipeline(device, shaders, UiImageVertexType, UiImagePixelType, desc);
     case UiShader::Mask:
-        desc.bindings.texture = UiTextureName;
         return CreateUiPipeline(device, shaders, UiImageVertexType, UiMaskPixelType, desc);
     case UiShader::Retained:
-        desc.bindings.texture = UiTextureName;
         return CreateUiPipeline(device, shaders, UiImageVertexType, UiRetainedPixelType, desc);
     case UiShader::RoundedBox:
         return CreateUiPipeline(device, shaders, UiRoundedBoxVertexType, UiRoundedBoxPixelType,
                                 desc);
     case UiShader::Blur:
     default:
-        desc.bindings.texture = UiBackdropName;
         return CreateUiPipeline(device, shaders, UiBlurVertexType, UiBlurPixelType, desc);
     }
 }
@@ -192,6 +188,11 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
         float offsetY;
     };
     const ScreenTransform transform{2.0f / viewportSize.x, -2.0f / viewportSize.y, -1.0f, 1.0f};
+    // 텍스처 slot은 셰이더 바인딩 layout에서 찾는다(처음 한 번).
+    if (auto slots = buffers.PrepareSlots(); !slots) {
+        return slots;
+    }
+
     commands.SetViewport({0, 0, viewportSize.x, viewportSize.y, 0, 1});
     commands.SetPipeline(pipeline);
     auto constants = commands.SetDrawConstants(graphics::DrawConstantBytes(transform));
@@ -226,7 +227,8 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
         if (command.operation == PaintOperation::CopyBackdrop ||
             command.operation == PaintOperation::BlurBackdrop ||
             command.operation == PaintOperation::BlurToBuffer) {
-            commands.SetTexture({});
+            // 복사 대상 텍스처를 읽기 slot에서 내린다(흰 텍스처를 묶는다).
+            commands.SetTexture(graphics::ShaderStage::Pixel, buffers.BackdropSlot(), {});
             auto copied = commands.CopyPassTarget(command.operation == PaintOperation::CopyBackdrop
                                                       ? texture->texture
                                                       : buffers.backdrop_);
@@ -284,9 +286,11 @@ Result<void> DrawBatchRenderer::Draw(graphics::CommandContext& commands,
                 return set;
             }
 
-            commands.SetTexture(buffers.backdrop_);
+            commands.SetTexture(graphics::ShaderStage::Pixel, buffers.BackdropSlot(),
+                                buffers.backdrop_);
         } else if (texture) {
-            commands.SetTexture(texture->texture);
+            commands.SetTexture(graphics::ShaderStage::Pixel, buffers.TextureSlot(),
+                                texture->texture);
         }
 
         commands.DrawIndexed(command.indexCount, 1, command.firstIndex);

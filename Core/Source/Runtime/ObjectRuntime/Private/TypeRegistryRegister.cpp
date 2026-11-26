@@ -1,3 +1,4 @@
+#include "TypeRegistryFunctions.h"
 #include "TypeRegistryInternal.h"
 #include "TypeRegistryRegisterInternal.h"
 
@@ -38,7 +39,8 @@ constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::DuplicateTransient) |
     static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient) |
     static_cast<uint32>(FieldFlags::SaveGame) |
-    static_cast<uint32>(FieldFlags::TextExportTransient);
+    static_cast<uint32>(FieldFlags::TextExportTransient) |
+    static_cast<uint32>(FieldFlags::TextMapMergeByKey);
 
 // 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
 // 가져 패키지 저장의 rejectMissingRequired가 실패한다).
@@ -323,6 +325,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         return Result<TypeRegistrationToken>::Failure(listed.Error());
     }
 
+    // 리플렉션 함수 서술(Docs/Design/FunctionReflection.ko.md FD10)이다. 기반 체인과의 겹침은 잠금
+    // 안에서 본다.
+    auto functionsChecked = detail::ValidateFunctionList(schema, ops);
+    if (!functionsChecked) {
+        return Result<TypeRegistrationToken>::Failure(functionsChecked.Error());
+    }
+
+    detail::FunctionBlockLayout functionBlock = functionsChecked.Value();
+
     // 완전한 필드 배치를 선언한 타입은 그래프에 저장할 수 있어야 하므로 Transient가 아닌 모든
     // 필드에 codec(encode·decode)이 있어야 한다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     if (ops.completeFieldLayout) {
@@ -395,12 +406,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     // 필드 ID 정렬 색인과 스키마 위치 → 함수표 위치 색인(경로 접근의 FieldIndex·FieldOps).
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     const usize opsIndexOffset = orderOffset + schema.fields.Size() * sizeof(uint32);
+    // 리플렉션 함수 배열(서술·매개변수·연산 — FD10)을 색인 뒤에 둔다.
+    const usize functionsEnd =
+        functionBlock.Place(opsIndexOffset + schema.fields.Size() * sizeof(uint32));
     // EditorOnly 필드 ID 목록(Guid 정렬)을 문자열보다 먼저 둔다.
-    const usize idsOffset =
-        (opsIndexOffset + schema.fields.Size() * sizeof(uint32) + alignof(Guid) - 1) &
-        ~(alignof(Guid) - 1);
+    const usize idsOffset = (functionsEnd + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
     usize bytes = idsOffset + schema.editorOnlyFieldIds.Size() * sizeof(Guid);
-    if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
+    if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size()) ||
+        !AddBytes(bytes, functionBlock.textBytes)) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
 
@@ -492,6 +505,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                     schema.withinType == schema.id ? base : FindLocked(schema.withinType);
                 if (within && !derives(within)) {
                     return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+
+            // 리플렉션 함수의 ID·실효 이름은 기반 체인의 함수와 겹치지 않는다(FD2·FD10 — 상속
+            // 조회가 이름으로 기반 체인을 걷는다).
+            for (const Record* inherited = base; inherited; inherited = inherited->base) {
+                if (detail::FunctionsConflictWithBase(schema.functions,
+                                                      inherited->schema.functions)) {
+                    return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
                 }
             }
 
@@ -592,8 +614,12 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         }
     }
 
+    Span<const RuntimeFunctionOps> functionOps;
+    detail::CopyFunctions(functionBlock, static_cast<uint8*>(memory.Value()), schema, ops, cursor,
+                          record->schema.functions, functionOps);
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};
+    record->ops.functions = functionOps;
     record->base = base;
 
     platform::LockGuard lock(gate_);

@@ -23,10 +23,11 @@ namespace rocks {
 //
 // 리플렉션(Docs/Design/ReflectionFoundations.ko.md 9.1절): WorldOnly 리플렉션 클래스다. 영속
 // 필드는 enabled(ReadOnly — 경로·리플렉션 쓰기가 World의 활성 전환 hook을 우회하지 않게, 바꿀 때는
-// SetEnabled)뿐이고, World 포인터·소유 Actor·Tick 설정·수명 기록은 ROCKS_NATIVE(저장하지 않는
-// 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly 상속)로 리플렉션 헤더에, 영속
-// 상태가 없는 런타임 전용 파생은 위처럼 ROCKS_NATIVE_TYPE으로 둔다(그 생성 헤더
-// <World/Component.generated.h>를 RegisterNativeClass 전에 include한다).
+// SetEnabled)와 tickSettings(Tick 설정 — 생성자 값은 클래스 기본값, 시작 때 한 번 등록하므로 시작
+// 뒤 변경은 반영하지 않는다)이고, World 포인터·소유 Actor·Tick 등록 handle·수명 기록은
+// ROCKS_NATIVE(저장하지 않는 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly
+// 상속)로 리플렉션 헤더에, 영속 상태가 없는 런타임 전용 파생은 위처럼 ROCKS_NATIVE_TYPE으로 둔다(그
+// 생성 헤더 <World/Component.generated.h>를 RegisterNativeClass 전에 include한다).
 //
 // 수명:
 // - hook 순서: OnRegister -> OnAwake -> OnEnable -> OnStart(시작 단계, 활성일 때) -> OnTick… ->
@@ -40,7 +41,7 @@ namespace rocks {
 //   거짓)는 World에 편입되기 전까지 World API를 쓰지 못한다(Destroy는 InvalidArgument).
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
-ROCKS_CLASS(WorldOnly)
+ROCKS_CLASS(WorldOnly, ScriptType)
 class ROCKS_WORLD_API Component : public Object {
     ROCKS_GENERATED_BODY()
 
@@ -133,6 +134,20 @@ public:
     // InvalidArgument, 할당 실패.
     Result<void> MarkSystemStateDirty(SystemStateKind kind) noexcept;
 
+    // 그 종류의 시스템 상태를 그 자리에서 다시 만든다(UE RecreatePhysicsState·
+    // EnsurePhysicsStateCreated — 23.2절). 있으면 지우고, WantsSystemState가 참이면 만든다(없던
+    // 것도 만든다). 그 종류의 대기 표시는 지운다. 같은 프레임의 다음 질의가 바뀐 상태를 봐야 하는
+    // setter가 부른다.
+    //
+    // 사용 예:
+    //   collisionEnabled_ = enabled;
+    //   (void)RecreateSystemStateNow(SystemStateKind::Physics);   // 실패해도 값은 바뀌었다
+    //
+    // 등록 전·해제 뒤·파괴 대기면 아무것도 하지 않고 성공한다. 오류: 범위 밖 종류 InvalidArgument,
+    // 같은 종류의 Create·Destroy 안에서 다시 부르면 Busy, Create 실패는 그 오류(그 종류 없이 두고
+    // Warning SystemStateRecreateFailed).
+    Result<void> RecreateSystemStateNow(SystemStateKind kind) noexcept;
+
     // --- 타입 규칙·EditorOnly(23.2절 CR5·CR6) ---
 
     // 이 타입의 규칙이다(인스턴스 virtual — World가 만든 직후 등록 전에 묻는다). 기본은 규칙 없음.
@@ -180,10 +195,10 @@ private:
 
     ROCKS_NATIVE() World* world_ = nullptr;
     ROCKS_NATIVE() ObjectHandle owner_;
-    // Tick 설정은 클래스 기본값(생성자)이 정한다. 기본값 레코드와 차이 저장이 아직 없어 인스턴스
-    // 저장값이 기본값 변경을 가리므로 저장하지 않는다. A5에서 리플렉션으로 옮긴다(9.1절).
-    ROCKS_NATIVE() TickSettings tickSettings_;
-    ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
+    // Tick 설정이다(A5c — 생성자 값은 클래스 기본값 레코드에 들어가고, 차이 저장이 기본값과 같은
+    // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
+    ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
+    ROCKS_PROPERTY(ReadOnly, Name = "enabled", ScriptReadOnly) bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // World가 관리하는 수명 기록이다.
     ROCKS_NATIVE() ComponentState state_ = ComponentState::Constructed;
@@ -194,6 +209,13 @@ private:
     // 있는 시스템 상태와 다시 만들 표시다(종류마다 비트).
     ROCKS_NATIVE() uint8 systemStates_ = 0;
     ROCKS_NATIVE() uint8 dirtySystemStates_ = 0;
+    // 지금 다시 만드는 중인 종류다(즉시·갱신 지점 모두 — 같은 종류 재진입은 Busy).
+    ROCKS_NATIVE() uint8 recreatingSystemStates_ = 0;
+    // 갱신 지점이 이 Component에서 아직 처리하지 않은 종류다(즉시 다시 만들기가 지운다).
+    ROCKS_NATIVE() uint8 flushingSystemStates_ = 0;
+    // World의 갱신 목록에 들어 있다(표시 비트와 따로 — 즉시 다시 만들기가 비트를 지워도 한 번만
+    // 들어간다).
+    ROCKS_NATIVE() bool systemStateQueued_ = false;
     // 단독 파괴(DestroyComponent)의 정리 이유다(먼저 정한 것을 유지한다).
     ROCKS_NATIVE() EndPlayReason endReason_ = EndPlayReason::Destroyed;
     ROCKS_NATIVE() TickHandle ticks_[detail::TickHookCount];

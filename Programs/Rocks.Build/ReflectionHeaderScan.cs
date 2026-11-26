@@ -46,11 +46,30 @@ public static class ReflectionHeaderScan
     /// <summary>text(헤더 원문)에 리플렉션 선언 표지가 있는가다. 주석·리터럴·전처리 지시문 줄은 보지 않는다.</summary>
     public static bool HasMarkup(string text) => Markup.IsMatch(WithoutPreprocessorLines(CppSourceText.WithoutCommentsAndLiterals(text)));
 
+    // 줄 첫머리 셰이더 파라미터 구조체 표지다(Docs/Design/ShaderSystem 16.2절 SSD49 — 리플렉션 표지와 같은 어휘 판정).
+    private static readonly Regex ShaderParameterMarkup = new(@"^[ \t]*ROCKS_SHADER_PARAMETERS[ \t]*\(",
+        RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromSeconds(10));
+
+    /// <summary>text(헤더 원문)에 셰이더 파라미터 구조체 표지(ROCKS_SHADER_PARAMETERS)가 있는가다. 판정 규칙은 <see cref="HasMarkup"/>와 같다.</summary>
+    public static bool HasShaderParameterMarkup(string text) =>
+        ShaderParameterMarkup.IsMatch(WithoutPreprocessorLines(CppSourceText.WithoutCommentsAndLiterals(text)));
+
+    /// <summary>
+    /// <see cref="Discover"/>와 같은 범위·순서로 셰이더 파라미터 구조체 헤더를 찾는다(MetaCompiler 셰이더 파라미터 모드의 입력 — 16.2절 SSD49).
+    /// </summary>
+    public static IReadOnlyList<ReflectionHeader> DiscoverShaderParameters(string moduleDirectory, IReadOnlyList<string> publicIncludeDirectories,
+        IReadOnlyList<string> privateIncludeDirectories) =>
+        DiscoverMatching(moduleDirectory, publicIncludeDirectories, privateIncludeDirectories, HasShaderParameterMarkup);
+
     /// <summary>
     /// moduleDirectory(절대 경로) 안의 include 디렉터리에서 리플렉션 헤더를 찾는다. 반환 목록은 철자 순서다. 없는 디렉터리는 건너뛴다.
     /// </summary>
     public static IReadOnlyList<ReflectionHeader> Discover(string moduleDirectory, IReadOnlyList<string> publicIncludeDirectories,
-        IReadOnlyList<string> privateIncludeDirectories)
+        IReadOnlyList<string> privateIncludeDirectories) =>
+        DiscoverMatching(moduleDirectory, publicIncludeDirectories, privateIncludeDirectories, HasMarkup);
+
+    private static IReadOnlyList<ReflectionHeader> DiscoverMatching(string moduleDirectory, IReadOnlyList<string> publicIncludeDirectories,
+        IReadOnlyList<string> privateIncludeDirectories, Func<string, bool> marked)
     {
         string module = Path.GetFullPath(moduleDirectory);
         var seen = new HashSet<string>(PathComparer);
@@ -66,7 +85,7 @@ public static class ReflectionHeaderScan
 
                 foreach (string full in Headers(directory, []))
                 {
-                    if (!seen.Add(full) || !HasMarkup(File.ReadAllText(full)))
+                    if (!seen.Add(full) || !marked(File.ReadAllText(full)))
                     {
                         continue;
                     }

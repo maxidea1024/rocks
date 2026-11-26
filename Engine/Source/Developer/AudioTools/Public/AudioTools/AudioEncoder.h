@@ -5,7 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Result.h>
 
-// 쿠킹 쪽 인코더 인터페이스와 PCM16·ADPCM 인코더다(Docs/Design/AudioSystem.ko.md 3.30.3절).
+// 쿠킹 쪽 인코더 인터페이스와 PCM16·ADPCM 인코더다(Docs/Design/AudioSystem 3.30.3절).
 // 인코더는 codec 단위(패킷·블록 묶음) 목록을 내고,
 // WriteAudioPlatformData(AudioPlatformDataWriter.h)가 청크로 나눠 플랫폼 데이터 byte를 만든다.
 //
@@ -60,9 +60,9 @@ struct AudioCodecInfo {
     uint32 maxChannels = 0;
 };
 
-// 인코드 설정이다. PCM16·ADPCM은 쓰지 않는다(Opus 품질은 C3).
+// 인코드 설정이다. PCM16·ADPCM은 쓰지 않는다. Opus는 품질이 범위 밖이면 InvalidArgument다.
 struct AudioEncodeSettings {
-    float quality = 1.0f;
+    uint32 quality = DefaultAudioCompressionQuality;
 };
 
 class ROCKS_AUDIOTOOLS_API AudioEncoder {
@@ -73,7 +73,8 @@ public:
 
     // pcm(채널 수 = pcm.channelCount)을 인코드해 out을 채운다(out은 먼저 비운다). 채널 1–8 밖, 채널
     // 마스크 bit 수 불일치, rate 범위 밖, frame 0, 비유한 표본은 InvalidArgument, 할당 실패는
-    // OutOfMemory다. 실패하면 out을 비운다. 같은 입력이면 같은 결과다.
+    // OutOfMemory다. 실패하면 out을 비운다. 같은 입력이면 같은 결과다(Opus는 libm을 부르므로
+    // 아키텍처·OS가 같을 때).
     virtual Result<void> Encode(const PlanarConstView& pcm, uint32 sampleRate, uint32 channelMask,
                                 const AudioEncodeSettings& settings,
                                 EncodedAudio& out) noexcept = 0;

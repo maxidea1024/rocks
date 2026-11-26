@@ -7,7 +7,7 @@
 #include <World/Primitives/TriggerBase.generated.h>
 #include <World/Primitives/TriggerBox.generated.h>
 #include <World/Primitives/TriggerBox.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
 

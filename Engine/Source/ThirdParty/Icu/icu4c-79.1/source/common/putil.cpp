@@ -1088,8 +1088,8 @@ typedef int(system_property_get)(const char*, char*);
 
 static char gAndroidTimeZone[PROP_VALUE_MAX] = { '\0' };
 
-static void u_property_read(void* cookie, const char* name, const char* value,
-                            uint32_t serial) {
+static void u_property_read(void* cookie, const char* /*name*/, const char* value,
+                            uint32_t /*serial*/) {
     uprv_strcpy((char* )cookie, value);
 }
 #endif

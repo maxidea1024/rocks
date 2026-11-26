@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 // 스킨 메시 빌드의 설정·입력 오류·정적 빌드와의 일치·결정성·할당 실패·퍼징
-// 시험이다(Docs/Design/MeshAnimationAssets.ko.md 6.5절, 11절 진단, 12절 "스켈레톤·스킨").
+// 시험이다(Docs/Design/MeshAnimationAssets 6.5절, 11절 진단, 12절 "스켈레톤·스킨").
 using namespace rocks;
 namespace skinned_mesh_builder_robustness_tests_file {
 

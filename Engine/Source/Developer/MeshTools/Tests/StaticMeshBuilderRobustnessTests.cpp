@@ -8,7 +8,7 @@
 #include <stdio.h>
 
 // 정적 메시 빌드의 결정성·설정·입력 오류·할당 실패·퍼징
-// 시험이다(Docs/Design/MeshAnimationAssets.ko.md 4.1절, 5.2절 결정성, 11절 진단, 12절 "빌드").
+// 시험이다(Docs/Design/MeshAnimationAssets 4.1절, 5.2절 결정성, 11절 진단, 12절 "빌드").
 // 빌드는 스레드를 쓰지 않으므로(한 호출 = 한 스레드의 순수 함수) 12절의 "스레드 수 바꿔서" 결정성
 // 시험은 대상이 없어 두지 않는다 — 스레드를 쓰게 되면 그때 더한다(5.4절).
 using namespace rocks;

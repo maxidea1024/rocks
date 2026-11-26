@@ -176,9 +176,14 @@ Result<void> WriteBitfieldStagedField(ConstructionContext& construction, ObjectH
 }
 
 template <class Owner, auto Get, auto Set>
-Result<uint32> EncodeBitfieldField(const RuntimeFieldOps&, ObjectRegistry& registry,
+Result<uint32> EncodeBitfieldField(const RuntimeFieldOps&, ObjectRegistry* registry,
                                    const ObjectAccessContext& access, ObjectHandle handle,
                                    ArchiveWriter& out, FieldEncodeContext& context) noexcept {
+    // 원본 모드(클래스 기본값 레코드)는 그 객체에서 바로 읽는다.
+    if (const Object* raw = context.RawSource()) {
+        return EncodeBitfieldValue<Owner, Get>(*static_cast<const Owner*>(raw), out, context);
+    }
+
     if (ConstructionContext* staged = context.StagedSource()) {
         auto owner = staged->Get<Owner>(handle);
         if (!owner) {
@@ -188,7 +193,11 @@ Result<uint32> EncodeBitfieldField(const RuntimeFieldOps&, ObjectRegistry& regis
         return EncodeBitfieldValue<Owner, Get>(*owner.Value(), out, context);
     }
 
-    auto borrowed = registry.Resolve<Owner>(access, handle);
+    if (registry == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto borrowed = registry->Resolve<Owner>(access, handle);
     if (!borrowed) {
         return Result<uint32>::Failure(borrowed.Error());
     }

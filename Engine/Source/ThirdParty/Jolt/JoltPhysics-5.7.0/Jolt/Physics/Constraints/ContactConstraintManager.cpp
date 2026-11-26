@@ -854,6 +854,17 @@ void ContactConstraintManager::TemplatedGetContactsFromCache(ContactAllocator &i
 	uint32 output_handle = ManifoldMap::cInvalidHandle;
 	uint32 input_handle = inCachedBodyPair.mFirstCachedManifold;
 	bool link_bodies = true;
+
+	// Rocks modification: a copied manifold that gets no constraint in this step keeps the impulses of the previous step, clear them like the new manifold path does (GetAppliedContactImpulse would report them otherwise)
+	auto clear_applied_impulses = [](CachedManifold &ioManifold)
+	{
+		for (uint32 i = 0; i < ioManifold.mNumContactPoints; ++i)
+			ioManifold.mContactPoints[i].mNonPenetrationLambda = 0.0f;
+		ioManifold.mFrictionLambda[0] = 0.0f;
+		ioManifold.mFrictionLambda[1] = 0.0f;
+		ioManifold.mAngularFrictionLambda = 0.0f;
+	};
+
 	do
 	{
 		JPH_PROFILE("Add Constraint From Cached Manifold");
@@ -920,6 +931,7 @@ void ContactConstraintManager::TemplatedGetContactsFromCache(ContactAllocator &i
 			if (constraint == nullptr)
 			{
 				ioContactAllocator.mErrors |= EPhysicsUpdateError::ContactConstraintsFull;
+				clear_applied_impulses(*output_cm);
 				break;
 			}
 
@@ -990,6 +1002,8 @@ void ContactConstraintManager::TemplatedGetContactsFromCache(ContactAllocator &i
 				constraint->Draw(DebugRenderer::sInstance, *mWriteCache, Color::sYellow);
 		#endif // JPH_DEBUG_RENDERER
 		}
+		else
+			clear_applied_impulses(*output_cm);
 
 		// Mark contact as persisted so that we won't fire OnContactRemoved callbacks
 		input_cm.mFlags |= (uint16)CachedManifold::EFlags::ContactPersisted;
@@ -1552,6 +1566,37 @@ bool ContactConstraintManager::WereBodiesInContact(const BodyID &inBody1ID, cons
 	uint64 key_hash = key.GetHash();
 	const BPKeyValue *kv = read_cache.Find(key, key_hash);
 	return kv != nullptr && kv->GetValue().mFirstCachedManifold != ManifoldMap::cInvalidHandle;
+}
+
+bool ContactConstraintManager::GetAppliedContactImpulse(const BodyID &inBody1ID, const BodyID &inBody2ID, QuatArg inRotationOfLargerBody, Vec3 &outImpulseOnBody2, uint &outNumContactPoints) const
+{
+	// Rocks modification: same lookup as WereBodiesInContact, then sum lambda * world normal over every manifold of the pair
+	outImpulseOnBody2 = Vec3::sZero();
+	outNumContactPoints = 0;
+	const ManifoldCache &read_cache = mCache[mCacheWriteIdx ^ 1];
+	const bool body2_is_larger = inBody1ID < inBody2ID;
+	const BodyPair key = body2_is_larger? BodyPair(inBody1ID, inBody2ID) : BodyPair(inBody2ID, inBody1ID);
+	const BPKeyValue *kv = read_cache.Find(key, key.GetHash());
+	if (kv == nullptr)
+		return false;
+
+	// The cached normal points along the direction that moves the larger body out of the collision, so the impulse acts on the larger body along it
+	Vec3 impulse_on_larger = Vec3::sZero();
+	bool found = false;
+	for (uint32 handle = kv->GetValue().mFirstCachedManifold; handle != ManifoldMap::cInvalidHandle; )
+	{
+		const CachedManifold &manifold = read_cache.FromHandle(handle)->GetValue();
+		float lambda = 0.0f;
+		for (uint16 i = 0; i < manifold.mNumContactPoints; ++i)
+			lambda += manifold.mContactPoints[i].mNonPenetrationLambda;
+		const Vec3 world_normal = inRotationOfLargerBody * Vec3::sLoadFloat3Unsafe(manifold.mContactNormal);
+		impulse_on_larger += lambda * world_normal.NormalizedOr(Vec3::sZero());
+		outNumContactPoints += manifold.mNumContactPoints;
+		found = true;
+		handle = manifold.mNextWithSameBodyPair;
+	}
+	outImpulseOnBody2 = body2_is_larger? impulse_on_larger : -impulse_on_larger;
+	return found;
 }
 
 template <EMotionType Type1, EMotionType Type2>

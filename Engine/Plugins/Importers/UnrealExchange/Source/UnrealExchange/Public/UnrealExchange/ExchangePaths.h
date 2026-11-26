@@ -5,7 +5,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// UE 객체 경로와 Rocks 논리 경로의 대응이다(Docs/Design/UnrealExchange.ko.md 9.1절, 10.4절 7·13번).
+// UE 객체 경로와 Rocks 논리 경로의 대응이다(Docs/Design/UnrealExchange 9.1절, 10.4절 7·13번).
 // `/<Mount>/<경로>/<패키지>.<객체>` → `<root>/<Mount>/<경로>/<패키지>`. 구성 요소마다 NFC 정규화 뒤
 // 받지 않는 문자를 `_`로 바꾸고, 첫 문자·Windows 예약 이름이면 `U`를 붙이고, 바뀌었거나 64 byte를
 // 넘으면 원래 경로 접두의 SHA-256 앞 8자를 붙인다. 결과는 원래 경로만으로 정해진다(함께 가져오는

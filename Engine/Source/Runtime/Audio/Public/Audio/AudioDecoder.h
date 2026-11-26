@@ -2,11 +2,12 @@
 
 #include <Audio/AudioBuffer.h>
 #include <Audio/AudioPlatformData.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
 
-// 오디오 디코더 인터페이스와 codec별 디코더 표다(Docs/Design/AudioSystem.ko.md 3.30.2절).
+// 오디오 디코더 인터페이스와 codec별 디코더 표다(Docs/Design/AudioSystem 3.30.2절).
 // Audio(Runtime)는 codec 구현 모듈(AudioOpus 등)을 링크하지 않고 이 표로만 찾는다. 내장
 // PCM16·ADPCM은 RegisterBuiltInAudioDecoders가 넣고, codec 모듈은 시작 때 HostServices에 factory를
 // 등록해 표를 만드는 쪽이 넣는다.
@@ -16,7 +17,8 @@
 //   RegisterBuiltInAudioDecoders(table);
 //   auto decoder = table.Create(view.Header().codec, allocator);
 //   decoder.Value()->Open(view.Header(), view.CodecHeader());
-//   decoder.Value()->BeginChunk(chunk, payload, chunk.firstFrame);
+//   decoder.Value()->BeginChunk(chunk, payload, chunk.firstFrame);   // 시작·seek: 상태를 비운다
+//   // ... 청크를 끝까지 낸 뒤 다음 청크는 ContinueChunk(next, nextPayload)로 상태를 잇는다.
 //   while (true) {
 //       auto written = decoder.Value()->DecodeNext(out);
 //       if (!written || written.Value() == 0) { break; }
@@ -30,7 +32,8 @@ public:
     virtual ~AudioDecoder() = default;
 
     // 머리와 codec 머리를 확인한다(codec·채널 1–8·rate·bitstream 판). 다르면 InvalidArgument(판은
-    // Unsupported)다. 실패하면 앞 상태(열린 청크)를 남기지 않는다.
+    // Unsupported — codec 다음, 다른 규칙보다 먼저 본다)다. 실패하면 앞 상태(열린 청크)를 남기지
+    // 않는다.
     virtual Result<void> Open(const AudioPlatformDataHeader& header,
                               Span<const uint8> codecHeader) noexcept = 0;
 
@@ -40,12 +43,22 @@ public:
     virtual Result<void> BeginChunk(const AudioChunkEntry& chunk, Span<const uint8> payload,
                                     uint64 startCodecFrame) noexcept = 0;
 
+    // 앞 청크를 끝까지 낸 뒤(DecodeNext가 0) 바로 다음 청크(첫 frame = 앞 청크 끝)를 상태를 이어
+    // 연다. 복제 pre-roll은 디코드하지 않고 건너뛴다. 그래서 처음부터 순차로 낸 결과는 연속
+    // 디코드와 같다(3.30.2절 청크 경계 규칙). payload 검사는 BeginChunk와 같다. 열린 청크가 없거나,
+    // 앞 청크를 다 내지 않았거나, 이어지지 않으면 InvalidArgument이고 열린 청크도 닫는다. 모든
+    // codec이 이 순서 규칙을 지킨다(청크 사이 상태가 없는 PCM16·ADPCM도 같다). 그래서 호출 순서
+    // 오류가 codec에 따라 숨지 않는다.
+    virtual Result<void> ContinueChunk(const AudioChunkEntry& chunk,
+                                       Span<const uint8> payload) noexcept = 0;
+
     // 다음 단위를 out에 planar로 쓴다(시작 단위는 startCodecFrame부터의 나머지). 쓴 codec frame 수,
     // 청크 끝이면 0이다. out 채널 수가 다르거나 frame 용량이 MaxFramesPerCall보다 작거나
     // Open·BeginChunk 전이면 InvalidArgument다.
     virtual Result<uint32> DecodeNext(const PlanarView& out) noexcept = 0;
 
-    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수다(PCM16 1024, ADPCM 1012, Opus 5760).
+    // DecodeNext 한 번이 쓸 수 있는 최대 frame 수다(PCM16 1024, ADPCM 1012,
+    // Opus 960(bitstream 1)).
     virtual uint32 MaxFramesPerCall() const noexcept = 0;
 };
 
@@ -71,6 +84,46 @@ private:
 
 // 내장 디코더(PCM16·ADPCM)를 넣는다. 이미 있으면 AlreadyExists다.
 ROCKS_AUDIO_API Result<void> RegisterBuiltInAudioDecoders(AudioDecoderTable& table) noexcept;
+
+// 호스트가 HostServices에 올리는 codec 모듈 디코더 등록부다(Docs/Design/AudioSystem 3.37.1절).
+// Audio(Runtime)는 ClientOnly codec 모듈(AudioOpus)을 링크하지 않으므로 그 모듈의 Startup이 여기에
+// factory를 넣고, 표를 만드는 쪽(AudioEngineSubsystem·도구)이 Fill로 옮긴다. 출력 backend
+// 등록부(AudioOutputBackendRegistry)와 같은 방식이다. 등록·조회는 로더 스레드에서 한다.
+//
+// 사용 예(codec 모듈 Startup):
+//   if (auto* registry = context.Services().Find<AudioDecoderRegistry>()) {
+//       registry->SetFactory(AudioCodecId::Opus, &CreateOpusAudioDecoder);
+//   }
+class AudioDecoderRegistry final {
+public:
+    // codec의 factory를 바꾼다(nullptr이면 지운다). None·범위 밖 codec은 무시한다. 모듈 Shutdown은
+    // 자기 factory를 지운다.
+    void SetFactory(AudioCodecId codec, AudioDecoderFactory factory) noexcept {
+        const uint32 index = static_cast<uint32>(codec);
+        if (codec != AudioCodecId::None && index < MaxAudioCodecs) {
+            factories_[index] = factory;
+        }
+    }
+
+    AudioDecoderFactory Factory(AudioCodecId codec) const noexcept {
+        const uint32 index = static_cast<uint32>(codec);
+        return index < MaxAudioCodecs ? factories_[index] : nullptr;
+    }
+
+    // 등록된 factory를 table에 넣는다. table에 이미 있는 codec은 그대로 둔다(내장 디코더가
+    // 앞선다). 오류는 없다(넣을 수 있는 것만 넣는다).
+    void Fill(AudioDecoderTable& table) const noexcept {
+        for (uint32 index = 1; index < MaxAudioCodecs; ++index) {
+            const auto codec = static_cast<AudioCodecId>(index);
+            if (factories_[index] != nullptr && !table.Contains(codec)) {
+                (void)table.Register(codec, factories_[index]);
+            }
+        }
+    }
+
+private:
+    AudioDecoderFactory factories_[MaxAudioCodecs] = {};
+};
 
 // 전체 디코드 결과(유효 frame만, planar float)다.
 class ROCKS_AUDIO_API DecodedAudioPcm {
@@ -114,3 +167,5 @@ ROCKS_AUDIO_API Result<void> DecodeAudioPlatformData(const AudioPlatformDataView
                                                      DecodedAudioPcm& out) noexcept;
 
 } // namespace rocks::audio
+
+ROCKS_DECLARE_HOST_SERVICE(rocks::audio::AudioDecoderRegistry, ROCKS_AUDIO_API)

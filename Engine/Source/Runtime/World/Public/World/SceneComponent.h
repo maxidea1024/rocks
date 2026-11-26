@@ -9,6 +9,10 @@
 
 namespace rocks {
 
+namespace detail {
+struct LevelGraphTestAccess;
+}
+
 // 부착할 때 Transform 성분 하나를 다루는 규칙이다(UE EAttachmentRule — Docs/Design/EngineRuntime
 // 23.3절).
 enum class AttachmentRule : uint8 {
@@ -48,7 +52,7 @@ struct AttachmentRules {
 
 // SceneComponent가 움직일 수 있는지다(UE EComponentMobility). Static·Stationary는 게임 World에서
 // 초기화 뒤 옮길 수 없다(23.3절).
-ROCKS_ENUM()
+ROCKS_ENUM(ScriptType)
 enum class ComponentMobility : uint8 {
     Static,
     Stationary,
@@ -105,8 +109,9 @@ TransformComponentBounds(const ComponentBounds& local, const Mat4d& localToWorld
 // 리플렉션 클래스다. 영속 필드는 relativeTransform(Core 값 타입 Transform — CoreTypeBindings 미러
 // 경유)이고 ReadOnly다: 경로·리플렉션 쓰기는 MarkDirty·검증을 거치지 않으므로
 // SetRelativeTransform만 쓴다(CU5 setter hook 전에는 에디터에서 경로로 편집할 수 없다 — UE
-// EditAnywhere와 다른 제약). 월드 행렬 캐시·부모·자식은 ROCKS_NATIVE다 — 부착 계층은 저장하지
-// 않는다(추적하지 않는 참조 WeakObjectRef가 생긴 뒤 레벨·prefab 저장 전에 영속한다, children은
+// EditAnywhere와 다른 제약). 월드 행렬 캐시·부모·자식은 ROCKS_NATIVE다. 부착 부모는 영속
+// attachParent(WeakObjectRef — 같은 그래프 안 대상만 보존)·attachSocket으로 저장하고, 레벨 편입
+// (World::AdoptLevel — Docs/Design/EngineRuntime 29절)이 부모·자식 목록을 다시 만든다(children은
 // parent에서 유도되는 값이다).
 //
 // 규약:
@@ -131,6 +136,9 @@ class ROCKS_WORLD_API SceneComponent : public Component {
     ROCKS_GENERATED_BODY()
 
 public:
+    // 부모 사슬 탐색 상한이다. 정상 계층은 이보다 훨씬 얕다(순환 검사의 안전장치 — 부착·편입).
+    static constexpr uint32 MaxHierarchyDepth = 4096;
+
     explicit SceneComponent(Allocator& allocator) noexcept
         : children_(allocator), attachSocket_(allocator) {
     }
@@ -143,7 +151,7 @@ public:
     // 바꾸지 않는다. 아래 세 함수는 해당 성분만 바꾸며 실패 조건이 같다.
     Result<void> SetRelativeTransform(const Transform& transform) noexcept;
     // 부모 기준 위치(cm)다. UE SetRelativeLocation과 같은 단위다.
-    Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
+    ROCKS_FUNCTION(ScriptCallable) Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
     // 부모 기준 회전(단위 quaternion, 왼손 양의 각)이다. 도 단위 Rotator는 ToQuaternion으로 바꾼다.
     Result<void> SetRelativeRotation(const Quatd& rotation) noexcept;
     // 부모 기준 scale(무차원 배율, 1 = 원래 크기)이다.
@@ -154,10 +162,11 @@ public:
     Mat4d WorldMatrix() const noexcept;
 
     // 월드 변환을 TRS로 분해한다. shear가 있으면 Unsupported, 0 scale이면 InvalidArgument다.
-    Result<Transform> TryWorldTransform() const noexcept;
+    // Sparks에는 WorldTransform으로 보인다(Result 함수의 TryX → X — SparksBinding B13).
+    ROCKS_FUNCTION(Pure, ScriptCallable) Result<Transform> TryWorldTransform() const noexcept;
 
     // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
-    Vec3d WorldLocation() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) Vec3d WorldLocation() const noexcept;
 
     // 월드 위치·회전을 정한다(UE SetWorldLocationAndRotation — 부모 frame 기준 상대 값으로 바꿔
     // 쓴다, 절대 성분은 그대로, scale은 유지). 오류: 비유한 위치·0 quaternion, 부모 frame 역변환
@@ -243,9 +252,12 @@ public:
         return mobility_;
     }
 
-    void SetMobility(ComponentMobility mobility) noexcept {
-        mobility_ = mobility;
-    }
+    // Mobility를 바꾼다(UE SetMobility). 값이 바뀌고 등록돼 있으면 시스템 상태를 종류마다 그
+    // 자리에서 다시 만든다(UE는 재등록 — Docs/Design/PhysicsModule 7.1.5절, 물리 body의 Static ↔
+    // Movable). Movable이 되면 자식도 Movable로 바꾼다(Static 자식을 Movable 부모 아래 둘 수 없다 —
+    // UE와 같다). 다시 만들기 실패는 그 종류 없이 두고 Warning SystemStateRecreateFailed다(값은
+    // 바뀐다).
+    ROCKS_FUNCTION(ScriptCallable) void SetMobility(ComponentMobility mobility) noexcept;
 
     // --- 가시성(23.3절) ---
 
@@ -264,7 +276,7 @@ public:
     }
 
     // 보이는지다: visible이고, 게임 World(Game·Tryout)면 hiddenInGame도 아니다(UE ShouldRender).
-    bool IsVisible() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) bool IsVisible() const noexcept;
 
     // --- 속도·bounds(23.3절) ---
 
@@ -285,6 +297,8 @@ public:
 
 private:
     friend class World;
+    // 편입 시험이 장부 밖 그래프를 손상시킨다(Private/LevelGraphTestAccess.h — Tests/ 전용).
+    friend struct detail::LevelGraphTestAccess;
 
     // 파괴 직전에 World가 부른다(등록 여부·파생 재정의와 무관). 부모에서 떼고 자식들을 루트로
     // 만든다(자식의 상대 Transform 유지, 월드 행렬은 다시 계산).
@@ -361,7 +375,7 @@ private:
     Result<void> AddChild(ObjectHandle child) noexcept;
     void RemoveChild(ObjectHandle child) noexcept;
 
-    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform") Transform relative_;
+    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform", ScriptReadOnly) Transform relative_;
     // 월드 행렬 캐시다(Component::world_를 가리지 않게 worldMatrix_라 한다).
     ROCKS_NATIVE() mutable Mat4d worldMatrix_;
     ROCKS_NATIVE() mutable bool worldDirty_ = true;
@@ -369,15 +383,18 @@ private:
     // parent_에서 유도되는 값이다(UE AttachChildren처럼 Transient — 편입이 다시 만든다).
     ROCKS_NATIVE() Array<ObjectHandle> children_;
     // 부착 부모·socket이다(영속 — 23.3절 CR3, 편입이 계층을 복원한다). parent_와 같은 값이다.
-    ROCKS_PROPERTY(ReadOnly, Name = "attachParent") WeakObjectRef<SceneComponent> attachParent_;
+    ROCKS_PROPERTY(ReadOnly, Name = "attachParent", ScriptReadOnly)
+    WeakObjectRef<SceneComponent> attachParent_;
     ROCKS_PROPERTY(ReadOnly, Name = "attachSocket") String attachSocket_;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation") bool absoluteLocation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation") bool absoluteRotation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale") bool absoluteScale_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "mobility")
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation", ScriptReadOnly)
+    bool absoluteLocation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation", ScriptReadOnly)
+    bool absoluteRotation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale", ScriptReadOnly) bool absoluteScale_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "mobility", ScriptReadOnly)
     ComponentMobility mobility_ = ComponentMobility::Movable;
-    ROCKS_PROPERTY(ReadOnly, Name = "visible") bool visible_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame") bool hiddenInGame_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "visible", ScriptReadOnly) bool visible_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame", ScriptReadOnly) bool hiddenInGame_ = false;
     ROCKS_NATIVE() Vec3d velocity_;
     ROCKS_NATIVE() mutable ComponentBounds bounds_;
     ROCKS_NATIVE() mutable bool boundsDirty_ = true;

@@ -9,6 +9,7 @@
 #include <Core/Text/NamePool.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Object/ModuleRegistration.h>
+#include <Object/ModuleTypeRegistrations.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 
@@ -160,6 +161,10 @@ private:
     static RegistryOptions MakeOptions(NamePool& names) noexcept;
     // 모든 모듈의 registerSettings를 모듈 표 순서로 부른다(HostSettingsOptions::modules).
     Result<void> RegisterModuleSettings(ModuleLoader& modules) noexcept;
+    // 설정 struct를 등록할 수 있는 모듈(registerSettings와 registerTypes가 둘 다 있는 모듈)과 그
+    // 의존 closure의 자기 타입을 이 레지스트리에 등록한다(Docs/Design/ModuleLoader 3.10절 보강 —
+    // Engine 모듈의 설정 struct). 이미 등록한 타입은 멱등으로 지나간다.
+    Result<void> RegisterSettingsModuleTypes(ModuleLoader& modules) noexcept;
     // 거부를 진단과 함께 기록한다(진단은 비운다).
     void ReportRejected(StringView what, ErrorCode error) noexcept;
     // 남은 Warning 진단(오래된 사용자 파일의 버린 키 등)을 Warning 로그로 남기고 진단을 비운다.
@@ -170,6 +175,10 @@ private:
     Allocator& allocator_;
     TypeRegistry types_;
     ModuleRegistration modules_;
+    // RegisterSettingsModuleTypes가 모듈마다 등록한 기록과 그 모듈 이름(등록 순서 — 역순으로
+    // 놓는다)이다.
+    ModuleTypeRegistrations settingsModuleTypes_;
+    Array<StringView> settingsTypeModules_;
     NamePool names_;
     ObjectRegistry objects_;
     UniquePtr<config::ConfigContext> context_;

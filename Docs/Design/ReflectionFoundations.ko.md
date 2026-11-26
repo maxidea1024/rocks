@@ -152,12 +152,12 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 | `EditorOnly` | 4 | `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 선언하고(블록 안 필드와 `EditorOnly`는 양방향 일치 — [빌드 타깃](BuildTargets/03-Design/03.04-EditorOnlyData.ko.md) 3.4절 BD6·BS2c, RMC2501–2503), `ROCKS_WITH_EDITOR_DATA=0` 빌드에서는 메모리 배치와 스키마 필드에서 빠지고 ID만 `TypeSchema::editorOnlyFieldIds`에 남는다. descriptor·안정 ID 명세는 두 조합의 합집합이다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다 |
 | `Required` | 8 | ObjectRef·SoftObjectRef 필드와 그 배열(`ObjectRefArray`·`Array<SoftObjectRef>` — 원소마다 non-null, 5.6절)에만 쓸 수 있다(그 밖은 RMC2202). **패키지 저장·쿠킹에서** null이면 거부한다 — graph 저장 옵션 `rejectMissingRequired`(패키지 저장·쿠킹이 켠다, 스냅샷·복제 같은 다른 저장은 끈다)이 켜져 있으면 InvalidArgument, Soft 대상의 존재 확인은 패키지 저장·쿠킹(A1). **로드는 거부하지 않고** 진단(`RequiredMissing`)만 낸다 — 기존 필드에 `Required`를 붙여도 null을 가진 에셋을 열어 고칠 수 있어야 한다 |
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
-| `AssetBundles="a,b"` | — | 에셋 bundle 이름 목록(UE `meta=(AssetBundles=…)` — 에셋 A4e2a). 값(컨테이너 원소·Map 키·값 포함)이 SoftObjectRef·struct·InstancedStruct인 필드만, EditorOnly 필드(유효 플래그)와 AssetId 값 필드는 아니다(RMC2202). 이름은 ASCII 식별자 1–64 byte, 1–16개, 중복 금지(RMC2212). 소프트 참조의 실효 bundle은 경로에 있는 목록들의 교집합이다(struct 필드의 목록은 사슬 제한). `FieldSchema::assetBundles`(정규 텍스트) — 저장 때 bundle 태그가 쓴다([AssetSystem](AssetSystem/10-Cooker.ko.md) 10.2절) |
+| `AssetBundles="a,b"` | — | 에셋 bundle 이름 목록(UE `meta=(AssetBundles=…)` — 에셋 A4e2a). 값(컨테이너 원소·Map 키·값 포함)이 SoftObjectRef·struct·InstancedStruct인 필드만, EditorOnly 필드와 AssetId 값 필드는 아니다(RMC2202 — EditorOnly struct 필드 안 멤버의 목록은 받고 태그 수집이 그 경로를 건너뛴다). 이름은 ASCII 식별자 1–64 byte, 1–16개, 중복 금지(RMC2212). 소프트 참조의 실효 bundle은 경로에 있는 목록들의 교집합이다(struct 필드의 목록은 사슬 제한). `FieldSchema::assetBundles`(정규 텍스트) — 저장 때 bundle 태그가 쓴다([AssetSystem](AssetSystem/10-Cooker.ko.md) 10.2절) |
 | `MaxElements=N` | — | 배열 길이 상한(5.5절 — 쓰기·저장에서 건다). 1..1,048,576(밖은 RMC2000), 없으면 65,536. 배열이 아닌 필드는 RMC2202 |
 
 설정 계층(CF1)이 설정 struct 직접 멤버의 설정 지정자 `UserConfig`·`ConsoleName="…"`·`RestartRequired`·`StartupOnly`·`RenderRead`·`DevelopmentOnly`를 더한다(`FieldFlags`가 아니라 `SettingsFieldSchema`에 실린다 — [설정 계층](ConfigSystem.ko.md) 7절, RMC2210·RMC2202). 출시 제외 `ShippingExcluded`는 쿠킹(CF5) 때 더한다.
 
-리플렉션 B9가 `DuplicateTransient`·`NonTryoutDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절).
+리플렉션 B9가 `DuplicateTransient`·`NonTryoutDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절). AssetSystem A4f1이 `TextMapMergeByKey`(256 — Map 필드 JSON import 키별 병합, 전파 없음)를 더한다(RX 10.4절).
 
 계약 설정(기본값이 아니면 `UnsupportedSetting`, 12.4절)과 필드 기본값 조회(빌드 키의 "기본값 포함")는 클래스 기본값 레코드(RuntimeClassMetadata '클래스 기본값 결정')가 필요하므로 텍스처 설정 단계(A5)에서 구현한다(11절).
 
@@ -174,7 +174,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 
 ### 2.6 스키마·Registry 변경
 
-- `FieldFlags`: `EditorOnly = 4`, `Required = 8`. `TypeFlags`: `WorldOnly = 2`, `EditorOnly = 32`(에셋 A4e2a — WorldOnly와 같은 상속 검사). `FieldSchema::assetBundles`(에셋 A4e2a — 깊은 복사·등록 때 문법·종류 검사·상속 필드 일치 비교). TypeRegistry의 허용 마스크를 넓히고, `Required`는 참조 종류 필드에만, `MaxElements`는 배열에만 허용한다(수동 등록도 같은 검사).
+- `FieldFlags`: `EditorOnly = 4`, `Required = 8`. `TypeFlags`: `WorldOnly = 2`, `EditorOnly = 32`(에셋 A4e2a — WorldOnly와 같은 상속 검사). 상속 비트는 `InheritedTypeFlags`(WorldOnly·Transient·Deprecated·EditorOnly)이고 손 등록 파생(`NativeClass`)도 리플렉션 조상의 이 비트를 모두 물려받는다(전에는 WorldOnly만이라 Transient·Deprecated 조상의 손 등록 파생이 거부됐다 — 2026-11-23 수정). `FieldSchema::assetBundles`(에셋 A4e2a — 깊은 복사·등록 때 문법·종류 검사·상속 필드 일치 비교). TypeRegistry의 허용 마스크를 넓히고, `Required`는 참조 종류 필드에만, `MaxElements`는 배열에만 허용한다(수동 등록도 같은 검사).
 - 상속 필드 일치 비교에 새 서술자(3.5절 `ValueType`·`toolName`·`maxElements`)를 더한다.
 - `toolName`은 등록 때 깊게 복사하고(단일 할당 원자성 유지) 대소문자 무시 유일성도 등록 때 검사한다.
 

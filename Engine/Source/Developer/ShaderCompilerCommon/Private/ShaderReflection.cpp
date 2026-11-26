@@ -401,9 +401,10 @@ private:
                    : NoShaderReflectedParent;
     }
 
+    // 상수 버퍼 이름의 표다(상수 부분이 없는 자원 표는 상수 버퍼가 아니다).
     const ShaderParameterLayout* FindLayout(StringView name) const noexcept {
         for (const ShaderParameterLayout& layout : layouts_) {
-            if (layout.name == name) {
+            if (layout.name == name && layout.totalBytes != 0) {
                 return &layout;
             }
         }
@@ -411,7 +412,78 @@ private:
         return nullptr;
     }
 
-    // 손으로 쓴 표와 대조한다(7.3절 (a) — 이름·타입·오프셋·원소 수·전체 크기).
+    // 자원 멤버와 셰이더 선언이 같은 종류·모양·원소·stride인가(16.2절 SSD63).
+    static bool ResourceFits(const ShaderParameterResource& member,
+                             const ShaderBindingResource& binding) noexcept {
+        if (binding.shape != member.shape || binding.component != member.component) {
+            return false;
+        }
+
+        const bool typed = member.shape == ShaderResourceShape::TypedBuffer;
+        const bool strided = binding.structureStride == member.structureStride;
+        switch (member.kind) {
+        case ShaderParameterResourceKind::DeviceTexture:
+        case ShaderParameterResourceKind::GraphTexture:
+        case ShaderParameterResourceKind::GraphTextureSrv:
+            return binding.kind == ShaderResourceKind::SampledTexture;
+        case ShaderParameterResourceKind::DeviceBuffer:
+        case ShaderParameterResourceKind::GraphBufferSrv:
+            return typed ? binding.kind == ShaderResourceKind::SampledTexture
+                         : binding.kind == ShaderResourceKind::StorageBufferRead && strided;
+        case ShaderParameterResourceKind::GraphTextureUav:
+            return binding.kind == ShaderResourceKind::StorageImage;
+        case ShaderParameterResourceKind::GraphBufferUav:
+            return typed ? binding.kind == ShaderResourceKind::StorageImage
+                         : binding.kind == ShaderResourceKind::StorageBufferReadWrite && strided;
+        case ShaderParameterResourceKind::GraphTextureAccess:
+        case ShaderParameterResourceKind::GraphBufferAccess:
+        case ShaderParameterResourceKind::RenderTargets:
+            break;
+        }
+
+        return false;
+    }
+
+    // 상수 버퍼가 아닌 자원을 job 표의 자원 멤버와 이름으로 맞춰 구조체 identity와 멤버 오프셋을
+    // 넣는다(SX8 뒷부분, 16.2절 SSD63). 짝 샘플러는 그 텍스처 멤버의 오프셋이다. 이름이 같은데
+    // 종류·모양·원소·stride가 다르면 실패다. 맞는 멤버가 없으면 그대로 둔다(손으로 쓴 자원).
+    bool MatchResourceMember(ShaderBindingResource& binding) noexcept {
+        const bool sampler = binding.kind == ShaderResourceKind::Sampler;
+        for (const ShaderParameterLayout& layout : layouts_) {
+            for (const ShaderParameterResource& member : layout.resources) {
+                if (!IsShaderBoundResource(member.kind) ||
+                    (sampler ? member.samplerName != binding.name : member.name != binding.name)) {
+                    continue;
+                }
+
+                if (!sampler && !ResourceFits(member, binding)) {
+                    Text("parameter layout '");
+                    Text(layout.name);
+                    Text("' resource member '");
+                    Text(member.name);
+                    Text("' (");
+                    Text(ShaderParameterResourceKindName(member.kind));
+                    Text(", ");
+                    Text(ShaderResourceShapeName(member.shape));
+                    Text(") does not match the shader resource of kind ");
+                    Text(ShaderResourceKindName(binding.kind));
+                    Text(", ");
+                    Text(ShaderResourceShapeName(binding.shape));
+                    return Fail(" (kind, shape, element type and structure stride must be the "
+                                "same)");
+                }
+
+                binding.structId = layout.structId;
+                binding.memberOffset = member.offset;
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    // 레이아웃 표와 대조한다(7.3절 (a) — 이름·타입·오프셋·원소 수·전체 크기, 중첩 구조체는 그 표와
+    // 재귀로, 16.2절 SSD55).
     bool CompareLayout(const ShaderReflectedResource& resource, uint32 level,
                        const ShaderParameterLayout& layout, uint64 totalBytes) noexcept {
         if (layout.rootConstants != resource.rootConstants) {
@@ -419,6 +491,23 @@ private:
                              "root constants flag does not match the shader declaration");
         }
 
+        if (!CompareLevel(resource, level, layout, layout)) {
+            return false;
+        }
+
+        if (layout.totalBytes != totalBytes) {
+            return FailNamed("parameter layout", layout.name,
+                             "total size does not match the shader declaration");
+        }
+
+        return true;
+    }
+
+    // level 아래 리플렉션 멤버(한 층)를 표 table의 멤버와 1:1로 대조한다. owner는 진단에 쓰는 바깥
+    // 표다.
+    bool CompareLevel(const ShaderReflectedResource& resource, uint32 level,
+                      const ShaderParameterLayout& table,
+                      const ShaderParameterLayout& owner) noexcept {
         usize member = 0;
         const uint32 last = resource.firstMember + resource.memberCount;
         for (uint32 index = resource.firstMember; index < last; ++index) {
@@ -427,26 +516,27 @@ private:
                 continue;
             }
 
-            uint32 bytes = 0;
-            uint32 alignment = 0;
-            ShaderParameterType type = ShaderParameterType::Float;
-            if (reflected.base == ShaderReflectedBase::Struct ||
-                !Describe(reflected, bytes, alignment, type)) {
-                return FailNamed("parameter layout", layout.name,
-                                 "hand-written layout tables cannot describe struct members yet "
-                                 "(ShaderSystem SH3)");
-            }
-
-            if (member >= layout.members.Size()) {
-                return FailNamed("parameter layout", layout.name,
+            if (member >= table.members.Size()) {
+                return FailNamed("parameter layout", owner.name,
                                  "the shader declares more members than the C++ layout table");
             }
 
-            const ShaderParameterMember& expected = layout.members[member++];
-            if (expected.name != reflected.name || expected.type != type ||
-                expected.offset != reflected.offset || expected.arrayCount != reflected.elements) {
+            const ShaderParameterMember& expected = table.members[member++];
+            bool same = expected.name == reflected.name && expected.offset == reflected.offset &&
+                        expected.arrayCount == reflected.elements;
+            if (reflected.base == ShaderReflectedBase::Struct) {
+                same = same && expected.type == ShaderParameterType::Struct &&
+                       expected.structLayout != nullptr;
+            } else {
+                uint32 bytes = 0;
+                uint32 alignment = 0;
+                ShaderParameterType type = ShaderParameterType::Float;
+                same = same && Describe(reflected, bytes, alignment, type) && expected.type == type;
+            }
+
+            if (!same) {
                 Text("parameter layout '");
-                Text(layout.name);
+                Text(owner.name);
                 Text("' member '");
                 Text(expected.name);
                 Text("' does not match the shader member '");
@@ -455,17 +545,23 @@ private:
                 Number(reflected.offset);
                 return Fail(" (name, type, offset and array count must be the same)");
             }
+
+            if (reflected.base == ShaderReflectedBase::Struct &&
+                !CompareLevel(resource, index, *expected.structLayout, owner)) {
+                return false;
+            }
         }
 
-        if (member != layout.members.Size() || layout.totalBytes != totalBytes) {
-            return FailNamed("parameter layout", layout.name,
-                             "member count or total size does not match the shader declaration");
+        if (member != table.members.Size()) {
+            return FailNamed("parameter layout", owner.name,
+                             "member count does not match the shader declaration");
         }
 
         return true;
     }
 
-    bool CheckConstantBuffer(const ShaderReflectedResource& resource, uint32& bytesOut) noexcept {
+    bool CheckConstantBuffer(const ShaderReflectedResource& resource, uint32& bytesOut,
+                             uint64& structIdOut) noexcept {
         const uint32 wrapper = WrapperOf(resource);
         const uint64 base = 0;
         uint64 end = 0;
@@ -487,6 +583,8 @@ private:
             if (!CompareLayout(resource, wrapper, *layout, totalBytes)) {
                 return false;
             }
+
+            structIdOut = layout->structId;
         }
 
         bytesOut = static_cast<uint32>(totalBytes);
@@ -559,7 +657,8 @@ private:
                 rootSeen_ = true;
                 const usize membersBefore = members_.Size();
                 uint32 bytes = 0;
-                if (!CheckConstantBuffer(resource, bytes)) {
+                uint64 structId = 0;
+                if (!CheckConstantBuffer(resource, bytes, structId)) {
                     return false;
                 }
 
@@ -575,6 +674,7 @@ private:
                 }
 
                 out_.rootConstantBytes = bytes;
+                out_.rootConstantStructId = structId;
                 continue;
             }
 
@@ -594,13 +694,15 @@ private:
             binding.structureStride = resource.structureStride;
             if (constantBuffer) {
                 binding.firstMember = static_cast<uint32>(members_.Size());
-                if (!CheckConstantBuffer(resource, binding.constantBufferBytes)) {
+                if (!CheckConstantBuffer(resource, binding.constantBufferBytes, binding.structId)) {
                     return false;
                 }
 
                 binding.memberCount = static_cast<uint32>(members_.Size()) - binding.firstMember;
             } else if (resource.memberCount != 0) {
                 return FailNamed("resource", resource.name, "only constant buffers have members");
+            } else if (!MatchResourceMember(binding)) {
+                return false;
             }
 
             if (!pending_.TryPushBack(binding)) {

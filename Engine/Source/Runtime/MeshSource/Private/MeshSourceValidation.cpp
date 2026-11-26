@@ -6,7 +6,7 @@
 #include <MeshSource/MeshSourceValidation.h>
 #include <Object/NameField.h>
 
-// 원본 메시 내용 불변식 검증이다(Docs/Design/MeshAnimationAssets.ko.md 3.1·3.5·3.7절).
+// 원본 메시 내용 불변식 검증이다(Docs/Design/MeshAnimationAssets 3.1·3.5·3.7절).
 namespace rocks {
 
 namespace {

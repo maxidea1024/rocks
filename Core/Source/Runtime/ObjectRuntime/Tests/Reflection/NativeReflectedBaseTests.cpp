@@ -2,6 +2,7 @@
 #include <Base/TypeTraits.h>
 #include <CoreTypeBindings/CoreTypeBindings.module.generated.h>
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
+#include <ReflectionTestFixtures/ClassFlagFixture.generated.h>
 #include <ReflectionTestFixtures/ClassRefFixture.generated.h>
 #include <ReflectionTestFixtures/CoreValueFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
@@ -17,11 +18,11 @@
 // 안의 ROCKS_NATIVE_TYPE 클래스가 생성 fixture(WorldOnly WorldFixture, 그 위의 두 단계 리플렉션
 // 사슬 SceneFixture)를 base로 두고 RegisterNativeClass로 등록한다: WorldOnly 상속, base 필드·함수표
 // 빌리기(읽기·쓰기·경로 접근·struct 의존과 그 미등록 NotFound), WorldOnly 아닌·Abstract 리플렉션
-// base(WorldOnly만 물려받음), 손 Trace와 생성 Trace 모두 방문(GC 생존, 이중 방문 없음 —
-// private·protected 손 Trace 포함), 두 단계 native 사슬, base 해제 Busy, WorldOnly를 빠뜨린 수동
-// 등록 거부, ObjectTypeIdOf 두 경로. 그래프 저장·로드 Unsupported는 ObjectSerialization
-// 시험(NativeDerivedGraphTests)이, 잘못된 Trace 선언의 컴파일 거부는 ToolTests meta 컴파일 probe가
-// 본다.
+// base(상속 비트 InheritedTypeFlags만 물려받음 — Transient 조상 포함, 에셋 A4e2a), 손 Trace와 생성
+// Trace 모두 방문(GC 생존, 이중 방문 없음 — private·protected 손 Trace 포함), 두 단계 native 사슬,
+// base 해제 Busy, WorldOnly를 빠뜨린 수동 등록 거부, ObjectTypeIdOf 두 경로. 그래프 저장·로드
+// Unsupported는 ObjectSerialization 시험(NativeDerivedGraphTests)이, 잘못된 Trace 선언의 컴파일
+// 거부는 ToolTests meta 컴파일 probe가 본다.
 using namespace rocks;
 namespace native_reflected_base_tests_file {
 
@@ -30,6 +31,7 @@ using reflection_fixture::AbstractByPolicy;
 using reflection_fixture::Base;
 using reflection_fixture::Node;
 using reflection_fixture::SceneFixture;
+using reflection_fixture::TransientThing;
 using reflection_fixture::WorldFixture;
 
 namespace {
@@ -46,6 +48,13 @@ public:
 
     ObjectRef<Node> extra;
     int32 nativeState = 0;
+};
+
+// Transient 리플렉션 base를 둔 native 파생이다(조상의 상속 비트를 물려받는다 — 전에는 WorldOnly만
+// 물려받아 등록이 거부됐다, 에셋 A4e2a InheritedTypeFlags).
+class NativeOnTransient final : public TransientThing {
+    ROCKS_NATIVE_TYPE(NativeOnTransient, TransientThing, 0x3c51a0e24f9b4e07ull,
+                      0x8d2f6b1e9a7c4d53ull)
 };
 
 // 두 단계 native 사슬(native U : native T : 리플렉션 R)이다. Super::Trace를 부르지 않는다.
@@ -748,6 +757,29 @@ TEST(NativeReflectedBase_InheritsOnlyWorldOnlyFromReflectedBase) {
         REQUIRE(types.Unregister(onBase.Value()));
         REQUIRE(types.Unregister(onPolicy.Value()));
         REQUIRE(types.Unregister(onAbstract.Value()));
+        REQUIRE(registration.Unregister());
+    }
+
+    CHECK(types.Shutdown());
+}
+
+// 상속 비트는 InheritedTypeFlags(WorldOnly·Transient·Deprecated·EditorOnly)다: Transient 리플렉션
+// 조상의 native 파생은 Transient를 물려받아 등록된다(TypeRegistry의 상속 검사를 지난다).
+TEST(NativeReflectedBase_InheritsTransientFromReflectedBase) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    {
+        ModuleRegistration registration(types, allocator);
+        REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
+        auto token = RegisterNativeClass<NativeOnTransient>(types);
+        REQUIRE(token);
+        {
+            auto lease = types.Acquire(ObjectTypeIdOf<NativeOnTransient>());
+            REQUIRE(lease);
+            CHECK(HasFlag(lease.Value().Schema().flags, TypeFlags::Transient));
+        }
+
+        REQUIRE(types.Unregister(token.Value()));
         REQUIRE(registration.Unregister());
     }
 

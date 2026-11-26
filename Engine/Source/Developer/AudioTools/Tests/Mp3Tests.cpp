@@ -1,4 +1,5 @@
 #include "Mp3TestFixtures.h"
+#include "SourceAudioReference.h"
 
 #include <AudioTools/SourceAudio.h>
 #include <Base/Compiler.h>
@@ -15,7 +16,7 @@ namespace mp3_tests_file {
 using namespace rocks::audio;
 using namespace rocks::audio::mp3fixtures;
 
-// MP3 원본 디코드 시험이다(Docs/Design/AudioSystem.ko.md 3.26.3절). 입력은 LAME·ffmpeg로
+// MP3 원본 디코드 시험이다(Docs/Design/AudioSystem 3.26.3절). 입력은 LAME·ffmpeg로
 // 만든 작은 파일이다(Mp3TestFixtures.h).
 
 namespace {
@@ -41,7 +42,7 @@ constexpr uint64 Mpeg2FrameSamples = 576;
 // 시험 MP3의 rate·frame 수다.
 constexpr uint32 Rate44100 = 44100;
 constexpr uint32 Rate16000 = 16000;
-constexpr uint64 MonoFrames = 11025;
+constexpr uint64 MonoFrames = sourcereference::Mp3MonoLameFrames;
 constexpr uint64 MonoLameAudioFrames = 11;
 constexpr uint64 StereoAudioFrames = 5;
 constexpr uint64 Mpeg2MonoAudioFrames = 11;
@@ -51,8 +52,7 @@ constexpr uint64 MonoLameSkip = 576 + 529;
 constexpr usize MonoId3v2Bytes = 111;
 
 // x86-64(SSE2)에서 Mp3MonoLame 디코드 결과(planar float32 byte)의 SHA-256이다.
-constexpr const char* MonoLameDigestX64 =
-    "98c3cb062812ef8c6b6995fc3343f62df2b2c5f7b3a483d4b721c38996a01b4c";
+constexpr const char* MonoLameDigestX64 = sourcereference::Mp3MonoLameDigestX64;
 
 // MPEG-1 Layer III 머리 해석에 쓰는 값이다(시험 입력의 frame 위치 계산용).
 constexpr uint32 Mpeg1BitratesKbps[16] = {0,   32,  40,  48,  56,  64,  80,  96,

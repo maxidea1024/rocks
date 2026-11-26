@@ -5,7 +5,7 @@
 #include <Meta/Annotations.h>
 #include <Object/ModuleRegistration.h>
 
-// 메시 빌드 설정이다(Docs/Design/MeshAnimationAssets.ko.md 4.1절, UE FMeshBuildSettings —
+// 메시 빌드 설정이다(Docs/Design/MeshAnimationAssets 4.1절, UE FMeshBuildSettings —
 // EngineTypes.h).
 namespace rocks {
 

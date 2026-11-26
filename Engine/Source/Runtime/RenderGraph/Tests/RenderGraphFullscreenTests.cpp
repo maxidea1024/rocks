@@ -51,7 +51,6 @@ TEST(RenderGraph_FullscreenPassRecordsDrawAndCachesPipeline) {
     auto request =
         FullscreenPipelineRequest(shaders.set, copy.Value(), graphics::PixelFormat::RGBA8Unorm);
     REQUIRE(request);
-    request.Value().state.bindings.texture = CopyTextureSourceName;
     PipelineCache cache(bench.allocator, bench.device);
     for (uint32 run = 0; run < 2; ++run) {
         RenderGraph graph(bench.Next());
@@ -69,7 +68,8 @@ TEST(RenderGraph_FullscreenPassRecordsDrawAndCachesPipeline) {
         auto pass =
             graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache,
                                     request.Value(), [read](GraphPassContext& context) noexcept {
-                                        context.Commands().SetTexture(context.Texture(read));
+                                        context.Commands().SetTexture(graphics::ShaderStage::Pixel,
+                                                                      0, context.Texture(read));
                                     });
         REQUIRE(pass);
         REQUIRE(graph.Execute());

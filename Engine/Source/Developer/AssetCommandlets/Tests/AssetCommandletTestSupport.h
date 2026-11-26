@@ -18,6 +18,11 @@ struct Captured {
 
     static Result<void> Write(void* context, CommandletStream stream, StringView text) noexcept {
         Captured& captured = *static_cast<Captured*>(context);
+        ++captured.writes;
+        if (captured.writes == captured.failAtWrite) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
         if (stream == captured.failStream && captured.failWrites) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
@@ -34,6 +39,10 @@ struct Captured {
     // 참이면 failStream 쓰기가 Busy로 실패한다(출력 실패 시험).
     bool failWrites = false;
     CommandletStream failStream = CommandletStream::Output;
+    // 두 스트림을 합친 쓰기 수다(출력 실패 전수 — 시험이 0으로 되돌린다).
+    uint64 writes = 0;
+    // 0이 아니면 writes가 이 값이 되는 쓰기가 Busy로 실패한다(그 한 번만).
+    uint64 failAtWrite = 0;
 };
 
 // 시험 임포터 등록 상태다(failWith가 None이 아니면 등록이 그 오류로 실패한다).
@@ -130,6 +139,17 @@ struct CommandScene {
                static_cast<bool>(file.Open(platform::PhysicalFileSystem(), builder.View().Data(),
                                            builder.View().ByteCount(),
                                            platform::FileOpenMode::ReadExisting));
+    }
+
+    // 디렉터리가 있는지다(Exists는 파일만 연다).
+    bool DirectoryExists(StringView relative) noexcept {
+        char path[1024] = {};
+        FixedStringBuilder builder{Span<char>(path)};
+        bool exists = false;
+        return builder.TryAppendFormat("{}/{}", root.Root(), relative) &&
+               static_cast<bool>(platform::PhysicalFileSystem().DirectoryExists(
+                   builder.View().Data(), builder.View().ByteCount(), exists)) &&
+               exists;
     }
 
     asset_database_test::TempProject root;

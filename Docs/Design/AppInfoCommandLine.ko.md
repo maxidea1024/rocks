@@ -1,6 +1,6 @@
 # 앱 정보와 명령줄 설계
 
-기준일: 2026-11-22, 개정 4(오디오 실행 성격 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`·`--allow-commandlet-audio` — [오디오 시스템](AudioSystem.ko.md) 3.8.4절). 개정 3: 크래시 수집·실행 진입점 반영. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
+기준일: 2026-11-22, 개정 4(오디오 실행 성격 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`·`--allow-commandlet-audio` — [오디오 시스템](AudioSystem/03-Design/03.08-EngineAndWorld.ko.md) 3.8.4절). 개정 3: 크래시 수집·실행 진입점 반영. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
 
 **착수 시점.** 고정 구현 순서(Curve → A0-G → A1–A6 → 화면 마일스톤)를 바꾸지 않는다. 이 문서의 단계(AP·CL — 18절)는 그 순서 안에 끼워 넣지 않으며 착수 시점은 사용자가 정한다. AP3(프레임 시간 전달)은 렌더 기반 RB1의 프레임 packet과 CVar 설계의 worker 묶음 장치에 기대므로 그 단계들과 함께 간다.
 
@@ -63,7 +63,7 @@ UE 이름은 6절 대응표와 근거 문장에만 쓴다.
 - UE `FEngineLoop` 구조 자체(PreInit·Init·Tick 순서). Rocks 엔진 루프는 [엔진 런타임](EngineRuntime/README.ko.md)과 `Engine::RunFrame`이 정한다. 이 문서는 부트 순서에 끼우는 지점만 적는다(8.3절).
 - UE Zen 저장소 프로젝트 ID(`GetZenStoreProjectId`). Rocks 파생 데이터 캐시는 에셋 너겟이고 Zen 대응이 없다.
 - UE 원격 세션 도구의 사용자 허가 목록(`AuthorizeUser`·`DenyUser`). 대응하는 원격 세션 도구가 없다.
-- 오디오 볼륨 배수와 VR 포커스. 오디오는 [오디오 시스템](AudioSystem.ko.md)이 정했고(8.6절), XR은 그 설계 때 정한다.
+- 오디오 볼륨 배수와 VR 포커스. 오디오는 [오디오 시스템](AudioSystem/README.ko.md)이 정했고(8.6절), XR은 그 설계 때 정한다.
 
 ## 3. UE 5.8 `FApp` 조사
 
@@ -454,7 +454,7 @@ Config 5.4절 부트 순서 앞뒤에 다음을 끼운다.
 | UE 값 | Rocks에서 맡는 곳 | 이유 |
 |---|---|---|
 | 포커스(`HasFocus`) | PlatformWindow 이벤트를 받은 엔진이 프레임 상태로 공개한다: `Engine::IsForeground()`(게임 lane). 다른 lane이 필요하면 프레임 packet에 넣는다. benchmark면 늘 true(UE `APPC` 347–350과 같다) | 실행 중 바뀐다. 원천은 `ui::Platform`·PlatformWindow다 |
-| 볼륨 배수·포커스 잃었을 때 배수 | 오디오 모듈의 `audio.*` CVar(`audio.master.volume`·`audio.unfocused.volume` — [오디오 시스템](AudioSystem.ko.md) 3.8.5절) | 설정 값이다. UE도 config에서 읽는다(`APPC` 316) |
+| 볼륨 배수·포커스 잃었을 때 배수 | 오디오 모듈의 `audio.*` CVar(`audio.master.volume`·`audio.unfocused.volume` — [오디오 시스템](AudioSystem/03-Design/03.08-EngineAndWorld.ko.md) 3.8.5절) | 설정 값이다. UE도 config에서 읽는다(`APPC` 316) |
 | 그래픽 API 이름 | Graphics 장치 정보 | 장치를 만든 뒤에야 안다 |
 | 게임 중인지(`IsGame`) | World 종류 | World마다 다르다 |
 | 세션 이름 바꾸기 | 없음 | 실행 중 바꿀 이유가 없다 |
@@ -1382,4 +1382,4 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
   - 12절·D15: Windows `main(char**)`·`WinMain`의 `GetCommandLineW` 직접 분해를 지웠다(그 설계 D7). Launch 진입점은 늘 `wmain`·`wWinMain`(CRT `__wargv`)이다. 17절의 직접 분해 표 시험도 뺐다.
   - 7.1절 PlatformBase 행, 8.3절 0단계(Launch가 캡처, 실패 종료 코드는 `commandLineFailureExitCode`)를 맞췄다.
   - 18절 AP1: 크래시 처리 설계가 먼저 구현한 부분을 적고, 남은 일(`ApplicationKind` → `HostKind`, `suppressSystemErrorDialogs` ← `RunTraits::unattended`)을 적었다. 크래시 메타데이터에 가린 명령줄(CL2 뒤)·`--crash-*` 호스트 공용 옵션(CL4 뒤)·`BuildDescription`(AP2 뒤)을 더하는 일은 그 설계 21절에 있다.
-- **개정 4(2026-11-22)**: [오디오 시스템](AudioSystem.ko.md) 요구로 오디오 실행 성격을 열었다. `RunTraits::audioOutput`(부트가 Server 대상·commandlet·benchmark·`--no-sound`로 정함)·`audioMuted`(`--mute-audio`), 비출시 `--allow-commandlet-audio`. UE `-enablesound`는 두지 않는다. 볼륨 배수는 오디오 CVar로 넘겼다(8.6절).
+- **개정 4(2026-11-22)**: [오디오 시스템](AudioSystem/README.ko.md) 요구로 오디오 실행 성격을 열었다. `RunTraits::audioOutput`(부트가 Server 대상·commandlet·benchmark·`--no-sound`로 정함)·`audioMuted`(`--mute-audio`), 비출시 `--allow-commandlet-audio`. UE `-enablesound`는 두지 않는다. 볼륨 배수는 오디오 CVar로 넘겼다(8.6절).

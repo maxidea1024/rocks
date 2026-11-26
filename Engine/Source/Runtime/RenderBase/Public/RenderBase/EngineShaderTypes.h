@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Span.h>
+#include <ShaderCore/ShaderParameterTypes.h>
 #include <ShaderCore/ShaderType.h>
 
 // RenderBase가 등록하는 엔진 셰이더 타입이다(Docs/Design/RenderBase 11.4절 2항). UE도 화면 VS·
@@ -23,7 +24,7 @@ ROCKS_SHADER_TYPE_NAME(FullscreenTriangleVertexType, "FullscreenTriangleVertex")
 // CopyTextureSourceName이고 FullscreenTriangleVertex와 짝이다.
 ROCKS_SHADER_TYPE_NAME(CopyTexturePixelType, "CopyTexturePixel");
 
-// CopyTexturePixel의 텍스처 이름이다(PipelineBindingNames::texture).
+// CopyTexturePixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char CopyTextureSourceName[] = "Source";
 
 // fallback 메시 VS다(/Engine/Private/Utility/BuiltinMesh.rsf, 정점 입력 축 — 정점 입력 타입은
@@ -34,8 +35,121 @@ ROCKS_SHADER_TYPE_NAME(BuiltinMeshVertexType, "BuiltinMeshVertex");
 // fallback 메시 PS다(Albedo 표본 × 정점 색 × 그리기 색). 텍스처 이름은 BuiltinMeshAlbedoName이다.
 ROCKS_SHADER_TYPE_NAME(BuiltinMeshPixelType, "BuiltinMeshPixel");
 
-// BuiltinMeshPixel의 텍스처 이름이다(PipelineBindingNames::texture).
+// BuiltinMeshPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char BuiltinMeshAlbedoName[] = "Albedo";
+
+// 최소 tone map PS다(/Engine/Private/PostProcess/TonemapPass.rsf, Docs/Design/RenderBase 18.5절
+// 3항). FullscreenTriangleVertex와 짝이다. 텍스처 이름은 TonemapSceneColorName, 그리기별 상수는
+// TonemapConstants다. 출력은 선형 표시 색이고 sRGB 부호화는 대상 view가 한다. 렌더러 RS0에서
+// RendererShaders 모듈로 옮긴다.
+ROCKS_SHADER_TYPE_NAME(TonemapPixelType, "TonemapPixel");
+
+// TonemapPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
+inline constexpr char TonemapSceneColorName[] = "SceneColor";
+
+// TonemapPixel의 그리기별 상수다(48 byte, 생성 HLSL
+// /Engine/Generated/RenderBase/TonemapConstants.rsh — 셰이더는 Tonemap.<멤버>로 읽는다,
+// ShaderSystem 16.2절). 기본값은 UE 5.8 FPostProcessSettings 기본값(Engine/Private/Scene.cpp —
+// BlueCorrection 0.6, ExpandGamut 1, ToneCurveAmount 1, FilmSlope 0.88, FilmToe 0.55, FilmShoulder
+// 0.26, FilmBlackClip 0, FilmWhiteClip 0.04)과 노출 배율 1이다.
+//
+// 사용 예:
+//   render::TonemapConstants tonemap;
+//   tonemap.exposure.x = exposureScale;
+//   commands.SetDrawConstants(Span<const uint8>(reinterpret_cast<const uint8*>(&tonemap),
+//                                               sizeof(tonemap)));
+ROCKS_SHADER_PARAMETERS(Name = "Tonemap", RootConstants)
+struct alignas(16) TonemapConstants {
+    static constexpr float DefaultExposureScale = 1.0f;
+    static constexpr float DefaultBlueCorrection = 0.6f;
+    static constexpr float DefaultExpandGamut = 1.0f;
+    static constexpr float DefaultToneCurveAmount = 1.0f;
+    static constexpr float DefaultFilmSlope = 0.88f;
+    static constexpr float DefaultFilmToe = 0.55f;
+    static constexpr float DefaultFilmShoulder = 0.26f;
+    static constexpr float DefaultFilmBlackClip = 0.0f;
+    static constexpr float DefaultFilmWhiteClip = 0.04f;
+
+    // 노출 배율·blue correction·색역 확장·곡선 양이다.
+    shader::ShaderFloat4 exposure = {DefaultExposureScale, DefaultBlueCorrection,
+                                     DefaultExpandGamut, DefaultToneCurveAmount};
+    // 기울기·toe·shoulder·black clip이다.
+    shader::ShaderFloat4 film = {DefaultFilmSlope, DefaultFilmToe, DefaultFilmShoulder,
+                                 DefaultFilmBlackClip};
+    // white clip(나머지는 0)이다.
+    shader::ShaderFloat4 filmWhite = {DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
+};
+
+// 텍스처 표시 PS다(/Engine/Private/Debug/TextureInspector.rsf, Docs/Design/RenderBase 18.5절
+// 6·7항). FullscreenTriangleVertex와 짝이고 차원(과 정수 성분 계열)마다 타입 하나다. 텍스처 이름은
+// 아래 *SourceName, 그리기별 상수는 TextureInspectorConstants다. cube·cube 배열은 가로 십자(4 × 3
+// 칸)로 펼친다. 읽은 값에 쿠킹 swizzle(sampler type 계약 — 6.5절)을 적용한다. 정수 형식(uint·int)은
+// 2D·2D 배열·volume 타입이 따로이고 texel을 Load로 읽어 배율을 곱해 LDR로 표시한다(cube 계열 정수
+// 형식은 표시하지 않는다 — HLSL TextureCube에 Load가 없다).
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DPixelType, "TextureInspector2DPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DArrayPixelType, "TextureInspector2DArrayPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspectorCubePixelType, "TextureInspectorCubePixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspectorCubeArrayPixelType, "TextureInspectorCubeArrayPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspectorVolumePixelType, "TextureInspectorVolumePixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DUintPixelType, "TextureInspector2DUintPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DArrayUintPixelType, "TextureInspector2DArrayUintPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspectorVolumeUintPixelType, "TextureInspectorVolumeUintPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DIntPixelType, "TextureInspector2DIntPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspector2DArrayIntPixelType, "TextureInspector2DArrayIntPixel");
+ROCKS_SHADER_TYPE_NAME(TextureInspectorVolumeIntPixelType, "TextureInspectorVolumeIntPixel");
+
+inline constexpr char TextureInspector2DSourceName[] = "Source2D";
+inline constexpr char TextureInspector2DArraySourceName[] = "Source2DArray";
+inline constexpr char TextureInspectorCubeSourceName[] = "SourceCube";
+inline constexpr char TextureInspectorCubeArraySourceName[] = "SourceCubeArray";
+inline constexpr char TextureInspectorVolumeSourceName[] = "SourceVolume";
+inline constexpr char TextureInspector2DUintSourceName[] = "Source2DUint";
+inline constexpr char TextureInspector2DArrayUintSourceName[] = "Source2DArrayUint";
+inline constexpr char TextureInspectorVolumeUintSourceName[] = "SourceVolumeUint";
+inline constexpr char TextureInspector2DIntSourceName[] = "Source2DInt";
+inline constexpr char TextureInspector2DArrayIntSourceName[] = "Source2DArrayInt";
+inline constexpr char TextureInspectorVolumeIntSourceName[] = "SourceVolumeInt";
+
+// 텍스처 표시 방식이다(TextureInspectorConstants::selection[3]).
+enum class TextureInspectorDisplay : uint8 {
+    // 선형 값을 그대로 표시 색으로(LDR·sRGB 텍스처).
+    Ldr,
+    // 노출 × filmic 곡선(HDR 텍스처 — TonemapPixel과 같은 식).
+    Hdr,
+    // 빨강 채널을 회색으로(깊이).
+    Depth
+};
+
+// TextureInspector*Pixel의 그리기별 상수다(96 byte, 생성 HLSL
+// /Engine/Generated/RenderBase/TextureInspectorConstants.rsh — 셰이더는 Inspector.<멤버>). 앞 셋은
+// TonemapConstants와 같은 배치다.
+//
+// 사용 예:
+//   render::TextureInspectorConstants inspector;
+//   inspector.selection[0] = mip;
+//   inspector.selection[1] = slice;                 // 배열 층·cube 배열 원소·volume z texel
+//   inspector.selection[2] = depth;                 // 고른 mip의 volume 깊이(texel 수)
+//   inspector.selection[3] = static_cast<float>(render::TextureInspectorDisplay::Hdr);
+//   inspector.swizzle[1] = 0.0f;                    // 쿠킹 swizzle(SwizzleSource 번호) — .rrrr 등
+//   inspector.integer[0] = 1.0f / 255.0f;           // 정수 형식: 값 → 표시 배율
+//   inspector.integer[1] = mipWidth;                // 정수 형식: 고른 mip 크기(texel)
+//   inspector.integer[2] = mipHeight;
+ROCKS_SHADER_PARAMETERS(Name = "Inspector", RootConstants)
+struct alignas(16) TextureInspectorConstants {
+    shader::ShaderFloat4 exposure = {
+        TonemapConstants::DefaultExposureScale, TonemapConstants::DefaultBlueCorrection,
+        TonemapConstants::DefaultExpandGamut, TonemapConstants::DefaultToneCurveAmount};
+    shader::ShaderFloat4 film = {
+        TonemapConstants::DefaultFilmSlope, TonemapConstants::DefaultFilmToe,
+        TonemapConstants::DefaultFilmShoulder, TonemapConstants::DefaultFilmBlackClip};
+    shader::ShaderFloat4 filmWhite = {TonemapConstants::DefaultFilmWhiteClip, 0.0f, 0.0f, 0.0f};
+    // mip·층·고른 mip의 volume 깊이·표시 방식이다.
+    shader::ShaderFloat4 selection = {0.0f, 0.0f, 1.0f, 0.0f};
+    // 쿠킹 swizzle 출처 번호 넷(graphics::SwizzleSource — 기본 항등)이다.
+    shader::ShaderFloat4 swizzle = {0.0f, 1.0f, 2.0f, 3.0f};
+    // 정수 형식의 값 → 표시 배율, 고른 mip의 폭·높이(texel), 0이다.
+    shader::ShaderFloat4 integer = {1.0f, 1.0f, 1.0f, 0.0f};
+};
 
 // 엔진 기본 정점 입력 타입이다(Docs/Design/RenderBase 10.6절 3항,
 // /Engine/Private/VertexInput/BuiltinVertexInput.rsh — 위치·UV·색, 배치는 BuiltinVertexLayout).

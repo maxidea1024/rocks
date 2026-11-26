@@ -33,6 +33,8 @@ private:
     graphics::Device& device_;
     render::ShaderSet& shaders_;
     graphics::PipelineHandle pipeline_{};
+    // 평면 셰이더의 표면 텍스처 slot이다(Initialize가 셰이더 layout에서 찾는다).
+    uint32 surfaceSlot_ = graphics::MaxResourceSlots;
     graphics::BufferHandle quad_{};
 };
 

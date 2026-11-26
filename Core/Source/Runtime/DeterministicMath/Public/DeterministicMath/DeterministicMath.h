@@ -52,7 +52,7 @@ ROCKS_DETERMINISTICMATH_API double SinPi(double x) noexcept;
 ROCKS_DETERMINISTICMATH_API double CosPi(double x) noexcept;
 
 // arccos(x)(라디안, [0, π])다. Acos(1) = +0, Acos(−1) = π(가장 가까운 double), |x| > 1·NaN은
-// 고정 NaN. MikkTSpace 패치·가중 법선의 코너 각(MeshAnimationAssets.ko.md 결정 MA-D5)이 쓴다.
+// 고정 NaN. MikkTSpace 패치·가중 법선의 코너 각(Docs/Design/MeshAnimationAssets 결정 MA-D5)이 쓴다.
 ROCKS_DETERMINISTICMATH_API double Acos(double x) noexcept;
 
 // sinc(x) = sin(πx)/(πx), sinc(0) = 1. Lanczos(x, lobes) = sinc(x)·sinc(x/lobes)(|x| < lobes), 그

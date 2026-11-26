@@ -1,0 +1,376 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::attenuate",
+      "id": "229e82c9328942e7a887cc27b5c259a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::falloffDistance",
+      "id": "3770e23b16d8478eb35588c7045b9909",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::innerRadius",
+      "id": "c334095034d948f7b619bce6edd02d0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::model",
+      "id": "1df1d430115d4bf595509a213649f0e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::naturalSoundAttenuationDb",
+      "id": "9c095d6bb3674773affbe60366b0a082",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::naturalSoundFalloffMode",
+      "id": "ae6d54a614ad48bebc79f6e01c87b52a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonSpatializedRadiusEnd",
+      "id": "43dc31b89fe145b8a1c35d56a793059f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonSpatializedRadiusStart",
+      "id": "b2102ae33a934bb08fe491810fa08efd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::spatialize",
+      "id": "9fd8aa51a8c74f47a5c106b301b29dc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::channelCount",
+      "id": "47f1bc6683e5409f86e93d9bdf0cf250",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::compression",
+      "id": "1d34c5575fc1478a88f6fdb53fde6ceb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::compressionQuality",
+      "id": "238f2656788240b5b6c6851e00df813d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::cues",
+      "id": "abf5f9b0cded46a6b005b810af885423",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::fileLoopBegin",
+      "id": "98a38e0b747a4068812f3ea76f160e62",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::fileLoopEnd",
+      "id": "2fef667ccd014c3f90fe726c321e1d78",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::frameCount",
+      "id": "d639bf0f336f48edba1f631e4efa5853",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::hasFileLoop",
+      "id": "9fc04f89ee8a4d4f86a735249f81388b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::loopBegin",
+      "id": "67dbb88c928a4b799cc16666628f46ca",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::loopEnd",
+      "id": "5b5ed4abb93c478abf0492feec93bdb4",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::loopOverride",
+      "id": "5de1bedce13248d589d892306dfafd93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::looping",
+      "id": "bc1036687cc74c71b5bca6a5d22e8e14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::platformData",
+      "id": "2657787f5fd444acb6d3dbd434047d93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::sampleRate",
+      "id": "54b2fd8da5254b589235d003bc3eef9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::source",
+      "id": "11c258993b384b159bdb5b72a94a3f8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::sourceCodec",
+      "id": "7e1fcc42e602410897aa965f77675e65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipImportOptions::channelHandling",
+      "id": "5b4953fc709e4b418ce671a9b88ce59a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipImportOptions::loopFromFile",
+      "id": "a788c8212b4042d3a67ebd34211acfc7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipImportOptions::normalize",
+      "id": "42b8f043897140e7b38fc11fb65c6f41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipImportOptions::normalizePeakDb",
+      "id": "fbf4b3a722914749bb5608b563341a9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipSource::bulk",
+      "id": "f3af9fb2107d4f6d8536a9cd4d50fb1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClipSource::format",
+      "id": "ec9bfaf395d641bd8be1264eed98acb1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundCuePoint::frame",
+      "id": "71d015cfa5ce41e4b8af71d3dcb10550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundCuePoint::id",
+      "id": "291af6c6be1a4230bd17e25f32fd287c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundCuePoint::name",
+      "id": "98268fb960484c70a9e7d95b98cd5f73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundLoopOverride::begin",
+      "id": "8c5221fd273c4a619607a8340375b4cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundLoopOverride::enabled",
+      "id": "4d174c3ac7444cfe957e6f99328b7c07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundLoopOverride::end",
+      "id": "4d73683834c84a1195a3229e52ab32cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::attenuation",
+      "id": "b700ebe2f6cc413a88b48ce65f378770",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::pitch",
+      "id": "596c573e5b4244cfa6c1d91d76f53b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::volume",
+      "id": "321945e501ff456ab8b015dba9e849c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AttenuationSettings",
+      "id": "e09cbf1b74fe40a58c7b72bb3ccf1137",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundClip",
+      "id": "9ed7206fa51f48458308082fdbd3df1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundClipImportOptions",
+      "id": "ba637d01c32c4a209d67e6379e909b42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundClipSource",
+      "id": "e8b4961d0d084518b41a4deb4bd3fe6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundCompression",
+      "id": "e1fefd6832c049bf9023ae9d551b9ae1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundCuePoint",
+      "id": "16e136aed94841dcbbd327bb0010cc1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundDistanceModel",
+      "id": "cf58405214a74458a1cd284299988ff7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundImportChannelHandling",
+      "id": "36a8238a804944f59f2c445e1fcb404c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundLoopOverride",
+      "id": "2f8d9fb256de4debbaba5479eeed38e6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundNaturalFalloffMode",
+      "id": "3dd09f5d6a33484e82f8fac30414e090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundSource",
+      "id": "2d0563c5d7244e0ba5c9b47301a3103a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundSourceCodec",
+      "id": "596c1f8a42cb459eacfff88c66e96498",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundSourceStorage",
+      "id": "dd302658307b44c19c998c5a33ae19b9",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

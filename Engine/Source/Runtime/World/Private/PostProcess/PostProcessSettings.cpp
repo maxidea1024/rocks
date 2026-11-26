@@ -1,6 +1,6 @@
 #include <Core/Math/MathUtility.h>
 #include <World/PostProcess/PostProcessSettings.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 후처리 설정 범위 검사다(Docs/Design/EngineRuntime 27.5절, D5).
 namespace rocks {

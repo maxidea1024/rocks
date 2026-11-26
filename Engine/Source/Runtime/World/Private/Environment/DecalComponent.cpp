@@ -5,7 +5,7 @@
 #include <World/Environment/DecalComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // decal 컴포넌트다(Docs/Design/EngineRuntime 27.4절, D5).
 namespace rocks {

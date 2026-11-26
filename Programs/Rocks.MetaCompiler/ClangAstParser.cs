@@ -863,7 +863,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     // 기본 도구 이름(한정하지 않은 C++ 이름)과 같은 Name은 지정하지 않은 것과 같다.
                     ToolName = (classSpec?.ToolName ?? structSpec!.ToolName) is string toolName && toolName != TypeToolName.Default(qualified) ? toolName : "",
                     BindsSpelling = structSpec?.Binds ?? "",
-                    BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
+                    BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null,
+                    Script = classSpec?.Script ?? structSpec!.Script
                 };
                 if (isStruct)
                 {
@@ -1029,6 +1030,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     });
                 }
 
+                // 리플렉션 함수(ROCKS_FUNCTION — Docs/Design/FunctionReflection.ko.md)다.
+                ParseFunctions(model, members, qualified, isStruct, Text(node, "tagUsed") == "class" ? "private" : "public", generatedBody);
                 classes.Add(qualified, model);
             }
 

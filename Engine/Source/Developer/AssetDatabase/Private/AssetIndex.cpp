@@ -314,7 +314,7 @@ void AssetIndexRefresh::Reset() noexcept {
 AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout,
                        WorkerScheduler* scheduler) noexcept
     : allocator_(&allocator), layout_(&layout), scheduler_(scheduler), entries_(allocator),
-      byId_(allocator), diagnostics_(allocator) {
+      byId_(allocator), byOwner_(allocator), diagnostics_(allocator) {
 }
 
 // 패키지 파일 하나(Content 상대 이름 relative)를 부분 읽기해 found에 항목을, diagnostics에 그
@@ -402,6 +402,16 @@ Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageRea
     entry.fileName = Move(relative);
     if (auto appended = entry.dependencies.TryAppend(contents.dependencies.View()); !appended) {
         return appended;
+    }
+
+    // export 타입 목록(A5c): Summary 타입 표가 export 타입 집합이다(정렬·중복 없음은 reader가
+    // 봤다).
+    if (auto reserved = entry.exportTypes.TryReserve(contents.summary.types.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const PackageTypeVersion& row : contents.summary.types) {
+        (void)entry.exportTypes.TryPushBack(row.type);
     }
 
     auto tags = ReadPackageTags(*allocator_, contents.tags);
@@ -545,7 +555,33 @@ Result<void> AssetIndex::PlanPublish(Span<AssetIndexEntry* const> entries,
         return reserved;
     }
 
+    // 참조 기록 항목(owner ≠ 자신)을 owner → 경로 순으로 둔다(FindByOwner — 재임포트 고아 입양).
+    const auto isReference = [](const AssetIndexEntry& entry) noexcept {
+        return entry.importRecord.present && !(entry.importRecord.owner == entry.id);
+    };
+    usize references = 0;
+    for (const AssetIndexEntry* entry : sorted) {
+        references += isReference(*entry) ? 1 : 0;
+    }
+
+    Array<usize> byOwner(*allocator_);
+    if (auto reserved = byOwner.TryReserve(references); !reserved) {
+        return reserved;
+    }
+
+    for (usize position = 0; position < sorted.Size(); ++position) {
+        if (isReference(*sorted[position])) {
+            (void)byOwner.TryPushBack(position);
+        }
+    }
+
+    algo::Sort(byOwner.View(), [&](usize left, usize right) noexcept {
+        const int compared =
+            CompareId(sorted[left]->importRecord.owner, sorted[right]->importRecord.owner);
+        return compared != 0 ? compared < 0 : left < right;
+    });
     plan.byId_ = Move(byId);
+    plan.byOwner_ = Move(byOwner);
     plan.revision_ = revision_;
     plan.ready_ = true;
     return Result<void>::Success();
@@ -566,6 +602,7 @@ void AssetIndex::CommitPublish(AssetIndexRefresh& plan) noexcept {
 
     entries_ = Move(plan.entries_);
     byId_ = Move(plan.byId_);
+    byOwner_ = Move(plan.byOwner_);
     diagnostics_ = Move(plan.diagnostics_);
     ++revision_;
     plan.ready_ = false;
@@ -640,6 +677,10 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
 
     if (step) {
         step = entry.dependencies.TryAppend(cached->dependencies.View());
+    }
+
+    if (step) {
+        step = entry.exportTypes.TryAppend(cached->exportTypes.View());
     }
 
     if (step) {
@@ -1004,6 +1045,7 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadO
                                  const AssetIndexCache* cache) noexcept {
     entries_.Clear();
     byId_.Clear();
+    byOwner_.Clear();
     diagnostics_.Clear();
     Array<AssetIndexEntry> found(*allocator_);
     Array<AssetIndexDiagnostic> diagnostics(*allocator_);
@@ -1514,6 +1556,7 @@ Result<void> AssetIndex::MarkRootLost() noexcept {
 
     entries_.Clear();
     byId_.Clear();
+    byOwner_.Clear();
     diagnostics_ = Move(lost);
     ++revision_;
     return Result<void>::Success();
@@ -1538,6 +1581,29 @@ Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {
     }
 
     return Result<Out>::Success(&entry);
+}
+
+Result<void> AssetIndex::FindByOwner(AssetId owner,
+                                     Array<const AssetIndexEntry*>& out) const noexcept {
+    const usize low =
+        algo::LowerBound(byOwner_.View(), owner, [&](usize index, AssetId key) noexcept {
+            return CompareId(entries_[index].importRecord.owner, key) < 0;
+        });
+    usize high = low;
+    while (high < byOwner_.Size() &&
+           CompareId(entries_[byOwner_[high]].importRecord.owner, owner) == 0) {
+        ++high;
+    }
+
+    if (auto reserved = out.TryReserve(out.Size() + (high - low)); !reserved) {
+        return reserved;
+    }
+
+    for (usize at = low; at < high; ++at) {
+        (void)out.TryPushBack(&entries_[byOwner_[at]]);
+    }
+
+    return Result<void>::Success();
 }
 
 Result<const AssetIndexEntry*> AssetIndex::FindByPath(const LogicalPath& path) const noexcept {

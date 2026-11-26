@@ -2,7 +2,7 @@
 
 ### 10.1 C++ 선언과 Sparks에서의 형태
 
-기존 `ROCKS_CLASS`·`ROCKS_PROPERTY`에 함수 리플렉션(CU2)·enum·struct(CU8)를 더한 선언에서 바인딩을 생성한다. 이벤트는 Core `MulticastDelegate` 필드에 `ROCKS_PROPERTY`를 붙이고, 메타 컴파일러가 필드 타입으로 `FieldKind::Event`를 판별한다(CU3 — 현재 `FieldKind`는 `Value`·`ObjectReference`뿐). 이벤트 인자 이름은 `Params` 지정자로 주며 이벤트 필드의 이름도 §10.3의 필드 이름 변환을 따른다. 매크로 이름은 현재 코드 기준이다(매크로 단축 개명은 보류 중이며 착수 시 함께 바꾼다).
+기존 `ROCKS_CLASS`·`ROCKS_PROPERTY`에 함수 리플렉션(CU2)·enum·struct(CU8)를 더한 선언에서 바인딩을 생성한다. 노출은 opt-in이다(UE `BlueprintType`·`BlueprintReadOnly`와 같다 — 노출 지정자가 없는 타입·필드는 스크립트에 보이지 않는다, 2026-11-26 사용자 결정). 지정자·타입 대응·생성 규칙의 세부는 [Sparks 엔진 binding](../SparksBinding.ko.md)(EI1) 2절이다. 이벤트는 Core `MulticastDelegate` 필드에 `ROCKS_PROPERTY`를 붙이고, 메타 컴파일러가 필드 타입으로 `FieldKind::Event`를 판별한다(CU3 — 현재 `FieldKind`는 `Value`·`ObjectReference`뿐). 이벤트 인자 이름은 `Params` 지정자로 주며 이벤트 필드의 이름도 §10.3의 필드 이름 변환을 따른다. 매크로 이름은 현재 코드 기준이다(매크로 단축 개명은 보류 중이며 착수 시 함께 바꾼다).
 
 C++ · `Health.h`:
 
@@ -14,14 +14,14 @@ class Health : public rocks::Component {
 public:
     explicit Health(rocks::Allocator& allocator) noexcept : Died(allocator) {}
 
-    ROCKS_PROPERTY(Edit, SaveGame)        // Edit: CU1 편집 메타(신설), SaveGame: 현재 지정자
+    ROCKS_PROPERTY(Edit, SaveGame, ScriptWritable)  // Edit: CU1 편집 메타(신설), SaveGame: 현재 지정자
     rocks::int32 maxHealth_ = 100;
 
-    ROCKS_PROPERTY(ReadOnly, Replicated)  // Replicated: 네트워크 단계에서 신설
+    ROCKS_PROPERTY(ReadOnly, ScriptReadOnly, Replicated)  // Replicated: 네트워크 단계에서 신설
     rocks::int32 current_ = 100;
 
-    ROCKS_PROPERTY(Params = "killer")     // CU3: MulticastDelegate 필드 → FieldKind::Event
-    rocks::MulticastDelegate<void(rocks::WeakObjectRef<rocks::Actor>)> Died;
+    ROCKS_PROPERTY(Params = "killer")     // CU3: 이벤트 필드 → FieldKind::Event(EventReflection ED8 — 안쪽이 Core MulticastDelegate)
+    rocks::Event<rocks::WeakObjectRef<rocks::Actor>> Died;
 
     ROCKS_FUNCTION(Lane = Game, Effects = WriteWorld)   // CU2
     rocks::Result<void> ApplyDamage(rocks::int32 amount, rocks::WeakObjectRef<rocks::Actor> instigator);
@@ -33,7 +33,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 예시의 이름 | 현재 상태 | 선행 |
 |---|---|---|
 | `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_GENERATED_BODY`, `SaveGame`·`ReadOnly`·`Name =` | 있음 | — |
-| `ScriptExtensible`, `ScriptName`, `ScriptWritable` | 없음 | 신설(L1, 메타 컴파일러) |
+| `ScriptType`·`NotScriptType`, `ScriptExtensible`·`NotScriptExtensible`, `ScriptReadOnly`·`ScriptWritable`, `ScriptName` | 있음(EI1a — SparksBinding 2절 B1·6절) | — |
 | `Edit`(편집 메타), `Params` | 없음 | UiToolkit CU1·CU3 |
 | `ROCKS_FUNCTION`과 `Lane`·`Effects` 등 | 없음 | CU2(CVar 문서의 `Cheat`·`Authority`·`Help`와 지정자 이름 공간을 함께 정한다) |
 | `Replicated` | 없음 | 네트워크 단계(RX 0절 범위 밖) |
@@ -59,7 +59,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 타입 | TypeId, 기반 타입, `ScriptExtensible`, 수명 종류(엔진 객체·에셋·값), 외형 전용 여부(준비 mask), 구현한 interface 표(CU9) |
 | 필드 | FieldId, 값 형식, 단위, nullability, 편집·저장·복제·ReadOnly·`ScriptWritable`, 변경 통지 지원(CU5) |
 | 계산 속성 | getter·setter 함수 쌍으로 만든 쓰기 가능한 속성(예: `RelativeLocation` ← `SceneComponent`의 `relativeTransform`과 `SetRelativeLocation`). 손실이 생길 수 있는 왕복(quat 저장값 ↔ `RelativeRotation` Rotator)은 binding이 정규화 규칙을 선언한다. CU5 setter 통지와 함께 정한다 |
-| 함수 | FunctionId, 시그니처와 nullability, 초당 값 인자, lane, `ThreadSafe`, `Deterministic`, 부수 효과, 최대 작업량, 취소 가능 여부, `MaySafepoint`, 권한, 편집기·출시 가용성, 오류 타입, `NoFatalOnInput`(입력 오류로 Fatal하지 않음 — 선언이 없으면 노출 불가, §8.4), PendingDestroy 대상에서의 동작(읽기 허용·쓰기는 효과 없음 또는 `ContractViolation`) |
+| 함수 | FunctionId, 시그니처와 nullability, 초당 값 인자, lane, `ThreadSafe`, `Deterministic`, 부수 효과, 최대 작업량, 취소 가능 여부, `MaySafepoint`, 권한, 편집기·출시 가용성, 오류 타입, `NoFatalOnInput`(입력 오류로 Fatal하지 않음 — 선언이 없으면 노출 불가, §8.4), PendingDestroy 대상에서의 동작(읽기 허용·쓰기는 효과 없음 또는 `ContractViolation`). 노출 지정자 `ScriptCallable`이 `NoFatalOnInput`·Game lane을 함께 약속하고, PendingDestroy 대상에서는 실행 host가 `Const` 함수만 부르고 그 밖은 효과 없이 건너뛴다(EI1b — SparksBinding B12) |
 | 자원 정책 | 반환하는 것의 종류: 유지 자원(로드 요청 `LoadRequest<T>` 포함) / 일회성 효과 / 값. 기다리는 API는 고립 완료 해제 경로를 선언. 선언이 없으면 노출 불가 |
 | 파괴 지연 | 엔진 객체를 파괴하는 함수는 스크립트 단계 끝 deferred command로 처리함을 선언(SD3) |
 | 이벤트 | `FieldKind::Event`, FieldId, 인자 이름(`Params`)·형식, 발행 lane, 발행 측(서버·소유 클라이언트·모든 기기), 스크립트 단계 안 `Broadcast`의 큐 기록, VM 연결 thunk |
@@ -77,7 +77,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 타입 | `name` | 예 | 스크립트 타입 이름(영문 대문자로 시작하는 ASCII 영문자·숫자). 한 패키지 안에서 중복 불가 |
 | 타입 | `id` | 예 | TypeId. `.rocksids.json`과 같은 32자리 소문자 16진(모두 `0`은 안 된다). 모든 schema에서 중복 불가(FieldId·FunctionId와도) |
 | 타입 | `kind` | 예 | `object`(엔진 객체 — Actor·Component·Service·WidgetController 계열), `asset`(에셋 타입), `struct`(native 값 struct), `enum`, `interface`(CU9) |
-| 타입 | `base` | 아니오 | 기반 타입 이름. `object`·`asset`·`interface`만 쓴다 |
+| 타입 | `base` | 아니오 | 기반 타입 이름. `object`·`asset`·`interface`·`struct`만 쓴다. `struct`의 기반은 `struct`이고 필드만 물려받는다(struct 사이 변환·대입은 없다 — EI1a, C++ 리플렉션 struct 상속 B9k) |
 | 타입 | `scriptExtensible` | 아니오 | bool(기본 false). Sparks class가 상속할 수 있는지. `object`·`asset`만 |
 | 타입 | `constructible` | 아니오 | bool(기본 true). 이름 지정 인자로 생성할 수 있는지. `struct`만 |
 | 타입 | `fields` | 아니오 | 필드 객체 배열. `object`·`asset`·`struct`만 |
@@ -108,7 +108,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 이벤트 | `publisher` | 아니오 | `"server"`·`"owner"`·`"all"`(기본) |
 
 - **이름(LC2b):** 타입 이름은 언어 소유 이름(내장 타입·prelude 타입·prelude 값 — §3.9 표)일 수 없다(S1120 — 그 파일을 쓰지 않는다). 타입 표기·`base`·`constraint`의 이름 해석과 그 오류는 §3.9 "타입 표기 해석"이다.
-- **타입 표기:** §3.6 `Type`과 같은 문자열의 정규형이다(`int32`, `Actor?`, `Array<Actor>`, `Map<string, int32>`, `Result<void>`, `Soft<SoundAsset>`, 타입 매개변수 `T?`). 문법은 `표기 = 이름 {"." 이름} ["<" 표기 {", " 표기} ">"] ["?"]`이고 공백은 쉼표 뒤 한 칸만 쓴다(생성기 출력이 하나로 정해지게). 이름은 ASCII 영문자로 시작하는 영문자·숫자이며 키워드(§3.1)일 수 없고, 꺾쇠 중첩은 §8.1 구문 깊이 상한(128)까지다. schema reader는 표기의 문법만 검사하고(S1120), 이름이 가리키는 타입(같은·의존 패키지의 타입, prelude 타입, 내장 타입, 그 함수의 타입 매개변수)은 이름 해석(LC2b)이 검사한다.
+- **타입 표기:** §3.6 `Type`과 같은 문자열의 정규형이다(`int32`, `Actor?`, `Array<Actor>`, `Map<string, int32>`, `Result<void>`, `Soft<SoundAsset>`, 타입 매개변수 `T?`). 소스 타입 표기와 같이 타입 인자 안에는 `?`를 쓸 수 없다(§4.2 — `Array<Actor?>`는 S1120, EI1a). 문법은 `표기 = 이름 {"." 이름} ["<" 표기 {", " 표기} ">"] ["?"]`이고 공백은 쉼표 뒤 한 칸만 쓴다(생성기 출력이 하나로 정해지게). 이름은 ASCII 영문자로 시작하는 영문자·숫자이며 키워드(§3.1)일 수 없고, 꺾쇠 중첩은 §8.1 구문 깊이 상한(128)까지다. schema reader는 표기의 문법만 검사하고(S1120), 이름이 가리키는 타입(같은·의존 패키지의 타입, prelude 타입, 내장 타입, 그 함수의 타입 매개변수)은 이름 해석(LC2b)이 검사한다.
 - 한 타입 안의 필드·함수·이벤트 이름은 한 이름 공간이다(§3.1). 중복은 메타 컴파일러가 막지만 reader도 S1120으로 거부한다(손으로 쓴 schema·손상된 파일 방어).
 - 타입의 `kind`가 허용하지 않는 key(표의 "만" 조건)는 S1120 하나만 내고 그 값은 검사하지 않는다(진단이 겹치지 않게). `kind`가 없거나 틀리면 어느 key도 거부하지 않고 모든 값을 검사한다(`cases`가 하나 이상이어야 한다는 규칙은 `enum`일 때만).
 - 한 파일 안의 중복(타입 이름, 한 타입의 멤버 이름, 매개변수·타입 매개변수 이름, enum case, ID)은 원문에서 뒤에 나온 것마다 하나씩 낸다(세 번 나오면 둘).
@@ -116,9 +116,9 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 
 ### 10.3 이름·노출과 API 규칙
 
-- 타입·함수·이벤트 이름은 C++ 이름 그대로다. 리플렉션 필드(이벤트 필드 포함)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
+- 타입 이름은 타입 도구 이름(`Name =` 지정값, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`)이고, 함수 이름은 함수 도구 이름(`ROCKS_FUNCTION(Name = …)`, 없으면 C++ 이름 — EI1b, 런타임 조회와 같은 이름), 이벤트 이름은 C++ 이름 그대로다. 리플렉션 필드(이벤트 필드 포함)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
 - `Result`를 돌려주는 C++ 함수 `TryX`는 Sparks에서 자동으로 `X`로 노출한다(SD44). 변환한 이름이 다른 멤버와 겹치면 메타 컴파일 오류이며 `ScriptName`을 요구한다. 엔진 수명 hook 이름과 겹치는 C++ 함수(`Actor::Destroy` 등)는 `ScriptName`(예: `RequestDestroy`)으로 노출한다.
-- 메타 컴파일러는 타입별로 기반 체인을 포함한 최종 Sparks 이름을 계산한다. 이름이 중복되거나 예약 이름(부록 A)·hook 이름과 같으면 메타 컴파일 오류이며 `ScriptName`을 요구한다. 스크립트에 노출하는 함수의 C++ 오버로드도 서로 다른 `ScriptName`이 없으면 메타 컴파일 오류다.
+- 메타 컴파일러는 타입별로 기반 체인을 포함한 최종 Sparks 이름을 계산한다. 이름이 중복되거나 예약 이름(부록 A)·hook 이름(컴파일러 `HookForMemberName`과 같은 집합 — hook, `On` + hook, Unity 별칭)과 같으면 메타 컴파일 오류이며 `ScriptName`을 요구한다(메타 컴파일러가 읽는 이름 표는 컴파일러 목록과 시험으로 대조한다 — SparksBinding B6). 스크립트에 노출하는 함수의 C++ 오버로드도 서로 다른 `ScriptName`이 없으면 메타 컴파일 오류다.
 - C++ 수명 가상 함수(`On*`·`OnRegister`·`OnUnregister`)는 노출하지 않는다. 쓰기 가능한 속성이 있으면 같은 값을 쓰는 `SetX` 함수는 노출하지 않는다.
 - **스크립트용 API 규칙:**
   - 이동 API는 초당 값을 받고 dt는 엔진이 적용한다. binding이 초당 값 인자를 표시하며 그 인자 식에 `dt`·`Time.Delta`를 곱하면 오류다.

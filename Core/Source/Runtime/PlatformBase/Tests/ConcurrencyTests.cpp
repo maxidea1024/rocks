@@ -150,8 +150,9 @@ struct TryLockContext {
 
 void TryLockFromOtherThread(void* raw) noexcept {
     auto& context = *static_cast<TryLockContext*>(raw);
-    context.acquired = context.mutex->TryLock();
-    if (context.acquired) {
+    context.acquired = false;
+    if (context.mutex->TryLock()) {
+        context.acquired = true;
         context.mutex->Unlock();
     }
 }

@@ -8,12 +8,9 @@
 #include "/Engine/Generated/VertexInput.rsh"
 #endif
 
-struct BuiltinMeshConstants {
-    float4x4 localToClip;
-    float4 color;
-};
-
-ROCKS_ROOT_CONSTANTS(BuiltinMeshConstants, Draw);
+// 그리기별 상수 Draw(localToClip·color)는 C++ RenderBase/BuiltinResources.h BuiltinMeshConstants의 생성
+// 원문이다(ShaderSystem 16.2절).
+#include "/Engine/Generated/RenderBase/BuiltinMeshConstants.rsh"
 
 struct BuiltinMeshVaryings {
     float4 position : SV_Position;

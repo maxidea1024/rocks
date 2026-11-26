@@ -2,7 +2,7 @@ using Rocks.Tooling.Checks;
 
 namespace Rocks.ToolTests;
 
-// self 시험 중 다른 엔진 경계 정책 검사다(Docs/Design/UnrealExchange.ko.md 11.1절 — foreign-engine-boundary). UE 플러그인은
+// self 시험 중 다른 엔진 경계 정책 검사다(Docs/Design/UnrealExchange 11.1절 — foreign-engine-boundary). UE 플러그인은
 // Extras/에, Rocks 모듈은 Rocks 규칙 경로에 있으면 통과하고, 서로의 서술자·빌드 네임스페이스가 상대 자리에 있으면 거부한다.
 internal static partial class SelfTests
 {

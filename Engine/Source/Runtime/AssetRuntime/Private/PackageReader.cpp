@@ -4,11 +4,13 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
+#include <Core/Algorithms.h>
 #include <Core/Assert.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Text/NameComponent.h>
 #include <Object/ObjectIdentity.h>
 #include <Object/TypeRegistry.h>
+#include <ObjectSerialization/ClassDefaults.h>
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
@@ -149,6 +151,76 @@ Result<void> ReadVersionList(const RecordReader& parent, const FieldView& field,
     return Result<void>::Success();
 }
 
+// 클래스 기본값 목록(RecordList[{id, fingerprint}] — A5c)을 읽는다. id 오름차순·중복 없음이어야
+// 한다(export 타입 집합과의 대조는 ClassDefaultsWithinTypes).
+Result<void> ReadClassDefaultsList(const RecordReader& parent, const FieldView& field,
+                                   Array<PackageClassDefaults>& out) noexcept {
+    RecordListLimits listLimits;
+    listLimits.maxItems = PackageMaxExports;
+    listLimits.maxPayloadBytes = static_cast<usize>(PackageMaxSectionBytes);
+    listLimits.maxItemBytes = static_cast<usize>(PackageMaxSectionBytes);
+    auto list =
+        RecordListReader::OpenField(parent, field, ClassDefaultsItemSchema, 1, 1, listLimits);
+    if (!list) {
+        return Result<void>::Failure(list.Error());
+    }
+
+    if (auto reserved = out.TryReserve(list.Value().ItemCount()); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < list.Value().ItemCount(); ++index) {
+        auto item = list.Value().OpenItem(index, 2);
+        if (!item || item.Value().FieldCount() != 2) {
+            return Result<void>::Failure(item ? ErrorCode::InvalidArgument : item.Error());
+        }
+
+        auto idField = item.Value().Find(ClassDefaultsItemIdField);
+        auto digestField = item.Value().Find(ClassDefaultsItemFingerprintField);
+        if (!idField || !digestField) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto id = FieldGuid(idField.Value());
+        const FieldView& digest = digestField.Value();
+        if (!id || digest.wireType != static_cast<uint32>(WireType::Bytes) ||
+            digest.payload.Size() != Sha256Digest::Bytes) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (!out.IsEmpty() && !GuidLess(out[out.Size() - 1].type, id.Value())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PackageClassDefaults row;
+        row.type = id.Value();
+        for (usize at = 0; at < Sha256Digest::Bytes; ++at) {
+            row.fingerprint.bytes[at] = digest.payload[at];
+        }
+
+        // 항목 수만큼 위에서 예약했다.
+        (void)out.TryPushBack(row);
+    }
+
+    return Result<void>::Success();
+}
+
+// 클래스 기본값 행이 모두 타입 표(= export 타입 집합)에 있는지다(둘 다 정렬 — 한 번 훑기).
+bool ClassDefaultsWithinTypes(const PackageSummary& summary) noexcept {
+    usize at = 0;
+    for (const PackageClassDefaults& row : summary.classDefaults) {
+        while (at < summary.types.Size() && GuidLess(summary.types[at].type, row.type)) {
+            ++at;
+        }
+
+        if (at == summary.types.Size() || !(summary.types[at].type == row.type)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // 버전 표 항목의 정렬 키 이름을 맞추는 대리 항목이다(커스텀 버전은 id를 type 칸으로 읽는다).
 struct CustomVersionRow {
     Guid type{};
@@ -188,15 +260,20 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
     }
 
     RecordReader& record = reader.Value();
-    const usize expected = kind == PackageKind::Editor ? 4 : 5;
+    const usize expected = kind == PackageKind::Editor ? 5 : 6;
     if (record.FieldCount() != expected) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto types = record.Find(SummaryTypesField);
     auto customs = record.Find(SummaryCustomVersionsField);
-    if (!types || !customs) {
+    auto defaults = record.Find(SummaryClassDefaultsField);
+    if (!types || !customs || !defaults) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto read = ReadClassDefaultsList(record, defaults.Value(), summary.classDefaults); !read) {
+        return read;
     }
 
     if (auto read = ReadVersionList(record, types.Value(), summary.types); !read) {
@@ -280,6 +357,56 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
 
     summary.cookerVersion = cookerVersion.Value();
     return Result<void>::Success();
+}
+
+// 클래스 하나의 기본값 판정 결과다(A5c).
+struct ClassDefaultsJudgement {
+    // 저장 당시와 같다(둘 다 지문이 같거나 둘 다 레코드 없음).
+    bool same = false;
+    // 지금 레코드 실패다(reason이 이유).
+    bool failed = false;
+    ClassDefaultsReason reason = ClassDefaultsReason::None;
+};
+
+// lease 클래스의 저장 당시(summary 행)와 지금 레코드를 맞춘다. 오류는 레코드를 만드는 일시
+// 실패(할당 등)다.
+Result<ClassDefaultsJudgement> JudgeClassDefaults(Allocator& allocator, const TypeLease& lease,
+                                                  const PackageSummary& summary,
+                                                  bool cooked) noexcept {
+    // 행은 TypeId 오름차순이다(ReadClassDefaultsList가 확인했다) — 이진 탐색.
+    const TypeId type = lease.Id();
+    const usize at = algo::LowerBound(summary.classDefaults.View(), type,
+                                      [](const PackageClassDefaults& row, TypeId key) noexcept {
+                                          return GuidLess(row.type, key);
+                                      });
+    const PackageClassDefaults* stored =
+        at < summary.classDefaults.Size() && summary.classDefaults[at].type == type
+            ? &summary.classDefaults[at]
+            : nullptr;
+
+    auto status = ClassifyClassDefaults(lease, allocator);
+    if (!status) {
+        return Result<ClassDefaultsJudgement>::Failure(status.Error());
+    }
+
+    ClassDefaultsJudgement judgement;
+    switch (status.Value().availability) {
+    case ClassDefaultsAvailability::Present: {
+        const Sha256Digest now = status.Value().defaults->Fingerprint(
+            cooked ? ClassDefaultsConfiguration::Cooked : ClassDefaultsConfiguration::Editor);
+        judgement.same = stored != nullptr && stored->fingerprint == now;
+        break;
+    }
+    case ClassDefaultsAvailability::WithoutRecord:
+        judgement.same = stored == nullptr;
+        break;
+    case ClassDefaultsAvailability::Failed:
+        judgement.failed = true;
+        judgement.reason = status.Value().diagnostic.reason;
+        break;
+    }
+
+    return Result<ClassDefaultsJudgement>::Success(judgement);
 }
 
 // 해석 오류를 진단으로 바꾼다. 할당 실패는 자원 실패, 그 밖은 손상이다.
@@ -896,6 +1023,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnrealPathCollision";
     case AssetDiagnosticCode::MissingUnrealDependency:
         return "MissingUnrealDependency";
+    case AssetDiagnosticCode::UnsupportedSourceLayout:
+        return "UnsupportedSourceLayout";
+    case AssetDiagnosticCode::GammaMismatch:
+        return "GammaMismatch";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
     case AssetDiagnosticCode::AliasResolved:
@@ -928,6 +1059,28 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnknownProperty";
     case AssetDiagnosticCode::NuggetMismatch:
         return "NuggetMismatch";
+    case AssetDiagnosticCode::InvalidClassDefaults:
+        return "InvalidClassDefaults";
+    case AssetDiagnosticCode::LossySource:
+        return "LossySource";
+    case AssetDiagnosticCode::NonSrgbSource:
+        return "NonSrgbSource";
+    case AssetDiagnosticCode::IgnoredSourceChannels:
+        return "IgnoredSourceChannels";
+    case AssetDiagnosticCode::IgnoredSourceMips:
+        return "IgnoredSourceMips";
+    case AssetDiagnosticCode::IgnoredSourceImages:
+        return "IgnoredSourceImages";
+    case AssetDiagnosticCode::SrgbIgnored:
+        return "SrgbIgnored";
+    case AssetDiagnosticCode::PreserveBorderWithWrap:
+        return "PreserveBorderWithWrap";
+    case AssetDiagnosticCode::NuggetConflict:
+        return "NuggetConflict";
+    case AssetDiagnosticCode::SourceCleared:
+        return "SourceCleared";
+    case AssetDiagnosticCode::IgnoredSourceChunks:
+        return "IgnoredSourceChunks";
     }
 
     return "Unknown";
@@ -935,6 +1088,15 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
 
 bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     switch (code) {
+    case AssetDiagnosticCode::NonSrgbSource:
+    case AssetDiagnosticCode::IgnoredSourceChannels:
+    case AssetDiagnosticCode::IgnoredSourceMips:
+    case AssetDiagnosticCode::IgnoredSourceImages:
+    case AssetDiagnosticCode::SrgbIgnored:
+    case AssetDiagnosticCode::PreserveBorderWithWrap:
+    case AssetDiagnosticCode::NuggetConflict:
+    case AssetDiagnosticCode::SourceCleared:
+    case AssetDiagnosticCode::IgnoredSourceChunks:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:
@@ -951,6 +1113,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnsupportedAsset:
     case AssetDiagnosticCode::UnrealPathRenamed:
     case AssetDiagnosticCode::MissingUnrealDependency:
+    case AssetDiagnosticCode::GammaMismatch:
     case AssetDiagnosticCode::AliasResolved:
     case AssetDiagnosticCode::AliasInUse:
     case AssetDiagnosticCode::AliasSearchTruncated:
@@ -1376,7 +1539,7 @@ Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource&
                                          SectionKindValue(PackageSectionKind::Summary));
     }
 
-    if (!typesMatch.Value()) {
+    if (!typesMatch.Value() || !ClassDefaultsWithinTypes(contents.summary)) {
         return Corrupt<PackageContents>(failure, asset,
                                         SectionKindValue(PackageSectionKind::Summary), 0);
     }
@@ -1411,6 +1574,40 @@ Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource&
                 if (!lease) {
                     contents.unavailableExportType = true;
                 }
+            }
+
+            if (!lease) {
+                continue;
+            }
+
+            // 클래스 기본값 판정(A5c): 저장 쪽(행 + 지문 / 행 없음)과 지금 쪽(그 구성의 레코드
+            // 있음 + 지문 / 레코드 없는 타입 / 레코드 실패)을 맞춘다.
+            auto judged = JudgeClassDefaults(allocator, lease.Value(), contents.summary, cooked);
+            if (!judged) {
+                return Resource<PackageContents>(failure, judged.Error(), asset, 0);
+            }
+
+            if (judged.Value().same) {
+                continue;
+            }
+
+            if (cooked) {
+                return Unsupported<PackageContents>(
+                    failure, AssetDiagnosticCode::UnsupportedVersion, asset,
+                    SectionKindValue(PackageSectionKind::Summary), index);
+            }
+
+            // 타입 표 순서로 돌므로 두 목록은 TypeId 오름차순이다.
+            Result<void> noted = Result<void>::Success();
+            if (judged.Value().failed) {
+                noted = contents.unavailableDefaults.TryPushBack(
+                    PackageUnavailableDefaults{row.type, judged.Value().reason});
+            } else {
+                noted = contents.changedDefaults.TryPushBack(row.type);
+            }
+
+            if (!noted) {
+                return Resource<PackageContents>(failure, noted.Error(), asset, 0);
             }
         }
     }

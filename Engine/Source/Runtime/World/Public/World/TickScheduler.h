@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/SlotArray.h>
+#include <Meta/Annotations.h>
 #include <Object/ObjectHandle.h>
 
 namespace rocks {
@@ -9,13 +10,16 @@ namespace rocks {
 // 한 프레임의 Tick 실행 단계다. 열거 순서가 실행 순서다. Physics 단계만 고정 스텝(프레임당 0회
 // 이상)으로 실행하고 나머지는 프레임당 한 번 가변 delta로 실행한다. LateUpdate(카메라 추적 등
 // 후처리)는 PreRender(렌더 추출 준비)보다 먼저 와서 그 결과가 같은 프레임 렌더에 반영된다.
+// 리플렉션 enum이다(Tick 설정 저장 — RuntimeClassMetadata 'A5c 지문 연결'). 값은 저장 형식이라
+// 바꾸지 않는다. Count는 개수 표지라 저장·편집 값이 아니다(Hidden).
+ROCKS_ENUM()
 enum class TickPhase : uint8 {
-    PrePhysics,
-    Physics,
-    PostPhysics,
-    LateUpdate,
-    PreRender,
-    Count
+    PrePhysics = 0,
+    Physics = 1,
+    PostPhysics = 2,
+    LateUpdate = 3,
+    PreRender = 4,
+    Count ROCKS_ENUMERATOR(Hidden) = 5
 };
 
 inline constexpr uint32 TickPhaseCount = static_cast<uint32>(TickPhase::Count);

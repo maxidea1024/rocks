@@ -5,8 +5,8 @@
 #include <AssetRuntime/CookedManifest.h>
 #include <Serialization/Archive.h>
 
-// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem 10.1절): 모델 만들기, 검증하지 않는
-// 시험 인코더(규칙을 어긴 모델을 reader에 넣는다 — writer와 같은 배치), CRC 다시 맞추기.
+// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem 10.1절·10.3절 4항 v2): 모델 만들기, 검증하지
+// 않는 시험 인코더(규칙을 어긴 모델을 reader에 넣는다 — writer와 같은 배치), CRC 다시 맞추기.
 namespace rocks::asset_test {
 
 // 시험 매니페스트의 고정 헤더 값이다(쿠킹 패키지 시험 옵션 CookedOptions와 같은 프로파일).
@@ -73,6 +73,43 @@ inline bool AddDependency(CookedManifestEntry& entry, uint64 low,
     return entry.dependencies.TryPushBack(CookedManifestDependency{FixedId(low), kind}).IsOk();
 }
 
+// backend를 끝에 더한다(형식은 그대로 순서로 넣는다).
+inline bool AddBackend(CookedManifest& manifest, StringView name,
+                       Span<const StringView> formats) noexcept {
+    auto added = manifest.backends.TryEmplaceBack(manifest.backends.GetAllocator());
+    if (!added || !added.Value()->name.TryAssign(name)) {
+        return false;
+    }
+
+    for (StringView format : formats) {
+        auto slot = added.Value()->formats.TryEmplaceBack(manifest.backends.GetAllocator());
+        if (!slot || !slot.Value()->TryAssign(format)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// artifact를 끝에 더한다(셰이더 라이브러리, sha256 = digest 값 v, cookKey = v + 1).
+inline CookedManifestArtifact* AddArtifact(CookedManifest& manifest, StringView name,
+                                           StringView formatId, uint64 bytes,
+                                           uint8 digest) noexcept {
+    auto added = manifest.artifacts.TryEmplaceBack(manifest.artifacts.GetAllocator());
+    if (!added) {
+        return nullptr;
+    }
+
+    CookedManifestArtifact& artifact = *added.Value();
+    artifact.kind = CookArtifactKind::ShaderLibrary;
+    artifact.bytes = bytes;
+    artifact.sha256 = ManifestDigestOf(digest);
+    artifact.cookKey = ManifestDigestOf(static_cast<uint8>(digest + 1));
+    const bool ok =
+        artifact.name.TryAssign(name).IsOk() && artifact.formatId.TryAssign(formatId).IsOk();
+    return ok ? &artifact : nullptr;
+}
+
 // 시험 인코더가 덮어쓸 원시 값이다(없으면 모델 값 — AS 10.1절 1 배치 그대로).
 struct ManifestRaw {
     bool overrideCount = false;
@@ -92,6 +129,14 @@ struct ManifestRaw {
     // 프로파일 id 길이 칸을 이 값으로 쓴다(내용은 모델 그대로).
     bool overrideProfileLength = false;
     uint64 profileLength = 0;
+    // backend 개수 칸·첫 backend의 형식 개수 칸·artifact 개수 칸을 이 값으로 쓴다(내용은 모델
+    // 그대로).
+    bool overrideBackendCount = false;
+    uint32 backendCount = 0;
+    bool overrideFormatCount = false;
+    uint32 formatCount = 0;
+    bool overrideArtifactCount = false;
+    uint32 artifactCount = 0;
     // 다른 magic·formatVersion이다.
     uint8 magic[4] = {'R', 'M', 'A', 'N'};
     uint32 formatVersion = CookedManifestFormatVersion;
@@ -99,7 +144,7 @@ struct ManifestRaw {
     usize trailing = 0;
 };
 
-// 검증하지 않고 manifest를 AS 10.1절 배치로 쓴다(끝에 CRC32).
+// 검증하지 않고 manifest를 AS 10.3절 4항 v2 배치로 쓴다(끝에 CRC32).
 inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& manifest,
                                    const ManifestRaw& raw = {}) noexcept {
     ArchiveLimits limits;
@@ -130,6 +175,22 @@ inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& m
                              manifest.cookedBy.patchVersion};
     for (uint32 part = 0; part < 3; ++part) {
         ok = ok && out.WriteU32(part == raw.enginePart ? raw.engineValue : parts[part]).IsOk();
+    }
+
+    ok =
+        ok && out.WriteU32(raw.overrideBackendCount ? raw.backendCount
+                                                    : static_cast<uint32>(manifest.backends.Size()))
+                  .IsOk();
+    for (usize index = 0; index < manifest.backends.Size(); ++index) {
+        const CookedManifestBackend& backend = manifest.backends[index];
+        ok = ok && out.WriteString(backend.name.View()).IsOk();
+        ok = ok && out.WriteU32(index == 0 && raw.overrideFormatCount
+                                    ? raw.formatCount
+                                    : static_cast<uint32>(backend.formats.Size()))
+                       .IsOk();
+        for (const String& format : backend.formats) {
+            ok = ok && out.WriteString(format.View()).IsOk();
+        }
     }
 
     for (usize index = 0; index < manifest.entries.Size(); ++index) {
@@ -164,6 +225,19 @@ inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& m
                                     : static_cast<uint32>(dependency.kind);
             ok = ok && out.WriteGuid(dependency.asset.value).IsOk() && out.WriteU32(kind).IsOk();
         }
+    }
+
+    ok = ok &&
+         out.WriteU32(raw.overrideArtifactCount ? raw.artifactCount
+                                                : static_cast<uint32>(manifest.artifacts.Size()))
+             .IsOk();
+    for (const CookedManifestArtifact& artifact : manifest.artifacts) {
+        ok = ok && out.WriteU8(static_cast<uint8>(artifact.kind)).IsOk() &&
+             out.WriteString(artifact.name.View()).IsOk() &&
+             out.WriteString(artifact.formatId.View()).IsOk() &&
+             out.WriteU64(artifact.bytes).IsOk() &&
+             out.WriteRaw(Span<const uint8>(artifact.sha256.bytes, 32)).IsOk() &&
+             out.WriteRaw(Span<const uint8>(artifact.cookKey.bytes, 32)).IsOk();
     }
 
     for (usize index = 0; ok && index < raw.trailing; ++index) {

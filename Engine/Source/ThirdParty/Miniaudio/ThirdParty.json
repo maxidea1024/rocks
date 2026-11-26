@@ -1,0 +1,426 @@
+{
+  "schema": 1,
+  "name": "Miniaudio",
+  "version": "0.11.26",
+  "upstreamDirectory": "miniaudio-0.11.26",
+  "globalState": true,
+  "source": {
+    "url": "https://github.com/mackron/miniaudio/archive/refs/tags/0.11.26.tar.gz",
+    "sha256": "838ba55a21c9142adf7b76bdc4351e5cd8b7ae128f46b25ec25f94ae9969c600",
+    "verification": "GitHub HTTPS tag archive of the author's repository (tag 0.11.26 = commit 877ea4a7c2601c7b0f2a44e83dfac42e6470fea6, released 2026-10-31), downloaded on 2026-11-26 and its SHA-256 recorded. Upstream publishes no signatures, so it is pinned by the tag commit and the archive hash. Imported files are miniaudio.h and LICENSE (miniaudio.c only includes the header with MINIAUDIO_IMPLEMENTATION, which MiniaudioGlue.c does; examples, tests, extras and external decoders are not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "Unlicense OR MIT-0",
+      "upstreamExpression": "Choice of Public Domain (Unlicense) or MIT No Attribution in LICENSE and at the end of miniaudio.h",
+      "file": "miniaudio-0.11.26/LICENSE",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [
+    "MiniaudioGlue.c"
+  ],
+  "includeDirectories": [
+    "miniaudio-0.11.26"
+  ],
+  "defines": [
+    "MA_NO_DECODING",
+    "MA_NO_ENCODING",
+    "MA_NO_GENERATION",
+    "MA_NO_RESOURCE_MANAGER",
+    "MA_NO_NODE_GRAPH",
+    "MA_NO_ENGINE",
+    "MA_ENABLE_ONLY_SPECIFIC_BACKENDS",
+    "MA_ENABLE_WASAPI",
+    "MA_ENABLE_COREAUDIO",
+    "MA_ENABLE_AAUDIO",
+    "MA_ENABLE_OPENSL"
+  ],
+  "platformDefines": {
+    "MacOS": [
+      "MA_NO_RUNTIME_LINKING"
+    ]
+  },
+  "consumerDefines": [
+    "MA_NO_DECODING",
+    "MA_NO_ENCODING",
+    "MA_NO_GENERATION",
+    "MA_NO_RESOURCE_MANAGER",
+    "MA_NO_NODE_GRAPH",
+    "MA_NO_ENGINE",
+    "MA_ENABLE_ONLY_SPECIFIC_BACKENDS",
+    "MA_ENABLE_WASAPI",
+    "MA_ENABLE_COREAUDIO",
+    "MA_ENABLE_AAUDIO",
+    "MA_ENABLE_OPENSL"
+  ],
+  "adapterHeaders": [
+    "miniaudio-0.11.26/miniaudio.h"
+  ],
+  "files": {
+    "LICENSE": "457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb",
+    "miniaudio.h": "14caa71f2f073f6b764518cdfae6b466b260d90bea093aeb89aaaaf2848b23e6"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "miniaudio.h",
+      "line": 3754,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3755,
+      "text": "#pragma warning(disable:4201)   /* nonstandard extension used: nameless struct/union */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3756,
+      "text": "#pragma warning(disable:4214)   /* nonstandard extension used: bit field types other than int */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3757,
+      "text": "#pragma warning(disable:4324)   /* structure was padded due to alignment specifier */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3759,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3760,
+      "text": "#pragma GCC diagnostic ignored \"-Wpedantic\" /* For ISO C99 doesn't support unnamed structs/unions [-Wpedantic] */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3762,
+      "text": "#pragma GCC diagnostic ignored \"-Wc11-extensions\"   /* anonymous unions are a C11 extension */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3798,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3799,
+      "text": "#pragma GCC diagnostic ignored \"-Wlong-long\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3801,
+      "text": "#pragma GCC diagnostic ignored \"-Wc++11-long-long\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 3807,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 8082,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 8084,
+      "text": "#pragma GCC diagnostic pop  /* For ISO C99 doesn't support unnamed structs/unions [-Wpedantic] */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 11742,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 11743,
+      "text": "#pragma warning(disable:4752)   /* found Intel(R) Advanced Vector Extensions; consider using /arch:AVX */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 11744,
+      "text": "#pragma warning(disable:4049)   /* compiler limit : terminating line number emission */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 12269,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 12270,
+      "text": "#pragma GCC diagnostic ignored \"-Wunused-variable\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 12322,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 14245,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 14246,
+      "text": "#pragma GCC diagnostic ignored \"-Wlong-long\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 14248,
+      "text": "#pragma GCC diagnostic ignored \"-Wc++11-long-long\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 15904,
+      "text": "#pragma clang diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 15906,
+      "text": "#pragma clang diagnostic ignored \"-Watomic-alignment\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 15915,
+      "text": "#pragma clang diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 17466,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19516,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19517,
+      "text": "#pragma GCC diagnostic ignored \"-Wpedantic\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19521,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19986,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19987,
+      "text": "#pragma warning(disable:4201)   /* nonstandard extension used: nameless struct/union */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19989,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19990,
+      "text": "#pragma GCC diagnostic ignored \"-Wpedantic\" /* For ISO C99 doesn't support unnamed structs/unions [-Wpedantic] */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 19992,
+      "text": "#pragma GCC diagnostic ignored \"-Wc11-extensions\"   /* anonymous unions are a C11 extension */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 20013,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 20015,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 21789,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 21790,
+      "text": "#pragma warning(disable:4091)   /* 'typedef ': ignored on left of '' when no variable is declared */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 21795,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23434,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23435,
+      "text": "#pragma warning(disable:4201)   /* nonstandard extension used: nameless struct/union */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23437,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23438,
+      "text": "#pragma GCC diagnostic ignored \"-Wpedantic\" /* For ISO C99 doesn't support unnamed structs/unions [-Wpedantic] */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23440,
+      "text": "#pragma GCC diagnostic ignored \"-Wc11-extensions\"   /* anonymous unions are a C11 extension */"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23453,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 23455,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 41665,
+      "text": "#pragma clang diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 41666,
+      "text": "#pragma clang diagnostic ignored \"-Wdollar-in-identifier-extension\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 41668,
+      "text": "#pragma clang diagnostic ignored \"-Wvariadic-macro-arguments-omitted\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 41670,
+      "text": "#pragma clang diagnostic ignored \"-Wgnu-zero-variadic-macro-arguments\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 42634,
+      "text": "#pragma clang diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 69584,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 69586,
+      "text": "#pragma GCC diagnostic ignored \"-Wimplicit-fallthrough\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 69665,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 73785,
+      "text": "#pragma message (\"ma_debug_fill_pcm_frames_with_sine_wave() will do nothing because MA_NO_GENERATION is enabled.\")"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 80188,
+      "text": "#pragma options opt off"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85187,
+      "text": "#pragma options opt reset"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85200,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85202,
+      "text": "#pragma GCC diagnostic ignored \"-Wimplicit-fallthrough\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85380,
+      "text": "#pragma aux _watcom_bswap16 =     \"xchg al, ah\"     parm  [ax]        value [ax]        modify nomemory;"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85385,
+      "text": "#pragma aux _watcom_bswap32 =     \"bswap eax\"     parm  [eax]     value [eax]     modify nomemory;"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 85390,
+      "text": "#pragma aux _watcom_bswap64 =     \"bswap eax\"         \"bswap edx\"         \"xchg eax,edx\"      parm [eax edx]      value [eax edx]     modify nomemory;"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 86346,
+      "text": "#pragma aux ma_dr_flac__clz_watcom_lzcnt =     \"db 0F3h, 0Fh, 0BDh, 0C0h\"      parm [eax]     value [eax]     modify nomemory;"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 86352,
+      "text": "#pragma aux ma_dr_flac__clz_watcom =     \"bsr eax, eax\"     \"xor eax, 31\"     parm [eax] nomemory     value [eax]     modify exact [eax] nomemory;"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 93713,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 94310,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 94311,
+      "text": "#pragma GCC diagnostic ignored \"-Wstringop-overflow\""
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 94372,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "miniaudio.h",
+      "line": 96894,
+      "text": "#pragma warning(pop)"
+    }
+  ],
+  "notes": [
+    "Audio output device IO for the ClientOnly module AudioMiniaudio (Docs/Design/AudioSystem sections 3.7.2 and 3.34). Only the low-level device API is used; the mixer, streaming and DSP are Rocks code.",
+    "Global state: the LCG seed g_maLCG, the Core Audio device tracking globals and the OpenSL ES init spinlock, so AudioMiniaudio is the only Rocks module that may depend on it (Docs/Design/BuildTargets section 3.8 BD29).",
+    "Windows keeps miniaudio run-time linking (ole32, avrt and the WASAPI entry points are loaded with LoadLibrary), so no system libraries are linked. macOS defines MA_NO_RUNTIME_LINKING because run-time dlopen of the frameworks fails notarization; AudioMiniaudio links CoreFoundation, CoreAudio and AudioToolbox. Android keeps run-time linking so that AAudio (API 26+) is picked when present and OpenSL ES otherwise. MA_NO_RUNTIME_LINKING only changes how entry points are resolved, not the structure layouts, so it is a library define only.",
+    "Allocation goes through ma_allocation_callbacks that AudioMiniaudio routes to a Rocks allocator; miniaudio allocates only while it initializes the context and the device, never in the data callback.",
+    "Pragma review: the directives are warning push, pop, disable and ignore pairs, except #pragma options opt off/reset (Metrowerks only), #pragma aux (Open Watcom inline assembly only) and one #pragma message in the MA_NO_GENERATION branch of ma_debug_fill_pcm_frames_with_sine_wave, which is compiled only with MA_DEBUG_OUTPUT; none of them is active with clang."
+  ],
+  "patch": "Rocks.patch",
+  "modifications": [
+    {
+      "file": "miniaudio.h",
+      "upstreamSha256": "6b376c7fbb1352ba1e0e432ab66069b335ea9405e45cb6c30b97ef0f3c9c3e0e",
+      "reason": "The /* End MurmurHash3 */ block pushes the GCC diagnostic stack again instead of popping it (upstream typo), so the implementation leaves one push unbalanced and the -Wimplicit-fallthrough suppression active for the rest of the translation unit; the push becomes a pop."
+    }
+  ]
+}

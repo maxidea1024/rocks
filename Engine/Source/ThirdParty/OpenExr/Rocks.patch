@@ -1,0 +1,282 @@
+diff --git a/external/deflate/lib/x86/cpu_features.h b/external/deflate/lib/x86/cpu_features.h
+--- a/external/deflate/lib/x86/cpu_features.h
++++ b/external/deflate/lib/x86/cpu_features.h
+@@ -165,7 +165,9 @@
+ #  define HAVE_AVXVNNI(features)	((features) & X86_CPU_FEATURE_AVXVNNI)
+ #endif
+ 
+-#if (GCC_PREREQ(14, 0) || CLANG_PREREQ(18, 0, 18000000)) \
++/* Rocks: LLVM 22 removed the evex512 target feature (Rocks.patch) */
++#if (GCC_PREREQ(14, 0) || (CLANG_PREREQ(18, 0, 18000000) \
++	&& (defined(__apple_build_version__) || __clang_major__ < 22))) \
+ 	&& !defined(__EVEX512__) /* avoid subtracting the evex512 feature */
+ #  define EVEX512	",evex512"	/* needed to override potential -mno-evex512 */
+ #  define NO_EVEX512	",no-evex512"
+diff --git a/src/lib/OpenEXRCore/IlmThreadConfig.h b/src/lib/OpenEXRCore/IlmThreadConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/IlmThreadConfig.h
+@@ -0,0 +1,10 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10). openexr_config.h includes the
++   IlmThread configuration, which CMake generates from cmake/IlmThreadConfig.h.in. OpenEXRCore tests the threading macro with
++   #ifdef, so Rocks defines nothing here: no context mutex, no POSIX file locking. ImageCodec uses one context from one thread
++   with memory read callbacks, which is safe without locks. */
++#ifndef INCLUDED_ILMTHREAD_CONFIG_H
++#define INCLUDED_ILMTHREAD_CONFIG_H 1
++
++#pragma once
++
++#endif /* INCLUDED_ILMTHREAD_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/ImathConfig.h b/src/lib/OpenEXRCore/ImathConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/ImathConfig.h
+@@ -0,0 +1,9 @@
++/* Rocks stand-in for the Imath configuration header that openexr_config.h includes (Docs/Design/AssetSystem section 12.10). Imath
++   is not imported. The version macros stay undefined, so internal_coding.h uses the half conversion built into OpenEXRCore
++   instead of including the Imath half.h. */
++#ifndef INCLUDED_IMATH_CONFIG_H
++#define INCLUDED_IMATH_CONFIG_H 1
++
++#pragma once
++
++#endif /* INCLUDED_IMATH_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/OpenEXRConfig.h b/src/lib/OpenEXRCore/OpenEXRConfig.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/OpenEXRConfig.h
+@@ -0,0 +1,38 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10). The OpenEXR CMake build generates
++   this file from cmake/OpenEXRConfig.h.in. Rocks compiles only the C core as a static library, so it writes by hand the subset
++   OpenEXRCore uses: the version macros, empty export macros (no shared library, no visibility attributes) and the deprecation
++   macro. The C++ library macros (namespaces, Imath and OpenJPH versions) are not needed by the C core. */
++#ifndef INCLUDED_OPENEXR_CONFIG_H
++#define INCLUDED_OPENEXR_CONFIG_H 1
++
++#pragma once
++
++#ifndef INCLUDED_OPENEXR_VERSION_H
++#define OPENEXR_VERSION_MAJOR 3
++#define OPENEXR_VERSION_MINOR 4
++#define OPENEXR_VERSION_PATCH 3
++#endif
++
++#define OPENEXR_VERSION_STRING "3.4.3"
++#define OPENEXR_PACKAGE_STRING "OpenEXR 3.4.3"
++#define OPENEXR_VERSION_RELEASE_TYPE ""
++#define OPENEXR_VERSION_EXTRA ""
++#define OPENEXR_VERSION_HEX                                                                       \
++    (((OPENEXR_VERSION_MAJOR) << 24) | ((OPENEXR_VERSION_MINOR) << 16) |                          \
++     ((OPENEXR_VERSION_PATCH) << 8))
++
++#define OPENEXR_EXPORT
++#define OPENEXR_HIDDEN
++#define OPENEXR_EXPORT_TYPE
++#define OPENEXR_EXPORT_EXTERN_TEMPLATE
++#define OPENEXR_EXPORT_ENUM
++#define OPENEXR_EXPORT_TEMPLATE_TYPE
++#define OPENEXR_EXPORT_TEMPLATE_INSTANCE
++
++#if defined(__cplusplus) && (__cplusplus >= 201402L)
++#define OPENEXR_DEPRECATED(msg) [[deprecated(msg)]]
++#else
++#define OPENEXR_DEPRECATED(msg) __attribute__((deprecated(msg)))
++#endif
++
++#endif /* INCLUDED_OPENEXR_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/OpenEXRConfigInternal.h b/src/lib/OpenEXRCore/OpenEXRConfigInternal.h
+new file mode 100644
+--- /dev/null
++++ b/src/lib/OpenEXRCore/OpenEXRConfigInternal.h
+@@ -0,0 +1,13 @@
++/* Rocks configuration header for OpenEXRCore 3.4.3 (Docs/Design/AssetSystem section 12.10), written by hand in place of the
++   file CMake generates from cmake/OpenEXRConfigInternal.h.in. Only the internal libdeflate copy is selected. The inline AVX
++   assembly probe (OPENEXR_IMF_HAVE_GCC_INLINE_ASM_AVX) stays undefined so that the DWA path uses its portable code, and
++   OPENEXR_MISSING_ARM_VLD1 stays undefined because every Rocks ARM compiler has the vld1q_*_x4 intrinsics. The other entries of
++   the template configure the C++ library and the threading pool, which Rocks does not build. */
++#ifndef INCLUDED_OPENEXR_INTERNAL_CONFIG_H
++#define INCLUDED_OPENEXR_INTERNAL_CONFIG_H 1
++
++#pragma once
++
++#define OPENEXR_USE_INTERNAL_DEFLATE 1
++
++#endif /* INCLUDED_OPENEXR_INTERNAL_CONFIG_H */
+diff --git a/src/lib/OpenEXRCore/attributes.c b/src/lib/OpenEXRCore/attributes.c
+--- a/src/lib/OpenEXRCore/attributes.c
++++ b/src/lib/OpenEXRCore/attributes.c
+@@ -69,12 +69,12 @@
+     switch (nattr->type)
+     {
+         case EXR_ATTR_BOX2I: {
+-            exr_attr_box2i_t nil = {{0}};
++            exr_attr_box2i_t nil = {{0, 0}, {0, 0}};
+             *(nattr->box2i)      = nil;
+             break;
+         }
+         case EXR_ATTR_BOX2F: {
+-            exr_attr_box2f_t nil = {{0}};
++            exr_attr_box2f_t nil = {{0, 0}, {0, 0}};
+             *(nattr->box2f)      = nil;
+             break;
+         }
+diff --git a/src/lib/OpenEXRCore/channel_list.c b/src/lib/OpenEXRCore/channel_list.c
+--- a/src/lib/OpenEXRCore/channel_list.c
++++ b/src/lib/OpenEXRCore/channel_list.c
+@@ -80,7 +80,7 @@
+     int32_t                    xsamp,
+     int32_t                    ysamp)
+ {
+-    exr_attr_chlist_entry_t  nent = {{0}};
++    exr_attr_chlist_entry_t  nent = {0};
+     exr_attr_chlist_entry_t *nlist, *olist;
+     int                      newcount, insertpos;
+     int32_t                  maxlen;
+diff --git a/src/lib/OpenEXRCore/internal_structs.c b/src/lib/OpenEXRCore/internal_structs.c
+--- a/src/lib/OpenEXRCore/internal_structs.c
++++ b/src/lib/OpenEXRCore/internal_structs.c
+@@ -272,10 +272,18 @@
+     }
+     else if (ncount == 1)
+     {
+-        if (part == &(ctxt->first_part)) ctxt->first_part = *(ctxt->parts[1]);
++        /* Rocks: free the allocated part struct that leaves the table (the reverted part, or the
++         * second part copied into first_part), not only its contents (Rocks.patch) */
++        exr_priv_part_t gone = part;
++        if (part == &(ctxt->first_part))
++        {
++            gone             = ctxt->parts[1];
++            ctxt->first_part = *gone;
++        }
+         ctxt->init_part = &(ctxt->first_part);
+         ctxt->free_fn (ctxt->parts);
+         ctxt->parts = &(ctxt->init_part);
++        ctxt->free_fn (gone);
+     }
+     else
+     {
+@@ -286,6 +294,8 @@
+             ctxt->parts[np] = ctxt->parts[p];
+             ++np;
+         }
++        /* Rocks: free the allocated part struct too (Rocks.patch) */
++        if (part != &(ctxt->first_part)) ctxt->free_fn (part);
+     }
+     ctxt->num_parts = ncount;
+ }
+diff --git a/src/lib/OpenEXRCore/internal_structs.h b/src/lib/OpenEXRCore/internal_structs.h
+--- a/src/lib/OpenEXRCore/internal_structs.h
++++ b/src/lib/OpenEXRCore/internal_structs.h
+@@ -62,9 +62,9 @@
+     uintptr_t volatile* object)
+ {
+ #        if UINTPTR_MAX == 0xFFFFFFFF
+-    return (uintptr_t) InterlockedOr (object, 0);
++    return (uintptr_t) InterlockedOr ((LONG volatile*) object, 0);
+ #        else
+-    return (uintptr_t) InterlockedOr64 (object, 0);
++    return (uintptr_t) InterlockedOr64 ((LONG64 volatile*) object, 0);
+ #        endif
+ }
+ 
+@@ -74,10 +74,12 @@
+ {
+ #        if UINTPTR_MAX == 0xFFFFFFFF
+     uintptr_t prev =
+-        (uintptr_t) InterlockedCompareExchange (object, desired, *expected);
++        (uintptr_t) InterlockedCompareExchange (
++            (LONG volatile*) object, (LONG) desired, (LONG) *expected);
+ #        else
+     uintptr_t prev =
+-        (uintptr_t) InterlockedCompareExchange64 (object, desired, *expected);
++        (uintptr_t) InterlockedCompareExchange64 (
++            (LONG64 volatile*) object, (LONG64) desired, (LONG64) *expected);
+ #        endif
+     if (prev == *expected) return 1;
+     *expected = prev;
+@@ -252,6 +254,7 @@
+ static inline void
+ internal_exr_lock (exr_const_context_t c)
+ {
++    (void)c;
+ #ifdef ILMTHREAD_THREADING_ENABLED
+     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
+ #    ifdef _WIN32
+@@ -265,6 +268,7 @@
+ static inline void
+ internal_exr_unlock (exr_const_context_t c)
+ {
++    (void)c;
+ #ifdef ILMTHREAD_THREADING_ENABLED
+     exr_context_t nonc = EXR_CONST_CAST (exr_context_t, c);
+ #    ifdef _WIN32
+diff --git a/src/lib/OpenEXRCore/internal_util.h b/src/lib/OpenEXRCore/internal_util.h
+--- a/src/lib/OpenEXRCore/internal_util.h
++++ b/src/lib/OpenEXRCore/internal_util.h
+@@ -46,6 +46,7 @@
+ static inline int
+ compute_sampled_width (int width, int x_sampling, int start_x)
+ {
++    (void)start_x;
+     /*
+      * we require that the start_x % x_sampling == 0 and for tiled images (and for deep),
+      * x_sampling must be 1, so this can simplify the math compared to the y case
+diff --git a/src/lib/OpenEXRCore/internal_win32_file_impl.h b/src/lib/OpenEXRCore/internal_win32_file_impl.h
+--- a/src/lib/OpenEXRCore/internal_win32_file_impl.h
++++ b/src/lib/OpenEXRCore/internal_win32_file_impl.h
+@@ -103,6 +103,8 @@
+ static void
+ default_shutdown (exr_const_context_t c, void* userdata, int failed)
+ {
++    (void)c;
++    (void)failed;
+     /* we will handle failure before here */
+     struct _internal_exr_filehandle* fh = userdata;
+     if (fh)
+@@ -388,6 +390,7 @@
+ static int64_t
+ default_query_size_func (exr_const_context_t ctxt, void* userdata)
+ {
++    (void)ctxt;
+     struct _internal_exr_filehandle* fh = userdata;
+     int64_t                          sz = -1;
+ 
+diff --git a/src/lib/OpenEXRCore/internal_zip.c b/src/lib/OpenEXRCore/internal_zip.c
+--- a/src/lib/OpenEXRCore/internal_zip.c
++++ b/src/lib/OpenEXRCore/internal_zip.c
+@@ -20,7 +20,8 @@
+ #    include <emmintrin.h>
+ #    include <mmintrin.h>
+ #endif
+-#if defined __SSE4_1__ || (_MSC_VER >= 1300 && (_M_IX86 || _M_X64))
++/* Rocks: clang-cl defines _MSC_VER but needs SSE4.1 enabled for the intrinsics (Rocks.patch) */
++#if defined __SSE4_1__ || (_MSC_VER >= 1300 && (_M_IX86 || _M_X64) && !defined(__clang__))
+ #    define IMF_HAVE_SSE4_1 1
+ #    include <smmintrin.h>
+ #endif
+diff --git a/src/lib/OpenEXRCore/parse_header.c b/src/lib/OpenEXRCore/parse_header.c
+--- a/src/lib/OpenEXRCore/parse_header.c
++++ b/src/lib/OpenEXRCore/parse_header.c
+@@ -130,7 +130,7 @@
+ 
+             if (scr->ctxt->file_size > 0)
+             {
+-                if ((scr->fileoff + SCRATCH_BUFFER_SIZE) > scr->ctxt->file_size)
++                if ((scr->fileoff + SCRATCH_BUFFER_SIZE) > (uint64_t) scr->ctxt->file_size)
+                 {
+                     toread = scr->ctxt->file_size - scr->fileoff;
+                 }
+@@ -768,11 +768,11 @@
+ 
+     exr_attr_bytes_destroy(ctxt, attrdata);
+ 
+-    if (attrsz < sizeof(uint32_t))
++    if (attrsz < (int32_t) sizeof(uint32_t))
+         return ctxt->print_error (
+             ctxt,
+             EXR_ERR_ATTR_SIZE_MISMATCH,
+-            "Attribute '%s': Invalid size %d (exp '%s' size >= %ld)",
++            "Attribute '%s': Invalid size %d (exp '%s' size >= %zu)",
+             aname,
+             attrsz,
+             tname,

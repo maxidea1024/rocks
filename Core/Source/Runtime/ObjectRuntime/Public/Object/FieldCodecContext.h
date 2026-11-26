@@ -251,7 +251,7 @@ private:
 //   FieldScope scope(context, schema.fields[index], schema.id, lease.FieldEnum(index),
 //                    lease.FieldStruct(index), FieldCodecFrame::NoIndex,
 //                    lease.FieldKeyEnum(index));
-//   auto wire = ops->encode(*ops, registry, access, handle, payload, context);
+//   auto wire = ops->encode(*ops, &registry, access, handle, payload, context);
 class FieldScope {
 public:
     [[nodiscard]] FieldScope(FieldCodecContext& context, const FieldSchema& field,

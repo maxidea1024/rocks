@@ -58,7 +58,7 @@ bool LspClassify(const Compilation& compilation, uint32 symbolIndex, uint32& typ
                  uint32& modifiers) noexcept {
     const Symbol& symbol = compilation.Symbols()[symbolIndex];
     const uint32 library = LspModifier::DefaultLibrary;
-    const bool readonly = (symbol.flags & (SymbolFlags::Let | SymbolFlags::ReadOnly)) != 0;
+    const bool readonly = LspIsReadOnly(compilation, symbol);
     const bool async = LspAsyncSignature(compilation, symbol);
     auto set = [&](LspTokenType kind, uint32 bits) noexcept {
         type = static_cast<uint32>(kind);
@@ -188,67 +188,19 @@ Result<void> LspAppendSemanticTokens(const Compilation& compilation, const Sourc
         return push(tree->Node(node).token, type, modifiers);
     };
 
+    // 이름 노드 → 심볼 규칙은 위치 질의와 공용이다(LspVisitNames — 11.2절). Type 안의 Path에도
+    // 타입이 있으면 같은 토큰이 둘 나오고 정렬 뒤 겹침 제거가 하나만 남긴다.
+    auto visit = [&](const LspNamed& named) noexcept {
+        if (named.symbol != NoSymbol) {
+            return pushSymbol(named.node, named.symbol);
+        }
+
+        // import 경로의 이름은 모듈 이름 공간이다.
+        return push(named.token, static_cast<uint32>(LspTokenType::Namespace), 0);
+    };
     for (uint32 node = 0; node < tree->NodeCount(); ++node) {
-        const SyntaxNode& entry = tree->Node(node);
-        Result<void> pushed = Result<void>::Success();
-        switch (entry.kind) {
-        case SyntaxKind::Name:
-        case SyntaxKind::Identifier:
-        case SyntaxKind::Member: {
-            const uint32 symbol = compilation.NodeSymbol(module, node);
-            if (symbol != NoSymbol) {
-                pushed = pushSymbol(node, symbol);
-            }
-
-            break;
-        }
-        case SyntaxKind::Type:
-        case SyntaxKind::Path: {
-            // 타입 표기(Type)와 class 기반 목록의 경로(Path — 기반 해석이 경로에 타입을 둔다):
-            // 경로 마지막 이름에 그 타입(이름 노드에 심볼이 따로 있으면 그쪽이 쓴다). Type 안의
-            // Path에도 타입이 있으면 같은 토큰이 둘 나오고 정렬 뒤 겹침 제거가 하나만 남긴다.
-            const uint32 typeIndex = compilation.NodeType(module, node);
-            const uint32 path = entry.kind == SyntaxKind::Path ? node : tree->Child(node, 0);
-            if (typeIndex == NoType || typeIndex >= compilation.Types().Size() || path == NoNode ||
-                tree->Node(path).kind != SyntaxKind::Path || tree->Node(path).childCount == 0) {
-                break;
-            }
-
-            const Span<const uint32> names = tree->Children(path);
-            const uint32 last = names[names.Size() - 1];
-            const uint32 symbol = compilation.Types()[typeIndex].symbol;
-            if (symbol != NoSymbol && compilation.NodeSymbol(module, last) == NoSymbol) {
-                pushed = pushSymbol(last, symbol);
-            }
-
-            break;
-        }
-        case SyntaxKind::Import: {
-            // import 경로의 이름은 모듈 이름 공간이다.
-            const uint32 path = tree->Child(node, 0);
-            if (path == NoNode || tree->Node(path).kind != SyntaxKind::Path) {
-                break;
-            }
-
-            for (const uint32 name : tree->Children(path)) {
-                if (compilation.NodeSymbol(module, name) == NoSymbol) {
-                    pushed = push(tree->Node(name).token,
-                                  static_cast<uint32>(LspTokenType::Namespace), 0);
-                }
-
-                if (!pushed) {
-                    break;
-                }
-            }
-
-            break;
-        }
-        default:
-            break;
-        }
-
-        if (!pushed) {
-            return pushed;
+        if (auto visited = LspVisitNames(compilation, module, node, visit); !visited) {
+            return visited;
         }
     }
 

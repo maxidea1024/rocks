@@ -9,7 +9,7 @@
 | SH0 | 도구 스파이크: 지금의 내장 샘플 셰이더(`Programs/Sandbox/Private/SampleRenderer.cpp`의 HLSL)를 DXIL·SPIR-V·DXBC·MSL·ESSL로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | P3·P4·P10 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함, S1), FXC 고정본 로드, 리플렉션 덤프, `ROCKS_IMAGE_FORMAT`의 DXC 지원 확인, S2·S3·S6·S8·S9·S10·S12(데스크톱)·S13·S14 측정. 남은 것(2026-11-20): macOS 부분(S1·S3 호스트 사이·S9)과 기계 하나로 못 재는 S2·S3·S12 일부(5.4절 끝) |
 | SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1, 11절)·두 층 키(P5)·에셋 너겟·`shader-compile` 명령·Development 필요 시 컴파일. 설계·하위 단계 SH1a–SH1e: 11.1절(개정 23) | SH0·P1·P5(A2·A3·P6a)·결정 6 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고, 부모 종료 시 워커와 그 자식 종료, 형식 버전 불일치 진단, 도구 조회, 전처리 정합성(측정 S7) |
 | SH2 | 리플렉션 정규화와 워커 규칙(7.2절)·ShaderCore와 셰이더 타입·퍼뮤테이션(P14)·쿠킹 라이브러리와 매니페스트 v2(P6b)·Graphics API의 쿠킹 코드 수신·RB3 셰이더 집합·런타임 컴파일러 제거·GLES 미리보기 Release 제외·샘플 렌더러 전환. 설계와 하위 단계 SH2a–SH2g: 16.1절(개정 31) | SH1·P2·P4·P9·P11·A0-G·결정 2·3·4·5·9 | 16.1절 완료 기준 |
-| SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM11, 개정 49) | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
+| SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM11, 개정 49). 설계와 하위 단계 SH3a–SH3c: 16.2절(개정 54). SH3a 구현(개정 55), SH3b·SH3c 설계(개정 56), SH3b 구현(개정 57), SH3c 남음 | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
 | SH4 | 감시 재컴파일(`DirectoryWatch`)·오류 위치·디버그 심볼·PSO 교체. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM12, 개정 49) | SH2 | 저장 후 10초 안 반영(계획 I5) |
 | SH5 | MetalGraphics(D3D11의 쿠킹 셰이더 전환은 개정 32에서 SH2로 옮겼다) | SH2·P12·P15 | Metal이 D3D12와 허용 오차 안 일치, 7.3절 (c)·(e)·(g)의 Metal 부분 |
 | SH6 | Android: `GLES31_ANDROID` 기기 실행, `VULKAN_ANDROID` 형식과 VulkanGraphics Android | SH2·P13·P11 | Android(실기기 또는 S11 에뮬레이터)에서 D3D12 기준 이미지와 허용 오차 안 일치, 7.3절 (c)·(i)의 Android 부분, S12(기기) |
@@ -41,7 +41,7 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 | SH2e | 공급자와 메모리 라이브러리(SSD16), Graphics API 전환(4 backend `CreateShader`·파이프라인 layout), RB3 셰이더 집합, RB4 SH2분, 런타임 컴파일러 제거 | RenderBase SX10, 7.3절 (c)·(d)·(j 장치) |
 | SH2f | 샘플 렌더러 전환·Sandbox self-test(D3D12·D3D11·Vulkan·GLES 미리보기)·Release 제외 정책·측정 S5 | 아래 완료 기준 1·4·5 |
 | SH2d | P6b: `CookShaderLibraries`를 비에셋 산출물 훅에 붙임·`--engine`·`cookDevelopmentShaders`, 런타임 열기·형식 선택. 선행: 에셋 세션의 TargetProfile 칸·매니페스트 v2·훅 | 12.3.1절 완료 기준 |
-| SH2g(선택) | 엔진 셰이더 SL0(SSD21) | SH2g 완료 기준(아래) |
+| SH2g(선택) | 엔진 셰이더 SL0(SSD21). 이 문서의 "SH2g 구현 메모(개정 46)"는 GLES cube storage 쓰기를 고친 다른 일이다 — SL0은 "SH2g(SL0)"로 적는다(개정 50) | SH2g 완료 기준(아래) |
 
 **완료 기준(위 표 SH2 행을 대신한다).**
 
@@ -51,7 +51,9 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 4. 행렬 옵션·앞면 매핑 기록(측정 S5), A0-G 범위를 Vulkan이 받음(G3).
 5. Release 구성에 셰이더 컴파일러·GLES 미리보기 없음(9절 정책, `release-shader-compiler`의 D3D12·D3D11 항과 `release-windows-opengl` 예외 삭제).
 
-**SH2g 완료 기준(선택, SLR3).** 엔진 셰이더 7.7절 1–3·5(SL0 컴파일 행렬 — 형식은 호스트 플랫폼 TargetProfile의 형식(SSD24)·CPU 대조·정수 golden·coverage 사유). SH2 완료 기준에 들지 않는다.
+**SH2g(SL0) 완료 기준(선택, SLR3).** 엔진 셰이더 7.7절 1–3·5(SL0 컴파일 행렬·CPU 대조·정수 golden·coverage 사유). SH2 완료 기준에 들지 않는다. 컴파일 행렬 형식은 형식 정의 전부(`Engine/Config/ShaderFormats` — 호스트 TargetProfile 형식과 `GLES31_PC`·Android 형식을 모두 덮는다, 도구 없는 Metal은 SKIP)이고 EngineTests가 실제 워커로 컴파일한다. GPU probe는 Sandbox self-test가 공급자 셰이더로 돌린다(엔진 셰이더 7.6절·결정 SLD19, 개정 50). 시험 루트 `/Plugin/EngineShaderTests`는 `Programs/Sandbox/EngineShaderTests`이고 Sandbox 호스트 원문 디렉터리로 들어가 공급자 라이브러리에 들어간다(쿠킹하지 않는다 — SSD17).
+
+**SH2g(SL0) 구현 메모(개정 51, 2026-11-25).** 엔진 셰이더 7.8절이 상세다. 완료 기준 충족: 컴파일 행렬(EngineTests `EngineShaders_CompileMatrix` — `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`GLES31_PC`·`GLES31_ANDROID` 통과, `METAL_SM5` SKIP, 자리표시 형식 `VULKAN_ANDROID`·`METAL_IOS` SKIP), Sandbox self-test 8 장치 CPU 대조·정수 golden 56개 bit 일치, coverage 사유 출력. 이 문서에 걸린 사실: (1) FXC가 이른 `return`이 있는 함수를 분기 안에 펼치면 X4000 경고(오류 처리)를 내는데, FXC가 HRESULT 실패로 돌려 워커가 `CompileError`가 아닌 도구 실패로 분류하므로 대체 경로(DXC → SPIRV-Cross → FXC)를 타지 않는다 — 엔진 셰이더는 단일 출구로 피했다(엔진 셰이더 7.1절). 분류가 맞는지는 SS 쪽 후속 확인 항목이다. (2) HLSL 2018 DXC에는 `static_assert`가 없다. (3) 시험 루트의 `Shared/*.h`(probe 함수 번호)를 Sandbox C++가 include 디렉터리로 함께 쓴다.
 
 **결정.**
 
@@ -199,6 +201,58 @@ SH2는 쿠킹된 셰이더로 그리는 첫 단계다. 위 표의 SH2 행과 결
 - **Sandbox.** StorageTarget은 `FillCubeCS`(RWTextureCube)·`FillCubeArrayCS`(RWTextureCubeArray)·면 하나 `FillFaceLayerCS`(RWTexture2DArray, GLES 밖)·`FillFaceCS`(RWTexture2D, GLES)로 나눴고(`FillCS` 대체), ViewDimension `FillCubeCS`는 RWTextureCube다. 두 self-test의 GLES 조기 반환을 지웠다.
 - 시험: `ShaderBindingRules_WorkerGlesCubeStorageImages`(GLES ESSL `imageCube`·`imageCubeArray`·공유 타입의 `image2DArray`, 형식별 모양, GLES GetDimensions 오류·Vulkan 통과), 값 1 storage image cube 모양 규칙, 원문 검사 attribute 묶음.
 
+**SH2d 구현 설계(개정 52, 2026-11-25).** 에셋 세션이 A4f(AssetSystem 10.3절·10.3.1절 — 매니페스트 v2·`CookArtifactStage`·`--engine`·TargetProfiles)를 push한 뒤 12.3.1절 SSD10–SSD16·SSD41을 셰이더 쪽에서 붙이는 구현 단위를 정한다(결정 SSD44–SSD48). 애매한 곳은 UE 5.8을 따랐다. 쿠커 모듈 집합은 BuildTargets 3.10절(BS10, 개정 37)에 따로 적었다.
+
+- **SSD44 단계 위치와 등록.** `ShaderLibraryCookStage`(`ShaderCompiler/ShaderLibraryCookStage.h`)가 `CookArtifactStage`를 구현한다(종류 `ShaderLibrary`, 정체성 `ShaderLibraryCookStageId` — processor Guid와 version Guid). ShaderCompiler가 AssetCooker를 공개 의존으로 갖는다(의존 방향 ShaderCompiler → AssetCooker — AssetSystem 10.3절 3항). ShaderCompiler 모듈 수명 객체가 `Startup`에서 단계를 만들어 `CookArtifactStages().Register`하고 `Shutdown`에서 뺀다(SSD41 명시 등록). 이미 다른 `ShaderLibrary` 단계가 있거나(시험의 가짜 단계) 표가 사용 중이면 Warning을 남기고 등록하지 않은 채 시작은 성공한다(`DevelopmentShaderProvider`가 다른 공급자가 붙어 있으면 붙이지 않는 것과 같은 규칙 — Development 실행 파일·EngineTests의 엔진 묶음도 이 모듈을 시작한다). 버린 대안: 모듈 시작 실패로 둔다 — 엔진 묶음을 시작하는 모든 시험이 가짜 단계와 겹칠 때 실패한다.
+- **SSD45 단계 흐름(`Run`).** 쿠커는 `graphicsBackends`가 빈 프로필이면 단계를 부르지 않는다(A4f3).
+  1. **형식 목록**: `MakeCookedManifestBackends`(TargetProfiles)의 순서대로 backend의 형식을 잇는다. 형식 id는 프로필 검증이 전역 중복을 막는다.
+  2. **형식 정의 대조**(SSD10 알림 (a)): 형식마다 `<엔진>/Config/ShaderFormats/<id>.json`을 읽는다. 읽기 실패·없음, 자리만 둔 형식, 형식 정의 backend와 키가 다름, `GLES31_PC`는 `Report(code InvalidSetting, setting = 형식 목록 순번)`과 영어 Log Error(형식 id·이유)다. 하나라도 있으면 컴파일하지 않고 성공으로 끝낸다(게시하지 않음).
+  3. **등록부**: 단계는 등록부 원천(`ShaderCookRegistrySource`)에서 Freeze된 등록부를 받는다. 제품 원천 `ModuleShaderCookRegistrySource`는 BuildTargets 3.10절 4항대로 엔진 모듈 집합을 시작해 채운다. 시험은 자기 등록부를 준다. 원천 실패(모듈 시작 실패 등)는 `Report(code None, error DependencyFailed)`와 Log Error(모듈·단계·문구)다. 소속이 `Project`·`ProjectPlugin`인 타입이 있으면 `Report(code None, error Unsupported)`다 — 프로젝트·플러그인 모듈 적재(ModuleLoader ML5b) 전에는 `Project` 라이브러리를 만들지 않고 조용히 빼지도 않는다(BuildTargets 3.10절 2항).
+  4. **컴파일 환경**: 원문 `/Engine` = `<엔진>/Shaders`(시험 원천은 원문 디렉터리를 더 줄 수 있다). 너겟은 `request.nuggets`, null이면 engineOnly일 때 `ResolveShaderNuggetRoot("")`(엔진 폴더)로 연 캐시를 Run 안에서 쓰고 닫는다(A4f4 3번), 아니면 캐시 없이 컴파일한다. 워커 작업 디렉터리는 `<staging>/ShaderWorkers`(쿠킹 루트 안 — 다음 쿠킹의 `Begin`이 지운다, 프로젝트·엔진 쿠킹이 같은 규칙). 워커는 실행 파일 옆이다(Commandlet의 동반 타깃).
+  5. **형식마다**: `CompileShaderLibrary`와 같은 본체로 `Engine` 라이브러리 byte를 메모리에 만들고(includeDevelopment = `cookDevelopmentShaders`), cookKey(SSD46)를 계산한다. 같은 (Engine, 형식)·같은 cookKey의 재사용 후보(`request.reusable`)가 있으면 `Reuse`, 아니면 `NewStagingPath`로 받은 경로에 쓰고 닫은 뒤 `Produce`다(크기·SHA-256·이름은 쿠커가 계산). 엔진 전용 쿠킹도 같은 `Engine` 라이브러리다.
+  6. **job 실패**: 실패 job마다 영어 Log Error(형식·타입·정점 입력·퍼뮤테이션·상태·컴파일러 진단)를 남기고 형식마다 진단 하나를 `Report`한다 — 모든 실패가 `UnsupportedCapability`(이 호스트에 도구가 없음 — job 키 2행이 판정, 예: Windows의 `METAL_SM5`)면 `code None, error UnsupportedCapability`, 아니면 `code None, error DependencyFailed`(setting = 형식 순번). CookDiagnostic에 문구 칸이 없어 상세는 로그로 간다(Commandlet은 도구 로그가 stderr다).
+  7. **verify**(`request.verifyNuggets`): 너겟을 쓴 라이브러리와 캐시 없이 다시 컴파일한 라이브러리의 byte를 대조한다. 다르면 `Report(code NuggetMismatch, error InvalidArgument)`다(에셋 처리기 verify와 같은 코드). job 단위 대조가 아니라 라이브러리 단위다(한계 — 다른 job은 Log에 없다).
+  8. **보고서 절**(`ReportStat`): `formats`·`jobs`·`entries`·`codes`·`cacheHits`·`reused`.
+- **SSD46 cookKey.** SSD13의 정의를 byte로 정한다. SHA-256(`ShaderLibraryCookStageId.processor` 16 byte ‖ `ShaderLibraryCookKeyVersion` u32 ‖ 라이브러리 형식 버전 u32 ‖ 라이브러리 종류 u8 ‖ `cookDevelopmentShaders` u8 ‖ 형식 정의 SHA-256 ‖ 타입 집합 SHA-256 ‖ 항목 수 u32 ‖ 항목마다(타입 해시 u64 ‖ 정점 입력 id u64 ‖ 퍼뮤테이션 u32 ‖ 단계 u32 ‖ 서명 32 ‖ 런타임 기능 u32 ‖ 개발 전용 u8) ‖ job 키 수 u32 ‖ job 키 정렬 목록) — 정수는 little-endian이다. `cookDevelopmentShaders`는 항목이 같아도(개발 전용 타입이 없는 등록부) 키에 넣는다(A4f3 1번 규칙 — 재사용 판정이 CookSettings SHA를 보지 않는다). job 키는 컴파일 결과로 얻으므로 재사용도 job 키 계산·너겟 조회까지는 한다(SSD13 그대로 — 너겟 적중이면 컴파일하지 않는다). 너겟이 비었으면 다시 컴파일한 뒤 재사용한다(한계).
+- **SSD47 런타임 열기와 형식 선택(SSD14·SSD15).**
+  - `render::CookedShaderLibrarySource`(RenderBase 9.12절 3항) interface: `Backends()`(쿠킹한 backend 순서 — 빈 목록이면 셰이더 없는 쿠킹), `Formats(backend)`(그 backend의 선호 순서 형식 id), `ReadLibrary(formatId, library, out)`(byte — 없으면 `NotFound`), `Problem()`(마지막 실패의 영어 설명).
+  - 구현 `CookedManifestShaderLibraries`(RenderBase — AssetRuntime 비공개 의존): `TryCreate(allocator, files, manifest, cookedRoot)`가 매니페스트 backend 표와 `ShaderLibrary` artifact 행을 복사한다(매니페스트 수명과 무관 — EngineAssets Subsystem이 먼저 내려가도 된다). `ReadLibrary`는 `FindArtifact` → `<쿠킹 루트>/` + `AppendCookedArtifactPath` → 읽기(크기 상한 = 항목 bytes) → `CheckCookedArtifactFile`이다. 크기·SHA-256이 다르면 `InvalidArgument`와 진단 `CorruptPackage`(section `ArtifactBytes`·`ArtifactSha256` — `LastFailure()`), 파일이 없으면 그 파일 오류다(항목은 있는데 파일이 없음 — 손상, `NotFound`로 바꾸지 않는다: 공급자로 넘어가면 쿠킹 결과 손상을 숨긴다).
+  - 형식 선택 `SelectCookedShaderFormat(source, device, library, out)`: 장치 backend가 `Backends()`에 없으면 `NotFound`(공급자 경로, SSD16). `Backends()`가 비면 `Unsupported`("this cook has no shader formats"). 있으면 `Formats(backend)` 앞에서부터 (1) `Engine` 라이브러리를 읽음(`NotFound`면 다음 형식) (2) 라이브러리 머리 형식 사실의 `limits`가 장치 한도 안 (3) `deviceRequirements` ⊆ 장치 `DeviceFeatures::shaderDeviceRequirements`를 만족하는 첫 형식을 고르고 그 byte를 넘긴다. 없으면 `Unsupported`와 형식마다 이유다(다른 backend로 몰래 넘기지 않는다 — 7.2절 4항).
+  - 한도 대조(7.2절 4항): 단계(VS·PS·CS)마다 상수 버퍼·SRV 텍스처·샘플러 ≤ 장치 단계 한도, storage buffer·storage image는 `uavStages`의 단계만(VS·PS 읽기 storage는 형식 거르기가 정한다 — GLES), `renderTargets` ≤ `colorAttachments`, `interStageVectors` ≤ 장치 값, `rootConstantBytes` ≤ 장치 값, `uavTotal` ≤ `pipelineUavs`(둘 다 적용될 때), GLES `uniformVectors` ≤ 장치 단계 값(둘 다 적용될 때), Vulkan은 PS의 `constantBuffers + sampledTextures + storageBuffers + storageImages + renderTargets` ≤ `perStageResources`(적용될 때).
+  - 장치 요구 비트(RenderBase GX1 몫을 여기서 채운다): `DeviceFeatures::shaderDeviceRequirements`(ShaderCore `ShaderDeviceRequirementBits`). D3D12 = FL 11.0(장치 생성 조건) | SM 6.6(최고 셰이더 모델 ≥ 66) | `TypedUAVLoadAdditionalFormats`(OPTIONS), D3D11 = FL 11.0, Vulkan = 장치 apiVersion ≥ 1.1, OpenGL = 데스크톱 core context면 GL ≥ 4.3·`ARB_ES3_2_compatibility`·`ARB_clip_control`(생성 조건), ES context면 ES ≥ 3.2.
+  - `EngineRenderResources::Open`(RenderBase 9.12절 2항)은 쿠킹 원천이 있으면 형식 선택을 먼저 한다: 성공이면 고른 형식으로 집합을 만들어 `OpenCooked`, `NotFound`면 고정 표 형식(`EngineShaderFormat`)으로 공급자, 그 밖의 오류(`Unsupported`·손상·읽기)는 실패다. 공급자 경로의 형식 선택(SSD15 끝 문장)은 지금처럼 backend 고정 표다(한계 — 호스트 TargetProfile 순서는 공급자가 형식을 여럿 받을 때).
+  - `Project` 라이브러리는 원천이 같은 함수로 읽지만(`ReadLibrary(…, Project)`) 여는 일은 RR9(프로젝트 셰이더 집합)다.
+- **SSD48 Sandbox(엔진 전용 실행).**
+  - `--engine` 호스트는 Sandbox 시험 타입(`/Plugin/Sandbox`·`/Plugin/EngineShaderTests`)을 엔진 셰이더 호스트에 등록하지 않는다. 시험 타입은 시험 runner 등록부에만 둔다(SSD17과 같은 원칙). 그래서 `--engine`의 등록부는 쿠커와 같은 엔진 모듈 타입(지금은 RenderBase)이고, 쿠킹 라이브러리의 타입 집합 SHA와 맞는다. self-test 호스트는 지금처럼 시험 타입을 등록하고 공급자를 쓴다.
+  - 엔진 디렉터리를 찾으면 `EngineAssetsSubsystem::SetEngineOnlyDirectory`를 부른다. 엔진 쿠킹 루트(`ResolveCookedRoot` — `asset.cooked_root`가 비면 `<엔진>/Saved/Cooked/<실행 프로파일>`)에 `CookedManifest.rman`이 있을 때만 EngineAssets Subsystem을 엔진에 넣는다. 매니페스트가 없으면 EngineAssets 초기화가 `NotFound`로 엔진 시작을 막기 때문이다(개발 트리는 쿠킹하지 않고도 돈다 — SSD16). 엔진 시작 뒤 Subsystem의 매니페스트·쿠킹 루트로 `CookedManifestShaderLibraries`를 만들어 엔진 셰이더 호스트에 붙인다.
+  - 창 경로의 장치: 원천이 셰이더 없는 쿠킹이면 장치를 만들지 않고 Warning("this cook has no shader formats")으로 렌더 없이 돈다. `--graphics=auto`면 매니페스트 backend 순서(Windows: D3D12 → D3D11 → Vulkan)로 만들 수 있는 첫 장치다(원천이 없으면 지금처럼 D3D12 → Vulkan → OpenGL ES).
+  - self-test: 엔진 쿠킹 매니페스트가 있으면 장치마다 쿠킹 라이브러리 화면 검사를 한 번 더 돈다 — 시험 호스트와 따로 RenderBase 엔진 타입만 등록한 엔진 셰이더 호스트(Freeze)에 `CookedManifestShaderLibraries`를 붙이고 화면 검사(18.5절 SM5 픽셀 단언)를 그 호스트로 돌린다. 집합이 쿠킹 원천으로 열렸는지와 고른 형식을 확인한다. 매니페스트가 없으면 `[NOT RUN]`("run asset-cook --engine --profile=<host>")이다.
+- 완료 기준(12.3.1절 완료 기준 가운데 SH2d 몫): EngineTests — 단계 등록(시작 hook·중복 공존), cookKey 재사용과 변화(`cookDevelopmentShaders` 토글·형식 정의 변경), 형식 정의 대조 음성(`InvalidSetting` 넷), 만들 수 없는 형식 `UnsupportedCapability`, 런타임 열기(정상·크기·SHA 불일치 `CorruptPackage`·항목 없음 공급자·셰이더 없는 쿠킹 `Unsupported`), 형식 선택 순서(첫 형식 한도 미달·장치 요구 미달 → 다음 형식, 모두 미달 `Unsupported`, backend 없음 `NotFound`). C# 명령 시험 — `asset-cook --engine --profile=Windows`가 `Shaders/Engine-<형식>-<hash>.rshl` 셋을 게시하고 두 번째는 재사용. Sandbox self-test — 그 라이브러리로 D3D12(WARP 포함)·D3D11·Vulkan(lavapipe 포함)에서 화면 검사 PASS.
+
+**SH2d 구현 메모(개정 53, 2026-11-25).** SSD44–SSD48을 구현했다. 설계와 다르게 정하거나 더한 것은 아래에 적는다.
+
+- **파일.**
+  - ShaderCompiler: `ShaderLibraryCookStage.h`(단계·`ShaderLibraryCookStageId`·`ShaderCookSourceDirectory`), `ShaderCookRegistrySource.h`(등록부 원천 interface), `ModuleShaderCookRegistrySource.h`(제품 원천 — BuildTargets 3.10절 4항), `Private/ShaderLibraryCookStage.cpp`, `Private/ModuleShaderCookRegistrySource.cpp`, `Private/ShaderCompilerModule.cpp`(모듈 수명 객체 — 단계 등록), `Private/ShaderCompileReflection.h`(명령·단계가 함께 쓰는 키 리플렉션 문맥·워커 찾기 — `shader-compile` 사본을 옮겼다). `ShaderLibraryCook.h`에 `ShaderLibraryCookerGuid`·`ShaderLibraryCookKeyVersion`과 결과 줄의 `cookKey`·`hasCookKey`·`cacheHits`를 더했다(`CookShaderLibraries`·`CompileShaderLibrary`가 함께 계산한다).
+  - Graphics: `DeviceFeatures::shaderDeviceRequirements`와 네 backend(D3D12 `D3D12Caps`·D3D11 `D3D11Caps`·Vulkan `QueryDeviceCaps`·GLES `QueryDeviceCaps`)의 값.
+  - RenderBase: `CookedShaderFormat.h`(`SelectCookedShaderFormat`·`CheckShaderFormatFitsDevice`·`CookedShaderFormatChoice`), `CookedManifestShaderLibraries.h`, `EngineShaderHost.h`의 interface 확장·`EngineRenderResources::FormatId`. AssetRuntime을 비공개 의존으로 더했다.
+  - 빌드: Commandlet 링크 목록·호스트의 `asset-cook` 감싸기(ShaderCompiler `Load`), 정책 `cooker-module-set`(`Rocks.Tooling.Checks/CookerModuleSet.cs`), `.gitignore`의 `/Engine/Saved/`(엔진 전용 쿠킹 루트·잠금).
+  - Sandbox: `SandboxShaderScope`(엔진 실행은 시험 타입 없음), EngineAssets 의존·`SetEngineOnlyDirectory`·엔진 쿠킹이 있을 때만 EngineAssets Subsystem, 쿠킹 원천 연결(`CookedShaderAttachment`), 매니페스트 순서 장치 생성(`CreateScreenDeviceInOrder`), 셰이더 없는 쿠킹의 장치 생략, self-test 쿠킹 화면 검사(`CookedSelfTestShaders`·`RunCookedScreenChecks`)와 `--cooked-shader-self-test`.
+- **더한 것.**
+  - 생산 호스트 사전 판정: 형식 정의의 `producers`에 이 호스트(HostConfig 플랫폼 이름 — macOS는 arm64)가 없으면 컴파일하지 않고 `code None, error UnsupportedCapability`다. 생산 호스트이지만 system 도구가 없는 경우(Windows의 `METAL_SM5` — Apple Metal for Windows 없음)는 job 키 2행이 `UnsupportedCapability`로 판정해 같은 진단이 된다(SSD45 6번).
+  - 쿠킹 단계 시험은 실제 저장소 `Engine/Saved`·엔진 너겟을 건드리지 않게 config의 엔진 폴더·워커·원문 디렉터리를 받는다(제품은 비워 둔다 — FindEngineDirectory·실행 파일 옆 워커).
+  - 원천 `ReadLibrary`는 매니페스트 크기를 읽기 상한으로 써서, 큰 파일은 끝까지 읽지 않고 `ArtifactBytes` 손상으로 판정한다.
+- **한계.**
+  - 재사용도 job 키 계산과 너겟 조회를 한다(SSD46 그대로). 너겟이 비었으면 다시 컴파일한 뒤 재사용한다.
+  - verify 대조는 라이브러리 단위다(다른 job 이름은 로그에 없다).
+  - Sandbox의 엔진 쿠킹 판정은 `asset.cooked_root` 설정을 보지 않는다(엔진 전용 기본 루트만).
+  - 공급자 경로의 형식은 backend 고정 표 그대로다(SSD47).
+  - Development 실행 파일은 DevelopmentShaderProvider → ShaderCompiler → AssetCooker 의존으로 AssetCooker·AssetDatabase를 링크한다(SSD44 의존 방향의 결과 — Release는 Developer 모듈이 없다).
+- 시험:
+  - EngineTests: `ShaderLibraryCookStage_ProducesReusesAndRekeys`(형식 목록 순서 Produce·라이브러리 머리·같은 cookKey Reuse·`cookDevelopmentShaders` 토글로 cookKey만 바뀜(byte 같음)·형식 정의 변경은 그 형식만·verify 진단 없음·단계 표 중복 `AlreadyExists`), `ShaderLibraryCookStage_RejectsFormatsAgainstDefinitions`(없는 형식·자리만 둔 형식·backend 다름·`GLES31_PC` 넷 `InvalidSetting`, 등록부를 받지 않음), `ShaderLibraryCookStage_DiagnosesUnavailableFormatsAndJobs`(Windows `METAL_SM5` `UnsupportedCapability`·다른 형식은 게시, job 실패 `DependencyFailed`, 프로젝트 소속 타입 `Unsupported`, 원천 실패 `DependencyFailed`·Release 안 부름, 요청 결함 `InvalidArgument`), `RenderBase_CookedManifestShaderLibrariesReadsAndChecks`(backend·형식 사본, 정상 읽기, 항목 없음 `NotFound`, SHA·큼·작음·파일 없음 `CorruptPackage`), `RenderBase_SelectCookedShaderFormatFollowsManifestOrder`(장치 요구·render target 미달 → 다음 형식, 채우면 앞 형식, 한도 대조, 모두 미달 `Unsupported`와 형식별 이유, backend 없음 `NotFound`, 셰이더 없는 쿠킹), `RenderBase_EngineRenderResourcesOpenCookedManifest`(쿠킹 열기·`FormatId`, 손상 `InvalidArgument`·CorruptPackage 진단, 셰이더 없는 쿠킹 `Unsupported`), `RenderBase_EngineRenderResourcesPreferCookedLibraries` 갱신(backend 없음은 공급자, backend는 있는데 라이브러리 없음은 `Unsupported`). `--filter Shader` 143·`RenderBase_` 13·`CookArtifact` 7·`AssetCookCommand` 12 통과(Metal SKIP — 이 기계 Windows).
+  - 명령: Rocks.Commandlet.Tests `asset-cook --engine` 두 줄(임시 엔진 배치 — 게시 셋·두 번째 셋 다 `reused`) 포함 426 PASS. 저장소에서 `asset-cook --engine --profile=Windows`가 30 job(형식마다 엔진 타입 10)으로 `Engine-D3D12_SM6`·`Engine-D3D11_SM5`·`Engine-VULKAN_SM5`를 게시한다.
+  - 정책: `cooker-module-set`(저장소 통과·음성 대조 `Policy.CookerModuleSetControls`), ToolTests self 168 통과, policy·format 통과.
+  - Sandbox(Debug): `--cooked-shader-self-test`에서 D3D12·D3D12 WARP·D3D11·D3D11 WARP·Vulkan(GTX 1060)·Vulkan software(lavapipe) 쿠킹 화면 검사 PASS(형식 D3D12_SM6·D3D11_SM5·VULKAN_SM5, 두 lane 모드 픽셀 동일·CPU tone map 대조), OpenGL ES 둘은 쿠킹에 없는 backend라 NOT RUN. `--engine --window`가 EngineAssets와 쿠킹 라이브러리로 D3D12에서 그린다. 전체 `--self-test`(공급자 경로 그대로 + 장치마다 쿠킹 화면 검사)도 여덟 장치 PASS, 엔진 호스트 자식 여섯 항목 PASS(엔진 쿠킹이 있는 트리에서 `--engine` 자식이 EngineAssets로 시작).
+
 SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [x] 스파이크 `Programs/ShaderToolSpike`(Program 타깃, `ShaderToolSpike --out <디렉터리> [--sm 6_0]`). 도구는 P4 `ShaderToolSet`으로 사용자 저장소에서 연다. 산출물은 `<out>` 아래에 두고 저장소에는 이 요약만 남긴다. `manifest.json`(산출물 이름·크기·SHA-256, 결정성 비교용)과 `report.json`(검사·측정값)을 쓴다.
 - [x] 형식별 산출(내장 Renderer VS·PS): DXIL `vs_6_0`·`ps_6_0`(`-Qstrip_reflect`), SPIR-V(`-spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w`), DXBC(FXC 고정본 `vs_5_0`·`ps_5_0`), MSL 2.1 macOS, ESSL `#version 320 es`의 `GLES31_ANDROID`(`fixup_clipspace`·`flip_vert_y` 켬)와 `GLES31_PC`(끔), HLSL 5.0. HLSL 5.0 출력은 FXC로 다시 컴파일된다(D3D11 대체 경로 확인).
@@ -217,3 +271,162 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [ ] S3의 FMA3 유무·OS 버전 차이와 S12의 다른 GPU 공급자는 기계가 하나라 미측정이다.
 
 **Development 공급자 공용화.** Sandbox 공급자는 Developer 모듈 `DevelopmentShaderProvider`로 옮겨졌고 다른 개발 호스트(UiDemo 등)도 같은 모듈을 쓴다 — [RenderBase 9.12절](../RenderBase/09-ShaderRuntime.ko.md)(RR11).
+
+### 16.2 SH3 설계(개정 54, 2026-11-26)
+
+SH3는 13절 P7(MetaCompiler 셰이더 파라미터)을 구현한다. 위 표 SH3 행의 완료 기준("7.3절 (a)·(f)를 생성 구조체로")은 그대로다. 결정은 권장안으로 확정했고 애매한 곳은 UE 5.8을 따랐다(SSD49–SSD58).
+
+**UE 5.8 방식.**
+
+| 항목 | UE 5.8 | 근거 |
+|---|---|---|
+| 선언 | `BEGIN_SHADER_PARAMETER_STRUCT`·`BEGIN_UNIFORM_BUFFER_STRUCT` 매크로가 멤버마다 정렬 static_assert와 `FShaderParametersMetadata` 멤버 표를 만든다 | `Runtime/RenderCore/Public/ShaderParameterMacros.h:858–1130, 1308–1495`, `Runtime/RenderCore/Public/ShaderParameterMetadata.h:139–176` |
+| 생성 HLSL | 컴파일 환경을 만들 때 메타데이터로 `cbuffer`·멤버·명시 padding을 만들어 메모리 include `/Engine/Generated/UniformBuffers/<이름>.ush`로 넣는다(`IncludeVirtualPathToContentsMap`). 디스크 파일은 없다 | `Runtime/RenderCore/Private/ShaderParameters.cpp:85–102, 210–447, 450, 563, 615–616` |
+| 대조 | Development에서 그리기 때 구조체 layout hash를 비교한다 | `Runtime/RenderCore/Private/ShaderParameterStruct.cpp:520–527` |
+
+**결정.**
+
+- **SSD49 생성 단계의 위치.** MetaCompiler에 셰이더 파라미터 모드(`Rocks.MetaCompiler shader-parameters`)를 더하고, 빌드가 리플렉션 메타 단계와 **따로** 부른다. 대상 헤더는 리플렉션 헤더처럼 어휘 판정(줄 첫머리 `ROCKS_SHADER_PARAMETERS(`)으로 찾는다(모듈 규칙에 목록을 적지 않는다). 같은 헤더에 리플렉션 표지가 함께 있어도 된다.
+  - 근거: 리플렉션 struct 생성물(모듈 등록 함수)은 ObjectRuntime(`Object/ModuleRegistration.h`)을 include하는데, 파라미터 구조체의 첫 주인인 RenderBase는 렌더 층 "Object 없음"이라 ObjectRuntime에 의존하지 않는다(RenderBase 9.3절). 그래서 13절의 "TypeSchema·TypeRegistry 등록, identity 명세, 자원 멤버의 `ValueKind`"는 SH3에서 하지 않고, 스키마를 처음 쓰는 RenderBase RR14(바인딩 지도를 스키마로)가 MetaSchema만으로 등록하는 길과 함께 정한다. SH3의 단일 출처는 C++ 선언이고, 생성 C++ 표와 생성 HLSL이 한 실행에서 나온다(결정 4의 "리플렉션이 단일 출처"를 이 범위로 지킨다).
+  - 버린 안: (가) `ROCKS_STRUCT`의 변형 — 위 의존 위반. (나) UE 매크로 — 결정 4. (다) 모듈 규칙(C#)의 생성 소스 — Clang 없이 C++ 원문을 해석해야 해 별칭·이름공간·배열 철자를 바르게 풀지 못한다.
+- **SSD50 선언.**
+
+  ```cpp
+  ROCKS_SHADER_PARAMETERS(Name = "Tonemap", RootConstants)
+  struct alignas(16) TonemapConstants {
+      shader::ShaderFloat4 exposure;
+      shader::ShaderFloat4 film;
+      shader::ShaderFloat4 filmWhite;
+  };
+  ```
+
+  - 지정자: `Name = "…"`(HLSL 쪽 이름 — cbuffer 이름·루트 상수 변수 이름이고 레이아웃 표 이름이다. 식별자 64 byte 이하, 없으면 C++ 이름), `RootConstants`(그리기별 상수, 7.2절 2항). 그 밖은 오류다.
+  - 구조체: 이름공간 범위, base 없음, 템플릿 아님, 완전한 정의. 비정적 데이터 멤버 전부가 파라미터다(비트필드·참조·익명 멤버는 오류). 크기는 16 byte 배수이고 정렬은 16 이하다(`alignas(16)`이나 멤버로 맞춘다).
+  - 멤버 타입: `float`·`int32`·`uint32`, ShaderCore 정렬 타입 12종(`ShaderFloat2`–`ShaderUint4`, `ShaderFloat4x4`), 다른 셰이더 파라미터 구조체(중첩 — 1단만이고 루트 상수 표시가 없어야 한다), 이들의 1차원 C 배열(원소 16 byte 배수, 구조체 배열 금지). Core `Matrix4`·`Vector3`, bool, double, 포인터, 2차원 배열, 그 밖의 타입은 오류다(13절).
+  - 오프셋은 Clang이 정한 C++ 오프셋이 기준이다. 생성기가 7.2절 5항 규칙(정렬, 한 16 byte 슬롯에 기본 타입을 섞지 않음, 배열 원소, 구조체 시작·크기)을 그 오프셋으로 검사한다. C++ 오프셋 앞의 빈 자리는 모두 생성 HLSL의 명시 padding 멤버 `rocksPadding<n>`(같은 16 byte 슬롯의 앞 멤버와 같은 기본 타입 스칼라, 새 슬롯이면 다음 멤버의 기본 타입)으로 채운다. 3성분 다음(C++ `ShaderFloat3`은 16 byte다)뿐 아니라 규칙 오프셋과 같은 자리도 채운다: D3D cbuffer 배치는 2성분을 4 byte 경계에도 두므로(16 byte 경계만 넘지 않으면 된다 — 구현 중 D3D12 리플렉션으로 확인, `float a; float2 b;`의 b가 4) 빈 자리를 남기면 D3D 형식이 멤버를 앞으로 당긴다. UE도 생성 HLSL에 명시 padding을 넣는다(`ShaderParameters.cpp:240–257`). padding은 레이아웃 표에도 멤버로 들어간다(워커 대조가 리플렉션 멤버와 1:1로 본다).
+  - 상한: 멤버 `MaxShaderParameterMembers`(256 — padding 포함, 중첩 구조체는 자기 표 안에서), 크기 `MaxShaderConstantBufferBytes`(64 KiB), 루트 상수 `MaxShaderRootConstantBytes`(128).
+- **SSD51 생성물.**
+  - C++: `<out>/Generated/<모듈>/ShaderParameters/<헤더 철자의 .h를 .shaderparams.h로>`. 원본 헤더와 `ShaderCore/ShaderParameterLayout.h`를 include하고, 구조체마다 `rocks::shader::ShaderParameterStruct<T>` 특수화(`static constexpr ShaderParameterLayout Layout`)와 멤버별 `offsetof`·`sizeof`, 구조체 `sizeof`·`alignof` static_assert를 낸다. 쓰는 쪽은 `ShaderParameterLayoutOf<T>()`다. 빌드는 그 디렉터리를 모듈 include 디렉터리로 더한다(원본이 public 헤더면 public).
+  - HLSL: `<out>/Generated/<모듈>/Shaders/<C++ 이름>.rsh`(13절의 자리). 같은 원문을 C++ 표의 문자열로도 넣는다(SSD52).
+  - 생성 주석과 오류 문구는 영어다.
+- **SSD52 생성 HLSL과 그 원천.**
+  - 가상 경로: `/Engine/Generated/<모듈>/<C++ 이름>.rsh`(엔진·Developer·실행 파일 모듈). 플러그인·프로젝트 모듈은 `/Plugin/<이름>/Generated/…`·`/Project/Generated/…`이고 그 모듈 종류가 파라미터 구조체를 가질 때 연다(후속).
+  - 원문 모양: `#pragma once` → 중첩 구조체 정의(구조체마다 `#ifndef ROCKS_SHADER_STRUCT_<이름>` 가드 — 둘 이상의 생성 원문이 같은 구조체를 담아도 한 번만 정의된다) → `struct <C++ 이름> { … };`(같은 가드) → cbuffer면 `cbuffer <Name> { 멤버 };`, 루트 상수면 `ROCKS_ROOT_CONSTANTS(<C++ 이름>, <Name>);`. 셰이더는 cbuffer 멤버를 이름 그대로(전역), 루트 상수는 `<Name>.<멤버>`로 읽는다(지금 손으로 쓴 원문과 같다). FXC(`D3D11_SM5`)가 `ConstantBuffer<T>`를 받지 않아 cbuffer는 `cbuffer` 문법으로 낸다.
+  - 원천: 원문 트리의 `<루트>/Generated/…`는 메모리 원문 전용이다(SH1의 자리, UE `IncludeVirtualPathToContentsMap`). 컴파일 관리자는 job의 레이아웃 표들이 가진 (가상 경로, 원문)을 그 job 전처리의 메모리 원문으로 준다(job마다 — 트리는 공유·읽기 전용 그대로). 디스크 `.rsh`는 사람이 보는 사본이고 컴파일 입력은 실행 파일에 든 원문이다. include 폐포가 job 키에 들어가는 규칙은 그대로다. 셰이더가 자기 타입의 표에 없는 생성 원문을 include하면 `GeneratedSource` 오류다(표에 넣어야 워커가 오프셋을 대조한다).
+  - 버린 안: 디스크 mount(`/Engine/Generated` → `<out>/Generated`). 쿠커·공급자·시험이 빌드 출력 뿌리를 알아야 하고 설치 SDK·게임 빌드에서 경로가 달라진다. 원문을 실행 파일에 넣으면 C++ 표와 원문이 같은 빌드에서 나온다는 것도 보장된다(레이아웃 서명의 런타임 검증, RenderBase 9.3절과 같은 성질).
+- **SSD53 `ShaderParameterLayout` 확장(13절의 데이터 형식 확정).**
+  - 멤버 타입 `Struct`(값 13)와 `ShaderParameterMember::structLayout`(중첩 표, 멤버 오프셋은 그 구조체 기준).
+  - 표에 `structName`(C++ 정규 이름 — 손으로 쓴 표와 머티리얼 동적 layout은 빈 값), `structId`(= `ShaderParameterStructId(structName)`, CP7 렌더 이름·셰이더 타입 이름과 같은 64-bit 해시, 빈 이름이면 0), `sourcePath`·`source`(생성 원문 — 없으면 빈 값)를 더한다.
+  - 검사를 더한다: 중첩은 1단이고 16 byte 정렬에서 시작하며 크기가 16 byte 배수이고 배열이 아니다. 중첩 표는 루트 상수가 아니다. `structId`는 이름의 해시와 같다. 원문이 있으면 가상 경로가 `<루트>/Generated/` 아래 `.rsh`다.
+  - 서명 정규 byte에 `structName`과 중첩 멤버를 더한다(identity가 바뀌면 서명도 바뀐다). 원문은 넣지 않는다 — 표에서 결정적으로 나오고 include 폐포로 job 키에 이미 들어간다.
+- **SSD54 SX8 — 바인딩 layout v4.** 상수 버퍼 자원 항목에 u64 파라미터 구조체 identity(`structId`, 0 = 없음)를, 머리에 루트 상수 identity(`rootConstantStructId`)를 둔다. 워커가 job 표 가운데 이름이 같은 표의 `structId`를 넣는다. 자원 항목의 파라미터 구조체 멤버 오프셋(SX8 뒷부분)은 자원 멤버가 들어오는 SH3b다. 값 1 형식이 바뀌므로 형식 처리기 버전을 모두 하나씩 올린다(너겟 키 — 10절).
+- **SSD55 워커 대조.** 중첩 구조체 리플렉션 멤버를 표의 `Struct` 멤버와 재귀로 대조한다(이름·오프셋·크기·자식). 셰이더가 쓰지 않아 컴파일러가 지운 버퍼는 대조하지 않는다(오류 아님 — UE도 쓰지 않는 멤버를 바인딩에서 거른다). 발견(개정 54): 손으로 쓴 tone map·텍스처 표시 표는 이름이 구조체 이름(`TonemapConstants`)이고 HLSL 변수 이름(`Tonemap`)과 달라 대조가 빠지고 있었다. 생성 표는 이름이 HLSL 쪽 `Name`이라 이 일이 없다.
+- **SSD56 이관 범위.** 엔진 셰이더의 손으로 쓴 표 셋(`BuiltinMeshConstants`·`TonemapConstants`·`TextureInspectorConstants`)을 생성 구조체로 바꾸고 원문은 생성 `.rsh`를 include한다. 손으로 쓴 표 자체는 데이터 형식으로 남는다(머티리얼 동적 layout과 같은 경로, 워커·ShaderCore 시험). Sandbox 시험 셰이더의 손으로 쓴 표는 그 경로의 시험이라 그대로 둔다.
+- **SSD57 하위 단계.**
+
+  | 단계 | 내용 | 완료 기준 |
+  |---|---|---|
+  | SH3a | SSD49–SSD56: 상수 멤버(스칼라·벡터·행렬·배열·중첩)·루트 상수 표시, 생성 C++ 표·HLSL, 메모리 원문, 바인딩 layout v4 identity, 엔진 셰이더 이관 | 아래 시험 1–3 |
+  | SH3b | 자원 멤버(RenderBase 9.6절 표의 장치 자원·그래프 자원·샘플러 지정): ShaderCore 자원 값 타입, 생성 HLSL의 전역 자원·짝 샘플러, 표의 자원 목록, SX8 자원 항목의 멤버 오프셋, `ShaderResourceMap`을 생성 표로 | 생성 자원 선언 golden, 자원 지도의 생성 표 양성·음성 |
+  | SH3c | 렌더 그래프 파라미터 수집기(RenderGraph 8절 RG1 남은 것): 구조체의 그래프 자원 멤버를 훑어 `GraphPassAccesses`를 만든다 | 수집 경로와 명시 선언 경로의 명령 열 동치 |
+
+- **SSD58 시험(SH3a 완료 기준).**
+  1. EngineTests: 생성 HLSL golden(시험 fixture 모듈 `ShaderParameterTestFixtures`의 구조체 — 3성분 뒤 스칼라, 배열, 중첩 구조체, 행렬, int·uint 슬롯, 루트 상수), 형식별 오프셋 대조(형식 정의 전부를 실제 워커로 컴파일해 값 1 멤버 오프셋·크기와 GLES 복사 표가 C++ `offsetof`와 같다 — Metal 도구가 없으면 SKIP), 바인딩 layout v4의 identity, ShaderCore 표 음성(모르는 타입·2단 중첩·중첩 배열·중첩 루트 상수·identity 불일치·상한).
+  2. ToolTests: MetaCompiler 음성(금지 타입 `Matrix4`·bool·double·포인터·2차원 배열·구조체 배열·2단 중첩·루트 상수 중첩, 루트 상수 128 byte 초과, 크기 16 byte 배수 아님, 정렬 32, base·템플릿, 모르는 지정자, 이름 충돌·식별자 아님, 슬롯 기본 타입 섞기, 멤버 256 초과)과 양성 생성물.
+  3. Sandbox `--self-test`: 생성 구조체(cbuffer — 중첩·배열·행렬·padding, 루트 상수)로 그린 픽셀이 기대값과 같다(여덟 장치), 엔진 셰이더 소비자(tone map·텍스처 표시·내장 메시) 회귀, `--texture-self-test`·`--cooked-shader-self-test` 회귀 없음.
+
+**SH3a 구현 메모(개정 55, 2026-11-26).** SSD49–SSD56대로 구현했다. SH3b(자원 멤버)·SH3c(렌더 그래프 수집기)는 남았다.
+- 파일:
+  - ShaderCore: `ShaderParameterTypes.h`(표지 `ROCKS_SHADER_PARAMETERS(...)`, 정렬 타입의 성분 `operator[]`·행렬 행 `operator[]` — 이관한 호출이 `exposure[0]`·`localToClip[3][2]` 철자를 그대로 쓴다), `ShaderParameterLayout.h`(`ShaderParameterType::Struct`, `ShaderParameterMember::structLayout`, 표의 `structName`·`structId`·`sourcePath`·`source`, `ShaderParameterStructId`, `ShaderParameterStruct<T>`·`ShaderParameterLayoutOf<T>()`, 두 constexpr 생성자 — 손으로 쓴 표의 짧은 중괄호 초기화를 그대로 받는다), 정규 byte·서명·디코딩의 중첩 표(`ShaderParameterLayoutSet::nested`), `ShaderBindingLayout.h` v4(`structId`·`rootConstantStructId`).
+  - 워커: `ShaderReflection.cpp` `CompareLevel`(중첩 재귀 대조)과 identity 채움. 형식 처리기 버전 D3D 5·Vulkan 5·OpenGL 5·Metal 4와 형식 정의 `processor.version`.
+  - 관리자·전처리기: `ShaderGeneratedInclude::contents`(메모리 원문 — 연결과 함께 주면 그 줄의 `InvalidArgument`), 관리자가 job 표의 원문을 넣는다.
+  - MetaCompiler: `ShaderParameterGenerator.cs`(`shader-parameters` 모드, 진단 RMC6000–RMC6008). Clang AST로 표지·멤버를 찾고, 정규 형식 탐침(ClangVersionSupport 4.2절 형판) 한 번으로 멤버 정규 형식·C 배열 원소·크기·`ROCKS_OFFSET_OF`·구조체 크기·정렬을 읽는다. 헤더 안의 구조체 이름은 원문 어휘로 정한다(AST 위치는 파일이 바뀔 때만 실린다). 출력 루트 `<out>/Generated/<모듈>/ShaderParameters`(`Include`·`Shaders`)에 바뀔 때만 쓰고 이번에 내지 않은 파일을 지운다.
+  - 빌드: `ReflectionHeaderScan.DiscoverShaderParameters`, `MetadataLayout`(`MetadataPlan.ShaderParameters`, 모듈 include 디렉터리에 `Include`를 더한다), `ShaderParameterRunner`(리플렉션 게시 뒤 모듈마다 한 번 — 엔진 build·test와 게임 빌드. 게임 모듈은 가상 루트 `/Project`, 플러그인 모듈은 `/Plugin/<이름>`).
+  - 이관: `TonemapConstants`(Name `Tonemap`)·`TextureInspectorConstants`(`Inspector`)·`BuiltinMeshConstants`(`Draw`). 세 원문은 생성 `.rsh`를 include한다. `BuiltinMeshPixel`도 같은 원문을 include하므로 표를 가진다(PS가 Draw를 읽지 않아 대조할 버퍼는 없다).
+  - RenderBase `ShaderBindingMap::Build`: identity가 있는 표는 구조체 identity로 상수 버퍼·루트 상수를 찾고(SX8), 손으로 쓴 표는 이름으로 찾는다. 중첩 구조체 멤버는 오프셋만 대조한다(형식 리플렉션마다 구조체 byte 수의 끝 padding 포함 여부가 다르다).
+- 스펙과 다르게 정한 것:
+  1. 명시 padding은 3성분 다음만이 아니라 C++ 오프셋 앞의 빈 자리 전부다(SSD50 개정). D3D12 리플렉션에서 `float exposure; float2 uvScale;`의 uvScale이 C++·규칙의 88이 아니라 84에 놓였다(D3D cbuffer는 2성분을 4 byte 경계에 둔다).
+  2. cbuffer 구조체의 생성 원문은 HLSL `struct`를 내지 않는다(cbuffer 이름과 구조체 이름이 같을 때 겹치지 않게 — 중첩 정의는 바깥 원문 안에 있다). 루트 상수는 매크로가 타입을 받으므로 `struct`를 내고 `Name`이 C++ 이름과 같으면 RMC6005다.
+  3. 루트 상수 구조체는 중첩 구조체 멤버를 받지 않는다(RMC6007 — SPIR-V push constant 블록과 GLES `<단계>u` 배열 펼침이 2층을 다루지 않는다). 중첩 대상 구조체는 같은 모듈에 있어야 한다.
+  4. 정적 데이터 멤버(기본값 상수)는 배치에 들지 않아 받는다.
+- 시험:
+  - EngineTests: `ShaderCore_ParameterLayoutNestedAndIdentityRules`(중첩 양성·표 없음·배열·경계·크기 초과·2단·루트 상수 중첩·스칼라에 표, identity 불일치·정규 이름 아님 5가지, 원문 경로만·원문만·Generated 밖·확장자, 원문 경로 중복, 멤버 256 수용·257 거부, 루트 상수 128 초과, 중첩 정규 byte 왕복·모든 잘린 길이), `ShaderCore_BindingLayoutIdentityRules`, 바뀐 `ShaderCore_BindingLayoutRoundTrip`(v4 머리·자원 golden)·`ShaderCore_ParameterLayoutSignatureIsCanonicalBytes`·`ShaderCore_ParameterLayoutBytesRoundTrip`, `ShaderPreprocessor_GeneratedIncludeReadsMemoryContents`, `ShaderParameterStructs_GeneratedTablesMatchCpp`(fixture 표 = C++ `ROCKS_OFFSET_OF`, padding 자리·기본 타입, identity·경로, 왕복·서명), `ShaderParameterStructs_GeneratedHlslGolden`(세 원문), `ShaderParameterStructs_CompileMatrix`(실제 워커로 D3D12_SM6·D3D11_SM5·VULKAN_SM5·GLES31_PC·GLES31_ANDROID 컴파일: 값 1 멤버 이름·오프셋·크기 = 표, 상수 버퍼·루트 상수 identity, GLES 복사 표가 두 버퍼 전체 byte를 덮음, 중첩 멤버 타입을 바꾼 표는 `CompileError` — METAL_SM5는 도구 없음 SKIP, VULKAN_ANDROID·METAL_IOS는 자리표시 형식 SKIP). 기존 `ShaderBindingRules_*`·`ShaderGlesBindings_*`·`ShaderCompileManager_*`·`ShaderJobKey_*`·`ShaderNugget_*`·`ShaderLibraryCookStage_*`·`EngineShaders_CompileMatrix`·`ShaderWorkerProtocol_*`·`ShaderPreprocessor_*`·`ShaderSourceTree*`·`ConstantBlock_*`·`ShaderSet*`·`ShaderBindings_*`·`PipelineCache*`·`RenderBase_*`·`RenderGraph_Constant*`·`ConstantBuffer_*` 통과.
+  - Sandbox `--self-test`: `RunShaderParameterChecks`(Programs/Sandbox/Private/ShaderParameterSelfTest.cpp, 셰이더 GeneratedParameters.rsf, 구조체 SandboxShaderParameters.h — 행렬 행 우선·3성분 뒤 스칼라·int 슬롯·배열·중첩 cbuffer와 루트 상수를 C++ 값 그대로 올린 픽셀 = CPU 식, 값 1 identity·크기): D3D12(GTX 1060)·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan(GTX 1060)·lavapipe 모두 PASS, `[FAIL]` 0, 장치 사이 대조 0 differing channels.
+  - 회귀: 엔진 쿠킹(`asset-cook --engine --profile=Windows` — 생성 원문이 쿠킹 job의 메모리 원문으로 들어간다)과 시험 콘텐츠 쿠킹(13 targets) 뒤 `--texture-self-test`·`--cooked-shader-self-test` 0 failures(D3D12·WARP·D3D11·D3D11 WARP·Vulkan·lavapipe 쿠킹 화면 PASS, GLES 둘은 Windows 쿠킹에 형식이 없어 NOT RUN).
+  - ToolTests `meta --filter ShaderParameters`: 양성 생성물(trait 특수화·padding 자리·배열·중첩 연결·`ROCKS_OFFSET_OF` 단언·identity·경로·정적 멤버 제외·cbuffer·중첩 정의·루트 상수 선언·낡은 생성물 정리)과 음성 21건(bool·double·포인터·스칼라 배열·2차원 배열·구조체 배열·2단 중첩·루트 상수 중첩·루트 상수 128 byte 초과·루트 상수 이름이 구조체 이름과 같음·16 byte 배수 아님·정렬 32·base·템플릿·함수 멤버·모르는 지정자·식별자 아닌 Name·Name 충돌·슬롯 기본 타입 섞기·padding 접두 이름, 정렬 지정 없는 일반 값 struct와 멤버 257) 통과. format·policy 통과 — policy `windows-macro-leak`은 `.shaderparams.h`를 `.generated.h`처럼 출력 디렉터리 생성 헤더로 본다.
+  - EngineModular(Debug) 빌드·링크 통과.
+- 남은 것: SH3b(자원 멤버·SX8 자원 멤버 오프셋·`ShaderResourceMap`을 생성 표로), SH3c(렌더 그래프 수집기), TypeSchema 등록·identity 명세(RR14), 플러그인·프로젝트 모듈의 생성 시험(가상 루트는 연결됨).
+
+**SH3b·SH3c 설계(개정 56, 2026-11-26).** SSD57 표의 SH3b(자원 멤버)와 SH3c(렌더 그래프 수집기)다. 결정은 권장안으로 확정했고 애매한 곳은 UE 5.8을 따랐다(SSD59–SSD66). RenderBase 9.6절 멤버 종류 표를 구현 단위로 내린 것이다.
+
+**UE 5.8 방식.**
+
+| 항목 | UE 5.8 | 근거 |
+|---|---|---|
+| 자원 멤버 | 멤버마다 기본 타입(`UBMT_TEXTURE`·`_SRV`·`_SAMPLER`·`_RDG_TEXTURE`·`_RDG_TEXTURE_SRV`·`_RDG_TEXTURE_UAV`·`_RDG_BUFFER_SRV`·`_RDG_BUFFER_UAV`·`_RDG_TEXTURE_ACCESS`·`_RDG_BUFFER_ACCESS`·`_RENDER_TARGET_BINDING_SLOTS`)과 HLSL 타입 철자를 메타데이터에 둔다. 값은 구조체 안의 포인터다 | `Runtime/RenderCore/Public/ShaderParameterMacros.h:1637–1760, 1868–1900` |
+| 장치 쓰기 자원 | 그래프 밖 UAV가 있으면 그 구조체의 pass는 외부 출력이다 | `Runtime/RenderCore/Private/ShaderParameterMetadata.cpp:652–669, 822` |
+| HLSL 이름 | 셰이더 바인딩 이름은 멤버 이름이고 중첩 구조체는 `<멤버>_` 접두다. 펼쳐 넣기는 접두가 없다 | `Runtime/RenderCore/Private/ShaderParameterStruct.cpp:48–130` |
+| 그래프 의존 | pass 파라미터 구조체의 그래프 멤버를 훑어 (자원, 접근, 범위)를 만든다. SRV는 pass 종류의 SRV 접근, UAV는 UAV 접근, 접근만 선언은 그 접근, 렌더 타깃 slot은 RTV다. null 멤버는 의존이 아니다 | `Runtime/RenderCore/Private/RenderGraphBuilder.cpp:100–175, 2384–2532`, `Runtime/RenderCore/Public/RenderGraphParameter.h:212–272` |
+| 쓰지 않는 멤버 | 셰이더가 쓰지 않는 멤버를 pass 추가 전에 비워 의존에서 뺀다(명시 호출) | `Runtime/RenderCore/Private/RenderGraphUtils.cpp:22–101` |
+| 그리기 때 묶기 | 셰이더의 바인딩(자원 칸의 구조체 byte 오프셋·기본 타입·register)대로 구조체 값을 읽어 묶음 객체에 넣는다 | `Runtime/RenderCore/Public/ShaderParameterStruct.h:258`, `Runtime/RenderCore/Private/ShaderParameterStruct.cpp:912–990` |
+
+**결정.**
+
+- **SSD59 자원 멤버 종류와 C++ 타입.** 멤버 C++ 타입은 "값을 담는 틀"(어느 모듈의 handle인가)과 "HLSL 자원 서술자"(모양·원소·짝 샘플러·image 형식)의 조합이다. 서술자는 ShaderCore(`ShaderCore/ShaderResourceTypes.h`, 값 없는 태그 타입)에, 틀은 handle을 가진 모듈에 둔다 — ShaderCore는 Core에만 의존하므로 장치 handle(Graphics)·그래프 handle(RenderGraph)을 담을 수 없다. 틀은 모두 `alignas(16)`이다(SSD60).
+
+  | 종류(`ShaderParameterResourceKind`) | C++ 틀 | 값 | HLSL | UE 5.8 |
+  |---|---|---|---|---|
+  | `DeviceTexture` | RenderBase `DeviceTextureParameter<서술자>` | `graphics::TextureHandle texture`(텍스처 또는 Read view), `SamplerOverride sampler` | `Texture2D<float4> X;` + 짝 샘플러 | `SHADER_PARAMETER_TEXTURE` + `_SAMPLER` |
+  | `DeviceBuffer` | RenderBase `DeviceBufferParameter<서술자>` | `graphics::BufferViewHandle view`(Read) | `Buffer<T>`·`StructuredBuffer<T>`·`ByteAddressBuffer` | `SHADER_PARAMETER_SRV` |
+  | `GraphTexture` | RenderGraph `GraphTextureParameter<서술자>` | `GraphTexture texture`(전체), `SamplerOverride sampler` | 텍스처 + 짝 샘플러 | `SHADER_PARAMETER_RDG_TEXTURE` |
+  | `GraphTextureSrv` | `GraphTextureSrvParameter<서술자>` | `GraphTextureView view`(Read), `SamplerOverride sampler` | 텍스처 + 짝 샘플러 | `SHADER_PARAMETER_RDG_TEXTURE_SRV` |
+  | `GraphTextureUav` | `GraphTextureUavParameter<서술자>` | `GraphTextureView view`(ReadWrite) | `ROCKS_IMAGE_FORMAT(f) RWTexture2D<T>` 등 | `SHADER_PARAMETER_RDG_TEXTURE_UAV` |
+  | `GraphBufferSrv` | `GraphBufferSrvParameter<서술자>` | `GraphBufferView view`(Read) | 버퍼 SRV | `SHADER_PARAMETER_RDG_BUFFER_SRV` |
+  | `GraphBufferUav` | `GraphBufferUavParameter<서술자>` | `GraphBufferView view`(ReadWrite) | `RWStructuredBuffer<T>`·`RWByteAddressBuffer`·`RWBuffer<T>` | `SHADER_PARAMETER_RDG_BUFFER_UAV` |
+  | `GraphTextureAccess` | `GraphTextureAccessParameter` | `GraphTexture texture`, `graphics::ResourceAccess access`, `graphics::SubresourceRange range` | 없음(셰이더에 묶지 않는다) | `RDG_TEXTURE_ACCESS` |
+  | `GraphBufferAccess` | `GraphBufferAccessParameter` | `GraphBuffer buffer`, `graphics::ResourceAccess access` | 없음 | `RDG_BUFFER_ACCESS` |
+  | `RenderTargets` | `GraphRenderTargetParameter` | 색 `GraphColorTarget colors[8]`·`colorCount`, `GraphDepthTarget depth`·`hasDepth` | 없음 | `RENDER_TARGET_BINDING_SLOTS` |
+  | (자원 구조체 포함) | 자원만 가진 다른 `ROCKS_SHADER_PARAMETERS` 구조체 | 그 구조체 값 | 그 자원들을 `<멤버>_<자원>`으로 | `SHADER_PARAMETER_STRUCT_INCLUDE`(접두 없음 — RenderBase 9.6절 "이름"대로 Rocks는 접두를 쓴다) |
+
+  - 서술자(`shader::`): SRV 텍스처 `ShaderTexture1D`·`1DArray`·`2D`·`2DArray`·`3D`·`Cube`·`CubeArray<원소 = ShaderFloat4, 짝 = ShaderFilterSampler>`(짝 `ShaderComparisonSampler`면 `SamplerComparisonState`), `ShaderTexture2DMS`·`2DMSArray<원소>`(짝 없음), 버퍼 SRV `ShaderBuffer<원소>`·`ShaderStructuredBuffer<원소>`·`ShaderByteAddressBuffer`, UAV `ShaderRWTexture2D`·`2DArray`·`3D<원소, 형식>`·`ShaderRWBuffer<원소, 형식>`·`ShaderRWStructuredBuffer<원소>`·`ShaderRWByteAddressBuffer`. 형식 태그는 `ShaderImageRgba8`·`Rgba8Snorm`·`Rgba16f`·`Rgba32f`·`R11g11b10f`·`R16f`·`Rg16f`·`R32f`·`Rg32f`·`R32ui`·`R32i`·`Rgba32ui`(DXC `[[vk::image_format]]` 철자, 7.2절 1항)다.
+  - 원소: typed 자원은 SH3a의 12타입(`float`·`int32`·`uint32`과 그 2–4성분, 행렬 제외), 구조화 버퍼는 4 byte 스칼라·2·4성분·`ShaderFloat4x4`(3성분은 C++ 16 byte와 HLSL stride 12가 달라 거부). UAV 형식은 원소의 기본 타입·성분 수와 맞아야 한다(`r32ui` ↔ `uint32`, `rgba16f` ↔ `ShaderFloat4`, `r11g11b10f` ↔ `ShaderFloat3`).
+  - 짝 샘플러: 원소가 float인 SRV 텍스처(MS 제외)에만 낸다. 정수 텍스처는 `Load` 전용이다(7.2절 9항 — 정수 형식은 필터를 받지 않는다). 짝 샘플러 값은 틀의 `SamplerOverride`(`given`이면 그 desc, 아니면 텍스처 desc 기본값 — 결정 R12)다. 셰이더가 짝을 쓰지 않으면 컴파일러가 지워 바인딩에 없다.
+  - 이 단계 밖: 장치 UAV 멤버(장치 쓰기 slot은 아직 이름 표다 — RenderBase 9.13절 7항, 쓸 소비자가 생길 때), 자원 배열(워커가 거부한다 — 머티리얼 시스템이 정할 때), 상수 블록 참조 멤버(지금은 `ApplyConstantBlock`·`SetConstants` — 9.13절 7항), 구조체 원소의 구조화 버퍼, 정적 샘플러.
+  - 버린 안: (가) HLSL 타입 문자열을 멤버 annotation으로(UE 철자) — C++ 타입이 단일 출처가 아니게 되고 틀과 철자가 어긋나도 컴파일러가 모른다. (나) ShaderCore에 handle 없는 범용 자원 값(`uint64` 칸) — 장치·그래프 handle을 섞어 넣어도 C++가 막지 못한다. (다) 모양마다 틀 하나(`GraphTexture2DParameter` …) — 틀 9종 × 모양 9종으로 늘어난다.
+- **SSD60 배치.** 구조체는 상수 부분 다음에 자원 부분이다. 비정적 멤버를 선언 순서로 보아 자원 멤버 뒤에 상수 멤버가 오면 RMC6009다. 틀이 `alignas(16)`이므로 첫 자원 멤버의 C++ 오프셋은 늘 상수 부분 끝을 16 byte로 올린 값 이상이다. 표의 `totalBytes`는 상수 부분 byte(= cbuffer byte, 16 byte 배수)이고 C++ 구조체의 앞 `totalBytes` byte가 그대로 cbuffer 값이다(SH3a의 "C++ byte 그대로 올리기"가 자원 멤버가 있어도 맞다). 상수 멤버가 없으면 `totalBytes` 0이고 cbuffer를 내지 않는다(자원 구조체 — RenderBase 9.6절 `SharedResourceStruct`·`DrawResourceStruct`). 루트 상수 구조체는 자원을 받지 않는다(RMC6009). 포함하는 자원 구조체는 상수·접근만 선언·렌더 타깃 멤버가 없고 1단이다(RMC6007). 렌더 타깃 멤버는 구조체에 하나다.
+- **SSD61 생성 HLSL.** cbuffer(있으면) 다음에 셰이더 자원 멤버마다 전역 선언 한 줄, 짝 샘플러가 있으면 바로 다음 줄에 `SamplerState <이름>Sampler;`(비교면 `SamplerComparisonState`)다. UAV 텍스처·typed 버퍼는 `ROCKS_IMAGE_FORMAT(<형식>)`을 앞에 둔다. 포함한 자원 구조체의 자원은 `<멤버>_<자원>`(짝 `<멤버>_<자원>Sampler`)이다. 접근만 선언·렌더 타깃 멤버는 원문에 없다. 이름 겹침(상수 멤버·다른 자원·짝 샘플러·예약 이름 `SharedWrap`·`SharedClamp`·`SharedWrapSampler`·`SharedClampSampler`·`RocksDebugBuffer`), 64 byte 초과는 RMC6010이다.
+- **SSD62 표의 자원 목록(ShaderCore 데이터 형식).** `ShaderParameterResource`(HLSL 이름·짝 샘플러 이름(없으면 빈 값)·종류·C++ 오프셋(바깥 구조체 기준 — 포함 구조체는 펼친다)·모양·원소 타입·구조화 원소 byte·짝 종류)와 `ShaderParameterLayout::resources`. 검사: 자원은 루트 상수 표에 없음, 오프셋은 `totalBytes` 이상·16 byte 배수·오름차순, 이름·짝 이름이 식별자이고 상수 멤버·자원·짝 이름과 겹치지 않음, 종류마다 모양·원소·짝 허용 값, 렌더 타깃 하나 이하, 수 ≤ `MaxShaderParameterResources`(256), 상수 멤버 0이면 `totalBytes` 0이고 자원이 하나 이상. 목록 검사는 표 사이 자원·짝 이름 겹침을 더 본다(한 셰이더의 전역 이름이다). 정규 byte(서명·워커 전송)의 표 byte 끝에 u32 자원 수와 자원마다 (이름, 짝 이름, u8 종류, u32 오프셋, u8 모양, u8 원소, u32 stride, u8 짝)를 더한다 — 자원 멤버를 바꾸면 job 키가 바뀐다.
+- **SSD63 SX8 뒷부분 — 바인딩 layout v5.** 모든 자원 항목이 u64 파라미터 구조체 identity와 u32 멤버 오프셋(`NoShaderParameterMember` = 0xFFFFFFFF)을 가진다. 워커는 상수 버퍼가 아닌 자원의 이름을 job 표들의 자원 이름(샘플러는 짝 이름)과 맞춰 그 표의 `structId`와 멤버 오프셋(짝 샘플러는 그 텍스처 멤버의 오프셋)을 넣고, 종류·모양·원소·구조화 stride가 표와 다르면 `CompileError`다(7.3절 (a)의 자원판). 상수 버퍼 항목은 멤버 오프셋이 없음이다. 값 1이 바뀌므로 형식 처리기 버전을 모두 하나씩 올린다(10절 너겟 키).
+- **SSD64 생성 표의 자원 지도와 묶음.** `ShaderResourceMap::Build(allocator, const ShaderParameterLayout&, stages, names)`가 생성 표로 지도를 만든다(손으로 쓴 표 경로는 그대로). 항목은 표의 셰이더 자원(SRV 텍스처 → `Texture`와 짝 `Sampler`, 버퍼 SRV → `BufferView`, UAV → 새 종류 `WritableTexture`·`WritableBuffer` — slot은 이름 표 `writableTextures`·`writableBuffers`)과, 단계가 읽는 공유 샘플러(멤버 없음 — 이름으로 값을 준다)다. 단계 자원은 이름이 아니라 (구조체 identity, 멤버 오프셋, 종류)로 찾는다. 실패(InvalidArgument): 표가 생성 표가 아님(identity 없음), 단계가 읽는 텍스처·샘플러·버퍼 view·쓰기 자원이 이 구조체 멤버가 아님(공유 샘플러 제외), 버퍼 view·쓰기 자원이 이름 표에 없음. 셰이더가 쓰지 않는 멤버는 자리 없는 항목이다(오류 아님 — UE도 쓰지 않는 멤버를 거른다).
+  - `ResourceParameter`에 멤버 종류·멤버 오프셋을 더한다. `ParameterBatch::SetParameters(values, layout)`(템플릿 `SetParameters<T>(const T&)`)는 장치 멤버(`DeviceTexture` → 텍스처·짝 샘플러, `DeviceBuffer` → view)를 구조체 값에서 읽는다. 자리 없는 항목과 그래프 멤버 항목(쓰기 자원 포함)은 `Validate`·`Apply`가 건너뛴다 — 그래프 멤버는 pass 문맥이 묶는다(SSD65).
+- **SSD65 SH3c 렌더 그래프 수집기.** RenderGraph `GraphParameterCollector.h`.
+  - `CollectGraphPassAccesses(out, passKind, layout, parameters, used)`: 표의 그래프 멤버를 오프셋 순으로 읽어 `GraphPassAccesses`에 넣는다. 접근: `GraphTexture` → `Texture(전체, SRV)`, `GraphTextureSrv` → `TextureView(SRV)`, `GraphBufferSrv` → `BufferView(SRV)`(SRV는 Raster `SrvGraphics`·Compute `SrvCompute`), `GraphTextureUav`·`GraphBufferUav` → `UavCompute`(Compute만), 접근만 선언 → 그 접근·범위, 렌더 타깃 → `ColorTarget`·`DepthTarget`(Raster만). 장치 멤버는 의존이 아니다. `used`(생성 표의 자원 지도, 없으면 null)가 있으면 자리 없는 셰이더 멤버를 뺀다(RenderBase 9.6절 "쓰지 않는 멤버", UE `ClearUnusedGraphResources`). null handle 멤버는 빼되 셰이더가 읽는 멤버가 null이면 InvalidArgument다. 실패(InvalidArgument): 생성 표 아님, Copy pass의 셰이더 멤버, Raster의 UAV 멤버, Compute·Copy의 렌더 타깃. 접근 조합·handle 정당성은 `AddPass`가 그대로 검사한다(수집 경로와 무관 — RenderBase 8절 RG1).
+  - `RenderGraph::AllocateParameters<T>()`: 프레임 arena의 0 초기화 구조체(UE `AllocParameters`). pass에 넘긴 뒤 바꾸지 않는다(9.6절).
+  - `RenderGraph::AddPass(name, kind, flags, const T* parameters, const ShaderResourceMap* used, execute)`: 수집기로 접근을 만들어 기존 `AddPassWithAccesses`로 넣는다.
+  - `GraphPassContext::SetParameters(map, parameters)`: 지도의 자리마다 멤버 값을 묶는다 — 그래프 SRV 텍스처 `SetTexture(pass.Texture·View)`·짝 `SetSampler`, 그래프 버퍼 SRV `SetBufferView`, UAV `SetWritableTexture`·`SetWritableBufferView`, 장치 멤버는 값 그대로(검증은 소유 스레드의 `ParameterBatch` 몫이고 pass 함수는 병렬 기록에서 불릴 수 있다). 공유 샘플러는 호출자가 `SetSampler`로 준다. 실패: 생성 표 지도 아님 InvalidArgument, `SetSampler` 실패는 그 오류다.
+  - 버린 안: 수집기가 접근 목록을 새로 정의 — 그래프 내부 모델을 둘로 만든다. 명시 선언 builder와 같은 값을 만들어 같은 진입점으로 넣으면 culling·수명·전이·검증이 경로와 무관하다(RG1 설계 그대로).
+- **SSD66 시험(SH3b·SH3c 완료 기준).**
+  1. EngineTests: 생성 자원 선언 golden(fixture 자원 구조체 — 장치·그래프 SRV 텍스처와 짝·비교 짝·정수 텍스처·MS·버퍼 셋·UAV 셋·포함 구조체 접두·상수와 섞인 구조체·자원만 가진 구조체), 표의 자원 목록 = C++ `ROCKS_OFFSET_OF`, ShaderCore 표 음성(자원 규칙 각각, 표 사이 이름 겹침, 정규 byte 왕복·잘린 길이), 바인딩 layout v5 golden·identity·멤버 오프셋 규칙, 형식별 컴파일(`ShaderParameterStructs_ResourceCompileMatrix` — 값 1 자원마다 identity·멤버 오프셋·모양·원소, 짝 샘플러의 멤버 오프셋, 모양을 바꾼 표의 `CompileError`), 자원 지도의 생성 표 양성(자리·짝·공유 샘플러·자리 없는 멤버)·음성(구조체 밖 자원·이름 표 밖 버퍼 view·쓰기 자원·identity 없는 표), 묶음 `SetParameters`(장치 멤버 값·짝 샘플러 override·그래프 멤버 건너뜀).
+  2. ToolTests `meta --filter ShaderParameters`: 자원 양성 생성물과 음성(자원 뒤 상수, 루트 상수의 자원, 모르는 서술자·틀, 3성분 구조화 원소, 형식과 원소 불일치, 이름 겹침·예약 이름, 포함 구조체의 상수·렌더 타깃, 렌더 타깃 둘, 2단 포함).
+  3. SH3c: `RenderGraph_ParameterStructCollectorMatchesExplicitAccesses`(같은 그래프를 명시 선언 + 손 묶기와 구조체 수집 + `SetParameters`로 두 번 만들어 기록 장치의 명령 열이 같다 — Raster·Compute와 접근만 선언·렌더 타깃·UAV·쓰지 않는 멤버·null 멤버), 수집기 음성.
+  4. Sandbox `--self-test`(여덟 장치): 생성 구조체(상수 + 장치 텍스처 — 짝 샘플러 override·정수 `Load`·버퍼 SRV)를 `ParameterBatch::SetParameters`로 묶어 그린 픽셀 = CPU 식, 기존 self-test·`--texture-self-test`·`--cooked-shader-self-test` 회귀 없음.
+
+**SH3b 구현 메모(개정 57, 2026-11-26).** SSD59–SSD64·SSD66 1·2·4대로 구현했다. SH3c(SSD65)는 남았다.
+- 파일:
+  - ShaderCore: `ShaderResourceTypes.h`(서술자 태그 — `ShaderTexture*`·`ShaderTexture2DMS*`·`ShaderBuffer`·`ShaderStructuredBuffer`·`ShaderByteAddressBuffer`·`ShaderRW*`, 짝 `ShaderFilterSampler`·`ShaderComparisonSampler`, 형식 `ShaderImage*` 12종), `ShaderParameterLayout.h`(`ShaderParameterResourceKind`·`ShaderParameterSampler`·`ShaderParameterResource`, `ShaderParameterLayout::resources`와 자원 생성자, `IsShaderBoundResource`·`IsGraphResource`, `MaxShaderParameterResources` 256, 자원 규칙·정규 byte·`ShaderParameterLayoutSet::resources`), `ShaderBindingLayout.h` v5(`memberOffset`·`NoShaderParameterMember`, 모든 자원의 `structId`).
+  - 워커: `ShaderReflection.cpp` `MatchResourceMember`·`ResourceFits`(이름으로 맞춘 뒤 identity·오프셋을 넣고 종류·모양·원소·stride 대조), 상수 부분이 없는 표는 상수 버퍼 대조(`FindLayout`)에서 뺀다. 형식 처리기 버전 D3D 6·Vulkan 6·OpenGL 6·Metal 5와 형식 정의 `processor.version`.
+  - MetaCompiler `ShaderParameterGenerator.cs`: 틀·서술자 해석(`ResourceOf`·`SplitTemplate`), 포함 구조체 펼치기, 전역 이름 검사(`CheckGlobalNames`), 생성 표의 `Resources` 행과 C++ `sizeof`·자원 멤버 오프셋 단언, 생성 HLSL의 전역 선언. 새 진단 RMC6009(배치)·RMC6010(이름)·RMC6011(서술자).
+  - RenderBase: `ResourceParameters/SamplerOverride.h`·`DeviceTextureParameter.h`·`DeviceBufferParameter.h`, `ShaderResourceMap::Build(layout, …)`·`Layout()`, `ResourceParameterKind::WritableTexture`·`WritableBuffer`, `ResourceParameter::memberOffset`·`memberKind`, `ParameterBatch::SetParameters`.
+  - RenderGraph: `Parameters/` 틀 여덟(`GraphTextureParameter`·`GraphTextureSrvParameter`·`GraphTextureUavParameter`·`GraphBufferSrvParameter`·`GraphBufferUavParameter`·`GraphTextureAccessParameter`·`GraphBufferAccessParameter`·`GraphRenderTargetParameter`). 수집기·pass 문맥 묶기는 SH3c다.
+- 스펙과 다르게 정한 것:
+  1. Clang 정규 철자는 기본 템플릿 인자를 생략한다(`ShaderTexture2D<>`, `ShaderTexture2D<float>`). 생성기가 SRV 텍스처 서술자의 기본 원소 `ShaderFloat4`와 기본 짝 `ShaderFilterSampler`를 채운다.
+  2. 틀은 서술자와 무관한 값 배치 구조체(`DeviceTextureValue`·`GraphTextureValue` 등)를 상속한다. 묶는 쪽(`ParameterBatch`, SH3c 수집기)이 서술자를 모른 채 멤버 오프셋의 값을 읽는다(표준 배치 첫 기반 — 포인터 상호 변환 가능).
+  3. 생성 표 지도에서 멤버가 아닌 쓰기 자원(PS 진단 버퍼 등)은 오류가 아니라 지도 밖이다(손으로 쓴 표 경로와 같다). 멤버가 아닌 읽기 자원은 오류다.
+  4. 시험 소스 그룹: RenderBase 시험이 fixture 구조체를 보도록 `FoundationTests.Build.cs` RenderBase 묶음에 `ShaderParameterTestFixtures`를 더했다(fixture 모듈은 RenderBase·RenderGraph를 public 의존한다).
+  5. 함께 고친 SH3a 회귀: `ShaderWorkerChannel_ReportsVersionMismatches`가 형식 정의의 처리기 버전 숫자(`"version": 4`)를 박아 두어 SH3a의 버전 5 뒤 실패하고 있었다. 형식 정의에서 지금 버전을 읽어 하나 올리게 고쳤다(버전을 올려도 시험은 그대로다).
+  6. 함께 고친 SH3b 중간 결함: `ShaderResourceMap`의 자리 계산을 공용화하며 이름 표 slot 검사가 텍스처·샘플러에도 걸려, Vulkan binding 번호(종류를 이어 매긴다)가 이름 표 상한과 같은 텍스처가 거부됐다. Sandbox Vulkan 두 장치에서 드러났고, 이름 표 종류만 검사하게 고친 뒤 시험에 그 slot을 넣었다.
+- 시험:
+  - EngineTests: `ShaderCore_ParameterLayoutResourceRules`(자원 표 양성·자원만 가진 표, 이름 규칙 6·오프셋 3·짝 규칙 6·모양·원소·stride 9, 루트 상수·손으로 쓴 표·중첩 표의 자원, 상한 256·257, 표 사이 자원·짝 이름 겹침, 정규 byte 왕복·모든 잘린 길이·서명), 바뀐 `ShaderCore_BindingLayoutRoundTrip`(v5 머리·자원 golden)·`ShaderCore_BindingLayoutIdentityRules`(identity·멤버 오프셋 함께, 상수 버퍼의 멤버 오프셋 거부)·`ShaderCore_ParameterLayoutSignatureIsCanonicalBytes`(자원 수), `ShaderParameterStructs_ResourceTablesMatchCpp`(fixture `ShaderResourceFixtures.h`의 자원 목록 = C++ `ROCKS_OFFSET_OF`, 포함 구조체 펼친 이름·오프셋, 상수 부분 크기), `ShaderParameterStructs_ResourceHlslGolden`(네 원문), `ShaderParameterStructs_ResourceCompileMatrix`(실제 워커로 PS·CS를 D3D12_SM6·D3D11_SM5·VULKAN_SM5·GLES31_PC·GLES31_ANDROID 컴파일 — 값 1 자원마다 identity·멤버 오프셋·모양·원소, 짝 샘플러의 멤버 오프셋, 모양을 바꾼 표의 `CompileError`. METAL_SM5는 도구 없음 SKIP, VULKAN_ANDROID·METAL_IOS는 자리표시 형식 SKIP), `RenderBase_ShaderResourceMapFromGeneratedTable`(identity·오프셋으로 찾기 — 셰이더 철자가 달라도, 짝·공유 샘플러·자리 없는 멤버·멤버 아닌 쓰기 자원, 이름 표 상한과 같은 텍스처 slot, 음성: 손으로 쓴 표·멤버 아닌 자원·다른 구조체·같은 오프셋 다른 종류·이름 표 밖 버퍼 view), `RenderBase_ParameterBatchSetsGeneratedParameters`(장치 멤버 값·짝 override·override 해제·그래프 멤버 건너뜀·Apply 호출 열·null 검증·잘못된 desc·다른 layout·손으로 쓴 지도 거부). 기존 `ShaderCore_*`·`ShaderParameterStructs_*`·`ShaderBindingRules_*`·`ShaderGlesBindings_*`·`ShaderJobKey_*`·`ShaderNugget_*`·`ShaderWorkerProtocol_*`·`ShaderWorkerChannel_*`·`ShaderPreprocessor_*`·`ShaderCompileManager_*`·`ShaderLibraryCookStage_*`·`EngineShaders_CompileMatrix`·`ShaderBindings_*`·`SharedConstantSlots_*`·`ConstantBlock_*`·`ConstantBuffer_*`·`PipelineCache*`·`ShaderSet*`·`RenderBase_*`·`RenderGraph_*` 통과.
+  - ToolTests `meta --filter ShaderParameters` 39건 통과: 새 양성 `Meta.ShaderParametersGenerateResourceMembers`(자원 목록 행·짝·비교 짝·구조화 stride·접근만 선언 행·포함 구조체 펼치기·상수 부분 크기·HLSL 전역 선언·자원만 가진 구조체 원문)와 음성 16건(자원 뒤 상수, 루트 상수의 자원, 틀과 맞지 않는 서술자, 3성분 구조화 원소, 행렬 텍스처 원소, 형식과 원소 불일치, 정수 텍스처의 비교 짝, 자원 배열, 짝 이름 겹침, 예약 이름, cbuffer 이름 겹침, 포함 이름 겹침, 상수가 있는 포함 구조체, 렌더 타깃이 있는 포함 구조체, 2단 포함, 렌더 타깃 둘). 틀은 probe 머리의 같은 철자 stub이다.
+  - Sandbox `--self-test`: `RunShaderResourceChecks`(Programs/Sandbox/Private/ShaderResourceSelfTest.cpp, 셰이더 GeneratedResources.rsf, 구조체 SandboxShaderParameters.h `GeneratedResourceParameters` — 상수 + 장치 텍스처 둘 + typed 버퍼, 생성 표 자원 지도와 `SetParameters`로 묶어 그린 픽셀, 짝 override Wrap → Clamp, cbuffer는 C++ 앞 `totalBytes` byte, 값 1 identity·멤버 오프셋): D3D12(GTX 1060)·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan(GTX 1060)·Vulkan software(lavapipe) 모두 0 failures, 전체 Graphics self-test PASS(0 failures — 기존 `RunShaderParameterChecks`·`RunMultiTextureChecks` 회귀 없음). 회귀: 처리기 버전이 바뀌어 엔진 쿠킹(`asset-cook --engine --profile=Windows` — D3D12_SM6·D3D11_SM5·VULKAN_SM5 라이브러리)과 시험 콘텐츠 쿠킹(13 targets)을 다시 만든 뒤 `--cooked-shader-self-test`(D3D12·WARP·D3D11·D3D11 WARP·Vulkan·lavapipe 쿠킹 화면 PASS, GLES 둘은 Windows 쿠킹에 형식이 없어 NOT RUN)·`--texture-self-test` 0 failures.
+- 남은 것: SH3c(SSD65), TypeSchema 등록·identity 명세(RR14), 장치 UAV 멤버·자원 배열·상수 블록 참조 멤버·구조체 원소 구조화 버퍼(SSD59 "이 단계 밖").

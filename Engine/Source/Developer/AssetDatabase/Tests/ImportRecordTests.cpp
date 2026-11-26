@@ -279,7 +279,267 @@ bool SameText(const String& text, StringView expected) noexcept {
     return StringView::CompareBytes(text.View(), expected) == 0;
 }
 
+RawRecord TagItem(Allocator& allocator, StringView key, StringView value) noexcept {
+    RawRecord item(allocator, ImportTagSchema, ImportRecordVersion);
+    item.SetText(ImportTagKeyField, key);
+    item.SetText(ImportTagValueField, value);
+    return item;
+}
+
+// 'v'로 채운 count byte 문자열이다(count ≤ PackageMaxStringBytes + 1 — 태그 값 경계).
+StringView LongValue(usize count) noexcept {
+    static char text[PackageMaxStringBytes + 1];
+    memset(text, 'v', sizeof(text));
+    return StringView(text, count);
+}
+
 } // namespace
+
+// 태그 접두(7.1절 21 A2f5): 접두가 이름과 다르면 필드 9에 쓰고 읽기가 그 접두로 태그를 대조한다.
+// 이름과 같은 접두는 쓰지 않는다(한 꼴). 접두 길이·참조 기록 위반은 쓰기 InvalidArgument이고,
+// 읽기는 이름과 같은 접두·형식 위반·접두가 다른 태그 키를 거부한다.
+TEST(ImportRecord_TagPrefix) {
+    SystemAllocator allocator;
+    WriteScene scene(allocator);
+    const ImportTagInput tags[] = {{"Shared.Path", "/Game/A"}};
+    scene.input.tags = tags;
+    scene.input.tagPrefix = "Shared";
+    auto written = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(written);
+    auto read = ReadImportRecord(allocator, Self, written.Value().View());
+    REQUIRE(read);
+    CHECK(SameText(read.Value().tagPrefix, "Shared") && read.Value().TagPrefix() == "Shared" &&
+          read.Value().tags.Size() == 1);
+
+    // 이름 접두 키는 다른 접두의 기록에 쓸 수 없다.
+    const ImportTagInput named[] = {{"TextureImporter.Path", "/Game/A"}};
+    scene.input.tags = named;
+    CHECK(WriteImportRecord(allocator, Self, scene.input).Error() == ErrorCode::InvalidArgument);
+
+    // 이름과 같은 접두는 쓰지 않는다(읽으면 빈 값, 접두는 이름).
+    scene.input.tagPrefix = "TextureImporter";
+    auto same = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(same);
+    auto sameRead = ReadImportRecord(allocator, Self, same.Value().View());
+    REQUIRE(sameRead);
+    CHECK(sameRead.Value().tagPrefix.IsEmpty() &&
+          sameRead.Value().TagPrefix() == "TextureImporter");
+    scene.input.tagPrefix = {};
+    auto plain = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(plain);
+    CHECK(plain.Value().Size() == same.Value().Size() &&
+          memcmp(plain.Value().Data(), same.Value().Data(), plain.Value().Size()) == 0);
+
+    // 접두 길이 상한.
+    char longPrefix[MaxImporterNameBytes + 1];
+    memset(longPrefix, 'p', sizeof(longPrefix));
+    scene.input.tags = {};
+    scene.input.tagPrefix = StringView(longPrefix, sizeof(longPrefix));
+    CHECK(WriteImportRecord(allocator, Self, scene.input).Error() == ErrorCode::InvalidArgument);
+    scene.input.tagPrefix = StringView(longPrefix, MaxImporterNameBytes);
+    auto longest = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(longest);
+
+    // 태그 없이 접두만 있는 기록도 왕복한다(필드 9만).
+    auto longestRead = ReadImportRecord(allocator, Self, longest.Value().View());
+    REQUIRE(longestRead);
+    CHECK(longestRead.Value().tagPrefix.ByteCount() == MaxImporterNameBytes &&
+          longestRead.Value().tags.IsEmpty());
+
+    // 참조 기록은 접두가 없다.
+    ImportRecordInput reference;
+    reference.owner = Other;
+    reference.tagPrefix = "Shared";
+    CHECK(WriteImportRecord(allocator, Self, reference).Error() == ErrorCode::InvalidArgument);
+
+    // 읽기 거부: 이름과 같은 접두, 빈 접두, wire 종류, 접두와 다른 태그 키.
+    const auto readRejects = [&](StringView prefix, WireType wire, StringView key) noexcept {
+        RawScene raw(allocator);
+        raw.top.Set(
+            ImportRecordTagPrefixField, wire,
+            Span<const uint8>(reinterpret_cast<const uint8*>(prefix.Data()), prefix.ByteCount()));
+        Array<RawRecord> items(allocator);
+        CHECK(items.TryPushBack(TagItem(allocator, key, "1")));
+        const Array<uint8> list = ListPayload(allocator, items);
+        raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
+        return ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+               ErrorCode::InvalidArgument;
+    };
+    CHECK(readRejects("TextureImporter", WireType::String, "TextureImporter.A"));
+    CHECK(readRejects("", WireType::String, "TextureImporter.A"));
+    CHECK(readRejects("Shared", WireType::Bytes, "Shared.A"));
+    CHECK(readRejects("Shared", WireType::String, "TextureImporter.A"));
+    CHECK(!readRejects("Shared", WireType::String, "Shared.A"));
+
+    // 참조 기록에는 필드 9가 없어야 한다.
+    RawScene raw(allocator);
+    raw.MakeReference();
+    raw.top.Set(ImportRecordTagPrefixField, WireType::String,
+                Span<const uint8>(reinterpret_cast<const uint8*>("Shared"), 6));
+    CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+          ErrorCode::InvalidArgument);
+}
+
+// 임포터 태그(7.1절 19 A2f3a UXR8): 쓰기는 (key, value) byte 순으로 정렬해 필드 8에 쓰고 읽기가 그
+// 순서로 돌려준다. 태그가 없으면 필드를 쓰지 않는다. 버전 1 기록은 읽지 않는다(Unsupported —
+// 하위호환 없음). 접두·길이·개수·같은 쌍·참조 기록 규칙 위반은 쓰기 InvalidArgument이고, 읽기는
+// 같은 규칙과 순서·빈 목록·항목 형태를 거부한다.
+TEST(ImportRecord_Tags) {
+    SystemAllocator allocator;
+    WriteScene scene(allocator);
+    const ImportTagInput tags[] = {{"TextureImporter.Path", "/Game/B"},
+                                   {"TextureImporter.Former", "/Game/Old"},
+                                   {"TextureImporter.Path", "/Game/A"}};
+    scene.input.tags = tags;
+    auto written = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(written);
+    auto read = ReadImportRecord(allocator, Self, written.Value().View());
+    REQUIRE(read);
+    REQUIRE(read.Value().tags.Size() == 3);
+    CHECK(SameText(read.Value().tags[0].key, "TextureImporter.Former"));
+    CHECK(SameText(read.Value().tags[1].key, "TextureImporter.Path") &&
+          SameText(read.Value().tags[1].value, "/Game/A"));
+    CHECK(SameText(read.Value().tags[2].value, "/Game/B"));
+
+    // 태그가 없으면 필드 8이 없다(읽으면 빈 목록).
+    scene.input.tags = {};
+    auto plain = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(plain);
+    auto plainRead = ReadImportRecord(allocator, Self, plain.Value().View());
+    REQUIRE(plainRead);
+    CHECK(plainRead.Value().tags.IsEmpty());
+    CHECK(plain.Value().Size() < written.Value().Size());
+
+    // 경계: 키 256 byte·값 4096 byte·태그 256개는 받는다.
+    char key[MaxPackageTagKeyBytes + 1] = {};
+    memcpy(key, "TextureImporter.", 16);
+    memset(key + 16, 'k', sizeof(key) - 16);
+    const ImportTagInput longest[] = {
+        {StringView(key, MaxPackageTagKeyBytes), LongValue(PackageMaxStringBytes)},
+        {"TextureImporter.Empty", ""}};
+    scene.input.tags = longest;
+    CHECK(WriteImportRecord(allocator, Self, scene.input));
+    Array<String> names(allocator);
+    Array<ImportTagInput> many(allocator);
+    for (usize index = 0; index <= MaxImportTags; ++index) {
+        String name(allocator);
+        char digits[32] = {};
+        const int length =
+            snprintf(digits, sizeof(digits), "TextureImporter.T%04u", static_cast<unsigned>(index));
+        REQUIRE(name.TryAssign(StringView(digits, static_cast<usize>(length))));
+        REQUIRE(names.TryPushBack(Move(name)));
+    }
+
+    for (const String& name : names) {
+        REQUIRE(many.TryPushBack(ImportTagInput{name.View(), "x"}));
+    }
+
+    scene.input.tags = Span<const ImportTagInput>(many.Data(), MaxImportTags);
+    auto full = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(full);
+    auto fullRead = ReadImportRecord(allocator, Self, full.Value().View());
+    REQUIRE(fullRead);
+    CHECK(fullRead.Value().tags.Size() == MaxImportTags);
+
+    // 쓰기 거부.
+    const auto rejects = [&](Span<const ImportTagInput> list) noexcept {
+        scene.input.tags = list;
+        return WriteImportRecord(allocator, Self, scene.input).Error() ==
+               ErrorCode::InvalidArgument;
+    };
+    CHECK(rejects(many.View()));
+    const ImportTagInput duplicate[] = {{"TextureImporter.A", "1"}, {"TextureImporter.A", "1"}};
+    CHECK(rejects(duplicate));
+    const ImportTagInput noPrefix[] = {{"Other.A", "1"}};
+    CHECK(rejects(noPrefix));
+    const ImportTagInput emptyRest[] = {{"TextureImporter.", "1"}};
+    CHECK(rejects(emptyRest));
+    const ImportTagInput noDot[] = {{"TextureImporterA", "1"}};
+    CHECK(rejects(noDot));
+    const ImportTagInput caseOnly[] = {{"textureimporter.A", "1"}};
+    CHECK(rejects(caseOnly));
+    char longKey[MaxPackageTagKeyBytes + 2] = {};
+    memcpy(longKey, "TextureImporter.", 16);
+    memset(longKey + 16, 'k', sizeof(longKey) - 16);
+    const ImportTagInput keyTooLong[] = {{StringView(longKey, MaxPackageTagKeyBytes + 1), "1"}};
+    CHECK(rejects(keyTooLong));
+    const ImportTagInput valueTooLong[] = {
+        {"TextureImporter.A", LongValue(PackageMaxStringBytes + 1)}};
+    CHECK(rejects(valueTooLong));
+    const ImportTagInput nul[] = {{"TextureImporter.A", StringView("a\0b", 3)}};
+    CHECK(rejects(nul));
+    const ImportTagInput badUtf8[] = {{"TextureImporter.A", StringView("\xff", 1)}};
+    CHECK(rejects(badUtf8));
+    ImportRecordInput reference;
+    reference.owner = Other;
+    const ImportTagInput one[] = {{"TextureImporter.A", "1"}};
+    reference.tags = one;
+    CHECK(WriteImportRecord(allocator, Self, reference).Error() == ErrorCode::InvalidArgument);
+
+    // 버전 1 기록은 읽지 않는다.
+    {
+        RawScene raw(allocator);
+        raw.top.version = 1;
+        CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+              ErrorCode::Unsupported);
+    }
+
+    // 읽기 거부: 순서·같은 쌍·빈 목록·접두·항목 형태·wire.
+    const auto readRejects = [&](auto&& edit) noexcept {
+        RawScene raw(allocator);
+        Array<RawRecord> items(allocator);
+        CHECK(items.TryPushBack(TagItem(allocator, "TextureImporter.A", "1")));
+        CHECK(items.TryPushBack(TagItem(allocator, "TextureImporter.B", "2")));
+        edit(raw, items);
+        // 빈 목록도 필드로 쓴다(읽기가 거부해야 한다).
+        const Array<uint8> list = ListPayload(allocator, items);
+        raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
+
+        return ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+               ErrorCode::InvalidArgument;
+    };
+    {
+        RawScene raw(allocator);
+        Array<RawRecord> items(allocator);
+        CHECK(items.TryPushBack(TagItem(allocator, "TextureImporter.A", "1")));
+        const Array<uint8> list = ListPayload(allocator, items);
+        raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
+        auto good = ReadImportRecord(allocator, Self, raw.Build().View());
+        REQUIRE(good);
+        CHECK(good.Value().tags.Size() == 1);
+    }
+
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[0] = TagItem(allocator, "TextureImporter.C", "1");
+    }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[1] = TagItem(allocator, "TextureImporter.A", "1");
+    }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept { items.Clear(); }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[0] = TagItem(allocator, "Other.A", "1");
+    }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[0].SetU32(ImportTagKeyField, 7);
+    }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[0].SetText(Guid{0, 3}, "extra");
+    }));
+    CHECK(readRejects([&](RawScene&, Array<RawRecord>& items) noexcept {
+        items[0].Remove(ImportTagValueField);
+    }));
+    {
+        RawScene raw(allocator);
+        raw.top.SetText(ImportRecordTagsField, "not a list");
+        CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    // IsValidImportTag 직접 판정.
+    CHECK(IsValidImportTag("Imp", "Imp.A", ""));
+    CHECK(!IsValidImportTag("", ".A", "x") && !IsValidImportTag("Imp", "Imp", "x") &&
+          !IsValidImportTag("Imp", "ImpXA", "x") && !IsValidImportTag("Imp", "Imp.", "x"));
+}
 
 // 왕복과 배치(7.1절 15): 소유 기록을 쓰면 손으로 만든 정규 배치와 byte가 같고(출력은 key 순으로
 // 정렬된다), 읽으면 모든 값이 돌아온다(원본은 쓴 순서). options 없는 소유 기록·참조 기록도 정규

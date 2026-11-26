@@ -17,6 +17,9 @@ public static partial class PolicyChecks
     // 생성 헤더의 이름 끝이다. 출력 디렉터리에 있어 저장소 헤더로 찾아지지 않는다. 선언만 담는다.
     private const string GeneratedHeaderSuffix = ".generated.h";
 
+    // 셰이더 파라미터 구조체 생성 헤더의 이름 끝이다(Docs/Design/ShaderSystem 16.2절 SSD51 — 출력 디렉터리, 선언과 표만 담는다).
+    private const string ShaderParameterHeaderSuffix = ".shaderparams.h";
+
     // include 지시문 한 줄에서 #include 뒤의 내용이다. 주석을 지우고 줄 이음을 이은 한 줄에 맞춘다.
     private static readonly Regex IncludeOperand = Pattern("^[ \\t]*#[ \\t]*include\\b[ \\t]*(.*)$");
 
@@ -56,14 +59,20 @@ public static partial class PolicyChecks
         // ZLIB_WINAPI일 때만 <windows.h>를 연다. Zlib 모듈과 소비자는 그 매크로를 정의하지 않는다(ThirdParty.json).
         "Core/Source/ThirdParty/Zlib/zlib-1.4/zconf.h",
         // VK_USE_PLATFORM_WIN32_KHR일 때만 <windows.h>를 연다. 저장소는 정의하지 않고 vulkan_core.h와 vulkan_win32.h를 따로 include한다.
-        "Engine/Source/ThirdParty/VulkanHeaders/vulkan-headers-1.4.363.0/include/vulkan/vulkan.h"
+        "Engine/Source/ThirdParty/VulkanHeaders/vulkan-headers-1.4.363.0/include/vulkan/vulkan.h",
+        // USE_WIN32_FILEIO일 때만 <windows.h>를 연다. LibTiff 모듈은 tif_win32.c 대신 tif_rocks.c를 쓰고 그 매크로를 정의하지 않는다
+        // (헤더가 _WIN32에서 AVOID_WIN32_FILEIO를 정의한다 — Docs/Design/AssetSystem 12.10절).
+        "Engine/Source/ThirdParty/LibTiff/tiff-4.7.2/libtiff/tiffio.h",
+        // MINIAUDIO_IMPLEMENTATION일 때만 <windows.h>를 연다(구현 구간). 그 매크로는 Miniaudio 모듈의 MiniaudioGlue.c만 정의하고
+        // 소비자(AudioMiniaudio)는 선언 구간만 본다(Docs/Design/AudioSystem 3.34.1절).
+        "Engine/Source/ThirdParty/Miniaudio/miniaudio-0.11.26/miniaudio.h"
     };
 
     // 이 접두로 시작하는 이름도 같은 계열이다(Direct3D·DXGI·Direct2D·DirectWrite·WRL).
     private static readonly string[] WindowsSdkHeaderPrefixes = ["d3d", "dxgi", "d2d1", "dwrite", "wrl/"];
 
     /// <summary>
-    /// 쌍 밖에 둘 수 있는 시스템 헤더 철자인지다: C++ 표준 헤더(확장자·디렉터리 없음), 목록의 C·CRT 헤더, intrinsic 헤더, 생성 헤더.
+    /// 쌍 밖에 둘 수 있는 시스템 헤더 철자인지다: C++ 표준 헤더(확장자·디렉터리 없음), 목록의 C·CRT 헤더, intrinsic 헤더, 생성 헤더(리플렉션·셰이더 파라미터).
     /// 저장소 파일로 찾아지지 않은 include에만 묻는다.
     /// </summary>
     public static bool IsCleanSystemHeader(string spelling)
@@ -71,7 +80,8 @@ public static partial class PolicyChecks
         spelling = spelling.Replace('\\', '/');
         return (!spelling.Contains('.') && !spelling.Contains('/')) || CleanSystemHeaders.Contains(spelling) ||
             (!spelling.Contains('/') && spelling.EndsWith("intrin.h", StringComparison.OrdinalIgnoreCase)) ||
-            spelling.EndsWith(GeneratedHeaderSuffix, StringComparison.Ordinal);
+            spelling.EndsWith(GeneratedHeaderSuffix, StringComparison.Ordinal) ||
+            spelling.EndsWith(ShaderParameterHeaderSuffix, StringComparison.Ordinal);
     }
 
     /// <summary>알려진 Windows SDK 헤더 이름인지다(외부 라이브러리 헤더 안의 include를 알아볼 때만 쓴다).</summary>

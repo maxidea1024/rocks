@@ -23,8 +23,9 @@ public static partial class PolicyChecks
             "\\b__c11_atomic_load\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Memory.h"] = Pattern(
             "\\b__builtin_(?:memcpy|memmove|memset|memcmp|strlen|strcmp|bit_cast|launder|addressof|prefetch)\\b"),
+        // CpuPause의 spin 힌트(x86-64 pause, ARM64 isb)도 원자 대기 반복의 일부라 같은 헤더가 맡는다.
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Atomics.h"] = Pattern(
-            "\\b__atomic_[A-Za-z0-9_]*|\\b__ATOMIC_[A-Z_]+\\b"),
+            "\\b__atomic_[A-Za-z0-9_]*|\\b__ATOMIC_[A-Z_]+\\b|\\b__builtin_(?:ia32_pause|arm_isb)\\b"),
         // 호출 위치(파일·함수·줄)는 SourceLocation::Current의 기본 인자로만 쓴다. 기본 인자가 호출 지점에서
         // 평가되어야 하므로 함수 본문으로 감쌀 수 없다.
         ["Core/Source/Runtime/Core/Public/Core/Diagnostics/SourceLocation.h"] = Pattern(
@@ -41,7 +42,7 @@ public static partial class PolicyChecks
     /// 직접 쓴다. 나머지 소스(테스트 포함)는 그 헤더의 함수를 쓴다(rule id compiler-builtin).
     /// <list type="bullet">
     /// <item>byte 범위·C 문자열·객체 표현·캐시 힌트(memcpy·strlen·bit_cast·launder·addressof·prefetch): Platform/Memory.h</item>
-    /// <item>원자 연산·메모리 순서: Platform/Atomics.h</item>
+    /// <item>원자 연산·메모리 순서·spin 힌트(pause·isb): Platform/Atomics.h</item>
     /// <item>overflow 검사 산술: Base/Checked.h. byte 순서: Base/Endian.h</item>
     /// <item>중단점·도달 불가·offsetof·호출자 복귀 주소: Base/Compiler.h</item>
     /// <item>호출 위치(파일·함수·줄): Core/Diagnostics/SourceLocation.h</item>

@@ -25,6 +25,7 @@ class ConfigContext;
 namespace rocks {
 
 class ConstructionContext;
+class PhysicsScene;
 class World;
 
 // World 수명과 같이하는 Subsystem의 기반이다(SubsystemCollection 참고).
@@ -360,6 +361,26 @@ public:
         return gcScheduler_;
     }
 
+    // 설정 문맥이다(WorldDesc::settings — 없으면 nullptr). 물리 설정처럼 World 수명 Subsystem이
+    // 등록된 설정 struct를 읽는 데 쓴다(FindSettings).
+    config::ConfigContext* Settings() const noexcept {
+        return settings_;
+    }
+
+    // 이 World의 물리 장면 접점이다(Docs/Design/PhysicsModule 2.2절 — UE UWorld::GetPhysicsScene).
+    // Physics 모듈의 PhysicsWorldSubsystem이 꽂고, 없으면 nullptr이다(물리 없는 World).
+    PhysicsScene* GetPhysicsScene() const noexcept {
+        return physicsScene_;
+    }
+
+    // 물리 장면 접점을 꽂거나(scene) 뗀다(nullptr). PhysicsWorldSubsystem만 부른다. World가
+    // Initialized(Subsystem 초기화 중과 BeginPlay 전)·TearingDown(정리 중)일 때만 받고 다른 상태는
+    // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 떼기는 body가 남아
+    // 있어도 성공한다: 초기화 되돌림은 Subsystem 정리가 Actor 정리보다 먼저이고, 장면이 없으면
+    // 컴포넌트는 body 지우기를 건너뛴다(PhysicsModule 7.1.5절). 장면은 뗄 때까지 살아 있어야 한다.
+    // PhysicsModule 7.1.1절.
+    Result<void> SetPhysicsScene(PhysicsScene* scene) noexcept;
+
     WorldState State() const noexcept {
         return state_;
     }
@@ -521,6 +542,23 @@ public:
     // 정리되면 Level을 회수한다(Tick 밖에서 비어 있으면 즉시). 영구 Level은 InvalidArgument, 이미
     // 요청됐으면 성공, 모르는 handle은 StaleHandle이다.
     Result<void> DestroyLevel(ObjectHandle level) noexcept;
+
+    // 로드한 Level 그래프를 장부에 넣고 수명 단계로 진행한다(Docs/Design/EngineRuntime 29절 — 레벨
+    // 편입). loaded는 호출자가 이 World registry(Objects()·Access())에 LoadObjectGraph로 읽은 Level
+    // 루트다. 검증(장부 밖 객체, 유효한 relativeTransform, 부착 순환 없음, Component 중복 없음)을
+    // 통과하면 null·root 밖 원소를 정리하고, Actor·Component 레코드를 만들고, attachParent에서 부착
+    // 계층을 다시 만든 뒤 Actor마다 FinishSpawning한다. 실패한 Actor는 Spawn 실패처럼 정리되고
+    // failedActors에 센다. 성공하면 loaded의 소유가 World로 넘어온다.
+    // 오류: Created World(InvalidArgument)·종료 중(ShuttingDown)·hook 안(Busy), 루트가 Level이 아님
+    // (TypeMismatch), 이미 장부에 있는 Level(AlreadyExists), 검증 실패(InvalidArgument), 타입 규칙
+    // 위반(그 오류)·할당 실패(OutOfMemory). 오류면 만든 레코드를 되돌려 아무것도 바꾸지
+    // 않는다(그래프 정리는 성공이 확정된 뒤에 한다).
+    //
+    // 사용 예:
+    //   auto root = LoadObjectGraph(allocator, world.Objects(), types, world.Access(), bytes);
+    //   auto adopted = world.AdoptLevel(Move(root.Value()));
+    //   // adopted.Value().level은 CreateLevel로 만든 Level처럼 쓴다
+    Result<LevelAdoption> AdoptLevel(RootRef<Object>&& loaded) noexcept;
 
     // 이 World에 레코드가 있는 Level인지다(파괴 대기 포함).
     bool HasLevel(ObjectHandle level) const noexcept;
@@ -998,6 +1036,8 @@ private:
     WorkerScheduler* gcScheduler_ = nullptr;
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
+    // 물리 장면 접점이다(빌림 — PhysicsWorldSubsystem이 소유).
+    PhysicsScene* physicsScene_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
     CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;

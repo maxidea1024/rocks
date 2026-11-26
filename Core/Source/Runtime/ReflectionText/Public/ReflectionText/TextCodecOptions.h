@@ -69,6 +69,10 @@ struct TextCodecOptions {
     uint32 maxJsonDepth = DefaultMaxTextJsonDepth;
     // 값 하나의 원소 수 상한. 넘으면 진단 OutOfRange다. 1 이상 MaxArrayElements 이하.
     uint32 maxElements = DefaultMaxTextElements;
+    // 순회(VisitValues)만 본다: 참이면 텍스트 꼴이 없는 필드(접근기 없는 Opaque)를 Unsupported로
+    // 멈추지 않고 건너뛴다. 값 일부만 보는 소비자(에셋 bundle 태그 수집 — 소프트 참조만 본다,
+    // AssetSystem 10.2절 A4e2b)가 쓴다. 텍스트 출력·키 기록은 거짓(빠진 필드를 숨기지 않는다).
+    bool skipFieldsWithoutText = false;
 };
 
 // 옵션 값의 범위를 검사한다(대상과 무관한 검사만 — names와 대상 Registry pool의 일치는 대입 묶음이

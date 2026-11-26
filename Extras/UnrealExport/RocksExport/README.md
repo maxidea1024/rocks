@@ -1,7 +1,7 @@
 # RocksExport (Unreal Engine 5.8 플러그인)
 
 UE 에디터의 에셋을 Rocks가 읽는 **Unreal 교환 묶음**(`<이름>.rxbundle/`)으로 내보낸다. 설계는 Rocks 저장소
-`Docs/Design/UnrealExchange.ko.md`(3절 형식, 9절 식별·의존, 11절 플러그인)다. 지원 UE 버전은 5.8 하나다.
+`Docs/Design/UnrealExchange/`(3절 형식, 9절 식별·의존, 11절 플러그인)다. 지원 UE 버전은 5.8 하나다.
 
 현재 단계는 UX4a(머티리얼 계열 추출)다. 묶음 목록·에셋 JSON 공통부(objectPath·class·ueClass·dependencies·diagnostics)·의존 닫힘·
 redirector, 텍스처 본문(설정 덤프, 원본 mip 사슬 blob — 설계 4.5절)과 정적 메시 본문(LOD별 원본·UE 준비 원본·생성 LOD,

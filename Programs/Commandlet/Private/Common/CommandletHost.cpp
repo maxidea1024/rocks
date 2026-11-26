@@ -4,22 +4,64 @@
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
+#include <AssetCommandlets/ClassDefaultsCommandlet.h>
+#include <AudioTools/SoundClipImporter.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
+#include "ProductAssetSetup.h"
 #include <Config/ConfigDump.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <NodeGraphTools/GraphCommandlets.h>
 #include <Platform/File.h>
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 #include <TraceAnalysis/TraceModel.h>
+#include <TextureTools/TextureCook.h>
+#include <TextureTools/TextureImport.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
+#include <UnrealExchange/ExchangeTextureKind.h>
+#include <UnrealExchange/UnrealTextureImporterSet.h>
 
 #include <stdio.h>
 
 namespace rocks::commandlet_host {
 namespace {
+
+// Unreal 교환 플러그인 모듈 이름이다(호스트가 시작해 옵션 타입을 등록한다).
+constexpr StringView UnrealExchangeModuleName = "UnrealExchange";
+
+// 명령 호스트의 임포터 칸은 하나라서(AssetCommandContext::importers) 제품 임포터를 한 묶음으로
+// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나 → Unreal 교환 텍스처
+// 다섯(Docs/Design/UnrealExchange 10.6절 9번 — 일반 asset-reimport도 교환 에셋을 다시 임포트한다).
+// 교환 임포터는 옵션 타입이 UnrealExchange 모듈에 있어 그 모듈이 시작했을 때만 건다.
+struct ProductImporters {
+    TextureImporterSet textures;
+    SoundClipImporter sound;
+    UnrealTextureImporterSet unrealTextures;
+    bool unrealExchange = false;
+};
+
+Result<void> RegisterProductImporters(void* state, AssetImporterTable& table,
+                                      Array<AssetImporterRegistration>& tokens) noexcept {
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto& importers = *static_cast<ProductImporters*>(state);
+    if (auto textures = RegisterTextureImporters(&importers.textures, table, tokens); !textures) {
+        return textures;
+    }
+
+    if (auto sound = RegisterSoundClipImporter(&importers.sound, table, tokens); !sound) {
+        return sound;
+    }
+
+    return importers.unrealExchange
+               ? RegisterUnrealTextureImporters(&importers.unrealTextures, table, tokens)
+               : Result<void>::Success();
+}
 
 Result<int32> CoreCheck(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
     if (args.Size() != 0) {
@@ -162,6 +204,30 @@ bool BootSettings(HostSettings& settings, ModuleLoader& modules) noexcept {
            settings.CompleteStartup().IsOk();
 }
 
+// 셰이더 라이브러리 단계를 등록하는 모듈이다(Docs/Design/BuildTargets 3.10절 4항).
+constexpr char ShaderCookStageModule[] = "ShaderCompiler";
+
+// asset-cook 앞에 ShaderCompiler 모듈을 시작해 모듈 수명 객체가 셰이더 라이브러리 비에셋 산출물
+// 단계를 등록하게 한다(ShaderSystem 16.1절 SSD44). 모듈을 시작하지 못하면 명령은 그대로 돌고
+// 셰이더 있는 프로필은 쿠커가 UnsupportedCapability로 게시하지 않는다(AssetSystem 10.3절 3항).
+struct CookCommandContext {
+    AssetCommandContext* asset = nullptr;
+    ModuleLoader* modules = nullptr;
+};
+
+Result<int32> RunCookWithShaderStage(void* context, Span<const StringView> args,
+                                     CommandletOutput& output) noexcept {
+    auto* cook = static_cast<CookCommandContext*>(context);
+    if (const ModuleLoadReport loaded = cook->modules->Load(ShaderCookStageModule);
+        !loaded.IsOk()) {
+        (void)output.write(output.context, CommandletStream::Error,
+                           "asset-cook: warning: the shader library cook stage module did not "
+                           "start\n");
+    }
+
+    return RunAssetCookCommand(cook->asset, args, output);
+}
+
 } // namespace
 
 // 명령을 등록하고 실행한다. 명령의 Log 호출은 Launch가 설치한 도구 로그로 간다(명령이 로그를
@@ -171,8 +237,28 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
-    // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
+    // 제품 임포터(텍스처·사운드)·예약 인자 번역기다(Docs/Design/AssetSystem 12.12절, AudioSystem
+    // 3.36.3절 — 임포터 묶음은 명령보다 오래 산다. 번역기는 예약 인자 없는 사운드 원본을 그대로
+    // 통과시킨다).
+    ProductImporters productImporters;
+    // 교환 임포터의 옵션 타입(UnrealExchangeImportOptions)은 UnrealExchange 모듈 타입이다 — 세션
+    // 타입 등록기가 붙을 때 시작한 모듈의 타입을 등록하므로 먼저 시작한다(실패하면 교환 임포터만
+    // 빠진다).
+    productImporters.unrealExchange = modules.Load(UnrealExchangeModuleName).IsOk();
+    assetContext.importers = {&RegisterProductImporters, &productImporters};
+    // 타입 hook은 텍스처(설정 정규화·원본 재구성)와 애니메이션(Build 의존 —
+    // MeshAnimationAssets 7.6.1절 2)이다(사운드는 hook이 없다).
+    assetContext.typeHooks = {&RegisterProductTypeHooks, nullptr};
+    assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
+    // 쿠킹 처리기다(텍스처 12.14절, 정적·스킨 메시·애니메이션 클립 — MeshAnimationAssets 13.1절 1).
+    ProductCookProcessors cookProcessors;
+    assetContext.cookProcessors = {&RegisterProductCookProcessors, &cookProcessors};
+    // 종류별 임포터다(Docs/Design/UnrealExchange 10.5절 7번 — 텍스처 10.6절·4.6절).
+    ExchangeTextureKind exchangeTextures;
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
+    if (productImporters.unrealExchange) {
+        unrealContext.kinds = {&RegisterExchangeTextureKinds, &exchangeTextures};
+    }
     const bool settingsReady = BootSettings(settings, modules);
     // 노드 그래프 명령 문맥은 registry보다 먼저 만들어 오래 산다(헤더 계약).
     nodegraph::GraphCommandletContext graphContext;
@@ -262,8 +348,22 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         return 1;
     }
 
+    CookCommandContext cookContext{&assetContext, &modules};
     registered = registry.Register({"asset-cook", "Cook the project for a target profile.",
-                                    &RunAssetCookCommand, &assetContext});
+                                    &RunCookWithShaderStage, &cookContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"asset-load-cooked",
+                                    "Load one cooked asset from the cooked manifest to check it.",
+                                    &RunAssetLoadCookedCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
+    registered = registry.Register({"nugget-gc", "Collect unused asset nuggets of the project.",
+                                    &RunNuggetGcCommand, &assetContext});
     if (!registered) {
         return 1;
     }
@@ -312,6 +412,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     }
     registered = registry.Register({"asset-alias-remove", "Remove a path alias of the project.",
                                     &RunAssetAliasRemoveCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"class-defaults-dump", "Print the class default fingerprints of the registered classes.",
+         &RunClassDefaultsDumpCommand, &assetContext});
     if (!registered) {
         return 1;
     }

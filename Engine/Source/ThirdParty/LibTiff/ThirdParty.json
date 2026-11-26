@@ -1,0 +1,296 @@
+{
+  "schema": 1,
+  "name": "libtiff",
+  "version": "4.7.2",
+  "upstreamDirectory": "tiff-4.7.2",
+  "globalState": true,
+  "source": {
+    "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz",
+    "sha256": "672bd7d10aee4606171afb864f3570b83340f6a33e2c186dc0512f7145ffdf6a",
+    "verification": "Official libtiff release tarball from download.osgeo.org, downloaded on 2026-11-24 (the newest stable release; UE 5.8 ships 4.2.0). Imported files are the library sources Rocks builds, their private and public headers and LICENSE.md. The platform files tif_unix.c and tif_win32.c, the printing code tif_print.c, the C++ stream, the codecs Rocks does not build, the CMake and autoconf templates, tools, tests and documentation are not imported."
+  },
+  "licenses": [
+    {
+      "spdx": "libtiff",
+      "upstreamExpression": "LICENSE.md (libtiff license, Sam Leffler and Silicon Graphics)",
+      "file": "tiff-4.7.2/LICENSE.md",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "tiff-4.7.2/libtiff/tif_aux.c",
+    "tiff-4.7.2/libtiff/tif_close.c",
+    "tiff-4.7.2/libtiff/tif_codec.c",
+    "tiff-4.7.2/libtiff/tif_color.c",
+    "tiff-4.7.2/libtiff/tif_compress.c",
+    "tiff-4.7.2/libtiff/tif_dir.c",
+    "tiff-4.7.2/libtiff/tif_dirinfo.c",
+    "tiff-4.7.2/libtiff/tif_dirread.c",
+    "tiff-4.7.2/libtiff/tif_dirwrite.c",
+    "tiff-4.7.2/libtiff/tif_dumpmode.c",
+    "tiff-4.7.2/libtiff/tif_error.c",
+    "tiff-4.7.2/libtiff/tif_extension.c",
+    "tiff-4.7.2/libtiff/tif_fax3.c",
+    "tiff-4.7.2/libtiff/tif_fax3sm.c",
+    "tiff-4.7.2/libtiff/tif_flush.c",
+    "tiff-4.7.2/libtiff/tif_getimage.c",
+    "tiff-4.7.2/libtiff/tif_hash_set.c",
+    "tiff-4.7.2/libtiff/tif_jpeg.c",
+    "tiff-4.7.2/libtiff/tif_lzw.c",
+    "tiff-4.7.2/libtiff/tif_next.c",
+    "tiff-4.7.2/libtiff/tif_ojpeg.c",
+    "tiff-4.7.2/libtiff/tif_open.c",
+    "tiff-4.7.2/libtiff/tif_packbits.c",
+    "tiff-4.7.2/libtiff/tif_predict.c",
+    "tiff-4.7.2/libtiff/tif_read.c",
+    "tiff-4.7.2/libtiff/tif_strip.c",
+    "tiff-4.7.2/libtiff/tif_swab.c",
+    "tiff-4.7.2/libtiff/tif_thunder.c",
+    "tiff-4.7.2/libtiff/tif_tile.c",
+    "tiff-4.7.2/libtiff/tif_version.c",
+    "tiff-4.7.2/libtiff/tif_warning.c",
+    "tiff-4.7.2/libtiff/tif_write.c",
+    "tiff-4.7.2/libtiff/tif_zip.c",
+    "tiff-4.7.2/libtiff/tif_rocks.c"
+  ],
+  "includeDirectories": [
+    "tiff-4.7.2/libtiff"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "tiff-4.7.2/libtiff/tiffio.h",
+    "tiff-4.7.2/libtiff/tiff.h",
+    "tiff-4.7.2/libtiff/tiffvers.h",
+    "tiff-4.7.2/libtiff/tiffconf.h",
+    "tiff-4.7.2/libtiff/tif_rocks.h"
+  ],
+  "files": {
+    "LICENSE.md": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+    "libtiff/t4.h": "68fea8b3e6ac6f9c02395de1ac7759686d82c773024caa9c112784dfa967cae5",
+    "libtiff/tif_aux.c": "f60471ca247420de0676efc334ea1573c2fb16fc8415b73e9d9259ae12833084",
+    "libtiff/tif_close.c": "c08aa975b642b5034962d1dbdbadc944c979843764de4ce440055ccc72be57a1",
+    "libtiff/tif_codec.c": "ba6c41b956bfccb221b8e9d088502880544f7dedb751f50fdaddefd1edd263cb",
+    "libtiff/tif_color.c": "4e5183a58f908ad6d2fa1805d657fbde67fde90a66b3e431005221bf190983ac",
+    "libtiff/tif_compress.c": "0309ee0f6a10dbdf035f09dc90bb99a5bba9715c615668a9c06e5c91d6737b89",
+    "libtiff/tif_config.h": "bdbfc8bb877b7e66d92fde93a8f830ee42e35cd4f621e3740e15b12cd28f2d3a",
+    "libtiff/tif_dir.c": "bf0e5f3a7f2b60e82f7925c1e7a68d39d7bae834edacd0ee3783e266ec23c5c2",
+    "libtiff/tif_dir.h": "2d9c36a036f169b8521e0e3f0de968576136b5b43f38d8b9904791a6137d342f",
+    "libtiff/tif_dirinfo.c": "356878e81e964dec90c062f480b9aefc6490c6a0718e7e09c0ca65c6d1f621b9",
+    "libtiff/tif_dirread.c": "b9f28e1b9a780fb01363c709bbac2b228c2622452d06833ce3367d0bbc8d89a5",
+    "libtiff/tif_dirwrite.c": "6c0fa9956a82abe68c5eb517c36bbfaafd6eed4d04af6aae85797b5d3ada52c2",
+    "libtiff/tif_dumpmode.c": "e850f24a63acc1e67f133a1c783b2ecde72a6816e37e840f206f5c8a5d633fe5",
+    "libtiff/tif_error.c": "ec178c0dcb7d1e4e6a5aec3220549ab5372cdc1725b185584972c005d11f5abd",
+    "libtiff/tif_extension.c": "794bf7b085ab59fec67db9a47acc84a6be15e23a31d911cd5ea532e7084984c0",
+    "libtiff/tif_fax3.c": "21e3a1efe3a309662736d4d745a01c305e411cc22fd17453cb48adcc1498c31f",
+    "libtiff/tif_fax3.h": "1f76e5301166899b22409c31192d9f91be00bbe61f6d2badc529ece3b839de2d",
+    "libtiff/tif_fax3sm.c": "7484907f2bd8a2439f582158e2eeef7f209780a411ea07e1b88ce74fa0cbbc75",
+    "libtiff/tif_flush.c": "0d6277cc2c3c898056290be7162913b148ce13f0d27a1146e1f1f30e34a014ae",
+    "libtiff/tif_getimage.c": "9ebfe8afe9d74f6b3d23d5172d1e20150c3162082a80d2eb0fa776817915dc07",
+    "libtiff/tif_hash_set.c": "b1257c93662c75de7ad67fc73f73a20e0645502fc05120d14f12bf08be49f10b",
+    "libtiff/tif_hash_set.h": "de1ba012c293a798301e445e2d65b8a37bfd60426b7a6be59891058163c896eb",
+    "libtiff/tif_jpeg.c": "e08409b25a263104e14ab705a7a5fea45514b8b2c5272a1a218234e353ac680f",
+    "libtiff/tif_lzw.c": "d313ba3ff2e358e9a516f7c5e7ce9b2f86ef12f505e667b2c6526da1a5085099",
+    "libtiff/tif_next.c": "10a71e4975baac7278c6ed3ae4b0eb18402027ce1e4a2feb58873250269b9022",
+    "libtiff/tif_ojpeg.c": "e0dcb8bf12d3b403407155ac84402158c4efb0f19d2c6e10f16329b2bf311bc4",
+    "libtiff/tif_open.c": "38865376f48cbc472063cfc73c021ba780fd933baf1432e5d06520a8fc8d40e3",
+    "libtiff/tif_packbits.c": "6882b72c2770de2f5c491d34f81a40be6b0782a65f04b6c5b7b4a18035db7e83",
+    "libtiff/tif_predict.c": "5480cb89241e7c0095b4a85c37aeb91a1c7ddf62ab05c2ac634e9ce96bc0618a",
+    "libtiff/tif_predict.h": "a1a7241bac6631f1161921f5158a96c7ee53dbe293f7caefdf945cd279046c48",
+    "libtiff/tif_read.c": "332043d298faf86609a1e07eed21fb4da95b0e42d2df0af43e7e25cd2578997e",
+    "libtiff/tif_rocks.c": "4065b9a8c902707e411f786c24875f626ebf5ef50a1d3d483f900c4206e8173c",
+    "libtiff/tif_rocks.h": "420c9162c3140e42626ffd5f41919db7d0a03e612d1e6c919f40f760ee14d63c",
+    "libtiff/tif_strip.c": "30796199aec3fa7f6c37386cf464ca5941701bf90e77a70c52a6cf0dd00a1757",
+    "libtiff/tif_swab.c": "c18d2549216dbcc2111726473c15dd5e2bd40653e2c64984ac51ca720fdbc3ac",
+    "libtiff/tif_thunder.c": "0e1013bc534f49f8b1d99439b19fe87ac18bfcb9bcda390f43d4a909f0236ae6",
+    "libtiff/tif_tile.c": "40b00f3b91e54a88e541a6ad634bad2044f5eb0b9d749ed92fac7b37e66d32df",
+    "libtiff/tif_version.c": "c6bc3af2cc77a377f780bbe87087d2fc7a49686dd88b9a1a69d57b95530b95b0",
+    "libtiff/tif_warning.c": "cfb6a08e9240ca789b061be18b980173d07fe6d645a5eace7557f33d076369bb",
+    "libtiff/tif_write.c": "2d970aacf60e6e6e884353361c1e781c2fe5f90fdd2fe1aaee7cf93863e53f78",
+    "libtiff/tif_zip.c": "1ca068ada61c583f20dcd969d1acabc2b9c58eea4a4b18964644d34d5452e207",
+    "libtiff/tiff.h": "ff8668357867cefdb31d7807a441fea04422bcff929303be09e16d99c7528fa6",
+    "libtiff/tiffconf.h": "66c91344020b5b776a653708b2e59719e7ff3f1e3dd4090b3a8c7d54f4ca15ad",
+    "libtiff/tiffio.h": "03ed4a148b230ae5ae3636b07b66e97d55956f9a13c4baf98ed707fc7e712f5e",
+    "libtiff/tiffiop.h": "45f09bf096c43a776456e23045ade192d9b20adbdbaaa20bd14df0570ea7d668",
+    "libtiff/tiffvers.h": "42c5229cac5520092fd13e7dbec357bfa18cec4e685ef252252a2918ed036a36",
+    "libtiff/uvcode.h": "f815e1b3530ad3f48ea47a2865d39a2b40f59a18876410cbdda976b64c2a3042"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 64,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 65,
+      "text": "#pragma GCC diagnostic ignored \"-Wc++-compat\""
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 67,
+      "text": "#pragma clang diagnostic push"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 68,
+      "text": "#pragma clang diagnostic ignored \"-Wc++-compat\""
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 70,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 71,
+      "text": "#pragma warning(disable : 4132)"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 77,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 79,
+      "text": "#pragma clang diagnostic pop"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 81,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 524,
+      "text": "#pragma GCC diagnostic push"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 525,
+      "text": "#pragma GCC diagnostic ignored \"-Wc++-compat\""
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 527,
+      "text": "#pragma clang diagnostic push"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 528,
+      "text": "#pragma clang diagnostic ignored \"-Wc++-compat\""
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 537,
+      "text": "#pragma GCC diagnostic pop"
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "line": 539,
+      "text": "#pragma clang diagnostic pop"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 164,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 165,
+      "text": "#pragma warning(disable : 4324) /* structure padding due to alignment */"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "line": 205,
+      "text": "#pragma warning(pop)"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2829,
+      "text": "#pragma warning(push)"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2830,
+      "text": "#pragma warning(disable : 4702) /* unreachable code */"
+    },
+    {
+      "file": "libtiff/tif_ojpeg.c",
+      "line": 2843,
+      "text": "#pragma warning(pop)"
+    }
+  ],
+  "notes": [
+    "TIFF source decoder for the texture importer (Docs/Design/AssetSystem section 12.10, stage A5f). Developer only: ImageCodec links it, runtime targets do not.",
+    "LibTiff.Build.cs adds the Zlib and LibJpegTurbo include directories and the Zlib consumer defines, because tif_zip.c includes zlib.h and tif_jpeg.c and tif_ojpeg.c include jpeglib.h; consumers link LibTiff before LibJpegTurbo and Zlib. During TIFF decoding ImageCodec binds both tif_rocks and jmemrocks allocators (section 12.11). tif_zip.c passes its own zalloc and zfree (TIFF_zalloc through _TIFFmallocExt), as Z_SOLO requires.",
+    "Allocation: tif_rocks.c defines _TIFFmalloc, _TIFFcalloc, _TIFFrealloc and _TIFFfree on a per-thread allocator binding (RocksTiffBindAllocator); without a binding every allocation fails. Rocks.patch moves the two CRT allocation sites (tif_hash_set.c, the IFD offset map in tif_dirread.c) to these functions, so no libtiff allocation reaches the CRT.",
+    "Messages: the global handlers are null and ImageCodec sets per-handle handlers with TIFFOpenOptionsSetErrorHandlerExtR and TIFFOpenOptionsSetWarningHandlerExtR; nothing is printed. TIFFOpen and the other file open functions are not defined; ImageCodec reads from memory through TIFFClientOpenExt.",
+    "In Debug builds (NDEBUG not defined) libtiff assert becomes the CRT assert. The asserts check internal invariants, not input data."
+  ],
+  "modifications": [
+    {
+      "file": "libtiff/tif_compress.c",
+      "upstreamSha256": "e569f3502c4af70f4ccd56b7f78aac0f809fedb438419cb1ae09f69e3b1bfb8e",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
+    },
+    {
+      "file": "libtiff/tif_config.h",
+      "upstreamSha256": null,
+      "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tif_config.h.cmake.in (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tif_dir.c",
+      "upstreamSha256": "633bede16c3b1829d8ded69c97be9dd16d976121eed99ab8ccacf707d14625db",
+      "reason": "_TIFFVSetField: when copying the ColorMap, TransferFunction, ReferenceBlackWhite, ExtraSamples or Matteing values fails (allocation failure), free the partial copies, clear the field bit and fail the set instead of keeping a set tag with null arrays that the directory writer reads (the encoder allocation failure test found the crash); behavior on success is unchanged."
+    },
+    {
+      "file": "libtiff/tif_dirinfo.c",
+      "upstreamSha256": "f0c2d4c491cfc148ac8cb02ad12ee3d17b6a9e64a6f7de2f12fcd5d18ed5f711",
+      "reason": "_TIFFMergeFields: when growing the fields array fails, keep the old array and its count instead of zeroing the count, so TIFFCleanup frees the array (the allocation failure test found the leak); behavior on success is unchanged."
+    },
+    {
+      "file": "libtiff/tif_dirread.c",
+      "upstreamSha256": "9a9220abd10e952c5147207461725630ccd9a0886e157ccabbe8c5a3006445fe",
+      "reason": "Allocate the IFD offset map entries with _TIFFmalloc and free them with _TIFFfree instead of the CRT, so every libtiff allocation reaches the allocator bound in tif_rocks.c (Docs/Design/AssetSystem section 12.10); and do not read LIBTIFF_STRILE_ARRAY_MAX_RESIZE_COUNT: the environment is not read, so the decode does not depend on the host environment (cooking determinism, Docs/Design/AssetSystem section 12.10) and the Microsoft CRT getenv deprecated under -Wdeprecated-declarations is not called. The built-in limit of 1000000 strips applies."
+    },
+    {
+      "file": "libtiff/tif_extension.c",
+      "upstreamSha256": "b49abfbd8f153237ff1187c6c1d34ffd0a6f26013b70d133b41ba64cbbf725ca",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
+    },
+    {
+      "file": "libtiff/tif_hash_set.c",
+      "upstreamSha256": "f3d3aaf6ac8bfa79626e48fa4cc17c65abee3caa7577154370391c82a74120f4",
+      "reason": "Allocate through _TIFFmalloc, _TIFFcalloc and _TIFFfree instead of the CRT (the IFD loop detection hash set), so every libtiff allocation reaches the allocator bound in tif_rocks.c (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tif_jpeg.c",
+      "upstreamSha256": "f6b80b90e7fb8f17448d07ceebb075dc1b8371fba5f84ab3ed00df2730a13c21",
+      "reason": "Do not read LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER, LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC and JPEGMEM: the environment is not read, so the decode does not depend on the host environment (cooking determinism, Docs/Design/AssetSystem section 12.10) and the Microsoft CRT getenv deprecated under -Wdeprecated-declarations is not called. The built-in defaults apply (100 scans, the libjpeg memory threshold, the larger encoder memory limit). And when copying the JPEGTables tag fails (allocation failure), leave no tables and fail the set instead of keeping the length with a null pointer that libjpeg would read (found by the decoder allocation failure test)."
+    },
+    {
+      "file": "libtiff/tif_open.c",
+      "upstreamSha256": "d536531e0323cc007982e8ec10d4cae03b984f19523d1b3e66dd60a7f33ce959",
+      "reason": "Copy the name with memcpy of strlen + 1 bytes into the buffer allocated for exactly that size instead of strcpy, which the Microsoft CRT marks deprecated under -Wdeprecated-declarations; the result is unchanged."
+    },
+    {
+      "file": "libtiff/tif_rocks.c",
+      "upstreamSha256": null,
+      "reason": "Rocks platform layer in place of tif_unix.c and tif_win32.c: memory entry points through a per-thread allocator binding, null global message handlers, no file open functions (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tif_rocks.h",
+      "upstreamSha256": null,
+      "reason": "Declaration of the tif_rocks.c allocator binding (RocksTiffBindAllocator) (Docs/Design/AssetSystem section 12.10)"
+    },
+    {
+      "file": "libtiff/tiffconf.h",
+      "upstreamSha256": null,
+      "reason": "Hand-written configuration header in place of the file the libtiff CMake build generates from tiffconf.h.cmake.in (lossless codecs, JPEG and old JPEG through libjpeg-turbo, DEFAULT_EXTRASAMPLE_AS_ALPHA as in UE 5.8) (Docs/Design/AssetSystem section 12.10)"
+    }
+  ],
+  "patch": "Rocks.patch"
+}

@@ -37,13 +37,21 @@
   ],
   "files": {
     "LICENSE": "6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01",
-    "minimp3.h": "5fb296a790734772b65a5514438cc06d14f24e539c13475ff2a7f737681c82c0",
+    "minimp3.h": "34f88c0b661f06efc14c57fc590b48a449e2b85c785660bcd14169f19d5d4e96",
     "minimp3_ex.h": "bb001301b8666ea7a45ae057b62b17074483213b0d410555d97cc4d076e110df"
   },
   "pragmaDirectives": [],
   "notes": [
-    "MP3 source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.26). Developer only: AudioTools links it, runtime targets do not.",
+    "MP3 source decoder for the audio importer (Docs/Design/AudioSystem sections 3.10.1 and 3.26). Developer only: AudioTools links it, runtime targets do not.",
     "Minimp3Glue.c compiles the header-only implementation once (MINIMP3_IMPLEMENTATION, float output, no stdio, Layer III only: MINIMP3_ONLY_MP3 leaves out the Layer I and II decoder, which AudioTools rejects anyway) and exposes the static tag helpers of minimp3_ex.h (ID3 skip, Xing/LAME tag) under Rocks names. The tag reader gets a zero-padded copy of the frame because mp3dec_check_vbrtag reads the tag fields before it checks the frame size. AudioTools decodes frame by frame with mp3dec_decode_frame and never calls the minimp3_ex load or ex functions, which allocate with malloc and realloc.",
     "SIMD is selected at compile time (SSE2 on x86-64, NEON on ARM64) with no runtime CPU dispatch, so decoded samples are fixed per architecture (decision of section 3.10.1 on determinism)."
+  ],
+  "patch": "Rocks.patch",
+  "modifications": [
+    {
+      "file": "minimp3.h",
+      "upstreamSha256": "5fb296a790734772b65a5514438cc06d14f24e539c13475ff2a7f737681c82c0",
+      "reason": "Declare the ARM NEON have_simd() with a (void) parameter list (-Wstrict-prototypes; only the ARM branch has the old-style declaration, so the Android arm64 build failed while Windows and macOS x64 passed)."
+    }
   ]
 }

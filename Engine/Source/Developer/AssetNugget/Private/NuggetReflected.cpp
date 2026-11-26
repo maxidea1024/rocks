@@ -52,7 +52,10 @@ public:
         return out.writer.Error();
     }
 
-    Result<void> Field(StringView name) noexcept override {
+    // 키는 이름과 값만 쓴다(필드 메타·유효 플래그는 키 입력이 아니다).
+    Result<void> Field(StringView name, const FieldSchema& field, uint32 flags) noexcept override {
+        (void)field;
+        (void)flags;
         Out out(*this, Current());
         out.writer.WriteField(name);
         return out.writer.Error();

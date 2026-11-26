@@ -6,6 +6,9 @@
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 #include <World/Lights/LightingChannels.h>
+#include <World/Physics/BodyGeometry.h>
+#include <World/Physics/BodyMotion.h>
+#include <World/Physics/PhysicsBodyHandle.h>
 #include <World/SceneComponent.h>
 #include <World/Primitives/PrimitiveTypes.h>
 
@@ -388,6 +391,38 @@ public:
         return bodySettings_;
     }
 
+    // --- 물리 body(Docs/Design/PhysicsModule 2.3–2.5절, 7.1.3절) ---
+
+    // body 형상(scale 전 cm)이다. 형상이 있는 파생(Box·Sphere·Capsule)이 채우고 참을 돌려준다.
+    // 기본은 형상 없음(거짓 — body를 만들지 않는다).
+    virtual bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept;
+
+    // 물리 body handle이다. World에 물리 장면이 있고 형상과 충돌이 있으면 등록 때 생기고 등록 해제
+    // 때 없어진다(없으면 IsNull).
+    PhysicsBodyHandle BodyHandle() const noexcept {
+        return bodyHandle_;
+    }
+
+    // body 운동 종류다(2.5절): Mobility가 Movable이 아니면 Static, Movable이고 simulatePhysics면
+    // Dynamic, 그 밖은 Kinematic.
+    BodyMotion PhysicsBodyMotion() const noexcept;
+
+    // 물리 시뮬레이션을 켜거나 끈다(UE SetSimulatePhysics — bodySettings.simulatePhysics,
+    // PhysicsModule 2.3.1·7.1.5절). 켤 때 등록돼 있고 부모가 있으면 먼저 월드 transform을 유지하며
+    // 뗀다(시뮬레이션하는 컴포넌트는 부착될 수 없다). body가 있으면 다시 만들지 않고 Kinematic ↔
+    // Dynamic으로 바꾼다: 끄면 그 자리에서 속도 0, 켜면 startAwake일 때 깨운다. Movable이 아니면
+    // 값만 바꾸고 Warning SimulateOnStaticBody다(Static body 그대로).
+    //
+    // 사용 예:
+    //   ball.SetSimulatePhysics(true);   // 다음 고정 스텝부터 떨어진다
+    void SetSimulatePhysics(bool simulate) noexcept;
+
+    // 물리 결과를 컴포넌트에 쓴다(Docs/Design/PhysicsModule 3.4절 — Physics의 PhysicsResults만
+    // 부른다). 월드 위치(cm)·회전으로 옮기되 자기 body로 되돌려 보내지 않는다(UE
+    // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
+    // 돌려준다 — SetWorldLocationAndRotation).
+    Result<void> ApplyPhysicsTransform(const Vec3d& location, const Quatd& rotation) noexcept;
+
     // 실효 충돌 값이다(CollisionData 5절 ResolveCollision — World의 profile 표, 이름은
     // CollisionProfileName). profileName은 World 표가 살아 있는 동안 유효하다. 오류: World 장부 밖
     // 객체(HasWorld 거짓 — InvalidArgument).
@@ -480,11 +515,44 @@ protected:
     rocks::CanBeCharacterBase canCharacterStepUpOn_ = rocks::CanBeCharacterBase::Yes;
 
 protected:
+    // SetCollisionProfileName이 성공한 뒤 부른다(파생이 profile에 딸린 자기 상태를 고친다 — UE
+    // UStaticMeshComponent::SetCollisionProfileName이 bUseDefaultCollision을 끄는 것, EngineRuntime
+    // 30.3절). 기본은 아무것도 하지 않는다.
+    virtual void OnCollisionProfileNameSet() noexcept {
+    }
+
     // 등록 때 이름을 해석한다: profile 값이면 body에 옮기고, 표에 없으면 경고를 한 번 남긴다
     // (CollisionProfileMissing — CollisionData 9절 CD2). 파생이 재정의하면 이것을 먼저 부른다.
     Result<void> OnRegister() noexcept override;
 
+    // 물리 시스템 상태(2.3절): World에 장면이 있고 형상이 있으며 실효 충돌 켬이 NoCollision이
+    // 아니면 body를 만들고, 등록 해제 때 지운다. 다른 종류는 기반 동작이다. 파생이 재정의하면
+    // 이것을 부른다.
+    bool WantsSystemState(SystemStateKind kind) const noexcept override;
+    Result<void> CreateSystemState(SystemStateKind kind) noexcept override;
+    void DestroySystemState(SystemStateKind kind) noexcept override;
+
+    // body가 있으면 월드 transform으로 옮긴다(3.3절 — UE OnUpdateTransform → SendPhysicsTransform).
+    // scale이 바뀌었으면 장면이 형상을 다시 만든다(7.1.5절). 파생이 재정의하면 이것을 부른다.
+    void OnTransformUpdated() noexcept override;
+
+    // 시작할 때 simulatePhysics이고 부모가 있으면 월드 transform을 유지하며 뗀다(UE
+    // UPrimitiveComponent::BeginPlay — PhysicsModule 2.3.1절). 파생이 재정의하면 이것을 부른다.
+    void OnStart() noexcept override;
+
+    // 형상 값이 바뀐 뒤 파생 setter가 부른다(UE UpdateBodyScale(scale, true) — 7.1.5절). body가
+    // 있으면 BuildBodyGeometry의 새 값으로 형상을 바꾼다. 실패하면 이전 형상을 두고 Warning
+    // BodyShapeUpdateFailed다.
+    void UpdateBodyGeometry() noexcept;
+
 private:
+    // body에 넘기는 월드 transform(위치·회전·scale 따로 — 행렬 분해 없음)이다.
+    Transform BodyWorldTransform() const noexcept;
+
+    // 충돌 값이 바뀐 뒤 부른다(2.3.1절): NoCollision 경계를 넘으면 body를 그 자리에서 만들거나
+    // 지우고 (RecreateSystemStateNow), 아니면 body 필터만 바꾼다.
+    void UpdateBodyCollision() noexcept;
+
     // 실효 값을 편집해 바뀌면 "Custom"으로 옮긴다(위 네 setter의 공통 경로).
     template <class Edit>
     Result<void> EditCustomCollision(Edit&& edit) noexcept;
@@ -492,6 +560,10 @@ private:
     // 빈 값 = 클래스 기본(DefaultCollisionProfileName).
     ROCKS_PROPERTY(ReadOnly, Name = "collisionProfileName") String collisionProfileName_;
     ROCKS_PROPERTY(ReadOnly, Name = "bodySettings") BodySettings bodySettings_;
+    // 물리 body다(실행 상태 — 저장하지 않는다).
+    ROCKS_NATIVE() PhysicsBodyHandle bodyHandle_;
+    // ApplyPhysicsTransform 안이다(OnTransformUpdated가 body로 되돌려 보내지 않는다).
+    ROCKS_NATIVE() bool applyingPhysicsResult_ = false;
 };
 
 } // namespace rocks

@@ -671,6 +671,29 @@ TEST(AssetImporterTable_RegisterAndFind) {
     info = ValidInfo();
     info.roles = Span<const StringView>(manyRoles, MaxImportSources + 1);
     CHECK(rejects(info, ErrorCode::InvalidArgument));
+    // 가변만 받는 임포터(A5h — 12.12절): 고정 역할이 있거나 접두가 없으면 거부, 접두만 있으면
+    // 받는다(기본 역할 `source`가 없으므로 그 앞부분인 `sou` 접두도 된다 — 표지가 없으면 모호해
+    // 거부).
+    {
+        const StringView prefixes[] = {"sou"};
+        const StringView fixed[] = {"px"};
+        info = ValidInfo();
+        info.variableSourcesOnly = true;
+        CHECK(rejects(info, ErrorCode::InvalidArgument));
+        info.roles = Span<const StringView>(fixed);
+        info.rolePrefixes = Span<const StringView>(prefixes);
+        CHECK(rejects(info, ErrorCode::InvalidArgument));
+        info.roles = {};
+        {
+            InfoImporter variable(info);
+            auto registered = table.Register(variable);
+            CHECK(registered);
+        }
+
+        info.variableSourcesOnly = false;
+        CHECK(rejects(info, ErrorCode::InvalidArgument));
+    }
+
     // 타입: 주 출력 없음·struct·에셋 아닌 클래스·추상 에셋, 옵션 없음·클래스·충돌·예약 이름.
     info = ValidInfo();
     info.outputType = Guid{0x7777, 1};

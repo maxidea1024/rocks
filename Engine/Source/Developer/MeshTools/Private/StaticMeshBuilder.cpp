@@ -3,7 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Platform/FloatingPointEnvironment.h>
 
-// 정적 메시 LOD 빌드의 단계 연결이다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4절, UE
+// 정적 메시 LOD 빌드의 단계 연결이다(Docs/Design/MeshAnimationAssets 5.2·5.4절, UE
 // FStaticMeshBuilder::Build의 LOD 루프). 단계 함수는 MeshLodBuild.cpp에 있다.
 namespace rocks {
 

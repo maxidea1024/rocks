@@ -107,8 +107,14 @@
 
 ```json
 "graphicsBackends": ["D3D12", "D3D11", "Vulkan"],
-"shaderFormats": { "D3D12": ["D3D12_SM6"], "D3D11": ["D3D11_SM5"], "Vulkan": ["VULKAN_SM5"] }
+"shaderFormats": {
+  "D3D12": { "formats": ["D3D12_SM6"] },
+  "D3D11": { "formats": ["D3D11_SM5"] },
+  "Vulkan": { "formats": ["VULKAN_SM5"] }
+}
 ```
+
+JSON에서 backend 값은 형식 목록을 한 층 감싼 struct(`ShaderFormatList{formats}`)다(개정 52 — 실제 구현 TargetProfiles에 맞춤). 리플렉션 Map의 값이 배열일 수 없어서 에셋 세션이 A4f1에서 이렇게 정했다(AssetSystem 10.3.1절 A4f1 3번). 뜻은 위 서술 그대로 backend → 선호 순서 형식 id 목록이다.
 
 - 엔진 기본 프로필: `Windows`(위), `Mac`(`Metal`: `METAL_SM5`, 새로 더함), `Android`(`OpenGL`: `GLES31_ANDROID`, SH6에서 `Vulkan`: `VULKAN_ANDROID`를 앞에 더함). 현재 엔진 기본은 `Windows`·`Android`뿐이다(AssetSystem 10절). backend 이름 `OpenGL`은 OpenGL ES backend다(UE `EWindowsRHI::OpenGL`과 같은 이름).
 - 엔진 컴파일 프로필은 개정 32에서 없앴다(12.3.1절 SSD24). 형식 목록과 순서의 출처는 TargetProfile 하나다.
@@ -127,7 +133,7 @@
 
 - **SSD10 TargetProfile 칸.** AssetSystem 10.2절 2항의 `graphicsBackend`(String, A4는 기록만)를 다음 둘로 바꾼다(하위호환 없음 — 다시 쿠킹한다):
   - `graphicsBackends`(`Array<String>`): 런타임이 시도하는 순서다.
-  - `shaderFormats`(`Map<String, Array<String>>`): backend → 선호 순서 형식 id 목록이다.
+  - `shaderFormats`(`Map<String, ShaderFormatList>`, `ShaderFormatList{formats: Array<String>}`): backend → 선호 순서 형식 id 목록이다. JSON은 `{"D3D12": {"formats": ["D3D12_SM6"]}}`처럼 한 층 감싼다(개정 52 — 구현 TargetProfiles에 맞춤, 12.3절 예시).
   - 병합: `graphicsBackends`는 ReflectionText 기본(배열 통째 교체)이다. `shaderFormats`는 **Replace**(프로젝트 파일에 있으면 Map 전체를 통째로 바꾼다 — 키별 병합을 쓰지 않는다)다. backend 목록과 형식 목록이 서로 맞아야 하므로 반쪽만 덮어 엇갈린 조합이 생기지 않게 한다. 새 칸이 프로필 출력 설정 SHA-256에 들어가므로 기존 쿠킹은 다시 쿠킹된다.
   - 검증(위반은 `InvalidSetting`). 개정 39(AssetSystem 10.3절 A4f 정합)에서 둘로 나눴다: **프로필 구조 검증**(어휘 — backend 이름이 고정 어휘 `D3D12`·`D3D11`·`Vulkan`·`Metal`·`OpenGL` 밖, `graphicsBackends` 중복, 목록의 backend에 형식 목록이 없음, 목록에 없는 backend 키, 상한 8 backend × backend당 16 형식)은 에셋 쪽(프로필 읽기)이 한다. **형식 정의 디렉터리 대조**(없는 형식 id·자리만 둔 형식, 형식 정의의 backend가 키와 다름, `GLES31_PC` — 출시 프로필에 넣지 않는다, 위 서술)는 셰이더 쪽 비에셋 산출물 단계(`CookArtifactStage`, SSD41)가 시작할 때 하고 위반을 진단 sink에 `InvalidSetting`으로 낸다.
   - **셰이더 없는 프로필(개정 39).** `graphicsBackends`가 비면(전용 서버 등) 매니페스트 머리 backendCount가 0이고 셰이더 단계는 라이브러리를 만들지 않는다. 런타임은 그래픽 장치·렌더러를 만들지 않는다(UE 전용 서버의 NullDrv와 같은 자리). 그런 쿠킹에서 장치 생성을 요청하면 `Unsupported`와 진단 "this cook has no shader formats"다.

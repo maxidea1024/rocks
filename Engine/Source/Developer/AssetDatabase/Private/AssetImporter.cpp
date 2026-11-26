@@ -2,6 +2,7 @@
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
+#include <AssetRuntime/PackageTags.h>
 #include <Object/PropertyPath.h>
 #include <Object/TypeRegistry.h>
 
@@ -27,6 +28,30 @@ bool IsToken(StringView text, usize maxBytes, bool upper, bool dot) noexcept {
     }
 
     return true;
+}
+
+// 원본 역할이다(1–MaxImportRoleBytes byte의 `[A-Za-z0-9_.:]` — `:`는 가변 원본 역할
+// `blob:<sha256>`, Docs/Design/AssetSystem 7.1절 19 A2f3b).
+bool IsRole(StringView role) noexcept {
+    if (role.IsEmpty() || role.ByteCount() > MaxImportRoleBytes) {
+        return false;
+    }
+
+    for (usize index = 0; index < role.ByteCount(); ++index) {
+        const char c = role.Data()[index];
+        if (!IsWordChar(c, true, true) && c != ':') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 엔진이 쓰는 태그 이름공간과 같은 임포터 이름인지다(대소문자 무시 — 임포터 태그 키
+// `<이름>.<…>`가 bundle 구성원 태그 `Bundle.<이름>`과 겹치지 않게, A2f3a).
+bool IsReservedImporterName(StringView name) noexcept {
+    const StringView bundle(AssetBundleTagPrefix.Data(), AssetBundleTagPrefix.ByteCount() - 1);
+    return EqualsIgnoringAsciiCase(name, bundle);
 }
 
 // 목록 안에 (규칙대로 비교해) 같은 것이 둘 있는지다.
@@ -79,7 +104,12 @@ AssetImporterTable::AssetImporterTable(Allocator& allocator, TypeRegistry& types
 
 Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& entry) noexcept {
     auto invalid = []() noexcept { return Result<void>::Failure(ErrorCode::InvalidArgument); };
+    // 태그 접두(A2f5)는 비면 이름이고, 있으면 이름과 같은 규칙이다.
+    const bool tagPrefixValid =
+        info.tagPrefix.IsEmpty() || (IsToken(info.tagPrefix, MaxImporterNameBytes, true, false) &&
+                                     !IsReservedImporterName(info.tagPrefix));
     if (info.id == Guid{} || !IsToken(info.name, MaxImporterNameBytes, true, false) ||
+        IsReservedImporterName(info.name) || !tagPrefixValid ||
         info.extensions.Size() > MaxImporterExtensions || info.roles.Size() > MaxImportSources ||
         HasDuplicate(info.extensions) || HasDuplicate(info.roles)) {
         return invalid();
@@ -92,8 +122,44 @@ Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& 
     }
 
     for (StringView role : info.roles) {
-        if (!IsToken(role, MaxImportRoleBytes, true, true)) {
+        if (!IsRole(role)) {
             return invalid();
+        }
+    }
+
+    // 가변 원본 접두(A2f3b): 역할 문자, 고정 역할이 접두로 시작하지 않고, 접두끼리 앞부분이 아니다
+    // (어느 역할이 어느 규칙에 드는지 모호함이 없게).
+    if (info.rolePrefixes.Size() > MaxImportSources || HasDuplicate(info.rolePrefixes)) {
+        return invalid();
+    }
+
+    // 가변만 받는 임포터(A5h): 고정 역할이 없고 접두가 하나 이상이다.
+    if (info.variableSourcesOnly && (!info.roles.IsEmpty() || info.rolePrefixes.IsEmpty())) {
+        return invalid();
+    }
+
+    const StringView defaultRole = DefaultImportSourceRole;
+    const Span<const StringView> fixedRoles = info.variableSourcesOnly ? Span<const StringView>()
+                                              : info.roles.IsEmpty()
+                                                  ? Span<const StringView>(&defaultRole, 1)
+                                                  : info.roles;
+    for (usize index = 0; index < info.rolePrefixes.Size(); ++index) {
+        const StringView prefix = info.rolePrefixes[index];
+        if (!IsRole(prefix)) {
+            return invalid();
+        }
+
+        for (StringView role : fixedRoles) {
+            if (role.StartsWith(prefix, StringComparison::CaseSensitive)) {
+                return invalid();
+            }
+        }
+
+        for (usize other = 0; other < info.rolePrefixes.Size(); ++other) {
+            if (other != index &&
+                info.rolePrefixes[other].StartsWith(prefix, StringComparison::CaseSensitive)) {
+                return invalid();
+            }
         }
     }
 

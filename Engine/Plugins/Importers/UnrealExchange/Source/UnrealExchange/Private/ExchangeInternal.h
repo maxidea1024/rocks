@@ -2,7 +2,7 @@
 
 #include <UnrealExchange/ExchangeBundle.h>
 
-// UnrealExchange 모듈 안에서만 쓰는 묶음 접근과 blob 검사다(Docs/Design/UnrealExchange.ko.md 10.4절
+// UnrealExchange 모듈 안에서만 쓰는 묶음 접근과 blob 검사다(Docs/Design/UnrealExchange 10.4절
 // 11·12번).
 
 namespace rocks {

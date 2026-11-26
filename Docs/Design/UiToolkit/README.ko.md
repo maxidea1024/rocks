@@ -12,7 +12,7 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 |---|---|
 | 기준 문서 | [전체 구현 계획](../EngineImplementationPlan.ko.md) 개정 1.9 · [Core·Object·Input 상세 구현 계획](../CoreObjectInputDetailedPlan.ko.md) · [Clang 생성 Reflection](../../Implementation/ReflectionMetadata.ko.md) · [리플렉션 B9](../ReflectionExtensions.ko.md) · [Sparks 언어 설계](../SparksLanguage/README.ko.md) |
 | UE 기준 | 로컬 클론 `C:\github\UnrealEngine` 5.8.4-release(commit `f45729c0b6f0`). 이 문서의 UE 경로는 `Engine/Source/` 기준 상대 경로이며, 행 번호는 해당 클론의 값이다 |
-| Rocks 상태 | 단계 순서보다 먼저 만든 UI 코드(UiCore·UiFramework·UiWidget·UiScreens·UiRender·WorldIntegration·UiDemo, 약 34k줄)가 있다. 9.1절의 리뷰 결과대로 UT1 진행 중으로 보고 UW 단계로 이 문서에 맞춘다. 글꼴은 [글꼴 설계](../Font/README.ko.md) FT1·FT2가 구현됐다. `PlatformWindow`은 Win64·Android 창, Win64 clipboard·cursor·IMM 조합 창(DPI 없음) |
+| Rocks 상태 | 단계 순서보다 먼저 만든 UI 코드(UiCore·UiFramework·UiWidget·UiScreens·UiRender·UiWorld·UiDemo, 약 34k줄)가 있다. 9.1절의 리뷰 결과대로 UT1 진행 중으로 보고 UW 단계로 이 문서에 맞춘다. 글꼴은 [글꼴 설계](../Font/README.ko.md) FT1·FT2가 구현됐다. `PlatformWindow`은 Win64·Android 창, Win64 clipboard·cursor·IMM 조합 창(DPI 없음) |
 | 이름 | Rocks 고유 이름을 사용한다(UD12). UI 계층 매크로는 `ROCKS_UI_` 접두. UE 이름(모듈·타입·매크로)은 대응표와 근거 열에만 적는다 |
 | UE 원본 취급 | UE 소스는 구조·동작 확인을 위한 열람·대조에만 사용하고 코드를 옮기지 않는다. Epic 저작 자원(아이콘·이미지·`Engine/Content`)은 포함하지 않는다 |
 | 식별자 | 단계 UT0–UT6, Core 선행 계약 CU1–CU9, Core·플랫폼 보강 CB1–CB4·PW1–PW8, 검증 UV1–UV9, 위험 UR1–UR8, 결정 UD1–UD17 |

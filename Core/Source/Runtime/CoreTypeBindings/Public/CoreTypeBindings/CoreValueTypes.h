@@ -3,6 +3,7 @@
 #include <Core/Math/Color.h>
 #include <Core/Math/IntVector.h>
 #include <Core/Math/Rotator.h>
+#include <Core/Math/Shapes.h>
 #include <Core/Math/Transform.h>
 #include <Core/Math/Vector2.h>
 #include <Core/Math/Vector4.h>
@@ -18,7 +19,7 @@
 // 있으면 생성 헤더가 컴파일되지 않는다. 스키마 이름은 미러 이름이다. 저장은 다른 struct와 같은
 // 태그형 중첩 Record다(4.4절).
 //
-// 미러 17종 중 혼합 정밀도 Transform을 뺀 16종은 Atomic(통째 단위 — TypeFlags::Atomic,
+// 미러 19종 중 혼합 정밀도 Transform을 뺀 18종은 Atomic(통째 단위 — TypeFlags::Atomic,
 // Docs/Design/ReflectionExtensions.ko.md 3.1·3.2절)이다: 차이 저장은 성분 하나라도 기준과
 // 다르면 모든 성분을 쓰고, override 집합·되돌리기의 단위가 그 값 필드 경로다(차이 쓰기 구현은
 // A5). UE가 수학 타입을 native Serializer나 Immutable 이진 직렬화로 통째 쓰는 결과를 따른다.
@@ -148,6 +149,14 @@ struct IntVec3Binding {
     ROCKS_PROPERTY() int32 z = 0;
 };
 
+// 축 정렬 상자(rocks::Box<double> — UE FBox의 Min·Max, IsValid 플래그는 두지 않는다 — Shapes.h)다.
+// 메시 쿠킹 bounds가 쓴다(Docs/Design/MeshAnimationAssets 5.5.1절 7). 길이는 cm다.
+ROCKS_STRUCT(Binds = "rocks::Box<double>", Atomic, Version = 1)
+struct BoxdBinding {
+    ROCKS_PROPERTY() Vec3d min;
+    ROCKS_PROPERTY() Vec3d max;
+};
+
 // 회전·이동·축별 scale이 모두 double인 TRS(rocks::Transform — UE FTransform)다. 멤버 순서는 UE
 // FTransform과 같은 rotation·translation·scale이다(Core/Math/Transform.h). 멤버는 위 미러들이
 // 결합한 실제 타입이다. 비Atomic(멤버 단위 — UE FTransform과 같다)이다. 세이브게임 포함
@@ -184,7 +193,7 @@ struct Transform3dBinding {
 // 프레임 속도(rocks::FrameRate — UE FFrameRate)다. 초당 numerator / denominator 프레임이고 두 값은
 // 양수다. Core FrameRate의 private 멤버를 GeneratedType friend로 읽고 쓰며(InterpCurve 미러와 같은
 // 방식), 도구 이름은 UE와 같은 numerator·denominator다. 검증 hook Validate가 0·음수 값을 거부한다
-// (FrameRate::TryCreate와 같은 불변식 — Docs/Design/MeshAnimationAssets.ko.md 7.5절 3).
+// (FrameRate::TryCreate와 같은 불변식 — Docs/Design/MeshAnimationAssets 7.5절 3).
 ROCKS_STRUCT(Binds = "rocks::FrameRate", Atomic, Version = 1)
 struct FrameRateBinding {
     ROCKS_PROPERTY(Name = "numerator") int32 numerator_ = 60000;

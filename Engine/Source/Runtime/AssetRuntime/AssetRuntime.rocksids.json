@@ -37,6 +37,69 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::PerPlatformBool::defaultValue",
+      "id": "9d3c0406d8284a69a50ac758e76bad02",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformBool::perPlatform",
+      "id": "e8f5195618ff401996d8e464cbf17840",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformFloat::defaultValue",
+      "id": "ecaa210e815e4bc6bd2073cacbf372e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformFloat::perPlatform",
+      "id": "db34ac75373d4c608c066018ad9685e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformInt32::defaultValue",
+      "id": "fa970531d5fb48679ffee8709fe7b7a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PerPlatformInt32::perPlatform",
+      "id": "7cbc6ada627745f69820ded83cf003ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StreamableRenderAsset::globalForceMipLevelsToBeResident",
+      "id": "e4d080ebd00c4dfe80879a2192f5b3fc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StreamableRenderAsset::neverStream",
+      "id": "0e1e8a5ea6064af0a36a9d4e9eebd86d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StreamableRenderAsset::numCinematicMipLevels",
+      "id": "48444c8a9a4447be83b105b4c3e3ce79",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::Asset",
       "id": "56b77eb53b784bc28e54f8edc79dc075",
@@ -54,6 +117,34 @@
       "kind": "type",
       "name": "rocks::Package",
       "id": "cecd2aaca3c146f6a2d1321087c7cdeb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PerPlatformBool",
+      "id": "51f4d96c6a3c4d7faaa6956e5dac8381",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PerPlatformFloat",
+      "id": "d81573e220ca43efad688bc580c1d94b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PerPlatformInt32",
+      "id": "7265f00ec0264c5193bc7f21de09345d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StreamableRenderAsset",
+      "id": "566a34417bd842c5bac87b641657bc49",
       "aliases": [],
       "retired": false
     }

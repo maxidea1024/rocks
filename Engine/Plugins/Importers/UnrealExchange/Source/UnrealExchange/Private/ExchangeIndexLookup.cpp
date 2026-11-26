@@ -4,7 +4,7 @@
 #include <Core/Algorithms.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// AssetIndex 태그 기반 기존 에셋 조회다(Docs/Design/UnrealExchange.ko.md 9.2절, 10.5절 4번).
+// AssetIndex 태그 기반 기존 에셋 조회다(Docs/Design/UnrealExchange 9.2절, 10.5절 4번).
 
 namespace rocks {
 

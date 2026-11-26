@@ -68,7 +68,12 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
         view = {};
     }
 
-    boundTexture_ = white_.slot;
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = nullptr;
+        }
+    }
     for (auto& stage : boundConstants_) {
         for (BoundConstant& bound : stage) {
             bound = {};
@@ -291,20 +296,47 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
                                 static_cast<UINT>(offset));
 }
 
-void D3D11Device::SetTexture(TextureHandle handle) noexcept {
+void D3D11Device::SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots) {
+        return;
+    }
+
     const TextureRecord* record = textures_.Find(handle.slot);
-    SlotHandle slot = handle.slot;
+    SlotHandle bound = handle.slot;
     if (record == nullptr || !record->srv) {
-        record = textures_.Find(white_.slot);
-        slot = white_.slot;
+        bound = white_.slot;
         ++nullTextureBindings_;
     }
 
-    if (record != nullptr) {
-        // 그리기·dispatch 직전에 파이프라인 slot 표대로 건다(ApplySlots).
-        boundTexture_ = slot;
+    // 그리기·dispatch 직전에 파이프라인 slot 표대로 건다(ApplySlots).
+    boundTextures_[stageIndex][slot] = bound;
+}
+
+Result<void> D3D11Device::SetSampler(ShaderStage stage, uint32 slot,
+                                     const SamplerDesc* sampler) noexcept {
+    platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        (void)Fail("SetSampler needs a recording, a stage and slot in range and a valid sampler "
+                   "description");
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
+    if (sampler == nullptr) {
+        boundSamplers_[stageIndex][slot] = nullptr;
+        return Result<void>::Success();
+    }
+
+    auto made = SamplerFor(*sampler);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    boundSamplers_[stageIndex][slot] = made.Value();
+    return Result<void>::Success();
 }
 
 Result<void> D3D11Device::SetDrawConstants(Span<const uint8> bytes) noexcept {

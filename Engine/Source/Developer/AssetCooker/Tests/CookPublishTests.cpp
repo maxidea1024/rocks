@@ -77,8 +77,34 @@ struct FakePackage {
 struct PublishScene {
     PublishScene(AssetEnv& sceneEnv, const char* tag) noexcept
         : env(sceneEnv), root(tag), layout(env.allocator),
-          files(env.allocator, Initialized(layout, root)) {
-        ready = root.made && files.Ready() && static_cast<bool>(lock.Acquire(layout, 0));
+          files(env.allocator, Initialized(layout, root)), backends(env.allocator) {
+        ready =
+            root.made && files.Ready() &&
+            static_cast<bool>(lock.Acquire(env.allocator, layout.SavedDirectory(), Profile, 0)) &&
+            AddBackend("D3D12", "D3D12_SM6", "D3D12_SM5") &&
+            AddBackend("Vulkan", "VULKAN_SM5", StringView());
+    }
+
+    // 매니페스트 backend 표 하나를 더한다(second가 비면 형식 하나).
+    bool AddBackend(StringView name, StringView first, StringView second) noexcept {
+        auto added = backends.TryEmplaceBack(env.allocator);
+        if (!added || !added.Value()->name.TryAssign(name)) {
+            return false;
+        }
+
+        const StringView formats[] = {first, second};
+        for (StringView format : formats) {
+            if (format.IsEmpty()) {
+                continue;
+            }
+
+            auto slot = added.Value()->formats.TryEmplaceBack(env.allocator);
+            if (!slot || !slot.Value()->TryAssign(format)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     static StringView Initialized(ProjectLayout& layout, const TempProject& root) noexcept {
@@ -88,11 +114,12 @@ struct PublishScene {
     CookPublishConfig Config() noexcept {
         CookPublishConfig config;
         config.files = &files;
-        config.layout = &layout;
+        config.savedDirectory = layout.SavedDirectory();
         config.profileId = Profile;
         config.profileSettings = DigestOf("profile");
         config.cookSettings = DigestOf("settings");
         config.cookedBy = TestEngineVersion;
+        config.backends = Span<const CookedManifestBackend>(backends.Data(), backends.Size());
         return config;
     }
 
@@ -133,7 +160,11 @@ struct PublishScene {
     TempProject root;
     ProjectLayout layout;
     MemoryFileSystem files;
-    AssetDatabaseLock lock;
+    // 쿠킹 루트 잠금이다(게시기 Begin이 대조한다 — 10.3.1절 A4f4 2번).
+    CookRootLock lock;
+    // 매니페스트 backend 표다(D3D12 [D3D12_SM6, D3D12_SM5]·Vulkan [VULKAN_SM5] — 10.3.1절 A4f2
+    // 8번).
+    Array<CookedManifestBackend> backends;
     bool ready = false;
 };
 
@@ -207,7 +238,7 @@ TEST(CookPublish_FullCookAndCleanup) {
     REQUIRE(publisher.Begin(scene.lock));
     CHECK(!scene.files.Has(orphan.View()));
     StringBuilder<256> expectedRoot(env.allocator);
-    REQUIRE(AppendCookedRoot(expectedRoot, scene.layout, Profile));
+    REQUIRE(AppendCookedRoot(expectedRoot, scene.layout.SavedDirectory(), Profile));
     CHECK(publisher.Root() == expectedRoot.View());
     REQUIRE(publisher.Put(a.View()) && publisher.Put(b.View()) && publisher.Put(c.View()));
     const uint32 syncsBefore = scene.files.syncs;
@@ -222,6 +253,12 @@ TEST(CookPublish_FullCookAndCleanup) {
           manifest.Value().profileSettings == DigestOf("profile") &&
           manifest.Value().cookSettings == DigestOf("settings") &&
           manifest.Value().cookerVersion == CookerVersion);
+    // backend 표는 설정 순서 그대로이고, artifact 표는 비어 있다(단계는 A4f3).
+    const Span<const CookedManifestBackend> tables = manifest.Value().Backends();
+    CHECK(tables.Size() == 2 && tables[0].name.View() == "D3D12" && tables[0].formats.Size() == 2 &&
+          tables[0].formats[0].View() == "D3D12_SM6" &&
+          tables[0].formats[1].View() == "D3D12_SM5" && tables[1].name.View() == "Vulkan" &&
+          tables[1].formats.Size() == 1 && manifest.Value().artifacts.IsEmpty());
     REQUIRE(manifest.Value().entries.Size() == 3);
     CHECK(manifest.Value().entries[0].asset == b.asset &&
           manifest.Value().entries[1].asset == c.asset &&
@@ -409,6 +446,18 @@ TEST(CookPublish_PartialMerge) {
     REQUIRE(bundle.name.TryAssign("Ui") && bundle.members.TryPushBack(d.asset));
     REQUIRE(aTarget.bundles.TryPushBack(Move(bundle)));
     const AssetId removed[] = {c.asset};
+    // 이전 매니페스트의 artifact(A4f3 단계가 만들 항목 대신 모델에 더한다)는 이번 쿠킹에 같은 키가
+    // 없으면 그대로 남는다(10.3.1절 A4f2 8번 — 정렬 순서로).
+    const StringView libraryFormats[] = {"VULKAN_SM5", "D3D12_SM6"};
+    for (StringView format : libraryFormats) {
+        CookedManifestArtifact artifact(env.allocator);
+        artifact.bytes = 100;
+        artifact.sha256 = DigestOf("library");
+        REQUIRE(artifact.name.TryAssign(CookedArtifactEngineName) &&
+                artifact.formatId.TryAssign(format));
+        REQUIRE(existing.Value().artifacts.TryPushBack(Move(artifact)));
+    }
+
     CookPublisher partial(env.allocator, scene.Config());
     REQUIRE(partial.Begin(scene.lock));
     REQUIRE(partial.Put(b2.View()));
@@ -427,6 +476,12 @@ TEST(CookPublish_PartialMerge) {
           aEntry->bundles.Size() == 1 && aEntry->bundles[0].members.Size() == 1 &&
           aEntry->packageSha256 == a.sha256 && aEntry->cookKey == a.cookKey);
     CHECK(bEntry->packageSha256 == b2.sha256);
+    const Span<const CookedManifestArtifact> kept = merged.Value().Artifacts();
+    CHECK(kept.Size() == 2 && kept[0].formatId.View() == "D3D12_SM6" &&
+          kept[1].formatId.View() == "VULKAN_SM5" && kept[0].bytes == 100 &&
+          kept[0].sha256 == DigestOf("library") &&
+          merged.Value().FindArtifact(CookArtifactKind::ShaderLibrary, CookedArtifactEngineName,
+                                      "VULKAN_SM5") == &kept[1]);
     // PrimaryAsset이 아닌 재사용 대상은 flags 0·bundle 없음이다(이번 판정).
     CookTarget plain(env.allocator);
     plain.id = d.asset;
@@ -437,7 +492,8 @@ TEST(CookPublish_PartialMerge) {
     auto plainMerged = scene.Manifest();
     REQUIRE(plainMerged && plainMerged.Value().Find(d.asset) != nullptr);
     CHECK(plainMerged.Value().Find(d.asset)->flags == 0 &&
-          plainMerged.Value().Find(d.asset)->bundles.IsEmpty());
+          plainMerged.Value().Find(d.asset)->bundles.IsEmpty() &&
+          plainMerged.Value().artifacts.Size() == 2);
     CHECK(scene.files.Has(oldB.View()) && scene.files.Has(scene.PackageName(c).View()));
 
     // 다른 CookSettings: IncompatibleCook 오류, 게시하지 않음(매니페스트 byte 그대로).
@@ -456,6 +512,15 @@ TEST(CookPublish_PartialMerge) {
     REQUIRE(incompatible.Diagnostics().Size() == 1);
     CHECK(incompatible.Diagnostics()[0].code == AssetDiagnosticCode::IncompatibleCook);
     CHECK(Same(scene.files.Bytes(manifestName.View()), before.View()));
+
+    // 전체 쿠킹은 이전 artifact를 넘기지 않는다(10.3.1절 A4f2 8번).
+    CookPublisher full(env.allocator, scene.Config());
+    REQUIRE(full.Begin(scene.lock));
+    REQUIRE(full.Put(b.View()));
+    REQUIRE(full.Finish(nullptr, {}));
+    auto fresh = scene.Manifest();
+    REQUIRE(fresh);
+    CHECK(fresh.Value().artifacts.IsEmpty() && fresh.Value().backends.Size() == 2);
 }
 
 // 실패 시 게시본 불변: Finish 없이 끝나면 매니페스트는 그대로이고 옮긴 새 패키지는 기존 파일을 덮지
@@ -516,13 +581,18 @@ TEST(CookPublish_RejectsAndFaults) {
     nullFiles.files = nullptr;
     CookPublisher noFiles(env.allocator, nullFiles);
     CHECK(noFiles.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
-    CookPublishConfig nullLayout = scene.Config();
-    nullLayout.layout = nullptr;
-    CookPublisher noLayout(env.allocator, nullLayout);
-    CHECK(noLayout.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
-    AssetDatabaseLock unheld;
+    CookPublishConfig nullSaved = scene.Config();
+    nullSaved.savedDirectory = {};
+    CookPublisher noSaved(env.allocator, nullSaved);
+    CHECK(noSaved.Begin(scene.lock).Error() == ErrorCode::InvalidArgument);
+    CookRootLock unheld;
     CookPublisher notLocked(env.allocator, scene.Config());
     CHECK(notLocked.Begin(unheld).Error() == ErrorCode::InvalidArgument);
+    // 다른 쿠킹 루트(다른 프로필)의 잠금은 받지 않는다(10.3.1절 A4f4 2번).
+    CookRootLock other;
+    REQUIRE(other.Acquire(env.allocator, scene.layout.SavedDirectory(), "Android", 0));
+    CookPublisher otherRoot(env.allocator, scene.Config());
+    CHECK(otherRoot.Begin(other).Error() == ErrorCode::InvalidArgument);
     CookTarget target(env.allocator);
     CHECK(notLocked.Put(a.View()).Error() == ErrorCode::InvalidArgument);
     CHECK(notLocked.Finish(nullptr, {}).Error() == ErrorCode::InvalidArgument);
@@ -760,7 +830,7 @@ TEST(CookPublish_PlanReuse) {
     unknown.hasKey = true;
     REQUIRE(keys.keys.TryPushBack(unknown));
     StringBuilder<256> root(env.allocator);
-    REQUIRE(AppendCookedRoot(root, scene.layout, Profile));
+    REQUIRE(AppendCookedRoot(root, scene.layout.SavedDirectory(), Profile));
     CookReuseRequest request;
     request.files = &scene.files;
     request.cookedRoot = root.View();

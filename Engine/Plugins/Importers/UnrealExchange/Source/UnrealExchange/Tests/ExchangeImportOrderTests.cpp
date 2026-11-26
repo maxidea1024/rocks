@@ -3,7 +3,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 임포트 순서 시험이다(Docs/Design/UnrealExchange.ko.md 9.1·9.3절, 10.4절 13–15번):
+// Unreal 교환 임포트 순서 시험이다(Docs/Design/UnrealExchange 9.1·9.3절, 10.4절 13–15번):
 // fixture 순서(깊이·SCC·redirect·누락 경고·이름 바꿈), Build 순환, Hard 순환 허용, 누락 의존 분류와
 // 기존 에셋 조회, 깊이 상한, 실패 전파, 경로 겹침·길이, 잘못된 root, 결정성, 할당 실패.
 using namespace rocks;

@@ -56,7 +56,6 @@ void PutStencil(KeyWriter& key, const graphics::StencilFace& face) noexcept {
 }
 
 void PutNames(KeyWriter& key, const graphics::PipelineBindingNames& names) noexcept {
-    key.Text(names.texture);
     for (uint32 slot = 0; slot < graphics::MaxPipelineNamedSlots; ++slot) {
         key.Text(names.bufferViews[slot]);
         key.Text(names.writableBuffers[slot]);

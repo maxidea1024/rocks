@@ -1,31 +1,47 @@
 #include "EngineHost.h"
 
+#include "CookedTextureLibrary.h"
 #include "GraphicsDeviceTraits.h"
 #include "SandboxGame.h"
 #include "SandboxShaders.h"
+#include "ScreenHost.h"
 
 #include <Base/PlacementNew.h>
+#include <Collision/CollisionSettings.h>
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Move.h>
+#include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
+#include <AssetRuntime/CookedManifest.h>
 #include <Engine/Engine.h>
+#include <Engine/SplashSettings.h>
+#include <EngineAssets/EngineAssetsSubsystem.h>
+#include <EngineAudio/AudioEngineSubsystem.h>
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstance.h>
 #include <Gameplay/GameInstanceClient.h>
+#include <Gameplay/LocalPlayer.generated.h>
+#include <Gameplay/PlayerController.generated.h>
+#include <Gameplay/PlayerController.h>
 #include <HostConfig/HostSettings.h>
 #include <Input/InputEvent.h>
 #include <Input/InputSettings.h>
 #include <Input/InputState.h>
 #include <Launch/Application.h>
+#include <Physics/PhysicsSettings.h>
 #include <Platform/ApkFile.h>
 #include <Platform/Clock.h>
 #include <Platform/CrashReporting.h>
 #include <LogHost/LogHost.h>
+#include <ModuleLoader/HostServices.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
 #include <PlatformWindow/Window.h>
+#include <RenderBase/CookedManifestShaderLibraries.h>
+#include <SplashScreen/SplashScreen.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -48,6 +64,57 @@ constexpr uint32 TraceLogFlushTimeoutMilliseconds = 2000;
 // Sandbox 엔진 호스트의 로그 카테고리다.
 inline constexpr LogCategory LogSandboxHost{"Sandbox"};
 
+// 로컬 플레이어마다 PlayerController의 진동 합성 값을 그 패드에 쓴다(Docs/Design/InputActions
+// 6.3절 출력). PlayerController가 없거나 끊겼으면 0이다. ControllerId가 음수인 플레이어는 쓰지
+// 않는다(입력은 패드 0을 읽지만 패드 0의 진동 주인은 ControllerId 0이다 — 둘이 번갈아 쓰지 않게).
+// 지난 프레임에 0이 아닌 값을 썼는데 이번에 아무도 쓰지 않은 패드(LocalPlayer 제거·인스턴스 정지)는
+// 0으로 멈춘다. 연결되지 않은 패드(NotFound)·진동 없는 backend(Unsupported)는 조용히 넘긴다.
+// 프레임마다 부른다(backend는 바뀐 값만 장치에 쓰고, Android는 이 호출에서 1초 one-shot을 다시
+// 건다). 돌려주는 값은 이번에 0이 아닌 값을 쓴 패드 비트다.
+uint32 WriteLocalPlayerMotors(GameInstanceClient& client, platform::GamepadBackend& gamepads,
+                              uint32 previousActivePads) noexcept {
+    uint32 writtenPads = 0;
+    uint32 activePads = 0;
+    auto written = client.WithInstance([&](GameInstance& instance) noexcept {
+        World* world = instance.CurrentWorld();
+        for (uint32 index = 0; index < instance.LocalPlayerCount(); ++index) {
+            int32 controllerId = 0;
+            ObjectHandle controller;
+            (void)instance.WithLocalPlayer(instance.LocalPlayerAt(index),
+                                           [&](LocalPlayer& player) noexcept {
+                                               controllerId = player.ControllerId();
+                                               controller = player.PlayerControllerHandle();
+                                           });
+            if (controllerId < 0 || static_cast<uint32>(controllerId) >= input::MaxGamepads) {
+                continue;
+            }
+
+            const auto gamepad = static_cast<uint32>(controllerId);
+            input::MotorValues motors;
+            if (world != nullptr && !controller.IsNull() && world->HasActor(controller)) {
+                (void)world->With<PlayerController>(
+                    controller,
+                    [&motors](PlayerController& value) noexcept { motors = value.MotorOutput(); });
+            }
+
+            (void)gamepads.SetMotors(gamepad, motors);
+            writtenPads |= 1u << gamepad;
+            if (!(motors == input::MotorValues{})) {
+                activePads |= 1u << gamepad;
+            }
+        }
+    });
+    (void)written;
+    for (uint32 gamepad = 0; gamepad < input::MaxGamepads; ++gamepad) {
+        const uint32 bit = 1u << gamepad;
+        if ((previousActivePads & bit) != 0 && (writtenPads & bit) == 0) {
+            (void)gamepads.SetMotors(gamepad, input::MotorValues{});
+        }
+    }
+
+    return activePads;
+}
+
 // 헤드리스 실행의 고정 프레임 시간이다(결정적 시간 진행).
 constexpr double HeadlessFrameSeconds = 1.0 / 60.0;
 
@@ -66,6 +133,11 @@ constexpr uint64 NanosecondsPerSecond = 1000000000ull;
 constexpr uint64 NanosecondsPerMillisecond = 1000000ull;
 constexpr uint64 WindowFramesPerSecond = 60;
 constexpr uint64 WindowFrameNanoseconds = NanosecondsPerSecond / WindowFramesPerSecond;
+
+// 스플래시에서 주 창으로 넘기는 프레임이다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 주
+// 창을 보이고(최소 표시 시간 ui.splash.min_seconds도 지나야 한다 — 9.7절), 보인 뒤 한 프레임을 더
+// 낸 다음 스플래시를 숨긴다.
+constexpr uint64 ShowWindowAfterFrames = 1;
 
 // 창 크기다(client 영역 픽셀).
 constexpr uint32 WindowWidth = 1280;
@@ -87,6 +159,11 @@ public:
         // 창(선택)과 게임패드 backend(선택)다. hook보다 오래 산다.
         platform::Window* window = nullptr;
         platform::GamepadBackend* gamepads = nullptr;
+        // 엔진 카메라를 읽을 게임 세션이다(렌더 view). hook보다 오래 산다.
+        GameInstanceClient* client = nullptr;
+        // 시작 화면(선택)이다. 주 창은 숨긴 채 만들어져 있고, 첫 프레임이 끝나면 보이고 한 프레임을
+        // 더 그린 뒤 스플래시를 숨긴다(Docs/Design/SplashScreen 9.4절). hook보다 오래 산다.
+        splash::SplashScreen* splash = nullptr;
     };
 
     HostLoopBridge(input::InputQueue& queue, const Options& options) noexcept
@@ -96,6 +173,23 @@ public:
     // 엔진 LocalPlayer가 읽는 입력 원천이다(GameInstance::SetLocalPlayerInput).
     const input::InputState& Input() const noexcept {
         return input_;
+    }
+
+    // 창 렌더 경로를 붙인다(Docs/Design/RenderBase 18.5절 1항). screen은 엔진 Shutdown 뒤까지 산다.
+    void AttachScreen(screen::ScreenHost* screen) noexcept {
+        screen_ = screen;
+    }
+
+    // 쿠킹 텍스처 목록을 붙인다(18.5절 7·8항). 프레임 끝에 텍스처 렌더 캐시를 갱신해 준비된
+    // 텍스처를 화면에 올리고, 엔진 종료 시작에 handle을 Retire한 뒤 lease를 놓는다(EngineAssets
+    // 종료 계약 — AssetSystem 11.8절 6).
+    void AttachTextures(CookedTextureLibrary* textures) noexcept {
+        textures_ = textures;
+    }
+
+    // 렌더 lane slot 대기 중 창 메시지 펌프다(5.3절 — 펌프한 이벤트는 다음 PumpEvents가 모은다).
+    render::RenderLanePump LanePump() noexcept {
+        return {&PumpWindow, this};
     }
 
     void PumpEvents(Engine& engine) noexcept override {
@@ -111,18 +205,33 @@ public:
 
         if (options_.window != nullptr) {
             options_.window->PumpEvents(queue_);
-            // 렌더가 아직 없으므로 잃은 surface를 곧바로 놓았다고 알린다(Android 창 파괴 gate —
-            // Docs/Design/ AndroidPlatform.ko.md 4절).
+            // 창 포커스가 비활성 창 볼륨(audio.unfocused.volume)을 정한다(3.35.9절).
+            if (auto* audio = engine.GetSubsystem<AudioEngineSubsystem>()) {
+                audio->SetApplicationForeground(options_.window->HasFocus());
+            }
+
+            const bool rendering = screen_ != nullptr && screen_->IsRunning();
+            // 잃은 surface는 렌더 lane이 스왑체인을 놓은 뒤(handshake) 놓았다고 알린다(Android 창
+            // 파괴 gate — Docs/Design/AndroidPlatform.ko.md 4절).
             if (options_.window->ConsumeSurfaceLost()) {
+                if (rendering) {
+                    screen_->ReleaseSurface();
+                }
+
                 options_.window->AcknowledgeSurfaceLost();
             }
 
-            // 새 surface에는 빈 프레임을 낸다(렌더러가 없다 — Android는 첫 프레임 전까지 입력을
-            // 보내지 않는다).
+            // 크기 변경은 렌더 lane의 표면 작업이다(새 surface면 스왑체인을 다시 만든다). 렌더가
+            // 없으면 빈 프레임을 낸다(Android는 첫 프레임 전까지 입력을 보내지 않는다).
             uint32 width = 0;
             uint32 height = 0;
             if (options_.window->ConsumeResize(width, height)) {
-                options_.window->PresentBlankFrame();
+                if (rendering) {
+                    screen_->RecreateSurface(*options_.window);
+                    screen_->Resize(width, height);
+                } else {
+                    options_.window->PresentBlankFrame();
+                }
             }
 
             if (options_.window->IsCloseRequested()) {
@@ -158,6 +267,21 @@ public:
     // 평균이 맞는다). 한 간격 넘게 밀리면 deadline을 지금으로 다시 잡는다(밀린 프레임을 몰아 돌리지
     // 않는다). 헤드리스는 기다리지 않는다.
     void EndFrame(Engine&) noexcept override {
+        if (options_.gamepads != nullptr && options_.client != nullptr) {
+            activeMotorPads_ =
+                WriteLocalPlayerMotors(*options_.client, *options_.gamepads, activeMotorPads_);
+        }
+
+        if (screen_ != nullptr) {
+            if (textures_ != nullptr) {
+                textures_->Update();
+            }
+
+            screen_->HandleInspectorInput(input_);
+            screen_->SubmitFrame(options_.client);
+        }
+
+        HandOffFromSplash();
         if (options_.window == nullptr) {
             return;
         }
@@ -173,23 +297,90 @@ public:
         }
     }
 
+    // 스플래시에서 주 창으로 넘긴다(Docs/Design/SplashScreen 9.4절): 첫 프레임을 낸 뒤 숨겨 둔 주
+    // 창을 보이고 앞으로 가져오고, 보인 뒤 한 프레임을 더 낸 다음 스플래시를 숨긴다(숨긴 창에 낸
+    // 프레임이 보이는 순간 화면에 남는다는 보장이 없어서다). 최소 표시 시간(9.7절)이 지날 때까지는
+    // 주 창을 숨긴 채 엔진 프레임을 계속 돈다.
+    void HandOffFromSplash() noexcept {
+        if (options_.splash == nullptr) {
+            return;
+        }
+
+        ++handOffFrames_;
+        if (windowShown_) {
+            options_.splash->Hide();
+            options_.splash = nullptr;
+        } else if (handOffFrames_ >= ShowWindowAfterFrames && options_.splash->CanHide()) {
+            if (options_.window != nullptr) {
+                options_.window->ShowAndActivate();
+            }
+
+            windowShown_ = true;
+        }
+    }
+
+    // 엔진 종료 hook을 렌더 lane 종료 단계에 잇는다(Docs/Design/RenderBase 5.5절).
+    void BeginShutdown(Engine&) noexcept override {
+        if (textures_ != nullptr) {
+            textures_->Release();
+        }
+
+        if (screen_ != nullptr) {
+            screen_->BlockFrames();
+        }
+    }
+
+    Result<void> CompleteInFlightWork(Engine&) noexcept override {
+        return screen_ != nullptr ? screen_->WaitFramesIdle() : Result<void>::Success();
+    }
+
+    Result<uint64> DrainShutdownCleanup(Engine&) noexcept override {
+        return screen_ != nullptr ? screen_->DrainRetires() : Result<uint64>::Success(0);
+    }
+
+    Result<void> VerifyShutdownClosure(Engine&) noexcept override {
+        return screen_ != nullptr ? screen_->CloseResources() : Result<void>::Success();
+    }
+
+    Result<void> StopExecutors(Engine&) noexcept override {
+        return screen_ != nullptr ? screen_->Stop() : Result<void>::Success();
+    }
+
 private:
+    static void PumpWindow(void* raw) noexcept {
+        auto* self = static_cast<HostLoopBridge*>(raw);
+        if (self->options_.window != nullptr) {
+            self->options_.window->PumpEvents(self->queue_);
+        }
+    }
+
     input::InputQueue& queue_;
     Options options_;
+    // 스플래시 넘기기에서 끝난 프레임 수와 주 창을 보였는지다(보인 다음 프레임에 스플래시를
+    // 숨긴다).
+    uint64 handOffFrames_ = 0;
+    bool windowShown_ = false;
+    screen::ScreenHost* screen_ = nullptr;
+    CookedTextureLibrary* textures_ = nullptr;
     input::InputState input_;
     uint64 pumped_ = 0;
     // 지난 프레임까지 본 큐 손실 수다.
     uint64 droppedSeen_ = 0;
+    // 지난 프레임에 0이 아닌 진동을 쓴 패드 비트다(빠진 플레이어의 패드를 멈춘다).
+    uint32 activeMotorPads_ = 0;
     // 창 모드 다음 프레임 끝 목표 시각(MonotonicNanoseconds)이다. 0이면 아직 없다.
     uint64 deadline_ = 0;
 };
 
-// 창 모드의 창을 만든다. 실패는 Error를 남기고 그대로 돌려준다(호스트는 실패 코드로 끝난다).
-Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator) noexcept {
+// 창 모드의 창을 만든다. 스플래시가 떠 있으면 숨긴 채 만든다(첫 프레임 뒤 보인다 — HostLoopBridge).
+// 실패는 Error를 남기고 그대로 돌려준다(호스트는 실패 코드로 끝난다).
+Result<UniquePtr<platform::Window>> CreateSandboxWindow(Allocator& allocator,
+                                                        bool visible) noexcept {
     platform::WindowDesc desc;
     desc.title = "Rocks Sandbox";
     desc.width = WindowWidth;
     desc.height = WindowHeight;
+    desc.visible = visible;
     platform::WindowCreateReport report;
     auto window = platform::Window::Create(allocator, desc, &report);
     if (!window) {
@@ -258,17 +449,140 @@ void LogApkProbe() noexcept {
               size, StringView(text, length));
 }
 
+// 쿠킹 결과의 매니페스트가 있는가다(ShaderSystem 16.1절 SSD48, RenderBase 18.5절 7항). 쿠킹 루트는
+// EngineAssets와 같은 규칙이다: asset.cooked_root(설정·`--set=` — 시험 콘텐츠 쿠킹 등)가 있으면
+// 그것, 없으면 엔진 전용 기본값(`asset-cook --engine --profile=<실행 프로파일>`)이다.
+bool HasEngineCook(Allocator& allocator, StringView engineDirectory,
+                   const config::ConfigContext& settings) noexcept {
+    char executable[4096];
+    usize executableBytes = 0;
+    if (engineDirectory.IsEmpty() ||
+        !platform::GetExecutablePath(executable, sizeof(executable), executableBytes)) {
+        return false;
+    }
+
+    StringView configured;
+    if (auto setting = settings.FindConsoleSetting("asset.cooked_root")) {
+        configured = settings.ConsoleValue(setting.Value()).string.View();
+    }
+
+    String root(allocator);
+    if (!ResolveCookedRoot(configured, engineDirectory, ResolveRuntimeProfile(StringView()),
+                           ExecutableDirectoryOf(StringView(executable, executableBytes)), root) ||
+        !root.TryAppend("/") || !root.TryAppend(CookedManifestFileName)) {
+        return false;
+    }
+
+    bool exists = false;
+    return platform::PhysicalFileSystem().FileExists(root.CStr(), root.View().ByteCount(),
+                                                     exists) &&
+           exists;
+}
+
+// 엔진 셰이더 호스트에 붙인 쿠킹 라이브러리 원천이다(SSD48). 파괴하면 떼고 놓는다 — 렌더 장치·
+// lane(ScreenHost)보다 먼저 선언해 그 뒤에 파괴한다.
+class CookedShaderAttachment {
+public:
+    explicit CookedShaderAttachment(render::EngineShaderHost& host) noexcept : host_(host) {
+    }
+
+    ~CookedShaderAttachment() noexcept {
+        if (source_) {
+            host_.DetachCookedLibraries(*source_);
+        }
+    }
+
+    CookedShaderAttachment(const CookedShaderAttachment&) = delete;
+    CookedShaderAttachment& operator=(const CookedShaderAttachment&) = delete;
+
+    // 엔진 에셋 Subsystem의 매니페스트(backend·셰이더 라이브러리 행 사본)로 원천을 만들어 붙인다.
+    void Attach(Allocator& allocator, const EngineAssetsSubsystem& assets) noexcept {
+        auto created = render::CookedManifestShaderLibraries::TryCreate(
+            allocator, platform::PhysicalFileSystem(), assets.Manifest(), assets.CookedRoot());
+        if (!created || !host_.AttachCookedLibraries(*created.Value())) {
+            Log::Warning(LogSandboxHost,
+                         "The cooked engine shader libraries could not be attached; the shader "
+                         "provider is used");
+            return;
+        }
+
+        source_ = Move(created.Value());
+        Log::Info(LogSandboxHost, "Engine shaders come from the cooked engine libraries at {Root}",
+                  assets.CookedRoot());
+    }
+
+    const render::CookedShaderLibrarySource* Source() const noexcept {
+        return source_.Get();
+    }
+
+private:
+    render::EngineShaderHost& host_;
+    UniquePtr<render::CookedManifestShaderLibraries> source_;
+};
+
+// 출력 backend 등록부와 디코더 등록부를 엔진 수명 동안 호스트 서비스에 올린다
+// (Docs/Design/AudioSystem 3.35.11·3.37.1절). AudioMiniaudio·AudioOpus 모듈 Startup이 엔진 묶음
+// 시작(엔진 Initialize) 때 여기에 factory를 넣으므로 그보다 먼저 올려야 한다(늦으면 조용히 빠진다).
+// RunEngine의 중간 반환에서도 떼도록 소멸자가 Unregister한다(엔진보다 먼저 선언해 엔진 뒤에
+// 소멸한다).
+class AudioHostRegistries {
+public:
+    explicit AudioHostRegistries(HostServices& services) noexcept : services_(services) {
+        backendsRegistered_ = services_.Register(backends_).IsOk();
+        decodersRegistered_ = services_.Register(decoders_).IsOk();
+    }
+
+    ~AudioHostRegistries() noexcept {
+        if (decodersRegistered_) {
+            (void)services_.Unregister(decoders_);
+        }
+
+        if (backendsRegistered_) {
+            (void)services_.Unregister(backends_);
+        }
+    }
+
+    AudioHostRegistries(const AudioHostRegistries&) = delete;
+    AudioHostRegistries& operator=(const AudioHostRegistries&) = delete;
+
+private:
+    HostServices& services_;
+    audio::AudioOutputBackendRegistry backends_;
+    audio::AudioDecoderRegistry decoders_;
+    bool backendsRegistered_ = false;
+    bool decodersRegistered_ = false;
+};
+
 // 엔진을 GameInstance(기본 맵 "Main" — PlayerStart, 첫 LocalPlayer의 SandboxPawn)로 돌린다
 // (Docs/Design/EngineRuntime 21.5절). 헤드리스는 고정 delta로 options.frames만큼, 창 모드는 실제
 // 시간으로 창이 닫히거나 frames(0이면 상한 없음)까지 돈다. 프레임 입력 상태를 첫 LocalPlayer의 입력
 // 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
 int RunEngine(Allocator& allocator, const EngineHostOptions& options,
-              config::ConfigContext& settings, ModuleLoader& modules) noexcept {
+              config::ConfigContext& settings, ModuleLoader& modules, StringView engineDirectory,
+              splash::SplashScreen* splash) noexcept {
     LogApkProbe();
+    // 엔진 전용 실행의 쿠킹 루트(SSD48 — EngineAssets 10.3.1절 A4f4 5번)다. 엔진 쿠킹 매니페스트가
+    // 있을 때만 EngineAssets Subsystem을 넣는다(없으면 그 초기화가 NotFound로 엔진 시작을 막는다 —
+    // 개발 트리는 쿠킹 없이 공급자로 돈다).
+    EngineAssetsSubsystem::SetEngineOnlyDirectory(engineDirectory);
+    const bool engineCook = HasEngineCook(allocator, engineDirectory, settings);
+    // 오디오는 늘 넣고(장치가 없으면 Null — 3.35.9절), EngineAssets는 엔진 쿠킹이 있을 때만 넣는다.
+    const EngineSubsystemType withAssets[] = {EngineAssetsSubsystemType(),
+                                              AudioEngineSubsystemType()};
+    const EngineSubsystemType audioOnly[] = {AudioEngineSubsystemType()};
+    AudioHostRegistries audioRegistries(modules.Services());
+    CookedShaderAttachment cooked(shaders::Host());
     UniquePtr<platform::Window> window;
     UniquePtr<platform::GamepadBackend> gamepads;
+    // 창 렌더 경로(Docs/Design/RenderBase 18.5절 1항)다. 엔진보다 먼저 선언해 엔진 Shutdown 뒤에
+    // 파괴하고(종료 hook이 쓴다), 창보다 뒤에 선언해 창보다 먼저 파괴한다(스왑체인 → 창).
+    UniquePtr<graphics::Device> device;
+    UniquePtr<screen::ScreenHost> screenHost;
+    // 쿠킹 텍스처 목록이다(18.5절 7항). 준비 callback이 가리키므로 엔진(AssetManager Shutdown)보다
+    // 먼저 선언해 뒤에 파괴한다.
+    UniquePtr<CookedTextureLibrary> textures;
     if (options.window) {
-        auto created = CreateSandboxWindow(allocator);
+        auto created = CreateSandboxWindow(allocator, splash == nullptr);
         if (!created) {
             return 1;
         }
@@ -284,14 +598,16 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
         return 1;
     }
 
+    SandboxGame game;
+    GameInstanceClient client(allocator, game.config);
     HostLoopBridge::Options hookOptions;
     hookOptions.requestTerminationAtFrame = options.requestTerminationAtFrame;
     hookOptions.injectKeyAtFrame = options.injectKeyAtFrame;
     hookOptions.window = window.Get();
     hookOptions.gamepads = gamepads.Get();
+    hookOptions.client = &client;
+    hookOptions.splash = window ? splash : nullptr;
     HostLoopBridge bridge(queue, hookOptions);
-    SandboxGame game;
-    GameInstanceClient client(allocator, game.config);
     EngineConfig config;
     config.hooks = &bridge;
     config.client = &client;
@@ -300,9 +616,16 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = options.window ? 0.0 : HeadlessFrameSeconds;
     config.registerTypes = &RegisterSandboxTypes;
+    config.subsystems = engineCook ? Span<const EngineSubsystemType>(withAssets)
+                                   : Span<const EngineSubsystemType>(audioOnly);
+
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
         return 1;
+    }
+
+    if (const EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>()) {
+        cooked.Attach(allocator, *assets);
     }
 
     // 엔진 묶음·PostEngineInit 모듈이 셰이더 타입을 등록했다. 렌더 lane 시작 전 자리에서 등록부를
@@ -310,6 +633,50 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     if (!shaders::Host().Freeze()) {
         (void)engine.Shutdown();
         return 1;
+    }
+
+    // 창 모드면 장치와 렌더 lane을 시작한다. 엔진 셰이더를 열 원천이 없거나(Release·Android)
+    // 장치·lane을 만들지 못하면 렌더 없이 계속한다(빈 프레임 경로, 18.5절 1항).
+    if (window && options.render) {
+        // 쿠킹 원천이 있으면 그 backend 순서로 장치를 고르고(auto), 셰이더 없는 쿠킹이면 장치를
+        // 만들지 않는다(SSD48 — UE 전용 서버의 NullDrv 자리).
+        const render::CookedShaderLibrarySource* source = cooked.Source();
+        const bool shaderless = source != nullptr && source->Backends().IsEmpty();
+        auto create = [&]() noexcept {
+            return source != nullptr && options.graphics == screen::ScreenBackend::Auto
+                       ? screen::CreateScreenDeviceInOrder(allocator, source->Backends(),
+                                                           options.graphicsValidation)
+                       : screen::CreateScreenDevice(allocator, options.graphics,
+                                                    options.graphicsValidation);
+        };
+        if (shaderless) {
+            Log::Warning(LogSandboxHost, "Screen rendering is not available (Unsupported): this "
+                                         "cook has no shader formats");
+        } else if (!screen::CanOpenEngineShaders(shaders::Host())) {
+            Log::Info(LogSandboxHost, "Screen rendering is not available: no shader provider or "
+                                      "cooked shader libraries");
+        } else if (auto created = create()) {
+            device = Move(created.Value());
+            auto host = UniquePtr<screen::ScreenHost>::TryMake(allocator, allocator, *device,
+                                                               shaders::Host());
+            if (host &&
+                host.Value()->Start(*window, render::RenderLaneMode::Thread, bridge.LanePump())) {
+                screenHost = Move(host.Value());
+                bridge.AttachScreen(screenHost.Get());
+            }
+
+            // 쿠킹 텍스처를 요청한다(패키지 공개 뒤 프레임 끝에 올린다 — 6.5절 "업로드").
+            if (EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>();
+                assets != nullptr && screenHost) {
+                auto library = UniquePtr<CookedTextureLibrary>::TryMake(
+                    allocator, allocator, assets->Manager(), assets->Manifest(), engine.Types(),
+                    *screenHost);
+                if (library && library.Value()->RequestAll()) {
+                    textures = Move(library.Value());
+                    bridge.AttachTextures(textures.Get());
+                }
+            }
+        }
     }
 
     // 첫 LocalPlayer(DedicatedServer면 없다)의 입력 원천이다. bridge는 엔진 Shutdown 뒤까지 산다.
@@ -588,6 +955,58 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
            compute.number == 1.0;
 }
 
+// 설정 struct를 RegisterSettings로 올리는 엔진 모듈(Collision·Physics)의 리플렉션 타입을 등록한다.
+Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noexcept {
+    if (auto collision = RegisterCollisionTypes(registration); !collision) {
+        return collision;
+    }
+
+    return RegisterPhysicsTypes(registration);
+}
+
+// 창 모드의 시작 화면을 띄운다(Docs/Design/SplashScreen 4·10절). 띄우지 않기로 했으면
+// Unsupported(사유는 Debug 로그), 띄우지 못했으면 Warning을 남기고 그 오류를 돌려준다. 설정은 부팅
+// 값(ui.splash.*)이고, 제목이 비면 "Rocks Sandbox"다.
+Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
+                                               const EngineHostOptions& options,
+                                               StringView engineDirectory) noexcept {
+    const SplashSettingValues values = ReadSplashSettings();
+    splash::SplashVisibilityInput input = splash::MakeSplashVisibilityInput();
+    input.interactiveHost = true;
+    input.opensMainWindow = options.window;
+    input.noSplashOption = options.noSplash;
+    input.settingsEnabled = values.enabled;
+    input.desktop = platform::QueryDesktopSessionState();
+    const splash::SplashSkipReason reason = splash::DecideSplashVisibility(input);
+    if (reason != splash::SplashSkipReason::None) {
+        Log::Debug(LogSandboxHost, "The splash screen is not shown ({Reason})",
+                   splash::SplashSkipReasonName(reason));
+        return Result<splash::SplashScreen>::Failure(ErrorCode::Unsupported);
+    }
+
+    const splash::SplashTextValue texts[] = {
+        {splash::SplashTextSlot::Title,
+         values.gameTitle.IsEmpty() ? StringView("Rocks Sandbox") : values.gameTitle},
+        {splash::SplashTextSlot::Copyright, values.gameCopyright},
+    };
+    splash::SplashShowDesc desc;
+    desc.kind = splash::SplashKind::Game;
+    desc.configuredImage = values.gameImage;
+    desc.engineDirectory = engineDirectory;
+    desc.texts = texts;
+    desc.showTitle = values.gameShowTitle;
+    desc.showProgressText = values.gameShowProgressText;
+    desc.showProgressBar = values.gameShowProgressBar;
+    desc.minimumDisplaySeconds = values.minimumSeconds;
+    auto shown = splash::SplashScreen::Show(allocator, desc);
+    if (!shown) {
+        Log::Warning(LogSandboxHost, "The splash screen could not be shown: {Error}",
+                     ErrorCodeName(shown.Error()));
+    }
+
+    return shown;
+}
+
 } // namespace
 
 // 엔진 호스트 본문이다(Docs/Design/ModuleLoader 3.11절). Launch가 소유한 프로세스 모듈
@@ -602,6 +1021,12 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
     char engineDir[4096] = {};
     HostSettingsOptions boot;
     boot.modules = &modules;
+    // 설정 struct를 RegisterSettings로 올리는 엔진 모듈의 리플렉션 타입을 설정 문맥의 타입 등록에
+    // 넣는다(HostSettings는 Config·TraceControl 타입만 스스로 넣는다). Collision 모듈의
+    // CollisionSettings(Engine branch Collision 섹션, Docs/Design/CollisionData.ko.md 3절)와
+    // Physics 모듈의 PhysicsSettings(Physics 섹션, Docs/Design/PhysicsModule 6.8절)다 — 없으면 모듈
+    // 설정 등록이 NotFound로 실패한다.
+    boot.registerModuleTypes = &RegisterSandboxSettingsTypes;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
         boot.engineDir = StringView(engineDir, found.Value());
     } else {
@@ -661,6 +1086,11 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
         // 개발 빌드는 설정 파일을 감시해 프레임 sync 지점에서 다시 읽는다(출시 규칙이면 Unsupported
         // — 기록하지 않는다).
         (void)settings.StartHotReload();
+        // 시작 화면(Docs/Design/SplashScreen 10.3절): 설정·로그 뒤, trace·호스트 단계 모듈·엔진
+        // 전에 띄우고 주 창 첫 프레임 뒤 숨긴다(HostLoopBridge). 띄우지 못해도 시작은 계속한다.
+        // 엔진이 일찍 끝나면 이 범위가 끝날 때 숨긴다.
+        Result<splash::SplashScreen> shownSplash =
+            ShowSandboxSplash(allocator, options, boot.engineDir);
         // 7) trace 세션(trace.* 설정 — 5)에서 고정됐다)·콘솔 명령·--trace. 세션을 열지 못해도
         // 엔진은 돈다.
         TraceSession trace;
@@ -705,11 +1135,12 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
             // 엔진 셰이더 호스트(Docs/Design/RenderBase 9.12절): Sandbox 타입·원문 디렉터리를 넣고
             // 등록부와 함께 서비스로 올린다. 모듈이 Startup에서 엔진 셰이더 타입·공급자를 넣는다.
             // 실패하면 Error를 남기고 모듈은 등록부 없이 시작한다.
-            (void)shaders::AttachHost(modules);
+            (void)shaders::AttachHost(modules, shaders::SandboxShaderScope::Engine);
 
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
-                exitCode = RunEngine(allocator, options, settings.Context(), modules);
+                exitCode = RunEngine(allocator, options, settings.Context(), modules,
+                                     boot.engineDir, shownSplash ? &shownSplash.Value() : nullptr);
             } else {
                 Log::Error(LogSandboxHost,
                            "Host module {Module} failed to start ({Code}) at {Stage}: {Message}",

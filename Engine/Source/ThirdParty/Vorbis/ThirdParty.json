@@ -98,7 +98,7 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Ogg Vorbis source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.28). Developer only: AudioTools links it, runtime targets do not.",
+    "Ogg Vorbis source decoder for the audio importer (Docs/Design/AudioSystem sections 3.10.1 and 3.28). Developer only: AudioTools links it, runtime targets do not.",
     "Vorbis.Build.cs adds the Ogg include directories, because libvorbis includes ogg/ogg.h; the consumer links both Ogg and Vorbis.",
     "The block, psy, envelope and bitrate sources are part of the analysis side but block.c references them from the shared dsp setup, so they are compiled; vorbisenc.c (encoder setup) is not imported.",
     "Decoding is float math without SIMD or runtime CPU dispatch, so decoded samples are fixed per architecture and compiler flags (section 3.10.1).",

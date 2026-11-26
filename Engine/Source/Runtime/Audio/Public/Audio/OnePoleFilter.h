@@ -2,7 +2,7 @@
 
 #include <Audio/AudioBuffer.h>
 
-// 1극 저역·고역 필터다(Docs/Design/AudioSystem.ko.md 3.20.4절). source의 차폐·공기 흡수·사용자
+// 1극 저역·고역 필터다(Docs/Design/AudioSystem 3.20.4절). source의 차폐·공기 흡수·사용자
 // LPF/HPF가 쓴다. 식은 UE FInterpolatedLPF·FInterpolatedHPF(SignalProcessing/Private/
 // InterpolatedOnePole.cpp)와 같다.
 //

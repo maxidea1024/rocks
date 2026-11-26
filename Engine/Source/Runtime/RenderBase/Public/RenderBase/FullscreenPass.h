@@ -14,10 +14,11 @@
 // 사용 예(텍스처를 대상 전체에 복사):
 //   auto copy = set.FindEntry(render::CopyTexturePixelType.hash);
 //   auto request = render::FullscreenPipelineRequest(set, copy.Value(), PixelFormat::RGBA8Unorm);
-//   request.Value().state.bindings.texture = render::CopyTextureSourceName;
 //   auto pipeline = cache.FindOrCreate(request.Value());
 //   commands.SetPipeline(pipeline.Value());
-//   commands.SetTexture(source);
+//   auto slot = graphics::FindTextureSlot(*set.BindingLayout(copy.Value()),
+//                                         render::CopyTextureSourceName);
+//   commands.SetTexture(graphics::ShaderStage::Pixel, slot.Value(), source);
 //   render::DrawFullscreenTriangle(commands);
 namespace rocks::render {
 

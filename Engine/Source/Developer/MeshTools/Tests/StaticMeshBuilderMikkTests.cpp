@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 // MikkTSpace 패치(결정적 cos·acos, allocator 훅 — 결정 MA-D5)와 패치 전 원본의 대조다
-// (Docs/Design/MeshAnimationAssets.ko.md 12절 "MikkTSpace 참조 구현과의 대조"). 원본 동작은
+// (Docs/Design/MeshAnimationAssets 12절 "MikkTSpace 참조 구현과의 대조"). 원본 동작은
 // ThirdParty MikkTSpaceReference.c(같은 원본을 CRT cos·acos·malloc으로 다시 빌드한 것)가 준다.
 // 법선을 원본 속성으로 주고 법선 재계산을 끈 빌드는 MikkTSpace에 같은 위치·법선·UV0을 넘기므로,
 // 코너마다 tangent 차이는 acos 결과의 ulp 차이와 출력 정규화뿐이다. 상한

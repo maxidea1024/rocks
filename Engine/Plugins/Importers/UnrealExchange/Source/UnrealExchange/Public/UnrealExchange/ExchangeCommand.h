@@ -4,7 +4,7 @@
 #include <Core/Commandlet/Commandlet.h>
 #include <UnrealExchange/ExchangeImportRun.h>
 
-// asset-import-unreal 명령이다(Docs/Design/UnrealExchange.ko.md 10.2절, 10.5절 9·10번). Commandlet
+// asset-import-unreal 명령이다(Docs/Design/UnrealExchange 10.2절, 10.5절 9·10번). Commandlet
 // 호스트가 등록하고 EngineTests가 시험 임포터로 프로세스 안에서 부른다.
 //
 //   asset-import-unreal <묶음 디렉터리> [--root=/Game/Unreal] [--only=<objectPath>]...

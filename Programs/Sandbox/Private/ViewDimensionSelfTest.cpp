@@ -100,7 +100,6 @@ struct Canvas {
     bool Draw(const shaders::ShaderTypeDesc& shader, const char* name,
               TextureHandle texture) noexcept {
         PipelineDesc desc;
-        desc.bindings.texture = name;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         auto pipeline =
             shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, shader, desc);
@@ -112,7 +111,8 @@ struct Canvas {
         auto frame = device.BeginOffscreen(target, {});
         if (frame) {
             frame.Value()->SetPipeline(pipeline.Value());
-            frame.Value()->SetTexture(texture);
+            frame.Value()->SetTexture(ShaderStage::Pixel, shaders::TextureSlot(shader, name),
+                                      texture);
             frame.Value()->Draw(3);
         }
 

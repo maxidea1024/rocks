@@ -90,6 +90,26 @@ TEST(AssetImportCommand_Imports) {
     CHECK(scene.Exists("Content/Rock.rasset") && scene.Exists("Content/Rock_extra.rasset") &&
           scene.Exists("Intermediate/AssetIndex.cache") && state.test.calls == 1);
 
+    // 다른 에셋을 고친 임포트는 고친 에셋마다 edited 줄을 낸다(7.1절 20 A2f4).
+    const StringView rockLine = run.captured.out.View();
+    const usize idStart = StringView("asset-import: /Game/Rock ").ByteCount();
+    usize idEnd = idStart;
+    while (idEnd < rockLine.ByteCount() && rockLine.Data()[idEnd] != '\n') {
+        ++idEnd;
+    }
+
+    String editText(env.allocator);
+    REQUIRE(editText.TryAppend("value=1\nedit=") &&
+            editText.TryAppend(rockLine.SliceBytes(idStart, idEnd - idStart)) &&
+            scene.WriteFile("Edit.trock", editText.View()));
+    char editSource[512] = {};
+    FixedStringBuilder editPath{Span<char>(editSource)};
+    REQUIRE(editPath.TryAppendFormat("{}/Edit.trock", scene.root.Root()));
+    Run edit(env.allocator, &state);
+    const StringView editArgs[] = {"/Game/Editor", editPath.View(), projectOption.View()};
+    CHECK(edit.Call(editArgs) == 0);
+    CHECK(StringView(edit.captured.out.View()).Contains("asset-import: edited /Game/Rock "));
+
     // 역할 원본(이름으로 고르는 임포터 — 상대 원본 경로는 작업 디렉터리 기준).
     char px[512] = {};
     char nx[512] = {};
@@ -344,6 +364,20 @@ TEST(AssetReimportCommand_Reimports) {
                   .Contains("asset-reimport: MissingSource: /Game/Rock"));
     }
 
+    // 원본 전체 교체(`--replace-sources` — 7.1절 19 A2f3b): 역할 있는 원본으로 기록 원본 전체를
+    // 바꾼다 (시험 임포터의 유일한 고정 역할 source).
+    {
+        char replacement[512] = {};
+        FixedStringBuilder replacementOption{Span<char>(replacement)};
+        REQUIRE(
+            replacementOption.TryAppendFormat("--source.source={}/Other.trock", scene.root.Root()));
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--replace-sources", replacementOption.View(),
+                                   projectOption.View()};
+        CHECK(run.Reimport(args) == 0);
+        CHECK(run.captured.out.View().StartsWith("asset-reimport: /Game/Rock "));
+    }
+
     // 사용법(종료 2)·도움말.
     const StringView noPath[] = {"--wait=1"};
     const StringView positionalSource[] = {"/Game/A", "a.trock"};
@@ -352,8 +386,14 @@ TEST(AssetReimportCommand_Reimports) {
     const StringView mixed[] = {"/Game/A", "--source=a", "--source.px=b"};
     const StringView mixedReverse[] = {"/Game/A", "--source.px=b", "--source=a"};
     const StringView emptySource[] = {"/Game/A", "--source="};
-    const Span<const StringView> cases[] = {noPath, positionalSource, importer,   sourceTwice,
-                                            mixed,  mixedReverse,     emptySource};
+    // --replace-sources는 역할 있는 원본과만, 한 번만 쓴다.
+    const StringView replaceAlone[] = {"/Game/A", "--replace-sources"};
+    const StringView replaceSingle[] = {"/Game/A", "--replace-sources", "--source=a"};
+    const StringView replaceTwice[] = {"/Game/A", "--replace-sources", "--replace-sources",
+                                       "--source.px=b"};
+    const Span<const StringView> cases[] = {
+        noPath,       positionalSource, importer,     sourceTwice,   mixed,
+        mixedReverse, emptySource,      replaceAlone, replaceSingle, replaceTwice};
     for (Span<const StringView> args : cases) {
         Run run(env.allocator, &state);
         CHECK(run.Reimport(args) == 2);

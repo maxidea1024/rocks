@@ -45,14 +45,30 @@ Result<void> D3D12Device::InitializeConstants() noexcept {
 
     onlineIncrement_ =
         device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_DESCRIPTOR_HEAP_DESC samplers = {};
+    samplers.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+    samplers.NumDescriptors = OnlineSamplersPerQueue * 2;
+    samplers.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    const HRESULT samplerHeap =
+        device_->CreateDescriptorHeap(&samplers, IID_PPV_ARGS(onlineSamplers_.Out()));
+    if (FAILED(samplerHeap)) {
+        return Fail("CreateDescriptorHeap (shader-visible sampler ring)", samplerHeap);
+    }
+
+    onlineSamplerIncrement_ =
+        device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     TransientRings* rings[] = {&graphicsRings_, &computeRings_};
     for (uint32 index = 0; index < 2; ++index) {
         TransientRings& ring = *rings[index];
         ring.descriptorBase = index * OnlineDescriptorsPerQueue;
+        ring.samplerBase = index * OnlineSamplersPerQueue;
         auto descriptors = ring.descriptors.Reset(OnlineDescriptorsPerQueue);
+        auto samplerRing = ring.samplers.Reset(OnlineSamplersPerQueue);
         auto constants = ring.constants.Reset(DefaultConstantRingBytes);
-        if (!descriptors || !constants) {
-            return Result<void>::Failure(!descriptors ? descriptors.Error() : constants.Error());
+        if (!descriptors || !samplerRing || !constants) {
+            return Result<void>::Failure(!descriptors   ? descriptors.Error()
+                                         : !samplerRing ? samplerRing.Error()
+                                                        : constants.Error());
         }
 
         if (!CreateMappedUpload(device_.Get(), DefaultConstantRingBytes, ring.buffer, ring.data)) {
@@ -283,10 +299,34 @@ bool D3D12Device::AllocateOnline(uint32 count, D3D12_CPU_DESCRIPTOR_HANDLE& cpu,
     return true;
 }
 
+bool D3D12Device::AllocateOnlineSamplers(uint32 count, D3D12_CPU_DESCRIPTOR_HANDLE& cpu,
+                                         D3D12_GPU_DESCRIPTOR_HANDLE& gpu) noexcept {
+    TransientRings& rings = ActiveRings();
+    auto offset = AllocateTransient(rings.samplers, count, 1);
+    if (!offset) {
+        if (!onlineExhaustedLogged_) {
+            onlineExhaustedLogged_ = true;
+            Log::Warning(LogGraphicsD3D12,
+                         "D3D12 shader-visible sampler ring of a recording is exhausted; further "
+                         "draws in the recording are ignored");
+        }
+
+        return false;
+    }
+
+    const uint64 index = rings.samplerBase + offset.Value();
+    cpu = onlineSamplers_->GetCPUDescriptorHandleForHeapStart();
+    cpu.ptr += static_cast<SIZE_T>(index) * onlineSamplerIncrement_;
+    gpu = onlineSamplers_->GetGPUDescriptorHandleForHeapStart();
+    gpu.ptr += index * onlineSamplerIncrement_;
+    return true;
+}
+
 void D3D12Device::CloseTransientRings(bool compute, uint64 fence) noexcept {
     TransientRings& rings = compute ? computeRings_ : graphicsRings_;
     rings.constants.CloseBatch(fence);
     rings.descriptors.CloseBatch(fence);
+    rings.samplers.CloseBatch(fence);
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS D3D12Device::BoundConstantAddress(uint32 stage, uint32 slot,
@@ -330,17 +370,25 @@ bool D3D12Device::CopyTable(uint32 cacheStage, uint32 cacheKind, const uint32* s
         return true;
     }
 
+    const bool sampler = cacheKind == SamplerTableKind;
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = {};
-    if (!AllocateOnline(count, cpu, gpu)) {
+    if (!(sampler ? AllocateOnlineSamplers(count, cpu, gpu) : AllocateOnline(count, cpu, gpu))) {
         cache.valid = false;
         return false;
     }
 
+    const uint32 increment = sampler ? onlineSamplerIncrement_ : onlineIncrement_;
     for (uint32 index = 0; index < count; ++index) {
         D3D12_CPU_DESCRIPTOR_HANDLE destination = cpu;
-        destination.ptr += static_cast<SIZE_T>(index) * onlineIncrement_;
-        device_->CopyDescriptorsSimple(1, destination, srvs_.Cpu(sources[index]),
-                                       D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        destination.ptr += static_cast<SIZE_T>(index) * increment;
+        if (sampler) {
+            device_->CopyDescriptorsSimple(1, destination, samplers_.Cpu(sources[index]),
+                                           D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+        } else {
+            device_->CopyDescriptorsSimple(1, destination, srvs_.Cpu(sources[index]),
+                                           D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        }
+
         cache.sources[index] = sources[index];
     }
 

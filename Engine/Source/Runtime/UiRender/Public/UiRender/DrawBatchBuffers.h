@@ -23,11 +23,19 @@ private:
     friend class DrawBatchRenderer;
     void Release() noexcept;
     Result<void> PrepareBlur(uint32 width, uint32 height) const noexcept;
+    // UI pixel 셰이더의 텍스처·배경 slot을 셰이더 바인딩 layout에서 찾아 둔다(RenderBase 9.13절).
+    // 이미지·마스크·보관 셰이더는 텍스처 하나(UiTexture)만 선언하므로 slot이 같아야 하고, 다르면
+    // InvalidArgument다.
+    Result<void> PrepareSlots() const noexcept;
+    uint32 TextureSlot() const noexcept;
+    uint32 BackdropSlot() const noexcept;
     Result<void> PrepareRoundedBox() const noexcept;
     mutable graphics::TextureHandle backdrop_{};
     mutable graphics::PipelineHandle blurPipeline_{};
     mutable graphics::PipelineHandle roundedPipeline_{};
     mutable uint32 backdropWidth_ = 0, backdropHeight_ = 0;
+    mutable uint32 textureSlot_ = graphics::MaxResourceSlots;
+    mutable uint32 backdropSlot_ = graphics::MaxResourceSlots;
     graphics::PixelFormat targetFormat_;
     graphics::Device& device_;
     render::ShaderSet& shaders_;

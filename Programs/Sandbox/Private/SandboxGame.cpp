@@ -1,6 +1,12 @@
 #include "SandboxGame.h"
+#include "SandboxSounds.h"
 
 #include <Core/Diagnostics/Log.h>
+#include <Core/Math/MathUtility.h>
+#include <Engine/Engine.h>
+#include <EngineAudio/AudioComponent.generated.h>
+#include <EngineAudio/AudioEngineSubsystem.h>
+#include <EngineAudio/AudioWorldSubsystem.h>
 #include <Gameplay/Controller.generated.h>
 #include <Gameplay/GameDirector.generated.h>
 #include <Gameplay/GameDirector.h>
@@ -8,6 +14,7 @@
 #include <Gameplay/Pawn.h>
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
+#include <Physics/PhysicsWorldSubsystem.h>
 #include <World/Actor.generated.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
@@ -31,12 +38,70 @@ constexpr input::GamepadButton WatchedGamepadButtons[] = {input::GamepadButton::
 // 로그로 확인하는 게임패드 번호다(첫 패드).
 constexpr uint32 WatchedGamepad = 0;
 
+// 카메라 조작 값이다(Docs/Design/RenderBase 18.5절 4항, UE ADefaultPawn·UFloatingPawnMovement·
+// APlayerCameraManager 기본값).
+// 최대 속도(cm/s, UE FloatingPawnMovement MaxSpeed)다.
+constexpr double PawnMaxSpeed = 1200.0;
+// 회전율(도/s, UE DefaultPawn BaseTurnRate·BaseLookUpRate)이다.
+constexpr double PawnTurnRate = 45.0;
+// 마우스 1 pixel당 회전(도, UE 기본 축 감도 0.07 × 컨트롤러 입력 배율 2.5)이다.
+constexpr double PawnMouseDegreesPerPixel = 0.175;
+// pitch 한계(도, UE ViewPitchMin·ViewPitchMax)다.
+constexpr double PawnPitchLimit = 89.9;
+
+// 오디오 확인(Docs/Design/AudioSystem 3.35.11절): 키 1 = UI음, 2 = 플레이어 주위를 도는 loop
+// 켜기·끄기, 3 = 그 loop를 플레이어 오른쪽에 고정·해제. 원 반지름(cm)과 한 바퀴 시간(초)이다.
+constexpr double AudioOrbitRadius = 600.0;
+constexpr double AudioOrbitPeriodSeconds = 4.0;
+
+// 키 둘의 축 값(+1·−1)이다.
+double KeyAxis(const input::InputState& state, input::Key positive, input::Key negative) noexcept {
+    return (state.IsDown(positive) ? 1.0 : 0.0) - (state.IsDown(negative) ? 1.0 : 0.0);
+}
+
+// UE DefaultPawn 바인딩으로 이번 프레임 이동 입력(앞·오른쪽·위)과 회전(yaw·pitch, 도)을 모은다.
+struct PawnInput {
+    double forward = 0.0;
+    double right = 0.0;
+    double up = 0.0;
+    double yaw = 0.0;
+    double pitch = 0.0;
+};
+
+PawnInput ReadPawnInput(const input::InputState& state, double deltaSeconds) noexcept {
+    PawnInput out;
+    out.forward = KeyAxis(state, input::Key::W, input::Key::S) +
+                  KeyAxis(state, input::Key::Up, input::Key::Down) +
+                  state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::LeftY);
+    out.right = KeyAxis(state, input::Key::D, input::Key::A) +
+                state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::LeftX);
+    out.up = KeyAxis(state, input::Key::E, input::Key::Q) +
+             KeyAxis(state, input::Key::Space, input::Key::C) -
+             (state.IsDown(input::Key::LeftControl) ? 1.0 : 0.0) +
+             (state.IsDown(WatchedGamepad, input::GamepadButton::South) ? 1.0 : 0.0) +
+             (state.IsDown(WatchedGamepad, input::GamepadButton::LeftThumb) ? 1.0 : 0.0) -
+             (state.IsDown(WatchedGamepad, input::GamepadButton::RightThumb) ? 1.0 : 0.0);
+    const double turn = KeyAxis(state, input::Key::Right, input::Key::Left) +
+                        state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::RightX);
+    const double look = state.GamepadAxisValue(WatchedGamepad, input::GamepadAxis::RightY);
+    out.yaw = turn * PawnTurnRate * deltaSeconds;
+    out.pitch = look * PawnTurnRate * deltaSeconds;
+    // 창이 마우스를 가두지 않으므로 오른쪽 버튼을 누른 동안만 돌린다(UE 편집 viewport 방식). 화면
+    // y는 아래가 +라 위로 올리면 위를 본다.
+    if (state.IsDown(input::MouseButton::Right)) {
+        out.yaw += state.MouseDeltaX() * PawnMouseDegreesPerPixel;
+        out.pitch -= state.MouseDeltaY() * PawnMouseDegreesPerPixel;
+    }
+
+    return out;
+}
+
 // Controller의 입력 스냅숏에서 이번 프레임 새로 눌린 것을 로그로 남기는 Pawn이다.
 class SandboxPawn final : public Pawn {
     ROCKS_NATIVE_TYPE(SandboxPawn, Pawn, 0x6c1f8e3a5d2b4097ull, 0xa3d70e9b1c64f582ull)
 
 public:
-    explicit SandboxPawn(Allocator& allocator) noexcept : Pawn(allocator) {
+    explicit SandboxPawn(Allocator& allocator) noexcept : Pawn(allocator), allocator_(allocator) {
         autoPossessAi = AutoPossessAi::Disabled;
         PrimaryTick().tick = true;
     }
@@ -51,7 +116,7 @@ public:
         return SetRootComponent(root.Value());
     }
 
-    void OnTick(const TickContext&) noexcept override {
+    void OnTick(const TickContext& context) noexcept override {
         if (ControllerHandle().IsNull()) {
             return;
         }
@@ -77,6 +142,8 @@ public:
         }
 
         const input::InputState& state = snapshot.Value().input;
+        ApplyMovement(ReadPawnInput(state, context.deltaSeconds), context.deltaSeconds);
+        UpdateAudio(state, context.deltaSeconds);
         LogGestures(snapshot.Value().gestures);
         for (input::Key key : WatchedKeys) {
             if (state.WasPressed(key)) {
@@ -131,6 +198,143 @@ protected:
     }
 
 private:
+    // 리스너를 Pawn 시점(위치·control 회전)으로 두고, 키 1–3을 처리하며, 도는 loop를 옮긴다.
+    void UpdateAudio(const input::InputState& state, double deltaSeconds) noexcept {
+        AudioWorldSubsystem* audio = GetWorld().GetSubsystem<AudioWorldSubsystem>();
+        if (audio == nullptr || RootComponent().IsNull()) {
+            return;
+        }
+
+        Vec3d location;
+        (void)GetWorld().With<SceneComponent>(
+            RootComponent(),
+            [&location](SceneComponent& root) noexcept { location = root.WorldLocation(); });
+        const Rotator<double> view = GetControlRotation();
+        audio->SetListener(location, view.ToQuaternion());
+        if (!sounds_.click.IsValid()) {
+            auto made = MakeSandboxSounds(allocator_);
+            if (!made) {
+                return;
+            }
+
+            sounds_ = made.Value();
+        }
+
+        if (state.WasPressed(input::Key::Digit1)) {
+            if (auto* engineAudio = GetEngineSubsystem<AudioEngineSubsystem>(GetWorld())) {
+                (void)engineAudio->Play2D(sounds_.click);
+                Log::Info(LogSandboxGame, "Audio: UI click (2D)");
+            }
+        }
+
+        if (state.WasPressed(input::Key::Digit2)) {
+            ToggleOrbit(location);
+        }
+
+        if (state.WasPressed(input::Key::Digit3)) {
+            fixedRight_ = !fixedRight_;
+            Log::Info(LogSandboxGame, "Audio: loop {Mode}",
+                      fixedRight_ ? "fixed 600 cm to the right" : "orbiting");
+        }
+
+        if (orbitComponent_.IsNull()) {
+            return;
+        }
+
+        orbitSeconds_ += deltaSeconds;
+        Vec3d offset;
+        if (fixedRight_) {
+            // 시선의 수평 오른쪽(+Y가 오른쪽인 UE 좌표 — pitch는 뺀다).
+            offset = Rotator<double>(0.0, view.yaw, 0.0).RotateVector(Vec3d(0.0, 1.0, 0.0)) *
+                     AudioOrbitRadius;
+        } else {
+            const double angle = math::TwoPi<double> * orbitSeconds_ / AudioOrbitPeriodSeconds;
+            offset = Vec3d(math::Cos(angle), math::Sin(angle), 0.0) * AudioOrbitRadius;
+        }
+
+        (void)GetWorld().With<SceneComponent>(
+            orbitComponent_, [&](SceneComponent& emitter) noexcept {
+                return emitter.SetRelativeLocation(location + offset);
+            });
+    }
+
+    // 도는 loop Actor를 만들거나 없앤다(AudioComponent root — autoActivate로 시작, 파괴로 끝난다).
+    void ToggleOrbit(const Vec3d& location) noexcept {
+        World& world = GetWorld();
+        if (!orbitActor_.IsNull()) {
+            (void)world.DestroyActor(orbitActor_);
+            orbitActor_ = ObjectHandle{};
+            orbitComponent_ = ObjectHandle{};
+            Log::Info(LogSandboxGame, "Audio: loop off");
+            return;
+        }
+
+        auto actor = world.SpawnActorDeferred<Actor>();
+        if (!actor) {
+            return;
+        }
+
+        auto component = world.AddComponent<AudioComponent>(actor.Value());
+        if (!component) {
+            (void)world.DestroyActor(actor.Value());
+            return;
+        }
+
+        (void)world.With<Actor>(actor.Value(), [&](Actor& owner) noexcept {
+            return owner.SetRootComponent(component.Value());
+        });
+        (void)world.With<AudioComponent>(component.Value(), [&](AudioComponent& audio) noexcept {
+            audio.SetSound(sounds_.loop);
+            audio.SetMobility(ComponentMobility::Movable);
+            return audio.SetRelativeLocation(location + Vec3d(AudioOrbitRadius, 0.0, 0.0));
+        });
+        if (!world.FinishSpawning(actor.Value())) {
+            return;
+        }
+
+        orbitActor_ = actor.Value();
+        orbitComponent_ = component.Value();
+        orbitSeconds_ = 0.0;
+        Log::Info(LogSandboxGame, "Audio: loop on (orbit {Radius} cm, {Period} s)",
+                  AudioOrbitRadius, AudioOrbitPeriodSeconds);
+    }
+
+    // controlRotation을 돌리고(pitch 한계) 그 방향 기준으로 root를 옮긴다(UE DefaultPawn
+    // MoveForward· MoveRight는 control 회전 축, MoveUp은 월드 Z). 입력 벡터는 길이 1로 자른다(UE
+    // ConsumeInputVector·GetClampedToMaxSize). 가속·감속은 이동 컴포넌트 단계에서 넣는다.
+    void ApplyMovement(const PawnInput& input, double deltaSeconds) noexcept {
+        Rotator<double> rotation = GetControlRotation();
+        if (input.yaw != 0.0 || input.pitch != 0.0) {
+            rotation.yaw = Rotator<double>::NormalizeAxis(rotation.yaw + input.yaw);
+            rotation.pitch = Rotator<double>::NormalizeAxis(rotation.pitch + input.pitch);
+            rotation.pitch = rotation.pitch < -PawnPitchLimit  ? -PawnPitchLimit
+                             : rotation.pitch > PawnPitchLimit ? PawnPitchLimit
+                                                               : rotation.pitch;
+            (void)GetWorld().With<PlayerController>(
+                ControllerHandle(), [&rotation](PlayerController& controller) noexcept {
+                    controller.SetControlRotation(rotation);
+                });
+        }
+
+        Vec3d direction = rotation.RotateVector(Vec3d(1.0, 0.0, 0.0)) * input.forward +
+                          rotation.RotateVector(Vec3d(0.0, 1.0, 0.0)) * input.right +
+                          Vec3d(0.0, 0.0, 1.0) * input.up;
+        const double length = direction.Length();
+        if (length == 0.0 || RootComponent().IsNull()) {
+            return;
+        }
+
+        if (length > 1.0) {
+            direction = direction * (1.0 / length);
+        }
+
+        const Vec3d step = direction * (PawnMaxSpeed * deltaSeconds);
+        (void)GetWorld().With<SceneComponent>(
+            RootComponent(), [&step](SceneComponent& root) noexcept {
+                return root.SetRelativeLocation(root.WorldLocation() + step);
+            });
+    }
+
     // 제스처 시작·끝을 로그로 남긴다(Pinch·Rotate는 끝날 때 마지막 값, Flick은 방향 각).
     static void
     LogGestures(const input::TouchGestureValue (&gestures)[input::TouchGestureCount]) noexcept {
@@ -146,6 +350,13 @@ private:
             }
         }
     }
+
+    Allocator& allocator_;
+    SandboxSounds sounds_;
+    ObjectHandle orbitActor_;
+    ObjectHandle orbitComponent_;
+    double orbitSeconds_ = 0.0;
+    bool fixedRight_ = false;
 };
 
 // 기본 Pawn을 SandboxPawn으로 두는 GameDirector다.
@@ -167,6 +378,9 @@ Result<void> PopulateMain(World& world, void*) noexcept {
 } // namespace
 
 SandboxGame::SandboxGame() noexcept {
+    worldSubsystems[0] = rocks::PhysicsWorldSubsystem::Type();
+    worldSubsystems[1] = rocks::AudioWorldSubsystem::Type();
+    config.worldSubsystems = rocks::Span<const rocks::WorldSubsystemType>(worldSubsystems);
     config.defaultDirectorType = ObjectTypeIdOf<SandboxDirector>();
     config.defaultMap.name = "Main";
     config.defaultMap.populate = &PopulateMain;

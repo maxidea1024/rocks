@@ -29,6 +29,11 @@ RegistryOptions WorldRegistryOptions(const WorldDesc& desc) noexcept {
 
 } // namespace
 
+Result<void> TickSettings::Validate(const TickSettings& settings) noexcept {
+    return IsValidTickSettings(settings) ? Result<void>::Success()
+                                         : Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
 bool IsValidTickSettings(const TickSettings& settings) noexcept {
     if (!math::IsFinite(settings.intervalSeconds) || settings.intervalSeconds < 0.0) {
         return false;
@@ -137,6 +142,21 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
+}
+
+Result<void> World::SetPhysicsScene(PhysicsScene* scene) noexcept {
+    // 접점은 Initialized(Subsystem 초기화 중과 BeginPlay 전)와 TearingDown(정리 중)에만 바꾼다 —
+    // 게임 진행 중에 바뀌면 body가 다른 장면을 가리킨다(PhysicsModule 7.1.1절).
+    if (state_ != WorldState::Initialized && state_ != WorldState::TearingDown) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (scene != nullptr && physicsScene_ != nullptr && physicsScene_ != scene) {
+        return Result<void>::Failure(ErrorCode::AlreadyExists);
+    }
+
+    physicsScene_ = scene;
+    return Result<void>::Success();
 }
 
 Result<void> World::BuildWorldCollisionProfiles() noexcept {
@@ -271,6 +291,7 @@ Result<void> World::Initialize() noexcept {
 
         persistentLevel_ = {};
         ReleaseCVarScope();
+        physicsScene_ = nullptr;
         outerOpen_ = false;
         state_ = WorldState::Created;
         return initialized;
@@ -575,6 +596,8 @@ Result<void> World::Shutdown(EndPlayReason reason) noexcept {
             subsystems_.Deinitialize(*this);
         }
 
+        // 장면을 소유한 Subsystem이 정리됐으므로 남은 접점은 빌린 포인터일 뿐이다.
+        physicsScene_ = nullptr;
         outerOpen_ = false;
 
         // 모든 Actor가 정리됐으므로 영구 Level을 포함한 모든 Level 루트를 반환한다.

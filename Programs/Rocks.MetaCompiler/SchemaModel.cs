@@ -173,10 +173,10 @@ internal sealed class FieldModel
     public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8, DuplicateTransient 16, NonTryoutDuplicateTransient 32, SaveGame 64,
-    // TextExportTransient 128(리플렉션 B9h1).
+    // TextExportTransient 128(리플렉션 B9h1), TextMapMergeByKey 256(AssetSystem 10.3.1절).
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u) |
         (Spec.DuplicateTransient ? 16u : 0u) | (Spec.NonTryoutDuplicateTransient ? 32u : 0u) | (Spec.SaveGame ? 64u : 0u) |
-        (Spec.TextExportTransient ? 128u : 0u);
+        (Spec.TextExportTransient ? 128u : 0u) | (Spec.TextMapMergeByKey ? 256u : 0u);
 
     // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
@@ -625,6 +625,67 @@ internal static class StructRules
     }
 }
 
+// 리플렉션 함수 칸 철자 규칙이다(Docs/Design/FunctionReflection.ko.md FD4·FD5).
+internal static class FunctionRules
+{
+    // 문자열 view 매개변수(호출 frame은 rocks::String으로 잡는다)와 대상 없는 객체 handle의 정규 철자다.
+    public const string StringViewSpelling = "rocks::StringView";
+
+    public const string StringSpelling = "rocks::String";
+
+    public const string ObjectHandleSpelling = "rocks::ObjectHandle";
+
+    // 함수 하나의 매개변수 수와 클래스 하나의 자기 함수 수 상한이다(런타임 MaxFunctionParameters·MaxTypeFunctions — TypeSchema.h와 같다).
+    public const int MaxParameters = 16;
+
+    public const int MaxFunctions = 4096;
+
+    private const string ResultPrefix = "rocks::Result<";
+
+    // `rocks::Result<T>`의 T(void 포함)다. Result가 아니면 null이다.
+    public static string? ResultInner(string spelling) =>
+        spelling.StartsWith(ResultPrefix, StringComparison.Ordinal) && spelling.EndsWith('>') ? spelling[ResultPrefix.Length..^1].Trim() : null;
+}
+
+// 리플렉션 함수 하나다(ROCKS_FUNCTION — Docs/Design/FunctionReflection.ko.md). 매개변수·반환은 합성 FieldModel이다(이름·소유자·철자 —
+// 정규 형식 탐침과 값 종류 판정을 필드와 같은 경로로 지난다, FD9). Result는 반환 값 칸(void·Result<void>면 null)이고 ReturnsResult는
+// 반환이 Result<…>인지다. import 함수(descriptor)는 이름·ID·flag만 채운다(다른 모듈의 상속 이름 검사용).
+internal sealed class FunctionModel
+{
+    public required string Id { get; init; }
+
+    public required SourceSite Site { get; init; }
+
+    public required string Name { get; init; }
+
+    public required string Owner { get; init; }
+
+    public required FunctionSpec Spec { get; init; }
+
+    public bool IsStatic { get; init; }
+
+    public bool IsConst { get; init; }
+
+    public List<FieldModel> Parameters { get; } = [];
+
+    public FieldModel? Result { get; set; }
+
+    public bool ReturnsResult { get; set; }
+
+    // 값으로 받는 매개변수의 위치다(SchemaValidator가 채운다). Invoke는 같은 frame으로 여러 번 부를 수 있어 인자를 옮기지 않고 복사로
+    // 넘기므로, 생성 코드가 복사 생성 가능을 static_assert로 확인한다(String·컨테이너·SoftObjectRef는 const&로 받는다 — RMC2704).
+    public HashSet<int> ByValueParameters { get; } = [];
+
+    public bool Imported { get; init; }
+
+    // 실효 도구 이름이다(Name="…", 없으면 C++ 이름 — FD2).
+    public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
+
+    // 실행 schema의 FunctionFlags 비트다(Static 1, Const 2, Pure 4, EditorOnly 8, ReturnsResult 16).
+    public uint Flags => (IsStatic ? 1u : 0u) | (IsConst ? 2u : 0u) | (Spec.Pure ? 4u : 0u) | (Spec.EditorOnly ? 8u : 0u) |
+        (ReturnsResult ? 16u : 0u);
+}
+
 // 리플렉션 타입(ROCKS_CLASS 클래스, ROCKS_STRUCT struct, ROCKS_ENUM enum) 모델이다. enum은 IsEnum이고 Base는 "",
 // 필드는 없으며 Underlying·FlagsEnum·ToolPrefix·Enumerators를 쓴다. struct는 IsStruct이고 Base는 ""이며
 // 형질(ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이(Depth)를 갖는다. 셋 모두 같은 이름·ID 공간과
@@ -785,6 +846,19 @@ internal sealed class ClassModel
     public string ToolPrefix { get; init; } = "";
 
     public List<EnumeratorModel> Enumerators { get; init; } = [];
+
+    // 이 타입이 선언한 리플렉션 함수다(클래스만 — FunctionReflection FD1, 선언 순서). import 타입은 descriptor의 함수(이름·ID·flag)다.
+    public List<FunctionModel> Functions { get; } = [];
+
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1): 이 모듈 타입이 선언에 직접 쓴 값이다(enum은 Type만, import 타입은 None).
+    public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
+
+    // 실효 Sparks 노출이다(상속·끊기를 합친 값 — 이 모듈 타입은 SparksBinding.Resolve가, import 타입은 descriptor flags가 채운다).
+    public bool ScriptType { get; set; }
+
+    // Sparks 확장 가능의 상속 값이다(클래스만 — UE Blueprintable처럼 노출과 따로 내려가 NotScriptType 타입에도 남는다). schema의
+    // scriptExtensible은 노출된 타입에서 이 값이다(Docs/Design/SparksBinding.ko.md B1).
+    public bool ScriptExtensible { get; set; }
 }
 
 // Classes는 이 모듈 타입(클래스·struct·enum)만, Imported는 import한 타입(정규 이름 → 모델)이다. Ordered는 이 모듈

@@ -7,7 +7,7 @@ class USkeleton;
 struct FReferenceSkeleton;
 struct FRocksAssetBody;
 
-// 스켈레톤 추출이다(UnrealExchange.ko.md 6.1절, 6.3절 — 11.6절 FRocksSkeletonExtractor).
+// 스켈레톤 추출이다(UnrealExchange 6.1절, 6.3절 — 11.6절 FRocksSkeletonExtractor).
 //
 // - settings: USkeleton UPROPERTY 덤프(11.5절 — BoneTree·가상 본·소켓·슬롯 묶음·리타깃 원본·호환 스켈레톤·blend
 //   profile·커브 메타데이터 AssetUserData 등이 이름 그대로).

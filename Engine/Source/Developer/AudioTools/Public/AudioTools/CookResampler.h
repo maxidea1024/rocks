@@ -4,7 +4,7 @@
 #include <Audio/AudioDecoder.h>
 #include <Core/Result.h>
 
-// 쿠킹 리샘플러다(Docs/Design/AudioSystem.ko.md 3.31절). UE ResampleWaveData와 같이 libsamplerate
+// 쿠킹 리샘플러다(Docs/Design/AudioSystem 3.31절). UE ResampleWaveData와 같이 libsamplerate
 // SRC_SINC_BEST_QUALITY(band-limited)를 쓴다. Opus 플랫폼 데이터(48 kHz)로 바꿀 때 쓰고, 런타임
 // 리샘플러(선형)와는 다르다.
 //

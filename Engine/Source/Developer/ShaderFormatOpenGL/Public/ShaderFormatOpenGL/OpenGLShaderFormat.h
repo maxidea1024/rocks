@@ -19,7 +19,7 @@
 namespace rocks::shader {
 
 // 처리기 버전이다(형식 정의 processor.version).
-inline constexpr uint32 OpenGLShaderProcessorVersion = 4;
+inline constexpr uint32 OpenGLShaderProcessorVersion = 6;
 
 class ROCKS_SHADERFORMATOPENGL_API OpenGLShaderFormatBackend final : public ShaderFormatBackend {
 public:

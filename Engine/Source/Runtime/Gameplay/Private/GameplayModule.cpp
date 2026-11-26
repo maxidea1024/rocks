@@ -83,7 +83,8 @@ Result<void> RegisterGameplayTypes(ModuleRegistration& registration) noexcept {
     return generated::Gameplay::RegisterModuleTypes(registration);
 }
 
-LocalPlayer::LocalPlayer(Allocator& allocator) noexcept : subsystems_(allocator) {
+LocalPlayer::LocalPlayer(Allocator& allocator) noexcept
+    : subsystems_(allocator), inputSettings_(allocator) {
 }
 
 LocalPlayer::~LocalPlayer() noexcept = default;

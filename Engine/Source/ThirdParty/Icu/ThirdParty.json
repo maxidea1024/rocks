@@ -360,7 +360,7 @@
     "source/common/propsvec.h": "3a4331ec979a395b34344e5fb5cb23a3e3599299dc1762991015cb973f7c9d24",
     "source/common/punycode.cpp": "94072731480fa04c3ad69606dc8ac0c663db9ca3f7b34526a921cfb6ae39c0c9",
     "source/common/punycode.h": "dcab72c50aa9e864e72a1d9c2e459f35d1dbeb7de3a27bc17e52574437720a09",
-    "source/common/putil.cpp": "78fec5a2400dc5130b4ddbbf5e2a149ad9829f6180e4cde3c44876ec551a20a6",
+    "source/common/putil.cpp": "3c749222d037e87b1da28cadda52d2d6ac1805ed0cc8dc7dff68c688772cfb41",
     "source/common/putilimp.h": "4c9434246eab23d7d702160943df7a123535d382db10df841175d4517507424c",
     "source/common/rbbi.cpp": "b3cd6a95020fb80e90012f3dcb5a16820fdfb51ad0f90471a6a3ce938f8e8e70",
     "source/common/rbbi_cache.cpp": "009a37eeec4318acb36228217414b719d02fe830a3ab64fd8315bf42ab23b0ae",
@@ -793,7 +793,7 @@
     {
       "file": "source/common/putil.cpp",
       "upstreamSha256": "0e79c38ac63b83106c322510cc98f080210def8a7fe66f4dcbdbbe9744379c96",
-      "reason": "On Windows, uprv_timezone and uprv_tzname read the CRT time zone with _get_timezone and _get_tzname (the same values; _timezone and _tzname are deprecated in the Microsoft CRT), and the ICU_TIMEZONE_FILES_DIR environment variable is not read (data comes only from memory and behavior does not depend on the environment; getenv is deprecated in the Microsoft CRT)."
+      "reason": "On Windows, uprv_timezone and uprv_tzname read the CRT time zone with _get_timezone and _get_tzname (the same values; _timezone and _tzname are deprecated in the Microsoft CRT), and the ICU_TIMEZONE_FILES_DIR environment variable is not read (data comes only from memory and behavior does not depend on the environment; getenv is deprecated in the Microsoft CRT). On Android, the u_property_read callback marks its unused name and serial parameters with comments (-Wunused-parameter; the Android time zone branch is only compiled for the NDK target)."
     },
     {
       "file": "source/common/umapfile.cpp",

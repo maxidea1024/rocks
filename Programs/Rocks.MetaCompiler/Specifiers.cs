@@ -17,6 +17,16 @@ internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, st
     public bool EditorOnly { get; init; }
 
     public string Within { get; init; } = "";
+
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1 — UE BlueprintType·NotBlueprintType·Blueprintable·NotBlueprintable).
+    // 선언이 직접 쓴 값이고, 상속을 합친 실효 값은 SparksBinding.Resolve가 정한다.
+    public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
+}
+
+// 타입의 Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1). Extensible·NotExtensible은 클래스만 쓴다.
+internal sealed record ScriptTypeSpec(bool Type, bool NotType, bool Extensible, bool NotExtensible)
+{
+    public static readonly ScriptTypeSpec None = new(false, false, false, false);
 }
 
 // STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 미러 선언이 결합하는 실제 C++ 타입의
@@ -31,6 +41,9 @@ internal sealed record StructSpec(uint Version, string Binds, bool Atomic, strin
     public string SettingsBranch { get; init; } = "";
 
     public string SettingsSection { get; init; } = "";
+
+    // Sparks 노출 지정자다(ScriptType·NotScriptType — Docs/Design/SparksBinding.ko.md B1).
+    public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
 }
 
 // PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
@@ -51,6 +64,9 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     public bool SaveGame { get; init; }
 
     public bool TextExportTransient { get; init; }
+
+    // JSON import가 이 Map을 키별로 병합한다(TextMapMergeByKey — Map 필드만, SchemaValidator RMC2202, Docs/Design/AssetSystem 10.3.1절).
+    public bool TextMapMergeByKey { get; init; }
 
     public string ToolName { get; init; } = "";
 
@@ -75,6 +91,16 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public bool DevelopmentOnly { get; init; }
 
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1 — UE BlueprintReadOnly·BlueprintReadWrite, ScriptName은 SL 10.3절).
+    // ScriptName은 지정하지 않았으면 ""다.
+    public bool ScriptReadOnly { get; init; }
+
+    public bool ScriptWritable { get; init; }
+
+    public string ScriptName { get; init; } = "";
+
+    public bool ScriptVisible => ScriptReadOnly || ScriptWritable;
+
     public bool HasSettings => UserConfig || ConsoleName.Length != 0 || RestartRequired || StartupOnly || RenderRead || DevelopmentOnly;
 
     // SettingsFieldFlags 비트: UserConfig 1, RestartRequired 2, StartupOnly 4, RenderRead 8, DevelopmentOnly 16.
@@ -82,10 +108,31 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
         (DevelopmentOnly ? 16u : 0u);
 }
 
+// FUNCTION 지정자 결과다(Docs/Design/FunctionReflection.ko.md FD12). ToolName은 Name="…"의 값이고 함수 이름과 같거나 없으면 ""다.
+internal sealed record FunctionSpec(bool Pure, bool EditorOnly, string ToolName)
+{
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B11 — UE BlueprintCallable). import 함수(descriptor)는 ScriptName에 B13 변환을 마친
+    // 최종 Sparks 이름을 담는다.
+    public bool ScriptCallable { get; init; }
+
+    public string ScriptName { get; init; } = "";
+
+    // schema effects(정규 순서 — Specifiers.ScriptEffectNames)·oneShot·perSecond 매개변수 이름(쓴 순서)이다.
+    public IReadOnlyList<string> ScriptEffects { get; init; } = [];
+
+    public bool ScriptOneShot { get; init; }
+
+    public IReadOnlyList<string> ScriptPerSecond { get; init; } = [];
+}
+
 // ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
 // Flags는 비트 플래그 enum(값은 선언 값의 OR)이다.
 // Binds는 Core enum 미러가 결합하는 실제 enum의 C++ 철자다(CoreTypeBindings만 — 없으면 "", CurveData CV9).
-internal sealed record EnumSpec(string ToolPrefix, bool Flags, string Binds = "");
+internal sealed record EnumSpec(string ToolPrefix, bool Flags, string Binds = "")
+{
+    // Sparks 노출 지정자 ScriptType이다(enum은 자기 것만 본다 — Docs/Design/SparksBinding.ko.md B1).
+    public bool ScriptType { get; init; }
+}
 
 // ENUMERATOR 지정자 결과다. ToolName은 Name="…"의 값이고 C++ 이름과 같거나 없으면 ""다. Hidden은 저장 값으로는
 // 유효하지만 도구 설정이 받지 않는 열거자다.
@@ -104,7 +151,8 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly";
+            bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly" or "ScriptType" or "NotScriptType" or
+                "ScriptExtensible" or "NotScriptExtensible";
             bool number = key is "Version";
             bool label = key is "Name" or "Within";
             if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
@@ -126,7 +174,8 @@ internal static class Specifiers
             Transient = values.ContainsKey("Transient"),
             Deprecated = values.ContainsKey("Deprecated"),
             EditorOnly = values.ContainsKey("EditorOnly"),
-            Within = within
+            Within = within,
+            Script = ScriptType(values, symbol, classes: true)
         };
     }
 
@@ -145,7 +194,7 @@ internal static class Specifiers
 
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Atomic";
+            bool flag = key is "Atomic" or "ScriptType" or "NotScriptType";
             bool number = key is "Version";
             bool label = key is "Binds" or "Name";
             bool group = key is "Settings";
@@ -167,7 +216,8 @@ internal static class Specifiers
         return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds, values.ContainsKey("Atomic"), TypeName(values, symbol))
         {
             SettingsBranch = branch,
-            SettingsSection = section
+            SettingsSection = section,
+            Script = ScriptType(values, symbol, classes: false)
         };
     }
 
@@ -216,8 +266,9 @@ internal static class Specifiers
         foreach ((string key, Value? value) in values)
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
-                "SaveGame" or "TextExportTransient" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly";
-            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles";
+                "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
+                "ScriptReadOnly" or "ScriptWritable";
+            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
                 (number && value?.Number is null))
@@ -248,6 +299,34 @@ internal static class Specifiers
                 "RMC2212", "Write AssetBundles = \"UI,Game\" with identifier names ([A-Za-z_][A-Za-z0-9_]*) and no repeated name.");
         }
 
+        // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1·B10 — RMC2603·RMC2604).
+        bool scriptReadOnly = values.ContainsKey("ScriptReadOnly");
+        bool scriptWritable = values.ContainsKey("ScriptWritable");
+        string scriptName = values.GetValueOrDefault("ScriptName")?.Text ?? "";
+        if (scriptReadOnly && scriptWritable)
+        {
+            throw new MetadataException($"{symbol}: ScriptReadOnly and ScriptWritable cannot be combined", "RMC2603",
+                "Choose ScriptReadOnly (scripts read the field) or ScriptWritable (scripts read and write it).");
+        }
+
+        if (scriptWritable && values.ContainsKey("ReadOnly"))
+        {
+            throw new MetadataException($"{symbol}: a ReadOnly field cannot be ScriptWritable", "RMC2603",
+                "Reflection writes refuse ReadOnly fields; use ScriptReadOnly, or remove ReadOnly if scripts should write the field.");
+        }
+
+        if (values.ContainsKey("ScriptName") && !scriptReadOnly && !scriptWritable)
+        {
+            throw new MetadataException($"{symbol}: ScriptName needs ScriptReadOnly or ScriptWritable", "RMC2603",
+                "ScriptName renames a field that scripts can see; add ScriptReadOnly or ScriptWritable, or remove ScriptName.");
+        }
+
+        if (values.ContainsKey("ScriptName") && !IsScriptName(scriptName))
+        {
+            throw new MetadataException($"{symbol}: ScriptName must be a PascalCase ASCII name (an uppercase letter, then letters and digits): \"{scriptName}\"", "RMC2604",
+                "Write the Sparks name as letters and digits starting with an uppercase letter, e.g. ScriptName = \"MaxHealth\".");
+        }
+
         if (values.ContainsKey("RestartRequired") && values.ContainsKey("StartupOnly"))
         {
             throw new MetadataException($"{symbol}: RestartRequired and StartupOnly cannot be combined", "RMC2210",
@@ -263,6 +342,7 @@ internal static class Specifiers
             NonTryoutDuplicateTransient = values.ContainsKey("NonTryoutDuplicateTransient"),
             SaveGame = values.ContainsKey("SaveGame"),
             TextExportTransient = values.ContainsKey("TextExportTransient"),
+            TextMapMergeByKey = values.ContainsKey("TextMapMergeByKey"),
             // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).
             ToolName = toolName == fieldName ? "" : toolName,
             MaxElements = values.GetValueOrDefault("MaxElements")?.Number ?? 0,
@@ -272,7 +352,90 @@ internal static class Specifiers
             RestartRequired = values.ContainsKey("RestartRequired"),
             StartupOnly = values.ContainsKey("StartupOnly"),
             RenderRead = values.ContainsKey("RenderRead"),
-            DevelopmentOnly = values.ContainsKey("DevelopmentOnly")
+            DevelopmentOnly = values.ContainsKey("DevelopmentOnly"),
+            ScriptReadOnly = scriptReadOnly,
+            ScriptWritable = scriptWritable,
+            ScriptName = scriptName
+        };
+    }
+
+    // ROCKS_FUNCTION 지정자다(Pure·EditorOnly·Name — 그 밖은 뒤 단계가 받는다: DisplayName·Category·Help(FR2)·ScriptOverridable(FR3)·
+    // Cheat·Authority(CVR8)·Sparks 함수 지정자(EI1b) — 지금은 모르는 지정자 RMC2000).
+    public static FunctionSpec Function(string text, string symbol, string functionName)
+    {
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
+        {
+            bool flag = key is "Pure" or "EditorOnly" or "ScriptCallable" or "ScriptOneShot";
+            bool label = key is "Name" or "ScriptName" or "ScriptEffects" or "ScriptPerSecond";
+            if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
+            {
+                throw new MetadataException($"{symbol}: unsupported FUNCTION specifier/value {key}",
+                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly, Name=\"<tool name>\" and the Sparks specifiers ScriptCallable, ScriptName, ScriptEffects, " +
+                        "ScriptOneShot and ScriptPerSecond (display metadata, script overrides and cheat specifiers come with later stages).");
+            }
+        }
+
+        // Sparks 노출 지정자(Docs/Design/SparksBinding.ko.md B11): 부속 지정자는 ScriptCallable과 함께만, Pure와 효과·일회성은 함께 쓸 수 없다.
+        bool scriptCallable = values.ContainsKey("ScriptCallable");
+        string? lone = new[] { "ScriptName", "ScriptEffects", "ScriptOneShot", "ScriptPerSecond" }.FirstOrDefault(values.ContainsKey);
+        if (lone is not null && !scriptCallable)
+        {
+            throw new MetadataException($"{symbol}: {lone} needs ScriptCallable", "RMC2603",
+                $"{lone} describes a function that scripts can call; add ScriptCallable, or remove {lone}.");
+        }
+
+        string scriptName = values.GetValueOrDefault("ScriptName")?.Text ?? "";
+        if (values.ContainsKey("ScriptName") && !IsScriptName(scriptName))
+        {
+            throw new MetadataException($"{symbol}: ScriptName must be a PascalCase ASCII name (an uppercase letter, then letters and digits): \"{scriptName}\"", "RMC2604",
+                "Use a name like \"RequestDestroy\".");
+        }
+
+        List<string> effects = [];
+        foreach (string effect in SplitList(values.GetValueOrDefault("ScriptEffects")?.Text, symbol))
+        {
+            if (!ScriptEffectNames.Contains(effect, StringComparer.Ordinal) || effects.Contains(effect, StringComparer.Ordinal))
+            {
+                throw new MetadataException($"{symbol}: ScriptEffects entry '{effect}' is unknown or listed twice", "RMC2603",
+                    "List each of spawn, acquire, readiness, io and wallClock at most once, separated by commas (SL 3.13).");
+            }
+
+            effects.Add(effect);
+        }
+
+        List<string> perSecond = [];
+        foreach (string parameter in SplitList(values.GetValueOrDefault("ScriptPerSecond")?.Text, symbol))
+        {
+            if (perSecond.Contains(parameter, StringComparer.Ordinal))
+            {
+                throw new MetadataException($"{symbol}: ScriptPerSecond lists '{parameter}' twice", "RMC2603", "List each per-second parameter once.");
+            }
+
+            perSecond.Add(parameter);
+        }
+
+        bool pure = values.ContainsKey("Pure");
+        if (pure && (effects.Count != 0 || values.ContainsKey("ScriptOneShot")))
+        {
+            throw new MetadataException($"{symbol}: a Pure function has no effects or one-shot effect", "RMC2603",
+                "Remove Pure, or remove ScriptEffects and ScriptOneShot (Pure functions only read state).");
+        }
+
+        string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
+        if (values.ContainsKey("Name") && !IsAsciiIdentifier(toolName))
+        {
+            throw new MetadataException($"{symbol}: Name specifier must be a non-empty ASCII identifier ([A-Za-z_][A-Za-z0-9_]*): \"{toolName}\"", "RMC2703",
+                "Use an ASCII identifier for the function tool name, or omit Name to use the C++ name.");
+        }
+
+        return new(pure, values.ContainsKey("EditorOnly"), toolName == functionName ? "" : toolName)
+        {
+            ScriptCallable = scriptCallable,
+            ScriptName = scriptName,
+            ScriptEffects = [.. ScriptEffectNames.Where(name => effects.Contains(name, StringComparer.Ordinal))],
+            ScriptOneShot = values.ContainsKey("ScriptOneShot"),
+            ScriptPerSecond = perSecond
         };
     }
 
@@ -290,7 +453,7 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Flags";
+            bool flag = key is "Flags" or "ScriptType";
             bool label = key is "ToolPrefix" or "Binds";
             if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
             {
@@ -312,7 +475,7 @@ internal static class Specifiers
                 hint: "Write the real enum fully qualified from the global scope, e.g. Binds = \"rocks::InterpCurveMode\".");
         }
 
-        return new(prefix, values.ContainsKey("Flags"), binds);
+        return new(prefix, values.ContainsKey("Flags"), binds) { ScriptType = values.ContainsKey("ScriptType") };
     }
 
     public static EnumeratorSpec Enumerator(string text, string symbol, string name)
@@ -338,6 +501,59 @@ internal static class Specifiers
         // C++ 이름과 같은 Name은 지정하지 않은 것과 같다.
         return new(toolName == name ? "" : toolName, values.GetValueOrDefault("DisplayName")?.Text ?? "", values.ContainsKey("Hidden"));
     }
+
+    // CLASS·STRUCT의 Sparks 노출 지정자다. 같은 축의 켜기·끄기를 함께 쓰면 RMC2603이다(Docs/Design/SparksBinding.ko.md B10).
+    private static ScriptTypeSpec ScriptType(Dictionary<string, Value?> values, string symbol, bool classes)
+    {
+        ScriptTypeSpec spec = new(values.ContainsKey("ScriptType"), values.ContainsKey("NotScriptType"),
+            classes && values.ContainsKey("ScriptExtensible"), classes && values.ContainsKey("NotScriptExtensible"));
+        if (spec.Type && spec.NotType)
+        {
+            throw new MetadataException($"{symbol}: ScriptType and NotScriptType cannot be combined", "RMC2603",
+                "Keep ScriptType to show the type to scripts, or NotScriptType to hide it and its derived types.");
+        }
+
+        if (spec.Extensible && spec.NotExtensible)
+        {
+            throw new MetadataException($"{symbol}: ScriptExtensible and NotScriptExtensible cannot be combined", "RMC2603",
+                "Keep ScriptExtensible to let Sparks classes derive from the class, or NotScriptExtensible to stop that.");
+        }
+
+        if (spec.Extensible && spec.NotType)
+        {
+            throw new MetadataException($"{symbol}: ScriptExtensible and NotScriptType cannot be combined", "RMC2603",
+                "A class Sparks can derive from is visible to scripts; remove NotScriptType or ScriptExtensible.");
+        }
+
+        return spec;
+    }
+
+    // Sparks 효과 이름이다(SL 3.13 — schema effects의 정규 순서).
+    public static readonly IReadOnlyList<string> ScriptEffectNames = ["spawn", "acquire", "readiness", "io", "wallClock"];
+
+    // 쉼표로 나눈 목록 지정자 값의 항목이다(앞뒤 공백을 뗀다, 빈 항목은 RMC2603 — symbol은 진단의 선언 이름이다).
+    private static IEnumerable<string> SplitList(string? text, string symbol)
+    {
+        if (text is null)
+        {
+            yield break;
+        }
+
+        foreach (string part in text.Split(','))
+        {
+            string item = part.Trim();
+            if (item.Length == 0)
+            {
+                throw new MetadataException($"{symbol}: empty entry in the list \"{text}\"", "RMC2603", "Separate entries with single commas.");
+            }
+
+            yield return item;
+        }
+    }
+
+    // Sparks 이름(PascalCase ASCII — SL 10.2절 schema 이름 규칙)이다: 영문 대문자로 시작하는 영문자·숫자.
+    public static bool IsScriptName(string text) =>
+        text.Length != 0 && char.IsAsciiLetterUpper(text[0]) && text.All(char.IsAsciiLetterOrDigit);
 
     // CLASS·STRUCT의 Name="…"(타입 도구 이름)이다. 형식은 TypeToolName.IsValid이고 `none`은 예약이다(RMC2203). 없으면 ""다.
     private static string TypeName(Dictionary<string, Value?> values, string symbol)

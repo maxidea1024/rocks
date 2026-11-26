@@ -10,7 +10,7 @@ namespace error_code_tests_file {
 // -Wswitch가 먼저 잡는다. 이 시험은 이름의 고유성과 마지막 열거자 다음 값의 "Unknown"을 확인한다(새
 // 열거자를 더하면 last도 그 값으로 옮긴다).
 TEST(ErrorCodeNamesAreCompleteAndUnique) {
-    constexpr uint32 last = static_cast<uint32>(ErrorCode::NotReady);
+    constexpr uint32 last = static_cast<uint32>(ErrorCode::CorruptData);
     for (uint32 i = 0; i <= last; ++i) {
         const char* name = ErrorCodeName(static_cast<ErrorCode>(i));
         CHECK(strcmp(name, "Unknown") != 0);
@@ -25,6 +25,8 @@ TEST(ErrorCodeNamesAreCompleteAndUnique) {
     CHECK(strcmp(ErrorCodeName(ErrorCode::AlreadyRegistered), "AlreadyRegistered") == 0);
     CHECK(strcmp(ErrorCodeName(ErrorCode::ScopeClosed), "ScopeClosed") == 0);
     CHECK(strcmp(ErrorCodeName(ErrorCode::NotReady), "NotReady") == 0);
+    CHECK(strcmp(ErrorCodeName(ErrorCode::IoError), "IoError") == 0);
+    CHECK(strcmp(ErrorCodeName(ErrorCode::CorruptData), "CorruptData") == 0);
     CHECK(strcmp(ErrorCodeName(static_cast<ErrorCode>(last + 1)), "Unknown") == 0);
 }
 } // namespace error_code_tests_file

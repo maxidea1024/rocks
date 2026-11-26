@@ -10,6 +10,7 @@
 namespace rocks {
 
 class TypeRegistry;
+class FunctionHandle;
 
 struct TypeRegistrationToken {
     uint64 registry = 0;
@@ -31,7 +32,9 @@ struct TypeVersionEntry {
 };
 
 // 등록·해제·Shutdown은 생성 스레드 전용이다. Acquire/Stats/lease 계수는 잠금으로 보호한다.
-// Allocator는 Registry보다 오래 살아야 하며 소멸 전 모든 lease를 반환해야 한다.
+// Allocator는 Registry보다 오래 살아야 하며 소멸 전 모든 lease를 반환해야 한다. Allocator는 스레드
+// 안전해야 한다(클래스 기본값 게시 — TypeLease::ResolveClassDefaults — 가 생성 스레드 밖에서도
+// 할당한다, Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드').
 // 콜백 코드는 입력 계약을 신뢰한다. 임의 플러그인의 메모리 안전성을 검증하지 않는다.
 class ROCKS_OBJECTRUNTIME_API TypeRegistry {
 public:
@@ -170,6 +173,17 @@ public:
     //   if (!lease) { return Result<void>::Failure(lease.Error()); }
     Result<TypeLease> AcquireDerivedClass(TypeId type, TypeId base) noexcept;
 
+    // 클래스 type과 그 기반 체인에서 리플렉션 함수를 찾는다(ROCKS_FUNCTION — Docs/Design/
+    // FunctionReflection.ko.md FD10). ID로 찾거나 실효 이름(도구 이름, 없으면 C++ 이름 — 대소문자
+    // 무시)으로 찾는다. 돌려준 FunctionHandle은 함수를 선언한 클래스의 lease를 쥔다. 클래스가 아닌
+    // 레코드는 TypeMismatch, 타입·함수가 없으면 NotFound, 종료 중 ShuttingDown이다. 정의는
+    // FunctionCall.cpp(Object/FunctionCall.h를 include해 쓴다).
+    //
+    // 사용 예:
+    //   auto function = types.FindFunctionByName(TypeIdOf<Door>(), "Open");
+    Result<FunctionHandle> FindFunction(TypeId type, Guid functionId) noexcept;
+    Result<FunctionHandle> FindFunctionByName(TypeId type, Span<const char> name) noexcept;
+
     Result<bool> IsA(TypeId actual, TypeId expected) noexcept;
     Result<void> Unregister(TypeRegistrationToken) noexcept;
     // 신규 Acquire/Clone을 닫는다. lease가 남으면 Busy이며, 반환 후 다시 호출한다.
@@ -258,6 +272,11 @@ private:
 
     Allocator& allocator_;
     mutable platform::Mutex gate_;
+    // 클래스 기본값 생성 잠금이다(gate_와 다르다 — 생성 중 ClassRef 판정이 gate_를 잡는다. 순서는
+    // defaultsGate_ → gate_ 한 방향). 잠금 안에서 생성자(사용자 코드)가 돈다.
+    mutable platform::Mutex defaultsGate_;
+    // 지금 기본값을 만드는 스레드다(0 = 없음 — 같은 스레드의 재진입을 Fatal로 잡는다).
+    uint64 defaultsBuilder_ = 0;
     // 등록 레코드의 이중 연결 목록이다(머리가 가장 최근 등록 — Shutdown이 이 순서로 의존자부터
     // 파괴한다).
     Record* records_ = nullptr;

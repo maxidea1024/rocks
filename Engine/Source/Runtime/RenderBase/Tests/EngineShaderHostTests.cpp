@@ -54,11 +54,24 @@ public:
     bool fail = false;
 };
 
-// 쿠킹 라이브러리 원천이다. 형식이 있으면 등록부의 라이브러리, 없으면 NotFound, error면 그 오류다.
+// 쿠킹 라이브러리 원천이다. 쿠킹 backend는 D3D12 하나(cookedBackend가 거짓이면 Vulkan — 장치
+// backend가 쿠킹에 없음), 형식은 D3D12_SM6이다. 형식이 있으면 등록부의 라이브러리, 없으면 NotFound,
+// error면 그 오류다.
 class FakeCookedSource final : public CookedShaderLibrarySource {
 public:
     explicit FakeCookedSource(const shader::ShaderTypeRegistry& registry) noexcept
         : registry_(registry) {
+    }
+
+    Span<const graphics::Backend> Backends() const noexcept override {
+        return cookedBackend ? Span<const graphics::Backend>(&d3d12_, 1)
+                             : Span<const graphics::Backend>(&vulkan_, 1);
+    }
+
+    Span<const StringView> Formats(graphics::Backend backend) const noexcept override {
+        return backend == graphics::Backend::D3D12 && cookedBackend
+                   ? Span<const StringView>(&format_, 1)
+                   : Span<const StringView>();
     }
 
     Result<void> ReadLibrary(StringView formatId, shader::ShaderLibraryKind library,
@@ -78,12 +91,20 @@ public:
                    : Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
+    StringView Problem() const noexcept override {
+        return error != ErrorCode::None ? StringView("fake read failure") : StringView();
+    }
+
     uint32 reads = 0;
     bool hasFormat = true;
+    bool cookedBackend = true;
     ErrorCode error = ErrorCode::None;
 
 private:
     const shader::ShaderTypeRegistry& registry_;
+    const graphics::Backend d3d12_ = graphics::Backend::D3D12;
+    const graphics::Backend vulkan_ = graphics::Backend::Vulkan;
+    const StringView format_ = "D3D12_SM6";
 };
 
 // 렌더 lane 시작 단계에서 엔진 렌더 자원을 여는 처리기다(9.12절 2항).
@@ -288,19 +309,33 @@ TEST(RenderBase_EngineRenderResourcesPreferCookedLibraries) {
         resources.Retire(device);
     }
 
-    cooked.hasFormat = false;
+    // 장치 backend(D3D12)가 쿠킹에 없으면 공급자 경로다(ShaderSystem SSD16) — 원천을 읽지 않는다.
+    cooked.cookedBackend = false;
     {
         EngineRenderResources resources(Allocator_());
         REQUIRE(resources.Open(device, host));
-        CHECK(!resources.OpenedFromCookedLibrary() && cooked.reads == 2 && provider.requests == 1);
+        CHECK(!resources.OpenedFromCookedLibrary() && cooked.reads == 1 && provider.requests == 1);
+        CHECK(resources.FormatId() == StringView("D3D12_SM6"));
         resources.Retire(device);
     }
 
+    // backend는 쿠킹에 있는데 그 형식의 라이브러리가 없으면 공급자로 넘기지 않고 Unsupported다.
+    cooked.cookedBackend = true;
+    cooked.hasFormat = false;
+    {
+        EngineRenderResources resources(Allocator_());
+        CHECK(resources.Open(device, host).Error() == ErrorCode::Unsupported);
+        CHECK(resources.Problem().Contains(StringView("no library of this kind")));
+        CHECK(cooked.reads == 2 && provider.requests == 1);
+    }
+
+    cooked.hasFormat = true;
     cooked.error = ErrorCode::Cancelled;
     {
         EngineRenderResources resources(Allocator_());
         CHECK(resources.Open(device, host).Error() == ErrorCode::Cancelled);
         CHECK(resources.Problem().Contains(StringView("cooked shader library")));
+        CHECK(resources.Problem().Contains(StringView("fake read failure")));
         CHECK(provider.requests == 1);
     }
 

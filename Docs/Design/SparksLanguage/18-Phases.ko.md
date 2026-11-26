@@ -1,6 +1,6 @@
 ## 18. 도입 단계
 
-구현은 두 갈래로 나눈다(SD51, 2026-11-20 사용자 결정). 엔진 요소와 무관한 **언어 코어**(LC0–LC9)를 먼저 만들고, 엔진 쪽이 준비되는 대로 **엔진 연동**(EI1–EI9)을 하나씩 더한다. 언어 코어는 엔진의 다른 작업(리플렉션 확장·World·에셋)을 기다리지 않고, 그 작업들도 Sparks를 기다리지 않는다.
+구현은 두 갈래로 나눈다(SD51, 2026-11-20 사용자 결정). 엔진 요소와 무관한 **언어 코어**(LC0–LC9)를 먼저 만들고, 엔진 쪽이 준비되는 대로 **엔진 연동**(EI1–EI9)을 하나씩 더한다. 언어 코어 가운데 LC9(AOT)는 급하지 않아 뒤로 미룬다(SD77, 2026-11-25 사용자 결정 — LC8 다음은 연동 단계). 언어 코어는 엔진의 다른 작업(리플렉션 확장·World·에셋)을 기다리지 않고, 그 작업들도 Sparks를 기다리지 않는다.
 
 ### 18.1 언어 코어와 host 경계
 
@@ -17,9 +17,10 @@
 |---|---|---|---|
 | `SparksVm` | `Engine/Source/Runtime` | bytecode와 `.sparkc` 형식, verifier, interpreter, 값 버퍼, 실행·발행 큐·ledger, 핫 리로드, host interface | Core |
 | `SparksCompiler` | `Engine/Source/Runtime` | 원문 관리, 진단, lexer, parser, 검사기, typed IR, bytecode 생성, schema·manifest reader, formatter | Core(LC4부터 SparksVm) |
-| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksCompiler(LC5부터 SparksVm) |
-| `Sparks`(CLI) | `Programs` | `sparks check`·`build`·`test`·`fmt` | 위 모듈, Launch |
-| `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksCompiler, Launch |
+| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner, `@test` 실행기(`TestRunner.h` — LC8d) | Core, SparksCompiler(LC5부터 SparksVm) |
+| `SparksTools` | `Engine/Source/Developer` | 작업 공간 적재, 명령 실행, 언어 서버 핵심(LC8 — [SparksTools](../SparksTools.ko.md) 2절 T1) | Core, SparksCompiler, SparksVm, SparksTestHost |
+| `SparksCli`(CLI) | `Programs` | `sparks check`·`dump`·`build`·`ids`·`fmt`·`test`(설치 이름 `sparks`) | SparksTools, Launch |
+| `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksTools, Launch |
 | `ScriptRuntime`(연동, EI2) | `Engine/Source/Runtime` | host 구현, native call thunk, Sparks 클래스의 타입 등록 | SparksVm, ObjectRuntime, MetaSchema, Task |
 
 - 모듈은 필요해질 때 만든다. LC0은 `SparksCompiler`(원문·진단)와 `SparksTestHost`(conformance runner)만 만들고, `SparksVm`은 bytecode 형식이 생기는 LC4에서 만든다(빈 자리표시 모듈을 두지 않는다).
@@ -42,7 +43,7 @@
 | LC5 VM 핵심 | interpreter(Scalar·Ref·Buf bank), 값 버퍼(COW 참조계수), 숫자 검사와 fault(§8.3), 예산(명령어·호출 깊이·메모리), 부록 B 표준 API, host interface 1차(native call·객체 handle 검증·native 필드) | 동기 함수 corpus의 결과·fault·예산 계수 golden, 종료 시 메모리 ledger 0 | 없음 |
 | LC6 실행 모델 | instance와 수명 hook, 스크립트 단계·발행 큐·`emit`·`Changed`·연쇄 상한(§5.4), async 실행·`await`·`All`/`Race`·취소(§6.1), 유지 자원 해제(§7.1), 파괴·활성 지연 큐(§4.3), 소유 범위와 EndExec·Detach·CloseSession(§9), fault 처리와 격리(§8.3), host interface 2차(이벤트·자원·로드·시계) | TestHost에서 §2 예시 시나리오의 전달 순서 golden, Gate G1·G4 | 없음 |
 | LC7 핫 리로드 | R1 본문 교체, R2 스크립트 필드 migration과 구독 연결 재구성, `ReloadExecutions`, 계획·판정·원자적 적용의 언어 쪽(§12.4), 증분 재컴파일 | Gate G5의 R1·R2 행, 본문 reload 2 s 측정 | 없음 |
-| LC8 도구 | CLI(`sparks check·build·test·fmt·dump`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·빠른 수정) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
+| LC8 도구 | CLI(`sparks check·dump·build·ids·fmt·test`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식), VS Code 확장 — 세부는 [SparksTools](../SparksTools.ko.md) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden — 완료(2026-11-26, VS Code 안 사람 확인 대기) | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
 | LC9 AOT 생성 | typed IR → C++ 생성기, 동등성 규칙(§12.5), VM·AOT 혼합 진입 표 | Gate G6(TestHost에서 VM·AOT 차등) | 없음. 시험은 corpus의 생성 C++을 golden으로 커밋해 시험 실행 파일에 컴파일하고, 다시 생성한 바이트가 golden과 같은지 대조한다. target 빌드 편입은 EI8(SE-B2) |
 
 LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 하나 이상과 리뷰 1회로 끝난다).
@@ -63,7 +64,7 @@ LC3도 하위 단계로 나눈다(컴파일 단계 `Rules` — 각 단계가 cor
 | LC3c 유지 자원·로드 | 유지 자원의 담는 자리·해제·`_ =` 버림 금지, 로드 요청 handle(§7). 진단 S09xx |
 | LC3d 권한·저장 | 권한 구역과 `@net` 쓰기(§14, SD45), `@rpc`, 저장 가능 타입과 호환성(§15). 진단 S10xx |
 
-순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
+순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤에 할 수 있지만 미룬다(SD77): LC8이 끝나면 선행 항목이 갖춰진 연동 단계(18.3절)와 다른 작업을 먼저 하고, LC9는 AOT가 실제로 필요해질 때(L3 · M5, EI8과 함께) 착수한다. 미루는 동안에도 VM 쪽 변경은 동등성 규칙(§12.5)을 지킨다 — AOT가 따라올 수 없는 VM 동작을 새로 만들지 않는다.
 
 ### 18.3 엔진 연동 단계
 
@@ -89,6 +90,6 @@ LC3도 하위 단계로 나눈다(컴파일 단계 `Rules` — 각 단계가 cor
 |---|---|---|
 | L0 · M3 | 문서 규격(초안 1.3에서 확정), LC0의 conformance 틀 | Core/Object 계약에 맞는 언어 규칙 확정 |
 | L1 · M3 | LC1–LC5, LC8의 CLI와 언어 서버 기본, EI1·EI2 | 조건문·함수·객체 필드·배열·오류 처리와 바인딩 테스트 |
-| L2 · M3/M4 | LC6, LC7(R1·R2), LC8의 자동완성·빠른 수정과 VS Code 확장, LC9의 동기 함수, EI3·EI4·EI5·EI6(R3) | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작, G5의 R1–R3 행, G2의 reload 항목 |
-| L3 · M5 | EI7, LC9 완성과 EI8, eval(`DevOnly`), soak G2·G3 | 취소·GC·replication·중단점·migration·누수 Gate 통합 검증, G5 전체, G6 전체 |
+| L2 · M3/M4 | LC6, LC7(R1·R2), LC8의 자동완성·빠른 수정과 VS Code 확장, EI3·EI4·EI5·EI6(R3) | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작, G5의 R1–R3 행, G2의 reload 항목 |
+| L3 · M5 | EI7, LC9(동기 함수부터 — SD77로 L2에서 옮김)와 EI8, eval(`DevOnly`), soak G2·G3 | 취소·GC·replication·중단점·migration·누수 Gate 통합 검증, G5 전체, G6 전체 |
 | L4 · M6 이후 | profiler UI, 최적화 IR, AOT profile 기반 최적화와 cold module VM 유지, EI9, target별 eval 정책 | hot function 비용과 마켓 규정 근거로 결정 |

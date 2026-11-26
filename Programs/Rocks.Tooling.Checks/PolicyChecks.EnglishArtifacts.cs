@@ -6,9 +6,13 @@ namespace Rocks.Tooling.Checks;
 public static partial class PolicyChecks
 {
     // 실행 중에 사용자·개발자에게 보이는 문자열(로그·추적·진단·오류·도움말)이 들어가는 소스의 루트다. 주석은 한국어로 둘 수 있고
-    // 주석 밖의 한글만 금지한다. Build/ 아래 파일은 빌드 설정이라 주석까지 영어다(IsEnglishBuildFile).
+    // 주석 밖의 한글만 금지한다. Build/ 아래 파일은 빌드 설정이라 주석까지 영어다(IsEnglishBuildFile). Tools/는 편집기 연동(VS Code
+    // 확장 — Docs/Design/SparksTools.ko.md 12.5절)이다.
     private static readonly string[] EnglishMessageRoots =
-        ["Core/Source/Runtime", "Core/Source/Developer", "Engine/Source/Runtime", "Engine/Source/Developer", "Engine/Plugins", "Programs", "Build"];
+        ["Core/Source/Runtime", "Core/Source/Developer", "Engine/Source/Runtime", "Engine/Source/Developer", "Engine/Plugins", "Programs", "Build", ToolsRoot];
+
+    // 편집기 연동 루트다. 그 아래 .ts는 주석 밖 한글을, .json(확장 manifest·문법·설정)은 파일 전체 한글을 금지한다.
+    private const string ToolsRoot = "Tools";
 
     // 빌드 설정과 생성물처럼 파일 전체(주석 포함)를 영어로 두는 저장소 루트의 파일이다. 빌드 도구·편집기·CI가 읽는 설정과 설치
     // 마법사 진입 스크립트(Docs/Design/SetupWizard.ko.md)다.
@@ -96,7 +100,8 @@ public static partial class PolicyChecks
             string relative = Relative(root, path);
             string extension = Path.GetExtension(path).ToLowerInvariant();
             bool native = extension is ".h" or ".c" or ".cpp" or ".mm";
-            if ((!native && extension != ".cs") || IsTestSource(relative) || IsCSharpTestProject(relative) ||
+            bool typeScript = extension == ".ts";
+            if ((!native && !typeScript && extension != ".cs") || IsTestSource(relative) || IsCSharpTestProject(relative) ||
                 IsTestFixtureSource(relative) || IsEnglishBuildFile(relative) || IsEnglishIgnored(relative) ||
                 upstream.Any(directory => relative.StartsWith(directory, StringComparison.Ordinal)))
             {
@@ -104,7 +109,7 @@ public static partial class PolicyChecks
             }
 
             string text = File.ReadAllText(path, StrictUtf8);
-            string code = native ? WithoutComments(text) : WithoutCSharpComments(text);
+            string code = native ? WithoutComments(text) : typeScript ? WithoutTypeScriptComments(text) : WithoutCSharpComments(text);
             AddHangulLines(relative, code, "source-literal-english",
                 "text outside comments must be English (runtime, tool and diagnostic strings; comments may stay Korean)", failures);
         }
@@ -138,7 +143,7 @@ public static partial class PolicyChecks
         }
 
         IReadOnlyList<string> upstream = UpstreamDirectories(root);
-        foreach (string path in Files(root, [".github/workflows", "Build", .. OwnedSourceRoots]))
+        foreach (string path in Files(root, [".github/workflows", "Build", ToolsRoot, .. OwnedSourceRoots]))
         {
             string relative = Relative(root, path);
             if (IsEnglishBuildFile(relative) && !IsEnglishIgnored(relative) &&
@@ -185,6 +190,7 @@ public static partial class PolicyChecks
         return relative.StartsWith(".github/workflows/", StringComparison.Ordinal) ||
                EnglishBuildFileSuffixes.Any(suffix => relative.EndsWith(suffix, StringComparison.Ordinal)) ||
                relative.StartsWith("Build/", StringComparison.Ordinal) ||
+               (relative.StartsWith(ToolsRoot + "/", StringComparison.Ordinal) && relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) ||
                EnglishWholeDirectories.Any(directory => relative.StartsWith(directory + "/", StringComparison.Ordinal)) ||
                IsGeneratedFile(relative);
     }

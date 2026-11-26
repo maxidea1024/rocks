@@ -186,6 +186,9 @@ internal static class CompilerDriver
                 "Use the supported Clang/toolchain and metadata subset; add a reviewed parser case before accepting a new AST shape.");
         }
 
+        // Sparks 노출(상속·끊기)과 노출 규칙이다(Docs/Design/SparksBinding.ko.md — descriptor가 실효 노출 flag를 싣는다). AST 모양 예외 변환
+        // 밖에서 부른다(이름 표 적재 실패가 RMC2001로 바뀌지 않게).
+        SparksBinding.Resolve(schema, SparksNames.Load());
         foreach (ClassModel type in schema.Ordered)
         {
             // 의존 모듈이 이미 리플렉션한 이름을 이 모듈이 다시 정의하면(헤더를 include하지 않은 재정의) 한 프로그램에서
@@ -374,6 +377,7 @@ internal static class CompilerDriver
         }
 
         byte[] descriptor = ModuleDescriptor.Write(options.Module, schema.Ordered);
+        byte[]? bindingSchema = options.BindingSchema is null ? null : SparksBinding.Write(options.Module, schema);
         beforeManifestVerification?.Invoke();
         // 외부 편집은 파일 잠금을 따르지 않을 수 있다. 이 비교는 확인 시점의 변경을 감지하지만
         // 검사 이후 게시 사이에 다른 프로세스가 바꾸는 것까지 OS 원자 CAS로 막지는 않는다.
@@ -391,6 +395,11 @@ internal static class CompilerDriver
             if (!File.Exists(options.Descriptor) || !File.ReadAllBytes(options.Descriptor).AsSpan().SequenceEqual(descriptor))
             {
                 throw new MetadataException($"generated descriptor is stale: {options.Descriptor}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
+            }
+
+            if (options.BindingSchema is not null && (!File.Exists(options.BindingSchema) || !File.ReadAllBytes(options.BindingSchema).AsSpan().SequenceEqual(bindingSchema)))
+            {
+                throw new MetadataException($"generated binding schema is stale: {options.BindingSchema}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
             }
 
             HashSet<string> expected = formattedOutputs.Select(output => Path.GetFullPath(output.Path)).ToHashSet(
@@ -424,7 +433,8 @@ internal static class CompilerDriver
 
             var declarations = schema.Ordered.SelectMany(type =>
                 new[] { Declaration("type", type.Name, type.Id, type.Site) }
-                    .Concat(type.OwnFields.Select(field => Declaration("field", field.Owner + "::" + field.Name, field.Id, field.Site))))
+                    .Concat(type.OwnFields.Select(field => Declaration("field", field.Owner + "::" + field.Name, field.Id, field.Site)))
+                    .Concat(type.Functions.Select(function => Declaration("function", function.Owner + "::" + function.Name, function.Id, function.Site))))
                 .ToArray();
             string json = JsonSerializer.Serialize(new { schema = 1, declarations }, new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n";
             AtomicFile.WriteIfChanged(options.IdentityInventory, new UTF8Encoding(false, true).GetBytes(json));
@@ -441,6 +451,10 @@ internal static class CompilerDriver
             }
 
             AtomicFile.WriteIfChanged(options.Descriptor, descriptor);
+            if (options.BindingSchema is not null)
+            {
+                AtomicFile.WriteIfChanged(options.BindingSchema, bindingSchema!);
+            }
         }
 
         Console.WriteLine($"Rocks metadata: module {options.Module}: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
@@ -901,7 +915,7 @@ internal static class CompilerDriver
 
     // 메타 컴파일러가 정하는 타깃 매크로 넷이다(Docs/Design/BuildTargets 3.4절 BS2c). 에디터 조합은 에디터 코드·데이터가 있고, 게임 조합은 둘 다
     // 없다. 서버·클라이언트 코드는 둘 다 있다(그 조건 안의 리플렉션 선언은 어휘 스캔이 막는다).
-    private static IEnumerable<string> TargetMacroArguments(bool clangCl, bool editor)
+    internal static IEnumerable<string> TargetMacroArguments(bool clangCl, bool editor)
     {
         string prefix = clangCl ? "/D" : "-D";
         string bit = editor ? "1" : "0";
@@ -940,6 +954,22 @@ internal static class CompilerDriver
                     "other field outside it; a Binds mirror lists the real type's members without EditorOnly (Docs/Design/BuildTargets section 3.4).")
                     .At(field.Site);
             }
+
+            // 리플렉션 함수도 EditorOnly 지정과 #if ROCKS_WITH_EDITOR 블록 위치가 같아야 한다(RMC2706 — Docs/Design/FunctionReflection.ko.md FD14).
+            foreach (FunctionModel function in type.Functions)
+            {
+                bool inBlock = scan.InEditorBlock(function.Site.File, function.Site.Line);
+                if (inBlock == function.Spec.EditorOnly)
+                {
+                    continue;
+                }
+
+                string problem = function.Spec.EditorOnly ? "is EditorOnly but not inside '#if ROCKS_WITH_EDITOR'"
+                    : "is inside '#if ROCKS_WITH_EDITOR' but not EditorOnly";
+                throw new MetadataException($"{type.Name}::{function.Name} {problem}", "RMC2706",
+                    "Write editor-only functions as ROCKS_FUNCTION(EditorOnly, ...) directly inside '#if ROCKS_WITH_EDITOR' ... '#endif', and every " +
+                    "other reflected function outside it (Docs/Design/FunctionReflection.ko.md FD14).").At(function.Site);
+            }
         }
     }
 
@@ -973,9 +1003,9 @@ internal static class CompilerDriver
     private static void CompareVariants(Dictionary<string, ClassModel> editor, Dictionary<string, ClassModel> game)
     {
         MetadataException Differs(ClassModel type, string what) => new MetadataException(
-            $"{type.Name}: {what} differs between the editor combination and the game combination (ROCKS_WITH_EDITOR_DATA=0)", "RMC2503",
-            "Only EditorOnly fields in '#if ROCKS_WITH_EDITOR_DATA' may differ; do not change types, bases, other fields or enumerators " +
-            "with target macros, even through an indirect macro (Docs/Design/BuildTargets section 3.4).").At(type.Site);
+            $"{type.Name}: {what} differs between the editor combination and the game combination (ROCKS_WITH_EDITOR=0, ROCKS_WITH_EDITOR_DATA=0)", "RMC2503",
+            "Only EditorOnly fields in '#if ROCKS_WITH_EDITOR_DATA' and EditorOnly functions in '#if ROCKS_WITH_EDITOR' may differ; do not change types, " +
+            "bases, other fields, function signatures or enumerators with target macros, even through an indirect macro (Docs/Design/BuildTargets section 3.4).").At(type.Site);
 
         foreach (ClassModel type in editor.Values.OrderBy(type => type.Name, StringComparer.Ordinal))
         {
@@ -1000,6 +1030,18 @@ internal static class CompilerDriver
             {
                 throw Differs(type, "the enumerator list");
             }
+
+            // 리플렉션 함수는 EditorOnly 함수만 게임 조합에서 빠질 수 있다(이름·static·const·지정자·쓴 형식 철자가 같아야 한다).
+            static string FunctionShape(FunctionModel function) =>
+                $"{function.Name} {function.IsStatic} {function.IsConst} {function.Spec.Pure} {function.Spec.ToolName} {function.Spec.ScriptCallable} " +
+                $"{function.Spec.ScriptName} {string.Join(",", function.Spec.ScriptEffects)} {function.Spec.ScriptOneShot} {string.Join(",", function.Spec.ScriptPerSecond)} " +
+                string.Join(",", function.Parameters.Select(slot => slot.Name + ":" + slot.NativeSpelling)) + " -> " + (function.Result?.NativeSpelling ?? "void");
+            string[] editorFunctions = [.. type.Functions.Where(function => !function.Spec.EditorOnly).Select(FunctionShape)];
+            string[] gameFunctions = [.. other.Functions.Select(FunctionShape)];
+            if (!editorFunctions.SequenceEqual(gameFunctions, StringComparer.Ordinal))
+            {
+                throw Differs(type, "the reflected function list");
+            }
         }
 
         if (game.Keys.FirstOrDefault(name => !editor.ContainsKey(name)) is { } extra)
@@ -1008,7 +1050,7 @@ internal static class CompilerDriver
         }
     }
 
-    private static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
+    internal static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
         string root, IReadOnlyDictionary<string, string?> environment)
     {
         // 허용된 프로필의 의미를 추측해 우회 인자 목록을 계속 추가하지 않는다. 프로필 확장은
@@ -1153,7 +1195,7 @@ internal static class CompilerDriver
 
     // 조립된 결과에서 검사하므로 C# 문자열을 나눠 내장 이름을 만들어도 빠져나가지 않는다.
     // 입력 파일의 내용은 여기서 펼치지 않으며 생성기 자신이 만든 C++만 검사한다.
-    private static string ValidateGeneratedCode(string source)
+    internal static string ValidateGeneratedCode(string source)
     {
         if (CompilerTypeTraits.FirstGeneratedBuiltinUse(source) is string intrinsic)
         {
@@ -1168,7 +1210,7 @@ internal static class CompilerDriver
         "unsupported compiler option override: " + argument, "RMC1000",
         "Use the documented native profile, explicit -D or /D definitions, and --include-dir; unsupported flags require a reviewed profile extension.");
 
-    private static void ValidateIncludeBinding(string input, string include, IEnumerable<string> directories)
+    internal static void ValidateIncludeBinding(string input, string include, IEnumerable<string> directories)
     {
         string? target = directories.Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
             .FirstOrDefault(File.Exists);
@@ -1215,7 +1257,7 @@ internal static class CompilerDriver
         return notes.ToString();
     }
 
-    private static string? FindRoot()
+    internal static string? FindRoot()
     {
         for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {

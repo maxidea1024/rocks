@@ -142,7 +142,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 
 ### 16.9 전수 목록
 
-갤러리가 빠짐없이 덮어야 하는 구현 부품과 기능의 목록이다(리뷰어 전수 조사 2026-11-25 — UiCore·UiFramework·UiWidget·UiScreens·WorldIntegration·UiRender·TextLayout 공개 헤더 전부). 행을 고르는 기준이고, 부품이 생기거나 없어지면 이 목록을 먼저 고친다.
+갤러리가 빠짐없이 덮어야 하는 구현 부품과 기능의 목록이다(리뷰어 전수 조사 2026-11-25 — UiCore·UiFramework·UiWidget·UiScreens·UiWorld·UiRender·TextLayout 공개 헤더 전부). 행을 고르는 기준이고, 부품이 생기거나 없어지면 이 목록을 먼저 고친다.
 
 #### 16.9.1 부품
 
@@ -156,7 +156,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 - **Widget 층 전용**: RichTextBlockWidget(+RichTextStyle·Decorator·ImageDecorator), EditableText·EditableTextBox·MultiLineEditableText(Box)Widget, ExpandableAreaWidget, ComboBoxString·KeyWidget, CarouselWidget(자동 넘김)·CarouselNavBarWidget, SafeZoneWidget, DynamicEntryBoxWidget(+RadialBoxSettings — 원형 배치는 private `EntryPatternPanel`), ListViewWidget::UseObjectItems·WidgetPool, UserWidget·UserWidgetAnimation·WidgetAnimation(채널·재생 방식), WidgetTransform, Widget 공통(SetToolTipText·SetAccessibleText·SetNavigationRule·SetCursor), MVVM 바인딩(WidgetFieldBindings·WidgetModelSource·WidgetPropertyBinding·WidgetEventBinding).
 - **Widget 층 감싼 것(이름 대응)**: Button·CheckBox·ComboBox·MenuAnchor·Image·ProgressBar·Slider·SpinBox·RadialSlider·ScrollBar·InputKeySelector·Throbber·CircularThrobber·TextLabel·Border(Frame)·SizeBox·Spacer·NamedSlot·NativeWidgetHost·Overlay·CanvasPanel(AnchorCanvas)·GridPanel·UniformGridPanel·HorizontalBox·VerticalBox·StackPanel·StackBox·WrapBox·ScaleBox(FitBox)·WidgetSwitcher·ScrollBox·InvalidationBox(CachePanel)·RetainerBox·BackgroundBlur·PostBufferUpdate·Viewport·WindowTitleBarArea·ListView·TileView·TreeView Widget.
 - **UiScreens**: Screen(입력 모드), ScreenStack·Queue·Switcher(초점 복구·플레이어별 초점)와 Widget 판, ScreenTabListWidget, HardwareVisibilityWidget, ScreenInputRouter·ScreenDeviceState.
-- **WorldIntegration·UiRender**: 월드 위젯(갤러리 밖 — WorldWidgetSelfTest), 렌더 기반(Effects가 간접으로 보인다).
+- **UiWorld·UiRender**: 월드 위젯(갤러리 밖 — WorldWidgetSelfTest), 렌더 기반(Effects가 간접으로 보인다).
 
 #### 16.9.2 공통 기능(Behavior 탭)
 

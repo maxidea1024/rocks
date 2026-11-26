@@ -3,6 +3,7 @@
 #include <Core/Text/Json.h>
 
 #include "NameBinder.h"
+#include "TypeFacts.h"
 
 // 타입 검사(LC2c)다(Docs/Design/SparksLanguage 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
 // (NameBinder)의 이름 공간과 심볼을 그대로 쓰며 NameBinder::Run의 마지막에 돈다. 파일:
@@ -12,19 +13,6 @@
 //   CheckStatements.cpp  선언 초기값·본문·문장·반환·switch
 
 namespace rocks::sparks::detail {
-
-// 숫자 타입의 분류다.
-enum class NumericKind : uint8 {
-    None,
-    Signed,
-    Unsigned,
-    Float
-};
-
-struct NumericInfo {
-    NumericKind kind = NumericKind::None;
-    uint32 bits = 0;
-};
 
 // 컴파일 때 아는 값이다(상수식·switch case·const).
 struct ConstantValue {
@@ -362,7 +350,7 @@ private:
     // 진단 문장의 타입 표기다(정규 이름 대신 선언 이름 — `Mode`, `Array<Box>?`).
     void AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept;
 
-    // ---- 타입 관계(TypeRelations.cpp) ----
+    // ---- 타입 관계(TypeRelations.cpp — 표만 읽는 판정은 TypeFacts에 맡긴다) ----
     NumericInfo Numeric(uint32 type) const noexcept;
     bool IsOptional(uint32 type) const noexcept;
     uint32 NonOptional(uint32 type) noexcept;
@@ -418,6 +406,14 @@ private:
     ExpressionValue CheckIdentifier(const CheckContext& context, uint32 node) noexcept;
     ExpressionValue ValueOfSymbol(const CheckContext& context, uint32 symbol, uint32 receiver,
                                   bool instance) noexcept;
+    // node부터 왼쪽 자식으로 내려가며 같은 무리(logical이면 `&&`·`||`, 아니면 `??` 밖의
+    // 산술·비교)의 Binary 노드를 바깥부터 spine에 모은다. 할당 실패면 거짓이다(binder_.error_에
+    // 남긴다).
+    bool CollectBinarySpine(const CheckContext& context, uint32 node, bool logical,
+                            Array<uint32>& spine) noexcept;
+    // 멤버·호출·인덱스·`as?` 후위 사슬을 받는 쪽부터 반복으로 판정한다(재귀하지 않는다).
+    ExpressionValue CheckPostfix(const CheckContext& context, uint32 node,
+                                 uint32 expected) noexcept;
     ExpressionValue CheckBinary(const CheckContext& context, uint32 node) noexcept;
     ExpressionValue CheckLogical(const CheckContext& context, uint32 node) noexcept;
     ExpressionValue CombineLogical(const CheckContext& context, uint32 node,
@@ -439,7 +435,6 @@ private:
     ExpressionValue CheckUnary(const CheckContext& context, uint32 node, uint32 expected) noexcept;
     ExpressionValue CheckUnaryValue(const CheckContext& context, uint32 node,
                                     uint32 expected) noexcept;
-    ExpressionValue CheckIndex(const CheckContext& context, uint32 node) noexcept;
     ExpressionValue IndexValue(const CheckContext& context, uint32 node,
                                const ExpressionValue& object) noexcept;
     ExpressionValue JudgeIndex(const CheckContext& context, uint32 node,
@@ -449,7 +444,6 @@ private:
     ExpressionValue CheckCollectionValue(const CheckContext& context, uint32 node,
                                          uint32 expected) noexcept;
     ExpressionValue CheckString(const CheckContext& context, uint32 node) noexcept;
-    ExpressionValue CheckCast(const CheckContext& context, uint32 node) noexcept;
     ExpressionValue CastOf(const CheckContext& context, uint32 node,
                            const ExpressionValue& operand) noexcept;
     ExpressionValue CastOfValue(const CheckContext& context, uint32 node,
@@ -474,13 +468,11 @@ private:
     void ReportMismatch(const CheckContext& context, uint32 node, uint32 from, uint32 to) noexcept;
 
     // ---- 멤버·호출(CheckCalls.cpp) ----
-    ExpressionValue CheckMember(const CheckContext& context, uint32 node) noexcept;
-    // 받는 값을 검사한 뒤의 멤버 판정이다(재귀 경로 밖 — CheckBinary 참고).
+    // 받는 값을 검사한 뒤의 멤버 판정이다(CheckPostfix가 사슬마다 부른다).
     ExpressionValue MemberOf(const CheckContext& context, uint32 node,
                              const ExpressionValue& receiver) noexcept;
     ExpressionValue MemberOfValue(const CheckContext& context, uint32 node,
                                   const ExpressionValue& receiver) noexcept;
-    ExpressionValue CheckCall(const CheckContext& context, uint32 node, uint32 expected) noexcept;
     // 부르는 값을 검사한 뒤의 호출 판정이다(재귀 경로 밖 — CheckBinary 참고).
     ExpressionValue CallValue(const CheckContext& context, uint32 node, uint32 expected,
                               const ExpressionValue& callee) noexcept;

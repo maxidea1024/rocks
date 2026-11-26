@@ -270,4 +270,37 @@ TEST(AssetManager_EdgeBatchCoalescesPerPair) {
     }
 }
 
+// 한 묶음에서 간선 하나가 빠져 대상 이웃 칸이 비고, 뒤 간선이 같은 대상에 새로 이을 때(Discard한
+// 패키지의 옛 간선과 다시 로드한 패키지의 새 간선이 같은 대상을 가리키는 경우와 같은 모양): 빈 칸은
+// 묶음 끝에 해제하므로 뒤 간선이 그 칸에 잇는다. 대상의 보유는 새 간선 하나다.
+TEST(AssetManager_EdgeBatchRelinksEmptiedNode) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ManagerRig rig(env);
+    rig.scene.Add(1);
+    rig.scene.Add(2);
+    rig.scene.Add(3);
+    REQUIRE(rig.Cook());
+    REQUIRE(rig.Start());
+    LoadTicket one = rig.Request(1);
+    LoadTicket two = rig.Request(2);
+    LoadTicket three = rig.Request(3);
+    REQUIRE(rig.Settle());
+    REQUIRE(rig.SetHard(1, 3));
+    REQUIRE(rig.Pump());
+    CHECK(rig.UnitOf(3).info.inboundEdges == 1);
+
+    // 묶음 안 순서: 소유 칸 순(1 → 3 빼기가 2 → 3 잇기보다 먼저)이라 3의 칸이 먼저 빈다.
+    REQUIRE(rig.manager->Loader().FindPackage(FixedId(1)).Value().slot <
+            rig.manager->Loader().FindPackage(FixedId(2)).Value().slot);
+    REQUIRE(rig.SetHard(1, 0));
+    REQUIRE(rig.SetHard(2, 3));
+    REQUIRE(rig.Pump());
+    CHECK(rig.UnitOf(3).info.inboundEdges == 1);
+    // 다음 묶음에서 그 간선을 빼면 보유가 0이다(칸이 제대로 이어졌다).
+    REQUIRE(rig.SetHard(2, 0));
+    REQUIRE(rig.Pump());
+    CHECK(rig.UnitOf(3).info.inboundEdges == 0);
+}
+
 } // namespace manager_graph_tests_file

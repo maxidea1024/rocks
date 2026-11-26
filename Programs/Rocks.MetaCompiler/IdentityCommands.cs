@@ -47,13 +47,15 @@ internal static class IdentityCommands
         {
             case "add":
                 {
-                    Allow("manifest", "type", "field");
+                    Allow("manifest", "type", "field", "function");
                     string path = ManifestPath(One("manifest"));
                     string[] types = Many("type");
                     string[] fields = Many("field");
-                    if (types.Length + fields.Length == 0)
+                    // 리플렉션 함수(ROCKS_FUNCTION — `<클래스>::<함수>`, Docs/Design/FunctionReflection.ko.md FD3)다.
+                    string[] functions = Many("function");
+                    if (types.Length + fields.Length + functions.Length == 0)
                     {
-                        throw new ArgumentException("Specify at least one --type or --field.");
+                        throw new ArgumentException("Specify at least one --type, --field or --function.");
                     }
 
                     StableIdManifest.Update(path, true, manifest =>
@@ -68,9 +70,14 @@ internal static class IdentityCommands
                             manifest.Register("field", name);
                         }
 
+                        foreach (string name in functions)
+                        {
+                            manifest.Register("function", name);
+                        }
+
                         return 0;
                     });
-                    Console.WriteLine($"Registered {types.Length} types and {fields.Length} fields in {path}.");
+                    Console.WriteLine($"Registered {types.Length} types, {fields.Length} fields and {functions.Length} functions in {path}.");
                     return 0;
                 }
             case "reissue":

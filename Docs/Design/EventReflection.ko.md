@@ -1,0 +1,86 @@
+# 이벤트 리플렉션(CU3)
+
+이 문서는 리플렉션된 이벤트(UiToolkit CU3, UE dynamic multicast delegate 대응)와 그 위의 함수 바인딩(함수 리플렉션 FR4)을 정한다: 재사용 함수 바인딩 값, 이벤트 필드 타입, 서명·frame 배치 검사, 발행, 대상 파괴 시 자동 해제, 발행자 수명, 저장, 리플렉션 schema, 단계. 사용처는 Sparks 이벤트(EI1c·EI3 — SL 5.2·5.5절, 연동 요구 SE-R2), UI 이벤트 연결(WidgetAsset — UiToolkit 5절), 입력 action 함수 바인딩(InputActions IA7), 에디터 이벤트 목록. 구조는 UE 5.8을 따르고 이름은 Rocks식이다(UE 이름은 대응표에만).
+
+- 개정 2(2026-11-26): 교차 검증 반영 — 인자는 값(nothrow 복사) 또는 `const T&`(ED1), 서명 일치는 frame 칸 C++ 형식·배치(ED5, FD11 개정), 발행 1회당 스택 frame 하나 + 생성 thunk 직접 호출(ED6 — 바인딩마다 할당·전역 잠금 없음), 재사용 값 `FunctionBinding`(ED3 — IA7과 공유), adapter는 (상태, 바인딩 id)만 쥠·Event 이동 금지(ED2), 생존 판정은 Event의 `Compact`·`TryBind` 분할 상환(ED7 — C1은 Sparks용), 발행자 Borrow·논리 파괴 `UnbindAll`(ED8), 로드는 Commit 뒤 다시 바인딩(ED10), 클래스 기본값엔 바인딩 없음·에셋 바인딩은 템플릿 바인딩 표(ED10 — UE `UComponentDelegateBinding`), `ValueKind::Event` 없음·`RuntimeEventOps`(ED9), Event 16 byte(ED13), Broadcast는 결과 없음 + `TryBroadcast`(ED6), EditorOnly·static 대상 규칙(ED4), UE 사실 정정(2절), 단계 재분할(EV1a·EV1b·EV3a·EV3b).
+- 개정 1(2026-11-26): 첫 판 — 결정 ED1–ED14, 단계 EV0–EV5. 이 세션(rocks-1b)이 맡는다(사용자 결정 2026-11-26).
+
+## 1. 단계
+
+| 단계 | 내용 | 선행 |
+|---|---|---|
+| EV0 Core delegate 보강 | SL 5.5절 C2–C4: `TryAdd`의 상한 compact, 순서를 지키는 단일 pass compact, `CompactDead`·`Stats`. C1(생존을 밖에서 판정하는 대상)은 Sparks 연결(EI3) 때 | 없음 |
+| EV1a 함수 바인딩 | `FunctionBinding`(대상 handle + FunctionId, 바인딩 시점 검사, frame 호출), `FunctionSignatureMatches`(ParameterSchema·frame 배치판 — FD11), `detail::FrameLayoutOf<Args...>` — FR4. 이것이 끝나면 InputActions IA7을 시작할 수 있다 | FR1 |
+| EV1b 이벤트 타입 | `Event<Args...>`(지연 상태, native 구독 + 리플렉션 바인딩, 스택 frame 발행, 발행자 Borrow, `Compact`·`TryBind` 정리, `UnbindAll`), bench | EV0, EV1a |
+| EV2 리플렉션 | `ROCKS_PROPERTY(Params = "…")` 이벤트 필드, `FieldKind::Event`, `FieldSchema::eventParameters`, `RuntimeEventOps`, 값 필드 경로 점검표와 이벤트 fixture 시험, descriptor schema 7 | EV1b |
+| EV3a 그래프 저장 | 실행 중에 만든 리플렉션 바인딩(세이브 게임)의 저장·로드 — Commit 뒤 다시 바인딩, 그래프 밖 대상 버림, 쿠킹의 EditorOnly 대상 거부 | EV2 |
+| EV3b 템플릿 바인딩 표 | WidgetAsset·Prefab의 바인딩 표(원천 subobject 경로, 이벤트 FieldId, 대상 경로, FunctionId)를 인스턴싱 때 적용(UE `UComponentDelegateBinding`) | EV2, UiToolkit UT5·Prefab 단계 |
+| EV4 Sparks binding | schema `events`(EI1c — `Params`·`publisher`·`ScriptAssignable`·`ScriptBroadcast`), 스크립트 단계 안 발행 순서 결정(ED11) | EV2 |
+| EV5 편집 | 에디터 이벤트 목록·연결 편집 | EV3b, UI 단계 |
+
+## 2. UE 5.8 구조(대응표)
+
+| UE | 위치 | Rocks |
+|---|---|---|
+| `TScriptDelegate`(약한 객체 + 함수 이름) | `Core/Public/UObject/ScriptDelegates.h:487`, 실행 `ProcessDelegate` `:991` — `FindFunctionChecked(FunctionName)` 뒤 `ProcessEvent(Function, Parameters)`(호출자가 만든 `Parms` 하나) | `FunctionBinding`(약한 handle + FunctionId — ED3), 발행 frame 하나(ED6) |
+| `TMulticastScriptDelegate` | `ScriptDelegates.h:1095`, 실행 `:1429` — 목록 **사본**을 돌며 `IsBound`인 것을 호출하므로 발행 중 지운 바인딩도 그 발행에서는 불린다(`:1438-1446`), 끝에 `CompactInvocationList` — `RemoveAllSwap`이라 순서가 바뀐다(`:1600-1602`) | `Event<Args...>` 안쪽 Core `MulticastDelegate` — 발행 중 지운 항목은 이후 불리지 않고, 정리가 등록 순서를 지킨다(Rocks가 더 강하다) |
+| `Add`·`AddUnique`·`Remove`(객체·이름) | `ScriptDelegates.h:1222-1296` | `TryBind`(같은 쌍은 `AlreadyExists` — ED4)·`Unbind`·`UnbindAll` |
+| `FMulticastDelegateProperty`(+ `SignatureFunction`), 하위 Inline·Sparse | `CoreUObject/Public/UObject/UnrealType.h:6558-6618`, `6693`, `6748` | 이벤트 필드(ED8 — 서명은 C++ 타입 인자, Sparse 대응은 지연 상태 — ED13) |
+| 서명 함수 `FUNC_MulticastDelegate`·`FUNC_Delegate` | `CoreUObject/Public/UObject/Script.h:153`·`:157` | 없음 — 매개변수 schema를 필드에 직접 싣는다(ED9) |
+| `BlueprintAssignable`·`BlueprintCallable`·`BlueprintAuthorityOnly` | `ObjectMacros.h:462,478,479` | `ScriptAssignable`·`ScriptBroadcast`(EV4)·권한은 네트워크 단계 |
+| 서명 검사 | `AddDynamic`은 형식이 정해진 멤버 함수 포인터를 받아 C++ 컴파일 때 검사한다(`DelegateSignatureImpl.inl:1192,1384`). BP 컴파일러는 `IsSignatureCompatibleWith`. 이름으로 직접 거는 `BindUFunction`만 검사가 없다 | `TryBind`가 실행 중 바인딩 시점에 검사한다(이름·ID로 거는 길뿐이라) |
+| 에셋 이벤트 바인딩 | 클래스 단위 표 `UComponentDelegateBinding`(`ComponentDelegateBinding.h:13-47`), 적용 `BindDynamicDelegates`(`BlueprintGeneratedClass.cpp:1624-1646`) | 템플릿 바인딩 표(EV3b — ED10) |
+| native `TMulticastDelegate` | `Core/Public/Delegates/MulticastDelegateBase.h` | Core `MulticastDelegate`(있음) |
+
+UE는 native multicast와 dynamic multicast를 다른 타입으로 둔다. Rocks는 이벤트 필드 하나가 둘을 함께 담는다(ED2): 엔진 C++ 구독자가 이벤트마다 native 사본을 따로 두지 않게(UE의 `OnX`·`OnXDynamic` 쌍).
+
+## 3. 결정
+
+- **ED1 이벤트 타입과 인자:** 이벤트 필드는 ObjectRuntime `Event<Args...>`(`Object/Event.h`)다. 안쪽 저장은 Core `MulticastDelegate`(등록 순서·발행 중 추가·제거·지연 정리 — Core 계약 그대로, 중복 구현 금지). `Args`는 FD4의 매개변수 형식이고 각 인자는 (a) nothrow 복사 가능한 값(정수·`bool`·실수·enum·`ObjectHandle`·`WeakObjectRef<T>`·`ClassRef<T>`·`Guid` 등 — Core가 대상마다 복사해 넘긴다) 또는 (b) `const T&`(`String`·컨테이너·struct·`SoftObjectRef<T>` — 복사할 수 없거나 큰 형식, IA7 `const ActionEventData&`)다. `StringView`는 받지 않는다(발행자 저장소를 가리켜 큐에 넣을 수 없다 — `const String&`). 반환은 없다(UE와 같다). 이벤트 필드는 리플렉션 클래스의 필드에만 둔다: struct 멤버·컨테이너(Array·Optional·Map·정적 배열) 원소는 불가(바인딩이 발행자 객체에 묶이고 값 복사로 바인딩이 둘이 되면 안 된다 — UE는 struct 안 delegate를 허용하지만 Rocks는 막는다). `Event`는 복사·이동을 지운다(adapter가 상태 주소를 쥔다 — ED2).
+- **ED2 항목과 상태:** `Event`는 `Allocator*`와 지연 할당 상태 포인터(16 byte — ED13)다. 상태는 안쪽 `MulticastDelegate<void(Args...)>`, 리플렉션 바인딩 레코드 배열(바인딩 id 순 — `{id, FunctionBinding, DelegateHandle, dead}`), 발행 문맥 사슬(ED6)을 쥔다. native 구독(`TryAdd(Delegate)`·`TryAddLambda` — C++ 엔진 코드, 저장하지 않는다)과 리플렉션 바인딩(`TryBind` — 저장한다)은 모두 안쪽 delegate의 항목이라 호출 순서는 섞인 등록 순서다. 리플렉션 바인딩의 항목은 `{상태*, 바인딩 id}`만 쥔 adapter다(inline 48 byte 안 — 레코드 배열이 발행 중 커지거나 당겨져도 adapter는 id로 찾는다). adapter의 소멸(Core 정리가 부른다)이 레코드를 지운다(Core는 정리 중 소멸자 재진입을 허용한다).
+- **ED3 `FunctionBinding`(EV1a — FR4의 재사용 값):** `(ObjectHandle target, Guid functionId)` + 바인딩 시점 검사 결과(대상 타입의 등록 세대, 함수의 타입·index 캐시). `Result<FunctionBinding> FunctionBinding::Create(registry, access, target, functionId, const FrameLayout& expected)` — 대상 해석(Registry 오류 그대로), 함수 찾기(기반 체인, 없으면 `NotFound`), 서명·배치 검사(ED5 — `TypeMismatch`), static 함수 거부(`InvalidArgument` — 대상 없는 바인딩은 의미가 없다). `Result<void> Invoke(registry, access, void* frame)` — 대상 타입 lease(해석에 어차피 필요하다)에서 캐시한 함수 index로 잠금 없이 연산표를 찾아 생성 `invoke`를 부른다. 등록 세대가 바뀌었으면(reload·Unregister 뒤 재등록) 다시 찾고 서명을 다시 맞춰 보며, 안 맞으면 `TypeMismatch`를 돌려 호출자가 죽음 표시·경고 1회를 남긴다(ED7). Event와 InputActions의 `InputActionBindings`(이벤트 마스크·`consumes`·전달 중 지운 바인딩 규칙이 따로 있다)가 함께 쓴다. 대상은 handle만 쥔다(강한 참조가 아니므로 대상 수명을 늘리지 않고 GC trace 대상도 아니다). FunctionId로 잇는다(이름을 바꿔도 ids rename으로 이어진다 — UE는 `FName`).
+- **ED4 바인딩 API:** `Event::TryBind(registry, access, target, functionId)` → `Result<DelegateHandle>`. 같은 (대상, 함수) 쌍이 이미 있으면 `AlreadyExists`(UE `AddUnique`는 handle을 공유해 한쪽 `Remove`가 다른 바인딩자의 것까지 지운다 — Rocks는 거부한다). `EditorOnly` 함수는 에디터 빌드에서 받는다(에디터 도구 바인딩). 게임 빌드에는 그 함수가 없어 `NotFound`이고, 저장된 바인딩이 EditorOnly 함수를 가리키면 쿠킹(asset-cook — TypeRegistry 함수 flag를 본다)이 오류로 거부한다(EV3a). `Unbind(DelegateHandle)`, `UnbindAll(target)`(UE `RemoveAll(Object)`), `UnbindAll()`. 바인딩·발행은 발행자 소유 스레드·접근 문맥에서만(ED12).
+- **ED5 서명·배치 검사(FD11 개정):** `FunctionSignatureMatches(const FunctionSchema&, const RuntimeFunctionOps&, const FrameLayout& expected)` — 매개변수 수가 같고, 칸마다 frame 칸의 정규 C++ 형식(`RuntimeParameterOps::value->nativeType` — `NativeTypeKey`)과 offset이 같으며, frame 크기·정렬과 반환(이벤트는 반환 없음·`ReturnsResult` 아님)이 같다. 이름은 무시한다. `ValueType`만으로는 `Array<int32>`와 `Array<float>`, `ObjectHandle`과 `WeakObjectRef<Object>`를 가르지 못하므로(개정 1의 잘못) C++ 형식으로 본다 — 값·`const&` 차이는 frame 칸이 같아 저절로 무시된다. 기대 배치 `FrameLayout`(칸 C++ 형식·offset·크기·정렬)은 `detail::FrameLayoutOf<Args...>()`가 생성 frame과 같은 규칙(칸 `FrameSlot<T>` — `const T&`는 `T`, 선언 순서, 뒤에 `ErrorCode error`, 표준 배치 struct의 offset 규칙)으로 계산한다. 생성 frame 배치 규칙은 FunctionReflection 7절이 정본이고 시험이 생성 frame과 템플릿 계산을 대조한다.
+- **ED6 발행:** `Broadcast(const EventContext&, Args... args)` — `EventContext`는 `{ObjectRegistry&, const ObjectAccessContext&, ObjectHandle publisher}`다. (1) `VerifyAccess`(다른 스레드·문맥이면 바로 실패 — 바인딩마다 모으지 않는다), (2) 발행자를 Borrow로 붙잡아 발행 중 회수되지 않게 한다(호출된 함수가 `Collect`·`DrainRetired`를 불러도 — ObjectRegistry 회수 규칙), (3) 리플렉션 바인딩이 하나라도 있으면 스택에 frame 하나를 만들어 인자를 한 번 복사한다(`const T&` 칸은 값 ops `copy` — 할당은 Registry 객체 allocator, 실패하면 리플렉션 바인딩만 건너뛰고 오류로 센다), (4) 상태의 문맥 사슬에 `{context, frame*, firstError}`를 RAII로 쌓고 안쪽 `MulticastDelegate::Broadcast(args...)`를 부른다 — native 구독은 Core대로, adapter는 사슬 꼭대기의 frame으로 `FunctionBinding::Invoke`(같은 frame을 바인딩마다 다시 쓴다: FD4가 "thunk는 인자를 옮기지 않는다"를 보장한다). 지금 실행 중인 adapter는 언제나 가장 안쪽 발행의 것이므로 사슬 꼭대기가 맞다(thread_local이 아니라 상태 안에 둔다 — 공개 헤더에 thread_local을 두지 않는다). 대상 실패: `StaleHandle`·`Destroyed`는 죽음 표시(ED7), `TypeMismatch`·`NotFound`(reload로 함수가 바뀜·사라짐)는 죽음 표시와 경고 1회, 그 밖(`Busy`·할당 실패)은 그 호출만 실패. 다른 대상은 계속 부른다. `Broadcast`는 결과를 돌려주지 않고(엔진 호출 지점마다 결과 처리를 강요하지 않는다 — 실패는 바인딩별 경고 1회), 결과가 필요한 호출자는 `TryBroadcast`(첫 실패 코드)를 쓴다.
+- **ED7 자동 해제:** adapter의 생존 질의는 레코드의 죽음 표시만 본다(Core 정리는 registry 없이 돈다). 표시는 (a) 호출 실패(ED6), (b) `Event::Compact(registry, access)`가 레코드 대상을 Registry 생존 조회로 훑어 단다. `TryBind`는 Registry가 있으므로 Core C2와 같은 상한(죽은·의심 항목이 직전 정리 뒤 살아 있던 수 + 8을 넘지 않음)으로 분할 상환 `Compact`를 한다 — 한 번도 발행되지 않는 이벤트(UI)에도 죽은 바인딩이 끝없이 쌓이지 않는다. 대상 쪽 역방향 목록은 두지 않는다(1M 객체 — 구독하지 않는 객체에 비용이 없게, UE도 없다). C1(밖에서 생존을 판정하는 Core 대상)은 Sparks 연결 항목(slot·generation key — SL 5.5)용이다.
+- **ED8 발행자 수명:** 발행 중 발행자는 Borrow로 산다(ED6). 발행자의 논리 파괴(World `DestroyActor`·`DestroyComponent`의 정리, SE-O1 회수 전 cleanup hook)는 이벤트 연산 `unbindAll`을 불러 연결을 비운다(SL 5.5 "발행자 Detach가 delegate를 비운다"). 저장소 회수 때는 `Event` 소멸자가 남은 항목을 정리한다(Core — 발행 중 파괴는 Fatal이지만 Borrow가 그 경로를 막는다).
+- **ED9 schema 모양:** `FieldKind::Event` 하나를 더한다(SE-R2). `ValueKind`는 늘리지 않는다(값 종류 성질 표·descriptor·FieldValue wire·text·Sparks 형식 대응이 모두 손을 타게 된다 — 이벤트 필드의 `value`는 `Opaque`). `FieldSchema`에 `Span<const ParameterSchema> eventParameters`(FunctionSchema와 같은 `ParameterSchema` — offset은 발행 frame 기준). 런타임 연산은 `RuntimeTypeOps::events`(`RuntimeEventOps` — FieldId, `bind`·`unbind`·`unbindAll`·`compact`·`encode`·`decode`(EV3a)·`broadcastFromFrame`(도구·Sparks host가 frame으로 발행 — `ScriptBroadcast`이면 필수, struct 인자는 FieldValue로 담지 못하므로 frame 경로))이고, 그 필드의 값 연산(read·write·diff·copy)은 null이다. 값 필드를 다루는 모든 경로(그래프 저장·diff·클래스 기본값·Inspector·속성 경로·ValueCopy·ReferenceLayout·descriptor·Sparks schema)가 `FieldKind::Event`를 건너뛰거나 이벤트 경로로 돌려야 한다 — 지금 `FieldKind::` 쓰임 97곳(42파일)은 대부분 `==` 비교라 컴파일러가 잡지 않는다: EV2가 점검표를 문서에 남기고, 이벤트 필드 fixture로 그 경로 전부를 지나는 시험을 둔다.
+- **ED10 저장:** (a) **클래스 기본값:** 이벤트 필드는 기본값 레코드에서 늘 비어 있다(생성자에는 Registry·handle이 없어 리플렉션 바인딩을 만들 수 없다 — ClassDefaults는 객체가 아니다). (b) **에셋 바인딩(EV3b):** WidgetAsset·Prefab 같은 템플릿은 인스턴스별 바인딩 목록이 아니라 템플릿 바인딩 표(원천 subobject 경로, 이벤트 FieldId, 대상 경로, FunctionId)를 두고 인스턴싱 때 적용한다(UE `UComponentDelegateBinding`·`BindDynamicDelegates`) — remap이 필요 없고 인스턴스마다 저장 비용이 없다. (c) **그래프 저장(EV3a — 세이브 게임 등 실행 중에 만든 바인딩):** 레코드의 (대상 참조, FunctionId) 배열을 저장한다(`Transient` 이벤트 필드는 저장하지 않는다). 대상 참조는 약한 참조 그래프 정책(ReflectionExtensions 5.1)을 그대로 쓰되, 집합 밖 대상(정책이 null + `ExternalReference` 진단)·Include 지연 덮어쓰기에서 0이 된 항목은 버린다(null 대상 바인딩은 뜻이 없다). 로드: decode는 (그래프 handle, FunctionId)를 보류 레코드로 두고(공개 전 객체는 해석되지 않는다 — ConstructionContext), Commit 뒤 fixup이 `TryBind`한다. 서명이 바뀐 바인딩: 에디터는 레코드를 보존(다시 저장할 때 사라지지 않게)하고 표시하며, 게임은 경고 후 버리고, 쿠킹은 오류로 거부한다(UE는 함수가 사라지면 실행 때 `FindFunctionChecked`가 Fatal이다).
+- **ED11 Sparks:** 이벤트 schema(EV4 — EI1c)는 `Params` 이름·형식, 발행 측(`publisher` — 네트워크 단계 전에는 기본 `all`), 노출 지정자 `ScriptAssignable`(UE `BlueprintAssignable` — Sparks `on X.Event` 연결 가능)·`ScriptBroadcast`(Sparks가 엔진 이벤트를 `emit` — 기본 불가, 멤버 이벤트는 선언한 클래스만 `emit` — SL 5.2). Sparks 연결 항목(SL 5.5 — 연결 slot·generation key·handler ID, 큐 기록 thunk)은 native 구독(C1 생존 판정 대상)으로 들어가며 리플렉션 바인딩이 아니다. 인자는 큐에 넣을 때 깊게 복사한다(`const T&` 인자가 발행자 저장소를 가리킬 수 있다). **열린 결정(EV4):** SL 5.4는 스크립트 단계 안의 native 발행도 큐 항목으로 기록하고 전달 때 C++·Sparks handler를 연결 순서대로 실행한다고 하는데, ED6은 C++ 구독자를 즉시 부른다 — 스크립트 단계 안 발행의 큐 경로(host hook)를 EV4에서 SL과 함께 정한다.
+- **ED12 스레드·문맥:** 이벤트는 발행자와 같은 소유 스레드·접근 문맥에서만 바인딩·발행한다(FD8과 같은 Registry 문맥 — `Broadcast`가 받은 access로 대상 함수를 부른다). 다른 스레드의 발행은 그 스레드의 큐로 넘긴다(엔진은 Game lane 전달 — Sparks 큐 SL 5.4).
+- **ED13 비용:** `Event`는 16 byte(`Allocator*` + 상태 포인터)이고 구독이 생길 때 상태를 할당한다 — 이벤트가 4–6개인 Actor 1M에서 상태를 늘 두면 수백 MB다(SL 5.5가 1M 때문에 지연 slot 표를 고른 것과 같은 이유, UE Sparse delegate의 몫). 리플렉션 바인딩 호출은 발행당 frame 생성 1회(스택, `const T&` 칸만 복사 할당) + 바인딩마다 대상 해석과 생성 thunk 호출이다(할당·전역 잠금 없음). EV1b 시험에 bench 한 줄(native·리플렉션 바인딩 1·16·256개 발행 비용).
+- **ED14 검사(메타 컴파일러 RMC28xx, 메시지 영어):** 리플렉션 클래스의 `Event<…>` 필드에 `ROCKS_PROPERTY` 없음(저장·Sparks가 보지 못하는 이벤트를 막는다), struct 멤버·컨테이너·정적 배열 안 `Event`, `Params` 수·lowerCamel ASCII·겹침·Sparks 키워드, `Args` 형식(FD4 거부 형식, 값 인자의 nothrow 복사, `StringView`), flag(받는 것: `Transient`(바인딩 저장 안 함 — UE에서 흔하다)·`EditorOnly`(EditorOnly 리플렉션 규칙)·`Category`·`Name`. 거부: `ReadOnly`·`Required`·`ScriptReadOnly`·`ScriptWritable`·값 필드 전용 flag), `Event` 필드를 가진 클래스의 `T(Allocator&)` 생성자(이벤트가 allocator를 받는다).
+
+## 4. 요구 대응
+
+| 요구 | 대응 |
+|---|---|
+| UiToolkit CU3 "약한 Object 바인딩, 대상 파괴 시 자동 해제, 연결을 WidgetAsset에 저장, 에디터 이벤트 목록" | ED3·ED7·ED10 (b)·EV5 |
+| SL 5.5 "발행자 쪽은 Core `MulticastDelegate`", C1–C4 | ED1(안쪽에 쥔다)·EV0(C2–C4)·C1은 EI3 |
+| SE-R2 "`MulticastDelegate` 필드를 `FieldKind::Event`로 분류, `Params`" | ED8·ED9 — 필드 타입은 `Event<Args...>`(안쪽이 `MulticastDelegate`) |
+| InputActions IA7 "(객체 handle, FunctionId) 바인딩, `void(const ActionEventData&)`, 바인딩 때 `FunctionSignatureMatches`" | ED3·ED5 — `InputActionBindings`가 `FunctionBinding`을 쓴다(이벤트 마스크·`consumes` 규칙은 InputActions 몫) |
+| FunctionReflection FR4 "쿠킹은 EditorOnly 함수를 가리키는 바인딩을 거부" | ED4·ED10 (c) |
+
+## 5. 버린 대안
+
+- **Core `MulticastDelegate`를 그대로 리플렉션:** 저장할 항목을 구별하지 못하고, Core가 ObjectRuntime(Registry·생성 thunk)을 볼 수 없다.
+- **UE처럼 native·dynamic 두 타입:** 엔진 이벤트마다 C++ 구독용과 리플렉션용을 둘 두게 된다.
+- **함수 이름으로 바인딩(UE):** 이름 변경에 약하고, 도구 이름과 C++ 이름이 갈라진다(SparksBinding B19).
+- **바인딩마다 `FunctionCall`(개정 1):** 바인딩·발행마다 frame 힙 할당과 TypeRegistry 전역 잠금·기반 체인 선형 탐색이 든다. UE `Parms`처럼 발행 frame 하나를 바인딩이 함께 쓴다.
+- **바인딩이 FunctionHandle(lease)을 쥠:** 바인딩이 남아 있는 동안 모듈 reload·Unregister가 막힌다. 등록 세대 캐시로 다시 찾는다.
+- **`ValueType` 목록으로 서명 비교(개정 1):** 컨테이너 원소·`ObjectHandle`/`WeakObjectRef`를 가르지 못하고, 실행 경로(`SetArgumentValue`의 C++ 형식 검사)와 기준이 달라진다.
+- **이벤트를 fields 밖 별도 목록(`TypeSchema::events`만):** FieldId·경로·저장 경로를 따로 만들어야 하고 SE-R2·SL이 이미 필드로 정했다. 필드로 두되 연산은 `RuntimeEventOps`로 나눈다(ED9).
+- **`ValueKind::Event`(개정 1):** `FieldKind::Event`와 중복이고 값 종류 표 전체가 손을 탄다.
+- **클래스 기본값·인스턴스 그래프에 에셋 바인딩 저장 + remap(개정 1):** ClassDefaults는 객체가 아니어서 생성자에서 바인딩을 만들 수 없고, 인스턴스마다 저장 비용이 든다. 템플릿 바인딩 표(UE).
+- **이벤트 상태를 늘 할당(개정 1, 96 byte):** 1M 규모에서 수백 MB.
+- **대상 쪽 역방향 목록:** 모든 객체에 비용이 들고 UE도 두지 않는다.
+
+## 6. 한계·후속
+
+- 단일 cast 이벤트(UE `DECLARE_DYNAMIC_DELEGATE` — 반환이 있는 바인딩)는 요구 시.
+- 네트워크 발행 측·권한(`BlueprintAuthorityOnly`)은 네트워크 단계.
+- 함께 고칠 문서(이 개정과 같은 묶음): FunctionReflection FD11(ED5), UiToolkit 7절 CU3 행·SL 10.1·SE-R2의 "Core `MulticastDelegate` 필드"를 `Event<Args...>`로, InputActions 5.1절 함수 바인딩 문장(`FunctionBinding`).
+
+## 7. 구현 기록
+
+- **EV0(Core `Core/Delegate.h`):** `MulticastDelegate`에 C2 상한 정리(`TryAdd`가 항목 수가 직전 정리 뒤 남은 수의 두 배 + `MulticastCompactSlack`(8)에 닿으면 정리 — 메모리는 그 상한 안, 비용은 분할 상환 O(1)), C3 단일 pass 정리(대상 소멸자를 부르지 않는 안정 분할로 살아 있는 항목을 등록 순서대로 앞으로 모은 뒤 죽은 묶음을 뒤에서부터 떼어 해제 — 재진입한 `TryAdd`는 묶음 뒤에 붙고, 재진입한 제거가 앞쪽을 표시하면 한 번 더 돈다), C4 `CompactDead()`(해제 수)·`Stats()`(`MulticastDelegateStats` — 항목·호출될 항목·직전 정리 뒤 남은 수). 시험 `MulticastDelegate_CompactKeepsOrder`·`TryAddBoundsDeadEntries`·`CompactAllowsReentrantTargets`. C1은 Sparks 연결(EI3) 때.

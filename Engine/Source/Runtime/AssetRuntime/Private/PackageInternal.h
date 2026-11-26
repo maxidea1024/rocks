@@ -20,6 +20,15 @@ inline constexpr Guid SummaryCompatibleWithField{0x7d9444370e0e4d6eull, 0xa0bdc9
 inline constexpr Guid SummaryProfileIdField{0x91942e1fe43d4ad5ull, 0x87a78df076ee6d66ull};
 inline constexpr Guid SummaryProfileSettingsField{0x8e3695ae88ea4f33ull, 0x8bcf12b5702003c6ull};
 inline constexpr Guid SummaryCookerVersionField{0x9eff96ac38e74376ull, 0x8e4e00e5f9d18071ull};
+// 클래스 기본값 목록(RecordList[{id, fingerprint}] — A5c, RuntimeClassMetadata 'A5c 지문
+// 연결')이다.
+inline constexpr Guid SummaryClassDefaultsField{0x77a4842e0e914e4full, 0x8f92599836365a11ull};
+
+// 클래스 기본값 목록 항목 Record({id Guid, fingerprint Bytes 32})다.
+inline constexpr Guid ClassDefaultsItemSchema{0x9426ffd2388f4dcdull, 0x81f8e572bfcad00full};
+inline constexpr Guid ClassDefaultsItemIdField{0xb4ca643df2ee4e45ull, 0xa9f9310616cfe3e4ull};
+inline constexpr Guid ClassDefaultsItemFingerprintField{0x90929d97b6724cc3ull,
+                                                        0x8abac6c5c442cb42ull};
 
 // 버전 표 항목 Record(타입·커스텀 버전 공통 — {id, version})다.
 inline constexpr Guid VersionItemSchema{0xfed3de0160bd48f0ull, 0xac87ebc80f031ffcull};

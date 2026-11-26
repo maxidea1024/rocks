@@ -11,6 +11,11 @@
 // NodeTable이 있는 그래프를 한 트랜잭션으로 공개)다.
 namespace rocks {
 
+// graph 형식 버전이다(Docs/Design/ObjectFoundations.ko.md 5.1절 graph v2). 클래스 기본값 지문의
+// "codec wire 버전"이 이것이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 바꾸면 모든
+// 지문이 바뀐다).
+inline constexpr uint32 ObjectGraphFormatVersion = 2;
+
 // byte 한도는 파일/필드와 migration 결과 누계다. peak RAM은 소유 index·필드 색인·참조 token·output
 // 복사도 포함한다. work는 codec의 반복/복사 비용이며 신뢰된 ctor/accessor/migration/hook의 임의
 // 코드를 중단하지 않는다. 이 콜백들은 유한 작업만 하고 registry/input/현재 wrapper를 재진입
@@ -109,11 +114,34 @@ enum class UnsaveablePolicy : uint8 {
     Keep
 };
 
-// 클래스(상속 포함)가 Transient·Deprecated인 저장 불가 타입인지다(리플렉션 B9h2). A1 export 집합
-// 구성이 CollectInners 결과를 이것으로 거른다(저장 불가 객체의 부분 트리도 뺀다).
-inline bool IsUnsaveableType(const TypeLease& type) noexcept {
-    return (type.Schema().flags & UnsaveableTypeFlags) != 0;
+// 클래스(상속 포함)가 저장 불가 타입인지다(기본 mask는 Transient·Deprecated — 리플렉션 B9h2,
+// 쿠킹 쓰기는 EditorOnly를 더한다 — 에셋 A4e2b). A1 export 집합 구성이 CollectInners 결과를
+// 이것으로 거른다(저장 불가 객체의 부분 트리도 뺀다).
+inline bool IsUnsaveableType(const TypeLease& type, uint32 mask = UnsaveableTypeFlags) noexcept {
+    return (type.Schema().flags & mask) != 0;
 }
+
+class OverrideSet;
+
+// 차이 쓰기의 기준 구성이다(Docs/Design/RuntimeClassMetadata.ko.md '클래스 기본값 구현 명세 —
+// A5b'). None은 전부 저장(기본 — 세이브게임·시험·Rockpile 등), Editor·Cooked는 노드마다 그 구체
+// 클래스의 기본값 레코드(AcquireClassDefaults의 그 구성)와 같은 값을 쓰지 않는다(override 집합
+// 단위는 쓴다).
+enum class GraphBaseline : uint8 {
+    None,
+    Editor,
+    Cooked,
+};
+
+// 차이 쓰기가 객체의 override 집합을 묻는 곳이다(편집기 패키지 집합이 구현한다 — 없으면 null).
+// 저장 중이므로 Registry·집합을 바꾸지 않는다.
+class GraphOverrides {
+public:
+    virtual const OverrideSet* Find(ObjectHandle object) const noexcept = 0;
+
+protected:
+    ~GraphOverrides() = default;
+};
 
 // 저장 옵션이다. policy.rejectMissingRequired면 Required 참조 null을 RequiredMissing 진단 뒤
 // InvalidArgument로 거부하고, policy.excludedFlags의 필드는 저장하지 않는다. hooks는 진단·소프트
@@ -121,6 +149,11 @@ inline bool IsUnsaveableType(const TypeLease& type) noexcept {
 struct ObjectGraphSaveOptions {
     // 저장 불가 객체의 정책이다(기본 Exclude — 패키지 저장, UnsaveablePolicy).
     UnsaveablePolicy unsaveable = UnsaveablePolicy::Exclude;
+    // 저장 불가로 보는 클래스 비트다(기본 Transient·Deprecated). 쿠킹 패키지 쓰기는 EditorOnly를
+    // 더한다(에셋 A4e2b — UE SavePackage가 쿠킹 때 편집기 전용 객체를 빼는 것과 같다). 그 대상을
+    // 가리키는 참조의 ExternalReference 진단 value는 3 = Transient, 4 = Deprecated, 5 = EditorOnly
+    // 클래스다(여럿이면 앞의 것). Exclude일 때만 쓴다.
+    uint32 unsaveableTypeFlags = UnsaveableTypeFlags;
     ObjectGraphLimits limits;
     FieldEncodePolicy policy;
     FieldCodecHooks* hooks = nullptr;
@@ -130,6 +163,12 @@ struct ObjectGraphSaveOptions {
     // 그 노드보다 앞의 노드이거나 기준 Outer(노드 1의 Outer — 없으면 Outer 없음)여야 한다(아니면
     // InvalidArgument — 기준 Outer와 다른 집합 밖 Outer, Outer 없음과 기준 Outer의 혼합 포함).
     bool writeNodeTable = false;
+    // 차이 쓰기 기준 구성과 override 집합이다(A5b). Editor는 policy.excludedFlags에 EditorOnly가
+    // 없어야 하고 Cooked는 있어야 하며, 둘 다 policy.includeFlags가 0이어야 한다(아니면
+    // InvalidArgument). 레코드가 없는 타입(IncompleteLayout·ManualFields)의 노드는 전부 저장하고,
+    // 그 밖의 레코드 실패는 저장 실패다.
+    GraphBaseline baseline = GraphBaseline::None;
+    const GraphOverrides* overrides = nullptr;
 };
 
 // 외부 참조 대상 하나다(저장의 Admit 정책이 Import로 쓴 대상 — slot 순서 = 첫 출현 순,

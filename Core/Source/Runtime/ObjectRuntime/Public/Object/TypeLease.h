@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/ClassDefaults.h>
 #include <Base/NumericLimits.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
@@ -173,6 +174,25 @@ public:
     // 같은지를 돌려준다(다르면 construct가 같은 타입에서 다른 기반 위치를 돌려준 함수표 오류다). 빈
     // lease는 Fatal이다.
     bool RecordObjectOffset(usize offset) const noexcept;
+
+    // 클래스 기본값 레코드다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 만드는 쪽은
+    // ObjectSerialization AcquireClassDefaults가 builder를 준다). 게시된 레코드가 있으면 그것을,
+    // 실패를 기억했으면 그 오류를 돌려준다(diagnostic에 기억한 진단). 아직 없으면 TypeRegistry 생성
+    // 잠금 안에서 상태를 다시 보고 builder를 한 번 불러 결과를 게시한다: 성공은 초안 byte를
+    // TypeRegistry allocator의 한 블록으로 복사하고, 실패는 IsRememberedClassDefaultsFailure면
+    // 진단을 기억한다(일시 오류는 기억하지 않는다). 어느 스레드에서나 부를 수 있다. 같은 스레드가
+    // builder 안에서 다시 부르면 Fatal이다(생성자 순수성 계약 위반). 반환 레코드는 이 lease(또는
+    // 같은 레코드를 지키는 다른 lease)가 살아 있는 동안 유효하다.
+    //
+    // 오류: 클래스가 아닌 lease·null builder InvalidArgument, builder의 오류, 게시 할당 실패
+    // OutOfMemory(기억하지 않는다). 빈 lease는 Fatal이다.
+    Result<const ClassDefaults*>
+    ResolveClassDefaults(ClassDefaultsBuilder builder, void* user,
+                         ClassDefaultsDiagnostic* diagnostic = nullptr) const noexcept;
+
+    // base 사슬의 모든 클래스 레코드에 생성 코덱 표지(RuntimeTypeOps::generatedFieldCodecs)가
+    // 있는지다(클래스 기본값 레코드의 원본 모드 인코딩 조건). 빈 lease는 Fatal이다.
+    bool HasGeneratedFieldCodecs() const noexcept;
 
     // ID는 값으로 반환하므로 lease 종료 후에도 보관할 수 있다. 빈 lease는 Fatal이다.
     TypeId Id() const noexcept;

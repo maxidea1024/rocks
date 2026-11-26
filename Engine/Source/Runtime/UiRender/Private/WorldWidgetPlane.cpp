@@ -51,7 +51,6 @@ Result<void> WorldWidgetPlane::Initialize(graphics::PixelFormat color, graphics:
     graphics::PipelineDesc desc;
     desc.layout = {attributes, streams};
     desc.topology = graphics::PrimitiveTopology::TriangleStrip;
-    desc.bindings.texture = UiSurfaceName;
     desc.colorFormats[0] = color;
     desc.blend[0] = render::PremultipliedAlphaBlend();
     desc.depthFormat = depth;
@@ -65,12 +64,19 @@ Result<void> WorldWidgetPlane::Initialize(graphics::PixelFormat color, graphics:
         desc.colorFormats[1] = velocity;
     }
 
-    auto pipeline = CreateUiPipeline(
-        device_, shaders_, UiWorldPlaneVertexType,
-        withVelocity ? UiWorldPlaneVelocityPixelType : UiWorldPlanePixelType, desc);
+    const shader::ShaderTypeName& pixel =
+        withVelocity ? UiWorldPlaneVelocityPixelType : UiWorldPlanePixelType;
+    auto slot = UiPixelTextureSlot(shaders_, pixel, UiSurfaceName);
+    if (!slot) {
+        return Result<void>::Failure(slot.Error());
+    }
+
+    auto pipeline = CreateUiPipeline(device_, shaders_, UiWorldPlaneVertexType, pixel, desc);
     if (!pipeline) {
         return Result<void>::Failure(pipeline.Error());
     }
+
+    surfaceSlot_ = slot.Value();
 
     if (quad_.IsNull()) {
         constexpr Vec2 quad[] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
@@ -123,7 +129,7 @@ Result<void> WorldWidgetPlane::Draw(graphics::CommandContext& commands,
 
     const graphics::VertexBufferBinding binding[] = {{quad_, 0}};
     commands.SetVertexBuffers(0, binding);
-    commands.SetTexture(texture);
+    commands.SetTexture(graphics::ShaderStage::Pixel, surfaceSlot_, texture);
     commands.Draw(4);
     return Result<void>::Success();
 }

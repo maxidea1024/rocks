@@ -3,43 +3,239 @@
   "entries": [
     {
       "kind": "field",
-      "name": "rocks::ui::WorldWidgetComponent::drawSize_",
-      "id": "79e3d3eb2d4d45e5831c48f8a1b1b6da",
+      "name": "rocks::MeshComponent::materialSlotsOverlayMaterial_",
+      "id": "ead37360cc994d1f8d7d9003a5999f13",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WorldWidgetComponent::pivot_",
-      "id": "d8460c8b4792435396ef27d55a4693a3",
+      "name": "rocks::MeshComponent::overlayMaterialMaxDrawDistance_",
+      "id": "85212301768e48ad800ec4e5dd1f3dfd",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WorldWidgetComponent::playerId_",
-      "id": "74585f95d06444cc890252b02dd57c22",
+      "name": "rocks::MeshComponent::overlayMaterial_",
+      "id": "f077bd7587e5491aa8db3b6879ed0d96",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WorldWidgetComponent::screenSpace_",
-      "id": "293ce938328e4cd282b8f7db7cc7ab2a",
+      "name": "rocks::MeshComponent::overrideMaterials_",
+      "id": "587148c985214eaf89b2b786d036d5b5",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WorldWidgetComponent::widget_",
-      "id": "e9c23321986c449fa18ebe4152b774ab",
+      "name": "rocks::StaticMeshComponent::castDistanceFieldIndirectShadow_",
+      "id": "550e42255c0b488f82a0f5c94baf6ec1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::disallowNanite_",
+      "id": "a42389fc36ed4aeeba9ab1762418ac36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::distanceFieldIndirectShadowMinVisibility_",
+      "id": "b3dbfa784fc34dcd917af5adf8279f3d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::distanceFieldSelfShadowBias_",
+      "id": "9f6de5d1e0f44c6cb76d3839839246f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::evaluateWorldPositionOffsetInRayTracing_",
+      "id": "48ce50da643d4be8a97a30ed44b451c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::evaluateWorldPositionOffset_",
+      "id": "659057504ce44babb74d4f5869b8b1ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::forceDisableNanite_",
+      "id": "b5838d79c38a4bf69396f1e08e03b5c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::forceNaniteForMasked_",
+      "id": "b0a98f2d823b439b89f2c962a04ab227",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::forcedLodModel_",
+      "id": "958e5c97645649e9b1963ed4cb1ea317",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::ignoreInstanceForTextureStreaming_",
+      "id": "3afec168262448a4bf7a82dfec655fdb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::minLod_",
+      "id": "8856e042fdad46188ec3f5d56ddfc5c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::nanitePixelProgrammableDistance_",
+      "id": "487732f3003c4774b58e0f76d09ed5f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::overriddenLightMapRes_",
+      "id": "15c887f6bc0d4b04bbee158941fca480",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::overrideDistanceFieldSelfShadowBias_",
+      "id": "4222ce9ed2764266bc772075b86cb5f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::overrideLightMapRes_",
+      "id": "4c47c1a085874063b10098a3a0763668",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::overrideMinLod_",
+      "id": "2afe55a6c53146f2aa2159e508330b74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::overrideWireframeColor_",
+      "id": "f2734719ddc04bbbbd6f208f013fa8af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::reverseCulling_",
+      "id": "3123a48c84894948ac75ea3a40441d1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::sortTriangles_",
+      "id": "caf853cfdbba4b89b62fe6c6b764dab5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::staticMesh_",
+      "id": "a4510eeb8d41444c84aefe48d6c8966d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::streamingDistanceMultiplier_",
+      "id": "c2e0fc3612eb481b89bd9ea62ce7511f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::subDivisionStepSize_",
+      "id": "7db7c092a29d4a39b27ec6f25bd14c05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::useDefaultCollision_",
+      "id": "700fbbe798ee4396aeef3316ef5bdb1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::useSubDivisions_",
+      "id": "1bb8a94e917840a390c2b4199509277f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::wireframeColorOverride_",
+      "id": "4ba38add886e4e2ead836fcc67f083a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::worldPositionOffsetDisableDistance_",
+      "id": "4da6b089f02c493fb6340339bf3fb2b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StaticMeshComponent::worldPositionOffsetWritesVelocity_",
+      "id": "18b7c8d4cb2f4e869c9bc4d1e92da29d",
       "aliases": [],
       "retired": false
     },
     {
       "kind": "type",
-      "name": "rocks::ui::WorldWidgetComponent",
-      "id": "6b0cc10eadd245fab59aa9280ed33dd0",
+      "name": "rocks::MeshComponent",
+      "id": "70d6a4d821104096959861418e8dbe11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StaticMeshActor",
+      "id": "5ef877e9cfda4928af48f112035073bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StaticMeshComponent",
+      "id": "d497df3489794f9ebd69e787c0ad12eb",
       "aliases": [],
       "retired": false
     }

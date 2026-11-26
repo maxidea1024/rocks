@@ -61,13 +61,30 @@ public:
           registry_(registry), access_(access), nodes_(nodes), budget_(budget),
           externalPolicy_(options.externals), writeNodeTable_(options.writeNodeTable),
           excludeUnsaveable_(options.unsaveable == UnsaveablePolicy::Exclude),
+          unsaveableMask_(options.unsaveableTypeFlags),
           packagePolicy_(registry.Policy().packageNativeType != nullptr),
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
           slots_(allocator), externals_(allocator), externalLeases_(allocator),
-          positions_(allocator), weakDeferrals_(allocator), weakPaths_(allocator) {
+          positions_(allocator), weakDeferrals_(allocator), weakPaths_(allocator),
+          baselines_(allocator) {
         // Name 필드는 이 Registry의 pool로 표시 문자열을 읽는다.
         SetNames(registry.Names());
+    }
+
+    // 노드 하나의 차이 쓰기 기준을 연다(A5b — record는 그 구체 클래스 레코드의 기준 구성 byte,
+    // overrides는 그 객체의 집합 또는 null). EndBaseline이 닫는다. 오류: Record 열기의 오류.
+    Result<void> BeginBaseline(const TypeSchema& schema, Span<const uint8> record,
+                               const OverrideSet* overrides) noexcept;
+    void EndBaseline() noexcept;
+
+    Result<bool> BeginStructBaseline() noexcept override;
+    void EndStructBaseline() noexcept override;
+    Result<bool> OmitCurrent(uint32 wire, Span<const uint8> payload,
+                             usize referenceMark) noexcept override;
+
+    usize ReferenceMark() const noexcept override {
+        return positions_.Size() + weakDeferrals_.Size();
     }
 
     // 노드 하나의 encode를 시작한다. fileBytes는 이 노드 앞까지의 출력 byte 누계다(위치 표 메모리
@@ -232,6 +249,8 @@ private:
     bool writeNodeTable_;
     // UnsaveablePolicy::Exclude인지다(리플렉션 B9h2).
     bool excludeUnsaveable_;
+    // 저장 불가 클래스 비트(ObjectGraphSaveOptions::unsaveableTypeFlags)다.
+    uint32 unsaveableMask_;
     bool packagePolicy_;
     BudgetAllocator scratch_;
     BudgetAllocator observation_;
@@ -255,7 +274,58 @@ private:
     Array<PathStep> weakPaths_;
     const ArchiveWriter* fieldWriter_ = nullptr;
     usize committedBytes_ = 0;
+    // 차이 쓰기 기준 사슬이다(A5b): 맨 아래는 노드 클래스 레코드(frame null), 위로 멤버 비교 중인
+    // struct 값(그 위치 frame과 기준 Record reader).
+    struct BaselineLevel {
+        BaselineLevel(const FieldCodecFrame* position, RecordReader&& opened) noexcept
+            : frame(position), reader(Move(opened)) {
+        }
+
+        const FieldCodecFrame* frame = nullptr;
+        RecordReader reader;
+    };
+    Array<BaselineLevel> baselines_;
+    const OverrideSet* overrides_ = nullptr;
 };
+
+// 객체 하나의 필드 루프가 저장 쪽에 묻고 알리는 곳이다(EncodeObjectFields — 그래프 저장 노드와
+// 클래스 기본값 레코드가 같은 루프를 쓴다).
+class ObjectFieldSink {
+public:
+    // 지금 객체의 lease다. 필드마다 다시 묻는다(그래프 저장은 encode가 노드 표를 다시 할당할 수
+    // 있다 — 스키마·필드 정보는 Registry 레코드 안이라 안정적이다).
+    virtual const TypeLease& Lease() noexcept = 0;
+
+    // 필드 encode 직전(그 필드 writer — 외부 참조 위치 기록의 기준)과 직후다.
+    virtual void BeginField(ArchiveWriter& writer) noexcept {
+        (void)writer;
+    }
+
+    virtual void EndField() noexcept {
+    }
+
+    // 필드를 Record에 더한 뒤다(payloadOffset = 그 필드 payload의 Record 안 시작).
+    virtual Result<void> FieldAdded(usize payloadOffset) noexcept {
+        (void)payloadOffset;
+        return Result<void>::Success();
+    }
+
+protected:
+    ~ObjectFieldSink() = default;
+};
+
+// 객체 하나의 필드를 스키마 순서로 encode해 record에 더한다(GraphSave.cpp). 그래프 저장 노드와
+// 클래스 기본값 레코드(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드')가 같은 함수를 써서 같은
+// thunk·같은 순서·같은 wire 재확인으로 같은 byte를 낸다. 지금 위치(FieldScope)를 세우고 제외 판정
+// (ExcludesCurrent)·함수표 찾기·encode(필드 writer 한도 maxFieldBytes)·wire 재확인·예산 청구·
+// AddField를 한다. registry는 원본 모드(context.RawSource())면 null이다. payloadBytes에 더한 필드
+// byte(TLV 머리 28 + payload)의 합을 더한다. 오류: 함수표 찾기·encode·builder·예산의 오류, wire가
+// 스키마와 다름 TypeMismatch, byte 합 넘침 Overflow.
+Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
+                                const ObjectAccessContext& access, ObjectHandle handle,
+                                Budget& budget, usize maxFieldBytes, FieldEncodeContext& context,
+                                RecordBuilder& record, ObjectFieldSink& sink,
+                                usize& payloadBytes) noexcept;
 
 // NodeTable의 outer 값과 BaseOuter 비트를 정한다(GraphSaveSet.cpp).
 Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeContext& context,

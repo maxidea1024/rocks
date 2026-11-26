@@ -1,6 +1,6 @@
 # 머티리얼 시스템(MaterialSystem) 설계
 
-기준일: 2026-11-23, 개정 9(초안 — MS3a: 에셋 클래스 골격을 먼저 만든다, 15.2절). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
+기준일: 2026-11-25, 개정 10(초안 — MS3a: 에셋 클래스 골격을 먼저 만든다, 15.2절). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
 - 머티리얼 에셋 모델(머티리얼·인스턴스·함수·레이어·파라미터 컬렉션)과 쿠킹 데이터
 - 그래프 스키마, typed IR, IR에서 HLSL을 만드는 코드 생성
 - 퍼뮤테이션, 파라미터 layout과 상수 식, 인스턴스 override와 static 변형
@@ -88,7 +88,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 정점 입력 타입 | vertex factory | RenderBase 10절 |
 | 품질 수준 `MaterialQuality` | `EMaterialQualityLevel` | Low·Medium·High·Epic |
 | 기능 등급 `CapabilityTier` | `ERHIFeatureLevel`(머티리얼 switch 용도) | 형식 정의가 주는 등급(Mobile·SM5·SM6) |
-| 텍스처 샘플 종류 `TextureSampleKind` | `EMaterialSamplerType` | 색·선형·노멀·마스크 등 해석 방식 |
+| 텍스처 샘플 종류 `TextureSampleKind` | `EMaterialSamplerType` | 색·선형·노멀·마스크 등 해석 방식. 단일 채널 복제·노멀 채널 배치는 생성 셰이더가 이 종류로 한다(텍스처 view swizzle은 항등 — RenderBase 6.5절, 엔진 셰이더 `Material/MaterialTextureSampling.rsh`) |
 | 머티리얼 공통 원문 `MaterialCommon.rsh` | `MaterialTemplate.ush` | 생성 원문을 감싸는 정적 원문 |
 | 생성 원문 `/Engine/Generated/Material.rsh` | `/Engine/Generated/Material.ush` | job마다 연결되는 생성 파일 |
 | 표면 속성 `SurfaceAttributes`(Renderer 14.1절 소유) | `FPixelMaterialInputs`·GBuffer 데이터 | pass 셰이더가 읽는 픽셀 표면 값 |
@@ -604,7 +604,7 @@ UE는 에디터에서 사용 플래그를 자동으로 켜고 패키지를 dirty
 - **scope** = 전역 | 함수 호출 경로(호출 위치 NodeId 목록) | 레이어(레이어 Guid, 그 안의 호출 경로) | 혼합(혼합 Guid, 그 안의 호출 경로).
 - 계획 14.7절대로 함수 안 파라미터는 **호출 위치마다 독립**이다. 같은 함수를 두 번 부르면 두 파라미터다. 여러 호출이 공유해야 하는 파라미터는 파라미터 노드의 "공유" 표시로 전역 scope에 둔다. 이것은 UE와 다르다(9.1절: UE는 같은 이름이면 합쳐진다).
 - **이름**은 표시·검색용이다. 인스턴스 에디터는 이름과 그룹으로 보여 주고, 저장은 키로 한다. 같은 scope의 같은 이름은 V8 오류다.
-- **외부 그래프 번역**(Unreal 교환 UXR4, 2026-11-20): UE 그래프는 이름이 같은 파라미터 노드를 하나로 합친다. 번역기([Unreal 교환 형식](UnrealExchange.ko.md) 8.5절)는 이것을 Rocks 규칙으로 옮긴다. 머티리얼 그래프 안에서 같은 이름·같은 종류의 파라미터 노드 여러 개는 파라미터 노드 하나와 그 출력을 잇는 간선들로 바꾼다. 함수 안에서 UE global association인 파라미터는 위의 "공유" 표시를 붙인 전역 scope 파라미터로 옮긴다. 결과 그래프에는 같은 scope의 같은 이름이 남지 않으므로 V8을 통과한다. 인스턴스 override 하나는 Rocks 키 하나로 옮겨진다.
+- **외부 그래프 번역**(Unreal 교환 UXR4, 2026-11-20): UE 그래프는 이름이 같은 파라미터 노드를 하나로 합친다. 번역기([Unreal 교환 형식](UnrealExchange/08-Material.ko.md) 8.5절)는 이것을 Rocks 규칙으로 옮긴다. 머티리얼 그래프 안에서 같은 이름·같은 종류의 파라미터 노드 여러 개는 파라미터 노드 하나와 그 출력을 잇는 간선들로 바꾼다. 함수 안에서 UE global association인 파라미터는 위의 "공유" 표시를 붙인 전역 scope 파라미터로 옮긴다. 결과 그래프에는 같은 scope의 같은 이름이 남지 않으므로 V8을 통과한다. 인스턴스 override 하나는 Rocks 키 하나로 옮겨진다.
 - 레이어 순서를 바꿔도 레이어 Guid가 그대로라 override가 남는다. UE는 index를 다시 매긴다(`RE/Public/Materials/MaterialParameters.h:78, 134` `RemapLayerIndex`).
 
 ### 9.3 종류와 단계
@@ -854,7 +854,7 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 - 엔진 내장 라이브러리를 만드는 `shader-compile --engine`(셰이더 시스템 12.3절)은 지금 `Engine/Shaders` 원문만 다룬다. 엔진 기본 머티리얼 에셋을 번역해 넣는 경로를 더해야 한다(16절 MSR11). 필요 시 컴파일 형식(`GLES31_PC`)은 RenderBase SX14 셰이더 공급자가 엔진 기본 머티리얼 번역도 맡는다(16절 MRB1).
 - 셰이더 시스템 12.2·12.3절은 "필요한 셰이더가 없으면 `IncompatibleCook`"이다. 머티리얼 셰이더는 그 예외로 위 표의 조합 단위 대체를 쓴다(16절 MSR10). 엔진 셰이더와 엔진 기본 머티리얼은 그 규칙 그대로다.
 
-**엔진 내장 "구운 표면" 머티리얼**(Unreal 교환 UXR4, 2026-11-20). 다른 엔진에서 가져온 머티리얼을 그래프로 번역하지 못했을 때, 그쪽에서 구운 텍스처를 받는 부모 머티리얼이다([Unreal 교환 형식](UnrealExchange.ko.md) 8.5절 결과 2번). 기본 머티리얼과 달리 대체용이 아니라 보통 머티리얼이며 사용 대상 거르기를 받는다.
+**엔진 내장 "구운 표면" 머티리얼**(Unreal 교환 UXR4, 2026-11-20). 다른 엔진에서 가져온 머티리얼을 그래프로 번역하지 못했을 때, 그쪽에서 구운 텍스처를 받는 부모 머티리얼이다([Unreal 교환 형식](UnrealExchange/08-Material.ko.md) 8.5절 결과 2번). 기본 머티리얼과 달리 대체용이 아니라 보통 머티리얼이며 사용 대상 거르기를 받는다.
 - 영역 Surface, Opaque와 Masked(블렌드 모드는 static 파라미터), 기본 표면 모델.
 - 텍스처 파라미터: BaseColor, Normal(접선 공간), Metallic, Roughness, Specular, Emissive(HDR), Opacity, OpacityMask, AmbientOcclusion. 스칼라 파라미터: Emissive 배율, OpacityMask 기준값. 비어 있는 텍스처 파라미터는 엔진 기본 텍스처(흰색·평면 법선·검정)를 쓴다.
 - 엔진 콘텐츠 `/Engine` 마운트는 후속이다(AssetSystem 4.2절). 그 전까지는 `UnrealExchange` 플러그인이 자기 콘텐츠로 이 머티리얼을 갖고, `/Engine` 마운트가 생기면 엔진 콘텐츠로 옮긴다.
@@ -1186,6 +1186,7 @@ UE 대조:
 | 3(초안) | 2026-11-18 | 셰이더 시스템 개정 13의 MSR1·MSR12·MSR13 반영 상태와 공유 출처일 때의 생성 규칙(13절 9항 대응)을 적었다 |
 | 4(초안) | 2026-11-18 | 셰이더 시스템 개정 16의 MSR5 반영 상태를 적었다(Renderer RQ13과 같은 개정) |
 | 5(초안) | 2026-11-18 | RenderBase 개정 16의 상수 버퍼 예산에 맞춰 9.7절 컬렉션 개수 근거와 크기 상한(GLES `vec4` 합에서 계산)을 고쳤다. 셰이더 시스템 개정 17의 공통 상한 폐기에 맞춰 backend 표 문구를 고쳤다 |
+| 10(초안) | 2026-11-25 | RenderBase 개정 48(6.5절 swizzle 합의) 반영: 2절 `TextureSampleKind` 행에 "단일 채널 복제·노멀 채널 배치는 생성 셰이더가 sampler type으로 하고 텍스처 view swizzle은 항등"을 적었다 |
 | 9(초안) | 2026-11-23 | 15.2절에 MS3a(에셋 클래스 골격 `MaterialBase`·`Material`, 필드 없음, 의존 AssetRuntime)를 더했다. 메시 슬롯 참조 타입이 필요해 MS1·MS2보다 먼저 한다(사용자 결정 2026-11-23). MS3은 이 골격에 4.2절 필드·쿠킹을 더한다 |
 | 8(초안) | 2026-11-22 | [노드 그래프](NodeGraph/README.ko.md) 개정 4에 맞춰 3.2절 MaterialSchema 의존에 ObjectRuntime(리플렉션 codec)을 적었다 |
 | 7(초안) | 2026-11-22 | [노드 그래프](NodeGraph/README.ko.md) 개정 2의 GR2를 반영해 그래프 데이터 모델·변경·undo·의미 바이트를 공통 `NodeGraph`로 옮겼다. 3.2절: MaterialSchema가 NodeGraph에, EditorMaterial이 GraphView에 의존. 4.3절: 노드 속성을 `InstancedStruct`에서 Record 바이트로, 배치는 `GraphDocumentLayout`, 사라진 핀은 고아 핀. 5.2절: 형식은 노드 그래프 6절 참조, 재경유는 의미 비교 때 접히는 공통 노드, 주석은 배치 데이터. 5.5절: semantic hash를 의미 바이트 + `NormalizeSemanticNode`로 정의(입력 기본값·활성 상태·고아 핀 포함, 간선 정규 순서, migration 뒤 계산). 14절: E1–E4·E13 제공 모듈. 15.1절: MS1 선행을 B9에서 NG0–NG3으로. 15.2절: MS1 내용 |

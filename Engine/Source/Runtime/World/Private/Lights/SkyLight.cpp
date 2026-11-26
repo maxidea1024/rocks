@@ -7,7 +7,7 @@
 #include <World/Lights/SkyLight.h>
 #include <World/Lights/SkyLightComponent.generated.h>
 #include <World/Lights/SkyLightComponent.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
 

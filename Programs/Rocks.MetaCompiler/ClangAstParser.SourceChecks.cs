@@ -141,6 +141,11 @@ internal sealed partial class ClangAstParser
         PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end, kind);
     }
 
+    // node의 marker annotation이 앞 선언에서 물려받은 것(Clang AnnotateAttr "inherited")인가다.
+    private static bool InheritedAnnotation(JsonElement node, string marker) =>
+        Children(node).Any(child => Text(child, "kind") == "AnnotateAttr" && Flag(child, "inherited") &&
+            Children(child).Select(Constant).FirstOrDefault() is string name && name == marker);
+
     private void ValidateAnnotationPlacement(JsonElement node, bool reflectedOwner,
         bool directReflectedMember = false, string? directOwnerFile = null, bool reflectedEnum = false)
     {
@@ -162,6 +167,15 @@ internal sealed partial class ClangAstParser
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
         {
             throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS or STRUCT");
+        }
+
+        // 클래스 밖 정의(`inline void Value::Touch() noexcept {}`)는 클래스 안 선언의 annotation을 물려받는다(Clang inherited 속성) — 그
+        // 재선언은 자리 검사 대상이 아니다.
+        if (Annotation(node, "rocks.function") is not null && (kind != "CXXMethodDecl" || !directReflectedMember) &&
+            !(kind == "CXXMethodDecl" && InheritedAnnotation(node, "rocks.function")))
+        {
+            throw new MetadataException("ROCKS_FUNCTION must annotate a member function declared directly in a reflected CLASS", "RMC2701",
+                "Put ROCKS_FUNCTION right before a non-template member function of the ROCKS_CLASS (function templates and nested types are not reflected).");
         }
 
         if (Annotation(node, "rocks.field.native") is not null && (kind != "FieldDecl" || !reflectedOwner))

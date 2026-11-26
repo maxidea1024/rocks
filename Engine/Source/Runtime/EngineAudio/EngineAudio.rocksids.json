@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::autoActivate",
+      "id": "265bbe21e1a449aba7efe57a284d4184",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::pitchMultiplier",
+      "id": "3d7b9b7ad54c41318ff48b8af3ad1ad2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::stopOnDisable",
+      "id": "3054b55a5dfa420fbdee35fd692e78e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::volumeMultiplier",
+      "id": "06200ef136604ef5878d4499c0cdb527",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AudioComponent",
+      "id": "8671626a5b5f4edf98ee6098533d6708",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

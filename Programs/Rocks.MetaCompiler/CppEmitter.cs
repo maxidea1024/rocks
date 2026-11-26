@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Rocks.MetaCompiler;
 
-internal static class CppEmitter
+internal static partial class CppEmitter
 {
     private static string GuidValue(string? id) => id is null ? "Guid{}" : $"Guid{{0x{id[..16]}ull, 0x{id[16..]}ull}}";
 
@@ -338,7 +338,10 @@ internal static class CppEmitter
         // import 타입에서 물려받은 필드의 클래스 대상은 이름 없이 ID만 있다(SchemaValidator.Imports — enum·struct 대상만 이름으로 잇는다).
         Dictionary<string, ClassModel> byId = schema.Classes.Values.Concat(schema.Imported.Values)
             .GroupBy(type => type.Id, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-        IEnumerable<FieldModel> ownFields = own.SelectMany(type => type.Fields).ToArray();
+        // 리플렉션 함수의 매개변수·반환 칸도 대상(enum·struct·참조의 클래스)의 생성 헤더가 필요하다(GeneratedType<E>::Id·NativeTypeKey).
+        IEnumerable<FieldModel> ownFields = own.SelectMany(type => type.Fields)
+            .Concat(own.SelectMany(type => type.Functions).SelectMany(function => function.Result is null ? function.Parameters : function.Parameters.Append(function.Result)))
+            .ToArray();
         IEnumerable<string> targetHeaders = ownFields
             .SelectMany(field => new[] { field.Reference, field.KeyReference })
             .Concat(own.Where(type => type.Base.Length != 0).Select(type => type.Base))
@@ -352,6 +355,13 @@ internal static class CppEmitter
         foreach (string targetHeader in targetHeaders)
         {
             Body($"#include <{CompilerOptions.GeneratedSpelling(targetHeader)}>");
+        }
+
+        // 리플렉션 함수의 frame·연산 도우미(Object/FunctionCall.h — offsetof는 <stddef.h> 대신 Base 매크로가 아니라 표준 offsetof를 쓴다).
+        if (own.Any(type => type.Functions.Count != 0))
+        {
+            Body("#include <Object/FunctionCall.h>");
+            Body("#include <stddef.h>");
         }
 
         Line("namespace rocks {");
@@ -445,12 +455,18 @@ internal static class CppEmitter
 
         Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
         Line("static const TypeSchema& Schema() noexcept;");
+        // 리플렉션 함수의 thunk 선언·frame·정의다(Docs/Design/FunctionReflection.ko.md FD7).
+        EmitFunctionDeclarations(type, Line);
         EmitNativeKey(module, self, Line, Body);
         EmitVerifyGenerated(self, checks, Line, Body);
+        EmitFunctionDefinitions(schema, type, native, self, Body);
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
         EmitFieldSchemas(type, Body);
         string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
-        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}{EditorOnlyIds(type)}}};");
+        string functionSpan = EmitFunctionSchemas(type, Body);
+        string editorOnlyIds = EditorOnlyIds(type);
+        string functionsTail = functionSpan.Length == 0 ? "" : $"{(editorOnlyIds.Length == 0 ? ", Span<const Guid>{}" : "")}, {functionSpan}";
+        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}{editorOnlyIds}{functionsTail}}};");
         Body("return schema;");
         Body("}");
         // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
@@ -588,7 +604,10 @@ internal static class CppEmitter
             Body($"ops.nativeBaseType = NativeTypeKey<::{type.Base}>();");
         }
 
+        EmitFunctionOps(type, self, Body);
         Body("ops.completeFieldLayout = true;");
+        // 모든 필드 encode thunk가 생성 코드다(클래스 기본값 레코드의 원본 모드 — Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드').
+        Body("ops.generatedFieldCodecs = true;");
         Body("ops.parallelTraceSafe = true;");
         // 방문할 필드가 없는 클래스는 잎 타입이다(GC marker가 trace를 부르지 않는다 — Docs/Design/GarbageCollectionScale.ko.md M2).
         if (traced.Length == 0)
@@ -826,7 +845,7 @@ internal static class CppEmitter
     // thunk(ClassPathThunk — 모든 필드), Map·Set은 그 뒤에 키 enum native 키다.
     private static void EmitClassCodec(string native, string member, string tail, Action<string> Line)
     {
-        Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
+        Line("+[](const RuntimeFieldOps&, ObjectRegistry* registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
         Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
         Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
         Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{tail} }},");

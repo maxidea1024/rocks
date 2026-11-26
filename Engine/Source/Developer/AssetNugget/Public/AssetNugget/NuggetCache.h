@@ -131,6 +131,8 @@ struct NuggetCacheStats {
     uint64 conflicts = 0;
     uint64 dropped = 0;
     uint64 uncachedKeys = 0;
+    // 소비자가 거부해 치운 Record 수다(Reject).
+    uint64 rejected = 0;
     // 지금 값이다.
     uint64 memoryBytes = 0;
     uint64 pinnedBytes = 0;
@@ -186,6 +188,20 @@ public:
     // PartialRecord는 두 번째 Get에 쓴다.
     NuggetCacheGetResult GetSccMember(StringView bucket, const Sha256Digest& sccKey, AssetId asset,
                                       NuggetPolicy policy = NuggetPolicy::Default) noexcept;
+
+    // 소비자 거부다(Docs/Design/AssetSystem 9절 A3c1 — 2026-11-25): 처리기가 적중 값을 해석하지
+    // 못해 미적중으로 다룬 Record(key·digest)를 치운다. 그 digest의 Memory 항목(고정 보관 아님)과
+    // 세션 고정을 지우고 backend 항목을 Remove한다. 지웠으면 true다. 고정이 다른 digest이거나
+    // Regenerated·Uncached면(이 세션이 다시 만든 값) 아무것도 하지 않고 false, off·Open 전도
+    // false다. 오류: backend Remove의 IO 오류. 한계: backend는 key만 보므로 다른 프로세스가 그
+    // 사이에 다시 쓴 항목도 지울 수 있다(캐시 — 다음 쿠킹이 다시 만든다).
+    //
+    // 사용 예(쿠킹 처리기):
+    //   if (got.status == NuggetStatus::Hit && !Accept(got)) {
+    //       (void)cache.Reject(NuggetBucketTexture, key, got.digest);
+    //   }
+    Result<bool> Reject(StringView bucket, const Sha256Digest& key,
+                        const Sha256Digest& digest) noexcept;
 
     NuggetCacheStats Stats() const noexcept;
 

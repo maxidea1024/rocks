@@ -40,6 +40,8 @@ constexpr usize TargetBytes = static_cast<usize>(TargetSize) * TargetSize * Byte
 TraceScopeName CopyName("FullscreenCopy");
 
 uint32 failures = 0;
+// 전체화면 복사 PS(CopyTexturePixel)의 텍스처 slot이다(RunRenderUtilityChecks가 값 1에서 정한다).
+uint32 copySourceSlot = MaxResourceSlots;
 const char* backendName = "";
 
 void Check(bool condition, const char* what) noexcept {
@@ -111,7 +113,7 @@ void RunDirectCopy(Device& device, PipelineHandle pipeline, TextureHandle source
 
     CommandContext& commands = *frame.Value();
     commands.SetPipeline(pipeline);
-    commands.SetTexture(source);
+    commands.SetTexture(ShaderStage::Pixel, copySourceSlot, source);
     render::DrawFullscreenTriangle(commands);
     Check(device.EndFrame().IsOk() && device.ReadPixels(target, pixels.View()).IsOk(),
           "fullscreen copy frame");
@@ -129,7 +131,7 @@ void RunDirectCopy(Device& device, PipelineHandle pipeline, TextureHandle source
 
     CommandContext& again = *frame.Value();
     again.SetPipeline(pipeline);
-    again.SetTexture(TextureHandle{});
+    again.SetTexture(ShaderStage::Pixel, copySourceSlot, TextureHandle{});
     render::DrawFullscreenTriangle(again);
     Check(device.EndFrame().IsOk() && device.ReadPixels(target, pixels.View()).IsOk(),
           "null binding frame");
@@ -175,11 +177,12 @@ void RunGraphCopy(Device& device, render::PipelineCache& cache,
         accesses.Texture(input.Value(), ResourceAccess::SrvGraphics)
             .RenderTarget(output.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
         const render::GraphTexture read = input.Value();
-        auto pass =
-            graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache, request,
-                                    [read](GraphPassContext& context) noexcept {
-                                        context.Commands().SetTexture(context.Texture(read));
-                                    });
+        auto pass = graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache,
+                                            request, [read](GraphPassContext& context) noexcept {
+                                                context.Commands().SetTexture(
+                                                    ShaderStage::Pixel, copySourceSlot,
+                                                    context.Texture(read));
+                                            });
         auto executed = pass ? graph.Execute() : Result<void>::Failure(pass.Error());
         if (!executed) {
             printf("    graph error: %.*s\n", static_cast<int>(graph.LastError().ByteCount()),
@@ -397,7 +400,7 @@ void CheckBlendPresets(Device& device, render::PipelineCache& cache,
 
         CommandContext& commands = *frame.Value();
         commands.SetPipeline(pipeline.Value());
-        commands.SetTexture(texture.Value());
+        commands.SetTexture(ShaderStage::Pixel, copySourceSlot, texture.Value());
         render::DrawFullscreenTriangle(commands);
         Check(device.EndFrame().IsOk() && device.ReadPixels(target, pixels.View()).IsOk(),
               "blend preset readback");
@@ -456,7 +459,6 @@ struct MeshBench {
         request.state.raster = raster;
         request.state.depthStencil = depthState;
         request.state.drawConstantBytes = sizeof(render::BuiltinMeshConstants);
-        request.state.bindings.texture = render::BuiltinMeshAlbedoName;
         return cache->FindOrCreate(request);
     }
 
@@ -468,7 +470,11 @@ struct MeshBench {
             Span<const uint8>(reinterpret_cast<const uint8*>(&constants), sizeof(constants)));
         auto white = pack->FallbackTexture(shader::ShaderResourceShape::Texture2D,
                                            shader::ShaderComponentType::Float);
-        commands.SetTexture(white ? white.Value() : TextureHandle{});
+        commands.SetTexture(
+            ShaderStage::Pixel,
+            shaders::TextureSlot(set->BindingLayout(pack->ShaderEntries().meshPixel),
+                                 render::BuiltinMeshAlbedoName),
+            white ? white.Value() : TextureHandle{});
         const VertexBufferBinding vertices[] = {{buffers.vertices, 0}};
         commands.SetVertexBuffers(0, vertices);
         commands.SetIndexBuffer(buffers.indices, buffers.indexFormat);
@@ -606,7 +612,8 @@ uint32 RunRenderUtilityChecks(const char* name, Device& device, Allocator& alloc
         return failures;
     }
 
-    request.Value().state.bindings.texture = render::CopyTextureSourceName;
+    copySourceSlot =
+        shaders::TextureSlot(set->BindingLayout(copy.Value()), render::CopyTextureSourceName);
     render::PipelineCache cache(allocator, device);
     auto pipeline = cache.FindOrCreate(request.Value());
     Check(pipeline.IsOk(), "the fullscreen copy pipeline is created");

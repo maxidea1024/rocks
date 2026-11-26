@@ -6,15 +6,15 @@
 #include <UiWidget/UserWidget.generated.h>
 #include <World/Actor.generated.h>
 #include <World/World.h>
-#include <WorldIntegration/WorldWidgetComponent.generated.h>
-#include <WorldIntegration/WorldWidgetPresenter.h>
+#include <UiWorld/WorldWidgetComponent.generated.h>
+#include <UiWorld/WorldWidgetPresenter.h>
 
 namespace rocks::ui {
 
 int VerifyWorldWidgetPlane(Allocator& allocator, graphics::Device& device) noexcept {
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
-    if (!RegisterWorldIntegrationTypes(registration)) {
+    if (!RegisterUiWorldTypes(registration)) {
         return 141;
     }
 

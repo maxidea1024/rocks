@@ -3,7 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 위상 조회 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.7절 11): 다각형 → 삼각형, 묶음 →
+// 위상 조회 시험이다(Docs/Design/MeshAnimationAssets 3.7절 11): 다각형 → 삼각형, 묶음 →
 // 다각형, 정점 → 코너·변, 코너 → 삼각형·다각형, 변 → 다각형, 변 찾기, 둘레 변(퇴화 변 건너뜀), 할당
 // 실패 시 이전 표 유지.
 using namespace rocks;

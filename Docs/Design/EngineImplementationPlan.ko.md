@@ -34,7 +34,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptableComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
 
-**1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
+**1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem/README.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
 
 **1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph/README.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
@@ -813,7 +813,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 runtime reference graph와 cook build-dependency graph를 분리한다. 단순 AssetId 참조는 상대 cooked payload의 완료를 자동 선행 조건으로 만들지 않는다. 실제 산출물 의존이 순환하면 지원 가능한 SCC를 하나의 cook 단위로 축약하고, 정렬된 구성원 source/settings/schema·내부 edge ID·외부 component의 확정 digest로 key를 계산한다. 구성원 output은 component key+local output ID에서 파생하며 서로의 cooked hash를 재귀 정의하지 않는다. 지원하지 않는 순환 변환은 cycle 경로와 함께 거부한다. A↔B·3-node cycle 및 외부 변경 fixture에서 clean/incremental/local/remote 결과를 대조한다.
 
-Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange.ko.md), 2026-11-20).
+Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange/README.ko.md), 2026-11-20).
 
 ### 9.2 로딩 상태와 취소
 
@@ -1267,7 +1267,7 @@ native 고해상도 기준 영상과 비교하여 SSIM/이미지 차이, edge fl
 
 ### 13.1 GPU-driven 기준 경로
 
-StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 3–5절이다.
+StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/03-MeshSource.ko.md) 3–5절이다.
 
 GPU Scene은 RenderInstanceId별 transform, previous transform, mesh/material handle, bounds, flags를 저장한다. 변경 범위만 upload하고 frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다. material table·descriptor table도 version과 deferred retirement를 적용한다. GPU에는 Object 주소나 ObjectHandle을 직접 전달하지 않는다.
 
@@ -1506,7 +1506,7 @@ LT01–03·LT05–06의 static/basic probe·CPU bake 사례는 M4 필수다. LT0
 
 ## 15. Skeletal Mesh와 Animation
 
-SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 6–7절이다.
+SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/06-SkeletonSkinned.ko.md) 6–7절이다.
 
 AnimationClip은 position·rotation·scale track, curve, notify, root motion을 포함한다. ACL을 압축·복호화 후보로 사용하며 CPU 작업 메모리와 시간·오차를 adapter에서 계측한다. [S9](https://github.com/nfrechette/acl)
 
@@ -1569,6 +1569,8 @@ public:
     virtual Result<QueryHit> Sweep(const SweepQuery&, const QueryReadScope&) const = 0;
 };
 ~~~
+
+상세 설계는 [물리 모듈](PhysicsModule/README.ko.md)이다(개정 1.20 뒤 추가). 위 `PhysicsWorld` 스케치는 그 문서 2.2절의 World 쪽 추상 접점 `PhysicsScene`으로 대체한다. 아래 16.1–16.3절의 command 구조(`Enqueue(PhysicsCommand)`, callback 중 body 추가·삭제를 다음 command batch로, 쓰기는 Physics lane의 command 단계)는 비동기 step(게임 Tick과 겹치는 step)을 들일 때 쓴다. 지금은 동기 step이라 step 밖에서 Jolt 상태를 바로 쓰고, step 안 callback은 값만 복사한다(물리 모듈 3.2절 PMD6).
 
 Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. Jolt의 작업 분배 연결 지점(job system)은 공통 Task Graph의 worker에 작업을 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. adapter가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. 제출 실패를 반환할 수 없는 연결 지점이면 사전 예약한 node pool을 사용하고, 포화 시 작업을 폐기하지 않고 제출 thread에서 즉시 실행한다. 실행 중 작업을 취소할 수 없으면 종료 절차는 그 완료를 기다린다(연결 지점의 실패 표현·취소 가능 여부는 검증 항목 J14). physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
 
@@ -1684,7 +1686,7 @@ OnlineServices는 Auth·Session/Lobby·Presence/Friends·Invite·Matchmaking·Cl
 
 ## 18. 오디오·DSP Graph
 
-오디오는 게임의 AudioComponent 설정과 실시간 native mixer를 분리한다. miniaudio는 device IO·decode backend 후보로 사용하고 엔진의 voice·routing·DSP 정책은 독립 인터페이스에 정의한다. 구현 정본은 [오디오 시스템](AudioSystem.ko.md)이다(개정 1.17). [S11](https://miniaud.io/docs/manual/index.html)
+오디오는 게임의 AudioComponent 설정과 실시간 native mixer를 분리한다. miniaudio는 device IO·decode backend 후보로 사용하고 엔진의 voice·routing·DSP 정책은 독립 인터페이스에 정의한다. 구현 정본은 [오디오 시스템](AudioSystem/README.ko.md)이다(개정 1.17). [S11](https://miniaud.io/docs/manual/index.html)
 
 ~~~cpp
 struct AudioVoiceHandle {
@@ -1703,7 +1705,7 @@ Result<AudioCommandTicket> TryEnqueueAudio(AudioCommand);
 void RenderAudioBlock(float* output, uint32 frames) noexcept;
 ~~~
 
-48 kHz·256/512 frame block을 기준 후보로 사용하며 device가 지원하는 실제 값으로 구성한다. voice pool·DSP state·command ring을 미리 할당한다. AudioRT(전용 렌더 스레드 — 장치 콜백은 출력 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다, [오디오 시스템](AudioSystem.ko.md) 3.2절, 개정 1.17)에서 Object·파일 IO·일반 task wait·heap allocation·mutex·직접 로그 출력을 금지한다. trace는 미리 확보한 ring에 숫자 event만 기록한다.
+48 kHz·256/512 frame block을 기준 후보로 사용하며 device가 지원하는 실제 값으로 구성한다. voice pool·DSP state·command ring을 미리 할당한다. AudioRT(전용 렌더 스레드 — 장치 콜백은 출력 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다, [오디오 시스템](AudioSystem/03-Design/03.02-Threads.ko.md) 3.2절, 개정 1.17)에서 Object·파일 IO·일반 task wait·heap allocation·mutex·직접 로그 출력을 금지한다. trace는 미리 확보한 ring에 숫자 event만 기록한다.
 
 Audio graph는 worker에서 검증·생성한 불변 plan을 block boundary에 교체한다. 이전 graph와 clip chunk는 audio epoch ACK 후 반환한다. 명령은 bounded MPSC 또는 producer별 SPSC로 전달한다. 일반 명령은 포화 시 Backpressure를 반환하며 낮은 우선순위 parameter는 정의된 latest-value 규칙으로 병합한다. 수락되지 않은 명령을 성공으로 간주하지 않는다. listener·emitter 위치는 snapshot으로 전달한다.
 

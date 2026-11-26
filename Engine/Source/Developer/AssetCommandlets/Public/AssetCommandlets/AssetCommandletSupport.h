@@ -1,6 +1,8 @@
 #pragma once
 
+#include <AssetCooker/CookProcessor.h>
 #include <AssetDatabase/AssetDatabaseLock.h>
+#include <AssetDatabase/AssetImportArguments.h>
 #include <AssetDatabase/AssetService.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <AssetRuntime/AssetTypeHooks.h>
@@ -11,6 +13,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Object/ModuleTypeRegistrations.h>
 #include <Object/TypeRegistry.h>
+#include <ReflectionText/TextDiagnostics.h>
 #include <Task/WorkerScheduler.h>
 
 namespace rocks {
@@ -71,21 +74,50 @@ struct AssetImporterSetup {
     void* state = nullptr;
 };
 
+// 세션의 에셋 타입 hook 등록이다(Docs/Design/AssetSystem 12.12절 — 설정 정규화 hook 등, 임포터
+// 등록과 같은 때): table(세션 hook 표)에 hook을 등록하고 토큰을 tokens에 둔다(세션이 표보다 먼저
+// 해제한다). 실패하면 그 오류로 명령이 실패한다. 제품은 텍스처·애니메이션 hook 묶음
+// RegisterProductTypeHooks를 건다(Programs/Commandlet ProductAssetSetup —
+// MeshAnimationAssets 13.1절).
+struct AssetTypeHookSetup {
+    Result<void> (*registerHooks)(void* state, AssetTypeHookTable& table,
+                                  Array<AssetTypeHookRegistration>& tokens) noexcept = nullptr;
+    void* state = nullptr;
+};
+
+// asset-cook의 쿠킹 처리기 등록이다(Docs/Design/AssetSystem 12.14절 — 표를 만든 뒤 부른다):
+// table(기본 처리기를 fallback으로 둔 세션 표)에 처리기를 등록한다. 처리기는 state가 소유하고 명령
+// 동안 산다. 실패하면 그 오류로 명령이 실패한다. 없으면 기본 처리기만 쓴다. 제품은 텍스처·정적
+// 메시·스킨 메시·애니메이션 클립 처리기 묶음 RegisterProductCookProcessors를
+// 건다(Programs/Commandlet ProductAssetSetup — MeshAnimationAssets 13.1절).
+struct AssetCookProcessorSetup {
+    Result<void> (*registerProcessors)(void* state, CookProcessorTable& table) noexcept = nullptr;
+    void* state = nullptr;
+};
+
 // 에셋 명령의 문맥이다(commandlet_host::Run이 건다): 작업 메모리와 Launch의 프로세스 모듈 로더,
-// 에셋 타입 모듈 이름(비면 AssetTypeModule — 시험은 fixture 모듈), 임포터 등록.
+// 에셋 타입 모듈 이름(비면 AssetTypeModules 전부 — 시험은 fixture 모듈), 임포터 등록, 타입 hook
+// 등록, 임포트 예약 인자 번역기(12.12절 — 없으면 예약 인자는 사용법 오류), 쿠킹 처리기 등록.
 struct AssetCommandContext {
     Allocator* allocator = nullptr;
     ModuleLoader* modules = nullptr;
     StringView typeModule{};
     AssetImporterSetup importers{};
+    AssetTypeHookSetup typeHooks{};
+    AssetImportTranslator importTranslator{};
+    AssetCookProcessorSetup cookProcessors{};
+    // 엔진 디렉터리 재정의다(비면 FindEngineDirectory — 제품 호스트 CommandletHost는 두지 않는다).
+    // 명령 시험이 임시 엔진 디렉터리를 넣어 실제 저장소 `Engine/Saved`를 건드리지 않게
+    // 한다(10.3.1절 A4f4 4번).
+    StringView engineDirectory{};
 };
 
 // 에셋 타입 등록이다(명령 하나 동안 — Docs/Design/AssetSystem 7.1절 15 A2c3b, ModuleLoader
-// 3.11절): 에셋 타입 모듈(AssetTypeModule — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
+// 3.11절): 에셋 타입 모듈(AssetTypeModules — AssetRuntime은 그 의존)을 시작하고 이 TypeRegistry의
 // 타입 등록기를 붙인다. Name pool도 둔다. 소멸이 등록기를 떼고 Registry·pool을 닫는다.
 class ROCKS_ASSETCOMMANDLETS_API AssetCommandTypes {
 public:
-    // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModule).
+    // module은 시작할 에셋 타입 모듈이다(비면 AssetTypeModules 전부).
     AssetCommandTypes(Allocator& allocator, ModuleLoader& modules, StringView module = {}) noexcept;
     ~AssetCommandTypes() noexcept;
     AssetCommandTypes(const AssetCommandTypes&) = delete;
@@ -103,7 +135,8 @@ public:
         return names_;
     }
 
-    // 시작하는 에셋 타입 모듈 이름이다(실패 줄이 쓴다).
+    // 시작하는 에셋 타입 모듈 이름이다(실패 줄이 쓴다 — 목록이면 Start가 실패한 모듈, 시작 전이나
+    // 성공 뒤에는 첫 모듈).
     StringView Module() const noexcept {
         return module_;
     }
@@ -111,6 +144,8 @@ public:
 private:
     ModuleLoader* modules_;
     StringView module_;
+    // module이 비어 AssetTypeModules 전부를 시작하는지다.
+    bool defaultModules_ = false;
     TypeRegistry types_;
     ModuleTypeRegistrations registrations_;
     NamePool names_;
@@ -118,9 +153,19 @@ private:
     bool namesReady_ = false;
 };
 
-// 에셋 명령이 시작하는 에셋 타입 모듈이다(그 의존 폐포의 타입이 등록된다 — A5 뒤 텍스처 모듈을
-// 더한다).
-inline constexpr StringView AssetTypeModule = "Animation";
+// 에셋 명령이 시작하는 에셋 타입 모듈들이다(차례로 시작 — 각 의존 폐포의 타입이 등록된다,
+// Docs/Design/AssetSystem 12.8절). 시험은 AssetCommandContext::typeModule로 모듈 하나를 준다.
+// AudioAssets는 사운드 에셋(Docs/Design/AudioSystem 3.36.1절 — World 없이 등록되도록
+// EngineAudio에서 뗐다). 이 목록을 쓰는 호스트(기본 typeModule)는 목록의 모든 모듈을 링크해야
+// 한다(없으면 Start가 실패한다).
+inline constexpr StringView AssetTypeModules[] = {"Animation", "Mesh", "Texture", "AudioAssets"};
+
+// 대입 진단 줄의 진단 이름이다(AS 13절 `<command>: <진단>: <경로>: <설명>`). 숨김 열거자 입력
+// (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다
+// (Docs/Design/AssetSystem 12.8절, ReflectionExtensions "A5가 InvalidSetting으로 바꾼다"). 그 밖은
+// ReflectionText 이름 그대로다.
+ROCKS_ASSETCOMMANDLETS_API StringView
+AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noexcept;
 
 // 공통 옵션 --wait=<초>의 상한이다(하루 — 밖이면 사용법 오류).
 inline constexpr uint32 MaxWaitSeconds = 86400;
@@ -129,6 +174,21 @@ inline constexpr uint32 MillisecondsPerSecond = 1000;
 // --wait 값(10진 숫자만, 0–MaxWaitSeconds)을 밀리초로 푼다. 비어 있으면 0이다. 형식·범위 위반은
 // false다.
 ROCKS_ASSETCOMMANDLETS_API bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
+
+// 명령행 경로를 절대 경로로 바꾼다(상대 경로는 현재 작업 디렉터리 기준 — asset-import 원본·
+// asset-import-unreal 묶음, ProjectLayout과 같은 규칙). 절대 경로는 그대로 복사한다.
+// workingFailed(null 가능)는 작업 디렉터리를 읽지 못해 실패했는지다(호출자가 메시지를 고른다).
+// 오류: 작업 디렉터리 읽기 실패(그 파일 오류), 경로 합치기 오류(Path::MakeAbsolute), 할당 실패.
+ROCKS_ASSETCOMMANDLETS_API Result<String>
+AbsoluteCommandPath(Allocator& allocator, StringView path, bool* workingFailed = nullptr) noexcept;
+
+// `--wait` 마감 시각 하나에서 남은 밀리초다(두 잠금이 대기를 나눠 쓴다 — Docs/Design/AssetSystem
+// 10.3.1절 A4f4 1번): startNanoseconds부터 nowNanoseconds까지 지난 시간을 waitMilliseconds에서
+// 빼고, 다 썼으면 0이다(now가 start보다 앞이면 지난 시간 0). 값은 단조
+// 시계(platform::MonotonicNanoseconds)다.
+ROCKS_ASSETCOMMANDLETS_API uint32 RemainingWaitMilliseconds(uint32 waitMilliseconds,
+                                                            uint64 startNanoseconds,
+                                                            uint64 nowNanoseconds) noexcept;
 
 // 에셋 Registry의 문맥 id다(명령 하나의 에디터 집합).
 inline constexpr ContextId CommandletAssetContext{0x524f434b41535345ull, 1};
@@ -161,9 +221,9 @@ struct EditSession {
     explicit EditSession(const AssetCommandContext& command) noexcept
         : context(&command), layout(*command.allocator), scan(*command.allocator),
           types(*command.allocator, *command.modules, command.typeModule),
-          hooks(*command.allocator, types.Types()), importers(*command.allocator, types.Types()),
-          importerTokens(*command.allocator), warnings(*command.allocator),
-          diagnostics(*command.allocator) {
+          hooks(*command.allocator, types.Types()), hookTokens(*command.allocator),
+          importers(*command.allocator, types.Types()), importerTokens(*command.allocator),
+          warnings(*command.allocator), diagnostics(*command.allocator) {
     }
 
     const AssetCommandContext* context;
@@ -172,6 +232,8 @@ struct EditSession {
     ScanScheduler scan;
     AssetCommandTypes types;
     AssetTypeHookTable hooks;
+    // hook 등록 토큰이다(표보다 먼저 사라진다 — 선언 순서).
+    Array<AssetTypeHookRegistration> hookTokens;
     // 임포터 표와 등록 토큰이다(토큰이 표보다, 서비스가 둘보다 먼저 사라진다).
     AssetImporterTable importers;
     Array<AssetImporterRegistration> importerTokens;

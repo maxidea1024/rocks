@@ -7,7 +7,7 @@
 #include <World/Lights/LightComponent.h>
 #include <World/Lights/LightingChannels.generated.h>
 #include <World/SceneComponent.generated.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 #include "LightUnitMath.h"
 
 // 광원 컴포넌트다(Docs/Design/EngineRuntime 24.2절, D1). 데이터·순수 계산만 있고 렌더 연결은 RS

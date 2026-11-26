@@ -22,6 +22,11 @@ uint32 LspUtf16Units(StringView bytes) noexcept;
 // BOM 뒤부터 센다.
 LspPosition LspPositionOf(const SourceFile& file, uint32 offset) noexcept;
 
+// LspPositionOf의 역이다(Docs/Design/SparksTools.ko.md 11.2절): 줄이 줄 수 이상이면 원문 끝, 열이
+// 줄 끝을 넘으면 줄 끝(LF 앞, CRLF면 CR 앞 — 외톨이 CR은 줄 안의 글자), 서로게이트 쌍 가운데면 그
+// 글자의 시작. 1줄은 BOM 뒤부터 센다.
+uint32 LspOffsetOf(const SourceFile& file, LspPosition position) noexcept;
+
 // `file` URI를 경로(`/` 구분, Windows 드라이브 `c:/…`)로 바꿔 path에 둔다. 값 false는 받지 않는
 // URI다(scheme이 file이 아님·authority 있음·잘못된 percent·UTF-8 아님). 실패: 할당 실패.
 Result<bool> LspPathFromUri(StringView uri, String& path) noexcept;

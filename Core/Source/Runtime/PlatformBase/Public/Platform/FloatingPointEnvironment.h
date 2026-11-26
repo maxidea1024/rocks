@@ -44,7 +44,7 @@ ROCKS_PLATFORMBASE_API bool IsRealtimeAudioFloatingPointEnvironment() noexcept;
 
 // 결정적 기준 환경(nearest-even, trap 끔)에 FTZ(x64 MXCSR FTZ, ARM64 FPCR FZ)를 더해
 // function(context)를 실행한 뒤 제어 설정을 호출 전 값으로 되돌린다(Docs/Design/
-// CoreDataFoundations.ko.md 2.1절, AudioSystem.ko.md 3.22.8절). DAZ는 켜지 않는다(UE
+// CoreDataFoundations.ko.md 2.1절, Docs/Design/AudioSystem 3.22.8절). DAZ는 켜지 않는다(UE
 // FScopedFTZFloatMode와 같다). 오디오 렌더의 무음 꼬리에서 비정규 수 연산이 느려지는 것을 막는다.
 // 쿠킹 결정성 계산은 RunWithDeterministicFloatingPoint를 쓴다. 규칙(예외 없음, 같은 스레드에서
 // 끝남, 중첩 가능, 상태 플래그 보존)은 RunWithDeterministicFloatingPoint와 같다.

@@ -17,10 +17,12 @@ internal static partial class SelfTests
         ApplePropertyLocationTests.Register(suite);
         IdentityInventoryTests.Register(suite);
         StableIdManifestTests.Register(suite, options);
+        SparksVSCodeTests.Register(suite, options);
         StableIdMergeTests.Register(suite);
         IdentityGitMergeTests.Register(suite, options);
         ProgramsPolicyReviewTests.Register(suite);
         FormatCheckTests.Register(suite, options);
+        CSharpMemberSpacingTests.Register(suite, options);
         ProcessReviewTests.Register(suite, options);
         ProcessHardTimeoutReviewTests.Register(suite, options);
         Json5ReaderTests.Register(suite, options);

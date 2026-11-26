@@ -449,8 +449,8 @@ TEST(AssetDuplicate_RejectsAndFailures) {
 
     // hook: 사본의 Tags·Build 의존은 hook으로 다시 만든다, hook 실패는 아무것도 쓰지 않는다.
     {
-        auto registration = scene.hooks.Register(IdOf<TestAsset>(),
-                                                 AssetTypeHooks{&DuplicateTags, &DuplicateBuild});
+        auto registration = scene.hooks.Register(
+            IdOf<TestAsset>(), AssetTypeHooks{&DuplicateTags, &DuplicateBuild, nullptr});
         REQUIRE(registration);
         AssetDuplicateResult hooked(env.allocator);
         REQUIRE(service.Duplicate(scene.lock, "/Game/Villain", "/Game/Hooked", hooked));

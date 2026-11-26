@@ -1,5 +1,6 @@
 #include <UiRender/DrawBatchBuffers.h>
 #include <UiRender/DrawBatchRenderer.h>
+#include <UiRender/UiShaderTypes.h>
 
 namespace rocks::ui {
 
@@ -32,6 +33,41 @@ DrawBatchBuffers::~DrawBatchBuffers() noexcept {
     if (!roundedPipeline_.IsNull()) {
         device_.Retire(roundedPipeline_);
     }
+}
+
+Result<void> DrawBatchBuffers::PrepareSlots() const noexcept {
+    if (textureSlot_ != graphics::MaxResourceSlots) {
+        return Result<void>::Success();
+    }
+
+    auto image = UiPixelTextureSlot(shaders_, UiImagePixelType, UiTextureName);
+    auto mask = UiPixelTextureSlot(shaders_, UiMaskPixelType, UiTextureName);
+    auto retained = UiPixelTextureSlot(shaders_, UiRetainedPixelType, UiTextureName);
+    auto blur = UiPixelTextureSlot(shaders_, UiBlurPixelType, UiBackdropName);
+    if (!image || !mask || !retained || !blur) {
+        return Result<void>::Failure(!image      ? image.Error()
+                                     : !mask     ? mask.Error()
+                                     : !retained ? retained.Error()
+                                                 : blur.Error());
+    }
+
+    // 그리기마다 파이프라인이 바뀌어도 텍스처 slot 하나로 묶으므로 세 셰이더가 같은 slot이어야
+    // 한다.
+    if (mask.Value() != image.Value() || retained.Value() != image.Value()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    textureSlot_ = image.Value();
+    backdropSlot_ = blur.Value();
+    return Result<void>::Success();
+}
+
+uint32 DrawBatchBuffers::TextureSlot() const noexcept {
+    return textureSlot_;
+}
+
+uint32 DrawBatchBuffers::BackdropSlot() const noexcept {
+    return backdropSlot_;
 }
 
 Result<void> DrawBatchBuffers::PrepareRoundedBox() const noexcept {

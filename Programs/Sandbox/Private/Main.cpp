@@ -1,3 +1,4 @@
+#include "AudioTone.h"
 #include "EngineHost.h"
 #include "GraphicsSelfTest.h"
 
@@ -8,6 +9,10 @@
 // Sandbox 진입점이다.
 //   Sandbox [--self-test] [--gpu-validation]
 //                                  창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과).
+//   Sandbox --engine-shader-self-test
+//                                  장치마다 엔진 셰이더 SL0 GPU probe만
+//                                  돈다(Docs/Design/EngineShaders 7.6절 — 반복 검증용,
+//                                  --self-test에도 들어 있다)
 //                                  --gpu-validation은 D3D12 장치를 GPU 기반 검증으로 만든다(UE
 //                                  -gpuvalidation, 아주 느리다)
 //   Sandbox --engine [--window] [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
@@ -24,6 +29,16 @@
 //                                  같은 종료 요청 표시를 남긴다
 //                                  --inject-key-at-frame N은 시험용으로 N번째 프레임에 입력 큐에
 //                                  W 키 눌림을 넣는다
+//                                  --graphics=<auto|d3d12|d3d11|vulkan|opengl>는 창 렌더 경로의
+//                                  장치다(기본 auto — D3D12 → Vulkan → OpenGL ES),
+//                                  --graphics-validation은 API 검증 계층을 켜고, --no-render는 렌더
+//                                  없이 창만 연다 (Docs/Design/RenderBase 18.5절). 창 모드는 엔진이
+//                                  설 때까지 시작 화면(스플래시)을 띄우고 --no-splash는 끈다
+//                                  (Docs/Design/SplashScreen 4절)
+//   Sandbox --audio-tone [--seconds N]
+//                                  기본 출력 장치로 440 Hz 시험음을 N초(기본 3, 최대 60) 재생하고
+//                                  협상값·underrun을 남긴다(Docs/Design/AudioSystem 3.34.5절, 종료
+//                                  코드 0 = 통과, 2 = 장치 없음)
 //
 // 진입점은 Launch 공통 실행 계층이다(Docs/Design/CrashHandlingAndLaunch.ko.md 16절). Launch가
 // 명령줄을 UTF-8로 캡처하고 크래시 수집(덤프 도우미 포함)을 설치한다. 로그(Docs/Design/
@@ -38,7 +53,11 @@ using rocks::StringView;
 
 int Usage() noexcept {
     fprintf(stderr,
-            "usage: Sandbox [--self-test] [--gpu-validation] | --engine [--window] [--frames N] "
+            "usage: Sandbox [--self-test] [--gpu-validation] | --engine-shader-self-test | "
+            "--cooked-shader-self-test | --texture-self-test | --audio-tone [--seconds N] | "
+            "--engine [--window] [--frames N] "
+            "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
+            "[--no-splash] "
             "[--config <file>] "
             "[--set=<target>=<value>]... [--trace=<channels>]... "
             "[--trace-file <path>]\n");
@@ -100,7 +119,12 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     StringView settingArguments[MaxSettingArguments];
     rocks::usize settingCount = 0;
     bool gpuValidation = false;
+    bool engineShaders = false;
+    bool cookedShaders = false;
+    bool textures = false;
     bool framesGiven = false;
+    bool audioTone = false;
+    rocks::uint64 toneSeconds = sandbox::DefaultAudioToneSeconds;
     for (rocks::usize index = 0; index < arguments.Size(); ++index) {
         const StringView argument = arguments[index];
         const bool hasValue = index + 1 < arguments.Size();
@@ -110,10 +134,35 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
 
         if (Is(argument, "--engine")) {
             engine = true;
+        } else if (Is(argument, "--audio-tone")) {
+            audioTone = true;
+        } else if (Is(argument, "--seconds") && hasValue &&
+                   ParseFrames(arguments[index + 1], toneSeconds) &&
+                   toneSeconds <= sandbox::MaxAudioToneSeconds) {
+            ++index;
+        } else if (Is(argument, "--engine-shader-self-test")) {
+            engineShaders = true;
+        } else if (Is(argument, "--cooked-shader-self-test")) {
+            cookedShaders = true;
+        } else if (Is(argument, "--texture-self-test")) {
+            textures = true;
         } else if (Is(argument, "--gpu-validation")) {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
             options.window = true;
+        } else if (Is(argument, "--no-splash")) {
+            options.noSplash = true;
+        } else if (Is(argument, "--no-render")) {
+            options.render = false;
+        } else if (Is(argument, "--graphics-validation")) {
+            options.graphicsValidation = true;
+        } else if (argument.StartsWith("--graphics=", rocks::StringComparison::CaseSensitive)) {
+            constexpr rocks::usize PrefixBytes = sizeof("--graphics=") - 1;
+            const StringView name(argument.Data() + PrefixBytes,
+                                  argument.ByteCount() - PrefixBytes);
+            if (!sandbox::screen::ParseScreenBackend(name, options.graphics)) {
+                return Usage();
+            }
         } else if (Is(argument, "--frames") && hasValue &&
                    ParseFrames(arguments[index + 1], options.frames)) {
             framesGiven = true;
@@ -143,6 +192,20 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     }
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
+    if (audioTone) {
+        return sandbox::RunAudioTone(context.DefaultAllocator(), context.Modules(),
+                                     static_cast<rocks::uint32>(toneSeconds));
+    }
+
+    if (engineShaders || cookedShaders || textures) {
+        const sandbox::GraphicsSelfTestScope scope =
+            engineShaders   ? sandbox::GraphicsSelfTestScope::EngineShaders
+            : cookedShaders ? sandbox::GraphicsSelfTestScope::CookedShaders
+                            : sandbox::GraphicsSelfTestScope::Textures;
+        return sandbox::RunGraphicsSelfTest(context.DefaultAllocator(), context.Modules(), false,
+                                            scope);
+    }
+
     return engine ? sandbox::RunEngineHost(context, options)
                   : RunSelfTest(context.DefaultAllocator(), context.Modules(), gpuValidation);
 }

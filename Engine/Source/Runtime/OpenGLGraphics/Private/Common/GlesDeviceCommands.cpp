@@ -527,8 +527,7 @@ const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
     }
 
     ApplyConstants(*pipeline);
-    ApplySlots(*pipeline);
-    return pipeline;
+    return ApplySlots(*pipeline) ? pipeline : nullptr;
 }
 
 const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
@@ -562,8 +561,7 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
     }
 
     ApplyConstants(*pipeline);
-    ApplySlots(*pipeline);
-    return pipeline;
+    return ApplySlots(*pipeline) ? pipeline : nullptr;
 }
 
 GLuint GlesDevice::IndirectArguments(BufferHandle arguments, uint64 offset,

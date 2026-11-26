@@ -182,6 +182,18 @@ TEST(ArrayMoveAppendPreservesBothArraysOnFailure) {
     CHECK(backing.Stats().liveAllocations == 0);
 }
 
+TEST(ArrayLastCountsFromTheEnd) {
+    SystemAllocator allocator;
+    Array<int> values(allocator);
+    REQUIRE(values.TryPushBack(10));
+    REQUIRE(values.TryPushBack(20));
+    REQUIRE(values.TryPushBack(30));
+    CHECK(values.Last() == 30 && values.Last(1) == 20 && values.Last(2) == 10);
+    values.Last(1) = 25;
+    const Array<int>& view = values;
+    CHECK(view[1] == 25 && view.Last() == values[values.Size() - 1] && view.Last(2) == view[0]);
+}
+
 TEST(ArrayResizeShrinkRemovePopAndFindContracts) {
     Value::ResetCounts();
     SystemAllocator backing;

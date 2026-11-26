@@ -263,7 +263,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 
 ### 4.9 메시 LOD(결정 T9)
 
-2026-11-20 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). 메시 에셋 스펙의 요구 MR3([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 5.3·6.3절)을 받는다. 구조는 UE 5.8과 같다.
+2026-11-20 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). 메시 에셋 스펙의 요구 MR3([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/05-StaticMesh.ko.md) 5.3·6.3절)을 받는다. 구조는 UE 5.8과 같다.
 - **UE 5.8.** 텍스처와 메시가 같은 스트리밍 관리자를 쓴다(`FRenderAssetStreamingManager`가 `UStreamableRenderAsset`을 다룬다 — `Engine/Classes/Engine/StreamableRenderAsset.h:405`). 메시 풀은 기본으로 텍스처 풀과 공유한다(`r.Streaming.PoolSizeForMeshes` 기본 −1 = 공유 — `Engine/Private/Streaming/TextureStreamingHelpers.cpp:125–129`). 메시마다 플랫폼별 스트리밍 LOD 수 상한이 있고(`NumStreamedLODs`, `Engine/Classes/Engine/StaticMesh.h:708`), 메시 LOD 그룹이 기본값(`DefaultMaxNumStreamedLODs`)과 지원 여부(`bSupportLODStreaming`)를 준다(`Engine/Public/StaticMeshResources.h:58`). 켜고 끄는 설정은 `r.MeshStreaming`이다.
 
 Rocks 규칙:

@@ -1,4 +1,5 @@
 #include <UiRender/UiShaderTypes.h>
+#include <Graphics/ShaderBindings.h>
 
 // UiRender 셰이더 타입 desc다(Docs/Design/UiToolkit 9.1절 UW1a). 원문 경로는 Engine/Shaders 아래다.
 namespace rocks::ui {
@@ -56,6 +57,21 @@ Result<graphics::ShaderHandle> DeviceShader(render::ShaderSet& shaders,
 
 Span<const shader::ShaderTypeDesc* const> UiShaderTypes() noexcept {
     return Span<const shader::ShaderTypeDesc* const>(Types);
+}
+
+Result<uint32> UiPixelTextureSlot(render::ShaderSet& shaders, const shader::ShaderTypeName& pixel,
+                                  StringView name) noexcept {
+    auto entry = shaders.FindEntry(pixel.hash);
+    if (!entry) {
+        return Result<uint32>::Failure(entry.Error());
+    }
+
+    const shader::ShaderBindingLayout* layout = shaders.BindingLayout(entry.Value());
+    if (layout == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::NotFound);
+    }
+
+    return graphics::FindTextureSlot(*layout, name);
 }
 
 Result<graphics::PipelineHandle> CreateUiPipeline(graphics::Device& device,

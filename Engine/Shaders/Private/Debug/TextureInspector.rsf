@@ -1,0 +1,204 @@
+// 텍스처 표시 PS다(Docs/Design/RenderBase 18.5절 6·7항, 엔진 셰이더 A20 TextureInspector).
+// FullscreenTriangleVertex와 짝을 이루어 대상(보통 viewport 일부)을 텍스처 하나로 채운다. 차원마다
+// 엔트리가 따로다: 2D, 2D 배열 층, cube 펼침(가로 십자), cube 배열 원소의 펼침, volume z 단면. mip은
+// 그대로 고른다(SampleLevel). 출력은 선형 표시 색이고 sRGB 부호화는 대상 view가 한다.
+//
+// 읽은 값에는 쿠킹 swizzle(sampler type 계약 — RB 6.5절)을 적용한다. 텍스처 view swizzle은 항등이다.
+// 정수 형식(uint·int)은 2D·2D 배열·volume 엔트리가 따로이고, texel을 Load로 읽어 배율을 곱한 뒤 LDR로
+// 표시한다(정수 형식은 필터 표본이 없고, HLSL TextureCube에는 Load가 없어 cube 계열은 두지 않는다).
+//
+// 표시 방식(selection.w): 0 그대로(LDR — 선형 값이 그대로 표시 색), 1 HDR(노출 × filmic 곡선 —
+// Color/FilmicToneCurve.rsh), 2 깊이(빨강 채널을 회색으로 — reversed-Z라 가까울수록 밝다).
+#include "/Engine/Private/Color/FilmicToneCurve.rsh"
+#include "/Engine/Private/Material/MaterialTextureSampling.rsh"
+
+// 그리기별 상수 Inspector는 C++ RenderBase/EngineShaderTypes.h TextureInspectorConstants의 생성 원문이다
+// (96 byte, ShaderSystem 16.2절). exposure·film·filmWhite는 tone map 상수와 같은 배치이고, selection(x mip,
+// y 층 — 배열 층·cube 배열 원소·volume z texel, z 고른 mip의 volume 깊이(texel 수), w 표시 방식),
+// swizzle(쿠킹 swizzle 출처 번호 넷 — MaterialTextureSampling.rsh SwizzleSource*), integer(x 정수 값 →
+// 표시 값 배율, y·z 고른 mip의 폭·높이(texel 수), w 0)다.
+#include "/Engine/Generated/RenderBase/TextureInspectorConstants.rsh"
+
+static const float InspectorLdr = 0.0;
+static const float InspectorHdr = 1.0;
+
+float4 InspectorDisplay(float4 sampled) {
+    const float4 value = ApplyCookedChannelSwizzle(sampled, Inspector.swizzle);
+    if (Inspector.selection.w == InspectorLdr) {
+        return float4(value.rgb, 1.0);
+    }
+
+    if (Inspector.selection.w == InspectorHdr) {
+        RocksFilmicParameters film;
+        film.slope = Inspector.film.x;
+        film.toe = Inspector.film.y;
+        film.shoulder = Inspector.film.z;
+        film.blackClip = Inspector.film.w;
+        film.whiteClip = Inspector.filmWhite.x;
+        film.blueCorrection = Inspector.exposure.y;
+        film.expandGamut = Inspector.exposure.z;
+        film.toneCurveAmount = Inspector.exposure.w;
+        return float4(RocksFilmicDisplayColor(max(value.rgb * Inspector.exposure.x, 0.0), film),
+                      1.0);
+    }
+
+    return float4(value.rrr, 1.0);
+}
+
+// 가로 십자(4 × 3 칸) 펼침의 방향이다. 칸: 위 줄 둘째 +Y, 가운데 줄 -X·+Z·+X·-Z, 아래 줄 둘째 -Y
+// (D3D cube 면 규약 — 면 안 s 오른쪽·t 아래). 칸 밖이면 valid = false다.
+float3 InspectorCrossDirection(float2 uv, out bool valid) {
+    const float2 cell = uv * float2(4.0, 3.0);
+    const float2 index = floor(cell);
+    const float2 st = (cell - index) * 2.0 - 1.0;
+    valid = true;
+    if (index.y == 1.0) {
+        if (index.x == 0.0) {
+            return float3(-1.0, -st.y, st.x);
+        }
+
+        if (index.x == 1.0) {
+            return float3(st.x, -st.y, 1.0);
+        }
+
+        if (index.x == 2.0) {
+            return float3(1.0, -st.y, -st.x);
+        }
+
+        return float3(-st.x, -st.y, -1.0);
+    }
+
+    if (index.x == 1.0 && index.y == 0.0) {
+        return float3(st.x, 1.0, st.y);
+    }
+
+    if (index.x == 1.0 && index.y == 2.0) {
+        return float3(st.x, -1.0, -st.y);
+    }
+
+    valid = false;
+    return float3(0.0, 0.0, 1.0);
+}
+
+Texture2D Source2D;
+SamplerState Source2DSampler;
+
+float4 TextureInspector2DPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    return InspectorDisplay(Source2D.SampleLevel(Source2DSampler, uv, Inspector.selection.x));
+}
+
+Texture2DArray Source2DArray;
+SamplerState Source2DArraySampler;
+
+float4 TextureInspector2DArrayPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    return InspectorDisplay(Source2DArray.SampleLevel(
+        Source2DArraySampler, float3(uv, Inspector.selection.y), Inspector.selection.x));
+}
+
+TextureCube SourceCube;
+SamplerState SourceCubeSampler;
+
+float4 TextureInspectorCubePixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    bool valid;
+    const float3 direction = InspectorCrossDirection(uv, valid);
+    if (!valid) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+
+    return InspectorDisplay(SourceCube.SampleLevel(SourceCubeSampler, direction,
+                                                   Inspector.selection.x));
+}
+
+TextureCubeArray SourceCubeArray;
+SamplerState SourceCubeArraySampler;
+
+float4 TextureInspectorCubeArrayPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    bool valid;
+    const float3 direction = InspectorCrossDirection(uv, valid);
+    if (!valid) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+
+    return InspectorDisplay(SourceCubeArray.SampleLevel(
+        SourceCubeArraySampler, float4(direction, Inspector.selection.y), Inspector.selection.x));
+}
+
+Texture3D SourceVolume;
+SamplerState SourceVolumeSampler;
+
+float4 TextureInspectorVolumePixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const float w = (Inspector.selection.y + 0.5) / max(Inspector.selection.z, 1.0);
+    return InspectorDisplay(
+        SourceVolume.SampleLevel(SourceVolumeSampler, float3(uv, w), Inspector.selection.x));
+}
+
+// 정수 형식 표시다. uv가 덮는 texel(고른 mip 크기 기준, 가장자리에서 자름)을 Load로 읽는다.
+int2 InspectorTexel(float2 uv) {
+    const float2 size = max(Inspector.integer.yz, 1.0);
+    return int2(min(floor(uv * size), size - 1.0));
+}
+
+float4 InspectorIntegerDisplay(float4 value) {
+    return InspectorDisplay(value * Inspector.integer.x);
+}
+
+Texture2D<uint4> Source2DUint;
+
+float4 TextureInspector2DUintPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    return InspectorIntegerDisplay(float4(Source2DUint.Load(int3(InspectorTexel(uv), mip))));
+}
+
+Texture2DArray<uint4> Source2DArrayUint;
+
+float4 TextureInspector2DArrayUintPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    const int layer = int(Inspector.selection.y);
+    return InspectorIntegerDisplay(
+        float4(Source2DArrayUint.Load(int4(InspectorTexel(uv), layer, mip))));
+}
+
+Texture3D<uint4> SourceVolumeUint;
+
+float4 TextureInspectorVolumeUintPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    const int z = int(Inspector.selection.y);
+    return InspectorIntegerDisplay(
+        float4(SourceVolumeUint.Load(int4(InspectorTexel(uv), z, mip))));
+}
+
+Texture2D<int4> Source2DInt;
+
+float4 TextureInspector2DIntPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    return InspectorIntegerDisplay(float4(Source2DInt.Load(int3(InspectorTexel(uv), mip))));
+}
+
+Texture2DArray<int4> Source2DArrayInt;
+
+float4 TextureInspector2DArrayIntPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    const int layer = int(Inspector.selection.y);
+    return InspectorIntegerDisplay(
+        float4(Source2DArrayInt.Load(int4(InspectorTexel(uv), layer, mip))));
+}
+
+Texture3D<int4> SourceVolumeInt;
+
+float4 TextureInspectorVolumeIntPixel(float4 position : SV_Position, float2 uv : TEXCOORD0)
+    : SV_Target0 {
+    const int mip = int(Inspector.selection.x);
+    const int z = int(Inspector.selection.y);
+    return InspectorIntegerDisplay(
+        float4(SourceVolumeInt.Load(int4(InspectorTexel(uv), z, mip))));
+}
