@@ -135,11 +135,14 @@ enum class IrOp : uint8 {
     TextureSample = 88,
     // Double uv를 주소 모드대로 Float로 낮춘다(6.10절 MS2c3 — UE WSApplyAddressMode). 즉시값 [0]은
     // 성분마다 2 bit 주소 모드(0 Clamp, 1 Wrap, 2 Mirror).
-    AddressDemote = 89
+    AddressDemote = 89,
+    // 텍스처 slot의 논리 크기다(6.10절 MS2c3b — UE TextureProperty). 피연산자 텍스처, 즉시값 [0]은
+    // 0 크기·1 texel 크기. 빈도 Uniform(상수 식 프로그램 명령).
+    TextureSize = 90
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 90;
+inline constexpr uint32 IrOpCount = 91;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

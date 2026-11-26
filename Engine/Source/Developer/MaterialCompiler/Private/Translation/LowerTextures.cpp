@@ -410,59 +410,36 @@ Result<bool> StaticBoolOverride(LoweringContext& context, StringView key, bool& 
     return Result<bool>::Success(true);
 }
 
-// 샘플 하나다(UE TextureSample Compile 5–7단계와 HT TextureSample). texture는 텍스처 값이고
-// samplerType은 실효 샘플 종류다. 결과 Float4 또는 NoIrValue(진단함).
-Result<IrValueId> Sample(LoweringContext& context, IrValueId texture,
-                         const SampleSettings& settings, uint8 samplerType,
-                         bool useViewMipBias) noexcept {
-    IrTexture slot;
-    const MaterialTextureFacts* facts = FactsOf(context, texture, slot);
-    const IrTextureKind kind = context.TypeOf(texture).texture;
-    static constexpr StringView UvwMessages[] = {
-        "UVW input required for cubemap sample", "UVW input required for texturearray sample",
-        "UVWX input required for texturecubearray sample", "UVW input required for volume sample"};
+// Coordinates 입력이 연결되면 그 값, 아니면 TexCoord(constCoordinate)다.
+Result<IrValueId> CoordinatesOrTexCoord(LoweringContext& context,
+                                        const SampleSettings& settings) noexcept {
     auto connected = context.IsConnected("Coordinates");
     if (!connected) {
         return Result<IrValueId>::Failure(connected.Error());
     }
 
-    if (!connected.Value() && kind != IrTextureKind::Texture2D && kind != IrTextureKind::External) {
-        const usize message =
-            static_cast<usize>(kind) - static_cast<usize>(IrTextureKind::TextureCube);
-        if (auto reported = context.Error(MaterialDiagnosticCode::MissingInput, "Coordinates",
-                                          UvwMessages[message]);
-            !reported) {
-            return Result<IrValueId>::Failure(reported.Error());
-        }
-
-        return Result<IrValueId>::Success(NoIrValue);
-    }
-
-    // 좌표: 연결 또는 TexCoord(constCoordinate).
-    IrValueId uv = NoIrValue;
     if (connected.Value()) {
-        auto input = context.Input("Coordinates");
-        if (!input || input.Value() == NoIrValue) {
-            return input;
-        }
-
-        uv = input.Value();
-    } else {
-        const uint32 index = settings.constCoordinate;
-        auto slotValue = context.Builder().UIntConstant(Span<const uint32>(&index, 1));
-        if (!slotValue) {
-            return slotValue;
-        }
-
-        const IrValueId arguments[] = {slotValue.Value()};
-        auto texCoord = context.ContextValue("TexCoord", arguments);
-        if (!texCoord) {
-            return texCoord;
-        }
-
-        uv = texCoord.Value();
+        return context.Input("Coordinates");
     }
 
+    const uint32 index = settings.constCoordinate;
+    auto slotValue = context.Builder().UIntConstant(Span<const uint32>(&index, 1));
+    if (!slotValue) {
+        return slotValue;
+    }
+
+    const IrValueId arguments[] = {slotValue.Value()};
+    return context.ContextValue("TexCoord", arguments);
+}
+
+// texture를 uv에서 샘플한다(HT TextureSample — mip 값·방식 결정, gather·정점 문맥·view mip bias,
+// uv 폭 맞춤, 샘플러 예산). samplerType은 실효 샘플 종류다. 결과 Float4 또는 NoIrValue(진단함).
+Result<IrValueId> SampleAt(LoweringContext& context, IrValueId texture, IrValueId uv,
+                           const SampleSettings& settings, uint8 samplerType,
+                           bool useViewMipBias) noexcept {
+    IrTexture slot;
+    const MaterialTextureFacts* facts = FactsOf(context, texture, slot);
+    const IrTextureKind kind = context.TypeOf(texture).texture;
     const bool pixel = context.Context() == EvaluationContext::Pixel;
     IrTextureMipMode mode =
         settings.mipMode == TextureMipValueMode::MipLevel     ? IrTextureMipMode::Level
@@ -686,6 +663,60 @@ Result<IrValueId> Sample(LoweringContext& context, IrValueId texture,
     }
 
     return context.Builder().TextureSample(desc, texture, uv, first, second);
+}
+
+// 텍스처 샘플 노드의 샘플 하나다(UE TextureSample Compile 5–7단계 — Cube·배열·Volume은 Coordinates
+// 필수, 그 뒤 좌표와 SampleAt).
+Result<IrValueId> Sample(LoweringContext& context, IrValueId texture,
+                         const SampleSettings& settings, uint8 samplerType,
+                         bool useViewMipBias) noexcept {
+    const IrTextureKind kind = context.TypeOf(texture).texture;
+    static constexpr StringView UvwMessages[] = {
+        "UVW input required for cubemap sample", "UVW input required for texturearray sample",
+        "UVWX input required for texturecubearray sample", "UVW input required for volume sample"};
+    auto connected = context.IsConnected("Coordinates");
+    if (!connected) {
+        return Result<IrValueId>::Failure(connected.Error());
+    }
+
+    if (!connected.Value() && kind != IrTextureKind::Texture2D && kind != IrTextureKind::External) {
+        const usize message =
+            static_cast<usize>(kind) - static_cast<usize>(IrTextureKind::TextureCube);
+        if (auto reported = context.Error(MaterialDiagnosticCode::MissingInput, "Coordinates",
+                                          UvwMessages[message]);
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    auto uv = CoordinatesOrTexCoord(context, settings);
+    if (!uv || uv.Value() == NoIrValue) {
+        return uv;
+    }
+
+    return SampleAt(context, texture, uv.Value(), settings, samplerType, useViewMipBias);
+}
+
+// UE DescribeType의 텍스처 이름이다(TextureProperty 문구).
+StringView DescribeTextureType(IrType type) noexcept {
+    switch (type.texture) {
+    case IrTextureKind::TextureCube:
+        return "textureCube";
+    case IrTextureKind::TextureCubeArray:
+        return "textureCubeArray";
+    case IrTextureKind::External:
+        return "textureExternal";
+    case IrTextureKind::Texture2DArray:
+        return "texture2DArray";
+    case IrTextureKind::Texture3D:
+        return "volumeTexture";
+    case IrTextureKind::Texture2D:
+        return "texture2D";
+    default:
+        return "unknown";
+    }
 }
 
 // 샘플 종류가 선행 없는 종류(External·가상)면 그 자리 값이다. 아니면 NoIrValue다.
@@ -981,6 +1012,481 @@ Result<void> LowerTextureObjectParameter(LoweringContext& context) noexcept {
     return LowerTextureObjectNode(context, true);
 }
 
+// UE TextureProperty(MaterialExpressions.cpp:4277–4290, HLSLMaterialTranslator.cpp:7770–7787).
+Result<void> LowerTextureProperty(LoweringContext& context) noexcept {
+    auto connected = context.IsConnected("TextureObject");
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    if (!connected.Value()) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, "TextureObject",
+                             "TextureSample> Missing input texture");
+    }
+
+    auto input = context.Input("TextureObject");
+    if (!input || input.Value() == NoIrValue) {
+        return input ? Result<void>::Success() : Result<void>::Failure(input.Error());
+    }
+
+    const IrValue& value = context.Builder().Value(input.Value());
+    if (value.op == IrOp::Pending) {
+        auto pending = context.Builder().Pending(
+            IrFloat(2), static_cast<IrPendingKind>(value.immediate[0]),
+            static_cast<uint8>(value.immediate[1]), Guid{value.immediate[2], value.immediate[3]});
+        return pending ? context.Output("Result", pending.Value())
+                       : Result<void>::Failure(pending.Error());
+    }
+
+    const IrTextureKind kind = context.TypeOf(input.Value()).texture;
+    if (value.op != IrOp::Texture ||
+        (kind != IrTextureKind::Texture2D && kind != IrTextureKind::Texture2DArray &&
+         kind != IrTextureKind::Texture3D)) {
+        SystemAllocator scratch;
+        StringBuilder<> message(scratch);
+        message << "Texture size only available for Texture2D, TextureVirtual, Texture2DArray, "
+                   "VolumeTexture and SparseVolumeTexture, not "
+                << DescribeTextureType(context.TypeOf(input.Value()));
+        if (auto status = message.Status(); !status) {
+            return status;
+        }
+
+        return context.Error(MaterialDiagnosticCode::TypeMismatch, "TextureObject", message.View());
+    }
+
+    int64 property = 0;
+    auto read = context.ReadInteger("property", 0, property);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    auto size = context.Builder().TextureSize(input.Value(),
+                                              static_cast<ExposedTextureProperty>(property) ==
+                                                  ExposedTextureProperty::TexelSize);
+    if (!size) {
+        return Result<void>::Failure(size.Error());
+    }
+
+    return context.Output("Result", size.Value());
+}
+
+// 텍스처 입력이 연결되면 그 값을 검사해 돌려준다(RecordTextureStreamingInfo·ParticleSubUv).
+// 텍스처가 아니면 message로 진단하고 NoIrValue다. pending은 늦은 진단 자리 값이면 참이다.
+Result<IrValueId> TextureInput(LoweringContext& context, StringView message,
+                               bool& pending) noexcept {
+    pending = false;
+    auto input = context.Input("TextureObject");
+    if (!input || input.Value() == NoIrValue) {
+        return input;
+    }
+
+    const IrValue& value = context.Builder().Value(input.Value());
+    if (value.op == IrOp::Pending) {
+        pending = true;
+        return input;
+    }
+
+    if (value.op != IrOp::Texture) {
+        if (auto reported =
+                context.Error(MaterialDiagnosticCode::TypeMismatch, "TextureObject", message);
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    return input;
+}
+
+// UE RecordTextureStreamingInfo(MaterialExpressions.cpp:23095–23128). 스트리밍 기록은 UE도 보통
+// no-op이라 IR을 내지 않는다(6.10절 MS2c3b).
+Result<void> LowerRecordTextureStreamingInfo(LoweringContext& context) noexcept {
+    auto hasTexture = context.IsConnected("TextureObject");
+    if (!hasTexture) {
+        return Result<void>::Failure(hasTexture.Error());
+    }
+
+    if (!hasTexture.Value()) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, "TextureObject",
+                             "Missing input TextureObject");
+    }
+
+    bool pending = false;
+    auto texture = TextureInput(context, "TextureObject input requires a texture value", pending);
+    if (!texture || texture.Value() == NoIrValue) {
+        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
+    }
+
+    auto hasCoordinates = context.IsConnected("Coordinates");
+    if (!hasCoordinates) {
+        return Result<void>::Failure(hasCoordinates.Error());
+    }
+
+    if (!hasCoordinates.Value()) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, "Coordinates",
+                             "Missing input UV Coordinates");
+    }
+
+    auto coordinates = context.Input("Coordinates");
+    if (!coordinates || coordinates.Value() == NoIrValue) {
+        return coordinates ? Result<void>::Success() : Result<void>::Failure(coordinates.Error());
+    }
+
+    return context.Output("Tex", texture.Value());
+}
+
+// UE ParticleSubUV(HLSLMaterialTranslator.cpp ParticleSubUV): SubUV 좌표 둘로 샘플하고 blend면
+// SubUVLerp로 섞는다. 샘플은 mip 방식·값만 노드 것이다(UE TextureSample 기본 인자 — 자기 샘플러,
+// gather 없음, view mip bias 없음).
+Result<void> EmitParticleSubUv(LoweringContext& context, IrValueId texture,
+                               const SampleSettings& settings, uint8 samplerType) noexcept {
+    if (context.Context() != EvaluationContext::Pixel) {
+        return context.Error(MaterialDiagnosticCode::StageViolation, StringView(),
+                             "Invalid node used in vertex/hull/domain shader input!");
+    }
+
+    bool blend = true;
+    auto read = context.ReadBool("blend", true, blend);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    SampleSettings plain = settings;
+    plain.samplerSource = SamplerSourceMode::FromTextureAsset;
+    plain.gather = TextureGatherMode::None;
+    const StringView coordinates[] = {"ParticleSubUvCoords0", "ParticleSubUvCoords1"};
+    IrValueId samples[2] = {NoIrValue, NoIrValue};
+    for (usize index = 0; index < (blend ? 2u : 1u); ++index) {
+        auto uv = context.ContextValue(coordinates[index]);
+        if (!uv) {
+            return Result<void>::Failure(uv.Error());
+        }
+
+        auto sample = SampleAt(context, texture, uv.Value(), plain, samplerType, false);
+        if (!sample || sample.Value() == NoIrValue) {
+            return sample ? Result<void>::Success() : Result<void>::Failure(sample.Error());
+        }
+
+        samples[index] = sample.Value();
+    }
+
+    if (!blend) {
+        return EmitSampleOutputs(context, samples[0]);
+    }
+
+    auto alpha = context.ContextValue("ParticleSubUvLerp");
+    if (!alpha) {
+        return Result<void>::Failure(alpha.Error());
+    }
+
+    auto mixed =
+        context.Ternary(IrOp::Lerp, samples[0], samples[1], alpha.Value(), NumberRule::FloatOnly);
+    if (!mixed) {
+        return Result<void>::Failure(mixed.Error());
+    }
+
+    return EmitSampleOutputs(context, mixed.Value());
+}
+
+// UE ParticleSubUV(MaterialExpressions.cpp:10261–10299).
+Result<void> LowerParticleSubUv(LoweringContext& context) noexcept {
+    SampleSettings settings;
+    auto read = ReadSampleSettings(context, settings);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    auto connected = context.IsConnected("TextureObject");
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    IrValueId texture = NoIrValue;
+    uint8 samplerType = settings.samplerType;
+    if (connected.Value()) {
+        bool pending = false;
+        auto input = TextureInput(context, "Tex input requires a texture value", pending);
+        if (!input || input.Value() == NoIrValue) {
+            return input ? Result<void>::Success() : Result<void>::Failure(input.Error());
+        }
+
+        if (pending) {
+            auto placeholder = PendingSample(context, context.Builder().Value(input.Value()));
+            if (!placeholder) {
+                return Result<void>::Failure(placeholder.Error());
+            }
+
+            return EmitSampleOutputs(context, placeholder.Value());
+        }
+
+        texture = input.Value();
+        samplerType = static_cast<uint8>(context.Builder().Value(texture).immediate[2] >> 8);
+    } else {
+        if (settings.texture == Guid{}) {
+            return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
+                                 "Missing ParticleSubUV input texture");
+        }
+
+        auto made = AssetTexture(context, settings.texture, settings.samplerType);
+        if (!made || made.Value() == NoIrValue) {
+            return made ? Result<void>::Success() : Result<void>::Failure(made.Error());
+        }
+
+        texture = made.Value();
+    }
+
+    auto unsupported = UnsupportedSamplerType(context, samplerType);
+    if (!unsupported || unsupported.Value() != NoIrValue) {
+        return unsupported ? EmitSampleOutputs(context, unsupported.Value())
+                           : Result<void>::Failure(unsupported.Error());
+    }
+
+    IrTexture slot;
+    if (const MaterialTextureFacts* facts = FactsOf(context, texture, slot)) {
+        auto verified = VerifySamplerType(context, *facts, samplerType);
+        if (!verified || !verified.Value()) {
+            return verified ? Result<void>::Success() : Result<void>::Failure(verified.Error());
+        }
+    }
+
+    return EmitParticleSubUv(context, texture, settings, samplerType);
+}
+
+// Param2D와 같은 텍스처 검사(UE TextureSampleParameter2D::TextureIsValid)다. 맞으면 facts를 채우고
+// true다. 아니면 진단했다.
+Result<bool> CheckParameter2DTexture(LoweringContext& context, const SampleSettings& settings,
+                                     const MaterialTextureFacts*& facts) noexcept {
+    facts = settings.texture == Guid{} ? nullptr : context.FindTexture(settings.texture);
+    SystemAllocator scratch;
+    StringBuilder<> message(scratch);
+    if (settings.texture == Guid{}) {
+        message << "Found NULL, requires Texture2D";
+    } else if (facts == nullptr) {
+        auto made = AssetTexture(context, settings.texture, settings.samplerType);
+        return made ? Result<bool>::Success(false) : Result<bool>::Failure(made.Error());
+    } else if (facts->kind != IrTextureKind::Texture2D && facts->kind != IrTextureKind::External) {
+        message << "Found " << ClassName(facts->kind) << ", requires Texture2D";
+    } else if (IsVirtualSamplerType(settings.samplerType) && !facts->virtualTexture) {
+        message << "Sampler requires VirtualTexture";
+    } else if (!IsVirtualSamplerType(settings.samplerType) && facts->virtualTexture) {
+        message << "Sampler requires non-VirtualTexture";
+    }
+
+    if (auto status = message.Status(); !status) {
+        return Result<bool>::Failure(status.Error());
+    }
+
+    if (message.View().IsEmpty()) {
+        return Result<bool>::Success(true);
+    }
+
+    if (auto reported =
+            context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), message.View());
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
+// parameterName·parameterId로 파라미터 Texture(이름이 없으면 참조 Texture)를 만든다.
+Result<IrValueId> NamedTexture(LoweringContext& context, const SampleSettings& settings) noexcept {
+    auto properties = context.Properties();
+    if (!properties) {
+        return Result<IrValueId>::Failure(properties.Error());
+    }
+
+    StringView name;
+    if (properties.Value() != nullptr) {
+        auto text = properties.Value()->ReadText("parameterName");
+        if (!text && text.Error() == ErrorCode::OutOfMemory) {
+            return Result<IrValueId>::Failure(text.Error());
+        }
+
+        name = text ? text.Value() : StringView();
+    }
+
+    Guid parameter;
+    auto idRead = context.ReadGuid("parameterId", parameter);
+    if (!idRead || !idRead.Value()) {
+        return idRead ? Result<IrValueId>::Success(NoIrValue)
+                      : Result<IrValueId>::Failure(idRead.Error());
+    }
+
+    return name.IsEmpty()
+               ? AssetTexture(context, settings.texture, settings.samplerType)
+               : ParameterTexture(context, parameter, settings.texture, settings.samplerType);
+}
+
+// UE TextureSampleParameterSubUV(MaterialExpressions.cpp:4674–4695).
+Result<void> LowerTextureSampleParameterSubUv(LoweringContext& context) noexcept {
+    SampleSettings settings;
+    auto read = ReadSampleSettings(context, settings);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    const MaterialTextureFacts* facts = nullptr;
+    auto valid = CheckParameter2DTexture(context, settings, facts);
+    if (!valid || !valid.Value()) {
+        return valid ? Result<void>::Success() : Result<void>::Failure(valid.Error());
+    }
+
+    auto unsupported = UnsupportedSamplerType(context, settings.samplerType);
+    if (!unsupported || unsupported.Value() != NoIrValue) {
+        return unsupported ? EmitSampleOutputs(context, unsupported.Value())
+                           : Result<void>::Failure(unsupported.Error());
+    }
+
+    auto verified = VerifySamplerType(context, *facts, settings.samplerType);
+    if (!verified || !verified.Value()) {
+        return verified ? Result<void>::Success() : Result<void>::Failure(verified.Error());
+    }
+
+    // UE: Coordinates 입력은 무시하고 UV0 사용을 기록한다(정점 UV 채널 수).
+    const uint32 first = 0;
+    auto channel = context.Builder().UIntConstant(Span<const uint32>(&first, 1));
+    if (!channel) {
+        return Result<void>::Failure(channel.Error());
+    }
+
+    const IrValueId arguments[] = {channel.Value()};
+    if (auto noted = context.ContextValue("TexCoord", arguments); !noted) {
+        return Result<void>::Failure(noted.Error());
+    }
+
+    auto texture = NamedTexture(context, settings);
+    if (!texture || texture.Value() == NoIrValue) {
+        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
+    }
+
+    return EmitParticleSubUv(context, texture.Value(), settings, settings.samplerType);
+}
+
+// UE AntialiasedTextureMask(MaterialExpressions.cpp:19568–19606, Common.ush:1724).
+Result<void> LowerAntialiasedTextureMask(LoweringContext& context) noexcept {
+    SampleSettings settings;
+    auto read = ReadSampleSettings(context, settings);
+    if (!read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    if (settings.texture == Guid{}) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
+                             "UMaterialExpressionAntialiasedTextureMask> Missing input texture");
+    }
+
+    const MaterialTextureFacts* known = context.FindTexture(settings.texture);
+    if (known != nullptr && known->virtualTexture) {
+        return context.Error(
+            MaterialDiagnosticCode::UnsupportedCapability, StringView(),
+            "UMaterialExpressionAntialiasedTextureMask> Virtual textures are not supported");
+    }
+
+    const MaterialTextureFacts* facts = nullptr;
+    auto valid = CheckParameter2DTexture(context, settings, facts);
+    if (!valid || !valid.Value()) {
+        return valid ? Result<void>::Success() : Result<void>::Failure(valid.Error());
+    }
+
+    auto texture = NamedTexture(context, settings);
+    if (!texture || texture.Value() == NoIrValue) {
+        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
+    }
+
+    auto verified = VerifySamplerType(context, *facts, settings.samplerType);
+    if (!verified || !verified.Value()) {
+        return verified ? Result<void>::Success() : Result<void>::Failure(verified.Error());
+    }
+
+    if (context.Target(MaterialTargetField::IsMobile).isMobile) {
+        return context.Error(MaterialDiagnosticCode::UnsupportedCapability, StringView(),
+                             "Node not supported in feature level ES3_1. SM5 required.");
+    }
+
+    float threshold = 0.5f;
+    int64 channel = static_cast<int64>(TextureColorChannel::Alpha);
+    auto thresholdRead = context.ReadFloat("threshold", 0.5f, threshold);
+    auto channelRead =
+        context.ReadInteger("channel", static_cast<int64>(TextureColorChannel::Alpha), channel);
+    if (!thresholdRead || !channelRead) {
+        return Result<void>::Failure(!thresholdRead ? thresholdRead.Error() : channelRead.Error());
+    }
+
+    if (!thresholdRead.Value() || !channelRead.Value()) {
+        return Result<void>::Success();
+    }
+
+    // 원시 샘플(샘플 종류 처리 없음 — UE Texture2DSample)이다.
+    SampleSettings plain = settings;
+    plain.mipMode = TextureMipValueMode::None;
+    plain.samplerSource = SamplerSourceMode::FromTextureAsset;
+    plain.gather = TextureGatherMode::None;
+    auto uv = CoordinatesOrTexCoord(context, settings);
+    if (!uv || uv.Value() == NoIrValue) {
+        return uv ? Result<void>::Success() : Result<void>::Failure(uv.Error());
+    }
+
+    auto sample = SampleAt(context, texture.Value(), uv.Value(), plain,
+                           static_cast<uint8>(SamplerType::Masks), false);
+    if (!sample || sample.Value() == NoIrValue) {
+        return sample ? Result<void>::Success() : Result<void>::Failure(sample.Error());
+    }
+
+    float mask[MaxIrComponents] = {0.0f, 0.0f, 0.0f, 0.0f};
+    mask[static_cast<usize>(channel) < MaxIrComponents ? static_cast<usize>(channel) : 3] = 1.0f;
+    auto maskValue = context.FloatConstant(mask, StringView());
+    auto thresholdValue = context.FloatScalar(threshold);
+    if (!maskValue || !thresholdValue) {
+        return Result<void>::Failure(!maskValue ? maskValue.Error() : thresholdValue.Error());
+    }
+
+    // s = dot(mask, sample), d = max(|ddx s|, |ddy s|), saturate((s − T) / d + T).
+    auto value =
+        context.Binary(IrOp::Dot, maskValue.Value(), sample.Value(), NumberRule::FloatOnly);
+    if (!value) {
+        return Result<void>::Failure(value.Error());
+    }
+
+    auto dx = context.Unary(IrOp::Ddx, value.Value(), NumberRule::FloatOnly);
+    auto dy = context.Unary(IrOp::Ddy, value.Value(), NumberRule::FloatOnly);
+    if (!dx || !dy) {
+        return Result<void>::Failure(!dx ? dx.Error() : dy.Error());
+    }
+
+    auto ax = context.Unary(IrOp::Abs, dx.Value(), NumberRule::FloatOnly);
+    auto ay = context.Unary(IrOp::Abs, dy.Value(), NumberRule::FloatOnly);
+    if (!ax || !ay) {
+        return Result<void>::Failure(!ax ? ax.Error() : ay.Error());
+    }
+
+    auto slope = context.Binary(IrOp::Max, ax.Value(), ay.Value(), NumberRule::FloatOnly);
+    auto top = context.Binary(IrOp::Subtract, value.Value(), thresholdValue.Value(),
+                              NumberRule::FloatOnly);
+    if (!slope || !top) {
+        return Result<void>::Failure(!slope ? slope.Error() : top.Error());
+    }
+
+    auto ratio = context.Binary(IrOp::Divide, top.Value(), slope.Value(), NumberRule::FloatOnly);
+    if (!ratio) {
+        return Result<void>::Failure(ratio.Error());
+    }
+
+    auto biased =
+        context.Binary(IrOp::Add, ratio.Value(), thresholdValue.Value(), NumberRule::FloatOnly);
+    if (!biased) {
+        return Result<void>::Failure(biased.Error());
+    }
+
+    auto result = context.Unary(IrOp::Saturate, biased.Value(), NumberRule::FloatOnly);
+    if (!result) {
+        return Result<void>::Failure(result.Error());
+    }
+
+    return context.Output("Result", result.Value());
+}
+
 constexpr LoweringEntry TextureEntries[] = {
     {"Material.TextureObject", &LowerTextureObject},
     {"Material.TextureObjectParameter", &LowerTextureObjectParameter},
@@ -990,6 +1496,11 @@ constexpr LoweringEntry TextureEntries[] = {
     {"Material.TextureSampleParameter2DArray", &LowerTextureSampleParameter2DArray},
     {"Material.TextureSampleParameterCubeArray", &LowerTextureSampleParameterCubeArray},
     {"Material.TextureSampleParameterVolume", &LowerTextureSampleParameterVolume},
+    {"Material.TextureSampleParameterSubUv", &LowerTextureSampleParameterSubUv},
+    {"Material.TextureProperty", &LowerTextureProperty},
+    {"Material.AntialiasedTextureMask", &LowerAntialiasedTextureMask},
+    {"Material.RecordTextureStreamingInfo", &LowerRecordTextureStreamingInfo},
+    {"Material.ParticleSubUv", &LowerParticleSubUv},
 };
 
 } // namespace

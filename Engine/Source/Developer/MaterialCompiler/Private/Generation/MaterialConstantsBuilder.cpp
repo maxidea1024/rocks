@@ -56,6 +56,7 @@ bool IsMaterialConstantProgramOp(IrOp op) noexcept {
     case IrOp::Swizzle:
     case IrOp::Append:
     case IrOp::Convert:
+    case IrOp::TextureSize:
         return true;
     default:
         return false;
@@ -96,9 +97,11 @@ Result<void> BuildMaterialConstants(const IrModule& module, MaterialConstants& o
 
         for (uint8 operand = 0; can && operand < value.operandCount; ++operand) {
             const IrValue& source = values[value.operands[operand]];
-            can = source.op == IrOp::Constant ? (source.type.scalar == IrScalar::Float ||
+            // 텍스처 값은 TextureSize의 slot leaf로만 프로그램에 든다(6.10절 MS2c3b).
+            can = source.op == IrOp::Constant  ? (source.type.scalar == IrScalar::Float ||
                                                  source.type.scalar == IrScalar::Double)
-                                              : programmable[value.operands[operand]];
+                  : source.op == IrOp::Texture ? value.op == IrOp::TextureSize
+                                               : programmable[value.operands[operand]];
         }
 
         programmable[index] = can;

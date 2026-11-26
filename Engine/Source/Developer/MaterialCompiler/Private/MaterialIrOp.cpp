@@ -102,9 +102,10 @@ constexpr IrOpInfo IrOpInfos[IrOpCount] = {
     {"Texture", 0},
     {"TextureSample", 0},
     {"AddressDemote", 0},
+    {"TextureSize", 0},
 };
 
-static_assert(static_cast<uint32>(IrOp::AddressDemote) + 1 == IrOpCount,
+static_assert(static_cast<uint32>(IrOp::TextureSize) + 1 == IrOpCount,
               "IrOpCount must follow the last IrOp value");
 
 } // namespace

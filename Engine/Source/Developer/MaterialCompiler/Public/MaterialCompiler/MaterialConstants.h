@@ -42,7 +42,8 @@ struct MaterialConstants {
     }
 
     // 프로그램 명령이다. IrValue 형식 그대로이고 operands는 앞 명령 번호, Parameter는 모듈 파라미터
-    // 표 번호(즉시값 [3])를 읽는다. 형식 버전은 MaterialConstantProgramVersion이다.
+    // 표 번호(즉시값 [3])를, Texture는 모듈 텍스처 표 번호(즉시값 [3])를 읽고 TextureSize는 그
+    // slot의 논리 크기다. 형식 버전은 MaterialConstantProgramVersion이다.
     Array<IrValue> steps;
     // 멤버는 출력 값 번호 순, Double은 tile 다음 offset이다.
     Array<MaterialConstantMember> members;

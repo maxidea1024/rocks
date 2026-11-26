@@ -1295,6 +1295,26 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
     return Intern(value);
 }
 
+Result<IrValueId> IrBuilder::TextureSize(IrValueId texture, bool texel) noexcept {
+    if (!IsValid(texture) || !values_[texture].type.IsTexture()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const IrTextureKind kind = values_[texture].type.texture;
+    if (kind != IrTextureKind::Texture2D && kind != IrTextureKind::Texture2DArray &&
+        kind != IrTextureKind::Texture3D) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = IrFloat(kind == IrTextureKind::Texture2D ? 2 : 3);
+    value.op = IrOp::TextureSize;
+    value.operandCount = 1;
+    value.operands[0] = texture;
+    value.immediate[0] = texel ? 1 : 0;
+    return Intern(value);
+}
+
 Result<IrValueId> IrBuilder::AddressDemote(IrValueId operand, uint32 modes) noexcept {
     if (!IsNumeric(operand) || values_[operand].type.scalar != IrScalar::Double ||
         values_[operand].type.IsMatrix()) {

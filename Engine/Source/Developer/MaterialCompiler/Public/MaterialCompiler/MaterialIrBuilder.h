@@ -90,6 +90,9 @@ public:
     // CubeArray는 3)의 Float다. 결과 Float4. 오류: 규칙 밖이면 InvalidArgument.
     Result<IrValueId> TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
                                     IrValueId uv, IrValueId first, IrValueId second) noexcept;
+    // 텍스처 slot의 논리 크기(texel이면 1/크기)다. 2DArray·Texture3D는 Float3, 2D는 Float2다.
+    // 오류: 다른 종류이거나 텍스처가 아니면 InvalidArgument.
+    Result<IrValueId> TextureSize(IrValueId texture, bool texel) noexcept;
     // Double 값을 성분마다 주소 모드(modes — 2 bit씩, 성분 0이 하위)로 Float로 낮춘다.
     Result<IrValueId> AddressDemote(IrValueId operand, uint32 modes) noexcept;
 

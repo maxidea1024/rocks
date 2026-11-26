@@ -1,7 +1,12 @@
 #include <Core/Text/StringBuilder.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
+#include <MaterialCompiler/MaterialConstants.h>
 #include <MaterialSchema/Nodes/Parameters/StaticSwitchParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Parameters/StaticSwitchParameterProperties.h>
+#include <MaterialSchema/Nodes/Texture/AntialiasedTextureMaskProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/AntialiasedTextureMaskProperties.h>
+#include <MaterialSchema/Nodes/Texture/ParticleSubUvProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/ParticleSubUvProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.generated.h>
@@ -10,6 +15,10 @@
 #include <MaterialSchema/Nodes/Texture/TextureSampleParameter2DProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleParameterCubeProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleParameterCubeProperties.h>
+#include <MaterialSchema/Nodes/Texture/TextureSampleParameterSubUvProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureSampleParameterSubUvProperties.h>
+#include <MaterialSchema/Nodes/Texture/TexturePropertyProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TexturePropertyProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.h>
 
@@ -550,6 +559,221 @@ TEST(MaterialTexture_TextureValueIsNotNumeric) {
     REQUIRE(TranslateTextures(fixture, out));
     CHECK(!out.succeeded);
     CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::TypeMismatch, product));
+}
+
+// TextureProperty: 입력 없음 문구, 2D 크기는 Float2 상수 블록 멤버(프로그램 leaf), Cube는 UE 문구.
+TEST(MaterialTexture_TextureProperty) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture missing(env);
+    const Guid lonely = missing.Add("Material.TextureProperty");
+    missing.Connect(lonely, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation rejected(env.allocator);
+    REQUIRE(TranslateTextures(missing, rejected));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::MissingInput, lonely));
+    CHECK(HasMessage(rejected, "TextureSample> Missing input texture"));
+
+    GraphFixture fixture(env);
+    TextureObjectProperties object;
+    object.texture.assetId = AssetId{BrickId};
+    const Guid texture = fixture.Add("Material.TextureObject", env.Save(object));
+    TexturePropertyProperties property;
+    property.property = ExposedTextureProperty::TexelSize;
+    const Guid size = fixture.Add("Material.TextureProperty", env.Save(property));
+    fixture.Connect(texture, "Result", size, "TextureObject");
+    const Guid uv = fixture.Add("Material.TextureCoordinate");
+    const Guid scaled = fixture.Add("Material.Multiply");
+    fixture.Connect(size, "Result", scaled, "A");
+    fixture.Connect(uv, "Result", scaled, "B");
+    const Guid dot = fixture.Add("Material.DotProduct");
+    fixture.Connect(scaled, "Result", dot, "A");
+    fixture.Connect(scaled, "Result", dot, "B");
+    fixture.Connect(dot, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    const IrValue* texel = nullptr;
+    for (const IrValue& value : out.module.Values()) {
+        texel = value.op == IrOp::TextureSize ? &value : texel;
+    }
+
+    REQUIRE(texel != nullptr);
+    CHECK(texel->type == IrFloat(2));
+    CHECK(texel->immediate[0] == 1);
+    CHECK(texel->frequency == IrFrequency::Uniform);
+    MaterialConstants constants(env.allocator);
+    REQUIRE(BuildMaterialConstants(out.module, constants));
+    REQUIRE(constants.members.Size() == 1);
+    CHECK(out.module.Values()[constants.members[0].value].op == IrOp::TextureSize);
+    REQUIRE(constants.steps.Size() == 2);
+    CHECK(constants.steps[0].op == IrOp::Texture);
+    CHECK(HasText(source.text.View(), "materialFloats[0].xy"));
+    // 크기만 쓰는 slot도 선언은 있고 자기 샘플러는 없다.
+    CHECK(HasText(source.text.View(), "Texture2D MaterialTexture0;\n"));
+    CHECK(!HasText(source.text.View(), "SamplerState MaterialTexture0Sampler"));
+
+    GraphFixture cube(env);
+    TextureObjectProperties sky;
+    sky.texture.assetId = AssetId{SkyId};
+    const Guid cubeTexture = cube.Add("Material.TextureObject", env.Save(sky));
+    const Guid cubeSize = cube.Add("Material.TextureProperty");
+    cube.Connect(cubeTexture, "Result", cubeSize, "TextureObject");
+    const Guid x = cube.Add("Material.DotProduct");
+    cube.Connect(cubeSize, "Result", x, "A");
+    cube.Connect(cubeSize, "Result", x, "B");
+    cube.Connect(x, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation wrong(env.allocator);
+    REQUIRE(TranslateTextures(cube, wrong));
+    CHECK(HasOnlyErrorAt(wrong, MaterialDiagnosticCode::TypeMismatch, cubeSize));
+    CHECK(HasMessage(wrong,
+                     "Texture size only available for Texture2D, TextureVirtual, "
+                     "Texture2DArray, VolumeTexture and SparseVolumeTexture, not textureCube"));
+}
+
+// RecordTextureStreamingInfo: 텍스처를 그대로 넘기고 Coordinates가 필요하다(UE 문구).
+TEST(MaterialTexture_RecordTextureStreamingInfo) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    TextureObjectProperties object;
+    object.texture.assetId = AssetId{BrickId};
+    TextureSampleProperties properties(env.allocator);
+    GraphFixture missing(env);
+    const Guid texture = missing.Add("Material.TextureObject", env.Save(object));
+    const Guid record = missing.Add("Material.RecordTextureStreamingInfo");
+    missing.Connect(texture, "Result", record, "TextureObject");
+    const Guid sample = missing.Add("Material.TextureSample", env.Save(properties));
+    missing.Connect(record, "Tex", sample, "TextureObject");
+    ToAo(missing, sample);
+    MaterialTranslation rejected(env.allocator);
+    REQUIRE(TranslateTextures(missing, rejected));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::MissingInput, record));
+    CHECK(HasMessage(rejected, "Missing input UV Coordinates"));
+
+    GraphFixture fixture(env);
+    const Guid source = fixture.Add("Material.TextureObject", env.Save(object));
+    const Guid passed = fixture.Add("Material.RecordTextureStreamingInfo");
+    fixture.Connect(source, "Result", passed, "TextureObject");
+    fixture.Connect(fixture.Add("Material.TextureCoordinate"), "Result", passed, "Coordinates");
+    const Guid user = fixture.Add("Material.TextureSample", env.Save(properties));
+    fixture.Connect(passed, "Tex", user, "TextureObject");
+    ToAo(fixture, user);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateTextures(fixture, out));
+    REQUIRE(out.succeeded);
+    CHECK(out.module.Textures().Size() == 1);
+}
+
+// ParticleSubUv: blend면 SubUV 좌표 둘의 샘플을 SubUVLerp로 섞고, 픽셀 문맥만 된다(UE 문구).
+TEST(MaterialTexture_ParticleSubUv) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    ParticleSubUvProperties properties(env.allocator);
+    properties.texture.assetId = AssetId{BrickId};
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.ParticleSubUv", env.Save(properties));
+    ToAo(fixture, node);
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    usize samples = 0;
+    bool lerped = false;
+    for (const IrValue& value : out.module.Values()) {
+        samples += value.op == IrOp::TextureSample ? 1 : 0;
+        lerped = lerped || value.op == IrOp::Lerp;
+    }
+
+    CHECK(samples == 2);
+    CHECK(lerped);
+    CHECK(HasText(source.text.View(), "MaterialContextParticleSubUvCoords1(c)"));
+    CHECK(HasText(source.text.View(), "MaterialContextParticleSubUvLerp(c)"));
+
+    GraphFixture vertex(env);
+    const Guid inVertex = vertex.Add("Material.ParticleSubUv", env.Save(properties));
+    vertex.Connect(inVertex, "RGB", OutputNodeId, "WorldPositionOffset");
+    MaterialTranslation rejected(env.allocator);
+    REQUIRE(TranslateTextures(vertex, rejected));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::StageViolation, inVertex));
+    CHECK(HasMessage(rejected, "Invalid node used in vertex/hull/domain shader input!"));
+
+    GraphFixture empty(env);
+    ParticleSubUvProperties none(env.allocator);
+    const Guid lonely = empty.Add("Material.ParticleSubUv", env.Save(none));
+    ToAo(empty, lonely);
+    MaterialTranslation missing(env.allocator);
+    REQUIRE(TranslateTextures(empty, missing));
+    CHECK(HasMessage(missing, "Missing ParticleSubUV input texture"));
+}
+
+// TextureSampleParameterSubUv: 파라미터 slot과 SubUV 샘플 하나(blend 끔).
+TEST(MaterialTexture_ParameterSubUv) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    TextureSampleParameterSubUvProperties properties(env.allocator);
+    properties.parameterName = env.Intern("Flipbook");
+    properties.parameterId = ParameterId;
+    properties.texture.assetId = AssetId{BrickId};
+    properties.blend = false;
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.TextureSampleParameterSubUv", env.Save(properties));
+    ToAo(fixture, node);
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    REQUIRE(out.module.Textures().Size() == 1);
+    CHECK(out.module.Textures()[0].source == IrTextureSource::Parameter);
+    usize samples = 0;
+    for (const IrValue& value : out.module.Values()) {
+        samples += value.op == IrOp::TextureSample ? 1 : 0;
+    }
+
+    CHECK(samples == 1);
+}
+
+// AntialiasedTextureMask: dot·미분·saturate로 펼친 식, 모바일 형식 오류(UE 문구), 텍스처 없음 문구.
+TEST(MaterialTexture_AntialiasedTextureMask) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    AntialiasedTextureMaskProperties properties(env.allocator);
+    properties.texture.assetId = AssetId{BrickId};
+    properties.samplerType = SamplerType::Color;
+    properties.channel = TextureColorChannel::Green;
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.AntialiasedTextureMask", env.Save(properties));
+    fixture.Connect(node, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    const IrResult* ao = FindResult(out, "AmbientOcclusion");
+    REQUIRE(ao != nullptr);
+    CHECK(ValueOf(out, ao->value).op == IrOp::Saturate);
+    bool ddx = false;
+    for (const IrValue& value : out.module.Values()) {
+        ddx = ddx || value.op == IrOp::Ddx;
+    }
+
+    CHECK(ddx);
+    const IrValue* sample = FindSample(out);
+    REQUIRE(sample != nullptr);
+    CHECK(sample->immediate[0] == static_cast<uint64>(SamplerType::Masks));
+    CHECK(sample->immediate[1] == static_cast<uint64>(IrTextureMipMode::Implicit));
+    CHECK(HasText(source.text.View(),
+                  "(MaterialSample2D(MaterialTexture0, MaterialTexture0Sampler, "));
+
+    MaterialTranslationTarget mobile;
+    mobile.isMobile = true;
+    mobile.isPc = false;
+    MaterialTranslation rejected(env.allocator);
+    REQUIRE(TranslateTextures(fixture, rejected, Traits(), mobile));
+    CHECK(HasOnlyErrorAt(rejected, MaterialDiagnosticCode::UnsupportedCapability, node));
+    CHECK(HasMessage(rejected, "Node not supported in feature level ES3_1. SM5 required."));
+
+    GraphFixture empty(env);
+    AntialiasedTextureMaskProperties none(env.allocator);
+    const Guid lonely = empty.Add("Material.AntialiasedTextureMask", env.Save(none));
+    empty.Connect(lonely, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation missing(env.allocator);
+    REQUIRE(TranslateTextures(empty, missing));
+    CHECK(HasMessage(missing, "UMaterialExpressionAntialiasedTextureMask> Missing input texture"));
 }
 
 } // namespace material_texture_lowering_tests_file
