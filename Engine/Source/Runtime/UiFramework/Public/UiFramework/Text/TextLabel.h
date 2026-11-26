@@ -4,6 +4,7 @@
 #include <TextLayout/TextLayoutModel.h>
 #include <UiCore/ColorRef.h>
 #include <UiCore/Element.h>
+#include <UiFramework/Text/TextOverflow.h>
 
 namespace rocks::ui {
 
@@ -50,8 +51,23 @@ public:
     float LineStride() const noexcept;
     Result<void> SetMinDesiredWidth(float width) noexcept;
     Result<void> CopyParagraphTo(TextLabel& target) const noexcept;
-    // 부모가 허용한 폭과 높이를 넘는 줄에서만 사용한다. 표시는 전용 셰이핑 결과를 공유한다.
+    // 말줄임 표지(보통 "…")다. 넘침 정책(SetOverflow)이 표지를 쓸 때만 그린다. 표시는 전용
+    // 셰이핑 결과를 공유한다.
     void SetEllipsisMarker(SharedPtr<const TextLabel> marker) noexcept;
+    // 넘침 정책이다(기본 Clip — UE와 같다). 표지가 없으면 정책과 상관없이 Clip이다.
+    //
+    // 사용 예(경로 — 끝이 중요한 글자):
+    //   label->SetEllipsisMarker(shape("…"));
+    //   label->SetOverflow(TextOverflow::Start);   // "…/Content/Maps/Level_01.rmap"
+    //   label->SetFullTextToolTip(true);            // 잘렸을 때만 전체 글자 툴팁
+    void SetOverflow(TextOverflow overflow) noexcept;
+    TextOverflow GetOverflow() const noexcept;
+    // 마지막 배치에서 글자가 받은 영역을 넘쳤는지다(정책과 상관없이 — Clip도 참이다).
+    bool IsTruncated() const noexcept;
+    // 켜면 잘렸을 때만 글자 전체를 담은 글자 툴팁을 띄운다(UE보다 개선 — UE는 잘린 글자를 볼
+    // 방법이 없다). 이미 shaping한 결과를 복사하므로 다시 shaping하지 않는다. 끄면 이 레이블의
+    // 툴팁 factory를 지운다(다른 툴팁과 함께 쓰지 않는다).
+    Result<void> SetFullTextToolTip(bool enabled) noexcept;
     // 글자 색이다(UE STextBlock ColorAndOpacity). 기본은 부모 전경색
     // 상속(ColorSource::Foreground)이라 버튼 안의 레이블은 버튼 상태 전경색을 따른다. LinearColor는
     // 지정 색(ColorRef::Specified)이다.
@@ -83,6 +99,8 @@ private:
                         const text::ParagraphMetrics& metrics, Vec2 shadowExtent) noexcept;
 
     Result<void> PaintOverflow(PaintList& list, int32 layer) const noexcept;
+    // 글자 전체를 담은 툴팁(복사한 레이블)을 만든다. 잘리지 않았으면 NotFound다.
+    Result<SharedPtr<Element>> MakeFullTextToolTip() noexcept;
     Result<void> PaintDecorations(PaintList& list, const Geometry& area, int32 layer,
                                   const text::TextLine& line, usize first,
                                   usize count) const noexcept;
@@ -95,6 +113,8 @@ private:
     Array<PaintGlyph> positioned_;
     Array<usize> visualGlyphStarts_;
     SharedPtr<const TextLabel> ellipsisMarker_;
+    TextOverflow overflow_ = TextOverflow::Clip;
+    bool fullTextToolTip_ = false;
     Array<LabelDecoration> decorations_;
     text::ParagraphMetrics metrics_{};
     Vec2 shadowOffset_{};

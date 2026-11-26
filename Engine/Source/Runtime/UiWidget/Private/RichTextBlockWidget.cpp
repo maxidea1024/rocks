@@ -152,6 +152,8 @@ Result<void> RichTextBlockWidget::Shape(TextLabel& target, const Text& value, fl
     auto published = target.SetShapedText(plain, clusters.View(), glyphs.View(), height,
                                           shaped.IsRightToLeft(), decorations.View());
     if (published) {
+        // 말줄임을 켜면 여러 줄 끝 말줄임이다(Docs/Design/UiToolkit 9.1절 UW4o).
+        target.SetOverflow(marker ? TextOverflow::MultiLineEnd : TextOverflow::Clip);
         target.SetEllipsisMarker(Move(marker));
     }
 
@@ -299,6 +301,11 @@ Result<void> RichTextBlockWidget::SetEllipsis(bool enabled) noexcept {
 
             marker = Move(shaped.Value());
         }
+
+        // 말줄임을 켜면 여러 줄 끝 말줄임이다(Docs/Design/UiToolkit 9.1절 UW4o).
+
+        static_cast<TextLabel&>(*live).SetOverflow(marker ? TextOverflow::MultiLineEnd
+                                                          : TextOverflow::Clip);
 
         static_cast<TextLabel&>(*live).SetEllipsisMarker(Move(marker));
     }

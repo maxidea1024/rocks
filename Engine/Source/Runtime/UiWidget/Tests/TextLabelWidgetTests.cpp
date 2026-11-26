@@ -171,6 +171,7 @@ TEST(UiWidget_EllipsisKeepsWholeVisualClustersAndMarksHiddenLines) {
     const LabelGlyph dots[] = {{0, {{}, {3, 8}, {9, 1}, {{}, {1, 1}}}}};
     REQUIRE(marker.Value()->SetShapedText("…", dot, dots, 8, false));
     label.SetEllipsisMarker(marker.Value());
+    label.SetOverflow(TextOverflow::MultiLineEnd);
 
     // 첫 클러스터는 기본 글자와 결합 부호 두 글리프로 그린다.
     const text::TextCluster source[] = {{.byteEnd = 3, .advance = 6, .bidiLevel = 1},

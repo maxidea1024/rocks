@@ -418,8 +418,8 @@ Vec2 TextLabel::ComputeDesiredSize(float) const noexcept {
 Result<void> TextLabel::OnPaint(PaintList& list, int32 layer) const noexcept {
     const auto& area = GetGeometry();
     const LinearColor color = color_.Resolve(list.Theme(), list.ColorContext());
-    if (ellipsisMarker_ &&
-        (layout_.DesiredSize().x > area.size.x || layout_.DesiredSize().y > area.size.y)) {
+    // 표지를 쓰는 넘침 정책이고 영역을 넘쳤을 때만 잘라 그린다(Clip은 그대로 — UE Clip).
+    if (ellipsisMarker_ && overflow_ != TextOverflow::Clip && IsTruncated()) {
         return PaintOverflow(list, layer);
     }
 

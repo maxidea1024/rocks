@@ -25,6 +25,8 @@ Result<void> TextLabelWidget::Shape(TextLabel& label, const Text& value,
     auto shaped =
         shaper_ ? shaper_->Shape(label, value, size) : Result<void>::Failure(ErrorCode::NotReady);
     if (shaped) {
+        // 말줄임을 켜면 여러 줄 끝 말줄임이다(Docs/Design/UiToolkit 9.1절 UW4o).
+        label.SetOverflow(marker ? TextOverflow::MultiLineEnd : TextOverflow::Clip);
         label.SetEllipsisMarker(Move(marker));
     }
 
@@ -122,6 +124,11 @@ Result<void> TextLabelWidget::SetEllipsis(bool enabled) noexcept {
 
             marker = Move(shaped.Value());
         }
+
+        // 말줄임을 켜면 여러 줄 끝 말줄임이다(Docs/Design/UiToolkit 9.1절 UW4o).
+
+        static_cast<TextLabel&>(*live).SetOverflow(marker ? TextOverflow::MultiLineEnd
+                                                          : TextOverflow::Clip);
 
         static_cast<TextLabel&>(*live).SetEllipsisMarker(Move(marker));
     }

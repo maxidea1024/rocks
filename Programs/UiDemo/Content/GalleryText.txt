@@ -12,3 +12,7 @@ sample.mono = 0O 1lI | {} [] () <> => != == // log.Info("Ready");
 sample.log = [2026.11.25-09.30.00:000][  0]LogInit: Display: Engine version: 5.8.4
 sample.wrap = Long text wraps at the allotted width and keeps whole words together where it can, so a narrow column still reads naturally.
 sample.ellipsis = Ellipsis cuts a line that does not fit and ends it with a marker instead of overflowing the box.
+sample.path = Content/Environments/Forest/Maps/Sublevels/Lighting/Forest_Lighting_Night.rmap
+sample.hangul.long = 긴 한글 문장은 가운데를 줄여 앞과 뒤를 함께 보여 주므로 파일 이름처럼 양쪽이 모두 중요한 글자에 알맞다
+sample.arabic.long = هذا نص عربي طويل يقطع من نهايته المنطقية التي تقع على اليسار عند الكتابة من اليمين إلى اليسار
+sample.bidi.long = Level 3 — المستوى الثالث من الخريطة — 레벨 3 숲 지도 — Forest map, third floor

@@ -11,6 +11,7 @@
 
 #include <AssetDatabase/AtomicFileWrite.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Text/NumberText.h>
 #include <Core/FileRead.h>
 #include <Core/ScopeExit.h>
 #include <D3D11Graphics/D3D11Device.h>
@@ -34,10 +35,14 @@ constexpr StringView LayoutFile = "Gallery.v1.json";
 constexpr StringView LayoutPath = "Saved/UiDemo/Gallery.v1.json";
 constexpr usize LayoutFileLimit = 1024 * 1024;
 constexpr StringView TabArgument = "--tab=";
+// 화면 캡처 높이다(긴 탭의 아래쪽까지 보려고 — 기본 GalleryHeight).
+constexpr StringView SnapshotHeightArgument = "--snapshot-height=";
+constexpr uint32 MaxSnapshotHeight = 8192;
 
 int Run(launch::ApplicationContext& context) noexcept {
     auto& allocator = context.DefaultAllocator();
     bool snapshot = false;
+    uint32 snapshotHeight = GalleryHeight;
     bool selfTest = false;
     bool surfaceTest = false;
     StringView startTab;
@@ -58,6 +63,18 @@ int Run(launch::ApplicationContext& context) noexcept {
 
         if (argument == "--snapshot") {
             snapshot = true;
+        }
+
+        if (argument.StartsWith(SnapshotHeightArgument)) {
+            auto height = TryParseUInt32(
+                argument.SliceBytes(SnapshotHeightArgument.ByteCount(),
+                                    argument.ByteCount() - SnapshotHeightArgument.ByteCount()));
+            if (!height || height.Value() == 0 || height.Value() > MaxSnapshotHeight) {
+                Log::Error(LogUiDemo, "Invalid snapshot height: {Argument}", argument);
+                return 2;
+            }
+
+            snapshotHeight = height.Value();
         }
     }
 
@@ -156,7 +173,7 @@ int Run(launch::ApplicationContext& context) noexcept {
             gallery::GalleryWindow::BehaviorTab, gallery::GalleryWindow::EffectsTab,
             gallery::GalleryWindow::IconsTab};
         return gallery::CaptureGallery(allocator, device, solid.Value(), textures, area.Value(),
-                                       icons, image.Value(), tabs, GalleryWidth, GalleryHeight)
+                                       icons, image.Value(), tabs, GalleryWidth, snapshotHeight)
                    ? 0
                    : 7;
     }

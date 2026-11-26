@@ -3,6 +3,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <UiFramework/Layout/Grid.h>
 #include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Layout/SizeBox.h>
 #include <UiFramework/Scrolling/ScrollView.h>
 #include <UiFramework/Layout/VerticalStack.h>
 
@@ -22,6 +23,8 @@ constexpr Vec4 CellPadding{0, 6, 32, 6};
 // 문단 견본 폭이다.
 constexpr float ParagraphWidth = 320;
 constexpr float EllipsisWidth = 240;
+// 말줄임 표지 글자다(U+2026 HORIZONTAL ELLIPSIS).
+constexpr StringView EllipsisMarkerText = "\xE2\x80\xA6";
 // UE Menu.Heading 자간(1/1000 em, StarshipCoreStyle.cpp 2532–2538행)이다.
 constexpr int32 MenuHeadingLetterSpacing = 250;
 // 그림자 견본의 오프셋이다.
@@ -284,15 +287,95 @@ Result<SharedPtr<Element>> MakeParagraphTable(GalleryContext& context) noexcept 
     add("Wrap - right", "SetLayoutOptions(320, Right, autoWrap)",
         aligned(text::TextAlignment::Right));
 
-    {
-        auto label = MakeText(context, context.strings.Get("sample.ellipsis"));
-        auto marker = MakeText(context, "...");
-        if (status.Take(label) && status.Take(marker)) {
-            label.Value()->SetEllipsisMarker(marker.Value());
-            auto set =
-                label.Value()->SetLayoutOptions(EllipsisWidth, text::TextAlignment::Left, false);
+    // 넘침 정책(UW4o): 같은 긴 글자를 정책마다 나란히 둔다. 잘린 글자는 머무르면 전체가 툴팁으로
+    // 보인다(SetFullTextToolTip).
+    auto marker = MakeText(context, EllipsisMarkerText);
+    if (status.Take(marker)) {
+        const SharedPtr<TextLabel> dots = marker.Value();
+        const auto overflowed = [&](StringView key, TextOverflow overflow,
+                                    text::TextAlignment alignment =
+                                        text::TextAlignment::Left) noexcept {
+            auto label = MakeText(context, context.strings.Get(key));
+            if (!label) {
+                return label;
+            }
+
+            // 한 줄(줄바꿈 없음)로 두고 받는 폭은 아래 상자가 정한다.
+            label.Value()->SetEllipsisMarker(dots);
+            label.Value()->SetOverflow(overflow);
+            auto set = label.Value()->SetLayoutOptions(0, alignment, false);
+            if (set) {
+                set = label.Value()->SetFullTextToolTip(true);
+            }
+
+            return set ? Move(label) : Result<SharedPtr<TextLabel>>::Failure(set.Error());
+        };
+        // 견본 폭을 EllipsisWidth로 묶어 행에 둔다.
+        const auto addBoxed = [&](StringView name, StringView usage,
+                                  Result<SharedPtr<TextLabel>> sample) noexcept {
+            auto box = SharedPtr<SizeBox>::TryMake(context.allocator, context.allocator);
+            auto spec = MakeText(context, usage, SmallFont, ColorRef::Specified(LabelColor));
+            if (!status.Take(sample) || !status.Take(box) || !status.Take(spec)) {
+                return;
+            }
+
+            auto set = box.Value()->SetWidthOverride(EllipsisWidth);
+            if (set) {
+                set = box.Value()->TryAddChild(sample.Value());
+            }
+
             if (status.Take(set)) {
-                add("Ellipsis", "SetEllipsisMarker", Move(label));
+                auto added = AddRow(context, *grid.Value(), row++, name, spec.Value(), box.Value());
+                status.Take(added);
+            }
+        };
+        addBoxed("Overflow - clip", "SetOverflow(Clip)",
+                 overflowed("sample.ellipsis", TextOverflow::Clip));
+        addBoxed("Overflow - end", "SetOverflow(End)",
+                 overflowed("sample.ellipsis", TextOverflow::End));
+        addBoxed("Overflow - middle", "SetOverflow(Middle)",
+                 overflowed("sample.ellipsis", TextOverflow::Middle));
+        addBoxed("Overflow - start", "SetOverflow(Start) - keeps the end of paths",
+                 overflowed("sample.path", TextOverflow::Start));
+        addBoxed("Overflow - end, centered", "SetOverflow(End) + Center",
+                 overflowed("sample.ellipsis", TextOverflow::End, text::TextAlignment::Center));
+        addBoxed("Overflow - Hangul middle", "SetOverflow(Middle)",
+                 overflowed("sample.hangul.long", TextOverflow::Middle));
+        addBoxed("Overflow - Arabic end (RTL)", "SetOverflow(End) - logical end is on the left",
+                 overflowed("sample.arabic.long", TextOverflow::End));
+        addBoxed("Overflow - BiDi start", "SetOverflow(Start) - visual order",
+                 overflowed("sample.bidi.long", TextOverflow::Start));
+
+        // 여러 줄 끝 말줄임: 두 줄 높이에 넣은 긴 문단의 마지막 줄 끝에 표지를 둔다.
+        auto paragraph = MakeText(context, wrap);
+        auto box = SharedPtr<SizeBox>::TryMake(context.allocator, context.allocator);
+        if (status.Take(paragraph) && status.Take(box)) {
+            paragraph.Value()->SetEllipsisMarker(dots);
+            paragraph.Value()->SetOverflow(TextOverflow::MultiLineEnd);
+            auto set =
+                paragraph.Value()->SetLayoutOptions(EllipsisWidth, text::TextAlignment::Left, true);
+            if (set) {
+                set = paragraph.Value()->SetFullTextToolTip(true);
+            }
+
+            if (set) {
+                set = box.Value()->SetHeightOverride(2 * paragraph.Value()->LineStride());
+            }
+
+            if (set) {
+                set = box.Value()->SetWidthOverride(EllipsisWidth);
+            }
+
+            if (set) {
+                set = box.Value()->TryAddChild(paragraph.Value());
+            }
+
+            auto spec = MakeText(context, "SetOverflow(MultiLineEnd) in a 2-line box", SmallFont,
+                                 ColorRef::Specified(LabelColor));
+            if (status.Take(set) && status.Take(spec)) {
+                auto added = AddRow(context, *grid.Value(), row++, "Overflow - multi-line end",
+                                    spec.Value(), box.Value());
+                status.Take(added);
             }
         }
     }
