@@ -1,12 +1,17 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
 #include <Core/Result.h>
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/BodyKinematics.h>
+#include <World/Physics/HitResult.h>
 #include <World/Physics/PhysicsBodyHandle.h>
+#include <World/Physics/QueryFilter.h>
+#include <World/Physics/QueryParams.h>
 #include <World/Physics/TeleportMode.h>
+#include <World/Physics/TraceMode.h>
 
 namespace rocks {
 
@@ -29,7 +34,8 @@ struct PhysicsSceneStats {
 // World::GetPhysicsScene()은 nullptr이다.
 //
 // 함수는 구현하는 단계마다 더한다(PH1 Stats, PH2b body 수명·이동·운동 읽기, PH2d 운동 종류·필터·
-// 형상 갱신 — PhysicsModule 7.1.1·7.1.3·7.1.5절 PMD22). 공개 인자는 Rocks 단위(cm·kg·초)이고 결과는
+// 형상 갱신, PH3b line trace — PhysicsModule 7.1.1·7.1.3·7.1.5·7.1.7절 PMD22). 질의는 World의
+// WorldCollision.h 함수가 부른다. 공개 인자는 Rocks 단위(cm·kg·초)이고 결과는
 // 값, 실패는 Result다.
 //
 // 사용 예:
@@ -79,6 +85,15 @@ public:
 
     // body의 현재 운동 상태다. 오류: 없는 handle·옛 세대(StaleHandle).
     virtual Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept = 0;
+
+    // start → end line trace다(4.4·4.5절, 7.1.7절). 끝점은 유한하고 길이가 0이 아니어야
+    // 한다(World가 거른다). filter.kind는 Channel·ObjectTypes다(Profile은 World가 풀어 넘긴다).
+    // mode가 Test면 결과를 쓰지 않고, First면 가장 가까운 막는 hit를 first에, All이면 all
+    // 끝에 4.5절 순서로 덧붙인다. 반환 값은 막는 hit가 있는지다(ObjectTypes All은 hit가 하나라도
+    // 있는지). 오류: Profile 필터·mode에 맞는 결과 포인터 없음(InvalidArgument), all 할당 실패.
+    virtual Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
+                                   const QueryParams& params, TraceMode mode, HitResult* first,
+                                   Array<HitResult>* all) const noexcept = 0;
 
 protected:
     PhysicsScene() noexcept = default;

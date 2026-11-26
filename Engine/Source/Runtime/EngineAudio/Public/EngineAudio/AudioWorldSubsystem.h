@@ -2,7 +2,7 @@
 
 #include <Core/TypeKey.h>
 #include <EngineAudio/AudioPlayback.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 #include <World/World.h>
 
 // World 하나의 오디오 scene이다(Docs/Design/AudioSystem 3.8·3.35.7절, UE UWorld의 AudioDevice 연결·

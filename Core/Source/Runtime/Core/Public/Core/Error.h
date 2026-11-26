@@ -51,7 +51,12 @@ enum class ErrorCode : uint32 {
     // 입출력이 실패했는데 그 층이 원인 오류를 주지 않았다(예: 너겟 캐시 backend가 실패만 알린
     // 경우 — AssetSystem 12.14절). 원인 오류가 있으면 그것을 그대로 올린다. 파일 API 대응
     // (FileErrorCode)의 그 밖 IO 실패는 아직 DependencyFailed다.
-    IoError
+    IoError,
+    // 읽은 데이터가 손상됐거나 형식 규칙을 어긴다(파일·패키지·bulk·스트림·디코드 입력의 크기·필드
+    // 불일치, 비유한 표본 등 — 예: SoundClip 원본 bulk 크기가 형식 필드와 다름,
+    // AudioSystem 3.36.4절). 호출자 인자 오용은 InvalidArgument, 인증·무결성 검증(tag·MAC·서명)
+    // 실패는 AuthenticationFailed로 구분한다. 데이터를 다시 만들거나 받으면 성공할 수 있다.
+    CorruptData
 };
 
 // 진단 출력용 열거자 이름이다(예: ErrorCode::NotFound → "NotFound"). 모르는 값은 "Unknown"이다.
@@ -109,6 +114,8 @@ constexpr const char* ErrorCodeName(ErrorCode code) noexcept {
         return "NotReady";
     case ErrorCode::IoError:
         return "IoError";
+    case ErrorCode::CorruptData:
+        return "CorruptData";
     }
     return "Unknown";
 }

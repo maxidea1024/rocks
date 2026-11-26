@@ -6,7 +6,7 @@
 #include <UnrealExchange/ExchangeDiagnostic.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// Unreal 교환 묶음 형식의 이름표·상수·진단 목록·실수 읽기 시험이다(Docs/Design/UnrealExchange.ko.md
+// Unreal 교환 묶음 형식의 이름표·상수·진단 목록·실수 읽기 시험이다(Docs/Design/UnrealExchange
 // 3.2·3.3·10.3·10.4절). EngineTests가 이 플러그인을 켜고 Tests/를 모은다(BuildTargets 3.9절 BD40).
 using namespace rocks;
 namespace unreal_exchange_format_tests_file {
@@ -58,7 +58,7 @@ TEST(UnrealExchange_BlobLayoutNames) {
 
 // 세부 규칙 이름은 모두 다르고 "Unknown"이 아니다. 코드별 수준은 10.3절 표다.
 TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
-    constexpr uint32 last = static_cast<uint32>(ExchangeIssue::PathTaken);
+    constexpr uint32 last = static_cast<uint32>(ExchangeIssue::ServiceFailure);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(ExchangeIssueName(static_cast<ExchangeIssue>(index)));
         CHECK(name != StringView("Unknown"));
@@ -78,6 +78,9 @@ TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingDependency) == ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnknownField) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedAsset) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::GammaMismatch) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedSourceLayout) ==
+          ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingUnrealDependency) ==
           ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnrealPathRenamed) == ExchangeSeverity::Info);

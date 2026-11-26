@@ -1,7 +1,7 @@
 #pragma once
 
 #include <AssetRuntime/Package.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 // 감쇠 설정 에셋이다(Docs/Design/AudioSystem 3.9·3.35.3절, UE USoundAttenuation 대응). AU3은 구
 // 모양 거리 감쇠·패닝·비공간화 반경만 가진다(모양·공기 흡수·거리별 send는 AU7). 기본값은 UE
@@ -33,7 +33,7 @@ enum class SoundNaturalFalloffMode : uint8 {
 };
 
 ROCKS_CLASS()
-class ROCKS_ENGINEAUDIO_API AttenuationSettings final : public Asset {
+class ROCKS_AUDIOASSETS_API AttenuationSettings final : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:

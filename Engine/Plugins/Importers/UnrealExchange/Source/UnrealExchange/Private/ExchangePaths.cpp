@@ -6,7 +6,7 @@
 #include <Platform/Memory.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// UE 객체 경로 → Rocks 논리 경로 대응이다(Docs/Design/UnrealExchange.ko.md 9.1절, 10.4절 7·13번).
+// UE 객체 경로 → Rocks 논리 경로 대응이다(Docs/Design/UnrealExchange 9.1절, 10.4절 7·13번).
 
 namespace rocks {
 

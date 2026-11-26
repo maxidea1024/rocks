@@ -6,7 +6,7 @@ public static partial class PolicyChecks
 {
     /// <summary>
     /// 다른 엔진(UE)의 코드를 두는 저장소 최상위 폴더다. Rocks 빌드 규칙·정책·서식 검사가 보지 않는다
-    /// (Docs/Design/UnrealExchange.ko.md 11.1절 — UE 추출 플러그인 RocksExport가 여기 산다).
+    /// (Docs/Design/UnrealExchange 11.1절 — UE 추출 플러그인 RocksExport가 여기 산다).
     /// </summary>
     public const string ForeignEngineRoot = "Extras";
 

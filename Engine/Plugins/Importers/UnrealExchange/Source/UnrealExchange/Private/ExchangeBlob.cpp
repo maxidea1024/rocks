@@ -5,7 +5,7 @@
 #include <Object/NameField.h>
 #include <Platform/Memory.h>
 
-// blob 파일 검사와 읽기다(Docs/Design/UnrealExchange.ko.md 3.3절, 10.4절 12번). 크기를 먼저 보고,
+// blob 파일 검사와 읽기다(Docs/Design/UnrealExchange 3.3절, 10.4절 12번). 크기를 먼저 보고,
 // 읽는 모든 byte를 SHA-256에 넣으면서 가변 배치(MeshAnimationAssets 3.4.1절)를 함께 파싱한다.
 
 namespace rocks {
@@ -351,21 +351,8 @@ Result<void> AppendBundlePath(StringView directory, StringView relative,
 Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
                            const ExchangeBlobRef& blob, Allocator& allocator, Array<uint8>* keep,
                            BlobCheckFailure& failure) noexcept {
-    // 묶음 안 상대 경로 `blobs/<앞 2자>/<64자>.bin`이다.
-    char hex[Sha256Digest::HexBytes + 1];
-    blob.digest.ToHex(hex);
-    char relative[BlobRelativePathBytes];
-    platform::MemoryCopy(relative, BlobDirectoryPrefix.Data(), BlobDirectoryPrefix.ByteCount());
-    usize at = BlobDirectoryPrefix.ByteCount();
-    platform::MemoryCopy(relative + at, hex, BlobHexPrefixChars);
-    at += BlobHexPrefixChars;
-    relative[at++] = '/';
-    platform::MemoryCopy(relative + at, hex, Sha256Digest::HexBytes);
-    at += Sha256Digest::HexBytes;
-    platform::MemoryCopy(relative + at, BlobFileSuffix.Data(), BlobFileSuffix.ByteCount());
     StringBuilder<512> path(allocator);
-    if (auto made = AppendBundlePath(directory, StringView(relative, BlobRelativePathBytes), path);
-        !made) {
+    if (auto made = AppendExchangeBlobPath(directory, blob.digest, path); !made) {
         return Result<bool>::Failure(made.Error());
     }
 
@@ -432,6 +419,46 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
 }
 
 } // namespace exchange_detail
+
+Result<void> VerifyExchangeBlob(const ExchangeBlobRef& blob, Span<const uint8> bytes,
+                                ExchangeIssue* issue) noexcept {
+    exchange_detail::BlobCheckFailure failure;
+    bool checked = false;
+    if (static_cast<uint64>(bytes.Size()) != blob.bytes) {
+        checked = FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::InvalidArgument);
+    } else {
+        MemoryBlobSource source(bytes);
+        checked = FinishBlobCheck(source, blob, failure);
+    }
+
+    if (checked) {
+        return Result<void>::Success();
+    }
+
+    if (issue != nullptr) {
+        *issue = failure.issue;
+    }
+
+    return Result<void>::Failure(failure.error);
+}
+
+Result<void> AppendExchangeBlobPath(StringView directory, const Sha256Digest& digest,
+                                    StringBuilderBase& out) noexcept {
+    // 묶음 안 상대 경로 `blobs/<앞 2자>/<64자>.bin`이다.
+    char hex[Sha256Digest::HexBytes + 1];
+    digest.ToHex(hex);
+    char relative[BlobRelativePathBytes];
+    platform::MemoryCopy(relative, BlobDirectoryPrefix.Data(), BlobDirectoryPrefix.ByteCount());
+    usize at = BlobDirectoryPrefix.ByteCount();
+    platform::MemoryCopy(relative + at, hex, BlobHexPrefixChars);
+    at += BlobHexPrefixChars;
+    relative[at++] = '/';
+    platform::MemoryCopy(relative + at, hex, Sha256Digest::HexBytes);
+    at += Sha256Digest::HexBytes;
+    platform::MemoryCopy(relative + at, BlobFileSuffix.Data(), BlobFileSuffix.ByteCount());
+    return exchange_detail::AppendBundlePath(directory, StringView(relative, BlobRelativePathBytes),
+                                             out);
+}
 
 Result<void> LoadExchangeBlob(const ExchangeBundle& bundle, uint32 asset,
                               const ExchangeBlobRef& blob, Array<uint8>& out,

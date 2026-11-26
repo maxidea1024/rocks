@@ -5,12 +5,12 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
 #include <Engine/Engine.h>
-#include <EngineAudio/AttenuationSettings.generated.h>
+#include <AudioAssets/AttenuationSettings.generated.h>
 #include <EngineAudio/AudioEngineSettings.h>
 #include <EngineAudio/AudioEngineSubsystem.h>
-#include <EngineAudio/EngineAudioTypes.h>
-#include <EngineAudio/SoundClip.generated.h>
-#include <EngineAudio/SoundSource.generated.h>
+#include <AudioAssets/AudioAssetsTypes.h>
+#include <AudioAssets/SoundClip.generated.h>
+#include <AudioAssets/SoundSource.generated.h>
 #include <ModuleLoader/HostServices.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/PlatformMath.h>
@@ -159,7 +159,7 @@ TEST(EngineAudio_MakePlayableCopiesAttenuationSnapshot) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
-    REQUIRE(RegisterEngineAudioTypes(registration));
+    REQUIRE(RegisterAudioAssetsTypes(registration));
     {
         ObjectRegistry objects(allocator, types, {0x45415544494f3031ull, 1});
         auto clip = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());
@@ -809,6 +809,38 @@ TEST(EngineAudio_InitializeFailureCleansUpThreadControl) {
     Engine engine(allocator);
     // 실행 중인 lane 스레드가 Deinitialize의 drain에서 닫힌다(실행 중 파괴 Fatal 없음).
     CHECK(engine.Initialize(config).Error() == ErrorCode::Unsupported);
+}
+
+// 엔진 디코더 표(Docs/Design/AudioSystem 3.37.1절): 내장 PCM16·ADPCM에 등록부의 factory를 더한다.
+// 시험 실행은 AudioOpus를 링크하므로 등록부가 있으면 엔진 묶음 시작 때 Opus가 들어오고, 마지막
+// 엔진이 묶음을 내리면 모듈 Shutdown이 지운다. 장치가 없는 실행도 표를 만든다.
+TEST(EngineAudio_DecoderTableIncludesRegisteredCodecs) {
+    {
+        audio::AudioDecoderRegistry registry;
+        REQUIRE(test::ProcessModules().Services().Register(registry).IsOk());
+        {
+            AudioEngine run(DeterministicOptions(false));
+            REQUIRE(run.initialized);
+            const audio::AudioDecoderTable& table = run.audio->DecoderTable();
+            CHECK(table.Contains(audio::AudioCodecId::Pcm16));
+            CHECK(table.Contains(audio::AudioCodecId::Adpcm));
+            CHECK(table.Contains(audio::AudioCodecId::Opus));
+            CHECK(registry.Factory(audio::AudioCodecId::Opus) != nullptr);
+            auto decoder = table.Create(audio::AudioCodecId::Opus, run.allocator);
+            CHECK(decoder.IsOk());
+        }
+
+        CHECK(registry.Factory(audio::AudioCodecId::Opus) == nullptr);
+        REQUIRE(test::ProcessModules().Services().Unregister(registry));
+    }
+
+    // 등록부가 없으면 내장 디코더뿐이다.
+    AudioEngine run(DeterministicOptions(true));
+    REQUIRE(run.initialized);
+    const audio::AudioDecoderTable& table = run.audio->DecoderTable();
+    CHECK(table.Contains(audio::AudioCodecId::Pcm16));
+    CHECK(table.Contains(audio::AudioCodecId::Adpcm));
+    CHECK(!table.Contains(audio::AudioCodecId::Opus));
 }
 
 TEST(EngineAudio_ThreadAndInlineControlProduceSameEvents) {

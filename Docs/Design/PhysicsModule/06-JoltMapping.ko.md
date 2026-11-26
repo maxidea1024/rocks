@@ -40,10 +40,10 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 
 | 단계 | Jolt 필터 | 판정 |
 |---|---|---|
-| 1 | `BroadPhaseLayerFilter` | `mobility`(Static·Dynamic 하나만) |
-| 2 | `ObjectLayerFilter` | query 표지가 없으면 제외. Channel 질의: 질의 응답의 body object type 응답 × body 묶음의 질의 채널 응답 = 최소, Ignore면 제외. ObjectTypes 질의: object type bit |
-| 3 | `BodyFilter` | 무시 목록(body handle 집합) |
-| 4 | `ShapeFilter` | `traceComplex`(단순·complex 형상 구분 — compound 하위 형상 표지), weld 자식의 충돌 켬 |
+| 1 | `BroadPhaseLayerFilter` | 쓰지 않는다(기본 — 모든 broadphase 층) |
+| 2 | `ObjectLayerFilter` | query 표지가 없으면 제외. Channel 질의: 질의 응답의 body object type 응답 × body 묶음의 질의 채널 응답 = 최소, Ignore면 제외. ObjectTypes 질의: object type bit. `ignoreTouches`·`ignoreBlocks`, Test·First의 겹침 제외도 여기서 한다(7.1.7절) |
+| 3 | `BodyFilter` | 무시 목록(컴포넌트·Actor — 장면 칸이 기억한 값과 비교)과 `mobility`(칸의 운동 종류 — QueryOnly body는 층에 운동 묶음이 없다) |
+| 4 | `ShapeFilter` | `traceComplex`(단순·complex 형상 구분 — compound 하위 형상 표지), weld 자식의 충돌 켬(PH6) |
 
 - 단계 2의 최소 응답이 Overlap인지 Block인지는 결과 분류(`blockingHit`)에 쓰이므로, 필터는 통과시키고 수집기(`CollisionCollector`)가 body 층에서 다시 계산해 기록한다.
 - `First` 질의는 "막는 것 중 가장 가까운 것"이어야 한다(겹침은 건너뜀). 수집기를 Rocks가 구현해 막음만 early-out 기준으로 쓴다. `All`은 모두 모은 뒤 4.5절 정렬·자르기.

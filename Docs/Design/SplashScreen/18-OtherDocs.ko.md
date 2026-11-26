@@ -12,4 +12,6 @@
 | PlatformWindow(문서 없음 — EngineRuntime 9·10장 근처) | 프로세스 per-monitor v2 DPI 인식과 `Window`의 `WM_DPICHANGED` 처리(UE `InitHighDPI` 대응)는 스플래시와 별개 작업으로 남긴다. 스플래시는 스레드 DPI 문맥만 쓴다 |
 | 패키징 설계(아직 없음) | 5.5절 낱개 파일 싣기 규칙 |
 | `Engine/README.ko.md` | `Content/Splash` 폴더(이 개정에서 고침) |
+| PlatformWindow `Window.h` | `ShowAndActivate`(숨긴 채 만든 창을 보이고 앞으로 — 9.4절, 개정 2·SP1에서 코드 주석으로 문서화) |
+| PlatformBase `Platform/SystemDialog.h` | 시스템 대화상자 hook(9.5절, SP1) |
 | `Templates/Game/Foundation/README.ko.md` | 템플릿 스플래시(이 개정에서 고침) |

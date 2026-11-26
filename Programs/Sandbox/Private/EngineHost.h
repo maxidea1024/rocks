@@ -34,6 +34,8 @@ struct EngineHostOptions {
     screen::ScreenBackend graphics = screen::ScreenBackend::Auto;
     // API 검증 계층을 켠다(`--graphics-validation`).
     bool graphicsValidation = false;
+    // 창 모드의 시작 화면(스플래시)을 띄우지 않는다(`--no-splash`, Docs/Design/SplashScreen 4절).
+    bool noSplash = false;
 };
 
 // 헤드리스 엔진 실행이다(Docs/Design/LoggingSystem.ko.md 5.1절 — tick이 있는 엔진 호스트는 Async,

@@ -70,9 +70,11 @@ enum class AssetDiagnosticCode : uint16 {
     InvalidClipData,
     UnknownBoneTrack,
     EventPropertiesDropped,
-    // Unreal 교환 묶음(UnrealExchange.ko.md 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
+    // Unreal 교환 묶음(UnrealExchange 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
     // CorruptBundle·UnsupportedBundleVersion·UnrealPathTooLong·UnrealPathCollision, 경고
-    // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed.
+    // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed. 종류별
+    // 임포트(10.6절·4.6절 — UX2b): 오류 UnsupportedSourceLayout(다층·UDIM·위도경도 큐브 원본), 경고
+    // GammaMismatch(원본 층 감마와 SRGB·bUseLegacyGamma 설정이 다름 — 설정을 따른다).
     CorruptBundle,
     UnsupportedBundleVersion,
     UnknownField,
@@ -81,6 +83,8 @@ enum class AssetDiagnosticCode : uint16 {
     UnrealPathTooLong,
     UnrealPathCollision,
     MissingUnrealDependency,
+    UnsupportedSourceLayout,
+    GammaMismatch,
     // 감시 갱신(AssetSystem 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
     // 다시 나타나면 전체 검색).
     RootLost,
@@ -140,7 +144,10 @@ enum class AssetDiagnosticCode : uint16 {
     NuggetConflict,
     // 텍스처 원본 묶음(AssetSystem 12.14절 A5j2): 원본 재구성이 원본을 비웠다(SourceCleared — 경고,
     // Volume 원본 2D·타일이 원본을 만들지 못함, UE와 같이 비우고 알린다).
-    SourceCleared
+    SourceCleared,
+    // 사운드 원본(AudioSystem 3.36.2절 — AU4): 모르는 chunk를 건너뛰었다(IgnoredSourceChunks —
+    // 경고, detail = 건너뛴 chunk 수).
+    IgnoredSourceChunks
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

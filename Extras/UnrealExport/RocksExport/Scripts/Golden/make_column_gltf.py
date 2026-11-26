@@ -1,4 +1,4 @@
-# Writes the small skinned glTF 2.0 source of the golden bundle (RocksExport, Docs/Design/UnrealExchange.ko.md section 12.3): a two-joint column with blended skin weights,
+# Writes the small skinned glTF 2.0 source of the golden bundle (RocksExport, Docs/Design/UnrealExchange section 12.3): a two-joint column with blended skin weights,
 # one morph target ("Bulge") and an animation that bends the tip joint, moves the root and drives the morph weight.
 import base64
 import json

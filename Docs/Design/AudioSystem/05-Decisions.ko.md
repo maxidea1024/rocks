@@ -26,7 +26,7 @@
 | AD22 | Opus는 48 kHz로 쿠킹(다른 rate 원본은 쿠킹 때 리샘플) | 권장안 |
 | AD23 | 오디오 종료 drain 실패 시 소유자 해제로 넘어가지 않는 Engine 종료 재시도 게이트를 요구한다(계약은 EngineRuntime 개정) | 권장안 |
 | AD24 | `Audio`·`EngineAudio`는 서버에도 링크하고 장치 backend(`AudioMiniaudio`)와 디코더(`AudioOpus`)는 ClientOnly. 연결은 `HostServices`·`AudioDecoderTable` 등록으로, 호스트는 ClientOnly 모듈을 직접 참조하지 않는다. 서버 쿠킹은 오디오 payload 제외 | 권장안 |
-| AD25 | 에디터·Tryout은 쿠킹하지 않은 clip을 재생할 때 실행 플랫폼 데이터를 만든다(UE DDC 방식). AU4는 PCM 변환만, AU5부터 AssetNugget 경유 | 권장안 |
+| AD25 | 에디터·Tryout은 쿠킹하지 않은 clip을 재생할 때 실행 플랫폼 데이터를 만든다(UE DDC 방식). AU4는 원본 bulk → 재생 PCM 직접 변환(원본 정밀도 — PCM16 플랫폼 데이터와 다르다, 개정 33), AU5·AU6 뒤 AssetNugget 경유 플랫폼 데이터로 | 권장안 |
 | AD26 | 장치 콜백 → AudioRT 깨우기는 잠금 없는 단일 대기자 신호(`RealtimeWakeSignal`: Windows `WaitOnAddress`, Android futex, macOS Mach semaphore) | 권장안 |
 | AD27 | 리버브 bypass·없음으로 전환해도 꼬리 에너지가 임계 아래로 머문 뒤에 끄고 이력을 지운다(UE는 즉시 지움) | 권장안 |
 | AD28 | Opus 청크는 앞 청크 끝 320 ms(개정 27, 처음 80 ms) 패킷을 복제해 독립 디코드, looping clip은 loop 머리 PCM을 미리 디코드해 둔다 | 권장안 |
