@@ -1,8 +1,11 @@
-#include "PlatformTextureSource.h"
+#include <WorldIntegration/Textures/PlatformTextureSource.h>
 
-namespace sandbox {
+namespace rocks {
 
 namespace {
+
+// 장치 차원 범위 밖 값이다(GraphicsTextureDimension의 모르는 차원 결과).
+inline constexpr uint8 InvalidGraphicsDimension = 0xff;
 
 Result<void> Corrupt() noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -78,7 +81,7 @@ bool ToSwizzle(TextureSwizzle swizzle, graphics::SwizzleSource& out) noexcept {
 
 } // namespace
 
-graphics::TextureDimension ToGraphicsDimension(TextureDimension dimension) noexcept {
+graphics::TextureDimension GraphicsTextureDimension(TextureDimension dimension) noexcept {
     switch (dimension) {
     case TextureDimension::Texture2D:
         return graphics::TextureDimension::Texture2D;
@@ -93,14 +96,14 @@ graphics::TextureDimension ToGraphicsDimension(TextureDimension dimension) noexc
     }
 
     // 범위 밖 값은 장치 차원 범위 밖으로 돌려 검사가 InvalidDimension으로 거부하게 한다.
-    return static_cast<graphics::TextureDimension>(0xff);
+    return static_cast<graphics::TextureDimension>(InvalidGraphicsDimension);
 }
 
 Result<void> MakePlatformTextureSource(const TexturePlatformData& data, PlatformBulkReader reader,
                                        void* context, PlatformTextureSource& out) noexcept {
     out.mips.Clear();
     out.source = render::CookedTextureSource{};
-    const graphics::TextureDimension dimension = ToGraphicsDimension(data.dimension);
+    const graphics::TextureDimension dimension = GraphicsTextureDimension(data.dimension);
     if (!graphics::IsValidTextureDimension(dimension)) {
         return Corrupt();
     }
@@ -185,4 +188,4 @@ Result<void> MakePlatformTextureSource(const TexturePlatformData& data, Platform
     return Result<void>::Success();
 }
 
-} // namespace sandbox
+} // namespace rocks

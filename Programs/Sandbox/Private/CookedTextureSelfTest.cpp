@@ -99,7 +99,7 @@ public:
             return;
         }
 
-        library_->Update(screen_);
+        library_->Update();
         if (!captureRequested) {
             captureRequested = screen_.RequestCapture(SceneCaptureWidth, SceneCaptureHeight).IsOk();
         }
@@ -258,7 +258,7 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
             auto made = assets != nullptr
                             ? UniquePtr<CookedTextureLibrary>::TryMake(
                                   allocator, allocator, assets->Manager(), assets->Manifest(),
-                                  engine.Types())
+                                  engine.Types(), screen)
                             : Result<UniquePtr<CookedTextureLibrary>>::Failure(ErrorCode::NotFound);
             if (made) {
                 library = Move(made.Value());
