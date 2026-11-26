@@ -93,6 +93,7 @@ internal static partial class MetaTests
         RegisterEditorOnlyBlocks(context);
         RegisterClassFlags(context);
         RegisterStructs(context);
+        RegisterShaderParameters(context);
         RegisterValidateHooks(context);
         RegisterBinds(context);
         RegisterArrays(context);

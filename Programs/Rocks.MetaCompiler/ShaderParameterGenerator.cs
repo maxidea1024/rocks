@@ -79,14 +79,23 @@ internal static class ShaderParameterGenerator
     private sealed class StructDecl
     {
         public required string Qualified { get; init; }
+
         public required string Simple { get; init; }
+
         public required string Specifiers { get; init; }
+
         public required List<string> Fields { get; init; }
+
         public ModuleInput? Input { get; set; }
+
         public string Name { get; set; } = "";
+
         public bool RootConstants { get; set; }
+
         public int Size { get; set; }
+
         public int Alignment { get; set; }
+
         public List<Member> Members { get; } = [];
     }
 
@@ -94,10 +103,15 @@ internal static class ShaderParameterGenerator
     private sealed class Member
     {
         public required string Name { get; init; }
+
         public required int Offset { get; init; }
+
         public ScalarType? Scalar { get; init; }
+
         public StructDecl? Struct { get; init; }
+
         public int ArrayCount { get; init; }
+
         public bool Padding { get; init; }
 
         public Base Base => Struct is null ? Scalar!.Base : Base.Struct;
