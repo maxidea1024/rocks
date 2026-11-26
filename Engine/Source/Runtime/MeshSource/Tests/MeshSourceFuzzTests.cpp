@@ -3,7 +3,7 @@
 #include <Core/Math/RandomStream.h>
 #include <Core/Memory/SystemAllocator.h>
 
-// 고정 seed 퍼징이다(Docs/Design/MeshAnimationAssets.ko.md 12절 "무작위 위상·속성 퍼징"): 무작위
+// 고정 seed 퍼징이다(Docs/Design/MeshAnimationAssets 12절 "무작위 위상·속성 퍼징"): 무작위
 // 메시는 검증이 오류(정해진 코드·세부 규칙)를 내거나 통과하고, 통과한 것은 위상 조회 전체를 돌아도
 // 범위 단언에 걸리지 않으며 저장·로드 왕복이 같은 메시다. 저장 byte를 무작위로 바꾼 패키지는
 // Load가 손상(CorruptPackage)으로 거부하거나, 받아들이면 검증을 통과한 메시다.

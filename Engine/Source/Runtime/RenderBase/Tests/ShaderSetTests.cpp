@@ -416,7 +416,7 @@ TEST(PipelineCache_HitsMissesLinkAndRetire) {
         request.vertexEntry = vertex.Value().Entry();
         request.pixelEntry = pixel.Value().Entry();
         request.state.colorFormats[0] = graphics::PixelFormat::RGBA8Unorm;
-        request.state.drawConstantBytes = 16;
+        request.state.raster.cullMode = graphics::CullMode::Front;
         auto first = cache.FindOrCreate(request);
         auto second = cache.FindOrCreate(request);
         REQUIRE(first && second);
@@ -428,7 +428,7 @@ TEST(PipelineCache_HitsMissesLinkAndRetire) {
         auto culled = cache.FindOrCreate(request);
         REQUIRE(culled);
         CHECK(!(culled.Value() == first.Value()));
-        request.state.bindings.texture = "Albedo";
+        request.state.raster.cullMode = graphics::CullMode::None;
         REQUIRE(cache.FindOrCreate(request));
         CHECK(cache.Misses() == 3 && cache.Size() == 3);
         CHECK(set.LeaseCount() == 3);

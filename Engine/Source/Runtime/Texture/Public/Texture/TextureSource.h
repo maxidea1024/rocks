@@ -74,18 +74,6 @@ struct TextureFormatSettings {
     ROCKS_PROPERTY() uint8 srgb : 1 = 0;
 };
 
-// 플랫폼별 축소 비율이다(UE FPerPlatformFloat 대응 — 계약). PerPlatform 키는 플랫폼 이름이다.
-ROCKS_STRUCT()
-struct TextureDownscale {
-    ROCKS_GENERATED_BODY()
-
-    explicit TextureDownscale(Allocator& allocator) noexcept : perPlatform(allocator) {
-    }
-
-    ROCKS_PROPERTY() float defaultValue = 0.0f;
-    ROCKS_PROPERTY() OrderedMap<Name, float> perPlatform;
-};
-
 // 쿠킹 mip 하나다(12.1절): 크기, 패딩 제외 byte 수, 위치(스트리밍 mip은 Bulk, 상주 꼬리 mip은
 // TexturePlatformData::TailBulk 안 오프셋 — 한 mip의 모든 slice·면·깊이를 함께 담는다).
 ROCKS_STRUCT()

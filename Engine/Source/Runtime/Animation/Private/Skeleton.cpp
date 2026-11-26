@@ -2,7 +2,7 @@
 
 #include <Animation/Skeleton.h>
 
-// 스켈레톤 검증과 진단 이름이다(Docs/Design/MeshAnimationAssets.ko.md 6.2·6.4절).
+// 스켈레톤 검증과 진단 이름이다(Docs/Design/MeshAnimationAssets 6.2·6.4절).
 namespace rocks {
 
 using namespace animation_detail;
@@ -344,6 +344,8 @@ const char* SkeletonIssueName(SkeletonIssue issue) noexcept {
         return "MissingAncestor";
     case SkeletonIssue::EmptyMeshHierarchy:
         return "EmptyMeshHierarchy";
+    case SkeletonIssue::MissingSkeletonBones:
+        return "MissingSkeletonBones";
     }
 
     return "Unknown";

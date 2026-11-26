@@ -1,5 +1,6 @@
 #include <TextureTools/TextureCook.h>
 
+#include <AssetCooker/CookBulkSource.h>
 #include <AssetNugget/NuggetReflected.h>
 #include <AssetNugget/NuggetScc.h>
 #include <AssetRuntime/BulkStore.h>
@@ -16,6 +17,10 @@
 
 // 텍스처 쿠킹 처리기다(Docs/Design/AssetSystem 12.14절 — A5j1).
 namespace rocks {
+
+using graphics::IsValidPixelFormat;
+using graphics::PixelFormatFromNumber;
+using graphics::PixelFormatImageBytes;
 namespace {
 
 using reflection_text::AssignmentTarget;
@@ -25,10 +30,6 @@ constexpr usize CookHeaderFixedBytes = 4 + 4 + 1 + 4 + 4 + 4;
 constexpr usize CookHeaderMipBytes = 4 * 3 + 8;
 constexpr uint32 CookSwizzleCount = 4;
 
-// 쿠킹이 새로 만든 bulk(mip·꼬리)의 id는 uint32 최댓값부터 내려간다(12.14절 9번 — 에디터 저장소의
-// 저장하지 않은 bulk는 최상위 bit id를 1부터 올려 쓰므로 겹치지 않는다).
-constexpr uint32 CookBulkIdFirst = NumericLimits<uint32>::Max();
-
 bool CookIsPowerOfTwo(uint32 value) noexcept {
     return value != 0 && (value & (value - 1)) == 0;
 }
@@ -36,67 +37,6 @@ bool CookIsPowerOfTwo(uint32 value) noexcept {
 uint32 CookHalf(uint32 value) noexcept {
     return value > 1 ? value >> 1 : 1u;
 }
-
-// 새 bulk를 먼저, 그 밖 ref는 에디터 bulk 저장소로 보내는 연쇄 원본이다(12.14절 9번). byte는
-// 빌림이다 (쓰기가 끝날 때까지 산다).
-class CookChainedBulkSource final : public PackageBulkSource {
-public:
-    CookChainedBulkSource(Allocator& allocator, PackageBulkSource* next) noexcept
-        : entries_(allocator), next_(next) {
-    }
-
-    Result<BulkDataRef> Add(Span<const uint8> bytes) noexcept {
-        // 내려가는 id가 저장하지 않은 bulk의 최상위 bit 범위로 내려오지 않게 한다(실제로는 mip 수 +
-        // 1개뿐이다).
-        if (entries_.Size() >= CookBulkIdFirst - UnsavedBulkIdBit) {
-            return Result<BulkDataRef>::Failure(ErrorCode::CapacityExceeded);
-        }
-
-        if (auto pushed = entries_.TryPushBack(bytes); !pushed) {
-            return Result<BulkDataRef>::Failure(pushed.Error());
-        }
-
-        BulkDataRef ref;
-        ref.bulkId = CookBulkIdFirst - static_cast<uint32>(entries_.Size() - 1);
-        ref.rawBytes = bytes.Size();
-        ref.sha256 = Sha256::Hash(bytes);
-        return Result<BulkDataRef>::Success(ref);
-    }
-
-    Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override {
-        if (const Span<const uint8>* own = Find(ref.bulkId)) {
-            return Result<Span<const uint8>>::Success(*own);
-        }
-
-        if (next_ == nullptr) {
-            return Result<Span<const uint8>>::Failure(ErrorCode::NotFound);
-        }
-
-        return next_->ReadBulk(ref);
-    }
-
-    // 새 bulk는 저장 byte가 없다(writer가 raw를 부호화한다).
-    Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override {
-        if (Find(ref.bulkId) != nullptr || next_ == nullptr) {
-            return Result<PackageStoredBulk>::Failure(ErrorCode::NotFound);
-        }
-
-        return next_->ReadStoredBulk(ref);
-    }
-
-private:
-    const Span<const uint8>* Find(uint32 bulkId) const noexcept {
-        if (bulkId == 0) {
-            return nullptr;
-        }
-
-        const uint32 offset = CookBulkIdFirst - bulkId;
-        return offset < entries_.Size() ? &entries_[offset] : nullptr;
-    }
-
-    Array<Span<const uint8>> entries_;
-    PackageBulkSource* next_;
-};
 
 // 실패 진단을 채우고 error로 실패한다.
 Result<void> CookFail(const CookContext& context, AssetDiagnosticCode code, ErrorCode error,

@@ -4,7 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 값 정리·스킨 가중치 정규화 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.2·3.3·3.7절, 12절
+// 값 정리·스킨 가중치 정규화 시험이다(Docs/Design/MeshAnimationAssets 3.2·3.3·3.7절, 12절
 // "정규화 잔차·동률"): 법선·tangent·UV·색 고치기와 경고 수, UV 범위 경고, 가중치 정규화(비례 배분
 // + 잔차를 가장 큰 영향에, 동률이면 작은 본 번호), 합 0 거부와 실패 시 무변경, 진단 이름표.
 using namespace rocks;
@@ -239,7 +239,7 @@ TEST(MeshSource_SanitizeWarningAllocation) {
 // 진단 이름표: 모든 MeshIssue가 고유한 이름을 갖고 열거 밖 값은 "Unknown"이다. 메시 진단 코드는
 // AssetSystem 4.6절 이름표에 등록되어 있다.
 TEST(MeshSource_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(MeshIssue::SingularBindPose);
+    constexpr uint32 last = static_cast<uint32>(MeshIssue::RenderInverseBind);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(MeshIssueName(static_cast<MeshIssue>(index)));
         CHECK(name != StringView("Unknown"));

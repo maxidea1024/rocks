@@ -1,6 +1,6 @@
 /* Rocks glue: reference build of the unmodified upstream mikktspace.c behaviour.
  *
- * Comparison tests (Docs/Design/MeshAnimationAssets.ko.md section 12, MeshTools MikkTSpace
+ * Comparison tests (Docs/Design/MeshAnimationAssets section 12, MeshTools MikkTSpace
  * reference tests) need the original algorithm next to the patched one. This translation unit
  * defines the Rocks hooks of the patched source as the exact original upstream expressions (CRT
  * cos/acos and malloc/free) and renames the two public functions so that both builds link into one

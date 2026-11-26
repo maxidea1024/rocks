@@ -2,7 +2,7 @@
 
 #include <MeshSource/MeshSource.h>
 
-// 원본 메시 검증과 값 정리다(Docs/Design/MeshAnimationAssets.ko.md 3.1·3.3·3.5·3.7절).
+// 원본 메시 검증과 값 정리다(Docs/Design/MeshAnimationAssets 3.1·3.3·3.5·3.7절).
 namespace rocks {
 
 struct MeshValidateOptions {

@@ -6,7 +6,7 @@
 #include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
 
-// 원본 메시의 영속 형태다(Docs/Design/MeshAnimationAssets.ko.md 3.4절). 요소 수·위상 blob·속성
+// 원본 메시의 영속 형태다(Docs/Design/MeshAnimationAssets 3.4절). 요소 수·위상 blob·속성
 // 레코드 목록만 리플렉션 필드로 두고, 위상 배열과 속성 값은 Bulk entry에 둔다(속성 하나 = Bulk
 // entry 하나, 결정 MA-D2). 편집·빌드는 메모리 형태 MeshSource(MeshSource/MeshSource.h)로 하고 둘
 // 사이 변환은 MeshSource::Load·Store가 한다.

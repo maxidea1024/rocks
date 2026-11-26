@@ -36,7 +36,7 @@ auto Capture(GraphTexture texture, graphics::TextureHandle* out) noexcept {
 // 텍스처를 셰이더로 읽고 그린다.
 auto Sampling(GraphTexture texture) noexcept {
     return [texture](GraphPassContext& pass) noexcept {
-        pass.Commands().SetTexture(pass.Texture(texture));
+        pass.Commands().SetTexture(graphics::ShaderStage::Pixel, 0, pass.Texture(texture));
         pass.Commands().Draw(3);
     };
 }

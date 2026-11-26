@@ -6,7 +6,7 @@
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 
-// 스킨 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets.ko.md 6.3·6.5절, UE
+// 스킨 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets 6.3·6.5절, UE
 // GenerateSkeletalRenderMesh·BuildSkeletalMeshChunks·CalculateInvRefMatrices·ComputeMorphDeltas).
 // 렌더 정점·섹션·bounds는 정적 빌드와 같은 단계 함수(MeshLodBuild.cpp)를 쓴다.
 namespace rocks {

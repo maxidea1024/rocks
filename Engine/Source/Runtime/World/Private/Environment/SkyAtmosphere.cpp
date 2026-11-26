@@ -6,7 +6,7 @@
 #include <World/Environment/SkyAtmosphereComponent.h>
 #include <World/Environment/SkyAtmosphereSettings.generated.h>
 #include <World/SceneComponent.generated.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 
 // 환경 Actor SkyAtmosphere다(Docs/Design/EngineRuntime 27.1절, D5).
 namespace rocks {

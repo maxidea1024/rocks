@@ -51,7 +51,6 @@ TextureDesc TargetDesc(uint32 samples, TextureUsage usage, PixelFormat format) n
 Result<PipelineHandle> MakePipeline(Device& device, const shaders::ShaderTypeDesc& vertex,
                                     const shaders::ShaderTypeDesc& pixel, uint32 samples) noexcept {
     PipelineDesc desc;
-    desc.bindings.texture = "Source";
     desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
     desc.sampleCount = samples;
     return shaders::CreateGraphicsPipeline(device, vertex, pixel, desc);
@@ -113,7 +112,8 @@ void RunResolve(Device& device, TextureHandle msaa) noexcept {
     frame = device.BeginPass(readPass);
     if (frame) {
         frame.Value()->SetPipeline(load.Value());
-        frame.Value()->SetTexture(msaa);
+        frame.Value()->SetTexture(ShaderStage::Pixel,
+                                  shaders::TextureSlot(shaders::MsaaLoadPS, "Source"), msaa);
         frame.Value()->Draw(3);
     }
 

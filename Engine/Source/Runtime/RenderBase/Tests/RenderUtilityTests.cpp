@@ -143,9 +143,9 @@ TEST(RenderBase_NullTextureBindingsAreCounted) {
     REQUIRE(recording);
     graphics::CommandContext& commands = *recording.Value();
     CHECK(device.NullTextureBindings() == 0);
-    commands.SetTexture(texture.Value());
+    commands.SetTexture(graphics::ShaderStage::Pixel, 0, texture.Value());
     CHECK(device.NullTextureBindings() == 0);
-    commands.SetTexture(graphics::TextureHandle{});
+    commands.SetTexture(graphics::ShaderStage::Pixel, 0, graphics::TextureHandle{});
     CHECK(device.NullTextureBindings() == 1);
     REQUIRE(device.EndFrame());
     device.Retire(texture.Value());

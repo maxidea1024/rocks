@@ -3,7 +3,7 @@
 #include <Core/Text/Name.h>
 #include <Platform/Memory.h>
 
-// 정적·스킨 메시 LOD 빌드의 공용 단계다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4·6.5절, UE
+// 정적·스킨 메시 LOD 빌드의 공용 단계다(Docs/Design/MeshAnimationAssets 5.2·5.4·6.5절, UE
 // FStaticMeshBuilder::Build의 LOD 루프와 BuildVertexBuffer·BuildCombinedSectionIndices, UE 스킨
 // 빌드의 BuildSkeletalMeshChunks).
 namespace rocks::mesh_build {

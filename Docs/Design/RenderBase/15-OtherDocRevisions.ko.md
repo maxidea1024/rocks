@@ -5,7 +5,7 @@
 | 문서 | 위치 | 현재 | 개정 |
 |---|---|---|---|
 | AssetSystem | 1절 A0-G(샘플러 확장) | 샘플러 확장 범위 | **A0-G 착수 전**: 비교 함수(SX13), 텍스처 desc 샘플러는 기본값이고 바인딩 때 지정 가능(결정 R12) |
-| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절). **메시 에셋 스펙 [MeshAnimationAssets](../MeshAnimationAssets.ko.md)이 stream 집합을 정했고 이 문서 10.4절 끝 "메시 에셋 요구"로 받았다(개정 29)** |
+| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절). **메시 에셋 스펙 [MeshAnimationAssets](../MeshAnimationAssets/README.ko.md)이 stream 집합을 정했고 이 문서 10.4절 끝 "메시 에셋 요구"로 받았다(개정 29)** |
 | 〃 | A5 텍스처 플랫폼 데이터(`TexturePlatformData`) | 형식·swizzle·mip 배치 서술 | **A5 착수 전**: 6.5절 입력 계약(mip-major 배치, 상주 꼬리·스트리밍 덩어리, 4 KiB 정렬, 고정 번호표 직렬화). 에셋 세션이 반영한다 |
 | ShaderSystem | 9.9절 SX1–SX14 | — | 표대로. SX3·SX4·SX5·SX6은 P14 전, SX13은 A0-G 전, SX14는 SH1 전 |
 | 〃 | 3절 구조 | ShaderCore에 "라이브러리 로드" | ShaderCore는 장치 없는 메타데이터·라이브러리 형식 읽기, 장치 셰이더 객체는 RenderBase |

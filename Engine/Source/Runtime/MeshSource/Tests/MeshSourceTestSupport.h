@@ -11,7 +11,7 @@
 #include <Platform/Memory.h>
 #include <TestSupport/Test.h>
 
-// MeshSource 시험 공용 도우미다(Docs/Design/MeshAnimationAssets.ko.md 12절): 표본 메시(사각형·
+// MeshSource 시험 공용 도우미다(Docs/Design/MeshAnimationAssets 12절): 표본 메시(사각형·
 // 코너 공유·퇴화·모든 엔진 속성), 깊은 비교, 패키지 왕복(TestMeshAsset을 저장해 다른 Registry에
 // 로드), 저장 데이터 변조 도우미.
 namespace rocks::mesh_source_test {

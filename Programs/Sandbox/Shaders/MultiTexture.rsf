@@ -1,0 +1,47 @@
+// 다중 텍스처 slot self-test 셰이더다(Docs/Design/RenderBase 9.13절): VS 텍스처 하나와 PS 텍스처
+// 넷(2D·2D 배열·공유 샘플러로 읽는 2D·정수 2D)을 한 pass에서 읽는다. 열 x가 읽을 자원을 고른다.
+#include "/Plugin/Sandbox/Common.rsh"
+
+Texture2D<float4> Heights;
+
+struct MultiVertex {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+MultiVertex MultiVS(uint id : SV_VertexID) {
+    MultiVertex output;
+    output.position = FullScreenPosition(id);
+    output.color = Heights.Load(int3(0, 0, 0));
+    return output;
+}
+
+Texture2D<float4> Albedo;
+SamplerState AlbedoSampler;
+Texture2DArray<float4> Layers;
+SamplerState LayersSampler;
+Texture2D<float4> Detail;
+SamplerState SharedClampSampler;
+Texture2D<uint4> Codes;
+
+float4 MultiPS(MultiVertex input) : SV_Target0 {
+    uint column = uint(input.position.x);
+    if (column == 0) {
+        // u = 1.25: Wrap이면 왼쪽 texel, Clamp면 오른쪽 texel이다(2 × 1 텍스처, 점 필터).
+        return Albedo.SampleLevel(AlbedoSampler, float2(1.25, 0.5), 0.0);
+    }
+
+    if (column == 1) {
+        return Layers.SampleLevel(LayersSampler, float3(0.5, 0.5, 1.0), 0.0);
+    }
+
+    if (column == 2) {
+        return Detail.SampleLevel(SharedClampSampler, float2(1.25, 0.5), 0.0);
+    }
+
+    if (column == 3) {
+        return float4(Codes.Load(int3(0, 0, 0))) / 255.0;
+    }
+
+    return input.color;
+}

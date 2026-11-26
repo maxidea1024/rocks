@@ -52,14 +52,21 @@ void BuildGraph(RenderGraph& graph) noexcept {
         accesses.RenderTarget(target.Value());
         const GraphTexture read = previous;
         const bool last = index + 1 == RasterPasses;
-        auto added = graph.AddPass(RasterName, GraphPassKind::Raster,
-                                   last ? GraphPassFlags::HasSideEffects : GraphPassFlags::None,
-                                   accesses, [read, index](GraphPassContext& pass) noexcept {
-                                       pass.Commands().PushMarker(StringView("Inside"));
-                                       pass.Commands().SetTexture(pass.Texture(read));
-                                       pass.Commands().Draw(3 + index);
-                                       pass.Commands().PopMarker();
-                                   });
+        auto added = graph.AddPass(
+            RasterName, GraphPassKind::Raster,
+            last ? GraphPassFlags::HasSideEffects : GraphPassFlags::None, accesses,
+            [read, index](GraphPassContext& pass) noexcept {
+                pass.Commands().PushMarker(StringView("Inside"));
+                // 단계별 slot 묶기와 샘플러 값(복사한 desc·지우기)도
+                // 재생된다(RenderBase 9.13절).
+                pass.Commands().SetTexture(graphics::ShaderStage::Pixel, index, pass.Texture(read));
+                graphics::SamplerDesc point;
+                point.filter = graphics::Filter::Point;
+                (void)pass.Commands().SetSampler(graphics::ShaderStage::Pixel, index,
+                                                 (index & 1u) != 0 ? &point : nullptr);
+                pass.Commands().Draw(3 + index);
+                pass.Commands().PopMarker();
+            });
         (void)added;
         previous = target.Value();
     }

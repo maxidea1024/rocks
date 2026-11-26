@@ -1,5 +1,6 @@
 #include <Base/PlacementNew.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Hash.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Launch/AndroidActivity.h>
 #include <Platform/Atomics.h>
@@ -18,6 +19,7 @@
 #include <jni.h>
 
 #include "../Common/GamepadMotorMapping.h"
+#include "../Common/GamepadSlotTable.h"
 
 // Android 창이다(Docs/Design/AndroidPlatform.ko.md 4·5절). 앱의 그 창 하나이며, Launch 액티비티
 // 층의 listener로 창·포커스·입력 큐 콜백(UI 스레드)을 받는다. 입력은 이 창이 띄운 입력 스레드의
@@ -57,8 +59,18 @@ constexpr jint VibrationLocalReferences = 32;
 // 패드 하나에서 쓰는 진동자 수다(UE는 첫 두 진동자를 왼쪽·오른쪽으로 쓴다 — 6.4절).
 constexpr uint32 MaxPadVibrators = 2;
 
-// MonotonicNanoseconds를 진동 판단 시각(ms)으로 바꾼다.
+// MonotonicNanoseconds를 진동·장치 확인 시각(ms)으로 바꾼다.
 constexpr uint64 NanosecondsPerMillisecond = 1000000;
+
+// 패드 연결 해제를 확인하는 간격이다(XInput 빈 슬롯 확인과 같다 — AndroidPlatform 5절, AD12).
+constexpr uint64 GamepadDeviceCheckIntervalMilliseconds = 1000;
+
+// 장치 확인·descriptor 읽기 JNI 호출 한 번이 만드는 지역 참조 수의 상한이다(PushLocalFrame).
+constexpr jint DeviceQueryLocalReferences = 8;
+
+// 앉지 못한 패드 장치 ID(표가 꽉 참·이미 없는 장치)를 기억하는 수다. 그 장치의 이벤트마다 JNI를
+// 다시 하지 않는다. 넘치면 가장 오래된 칸부터 덮는다.
+constexpr uint32 MaxRejectedGamepadDevices = 8;
 
 // 입력 이벤트를 처리했다고(1) 또는 시스템에 넘긴다고(0) AInputQueue_finishEvent에 알리는 값이다.
 constexpr int EventHandled = 1;
@@ -179,37 +191,37 @@ struct VibrationRequest {
 };
 
 // 입력 스레드가 모으고 GamepadBackend::Poll(게임 스레드)이 읽는 패드 상태다(Docs/Design/
-// AndroidPlatform.ko.md 5절). 패드는 입력 장치 ID 순서로 가장 작은 빈 슬롯에 앉는다. 연결 해제
-// 감지는 InputManager 리스너(Java)가 필요해 후속이다 — 그때까지 앉은 패드는 연결된 채로 남는다.
+// AndroidPlatform.ko.md 5절). 슬롯 배정은 GamepadSlotTable이다(같은 descriptor는 다시 연결돼도 같은
+// 슬롯). 연결 해제는 게임 스레드 Poll이 1초마다 확인을 요청하면 입력 스레드가 JNI 장치 목록으로
+// 판정한다(AD12).
 //
 // 진동(InputActions 6.4절): 게임 스레드는 JavaVM에 붙어 있지 않으므로 SetMotors가 슬롯의 요청 칸에
 // 쓰고 입력 스레드 looper를 깨운다. JavaVM에 붙은 입력 스레드가 요청을 가져가 JNI로 쓴다.
 class AndroidGamepadStore {
 public:
-    // 장치의 슬롯이다. 처음 보는 장치면 빈 슬롯을 준다. 자리가 없으면 MaxGamepads다.
-    uint32 SlotLocked(int32_t deviceId) noexcept {
-        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
-            if (pads_[slot].used && pads_[slot].deviceId == deviceId) {
-                return slot;
-            }
-        }
-
-        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
-            if (!pads_[slot].used) {
-                pads_[slot].used = true;
-                pads_[slot].deviceId = deviceId;
-                pads_[slot].state.connected = true;
-                return slot;
-            }
-        }
-
-        return input::MaxGamepads;
+    // 연결된 그 장치의 슬롯이다(없으면 NoGamepadSlot — 입력 스레드가 descriptor를 읽어 Seat한다).
+    uint32 FindSlot(int32_t deviceId) const noexcept {
+        LockGuard guard(mutex_);
+        return table_.Find(deviceId);
     }
 
-    void SetButton(int32_t deviceId, input::GamepadButton button, bool down) noexcept {
+    // 장치를 앉힌다(GamepadSlotTable 규칙). 새로 앉은 슬롯(이어받기 포함)은 빈 상태·새 세대로
+    // 시작한다. 자리가 없으면 NoGamepadSlot이다.
+    uint32 Seat(int32_t deviceId, uint64 descriptorHash) noexcept {
         LockGuard guard(mutex_);
-        const uint32 slot = SlotLocked(deviceId);
-        if (slot == input::MaxGamepads) {
+        const bool known = table_.Find(deviceId) != gamepad::NoGamepadSlot;
+        const uint32 slot = table_.Seat(deviceId, descriptorHash);
+        if (slot != gamepad::NoGamepadSlot && !known) {
+            ResetPadLocked(slot);
+            pads_[slot].state.connected = true;
+        }
+
+        return slot;
+    }
+
+    void SetButton(uint32 slot, input::GamepadButton button, bool down) noexcept {
+        LockGuard guard(mutex_);
+        if (!table_.IsConnected(slot)) {
             return;
         }
 
@@ -223,7 +235,7 @@ public:
     }
 
     // 축과 HAT(방향 버튼)을 갱신한다. 스틱 Y는 화면 아래가 +라 뒤집는다(위가 +).
-    void SetAxes(int32_t deviceId, const AInputEvent* event) noexcept {
+    void SetAxes(uint32 slot, const AInputEvent* event) noexcept {
         auto axis = [event](int32_t code) noexcept {
             return AMotionEvent_getAxisValue(event, code, 0);
         };
@@ -238,8 +250,7 @@ public:
         const float hatX = axis(AMOTION_EVENT_AXIS_HAT_X);
         const float hatY = axis(AMOTION_EVENT_AXIS_HAT_Y);
         LockGuard guard(mutex_);
-        const uint32 slot = SlotLocked(deviceId);
-        if (slot == input::MaxGamepads) {
+        if (!table_.IsConnected(slot)) {
             return;
         }
 
@@ -263,11 +274,45 @@ public:
         pad.state.buttons = (pad.state.buttons & ~hatMask) | hat;
     }
 
-    // 진동을 쓸 입력 스레드 looper다(JavaVM에 붙은 입력 스레드가 시작할 때 걸고 끝날 때 뗀다 —
-    // nullptr이면 진동 없음).
-    void SetVibrationLooper(ALooper* looper) noexcept {
+    // 진동·장치 확인을 맡을 입력 스레드 looper다(JavaVM에 붙은 입력 스레드가 시작할 때 걸고 끝날 때
+    // 뗀다 — nullptr이면 진동·해제 감지 없음).
+    void SetInputLooper(ALooper* looper) noexcept {
         LockGuard guard(mutex_);
-        vibrationLooper_ = looper;
+        inputLooper_ = looper;
+    }
+
+    // 장치 확인을 요청하고 입력 스레드를 깨운다(게임 스레드 Poll — 연결된 패드가 없거나 입력
+    // 스레드가 없으면 하지 않는다).
+    void RequestDeviceCheck() noexcept {
+        LockGuard guard(mutex_);
+        if (inputLooper_ == nullptr || !table_.AnyConnected()) {
+            return;
+        }
+
+        deviceCheckPending_ = true;
+        ALooper_wake(inputLooper_);
+    }
+
+    // 장치 확인 요청을 가져간다(입력 스레드).
+    bool TakeDeviceCheck() noexcept {
+        LockGuard guard(mutex_);
+        const bool pending = deviceCheckPending_;
+        deviceCheckPending_ = false;
+        return pending;
+    }
+
+    // 목록에 없는 연결된 패드를 끊는다(상태를 비워 다음 Poll이 connected = false를 낸다). 끊은 슬롯
+    // 비트다.
+    uint32 DisconnectMissing(Span<const int32> connectedIds) noexcept {
+        LockGuard guard(mutex_);
+        const uint32 lost = table_.DisconnectMissing(connectedIds);
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if ((lost & (1u << slot)) != 0) {
+                ResetPadLocked(slot);
+            }
+        }
+
+        return lost;
     }
 
     // 앱 창 포커스다(UI 스레드 OnFocusChanged가 쓴다 — 포커스가 없으면 진동을 끈다).
@@ -281,30 +326,30 @@ public:
         return focused_;
     }
 
-    // 그 슬롯에 진동을 쓸 수 있는지다: 패드가 없으면 NotFound, 진동을 쓸 입력 스레드가 없으면(창
-    // 없음·입력 스레드의 JavaVM 붙이기 실패) Unsupported, 되면 None이다.
+    // 그 슬롯에 진동을 쓸 수 있는지다: 연결된 패드가 없으면 NotFound, 진동을 쓸 입력 스레드가
+    // 없으면(창 없음·입력 스레드의 JavaVM 붙이기 실패) Unsupported, 되면 None이다.
     ErrorCode VibrationAvailability(uint32 slot) const noexcept {
         LockGuard guard(mutex_);
-        if (!pads_[slot].used) {
+        if (!table_.IsConnected(slot)) {
             return ErrorCode::NotFound;
         }
 
-        return vibrationLooper_ != nullptr ? ErrorCode::None : ErrorCode::Unsupported;
+        return inputLooper_ != nullptr ? ErrorCode::None : ErrorCode::Unsupported;
     }
 
-    // 그 슬롯의 진동 요청을 두고(처리 전 요청은 덮는다) 입력 스레드를 깨운다. 패드나 입력 스레드가
-    // 없으면 아무것도 하지 않는다.
+    // 그 슬롯의 진동 요청을 두고(처리 전 요청은 덮는다) 입력 스레드를 깨운다. 연결된 패드나 입력
+    // 스레드가 없으면 아무것도 하지 않는다.
     void RequestVibration(uint32 slot, gamepad::AndroidVibratorPair intensities) noexcept {
         LockGuard guard(mutex_);
-        if (!pads_[slot].used || vibrationLooper_ == nullptr) {
+        if (!table_.IsConnected(slot) || inputLooper_ == nullptr) {
             return;
         }
 
         VibrationRequest& request = vibrationRequests_[slot];
         request.pending = true;
-        request.deviceId = pads_[slot].deviceId;
+        request.deviceId = table_.DeviceId(slot);
         request.intensities = intensities;
-        ALooper_wake(vibrationLooper_);
+        ALooper_wake(inputLooper_);
     }
 
     // 처리할 요청을 out에 옮기고 비운다(입력 스레드 — JNI는 잠금 밖에서 한다). 옮긴 수다.
@@ -321,15 +366,24 @@ public:
         return count;
     }
 
-    // 바뀐 패드를 큐에 넣는다. 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 넣어 edge를
-    // 잃지 않는다(입력 스레드는 이벤트로 받지만 backend 계약은 폴링이다).
-    void Poll(input::InputQueue& queue,
-              input::GamepadSnapshot (&last)[input::MaxGamepads]) noexcept {
+    // 바뀐 패드를 큐에 넣는다(끊김 포함 — 끊긴 슬롯은 빈 상태라 한 번 connected = false를 낸다).
+    // 세대가 바뀌었는데(끊긴 뒤 다시 앉음·이어받기가 이번 Poll 사이에 겹침) 지난번에 연결로 냈으면
+    // 끊김을 먼저 한 번 낸다. 폴링 사이에 눌렀다 뗀 버튼은 "눌림 → 현재" 두 상태로 넣어 edge를 잃지
+    // 않는다(입력 스레드는 이벤트로 받지만 backend 계약은 폴링이다). 세대가 바뀐 슬롯 비트다.
+    uint32 Poll(input::InputQueue& queue, input::GamepadSnapshot (&last)[input::MaxGamepads],
+                uint32 (&seenGenerations)[input::MaxGamepads]) noexcept {
         LockGuard guard(mutex_);
+        uint32 changed = 0;
         for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
             Pad& pad = pads_[slot];
-            if (!pad.used) {
-                continue;
+            if (pad.generation != seenGenerations[slot]) {
+                seenGenerations[slot] = pad.generation;
+                changed |= 1u << slot;
+                if (last[slot].connected && pad.state.connected) {
+                    (void)queue.Push(input::InputEvent::Gamepad(static_cast<uint8>(slot),
+                                                                input::GamepadSnapshot{}));
+                    last[slot] = input::GamepadSnapshot{};
+                }
             }
 
             const uint32 missed = pad.latched & ~pad.state.buttons;
@@ -346,6 +400,8 @@ public:
                 last[slot] = pad.state;
             }
         }
+
+        return changed;
     }
 
 private:
@@ -353,11 +409,19 @@ private:
     static constexpr float HatThreshold = 0.5f;
 
     struct Pad {
-        bool used = false;
-        int32_t deviceId = 0;
         uint32 latched = 0;
         input::GamepadSnapshot state;
+        // 앉음·끊김마다 늘어난다(Poll이 한 Poll 사이의 끊김·다시 앉음을 알아챈다).
+        uint32 generation = 0;
     };
+
+    // 슬롯을 빈 상태·새 세대로 되돌리고 진동 요청을 버린다(잠금 아래).
+    void ResetPadLocked(uint32 slot) noexcept {
+        const uint32 generation = pads_[slot].generation + 1;
+        pads_[slot] = Pad{};
+        pads_[slot].generation = generation;
+        vibrationRequests_[slot] = VibrationRequest{};
+    }
 
     static float Max(float left, float right) noexcept {
         return left > right ? left : right;
@@ -379,9 +443,11 @@ private:
     }
 
     mutable Mutex mutex_;
+    gamepad::GamepadSlotTable table_;
     Pad pads_[input::MaxGamepads];
     VibrationRequest vibrationRequests_[input::MaxGamepads];
-    ALooper* vibrationLooper_ = nullptr;
+    ALooper* inputLooper_ = nullptr;
+    bool deviceCheckPending_ = false;
     bool focused_ = false;
 };
 
@@ -409,8 +475,24 @@ public:
         }
     }
 
+    // 1초마다 장치 확인을 요청하고(AD12) 바뀐 패드를 낸다. 끊긴 슬롯·세대가 바뀐 슬롯의 진동 상태는
+    // 지운다(새 장치에는 처음부터 쓴다).
     void Poll(input::InputQueue& queue) noexcept override {
-        GamepadStore().Poll(queue, last_);
+        AndroidGamepadStore& store = GamepadStore();
+        const uint64 now = MonotonicNanoseconds() / NanosecondsPerMillisecond;
+        if (!deviceCheckRequested_ ||
+            now - lastDeviceCheckMilliseconds_ >= GamepadDeviceCheckIntervalMilliseconds) {
+            store.RequestDeviceCheck();
+            deviceCheckRequested_ = true;
+            lastDeviceCheckMilliseconds_ = now;
+        }
+
+        const uint32 changed = store.Poll(queue, last_, seenGenerations_);
+        for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+            if ((changed & (1u << slot)) != 0 || !last_[slot].connected) {
+                vibration_[slot] = gamepad::AndroidVibrationState{};
+            }
+        }
     }
 
     // 바뀐 세기(또는 1초가 지난 같은 세기)만 입력 스레드에 넘긴다. 쓰기 결과는 비동기라 넘기면
@@ -439,6 +521,9 @@ public:
 private:
     input::GamepadSnapshot last_[input::MaxGamepads];
     gamepad::AndroidVibrationState vibration_[input::MaxGamepads];
+    uint32 seenGenerations_[input::MaxGamepads] = {};
+    uint64 lastDeviceCheckMilliseconds_ = 0;
+    bool deviceCheckRequested_ = false;
 };
 
 bool IsGamepadSource(int32_t source) noexcept {
@@ -716,9 +801,9 @@ private:
             self.env_ = nullptr;
         }
 
-        // 진동은 JNI가 있어야 쓴다(InputActions 6.4절).
+        // 진동·패드 해제 확인은 JNI가 있어야 한다(InputActions 6.4절, AD12).
         if (self.env_ != nullptr) {
-            GamepadStore().SetVibrationLooper(self.looper_);
+            GamepadStore().SetInputLooper(self.looper_);
         }
 
         self.looperReady_.Signal();
@@ -727,6 +812,7 @@ private:
             void* data = nullptr;
             const int ident = ALooper_pollOnce(-1, nullptr, &events, &data);
             self.ServiceQueueRequests();
+            self.ServiceDeviceCheck();
             self.ServiceVibrationRequests();
             if (ident == LooperIdInput) {
                 self.DrainInputQueue();
@@ -734,7 +820,7 @@ private:
         }
 
         // 남은 요청(backend 소멸의 0 포함)을 쓰고 뗀다.
-        GamepadStore().SetVibrationLooper(nullptr);
+        GamepadStore().SetInputLooper(nullptr);
         self.ServiceVibrationRequests();
 
         // 종료 때 붙어 있던 큐를 뗀다.
@@ -807,8 +893,10 @@ private:
             if (GamepadButtonFromKeyCode(AKeyEvent_getKeyCode(event), button)) {
                 const int32_t keyAction = AKeyEvent_getAction(event);
                 if (keyAction == AKEY_EVENT_ACTION_DOWN || keyAction == AKEY_EVENT_ACTION_UP) {
-                    GamepadStore().SetButton(AInputEvent_getDeviceId(event), button,
-                                             keyAction == AKEY_EVENT_ACTION_DOWN);
+                    if (const uint32 slot = GamepadSlotFor(AInputEvent_getDeviceId(event));
+                        slot != gamepad::NoGamepadSlot) {
+                        GamepadStore().SetButton(slot, button, keyAction == AKEY_EVENT_ACTION_DOWN);
+                    }
                 }
 
                 return EventHandled;
@@ -819,7 +907,10 @@ private:
             (source & AINPUT_SOURCE_JOYSTICK) == AINPUT_SOURCE_JOYSTICK) {
             if ((AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK) ==
                 AMOTION_EVENT_ACTION_MOVE) {
-                GamepadStore().SetAxes(AInputEvent_getDeviceId(event), event);
+                if (const uint32 slot = GamepadSlotFor(AInputEvent_getDeviceId(event));
+                    slot != gamepad::NoGamepadSlot) {
+                    GamepadStore().SetAxes(slot, event);
+                }
             }
 
             return EventHandled;
@@ -994,6 +1085,142 @@ private:
 
         (void)env->PopLocalFrame(nullptr);
         return reports;
+    }
+
+    // 패드 이벤트의 슬롯이다. 처음 보는 장치는 descriptor를 읽어 앉힌다(AD12). 장치가 이미 없으면
+    // (해제 뒤 늦게 온 이벤트) 앉히지 않고 NoGamepadSlot이다. JNI가 없으면 descriptor 없이 앉힌다.
+    uint32 GamepadSlotFor(int32_t deviceId) noexcept {
+        AndroidGamepadStore& store = GamepadStore();
+        if (const uint32 slot = store.FindSlot(deviceId); slot != gamepad::NoGamepadSlot) {
+            return slot;
+        }
+
+        for (uint32 index = 0; index < rejectedDeviceCount_; ++index) {
+            if (rejectedDevices_[index] == deviceId) {
+                return gamepad::NoGamepadSlot;
+            }
+        }
+
+        uint64 descriptorHash = gamepad::UnknownDescriptorHash;
+        const uint32 slot = ReadDescriptorHash(deviceId, descriptorHash)
+                                ? store.Seat(deviceId, descriptorHash)
+                                : gamepad::NoGamepadSlot;
+        if (slot == gamepad::NoGamepadSlot) {
+            RememberRejectedDevice(deviceId);
+            return slot;
+        }
+
+        Log::Info(LogAndroidWindow, "Gamepad {Slot} connected (input device {Device})", slot,
+                  deviceId);
+        return slot;
+    }
+
+    // 앉지 못한 장치를 기억한다(슬롯이 비면 — 끊김 — 잊는다).
+    void RememberRejectedDevice(int32_t deviceId) noexcept {
+        if (rejectedDeviceCount_ < MaxRejectedGamepadDevices) {
+            rejectedDevices_[rejectedDeviceCount_++] = deviceId;
+            return;
+        }
+
+        rejectedDevices_[rejectedDeviceNext_] = deviceId;
+        rejectedDeviceNext_ = (rejectedDeviceNext_ + 1) % MaxRejectedGamepadDevices;
+    }
+
+    // InputDevice.getDescriptor()의 해시를 읽는다. 장치가 없으면(getDevice가 null) false다. JNI가
+    // 없거나 읽지 못하면(예외) 해시는 모름이고 true다.
+    bool ReadDescriptorHash(int32_t deviceId, uint64& hash) noexcept {
+        hash = gamepad::UnknownDescriptorHash;
+        JNIEnv* env = env_;
+        if (env == nullptr || env->PushLocalFrame(DeviceQueryLocalReferences) != JNI_OK) {
+            return true;
+        }
+
+        bool exists = true;
+        jclass deviceClass = env->FindClass("android/view/InputDevice");
+        jmethodID getDevice =
+            deviceClass != nullptr && !env->ExceptionCheck()
+                ? env->GetStaticMethodID(deviceClass, "getDevice", "(I)Landroid/view/InputDevice;")
+                : nullptr;
+        jobject device = getDevice != nullptr && !env->ExceptionCheck()
+                             ? env->CallStaticObjectMethod(deviceClass, getDevice, deviceId)
+                             : nullptr;
+        if (!env->ExceptionCheck() && getDevice != nullptr && device == nullptr) {
+            exists = false;
+        } else if (device != nullptr && !env->ExceptionCheck()) {
+            jmethodID getDescriptor =
+                env->GetMethodID(deviceClass, "getDescriptor", "()Ljava/lang/String;");
+            auto descriptor =
+                getDescriptor != nullptr && !env->ExceptionCheck()
+                    ? static_cast<jstring>(env->CallObjectMethod(device, getDescriptor))
+                    : nullptr;
+            if (descriptor != nullptr && !env->ExceptionCheck()) {
+                const char* bytes = env->GetStringUTFChars(descriptor, nullptr);
+                if (bytes != nullptr) {
+                    const auto length = static_cast<usize>(env->GetStringUTFLength(descriptor));
+                    const uint64 value = HashStringBytes(StringView(bytes, length));
+                    // 0은 "모름"이라 실제 해시가 0이면 1로 둔다.
+                    hash = value == gamepad::UnknownDescriptorHash ? value + 1 : value;
+                    env->ReleaseStringUTFChars(descriptor, bytes);
+                }
+            }
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            hash = gamepad::UnknownDescriptorHash;
+            exists = true;
+        }
+
+        (void)env->PopLocalFrame(nullptr);
+        return exists;
+    }
+
+    // 게임 스레드가 요청했으면 지금 장치 ID 목록(InputDevice.getDeviceIds)에 없는 패드를 끊는다
+    // (AD12). 목록을 읽지 못하면 아무것도 끊지 않는다.
+    void ServiceDeviceCheck() noexcept {
+        if (!GamepadStore().TakeDeviceCheck()) {
+            return;
+        }
+
+        JNIEnv* env = env_;
+        if (env == nullptr || env->PushLocalFrame(DeviceQueryLocalReferences) != JNI_OK) {
+            return;
+        }
+
+        jclass deviceClass = env->FindClass("android/view/InputDevice");
+        jmethodID getDeviceIds = deviceClass != nullptr && !env->ExceptionCheck()
+                                     ? env->GetStaticMethodID(deviceClass, "getDeviceIds", "()[I")
+                                     : nullptr;
+        auto ids =
+            getDeviceIds != nullptr && !env->ExceptionCheck()
+                ? static_cast<jintArray>(env->CallStaticObjectMethod(deviceClass, getDeviceIds))
+                : nullptr;
+        if (ids != nullptr && !env->ExceptionCheck()) {
+            const jsize count = env->GetArrayLength(ids);
+            jint* values = env->GetIntArrayElements(ids, nullptr);
+            if (values != nullptr) {
+                const uint32 lost = GamepadStore().DisconnectMissing(
+                    Span<const int32>(values, static_cast<usize>(count)));
+                env->ReleaseIntArrayElements(ids, values, JNI_ABORT);
+                if (lost != 0) {
+                    // 자리가 났으니 앉지 못했던 장치를 다시 받아 본다.
+                    rejectedDeviceCount_ = 0;
+                    rejectedDeviceNext_ = 0;
+                }
+
+                for (uint32 slot = 0; slot < input::MaxGamepads; ++slot) {
+                    if ((lost & (1u << slot)) != 0) {
+                        Log::Info(LogAndroidWindow, "Gamepad {Slot} disconnected", slot);
+                    }
+                }
+            }
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+
+        (void)env->PopLocalFrame(nullptr);
     }
 
     // 저장소의 진동 요청을 JNI로 쓴다(입력 스레드).
@@ -1204,6 +1431,10 @@ private:
     JNIEnv* env_ = nullptr;
     // 진동 Java 예외 경고를 한 번 냈다(입력 스레드 전용).
     bool vibrationWarned_ = false;
+    // 앉지 못한 패드 장치 ID다(입력 스레드 전용 — GamepadSlotFor).
+    int32_t rejectedDevices_[MaxRejectedGamepadDevices] = {};
+    uint32 rejectedDeviceCount_ = 0;
+    uint32 rejectedDeviceNext_ = 0;
     uint32 closing_ = 0;
     uint32 stopInput_ = 0;
     // 입력 스레드만 만진다(looper_는 Start에서 준비된 뒤 읽기만 한다).

@@ -8,7 +8,7 @@
 #include <Object/ModuleRegistration.h>
 #include <Object/SoftObjectRef.h>
 
-// 스켈레톤 에셋이다(Docs/Design/MeshAnimationAssets.ko.md 6.2·6.4절, UE USkeleton).
+// 스켈레톤 에셋이다(Docs/Design/MeshAnimationAssets 6.2·6.4절, UE USkeleton).
 namespace rocks {
 
 // 본마다 이동 트랙을 리타깃하는 방식이다(UE EBoneTranslationRetargetingMode와 같은 순서·뜻). 번호는

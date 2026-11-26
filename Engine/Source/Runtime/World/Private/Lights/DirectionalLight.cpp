@@ -8,7 +8,7 @@
 #include <World/Lights/Light.generated.h>
 #include <World/Lights/LightComponent.generated.h>
 #include <World/Lights/LightComponentBase.generated.h>
-#include "../ActorRootSetup.h"
+#include <World/ActorRootSetup.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
 

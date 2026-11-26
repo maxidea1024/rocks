@@ -3,7 +3,7 @@
 #include <Animation/BoneHierarchy.h>
 
 // 메시 본 계층을 스켈레톤 본 계층에 합치는
-// 판정이다(Docs/Design/MeshAnimationAssets.ko.md 6.2·6.4절, UE
+// 판정이다(Docs/Design/MeshAnimationAssets 6.2·6.4절, UE
 // USkeleton::MergeBonesToBoneTree·IsCompatibleMesh·DoesParentChainMatch).
 namespace rocks {
 

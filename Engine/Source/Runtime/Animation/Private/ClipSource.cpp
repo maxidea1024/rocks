@@ -2,7 +2,7 @@
 
 #include <Platform/Memory.h>
 
-// 클립 원본 본 트랙의 검증·저장·로드·샘플링이다(Docs/Design/MeshAnimationAssets.ko.md 7.2·7.5절,
+// 클립 원본 본 트랙의 검증·저장·로드·샘플링이다(Docs/Design/MeshAnimationAssets 7.2·7.5절,
 // UE UAnimDataModel::Evaluate·FAnimationRuntime::GetKeyIndicesFromTime·FTransform::Blend).
 namespace rocks::animation_detail {
 

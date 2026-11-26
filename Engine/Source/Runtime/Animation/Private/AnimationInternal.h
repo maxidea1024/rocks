@@ -8,7 +8,7 @@
 #include <Base/Endian.h>
 #include <Core/Math/MathUtility.h>
 
-// Animation 모듈 내부 공용 부분이다(Docs/Design/MeshAnimationAssets.ko.md 6.4절): 이름 정렬 표,
+// Animation 모듈 내부 공용 부분이다(Docs/Design/MeshAnimationAssets 6.4절): 이름 정렬 표,
 // 진단 채우기, 계층 복사.
 namespace rocks::animation_detail {
 

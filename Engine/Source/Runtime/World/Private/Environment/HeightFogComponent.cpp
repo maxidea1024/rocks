@@ -4,7 +4,7 @@
 #include <World/Environment/HeightFogComponent.h>
 #include <World/Environment/HeightFogSettings.generated.h>
 #include <World/SceneComponent.generated.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 높이 안개 컴포넌트다(Docs/Design/EngineRuntime 27.3절, D5).
 namespace rocks {

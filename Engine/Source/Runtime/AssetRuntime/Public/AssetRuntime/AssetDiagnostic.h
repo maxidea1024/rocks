@@ -43,7 +43,7 @@ enum class AssetDiagnosticCode : uint16 {
     // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
     // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
     ContentNotTrusted,
-    // 메시(MeshAnimationAssets.ko.md 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
+    // 메시(Docs/Design/MeshAnimationAssets 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
     InvalidMeshData,
     NonFiniteAttribute,
     UvOutOfRange,
@@ -51,22 +51,22 @@ enum class AssetDiagnosticCode : uint16 {
     TooManyInfluences,
     MaterialSlotFallback,
     NegativeBuildScale,
-    // 스킨 메시 빌드(MeshAnimationAssets.ko.md 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
+    // 스킨 메시 빌드(Docs/Design/MeshAnimationAssets 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
     // MissingInfluences.
     InfluencesTrimmed,
     MissingInfluences,
-    // 단순 충돌(MeshAnimationAssets.ko.md 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터 경고
-    // UnsupportedCollisionShape.
+    // 단순 충돌(Docs/Design/MeshAnimationAssets 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터
+    // 경고 UnsupportedCollisionShape.
     InvalidCollisionData,
     UnsupportedCollisionShape,
     // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
     UnsupportedSetting,
     InvalidSetting,
-    // 애니메이션(MeshAnimationAssets.ko.md 6.4·11절 — MA4a 스켈레톤이 내는 것)
+    // 애니메이션(Docs/Design/MeshAnimationAssets 6.4·11절 — MA4a 스켈레톤이 내는 것)
     InvalidSkeletonData,
     SkeletonMismatch,
-    // 클립(MeshAnimationAssets.ko.md 7.5절 — MA6a): 오류 InvalidClipData, 경고 UnknownBoneTrack,
-    // 임포터 경고 EventPropertiesDropped.
+    // 클립(Docs/Design/MeshAnimationAssets 7.5절 — MA6a): 오류 InvalidClipData, 경고
+    // UnknownBoneTrack, 임포터 경고 EventPropertiesDropped.
     InvalidClipData,
     UnknownBoneTrack,
     EventPropertiesDropped,

@@ -10,7 +10,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 
-// 단순 충돌 값 타입 시험이다(Docs/Design/MeshAnimationAssets.ko.md 4.6·4.8절, 12.6절): UE 기본값,
+// 단순 충돌 값 타입 시험이다(Docs/Design/MeshAnimationAssets 4.6·4.8절, 12.6절): UE 기본값,
 // 형상 규칙마다 하나씩 어기기, 볼록 형상 점·index 규칙, 패키지 왕복(볼록 bulk 포함)·변조, 할당
 // 실패, 퍼징, 진단 이름.
 using namespace rocks;

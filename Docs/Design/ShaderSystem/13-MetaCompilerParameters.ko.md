@@ -7,6 +7,7 @@
 15절 결정 4(2026-11-18 확정, MetaCompiler 방식)의 내용이다. 바탕인 A0-B(B1–B8)는 구현되었다.
 
 - **선언.** `ROCKS_SHADER_PARAMETERS(Name)` 구조체 종류를 MetaCompiler에 더한다. 파서·descriptor는 B4 `ROCKS_STRUCT`([리플렉션 기반](../ReflectionFoundations.ko.md) 4절)를 바탕으로 한다. 멤버는 ShaderCore 셰이더 전용 정렬 타입(7.2절 5항)과 셰이더 자원 값 타입(텍스처·샘플러·버퍼 SRV·UAV)만 받고, 다른 타입(Core `Matrix4`·`Vector3` 포함)은 MetaCompiler 오류다.
+- **SH3 구현 설계(개정 54).** 16.2절 SSD49–SSD58이 이 절을 구체화한다. 생성은 리플렉션 메타 단계와 따로 도는 MetaCompiler 셰이더 파라미터 모드이고(SSD49), 아래 "identity와 등록"의 TypeSchema·TypeRegistry 등록·identity 명세·자원 `ValueKind`는 렌더 층이 ObjectRuntime에 의존하지 않아야 하므로 RenderBase RR14로 미룬다. 생성 HLSL은 디스크 사본과 함께 C++ 표에 원문으로 들어가 컴파일 job의 메모리 원문이 된다(SSD52).
 - **identity와 등록.** 공통 규칙대로 셰이더 파라미터 구조체도 identity 명세(`<Module>.rocksids.json`)에 항목을 두고, `ROCKS_STRUCT`와 같은 경로로 `TypeSchema`·TypeRegistry에 등록한다. 셰이더 파라미터 종류는 그 위에 허용 타입 제약과 HLSL 생성만 더한다. 셰이더 자원 멤버를 담을 리플렉션 값 종류는 `ValueKind`에 더한다. `ValueKind`는 닫힌 열거라 값을 덧붙이고 TypeRegistry 경계를 올리는 방식이다(ReflectionFoundations 3절).
 - **생성물.**
   - C++: 멤버별 offset·크기 static_assert, `ShaderBindingLayout`과 대조할 레이아웃 표.

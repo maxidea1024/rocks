@@ -6,7 +6,7 @@
 #include <World/Environment/SphereReflectionCaptureComponent.generated.h>
 #include <World/Environment/SphereReflectionCaptureComponent.h>
 #include <World/SceneComponent.generated.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 구 반사 캡처 컴포넌트다(Docs/Design/EngineRuntime 27.6절, D5).
 namespace rocks {

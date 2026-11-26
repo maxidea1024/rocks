@@ -18,6 +18,8 @@
 using namespace rocks;
 namespace texture_type_tests_file {
 
+using graphics::PixelFormat;
+
 namespace {
 
 struct TextureFixture {

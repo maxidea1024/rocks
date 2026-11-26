@@ -56,8 +56,10 @@ inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
 inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 // 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4,
 // compute는 읽기 4 + 쓰기 4).
-inline constexpr uint32 MaxPipelineBindings =
-    2 + 2 * MaxDrawBufferViews + 2 * MaxConstantBufferSlots;
+inline constexpr uint32 MaxPipelineBindings = MaxPipelineSlotBindings + 2 * MaxConstantBufferSlots;
+// 프레임 descriptor pool이 set 하나에 기대하는 평균 텍스처·샘플러 수다(pool 크기 = set 수 × 이
+// 값). 더 많이 쓰는 set이 pool을 채우면 다음(두 배) pool로 넘어간다.
+inline constexpr uint32 DescriptorTexturesPerSet = 4;
 // framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
 inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
 // 그리기별 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
@@ -205,10 +207,12 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 
 // 파이프라인 descriptor binding 하나가 읽는 것이다(PipelineDesc 고정 배치).
 enum class BindingSource : uint8 {
-    // SetTexture의 이미지 view(t0)
+    // SetTexture(단계, binding)의 이미지 view
     Texture,
-    // SetTexture 텍스처의 샘플러(s0)
+    // 자기 샘플러(SetSampler 값, 없으면 짝 텍스처의 샘플러 — RenderBase 9.13절 3항)
     Sampler,
+    // 공유 샘플러(SetSampler 값만)
+    SharedSampler,
     // SetBufferView slot(t1–t4)
     BufferView,
     // SetWritableBufferView slot(compute u0–u3)
@@ -228,6 +232,8 @@ struct PipelineBinding {
     // 상수 버퍼의 셰이더 선언 byte 수(descriptor range)와 묶음 표 단계 색인이다.
     uint32 range = 0;
     uint32 stage = 0;
+    // 자기 샘플러의 짝 텍스처 binding이다(PipelineSlotBinding::pair).
+    uint32 pair = NoPairedSlot;
 };
 
 // 상수 버퍼 handle 저장소 page다(host-visible 버퍼 하나, 9.11절 2항).
@@ -579,7 +585,13 @@ private:
     void SetVertexBuffers(uint32 firstStream,
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
-    void SetTexture(TextureHandle texture) noexcept override;
+    void SetTexture(ShaderStage stage, uint32 slot, TextureHandle texture) noexcept override;
+    Result<void> SetSampler(ShaderStage stage, uint32 slot,
+                            const SamplerDesc* sampler) noexcept override;
+    Result<TextureViewInfo> GetTextureViewInfo(TextureHandle texture) noexcept override;
+    Result<BufferViewInfo> GetBufferViewInfo(BufferViewHandle view) noexcept override;
+    // 단계·binding에 묶인 텍스처 기록이다(없거나 image view가 없으면 흰 텍스처).
+    const TextureRecord* BoundTexture(uint32 stage, uint32 slot) const noexcept;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     void SetConstantBuffer(ShaderStage stage, uint32 slot,
                            ConstantBufferHandle buffer) noexcept override;
@@ -1078,8 +1090,11 @@ private:
     SlotHandle boundPipeline_;
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
     BoundIndexBuffer boundIndex_;
-    // 그리기 descriptor 입력(SetTexture·SetBufferView)과 다시 써야 하는지다.
-    TextureHandle boundTexture_;
+    // 그리기 descriptor 입력(SetTexture·SetSampler·SetBufferView)이다. 단계·텍스처 binding마다
+    // SetTexture로 묶은 텍스처 기록(null이면 흰 텍스처)과 샘플러 binding마다 SetSampler로 준
+    // 값(장치 수명 동안 사는 캐시 객체, 없으면 VK_NULL_HANDLE)이다(9.13절).
+    SlotHandle boundTextures_[ConstantBufferStageCount][MaxResourceSlots] = {};
+    VkSampler boundSamplers_[ConstantBufferStageCount][MaxResourceSlots] = {};
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).

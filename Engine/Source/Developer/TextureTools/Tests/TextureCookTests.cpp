@@ -32,6 +32,8 @@
 using namespace rocks;
 namespace texture_cook_tests_file {
 
+using graphics::PixelFormat;
+
 using rocks::asset_database_test::TempProject;
 
 namespace {

@@ -183,7 +183,7 @@ private:
 // fps는 30000/1001. 분자·분모는 둘 다 양수다(TryCreate가 확인한다). 기본값은 UE와 같은
 // 60000/1이다(프레임 속도를 고르지 않은 시간 표현의 정밀도용 — 표시용 속도가 아니다).
 class FrameRate {
-    // 리플렉션 미러(CoreTypeBindings FrameRate 미러 — Docs/Design/MeshAnimationAssets.ko.md 7.5절
+    // 리플렉션 미러(CoreTypeBindings FrameRate 미러 — Docs/Design/MeshAnimationAssets 7.5절
     // 3)의 생성 코드가 private 멤버(numerator_·denominator_)에 닿는다. 생성 코드는 decode한 값을
     // 게시하기 전에 미러의 Validate(두 값이 양수)를 부르므로 불변식이 깨진 값을 게시하지 않는다.
     template <class>

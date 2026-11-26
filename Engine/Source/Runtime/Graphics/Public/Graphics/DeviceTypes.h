@@ -8,6 +8,7 @@
 #include <Graphics/PipelineState.h>
 #include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/ChannelSwizzle.h>
+#include <GraphicsTypes/IndexFormat.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
 #include <GraphicsTypes/TextureDimension.h>
@@ -342,16 +343,40 @@ ROCKS_GRAPHICS_API bool
 DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
                          const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept;
 
-// index 형식이다(RenderBase 10.4절).
-enum class IndexFormat : uint8 {
-    UInt16,
-    UInt32
+// 텍스처·샘플러 slot 번호(값 1 slot = backend 위치, ShaderSystem 16.1절 SSD30)의 상한이다
+// (RenderBase 9.13절 1항). Vulkan은 binding을 종류 순서(상수 버퍼 → 구조화 → storage image → SRV
+// 텍스처 → 샘플러)로 이어 매기므로 가장 넓은 형식 VULKAN_SM5의 상한 합 12 + 4 + 4 + 128 + 16이
+// 가장 큰 번호다. D3D register(t 128·s 16)와 GLES 유닛(PS 0–15·VS 16–31)은 그 안이다.
+inline constexpr uint32 MaxResourceSlots = 164;
+// 단계 하나가 읽는 SRV 텍스처(typed buffer SRV 포함)·샘플러 수 상한이다(가장 넓은 형식 정의의
+// sampledTextures 128·samplers 16).
+inline constexpr uint32 MaxStageTextures = 128;
+inline constexpr uint32 MaxStageSamplers = 16;
+
+// 묶을 텍스처(또는 view) 하나의 요약이다(Device::GetTextureViewInfo — 자원 묶음 검증, RenderBase
+// 9.13절 6항).
+struct TextureViewInfo {
+    // 셰이더가 보는 차원·형식이다(view면 view의 값).
+    TextureDimension dimension = TextureDimension::Texture2D;
+    PixelFormat format = PixelFormat::Unknown;
+    uint32 sampleCount = 1;
+    // ReadWrite view(SetWritableTexture 전용)다.
+    ViewAccess access = ViewAccess::Read;
+    // SRV가 있다(형식이 Sampled). 거짓이면 SetTexture가 흰 텍스처로 대신한다.
+    bool sampled = false;
+    // 묶을 때의 기본 샘플러(TextureDesc::sampler — view면 원 텍스처의 값)가 비교 샘플러다.
+    bool comparison = false;
 };
 
-// index 하나의 byte 크기다(2·4).
-constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
-    return format == IndexFormat::UInt16 ? 2u : 4u;
-}
+// 묶을 버퍼 view 하나의 요약이다(Device::GetBufferViewInfo).
+struct BufferViewInfo {
+    BufferViewKind kind = BufferViewKind::Typed;
+    ViewAccess access = ViewAccess::Read;
+    // Typed view 형식의 값 계열이다(그 밖은 None).
+    PixelShaderType shaderType = PixelShaderType::None;
+    // Structured view의 원소 byte(BufferDesc::stride)다(그 밖은 0).
+    uint32 stride = 0;
+};
 
 // 텍스처 용도 비트 묶음이다(UE ETextureCreateFlags의 ShaderResource·RenderTargetable·
 // DepthStencilTargetable·UAV 대응, RenderBase 4.4절 텍스처 GX2 나머지 A부). 받는 조합은 다섯이다:
@@ -697,19 +722,22 @@ Span<const uint8> DrawConstantBytes(const T& constants) noexcept {
 
 // 그리기 파이프라인 설정이다(ShaderSystem 16.1절 SSD18 — UE PSO 초기화자처럼 장치 셰이더 handle을
 // 받는다). 셰이더는 Device::CreateShader로 만든 VS·PS이고 단계 사이 연결(ShaderCore
-// CheckShaderStageLink)이 맞아야 한다. 자원은 셰이더 layout의 backend 위치에 묶이고, 그리기 기록의
-// 고정 slot(파라미터 묶음 GX6 전의 개발 경로)과는 bindings 이름 표로 잇는다(ShaderCode.h
-// PipelineBindingNames):
+// CheckShaderStageLink)이 맞아야 한다. 자원은 셰이더 layout의 backend 위치에 묶인다. 상수 버퍼·
+// 텍스처·샘플러는 그 위치(값 1 slot)로 묶고(SetConstantBuffer·SetTexture·SetSampler), 버퍼 view는
+// bindings 이름 표로 고정 slot에 잇는다(ShaderCode.h PipelineBindingNames):
 // - 그리기별 상수 drawConstantBytes byte(셰이더의 ROCKS_ROOT_CONSTANTS, ShaderSystem 7.2절 2항).
 //   단계마다 읽는 루트 상수 크기가 drawConstantBytes 이하여야 하고(작아도 된다), 넘으면
 //   InvalidArgument다. 값은 CommandContext::SetDrawConstants로 올린다.
-// - PS 텍스처 하나(bindings.texture, 짝 샘플러 <이름>Sampler). 셰이더는 묶을 텍스처의 차원에 맞는
-//   타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray)을 선언한다. 샘플러는 묶은
-//   텍스처의 TextureDesc::sampler를 따르며 비교 샘플러(SamplerDesc::comparison)면
-//   SamplerComparisonState로 선언한다.
+// - VS·PS의 텍스처 여럿(값 1 SRV 텍스처 slot, SetTexture — RenderBase 9.13절). 셰이더는 묶을
+//   텍스처의 차원에 맞는 타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray·
+//   Texture2DMS)을 선언한다. 짝 샘플러 <이름>Sampler는 SetSampler로 준 값, 없으면 묶은 텍스처의
+//   TextureDesc::sampler를 따르며 비교 샘플러(SamplerDesc::comparison)면 SamplerComparisonState로
+//   선언한다. 공유 샘플러(SharedWrapSampler·SharedClampSampler)는 SetSampler로 준 값만 쓴다.
+//   slot 번호는 MaxResourceSlots 밖, 단계 텍스처 수는 MaxStageTextures·샘플러 수는
+//   MaxStageSamplers를 넘으면 InvalidArgument다.
 // - VS·PS가 읽는 버퍼 view slot 0–3(bindings.bufferViews, SetBufferView): Buffer<T>·
 //   StructuredBuffer<T>·ByteAddressBuffer. 같은 이름을 두 단계가 읽으면 같은 view를 본다.
-// 이름 표에 없는 자원·상수 버퍼(루트 상수 밖)·VS·PS의 UAV·공유 샘플러를 선언한 셰이더는
+// 이름 표에 없는 버퍼 view, 짝 텍스처가 없는 샘플러, VS·PS의 UAV를 선언한 셰이더는
 // InvalidArgument다(LastError에 단계·자원 이름). OpenGL ES의 VS·PS storage block은 형식 상한(0)으로
 // 쿠킹 때 거부된다.
 //
@@ -779,12 +807,12 @@ ROCKS_GRAPHICS_API bool PipelineWritesDepthStencil(const PipelineDesc& desc) noe
 // compute 파이프라인 설정이다. 셰이더는 단계 Compute의 장치 셰이더(CreateShader)다. 자원은
 // PipelineDesc와 같이 bindings 이름 표로 고정 slot에 잇는다:
 // - 그리기별 상수 drawConstantBytes byte(규칙은 PipelineDesc와 같다).
-// - 읽기 버퍼 view slot 0–3(bindings.bufferViews, SetBufferView)과 텍스처 하나(bindings.texture,
-//   SetTexture).
+// - 읽기 버퍼 view slot 0–3(bindings.bufferViews, SetBufferView)과 텍스처·샘플러(값 1 slot,
+//   SetTexture·SetSampler — 규칙은 PipelineDesc와 같다).
 // - 쓰기 slot 0–3(SetWritableBufferView·SetWritableTexture, 같은 번호 공간):
 //   bindings.writableBuffers(RWBuffer<T>·RWStructuredBuffer<T>·RWByteAddressBuffer)와
 //   bindings.writableTextures(RWTexture2D·RWTexture2DArray·RWTexture3D, 형식은 ROCKS_IMAGE_FORMAT).
-// 이름 표에 없는 자원은 InvalidArgument다.
+// 이름 표에 없는 버퍼 view·쓰기 자원은 InvalidArgument다.
 struct ComputePipelineDesc {
     // 장치 셰이더(CreateShader, 단계 Compute)다.
     ShaderHandle computeShader;

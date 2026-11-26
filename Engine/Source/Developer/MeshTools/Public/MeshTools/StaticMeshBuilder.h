@@ -9,7 +9,7 @@
 #include <Mesh/MeshBuildSettings.h>
 #include <MeshSource/MeshSource.h>
 
-// 정적 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4절, UE FStaticMeshBuilder
+// 정적 메시 LOD 빌드다(Docs/Design/MeshAnimationAssets 5.2·5.4절, UE FStaticMeshBuilder
 // 대응).
 namespace rocks {
 
