@@ -688,6 +688,7 @@ TEST(EngineAudio_SetParameterRampsAndMerges) {
     // 같은 프레임의 두 번 호출은 마지막 값 하나로 합친다.
     REQUIRE(fixture.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 2.0f, 0));
     REQUIRE(fixture.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 1.0f, 0));
+    CHECK(fixture.audio->Stats().mergedParameters == 1);
     REQUIRE(fixture.Frames(3));
     const StereoPeak settled = CapturePeak(fixture, chunk);
     CHECK(platform::PlatformMath::Abs(settled.left - 0.25f) < 1.0e-4f);

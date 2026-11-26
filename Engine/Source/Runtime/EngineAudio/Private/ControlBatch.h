@@ -22,16 +22,6 @@ enum class ControlCommandType : uint8 {
     RemoveEmitter
 };
 
-// 재생 위치 원천이다.
-enum class PlayPlacement : uint8 {
-    // 2D(감쇠·패닝 없음).
-    NonSpatial,
-    // 고정 world 위치(PlayAt).
-    Fixed,
-    // emitter 위치(PlayAttached).
-    Emitter
-};
-
 struct ControlCommand {
     ControlCommandType type = ControlCommandType::Play;
     PlaybackHandle handle;

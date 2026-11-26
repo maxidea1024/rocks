@@ -74,7 +74,7 @@ struct AudioEngineSubsystem::Control {
 AudioEngineSubsystem::AudioEngineSubsystem(Allocator& allocator) noexcept
     : allocator_(allocator), playbacks_(allocator), freeSlots_(allocator), ignored_(allocator),
       delivering_(allocator), scenes_(allocator), sceneEpochs_(allocator), emitters_(allocator),
-      freeEmitters_(allocator), freeBatches_(allocator) {
+      freeEmitters_(allocator), pendingSceneRemovals_(allocator), freeBatches_(allocator) {
 }
 
 AudioEngineSubsystem::~AudioEngineSubsystem() {
@@ -95,7 +95,8 @@ Result<void> AudioEngineSubsystem::Initialize(Engine& engine) noexcept {
         !ignored_.TryReserve(MaxPlaybacks) || !delivering_.TryReserve(DeliveringCapacity) ||
         !freeBatches_.TryReserve(ControlBatchCount) || !scenes_.TryResize(MaxAudioScenes) ||
         !sceneEpochs_.TryResize(MaxAudioScenes) || !emitters_.TryResize(MaxAudioEmitters) ||
-        !freeEmitters_.TryReserve(MaxAudioEmitters)) {
+        !freeEmitters_.TryReserve(MaxAudioEmitters) ||
+        !pendingSceneRemovals_.TryReserve(MaxAudioScenes)) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -358,7 +359,7 @@ Result<PlaybackHandle> AudioEngineSubsystem::PlayAtInScene(AudioSceneId scene,
     }
 
     Placement placement;
-    placement.kind = static_cast<uint8>(PlayPlacement::Fixed);
+    placement.kind = PlayPlacement::Fixed;
     placement.position = position;
     return Accept(sound, options, scene, placement);
 }
@@ -372,7 +373,7 @@ Result<PlaybackHandle> AudioEngineSubsystem::PlayAttachedInScene(AudioSceneId sc
     }
 
     Placement placement;
-    placement.kind = static_cast<uint8>(PlayPlacement::Emitter);
+    placement.kind = PlayPlacement::Emitter;
     placement.emitter = emitter;
     return Accept(sound, options, scene, placement);
 }
@@ -420,13 +421,10 @@ void AudioEngineSubsystem::UnregisterScene(AudioSceneId scene) noexcept {
     }
 
     if (control_ != nullptr && !drained_) {
-        ControlCommand command;
-        command.type = ControlCommandType::RemoveScene;
-        command.scene = scene.index;
-        command.sceneEpoch = scene.epoch;
-        // 할당 실패면 제어 쪽 재생이 scene 해제를 모르고 남는다 — emitter 해제가 부착 재생을
-        // 끝내고, 고정 위치 재생은 종료 drain이 끝낸다.
-        (void)current_->commands.TryPushBack(Move(command));
+        // 명령은 프레임 끝(SnapshotScenes)에 넣는다. 할당이 실패하면 다음 프레임에 다시 보낸다(남은
+        // 재생은 Status가 Finished라 게임이 멈출 수 없으므로 해제를 잃으면 안 된다). 칸은 scene
+        // 수만큼 미리 잡았다.
+        (void)pendingSceneRemovals_.TryPushBack(scene);
     }
 
     for (uint32 slot = 0; slot < emitters_.Size(); ++slot) {
@@ -458,6 +456,14 @@ Result<AudioEmitterId> AudioEngineSubsystem::RegisterEmitter(AudioSceneId scene,
     }
 
     if (freeEmitters_.IsEmpty()) {
+        if (!emitterFullWarned_) {
+            emitterFullWarned_ = true;
+            Log::Warning(LogEngineAudio,
+                         "Audio emitter table is full ({Capacity}); new audio components play at a "
+                         "fixed location",
+                         MaxAudioEmitters);
+        }
+
         return Registered::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -514,6 +520,13 @@ void AudioEngineSubsystem::UnregisterEmitter(AudioEmitterId id) noexcept {
     (void)freeEmitters_.TryPushBack(id.slot);
 }
 
+bool AudioEngineSubsystem::IsPlaybackInScene(PlaybackHandle handle,
+                                             AudioSceneId scene) const noexcept {
+    const GamePlayback* playback = FindLive(handle);
+    return playback != nullptr && playback->scene == scene.index &&
+           playback->sceneEpoch == scene.epoch;
+}
+
 bool AudioEngineSubsystem::IsLiveScene(AudioSceneId scene) const noexcept {
     return scene.IsValid() && scene.index < scenes_.Size() &&
            scenes_[scene.index].epoch == scene.epoch;
@@ -541,6 +554,23 @@ void AudioEngineSubsystem::PushEmitterUpdate(uint32 slot) noexcept {
 }
 
 void AudioEngineSubsystem::SnapshotScenes() noexcept {
+    usize sent = 0;
+    for (const AudioSceneId removed : pendingSceneRemovals_) {
+        ControlCommand command;
+        command.type = ControlCommandType::RemoveScene;
+        command.scene = removed.index;
+        command.sceneEpoch = removed.epoch;
+        if (!current_->commands.TryPushBack(Move(command))) {
+            break;
+        }
+
+        ++sent;
+    }
+
+    if (sent != 0) {
+        (void)pendingSceneRemovals_.TryRemoveAt(0, sent);
+    }
+
     for (uint32 index = 0; index < scenes_.Size(); ++index) {
         GameScene& scene = scenes_[index];
         if (scene.epoch == 0 || !scene.listenerDirty) {
@@ -612,6 +642,7 @@ Result<void> AudioEngineSubsystem::SetParameter(PlaybackHandle handle, PlaybackP
         ControlCommand& merged = current_->commands[playback->parameterCommand[kind] - 1];
         merged.value = value;
         merged.rampFrames = rampFrames;
+        ++stats_.mergedParameters;
         return Result<void>::Success();
     }
 
@@ -707,7 +738,7 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
     GamePlayback& playback = playbacks_[slot];
     const PlaybackHandle handle{slot, playback.generation};
     bool live = IsLiveScene(scene);
-    if (live && placement.kind == static_cast<uint8>(PlayPlacement::Emitter)) {
+    if (live && placement.kind == PlayPlacement::Emitter) {
         const AudioEmitterId id = placement.emitter;
         live = id.slot < emitters_.Size() && emitters_[id.slot].live &&
                emitters_[id.slot].generation == id.generation;
@@ -724,7 +755,7 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.sound = sound;
         command.scene = scene.index;
         command.sceneEpoch = scene.epoch;
-        command.placement = static_cast<PlayPlacement>(placement.kind);
+        command.placement = placement.kind;
         command.position = placement.position;
         command.emitter = placement.emitter;
         command.volume = options.volume;
@@ -776,8 +807,18 @@ void AudioEngineSubsystem::Deliver(const PlaybackEvent& event) noexcept {
             playback->status = PlaybackStatus::Playing;
         }
 
-        if (playback->onEvent) {
-            playback->onEvent(event);
+        // 콜백을 꺼내서 부른다. 콜백이 World를 즉시 파괴하면(Tick 밖 DestroyWorld) scene 해제가 이
+        // 슬롯의 onEvent를 비우므로, 제자리에서 부르면 실행 중인 콜백 객체가 파괴된다.
+        PlaybackEventCallback callback = Move(playback->onEvent);
+        if (!callback) {
+            return;
+        }
+
+        callback(event);
+        // 그 사이 scene 해제·종료로 끊겼으면 되돌리지 않는다(Ended를 위해 다시 둔다).
+        GamePlayback* again = FindLive(event.handle);
+        if (again != nullptr && again->status != PlaybackStatus::Finished && !again->onEvent) {
+            again->onEvent = Move(callback);
         }
 
         return;
@@ -882,6 +923,8 @@ void AudioEngineSubsystem::Drain() noexcept {
         }
 
         if (context_ != nullptr && current_ != nullptr) {
+            // 아직 보내지 못한 scene 해제를 마지막 묶음에 싣는다.
+            SnapshotScenes();
             context_->Process(*current_);
             current_->Recycle();
             context_->StopAll(audio::DefaultStopFadeFrames);

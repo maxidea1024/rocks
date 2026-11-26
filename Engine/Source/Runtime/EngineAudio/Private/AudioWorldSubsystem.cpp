@@ -85,18 +85,36 @@ Result<PlaybackHandle> AudioWorldSubsystem::PlayAttached(AudioEmitterId emitter,
     return engine_->PlayAttachedInScene(scene_, emitter, sound, Move(options));
 }
 
+// 다른 World·엔진 소유 재생은 건드리지 않는다(이 World scene 소유만 — 낡은 handle과 같이 아무 일도
+// 하지 않는다).
 Result<void> AudioWorldSubsystem::Stop(PlaybackHandle handle, uint32 fadeFrames) noexcept {
-    return engine_ != nullptr ? engine_->Stop(handle, fadeFrames) : Result<void>::Success();
+    if (!handle.IsValid()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (engine_ == nullptr || !engine_->IsPlaybackInScene(handle, scene_)) {
+        return Result<void>::Success();
+    }
+
+    return engine_->Stop(handle, fadeFrames);
 }
 
 Result<void> AudioWorldSubsystem::SetParameter(PlaybackHandle handle, PlaybackParameter parameter,
                                                float value, uint32 rampFrames) noexcept {
-    return engine_ != nullptr ? engine_->SetParameter(handle, parameter, value, rampFrames)
-                              : Result<void>::Success();
+    if (engine_ == nullptr || !engine_->IsPlaybackInScene(handle, scene_)) {
+        return handle.IsValid() ? Result<void>::Success()
+                                : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return engine_->SetParameter(handle, parameter, value, rampFrames);
 }
 
 PlaybackStatus AudioWorldSubsystem::Status(PlaybackHandle handle) const noexcept {
-    return engine_ != nullptr ? engine_->Status(handle) : PlaybackStatus::Finished;
+    if (engine_ == nullptr || !engine_->IsPlaybackInScene(handle, scene_)) {
+        return PlaybackStatus::Finished;
+    }
+
+    return engine_->Status(handle);
 }
 
 void AudioWorldSubsystem::SetListener(const Vec3d& position, const Quatd& rotation) noexcept {

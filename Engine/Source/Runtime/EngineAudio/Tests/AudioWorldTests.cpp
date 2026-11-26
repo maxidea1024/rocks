@@ -1,5 +1,10 @@
 #include "AudioEngineTestSupport.h"
 
+#include <Core/Module/ModuleEntry.h>
+#include <EngineAudio/EngineAudioTypes.h>
+#include <EngineAudio/SoundClip.generated.h>
+#include <Object/ObjectRegistry.h>
+
 #include <Core/Math/MathUtility.h>
 #include <EngineAudio/AudioComponent.h>
 #include <EngineAudio/AudioSpatialization.h>
@@ -470,6 +475,220 @@ TEST(EngineAudioWorld_NoEngineAudioGivesEmptyHandles) {
     CHECK(audio->Status(played.Value()) == PlaybackStatus::Finished);
     CHECK(audio->RegisterEmitter(Vec3d()).Error() == ErrorCode::InvalidArgument);
     REQUIRE(engine.Shutdown());
+}
+
+TEST(EngineAudioWorld_StartedCallbackMayDestroyWorld) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.1f, 480);
+    const SoundSourceRef sound = MakeSound(fixture.allocator, pcm, true, 0, 0, PanOnly());
+    WorldScope scope(fixture);
+    REQUIRE(scope.audio != nullptr);
+    uint32 calls = 0;
+    auto callback =
+        PlaybackEventCallback::TryCreate(fixture.allocator, [&](const PlaybackEvent&) noexcept {
+            // Tick 밖(OnFrameBegin)이라 즉시 파괴다 — 실행 중인 이 콜백 객체는 살아 있어야 한다.
+            ++calls;
+            (void)scope.Destroy();
+        });
+    REQUIRE(callback);
+    PlayOptions options;
+    options.onEvent = Move(callback.Value());
+    REQUIRE(scope.audio->PlayAt(sound, Vec3d(100.0, 0.0, 0.0), Move(options)));
+    REQUIRE(fixture.Frames(6));
+    CHECK(calls == 1);
+    REQUIRE(fixture.RunUntilIdle());
+}
+
+TEST(EngineAudioWorld_SameFrameWorldSwapKeepsNewScene) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    const SoundSourceRef sound = MakeSound(fixture.allocator, pcm, true, 0, 0, PanOnly());
+    WorldScope first(fixture);
+    REQUIRE(first.audio != nullptr);
+    const AudioSceneId oldScene = first.audio->Scene();
+    auto oldLoop = first.audio->PlayAt(sound, Vec3d(0.0, 500.0, 0.0));
+    REQUIRE(oldLoop);
+    REQUIRE(fixture.Frames(3));
+    // 한 프레임 사이에 옛 World를 없애고 새 World를 만들어 재생한다(같은 scene 칸, 새 epoch).
+    REQUIRE(first.Destroy());
+    WorldScope second(fixture);
+    REQUIRE(second.audio != nullptr);
+    CHECK(second.audio->Scene().index == oldScene.index);
+    CHECK(second.audio->Scene().epoch != oldScene.epoch);
+    auto newLoop = second.audio->PlayAt(sound, Vec3d(0.0, -500.0, 0.0));
+    REQUIRE(newLoop);
+    REQUIRE(fixture.Frames(4));
+    CHECK(fixture.audio->Status(oldLoop.Value()) == PlaybackStatus::Finished);
+    CHECK(fixture.audio->Status(newLoop.Value()) == PlaybackStatus::Playing);
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    // 옛 오른쪽 loop는 끝나고 새 왼쪽 loop만 들린다.
+    const StereoPeak peak = CapturePeak(fixture, chunk);
+    CHECK(peak.left > 0.45f);
+    CHECK(peak.right < 0.01f);
+    CHECK(fixture.audio->ControlStats().activeVoices == 1);
+}
+
+TEST(EngineAudioWorld_SameFrameEmitterReuseIsolatesGenerations) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    WorldScope scope(fixture);
+    REQUIRE(scope.audio != nullptr);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    const SoundSourceRef sound = MakeSound(fixture.allocator, pcm, true, 0, 0, PanOnly());
+    EventLog log(fixture.allocator);
+    auto oldEmitter = scope.audio->RegisterEmitter(Vec3d(0.0, -500.0, 0.0));
+    REQUIRE(oldEmitter);
+    PlayOptions options;
+    options.onEvent = log.Callback(fixture.allocator);
+    REQUIRE(scope.audio->PlayAttached(oldEmitter.Value(), sound, Move(options)));
+    scope.audio->UnregisterEmitter(oldEmitter.Value());
+    // 놓은 칸을 같은 프레임에 새 generation으로 다시 받는다.
+    auto newEmitter = scope.audio->RegisterEmitter(Vec3d(0.0, 500.0, 0.0));
+    REQUIRE(newEmitter);
+    CHECK(newEmitter.Value().slot == oldEmitter.Value().slot);
+    CHECK(newEmitter.Value().generation != oldEmitter.Value().generation);
+    auto played = scope.audio->PlayAttached(newEmitter.Value(), sound);
+    REQUIRE(played);
+    REQUIRE(fixture.Frames(4));
+    REQUIRE(log.events.Size() == 1);
+    CHECK(log.events[0].reason == PlaybackEndReason::EmitterRemoved);
+    CHECK(fixture.audio->Status(played.Value()) == PlaybackStatus::Playing);
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    const StereoPeak peak = CapturePeak(fixture, chunk);
+    CHECK(peak.right > 0.45f);
+    CHECK(peak.left < 0.01f);
+}
+
+TEST(EngineAudioWorld_PlaybackOutlivesCollectedSoundAsset) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    WorldScope scope(fixture);
+    REQUIRE(scope.audio != nullptr);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 4800);
+    PlaybackHandle handle;
+    {
+        // 에셋 객체 Registry에 SoundClip을 만들어 스냅숏을 떠서 재생한 뒤, Registry째 수거한다.
+        TypeRegistry types(fixture.allocator);
+        ModuleRegistration registration(types, fixture.allocator);
+        REQUIRE(RegisterEngineAudioTypes(registration));
+        {
+            ObjectRegistry objects(fixture.allocator, types, {0x45415544474331ull, 1});
+            auto clip = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());
+            REQUIRE(clip);
+            auto borrow = objects.Resolve<SoundClip>(objects.OwnerAccess(), clip.Value().Handle());
+            REQUIRE(borrow);
+            SoundClip& sound = *borrow.Value().Get().Value();
+            REQUIRE(sound.SetPcm(pcm));
+            auto playable = sound.MakePlayable(fixture.allocator, objects, objects.OwnerAccess());
+            REQUIRE(playable);
+            auto played = scope.audio->Play2D(playable.Value());
+            REQUIRE(played);
+            handle = played.Value();
+        }
+
+        CHECK(registration.Unregister());
+    }
+
+    // 객체가 사라져도 재생은 스냅숏으로 끝까지 간다(4800 frame).
+    Array<float> capture(fixture.allocator);
+    REQUIRE(capture.TryResize(PumpFrames * 2 * 12));
+    fixture.audio->Device()->NullOutput()->CaptureTo(Span<float>(capture.Data(), capture.Size()));
+    REQUIRE(fixture.Frames(12));
+    uint32 loud = 0;
+    for (usize frame = 0; frame + 1 < capture.Size(); frame += 2) {
+        loud += capture[frame] == 0.25f ? 1 : 0;
+    }
+
+    CHECK(loud == 4800);
+    CHECK(fixture.audio->Status(handle) == PlaybackStatus::Finished);
+    REQUIRE(fixture.RunUntilIdle());
+    CHECK(pcm.UseCount() == 1);
+}
+
+TEST(EngineAudioWorld_SpatialPlaybackRampsWithAttenuation) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    WorldScope scope(fixture);
+    REQUIRE(scope.audio != nullptr);
+    SoundAttenuation attenuation;
+    attenuation.spatialize = false;
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    const SoundSourceRef sound = MakeSound(fixture.allocator, pcm, true, 0, 0, attenuation);
+    auto played = scope.audio->PlayAt(sound, Vec3d(2200.0, 0.0, 0.0));
+    REQUIRE(played);
+    REQUIRE(fixture.Frames(4));
+    // 공간 재생은 묶음마다 다시 게시되지만 사용자 ramp 중간값은 그 위에 곱해진다(3.35.6절).
+    REQUIRE(
+        scope.audio->SetParameter(played.Value(), PlaybackParameter::Volume, 0.0f, PumpFrames * 8));
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    uint32 between = 0;
+    float previous = 1.0f;
+    for (uint32 frame = 0; frame < 12; ++frame) {
+        const StereoPeak peak = CapturePeak(fixture, chunk);
+        CHECK(peak.left <= previous + 1.0e-6f);
+        between += peak.left > 0.005f && peak.left < 0.12f ? 1 : 0;
+        previous = peak.left;
+    }
+
+    CHECK(between >= 3);
+    CHECK(previous == 0.0f);
+}
+
+TEST(EngineAudioWorld_TwoDimensionalPlaysIgnoreAttenuation) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    WorldScope scope(fixture);
+    REQUIRE(scope.audio != nullptr);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
+    SoundAttenuation farAway;
+    farAway.innerRadius = 0.0f;
+    // Play2D는 감쇠 스냅숏이 있어도 2D다(UE PlaySound2D).
+    const SoundSourceRef attenuated = MakeSound(fixture.allocator, pcm, true, 0, 0, farAway);
+    auto flat = scope.audio->Play2D(attenuated);
+    REQUIRE(flat);
+    REQUIRE(fixture.Frames(4));
+    Array<float> chunk(fixture.allocator);
+    REQUIRE(chunk.TryResize(PumpFrames * 2));
+    StereoPeak peak = CapturePeak(fixture, chunk);
+    CHECK(math::Abs(peak.left - 0.25f) < 1.0e-4f);
+    CHECK(math::Abs(peak.right - 0.25f) < 1.0e-4f);
+    REQUIRE(scope.audio->Stop(flat.Value(), 0));
+    // 감쇠 스냅숏이 없는 위치 재생도 2D다.
+    const SoundSourceRef plain = MakeSound(fixture.allocator, pcm, true);
+    REQUIRE(scope.audio->PlayAt(plain, Vec3d(0.0, 90000.0, 0.0)));
+    REQUIRE(fixture.Frames(4));
+    peak = CapturePeak(fixture, chunk);
+    CHECK(math::Abs(peak.left - 0.25f) < 1.0e-4f);
+    CHECK(math::Abs(peak.right - 0.25f) < 1.0e-4f);
+}
+
+TEST(EngineAudioWorld_WorldCommandsTouchOnlyItsOwnPlaybacks) {
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    WorldScope first(fixture);
+    WorldScope second(fixture);
+    REQUIRE(first.audio != nullptr);
+    REQUIRE(second.audio != nullptr);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.1f, 480);
+    const SoundSourceRef sound = MakeSound(fixture.allocator, pcm, true);
+    auto mine = first.audio->Play2D(sound);
+    auto engineOwned = fixture.audio->Play2D(sound);
+    REQUIRE(mine);
+    REQUIRE(engineOwned);
+    REQUIRE(fixture.Frames(3));
+    // 다른 World·엔진 소유 handle은 건드리지 않는다.
+    CHECK(second.audio->Stop(mine.Value()));
+    CHECK(first.audio->Stop(engineOwned.Value()));
+    CHECK(second.audio->Status(mine.Value()) == PlaybackStatus::Finished);
+    CHECK(first.audio->Stop(PlaybackHandle{}).Error() == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.Frames(3));
+    CHECK(first.audio->Status(mine.Value()) == PlaybackStatus::Playing);
+    CHECK(fixture.audio->Status(engineOwned.Value()) == PlaybackStatus::Playing);
 }
 
 } // namespace audio_world_tests_file

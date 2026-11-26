@@ -110,6 +110,16 @@ inline constexpr uint32 PlaybackParameterIndex(PlaybackParameter parameter) noex
     return static_cast<uint32>(parameter);
 }
 
+// 재생 위치 원천이다.
+enum class PlayPlacement : uint8 {
+    // 2D(감쇠·패닝 없음 — 감쇠 스냅숏이 있어도 2D, UE PlaySound2D).
+    NonSpatial,
+    // 고정 world 위치(PlayAt). 감쇠 스냅숏이 없으면 2D다.
+    Fixed,
+    // emitter 위치(PlayAttached). 감쇠 스냅숏이 없으면 2D다.
+    Emitter
+};
+
 // 엔진 소유 재생(World 교체를 넘는 음악 등)과 World 소유 재생을 가른다.
 enum class PlaybackOwnership : uint8 {
     World,

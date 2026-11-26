@@ -50,7 +50,9 @@ public:
     Result<PlaybackHandle> PlayAttached(AudioEmitterId emitter, const SoundSourceRef& sound,
                                         PlayOptions options = {}) noexcept;
 
-    // AudioEngineSubsystem의 같은 이름 함수와 같다. 엔진 오디오가 없으면 성공(할 일 없음)이다.
+    // AudioEngineSubsystem의 같은 이름 함수와 같되 이 World 소유 재생만 다룬다(다른 World·엔진 소유
+    // handle은 낡은 handle처럼 아무 일도 하지 않고 Status는 Finished). 엔진 오디오가 없으면 성공(할
+    // 일 없음)이다.
     Result<void> Stop(PlaybackHandle handle,
                       uint32 fadeFrames = audio::DefaultStopFadeFrames) noexcept;
     Result<void> SetParameter(PlaybackHandle handle, PlaybackParameter parameter, float value,

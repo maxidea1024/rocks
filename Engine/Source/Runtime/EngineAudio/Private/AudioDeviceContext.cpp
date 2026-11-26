@@ -566,6 +566,7 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
         params.azimuthDegrees = record.spatial.azimuthDegrees;
         params.nonSpatializedAmount = record.spatial.nonSpatializedAmount;
     }
+
     return params;
 }
 

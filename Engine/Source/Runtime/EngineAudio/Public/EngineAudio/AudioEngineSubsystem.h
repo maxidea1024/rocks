@@ -41,6 +41,8 @@ struct AudioEngineStats {
     // 보낸 묶음 수와 돌려받은 묶음 수.
     uint64 submittedBatches = 0;
     uint64 returnedBatches = 0;
+    // 같은 묶음 안의 SetParameter를 앞 명령에 합친 수(3.35.5절).
+    uint64 mergedParameters = 0;
     // 지금 살아 있는 재생 handle 수.
     uint32 livePlaybacks = 0;
 };
@@ -85,6 +87,10 @@ public:
                               uint32 rampFrames = audio::DefaultParamRampFrames) noexcept;
 
     PlaybackStatus Status(PlaybackHandle handle) const noexcept;
+
+    // handle이 지금 그 scene 소유의 살아 있는 재생인지다(World 쪽 Stop·SetParameter·Status가 다른
+    // World·엔진 소유 재생을 건드리지 않게 확인한다).
+    bool IsPlaybackInScene(PlaybackHandle handle, AudioSceneId scene) const noexcept;
 
     // --- World 연결(AudioWorldSubsystem이 부른다 — 3.35.7절) ---
 
@@ -178,9 +184,9 @@ private:
         uint32 updateIndex = 0;
     };
 
-    // Play 요청의 위치 원천이다(ControlBatch의 PlayPlacement와 같은 값).
+    // Play 요청의 위치 원천이다.
     struct Placement {
-        uint8 kind = 0;
+        PlayPlacement kind = PlayPlacement::NonSpatial;
         Vec3d position;
         AudioEmitterId emitter;
     };
@@ -219,6 +225,9 @@ private:
     Array<uint32> sceneEpochs_;
     Array<GameEmitter> emitters_;
     Array<uint32> freeEmitters_;
+    // 아직 제어 쪽에 보내지 못한 scene 해제다(명령 할당 실패 — 다음 프레임 끝에 다시 보낸다).
+    Array<AudioSceneId> pendingSceneRemovals_;
+    bool emitterFullWarned_ = false;
     Array<ControlBatch*> freeBatches_;
     ControlBatch* current_ = nullptr;
     BoundedSpscQueue<ControlBatch*> returned_;
