@@ -39,4 +39,34 @@ TEST(UiFramework_FrameContentAlignmentPlacesDesiredSize) {
     CHECK(inner.Value()->GetGeometry().size == Vec2(8, 2));
 }
 
+TEST(UiFramework_FrameContentAlignmentArgsAndEdgeCases) {
+    SystemAllocator allocator;
+    auto outer = SharedPtr<Frame>::TryMake(allocator, allocator);
+    auto inner = SharedPtr<Frame>::TryMake(allocator, allocator);
+    REQUIRE(outer && inner);
+    inner.Value()->SetDesiredSize({20, 10});
+    // 선언형 인자로도 정렬을 준다(UE SBorder HAlign·VAlign).
+    REQUIRE(outer.Value()->Construct({.content = inner.Value(),
+                                      .horizontalAlignment = StackAlignment::Center,
+                                      .verticalAlignment = StackAlignment::End}));
+    Application app(allocator);
+    app.SetRoot(outer.Value());
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    CHECK(inner.Value()->GetGeometry().layout.tx == 40 &&
+          inner.Value()->GetGeometry().layout.ty == 50);
+    // 인자를 비우고 다시 만들면 지금 정렬을 그대로 둔다(파생 부품이 생성자에서 정한 정렬 보존).
+    REQUIRE(outer.Value()->RemoveChild(*inner.Value()));
+    REQUIRE(outer.Value()->Construct({.content = inner.Value()}));
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    CHECK(inner.Value()->GetGeometry().layout.tx == 40 &&
+          inner.Value()->GetGeometry().layout.ty == 50);
+    // 칸이 원하는 크기보다 작으면 가운데·끝 정렬도 칸 크기로 줄인다.
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({8, 6}, {}), 1));
+    CHECK(inner.Value()->GetGeometry().size == Vec2(8, 6));
+    // 접힌 자식은 배치하지 않고 원하는 크기에서도 빠진다.
+    inner.Value()->SetVisibility(Visibility::Collapsed);
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    CHECK(outer.Value()->GetDesiredSize() == Vec2(0, 0));
+}
+
 } // namespace rocks::ui

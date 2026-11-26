@@ -1,4 +1,5 @@
 #include "GallerySelfTest.h"
+#include <UiCore/Styles/CoreStyles.h>
 
 #include <UiFramework/Application.h>
 
@@ -22,8 +23,21 @@ enum Failure : int {
     DockingMissing = 47,
     TabDragFailed = 48,
     FocusOutlineMissing = 49,
-    FocusOutlineNotCleared = 50
+    FocusOutlineNotCleared = 50,
+    ToolTipMissing = 51,
+    TabHeaderMissing = 52,
+    TabClickIgnored = 53
 };
+
+// 툴팁 확인의 지연·나타나기 시간(초)이다(Application 기본값과 같다).
+constexpr double GalleryTipDelay = 0.15;
+constexpr double GalleryTipFade = 0.1;
+
+// 툴팁 확인용 시계다(지연을 기다리지 않고 결정적으로 연다).
+double galleryTipClock = 0;
+double ReadGalleryTipClock() noexcept {
+    return galleryTipClock;
+}
 
 Optional<Vec2> Center(const Element* element) noexcept {
     if (!element) {
@@ -57,7 +71,7 @@ bool Drag(Application& app, Vec2 from, Vec2 to) noexcept {
     return step && move && up && up.Value();
 }
 
-// within 안에 초점 외곽선(투명 채움 + Primary 외곽선 둥근 상자)이 있는지 본다.
+// within 안에 초점 외곽선(투명 채움 + Primary 또는 흰 외곽선 둥근 상자)이 있는지 본다.
 bool HasFocusOutline(const CacheRoot& cache, const Element& within,
                      const ThemeColors& theme) noexcept {
     auto bounds = within.GetGeometry().WindowBounds();
@@ -67,8 +81,10 @@ bool HasFocusOutline(const CacheRoot& cache, const Element& within,
 
     for (const PaintBox& box : cache.List().Boxes()) {
         auto boxBounds = box.geometry.WindowBounds();
-        if (box.roundedBox && box.color.a == 0 &&
-            box.outlineColor == theme.Get(ThemeSlot::Primary) && boxBounds &&
+        // Primary 바탕 버튼은 흰 외곽선이다(FocusOutlineOnAccentStyle).
+        const bool outlined = box.outlineColor == theme.Get(ThemeSlot::Primary) ||
+                              box.outlineColor == theme.Get(ThemeSlot::White);
+        if (box.roundedBox && box.color.a == 0 && outlined && boxBounds &&
             boxBounds.Value().min.x >= bounds.Value().min.x &&
             boxBounds.Value().max.x <= bounds.Value().max.x) {
             return true;
@@ -159,7 +175,7 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
 
     // 행 0 안으로 Tab 이동하면 Primary Button에 초점 외곽선이 보이고, 누르면 사라진다(UW4f1).
     const SharedPtr<Element> primaryRow = widgets->RowContent(0);
-    auto moved = app.MoveFocusWithin(0, primaryRow, true, true);
+    auto moved = app.MoveFocusWithin(0, primaryRow, true, true, FocusCause::Navigation);
     cache = app.UpdatePaintCache(viewport, 1);
     if (!moved || !moved.Value() || !cache ||
         !HasFocusOutline(*cache.Value(), *primaryRow, theme)) {
@@ -176,10 +192,60 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
         return FocusOutlineNotCleared;
     }
 
+    // Tool Tip 행의 첫 버튼("Hover me")에 올리면 지연 뒤 밝은 글자 툴팁이 열린다(UW4t).
+    Element* tipOwner = nullptr;
+    for (usize row = 0; row < widgets->RowCount() && !tipOwner; ++row) {
+        const SharedPtr<Element> content = widgets->RowContent(row);
+        Element* first = content ? content->ChildAt(0) : nullptr;
+        tipOwner = first && first->HasToolTip() ? first : nullptr;
+    }
+
+    const auto tipPoint = Center(tipOwner);
+    galleryTipClock = 0;
+    app.SetToolTipClock(&ReadGalleryTipClock);
+    // 나타나기(fade)를 끄고 연 첫 프레임의 바탕을 그대로 본다.
+    (void)app.SetToolTipTiming(GalleryTipDelay, 0);
+    if (!tipPoint || !app.RoutePointer({PointerEventType::Move, *tipPoint})) {
+        app.SetToolTipClock(nullptr);
+        return ToolTipMissing;
+    }
+
+    galleryTipClock = 1;
+    cache = app.UpdatePaintCache(viewport, 1);
+    if (cache) {
+        cache = app.UpdatePaintCache(viewport, 1);
+    }
+    bool bright = false;
+    if (cache) {
+        for (const PaintBox& box : cache.Value()->List().Boxes()) {
+            bright = bright || (box.roundedBox && box.color == BrightToolTipFill);
+        }
+    }
+
+    const bool tipOpen = app.IsToolTipOpen(0);
+    app.CloseToolTip(0);
+    app.SetToolTipClock(nullptr);
+    (void)app.SetToolTipTiming(GalleryTipDelay, GalleryTipFade);
+    if (!tipOpen || !bright) {
+        return ToolTipMissing;
+    }
+
+    // 툴팁 층을 닫으면 Application이 감싸개를 풀고 캐시를 비우므로 다시 배치한다.
+    if (!app.UpdatePaintCache(viewport, 1)) {
+        return LayoutFailed;
+    }
+
     // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다.
     const auto layoutTab = Center(area->TabHeader(GalleryWindow::LayoutTab));
-    if (!layoutTab || !Click(app, *layoutTab) || !app.UpdatePaintCache(viewport, 1) ||
-        !area->IsActive(GalleryWindow::LayoutTab)) {
+    if (!layoutTab) {
+        return TabHeaderMissing;
+    }
+
+    if (!Click(app, *layoutTab)) {
+        return TabClickIgnored;
+    }
+
+    if (!app.UpdatePaintCache(viewport, 1) || !area->IsActive(GalleryWindow::LayoutTab)) {
         return TabSwitchFailed;
     }
 

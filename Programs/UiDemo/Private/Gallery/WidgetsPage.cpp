@@ -11,7 +11,10 @@
 #include <UiFramework/ScrollBar.h>
 #include <UiFramework/Slider.h>
 #include <UiFramework/SpinBox.h>
+#include <UiFramework/HorizontalStack.h>
 #include <UiFramework/Timeline.h>
+#include <UiFramework/ToolTip.h>
+#include <UiFramework/VerticalStack.h>
 
 namespace rocks::ui::gallery {
 
@@ -55,33 +58,48 @@ Delegate<Result<void>(StringView)> Caption(GalleryContext& context,
 }
 
 template <typename T>
+Result<SharedPtr<Element>> AsElement(Result<SharedPtr<T>>&& made) noexcept;
+
+// 글자 툴팁이다(밝은 바탕 위 검은 글자 — DefaultToolTipStyle).
+Result<SharedPtr<Element>> MakeTextToolTip(GalleryContext& context, StringView text) noexcept {
+    const ToolTipStyle& style = DefaultToolTipStyle();
+    auto label = MakeText(context, text, style.text.font);
+    auto tip = SharedPtr<ToolTip>::TryMake(context.allocator, context.allocator);
+    if (const ErrorCode error = FirstError(label, tip); error != ErrorCode::None) {
+        return Result<SharedPtr<Element>>::Failure(error);
+    }
+
+    auto built = tip.Value()->Construct({.text = label.Value()});
+    return built ? Result<SharedPtr<Element>>::Success(tip.Value())
+                 : Result<SharedPtr<Element>>::Failure(built.Error());
+}
+
+// 제목·단축키·설명 툴팁이다(어두운 바탕 — ToolTip 표준 API, ContentToolTipStyle).
+Result<SharedPtr<Element>> MakeContentToolTip(GalleryContext& context) noexcept {
+    const ToolTipStyle& style = ContentToolTipStyle();
+    auto title = MakeText(context, "Save Current Level", style.title.font);
+    auto keys = MakeText(context, "Ctrl+S", style.shortcut.font);
+    auto description =
+        MakeText(context, "Saves the level that is open in the viewport.", style.description.font);
+    auto tip = SharedPtr<ToolTip>::TryMake(context.allocator, context.allocator);
+    if (const ErrorCode error = FirstError(title, keys, description, tip);
+        error != ErrorCode::None) {
+        return Result<SharedPtr<Element>>::Failure(error);
+    }
+
+    auto built = tip.Value()->Construct(
+        {.title = title.Value(), .shortcut = keys.Value(), .description = description.Value()});
+    return built ? Result<SharedPtr<Element>>::Success(tip.Value())
+                 : Result<SharedPtr<Element>>::Failure(built.Error());
+}
+
+template <typename T>
 Result<SharedPtr<Element>> AsElement(Result<SharedPtr<T>>&& made) noexcept {
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
 
     return Result<SharedPtr<Element>>::Success(made.Value());
-}
-
-Result<SharedPtr<Element>> MakeCheckBox(GalleryContext& context, CheckState state,
-                                        StringView label) noexcept {
-    auto check = SharedPtr<CheckBox>::TryMake(context.allocator, context.allocator);
-    if (!check) {
-        return Result<SharedPtr<Element>>::Failure(check.Error());
-    }
-
-    auto result = check.Value()->SetState(state);
-    if (result && !label.IsEmpty()) {
-        auto text = MakeText(context, label);
-        result =
-            text ? check.Value()->TryAddChild(text.Value()) : Result<void>::Failure(text.Error());
-    }
-
-    if (!result) {
-        return Result<SharedPtr<Element>>::Failure(result.Error());
-    }
-
-    return Result<SharedPtr<Element>>::Success(check.Value());
 }
 
 } // namespace
@@ -283,18 +301,30 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         }
     }
 
+    // 툴팁: 글자 툴팁(밝은 바탕)과 내용 툴팁(어두운 바탕, 제목·단축키·설명).
     {
-        auto button = MakeTextButton(context, "Hover me", DefaultButtonStyle());
-        if (status.Take(button)) {
-            auto set = button.Value()->SetToolTipFactory(
+        auto plain = MakeTextButton(context, "Hover me", DefaultButtonStyle());
+        auto rich = MakeTextButton(context, "Rich tip", DefaultButtonStyle());
+        if (status.Take(plain) && status.Take(rich)) {
+            auto set = plain.Value()->SetToolTipFactory(
                 Element::ToolTipFactory::CreateLambda(
                     [target = &context]() noexcept -> Result<SharedPtr<Element>> {
-                        return AsElement(MakeText(*target, "Tool tip text"));
+                        return MakeTextToolTip(*target, "Plain text tool tip");
                     }),
-                "Tool tip text");
+                "Plain text tool tip");
             if (status.Take(set)) {
-                one("Tool Tip", "Element::SetToolTipFactory",
-                    Result<SharedPtr<Element>>::Success(button.Value()));
+                set = rich.Value()->SetToolTipFactory(
+                    Element::ToolTipFactory::CreateLambda(
+                        [target = &context]() noexcept -> Result<SharedPtr<Element>> {
+                            return MakeContentToolTip(*target);
+                        }),
+                    "Save Current Level");
+            }
+
+            if (status.Take(set)) {
+                const SharedPtr<Element> parts[] = {plain.Value(), rich.Value()};
+                rows.AddRow("Tool Tip", "ToolTip + DefaultToolTipStyle() / ContentToolTipStyle()",
+                            parts);
             }
         }
     }

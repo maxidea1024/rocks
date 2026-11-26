@@ -66,6 +66,9 @@ public:
     Result<void> Arrange(const Geometry& geometry) noexcept override;
 
     Vec2 ComputeDesiredSize(float) const noexcept override;
+    // 세로 쌓기는 자식마다 같은 폭으로 측정해 높이를 더한다. 가로 쌓기는 폭을 나누는 규칙이 Fill
+    // 배분에 달려 있어 원하는 크기 그대로다.
+    Vec2 MeasureForWidth(float width) noexcept override;
 
 private:
     Allocator& allocator_;

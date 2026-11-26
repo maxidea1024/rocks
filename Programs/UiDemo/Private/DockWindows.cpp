@@ -1,5 +1,8 @@
+#include "DemoLog.h"
 #include "DemoShaders.h"
 #include "DockWindows.h"
+
+#include <Core/Diagnostics/Log.h>
 
 namespace rocks::ui {
 
@@ -278,8 +281,9 @@ Result<bool> DockWindows::Update(Surface& host) noexcept {
     auto routed = host.adapter.RouteBatch(host.queue.Events(), host.consumed.View(),
                                           host.queue.DroppedCount());
     host.queue.Clear();
+    // 입력 처리 오류는 UI 버그다. 앱을 닫지 않고 남겨 원인을 찾게 한다(넘친 큐는 정상 상황).
     if (!routed && routed.Error() != ErrorCode::CapacityExceeded) {
-        return Result<bool>::Failure(routed.Error());
+        Log::Error(LogUiDemo, "Input routing failed: {Error}", ErrorCodeName(routed.Error()));
     }
 
     if (host.liveResizeError != ErrorCode::None) {

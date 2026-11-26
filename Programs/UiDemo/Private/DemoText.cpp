@@ -1,5 +1,7 @@
 #include "DemoText.h"
 
+#include "DemoLog.h"
+
 #include "DemoFiles.h"
 
 #include <Core/Diagnostics/Log.h>
@@ -10,8 +12,6 @@
 namespace rocks::ui {
 
 namespace {
-
-inline constexpr LogCategory LogUiDemo{"UiDemo"};
 
 // 엔진 폴더 기준 ICU 데이터·시험 글꼴 경로다(Engine/Source/ThirdParty).
 constexpr char IcuDataPath[] = "Source/ThirdParty/IcuData/icudata-79.1-rocks/icudt79l.dat";
@@ -317,8 +317,8 @@ Result<void> DemoText::Shape(TextLabel& label, StringView value, float size, Str
         }
 
         const usize cluster = ClusterOf(graphemes.View(), glyph.cluster);
-        // 강제 줄바꿈 클러스터는 그리지 않고 폭도 없다(UE FTextLayout은 줄을 먼저 나누고 shaping한다 —
-        // TextLabel은 줄바꿈 클러스터의 글리프를 받지 않는다).
+        // 강제 줄바꿈 클러스터는 그리지 않고 폭도 없다(UE FTextLayout은 줄을 먼저 나누고
+        // shaping한다 — TextLabel은 줄바꿈 클러스터의 글리프를 받지 않는다).
         if (clusters[cluster].hardBreak) {
             continue;
         }

@@ -28,6 +28,8 @@ enum class ButtonPressMethod : uint8 {
 class ROCKS_UIFRAMEWORK_API Button : public Frame {
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
+    // 바탕이 강조색(Primary 계열)이면 흰 외곽선을 쓴다.
+    const StyleBrush* FocusOutlineBrush() const noexcept override;
     using Super = Frame;
     struct Args {
         ElementChild content{};
@@ -39,6 +41,9 @@ public:
         Optional<ColorRef> foregroundColor{};
         // 스타일의 보통·눌림 여백에 더한다(UE ContentPadding·GetCombinedPadding).
         Vec4 contentPadding{};
+        // 여백 안 내용 정렬이다(UE SButton HAlign·VAlign, 기본 Fill). 비우면 지금 정렬을 둔다.
+        Optional<StackAlignment> horizontalAlignment{};
+        Optional<StackAlignment> verticalAlignment{};
         ElementArgs common{};
         Delegate<void()> onClicked{};
         ButtonClickMethod clickMethod = ButtonClickMethod::DownAndUp;

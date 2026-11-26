@@ -547,7 +547,8 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
         if (user) {
             auto current = app_.GetFocus(*user);
             if (!current || !current->IsWithin(*target)) {
-                auto focused = app_.MoveFocusWithin(*user, target, true, false);
+                auto focused =
+                    app_.MoveFocusWithin(*user, target, true, false, app_.GetFocusCause(*user));
                 if (!focused) {
                     return Result<void>::Failure(focused.Error());
                 }

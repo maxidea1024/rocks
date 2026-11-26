@@ -170,7 +170,8 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
         {input::GamepadButton::DPadDown, FocusDirection::Down}};
     for (const auto& direction : directions) {
         if (pressed & Mask(direction.button)) {
-            return app_.Navigate(screens_.UserId(), direction.direction, screens_.ActiveRoot());
+            return app_.Navigate(screens_.UserId(), direction.direction, screens_.ActiveRoot(),
+                                 FocusCause::Navigation);
         }
     }
 

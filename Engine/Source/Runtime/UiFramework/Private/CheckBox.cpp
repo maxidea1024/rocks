@@ -6,6 +6,8 @@ CheckBox::CheckBox(Allocator& allocator) noexcept : Button(allocator) {
     // 상자는 CheckBoxStyle로 그리므로 버튼 brush·여백은 쓰지 않는다.
     (void)SetStyle(ButtonStyle{});
     UpdateContentPadding();
+    // 상자 오른쪽 내용은 세로 가운데다(UE SCheckBox 내용 슬롯 VAlign_Center, 558행).
+    SetContentAlignment(StackAlignment::Fill, StackAlignment::Center);
 }
 
 Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
@@ -54,23 +56,6 @@ Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
 
 const CheckBoxStyle& CheckBox::GetCheckBoxStyle() const noexcept {
     return checkStyle_;
-}
-
-Result<void> CheckBox::Arrange(const Geometry& geometry) noexcept {
-    // 상자 오른쪽 내용은 세로 가운데다(UE SCheckBox 내용 슬롯 VAlign_Center, 558행).
-    SetGeometry(geometry);
-    Element* child = ChildAt(0);
-    if (!child || child->GetVisibility() == Visibility::Collapsed) {
-        return Result<void>::Success();
-    }
-
-    const Vec4 padding = GetContentPadding();
-    const Vec2 inner{math::Max(0.0f, geometry.size.x - padding.x - padding.z),
-                     math::Max(0.0f, geometry.size.y - padding.y - padding.w)};
-    const float height = math::Min(inner.y, child->GetDesiredSize().y);
-    const float top = padding.y + (inner.y - height) * 0.5f;
-    return child->ArrangeIfNeeded(
-        GetGeometry().MakeChild({inner.x, height}, {1, 0, 0, 1, padding.x, top}, {}, {}));
 }
 
 void CheckBox::UpdateContentPadding() noexcept {

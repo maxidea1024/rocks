@@ -31,7 +31,6 @@ public:
     Result<void> SetState(CheckState state) noexcept;
     void SetOnChanged(Delegate<void(CheckState)>&& callback) noexcept;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
-    Result<void> Arrange(const Geometry& geometry) noexcept override;
 
 protected:
     void OnActivated() noexcept override;

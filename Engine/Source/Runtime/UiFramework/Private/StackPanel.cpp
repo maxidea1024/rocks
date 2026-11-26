@@ -231,6 +231,35 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
     return Result<void>::Success();
 }
 
+Vec2 StackPanel::MeasureForWidth(float width) noexcept {
+    if (direction_ != StackDirection::Vertical) {
+        return GetDesiredSize();
+    }
+
+    float along = 0;
+    float across = 0;
+    bool hasVisible = false;
+    for (usize i = 0; i < slots_.Size() && i < ChildCount(); ++i) {
+        Element* child = ChildAt(i);
+        if (child->GetVisibility() == Visibility::Collapsed) {
+            continue;
+        }
+
+        const float inner = math::Max(0.0f, width - slots_[i].crossBefore - slots_[i].crossAfter);
+        const Vec2 size = child->MeasureForWidth(inner);
+        if (hasVisible) {
+            along += spacing_;
+        }
+
+        hasVisible = true;
+        along += math::Clamp(size.y, slots_[i].minSize, slots_[i].maxSize) + slots_[i].before +
+                 slots_[i].after;
+        across = math::Max(across, size.x + slots_[i].crossBefore + slots_[i].crossAfter);
+    }
+
+    return {across, along};
+}
+
 Vec2 StackPanel::ComputeDesiredSize(float) const noexcept {
     const bool vertical = direction_ == StackDirection::Vertical;
     float along = 0;

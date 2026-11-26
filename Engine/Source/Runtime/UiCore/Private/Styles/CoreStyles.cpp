@@ -160,11 +160,73 @@ const ScrollBarStyle& DefaultScrollBarStyle() noexcept {
     return style;
 }
 
+namespace {
+
+// 제목·단축키·설명 툴팁 값이다. 제목은 굵은 Normal, 설명은 툴팁 글꼴, 단축키는 표지 위 흰 굵은
+// 글자다.
+void AddToolTipParts(ToolTipStyle& tip, ColorRef title, ColorRef description) noexcept {
+    tip.title = {{Typeface::Bold, NormalFontSize}, title};
+    tip.description = {{Typeface::Regular, ToolTipFontSize}, description};
+    tip.shortcut = {{Typeface::Bold, ToolTipShortcutFontSize},
+                    ColorRef::FromTheme(ThemeSlot::White)};
+    tip.shortcutBackground = StyleBrush::RoundedBox(ThemeSlot::Hover2, ToolTipShortcutRadius);
+    tip.shortcutPadding = ToolTipShortcutPadding;
+    tip.shortcutGap = ToolTipShortcutGap;
+    tip.lineGap = ToolTipLineGap;
+}
+
+} // namespace
+
+const ToolTipStyle& DefaultToolTipStyle() noexcept {
+    static const ToolTipStyle style = [] {
+        ToolTipStyle tip;
+        tip.background.mode = BrushMode::RoundedBox;
+        tip.background.fill = ColorRef::Specified(BrightToolTipFill);
+        tip.background.outlineColor = ColorRef::Specified(BrightToolTipOutline);
+        tip.background.outlineWidth = ControlOutlineThickness;
+        tip.background.cornerRadii = {BrightToolTipRadius, BrightToolTipRadius, BrightToolTipRadius,
+                                      BrightToolTipRadius};
+        tip.padding = {TextToolTipPadding, TextToolTipPadding, TextToolTipPadding,
+                       TextToolTipPadding};
+        tip.text = {{Typeface::Regular, ToolTipFontSize}, ColorRef::Specified({0, 0, 0, 1})};
+        tip.wrapWidth = ToolTipWrapWidth;
+        AddToolTipParts(tip, ColorRef::Specified({0, 0, 0, 1}),
+                        ColorRef::Specified(BrightToolTipSubdued));
+        return tip;
+    }();
+    return style;
+}
+
+const ToolTipStyle& ContentToolTipStyle() noexcept {
+    static const ToolTipStyle style = [] {
+        ToolTipStyle tip;
+        tip.background = StyleBrush::RoundedBox(
+            ThemeSlot::Dropdown, 0.0f, ThemeSlot::DropdownOutline, ControlOutlineThickness);
+        tip.padding = {ContentToolTipPadding, ContentToolTipPadding, ContentToolTipPadding,
+                       ContentToolTipPadding};
+        tip.text = {{Typeface::Regular, ToolTipFontSize}, {ColorSource::Foreground}};
+        tip.wrapWidth = ToolTipWrapWidth;
+        AddToolTipParts(tip, ColorRef::FromTheme(ThemeSlot::ForegroundHover),
+                        ColorRef::FromTheme(ThemeSlot::Foreground));
+        return tip;
+    }();
+    return style;
+}
+
 const StyleBrush& FocusOutlineStyle() noexcept {
     static const StyleBrush style = [] {
         StyleBrush brush = StyleBrush::RoundedBox(ThemeSlot::Primary, FocusOutlineRadius,
                                                   ThemeSlot::Primary, ControlOutlineThickness);
         brush.fill = ColorRef::Specified({0, 0, 0, 0});
+        return brush;
+    }();
+    return style;
+}
+
+const StyleBrush& FocusOutlineOnAccentStyle() noexcept {
+    static const StyleBrush style = [] {
+        StyleBrush brush = FocusOutlineStyle();
+        brush.outlineColor = ColorRef::FromTheme(ThemeSlot::White);
         return brush;
     }();
     return style;

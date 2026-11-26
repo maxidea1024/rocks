@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Math/Vector4.h>
+#include <Core/Optional.h>
 #include <UiCore/Declarative.h>
 #include <UiCore/StackLayout.h>
 
@@ -16,6 +17,9 @@ public:
         Brush brush{};
         Vec4 padding{};
         Bindable<Vec2> desiredSize{};
+        // 여백 안 내용 정렬이다(UE SBorder HAlign·VAlign). 비우면 지금 정렬(기본 Fill)을 둔다.
+        Optional<StackAlignment> horizontalAlignment{};
+        Optional<StackAlignment> verticalAlignment{};
         ElementArgs common{};
     };
 
@@ -48,6 +52,7 @@ public:
     void SetContentAlignment(StackAlignment horizontal, StackAlignment vertical) noexcept;
 
     Vec2 ComputeDesiredSize(float) const noexcept override;
+    Vec2 MeasureForWidth(float width) noexcept override;
 
     Result<void> Arrange(const Geometry& geometry) noexcept override;
 

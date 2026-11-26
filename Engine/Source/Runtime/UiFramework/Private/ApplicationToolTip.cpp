@@ -6,12 +6,21 @@ namespace rocks::ui {
 
 namespace {
 
+// 커서 기준 툴팁 위치다(커서 그림을 피하는 오른쪽 아래 — UE SlateApplication.cpp 619행
+// ToolTipOffsetFromMouse(12, 8)은 5.8에서 쓰이지 않아 이전 Rocks 값을 유지한다).
+constexpr Vec2 ToolTipCursorOffset{12, 16};
+// 키보드·대화형 툴팁과 소유자 사이 간격이다.
+constexpr float ToolTipOwnerGap = 2;
+// 대화형 툴팁에서 포인터가 나간 뒤 닫기까지의 유예(초)다.
+constexpr double InteractiveToolTipLeaveDelay = 0.15;
+
 // 호스트 Overlay의 전체 크기를 받되 내용만 커서 또는 소유 요소 옆에 배치한다.
 class ToolTipLayer final : public Element {
 public:
     ToolTipLayer(Allocator& allocator, Vec2 point, const SharedPtr<Element>& owner,
-                 bool interactive) noexcept
-        : Element(allocator), point_(point), owner_(owner), interactive_(interactive) {
+                 bool interactive, bool belowOwner) noexcept
+        : Element(allocator), point_(point), owner_(owner), interactive_(interactive),
+          belowOwner_(belowOwner) {
         SetVisibility(interactive ? Visibility::SelfHitTestInvisible
                                   : Visibility::HitTestInvisible);
     }
@@ -32,9 +41,17 @@ public:
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto local = inverse.Apply(point_);
+        // 창보다 넓으면 창 폭에서 줄을 다시 나눈 높이를 같은 프레임에 쓴다.
+        Vec2 desired = child->GetDesiredSize();
+        if (desired.x > area.size.x) {
+            desired = child->MeasureForWidth(area.size.x);
+        }
+
+        const Vec2 size{math::Min(area.size.x, desired.x), math::Min(area.size.y, desired.y)};
+        Vec2 local;
         const auto owner = owner_.Lock();
-        if (interactive_ && owner) {
+        if ((interactive_ || belowOwner_) && owner) {
+            // 소유자 아래 왼쪽, 아래가 모자라면 소유자 위로 뒤집는다(소유자를 덮지 않는다).
             auto bounds = Geometry::Root(owner->GetGeometry().size,
                                          inverse.Compose(owner->GetGeometry().render))
                               .WindowBounds();
@@ -42,14 +59,21 @@ public:
                 return Result<void>::Failure(bounds.Error());
             }
 
-            local = {bounds.Value().min.x, bounds.Value().max.y};
+            const float gap = belowOwner_ ? ToolTipOwnerGap : 0.0f;
+            local = {bounds.Value().min.x, bounds.Value().max.y + gap};
+            if (local.y + size.y > area.size.y) {
+                local.y = bounds.Value().min.y - gap - size.y;
+            }
         } else {
-            local.x += 12;
-            local.y += 16;
+            // 커서 오른쪽 아래, 아래가 모자라면 커서 위로 뒤집는다(UE
+            // CalculateTooltipWindowPosition처럼 커서를 덮지 않는다).
+            const Vec2 cursor = inverse.Apply(point_);
+            local = cursor + ToolTipCursorOffset;
+            if (local.y + size.y > area.size.y) {
+                local.y = cursor.y - size.y;
+            }
         }
 
-        const auto desired = child->GetDesiredSize();
-        const Vec2 size{math::Min(area.size.x, desired.x), math::Min(area.size.y, desired.y)};
         const float x = math::Clamp(local.x, 0.f, area.size.x - size.x);
         const float y = math::Clamp(local.y, 0.f, area.size.y - size.y);
         return child->ArrangeIfNeeded(area.MakeChild(size, {1, 0, 0, 1, x, y}, {}, {}));
@@ -59,6 +83,8 @@ private:
     Vec2 point_;
     WeakPtr<Element> owner_;
     bool interactive_;
+    // 키보드 초점 툴팁은 커서가 아니라 소유자 아래 왼쪽에 놓는다.
+    bool belowOwner_;
 };
 } // namespace
 
@@ -154,6 +180,12 @@ void Application::ObserveToolTip(const PointerEvent& event, Element* hit,
 
     if (i < toolTips_.Size()) {
         auto& state = toolTips_[i];
+        // 키보드 툴팁은 다른 툴팁 소유자에 올라갈 때만 hover 툴팁으로 바뀐다(포인터 흔들림으로 닫지
+        // 않는다).
+        if (state.keyboard && (!owner || state.owner.Lock().Get() == owner)) {
+            return;
+        }
+
         if (owner && state.owner.Lock().Get() == owner &&
             state.revision == owner->ToolTipRevision()) {
             state.point = event.position;
@@ -164,7 +196,7 @@ void Application::ObserveToolTip(const PointerEvent& event, Element* hit,
         auto previous = state.owner.Lock();
         if (!owner && state.layer && previous && previous->IsToolTipInteractive()) {
             if (state.leaveDue == 0) {
-                state.leaveDue = ToolTipTime() + 0.15;
+                state.leaveDue = ToolTipTime() + InteractiveToolTipLeaveDelay;
             }
 
             return;
@@ -186,9 +218,57 @@ void Application::ObserveToolTip(const PointerEvent& event, Element* hit,
                                          0,
                                          0,
                                          owner->ToolTipRevision(),
+                                         false,
                                          false});
         }
     }
+}
+
+bool Application::ShowFocusToolTip(uint32 user) noexcept {
+    auto target = GetFocus(user);
+    if (!target || !IsFocusablePath(target.Get()) || !target->HasToolTip()) {
+        return false;
+    }
+
+    CloseToolTip(user);
+    auto added = toolTips_.TryPushBack({user,
+                                        WeakPtr<Element>(target),
+                                        {},
+                                        Vec2{},
+                                        ToolTipTime(),
+                                        0,
+                                        0,
+                                        target->ToolTipRevision(),
+                                        false,
+                                        true});
+    return static_cast<bool>(added);
+}
+
+void Application::ObserveFocusToolTip(uint32 user, const SharedPtr<Element>& target,
+                                      FocusCause cause) noexcept {
+    const usize i = FindToolTip(user);
+    if (i < toolTips_.Size() && toolTips_[i].keyboard &&
+        toolTips_[i].owner.Lock().Get() != target.Get()) {
+        CloseToolTip(user);
+    }
+
+    // UE는 툴팁을 마우스 hover로만 연다. Rocks는 키보드·게임패드로 옮긴 초점에도 같은 지연 뒤에
+    // 연다(9.1절 UW4t — 키보드 사용자도 설명을 볼 수 있게).
+    if (!target || cause != FocusCause::Navigation || !target->HasToolTip()) {
+        return;
+    }
+
+    CloseToolTip(user);
+    (void)toolTips_.TryPushBack({user,
+                                 WeakPtr<Element>(target),
+                                 {},
+                                 Vec2{},
+                                 ToolTipTime() + toolTipDelay_,
+                                 0,
+                                 0,
+                                 target->ToolTipRevision(),
+                                 false,
+                                 true});
 }
 
 Result<void> Application::AttachToolTip(const PopupRequest& popup) noexcept {
@@ -253,7 +333,8 @@ void Application::AdvanceToolTips() noexcept {
 
             if (tip && tip.Value() && !tip.Value()->Parent() && !owner->IsWithin(*tip.Value())) {
                 auto layer = SharedPtr<ToolTipLayer>::TryMake(allocator_, allocator_, point, owner,
-                                                              owner->IsToolTipInteractive());
+                                                              owner->IsToolTipInteractive(),
+                                                              toolTips_[i].keyboard);
                 if (layer && layer.Value()->TryAddChild(tip.Value())) {
                     auto attached = AttachToolTip({layer.Value(), owner, [](Element&) noexcept {}});
                     if (attached) {

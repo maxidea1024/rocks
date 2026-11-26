@@ -7,7 +7,9 @@
 #include <UiCore/KeyChord.h>
 #include <UiCore/NavigationRule.h>
 #include <Core/Text/String.h>
+#include <Core/Optional.h>
 #include <UiCore/ColorRef.h>
+#include <UiCore/FocusCause.h>
 #include <UiCore/PaintList.h>
 #include <UiCore/Styles/StyleBrush.h>
 
@@ -199,6 +201,12 @@ public:
     void SetFocusOutlineVisible(bool visible) noexcept;
     bool IsFocusOutlineVisible() const noexcept;
 
+    // 이 요소가 초점 잎이거나 그 조상일 때 외곽선을 보일지 정한다(UE SWidget::OnQueryShowFocus).
+    // Application은 초점 잎부터 루트 방향으로 물어 처음 값이 있는 답을 쓰고, 모두 없으면 원인이
+    // Navigation일 때만 보인다. 예: 키보드 이동에도 외곽선이 어울리지 않는 그리기 영역은 false,
+    // 코드가 옮긴 초점에도 늘 보여야 하는 접근성 모드 화면은 true.
+    virtual Optional<bool> OnQueryShowFocus(FocusCause cause) const noexcept;
+
     // 초점 외곽선 brush다. 기본은 FocusOutlineStyle()이다. 테두리 색으로 초점을 보이는 부품(편집
     // 텍스트)이나 외곽선이 어울리지 않는 부품(뷰포트)은 nullptr을 돌려 그리지 않는다.
     virtual const StyleBrush* FocusOutlineBrush() const noexcept;
@@ -263,6 +271,11 @@ public:
     Vec2 GetDesiredSize() const noexcept;
 
     virtual Vec2 ComputeDesiredSize(float) const noexcept;
+
+    // 폭 width 안에 놓을 때의 원하는 크기다(줄바꿈 글자가 좁은 칸에서 높아지는 것을 배치 전에 안다
+    // — UE는 다음 프레임에 바로잡는다). 기본은 GetDesiredSize()다. 글자·틀·세로 쌓기가 재정의한다.
+    // 배치 직전에만 부르고, 글자는 그 폭으로 줄을 미리 나눠 둔다.
+    virtual Vec2 MeasureForWidth(float width) noexcept;
 
     const Geometry& GetGeometry() const noexcept;
 

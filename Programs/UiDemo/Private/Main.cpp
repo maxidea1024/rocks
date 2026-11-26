@@ -1,3 +1,4 @@
+#include "DemoLog.h"
 #include "DemoFiles.h"
 #include "DemoShaders.h"
 #include "DockWindows.h"
@@ -20,8 +21,6 @@ namespace {
 
 using namespace rocks;
 using namespace rocks::ui;
-
-inline constexpr LogCategory LogUiDemo{"UiDemo"};
 
 // UI 갤러리 창 크기다(Docs/Design/UiToolkit 16장).
 constexpr uint32 GalleryWidth = 1280;

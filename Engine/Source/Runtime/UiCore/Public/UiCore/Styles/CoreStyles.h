@@ -7,6 +7,7 @@
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
 #include <UiCore/Styles/TextStyle.h>
+#include <UiCore/Styles/ToolTipStyle.h>
 
 namespace rocks::ui {
 
@@ -75,9 +76,49 @@ ROCKS_UICORE_API const ProgressBarStyle& DefaultProgressBarStyle() noexcept;
 // 4), 트랙 없음, 두께 8).
 ROCKS_UICORE_API const ScrollBarStyle& DefaultScrollBarStyle() noexcept;
 
+// 툴팁 글꼴 크기(UE "ToolTip.Font" = Regular 9 — StarshipCoreStyle.cpp 510행)와 줄바꿈 폭(UE
+// Slate.ToolTipWrapWidth 기본 1000 — SToolTip.cpp 9–12행)이다.
+inline constexpr float ToolTipFontSize = 9.0f;
+inline constexpr float ToolTipWrapWidth = 1000.0f;
+// 글자 툴팁 여백(UE SToolTip 글자 전용 경로 Padding 11 — SToolTip.cpp 76행)과 내용 툴팁 여백(UE
+// SToolTip TextMargin 기본 8 — SToolTip.h 30행)이다.
+inline constexpr float TextToolTipPadding = 11.0f;
+inline constexpr float ContentToolTipPadding = 8.0f;
+// 밝은 툴팁 바탕이다. UE "ToolTip.BrightBackground"는 9분할 이미지(Old/ToolTip_BrightBackground,
+// 여백 8/64)인데 UE 클론에 이미지가 없어 밝은 회색 둥근 상자로 근사한다(sRGB 약 #E6E6E6, 외곽선 약
+// #A0A0A0, 반경 3 — 실제 에디터 화면과 대조는 사람 확인 목록, Docs/Design/UiToolkit 9.1절 UW4t).
+inline constexpr LinearColor BrightToolTipFill{0.79f, 0.79f, 0.79f, 1.0f};
+// 밝은 툴팁의 흐린 설명 글자색이다(UE "Documentation.SDocumentationTooltipSubdued" — (0.1, 0.1,
+// 0.1), StarshipStyle.cpp 3464–3466행).
+inline constexpr LinearColor BrightToolTipSubdued{0.1f, 0.1f, 0.1f, 1.0f};
+// 툴팁 단축키 표지다(UE "ToolTip.KeybindBorder" RB(#808080, 4)·"ToolTip.KeybindText" Bold 10 흰색 —
+// DocumentationStyleSet.cpp 65–69행, 여백 (4, 2)·제목과 9 — SDocumentationToolTip.cpp 189–193행).
+// 설명 줄 간격은 Padding(0, 5, 0, 0)(278행)이다.
+inline constexpr float ToolTipShortcutRadius = 4.0f;
+inline constexpr Vec4 ToolTipShortcutPadding{4.0f, 2.0f, 4.0f, 2.0f};
+inline constexpr float ToolTipShortcutGap = 9.0f;
+inline constexpr float ToolTipShortcutFontSize = 10.0f;
+inline constexpr float ToolTipLineGap = 5.0f;
+inline constexpr LinearColor BrightToolTipOutline{0.35f, 0.35f, 0.35f, 1.0f};
+inline constexpr float BrightToolTipRadius = 3.0f;
+
+// 글자 툴팁 스타일이다. UE 5.8 에디터의 글자 툴팁과 문서 툴팁은 모두 밝은 바탕 위 검은 글자
+// Regular 9, 여백 11이다(SToolTip.cpp 64–80행, Documentation.cpp 258–266행, StarshipStyle.cpp
+// 3456–3462행). Element::SetToolTipFactory에 글자만 줄 때 쓴다.
+ROCKS_UICORE_API const ToolTipStyle& DefaultToolTipStyle() noexcept;
+
+// 내용 툴팁 스타일이다(UE "ToolTip.Background" — StarshipCoreStyle.cpp 511행: RB(Dropdown, 0,
+// DropdownOutline, 1), 여백 8, 글자 Regular 9·전경색). 제목·설명·단축키처럼 여러 부품을 담는 툴팁에
+// 쓴다.
+ROCKS_UICORE_API const ToolTipStyle& ContentToolTipStyle() noexcept;
+
 // 키보드 초점 외곽선이다(UE 핵심 스타일 "FocusRectangle" — StarshipCoreStyle.cpp 217행: 투명 채움,
 // 반경 FocusOutlineRadius, 외곽선 Primary·ControlOutlineThickness).
 ROCKS_UICORE_API const StyleBrush& FocusOutlineStyle() noexcept;
+
+// 강조색(Primary) 바탕 위의 초점 외곽선이다(외곽선 White — Primary 외곽선은 Primary 바탕에 묻힌다.
+// UE에 없는 Rocks 개선, Docs/Design/UiToolkit 9.1절 UW4f1).
+ROCKS_UICORE_API const StyleBrush& FocusOutlineOnAccentStyle() noexcept;
 
 // 보통 텍스트 스타일이다(UE "NormalText" — 1252–1258행: Regular 10, 상속 전경색).
 ROCKS_UICORE_API const TextStyle& NormalTextStyle() noexcept;

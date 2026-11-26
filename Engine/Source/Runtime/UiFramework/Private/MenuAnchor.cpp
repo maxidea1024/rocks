@@ -115,6 +115,7 @@ Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
     }
 
     auto previous = app.GetFocus(user);
+    const FocusCause cause = previous ? app.GetFocusCause(user) : FocusCause::Direct;
     if (!previous && Parent()) {
         previous = Parent()->FindChild(this);
     }
@@ -125,7 +126,7 @@ Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
     }
 
     auto menu = layer_->ChildRefAt(0);
-    auto moved = app.MoveFocusWithin(user, menu, true, false);
+    auto moved = app.MoveFocusWithin(user, menu, true, false, cause);
     if (!moved) {
         Close();
         return Result<void>::Failure(moved.Error());
@@ -135,6 +136,7 @@ Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
         app_ = Move(context.Value());
         restoreFocus_ = WeakPtr<Element>(previous);
         focusUser_ = user;
+        restoreCause_ = cause;
     }
 
     return Result<void>::Success();
@@ -176,7 +178,7 @@ void MenuAnchor::Close() noexcept {
         if (app && *app && restore) {
             auto current = (*app)->GetFocus(focusUser_);
             if (current && current->IsWithin(*layer)) {
-                (void)(*app)->SetFocus(focusUser_, restore);
+                (void)(*app)->SetFocus(focusUser_, restore, restoreCause_);
             }
         }
 

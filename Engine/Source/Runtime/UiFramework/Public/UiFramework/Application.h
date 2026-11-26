@@ -4,7 +4,7 @@
 #include <UiCore/HitGrid.h>
 #include <UiFramework/Commands.h>
 #include <UiFramework/AccessibleNode.h>
-#include <UiFramework/FocusCause.h>
+#include <UiCore/FocusCause.h>
 #include <UiFramework/UiTimer.h>
 
 namespace rocks::ui {
@@ -92,15 +92,23 @@ public:
     Result<bool> RouteKeyWithin(uint32 userId, const input::InputEvent& event,
                                 const SharedPtr<Element>& scope) noexcept;
 
-    // 트리 순서로 focus를 옮긴다. wrap이 false면 끝에서 이동하지 않는다.
-    Result<bool> MoveFocus(uint32 userId, bool forward, bool wrap = false) noexcept;
+    // 트리 순서로 focus를 옮긴다. wrap이 false면 끝에서 이동하지 않는다. cause는 옮긴 원인이다:
+    // 사용자의 Tab·방향키·게임패드 이동만 Navigation(외곽선·키보드 툴팁)이고, 코드가 옮기는
+    // 경우(메뉴·화면의 첫 초점 등)는 기본 Direct다.
+    Result<bool> MoveFocus(uint32 userId, bool forward, bool wrap = false,
+                           FocusCause cause = FocusCause::Direct) noexcept;
 
     Result<bool> MoveFocusWithin(uint32 userId, const SharedPtr<Element>& root, bool forward,
-                                 bool wrap) noexcept;
+                                 bool wrap, FocusCause cause = FocusCause::Direct) noexcept;
 
     // 방향으로 마주 보는 요소를 고른다. 같은 행·열에 놓인 대상을 먼저 고려한다.
     Result<bool> Navigate(uint32 userId, FocusDirection direction,
-                          const SharedPtr<Element>& scope = {}) noexcept;
+                          const SharedPtr<Element>& scope = {},
+                          FocusCause cause = FocusCause::Direct) noexcept;
+
+    // 초점 요소의 툴팁을 지연 없이 연다(키보드 사용자가 닫힌 툴팁을 다시 볼 때 — InputAdapter의
+    // Ctrl+F1). 툴팁이 없거나 초점이 없으면 false다.
+    bool ShowFocusToolTip(uint32 userId) noexcept;
 
     // 창 포커스 상실 등으로 포인터 입력이 중단되면 모든 capture를 해제한다.
     void CancelAllPointers() noexcept;
@@ -145,7 +153,10 @@ private:
     };
 
     Result<bool> NavigateInternal(uint32 user, FocusDirection direction,
-                                  const SharedPtr<Element>& scope, bool wrap) noexcept;
+                                  const SharedPtr<Element>& scope, bool wrap,
+                                  FocusCause cause) noexcept;
+    // 원인과 경로의 OnQueryShowFocus로 외곽선을 정한다(UE SetUserFocus 3097–3110행).
+    bool ResolveFocusOutline(const Element& target, FocusCause cause) const noexcept;
     bool IsFocusablePath(const Element* element) const noexcept;
 
     Result<void> BuildPath(Element* target, const SharedPtr<Element>& root,
@@ -194,7 +205,13 @@ private:
         double leaveDue;
         uint64 revision;
         bool attempted;
+        // 키보드·게임패드 초점으로 연 툴팁이다(소유자 아래에 놓고, 포인터 이동으로 닫지 않는다).
+        bool keyboard;
     };
+    // 키보드·게임패드로 초점을 옮긴 요소에 툴팁이 있으면 예약하고, 초점이 떠난 키보드 툴팁은
+    // 닫는다.
+    void ObserveFocusToolTip(uint32 user, const SharedPtr<Element>& target,
+                             FocusCause cause) noexcept;
     void ObserveToolTip(const PointerEvent& event, Element* hit,
                         const SharedPtr<Element>& scope) noexcept;
     void AdvanceToolTips() noexcept;

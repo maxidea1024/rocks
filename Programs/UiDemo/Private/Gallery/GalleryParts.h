@@ -6,6 +6,7 @@
 
 #include <UiCore/Style.h>
 #include <UiFramework/Button.h>
+#include <UiFramework/CheckBox.h>
 #include <UiFramework/TextLabel.h>
 
 // 갤러리 탭들이 함께 쓰는 부품이다(Docs/Design/UiToolkit 16장). 텍스트는 데모 글꼴 조합으로
@@ -51,8 +52,12 @@ inline constexpr Vec4 BlockPadding{6, 3, 6, 3};
 
 // 색 상자 하나(둥근 채움 + 가운데 놓인 어두운 굵은 작은 레이블)다. 배치·동작 견본의 표지로 쓴다.
 // 상자가 레이블보다 커도 레이블은 가로·세로 가운데다.
-Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
-                                   ThemeSlot color) noexcept;
+Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label, ThemeSlot color,
+                                   ThemeSlot textColor = ThemeSlot::Background) noexcept;
+
+// 체크 상자다. label이 비어 있지 않으면 상자 오른쪽에 레이블을 둔다.
+Result<SharedPtr<Element>> MakeCheckBox(GalleryContext& context, CheckState state,
+                                        StringView label) noexcept;
 
 // 레이블 하나를 담은 버튼이다(UE 갤러리 LeftRightLabel의 텍스트만 있는 경우).
 Result<SharedPtr<Button>> MakeTextButton(GalleryContext& context, StringView label,

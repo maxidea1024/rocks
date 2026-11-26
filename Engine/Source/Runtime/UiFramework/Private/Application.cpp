@@ -3,6 +3,17 @@
 
 namespace rocks::ui {
 
+namespace {
+
+bool IsModifierKey(input::Key key) noexcept {
+    return key == input::Key::LeftShift || key == input::Key::RightShift ||
+           key == input::Key::LeftControl || key == input::Key::RightControl ||
+           key == input::Key::LeftAlt || key == input::Key::RightAlt ||
+           key == input::Key::LeftSuper || key == input::Key::RightSuper;
+}
+
+} // namespace
+
 Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
@@ -266,13 +277,19 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
     SharedPtr<Element> previous =
         index < focus_.Size() ? focus_[index].target.Lock() : SharedPtr<Element>();
     // 외곽선은 키보드·게임패드 이동으로 옮긴 초점에만 보인다(UE SetUserFocus의 ShowFocus).
-    const bool outline = target && cause == FocusCause::Navigation;
+    const bool outline = target && ResolveFocusOutline(*target, cause);
     if (previous.Get() == target.Get() && (target || index == focus_.Size())) {
         if (target) {
+            const bool causeChanged = focus_[index].cause != cause;
             focus_[index].cause = cause;
             if (focus_[index].outline != outline) {
                 focus_[index].outline = outline;
                 target->SetFocusOutlineVisible(outline);
+            }
+
+            // 같은 대상이라도 원인이 Navigation으로 바뀌면 키보드 툴팁을 예약한다.
+            if (causeChanged) {
+                ObserveFocusToolTip(userId, target, cause);
             }
         }
 
@@ -295,6 +312,8 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
         previous->SetFocusOutlineVisible(false);
     }
 
+    ObserveFocusToolTip(userId, target, cause);
+
     if (outline) {
         target->SetFocusOutlineVisible(true);
     }
@@ -313,8 +332,24 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
     return Result<void>::Success();
 }
 
+bool Application::ResolveFocusOutline(const Element& target, FocusCause cause) const noexcept {
+    // 초점 잎에서 루트 방향으로 처음 답한 요소를 따른다.
+    for (const Element* node = &target; node; node = node->Parent()) {
+        if (const Optional<bool> answer = node->OnQueryShowFocus(cause)) {
+            return *answer;
+        }
+    }
+
+    return cause == FocusCause::Navigation;
+}
+
 bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
                                       const SharedPtr<Element>& scope) noexcept {
+    // 키보드 KeyDown처럼 버튼 누름도 열린 툴팁을 닫는다.
+    if (pressed != 0) {
+        CloseToolTip(user);
+    }
+
     auto target = GetFocus(user);
     if (!target || !IsFocusablePath(target.Get()) || (scope && !target->IsWithin(*scope))) {
         return false;
@@ -343,7 +378,8 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (event.type == input::InputEventType::KeyDown) {
+    // 보조 키만 누를 때는 닫지 않는다(Shift·Ctrl을 누른 채 툴팁을 읽을 수 있게 — UE는 닫는다).
+    if (event.type == input::InputEventType::KeyDown && !IsModifierKey(event.key)) {
         CloseToolTip(userId);
     }
 
@@ -627,12 +663,38 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
 
     // 이벤트 처리 중 focus가 바뀌지 않았다면 경로에서 가장 안쪽의 focus 가능 Element를 고른다.
     if (event.type == PointerEventType::Down && focusVersion_ == focusBefore) {
+        bool chosen = false;
         for (usize i = 0; i < path.Size(); ++i) {
             if (path[i]->SupportsKeyboardFocus() && IsFocusablePath(path[i].Get())) {
                 auto focused = SetFocus(event.userId, path[i], FocusCause::Pointer);
                 if (!focused) {
                     return Result<bool>::Failure(focused.Error());
                 }
+
+                chosen = true;
+                break;
+            }
+        }
+
+        // 빈 곳을 눌러도 초점은 두되 마우스 사용으로 바뀌었으니 외곽선은 끈다(UE는 창이 초점을
+        // 가져가 외곽선이 사라진다 — SWindow.cpp 1783행. Rocks는 편집 중인 값의 확정을 피하려고
+        // 초점은 유지한다).
+        // 누름 처리 중 페이지가 바뀌어 초점 요소가 떨어져 나갔을 수 있으니, 아직 붙어 있고 외곽선이
+        // 켜진 초점만 끈다(떨어진 초점은 다음 갱신의 ReleaseInactiveTargets가 놓는다).
+        if (!chosen) {
+            for (const auto& entry : focus_) {
+                if (entry.userId != event.userId || !entry.outline) {
+                    continue;
+                }
+
+                auto current = entry.target.Lock();
+                if (current && IsFocusablePath(current.Get())) {
+                    auto kept = SetFocus(event.userId, current, FocusCause::Pointer);
+                    if (!kept) {
+                        return Result<bool>::Failure(kept.Error());
+                    }
+                }
+
                 break;
             }
         }
@@ -779,25 +841,30 @@ Result<void> Application::SetCapture(const PointerEvent& event, const SharedPtr<
                                   WeakPtr<Element>(target), event.position, allowTouchPan});
 }
 
-Result<bool> Application::MoveFocus(uint32 userId, bool forward, bool wrap) noexcept {
-    return MoveFocusWithin(userId, root_, forward, wrap);
+Result<bool> Application::MoveFocus(uint32 userId, bool forward, bool wrap,
+                                    FocusCause cause) noexcept {
+    return MoveFocusWithin(userId, root_, forward, wrap, cause);
 }
 
 Result<bool> Application::MoveFocusWithin(uint32 userId, const SharedPtr<Element>& root,
-                                          bool forward, bool wrap) noexcept {
-    return root ? NavigateInternal(
-                      userId, forward ? FocusDirection::Next : FocusDirection::Previous, root, wrap)
-                : Result<bool>::Success(false);
+                                          bool forward, bool wrap, FocusCause cause) noexcept {
+    return root
+               ? NavigateInternal(userId, forward ? FocusDirection::Next : FocusDirection::Previous,
+                                  root, wrap, cause)
+               : Result<bool>::Success(false);
 }
 
 Result<void> Application::CollectFocusTargets(const SharedPtr<Element>& element,
                                               Array<SharedPtr<Element>>& targets) const noexcept {
-    if (!element->IsEnabled() || element->GetVisibility() == Visibility::Collapsed ||
-        element->GetVisibility() == Visibility::Hidden) {
+    // 누를 수 없는 요소는 탐색 대상도 아니다(UE 탐색은 hit grid 기반). HitTestInvisible은 하위까지,
+    // SelfHitTestInvisible은 자기만 빠진다 — 툴팁 층이 Tab 순서에 끼지 않는다.
+    const Visibility visibility = element->GetVisibility();
+    if (!element->IsEnabled() || visibility == Visibility::Collapsed ||
+        visibility == Visibility::Hidden || visibility == Visibility::HitTestInvisible) {
         return Result<void>::Success();
     }
 
-    if (element->SupportsKeyboardFocus()) {
+    if (element->SupportsKeyboardFocus() && visibility != Visibility::SelfHitTestInvisible) {
         auto added = targets.TryPushBack(element);
         if (!added) {
             return added;

@@ -77,11 +77,12 @@ Result<BehaviorPage> BuildBehaviorPage(GalleryContext& context) noexcept {
         auto first = MakeTextButton(context, "First", DefaultButtonStyle());
         auto second = MakeTextButton(context, "Second", DefaultButtonStyle());
         auto primary = MakeTextButton(context, "Primary", PrimaryButtonStyle());
+        auto check = MakeCheckBox(context, CheckState::Checked, "Check");
         auto slider = MakeSlider(context, 0.5f, [](float) noexcept {});
         if (status.Take(first) && status.Take(second) && status.Take(primary) &&
-            status.Take(slider)) {
+            status.Take(check) && status.Take(slider)) {
             const SharedPtr<Element> parts[] = {first.Value(), second.Value(), primary.Value(),
-                                                slider.Value()};
+                                                check.Value(), slider.Value()};
             rows.AddRow("Focus Outline", "Tab, arrows: outline / click: none", parts);
         }
     }
@@ -245,7 +246,10 @@ Result<BehaviorPage> BuildBehaviorPage(GalleryContext& context) noexcept {
             Array<SharedPtr<Element>> cells(allocator);
             for (usize i = first;
                  i < first + CursorsPerRow && i < sizeof(Cursors) / sizeof(Cursors[0]); ++i) {
-                auto cell = MakeBlock(context, Cursors[i].name, ThemeSlot::AccentGray);
+                // 커서는 실제로 나오는 어두운 입력 칸 바탕에서 본다. Windows 글자·십자 커서는
+                // 바탕을 뒤집어 그려 중간 회색 위에서는 거의 사라진다.
+                auto cell =
+                    MakeBlock(context, Cursors[i].name, ThemeSlot::Input, ThemeSlot::Foreground);
                 if (!status.Take(cell)) {
                     break;
                 }

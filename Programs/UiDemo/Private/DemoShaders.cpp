@@ -1,5 +1,7 @@
 #include "DemoShaders.h"
 
+#include "DemoLog.h"
+
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -7,8 +9,6 @@
 namespace rocks::ui {
 
 namespace {
-
-inline constexpr LogCategory LogUiDemo{"UiDemo"};
 
 SystemAllocator& ProcessAllocator() noexcept {
     static SystemAllocator allocator;

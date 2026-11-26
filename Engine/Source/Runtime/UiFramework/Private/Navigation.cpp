@@ -27,16 +27,17 @@ struct DirectionalDistance {
 } // namespace
 
 Result<bool> Application::Navigate(uint32 userId, FocusDirection direction,
-                                   const SharedPtr<Element>& scope) noexcept {
+                                   const SharedPtr<Element>& scope, FocusCause cause) noexcept {
     if (direction > FocusDirection::Previous) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return NavigateInternal(userId, direction, scope ? scope : root_, false);
+    return NavigateInternal(userId, direction, scope ? scope : root_, false, cause);
 }
 
 Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection direction,
-                                           const SharedPtr<Element>& root, bool wrap) noexcept {
+                                           const SharedPtr<Element>& root, bool wrap,
+                                           FocusCause cause) noexcept {
     if (!root || !IsFocusablePath(root.Get())) {
         return Result<bool>::Success(false);
     }
@@ -58,7 +59,7 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             return Result<bool>::Success(false);
         }
 
-        auto moved = SetFocus(userId, target, FocusCause::Navigation);
+        auto moved = SetFocus(userId, target, cause);
         return moved ? Result<bool>::Success(true) : Result<bool>::Failure(moved.Error());
     };
     if (!focus || !focus->IsInputPathActive(*root, false)) {

@@ -99,7 +99,7 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | (Rocks) Timeline | `STimeSlider`(Editor/Sequencer — 직접 대응은 아님) | `Timeline` | UW4b 스타일 |
 | (Rocks) Scroll Bar | `SScrollBar` | `ScrollBar` | UW4b 스타일 |
 | (Rocks) Image | `SImage` | `Image` | 있음 |
-| (Rocks) Tool Tip | `SToolTip` | `Element::SetToolTipFactory` | UW4b 스타일 |
+| (Rocks) Tool Tip | `SToolTip`·`SDocumentationToolTip` | `ToolTip` + `DefaultToolTipStyle()`(글자)·`ContentToolTipStyle()`(제목·단축키·설명), 키보드 초점으로도 열림·Ctrl+F1 다시 열기 | UW4t |
 
 UW4a는 "있음"과 "UW4b 스타일" 행을 모두 넣는다(아직 UE 룩이 아닌 행도 보여서 남은 일을 드러낸다). UW4b–UW4d 행은 부품이 생기는 단계에 더한다. 체크 상자 행은 UE처럼 레이블 없는 상자 넷(해제·해제·체크·미정, 여백 8 — 1037–1041행)이고, 레이블 붙은 변형은 Rocks 행을 따로 둔다. UE 1439행 "Window Flash Button"은 창 깜빡임(작업 표시줄 주의) 견본이라 창 계약(UW7)에서 다룬다.
 
@@ -176,6 +176,6 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 | 목록 셋, MenuAnchor 열기, 화면 컨테이너, 캐러셀 자동 넘김, UserWidget 애니메이션, 타이머·접근성 트리·테마 견본 | `Application`을 생성자·인자로 받는다 | `Element::FindApplication()`(16.5절) | UW4a2 |
 | Widget 층 전용 부품 | Element 공개판이 없고, Widget 층은 ObjectRegistry·WidgetTree·`WidgetTextShaper`가 필요하다 | 갤러리 Widget 호스트: GalleryContext에 ObjectRegistry·WidgetTree를 두고, DemoText로 `WidgetTextShaper`를 구현해 `TakeElement` 결과를 행에 넣는다 | UW4a2 |
 | 이미지·9분할 Box·Border·ProgressBar Mask·throbber 조각 brush·rich text 이미지·Viewport 장면 | 등록된 텍스처가 없다 | 시작할 때 절차 생성 텍스처(체크무늬·9분할 테두리)를 BrushTexture 표에 넣어 GalleryContext로 넘긴다 | UW4a |
-| 초점 이동·Focus Rectangle | 초점 표시가 없다 | 초점 외곽선(4/1) | UW4b |
+| 초점 이동·Focus Rectangle | Behavior 탭 Focus Outline 행(UW4f1) | 편집 텍스트 억제 견본은 UW4f2 | UW4f2 |
 | CachePanel 효과 | 캐시 통계를 읽을 길이 없다 | 호스트가 `CacheRoot::LastUpdate()`를 레이블로 넘기는 콜백 | UW4a |
 | 터치 팬·게임패드 컨트롤러 잠금 | 기기가 필요하다 | 행에 설명, 사람 확인 목록 | — |

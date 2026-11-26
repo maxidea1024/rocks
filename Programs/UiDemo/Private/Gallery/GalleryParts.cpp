@@ -52,9 +52,9 @@ Result<SharedPtr<Button>> MakeTextButton(GalleryContext& context, StringView lab
     return button;
 }
 
-Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
-                                   ThemeSlot color) noexcept {
-    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(ThemeSlot::Background));
+Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label, ThemeSlot color,
+                                   ThemeSlot textColor) noexcept {
+    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(textColor));
     auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);
     if (const ErrorCode error = FirstError(text, frame); error != ErrorCode::None) {
         return Result<SharedPtr<Frame>>::Failure(error);
@@ -70,6 +70,27 @@ Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
 
     frame.Value()->SetContentAlignment(StackAlignment::Center, StackAlignment::Center);
     return frame;
+}
+
+Result<SharedPtr<Element>> MakeCheckBox(GalleryContext& context, CheckState state,
+                                        StringView label) noexcept {
+    auto check = SharedPtr<CheckBox>::TryMake(context.allocator, context.allocator);
+    if (!check) {
+        return Result<SharedPtr<Element>>::Failure(check.Error());
+    }
+
+    auto result = check.Value()->SetState(state);
+    if (result && !label.IsEmpty()) {
+        auto text = MakeText(context, label);
+        result =
+            text ? check.Value()->TryAddChild(text.Value()) : Result<void>::Failure(text.Error());
+    }
+
+    if (!result) {
+        return Result<SharedPtr<Element>>::Failure(result.Error());
+    }
+
+    return Result<SharedPtr<Element>>::Success(check.Value());
 }
 
 Result<SharedPtr<Element>> PadContent(GalleryContext& context, const SharedPtr<Element>& content,

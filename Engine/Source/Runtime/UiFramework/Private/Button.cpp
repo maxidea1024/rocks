@@ -3,7 +3,10 @@
 namespace rocks::ui {
 
 Result<void> Button::Construct(Args&& args) noexcept {
-    auto status = Frame::Construct({.content = args.content, .color = Move(args.color)});
+    auto status = Frame::Construct({.content = args.content,
+                                    .color = Move(args.color),
+                                    .horizontalAlignment = args.horizontalAlignment,
+                                    .verticalAlignment = args.verticalAlignment});
     if (status) {
         status = SetStyle(args.style);
     }
@@ -33,6 +36,14 @@ Result<void> Button::Construct(Args&& args) noexcept {
     }
 
     return status;
+}
+
+const StyleBrush* Button::FocusOutlineBrush() const noexcept {
+    const ColorRef fill = style_.normal.fill;
+    const bool accent = fill == ColorRef::FromTheme(ThemeSlot::Primary) ||
+                        fill == ColorRef::FromTheme(ThemeSlot::PrimaryHover) ||
+                        fill == ColorRef::FromTheme(ThemeSlot::PrimaryPress);
+    return accent ? &FocusOutlineOnAccentStyle() : &FocusOutlineStyle();
 }
 
 Button::Button(Allocator& allocator) noexcept : Frame(allocator) {

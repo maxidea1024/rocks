@@ -1,4 +1,6 @@
 #include <Core/Containers/HashSet.h>
+#include <UiCore/Styles/CoreStyles.h>
+#include <UiFramework/ToolTip.h>
 #include <UiWidget/Widget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 #include <UiWidget/WidgetTextShaper.h>
@@ -41,11 +43,30 @@ Result<void> Widget::ApplyToolTip(ObjectRegistry& objects, Element& owner, const
             return Result<void>::Failure(ErrorCode::CycleDetected);
         }
 
+        // 사용자 위젯은 내용 툴팁 상자에 담는다(UE UWidget::SetToolTip — SToolTip, Widget.cpp
+        // 1514행). 닫힌 지난 상자에 남은 내용은 떼어 새 상자에 담는다.
+        auto& boxAllocator = objects.ObjectAllocator();
         return owner.SetToolTipFactory(
-            Element::ToolTipFactory::CreateLambda([view = Move(content.Value())]() noexcept {
-                return view->Parent() ? Result<SharedPtr<Element>>::Failure(ErrorCode::Busy)
-                                      : Result<SharedPtr<Element>>::Success(view);
-            }),
+            Element::ToolTipFactory::CreateLambda(
+                [view = Move(content.Value()),
+                 &boxAllocator]() noexcept -> Result<SharedPtr<Element>> {
+                    if (Element* box = view->Parent()) {
+                        if (box->Parent()) {
+                            return Result<SharedPtr<Element>>::Failure(ErrorCode::Busy);
+                        }
+
+                        (void)box->RemoveChild(*view);
+                    }
+
+                    auto tip = SharedPtr<ToolTip>::TryMake(boxAllocator, boxAllocator);
+                    if (!tip) {
+                        return Result<SharedPtr<Element>>::Failure(tip.Error());
+                    }
+
+                    auto built = tip.Value()->Construct({.content = view});
+                    return built ? Result<SharedPtr<Element>>::Success(tip.Value())
+                                 : Result<SharedPtr<Element>>::Failure(built.Error());
+                }),
             fallback.source, true);
     }
 
@@ -83,24 +104,21 @@ Result<void> Widget::ApplyToolTip(ObjectRegistry& objects, Element& owner, const
                     return Result<SharedPtr<Element>>::Failure(label.Error());
                 }
 
-                auto shaped = shaper->Shape(*label.Value(), body, 14);
+                // 글자 툴팁 상자다(UE UWidget::SetToolTipText — SToolTip, Widget.cpp 552행).
+                auto shaped =
+                    shaper->Shape(*label.Value(), body, DefaultToolTipStyle().text.font.size);
                 if (!shaped) {
                     return Result<SharedPtr<Element>>::Failure(shaped.Error());
                 }
 
-                auto frame = SharedPtr<Frame>::TryMake(allocator, allocator);
-                if (!frame) {
-                    return Result<SharedPtr<Element>>::Failure(frame.Error());
+                auto tip = SharedPtr<ToolTip>::TryMake(allocator, allocator);
+                if (!tip) {
+                    return Result<SharedPtr<Element>>::Failure(tip.Error());
                 }
 
-                frame.Value()->SetColor({0.05f, 0.05f, 0.05f, 1});
-                (void)frame.Value()->SetPadding({8, 4, 8, 4});
-                auto added = frame.Value()->TryAddChild(label.Value());
-                if (!added) {
-                    return Result<SharedPtr<Element>>::Failure(added.Error());
-                }
-
-                return Result<SharedPtr<Element>>::Success(Move(frame.Value()));
+                auto built = tip.Value()->Construct({.text = label.Value()});
+                return built ? Result<SharedPtr<Element>>::Success(tip.Value())
+                             : Result<SharedPtr<Element>>::Failure(built.Error());
             }),
         fallback.source, false);
 }

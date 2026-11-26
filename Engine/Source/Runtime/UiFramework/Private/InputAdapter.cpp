@@ -79,20 +79,26 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
             return routed;
         }
 
+        constexpr FocusCause user = FocusCause::Navigation;
         switch (event.key) {
         case input::Key::Left:
-            return application_.Navigate(event.userId, FocusDirection::Left, scope);
+            return application_.Navigate(event.userId, FocusDirection::Left, scope, user);
         case input::Key::Right:
-            return application_.Navigate(event.userId, FocusDirection::Right, scope);
+            return application_.Navigate(event.userId, FocusDirection::Right, scope, user);
         case input::Key::Up:
-            return application_.Navigate(event.userId, FocusDirection::Up, scope);
+            return application_.Navigate(event.userId, FocusDirection::Up, scope, user);
         case input::Key::Down:
-            return application_.Navigate(event.userId, FocusDirection::Down, scope);
+            return application_.Navigate(event.userId, FocusDirection::Down, scope, user);
         case input::Key::Tab: {
             const bool forward = !application_.IsShiftDown(event.userId);
-            return scope ? application_.MoveFocusWithin(event.userId, scope, forward, true)
-                         : application_.MoveFocus(event.userId, forward);
+            return scope ? application_.MoveFocusWithin(event.userId, scope, forward, true, user)
+                         : application_.MoveFocus(event.userId, forward, false, user);
         }
+
+        // 닫힌 툴팁을 키보드로 다시 연다(UE에 없음 — 9.1절 UW4t).
+        case input::Key::F1:
+            return Result<bool>::Success(application_.IsControlDown(event.userId) &&
+                                         application_.ShowFocusToolTip(event.userId));
         default:
             return routed;
         }

@@ -15,6 +15,8 @@ Result<void> Frame::Construct(Args&& args) noexcept {
     if (status) {
         BindColor(Move(args.color));
         BindDesiredSize(Move(args.desiredSize));
+        SetContentAlignment(args.horizontalAlignment.ValueOr(horizontal_),
+                            args.verticalAlignment.ValueOr(vertical_));
     }
 
     return status;
@@ -89,6 +91,18 @@ Vec2 Frame::ComputeDesiredSize(float) const noexcept {
                                : Vec2{};
     const Vec2 size(childSize.x + padding_.x + padding_.z, childSize.y + padding_.y + padding_.w);
     return Vec2(math::Max(size.x, desiredSize_.Get().x), math::Max(size.y, desiredSize_.Get().y));
+}
+
+Vec2 Frame::MeasureForWidth(float width) noexcept {
+    Element* child = ChildAt(0);
+    if (child == nullptr || child->GetVisibility() == Visibility::Collapsed) {
+        return GetDesiredSize();
+    }
+
+    const float inner = math::Max(0.0f, width - padding_.x - padding_.z);
+    const Vec2 measured = child->MeasureForWidth(inner);
+    return {math::Max(measured.x + padding_.x + padding_.z, desiredSize_.Get().x),
+            math::Max(measured.y + padding_.y + padding_.w, desiredSize_.Get().y)};
 }
 
 void Frame::SetContentAlignment(StackAlignment horizontal, StackAlignment vertical) noexcept {

@@ -318,6 +318,14 @@ void Element::SetFocusOutlineVisible(bool visible) noexcept {
     }
 }
 
+Vec2 Element::MeasureForWidth(float) noexcept {
+    return GetDesiredSize();
+}
+
+Optional<bool> Element::OnQueryShowFocus(FocusCause) const noexcept {
+    return {};
+}
+
 bool Element::IsFocusOutlineVisible() const noexcept {
     return focusOutlines_ != 0;
 }

@@ -404,6 +404,12 @@ Result<void> TextLabel::TryAddChild(const SharedPtr<Element>&) noexcept {
     return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
+Vec2 TextLabel::MeasureForWidth(float width) noexcept {
+    // 그 폭으로 줄을 다시 나눈 결과의 크기다. 실패하면(폭이 유한하지 않음 등) 지금 크기다.
+    (void)ArrangeForWidth(math::Max(0.0f, width));
+    return ComputeDesiredSize(1);
+}
+
 Vec2 TextLabel::ComputeDesiredSize(float) const noexcept {
     const Vec2 desired = layout_.DesiredSize();
     return {math::Max(minDesiredWidth_, desired.x), desired.y};

@@ -76,6 +76,8 @@ private:
     WeakPtr<Application*> app_;
     WeakPtr<Element> restoreFocus_;
     uint32 focusUser_ = 0;
+    // 메뉴를 열기 전 초점 원인이다. 키보드로 연 메뉴는 첫 항목과 닫은 뒤 복원에 외곽선을 잇는다.
+    FocusCause restoreCause_ = FocusCause::Direct;
     Delegate<void(bool)> openChanged_;
     bool opening_ = false;
 };
