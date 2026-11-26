@@ -42,7 +42,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - [3. 모듈 배치와 의존](03-Modules.ko.md)
 - [4. 에셋 모델](04-AssetModel.ko.md)
 - [5. 그래프 스키마](05-GraphSchema.ko.md)
-- [6. IR](06-IR.ko.md)
+- [6. IR](06-IR/README.ko.md)
 - [7. 코드 생성](07-CodeGeneration.ko.md)
 - [8. 퍼뮤테이션](08-Permutations.ko.md)
 - [9. 파라미터](09-Parameters.ko.md)
