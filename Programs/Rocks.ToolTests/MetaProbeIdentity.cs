@@ -77,7 +77,7 @@ internal static class MetaProbeIdentity
                 "probe::Host::shape", "probe::RealBinding::a", "probe::Value::title", "probe::Value::lines",
                 "probe::Value::byKey", "probe::Value::titles", "probe::Flags::on", "probe::Flags::wide",
                 "probe::Flags::wider", "probe::Flags::widest", "probe::Flags::plain", "probe::Value::visible", "probe::Value::locked",
-                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag",
+                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag", "probe::Value::keyed",
                 "probe::Range::low", "probe::Range::high", "probe::Range::owner", "probe::Range::Inner::n", "probe::Hidden::range", "probe::Child::extra",
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
