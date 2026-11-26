@@ -138,11 +138,14 @@ enum class IrOp : uint8 {
     AddressDemote = 89,
     // 텍스처 slot의 논리 크기다(6.10절 MS2c3b — UE TextureProperty). 피연산자 텍스처, 즉시값 [0]은
     // 0 크기·1 texel 크기. 빈도 Uniform(상수 식 프로그램 명령).
-    TextureSize = 90
+    TextureSize = 90,
+    // 표면 값이다(6.11절 MS2d1). 즉시값 [0]은 번역기 표면 기록 번호다. 모듈에는 남지 않는다(출력
+    // 노드가 접어 내보낸다).
+    SurfaceRef = 91
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 91;
+inline constexpr uint32 IrOpCount = 92;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

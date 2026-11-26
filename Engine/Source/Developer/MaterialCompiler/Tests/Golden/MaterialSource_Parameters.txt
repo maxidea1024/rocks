@@ -27,6 +27,7 @@
 #define MATERIAL_NUM_CUSTOMIZED_UVS 0
 #define MATERIAL_OPACITY_MASK_CLIP 0.3333
 #define MATERIAL_SURFACE_USES_VERTEX 1
+#define MATERIAL_NORMAL_USES_VERTEX 1
 #define MATERIAL_NUM_CONSTANT_VECTORS 2
 #define MATERIAL_NUM_COLLECTIONS 0
 
@@ -44,6 +45,11 @@ void EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout MaterialVer
     r.worldPositionOffset = float3(0.0, 0.0, 0.0);
 }
 
+float3 EvaluateMaterialNormal(in MaterialInputs c) {
+    const float3 m18 = MaterialContextVertexNormal(c);
+    return m18;
+}
+
 SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {
     SurfaceAttributes s = DefaultSurfaceAttributes();
     const float m6 = materialFloats[0].w;
@@ -56,6 +62,11 @@ SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {
     const float3 m15 = MaterialDoubleDemote(m14);
     const float m16 = length(m15);
     const float m17 = (m10 + m16);
+    const float3 m18 = MaterialContextVertexNormal(c);
+    const float3 m19 = MaterialContextVertexTangent(c);
+    s.normal = m18;
+    s.tangent = m19;
+    s.shadingModel = 1u;
     s.ambientOcclusion = m17;
     return s;
 }

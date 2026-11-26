@@ -419,7 +419,7 @@ bool IrBuilder::IsValid(IrValueId id) const noexcept {
 }
 
 bool IrBuilder::IsNumeric(IrValueId id) const noexcept {
-    return id < values_.Size() && !values_[id].type.IsTexture();
+    return id < values_.Size() && !values_[id].type.IsOpaque();
 }
 
 bool IrBuilder::IsConstant(IrValueId id) const noexcept {
@@ -436,6 +436,7 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
         const uint64 bits = constant.immediate[index];
         switch (constant.type.scalar) {
         case IrScalar::Texture:
+        case IrScalar::Surface:
             // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
             break;
         case IrScalar::Float:
@@ -667,6 +668,7 @@ Result<IrValueId> IrBuilder::Fold(const IrValue& value) noexcept {
             const uint64 bits = operands[0]->immediate[index];
             switch (value.type.scalar) {
             case IrScalar::Texture:
+            case IrScalar::Surface:
                 // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
                 return none();
             case IrScalar::Float:
@@ -1283,6 +1285,14 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
     value.immediate[2] = static_cast<uint64>(desc.samplerSource);
     value.immediate[3] =
         static_cast<uint64>(desc.gather) | (uint64{desc.decal ? 1u : 0u} << IrTextureDecalShift);
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::SurfaceRef(uint32 record) noexcept {
+    IrValue value;
+    value.type = IrSurfaceType();
+    value.op = IrOp::SurfaceRef;
+    value.immediate[0] = record;
     return Intern(value);
 }
 

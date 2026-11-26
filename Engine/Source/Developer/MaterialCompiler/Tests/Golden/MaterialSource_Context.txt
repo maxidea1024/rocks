@@ -30,6 +30,7 @@
 #define MATERIAL_VERTEX_PREVIOUS_USES_VIEW 1
 #define MATERIAL_SURFACE_USES_VERTEX 1
 #define MATERIAL_PIXEL_DEPTH_OFFSET_USES_VIEW 1
+#define MATERIAL_NORMAL_USES_VERTEX 1
 #define MATERIAL_NUM_CONSTANT_VECTORS 0
 #define MATERIAL_NUM_COLLECTIONS 0
 #define MATERIAL_NUM_TEXTURES 0
@@ -46,10 +47,20 @@ void EvaluateMaterialVertexPrevious(in MaterialVertexInputs c, inout MaterialVer
     r.worldPositionOffset = m3;
 }
 
+float3 EvaluateMaterialNormal(in MaterialInputs c) {
+    const float3 m6 = MaterialContextVertexNormal(c);
+    return m6;
+}
+
 SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {
     SurfaceAttributes s = DefaultSurfaceAttributes();
     const float4 m4 = MaterialContextVertexColor(c);
     const float m5 = m4.y;
+    const float3 m6 = MaterialContextVertexNormal(c);
+    const float3 m7 = MaterialContextVertexTangent(c);
+    s.normal = m6;
+    s.tangent = m7;
+    s.shadingModel = 1u;
     s.ambientOcclusion = m5;
     return s;
 }
@@ -63,9 +74,9 @@ float EvaluateMaterialOpacityMask(in MaterialInputs c) {
 }
 
 float EvaluateMaterialPixelDepthOffset(in MaterialInputs c) {
-    const float m6 = MaterialContextPixelDepth(c);
-    const float m7 = ddx(m6);
-    return m7;
+    const float m9 = MaterialContextPixelDepth(c);
+    const float m10 = ddx(m9);
+    return m10;
 }
 
 float4 EvaluateMaterialPreview(in MaterialInputs c) {

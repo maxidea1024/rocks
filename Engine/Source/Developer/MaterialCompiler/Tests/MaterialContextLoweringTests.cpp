@@ -297,8 +297,10 @@ TEST(MaterialContext_UsageAndTier) {
     REQUIRE(Translate(valid, Traits(), result));
     REQUIRE(result.succeeded);
     const MaterialContextFeatureMask surface = result.module.EntryFeatures(IrEntry::Surface);
+    // 표면 칸은 정점 기저(노멀·tangent 기본값 — 6.11절 MS2d1)도 읽는다.
     CHECK(surface ==
-          (ToMask(MaterialContextFeature::Lightmap) | ToMask(MaterialContextFeature::Particle)));
+          (ToMask(MaterialContextFeature::Lightmap) | ToMask(MaterialContextFeature::Particle) |
+           ToMask(MaterialContextFeature::Vertex)));
     CHECK(result.module.EntryFeatures(IrEntry::Vertex) == ToMask(MaterialContextFeature::Particle));
     CHECK(result.module.EntryFeatures(IrEntry::VertexPrevious) ==
           ToMask(MaterialContextFeature::Particle));
@@ -326,12 +328,12 @@ TEST(MaterialContext_UsageAndTier) {
         CHECK(!HasText(text, part));
     }
 
-    // 깨끗한 Surface는 Mobile이고 사용 기능이 없다.
+    // 깨끗한 Surface는 Mobile이고 정점 기저(노멀·tangent 기본값)만 쓴다.
     GraphFixture empty(env);
     MaterialTranslation plain(env.allocator);
     REQUIRE(Translate(empty, Traits(), plain));
     CHECK(plain.module.RequiredTier() == MaterialCapabilityTier::Mobile);
-    CHECK(plain.module.EntryFeatures(IrEntry::Surface) == NoMaterialContextFeatures);
+    CHECK(plain.module.EntryFeatures(IrEntry::Surface) == ToMask(MaterialContextFeature::Vertex));
 }
 
 // Time 속성(UE HLSLMaterialTranslator.cpp:5276–5323): ignorePause면 RealTime, 주기 0이면 상수 0,

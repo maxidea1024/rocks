@@ -217,7 +217,10 @@ TEST(MaterialSourceWriter_DefaultSurfaceGolden) {
     REQUIRE(Generate(fixture, Traits(), generated));
     CHECK(MatchesGolden(env.allocator, "MaterialSource_DefaultSurface.txt",
                         generated.source.text.View()));
-    CHECK(generated.source.locations.IsEmpty());
+    // 표면 기본 칸(정점 기저)은 출력 노드 자리다.
+    for (const MaterialSourceLocation& location : generated.source.locations) {
+        CHECK(location.node == OutputNodeId);
+    }
 }
 
 // MS-T3: 여러 연산 철자를 지나는 Masked 그래프의 생성 원문.

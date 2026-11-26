@@ -23,7 +23,9 @@ enum class IrScalar : uint8 {
     Bool = 3,
     Double = 4,
     // 텍스처 자원이다(종류는 IrType::texture).
-    Texture = 5
+    Texture = 5,
+    // 표면 값이다(번역기 표면 기록을 가리킨다 — 6.11절 MS2d1). 산술·변환·선택에 들어가지 못한다.
+    Surface = 6
 };
 
 // 텍스처 자원 종류다(UE MCT_Texture2D·TextureCube·Texture2DArray·TextureCubeArray·VolumeTexture·
@@ -59,6 +61,15 @@ struct IrType {
         return scalar == IrScalar::Texture;
     }
 
+    constexpr bool IsSurface() const noexcept {
+        return scalar == IrScalar::Surface;
+    }
+
+    // 수가 아닌 값(텍스처·표면)인가다.
+    constexpr bool IsOpaque() const noexcept {
+        return scalar == IrScalar::Texture || scalar == IrScalar::Surface;
+    }
+
     friend constexpr bool operator==(const IrType&, const IrType&) noexcept = default;
 };
 
@@ -68,6 +79,10 @@ constexpr IrType IrFloat(uint8 components) noexcept {
 
 constexpr IrType IrTextureType(IrTextureKind kind) noexcept {
     return IrType{IrScalar::Texture, 1, 1, kind};
+}
+
+constexpr IrType IrSurfaceType() noexcept {
+    return IrType{IrScalar::Surface, 1, 1, IrTextureKind::None};
 }
 
 constexpr IrType IrInt(uint8 components) noexcept {
@@ -96,6 +111,10 @@ constexpr bool IsValidIrType(IrType type) noexcept {
     if (type.scalar == IrScalar::Texture) {
         return type.components == 1 && type.rows == 1 && type.texture != IrTextureKind::None &&
                static_cast<uint8>(type.texture) <= static_cast<uint8>(IrTextureKind::External);
+    }
+
+    if (type.scalar == IrScalar::Surface) {
+        return type.components == 1 && type.rows == 1 && type.texture == IrTextureKind::None;
     }
 
     if (static_cast<uint8>(type.scalar) > static_cast<uint8>(IrScalar::Double) ||

@@ -14,6 +14,7 @@
 #include <MaterialSchema/MaterialNodeDefinition.h>
 
 #include "LoweringTable.h"
+#include "SurfaceRecord.h"
 
 // 그래프 → IR 번역기 본체다(Docs/Design/MaterialSystem 6.3·6.8절). 먼저 출력 노드의 활성 핀에서
 // 간선을 거슬러 닿는 노드를 반복(스택 없는 재귀가 아닌) 깊이 우선으로 훑어 의존 후위 순서를 만든다.
@@ -142,6 +143,11 @@ public:
     // UserSceneTexture 이름을 번호로 바꾼다(처음 참조 순). 상한을 넘으면 거짓이다(6.10절 MS2c4).
     Result<bool> ReferenceUserSceneTexture(StringView name, uint32& index) noexcept;
 
+    // 표면 기록 하나를 더하고 그 표면 값(IR SurfaceRef)을 돌려준다(6.11절 MS2d1).
+    Result<IrValueId> AddSurface(const SurfaceRecord& record) noexcept;
+    // 표면 값의 기록이다. 표면 값이 아니면 nullptr이다.
+    const SurfaceRecord* FindSurface(IrValueId value) const noexcept;
+
     // value가 결과에 닿을 때만 낼 오류를 둔다(지연 진단 — 6.10절 MS2c4). message는 번역이 끝날
     // 때까지 살아 있어야 한다(문자열 상수).
     Result<void> DeferError(IrValueId value, MaterialDiagnosticCode code, Guid node,
@@ -199,6 +205,10 @@ private:
     Result<void> TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept;
     // 보간 성분 수 V9 검사다(모듈을 만든 뒤).
     Result<void> CheckInterpolantBudget() noexcept;
+    // 출력 노드 Surface 핀의 표면을 접어 Surface·Normal 결과로 내보낸다(6.11절 MS2d1 — 픽셀 문맥).
+    Result<void> TranslateSurface(LoweringContext& context) noexcept;
+    // 대표 노멀 경로에 PixelNormal이 닿으면 순환 오류다(6.11절 — UE HT:11784–11787보다 넓다).
+    Result<void> CheckNormalCycle() noexcept;
     // 결과에서 닿는 값에 묶인 지연 진단을 낸다(6.10절 MS2c4).
     Result<void> CheckDeferred() noexcept;
     // 결과에서 닿는 Pending 자리 값의 늦은 진단이다(6.10절 MS2c1 — DCE 뒤, 조건 값 가지는 경고).
@@ -283,6 +293,10 @@ private:
     };
 
     Array<DeferredError> deferred_;
+    // 표면 기록이다(SurfaceRef 즉시값 [0]이 번호 — 6.11절 MS2d1).
+    Array<SurfaceRecord> surfaces_;
+    // 내보낸 shading model 집합 비트다(Renderer 14.2절 번호).
+    uint32 shadingModels_ = 0;
     Name rerouteType_;
     Name rerouteIn_;
     Name rerouteOut_;

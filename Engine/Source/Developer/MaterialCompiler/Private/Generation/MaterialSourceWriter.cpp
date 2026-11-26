@@ -392,6 +392,7 @@ Result<void> SourceWriter::TypeName(IrType type) noexcept {
     StringView scalar = "float";
     switch (type.scalar) {
     case IrScalar::Texture:
+    case IrScalar::Surface:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float:
@@ -467,6 +468,7 @@ Result<void> SourceWriter::Literal(const IrValue& value) noexcept {
         Result<void> written = Result<void>::Success();
         switch (value.type.scalar) {
         case IrScalar::Texture:
+        case IrScalar::Surface:
             // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
             break;
         case IrScalar::Float:
@@ -1793,12 +1795,28 @@ Result<void> SourceWriter::Surface() noexcept {
     };
 
     // SurfaceAttributes 칸이 있는 결과만 쓴다(Refraction·SurfaceThickness는 칸이 없다 — 16절
-    // MRD16).
+    // MRD16). 표면 칸은 6.11절 MS2d1 내보내기 결과다. opacity는 표면 opacity(SSS 칸)가 있으면 그것,
+    // 없으면 Opacity 진입점이다.
     static constexpr Field Fields[] = {
+        {IrEntry::Surface, "BaseColor", "s.baseColor"},
+        {IrEntry::Surface, "Metallic", "s.metallic"},
+        {IrEntry::Surface, "Specular", "s.specular"},
+        {IrEntry::Surface, "Roughness", "s.roughness"},
+        {IrEntry::Surface, "Anisotropy", "s.anisotropy"},
+        {IrEntry::Surface, "Emissive", "s.emissive"},
+        {IrEntry::Surface, "Normal", "s.normal"},
+        {IrEntry::Surface, "Tangent", "s.tangent"},
+        {IrEntry::Surface, "SubsurfaceColor", "s.subsurfaceColor"},
+        {IrEntry::Surface, "CustomData0", "s.customData0"},
+        {IrEntry::Surface, "CustomData1", "s.customData1"},
+        {IrEntry::Surface, "ShadingModel", "s.shadingModel"},
         {IrEntry::Surface, "AmbientOcclusion", "s.ambientOcclusion"},
+        {IrEntry::Surface, "SurfaceOpacity", "s.opacity"},
         {IrEntry::Opacity, "Opacity", "s.opacity"},
         {IrEntry::OpacityMask, "OpacityMask", "s.opacityMask"},
     };
+    constexpr usize FieldCount = sizeof(Fields) / sizeof(Fields[0]);
+    const bool surfaceOpacity = FindResult(IrEntry::Surface, "SurfaceOpacity") != nullptr;
 
     if (auto head = Raw("\nSurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {\n    "
                         "SurfaceAttributes s = DefaultSurfaceAttributes();\n");
@@ -1806,9 +1824,13 @@ Result<void> SourceWriter::Surface() noexcept {
         return head;
     }
 
-    IrValueId roots[3] = {NoIrValue, NoIrValue, NoIrValue};
+    IrValueId roots[FieldCount] = {};
     usize count = 0;
     for (const Field& field : Fields) {
+        if (field.entry == IrEntry::Opacity && surfaceOpacity) {
+            continue;
+        }
+
         if (const IrResult* result = FindResult(field.entry, field.slot)) {
             roots[count++] = result->value;
         }
@@ -1820,7 +1842,7 @@ Result<void> SourceWriter::Surface() noexcept {
 
     for (const Field& field : Fields) {
         const IrResult* result = FindResult(field.entry, field.slot);
-        if (result == nullptr) {
+        if (result == nullptr || (field.entry == IrEntry::Opacity && surfaceOpacity)) {
             continue;
         }
 
@@ -1956,16 +1978,14 @@ Result<void> SourceWriter::Run() noexcept {
         return defined;
     }
 
-    // Surface 입력을 번역하는 MS2d 전까지 DefaultLit 하나다(7.7절).
+    // 내보낸 shading model 집합이다(6.11절 MS2d1 — 표면이 없으면 DefaultLit). 하나뿐이면 그 번호를
+    // MATERIAL_SINGLE_SHADING_MODEL로 낸다(UE MATERIAL_SINGLE_SHADINGMODEL).
+    const uint32 shadingModels = module_.ShadingModels() == 0
+                                     ? (uint32{1} << WriterDefaultLitShadingModel)
+                                     : module_.ShadingModels();
     StringBuilder<> models(allocator_);
-    models << (uint32{1} << WriterDefaultLitShadingModel) << "u";
-    StringBuilder<> single(allocator_);
-    single << WriterDefaultLitShadingModel;
+    models << shadingModels << "u";
     if (auto status = models.Status(); !status) {
-        return status;
-    }
-
-    if (auto status = single.Status(); !status) {
         return status;
     }
 
@@ -1973,8 +1993,21 @@ Result<void> SourceWriter::Run() noexcept {
         return defined;
     }
 
-    if (auto defined = Define("MATERIAL_SINGLE_SHADING_MODEL", single.View()); !defined) {
-        return defined;
+    if ((shadingModels & (shadingModels - 1)) == 0) {
+        uint32 number = 0;
+        while ((shadingModels >> number) != 1) {
+            ++number;
+        }
+
+        StringBuilder<> single(allocator_);
+        single << number;
+        if (auto status = single.Status(); !status) {
+            return status;
+        }
+
+        if (auto defined = Define("MATERIAL_SINGLE_SHADING_MODEL", single.View()); !defined) {
+            return defined;
+        }
     }
 
     // 진입점에서 닿는 TexCoord의 최대 상수 색인 + 1이다(6.9절 — 정점 입력에서 읽을 UV 채널 수).
@@ -2076,6 +2109,13 @@ Result<void> SourceWriter::Run() noexcept {
 
     if (auto vertex = Vertex(); !vertex) {
         return vertex;
+    }
+
+    // 대표 노멀이다(6.11절 MS2d1 — pass가 먼저 불러 c.pixelNormal을 채운다).
+    if (auto normal = ScalarFunction("float3 EvaluateMaterialNormal(in MaterialInputs c)",
+                                     IrEntry::Normal, "Normal", "float3(0.0, 0.0, 1.0)");
+        !normal) {
+        return normal;
     }
 
     if (auto surface = Surface(); !surface) {

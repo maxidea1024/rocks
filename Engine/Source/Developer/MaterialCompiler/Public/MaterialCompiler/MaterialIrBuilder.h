@@ -90,6 +90,8 @@ public:
     // CubeArray는 3)의 Float다. 결과 Float4. 오류: 규칙 밖이면 InvalidArgument.
     Result<IrValueId> TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
                                     IrValueId uv, IrValueId first, IrValueId second) noexcept;
+    // 표면 값이다(6.11절 MS2d1 — record는 번역기 표면 기록 번호). 기록마다 다른 값이다.
+    Result<IrValueId> SurfaceRef(uint32 record) noexcept;
     // 텍스처 slot의 논리 크기(texel이면 1/크기)다. 2DArray·Texture3D는 Float3, 2D는 Float2다.
     // 오류: 다른 종류이거나 텍스처가 아니면 InvalidArgument.
     Result<IrValueId> TextureSize(IrValueId texture, bool texel) noexcept;

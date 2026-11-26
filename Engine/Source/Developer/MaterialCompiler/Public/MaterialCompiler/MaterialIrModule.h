@@ -32,11 +32,13 @@ enum class IrEntry : uint8 {
     OpacityMask = 4,
     PixelDepthOffset = 5,
     CustomOutput = 6,
-    Preview = 7
+    Preview = 7,
+    // 대표 노멀(6.11절 MS2d1 — EvaluateMaterialNormal, 픽셀).
+    Normal = 8
 };
 
 // 진입점 수다(마지막 값 + 1).
-inline constexpr uint32 IrEntryCount = 8;
+inline constexpr uint32 IrEntryCount = 9;
 
 // 진입점 결과 칸 하나다. slot은 출력 핀 키(정적 원문 — 예: "WorldPositionOffset")다. 한 모듈 안에서
 // (entry, slot)은 유일하다.
@@ -92,6 +94,16 @@ public:
         return collections_.View();
     }
 
+    // 내보낸 shading model 집합 비트다(6.11절 MS2d1 — 생성 원문 MATERIAL_SHADING_MODELS). 0이면
+    // 표면이 없다(DefaultLit로 본다).
+    uint32 ShadingModels() const noexcept {
+        return shadingModels_;
+    }
+
+    void SetShadingModels(uint32 mask) noexcept {
+        shadingModels_ = mask;
+    }
+
     // 보간 값(Interpolate) 성분 수의 합이다(6.9절 MS2b4a — 보간 배정).
     uint32 InterpolantComponents() const noexcept {
         return interpolantComponents_;
@@ -110,6 +122,7 @@ public:
         textures_.Clear();
         collections_.Clear();
         hash_ = Sha256Digest{};
+        shadingModels_ = 0;
         for (MaterialContextFeatureMask& features : entryFeatures_) {
             features = NoMaterialContextFeatures;
         }
@@ -128,6 +141,7 @@ private:
     Array<IrTexture> textures_;
     Array<IrCollection> collections_;
     Sha256Digest hash_{};
+    uint32 shadingModels_ = 0;
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};
     MaterialCapabilityTier requiredTier_ = MaterialCapabilityTier::Mobile;
     uint32 interpolantComponents_ = 0;

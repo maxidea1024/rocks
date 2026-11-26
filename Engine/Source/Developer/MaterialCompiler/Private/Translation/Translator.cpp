@@ -34,9 +34,9 @@ constexpr OutputSlot OutputSlots[] = {
     {"PixelDepthOffset", IrEntry::PixelDepthOffset, MaterialPinType::Float1},
 };
 
-// MS2a가 번역하지 않는 출력 핀이다(연결이 있으면 NotYetLowered — Surface·Attributes·Displacement는
-// MS2d, CustomizedUv는 MS2b).
-constexpr StringView PendingOutputPins[] = {"Surface", "Attributes", "Displacement"};
+// 아직 번역하지 않는 출력 핀이다(연결이 있으면 NotYetLowered — Attributes는 MS2e, Displacement는
+// MS2d 뒤 단계). Surface는 TranslateSurface가 번역한다(6.11절 MS2d1).
+constexpr StringView PendingOutputPins[] = {"Attributes", "Displacement"};
 
 // CustomizedUv 출력 핀 키이자 Vertex 결과 slot이다(UE MP_CustomizedUVs0–7).
 constexpr StringView CustomizedUvPins[] = {"CustomizedUv0", "CustomizedUv1", "CustomizedUv2",
@@ -133,7 +133,7 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
       outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
       statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
       incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
-      collections_(allocator), samplers_(allocator), deferred_(allocator) {
+      collections_(allocator), samplers_(allocator), deferred_(allocator), surfaces_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -404,7 +404,8 @@ Result<void> Translator::BuildIndex() noexcept {
     const Span<const LoweringEntry> groups[] = {
         ConstantLowerings(),   MathLowerings(),      FlowLowerings(),    ContextValueLowerings(),
         CoordinateLowerings(), TransformLowerings(), SwitchLowerings(),  InterpolatorLowerings(),
-        SupplyLowerings(),     ParameterLowerings(), TextureLowerings(), SceneLowerings()};
+        SupplyLowerings(),     ParameterLowerings(), TextureLowerings(), SceneLowerings(),
+        SurfaceLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -1002,6 +1003,12 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
         }
     }
 
+    if (context_ == EvaluationContext::Pixel) {
+        if (auto surface = TranslateSurface(context); !surface) {
+            return surface;
+        }
+    }
+
     if (auto marked = States().InsertOrAssign(output.id, NodeState::Done); !marked) {
         return Result<void>::Failure(marked.Error());
     }
@@ -1011,6 +1018,18 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
 
 Result<void> Translator::ContextRoots(Array<Name>& roots) const noexcept {
     roots.Clear();
+    // Surface 핀(픽셀 문맥)은 표면 트리의 뿌리다(6.11절 MS2d1).
+    if (context_ == EvaluationContext::Pixel) {
+        auto surface = input_.names.TryFind("Surface");
+        if (surface) {
+            if (auto added = roots.TryPushBack(surface.Value()); !added) {
+                return added;
+            }
+        } else if (surface.Error() != ErrorCode::NotFound) {
+            return Result<void>::Failure(surface.Error());
+        }
+    }
+
     for (const OutputSlot& slot : OutputSlots) {
         if (!SlotInContext(slot.entry, context_) || !IsOutputActive(slot.pin, input_.traits)) {
             continue;
@@ -1363,6 +1382,10 @@ Result<IrValueId> Translator::PendingOutput(const nodegraph::GraphNode& node, Na
             } else if (const IrTextureKind texture = PendingTextureKind(definitionPin.type);
                        texture != IrTextureKind::None) {
                 type = IrTextureType(texture);
+            } else if (definitionPin.type == MaterialPinType::Surface) {
+                type = IrSurfaceType();
+            } else if (definitionPin.type == MaterialPinType::ShadingModel) {
+                type = IrUInt(1);
             }
         }
     }
@@ -1582,6 +1605,10 @@ Result<void> Translator::Run() noexcept {
         return pending;
     }
 
+    if (auto cycle = CheckNormalCycle(); !cycle) {
+        return cycle;
+    }
+
     if (auto deferred = CheckDeferred(); !deferred) {
         return deferred;
     }
@@ -1593,6 +1620,9 @@ Result<void> Translator::Run() noexcept {
     if (auto built = BuildIrModule(builder_, results_.View(), out_.module); !built) {
         return built;
     }
+
+    out_.shadingModels = shadingModels_;
+    out_.module.SetShadingModels(shadingModels_);
 
     if (auto budget = CheckInterpolantBudget(); !budget) {
         return budget;

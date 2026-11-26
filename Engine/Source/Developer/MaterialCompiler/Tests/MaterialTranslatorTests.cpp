@@ -21,7 +21,8 @@ TEST(MaterialTranslator_OutputDefaults) {
     REQUIRE(Translate(fixture, Traits(), out));
     REQUIRE(out.succeeded);
     CHECK(out.diagnostics.items.IsEmpty());
-    REQUIRE(out.module.Results().Size() == 4);
+    // 표면이 없어도 표면 칸 셋(정점 노멀·tangent·DefaultLit)과 대표 노멀이 나간다(6.11절 MS2d1).
+    REQUIRE(out.module.Results().Size() == 8);
     const float zero3[] = {0.0f, 0.0f, 0.0f};
     const float one[] = {1.0f};
     const float zero[] = {0.0f};
@@ -31,8 +32,16 @@ TEST(MaterialTranslator_OutputDefaults) {
     // WPO가 있으면 이전 정점 문맥도 번역한다(6.9절 — UE HLSLMaterialTranslator.cpp:1663–1667).
     CHECK(out.module.Results()[0].entry == IrEntry::Vertex);
     CHECK(out.module.Results()[1].entry == IrEntry::VertexPrevious);
-    CHECK(out.module.Results()[2].entry == IrEntry::Surface);
-    CHECK(out.module.Results()[3].entry == IrEntry::PixelDepthOffset);
+    usize surfaceFields = 0;
+    usize normals = 0;
+    for (const IrResult& result : out.module.Results()) {
+        surfaceFields += result.entry == IrEntry::Surface ? 1 : 0;
+        normals += result.entry == IrEntry::Normal ? 1 : 0;
+    }
+
+    // AO와 표면 기본 칸 셋(Normal·Tangent·ShadingModel), 대표 노멀 하나다.
+    CHECK(surfaceFields == 4);
+    CHECK(normals == 1);
 
     // Masked면 OpacityMask(기본 1)가, AlphaComposite면 Opacity가 더해진다. 반투명은 PDO가 빠진다.
     MaterialTranslation masked(env.allocator);
@@ -64,11 +73,15 @@ TEST(MaterialTranslator_OutputDefaults) {
     REQUIRE(Translate(fixture, refractive, fromF0));
     CHECK(FindResult(fromF0, "Refraction") == nullptr);
 
-    // PostProcess·LightFunction 영역은 MS2a 핀을 쓰지 않는다(Opacity는 AlphaComposite만).
+    // PostProcess·LightFunction 영역은 MS2a 핀을 쓰지 않는다(Opacity는 AlphaComposite만). 표면 기본
+    // 칸과 대표 노멀만 나간다(6.11절 MS2d1).
     MaterialTranslation light(env.allocator);
     REQUIRE(Translate(fixture, Traits(BlendMode::Opaque, MaterialDomain::LightFunction), light));
     CHECK(light.succeeded);
-    CHECK(light.module.Results().IsEmpty());
+    for (const IrResult& result : light.module.Results()) {
+        CHECK((result.entry == IrEntry::Surface || result.entry == IrEntry::Normal));
+        CHECK(result.slot != StringView("AmbientOcclusion"));
+    }
 }
 
 // 상수·산술은 빌더가 접는다(정확히 반올림되는 연산 — 6.8절).

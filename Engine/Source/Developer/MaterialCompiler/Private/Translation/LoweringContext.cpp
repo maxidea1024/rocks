@@ -82,6 +82,10 @@ StringView LoweringTypeName(IrType type) noexcept {
         return type.rows == 3 ? StringView("float3x3") : StringView("float4x4");
     }
 
+    if (type.IsSurface()) {
+        return "surface";
+    }
+
     if (type.IsTexture()) {
         // UE DescribeType 이름이다.
         switch (type.texture) {
@@ -107,6 +111,7 @@ StringView LoweringTypeName(IrType type) noexcept {
     const usize index = type.components - 1;
     switch (type.scalar) {
     case IrScalar::Texture:
+    case IrScalar::Surface:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float:
@@ -160,6 +165,15 @@ const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) cons
     }
 
     return nullptr;
+}
+
+Result<IrValueId> LoweringContext::MakeSurface(SurfaceRecord record) noexcept {
+    record.node = node_.id;
+    return translator_.AddSurface(record);
+}
+
+const SurfaceRecord* LoweringContext::SurfaceOf(IrValueId value) const noexcept {
+    return translator_.FindSurface(value);
 }
 
 Result<void> LoweringContext::DeferError(IrValueId value, MaterialDiagnosticCode code,
@@ -923,6 +937,7 @@ Result<IrValueId> LoweringFilled(IrBuilder& builder, IrType type, int32 value) n
     const usize count = type.components;
     switch (type.scalar) {
     case IrScalar::Texture:
+    case IrScalar::Surface:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float: {
@@ -964,13 +979,15 @@ Result<IrValueId> LoweringContext::One(IrType type) noexcept {
 }
 
 Result<IrValueId> LoweringContext::RejectTexture(IrValueId value, bool& rejected) noexcept {
-    rejected = value != NoIrValue && TypeOf(value).IsTexture();
+    rejected = value != NoIrValue && TypeOf(value).IsOpaque();
     if (!rejected) {
         return Result<IrValueId>::Success(value);
     }
 
-    if (auto reported =
-            TypeError("Texture values are not accepted here", TypeOf(value), TypeOf(value));
+    if (auto reported = TypeError(TypeOf(value).IsSurface()
+                                      ? StringView("Surface values are not accepted here")
+                                      : StringView("Texture values are not accepted here"),
+                                  TypeOf(value), TypeOf(value));
         !reported) {
         return Result<IrValueId>::Failure(reported.Error());
     }
@@ -1060,11 +1077,12 @@ Result<Optional<IrType>> LoweringContext::CommonType(Span<const IrValueId> value
     bool hasUInt = false;
     for (IrValueId value : values) {
         const IrType type = TypeOf(value);
-        if (type.IsMatrix() || type.IsTexture()) {
-            if (auto reported =
-                    TypeError(type.IsTexture() ? StringView("Texture values are not accepted here")
-                                               : StringView("Matrix values are not accepted here"),
-                              type, TypeOf(values[0]));
+        if (type.IsMatrix() || type.IsOpaque()) {
+            if (auto reported = TypeError(
+                    type.IsSurface()   ? StringView("Surface values are not accepted here")
+                    : type.IsTexture() ? StringView("Texture values are not accepted here")
+                                       : StringView("Matrix values are not accepted here"),
+                    type, TypeOf(values[0]));
                 !reported) {
                 return Result<Optional<IrType>>::Failure(reported.Error());
             }
@@ -1151,12 +1169,14 @@ Result<IrValueId> LoweringContext::CoerceTo(IrValueId value, IrType target,
 
     const IrType source = TypeOf(value);
     StringView problem;
-    if (source.IsTexture() || target.IsTexture()) {
+    if (source.IsOpaque() || target.IsOpaque()) {
         if (source == target) {
             return Result<IrValueId>::Success(value);
         }
 
-        problem = "Texture value cannot be used here";
+        problem = source.IsSurface() || target.IsSurface()
+                      ? StringView("Surface value cannot be used here")
+                      : StringView("Texture value cannot be used here");
     } else if (source.IsMatrix() || target.IsMatrix()) {
         problem = "Matrix value cannot be used here";
     } else if ((source.scalar == IrScalar::Bool) != (target.scalar == IrScalar::Bool)) {

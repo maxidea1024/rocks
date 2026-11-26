@@ -485,7 +485,8 @@ TEST(MaterialParameter_CustomPrimitiveData) {
     bool single = false;
     bool four = false;
     for (const IrValue& value : out.module.Values()) {
-        if (value.op != IrOp::Extern) {
+        // 인자 없는 문맥 값(표면 기본 정점 기저 등)은 건너뛴다.
+        if (value.op != IrOp::Extern || value.operandCount == 0) {
             continue;
         }
 

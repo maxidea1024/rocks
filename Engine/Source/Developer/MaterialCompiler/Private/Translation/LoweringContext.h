@@ -18,6 +18,8 @@
 #include <NodeGraph/GraphDiagnostic.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
+#include "SurfaceRecord.h"
+
 // lowering 함수 하나가 보는 노드 문맥이다(Docs/Design/MaterialSystem 6.8절). 입력 값 요청(연결 →
 // 핀 사용자 값 → 정의 기본값 → 필수 입력 오류), 속성 읽기, 출력 기록, 진단, 타입 규칙을 지키는 연산
 // 도우미("입력 값과 변환"·"연산 묶음별 수 종류")를 준다.
@@ -86,6 +88,11 @@ public:
 
     // 번역 입력의 컬렉션 layout이다. 없으면 nullptr이다.
     const MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
+
+    // 표면 기록을 더하고 그 표면 값을 돌려준다(record.node는 이 노드로 채운다 — 6.11절 MS2d1).
+    Result<IrValueId> MakeSurface(SurfaceRecord record) noexcept;
+    // 표면 값의 기록이다(아니면 nullptr).
+    const SurfaceRecord* SurfaceOf(IrValueId value) const noexcept;
 
     // value가 결과에 닿을 때만 이 노드 위치에 낼 오류다(지연 진단 — UE처럼 쓰이는 출력의 검사만
     // 남긴다, 6.10절 MS2c4). message는 문자열 상수여야 한다(번역 끝까지 산다).

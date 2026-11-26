@@ -28,6 +28,8 @@ struct MaterialTranslation {
     // UserSceneTexture 노드가 읽는 이름이다(6.10절 MS2c4 — 처음 참조 순, 번호 k의 scene texture
     // id는 MaterialUserSceneTextureFirstId + k). pass가 이름으로 입력을 묶는다.
     Array<Name> userSceneTextures;
+    // 내보낸 shading model 집합 비트다(Renderer 14.2절 번호 — 6.11절, 8.3절 MaterialShaderTraits).
+    uint32 shadingModels = 0;
     bool succeeded = false;
 };
 

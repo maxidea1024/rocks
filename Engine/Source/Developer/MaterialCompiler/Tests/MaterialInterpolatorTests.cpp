@@ -67,7 +67,7 @@ TEST(MaterialInterpolator_VertexValueInPixel) {
     MaterialTranslation out(env.allocator);
     MaterialGeneratedSource source(env.allocator);
     REQUIRE(Generate(fixture, Traits(), out, source));
-    CHECK(out.module.EntryFeatures(IrEntry::Surface) == NoMaterialContextFeatures);
+    CHECK(out.module.EntryFeatures(IrEntry::Surface) == ToMask(MaterialContextFeature::Vertex));
     CHECK(out.module.EntryFeatures(IrEntry::Vertex) == ToMask(MaterialContextFeature::Skin));
     CHECK(out.module.InterpolantComponents() == 3);
     const StringView text = source.text.View();
