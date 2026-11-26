@@ -20,8 +20,8 @@ public:
     ROCKS_PROPERTY(ReadOnly, ScriptReadOnly, Replicated)  // Replicated: 네트워크 단계에서 신설
     rocks::int32 current_ = 100;
 
-    ROCKS_PROPERTY(Params = "killer")     // CU3: MulticastDelegate 필드 → FieldKind::Event
-    rocks::MulticastDelegate<void(rocks::WeakObjectRef<rocks::Actor>)> Died;
+    ROCKS_PROPERTY(Params = "killer")     // CU3: 이벤트 필드 → FieldKind::Event(EventReflection ED8 — 안쪽이 Core MulticastDelegate)
+    rocks::Event<rocks::WeakObjectRef<rocks::Actor>> Died;
 
     ROCKS_FUNCTION(Lane = Game, Effects = WriteWorld)   // CU2
     rocks::Result<void> ApplyDamage(rocks::int32 amount, rocks::WeakObjectRef<rocks::Actor> instigator);

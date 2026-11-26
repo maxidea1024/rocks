@@ -29,7 +29,8 @@
 //     5 options Record(임포터 스키마), 6 outputs RecordList[Record(ImportOutputSchema){
 //       1 outputKey String, 2 assetId Guid, 3 typeId Guid }], 7 ownerAssetId Guid,
 //     8 tags RecordList[Record(ImportTagSchema){ 1 key String, 2 value String }] (소유 기록, 태그가
-//     있을 때만 — A2f3a UXR8) }
+//     있을 때만 — A2f3a UXR8), 9 tagPrefix String(소유 기록, 태그 접두가 importerName과 다를 때만 —
+//     A2f5) }
 //
 // 사용 예(텍스처 하나를 임포트한 소유 기록):
 //   const ImportSourceInput sources[] = {{"source", "Raw", "Textures/Rock.png", digest, size}};
@@ -60,6 +61,7 @@ inline constexpr Guid ImportRecordOptionsField{0, 5};
 inline constexpr Guid ImportRecordOutputsField{0, 6};
 inline constexpr Guid ImportRecordOwnerField{0, 7};
 inline constexpr Guid ImportRecordTagsField{0, 8};
+inline constexpr Guid ImportRecordTagPrefixField{0, 9};
 inline constexpr Guid ImportTagKeyField{0, 1};
 inline constexpr Guid ImportTagValueField{0, 2};
 
@@ -119,6 +121,8 @@ struct ImportRecordInput {
     AssetId owner{};
     Guid importerId{};
     StringView importerName{};
+    // 태그 키 접두다(A2f5 — 비거나 importerName과 같으면 필드를 쓰지 않는다).
+    StringView tagPrefix{};
     uint32 importerVersion = 0;
     Span<const ImportSourceInput> sources{};
     Span<const uint8> options{};
@@ -162,8 +166,8 @@ struct ImportTag {
 // 기본값·빈 목록이다. outputs는 outputKey byte 순, tags는 (key, value) byte 순이다.
 struct ImportRecord {
     explicit ImportRecord(Allocator& allocator) noexcept
-        : importerName(allocator), sources(allocator), options(allocator), outputs(allocator),
-          tags(allocator) {
+        : importerName(allocator), tagPrefix(allocator), sources(allocator), options(allocator),
+          outputs(allocator), tags(allocator) {
     }
 
     ImportRecord(ImportRecord&&) noexcept = default;
@@ -174,11 +178,18 @@ struct ImportRecord {
     AssetId owner{};
     Guid importerId{};
     String importerName;
+    // 기록의 태그 접두다(A2f5 — 필드가 없으면 빈 값: 접두는 importerName).
+    String tagPrefix;
     uint32 importerVersion = 0;
     Array<ImportSource> sources;
     Array<uint8> options;
     Array<ImportOutput> outputs;
     Array<ImportTag> tags;
+
+    // 태그 키 접두다(tagPrefix, 비면 importerName — A2f5).
+    StringView TagPrefix() const noexcept {
+        return tagPrefix.IsEmpty() ? importerName.View() : tagPrefix.View();
+    }
 
     // 패키지 self의 기록이 소유 기록인지다(owner == self).
     bool OwnedBy(AssetId self) const noexcept {
@@ -195,8 +206,9 @@ ROCKS_ASSETDATABASE_API bool IsValidImportSourceLocation(StringView root,
 
 // 임포터 태그 한 쌍이 기록 규칙에 맞는지다(쓰기·읽기·임포트 문맥 AddTag와 같은 판정 — AS 7.1절
 // 19 A2f3a): key는 `<importerName>.` 다음이 비지 않고 전체 1–MaxPackageTagKeyBytes byte, value는
-// 0–PackageMaxStringBytes byte, 둘 다 유효 UTF-8·NUL 없음.
-ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView importerName, StringView key,
+// 0–PackageMaxStringBytes byte, 둘 다 유효 UTF-8·NUL 없음. prefix는 태그 접두다(기록·임포터의
+// tagPrefix, 비면 importerName — 7.1절 21 A2f5).
+ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView prefix, StringView key,
                                               StringView value) noexcept;
 
 // self 패키지의 ImportRecord byte를 쓴다(PackageWriteOptions::importRecord에 넘긴다). outputs는
@@ -204,8 +216,10 @@ ROCKS_ASSETDATABASE_API bool IsValidImportTag(StringView importerName, StringVie
 // 오류: self·owner가 null이거나 스펙 규칙(AS 7.1절 15 — 소유 기록: importerId·importerName 있음,
 // 원본 1–256개·role 유일, 출력 1–1024개·outputKey 유일·asset 유일·null 아님·type null 아님·self
 // 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 형태(IsValidImportSourceLocation), root에 `/`·`\`
-// 없음, options는 Record envelope, 태그 0–256개·(key, value) 쌍 유일·IsValidImportTag. 참조 기록:
-// importerId null·이름 빈 값·버전 0·원본·옵션·출력·태그 없음)을 어기면 InvalidArgument, 전체가
+// 없음, options는 Record envelope, 태그 0–256개·(key, value) 쌍 유일·IsValidImportTag(접두는
+// tagPrefix, 비면 importerName), tagPrefix는 비거나 1–MaxImporterNameBytes byte·UTF-8. 참조 기록:
+// importerId null·이름 빈 값·tagPrefix 빈 값·버전 0·원본·옵션·출력·태그 없음)을 어기면
+// InvalidArgument, 전체가
 // Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
 ROCKS_ASSETDATABASE_API Result<Array<uint8>>
 WriteImportRecord(Allocator& allocator, AssetId self, const ImportRecordInput& input) noexcept;

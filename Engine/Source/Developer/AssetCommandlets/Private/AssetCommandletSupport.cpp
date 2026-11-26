@@ -2,6 +2,7 @@
 
 #include <Core/Build/BuildInfo.h>
 #include <Core/FileError.h>
+#include <Core/Text/Path.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Platform/File.h>
@@ -161,6 +162,41 @@ StringView AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noe
     return code == reflection_text::TextDiagnosticCode::HiddenEnumerator
                ? StringView(AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting))
                : reflection_text::TextDiagnosticCodeName(code);
+}
+
+Result<String> AbsoluteCommandPath(Allocator& allocator, StringView path,
+                                   bool* workingFailed) noexcept {
+    if (workingFailed != nullptr) {
+        *workingFailed = false;
+    }
+
+    auto kind = Path::Root(path);
+    if (!kind || kind.Value() != PathRoot::Relative) {
+        String copy(allocator);
+        if (auto assigned = copy.TryAssign(path); !assigned) {
+            return Result<String>::Failure(assigned.Error());
+        }
+
+        return Result<String>::Success(rocks::Move(copy));
+    }
+
+    Array<char> working(allocator);
+    if (auto sized = working.TryResize(MaxNativePathBytes() + 1); !sized) {
+        return Result<String>::Failure(sized.Error());
+    }
+
+    usize bytes = 0;
+    if (auto got = platform::GetStandardDirectory(platform::StandardDirectory::Working,
+                                                  working.Data(), working.Size(), bytes);
+        !got) {
+        if (workingFailed != nullptr) {
+            *workingFailed = true;
+        }
+
+        return Result<String>::Failure(FileErrorCode(got));
+    }
+
+    return Path::MakeAbsolute(allocator, StringView(working.Data(), bytes), path);
 }
 
 bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {
