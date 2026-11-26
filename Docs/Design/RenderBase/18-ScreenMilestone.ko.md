@@ -254,3 +254,4 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
 - 시험(Debug):
   - EngineTests `WorldIntegration_PlatformTextureSource*` 셋·`WorldIntegration_TextureRenderCache*` 일곱이 모두 PASS다(위 8항 시험 목록). `RenderBase_*`·`RenderGraph*`·`MeshComponent_*`도 그대로 PASS다.
   - Sandbox `--texture-self-test`: 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) Thread·Inline 두 모드 0 failures. 쿠킹 장면은 캐시 경로로 13 텍스처·53 표본점이다. GL core 위 ES만 49 표본점이다: `RGBA16Unorm` 하나가 NOT RUN이고, 사유는 SM7과 같다.
+  - Sandbox `--self-test`: 여덟 장치 모두 PASS이고 전체 0 failures다. 엔진 쿠킹 화면(`cooked screen`)은 worktree에 엔진 쿠킹(`asset-cook --engine`)이 없어 NOT RUN이다. 이 단계와 무관하다.
