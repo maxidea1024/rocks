@@ -50,6 +50,10 @@ inline constexpr char DiagSimulateOnStaticBody[] = "SimulateOnStaticBody";
 // - BodyShapeUpdateFailed: 형상 값·scale이 바뀌었지만 body 형상을 다시 만들지 못해 이전 형상을
 //   두었다(Warning — Docs/Design/PhysicsModule 7.1.5절).
 inline constexpr char DiagBodyShapeUpdateFailed[] = "BodyShapeUpdateFailed";
+// - QueryProfileMissing: Profile 필터 장면 질의의 profile이 World 표에 없어 WorldStatic 채널과
+//   모두 Block 응답으로 질의했다(Warning — Docs/Design/PhysicsModule 4.2절, UE
+//   World.cpp:2052-2063).
+inline constexpr char DiagQueryProfileMissing[] = "QueryProfileMissing";
 inline constexpr char DiagAutoTickPrerequisiteCycleSkipped[] = "AutoTickPrerequisiteCycleSkipped";
 inline constexpr char DiagBeginPlayDispatchContractViolated[] = "BeginPlayDispatchContractViolated";
 
