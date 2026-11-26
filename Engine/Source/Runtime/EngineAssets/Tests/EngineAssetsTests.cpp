@@ -266,8 +266,8 @@ TEST(EngineAssets_InitializationCombinations) {
         // 봉투도 rman도 없으면 Release는 봉투 단계에서, 그 밖은 rman 읽기에서 NotFound다.
         {ManifestState::Missing, ErrorCode::NotFound, MissingManifestStage, "None"},
         {ManifestState::Directory, ErrorCode::NotFound, MissingManifestStage, "None"},
-        {ManifestState::Empty, ErrorCode::InvalidArgument, "manifest parse", "CorruptPackage"},
-        {ManifestState::Corrupt, ErrorCode::InvalidArgument, "manifest parse", "CorruptPackage"},
+        {ManifestState::Empty, ErrorCode::CorruptData, "manifest parse", "CorruptPackage"},
+        {ManifestState::Corrupt, ErrorCode::CorruptData, "manifest parse", "CorruptPackage"},
         {ManifestState::OtherVersion, ErrorCode::Unsupported, "manifest parse",
          "UnsupportedVersion"},
     };
@@ -915,7 +915,7 @@ TEST(EngineAssets_ManifestLocationFailures) {
         Engine engine(allocator);
         const auto initialized =
             engine.Initialize(MakeEngineConfig(&fixture.Context(), subsystems, nullptr));
-        CHECK(initialized.Error() == ErrorCode::InvalidArgument);
+        CHECK(initialized.Error() == ErrorCode::CorruptData);
         CHECK(engine.State() == EngineState::Failed);
     }
 }

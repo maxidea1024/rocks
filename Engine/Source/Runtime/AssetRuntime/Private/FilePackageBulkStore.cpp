@@ -248,8 +248,8 @@ Result<void> FilePackageBulkStore::Load(Slot& slot, AssetDiagnostic* failure) no
     }
 
     if (Crc32(stored.View()) != slot.entry.crc32) {
-        return Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
-                    asset_, BulkSection, slot.fileId);
+        return Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, asset_,
+                    BulkSection, slot.fileId);
     }
 
     // raw를 잡기 전에 Zstd 컨테이너 헤더의 rawSize를 대조한다(손상된 표로 큰 할당을 하지 않게).
@@ -259,7 +259,7 @@ Result<void> FilePackageBulkStore::Load(Slot& slot, AssetDiagnostic* failure) no
         return decoded.Error() == ErrorCode::OutOfMemory
                    ? Fail(failure, AssetDiagnosticCode::None, decoded.Error(), asset_, BulkSection,
                           slot.fileId)
-                   : Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+                   : Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
                           asset_, BulkSection, slot.fileId);
     }
 

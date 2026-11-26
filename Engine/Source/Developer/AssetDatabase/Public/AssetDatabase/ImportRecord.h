@@ -214,7 +214,7 @@ WriteImportRecord(Allocator& allocator, AssetId self, const ImportRecordInput& i
 // InvalidArgument(섹션이 없으면 부르지 않는다), 스키마 Guid가 ImportRecordSchema가 아니거나 Record·
 // 항목 버전이 ImportRecordVersion 밖이면 Unsupported(다른 스키마·더 새 기록 — 색인은
 // UnsupportedVersion), 형식·순서·크기·규칙 위반(WriteImportRecord와 같은 규칙, 모르는 필드·빈 목록
-// 필드·wire가 다른 필드 포함)은 InvalidArgument, 할당 실패.
+// 필드·wire가 다른 필드 포함)은 CorruptData(읽은 데이터 손상 — AssetSystem 19장), 할당 실패.
 ROCKS_ASSETDATABASE_API Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
                                                               Span<const uint8> bytes) noexcept;
 

@@ -11,7 +11,7 @@
 
 // PngSuite 대조 시험이다(Docs/Design/AssetSystem 15절, 14.1.119 후속 3번 — 2017-07-19판, 라이선스
 // Fixtures/PngSuite/PngSuite.LICENSE). 기대값은 외부 디코더 없이 정한다: `x`로 시작하는 파일은 실패
-// (InvalidSource/InvalidArgument), 나머지는 성공하고 크기는 이름 규칙이며, 같은 그림 묶음(Adam7
+// (InvalidSource/CorruptData), 나머지는 성공하고 크기는 이름 규칙이며, 같은 그림 묶음(Adam7
 // 유무· IDAT 쪼개기·zlib 수준·보조 chunk 변형 — 독립 참조 디코더로 찾았다)은 형식·크기·픽셀이 같다.
 using namespace rocks;
 using namespace rocks::image;
@@ -174,7 +174,7 @@ TEST(PngDecode_PngSuite) {
                 if (file.width == 0) {
                     ++failures;
                     CHECK(!ok && result.failure.code == AssetDiagnosticCode::InvalidSource &&
-                          result.failure.error == ErrorCode::InvalidArgument);
+                          result.failure.error == ErrorCode::CorruptData);
                 } else {
                     ++decoded;
                     const DecodedImage& image = result.image;

@@ -410,11 +410,11 @@ Result<TextureDimension> PeekDdsDimension(Span<const uint8> file,
     const auto invalid = [failure](uint64 offset) noexcept {
         if (failure != nullptr) {
             failure->code = AssetDiagnosticCode::InvalidSource;
-            failure->error = ErrorCode::InvalidArgument;
+            failure->error = ErrorCode::CorruptData;
             failure->offset = offset;
         }
 
-        return Result<TextureDimension>::Failure(ErrorCode::InvalidArgument);
+        return Result<TextureDimension>::Failure(ErrorCode::CorruptData);
     };
     if (file.Size() < DdsDataOffset) {
         return invalid(file.Size());

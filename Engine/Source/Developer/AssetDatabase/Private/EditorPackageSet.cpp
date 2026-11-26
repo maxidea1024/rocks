@@ -782,8 +782,11 @@ Result<void> EditorPackageSet::PreparePending(Pending& pending,
     }
 
     if (!unknownRecord) {
+        // 읽은 패키지의 임포트 소유 대조 위반은 손상이다(같은 검사가 저장에서는 InvalidArgument).
         if (auto owner = CheckImportOwner(id, checked, contents.dependencies.View()); !owner) {
-            return fail(AssetDiagnosticCode::CorruptPackage, owner.Error(),
+            return fail(AssetDiagnosticCode::CorruptPackage,
+                        owner.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData
+                                                                    : owner.Error(),
                         static_cast<uint32>(PackageSectionKind::Dependencies));
         }
     }

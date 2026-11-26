@@ -173,8 +173,7 @@ TEST(NuggetFile_HeadAndRecordTampering) {
         NuggetMemoryReader reader(copy.View());
         auto view = OpenNuggetFile(allocator, reader);
         const bool version = at >= 4 && at < 8;
-        CHECK(!view &&
-              view.Error() == (version ? ErrorCode::Unsupported : ErrorCode::InvalidArgument));
+        CHECK(!view && view.Error() == (version ? ErrorCode::Unsupported : ErrorCode::CorruptData));
     }
 }
 
@@ -201,12 +200,12 @@ TEST(NuggetFile_ValueTableAndSizeTampering) {
             for (usize other = 0; other < 3; ++other) {
                 Array<uint8> stored(allocator);
                 auto read = ReadNuggetValue(opened.Value(), reader, other, stored);
-                CHECK(other == index ? read.Error() == ErrorCode::InvalidArgument
+                CHECK(other == index ? read.Error() == ErrorCode::CorruptData
                                      : static_cast<bool>(read));
                 // 흘려 읽는 검증도 같은 판정이다.
                 uint8 buffer[4096];
                 auto verified = VerifyNuggetValue(opened.Value(), reader, other, buffer);
-                CHECK(other == index ? verified.Error() == ErrorCode::InvalidArgument
+                CHECK(other == index ? verified.Error() == ErrorCode::CorruptData
                                      : static_cast<bool>(verified));
             }
         }
@@ -219,7 +218,7 @@ TEST(NuggetFile_ValueTableAndSizeTampering) {
         REQUIRE(copy.TryAppend(built.file.View()));
         copy[at] ^= 0x01;
         NuggetMemoryReader reader(copy.View());
-        CHECK(OpenNuggetFile(allocator, reader).Error() == ErrorCode::InvalidArgument);
+        CHECK(OpenNuggetFile(allocator, reader).Error() == ErrorCode::CorruptData);
     }
 
     // 잘림·남는 byte·머리보다 짧음.
@@ -227,20 +226,20 @@ TEST(NuggetFile_ValueTableAndSizeTampering) {
                            NuggetFileHeadBytes + built.recordBytes};
     for (usize size : sizes) {
         NuggetMemoryReader reader(built.file.View().Slice(0, size));
-        CHECK(OpenNuggetFile(allocator, reader).Error() == ErrorCode::InvalidArgument);
+        CHECK(OpenNuggetFile(allocator, reader).Error() == ErrorCode::CorruptData);
     }
 
     Array<uint8> longer(allocator);
     REQUIRE(longer.TryAppend(built.file.View()) && longer.TryPushBack(0));
     NuggetMemoryReader extra(longer.View());
-    CHECK(OpenNuggetFile(allocator, extra).Error() == ErrorCode::InvalidArgument);
+    CHECK(OpenNuggetFile(allocator, extra).Error() == ErrorCode::CorruptData);
 
     // Record 크기 칸이 1 MiB를 넘음.
     Array<uint8> huge(allocator);
     REQUIRE(huge.TryAppend(built.file.View()));
     StoreLittleEndian<uint64>(huge.Data() + 8, NuggetRecordMaxBytes + 1);
     NuggetMemoryReader hugeReader(huge.View());
-    CHECK(OpenNuggetFile(allocator, hugeReader).Error() == ErrorCode::InvalidArgument);
+    CHECK(OpenNuggetFile(allocator, hugeReader).Error() == ErrorCode::CorruptData);
 }
 
 // 해제 검증: 크기 불일치·RawHash 불일치·Rcbk 색인 해시·색인 길이·원본 크기·손상 블록, Codec은
@@ -258,17 +257,17 @@ TEST(NuggetFile_DecodeChecks) {
     Array<uint8> out(allocator);
     REQUIRE(out.TryPushBack(42));
     CHECK(DecodeNuggetValue(allocator, identity, built.small.View().Slice(0, 36), out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     NuggetValueRow wrongHash = identity;
     wrongHash.rawHash.bytes[0] ^= 1;
     CHECK(DecodeNuggetValue(allocator, wrongHash, built.small.View(), out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(out.Size() == 1);
     // 정규 형식을 거치지 않은 행: Identity인데 rawSize가 저장 크기와 다르다.
     NuggetValueRow sizeMismatch = identity;
     sizeMismatch.rawSize = identity.storedSize + 1;
     CHECK(DecodeNuggetValue(allocator, sizeMismatch, built.small.View(), out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     NuggetValueRow codec = identity;
     codec.encoding = NuggetEncoding::Codec;
     CHECK(DecodeNuggetValue(allocator, codec, built.small.View(), out).Error() ==
@@ -279,32 +278,30 @@ TEST(NuggetFile_DecodeChecks) {
     NuggetValueRow badIndexHash = rcbk;
     badIndexHash.indexHash.bytes[0] ^= 1;
     CHECK(DecodeNuggetValue(allocator, badIndexHash, packed, out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     NuggetValueRow badIndexLength = rcbk;
     badIndexLength.indexLength = rcbk.storedSize + 1;
     CHECK(DecodeNuggetValue(allocator, badIndexLength, packed, out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     NuggetValueRow shorterIndex = rcbk;
     shorterIndex.indexLength = rcbk.indexLength - 8;
     shorterIndex.indexHash =
         Sha256::Hash(packed.Slice(0, static_cast<usize>(shorterIndex.indexLength)));
     CHECK(DecodeNuggetValue(allocator, shorterIndex, packed, out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     NuggetValueRow wrongRaw = rcbk;
     wrongRaw.rawSize = rcbk.rawSize - 1;
-    CHECK(DecodeNuggetValue(allocator, wrongRaw, packed, out).Error() ==
-          ErrorCode::InvalidArgument);
+    CHECK(DecodeNuggetValue(allocator, wrongRaw, packed, out).Error() == ErrorCode::CorruptData);
     NuggetValueRow wrongRawHash = rcbk;
     wrongRawHash.rawHash.bytes[0] ^= 1;
     CHECK(DecodeNuggetValue(allocator, wrongRawHash, packed, out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(out.Size() == 1);
     // 손상된 블록(색인은 그대로 — 블록 CRC가 잡는다)·손상된 헤더.
     Array<uint8> broken(allocator);
     REQUIRE(broken.TryAppend(packed));
     broken[broken.Size() - 1] ^= 0xff;
-    CHECK(DecodeNuggetValue(allocator, rcbk, broken.View(), out).Error() ==
-          ErrorCode::InvalidArgument);
+    CHECK(DecodeNuggetValue(allocator, rcbk, broken.View(), out).Error() == ErrorCode::CorruptData);
     Array<uint8> badHeader(allocator);
     REQUIRE(badHeader.TryAppend(packed));
     badHeader[0] ^= 0xff;
@@ -312,7 +309,7 @@ TEST(NuggetFile_DecodeChecks) {
     headerRow.indexHash =
         Sha256::Hash(badHeader.View().Slice(0, static_cast<usize>(rcbk.indexLength)));
     CHECK(DecodeNuggetValue(allocator, headerRow, badHeader.View(), out).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(out.Size() == 1);
 }
 
@@ -564,7 +561,7 @@ TEST(NuggetFile_ReadErrorsAndHashedGarbage) {
     StoreLittleEndian<uint64>(size, sizeof(garbage));
     REQUIRE(file.TryAppend(size) && file.TryAppend(hash.bytes) && file.TryAppend(garbage));
     NuggetMemoryReader garbageReader(file.View());
-    CHECK(OpenNuggetFile(allocator, garbageReader).Error() == ErrorCode::InvalidArgument);
+    CHECK(OpenNuggetFile(allocator, garbageReader).Error() == ErrorCode::CorruptData);
 }
 
 } // namespace nugget_file_tests_file

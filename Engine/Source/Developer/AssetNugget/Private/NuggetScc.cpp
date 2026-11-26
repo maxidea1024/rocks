@@ -47,7 +47,7 @@ Result<void> WriteNuggetSccMeta(Span<const AssetId> members, Array<uint8>& meta)
 Result<uint32> FindNuggetSccMember(Span<const uint8> meta, AssetId asset) noexcept {
     if (meta.Size() % NuggetSccMemberBytes != 0 ||
         meta.Size() / NuggetSccMemberBytes > NuggetSccMaxMembers) {
-        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+        return Result<uint32>::Failure(ErrorCode::CorruptData);
     }
 
     for (usize index = 0; index < meta.Size() / NuggetSccMemberBytes; ++index) {

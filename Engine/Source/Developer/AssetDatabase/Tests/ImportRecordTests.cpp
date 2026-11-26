@@ -411,7 +411,7 @@ TEST(ImportRecord_Tags) {
         raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
 
         return ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
-               ErrorCode::InvalidArgument;
+               ErrorCode::CorruptData;
     };
     {
         RawScene raw(allocator);
@@ -447,7 +447,7 @@ TEST(ImportRecord_Tags) {
         RawScene raw(allocator);
         raw.top.SetText(ImportRecordTagsField, "not a list");
         CHECK(ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // IsValidImportTag 직접 판정.
@@ -503,7 +503,7 @@ TEST(ImportRecord_RoundTripAndLayout) {
 
         // 소유 기록을 다른 self로 읽으면 참조 기록 규칙(임포터 비어 있음) 위반이다.
         CHECK(ReadImportRecord(allocator, Other, written.Value().View()).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     {
@@ -544,7 +544,7 @@ TEST(ImportRecord_RoundTripAndLayout) {
 
         // 참조 기록을 owner 자신으로 읽으면 소유 기록 규칙(임포터·목록 있음) 위반이다.
         CHECK(ReadImportRecord(allocator, Other, written.Value().View()).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -949,43 +949,45 @@ struct ReadCase {
 };
 
 constexpr ErrorCode Invalid = ErrorCode::InvalidArgument;
+// 읽은 byte의 손상이다(AssetSystem 19장).
+constexpr ErrorCode Corrupt = ErrorCode::CorruptData;
 constexpr ErrorCode Newer = ErrorCode::Unsupported;
 
 constexpr ReadCase AllReadCases[] = {
-    {ReadBreak::MissingImporter, Invalid},    {ReadBreak::MissingName, Invalid},
-    {ReadBreak::MissingVersion, Invalid},     {ReadBreak::MissingOwner, Invalid},
-    {ReadBreak::ImporterWire, Invalid},       {ReadBreak::ImporterSize, Invalid},
-    {ReadBreak::NameWire, Invalid},           {ReadBreak::VersionWire, Invalid},
-    {ReadBreak::VersionSize, Invalid},        {ReadBreak::OwnerWire, Invalid},
-    {ReadBreak::NullOwner, Invalid},          {ReadBreak::UnknownField, Invalid},
-    {ReadBreak::NullImporter, Invalid},       {ReadBreak::EmptyName, Invalid},
-    {ReadBreak::LongName, Invalid},           {ReadBreak::NulName, Invalid},
-    {ReadBreak::MissingSources, Invalid},     {ReadBreak::MissingOutputs, Invalid},
-    {ReadBreak::SourcesWire, Invalid},        {ReadBreak::OutputsWire, Invalid},
-    {ReadBreak::OptionsWire, Invalid},        {ReadBreak::OptionsEmpty, Invalid},
-    {ReadBreak::OptionsHeader, Invalid},      {ReadBreak::SourcesEmpty, Invalid},
-    {ReadBreak::SourcesTooMany, Invalid},     {ReadBreak::SourcesTruncated, Invalid},
-    {ReadBreak::SourceSchema, Invalid},       {ReadBreak::SourceMissingRole, Invalid},
-    {ReadBreak::SourceMissingRoot, Invalid},  {ReadBreak::SourceMissingPath, Invalid},
-    {ReadBreak::SourceMissingSha, Invalid},   {ReadBreak::SourceMissingBytes, Invalid},
-    {ReadBreak::SourceExtraField, Invalid},   {ReadBreak::SourceRoleWire, Invalid},
-    {ReadBreak::SourceRootWire, Invalid},     {ReadBreak::SourcePathWire, Invalid},
-    {ReadBreak::SourceShaWire, Invalid},      {ReadBreak::SourceShaSize, Invalid},
-    {ReadBreak::SourceBytesWire, Invalid},    {ReadBreak::SourceBytesSize, Invalid},
-    {ReadBreak::SourceEmptyRole, Invalid},    {ReadBreak::SourceRootSlash, Invalid},
-    {ReadBreak::SourceDotDot, Invalid},       {ReadBreak::SourceDuplicateRole, Invalid},
-    {ReadBreak::OutputsEmpty, Invalid},       {ReadBreak::OutputsTooMany, Invalid},
-    {ReadBreak::OutputSchema, Invalid},       {ReadBreak::OutputMissingKey, Invalid},
-    {ReadBreak::OutputMissingAsset, Invalid}, {ReadBreak::OutputMissingType, Invalid},
-    {ReadBreak::OutputExtraField, Invalid},   {ReadBreak::OutputKeyWire, Invalid},
-    {ReadBreak::OutputAssetSize, Invalid},    {ReadBreak::OutputTypeWire, Invalid},
-    {ReadBreak::OutputLongKey, Invalid},      {ReadBreak::OutputNullAsset, Invalid},
-    {ReadBreak::OutputNullType, Invalid},     {ReadBreak::OutputOrder, Invalid},
-    {ReadBreak::OutputDuplicateKey, Invalid}, {ReadBreak::OutputDuplicateAsset, Invalid},
-    {ReadBreak::OutputSelfMissing, Invalid},  {ReadBreak::ReferenceImporter, Invalid},
-    {ReadBreak::ReferenceName, Invalid},      {ReadBreak::ReferenceVersion, Invalid},
-    {ReadBreak::ReferenceSources, Invalid},   {ReadBreak::ReferenceOptions, Invalid},
-    {ReadBreak::ReferenceOutputs, Invalid},   {ReadBreak::TopVersion, Newer},
+    {ReadBreak::MissingImporter, Corrupt},    {ReadBreak::MissingName, Corrupt},
+    {ReadBreak::MissingVersion, Corrupt},     {ReadBreak::MissingOwner, Corrupt},
+    {ReadBreak::ImporterWire, Corrupt},       {ReadBreak::ImporterSize, Corrupt},
+    {ReadBreak::NameWire, Corrupt},           {ReadBreak::VersionWire, Corrupt},
+    {ReadBreak::VersionSize, Corrupt},        {ReadBreak::OwnerWire, Corrupt},
+    {ReadBreak::NullOwner, Corrupt},          {ReadBreak::UnknownField, Corrupt},
+    {ReadBreak::NullImporter, Corrupt},       {ReadBreak::EmptyName, Corrupt},
+    {ReadBreak::LongName, Corrupt},           {ReadBreak::NulName, Corrupt},
+    {ReadBreak::MissingSources, Corrupt},     {ReadBreak::MissingOutputs, Corrupt},
+    {ReadBreak::SourcesWire, Corrupt},        {ReadBreak::OutputsWire, Corrupt},
+    {ReadBreak::OptionsWire, Corrupt},        {ReadBreak::OptionsEmpty, Corrupt},
+    {ReadBreak::OptionsHeader, Corrupt},      {ReadBreak::SourcesEmpty, Corrupt},
+    {ReadBreak::SourcesTooMany, Corrupt},     {ReadBreak::SourcesTruncated, Corrupt},
+    {ReadBreak::SourceSchema, Corrupt},       {ReadBreak::SourceMissingRole, Corrupt},
+    {ReadBreak::SourceMissingRoot, Corrupt},  {ReadBreak::SourceMissingPath, Corrupt},
+    {ReadBreak::SourceMissingSha, Corrupt},   {ReadBreak::SourceMissingBytes, Corrupt},
+    {ReadBreak::SourceExtraField, Corrupt},   {ReadBreak::SourceRoleWire, Corrupt},
+    {ReadBreak::SourceRootWire, Corrupt},     {ReadBreak::SourcePathWire, Corrupt},
+    {ReadBreak::SourceShaWire, Corrupt},      {ReadBreak::SourceShaSize, Corrupt},
+    {ReadBreak::SourceBytesWire, Corrupt},    {ReadBreak::SourceBytesSize, Corrupt},
+    {ReadBreak::SourceEmptyRole, Corrupt},    {ReadBreak::SourceRootSlash, Corrupt},
+    {ReadBreak::SourceDotDot, Corrupt},       {ReadBreak::SourceDuplicateRole, Corrupt},
+    {ReadBreak::OutputsEmpty, Corrupt},       {ReadBreak::OutputsTooMany, Corrupt},
+    {ReadBreak::OutputSchema, Corrupt},       {ReadBreak::OutputMissingKey, Corrupt},
+    {ReadBreak::OutputMissingAsset, Corrupt}, {ReadBreak::OutputMissingType, Corrupt},
+    {ReadBreak::OutputExtraField, Corrupt},   {ReadBreak::OutputKeyWire, Corrupt},
+    {ReadBreak::OutputAssetSize, Corrupt},    {ReadBreak::OutputTypeWire, Corrupt},
+    {ReadBreak::OutputLongKey, Corrupt},      {ReadBreak::OutputNullAsset, Corrupt},
+    {ReadBreak::OutputNullType, Corrupt},     {ReadBreak::OutputOrder, Corrupt},
+    {ReadBreak::OutputDuplicateKey, Corrupt}, {ReadBreak::OutputDuplicateAsset, Corrupt},
+    {ReadBreak::OutputSelfMissing, Corrupt},  {ReadBreak::ReferenceImporter, Corrupt},
+    {ReadBreak::ReferenceName, Corrupt},      {ReadBreak::ReferenceVersion, Corrupt},
+    {ReadBreak::ReferenceSources, Corrupt},   {ReadBreak::ReferenceOptions, Corrupt},
+    {ReadBreak::ReferenceOutputs, Corrupt},   {ReadBreak::TopVersion, Newer},
     {ReadBreak::SourceVersion, Newer},        {ReadBreak::OutputVersion, Newer}};
 
 const uint8 ShortGuid[15] = {};
@@ -1252,9 +1254,9 @@ Array<uint8> BuildBroken(RawScene& scene, ReadBreak kind) noexcept {
 
 } // namespace
 
-// 읽기 손상(7.1절 15): 손상 하나마다 기대 오류다 — 형식·규칙 위반은 InvalidArgument, 기록·항목의
+// 읽기 손상(7.1절 15): 손상 하나마다 기대 오류다 — 형식·규칙 위반은 CorruptData, 기록·항목의
 // 더 새 버전은 Unsupported. 그 밖의 입력: 빈 byte·null self는 InvalidArgument, header가 아닌 byte는
-// InvalidArgument, 더 새 envelope 버전·다른 스키마(Tags)는 Unsupported. 바꾸지 않은 장면은 읽힌다.
+// CorruptData, 더 새 envelope 버전·다른 스키마(Tags)는 Unsupported. 바꾸지 않은 장면은 읽힌다.
 TEST(ImportRecord_ReadRejects) {
     SystemAllocator allocator;
     {
@@ -1263,7 +1265,7 @@ TEST(ImportRecord_ReadRejects) {
         CHECK(ReadImportRecord(allocator, Self, bytes.View()));
         CHECK(ReadImportRecord(allocator, AssetId{}, bytes.View()).Error() == Invalid);
         CHECK(ReadImportRecord(allocator, Self, {}).Error() == Invalid);
-        CHECK(ReadImportRecord(allocator, Self, Span<const uint8>(EightBytes)).Error() == Invalid);
+        CHECK(ReadImportRecord(allocator, Self, Span<const uint8>(EightBytes)).Error() == Corrupt);
         Array<uint8> envelope(allocator);
         REQUIRE(envelope.TryAppend(bytes.View()));
         StoreLittleEndian<uint32>(envelope.Data() + 8, 2);

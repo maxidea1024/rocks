@@ -184,7 +184,7 @@ TEST(AssetManager_LoadPrimaryAssetFirstFailure) {
         REQUIRE(rig.manager->OnReady(ticket.Value(), TaskLane::Game,
                                      RecordPrimary(env.allocator, record)));
         REQUIRE(rig.Settle());
-        CHECK(record.calls == 1 && record.error == ErrorCode::InvalidArgument);
+        CHECK(record.calls == 1 && record.error == ErrorCode::CorruptData);
         CHECK(record.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
               record.diagnostic.asset == FixedId(2));
         CHECK(record.lease.Leases().IsEmpty());

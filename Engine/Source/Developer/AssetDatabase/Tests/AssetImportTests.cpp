@@ -3441,8 +3441,7 @@ TEST(AssetImportStatus_Rejects) {
         CraftedRecord corrupt;
         corrupt.rawLeafRecord = brokenBytes.Value().View();
         REQUIRE(PutCrafted(env, sources, scene, corrupt));
-        CHECK(rejects("/Game/Leaf", ErrorCode::InvalidArgument,
-                      AssetDiagnosticCode::CorruptPackage) &&
+        CHECK(rejects("/Game/Leaf", ErrorCode::CorruptData, AssetDiagnosticCode::CorruptPackage) &&
               failure.section == static_cast<uint32>(PackageSectionKind::ImportRecord));
         REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
     }
@@ -3471,10 +3470,10 @@ TEST(AssetImportStatus_Rejects) {
         REQUIRE(scene.files.AddFile("Content/Leaf.rasset",
                                     leafBytes.View().Left(leafBytes.Size() / 2)));
         // 잘린 파일: 섹션 표가 파일 끝 밖을 가리킨다(부분 읽기 CorruptPackage / InvalidArgument).
-        CHECK(again(ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptPackage) &&
+        CHECK(again(ErrorCode::CorruptData, AssetDiagnosticCode::CorruptPackage) &&
               failure.section == 0);
         // 진단 인자 없이도(잘린 파일·사라진 파일).
-        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::InvalidArgument);
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::CorruptData);
         scene.files.Remove("Content/Leaf.rasset");
         CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::NotFound);
         REQUIRE(scene.files.AddFile("Content/Leaf.rasset", leafBytes.View()));
@@ -3490,7 +3489,7 @@ TEST(AssetImportStatus_Rejects) {
         REQUIRE(PutCrafted(env, sources, scene, corrupt));
         AssetService service(env.allocator, scene.layout, scene.Config(env));
         REQUIRE(service.Initialize());
-        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::InvalidArgument);
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::CorruptData);
         REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
     }
 

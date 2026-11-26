@@ -304,11 +304,11 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
 
     auto header = ReadRecordHeader(bytes);
     if (!header) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     if (!(header.Value().schema == NuggetRecordSchema)) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     if (header.Value().schemaVersion > NuggetRecordSchemaVersion) {
@@ -320,7 +320,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
     if (!reader) {
         return Result<Out>::Failure(reader.Error() == ErrorCode::OutOfMemory
                                         ? ErrorCode::OutOfMemory
-                                        : ErrorCode::InvalidArgument);
+                                        : ErrorCode::CorruptData);
     }
 
     NuggetRecord record(allocator);
@@ -334,14 +334,14 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
         if (!field || !(field.Value().id == Guid{0, index + 1}) ||
             field.Value().wireType != static_cast<uint32>(wires[index])) {
             // Next는 할당하지 않는다(없음·예산 소진만 실패) — 형식 위반이다.
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         fields[index] = field.Value();
     }
 
     if (auto extra = reader.Value().Next(); extra) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     auto text = [](Span<const uint8> payload) noexcept {
@@ -358,7 +358,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
 
     if (fields[2].payload.Size() != DigestBytes ||
         fields[3].payload.Size() % NuggetValueRowBytes != 0) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     for (usize at = 0; at < DigestBytes; ++at) {
@@ -374,7 +374,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
         NuggetValueRow row;
         if (!DecodeRow(fields[3].payload.Slice(index * NuggetValueRowBytes, NuggetValueRowBytes),
                        row)) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         (void)record.values.TryPushBack(row);
@@ -385,7 +385,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
     if (!items) {
         return Result<Out>::Failure(items.Error() == ErrorCode::OutOfMemory
                                         ? ErrorCode::OutOfMemory
-                                        : ErrorCode::InvalidArgument);
+                                        : ErrorCode::CorruptData);
     }
 
     if (auto reserved = record.inputs.TryReserve(items.Value().ItemCount()); !reserved) {
@@ -397,7 +397,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
         if (!item) {
             return Result<Out>::Failure(item.Error() == ErrorCode::OutOfMemory
                                             ? ErrorCode::OutOfMemory
-                                            : ErrorCode::InvalidArgument);
+                                            : ErrorCode::CorruptData);
         }
 
         const WireType inputWires[InputFieldCount] = {WireType::String, WireType::Bytes,
@@ -407,7 +407,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
             auto field = item.Value().Next();
             if (!field || !(field.Value().id == Guid{0, at + 1}) ||
                 field.Value().wireType != static_cast<uint32>(inputWires[at])) {
-                return Result<Out>::Failure(ErrorCode::InvalidArgument);
+                return Result<Out>::Failure(ErrorCode::CorruptData);
             }
 
             parts[at] = field.Value();
@@ -415,7 +415,7 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
 
         if (auto extra = item.Value().Next(); extra || parts[1].payload.Size() != DigestBytes ||
                                               parts[2].payload.Size() != DigestBytes) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         NuggetInput input(allocator);
@@ -436,7 +436,9 @@ Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> by
     }
 
     if (auto valid = ValidateNuggetRecord(record); !valid) {
-        return Result<Out>::Failure(valid.Error());
+        // 읽은 레코드의 규칙 위반은 손상이다(같은 검사가 쓰기에서는 InvalidArgument).
+        return Result<Out>::Failure(
+            valid.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : valid.Error());
     }
 
     return Result<Out>::Success(Move(record));

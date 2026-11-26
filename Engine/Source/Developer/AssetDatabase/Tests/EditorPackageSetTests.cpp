@@ -277,7 +277,7 @@ ShapeExpectation Expect(BaseShape shape) noexcept {
                 false,
                 false,
                 C::CorruptPackage,
-                ErrorCode::InvalidArgument,
+                ErrorCode::CorruptData,
                 RecordSection,
                 true,
                 C::MissingDependency};
@@ -286,7 +286,7 @@ ShapeExpectation Expect(BaseShape shape) noexcept {
                 false,
                 false,
                 C::CorruptPackage,
-                ErrorCode::InvalidArgument,
+                ErrorCode::CorruptData,
                 DependencySection,
                 true,
                 C::MissingDependency};

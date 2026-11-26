@@ -260,12 +260,18 @@ inline void FixManifestCrc(Array<uint8>& bytes) noexcept {
     StoreLittleEndian<uint32>(bytes.Data() + body, Crc32(bytes.View().Slice(0, body)));
 }
 
-// 실패 진단이 기대 칸·항목의 CorruptPackage인지 본다.
-inline bool CorruptAt(const AssetDiagnostic& failure, CookedManifestField field,
-                      uint64 detail) noexcept {
-    return failure.code == AssetDiagnosticCode::CorruptPackage &&
-           failure.error == ErrorCode::InvalidArgument &&
+// 실패 진단이 기대 칸·항목의 CorruptPackage인지 본다. 읽기·대조(파일·패키지 손상)는 CorruptData,
+// 호출자가 넘긴 모델의 검증·쓰기는 InvalidArgument다(AssetSystem 19장 — ModelCorruptAt).
+inline bool CorruptAt(const AssetDiagnostic& failure, CookedManifestField field, uint64 detail,
+                      ErrorCode error = ErrorCode::CorruptData) noexcept {
+    return failure.code == AssetDiagnosticCode::CorruptPackage && failure.error == error &&
            failure.section == static_cast<uint32>(field) && failure.detail == detail;
+}
+
+// ValidateCookedManifest·WriteCookedManifest(호출자 모델)의 진단이다.
+inline bool ModelCorruptAt(const AssetDiagnostic& failure, CookedManifestField field,
+                           uint64 detail) noexcept {
+    return CorruptAt(failure, field, detail, ErrorCode::InvalidArgument);
 }
 
 } // namespace rocks::asset_test

@@ -16,9 +16,9 @@ inline Result<void> Fail(ImageDecodeResult& out, AssetDiagnosticCode code, Error
     return Result<void>::Failure(error);
 }
 
-// 구조·길이 위반이다(InvalidSource/InvalidArgument).
+// 구조·길이 위반이다(InvalidSource/CorruptData — 읽은 데이터 손상, AssetSystem 19장).
 inline Result<void> Invalid(ImageDecodeResult& out, uint64 offset) noexcept {
-    return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, offset);
+    return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, offset);
 }
 
 // 받지 않는 변형이다(UnsupportedSourceFormat/Unsupported).

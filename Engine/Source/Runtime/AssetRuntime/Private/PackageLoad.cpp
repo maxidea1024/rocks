@@ -51,8 +51,11 @@ Result<T> ClassifyGraphFailure(AssetDiagnostic* failure, ErrorCode error, AssetI
         return FailAsset<T>(failure, AssetDiagnosticCode::UnsupportedVersion, error, asset,
                             static_cast<uint32>(PackageSectionKind::Objects), 0);
     default:
-        return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, error, asset,
-                            static_cast<uint32>(PackageSectionKind::Objects), 0);
+        // 그래프 입력(노드·import 표)은 모두 패키지 byte에서 온다 — 그래프의 인자 위반도 손상이다
+        // (AssetSystem 19장).
+        return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage,
+                            error == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : error,
+                            asset, static_cast<uint32>(PackageSectionKind::Objects), 0);
     }
 }
 
@@ -137,8 +140,7 @@ Result<void> PackageLoadHooks::Report(const FieldDiagnostic& diagnostic) noexcep
     case FieldDiagnosticKind::RequiredMissing:
         ++missingRequired;
         // 쿠킹 패키지는 writer가 Required null을 거부하므로 누락은 손상이다.
-        return cooked_ ? Result<void>::Failure(ErrorCode::InvalidArgument)
-                       : Result<void>::Success();
+        return cooked_ ? Result<void>::Failure(ErrorCode::CorruptData) : Result<void>::Success();
     default:
         return Result<void>::Success();
     }
@@ -168,7 +170,7 @@ Result<void> PackageLoadHooks::ObserveStruct(const FieldCodecFrame& frame, TypeI
     if (ref.IsEmpty()) {
         // 빈 값의 크기·해시는 0이다(AS 5.7절 14 — writer가 쓰지 않는 값이라 Objects 손상).
         return IsMalformedEmptyBulkRef(ref.rawBytes, ref.sha256)
-                   ? Result<void>::Failure(ErrorCode::InvalidArgument)
+                   ? Result<void>::Failure(ErrorCode::CorruptData)
                    : Result<void>::Success();
     }
 
@@ -310,9 +312,8 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure,
                                           const TypeLease& representativeType) noexcept {
     const AssetId asset = contents_.header.assetId;
     auto corrupt = [&](PackageSectionKind section, uint64 detail) noexcept {
-        return FailAsset<void>(failure, AssetDiagnosticCode::CorruptPackage,
-                               ErrorCode::InvalidArgument, asset, static_cast<uint32>(section),
-                               detail);
+        return FailAsset<void>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
+                               asset, static_cast<uint32>(section), detail);
     };
 
     // export 1(대표 에셋)은 Asset 파생이어야 한다(Prepare가 잡은 lease로 판정한다).
