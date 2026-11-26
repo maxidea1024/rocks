@@ -108,6 +108,13 @@ public:
     // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
 
+    // 숨긴 채 만든 창(WindowDesc::visible = false)을 보이고 앞으로 가져온다. 이미 보이면 앞으로만
+    // 가져온다. 시작 화면(스플래시)에서 주 창으로 넘길 때 첫 프레임을 그린 뒤 부른다
+    // (Docs/Design/SplashScreen 9.4절). 다른 앱이 전경이면 OS가 앞으로 가져오기를 거부할 수 있다.
+    // 창 backend가 따로 보이기를 다루지 않는 플랫폼(Android)은 아무것도 하지 않는다.
+    virtual void ShowAndActivate() noexcept {
+    }
+
     // 렌더 surface를 잃었는지다(Android: 창이 사라진다 — Docs/Design/AndroidPlatform.ko.md 4절).
     // true를 돌려받은 호스트는 그 창의 swapchain·EGL window surface를 놓고 AcknowledgeSurfaceLost를
     // 부른다. 그 전까지 OS 콜백이 기다린다(제한 시간 4초). 데스크톱은 늘 false다. 게임 스레드에서

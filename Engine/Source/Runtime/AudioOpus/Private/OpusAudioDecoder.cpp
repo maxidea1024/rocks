@@ -302,7 +302,9 @@ private:
     bool finished_ = false;
 };
 
-Result<UniquePtr<AudioDecoder>> CreateOpusDecoder(Allocator& allocator) noexcept {
+} // namespace
+
+Result<UniquePtr<AudioDecoder>> CreateOpusAudioDecoder(Allocator& allocator) noexcept {
     auto made = UniquePtr<OpusChunkDecoder>::TryMake(allocator, allocator);
     if (!made) {
         return Result<UniquePtr<AudioDecoder>>::Failure(made.Error());
@@ -311,10 +313,8 @@ Result<UniquePtr<AudioDecoder>> CreateOpusDecoder(Allocator& allocator) noexcept
     return Result<UniquePtr<AudioDecoder>>::Success(UniquePtr<AudioDecoder>(Move(made.Value())));
 }
 
-} // namespace
-
 Result<void> RegisterOpusAudioDecoder(AudioDecoderTable& table) noexcept {
-    return table.Register(AudioCodecId::Opus, &CreateOpusDecoder);
+    return table.Register(AudioCodecId::Opus, &CreateOpusAudioDecoder);
 }
 
 } // namespace rocks::audio

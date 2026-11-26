@@ -385,3 +385,12 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
     - 결과: `AssetImportResult::edited`(`AssetImportOutput` — key는 비고 경로(색인 항목)·id, 저장 순서). 실패하면 비운다. 단 기존 파일을 교체한 뒤의 실패로 결과를 남기는 구성원(7.1절 19 A2f3d 리뷰 반영 (2))은 저장을 마친 고친 에셋만 남긴다. 실패 뒤 dirty로 두는 것은 저장하지 않은 대상뿐이다(저장한 대상은 디스크와 같다). 명령 `asset-import`·`asset-reimport`는 고친 에셋마다 `edited <path> <AssetId>` 줄을 낸다(출력 줄 다음).
     - 버린 대안: 스켈레톤을 출력으로 다시 만들기(다른 에셋의 출력이 될 수 없다 — 소유 기록이 하나다), 임포트 뒤 따로 `asset-set`(중간 상태가 디스크에 남고 실패를 되돌릴 수 없다), 고친 에셋을 맨 끝(전파 뒤)에 저장(새 메시는 먼저 써도 되지만 기존 메시 재임포트가 먼저 저장되면 본이 모자란 스켈레톤을 가리킨 채 남는다).
     - 시험(14절 완료 조건 넷): 시험 임포터에 고칠 대상 변형(하나·둘·같은 id 두 번·OpenAsset과 함께), 거부 경우 전부, 저장 순서(고친 에셋 저장 실패 → 새 파일 지움·기존 파일 그대로, 기존 출력 저장 실패 → 고친 에셋은 저장됨), 열려 있던 깨끗한·dirty 대상, 묶음 두 구성원이 같은 대상, 할당 실패.
+21. **A2f5 — 임포터 태그 접두 `tagPrefix`**(2026-11-26, 설계 — [Unreal 교환](../UnrealExchange/10-RocksImporter.ko.md) 10.6절 7번이 처음 쓴다. 권장안으로 확정):
+    - 문제: A2f3a는 태그 키를 `<importerName>.`으로 시작하게 정했다. 그런데 A2f 임포터는 주 출력 타입이 하나라 Unreal 교환은 교환 클래스마다 임포터가 따로 있다(`unreal_texture_2d` 등). 반면 기존 에셋 조회(UX1c)는 한 키 `UnrealExchange.ObjectPath`로 찾는다. 임포터 이름을 접두로 쓰면 키가 임포터마다 갈려 조회가 모든 이름을 알아야 한다.
+    - `AssetImporterInfo::tagPrefix`(StringView — 비면 `name`): 이 임포터가 쓰는 태그 키 접두다. 여러 임포터가 같은 접두를 쓸 수 있다(같은 기능 묶음 — 교환 임포터 다섯이 `UnrealExchange`). 등록 규칙은 이름과 같다(1–`MaxImporterNameBytes` byte의 `[A-Za-z0-9_]`, 엔진 이름공간 `Bundle`(대소문자 무시)은 InvalidArgument).
+    - 문맥 `AddTag`는 키가 `<tagPrefix>.`(비면 `<name>.`)로 시작해야 한다.
+    - ImportRecord 소유 기록에 선택 필드 9 `tagPrefix`(String)를 더한다. 접두가 `importerName`과 다를 때만 쓴다(같으면 쓰지 않는다 — 한 꼴). 읽기는 필드가 있으면 그 값(1–`MaxImporterNameBytes` byte, `importerName`과 다름 — 아니면 InvalidArgument), 없으면 `importerName`으로 태그 접두를 대조한다. `ImportRecord::tagPrefix`(없으면 빈 값)와 `ImportRecordInput::tagPrefix`(비거나 `importerName`과 같으면 쓰지 않음)를 둔다. 스키마 버전은 그대로 2다(선택 필드 — 옛 파일은 필드 9가 없을 뿐 그대로 읽힌다).
+    - 기록을 다시 쓰는 곳(저장의 기록 옮기기 — 복제 `Duplicate`·ID 수정 `FixDuplicateId`, 이동은 기록을 다시 쓰지 않는다)은 옛 기록의 `tagPrefix`를 그대로 넘긴다.
+    - 버린 대안: (1) 임포터 이름을 접두로 두고 조회가 교환 임포터 이름 전부를 키로 찾기(새 종류가 생길 때마다 조회 표를 고친다), (2) 기록 읽기가 접두를 보지 않기(다른 임포터 키가 섞인 기록을 받는다), (3) 교환 임포터 하나가 여러 출력 타입 만들기(A2f 주 출력 타입 계약을 깬다).
+    - 시험: 등록(접두 규칙·`Bundle`·비면 이름·같은 접두 둘), `AddTag`(접두 대조 — 이름 접두는 거부), 기록 쓰기·읽기(필드 9 있음·없음·이름과 같음 거부·접두 위반 키 거부·참조 기록 거부·접두만 있는 기록), 재임포트·복제가 접두를 옮김.
+    - **상태(2026-11-26)**: 구현·시험 완료(UnrealExchange UX2b2와 함께). `FixDuplicateId`의 접두 전파는 같은 코드 경로(복제와 같은 기록 옮기기)라 따로 시험하지 않았다.

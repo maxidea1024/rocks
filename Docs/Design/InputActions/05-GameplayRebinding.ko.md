@@ -9,10 +9,8 @@
 `PlayerController`는 `PlayerActionInput`과 `InputActionBindings`(UE `UEnhancedInputComponent`)를 가진다. 둘 다 NATIVE(실행 중 상태)다.
 
 컨텍스트 객체 쥐기(2.7절 — UE `AppliedInputContextData`가 컨텍스트를 강하게 붙잡는 역할):
-- IA3은 bundle 수준 API다: `PlayerController::ActionInput()`(`PlayerActionInput`)에 `AddContext(bundle, …)`로 넣는다. 객체·에셋에서 모으는 도우미(아래 둘)는 에셋 감싸기와 함께 IA6이다.
-- 에셋 컨텍스트는 적용한 동안 `AssetLease`로 쥐고, 코드로 만든 객체는 handle로 쥔다(PlayerController의 기존 NATIVE handle + `World::With` 방식).
-- `AddInputContext(asset, priority, options)`는 `AssetManager::With` 범위에서 `CollectInputContext`로 모아 평가기에 넣는다. 데이터를 바꾼 뒤에는 `RefreshInputContext(asset)`이 다시 모아 `UpdateContext`한다.
-- 실행 중 편집을 퍼뜨리는 도우미(UE `MapKey`·`UnmapKey`·`UnmapAll`): 한 번 모은 bundle을 그 id의 컨텍스트를 가진 모든 PlayerController에 `UpdateContext`한다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정의 등록 사본도 바뀐다(`UpdateContext`가 한다 — 행은 다시 매기지 않는다, 5.2절).
+- IA3은 bundle 수준 API다: `PlayerController::ActionInput()`(`PlayerActionInput`)에 `AddContext(bundle, …)`로 넣는다. 코드로 만든 객체는 호출자가 handle로 쥐고(PlayerController의 기존 NATIVE handle + `World::With` 방식) 모은 bundle을 넣는다.
+- 에셋 컨텍스트는 적용한 동안 PlayerController가 `AssetLease`로 쥔다(5.4절 — IA6b).
 
 평가 시점:
 - `PlayerController::OnTick` 안에서 한다. 입력 스냅숏과 제스처 다음, `OnPlayerTick` 전이다(UE `TickActor`·`PlayerTick`이 `TickPlayerInput`을 먼저 한다 — `PlayerController.cpp:2326·5504-5510`).
@@ -24,7 +22,7 @@
 - `BindAction(actionId, ActionEvent events, Function<void(const ActionEventData&)>, bool consumes = false) → ActionBindingHandle`
   - `ActionEventData`는 액션 id, 이벤트, 값, 경과·Triggered 시간이다(UE `(const FInputActionInstance&)` 형태).
   - 빈 함수·None 마스크는 `InvalidArgument`다(UE는 `ETriggerEvent::None` 바인딩을 이벤트 없는 틱마다 부른다 — 버린 대안: 쓰임이 불분명하고 매 평가 호출이 된다). 할당 실패면 `OutOfMemory`다.
-  - 함수 바인딩(후속 — [함수 리플렉션](../FunctionReflection.ko.md) FR4): `(객체 handle, FunctionId)` 바인딩은 FR4가 들어온 뒤 더한다. 서명은 `void(const ActionEventData&)`이고 바인딩할 때 `FunctionSignatureMatches`로 검사한다. 그래서 `ActionEventData`는 강한 참조(`ObjectRef<T>` 등)를 담지 않는 리플렉션 struct로 둔다(FD4 — frame에 둘 수 없다).
+  - 함수 바인딩(후속 — [함수 리플렉션](../FunctionReflection.ko.md) FR4, 설계 [이벤트 리플렉션](../EventReflection.ko.md) EV1a): `(객체 handle, FunctionId)` 바인딩은 재사용 값 `FunctionBinding`(바인딩 시점 서명·frame 배치 검사, 같은 frame으로 생성 thunk 호출)이 들어온 뒤 `InputActionBindings`가 그것을 쥐어 더한다(이벤트 마스크·`consumes`·전달 중 지운 바인딩 규칙은 이 절 그대로). 서명은 `void(const ActionEventData&)`이고 바인딩할 때 `FunctionSignatureMatches`(frame 배치판)로 검사한다. 그래서 `ActionEventData`는 강한 참조(`ObjectRef<T>` 등)를 담지 않는 리플렉션 struct로 둔다(FD4 — frame에 둘 수 없다).
   - 콜백 수명: `Function`은 캡처를 그대로 쥔다(UE delegate처럼 객체 파괴를 알지 못한다). 객체는 handle을 캡처해 `World::With`로 접근하거나, 없어지기 전에(OnUnPossess·EndPlay) `RemoveBinding`한다. 콜백을 만든 allocator는 바인딩보다 오래 살아야 한다.
 - `BindActionValue(actionId) → ActionValueHandle`과 `ActionValue(handle) → InputValue`: 평가마다 갱신한다. 포인터를 내주지 않는다(재배치 안전).
 - `RemoveBinding(handle)`·`RemoveValueBinding(handle)`·`ClearBindings()`. 전달 중(콜백 안)에 지운 바인딩은 그 평가의 실행 목록에 있으면 실행되고, 전달이 끝난 뒤 지워진다(UE는 실행 목록을 복제본으로 만든다).
@@ -92,3 +90,24 @@ Rocks:
 - 비운 slot(현재 키 무효 — 사용자가 만든 slot을 되돌린 것)은 빈 키 이름 `""`으로 쓰고, 불러오기는 빈 이름을 비운 slot으로 읽는다.
 - 파일 위치(사용자 Saved 폴더)는 호출자(Gameplay `LocalPlayer`)가 정한다. Rocks에는 아직 SaveGame 체계가 없다.
 - 모르는 키 이름·범위 밖 slot의 매핑은 건너뛰고 Warning `InputUserSettingsEntrySkipped`로 알린다(설정을 버리지 않는다). JSON이 깨졌거나 필수 칸(version·profiles·각 id)이 없거나 종류가 틀리면 `InvalidArgument`이고(Config의 JSON 오류와 같다) 기존 설정은 그대로다. 더 높은 version은 `Unsupported`다(그대로). 현재 프로필 id가 목록에 없으면 기본 프로필로 둔다.
+
+### 5.4 에셋 컨텍스트(IA6b — IAD14)
+
+`PlayerController`(Gameplay — 공개 의존에 `AssetRuntime`을 더한다)가 적용한 에셋 컨텍스트의 lease를 쥔다. UE `AppliedInputContextData`가 컨텍스트 객체를 강하게 쥐는 것과 같은 역할이다(`EI/Public/EnhancedPlayerInput.h`). 추가 API는 `EI/Public/EnhancedInputSubsystemInterface.h:265`다. 표는 (AssetId, 컨텍스트 id, lease)이고 NATIVE다. 모두 게임 스레드 전용이다(AssetManager와 같다).
+
+- `AddInputContext(AssetManager& assets, AssetLease&& context, int32 priority, const ContextOptions& options = {})`(UE `AddMappingContext(const UInputMappingContext*, int32, const FModifyContextOptions&)`):
+  - lease의 InputContext를 2.8절 도우미로 모아 `ActionInput().AddContext(bundle, priority, options)`에 넣는다. 성공하면 언제나 lease를 가져간다(호출자의 lease는 비게 된다).
+  - 같은 에셋을 다시 넣으면 `AddContext`의 같은 id 규칙을 따른다(Untracked면 우선순위를 바꾸고, CountRegistrations면 등록 횟수만 는다 — 4.1절). 쥔 lease는 받은 새 lease로 바꾼다(옛 lease를 놓는다 — 같은 에셋이라 상주는 그대로다. 옛 lease가 scope 회수로 비었어도 다시 넣으면 살아난다). 모은 id가 쥘 때와 다르면 `InvalidArgument`다.
+  - 다른 원천이 이미 그 컨텍스트 id를 넣었으면 `InvalidArgument`이고 아무것도 바꾸지 않는다. 다른 원천은 다른 에셋이거나 `ActionInput().AddContext`로 넣은 코드 bundle이다. 한 id는 한 원천이다(UE는 객체 포인터가 키라 겹치지 않는다).
+  - 실패하면 상태와 lease는 그대로다(lease는 옮기지 않는다). 오류는 2.8절 모으기, `AddContext`(검증 `InvalidArgument`), 표 확보 실패 `OutOfMemory`다. 표 칸은 `AddContext` 전에 확보한다.
+- **원천 확인(세대).** 표의 칸은 넣을 때 평가기 컨텍스트 칸의 세대(`PlayerActionInput::ContextSerial(id)` — 새 칸을 만들 때마다 바뀌고, 없으면 0)를 함께 적는다. 세대가 지금 값과 다르면 그 칸은 끝난 것이다. 평가기에서 직접 뺐거나(`ActionInput().RemoveContext`·`ClearContexts`), 뺀 뒤 같은 id를 다시 넣은 경우다. 끝난 칸은 `Add`·`Remove`·`Refresh`를 시작할 때와 `OnTick` 평가 전에 lease를 놓는다. `HasInputContext`는 세대를 비교해 판정만 한다(const). 그래서 끝난 칸에서 `HasInputContext`는 거짓, `Remove`·`Refresh`는 `NotFound`이고, `Add`는 새로 넣는 것으로 본다.
+- 에셋이 쥔 컨텍스트 id에 `ActionInput()`을 직접 쓰는 것(`UpdateContext`, 같은 id `AddContext`로 우선순위·등록 횟수 바꾸기)은 계약 위반이다. 결과는 정하지 않는다(다음 `RefreshInputContext`가 에셋 데이터로 덮어쓴다). 세대가 같아 감지하지 못한다.
+- `RemoveInputContext(AssetId asset, const ContextOptions& options = {})`(UE `RemoveMappingContext`): `ActionInput().RemoveContext(id, options)`를 부른다. 컨텍스트가 평가기에서 빠지면(CountRegistrations면 등록 횟수 0) lease를 놓는다. 쥐지 않은 에셋(끝난 칸 포함)은 `NotFound`다.
+- `RefreshInputContext(AssetManager& assets, AssetId asset, bool forceImmediately = false)`: 쥔 lease로 다시 모아 `ActionInput().UpdateContext(bundle, forceImmediately)`에 넣는다(2.7절 — 우선순위·등록 횟수는 그대로). 에셋 데이터를 바꾼 뒤 부른다. 쥐지 않은 에셋은 `NotFound`다. 모은 컨텍스트 id가 쥘 때와 다르면 `InvalidArgument`다(키가 바뀐 데이터는 Remove 뒤 Add). 회수된 lease는 `StaleHandle`이다. 실패하면 평가기는 이전 사본 그대로다.
+- `HasInputContext(AssetId asset)`: 쥐고 있고 그 칸이 끝나지 않았으면(세대가 같으면) 참이다.
+- 수명: `OnFrameworkEndPlay`가 쥔 컨텍스트를 평가기에서 모두 빼고(등록 횟수를 세는 컨텍스트는 0이 될 때까지 기본 옵션으로 `RemoveContext`를 되풀이한다 — 사용자 설정 등록은 건드리지 않는다, 뒤의 `ClearPlayer`가 설정을 뗀다) lease를 놓는다. EngineAssets 종료 계약에서 World가 쥔 lease는 World 파괴가 놓는다(AssetSystem 11.8절 6). 그 뒤 `AddInputContext`는 `InvalidArgument`다(Actor 정리 뒤 — 쥘 수 없다).
+- 컨텍스트를 모든 플레이어에 다시 모으기: `GameplayWorldSubsystem::RefreshInputContext(World&, AssetManager&, AssetId, bool forceImmediately = false)`. UE `UEnhancedInputLibrary::RequestRebuildControlMappingsUsingContext`(`EI/Private/EnhancedInputLibrary.cpp:55-67`) 대응이다.
+  - `Controllers()` 중 그 에셋을 쥔 PlayerController마다 `RefreshInputContext`를 부른다. 모두 시도하고 첫 실패를 돌려준다. 파괴 대기 Controller와 PlayerController가 아닌 Controller는 건너뛴다.
+  - 호출자는 World 게임 스레드에서 부른다(PlayerController를 `World::With`로 읽고, 그 안에서 2.8절 도우미가 `AssetManager::With`를 중첩해 연다).
+  - 쥔 플레이어가 없으면 성공이다(UE와 같다).
+  - 실행 중 데이터 편집(키 바꾸기 — UE 에디터·런타임에서 매핑 객체를 고친 뒤 이 함수를 부르는 흐름)에 쓴다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정의 등록 사본도 바뀐다(`UpdateContext`가 한다 — 행은 다시 매기지 않는다, 5.2절).

@@ -108,6 +108,7 @@ internal static partial class MetaTests
         RegisterRejectedSpecifiers(context);
         RegisterSparksBinding(context);
         RegisterFunctions(context);
+        RegisterSparksFunctions(context);
     }
 
     // 거부 시험 하나(name)를 등록한다. sources의 원본마다 MetaCompiler가 code 진단(reason을 담은 문장)으로 거부해야 한다.

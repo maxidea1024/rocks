@@ -22,9 +22,9 @@ namespace rocks {
 // 원본 층의 감마 공간이다(UE EGammaSpace와 같은 순서·번호 — Linear 0, Pow22 1, sRGB 2. 4.5절 1번
 // layers[].gammaSpace, 4.6절 4번 대조 — GammaMismatch detail).
 enum class ExchangeGammaSpace : uint8 {
-    Linear,
-    Pow22,
-    Srgb
+    Linear = 0,
+    Pow22 = 1,
+    Srgb = 2
 };
 
 // 변환한 원본이다.

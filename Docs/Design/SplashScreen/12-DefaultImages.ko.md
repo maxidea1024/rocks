@@ -18,7 +18,7 @@
 
 ![템플릿 스플래시 모의 화면](../img/SplashScreen/template-mock.png)
 
-- 논리 크기 768×432(16:9), `@2x`는 1536×864다. sRGB 8-bit PNG, alpha 없음.
+- 논리 크기 768×384(2:1), `@2x`는 1536×768이다. sRGB 8-bit PNG, alpha 없음. 개정 3에서 16:9(768×432)를 높이가 길다는 사용자 의견으로 2:1로 낮췄다. 글자 칸은 이미지 아래 기준이라 코드는 그대로다. 템플릿 그림은 432 높이 구도로 그린 뒤 위쪽 하늘 48 px를 잘라 낸다.
 - 브랜드 지침(`Assets/Branding/README.md`)을 지킨다: 로고는 SVG 마스터에서 뽑은 흰색 PNG를 한 번에 최종 크기로 줄여 얹었고 형상·비율을 바꾸지 않았다. 스택형은 지침의 "Splash screen" 용도이고, 가로형 로고 최소 폭(240 px)보다 작은 자리(템플릿 띠)는 심볼만 쓴다. 로고에 그라데이션·그림자를 쓰지 않는다(배경의 아주 약한 빛 웅덩이는 로고가 아니라 바탕이다). 여백은 지침 5절의 x(= H/8) 이상이다.
 - 생성기는 `Assets/Branding/Splash/`(`make_splash.py`·`template_art.py`·`mockup.py`, Python 3 + numpy + Pillow)이다. 등고선과 지형은 고정 시드로 만들어 다시 돌려도 같은 그림이 나온다. 이미지를 바꿀 때 생성기와 결과를 함께 커밋한다.
 - 템플릿은 PNG를 그대로 복사한다(`replaceInExtensions`에 없는 확장자 — `NewProjectCommand`가 `File.Copy`).

@@ -19,7 +19,8 @@ using Rocks.Build.Rules;
 // ES preview out of shipping Windows builds as well); Android always links it (GLES31_ANDROID).
 // --audio-tone plays a test tone through Audio's output device; it links AudioMiniaudio, whose module lifetime object registers the
 // miniaudio backend factory in the AudioOutputBackendRegistry host service (Docs/Design/AudioSystem section 3.34.5 — the host code never calls it).
-// --engine runs AudioEngineSubsystem and AudioWorldSubsystem from EngineAudio (keys 1-3 audio check, Docs/Design/AudioSystem section 3.35.11).
+// --engine runs AudioEngineSubsystem and AudioWorldSubsystem from EngineAudio (keys 1-3 audio check, Docs/Design/AudioSystem section 3.35.11);
+// AudioOpus registers its decoder factory in the AudioDecoderRegistry host service for the engine decoder table (section 3.37.1).
 public sealed class SandboxProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context)
@@ -43,8 +44,8 @@ public sealed class SandboxProgram : ModuleRules
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private"), context.PathInRoot("Programs/Sandbox/EngineShaderTests/Shared")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
-                "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio", "EngineAudio",
+            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "SplashScreen", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
+                "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),
                 .. (traceAnalysis ? ["TraceAnalysis"] : Array.Empty<string>())]

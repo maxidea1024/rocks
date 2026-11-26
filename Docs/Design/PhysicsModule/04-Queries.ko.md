@@ -39,6 +39,7 @@ struct QueryFilter {
 ```
 
 - `ObjectTypes` 도우미: `AllObjects`·`AllStaticObjects`·`AllDynamicObjects`(UE `CollisionQueryParams.h:458–463`·`528–545`). UE `FCollisionQueryFlag`는 AllObjects를 모든 bit로 시작해(`:359–362`) trace 채널(Visibility·Camera·trace 사용자 채널)만 뺀다(`E/Private/Collision/CollisionProfile.cpp` `RemoveFromAllObjectsQueryFlag`). 그래서 이름 없는 사용자 채널도 AllObjects에 든다. 정적 묶음은 WorldStatic과 `staticObject` 사용자 채널(profile 표 `IsStaticObjectChannel`), AllDynamic = AllObjects − 정적 묶음이다.
+- 빈 `ObjectTypes`(0)는 UE처럼 채널 0(WorldStatic)·모두 Block의 Channel 질의다(UE `FCollisionObjectQueryParams::IsValid` 거짓 → `DefaultCollisionChannel` — `E/Private/PhysicsEngine/PhysicsInterfaceUtils.cpp:17`, `E/Private/Collision/WorldCollision.cpp:55`).
 - `Profile`: 표에서 그 profile의 object type을 채널로, 응답 묶음을 응답으로 써서 `Channel` 질의를 한다(UE `WorldCollision.cpp:286–293`). 표에 없으면 경고 후 `WorldStatic` + 기본 응답(UE `World.cpp:2052–2063`).
 
 `QueryParams`(UE `FCollisionQueryParams` — `CollisionQueryParams.h:42–126`, 기본값 `:210–228`):
@@ -90,7 +91,7 @@ UE와 같은 규칙이다(`CH/Private/Chaos/CollisionFilterData.cpp:434–513`, 
 | `time` | 0–1 비율(시작 → 끝). sweep 이동은 pullback 때문에 조금 작다(5.1절) |
 | `distance` | 시작점에서 `location`까지 거리(cm). 시작 겹침이면 0 |
 | `location` | 형상 중심이 닿은 위치 = 시작 + time·(끝 − 시작) |
-| `impactPoint` | 실제 접촉점. 시작 겹침이면 `location` |
+| `impactPoint` | 실제 접촉점. 시작 겹침이면 shape trace는 MTD 접촉점(UE `ConvertOverlappedShapeToImpactHit`), line trace는 시작점 |
 | `normal` | 쓸고 간 형상 쪽 법선(line은 `impactNormal`과 같다) |
 | `impactNormal` | 맞은 표면 법선(바깥 방향, 어댑터 경계 5절) |
 | `traceStart`·`traceEnd` | 시작·시도한 끝 |

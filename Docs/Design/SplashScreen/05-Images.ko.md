@@ -38,4 +38,4 @@ UE의 `EdSplash`는 Rocks 이름(Studio)에 맞춰 `StudioSplash`로 한다.
 ### 5.5 배포
 
 - 스플래시는 에셋 시스템이 서기 전에 떠야 하므로 쿠킹 패키지가 아니라 낱개 파일로 싣는다(UE `EngineExtraStageFiles`와 같다). 게임 패키지는 `{EngineDir}/Content/Splash`의 `Splash*` 파일(프로젝트가 자기 것을 가지면 생략)과 `{ProjectDir}/Content/Splash`를 싣고, `StudioSplash*`는 싣지 않는다. 패키징 단계 설계가 이 규칙을 가져간다(18절).
-- 설치형 SDK(`InstalledSdk`)는 `Engine/Content/Splash`를 싣는다(SP1).
+- 설치형 SDK(`InstalledSdk`)는 아직 엔진 데이터 폴더(`Engine/Config`도)를 싣지 않는다. 엔진 데이터를 싣는 패키징 단계(SP6)에서 `Engine/Content/Splash`도 함께 싣는다(개정 2 — SP1에서 옮김).
