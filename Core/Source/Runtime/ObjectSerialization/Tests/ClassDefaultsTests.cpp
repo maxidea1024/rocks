@@ -1,5 +1,6 @@
 #include <ReflectionTestFixtures/ClassDefaultsFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/GeneratedFieldAccess.h>
@@ -260,7 +261,8 @@ TEST(ClassDefaults_RecordMatchesGraphSave) {
                   ExpectedFingerprint(1, record.Record(ClassDefaultsConfiguration::Cooked)));
             CHECK(!(record.Fingerprint(ClassDefaultsConfiguration::Editor) ==
                     record.Fingerprint(ClassDefaultsConfiguration::Cooked)));
-            // cooked에는 EditorOnly 필드가 없다.
+#if ROCKS_WITH_EDITOR_DATA
+            // cooked에는 EditorOnly 필드가 없다(에디터 데이터가 없는 빌드는 필드 자체가 없다).
             const TypeSchema& schema = lease.Schema();
             auto cooked =
                 RecordReader::Open(allocator, record.Record(ClassDefaultsConfiguration::Cooked),
@@ -270,6 +272,7 @@ TEST(ClassDefaults_RecordMatchesGraphSave) {
             REQUIRE(editorValue != TypeLease::NoField);
             CHECK(cooked.Value().Find(schema.fields[editorValue].id).Error() ==
                   ErrorCode::NotFound);
+#endif
             // 게시 한 번 — 같은 레코드.
             auto again = AcquireClassDefaults(lease, allocator);
             REQUIRE(again);
@@ -492,7 +495,8 @@ TEST(ClassDefaults_PublishedAcrossThreads) {
 
 // 경로 조회: 필드·비Atomic struct 멤버·두 단계 멤버는 payload, Atomic struct 통째는 payload이고 그
 // 멤버는 InvalidArgument, 원소 단계(정적 배열·배열)는 Unsupported, cooked의 EditorOnly 필드·멤버는
-// NotFound, struct가 아닌 값 뒤 단계는 TypeMismatch, 빈 경로는 InvalidArgument.
+// NotFound, struct가 아닌 값 뒤 단계는 TypeMismatch, 빈 경로는 InvalidArgument. 에디터 데이터가
+// 없는 빌드에는 EditorOnly 필드·멤버가 없어 경로 해석이 NotFound다.
 TEST(ClassDefaults_FindDefaultPayload) {
     SystemAllocator allocator;
     DefaultsFixture fixture(allocator);
@@ -525,9 +529,17 @@ TEST(ClassDefaults_FindDefaultPayload) {
     CHECK(atomic && atomic.Value().wire == static_cast<uint32>(WireType::Record));
     CHECK(find("pair.u", Editor).Error() == ErrorCode::InvalidArgument);
     CHECK(find("fixed[1]", Editor).Error() == ErrorCode::Unsupported);
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(find("editorValue", Cooked).Error() == ErrorCode::NotFound);
     CHECK(find("point.note", Cooked).Error() == ErrorCode::NotFound);
     CHECK(find("point.note", Editor));
+#else
+    const StringView editorOnly[] = {"editorValue", "point.note"};
+    for (StringView one : editorOnly) {
+        PropertyPathBuffer missing;
+        CHECK(ParsePropertyPath(lease, one, missing).Error() == ErrorCode::NotFound);
+    }
+#endif
     CHECK(find("count", Cooked));
     PropertyPathBuffer empty;
     CHECK(FindDefaultPayload(lease, record, empty, Editor, allocator).Error() ==
