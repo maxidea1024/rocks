@@ -170,6 +170,24 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
                                 Array<HitResult>*) const noexcept override {
             return Result<bool>::Success(false);
         }
+
+        Result<bool> OverlapShape(const Vec3d&, const Quatd&, const CollisionShape&,
+                                  const QueryFilter&, const QueryParams&, OverlapMode,
+                                  Array<OverlapResult>*) const noexcept override {
+            return Result<bool>::Success(false);
+        }
+
+        Result<bool> TraceBody(PhysicsBodyHandle, const Vec3d&, const Vec3d&, const Quatd&,
+                               const QueryFilter&, const QueryParams&,
+                               Array<HitResult>&) const noexcept override {
+            return Result<bool>::Success(false);
+        }
+
+        Result<bool> OverlapBody(PhysicsBodyHandle, const Vec3d&, const Quatd&, const QueryFilter&,
+                                 const QueryParams&,
+                                 Array<OverlapResult>&) const noexcept override {
+            return Result<bool>::Success(false);
+        }
     };
 
     NullScene first;
