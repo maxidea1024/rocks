@@ -1940,7 +1940,8 @@ try
     ProcessResult rock = await RunCook("asset-new", "StaticMesh", "/Game/Rock", projectOption);
     ProcessResult body = await RunCook("asset-new", "SkeletalMesh", "/Game/Body", projectOption);
     ProcessResult walk = await RunCook("asset-new", "AnimationClip", "/Game/Walk", projectOption);
-    ReportCook("asset-new mesh and clip types", rock.ExitCode == 0 && body.ExitCode == 0 && walk.ExitCode == 0, walk);
+    ProcessResult failedNew = rock.ExitCode != 0 ? rock : body.ExitCode != 0 ? body : walk;
+    ReportCook("asset-new mesh and clip types", rock.ExitCode == 0 && body.ExitCode == 0 && walk.ExitCode == 0, failedNew);
     ProcessResult wired = await RunCook("asset-cook", "--profile=Windows", projectOption);
     ReportCook("asset-cook mesh and clip processors", wired.ExitCode == 1 &&
         wired.StdErr.Contains("InvalidSource: /Game/Rock: error", StringComparison.Ordinal) &&

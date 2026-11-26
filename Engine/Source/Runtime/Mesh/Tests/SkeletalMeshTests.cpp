@@ -6,7 +6,8 @@
 #include <TestSupport/Test.h>
 
 // 스킨 메시 에셋 타입 시험이다(Docs/Design/MeshAnimationAssets 6.3절·6.7.1절): UE 기본값(메시·원본
-// LOD· 가중치 프로필 정보·PerPlatformBool), 생성 LOD 판정, 패키지 왕복(에디터·쿠킹 — EditorOnly
+// LOD· 가중치 프로필 정보·PerPlatformBool), 축소 판정(6.7.1절 4 — 기준별·열거 밖 값), 생성 LOD
+// 판정, 패키지 왕복(에디터·쿠킹 — EditorOnly
 // 원본 LOD와 프로파일별 맵이 쿠킹에서 빠짐, 본 계층·슬롯·소켓·프로필·렌더 데이터·inverse-bind bulk
 // 보존, 다시 쓰기 byte 같음).
 using namespace rocks;
@@ -56,6 +57,53 @@ TEST(SkeletalMesh_DefaultsMatchUe) {
     const SkinnedRenderLod render(allocator);
     CHECK(render.influencesPerVertex == 0 && render.boneMap.IsEmpty() &&
           render.morphTargets.IsEmpty() && render.skinWeightProfiles.IsEmpty());
+}
+
+// 스킨 축소 판정(UE SkeletalMeshReductionPlugin IsReductionActive — 6.7.1절 4): 비율 기준은 비율 <
+// 1이거나 비율 상한 < 수, 절대 기준은 수 > 상한, 둘 중 기준은 어느 쪽이든, 열거 밖 값은 거짓.
+TEST(SkeletalMesh_ReductionCriteria) {
+    SkeletalMeshReductionSettings settings;
+    settings.percentTriangles = 1.0f;
+    settings.percentVertices = 1.0f;
+    constexpr uint32 Vertices = 100;
+    constexpr uint32 Triangles = 50;
+    settings.terminationCriterion = SkeletalMeshReductionTermination::Vertices;
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxVerticesFromPercent = Vertices;
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxVerticesFromPercent = Vertices - 1;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxVerticesFromPercent = NumericLimits<uint32>::Max();
+    settings.percentVertices = 0.5f;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.percentVertices = 1.0f;
+    settings.terminationCriterion = SkeletalMeshReductionTermination::TrianglesOrVertices;
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.percentVertices = 0.5f;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.percentVertices = 1.0f;
+    settings.percentTriangles = 0.5f;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.percentTriangles = 1.0f;
+    settings.terminationCriterion = SkeletalMeshReductionTermination::AbsoluteTriangles;
+    settings.maxTriangles = Triangles;
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxTriangles = Triangles - 1;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.terminationCriterion = SkeletalMeshReductionTermination::AbsoluteTrianglesOrVertices;
+    settings.maxTriangles = Triangles;
+    settings.maxVertices = Vertices;
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxVertices = Vertices - 1;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    settings.maxVertices = Vertices;
+    settings.maxTriangles = Triangles - 1;
+    CHECK(IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
+    // 열거에 없는 값이다(손상된 데이터).
+    constexpr uint8 OutOfRangeCriterion = 0xff;
+    settings.terminationCriterion =
+        static_cast<SkeletalMeshReductionTermination>(OutOfRangeCriterion);
+    CHECK(!IsSkeletalMeshReductionActive(settings, Vertices, Triangles));
 }
 
 // 생성 LOD(UE IsReductionActive): 원본이 없으면 생성, inline 축소(baseLod == LOD)면 원본 수로 판정
