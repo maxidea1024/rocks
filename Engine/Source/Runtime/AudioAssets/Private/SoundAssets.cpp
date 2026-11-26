@@ -277,13 +277,16 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
         return Result<void>::Failure(read.Error());
     }
 
-    // 형식 위반·모르는 codec id는 손상이다(쿠커가 쓴 byte가 아니다).
+    // 형식 위반은 Parse가 CorruptData로, 모르는 판·codec은 Unsupported로 알린다(3.38절 — 그대로
+    // 넘긴다).
     auto view = audio::AudioPlatformDataView::Parse(read.Value());
     if (!view) {
-        return Result<void>::Failure(view.Error() == ErrorCode::InvalidArgument ||
-                                             view.Error() == ErrorCode::Unsupported
-                                         ? ErrorCode::CorruptData
-                                         : view.Error());
+        return Result<void>::Failure(view.Error());
+    }
+
+    // reader가 준 byte는 플랫폼 데이터 전체여야 한다(payload가 모자라면 잘린 데이터다).
+    if (!view.Value().HasAllPayload()) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 머리와 필드가 다르면(필드가 다른 쿠킹의 것) 재생 PCM 차원 검사가 원인 없이 NotReady를 내므로
@@ -297,8 +300,7 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
     audio::DecodedAudioPcm decoded(allocator);
     if (auto done = audio::DecodeAudioPlatformData(view.Value(), decoders, allocator, decoded);
         !done) {
-        return Result<void>::Failure(
-            done.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : done.Error());
+        return done;
     }
 
     // 디코드 결과가 머리 차원과 같아야 복사할 수 있다(디코더 결함이 범위 밖 읽기가 되지 않게).

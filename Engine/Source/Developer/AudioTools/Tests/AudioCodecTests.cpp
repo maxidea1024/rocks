@@ -624,10 +624,10 @@ TEST(Audio_Codec_PreRollAcrossChunks) {
     const AudioChunkEntry chunk2 = corruptedView.Value().Chunk(2);
     corrupted[view.MetaBytes() + static_cast<usize>(chunk2.payloadOffset)] ^= 0x01;
     CHECK(VerifyAudioChunk(chunk2, corruptedView.Value().ChunkPayload(2)).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     DecodedAudioPcm broken(allocator);
     CHECK(DecodeAudioPlatformData(corruptedView.Value(), table, allocator, broken).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(broken.FrameCount() == 0);
 }
 
@@ -667,7 +667,7 @@ TEST(Audio_Codec_MetaPayloadSplit) {
     Array<uint8> longer(allocator);
     REQUIRE(longer.TryAppend(bytes.View()));
     REQUIRE(longer.TryPushBack(0));
-    CHECK(ParseError(longer.View()) == ErrorCode::InvalidArgument);
+    CHECK(ParseError(longer.View()) == ErrorCode::CorruptData);
 }
 
 TEST(Audio_Codec_ParseRejects) {
@@ -691,40 +691,39 @@ TEST(Audio_Codec_ParseRejects) {
     };
 
     const Change changes[] = {
-        {0, 'X', 1, ErrorCode::InvalidArgument},                  // magic
-        {4, 2, 2, ErrorCode::InvalidArgument},                    // 형식 판
+        {0, 'X', 1, ErrorCode::CorruptData},                      // magic
+        {4, 2, 2, ErrorCode::Unsupported},                        // 형식 판(새 판 — 3.38절)
         {CodecOffset, MaxAudioCodecs, 1, ErrorCode::Unsupported}, // 모르는 codec
-        {CodecOffset, 0, 1, ErrorCode::InvalidArgument},          // codec None
-        {ChannelsOffset, 0, 1, ErrorCode::InvalidArgument},       // 채널 0
-        {ChannelsOffset, 9, 1, ErrorCode::InvalidArgument},       // 채널 9
-        {ChannelMaskOffset, AudioChannelFrontCenter, 4,
-         ErrorCode::InvalidArgument},                                     // bit 수 불일치
-        {ChannelMaskOffset, 0x203, 4, ErrorCode::InvalidArgument},        // bit 9
-        {RateOffset, 4000, 4, ErrorCode::InvalidArgument},                // rate 범위 밖
-        {FramesOffset, 0, 8, ErrorCode::InvalidArgument},                 // 유효 frame 0
-        {FramesOffset, 2999, 8, ErrorCode::InvalidArgument},              // frame 합 불일치
-        {DelayOffset, 1, 4, ErrorCode::InvalidArgument},                  // delay 합 불일치
-        {LoopStartOffset, 5, 8, ErrorCode::InvalidArgument},              // 끝 0인데 시작 ≠ 0
-        {LoopEndOffset, 3001, 8, ErrorCode::InvalidArgument},             // 끝 > 유효
-        {ChunkCountOffset, 0, 4, ErrorCode::InvalidArgument},             // 청크 0개
-        {CodecHeaderBytesOffset, 4, 4, ErrorCode::InvalidArgument},       // 8 배수 아님
-        {Reserved32Offset, 1, 4, ErrorCode::InvalidArgument},             // 0 칸
-        {Reserved64Offset, 1, 8, ErrorCode::InvalidArgument},             // 0 칸
-        {table + ChunkFlagsField, 0, 4, ErrorCode::InvalidArgument},      // flags
-        {table + ChunkOffsetField, 16, 8, ErrorCode::InvalidArgument},    // 청크 0 위치 ≠ 0
-        {table + ChunkPreRollField, 1, 4, ErrorCode::InvalidArgument},    // 청크 0 pre-roll
-        {table + ChunkFrameCountField, 0, 4, ErrorCode::InvalidArgument}, // frame 0
+        {CodecOffset, 0, 1, ErrorCode::CorruptData},              // codec None
+        {ChannelsOffset, 0, 1, ErrorCode::CorruptData},           // 채널 0
+        {ChannelsOffset, 9, 1, ErrorCode::CorruptData},           // 채널 9
+        {ChannelMaskOffset, AudioChannelFrontCenter, 4, ErrorCode::CorruptData}, // bit 수 불일치
+        {ChannelMaskOffset, 0x203, 4, ErrorCode::CorruptData},                   // bit 9
+        {RateOffset, 4000, 4, ErrorCode::CorruptData},                           // rate 범위 밖
+        {FramesOffset, 0, 8, ErrorCode::CorruptData},                            // 유효 frame 0
+        {FramesOffset, 2999, 8, ErrorCode::CorruptData},                         // frame 합 불일치
+        {DelayOffset, 1, 4, ErrorCode::CorruptData},                             // delay 합 불일치
+        {LoopStartOffset, 5, 8, ErrorCode::CorruptData},              // 끝 0인데 시작 ≠ 0
+        {LoopEndOffset, 3001, 8, ErrorCode::CorruptData},             // 끝 > 유효
+        {ChunkCountOffset, 0, 4, ErrorCode::CorruptData},             // 청크 0개
+        {CodecHeaderBytesOffset, 4, 4, ErrorCode::CorruptData},       // 8 배수 아님
+        {Reserved32Offset, 1, 4, ErrorCode::CorruptData},             // 0 칸
+        {Reserved64Offset, 1, 8, ErrorCode::CorruptData},             // 0 칸
+        {table + ChunkFlagsField, 0, 4, ErrorCode::CorruptData},      // flags
+        {table + ChunkOffsetField, 16, 8, ErrorCode::CorruptData},    // 청크 0 위치 ≠ 0
+        {table + ChunkPreRollField, 1, 4, ErrorCode::CorruptData},    // 청크 0 pre-roll
+        {table + ChunkFrameCountField, 0, 4, ErrorCode::CorruptData}, // frame 0
         {table + AudioChunkEntryBytes + ChunkFirstFrameField, 5, 8,
-         ErrorCode::InvalidArgument}, // frame 빈틈
+         ErrorCode::CorruptData}, // frame 빈틈
         {table + AudioChunkEntryBytes + ChunkOffsetField, 4104, 8,
-         ErrorCode::InvalidArgument}, // 정렬만 위반
+         ErrorCode::CorruptData}, // 정렬만 위반
         {table + AudioChunkEntryBytes + ChunkOffsetField, 4080, 8,
-         ErrorCode::InvalidArgument},                      // 16 배수인데 앞 청크 끝보다 작음
-        {PaddingOffset, 1, 4, ErrorCode::InvalidArgument}, // padding 합 불일치
+         ErrorCode::CorruptData},                      // 16 배수인데 앞 청크 끝보다 작음
+        {PaddingOffset, 1, 4, ErrorCode::CorruptData}, // padding 합 불일치
         {table + AudioChunkEntryBytes + ChunkPreRollField, 5000, 4,
-         ErrorCode::InvalidArgument}, // pre-roll > 첫 frame
+         ErrorCode::CorruptData}, // pre-roll > 첫 frame
         {table + AudioChunkEntryBytes + ChunkOffsetField, 1u << 30, 8,
-         ErrorCode::InvalidArgument}, // 범위 밖
+         ErrorCode::CorruptData}, // 범위 밖
     };
 
     for (const Change& change : changes) {
@@ -743,7 +742,7 @@ TEST(Audio_Codec_ParseRejects) {
         REQUIRE(copy.TryAppend(valid.View()));
         StoreLittleEndian<uint64>(copy.Data() + LoopStartOffset, 10);
         StoreLittleEndian<uint64>(copy.Data() + LoopEndOffset, 10);
-        CHECK(ParseError(copy.View()) == ErrorCode::InvalidArgument);
+        CHECK(ParseError(copy.View()) == ErrorCode::CorruptData);
     }
 
     // 청크 수 최대값(메타 크기 넘침)과 머리보다 짧은 입력.
@@ -751,13 +750,13 @@ TEST(Audio_Codec_ParseRejects) {
         Array<uint8> copy(allocator);
         REQUIRE(copy.TryAppend(valid.View()));
         StoreLittleEndian<uint32>(copy.Data() + ChunkCountOffset, 0xFFFFFFFFu);
-        CHECK(ParseError(copy.View()) == ErrorCode::InvalidArgument);
+        CHECK(ParseError(copy.View()) == ErrorCode::CorruptData);
     }
 
     CHECK(ParseError(valid.View().Left(AudioPlatformDataHeaderBytes - 1)) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(ParseError(valid.View().Left(AudioPlatformDataHeaderBytes + 10)) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 }
 
 TEST(Audio_Codec_DecoderContract) {
@@ -802,7 +801,7 @@ TEST(Audio_Codec_DecoderContract) {
               ErrorCode::InvalidArgument);
         AudioChunkEntry withPreRoll = chunk;
         withPreRoll.preRollFrames = 1;
-        CHECK(decoder.BeginChunk(withPreRoll, payload, 0).Error() == ErrorCode::InvalidArgument);
+        CHECK(decoder.BeginChunk(withPreRoll, payload, 0).Error() == ErrorCode::CorruptData);
 
         // out 채널 수 불일치·용량 부족, 청크 끝 뒤 0.
         REQUIRE(decoder.BeginChunk(chunk, payload, 0));
@@ -867,7 +866,7 @@ TEST(Audio_Codec_DecoderContract) {
         // codec 머리가 있으면 Open이 거부한다.
         const uint8 extra[8] = {};
         CHECK(decoder.Open(view.Value().Header(), Span<const uint8>(extra)).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 }
 
@@ -898,6 +897,65 @@ TEST(Audio_Codec_DecoderTable) {
     DecodedAudioPcm decoded(allocator);
     CHECK(DecodeAudioPlatformData(view.Value(), table, allocator, decoded).Error() ==
           ErrorCode::NotFound);
+}
+
+// 내장 디코더의 오류 분류(3.38절): 호출자 오용(다른 codec 머리, 열기 전, 청크와 다른 payload 길이,
+// 청크 밖 시작 frame)은 InvalidArgument, 읽은 데이터의 규칙 위반(채널·rate, codec 머리가 비지 않음,
+// pre-roll, frame 수와 payload byte 수 불일치)은 CorruptData다.
+TEST(Audio_Codec_BuiltInDecoderErrorClasses) {
+    SystemAllocator allocator;
+    const AudioDecoderTable table = MakeTable();
+    const Signal signal(allocator, 2, 3000);
+    Pcm16AudioEncoder pcm;
+    AdpcmAudioEncoder adpcm;
+    for (AudioEncoder* encoder :
+         {static_cast<AudioEncoder*>(&pcm), static_cast<AudioEncoder*>(&adpcm)}) {
+        EncodedAudio encoded(allocator);
+        REQUIRE(encoder->Encode(signal.View(), Rate, DefaultAudioChannelMask(2), {}, encoded));
+        const Array<uint8> bytes = WriteOrDie(allocator, encoded, {});
+        auto view = AudioPlatformDataView::Parse(bytes.View());
+        REQUIRE(view);
+        const AudioPlatformDataHeader& valid = view.Value().Header();
+        auto created = table.Create(valid.codec, allocator);
+        REQUIRE(created);
+        AudioDecoder& decoder = *created.Value();
+        const AudioChunkEntry chunk = view.Value().Chunk(0);
+        const Span<const uint8> payload = view.Value().ChunkPayload(0);
+
+        // 열기 전 BeginChunk는 오용이다.
+        CHECK(decoder.BeginChunk(chunk, payload, chunk.firstFrame).Error() ==
+              ErrorCode::InvalidArgument);
+
+        AudioPlatformDataHeader other = valid;
+        other.codec =
+            valid.codec == AudioCodecId::Pcm16 ? AudioCodecId::Adpcm : AudioCodecId::Pcm16;
+        CHECK(decoder.Open(other, {}).Error() == ErrorCode::InvalidArgument);
+        AudioPlatformDataHeader noChannels = valid;
+        noChannels.channels = 0;
+        CHECK(decoder.Open(noChannels, {}).Error() == ErrorCode::CorruptData);
+        AudioPlatformDataHeader lowRate = valid;
+        lowRate.sampleRate = MinPlatformSampleRate - 1;
+        CHECK(decoder.Open(lowRate, {}).Error() == ErrorCode::CorruptData);
+        const uint8 extra[8] = {};
+        CHECK(decoder.Open(valid, Span<const uint8>(extra)).Error() == ErrorCode::CorruptData);
+
+        REQUIRE(decoder.Open(valid, view.Value().CodecHeader()));
+        CHECK(
+            decoder.BeginChunk(chunk, payload.Left(payload.Size() - 1), chunk.firstFrame).Error() ==
+            ErrorCode::InvalidArgument);
+        CHECK(decoder.BeginChunk(chunk, payload, chunk.firstFrame + chunk.frameCount).Error() ==
+              ErrorCode::InvalidArgument);
+        AudioChunkEntry preRoll = chunk;
+        preRoll.preRollFrames = 1;
+        CHECK(decoder.BeginChunk(preRoll, payload, preRoll.firstFrame).Error() ==
+              ErrorCode::CorruptData);
+        // payload 길이는 표와 같지만 frame 수가 byte 수와 맞지 않는다(블록 둘만큼 더 많다).
+        AudioChunkEntry longer = chunk;
+        longer.frameCount = chunk.frameCount + AdpcmFramesPerBlock * 2;
+        CHECK(decoder.BeginChunk(longer, payload, longer.firstFrame).Error() ==
+              ErrorCode::CorruptData);
+        CHECK(decoder.BeginChunk(chunk, payload, chunk.firstFrame));
+    }
 }
 
 // 디코더 등록부(Docs/Design/AudioSystem 3.37.1절): 넣기·지우기·범위 밖 무시, Fill은 표에 없는
@@ -1043,7 +1101,7 @@ TEST(Audio_Codec_DecoderReopenAndBounds) {
     AudioPlatformDataHeader newer = view.Value().Header();
     newer.bitstreamVersion = Pcm16BitstreamVersion + 1;
     CHECK(decoder.Open(newer, Span<const uint8>()).Error() == ErrorCode::Unsupported);
-    // 새 판이 codec 머리를 두더라도 손상(InvalidArgument)이 아니라 모르는 판이다.
+    // 새 판이 codec 머리를 두더라도 손상(CorruptData)이 아니라 모르는 판이다.
     const uint8 newerCodecHeader[AudioCodecHeaderAlignment] = {};
     CHECK(decoder.Open(newer, Span<const uint8>(newerCodecHeader, AudioCodecHeaderAlignment))
               .Error() == ErrorCode::Unsupported);
@@ -1061,7 +1119,7 @@ TEST(Audio_Codec_DecoderReopenAndBounds) {
     // 검증하지 않은 머리(채널 9)로 Open하면 거부한다.
     AudioPlatformDataHeader nine = view.Value().Header();
     nine.channels = 9;
-    CHECK(decoder.Open(nine, Span<const uint8>()).Error() == ErrorCode::InvalidArgument);
+    CHECK(decoder.Open(nine, Span<const uint8>()).Error() == ErrorCode::CorruptData);
 
     // 다시 정상 Open하면 처음부터 쓸 수 있다.
     REQUIRE(decoder.Open(view.Value().Header(), view.Value().CodecHeader()));
@@ -1085,14 +1143,14 @@ TEST(Audio_Codec_MetaPaddingAndOverflow) {
     Array<uint8> padded(allocator);
     REQUIRE(padded.TryAppend(bytes.View()));
     padded[raw] = 1;
-    CHECK(ParseError(padded.View()) == ErrorCode::InvalidArgument);
+    CHECK(ParseError(padded.View()) == ErrorCode::CorruptData);
 
     // delay + 유효 + padding 넘침.
     Array<uint8> overflow(allocator);
     REQUIRE(overflow.TryAppend(bytes.View()));
     StoreLittleEndian<uint64>(overflow.Data() + FramesOffset, NumericLimits<uint64>::Max() - 1);
     StoreLittleEndian<uint32>(overflow.Data() + DelayOffset, 5);
-    CHECK(ParseError(overflow.View()) == ErrorCode::InvalidArgument);
+    CHECK(ParseError(overflow.View()) == ErrorCode::CorruptData);
 }
 
 TEST(Audio_Codec_HugeFrameCountRejectedBeforeAllocation) {
@@ -1125,7 +1183,7 @@ TEST(Audio_Codec_HugeFrameCountRejectedBeforeAllocation) {
     const AudioDecoderTable table = MakeTable();
     DecodedAudioPcm decoded(allocator);
     CHECK(DecodeAudioPlatformData(view.Value(), table, allocator, decoded).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 }
 
 TEST(Audio_Codec_CorruptedPayloadsReachDecoder) {
@@ -1176,7 +1234,10 @@ TEST(Audio_Codec_CorruptedPayloadsReachDecoder) {
                     static_cast<uint8>(random.NextUInt32());
             }
 
-            if (!decoder.BeginChunk(chunk, payload.View(), chunk.firstFrame)) {
+            // 내장 디코더(PCM16·ADPCM)의 손상 실패는 CorruptData다(3.38절 — 시험 codec은 계약 밖).
+            const bool builtIn = kind != 2;
+            if (auto begun = decoder.BeginChunk(chunk, payload.View(), chunk.firstFrame); !begun) {
+                CHECK(!builtIn || begun.Error() == ErrorCode::CorruptData);
                 continue;
             }
 
@@ -1185,6 +1246,7 @@ TEST(Audio_Codec_CorruptedPayloadsReachDecoder) {
             while (true) {
                 auto written = decoder.DecodeNext(out);
                 if (!written) {
+                    CHECK(!builtIn || written.Error() == ErrorCode::CorruptData);
                     failed = true;
                     break;
                 }

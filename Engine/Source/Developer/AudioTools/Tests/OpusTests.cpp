@@ -160,14 +160,14 @@ TEST(Audio_Opus_UnsupportedHeads) {
         CHECK(OpusError(file.View(), allocator) == ErrorCode::Unsupported);
     }
 
-    // 올바른 Ogg Vorbis는 Opus가 아니다(OP_ENOTFORMAT → InvalidArgument).
-    CHECK(OpusError(Bytes(vorbisfixtures::VorbisStereo), allocator) == ErrorCode::InvalidArgument);
+    // 올바른 Ogg Vorbis는 Opus가 아니다(OP_ENOTFORMAT → CorruptData).
+    CHECK(OpusError(Bytes(vorbisfixtures::VorbisStereo), allocator) == ErrorCode::CorruptData);
 }
 
 TEST(Audio_Opus_PacketCorruption) {
     // audio page 본문 byte를 바꾸고 page CRC를 다시 맞춘다: page 검사를 지나 libopus packet
     // 디코더까지 간다. 멈추거나 abort하지 않고, 받으면 길이가 원본과 같고 표본이 유한하며, 아니면
-    // InvalidArgument다.
+    // CorruptData다.
     SystemAllocator allocator;
     DecodedSourceAudio audio(allocator);
     Array<uint8> mutated(allocator);
@@ -199,7 +199,7 @@ TEST(Audio_Opus_PacketCorruption) {
 
             CHECK(finite && audio.FrameCount() == NoiseAFrames);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument);
+            CHECK(decoded.Error() == ErrorCode::CorruptData);
         }
     }
 }
@@ -229,31 +229,31 @@ TEST(Audio_Opus_ChainedAndPageIntegrity) {
         Array<uint8> chain = Join(allocator, first, second);
         REQUIRE(chain.Size() > at);
         chain[at] = static_cast<uint8>(chain[at] ^ CorruptionMask);
-        CHECK(OpusError(chain.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(OpusError(chain.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // page 중간·경계 잘림.
     const Array<uint8> chain = Join(allocator, first, second);
     REQUIRE(chain.Size() > 0);
     CHECK(OpusError(chain.View().Left(chain.Size() - IntoPageBytes / 2), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(OpusError(chain.View().Left(secondStart + OpusNoiseBPageOffsets[3]), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 }
 
 TEST(Audio_Opus_Rejects) {
     SystemAllocator allocator;
     const uint8 notOgg[] = {'f', 'L', 'a', 'C', 0, 0, 0, 0};
-    CHECK(OpusError(Bytes(notOgg), allocator) == ErrorCode::InvalidArgument);
-    CHECK(OpusError(Span<const uint8>(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(OpusError(Bytes(notOgg), allocator) == ErrorCode::CorruptData);
+    CHECK(OpusError(Span<const uint8>(), allocator) == ErrorCode::CorruptData);
 
-    // Ogg이지만 Opus가 아님: Vorbis stream은 OpusHead가 없어 InvalidArgument다. 여기서는 OpusHead
-    // 표지를 깨고 page CRC를 다시 맞추지 않으므로 page 검사에서 걸린다 — 둘 다 InvalidArgument다.
+    // Ogg이지만 Opus가 아님: Vorbis stream은 OpusHead가 없어 CorruptData다. 여기서는 OpusHead
+    // 표지를 깨고 page CRC를 다시 맞추지 않으므로 page 검사에서 걸린다 — 둘 다 CorruptData다.
     Array<uint8> notOpus(allocator);
     REQUIRE(notOpus.TryAppend(Bytes(OpusStereo)));
     constexpr usize HeadMagicOffset = 28;
     notOpus[HeadMagicOffset] = 'X';
-    CHECK(OpusError(notOpus.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(OpusError(notOpus.View(), allocator) == ErrorCode::CorruptData);
 
     // 실패하면 앞 결과를 비운다.
     DecodedSourceAudio audio(allocator);
@@ -266,16 +266,16 @@ TEST(Audio_Opus_Rejects) {
 TEST(Audio_Opus_TruncatedAndCorruptedInputs) {
     SystemAllocator allocator;
     DecodedSourceAudio audio(allocator);
-    // 앞부분 길이(29 byte 간격): page 끝이 아니면 page 검사로 InvalidArgument, page 경계면 EOS가
-    // 없어 InvalidArgument다.
+    // 앞부분 길이(29 byte 간격): page 끝이 아니면 page 검사로 CorruptData, page 경계면 EOS가
+    // 없어 CorruptData다.
     constexpr usize PrefixStep = 29;
     for (usize size = 0; size < sizeof(OpusNoiseA); size += PrefixStep) {
         CHECK(DecodeOpus(Span<const uint8>(OpusNoiseA, size), audio).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // byte를 무작위로 바꾼 입력: 멈추거나 범위 밖을 읽지 않는다. 바뀐 byte가 page CRC로 잡히지 않는
-    // 경우는 없으므로 결과는 언제나 InvalidArgument다(값이 같게 바뀐 경우만 성공).
+    // 경우는 없으므로 결과는 언제나 CorruptData다(값이 같게 바뀐 경우만 성공).
     Array<uint8> mutated(allocator);
     REQUIRE(mutated.TryAppend(Bytes(OpusNoiseA)));
     RandomStream random(0x4F505553);
@@ -293,7 +293,7 @@ TEST(Audio_Opus_TruncatedAndCorruptedInputs) {
         if (value == OpusNoiseA[at]) {
             CHECK(decoded && audio.FrameCount() == NoiseAFrames);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument);
+            CHECK(decoded.Error() == ErrorCode::CorruptData);
         }
     }
 }

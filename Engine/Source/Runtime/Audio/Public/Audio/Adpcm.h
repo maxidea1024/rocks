@@ -50,15 +50,16 @@ constexpr uint64 AdpcmPayloadBytes(uint32 channels, uint64 frames) noexcept {
 }
 
 // 블록 하나를 frames(1–AdpcmFramesPerBlock)만큼 디코드해 out[0..frames)에 float로 쓴다. 할당하지
-// 않는다. 계수 색인이 6을 넘거나, block이 머리보다 짧거나, frames에 필요한 nibble보다 짧거나, out이
-// frames보다 작으면 InvalidArgument이고 out을 쓰지 않는다.
+// 않는다. frames가 0·AdpcmFramesPerBlock 초과이거나 out이 frames보다 작으면 InvalidArgument, 계수
+// 색인이 6을 넘거나 block이 머리·frames에 필요한 nibble보다 짧으면 CorruptData다(3.38절). 실패하면
+// out을 쓰지 않는다.
 ROCKS_AUDIO_API Result<void> DecodeAdpcmBlock(Span<const uint8> block, uint32 frames,
                                               Span<float> out) noexcept;
 
 // 블록 묶음 배치의 payload에서 [startFrame, startFrame + out.frameCount)를 디코드한다(임의 위치
-// 시작). out의 채널 수는 channels여야 한다. payload 크기가 AdpcmPayloadBytes(channels,
-// totalFrames)와 다르거나 범위가 넘거나 블록이 잘못되면 InvalidArgument다(out은 일부 쓰였을 수
-// 있다). 할당하지 않는다.
+// 시작). out의 채널 수는 channels여야 한다. channels 범위 밖·out 채널 불일치·범위가 넘으면
+// InvalidArgument, payload 크기가 AdpcmPayloadBytes(channels, totalFrames)와 다르거나 블록이
+// 잘못되면 CorruptData다(out은 일부 쓰였을 수 있다). 할당하지 않는다.
 ROCKS_AUDIO_API Result<void> DecodeAdpcmFrames(Span<const uint8> payload, uint32 channels,
                                                uint64 totalFrames, uint64 startFrame,
                                                const PlanarView& out) noexcept;

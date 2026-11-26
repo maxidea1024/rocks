@@ -341,12 +341,12 @@ TEST(Audio_Adpcm_RejectsInvalidInput) {
     float out[BlockFrames];
     block[0] = static_cast<uint8>(AdpcmCoefficientSets);
     CHECK(DecodeAdpcmBlock(Span<const uint8>(block), 10, Span<float>(out)).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     block[0] = 0;
     CHECK(DecodeAdpcmBlock(Span<const uint8>(block, PreambleBytes - 1), 1, Span<float>(out))
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::CorruptData);
     CHECK(DecodeAdpcmBlock(Span<const uint8>(block, PreambleBytes + 1), 5, Span<float>(out))
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::CorruptData);
     CHECK(DecodeAdpcmBlock(Span<const uint8>(block), 0, Span<float>(out)).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(DecodeAdpcmBlock(Span<const uint8>(block), BlockFrames + 1, Span<float>(out)).Error() ==
@@ -358,7 +358,7 @@ TEST(Audio_Adpcm_RejectsInvalidInput) {
     // 크기가 맞는 payload(100 frame = 블록 하나)는 디코드된다.
     CHECK(DecodeAdpcmFrames(Span<const uint8>(block), 1, 100, 0, view.View()));
     CHECK(DecodeAdpcmFrames(Span<const uint8>(block, 100), 1, 100, 0, view.View()).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(DecodeAdpcmFrames(Span<const uint8>(block), 1, 100, 90, view.View()).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(DecodeAdpcmFrames(Span<const uint8>(block), 1, 100, 101, view.View(0)).Error() ==
@@ -368,9 +368,9 @@ TEST(Audio_Adpcm_RejectsInvalidInput) {
     // 손상된 frame 수(넘침 경계)는 Fatal 없이 거부한다.
     CHECK(
         DecodeAdpcmFrames(Span<const uint8>(block), 1, NumericLimits<uint64>::Max(), 0, view.View())
-            .Error() == ErrorCode::InvalidArgument);
+            .Error() == ErrorCode::CorruptData);
     CHECK(DecodeAdpcmFrames(Span<const uint8>(block), 1, BlockFrames + 1, 0, view.View()).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     for (const float poison : {PlatformMath::QuietNaN<float>(), PlatformMath::Infinity<float>()}) {
         PlanarBuffer poisoned = MakeBuffer(1, 4, allocator);
