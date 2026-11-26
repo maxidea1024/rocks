@@ -21,6 +21,18 @@ public sealed record MetadataModule(string Name, string Manifest, IReadOnlyList<
     /// <summary>생성 소스 디렉터리의 이름이다(생성 루트 &lt;out&gt;/Generated/&lt;모듈&gt; 바로 아래, MetaCompiler 출력 루트의 Source).</summary>
     public const string SourceDirectoryName = "Source";
 
+    /// <summary>descriptor 파일 이름의 끝이다.</summary>
+    public const string DescriptorSuffix = ".rocksmeta.json";
+
+    /// <summary>Sparks binding schema 파일 이름의 끝이다(Docs/Design/SparksBinding.ko.md B2).</summary>
+    public const string BindingSchemaSuffix = ".sparkbind.json";
+
+    /// <summary>
+    /// Sparks binding schema(&lt;out&gt;/Metadata/&lt;모듈&gt;.sparkbind.json)의 절대 경로다. descriptor 옆에 있고 메타 생성이 함께 게시한다
+    /// (Docs/Design/SparksBinding.ko.md B2 — 노출 타입이 없는 모듈도 빈 types로 쓴다).
+    /// </summary>
+    public string BindingSchema => Descriptor[..^DescriptorSuffix.Length] + BindingSchemaSuffix;
+
     /// <summary>모듈 생성 소스의 파일 이름이다(MetaCompiler의 CompilerOptions.ModuleSourceName과 같다).</summary>
     public static string ModuleSourceName(string module) => module + ".module.generated.cpp";
 
@@ -161,7 +173,7 @@ public static class MetadataLayout
                 Directory.CreateDirectory(generatedPrivate);
             }
 
-            string descriptor = Path.Combine(context.OutputDirectory, "Metadata", module.Name + ".rocksmeta.json");
+            string descriptor = Path.Combine(context.OutputDirectory, "Metadata", module.Name + MetadataModule.DescriptorSuffix);
             var layout = new MetadataModule(module.Name, manifest, headers, generatedPublic, generatedPrivate,
                 Path.Combine(generatedRoot, MetadataModule.SourceDirectoryName), descriptor);
             generated.Add(layout);

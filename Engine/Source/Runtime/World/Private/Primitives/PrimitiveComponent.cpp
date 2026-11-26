@@ -13,7 +13,7 @@
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
 #include <World/WorldLog.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // PrimitiveComponent다(Docs/Design/EngineRuntime 24.3.3–24.3.5절, D2). 데이터만 있고 렌더·충돌
 // 연결은 RS1·CR16이다.
@@ -132,6 +132,7 @@ Result<void> PrimitiveComponent::SetCollisionProfileName(StringView name) noexce
     }
 
     if (!HasWorld()) {
+        OnCollisionProfileNameSet();
         return Result<void>::Success();
     }
 
@@ -145,6 +146,7 @@ Result<void> PrimitiveComponent::SetCollisionProfileName(StringView name) noexce
     }
 
     UpdateBodyCollision();
+    OnCollisionProfileNameSet();
     return Result<void>::Success();
 }
 

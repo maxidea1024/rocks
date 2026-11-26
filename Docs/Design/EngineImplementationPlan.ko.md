@@ -1267,7 +1267,7 @@ native 고해상도 기준 영상과 비교하여 SSIM/이미지 차이, edge fl
 
 ### 13.1 GPU-driven 기준 경로
 
-StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 3–5절이다.
+StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/03-MeshSource.ko.md) 3–5절이다.
 
 GPU Scene은 RenderInstanceId별 transform, previous transform, mesh/material handle, bounds, flags를 저장한다. 변경 범위만 upload하고 frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다. material table·descriptor table도 version과 deferred retirement를 적용한다. GPU에는 Object 주소나 ObjectHandle을 직접 전달하지 않는다.
 
@@ -1506,7 +1506,7 @@ LT01–03·LT05–06의 static/basic probe·CPU bake 사례는 M4 필수다. LT0
 
 ## 15. Skeletal Mesh와 Animation
 
-SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 6–7절이다.
+SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/06-SkeletonSkinned.ko.md) 6–7절이다.
 
 AnimationClip은 position·rotation·scale track, curve, notify, root motion을 포함한다. ACL을 압축·복호화 후보로 사용하며 CPU 작업 메모리와 시간·오차를 adapter에서 계측한다. [S9](https://github.com/nfrechette/acl)
 

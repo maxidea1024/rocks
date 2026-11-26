@@ -8,7 +8,7 @@
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 이동 컴포넌트 기반·회전·발사체다(Docs/Design/EngineRuntime 26.3–26.5절, D4). 충돌 sweep 없이
 // 움직인다.

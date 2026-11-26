@@ -1,4 +1,5 @@
 #include "LiveCountingAllocator.h"
+#include "ImageFuzz.h"
 
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -493,6 +494,55 @@ TEST(ExrEncode_AllocationFailures) {
         CHECK(firstLeak == 0);
         CHECK(failures > 0);
     }
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): OpenEXR(무압축 RGB
+// half, Zip RGBA, Piz tile, RLE 단일 float) 씨앗. 변조한 파일은 결과가 서로 맞는 성공이거나 다섯
+// 분류의 실패이고, 할당 블록을 다 돌려준다.
+TEST(ExrDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    const Halves r(1.0f, 16);
+    const Halves g(10.0f, 16);
+    const Halves b(20.0f, 16);
+    const Halves a(30.0f, 16);
+    ExrSpec spec;
+    spec.width = 4;
+    spec.height = 4;
+    const ExrChannelSpec rgb[] = {{"B", ExrPixelType::Half, b.Bytes()},
+                                  {"G", ExrPixelType::Half, g.Bytes()},
+                                  {"R", ExrPixelType::Half, r.Bytes()}};
+    spec.channels = rgb;
+    const Array<uint8> plain = WriteExr(allocator, spec);
+    const ExrChannelSpec rgba[] = {{"A", ExrPixelType::Half, a.Bytes()},
+                                   {"B", ExrPixelType::Half, b.Bytes()},
+                                   {"G", ExrPixelType::Half, g.Bytes()},
+                                   {"R", ExrPixelType::Half, r.Bytes()}};
+    spec.channels = rgba;
+    spec.compression = ExrCompression::Zip;
+    const Array<uint8> zip = WriteExr(allocator, spec);
+    spec.compression = ExrCompression::Piz;
+    spec.storage = ExrStorage::Tiled;
+    spec.tileWidth = 2;
+    spec.tileHeight = 2;
+    const Array<uint8> piz = WriteExr(allocator, spec);
+    ExrSpec single;
+    single.width = 4;
+    single.height = 2;
+    single.compression = ExrCompression::Rle;
+    const ExrChannelSpec y[] = {{"Y", ExrPixelType::Half, Span<const uint8>(r.Bytes().Data(), 16)}};
+    single.channels = y;
+    const Array<uint8> rle = WriteExr(allocator, single);
+    const Span<const uint8> seeds[] = {plain.View(), zip.View(), piz.View(), rle.View()};
+    for (const Span<const uint8>& seed : seeds) {
+        REQUIRE(!seed.IsEmpty());
+    }
+
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Exr, 0x5EED0E52ull, 3000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace exr_decode_tests_file

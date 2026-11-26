@@ -438,7 +438,7 @@ void VulkanDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint6
     platform::LockGuard lock(gate_);
     boundIndex_ = {buffer, format, offset};
     const BufferRecord* record = buffers_.Find(buffer.slot);
-    if (!recording_ || record == nullptr || offset >= record->size ||
+    if (!recording_ || record == nullptr || offset >= record->size || !IsValidIndexFormat(format) ||
         offset % IndexFormatSize(format) != 0) {
         return;
     }

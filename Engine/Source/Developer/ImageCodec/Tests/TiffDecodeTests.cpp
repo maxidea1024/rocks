@@ -1,4 +1,5 @@
 #include "LiveCountingAllocator.h"
+#include "ImageFuzz.h"
 
 #include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
@@ -928,6 +929,63 @@ TEST(TiffEncode_AllocationFailures) {
         CHECK(firstLeak == 0);
         CHECK(failures > 0);
     }
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): TIFF(회색 8비트
+// raw, RGB LZW + 예측, 회색 Deflate tile, PackBits, 1비트, big-endian) 씨앗. 변조한 파일은 결과가
+// 서로 맞는 성공이거나 다섯 분류의 실패이고, 할당 블록을 다 돌려준다.
+TEST(TiffDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    uint8 pixels[16 * 16 * 3] = {};
+    for (usize index = 0; index < sizeof(pixels); ++index) {
+        pixels[index] = static_cast<uint8>(index * 7 + index / 13);
+    }
+
+    TiffImage gray;
+    gray.width = 8;
+    gray.height = 4;
+    gray.raw = Span<const uint8>(pixels, 32);
+    const Array<uint8> plain = WriteTiff(allocator, gray);
+    TiffImage rgb;
+    rgb.width = 8;
+    rgb.height = 8;
+    rgb.samples = 3;
+    rgb.photometric = tiff::PhotometricRgb;
+    rgb.compression = tiff::CompressionLzw;
+    rgb.predictor = tiff::PredictorHorizontal;
+    rgb.rowsPerStrip = 3;
+    rgb.raw = Span<const uint8>(pixels, 8 * 8 * 3);
+    const Array<uint8> lzw = WriteTiff(allocator, rgb);
+    TiffImage tiled;
+    tiled.width = 16;
+    tiled.height = 16;
+    tiled.compression = tiff::CompressionAdobeDeflate;
+    tiled.tileWidth = 16;
+    tiled.tileHeight = 16;
+    tiled.raw = Span<const uint8>(pixels, 256);
+    const Array<uint8> deflate = WriteTiff(allocator, tiled);
+    TiffImage packed = gray;
+    packed.compression = tiff::CompressionPackBits;
+    packed.byteOrder = TiffByteOrder::Big;
+    const Array<uint8> packBits = WriteTiff(allocator, packed);
+    TiffImage bilevel;
+    bilevel.width = 8;
+    bilevel.height = 2;
+    bilevel.bits = 1;
+    bilevel.raw = Span<const uint8>(pixels, 2);
+    const Array<uint8> oneBit = WriteTiff(allocator, bilevel);
+    const Span<const uint8> seeds[] = {plain.View(), lzw.View(), deflate.View(), packBits.View(),
+                                       oneBit.View()};
+    for (const Span<const uint8>& seed : seeds) {
+        REQUIRE(!seed.IsEmpty());
+    }
+
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Tiff, 0x5EED071Full, 3000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace tiff_decode_tests_file

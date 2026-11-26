@@ -8,6 +8,7 @@
 #include <Graphics/PipelineState.h>
 #include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/ChannelSwizzle.h>
+#include <GraphicsTypes/IndexFormat.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
 #include <GraphicsTypes/TextureDimension.h>
@@ -376,17 +377,6 @@ struct BufferViewInfo {
     // Structured view의 원소 byte(BufferDesc::stride)다(그 밖은 0).
     uint32 stride = 0;
 };
-
-// index 형식이다(RenderBase 10.4절).
-enum class IndexFormat : uint8 {
-    UInt16,
-    UInt32
-};
-
-// index 하나의 byte 크기다(2·4).
-constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
-    return format == IndexFormat::UInt16 ? 2u : 4u;
-}
 
 // 텍스처 용도 비트 묶음이다(UE ETextureCreateFlags의 ShaderResource·RenderTargetable·
 // DepthStencilTargetable·UAV 대응, RenderBase 4.4절 텍스처 GX2 나머지 A부). 받는 조합은 다섯이다:

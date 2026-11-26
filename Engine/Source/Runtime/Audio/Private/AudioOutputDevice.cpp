@@ -152,7 +152,8 @@ Result<void> AudioOutputDevice::OpenWith(AudioOutputBackend& backend,
         return ring;
     }
 
-    if (auto render = render_.Initialize(allocator_, *mixer_, ring_); !render) {
+    if (auto render = render_.Initialize(allocator_, *mixer_, ring_, options_.commandCapacity);
+        !render) {
         ring_.Shutdown();
         mixer_ = NullOpt;
         backend.Close();

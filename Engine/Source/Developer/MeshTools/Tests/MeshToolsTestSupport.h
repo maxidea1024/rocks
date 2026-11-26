@@ -8,7 +8,7 @@
 #include <Platform/Memory.h>
 #include <TestSupport/Test.h>
 
-// MeshTools 빌드 시험 공용 도우미다(Docs/Design/MeshAnimationAssets.ko.md 12절 "빌드"): 다각형
+// MeshTools 빌드 시험 공용 도우미다(Docs/Design/MeshAnimationAssets 12절 "빌드"): 다각형
 // 목록으로 메시 만들기, 코너 속성 채우기, 빌드 결과의 정규 byte(결정성 비교), 렌더 정점 찾기.
 namespace rocks::mesh_tools_test {
 

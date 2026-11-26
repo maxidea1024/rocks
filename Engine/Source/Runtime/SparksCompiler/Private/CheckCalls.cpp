@@ -1151,14 +1151,26 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
         for (usize index = chain.Size(); index > 0; --index) {
             requireDeclared(chain[index - 1], 4);
         }
-    } else if (entry.kind == SymbolKind::EngineType) {
-        const BindingSchema& schema = compilation_.schemas_[entry.index].schema;
-        const SchemaType& source = schema.Types()[entry.item];
-        if (source.kind == SchemaTypeKind::Struct) {
+    } else if (IsEngineStruct(typeSymbol)) {
+        // 엔진 struct: 기반 struct의 필드부터(SL 10.2절 struct `base` — EI1a).
+        Array<uint32> chain(allocator_);
+        for (uint32 at = typeSymbol, step = 0;
+             IsEngineStruct(at) && step < compilation_.symbols_.Size();
+             at = compilation_.symbols_[at].base, ++step) {
+            if (auto pushed = chain.TryPushBack(at); !pushed) {
+                binder_.error_ = pushed.Error();
+                return result;
+            }
+        }
+
+        for (usize index = chain.Size(); index > 0; --index) {
+            const Symbol& owner = compilation_.symbols_[chain[index - 1]];
+            const BindingSchema& schema = compilation_.schemas_[owner.index].schema;
+            const SchemaType& source = schema.Types()[owner.item];
             for (uint32 at = source.firstField; at < source.firstField + source.fieldCount; ++at) {
                 const StringView fieldName = schema.Text(schema.Fields()[at].name);
                 const uint32 field =
-                    binder_.FindName(SpaceKey(NameSpaceKind::Members, typeSymbol), fieldName);
+                    binder_.FindName(SpaceKey(NameSpaceKind::Members, chain[index - 1]), fieldName);
                 if (field != NoSymbol) {
                     requireField(field, fieldName, compilation_.symbols_[field].type, false);
                 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Compiler.h>
+#include <AssetRuntime/PerPlatformFloat.h>
 #include <AssetRuntime/StreamableRenderAsset.h>
 #include <Core/Math/Color.h>
 #include <Core/Math/Vector4.h>
@@ -101,7 +102,8 @@ public:
         TextureCookPlatformTilingSettings::FromTextureGroup;
     ROCKS_PROPERTY() bool oodlePreserveExtremes = false;
     ROCKS_PROPERTY() TextureGroup lodGroup = TextureGroup::World;
-    ROCKS_PROPERTY() TextureDownscale downscale;
+    // 플랫폼별 축소 비율이다(UE FPerPlatformFloat Downscale — 계약, 키는 TargetProfile id).
+    ROCKS_PROPERTY() PerPlatformFloat downscale;
     ROCKS_PROPERTY()
     TextureDownscaleOptions downscaleOptions = TextureDownscaleOptions::Default;
     ROCKS_PROPERTY()

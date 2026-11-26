@@ -2,7 +2,7 @@
 
 #include <Core/Algorithms.h>
 
-// 겹치는 코너 찾기다(Docs/Design/MeshAnimationAssets.ko.md 5.2절 4단계·5.4절 16, UE
+// 겹치는 코너 찾기다(Docs/Design/MeshAnimationAssets 5.2절 4단계·5.4절 16, UE
 // FStaticMeshOperations::FindOverlappingCorners). 렌더 정점 용접은 이 표의 앞 wedge만 후보로 본다.
 namespace rocks::mesh_build {
 

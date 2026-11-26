@@ -1,0 +1,42 @@
+#pragma once
+
+#include <Core/Math/Quaternion.h>
+#include <Core/Math/Vector3.h>
+#include <EngineAudio/SoundSourceRef.h>
+
+// 리스너 기준 감쇠·패닝 계산이다(Docs/Design/AudioSystem 3.13·3.35.7절). 제어 pipe가 묶음마다 공간
+// 재생에 대해 부르는 순수 함수이며, 시험이 바로 단언한다. 좌표·단위는 UE와 같다(+X 전방, +Y 오른쪽,
+// +Z 위, cm).
+namespace rocks {
+
+// 믹서 voice 파라미터로 옮길 공간 값이다.
+struct SpatialParams {
+    // 거리 감쇠 선형 이득([0, 1])이다(attenuate가 false면 1).
+    float attenuationGain = 1.0f;
+    // true면 방위각 equal-power 패닝(mono만), false면 Direct다.
+    bool azimuthPan = false;
+    // 리스너 앞 0°, 오른쪽 90°인 [0, 360) 방위각이다.
+    float azimuthDegrees = 0.0f;
+    // [0, 1] 비공간화 비율이다(UE NonSpatializedAmount).
+    float nonSpatializedAmount = 0.0f;
+};
+
+// UE NonSpatializedRadius 식(Engine/Private/Audio.cpp:739–779)이다. S = start, E = min(S, end).
+// - distance가 0이면(방향 없음) 1이다(S와 상관없이 먼저 본다 — Rocks 규칙).
+// - S = 0이면 0이다.
+// - E > 0이면 d < S에서 clamp((S − d) / max(S − E, 1), 0, 1), 그 밖은 0이다.
+// - E = 0이면 r = clamp(S / d, 0, 10⁶)으로 r > 1에서 1 − 1/r², 그 밖은 0이다.
+ROCKS_ENGINEAUDIO_API float NonSpatializedAmount(float distance, float radiusStart,
+                                                 float radiusEnd) noexcept;
+
+// 리스너(위치·회전)에서 본 소리(위치)의 공간 값이다. 상대 위치는 double로 뺀 뒤 리스너 회전의
+// 역으로 돌리고 float로 내린다(큰 월드). channelCount가 2(stereo 원본)면 Direct에 거리 감쇠만
+// 한다(stereo spread는 AU7). 감쇠 평가가 실패하는 값은 SoundSourceRef 검사가 이미 막는다(실패하면
+// 이득 1).
+ROCKS_ENGINEAUDIO_API SpatialParams ComputeSpatialParams(const SoundAttenuation& attenuation,
+                                                         uint32 channelCount,
+                                                         const Vec3d& listenerPosition,
+                                                         const Quatd& listenerRotation,
+                                                         const Vec3d& sourcePosition) noexcept;
+
+} // namespace rocks

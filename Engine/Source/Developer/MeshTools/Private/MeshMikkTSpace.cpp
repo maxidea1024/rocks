@@ -4,7 +4,7 @@
 #include <DeterministicMath/DeterministicMath.h>
 #include <mikktspace.h>
 
-// MikkTSpace 어댑터와 Rocks.patch 훅 정의다(Docs/Design/MeshAnimationAssets.ko.md 5.2절, 결정
+// MikkTSpace 어댑터와 Rocks.patch 훅 정의다(Docs/Design/MeshAnimationAssets 5.2절, 결정
 // MA-D5, UE MeshDescriptionMikktSpaceInterface). 훅은 C 연결 이름으로 정의하며 MikkTSpace 정적
 // 라이브러리를 이 모듈에 링크해야 풀린다(MikkTSpace를 쓰는 곳은 이 모듈뿐이다).
 namespace rocks::mesh_build {

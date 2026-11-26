@@ -75,6 +75,12 @@ ROCKS_SPARKSCOMPILER_API StringView SimilarAttribute(StringView name) noexcept;
 // Unity 이름 대응 전부다.
 ROCKS_SPARKSCOMPILER_API Span<const UnityAlias> UnityAliases() noexcept;
 
+// 언어 소유 이름 전부다(내장 타입·prelude 타입·prelude 값·검증 리터럴 — binding schema 타입
+// 이름으로 쓸 수 없다). 메타 컴파일러의 이름 표(Programs/Rocks.MetaCompiler/SparksNames.json)가 이
+// 목록과 같은지 시험이 본다(Docs/Design/SparksBinding.ko.md B6). index가 범위 밖이면 빈 이름이다.
+ROCKS_SPARKSCOMPILER_API uint32 LanguageOwnedNameCount() noexcept;
+ROCKS_SPARKSCOMPILER_API StringView LanguageOwnedNameAt(uint32 index) noexcept;
+
 // 언어 이름 심볼(BuiltinType·PreludeType·PreludeValue)이 원문에 쓸 수 있는 이름인지다: 이름만
 // 예약한 타입(`WorldPosition` — S0318)과 언어 이름 표 밖의 타입(문맥 이름 `Time`의 타입)은
 // 거짓이다. 다른 종류의 심볼은 참이다.

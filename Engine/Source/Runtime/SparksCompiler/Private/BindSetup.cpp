@@ -18,7 +18,7 @@ constexpr uint32 MaxEngineChainSteps = 1u << 16;
 bool SameKindFamily(SchemaTypeKind derived, SchemaTypeKind base) noexcept {
     return derived == base &&
            (derived == SchemaTypeKind::Object || derived == SchemaTypeKind::Asset ||
-            derived == SchemaTypeKind::Interface);
+            derived == SchemaTypeKind::Interface || derived == SchemaTypeKind::Struct);
 }
 
 } // namespace

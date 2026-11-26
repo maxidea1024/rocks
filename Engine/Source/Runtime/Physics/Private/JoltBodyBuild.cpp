@@ -86,7 +86,8 @@ Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(const BodyGeometry& geometry,
     return Invalid();
 }
 
-JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion) noexcept {
+JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion,
+                                uint32 responseSet) noexcept {
     uint32 participation = 0;
     if (CollisionEnabledHasPhysics(collision.collisionEnabled)) {
         participation |= LayerParticipationPhysics;
@@ -105,7 +106,8 @@ JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion m
     const LayerMotion group = !simulates                     ? LayerMotion::QueryOnly
                               : motion == BodyMotion::Static ? LayerMotion::Static
                                                              : LayerMotion::Moving;
-    return MakeObjectLayer(static_cast<uint32>(collision.objectType), group, participation, 0);
+    return MakeObjectLayer(static_cast<uint32>(collision.objectType), group, participation,
+                           responseSet);
 }
 
 JPH::EMotionType ToJoltMotion(BodyMotion motion) noexcept {

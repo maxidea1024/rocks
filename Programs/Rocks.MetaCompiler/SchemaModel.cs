@@ -785,6 +785,16 @@ internal sealed class ClassModel
     public string ToolPrefix { get; init; } = "";
 
     public List<EnumeratorModel> Enumerators { get; init; } = [];
+
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1): 이 모듈 타입이 선언에 직접 쓴 값이다(enum은 Type만, import 타입은 None).
+    public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
+
+    // 실효 Sparks 노출이다(상속·끊기를 합친 값 — 이 모듈 타입은 SparksBinding.Resolve가, import 타입은 descriptor flags가 채운다).
+    public bool ScriptType { get; set; }
+
+    // Sparks 확장 가능의 상속 값이다(클래스만 — UE Blueprintable처럼 노출과 따로 내려가 NotScriptType 타입에도 남는다). schema의
+    // scriptExtensible은 노출된 타입에서 이 값이다(Docs/Design/SparksBinding.ko.md B1).
+    public bool ScriptExtensible { get; set; }
 }
 
 // Classes는 이 모듈 타입(클래스·struct·enum)만, Imported는 import한 타입(정규 이름 → 모델)이다. Ordered는 이 모듈

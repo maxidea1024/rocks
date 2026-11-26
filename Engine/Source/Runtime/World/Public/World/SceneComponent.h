@@ -52,7 +52,7 @@ struct AttachmentRules {
 
 // SceneComponent가 움직일 수 있는지다(UE EComponentMobility). Static·Stationary는 게임 World에서
 // 초기화 뒤 옮길 수 없다(23.3절).
-ROCKS_ENUM()
+ROCKS_ENUM(ScriptType)
 enum class ComponentMobility : uint8 {
     Static,
     Stationary,
@@ -374,7 +374,7 @@ private:
     Result<void> AddChild(ObjectHandle child) noexcept;
     void RemoveChild(ObjectHandle child) noexcept;
 
-    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform") Transform relative_;
+    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform", ScriptReadOnly) Transform relative_;
     // 월드 행렬 캐시다(Component::world_를 가리지 않게 worldMatrix_라 한다).
     ROCKS_NATIVE() mutable Mat4d worldMatrix_;
     ROCKS_NATIVE() mutable bool worldDirty_ = true;
@@ -382,15 +382,18 @@ private:
     // parent_에서 유도되는 값이다(UE AttachChildren처럼 Transient — 편입이 다시 만든다).
     ROCKS_NATIVE() Array<ObjectHandle> children_;
     // 부착 부모·socket이다(영속 — 23.3절 CR3, 편입이 계층을 복원한다). parent_와 같은 값이다.
-    ROCKS_PROPERTY(ReadOnly, Name = "attachParent") WeakObjectRef<SceneComponent> attachParent_;
+    ROCKS_PROPERTY(ReadOnly, Name = "attachParent", ScriptReadOnly)
+    WeakObjectRef<SceneComponent> attachParent_;
     ROCKS_PROPERTY(ReadOnly, Name = "attachSocket") String attachSocket_;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation") bool absoluteLocation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation") bool absoluteRotation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale") bool absoluteScale_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "mobility")
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation", ScriptReadOnly)
+    bool absoluteLocation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation", ScriptReadOnly)
+    bool absoluteRotation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale", ScriptReadOnly) bool absoluteScale_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "mobility", ScriptReadOnly)
     ComponentMobility mobility_ = ComponentMobility::Movable;
-    ROCKS_PROPERTY(ReadOnly, Name = "visible") bool visible_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame") bool hiddenInGame_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "visible", ScriptReadOnly) bool visible_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame", ScriptReadOnly) bool hiddenInGame_ = false;
     ROCKS_NATIVE() Vec3d velocity_;
     ROCKS_NATIVE() mutable ComponentBounds bounds_;
     ROCKS_NATIVE() mutable bool boundsDirty_ = true;

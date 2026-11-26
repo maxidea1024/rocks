@@ -3,6 +3,20 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::core_type_bindings::BoxdBinding::max",
+      "id": "1b755712d0d747e083a82224ce24216c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::BoxdBinding::min",
+      "id": "0b86cb2fe6e24c9c9a33acc563eae625",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::core_type_bindings::ColorBinding::a",
       "id": "dc1f30c985f24333aa3458148d043eb6",
       "aliases": [],
@@ -670,6 +684,13 @@
       "kind": "field",
       "name": "rocks::core_type_bindings::Vec4dBinding::z",
       "id": "1f34ed6f5e054831a1e137890ac60cb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::BoxdBinding",
+      "id": "d68a04d18b8246f6a02b3798b0526978",
       "aliases": [],
       "retired": false
     },

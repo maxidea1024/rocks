@@ -97,7 +97,9 @@ constexpr StringView ImportUsage =
     "to\n"
     "  the import record (a reimport uses it again); any other setting is a property of the new\n"
     "  asset. Additional outputs are saved at <path>_<key>. Prints '<path> <AssetId>' and one\n"
-    "  'output <key> <path> <AssetId>' line per additional output. Takes the project write lock.\n"
+    "  'output <key> <path> <AssetId>' line per additional output and one 'edited <path>\n"
+    "  <AssetId>' line per other asset the importer changed and saved with it. Takes the project\n"
+    "  write lock.\n"
     "  Textures: --cube=px:<file>,nx:<file>,... (six faces), --array and --volume (one file per\n"
     "  slice, comma separated), --cube-array (cubes separated by ';', quote the argument),\n"
     "  --cube-layout (HorizontalCross, VerticalCross, Strip6) and --volume-tile split one image.\n"
@@ -117,7 +119,9 @@ constexpr StringView ReimportUsage =
     "  options or the asset properties as in asset-import. A recorded output the importer no "
     "longer\n"
     "  makes is reported as OrphanedOutput. Prints '<path> <AssetId>' and one\n"
-    "  'output <key> <path> <AssetId>' line per additional output. Takes the project write lock.\n";
+    "  'output <key> <path> <AssetId>' line per additional output and one 'edited <path>\n"
+    "  <AssetId>' line per other asset the importer changed and saved with it. Takes the project\n"
+    "  write lock.\n";
 
 constexpr StringView FixIdUsage =
     "usage: asset-fix-duplicate-id <path> [--project=<dir>] [--wait=<seconds>]\n"
@@ -1059,6 +1063,15 @@ Result<int32> RunImportCommand(void* context, Span<const StringView> args, Comma
     for (const AssetImportOutput& one : result.outputs) {
         if (auto formatted = line.TryAppendFormat("{}: output {} {} {}\n", name, one.key.View(),
                                                   one.path.View(), one.id);
+            !formatted) {
+            return Result<int32>::Failure(formatted.Error());
+        }
+    }
+
+    // 임포터가 고쳐 함께 저장한 다른 에셋이다(7.1절 20 A2f4).
+    for (const AssetImportOutput& one : result.edited) {
+        if (auto formatted =
+                line.TryAppendFormat("{}: edited {} {}\n", name, one.path.View(), one.id);
             !formatted) {
             return Result<int32>::Failure(formatted.Error());
         }

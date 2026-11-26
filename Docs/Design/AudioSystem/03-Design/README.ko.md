@@ -36,3 +36,4 @@
 - [3.32 AU5 앞당김 — 코덱 계층 C3: Opus 인코더·`AudioOpus` 디코더(개정 27)](03.32-Au5CodecC3.ko.md)
 - [3.33 AU2 구현 세부 — 출력 장치·AudioRT(개정 28)](03.33-Au2OutputDevice.ko.md)
 - [3.34 AU2b 구현 세부 — miniaudio 장치 backend(개정 31)](03.34-Au2bMiniaudio.ko.md)
+- [3.35 AU3 구현 세부 — `EngineAudio`(개정 32)](03.35-Au3EngineAudio.ko.md)

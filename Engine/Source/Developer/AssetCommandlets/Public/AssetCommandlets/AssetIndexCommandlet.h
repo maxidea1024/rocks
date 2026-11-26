@@ -14,16 +14,19 @@
 //       요약 한 줄을 표준 출력에 쓴다. 진단이 있으면 1이다.
 namespace rocks::commandlet_host {
 
-Result<int32> RunAssetListCommand(void* context, Span<const StringView> args,
-                                  CommandletOutput& output) noexcept;
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunAssetListCommand(void* context, Span<const StringView> args, CommandletOutput& output) noexcept;
 
-Result<int32> RunAssetOrphansListCommand(void* context, Span<const StringView> args,
-                                         CommandletOutput& output) noexcept;
-Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> args,
-                                         CommandletOutput& output) noexcept;
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunAssetOrphansListCommand(void* context, Span<const StringView> args,
+                           CommandletOutput& output) noexcept;
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunAssetIndexVerifyCommand(void* context, Span<const StringView> args,
+                           CommandletOutput& output) noexcept;
 // asset-index-rebuild [--project=<dir>] [--wait=<seconds>] — 쓰기 잠금을 잡고 캐시 없이 다시
 // 검색하고 고아 임시 파일을 지운 뒤 색인 캐시를 쓴다(7.1절 16 A2d1). 진단이 있어도 0이다.
-Result<int32> RunAssetIndexRebuildCommand(void* context, Span<const StringView> args,
-                                          CommandletOutput& output) noexcept;
+ROCKS_ASSETCOMMANDLETS_API Result<int32>
+RunAssetIndexRebuildCommand(void* context, Span<const StringView> args,
+                            CommandletOutput& output) noexcept;
 
 } // namespace rocks::commandlet_host

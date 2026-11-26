@@ -2,7 +2,7 @@
 
 #include <Platform/Memory.h>
 
-// 클립 원본 본 트랙의 검증·저장·로드·샘플링이다(Docs/Design/MeshAnimationAssets.ko.md 7.2·7.5절,
+// 클립 원본 본 트랙의 검증·저장·로드·샘플링이다(Docs/Design/MeshAnimationAssets 7.2·7.5절,
 // UE UAnimDataModel::Evaluate·FAnimationRuntime::GetKeyIndicesFromTime·FTransform::Blend).
 namespace rocks::animation_detail {
 
@@ -416,10 +416,21 @@ Result<void> StoreClipSource(const ClipSource& source, MemoryBulkSource& bulk, N
 
 namespace {
 
+// 원본 bulk를 읽는 곳이다(쿠킹 패키지·에디터 패키지는 Package, 쿠킹 처리기는 열린 패키지의 bulk
+// 원본 — MeshSource::Load와 같은 두 경로).
+struct ClipBulkReader {
+    const Package* package = nullptr;
+    PackageBulkSource* source = nullptr;
+
+    Result<Span<const uint8>> Read(const BulkDataRef& ref) const noexcept {
+        return package != nullptr ? package->BulkBytes(ref) : source->ReadBulk(ref);
+    }
+};
+
 // ref의 bulk를 읽는다. 못 읽으면 CorruptPackage(BulkUnreadable)다.
-Result<Span<const uint8>> ReadClipBulk(const Package& package, const BulkDataRef& ref, uint32 index,
-                                       ClipDiagnostic* failure) noexcept {
-    auto bytes = package.BulkBytes(ref);
+Result<Span<const uint8>> ReadClipBulk(const ClipBulkReader& reader, const BulkDataRef& ref,
+                                       uint32 index, ClipDiagnostic* failure) noexcept {
+    auto bytes = reader.Read(ref);
     if (!bytes) {
         (void)animation_detail::ClipFail(failure, AssetDiagnosticCode::CorruptPackage,
                                          bytes.Error(), ClipIssue::BulkUnreadable, index);
@@ -455,10 +466,10 @@ Result<void> DecodeComponent(Span<const uint8> bytes, uint32 keys, uint32 index,
     return Result<void>::Success();
 }
 
-Result<void> LoadTrack(const ClipBoneTrack& stored, const Package& package, uint32 keys,
+Result<void> LoadTrack(const ClipBoneTrack& stored, const ClipBulkReader& reader, uint32 keys,
                        uint32 index, ClipTrack& track, ClipDiagnostic* failure) noexcept {
     track.bone = stored.bone;
-    auto translation = ReadClipBulk(package, stored.translation, index, failure);
+    auto translation = ReadClipBulk(reader, stored.translation, index, failure);
     if (!translation) {
         return Result<void>::Failure(translation.Error());
     }
@@ -469,7 +480,7 @@ Result<void> LoadTrack(const ClipBoneTrack& stored, const Package& package, uint
         return decoded;
     }
 
-    auto rotation = ReadClipBulk(package, stored.rotation, index, failure);
+    auto rotation = ReadClipBulk(reader, stored.rotation, index, failure);
     if (!rotation) {
         return Result<void>::Failure(rotation.Error());
     }
@@ -480,7 +491,7 @@ Result<void> LoadTrack(const ClipBoneTrack& stored, const Package& package, uint
         return decoded;
     }
 
-    auto scale = ReadClipBulk(package, stored.scale, index, failure);
+    auto scale = ReadClipBulk(reader, stored.scale, index, failure);
     if (!scale) {
         return Result<void>::Failure(scale.Error());
     }
@@ -488,10 +499,9 @@ Result<void> LoadTrack(const ClipBoneTrack& stored, const Package& package, uint
     return DecodeComponent(scale.Value(), keys, index, ScaleComponent, track.scale, failure);
 }
 
-} // namespace
-
-Result<void> LoadClipSource(const ClipSourceData& data, const Package& package, NamePool& names,
-                            ClipSource& out, ClipDiagnostic* failure) noexcept {
+Result<void> LoadClipSourceFrom(const ClipSourceData& data, const ClipBulkReader& reader,
+                                NamePool& names, ClipSource& out,
+                                ClipDiagnostic* failure) noexcept {
     Allocator& allocator = out.tracks.GetAllocator();
     ClipSource loaded(allocator);
     loaded.frameRate = data.frameRate;
@@ -526,7 +536,7 @@ Result<void> LoadClipSource(const ClipSourceData& data, const Package& package, 
 
         previous = Move(lease.Value());
         ClipTrack track(allocator);
-        if (auto loadedTrack = LoadTrack(stored, package, keys, index, track, failure);
+        if (auto loadedTrack = LoadTrack(stored, reader, keys, index, track, failure);
             !loadedTrack) {
             return loadedTrack;
         }
@@ -547,6 +557,22 @@ Result<void> LoadClipSource(const ClipSourceData& data, const Package& package, 
 
     out = Move(loaded);
     return Result<void>::Success();
+}
+
+} // namespace
+
+Result<void> LoadClipSource(const ClipSourceData& data, const Package& package, NamePool& names,
+                            ClipSource& out, ClipDiagnostic* failure) noexcept {
+    ClipBulkReader reader;
+    reader.package = &package;
+    return LoadClipSourceFrom(data, reader, names, out, failure);
+}
+
+Result<void> LoadClipSource(const ClipSourceData& data, PackageBulkSource& bulk, NamePool& names,
+                            ClipSource& out, ClipDiagnostic* failure) noexcept {
+    ClipBulkReader reader;
+    reader.source = &bulk;
+    return LoadClipSourceFrom(data, reader, names, out, failure);
 }
 
 Transform3f SampleClipSource(const ClipSource& source, uint32 track, double seconds,

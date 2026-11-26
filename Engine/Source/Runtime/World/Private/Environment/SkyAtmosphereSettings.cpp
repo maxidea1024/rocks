@@ -1,6 +1,6 @@
 #include <Core/Math/MathUtility.h>
 #include <World/Environment/SkyAtmosphereSettings.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 대기 설정 범위 검사다(Docs/Design/EngineRuntime 27.2절, D5).
 namespace rocks {

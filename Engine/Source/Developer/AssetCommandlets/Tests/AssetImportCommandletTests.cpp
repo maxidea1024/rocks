@@ -90,6 +90,26 @@ TEST(AssetImportCommand_Imports) {
     CHECK(scene.Exists("Content/Rock.rasset") && scene.Exists("Content/Rock_extra.rasset") &&
           scene.Exists("Intermediate/AssetIndex.cache") && state.test.calls == 1);
 
+    // 다른 에셋을 고친 임포트는 고친 에셋마다 edited 줄을 낸다(7.1절 20 A2f4).
+    const StringView rockLine = run.captured.out.View();
+    const usize idStart = StringView("asset-import: /Game/Rock ").ByteCount();
+    usize idEnd = idStart;
+    while (idEnd < rockLine.ByteCount() && rockLine.Data()[idEnd] != '\n') {
+        ++idEnd;
+    }
+
+    String editText(env.allocator);
+    REQUIRE(editText.TryAppend("value=1\nedit=") &&
+            editText.TryAppend(rockLine.SliceBytes(idStart, idEnd - idStart)) &&
+            scene.WriteFile("Edit.trock", editText.View()));
+    char editSource[512] = {};
+    FixedStringBuilder editPath{Span<char>(editSource)};
+    REQUIRE(editPath.TryAppendFormat("{}/Edit.trock", scene.root.Root()));
+    Run edit(env.allocator, &state);
+    const StringView editArgs[] = {"/Game/Editor", editPath.View(), projectOption.View()};
+    CHECK(edit.Call(editArgs) == 0);
+    CHECK(StringView(edit.captured.out.View()).Contains("asset-import: edited /Game/Rock "));
+
     // 역할 원본(이름으로 고르는 임포터 — 상대 원본 경로는 작업 디렉터리 기준).
     char px[512] = {};
     char nx[512] = {};

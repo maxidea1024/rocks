@@ -11,7 +11,7 @@
 | PH0 | 이 문서 | JL1·CD1·CD2 | 리뷰어 1명 반영 |
 | PH1 | `Physics` 모듈 골격: 수명 객체(할당·로그·assert hook, `VerifyJoltVersionID`, `Factory`·`RegisterTypes`), `TaskJobSystem`, `PhysicsSettings`, `PhysicsWorldSubsystem`·`JoltPhysicsScene`(빈 장면), World 접점(2.2절), PhysicsSimulate 자리 연결(7.4절), Jolt `JPH_OBJECT_LAYER_BITS` 32(6.1절 — JL1 manifest·어댑터 경계 10.2절 갱신) | 7.4절 ER 개정 | 장면 생성·파괴·빈 step, job 풀 포화·종료 중 job(PC06), FP 상태, 할당 잔여 0, Editor·Preview World는 step 없음 |
 | PH2 | (하위 단계 PH2a–PH2d — 7.1.2절) 어댑터 변환 함수(어댑터 경계 7절)와 PA 시험(7.1.2절 배정), Box·Sphere·Capsule·Cylinder body, 운동 종류, step, 결과 반영(3.4절 — 스텝별 활성·잠든 body 합), Kinematic 이동·teleport·목표 없는 스텝 정지(3.3절), 재생성 표(2.3.1절 — simulate 켤 때 떼기) | PH1, CM3 형상 컴포넌트(CR16 데이터) | 7.1.2절 PH2 배정 PA, 수명 시험, 결정성(같은 binary 상태 hash — PC03), 한 프레임 여러 스텝의 Kinematic 정지·프레임 안에서 잠든 body 반영 |
-| PH3 | 질의(4장)와 필터 사상(6.1–6.3절 — CD3), `HitResult`·`OverlapResult` | PH2 | 4.4–4.5절 규칙 표 시험(채널·ObjectTypes·profile, 무시 목록, mobility, 시작 겹침, 정렬·자르기), PC02 |
+| PH3 | (하위 단계 PH3a–PH3c — 7.1.6절) 질의(4장)와 필터 사상(6.1–6.3절 — CD3), `HitResult`·`OverlapResult` | PH2 | 4.4–4.5절 규칙 표 시험(채널·ObjectTypes·profile, 무시 목록, mobility, 시작 겹침, 정렬·자르기), PC02 |
 | PH4 | `MoveComponent` sweep·침투 해소(5.1–5.2절), overlap(5.3절), hit(5.4절, sweep·시뮬레이션), probe(6.4절) | PH3, CR7(구독형 이벤트 — 없으면 가상 hook만) | UE 순서 시험(발행 순서·대칭 장부·재진입), pullback 수치 |
 | PH5 | 힘·속도·질량·잠듦 API(2.6–2.7절), DOF·CCD·body 값 사상(6.5절), 기본 물리 재질·결합 방식(6.6절) | PH2 | PA04·PA05와 API 왕복, 잠듦 이벤트 |
 | PH6 | weld(2.8절), 메시 단순 충돌·complex-as-simple(StaticMesh — D2b 뒤), 쿠킹 형상 너겟(계획 16.4절 cook — PC05) | PH2, StaticMesh 에셋(MA2b), 에셋 쿠킹 | weld 질량·질의 결과 컴포넌트, PC05 |
@@ -174,6 +174,46 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 질량: 공개 질량 API(`GetMass` — 2.6절)는 PH5라 `updateMassWhenScaleChanges` 두 값의 시험은 PH5로 미룬다. 이 단계는 표지를 Jolt `SetShape`에 넘기는 코드만 둔다.
 
+### 7.1.6 PH3 하위 단계와 PH3a 구현 세부(2026-11-26)
+
+PH3도 셋으로 나눈다(사용자 지시 "순서대로" — PH2 바로 뒤). 각 하위 단계는 설계 갱신 → 구현 → 리뷰어 1명 → 커밋이다.
+
+| 하위 단계 | 내용 | 선행 |
+|---|---|---|
+| PH3a | 응답 묶음 표와 시뮬레이션 쌍 필터(6.1절 bit 11–31, 6.2절 2–3단계 — CD3의 필터 몫) | PH2 |
+| PH3b | 질의 타입(`QueryFilter`·`QueryParams`·`CollisionShape`·`HitResult`·`OverlapResult` — 4.2–4.5절), `WorldCollision.h` 자유 함수, `PhysicsScene` 질의 접점, line trace(Test·First·All)와 질의 필터(6.3절) | PH3a |
+| PH3c | shape trace·overlap·컴포넌트 질의(4.1절), 시작 겹침·MTD, 작은 형상의 line 전환, PA08 sweep | PH3b |
+
+PC02(질의 결과를 x64와 비교)는 플랫폼별 실행이 필요해 PH3c의 x64 기준 시험을 CI가 다른 플랫폼에서 돌릴 때 판정한다(M4 완료 조건 — 이 단계 완료 기준이 아니다).
+
+**PH3a 응답 묶음 표.** Physics private `JoltResponseSets.h`. 장면 하나에 표 하나를 둔다.
+- 칸은 `CollisionResponses`(64칸) 하나와 참조 수다. 같은 응답을 쓰는 body가 한 칸을 공유한다(참조 수 +1).
+- 칸 0은 "모든 채널 Block"으로 늘 있고 참조를 세지 않는다. Jolt를 직접 쓰는 시험의 층 색인 0이 PH2까지와 같은 뜻이 된다. 컴포넌트 기본 응답은 Gizmo 채널이 Ignore(UE 기본 — `CollisionProfileTable`)라 일반 칸 하나를 공유한다.
+- 찾기는 지금 칸들을 앞에서부터 비교한다. 서로 다른 응답 묶음은 profile 수 정도라 적다. 많아지면 해시로 바꾼다(한계).
+- 참조 수가 0이 된 칸은 빈 칸 목록으로 돌려 다음 새 묶음이 다시 쓴다.
+- 색인은 object 층 bit 11–31에 넣는다. 칸 수가 `LayerResponseSetMask + 1`(약 200만)을 넘으면 `CreateBody`가 `CapacityExceeded`로 실패하고 Warning `ResponseSetCapacity`를 남긴다.
+- 표는 게임 thread에서 step 밖에만 바뀐다(`CreateBody`·`DestroyBody`·`SetBodyCollision`). step 안에서 job thread의 쌍 필터는 읽기만 하므로 잠금이 없다(3.2절 — step 중 접점 호출 금지).
+- `SetBodyCollision`은 새 묶음을 먼저 얻고 층을 바꾼 뒤 옛 묶음을 놓는다(같은 묶음이면 같은 칸이다). 새 묶음을 얻지 못하면 옛 응답 색인을 둔 채 object type·참여 표지만 바꾸고 Warning이다(용량이면 `ResponseSetCapacity`).
+- `SetBodyCollision`은 그 body를 깨운다(UE "Always wake actors up when collision filters change" — `BodyInstance.cpp:1125–1126`). Static body는 깨울 것이 없으므로, 잠든 Dynamic이 놓인 바닥의 응답을 바꾸면 그 Dynamic은 깨울 때까지 그대로다(UE도 Static을 깨워 봐야 효과가 없다).
+- 접점 쓰기(body 만들기·지우기·옮기기·운동 종류·필터·형상, 결과 꺼내기)는 step 안에서 부르면 Fatal이다(`ROCKS_ASSERT` — step 안의 job thread가 표와 body를 읽는다). PH3b 질의도 같은 thread에서 step 밖에서만 한다.
+- `PhysicsSceneStats::responseSets`(쓰는 칸 수)를 진단으로 더한다.
+
+**PH3a 쌍 필터**(6.2절 2–3단계). `ObjectLayerPairFilter`가 표를 참조한다.
+- 1단계(둘 다 Static, QueryOnly, physics·probe 표지 없음)는 그대로다.
+- 2단계: a 쪽 판정 = a 묶음에서 b object type의 응답, b 쪽 판정 = b 묶음에서 a object type의 응답이다. 결과는 둘의 최소다(UE `SceneComponent.cpp:3089–3092`).
+- 3단계: 최소가 Block일 때만 충돌이다. Overlap·Ignore는 시뮬레이션 접촉이 없다(Overlap은 질의 기반 overlap 5.3절 — PH4).
+- `ObjectVsBroadPhaseFilter`는 운동 묶음만 본다(바뀌지 않는다).
+
+**PH3a 시험**(공개 API만 — 새 파일 `PhysicsFilterTests.cpp`, 고정 장치는 `PhysicsBodyFixture.h`):
+- 바닥이 Pawn 채널을 Ignore·Overlap으로 응답하면 Pawn 구가 빠지고, Block이면 선다. 구 쪽에서 WorldStatic을 Ignore로 응답해도 빠진다(양쪽 최소).
+- 떨어지는 중에 응답을 바꾸면 다음 step부터 따른다. 바닥에 닿아 있는(깨어 있는) 구도 바닥을 Ignore로 바꾸면 빠진다(Jolt 접촉 캐시도 다시 거른다).
+- 잠든 구는 자기 응답을 바꾸면 깨어서 빠지고, 바닥 응답만 바꾸면 그대로 있다.
+- 같은 응답의 body 둘은 묶음 하나를 공유한다. 하나를 바꾸면 묶음이 늘고, 둘째도 같게 바꾸면 쓰지 않는 기본 칸이 사라지며, 마지막 사용자가 놓으면 칸 0만 남는다(`responseSets`).
+- 놓인 칸을 다시 쓴 새 묶음이 옛 응답을 남기지 않는다.
+- Dynamic 대 Dynamic도 같은 규칙이다(위 상자만 Pawn을 Ignore해도 아래 Pawn 상자를 지나 바닥에 선다 — 양쪽 최소).
+
+**PH3a 리뷰 반영(2026-11-26).** 치명 0, 중요 2, 경미 5. 닿아 있는 쌍·잠든 body의 응답 변경 시험과 UE의 필터 변경 깨움, step 중 접점 쓰기 Fatal, 묶음 확보 실패 때 나머지 bit는 바꿈, 진단 코드는 용량일 때만, 빈 칸 목록 성장은 `TryEnsureCapacity`, 놓인 칸 재사용 시험.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -223,6 +263,7 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 ## 7.6 개정 이력
 
+- 개정 11(2026-11-26): PH2d 완료(05226c41 — PH2 끝), PH3 하위 단계와 PH3a 구현 세부(7.1.6절).
 - 개정 10(2026-11-26): PH2c 완료(e67a082b), PH2d 구현 세부(7.1.5절 — 운동 종류 전환·필터·형상·scale·Mobility, 리뷰 반영).
 - 개정 9(2026-11-26): PH2b 완료(6ba9c214 — 리뷰 반영: 크기 0·shear에서도 body, 옮긴 잠든 body 깨움), PH2c 구현 세부(7.1.4절).
 - 개정 8(2026-11-26): PH2a 완료(fcfe9ad4), PH2b 구현 세부(7.1.3절).

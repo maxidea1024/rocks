@@ -22,6 +22,9 @@
 //   reference보다 앞선다, 실패하면 그 오류로 끝낸다)
 //   openmember=<번호>         OpenAsset(MemberAsset(번호))를 hard에 건다(A2f3d 묶음 — open보다
 //   앞선다)
+//   edit=<AssetId>,…          EditAsset(그 id)로 연 TestAsset의 value를 1 늘린다(A2f4 — 같은 id를
+//   다시 적으면 또 늘린다, 실패하면 그 오류로 끝낸다)
+//   editmember=<번호>         EditAsset(MemberAsset(번호))(A2f4 거부 시험)
 // 옵션 TestImportOptions{scale, failAt}: failAt 1이면 원본을 읽은 뒤 Fail(InvalidSource,
 // InvalidArgument, 5), 2면 주 출력을 만든 뒤 Failure(Busy)(진단 없이), 3이면 모든 출력 뒤 Fail.
 // 역할 변형(roles px·nx)은 두 원본의 value를 더한다.
@@ -247,6 +250,49 @@ public:
             referenced = opened.Value();
         }
 
+        // 다른 에셋 고치기(A2f4).
+        lastEditError = ErrorCode::None;
+        if (FindLine(first, "editmember", option)) {
+            auto index = TryParseInt64(option);
+            if (!index || index.Value() < 0) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto edited = context.EditAsset(context.MemberAsset(static_cast<usize>(index.Value())));
+            if (!edited) {
+                lastEditError = edited.Error();
+                return Result<void>::Failure(edited.Error());
+            }
+        }
+
+        if (FindLine(first, "edit", option)) {
+            usize start = 0;
+            for (usize index = 0; index <= option.ByteCount(); ++index) {
+                if (index < option.ByteCount() && option.Data()[index] != ',') {
+                    continue;
+                }
+
+                auto id = AssetId::TryParse(option.SliceBytes(start, index - start));
+                start = index + 1;
+                if (!id) {
+                    return Result<void>::Failure(id.Error());
+                }
+
+                auto edited = context.EditAsset(id.Value());
+                if (!edited) {
+                    lastEditError = edited.Error();
+                    return Result<void>::Failure(edited.Error());
+                }
+
+                TestAsset* target = Pointer<TestAsset>(context.Registry(), edited.Value());
+                if (target == nullptr) {
+                    return Result<void>::Failure(ErrorCode::TypeMismatch);
+                }
+
+                ++target->value;
+            }
+        }
+
         // 임포트가 정하는 필드는 매번 모두 쓴다(참조가 없으면 null).
         if (!main.IsNull()) {
             auto set = context.Registry().SetReference(
@@ -323,6 +369,8 @@ public:
     usize lastPreviousTags = 0;
     // 마지막 Import의 OpenAsset 오류다(None이면 성공이거나 열지 않음 — A2f3c).
     ErrorCode lastOpenError = ErrorCode::None;
+    // 마지막 Import의 EditAsset 오류다(None이면 성공이거나 고치지 않음 — A2f4).
+    ErrorCode lastEditError = ErrorCode::None;
     // 마지막 Import가 본 묶음 구성원 수·자기 번호다(A2f3d).
     usize lastGroupSize = 0;
     usize lastGroupIndex = 0;

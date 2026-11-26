@@ -238,7 +238,8 @@ internal static partial class ModuleMetaTests
                     ["displayName"] = "",
                     ["maxElements"] = 65536,
                     ["bitfield"] = false,
-                    ["assetBundles"] = ""
+                    ["assetBundles"] = "",
+                    ["scriptName"] = ""
                 });
             });
             await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), nested]), "RMC1000", "holds a reference array");
@@ -262,7 +263,8 @@ internal static partial class ModuleMetaTests
                     ["displayName"] = "",
                     ["maxElements"] = 65536,
                     ["bitfield"] = false,
-                    ["assetBundles"] = ""
+                    ["assetBundles"] = "",
+                    ["scriptName"] = ""
                 }));
                 await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), cycle]), "RMC2302", "cycle");
             }

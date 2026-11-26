@@ -2,7 +2,7 @@
 #include <Core/Math/MathUtility.h>
 #include <Mesh/SimpleCollision.h>
 
-// 단순 충돌 검증과 볼록 형상 bulk 저장·로드다(Docs/Design/MeshAnimationAssets.ko.md 4.6·4.8절).
+// 단순 충돌 검증과 볼록 형상 bulk 저장·로드다(Docs/Design/MeshAnimationAssets 4.6·4.8절).
 namespace rocks {
 
 namespace {

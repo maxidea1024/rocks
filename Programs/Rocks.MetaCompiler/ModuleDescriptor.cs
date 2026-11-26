@@ -11,7 +11,9 @@ internal static class ModuleDescriptor
 {
     // descriptor 형식 판이다. 2: 클래스 flags에 Exported(Docs/Design/BuildTargets 3.8절 BS8d3). 다른 판은 다시 만들어야 한다.
     // 3: 필드 assetBundles(에셋 A4e2a)를 더했다.
-    private const int DescriptorSchema = 3;
+    // 4: 타입 flags ScriptType·ScriptExtensible(실효 — 상속 포함), 필드 flags ScriptReadOnly·ScriptWritable과 필드 scriptName(Sparks binding —
+    // Docs/Design/SparksBinding.ko.md B2).
+    private const int DescriptorSchema = 4;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -32,7 +34,8 @@ internal static class ModuleDescriptor
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
     private static readonly string[] FieldKeys =
-        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles"];
+        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles",
+            "scriptName"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -95,6 +98,7 @@ internal static class ModuleDescriptor
                     json.WriteStringValue("Exported");
                 }
 
+                WriteScriptFlags(json, type);
                 json.WriteEndArray();
                 // 실효 Within(상속 포함 — 리플렉션 B9h2)이다. 없으면 null이다.
                 if (type.Within is null)
@@ -157,6 +161,7 @@ internal static class ModuleDescriptor
             json.WriteStringValue("ContainsReferenceArray");
         }
 
+        WriteScriptFlags(json, type);
         json.WriteEndArray();
         json.WriteString("binds", type.Binds);
         json.WriteString("toolName", type.EffectiveToolName);
@@ -245,7 +250,8 @@ internal static class ModuleDescriptor
             // 필드 플래그(리플렉션 B9h1)는 비트 순서로 적는다.
             foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
                 (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
-                (field.Spec.TextExportTransient, "TextExportTransient"), (field.Spec.TextMapMergeByKey, "TextMapMergeByKey") })
+                (field.Spec.TextExportTransient, "TextExportTransient"), (field.Spec.TextMapMergeByKey, "TextMapMergeByKey"),
+                (field.Spec.ScriptReadOnly, "ScriptReadOnly"), (field.Spec.ScriptWritable, "ScriptWritable") })
             {
                 if (set)
                 {
@@ -262,10 +268,26 @@ internal static class ModuleDescriptor
             json.WriteBoolean("bitfield", field.Bitfield);
             // bundle 이름 목록의 정규 텍스트다(에셋 A4e2a — 없으면 ""). 상속 필드 일치 비교와 EditorOnly 필드 안 목록 거부가 쓴다.
             json.WriteString("assetBundles", field.Spec.AssetBundles);
+            // Sparks 스크립트 이름 지정(ScriptName — 없으면 "")이다. 파생 모듈이 상속 필드의 Sparks 이름 겹침을 본다(SparksBinding B5).
+            json.WriteString("scriptName", field.Spec.ScriptName);
             json.WriteEndObject();
         }
 
         json.WriteEndArray();
+    }
+
+    // 실효 Sparks 노출 flag를 기존 flag 뒤에 ScriptType → ScriptExtensible 순서로 적는다(Docs/Design/SparksBinding.ko.md B2).
+    private static void WriteScriptFlags(Utf8JsonWriter json, ClassModel type)
+    {
+        if (type.ScriptType)
+        {
+            json.WriteStringValue("ScriptType");
+        }
+
+        if (type.ScriptExtensible)
+        {
+            json.WriteStringValue("ScriptExtensible");
+        }
     }
 
     private static void WriteEnum(Utf8JsonWriter json, ClassModel type)
@@ -283,6 +305,7 @@ internal static class ModuleDescriptor
             json.WriteStringValue("Flags");
         }
 
+        WriteScriptFlags(json, type);
         json.WriteEndArray();
         json.WriteString("toolPrefix", type.ToolPrefix);
         // Binds 미러 enum(CurveData CV9)의 실제 enum 정규 철자다(미러가 아니면 "").
@@ -397,8 +420,8 @@ internal static class ModuleDescriptor
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
             // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
             // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
-            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray"
-                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly" or "Exported";
+            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" or "ScriptType"
+                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly" or "Exported" or "ScriptType" or "ScriptExtensible";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -455,8 +478,16 @@ internal static class ModuleDescriptor
                 RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner"),
                 ContainsReferenceArray = flags.Contains("ContainsReferenceArray"),
                 Binds = binds,
-                ToolName = typeToolName == TypeToolName.Default(name) ? "" : typeToolName
+                ToolName = typeToolName == TypeToolName.Default(name) ? "" : typeToolName,
+                ScriptType = flags.Contains("ScriptType"),
+                ScriptExtensible = flags.Contains("ScriptExtensible")
             };
+            // EditorOnly 타입은 Sparks에 보이지 않는다(원본 규칙 RMC2607 — Docs/Design/SparksBinding.ko.md B1). ScriptExtensible은 확장 상속
+            // 값이라 NotScriptType 타입에도 있을 수 있다(UE Blueprintable처럼 노출과 따로 내려간다 — B1).
+            if (model.EditorOnly && (model.ScriptType || model.ScriptExtensible))
+            {
+                throw Invalid("Sparks exposure on the EditorOnly type " + name);
+            }
             // 클래스의 실효 Within(리플렉션 B9h2)은 {name, id} 또는 null이다.
             if (!isStruct)
             {
@@ -647,7 +678,7 @@ internal static class ModuleDescriptor
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
                 if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
-                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient" or "TextMapMergeByKey")) ||
+                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "ScriptReadOnly" or "ScriptWritable")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
@@ -722,7 +753,10 @@ internal static class ModuleDescriptor
                         ToolName = toolName == fieldName ? "" : toolName,
                         // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
                         MaxElements = fixedArray ? 0 : maxElements,
-                        AssetBundles = assetBundles
+                        AssetBundles = assetBundles,
+                        ScriptReadOnly = fieldFlags.Contains("ScriptReadOnly"),
+                        ScriptWritable = fieldFlags.Contains("ScriptWritable"),
+                        ScriptName = ScriptNameOf(field, fieldFlags, Invalid)
                     },
                     Kind = kind,
                     ElementKind = elementKind,
@@ -738,6 +772,31 @@ internal static class ModuleDescriptor
         }
 
         return (module, types);
+    }
+
+    // 필드 scriptName(Sparks 이름 지정 — 없으면 "")이다. 지정은 Sparks 노출 필드에만 있고 PascalCase ASCII다(원본 선언의 RMC2603·RMC2604와
+    // 같은 규칙 — Docs/Design/SparksBinding.ko.md B1). ReadOnly 필드의 ScriptWritable도 원본 규칙대로 거부한다.
+    private static string ScriptNameOf(JsonElement field, string[] flags, Func<string, Exception> invalid)
+    {
+        JsonElement value = field.GetProperty("scriptName");
+        string name = value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : throw invalid("scriptName");
+        bool visible = flags.Contains("ScriptReadOnly", StringComparer.Ordinal) || flags.Contains("ScriptWritable", StringComparer.Ordinal);
+        if (name.Length != 0 && (!visible || !Specifiers.IsScriptName(name)))
+        {
+            throw invalid("scriptName " + name);
+        }
+
+        if (flags.Contains("ScriptReadOnly", StringComparer.Ordinal) && flags.Contains("ScriptWritable", StringComparer.Ordinal))
+        {
+            throw invalid("ScriptReadOnly with ScriptWritable");
+        }
+
+        if (flags.Contains("ReadOnly", StringComparer.Ordinal) && flags.Contains("ScriptWritable", StringComparer.Ordinal))
+        {
+            throw invalid("ReadOnly with ScriptWritable");
+        }
+
+        return name;
     }
 
     // 필드의 bitfield 표시다(리플렉션 B9m): bool이어야 하고, 참이면 값 종류가 Bool이어야 한다(아니면 InvalidDescriptor).
@@ -765,12 +824,18 @@ internal static class ModuleDescriptor
         string underlying = type.GetProperty("underlying").GetString() ?? "";
         (long minimum, long maximum) = EnumRules.Range(underlying) ?? throw Invalid("underlying of " + name);
         string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-        if (flags.Any(flag => flag != "Flags") || flags.Length > 1)
+        if (flags.Any(flag => flag is not ("Flags" or "ScriptType")) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
         {
             throw Invalid("unknown or duplicate enum flag in " + name);
         }
 
-        bool flagsEnum = flags.Length == 1;
+        bool flagsEnum = flags.Contains("Flags");
+        // Flags enum은 Sparks 타입이 될 수 없다(원본 규칙 RMC2607).
+        if (flagsEnum && flags.Contains("ScriptType"))
+        {
+            throw Invalid("ScriptType on the Flags enum " + name);
+        }
+
         string prefix = type.GetProperty("toolPrefix").GetString() ?? throw Invalid("toolPrefix of " + name);
         if (prefix.Length != 0 && !Specifiers.IsEnumToolName(prefix))
         {
@@ -832,6 +897,7 @@ internal static class ModuleDescriptor
             Imported = true,
             Module = module,
             IsEnum = true,
+            ScriptType = flags.Contains("ScriptType"),
             Underlying = underlying,
             FlagsEnum = flagsEnum,
             ToolPrefix = prefix,

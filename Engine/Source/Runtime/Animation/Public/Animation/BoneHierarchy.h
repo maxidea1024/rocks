@@ -9,7 +9,7 @@
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 
-// 본 계층이다(Docs/Design/MeshAnimationAssets.ko.md 6.1·6.4절, UE FReferenceSkeleton의 raw 계층).
+// 본 계층이다(Docs/Design/MeshAnimationAssets 6.1·6.4절, UE FReferenceSkeleton의 raw 계층).
 namespace rocks {
 
 // 루트 본의 부모 번호다(UE INDEX_NONE).
