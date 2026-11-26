@@ -38,3 +38,4 @@
 - [3.34 AU2b 구현 세부 — miniaudio 장치 backend(개정 31)](03.34-Au2bMiniaudio.ko.md)
 - [3.35 AU3 구현 세부 — `EngineAudio`(개정 32)](03.35-Au3EngineAudio.ko.md)
 - [3.36 AU4 구현 세부 — 사운드 에셋 모듈·`SoundClipImporter`·에디터 재생(개정 33)](03.36-Au4Import.ko.md)
+- [3.37 AU5 구현 세부 — 디코더 등록·쿠킹 처리기·쿠킹 재생(개정 34)](03.37-Au5Cook.ko.md)

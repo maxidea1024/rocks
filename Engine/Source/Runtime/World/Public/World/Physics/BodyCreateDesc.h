@@ -14,6 +14,8 @@ namespace rocks {
 struct BodyCreateDesc {
     // body를 가진 컴포넌트다(결과 반영이 이 컴포넌트에 쓴다 — 3.4절).
     ObjectHandle component;
+    // 그 컴포넌트의 소유 Actor다(질의 hit의 actor·무시 목록 — 7.1.7절).
+    ObjectHandle actor;
     // scale 전 형상(cm)이다.
     BodyGeometry geometry;
     // 월드 transform(cm·scale 포함)이다. scale은 형상 크기에 굽는다.

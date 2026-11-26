@@ -5,6 +5,8 @@
 #include <Core/Assert.h>
 #include <Core/Move.h>
 
+ROCKS_DEFINE_HOST_SERVICE(rocks::audio::AudioDecoderRegistry)
+
 namespace rocks::audio {
 
 namespace {

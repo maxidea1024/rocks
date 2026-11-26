@@ -101,6 +101,14 @@ StringView SimilarAttribute(StringView name) noexcept {
     return best;
 }
 
+uint32 ReservedNameCount() noexcept {
+    return detail::ReservedNameCount();
+}
+
+StringView ReservedNameAt(uint32 index) noexcept {
+    return detail::ReservedNameAt(index);
+}
+
 uint32 LanguageOwnedNameCount() noexcept {
     return static_cast<uint32>(detail::LanguageNames().Size());
 }

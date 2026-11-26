@@ -1,6 +1,6 @@
 """Rocks 기본 스플래시 이미지 생성기.
 
-논리 크기 768x432(16:9)를 기준으로 1x·2x 두 장을 만든다. 배경은 절차적 지형 등고선(암석 지층 모티프),
+논리 크기 768x384(2:1)를 기준으로 1x·2x 두 장을 만든다. 배경은 절차적 지형 등고선(암석 지층 모티프),
 로고는 Assets/Branding의 흰색 PNG 마스터를 고품질 축소해 얹는다(로고 형상은 바꾸지 않는다).
 
 사용: python make_splash.py <repo root> <out dir> studio|game|template
@@ -11,8 +11,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-LOGICAL_W, LOGICAL_H = 768, 432
-BAND_TOP = 336  # 엔진이 글자를 그리는 아래 띠의 시작(논리 픽셀)
+LOGICAL_W, LOGICAL_H = 768, 384
+# 엔진이 글자를 그리는 아래 띠의 높이와 시작(논리 픽셀 — Docs/Design/SplashScreen 6.2절 SplashTextBandHeight)
+TEXT_BAND_HEIGHT = 96
+BAND_TOP = LOGICAL_H - TEXT_BAND_HEIGHT
 
 ROCKS_BLACK = np.array([17, 17, 17], dtype=np.float64)
 
@@ -142,8 +144,8 @@ def make_studio(repo, out, scale):
     rgb = dark_contour_background(scale, seed=20261126, mask_fn=mask)
     image = to_image(rgb)
     add_band_rule(image, scale)
-    logo = load_logo(repo / "Assets/Branding/PNG/rocks-logo-stacked-white.png", 214 * scale)
-    # 스택형 로고: 위쪽 영역(0–336)의 세로 가운데, 왼쪽 1/4 축에 둔다.
+    logo = load_logo(repo / "Assets/Branding/PNG/rocks-logo-stacked-white.png", 188 * scale)
+    # 스택형 로고: 위쪽 영역(글자 띠 위)의 세로 가운데, 왼쪽 1/4 축에 둔다.
     cx, cy = 200 * scale, (BAND_TOP * scale) // 2
     image.paste(logo, (cx - logo.width // 2, cy - logo.height // 2), logo)
     image.save(out / f"StudioSplash{'' if scale == 1 else '@2x'}.png", optimize=True)
@@ -158,7 +160,7 @@ def make_engine_game(repo, out, scale):
     image = to_image(rgb)
     add_band_rule(image, scale)
     # 가운데에 브랜드 심볼(작게) — 게임 이름은 엔진이 띠에 그린다.
-    symbol = load_logo(repo / "Assets/Branding/PNG/rocks-symbol-white.png", 112 * scale)
+    symbol = load_logo(repo / "Assets/Branding/PNG/rocks-symbol-white.png", 104 * scale)
     image.paste(symbol, ((LOGICAL_W * scale - symbol.width) // 2, (BAND_TOP * scale) // 2 - symbol.height // 2 - 6 * scale), symbol)
     image.save(out / f"Splash{'' if scale == 1 else '@2x'}.png", optimize=True)
 
