@@ -1,0 +1,80 @@
+# Sparks 엔진 binding(EI1)
+
+이 문서는 Sparks 엔진 연동의 첫 단계 EI1(SparksEngineIntegration 3절 — 실제 엔진 선언에서 binding schema `<모듈>.sparkbind.json`을 생성하고 컴파일러가 실제 엔진 API로 타입을 검사한다)을 어떻게 만드는지 정한다. schema 파일 형식은 SL 10.2절 "binding schema 파일 형식"이 정본이고, 이 문서는 C++ 리플렉션 선언 → schema 항목의 규칙(노출 지정자·타입 대응·이름·검사)과 생성 위치·시험을 정한다. 리플렉션 지정자 목록의 정본은 구현 문서 ReflectionMetadata(지정자 표)다.
+
+- 개정 2(2026-11-26): 리뷰 반영 — 컨테이너 타입 인자에 `?` 없음(B4), struct 상속(`base`·`ScriptType` 상속 — SL 10.2 개정), 상속을 끊는 `NotScriptType`·`NotScriptExtensible`, descriptor schema 4(B2), 언어 이름 충돌은 메타 컴파일러가 이름 표 파일로(B6 — SL 10.3대로, 표는 C++ 시험이 컴파일러와 대조), `Soft<T>`·`Class<T>`·Flags enum·Binds 미러·`Asset` 규칙, C++ 시험의 모듈 목록과 출력 폴더 찾기(B9), 빌드 연결 항목(B2), escape(B8), 노출 범위(3절).
+- 개정 1(2026-11-26): 첫 판 — EI1a 설계(B1–B10). 노출은 UE처럼 opt-in(사용자 결정 2026-11-26).
+
+## 1. 나눔
+
+| 단계 | 내용 | 선행 |
+|---|---|---|
+| EI1a 타입·필드 | 노출 지정자(SE-R3 중 타입·필드 몫), 메타 컴파일러의 `.sparkbind.json` 생성(SE-R4 — 타입·필드·enum), 컴파일러의 struct 상속·schema 표기 검사, 엔진 핵심 World 타입에 지정자, 생성된 schema로 Sparks 컴파일 시험 | 없음(지금 리플렉션으로 된다) |
+| EI1b 함수 | `ROCKS_FUNCTION`의 schema `functions`(SE-R1 — 시그니처·효과·`TryX` 이름), 계산 속성(getter·setter 쌍) | UiToolkit CU2 |
+| EI1c 이벤트 | `FieldKind::Event` 필드의 schema `events`(SE-R2 — `Params`·발행 측) | UiToolkit CU3 |
+| EI1d 편집 메타·통지 | 필드 `changed`(CU5), 단위·범위(CU1)의 schema 반영 | UiToolkit CU1·CU5 |
+
+EI1a가 끝나면 컴파일러가 실제 엔진 타입·필드를 읽어 타입 검사하고 언어 서버가 그것을 자동완성·hover에 보인다(실행은 EI2 — host가 없다).
+
+## 2. 결정
+
+- **B1 노출은 opt-in(UE `BlueprintType`·`BlueprintReadOnly`와 같다):** 지정자가 없는 리플렉션 타입·필드는 schema에 나오지 않는다. 지정자(이름은 Rocks식 — UE 대응은 괄호):
+  - `ROCKS_CLASS`·`ROCKS_STRUCT`·`ROCKS_ENUM`의 `ScriptType`(`BlueprintType`): 스크립트에 타입으로 보인다. 클래스와 struct는 기반 체인에서 상속되고(UE `IsScriptExposedClass`·`IsScriptExposedStruct`가 super 체인을 걷는다), `NotScriptType`(`NotBlueprintType`)이 그 타입과 파생에서 상속을 끊는다(파생이 다시 `ScriptType`을 쓰면 다시 노출 — UE와 같다). enum은 자기 것만 본다(UE `IsScriptExposedEnum`).
+  - `ROCKS_CLASS`의 `ScriptExtensible`(`Blueprintable`): Sparks class가 상속할 수 있다. `ScriptType`을 함께 뜻하고 기반에서 상속되며 `NotScriptExtensible`(`NotBlueprintable`)이 끊는다(schema `scriptExtensible: true`).
+  - `ROCKS_PROPERTY`의 `ScriptReadOnly`(`BlueprintReadOnly`)·`ScriptWritable`(`BlueprintReadWrite`): 필드가 읽기 전용(`access` 생략) 또는 읽기·쓰기(`access: "readWrite"`)로 보인다. 둘 다 쓰면 오류, 리플렉션 `ReadOnly` 필드(리플렉션 쓰기 경로가 거부한다)에 `ScriptWritable`이면 오류다. `ScriptName = "X"`: 스크립트 이름을 덮는다(SL 10.3절 — `ScriptReadOnly`·`ScriptWritable` 없이 쓰면 오류).
+  - enum의 `Hidden` 열거자(`ROCKS_ENUMERATOR(Hidden)` — `Count` 같은 표지)는 `cases`에 넣지 않는다(UE `IsScriptExposedEnumEntry`). 그래서 case 번호는 C++ 값·선언 번호와 다를 수 있다 — 실행 host(EI2)는 case 이름으로 대응한다.
+  - `EditorOnly` 타입은 상속으로 노출되지 않는다(출시 빌드에 없다 — 조용히 빠진다). `EditorOnly` 타입·필드에 노출 지정자를 직접 쓰면 오류다.
+- **B2 생성 위치와 빌드 연결:** 메타 컴파일러가 모듈마다 descriptor(`<출력>/Metadata/<M>.rocksmeta.json`) 옆에 `<M>.sparkbind.json`을 같은 실행에서 쓴다(같은 staging·게시 규칙). 노출 타입이 없는 모듈도 `types: []` 파일을 쓴다(빌드 출력 목록이 지정자에 따라 바뀌지 않게). 빌드 쪽: 모듈 배치(`MetadataLayout`)에 schema 경로 칸, 메타 컴파일러 출력 옵션(`--binding-schema`), 런너(`MetadataRunner`)의 stage 경로·게시 목록·생성 확인. 런너가 매번 돌므로 증분 key는 바뀌지 않는다.
+  - **descriptor schema 4:** 다른 모듈이 기반·필드 대상의 노출과 상속 이름을 판정하도록 싣는다 — 타입 flag `ScriptType`·`ScriptExtensible`(실효 — 상속·끊기를 마친 값, class·struct·enum), 필드 flag `ScriptReadOnly`·`ScriptWritable`, 필드 key `scriptName`(없으면 빈 글자). reader는 엄격하므로 판 번호를 올린다(옛 판 거부 — 하위호환 없음). flag 쓰기 순서는 기존 flag 뒤 위 순서.
+  - 런타임 생성 코드(TypeSchema flag)는 바꾸지 않는다 — 실행 host(EI2)가 생기면 그때 정한다.
+- **B3 타입 종류:** `ROCKS_CLASS` 중 기반 체인에 `rocks::Asset`(AssetRuntime)이 있으면 `asset`, 아니면 `object`. `rocks::Asset` 자신은 노출할 수 없다(도구 이름 `Asset`이 언어 소유 이름(`Asset(...)` 리터럴)이라 — 오류). `ROCKS_STRUCT`는 `struct`, `ROCKS_ENUM`은 `enum`, `interface`는 CU9 뒤. `base`는 직접 기반이 노출 타입이면 그 이름, 아니면 쓰지 않는다(`Actor`의 기반 `Object`는 노출하지 않는다). 기반 체인이 노출 → 비노출 → 노출로 끊기면(`NotScriptType` 아래에서 다시 `ScriptType`) 그 타입의 `base`는 가장 가까운 노출 조상이 아니라 생략이다(비노출 조상의 필드는 보이지 않는다 — UE와 같다).
+  - **struct:** `base`는 기반 struct가 노출 타입일 때 그 이름이다(SL 10.2 개정 — 필드 상속만, struct 사이 변환·대입은 없다). struct `constructible`은 EI1a에서 쓰지 않는다 — 엔진 struct의 이름 지정 생성은 host의 struct 초기화(EI2)와 함께 정하므로 `false`를 쓴다.
+- **B4 타입 대응(필드 `type` 표기 — SL 3.6 정규형):** `?`는 필드 타입의 최상위에만 붙는다 — 컨테이너 타입 인자 안의 객체 참조는 `T`·`Soft<T>`로 쓴다(SL 4장 "타입 인자에는 `?`를 쓸 수 없다", 원소 읽기는 그 규칙대로 `T?`).
+
+| C++ 값 종류(ValueKind) | 최상위 표기 | 타입 인자 안 |
+|---|---|---|
+| Bool, Int8–Int64, UInt8–UInt64, Float32, Float64 | `bool`, `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`(SL 4장 — C++ 타입과 같은 Sparks 타입) | 같음 |
+| Utf8String, Text | `string`, `Text` | 같음 |
+| Enum | 그 enum의 스크립트 이름(`ScriptType`이어야 한다, Flags enum은 노출할 수 없다 — Sparks enum은 값 하나) | 같음 |
+| Struct — `CoreTypeBindings` 수학 미러 | `binds` 철자로: `Vector2/3/4<float·double>` → `vec2`/`vec3`/`vec4`, `Quaternion<…>` → `quat`, `Rotator<…>` → `Rotator`, `Transform`·`Transform3<…>` → `Transform`, `LinearColor` → `Color`(SL `Color`는 선형 float RGBA). 표 밖의 미러(`Color` 8비트·`IntVec*`·`FrameRate`·커브)와 enum 미러(`InterpCurveModeBinding`)는 노출할 수 없다 | 같음 |
+| Struct — 그 밖 | 그 struct의 스크립트 이름(`ScriptType`이어야 한다) | 같음 |
+| ObjectReference, WeakObjectReference | `T?`(T는 대상 클래스의 스크립트 이름 — SL 4장 "그 밖의 객체 필드". `Required`도 `T?`) | `T` |
+| SoftObjectReference | `Soft<T>?`(T는 `asset` 종류 — SL SD19, 빈 값이 있다) | `Soft<T>` |
+| ClassReference | 노출할 수 없다(EI1a — `Class<T>`는 full 전용이고 schema 필드를 core 패키지가 읽는 규칙·실행이 없다, host와 함께) | — |
+| Optional | 내부 표기 + `?`(내부는 값 종류뿐이다 — 참조는 Optional 내부가 될 수 없다) | 노출할 수 없다 |
+| Array, Map, Set | `Array<T>`, `Map<K, V>`, `Set<T>`(원소·키·값이 "타입 인자 안" 열로 표기될 때) | 노출할 수 없다(중첩 컨테이너는 리플렉션에 없다) |
+| Name, Guid, AssetId, Digest256, StaticArray, InstancedStruct, Opaque | 노출할 수 없다(Sparks에 대응 타입이 없다 — `Name`·태그 사전은 SE-G2, 에셋 id는 `Soft<T>`로) | — |
+
+  노출 지정자를 쓴 필드의 타입이 표로 표기되지 않거나 대상(enum·struct·클래스)이 노출 타입이 아니거나 `Soft<T>`의 대상이 `asset`이 아니면 오류다(UE UHT의 "type is not supported by blueprint"와 같다 — 조용히 빼지 않는다).
+- **B5 이름(SL 10.3절 개정):** 타입 이름은 실효 타입 도구 이름(`Name =` 지정, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`, enum은 한정하지 않은 C++ 이름)이고 PascalCase여야 한다. 필드 이름은 `ScriptName`, 없으면 도구 이름(`Name =`, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꾼 것이며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(오류). enum case는 열거자 도구 이름(`ToolPrefix`를 뗀 것)이고 대문자로 시작해야 한다. 기반 체인(import 기반 포함 — descriptor schema 4의 `scriptName`·노출 flag로)을 포함한 한 타입의 노출 필드 이름이 겹치면 오류, 한 패키지(`Rocks`)의 노출 타입 이름이 대소문자 무시로 겹치면 오류다(이 모듈과 import한 모듈 사이).
+- **B6 언어 이름과의 충돌(SL 10.3절대로 메타 컴파일 오류):** 노출 타입 이름이 언어 소유 이름(SL 3.7절 표 — 내장 타입·prelude·prelude 타입·`Asset` 같은 리터럴 이름)이거나, 노출 필드 이름이 키워드이거나, `object` 종류 타입의 노출 필드 이름이 hook 이름과 겹치면(컴파일러 `HookForMemberName`과 같은 집합 — hook, `On` + hook, Unity 별칭) 오류다. 메타 컴파일러는 이 이름들을 데이터 파일 `Programs/Rocks.MetaCompiler/SparksNames.json`(키워드·언어 소유 이름·hook·Unity 별칭)에서 읽고, C++ 시험이 그 파일을 컴파일러 공개 목록(`LanguageKeywordAt`·`LanguageHooks`·`UnityAliases`·언어 소유 이름 판정)과 집합으로 대조한다(사본이 어긋나지 않게 — SparksTools T13·LC8g 문법 키워드 시험과 같은 방식). reader의 S1120 검사(키워드·타입 이름의 언어 소유 이름)는 손으로 쓴 schema·손상 방어로 그대로 둔다 — 생성 경로에서는 메타 컴파일러가 먼저 막으므로 파일 하나가 통째로 버려지는 일이 생기지 않는다.
+- **B7 ID:** 타입 `id`는 TypeId, 필드 `id`는 FieldId(리플렉션 identity — `.rocksids.json`과 같은 32자리 소문자 16진)를 그대로 쓴다. Sparks 쪽 manifest와 같은 ID 공간이다(SE-R8). 필드는 선언한 타입에만 나오므로(B8) 상속이 ID를 겹치게 하지 않는다.
+- **B8 출력 형식:** SL 10.2 형식 1, `package: "Rocks"`, `module`은 C++ 모듈 이름. 타입은 스크립트 이름 byte 순, 필드는 선언 순서(자기 필드만 — 상속 필드는 기반 타입에 있다), 기본값인 선택 key는 쓰지 않는다. JSON은 들여쓰기 2칸·LF·끝 LF 하나(C# `System.Text.Json` `WriteIndented` + `"\n"`, encoder는 `UnsafeRelaxedJsonEscaping` — 기본 encoder는 `<`·`>`를 escape해 `Array<Actor>`가 정규형이 아니다. descriptor writer와 같다).
+- **B9 시험:**
+  - C#(`Rocks.ToolTests` meta 묶음 — Clang으로 픽스처 헤더를 돌린다): 지정자 사례마다 생성 schema golden(타입 셋 종류·`ScriptType` 상속과 `NotScriptType` 끊기·`ScriptExtensible` 상속과 끊기·class·struct `base`와 생략·EditorOnly 파생 제외·타입 대응표 전부·최상위 `?`와 인자 안·미러·이름 변환·`ScriptName`·Hidden case·빈 모듈), 오류 사례마다 RMC 코드(B10)·위치, import 모듈의 노출 기반·필드 이름 겹침(descriptor schema 4 왕복).
+  - C++(EngineTests): 시험 실행 파일 위치에서 빌드 출력의 `Metadata/`를 찾아(실행 파일 `<출력>/bin/` → `<출력>/Metadata/` — 그 배치가 아닌 플랫폼은 이 시험을 등록하지 않는다) 목록으로 정한 모듈(`CoreTypeBindings`·`World`·`Gameplay` 등 — 도구·픽스처 모듈과 남은 옛 파일이 섞이지 않게)의 schema를 넣어 Sparks 패키지(실제 `Actor`·`Component`·`SceneComponent`·`Pawn` 필드를 읽는 모듈)를 컴파일해 진단 0과 필드 타입이 기대와 같음. `SparksNames.json` ↔ 컴파일러 목록 대조(B6). SparksCompiler 시험: struct `base`(멤버 찾기·순환·기반 종류), schema 타입 인자 안의 `?` 거부(S1120).
+  - 시험용 가짜 엔진 schema(`SparksTestHost/Schema`)와 conformance는 그대로다(실제 엔진이 바뀌어도 언어 시험이 흔들리지 않게).
+- **B10 오류 코드:** RMC2601–(CompilerDiagnostics 등록부의 메타 컴파일러 대역 RMC1000–4999 안 — 세부 코드 표는 ReflectionMetadata에 26xx "Sparks binding"으로 더한다): 지원하지 않는 필드 타입, 노출하지 않은 대상 타입·`Soft<T>` 대상 종류, 노출 지정자 충돌(`ScriptReadOnly`·`ScriptWritable` 함께, `ReadOnly`와 `ScriptWritable`, 지정자 없는 `ScriptName`, `ScriptType`과 `NotScriptType` 함께), 이름의 `_`·형식, 이름 겹침(필드·타입), 언어 이름 충돌(B6), `EditorOnly`와 노출, `Asset` 노출, 비노출 타입의 노출 필드(클래스에 `ScriptType`이 없음 — "타입에 `ScriptType`을 붙인다"). 메시지·도움말은 영어.
+
+## 3. EI1a에서 지정자를 붙이는 엔진 타입
+
+- **지정자:** `Actor`(`ScriptExtensible` — 가짜 schema처럼 확장 가능), `Component`(`ScriptType` — 확장은 `ScriptableComponent`(EI3)), 그리고 그 필드 타입이 쓰는 enum·struct에 `ScriptType`(`ComponentMobility` 등). `SceneComponent`·`Pawn`은 상속으로 노출된다.
+- **상속으로 노출되는 범위:** World·Gameplay의 `Actor`·`Component` 파생 전부(2026-11-26 기준 약 58개 — Light·ReflectionCapture·CameraDirector 등, `Actor` 파생은 확장 가능까지)와 시험 픽스처 모듈의 파생(`SaveActor` 등 — 픽스처 모듈의 schema는 B9 C++ 시험이 읽지 않는다). UE도 `BlueprintType`·`Blueprintable`이 그렇게 퍼진다. 스크립트에 보이면 안 되는 파생은 구현 때 목록을 보고 `NotScriptType`·`NotScriptExtensible`을 붙인다(5절 구현 표에 남긴다).
+- **필드:** 지금 리플렉션된 것 중 스크립트가 읽을 만한 것만 `ScriptReadOnly`로 — `Enabled`, `RootComponent`, `Components`(`Array<Component>`), `RelativeTransform`(`Transform`), `Mobility`, `Visible`·`HiddenInGame`, `AttachParent`(`SceneComponent?`). `attachSocket`(socket 이름 문자열)은 빼 둔다(SL 10.3 "등록된 이름은 검증 타입" — 사전이 생긴 뒤). 쓰기(`ScriptWritable`)는 실행 host가 쓰기 경로·검증을 갖춘 EI2 뒤에 정한다 — EI1a에서는 픽스처만 쓴다.
+- `ScriptableComponent`·`LevelScript`·`WorldService`·`World`는 타입이 생기는 EI3 몫이다(SE-W4).
+
+## 4. 버린 대안
+
+- **opt-out(SL 10.1 첫 예시 — 리플렉션 타입·필드를 모두 읽기 전용으로 노출, `ScriptHidden`으로 뺌):** 2026-11-26 엔진 빌드에서 리플렉션 타입 220개·필드 1,642개(AssetCooker·ShaderCompiler·NodeGraph 같은 도구 내부 포함)가 비프로그래머 대상 언어의 자동완성에 쏟아지고, 이름 규칙 오류가 노출할 생각이 없던 필드에서 기존 빌드를 깬다. UE도 opt-in이다(사용자 결정).
+- **descriptor를 읽는 별도 생성기:** descriptor에 필요한 정보는 거의 있지만 오류를 C++ 원문 위치로 알리려면 메타 컴파일러의 모델이 필요하고, 빌드 action이 하나 더 생긴다. 같은 실행에서 쓴다.
+- **런타임 `TypeSchema`/`FieldSchema` flag에 스크립트 노출을 싣기(UE `CPF_BlueprintVisible`):** 지금 그것을 읽을 런타임(host)이 없고 생성 코드가 바뀌면 모든 리플렉션 모듈이 다시 빌드된다. host(EI2)가 FieldId → 쓰기 권한을 알아야 할 때 schema 파일 또는 flag 중에서 정한다.
+- **언어 이름 충돌을 schema reader에서만 보기(개정 1):** reader의 S1120은 파일 하나를 통째로 버리므로 이름 하나가 World schema 전체를 지우고 그 사실이 시험에서만 드러난다. SL 10.3도 메타 컴파일 오류로 정했다. 이름 표 사본은 대조 시험으로 맞춘다.
+- **struct 상속 필드를 펼쳐 쓰기(SL 10.2를 고치지 않고):** 기반 struct도 노출하면 같은 FieldId가 두 타입에 나와 ID 유일성(SL 10.2)을 깬다.
+- **C++ 시험이 `Metadata/`의 모든 schema를 읽기:** 도구·픽스처 모듈과 지운 모듈·다른 타깃의 남은 파일이 섞여 결과가 빌드 이력에 따라 달라진다.
+
+## 5. 한계·후속
+
+- 생성된 schema를 Sparks 도구가 찾는 경로는 지금 `--schema <출력>/Metadata`(CLI·언어 서버 설정 — 비재귀 열거, `.sparkbind.json`만)다. 작업 공간 설정(`SparksWorkspace.json5`)과 설치 SDK에 schema 싣기는 EI 후속(SparksTools 13절) — 설치 SDK는 descriptor를 `Metadata/<M>/` 하위 폴더에 두므로 그대로는 `--schema` 한 폴더에 맞지 않는다.
+- 함수·이벤트·계산 속성이 없어 실제 엔진 타입으로 할 수 있는 것은 필드 읽기와 타입 검사뿐이다(EI1b·EI1c).
+- 대소문자 무시 타입 이름 겹침은 import 관계가 없는 형제 모듈 사이에서는 메타 컴파일러가 보지 못한다(reader가 같은 철자만 S1120 — 대소문자만 다른 두 이름은 Sparks에서는 다른 이름이라 동작은 맞다).
+- `Class<T>` 필드·쓰기 가능 엔진 필드·struct 이름 지정 생성은 host(EI2)와 함께.
