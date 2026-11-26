@@ -133,8 +133,8 @@ public:
     }
 
     // 엔진 디코더 표다(Docs/Design/AudioSystem 3.37.1절). Initialize가 내장 PCM16·ADPCM에 호스트
-    // 디코더 등록부(AudioDecoderRegistry — codec 모듈이 Startup에서 채운다)의 factory를 더해 만든다.
-    // 장치가 없는 실행에서도 만든다. 쿠킹 데이터 디코드(SoundClip::LoadCookedPcm)에 넘긴다.
+    // 디코더 등록부(AudioDecoderRegistry — codec 모듈이 Startup에서 채운다)의 factory를 더해
+    // 만든다. 장치가 없는 실행에서도 만든다. 쿠킹 데이터 디코드(SoundClip::LoadCookedPcm)에 넘긴다.
     const audio::AudioDecoderTable& DecoderTable() const noexcept {
         return decoders_;
     }
