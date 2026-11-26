@@ -4,7 +4,6 @@
 #include <AudioAssets/AudioAssetsTypes.h>
 #include <AudioAssets/SoundClip.generated.h>
 #include <AssetRuntime/MemoryBulkSource.h>
-#include <AudioAssets/AudioAssetsTypes.h>
 #include <Object/ObjectRegistry.h>
 
 #include <Core/Math/MathUtility.h>

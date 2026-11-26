@@ -31,6 +31,22 @@ enum class SoundSourceStorage : uint8 {
     Float32 = 3
 };
 
+// 저장 형식별 표본 byte 수와 정수 형식의 full scale(2^(비트−1) — 임포터가 곱하고 에디터 재생 PCM
+// 변환이 나눈다, 3.36.3절)·24비트 부호 비트다. 양자화와 역변환이 같은 값을 쓴다.
+inline constexpr uint32 SoundSourceInt16Bytes = 2;
+inline constexpr uint32 SoundSourceInt24Bytes = 3;
+inline constexpr uint32 SoundSourceFloat32Bytes = 4;
+inline constexpr float SoundSourceInt16FullScale = 32768.0f;
+inline constexpr float SoundSourceInt24FullScale = 8388608.0f;
+inline constexpr int32 SoundSourceInt16Min = -32768;
+inline constexpr int32 SoundSourceInt16Max = 32767;
+inline constexpr int32 SoundSourceInt24Min = -8388608;
+inline constexpr int32 SoundSourceInt24Max = 8388607;
+inline constexpr uint32 SoundSourceInt16Mask = 0xFFFFu;
+inline constexpr uint32 SoundSourceInt24Mask = 0xFFFFFFu;
+inline constexpr uint32 SoundSourceInt24SignBit = 0x800000u;
+inline constexpr uint32 SoundSourceInt24SignExtension = 0xFF000000u;
+
 // 표본 하나의 byte 수다(None은 0).
 ROCKS_AUDIOASSETS_API uint32 SoundSourceStorageBytes(SoundSourceStorage storage) noexcept;
 

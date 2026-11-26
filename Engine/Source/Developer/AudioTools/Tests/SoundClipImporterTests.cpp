@@ -2,12 +2,14 @@
 #include "Mp3TestFixtures.h"
 #include "OpusTestFixtures.h"
 #include "SoundClipImportTestSupport.h"
+#include "SourceAudioReference.h"
 #include "VorbisTestFixtures.h"
 
 #include <AssetRuntime/MemoryBulkSource.h>
 #include <AudioTools/SoundClipImporter.h>
 #include <AudioTools/SourceAudio.h>
 #include <Platform/Memory.h>
+#include <Base/Compiler.h>
 #include <Platform/PlatformMath.h>
 
 // SoundClip 필드·임포터·에디터 재생 PCM 시험이다(Docs/Design/AudioSystem 3.36.5절 —
@@ -385,8 +387,33 @@ TEST(SoundClipImport_RejectsInvalidSources) {
     }
 
     {
+        // Ogg가 아니거나 잘린 page는 손상이다.
         ImportRun run(env, "x.ogg", Span<const uint8>(garbage));
+        CHECK(run.context.failCode == AssetDiagnosticCode::InvalidSource);
+        CHECK(run.context.failError == ErrorCode::CorruptData);
+    }
+
+    {
+        // 온전한 첫 page인데 Opus·Vorbis가 아닌 codec(Ogg FLAC)은 미지원이다.
+        Bytes page(env.allocator);
+        page.Tag("OggS");
+        for (uint32 index = 4; index < 26; ++index) {
+            page.U8(0);
+        }
+
+        page.U8(1);
+        page.U8(5);
+        page.U8(0x7F);
+        page.Tag("FLAC");
+        ImportRun run(env, "flac.ogg", page.View());
         CHECK(run.context.failCode == AssetDiagnosticCode::UnsupportedSourceFormat);
+    }
+
+    {
+        SoundClipImportOptions options;
+        options.normalizePeakDb = -200.0f;
+        ImportRun run(env, "x.wav", Span<const uint8>(garbage), &options);
+        CHECK(run.context.failCode == AssetDiagnosticCode::InvalidImportOption);
     }
 
     Bytes one(env.allocator);
@@ -418,6 +445,218 @@ TEST(SoundClipImport_RejectsInvalidSources) {
         CHECK(!run.result);
         CHECK(run.context.failCode == AssetDiagnosticCode::InvalidSource);
     }
+}
+
+// AIFF 하나다(big-endian, 컨테이너 bit 폭 = 표본 bit를 byte로 올림, 좌정렬). rate는 48000 고정이다.
+void BuildAiff(Bytes& out, uint32 channels, uint32 frames, uint32 bits,
+               Span<const uint8> samples) noexcept {
+    // 48000 Hz의 80비트 확장 정밀도(지수 16383 + 15, 가수 0xBB80 << 48).
+    constexpr uint8 Rate48000[10] = {0x40, 0x0E, 0xBB, 0x80, 0, 0, 0, 0, 0, 0};
+    Bytes body(out.data.GetAllocator());
+    body.Tag("AIFF");
+    body.Tag("COMM");
+    const auto be32 = [](Bytes& bytes, uint32 value) {
+        bytes.U8(value >> 24);
+        bytes.U8(value >> 16);
+        bytes.U8(value >> 8);
+        bytes.U8(value);
+    };
+    be32(body, 18);
+    body.U8(channels >> 8);
+    body.U8(channels);
+    be32(body, frames);
+    body.U8(bits >> 8);
+    body.U8(bits);
+    body.Append(Span<const uint8>(Rate48000));
+    body.Tag("SSND");
+    be32(body, 8 + static_cast<uint32>(samples.Size()));
+    be32(body, 0);
+    be32(body, 0);
+    body.Append(samples);
+    if ((samples.Size() & 1) != 0) {
+        body.U8(0);
+    }
+
+    out.Tag("FORM");
+    be32(out, static_cast<uint32>(body.data.Size()));
+    out.Append(body.View());
+}
+
+TEST(SoundClipImport_IntegerSourcesRoundTripExactly) {
+    SoundEnv env;
+    REQUIRE(env.ready);
+    MemoryBulkSource bulkSource(env.allocator);
+    // 원본 표본을 디코더 float와 bit 단위로 같게 되돌리는지 본다.
+    const auto checkEditorPcm = [&](ImportRun& run, Span<const uint8> file, bool aiff) {
+        SoundClip* clip = run.context.Imported();
+        auto ref = bulkSource.AddCopy(run.context.bulk.View());
+        REQUIRE(ref);
+        clip->source.bulk = ref.Value();
+        REQUIRE(clip->LoadEditorPcm(env.allocator, bulkSource));
+        audio::DecodedSourceAudio decoded(env.allocator);
+        REQUIRE(aiff ? audio::DecodeAiff(file, decoded) : audio::DecodeWav(file, decoded));
+        for (uint32 channel = 0; channel < clip->channelCount; ++channel) {
+            CHECK(platform::MemoryCompare(clip->Pcm()->Channel(channel).Data(),
+                                          decoded.Channel(channel),
+                                          sizeof(float) * clip->frameCount) == 0);
+        }
+    };
+
+    {
+        // 32비트 정수 WAV는 Float32로 저장하고 디코더 float와 같다.
+        Bytes samples(env.allocator);
+        samples.Le32(0x40000000u);
+        samples.Le32(0x80000000u);
+        samples.Le32(0x00000001u);
+        Bytes file(env.allocator);
+        WavSpec spec;
+        spec.bitsPerSample = 32;
+        BuildWav(file, spec, samples.View());
+        ImportRun run(env, "i32.wav", file.View());
+        REQUIRE(run.result);
+        CHECK(run.context.Imported()->source.format == SoundSourceStorage::Float32);
+        CHECK(StoredFloat(run.context.bulk.View(), 0) == 0.5f);
+        CHECK(StoredFloat(run.context.bulk.View(), 1) == -1.0f);
+        checkEditorPcm(run, file.View(), false);
+    }
+
+    {
+        // 12비트 AIFF(16비트 컨테이너, 좌정렬 v << 4)는 Int16에 컨테이너 값 그대로다.
+        const int16 values[] = {100 << 4, -2048 * 16, 2047 << 4};
+        Bytes samples(env.allocator);
+        for (const int16 value : values) {
+            const uint16 raw = static_cast<uint16>(value);
+            samples.U8(raw >> 8);
+            samples.U8(raw);
+        }
+
+        Bytes file(env.allocator);
+        BuildAiff(file, 1, 3, 12, samples.View());
+        ImportRun run(env, "a12.aiff", file.View());
+        REQUIRE(run.result);
+        CHECK(run.context.Imported()->source.format == SoundSourceStorage::Int16);
+        Bytes expected(env.allocator);
+        Pcm16(expected, Span<const int16>(values));
+        REQUIRE(run.context.bulk.Size() == expected.data.Size());
+        CHECK(platform::MemoryCompare(run.context.bulk.Data(), expected.data.Data(),
+                                      expected.data.Size()) == 0);
+        checkEditorPcm(run, file.View(), true);
+    }
+
+    {
+        // 20비트 AIFF(24비트 컨테이너, 좌정렬)는 Int24에 컨테이너 값 그대로다.
+        const uint32 values[] = {0x7FFFF0u, 0x800000u, 0x000010u};
+        Bytes samples(env.allocator);
+        for (const uint32 value : values) {
+            samples.U8(value >> 16);
+            samples.U8(value >> 8);
+            samples.U8(value);
+        }
+
+        Bytes file(env.allocator);
+        BuildAiff(file, 1, 3, 20, samples.View());
+        ImportRun run(env, "a20.aif", file.View());
+        REQUIRE(run.result);
+        CHECK(run.context.Imported()->source.format == SoundSourceStorage::Int24);
+        Bytes expected(env.allocator);
+        for (const uint32 value : values) {
+            expected.Le24(value);
+        }
+
+        REQUIRE(run.context.bulk.Size() == expected.data.Size());
+        CHECK(platform::MemoryCompare(run.context.bulk.Data(), expected.data.Data(),
+                                      expected.data.Size()) == 0);
+        checkEditorPcm(run, file.View(), true);
+    }
+}
+
+TEST(SoundClipImport_LossySourcesMatchDecoderReference) {
+    SoundEnv env;
+    REQUIRE(env.ready);
+    namespace reference = audio::sourcereference;
+    // frame 수는 delay·padding을 잘라 낸 원래 길이(디코더 시험 기준값)다.
+    ImportRun flac(env, "s.flac", Span<const uint8>(FlacStereo16));
+    ImportRun flac24(env, "m.flac", Span<const uint8>(FlacMono24));
+    ImportRun vorbis(env, "v.ogg", Span<const uint8>(VorbisStereo));
+    ImportRun opus(env, "o.opus", Span<const uint8>(OpusStereo));
+    ImportRun mp3(env, "m.mp3", Span<const uint8>(Mp3MonoLame));
+    REQUIRE(flac.result && flac24.result && vorbis.result && opus.result && mp3.result);
+    CHECK(flac.context.Imported()->frameCount == reference::FlacStereo16Frames);
+    CHECK(flac24.context.Imported()->frameCount == reference::FlacMono24Frames);
+    CHECK(flac24.context.Imported()->source.format == SoundSourceStorage::Int24);
+    CHECK(vorbis.context.Imported()->frameCount == reference::VorbisStereoFrames);
+    CHECK(opus.context.Imported()->frameCount == reference::OpusStereoFrames);
+    CHECK(mp3.context.Imported()->frameCount == reference::Mp3MonoLameFrames);
+#if ROCKS_ARCH_X64
+    // 손실 원본 bulk(Float32 planar LE)의 SHA가 디코더 고정 SHA와 같다(디코드 SHA 고정값 기준).
+    const auto hex = [](ImportRun& run, char (&out)[Sha256Digest::HexBytes + 1]) {
+        run.context.Imported()->source.bulk.sha256.ToHex(out);
+    };
+    char digest[Sha256Digest::HexBytes + 1];
+    hex(vorbis, digest);
+    CHECK(StringView(digest) == StringView(reference::VorbisStereoDigestX64));
+    hex(opus, digest);
+    CHECK(StringView(digest) == StringView(reference::OpusStereoDigestX64));
+    hex(mp3, digest);
+    CHECK(StringView(digest) == StringView(reference::Mp3MonoLameDigestX64));
+#endif
+}
+
+TEST(SoundClipImport_ReimportClearsImportFields) {
+    SoundEnv env;
+    REQUIRE(env.ready);
+    // 첫 원본: stereo 24비트, 파일 loop·cue 있음.
+    Bytes first(env.allocator);
+    for (uint32 frame = 0; frame < 32; ++frame) {
+        first.Le24(frame * 1000);
+        first.Le24(frame * 2000);
+    }
+
+    WavSpec firstSpec;
+    firstSpec.channels = 2;
+    firstSpec.bitsPerSample = 24;
+    firstSpec.loop = true;
+    firstSpec.loopStart = 4;
+    firstSpec.loopEndInclusive = 20;
+    firstSpec.cue = true;
+    firstSpec.cueFrame = 10;
+    Bytes firstFile(env.allocator);
+    BuildWav(firstFile, firstSpec, first.View());
+    ImportRun created(env, "r.wav", firstFile.View());
+    REQUIRE(created.result);
+    SoundClip* clip = created.context.Imported();
+    REQUIRE(clip->hasFileLoop);
+    REQUIRE(clip->cues.Size() == 1);
+    clip->looping = true;
+    clip->loopOverride.enabled = true;
+    clip->loopOverride.begin = 1;
+    clip->loopOverride.end = 3;
+    clip->volume = 0.25f;
+    clip->pitch = 1.5f;
+
+    // 둘째 원본: mono 16비트, loop·cue 없음 — 임포트 필드는 모두 새 값(빈 값 포함)으로 바뀐다.
+    Bytes second(env.allocator);
+    const int16 values[] = {1, 2, 3, 4, 5};
+    Pcm16(second, Span<const int16>(values));
+    Bytes secondFile(env.allocator);
+    BuildWav(secondFile, WavSpec{}, second.View());
+    ImportRun again(env, "r.wav", secondFile.View(), nullptr, created.context.output);
+    REQUIRE(again.result);
+    CHECK(!clip->hasFileLoop);
+    CHECK(clip->fileLoopBegin == 0);
+    CHECK(clip->fileLoopEnd == 0);
+    CHECK(clip->cues.IsEmpty());
+    CHECK(clip->channelCount == 1);
+    CHECK(clip->frameCount == 5);
+    CHECK(clip->source.format == SoundSourceStorage::Int16);
+    CHECK(clip->sourceCodec == SoundSourceCodec::Pcm);
+    // 사용자 설정은 그대로다.
+    CHECK(clip->looping);
+    CHECK(clip->loopOverride.enabled);
+    CHECK(clip->loopOverride.begin == 1);
+    CHECK(clip->loopOverride.end == 3);
+    CHECK(clip->volume == 0.25f);
+    CHECK(clip->pitch == 1.5f);
 }
 
 TEST(SoundClipImport_ReimportKeepsUserSettings) {
@@ -494,9 +733,17 @@ TEST(SoundClip_LoadEditorPcmFromSourceBulk) {
     // 먼저 만든 스냅숏은 이전 PCM을 그대로 쥔다.
     CHECK(first.Value().Get()->pcm->SampleRate() == 48000);
 
-    // 크기가 맞지 않는 bulk·비유한 float·3채널.
+    // 크기가 맞지 않는 bulk·비유한 float·3채널. 실패는 PCM·revision·키를 바꾸지 않는다.
+    const SoundPcm* loaded = clip->Pcm().Get();
+    const uint64 loadedRevision = clip->PcmRevision();
     clip->frameCount = 4;
     CHECK(clip->LoadEditorPcm(env.allocator, bulkSource).Error() == ErrorCode::CorruptData);
+    CHECK(clip->Pcm().Get() == loaded);
+    CHECK(clip->PcmRevision() == loadedRevision);
+    clip->frameCount = 3;
+    REQUIRE(clip->LoadEditorPcm(env.allocator, bulkSource));
+    CHECK(clip->PcmRevision() == loadedRevision);
+    clip->frameCount = 4;
     clip->frameCount = 1;
     clip->channelCount = 1;
     clip->source.format = SoundSourceStorage::Float32;

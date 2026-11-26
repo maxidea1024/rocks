@@ -86,11 +86,11 @@ uint32 SoundSourceStorageBytes(SoundSourceStorage storage) noexcept {
     case SoundSourceStorage::None:
         return 0;
     case SoundSourceStorage::Int16:
-        return 2;
+        return SoundSourceInt16Bytes;
     case SoundSourceStorage::Int24:
-        return 3;
+        return SoundSourceInt24Bytes;
     case SoundSourceStorage::Float32:
-        return 4;
+        return SoundSourceFloat32Bytes;
     }
 
     return 0;
@@ -119,7 +119,7 @@ Result<void> SoundClip::SetPcm(SharedPtr<const SoundPcm> pcm) noexcept {
     frameCount = pcm ? pcm->FrameCount() : 0;
     pcm_ = Move(pcm);
     ++pcmRevision_;
-    editorPcmLoaded_ = false;
+    editorPcmKey_ = SoundEditorPcmKey{};
     return Result<void>::Success();
 }
 
@@ -142,26 +142,22 @@ Result<void> SoundClip::FillPlayable(SoundPlayable& playable) const noexcept {
 
 namespace {
 
-// 정수 저장 형식의 표본을 float로 되돌리는 배율이다(임포터가 곱한 2^(비트−1) — 3.36.3절).
-constexpr float Int16Scale = 1.0f / 32768.0f;
-constexpr float Int24Scale = 1.0f / 8388608.0f;
-
 float ReadStoredSample(const uint8* bytes, SoundSourceStorage format) noexcept {
     switch (format) {
     case SoundSourceStorage::Int16: {
         const int16 value =
             static_cast<int16>(static_cast<uint16>(bytes[0]) | static_cast<uint16>(bytes[1]) << 8);
-        return static_cast<float>(value) * Int16Scale;
+        return static_cast<float>(value) / SoundSourceInt16FullScale;
     }
     case SoundSourceStorage::Int24: {
         uint32 raw = static_cast<uint32>(bytes[0]) | static_cast<uint32>(bytes[1]) << 8 |
                      static_cast<uint32>(bytes[2]) << 16;
         // 부호 확장(24비트 → 32비트).
-        if ((raw & 0x800000u) != 0) {
-            raw |= 0xFF000000u;
+        if ((raw & SoundSourceInt24SignBit) != 0) {
+            raw |= SoundSourceInt24SignExtension;
         }
 
-        return static_cast<float>(static_cast<int32>(raw)) * Int24Scale;
+        return static_cast<float>(static_cast<int32>(raw)) / SoundSourceInt24FullScale;
     }
     case SoundSourceStorage::Float32: {
         const uint32 raw = static_cast<uint32>(bytes[0]) | static_cast<uint32>(bytes[1]) << 8 |
@@ -185,9 +181,10 @@ Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& b
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    if (editorPcmLoaded_ && editorPcmSource_.format == source.format &&
-        editorPcmSource_.bulk.SameContent(source.bulk) && editorPcmChannels_ == channelCount &&
-        editorPcmRate_ == sampleRate && editorPcmFrames_ == frameCount) {
+    const SoundEditorPcmKey& key = editorPcmKey_;
+    if (key.loaded && key.source.format == source.format &&
+        key.source.bulk.SameContent(source.bulk) && key.channels == channelCount &&
+        key.sampleRate == sampleRate && key.frames == frameCount) {
         return Result<void>::Success();
     }
 
@@ -230,11 +227,11 @@ Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& b
 
     pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
     ++pcmRevision_;
-    editorPcmLoaded_ = true;
-    editorPcmSource_ = source;
-    editorPcmChannels_ = channelCount;
-    editorPcmRate_ = sampleRate;
-    editorPcmFrames_ = frameCount;
+    editorPcmKey_.loaded = true;
+    editorPcmKey_.source = source;
+    editorPcmKey_.channels = channelCount;
+    editorPcmKey_.sampleRate = sampleRate;
+    editorPcmKey_.frames = frameCount;
     return Result<void>::Success();
 }
 

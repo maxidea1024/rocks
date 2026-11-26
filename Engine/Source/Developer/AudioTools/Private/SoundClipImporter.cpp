@@ -19,22 +19,17 @@ constexpr Guid SoundClipImporterId{0x5d2a8c41e7b34f09ull, 0x9a61c3e05b7d2f14ull}
 
 constexpr StringView SoundClipExtensions[] = {"wav", "aif", "aiff", "flac", "ogg", "opus", "mp3"};
 
-// 정수 저장 형식 배율이다(저장 형식 비트의 2^(비트−1) — 3.36.3절).
-constexpr float Int16Scale = 32768.0f;
-constexpr float Int24Scale = 8388608.0f;
-constexpr int32 Int16Min = -32768;
-constexpr int32 Int16Max = 32767;
-constexpr int32 Int24Min = -8388608;
-constexpr int32 Int24Max = 8388607;
-
 // Ogg page 머리(27 byte) 뒤 segment 표 길이 칸과 식별 header다(RFC 3533, RFC 7845, Vorbis I 4.2).
 constexpr usize OggPageHeaderBytes = 27;
 constexpr usize OggSegmentCountOffset = 26;
+constexpr uint8 OggCapturePattern[] = {'O', 'g', 'g', 'S'};
 constexpr uint8 OpusHeadMagic[] = {'O', 'p', 'u', 's', 'H', 'e', 'a', 'd'};
 constexpr uint8 VorbisIdentificationMagic[] = {0x01, 'v', 'o', 'r', 'b', 'i', 's'};
 
 enum class SourceKind : uint8 {
     Unknown,
+    // Ogg가 아니거나 첫 page가 잘렸다(손상 — InvalidSource).
+    CorruptOgg,
     Wav,
     Aiff,
     Flac,
@@ -80,13 +75,19 @@ bool StartsWith(Span<const uint8> bytes, usize offset, Span<const uint8> magic) 
            platform::MemoryCompare(bytes.Data() + offset, magic.Data(), magic.Size()) == 0;
 }
 
-// 첫 Ogg page 본문의 식별 header로 Opus·Vorbis를 가린다(Opus를 .ogg로 저장한 파일이 흔하다).
+// 첫 Ogg page 본문의 식별 header로 Opus·Vorbis를 가린다(Opus를 .ogg로 저장한 파일이 흔하다). Ogg가
+// 아니거나 page가 잘렸으면 손상, page는 온전한데 다른 codec(Ogg FLAC 등)이면 미지원이다.
 SourceKind SniffOgg(Span<const uint8> bytes) noexcept {
-    if (bytes.Size() <= OggSegmentCountOffset) {
-        return SourceKind::Unknown;
+    if (!StartsWith(bytes, 0, Span<const uint8>(OggCapturePattern)) ||
+        bytes.Size() <= OggSegmentCountOffset) {
+        return SourceKind::CorruptOgg;
     }
 
     const usize body = OggPageHeaderBytes + bytes[OggSegmentCountOffset];
+    if (body > bytes.Size()) {
+        return SourceKind::CorruptOgg;
+    }
+
     if (StartsWith(bytes, body, Span<const uint8>(OpusHeadMagic))) {
         return SourceKind::Opus;
     }
@@ -137,6 +138,7 @@ Result<void> Decode(SourceKind kind, Span<const uint8> bytes, DecodedSourceAudio
     case SourceKind::Mp3:
         return audio::DecodeMp3(bytes, out);
     case SourceKind::Unknown:
+    case SourceKind::CorruptOgg:
         break;
     }
 
@@ -194,15 +196,17 @@ int32 Quantize(float value, float scale, int32 low, int32 high) noexcept {
 void WriteSample(uint8* out, float value, SoundSourceStorage storage) noexcept {
     switch (storage) {
     case SoundSourceStorage::Int16: {
-        const uint32 raw =
-            static_cast<uint32>(Quantize(value, Int16Scale, Int16Min, Int16Max)) & 0xFFFFu;
+        const uint32 raw = static_cast<uint32>(Quantize(value, SoundSourceInt16FullScale,
+                                                        SoundSourceInt16Min, SoundSourceInt16Max)) &
+                           SoundSourceInt16Mask;
         out[0] = static_cast<uint8>(raw);
         out[1] = static_cast<uint8>(raw >> 8);
         return;
     }
     case SoundSourceStorage::Int24: {
-        const uint32 raw =
-            static_cast<uint32>(Quantize(value, Int24Scale, Int24Min, Int24Max)) & 0xFFFFFFu;
+        const uint32 raw = static_cast<uint32>(Quantize(value, SoundSourceInt24FullScale,
+                                                        SoundSourceInt24Min, SoundSourceInt24Max)) &
+                           SoundSourceInt24Mask;
         out[0] = static_cast<uint8>(raw);
         out[1] = static_cast<uint8>(raw >> 8);
         out[2] = static_cast<uint8>(raw >> 16);
@@ -245,7 +249,8 @@ Result<void> SoundClipImporter::Import(AssetImportContext& context) noexcept {
         options = *static_cast<const SoundClipImportOptions*>(given);
     }
 
-    if (!math::IsFinite(options.normalizePeakDb) || options.normalizePeakDb > 0.0f) {
+    if (!math::IsFinite(options.normalizePeakDb) || options.normalizePeakDb < MinNormalizePeakDb ||
+        options.normalizePeakDb > MaxNormalizePeakDb) {
         return context.Fail(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
                             0);
     }
@@ -255,6 +260,10 @@ Result<void> SoundClipImporter::Import(AssetImportContext& context) noexcept {
     if (kind == SourceKind::Unknown) {
         return context.Fail(AssetDiagnosticCode::UnsupportedSourceFormat, ErrorCode::Unsupported,
                             0);
+    }
+
+    if (kind == SourceKind::CorruptOgg) {
+        return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, 0);
     }
 
     // 디코더 오류 → 진단(3.36.3절): 형식 미지원은 UnsupportedSourceFormat, 할당 실패는 그대로,
@@ -314,10 +323,16 @@ Result<void> SoundClipImporter::Import(AssetImportContext& context) noexcept {
                 peak = math::Max(peak, math::Abs(sample));
             }
 
-            if (peak > 0.0f) {
-                const float gain = audio::DecibelsToLinear(options.normalizePeakDb) / peak;
+            // 비정규수 peak에서 float 나눗셈이 inf가 되지 않도록 double로 계산하고, 그래도
+            // 비유한이면 (사실상 무음) 건너뛴다.
+            const double gain =
+                peak > 0.0f
+                    ? static_cast<double>(audio::DecibelsToLinear(options.normalizePeakDb)) /
+                          static_cast<double>(peak)
+                    : 0.0;
+            if (peak > 0.0f && math::IsFinite(gain)) {
                 for (float& sample : work) {
-                    sample *= gain;
+                    sample = static_cast<float>(static_cast<double>(sample) * gain);
                 }
             }
         }

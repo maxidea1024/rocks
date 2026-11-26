@@ -1,11 +1,11 @@
 #include "CommandletHost.h"
 #include <AssetCommandlets/AssetAliasCommandlet.h>
 #include <AssetCommandlets/AssetCommandletSupport.h>
-#include <AudioTools/SoundClipImporter.h>
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
 #include <AssetCommandlets/ClassDefaultsCommandlet.h>
+#include <AudioTools/SoundClipImporter.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>

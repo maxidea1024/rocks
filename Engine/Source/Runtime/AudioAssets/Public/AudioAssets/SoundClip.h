@@ -24,6 +24,15 @@ namespace rocks {
 
 class PackageBulkSource;
 
+// LoadEditorPcm이 마지막으로 올린 원본의 키다(재사용 판정 — 3.36.4절). 리플렉션 밖 실행 데이터다.
+struct SoundEditorPcmKey {
+    bool loaded = false;
+    SoundClipSource source;
+    uint32 channels = 0;
+    uint32 sampleRate = 0;
+    uint32 frames = 0;
+};
+
 ROCKS_CLASS()
 class ROCKS_AUDIOASSETS_API SoundClip final : public SoundSource {
     ROCKS_GENERATED_BODY()
@@ -90,13 +99,9 @@ protected:
 private:
     ROCKS_NATIVE() SharedPtr<const SoundPcm> pcm_;
     ROCKS_NATIVE() uint64 pcmRevision_ = 0;
-    // 마지막으로 올린 에디터 원본의 키다(LoadEditorPcm 재사용 판정 — 에디터 빌드만 쓴다.
-    // ROCKS_NATIVE는 전처리 조건 안에 둘 수 없어 늘 둔다).
-    ROCKS_NATIVE() bool editorPcmLoaded_ = false;
-    ROCKS_NATIVE() SoundClipSource editorPcmSource_;
-    ROCKS_NATIVE() uint32 editorPcmChannels_ = 0;
-    ROCKS_NATIVE() uint32 editorPcmRate_ = 0;
-    ROCKS_NATIVE() uint32 editorPcmFrames_ = 0;
+    // 마지막으로 올린 에디터 원본의 키다(에디터 빌드만 읽는다 — ROCKS_NATIVE는 전처리 조건 안에 둘
+    // 수 없어 늘 둔다. SetPcm이 지운다).
+    ROCKS_NATIVE() SoundEditorPcmKey editorPcmKey_;
 };
 
 } // namespace rocks
