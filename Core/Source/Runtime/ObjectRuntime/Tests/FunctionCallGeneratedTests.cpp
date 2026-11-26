@@ -79,11 +79,11 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
         REQUIRE(type);
         const Span<const FunctionSchema> functions = type.Value().Schema().functions;
 #if ROCKS_WITH_EDITOR
-        REQUIRE(functions.Size() == 8);
-        CHECK(View(functions[6].name) == StringView("Reset"));
-        CHECK(functions[6].flags == Flags(FunctionFlags::EditorOnly));
+        REQUIRE(functions.Size() == 13);
+        CHECK(View(functions[11].name) == StringView("Reset"));
+        CHECK(functions[11].flags == Flags(FunctionFlags::EditorOnly));
 #else
-        REQUIRE(functions.Size() == 7);
+        REQUIRE(functions.Size() == 12);
 #endif
         CHECK(View(functions[0].name) == StringView("Add"));
         CHECK(functions[1].flags == (Flags(FunctionFlags::Const) | Flags(FunctionFlags::Pure)));
@@ -116,8 +116,7 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
             FieldValue result(allocator);
             REQUIRE(total.ReadResult(result));
             CHECK(result.kind == ValueKind::Int32 && result.signedInteger == 10);
-            const auto* typed =
-                static_cast<const int32*>(total.ResultValue(NativeTypeKey<int32>()));
+            const auto* typed = total.ResultValue<int32>();
             REQUIRE(typed != nullptr);
             CHECK(*typed == 10);
         }
@@ -149,7 +148,7 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
             Array<int32> values(allocator);
             REQUIRE(values.TryPushBack(1));
             REQUIRE(values.TryPushBack(2));
-            REQUIRE(sum.SetArgumentValue(0, &values, NativeTypeKey<Array<int32>>()));
+            REQUIRE(sum.SetArgumentValue(0, values));
             FieldValue mode(allocator);
             mode.kind = ValueKind::Enum;
             mode.type = GeneratedType<CallMode>::Id();
@@ -158,9 +157,8 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
             CallPoint point;
             point.x = 3;
             point.y = 4;
-            REQUIRE(sum.SetArgumentValue(2, &point, NativeTypeKey<CallPoint>()));
-            CHECK(CallError(sum.SetArgumentValue(2, &point, NativeTypeKey<int32>())) ==
-                  ErrorCode::TypeMismatch);
+            REQUIRE(sum.SetArgumentValue(2, point));
+            CHECK(CallError(sum.SetArgumentValue(2, point.x)) == ErrorCode::TypeMismatch);
             REQUIRE(sum.Invoke(registry, access, self));
             CHECK(sum.FunctionError() == ErrorCode::None);
             FieldValue result(allocator);
@@ -169,7 +167,7 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
 
             // 함수 자신의 실패(음수 합)는 FunctionError다.
             point.x = -100;
-            REQUIRE(sum.SetArgumentValue(2, &point, NativeTypeKey<CallPoint>()));
+            REQUIRE(sum.SetArgumentValue(2, point));
             REQUIRE(sum.Invoke(registry, access, self));
             CHECK(sum.FunctionError() == ErrorCode::Overflow);
         }

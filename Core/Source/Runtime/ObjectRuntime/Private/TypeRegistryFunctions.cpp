@@ -42,9 +42,9 @@ bool IsAggregateSlot(const ParameterSchema& slot) noexcept {
 bool ValidSlot(const ParameterSchema& slot, const RuntimeParameterOps& ops,
                const FunctionSchema& function) noexcept {
     const ValueKind kind = slot.value.kind;
-    if (kind == ValueKind::Opaque || kind == ValueKind::ObjectReference ||
-        kind == ValueKind::InstancedStruct || kind == ValueKind::StaticArray ||
-        slot.element.kind == ValueKind::ObjectReference ||
+    if ((slot.flags & ~KnownParameterFlags) != 0 || kind == ValueKind::Opaque ||
+        kind == ValueKind::ObjectReference || kind == ValueKind::InstancedStruct ||
+        kind == ValueKind::StaticArray || slot.element.kind == ValueKind::ObjectReference ||
         slot.key.kind == ValueKind::ObjectReference || ops.value == nullptr ||
         ops.value->size == 0 || ops.value->construct == nullptr || ops.value->destroy == nullptr ||
         !IsPowerOfTwo(static_cast<uint32>(ops.value->alignment)) ||

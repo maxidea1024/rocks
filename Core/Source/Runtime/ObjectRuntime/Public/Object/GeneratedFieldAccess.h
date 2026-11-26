@@ -62,6 +62,7 @@ struct SoftReferenceField {
 template <class T>
 struct SoftReferenceField<SoftObjectRef<T>> {
     static constexpr bool Supported = true;
+    using Target = T;
 };
 
 // 리플렉션 enum(ROCKS_ENUM)이다: 생성 헤더가 GeneratedType<E>::Id·IsDeclared를 내는 enum class다.

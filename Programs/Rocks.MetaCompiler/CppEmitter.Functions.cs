@@ -177,7 +177,9 @@ internal static partial class CppEmitter
             : $"{{ValueKind::{slot.Kind}, {(slot.HasTargetType ? GuidValue(slot.ReferenceId) : "Guid{}")}}}";
         string element = slot.HasElement ? $"{{ValueKind::{slot.ElementKind}, {(slot.HasTargetType ? GuidValue(slot.ReferenceId) : "Guid{}")}}}" : "{}";
         string key = slot.IsMap ? $"{{ValueKind::{slot.KeyKind}, {(slot.KeyHasTargetType ? GuidValue(slot.KeyReferenceId) : "Guid{}")}}}" : "{}";
-        return $"{{{View(slot.Name)}, {value}, {element}, {key}, 0u, {(slot.IsCounted ? slot.MaxElements : 0)}u, static_cast<uint32>(offsetof(detail::generated_frames::{frame}, {member}))}}";
+        // ObjectHandle 칸은 ParameterFlags::ObjectHandle(값 형식이 WeakObjectRef<Object>와 같아 바인딩 서명 비교가 이 flag로 가른다 — EventReflection ED5).
+        string flags = slot.NativeSpelling == FunctionRules.ObjectHandleSpelling ? "static_cast<uint32>(ParameterFlags::ObjectHandle)" : "0u";
+        return $"{{{View(slot.Name)}, {value}, {element}, {key}, {flags}, {(slot.IsCounted ? slot.MaxElements : 0)}u, static_cast<uint32>(offsetof(detail::generated_frames::{frame}, {member}))}}";
     }
 
     // Schema() 안의 함수 서술 배열이다. 함수가 있으면 TypeSchema 초기화의 functions 칸 문자열을, 없으면 ""를 돌려준다.

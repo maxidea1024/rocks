@@ -424,8 +424,8 @@ TEST(FunctionCall_ManualTableCallsResultsAndAccessErrors) {
             FieldValue result(allocator);
             REQUIRE(call.ReadResult(result));
             CHECK(result.kind == ValueKind::Int32 && result.signedInteger == 40);
-            CHECK(call.ResultValue(NativeTypeKey<int32>()) != nullptr);
-            CHECK(call.ResultValue(NativeTypeKey<int64>()) == nullptr);
+            CHECK(call.ResultValue<int32>() != nullptr);
+            CHECK(call.ResultValue<int64>() == nullptr);
         }
 
         {
@@ -457,9 +457,8 @@ TEST(FunctionCall_ManualTableCallsResultsAndAccessErrors) {
             CHECK(LabelIs(registry, self, "north"));
             String copy(allocator);
             REQUIRE(copy.TryAssign("south"));
-            REQUIRE(call.SetArgumentValue(0, &copy, NativeTypeKey<String>()));
-            CHECK(CallError(call.SetArgumentValue(0, &copy, NativeTypeKey<int32>())) ==
-                  ErrorCode::TypeMismatch);
+            REQUIRE(call.SetArgumentValue(0, copy));
+            CHECK(CallError(call.SetArgumentValue(0, int32(1))) == ErrorCode::TypeMismatch);
             REQUIRE(call.Invoke(registry, access, self));
             CHECK(LabelIs(registry, self, "south"));
         }
