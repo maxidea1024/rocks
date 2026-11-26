@@ -3,6 +3,7 @@
 #include "CommandSelfTest.h"
 #include "ComputeSelfTest.h"
 #include "ConstantSelfTest.h"
+#include "CookSamplingSelfTest.h"
 #include "ShaderParameterSelfTest.h"
 #include "ShaderResourceSelfTest.h"
 #include "MultiTextureSelfTest.h"
@@ -487,6 +488,11 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.adapterName.Data(), info.validationEnabled ? "on" : "off",
            info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
+    // 쿠킹 보장 샘플링 표와 장치 능력 대조(Docs/Design/PixelFormat 7.1절)는 셰이더가 필요 없어
+    // 전체 검사와 텍스처 검사에서 돈다.
+    if (!engineShadersOnly && !cookedShadersOnly) {
+        failures += RunCookSamplingChecks(name, device);
+    }
 
     if (texturesOnly) {
         // 쿠킹 텍스처 장면 대조만 돈다(RenderBase 18.5절 7항).
