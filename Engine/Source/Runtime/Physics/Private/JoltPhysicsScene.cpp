@@ -7,6 +7,7 @@
 #include "PhysicsLog.h"
 
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/FloatingPointEnvironment.h>
 
@@ -49,7 +50,8 @@ constexpr JPH::uint BodyMutexCount = 0;
 JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runtime,
                                    const PhysicsSettings& settings,
                                    WorkerScheduler* scheduler) noexcept
-    : runtime_(Move(runtime)), temp_(settings.tempAllocatorBytes),
+    : runtime_(Move(runtime)), responseSets_(allocator), layerPairs_(responseSets_),
+      temp_(settings.tempAllocatorBytes),
       jobs_(scheduler, JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers), activations_(allocator),
       slots_(allocator), freeSlots_(allocator), pendingResults_(allocator),
       kinematicTargets_(allocator), kinematicMoving_(allocator), slept_(allocator),
@@ -88,7 +90,12 @@ PhysicsSceneStats JoltPhysicsScene::Stats() const noexcept {
     stats.bodies = system_.GetNumBodies();
     stats.activeBodies = system_.GetNumActiveBodies(JPH::EBodyType::RigidBody);
     stats.steps = steps_;
+    stats.responseSets = responseSets_.Count();
     return stats;
+}
+
+void JoltPhysicsScene::AssertNotStepping() const noexcept {
+    ROCKS_ASSERT(!stepping_);
 }
 
 const JoltPhysicsScene::BodySlot*
@@ -102,6 +109,7 @@ JoltPhysicsScene::FindSlot(PhysicsBodyHandle body) const noexcept {
 }
 
 Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& desc) noexcept {
+    AssertNotStepping();
     if (!desc.worldTransform.IsValid()) {
         return Result<PhysicsBodyHandle>::Failure(ErrorCode::InvalidArgument);
     }
@@ -134,10 +142,23 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         index = static_cast<uint32>(slots_.Size() - 1);
     }
 
+    auto responseSet = responseSets_.Acquire(desc.collision.responses);
+    if (!responseSet) {
+        (void)freeSlots_.TryPushBack(index);
+        if (responseSet.Error() == ErrorCode::CapacityExceeded) {
+            Log::Warning(LogPhysics,
+                         "Physics scene ran out of collision response sets; the body was not "
+                         "created ({Code})",
+                         DiagResponseSetCapacity);
+        }
+
+        return Result<PhysicsBodyHandle>::Failure(responseSet.Error());
+    }
+
     JPH::BodyCreationSettings settings(
         shape.Value(), ToJoltPosition(desc.worldTransform.translation, origin_),
         ToJoltRotation(desc.worldTransform.rotation), ToJoltMotion(desc.motion),
-        ObjectLayerFor(desc.collision, desc.motion));
+        ObjectLayerFor(desc.collision, desc.motion, responseSet.Value()));
     // body 값(PH2b 몫 — 7.1.3절). Jolt 기본 감쇠 0.05에 맡기지 않는다. settings가 없으면
     // BodySettings 기본값(중력 켬, 선형 감쇠 DefaultLinearDamping, 각감쇠 0)이다.
     settings.mGravityFactor =
@@ -154,6 +175,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
                                               ? JPH::EActivation::Activate
                                               : JPH::EActivation::DontActivate);
     if (created.IsInvalid()) {
+        responseSets_.Release(responseSet.Value());
         (void)freeSlots_.TryPushBack(index);
         return Result<PhysicsBodyHandle>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -163,6 +185,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     slot.component = desc.component;
     slot.motion = desc.motion;
     slot.live = true;
+    slot.responseSet = responseSet.Value();
     slot.geometry = desc.geometry;
     slot.scale = desc.worldTransform.scale;
     slot.updateMassOnShapeChange =
@@ -175,6 +198,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
 }
 
 void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
+    AssertNotStepping();
     if (FindSlot(body) == nullptr) {
         return;
     }
@@ -183,6 +207,8 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
     bodies.RemoveBody(slot.body);
     bodies.DestroyBody(slot.body);
+    responseSets_.Release(slot.responseSet);
+    slot.responseSet = 0;
     slot.body = JPH::BodyID();
     slot.component = {};
     slot.live = false;
@@ -197,6 +223,7 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
 
 void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform& worldTransform,
                                         TeleportMode mode) noexcept {
+    AssertNotStepping();
     if (FindSlot(body) == nullptr || !worldTransform.IsValid()) {
         return;
     }
@@ -260,6 +287,7 @@ void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform&
 
 void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
                                      bool wake) noexcept {
+    AssertNotStepping();
     if (FindSlot(body) == nullptr) {
         return;
     }
@@ -295,17 +323,48 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
 
 void JoltPhysicsScene::SetBodyCollision(PhysicsBodyHandle body,
                                         const ResolvedCollision& collision) noexcept {
+    AssertNotStepping();
     if (FindSlot(body) == nullptr) {
         return;
     }
 
-    const BodySlot& slot = slots_[body.index];
-    // broadphase 층이 바뀌면 Jolt가 body를 옮긴다. 깨우지 않는다.
-    system_.GetBodyInterface().SetObjectLayer(slot.body, ObjectLayerFor(collision, slot.motion));
+    BodySlot& slot = slots_[body.index];
+    // 새 묶음을 먼저 얻고 층을 바꾼 뒤 옛 묶음을 놓는다(같은 묶음이면 같은 칸 — 7.1.6절). 새 묶음을
+    // 얻지 못하면 옛 묶음 색인을 둔 채 나머지 bit(object type·참여 표지)만 바꾼다.
+    uint32 responseSet = slot.responseSet;
+    auto acquired = responseSets_.Acquire(collision.responses);
+    if (acquired) {
+        responseSet = acquired.Value();
+    } else if (acquired.Error() == ErrorCode::CapacityExceeded) {
+        Log::Warning(
+            LogPhysics,
+            "Physics scene ran out of collision response sets; the body keeps its previous "
+            "responses ({Code})",
+            DiagResponseSetCapacity);
+    } else {
+        Log::Warning(LogPhysics,
+                     "Physics body collision responses were not updated: {Error}; the body keeps "
+                     "its previous responses",
+                     ErrorCodeName(acquired.Error()));
+    }
+
+    // broadphase 층이 바뀌면 Jolt가 body를 옮긴다. UE는 충돌 필터가 바뀌면 body를 늘 깨운다
+    // (BodyInstance.cpp:1125-1126 — Static은 깨울 것이 없다).
+    JPH::BodyInterface& bodies = system_.GetBodyInterface();
+    bodies.SetObjectLayer(slot.body, ObjectLayerFor(collision, slot.motion, responseSet));
+    if (slot.motion != BodyMotion::Static) {
+        bodies.ActivateBody(slot.body);
+    }
+
+    if (acquired) {
+        responseSets_.Release(slot.responseSet);
+        slot.responseSet = responseSet;
+    }
 }
 
 Result<void> JoltPhysicsScene::SetBodyGeometry(PhysicsBodyHandle body,
                                                const BodyGeometry& geometry) noexcept {
+    AssertNotStepping();
     if (FindSlot(body) == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -450,6 +509,7 @@ void JoltPhysicsScene::CollectMovedBodies() noexcept {
 }
 
 Result<Span<const MovedBody>> JoltPhysicsScene::TakeMovedBodies() noexcept {
+    AssertNotStepping();
     moved_.Clear();
     // 미리 잡아 두어 중간 실패로 일부만 꺼내는 일이 없게 한다(실패하면 목록을 그대로 둔다).
     if (auto reserved = moved_.TryReserve(pendingResults_.Size()); !reserved) {
@@ -496,6 +556,7 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     };
 
     StepCall call{this, seconds, JPH::EPhysicsUpdateError::None};
+    stepping_ = true;
     if (platform::RunWithDeterministicFloatingPoint(
             [](void* context) noexcept {
                 auto& step = *static_cast<StepCall*>(context);
@@ -508,6 +569,7 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
         ++floatingPointCorrections_;
     }
 
+    stepping_ = false;
     const JPH::EPhysicsUpdateError error = call.error;
     // step이 끝난 뒤에도 Task·미룬 목록이 job 참조를 쥐고 있을 수 있다. step마다 놓아 다음 step이
     // 쓸 job 칸이 언제나 남게 한다(타이밍과 무관한 상한 — 7.1.1절).

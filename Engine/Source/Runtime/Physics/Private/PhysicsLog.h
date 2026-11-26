@@ -10,4 +10,9 @@ namespace rocks::physics {
 inline constexpr LogCategory LogPhysics{"Physics"};
 inline constexpr LogCategory LogPhysicsJolt{"Physics.Jolt"};
 
+// 진단 코드다(Docs/Design/PhysicsModule 7.1.6절).
+// - ResponseSetCapacity: 장면의 응답 묶음 칸 수가 object 층 색인 bit(21)를 넘었다. 그 body는 만들지
+//   않거나(CreateBody 실패) 필터를 바꾸지 않는다(Warning).
+inline constexpr char DiagResponseSetCapacity[] = "ResponseSetCapacity";
+
 } // namespace rocks::physics

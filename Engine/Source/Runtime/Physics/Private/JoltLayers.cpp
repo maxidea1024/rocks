@@ -1,5 +1,7 @@
-// object 층 bit와 PH1 필터(Docs/Design/PhysicsModule 6.1–6.2절, 7.1.1절).
+// object 층 bit와 시뮬레이션 필터(Docs/Design/PhysicsModule 6.1–6.2절, 7.1.1·7.1.6절).
 #include "JoltLayers.h"
+
+#include "JoltResponseSets.h"
 
 namespace rocks::physics {
 
@@ -51,8 +53,20 @@ bool ObjectLayerPairFilter::ShouldCollide(JPH::ObjectLayer first, JPH::ObjectLay
         return false;
     }
 
-    return !(ObjectLayerMotion(first) == LayerMotion::Static &&
-             ObjectLayerMotion(second) == LayerMotion::Static);
+    if (ObjectLayerMotion(first) == LayerMotion::Static &&
+        ObjectLayerMotion(second) == LayerMotion::Static) {
+        return false;
+    }
+
+    // 서로의 object type에 대한 응답의 최소가 Block일 때만 시뮬레이션 접촉이다(6.2절 2–3단계 — UE
+    // SceneComponent.cpp:3089-3092). Overlap은 질의 기반 overlap이 다룬다.
+    const auto firstChannel = static_cast<CollisionChannel>(ObjectLayerChannel(first));
+    const auto secondChannel = static_cast<CollisionChannel>(ObjectLayerChannel(second));
+    const CollisionResponse firstSide =
+        responseSets_.Get(ObjectLayerResponseSet(first)).Get(secondChannel);
+    const CollisionResponse secondSide =
+        responseSets_.Get(ObjectLayerResponseSet(second)).Get(firstChannel);
+    return firstSide == CollisionResponse::Block && secondSide == CollisionResponse::Block;
 }
 
 } // namespace rocks::physics
