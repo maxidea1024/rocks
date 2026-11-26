@@ -1,11 +1,11 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/DrawBatch.h>
-#include <UiFramework/BackgroundBlur.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/PostBufferUpdate.h>
-#include <UiFramework/RetainerBox.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Effects/BackgroundBlur.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Effects/PostBufferUpdate.h>
+#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/Viewport.h>
 
 using namespace rocks;
 using namespace rocks::ui;

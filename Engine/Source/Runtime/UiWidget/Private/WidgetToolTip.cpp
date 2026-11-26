@@ -1,10 +1,10 @@
 #include <Core/Containers/HashSet.h>
 #include <UiCore/Styles/CoreStyles.h>
-#include <UiFramework/ToolTip.h>
+#include <UiFramework/Popups/ToolTip.h>
 #include <UiWidget/Widget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 #include <UiWidget/WidgetTextShaper.h>
-#include <UiFramework/Frame.h>
+#include <UiFramework/Layout/Frame.h>
 
 namespace rocks::ui {
 

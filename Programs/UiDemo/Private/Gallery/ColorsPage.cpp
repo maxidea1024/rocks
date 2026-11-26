@@ -1,13 +1,13 @@
 #include "ColorsPage.h"
 
 #include <Core/Text/StringBuilder.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/Image.h>
-#include <UiFramework/Overlay.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/VerticalStack.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Controls/Image.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/VerticalStack.h>
+#include <UiFramework/Layout/WrapStack.h>
 
 namespace rocks::ui::gallery {
 

@@ -1,6 +1,6 @@
 #include <UiWidget/InputKeySelectorWidget.h>
 #include "ControlCaption.h"
-#include <UiFramework/InputKeySelector.h>
+#include <UiFramework/Controls/InputKeySelector.h>
 #include <UiWidget/InputKeySelectorWidget.generated.h>
 
 namespace rocks::ui {

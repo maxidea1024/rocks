@@ -1,6 +1,6 @@
 #include <UiWidget/ScrollBarWidget.h>
 #include <UiWidget/ScrollBarWidget.generated.h>
-#include <UiFramework/ScrollBar.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
 
 namespace rocks::ui {
 

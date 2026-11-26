@@ -1,7 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
 
 // 버튼 스타일 적용 시험이다(Docs/Design/UiToolkit 9.1절 UW3c — UE SButton). 상태별 brush·여백·
 // 전경색, 색 곱, 전경색 상속과 캐시 재기록을 단언한다.

@@ -1,23 +1,23 @@
 #include "LayoutPage.h"
 
 #include <Core/Text/StringBuilder.h>
-#include <UiFramework/AnchorCanvas.h>
-#include <UiFramework/Carousel.h>
-#include <UiFramework/CarouselPage.h>
-#include <UiFramework/FitBox.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/Grid.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/Overlay.h>
-#include <UiFramework/WindowTitleBar.h>
-#include <UiFramework/ScaleLayer.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/Switcher.h>
-#include <UiFramework/UniformGrid.h>
-#include <UiFramework/VerticalStack.h>
-#include <UiFramework/WindowTitleBarArea.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Lists/Carousel.h>
+#include <UiFramework/Lists/CarouselPage.h>
+#include <UiFramework/Layout/FitBox.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/Grid.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Window/WindowTitleBar.h>
+#include <UiFramework/Layout/ScaleLayer.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/Switcher.h>
+#include <UiFramework/Layout/UniformGrid.h>
+#include <UiFramework/Layout/VerticalStack.h>
+#include <UiFramework/Window/WindowTitleBarArea.h>
+#include <UiFramework/Layout/WrapStack.h>
 
 namespace rocks::ui::gallery {
 

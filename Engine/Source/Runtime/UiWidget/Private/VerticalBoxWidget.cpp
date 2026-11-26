@@ -1,8 +1,8 @@
 #include <UiWidget/VerticalBoxWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Layout/VerticalStack.h>
 #include <UiWidget/VerticalBoxWidget.h>
-#include <UiFramework/StackPanel.h>
+#include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
 

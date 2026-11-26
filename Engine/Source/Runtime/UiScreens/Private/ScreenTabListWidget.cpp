@@ -6,8 +6,8 @@
 #include <UiWidget/WidgetSlot.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 #include <UiWidget/WidgetTextShaper.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

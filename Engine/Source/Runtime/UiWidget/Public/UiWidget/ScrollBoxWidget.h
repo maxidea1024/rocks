@@ -2,7 +2,7 @@
 
 #include <UiWidget/PanelWidget.h>
 #include <UiCore/StackLayout.h>
-#include <UiFramework/ScrollView.h>
+#include <UiFramework/Scrolling/ScrollView.h>
 
 namespace rocks::ui {
 

@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/InvalidationBoxWidget.h>
-#include <UiFramework/CachePanel.h>
+#include <UiFramework/Effects/CachePanel.h>
 
 namespace rocks::ui {
 

@@ -1,12 +1,12 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/InputKeySelector.h>
-#include <UiFramework/InputAdapter.h>
-#include <UiFramework/ScrollBar.h>
-#include <UiFramework/ProgressBar.h>
-#include <UiFramework/Slider.h>
-#include <UiFramework/SpinBox.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/InputKeySelector.h>
+#include <UiFramework/Application/InputAdapter.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
+#include <UiFramework/Controls/ProgressBar.h>
+#include <UiFramework/Controls/Slider.h>
+#include <UiFramework/Controls/SpinBox.h>
 
 namespace rocks::ui {
 

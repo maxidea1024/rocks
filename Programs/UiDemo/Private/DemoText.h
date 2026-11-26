@@ -6,7 +6,7 @@
 #include <TextLayout/GlyphCache.h>
 #include <TextLayout/TextShaping.h>
 #include <UiCore/Style.h>
-#include <UiFramework/TextLabel.h>
+#include <UiFramework/Text/TextLabel.h>
 #include <UiRender/GlyphCacheTextures.h>
 
 // 데모 레이블 텍스트다(Docs/Design/UiToolkit 9.1절 UW2). 엔진 글꼴 시스템으로 shaping·래스터한다:

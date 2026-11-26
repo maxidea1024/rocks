@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/SpacerWidget.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

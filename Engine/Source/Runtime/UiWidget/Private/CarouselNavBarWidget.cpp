@@ -1,8 +1,8 @@
 #include <UiWidget/CarouselNavBarWidget.generated.h>
 #include <UiWidget/CarouselWidget.generated.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/SlotPresenter.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/SlotPresenter.h>
 
 namespace rocks::ui {
 

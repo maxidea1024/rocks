@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/CircularThrobberWidget.h>
-#include <UiFramework/ActivityIndicator.h>
+#include <UiFramework/Controls/ActivityIndicator.h>
 
 namespace rocks::ui {
 

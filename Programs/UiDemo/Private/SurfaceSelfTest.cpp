@@ -1,12 +1,12 @@
 #include "DemoShaders.h"
 #include "SurfaceSelfTest.h"
 #include <Core/ScopeExit.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/BackgroundBlur.h>
-#include <UiFramework/Overlay.h>
-#include <UiFramework/PostBufferUpdate.h>
-#include <UiFramework/RetainerBox.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Effects/BackgroundBlur.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Effects/PostBufferUpdate.h>
+#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/Viewport.h>
 #include <UiRender/DrawBatchBuffers.h>
 #include <UiRender/WidgetSurfaceHost.h>
 

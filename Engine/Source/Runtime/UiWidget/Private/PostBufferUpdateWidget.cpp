@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/PostBufferUpdateWidget.h>
-#include <UiFramework/PostBufferUpdate.h>
+#include <UiFramework/Effects/PostBufferUpdate.h>
 
 namespace rocks::ui {
 

@@ -1,5 +1,5 @@
 #include "MakeWidgetElement.h"
-#include <UiFramework/UniformGrid.h>
+#include <UiFramework/Layout/UniformGrid.h>
 #include <UiWidget/UniformGridPanelWidget.h>
 #include <UiWidget/UniformGridWidgetSlot.generated.h>
 

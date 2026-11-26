@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiFramework/Commands.h>
+#include <UiFramework/Application/Commands.h>
 #include <UiWidget/Widget.h>
 
 namespace rocks::ui {

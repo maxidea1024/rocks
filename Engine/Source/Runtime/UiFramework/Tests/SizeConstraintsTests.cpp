@@ -1,8 +1,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/FitBox.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/FitBox.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

@@ -1,10 +1,10 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui {
 

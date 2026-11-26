@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiFramework/TextLabel.h>
+#include <UiFramework/Text/TextLabel.h>
 #include <UiWidget/Widget.h>
 
 namespace rocks::ui {

@@ -2,8 +2,8 @@
 
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
-#include <UiFramework/InputAdapter.h>
-#include <UiFramework/WindowChrome.h>
+#include <UiFramework/Application/InputAdapter.h>
+#include <UiFramework/Window/WindowChrome.h>
 #include <UiRender/VectorImageAtlas.h>
 #include <UiRender/WidgetSurfaceHost.h>
 #include <UiRender/DrawBatchRenderer.h>

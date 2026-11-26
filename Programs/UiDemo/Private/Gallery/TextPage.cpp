@@ -1,10 +1,10 @@
 #include "TextPage.h"
 
 #include <Core/Text/StringBuilder.h>
-#include <UiFramework/Grid.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Layout/Grid.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui::gallery {
 

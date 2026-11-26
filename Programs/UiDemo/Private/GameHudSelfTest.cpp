@@ -3,7 +3,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <D3D11Graphics/D3D11Device.h>
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 #include <UiRender/DrawBatchBuffers.h>
 #include <UiRender/DrawBatchRenderer.h>
 

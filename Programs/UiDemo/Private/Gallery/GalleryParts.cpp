@@ -1,8 +1,8 @@
 #include "GalleryParts.h"
 
 #include <Core/Diagnostics/Log.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui::gallery {
 

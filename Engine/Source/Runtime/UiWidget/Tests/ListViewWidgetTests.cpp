@@ -2,7 +2,7 @@
 #include <TestSupport/Test.h>
 #include <UiWidget/ButtonWidget.generated.h>
 #include <UiWidget/ListViewWidget.generated.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Controls/Button.h>
 
 namespace rocks::ui {
 

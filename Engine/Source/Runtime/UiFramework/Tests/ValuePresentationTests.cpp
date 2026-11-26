@@ -1,9 +1,9 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/ProgressBar.h>
-#include <UiFramework/Slider.h>
-#include <UiFramework/SpinBox.h>
+#include <UiFramework/Controls/ProgressBar.h>
+#include <UiFramework/Controls/Slider.h>
+#include <UiFramework/Controls/SpinBox.h>
 
 namespace rocks::ui {
 

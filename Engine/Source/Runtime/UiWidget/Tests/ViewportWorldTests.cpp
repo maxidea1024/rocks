@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Effects/Viewport.h>
 #include <UiWidget/ViewportWidget.generated.h>
 #include <World/Actor.generated.h>
 

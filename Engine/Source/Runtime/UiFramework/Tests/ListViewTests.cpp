@@ -1,9 +1,9 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/ListView.h>
-#include <UiFramework/TileView.h>
-#include <UiFramework/TreeView.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Lists/ListView.h>
+#include <UiFramework/Lists/TileView.h>
+#include <UiFramework/Lists/TreeView.h>
 
 namespace rocks::ui {
 

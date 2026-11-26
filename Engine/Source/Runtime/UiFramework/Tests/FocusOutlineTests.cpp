@@ -1,10 +1,10 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/AnchorCanvas.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/MenuAnchor.h>
-#include <UiFramework/Overlay.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Popups/MenuAnchor.h>
+#include <UiFramework/Layout/Overlay.h>
 #include <UiCore/Styles/CoreStyles.h>
 
 namespace rocks::ui {

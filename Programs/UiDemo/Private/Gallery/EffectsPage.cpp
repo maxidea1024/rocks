@@ -2,16 +2,16 @@
 
 #include "GalleryTextures.h"
 
-#include <UiFramework/BackgroundBlur.h>
-#include <UiFramework/CachePanel.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/AnchorCanvas.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/Image.h>
-#include <UiFramework/Overlay.h>
-#include <UiFramework/RetainerBox.h>
-#include <UiFramework/Slider.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Effects/BackgroundBlur.h>
+#include <UiFramework/Effects/CachePanel.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Controls/Image.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Controls/Slider.h>
+#include <UiFramework/Effects/Viewport.h>
 
 namespace rocks::ui::gallery {
 

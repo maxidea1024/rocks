@@ -1,6 +1,6 @@
 #include <UiWidget/SafeZoneWidgetSlot.generated.h>
 #include <UiWidget/SafeZoneWidget.h>
-#include <UiFramework/Frame.h>
+#include <UiFramework/Layout/Frame.h>
 
 namespace rocks::ui {
 

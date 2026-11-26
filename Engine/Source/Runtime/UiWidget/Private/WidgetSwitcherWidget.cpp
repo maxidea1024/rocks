@@ -1,7 +1,7 @@
 #include <UiWidget/WidgetSwitcherWidgetSlot.generated.h>
 #include <UiWidget/WidgetSwitcherWidget.h>
 #include "MakeWidgetElement.h"
-#include <UiFramework/Switcher.h>
+#include <UiFramework/Layout/Switcher.h>
 #include <UiWidget/WidgetSlot.generated.h>
 
 namespace rocks::ui {

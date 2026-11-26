@@ -1,5 +1,5 @@
 #include <UiWidget/ScrollBoxWidget.generated.h>
-#include <UiFramework/ScrollView.h>
+#include <UiFramework/Scrolling/ScrollView.h>
 
 namespace rocks::ui {
 

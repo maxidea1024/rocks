@@ -1,7 +1,7 @@
 #include <UiWidget/SizeBoxWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
 #include <UiWidget/SizeBoxWidget.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

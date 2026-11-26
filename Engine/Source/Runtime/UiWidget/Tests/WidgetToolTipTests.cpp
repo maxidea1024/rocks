@@ -1,7 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreStyles.h>
-#include <UiFramework/ToolTip.h>
+#include <UiFramework/Popups/ToolTip.h>
 #include <UiWidget/BorderWidget.generated.h>
 #include <UiWidget/TextLabelWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>

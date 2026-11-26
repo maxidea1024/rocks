@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiFramework/Platform.h>
+#include <UiFramework/Application/Platform.h>
 #include <UiWidget/EditableTextWidget.h>
 #include <UiWidget/WidgetTextShaper.h>
 

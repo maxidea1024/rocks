@@ -1,8 +1,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/WindowTitleBarArea.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Window/WindowTitleBarArea.h>
 
 namespace rocks::ui {
 

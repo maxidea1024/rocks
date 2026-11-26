@@ -4,7 +4,7 @@
 
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
-#include <UiFramework/MenuBar.h>
+#include <UiFramework/Menus/MenuBar.h>
 
 // 갤러리 창 주 메뉴다(Docs/Design/UiToolkit 9.1절 UW7c). File·Edit·View·Help를 제목 막대 왼쪽에
 // 둔다. 명령은 갤러리 명령 목록에 정의·연결되어 단축키(Ctrl+S 등)로도 실행된다. 데모 명령은 실행을

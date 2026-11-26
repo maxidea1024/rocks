@@ -1,7 +1,7 @@
 #include "DemoShaders.h"
 #include "SurfaceSelfTest.h"
-#include <UiFramework/Application.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Effects/Viewport.h>
 #include <UiRender/WidgetSurfaceHost.h>
 #include <UiWidget/ViewportWidget.generated.h>
 #include <World/Actor.generated.h>

@@ -2,11 +2,11 @@
 
 #include <Core/Math/MathUtility.h>
 #include <Core/Text/StringBuilder.h>
-#include <UiFramework/Frame.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/ProgressBar.h>
-#include <UiFramework/Slider.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Controls/ProgressBar.h>
+#include <UiFramework/Controls/Slider.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui::gallery {
 

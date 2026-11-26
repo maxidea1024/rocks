@@ -5,9 +5,9 @@
 #include "GalleryTextures.h"
 
 #include <UiCore/Style.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/CheckBox.h>
-#include <UiFramework/TextLabel.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Controls/CheckBox.h>
+#include <UiFramework/Text/TextLabel.h>
 
 // 갤러리 탭들이 함께 쓰는 부품이다(Docs/Design/UiToolkit 16장). 텍스트는 데모 글꼴 조합으로
 // shaping하고, 색은 지정하지 않으면 부모 전경색을 따른다(UE STextBlock 기본 UseForeground).

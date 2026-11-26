@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/Widget.h>
-#include <UiFramework/ComboBox.h>
+#include <UiFramework/Controls/ComboBox.h>
 
 namespace rocks::ui {
 

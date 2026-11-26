@@ -1,5 +1,5 @@
 #include <UiFramework/Docking/DockManager.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 #include "DockTabHeader.h"
 

@@ -1,7 +1,7 @@
 #include <UiWidget/BorderWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
 #include <UiWidget/BorderWidget.h>
-#include <UiFramework/Frame.h>
+#include <UiFramework/Layout/Frame.h>
 
 namespace rocks::ui {
 

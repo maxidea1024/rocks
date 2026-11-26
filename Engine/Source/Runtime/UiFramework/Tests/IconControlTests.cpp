@@ -1,11 +1,11 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreIcons.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/CachePanel.h>
-#include <UiFramework/CheckBox.h>
-#include <UiFramework/ComboBox.h>
-#include <UiFramework/Image.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Effects/CachePanel.h>
+#include <UiFramework/Controls/CheckBox.h>
+#include <UiFramework/Controls/ComboBox.h>
+#include <UiFramework/Controls/Image.h>
 
 // 아이콘을 쓰는 컨트롤 시험이다(Docs/Design/UiToolkit 17.4절 UW4s5). 체크 표시·콤보 화살표가 SVG
 // 아이콘 brush로 기록되는지(요청한 키·크기·tint)를 단언한다.

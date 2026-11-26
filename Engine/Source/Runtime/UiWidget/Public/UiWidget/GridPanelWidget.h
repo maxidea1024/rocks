@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/PanelWidget.h>
-#include <UiFramework/Grid.h>
+#include <UiFramework/Layout/Grid.h>
 
 namespace rocks::ui {
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/Widget.h>
-#include <UiFramework/ProgressBar.h>
+#include <UiFramework/Controls/ProgressBar.h>
 
 namespace rocks::ui {
 

@@ -1,7 +1,7 @@
 #include <UiWidget/BackgroundBlurWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
 #include <UiWidget/BackgroundBlurWidget.h>
-#include <UiFramework/BackgroundBlur.h>
+#include <UiFramework/Effects/BackgroundBlur.h>
 
 namespace rocks::ui {
 

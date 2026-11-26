@@ -1,7 +1,7 @@
 #include <UiWidget/ScaleBoxWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
 #include <UiWidget/ScaleBoxWidget.h>
-#include <UiFramework/FitBox.h>
+#include <UiFramework/Layout/FitBox.h>
 
 namespace rocks::ui {
 

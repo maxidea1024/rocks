@@ -2,9 +2,9 @@
 #include <Core/Text/Json.h>
 #include <TestSupport/Test.h>
 #include <UiCore/DrawBatch.h>
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 #include <UiFramework/Docking/DockManager.h>
-#include <UiFramework/Frame.h>
+#include <UiFramework/Layout/Frame.h>
 
 using namespace rocks;
 using namespace rocks::ui;

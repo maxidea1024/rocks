@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/ImageWidget.h>
-#include <UiFramework/Image.h>
+#include <UiFramework/Controls/Image.h>
 
 namespace rocks::ui {
 

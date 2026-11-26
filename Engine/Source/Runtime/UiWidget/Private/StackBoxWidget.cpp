@@ -1,7 +1,7 @@
 #include <UiWidget/StackBoxWidgetSlot.generated.h>
 #include <UiWidget/StackBoxWidget.h>
 #include "MakeWidgetElement.h"
-#include <UiFramework/StackPanel.h>
+#include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
 

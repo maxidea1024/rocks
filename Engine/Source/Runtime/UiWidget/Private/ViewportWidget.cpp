@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/ViewportWidget.h>
-#include <UiFramework/Viewport.h>
+#include <UiFramework/Effects/Viewport.h>
 
 namespace rocks::ui {
 

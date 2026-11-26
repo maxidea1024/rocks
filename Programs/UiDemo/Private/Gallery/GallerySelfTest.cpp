@@ -2,7 +2,7 @@
 #include <Core/ScopeExit.h>
 #include <UiCore/Styles/CoreStyles.h>
 
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 
 namespace rocks::ui::gallery {
 

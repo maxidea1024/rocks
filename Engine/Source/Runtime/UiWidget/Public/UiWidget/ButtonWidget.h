@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Delegate.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Controls/Button.h>
 #include <UiWidget/ContentWidget.h>
 
 namespace rocks::ui {

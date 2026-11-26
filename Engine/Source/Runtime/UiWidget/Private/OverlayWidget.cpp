@@ -1,6 +1,6 @@
 #include <UiWidget/OverlayWidgetSlot.generated.h>
 #include <UiWidget/OverlayWidget.generated.h>
-#include <UiFramework/Overlay.h>
+#include <UiFramework/Layout/Overlay.h>
 
 namespace rocks::ui {
 

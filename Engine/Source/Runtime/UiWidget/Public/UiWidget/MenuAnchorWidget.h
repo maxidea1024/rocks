@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/ContentWidget.h>
-#include <UiFramework/MenuAnchor.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 
 namespace rocks::ui {
 

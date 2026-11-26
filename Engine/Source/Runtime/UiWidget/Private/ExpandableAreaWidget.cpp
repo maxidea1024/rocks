@@ -1,8 +1,8 @@
 #include <UiWidget/ExpandableAreaWidget.generated.h>
 #include <UiWidget/ExpandableAreaSlot.generated.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui {
 

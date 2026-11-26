@@ -1,7 +1,7 @@
 #include <UiWidget/CarouselWidget.generated.h>
 #include <UiWidget/WidgetSlot.generated.h>
 #include <UiWidget/Widget.generated.h>
-#include <UiFramework/Carousel.h>
+#include <UiFramework/Lists/Carousel.h>
 #include "MakeWidgetElement.h"
 
 namespace rocks::ui {

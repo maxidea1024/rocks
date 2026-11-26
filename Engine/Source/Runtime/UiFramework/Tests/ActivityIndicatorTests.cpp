@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/ActivityIndicator.h>
+#include <UiFramework/Controls/ActivityIndicator.h>
 
 namespace rocks::ui {
 

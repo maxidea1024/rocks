@@ -2,7 +2,7 @@
 
 #include <Core/Delegate.h>
 #include <UiScreens/ScreenDeviceState.h>
-#include <UiFramework/InputAdapter.h>
+#include <UiFramework/Application/InputAdapter.h>
 #include <UiScreens/ScreenContainer.h>
 
 namespace rocks::ui {

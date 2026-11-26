@@ -1,7 +1,7 @@
 #include <UiWidget/WindowTitleBarAreaWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
 #include <UiWidget/WindowTitleBarAreaWidget.h>
-#include <UiFramework/WindowTitleBarArea.h>
+#include <UiFramework/Window/WindowTitleBarArea.h>
 
 namespace rocks::ui {
 

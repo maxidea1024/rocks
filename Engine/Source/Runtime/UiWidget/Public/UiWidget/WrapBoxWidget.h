@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/PanelWidget.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/WrapStack.h>
 
 namespace rocks::ui {
 

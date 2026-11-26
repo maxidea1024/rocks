@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/ScrollBar.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
 #include <UiWidget/CheckBoxWidget.generated.h>
 #include <UiWidget/ScrollBarWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>

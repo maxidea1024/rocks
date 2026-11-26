@@ -1,6 +1,6 @@
 #include "MakeWidgetElement.h"
 #include <UiWidget/CheckBoxWidget.generated.h>
-#include <UiFramework/CheckBox.h>
+#include <UiFramework/Controls/CheckBox.h>
 
 namespace rocks::ui {
 

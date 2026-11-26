@@ -2,7 +2,7 @@
 
 #include "UpdateLiveWidgetSlot.h"
 #include <UiWidget/GridPanelWidget.generated.h>
-#include <UiFramework/Grid.h>
+#include <UiFramework/Layout/Grid.h>
 
 namespace rocks::ui {
 

@@ -14,30 +14,30 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 
 | UE 클래스 (파일) | 에디터 용도 | Rocks |
 |---|---|---|
-| `SButton` (`S/Widgets/Input/SButton.h`) | 모든 버튼, 툴바 버튼 | **있음** `Button` (`UF/Button.h`). 클릭 방식, 상태 brush. Primary·Secondary·Simple 같은 스타일 변형은 없다(스타일 체계가 없어서, 2절) |
+| `SButton` (`S/Widgets/Input/SButton.h`) | 모든 버튼, 툴바 버튼 | **있음** `Button` (`UF/Controls/Button.h`). 클릭 방식, 상태 brush. Primary·Secondary·Simple 같은 스타일 변형은 없다(스타일 체계가 없어서, 2절) |
 | `SPrimaryButton`·`SPositiveActionButton`·`SNegativeActionButton`·`SSimpleButton`·`SSimpleComboButton`·`SActionButton` (`TW/`) | "+ Add"·"Save" 같은 강조 버튼, 아이콘만 있는 버튼 | **없음**. `Button` 위에 스타일과 아이콘+레이블을 조합해 만들어야 한다 |
-| `SCheckBox` (`S/Widgets/Input/SCheckBox.h`) | 체크 상자, 토글 버튼, 라디오 버튼(`ESlateCheckBoxType::ToggleButton` + 라디오 스타일) | **부분** `CheckBox` (`UF/CheckBox.h`). 3상태 체크만 있다. 토글 버튼 모양과 라디오 묶음(하나만 선택)은 없다 |
+| `SCheckBox` (`S/Widgets/Input/SCheckBox.h`) | 체크 상자, 토글 버튼, 라디오 버튼(`ESlateCheckBoxType::ToggleButton` + 라디오 스타일) | **부분** `CheckBox` (`UF/Controls/CheckBox.h`). 3상태 체크만 있다. 토글 버튼 모양과 라디오 묶음(하나만 선택)은 없다 |
 | `SSegmentedControl<T>` (`S/Widgets/Input/SSegmentedControl.h`) | 보기 방식 전환, viewport 도구 모음, 정렬 방식 | **없음** |
-| `SComboButton` (`S/Widgets/Input/SComboButton.h`) | 아래 화살표가 붙은 버튼 + 드롭다운 (도구 모음, 필터, "Add") | **부분** `MenuAnchor` (`UF/MenuAnchor.h`, Button 파생, 메뉴 생성기, 배치 방식 13가지). 화살표 장식과 ComboButton 스타일이 없다 |
-| `SComboBox<T>`·`STextComboBox` (`S/Widgets/Input/`) | enum·옵션 선택 | **부분** `ComboBox` (`UF/ComboBox.h`). 인덱스 기반이고 행 생성기와 최대 높이가 있다. 템플릿 항목 형식과 스타일은 없다 |
+| `SComboButton` (`S/Widgets/Input/SComboButton.h`) | 아래 화살표가 붙은 버튼 + 드롭다운 (도구 모음, 필터, "Add") | **부분** `MenuAnchor` (`UF/Popups/MenuAnchor.h`, Button 파생, 메뉴 생성기, 배치 방식 13가지). 화살표 장식과 ComboButton 스타일이 없다 |
+| `SComboBox<T>`·`STextComboBox` (`S/Widgets/Input/`) | enum·옵션 선택 | **부분** `ComboBox` (`UF/Controls/ComboBox.h`). 인덱스 기반이고 행 생성기와 최대 높이가 있다. 템플릿 항목 형식과 스타일은 없다 |
 | `SSearchableComboBox` (`S/Widgets/Input/`, `TW/`) | 항목이 많은 enum·클래스 선택 | **없음**. 검색 상자가 없다 |
 | `SEditableComboBox` | 직접 입력도 받는 콤보 | **없음**. 우선순위 낮음 |
-| `SSpinBox<T>` (`S/Widgets/Input/SSpinBox.h`) | 숫자 드래그 입력 | **부분** `SpinBox` (`UF/SpinBox.h`). **float만** 받는다. 드래그, 방향키, 직접 입력, 범위·단계·소수 자릿수, drag 시작·끝 통지는 있다. int·int64·double 형식, `NumericTypeInterface`(단위·서식·수식 입력)가 없다 |
+| `SSpinBox<T>` (`S/Widgets/Input/SSpinBox.h`) | 숫자 드래그 입력 | **부분** `SpinBox` (`UF/Controls/SpinBox.h`). **float만** 받는다. 드래그, 방향키, 직접 입력, 범위·단계·소수 자릿수, drag 시작·끝 통지는 있다. int·int64·double 형식, `NumericTypeInterface`(단위·서식·수식 입력)가 없다 |
 | `SNumericEntryBox<T>` (`S/Widgets/Input/SNumericEntryBox.h`) | 디테일 패널의 숫자 행. 축 레이블 색 띠, 여러 객체 값이 다를 때(Undetermined) 표시, 스핀 없는 모드 | **없음** |
 | `SNumericVectorInputBox`·`SVectorInputBox`·`SRotatorInputBox` (`S/Widgets/Input/SVectorInputBox.h`, `SRotatorInputBox.h`) | Transform·FVector·FRotator 편집, 비율 잠금 | **없음** |
-| `SSlider` (`S/Widgets/Input/SSlider.h`) | 볼륨, 색 채널 | **있음** `Slider` (`UF/Slider.h`), 그 밖에 `RadialSlider`·`Timeline` |
+| `SSlider` (`S/Widgets/Input/SSlider.h`) | 볼륨, 색 채널 | **있음** `Slider` (`UF/Controls/Slider.h`), 그 밖에 `RadialSlider`·`Timeline` |
 | `SNumericDropDown` | viewport 카메라 속도 | **없음**. 우선순위 낮음 |
 | `SHyperlink`·`SRichTextHyperlink` (`S/Widgets/Input/`) | 문서 링크, 로그·알림 안의 링크 | **없음** |
 | `SSearchBox` (`S/Widgets/Input/SSearchBox.h`) | 모든 패널의 검색 (Outliner·Content Browser·Details·Palette) | **없음**. 편집 텍스트 Element부터 공개해야 한다(1.2절) |
 | `SFilterSearchBox`·`SBasicFilterBar` (`TW/Filters/`), `SFilterBar` (`EW/Filters/SFilterBar.h`) | 필터 칩, 저장된 검색 | **없음** |
-| `SInputKeySelector` (`S/Widgets/Input/`), `SInputChord` (`EW/SInputChord.h`) | 키 선택, 단축키 편집 | **있음** `InputKeySelector` (`UF/InputKeySelector.h`). 결과가 `KeyChord`라 단축키 조합 편집에도 쓸 수 있다. 단축키 편집 화면(목록·충돌 표시)은 없다 |
+| `SInputKeySelector` (`S/Widgets/Input/`), `SInputChord` (`EW/SInputChord.h`) | 키 선택, 단축키 편집 | **있음** `InputKeySelector` (`UF/Controls/InputKeySelector.h`). 결과가 `KeyChord`라 단축키 조합 편집에도 쓸 수 있다. 단축키 편집 화면(목록·충돌 표시)은 없다 |
 | `SVirtualJoystick`·`SVirtualKeyboardEntry`·`SVolumeControl`·`SExpandableButton` | 게임·모바일용 | 조사에서 뺐다 |
 
 ### 1.2 텍스트
 
 | UE 클래스 (파일) | 에디터 용도 | Rocks |
 |---|---|---|
-| `STextBlock` (`S/Widgets/Text/STextBlock.h`) | 모든 레이블 | **부분** `TextLabel` (`UF/TextLabel.h`). 줄바꿈, 정렬, 말줄임, 밑줄·취소선, hit test, caret 좌표는 있다. 받는 것은 **이미 shaping한 결과**이고, `FontInfo`와 크기만 받아 최종 배율로 스스로 shaping하는 기능은 아직 없다(스펙 3.12절, UW4에서 할 예정). 검색어 강조(`HighlightText`)도 없다 |
+| `STextBlock` (`S/Widgets/Text/STextBlock.h`) | 모든 레이블 | **부분** `TextLabel` (`UF/Text/TextLabel.h`). 줄바꿈, 정렬, 말줄임, 밑줄·취소선, hit test, caret 좌표는 있다. 받는 것은 **이미 shaping한 결과**이고, `FontInfo`와 크기만 받아 최종 배율로 스스로 shaping하는 기능은 아직 없다(스펙 3.12절, UW4에서 할 예정). 검색어 강조(`HighlightText`)도 없다 |
 | `SEditableText`·`SEditableTextBox` (`S/Widgets/Input/SEditableTextBox.h`) | 이름 입력, 검색, 디테일 문자열 값 | **부분**. 구현(`EditableTextElement`: IME 조합, 클립보드, undo·redo 64단계, 비밀번호, 힌트, 오류 표시)은 있다. 다만 `UW/Private/EditableTextElement.h`에 있고 생성자가 `ObjectRegistry`·`ObjectHandle`을 받아 Widget 층에 묶여 있다. **에디터(Element 층)에서는 쓸 수 없다.** UiFramework로 옮기는 일은 UW9 범위다 |
 | `SMultiLineEditableText(Box)` | 설명, 여러 줄 문자열 | **부분**. 같은 Element의 multiline 모드이고, 같은 제약이 있다 |
 | `SInlineEditableTextBlock` (`S/Widgets/Text/SInlineEditableTextBlock.h`) | 이름 바꾸기(F2): Outliner, Content Browser, 변수 목록 | **없음** |
@@ -51,9 +51,9 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 
 | UE 클래스 (파일) | 에디터 용도 | Rocks |
 |---|---|---|
-| `SListView<T>` (`S/Widgets/Views/SListView.h`, `STableViewBase.h`) | 로그, 검색 결과, 목록 패널 | **부분** `ListView` (`UF/ListView.h`) + `TableRowSource` (`UF/TableRowSource.h`). 가상화, 행 재사용, 선택(None·Single·SingleToggle·Multi, 범위 선택), 키보드 이동, scroll into view는 있다. **행 높이가 고정**이다(`SetRowHeight`). 행 더블클릭, 오른쪽 클릭 메뉴(`OnContextMenuOpening`), 행 drag·drop 이벤트는 없다 |
-| `STreeView<T>` (`S/Widgets/Views/STreeView.h`) | Outliner, Details 트리, 클래스·경로 트리 | **부분** `TreeView` (`UF/TreeView.h`). key별 펼침 상태, 모두 펼치기·접기, `TableItem.depth`가 있다. 펼침 화살표 부품, 트리 연결선(wires), 펼침 상태 변경 통지는 없다. 행 높이 고정 제약도 그대로다 |
-| `STileView<T>` (`S/Widgets/Views/STileView.h`) | Content Browser 타일 | **있음** `TileView` (`UF/TileView.h`). 타일 너비 + 행 높이다 |
+| `SListView<T>` (`S/Widgets/Views/SListView.h`, `STableViewBase.h`) | 로그, 검색 결과, 목록 패널 | **부분** `ListView` (`UF/Lists/ListView.h`) + `TableRowSource` (`UF/Lists/TableRowSource.h`). 가상화, 행 재사용, 선택(None·Single·SingleToggle·Multi, 범위 선택), 키보드 이동, scroll into view는 있다. **행 높이가 고정**이다(`SetRowHeight`). 행 더블클릭, 오른쪽 클릭 메뉴(`OnContextMenuOpening`), 행 drag·drop 이벤트는 없다 |
+| `STreeView<T>` (`S/Widgets/Views/STreeView.h`) | Outliner, Details 트리, 클래스·경로 트리 | **부분** `TreeView` (`UF/Lists/TreeView.h`). key별 펼침 상태, 모두 펼치기·접기, `TableItem.depth`가 있다. 펼침 화살표 부품, 트리 연결선(wires), 펼침 상태 변경 통지는 없다. 행 높이 고정 제약도 그대로다 |
+| `STileView<T>` (`S/Widgets/Views/STileView.h`) | Content Browser 타일 | **있음** `TileView` (`UF/Lists/TileView.h`). 타일 너비 + 행 높이다 |
 | `SHeaderRow`·`SMultiColumnTableRow`·`STableRow` (`S/Widgets/Views/SHeaderRow.h`, `STableRow.h`) | Outliner 열(이름·형식·보이기), Content Browser 목록 보기, 열 정렬·크기 조정·숨기기 | **없음**. 열 개념이 없다 |
 | `SExpanderArrow` (`S/Widgets/Views/SExpanderArrow.h`) | 트리 행의 펼침 화살표 + 들여쓰기 | **없음** |
 | `SBreadcrumbTrail` (`S/Widgets/Navigation/SBreadcrumbTrail.h`) | Content Browser 경로, 디테일 하위 객체 경로 | **없음** |
@@ -86,11 +86,11 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 | `FTabManager`·`FGlobalTabmanager`·`SDockTab` (`S/Framework/Docking/TabManager.h`, `S/Widgets/Docking/SDockTab.h`) | 에디터 전체 배치 | **부분** `DockManager` (`UF/Docking/DockManager.h`). 탭 등록과 지연 생성기(표시 이름·그룹·메뉴 표시), 역할 4가지(Major·Panel·Global·Document), 분할 도킹, 창 사이 탭 이동, 떠 있는 탭 미리보기, 가운데 클릭으로 닫기가 있다. 없는 것: 탭 아이콘, 탭 오른쪽 클릭 메뉴(Private에서 오른쪽 버튼 처리를 찾지 못함), 탭 well 숨기기, 사이드바 drawer(`STabDrawer`), 자산 편집기별 중첩 tab manager의 공식 경로(`DockManager`가 Element라서 탭 안에 넣을 수는 있을 것 같다 — `?`), `FLayoutExtender`, 그룹에서 Window 메뉴를 자동으로 만드는 기능 |
 | `FLayoutSaveRestore` (`S/Framework/Docking/LayoutService.h`) | 배치 ini 저장, 버전을 올리면 무효화 | **부분** `DockManager::SaveLayout`·`RestoreLayout`이 JSON과 버전을 다룬다. 파일 위치와 사용자 설정 경로는 호스트 몫이고 그 서비스는 없다 |
 | `SWindow` + `FSlateApplication::AddWindow`·`AddModalWindow` (`SC/Widgets/SWindow.h`) | 떠 있는 창, 색 선택 창, 모달 대화상자 | **부분**. OS 창은 `PlatformWindow`와 호스트가 관리한다. UI 쪽 창 객체와 modal stack은 없다(스펙 3.10절에 계약만 있음) |
-| `SWindowTitleBar`·`SWindowTitleBarArea` | 에디터가 직접 그리는 제목 표시줄(메뉴 바 + 창 버튼) | **부분** `WindowTitleBarArea` (`UF/WindowTitleBarArea.h`)는 영역 판정만 한다. 제목 표시줄 부품은 없다 |
+| `SWindowTitleBar`·`SWindowTitleBarArea` | 에디터가 직접 그리는 제목 표시줄(메뉴 바 + 창 버튼) | **부분** `WindowTitleBarArea` (`UF/Window/WindowTitleBarArea.h`)는 영역 판정만 한다. 제목 표시줄 부품은 없다 |
 | `SCustomDialog`·`SMessageDialog` (`TW/Dialog/`) | 확인·저장 대화상자 | **없음** |
 | `SSidebar`·`SSidebarContainer`·`SWidgetDrawer` (`TW/Sidebar/`, `TW/SWidgetDrawer.h`) | Content Drawer(Ctrl+Space), 상태 표시줄 drawer | **없음** |
 | `SStatusBar` (Editor/StatusBar) | 아래 상태 표시줄 | **없음** |
-| `SViewport`·`SEditorViewport` (`Editor/UnrealEd/Public/SEditorViewport.h`) | 레벨·자산 viewport | **부분** `Viewport` (`UF/Viewport.h`, `WidgetSurface`). viewport 도구 모음과 `SEditorViewport`에 해당하는 것은 EditorFramework 범위이고 없다 |
+| `SViewport`·`SEditorViewport` (`Editor/UnrealEd/Public/SEditorViewport.h`) | 레벨·자산 viewport | **부분** `Viewport` (`UF/Effects/Viewport.h`, `WidgetSurface`). viewport 도구 모음과 `SEditorViewport`에 해당하는 것은 EditorFramework 범위이고 없다 |
 
 ### 1.6 메뉴·도구 모음·명령
 
@@ -100,7 +100,7 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 | `UToolMenus`·`FToolMenuEntry` (`Developer/ToolMenus/Public/ToolMenus.h`) | 이름 붙은 메뉴 등록과 확장 | **없음**. 스펙에서는 EditorFramework `MenuRegistry`다 |
 | `FExtender` (`S/Framework/MultiBox/MultiBoxExtender.h`) | 메뉴·도구 모음 확장 지점 | **없음** |
 | `SMenuAnchor` + `FMenuStack` (`S/Framework/Application/MenuStack.h`), `SSubMenuHandler` | 드롭다운, 하위 메뉴, 커서 위치 context menu | **부분** `MenuAnchor`. 배치, 창 안에 맞추기, Esc·바깥 클릭으로 닫기, focus 복귀가 있다. 없는 것: 여러 단의 하위 메뉴 stack(메뉴 안에 `MenuAnchor`를 다시 넣었을 때 동작하는지 `?`), 커서 위치에 여는 context menu(`FSlateApplication::PushMenu`), 새 OS 창으로 여는 방식(UD4) |
-| `FUICommandInfo`·`TCommands`·`FUICommandList`·`FInputBindingManager`·`FUIAction` (`S/Framework/Commands/`) | 단축키, 메뉴·도구 모음 항목의 동작 | **부분** `CommandSet`·`CommandInfo`·`CommandList`·`BindingManager`·`CommandAction` (`UF/Commands.h`), `Application::SetCommands`(scope별 목록과 전역 목록). id, 레이블, 설명, 1차·2차 chord, 실행·실행 가능·체크·표시 delegate, 재지정 저장·복원이 있다. 2절에서 빠진 것을 적었다 |
+| `FUICommandInfo`·`TCommands`·`FUICommandList`·`FInputBindingManager`·`FUIAction` (`S/Framework/Commands/`) | 단축키, 메뉴·도구 모음 항목의 동작 | **부분** `CommandSet`·`CommandInfo`·`CommandList`·`BindingManager`·`CommandAction` (`UF/Application/Commands.h`), `Application::SetCommands`(scope별 목록과 전역 목록). id, 레이블, 설명, 1차·2차 chord, 실행·실행 가능·체크·표시 delegate, 재지정 저장·복원이 있다. 2절에서 빠진 것을 적었다 |
 | `FGenericCommands` (`S/Framework/Commands/GenericCommands.h`) | Cut·Copy·Paste·Duplicate·Delete·Rename·SelectAll·Undo·Redo | **없음** |
 
 ### 1.7 알림·tooltip
@@ -163,10 +163,10 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 
 | UE 클래스 (파일) | 에디터 용도 | Rocks |
 |---|---|---|
-| `SImage`·`SLayeredImage` (`SC/Widgets/Images/`) | 아이콘, 겹친 아이콘 배지 | **부분** `Image` (`UF/Image.h`). 겹친 이미지는 없다 |
+| `SImage`·`SLayeredImage` (`SC/Widgets/Images/`) | 아이콘, 겹친 아이콘 배지 | **부분** `Image` (`UF/Controls/Image.h`). 겹친 이미지는 없다 |
 | `SCurveEditorPanel`·`FCurveEditor` (`Editor/CurveEditor/Public/`) | 곡선·타임라인 편집 | **없음**. 참고만(UT6). 선·스플라인 그리기가 먼저 있어야 한다 |
 | `SGraphEditor`·`SGraphPanel` | 그래프 편집 | **없음**. 참고만. Rocks NodeGraph 설계 11절의 `GraphView`(NG5–NG7)가 다룬다 |
-| `SSimpleTimeSlider`·`SScrubControlPanel` (`TW/`, `Editor/KismetWidgets/Public/`) | 애니메이션 미리보기 재생 막대 | **부분** `Timeline` (`UF/Timeline.h`, 눈금·마커가 있는 Slider). 재생 버튼 묶음은 없다 |
+| `SSimpleTimeSlider`·`SScrubControlPanel` (`TW/`, `Editor/KismetWidgets/Public/`) | 애니메이션 미리보기 재생 막대 | **부분** `Timeline` (`UF/Controls/Timeline.h`, 눈금·마커가 있는 Slider). 재생 버튼 묶음은 없다 |
 | `SOutputLog` (`Developer/OutputLog/Private/`) | 로그 패널 | **없음**. 목록·서식 텍스트·검색·필터가 먼저 있어야 한다 |
 | Widget Reflector (`Developer/SlateReflector`) | UI 트리 검사 | **없음**. 스펙 6절에 "UI 트리 검사기"가 있다 |
 | `SWizard` (`Runtime/AppFramework/Public/Widgets/Workflow/`) | 새 프로젝트·임포트 마법사 | **없음**. 우선순위 낮음 |
@@ -192,7 +192,7 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 | Transaction·Undo | `FScopedTransaction`, `PreEditChange`·`PostEditChangeChainProperty`, `EPropertyChangeType`(Interactive 등), `FEditorUndoClient` | 일반 Object Transaction은 없다. NodeGraph의 `GraphChange`·`GraphPatch`만 있다 | Transaction 버퍼, 변경 종류 플래그, drag 한 번에 Undo 하나(SpinBox drag 시작·끝 통지는 이미 있다) |
 | 숫자 형식 인터페이스 | `TNumericTypeInterface`·`TNumericUnitTypeInterface`(단위 표시·변환), `FBasicMathExpressionEvaluator`(입력란 수식) | 없다 | 단위(cm·deg·%)·서식·수식 입력. 디테일 숫자 행에 꼭 필요하다 |
 | 검색·필터 | `TTextFilter`·`FTextFilterExpressionEvaluator`, `SFilterBar` | 없다 | 문자열 필터 식, 필터 칩 틀 |
-| UI 애니메이션 곡선 | `FCurveSequence`(펼침·알림 fade) | `UiTimer`·frame timer(`UF/UiTimer.h`, `Application::StartFrameTimer`)만 있다 | ease 곡선 sequence(작은 틀) |
+| UI 애니메이션 곡선 | `FCurveSequence`(펼침·알림 fade) | `UiTimer`·frame timer(`UF/Application/UiTimer.h`, `Application::StartFrameTimer`)만 있다 | ease 곡선 sequence(작은 틀) |
 | 레이아웃 보조 | 가변 높이 행(`STableViewBase`가 생성된 행을 측정), 다중 열 표 | 고정 행 높이 | **가변 높이 행**이 없으면 디테일 패널(여러 줄 문자열, 썸네일 자산 행, 배열 자식)을 `TreeView`로 만들 수 없다 |
 
 ## 3. 우선순위

@@ -1,8 +1,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Grid.h>
-#include <UiFramework/SizeBox.h>
-#include <UiFramework/UniformGrid.h>
+#include <UiFramework/Layout/Grid.h>
+#include <UiFramework/Layout/SizeBox.h>
+#include <UiFramework/Layout/UniformGrid.h>
 
 namespace rocks::ui {
 

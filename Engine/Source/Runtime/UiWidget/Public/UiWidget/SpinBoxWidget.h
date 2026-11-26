@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Delegate.h>
-#include <UiFramework/SpinBox.h>
+#include <UiFramework/Controls/SpinBox.h>
 #include <UiWidget/Widget.h>
 
 namespace rocks::ui {

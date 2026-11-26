@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/HashMap.h>
-#include <UiFramework/Platform.h>
+#include <UiFramework/Application/Platform.h>
 #include <UiWidget/Widget.h>
 
 namespace rocks::ui {

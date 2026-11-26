@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/UserWidget.h>
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 #include <World/SceneComponent.h>
 
 namespace rocks::ui {

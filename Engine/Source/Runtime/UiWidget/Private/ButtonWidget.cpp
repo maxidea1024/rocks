@@ -1,6 +1,6 @@
 #include <UiWidget/ButtonWidgetSlot.generated.h>
 #include <UiWidget/ButtonWidget.generated.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Controls/Button.h>
 
 namespace rocks::ui {
 

@@ -1,5 +1,5 @@
 #include <UiScreens/HardwareVisibilityWidget.h>
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

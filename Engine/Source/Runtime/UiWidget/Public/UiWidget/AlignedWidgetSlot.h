@@ -1,6 +1,6 @@
 #pragma once
 #include <UiWidget/WidgetSlot.h>
-#include <UiFramework/SlotPresenter.h>
+#include <UiFramework/Layout/SlotPresenter.h>
 
 namespace rocks::ui {
 

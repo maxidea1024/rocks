@@ -5,10 +5,10 @@
 #include "LayoutPage.h"
 #include "WidgetsPage.h"
 
-#include <UiFramework/Commands.h>
+#include <UiFramework/Application/Commands.h>
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
-#include <UiFramework/MenuBar.h>
+#include <UiFramework/Menus/MenuBar.h>
 
 // UI 갤러리 창이다(UE SStarshipGallery, Docs/Design/UiToolkit 16장). 탭 묶음 하나에 "Colors"·
 // "Text"·"Widgets"·"Layout"·"Behavior"·"Effects"를 두고 UE처럼 "Widgets"를 앞에 연다. 창이 열려

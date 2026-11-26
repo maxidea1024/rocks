@@ -1,8 +1,8 @@
 #include "EntryPatternPanel.h"
 #include "MakeWidgetElement.h"
 
-#include <UiFramework/StackPanel.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/StackPanel.h>
+#include <UiFramework/Layout/WrapStack.h>
 #include <UiWidget/DynamicEntryBoxBaseWidget.h>
 #include <UiWidget/WidgetSlot.generated.h>
 

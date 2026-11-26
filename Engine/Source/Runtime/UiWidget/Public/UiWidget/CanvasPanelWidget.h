@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/PanelWidget.h>
-#include <UiFramework/AnchorCanvas.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
 
 namespace rocks::ui {
 

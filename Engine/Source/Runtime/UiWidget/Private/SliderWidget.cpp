@@ -1,6 +1,6 @@
 #include <UiWidget/SliderWidget.generated.h>
 #include "BindLiveWidgetEvent.h"
-#include <UiFramework/Slider.h>
+#include <UiFramework/Controls/Slider.h>
 
 namespace rocks::ui {
 

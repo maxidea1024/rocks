@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/ContentWidget.h>
-#include <UiFramework/FitBox.h>
+#include <UiFramework/Layout/FitBox.h>
 
 namespace rocks::ui {
 

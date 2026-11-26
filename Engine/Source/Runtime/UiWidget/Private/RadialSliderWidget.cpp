@@ -1,4 +1,4 @@
-#include <UiFramework/RadialSlider.h>
+#include <UiFramework/Controls/RadialSlider.h>
 #include <UiWidget/RadialSliderWidget.generated.h>
 
 namespace rocks::ui {

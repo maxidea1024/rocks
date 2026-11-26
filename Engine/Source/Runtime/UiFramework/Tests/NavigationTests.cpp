@@ -1,8 +1,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/AnchorCanvas.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/InputAdapter.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Application/InputAdapter.h>
 
 namespace rocks::ui {
 

@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Controls/Button.h>
 #include <UiWidget/BorderWidget.generated.h>
 #include <UiWidget/ButtonWidget.generated.h>
 #include <UiWidget/ImageWidget.generated.h>

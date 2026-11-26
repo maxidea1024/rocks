@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/WrapStack.h>
 #include <UiWidget/AlignedWidgetSlot.h>
 
 namespace rocks::ui {

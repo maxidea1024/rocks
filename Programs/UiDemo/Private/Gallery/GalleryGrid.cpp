@@ -1,9 +1,9 @@
 #include "GalleryGrid.h"
 
-#include <UiFramework/CheckBox.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Controls/CheckBox.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui::gallery {
 

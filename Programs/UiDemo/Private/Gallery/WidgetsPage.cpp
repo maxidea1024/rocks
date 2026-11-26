@@ -1,20 +1,20 @@
 #include "WidgetsPage.h"
 
 #include <UiCore/KeyChord.h>
-#include <UiFramework/ActivityIndicator.h>
-#include <UiFramework/CheckBox.h>
-#include <UiFramework/ComboBox.h>
-#include <UiFramework/Image.h>
-#include <UiFramework/InputKeySelector.h>
-#include <UiFramework/ProgressBar.h>
-#include <UiFramework/RadialSlider.h>
-#include <UiFramework/ScrollBar.h>
-#include <UiFramework/Slider.h>
-#include <UiFramework/SpinBox.h>
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/Timeline.h>
-#include <UiFramework/ToolTip.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Controls/ActivityIndicator.h>
+#include <UiFramework/Controls/CheckBox.h>
+#include <UiFramework/Controls/ComboBox.h>
+#include <UiFramework/Controls/Image.h>
+#include <UiFramework/Controls/InputKeySelector.h>
+#include <UiFramework/Controls/ProgressBar.h>
+#include <UiFramework/Controls/RadialSlider.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
+#include <UiFramework/Controls/Slider.h>
+#include <UiFramework/Controls/SpinBox.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Controls/Timeline.h>
+#include <UiFramework/Popups/ToolTip.h>
+#include <UiFramework/Layout/VerticalStack.h>
 
 namespace rocks::ui::gallery {
 

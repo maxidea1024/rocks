@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Localization/Text.h>
-#include <UiFramework/TextLabel.h>
+#include <UiFramework/Text/TextLabel.h>
 
 namespace rocks::ui {
 

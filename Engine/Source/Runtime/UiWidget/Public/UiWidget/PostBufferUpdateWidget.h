@@ -2,7 +2,7 @@
 
 #include <UiWidget/Widget.h>
 #include <UiWidget/PostBufferEntry.h>
-#include <UiFramework/PostBufferUpdate.h>
+#include <UiFramework/Effects/PostBufferUpdate.h>
 
 namespace rocks::ui {
 

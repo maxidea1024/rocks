@@ -2,11 +2,11 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreStyles.h>
-#include <UiFramework/AnchorCanvas.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/InputAdapter.h>
-#include <UiFramework/ToolTip.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Application/InputAdapter.h>
+#include <UiFramework/Popups/ToolTip.h>
 
 namespace rocks::ui {
 

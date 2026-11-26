@@ -1,7 +1,7 @@
 #include <UiWidget/Widget.h>
 #include <UiWidget/PanelWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 
 namespace rocks::ui {
 

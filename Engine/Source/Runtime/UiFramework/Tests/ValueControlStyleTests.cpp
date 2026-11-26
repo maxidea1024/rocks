@@ -1,9 +1,9 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/ActivityIndicator.h>
-#include <UiFramework/ProgressBar.h>
-#include <UiFramework/ScrollBar.h>
-#include <UiFramework/Slider.h>
+#include <UiFramework/Controls/ActivityIndicator.h>
+#include <UiFramework/Controls/ProgressBar.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
+#include <UiFramework/Controls/Slider.h>
 
 // 값 컨트롤의 UE 스타일 시험이다(Docs/Design/UiToolkit 9.1절 UW4b — StarshipCoreStyle.cpp "Slider"
 // 589-609행, "ProgressBar" 561-569행, "Scrollbar" 186-195행). 상태별 brush·크기·원하는 크기를

@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/InputAdapter.h>
+#include <UiFramework/Application/InputAdapter.h>
 #include <UiWidget/EditableTextBoxWidget.generated.h>
 #include <UiWidget/EditableTextWidget.generated.h>
 #include <UiWidget/MultiLineEditableTextBoxWidget.generated.h>

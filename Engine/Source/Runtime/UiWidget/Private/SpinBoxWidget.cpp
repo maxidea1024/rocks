@@ -1,7 +1,7 @@
 #include <UiWidget/SpinBoxWidget.h>
 #include "ControlCaption.h"
 #include "BindLiveWidgetEvent.h"
-#include <UiFramework/SpinBox.h>
+#include <UiFramework/Controls/SpinBox.h>
 #include <UiWidget/SpinBoxWidget.generated.h>
 
 namespace rocks::ui {

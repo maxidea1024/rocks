@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Delegate.h>
-#include <UiFramework/CheckBox.h>
+#include <UiFramework/Controls/CheckBox.h>
 #include <UiWidget/ContentWidget.h>
 
 namespace rocks::ui {

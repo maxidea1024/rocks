@@ -1,8 +1,8 @@
 #include <UiWidget/HorizontalBoxWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
-#include <UiFramework/HorizontalStack.h>
+#include <UiFramework/Layout/HorizontalStack.h>
 #include <UiWidget/HorizontalBoxWidget.h>
-#include <UiFramework/StackPanel.h>
+#include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
 

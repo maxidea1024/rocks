@@ -2,7 +2,7 @@
 
 #include "UpdateLiveWidgetSlot.h"
 #include <UiWidget/WrapBoxWidget.generated.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/WrapStack.h>
 
 namespace rocks::ui {
 

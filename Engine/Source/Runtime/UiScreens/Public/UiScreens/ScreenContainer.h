@@ -2,8 +2,8 @@
 
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ClassRef.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Switcher.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Layout/Switcher.h>
 #include <UiScreens/Screen.h>
 #include <UiWidget/WidgetPool.h>
 

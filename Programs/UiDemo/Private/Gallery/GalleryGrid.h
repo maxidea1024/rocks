@@ -2,7 +2,7 @@
 
 #include "GalleryParts.h"
 
-#include <UiFramework/Grid.h>
+#include <UiFramework/Layout/Grid.h>
 
 // 위젯 탭의 행 격자다(UE SStarshipGallery::ConstructWidgetGallery의 NextSlot, 742–784행). 한 행은
 // [활성 체크 상자][이름 — 부품 이름과 그 아래 쓰는 법]이고, 체크 상자를 끄면 그 행의

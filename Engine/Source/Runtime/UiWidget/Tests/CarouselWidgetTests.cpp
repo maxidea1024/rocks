@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
+#include <UiFramework/Application/Application.h>
 #include <UiWidget/ButtonWidget.generated.h>
 #include <UiWidget/CarouselNavBarWidget.generated.h>
 #include <UiWidget/CarouselWidget.generated.h>

@@ -1,6 +1,6 @@
 #include <UiWidget/StackPanelWidget.h>
 #include <UiWidget/StackWidgetSlot.generated.h>
-#include <UiFramework/StackPanel.h>
+#include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
 

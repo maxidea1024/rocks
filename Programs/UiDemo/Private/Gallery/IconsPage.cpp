@@ -1,10 +1,10 @@
 #include "IconsPage.h"
 
-#include <UiFramework/HorizontalStack.h>
-#include <UiFramework/Image.h>
-#include <UiFramework/ScrollView.h>
-#include <UiFramework/VerticalStack.h>
-#include <UiFramework/WrapStack.h>
+#include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Controls/Image.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Layout/VerticalStack.h>
+#include <UiFramework/Layout/WrapStack.h>
 #include <UiRender/VectorImageAtlas.h>
 
 namespace rocks::ui::gallery {

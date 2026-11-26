@@ -1,7 +1,7 @@
 #include <UiWidget/ScrollBoxWidgetSlot.generated.h>
 #include <UiWidget/ScrollBoxWidget.h>
-#include <UiFramework/VerticalStack.h>
-#include <UiFramework/ScrollView.h>
+#include <UiFramework/Layout/VerticalStack.h>
+#include <UiFramework/Scrolling/ScrollView.h>
 
 namespace rocks::ui {
 

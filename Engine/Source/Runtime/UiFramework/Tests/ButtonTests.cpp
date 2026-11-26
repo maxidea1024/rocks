@@ -1,7 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
 
 using namespace rocks;
 using namespace rocks::ui;

@@ -1,6 +1,6 @@
 #include <UiWidget/NativeWidgetHost.h>
 #include "MakeWidgetElement.h"
-#include <UiFramework/SizeBox.h>
+#include <UiFramework/Layout/SizeBox.h>
 
 namespace rocks::ui {
 

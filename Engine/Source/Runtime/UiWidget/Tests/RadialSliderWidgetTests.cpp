@@ -1,6 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/RadialSlider.h>
+#include <UiFramework/Controls/RadialSlider.h>
 #include <UiWidget/RadialSliderWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 

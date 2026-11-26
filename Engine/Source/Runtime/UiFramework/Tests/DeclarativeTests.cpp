@@ -1,9 +1,9 @@
 #include <Core/Memory/SystemAllocator.h>
-#include <UiFramework/VerticalStack.h>
+#include <UiFramework/Layout/VerticalStack.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Application.h>
-#include <UiFramework/Button.h>
-#include <UiFramework/StackPanel.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
+#include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
 

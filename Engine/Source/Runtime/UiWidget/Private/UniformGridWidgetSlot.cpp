@@ -1,9 +1,9 @@
 #include <UiWidget/UniformGridWidgetSlot.h>
-#include <UiFramework/SlotPresenter.h>
+#include <UiFramework/Layout/SlotPresenter.h>
 
 #include "UpdateLiveWidgetSlot.h"
 #include <UiWidget/UniformGridPanelWidget.generated.h>
-#include <UiFramework/UniformGrid.h>
+#include <UiFramework/Layout/UniformGrid.h>
 
 namespace rocks::ui {
 
