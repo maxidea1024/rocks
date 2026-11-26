@@ -151,9 +151,12 @@ public:
     virtual void Poll(input::InputQueue& queue) noexcept = 0;
 
     // index번 패드의 모터 세기를 values로 둔다(0–1, 넘치면 자른다). 바뀐 값만 장치에 쓴다. Poll과
-    // 같은 게임 스레드에서 부른다. 오류: index가 MaxGamepads 이상이거나 값이 비유한 수면
-    // InvalidArgument, 연결되지 않은 패드는 NotFound, 장치 쓰기 실패는 IoError, 진동이 없는
-    // backend(기본 구현 — Android·Mac은 후속)는 Unsupported다.
+    // 같은 게임 스레드에서 부른다. 진동하는 동안은 같은 값이라도 프레임마다 부른다(Android는 1초
+    // one-shot을 이 호출에서 다시 걸고, 포커스를 잃은 뒤의 끄기도 이 호출이 한다 — InputActions
+    // 6.4절). 오류: index가 MaxGamepads 이상이거나 값이 비유한 수면 InvalidArgument, 연결되지 않은
+    // 패드는 NotFound, 장치 쓰기 실패는 IoError, 진동이 없는 backend(기본 구현 — Mac은 후속)는
+    // Unsupported다. Android는 입력 스레드가 비동기로 쓰므로 쓰기 실패를 돌려주지 않는다(창이
+    // 없거나 입력 스레드가 JavaVM에 붙지 못했으면 Unsupported).
     virtual Result<void> SetMotors(uint32 index, const input::MotorValues& values) noexcept {
         (void)index;
         (void)values;
