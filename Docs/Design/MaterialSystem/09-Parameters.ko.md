@@ -55,8 +55,8 @@
   - 실행은 float32이고 Double 값만 double이다(LWC 파라미터 — UE도 double 두 칸이다). 실행 결과는 쿠킹 바이트가 아니므로 결정성 규칙(AssetSystem 10절) 대상이 아니다. 다만 같은 실행 파일에서는 같은 입력에 같은 결과를 낸다(멀티스레드 평가도 순서 무관).
 - **상수 블록 layout**(`MaterialConstants`): 머티리얼 컴파일러가 7.4절 5항 규칙으로 정한다.
   - 순서: float 계열 slot(상수 식 출력을 크기 큰 것부터, 같은 크기는 값 번호 순으로 채움, Double은 tile·offset 두 칸) → int·uint slot → bool 비트 slot. MS2c2는 float 계열만 낸다(프로그램 값이 Float·Double뿐이다). int·uint·bool slot은 Dynamic Bool 파라미터(MAT2)가 생길 때 더한다.
-  - 텍스처는 상수 블록 밖의 자원 slot `MaterialTexture<k>`(k는 첫 사용 값 번호 순)이다. Texture Size를 쓰는 slot은 논리 크기 상수를 float slot에 더한다.
-  - layout 표 = 멤버 목록 + 텍스처 목록(종류·샘플 종류·샘플러 출처) + 상수 식 출력 → 멤버 대응.
+  - 텍스처는 상수 블록 밖의 자원 slot `MaterialTexture<k>`(k는 모듈 텍스처 표의 (출처, id) 순 — 6.10절 MS2c3)이다. Texture Size는 slot의 논리 크기를 읽는 프로그램 명령이고 결과가 float 멤버가 된다(6.10절 MS2c3b).
+  - layout 표 = 상수 블록 멤버 목록(`MaterialConstants` — 출력 값·칸·성분) + 모듈 텍스처 표(`IrModule::Textures()` — 출처·id·종류·기본 asset). 자기 샘플러를 쓰는 slot은 표에 칸을 두지 않고 생성 원문이 샘플 값에서 유도한다.
   - UE는 preshader 버퍼를 `float4` 배열 하나로 두고 이름 없이 오프셋으로 접근한다(`MaterialUniformExpressions.cpp:642`). Rocks는 GLES 에뮬레이션의 타입 분리 규칙 때문에 float·int·uint를 나눈다.
 - **평가 위치.** 렌더 lane이 `MaterialRenderState`마다 (파라미터 version, 컬렉션 version)이 바뀐 때만 상수 식을 실행하고 상수 블록을 채운다(UE와 같은 위치, 9.1절). 게임 lane은 바뀐 파라미터 값만 프레임 packet으로 보낸다(RenderBase 1절 "불변 값 묶음"). 평가가 많으면 CP2 병렬 실행을 쓴다(구현 때 측정).
 - **상수 블록 수명.** 머티리얼 렌더 상태의 상수 블록은 `Persistent`(RenderBase 9.4절)다. 값이 바뀌면 새 블록을 할당하고 이전 블록은 `Retire`한다(진행 중 프레임이 읽고 있을 수 있다). GLES는 CPU 사본이고 업로드 판단은 RenderBase 9.4절대로다.
