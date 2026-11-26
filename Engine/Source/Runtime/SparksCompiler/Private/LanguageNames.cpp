@@ -118,6 +118,72 @@ bool IsReservedName(StringView name) noexcept {
     return false;
 }
 
+namespace {
+
+// 언어 소유 이름 밖의 예약 이름 목록을 차례로 훑는다(앞에서 나온 철자는 건너뛴다). visit가 거짓을
+// 돌려주면 멈춘다.
+template <class Visit>
+void VisitReservedNames(Visit&& visit) noexcept {
+    StringView seen[sizeof(EngineReservedNames) / sizeof(EngineReservedNames[0]) +
+                    sizeof(ContextNames) / sizeof(ContextNames[0]) +
+                    sizeof(RpcPrefixes) / sizeof(RpcPrefixes[0]) + 1];
+    usize count = 0;
+    auto offer = [&](StringView name) noexcept {
+        for (usize at = 0; at < count; ++at) {
+            if (seen[at] == name) {
+                return true;
+            }
+        }
+
+        seen[count++] = name;
+        return visit(name);
+    };
+    for (const StringView name : EngineReservedNames) {
+        if (!offer(name)) {
+            return;
+        }
+    }
+
+    for (const StringView name : ContextNames) {
+        if (!offer(name)) {
+            return;
+        }
+    }
+
+    for (const StringView name : RpcPrefixes) {
+        if (!offer(name)) {
+            return;
+        }
+    }
+
+    offer(ChangedEventName);
+}
+
+} // namespace
+
+uint32 ReservedNameCount() noexcept {
+    uint32 count = 0;
+    VisitReservedNames([&](StringView) noexcept {
+        ++count;
+        return true;
+    });
+    return count;
+}
+
+StringView ReservedNameAt(uint32 index) noexcept {
+    StringView found;
+    uint32 at = 0;
+    VisitReservedNames([&](StringView name) noexcept {
+        if (at++ == index) {
+            found = name;
+            return false;
+        }
+
+        return true;
+    });
+    return found;
+}
+
 StringView HookForMemberName(StringView name) noexcept {
     for (const LanguageHook& entry : LanguageHooks()) {
         const StringView hook = entry.name;

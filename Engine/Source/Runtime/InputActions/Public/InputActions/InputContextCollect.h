@@ -13,7 +13,8 @@ class ObjectRegistry;
 // 컨텍스트 객체 → 평가기 사본 모으기와 데이터 검증이다(Docs/Design/InputActions 2.7절).
 namespace rocks::input {
 
-// context(InputContext 객체)와 그 actions를 Borrow해 bundle을 만든다. registry·access는 그 객체를
+// context(InputContext 객체)와 그 actions를 Borrow해 bundle을 만든다. 컨텍스트·액션 id는 실효
+// id(EffectiveId — 에셋이 id를 0으로 두면 AssetId, 2.8절)다. registry·access는 그 객체를
 // 읽을 수 있는 문맥이다(에셋이면 AssetManager::With 범위). 같은 액션 객체가 actions에 여러 번
 // 있으면 한 번만 복사한다. 검증은 하지 않는다(평가기 AddContext·UpdateContext가 한다).
 //

@@ -54,7 +54,7 @@
 
 ### 2.3 InputAction
 
-리플렉션 클래스(Object)다. 필드는 `id`와 설정 struct `settings`(`InputActionSettings` — 평가기가 그대로 복사한다, 2.7절)다. 아래 표에서 `id` 밖의 필드는 모두 `settings` 안이다. 필드와 기본값은 UE `EI/Public/InputAction.h`와 같다.
+리플렉션 클래스(`Asset` 파생 — 2.8절)다. 필드는 `id`와 설정 struct `settings`(`InputActionSettings` — 평가기가 그대로 복사한다, 2.7절)다. 아래 표에서 `id` 밖의 필드는 모두 `settings` 안이다. 필드와 기본값은 UE `EI/Public/InputAction.h`와 같다.
 
 | 필드 | 기본 | UE |
 |---|---|---|
@@ -119,13 +119,33 @@ Rocks 객체 규칙 때문에 UE처럼 평가기가 액션·컨텍스트 객체 
 그래서 다음과 같이 나눈다.
 - **바인딩은 액션을 `id`(Guid)로 가리킨다.** chord 트리거의 대상도 액션 id다(`InputTrigger::chordActionId`). 컨텍스트 객체는 가리키는 액션을 `actions`(ObjectRefArray)로 붙잡는다(GC 간선 — 액션이 컨텍스트보다 먼저 회수되지 않는다). NodeGraph 문서가 노드를 Guid로 잇는 것과 비슷하다. 다만 NodeGraph는 한 문서 안의 닫힌 참조이고, 이쪽은 객체 사이 참조라 무결성은 검증이 맡는다.
 - **평가기는 데이터 사본만 갖는다.** `InputContextBundle`(리플렉션 타입이 아닌 C++ 값 — 이동만)은 컨텍스트 id, `InputContextData` 사본, `actions` 전체의 `InputActionData{ id, settings }` 사본 목록이다. 평가기는 객체도 Registry도 모른다(시험이 객체 없이 결정적이다).
-- **모으기**: `CollectInputContext(registry, access, ObjectHandle context, bundle)`가 컨텍스트와 `actions`를 Borrow해 사본을 만든다. `registry`·`access`는 호출자가 그 객체를 읽을 수 있는 문맥이다(에셋이면 `AssetManager::With` 범위 — 5.1절). 같은 액션 객체가 `actions`에 여러 번 있으면 한 번만 복사한다(ObjectRefArray는 중복을 담을 수 있다). 실패: 객체 접근 실패(파괴된 액션 포함)는 그 오류, null `actions` 원소는 `InvalidArgument`, 할당 실패는 `OutOfMemory`(bundle은 그대로)다.
+- **모으기**: `CollectInputContext(registry, access, ObjectHandle context, bundle)`가 컨텍스트와 `actions`를 Borrow해 사본을 만든다. `registry`·`access`는 호출자가 그 객체를 읽을 수 있는 문맥이다(에셋이면 `AssetManager::With` 범위 — 2.8절 lease 도우미). 같은 액션 객체가 `actions`에 여러 번 있으면 한 번만 복사한다(ObjectRefArray는 중복을 담을 수 있다). 실패: 객체 접근 실패(파괴된 액션 포함)는 그 오류, null `actions` 원소는 `InvalidArgument`, 할당 실패는 `OutOfMemory`(bundle은 그대로)다.
 - **검증**: `ValidateInputContextBundle`(평가기 `AddContext`·`UpdateContext`도 부른다)이 다음을 거부한다(`InvalidArgument`, 진단은 `InputDataDiagnostic` — 거부 까닭 `InputDataIssue`와 액션·프로필·바인딩·트리거/모디파이어 위치).
   - 0 id(컨텍스트·액션), 같은 id 액션 둘(다른 객체가 같은 id), 바인딩 액션이 목록에 없음, 범위 밖 enum, 비유한 매개변수
   - UE `IsDataValid`와 같은 것: DeadZone lower ≥ upper, ChordAction·ChordBlocker의 대상 id 0, `PlayerMappingSettings.name`이 빔(액션·바인딩에 값이 있을 때), Boolean 액션의 액션 수준 Scalar 모디파이어(UE `InputModifiers.cpp:82-95`)
   - 프로필 override 이름이 비거나 겹침(UE는 프로필 이름이 키인 Map이라 생길 수 없다)
   - 허용하는 것: chord 대상이 목록에 없음(다른 컨텍스트의 액션일 수 있다 — 평가 때 표에 없으면 None, 3.2절). 키 이름은 검증하지 않는다. 빈 키(UE `EKeys::Invalid` — 아직 고르지 않은 줄)는 다시 만들 때 그 바인딩을 조용히 건너뛰고, 모르는 이름(`Gamepad_LeftTrigger`처럼 Rocks 키 집합에 없는 UE 키 — 7.4절)은 Warning 진단과 함께 건너뛴다(4.2절 — UE도 빈 키 매핑을 받고 `bCheckForEmptyKeyMappingsDuringValidation` 기본 거짓). ChordBlocker를 데이터에 직접 넣는 것도 UE처럼 막지 않는다(UE는 편집기에서 숨길 뿐이다).
-- **데이터를 바꾸면** 다시 모아 `UpdateContext(bundle, forceImmediately)`로 사본만 바꾼다(UE `RequestRebuildControlMappingsUsingContext` — 4.1절). 우선순위·등록 횟수는 그대로다. `AddContext`는 이미 있는 id면 UE처럼 데이터를 건드리지 않는다. 실행 중 편집(키 추가·제거)을 그 컨텍스트를 쓰는 모든 플레이어에 퍼뜨리는 것은 Gameplay 도우미다(5.1절 — UE `MapKey`·`UnmapKey`는 그 컨텍스트를 가진 모든 플레이어를 다시 만든다).
-- **같은 id 액션을 여러 컨텍스트가 넣으면** 평가기는 액션 표에 하나만 둔다. 다시 만들 때마다 남은 bundle들에서 정렬 순(4.2절 1 — 높은 우선순위, 같으면 먼저 추가한 것)으로 처음 나온 사본을 쓴다(넣은 순서·제거에 따라 결과가 흔들리지 않는다). 같은 id인데 설정이 다르면 Warning 진단 `InputActionSettingsConflict`를 낸다(다른 객체가 같은 id를 가진 경우 — 에셋 복제는 id를 새로 만든다, IA6).
+- **데이터를 바꾸면** 다시 모아 `UpdateContext(bundle, forceImmediately)`로 사본만 바꾼다(UE `RequestRebuildControlMappingsUsingContext` — 4.1절). 우선순위·등록 횟수는 그대로다. `AddContext`는 이미 있는 id면 UE처럼 데이터를 건드리지 않는다. 실행 중 편집(키 추가·제거)을 그 컨텍스트를 쓰는 모든 플레이어에 퍼뜨리는 것은 Gameplay 도우미 `GameplayWorldSubsystem::RefreshInputContext`다(5.4절 — UE `MapKey`·`UnmapKey`는 그 컨텍스트를 가진 모든 플레이어를 다시 만든다).
+- **같은 id 액션을 여러 컨텍스트가 넣으면** 평가기는 액션 표에 하나만 둔다. 다시 만들 때마다 남은 bundle들에서 정렬 순(4.2절 1 — 높은 우선순위, 같으면 먼저 추가한 것)으로 처음 나온 사본을 쓴다(넣은 순서·제거에 따라 결과가 흔들리지 않는다). 같은 id인데 설정이 다르면 Warning 진단 `InputActionSettingsConflict`를 낸다(다른 객체가 같은 id를 가진 경우 — 에셋은 `id`를 0으로 두면 AssetId를 쓰므로 새로 만들거나 복제해도 겹치지 않는다, 2.8절).
 - `ActionState`·"사라진 액션"(4.2절 7)은 액션 표에 있는지가 아니라 바인딩·주입이 있는지로 판정한다. 액션 수준 chord(`settings.triggers`의 ChordAction)는 대상 액션의 GC 간선이 없다(id만 — 대상이 어느 컨텍스트에도 없으면 None, 3.2절).
 - 바인딩 없는 액션 주입은 `InjectValue`가 `InputActionData`를 함께 받는다(4.3절 3 — UE `InjectInputForAction`은 어느 컨텍스트에도 없는 액션도 받는다).
+
+### 2.8 에셋 타입(IA6a — IAD13)
+
+- `InputAction`·`InputContext`는 `Asset`(AssetRuntime `Package.h` — 패키지 대표 에셋의 기반) 파생이다. UE도 둘 다 `UDataAsset` 파생이다(`EI/Public/InputAction.h:55`, `EI/Public/InputMappingContext.h:87`). 필드·기본값은 그대로이고 `Asset`의 `assetId_`(Transient·ReadOnly — 로드가 대표 에셋에 채운다)가 하나 는다.
+- 코드로 만든 객체(패키지 없는 Registry — World·시험)도 그대로 쓴다. `assetId_`는 null이고 쓰임은 IA3까지와 같다.
+- **실효 id(`EffectiveId()`):** `id`(Guid)가 0이 아니면 그것이고, 0이면 대표 에셋의 AssetId 값이다. 액션·컨텍스트·진동 효과 모두 같다. 모으기(2.7절 `CollectInputContext`)·`CopyHapticEffect`가 사본에 실효 id를 쓴다. 그래서:
+  - 새로 만든 에셋(`asset-new`)과 복제한 에셋은 `id`를 0으로 두면 서로 겹치지 않는다(AssetId는 패키지마다 새로 발급된다). UE는 에셋 경로가 정체라 이 문제가 없다(7.3절 "액션 식별").
+  - 바인딩의 `action`·chord 대상·리바인딩 저장 키는 액션의 실효 id를 적는다(편집기 IA6c가 액션 에셋을 고를 때 채운다).
+  - `id`를 직접 적은 에셋을 복제하면 id가 같은 채로 남는다. 복제가 Guid 필드를 다시 만드는 장치는 AssetDatabase에 없다. 편집기(IA6c)가 복제할 때 `id`를 0으로 되돌린다. 그 전에는 같은 id의 두 컨텍스트를 한 플레이어에 넣으면 5.4절 규칙으로 거부되고, 액션은 `InputActionSettingsConflict` 경고로 드러난다.
+  - 패키지 없는 객체는 AssetId가 null이라 `id` 0이면 실효 id도 0이다. 검증이 거부한다(지금과 같다).
+- 패키지: 대표 에셋 하나다(AssetSystem 4.1절). InputContext의 `actions`가 다른 패키지의 InputAction을 가리키면 Hard 참조라 함께 로드·쿠킹된다(AssetSystem 6.2절). 액션을 컨텍스트 패키지 안 하위 객체(대표 에셋 아래 — 패키지 바로 아래에는 대표 에셋만 둔다)로 둘 수도 있다. 대표가 아니므로 `assetId_`는 null이고, 실효 id를 쓰려면 `id`를 직접 적는다.
+- 쿠킹은 기본 처리기다(리플렉션 필드 그대로 — AssetSystem 10절). 입력 에셋 전용 변환은 없다.
+- `HapticEffectAsset : Asset`(UE `UForceFeedbackEffect` — 에셋으로 쓰는 `UObject`, `RT/Engine/Classes/GameFramework/ForceFeedbackEffect.h:118`): 필드는 `effect: HapticEffect` 하나다(6.1절 값 struct를 그대로 감싼다). 재생은 효과의 깊은 사본을 쓰므로(6.2절) 값 struct를 그대로 둔다.
+- lease 읽기 도우미(`InputActions/InputAssetAccess.h`, AssetManager 소유 스레드(Game) — `AssetManager::With`가 에셋 문맥 접근 범위를 연다. World 접근 범위 안에서 불러도 된다(중첩):
+  - `CollectInputContext(AssetManager&, const AssetLease&, InputContextBundle&)`: `AssetManager::With(lease)` 안에서 에셋 객체 Registry(`AssetManager::Registry()`)의 소유 접근 문맥으로 2.7절 `CollectInputContext`를 부른다. 오류: 회수·무효 lease는 `StaleHandle`, 다른 스레드는 `WrongThread`, 초기화 전 AssetManager는 `InvalidArgument`(With 오류 그대로), 대표 에셋이 InputContext가 아니면 `TypeMismatch`, 그 밖은 2.7절 모으기와 같다. 실패하면 bundle은 그대로다.
+  - `CopyHapticEffect(AssetManager&, const AssetLease&, HapticEffect& out)`: 같은 방식으로 `effect`의 깊은 사본을 out에 쓴다. 오류는 위와 같다(대표가 HapticEffectAsset이 아니면 `TypeMismatch`). 사본을 다 만든 뒤에 out을 바꾸므로 실패하면 out은 그대로다.
+  - `HapticPlayer::PlayHapticEffect(AssetManager&, const AssetLease&, const HapticParams&)`: `CopyHapticEffect`로 만든 사본(실효 id)을 재생한다(재생이 그 사본을 다시 복사한다 — 실효 id를 적은 사본이 필요해 한 번으로 줄이지 않는다. 재생은 드물다)(UE `ClientPlayForceFeedback(UForceFeedbackEffect*, …)`). lease는 쥐지 않는다 — 재생이 사본을 쥔다(6.2절).
+- 버린 대안:
+  - 감싸는 에셋 클래스(`InputContextAsset`이 `InputContext` 하위 객체를 쥠). 객체가 두 겹이 되고 UE와 다르며 얻는 것이 없다. `InputContext`는 이미 리플렉션 Object다.
+  - `HapticEffect`를 클래스로 바꾸기. 재생은 값 사본을 쓰고, 코드로 만든 효과도 값으로 다룬다(6.2절).

@@ -44,7 +44,7 @@ public sealed class SandboxProgram : ModuleRules
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private"), context.PathInRoot("Programs/Sandbox/EngineShaderTests/Shared")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
+            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "SplashScreen", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
                 "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),

@@ -10,16 +10,44 @@
   },
   "data": {
     "source": {
-      "width": 2,
-      "height": 2,
       "format": "BGRA8",
-      "pixels": {
-        "blob": "0334fbb141542de36bbfbced8364565fcdbdb4cbf754b7ac48badeebd9eebba8",
-        "bytes": 16,
-        "layout": "u8",
-        "components": 4,
-        "count": 4
-      }
+      "compression": "None",
+      "lossyOrigin": null,
+      "longLat": false,
+      "numLayers": 1,
+      "numBlocks": 1,
+      "layers": [
+        {
+          "format": "BGRA8",
+          "gammaSpace": "sRGB"
+        }
+      ],
+      "blocks": [
+        {
+          "blockX": 0,
+          "blockY": 0,
+          "sizeX": 2,
+          "sizeY": 2,
+          "numSlices": 1,
+          "numMips": 1,
+          "mips": [
+            {
+              "sizeX": 2,
+              "sizeY": 2,
+              "numSlices": 1,
+              "pixels": [
+                {
+                  "blob": "0334fbb141542de36bbfbced8364565fcdbdb4cbf754b7ac48badeebd9eebba8",
+                  "bytes": 16,
+                  "layout": "u8",
+                  "components": 4,
+                  "count": 4
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   }
 }

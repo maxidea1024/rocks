@@ -229,13 +229,33 @@ void AssetManager::Impl::UnlinkEdge(ObjectHandle owner, ObjectHandle target) noe
             }
         }
 
+        // 빈 칸은 바로 해제하지 않는다. 같은 묶음의 뒤 간선(예: Discard한 패키지의 옛 간선 −1과
+        // 다시 로드한 패키지의 새 간선 +1이 같은 대상을 가리킬 때)이 준비 단계에서 "있다"고 본 칸에
+        // 이으므로, 해제는 ReleaseEmptiedEdgeNodes가 묶음 끝에 한다.
         if (edgeNodes[*index].in.IsEmpty() && edgeNodes[*index].out.IsEmpty()) {
-            (void)freeEdgeNodes.TryPushBack(*index);
-            (void)edgeNodeOf.Erase(node);
+            (void)emptiedEdgeNodes.TryPushBack(node);
         }
     };
     removeFrom(owner, target, true);
     removeFrom(target, owner, false);
+}
+
+void AssetManager::Impl::ReleaseEmptiedEdgeNodes() noexcept {
+    // 용량은 ApplyEdgeChanges가 미리 잡았다(빈 칸 후보는 간선 변화마다 둘 이하, 해제 목록도 같다).
+    for (ObjectHandle node : emptiedEdgeNodes) {
+        const uint32* index = edgeNodeOf.Find(node);
+        // 뒤 간선이 다시 채운 칸은 건너뛴다. 칸 없음은 방어다(쌍별 합산 뒤라 한 묶음에서 같은 칸이
+        // 두 번 빌 수 없다 — 14.1.7).
+        if (index == nullptr || !edgeNodes[*index].in.IsEmpty() ||
+            !edgeNodes[*index].out.IsEmpty()) {
+            continue;
+        }
+
+        (void)freeEdgeNodes.TryPushBack(*index);
+        (void)edgeNodeOf.Erase(node);
+    }
+
+    emptiedEdgeNodes.Clear();
 }
 
 namespace {
@@ -318,6 +338,7 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
     keep(edgeNodeOf.Reserve(edgeNodeOf.Count() + newNodes));
     keep(edgeNodes.TryReserve(edgeNodes.Size() + (newNodes - reusable)));
     keep(freeEdgeNodes.TryReserve(freeEdgeNodes.Size() + 2 * changes.Size()));
+    keep(emptiedEdgeNodes.TryReserve(2 * changes.Size()));
     keep(cycleOwners.TryReserve(changes.Size()));
     keep(cycleTargets.TryReserve(changes.Size()));
     keep(workStack.TryReserve(units.Size()));
@@ -412,6 +433,7 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
     }
 
     changes.Clear();
+    ReleaseEmptiedEdgeNodes();
     for (usize index = 0; index < cycleOwners.Size(); ++index) {
         // 앞의 병합이 단위를 지웠을 수 있다(CheckCycle이 지운 단위를 거른다 — 남은 두 단위는 여전히
         // 다른 단위다).

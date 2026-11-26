@@ -14,8 +14,10 @@ public sealed class AudioTools : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // AssetRuntime·AssetDatabase·AudioAssets: the SoundClipImporter on the A2f import framework writes SoundClip fields and source bulk
-    // (Docs/Design/AudioSystem section 3.36.3).
-    protected override string[] PublicDependencies => ["Core", "Audio", "AssetRuntime", "AssetDatabase", "AudioAssets"];
+    // (Docs/Design/AudioSystem section 3.36.3). AssetCooker·AssetNugget: the SoundClipCookProcessor writes cooked packages and caches the
+    // platform data in the audio nugget bucket (section 3.37.3).
+    protected override string[] PublicDependencies => ["Core", "Audio", "AssetRuntime", "AssetDatabase", "AssetCooker", "AssetNugget",
+        "AudioAssets"];
 
     // Source decoders from Engine/Source/ThirdParty (sections 3.26-3.29): minimp3 for MP3, libFLAC for FLAC, libvorbis for Ogg Vorbis,
     // opusfile and libopus for Ogg Opus (libopus also encodes Opus platform data, section 3.32), libogg for both Ogg formats, and

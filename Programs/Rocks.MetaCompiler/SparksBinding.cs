@@ -7,7 +7,8 @@ namespace Rocks.MetaCompiler;
 
 // Sparks 언어 이름 표다(Docs/Design/SparksBinding.ko.md B6). 정본은 Sparks 컴파일러의 목록이고(LanguageNames.cpp·LanguageCatalog.cpp),
 // 이 파일(SparksNames.json — embedded resource)이 그것과 같은지는 C++ 시험 SparksBinding_NamesMatchCompiler가 대조한다.
-internal sealed record SparksNames(IReadOnlySet<string> LanguageOwned, IReadOnlyList<string> Hooks, IReadOnlySet<string> UnityHookAliases)
+internal sealed record SparksNames(IReadOnlySet<string> LanguageOwned, IReadOnlyList<string> Hooks, IReadOnlySet<string> UnityHookAliases,
+    IReadOnlySet<string> Keywords, IReadOnlySet<string> ReservedNames)
 {
     private const int NamesSchema = 1;
 
@@ -29,8 +30,13 @@ internal sealed record SparksNames(IReadOnlySet<string> LanguageOwned, IReadOnly
         static string[] Strings(JsonElement root, string key) =>
             root.GetProperty(key).EnumerateArray().Select(item => item.GetString() ?? "").ToArray();
         return new(Strings(root, "languageOwnedNames").ToHashSet(StringComparer.Ordinal), Strings(root, "hooks"),
-            Strings(root, "unityHookAliases").ToHashSet(StringComparer.Ordinal));
+            Strings(root, "unityHookAliases").ToHashSet(StringComparer.Ordinal), Strings(root, "keywords").ToHashSet(StringComparer.Ordinal),
+            Strings(root, "reservedNames").ToHashSet(StringComparer.Ordinal));
     }
+
+    // 노출 멤버(필드·함수) 이름으로 쓸 수 없는 예약 이름인지다(컴파일러 IsReservedName과 같은 집합 — 언어 소유 이름, 핵심 엔진 타입, 문맥
+    // 이름, RPC 접두, `Changed`. 파생 Sparks class 본문의 이름 해석에서 멤버가 prelude·문맥 이름을 가리게 된다 — SparksBinding B13).
+    public bool IsReserved(string name) => LanguageOwned.Contains(name) || ReservedNames.Contains(name);
 
     // 수명 클래스 멤버로 쓸 수 없는 hook 계열 이름이면 그 hook 이름을, 아니면 null을 돌려준다(컴파일러 HookForMemberName과 같은 집합 —
     // hook, On + hook, Unity hook 별칭).
@@ -51,7 +57,7 @@ internal sealed record SparksNames(IReadOnlySet<string> LanguageOwned, IReadOnly
 // C++ 리플렉션에서 Sparks binding schema(`<모듈>.sparkbind.json` — SL 10.2절 형식 1)를 만든다(Docs/Design/SparksBinding.ko.md EI1a).
 // Resolve는 이 모듈 타입의 실효 노출(상속·끊기)을 정하고 노출 규칙(RMC26xx)을 검사한다 — descriptor를 쓰기 전에 부른다(descriptor가
 // 실효 노출 flag를 싣는다). Write는 검사를 마친 모델을 schema byte로 쓴다.
-internal static class SparksBinding
+internal static partial class SparksBinding
 {
     private const int FormatVersion = 1;
 
@@ -119,9 +125,14 @@ internal static class SparksBinding
                 CheckField(schema, type, field, names);
             }
 
+            foreach (FunctionModel function in type.Functions.Where(function => function.Spec.ScriptCallable))
+            {
+                CheckFunction(schema, type, function, names);
+            }
+
             if (type.ScriptType)
             {
-                CheckFieldNames(schema, type);
+                CheckMemberNames(schema, type);
             }
         }
     }
@@ -264,6 +275,12 @@ internal static class SparksBinding
         string name = FieldName(field) ?? throw new MetadataException(
             $"{symbol}: Sparks field name from '{field.EffectiveToolName}' must be letters and digits; name it with ScriptName", "RMC2604",
             "Add ScriptName = \"PascalName\" (SL 10.3: underscores other than a trailing one need an explicit Sparks name).").At(field.Site);
+        if (names.IsReserved(name))
+        {
+            throw new MetadataException($"{symbol}: Sparks field name '{name}' is a reserved Sparks name", "RMC2606",
+                "Rename the field for Sparks with ScriptName = \"...\" (prelude, built-in, core engine type and context names cannot be member names).").At(field.Site);
+        }
+
         if (Kind(schema, owner) == "object" && names.HookFor(name) is string hook)
         {
             throw new MetadataException($"{symbol}: Sparks field name '{name}' collides with the lifecycle hook '{hook}'", "RMC2606",
@@ -273,10 +290,12 @@ internal static class SparksBinding
         _ = Notation(schema, field, symbol, topLevel: true);
     }
 
-    // 노출 타입의 보이는 사슬(자기와 노출된 기반 — 끊긴 곳에서 멈춘다)의 노출 필드 이름은 겹치지 않는다(B5).
-    private static void CheckFieldNames(SchemaModel schema, ClassModel type)
+    // 노출 타입의 보이는 사슬(자기와 노출된 기반 — 끊긴 곳에서 멈춘다)의 노출 필드·함수 이름은 한 이름 공간에서 겹치지 않는다(B5·B13 —
+    // SL 3.1절).
+    private static void CheckMemberNames(SchemaModel schema, ClassModel type)
     {
-        HashSet<string> chain = new(StringComparer.Ordinal) { type.Name };
+        // 자기부터 기반 쪽으로의 순서를 지킨다(함수 겹침은 기반부터 본다).
+        List<string> chain = [type.Name];
         for (ClassModel current = type; current.Base.Length != 0 && current.Base != ObjectRoot;)
         {
             ClassModel parent = schema.Find(current.Base);
@@ -305,7 +324,44 @@ internal static class SparksBinding
                     "Give one of the fields a different Sparks name with ScriptName = \"...\".").At(field.Owner == type.Name ? field.Site : type.Site);
             }
         }
+
+        // 함수는 선언한 타입에만 있으므로 사슬의 타입마다 자기 함수를 본다(기반부터 — 겹침은 파생 쪽 함수 위치로 알린다).
+        Dictionary<string, FunctionModel> functions = new(StringComparer.Ordinal);
+        foreach (ClassModel owner in Enumerable.Reverse(chain).Select(schema.Find))
+        {
+            foreach (FunctionModel function in owner.Functions.Where(function => function.Spec.ScriptCallable))
+            {
+                string? name = FunctionName(function);
+                if (name is null)
+                {
+                    continue;
+                }
+
+                string? clash = seen.TryGetValue(name, out FieldModel? field) ? $"the field {field.Owner}::{field.Name}"
+                    : functions.TryGetValue(name, out FunctionModel? other) ? $"the function {other.Owner}::{other.Name}" : null;
+                if (clash is not null)
+                {
+                    throw new MetadataException($"{type.Name}: Sparks member name '{name}' of {function.Owner}::{function.Name} is also used by {clash}", "RMC2605",
+                        "Fields and functions share one Sparks name space; rename one with ScriptName = \"...\".").At(function.Owner == type.Name ? function.Site : type.Site);
+                }
+
+                functions.Add(name, function);
+            }
+        }
+
+        // 쓰기 가능한 속성 X가 있으면 같은 값을 쓰는 SetX는 노출하지 않는다(SL 10.3절).
+        foreach ((string name, FunctionModel function) in functions)
+        {
+            if (name.Length > SetterPrefix.Length && name.StartsWith(SetterPrefix, StringComparison.Ordinal) &&
+                seen.TryGetValue(name[SetterPrefix.Length..], out FieldModel? property) && property.Spec.ScriptWritable)
+            {
+                throw new MetadataException($"{type.Name}: {function.Owner}::{function.Name} ({name}) writes the Sparks-writable field {property.Owner}::{property.Name}", "RMC2605",
+                    "Remove ScriptCallable from the setter; scripts assign the writable field directly (SL 10.3).").At(function.Owner == type.Name ? function.Site : type.Site);
+            }
+        }
     }
+
+    private const string SetterPrefix = "Set";
 
     // 타입의 Sparks 이름이다(실효 타입 도구 이름 — B5).
     private static string TypeName(ClassModel type) => type.EffectiveToolName;
@@ -334,11 +390,15 @@ internal static class SparksBinding
         return Specifiers.IsScriptName(name) ? name : null;
     }
 
-    // 필드 타입의 Sparks 표기다(B4 표). 최상위에서만 `?`가 붙는다 — 타입 인자 안의 참조는 `T`·`Soft<T>`다.
-    private static string Notation(SchemaModel schema, FieldModel field, string symbol, bool topLevel)
+    // 필드 노출을 거두는 안내다(함수는 FunctionRemedy).
+    private const string FieldRemedy = "remove ScriptReadOnly/ScriptWritable from the field";
+
+    // 필드(와 함수 매개변수·반환 칸 — B14)의 Sparks 표기다(B4 표). 최상위에서만 `?`가 붙는다 — 타입 인자 안의 참조는 `T`·`Soft<T>`다.
+    // remedy는 진단 안내의 "노출을 거둔다" 문구다.
+    private static string Notation(SchemaModel schema, FieldModel field, string symbol, bool topLevel, string remedy = FieldRemedy)
     {
         string Unsupported(string what) => throw new MetadataException($"{symbol}: {what} cannot be shown to Sparks", "RMC2601",
-            "Sparks has no matching type (SparksBinding B4); remove ScriptReadOnly/ScriptWritable from the field.").At(field.Site);
+            $"Sparks has no matching type (SparksBinding B4); {remedy}.").At(field.Site);
 
         string Element(string kind, string? reference, bool top)
         {
@@ -390,8 +450,8 @@ internal static class SparksBinding
 
             if (!target.ScriptType)
             {
-                throw new MetadataException($"{symbol}: the field type {target.Name} is not a Sparks type", "RMC2602",
-                    $"Add ScriptType to {target.Name}, or remove ScriptReadOnly/ScriptWritable from the field.").At(field.Site);
+                throw new MetadataException($"{symbol}: the type {target.Name} is not a Sparks type", "RMC2602",
+                    $"Add ScriptType to {target.Name}, or {remedy}.").At(field.Site);
             }
 
             if (requireAsset && Kind(schema, target) != "asset")
@@ -527,6 +587,8 @@ internal static class SparksBinding
 
                 json.WriteEndArray();
             }
+
+            WriteFunctions(json, schema, type);
         }
 
         json.WriteEndObject();

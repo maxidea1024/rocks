@@ -48,6 +48,12 @@ inline constexpr uint32 AdpcmBitstreamVersion = 1;
 // Opus 플랫폼 데이터는 언제나 이 rate다.
 inline constexpr uint32 OpusPlatformSampleRate = 48000;
 
+// 압축 품질 범위와 기본값이다(3.32.1절, UE USoundWave::CompressionQuality와 같다). 1이 가장 많이
+// 압축하고 100이 가장 좋은 품질이다. 쿠킹 인코더와 SoundClip 설정이 함께 쓴다.
+inline constexpr uint32 MinAudioCompressionQuality = 1;
+inline constexpr uint32 MaxAudioCompressionQuality = 100;
+inline constexpr uint32 DefaultAudioCompressionQuality = 80;
+
 // PCM16·ADPCM 인코딩 rate 범위(Hz)다.
 inline constexpr uint32 MinPlatformSampleRate = 8000;
 inline constexpr uint32 MaxPlatformSampleRate = 192000;

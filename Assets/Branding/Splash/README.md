@@ -8,7 +8,7 @@ Generates the default Rocks Engine splash images. The design and the text slots 
 | `Engine/Content/Splash/Splash.png`, `Splash@2x.png` | Games and engine programs without their own splash |
 | `Templates/Game/Foundation/Content/Splash/Splash.png`, `Splash@2x.png` | Placeholder splash of new projects |
 
-All images are 768 × 432 logical pixels (16:9); `@2x` is 1536 × 864. The bottom 96 logical pixels are the text band the engine draws into, so it is kept dark and calm.
+All images are 768 × 384 logical pixels (2:1); `@2x` is 1536 × 768. The template art is drawn at a height of 432 and its top 48 rows of sky are cropped, which keeps the scene composition. The bottom 96 logical pixels are the text band the engine draws into, so it is kept dark and calm.
 
 ## Brand rules
 

@@ -304,7 +304,7 @@ void AiController::OnFrameworkEndPlay(EndPlayReason reason) noexcept {
 
 PlayerController::PlayerController(Allocator& allocator) noexcept
     : Controller(allocator), actionInput_(allocator), actionBindings_(allocator),
-      haptics_(allocator) {
+      haptics_(allocator), inputAssets_(allocator) {
     wantsPlayerState = true;
     // pause 중에도 Tick한다(UE PlayerController.cpp:204 — TickPlayerInput·Tick).
     PrimaryTick().tick = true;
@@ -348,6 +348,8 @@ void PlayerController::OnTick(const TickContext& context) noexcept {
         (void)viewed;
     }
 
+    // 평가기에서 직접 뺀 에셋 컨텍스트의 lease를 놓는다(5.4절).
+    ReleaseRemovedInputAssets();
     auto evaluated = actionInput_.Evaluate(playerInput_, actionContext);
     if (!evaluated && !inputEvaluationFailing_) {
         Log::Warning(LogGameplay,
@@ -441,6 +443,8 @@ void PlayerController::OnFrameworkEndPlay(EndPlayReason reason) noexcept {
     }
 
     Controller::OnFrameworkEndPlay(reason);
+    // 에셋 컨텍스트 lease는 World 파괴 안에서 놓는다(AssetSystem 11.8절 6 — 5.4절).
+    ReleaseInputAssets();
     ClearPlayer();
 }
 

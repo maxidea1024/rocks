@@ -1033,7 +1033,8 @@ internal static class CompilerDriver
 
             // 리플렉션 함수는 EditorOnly 함수만 게임 조합에서 빠질 수 있다(이름·static·const·지정자·쓴 형식 철자가 같아야 한다).
             static string FunctionShape(FunctionModel function) =>
-                $"{function.Name} {function.IsStatic} {function.IsConst} {function.Spec.Pure} {function.Spec.ToolName} " +
+                $"{function.Name} {function.IsStatic} {function.IsConst} {function.Spec.Pure} {function.Spec.ToolName} {function.Spec.ScriptCallable} " +
+                $"{function.Spec.ScriptName} {string.Join(",", function.Spec.ScriptEffects)} {function.Spec.ScriptOneShot} {string.Join(",", function.Spec.ScriptPerSecond)} " +
                 string.Join(",", function.Parameters.Select(slot => slot.Name + ":" + slot.NativeSpelling)) + " -> " + (function.Result?.NativeSpelling ?? "void");
             string[] editorFunctions = [.. type.Functions.Where(function => !function.Spec.EditorOnly).Select(FunctionShape)];
             string[] gameFunctions = [.. other.Functions.Select(FunctionShape)];
