@@ -6,7 +6,7 @@
 
 | 이름 | 값 | 근거 |
 |---|---|---|
-| `kSplashPollInterval` | 0.1 s | 문구 갱신으로 충분, ProgressReporting `kChildControlPollInterval`과 같음 |
+| `kSplashPollInterval`(코드 `SplashPollIntervalNanoseconds`) | 0.1 s | 문구 갱신으로 충분, ProgressReporting `kChildControlPollInterval`과 같음 |
 | `kSplashAnimationInterval` | 1/60 s | 보간·불확정 표시 동안만 |
 | `kSplashBarEaseSeconds` | 0.15 s | 튀지 않되 늦어 보이지 않음 |
 | `kSplashBarSettleEpsilon` | 0.001 | 막대 1 px 미만 |

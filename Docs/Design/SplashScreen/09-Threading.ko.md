@@ -35,15 +35,16 @@
 
 ### 9.4 주 창으로 넘기기
 
-1. 호스트는 주 창을 숨긴 채 만들고 첫 프레임을 렌더한다(화면 마일스톤 뒤 — 그 전 Sandbox는 렌더 없이 창을 보인다).
+1. 호스트는 주 창을 숨긴 채 만들고(`WindowDesc::visible = false`) 첫 프레임을 렌더한다.
 2. 주 창을 보이고 **보인 뒤 한 프레임을 더 present한다**(숨긴 창에 그린 present가 보이는 순간 화면에 남는다는 보장이 flip model·DWM에 없다).
-3. 주 창을 앞으로 가져온다(`SetForegroundWindow`). 같은 프로세스의 스플래시가 전경이면 허용된다. 사용자가 시작 중에 다른 앱으로 옮겼으면 실패하는데, 이때는 강제하지 않는다(OS가 작업 표시줄 단추를 깜빡인다).
+3. 주 창을 앞으로 가져온다(2·3은 `platform::Window::ShowAndActivate` 하나 — 개정 2에서 PlatformWindow에 더함, Windows는 `ShowWindow` + `SetForegroundWindow`). 같은 프로세스의 스플래시가 전경이면 허용된다. 사용자가 시작 중에 다른 앱으로 옮겼으면 실패하는데, 이때는 강제하지 않는다(OS가 작업 표시줄 단추를 깜빡인다).
 4. `StartupProgress::Finish()` → `SplashScreen::Hide()`.
+- Sandbox(SP1)는 프레임 수로 정한다: 엔진 프레임 1이 끝나면 `ShowAndActivate`, 프레임 2가 끝나면 Hide(호스트 루프 다리의 `EndFrame`).
 - 주 창을 먼저 보이므로 UE의 guard 창(1.4절)이 필요 없고 빈 화면 틈도 없다. 시작 중 Fatal이나 정상 종료 요청으로 주 창 없이 끝나면 `SplashScreen` 소멸이 Hide한다.
 
 ### 9.5 대화상자
 
-- `PlatformBase`에 `platform::SetSystemDialogHook(void (*)() noexcept)`·`platform::ClearSystemDialogHook()`·`platform::NotifySystemDialogOpening()`을 둔다. hook은 원자 함수 포인터 **하나**다. 이미 걸려 있으면 `SetSystemDialogHook`은 `AlreadyExists`다(지금 쓰는 곳은 스플래시뿐 — 둘째 사용자가 생기면 목록으로 바꾼다).
+- `PlatformBase`에 `platform::SetSystemDialogHook(SystemDialogHook)`·`platform::ClearSystemDialogHook(SystemDialogHook)`·`platform::NotifySystemDialogOpening()`을 둔다(`Platform/SystemDialog.h`). hook은 원자 함수 포인터 **하나**다. 다른 hook이 걸려 있으면 `SetSystemDialogHook`은 false다(PlatformBase는 `Result`를 쓰지 않는다 — 같은 hook은 true). `Clear`는 자기 hook일 때만 뗀다. 지금 쓰는 곳은 스플래시뿐이고 둘째 사용자가 생기면 목록으로 바꾼다.
 - OS 모달 대화상자를 띄우는 코드(앞으로 생길 Fatal·assert 대화상자, 메시지 상자 감싸개)는 띄우기 직전에 `NotifySystemDialogOpening()`을 부른다. 스플래시는 Show 때 hook을 걸고 Hide 때 푼다.
   - Windows: hook은 창을 숨기는 메시지를 `PostMessage`한다(잠금 없음, 크래시 경로에서도 부를 수 있다).
   - macOS: hook은 원자 표시만 세운다. 크래시 경로에서 AppKit을 만지지 않는다. 다음 타이머가 표시를 보고 창을 숨긴다.
