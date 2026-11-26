@@ -17,7 +17,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | `UnsupportedCollisionShape` | 경고 | level set 등 받지 않는 충돌 형상 |
 | `InvalidCollisionData` | 오류 | 단순 충돌 값·볼록 형상 bulk 규칙 위반(4.8절 — MA3a에서 더함) |
 | `InvalidSkeletonData` | 오류 | 본 계층·스켈레톤 불변식 위반(6.4절 — MA4a에서 더함) |
-| `SkeletonMismatch` | 오류 | 본 병합 때 부모 사슬 불일치 |
+| `SkeletonMismatch` | 오류 | 본 병합 때 부모 사슬 불일치, 스킨 메시 임포트에서 고칠 수 없는 묶음 구성원 스켈레톤에 메시 본이 모자람(세부 `MissingSkeletonBones` — 6.7.3절 3) |
 | `UnknownBoneTrack` | 경고 | 스켈레톤에 없는 본의 트랙 |
 | `InvalidClipData` | 오류 | 클립 상한·frame rate 위반 |
 | `EventPropertiesDropped` | 경고 | 이벤트 종류별 속성을 버림 |

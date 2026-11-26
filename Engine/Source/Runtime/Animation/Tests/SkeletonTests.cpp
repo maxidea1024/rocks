@@ -462,7 +462,7 @@ TEST(Skeleton_PackageRoundTripResaveIdentical) {
 // 진단 이름표: 모든 SkeletonIssue가 고유한 이름을 갖고 열거 밖은 "Unknown"이다. 새 진단
 // 코드는 4.6절 이름표에 있고, ToAssetDiagnostic은 위치를 detail로 옮긴다.
 TEST(Skeleton_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(SkeletonIssue::EmptyMeshHierarchy);
+    constexpr uint32 last = static_cast<uint32>(SkeletonIssue::MissingSkeletonBones);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(SkeletonIssueName(static_cast<SkeletonIssue>(index)));
         CHECK(name != StringView("Unknown"));

@@ -9,6 +9,8 @@ using Rocks.Build.Rules;
 // LOD bone map, required bones, inverse bind matrices from the mesh BoneHierarchy (Animation) and sparse morph target deltas.
 // Tangents use MikkTSpace (Engine/Source/ThirdParty/MikkTSpace); this module defines the hook functions of its Rocks.patch (deterministic
 // cos/acos and allocator hooks), so MikkTSpace headers stay private to this module (adapter approach).
+// ImportSkeletalMesh (section 6.7.3, stage MA5b3) uses AnimationTools: the auxiliary skeleton output is filled by
+// ImportSkeleton and missing bones are merged into an existing skeleton with MergeBonesIntoSkeleton.
 public sealed class MeshTools : EngineModuleRules
 {
     protected override string Group => "Developer";
@@ -18,7 +20,7 @@ public sealed class MeshTools : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["MeshSource", "Mesh", "Animation", "AssetRuntime", "AssetCooker", "AssetNugget"];
+    protected override string[] PublicDependencies => ["MeshSource", "Mesh", "Animation", "AnimationTools", "AssetRuntime", "AssetCooker", "AssetNugget"];
 
     protected override string[] PrivateDependencies => ["DeterministicMath", "MikkTSpace"];
 }

@@ -344,6 +344,8 @@ const char* SkeletonIssueName(SkeletonIssue issue) noexcept {
         return "MissingAncestor";
     case SkeletonIssue::EmptyMeshHierarchy:
         return "EmptyMeshHierarchy";
+    case SkeletonIssue::MissingSkeletonBones:
+        return "MissingSkeletonBones";
     }
 
     return "Unknown";

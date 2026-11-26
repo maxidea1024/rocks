@@ -22,6 +22,10 @@ namespace rocks {
 // 스킨 메시 원본 LOD 수 상한이다(UE MAX_SKELETAL_MESH_LODS — 정적 메시 StaticMeshMaxLods와 같은 8).
 inline constexpr uint32 SkeletalMeshMaxLods = 8;
 
+// 머티리얼 슬롯 수 상한이다(섹션 materialIndex가 16비트 — UE FSkelMeshRenderSection::MaterialIndex
+// uint16, 정적 메시와 같다).
+inline constexpr uint32 SkeletalMeshMaxMaterialSlots = 65535;
+
 // 스킨 메시다. 에디터 패키지는 원본 LOD·설정을 갖고 renderData가 비어 있다. 쿠킹 패키지는
 // EditorOnly 필드가 빠지고 renderData를 쿠킹 처리기가 채운다(MA5b2). bones는 메시 자체 본
 // 계층이다(스켈레톤의 부분집합, 순서가 달라도 된다 — 메시 본 ↔ 스켈레톤 본 대응은 로드 때 이름으로
