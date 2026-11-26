@@ -109,7 +109,21 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 }
 
 // FUNCTION 지정자 결과다(Docs/Design/FunctionReflection.ko.md FD12). ToolName은 Name="…"의 값이고 함수 이름과 같거나 없으면 ""다.
-internal sealed record FunctionSpec(bool Pure, bool EditorOnly, string ToolName);
+internal sealed record FunctionSpec(bool Pure, bool EditorOnly, string ToolName)
+{
+    // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B11 — UE BlueprintCallable). import 함수(descriptor)는 ScriptName에 B13 변환을 마친
+    // 최종 Sparks 이름을 담는다.
+    public bool ScriptCallable { get; init; }
+
+    public string ScriptName { get; init; } = "";
+
+    // schema effects(정규 순서 — Specifiers.ScriptEffectNames)·oneShot·perSecond 매개변수 이름(쓴 순서)이다.
+    public IReadOnlyList<string> ScriptEffects { get; init; } = [];
+
+    public bool ScriptOneShot { get; init; }
+
+    public IReadOnlyList<string> ScriptPerSecond { get; init; } = [];
+}
 
 // ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
 // Flags는 비트 플래그 enum(값은 선언 값의 OR)이다.
@@ -352,13 +366,60 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Pure" or "EditorOnly";
-            bool label = key is "Name";
+            bool flag = key is "Pure" or "EditorOnly" or "ScriptCallable" or "ScriptOneShot";
+            bool label = key is "Name" or "ScriptName" or "ScriptEffects" or "ScriptPerSecond";
             if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported FUNCTION specifier/value {key}",
-                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly and Name=\"<tool name>\" (display metadata, script overrides and cheat specifiers come with later stages).");
+                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly, Name=\"<tool name>\" and the Sparks specifiers ScriptCallable, ScriptName, ScriptEffects, " +
+                        "ScriptOneShot and ScriptPerSecond (display metadata, script overrides and cheat specifiers come with later stages).");
             }
+        }
+
+        // Sparks 노출 지정자(Docs/Design/SparksBinding.ko.md B11): 부속 지정자는 ScriptCallable과 함께만, Pure와 효과·일회성은 함께 쓸 수 없다.
+        bool scriptCallable = values.ContainsKey("ScriptCallable");
+        string? lone = new[] { "ScriptName", "ScriptEffects", "ScriptOneShot", "ScriptPerSecond" }.FirstOrDefault(values.ContainsKey);
+        if (lone is not null && !scriptCallable)
+        {
+            throw new MetadataException($"{symbol}: {lone} needs ScriptCallable", "RMC2603",
+                $"{lone} describes a function that scripts can call; add ScriptCallable, or remove {lone}.");
+        }
+
+        string scriptName = values.GetValueOrDefault("ScriptName")?.Text ?? "";
+        if (values.ContainsKey("ScriptName") && !IsScriptName(scriptName))
+        {
+            throw new MetadataException($"{symbol}: ScriptName must be a PascalCase ASCII name (an uppercase letter, then letters and digits): \"{scriptName}\"", "RMC2604",
+                "Use a name like \"RequestDestroy\".");
+        }
+
+        List<string> effects = [];
+        foreach (string effect in SplitList(values.GetValueOrDefault("ScriptEffects")?.Text, symbol))
+        {
+            if (!ScriptEffectNames.Contains(effect, StringComparer.Ordinal) || effects.Contains(effect, StringComparer.Ordinal))
+            {
+                throw new MetadataException($"{symbol}: ScriptEffects entry '{effect}' is unknown or listed twice", "RMC2603",
+                    "List each of spawn, acquire, readiness, io and wallClock at most once, separated by commas (SL 3.13).");
+            }
+
+            effects.Add(effect);
+        }
+
+        List<string> perSecond = [];
+        foreach (string parameter in SplitList(values.GetValueOrDefault("ScriptPerSecond")?.Text, symbol))
+        {
+            if (perSecond.Contains(parameter, StringComparer.Ordinal))
+            {
+                throw new MetadataException($"{symbol}: ScriptPerSecond lists '{parameter}' twice", "RMC2603", "List each per-second parameter once.");
+            }
+
+            perSecond.Add(parameter);
+        }
+
+        bool pure = values.ContainsKey("Pure");
+        if (pure && (effects.Count != 0 || values.ContainsKey("ScriptOneShot")))
+        {
+            throw new MetadataException($"{symbol}: a Pure function has no effects or one-shot effect", "RMC2603",
+                "Remove Pure, or remove ScriptEffects and ScriptOneShot (Pure functions only read state).");
         }
 
         string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
@@ -368,7 +429,14 @@ internal static class Specifiers
                 "Use an ASCII identifier for the function tool name, or omit Name to use the C++ name.");
         }
 
-        return new(values.ContainsKey("Pure"), values.ContainsKey("EditorOnly"), toolName == functionName ? "" : toolName);
+        return new(pure, values.ContainsKey("EditorOnly"), toolName == functionName ? "" : toolName)
+        {
+            ScriptCallable = scriptCallable,
+            ScriptName = scriptName,
+            ScriptEffects = [.. ScriptEffectNames.Where(name => effects.Contains(name, StringComparer.Ordinal))],
+            ScriptOneShot = values.ContainsKey("ScriptOneShot"),
+            ScriptPerSecond = perSecond
+        };
     }
 
     // ROCKS_NATIVE는 지정자를 받지 않는다.
@@ -458,6 +526,29 @@ internal static class Specifiers
         }
 
         return spec;
+    }
+
+    // Sparks 효과 이름이다(SL 3.13 — schema effects의 정규 순서).
+    public static readonly IReadOnlyList<string> ScriptEffectNames = ["spawn", "acquire", "readiness", "io", "wallClock"];
+
+    // 쉼표로 나눈 목록 지정자 값의 항목이다(앞뒤 공백을 뗀다, 빈 항목은 RMC2603 — symbol은 진단의 선언 이름이다).
+    private static IEnumerable<string> SplitList(string? text, string symbol)
+    {
+        if (text is null)
+        {
+            yield break;
+        }
+
+        foreach (string part in text.Split(','))
+        {
+            string item = part.Trim();
+            if (item.Length == 0)
+            {
+                throw new MetadataException($"{symbol}: empty entry in the list \"{text}\"", "RMC2603", "Separate entries with single commas.");
+            }
+
+            yield return item;
+        }
     }
 
     // Sparks 이름(PascalCase ASCII — SL 10.2절 schema 이름 규칙)이다: 영문 대문자로 시작하는 영문자·숫자.

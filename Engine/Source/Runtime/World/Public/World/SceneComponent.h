@@ -151,7 +151,7 @@ public:
     // 바꾸지 않는다. 아래 세 함수는 해당 성분만 바꾸며 실패 조건이 같다.
     Result<void> SetRelativeTransform(const Transform& transform) noexcept;
     // 부모 기준 위치(cm)다. UE SetRelativeLocation과 같은 단위다.
-    Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
+    ROCKS_FUNCTION(ScriptCallable) Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
     // 부모 기준 회전(단위 quaternion, 왼손 양의 각)이다. 도 단위 Rotator는 ToQuaternion으로 바꾼다.
     Result<void> SetRelativeRotation(const Quatd& rotation) noexcept;
     // 부모 기준 scale(무차원 배율, 1 = 원래 크기)이다.
@@ -162,10 +162,11 @@ public:
     Mat4d WorldMatrix() const noexcept;
 
     // 월드 변환을 TRS로 분해한다. shear가 있으면 Unsupported, 0 scale이면 InvalidArgument다.
-    Result<Transform> TryWorldTransform() const noexcept;
+    // Sparks에는 WorldTransform으로 보인다(Result 함수의 TryX → X — SparksBinding B13).
+    ROCKS_FUNCTION(Pure, ScriptCallable) Result<Transform> TryWorldTransform() const noexcept;
 
     // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
-    Vec3d WorldLocation() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) Vec3d WorldLocation() const noexcept;
 
     // 월드 위치·회전을 정한다(UE SetWorldLocationAndRotation — 부모 frame 기준 상대 값으로 바꿔
     // 쓴다, 절대 성분은 그대로, scale은 유지). 오류: 비유한 위치·0 quaternion, 부모 frame 역변환
@@ -256,7 +257,7 @@ public:
     // Movable). Movable이 되면 자식도 Movable로 바꾼다(Static 자식을 Movable 부모 아래 둘 수 없다 —
     // UE와 같다). 다시 만들기 실패는 그 종류 없이 두고 Warning SystemStateRecreateFailed다(값은
     // 바뀐다).
-    void SetMobility(ComponentMobility mobility) noexcept;
+    ROCKS_FUNCTION(ScriptCallable) void SetMobility(ComponentMobility mobility) noexcept;
 
     // --- 가시성(23.3절) ---
 
@@ -275,7 +276,7 @@ public:
     }
 
     // 보이는지다: visible이고, 게임 World(Game·Tryout)면 hiddenInGame도 아니다(UE ShouldRender).
-    bool IsVisible() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) bool IsVisible() const noexcept;
 
     // --- 속도·bounds(23.3절) ---
 

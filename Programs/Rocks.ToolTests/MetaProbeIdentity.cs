@@ -27,12 +27,14 @@ internal static class MetaProbeIdentity
     private static readonly string[] FunctionNames =
         ["probe::Value::Touch", "probe::Value::Count", "probe::Value::Build", "probe::Value::Apply", "probe::Value::Inspect", "probe::Value::Secret",
             "probe::Value::touch", "probe::Child::touch", "probe::Value::Place", "probe::Value::Settle", "probe::Value::Label", "probe::Value::Rest",
-            "probe::Value::Guess"];
+            "probe::Value::Guess", "probe::Thing::Jump", "probe::Thing::TryMove", "probe::Thing::TryCount", "probe::Thing::Make", "probe::Thing::Hidden",
+            "probe::Thing::Limit", "probe::Thing::Act", "probe::Thing::TryAct", "probe::Thing::Do_It", "probe::Thing::Score", "probe::Thing::Update",
+            "probe::Child::Jump", "probe::Plain::Act", "probe::Thing::TryParse", "probe::Thing::SetScore"];
 
     // 리플렉션 함수 시험의 타입·필드다(base가 있고 접근 수준이 섞인 struct 매개변수).
     private static readonly string[] FunctionTypes = ["probe::Root", "probe::Mixed"];
 
-    private static readonly string[] FunctionFields = ["probe::Root::a", "probe::Mixed::b", "probe::Mixed::c"];
+    private static readonly string[] FunctionFields = ["probe::Root::a", "probe::Mixed::b", "probe::Mixed::c", "probe::Thing::time"];
 
     public static void Create(string path)
     {
