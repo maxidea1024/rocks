@@ -123,6 +123,22 @@ inline constexpr ShaderTypeDesc GeneratedParametersPS = WithGeneratedLayouts(
     SandboxType("SandboxGeneratedParametersPS", "/Plugin/Sandbox/GeneratedParameters.rsf",
                 "GeneratedParametersPS", rocks::shader::ShaderStagePixel));
 
+// 생성 구조체 자원 멤버 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD66 4).
+inline constexpr rocks::shader::ShaderParameterLayout GeneratedResourceLayouts[] = {
+    rocks::shader::ShaderParameterLayoutOf<GeneratedResourceParameters>()};
+
+constexpr ShaderTypeDesc WithGeneratedResourceLayouts(ShaderTypeDesc desc) noexcept {
+    desc.parameterLayouts = GeneratedResourceLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GeneratedResourcesVS = WithGeneratedResourceLayouts(
+    SandboxType("SandboxGeneratedResourcesVS", "/Plugin/Sandbox/GeneratedResources.rsf",
+                "GeneratedResourcesVS", rocks::shader::ShaderStageVertex));
+inline constexpr ShaderTypeDesc GeneratedResourcesPS = WithGeneratedResourceLayouts(
+    SandboxType("SandboxGeneratedResourcesPS", "/Plugin/Sandbox/GeneratedResources.rsf",
+                "GeneratedResourcesPS", rocks::shader::ShaderStagePixel));
+
 // 엔진 셰이더 SL0 probe 타입이다(Docs/Design/EngineShaders 7.6절, 결정 SLD19). 원문은
 // Programs/Sandbox/EngineShaderTests를 /Plugin/EngineShaderTests로 mount한 시험 루트이고 쿠킹하지
 // 않는다. 그리기별 상수는 ProbeConstants(96 byte — Common/ProbeCommon.rsh)다.

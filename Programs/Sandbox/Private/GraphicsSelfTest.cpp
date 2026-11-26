@@ -4,6 +4,7 @@
 #include "ComputeSelfTest.h"
 #include "ConstantSelfTest.h"
 #include "ShaderParameterSelfTest.h"
+#include "ShaderResourceSelfTest.h"
 #include "MultiTextureSelfTest.h"
 #include "CullingSelfTest.h"
 #include "EngineShaderSelfTest.h"
@@ -773,6 +774,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     // 생성 셰이더 파라미터 구조체(ShaderSystem 16.2절 SH3a): cbuffer·루트 상수를 C++ 구조체 그대로
     // 올린 픽셀.
     failures += RunShaderParameterChecks(name, device, result.triangle.GetAllocator());
+    // 생성 구조체의 자원 멤버(ShaderSystem 16.2절 SH3b): 생성 표 자원 지도와 SetParameters로 묶은
+    // 장치 텍스처·짝 샘플러 override·typed 버퍼.
+    failures += RunShaderResourceChecks(name, device, result.triangle.GetAllocator());
     // 다중 텍스처·샘플러 slot과 자원 묶음(RR12, RenderBase 9.13절): VS·PS 텍스처 다섯, 샘플러 값
     // 지정, 공유 샘플러, 파이프라인 전환 뒤 묶음 유지.
     failures += RunMultiTextureChecks(name, device, result.triangle.GetAllocator());
