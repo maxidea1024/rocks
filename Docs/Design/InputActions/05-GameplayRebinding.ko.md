@@ -24,6 +24,7 @@
 - `BindAction(actionId, ActionEvent events, Function<void(const ActionEventData&)>, bool consumes = false) → ActionBindingHandle`
   - `ActionEventData`는 액션 id, 이벤트, 값, 경과·Triggered 시간이다(UE `(const FInputActionInstance&)` 형태).
   - 빈 함수·None 마스크는 `InvalidArgument`다(UE는 `ETriggerEvent::None` 바인딩을 이벤트 없는 틱마다 부른다 — 버린 대안: 쓰임이 불분명하고 매 평가 호출이 된다). 할당 실패면 `OutOfMemory`다.
+  - 함수 바인딩(후속 — [함수 리플렉션](../FunctionReflection.ko.md) FR4): `(객체 handle, FunctionId)` 바인딩은 FR4가 들어온 뒤 더한다. 서명은 `void(const ActionEventData&)`이고 바인딩할 때 `FunctionSignatureMatches`로 검사한다. 그래서 `ActionEventData`는 강한 참조(`ObjectRef<T>` 등)를 담지 않는 리플렉션 struct로 둔다(FD4 — frame에 둘 수 없다).
   - 콜백 수명: `Function`은 캡처를 그대로 쥔다(UE delegate처럼 객체 파괴를 알지 못한다). 객체는 handle을 캡처해 `World::With`로 접근하거나, 없어지기 전에(OnUnPossess·EndPlay) `RemoveBinding`한다. 콜백을 만든 allocator는 바인딩보다 오래 살아야 한다.
 - `BindActionValue(actionId) → ActionValueHandle`과 `ActionValue(handle) → InputValue`: 평가마다 갱신한다. 포인터를 내주지 않는다(재배치 안전).
 - `RemoveBinding(handle)`·`RemoveValueBinding(handle)`·`ClearBindings()`. 전달 중(콜백 안)에 지운 바인딩은 그 평가의 실행 목록에 있으면 실행되고, 전달이 끝난 뒤 지워진다(UE는 실행 목록을 복제본으로 만든다).

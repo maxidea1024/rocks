@@ -89,6 +89,7 @@ UE는 `PreInitializeComponents`·`PostInitializeComponents`·`Destroyed` 같은 
 
 - 실패는 `OnAwake` 실패와 같이 처리한다(Spawn 실패, OnAwake가 성공한 범위만 `OnDestroy`). `OnFrameworkEndPlay`는 `OnFrameworkPreAwake`가 성공한 Actor면 OnAwake가 실패해도 받는다(PreAwake에서 만든 것을 되돌릴 자리).
 - Gameplay 모듈의 프레임워크 클래스만 재정의하고 `final`로 닫는다. 게임 코드는 사용자 hook만 쓴다. Sparks 노출 대상이 아니다.
+- 스크립트 재정의([함수 리플렉션](../FunctionReflection.ko.md) FR3·FD13)는 사용자 hook(`OnAwake`·`OnStart`·`OnTick`·`OnEnd` 등)만 대상으로 한다. `ScriptExtensible` 클래스의 `virtual` 함수여야 하고, 프레임워크 hook과 `final`로 닫은 hook은 제외한다. FR3이 들어올 때 hook 선언에 `ScriptOverridable`을 붙인다.
 - 이 hook은 World 모듈(S9)이 부르고, 쓰는 쪽은 S11·S12다.
 
 ### 17.9 시험(완료 조건)
