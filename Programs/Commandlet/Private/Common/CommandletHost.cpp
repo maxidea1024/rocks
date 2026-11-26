@@ -1,6 +1,7 @@
 #include "CommandletHost.h"
 #include <AssetCommandlets/AssetAliasCommandlet.h>
 #include <AssetCommandlets/AssetCommandletSupport.h>
+#include <AudioTools/SoundClipImporter.h>
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
 #include <AssetCommandlets/AssetIndexCommandlet.h>
@@ -24,6 +25,27 @@
 
 namespace rocks::commandlet_host {
 namespace {
+
+// 명령 호스트의 임포터 칸은 하나라서(AssetCommandContext::importers) 제품 임포터를 한 묶음으로
+// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나.
+struct ProductImporters {
+    TextureImporterSet textures;
+    SoundClipImporter sound;
+};
+
+Result<void> RegisterProductImporters(void* state, AssetImporterTable& table,
+                                      Array<AssetImporterRegistration>& tokens) noexcept {
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto& importers = *static_cast<ProductImporters*>(state);
+    if (auto textures = RegisterTextureImporters(&importers.textures, table, tokens); !textures) {
+        return textures;
+    }
+
+    return RegisterSoundClipImporter(&importers.sound, table, tokens);
+}
 
 Result<int32> CoreCheck(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
     if (args.Size() != 0) {
@@ -199,10 +221,11 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
-    // 텍스처 임포터·설정 정규화 hook·예약 인자 번역기다(Docs/Design/AssetSystem 12.12절 — 임포터
-    // 묶음은 명령보다 오래 산다).
-    TextureImporterSet textureImporters;
-    assetContext.importers = {&RegisterTextureImporters, &textureImporters};
+    // 제품 임포터(텍스처·사운드)·텍스처 설정 정규화 hook·예약 인자 번역기다(Docs/Design/AssetSystem
+    // 12.12절, AudioSystem 3.36.3절 — 임포터 묶음은 명령보다 오래 산다. 사운드는 hook이 없고
+    // 번역기는 예약 인자 없는 원본을 그대로 통과시킨다).
+    ProductImporters productImporters;
+    assetContext.importers = {&RegisterProductImporters, &productImporters};
     assetContext.typeHooks = {&RegisterTextureTypeHooks, nullptr};
     assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
     // 텍스처 쿠킹 처리기다(12.14절 — asset-cook이 처리기 표에 등록한다).

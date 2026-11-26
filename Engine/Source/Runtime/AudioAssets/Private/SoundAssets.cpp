@@ -1,9 +1,13 @@
 #include <AudioAssets/AttenuationSettings.generated.h>
 #include <AudioAssets/SoundClip.generated.h>
 #include <AudioAssets/SoundSource.generated.h>
+#include <AssetRuntime/PackageWriter.h>
+#include <Base/Compiler.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/Memory.h>
 
-// 사운드 에셋 클래스의 스냅숏 만들기다(Docs/Design/AudioSystem 3.35.3절).
+// 사운드 에셋 클래스의 스냅숏 만들기와 에디터 원본 재생 PCM이다(Docs/Design/AudioSystem 3.35.3·
+// 3.36.2·3.36.4절).
 namespace rocks {
 
 static_assert(static_cast<uint8>(SoundDistanceModel::Linear) ==
@@ -77,27 +81,163 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
     return SoundSourceRef::TryCreate(allocator, playable);
 }
 
+uint32 SoundSourceStorageBytes(SoundSourceStorage storage) noexcept {
+    switch (storage) {
+    case SoundSourceStorage::None:
+        return 0;
+    case SoundSourceStorage::Int16:
+        return 2;
+    case SoundSourceStorage::Int24:
+        return 3;
+    case SoundSourceStorage::Float32:
+        return 4;
+    }
+
+    return 0;
+}
+
+void SoundClip::EffectiveLoop(uint32& begin, uint32& end) const noexcept {
+    if (loopOverride.enabled) {
+        begin = loopOverride.begin;
+        end = loopOverride.end;
+    } else if (hasFileLoop) {
+        begin = fileLoopBegin;
+        end = fileLoopEnd;
+    } else {
+        begin = 0;
+        end = 0;
+    }
+}
+
 Result<void> SoundClip::SetPcm(SharedPtr<const SoundPcm> pcm) noexcept {
     if (pcm && !pcm->IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    channelCount = pcm ? pcm->ChannelCount() : 0;
+    sampleRate = pcm ? pcm->SampleRate() : 0;
+    frameCount = pcm ? pcm->FrameCount() : 0;
     pcm_ = Move(pcm);
     ++pcmRevision_;
+    editorPcmLoaded_ = false;
     return Result<void>::Success();
 }
 
 Result<void> SoundClip::FillPlayable(SoundPlayable& playable) const noexcept {
-    if (!pcm_) {
+    // 재임포트 직후(LoadEditorPcm 전)에는 형식 필드가 새 값이고 PCM은 옛 것이다. 새 loop 구간이 옛
+    // PCM과 섞이지 않게 차원이 다르면 준비되지 않은 것으로 본다(3.36.2절).
+    if (!pcm_ || pcm_->ChannelCount() != channelCount || pcm_->SampleRate() != sampleRate ||
+        pcm_->FrameCount() != frameCount) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
     playable.pcm = pcm_;
     playable.looping = looping;
-    playable.loopBegin = loopBegin;
-    playable.loopEnd = loopEnd;
+    EffectiveLoop(playable.loopBegin, playable.loopEnd);
     playable.revision = pcmRevision_;
     return Result<void>::Success();
 }
+
+#if ROCKS_WITH_EDITOR_DATA
+
+namespace {
+
+// 정수 저장 형식의 표본을 float로 되돌리는 배율이다(임포터가 곱한 2^(비트−1) — 3.36.3절).
+constexpr float Int16Scale = 1.0f / 32768.0f;
+constexpr float Int24Scale = 1.0f / 8388608.0f;
+
+float ReadStoredSample(const uint8* bytes, SoundSourceStorage format) noexcept {
+    switch (format) {
+    case SoundSourceStorage::Int16: {
+        const int16 value =
+            static_cast<int16>(static_cast<uint16>(bytes[0]) | static_cast<uint16>(bytes[1]) << 8);
+        return static_cast<float>(value) * Int16Scale;
+    }
+    case SoundSourceStorage::Int24: {
+        uint32 raw = static_cast<uint32>(bytes[0]) | static_cast<uint32>(bytes[1]) << 8 |
+                     static_cast<uint32>(bytes[2]) << 16;
+        // 부호 확장(24비트 → 32비트).
+        if ((raw & 0x800000u) != 0) {
+            raw |= 0xFF000000u;
+        }
+
+        return static_cast<float>(static_cast<int32>(raw)) * Int24Scale;
+    }
+    case SoundSourceStorage::Float32: {
+        const uint32 raw = static_cast<uint32>(bytes[0]) | static_cast<uint32>(bytes[1]) << 8 |
+                           static_cast<uint32>(bytes[2]) << 16 |
+                           static_cast<uint32>(bytes[3]) << 24;
+        float value = 0.0f;
+        platform::MemoryCopy(&value, &raw, sizeof(value));
+        return value;
+    }
+    case SoundSourceStorage::None:
+        break;
+    }
+
+    return 0.0f;
+}
+
+} // namespace
+
+Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& bulk) noexcept {
+    if (source.format == SoundSourceStorage::None || source.bulk.IsEmpty() || frameCount == 0) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    if (editorPcmLoaded_ && editorPcmSource_.format == source.format &&
+        editorPcmSource_.bulk.SameContent(source.bulk) && editorPcmChannels_ == channelCount &&
+        editorPcmRate_ == sampleRate && editorPcmFrames_ == frameCount) {
+        return Result<void>::Success();
+    }
+
+    if (channelCount > audio::MaxClipChannels) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    const uint32 bytesPerSample = SoundSourceStorageBytes(source.format);
+    const uint64 expected = static_cast<uint64>(bytesPerSample) * channelCount * frameCount;
+    auto read = bulk.ReadBulk(source.bulk);
+    if (!read) {
+        return Result<void>::Failure(read.Error());
+    }
+
+    const Span<const uint8> bytes = read.Value();
+    if (channelCount == 0 || bytes.Size() != expected) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    auto made = SoundPcm::TryAllocate(allocator, channelCount, frameCount, sampleRate);
+    if (!made) {
+        // 형식 필드가 SoundPcm 범위 밖이면(rate·채널) 원본이 손상된 것이다.
+        return Result<void>::Failure(
+            made.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : made.Error());
+    }
+
+    for (uint32 channel = 0; channel < channelCount; ++channel) {
+        Span<float> samples = made.Value()->MutableChannel(channel);
+        const uint8* base =
+            bytes.Data() + static_cast<usize>(channel) * frameCount * bytesPerSample;
+        for (uint32 frame = 0; frame < frameCount; ++frame) {
+            samples[frame] =
+                ReadStoredSample(base + static_cast<usize>(frame) * bytesPerSample, source.format);
+        }
+    }
+
+    if (!made.Value()->IsFinite()) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
+    ++pcmRevision_;
+    editorPcmLoaded_ = true;
+    editorPcmSource_ = source;
+    editorPcmChannels_ = channelCount;
+    editorPcmRate_ = sampleRate;
+    editorPcmFrames_ = frameCount;
+    return Result<void>::Success();
+}
+
+#endif
 
 } // namespace rocks

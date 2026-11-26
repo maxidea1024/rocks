@@ -1807,6 +1807,38 @@ try
     ReportImport("asset-import unknown importer name", named.ExitCode == 1 &&
         named.StdErr.Contains("asset-import: UnsupportedSourceFormat: /Game/Rock", StringComparison.Ordinal), named);
 
+    // 사운드 임포터는 텍스처와 같은 칸에 묶어 등록한다(Docs/Design/AudioSystem 3.36.3절): 16비트 mono WAV 4 frame을 임포트하면
+    // 에셋이 생긴다. `volume`은 A2f 예약 이름이라 `--volume=`은 사용법 오류다(사운드 volume은 asset-edit로 정한다 — 한계).
+    string wav = Path.Combine(importDirectory, "Click.wav");
+    byte[] samples = [0x00, 0x00, 0x00, 0x40, 0x00, 0xC0, 0xFF, 0x7F];
+    using (var wavStream = new MemoryStream())
+    using (var writer = new BinaryWriter(wavStream))
+    {
+        writer.Write("RIFF"u8.ToArray());
+        writer.Write(4 + 8 + 16 + 8 + samples.Length);
+        writer.Write("WAVE"u8.ToArray());
+        writer.Write("fmt "u8.ToArray());
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write((short)1);
+        writer.Write(48000);
+        writer.Write(48000 * 2);
+        writer.Write((short)2);
+        writer.Write((short)16);
+        writer.Write("data"u8.ToArray());
+        writer.Write(samples.Length);
+        writer.Write(samples);
+        writer.Flush();
+        File.WriteAllBytes(wav, wavStream.ToArray());
+    }
+
+    ProcessResult sound = await RunImport("asset-import", "/Game/Click", wav, projectOption);
+    ReportImport("asset-import sound clip", sound.ExitCode == 0 &&
+        File.Exists(Path.Combine(project, "Content", "Click.rasset")), sound);
+    ProcessResult soundVolume = await RunImport("asset-import", "/Game/Quiet", wav, "--volume=0.5", projectOption);
+    ReportImport("asset-import sound --volume is reserved", soundVolume.ExitCode == 2 &&
+        soundVolume.StdErr.StartsWith("usage: asset-import", StringComparison.Ordinal), soundVolume);
+
     string[][] importUsage =
     [
         ["asset-import", projectOption],
