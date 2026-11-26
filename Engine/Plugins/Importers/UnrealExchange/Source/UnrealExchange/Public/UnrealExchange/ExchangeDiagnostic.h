@@ -70,7 +70,9 @@ enum class ExchangeIssue : uint8 {
     AmbiguousExisting, // 기존 에셋 조회가 둘 이상(UnrealPathCollision, text = objectPath)
     HardCycle,         // Hard만의 순환 단위 — 다중 에셋 원자 저장 전까지(UnsupportedCycle)
     NoKindImporter,    // 교환 클래스의 임포터가 없음(UnsupportedAsset, text = 클래스 이름)
-    PathTaken // 새 에셋의 대응 경로를 다른 Rocks 에셋이 씀(UnrealPathCollision, text = 경로)
+    PathTaken, // 새 에셋의 대응 경로를 다른 Rocks 에셋이 씀(UnrealPathCollision, text = 경로)
+    // 종류별 임포터의 서비스 임포트가 실패함(10.6절 2번 — 코드·오류는 서비스 진단, text = 그 path)
+    ServiceFailure
 };
 
 // 세부 규칙 이름이다(예: BlobHash → "BlobHash"). 모르는 값은 "Unknown"이다. 정적 수명이다.

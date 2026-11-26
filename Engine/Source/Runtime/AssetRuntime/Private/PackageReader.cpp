@@ -1023,6 +1023,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnrealPathCollision";
     case AssetDiagnosticCode::MissingUnrealDependency:
         return "MissingUnrealDependency";
+    case AssetDiagnosticCode::UnsupportedSourceLayout:
+        return "UnsupportedSourceLayout";
+    case AssetDiagnosticCode::GammaMismatch:
+        return "GammaMismatch";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
     case AssetDiagnosticCode::AliasResolved:
@@ -1106,6 +1110,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnsupportedAsset:
     case AssetDiagnosticCode::UnrealPathRenamed:
     case AssetDiagnosticCode::MissingUnrealDependency:
+    case AssetDiagnosticCode::GammaMismatch:
     case AssetDiagnosticCode::AliasResolved:
     case AssetDiagnosticCode::AliasInUse:
     case AssetDiagnosticCode::AliasSearchTruncated:

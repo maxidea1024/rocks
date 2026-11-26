@@ -130,7 +130,7 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
 4. **계획의 묶음 밖 대상 id.** 계획이 찾은 묶음 밖 Hard 대상의 기존 에셋(`Found`)을 의존마다 남긴다: `ExchangeImportPlan::ExternalTarget(asset, dependency)`(dependency는 `asset.dependencies` 번호 — 묶음 안 대상·못 찾음·모호함·Soft는 null id). 계획은 이미 그 조회를 하므로(10.5절 5번) 실행이 다시 찾지 않는다(dry run과 같은 결과). Soft 참조 연결은 후속이다(텍스처 설정에는 없다).
 5. **에셋 문서 다시 읽기.** A2f 임포터는 원본 byte를 믿지 않는다(묶음 읽기와 임포트 사이, 또는 일반 재임포트 때 파일이 바뀌었을 수 있다).
    - `ReadExchangeAssetDocument(bytes, allocator, out, diagnostics)`: 묶음 리더의 에셋 JSON 검사(10.4절 5–9·11번 — 키·`objectPath`·`class`·`ueClass`·의존·플러그인 진단·`settings`·`data` 객체·blob 참조 수집·플러그인 오류 진단)를 byte 입력으로 한다. bundle.json 대조(`ManifestMismatch`)만 빠지고, `className`·`exchangeClass`·`objectPath`는 문서에서 채운다. 의존의 `target`은 `ExchangeNoIndex`다. 묶음 리더도 파일을 읽은 뒤 이 검사를 부른다(동작 불변 — 같은 진단).
-   - `VerifyExchangeBlob(ref, bytes)`: 크기·SHA-256·가변 배치 검사(`LoadExchangeBlob`이 파일을 읽은 뒤 하던 것 — 그 함수도 이것을 부른다).
+   - `VerifyExchangeBlob(ref, bytes)`: 크기·SHA-256·가변 배치 검사(`LoadExchangeBlob`이 파일을 읽은 뒤 하는 것과 같은 검사 단계 `FinishBlobCheck`를 쓴다). blob 파일 경로는 `AppendExchangeBlobPath(directory, digest)`(묶음 리더와 공용)다.
 6. **A2f 임포터 공통 검사 순서**(실패는 `context.Fail` — 코드 / 오류 / detail):
    1. 원본 `asset`을 문서로 읽는다: 실패 `CorruptBundle` / 그 오류(진단의 세부 규칙은 버린다 — 한계: 서비스 진단은 코드·detail만 담는다).
    2. 문서 교환 클래스가 임포터의 클래스와 같다: 아니면 `InvalidSource` / `InvalidArgument`.

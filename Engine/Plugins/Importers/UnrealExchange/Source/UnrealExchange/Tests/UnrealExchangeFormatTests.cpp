@@ -58,7 +58,7 @@ TEST(UnrealExchange_BlobLayoutNames) {
 
 // 세부 규칙 이름은 모두 다르고 "Unknown"이 아니다. 코드별 수준은 10.3절 표다.
 TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
-    constexpr uint32 last = static_cast<uint32>(ExchangeIssue::PathTaken);
+    constexpr uint32 last = static_cast<uint32>(ExchangeIssue::ServiceFailure);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(ExchangeIssueName(static_cast<ExchangeIssue>(index)));
         CHECK(name != StringView("Unknown"));
@@ -78,6 +78,9 @@ TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingDependency) == ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnknownField) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedAsset) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::GammaMismatch) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedSourceLayout) ==
+          ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingUnrealDependency) ==
           ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnrealPathRenamed) == ExchangeSeverity::Info);
