@@ -3,6 +3,41 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::input::ActionEventData::action",
+      "id": "a157af7f39b94fabad425cebc05bcb18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::elapsedSeconds",
+      "id": "311f774b7e674aea81bb5b377cb8a361",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::events",
+      "id": "72ac386e72af4fd78cf32246a747fefd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::triggeredSeconds",
+      "id": "b3393f23286d4ca2bcdc89e4739bf418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::value",
+      "id": "24a31863e46446a3bb5e15dd33b2df44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::HapticChannel::affectsLeftLarge",
       "id": "034b2243b89943879d3582f606a3b85f",
       "aliases": [],
@@ -458,6 +493,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::InputValue::type",
+      "id": "bbaa23ebb0564006907e48a1f9d95507",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputValue::value",
+      "id": "1f23b73059734d519581d4bc5ac80dca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::PlayerMappingSettings::displayCategory",
       "id": "63b32af1bd0541349b8c2afced85c05e",
       "aliases": [],
@@ -488,6 +537,20 @@
       "kind": "type",
       "name": "rocks::input::ActionAccumulation",
       "id": "6c9fc881fd114d87b207818202c9f323",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ActionEvent",
+      "id": "36a9a21795d44c42ba02910ba551eefe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ActionEventData",
+      "id": "5bcc60b4c9514d03915431fcc1379a36",
       "aliases": [],
       "retired": false
     },
@@ -600,6 +663,13 @@
       "kind": "type",
       "name": "rocks::input::InputTriggerType",
       "id": "d98d41ff96e744a48a258ab6f79eedf5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputValue",
+      "id": "1ef14f863d324676914330ce9a7cf4fd",
       "aliases": [],
       "retired": false
     },
