@@ -609,6 +609,10 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     }
 
     (void)pixels;
+    if (createTextureError_ != ErrorCode::None) {
+        return Result<TextureHandle>::Failure(createTextureError_);
+    }
+
     TextureState state;
     const uint32 mipLevels =
         desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
@@ -1007,6 +1011,11 @@ const DeviceCaps& RecordingDevice::Caps() const noexcept {
 uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noexcept {
     (void)format;
     return 0;
+}
+
+PixelFormatCaps RecordingDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    (void)format;
+    return pixelFormatCaps_;
 }
 
 Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,

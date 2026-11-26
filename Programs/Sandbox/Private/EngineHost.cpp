@@ -170,8 +170,9 @@ public:
         screen_ = screen;
     }
 
-    // 쿠킹 텍스처 목록을 붙인다(18.5절 7항). 프레임 끝에 준비된 텍스처를 화면에 올리고, 엔진 종료
-    // 시작에 티켓·lease를 놓는다(EngineAssets 종료 계약 — AssetSystem 11.8절 6).
+    // 쿠킹 텍스처 목록을 붙인다(18.5절 7·8항). 프레임 끝에 텍스처 렌더 캐시를 갱신해 준비된
+    // 텍스처를 화면에 올리고, 엔진 종료 시작에 handle을 Retire한 뒤 lease를 놓는다(EngineAssets
+    // 종료 계약 — AssetSystem 11.8절 6).
     void AttachTextures(CookedTextureLibrary* textures) noexcept {
         textures_ = textures;
     }
@@ -263,7 +264,7 @@ public:
 
         if (screen_ != nullptr) {
             if (textures_ != nullptr) {
-                textures_->Update(*screen_);
+                textures_->Update();
             }
 
             screen_->HandleInspectorInput(input_);
@@ -619,7 +620,8 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
             if (EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>();
                 assets != nullptr && screenHost) {
                 auto library = UniquePtr<CookedTextureLibrary>::TryMake(
-                    allocator, allocator, assets->Manager(), assets->Manifest(), engine.Types());
+                    allocator, allocator, assets->Manager(), assets->Manifest(), engine.Types(),
+                    *screenHost);
                 if (library && library.Value()->RequestAll()) {
                     textures = Move(library.Value());
                     bridge.AttachTextures(textures.Get());

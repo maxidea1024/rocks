@@ -40,6 +40,8 @@ nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`
 - 종료 코드: 0 성공(경고만 있어도 0), 1 실행 실패(진단은 표준 오류에 `<진단 코드>: <path>: <설명>` 한 줄씩 — 임포터가 거부한 옵션 값은 `InvalidImportOption`), 2 사용법 오류(모르는 명령·옵션, 같은 옵션 두 번, 값이 필요한 옵션에 값 없음, 위치 인자 수·조합 오류).
 - 쓰기 잠금(8절)을 잡는 명령: `asset-import`·`asset-reimport`·`asset-new`·`asset-set`·`asset-move`·`asset-duplicate`·`asset-delete`·`asset-fix-duplicate-id`·`asset-alias-remove`·`asset-alias-prune`·`asset-orphans-delete`·`asset-index-rebuild`(캐시 기록)·`asset-cook`(쿠킹 동안 에디터 패키지가 바뀌지 않게, 쿠킹 출력 보호). 나머지는 잠금 없이 읽는다(캐시는 읽기만).
 
+제품 명령 실행 파일의 에셋 타입 모듈은 Animation·Mesh·Texture이고, `asset-cook`의 처리기는 텍스처(12.14절)·정적 메시·스킨 메시·애니메이션 클립([메시·애니메이션 에셋](../MeshAnimationAssets/13-Stages.ko.md) 13.1절 1)이며 그 밖의 타입은 기본 처리기다. 타입 hook은 텍스처(설정 정규화·원본 재구성)와 애니메이션(스켈레톤 Build 의존)이다.
+
 서비스 API(`AssetService`, AssetDatabase)는 명령과 1:1 함수이며 에디터가 나중에 같은 함수를 쓴다. A2 명령은 그 서비스 API가 생기는 하위 단계에서 함께 더한다(7.1절 4 표).
 
 ### 13.1 A6 구현 세부(2026-11-25 — 착수 때 정함)
