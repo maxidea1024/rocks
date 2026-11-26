@@ -9,6 +9,7 @@
 #include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/ShaderParameters.h>
+#include <RenderGraph/GraphParameterCollector.h>
 #include <RenderGraph/GraphPassAccesses.h>
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/GraphSharedData.h>
@@ -63,6 +64,25 @@ public:
     //   view.Value()); ... });
     Result<void> SetConstants(const ShaderBindingMap& map,
                               GraphConstantBuffer constants) const noexcept;
+
+    // 파라미터 구조체 값(parameters — map의 생성 표 구조체)의 자원 멤버를 지도의 자리마다 묶는다
+    // (Docs/Design/ShaderSystem 16.2절 SSD65, UE SetShaderParameters 대응): 그래프 SRV 텍스처는 이
+    // pass의 장치 텍스처·view를 SetTexture, 짝 샘플러는 SamplerOverride(given이 아니면 지움 —
+    // 텍스처 desc 샘플러)를 SetSampler, 그래프 버퍼 SRV는 SetBufferView, UAV는
+    // SetWritableTexture·SetWritableBufferView, 장치 멤버는 값 그대로다(검증은 소유 스레드의
+    // ParameterBatch 몫 — pass 함수는 병렬 기록에서 불릴 수 있다). 자리 없는 멤버·접근만 선언·렌더
+    // 타깃은 묶지 않고, 공유 샘플러는 호출자가 SetSampler로 준다. 실패: 생성 표 지도가 아니거나
+    // parameters null InvalidArgument, SetSampler의 실패는 그 오류다(앞 자리는 이미 묶였을 수
+    // 있다).
+    //
+    // 사용 예:
+    //   graph.AddPass(BlurName, GraphPassKind::Compute, GraphPassFlags::None, parameters, &blurMap,
+    //                 [=](GraphPassContext& pass) noexcept {
+    //                     pass.Commands().SetPipeline(blurPipeline);
+    //                     (void)pass.SetParameters(blurMap, parameters);
+    //                     pass.Commands().Dispatch(groups, 1);
+    //                 });
+    Result<void> SetParameters(const ShaderResourceMap& map, const void* parameters) const noexcept;
 
     // view의 기준 mip이다(graphics::TextureViewBaseMip: 범위 view를 지원하는 장치는 0, OpenGL ES는
     // view의 첫 mip). 셰이더는 이 값을 그리기별 상수로 받아 명시 LOD로 읽는다(7.5절). 선언하지 않은
@@ -384,6 +404,23 @@ public:
     Result<GraphPass> AddPass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
                               const GraphPassAccesses& accesses, Execute&& execute) noexcept;
 
+    // 파라미터 구조체(ROCKS_SHADER_PARAMETERS 생성 구조체)를 프레임 arena에 기본값으로 만든다(UE
+    // AllocParameters, ShaderSystem 16.2절 SSD65). 값은 그래프 수명이고 pass에 넘긴 뒤 바꾸지
+    // 않는다 (RenderBase 9.6절). 소멸자를 부르지 않으므로 T는 소멸자가 trivial해야 한다. 할당
+    // 실패면 null이다.
+    template <class T>
+    T* AllocateParameters() noexcept;
+
+    // 파라미터 구조체로 pass를 넣는다(ShaderSystem 16.2절 SSD65). 접근은 CollectGraphPassAccesses가
+    // parameters의 그래프 멤버(used가 있으면 셰이더가 쓰는 것만)에서 만들고, 그 밖은 위 AddPass와
+    // 같다. parameters는 AllocateParameters로 만든 값처럼 그래프보다 오래 살아야 한다(pass 함수가
+    // 실행 때 읽는다). 실패: 수집기 실패는 검증 오류(InvalidArgument — 그 뒤 Execute도 실패), 그
+    // 밖은 위 AddPass와 같다.
+    template <class T, class Execute>
+    Result<GraphPass> AddPass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
+                              const T* parameters, const ShaderResourceMap* used,
+                              Execute&& execute) noexcept;
+
     // 위 AddPass의 형식 지운 경로다(파라미터 구조체 수집기가 만든 접근 목록도 이리로 들어온다).
     // executor는 arena에 만든 실행기이며 성공·실패와 무관하게 그래프가 소유한다.
     Result<GraphPass> AddPassWithAccesses(TraceScopeName& name, GraphPassKind kind,
@@ -513,6 +550,11 @@ private:
                                       GraphPassAccesses& accesses) noexcept;
     // 캐시 판의 파이프라인 실패를 그래프 오류로 남기고 code를 돌려준다.
     ErrorCode RecordComputePipelineFailure(TraceScopeName& name, ErrorCode code) noexcept;
+    // 구조체 판 AddPass의 수집이다(수집기 실패는 검증 오류로 남긴다).
+    Result<void> CollectParameterAccesses(TraceScopeName& name, GraphPassKind kind,
+                                          const shader::ShaderParameterLayout& layout,
+                                          const void* parameters, const ShaderResourceMap* used,
+                                          GraphPassAccesses& out) noexcept;
     // AddFullscreenPass의 검사다(실패는 검증 오류로 남긴다).
     Result<void> CheckFullscreenPass(TraceScopeName& name, const GraphPassAccesses& accesses,
                                      graphics::PipelineHandle pipeline) noexcept;
@@ -560,6 +602,32 @@ public:
 private:
     RenderGraph& graph_;
 };
+
+template <class T>
+T* RenderGraph::AllocateParameters() noexcept {
+    static_assert(IsTriviallyDestructibleV<T>,
+                  "graph parameter structs live in the frame arena and are never destroyed");
+    auto memory = arena_.TryAllocate(sizeof(T), alignof(T));
+    if (!memory) {
+        return nullptr;
+    }
+
+    return ConstructAt<T>(memory.Value());
+}
+
+template <class T, class Execute>
+Result<GraphPass> RenderGraph::AddPass(TraceScopeName& name, GraphPassKind kind,
+                                       GraphPassFlags flags, const T* parameters,
+                                       const ShaderResourceMap* used, Execute&& execute) noexcept {
+    GraphPassAccesses accesses(arena_);
+    auto collected = CollectParameterAccesses(name, kind, shader::ShaderParameterLayoutOf<T>(),
+                                              parameters, used, accesses);
+    if (!collected) {
+        return Result<GraphPass>::Failure(collected.Error());
+    }
+
+    return AddPass(name, kind, flags, accesses, Forward<Execute>(execute));
+}
 
 template <class Execute>
 GraphPassExecutor* RenderGraph::MakeExecutor(Execute&& execute) noexcept {
