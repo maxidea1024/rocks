@@ -1,6 +1,5 @@
 #pragma once
 
-#include "PlatformTextureSource.h"
 #include "ScreenRenderer.h"
 
 #include <Base/NumericLimits.h>
@@ -13,6 +12,8 @@
 #include <Input/InputState.h>
 #include <PlatformWindow/Window.h>
 #include <RenderBase/RenderLane.h>
+#include <WorldIntegration/Textures/PlatformTextureSource.h>
+#include <WorldIntegration/Textures/TextureRenderCache.h>
 
 namespace rocks {
 
@@ -128,6 +129,8 @@ struct InspectorEntry {
     InspectorEntryState state = InspectorEntryState::Pending;
     // 실패면 그 오류다.
     ErrorCode error = ErrorCode::None;
+    // 텍스처 렌더 캐시의 handle이다(캐시가 Retire한다 — ScreenHost는 놓지 않는다, 18.5절 8항).
+    bool cacheOwned = false;
 };
 
 // 형식의 표시 방식·성분 계열·정수 배율이다(float는 HDR이면 노출 + filmic, unorm·snorm은 그대로,
@@ -188,6 +191,18 @@ public:
                               PlatformBulkReader reader, void* context, bool cpuPlaceholder,
                               render::CookedTextureIssue* issue = nullptr) noexcept;
 
+    // 텍스처 렌더 캐시 항목을 표시 목록 끝에 더한다(18.5절 8항 — 쿠킹 텍스처 에셋). handle은 캐시
+    // 것이라 ScreenHost가 Retire하지 않는다. 상태는 info.state에서 온다(Uploading → Pending, Ready,
+    // handle 있는 Failed, CpuPlaceholder → 검정 대체). 오류: lane 시작 전 NotReady, Loading·handle
+    // 없는 Failed InvalidArgument, 할당 실패.
+    Result<uint32> AddCachedTexture(StringView name, const TextureRenderInfo& info) noexcept;
+
+    // 렌더 통지를 함께 받을 텍스처 렌더 캐시를 붙인다(null이면 뗀다). ProcessNotices가 거둔 통지를
+    // 캐시에도 넘긴다(통지 큐 소비자는 하나 — RenderBase 5.2절). cache는 붙어 있는 동안 산다.
+    void AttachTextureCache(TextureRenderCache* cache) noexcept {
+        cache_ = cache;
+    }
+
     // 검사를 거치지 않은 업로드 값을 그대로 게시하고 항목을 더한다(self-test 음성 — 장치 생성
     // 실패의 ResourceFailed 경로). upload.handle은 이 함수가 예약해 채운다.
     Result<uint32> AddUnchecked(StringView name, render::CookedTextureUpload&& upload,
@@ -235,6 +250,11 @@ public:
         return lane_;
     }
 
+    // 장치다(업로드 검사의 능력 값 — Start 뒤 렌더 lane이 소유하므로 게임 lane은 능력 질의만 한다).
+    const graphics::Device& Device() const noexcept {
+        return device_;
+    }
+
     const ScreenRenderer& Renderer() const noexcept {
         return renderer_;
     }
@@ -255,6 +275,7 @@ private:
                                InspectorEntryState state) noexcept;
 
     Allocator& allocator_;
+    TextureRenderCache* cache_ = nullptr;
     render::RenderHandle pending_;
     render::RenderHandle capture_;
     Array<InspectorEntry> inspectors_;

@@ -3,7 +3,7 @@
 #include <Core/FileError.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 묶음 리더의 정상 읽기와 스키마 변조 시험이다(Docs/Design/UnrealExchange.ko.md 3절,
+// Unreal 교환 묶음 리더의 정상 읽기와 스키마 변조 시험이다(Docs/Design/UnrealExchange 3절,
 // 10.4절 2–11번, 12.1절): 저장소 fixture(실제·메모리 파일 시스템), bundle.json 묶음 수준 오류(버전·
 // 구문·BOM·필수 키·타입·정렬·objectPath·file·redirect·파일 실패), 에셋 JSON 에셋 수준 오류, 모르는
 // 키 경고.

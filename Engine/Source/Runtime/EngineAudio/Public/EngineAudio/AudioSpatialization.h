@@ -2,7 +2,7 @@
 
 #include <Core/Math/Quaternion.h>
 #include <Core/Math/Vector3.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 // 리스너 기준 감쇠·패닝 계산이다(Docs/Design/AudioSystem 3.13·3.35.7절). 제어 pipe가 묶음마다 공간
 // 재생에 대해 부르는 순수 함수이며, 시험이 바로 단언한다. 좌표·단위는 UE와 같다(+X 전방, +Y 오른쪽,

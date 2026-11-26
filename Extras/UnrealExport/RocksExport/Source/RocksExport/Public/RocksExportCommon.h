@@ -3,10 +3,10 @@
 #include "CoreMinimal.h"
 #include "Runtime/Launch/Resources/Version.h"
 
-// RocksExport 플러그인 공통 선언이다(Rocks 저장소 Docs/Design/UnrealExchange.ko.md 11절). 지원 UE 버전은
+// RocksExport 플러그인 공통 선언이다(Rocks 저장소 Docs/Design/UnrealExchange 11절). 지원 UE 버전은
 // 5.8 하나다(11.1절). 다른 버전에서는 컴파일을 멈춘다.
 #if ENGINE_MAJOR_VERSION != 5 || ENGINE_MINOR_VERSION != 8
-#error "RocksExport supports Unreal Engine 5.8 only (UnrealExchange.ko.md section 11.1)."
+#error "RocksExport supports Unreal Engine 5.8 only (UnrealExchange section 11.1)."
 #endif
 
 ROCKSEXPORT_API DECLARE_LOG_CATEGORY_EXTERN(LogRocksExport, Log, All);

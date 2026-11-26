@@ -282,6 +282,8 @@ public:
     graphics::DeviceInfo Info() const noexcept override;
     const graphics::DeviceCaps& Caps() const noexcept override;
     uint32 GetPixelFormatSampleCounts(graphics::PixelFormat format) const noexcept override;
+    graphics::PixelFormatCaps
+    GetPixelFormatCaps(graphics::PixelFormat format) const noexcept override;
     Result<graphics::PipelineHandle>
     CreateComputePipeline(const graphics::ComputePipelineDesc& desc) noexcept override;
     Result<graphics::BufferViewHandle>
@@ -427,6 +429,18 @@ public:
     // 장치 능력을 바꾼다(쿠킹 형식 선택의 한도·장치 요구 시험). 장치를 쓰기 전에 고친다.
     graphics::DeviceCaps& MutableCaps() noexcept {
         return caps_;
+    }
+
+    // 모든 형식의 능력(GetPixelFormatCaps)을 caps로 둔다(쿠킹 텍스처 업로드 시험 — 기본은 None).
+    // 장치를 쓰기 전에 부른다.
+    void SetPixelFormatCaps(graphics::PixelFormatCaps caps) noexcept {
+        pixelFormatCaps_ = caps;
+    }
+
+    // None이 아니면 CreateTexture가 이 오류로 실패한다(장치 생성 실패 경로 시험). 장치를 쓰기 전에
+    // 부른다.
+    void SetCreateTextureError(ErrorCode error) noexcept {
+        createTextureError_ = error;
     }
 
     // 살아 있는 버퍼 view 수다(그래프가 view를 모두 Retire했는지).
@@ -614,6 +628,8 @@ private:
     graphics::FenceTimeline timeline_;
     graphics::FenceTimeline computeTimeline_;
     graphics::DeviceCaps caps_;
+    graphics::PixelFormatCaps pixelFormatCaps_ = graphics::PixelFormatCaps::None;
+    ErrorCode createTextureError_ = ErrorCode::None;
     uint64 computeFenceValue_ = 0;
     // 지금 기록의 queue다.
     graphics::QueueKind recordingQueue_ = graphics::QueueKind::Graphics;

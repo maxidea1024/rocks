@@ -84,9 +84,18 @@ AudioEngineSubsystem::~AudioEngineSubsystem() {
 
 Result<void> AudioEngineSubsystem::Initialize(Engine& engine) noexcept {
     options_ = AudioEngineHostOptions{};
+    decoders_ = audio::AudioDecoderTable{};
+    if (auto builtIn = audio::RegisterBuiltInAudioDecoders(decoders_); !builtIn) {
+        return builtIn;
+    }
+
     if (ModuleLoader* modules = engine.Modules()) {
         if (const auto* hostOptions = modules->Services().Find<AudioEngineHostOptions>()) {
             options_ = *hostOptions;
+        }
+
+        if (const auto* registry = modules->Services().Find<audio::AudioDecoderRegistry>()) {
+            registry->Fill(decoders_);
         }
     }
 

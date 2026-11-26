@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0.0",
 	"FriendlyName": "Rocks Export",
-	"Description": "Exports Unreal Engine source assets as a Rocks exchange bundle (Docs/Design/UnrealExchange.ko.md in the Rocks repository).",
+	"Description": "Exports Unreal Engine source assets as a Rocks exchange bundle (Docs/Design/UnrealExchange in the Rocks repository).",
 	"Category": "Rocks",
 	"CreatedBy": "Rocks",
 	"EngineVersion": "5.8.0",

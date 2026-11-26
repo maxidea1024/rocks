@@ -1807,6 +1807,38 @@ try
     ReportImport("asset-import unknown importer name", named.ExitCode == 1 &&
         named.StdErr.Contains("asset-import: UnsupportedSourceFormat: /Game/Rock", StringComparison.Ordinal), named);
 
+    // 사운드 임포터는 텍스처와 같은 칸에 묶어 등록한다(Docs/Design/AudioSystem 3.36.3절): 16비트 mono WAV 4 frame을 임포트하면
+    // 에셋이 생긴다. `volume`은 A2f 예약 이름이라 `--volume=`은 사용법 오류다(사운드 volume은 asset-edit로 정한다 — 한계).
+    string wav = Path.Combine(importDirectory, "Click.wav");
+    byte[] samples = [0x00, 0x00, 0x00, 0x40, 0x00, 0xC0, 0xFF, 0x7F];
+    using (var wavStream = new MemoryStream())
+    using (var writer = new BinaryWriter(wavStream))
+    {
+        writer.Write("RIFF"u8.ToArray());
+        writer.Write(4 + 8 + 16 + 8 + samples.Length);
+        writer.Write("WAVE"u8.ToArray());
+        writer.Write("fmt "u8.ToArray());
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write((short)1);
+        writer.Write(48000);
+        writer.Write(48000 * 2);
+        writer.Write((short)2);
+        writer.Write((short)16);
+        writer.Write("data"u8.ToArray());
+        writer.Write(samples.Length);
+        writer.Write(samples);
+        writer.Flush();
+        File.WriteAllBytes(wav, wavStream.ToArray());
+    }
+
+    ProcessResult sound = await RunImport("asset-import", "/Game/Click", wav, projectOption);
+    ReportImport("asset-import sound clip", sound.ExitCode == 0 &&
+        File.Exists(Path.Combine(project, "Content", "Click.rasset")), sound);
+    ProcessResult soundVolume = await RunImport("asset-import", "/Game/Quiet", wav, "--volume=0.5", projectOption);
+    ReportImport("asset-import sound --volume is reserved", soundVolume.ExitCode == 2 &&
+        soundVolume.StdErr.StartsWith("usage: asset-import", StringComparison.Ordinal), soundVolume);
+
     string[][] importUsage =
     [
         ["asset-import", projectOption],
@@ -1934,6 +1966,19 @@ try
     ReportCook("asset-cook usage", usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-cook", StringComparison.Ordinal), usage);
     ProcessResult help = await RunCook("asset-cook", "--help");
     ReportCook("asset-cook help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-cook", StringComparison.Ordinal), help);
+
+    // 제품 쿠킹 처리기 연결(MeshAnimationAssets 13.1절 2): 빈 StaticMesh·SkeletalMesh·AnimationClip은 각 처리기가 거부한다
+    // (메시 둘은 쓸 LOD가 없어 InvalidSource, 클립은 스켈레톤이 없어 MissingDependency). 기본 처리기였다면 모두 성공한다.
+    ProcessResult rock = await RunCook("asset-new", "StaticMesh", "/Game/Rock", projectOption);
+    ProcessResult body = await RunCook("asset-new", "SkeletalMesh", "/Game/Body", projectOption);
+    ProcessResult walk = await RunCook("asset-new", "AnimationClip", "/Game/Walk", projectOption);
+    ProcessResult failedNew = rock.ExitCode != 0 ? rock : body.ExitCode != 0 ? body : walk;
+    ReportCook("asset-new mesh and clip types", rock.ExitCode == 0 && body.ExitCode == 0 && walk.ExitCode == 0, failedNew);
+    ProcessResult wired = await RunCook("asset-cook", "--profile=Windows", projectOption);
+    ReportCook("asset-cook mesh and clip processors", wired.ExitCode == 1 &&
+        wired.StdErr.Contains("InvalidSource: /Game/Rock: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("InvalidSource: /Game/Body: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("MissingDependency: /Game/Walk: error", StringComparison.Ordinal), wired);
 }
 finally
 {
@@ -1992,7 +2037,7 @@ if (OperatingSystem.IsWindows())
     }
 }
 
-// asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
+// asset-import-unreal(UnrealExchange 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
 // dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
 // 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");

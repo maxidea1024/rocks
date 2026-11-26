@@ -12,7 +12,7 @@
 #include <UnrealExchange/ExchangeImportOrder.h>
 #include <UnrealExchange/ExchangePaths.h>
 
-// Unreal 교환 리더 시험 공용 도구다(Docs/Design/UnrealExchange.ko.md 12.1절): 메모리 파일
+// Unreal 교환 리더 시험 공용 도구다(Docs/Design/UnrealExchange 12.1절): 메모리 파일
 // 시스템(변조· 실패 주입), 저장소 fixture
 // 묶음(Engine/Plugins/Importers/UnrealExchange/Tests/Bundles) 복사, 합성 묶음 작성.
 

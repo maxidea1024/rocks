@@ -21,6 +21,7 @@
 | EngineRuntime | 6절 RunFrame ⑥ "FrameEnd(렌더 추출·제출)" | 게임 스레드 동기 제출 | 프레임 packet 게시와 slot 확보(5.2·5.3절) |
 | 〃 | 10.1절 계약 | 생성 스레드 전용 | 장치 스레드 모델(5.4절) |
 | 〃 | 11절 "GPU 텍스처는 WorldIntegration 텍스처 캐시가 만든다" | 게임 스레드가 장치 자원을 만든다 | `RenderHandle` 예약과 렌더 lane 생성(6.2절) |
+| 〃 | 3절 `WorldIntegration` 행·30.1절 의존(개정 54) | RenderBase는 RenderScene 추출 때 더한다 | SM8 텍스처 렌더 캐시가 Texture·RenderBase를 더한다(18.5절 8항) |
 | 〃 | 12절 5·6단계 | 종료 시 GPU idle 대기 → 장치·창 정리 | 5.5절 종료 순서 |
 | 〃 | 13절 GPU 시험 | D3D12·OpenGL self-test | 기록 backend CPU 시험, D3D12·Vulkan·GLES 미리보기 |
 | 〃 | 14절 제한 | 렌더 스레드는 후속 | RB1 |

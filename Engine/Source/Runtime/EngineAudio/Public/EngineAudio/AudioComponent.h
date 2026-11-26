@@ -1,7 +1,7 @@
 #pragma once
 
 #include <EngineAudio/AudioPlayback.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 #include <World/SceneComponent.h>
 
 // 위치를 따라가는 사운드 컴포넌트다(Docs/Design/AudioSystem 3.8.3·3.35.8절, UE UAudioComponent

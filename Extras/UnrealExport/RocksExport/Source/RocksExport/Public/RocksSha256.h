@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-// FIPS 180-4 SHA-256이다(UnrealExchange.ko.md 11.3절). blob 이름(내용 주소)과 Rocks 리더의 검증이 이
+// FIPS 180-4 SHA-256이다(UnrealExchange 11.3절). blob 이름(내용 주소)과 Rocks 리더의 검증이 이
 // 값을 쓴다. UE Core에는 공개 SHA-256이 없어(GetSHA256Signature는 구현 없음) 플러그인이 직접 둔다.
 //
 // 사용 예:

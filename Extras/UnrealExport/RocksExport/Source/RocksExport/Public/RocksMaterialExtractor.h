@@ -5,7 +5,7 @@
 class UObject;
 struct FRocksAssetBody;
 
-// 머티리얼 계열 추출이다(UnrealExchange.ko.md 8.1·8.2절, 8.6절 — 11.6절 FRocksMaterialExtractor). 번역(8.5절)·
+// 머티리얼 계열 추출이다(UnrealExchange 8.1·8.2절, 8.6절 — 11.6절 FRocksMaterialExtractor). 번역(8.5절)·
 // Substrate 번역(8.3절)·굽기(8.4절)는 하지 않는다. Substrate 그래프도 에디터 메모리 그대로 덤프한다.
 //
 // - Material·MaterialFunction: settings = 객체 UPROPERTY 덤프(그래프 묶음 FMaterialExpressionCollection과 핀은 뺀다),

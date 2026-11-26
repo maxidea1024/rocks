@@ -16,6 +16,7 @@ public sealed class AudioOpus : EngineModuleRules
 
     protected override string[] PublicDependencies => ["Core", "Audio"];
 
-    // libopus (float build) from Engine/Source/ThirdParty; its headers stay private to this module.
-    protected override string[] PrivateDependencies => ["Opus"];
+    // libopus (float build) from Engine/Source/ThirdParty; its headers stay private to this module. ModuleLoader gives the module
+    // lifetime object the HostServices lookup for AudioDecoderRegistry (Docs/Design/AudioSystem section 3.37.1).
+    protected override string[] PrivateDependencies => ["Opus", "ModuleLoader"];
 }

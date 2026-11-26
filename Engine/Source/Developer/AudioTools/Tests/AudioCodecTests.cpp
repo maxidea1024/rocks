@@ -900,6 +900,47 @@ TEST(Audio_Codec_DecoderTable) {
           ErrorCode::NotFound);
 }
 
+// 디코더 등록부(Docs/Design/AudioSystem 3.37.1절): 넣기·지우기·범위 밖 무시, Fill은 표에 없는
+// codec만 넣는다(내장 디코더가 앞선다).
+TEST(Audio_Codec_DecoderRegistry) {
+    SystemAllocator allocator;
+    AudioDecoderRegistry registry;
+    for (uint32 index = 0; index < MaxAudioCodecs; ++index) {
+        CHECK(registry.Factory(static_cast<AudioCodecId>(index)) == nullptr);
+    }
+
+    // None·범위 밖은 무시한다(조회도 nullptr).
+    registry.SetFactory(AudioCodecId::None, &CreateTestCodecDecoder);
+    registry.SetFactory(static_cast<AudioCodecId>(MaxAudioCodecs), &CreateTestCodecDecoder);
+    CHECK(registry.Factory(AudioCodecId::None) == nullptr);
+    CHECK(registry.Factory(static_cast<AudioCodecId>(MaxAudioCodecs)) == nullptr);
+
+    registry.SetFactory(AudioCodecId::Opus, &FailingFactory);
+    registry.SetFactory(AudioCodecId::Pcm16, &FailingFactory);
+    registry.SetFactory(TestCodec, &CreateTestCodecDecoder);
+    CHECK(registry.Factory(AudioCodecId::Opus) == &FailingFactory);
+
+    // 내장 디코더가 먼저 있으면 Pcm16은 그대로이고, 표에 없던 Opus·시험 codec만 들어간다.
+    AudioDecoderTable table;
+    REQUIRE(RegisterBuiltInAudioDecoders(table));
+    registry.Fill(table);
+    CHECK(table.Contains(AudioCodecId::Opus) && table.Contains(TestCodec));
+    auto pcm = table.Create(AudioCodecId::Pcm16, allocator);
+    CHECK(pcm.IsOk());
+    CHECK(table.Create(AudioCodecId::Opus, allocator).Error() == ErrorCode::OutOfMemory);
+    // 다시 Fill해도 바뀌지 않는다(이미 있는 codec은 둔다).
+    registry.Fill(table);
+    CHECK(table.Create(AudioCodecId::Opus, allocator).Error() == ErrorCode::OutOfMemory);
+
+    // 지우면 새 표에는 들어가지 않는다.
+    registry.SetFactory(AudioCodecId::Opus, nullptr);
+    CHECK(registry.Factory(AudioCodecId::Opus) == nullptr);
+    AudioDecoderTable fresh;
+    registry.Fill(fresh);
+    CHECK(!fresh.Contains(AudioCodecId::Opus) && fresh.Contains(AudioCodecId::Pcm16) &&
+          fresh.Contains(TestCodec));
+}
+
 TEST(Audio_Codec_EncoderRejects) {
     SystemAllocator allocator;
     Pcm16AudioEncoder pcm;

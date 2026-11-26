@@ -6,10 +6,11 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
 #include <Platform/File.h>
 #include <UnrealExchange/ExchangeDiagnostic.h>
 
-// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange.ko.md 3절, 10.4절). UE 쪽 RocksExport가 쓴
+// Unreal 교환 묶음 리더다(Docs/Design/UnrealExchange 3절, 10.4절). UE 쪽 RocksExport가 쓴
 // `<이름>.rxbundle/` 디렉터리의 bundle.json과 에셋 JSON을 읽어 공통 스키마(3.4·3.5절)·정렬·blob
 // 참조(3.3절)를 검증하고, 에셋마다 종류별 단계(UX2–UX8)가 읽을 settings·data JSON을 넘긴다.
 //
@@ -243,6 +244,39 @@ ROCKS_UNREALEXCHANGE_API Result<void> LoadExchangeBlob(const ExchangeBundle& bun
                                                        const ExchangeBlobRef& blob,
                                                        Array<uint8>& out,
                                                        ExchangeDiagnostics& diagnostics) noexcept;
+
+// 에셋 JSON byte 하나를 읽어 out을 채운다(10.6절 5번 — A2f 임포터가 원본을 다시 볼 때). 검사는
+// 묶음 리더의 에셋 JSON 검사와 같다(10.4절 5–9·11번 — 크기 UnrealExchangeMaxJsonBytes, 구문, 키,
+// objectPath 문법, 의존, 플러그인 진단과 error, settings·data 객체, blob 참조 형식). bundle.json
+// 대조만 없고 objectPath·className·exchangeClass(모르는 클래스는 Unsupported)는 문서 값이며 의존의
+// target은 ExchangeNoIndex다. out의 문자열·JSON 값은 out.document를 가리킨다.
+//
+// 반환: 성공이면 out.state가 Ready다. 거부는 diagnostics(asset = ExchangeNoIndex, file AssetJson)에
+// 이유를 더하고 그 오류(CorruptBundle은 InvalidArgument·CapacityExceeded, 플러그인 error 진단은
+// InvalidArgument)이며 out은 Failed·빈 값이다. 할당 실패는 진단 없이 그 오류다.
+//
+// 사용 예(A2f 임포터):
+//   ExchangeAsset asset(allocator);
+//   if (auto read = ReadExchangeAssetDocument(source.bytes, allocator, asset, diagnostics); !read)
+//   {
+//       return context.Fail(AssetDiagnosticCode::CorruptBundle, read.Error());
+//   }
+ROCKS_UNREALEXCHANGE_API Result<void>
+ReadExchangeAssetDocument(Span<const uint8> bytes, Allocator& allocator, ExchangeAsset& out,
+                          ExchangeDiagnostics& diagnostics) noexcept;
+
+// blob byte가 참조와 맞는지 본다(10.6절 5번): 크기, 가변 배치, SHA-256(LoadExchangeBlob과 같은
+// 검사). 실패하면 issue(null 가능)에 세부 규칙(BlobSize·BlobHash·BlobLayout)을 쓰고
+// InvalidArgument다.
+ROCKS_UNREALEXCHANGE_API Result<void> VerifyExchangeBlob(const ExchangeBlobRef& blob,
+                                                         Span<const uint8> bytes,
+                                                         ExchangeIssue* issue = nullptr) noexcept;
+
+// directory 아래 blob 파일 경로(`<directory>/blobs/<앞 2자>/<64자>.bin` — 3.1절)를 out 뒤에 붙인다.
+// 오류: out의 쓰기 오류(용량·할당).
+ROCKS_UNREALEXCHANGE_API Result<void> AppendExchangeBlobPath(StringView directory,
+                                                             const Sha256Digest& digest,
+                                                             StringBuilderBase& out) noexcept;
 
 // 교환 JSON의 실수 값을 읽는다(3.2절): JSON 숫자이거나 문자열 "nan"·"inf"·"-inf"다. 그 밖은
 // InvalidArgument다. 종류별 단계가 settings·data를 읽을 때 쓴다.

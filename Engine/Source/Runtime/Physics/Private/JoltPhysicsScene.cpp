@@ -21,21 +21,6 @@ namespace rocks::physics {
 
 namespace {
 
-// Jolt body user data에 칸 번호(위 32 bit)와 세대(아래 32 bit)를 넣는다.
-constexpr uint32 UserDataIndexShift = 32;
-
-JPH::uint64 PackUserData(uint32 index, uint32 generation) noexcept {
-    return (static_cast<JPH::uint64>(index) << UserDataIndexShift) | generation;
-}
-
-uint32 UserDataIndex(JPH::uint64 userData) noexcept {
-    return static_cast<uint32>(userData >> UserDataIndexShift);
-}
-
-uint32 UserDataGeneration(JPH::uint64 userData) noexcept {
-    return static_cast<uint32>(userData);
-}
-
 // 잠든 body 목록 용량 배수다: 한 step 사이에 칸 하나에서 지운 body와 새 body가 함께 잠들 수 있다.
 constexpr usize DeactivationSlotsPerBody = 2;
 
@@ -55,7 +40,7 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
       jobs_(scheduler, JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers), activations_(allocator),
       slots_(allocator), freeSlots_(allocator), pendingResults_(allocator),
       kinematicTargets_(allocator), kinematicMoving_(allocator), slept_(allocator),
-      moved_(allocator) {
+      moved_(allocator), queryHits_(allocator) {
     system_.Init(settings.maxBodies, BodyMutexCount, settings.maxBodyPairs,
                  settings.maxContactConstraints, broadPhaseLayers_, objectVsBroadPhase_,
                  layerPairs_);
@@ -183,6 +168,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     BodySlot& slot = slots_[index];
     slot.body = created;
     slot.component = desc.component;
+    slot.actor = desc.actor;
     slot.motion = desc.motion;
     slot.live = true;
     slot.responseSet = responseSet.Value();
@@ -211,6 +197,7 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     slot.responseSet = 0;
     slot.body = JPH::BodyID();
     slot.component = {};
+    slot.actor = {};
     slot.live = false;
     slot.pendingResult = false;
     slot.hasTarget = false;

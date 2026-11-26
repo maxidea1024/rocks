@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CpuDisplayColor.h"
-#include "PlatformTextureSource.h"
 
 #include <Core/Containers/Array.h>
+#include <WorldIntegration/Textures/PlatformTextureSource.h>
 
 // 텍스처 장면 self-test의 표본점·CPU 기준·capture 대조 도우미다(Docs/Design/RenderBase 18.5절 7항).
 // 메모리 장면과 쿠킹 장면이 함께 쓴다. capture는 SceneCaptureWidth × SceneCaptureHeight RGBA8(sRGB

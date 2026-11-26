@@ -1,0 +1,2556 @@
+{
+  "textures": [
+    {
+      "objectPath": "/Engine/EditorLandscapeResources/DefaultAlphaTexture.DefaultAlphaTexture",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 64,
+          "Y": 64
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": true,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": true,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EditorMaterials/AssetViewer/T_GreyAmbient.T_GreyAmbient",
+      "class": "TextureCube",
+      "settings": {
+        "LightingGuid": {
+          "A": -1612246596,
+          "B": 1296777770,
+          "C": 493389191,
+          "D": -2142375840
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.12",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HDR_Compressed",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EditorMaterials/Dataflow/T_CheckerBoard.T_CheckerBoard",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 2000,
+          "Y": 2000
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -118783126,
+          "B": 1304959836,
+          "C": -67502414,
+          "D": -1463608779
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.16",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/ColorGradingWheelBackground.ColorGradingWheelBackground",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 1024,
+          "Y": 1024
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -32254379,
+          "B": 1194637358,
+          "C": -1455739743,
+          "D": 427427102
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.12",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_EditorIcon",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_UI",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/DefaultBloomKernel.DefaultBloomKernel",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 2048,
+          "Y": 2048
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -1129201244,
+          "B": 1226609449,
+          "C": 1930383023,
+          "D": 1708019185
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 512,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 1
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HDR",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/Hair/Hair_DualScattering.Hair_DualScattering",
+      "class": "VolumeTexture",
+      "settings": {
+        "Source2DTexture": {
+          "objectPath": "/Engine/EngineMaterials/Hair/Hair_DualScattering2D.Hair_DualScattering2D"
+        },
+        "Source2DTileSizeX": 64,
+        "Source2DTileSizeY": 64,
+        "AddressMode": "TA_Wrap",
+        "LightingGuid": {
+          "A": -1452827176,
+          "B": 1217917218,
+          "C": 1719131836,
+          "D": -762113529
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.16",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HDR",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/Hair/Hair_DualScattering2D.Hair_DualScattering2D",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 256,
+          "Y": 256
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -423962895,
+          "B": 1331700058,
+          "C": -406696534,
+          "D": 128308387
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.16",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HDR_Compressed",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/SMAASearchTex.SMAASearchTex",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 64,
+          "Y": 16
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 1371633041,
+          "B": 1307704074,
+          "C": 1453547419,
+          "D": 1001061255
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.13",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_VectorDisplacementmap",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/Substrate/Volume/SubstrateSimpleVolumeLUT2D.SubstrateSimpleVolumeLUT2D",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 11,
+          "Y": 792
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 636887762,
+          "B": 1149128188,
+          "C": 491466424,
+          "D": 1904862413
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.10",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HalfFloat",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/Substrate/Volume/SubstrateSimpleVolumeLUT3D.SubstrateSimpleVolumeLUT3D",
+      "class": "VolumeTexture",
+      "settings": {
+        "Source2DTexture": {
+          "objectPath": "/Engine/EngineMaterials/Substrate/Volume/SubstrateSimpleVolumeLUT2D.SubstrateSimpleVolumeLUT2D"
+        },
+        "Source2DTileSizeX": 11,
+        "Source2DTileSizeY": 11,
+        "AddressMode": "TA_Clamp",
+        "LightingGuid": {
+          "A": 1480074378,
+          "B": 1093048319,
+          "C": 43224988,
+          "D": 1324059791
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.10",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_HalfFloat",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/T_Default_Material_Grid_M.T_Default_Material_Grid_M",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 512,
+          "Y": 512
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 1794791461,
+          "B": 1234284259,
+          "C": -321045621,
+          "D": -717989752
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": true,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/T_Grid_Crosses.T_Grid_Crosses",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 4096,
+          "Y": 4096
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -1651546549,
+          "B": 1128005896,
+          "C": -1315720019,
+          "D": -351374838
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.12",
+        "MaxTextureSize": 1024,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/WeightMapArrayPlaceholderTexture.WeightMapArrayPlaceholderTexture",
+      "class": "Texture2DArray",
+      "settings": {
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "AddressZ": "TA_Wrap",
+        "SourceTextures": [
+          {
+            "objectPath": "/Engine/EngineMaterials/WeightMapPlaceholderTexture.WeightMapPlaceholderTexture"
+          }
+        ],
+        "LightingGuid": {
+          "A": 1818549779,
+          "B": 1260221137,
+          "C": -809462910,
+          "D": 1434851314
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.11",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineMaterials/WeightMapPlaceholderTexture.WeightMapPlaceholderTexture",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 2,
+          "Y": 2
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -1480777446,
+          "B": 1292240990,
+          "C": 1880771207,
+          "D": -536325369
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": true,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_Sharpen4",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": true,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineResources/DefaultTextureCube.DefaultTextureCube",
+      "class": "TextureCube",
+      "settings": {
+        "LightingGuid": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": true,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": true,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineResources/DefaultVolumeTexture.DefaultVolumeTexture",
+      "class": "VolumeTexture",
+      "settings": {
+        "Source2DTexture": {
+          "objectPath": "/Engine/EngineResources/DefaultVolumeTexture2D.DefaultVolumeTexture2D"
+        },
+        "Source2DTileSizeX": 4,
+        "Source2DTileSizeY": 4,
+        "AddressMode": "TA_Wrap",
+        "LightingGuid": {
+          "A": -266596264,
+          "B": 1284729367,
+          "C": -1342540627,
+          "D": 262051950
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": true,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_NoMipmaps",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Nearest",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": true,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineResources/DefaultVolumeTexture2D.DefaultVolumeTexture2D",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Clamp",
+        "AddressY": "TA_Clamp",
+        "ImportedSize": {
+          "X": 8,
+          "Y": 8
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": -345438667,
+          "B": 1293708976,
+          "C": 651092877,
+          "D": 627149862
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "None",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 1
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Nearest",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Engine/EngineSky/VolumetricClouds/T_CloudMask.T_CloudMask",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 1024,
+          "Y": 1024
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 2061595732,
+          "B": 1179715066,
+          "C": -657434954,
+          "D": -32046800
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": true,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.8",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0
+        },
+        "bUseNewMipFilter": false,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_NormalRoughnessToAlpha",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_VectorDisplacementmap",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": false,
+        "bNormalizeNormals": false,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Game/RxTex/T_Gray16.T_Gray16",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 16,
+          "Y": 8
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 1916484882,
+          "B": 1305248124,
+          "C": 1264623277,
+          "D": 585824456
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.16",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    },
+    {
+      "objectPath": "/Game/RxTex/T_Rgb16.T_Rgb16",
+      "class": "Texture2D",
+      "settings": {
+        "FirstResourceMemMip": 0,
+        "bHasBeenPaintedInEditor": false,
+        "AddressX": "TA_Wrap",
+        "AddressY": "TA_Wrap",
+        "ImportedSize": {
+          "X": 8,
+          "Y": 8
+        },
+        "CPUCopyTexture": null,
+        "LightingGuid": {
+          "A": 855271228,
+          "B": 1178984487,
+          "C": -1346674778,
+          "D": -1068053544
+        },
+        "AssetImportData": {
+          "subobject": "AssetImportData"
+        },
+        "AdjustBrightness": 1,
+        "AdjustBrightnessCurve": 1,
+        "AdjustVibrance": 0,
+        "AdjustSaturation": 1,
+        "AdjustRGBCurve": 1,
+        "AdjustHue": 0,
+        "AdjustMinAlpha": 0,
+        "AdjustMaxAlpha": 1,
+        "CompressionNoAlpha": false,
+        "CompressionForceAlpha": false,
+        "CompressionNone": false,
+        "LossyCompressionAmount": "TLCA_Default",
+        "OodleTextureSdkVersion": "2.9.16",
+        "MaxTextureSize": 0,
+        "CompressionQuality": "TCQ_Default",
+        "CompressionCacheId": {
+          "A": 0,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "bDoScaleMipsForAlphaCoverage": false,
+        "AlphaCoverageThresholds": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 0.75
+        },
+        "bUseNewMipFilter": true,
+        "bPreserveBorder": false,
+        "bFlipGreenChannel": false,
+        "PowerOfTwoMode": "None",
+        "PaddingColor": {
+          "B": 0,
+          "G": 0,
+          "R": 0,
+          "A": 255
+        },
+        "bPadWithBorderColor": false,
+        "ResizeDuringBuildX": 0,
+        "ResizeDuringBuildY": 0,
+        "bChromaKeyTexture": false,
+        "ChromaKeyThreshold": 0.00392156886,
+        "ChromaKeyColor": {
+          "B": 255,
+          "G": 0,
+          "R": 255,
+          "A": 255
+        },
+        "MipGenSettings": "TMGS_FromTextureGroup",
+        "CompositeTexture": null,
+        "CompositeTextureMode": "CTM_Disabled",
+        "CompositePower": 1,
+        "LayerFormatSettings": [],
+        "LODBias": 0,
+        "CompressionSettings": "TC_Default",
+        "Filter": "TF_Default",
+        "MipLoadOptions": "Default",
+        "VirtualTextureStreamingPriority": "Normal",
+        "VirtualTexturePrefetchMips": 0,
+        "CookPlatformTilingSettings": "TCPTS_FromTextureGroup",
+        "bOodlePreserveExtremes": false,
+        "LODGroup": "TEXTUREGROUP_World",
+        "Downscale": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "DownscaleOptions": "Default",
+        "Availability": "GPU",
+        "SRGB": true,
+        "bNormalizeNormals": true,
+        "bUseLegacyGamma": false,
+        "SourceColorSettings": {
+          "EncodingOverride": "TSE_None",
+          "ColorSpace": "TCS_None",
+          "RedChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "GreenChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "BlueChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "WhiteChromaticityCoordinate": {
+            "X": 0,
+            "Y": 0
+          },
+          "ChromaticAdaptationMethod": "TCAM_Bradford"
+        },
+        "bNoTiling": false,
+        "VirtualTextureStreaming": false,
+        "bUseVirtualTextureStreamingPriority": false,
+        "CompressionYCoCg": false,
+        "AssetUserData": [],
+        "NumCinematicMipLevels": 0,
+        "NoRefStreamingLODBias": {
+          "Default": -1,
+          "PerQuality": []
+        },
+        "NeverStream": false,
+        "bGlobalForceMipLevelsToBeResident": false
+      }
+    }
+  ]
+}
