@@ -401,14 +401,85 @@ private:
                    : NoShaderReflectedParent;
     }
 
+    // 상수 버퍼 이름의 표다(상수 부분이 없는 자원 표는 상수 버퍼가 아니다).
     const ShaderParameterLayout* FindLayout(StringView name) const noexcept {
         for (const ShaderParameterLayout& layout : layouts_) {
-            if (layout.name == name) {
+            if (layout.name == name && layout.totalBytes != 0) {
                 return &layout;
             }
         }
 
         return nullptr;
+    }
+
+    // 자원 멤버와 셰이더 선언이 같은 종류·모양·원소·stride인가(16.2절 SSD63).
+    static bool ResourceFits(const ShaderParameterResource& member,
+                             const ShaderBindingResource& binding) noexcept {
+        if (binding.shape != member.shape || binding.component != member.component) {
+            return false;
+        }
+
+        const bool typed = member.shape == ShaderResourceShape::TypedBuffer;
+        const bool strided = binding.structureStride == member.structureStride;
+        switch (member.kind) {
+        case ShaderParameterResourceKind::DeviceTexture:
+        case ShaderParameterResourceKind::GraphTexture:
+        case ShaderParameterResourceKind::GraphTextureSrv:
+            return binding.kind == ShaderResourceKind::SampledTexture;
+        case ShaderParameterResourceKind::DeviceBuffer:
+        case ShaderParameterResourceKind::GraphBufferSrv:
+            return typed ? binding.kind == ShaderResourceKind::SampledTexture
+                         : binding.kind == ShaderResourceKind::StorageBufferRead && strided;
+        case ShaderParameterResourceKind::GraphTextureUav:
+            return binding.kind == ShaderResourceKind::StorageImage;
+        case ShaderParameterResourceKind::GraphBufferUav:
+            return typed ? binding.kind == ShaderResourceKind::StorageImage
+                         : binding.kind == ShaderResourceKind::StorageBufferReadWrite && strided;
+        case ShaderParameterResourceKind::GraphTextureAccess:
+        case ShaderParameterResourceKind::GraphBufferAccess:
+        case ShaderParameterResourceKind::RenderTargets:
+            break;
+        }
+
+        return false;
+    }
+
+    // 상수 버퍼가 아닌 자원을 job 표의 자원 멤버와 이름으로 맞춰 구조체 identity와 멤버 오프셋을
+    // 넣는다(SX8 뒷부분, 16.2절 SSD63). 짝 샘플러는 그 텍스처 멤버의 오프셋이다. 이름이 같은데
+    // 종류·모양·원소·stride가 다르면 실패다. 맞는 멤버가 없으면 그대로 둔다(손으로 쓴 자원).
+    bool MatchResourceMember(ShaderBindingResource& binding) noexcept {
+        const bool sampler = binding.kind == ShaderResourceKind::Sampler;
+        for (const ShaderParameterLayout& layout : layouts_) {
+            for (const ShaderParameterResource& member : layout.resources) {
+                if (!IsShaderBoundResource(member.kind) ||
+                    (sampler ? member.samplerName != binding.name : member.name != binding.name)) {
+                    continue;
+                }
+
+                if (!sampler && !ResourceFits(member, binding)) {
+                    Text("parameter layout '");
+                    Text(layout.name);
+                    Text("' resource member '");
+                    Text(member.name);
+                    Text("' (");
+                    Text(ShaderParameterResourceKindName(member.kind));
+                    Text(", ");
+                    Text(ShaderResourceShapeName(member.shape));
+                    Text(") does not match the shader resource of kind ");
+                    Text(ShaderResourceKindName(binding.kind));
+                    Text(", ");
+                    Text(ShaderResourceShapeName(binding.shape));
+                    return Fail(" (kind, shape, element type and structure stride must be the "
+                                "same)");
+                }
+
+                binding.structId = layout.structId;
+                binding.memberOffset = member.offset;
+                return true;
+            }
+        }
+
+        return true;
     }
 
     // 레이아웃 표와 대조한다(7.3절 (a) — 이름·타입·오프셋·원소 수·전체 크기, 중첩 구조체는 그 표와
@@ -630,6 +701,8 @@ private:
                 binding.memberCount = static_cast<uint32>(members_.Size()) - binding.firstMember;
             } else if (resource.memberCount != 0) {
                 return FailNamed("resource", resource.name, "only constant buffers have members");
+            } else if (!MatchResourceMember(binding)) {
+                return false;
             }
 
             if (!pending_.TryPushBack(binding)) {

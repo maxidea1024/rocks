@@ -555,6 +555,21 @@ private:
     mutable bool destroyingTarget_ = false;
 };
 
+// MulticastDelegate 항목 수 통계다(MulticastDelegate::Stats — 진단·시험용).
+struct MulticastDelegateStats {
+    // 배열에 있는 항목 수(제거 표시·약한 대상이 사라진 항목 포함 — 아직 정리 전)다.
+    usize entries = 0;
+    // 호출될 항목(제거되지 않았고 약한 대상이 살아 있음) 수다.
+    usize bound = 0;
+    // 직전 정리가 끝났을 때 남은 항목 수다(TryAdd 정리 상한의 기준).
+    usize liveAtLastCompact = 0;
+};
+
+// TryAdd가 정리를 부르는 항목 수 상한의 여유분이다: 직전 정리 뒤 남은 수가 L이면 항목 수가
+// 2L + MulticastCompactSlack에 닿을 때 정리한다(SL 5.5절 C2 — 한 번도 Broadcast하지 않는
+// delegate에도 죽은 항목이 끝없이 쌓이지 않는다, 정리 비용은 분할 상환 O(1)).
+inline constexpr usize MulticastCompactSlack = 8;
+
 // 여러 대상을 등록해 한 번에 호출하는 delegate다(UE TMulticastDelegate 대응). 반환값은 없다.
 // 사용 예:
 //   MulticastDelegate<void(int)> onDamaged(allocator);
@@ -566,7 +581,11 @@ private:
 // - 등록 항목은 개별 할당되어 주소가 고정된다. Broadcast 중 추가·제거해도 실행 중인 대상을 옮기지
 //   않는다. Broadcast 중 추가한 항목은 다음 Broadcast부터 호출되고, 제거한 항목은 이후 순서에서
 //   호출되지 않는다. 실제 정리(소멸·반환)는 가장 바깥 Broadcast가 끝난 뒤에 한다.
-// - 호출 순서는 등록 순서다. 약한 대상이 사라진 항목은 건너뛰고 다음 정리 때 제거된다.
+// - 호출 순서는 등록 순서다. 약한 대상이 사라진 항목은 건너뛰고 다음 정리 때 제거된다. 정리는
+//   등록 순서를 지킨다(UE CompactInvocationList는 RemoveAllSwap이라 순서가 바뀐다).
+// - 정리 시점: Broadcast·제거가 끝날 때, 항목 수가 직전 정리 뒤 남은 수의 두 배 +
+//   MulticastCompactSlack에 닿은 TryAdd, CompactDead. 정리는 항목을 한 번씩 보고(재진입한 대상
+//   소멸자가 다른 항목을 제거할 때만 한 번 더) 할당하지 않는다.
 // - 같은 MulticastDelegate를 대상 안에서 다시 Broadcast할 수 있다(중첩 깊이만큼 정리 지연).
 //   Broadcast 중 이동·파괴는 Fatal이다.
 // - 인자는 각 대상에 lvalue로 전달된다(값 인자는 대상마다 복사). rvalue 참조 인자는 지원하지
@@ -588,7 +607,8 @@ public:
     MulticastDelegate& operator=(const MulticastDelegate&) = delete;
 
     MulticastDelegate(MulticastDelegate&& other) noexcept
-        : allocator_(other.allocator_), entries_(*other.allocator_), nextId_(other.nextId_) {
+        : allocator_(other.allocator_), entries_(*other.allocator_), nextId_(other.nextId_),
+          liveAtLastCompact_(other.liveAtLastCompact_) {
         other.CheckIdle("MulticastDelegate moved during Broadcast or removal");
         entries_ = Move(other.entries_);
     }
@@ -615,6 +635,11 @@ public:
     Result<DelegateHandle> TryAdd(DelegateType&& delegate) noexcept {
         if (!delegate.IsBound()) {
             return Result<DelegateHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        // 상한 정리(C2): 제거 표시·약한 대상이 사라진 항목을 Broadcast 없이도 거둔다.
+        if (broadcasting_ == 0 && mutating_ == 0 &&
+            entries_.Size() >= liveAtLastCompact_ * 2 + MulticastCompactSlack) {
+            Compact();
         }
         // Broadcast 중에는 배열이 커져도 항목 주소는 그대로이고 Broadcast는 index로 다시 읽는다.
         auto reserved = entries_.TryEnsureCapacity(entries_.Size() + 1);
@@ -724,6 +749,28 @@ public:
         return false;
     }
 
+    // 지금 정리한다(제거 표시·약한 대상이 사라진 항목을 해제). Broadcast·제거·정리 중이면 아무것도
+    // 하지 않는다. 반환: 해제한 항목 수.
+    usize CompactDead() noexcept {
+        if (broadcasting_ != 0 || mutating_ != 0) {
+            return 0;
+        }
+        return Compact();
+    }
+
+    MulticastDelegateStats Stats() const noexcept {
+        MulticastDelegateStats stats;
+        stats.entries = entries_.Size();
+        stats.liveAtLastCompact = liveAtLastCompact_;
+        for (usize index = 0; index < entries_.Size(); ++index) {
+            const Entry* entry = entries_[index];
+            if (entry->id != 0 && entry->delegate.IsBound()) {
+                ++stats.bound;
+            }
+        }
+        return stats;
+    }
+
     void Broadcast(Args... args) const noexcept {
         ++broadcasting_;
         // 시작 시점의 항목만 호출한다. 추가는 뒤에 붙고 배열이 커져도 index로 다시 읽는다.
@@ -760,25 +807,43 @@ private:
         }
     }
 
-    // 제거된 항목과 약한 대상이 사라진 항목을 반환한다. 할당하지 않는다. 항목을 배열에서 먼저
-    // 떼어 낸 뒤 해제하므로, 해제 중 실행되는 대상 소멸자가 이 객체를 다시 호출해도 해제된 항목을
-    // 보지 않는다. 재진입 호출이 다른 항목을 제거로 표시할 수 있으므로 끝까지 다시 확인한다.
-    void Compact() const noexcept {
+    // 제거된 항목과 약한 대상이 사라진 항목을 반환한다(C3 — 단일 pass, 순서 보존, 할당 없음).
+    // 1단계는 대상 소멸자를 부르지 않고 살아 있는 항목을 등록 순서대로 앞으로 모은다(죽은 항목은
+    // 뒤로 — 그들끼리의 순서는 상관없다). 2단계는 죽은 묶음을 뒤에서부터 배열에서 떼어 낸 다음
+    // 해제하므로, 해제 중 실행되는 대상 소멸자가 이 객체를 다시 호출해도 해제된 항목을 보지 않는다.
+    // 재진입한 TryAdd는 묶음 뒤에 붙으므로 묶음 위치가 바뀌지 않는다. 재진입한 제거가 앞쪽 항목을
+    // 제거로 표시했으면 한 번 더 돈다. 반환: 해제한 항목 수.
+    usize Compact() const noexcept {
         ++mutating_;
-        usize index = 0;
-        while (index < entries_.Size()) {
-            Entry* entry = entries_[index];
-            if (entry->id != 0 && entry->delegate.IsBound()) {
-                ++index;
-                continue;
+        usize released = 0;
+        for (;;) {
+            const usize size = entries_.Size();
+            usize live = 0;
+            for (usize index = 0; index < size; ++index) {
+                Entry* entry = entries_[index];
+                if (entry->id != 0 && entry->delegate.IsBound()) {
+                    if (live != index) {
+                        entries_[index] = entries_[live];
+                        entries_[live] = entry;
+                    }
+                    ++live;
+                }
             }
-            if (!entries_.TryRemoveAt(index)) {
-                platform::Fatal("MulticastDelegate compaction failed");
+            if (live == size) {
+                break;
             }
-            FreeEntry(entry);
-            index = 0; // 재진입이 앞쪽 항목을 제거로 표시했을 수 있다.
+            for (usize index = size; index > live; --index) {
+                Entry* entry = entries_[index - 1];
+                if (!entries_.TryRemoveAt(index - 1)) {
+                    platform::Fatal("MulticastDelegate compaction failed");
+                }
+                FreeEntry(entry);
+                ++released;
+            }
         }
+        liveAtLastCompact_ = entries_.Size();
         --mutating_;
+        return released;
     }
 
     void FreeEntry(Entry* entry) const noexcept {
@@ -798,6 +863,8 @@ private:
     // Broadcast(const)가 끝난 뒤 정리하므로 mutable이다.
     mutable Array<Entry*> entries_;
     uint64 nextId_ = 1;
+    // 직전 정리가 끝났을 때 남은 항목 수다(TryAdd 상한 정리의 기준 — C2).
+    mutable usize liveAtLastCompact_ = 0;
     mutable uint32 broadcasting_ = 0;
     mutable uint32 mutating_ = 0; // Remove·Clear·RemoveAll·정리·소멸 중 깊이
 };

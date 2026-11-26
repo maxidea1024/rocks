@@ -2,6 +2,7 @@
 #include <InputActions/Haptics/HapticChannel.generated.h>
 #include <InputActions/Haptics/HapticEffect.generated.h>
 #include <InputActions/Haptics/HapticPlayer.h>
+#include <InputActions/InputAssetAccess.h>
 #include <Object/ValueCopy.h>
 
 // 게임패드 진동 재생·합성이다(Docs/Design/InputActions 6.1–6.3절 — UE
@@ -117,6 +118,16 @@ Result<void> HapticPlayer::PlayHapticEffect(const HapticEffect& effect,
 
     (void)effects_.TryPushBack(Move(active));
     return Result<void>::Success();
+}
+
+Result<void> HapticPlayer::PlayHapticEffect(AssetManager& assets, const AssetLease& effect,
+                                            const HapticParams& params) noexcept {
+    HapticEffect copy(*allocator_);
+    if (auto copied = CopyHapticEffect(assets, effect, copy); !copied) {
+        return copied;
+    }
+
+    return PlayHapticEffect(copy, params);
 }
 
 void HapticPlayer::StopHapticEffect(const Guid& effectId, StringView tag) noexcept {

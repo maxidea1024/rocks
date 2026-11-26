@@ -21,17 +21,26 @@
 #include <TextureTools/TextureImport.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <UnrealExchange/ExchangeCommand.h>
+#include <UnrealExchange/ExchangeTextureKind.h>
+#include <UnrealExchange/UnrealTextureImporterSet.h>
 
 #include <stdio.h>
 
 namespace rocks::commandlet_host {
 namespace {
 
+// Unreal 교환 플러그인 모듈 이름이다(호스트가 시작해 옵션 타입을 등록한다).
+constexpr StringView UnrealExchangeModuleName = "UnrealExchange";
+
 // 명령 호스트의 임포터 칸은 하나라서(AssetCommandContext::importers) 제품 임포터를 한 묶음으로
-// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나.
+// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나 → Unreal 교환 텍스처
+// 다섯(Docs/Design/UnrealExchange 10.6절 9번 — 일반 asset-reimport도 교환 에셋을 다시 임포트한다).
+// 교환 임포터는 옵션 타입이 UnrealExchange 모듈에 있어 그 모듈이 시작했을 때만 건다.
 struct ProductImporters {
     TextureImporterSet textures;
     SoundClipImporter sound;
+    UnrealTextureImporterSet unrealTextures;
+    bool unrealExchange = false;
 };
 
 Result<void> RegisterProductImporters(void* state, AssetImporterTable& table,
@@ -45,7 +54,13 @@ Result<void> RegisterProductImporters(void* state, AssetImporterTable& table,
         return textures;
     }
 
-    return RegisterSoundClipImporter(&importers.sound, table, tokens);
+    if (auto sound = RegisterSoundClipImporter(&importers.sound, table, tokens); !sound) {
+        return sound;
+    }
+
+    return importers.unrealExchange
+               ? RegisterUnrealTextureImporters(&importers.unrealTextures, table, tokens)
+               : Result<void>::Success();
 }
 
 Result<int32> CoreCheck(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
@@ -226,6 +241,10 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 3.36.3절 — 임포터 묶음은 명령보다 오래 산다. 번역기는 예약 인자 없는 사운드 원본을 그대로
     // 통과시킨다).
     ProductImporters productImporters;
+    // 교환 임포터의 옵션 타입(UnrealExchangeImportOptions)은 UnrealExchange 모듈 타입이다 — 세션
+    // 타입 등록기가 붙을 때 시작한 모듈의 타입을 등록하므로 먼저 시작한다(실패하면 교환 임포터만
+    // 빠진다).
+    productImporters.unrealExchange = modules.Load(UnrealExchangeModuleName).IsOk();
     assetContext.importers = {&RegisterProductImporters, &productImporters};
     // 타입 hook은 텍스처(설정 정규화·원본 재구성)와 애니메이션(Build 의존 —
     // MeshAnimationAssets 7.6.1절 2)이다(사운드는 hook이 없다).
@@ -234,8 +253,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 쿠킹 처리기다(텍스처 12.14절, 정적·스킨 메시·애니메이션 클립 — MeshAnimationAssets 13.1절 1).
     ProductCookProcessors cookProcessors;
     assetContext.cookProcessors = {&RegisterProductCookProcessors, &cookProcessors};
-    // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
+    // 종류별 임포터다(Docs/Design/UnrealExchange 10.5절 7번 — 텍스처 10.6절·4.6절).
+    ExchangeTextureKind exchangeTextures;
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
+    if (productImporters.unrealExchange) {
+        unrealContext.kinds = {&RegisterExchangeTextureKinds, &exchangeTextures};
+    }
     const bool settingsReady = BootSettings(settings, modules);
     // 노드 그래프 명령 문맥은 registry보다 먼저 만들어 오래 산다(헤더 계약).
     nodegraph::GraphCommandletContext graphContext;

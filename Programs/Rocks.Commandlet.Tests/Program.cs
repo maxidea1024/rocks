@@ -2037,9 +2037,9 @@ if (OperatingSystem.IsWindows())
     }
 }
 
-// asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
-// dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
-// 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+// asset-import-unreal(UnrealExchange 10.5절, 텍스처 10.6절·4.6절 — UX2b): 저장소 fixture 묶음의 dry run(텍스처 하나 계획), 실행
+// (텍스처 임포터 연결 — 새로 만듦, 다시 실행하면 재임포트, 일반 asset-reimport도 교환 원본을 다시 읽는다), 임포터 없는 클래스(건너뜀
+// 경고), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");
 try
 {
@@ -2069,10 +2069,24 @@ try
         dryRun.StdOut.Contains("asset-import-unreal: plan-create /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock\n",
             StringComparison.Ordinal) &&
         dryRun.StdOut.Contains("asset-import-unreal: 1 to create, 0 to reimport, 0 failed, 0 skipped", StringComparison.Ordinal), dryRun);
-    ProcessResult noImporter = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
-    ReportUnreal("asset-import-unreal without a kind importer", noImporter.ExitCode == 0 &&
-        noImporter.StdOut.Contains("asset-import-unreal: skipped /Game/Textures/T_Rock.T_Rock no-importer", StringComparison.Ordinal) &&
-        noImporter.StdErr.Contains("warning NoKindImporter Texture2D", StringComparison.Ordinal), noImporter);
+    ProcessResult created = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
+    ReportUnreal("asset-import-unreal texture created", created.ExitCode == 0 &&
+        created.StdOut.Contains("asset-import-unreal: created /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock ",
+            StringComparison.Ordinal) &&
+        created.StdOut.Contains("asset-import-unreal: 1 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal) &&
+        File.Exists(Path.Combine(project, "Content", "Unreal", "Game", "Textures", "T_Rock.rasset")), created);
+    ProcessResult reimported = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
+    ReportUnreal("asset-import-unreal texture reimported", reimported.ExitCode == 0 &&
+        reimported.StdOut.Contains("asset-import-unreal: reimported /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock ",
+            StringComparison.Ordinal) &&
+        reimported.StdOut.Contains("asset-import-unreal: 0 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        reimported);
+    ProcessResult plainReimport = await RunUnreal("asset-reimport", "/Game/Unreal/Game/Textures/T_Rock", projectOption);
+    ReportUnreal("asset-reimport of an exchange texture", plainReimport.ExitCode == 0, plainReimport);
+    ProcessResult noImporter = await RunUnreal("asset-import-unreal", bundle, "--only=/Game/Materials/M_Base.M_Base", projectOption);
+    ReportUnreal("asset-import-unreal skips a class without a kind importer", noImporter.ExitCode == 0 &&
+        noImporter.StdOut.Contains("asset-import-unreal: skipped /Game/Materials/M_Base.M_Base no-importer", StringComparison.Ordinal) &&
+        noImporter.StdErr.Contains("warning NoKindImporter Material", StringComparison.Ordinal), noImporter);
     ProcessResult notFound = await RunUnreal("asset-import-unreal", bundle, "--only=/Game/Nope.Nope", "--dry-run", projectOption);
     ReportUnreal("asset-import-unreal only not in the bundle", notFound.ExitCode == 1 &&
         notFound.StdErr.Contains("asset-import-unreal: NotFound: /Game/Nope.Nope: not in the bundle", StringComparison.Ordinal), notFound);

@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// UE가 내보낸 교환 묶음을 리더로 읽어 확인하는 시험이다(Docs/Design/UnrealExchange.ko.md 11.7절
+// UE가 내보낸 교환 묶음을 리더로 읽어 확인하는 시험이다(Docs/Design/UnrealExchange 11.7절
 // 18번, 12.3절).
 // - UnrealExchange_ExternalBundle(선택): 환경 변수 ROCKS_UNREAL_EXCHANGE_BUNDLE이 가리키는 묶음.
 //   변수가 없으면 [SKIP]을 출력하고 통과한다.
@@ -164,7 +164,7 @@ usize NameIndex(Span<const StringView> names, StringView name) noexcept {
 }
 
 // 교환 MeshSource 기록 하나를 MA1 저장 형태로 옮겨 실제 패키지로 쓰고 다시 로드한 뒤
-// MeshSource::Load로 만든다(UnrealExchange.ko.md 12.3절 — UX3b 임포트가 할 저장과 같은 규칙):
+// MeshSource::Load로 만든다(UnrealExchange 12.3절 — UX3b 임포트가 할 저장과 같은 규칙):
 // MeshSourceData의 요소 수는 counts, 위상 bulk 하나는 위상 blob 일곱을 9.1절 순서로 이어 붙인 것,
 // 속성 레코드는 기록 순서(9.2절 정렬과 같다)이고 값 bulk는 교환 blob bytes 그대로다(배치가 같다 —
 // MeshAnimationAssets 3.4.1절). Load가 배치 판정과 ValidateMeshSource(본 수 모름)를 한다.
@@ -1139,7 +1139,7 @@ struct BundleTotals {
     usize referenceAssets = 0;
 };
 
-// directory의 묶음을 읽어 위 판정을 모두 돌린다(UnrealExchange.ko.md 11.7절 18번, 12.3절). 읽기에
+// directory의 묶음을 읽어 위 판정을 모두 돌린다(UnrealExchange 11.7절 18번, 12.3절). 읽기에
 // 실패하면 bundle은 비어 있고 totals는 0이다.
 BundleTotals CheckBundle(StringView directory, Allocator& allocator, ExchangeBundle& bundle) {
     ExchangeDiagnostics diagnostics(allocator);
@@ -1258,7 +1258,7 @@ bool HasExporterDiagnostic(const ExchangeAsset& asset, StringView code) noexcept
     return false;
 }
 
-// 저장소 golden 묶음(RocksExport로 만든 실제 묶음 — UnrealExchange.ko.md 12.3절)을 늘 읽어 위
+// 저장소 golden 묶음(RocksExport로 만든 실제 묶음 — UnrealExchange 12.3절)을 늘 읽어 위
 // 판정을 모두 돌리고, 묶음이 담은 경계 사례를 확인한다: 퇴화 다각형(자기 변을 뺀 변 수와
 // DegenerateEdgesDropped), 옛 경로 soft 참조(redirect 하나, 클립 의존이 새 경로·SkeletalMesh·soft·
 // 묶음 안 대상), 범위 밖 에셋 하나(PhysicsAsset Unsupported).

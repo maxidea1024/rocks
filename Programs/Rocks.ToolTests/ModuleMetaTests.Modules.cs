@@ -561,7 +561,7 @@ internal static partial class ModuleMetaTests
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module with an exported base");
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower"))))
             {
-                Verify.Equal(5, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 5");
+                Verify.Equal(6, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 6");
                 Verify.That(Type(descriptor, "probe::Parent").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "Exported"),
                     "the exported class carries the Exported flag");
             }
@@ -599,11 +599,11 @@ internal static partial class ModuleMetaTests
 
             layout.ApiValues.Clear();
 
-            // 이전 schema descriptor(schema 4 — 리플렉션 함수 이전)는 거부한다.
+            // 이전 schema descriptor(schema 5 — Sparks 함수 노출 이전)는 거부한다.
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module again");
             string mutated = layout.Generated("Mutated", "schema1.rocksmeta.json");
             Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
-            File.WriteAllText(mutated, File.ReadAllText(layout.Descriptor("Lower")).Replace("\"schema\": 5", "\"schema\": 4", StringComparison.Ordinal));
+            File.WriteAllText(mutated, File.ReadAllText(layout.Descriptor("Lower")).Replace("\"schema\": 6", "\"schema\": 5", StringComparison.Ordinal));
             await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "schema");
         });
 

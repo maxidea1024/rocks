@@ -2,6 +2,7 @@
 
 #include <Audio/AudioBuffer.h>
 #include <Audio/AudioPlatformData.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
@@ -84,6 +85,46 @@ private:
 // 내장 디코더(PCM16·ADPCM)를 넣는다. 이미 있으면 AlreadyExists다.
 ROCKS_AUDIO_API Result<void> RegisterBuiltInAudioDecoders(AudioDecoderTable& table) noexcept;
 
+// 호스트가 HostServices에 올리는 codec 모듈 디코더 등록부다(Docs/Design/AudioSystem 3.37.1절).
+// Audio(Runtime)는 ClientOnly codec 모듈(AudioOpus)을 링크하지 않으므로 그 모듈의 Startup이 여기에
+// factory를 넣고, 표를 만드는 쪽(AudioEngineSubsystem·도구)이 Fill로 옮긴다. 출력 backend
+// 등록부(AudioOutputBackendRegistry)와 같은 방식이다. 등록·조회는 로더 스레드에서 한다.
+//
+// 사용 예(codec 모듈 Startup):
+//   if (auto* registry = context.Services().Find<AudioDecoderRegistry>()) {
+//       registry->SetFactory(AudioCodecId::Opus, &CreateOpusAudioDecoder);
+//   }
+class AudioDecoderRegistry final {
+public:
+    // codec의 factory를 바꾼다(nullptr이면 지운다). None·범위 밖 codec은 무시한다. 모듈 Shutdown은
+    // 자기 factory를 지운다.
+    void SetFactory(AudioCodecId codec, AudioDecoderFactory factory) noexcept {
+        const uint32 index = static_cast<uint32>(codec);
+        if (codec != AudioCodecId::None && index < MaxAudioCodecs) {
+            factories_[index] = factory;
+        }
+    }
+
+    AudioDecoderFactory Factory(AudioCodecId codec) const noexcept {
+        const uint32 index = static_cast<uint32>(codec);
+        return index < MaxAudioCodecs ? factories_[index] : nullptr;
+    }
+
+    // 등록된 factory를 table에 넣는다. table에 이미 있는 codec은 그대로 둔다(내장 디코더가
+    // 앞선다). 오류는 없다(넣을 수 있는 것만 넣는다).
+    void Fill(AudioDecoderTable& table) const noexcept {
+        for (uint32 index = 1; index < MaxAudioCodecs; ++index) {
+            const auto codec = static_cast<AudioCodecId>(index);
+            if (factories_[index] != nullptr && !table.Contains(codec)) {
+                (void)table.Register(codec, factories_[index]);
+            }
+        }
+    }
+
+private:
+    AudioDecoderFactory factories_[MaxAudioCodecs] = {};
+};
+
 // 전체 디코드 결과(유효 frame만, planar float)다.
 class ROCKS_AUDIO_API DecodedAudioPcm {
 public:
@@ -126,3 +167,5 @@ ROCKS_AUDIO_API Result<void> DecodeAudioPlatformData(const AudioPlatformDataView
                                                      DecodedAudioPcm& out) noexcept;
 
 } // namespace rocks::audio
+
+ROCKS_DECLARE_HOST_SERVICE(rocks::audio::AudioDecoderRegistry, ROCKS_AUDIO_API)

@@ -24,6 +24,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::Actor::tags_",
+      "id": "ba077f6157b34155a17182b814cb49ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Actor::tickSettings_",
       "id": "5103c0c5088547639a54f60302e0455a",
       "aliases": [],
@@ -96,6 +103,13 @@
       "kind": "field",
       "name": "rocks::CapsuleComponent::capsuleRadius_",
       "id": "11c6f88a49ab446a9bc90799e9404dbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Component::componentTags_",
+      "id": "4a16812809304f3c832598238a6ab8bf",
       "aliases": [],
       "retired": false
     },
@@ -2721,6 +2735,41 @@
       "kind": "field",
       "name": "rocks::TickSettings::tickWhenPaused",
       "id": "2db893f0474e43c78346baece5db795f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::SceneComponent::IsVisible",
+      "id": "1e2167151a074a73a87fe910147c1195",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::SceneComponent::SetMobility",
+      "id": "2c5699c2b3d942a6a4d6aae5a855cf35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::SceneComponent::SetRelativeLocation",
+      "id": "951bbae3d68f43778070680ab6a04ffc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::SceneComponent::TryWorldTransform",
+      "id": "699a31c9da1b4bf696251a1c215257e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::SceneComponent::WorldLocation",
+      "id": "9b968ec84a104ffd9583245f8d2cd499",
       "aliases": [],
       "retired": false
     },

@@ -1,6 +1,8 @@
 #include <Base/Compiler.h>
 #include <Graphics/ShaderBindings.h>
 #include <RenderBase/ParameterBatch.h>
+#include <RenderBase/ResourceParameters/DeviceBufferParameter.h>
+#include <RenderBase/ResourceParameters/DeviceTextureParameter.h>
 
 // 묶음 설정의 자원 부분(Docs/Design/RenderBase 9.13절 6항)이다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::render {
@@ -139,6 +141,57 @@ Result<void> ParameterBatch::SetBufferView(StringView name,
     return Result<void>::Success();
 }
 
+bool ParameterBatch::Skips(usize parameter) const noexcept {
+    const ResourceParameter& entry = map_->Table()[parameter];
+    return map_->PlacementsOf(parameter).IsEmpty() ||
+           (entry.HasMember() && shader::IsGraphResource(entry.memberKind)) ||
+           entry.kind == ResourceParameterKind::WritableTexture ||
+           entry.kind == ResourceParameterKind::WritableBuffer;
+}
+
+Result<void> ParameterBatch::SetParameters(const void* values,
+                                           const shader::ShaderParameterLayout& layout) noexcept {
+    const Span<const ResourceParameter> table = map_->Table();
+    if (values_.Size() != table.Size() || values == nullptr || map_->Layout() == nullptr ||
+        map_->Layout()->structId != layout.structId) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint8* bytes = static_cast<const uint8*>(values);
+    for (usize index = 0; index < table.Size(); ++index) {
+        const ResourceParameter& entry = table[index];
+        if (!entry.HasMember()) {
+            continue;
+        }
+
+        Value& value = values_[index];
+        if (entry.memberKind == shader::ShaderParameterResourceKind::DeviceTexture) {
+            const auto& member =
+                *reinterpret_cast<const DeviceTextureValue*>(bytes + entry.memberOffset);
+            if (entry.kind == ResourceParameterKind::Sampler) {
+                if (member.sampler.given && !graphics::IsValidSamplerDesc(member.sampler.desc)) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                value = Value{};
+                value.given = member.sampler.given;
+                value.sampler = member.sampler.desc;
+            } else {
+                value.given = true;
+                value.handle = member.texture.slot;
+            }
+        } else if (entry.memberKind == shader::ShaderParameterResourceKind::DeviceBuffer) {
+            const auto& member =
+                *reinterpret_cast<const DeviceBufferValue*>(bytes + entry.memberOffset);
+            value.given = true;
+            value.handle = member.view.slot;
+        }
+    }
+
+    ++version_;
+    return Result<void>::Success();
+}
+
 Result<void> ParameterBatch::Validate(graphics::Device& device, const char** reason,
                                       usize* failedParameter) noexcept {
     const Span<const ResourceParameter> table = map_->Table();
@@ -151,9 +204,16 @@ Result<void> ParameterBatch::Validate(graphics::Device& device, const char** rea
             *failedParameter = index;
         }
 
+        if (Skips(index)) {
+            continue;
+        }
+
         const Value& value = values_[index];
         const Span<const ResourcePlacement> placements = map_->PlacementsOf(index);
         switch (table[index].kind) {
+        case ResourceParameterKind::WritableTexture:
+        case ResourceParameterKind::WritableBuffer:
+            break;
         case ResourceParameterKind::Texture: {
             if (!value.given || value.handle.IsNull()) {
                 return Fail(reason, "a texture of the parameter batch has no value or is null");
@@ -258,6 +318,10 @@ Result<void> ParameterBatch::Apply(graphics::CommandContext& commands,
 
     // null·값 없음은 모든 구성에서 막는다(장치 질의 없이 알 수 있다).
     for (usize index = 0; index < table.Size(); ++index) {
+        if (Skips(index)) {
+            continue;
+        }
+
         const Value& value = values_[index];
         const Span<const ResourcePlacement> placements = map_->PlacementsOf(index);
         const bool shared = !placements.IsEmpty() && placements[0].sharedSampler;
@@ -270,9 +334,16 @@ Result<void> ParameterBatch::Apply(graphics::CommandContext& commands,
     }
 
     for (usize index = 0; index < table.Size(); ++index) {
+        if (Skips(index)) {
+            continue;
+        }
+
         const Value& value = values_[index];
         for (const ResourcePlacement& placement : map_->PlacementsOf(index)) {
             switch (table[index].kind) {
+            case ResourceParameterKind::WritableTexture:
+            case ResourceParameterKind::WritableBuffer:
+                break;
             case ResourceParameterKind::Texture:
                 commands.SetTexture(placement.stage, placement.slot,
                                     graphics::TextureHandle{value.handle});

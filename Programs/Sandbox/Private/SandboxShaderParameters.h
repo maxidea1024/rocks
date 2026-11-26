@@ -1,7 +1,10 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <RenderBase/ResourceParameters/DeviceBufferParameter.h>
+#include <RenderBase/ResourceParameters/DeviceTextureParameter.h>
 #include <ShaderCore/ShaderParameterTypes.h>
+#include <ShaderCore/ShaderResourceTypes.h>
 
 // Sandbox의 생성 셰이더 파라미터 구조체다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 빌드가
 // SandboxShaderParameters.shaderparams.h(생성 표)와 /Engine/Generated/Sandbox/<이름>.rsh(생성
@@ -37,6 +40,20 @@ struct alignas(16) GeneratedProbeDraw {
     rocks::shader::ShaderFloat3 bias;
     float scale;
     rocks::shader::ShaderUint4 select;
+};
+
+// 상수와 장치 자원 멤버를 가진 구조체(cbuffer GeneratedResources +
+// albedo·albedoSampler·codes·lights)다 (16.2절 SSD66 4, self-test ShaderResourceSelfTest.cpp).
+// 셰이더는 Shaders/GeneratedResources.rsf다.
+ROCKS_SHADER_PARAMETERS(Name = "GeneratedResources")
+struct alignas(16) GeneratedResourceParameters {
+    rocks::shader::ShaderFloat4 scale;
+    rocks::render::DeviceTextureParameter<rocks::shader::ShaderTexture2D<>> albedo;
+    rocks::render::DeviceTextureParameter<
+        rocks::shader::ShaderTexture2D<rocks::shader::ShaderUint4>>
+        codes;
+    rocks::render::DeviceBufferParameter<rocks::shader::ShaderBuffer<rocks::shader::ShaderFloat4>>
+        lights;
 };
 
 } // namespace sandbox::shaders

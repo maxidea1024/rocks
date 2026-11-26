@@ -129,6 +129,11 @@ public:
 | `ScriptExtensible`·`NotScriptExtensible` | CLASS | Sparks class가 상속할 수 있다(`ScriptType`을 함께 뜻한다, 상속된다) / 그 상속을 끊는다 |
 | `ScriptReadOnly`·`ScriptWritable` | PROPERTY | 필드가 Sparks에 읽기 전용·읽기 쓰기로 보인다(둘 중 하나, `ReadOnly` 필드에 `ScriptWritable`은 RMC2603) |
 | `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
+| `ScriptCallable` | FUNCTION | Sparks에서 부를 수 있다(UE `BlueprintCallable` — 노출 타입의 함수만, `EditorOnly` 불가). 입력 오류로 Fatal하지 않고 Game lane에서 부른다는 계약이다(파괴 대기 대상의 비 const 호출은 실행 host가 건너뛴다). 이름이 예약 이름(prelude·핵심 엔진 타입·문맥 이름 등)이면 RMC2606이다. 리플렉션 `Pure`가 schema `pure`다 |
+| `ScriptName="X"` | FUNCTION | Sparks 이름(PascalCase ASCII, `Try` 접두 없음). 없으면 도구 이름이고 `Result` 함수의 `TryX`는 `X`다 |
+| `ScriptEffects="spawn, io"` | FUNCTION | schema `effects`(`spawn`·`acquire`·`readiness`·`io`·`wallClock` — 정규 순서로 쓴다, `Pure`와 함께 쓸 수 없다) |
+| `ScriptOneShot` | FUNCTION | schema `oneShot`(handle 없는 일회성 효과, `Pure`와 함께 쓸 수 없다) |
+| `ScriptPerSecond="speed"` | FUNCTION | 그 매개변수의 `perSecond`(초당 값 — `float32`·`float64`·`vec2`–`vec4`·`Rotator`) |
 
 필드 타입 대응(스칼라·`string`·`Text`·enum·struct·수학 미러 → `vec3` 등·객체 참조 `T?`·`Soft<T>?`·`Optional` → `T?`·`Array`·`Map`·`Set` — 타입 인자 안에는 `?`가 없다)과 노출할 수 없는 값 종류는 설계 B4 표다. 진단(메시지는 영어, 위치는 그 선언):
 

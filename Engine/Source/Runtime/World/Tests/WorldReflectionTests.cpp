@@ -37,6 +37,8 @@ class HookCounter final : public Component {
     ROCKS_NATIVE_TYPE(HookCounter, Component, 0x5446d4231cba4af9ull, 0xb767b4a0e73a19daull)
 
 public:
+    using Component::Component;
+
     void OnEnable() noexcept override {
         ++enables;
     }
@@ -256,15 +258,16 @@ TEST(WorldReflection_TypesAreWorldOnlyReflectedClasses) {
     };
 
     const Expected expected[] = {
-        // tickSettings(A5c)가 Actor·Component에 하나씩 더해졌다(파생은 상속 필드를 함께 센다).
+        // tickSettings(A5c)가 Actor·Component에 하나씩, 태그(31.4절 tags·componentTags)가 하나씩
+        // 더해졌다(파생은 상속 필드를 함께 센다).
         {ObjectTypeIdOf<Level>(), TypeId{}, 2},
-        {ObjectTypeIdOf<Actor>(), TypeId{}, 4},
-        {ObjectTypeIdOf<Component>(), TypeId{}, 2},
+        {ObjectTypeIdOf<Actor>(), TypeId{}, 5},
+        {ObjectTypeIdOf<Component>(), TypeId{}, 3},
         // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절) + 상속
-        // tickSettings.
-        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 11},
-        {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 7},
-        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 13},
+        // tickSettings·enabled·componentTags.
+        {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 12},
+        {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 8},
+        {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 14},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);

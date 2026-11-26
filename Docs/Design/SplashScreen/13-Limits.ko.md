@@ -6,7 +6,7 @@
 
 | 이름 | 값 | 근거 |
 |---|---|---|
-| `kSplashPollInterval` | 0.1 s | 문구 갱신으로 충분, ProgressReporting `kChildControlPollInterval`과 같음 |
+| `kSplashPollInterval`(코드 `SplashPollIntervalNanoseconds`) | 0.1 s | 문구 갱신으로 충분, ProgressReporting `kChildControlPollInterval`과 같음 |
 | `kSplashAnimationInterval` | 1/60 s | 보간·불확정 표시 동안만 |
 | `kSplashBarEaseSeconds` | 0.15 s | 튀지 않되 늦어 보이지 않음 |
 | `kSplashBarSettleEpsilon` | 0.001 | 막대 1 px 미만 |
@@ -17,5 +17,6 @@
 | `kMaxSplashLineBytes` | 512 B | 한 줄 문구 |
 | `kMaxCustomSplashTexts` | 6 | UE `User1–6` |
 | `kSplashThreadStackBytes` | 256 KiB | WIC·GDI 호출 여유(UE 128 KiB 예약) |
+| 최소 표시 시간 기본·상한(`ui.splash.min_seconds`) | 2 s · 10 s | 사용자 요구(2초), 상한은 시작을 지나치게 늦추는 값을 막는다 |
 | `kStartupProfileBlend` | 0.5 | 지난 값과 새 값의 반반 |
 | `kStartupStepWeightFloor` | 0.02 | 단계 최소 몫 |

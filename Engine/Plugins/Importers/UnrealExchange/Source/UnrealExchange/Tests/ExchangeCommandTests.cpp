@@ -9,7 +9,7 @@
 #include <UnrealExchange/ExchangeCommand.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// asset-import-unreal 명령 시험이다(Docs/Design/UnrealExchange.ko.md 10.2절, 10.5절 9번): 제품
+// asset-import-unreal 명령 시험이다(Docs/Design/UnrealExchange 10.2절, 10.5절 9번): 제품
 // Commandlet은 종류별 임포터가 없으므로 명령 함수를 이 프로세스에서 시험 임포터와 함께 부른다.
 // 도움말·사용법 오류, dry run(전체·--only·redirect 옛 경로·기존 에셋 재임포트 계획), 임포터 없는
 // 실행(건너뜀·경고·색인 캐시), 시험 임포터 실행, 실패 줄(없는 --only 값·묶음 읽기·root·임포터

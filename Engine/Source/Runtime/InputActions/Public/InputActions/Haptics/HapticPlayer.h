@@ -13,6 +13,11 @@
 #include <InputActions/Haptics/HapticParams.h>
 #include <InputActions/Haptics/HapticUpdateContext.h>
 
+namespace rocks {
+class AssetLease;
+class AssetManager;
+} // namespace rocks
+
 namespace rocks::input {
 
 // 플레이어 하나의 게임패드 진동 재생·합성이다(UE APlayerController의 ActiveForceFeedbackEffects·
@@ -40,6 +45,13 @@ public:
     // 지운다(사본을 다 만든 뒤 — 실패면 그대로). 오류: 무효 effect(id 0)는 InvalidArgument, 할당
     // 실패는 OutOfMemory(모두 그대로).
     Result<void> PlayHapticEffect(const HapticEffect& effect, const HapticParams& params) noexcept;
+
+    // lease의 HapticEffectAsset을 재생한다(UE ClientPlayForceFeedback(UForceFeedbackEffect*) —
+    // Docs/Design/InputActions 2.8절). CopyHapticEffect로 사본을 만들어 위 함수로 재생하므로
+    // lease는 쥐지 않는다(재생 뒤 놓아도 된다). 오류: CopyHapticEffect의 오류와 위 함수의
+    // 오류다(모두 그대로). AssetManager의 소유 스레드(Game)에서 부른다.
+    Result<void> PlayHapticEffect(AssetManager& assets, const AssetLease& effect,
+                                  const HapticParams& params) noexcept;
 
     // 재생 중인 효과를 멈춘다(UE ClientStopForceFeedback): effectId가 0이면 tag만, tag가 비면
     // effect만 보고, 둘 다 비면 모두 멈춘다.

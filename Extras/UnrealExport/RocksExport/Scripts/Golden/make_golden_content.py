@@ -1,5 +1,5 @@
 # Creates the source assets of the golden exchange bundle under /Game/RxGolden (RocksExport,
-# Docs/Design/UnrealExchange.ko.md section 12.3). Run it twice in a UE 5.8 project that has the RocksExport plugin,
+# Docs/Design/UnrealExchange section 12.3). Run it twice in a UE 5.8 project that has the RocksExport plugin,
 # each time in a new editor process:
 #   UnrealEditor-Cmd <Project>.uproject -run=pythonscript -script="make_golden_content.py content <path to SK_Column.gltf>"
 #   UnrealEditor-Cmd <Project>.uproject -run=pythonscript -script="make_golden_content.py redirect"

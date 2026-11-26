@@ -96,6 +96,8 @@ class WaitingComponent final : public Component {
     ROCKS_NATIVE_TYPE(WaitingComponent, Component, 0x8a2e5f1c7d304b96ull, 0x41b9c0e6f27d83a5ull)
 
 public:
+    using Component::Component;
+
     bool IsReadyToStart() const noexcept override {
         return ready;
     }

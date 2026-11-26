@@ -77,6 +77,11 @@ public:
 
     bool HasContext(const Guid& contextId) const noexcept;
 
+    // 컨텍스트 칸의 세대다(Docs/Design/InputActions 5.4절): 새 칸을 만들 때마다(AddContext가 없는
+    // id를 넣을 때) 다른 값이고, 같은 칸이면 우선순위·등록 횟수·데이터가 바뀌어도 같다. 없는 id는
+    // 0이다. 에셋 원천이 자기가 넣은 칸인지 가린다.
+    uint64 ContextSerial(const Guid& contextId) const noexcept;
+
     // 사용자 설정(리바인딩 — 5.2절)을 붙인다(null이면 뗀다). 붙어 있으면 활성 프로필은 설정의 현재
     // 프로필이고, 리바인딩 가능한 바인딩은 사용자 키로 바뀌며, 설정의 Revision이 바뀌면 다음
     // ApplyPendingChanges가 다시 만든다. notifyUserSettings 옵션의 컨텍스트는 설정에 등록·해제한다.

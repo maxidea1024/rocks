@@ -1436,6 +1436,7 @@ Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& targ
             input.owner = newId;
             input.importerId = old.importerId;
             input.importerName = old.importerName.View();
+            input.tagPrefix = old.tagPrefix.View();
             input.importerVersion = old.importerVersion;
             input.sources = sources.View();
             input.options = old.options.View();
@@ -1641,6 +1642,7 @@ Result<void> EditorPackageSet::FixDuplicateId(StringView fileName, AssetId newId
             input.owner = newId;
             input.importerId = old.importerId;
             input.importerName = old.importerName.View();
+            input.tagPrefix = old.tagPrefix.View();
             input.importerVersion = old.importerVersion;
             input.sources = sources.View();
             input.options = old.options.View();

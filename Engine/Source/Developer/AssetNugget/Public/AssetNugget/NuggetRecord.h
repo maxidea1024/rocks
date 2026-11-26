@@ -51,6 +51,8 @@ inline constexpr StringView NuggetBucketTexture = "texture";
 // 정적 메시 쿠킹 LOD(Docs/Design/MeshAnimationAssets 5.5.2절 10)다.
 inline constexpr StringView NuggetBucketMesh = "mesh";
 inline constexpr StringView NuggetBucketShader = "shader";
+// 사운드 clip 쿠킹 플랫폼 데이터(Docs/Design/AudioSystem 3.37.3절)다.
+inline constexpr StringView NuggetBucketAudio = "audio";
 inline constexpr StringView NuggetBucketScc = "scc";
 
 // bucket 이름 규칙(`[a-z][a-z0-9_]{0,63}`)인지다.
