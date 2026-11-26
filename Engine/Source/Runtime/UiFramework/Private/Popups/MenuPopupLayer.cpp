@@ -95,6 +95,8 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
         }
     }
 
+    x += anchor_->menuOffset_.x;
+    y += anchor_->menuOffset_.y;
     if (fit) {
         x = math::Clamp(x, 0.f, geometry.size.x - width);
         y = math::Clamp(y, 0.f, geometry.size.y - height);

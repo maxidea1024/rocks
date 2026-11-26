@@ -2,6 +2,8 @@
 #include "DemoShaders.h"
 #include "DockWindows.h"
 
+#include <UiFramework/Layout/VerticalStack.h>
+
 #include <Core/Diagnostics/Log.h>
 
 namespace rocks::ui {
@@ -85,9 +87,40 @@ DockWindows::DockWindows(Allocator& allocator, graphics::Device& device,
       makeTitle_(Move(makeTitle)), windows_(allocator) {
 }
 
+Result<void> DockWindows::AttachMenuRow(Surface& host) noexcept {
+    // OS 테두리 창(직접 그린 테두리를 못 쓰는 플랫폼)의 주 창은 내용 위 줄에 주 메뉴를 둔다(UW7c
+    // R11). 루트는 메뉴가 팝업을 열 수 있게 Overlay(팝업 호스트)다.
+    auto menu = makeMenu_.Execute(host.app, *host.window);
+    if (!menu) {
+        return Result<void>::Failure(menu.Error());
+    }
+
+    auto root = SharedPtr<Overlay>::TryMake(allocator_, allocator_);
+    auto stack = SharedPtr<VerticalStack>::TryMake(allocator_, allocator_);
+    if (!root || !stack) {
+        return Result<void>::Failure(!root ? root.Error() : stack.Error());
+    }
+
+    auto added = stack.Value()->TryAddSlot(menu.Value(), Auto);
+    if (added) {
+        added = stack.Value()->TryAddSlot(host.area, Fill(1));
+    }
+
+    if (added) {
+        added = root.Value()->TryAddChild(stack.Value());
+    }
+
+    if (!added) {
+        return added;
+    }
+
+    host.app.SetRoot(root.Value());
+    return Result<void>::Success();
+}
+
 Result<void> DockWindows::AttachChrome(Surface& host, StringView title, bool main) noexcept {
     if (host.window->Frame() != platform::WindowFrame::Custom) {
-        return Result<void>::Success();
+        return main && makeMenu_.IsBound() ? AttachMenuRow(host) : Result<void>::Success();
     }
 
     auto bar = SharedPtr<WindowTitleBar>::TryMake(allocator_, allocator_);

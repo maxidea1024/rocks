@@ -13,6 +13,7 @@ public:
     Result<void> TryAddSlot(const SharedPtr<Element>& child, int32 zOrder) noexcept;
     Result<void> AttachPopupLayer(const PopupRequest& popup) noexcept override;
     void DismissHostedPopups() noexcept override;
+    bool IsHostedPopupLayer(const Element& child) const noexcept override;
     bool RemoveChild(Element& child) noexcept override;
 
     Vec2 ComputeDesiredSize(float) const noexcept override;

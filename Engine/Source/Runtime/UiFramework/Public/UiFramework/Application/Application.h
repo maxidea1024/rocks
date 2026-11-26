@@ -28,6 +28,8 @@ public:
     // 창이 먼저 소멸할 수 있는 나중 작업은 이 토큰을 잠근 뒤 Application을 사용한다.
     Result<WeakPtr<Application*>> WeakContext() noexcept;
     void SetRoot(const SharedPtr<Element>& root) noexcept;
+    // 지금 루트다(툴팁 임시 호스트로 감쌌으면 그 호스트). 없으면 빈 포인터다.
+    const SharedPtr<Element>& GetRoot() const noexcept;
     // 팝업 허용 영역 공급자를 등록한다(Docs/Design/UiToolkit 9.1절 UW7d — 메뉴·하위 메뉴·콤보·툴팁
     // 등 모든 팝업이 모니터 작업 영역을 넘지 않는 시스템 규칙). 창 호스트가 한 번 부른다(보통
     // platform::Window::WorkAreaAt을 잇는다). Application은 지금과 이후의 루트(툴팁 임시 호스트
@@ -60,8 +62,14 @@ public:
     // 빈 scope에는 미처리 키를 받을 창 전역 명령 목록을 지정한다.
     Result<void> SetCommands(const SharedPtr<Element>& scope,
                              const SharedPtr<CommandList>& commands) noexcept;
+    // 창 단위 명령 목록을 더한다(Docs/Design/UiToolkit 9.1절 UW7c R4). 초점 경로·전역 목록이
+    // 처리하지 않은 키를 본다 — 메뉴 막대 가속키처럼 그 창에만 있는 명령이다. 같은 목록을 다시
+    // 더하면 AlreadyExists다. 목록 소유자가 사라지기 전에 RemoveWindowCommands로 뗀다.
+    Result<void> AddWindowCommands(const SharedPtr<CommandList>& commands) noexcept;
+    void RemoveWindowCommands(const CommandList& commands) noexcept;
     bool IsControlDown(uint32 userId) const noexcept;
     bool IsShiftDown(uint32 userId) const noexcept;
+    bool IsAltDown(uint32 userId) const noexcept;
 
     // 지연과 등장은 초 단위다. 주입한 시계는 시험이나 일시 정지 가능한 호스트에 사용한다.
     void SetToolTipClock(double (*clock)() noexcept) noexcept;
@@ -282,6 +290,7 @@ private:
     uint64 nextPressObserver_ = 1;
     bool notifyingPress_ = false;
     SharedPtr<CommandList> globalCommands_;
+    Array<SharedPtr<CommandList>> windowCommands_;
     Result<KeyChord> UpdateChord(uint32 userId, const input::InputEvent& event) noexcept;
     bool ProcessCommands(const Element* scope, KeyChord chord, bool repeat) const noexcept;
     uint64 focusVersion_ = 0;

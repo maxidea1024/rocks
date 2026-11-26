@@ -175,4 +175,80 @@ TEST(UiFramework_ToolTipStaysInsideWorkAreaOnTemporaryHost) {
     CHECK(bounds.Value().max.y <= WorkMax.y);
 }
 
+namespace {
+
+// 창이 두 모니터에 걸쳤다: 왼쪽 모니터 A는 x 0–200, 오른쪽 B는 200–400(창 좌표).
+constexpr float MonitorSplit = 200;
+
+Element::PopupWorkArea TwoMonitors() noexcept {
+    return Element::PopupWorkArea::CreateLambda([](Vec2 point, Box2<float>& area) noexcept {
+        area = point.x < MonitorSplit ? Box2<float>{{0, 0}, {MonitorSplit, WindowSize.y}}
+                                      : Box2<float>{{MonitorSplit, 0}, WindowSize};
+        return true;
+    });
+}
+
+} // namespace
+
+TEST(UiFramework_PopupPicksMonitorOfAnchorTopLeft) {
+    // 앵커(150..250)가 두 모니터에 걸쳤다. UE처럼 앵커 왼쪽 위(150)가 놓인 모니터 A 안에 둔다
+    // (가운데 200은 B다): 200 - 120 = 80.
+    PopupBench bench;
+    REQUIRE(bench.Build({150, 10, 100, 20}, MenuPlacement::Below));
+    REQUIRE(bench.app.SetPopupWorkArea(TwoMonitors()));
+    REQUIRE(bench.OpenAndArrange());
+    CHECK((bench.MenuOrigin() == Vec2{80, 30}));
+    // 층 자체도 그 모니터 영역이다(다른 모니터로 걸치지 않는다).
+    CHECK((bench.root->ChildAt(1)->GetGeometry().size == Vec2{MonitorSplit, WindowSize.y}));
+}
+
+TEST(UiFramework_PopupOnRightMonitorStaysOnRightMonitor) {
+    PopupBench bench;
+    REQUIRE(bench.Build({210, 10, 40, 20}, MenuPlacement::Below));
+    REQUIRE(bench.app.SetPopupWorkArea(TwoMonitors()));
+    REQUIRE(bench.OpenAndArrange());
+    CHECK((bench.MenuOrigin() == Vec2{210, 30}));
+    auto layer = bench.root->ChildAt(1)->GetGeometry().WindowBounds();
+    REQUIRE(layer);
+    CHECK(layer.Value().min.x == MonitorSplit);
+}
+
+TEST(UiFramework_CursorToolTipUsesCursorMonitor) {
+    // 소유자(100..300)의 왼쪽 위는 A, 커서(250)는 B다. 커서에 붙는 툴팁은 커서 모니터(B)를
+    // 쓴다(UE CalculateTooltipWindowPosition): 250 + 12 = 262(B 안에 들어간다).
+    SystemAllocator allocator;
+    Application app(allocator);
+    auto root = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto owner = SharedPtr<Button>::TryMake(allocator, allocator);
+    auto content = SharedPtr<Frame>::TryMake(allocator, allocator);
+    REQUIRE(root && owner && content);
+    content.Value()->SetDesiredSize({30, 10});
+    REQUIRE(owner.Value()->SetToolTipFactory(Element::ToolTipFactory::CreateLambda(
+        [element = content.Value()]() noexcept -> Result<SharedPtr<Element>> {
+            return Result<SharedPtr<Element>>::Success(element);
+        })));
+    REQUIRE(
+        root.Value()->TryAddSlot(owner.Value(), {.offset = {100, 90, 200, 30}, .alignment = {}}));
+    app.SetRoot(root.Value());
+    REQUIRE(app.SetPopupWorkArea(TwoMonitors()));
+    workTipClock = 0;
+    app.SetToolTipClock(&ReadWorkTipClock);
+    ROCKS_ON_SCOPE_EXIT {
+        app.SetToolTipClock(nullptr);
+    };
+    REQUIRE(app.SetToolTipTiming(0.5, 0));
+    const auto frame = [&]() noexcept {
+        return static_cast<bool>(app.UpdatePaintCache(Geometry::Root(WindowSize, {}), 1));
+    };
+    REQUIRE(frame());
+    REQUIRE(app.RoutePointer({PointerEventType::Move, {250, 100}}));
+    workTipClock = 1;
+    REQUIRE(frame());
+    REQUIRE(frame());
+    REQUIRE(app.IsToolTipOpen(0));
+    auto bounds = content.Value()->GetGeometry().WindowBounds();
+    REQUIRE(bounds);
+    CHECK(bounds.Value().min.x == 262);
+}
+
 } // namespace rocks::ui

@@ -68,7 +68,9 @@ Result<void> MenuBuilder::AddRow(StringView label, MenuAction&& action, KeyChord
                                          .isChecked = Move(action.isChecked),
                                          .canExecute = Move(action.canExecute),
                                          .execute = Move(action.execute),
-                                         .subMenu = Move(subMenu)});
+                                         .subMenu = Move(subMenu),
+                                         .icon = action.icon,
+                                         .toolTip = action.toolTip});
     if (!built) {
         return built;
     }
@@ -85,7 +87,8 @@ void MenuBuilder::AddEntry(StringView label, MenuAction action, KeyChord shortcu
 }
 
 void MenuBuilder::AddCommand(Guid id, const CommandSet& definitions, const CommandList& commands,
-                             const BindingManager& bindings, MenuCheckKind check) noexcept {
+                             const BindingManager& bindings, MenuCheckKind check,
+                             VectorImageKey icon) noexcept {
     const CommandInfo* info = definitions.Find(id);
     if (!info) {
         if (status_) {
@@ -104,7 +107,9 @@ void MenuBuilder::AddCommand(Guid id, const CommandSet& definitions, const Comma
             Delegate<bool()>::CreateLambda([list, id]() noexcept { return list->IsEnabled(id); }),
         .isChecked =
             Delegate<bool()>::CreateLambda([list, id]() noexcept { return list->IsChecked(id); }),
-        .check = check};
+        .check = check,
+        .icon = icon,
+        .toolTip = info->description.View()};
     AddEntry(info->label.View(), Move(action), bindings.Chords(*info).primary);
 }
 
@@ -125,7 +130,22 @@ void MenuBuilder::BeginSection(StringView heading) noexcept {
 
     const MenuStyle& style = context_->Style();
     Allocator& allocator = context_->GetAllocator();
-    auto text = context_->MakeLabel(heading, style.heading.font);
+    // 묶음 제목은 대문자로 보인다(UE SHeadingBlock — ASCII만 바꾸고 다른 글자는 그대로).
+    String upper(allocator);
+    for (usize i = 0; status_ && i < heading.ByteCount(); ++i) {
+        char c = heading.Data()[i];
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
+        }
+
+        status_ = upper.TryAppend(StringView(&c, 1));
+    }
+
+    if (!status_) {
+        return;
+    }
+
+    auto text = context_->MakeLabel(upper.View(), style.heading.font);
     auto title = SharedPtr<MenuHeading>::TryMake(allocator, allocator, style);
     if (!text || !title) {
         status_ = Result<void>::Failure(!text ? text.Error() : title.Error());

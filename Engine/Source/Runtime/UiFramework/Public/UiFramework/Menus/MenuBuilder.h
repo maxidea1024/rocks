@@ -1,6 +1,7 @@
 #pragma once
 
 #include <UiFramework/Application/Commands.h>
+#include <UiFramework/Menus/MenuAction.h>
 #include <UiFramework/Menus/MenuPanel.h>
 
 namespace rocks::ui {
@@ -9,14 +10,6 @@ class MenuBuilder;
 
 // 하위 메뉴를 채우는 delegate다(UE FNewMenuDelegate). 열 때마다 새로 부른다.
 using MenuFill = Delegate<Result<void>(MenuBuilder&)>;
-
-// 메뉴 항목 하나의 동작이다(UE FUIAction). 체크·라디오 항목은 isChecked로 표시를 정한다.
-struct MenuAction {
-    Delegate<void()> execute{};
-    Delegate<bool()> canExecute{};
-    Delegate<bool()> isChecked{};
-    MenuCheckKind check = MenuCheckKind::None;
-};
 
 // 메뉴를 짓는다(UE FMenuBuilder — Docs/Design/UiToolkit 9.1절 UW7c). 항목·명령·구분선·묶음 제목·
 // 하위 메뉴를 차례로 더하고 MakePanel로 펼친 메뉴를 만든다. 글자는 문맥의 레이블 factory로
@@ -36,13 +29,15 @@ public:
 
     // 글자 항목이다. shortcut은 표시만 한다(실행은 명령 목록의 몫).
     void AddEntry(StringView label, MenuAction action, KeyChord shortcut = {}) noexcept;
-    // 명령 항목이다(라벨·단축키는 정의와 바인딩, 실행·사용 가능·체크는 명령 목록에서 — UE
-    // FMenuBuilder::AddMenuEntry(FUICommandInfo)). 명령 목록은 메뉴보다 오래 살아야 한다.
+    // 명령 항목이다(라벨·단축키는 정의와 바인딩, 설명은 항목 툴팁, 실행·사용 가능·체크는 명령
+    // 목록에서 — UE FMenuBuilder::AddMenuEntry(FUICommandInfo)). 명령 목록은 메뉴보다 오래 살아야
+    // 한다.
     void AddCommand(Guid id, const CommandSet& definitions, const CommandList& commands,
-                    const BindingManager& bindings,
-                    MenuCheckKind check = MenuCheckKind::None) noexcept;
+                    const BindingManager& bindings, MenuCheckKind check = MenuCheckKind::None,
+                    VectorImageKey icon = {}) noexcept;
     void AddSeparator() noexcept;
     // 묶음을 시작한다. heading이 비어 있지 않으면 묶음 제목을 둔다(앞 묶음과는 구분선으로 나눈다).
+    // 제목의 ASCII 글자는 대문자로 보인다(UE SHeadingBlock ToUpper).
     void BeginSection(StringView heading = {}) noexcept;
     void AddSubMenu(StringView label, MenuFill fill) noexcept;
 

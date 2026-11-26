@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Delegate.h>
+#include <UiCore/FocusCause.h>
 #include <UiCore/Styles/CoreStyles.h>
 #include <UiFramework/Text/TextLabel.h>
 
@@ -38,6 +39,19 @@ public:
     bool NavigateRoot(int32 step) noexcept;
     void SetOnNavigateRoot(Delegate<bool(int32)>&& callback) noexcept;
 
+    // 메뉴 세션이다(Docs/Design/UiToolkit 9.1절 UW7c R1 — UE FMenuStack의 초점 복원). 막대 메뉴를
+    // 열기 직전·F10으로 막대에 초점을 두기 직전에 부른다. 지금 초점이 area(막대)나 열린 메뉴
+    // 안이면 이미 세션 중이므로 기억을 그대로 두고, 아니면 지금 초점(없으면 "없음")과 원인을
+    // 기억한다.
+    void BeginSession(uint32 user, const Element& area) noexcept;
+    bool InSession() const noexcept;
+    // 세션을 끝낸다. restore이고 지금 초점이 area·열린 메뉴 안이거나 트리에서 떨어졌으면(닫힌
+    // 메뉴의 항목) 기억한 초점으로 되돌린다 — 마우스로 Edit > Paste를 골라도 붙여 넣기가 원래 입력
+    // 상자로 간다. 사용자가 메뉴 밖으로 옮긴 초점은 그대로 둔다.
+    void EndSession(const Element& area, bool restore = true) noexcept;
+    // element가 지금 열린 메뉴(루트 메뉴와 하위 메뉴 사슬) 안에 있는지다.
+    bool IsInOpenMenus(const Element& element) const noexcept;
+
 private:
     Allocator& allocator_;
     Application& application_;
@@ -46,6 +60,10 @@ private:
     MenuAnchor* root_ = nullptr;
     Delegate<void()> closedAll_;
     Delegate<bool(int32)> navigateRoot_;
+    WeakPtr<Element> savedFocus_;
+    FocusCause savedCause_ = FocusCause::Direct;
+    uint32 sessionUser_ = 0;
+    bool session_ = false;
 };
 
 } // namespace rocks::ui

@@ -40,6 +40,21 @@ struct CommandSpec {
     KeyChord chord;
 };
 
+// 메뉴 항목 아이콘이다(Engine/Content/Ui/Icons/Common).
+constexpr VectorImageKey NewIcon = VectorImageKey::FromPath("Common/File");
+constexpr VectorImageKey OpenIcon = VectorImageKey::FromPath("Common/FolderOpen");
+constexpr VectorImageKey SaveIcon = VectorImageKey::FromPath("Common/Save");
+constexpr VectorImageKey UndoIcon = VectorImageKey::FromPath("Common/Undo");
+constexpr VectorImageKey RedoIcon = VectorImageKey::FromPath("Common/Redo");
+constexpr VectorImageKey CutIcon = VectorImageKey::FromPath("Common/Cut");
+constexpr VectorImageKey CopyIcon = VectorImageKey::FromPath("Common/Copy");
+constexpr VectorImageKey PasteIcon = VectorImageKey::FromPath("Common/Paste");
+constexpr VectorImageKey SettingsIcon = VectorImageKey::FromPath("Common/Settings");
+constexpr VectorImageKey InfoIcon = VectorImageKey::FromPath("Common/Info");
+
+// 최근 레벨 견본 수다 — 창 높이를 넘겨 메뉴 스크롤(R9)을 보인다.
+constexpr usize RecentLevelCount = 40;
+
 // 데모 명령은 실행을 로그로 남긴다(편집기가 붙으면 실제 동작으로 바뀐다).
 Delegate<void()> LogCommand(StringView label) noexcept {
     return Delegate<void()>::CreateLambda(
@@ -53,8 +68,7 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
                                          CommandList& commands, platform::Window& window,
                                          const SharedPtr<DockManager>& area) noexcept {
     Allocator& allocator = context.allocator;
-    // 명령 정의(UE UI_COMMAND — 라벨·설명·기본 단축키)다. Exit의 Alt+F4는 OS가 처리하므로 표시만
-    // 한다.
+    // 명령 정의(UE UI_COMMAND — 라벨·설명·기본 단축키)다.
     const CommandSpec specs[] = {
         {MenuCommand::New,
          "New Level",
@@ -72,7 +86,7 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
          "Save All",
          "Saves all unsaved levels and assets",
          {.key = input::Key::S, .shift = true, .control = true}},
-        {MenuCommand::Exit, "Exit", "Closes the gallery", {}},
+        {MenuCommand::Exit, "Exit", "Closes the gallery", {.key = input::Key::F4, .alt = true}},
         {MenuCommand::Undo,
          "Undo",
          "Undoes the last action",
@@ -151,31 +165,37 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
     const BindingManager* binds = &bindings;
     CommandList* list = &commands;
     const auto command = [set, binds, list](MenuBuilder& menu, MenuCommand id,
+                                            VectorImageKey icon = {},
                                             MenuCheckKind check = MenuCheckKind::None) noexcept {
-        menu.AddCommand(CommandId(id), *set, *list, *binds, check);
+        menu.AddCommand(CommandId(id), *set, *list, *binds, check, icon);
     };
 
     auto added = bar.Value()->AddMenu(
         "File", MenuFill::CreateLambda([command](MenuBuilder& menu) noexcept -> Result<void> {
-            menu.BeginSection("LEVEL");
-            command(menu, MenuCommand::New);
-            command(menu, MenuCommand::Open);
-            // 최근 파일 하위 메뉴(데모 목록).
+            menu.BeginSection("Level");
+            command(menu, MenuCommand::New, NewIcon);
+            command(menu, MenuCommand::Open, OpenIcon);
+            // 최근 파일 하위 메뉴(데모 목록 — 창보다 길어 스크롤한다).
             menu.AddSubMenu(
                 "Recent Levels",
                 MenuFill::CreateLambda([](MenuBuilder& recent) noexcept -> Result<void> {
-                    constexpr StringView Levels[] = {"Level_01", "Level_02", "MainMenu"};
-                    for (StringView level : Levels) {
-                        recent.AddEntry(level, {.execute = LogCommand(level)});
+                    constexpr StringView Levels[] = {"Level_00", "Level_01", "Level_02", "Level_03",
+                                                     "Level_04", "Level_05", "Level_06", "Level_07",
+                                                     "Level_08", "Level_09"};
+                    constexpr StringView Areas[] = {"Forest", "Desert", "Harbor", "Castle"};
+                    for (usize i = 0; i < RecentLevelCount; ++i) {
+                        const StringView name = i < 10 ? Levels[i] : Areas[i % 4];
+                        recent.AddEntry(name, {.execute = LogCommand(name)});
                     }
 
                     recent.AddSeparator();
                     recent.AddEntry("Clear Recent Levels",
-                                    {.execute = LogCommand("Clear Recent Levels")});
+                                    {.execute = LogCommand("Clear Recent Levels"),
+                                     .toolTip = "Removes every level from this list"});
                     return Result<void>::Success();
                 }));
-            menu.BeginSection("SAVE");
-            command(menu, MenuCommand::Save);
+            menu.BeginSection("Save");
+            command(menu, MenuCommand::Save, SaveIcon);
             command(menu, MenuCommand::SaveAll);
             menu.BeginSection();
             command(menu, MenuCommand::Exit);
@@ -184,14 +204,14 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
     if (added) {
         added = bar.Value()->AddMenu(
             "Edit", MenuFill::CreateLambda([command](MenuBuilder& menu) noexcept -> Result<void> {
-                command(menu, MenuCommand::Undo);
-                command(menu, MenuCommand::Redo);
+                command(menu, MenuCommand::Undo, UndoIcon);
+                command(menu, MenuCommand::Redo, RedoIcon);
                 menu.AddSeparator();
-                command(menu, MenuCommand::Cut);
-                command(menu, MenuCommand::Copy);
-                command(menu, MenuCommand::Paste);
+                command(menu, MenuCommand::Cut, CutIcon);
+                command(menu, MenuCommand::Copy, CopyIcon);
+                command(menu, MenuCommand::Paste, PasteIcon);
                 menu.AddSeparator();
-                command(menu, MenuCommand::Preferences);
+                command(menu, MenuCommand::Preferences, SettingsIcon);
                 return Result<void>::Success();
             }));
     }
@@ -203,7 +223,7 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
             "View", MenuFill::CreateLambda([command, tabs,
                                             activate](MenuBuilder& menu) noexcept -> Result<void> {
                 // 탭 항목은 그 탭을 앞으로 가져온다(라디오 — 지금 앞에 있는 탭).
-                menu.BeginSection("TABS");
+                menu.BeginSection("Tabs");
                 constexpr StringView Tabs[] = {
                     GalleryWindow::ColorsTab, GalleryWindow::TextTab,     GalleryWindow::WidgetsTab,
                     GalleryWindow::LayoutTab, GalleryWindow::BehaviorTab, GalleryWindow::EffectsTab,
@@ -217,8 +237,8 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
                              .check = MenuCheckKind::Radio});
                 }
 
-                menu.BeginSection("WINDOW");
-                command(menu, MenuCommand::Fullscreen, MenuCheckKind::Check);
+                menu.BeginSection("Window");
+                command(menu, MenuCommand::Fullscreen, {}, MenuCheckKind::Check);
                 return Result<void>::Success();
             }));
     }
@@ -228,13 +248,13 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
             "Help", MenuFill::CreateLambda([command](MenuBuilder& menu) noexcept -> Result<void> {
                 command(menu, MenuCommand::Documentation);
                 menu.AddSeparator();
-                command(menu, MenuCommand::About);
+                command(menu, MenuCommand::About, InfoIcon);
                 return Result<void>::Success();
             }));
     }
 
     if (added) {
-        added = bar.Value()->RegisterAccelerators(definitions, commands);
+        added = bar.Value()->RegisterAccelerators();
     }
 
     if (!added) {

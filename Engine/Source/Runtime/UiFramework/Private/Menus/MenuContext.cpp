@@ -1,5 +1,7 @@
-#include <UiFramework/Popups/MenuAnchor.h>
+#include <UiFramework/Application/Application.h>
 #include <UiFramework/Menus/MenuContext.h>
+#include <UiFramework/Menus/MenuPanel.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 
 namespace rocks::ui {
 
@@ -55,6 +57,70 @@ bool MenuContext::NavigateRoot(int32 step) noexcept {
 
 void MenuContext::SetOnNavigateRoot(Delegate<bool(int32)>&& callback) noexcept {
     navigateRoot_ = Move(callback);
+}
+
+bool MenuContext::IsInOpenMenus(const Element& element) const noexcept {
+    // 루트 메뉴부터 열린 하위 메뉴를 따라간다. 메뉴 내용은 늘 MenuBuilder가 만든 MenuPanel이다.
+    const MenuAnchor* anchor = root_;
+    while (anchor) {
+        const Element* content = anchor->MenuContent();
+        if (!content) {
+            return false;
+        }
+
+        if (element.IsWithin(*content)) {
+            return true;
+        }
+
+        anchor = static_cast<const MenuPanel*>(content)->OpenSubMenu();
+    }
+
+    return false;
+}
+
+void MenuContext::BeginSession(uint32 user, const Element& area) noexcept {
+    const auto focus = application_.GetFocus(user);
+    if (session_ && focus && (focus->IsWithin(area) || IsInOpenMenus(*focus))) {
+        return;
+    }
+
+    savedFocus_ = WeakPtr<Element>(focus);
+    savedCause_ = focus ? application_.GetFocusCause(user) : FocusCause::Direct;
+    sessionUser_ = user;
+    session_ = true;
+}
+
+bool MenuContext::InSession() const noexcept {
+    return session_;
+}
+
+void MenuContext::EndSession(const Element& area, bool restore) noexcept {
+    if (!session_) {
+        return;
+    }
+
+    session_ = false;
+    auto saved = savedFocus_.Lock();
+    savedFocus_.Reset();
+    if (!restore) {
+        return;
+    }
+
+    const auto current = application_.GetFocus(sessionUser_);
+    const auto& root = application_.GetRoot();
+    const bool inMenus = !current || current->IsWithin(area) || IsInOpenMenus(*current) || !root ||
+                         !current->IsWithin(*root);
+    if (!inMenus) {
+        return;
+    }
+
+    // 기억한 요소가 그사이 트리에서 떨어졌으면 초점을 비운다(떨어진 요소에 두지 않는다). 초점
+    // 콜백 안이라 Busy면 그대로 둔다 — 다음 입력에서 떨어진 초점은 Application이 지운다.
+    if (saved && root && saved->IsWithin(*root)) {
+        (void)application_.SetFocus(sessionUser_, saved, savedCause_);
+    } else {
+        (void)application_.SetFocus(sessionUser_, {});
+    }
 }
 
 } // namespace rocks::ui

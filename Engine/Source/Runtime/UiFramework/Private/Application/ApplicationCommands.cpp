@@ -44,6 +44,16 @@ bool Application::IsControlDown(uint32 userId) const noexcept {
     return false;
 }
 
+bool Application::IsAltDown(uint32 userId) const noexcept {
+    for (const auto& user : modifiers_) {
+        if (user.userId == userId) {
+            return ChordFromModifiers(input::Key::None, user.mask).alt;
+        }
+    }
+
+    return false;
+}
+
 bool Application::IsShiftDown(uint32 userId) const noexcept {
     for (const auto& user : modifiers_) {
         if (user.userId == userId) {
@@ -84,17 +94,52 @@ Result<void> Application::SetCommands(const SharedPtr<Element>& scope,
                     : Result<void>::Success();
 }
 
+Result<void> Application::AddWindowCommands(const SharedPtr<CommandList>& commands) noexcept {
+    if (!commands) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (const auto& entry : windowCommands_) {
+        if (entry.Get() == commands.Get()) {
+            return Result<void>::Failure(ErrorCode::AlreadyExists);
+        }
+    }
+
+    return windowCommands_.TryPushBack(commands);
+}
+
+void Application::RemoveWindowCommands(const CommandList& commands) noexcept {
+    for (usize i = 0; i < windowCommands_.Size(); ++i) {
+        if (windowCommands_[i].Get() == &commands) {
+            (void)windowCommands_.TryRemoveAt(i);
+            return;
+        }
+    }
+}
+
 bool Application::ProcessCommands(const Element* scope, KeyChord chord,
                                   bool repeat) const noexcept {
-    SharedPtr<CommandList> commands;
     if (!scope) {
-        commands = globalCommands_;
-    } else {
-        for (const auto& entry : commandScopes_) {
-            if (entry.element.Lock().Get() == scope) {
-                commands = entry.list;
-                break;
+        if (globalCommands_ && globalCommands_->Process(chord, repeat)) {
+            return true;
+        }
+
+        // 창 단위 목록(메뉴 막대 가속키 등)이다. 실행이 목록을 뗄 수 있어 참조를 잡고 부른다.
+        for (usize i = 0; i < windowCommands_.Size(); ++i) {
+            const SharedPtr<CommandList> list = windowCommands_[i];
+            if (list && list->Process(chord, repeat)) {
+                return true;
             }
+        }
+
+        return false;
+    }
+
+    SharedPtr<CommandList> commands;
+    for (const auto& entry : commandScopes_) {
+        if (entry.element.Lock().Get() == scope) {
+            commands = entry.list;
+            break;
         }
     }
 

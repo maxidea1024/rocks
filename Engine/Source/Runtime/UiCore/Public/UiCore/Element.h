@@ -106,6 +106,14 @@ public:
     virtual Result<void> AttachPopupLayer(const PopupRequest& popup) noexcept;
     // 화면이 비활성화될 때 이 호스트에서 열린 메뉴를 닫는다.
     virtual void DismissHostedPopups() noexcept;
+    // child가 이 요소가 품은 팝업 층인지다(팝업 호스트 Overlay가 답한다). 창 영역 판정이 팝업 위
+    // 지점을 크기 조절 가장자리보다 앞세울 때 쓴다(input::WindowRegion::Popup).
+    virtual bool IsHostedPopupLayer(const Element& child) const noexcept;
+    // 팝업 층이 허용 영역(모니터 작업 영역)을 고를 기준 창 좌표 지점이다. 비우면 호스트가 앵커의
+    // 왼쪽 위를 쓴다(UE CalculatePopupWindowPosition — 앵커 왼쪽 위 1 px로 가장 가까운 모니터).
+    // 커서에 붙는 툴팁 층은 커서 지점을 준다(UE CalculateTooltipWindowPosition). 여러 모니터에
+    // 걸친 창에서 팝업이 어느 모니터 안에 놓일지를 정한다.
+    virtual Optional<Vec2> PopupWorkAreaPoint() const noexcept;
 
     // 자식을 분리한다. 해당 자식이 없으면 false를 돌려준다.
     virtual bool RemoveChild(Element& child) noexcept;

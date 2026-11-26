@@ -10,7 +10,9 @@ namespace rocks::input {
 // UI가 점마다 돌려주는 창 영역이다(UE EWindowZone — GenericApplicationMessageHandler.h 81행).
 // Caption은 끌어 옮기는 제목 영역, FullscreenCaption은 더블클릭이 테두리 없는 전체 화면을 바꾸는
 // 제목, 창 버튼 셋과 SystemMenu(앱 아이콘 — 누르면 OS 시스템 메뉴)는 직접 그린 창 테두리
-// (WindowFrame::Custom)에서 쓴다. 크기 조절 가장자리는 창 계층이 판정한다.
+// (WindowFrame::Custom)에서 쓴다. 크기 조절 가장자리는 창 계층이 판정한다. Popup은 창 안에 그린
+// 팝업(메뉴·콤보·툴팁) 위 client 지점이다 — 직접 그린 창의 크기 조절 가장자리보다 앞선다(창 끝에
+// 붙은 메뉴 항목을 눌러도 크기 조절이 시작되지 않는다, Docs/Design/UiToolkit 9.1절 UW7c R6).
 enum class WindowRegion : uint8 {
     Client,
     Caption,
@@ -18,7 +20,8 @@ enum class WindowRegion : uint8 {
     MinimizeButton,
     MaximizeButton,
     CloseButton,
-    SystemMenu
+    SystemMenu,
+    Popup
 };
 
 // 키보드 키다. 문자 배치(QWERTY·AZERTY)와 무관한 물리 위치 기준이다. 예: Key::W는 US 배열의 W

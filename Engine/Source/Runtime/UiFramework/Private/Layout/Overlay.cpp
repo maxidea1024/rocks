@@ -58,6 +58,16 @@ Result<void> Overlay::AttachPopupLayer(const PopupRequest& popup) noexcept {
     return attached;
 }
 
+bool Overlay::IsHostedPopupLayer(const Element& child) const noexcept {
+    for (const OpenPopup& popup : popups_) {
+        if (popup.layer == &child) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void Overlay::DismissHostedPopups() noexcept {
     if (dismissingPopups_) {
         return;
@@ -160,8 +170,11 @@ Geometry Overlay::PopupLayerGeometry(const Element& child) const noexcept {
     auto hostBounds = host.WindowBounds();
     Box2<float> work;
     AffineTransform2D inverse;
+    // 기준 지점은 층이 정하거나(커서 툴팁) 앵커의 왼쪽 위다 — 여러 모니터에 걸친 창에서 UE처럼
+    // 앵커 왼쪽 위가 놓인 모니터를 고른다.
+    const Optional<Vec2> declared = child.PopupWorkAreaPoint();
     if (!anchorBounds || !hostBounds || !host.render.TryInverse(inverse) ||
-        !QueryPopupWorkArea((anchorBounds.Value().min + anchorBounds.Value().max) * 0.5f, work)) {
+        !QueryPopupWorkArea(declared ? *declared : anchorBounds.Value().min, work)) {
         return whole;
     }
 

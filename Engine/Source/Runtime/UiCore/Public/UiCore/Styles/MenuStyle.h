@@ -36,6 +36,9 @@ struct MenuStyle {
     StyleBrush radioOff{};
     StyleBrush radioOn{};
     float radioSize = 0.0f;
+    // 긴 메뉴(허용 높이를 넘는 패널)의 스크롤 위치 표시다 — 오른쪽 안쪽의 얇은 둥근 막대.
+    StyleBrush scrollThumb{};
+    float scrollThumbWidth = 0.0f;
     bool operator==(const MenuStyle&) const noexcept = default;
 };
 

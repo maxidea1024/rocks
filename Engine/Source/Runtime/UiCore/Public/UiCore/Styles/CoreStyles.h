@@ -174,6 +174,9 @@ inline constexpr Vec4 MenuPanelPadding{4.0f, 4.0f, 4.0f, 4.0f};
 inline constexpr float MenuPanelCornerRadius = 4.0f;
 inline constexpr float MenuRowCornerRadius = 3.0f;
 inline constexpr float MenuBarButtonCornerRadius = 4.0f;
+// 긴 메뉴의 스크롤 위치 막대 폭·반경이다(VS Code 메뉴 스크롤 막대처럼 얇게).
+inline constexpr float MenuScrollThumbWidth = 4.0f;
+inline constexpr float MenuScrollThumbRadius = 2.0f;
 
 // 펼친 메뉴 기본 스타일이다(UE "Menu").
 ROCKS_UICORE_API const MenuStyle& DefaultMenuStyle() noexcept;

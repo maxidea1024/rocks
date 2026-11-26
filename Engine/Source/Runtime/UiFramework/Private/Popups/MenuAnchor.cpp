@@ -180,6 +180,17 @@ Element* MenuAnchor::MenuContent() const noexcept {
     return IsOpen() ? layer_->ChildAt(0) : nullptr;
 }
 
+SharedPtr<Element> MenuAnchor::MenuContentRef() const noexcept {
+    return IsOpen() ? layer_->ChildRefAt(0) : SharedPtr<Element>{};
+}
+
+void MenuAnchor::SetMenuOffset(Vec2 offset) noexcept {
+    menuOffset_ = offset;
+    if (layer_) {
+        layer_->InvalidateArrangement();
+    }
+}
+
 void MenuAnchor::SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept {
     openChanged_ = Move(callback);
 }

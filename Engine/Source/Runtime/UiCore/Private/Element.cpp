@@ -69,6 +69,14 @@ Result<void> Element::AttachPopupLayer(const PopupRequest& popup) noexcept {
     return parent_ ? parent_->AttachPopupLayer(popup) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
+bool Element::IsHostedPopupLayer(const Element&) const noexcept {
+    return false;
+}
+
+Optional<Vec2> Element::PopupWorkAreaPoint() const noexcept {
+    return {};
+}
+
 void Element::DismissHostedPopups() noexcept {
 }
 

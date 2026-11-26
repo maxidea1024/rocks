@@ -64,6 +64,11 @@ public:
     Optional<Vec2> MenuPosition() const noexcept;
     // 열린 메뉴 내용(factory가 만든 요소)이다. 닫혀 있으면 null이다.
     Element* MenuContent() const noexcept;
+    // MenuContent의 소유 참조다(초점을 옮길 때). 닫혀 있으면 빈 포인터다.
+    SharedPtr<Element> MenuContentRef() const noexcept;
+    // 배치한 메뉴 위치에 더할 어긋남이다(밀어 넣기 전). 하위 메뉴는 첫 항목이 부모 항목과 같은
+    // 높이가 되게 패널 여백·외곽선만큼 위로 올린다.
+    void SetMenuOffset(Vec2 offset) noexcept;
     void SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept;
     void Close() noexcept;
     bool IsOpen() const noexcept;
@@ -83,6 +88,7 @@ private:
     MenuPlacement placement_ = MenuPlacement::Below;
     bool fit_ = true;
     bool catchOutside_ = true;
+    Vec2 menuOffset_{};
     WeakPtr<Application*> app_;
     WeakPtr<Element> restoreFocus_;
     uint32 focusUser_ = 0;

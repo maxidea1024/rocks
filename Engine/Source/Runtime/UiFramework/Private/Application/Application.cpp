@@ -17,7 +17,8 @@ bool IsModifierKey(input::Key key) noexcept {
 Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
-      modifiers_(allocator), commandScopes_(allocator), pressObservers_(allocator) {
+      modifiers_(allocator), commandScopes_(allocator), pressObservers_(allocator),
+      windowCommands_(allocator) {
     cache_.SetTheme(&theme_);
 }
 
@@ -73,6 +74,10 @@ void Application::SetRoot(const SharedPtr<Element>& root) noexcept {
     cache_.Reset();
     hitGrid_.Reset();
     ApplyPopupWorkArea();
+}
+
+const SharedPtr<Element>& Application::GetRoot() const noexcept {
+    return root_;
 }
 
 Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept {
@@ -210,6 +215,14 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
     const bool snapshot = hitGrid_.HasSnapshot();
     const auto hit = snapshot ? hitGrid_.Find(position, *root_) : SharedPtr<Element>{};
     auto* target = snapshot ? hit.Get() : root_->HitTest(position);
+    // 팝업 층 안 지점은 다른 판정보다 앞선다(직접 그린 창의 크기 조절 가장자리보다도 — UW7c R6).
+    for (const Element* current = target; current && current->Parent();
+         current = current->Parent()) {
+        if (current->Parent()->IsHostedPopupLayer(*current)) {
+            return input::WindowRegion::Popup;
+        }
+    }
+
     while (target) {
         const auto region = target->GetWindowRegion();
         if (region != input::WindowRegion::Client || target->SupportsKeyboardFocus()) {

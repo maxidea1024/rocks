@@ -29,6 +29,10 @@ constexpr wchar_t WindowClassName[] = L"RocksWindow";
 constexpr int CustomFrameShadowMargin = 1;
 // 최대화 중 자동 숨김 작업 표시줄 쪽에 남기는 틈(화소)이다.
 constexpr LONG AutoHideTaskbarGap = 1;
+// WM_SYSCOMMAND wParam의 아래 4 bit는 OS가 쓰므로 명령 비교 전에 지운다(SC_* 문서).
+constexpr WPARAM SysCommandMask = 0xFFF0;
+// SC_KEYMENU의 lParam이 이 글자면 Alt+Space(시스템 메뉴)다.
+constexpr LPARAM SystemMenuKey = ' ';
 constexpr usize MaxTitleCharacters = 256;
 
 // 스캔코드 set 1(make code) → Key. 확장 키(E0 접두)는 ExtendedKey가 처리한다.
@@ -733,8 +737,16 @@ private:
     WindowZone HitZone(IntVec2 clientPoint) const noexcept override {
         const input::WindowRegion region =
             regionHitTest_ ? regionHitTest_.Execute(clientPoint) : input::WindowRegion::Client;
+        // OS 테두리 창은 UI 영역만 본다: client·팝업 말고는 끌기 영역이다.
         if (!customFrame_) {
-            return region == input::WindowRegion::Client ? WindowZone::Client : WindowZone::Caption;
+            return region == input::WindowRegion::Client || region == input::WindowRegion::Popup
+                       ? WindowZone::Client
+                       : WindowZone::Caption;
+        }
+
+        // 팝업 위 지점은 크기 조절 가장자리보다 앞선다.
+        if (region == input::WindowRegion::Popup) {
+            return WindowZone::Client;
         }
 
         RECT client{};
@@ -944,6 +956,11 @@ private:
             // 제목·가장자리 누름은 열린 메뉴·툴팁을 닫는다(기본 처리로 창 옮기기·크기 조절은
             // 이어진다).
             PushNonClientPressed();
+            // 전체 화면 창은 제목을 끌어도 움직이지 않는다(모니터를 덮은 채로 — VS Code·Edge F11).
+            // 더블클릭(WM_NCLBUTTONDBLCLK)은 따로 와서 전체 화면 끄기를 그대로 한다.
+            if (fullscreenStyle_ && wParam == HTCAPTION) {
+                return 0;
+            }
             break;
         case WM_NCRBUTTONDOWN:
             PushNonClientPressed();
@@ -1065,6 +1082,14 @@ private:
             // Alt+F4 같은 시스템 키 동작은 OS 기본 처리로 넘긴다.
             break;
         }
+        case WM_SYSCOMMAND:
+            // F10·Alt·Alt+글자는 OS 메뉴 모드(SC_KEYMENU)로 가지 않는다 — UI 메뉴 막대 가속키가
+            // 받고, 메뉴 없는 창의 경고음도 없다(UE도 처리한 WM_SYSKEYDOWN에 0). Alt+Space(lParam '
+            // ')는 시스템 메뉴를 그대로 연다.
+            if ((wParam & SysCommandMask) == SC_KEYMENU && lParam != SystemMenuKey) {
+                return 0;
+            }
+            break;
         case WM_KEYUP:
         case WM_SYSKEYUP: {
             const Key key = KeyFromMessage(lParam);

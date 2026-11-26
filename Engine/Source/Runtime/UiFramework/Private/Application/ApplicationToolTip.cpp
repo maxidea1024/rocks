@@ -79,6 +79,16 @@ public:
         return child->ArrangeIfNeeded(area.MakeChild(size, {1, 0, 0, 1, x, y}, {}, {}));
     }
 
+    // 커서에 붙는 툴팁은 커서가 놓인 모니터 안에 놓는다(UE CalculateTooltipWindowPosition). 소유자
+    // 아래 툴팁(키보드·상호작용)은 소유자의 왼쪽 위를 쓴다(호스트 기본).
+    Optional<Vec2> PopupWorkAreaPoint() const noexcept override {
+        if (interactive_ || belowOwner_) {
+            return {};
+        }
+
+        return point_;
+    }
+
 private:
     Vec2 point_;
     WeakPtr<Element> owner_;

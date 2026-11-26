@@ -249,6 +249,8 @@ const MenuStyle& DefaultMenuStyle() noexcept {
         menu.radioOff = StyleBrush::Pill(ThemeSlot::Input);
         menu.radioOn = StyleBrush::Pill(ThemeSlot::White);
         menu.radioSize = MenuRadioSize;
+        menu.scrollThumb = StyleBrush::RoundedBox(ThemeSlot::Hover2, MenuScrollThumbRadius);
+        menu.scrollThumbWidth = MenuScrollThumbWidth;
         return menu;
     }();
     return style;

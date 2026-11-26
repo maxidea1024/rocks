@@ -2,6 +2,7 @@
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Menus/MenuPanel.h>
 #include <UiFramework/Menus/MenuRow.h>
+#include <UiFramework/Popups/ToolTip.h>
 
 namespace rocks::ui {
 
@@ -13,12 +14,14 @@ constexpr float IconColumnExtra = 2.0f;
 } // namespace
 
 MenuRow::MenuRow(Allocator& allocator, const SharedPtr<MenuContext>& context) noexcept
-    : MenuAnchor(allocator), context_(context) {
+    : MenuAnchor(allocator), context_(context), toolTip_(allocator) {
     const MenuStyle& style = context_->Style();
+    // 기본 메뉴 스타일 값은 늘 유효하다(IsValidStyle 실패는 호출자 스타일 오류뿐).
     (void)SetStyle(style.row);
     (void)SetContentPadding(style.rowPadding);
-    // 하위 메뉴는 오른쪽에 연다(UE 메뉴 하위 메뉴 배치).
+    // 하위 메뉴는 오른쪽에 열고, 첫 항목이 이 항목과 같은 높이가 되게 패널 여백·외곽선만큼 올린다.
     SetPlacement(MenuPlacement::Right);
+    SetMenuOffset({0, -(style.panelPadding.y + style.outline.outlineWidth)});
 }
 
 Result<void> MenuRow::Construct(Args&& args) noexcept {
@@ -43,11 +46,46 @@ Result<void> MenuRow::Construct(Args&& args) noexcept {
     check_ = args.check;
     isChecked_ = Move(args.isChecked);
     execute_ = Move(args.execute);
+    icon_ = args.icon;
     hasSubMenu_ = static_cast<bool>(args.subMenu);
     if (hasSubMenu_) {
         SetMenuFactory(Move(args.subMenu));
         // 하위 메뉴 층은 메뉴 영역만 받는다 — 부모 메뉴의 hover·누름이 그대로 가야 한다.
         SetCatchOutsidePresses(false);
+        SetOnOpenChanged(Delegate<void(bool)>::CreateLambda(
+            [this](bool open) noexcept { OnSubMenuOpenChanged(open); }));
+    }
+
+    if (!args.toolTip.IsEmpty()) {
+        auto copied = toolTip_.TryAssign(args.toolTip);
+        if (copied) {
+            copied = SetToolTipFactory(
+                ToolTipFactory::CreateLambda([this]() noexcept -> Result<SharedPtr<Element>> {
+                    auto text =
+                        context_->MakeLabel(toolTip_.View(), DefaultToolTipStyle().text.font);
+                    if (!text) {
+                        return Result<SharedPtr<Element>>::Failure(text.Error());
+                    }
+
+                    Allocator& allocator = context_->GetAllocator();
+                    auto tip = SharedPtr<ToolTip>::TryMake(allocator, allocator);
+                    if (!tip) {
+                        return Result<SharedPtr<Element>>::Failure(tip.Error());
+                    }
+
+                    auto built = tip.Value()->Construct({.text = Move(text.Value())});
+                    if (!built) {
+                        return Result<SharedPtr<Element>>::Failure(built.Error());
+                    }
+
+                    return Result<SharedPtr<Element>>::Success(Move(tip.Value()));
+                }),
+                args.toolTip);
+        }
+
+        if (!copied) {
+            return copied;
+        }
     }
 
     SetEnabled(!args.canExecute.IsBound() || args.canExecute.Execute());
@@ -64,6 +102,35 @@ bool MenuRow::IsChecked() const noexcept {
 
 MenuCheckKind MenuRow::CheckKind() const noexcept {
     return check_;
+}
+
+StringView MenuRow::LabelText() const noexcept {
+    return label_ ? label_->GetText() : StringView{};
+}
+
+VectorImageKey MenuRow::Icon() const noexcept {
+    return icon_;
+}
+
+bool MenuRow::IsHighlighted() const noexcept {
+    if (MenuAnchor::IsHighlighted()) {
+        return true;
+    }
+
+    // 키보드로 고른 항목이다(포인터로 옮긴 초점은 hover가 강조한다).
+    Application& app = context_->GetApplication();
+    if (app.GetFocusCause(0) == FocusCause::Navigation && app.GetFocus(0).Get() == this) {
+        return true;
+    }
+
+    // 하위 메뉴가 열린 항목은 패널에서 다른 항목을 hover하지 않는 동안 강조를 유지한다(하위
+    // 메뉴로 옮겨 가도 단계마다 강조 — UE ShouldSubMenuAppearHovered).
+    if (IsOpen()) {
+        const MenuRow* hovered = panel_ ? panel_->HoveredRow() : nullptr;
+        return hovered == nullptr || hovered == this;
+    }
+
+    return false;
 }
 
 void MenuRow::SetPanel(MenuPanel* panel) noexcept {
@@ -175,6 +242,20 @@ Result<void> MenuRow::OnPaintOverlay(PaintList& list, int32 layer) const noexcep
         }
     }
 
+    // 아이콘은 체크 표시가 없는 항목의 아이콘 칸 가운데다.
+    if (check_ == MenuCheckKind::None && icon_ != VectorImageKey{}) {
+        const float columnX = style.rowPadding.x + style.iconPadding.x;
+        const float columnWidth = style.iconSize + IconColumnExtra;
+        const Vec2 size{style.iconSize, style.iconSize};
+        const auto at = geometry.MakeChild(
+            size, {1, 0, 0, 1, columnX + (columnWidth - size.x) * 0.5f, middle - size.y * 0.5f}, {},
+            {});
+        painted = list.TryAddBrush(at, Brush::Vector(icon_, size), ink, layer);
+        if (!painted) {
+            return painted;
+        }
+    }
+
     if (hasSubMenu_) {
         const Vec2 size{style.subMenuIconSize, style.subMenuIconSize};
         const float x = geometry.size.x - style.rowPadding.z - size.x;
@@ -185,14 +266,80 @@ Result<void> MenuRow::OnPaintOverlay(PaintList& list, int32 layer) const noexcep
     return painted;
 }
 
-bool MenuRow::IsHighlighted() const noexcept {
-    return MenuAnchor::IsHighlighted() || IsOpen();
-}
-
 void MenuRow::OnMouseEnter(uint32 user) noexcept {
     MenuAnchor::OnMouseEnter(user);
-    if (panel_ && IsEnabled()) {
-        panel_->OnRowHovered(*this);
+    if (!panel_ || !IsEnabled()) {
+        return;
+    }
+
+    // 포인터가 고른 항목으로 키보드 초점도 옮긴다(Enter가 보이는 항목을 실행하고, 강조가 하나다).
+    // 초점 콜백 중이라 Busy면 다음 hover에서 맞춘다.
+    if (auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{}) {
+        (void)context_->GetApplication().SetFocus(user, self, FocusCause::Pointer);
+    }
+
+    panel_->OnRowHovered(*this);
+}
+
+void MenuRow::OnMouseLeave(uint32 user) noexcept {
+    MenuAnchor::OnMouseLeave(user);
+    if (panel_) {
+        panel_->OnRowUnhovered(*this);
+    }
+}
+
+void MenuRow::OnFocusReceived(uint32 user) noexcept {
+    MenuAnchor::OnFocusReceived(user);
+    InvalidatePaint();
+}
+
+void MenuRow::OnFocusLost(uint32 user) noexcept {
+    MenuAnchor::OnFocusLost(user);
+    InvalidatePaint();
+}
+
+Optional<bool> MenuRow::OnQueryShowFocus(FocusCause) const noexcept {
+    // 초점은 외곽선이 아니라 Primary 강조로 보인다.
+    return false;
+}
+
+void MenuRow::Invoke() noexcept {
+    OnActivated();
+}
+
+Result<void> MenuRow::OpenSubMenuFocused(uint32 user) noexcept {
+    if (!hasSubMenu_ || !IsEnabled()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (panel_) {
+        panel_->SwitchSubMenu(this);
+    }
+
+    auto* sub = static_cast<MenuPanel*>(MenuContent());
+    if (!sub) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    return sub->FocusFirstItem(user) ? Result<void>::Success()
+                                     : Result<void>::Failure(ErrorCode::NotFound);
+}
+
+void MenuRow::OnSubMenuOpenChanged(bool open) noexcept {
+    if (open) {
+        return;
+    }
+
+    // 하위 메뉴가 닫혔는데 초점이 그 안(이제 트리에서 떨어진 항목)에 있으면 이 항목으로 돌아온다.
+    Application& app = context_->GetApplication();
+    const auto focus = app.GetFocus(0);
+    const auto& root = app.GetRoot();
+    if (!focus || !root || focus->IsWithin(*root)) {
+        return;
+    }
+
+    if (auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{}) {
+        (void)app.SetFocus(0, self, app.GetFocusCause(0));
     }
 }
 
@@ -200,7 +347,8 @@ bool MenuRow::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
     // 오른쪽은 하위 메뉴를 열고 첫 항목으로 간다(키보드 — 외곽선을 잇는다).
     if (event.type == input::InputEventType::KeyDown && event.key == input::Key::Right &&
         hasSubMenu_ && IsEnabled()) {
-        (void)OpenFocused(context_->GetApplication(), user, FocusCause::Navigation);
+        // 채우기 실패(빈 하위 메뉴)면 그대로 이 항목에 머문다.
+        (void)OpenSubMenuFocused(user);
         return true;
     }
 
@@ -211,10 +359,11 @@ void MenuRow::OnActivated() noexcept {
     if (hasSubMenu_) {
         Application& app = context_->GetApplication();
         // 키보드(Enter·Space)로 누르면 하위 메뉴 첫 항목으로 가고, 마우스는 열기만 한다.
+        // 열기 실패(채우기 오류)면 항목에 머문다 — 메뉴 동작은 실패를 보이지 않는다.
         if (app.GetFocusCause(0) == FocusCause::Navigation && app.GetFocus(0).Get() == this) {
-            (void)OpenFocused(app, 0, FocusCause::Navigation);
-        } else if (!IsOpen()) {
-            (void)Open();
+            (void)OpenSubMenuFocused(0);
+        } else if (!IsOpen() && panel_) {
+            panel_->SwitchSubMenu(this);
         }
 
         return;

@@ -60,6 +60,8 @@ private:
     Result<SlotHandle> Add(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                            StringView title) noexcept;
     // Custom 창이면 제목 막대와 테두리를 만들어 루트로 둔다(창 버튼은 그 창의 동작에 건다).
+    // OS 테두리 주 창의 내용 위 줄에 주 메뉴를 둔다.
+    Result<void> AttachMenuRow(Surface& host) noexcept;
     Result<void> AttachChrome(Surface& surface, StringView title, bool main) noexcept;
     Result<bool> Update(Surface& surface) noexcept;
     // 펌프 없이 크기 반영·배치·그리기·present를 한다. 크기 조절 콜백(UiToolkit 9.1절 UW7a)도 쓴다.
