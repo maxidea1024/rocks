@@ -141,9 +141,9 @@ public abstract class TestsModule : ModuleRules
         ["PlatformBase"] = ["Core"],
         ["ReflectionText"] = ["CoreTypeBindings", "ReflectionTestFixtures"],
         // The RenderBase tests also cover its integration with the engine (render settings through Config, GPU trace through TraceAnalysis, the
-        // World render lane).
+        // World render lane) and build resource maps from the generated shader parameter fixture structs (Docs/Design/ShaderSystem section 16.2 SSD64).
         ["RenderBase"] = ["Config", "ConfigTestFixtures", "CoreTypeBindings", "Engine", "ObjectRuntime", "ReflectionTestFixtures", "ReflectionText",
-            "Serialization", "TraceAnalysis", "World"],
+            "Serialization", "ShaderParameterTestFixtures", "TraceAnalysis", "World"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
         // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers; the shader

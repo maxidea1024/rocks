@@ -22,9 +22,9 @@ internal static partial class MetaTests
 
         public string Shader(string name) => File.ReadAllText(Path.Combine(OutputRoot, "Shaders", name + ".rsh"));
 
-        public async Task<int> RunAsync(string body)
+        public async Task<int> RunAsync(string body, string? preamble = null)
         {
-            temporary.Write("Probe.h", ShaderParameterPreamble + body + "}\n");
+            temporary.Write("Probe.h", (preamble ?? ShaderParameterPreamble) + body + "}\n");
             List<string> arguments = [];
             string executable = generator;
             if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
@@ -52,9 +52,9 @@ internal static partial class MetaTests
             return result.ExitCode;
         }
 
-        public async Task RejectAsync(string body, string code, string reason)
+        public async Task RejectAsync(string body, string code, string reason, string? preamble = null)
         {
-            int exit = await RunAsync(body);
+            int exit = await RunAsync(body, preamble);
             Verify.That(exit != 0, "invalid shader parameter input accepted:\n" + body);
             Verify.Contains(code, LastStdErr, "stable shader parameter diagnostic code");
             Verify.Contains("hint:", LastStdErr, "actionable diagnostic hint");
