@@ -376,6 +376,125 @@ TEST(MulticastDelegate_TargetDestructorMayReenter) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+namespace {
+
+// 재진입 시험의 문맥이다(guard는 이 포인터 하나만 쥐어 약한 lambda가 inline 저장에 들어간다).
+struct Reentry {
+    MulticastDelegate<void(int)>* event;
+    DelegateHandle victim;
+    int order[8];
+    int written;
+};
+
+// 소멸될 때 같은 MulticastDelegate에서 다른 항목을 제거하고 새 항목을 더한다(정리 중 재진입).
+struct ReenterOnDestroy {
+    Reentry* context;
+
+    explicit ReenterOnDestroy(Reentry* target) noexcept : context(target) {
+    }
+
+    ReenterOnDestroy(ReenterOnDestroy&& source) noexcept : context(source.context) {
+        source.context = nullptr;
+    }
+
+    ~ReenterOnDestroy() noexcept {
+        if (context != nullptr) {
+            Reentry* state = context;
+            CHECK(state->event->Remove(state->victim));
+            CHECK(state->event->TryAddLambda(
+                [state](int) noexcept { state->order[state->written++] = 9; }));
+        }
+    }
+};
+
+} // namespace
+
+// 정리(SL 5.5절 C3)는 살아 있는 항목의 등록 순서를 지키고, CompactDead는 해제한 수를 돌려준다.
+TEST(MulticastDelegate_CompactKeepsOrder) {
+    SystemAllocator allocator;
+    {
+        MulticastDelegate<void(int)> event(allocator);
+        constexpr int Count = 6;
+        int order[Count + 2] = {};
+        int written = 0;
+        SharedPtr<Counter> owners[Count];
+        for (int index = 0; index < Count; ++index) {
+            auto owner = SharedPtr<Counter>::TryMake(allocator);
+            REQUIRE(owner);
+            owners[index] = owner.Value();
+            REQUIRE(event.TryAddWeakLambda(owners[index], [&order, &written, index](int) noexcept {
+                order[written++] = index;
+            }));
+        }
+
+        // 1·3·4번 대상이 사라진다(정리 전이라 배열에는 남아 있다).
+        owners[1].Reset();
+        owners[3].Reset();
+        owners[4].Reset();
+        MulticastDelegateStats before = event.Stats();
+        CHECK(before.entries == Count && before.bound == 3);
+        CHECK(event.CompactDead() == 3);
+        MulticastDelegateStats after = event.Stats();
+        CHECK(after.entries == 3 && after.bound == 3 && after.liveAtLastCompact == 3);
+        CHECK(event.CompactDead() == 0);
+        event.Broadcast(0);
+        CHECK(written == 3 && order[0] == 0 && order[1] == 2 && order[2] == 5);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Broadcast 없이 TryAdd만 계속해도 죽은 항목이 상한(직전 정리 뒤 남은 수의 두 배 + 여유분)을
+// 넘지 않는다(SL 5.5절 C2).
+TEST(MulticastDelegate_TryAddBoundsDeadEntries) {
+    SystemAllocator allocator;
+    {
+        MulticastDelegate<void()> event(allocator);
+        auto keeper = SharedPtr<Counter>::TryMake(allocator);
+        REQUIRE(keeper);
+        REQUIRE(event.TryAddWeakLambda(keeper.Value(), []() noexcept {}));
+        constexpr int Adds = 200;
+        for (int index = 0; index < Adds; ++index) {
+            auto owner = SharedPtr<Counter>::TryMake(allocator);
+            REQUIRE(owner);
+            REQUIRE(event.TryAddWeakLambda(owner.Value(), []() noexcept {}));
+            owner.Value().Reset(); // 대상이 곧바로 사라진다
+            const MulticastDelegateStats stats = event.Stats();
+            CHECK(stats.entries <= stats.liveAtLastCompact * 2 + MulticastCompactSlack);
+            CHECK(stats.bound == 1);
+        }
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 정리 중 해제되는 대상의 소멸자가 같은 delegate에서 다른 항목을 제거하고 새 항목을 더해도 순서와
+// 해제가 맞다(재진입한 TryAdd는 죽은 묶음 뒤에 붙고, 재진입한 제거는 한 번 더 도는 정리가 거둔다).
+TEST(MulticastDelegate_CompactAllowsReentrantTargets) {
+    SystemAllocator allocator;
+    {
+        MulticastDelegate<void(int)> event(allocator);
+        Reentry state{&event, {}, {}, 0};
+        auto owner = SharedPtr<Counter>::TryMake(allocator);
+        REQUIRE(owner);
+        REQUIRE(event.TryAddLambda([&state](int) noexcept { state.order[state.written++] = 1; }));
+        REQUIRE(event.TryAddWeakLambda(owner.Value(),
+                                       [guard = ReenterOnDestroy(&state)](int) noexcept {}));
+        auto removed =
+            event.TryAddLambda([&state](int) noexcept { state.order[state.written++] = 3; });
+        REQUIRE(removed);
+        state.victim = removed.Value();
+        REQUIRE(event.TryAddLambda([&state](int) noexcept { state.order[state.written++] = 4; }));
+
+        owner.Value().Reset();
+        CHECK(event.CompactDead() == 2); // 약한 대상 항목 + 재진입으로 제거된 항목
+        const MulticastDelegateStats stats = event.Stats();
+        CHECK(stats.entries == 3 && stats.bound == 3);
+        event.Broadcast(0);
+        CHECK(state.written == 3 && state.order[0] == 1 && state.order[1] == 4 &&
+              state.order[2] == 9);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
 } // namespace delegate_tests_file
 
 } // namespace rocks::test

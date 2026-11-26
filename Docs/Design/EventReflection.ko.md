@@ -80,3 +80,7 @@ UE는 native multicast와 dynamic multicast를 다른 타입으로 둔다. Rocks
 - 단일 cast 이벤트(UE `DECLARE_DYNAMIC_DELEGATE` — 반환이 있는 바인딩)는 요구 시.
 - 네트워크 발행 측·권한(`BlueprintAuthorityOnly`)은 네트워크 단계.
 - 함께 고칠 문서(이 개정과 같은 묶음): FunctionReflection FD11(ED5), UiToolkit 7절 CU3 행·SL 10.1·SE-R2의 "Core `MulticastDelegate` 필드"를 `Event<Args...>`로, InputActions 5.1절 함수 바인딩 문장(`FunctionBinding`).
+
+## 7. 구현 기록
+
+- **EV0(Core `Core/Delegate.h`):** `MulticastDelegate`에 C2 상한 정리(`TryAdd`가 항목 수가 직전 정리 뒤 남은 수의 두 배 + `MulticastCompactSlack`(8)에 닿으면 정리 — 메모리는 그 상한 안, 비용은 분할 상환 O(1)), C3 단일 pass 정리(대상 소멸자를 부르지 않는 안정 분할로 살아 있는 항목을 등록 순서대로 앞으로 모은 뒤 죽은 묶음을 뒤에서부터 떼어 해제 — 재진입한 `TryAdd`는 묶음 뒤에 붙고, 재진입한 제거가 앞쪽을 표시하면 한 번 더 돈다), C4 `CompactDead()`(해제 수)·`Stats()`(`MulticastDelegateStats` — 항목·호출될 항목·직전 정리 뒤 남은 수). 시험 `MulticastDelegate_CompactKeepsOrder`·`TryAddBoundsDeadEntries`·`CompactAllowsReentrantTargets`. C1은 Sparks 연결(EI3) 때.
