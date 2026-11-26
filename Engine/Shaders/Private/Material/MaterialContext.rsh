@@ -172,6 +172,8 @@ struct MaterialVertexInputs {
     float firstPersonScale;
     float previousFirstPersonScale;
     float nearPlane;
+    float materialTextureMipBias;
+    float materialTextureDerivativeMultiply;
 };
 
 struct MaterialInputs {
@@ -247,6 +249,8 @@ struct MaterialInputs {
     float2 firstPersonCotanHalfFieldOfView;
     float firstPersonScale;
     float nearPlane;
+    float materialTextureMipBias;
+    float materialTextureDerivativeMultiply;
 };
 
 // Accessors (MaterialContext<Name>, previous frame MaterialContextPrevious<Name>).
@@ -333,6 +337,8 @@ struct MaterialInputs {
 #define MaterialContextGlobalIlluminationPass(c) MaterialPassGlobalIlluminationPass(c)
 #define MaterialContextRayTracingPass(c) MaterialPassRayTracingPass(c)
 #define MaterialContextPostProcessVolumeFlagTest(c, a0) MaterialPassPostProcessVolumeFlagTest(c, a0)
+#define MaterialContextMaterialTextureMipBias(c) ((c).materialTextureMipBias)
+#define MaterialContextMaterialTextureDerivativeMultiply(c) ((c).materialTextureDerivativeMultiply)
 #else
 #define MaterialContextCameraVector(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextDeltaTime(c) (0.0)
@@ -415,6 +421,8 @@ struct MaterialInputs {
 #define MaterialContextGlobalIlluminationPass(c) (false)
 #define MaterialContextRayTracingPass(c) (false)
 #define MaterialContextPostProcessVolumeFlagTest(c, a0) (0.0)
+#define MaterialContextMaterialTextureMipBias(c) (0.0)
+#define MaterialContextMaterialTextureDerivativeMultiply(c) (1.0)
 #endif
 
 #if MATERIAL_SUPPLY_VERTEX

@@ -7,7 +7,7 @@ namespace rocks::material {
 namespace {
 
 // IR hash 바이트의 형식 표지다(형식을 바꾸면 올린다).
-constexpr uint32 IrHashFormatVersion = 2;
+constexpr uint32 IrHashFormatVersion = 3;
 
 // 깊이 우선 순회 칸 하나다(재귀 없이 — 그래프가 깊어도 스택을 넘지 않는다).
 struct Visit {
@@ -300,12 +300,67 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
     }
 
+    // 텍스처 표: 닿는 Texture의 표 항목을 (출처, id) 순으로 모으고 즉시값 [3]을 다시 매긴다(6.10절
+    // MS2c3 — 결정적 slot 순서).
+    const Span<const IrTexture> sourceTextures = builder.Textures();
+    for (const IrValue& value : out.values_) {
+        if (value.op != IrOp::Texture) {
+            continue;
+        }
+
+        const IrTexture& texture = sourceTextures[static_cast<usize>(value.immediate[3])];
+        bool known = false;
+        for (const IrTexture& existing : out.textures_) {
+            known = known || (existing.source == texture.source && existing.id == texture.id);
+        }
+
+        if (!known) {
+            if (auto added = out.textures_.TryPushBack(texture); !added) {
+                return FailBuild(out, Move(added));
+            }
+        }
+    }
+
+    const auto earlier = [](const IrTexture& left, const IrTexture& right) noexcept {
+        if (left.source != right.source) {
+            return static_cast<uint8>(left.source) < static_cast<uint8>(right.source);
+        }
+
+        return left.id.high < right.id.high ||
+               (left.id.high == right.id.high && left.id.low < right.id.low);
+    };
+    for (usize index = 1; index < out.textures_.Size(); ++index) {
+        for (usize at = index; at > 0 && earlier(out.textures_[at], out.textures_[at - 1]); --at) {
+            const IrTexture swap = out.textures_[at];
+            out.textures_[at] = out.textures_[at - 1];
+            out.textures_[at - 1] = swap;
+        }
+    }
+
+    for (IrValue& value : out.values_) {
+        if (value.op != IrOp::Texture) {
+            continue;
+        }
+
+        const Guid id{value.immediate[0], value.immediate[1]};
+        const IrTextureSource source = static_cast<IrTextureSource>(value.immediate[2] & 0xFF);
+        for (usize index = 0; index < out.textures_.Size(); ++index) {
+            if (out.textures_[index].source == source && out.textures_[index].id == id) {
+                value.immediate[3] = index;
+            }
+        }
+    }
+
     Sha256 hasher;
     WriteU32(hasher, IrHashFormatVersion);
     WriteU32(hasher, static_cast<uint32>(out.values_.Size()));
     for (const IrValue& value : out.values_) {
-        const uint8 header[] = {static_cast<uint8>(value.type.scalar), value.type.components,
-                                value.type.rows, static_cast<uint8>(value.op), value.operandCount};
+        const uint8 header[] = {static_cast<uint8>(value.type.scalar),
+                                value.type.components,
+                                value.type.rows,
+                                static_cast<uint8>(value.type.texture),
+                                static_cast<uint8>(value.op),
+                                value.operandCount};
         hasher.Update(Span<const uint8>(header, sizeof(header)));
         for (uint8 index = 0; index < value.operandCount; ++index) {
             WriteU32(hasher, value.operands[index]);

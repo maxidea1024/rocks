@@ -34,6 +34,7 @@ cbuffer MaterialConstants
 {
     float4 materialFloats[2];
 };
+#define MATERIAL_NUM_TEXTURES 0
 
 void EvaluateMaterialVertex(in MaterialVertexInputs c, inout MaterialVertexResult r) {
     r.worldPositionOffset = float3(0.0, 0.0, 0.0);

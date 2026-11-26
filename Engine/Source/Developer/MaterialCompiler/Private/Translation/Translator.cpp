@@ -133,7 +133,7 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
       outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
       statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
       incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
-      collections_(allocator) {
+      collections_(allocator), samplers_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -188,6 +188,27 @@ bool Translator::HasConnection(const nodegraph::GraphNode& consumer, Name pin) c
     }
 
     return false;
+}
+
+Result<bool> Translator::ReferenceSampler(uint8 source, Guid id, uint32& count) noexcept {
+    count = static_cast<uint32>(samplers_.Size());
+    for (const SamplerSlot& slot : samplers_) {
+        if (slot.source == source && slot.id == id) {
+            return Result<bool>::Success(true);
+        }
+    }
+
+    if (samplers_.Size() >= Target(MaterialTargetField::MaxSamplers).maxSamplers) {
+        count = static_cast<uint32>(samplers_.Size() + 1);
+        return Result<bool>::Success(false);
+    }
+
+    if (auto added = samplers_.TryPushBack(SamplerSlot{source, id}); !added) {
+        return Result<bool>::Failure(added.Error());
+    }
+
+    count = static_cast<uint32>(samplers_.Size());
+    return Result<bool>::Success(true);
 }
 
 Result<bool> Translator::ReferenceCollection(Guid asset) noexcept {
@@ -303,7 +324,7 @@ Result<void> Translator::BuildIndex() noexcept {
     const Span<const LoweringEntry> groups[] = {
         ConstantLowerings(),   MathLowerings(),      FlowLowerings(),   ContextValueLowerings(),
         CoordinateLowerings(), TransformLowerings(), SwitchLowerings(), InterpolatorLowerings(),
-        SupplyLowerings(),     ParameterLowerings()};
+        SupplyLowerings(),     ParameterLowerings(), TextureLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);

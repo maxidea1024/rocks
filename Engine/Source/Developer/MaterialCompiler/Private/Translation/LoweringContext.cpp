@@ -3,6 +3,7 @@
 #include <CoreTypeBindings/CoreValueTypes.generated.h>
 #include <CoreTypeBindings/CoreValueTypes.h>
 #include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
 #include <MaterialSchema/MaterialAssetReference.generated.h>
 #include <MaterialSchema/MaterialAssetReference.h>
 #include <MaterialSchema/MaterialContextValue.h>
@@ -45,12 +46,33 @@ StringView LoweringTypeName(IrType type) noexcept {
         return type.rows == 3 ? StringView("float3x3") : StringView("float4x4");
     }
 
+    if (type.IsTexture()) {
+        // UE DescribeType 이름이다.
+        switch (type.texture) {
+        case IrTextureKind::TextureCube:
+            return "textureCube";
+        case IrTextureKind::Texture2DArray:
+            return "texture2DArray";
+        case IrTextureKind::TextureCubeArray:
+            return "textureCubeArray";
+        case IrTextureKind::Texture3D:
+            return "volumeTexture";
+        case IrTextureKind::External:
+            return "textureExternal";
+        default:
+            return "texture2D";
+        }
+    }
+
     if (type.components < 1 || type.components > MaxIrComponents) {
         return "unknown";
     }
 
     const usize index = type.components - 1;
     switch (type.scalar) {
+    case IrScalar::Texture:
+        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+        break;
     case IrScalar::Float:
         return Floats[index];
     case IrScalar::Int:
@@ -140,6 +162,38 @@ const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) cons
     }
 
     return nullptr;
+}
+
+const MaterialTextureFacts* LoweringContext::FindTexture(Guid asset) const noexcept {
+    for (const MaterialTextureFacts& facts : translator_.Input().textures) {
+        if (facts.asset == asset) {
+            return &facts;
+        }
+    }
+
+    return nullptr;
+}
+
+Result<bool> LoweringContext::UseSampler(IrTextureSource source, Guid id) noexcept {
+    uint32 count = 0;
+    auto admitted = translator_.ReferenceSampler(static_cast<uint8>(source), id, count);
+    if (!admitted || admitted.Value()) {
+        return admitted;
+    }
+
+    const uint32 limit = translator_.Target(MaterialTargetField::MaxSamplers).maxSamplers;
+    StringBuilder<> message(scratch_);
+    message << "Material uses too many samplers (" << count << ", limit " << limit << ")";
+    if (auto status = message.Status(); !status) {
+        return Result<bool>::Failure(status.Error());
+    }
+
+    if (auto reported = Error(MaterialDiagnosticCode::BudgetExceeded, StringView(), message.View());
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
 }
 
 Result<bool> LoweringContext::UseCollection(Guid asset) noexcept {
@@ -836,6 +890,9 @@ namespace {
 Result<IrValueId> LoweringFilled(IrBuilder& builder, IrType type, int32 value) noexcept {
     const usize count = type.components;
     switch (type.scalar) {
+    case IrScalar::Texture:
+        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+        break;
     case IrScalar::Float: {
         const float items[MaxIrComponents] = {float(value), float(value), float(value),
                                               float(value)};
@@ -874,9 +931,28 @@ Result<IrValueId> LoweringContext::One(IrType type) noexcept {
     return LoweringBuilt(*this, LoweringFilled(Builder(), type, 1));
 }
 
+Result<IrValueId> LoweringContext::RejectTexture(IrValueId value, bool& rejected) noexcept {
+    rejected = value != NoIrValue && TypeOf(value).IsTexture();
+    if (!rejected) {
+        return Result<IrValueId>::Success(value);
+    }
+
+    if (auto reported =
+            TypeError("Texture values are not accepted here", TypeOf(value), TypeOf(value));
+        !reported) {
+        return Result<IrValueId>::Failure(reported.Error());
+    }
+
+    return Result<IrValueId>::Success(NoIrValue);
+}
+
 Result<IrValueId> LoweringContext::Convert(IrValueId value, IrScalar scalar) noexcept {
     if (value == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (auto refused = RejectTexture(value, textureRefused_); !refused || textureRefused_) {
+        return refused;
     }
 
     return LoweringBuilt(*this, Builder().Convert(value, scalar));
@@ -885,6 +961,10 @@ Result<IrValueId> LoweringContext::Convert(IrValueId value, IrScalar scalar) noe
 Result<IrValueId> LoweringContext::Splat(IrValueId value, uint8 components) noexcept {
     if (value == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (auto refused = RejectTexture(value, textureRefused_); !refused || textureRefused_) {
+        return refused;
     }
 
     if (TypeOf(value).components == components) {
@@ -897,6 +977,10 @@ Result<IrValueId> LoweringContext::Splat(IrValueId value, uint8 components) noex
 Result<IrValueId> LoweringContext::Prefix(IrValueId value, uint8 components) noexcept {
     if (value == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (auto refused = RejectTexture(value, textureRefused_); !refused || textureRefused_) {
+        return refused;
     }
 
     if (TypeOf(value).components == components) {
@@ -912,12 +996,23 @@ Result<IrValueId> LoweringContext::Swizzle(IrValueId value, Span<const uint8> co
         return Result<IrValueId>::Success(NoIrValue);
     }
 
+    if (auto refused = RejectTexture(value, textureRefused_); !refused || textureRefused_) {
+        return refused;
+    }
+
     return LoweringBuilt(*this, Builder().Swizzle(value, components));
 }
 
 Result<IrValueId> LoweringContext::Append(IrValueId left, IrValueId right) noexcept {
     if (left == NoIrValue || right == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    const IrValueId sides[] = {left, right};
+    for (IrValueId side : sides) {
+        if (auto refused = RejectTexture(side, textureRefused_); !refused || textureRefused_) {
+            return refused;
+        }
     }
 
     return LoweringBuilt(*this, Builder().Append(left, right));
@@ -933,9 +1028,11 @@ Result<Optional<IrType>> LoweringContext::CommonType(Span<const IrValueId> value
     bool hasUInt = false;
     for (IrValueId value : values) {
         const IrType type = TypeOf(value);
-        if (type.IsMatrix()) {
+        if (type.IsMatrix() || type.IsTexture()) {
             if (auto reported =
-                    TypeError("Matrix values are not accepted here", type, TypeOf(values[0]));
+                    TypeError(type.IsTexture() ? StringView("Texture values are not accepted here")
+                                               : StringView("Matrix values are not accepted here"),
+                              type, TypeOf(values[0]));
                 !reported) {
                 return Result<Optional<IrType>>::Failure(reported.Error());
             }
@@ -1022,7 +1119,13 @@ Result<IrValueId> LoweringContext::CoerceTo(IrValueId value, IrType target,
 
     const IrType source = TypeOf(value);
     StringView problem;
-    if (source.IsMatrix() || target.IsMatrix()) {
+    if (source.IsTexture() || target.IsTexture()) {
+        if (source == target) {
+            return Result<IrValueId>::Success(value);
+        }
+
+        problem = "Texture value cannot be used here";
+    } else if (source.IsMatrix() || target.IsMatrix()) {
         problem = "Matrix value cannot be used here";
     } else if ((source.scalar == IrScalar::Bool) != (target.scalar == IrScalar::Bool)) {
         problem = "Boolean and numeric values do not convert implicitly";
@@ -1070,6 +1173,10 @@ Result<IrValueId> LoweringContext::CoerceTo(IrValueId value, IrType target,
 Result<IrValueId> LoweringContext::Unary(IrOp op, IrValueId value, NumberRule rule) noexcept {
     if (value == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (auto refused = RejectTexture(value, textureRefused_); !refused || textureRefused_) {
+        return refused;
     }
 
     const IrType type = TypeOf(value);

@@ -1168,6 +1168,16 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Function, 1, MaterialContextFeature::Primitive,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::Zero, {}, false),
+    // UE View.MaterialTextureMipBias(자동 view mip bias — 텍스처 샘플 lowering이 읽는다).
+    ContextValue("MaterialTextureMipBias", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {}, false),
+    // UE View.MaterialTextureDerivativeMultiply(명시 미분 샘플의 view mip bias 배율).
+    ContextValue("MaterialTextureDerivativeMultiply", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::Zero, {1.0f}, false),
 };
 
 } // namespace

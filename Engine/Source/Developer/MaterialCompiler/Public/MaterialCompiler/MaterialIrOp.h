@@ -123,11 +123,23 @@ enum class IrOp : uint8 {
     Parameter = 85,
     // 파라미터 컬렉션 벡터 하나다(6.10절 MS2c2). 즉시값 [0]·[1]은 컬렉션 asset id, [2]는 벡터 번호,
     // [3]은 그 컬렉션의 벡터 수다.
-    CollectionValue = 86
+    CollectionValue = 86,
+
+    // 텍스처 하나다(6.10절 MS2c3). 즉시값 [0]·[1]은 asset id 또는 ParameterId, [2]는 출처
+    // (IrTextureSource) | 샘플 종류 << 8, [3]은 텍스처 표 번호(모듈이 (출처, id) 순으로 다시
+    // 매긴다).
+    Texture = 87,
+    // 텍스처 샘플이다(6.10절 MS2c3). 피연산자 [텍스처, uv, mip 값 또는 ddx, ddy]. 즉시값 [0]은 샘플
+    // 종류, [1]은 IrTextureMipMode, [2]는 IrSamplerSource, [3]은 gather 채널 | decal << 4. 결과
+    // Float4.
+    TextureSample = 88,
+    // Double uv를 주소 모드대로 Float로 낮춘다(6.10절 MS2c3 — UE WSApplyAddressMode). 즉시값 [0]은
+    // 성분마다 2 bit 주소 모드(0 Clamp, 1 Wrap, 2 Mirror).
+    AddressDemote = 89
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 87;
+inline constexpr uint32 IrOpCount = 90;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

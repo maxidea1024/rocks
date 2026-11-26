@@ -4,7 +4,8 @@
 
 // 머티리얼 IR 값 타입이다(Docs/Design/MaterialSystem 6.2·6.8절). 수 타입은 스칼라 종류와 성분
 // 수(1–4)이고, 행렬은 float 3×3·4×4뿐이다(5.3절). 핀 타입 Numeric·Any는 IR 타입이 아니다:
-// lowering이 연결된 값으로 정한다. 자원·표면·속성 집합 타입은 그 단계(MS2c·MS2d·MS2e)가 더한다.
+// lowering이 연결된 값으로 정한다. 텍스처는 스칼라 종류 Texture와 텍스처 종류 칸이다(6.10절 MS2c3 —
+// 성분 1, 산술·비교·선택에 들어가지 못한다). 표면·속성 집합 타입은 그 단계(MS2d·MS2e)가 더한다.
 //
 // 사용 예:
 //   const IrType color = IrFloat(3);
@@ -20,7 +21,21 @@ enum class IrScalar : uint8 {
     Int = 1,
     UInt = 2,
     Bool = 3,
-    Double = 4
+    Double = 4,
+    // 텍스처 자원이다(종류는 IrType::texture).
+    Texture = 5
+};
+
+// 텍스처 자원 종류다(UE MCT_Texture2D·TextureCube·Texture2DArray·TextureCubeArray·VolumeTexture·
+// TextureExternal).
+enum class IrTextureKind : uint8 {
+    None = 0,
+    Texture2D = 1,
+    TextureCube = 2,
+    Texture2DArray = 3,
+    TextureCubeArray = 4,
+    Texture3D = 5,
+    External = 6
 };
 
 struct IrType {
@@ -29,6 +44,8 @@ struct IrType {
     uint8 components = 1;
     // 1이면 스칼라·벡터, 3·4면 행렬 행 수다.
     uint8 rows = 1;
+    // scalar가 Texture일 때만 None이 아니다.
+    IrTextureKind texture = IrTextureKind::None;
 
     constexpr bool IsScalar() const noexcept {
         return rows == 1 && components == 1;
@@ -38,11 +55,19 @@ struct IrType {
         return rows > 1;
     }
 
+    constexpr bool IsTexture() const noexcept {
+        return scalar == IrScalar::Texture;
+    }
+
     friend constexpr bool operator==(const IrType&, const IrType&) noexcept = default;
 };
 
 constexpr IrType IrFloat(uint8 components) noexcept {
     return IrType{IrScalar::Float, components, 1};
+}
+
+constexpr IrType IrTextureType(IrTextureKind kind) noexcept {
+    return IrType{IrScalar::Texture, 1, 1, kind};
 }
 
 constexpr IrType IrInt(uint8 components) noexcept {
@@ -68,7 +93,13 @@ constexpr IrType IrFloatMatrix(uint8 rows, uint8 columns) noexcept {
 
 // 정의된 타입인가: 벡터는 성분 1–4, 행렬은 float 3×3·4×4다.
 constexpr bool IsValidIrType(IrType type) noexcept {
-    if (static_cast<uint8>(type.scalar) > static_cast<uint8>(IrScalar::Double)) {
+    if (type.scalar == IrScalar::Texture) {
+        return type.components == 1 && type.rows == 1 && type.texture != IrTextureKind::None &&
+               static_cast<uint8>(type.texture) <= static_cast<uint8>(IrTextureKind::External);
+    }
+
+    if (static_cast<uint8>(type.scalar) > static_cast<uint8>(IrScalar::Double) ||
+        type.texture != IrTextureKind::None) {
         return false;
     }
 

@@ -32,6 +32,7 @@
 #define MATERIAL_PIXEL_DEPTH_OFFSET_USES_VIEW 1
 #define MATERIAL_NUM_CONSTANT_VECTORS 0
 #define MATERIAL_NUM_COLLECTIONS 0
+#define MATERIAL_NUM_TEXTURES 0
 
 void EvaluateMaterialVertex(in MaterialVertexInputs c, inout MaterialVertexResult r) {
     const float m0 = MaterialContextTime(c);

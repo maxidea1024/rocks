@@ -128,6 +128,10 @@ public:
         return input_.target;
     }
 
+    // 자기 샘플러를 쓰는 텍스처 slot(출처, id)을 센다. 이미 센 slot이면 그대로 참이고, 번역 대상
+    // maxSamplers를 넘으면 넣지 않고 거짓이다(6.10절 MS2c3 V9). count는 넣은 뒤의 수다.
+    Result<bool> ReferenceSampler(uint8 source, Guid id, uint32& count) noexcept;
+
     // 컬렉션 asset을 참조 목록에 넣는다. 이미 있으면 그대로 참이고, 상한을 넘으면 넣지 않고
     // 거짓이다.
     Result<bool> ReferenceCollection(Guid asset) noexcept;
@@ -245,6 +249,13 @@ private:
     // 참조한 파라미터 컬렉션이다(처음 참조 순 — 상한 검사용, 모듈 표는 asset id 순으로 따로
     // 만든다).
     Array<Guid> collections_;
+    // 자기 샘플러를 쓰는 텍스처 slot이다(상한 검사용 — 출처 | id).
+    struct SamplerSlot {
+        uint8 source = 0;
+        Guid id;
+    };
+
+    Array<SamplerSlot> samplers_;
     Name rerouteType_;
     Name rerouteIn_;
     Name rerouteOut_;

@@ -162,3 +162,32 @@ MATERIAL_DOUBLE_OPERATIONS(MaterialDouble3, float3, bool3)
 MATERIAL_DOUBLE_OPERATIONS(MaterialDouble4, float4, bool4)
 
 #undef MATERIAL_DOUBLE_OPERATIONS
+
+// 큰 좌표 uv 성분 하나를 주소 모드대로 낮춘다(UE MaterialTemplate.ush LWCApplyAddressMode — 6.10절
+// MS2c3). Wrap(1)은 tile의 소수부만 남기고(텍스처 장치가 마지막 wrap을 하므로 tile 경계 밖에서 미분이
+// 맞다), Clamp(0)·Mirror(2)는 그냥 낮춘다.
+float MaterialDoubleApplyAddressMode(MaterialDouble1 value, uint mode) {
+    if (mode == 1u) {
+        return frac(value.tile * MaterialDoubleTileSize) + value.offset;
+    }
+
+    return MaterialDoubleDemote(value);
+}
+
+float2 MaterialDoubleApplyAddressMode(MaterialDouble2 value, uint x, uint y) {
+    return float2(MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.x, value.offset.x), x),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.y, value.offset.y), y));
+}
+
+float3 MaterialDoubleApplyAddressMode(MaterialDouble3 value, uint x, uint y, uint z) {
+    return float3(MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.x, value.offset.x), x),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.y, value.offset.y), y),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.z, value.offset.z), z));
+}
+
+float4 MaterialDoubleApplyAddressMode(MaterialDouble4 value, uint x, uint y, uint z, uint w) {
+    return float4(MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.x, value.offset.x), x),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.y, value.offset.y), y),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.z, value.offset.z), z),
+                  MaterialDoubleApplyAddressMode(MakeMaterialDouble1(value.tile.w, value.offset.w), w));
+}

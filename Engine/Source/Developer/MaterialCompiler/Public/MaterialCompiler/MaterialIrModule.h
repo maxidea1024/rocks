@@ -55,7 +55,8 @@ struct IrResult {
 class ROCKS_MATERIALCOMPILER_API IrModule {
 public:
     explicit IrModule(Allocator& allocator) noexcept
-        : values_(allocator), results_(allocator), parameters_(allocator), collections_(allocator) {
+        : values_(allocator), results_(allocator), parameters_(allocator), textures_(allocator),
+          collections_(allocator) {
     }
 
     IrModule(const IrModule&) = delete;
@@ -86,6 +87,12 @@ public:
         return parameters_.View();
     }
 
+    // 진입점에서 닿는 텍스처 slot이다((출처, id) 순 — Texture 즉시값 [3]이 이 번호다, 생성 원문의
+    // MaterialTexture<k>, 6.10절 MS2c3).
+    Span<const IrTexture> Textures() const noexcept {
+        return textures_.View();
+    }
+
     // 진입점에서 닿는 파라미터 컬렉션이다(asset id 순 — 생성 원문의 MaterialCollection<k>).
     Span<const IrCollection> Collections() const noexcept {
         return collections_.View();
@@ -106,6 +113,7 @@ public:
         values_.Clear();
         results_.Clear();
         parameters_.Clear();
+        textures_.Clear();
         collections_.Clear();
         hash_ = Sha256Digest{};
         for (MaterialContextFeatureMask& features : entryFeatures_) {
@@ -123,6 +131,7 @@ private:
     Array<IrValue> values_;
     Array<IrResult> results_;
     Array<IrParameter> parameters_;
+    Array<IrTexture> textures_;
     Array<IrCollection> collections_;
     Sha256Digest hash_{};
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};

@@ -9,6 +9,7 @@
 #include <MaterialCompiler/MaterialCollectionLayout.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialStaticParameterValue.h>
+#include <MaterialCompiler/MaterialTextureFacts.h>
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
@@ -79,6 +80,13 @@ public:
 
     // 번역 입력의 컬렉션 layout이다. 없으면 nullptr이다.
     const MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
+
+    // 번역 입력의 텍스처 사실이다(6.10절 MS2c3). 없으면 nullptr이다.
+    const MaterialTextureFacts* FindTexture(Guid asset) const noexcept;
+
+    // 자기 샘플러를 쓰는 텍스처 slot(출처, id)을 센다. 번역 대상 maxSamplers를 넘으면 이 노드
+    // 위치에 V9를 진단하고 false다(6.10절 MS2c3).
+    Result<bool> UseSampler(IrTextureSource source, Guid id) noexcept;
 
     // 컬렉션 하나를 참조한다(6.10절 MS2c2). 머티리얼당 상한(MaxMaterialCollections)을 넘으면 이
     // 노드 위치에 V9를 진단하고 false다.
@@ -206,6 +214,8 @@ private:
     Result<void> Diagnose(nodegraph::GraphDiagnosticSeverity severity, MaterialDiagnosticCode code,
                           StringView pin, StringView message) noexcept;
     Result<void> TypeError(StringView message, IrType left, IrType right) noexcept;
+    // 텍스처 값이면 V1을 진단하고 rejected를 참으로 한다(돌려주는 값은 NoIrValue). 아니면 value다.
+    Result<IrValueId> RejectTexture(IrValueId value, bool& rejected) noexcept;
 
     Translator& translator_;
     const nodegraph::GraphNode& node_;
@@ -216,6 +226,8 @@ private:
     nodegraph::PinList dynamicPins_;
     bool dynamicPinsComputed_ = false;
     bool poisoned_ = false;
+    // RejectTexture의 마지막 판정이다(도우미 안에서만 쓴다).
+    bool textureRefused_ = false;
 };
 
 } // namespace rocks::material::detail

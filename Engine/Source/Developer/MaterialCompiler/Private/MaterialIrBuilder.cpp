@@ -393,7 +393,8 @@ uint64 IrBuilder::KeyHash::operator()(const Key& key) const noexcept {
     uint64 hash = MixHash(
         static_cast<uint64>(value.type.scalar) | (uint64{value.type.components} << 8) |
         (uint64{value.type.rows} << 16) | (uint64{static_cast<uint8>(value.op)} << 24) |
-        (uint64{value.operandCount} << 32) | (uint64{static_cast<uint8>(value.frequency)} << 40));
+        (uint64{value.operandCount} << 32) | (uint64{static_cast<uint8>(value.frequency)} << 40) |
+        (uint64{static_cast<uint8>(value.type.texture)} << 48));
     for (uint32 index = 0; index < MaxIrOperands; ++index) {
         hash = HashCombine(hash, value.operands[index]);
     }
@@ -406,7 +407,7 @@ uint64 IrBuilder::KeyHash::operator()(const Key& key) const noexcept {
 }
 
 IrBuilder::IrBuilder(Allocator& allocator) noexcept
-    : values_(allocator), parameters_(allocator), lookup_(allocator) {
+    : values_(allocator), parameters_(allocator), textures_(allocator), lookup_(allocator) {
 }
 
 const IrValue& IrBuilder::Value(IrValueId id) const noexcept {
@@ -415,6 +416,10 @@ const IrValue& IrBuilder::Value(IrValueId id) const noexcept {
 
 bool IrBuilder::IsValid(IrValueId id) const noexcept {
     return id < values_.Size();
+}
+
+bool IrBuilder::IsNumeric(IrValueId id) const noexcept {
+    return id < values_.Size() && !values_[id].type.IsTexture();
 }
 
 bool IrBuilder::IsConstant(IrValueId id) const noexcept {
@@ -430,6 +435,9 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
     for (uint8 index = 0; index < constant.type.components; ++index) {
         const uint64 bits = constant.immediate[index];
         switch (constant.type.scalar) {
+        case IrScalar::Texture:
+            // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+            break;
         case IrScalar::Float:
             // 비트로 비교한다: −0은 0이 아니다(x − (−0)은 x가 아니다).
             if (bits != BitsOf(static_cast<float>(value))) {
@@ -465,10 +473,10 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
 Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     // 빈도는 피연산자 빈도의 최대다(6.2절). 상수는 Constant다. 미분은 Pixel이다. 문맥 값은 표가
     // 정한 빈도에서 시작한다(6.9절).
-    IrFrequency frequency =
-        value.op == IrOp::Extern || value.op == IrOp::Parameter || value.op == IrOp::CollectionValue
-            ? value.frequency
-            : IrFrequency::Constant;
+    IrFrequency frequency = value.op == IrOp::Extern || value.op == IrOp::Parameter ||
+                                    value.op == IrOp::CollectionValue || value.op == IrOp::Texture
+                                ? value.frequency
+                                : IrFrequency::Constant;
     for (uint8 index = 0; index < value.operandCount; ++index) {
         const IrFrequency operand = values_[value.operands[index]].frequency;
         frequency =
@@ -476,6 +484,13 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     }
 
     if (value.op == IrOp::Ddx || value.op == IrOp::Ddy || value.op == IrOp::Interpolate) {
+        frequency = IrFrequency::Pixel;
+    }
+
+    // 하드웨어 미분 샘플(Implicit·Bias·gather)은 픽셀 문맥 값이다(6.10절 MS2c3).
+    if (value.op == IrOp::TextureSample &&
+        (value.immediate[1] == static_cast<uint64>(IrTextureMipMode::Implicit) ||
+         value.immediate[1] == static_cast<uint64>(IrTextureMipMode::Bias))) {
         frequency = IrFrequency::Pixel;
     }
 
@@ -647,6 +662,9 @@ Result<IrValueId> IrBuilder::Fold(const IrValue& value) noexcept {
         for (uint8 index = 0; index < components; ++index) {
             const uint64 bits = operands[0]->immediate[index];
             switch (value.type.scalar) {
+            case IrScalar::Texture:
+                // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+                return none();
             case IrScalar::Float:
                 if (scalar == IrScalar::Int) {
                     folded.immediate[index] = BitsOf(static_cast<float>(IntOf(bits)));
@@ -793,7 +811,7 @@ Result<IrValueId> IrBuilder::Fold(const IrValue& value) noexcept {
 }
 
 Result<IrValueId> IrBuilder::Unary(IrOp op, IrValueId operand) noexcept {
-    if (!IsValid(operand) || IrOpArity(op) != 1 || op == IrOp::Splat || op == IrOp::Swizzle ||
+    if (!IsNumeric(operand) || IrOpArity(op) != 1 || op == IrOp::Splat || op == IrOp::Swizzle ||
         op == IrOp::Convert) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -815,7 +833,7 @@ Result<IrValueId> IrBuilder::Unary(IrOp op, IrValueId operand) noexcept {
 }
 
 Result<IrValueId> IrBuilder::Binary(IrOp op, IrValueId left, IrValueId right) noexcept {
-    if (!IsValid(left) || !IsValid(right) || IrOpArity(op) != 2 || op == IrOp::Append) {
+    if (!IsNumeric(left) || !IsNumeric(right) || IrOpArity(op) != 2 || op == IrOp::Append) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -862,7 +880,7 @@ Result<IrValueId> IrBuilder::Binary(IrOp op, IrValueId left, IrValueId right) no
 
 Result<IrValueId> IrBuilder::Ternary(IrOp op, IrValueId first, IrValueId second,
                                      IrValueId third) noexcept {
-    if (!IsValid(first) || !IsValid(second) || !IsValid(third) ||
+    if (!IsNumeric(first) || !IsNumeric(second) || !IsNumeric(third) ||
         (op != IrOp::Clamp && op != IrOp::Lerp && op != IrOp::Smoothstep)) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -887,7 +905,7 @@ Result<IrValueId> IrBuilder::Ternary(IrOp op, IrValueId first, IrValueId second,
 }
 
 Result<IrValueId> IrBuilder::Splat(IrValueId operand, uint8 components) noexcept {
-    if (!IsValid(operand) || !values_[operand].type.IsScalar() || components == 0 ||
+    if (!IsNumeric(operand) || !values_[operand].type.IsScalar() || components == 0 ||
         components > MaxIrComponents) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -910,7 +928,7 @@ Result<IrValueId> IrBuilder::Splat(IrValueId operand, uint8 components) noexcept
 }
 
 Result<IrValueId> IrBuilder::Swizzle(IrValueId operand, Span<const uint8> components) noexcept {
-    if (!IsValid(operand) || values_[operand].type.IsMatrix() || components.Size() == 0 ||
+    if (!IsNumeric(operand) || values_[operand].type.IsMatrix() || components.Size() == 0 ||
         components.Size() > MaxIrComponents) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -971,7 +989,7 @@ Result<IrValueId> IrBuilder::Swizzle(IrValueId operand, Span<const uint8> compon
 }
 
 Result<IrValueId> IrBuilder::Append(IrValueId left, IrValueId right) noexcept {
-    if (!IsValid(left) || !IsValid(right)) {
+    if (!IsNumeric(left) || !IsNumeric(right)) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -997,7 +1015,7 @@ Result<IrValueId> IrBuilder::Append(IrValueId left, IrValueId right) noexcept {
 }
 
 Result<IrValueId> IrBuilder::Convert(IrValueId operand, IrScalar target) noexcept {
-    if (!IsValid(operand) || values_[operand].type.IsMatrix() ||
+    if (!IsNumeric(operand) || values_[operand].type.IsMatrix() ||
         static_cast<uint8>(target) > static_cast<uint8>(IrScalar::Double)) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -1021,7 +1039,7 @@ Result<IrValueId> IrBuilder::Convert(IrValueId operand, IrScalar target) noexcep
 
 Result<IrValueId> IrBuilder::Select(IrValueId condition, IrValueId whenTrue,
                                     IrValueId whenFalse) noexcept {
-    if (!IsValid(condition) || !IsValid(whenTrue) || !IsValid(whenFalse)) {
+    if (!IsNumeric(condition) || !IsNumeric(whenTrue) || !IsNumeric(whenFalse)) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -1054,7 +1072,7 @@ Result<IrValueId> IrBuilder::Select(IrValueId condition, IrValueId whenTrue,
 
 Result<IrValueId> IrBuilder::Branch(IrValueId condition, IrValueId whenTrue,
                                     IrValueId whenFalse) noexcept {
-    if (!IsValid(condition) || !IsValid(whenTrue) || !IsValid(whenFalse) ||
+    if (!IsNumeric(condition) || !IsNumeric(whenTrue) || !IsNumeric(whenFalse) ||
         values_[condition].type != IrBool(1) || values_[whenTrue].type != values_[whenFalse].type) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
@@ -1092,7 +1110,7 @@ Result<IrValueId> IrBuilder::Extern(uint32 index, IrExternVariant variant, IrTyp
     value.frequency = frequency;
     value.operandCount = static_cast<uint8>(arguments.Size());
     for (usize at = 0; at < arguments.Size(); ++at) {
-        if (!IsValid(arguments[at])) {
+        if (!IsNumeric(arguments[at])) {
             return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -1171,8 +1189,129 @@ Result<IrValueId> IrBuilder::CollectionValue(Guid collection, uint32 index,
     return Intern(value);
 }
 
+Result<IrValueId> IrBuilder::Texture(const IrTexture& texture, uint8 samplerType) noexcept {
+    if (texture.kind == IrTextureKind::None ||
+        static_cast<uint8>(texture.kind) > static_cast<uint8>(IrTextureKind::External)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    usize slot = textures_.Size();
+    for (usize index = 0; index < textures_.Size(); ++index) {
+        if (textures_[index].source == texture.source && textures_[index].id == texture.id) {
+            if (textures_[index].kind != texture.kind) {
+                return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            slot = index;
+            break;
+        }
+    }
+
+    if (slot == textures_.Size()) {
+        if (auto added = textures_.TryPushBack(texture); !added) {
+            return Result<IrValueId>::Failure(added.Error());
+        }
+    }
+
+    IrValue value;
+    value.type = IrTextureType(texture.kind);
+    value.op = IrOp::Texture;
+    value.frequency = IrFrequency::Uniform;
+    value.immediate[0] = texture.id.high;
+    value.immediate[1] = texture.id.low;
+    value.immediate[2] = static_cast<uint64>(texture.source) | (uint64{samplerType} << 8);
+    value.immediate[3] = slot;
+    return Intern(value);
+}
+
+namespace {
+
+// 텍스처 종류의 uv 폭이다(UE TextureSample의 ForceCast 대상).
+uint8 TextureUvComponents(IrTextureKind kind) noexcept {
+    switch (kind) {
+    case IrTextureKind::TextureCubeArray:
+        return 4;
+    case IrTextureKind::TextureCube:
+    case IrTextureKind::Texture2DArray:
+    case IrTextureKind::Texture3D:
+        return 3;
+    default:
+        return 2;
+    }
+}
+
+} // namespace
+
+Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
+                                           IrValueId uv, IrValueId first,
+                                           IrValueId second) noexcept {
+    if (!IsValid(texture) || !values_[texture].type.IsTexture() || !IsNumeric(uv) ||
+        static_cast<uint8>(desc.mipMode) > static_cast<uint8>(IrTextureMipMode::Gradient) ||
+        static_cast<uint8>(desc.samplerSource) > static_cast<uint8>(IrSamplerSource::SharedClamp) ||
+        static_cast<uint8>(desc.gather) > static_cast<uint8>(IrTextureGather::Alpha)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const IrTextureKind kind = values_[texture].type.texture;
+    const uint8 width = TextureUvComponents(kind);
+    if (!(values_[uv].type == IrFloat(width))) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = IrFloat(MaxIrComponents);
+    value.op = IrOp::TextureSample;
+    value.operandCount = 2;
+    value.operands[0] = texture;
+    value.operands[1] = uv;
+    if (desc.mipMode == IrTextureMipMode::Level || desc.mipMode == IrTextureMipMode::Bias) {
+        if (!IsNumeric(first) || !(values_[first].type == IrFloat(1)) || second != NoIrValue) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        value.operandCount = 3;
+        value.operands[2] = first;
+    } else if (desc.mipMode == IrTextureMipMode::Gradient) {
+        const uint8 gradient = kind == IrTextureKind::TextureCubeArray ? 3
+                               : kind == IrTextureKind::Texture2DArray ? 2
+                                                                       : width;
+        if (!IsNumeric(first) || !IsNumeric(second) ||
+            !(values_[first].type == IrFloat(gradient)) ||
+            !(values_[second].type == IrFloat(gradient))) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        value.operandCount = 4;
+        value.operands[2] = first;
+        value.operands[3] = second;
+    } else if (first != NoIrValue || second != NoIrValue) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    value.immediate[0] = desc.samplerType;
+    value.immediate[1] = static_cast<uint64>(desc.mipMode);
+    value.immediate[2] = static_cast<uint64>(desc.samplerSource);
+    value.immediate[3] = static_cast<uint64>(desc.gather) | (uint64{desc.decal ? 1u : 0u} << 4);
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::AddressDemote(IrValueId operand, uint32 modes) noexcept {
+    if (!IsNumeric(operand) || values_[operand].type.scalar != IrScalar::Double ||
+        values_[operand].type.IsMatrix()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = IrFloat(values_[operand].type.components);
+    value.op = IrOp::AddressDemote;
+    value.operandCount = 1;
+    value.operands[0] = operand;
+    value.immediate[0] = modes;
+    return Intern(value);
+}
+
 Result<IrValueId> IrBuilder::Interpolate(IrValueId vertex) noexcept {
-    if (!IsValid(vertex) || values_[vertex].type.scalar != IrScalar::Float ||
+    if (!IsNumeric(vertex) || values_[vertex].type.scalar != IrScalar::Float ||
         values_[vertex].type.IsMatrix()) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }

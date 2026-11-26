@@ -1,4 +1,5 @@
 #include <MaterialCompiler/MaterialConstants.h>
+#include <MaterialCompiler/MaterialIrTextureSample.h>
 #include <Base/NumericLimits.h>
 #include <Core/Text/StringBuilder.h>
 #include <DeterministicMath/DeterministicMath.h>
@@ -334,6 +335,10 @@ private:
     // 상수 블록 출력 id의 읽기다(Double은 tile·offset 두 칸).
     Result<void> ConstantRead(IrValueId id) noexcept;
     Result<void> Collection(const IrValue& value) noexcept;
+    // 텍스처 slot 선언이다(6.10절 MS2c3 — 자원과 자기 샘플러).
+    Result<void> TextureDeclarations() noexcept;
+    Result<void> TextureSample(const IrValue& value) noexcept;
+    Result<void> AddressDemote(const IrValue& value) noexcept;
 
     bool IsConstantOutput(usize id) const noexcept {
         return constantMember_[id] != NoConstantMember;
@@ -390,6 +395,9 @@ Result<void> SourceWriter::Flag(StringView name, bool value) noexcept {
 Result<void> SourceWriter::TypeName(IrType type) noexcept {
     StringView scalar = "float";
     switch (type.scalar) {
+    case IrScalar::Texture:
+        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+        break;
     case IrScalar::Float:
         scalar = "float";
         break;
@@ -462,6 +470,9 @@ Result<void> SourceWriter::Literal(const IrValue& value) noexcept {
         const uint64 bits = value.immediate[index];
         Result<void> written = Result<void>::Success();
         switch (value.type.scalar) {
+        case IrScalar::Texture:
+            // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+            break;
         case IrScalar::Float:
             written = FloatLiteral(bits);
             break;
@@ -501,6 +512,15 @@ Result<void> SourceWriter::Operand(IrValueId id) noexcept {
     const IrValue& value = module_.Values()[id];
     if (value.op == IrOp::Constant) {
         return value.type.scalar == IrScalar::Double ? DoubleLiteral(value) : Literal(value);
+    }
+
+    if (value.op == IrOp::Texture) {
+        // 텍스처 값은 지역 변수 없이 자원 이름이다(6.10절 MS2c3).
+        if (auto name = Raw("MaterialTexture"); !name) {
+            return name;
+        }
+
+        return Uint(value.immediate[3]);
     }
 
     if (auto prefix = Raw("m"); !prefix) {
@@ -872,6 +892,202 @@ Result<void> SourceWriter::Collection(const IrValue& value) noexcept {
     return Raw("]");
 }
 
+Result<void> SourceWriter::TextureDeclarations() noexcept {
+    // <HLSL 종류> MaterialTexture<k>;와 자기 샘플러를 쓰는 slot만 SamplerState
+    // MaterialTexture<k>Sampler; (7.4절 9항 — 공유 출처는 SharedWrapSampler·SharedClampSampler).
+    const Span<const IrTexture> table = module_.Textures();
+    StringBuilder<> count(allocator_);
+    count << table.Size();
+    if (auto status = count.Status(); !status) {
+        return status;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_TEXTURES", count.View()); !defined) {
+        return defined;
+    }
+
+    for (usize slot = 0; slot < table.Size(); ++slot) {
+        bool own = false;
+        for (const IrValue& value : module_.Values()) {
+            if (value.op != IrOp::TextureSample ||
+                value.immediate[2] != static_cast<uint64>(IrSamplerSource::Own)) {
+                continue;
+            }
+
+            const IrValue& texture = module_.Values()[value.operands[0]];
+            own = own || texture.immediate[3] == slot;
+        }
+
+        StringView type = "Texture2D";
+        switch (table[slot].kind) {
+        case IrTextureKind::TextureCube:
+            type = "TextureCube";
+            break;
+        case IrTextureKind::Texture2DArray:
+            type = "Texture2DArray";
+            break;
+        case IrTextureKind::TextureCubeArray:
+            type = "TextureCubeArray";
+            break;
+        case IrTextureKind::Texture3D:
+            type = "Texture3D";
+            break;
+        default:
+            break;
+        }
+
+        const StringView parts[] = {slot == 0 ? StringView("\n") : StringView(), type,
+                                    " MaterialTexture"};
+        for (StringView part : parts) {
+            if (auto written = Raw(part); !written) {
+                return written;
+            }
+        }
+
+        if (auto number = Uint(slot); !number) {
+            return number;
+        }
+
+        if (auto end = Raw(";\n"); !end) {
+            return end;
+        }
+
+        if (!own) {
+            continue;
+        }
+
+        if (auto head = Raw("SamplerState MaterialTexture"); !head) {
+            return head;
+        }
+
+        if (auto number = Uint(slot); !number) {
+            return number;
+        }
+
+        if (auto end = Raw("Sampler;\n"); !end) {
+            return end;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> SourceWriter::TextureSample(const IrValue& value) noexcept {
+    // MaterialProcess<종류>Lookup(MaterialSample<자원><방식>(텍스처, 샘플러, uv[, mip…]))(6.10절
+    // MS2c3).
+    static constexpr StringView Process[] = {"MaterialProcessColorLookup(",
+                                             "MaterialProcessGrayscaleLookup(",
+                                             "MaterialProcessAlphaLookup(",
+                                             "MaterialUnpackNormalMap(",
+                                             "(",
+                                             "MaterialProcessAlphaLookup(",
+                                             "MaterialProcessLinearColorLookup(",
+                                             "MaterialProcessLinearGrayscaleLookup(",
+                                             "("};
+    static constexpr StringView Gathers[] = {"", "GatherRed", "GatherGreen", "GatherBlue",
+                                             "GatherAlpha"};
+    static constexpr StringView Modes[] = {"", "Level", "Bias", "Grad"};
+    const IrValue& texture = module_.Values()[value.operands[0]];
+    const usize type = static_cast<usize>(value.immediate[0]);
+    const usize mode = static_cast<usize>(value.immediate[1]);
+    const usize gather = static_cast<usize>(value.immediate[3] & 0xF);
+    const bool decal = ((value.immediate[3] >> 4) & 1) != 0;
+    if (type >= sizeof(Process) / sizeof(Process[0]) || mode >= sizeof(Modes) / sizeof(Modes[0]) ||
+        gather >= sizeof(Gathers) / sizeof(Gathers[0])) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    StringView kind = "2D";
+    switch (texture.type.texture) {
+    case IrTextureKind::TextureCube:
+        kind = "Cube";
+        break;
+    case IrTextureKind::Texture2DArray:
+        kind = "2DArray";
+        break;
+    case IrTextureKind::TextureCubeArray:
+        kind = "CubeArray";
+        break;
+    case IrTextureKind::Texture3D:
+        kind = "3D";
+        break;
+    default:
+        break;
+    }
+
+    const StringView parts[] = {Process[type], "MaterialSample", kind,
+                                gather != 0 ? Gathers[gather]
+                                : decal     ? StringView("_Decal")
+                                            : Modes[mode],
+                                "("};
+    for (StringView part : parts) {
+        if (auto written = Raw(part); !written) {
+            return written;
+        }
+    }
+
+    if (auto operand = Operand(value.operands[0]); !operand) {
+        return operand;
+    }
+
+    const IrSamplerSource source = static_cast<IrSamplerSource>(value.immediate[2]);
+    if (source == IrSamplerSource::Own) {
+        if (auto name = Raw(", "); !name) {
+            return name;
+        }
+
+        if (auto operand = Operand(value.operands[0]); !operand) {
+            return operand;
+        }
+
+        if (auto suffix = Raw("Sampler"); !suffix) {
+            return suffix;
+        }
+    } else if (auto name =
+                   Raw(source == IrSamplerSource::SharedWrap ? StringView(", SharedWrapSampler")
+                                                             : StringView(", SharedClampSampler"));
+               !name) {
+        return name;
+    }
+
+    for (uint8 index = 1; index < value.operandCount; ++index) {
+        if (auto comma = Raw(", "); !comma) {
+            return comma;
+        }
+
+        if (auto operand = Operand(value.operands[index]); !operand) {
+            return operand;
+        }
+    }
+
+    return Raw("))");
+}
+
+Result<void> SourceWriter::AddressDemote(const IrValue& value) noexcept {
+    // MaterialDoubleApplyAddressMode(v, mode0, …)(6.10절 MS2c3 — 성분마다 2 bit).
+    if (auto head = Raw("MaterialDoubleApplyAddressMode("); !head) {
+        return head;
+    }
+
+    if (auto operand = Operand(value.operands[0]); !operand) {
+        return operand;
+    }
+
+    for (uint8 component = 0; component < value.type.components; ++component) {
+        StringBuilder<> mode(allocator_);
+        mode << ", " << ((value.immediate[0] >> (component * 2)) & 3) << "u";
+        if (auto status = mode.Status(); !status) {
+            return status;
+        }
+
+        if (auto written = Raw(mode.View()); !written) {
+            return written;
+        }
+    }
+
+    return Raw(")");
+}
+
 Result<void> SourceWriter::ConstantBlocks() noexcept {
     // cbuffer MaterialConstants { float4 materialFloats[N]; }와 컬렉션마다 cbuffer
     // MaterialCollection<k> { float4 materialCollection<k>Vectors[N]; }다(6.10절 MS2c2).
@@ -947,6 +1163,14 @@ Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
 
     if (value.op == IrOp::CollectionValue) {
         return Collection(value);
+    }
+
+    if (value.op == IrOp::TextureSample) {
+        return TextureSample(value);
+    }
+
+    if (value.op == IrOp::AddressDemote) {
+        return AddressDemote(value);
     }
 
     if (InvolvesDouble(value)) {
@@ -1153,7 +1377,7 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
 
     for (usize index = 0; index < values.Size(); ++index) {
         const IrValue& value = values[index];
-        if (!reached_[index] || value.op == IrOp::Constant) {
+        if (!reached_[index] || value.op == IrOp::Constant || value.op == IrOp::Texture) {
             continue;
         }
 
@@ -1284,7 +1508,7 @@ Result<void> SourceWriter::CheckSupported() noexcept {
         const bool structural = value.op == IrOp::Splat || value.op == IrOp::Swizzle ||
                                 value.op == IrOp::Append || value.op == IrOp::Convert ||
                                 value.op == IrOp::Constant || value.op == IrOp::Branch ||
-                                value.op == IrOp::Extern;
+                                value.op == IrOp::Extern || value.op == IrOp::AddressDemote;
         const bool supported =
             value.op != IrOp::WorldPositionTile &&
             (!InvolvesDouble(value) || structural || !DoubleFunction(value.op).IsEmpty());
@@ -1834,6 +2058,10 @@ Result<void> SourceWriter::Run() noexcept {
 
     if (auto blocks = ConstantBlocks(); !blocks) {
         return blocks;
+    }
+
+    if (auto textures = TextureDeclarations(); !textures) {
+        return textures;
     }
 
     if (auto vertex = Vertex(); !vertex) {

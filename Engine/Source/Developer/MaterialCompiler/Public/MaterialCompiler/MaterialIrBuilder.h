@@ -6,6 +6,8 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <MaterialCompiler/MaterialIrParameter.h>
+#include <MaterialCompiler/MaterialIrTexture.h>
+#include <MaterialCompiler/MaterialIrTextureSample.h>
 #include <MaterialCompiler/MaterialIrValue.h>
 
 // 머티리얼 IR 빌더다(Docs/Design/MaterialSystem 6.5·6.8절). 값을 만들 때 (타입, 연산, 피연산자,
@@ -79,6 +81,23 @@ public:
     // 파라미터 컬렉션 벡터 하나다(Float4, 빈도 Instance). 오류: index ≥ vectors면 InvalidArgument.
     Result<IrValueId> CollectionValue(Guid collection, uint32 index, uint32 vectors) noexcept;
 
+    // 텍스처 값이다(6.10절 MS2c3). 같은 (출처, id)는 한 표 항목이다. samplerType은 객체 노드의 샘플
+    // 종류다(TextureObject 입력으로 받은 샘플이 쓴다). 빈도 Uniform. 오류: 같은 (출처, id)의 종류가
+    // 다르거나 kind가 None이면 InvalidArgument.
+    Result<IrValueId> Texture(const IrTexture& texture, uint8 samplerType) noexcept;
+    // 텍스처 샘플이다. uv는 종류에 맞는 Float 폭(2D·External 2, Cube·2DArray·3D 3, CubeArray 4),
+    // Level·Bias는 first가 Float 스칼라, Gradient는 first·second가 미분 폭(uv 폭 — 2DArray는 2,
+    // CubeArray는 3)의 Float다. 결과 Float4. 오류: 규칙 밖이면 InvalidArgument.
+    Result<IrValueId> TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
+                                    IrValueId uv, IrValueId first, IrValueId second) noexcept;
+    // Double 값을 성분마다 주소 모드(modes — 2 bit씩, 성분 0이 하위)로 Float로 낮춘다.
+    Result<IrValueId> AddressDemote(IrValueId operand, uint32 modes) noexcept;
+
+    // 텍스처 표다(Texture 값의 즉시값 [3]이 가리킨다).
+    Span<const IrTexture> Textures() const noexcept {
+        return textures_.View();
+    }
+
     // 파라미터 표다(Parameter 값의 즉시값 [3]이 가리킨다).
     Span<const IrParameter> Parameters() const noexcept {
         return parameters_.View();
@@ -114,9 +133,12 @@ private:
     Result<IrValueId> Fold(const IrValue& value) noexcept;
     bool IsConstant(IrValueId id) const noexcept;
     bool IsValid(IrValueId id) const noexcept;
+    // 수 값(텍스처가 아닌 값)인가.
+    bool IsNumeric(IrValueId id) const noexcept;
 
     Array<IrValue> values_;
     Array<IrParameter> parameters_;
+    Array<IrTexture> textures_;
     HashMap<Key, IrValueId, KeyHash, KeyEqual> lookup_;
     IrSite site_;
 };

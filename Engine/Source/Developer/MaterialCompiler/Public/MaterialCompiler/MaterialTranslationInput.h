@@ -5,6 +5,7 @@
 #include <Core/Text/NamePool.h>
 #include <MaterialCompiler/MaterialCollectionLayout.h>
 #include <MaterialCompiler/MaterialStaticParameterValue.h>
+#include <MaterialCompiler/MaterialTextureFacts.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
@@ -35,6 +36,8 @@ struct MaterialTranslationInput {
     // 머티리얼이 참조할 수 있는 파라미터 컬렉션 layout이다(6.10절 MS2c2 — 없으면 컬렉션 노드는
     // "invalid Collection" 오류다).
     Span<const MaterialCollectionLayout> collections{};
+    // 머티리얼이 참조하는 텍스처 에셋 사실이다(6.10절 MS2c3 — 없는 asset 참조는 해석 오류).
+    Span<const MaterialTextureFacts> textures{};
 };
 
 } // namespace rocks::material
