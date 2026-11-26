@@ -3,7 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 
-// MeshSource 편집 API 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.1·3.2·3.7절): 요소 추가와
+// MeshSource 편집 API 시험이다(Docs/Design/MeshAnimationAssets 3.1·3.2·3.7절): 요소 추가와
 // 배열 모양, 속성 추가 규칙(인자·이름·중복·예약 이름), 기본값, 값 접근, 가변 길이 값의 덮어쓰기·
 // 별칭, 희소 값의 +0.0/-0.0, 할당 실패 주입의 강한 보장.
 using namespace rocks;

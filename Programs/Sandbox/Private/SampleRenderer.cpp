@@ -59,7 +59,6 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     };
     const graphics::VertexStream streams[] = {{sizeof(Vertex), graphics::VertexStepRate::Vertex}};
     graphics::PipelineDesc pipeline;
-    pipeline.bindings.texture = "Albedo";
     pipeline.layout = {attributes, streams};
     pipeline.drawConstantBytes = sizeof(ObjectConstants);
     pipeline.colorFormats[0] = colorFormat;
@@ -74,6 +73,7 @@ Result<void> Renderer::Initialize(graphics::Device& device,
                    variant, graphics::BackendName(device.Info().backend), ErrorCodeName(error),
                    device.LastError().LeftBytesAtCodePoint(graphics::MaxShaderDiagnosticLogBytes));
     };
+    albedoSlot_ = shaders::TextureSlot(shaders::SamplePS, "Albedo");
     auto createdPipeline =
         shaders::CreateGraphicsPipeline(device, shaders::SampleVS, shaders::SamplePS, pipeline);
     if (!createdPipeline) {
@@ -163,7 +163,7 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         // 크기는 파이프라인 선언과 같으므로 실패하지 않는다.
         auto set = context.SetDrawConstants(graphics::DrawConstantBytes(constants));
         (void)set;
-        context.SetTexture(item.texture);
+        context.SetTexture(graphics::ShaderStage::Pixel, albedoSlot_, item.texture);
         const bool triangle = item.mesh == MeshKind::Triangle;
         const graphics::VertexBufferBinding binding{triangle ? triangle_ : quad_, 0};
         context.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));

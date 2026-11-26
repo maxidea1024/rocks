@@ -348,8 +348,8 @@ uint32 HighestBit(uint32 mask) noexcept {
 // root signature 매개변수 수의 상한이다(table 8 + root CBV 28 + 진단 UAV 1 + 루트 상수 1보다
 // 넉넉하다).
 constexpr uint32 MaxRootParameters = MaxRootSignatureDwords;
-// descriptor range 수의 상한이다(SRV·UAV는 자원마다 하나, Sampler·CBV는 단계마다 하나).
-constexpr uint32 MaxRootRanges = MaxPipelineSlotBindings + 2 * MaxRootBudgetStages;
+// descriptor range 수의 상한이다(SRV·Sampler·UAV는 자원마다 하나, CBV는 단계마다 하나).
+constexpr uint32 MaxRootRanges = MaxPipelineSlotBindings + MaxRootBudgetStages;
 
 } // namespace
 
@@ -364,7 +364,6 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
     layout.stageCount = compute ? 1 : 2;
     layout.stages[0].stage = compute ? ShaderStage::Compute : ShaderStage::Vertex;
     layout.stages[1].stage = ShaderStage::Pixel;
-    bool samplers[MaxRootBudgetStages] = {};
     for (uint32 index = 0; index < slots.count; ++index) {
         const PipelineSlotBinding& binding = slots.bindings[index];
         const uint32 stage = !compute && binding.stage == ShaderStage::Pixel ? 1u : 0u;
@@ -372,15 +371,15 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
         switch (binding.role) {
         case PipelineSlotRole::Texture:
         case PipelineSlotRole::BufferView:
-            tables.srvBindings[tables.srvCount++] = static_cast<uint8>(index);
+            tables.srvBindings[tables.srvCount++] = static_cast<uint16>(index);
             break;
         case PipelineSlotRole::Sampler:
-            tables.samplerBinding = static_cast<uint8>(index);
-            samplers[stage] = true;
+        case PipelineSlotRole::SharedSampler:
+            tables.samplerBindings[tables.samplerCount++] = static_cast<uint16>(index);
             break;
         case PipelineSlotRole::WritableBuffer:
         case PipelineSlotRole::WritableTexture:
-            tables.uavBindings[tables.uavCount++] = static_cast<uint8>(index);
+            tables.uavBindings[tables.uavCount++] = static_cast<uint16>(index);
             break;
         }
     }
@@ -392,7 +391,8 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
     for (uint32 stage = 0; stage < layout.stageCount; ++stage) {
         const RootStageTables& tables = layout.stages[stage];
         input.stages[stage].tables = (tables.srvCount != 0 ? 1u : 0u) +
-                                     (samplers[stage] ? 1u : 0u) + (tables.uavCount != 0 ? 1u : 0u);
+                                     (tables.samplerCount != 0 ? 1u : 0u) +
+                                     (tables.uavCount != 0 ? 1u : 0u);
         input.stages[stage].constantMask =
             slots.constantSlots.usedMask[ConstantBufferStageIndex(tables.stage)];
     }
@@ -436,12 +436,17 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
             tables.srvParam = table(visibility, first, tables.srvCount);
         }
 
-        if (samplers[stage]) {
-            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-            range.NumDescriptors = 1;
-            range.BaseShaderRegister = slots.bindings[tables.samplerBinding].location;
-            tables.samplerParam = table(visibility, rangeCount++, 1);
+        if (tables.samplerCount != 0) {
+            const uint32 first = rangeCount;
+            for (uint32 entry = 0; entry < tables.samplerCount; ++entry) {
+                D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount++];
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+                range.NumDescriptors = 1;
+                range.BaseShaderRegister = slots.bindings[tables.samplerBindings[entry]].location;
+                range.OffsetInDescriptorsFromTableStart = entry;
+            }
+
+            tables.samplerParam = table(visibility, first, tables.samplerCount);
         }
 
         if (tables.uavCount != 0) {
@@ -559,6 +564,16 @@ Result<ComRef<ID3D12RootSignature>> D3D12Device::RootSignatureFor(const Pipeline
     return Outcome::Success(Move(signature));
 }
 
+const TextureRecord* D3D12Device::BoundTexture(uint32 stage, uint32 slot) const noexcept {
+    const TextureRecord* texture =
+        slot < MaxResourceSlots ? textures_.Find(boundTextures_[stage][slot]) : nullptr;
+    if (texture == nullptr || !texture->hasSrv || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
 // root 인자를 건다(그리기·dispatch 직전). SRV·UAV table은 CPU 전용 heap의 원본을 shader-visible
 // ring으로 복사하고(바로 앞 같은 목록이면 다시 쓴다), 넘친 CBV table은 ring에 CBV를 만든다. ring이
 // 다 찼으면 거짓이다(그리기를 무시한다).
@@ -582,13 +597,8 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
             list_->SetGraphicsRootDescriptorTable(static_cast<UINT>(parameter), handle);
         }
     };
-    const TextureRecord* texture = textures_.Find(boundTexture_);
-    if (texture == nullptr || !texture->hasSrv || texture->writable) {
-        texture = textures_.Find(white_.slot);
-    }
-
     const RootLayout& root = pipeline.root;
-    uint32 sources[MaxPipelineSlotBindings] = {};
+    uint32 sources[MaxStageTextures + MaxDrawBufferViews] = {};
     for (uint32 stage = 0; stage < root.stageCount; ++stage) {
         const RootStageTables& tables = root.stages[stage];
         const uint32 stageIndex = ConstantBufferStageIndex(tables.stage);
@@ -598,7 +608,7 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
                 const PipelineSlotBinding& binding =
                     pipeline.slots.bindings[tables.srvBindings[entry]];
                 if (binding.role == PipelineSlotRole::Texture) {
-                    sources[entry] = texture->srv;
+                    sources[entry] = BoundTexture(stageIndex, binding.location)->srv;
                 } else {
                     const BufferViewRecord* view =
                         bufferViews_.Find(boundViews_[binding.slot].slot);
@@ -606,7 +616,7 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
                 }
             }
 
-            if (!CopyTable(stageIndex, 0, sources, tables.srvCount, handle)) {
+            if (!CopyTable(stageIndex, SrvTableKind, sources, tables.srvCount, handle)) {
                 return false;
             }
 
@@ -614,7 +624,25 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
         }
 
         if (tables.samplerParam >= 0) {
-            setTable(tables.samplerParam, samplers_.Gpu(texture->sampler));
+            // 준 값, 없으면 짝 텍스처 desc 샘플러다. 공유 샘플러는 준 값이 있어야 한다(9.13절 3항).
+            for (uint32 entry = 0; entry < tables.samplerCount; ++entry) {
+                const PipelineSlotBinding& binding =
+                    pipeline.slots.bindings[tables.samplerBindings[entry]];
+                const uint32 given = boundSamplers_[stageIndex][binding.location];
+                if (given != NoBoundSampler) {
+                    sources[entry] = given;
+                } else if (binding.role == PipelineSlotRole::SharedSampler) {
+                    return false;
+                } else {
+                    sources[entry] = BoundTexture(stageIndex, binding.pair)->sampler;
+                }
+            }
+
+            if (!CopyTable(stageIndex, SamplerTableKind, sources, tables.samplerCount, handle)) {
+                return false;
+            }
+
+            setTable(tables.samplerParam, handle);
         }
 
         if (tables.uavParam >= 0) {
@@ -632,7 +660,7 @@ bool D3D12Device::ApplyRootBindings(const PipelineRecord& pipeline) noexcept {
                 }
             }
 
-            if (!CopyTable(stageIndex, 1, sources, tables.uavCount, handle)) {
+            if (!CopyTable(stageIndex, UavTableKind, sources, tables.uavCount, handle)) {
                 return false;
             }
 

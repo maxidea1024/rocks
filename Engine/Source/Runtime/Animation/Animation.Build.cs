@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Animation assets (Docs/Design/MeshAnimationAssets.ko.md sections 6 and 7, stage MA4a): the bone hierarchy value types BoneInfo and
+// Animation assets (Docs/Design/MeshAnimationAssets sections 6 and 7, stage MA4a): the bone hierarchy value types BoneInfo and
 // BoneHierarchy with ValidateBoneHierarchy and NormalizeBoneReferencePose (section 6.1), the Skeleton asset class with its retarget modes,
 // virtual bones, sockets, curve info, slot groups, retarget sources and compatible skeletons plus ValidateSkeleton (section 6.2), and the
 // pure merge function MergeBoneHierarchy that checks parent chains and returns the merged hierarchy and the mesh-to-skeleton bone map

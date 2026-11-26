@@ -5,6 +5,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <Graphics/GraphicsLog.h>
+#include <Graphics/ShaderBindings.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/HostServices.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
@@ -212,6 +213,15 @@ Result<graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept {
     }
 
     return set->DeviceShader(entry.Value());
+}
+
+uint32 TextureSlot(const shader::ShaderBindingLayout* layout, StringView name) noexcept {
+    if (layout == nullptr) {
+        return graphics::MaxResourceSlots;
+    }
+
+    auto slot = graphics::FindTextureSlot(*layout, name);
+    return slot ? slot.Value() : graphics::MaxResourceSlots;
 }
 
 Result<graphics::PipelineHandle> CreateGraphicsPipeline(graphics::Device& device,

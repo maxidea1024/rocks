@@ -120,6 +120,10 @@ GlesDevice::~GlesDevice() {
         gl_.DeleteProgram(stencilReadProgram_);
         gl_.DeleteVertexArrays(1, &readVertexArray_);
         gl_.DeleteSamplers(1, &readSampler_);
+        for (uint32 index = 0; index < samplerCacheCount_; ++index) {
+            gl_.DeleteSamplers(1, &samplerCache_[index].filtering);
+            gl_.DeleteSamplers(1, &samplerCache_[index].point);
+        }
 
         for (const SwapChainRecord& record : swapChains_) {
             gl_.DeleteFramebuffers(1, &record.framebuffer);
@@ -1636,6 +1640,33 @@ GlesDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
 
     return Result<TextureSubresources>::Success(
         TextureSubresources{record->mipLevels, record->slices});
+}
+
+Result<TextureViewInfo> GlesDevice::GetTextureViewInfo(TextureHandle texture) noexcept {
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->writable ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = !record->writable &&
+                   HasPixelFormatCaps(GetPixelFormatCaps(record->format), PixelFormatCaps::Sampled);
+    info.comparison = record->samplerDesc.comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> GlesDevice::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
 }
 
 } // namespace rocks::graphics::gles

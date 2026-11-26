@@ -270,13 +270,16 @@ Result<void> CheckTextureSettings(ObjectRegistry& registry, const ObjectAccessCo
         }
 
         const Texture& read = *value.Value();
+        // 에디터 데이터가 없는 빌드는 EditorOnly 설정이 없으므로 그 사실은 기본값(거짓)이다.
+#if ROCKS_WITH_EDITOR_DATA
         facts.chromaKey = read.chromaKeyTexture;
         facts.alphaCoverage = read.doScaleMipsForAlphaCoverage;
         facts.composite = !read.compositeTexture.Handle().IsNull();
-        facts.virtualTexture = read.virtualTextureStreaming != 0;
         facts.mipGen = read.mipGenSettings;
         facts.encoding = read.sourceColorSettings.encodingOverride;
         facts.colorSpace = read.sourceColorSettings.colorSpace;
+#endif
+        facts.virtualTexture = read.virtualTextureStreaming != 0;
         facts.mipLoad = read.mipLoadOptions;
         facts.compression = read.compressionSettings;
     }

@@ -11,7 +11,7 @@
 #include <MeshTools/StaticMeshBuilder.h>
 
 // 정적·스킨 메시 빌드의 모듈 내부 공용
-// 부분이다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4·6.5절). 벡터 도우미는 UE TVector의 같은
+// 부분이다(Docs/Design/MeshAnimationAssets 5.2·5.4·6.5절). 벡터 도우미는 UE TVector의 같은
 // 이름 함수와 같은 식·같은 임계값으로 둔다(연산 순서가 결과 bit를 정하므로 Core Vector3 함수 대신
 // 여기서 식을 고정한다). 제곱근은 IEEE 정확 반올림 명령(math::Sqrt)이라 결정적이다.
 namespace rocks::mesh_build {

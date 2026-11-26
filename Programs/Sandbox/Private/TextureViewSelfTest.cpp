@@ -80,12 +80,16 @@ struct Canvas {
         return created.IsOk();
     }
 
+    // 마지막 Pipeline이 만든 파이프라인의 텍스처 slot이다.
+    uint32 textureSlot = MaxResourceSlots;
+
     Result<PipelineHandle> Pipeline(const shaders::ShaderTypeDesc& pixel, const char* texture,
                                     uint32 constants) noexcept {
         PipelineDesc desc;
-        desc.bindings.texture = texture;
         desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         desc.drawConstantBytes = constants;
+        // 다음 Draw가 쓰는 텍스처 slot이다(만든 직후 그린다).
+        textureSlot = shaders::TextureSlot(pixel, texture);
         return shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS, pixel, desc);
     }
 
@@ -99,7 +103,7 @@ struct Canvas {
 
         CommandContext& commands = *frame.Value();
         commands.SetPipeline(pipeline);
-        commands.SetTexture(texture);
+        commands.SetTexture(ShaderStage::Pixel, textureSlot, texture);
         bool set = true;
         if (constants != nullptr) {
             set = commands.SetDrawConstants(DrawConstantBytes(*constants)).IsOk();
@@ -174,7 +178,9 @@ void RunPyramid(Device& device, Allocator& allocator, TextureHandle pyramid) noe
             level.values[0] =
                 static_cast<float>(TextureViewBaseMip(features, MipView(mip, ViewAccess::Read)));
             level.values[1] = static_cast<float>(size);
-            commands.SetTexture(reads[mip]);
+            commands.SetTexture(ShaderStage::Compute,
+                                shaders::TextureSlot(shaders::TextureViewReduceCS, "Source"),
+                                reads[mip]);
             commands.SetWritableTexture(0, writes[mip + 1]);
             Check(commands.SetDrawConstants(DrawConstantBytes(level)).IsOk(),
                   "reduce draw constants are accepted");
@@ -305,7 +311,6 @@ Result<PipelineHandle> CreateFillPipeline(Device& device) noexcept {
 Result<PipelineHandle> CreateReducePipeline(Device& device) noexcept {
     ComputePipelineDesc desc;
     desc.drawConstantBytes = sizeof(LevelConstants);
-    desc.bindings.texture = "Source";
     desc.bindings.writableTextures[0] = "Target";
     return shaders::CreateComputePipeline(device, shaders::TextureViewReduceCS, desc);
 }

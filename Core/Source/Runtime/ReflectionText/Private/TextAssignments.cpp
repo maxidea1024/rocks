@@ -486,7 +486,7 @@ AssignmentTarget AssignmentTarget::Live(ObjectRegistry& registry, const ObjectAc
     AssignmentTarget target;
     target.kind_ = Kind::Live;
     target.registry_ = &registry;
-    target.access_ = &access;
+    target.access_ = access;
     target.object_ = object;
     return target;
 }
@@ -496,7 +496,7 @@ AssignmentTarget AssignmentTarget::Staged(ConstructionContext& transaction,
     AssignmentTarget target;
     target.kind_ = Kind::Staged;
     target.registry_ = &transaction.Registry();
-    target.access_ = &transaction.Access();
+    target.access_ = transaction.Access();
     target.object_ = object;
     target.transaction_ = &transaction;
     return target;
@@ -509,7 +509,7 @@ AssignmentTarget AssignmentTarget::Value(ObjectRegistry& registry,
     AssignmentTarget target;
     target.kind_ = Kind::Value;
     target.registry_ = &registry;
-    target.access_ = &access;
+    target.access_ = access;
     target.structType_ = &structType;
     target.storage_ = storage;
     target.allocator_ = &allocator;

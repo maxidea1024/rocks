@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 // 애니메이션 클립의 패키지 왕복·변조·결정성·할당 실패·퍼징
-// 시험이다(Docs/Design/MeshAnimationAssets.ko.md 7.5절, 12절 "클립" — 상수 트랙 접기의 bit 보존,
+// 시험이다(Docs/Design/MeshAnimationAssets 7.5절, 12절 "클립" — 상수 트랙 접기의 bit 보존,
 // 커브 왕복, 상한).
 using namespace rocks;
 namespace clip_robustness_tests_file {

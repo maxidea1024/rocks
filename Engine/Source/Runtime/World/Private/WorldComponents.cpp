@@ -265,15 +265,62 @@ Result<void> Component::MarkSystemStateDirty(SystemStateKind kind) noexcept {
         return Result<void>::Success();
     }
 
-    // 처음 표시할 때만 목록에 넣는다(한 Component는 목록에 많아야 한 번 — 23.2절).
-    if (dirtySystemStates_ == 0) {
+    // 목록에 없을 때만 넣는다(한 Component는 목록에 많아야 한 번 — 23.2절).
+    if (!systemStateQueued_) {
         if (auto queued = world_->systemStateUpdates_.TryPushBack(Handle()); !queued) {
             return queued;
         }
+
+        systemStateQueued_ = true;
     }
 
     dirtySystemStates_ = static_cast<uint8>(dirtySystemStates_ | (1u << index));
     return Result<void>::Success();
+}
+
+Result<void> Component::RecreateSystemStateNow(SystemStateKind kind) noexcept {
+    const uint32 index = static_cast<uint32>(kind);
+    if (index >= SystemStateKindCount) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 등록 전·해제 뒤·파괴 대기는 할 일이 없다(등록이 그때 값으로 만든다).
+    if (world_ == nullptr || !registered_ || state_ == ComponentState::PendingDestroy) {
+        return Result<void>::Success();
+    }
+
+    const auto bit = static_cast<uint8>(1u << index);
+    if ((recreatingSystemStates_ & bit) != 0) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // hook 범위에서 부른다(Create·Destroy 안에서 World 진입점 Initialize·Tick 등은 Busy — 갱신
+    // 지점과 같다).
+    World::HookScope hooks(*world_);
+    recreatingSystemStates_ = static_cast<uint8>(recreatingSystemStates_ | bit);
+    dirtySystemStates_ = static_cast<uint8>(dirtySystemStates_ & ~bit);
+    flushingSystemStates_ = static_cast<uint8>(flushingSystemStates_ & ~bit);
+    if (HasSystemState(kind)) {
+        DestroySystemState(kind);
+        systemStates_ = static_cast<uint8>(systemStates_ & ~bit);
+    }
+
+    Result<void> result = Result<void>::Success();
+    if (WantsSystemState(kind)) {
+        result = CreateSystemState(kind);
+        if (result) {
+            systemStates_ = static_cast<uint8>(systemStates_ | bit);
+        } else {
+            LogContextScope context("World", world_->Name());
+            Log::Warning(LogWorld,
+                         "Component system state {Kind} could not be recreated: {Error} ({Code})",
+                         SystemStateKindName(kind), ErrorCodeName(result.Error()),
+                         DiagSystemStateRecreateFailed);
+        }
+    }
+
+    recreatingSystemStates_ = static_cast<uint8>(recreatingSystemStates_ & ~bit);
+    return result;
 }
 
 Result<void> World::RegisterComponentNow(ObjectHandle component) noexcept {
@@ -337,22 +384,35 @@ void World::FlushSystemStateUpdates() noexcept {
     for (usize position = 0; position < batch.Size(); ++position) {
         const ObjectHandle component = batch[position];
         auto updated = With<Component>(component, [&](Component& value) noexcept {
-            const uint8 dirty = value.dirtySystemStates_;
+            // 이번 지점에서 처리할 종류를 떼어 둔다(처리 중 hook의 새 표시는 다음 지점). 즉시 다시
+            // 만들기가 처리 전에 그 종류를 만들면 이 비트도 지워 두 번 하지 않는다.
+            value.flushingSystemStates_ = value.dirtySystemStates_;
             value.dirtySystemStates_ = 0;
+            value.systemStateQueued_ = false;
             if (!value.registered_ || value.state_ == ComponentState::PendingDestroy) {
+                value.flushingSystemStates_ = 0;
                 return;
             }
 
             for (uint32 index = 0; index < SystemStateKindCount; ++index) {
                 const auto kind = static_cast<SystemStateKind>(index);
-                if ((dirty & (1u << index)) == 0 || !value.HasSystemState(kind)) {
+                const auto bit = static_cast<uint8>(1u << index);
+                if ((value.flushingSystemStates_ & bit) == 0 || !value.HasSystemState(kind)) {
                     continue;
                 }
 
+                value.flushingSystemStates_ =
+                    static_cast<uint8>(value.flushingSystemStates_ & ~bit);
+                // 이 Destroy·Create 안의 같은 종류 즉시 다시 만들기는 Busy다(23.2절).
+                value.recreatingSystemStates_ =
+                    static_cast<uint8>(value.recreatingSystemStates_ | bit);
                 value.DestroySystemState(kind);
-                value.systemStates_ = static_cast<uint8>(value.systemStates_ & ~(1u << index));
-                if (auto created = value.CreateSystemState(kind); created) {
-                    value.systemStates_ = static_cast<uint8>(value.systemStates_ | (1u << index));
+                value.systemStates_ = static_cast<uint8>(value.systemStates_ & ~bit);
+                auto created = value.CreateSystemState(kind);
+                value.recreatingSystemStates_ =
+                    static_cast<uint8>(value.recreatingSystemStates_ & ~bit);
+                if (created) {
+                    value.systemStates_ = static_cast<uint8>(value.systemStates_ | bit);
                 } else {
                     LogContextScope context("World", Name());
                     Log::Warning(LogWorld,

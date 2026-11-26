@@ -26,6 +26,10 @@ namespace rocks::graphics::gles {
 inline constexpr GLuint PixelTextureUnit = 0;
 inline constexpr GLuint VertexTextureUnitBase = 16;
 inline constexpr GLuint UploadTextureUnit = 32;
+// SetSampler 값의 desc 캐시 칸 수다(다른 backend의 샘플러 캐시와 같다).
+inline constexpr uint32 SamplerCacheCapacity = 256;
+// 샘플러 slot에 준 값이 없음을 나타내는 boundSamplers_ 값이다.
+inline constexpr uint16 NoBoundSampler = 0xFFFF;
 // 조회 수단이 없는 버퍼 최대 크기의 보수적 값이다(D3D 보장식의 하한 128 MiB, DeviceLimits).
 inline constexpr uint64 ConservativeBufferBytes = uint64{128} << 20;
 // 루트 상수 에뮬레이션 배열(uniform highp vec4|ivec4|uvec4 <단계>u_<타입>[N])의 vec4 한 칸 byte
@@ -395,7 +399,11 @@ private:
     void SetVertexBuffers(uint32 firstStream,
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
-    void SetTexture(TextureHandle handle) noexcept override;
+    void SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept override;
+    Result<void> SetSampler(ShaderStage stage, uint32 slot,
+                            const SamplerDesc* sampler) noexcept override;
+    Result<TextureViewInfo> GetTextureViewInfo(TextureHandle texture) noexcept override;
+    Result<BufferViewInfo> GetBufferViewInfo(BufferViewHandle view) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     void SetConstantBuffer(ShaderStage stage, uint32 slot,
                            ConstantBufferHandle buffer) noexcept override;
@@ -532,7 +540,11 @@ private:
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
     // 파이프라인 slot 표의 자원(텍스처·버퍼 view·compute 쓰기)을 layout의 유닛·binding에 묶는다
     // (그리기·dispatch 직전).
-    void ApplySlots(const PipelineRecord& pipeline) noexcept;
+    // 파이프라인 slot 표대로 자원을 건다. 공유 샘플러에 준 값이 없으면 거짓이다(그리기·dispatch를
+    // 무시한다, RenderBase 9.13절 3항).
+    bool ApplySlots(const PipelineRecord& pipeline) noexcept;
+    // 단계·유닛에 묶인 텍스처 기록이다(없거나 쓰기 view면 흰 텍스처).
+    const TextureRecord* BoundTexture(uint32 stage, uint32 unit) const noexcept;
     void ReleaseViewSource(const BufferViewRecord& view) noexcept;
     Result<GLuint> CompileShader(GLenum stage, StringView source) noexcept;
     void StoreLog(GLuint object, bool shader) noexcept;
@@ -679,8 +691,19 @@ private:
     SplitTransitionTracker splits_;
     // 장치 셰이더(CreateShader — ESSL과 layout·바인딩 머리의 CPU 사본)다.
     DeviceShaderTable shaders_;
-    // SetTexture로 묶은 텍스처다(그리기·dispatch 때 파이프라인 텍스처 유닛에 건다, 비면 흰색).
-    SlotHandle boundTexture_;
+    // 단계·텍스처 유닛마다 SetTexture로 묶은 텍스처(그리기·dispatch 때 파이프라인 텍스처 유닛에
+    // 건다, 비면 흰색)와 샘플러 slot마다 SetSampler로 준 값의 캐시 칸이다(RenderBase 9.13절).
+    SlotHandle boundTextures_[ConstantBufferStageCount][MaxResourceSlots] = {};
+    uint16 boundSamplers_[ConstantBufferStageCount][MaxResourceSlots] = {};
+    // SetSampler 값의 desc 캐시다(장치 수명 동안 유지). 선형 필터를 받지 않는 형식용 최근접 판을
+    // 함께 만든다(CreateSampler의 filterable).
+    struct SamplerCacheEntry {
+        SamplerDesc desc;
+        GLuint filtering = 0;
+        GLuint point = 0;
+    };
+    SamplerCacheEntry samplerCache_[SamplerCacheCapacity] = {};
+    uint32 samplerCacheCount_ = 0;
     bool recording_ = false;
     bool constantsDirty_ = false;
     bool validation_ = false;

@@ -9,7 +9,7 @@
 | SH0 | 도구 스파이크: 지금의 내장 샘플 셰이더(`Programs/Sandbox/Private/SampleRenderer.cpp`의 HLSL)를 DXIL·SPIR-V·DXBC·MSL·ESSL로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | P3·P4·P10 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함, S1), FXC 고정본 로드, 리플렉션 덤프, `ROCKS_IMAGE_FORMAT`의 DXC 지원 확인, S2·S3·S6·S8·S9·S10·S12(데스크톱)·S13·S14 측정. 남은 것(2026-11-20): macOS 부분(S1·S3 호스트 사이·S9)과 기계 하나로 못 재는 S2·S3·S12 일부(5.4절 끝) |
 | SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1, 11절)·두 층 키(P5)·에셋 너겟·`shader-compile` 명령·Development 필요 시 컴파일. 설계·하위 단계 SH1a–SH1e: 11.1절(개정 23) | SH0·P1·P5(A2·A3·P6a)·결정 6 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고, 부모 종료 시 워커와 그 자식 종료, 형식 버전 불일치 진단, 도구 조회, 전처리 정합성(측정 S7) |
 | SH2 | 리플렉션 정규화와 워커 규칙(7.2절)·ShaderCore와 셰이더 타입·퍼뮤테이션(P14)·쿠킹 라이브러리와 매니페스트 v2(P6b)·Graphics API의 쿠킹 코드 수신·RB3 셰이더 집합·런타임 컴파일러 제거·GLES 미리보기 Release 제외·샘플 렌더러 전환. 설계와 하위 단계 SH2a–SH2g: 16.1절(개정 31) | SH1·P2·P4·P9·P11·A0-G·결정 2·3·4·5·9 | 16.1절 완료 기준 |
-| SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM11, 개정 49) | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
+| SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM11, 개정 49). 설계와 하위 단계 SH3a–SH3c: 16.2절(개정 54) | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
 | SH4 | 감시 재컴파일(`DirectoryWatch`)·오류 위치·디버그 심볼·PSO 교체. 화면 마일스톤 밖, 렌더러 RS0 전(RenderBase 18.4절 SM12, 개정 49) | SH2 | 저장 후 10초 안 반영(계획 I5) |
 | SH5 | MetalGraphics(D3D11의 쿠킹 셰이더 전환은 개정 32에서 SH2로 옮겼다) | SH2·P12·P15 | Metal이 D3D12와 허용 오차 안 일치, 7.3절 (c)·(e)·(g)의 Metal 부분 |
 | SH6 | Android: `GLES31_ANDROID` 기기 실행, `VULKAN_ANDROID` 형식과 VulkanGraphics Android | SH2·P13·P11 | Android(실기기 또는 S11 에뮬레이터)에서 D3D12 기준 이미지와 허용 오차 안 일치, 7.3절 (c)·(i)의 Android 부분, S12(기기) |
@@ -269,3 +269,66 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 규약 검토 자료(결정 아님): `SV_InstanceID`를 쓰는 VS의 ESSL에는 ES에 draw parameters가 없어 SPIRV-Cross가 `uniform int SPIRV_Cross_BaseInstance`(기본값 0)를 더한다. base instance가 늘 0이라(7.2절 7항) 값은 맞고, SH2에서 워커가 SPIRV-Cross `support_nonzero_base_instance`를 꺼 이 uniform을 없앨지 정한다.
 - [ ] macOS: S1(macOS DXC 서명), S3 Windows–macOS 사이 byte 비교, S9, macOS CRT의 실수 출력. 개정 29: 절차는 `shader-compile --out`으로 옮겼고(11.1절 E10) 스파이크는 지운다. macOS에서 DXC를 여는 일(ShaderToolLoader `Private/Mac`, DXC는 `WinAdapter.h`)은 macOS 산출물(P3)과 함께 한다.
 - [ ] S3의 FMA3 유무·OS 버전 차이와 S12의 다른 GPU 공급자는 기계가 하나라 미측정이다.
+
+### 16.2 SH3 설계(개정 54, 2026-11-26)
+
+SH3는 13절 P7(MetaCompiler 셰이더 파라미터)을 구현한다. 위 표 SH3 행의 완료 기준("7.3절 (a)·(f)를 생성 구조체로")은 그대로다. 결정은 권장안으로 확정했고 애매한 곳은 UE 5.8을 따랐다(SSD49–SSD58).
+
+**UE 5.8 방식.**
+
+| 항목 | UE 5.8 | 근거 |
+|---|---|---|
+| 선언 | `BEGIN_SHADER_PARAMETER_STRUCT`·`BEGIN_UNIFORM_BUFFER_STRUCT` 매크로가 멤버마다 정렬 static_assert와 `FShaderParametersMetadata` 멤버 표를 만든다 | `Runtime/RenderCore/Public/ShaderParameterMacros.h:858–1130, 1308–1495`, `Runtime/RenderCore/Public/ShaderParameterMetadata.h:139–176` |
+| 생성 HLSL | 컴파일 환경을 만들 때 메타데이터로 `cbuffer`·멤버·명시 padding을 만들어 메모리 include `/Engine/Generated/UniformBuffers/<이름>.ush`로 넣는다(`IncludeVirtualPathToContentsMap`). 디스크 파일은 없다 | `Runtime/RenderCore/Private/ShaderParameters.cpp:85–102, 210–447, 450, 563, 615–616` |
+| 대조 | Development에서 그리기 때 구조체 layout hash를 비교한다 | `Runtime/RenderCore/Private/ShaderParameterStruct.cpp:520–527` |
+
+**결정.**
+
+- **SSD49 생성 단계의 위치.** MetaCompiler에 셰이더 파라미터 모드(`Rocks.MetaCompiler shader-parameters`)를 더하고, 빌드가 리플렉션 메타 단계와 **따로** 부른다. 대상 헤더는 리플렉션 헤더처럼 어휘 판정(줄 첫머리 `ROCKS_SHADER_PARAMETERS(`)으로 찾는다(모듈 규칙에 목록을 적지 않는다). 같은 헤더에 리플렉션 표지가 함께 있어도 된다.
+  - 근거: 리플렉션 struct 생성물(모듈 등록 함수)은 ObjectRuntime(`Object/ModuleRegistration.h`)을 include하는데, 파라미터 구조체의 첫 주인인 RenderBase는 렌더 층 "Object 없음"이라 ObjectRuntime에 의존하지 않는다(RenderBase 9.3절). 그래서 13절의 "TypeSchema·TypeRegistry 등록, identity 명세, 자원 멤버의 `ValueKind`"는 SH3에서 하지 않고, 스키마를 처음 쓰는 RenderBase RR14(바인딩 지도를 스키마로)가 MetaSchema만으로 등록하는 길과 함께 정한다. SH3의 단일 출처는 C++ 선언이고, 생성 C++ 표와 생성 HLSL이 한 실행에서 나온다(결정 4의 "리플렉션이 단일 출처"를 이 범위로 지킨다).
+  - 버린 안: (가) `ROCKS_STRUCT`의 변형 — 위 의존 위반. (나) UE 매크로 — 결정 4. (다) 모듈 규칙(C#)의 생성 소스 — Clang 없이 C++ 원문을 해석해야 해 별칭·이름공간·배열 철자를 바르게 풀지 못한다.
+- **SSD50 선언.**
+
+  ```cpp
+  ROCKS_SHADER_PARAMETERS(Name = "Tonemap", RootConstants)
+  struct alignas(16) TonemapConstants {
+      shader::ShaderFloat4 exposure;
+      shader::ShaderFloat4 film;
+      shader::ShaderFloat4 filmWhite;
+  };
+  ```
+
+  - 지정자: `Name = "…"`(HLSL 쪽 이름 — cbuffer 이름·루트 상수 변수 이름이고 레이아웃 표 이름이다. 식별자 64 byte 이하, 없으면 C++ 이름), `RootConstants`(그리기별 상수, 7.2절 2항). 그 밖은 오류다.
+  - 구조체: 이름공간 범위, base 없음, 템플릿 아님, 완전한 정의. 비정적 데이터 멤버 전부가 파라미터다(비트필드·참조·익명 멤버는 오류). 크기는 16 byte 배수이고 정렬은 16 이하다(`alignas(16)`이나 멤버로 맞춘다).
+  - 멤버 타입: `float`·`int32`·`uint32`, ShaderCore 정렬 타입 12종(`ShaderFloat2`–`ShaderUint4`, `ShaderFloat4x4`), 다른 셰이더 파라미터 구조체(중첩 — 1단만이고 루트 상수 표시가 없어야 한다), 이들의 1차원 C 배열(원소 16 byte 배수, 구조체 배열 금지). Core `Matrix4`·`Vector3`, bool, double, 포인터, 2차원 배열, 그 밖의 타입은 오류다(13절).
+  - 오프셋은 Clang이 정한 C++ 오프셋이 기준이다. 생성기가 7.2절 5항 규칙(정렬, 한 16 byte 슬롯에 기본 타입을 섞지 않음, 배열 원소, 구조체 시작·크기)을 그 오프셋으로 검사한다. HLSL 자연 배치가 C++ 오프셋보다 앞에 두는 자리(3성분 다음 — C++ `ShaderFloat3`은 16 byte다)에는 생성 HLSL에 명시 padding 멤버 `rocksPadding<n>`(앞 멤버와 같은 기본 타입 스칼라)을 넣는다. UE도 생성 HLSL에 명시 padding을 넣는다(`ShaderParameters.cpp:240–257`). padding은 레이아웃 표에도 멤버로 들어간다(워커 대조가 리플렉션 멤버와 1:1로 본다).
+  - 상한: 멤버 `MaxShaderParameterMembers`(256 — padding 포함, 중첩 구조체는 자기 표 안에서), 크기 `MaxShaderConstantBufferBytes`(64 KiB), 루트 상수 `MaxShaderRootConstantBytes`(128).
+- **SSD51 생성물.**
+  - C++: `<out>/Generated/<모듈>/ShaderParameters/<헤더 철자의 .h를 .shaderparams.h로>`. 원본 헤더와 `ShaderCore/ShaderParameterLayout.h`를 include하고, 구조체마다 `rocks::shader::ShaderParameterStruct<T>` 특수화(`static constexpr ShaderParameterLayout Layout`)와 멤버별 `offsetof`·`sizeof`, 구조체 `sizeof`·`alignof` static_assert를 낸다. 쓰는 쪽은 `ShaderParameterLayoutOf<T>()`다. 빌드는 그 디렉터리를 모듈 include 디렉터리로 더한다(원본이 public 헤더면 public).
+  - HLSL: `<out>/Generated/<모듈>/Shaders/<C++ 이름>.rsh`(13절의 자리). 같은 원문을 C++ 표의 문자열로도 넣는다(SSD52).
+  - 생성 주석과 오류 문구는 영어다.
+- **SSD52 생성 HLSL과 그 원천.**
+  - 가상 경로: `/Engine/Generated/<모듈>/<C++ 이름>.rsh`(엔진·Developer·실행 파일 모듈). 플러그인·프로젝트 모듈은 `/Plugin/<이름>/Generated/…`·`/Project/Generated/…`이고 그 모듈 종류가 파라미터 구조체를 가질 때 연다(후속).
+  - 원문 모양: `#pragma once` → 중첩 구조체 정의(구조체마다 `#ifndef ROCKS_SHADER_STRUCT_<이름>` 가드 — 둘 이상의 생성 원문이 같은 구조체를 담아도 한 번만 정의된다) → `struct <C++ 이름> { … };`(같은 가드) → cbuffer면 `cbuffer <Name> { 멤버 };`, 루트 상수면 `ROCKS_ROOT_CONSTANTS(<C++ 이름>, <Name>);`. 셰이더는 cbuffer 멤버를 이름 그대로(전역), 루트 상수는 `<Name>.<멤버>`로 읽는다(지금 손으로 쓴 원문과 같다). FXC(`D3D11_SM5`)가 `ConstantBuffer<T>`를 받지 않아 cbuffer는 `cbuffer` 문법으로 낸다.
+  - 원천: 원문 트리의 `<루트>/Generated/…`는 메모리 원문 전용이다(SH1의 자리, UE `IncludeVirtualPathToContentsMap`). 컴파일 관리자는 job의 레이아웃 표들이 가진 (가상 경로, 원문)을 그 job 전처리의 메모리 원문으로 준다(job마다 — 트리는 공유·읽기 전용 그대로). 디스크 `.rsh`는 사람이 보는 사본이고 컴파일 입력은 실행 파일에 든 원문이다. include 폐포가 job 키에 들어가는 규칙은 그대로다. 셰이더가 자기 타입의 표에 없는 생성 원문을 include하면 `GeneratedSource` 오류다(표에 넣어야 워커가 오프셋을 대조한다).
+  - 버린 안: 디스크 mount(`/Engine/Generated` → `<out>/Generated`). 쿠커·공급자·시험이 빌드 출력 뿌리를 알아야 하고 설치 SDK·게임 빌드에서 경로가 달라진다. 원문을 실행 파일에 넣으면 C++ 표와 원문이 같은 빌드에서 나온다는 것도 보장된다(레이아웃 서명의 런타임 검증, RenderBase 9.3절과 같은 성질).
+- **SSD53 `ShaderParameterLayout` 확장(13절의 데이터 형식 확정).**
+  - 멤버 타입 `Struct`(값 13)와 `ShaderParameterMember::structLayout`(중첩 표, 멤버 오프셋은 그 구조체 기준).
+  - 표에 `structName`(C++ 정규 이름 — 손으로 쓴 표와 머티리얼 동적 layout은 빈 값), `structId`(= `ShaderParameterStructId(structName)`, CP7 렌더 이름·셰이더 타입 이름과 같은 64-bit 해시, 빈 이름이면 0), `sourcePath`·`source`(생성 원문 — 없으면 빈 값)를 더한다.
+  - 검사를 더한다: 중첩은 1단이고 16 byte 정렬에서 시작하며 크기가 16 byte 배수이고 배열이 아니다. 중첩 표는 루트 상수가 아니다. `structId`는 이름의 해시와 같다. 원문이 있으면 가상 경로가 `<루트>/Generated/` 아래 `.rsh`다.
+  - 서명 정규 byte에 `structName`과 중첩 멤버를 더한다(identity가 바뀌면 서명도 바뀐다). 원문은 넣지 않는다 — 표에서 결정적으로 나오고 include 폐포로 job 키에 이미 들어간다.
+- **SSD54 SX8 — 바인딩 layout v4.** 상수 버퍼 자원 항목에 u64 파라미터 구조체 identity(`structId`, 0 = 없음)를, 머리에 루트 상수 identity(`rootConstantStructId`)를 둔다. 워커가 job 표 가운데 이름이 같은 표의 `structId`를 넣는다. 자원 항목의 파라미터 구조체 멤버 오프셋(SX8 뒷부분)은 자원 멤버가 들어오는 SH3b다. 값 1 형식이 바뀌므로 형식 처리기 버전을 모두 하나씩 올린다(너겟 키 — 10절).
+- **SSD55 워커 대조.** 중첩 구조체 리플렉션 멤버를 표의 `Struct` 멤버와 재귀로 대조한다(이름·오프셋·크기·자식). 셰이더가 쓰지 않아 컴파일러가 지운 버퍼는 대조하지 않는다(오류 아님 — UE도 쓰지 않는 멤버를 바인딩에서 거른다). 발견(개정 54): 손으로 쓴 tone map·텍스처 표시 표는 이름이 구조체 이름(`TonemapConstants`)이고 HLSL 변수 이름(`Tonemap`)과 달라 대조가 빠지고 있었다. 생성 표는 이름이 HLSL 쪽 `Name`이라 이 일이 없다.
+- **SSD56 이관 범위.** 엔진 셰이더의 손으로 쓴 표 셋(`BuiltinMeshConstants`·`TonemapConstants`·`TextureInspectorConstants`)을 생성 구조체로 바꾸고 원문은 생성 `.rsh`를 include한다. 손으로 쓴 표 자체는 데이터 형식으로 남는다(머티리얼 동적 layout과 같은 경로, 워커·ShaderCore 시험). Sandbox 시험 셰이더의 손으로 쓴 표는 그 경로의 시험이라 그대로 둔다.
+- **SSD57 하위 단계.**
+
+  | 단계 | 내용 | 완료 기준 |
+  |---|---|---|
+  | SH3a | SSD49–SSD56: 상수 멤버(스칼라·벡터·행렬·배열·중첩)·루트 상수 표시, 생성 C++ 표·HLSL, 메모리 원문, 바인딩 layout v4 identity, 엔진 셰이더 이관 | 아래 시험 1–3 |
+  | SH3b | 자원 멤버(RenderBase 9.6절 표의 장치 자원·그래프 자원·샘플러 지정): ShaderCore 자원 값 타입, 생성 HLSL의 전역 자원·짝 샘플러, 표의 자원 목록, SX8 자원 항목의 멤버 오프셋, `ShaderResourceMap`을 생성 표로 | 생성 자원 선언 golden, 자원 지도의 생성 표 양성·음성 |
+  | SH3c | 렌더 그래프 파라미터 수집기(RenderGraph 8절 RG1 남은 것): 구조체의 그래프 자원 멤버를 훑어 `GraphPassAccesses`를 만든다 | 수집 경로와 명시 선언 경로의 명령 열 동치 |
+
+- **SSD58 시험(SH3a 완료 기준).**
+  1. EngineTests: 생성 HLSL golden(시험 fixture 모듈 `ShaderParameterTestFixtures`의 구조체 — 3성분 뒤 스칼라, 배열, 중첩 구조체, 행렬, int·uint 슬롯, 루트 상수), 형식별 오프셋 대조(형식 정의 전부를 실제 워커로 컴파일해 값 1 멤버 오프셋·크기와 GLES 복사 표가 C++ `offsetof`와 같다 — Metal 도구가 없으면 SKIP), 바인딩 layout v4의 identity, ShaderCore 표 음성(모르는 타입·2단 중첩·중첩 배열·중첩 루트 상수·identity 불일치·상한).
+  2. ToolTests: MetaCompiler 음성(금지 타입 `Matrix4`·bool·double·포인터·2차원 배열·구조체 배열·2단 중첩·루트 상수 중첩, 루트 상수 128 byte 초과, 크기 16 byte 배수 아님, 정렬 32, base·템플릿, 모르는 지정자, 이름 충돌·식별자 아님, 슬롯 기본 타입 섞기, 멤버 256 초과)과 양성 생성물.
+  3. Sandbox `--self-test`: 생성 구조체(cbuffer — 중첩·배열·행렬·padding, 루트 상수)로 그린 픽셀이 기대값과 같다(여덟 장치), 엔진 셰이더 소비자(tone map·텍스처 표시·내장 메시) 회귀, `--texture-self-test`·`--cooked-shader-self-test` 회귀 없음.

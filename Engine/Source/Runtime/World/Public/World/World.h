@@ -375,8 +375,10 @@ public:
 
     // 물리 장면 접점을 꽂거나(scene) 뗀다(nullptr). PhysicsWorldSubsystem만 부른다. World가
     // Initialized(Subsystem 초기화 중과 BeginPlay 전)·TearingDown(정리 중)일 때만 받고 다른 상태는
-    // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 장면은 뗄 때까지
-    // 살아 있어야 한다. PhysicsModule 7.1.1절.
+    // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 떼기는 body가 남아
+    // 있어도 성공한다: 초기화 되돌림은 Subsystem 정리가 Actor 정리보다 먼저이고, 장면이 없으면
+    // 컴포넌트는 body 지우기를 건너뛴다(PhysicsModule 7.1.5절). 장면은 뗄 때까지 살아 있어야 한다.
+    // PhysicsModule 7.1.1절.
     Result<void> SetPhysicsScene(PhysicsScene* scene) noexcept;
 
     WorldState State() const noexcept {

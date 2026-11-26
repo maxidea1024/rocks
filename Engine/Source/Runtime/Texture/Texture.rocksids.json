@@ -657,14 +657,14 @@
       "name": "rocks::TextureDownscale::defaultValue",
       "id": "048b2ef27cca48ec8ce6546db0f8bf35",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::TextureDownscale::perPlatform",
       "id": "b8cf26f878cd4b7daa53e1b2320d4d9c",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -1196,7 +1196,7 @@
       "name": "rocks::TextureDownscale",
       "id": "98fc89aa16514fd49e6a905e759230f7",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",

@@ -32,11 +32,19 @@ public:
 
     Result<Span<const uint8>> ReadBulk(ObjectHandle, const BulkDataRef& ref) noexcept override {
         ++reads;
+        if (reads == failReadAt) {
+            return Result<Span<const uint8>>::Failure(readError);
+        }
+
         return bulk.ReadBulk(ref);
     }
 
     Result<BulkDataRef> AddBulk(Array<uint8>&& raw) noexcept override {
         ++adds;
+        if (adds == failAddAt) {
+            return Result<BulkDataRef>::Failure(addError);
+        }
+
         return bulk.Add(Move(raw));
     }
 
@@ -56,10 +64,14 @@ public:
         failCode = code;
         failError = error;
         failDetail = detail;
-        return Result<void>::Failure(error);
+        return Result<void>::Failure(failReplace != ErrorCode::None ? failReplace : error);
     }
 
     Result<void> Warn(AssetDiagnosticCode code, uint64 detail) noexcept override {
+        if (warnError != ErrorCode::None) {
+            return Result<void>::Failure(warnError);
+        }
+
         return warnings.TryPushBack(texture_import_test::SeenWarning{code, detail});
     }
 
@@ -78,6 +90,14 @@ public:
     usize reads = 0;
     usize adds = 0;
     usize rebuilds = 0;
+    // sink 실패 주입(0·None이면 없음): reads·adds가 이 값이 되는 호출이 그 오류로, Warn은
+    // warnError로 실패하고, Fail은 failReplace를 돌려준다(진단은 기록한다).
+    usize failReadAt = 0;
+    usize failAddAt = 0;
+    ErrorCode readError = ErrorCode::IoError;
+    ErrorCode addError = ErrorCode::IoError;
+    ErrorCode warnError = ErrorCode::None;
+    ErrorCode failReplace = ErrorCode::None;
 };
 
 // 텍스처 타입·hook 표·객체를 가진 장면이다.
@@ -948,6 +968,76 @@ TEST(TextureSourceRebuild_AllocationFailures) {
     for (RebuildSetup setup : setups) {
         CHECK(SweepRebuild(setup) > 0);
     }
+}
+
+// sink 실패 주입(14.1.119 후속 2번, 12.14절): 2DArray 잇기의 n번째 원소 bulk 읽기가 IoError면
+// InvalidSource(그 오류, detail = 원소 번호)이고 OutOfMemory면 진단 없이 OutOfMemory다. bulk 더하기
+// 실패는 그 오류 그대로다. 어느 쪽이든 배열 원본은 그대로(비어 있음)다. Volume 빈 원본의 경고 기록
+// 실패와 거부 판정의 실패 기록이 돌려준 오류(받은 오류 대신 sink 자신의 것)도 그대로 돌려준다.
+TEST(TextureSourceRebuild_SinkFailures) {
+    RebuildScene scene;
+    REQUIRE(scene.ready);
+    FakeSink sink(scene.env.allocator);
+    const TypeId plane = TypeIdOf<Texture2D>();
+    const ObjectHandle a = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 10);
+    const ObjectHandle b = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 100);
+    REQUIRE(!a.IsNull() && !b.IsNull());
+    const ObjectHandle array = scene.Make(TypeIdOf<Texture2DArray>());
+    const ObjectHandle list[] = {a, b};
+    REQUIRE(scene.SetList(array, false, list));
+
+    const ErrorCode readErrors[] = {ErrorCode::IoError, ErrorCode::OutOfMemory};
+    for (ErrorCode readError : readErrors) {
+        for (usize element = 0; element < 2; ++element) {
+            sink.reads = 0;
+            sink.failReadAt = element + 1;
+            sink.readError = readError;
+            sink.failCode = AssetDiagnosticCode::None;
+            sink.failError = ErrorCode::None;
+            auto rebuilt = scene.Rebuild(array, SourceTextures, sink);
+            sink.failReadAt = 0;
+            CHECK(!rebuilt && rebuilt.Error() == readError);
+            if (readError == ErrorCode::OutOfMemory) {
+                CHECK(sink.failCode == AssetDiagnosticCode::None &&
+                      sink.failError == ErrorCode::None);
+            } else {
+                CHECK(sink.failCode == AssetDiagnosticCode::InvalidSource &&
+                      sink.failError == readError && sink.failDetail == element);
+            }
+
+            CHECK(scene.Read(array)->source.bulk.IsEmpty());
+        }
+    }
+
+    sink.adds = 0;
+    sink.failAddAt = 1;
+    sink.addError = ErrorCode::Busy;
+    auto added = scene.Rebuild(array, SourceTextures, sink);
+    sink.failAddAt = 0;
+    CHECK(!added && added.Error() == ErrorCode::Busy && scene.Read(array)->source.bulk.IsEmpty());
+    REQUIRE(scene.Rebuild(array, SourceTextures, sink));
+    CHECK(scene.Read(array)->source.numSlices == 2);
+
+    // 경고 기록 실패(Volume 타일 0 → 빈 원본 + SourceCleared).
+    const ObjectHandle atlas = scene.Element(sink, plane, TextureSourceFormat::G8, 8, 8, 1, 0);
+    const ObjectHandle volume = scene.Make(TypeIdOf<VolumeTexture>());
+    REQUIRE(scene.SetSource2D(volume, atlas, 0, 4));
+    sink.warnError = ErrorCode::Busy;
+    const StringView tileField[] = {"source2DTileSizeY"};
+    auto warned = scene.Rebuild(volume, tileField, sink);
+    sink.warnError = ErrorCode::None;
+    CHECK(!warned && warned.Error() == ErrorCode::Busy && sink.warnings.IsEmpty());
+
+    // 실패 기록이 돌려준 오류(원본 없는 원소 → InvalidSource, sink는 Busy를 돌려준다).
+    const ObjectHandle wide = scene.Make(plane);
+    const ObjectHandle mixed = scene.Make(TypeIdOf<Texture2DArray>());
+    const ObjectHandle mixedList[] = {a, wide};
+    REQUIRE(scene.SetList(mixed, false, mixedList));
+    sink.failReplace = ErrorCode::Busy;
+    auto rejected = scene.Rebuild(mixed, SourceTextures, sink);
+    sink.failReplace = ErrorCode::None;
+    CHECK(!rejected && rejected.Error() == ErrorCode::Busy &&
+          sink.failCode == AssetDiagnosticCode::InvalidSource && sink.failDetail == 1);
 }
 
 } // namespace texture_source_rebuild_tests_file

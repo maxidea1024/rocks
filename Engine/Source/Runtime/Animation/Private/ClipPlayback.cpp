@@ -3,7 +3,7 @@
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 
-// 클립 원본 → 쿠킹 데이터 v1 변환과 쿠킹 데이터 저장·로드다(Docs/Design/MeshAnimationAssets.ko.md
+// 클립 원본 → 쿠킹 데이터 v1 변환과 쿠킹 데이터 저장·로드다(Docs/Design/MeshAnimationAssets
 // 7.4·7.5절, UE UAnimSequence::CalculateNumberOfSampledKeys).
 namespace rocks {
 

@@ -3,7 +3,7 @@
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Base/NumericLimits.h>
 
-// 스켈레톤·본 계층·클립 진단이다(Docs/Design/MeshAnimationAssets.ko.md 6.4절·7.5절·11절).
+// 스켈레톤·본 계층·클립 진단이다(Docs/Design/MeshAnimationAssets 6.4절·7.5절·11절).
 namespace rocks {
 
 // 진단이 위치를 가리키지 않을 때의 번호다.
@@ -40,7 +40,10 @@ enum class SkeletonIssue : uint8 {
     // 병합(MergeBoneHierarchy — SkeletonMismatch).
     ParentChainMismatch, // 같은 이름 본의 부모 사슬 이름이 스켈레톤과 다름
     MissingAncestor,     // 메시 본과 그 조상이 스켈레톤에 하나도 없음(루트가 다름)
-    EmptyMeshHierarchy   // 메시 계층에 본이 없음(UE IsCompatibleMesh의 NumOfBoneMatches > 0)
+    EmptyMeshHierarchy,  // 메시 계층에 본이 없음(UE IsCompatibleMesh의 NumOfBoneMatches > 0)
+    // 스킨 메시 임포트(MeshAnimationAssets 6.7.3절 3 — SkeletonMismatch).
+    // 고칠 수 없는 스켈레톤(묶음 구성원)에 메시 본이 모자람(index = 첫 모자란 메시 본).
+    MissingSkeletonBones
 };
 
 // 세부 규칙 이름이다(예: ParentOrder → "ParentOrder"). 모르는 값은 "Unknown"이다. 정적 수명이다.

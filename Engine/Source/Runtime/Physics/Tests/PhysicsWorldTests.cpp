@@ -146,6 +146,16 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         void SetBodyTransform(PhysicsBodyHandle, const Transform&, TeleportMode) noexcept override {
         }
 
+        void SetBodyMotion(PhysicsBodyHandle, BodyMotion, bool) noexcept override {
+        }
+
+        void SetBodyCollision(PhysicsBodyHandle, const ResolvedCollision&) noexcept override {
+        }
+
+        Result<void> SetBodyGeometry(PhysicsBodyHandle, const BodyGeometry&) noexcept override {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
         Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle) const noexcept override {
             return Result<BodyKinematics>::Failure(ErrorCode::StaleHandle);
         }

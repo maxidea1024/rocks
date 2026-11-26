@@ -118,7 +118,13 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     }
 
     boundIndex_ = {};
-    boundTexture_ = white_;
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = VK_NULL_HANDLE;
+        }
+    }
+
     for (BufferViewHandle& view : boundViews_) {
         view = {};
     }
@@ -432,7 +438,7 @@ void VulkanDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint6
     platform::LockGuard lock(gate_);
     boundIndex_ = {buffer, format, offset};
     const BufferRecord* record = buffers_.Find(buffer.slot);
-    if (!recording_ || record == nullptr || offset >= record->size ||
+    if (!recording_ || record == nullptr || offset >= record->size || !IsValidIndexFormat(format) ||
         offset % IndexFormatSize(format) != 0) {
         return;
     }
@@ -442,9 +448,10 @@ void VulkanDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint6
                                                                   : VK_INDEX_TYPE_UINT32);
 }
 
-void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
+void VulkanDevice::SetTexture(ShaderStage stage, uint32 binding, TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_) {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || binding >= MaxResourceSlots) {
         return;
     }
 
@@ -462,7 +469,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     // view는 image view만 자기 것이고 이미지 상태는 원 텍스처 기록이 추적한다. descriptor는 다음
     // 그리기가 쓴다(PrepareDescriptors).
-    boundTexture_ = TextureHandle{slot};
+    boundTextures_[stageIndex][binding] = slot;
     descriptorsDirty_ = true;
     // view는 자기 mip·slice 범위만 전이한다(텍스처 GX2 A부).
     const ResolvedSubresourceRange range = record->viewRange;
@@ -497,6 +504,70 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         TrackTransition(*record, slot, range, readState, false);
         ResumeRenderPass();
     }
+}
+
+Result<void> VulkanDevice::SetSampler(ShaderStage stage, uint32 slot,
+                                      const SamplerDesc* sampler) noexcept {
+    platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        return FailCode("SetSampler", ErrorCode::InvalidArgument,
+                        "needs a recording, a stage and slot in range and a valid sampler "
+                        "description");
+    }
+
+    VkSampler bound = VK_NULL_HANDLE;
+    if (sampler != nullptr) {
+        auto made = SamplerFor(*sampler);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        bound = made.Value();
+    }
+
+    boundSamplers_[stageIndex][slot] = bound;
+    descriptorsDirty_ = true;
+    return Result<void>::Success();
+}
+
+const TextureRecord* VulkanDevice::BoundTexture(uint32 stage, uint32 slot) const noexcept {
+    const TextureRecord* texture =
+        slot < MaxResourceSlots ? textures_.Find(boundTextures_[stage][slot]) : nullptr;
+    if (texture == nullptr || texture->view == VK_NULL_HANDLE || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
+Result<TextureViewInfo> VulkanDevice::GetTextureViewInfo(TextureHandle texture) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->writable ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = record->view != VK_NULL_HANDLE && !record->writable;
+    info.comparison = record->comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> VulkanDevice::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
 }
 
 Result<void> VulkanDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

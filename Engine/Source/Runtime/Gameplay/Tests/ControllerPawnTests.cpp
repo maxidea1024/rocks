@@ -686,6 +686,79 @@ TEST(ControllerPawn_InputUserSettingsFromLocalPlayer) {
     }));
 }
 
+// InputActions 6.3절: PlayerController는 입력 액션 전달 뒤 진동을 합성해 MotorOutput으로 낸다(pause
+// 중 playWhilePaused 아닌 동적 진동은 0). 연결을 끊으면 0이다.
+TEST(ControllerPawn_HapticsComposeMotorOutput) {
+    SystemAllocator allocator;
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    REQUIRE(!controller.IsNull());
+    input::HapticEffect effect(allocator);
+    effect.id = Guid{0x4943, 1};
+    input::HapticChannel channel(allocator);
+    channel.affectsLeftLarge = channel.affectsRightLarge = channel.affectsRightSmall = false;
+    REQUIRE(channel.curve.TryAddKey(0.0f, 0.5f));
+    REQUIRE(channel.curve.TryAddKey(1000.0f, 0.5f));
+    REQUIRE(effect.channels.TryPushBack(Move(channel)));
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        CHECK(value.MotorOutput() == input::MotorValues{});
+        input::HapticParams params;
+        params.playWhilePaused = true;
+        CHECK(value.Haptics().PlayHapticEffect(effect, params).IsOk());
+        input::DynamicHaptic rumble;
+        rumble.intensity = 0.25f;
+        rumble.affectsLeftSmall = false;
+        CHECK(value.Haptics().StartDynamicHaptic(rumble).IsOk());
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    input::MotorValues motors;
+    auto read = [&]() noexcept {
+        REQUIRE(
+            world.With<PlayerController>(controller, [&motors](PlayerController& value) noexcept {
+                motors = value.MotorOutput();
+            }));
+    };
+    read();
+    CHECK(motors.leftLarge == 0.25f && motors.leftSmall == 0.5f && motors.rightLarge == 0.25f &&
+          motors.rightSmall == 0.25f);
+
+    // pause: 동적 진동은 빠지고 playWhilePaused 효과만 남는다.
+    world.SetPaused(true);
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors.leftLarge == 0.0f && motors.leftSmall == 0.5f && motors.rightSmall == 0.0f);
+    world.SetPaused(false);
+
+    // 배율(설정 값은 GameInstance가 프레임마다 넣는다 — 여기서는 직접): 0.5배.
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ApplyHapticSettings(0.5f, true);
+        value.Haptics().StopAll();
+        input::DynamicHaptic full;
+        CHECK(value.Haptics().StartDynamicHaptic(full).IsOk());
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors.leftLarge == 0.5f && motors.leftSmall == 0.5f && motors.rightLarge == 0.5f &&
+          motors.rightSmall == 0.5f);
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ApplyHapticSettings(1.0f, false);
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors == input::MotorValues{});
+
+    // 연결이 끊기면 0이고 효과는 남는다.
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        input::DynamicHaptic rumble;
+        CHECK(value.Haptics().StartDynamicHaptic(rumble).IsOk());
+        value.ClearPlayer();
+        CHECK(value.MotorOutput() == input::MotorValues{});
+        CHECK(value.Haptics().ActiveDynamicCount() == 2);
+    }));
+}
+
 // 20.6절: CameraDirector는 LateUpdate 시작(CameraUpdate)에 view target(Possess 뒤 Pawn — 위치는
 // root, 회전은 controlRotation)으로 갱신한다. UnPossess 뒤에는 PlayerController로 돌아간다. pause
 // 중에는 갱신하지 않고 단일 스텝 프레임은 갱신한다.

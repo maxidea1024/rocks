@@ -1,10 +1,13 @@
 #include "AssetCommandletTestSupport.h"
 
+#include <AssetCommandlets/AssetAliasCommandlet.h>
 #include <AssetCommandlets/AssetCookCommandlet.h>
 #include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCommandlets/AssetIndexCommandlet.h>
 #include <AssetCommandlets/ClassDefaultsCommandlet.h>
 #include <AssetCooker/CookArtifacts.h>
 #include <AssetCooker/CookConfig.h>
+#include <AssetCooker/CookPublish.h>
 #include <AssetCooker/CookRootLock.h>
 #include <Core/FileRead.h>
 #include <HostConfig/HostSettings.h>
@@ -862,6 +865,252 @@ TEST(AssetCommands_AllocationFailures) {
               [&]() noexcept { return cook.run.Call(&RunClassDefaultsDumpCommand, {}); }, 0,
               " present ") > 0);
     cook.run.context.allocator = &env.allocator;
+}
+
+namespace {
+
+using CommandFunction = Result<int32> (*)(void*, Span<const StringView>, CommandletOutput&);
+
+// 출력 쓰기 전수(14.1.119 후속 2번) 한 시나리오다: prepare(실패 없음 — 같은 출발 상태를 만든다)
+// 뒤 쓰기 수를 0으로 두고 call(종료 코드, 함수 오류면 -1)을 부른다. 기준(실패 없음)은 expected
+// 종료 코드이고 쓰기가 하나 이상이다. 그 쓰기 수 N에 대해 n = 1..N번째 쓰기가 실패하면 call은
+// 함수 오류 Busy(넣은 오류 그대로)이고 실패한 쓰기 뒤로는 쓰지 않는다.
+template <class Prepare, class Call>
+bool SweepOutput(Run& run, Prepare&& prepare, Call&& call, int32 expected) noexcept {
+    prepare();
+    run.captured.writes = 0;
+    const int32 baseline = call();
+    const uint64 total = run.captured.writes;
+    bool ok = baseline == expected && total > 0;
+    for (uint64 attempt = 1; attempt <= total; ++attempt) {
+        prepare();
+        run.captured.writes = 0;
+        run.captured.failAtWrite = attempt;
+        const int32 code = call();
+        run.captured.failAtWrite = 0;
+        ok = ok && code == -1 && run.lastError == ErrorCode::Busy && run.captured.writes == attempt;
+    }
+
+    return ok;
+}
+
+// 출력 실패 전수 장면이다: 쿠킹 장면(Rock·Rock_extra 임포트·쿠킹 규칙)과 원본 하나(Plain — 출력
+// 없음), 프로젝트 옵션을 붙여 명령을 부르는 도구. 문맥이 AssetCommandContext인 명령과 Allocator인
+// 명령(색인 검증·고아 목록·색인 재구성·별칭)을 가른다(CommandletHost 등록과 같다).
+struct OutputScene {
+    OutputScene(Allocator& allocator, const char* tag) noexcept : cook(allocator, tag) {
+        ready = cook.ready && cook.scene.WriteFile("Plain.trock", "value=3") &&
+                plain.TryAppendFormat("{}/Plain.trock", cook.scene.root.Root());
+    }
+
+    int32 Asset(CommandFunction command, std::initializer_list<StringView> extra) noexcept {
+        return Invoke(command, &cook.run.context, extra);
+    }
+
+    int32 Plain(CommandFunction command, std::initializer_list<StringView> extra) noexcept {
+        return Invoke(command, cook.run.context.allocator, extra);
+    }
+
+    int32 Invoke(CommandFunction command, void* context,
+                 std::initializer_list<StringView> extra) noexcept {
+        StringView args[8] = {cook.project.View()};
+        usize count = 1;
+        for (StringView one : extra) {
+            args[count++] = one;
+        }
+
+        Run& run = cook.run;
+        run.captured.out.Clear();
+        run.captured.error.Clear();
+        CommandletOutput output = run.captured.Output();
+        auto ran = command(context, Span<const StringView>(args, count), output);
+        run.lastError = ran ? ErrorCode::None : ran.Error();
+        return ran ? ran.Value() : -1;
+    }
+
+    // 준비 단계로 부른다(종료 코드는 보지 않는다).
+    void Quietly(CommandFunction command, std::initializer_list<StringView> extra) noexcept {
+        (void)Asset(command, extra);
+    }
+
+    CookScene cook;
+    char plainText[512] = {};
+    FixedStringBuilder plain{Span<char>(plainText)};
+    bool ready = false;
+};
+
+} // namespace
+
+// 출력 실패 전수(14.1.119 후속 2번): 에셋 명령마다 성공·실행 실패 진단 줄·사용법 오류 출력의 n번째
+// 쓰기를 실패시키면 명령 함수는 그 오류(Busy)로 끝나고 더 쓰지 않는다(종료 코드나 다른 오류로
+// 바꾸지 않는다 — 호스트가 프로세스 오류로 바꾼다). 상태를 바꾸는 명령은 시도마다 같은 출발 상태를
+// 만든다.
+TEST(AssetCommands_OutputFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    OutputScene scene(env.allocator, "command-output");
+    REQUIRE(scene.ready);
+    Run& run = scene.cook.run;
+    REQUIRE(scene.cook.Cook() == 0);
+    const auto none = []() noexcept {};
+    const auto sweep = [&](auto&& prepare, auto&& call, int32 expected) noexcept {
+        return SweepOutput(run, prepare, call, expected);
+    };
+
+    // 색인·조회(잠금 없음).
+    CHECK(sweep(none, [&]() noexcept { return scene.Asset(&RunAssetListCommand, {}); }, 0));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetListCommand, {"--type=Nope"}); }, 1));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetInfoCommand, {"/Game/Rock"}); }, 0));
+    CHECK(sweep(
+        none,
+        [&]() noexcept { return scene.Asset(&RunAssetInfoCommand, {"/Game/Rock", "--json"}); }, 0));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetInfoCommand, {"/Game/Nope"}); }, 1));
+    CHECK(sweep(none, [&]() noexcept { return scene.Plain(&RunAssetIndexVerifyCommand, {}); }, 0));
+    CHECK(sweep(none, [&]() noexcept { return scene.Plain(&RunAssetIndexRebuildCommand, {}); }, 0));
+
+    // 편집(쓰기 잠금): 시도마다 같은 출발 상태.
+    const auto removeMade = [&]() noexcept {
+        scene.Quietly(&RunAssetDeleteCommand, {"/Game/Made", "--force"});
+    };
+    CHECK(sweep(
+        removeMade,
+        [&]() noexcept {
+            return scene.Asset(&RunAssetNewCommand, {"TestAsset", "/Game/Made", "value=7"});
+        },
+        0));
+    scene.Quietly(&RunAssetNewCommand, {"TestAsset", "/Game/Made", "value=7"});
+    // 성공한 asset-set은 쓰지 않는다 — 실패 진단 줄을 본다.
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetSetCommand, {"/Game/Made", "nope=1"}); },
+        1));
+    const auto removeCopy = [&]() noexcept {
+        scene.Quietly(&RunAssetDeleteCommand, {"/Game/Copy", "--force"});
+    };
+    CHECK(sweep(
+        removeCopy,
+        [&]() noexcept {
+            return scene.Asset(&RunAssetDuplicateCommand, {"/Game/Made", "/Game/Copy"});
+        },
+        0));
+    const auto copyAgain = [&]() noexcept {
+        scene.Quietly(&RunAssetDeleteCommand, {"/Game/Moved", "--force"});
+        removeCopy();
+        scene.Quietly(&RunAssetDuplicateCommand, {"/Game/Made", "/Game/Copy"});
+    };
+    CHECK(sweep(
+        copyAgain,
+        [&]() noexcept { return scene.Asset(&RunAssetMoveCommand, {"/Game/Copy", "/Game/Moved"}); },
+        0));
+    CHECK(sweep(none, [&]() noexcept { return scene.Plain(&RunAssetAliasListCommand, {}); }, 0));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Plain(&RunAssetAliasRemoveCommand, {"/Game/Nope"}); },
+        1));
+    const auto aliasAgain = [&]() noexcept {
+        copyAgain();
+        scene.Quietly(&RunAssetMoveCommand, {"/Game/Copy", "/Game/Moved"});
+    };
+    CHECK(sweep(
+        aliasAgain,
+        [&]() noexcept { return scene.Plain(&RunAssetAliasRemoveCommand, {"/Game/Copy"}); }, 0));
+    CHECK(sweep(none, [&]() noexcept { return scene.Plain(&RunAssetAliasPruneCommand, {}); }, 0));
+    const auto movedAgain = [&]() noexcept {
+        scene.Quietly(&RunAssetDuplicateCommand, {"/Game/Made", "/Game/Moved"});
+    };
+    CHECK(sweep(
+        movedAgain, [&]() noexcept { return scene.Asset(&RunAssetDeleteCommand, {"/Game/Moved"}); },
+        0));
+    const auto duplicateFile = [&]() noexcept {
+        (void)scene.cook.scene.RemoveFile("Content/Dup.rasset");
+        (void)scene.cook.scene.CopyFile("Content/Made.rasset", "Content/Dup.rasset");
+    };
+    CHECK(sweep(
+        duplicateFile,
+        [&]() noexcept { return scene.Asset(&RunAssetFixDuplicateIdCommand, {"/Game/Dup"}); }, 0));
+    CHECK(sweep(
+        none,
+        [&]() noexcept { return scene.Asset(&RunAssetFixDuplicateIdCommand, {"/Game/Made"}); }, 1));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetOrphansDeleteCommand, {"/Game/Made"}); },
+        1));
+    // 고아 출력: Orph(Hard 참조 → Orph_extra)를 임포트한 뒤 owner 패키지 파일을 지운다.
+    const auto makeOrphan = [&]() noexcept {
+        scene.Quietly(&RunAssetDeleteCommand, {"/Game/Orph_extra", "--force"});
+        scene.Quietly(&RunAssetImportCommand, {"/Game/Orph", scene.cook.source.View()});
+        (void)scene.cook.scene.RemoveFile("Content/Orph.rasset");
+    };
+    makeOrphan();
+    CHECK(sweep(none, [&]() noexcept { return scene.Plain(&RunAssetOrphansListCommand, {}); }, 0));
+    CHECK(sweep(
+        makeOrphan,
+        [&]() noexcept { return scene.Asset(&RunAssetOrphansDeleteCommand, {"/Game/Orph_extra"}); },
+        0));
+
+    // 임포트·재임포트.
+    const auto removeNew = [&]() noexcept {
+        scene.Quietly(&RunAssetDeleteCommand, {"/Game/New", "--force"});
+    };
+    CHECK(sweep(
+        removeNew,
+        [&]() noexcept {
+            return scene.Asset(&RunAssetImportCommand, {"/Game/New", scene.plain.View()});
+        },
+        0));
+    CHECK(sweep(
+        none, [&]() noexcept { return scene.Asset(&RunAssetReimportCommand, {"/Game/Rock"}); }, 0));
+
+    // 쿠킹(요약·JSON·경고·설정 거부)·로드·너겟·클래스 기본값.
+    CHECK(sweep(none, [&]() noexcept { return scene.cook.Cook(); }, 0));
+    CHECK(sweep(none, [&]() noexcept { return scene.cook.Cook({"--json"}); }, 0));
+    REQUIRE(scene.cook.Settings("{\"alwaysCook\": [\"/Game/\", \"/Game/Missing\"]}"));
+    CHECK(sweep(none, [&]() noexcept { return scene.cook.Cook(); }, 0));
+    REQUIRE(scene.cook.Settings("{\"nope\": 1}"));
+    CHECK(sweep(none, [&]() noexcept { return scene.cook.Cook(); }, 1));
+    REQUIRE(scene.cook.Settings(AlwaysAll));
+    CHECK(sweep(
+        none,
+        [&]() noexcept {
+            return scene.Asset(&RunAssetLoadCookedCommand, {"--profile=Windows", "/Game/Rock"});
+        },
+        0));
+    CHECK(sweep(
+        none,
+        [&]() noexcept {
+            return scene.Asset(&RunAssetLoadCookedCommand, {"--profile=Windows", "/Game/Nope"});
+        },
+        1));
+    CHECK(sweep(
+        none,
+        [&]() noexcept {
+            return scene.Asset(&RunNuggetGcCommand,
+                               {"--max-bytes=18446744073709551615", "--unused-days=0"});
+        },
+        0));
+    CHECK(sweep(none, [&]() noexcept { return run.Call(&RunClassDefaultsDumpCommand, {}); }, 0));
+    const StringView bogus[] = {"--bogus"};
+    CHECK(sweep(none, [&]() noexcept { return run.Call(&RunClassDefaultsDumpCommand, bogus); }, 2));
+
+    // 사용법 오류(명령마다 모르는 옵션).
+    const CommandFunction assetCommands[] = {
+        &RunAssetListCommand,          &RunAssetInfoCommand,
+        &RunAssetNewCommand,           &RunAssetSetCommand,
+        &RunAssetMoveCommand,          &RunAssetDuplicateCommand,
+        &RunAssetDeleteCommand,        &RunAssetFixDuplicateIdCommand,
+        &RunAssetOrphansDeleteCommand, &RunAssetImportCommand,
+        &RunAssetReimportCommand,      &RunAssetCookCommand,
+        &RunAssetLoadCookedCommand,    &RunNuggetGcCommand};
+    for (CommandFunction command : assetCommands) {
+        CHECK(sweep(none, [&]() noexcept { return scene.Asset(command, {"--bogus"}); }, 2));
+    }
+
+    const CommandFunction plainCommands[] = {
+        &RunAssetIndexVerifyCommand, &RunAssetOrphansListCommand, &RunAssetIndexRebuildCommand,
+        &RunAssetAliasListCommand,   &RunAssetAliasRemoveCommand, &RunAssetAliasPruneCommand};
+    for (CommandFunction command : plainCommands) {
+        CHECK(sweep(none, [&]() noexcept { return scene.Plain(command, {"--bogus"}); }, 2));
+    }
 }
 
 } // namespace asset_cook_commandlet_tests_file

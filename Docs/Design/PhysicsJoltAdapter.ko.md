@@ -88,7 +88,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
   - **구멍(한계).** UE는 칸 단위 구멍(재질 색인 255 — `HeightField.cpp:83`)이고 Jolt는 표본 단위 구멍(`cNoCollisionValue`, 그 표본을 쓰는 삼각형 전부 제거 — `HeightFieldShape.h:23`·`:34`)이다. 칸 하나만 비우는 UE 구멍은 Jolt 표본 구멍으로 정확히 옮길 수 없다(표본 하나를 비우면 주변 최대 6개 삼각형이 빠진다). 처리 방식(구멍 칸 주변을 Jolt mesh 조각으로 대신하는 방안 등)은 지형 충돌 단계(CM18, CR35)에서 정하고, 그 전까지 구멍 있는 heightfield 쿠킹은 진단을 내고 거부한다.
   - 정사각 제약: UE landscape 충돌 컴포넌트는 정사각(`ComponentSizeQuads + 1`)이라 맞는다. 비정사각 입력은 쿠킹이 거부한다.
 - **convex·compound.** convex 점은 A와 cm → m로 바꾸고, compound 자식의 상대 변환은 이동을 A·(cm → m), 회전을 (A·v, w)로 바꾼다.
-- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
+- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/04-CommonSettings.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
 
   | Rocks 형상 | 값의 의미(UE와 같음) | Jolt 형상 |
   |---|---|---|

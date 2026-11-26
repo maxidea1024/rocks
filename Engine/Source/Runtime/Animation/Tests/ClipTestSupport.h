@@ -5,7 +5,7 @@
 #include <Animation/AnimationClip.generated.h>
 #include <Animation/ClipSource.h>
 
-// 애니메이션 클립 시험 공용 도우미다(Docs/Design/MeshAnimationAssets.ko.md 12절 "클립"): 원본
+// 애니메이션 클립 시험 공용 도우미다(Docs/Design/MeshAnimationAssets 12절 "클립"): 원본
 // 트랙 만들기, 클립 에셋 만들기·채우기, 패키지 왕복, 비교.
 namespace rocks::clip_test {
 

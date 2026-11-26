@@ -122,6 +122,7 @@ bool VulkanDevice::PrepareDraw(bool indexed) noexcept {
     if (indexed) {
         const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
         if (index == nullptr || boundIndex_.offset >= index->size ||
+            !IsValidIndexFormat(boundIndex_.format) ||
             boundIndex_.offset % IndexFormatSize(boundIndex_.format) != 0) {
             return false;
         }

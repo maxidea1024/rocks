@@ -14,7 +14,7 @@ using namespace rocks;
 
 namespace path_reentry {
 
-struct Box;
+struct Crate;
 
 // 참조 없는 struct다(Array<Label> 원소·struct 필드). icon은 Soft 멤버다.
 struct Label {
@@ -22,7 +22,7 @@ struct Label {
     }
 
     String name;
-    SoftObjectRef<Box> icon;
+    SoftObjectRef<Crate> icon;
 };
 
 // 참조 struct다(StructRefArray 원소).
@@ -30,12 +30,12 @@ struct Entry {
     explicit Entry(Allocator& allocator) noexcept : name(allocator) {
     }
 
-    ObjectRef<Box> target;
+    ObjectRef<Crate> target;
     String name;
 };
 
-struct Box final : Object {
-    explicit Box(Allocator& allocator) noexcept
+struct Crate final : Object {
+    explicit Crate(Allocator& allocator) noexcept
         : title(allocator), caption(allocator), icon(allocator), label(allocator), names(allocator),
           labels(allocator), entries(allocator), softs(allocator), refs(allocator) {
     }
@@ -44,13 +44,13 @@ struct Box final : Object {
 
     String title;
     String caption;
-    SoftObjectRef<Box> icon;
+    SoftObjectRef<Crate> icon;
     Label label;
     Array<String> names;
     Array<Label> labels;
     StructRefArray<Entry> entries;
-    Array<SoftObjectRef<Box>> softs;
-    ObjectRefArray<Box> refs;
+    Array<SoftObjectRef<Crate>> softs;
+    ObjectRefArray<Crate> refs;
 };
 
 constexpr TypeId BoxId{0x505242, 1};
@@ -227,7 +227,7 @@ struct GeneratedType<path_reentry::Entry> {
 };
 
 template <>
-struct GeneratedType<path_reentry::Box> {
+struct GeneratedType<path_reentry::Crate> {
     static constexpr TypeId Id() noexcept {
         return path_reentry::BoxId;
     }
@@ -245,23 +245,23 @@ struct GeneratedType<path_reentry::Box> {
             Scalar(IconId, "icon", ValueKind::SoftObjectReference, BoxId),
             ArrayOf(SoftsId, "softs", ValueKind::SoftObjectReference, BoxId),
             ArrayOf(RefsId, "refs", ValueKind::ObjectReference, BoxId)};
-        static const TypeSchema schema{Id(), 1, fields, {"Box", 3}};
+        static const TypeSchema schema{Id(), 1, fields, {"Crate", 5}};
         return schema;
     }
 
     static RuntimeTypeOps Ops() noexcept {
         using namespace path_reentry;
         static const RuntimeFieldOps fields[] = {
-            ValueField<&Box::title>(TitleId),
-            PathField<&Box::label, ValueKind::Struct>(LabelFieldId, NativeTypeKey<Label>()),
-            PathField<&Box::names, ValueKind::Utf8String>(NamesId),
-            PathField<&Box::labels, ValueKind::Struct>(LabelsId, NativeTypeKey<Label>()),
-            PathField<&Box::entries, ValueKind::Struct>(EntriesId, NativeTypeKey<Entry>()),
-            ValueField<&Box::caption>(CaptionId),
-            ValueField<&Box::icon>(IconId),
-            PathField<&Box::softs, ValueKind::SoftObjectReference>(SoftsId),
-            PathField<&Box::refs, ValueKind::ObjectReference>(RefsId)};
-        auto ops = MakeRuntimeTypeOps<Box>();
+            ValueField<&Crate::title>(TitleId),
+            PathField<&Crate::label, ValueKind::Struct>(LabelFieldId, NativeTypeKey<Label>()),
+            PathField<&Crate::names, ValueKind::Utf8String>(NamesId),
+            PathField<&Crate::labels, ValueKind::Struct>(LabelsId, NativeTypeKey<Label>()),
+            PathField<&Crate::entries, ValueKind::Struct>(EntriesId, NativeTypeKey<Entry>()),
+            ValueField<&Crate::caption>(CaptionId),
+            ValueField<&Crate::icon>(IconId),
+            PathField<&Crate::softs, ValueKind::SoftObjectReference>(SoftsId),
+            PathField<&Crate::refs, ValueKind::ObjectReference>(RefsId)};
+        auto ops = MakeRuntimeTypeOps<Crate>();
         ops.fields = fields;
         return ops;
     }
@@ -269,7 +269,7 @@ struct GeneratedType<path_reentry::Box> {
 
 } // namespace rocks
 
-void path_reentry::Box::Trace(TraceVisitor& visitor) const noexcept {
+void path_reentry::Crate::Trace(TraceVisitor& visitor) const noexcept {
     detail::TraceArrayField(entries, visitor);
     detail::TraceArrayField(refs, visitor);
 }
@@ -408,7 +408,7 @@ struct World {
             types.RegisterStruct(GeneratedType<Label>::Schema(), GeneratedType<Label>::Ops());
         auto entry =
             types.RegisterStruct(GeneratedType<Entry>::Schema(), GeneratedType<Entry>::Ops());
-        auto box = types.Register(GeneratedType<Box>::Schema(), GeneratedType<Box>::Ops());
+        auto box = types.Register(GeneratedType<Crate>::Schema(), GeneratedType<Crate>::Ops());
         if (!label || !entry || !box) {
             return false;
         }
@@ -425,7 +425,7 @@ struct World {
     TypeRegistrationToken boxToken;
 };
 
-Box* Get(Borrow<Box>& borrow) noexcept {
+Crate* Get(Borrow<Crate>& borrow) noexcept {
     auto pointer = borrow.Get();
     if (!pointer) {
         platform::Fatal("fixture borrow failed");
@@ -434,8 +434,8 @@ Box* Get(Borrow<Box>& borrow) noexcept {
     return pointer.Value();
 }
 
-Box* Pointer(ObjectRegistry& objects, ObjectHandle owner) noexcept {
-    auto borrowed = objects.Resolve<Box>(objects.OwnerAccess(), owner);
+Crate* Pointer(ObjectRegistry& objects, ObjectHandle owner) noexcept {
+    auto borrowed = objects.Resolve<Crate>(objects.OwnerAccess(), owner);
     if (!borrowed) {
         platform::Fatal("fixture borrow failed");
     }
@@ -447,7 +447,7 @@ Box* Pointer(ObjectRegistry& objects, ObjectHandle owner) noexcept {
 struct Probe {
     World* world = nullptr;
     ObjectHandle owner;
-    Box* box = nullptr;
+    Crate* box = nullptr;
     Allocator* allocator = nullptr;
     ErrorCode removed = ErrorCode::DependencyFailed;
     ErrorCode inserted = ErrorCode::DependencyFailed;
@@ -469,7 +469,7 @@ struct Probe {
     uint32 index = 0;
 };
 
-Probe MakeProbe(World& world, ObjectHandle owner, Box* box, Allocator* allocator,
+Probe MakeProbe(World& world, ObjectHandle owner, Crate* box, Allocator* allocator,
                 uint32 index = 0) noexcept {
     Probe probe;
     probe.world = &world;
@@ -541,8 +541,8 @@ void WriteDuringRead(void* raw) noexcept {
     FieldValue replacement = TextValue(*probe.allocator, "replaced while being read");
     const PathStep name[] = {{LabelFieldId}, {NameId}};
     probe.written = ErrorOf(PathWrite(objects, access, probe.owner, PathOf(name), replacement));
-    probe.generated = ErrorOf(
-        detail::WriteGeneratedField<Box>(objects, access, probe.owner, &Box::title, replacement));
+    probe.generated = ErrorOf(detail::WriteGeneratedField<Crate>(objects, access, probe.owner,
+                                                                 &Crate::title, replacement));
 }
 
 // 최상위 생성 쓰기의 새 값 할당 중 같은 필드(title·icon)를 생성 write로 다시 쓴다.
@@ -551,11 +551,11 @@ void WriteTopDuringWrite(void* raw) noexcept {
     ObjectRegistry& objects = probe.world->objects;
     const auto access = objects.OwnerAccess();
     FieldValue text = TextValue(*probe.allocator, "reentrant title that should be rejected");
-    probe.generated =
-        ErrorOf(detail::WriteGeneratedField<Box>(objects, access, probe.owner, &Box::title, text));
+    probe.generated = ErrorOf(
+        detail::WriteGeneratedField<Crate>(objects, access, probe.owner, &Crate::title, text));
     FieldValue soft = SoftValue(*probe.allocator, Guid{7, 7}, "Reentrant.Icon");
-    probe.generatedSoft =
-        ErrorOf(detail::WriteGeneratedField<Box>(objects, access, probe.owner, &Box::icon, soft));
+    probe.generatedSoft = ErrorOf(
+        detail::WriteGeneratedField<Crate>(objects, access, probe.owner, &Crate::icon, soft));
 }
 
 void UnregisterDuringWrite(void* raw) noexcept {
@@ -575,12 +575,12 @@ TEST(PropertyPathReentry_AllocationCallbacksCannotChangeTheTarget) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
-        Box* pointer = nullptr;
+        Crate* pointer = nullptr;
         {
-            auto borrowed = objects.Resolve<Box>(access, owner);
+            auto borrowed = objects.Resolve<Crate>(access, owner);
             REQUIRE(borrowed);
             pointer = Get(borrowed.Value());
         }
@@ -674,12 +674,12 @@ TEST(PropertyPathReentry_OwnerDestroyedDuringArrayGrowthLeavesArrayUnchanged) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
-        Box* pointer = nullptr;
+        Crate* pointer = nullptr;
         {
-            auto borrowed = objects.Resolve<Box>(access, owner);
+            auto borrowed = objects.Resolve<Crate>(access, owner);
             REQUIRE(borrowed);
             pointer = Get(borrowed.Value());
         }
@@ -714,12 +714,12 @@ TEST(PropertyPathReentry_OldBufferReleaseSeesThePublishedArray) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
-        Box* pointer = nullptr;
+        Crate* pointer = nullptr;
         {
-            auto borrowed = objects.Resolve<Box>(access, owner);
+            auto borrowed = objects.Resolve<Crate>(access, owner);
             REQUIRE(borrowed);
             pointer = Get(borrowed.Value());
         }
@@ -785,7 +785,7 @@ TEST(PropertyPathReentry_WritesDuringReadAreBusy) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
         const PathStep labelName[] = {{LabelFieldId}, {NameId}};
@@ -846,7 +846,7 @@ TEST(PropertyPathReentry_LeasesHeldDuringOperationKeepUnregisterBusy) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
         Probe probe;
@@ -872,10 +872,10 @@ TEST(PropertyPathReentry_TopLevelGeneratedWritesPinWhileAllocating) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
-        Box* pointer = Pointer(objects, owner);
+        Crate* pointer = Pointer(objects, owner);
         auto lease = world.types.Acquire(BoxId);
         REQUIRE(lease);
         const RuntimeFieldOps& title = lease.Value().Ops().fields[0];
@@ -931,9 +931,9 @@ TEST(PropertyPathReentry_OwnerDestroyedBeforePublishIsNotPublished) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto reading = objects.NewObject<Box>(access, BoxId);
-        auto removing = objects.NewObject<Box>(access, BoxId);
-        auto inserting = objects.NewObject<Box>(access, BoxId);
+        auto reading = objects.NewObject<Crate>(access, BoxId);
+        auto removing = objects.NewObject<Crate>(access, BoxId);
+        auto inserting = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(reading && removing && inserting);
 
         // 읽기: out 할당 콜백의 소유자 파괴 → 게시 직전 재확인이 Destroyed, out은 그대로다.
@@ -953,7 +953,7 @@ TEST(PropertyPathReentry_OwnerDestroyedBeforePublishIsNotPublished) {
 
         // 다른 allocator로의 removed 복사(CaptureText) 중 소유자 파괴 → 원소를 빼지 않는다.
         const ObjectHandle removeOwner = removing.Value().Handle();
-        Box* removePointer = Pointer(objects, removeOwner);
+        Crate* removePointer = Pointer(objects, removeOwner);
         const PathStep name0[] = {At(NamesId, 0)};
         const PathStep name1[] = {At(NamesId, 1)};
         REQUIRE(PathInsertElement(objects, access, removeOwner, PathOf(name0), &name));
@@ -972,7 +972,7 @@ TEST(PropertyPathReentry_OwnerDestroyedBeforePublishIsNotPublished) {
 
         // String 원소의 용량 안 삽입: 원소 할당 중 소유자 파괴 → 삽입하지 않는다.
         const ObjectHandle insertOwner = inserting.Value().Handle();
-        Box* insertPointer = Pointer(objects, insertOwner);
+        Crate* insertPointer = Pointer(objects, insertOwner);
         FieldValue first = TextValue(allocator, "first");
         REQUIRE(PathInsertElement(objects, access, insertOwner, PathOf(name0), &first));
         REQUIRE(insertPointer->names.Size() < insertPointer->names.Capacity());
@@ -1000,10 +1000,10 @@ TEST(PropertyPathReentry_WriteReleasesOldBufferAfterPublishing) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
-        Box* pointer = Pointer(objects, owner);
+        Crate* pointer = Pointer(objects, owner);
         const PathStep name0[] = {At(NamesId, 0)};
         const PathStep labelName[] = {{LabelFieldId}, {NameId}};
         FieldValue old = TextValue(allocator, LongText);
@@ -1038,7 +1038,7 @@ TEST(PropertyPathReentry_TopLevelPreviousValidatesBeforeReading) {
         REQUIRE(world.Register());
         ObjectRegistry& objects = world.objects;
         const auto access = objects.OwnerAccess();
-        auto box = objects.NewObject<Box>(access, BoxId);
+        auto box = objects.NewObject<Crate>(access, BoxId);
         REQUIRE(box);
         const ObjectHandle owner = box.Value().Handle();
         // ReadOnly 최상위 String에 previous + 할당 실패: 쓰기 검증(ReadOnly)이 previous
@@ -1091,7 +1091,7 @@ bool AppendText(String& text, StringView value) noexcept {
     return text.TryAppend(value) && text.TryAppend("|");
 }
 
-void Capture(const Box& box, Snapshot& snapshot) noexcept {
+void Capture(const Crate& box, Snapshot& snapshot) noexcept {
     String& text = snapshot.text;
     bool ok = AppendText(text, box.title.View()) && AppendText(text, box.caption.View()) &&
               AppendText(text, box.icon.objectPath.View()) &&
@@ -1342,12 +1342,12 @@ TEST(PropertyPathReentry_EveryAllocationFailureLeavesContentsUnchanged) {
                 REQUIRE(world.Register());
                 ObjectRegistry& objects = world.objects;
                 const auto access = objects.OwnerAccess();
-                auto box = objects.NewObject<Box>(access, BoxId);
-                auto target = objects.NewObject<Box>(access, BoxId);
+                auto box = objects.NewObject<Crate>(access, BoxId);
+                auto target = objects.NewObject<Crate>(access, BoxId);
                 REQUIRE(box && target);
                 const ObjectHandle owner = box.Value().Handle();
                 REQUIRE(Prepare(world, owner, target.Value().Handle(), allocator));
-                Box* pointer = Pointer(objects, owner);
+                Crate* pointer = Pointer(objects, owner);
                 if (operation == SweepOperation::InsertGrowing) {
                     FieldValue filler = TextValue(allocator, "x");
                     const PathStep at[] = {At(NamesId, 3)};

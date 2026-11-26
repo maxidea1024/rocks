@@ -23,7 +23,7 @@ ROCKS_SHADER_TYPE_NAME(FullscreenTriangleVertexType, "FullscreenTriangleVertex")
 // CopyTextureSourceName이고 FullscreenTriangleVertex와 짝이다.
 ROCKS_SHADER_TYPE_NAME(CopyTexturePixelType, "CopyTexturePixel");
 
-// CopyTexturePixel의 텍스처 이름이다(PipelineBindingNames::texture).
+// CopyTexturePixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char CopyTextureSourceName[] = "Source";
 
 // fallback 메시 VS다(/Engine/Private/Utility/BuiltinMesh.rsf, 정점 입력 축 — 정점 입력 타입은
@@ -34,7 +34,7 @@ ROCKS_SHADER_TYPE_NAME(BuiltinMeshVertexType, "BuiltinMeshVertex");
 // fallback 메시 PS다(Albedo 표본 × 정점 색 × 그리기 색). 텍스처 이름은 BuiltinMeshAlbedoName이다.
 ROCKS_SHADER_TYPE_NAME(BuiltinMeshPixelType, "BuiltinMeshPixel");
 
-// BuiltinMeshPixel의 텍스처 이름이다(PipelineBindingNames::texture).
+// BuiltinMeshPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char BuiltinMeshAlbedoName[] = "Albedo";
 
 // 최소 tone map PS다(/Engine/Private/PostProcess/TonemapPass.rsf, Docs/Design/RenderBase 18.5절
@@ -43,7 +43,7 @@ inline constexpr char BuiltinMeshAlbedoName[] = "Albedo";
 // RendererShaders 모듈로 옮긴다.
 ROCKS_SHADER_TYPE_NAME(TonemapPixelType, "TonemapPixel");
 
-// TonemapPixel의 텍스처 이름이다(PipelineBindingNames::texture).
+// TonemapPixel의 텍스처 이름이다(slot은 FindTextureSlot — Docs/Design/RenderBase 9.13절).
 inline constexpr char TonemapSceneColorName[] = "SceneColor";
 
 // TonemapPixel의 그리기별 상수다(48 byte, TonemapPass.rsf TonemapConstants). 기본값은 UE 5.8
