@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Base/Types.h>
 #include <Platform/Atomics.h>
 
@@ -12,7 +13,10 @@ namespace rocks::platform::detail {
 //
 // 상태 word: bit 0 잠김, bit 1 큐 잠김(대기열을 고치는 중), 나머지 bit는 대기열 머리 노드 주소다
 // (노드는 4 byte 이상 정렬). 대기자가 없을 때만 CpuPause로 잠깐 돈다. 공정하지 않다.
-class QueueMutex {
+//
+// 느린 경로는 PlatformBase가 export한다. Lock·Unlock이 inline이라 시험(ParkingLotTests)이 Modular
+// 링크에서 LockSlow·UnlockSlow를 직접 부르기 때문이다.
+class ROCKS_PLATFORMBASE_API QueueMutex {
 public:
     constexpr QueueMutex() noexcept = default;
     QueueMutex(const QueueMutex&) = delete;

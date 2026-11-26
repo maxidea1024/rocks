@@ -14,6 +14,7 @@
 #include <Gameplay/PlayerController.generated.h>
 #include <Gameplay/PlayerController.h>
 #include <Input/InputEvent.h>
+#include <InputActions/InputUserSettings.h>
 #include <TestSupport/Test.h>
 #include <World/Actor.generated.h>
 #include <World/Camera/CameraComponent.generated.h>
@@ -593,6 +594,169 @@ TEST(ControllerPawn_InputActionsDispatchFromPlayerTick) {
             pc, [&gamepad](PlayerController& value) noexcept { gamepad = value.InputGamepad(); }));
         CHECK(gamepad == (id > 0 ? static_cast<uint32>(id) : 0));
     }
+}
+
+// InputActions 5.2절 Gameplay 연결: LocalPlayer의 키 설정이 PlayerController 평가기에 붙고, 그
+// 설정의 리바인딩이 다음 틱 전달에 반영된다. 연결을 끊으면(ClearPlayer —
+// RemoveLocalPlayer·EndPlay가 부른다) 평가기에서 떨어진다.
+TEST(ControllerPawn_InputUserSettingsFromLocalPlayer) {
+    SystemAllocator allocator;
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    input::InputState keyboard;
+    const ObjectHandle player = fixture.Player(0);
+    REQUIRE(fixture.client->WithInstance([&](GameInstance& instance) noexcept {
+        return instance.SetLocalPlayerInput(player, &keyboard);
+    }));
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    REQUIRE(!controller.IsNull());
+    input::InputUserSettings* settings = nullptr;
+    REQUIRE(fixture.client->WithInstance([&](GameInstance& instance) noexcept {
+        return instance.WithLocalPlayer(player, [&settings](LocalPlayer& local) noexcept {
+            settings = &local.InputSettings();
+        });
+    }));
+    REQUIRE(settings != nullptr);
+
+    constexpr Guid JumpId{0x4942, 1};
+    input::InputContextBundle bundle(allocator);
+    bundle.id = Guid{0x4942, 100};
+    input::InputActionData action(allocator);
+    action.id = JumpId;
+    input::PlayerMappingSettings mapping(allocator);
+    REQUIRE(mapping.name.TryAssign("Jump"));
+    action.settings.mappingSettings.Emplace(Move(mapping));
+    REQUIRE(bundle.actions.TryPushBack(Move(action)));
+    input::InputBinding binding(allocator);
+    binding.action = JumpId;
+    REQUIRE(binding.key.TryAssign("SpaceBar"));
+    REQUIRE(bundle.data.bindings.TryPushBack(Move(binding)));
+    uint32 jumps = 0;
+    auto jump = input::InputActionBindings::Callback::TryCreate(
+        allocator, [&jumps](const input::ActionEventData&) noexcept { ++jumps; });
+    REQUIRE(jump);
+    input::ContextOptions notify;
+    notify.notifyUserSettings = true;
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        CHECK(value.ActionInput().UserSettings() == settings);
+        CHECK(value.ActionInput().AddContext(Move(bundle), 0, notify).IsOk());
+        CHECK(value.ActionBindings()
+                  .BindAction(JumpId, input::ActionEvent::Started, Move(jump.Value()))
+                  .IsOk());
+    }));
+    CHECK(settings->IsContextRegistered(Guid{0x4942, 100}));
+    REQUIRE(fixture.engine->RunFrame());
+
+    // Jump를 E로 바꾼다 → Space는 이벤트가 없고 E가 낸다.
+    REQUIRE(settings->MapPlayerKey("Jump", 0, input::InputKey::FromKey(input::Key::E)));
+    const input::InputEvent space[] = {input::InputEvent::KeyDown(input::Key::Space)};
+    keyboard.BeginFrame(Span<const input::InputEvent>(space, 1));
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(jumps == 0);
+    const input::InputEvent rebound[] = {input::InputEvent::KeyUp(input::Key::Space),
+                                         input::InputEvent::KeyDown(input::Key::E)};
+    keyboard.BeginFrame(Span<const input::InputEvent>(rebound, 2));
+    REQUIRE(fixture.engine->RunFrame());
+    CHECK(jumps == 1);
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ActionBindings().ClearBindings();
+    }));
+    CHECK(fixture.client
+              ->WithInstance([&](GameInstance& instance) noexcept {
+                  return instance.SetLocalPlayerInput(player, nullptr);
+              })
+              .IsOk());
+
+    // 둘째 LocalPlayer는 자기 설정을 가진다. 빼면(ClearPlayer) 평가기에서 떨어진다.
+    auto second = fixture.client->WithInstance(
+        [](GameInstance& instance) noexcept { return instance.CreateLocalPlayer(1); });
+    REQUIRE(second);
+    const ObjectHandle secondController = fixture.PlayerControllerOf(1);
+    REQUIRE(!secondController.IsNull());
+    const input::InputUserSettings* secondSettings = nullptr;
+    REQUIRE(world.With<PlayerController>(secondController,
+                                         [&secondSettings](PlayerController& value) noexcept {
+                                             secondSettings = value.ActionInput().UserSettings();
+                                         }));
+    CHECK(secondSettings != nullptr && secondSettings != settings);
+    REQUIRE(world.With<PlayerController>(secondController, [](PlayerController& value) noexcept {
+        value.ClearPlayer();
+        CHECK(value.ActionInput().UserSettings() == nullptr);
+    }));
+}
+
+// InputActions 6.3절: PlayerController는 입력 액션 전달 뒤 진동을 합성해 MotorOutput으로 낸다(pause
+// 중 playWhilePaused 아닌 동적 진동은 0). 연결을 끊으면 0이다.
+TEST(ControllerPawn_HapticsComposeMotorOutput) {
+    SystemAllocator allocator;
+    Fixture fixture;
+    REQUIRE(fixture.Start());
+    World& world = fixture.Current();
+    const ObjectHandle controller = fixture.PlayerControllerOf(0);
+    REQUIRE(!controller.IsNull());
+    input::HapticEffect effect(allocator);
+    effect.id = Guid{0x4943, 1};
+    input::HapticChannel channel(allocator);
+    channel.affectsLeftLarge = channel.affectsRightLarge = channel.affectsRightSmall = false;
+    REQUIRE(channel.curve.TryAddKey(0.0f, 0.5f));
+    REQUIRE(channel.curve.TryAddKey(1000.0f, 0.5f));
+    REQUIRE(effect.channels.TryPushBack(Move(channel)));
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        CHECK(value.MotorOutput() == input::MotorValues{});
+        input::HapticParams params;
+        params.playWhilePaused = true;
+        CHECK(value.Haptics().PlayHapticEffect(effect, params).IsOk());
+        input::DynamicHaptic rumble;
+        rumble.intensity = 0.25f;
+        rumble.affectsLeftSmall = false;
+        CHECK(value.Haptics().StartDynamicHaptic(rumble).IsOk());
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    input::MotorValues motors;
+    auto read = [&]() noexcept {
+        REQUIRE(
+            world.With<PlayerController>(controller, [&motors](PlayerController& value) noexcept {
+                motors = value.MotorOutput();
+            }));
+    };
+    read();
+    CHECK(motors.leftLarge == 0.25f && motors.leftSmall == 0.5f && motors.rightLarge == 0.25f &&
+          motors.rightSmall == 0.25f);
+
+    // pause: 동적 진동은 빠지고 playWhilePaused 효과만 남는다.
+    world.SetPaused(true);
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors.leftLarge == 0.0f && motors.leftSmall == 0.5f && motors.rightSmall == 0.0f);
+    world.SetPaused(false);
+
+    // 배율(설정 값은 GameInstance가 프레임마다 넣는다 — 여기서는 직접): 0.5배.
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ApplyHapticSettings(0.5f, true);
+        value.Haptics().StopAll();
+        input::DynamicHaptic full;
+        CHECK(value.Haptics().StartDynamicHaptic(full).IsOk());
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors.leftLarge == 0.5f && motors.leftSmall == 0.5f && motors.rightLarge == 0.5f &&
+          motors.rightSmall == 0.5f);
+    REQUIRE(world.With<PlayerController>(controller, [](PlayerController& value) noexcept {
+        value.ApplyHapticSettings(1.0f, false);
+    }));
+    REQUIRE(fixture.engine->RunFrame());
+    read();
+    CHECK(motors == input::MotorValues{});
+
+    // 연결이 끊기면 0이고 효과는 남는다.
+    REQUIRE(world.With<PlayerController>(controller, [&](PlayerController& value) noexcept {
+        input::DynamicHaptic rumble;
+        CHECK(value.Haptics().StartDynamicHaptic(rumble).IsOk());
+        value.ClearPlayer();
+        CHECK(value.MotorOutput() == input::MotorValues{});
+        CHECK(value.Haptics().ActiveDynamicCount() == 2);
+    }));
 }
 
 // 20.6절: CameraDirector는 LateUpdate 시작(CameraUpdate)에 view target(Possess 뒤 Pawn — 위치는

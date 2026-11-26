@@ -17,9 +17,10 @@
 |---|---|---|---|
 | `SparksVm` | `Engine/Source/Runtime` | bytecode와 `.sparkc` 형식, verifier, interpreter, 값 버퍼, 실행·발행 큐·ledger, 핫 리로드, host interface | Core |
 | `SparksCompiler` | `Engine/Source/Runtime` | 원문 관리, 진단, lexer, parser, 검사기, typed IR, bytecode 생성, schema·manifest reader, formatter | Core(LC4부터 SparksVm) |
-| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksCompiler(LC5부터 SparksVm) |
-| `Sparks`(CLI) | `Programs` | `sparks check`·`build`·`test`·`fmt` | 위 모듈, Launch |
-| `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksCompiler, Launch |
+| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner, `@test` 실행기(`TestRunner.h` — LC8d) | Core, SparksCompiler(LC5부터 SparksVm) |
+| `SparksTools` | `Engine/Source/Developer` | 작업 공간 적재, 명령 실행, 언어 서버 핵심(LC8 — [SparksTools](../SparksTools.ko.md) 2절 T1) | Core, SparksCompiler, SparksVm, SparksTestHost |
+| `SparksCli`(CLI) | `Programs` | `sparks check`·`dump`·`build`·`ids`·`fmt`·`test`(설치 이름 `sparks`) | SparksTools, Launch |
+| `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksTools, Launch |
 | `ScriptRuntime`(연동, EI2) | `Engine/Source/Runtime` | host 구현, native call thunk, Sparks 클래스의 타입 등록 | SparksVm, ObjectRuntime, MetaSchema, Task |
 
 - 모듈은 필요해질 때 만든다. LC0은 `SparksCompiler`(원문·진단)와 `SparksTestHost`(conformance runner)만 만들고, `SparksVm`은 bytecode 형식이 생기는 LC4에서 만든다(빈 자리표시 모듈을 두지 않는다).
@@ -42,7 +43,7 @@
 | LC5 VM 핵심 | interpreter(Scalar·Ref·Buf bank), 값 버퍼(COW 참조계수), 숫자 검사와 fault(§8.3), 예산(명령어·호출 깊이·메모리), 부록 B 표준 API, host interface 1차(native call·객체 handle 검증·native 필드) | 동기 함수 corpus의 결과·fault·예산 계수 golden, 종료 시 메모리 ledger 0 | 없음 |
 | LC6 실행 모델 | instance와 수명 hook, 스크립트 단계·발행 큐·`emit`·`Changed`·연쇄 상한(§5.4), async 실행·`await`·`All`/`Race`·취소(§6.1), 유지 자원 해제(§7.1), 파괴·활성 지연 큐(§4.3), 소유 범위와 EndExec·Detach·CloseSession(§9), fault 처리와 격리(§8.3), host interface 2차(이벤트·자원·로드·시계) | TestHost에서 §2 예시 시나리오의 전달 순서 golden, Gate G1·G4 | 없음 |
 | LC7 핫 리로드 | R1 본문 교체, R2 스크립트 필드 migration과 구독 연결 재구성, `ReloadExecutions`, 계획·판정·원자적 적용의 언어 쪽(§12.4), 증분 재컴파일 | Gate G5의 R1·R2 행, 본문 reload 2 s 측정 | 없음 |
-| LC8 도구 | CLI(`sparks check·build·test·fmt·dump`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·빠른 수정) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
+| LC8 도구 | CLI(`sparks check·dump·build·ids·fmt·test`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·정의 이동·빠른 수정·서식), VS Code 확장 — 세부는 [SparksTools](../SparksTools.ko.md) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden — 완료(2026-11-26, VS Code 안 사람 확인 대기) | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
 | LC9 AOT 생성 | typed IR → C++ 생성기, 동등성 규칙(§12.5), VM·AOT 혼합 진입 표 | Gate G6(TestHost에서 VM·AOT 차등) | 없음. 시험은 corpus의 생성 C++을 golden으로 커밋해 시험 실행 파일에 컴파일하고, 다시 생성한 바이트가 golden과 같은지 대조한다. target 빌드 편입은 EI8(SE-B2) |
 
 LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 하나 이상과 리뷰 1회로 끝난다).

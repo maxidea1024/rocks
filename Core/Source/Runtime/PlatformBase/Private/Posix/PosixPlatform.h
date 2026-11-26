@@ -46,6 +46,10 @@ void PosixSetCurrentThreadName(const char* name) noexcept;
 // 현재 스레드의 우선순위를 바꾼다(Apple SCHED_OTHER 우선순위, Android nice). 실패는 무시한다.
 void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept;
 
+// 현재 스레드의 실제 우선순위를 PosixSetCurrentThreadPriority와 같은 눈금의 가장 가까운 단계로
+// 읽는다. 조회 실패는 false다.
+bool PosixGetCurrentThreadPriority(ThreadPriority& priority) noexcept;
+
 // decommit한 페이지를 OS에 돌려주는 madvise 값이다(Apple MADV_FREE, Linux 계열 MADV_DONTNEED).
 int PosixDecommitAdvice() noexcept;
 

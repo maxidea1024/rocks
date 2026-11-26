@@ -5,6 +5,8 @@
 #include <World/Camera/CameraComponent.h>
 #include <Input/InputState.h>
 #include <Input/TouchGestureRecognizer.h>
+#include <Input/MotorValues.h>
+#include <InputActions/Haptics/HapticPlayer.h>
 #include <InputActions/InputActionBindings.h>
 #include <InputActions/PlayerActionInput.h>
 
@@ -111,9 +113,10 @@ public:
 
     // LocalPlayer와 잇는다(UE SetPlayer — GameInstance Login이 부른다). source는 그 LocalPlayer의
     // 입력 원천이다(null이면 입력 없음). gamepad는 그 LocalPlayer의 패드 번호(ControllerId)다.
-    // 스냅숏을 비운다.
-    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source,
-                   uint32 gamepad) noexcept;
+    // userSettings는 그 LocalPlayer의 키 설정이다(입력 액션 평가기에 붙는다 — null이면 없음,
+    // ClearPlayer 전까지 살아 있어야 한다). 스냅숏을 비운다.
+    void SetPlayer(ObjectHandle localPlayer, const input::InputState* source, uint32 gamepad,
+                   input::InputUserSettings* userSettings = nullptr) noexcept;
 
     // 이 플레이어의 입력 액션 평가기다(컨텍스트 추가·주입 — Docs/Design/InputActions 4절). OnTick이
     // 평가한다.
@@ -136,6 +139,30 @@ public:
     // 입력 액션 평가에 쓰는 패드 번호다.
     uint32 InputGamepad() const noexcept {
         return gamepad_;
+    }
+
+    // 이 플레이어의 게임패드 진동이다(UE ClientPlayForceFeedback·PlayDynamicForceFeedback —
+    // Docs/Design/InputActions 6.2절). OnTick이 입력 액션 전달 뒤 합성한다.
+    //
+    // 사용 예:
+    //   input::HapticParams params;
+    //   params.tag = "Hit";
+    //   (void)controller.Haptics().PlayHapticEffect(hitEffect, params);
+    input::HapticPlayer& Haptics() noexcept {
+        return haptics_;
+    }
+
+    // 이번 틱에 합성한 모터 값이다(6.3절 — LocalPlayer가 없으면 0). 호스트가 프레임 끝에 이
+    // 플레이어의 패드 번호(InputGamepad)로 GamepadBackend::SetMotors에 넘긴다.
+    const input::MotorValues& MotorOutput() const noexcept {
+        return motorOutput_;
+    }
+
+    // 진동 설정 input.haptic_scale·input.enable_haptics를 넣는다(GameInstance가 프레임마다
+    // 부른다 — 설정 문맥이 없으면 기본 1·켬).
+    void ApplyHapticSettings(float scale, bool enabled) noexcept {
+        hapticScale_ = scale;
+        hapticsEnabled_ = enabled;
     }
 
     // 입력 원천만 바꾼다(GameInstance::SetLocalPlayerInput).
@@ -184,6 +211,9 @@ public:
         localPlayer_ = {};
         inputSource_ = nullptr;
         gamepad_ = 0;
+        actionInput_.SetUserSettings(nullptr);
+        // 플레이어가 없으면 진동을 내지 않는다(효과는 남는다 — UE Player == nullptr).
+        motorOutput_ = {};
     }
 
 protected:
@@ -219,6 +249,10 @@ private:
     ROCKS_NATIVE() bool gestureRecognizerExplicit_ = false;
     ROCKS_NATIVE() input::PlayerActionInput actionInput_;
     ROCKS_NATIVE() input::InputActionBindings actionBindings_;
+    ROCKS_NATIVE() input::HapticPlayer haptics_;
+    ROCKS_NATIVE() input::MotorValues motorOutput_;
+    ROCKS_NATIVE() float hapticScale_ = 1.0f;
+    ROCKS_NATIVE() bool hapticsEnabled_ = true;
     ROCKS_NATIVE() uint32 gamepad_ = 0;
     // 입력 액션 평가가 실패하고 있다(경고를 실패가 이어지는 동안 한 번만 남긴다).
     ROCKS_NATIVE() bool inputEvaluationFailing_ = false;

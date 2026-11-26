@@ -144,6 +144,7 @@ Result<void> PrimitiveComponent::SetCollisionProfileName(StringView name) noexce
         return copied;
     }
 
+    UpdateBodyCollision();
     return Result<void>::Success();
 }
 
@@ -179,6 +180,7 @@ Result<void> PrimitiveComponent::EditCustomCollision(Edit&& edit) noexcept {
     }
 
     collisionProfileName_ = Move(custom);
+    UpdateBodyCollision();
     return Result<void>::Success();
 }
 
@@ -286,6 +288,7 @@ Result<void> PrimitiveComponent::CreateSystemState(SystemStateKind kind) noexcep
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    desc.component = Handle();
     desc.worldTransform = BodyWorldTransform();
     desc.collision = resolved.Value();
     desc.settings = &bodySettings_;
@@ -326,9 +329,107 @@ void PrimitiveComponent::DestroySystemState(SystemStateKind kind) noexcept {
     }
 }
 
+void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
+    // 켤 때 부모에서 뗀다(UE FBodyInstance::SetInstanceSimulatePhysics —
+    // BodyInstance.cpp:2671-2686). 떼기가 실패하면(KeepWorld를 표현할 수 없는 부모 scale) 붙은 채
+    // 시뮬레이션한다.
+    if (simulate && IsRegistered() && !Parent().IsNull()) {
+        (void)Detach(AttachmentRule::KeepWorld);
+    }
+
+    const bool wasSimulating = bodySettings_.simulatePhysics;
+    bodySettings_.simulatePhysics = simulate;
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    if (scene == nullptr) {
+        return;
+    }
+
+    const BodyMotion motion = PhysicsBodyMotion();
+    if (motion == BodyMotion::Static) {
+        if (simulate && !wasSimulating) {
+            LogContextScope context("World", GetWorld().Name());
+            Log::Warning(
+                LogWorld,
+                "Primitive component #{Slot} simulates physics but is not Movable; keeping "
+                "a static body ({Code})",
+                Handle().slot, DiagSimulateOnStaticBody);
+        }
+
+        return;
+    }
+
+    // 다시 만들지 않고 바꾼다(UE UpdateInstanceSimulatePhysics — 켜면 startAwake일 때 깨운다).
+    scene->SetBodyMotion(bodyHandle_, motion, bodySettings_.startAwake);
+}
+
+void PrimitiveComponent::UpdateBodyCollision() noexcept {
+    if (!IsRegistered()) {
+        return;
+    }
+
+    // NoCollision 경계를 넘으면 그 자리에서 만들거나 지운다(UE PrimitiveComponentPhysics.cpp:
+    // 1376-1393). 실패는 RecreateSystemStateNow가 Warning으로 남기고 값은 바뀐 채 둔다(ERD25).
+    if (WantsSystemState(SystemStateKind::Physics) != HasSystemState(SystemStateKind::Physics)) {
+        (void)RecreateSystemStateNow(SystemStateKind::Physics);
+        return;
+    }
+
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    auto resolved = TryResolveCollision();
+    if (scene != nullptr && resolved) {
+        scene->SetBodyCollision(bodyHandle_, resolved.Value());
+    }
+}
+
+void PrimitiveComponent::UpdateBodyGeometry() noexcept {
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    BodyGeometry geometry;
+    if (scene == nullptr || !BuildBodyGeometry(geometry)) {
+        return;
+    }
+
+    if (auto updated = scene->SetBodyGeometry(bodyHandle_, geometry); !updated) {
+        LogContextScope context("World", GetWorld().Name());
+        Log::Warning(
+            LogWorld,
+            "Primitive component #{Slot} body shape could not be updated: {Error}; keeping "
+            "the previous shape ({Code})",
+            Handle().slot, ErrorCodeName(updated.Error()), DiagBodyShapeUpdateFailed);
+    }
+}
+
+void PrimitiveComponent::OnStart() noexcept {
+    SceneComponent::OnStart();
+    // 시뮬레이션하는 컴포넌트는 부착될 수 없다(UE UPrimitiveComponent::BeginPlay —
+    // PrimitiveComponent.cpp:4378-4392). UE는 이 떼기의 overlap 갱신을 끈다 — overlap은 PH4.
+    if (bodySettings_.simulatePhysics && !Parent().IsNull()) {
+        (void)Detach(AttachmentRule::KeepWorld);
+    }
+}
+
+Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,
+                                                       const Quatd& rotation) noexcept {
+    applyingPhysicsResult_ = true;
+    auto moved = SetWorldLocationAndRotation(location, rotation);
+    applyingPhysicsResult_ = false;
+    return moved;
+}
+
 void PrimitiveComponent::OnTransformUpdated() noexcept {
     SceneComponent::OnTransformUpdated();
-    if (bodyHandle_.IsNull()) {
+    if (bodyHandle_.IsNull() || applyingPhysicsResult_) {
         return;
     }
 

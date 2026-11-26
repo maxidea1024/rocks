@@ -1,3 +1,5 @@
+#include "InputMappingLookup.h"
+
 #include <Base/InitializerList.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Guid.h>
@@ -5,6 +7,7 @@
 #include <InputActions/InputActionsLog.h>
 #include <InputActions/InputModifier.generated.h>
 #include <InputActions/InputTrigger.generated.h>
+#include <InputActions/InputUserSettings.h>
 #include <InputActions/PlayerActionInput.h>
 #include <Object/ValueCopy.h>
 
@@ -87,33 +90,7 @@ Span<const InputBinding> RebuildProfileBindings(const InputContextData& data,
 // 바인딩의 매핑 설정이 활성 프로필을 지원하는지다(UE :986-990). 프로필이 없으면 거르지 않는다.
 bool RebuildSupportsProfile(const InputBinding& binding, const InputActionSettings& action,
                             StringView profile) noexcept {
-    if (profile.IsEmpty()) {
-        return true;
-    }
-
-    const PlayerMappingSettings* settings = nullptr;
-    switch (binding.settingBehavior) {
-    case MappingSettingBehavior::InheritFromAction:
-        settings = action.mappingSettings.HasValue() ? &action.mappingSettings.Value() : nullptr;
-        break;
-    case MappingSettingBehavior::Override:
-        settings = binding.mappingSettings.HasValue() ? &binding.mappingSettings.Value() : nullptr;
-        break;
-    case MappingSettingBehavior::Ignore:
-        break;
-    }
-
-    if (settings == nullptr || settings->supportedProfiles.IsEmpty()) {
-        return true;
-    }
-
-    for (const String& supported : settings->supportedProfiles) {
-        if (supported.View() == profile) {
-            return true;
-        }
-    }
-
-    return false;
+    return profile.IsEmpty() || MappingSupportsProfile(MappingSettingsOf(binding, action), profile);
 }
 
 bool RebuildSameCurve(const TangentCurve& left, const TangentCurve& right) noexcept {
@@ -312,6 +289,10 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     Array<ChordDependency> dependencies(allocator);
     Array<Guid> chordingActions(allocator);
     Array<const InputBinding*> ordered(allocator);
+    Array<InputKey> userKeys(allocator);
+    // 활성 프로필: 사용자 설정이 붙어 있으면 그 현재 프로필, 아니면 SetKeyProfile 값이다(5.2절).
+    const StringView activeProfile =
+        settings_ != nullptr ? settings_->CurrentProfileId() : profile_.View();
     Array<const InputBinding*> tiers[RebuildTierCount] = {Array<const InputBinding*>(allocator),
                                                           Array<const InputBinding*>(allocator),
                                                           Array<const InputBinding*>(allocator)};
@@ -371,8 +352,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
     for (const uint32 contextIndex : order) {
         const ContextEntry& context = contexts_[contextIndex];
         const InputContextBundle& bundle = context.bundle;
-        const Span<const InputBinding> source =
-            RebuildProfileBindings(bundle.data, profile_.View());
+        const Span<const InputBinding> source = RebuildProfileBindings(bundle.data, activeProfile);
         // 3단 재정렬(UE ReorderMappings): chord 대상 액션의 바인딩(chord 바인딩 먼저) → chord
         // 바인딩 → 나머지. Rocks는 원래 순서를 지키는 안정 분할이다(7.3절).
         chordingActions.Clear();
@@ -424,37 +404,20 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
         }
 
         contextApplied.Clear();
-        for (const InputBinding* binding : ordered) {
-            // 빈 키는 조용히, 모르는 이름은 경고와 함께 건너뛴다(2.7절 — UE도 빈 키 매핑을 받는다).
-            if (binding->key.IsEmpty()) {
-                continue;
-            }
-
-            auto key = ParseInputKey(binding->key.View());
-            if (!key) {
-                Log::Warning(
-                    LogInputActions,
-                    "Input binding key '{Key}' is unknown; the binding is skipped ({Code})",
-                    binding->key.View(), DiagInputBindingKeyUnknown);
-                continue;
-            }
-
-            const InputActionData* action = sourceOf(binding->action);
-            if (!RebuildSupportsProfile(*binding, action->settings, profile_.View())) {
-                continue;
-            }
-
+        // 바인딩 하나를 키 하나로 넣는다(소비·액션 표·트리거 복제·chord 짝 — 4.2절 2-4).
+        auto addBinding = [&](const InputBinding* binding, const InputActionData* action,
+                              InputKey key) noexcept -> Result<void> {
             // 앞(상위) 컨텍스트가 쓴 키는 넣지 않는다(4.2절 3 — 소비).
-            if (RebuildContainsKey(applied.View(), key.Value())) {
-                continue;
+            if (RebuildContainsKey(applied.View(), key)) {
+                return Result<void>::Success();
             }
 
             const bool actionChords = RebuildHasChord(action->settings.triggers.View());
             const bool chords = actionChords || RebuildHasChord(binding->triggers.View());
             // chord 바인딩은 소비하지 않는다(대상 액션을 가리면 안 된다 — UE :1041).
             if (!chords && action->settings.consumeInput &&
-                !RebuildContainsKey(contextApplied.View(), key.Value())) {
-                if (auto pushed = contextApplied.TryPushBack(key.Value()); !pushed) {
+                !RebuildContainsKey(contextApplied.View(), key)) {
+                if (auto pushed = contextApplied.TryPushBack(key); !pushed) {
                     return pushed;
                 }
             }
@@ -477,7 +440,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
             BindingEntry entry(allocator);
             entry.action = static_cast<uint32>(actionIndex);
             entry.context = bundle.id;
-            entry.key = key.Value();
+            entry.key = key;
             // 액션 수준 chord는 바인딩 수준에도 복제한다(UE :1076-1085). ChordBlocker·Down 자리도
             // 둔다.
             const usize chordCopies = actionChords ? action->settings.triggers.Size() : 0;
@@ -499,6 +462,18 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
                     RebuildCopyModifiers(entry.modifiers, binding->modifiers.View(), allocator);
                 !copied) {
                 return copied;
+            }
+
+            // 같은 액션·키·트리거·모디파이어 종류 항목이 이미 있으면 넣지 않는다(UE AddMapping
+            // Equals — EnhancedPlayerInput.cpp:1088-1101). 사용자 키로 같은 키가 여러 바인딩에
+            // 붙거나 데이터가 겹쳐도 한 번만 평가한다. UE는 뒤 바인딩의 값으로 앞 항목을 다시
+            // 만들지만 Rocks는 정렬 순 첫 것을 둔다(2.7절 첫 사본 규칙과 같다).
+            for (const BindingEntry& existing : bindings) {
+                if (existing.action == entry.action && existing.key == key &&
+                    RebuildSameShape(existing.triggers.View(), existing.modifiers.View(),
+                                     entry.triggers.View(), entry.modifiers.View())) {
+                    return Result<void>::Success();
+                }
             }
 
             for (const Span<const InputTrigger> triggers :
@@ -533,6 +508,57 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
 
             if (auto pushed = bindings.TryPushBack(Move(entry)); !pushed) {
                 return pushed;
+            }
+
+            return Result<void>::Success();
+        };
+
+        for (const InputBinding* binding : ordered) {
+            const InputActionData* action = sourceOf(binding->action);
+            if (!RebuildSupportsProfile(*binding, action->settings, activeProfile)) {
+                continue;
+            }
+
+            // 기본 키: 빈 키는 무효(조용히), 모르는 이름은 경고 뒤 무효다(2.7절 — UE도 빈 키 매핑을
+            // 받는다).
+            InputKey defaultKey;
+            if (!binding->key.IsEmpty()) {
+                auto parsed = ParseInputKey(binding->key.View());
+                if (parsed) {
+                    defaultKey = parsed.Value();
+                } else {
+                    Log::Warning(LogInputActions,
+                                 "Input binding key '{Key}' of context {Context} is unknown; only "
+                                 "user keys apply to the binding ({Code})",
+                                 binding->key.View(), bundle.id, DiagInputBindingKeyUnknown);
+                }
+            }
+
+            // 사용자 키가 있으면 그 키들, 없으면 기본 키다(5.2절 적용 — UE :1004-1020).
+            userKeys.Clear();
+            const PlayerMappingSettings* mapping = MappingSettingsOf(*binding, action->settings);
+            if (settings_ != nullptr && mapping != nullptr) {
+                if (auto keys =
+                        settings_->KeysForBinding(mapping->name.View(), defaultKey, userKeys);
+                    !keys) {
+                    return keys;
+                }
+            }
+
+            if (userKeys.IsEmpty()) {
+                if (!defaultKey.IsValid()) {
+                    continue;
+                }
+
+                if (auto pushed = userKeys.TryPushBack(defaultKey); !pushed) {
+                    return pushed;
+                }
+            }
+
+            for (const InputKey key : userKeys) {
+                if (auto added = addBinding(binding, action, key); !added) {
+                    return added;
+                }
             }
         }
 
@@ -793,6 +819,7 @@ Result<void> PlayerActionInput::Rebuild(const InputState* state, uint32 gamepad)
 
     rebuildPending_ = false;
     pendingIgnorePressed_ = true;
+    settingsRevision_ = settings_ != nullptr ? settings_->Revision() : 0;
     return Result<void>::Success();
 }
 

@@ -182,8 +182,10 @@ Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexce
     const ObjectHandle director = gameplay->Director();
     const input::InputState* input = nullptr;
     uint32 gamepad = 0;
-    auto read = WithLocalPlayer(player, [&input, &gamepad](LocalPlayer& local) noexcept {
+    input::InputUserSettings* settings = nullptr;
+    auto read = WithLocalPlayer(player, [&input, &gamepad, &settings](LocalPlayer& local) noexcept {
         input = local.input_;
+        settings = &local.inputSettings_;
         // 패드 번호는 ControllerId다(음수는 0 — Docs/Design/InputActions 5.1절).
         gamepad = local.ControllerId() > 0 ? static_cast<uint32>(local.ControllerId()) : 0;
     });
@@ -200,8 +202,8 @@ Result<void> GameInstance::LoginPlayer(World& world, ObjectHandle player) noexce
 
     const ObjectHandle created = controller.Value();
     auto linked = world.With<PlayerController>(
-        created, [player, input, gamepad](PlayerController& value) noexcept {
-            value.SetPlayer(player, input, gamepad);
+        created, [player, input, gamepad, settings](PlayerController& value) noexcept {
+            value.SetPlayer(player, input, gamepad, settings);
         });
     if (!linked) {
         return linked;
@@ -882,7 +884,11 @@ void GameInstanceClient::OnEngineTick(Engine& engine) noexcept {
     // LocalPlayer의 PlayerController 기본값으로 넣는다(명시로 정한 컨트롤러는 그대로다).
     const bool settings = engine.Settings() != nullptr;
     const bool gestures = settings && input::GestureRecognizerSetting();
-    auto ran = WithInstance([settings, gestures](GameInstance& game) noexcept {
+    // input.haptic_scale·input.enable_haptics도 같이 넣는다(Docs/Design/InputActions 6.3절).
+    const float hapticScale = settings ? input::HapticScaleSetting() : 1.0f;
+    const bool haptics = !settings || input::EnableHapticsSetting();
+    auto ran = WithInstance([settings, gestures, hapticScale,
+                             haptics](GameInstance& game) noexcept {
         game.inEngineTick_ = true;
         auto opened = game.RunPendingOpen();
         game.inEngineTick_ = false;
@@ -900,10 +906,10 @@ void GameInstanceClient::OnEngineTick(Engine& engine) noexcept {
                                            controller = player.PlayerControllerHandle();
                                        });
             if (!controller.IsNull() && world->HasActor(controller)) {
-                (void)world->With<PlayerController>(controller,
-                                                    [gestures](PlayerController& pc) noexcept {
-                                                        pc.ApplyGestureRecognizerSetting(gestures);
-                                                    });
+                (void)world->With<PlayerController>(controller, [&](PlayerController& pc) noexcept {
+                    pc.ApplyGestureRecognizerSetting(gestures);
+                    pc.ApplyHapticSettings(hapticScale, haptics);
+                });
             }
         }
     });

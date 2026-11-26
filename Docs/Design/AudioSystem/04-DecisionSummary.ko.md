@@ -8,3 +8,4 @@
 - 재생 핸들과 voice 핸들 분리, 동시 발음 그룹과 voice 상한 분리, 가상화 4모드(UE 그대로).
 - 리버브 존은 UE처럼 리버브 하나 파라미터 보간, 진행률은 mix clock.
 - 서버·`--no-sound`는 장치 없이 `Ignored`, 게임 진행은 완료 통지에 기대지 않는다.
+- 합성 사운드는 MetaSounds 대응 `SoundGraph` 하나, Sound Cue 대응은 두지 않는다(사용자 결정).

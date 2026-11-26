@@ -101,7 +101,78 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 **transform**: `PrimitiveComponent::OnTransformUpdated`가 body가 있으면 `SetBodyTransform(월드 transform, TeleportMode::None)`을 부른다(3.3절). PH2b의 `SetBodyTransform`은 모든 운동 종류를 즉시 옮기고(`SetPositionAndRotation`, Dynamic 속도 유지) 잠든 Dynamic을 깨운다(UE `SetGlobalPose`). Kinematic의 `MoveKinematic` 경로·결과 반영의 skip 표지는 PH2c, scale 변화의 형상 갱신은 PH2d(재생성 표)다.
 
-**시험**(World·컴포넌트 공개 API만 — Modular에서도 돈다): 등록·파괴의 body 수, NoCollision·장면 없는 World는 body 없음, mobility·simulate → 운동 종류(Static에 simulate면 경고 뒤 Static), 떨어지는 구의 `ReadKinematics`, PA10을 `CapsuleComponent` 경로로(반구 포함 반높이 의미), box scale을 바닥 위 구의 정지 높이로 확인, 컴포넌트 이동이 Kinematic body를 옮김, 옮긴 잠든 Dynamic이 깨어남, 크기·scale 0 형상과 비균일 scale 부모 아래 회전한 자식도 body가 생김. 한계: World 물리 장면 교체(`SetPhysicsScene` null → 새 장면) 뒤 남은 컴포넌트 handle은 새 장면의 같은 칸을 가리킬 수 있다 — 교체는 지금 Subsystem 수명 안에서만 일어나 남은 컴포넌트가 없다. 등록된 body가 있으면 교체를 거부하는 검사는 PH2d(재생성)에서 더한다. 등록 실패 되돌림 시험(용량 초과)은 PH5(설정 문맥 시험 기반)에서.
+**시험**(World·컴포넌트 공개 API만 — Modular에서도 돈다): 등록·파괴의 body 수, NoCollision·장면 없는 World는 body 없음, mobility·simulate → 운동 종류(Static에 simulate면 경고 뒤 Static), 떨어지는 구의 `ReadKinematics`, PA10을 `CapsuleComponent` 경로로(반구 포함 반높이 의미), box scale을 바닥 위 구의 정지 높이로 확인, 컴포넌트 이동이 Kinematic body를 옮김, 옮긴 잠든 Dynamic이 깨어남, 크기·scale 0 형상과 비균일 scale 부모 아래 회전한 자식도 body가 생김. 한계: World 물리 장면 교체(`SetPhysicsScene` null → 새 장면) 뒤 남은 컴포넌트 handle은 새 장면의 같은 칸을 가리킬 수 있다 — 교체는 지금 Subsystem 수명 안에서만 일어나 남은 컴포넌트가 없다. 등록된 body가 있으면 교체를 거부하는 검사는 초기화 되돌림과 맞지 않아 두지 않는다(7.1.5절 리뷰 반영). 등록 실패 되돌림 시험(용량 초과)은 PH5(설정 문맥 시험 기반)에서.
+
+### 7.1.4 PH2c 구현 세부(2026-11-26)
+
+**결과 반영(3.4절).**
+- body 칸이 컴포넌트 handle(`BodyCreateDesc::component`)과 운동 종류를 기억하고, Jolt body user data에 칸 번호·세대를 넣는다.
+- step마다 `Update` 뒤에 Jolt 활성 Dynamic body(`GetActiveBodies`)와 그 step에 잠든 body(`BodyActivationListener::OnBodyDeactivated` — job thread에서 불리므로 잠금 아래 칸 번호만 쌓는다)를 결과 목록에 더한다(칸마다 표지로 중복 없이).
+- `PhysicsWorldSubsystem`이 엔진 자리 `PhysicsResults`(Game·Tryout만)에서 목록을 칸 번호 순으로 정렬해 꺼내고, 살아 있는 칸의 위치·회전을 컴포넌트 `PrimitiveComponent::ApplyPhysicsTransform(위치, 회전)`으로 쓴다.
+- `ApplyPhysicsTransform`은 skip 표지를 세운 채 `SetWorldLocationAndRotation`을 불러 자기 body로 되돌려 보내지 않는다(UE `MOVECOMP_SkipPhysicsMove`). 부착된 자식은 부착 전파로 따라가고 자기 body를 옮긴다.
+- sweep 없는 이동이고, overlap 갱신이 붙는 `MoveComponent` 경로는 PH4다.
+
+**Kinematic(3.3절).** 장면이 step하는 World(Game·Tryout — `JoltPhysicsScene::SetSimulates`)에서 `SetBodyTransform(None)`은 Kinematic body를 다음처럼 다룬다.
+- 그 자리에서 목표로 옮긴다. 질의가 바로 보게 하려는 것이다.
+- 첫 요청일 때 원래 자세를 시작 자세로 기록하고, 목표를 갱신한다.
+- 다음 step 직전에 시작 자세로 되돌린 뒤 `MoveKinematic(목표, dt)`로 움직인다. 이때 속도는 위치 차이를 dt로 나눈 값이다.
+- 목표가 없는 다음 step에서는 선·각속도를 0으로 둔다. Jolt 속도가 남기 때문이다.
+- `TeleportPhysics`·`ResetPhysics`는 즉시 옮기고 속도를 0으로 두며, 대기 목표를 지운다.
+- 장면이 step하지 않는 World(Editor·Preview)는 언제나 teleport다(PMD16).
+- 한 프레임의 고정 스텝 여러 번 가운데 목표는 첫 step이 쓰고, 나머지 step은 정지다(3.3절).
+
+**리뷰 반영(2026-11-26).** 잠든 body 통지는 Jolt 활성 목록 잠금 아래에서 오므로 할당하지 않는다(용량은 `CreateBody`가 칸 수 × 2로 미리 잡고, 넘치면 세어 step 뒤 Warning). 결과 목록은 handle(세대)로 쥐어 칸 재사용을 거르고, Core `algo::Sort`로 정렬하며, 꺼낼 용량을 먼저 잡는다(실패하면 목록을 그대로 둔다). 반영 중 사라진 컴포넌트는 오류가 아니라 건너뛴다. Kinematic 목표 적용은 step과 같은 결정적 FP 환경에서 한다. 한계: 부모에 붙은 채 시뮬레이션하는 Dynamic 컴포넌트는 떼기(PH2d) 전까지 반영 순서·부착 전파에 따라 결과가 달라질 수 있다.
+
+**결정성(PC03).** 같은 설정·같은 호출 순서의 World 두 개에서 떨어지는 body들의 결과(위치·속도 byte)가 같다. 반영 순서는 칸 번호 순이다(Jolt 활성 목록 순서에 기대지 않는다).
+
+**시험.**
+- 떨어지는 구 컴포넌트의 월드 위치가 body 위치와 byte까지 같다(매 Tick, 여러 step 프레임 포함). 바닥에서 잠든 뒤에도 같다.
+- Kinematic 상자를 한 프레임에 옮긴다.
+  - 옮긴 직후 body 위치가 목표다.
+  - 다음 step에서 속도는 이동량/dt이고, 그다음 step에서 0이다.
+  - 3 step 프레임에서는 끝 속도가 0이고 위치가 목표다.
+- `TeleportPhysics`는 속도 0이다.
+- Editor World Kinematic은 즉시 이동이다.
+- 결정성을 시험한다.
+
+### 7.1.5 PH2d 구현 세부(2026-11-26)
+
+엔진 런타임의 즉시 다시 만들기 `Component::RecreateSystemStateNow`(63cb977e — 23.2절)를 쓴다. World 쪽 코드는 PH2b처럼 이 세션이 넣는다(World 담당 재확인 2026-11-26).
+
+**접점 추가**(`PhysicsScene` — 없는 handle·옛 세대는 무시하거나 `StaleHandle`):
+
+| 함수 | 동작 | UE |
+|---|---|---|
+| `SetBodyMotion(handle, BodyMotion, bool wake)` | Kinematic ↔ Dynamic만 바꾼다(Static이 끼면 무시 — Mobility 변경은 다시 만들기). Kinematic이 되면 선·각속도 0과 힘 취소, Dynamic이 되면 대기 Kinematic 목표·정지 표지를 지우고 wake면 깨운다 | `SetIsKinematic_AssumesLocked`(`PhysicsCore/Private/ChaosEngineInterface.cpp:494–544` — Kinematic 전환 때 속도 0), `UpdateInstanceSimulatePhysics`(`BodyInstance.cpp:2600–2611` — `bStartAwake`면 깨움) |
+| `SetBodyCollision(handle, const ResolvedCollision&)` | object 층만 다시 계산해 바꾼다(Jolt `SetObjectLayer` — broadphase 층이 바뀌면 Jolt가 옮긴다). body·속도는 그대로다 | 필터 데이터 갱신 |
+| `SetBodyGeometry(handle, const BodyGeometry&)` | 칸이 기억한 scale로 형상을 다시 만들어 바꾸고(Jolt `SetShape`) 깨운다 | `UBoxComponent::SetBoxExtent` → `UpdateBodyScale(scale, true)`(`BoxComponent.cpp:28–47`) |
+| `SetBodyTransform`의 scale | 칸이 기억한 scale과 다르면 위와 같은 경로로 형상을 다시 만든 뒤 옮긴다 | `UpdateBodyScale`(`BodyInstance.cpp:2545–2575` — 형상 교체·깨움·질량) |
+
+- 형상 교체의 질량: `updateMassWhenScaleChanges`(UE 기본 참 — `BodyInstanceCore.cpp:22`)가 참이면 새 형상의 밀도로 다시 계산하고, 거짓이면 이전 질량·관성을 둔다(Jolt `SetShape`의 `inUpdateMassProperties`). 그래서 칸은 형상 값·적용한 scale·이 표지를 기억한다.
+- 형상 교체 실패(비유한 값 — `InvalidArgument`)는 이전 형상을 둔다. 컴포넌트는 Warning `BodyShapeUpdateFailed`를 남긴다.
+
+**컴포넌트 쪽**(2.3.1절 표):
+- 충돌 setter 넷과 `SetCollisionProfileName`은 값을 바꾼 뒤 판정한다. `WantsSystemState(Physics)`가 지금 상태와 다르면(`NoCollision` 경계를 넘음) `RecreateSystemStateNow(Physics)`로 만들거나 지운다. 같고 body가 있으면 `SetBodyCollision`만 한다. 실패는 ERD25 정책이다(값 변경은 성공, Warning `SystemStateRecreateFailed`).
+- `SetSimulatePhysics(bool)`은 켤 때, 등록돼 있고 부모가 있으면 먼저 `Detach(KeepWorld)`한다(UE `BodyInstance.cpp:2671–2686`). 값을 바꾼 뒤 body가 있으면 새 운동 종류로 `SetBodyMotion(…, startAwake)`. Static이면 Warning `SimulateOnStaticBody`다. weld 자식(`ApplyWeldOnChildren`)은 PH6이다.
+- `OnStart`(UE `UPrimitiveComponent::BeginPlay` — `PrimitiveComponent.cpp:4378–4392`)는 `simulatePhysics`이고 부모가 있으면 `Detach(KeepWorld)`한다. UE는 이때 떼기의 overlap 갱신을 끈다. overlap은 PH4라 지금은 차이가 없다.
+- 형상 setter(`SetBoxExtent`·`SetSphereRadius`·`SetCapsuleSize`)는 값을 바꾼 뒤 body가 있으면 `SetBodyGeometry`(protected `UpdateBodyGeometry()`)를 부른다.
+- scale은 `OnTransformUpdated`의 `SetBodyTransform`이 월드 scale을 함께 넘기므로 장면이 바뀜을 안다. 결과 반영(`ApplyPhysicsTransform`)은 scale을 바꾸지 않는다.
+- `SceneComponent::SetMobility`는 값이 바뀌고 등록돼 있으면 시스템 상태를 종류마다 `RecreateSystemStateNow`로 다시 만든다. UE는 `FComponentReregisterContext`로 재등록한다(`SceneComponent.cpp:3098–3116`). Rocks는 등록 해제·재등록 대신 시스템 상태만 다시 만든다(한계: OnRegister·OnUnregister hook은 다시 부르지 않는다 — 지금 그 hook에 Mobility에 기대는 일이 없다). Movable이 되면 자식도 Movable로 바꾼다(UE와 같다).
+- `World::SetPhysicsScene`의 떼기는 body가 남아 있어도 거부하지 않는다(7.1.3절의 "교체 거부" 계획을 버렸다 — 아래 리뷰 반영).
+
+**시험**(공개 API만 — Modular에서도 돈다):
+- 공중의 Kinematic 상자에 simulate를 켜면 handle이 그대로이고 떨어진다. 끄면 속도 0으로 멈춰 그 자리에 있다.
+- 부모에 붙은 자식에 simulate를 켜면 부모에서 떨어지고 월드 위치를 유지한다. 시작 전에 simulate가 켜진 부착 자식은 `OnStart`에서 떨어진다.
+- `NoCollision` → body 없음, 다시 켜면 body가 생긴다. `QueryOnly` ↔ `QueryAndPhysics`는 같은 handle이고, 바닥을 `QueryOnly`로 바꾸면 그 위 구가 빠진다.
+- 바닥 위 구의 반경을 바꾸거나 scale을 바꾸면 같은 handle로 정지 높이가 새 크기를 따른다.
+- Mobility Static → Movable은 body를 다시 만들어 Kinematic이 된다.
+- Kinematic → Dynamic 전환은 Kinematic 표지를 지운다(직전 step에 움직인 body는 속도를 이어 가고, 대기 목표는 쓰지 않는다).
+- step 뒤 반영 전에 Kinematic이 되어도 그 step의 자세를 컴포넌트에 쓴다.
+- 물리 뒤 Subsystem이 body 있는 Actor를 Spawn하고 실패하는 초기화 되돌림에서 장면이 떼어지고 해제된 장면을 쓰지 않는다.
+
+**리뷰 반영(2026-11-26).** 치명 1: 계획한 "body가 남은 장면 떼기 `Busy`"는 초기화 되돌림 경로와 맞지 않는다. 되돌림은 Subsystem 정리(장면 파괴)가 Actor 정리보다 먼저라, 떼기가 거부되면 World가 파괴된 장면을 가리키고 뒤이은 Actor 정리의 `DestroyBody`가 해제된 메모리를 쓴다. 그래서 떼기는 늘 받고(장면이 없으면 컴포넌트는 body 지우기를 건너뛴다), 이 경로를 시험으로 고정했다. 7.1.3절 한계(남은 handle이 새 장면의 칸을 가리킴)는 그대로다: 떼기는 Subsystem 정리에서만 일어나고 그 뒤 World는 Created·정리로 가므로 남은 컴포넌트가 새 장면을 만나지 않는다. 중요 2: `SetMobility`의 자식 전파는 handle 사본을 색인으로 돈다(자식 hook이 목록을 바꿀 수 있다). 시험 보강(전환의 Kinematic 표지·반영 전 전환·시작 떼기 위치·Mobility 자식 추종). 경미: scale 비교는 UE `Scale3D.Equals`처럼 성분마다 `KindaSmallNumber` 허용 오차, Static의 simulate 경고는 꺼짐 → 켬일 때만.
+
+질량: 공개 질량 API(`GetMass` — 2.6절)는 PH5라 `updateMassWhenScaleChanges` 두 값의 시험은 PH5로 미룬다. 이 단계는 표지를 Jolt `SetShape`에 넘기는 코드만 둔다.
 
 ## 7.2 시험 원칙
 
@@ -118,8 +189,8 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 | 문서 | 요청 | 맡는 곳 |
 |---|---|---|
 | 엔진 런타임 8·15절 | Physics 단계 **고정 스텝마다** 사용자 Fixed hook 뒤에 엔진 자리 `PhysicsSimulate`를 하나 더한다. 등록은 `SetEngineStage`와 같은 방식 | runtime 세션(rocks-f5) — 반영됨(a438860b, 2026-11-25) |
-| 엔진 런타임 23절 | 즉시 다시 만들기 API `RecreateSystemStateNow(kind)`(2.3.1절 — ERD25의 PreRender 일괄과 별도, 실패 정책은 같음) | runtime 세션 — PH2 전 |
-| 엔진 런타임 23·24절 | `PrimitiveComponent`의 물리 시스템 상태 판정·생성(2.3절), `OnTransformUpdated` hook에서 body 이동(3.3절), 이동 API의 `TeleportMode` 인자, simulate 켤 때 떼기(2.3.1절), `MoveComponent`·`UpdateOverlaps`(5장), `World::GetPhysicsScene`·`SetPhysicsScene`(2.2절) | World 코드 — PH2·PH4 때(누가 구현할지는 그때 정한다) |
+| 엔진 런타임 23절 | 즉시 다시 만들기 API `RecreateSystemStateNow(kind)`(2.3.1절 — ERD25의 PreRender 일괄과 별도, 실패 정책은 같음) | runtime 세션 — 반영됨(63cb977e, 2026-11-26) |
+| 엔진 런타임 23·24절 | `PrimitiveComponent`의 물리 시스템 상태 판정·생성(2.3절), `OnTransformUpdated` hook에서 body 이동(3.3절), 이동 API의 `TeleportMode` 인자, simulate 켤 때 떼기(2.3.1절), `MoveComponent`·`UpdateOverlaps`(5장), `World::GetPhysicsScene`·`SetPhysicsScene`(2.2절) | World 코드 — PH2 몫은 이 세션이 넣었다(7.1.3·7.1.5절), `MoveComponent`·`UpdateOverlaps`는 PH4 |
 | 컴포넌트 도입 CR16 | 상태를 "설계 있음(PhysicsModule)"으로, CM3에 `CylinderComponent` 데이터 | 반영함(2026-11-25, PH0) |
 | 전체 구현 계획 16절 | 16.1절 `PhysicsWorld` 인터페이스 스케치를 이 문서 2.2절 접점으로 대체, 16.1–16.3절의 command 구조(`Enqueue`, "callback 중 body 추가·삭제는 다음 command batch로", "쓰기는 Physics lane의 command 단계")를 동기 step 결정(3.2절 PMD6)으로 고치고 비동기 step 때로 미룸 | 반영함(2026-11-25, PH0) |
 
@@ -152,6 +223,8 @@ runtime 세션(World 담당) 동의로 World 쪽 코드도 이 세션이 넣는�
 
 ## 7.6 개정 이력
 
+- 개정 10(2026-11-26): PH2c 완료(e67a082b), PH2d 구현 세부(7.1.5절 — 운동 종류 전환·필터·형상·scale·Mobility, 리뷰 반영).
+- 개정 9(2026-11-26): PH2b 완료(6ba9c214 — 리뷰 반영: 크기 0·shear에서도 body, 옮긴 잠든 body 깨움), PH2c 구현 세부(7.1.4절).
 - 개정 8(2026-11-26): PH2a 완료(fcfe9ad4), PH2b 구현 세부(7.1.3절).
 - 개정 7(2026-11-26): PH1 완료(PhysicsSimulate 연결·Sandbox 등록), PH2 하위 단계와 PA 시험 배정(7.1.2절).
 - 개정 6(2026-11-25): PH1 착수 — 구현 세부(7.1.1절), PMD20–PMD22.

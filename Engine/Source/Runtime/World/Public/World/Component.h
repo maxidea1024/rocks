@@ -134,6 +134,20 @@ public:
     // InvalidArgument, 할당 실패.
     Result<void> MarkSystemStateDirty(SystemStateKind kind) noexcept;
 
+    // 그 종류의 시스템 상태를 그 자리에서 다시 만든다(UE RecreatePhysicsState·
+    // EnsurePhysicsStateCreated — 23.2절). 있으면 지우고, WantsSystemState가 참이면 만든다(없던
+    // 것도 만든다). 그 종류의 대기 표시는 지운다. 같은 프레임의 다음 질의가 바뀐 상태를 봐야 하는
+    // setter가 부른다.
+    //
+    // 사용 예:
+    //   collisionEnabled_ = enabled;
+    //   (void)RecreateSystemStateNow(SystemStateKind::Physics);   // 실패해도 값은 바뀌었다
+    //
+    // 등록 전·해제 뒤·파괴 대기면 아무것도 하지 않고 성공한다. 오류: 범위 밖 종류 InvalidArgument,
+    // 같은 종류의 Create·Destroy 안에서 다시 부르면 Busy, Create 실패는 그 오류(그 종류 없이 두고
+    // Warning SystemStateRecreateFailed).
+    Result<void> RecreateSystemStateNow(SystemStateKind kind) noexcept;
+
     // --- 타입 규칙·EditorOnly(23.2절 CR5·CR6) ---
 
     // 이 타입의 규칙이다(인스턴스 virtual — World가 만든 직후 등록 전에 묻는다). 기본은 규칙 없음.
@@ -195,6 +209,13 @@ private:
     // 있는 시스템 상태와 다시 만들 표시다(종류마다 비트).
     ROCKS_NATIVE() uint8 systemStates_ = 0;
     ROCKS_NATIVE() uint8 dirtySystemStates_ = 0;
+    // 지금 다시 만드는 중인 종류다(즉시·갱신 지점 모두 — 같은 종류 재진입은 Busy).
+    ROCKS_NATIVE() uint8 recreatingSystemStates_ = 0;
+    // 갱신 지점이 이 Component에서 아직 처리하지 않은 종류다(즉시 다시 만들기가 지운다).
+    ROCKS_NATIVE() uint8 flushingSystemStates_ = 0;
+    // World의 갱신 목록에 들어 있다(표시 비트와 따로 — 즉시 다시 만들기가 비트를 지워도 한 번만
+    // 들어간다).
+    ROCKS_NATIVE() bool systemStateQueued_ = false;
     // 단독 파괴(DestroyComponent)의 정리 이유다(먼저 정한 것을 유지한다).
     ROCKS_NATIVE() EndPlayReason endReason_ = EndPlayReason::Destroyed;
     ROCKS_NATIVE() TickHandle ticks_[detail::TickHookCount];

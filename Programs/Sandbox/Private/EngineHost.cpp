@@ -20,6 +20,9 @@
 #include <Gameplay/GameInstance.generated.h>
 #include <Gameplay/GameInstance.h>
 #include <Gameplay/GameInstanceClient.h>
+#include <Gameplay/LocalPlayer.generated.h>
+#include <Gameplay/PlayerController.generated.h>
+#include <Gameplay/PlayerController.h>
 #include <HostConfig/HostSettings.h>
 #include <Input/InputEvent.h>
 #include <Input/InputSettings.h>
@@ -56,6 +59,57 @@ constexpr uint32 TraceLogFlushTimeoutMilliseconds = 2000;
 
 // Sandbox 엔진 호스트의 로그 카테고리다.
 inline constexpr LogCategory LogSandboxHost{"Sandbox"};
+
+// 로컬 플레이어마다 PlayerController의 진동 합성 값을 그 패드에 쓴다(Docs/Design/InputActions
+// 6.3절 출력). PlayerController가 없거나 끊겼으면 0이다. ControllerId가 음수인 플레이어는 쓰지
+// 않는다(입력은 패드 0을 읽지만 패드 0의 진동 주인은 ControllerId 0이다 — 둘이 번갈아 쓰지 않게).
+// 지난 프레임에 0이 아닌 값을 썼는데 이번에 아무도 쓰지 않은 패드(LocalPlayer 제거·인스턴스 정지)는
+// 0으로 멈춘다. 연결되지 않은 패드(NotFound)·진동 없는 backend(Unsupported)는 조용히 넘긴다.
+// 프레임마다 부른다(backend는 바뀐 값만 장치에 쓰고, Android는 이 호출에서 1초 one-shot을 다시
+// 건다). 돌려주는 값은 이번에 0이 아닌 값을 쓴 패드 비트다.
+uint32 WriteLocalPlayerMotors(GameInstanceClient& client, platform::GamepadBackend& gamepads,
+                              uint32 previousActivePads) noexcept {
+    uint32 writtenPads = 0;
+    uint32 activePads = 0;
+    auto written = client.WithInstance([&](GameInstance& instance) noexcept {
+        World* world = instance.CurrentWorld();
+        for (uint32 index = 0; index < instance.LocalPlayerCount(); ++index) {
+            int32 controllerId = 0;
+            ObjectHandle controller;
+            (void)instance.WithLocalPlayer(instance.LocalPlayerAt(index),
+                                           [&](LocalPlayer& player) noexcept {
+                                               controllerId = player.ControllerId();
+                                               controller = player.PlayerControllerHandle();
+                                           });
+            if (controllerId < 0 || static_cast<uint32>(controllerId) >= input::MaxGamepads) {
+                continue;
+            }
+
+            const auto gamepad = static_cast<uint32>(controllerId);
+            input::MotorValues motors;
+            if (world != nullptr && !controller.IsNull() && world->HasActor(controller)) {
+                (void)world->With<PlayerController>(
+                    controller,
+                    [&motors](PlayerController& value) noexcept { motors = value.MotorOutput(); });
+            }
+
+            (void)gamepads.SetMotors(gamepad, motors);
+            writtenPads |= 1u << gamepad;
+            if (!(motors == input::MotorValues{})) {
+                activePads |= 1u << gamepad;
+            }
+        }
+    });
+    (void)written;
+    for (uint32 gamepad = 0; gamepad < input::MaxGamepads; ++gamepad) {
+        const uint32 bit = 1u << gamepad;
+        if ((previousActivePads & bit) != 0 && (writtenPads & bit) == 0) {
+            (void)gamepads.SetMotors(gamepad, input::MotorValues{});
+        }
+    }
+
+    return activePads;
+}
 
 // 헤드리스 실행의 고정 프레임 시간이다(결정적 시간 진행).
 constexpr double HeadlessFrameSeconds = 1.0 / 60.0;
@@ -195,6 +249,11 @@ public:
     // 평균이 맞는다). 한 간격 넘게 밀리면 deadline을 지금으로 다시 잡는다(밀린 프레임을 몰아 돌리지
     // 않는다). 헤드리스는 기다리지 않는다.
     void EndFrame(Engine&) noexcept override {
+        if (options_.gamepads != nullptr && options_.client != nullptr) {
+            activeMotorPads_ =
+                WriteLocalPlayerMotors(*options_.client, *options_.gamepads, activeMotorPads_);
+        }
+
         if (screen_ != nullptr) {
             if (textures_ != nullptr) {
                 textures_->Update(*screen_);
@@ -262,6 +321,8 @@ private:
     uint64 pumped_ = 0;
     // 지난 프레임까지 본 큐 손실 수다.
     uint64 droppedSeen_ = 0;
+    // 지난 프레임에 0이 아닌 진동을 쓴 패드 비트다(빠진 플레이어의 패드를 멈춘다).
+    uint32 activeMotorPads_ = 0;
     // 창 모드 다음 프레임 끝 목표 시각(MonotonicNanoseconds)이다. 0이면 아직 없다.
     uint64 deadline_ = 0;
 };

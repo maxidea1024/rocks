@@ -12,7 +12,7 @@
 - IA3은 bundle 수준 API다: `PlayerController::ActionInput()`(`PlayerActionInput`)에 `AddContext(bundle, …)`로 넣는다. 객체·에셋에서 모으는 도우미(아래 둘)는 에셋 감싸기와 함께 IA6이다.
 - 에셋 컨텍스트는 적용한 동안 `AssetLease`로 쥐고, 코드로 만든 객체는 handle로 쥔다(PlayerController의 기존 NATIVE handle + `World::With` 방식).
 - `AddInputContext(asset, priority, options)`는 `AssetManager::With` 범위에서 `CollectInputContext`로 모아 평가기에 넣는다. 데이터를 바꾼 뒤에는 `RefreshInputContext(asset)`이 다시 모아 `UpdateContext`한다.
-- 실행 중 편집을 퍼뜨리는 도우미(UE `MapKey`·`UnmapKey`·`UnmapAll`): 한 번 모은 bundle을 그 id의 컨텍스트를 가진 모든 PlayerController에 `UpdateContext`한다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정 행도 갱신한다(5.2절).
+- 실행 중 편집을 퍼뜨리는 도우미(UE `MapKey`·`UnmapKey`·`UnmapAll`): 한 번 모은 bundle을 그 id의 컨텍스트를 가진 모든 PlayerController에 `UpdateContext`한다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정의 등록 사본도 바뀐다(`UpdateContext`가 한다 — 행은 다시 매기지 않는다, 5.2절).
 
 평가 시점:
 - `PlayerController::OnTick` 안에서 한다. 입력 스냅숏과 제스처 다음, `OnPlayerTick` 전이다(UE `TickActor`·`PlayerTick`이 `TickPlayerInput`을 먼저 한다 — `PlayerController.cpp:2326·5504-5510`).
@@ -41,41 +41,53 @@
 
 ### 5.2 사용자 설정·리바인딩(UE `EI/Public/UserSettings/EnhancedInputUserSettings.h`)
 
-`InputUserSettings`(로컬 플레이어마다):
+`InputUserSettings`(로컬 플레이어마다 — InputActions 모듈의 값 타입, Gameplay `LocalPlayer`가 가진다):
 - `profiles: Array<KeyProfile>`, `currentProfileId`
-- `KeyProfile { id, displayName, rows: Array<KeyMappingRow> }`
+- `KeyProfile { id, displayName(String), rows: Array<KeyMappingRow> }`
 - `KeyMappingRow { mappingName, Array<PlayerKeyMapping> }`
-- `PlayerKeyMapping { slot, defaultKey, currentKey }`
-  - `slot`은 First…Seventh다(UE `EPlayerMappableKeySlot`).
-  - `IsCustomized()`는 currentKey ≠ defaultKey다.
+- `PlayerKeyMapping { slot, defaultKey, currentKey, dirty }`
+  - `slot`은 0…6(First…Seventh — UE `EPlayerMappableKeySlot`, `KeySlotCount` 7)이다.
+  - `IsCustomized()`는 currentKey ≠ defaultKey다. `dirty`는 저장 뒤 바뀌었다는 표지다(UE `bIsDirty` — 저장은 customized이거나 dirty인 매핑을 쓴다).
+- 처음에는 기본 프로필 하나다(id `InputUserSettings.Profiles.Default`, 표시 이름 "Default Profile" — UE `DefaultProfileIdentifierString`과 같은 문자열이라 UE 컨텍스트의 프로필 override·supportedProfiles 이름과 맞는다). 그것이 현재 프로필이다.
+- 바뀔 때마다 `Revision()`이 는다. 평가기(`PlayerActionInput::SetUserSettings`)는 `ApplyPendingChanges`에서 수가 바뀌었으면 다시 만들기를 한다(UE `OnSettingsChanged` → `RequestRebuildControlMappings`). 설정이 붙어 있으면 활성 프로필은 설정의 현재 프로필이다(`SetKeyProfile`은 설정이 없을 때 쓴다).
+- 스레드: 게임 스레드 전용이다. 평가기는 설정을 가리키기만 한다(설정이 평가기보다 오래 살거나, 없어지기 전에 `SetUserSettings(nullptr)`).
+- Gameplay 연결: `LocalPlayer::InputSettings()`가 그 플레이어의 설정이다(UE는 EnhancedInputLocalPlayerSubsystem이 `UEnhancedInputUserSettings`를 가진다). `PlayerController::SetPlayer`가 평가기에 붙이고 `ClearPlayer`가 뗀다(LocalPlayer 제거·EndPlay 때 — 설정이 평가기보다 먼저 없어지지 않는다). 게임의 컨텍스트 추가는 `notifyUserSettings`를 켜야 행이 생긴다(UE `bNotifyUserSettings` 기본 거짓과 같다).
 
 UE는 slot을 하드웨어 장치 ID별로 둔다. 그런데 기본 구현이 Invalid를 돌려주므로(`UserSettings.cpp:1798-1801`) 모든 장치가 한 slot 열을 쓴다. Rocks도 장치 칸 없이 **이름마다 slot 한 열**이다(IAD9).
 
 동작:
-- **등록**: 컨텍스트를 `notifyUserSettings`로 추가하면 리바인딩 가능한 바인딩마다 행을 만든다. 같은 이름의 바인딩마다 slot을 차례로 배정한다(UE cpp:1676-).
+- **등록**(`RegisterContext(bundle)` — UE `RegisterInputMappingContext` :1598-1782): 컨텍스트를 `notifyUserSettings`로 추가하면 평가기가 부른다(빼면 `UnregisterContext` — 등록 목록에서만 빠지고 행은 남는다, UE와 같다).
+  - 컨텍스트의 프로필 override 이름마다 없는 프로필을 만든다(현재 프로필은 그대로).
+  - 모든 프로필에, 그 프로필의 바인딩(override 또는 기본) 중 리바인딩 가능한 것(매핑 설정이 있는 것 — `settingBehavior` Ignore가 아니고 설정이 있다, UE `IsPlayerMappable`)마다 이름(매핑 설정 `name`) 행을 찾거나 만든다. supportedProfiles가 그 프로필을 빼면 넣지 않는다.
+  - 한 등록 안에서 같은 이름의 바인딩마다 slot을 0부터 차례로 배정한다. 7개(`KeySlotCount`)를 넘는 바인딩은 행에 넣지 않고 Warning `InputMappingSlotOverflow`로 알린다(UE는 8번째를 Unspecified, 그 뒤를 Max 칸에 넣는다 — Rocks는 칸을 7개만 둔다. 넘친 바인딩은 다시 만들기에서 그 이름 행의 키를 받는다). 그 slot의 매핑이 이미 있으면(불러온 사용자 키) 기본 키만 바인딩 키로 고치고(기본 키와 같아졌으면 dirty를 지운다 — UE `UpdateDefaultKeyFromActionKeyMapping`), 없으면 기본 키 = 현재 키로 만든다.
 - **`MapPlayerKey(mappingName, slot, key, profile = 현재, createSlotIfNeeded = 거짓)`**(UE cpp:1133-1250):
-  - 그 (이름, slot)의 currentKey를 바꾼다.
+  - 그 (이름, slot)의 currentKey를 바꾼다. 같은 키면 아무 일도 없다(UE `SetCurrentKey` — 키가 다를 때만 dirty).
   - slot이 없고 `createSlotIfNeeded`면 새로 만든다. 이때 defaultKey는 없음이다. 같은 이름 행에 매핑이 하나 이상 있어야 한다(UE :1192).
-  - 바꾸면 다시 만들기를 예약한다.
+  - 바꾸면 `Revision()`이 는다(평가기가 다시 만든다). 새 매핑과 바뀐 매핑은 dirty다.
   - 오류:
-    - 이름 행이 없다: `NotFound`
-    - slot이 없고 만들 수 없다: `NotFound`
-    - 키가 무효다: `InvalidArgument`
+    - 이름이 비었다·키가 무효다·slot이 범위 밖이다: `InvalidArgument`(UE는 키를 보지 않는다 — Rocks는 무효 키를 막는다)
     - 프로필이 없다: `NotFound`
-- **`UnmapPlayerKey(mappingName, slot)`**: 기본 키로 되돌린다(UE cpp:1252-).
+    - 이름 행이 없다: `NotFound`
+    - slot이 없고 만들 수 없다: `NotFound`(UE는 아무 일 없이 넘어간다 — 호출자가 알 수 있게 Rocks는 오류)
+    - 할당 실패: `OutOfMemory`(그대로)
+- **`UnmapPlayerKey(mappingName, slot, profile = 현재)`**: 기본 키로 되돌린다(UE cpp:1252-). 매핑이 없으면 `NotFound`다. 이미 기본 키면 수가 늘지 않는다.
+- **프로필**: `CreateProfile(id, displayName)`(같은 id는 `AlreadyExists`), `SetCurrentProfile(id)`(없으면 `NotFound`, 바꾸면 수가 는다), `ResetProfileToDefault(id = 현재)`(모든 매핑을 기본 키로). UE `CreateNewKeyProfile`·`SetActiveKeyProfile`·`ResetKeyProfileToDefault`다.
 - **적용**: 다시 만들기(4.2절 2)에서 리바인딩 가능한 바인딩의 키를 바꾼다(UE `EnhancedInputSubsystemInterface.cpp:1004-1020`, UserSettings :479-500·535-546).
-  - 활성 프로필의 같은 이름 행에서, 기본 키와 **같은 종류**(게임패드 키인지·터치인지)인 currentKey들로 바꾼다.
-  - 키 하나에 바인딩 하나를 만든다.
-- **충돌**: 다른 이름이 이미 쓰는 키로 바꾸는 요청은 막지 않는다(UE와 같다). `FindMappingsUsingKey(key)`로 UI가 알린다.
+  - 활성 프로필의 같은 이름 행에서, 기본 키와 **같은 종류**(게임패드 키인지·터치인지 — UE `bMatchBasicKeyTypes`, 제스처는 Rocks 키에 없다)인 currentKey들로 바꾼다(`KeysForBinding`). 무효 키(slot을 비운 것)는 넣지 않는다.
+  - 키 하나에 바인딩 하나를 만든다. 고를 키가 없으면 바인딩의 기본 키 그대로다(UE :1012-1016).
+- **충돌**: 다른 이름이 이미 쓰는 키로 바꾸는 요청은 막지 않는다(UE와 같다). `FindMappingsUsingKey(key, out)`로 UI가 알린다(현재 프로필에서 그 키를 쓰는 이름 — UE `GetMappingNamesForKey`).
 
 ### 5.3 저장
 
 UE는 `USaveGame` 슬롯 "EnhancedInputUserSettings"에 쓴다(cpp:842-895·948-1040). 형식은 버전 2이고, 프로필 헤더 다음에 바뀐 매핑만 {이름, 키 이름, slot}을 쓴다.
 
 Rocks:
-- 같은 내용을 리플렉션 struct `InputUserSettingsRecord`로 두고 JSON으로 읽고 쓴다.
-  - `SaveUserSettings → Array<uint8>`
-  - `LoadUserSettings(bytes) → Result<void>`
+- 같은 내용을 JSON 텍스트로 읽고 쓴다(Core `JsonWriter`·`JsonDocument`). 리플렉션 JSON(`ReflectionText` ExportJson·ImportJson)은 객체 Registry를 대상으로 하므로 플레이어 설정 같은 순수 값에는 쓰지 않는다(버린 대안 — 설정이 Registry·타입 등록을 요구하게 된다).
+  - `Save(StringBuilderBase& out)`·`Load(StringView text, Allocator& scratch)`
+  - 형식(버전 1): `{"version":1,"currentProfile":id,"profiles":[{"id":…,"displayName":…,"mappings":[{"name":…,"slot":n,"key":키 이름},…]},…]}`. 사람이 고칠 수 있게 들여 쓴다(JsonWriter 기본). mappings는 customized이거나 dirty인 매핑만이고, 저장하면 dirty를 지운다. displayName이 없으면 "Default Profile"이다.
 - 키는 이름(2.2절)이다.
+- 불러온 매핑은 행이 없어도 만든다(기본 키 없음 — 등록이 기본 키를 채운다, UE와 같다).
+- 불러오기는 매핑·현재 프로필을 **덮어쓴다**(UE는 저장본에서 새 설정 객체를 만든다). 파일은 바꾼 매핑만 담으므로, 먼저 모든 매핑을 기본 키로 되돌리고(dirty 끔) 기본 키가 없는 매핑(사용자가 만든 slot)과 빈 행을 지운 뒤 파일의 매핑을 넣는다. 같은 id 프로필의 같은 (이름, slot)은 현재 키만 바꾼다. 파일에 없는 프로필은 남는다(등록이 만든 override 프로필일 수 있다). 수를 늘린다. 그래서 "저장본으로 되돌리기"는 `Load(저장본)`이다.
+- 비운 slot(현재 키 무효 — 사용자가 만든 slot을 되돌린 것)은 빈 키 이름 `""`으로 쓰고, 불러오기는 빈 이름을 비운 slot으로 읽는다.
 - 파일 위치(사용자 Saved 폴더)는 호출자(Gameplay `LocalPlayer`)가 정한다. Rocks에는 아직 SaveGame 체계가 없다.
-- 모르는 매핑 이름·키 이름은 건너뛰고 진단으로 알린다(설정을 버리지 않는다). 형식이 깨졌으면 `CorruptData`이고 기존 설정은 그대로다.
+- 모르는 키 이름·범위 밖 slot의 매핑은 건너뛰고 Warning `InputUserSettingsEntrySkipped`로 알린다(설정을 버리지 않는다). JSON이 깨졌거나 필수 칸(version·profiles·각 id)이 없거나 종류가 틀리면 `InvalidArgument`이고(Config의 JSON 오류와 같다) 기존 설정은 그대로다. 더 높은 version은 `Unsupported`다(그대로). 현재 프로필 id가 목록에 없으면 기본 프로필로 둔다.

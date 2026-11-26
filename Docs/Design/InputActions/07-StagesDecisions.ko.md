@@ -15,6 +15,7 @@
 | IA3 | Gameplay 연결(5.1절) | 바인딩 전달 순서·Started 먼저·콜백 중 변경·값 바인딩·pause |
 | IA4 | 사용자 설정·리바인딩·저장(5.2·5.3절) | 등록 slot, Map·Unmap, 프로필 전환, 재생성 반영, JSON 왕복·모르는 이름 |
 | IA5 | 햅틱(6절), `input::MotorValues`, `GamepadBackend::SetMotors`(Windows) | 커브 평가·duration·loop·tag 교체·pause·최댓값 합성·scale·끔, XInput 모터 변환(순수 함수로 시험) |
+| IA5b | Android 패드 진동(6.4절 — 입력 스레드 JNI, `VIBRATE` 권한) | 세기 바이트 변환·1초 다시 쓰기·포커스 0(시각을 인자로 준 시간열), Android 빌드 |
 | IA6 | 에셋 감싸기·편집기(후속) | — |
 
 단계마다 구현 → 바뀐 시험 → 리뷰어 1명 → 커밋·push다.
@@ -31,6 +32,7 @@
 | IAD6 | 출력 경계 | Gameplay는 모터 값만 내고 호스트가 플랫폼에 쓴다 | 입력 원천과 같은 방향. 시험이 장치 없이 결정적이다 |
 | IAD7 | 저장 | JSON(리플렉션 struct) 바이트, 위치는 호출자 | SaveGame 체계 없음 |
 | IAD10 | 객체 경계 | 바인딩은 액션을 Guid로, 컨텍스트는 `actions` ObjectRefArray로 GC 간선, 평가기는 bundle 사본만, 갱신은 `UpdateContext`(2.7절) | Borrow는 GC를 막고, `ObjectRef`·`StructRefArray`는 복사가 안 되며, chord 대상 참조는 RMC2304(참조 배열 중첩)에 걸리고, World 객체는 에셋을 lease로 쥔다. 버린 대안: `StructRefArray<InputBinding>`(chord 참조·사본 불가), 평가기가 Weak 참조를 쥐고 다시 만들 때 pin(평가기가 Registry·접근 문맥에 묶이고 시험이 객체를 요구하며 World → 에셋 경로와 맞지 않는다) |
+| IAD12 | 사용자 설정 저장 | Core JSON으로 직접 쓰고 읽는다(5.3절) | 플레이어 설정은 Registry 밖 값이다. 버린 대안: 리플렉션 struct + ReflectionText JSON(Registry·타입 등록이 필요하다) |
 | IAD11 | 키 저장 | 바인딩 키는 UE `EKeys` 이름 String, 평가기가 다시 만들 때 `InputKey`로 읽는다 | 저장물이 Rocks enum 순서에 묶이지 않는다(IAD4). 버린 대안: `InputKey{kind, code}` 숫자 저장(순서가 바뀌면 깨진다), 이름 codec 확장(리플렉션에 사용자 codec 기반이 아직 없다) |
 | IAD8 | 패드 축 | dead zone 전 원시 값을 읽고 dead zone은 모디파이어 | UE와 같다(게임패드 암묵 dead zone 없음). InputState 적용 값을 쓰면 이중 적용 |
 | IAD9 | slot | 이름마다 slot 한 열(장치 칸 없음) | UE 기본 구현이 장치 ID를 Invalid로 돌려줘 실제로 한 열이다 |
@@ -51,6 +53,9 @@
 | 주입 처리 순서 | 액션마다 호출 순서 | (액션, 종류 열) 항목마다 호출 순서 | 같은 액션에 종류 열이 다른 주입을 섞을 때만 다르다(TakeHighest에서 절댓값이 같고 부호가 다를 때 결과가 다르다) |
 | 실행 중 액션 트리거·모디파이어 편집 | instance를 다시 만들 때까지 옛 복제본 | 다시 만들 때 종류 열이 같으면 상태를 넘기고 새 매개변수 | IAD10(사본이 다시 만들 때 바뀐다) |
 | 액션 식별 | 에셋 경로 | Guid `id` | 상세 계획 21.1절, 이름 변경에 강하다 |
+| 겹친 바인딩 합치기 | 뒤 바인딩 값으로 앞 항목을 다시 만든다 | 정렬 순 첫 항목을 둔다 | 2.7절 첫 사본 규칙과 같게(종류가 같아 값만 다르다) |
+| 매핑 이름 slot 넘침 | 8번째 Unspecified, 그 뒤 Max 칸 | 7개 넘는 바인딩은 행에 넣지 않고 경고 | 칸 7개만 둔다(5.2절) |
+| 사용자 설정 불러오기 | 저장본에서 새 객체 | 같은 객체에 덮어쓰기(모든 매핑을 기본 키로 되돌린 뒤 적용) | 평가기가 가리키는 설정을 그대로 둔다(5.3절) |
 
 ### 7.4 들이지 않는 것(사유)
 

@@ -95,13 +95,15 @@ internal static class AndroidPackager
     };
 
     // manifest다. 플랫폼 NativeActivity가 lib<module>.so를 싣는다. 회전·크기 변경에 액티비티를 다시 만들지 않는다(configChanges — UE
-    // UEDeployAndroid.cs:2833). debuggable은 aapt2 --debug-mode가 넣는다.
+    // UEDeployAndroid.cs:2833). debuggable은 aapt2 --debug-mode가 넣는다. VIBRATE는 게임패드 진동이다(UE UEDeployAndroid.cs:3080의 기본
+    // manifest처럼 늘 넣는다 — Docs/Design/InputActions 6.4절).
     internal static string Manifest(AndroidPackage package, string module, int minimumApi, int targetApi) => $"""
         <?xml version="1.0" encoding="utf-8"?>
         <manifest xmlns:android="http://schemas.android.com/apk/res/android"
             package="{SecurityElement.Escape(package.PackageName)}" android:versionCode="1" android:versionName="1.0">
             <uses-sdk android:minSdkVersion="{minimumApi}" android:targetSdkVersion="{targetApi}" />
             <uses-feature android:glEsVersion="0x00030001" android:required="true" />
+            <uses-permission android:name="android.permission.VIBRATE" />
             <application android:label="{SecurityElement.Escape(module)}" android:hasCode="false" android:extractNativeLibs="false">
                 <activity android:name="android.app.NativeActivity" android:exported="true" android:launchMode="singleTask"
                     android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
