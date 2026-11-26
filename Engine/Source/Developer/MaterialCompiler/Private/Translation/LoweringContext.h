@@ -81,6 +81,13 @@ public:
     // 번역 입력의 컬렉션 layout이다. 없으면 nullptr이다.
     const MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
 
+    // 이 노드의 출력 key에 나가는 간선이 있는가(UE처럼 쓰이는 출력만 검사하는 노드 — 6.10절 MS2c4).
+    Result<bool> IsOutputUsed(StringView key) noexcept;
+
+    // UserSceneTexture 이름을 번호로 바꾼다. 상한을 넘으면 UE 문구로 진단하고 false다(6.10절
+    // MS2c4).
+    Result<bool> UseUserSceneTexture(StringView name, uint32& index) noexcept;
+
     // 번역 입력의 텍스처 사실이다(6.10절 MS2c3). 없으면 nullptr이다.
     const MaterialTextureFacts* FindTexture(Guid asset) const noexcept;
 

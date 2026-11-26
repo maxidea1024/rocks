@@ -164,6 +164,38 @@ const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) cons
     return nullptr;
 }
 
+Result<bool> LoweringContext::IsOutputUsed(StringView key) noexcept {
+    auto name = PinName(key);
+    if (!name) {
+        return Result<bool>::Failure(name.Error());
+    }
+
+    for (const nodegraph::GraphEdge& edge : translator_.Graph().edges) {
+        if (edge.fromNode == node_.id && edge.fromPin == name.Value()) {
+            return Result<bool>::Success(true);
+        }
+    }
+
+    return Result<bool>::Success(false);
+}
+
+Result<bool> LoweringContext::UseUserSceneTexture(StringView name, uint32& index) noexcept {
+    auto admitted = translator_.ReferenceUserSceneTexture(name, index);
+    if (!admitted || admitted.Value()) {
+        return admitted;
+    }
+
+    if (auto reported =
+            Error(MaterialDiagnosticCode::BudgetExceeded, StringView(),
+                  "Too many unique UserSceneTexture inputs in the post process material "
+                  "-- max allowed is 5");
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
 const MaterialTextureFacts* LoweringContext::FindTexture(Guid asset) const noexcept {
     for (const MaterialTextureFacts& facts : translator_.Input().textures) {
         if (facts.asset == asset) {

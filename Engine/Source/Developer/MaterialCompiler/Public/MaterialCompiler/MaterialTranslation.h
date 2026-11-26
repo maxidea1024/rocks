@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Text/Name.h>
 #include <MaterialCompiler/MaterialIrModule.h>
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <NodeGraph/GraphDiagnostic.h>
@@ -13,7 +15,7 @@ namespace rocks::material {
 
 struct MaterialTranslation {
     explicit MaterialTranslation(Allocator& allocator) noexcept
-        : module(allocator), diagnostics(allocator) {
+        : module(allocator), diagnostics(allocator), userSceneTextures(allocator) {
     }
 
     MaterialTranslation(const MaterialTranslation&) = delete;
@@ -23,6 +25,9 @@ struct MaterialTranslation {
     nodegraph::GraphDiagnosticList diagnostics;
     // 번역이 읽은 번역 대상 항목이다(6.9절 MS2b3 — 쿠킹이 번역 키에 넣는다).
     MaterialTargetFieldMask consultedTarget = NoMaterialTargetFields;
+    // UserSceneTexture 노드가 읽는 이름이다(6.10절 MS2c4 — 처음 참조 순, 번호 k의 scene texture
+    // id는 MaterialUserSceneTextureFirstId + k). pass가 이름으로 입력을 묶는다.
+    Array<Name> userSceneTextures;
     bool succeeded = false;
 };
 

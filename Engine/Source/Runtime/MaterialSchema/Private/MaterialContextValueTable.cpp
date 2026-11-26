@@ -1178,6 +1178,78 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::Zero, {1.0f}, false),
+    // UE ScreenAlignedPosition(GetScreenPosition(Parameters)) — 화면 정렬 uv(6.10절 MS2c4).
+    ContextValue("ScreenAlignedUv", "", MaterialPinType::Float2, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::Scene, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE CalcScreenUVFromOffsetFraction(GetScreenPosition(Parameters), offset).
+    ContextValue("ScreenUvFromOffsetFraction", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE ViewportUVToBufferUV(uv)를 BufferBilinearUVMinMax로 자른 값.
+    ContextValue("BufferUvFromViewportUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE CalcSceneDepth(uv).
+    ContextValue("SceneDepthAt", "", MaterialPinType::Float1, MaterialContextValueForm::Function, 1,
+                 MaterialContextFeature::Scene, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE DecodeSceneColorAndAlpharForMaterialNode(uv).
+    ContextValue("SceneColorAt", "", MaterialPinType::Float4, MaterialContextValueForm::Function, 1,
+                 MaterialContextFeature::Scene, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE MaterialExpressionSceneDepthWithoutWater(uv, fallback).
+    ContextValue("SceneDepthWithoutWaterAt", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::Scene,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetDefaultSceneTextureUV(Parameters, id).
+    ContextValue("SceneTextureDefaultUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE ClampSceneTextureUV(ViewportUVToSceneTextureUV(uv, id), id).
+    ContextValue("SceneTextureUvFromViewportUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE ClampSceneTextureUV(uv, id).
+    ContextValue("SceneTextureClampUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE SceneTextureLookup(uv, id, filtered)(모바일 MobileSceneTextureLookup — pass가 고른다).
+    ContextValue("SceneTextureLookup", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 3, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetSceneTextureViewSize(id)(xy 크기, zw 역수).
+    ContextValue("SceneTextureViewSize", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE ClampSceneTextureUV(ViewportUVToBufferUV(uv), 0).
+    ContextValue("DBufferUvFromViewportUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MaterialExpressionDBufferTextureLookup(Parameters, uv, index).
+    ContextValue("DBufferTextureLookup", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::Scene,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetDefaultPathTracingBufferTextureUV(Parameters, 0).
+    ContextValue("PathTracingBufferDefaultUv", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MaterialExpressionPathTracingBufferTextureLookup(Parameters, uv, index).
+    ContextValue("PathTracingBufferTextureLookup", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PathTracing,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
 };
 
 } // namespace

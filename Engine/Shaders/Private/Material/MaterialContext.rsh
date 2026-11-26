@@ -671,6 +671,36 @@ struct MaterialInputs {
 #define MaterialContextDepthOfFieldFunction(c, a0, a1) (0.0)
 #endif
 
+#if MATERIAL_SUPPLY_SCENE
+#define MaterialContextScreenAlignedUv(c) MaterialPassScreenAlignedUv(c)
+#define MaterialContextScreenUvFromOffsetFraction(c, a0) MaterialPassScreenUvFromOffsetFraction(c, a0)
+#define MaterialContextBufferUvFromViewportUv(c, a0) MaterialPassBufferUvFromViewportUv(c, a0)
+#define MaterialContextSceneDepthAt(c, a0) MaterialPassSceneDepthAt(c, a0)
+#define MaterialContextSceneColorAt(c, a0) MaterialPassSceneColorAt(c, a0)
+#define MaterialContextSceneDepthWithoutWaterAt(c, a0, a1) MaterialPassSceneDepthWithoutWaterAt(c, a0, a1)
+#define MaterialContextSceneTextureDefaultUv(c, a0) MaterialPassSceneTextureDefaultUv(c, a0)
+#define MaterialContextSceneTextureUvFromViewportUv(c, a0, a1) MaterialPassSceneTextureUvFromViewportUv(c, a0, a1)
+#define MaterialContextSceneTextureClampUv(c, a0, a1) MaterialPassSceneTextureClampUv(c, a0, a1)
+#define MaterialContextSceneTextureLookup(c, a0, a1, a2) MaterialPassSceneTextureLookup(c, a0, a1, a2)
+#define MaterialContextSceneTextureViewSize(c, a0) MaterialPassSceneTextureViewSize(c, a0)
+#define MaterialContextDBufferUvFromViewportUv(c, a0) MaterialPassDBufferUvFromViewportUv(c, a0)
+#define MaterialContextDBufferTextureLookup(c, a0, a1) MaterialPassDBufferTextureLookup(c, a0, a1)
+#else
+#define MaterialContextScreenAlignedUv(c) float2(0.0, 0.0)
+#define MaterialContextScreenUvFromOffsetFraction(c, a0) float2(0.0, 0.0)
+#define MaterialContextBufferUvFromViewportUv(c, a0) float2(0.0, 0.0)
+#define MaterialContextSceneDepthAt(c, a0) (0.0)
+#define MaterialContextSceneColorAt(c, a0) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextSceneDepthWithoutWaterAt(c, a0, a1) (0.0)
+#define MaterialContextSceneTextureDefaultUv(c, a0) float2(0.0, 0.0)
+#define MaterialContextSceneTextureUvFromViewportUv(c, a0, a1) float2(0.0, 0.0)
+#define MaterialContextSceneTextureClampUv(c, a0, a1) float2(0.0, 0.0)
+#define MaterialContextSceneTextureLookup(c, a0, a1, a2) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextSceneTextureViewSize(c, a0) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextDBufferUvFromViewportUv(c, a0) float2(0.0, 0.0)
+#define MaterialContextDBufferTextureLookup(c, a0, a1) float4(0.0, 0.0, 0.0, 0.0)
+#endif
+
 #if MATERIAL_SUPPLY_DECAL
 #define MaterialContextDecalColor(c) MaterialPassDecalColor(c)
 #define MaterialContextDecalLifetimeOpacity(c) MaterialPassDecalLifetimeOpacity(c)
@@ -881,12 +911,16 @@ struct MaterialInputs {
 #define MaterialContextPathTracingIndirectDiffuseRay(c) MaterialPassPathTracingIndirectDiffuseRay(c)
 #define MaterialContextPathTracingIndirectSpecularRay(c) MaterialPassPathTracingIndirectSpecularRay(c)
 #define MaterialContextPathTracingIndirectVolumeRay(c) MaterialPassPathTracingIndirectVolumeRay(c)
+#define MaterialContextPathTracingBufferDefaultUv(c) MaterialPassPathTracingBufferDefaultUv(c)
+#define MaterialContextPathTracingBufferTextureLookup(c, a0, a1) MaterialPassPathTracingBufferTextureLookup(c, a0, a1)
 #else
 #define MaterialContextPathTracingPass(c) (false)
 #define MaterialContextPathTracingShadowRay(c) (false)
 #define MaterialContextPathTracingIndirectDiffuseRay(c) (false)
 #define MaterialContextPathTracingIndirectSpecularRay(c) (false)
 #define MaterialContextPathTracingIndirectVolumeRay(c) (false)
+#define MaterialContextPathTracingBufferDefaultUv(c) float2(0.0, 0.0)
+#define MaterialContextPathTracingBufferTextureLookup(c, a0, a1) float4(0.0, 0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_USER_INTERFACE

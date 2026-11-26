@@ -211,6 +211,31 @@ Result<bool> Translator::ReferenceSampler(uint8 source, Guid id, uint32& count) 
     return Result<bool>::Success(true);
 }
 
+Result<bool> Translator::ReferenceUserSceneTexture(StringView name, uint32& index) noexcept {
+    auto interned = input_.names.TryIntern(name);
+    if (!interned) {
+        return Result<bool>::Failure(interned.Error());
+    }
+
+    for (usize at = 0; at < out_.userSceneTextures.Size(); ++at) {
+        if (out_.userSceneTextures[at] == interned.Value()) {
+            index = static_cast<uint32>(at);
+            return Result<bool>::Success(true);
+        }
+    }
+
+    if (out_.userSceneTextures.Size() >= MaxUserSceneTextures) {
+        return Result<bool>::Success(false);
+    }
+
+    index = static_cast<uint32>(out_.userSceneTextures.Size());
+    if (auto added = out_.userSceneTextures.TryPushBack(interned.Value()); !added) {
+        return Result<bool>::Failure(added.Error());
+    }
+
+    return Result<bool>::Success(true);
+}
+
 Result<bool> Translator::ReferenceCollection(Guid asset) noexcept {
     for (const Guid& existing : collections_) {
         if (existing == asset) {
@@ -322,9 +347,9 @@ Result<void> Translator::BuildIndex() noexcept {
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
     const Span<const LoweringEntry> groups[] = {
-        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),   ContextValueLowerings(),
-        CoordinateLowerings(), TransformLowerings(), SwitchLowerings(), InterpolatorLowerings(),
-        SupplyLowerings(),     ParameterLowerings(), TextureLowerings()};
+        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),    ContextValueLowerings(),
+        CoordinateLowerings(), TransformLowerings(), SwitchLowerings(),  InterpolatorLowerings(),
+        SupplyLowerings(),     ParameterLowerings(), TextureLowerings(), SceneLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -1379,6 +1404,7 @@ Result<void> Translator::CheckPending() noexcept {
 Result<void> Translator::Run() noexcept {
     out_.module.Clear();
     out_.diagnostics.items.Clear();
+    out_.userSceneTextures.Clear();
     out_.succeeded = false;
     out_.consultedTarget = NoMaterialTargetFields;
     auto domain = input_.names.TryFind(MaterialDomainName);

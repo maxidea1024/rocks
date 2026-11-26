@@ -48,6 +48,13 @@ inline constexpr uint32 MaxLoweringDepth = 256;
 // MaxNumParameterCollectionsPerMaterial, RE/Public/ParameterCollection.h:13–18).
 inline constexpr usize MaxMaterialCollections = 2;
 
+// post process 머티리얼 하나가 읽을 수 있는 UserSceneTexture 수다(UE
+// kPostProcessMaterialInputCountMax — Renderer/Public/PostProcess/PostProcessMaterialInputs.h:15).
+inline constexpr usize MaxUserSceneTextures = 5;
+
+// 첫 UserSceneTexture의 scene texture id다(UE PPI_UserSceneTexture0 — MaterialSceneTextureId.h:80).
+inline constexpr uint32 MaterialUserSceneTextureFirstId = 32;
+
 class Translator {
 public:
     Translator(Allocator& allocator, const MaterialTranslationInput& input,
@@ -131,6 +138,9 @@ public:
     // 자기 샘플러를 쓰는 텍스처 slot(출처, id)을 센다. 이미 센 slot이면 그대로 참이고, 번역 대상
     // maxSamplers를 넘으면 넣지 않고 거짓이다(6.10절 MS2c3 V9). count는 넣은 뒤의 수다.
     Result<bool> ReferenceSampler(uint8 source, Guid id, uint32& count) noexcept;
+
+    // UserSceneTexture 이름을 번호로 바꾼다(처음 참조 순). 상한을 넘으면 거짓이다(6.10절 MS2c4).
+    Result<bool> ReferenceUserSceneTexture(StringView name, uint32& index) noexcept;
 
     // 컬렉션 asset을 참조 목록에 넣는다. 이미 있으면 그대로 참이고, 상한을 넘으면 넣지 않고
     // 거짓이다.
