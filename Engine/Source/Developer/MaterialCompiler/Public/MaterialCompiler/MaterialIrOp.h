@@ -112,11 +112,23 @@ enum class IrOp : uint8 {
 
     // 정점 → 픽셀 보간 값이다(6.9절 MS2b4a — VertexInterpolator). 피연산자는 정점 문맥 값, 즉시값
     // [0]은 모듈이 정한 첫 성분 번호(성분 단위 오프셋)다.
-    Interpolate = 83
+    Interpolate = 83,
+
+    // 늦은 진단의 자리 값이다(6.10절 MS2c1 — TODO 노드·모르는 노드). 즉시값 [0]은 종류
+    // (IrPendingKind), [1]은 선행 ID 번호, [2]·[3]은 노드 NodeId(high·low)다.
+    Pending = 84
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 84;
+inline constexpr uint32 IrOpCount = 85;
+
+// Pending 자리 값의 종류다.
+enum class IrPendingKind : uint8 {
+    // 카탈로그에 없는 노드(V12).
+    UnknownNode = 0,
+    // 선행이 없는 TODO 노드(PrerequisiteMissing).
+    PrerequisiteMissing = 1
+};
 
 // 연산이 받는 피연산자 수다(Constant 0, 단항 1, 이항 2, 삼항·선택·분기 3, Append 2). 인자 수가
 // 값마다 다른 Extern은 0이다(값의 operandCount를 본다).

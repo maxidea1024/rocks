@@ -96,9 +96,10 @@ constexpr IrOpInfo IrOpInfos[IrOpCount] = {
     {"Smoothstep", 3},
     {"Extern", 0},
     {"Interpolate", 1},
+    {"Pending", 0},
 };
 
-static_assert(static_cast<uint32>(IrOp::Interpolate) + 1 == IrOpCount,
+static_assert(static_cast<uint32>(IrOp::Pending) + 1 == IrOpCount,
               "IrOpCount must follow the last IrOp value");
 
 } // namespace

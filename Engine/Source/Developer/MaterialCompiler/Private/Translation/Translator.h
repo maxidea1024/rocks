@@ -148,7 +148,9 @@ private:
         // 오류 없이 번역했다.
         Done = 1,
         // 번역 중 오류를 진단했다(없는 출력 핀 값을 다시 진단하지 않는다).
-        Failed = 2
+        Failed = 2,
+        // 늦은 진단 노드다(TODO·모르는 노드 — 출력 핀마다 Pending 자리 값, 6.10절 MS2c1).
+        Pending = 3
     };
 
     // 의존 하나다: consumer 노드의 input 핀이 source 노드에 기댄다.
@@ -170,6 +172,10 @@ private:
     Result<void> TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept;
     // 보간 성분 수 V9 검사다(모듈을 만든 뒤).
     Result<void> CheckInterpolantBudget() noexcept;
+    // 결과에서 닿는 Pending 자리 값의 늦은 진단이다(6.10절 MS2c1 — DCE 뒤, 조건 값 가지는 경고).
+    Result<void> CheckPending() noexcept;
+    // node의 pin 출력 자리 값을 만든다(처음 요청 때).
+    Result<IrValueId> PendingOutput(const nodegraph::GraphNode& node, Name pin) noexcept;
 
     HashMap<PinKey, IrValueId, PinKeyHash>& Outputs() noexcept {
         return context_ == EvaluationContext::Vertex           ? outputsVertex_

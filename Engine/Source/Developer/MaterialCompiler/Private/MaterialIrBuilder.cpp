@@ -1100,6 +1100,23 @@ Result<IrValueId> IrBuilder::Extern(uint32 index, IrExternVariant variant, IrTyp
     return Intern(value);
 }
 
+Result<IrValueId> IrBuilder::Pending(IrType type, IrPendingKind kind, uint8 prerequisite,
+                                     Guid node) noexcept {
+    if (!IsValidIrType(type)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = type;
+    value.op = IrOp::Pending;
+    value.frequency = IrFrequency::Pixel;
+    value.immediate[0] = static_cast<uint64>(kind);
+    value.immediate[1] = prerequisite;
+    value.immediate[2] = node.high;
+    value.immediate[3] = node.low;
+    return Intern(value);
+}
+
 Result<IrValueId> IrBuilder::Interpolate(IrValueId vertex) noexcept {
     if (!IsValid(vertex) || values_[vertex].type.scalar != IrScalar::Float ||
         values_[vertex].type.IsMatrix()) {

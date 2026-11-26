@@ -68,6 +68,10 @@ public:
     // 정점 값 vertex를 픽셀로 보간한 값이다(6.9절 MS2b4a — Float 벡터·스칼라만, 상수는 그 상수).
     // 오류: Float가 아니거나 빌더 밖이면 InvalidArgument.
     Result<IrValueId> Interpolate(IrValueId vertex) noexcept;
+    // 늦은 진단의 자리 값이다(6.10절 MS2c1). node마다 다른 값이다(hash-consing으로 합쳐지지
+    // 않는다). 오류: type이 규칙 밖이면 InvalidArgument.
+    Result<IrValueId> Pending(IrType type, IrPendingKind kind, uint8 prerequisite,
+                              Guid node) noexcept;
 
     const IrValue& Value(IrValueId id) const noexcept;
 

@@ -764,6 +764,18 @@ Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
         return Extern(value);
     case IrOp::Interpolate:
         return Interpolated(value);
+    case IrOp::Pending: {
+        // 조건 가지에만 있는 늦은 진단 노드의 자리다(그 가지를 고르는 조합은 쿠킹이 거부한다).
+        if (auto open = Raw("(("); !open) {
+            return open;
+        }
+
+        if (auto type = TypeName(value.type); !type) {
+            return type;
+        }
+
+        return Raw(")0)");
+    }
     case IrOp::Splat: {
         if (auto type = TypeName(value.type); !type) {
             return type;

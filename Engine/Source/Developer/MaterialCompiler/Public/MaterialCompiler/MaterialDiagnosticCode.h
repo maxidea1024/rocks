@@ -50,7 +50,9 @@ enum class MaterialDiagnosticCode : uint32 {
     // 번역 때 0 나누기가 확정된다.
     DivideByZero = 106,
     // 출력에서 거슬러 가는 노드 사슬이 번역 상한보다 깊다.
-    GraphTooDeep = 107
+    GraphTooDeep = 107,
+    // 노드가 아직 없는 선행(19.4.1절 MPQ-*)을 기다린다(TODO 노드 — 6.10절 MS2c1).
+    PrerequisiteMissing = 108
 };
 
 constexpr uint32 ToDiagnosticCode(MaterialDiagnosticCode code) noexcept {

@@ -440,6 +440,10 @@ Result<IrValueId> Translator::LowerNodeOutput(const nodegraph::GraphNode& node, 
         state = States().Find(node.id);
     }
 
+    if (state != nullptr && *state == NodeState::Pending) {
+        return PendingOutput(node, pin);
+    }
+
     if (state != nullptr && *state == NodeState::Visiting) {
         if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
                                    MaterialDiagnosticCode::Cycle, node.id, pin, "Data flow cycle");
@@ -488,10 +492,16 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
             lowered = RecordOutput(node.id, rerouteOut_, value.Value());
         }
     } else if (const MaterialNodeDefinition* definition = input_.catalog.Find(node.type);
-               definition == nullptr) {
-        lowered =
-            Report(nodegraph::GraphDiagnosticSeverity::Error, MaterialDiagnosticCode::UnknownNode,
-                   node.id, Name(), "Node type is not registered");
+               definition == nullptr ||
+               (definition->status == MaterialNodeStatus::PrerequisiteMissing &&
+                FindLowering(node.type) == nullptr)) {
+        // 모르는 노드·TODO 노드는 바로 진단하지 않고 출력마다 자리 값을 낸다(static 해석·DCE 뒤
+        // 살아 있는 것만 진단 — 6.10절 MS2c1).
+        if (auto marked = States().InsertOrAssign(node.id, NodeState::Pending); !marked) {
+            return Result<void>::Failure(marked.Error());
+        }
+
+        return Result<void>::Success();
     } else if (LoweringFn fn = FindLowering(node.type); fn == nullptr) {
         SystemAllocator scratch;
         String message(scratch);
@@ -1187,6 +1197,145 @@ Result<void> Translator::CheckInterpolantBudget() noexcept {
                   Guid{}, Name(), "Maximum number of custom vertex interpolators exceeded");
 }
 
+Result<IrValueId> Translator::PendingOutput(const nodegraph::GraphNode& node, Name pin) noexcept {
+    // 타입은 정의 출력 핀의 수 타입이고, Numeric·Any·모르는 노드는 Float4다.
+    IrType type = IrFloat(MaxIrComponents);
+    IrPendingKind kind = IrPendingKind::UnknownNode;
+    uint8 prerequisite = 0;
+    if (const MaterialNodeDefinition* definition = input_.catalog.Find(node.type)) {
+        kind = IrPendingKind::PrerequisiteMissing;
+        prerequisite = static_cast<uint8>(definition->prerequisite);
+        for (const MaterialPinDefinition& definitionPin : definition->pins) {
+            auto name = input_.names.TryFind(definitionPin.key);
+            if (definitionPin.direction != nodegraph::PinDirection::Output || !name ||
+                !(name.Value() == pin)) {
+                continue;
+            }
+
+            const uint32 value = static_cast<uint32>(definitionPin.type);
+            const uint32 first = static_cast<uint32>(MaterialPinType::Float1);
+            const uint32 last = static_cast<uint32>(MaterialPinType::Float4);
+            if (value >= first && value <= last) {
+                type = IrFloat(static_cast<uint8>(value - first + 1));
+            }
+        }
+    }
+
+    builder_.SetSite(IrSite{node.id, StringView()});
+    auto value = builder_.Pending(type, kind, prerequisite, node.id);
+    if (!value) {
+        return value;
+    }
+
+    if (auto recorded = RecordOutput(node.id, pin, value.Value()); !recorded) {
+        return Result<IrValueId>::Failure(recorded.Error());
+    }
+
+    return value;
+}
+
+Result<void> Translator::CheckPending() noexcept {
+    // 결과에서 닿는 Pending마다 진단한다. 조건 값(Bool 문맥 값)을 조건으로 한 Select의 가지로만
+    // 닿으면 경고다(19.2.1절 — 그 가지를 고르는 조합의 거부는 쿠킹이 한다).
+    SystemAllocator scratch;
+    Array<uint8> reached(scratch);
+    if (auto sized = reached.TryResize(builder_.Count()); !sized) {
+        return sized;
+    }
+
+    for (uint8& item : reached) {
+        item = 0;
+    }
+
+    struct Visit {
+        IrValueId value;
+        bool conditional;
+    };
+
+    // 닿은 표시 비트다(무조건·조건).
+    constexpr uint8 ReachedPlain = 1;
+    constexpr uint8 ReachedConditional = 2;
+    Array<Visit> stack(scratch);
+    for (const IrResult& result : results_) {
+        if (auto pushed = stack.TryPushBack(Visit{result.value, false}); !pushed) {
+            return pushed;
+        }
+    }
+
+    while (!stack.IsEmpty()) {
+        auto popped = stack.TryPopBack();
+        if (!popped) {
+            return Result<void>::Failure(popped.Error());
+        }
+
+        const Visit visit = popped.Value();
+        const uint8 bit = visit.conditional ? ReachedConditional : ReachedPlain;
+        if ((reached[visit.value] & bit) != 0 ||
+            (visit.conditional && (reached[visit.value] & ReachedPlain) != 0)) {
+            continue;
+        }
+
+        reached[visit.value] |= bit;
+        const IrValue& value = builder_.Value(visit.value);
+        if (value.op == IrOp::Pending) {
+            continue;
+        }
+
+        const bool conditionSelect = value.op == IrOp::Select &&
+                                     builder_.Value(value.operands[0]).op == IrOp::Extern &&
+                                     builder_.Value(value.operands[0]).type == IrBool(1);
+        for (uint8 index = 0; index < value.operandCount; ++index) {
+            const bool branch = conditionSelect && index > 0;
+            if (auto pushed =
+                    stack.TryPushBack(Visit{value.operands[index], visit.conditional || branch});
+                !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    // 값 번호 순으로 진단한다(결정적 순서).
+    for (usize index = 0; index < builder_.Count(); ++index) {
+        const IrValue& value = builder_.Value(static_cast<IrValueId>(index));
+        if (value.op != IrOp::Pending || reached[index] == 0) {
+            continue;
+        }
+
+        const bool plain = (reached[index] & ReachedPlain) != 0;
+        const Guid node{value.immediate[2], value.immediate[3]};
+        const auto severity = plain ? nodegraph::GraphDiagnosticSeverity::Error
+                                    : nodegraph::GraphDiagnosticSeverity::Warning;
+        if (value.immediate[0] == static_cast<uint64>(IrPendingKind::UnknownNode)) {
+            if (auto reported = Report(severity, MaterialDiagnosticCode::UnknownNode, node, Name(),
+                                       "Node type is not registered");
+                !reported) {
+                return reported;
+            }
+
+            continue;
+        }
+
+        String message(scratch);
+        const StringView prerequisite =
+            MaterialPrerequisiteId(static_cast<MaterialPrerequisite>(value.immediate[1]));
+        const StringView parts[] = {"Node is not translated until prerequisite ", prerequisite,
+                                    " exists"};
+        for (StringView part : parts) {
+            if (auto appended = message.TryAppend(part); !appended) {
+                return appended;
+            }
+        }
+
+        if (auto reported = Report(severity, MaterialDiagnosticCode::PrerequisiteMissing, node,
+                                   Name(), message.View());
+            !reported) {
+            return reported;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> Translator::Run() noexcept {
     out_.module.Clear();
     out_.diagnostics.items.Clear();
@@ -1280,6 +1429,10 @@ Result<void> Translator::Run() noexcept {
 
     if (auto checked = CheckContextValues(); !checked) {
         return checked;
+    }
+
+    if (auto pending = CheckPending(); !pending) {
+        return pending;
     }
 
     if (failed_) {
