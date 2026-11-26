@@ -117,7 +117,7 @@ layout 배율이 아직 정해지지 않은 Element의 무효화는 `Prepass`·`
 
 **좌표와 배율:** Element는 DPI 독립 단위로 계산한다. `Geometry`는 로컬 크기, 누적 layout 변환(균일 배율 + 이동), 누적 render 변환(2×2 행렬 + 이동)을 가진다(`SlateCore/Public/Layout/Geometry.h:39`, `SlateLayoutTransform.h:19`). layout 변환은 배치·hit 계산에, render 변환은 표시에만 쓴다. 원하는 크기 계산은 layout 배율을 인자로 받으므로 텍스트는 최종 배율로 측정된다. 창 루트 변환은 `앱 배율 × 창 DPI`다(`SWindow.cpp:823-831`).
 
-**lane:** Element·Widget 처리는 UE의 game thread와 같이 Game lane 하나에서 실행한다. 그리기 목록과 batch는 순환 draw buffer에 기록하여 Render owner lane에 넘기며, Render lane은 Element·Widget을 읽지 않는다(UE `FSlateRHIRenderer`는 game thread에서 batch한 뒤 render thread에 명령을 보낸다, `SlateRHIRenderer.cpp:1634, 1749`). buffer 반환은 GPU fence 완료 이벤트로 판정한다. OS 창 메시지는 PlatformWindow가 OS UI thread에서 받아 queue로 넘긴다(전체 계획 2.5절). Core `SharedPtr`는 항상 원자 참조 계수지만 Element 트리 자체는 Game lane 밖에서 접근하지 않는다.
+**lane:** Element·Widget 처리는 UE의 game thread와 같이 Game lane 하나에서 실행한다. 그리기 목록과 batch는 draw buffer에 기록하고 렌더러가 프레임 arena에 복사하여 Render owner lane에 넘기며, Render lane은 Element·Widget을 읽지 않는다(UE `FSlateRHIRenderer`는 game thread에서 batch한 뒤 render thread에 명령을 보낸다, `SlateRHIRenderer.cpp:1634, 1749`). 복사본(프레임 arena)은 그 프레임 slot의 GPU 완료 뒤 다시 쓰고, draw buffer는 복사 직후 다시 쓴다(18.3절). OS 창 메시지는 PlatformWindow가 OS UI thread에서 받아 queue로 넘긴다(전체 계획 2.5절). Core `SharedPtr`는 항상 원자 참조 계수지만 Element 트리 자체는 Game lane 밖에서 접근하지 않는다.
 
 ### 3.5 레이아웃 Element
 

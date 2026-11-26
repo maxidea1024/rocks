@@ -2,7 +2,7 @@
 
 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)를 Rocks Core 위에 재구현
 
-**설계 기준일 2026.11.26 · 초안 2.7 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 선행 구현을 UT1 진행 중으로 재작업 중(9.1절 UW 단계, 에디터 룩·갤러리 우선)**
+**설계 기준일 2026.11.26 · 초안 2.8 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD15는 `NotPlaceable`만 확정, UD13–UD17 권장안 · 선행 구현을 UT1 진행 중으로 재작업 중(9.1절 UW 단계, 에디터 룩·갤러리 우선)**
 
 Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용한다. 구조는 UE 5.8의 UI 체계를 그대로 따른다. 하위 층은 Object가 아닌 경량 Element로 레이아웃·그리기·입력·focus·텍스트를 처리하고, 상위 층은 `rocks::Object`인 Widget이 Element를 감싸 에셋·리플렉션·GC·자체 언어 바인딩·Designer 편집을 제공한다. 에디터는 Element 층을 직접 사용하고, 게임 UI는 Widget 층으로 작성한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8의 기본값을 따른다(4.2절).
 
@@ -44,3 +44,4 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 - [15. 에디터 부품 빈칸 목록](15-EditorPartsGap.ko.md)
 - [16. UI 갤러리 구성](16-Gallery.ko.md)
 - [17. 벡터 이미지(SVG)와 아이콘](17-VectorImages.ko.md)
+- [18. 렌더 경계(UW6 상세 설계)](18-RenderBoundary.ko.md)
