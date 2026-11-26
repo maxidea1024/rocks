@@ -286,14 +286,14 @@ TEST(Audio_Mp3_Rejects) {
     REQUIRE(channelChange.Size() > 0);
     CHECK(Mp3Error(channelChange.View(), allocator) == ErrorCode::Unsupported);
 
-    // frame이 없으면 InvalidArgument: 빈 입력, 0 byte 묶음, ID3v2 tag만, 머리 4 byte만.
-    CHECK(Mp3Error(Span<const uint8>(), allocator) == ErrorCode::InvalidArgument);
+    // frame이 없으면 CorruptData: 빈 입력, 0 byte 묶음, ID3v2 tag만, 머리 4 byte만.
+    CHECK(Mp3Error(Span<const uint8>(), allocator) == ErrorCode::CorruptData);
     const uint8 zeros[4096] = {};
-    CHECK(Mp3Error(Bytes(zeros), allocator) == ErrorCode::InvalidArgument);
+    CHECK(Mp3Error(Bytes(zeros), allocator) == ErrorCode::CorruptData);
     CHECK(Mp3Error(Span<const uint8>(Mp3MonoLame, MonoId3v2Bytes), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(Mp3Error(Span<const uint8>(Mp3StereoNoTag, HeaderBytes), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // 실패하면 앞 결과를 비운다.
     DecodedSourceAudio audio(allocator);
@@ -327,14 +327,14 @@ TEST(Audio_Mp3_CapacityBeforeDecode) {
 TEST(Audio_Mp3_TruncatedAndCorruptedInputs) {
     SystemAllocator allocator;
     DecodedSourceAudio audio(allocator);
-    // 모든 앞부분 길이(37 byte 간격): 받으면 길이가 원본 이하, 아니면 InvalidArgument다.
+    // 모든 앞부분 길이(37 byte 간격): 받으면 길이가 원본 이하, 아니면 CorruptData다.
     constexpr usize PrefixStep = 37;
     for (usize size = 0; size <= sizeof(Mp3MonoLame); size += PrefixStep) {
         const Result<void> decoded = DecodeMp3(Span<const uint8>(Mp3MonoLame, size), audio);
         if (decoded) {
             CHECK(audio.FrameCount() > 0 && audio.FrameCount() <= MonoFrames);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument);
+            CHECK(decoded.Error() == ErrorCode::CorruptData);
         }
     }
 
@@ -366,7 +366,7 @@ TEST(Audio_Mp3_TruncatedAndCorruptedInputs) {
 
             CHECK(finite);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument ||
+            CHECK(decoded.Error() == ErrorCode::CorruptData ||
                   decoded.Error() == ErrorCode::Unsupported);
         }
     }

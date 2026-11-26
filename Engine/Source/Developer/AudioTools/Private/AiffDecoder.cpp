@@ -71,7 +71,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     const uint8* bytes = file.Data();
     if (file.Size() < FormHeaderBytes || !IsTag(bytes, "FORM") ||
         !(IsTag(bytes + FormTypeOffset, "AIFF") || IsTag(bytes + FormTypeOffset, "AIFC"))) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const bool compressed = IsTag(bytes + FormTypeOffset, "AIFC");
@@ -120,7 +120,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     }
 
     if (!hasComm || commSize < (compressed ? CommCompressionBytes : CommBytes)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* comm = bytes + commOffset;
@@ -154,7 +154,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     }
 
     if (channels == 0 || frames == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (channels > MaxSourceChannels || sampleRate < MinSourceSampleRate ||
@@ -168,7 +168,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     }
 
     if (!hasSsnd || ssndSize < SsndHeaderBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // SSND: offset·blockSize 머리 뒤 offset byte를 건너뛴 곳부터 PCM이다.
@@ -177,7 +177,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     const uint64 needed = frames * channels * bytesPerSample;
     if (dataOffset > ssndSize - SsndHeaderBytes ||
         needed > ssndSize - SsndHeaderBytes - dataOffset) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(channels, sampleRate, frames, FormatOf(bytesPerSample, encoding),
@@ -188,7 +188,7 @@ Result<void> DecodeAiffInto(Span<const uint8> file, DecodedSourceAudio& out) noe
 
     if (!DeinterleaveToFloat(bytes + ssndOffset + SsndHeaderBytes + dataOffset, channels, frames,
                              bytesPerSample, encoding, bigEndian, pcm.Value())) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();

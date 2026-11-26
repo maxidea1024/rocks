@@ -19,7 +19,7 @@
 | IA6a | 에셋 타입(2.8절 — `InputAction`·`InputContext`의 `Asset` 파생, `HapticEffectAsset`, 실효 id, lease 읽기 도우미) | 리플렉션 형태(기반 `Asset`·필드), 쿠킹 패키지 로드(Hard 참조 액션 함께 로드)와 모은 bundle = source에서 모은 bundle(트리거·모디파이어·매핑 설정·프로필 override까지), 하위 객체 액션, 실효 id(0이면 AssetId), 도우미 `TypeMismatch`·무효·회수 lease·`WrongThread`·할당 실패(시도마다) 시 출력 그대로, 햅틱 사본·lease 재생과 그 실패 |
 | IA6b | PlayerController 에셋 컨텍스트(5.4절) | Add(쥠·같은 에셋 다시 넣기는 lease를 가져가 놓음·다른 원천 같은 id 거부·실패 시 lease 그대로)·Remove(등록 횟수 0에 놓음)·Refresh(데이터 변경 반영·id 변경 거부·회수 lease)·직접 뺀 컨텍스트와 빼고 다시 넣은 같은 id(세대) 정리·EndPlay 해제·World 전체 Refresh |
 | IA6c | 편집기(입력 에셋 편집 화면·키 선택·액션 고르기가 실효 id를 적음·복제 때 `id` 0으로 되돌림 — 2.8절) | Studio 단계 |
-| IA7 | 함수 바인딩(`(객체 handle, FunctionId)` → `BindAction` — 5.1절, 재사용 값 `FunctionBinding` — [이벤트 리플렉션](../EventReflection.ko.md) EV1a 뒤) | 서명 검사 거부·객체 사라짐 건너뛰기·쿠킹 EditorOnly 함수 거부 |
+| IA7 | 함수 바인딩(`BindFunction` — 5.1절, 재사용 값 `FunctionBinding` — [이벤트 리플렉션](../EventReflection.ko.md) EV1a), `ActionEventData`·`InputValue` 리플렉션 struct, `ActionEvent` Flags enum | 함수 호출과 받은 데이터(이벤트 마스크 적용), 콜백과 섞인 실행 순서·`consumes`, 바인딩 거부(없음·static·반환·서명·None 마스크·null·회수된 대상), 대상 사라짐(StaleHandle) 뒤 바인딩 정리·파괴 대기 건너뛰기(경고 없음), 호출 실패에도 consumes, 다른 스레드 전달의 Warning 한 번, Remove·Clear |
 
 단계마다 구현 → 바뀐 시험 → 리뷰어 1명 → 커밋·push다.
 
@@ -40,6 +40,7 @@
 | IAD8 | 패드 축 | dead zone 전 원시 값을 읽고 dead zone은 모디파이어 | UE와 같다(게임패드 암묵 dead zone 없음). InputState 적용 값을 쓰면 이중 적용 |
 | IAD13 | 에셋 타입 | `InputAction`·`InputContext`가 바로 `Asset` 파생, 햅틱은 `HapticEffectAsset`이 값 struct를 감싼다, `id` 0이면 AssetId가 실효 id(2.8절) | UE `UDataAsset` 파생과 같다. 버린 대안: 감싸는 에셋 클래스(객체 두 겹, 얻는 것 없음), 복제·생성 hook으로 Guid 다시 만들기(AssetDatabase에 장치가 없고 코드 객체와 규칙이 갈린다) |
 | IAD14 | 에셋 컨텍스트 보유 | PlayerController가 lease를 쥐고, 한 컨텍스트 id는 한 원천(평가기 칸 세대로 확인), 다시 모으기는 `UpdateContext`(5.4절) | World 객체는 에셋을 lease로 쥔다(AssetSystem 6.3절). 평가기는 사본만 가진다(IAD10). 버린 대안: 평가기가 lease를 쥠(InputActions 평가기가 AssetManager에 묶이고 시험이 에셋을 요구한다) |
+| IAD15 | 함수 바인딩 | `FunctionBinding`을 쥐고 `ActionEventData` 하나를 넘긴다, 사라진 대상은 바인딩을 지운다(그 뒤로 소비도 멈춘다) | 이벤트 마스크까지 콜백과 같은 정보(UE는 값·시간·액션 넷), 목록이 자라지 않고 사라진 객체가 입력을 막지 않게(UE는 남겨 계속 소비) |
 | IAD9 | slot | 이름마다 slot 한 열(장치 칸 없음) | UE 기본 구현이 장치 ID를 Invalid로 돌려줘 실제로 한 열이다 |
 
 ### 7.3 UE와 다른 점
@@ -58,6 +59,8 @@
 | 주입 처리 순서 | 액션마다 호출 순서 | (액션, 종류 열) 항목마다 호출 순서 | 같은 액션에 종류 열이 다른 주입을 섞을 때만 다르다(TakeHighest에서 절댓값이 같고 부호가 다를 때 결과가 다르다) |
 | 실행 중 액션 트리거·모디파이어 편집 | instance를 다시 만들 때까지 옛 복제본 | 다시 만들 때 종류 열이 같으면 상태를 넘기고 새 매개변수 | IAD10(사본이 다시 만들 때 바뀐다) |
 | 액션 식별 | 에셋 경로 | 실효 id(Guid `id`, 0이면 AssetId — 2.8절) | 상세 계획 21.1절, 이름 변경에 강하다. AssetId 대체로 새 에셋·복제가 겹치지 않는다 |
+| 객체 함수 바인딩 인자 | `(FInputActionValue, float ElapsedTime, float TriggeredTime, const UInputAction*)` | `const ActionEventData&`(이벤트 포함) | IAD15 |
+| 사라진 객체의 함수 바인딩 | 남겨 두고 `IsBound()`로 호출만 건너뜀, 소비는 계속 | 전달 뒤 지운다(소비도 멈춘다) | IAD15 |
 | 컨텍스트 추가 인자 | 객체 포인터 | `AssetManager` + lease(PlayerController가 쥔다) | IAD14 |
 | 같은 컨텍스트 id의 다른 원천 | 객체 포인터가 키라 없다 | `InvalidArgument` | 한 id는 한 원천(5.4절) |
 | 컨텍스트 데이터 변경 반영 | 다시 만들기 요청만(객체를 그대로 읽는다) | 다시 모아 `UpdateContext` | 평가기는 사본(IAD10) |

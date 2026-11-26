@@ -130,12 +130,12 @@ public:
     // PcmRevision을 올린다. 오류:
     // - platformData 없음·reader null: NotReady.
     // - 채널이 MaxClipChannels보다 많음: Unsupported(AU9).
-    // - 플랫폼 데이터 형식·청크 손상, 머리(채널·rate·frame)와 필드가 다름, 디코드 결과 차원이
-    // 머리와
-    //   다름: CorruptData.
+    // - 형식·청크 손상, payload 모자람(잘림), 머리(채널·rate·frame)와 필드 불일치, 디코드 결과
+    //   차원이 머리와 다름: CorruptData.
     // - decoders에 그 codec 디코더가 없음: NotFound(AudioOpus를 링크하지 않은 실행).
-    // - 디코더가 모르는 bitstream 판: Unsupported(더 새 쿠커의 데이터 — 손상이 아니다).
+    // - 형식 판·codec id·bitstream 판을 모름: Unsupported(새 쿠커의 데이터 — 손상이 아니다).
     // - reader 오류, 할당 실패.
+    // 하부(Parse·디코더)의 오류 값은 그대로 넘긴다(3.38절).
     // 실패하면 앞 PCM을 그대로 둔다. 게임 스레드에서 동기로 디코드한다(긴 clip은 로드 때 디코드
     // 비용이 든다 — 청크 스트리밍은 AU6).
     Result<void> LoadCookedPcm(Allocator& allocator, SoundBulkReader reader, void* context,

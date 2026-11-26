@@ -27,10 +27,13 @@ inline constexpr double InputValueNonZeroTolerance = 1.0e-4;
 //   InputValue move(InputValueType::Axis2D, Vec3d(0.5, -1.0, 7.0));   // z는 0이 된다
 //   if (move.IsNonZero()) { ... }
 //
-// 스레드: 값 타입이다.
+// 리플렉션 struct다(ActionEventData 필드 — 5.1절 함수 바인딩). 스레드: 값 타입이다.
+ROCKS_STRUCT()
 struct ROCKS_INPUTACTIONS_API InputValue {
-    Vec3d value;
-    InputValueType type = InputValueType::Boolean;
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() Vec3d value;
+    ROCKS_PROPERTY() InputValueType type = InputValueType::Boolean;
 
     constexpr InputValue() noexcept = default;
 

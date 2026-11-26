@@ -13,12 +13,18 @@
 #include <InputActions/ActionValueHandle.h>
 #include <InputActions/InputValue.h>
 #include <InputActions/PlayerActionInput.h>
+#include <Object/FunctionBinding.h>
+#include <Object/ObjectAccessContext.h>
+#include <Object/ObjectHandle.h>
 
 namespace rocks::input {
 
 // 액션 이벤트를 콜백에 전달한다(UE UEnhancedInputComponent의 바인딩 부분 — Docs/Design/InputActions
 // 5.1절). PlayerActionInput의 평가 뒤 Dispatch가 등록 순으로 실행 목록을 만들고(Started는 앞에 끼워
 // 넣는다) 소비·chord 억제를 적용해 실행한다.
+//
+// 함수 바인딩(BindFunction — IA7)은 리플렉션 함수 void(const ActionEventData&)를 (대상 handle,
+// FunctionId)로 부른다. 대상이 사라지면(StaleHandle) 그 바인딩을 전달 뒤 지운다.
 //
 // 콜백 수명: Function은 캡처를 그대로 쥔다(UE delegate처럼 객체 파괴를 알지 못한다). 객체를
 // 가리키려면 handle을 캡처해 World::With로 접근하거나, 그 객체가 없어지기 전에(OnUnPossess·EndPlay)
@@ -53,6 +59,30 @@ public:
     Result<ActionBindingHandle> BindAction(const Guid& actionId, ActionEvent events,
                                            Callback&& callback, bool consumes = false) noexcept;
 
+    // 리플렉션 함수를 바인딩한다(UE BindAction(Action, TriggerEvent, UObject*, FName) —
+    // Docs/Design/InputActions 5.1절 IA7). 함수는 target 타입(기반 체인 포함)의 ROCKS_FUNCTION
+    // void(const ActionEventData&)이어야 한다. registry는 바인딩보다 오래 살아야 하고, access는
+    // 전달 때 그 함수를 부를 문맥이다(World 객체면 World::Access()). 대상은 handle만 쥔다.
+    //
+    // 사용 예:
+    //   // 이름은 길이를 준 Span이다(배열 생성자는 끝 NUL까지 센다).
+    //   auto jump = types.FindFunctionByName(TypeIdOf<MyPawn>(), Span<const char>("OnJump", 6));
+    //   if (jump) {
+    //       (void)bindings.BindFunction(jumpId, ActionEvent::Started, world.Objects(),
+    //                                   world.Access(), pawn, jump.Value().Schema().id);
+    //   }
+    //
+    // 오류(그대로): None 마스크 InvalidArgument, 함수 없음 NotFound(게임 빌드의 EditorOnly 포함),
+    // static 함수 InvalidArgument, 반환이 있거나 서명이 다르면 TypeMismatch, 대상 해석 오류
+    // (StaleHandle·WrongContext 등 Registry 그대로), 할당 실패 OutOfMemory. 전달 중에 더하면 다음
+    // 전달부터 실행한다. 스레드: registry 소유 스레드에서 바인딩하고 전달한다(전달이 다른 스레드면
+    // WrongThread로 건너뛰고 Warning 한 번 — 5.1절).
+    Result<ActionBindingHandle> BindFunction(const Guid& actionId, ActionEvent events,
+                                             ObjectRegistry& registry,
+                                             const ObjectAccessContext& access, ObjectHandle target,
+                                             const Guid& functionId,
+                                             bool consumes = false) noexcept;
+
     // 전달마다 그 액션의 현재 값을 담는 값 바인딩이다. 할당 실패는 OutOfMemory다.
     Result<ActionValueHandle> BindActionValue(const Guid& actionId) noexcept;
 
@@ -85,6 +115,12 @@ private:
         Guid action;
         ActionEvent events = ActionEvent::None;
         Callback callback;
+        // 함수 바인딩이면 registry가 null이 아니다(IA7).
+        FunctionBinding function;
+        ObjectRegistry* registry = nullptr;
+        ObjectAccessContext access;
+        // 호출 실패 Warning을 이미 남겼다(바인딩마다 한 번).
+        bool failureLogged = false;
         bool consumes = false;
         bool removed = false;
     };
@@ -95,6 +131,10 @@ private:
         InputValue value;
     };
 
+    // 새 이벤트 바인딩 칸과 전달 작업 배열 용량을 잡는다(실패면 그대로).
+    Result<UniquePtr<EventBinding>> PrepareBinding() noexcept;
+    // 함수 바인딩 하나를 부른다(대상이 사라졌으면 지움 표시, 그 밖의 실패는 Warning 한 번).
+    void InvokeFunction(EventBinding& binding, const ActionEventData& data) noexcept;
     void PurgeRemoved() noexcept;
 
     Allocator* allocator_;
