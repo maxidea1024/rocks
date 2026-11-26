@@ -100,8 +100,8 @@ Rocks는 이것을 두 층으로 나눈다.
   - pass 셰이더 타입이 채우는 기능: view·scene·decal·post 등
   - 정점 입력 타입이 채우는 기능: vertex·skin·particle·speedtree·primitive의 instance 부분
   - 둘 다 공급 기능 집합을 선언한다(16절 MRD13·MRB9). 판정 단위는 파이프라인(VS 타입, PS 타입, 정점 입력 타입)이고, 공급 집합은 pass ∪ 정점 입력이다.
-- **진입점·단계별 사용 집합.** 생성 파일은 진입점(7.3절)마다 쓰는 기능을 고정된 정의로 낸다(`MATERIAL_<진입점>_USES_<기능> 0|1`, 예: `MATERIAL_SURFACE_USES_PARTICLE`). 정의는 머티리얼 번역 결과 하나에 대해 고정이다. pass가 어떤 진입점을 부르든 바뀌지 않으므로 셰이더 집합 id(8.6절)가 하나로 유지된다.
-  - pass는 자기가 부르는 진입점들의 합집합으로 필요한 기능을 계산한다(`MATERIAL_CONTEXT_<기능>`은 pass 원문이 이 합집합으로 정의한다).
+- **진입점·단계별 사용 집합.** 생성 파일은 진입점(7.3절)마다 쓰는 기능을 고정된 정의로 낸다(`MATERIAL_<진입점>_USES_<기능> 1` — 쓰는 쌍만 내고 정의 없는 이름은 전처리에서 0, 예: `MATERIAL_SURFACE_USES_PARTICLE` — 6.9절). 정의는 머티리얼 번역 결과 하나에 대해 고정이다. pass가 어떤 진입점을 부르든 바뀌지 않으므로 셰이더 집합 id(8.6절)가 하나로 유지된다.
+  - pass는 자기가 부르는 진입점들의 합집합으로 필요한 기능을 계산한다(`MATERIAL_CONTEXT_<기능>`은 `MaterialContext.rsh`가 pass의 공급 표지 `MATERIAL_SUPPLY_<기능>`과 이 합집합으로 정의한다 — 6.9절).
   - 픽셀 진입점이 쓰는 정점 기원 값(정점 색·파티클 값 등)은 정점 단계가 보간값으로 넘긴다. 이 보간 벡터는 V9 보간 예산에 들어간다. UE도 같다: 기능별 단계 정의(`NEEDS_PARTICLE_COLOR` Pixel|Compute, `CFG/BaseMaterialExpressions.ini:1056`), 보간 정의(`INTERPOLATE_VERTEX_COLOR`, `:1082`).
 - **공급하지 않은 값(결정 MD15).** UE는 공급하지 않은 문맥 필드를 0으로 두고, 파티클 색만 1로 둔다(`SH/Private/MaterialTemplate.ush:665–670, 761`). 그래서 UE 머티리얼은 모든 정점 입력 타입에서 컴파일된다. Rocks도 같게 한다.
   - 문맥 값 표(19.3.2절)의 값마다 UE 기본값을 둔다. 공급하지 않는 파이프라인에서는 그 기본값을 쓴다.
