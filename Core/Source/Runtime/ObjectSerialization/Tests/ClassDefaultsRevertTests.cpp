@@ -481,4 +481,46 @@ TEST(ClassDefaultsRevert_PlanAllocationFailures) {
     }
 }
 
+// 적용 단계의 할당(RuntimeClassMetadata 'A5b2 decode 명세' 원자성): 적용은 경로 쓰기뿐이라 자원
+// 실패는 기준이 힙 값(비지 않은 String·Text 기본값 등)일 때만 생긴다. 이 fixture의 기준(빈 String·
+// Text, 값 struct)은 객체 Registry allocator에서 하나도 할당하지 않고 기준 값이 된다.
+TEST(ClassDefaultsRevert_ApplyDoesNotAllocateForInlineDefaults) {
+    SystemAllocator allocator;
+    RevertFixture fixture(allocator);
+    const TypeId type = TypeIdOf<DefaultsHolder>();
+    const PropertyPathBuffer paths[] = {fixture.Path(type, "label"), fixture.Path(type, "point"),
+                                        fixture.Path(type, "caption")};
+    test::NFailAllocator failing(allocator);
+    {
+        ObjectRegistry objects(failing, fixture.types, {0x5256, 8});
+        auto created = objects.NewObject<DefaultsHolder>(objects.OwnerAccess(), type);
+        REQUIRE(created);
+        const ObjectHandle handle = created.Value().Handle();
+        EditNative<DefaultsHolder>(objects, handle, [](DefaultsHolder& holder) noexcept {
+            CHECK(holder.label.TryAssign("a label long enough to live on the heap"));
+            holder.point.x = 30;
+        });
+        Array<RevertPlan> plans(allocator);
+        for (const PropertyPathBuffer& path : paths) {
+            RevertPlan plan(allocator);
+            REQUIRE(PlanRevert(objects, objects.OwnerAccess(), handle, path, allocator, plan));
+            REQUIRE(plans.TryPushBack(Move(plan)));
+        }
+
+        failing.FailOnAttempt(1);
+        for (const RevertPlan& plan : plans) {
+            CHECK(ApplyRevert(objects, objects.OwnerAccess(), plan));
+        }
+
+        CHECK(failing.Attempts() == 0);
+        failing.DisableFailure();
+        EditNative<DefaultsHolder>(objects, handle, [](DefaultsHolder& holder) noexcept {
+            CHECK(holder.label.IsEmpty() && holder.point.x == 3);
+        });
+        CHECK(MatchesDefaults(allocator, fixture, objects, handle, type));
+        created.Value().Reset();
+        CHECK(objects.Shutdown(objects.OwnerAccess()));
+    }
+}
+
 } // namespace class_defaults_revert_tests_file
