@@ -91,13 +91,45 @@ Vec2 Frame::ComputeDesiredSize(float) const noexcept {
     return Vec2(math::Max(size.x, desiredSize_.Get().x), math::Max(size.y, desiredSize_.Get().y));
 }
 
+void Frame::SetContentAlignment(StackAlignment horizontal, StackAlignment vertical) noexcept {
+    if (horizontal_ != horizontal || vertical_ != vertical) {
+        horizontal_ = horizontal;
+        vertical_ = vertical;
+        InvalidateArrangement();
+    }
+}
+
+namespace {
+
+// 한 축에서 내용의 크기와 시작 위치를 정한다(Fill은 칸 전체).
+void PlaceAxis(StackAlignment alignment, float area, float desired, float& size,
+               float& start) noexcept {
+    if (alignment == StackAlignment::Fill) {
+        size = area;
+        start = 0;
+        return;
+    }
+
+    size = math::Min(area, desired);
+    start = alignment == StackAlignment::Start    ? 0.0f
+            : alignment == StackAlignment::Center ? (area - size) * 0.5f
+                                                  : area - size;
+}
+
+} // namespace
+
 Result<void> Frame::Arrange(const Geometry& geometry) noexcept {
     SetGeometry(geometry);
     Element* child = ChildAt(0);
     if (child != nullptr && child->GetVisibility() != Visibility::Collapsed) {
-        const Vec2 size(math::Max(0.0f, geometry.size.x - padding_.x - padding_.z),
+        const Vec2 area(math::Max(0.0f, geometry.size.x - padding_.x - padding_.z),
                         math::Max(0.0f, geometry.size.y - padding_.y - padding_.w));
-        const AffineTransform2D offset{1, 0, 0, 1, padding_.x, padding_.y};
+        const Vec2 desired = child->GetDesiredSize();
+        Vec2 size;
+        Vec2 start;
+        PlaceAxis(horizontal_, area.x, desired.x, size.x, start.x);
+        PlaceAxis(vertical_, area.y, desired.y, size.y, start.y);
+        const AffineTransform2D offset{1, 0, 0, 1, padding_.x + start.x, padding_.y + start.y};
         return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, offset, {}, {}));
     }
 

@@ -2,6 +2,7 @@
 
 #include <Core/Math/Vector4.h>
 #include <UiCore/Declarative.h>
+#include <UiCore/StackLayout.h>
 
 namespace rocks::ui {
 
@@ -41,6 +42,11 @@ public:
     // x/y/z/w는 각각 왼쪽·위·오른쪽·아래 여백이다.
     Result<void> SetPadding(Vec4 padding) noexcept;
 
+    // 여백 안에서 내용을 놓는 정렬이다(UE SBorder HAlign·VAlign). 기본은 가로·세로 모두 Fill이다.
+    // Fill이 아닌 축은 내용의 원하는 크기(여백 안 크기를 넘지 않게)로 놓는다. 예: 버튼이 글자
+    // 줄보다 높을 때 글자를 세로 가운데에 두려면 SetContentAlignment(Fill, Center).
+    void SetContentAlignment(StackAlignment horizontal, StackAlignment vertical) noexcept;
+
     Vec2 ComputeDesiredSize(float) const noexcept override;
 
     Result<void> Arrange(const Geometry& geometry) noexcept override;
@@ -52,6 +58,8 @@ private:
     ElementAttribute<LinearColor, InvalidateReason::Paint> color_;
     ElementAttribute<Vec2, InvalidateReason::Layout> desiredSize_;
     Vec4 padding_{};
+    StackAlignment horizontal_ = StackAlignment::Fill;
+    StackAlignment vertical_ = StackAlignment::Fill;
 };
 
 } // namespace rocks::ui

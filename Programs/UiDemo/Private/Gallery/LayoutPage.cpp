@@ -38,8 +38,6 @@ constexpr Vec2 DockStage{520, 260};
 // 무대 테두리·안쪽 여백·상자 반경이다.
 constexpr float StageRadius = 4;
 constexpr float StagePadding = 6;
-constexpr float BlockRadius = 3;
-constexpr Vec4 BlockPadding{6, 3, 6, 3};
 // 견본 상자 크기다.
 constexpr Vec2 FitContentSize{100, 40};
 constexpr Vec2 BadgeSize{56, 22};
@@ -67,21 +65,12 @@ constexpr usize BlockColorCount = sizeof(BlockColors) / sizeof(BlockColors[0]);
 // 색 상자 하나(둥근 채움 + 어두운 레이블)다.
 Result<SharedPtr<Element>> MakeBlock(GalleryContext& context, StringView label,
                                      usize colorIndex) noexcept {
-    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(ThemeSlot::Background));
-    auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);
-    if (const ErrorCode error = FirstError(text, frame); error != ErrorCode::None) {
-        return Result<SharedPtr<Element>>::Failure(error);
+    auto block = MakeBlock(context, label, BlockColors[colorIndex % BlockColorCount]);
+    if (!block) {
+        return Result<SharedPtr<Element>>::Failure(block.Error());
     }
 
-    const LinearColor fill = DefaultThemeColors().Get(BlockColors[colorIndex % BlockColorCount]);
-    auto result = frame.Value()->Construct({.content = text.Value(),
-                                            .brush = Brush::RoundedBox(fill, BlockRadius),
-                                            .padding = BlockPadding});
-    if (!result) {
-        return Result<SharedPtr<Element>>::Failure(result.Error());
-    }
-
-    return Result<SharedPtr<Element>>::Success(frame.Value());
+    return Result<SharedPtr<Element>>::Success(block.Value());
 }
 
 // 테두리를 그린 고정 크기 무대에 content를 담는다(Recessed 채움 + Dropdown 외곽선).

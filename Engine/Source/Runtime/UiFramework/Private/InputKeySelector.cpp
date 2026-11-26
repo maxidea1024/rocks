@@ -27,6 +27,8 @@ Result<void> InputKeySelector::Construct(Args&& args) noexcept {
 InputKeySelector::InputKeySelector(Allocator& allocator) noexcept
     : Button(allocator), allocator_(allocator) {
     SetDesiredSize({100, 24});
+    // 키 이름은 가운데다(UE SInputKeySelector의 ETextJustify::Center).
+    SetContentAlignment(StackAlignment::Center, StackAlignment::Center);
 }
 
 Result<void> InputKeySelector::RefreshCaption(KeyChord chord, bool selecting) noexcept {

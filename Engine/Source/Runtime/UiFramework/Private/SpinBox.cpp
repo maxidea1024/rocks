@@ -29,6 +29,8 @@ Result<void> SpinBox::Construct(Args&& args) noexcept {
 SpinBox::SpinBox(Allocator& allocator) noexcept : Frame(allocator), allocator_(allocator) {
     SetDesiredSize({72, 24});
     SetColor({0.12f, 0.12f, 0.12f, 1});
+    // 숫자는 세로 가운데다(UE SSpinBox 글자 칸 VAlign_Center — SSpinBox.cpp 183–219행).
+    SetContentAlignment(StackAlignment::Fill, StackAlignment::Center);
 }
 
 Result<void> SpinBox::ShowNumber(float value) noexcept {

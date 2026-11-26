@@ -52,6 +52,26 @@ Result<SharedPtr<Button>> MakeTextButton(GalleryContext& context, StringView lab
     return button;
 }
 
+Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
+                                   ThemeSlot color) noexcept {
+    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(ThemeSlot::Background));
+    auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);
+    if (const ErrorCode error = FirstError(text, frame); error != ErrorCode::None) {
+        return Result<SharedPtr<Frame>>::Failure(error);
+    }
+
+    auto result = frame.Value()->Construct(
+        {.content = text.Value(),
+         .brush = Brush::RoundedBox(DefaultThemeColors().Get(color), BlockRadius),
+         .padding = BlockPadding});
+    if (!result) {
+        return Result<SharedPtr<Frame>>::Failure(result.Error());
+    }
+
+    frame.Value()->SetContentAlignment(StackAlignment::Center, StackAlignment::Center);
+    return frame;
+}
+
 Result<SharedPtr<Element>> PadContent(GalleryContext& context, const SharedPtr<Element>& content,
                                       Vec4 padding) noexcept {
     auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);

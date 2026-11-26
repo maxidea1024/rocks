@@ -18,8 +18,6 @@ constexpr Vec2 BlockSize{90, 28};
 constexpr Vec2 ClipStage{120, 30};
 constexpr Vec2 CursorCell{96, 26};
 constexpr Vec2 ProgressSize{160, 14};
-constexpr float BlockRadius = 3;
-constexpr Vec4 BlockPadding{6, 3, 6, 3};
 constexpr float TwoPi = 6.2831853f;
 // 배율·기울기 견본 값이다.
 constexpr float SampleScale = 1.3f;
@@ -27,25 +25,6 @@ constexpr float SampleShear = 0.4f;
 constexpr float SampleOpacity = 0.5f;
 // 가운데 기준 피벗(로컬 크기 비율)이다.
 constexpr Vec2 CenterPivot{0.5f, 0.5f};
-
-Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
-                                   ThemeSlot color) noexcept {
-    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(ThemeSlot::Background));
-    auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);
-    if (const ErrorCode error = FirstError(text, frame); error != ErrorCode::None) {
-        return Result<SharedPtr<Frame>>::Failure(error);
-    }
-
-    auto result = frame.Value()->Construct(
-        {.content = text.Value(),
-         .brush = Brush::RoundedBox(DefaultThemeColors().Get(color), BlockRadius),
-         .padding = BlockPadding});
-    if (!result) {
-        return Result<SharedPtr<Frame>>::Failure(result.Error());
-    }
-
-    return frame;
-}
 
 template <typename T>
 Result<SharedPtr<Element>> Up(Result<SharedPtr<T>>&& made) noexcept {

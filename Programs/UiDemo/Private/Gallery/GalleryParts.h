@@ -45,6 +45,15 @@ Result<SharedPtr<TextLabel>> MakeText(GalleryContext& context, StringView value,
                                       const FontStyle& font = NormalFont,
                                       Optional<ColorRef> color = {}) noexcept;
 
+// 색 상자의 모서리 반경과 여백이다.
+inline constexpr float BlockRadius = 3;
+inline constexpr Vec4 BlockPadding{6, 3, 6, 3};
+
+// 색 상자 하나(둥근 채움 + 가운데 놓인 어두운 굵은 작은 레이블)다. 배치·동작 견본의 표지로 쓴다.
+// 상자가 레이블보다 커도 레이블은 가로·세로 가운데다.
+Result<SharedPtr<Frame>> MakeBlock(GalleryContext& context, StringView label,
+                                   ThemeSlot color) noexcept;
+
 // 레이블 하나를 담은 버튼이다(UE 갤러리 LeftRightLabel의 텍스트만 있는 경우).
 Result<SharedPtr<Button>> MakeTextButton(GalleryContext& context, StringView label,
                                          const ButtonStyle& style) noexcept;

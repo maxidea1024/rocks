@@ -20,8 +20,6 @@ namespace {
 constexpr Vec2 EffectStage{240, 90};
 constexpr Vec2 SliderSize{160, 20};
 constexpr float StageRadius = 4;
-constexpr float BlockRadius = 3;
-constexpr Vec4 BlockPadding{6, 3, 6, 3};
 constexpr Vec4 BlurInset{40, 20, 40, 20};
 // 색 줄은 무대 가운데 띠로 둔다.
 constexpr Vec4 StripeInset{0, 30, 0, 30};
@@ -36,25 +34,6 @@ constexpr LinearColor RetainerTint{1.0f, 0.8f, 0.6f, 1.0f};
 constexpr ThemeSlot StripeColors[] = {ThemeSlot::AccentBlue,   ThemeSlot::AccentGreen,
                                       ThemeSlot::AccentOrange, ThemeSlot::AccentPurple,
                                       ThemeSlot::AccentPink,   ThemeSlot::AccentYellow};
-
-Result<SharedPtr<Element>> MakeBlock(GalleryContext& context, StringView label,
-                                     ThemeSlot color) noexcept {
-    auto text = MakeText(context, label, SmallBoldFont, ColorRef::FromTheme(ThemeSlot::Background));
-    auto frame = SharedPtr<Frame>::TryMake(context.allocator, context.allocator);
-    if (const ErrorCode error = FirstError(text, frame); error != ErrorCode::None) {
-        return Result<SharedPtr<Element>>::Failure(error);
-    }
-
-    auto result = frame.Value()->Construct(
-        {.content = text.Value(),
-         .brush = Brush::RoundedBox(DefaultThemeColors().Get(color), BlockRadius),
-         .padding = BlockPadding});
-    if (!result) {
-        return Result<SharedPtr<Element>>::Failure(result.Error());
-    }
-
-    return Result<SharedPtr<Element>>::Success(frame.Value());
-}
 
 Result<SharedPtr<Element>> MakeStage(GalleryContext& context,
                                      const SharedPtr<Element>& content) noexcept {

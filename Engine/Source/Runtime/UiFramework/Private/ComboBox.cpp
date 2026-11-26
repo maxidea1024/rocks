@@ -9,6 +9,8 @@ namespace rocks::ui {
 ComboBox::ComboBox(Allocator& allocator) noexcept
     : MenuAnchor(allocator), allocator_(allocator), rows_(allocator) {
     SetDesiredSize({80, 24});
+    // 내용은 세로 가운데다(UE SComboButton 기본 VAlign_Center — SComboButton.h 45행).
+    SetContentAlignment(StackAlignment::Fill, StackAlignment::Center);
     SetPlacement(MenuPlacement::ComboBox);
     SetMenuFactory(MenuFactory::CreateRaw(this, &ComboBox::MakeMenu));
     // 화살표 칸(여백 2 + 16 + 여백 2)을 내용 오른쪽에 비워 둔다.
