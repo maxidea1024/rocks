@@ -41,13 +41,18 @@ public:
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // 창보다 넓으면 창 폭에서 줄을 다시 나눈 높이를 같은 프레임에 쓴다.
+        // 배치 경계는 호스트가 알린 팝업 허용 영역(UW7d)이고, 없으면 층 전체다. 그보다 넓으면 그
+        // 폭에서 줄을 다시 나눈 높이를 같은 프레임에 쓴다.
+        const Vec2 areaMin = popupArea_ ? popupArea_->min : Vec2{};
+        const Vec2 areaMax = popupArea_ ? popupArea_->max : area.size;
+        const Vec2 areaSize{math::Max(0.0f, areaMax.x - areaMin.x),
+                            math::Max(0.0f, areaMax.y - areaMin.y)};
         Vec2 desired = child->GetDesiredSize();
-        if (desired.x > area.size.x) {
-            desired = child->MeasureForWidth(area.size.x);
+        if (desired.x > areaSize.x) {
+            desired = child->MeasureForWidth(areaSize.x);
         }
 
-        const Vec2 size{math::Min(area.size.x, desired.x), math::Min(area.size.y, desired.y)};
+        const Vec2 size{math::Min(areaSize.x, desired.x), math::Min(areaSize.y, desired.y)};
         Vec2 local;
         const auto owner = owner_.Lock();
         if ((interactive_ || belowOwner_) && owner) {
@@ -61,7 +66,7 @@ public:
 
             const float gap = belowOwner_ ? ToolTipOwnerGap : 0.0f;
             local = {bounds.Value().min.x, bounds.Value().max.y + gap};
-            if (local.y + size.y > area.size.y) {
+            if (local.y + size.y > areaMax.y) {
                 local.y = bounds.Value().min.y - gap - size.y;
             }
         } else {
@@ -69,18 +74,27 @@ public:
             // CalculateTooltipWindowPosition처럼 커서를 덮지 않는다).
             const Vec2 cursor = inverse.Apply(point_);
             local = cursor + ToolTipCursorOffset;
-            if (local.y + size.y > area.size.y) {
+            if (local.y + size.y > areaMax.y) {
                 local.y = cursor.y - size.y;
             }
         }
 
-        const float x = math::Clamp(local.x, 0.f, area.size.x - size.x);
-        const float y = math::Clamp(local.y, 0.f, area.size.y - size.y);
+        const float x = math::Clamp(local.x, areaMin.x, math::Max(areaMin.x, areaMax.x - size.x));
+        const float y = math::Clamp(local.y, areaMin.y, math::Max(areaMin.y, areaMax.y - size.y));
         return child->ArrangeIfNeeded(area.MakeChild(size, {1, 0, 0, 1, x, y}, {}, {}));
     }
 
     // 커서에 붙는 툴팁은 커서가 놓인 모니터 안에 놓는다(UE CalculateTooltipWindowPosition). 소유자
     // 아래 툴팁(키보드·상호작용)은 소유자의 왼쪽 위를 쓴다(호스트 기본).
+    void SetPopupArea(const Optional<Box2<float>>& area) noexcept override {
+        const bool same = area.HasValue() == popupArea_.HasValue() &&
+                          (!area || (area->min == popupArea_->min && area->max == popupArea_->max));
+        if (!same) {
+            popupArea_ = area;
+            InvalidateArrangement();
+        }
+    }
+
     Optional<Vec2> PopupWorkAreaPoint() const noexcept override {
         if (interactive_ || belowOwner_) {
             return {};
@@ -91,6 +105,7 @@ public:
 
 private:
     Vec2 point_;
+    Optional<Box2<float>> popupArea_;
     WeakPtr<Element> owner_;
     bool interactive_;
     // 키보드 초점 툴팁은 커서가 아니라 소유자 아래 왼쪽에 놓는다.

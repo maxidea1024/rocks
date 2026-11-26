@@ -20,8 +20,19 @@ public:
     MenuPanel(Allocator& allocator, const SharedPtr<MenuContext>& context,
               MenuAnchor* owner) noexcept;
 
-    // 항목·구분선·묶음 제목을 끝에 더한다. MenuRow는 이 패널에 연결된다.
+    // 구분선·묶음 제목 같은 항목 아닌 요소를 끝에 더한다.
     Result<void> AddItem(const SharedPtr<Element>& item) noexcept;
+    // 항목을 끝에 더하고 이 패널에 연결한다. 항목 판정(글자 점프·끌어 놓기)은 이렇게 더한 항목만
+    // 본다(초점 받는 다른 요소를 항목으로 오인하지 않는다 — R16).
+    Result<void> AddRow(const SharedPtr<MenuRow>& row) noexcept;
+    // element가 이 패널의 항목이면 그 항목이다(아니면 null).
+    MenuRow* FindRow(const Element* element) const noexcept;
+    // 키보드로 옮긴 뒤 포인터가 다시 움직이기 전까지 참이다 — 그동안 hover 강조를 끈다(Windows —
+    // 강조 하나). 포인터가 움직이면 항목·패널이 OnPointerMoved로 푼다.
+    bool IsKeyboardNavigating() const noexcept;
+    void OnPointerMoved() noexcept;
+    // 패널 자체에 초점을 둔다(Pointer — 강조 없음). 항목을 떠날 때 쓴다.
+    void FocusPanel(uint32 user) noexcept;
     bool IsRoot() const noexcept;
     MenuAnchor* Owner() const noexcept;
 
@@ -69,8 +80,17 @@ private:
     MenuAnchor* owner_;
     MenuRow* openSub_ = nullptr;
     MenuRow* hoveredRow_ = nullptr;
+    Array<MenuRow*> rows_;
     float scroll_ = 0;
     float maxScroll_ = 0;
+    // 배치 전에 들어온 보이게 맞춤 요청이다(배치에서 적용한다).
+    usize pendingScroll_ = IndexNone;
+    bool arranged_ = false;
+    bool keyboardNavigating_ = false;
+    // 키보드 이동을 표시하고 항목 강조를 다시 그린다.
+    void SetKeyboardNavigating(bool navigating) noexcept;
+    // index 항목이 보이게 하는 스크롤 위치다.
+    float ScrollTarget(usize index) const noexcept;
     SharedPtr<UiTimer> clobber_;
 };
 

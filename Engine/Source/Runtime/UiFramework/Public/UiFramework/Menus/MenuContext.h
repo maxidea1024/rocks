@@ -9,6 +9,7 @@ namespace rocks::ui {
 
 class Application;
 class MenuAnchor;
+class MenuRow;
 
 // 메뉴의 글자 레이블 factory다(글자를 그 글꼴로 shaping한 레이블 — UiFramework에는 글꼴 서비스가
 // 없어 호출자가 준다).
@@ -51,6 +52,8 @@ public:
     void EndSession(const Element& area, bool restore = true) noexcept;
     // element가 지금 열린 메뉴(루트 메뉴와 하위 메뉴 사슬) 안에 있는지다.
     bool IsInOpenMenus(const Element& element) const noexcept;
+    // element(또는 그 조상)가 열린 메뉴의 항목이면 그 항목이다(끌어 놓기 — R8).
+    MenuRow* FindOpenRow(const Element& element) const noexcept;
 
 private:
     Allocator& allocator_;

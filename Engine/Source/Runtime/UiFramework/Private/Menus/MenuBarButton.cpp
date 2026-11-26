@@ -20,7 +20,7 @@ MenuBarButton::MenuBarButton(Allocator& allocator, MenuBar& bar, const MenuBarSt
 }
 
 bool MenuBarButton::IsHighlighted() const noexcept {
-    // 키보드 초점(F10·Alt)은 외곽선 대신 올림 바탕으로 보인다(Windows 메뉴 막대).
+    // 키보드 초점(F10·Alt+글자)은 외곽선 대신 올림 바탕으로 보인다(Windows 메뉴 막대).
     return MenuAnchor::IsHighlighted() || bar_.HasKeyboardFocus(*this);
 }
 

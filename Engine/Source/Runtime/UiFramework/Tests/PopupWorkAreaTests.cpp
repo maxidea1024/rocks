@@ -83,9 +83,9 @@ TEST(UiFramework_PopupLayerStaysInsideWorkArea) {
     REQUIRE(bench.OpenAndArrange());
     // 앵커 아래(30), 오른쪽 끝은 창(400)이 아니라 작업 영역(350)에서 밀린다: 350 - 120 = 230.
     CHECK((bench.MenuOrigin() == Vec2{230, 30}));
-    // 팝업 층 자체가 Overlay ∩ 작업 영역이다.
+    // 팝업 층은 Overlay 전체를 덮고(바깥 누름을 놓치지 않는다) 내용만 작업 영역 안이다.
     REQUIRE(bench.root->ChildCount() == 2);
-    CHECK((bench.root->ChildAt(1)->GetGeometry().size == WorkMax));
+    CHECK((bench.root->ChildAt(1)->GetGeometry().size == WindowSize));
 }
 
 TEST(UiFramework_PopupFlipsAboveAtWorkAreaBottom) {
@@ -198,8 +198,9 @@ TEST(UiFramework_PopupPicksMonitorOfAnchorTopLeft) {
     REQUIRE(bench.app.SetPopupWorkArea(TwoMonitors()));
     REQUIRE(bench.OpenAndArrange());
     CHECK((bench.MenuOrigin() == Vec2{80, 30}));
-    // 층 자체도 그 모니터 영역이다(다른 모니터로 걸치지 않는다).
-    CHECK((bench.root->ChildAt(1)->GetGeometry().size == Vec2{MonitorSplit, WindowSize.y}));
+    auto menuBounds = bench.menu->GetGeometry().WindowBounds();
+    REQUIRE(menuBounds);
+    CHECK(menuBounds.Value().max.x <= MonitorSplit);
 }
 
 TEST(UiFramework_PopupOnRightMonitorStaysOnRightMonitor) {
@@ -208,9 +209,6 @@ TEST(UiFramework_PopupOnRightMonitorStaysOnRightMonitor) {
     REQUIRE(bench.app.SetPopupWorkArea(TwoMonitors()));
     REQUIRE(bench.OpenAndArrange());
     CHECK((bench.MenuOrigin() == Vec2{210, 30}));
-    auto layer = bench.root->ChildAt(1)->GetGeometry().WindowBounds();
-    REQUIRE(layer);
-    CHECK(layer.Value().min.x == MonitorSplit);
 }
 
 TEST(UiFramework_CursorToolTipUsesCursorMonitor) {
@@ -249,6 +247,47 @@ TEST(UiFramework_CursorToolTipUsesCursorMonitor) {
     auto bounds = content.Value()->GetGeometry().WindowBounds();
     REQUIRE(bounds);
     CHECK(bounds.Value().min.x == 262);
+}
+
+TEST(UiFramework_PopupOutsidePressOnOtherMonitorStillCloses) {
+    // 회귀(R16): 바깥 누름을 받는 층(콤보 등)이 작업 영역 교집합으로 줄면, 다른 모니터 쪽 창 영역
+    // 누름이 아래 버튼으로 새고 메뉴가 열린 채 남았다.
+    PopupBench bench;
+    REQUIRE(bench.Build({20, 10, 40, 20}, MenuPlacement::Below));
+    auto other = SharedPtr<Button>::TryMake(bench.allocator, bench.allocator);
+    REQUIRE(other);
+    uint32 clicked = 0;
+    other.Value()->SetOnClicked(
+        Delegate<void()>::CreateLambda([&clicked]() noexcept { ++clicked; }));
+    REQUIRE(
+        bench.canvas->TryAddSlot(other.Value(), {.offset = {300, 100, 40, 20}, .alignment = {}}));
+    REQUIRE(bench.app.SetPopupWorkArea(TwoMonitors()));
+    REQUIRE(bench.OpenAndArrange());
+    REQUIRE(bench.anchor->IsOpen());
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Down, {320, 110}}));
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Up, {320, 110}}));
+    CHECK(!bench.anchor->IsOpen() && clicked == 0);
+}
+
+TEST(UiFramework_SubMenuPushedUpAtWorkAreaBottom) {
+    PopupBench bench;
+    REQUIRE(bench.Build({20, 230, 80, 20}, MenuPlacement::Right));
+    REQUIRE(bench.app.SetPopupWorkArea(WorkArea(true)));
+    REQUIRE(bench.OpenAndArrange());
+    // 옆에 여는 메뉴(80)가 작업 영역 아래(250)를 넘으면 위로 민다: 250 - 80 = 170.
+    CHECK((bench.MenuOrigin() == Vec2{100, 170}));
+}
+
+TEST(UiFramework_PopupWorkAreaUnderScaledHost) {
+    // 배율 2인 호스트(창 800×600, 로컬 400×300): 작업 영역은 창 좌표 (0, 0)–(350, 250)이라 로컬
+    // (0, 0)–(175, 125)다. 앵커(로컬 300, 10) 아래 메뉴는 로컬 175 - 120 = 55, 창 좌표 110이다.
+    PopupBench bench;
+    REQUIRE(bench.Build({300, 10, 40, 20}, MenuPlacement::Below));
+    REQUIRE(bench.app.SetPopupWorkArea(WorkArea(true)));
+    REQUIRE(bench.anchor->Open());
+    REQUIRE(bench.app.UpdatePaintCache(Geometry::Root(WindowSize, {2, 0, 0, 2, 0, 0}), 1));
+    REQUIRE(bench.app.UpdatePaintCache(Geometry::Root(WindowSize, {2, 0, 0, 2, 0, 0}), 1));
+    CHECK((bench.MenuOrigin() == Vec2{110, 60}));
 }
 
 } // namespace rocks::ui

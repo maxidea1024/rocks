@@ -79,6 +79,10 @@ private:
     void OnMenuOpenChanged(bool open) noexcept;
     // F10이다. 막대가 초점을 들고 메뉴가 닫혀 있으면 나가고, 아니면 첫 버튼에 초점을 둔다.
     void ToggleMenuMode() noexcept;
+    // 숨은 버튼이 메뉴를 열고 있거나 초점을 들고 있으면 다음 프레임에 정리한다(배치 중에 메뉴를
+    // 닫거나 초점을 옮기지 않는다 — R16).
+    void ScheduleHiddenCleanup() noexcept;
+    void CleanupHidden() noexcept;
 
     Allocator& allocator_;
     SharedPtr<MenuContext> context_;
@@ -94,6 +98,7 @@ private:
     BindingManager acceleratorBindings_;
     SharedPtr<CommandList> accelerators_;
     bool switching_ = false;
+    SharedPtr<UiTimer> cleanup_;
 };
 
 } // namespace rocks::ui

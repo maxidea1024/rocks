@@ -76,7 +76,7 @@ Result<void> MenuBuilder::AddRow(StringView label, MenuAction&& action, KeyChord
     }
 
     hasItems_ = true;
-    return panel_->AddItem(row.Value());
+    return panel_->AddRow(row.Value());
 }
 
 void MenuBuilder::AddEntry(StringView label, MenuAction action, KeyChord shortcut) noexcept {

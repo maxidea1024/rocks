@@ -5,7 +5,7 @@ namespace rocks::ui {
 
 MenuPanel::MenuPanel(Allocator& allocator, const SharedPtr<MenuContext>& context,
                      MenuAnchor* owner) noexcept
-    : Element(allocator), context_(context), owner_(owner) {
+    : Element(allocator), context_(context), owner_(owner), rows_(allocator) {
     // 긴 메뉴는 패널 안에서 스크롤하므로 경계 밖 항목은 그리지도 누르지도 않는다.
     SetClipToBounds(true);
 }
@@ -15,13 +15,64 @@ Result<void> MenuPanel::AddItem(const SharedPtr<Element>& item) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto added = TryAddChild(item);
-    if (added && item->SupportsKeyboardFocus()) {
-        // 항목만 초점을 받는다(구분선·묶음 제목은 아니다). 항목은 MenuRow뿐이다.
-        static_cast<MenuRow&>(*item).SetPanel(this);
+    return TryAddChild(item);
+}
+
+Result<void> MenuPanel::AddRow(const SharedPtr<MenuRow>& row) noexcept {
+    if (!row) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return added;
+    auto reserved = rows_.TryEnsureCapacity(rows_.Size() + 1);
+    if (reserved) {
+        reserved = TryAddChild(row);
+    }
+
+    if (!reserved) {
+        return reserved;
+    }
+
+    // 용량을 미리 잡았으므로 실패하지 않는다.
+    (void)rows_.TryPushBack(row.Get());
+    row->SetPanel(this);
+    return Result<void>::Success();
+}
+
+MenuRow* MenuPanel::FindRow(const Element* element) const noexcept {
+    for (MenuRow* row : rows_) {
+        if (row == element) {
+            return row;
+        }
+    }
+
+    return nullptr;
+}
+
+bool MenuPanel::IsKeyboardNavigating() const noexcept {
+    return keyboardNavigating_;
+}
+
+void MenuPanel::SetKeyboardNavigating(bool navigating) noexcept {
+    if (keyboardNavigating_ == navigating) {
+        return;
+    }
+
+    keyboardNavigating_ = navigating;
+    for (MenuRow* row : rows_) {
+        row->InvalidatePaint();
+    }
+}
+
+void MenuPanel::OnPointerMoved() noexcept {
+    SetKeyboardNavigating(false);
+}
+
+void MenuPanel::FocusPanel(uint32 user) noexcept {
+    auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{};
+    if (self) {
+        // 초점 콜백 중(Busy)이면 그대로 둔다 — 다음 이동이 다시 맞춘다.
+        (void)context_->GetApplication().SetFocus(user, self, FocusCause::Pointer);
+    }
 }
 
 bool MenuPanel::IsRoot() const noexcept {
@@ -68,10 +119,28 @@ float MenuPanel::ViewHeight() const noexcept {
 }
 
 void MenuPanel::ScrollIntoView(usize index) noexcept {
-    if (maxScroll_ <= 0 || index >= ChildCount()) {
+    if (index >= ChildCount()) {
         return;
     }
 
+    // 아직 배치 전이면(열자마자 End 등) 기억했다가 배치에서 맞춘다.
+    if (!arranged_) {
+        pendingScroll_ = index;
+        return;
+    }
+
+    if (maxScroll_ <= 0) {
+        return;
+    }
+
+    const float next = ScrollTarget(index);
+    if (next != scroll_) {
+        scroll_ = next;
+        InvalidateArrangement();
+    }
+}
+
+float MenuPanel::ScrollTarget(usize index) const noexcept {
     float top = 0;
     for (usize i = 0; i < index; ++i) {
         if (ChildAt(i)->GetVisibility() != Visibility::Collapsed) {
@@ -88,11 +157,7 @@ void MenuPanel::ScrollIntoView(usize index) noexcept {
         next = bottom - view;
     }
 
-    next = math::Clamp(next, 0.0f, maxScroll_);
-    if (next != scroll_) {
-        scroll_ = next;
-        InvalidateArrangement();
-    }
+    return math::Clamp(next, 0.0f, maxScroll_);
 }
 
 PointerReply MenuPanel::OnPointerEvent(const PointerEvent& event) noexcept {
@@ -101,10 +166,16 @@ PointerReply MenuPanel::OnPointerEvent(const PointerEvent& event) noexcept {
             math::Clamp(scroll_ - event.wheel * MenuWheelScrollStep, 0.0f, maxScroll_);
         if (next != scroll_) {
             scroll_ = next;
+            // 부모 항목이 밀려 가려지므로 열린 하위 메뉴를 닫는다.
+            SwitchSubMenu(nullptr);
             InvalidateArrangement();
         }
 
         return {.handled = true};
+    }
+
+    if (event.type == PointerEventType::Move) {
+        OnPointerMoved();
     }
 
     return Element::OnPointerEvent(event);
@@ -122,8 +193,9 @@ bool MenuPanel::FocusFirstItem(uint32 user) noexcept {
     Application& app = context_->GetApplication();
     for (usize i = 0; i < ChildCount(); ++i) {
         Element* item = ChildAt(i);
-        if (item->SupportsKeyboardFocus() && item->IsEnabled()) {
+        if (FindRow(item) && item->IsEnabled()) {
             ScrollIntoView(i);
+            SetKeyboardNavigating(true);
             return static_cast<bool>(app.SetFocus(user, ChildRefAt(i), FocusCause::Navigation));
         }
     }
@@ -208,13 +280,14 @@ bool MenuPanel::MoveFocus(uint32 user, int32 step, bool toEnd) noexcept {
         }
 
         Element* candidate = ChildAt(index);
-        if (candidate->SupportsKeyboardFocus() && candidate->IsEnabled()) {
+        if (FindRow(candidate) && candidate->IsEnabled()) {
             // 키보드로 다른 항목으로 가면 열린 하위 메뉴를 닫는다(Windows 메뉴).
             if (openSub_ && openSub_ != candidate) {
                 SwitchSubMenu(nullptr);
             }
 
             ScrollIntoView(index);
+            SetKeyboardNavigating(true);
             return static_cast<bool>(app.SetFocus(user, ChildRefAt(index), FocusCause::Navigation));
         }
     }
@@ -234,12 +307,13 @@ bool MenuPanel::JumpToLetter(uint32 user, char letter) noexcept {
     }
 
     // 항목 첫 글자(ASCII, 대소문자 무시)가 맞는 사용 가능 항목이다.
-    const auto matches = [letter](const Element& item) noexcept {
-        if (!item.SupportsKeyboardFocus() || !item.IsEnabled()) {
+    const auto matches = [this, letter](const Element& item) noexcept {
+        const MenuRow* row = FindRow(&item);
+        if (!row || !item.IsEnabled()) {
             return false;
         }
 
-        const StringView label = static_cast<const MenuRow&>(item).LabelText();
+        const StringView label = row->LabelText();
         if (label.IsEmpty()) {
             return false;
         }
@@ -271,16 +345,33 @@ bool MenuPanel::JumpToLetter(uint32 user, char letter) noexcept {
     }
 
     ScrollIntoView(found);
+    SetKeyboardNavigating(true);
     auto focused =
         context_->GetApplication().SetFocus(user, ChildRefAt(found), FocusCause::Navigation);
     if (focused && total == 1) {
-        static_cast<MenuRow*>(ChildAt(found))->Invoke();
+        FindRow(ChildAt(found))->Invoke();
     }
 
     return true;
 }
 
 bool MenuPanel::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+    // 글자 점프는 입력 문자 기준이다(물리 키가 아니라 — AZERTY·Dvorak에서도 그 글자). Ctrl·Alt
+    // 조합은 단축키·막대 가속키로 남긴다.
+    if (event.type == input::InputEventType::Text) {
+        Application& app = context_->GetApplication();
+        uint32 code = event.codePoint;
+        if (code >= 'a' && code <= 'z') {
+            code = code - 'a' + 'A';
+        }
+
+        if (code >= 'A' && code <= 'Z' && !app.IsControlDown(user) && !app.IsAltDown(user)) {
+            return JumpToLetter(user, static_cast<char>(code));
+        }
+
+        return false;
+    }
+
     if (event.type != input::InputEventType::KeyDown) {
         return false;
     }
@@ -311,15 +402,6 @@ bool MenuPanel::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept
         return context_->NavigateRoot(1);
     default:
         break;
-    }
-
-    // 보조 키 없이 누른 글자는 글자 점프다(Ctrl·Alt 조합은 단축키·막대 가속키로 남긴다).
-    Application& app = context_->GetApplication();
-    if (event.key >= input::Key::A && event.key <= input::Key::Z && !app.IsControlDown(user) &&
-        !app.IsAltDown(user)) {
-        const char letter = static_cast<char>(
-            'A' + (static_cast<uint32>(event.key) - static_cast<uint32>(input::Key::A)));
-        return JumpToLetter(user, letter);
     }
 
     return false;
@@ -356,11 +438,16 @@ Result<void> MenuPanel::Arrange(const Geometry& geometry) noexcept {
         }
     }
 
-    // 넘치면 위치 막대 자리만큼 항목 폭을 줄이고 스크롤 범위를 정한다.
+    // 스크롤 범위를 정한다. 위치 막대는 오른쪽 여백 안에 그리므로 항목 폭은 줄이지 않는다.
     maxScroll_ = math::Max(0.0f, content - ViewHeight());
     scroll_ = math::Clamp(scroll_, 0.0f, maxScroll_);
-    const float thumb = maxScroll_ > 0 ? context_->Style().scrollThumbWidth : 0.0f;
-    const float width = math::Max(0.0f, geometry.size.x - 2 * outline - pad.x - pad.z - thumb);
+    arranged_ = true;
+    if (pendingScroll_ != IndexNone) {
+        scroll_ = ScrollTarget(pendingScroll_);
+        pendingScroll_ = IndexNone;
+    }
+
+    const float width = math::Max(0.0f, geometry.size.x - 2 * outline - pad.x - pad.z);
     float y = ContentTop() - scroll_;
     for (usize i = 0; i < ChildCount(); ++i) {
         Element* item = ChildAt(i);
@@ -399,10 +486,12 @@ Result<void> MenuPanel::OnPaintOverlay(PaintList& list, int32 layer) const noexc
         const float total = view + maxScroll_;
         const float length = math::Max(style.scrollThumbWidth * 2, view * view / total);
         const float top = ContentTop() + (view - length) * (scroll_ / maxScroll_);
-        const float x = GetGeometry().size.x - style.outline.outlineWidth -
-                        style.panelPadding.z * 0.5f - style.scrollThumbWidth;
+        // 오른쪽 여백(panelPadding.z) 안이다 — 항목 강조와 겹치지 않는다.
+        const float thumbWidth = math::Min(style.scrollThumbWidth, style.panelPadding.z);
+        const float x = GetGeometry().size.x - style.outline.outlineWidth - style.panelPadding.z +
+                        (style.panelPadding.z - thumbWidth) * 0.5f;
         auto drawn = list.TryAddBrush(
-            GetGeometry().MakeChild({style.scrollThumbWidth, length}, {1, 0, 0, 1, x, top}, {}, {}),
+            GetGeometry().MakeChild({thumbWidth, length}, {1, 0, 0, 1, x, top}, {}, {}),
             style.scrollThumb.Resolve(list.Theme(), list.ColorContext()), LinearColor{1, 1, 1, 1},
             layer);
         if (!drawn) {

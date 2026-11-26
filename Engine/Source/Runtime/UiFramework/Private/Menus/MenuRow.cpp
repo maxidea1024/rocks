@@ -113,7 +113,8 @@ VectorImageKey MenuRow::Icon() const noexcept {
 }
 
 bool MenuRow::IsHighlighted() const noexcept {
-    if (MenuAnchor::IsHighlighted()) {
+    // hover 강조는 키보드로 옮긴 뒤 포인터가 다시 움직일 때까지 끈다(강조 하나 — R16).
+    if (MenuAnchor::IsHighlighted() && !(panel_ && panel_->IsKeyboardNavigating())) {
         return true;
     }
 
@@ -274,6 +275,7 @@ void MenuRow::OnMouseEnter(uint32 user) noexcept {
 
     // 포인터가 고른 항목으로 키보드 초점도 옮긴다(Enter가 보이는 항목을 실행하고, 강조가 하나다).
     // 초점 콜백 중이라 Busy면 다음 hover에서 맞춘다.
+    panel_->OnPointerMoved();
     if (auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{}) {
         (void)context_->GetApplication().SetFocus(user, self, FocusCause::Pointer);
     }
@@ -283,9 +285,26 @@ void MenuRow::OnMouseEnter(uint32 user) noexcept {
 
 void MenuRow::OnMouseLeave(uint32 user) noexcept {
     MenuAnchor::OnMouseLeave(user);
-    if (panel_) {
-        panel_->OnRowUnhovered(*this);
+    if (!panel_) {
+        return;
     }
+
+    panel_->OnRowUnhovered(*this);
+    // 포인터로 옮긴 초점은 항목을 떠나면 패널로 돌린다 — 강조 없는 항목을 Enter가 실행하지 않는다.
+    // 하위 메뉴가 열린 항목(하위 메뉴로 가는 중)과 키보드로 고른 항목은 그대로 둔다.
+    Application& app = context_->GetApplication();
+    if (!IsOpen() && app.GetFocus(user).Get() == this &&
+        app.GetFocusCause(user) == FocusCause::Pointer) {
+        panel_->FocusPanel(user);
+    }
+}
+
+PointerReply MenuRow::OnPointerEvent(const PointerEvent& event) noexcept {
+    if (event.type == PointerEventType::Move && panel_) {
+        panel_->OnPointerMoved();
+    }
+
+    return MenuAnchor::OnPointerEvent(event);
 }
 
 void MenuRow::OnFocusReceived(uint32 user) noexcept {
@@ -338,6 +357,7 @@ void MenuRow::OnSubMenuOpenChanged(bool open) noexcept {
         return;
     }
 
+    // 초점 콜백 중(Busy)이면 그대로 둔다 — 떨어진 초점은 다음 입력에서 Application이 지운다.
     if (auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{}) {
         (void)app.SetFocus(0, self, app.GetFocusCause(0));
     }

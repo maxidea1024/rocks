@@ -77,6 +77,9 @@ Optional<Vec2> Element::PopupWorkAreaPoint() const noexcept {
     return {};
 }
 
+void Element::SetPopupArea(const Optional<Box2<float>>&) noexcept {
+}
+
 void Element::DismissHostedPopups() noexcept {
 }
 

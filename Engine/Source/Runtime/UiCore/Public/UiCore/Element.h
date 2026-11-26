@@ -114,6 +114,10 @@ public:
     // 커서에 붙는 툴팁 층은 커서 지점을 준다(UE CalculateTooltipWindowPosition). 여러 모니터에
     // 걸친 창에서 팝업이 어느 모니터 안에 놓일지를 정한다.
     virtual Optional<Vec2> PopupWorkAreaPoint() const noexcept;
+    // 팝업 호스트가 이 팝업 층에 배치 경계(층 로컬 사각형 — 화면 안 허용 영역)를 알린다. 층 자신은
+    // 호스트 전체를 덮어 바깥 누름을 놓치지 않고, 내용만 이 경계 안에 놓는다(뒤집기·밀어 넣기·맞춤
+    // 높이). 비우면 층 전체다. 기본은 아무것도 하지 않는다(팝업 층이 아닌 요소).
+    virtual void SetPopupArea(const Optional<Box2<float>>& area) noexcept;
 
     // 자식을 분리한다. 해당 자식이 없으면 false를 돌려준다.
     virtual bool RemoveChild(Element& child) noexcept;

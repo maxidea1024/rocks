@@ -141,7 +141,13 @@ Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
             continue;
         }
 
-        auto arranged = child->ArrangeIfNeeded(PopupLayerGeometry(*child));
+        // 팝업 층도 Overlay 전체를 덮는다(바깥 누름을 놓치지 않게). 화면 안 배치 경계는 따로
+        // 알린다(UW7d R16).
+        if (IsHostedPopupLayer(*child)) {
+            child->SetPopupArea(PopupLayerArea(*child));
+        }
+
+        auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
         if (!arranged) {
             return arranged;
         }
@@ -150,10 +156,10 @@ Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
     return Result<void>::Success();
 }
 
-Geometry Overlay::PopupLayerGeometry(const Element& child) const noexcept {
-    // 팝업 층이 아니거나 허용 영역을 모르면 Overlay 전체다.
+Optional<Box2<float>> Overlay::PopupLayerArea(const Element& child) const noexcept {
+    // 팝업 층이 아니거나 허용 영역을 모르면 비운다(층 전체).
     const Geometry& host = GetGeometry();
-    const Geometry whole = host.MakeChild(host.size, {}, {}, {});
+    const Optional<Box2<float>> whole{};
     SharedPtr<Element> anchor;
     for (const OpenPopup& popup : popups_) {
         if (popup.layer == &child) {
@@ -188,12 +194,12 @@ Geometry Overlay::PopupLayerGeometry(const Element& child) const noexcept {
         return whole;
     }
 
-    // 창 좌표 → Overlay 로컬(팝업 호스트는 회전하지 않는다 — 축 정렬 가정).
+    // 창 좌표 → Overlay 로컬(팝업 호스트는 회전하지 않는다 — 축 정렬 가정). 층은 Overlay와 같은
+    // 자리에 놓이므로 층 로컬도 같다.
     const Vec2 localLow = inverse.Apply(low);
     const Vec2 localHigh = inverse.Apply(high);
-    const Vec2 origin{math::Min(localLow.x, localHigh.x), math::Min(localLow.y, localHigh.y)};
-    const Vec2 size{math::Abs(localHigh.x - localLow.x), math::Abs(localHigh.y - localLow.y)};
-    return host.MakeChild(size, {1, 0, 0, 1, origin.x, origin.y}, {}, {});
+    return Box2<float>{{math::Min(localLow.x, localHigh.x), math::Min(localLow.y, localHigh.y)},
+                       {math::Max(localLow.x, localHigh.x), math::Max(localLow.y, localHigh.y)}};
 }
 
 } // namespace rocks::ui

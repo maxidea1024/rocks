@@ -606,17 +606,17 @@ TEST(UiFramework_MenuTypeAheadJumpsAndExecutesUniqueMatch) {
     MenuPanel* panel = bench.FilePanel();
     REQUIRE(panel);
     // "O"로 시작하는 항목은 Other 하나 — 실행(하위 메뉴 열기)한다.
-    REQUIRE(bench.Key(input::Key::O));
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::Text('O')));
     REQUIRE(bench.Frame());
     CHECK(RowAt(*panel, 4)->IsOpen());
     // "T"로 시작하는 항목은 Toggle 하나 — 실행하면 메뉴가 닫힌다.
     REQUIRE(bench.Key(input::Key::Left));
-    REQUIRE(bench.Key(input::Key::T));
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::Text('t')));
     CHECK(bench.bar->OpenIndex() == IndexNone);
     // 맞는 항목이 없는 글자는 아무것도 하지 않는다.
     REQUIRE(bench.bar->OpenMenu(0, true));
     REQUIRE(bench.Frame());
-    REQUIRE(bench.Key(input::Key::Q));
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::Text('q')));
     CHECK(bench.bar->OpenIndex() == 0);
 }
 
@@ -646,7 +646,141 @@ TEST(UiFramework_MenuBarOverflowHidesMenusThatDoNotFit) {
     REQUIRE(bench.Frame());
     REQUIRE(bench.Frame());
     CHECK(!bench.bar->IsMenuHidden(1) && !bench.bar->IsMenuHidden(2));
+    REQUIRE(bench.Frame());
     CHECK(overflow->GetVisibility() == Visibility::Collapsed && !overflow->IsOpen());
+}
+
+TEST(UiFramework_MenuBarOverflowInTitleBarRecoversWhenWidened) {
+    // 회귀(R16): 제목 막대는 왼쪽 내용에 min(원하는 폭, 남는 폭)을 준다. 숨은 메뉴가 원하는 크기를
+    // 잃으면 다음 프레임에 앞 메뉴까지 연쇄로 접히고 넓혀도 돌아오지 않았다.
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.canvas->RemoveChild(*bench.bar));
+    auto titleBar = SharedPtr<WindowTitleBar>::TryMake(bench.allocator, bench.allocator);
+    auto chrome = SharedPtr<WindowChrome>::TryMake(bench.allocator, bench.allocator);
+    auto body = SharedPtr<AnchorCanvas>::TryMake(bench.allocator, bench.allocator);
+    REQUIRE(titleBar && chrome && body);
+    REQUIRE(titleBar.Value()->Construct({.leftContent = bench.bar}));
+    REQUIRE(chrome.Value()->Construct({.titleBar = titleBar.Value(), .content = body.Value()}));
+    bench.app.SetRoot(chrome.Value());
+    const auto frame = [&](float width) noexcept {
+        return static_cast<bool>(bench.app.UpdatePaintCache(Geometry::Root({width, 300}, {}), 1));
+    };
+    // 넉넉하면 모두 보인다.
+    REQUIRE(frame(800));
+    REQUIRE(frame(800));
+    CHECK(!bench.bar->IsMenuHidden(0) && !bench.bar->IsMenuHidden(2));
+    // 막대 폭을 100으로 줄이면(File 48 + 넘침 30 = 78은 들어가고 Edit까지 126은 안 들어간다) 뒤
+    // 메뉴만 숨고, 여러 프레임이 지나도 File은 남는다(연쇄로 접히지 않는다).
+    // 막대가 받을 수 있는 폭은 창 버튼 왼쪽 끝까지다.
+    const auto& minimize = titleBar.Value()->ControlButton(WindowButtonRole::Minimize);
+    REQUIRE(minimize);
+    auto buttons = minimize->GetGeometry().WindowBounds();
+    auto barBounds = bench.bar->GetGeometry().WindowBounds();
+    REQUIRE(buttons && barBounds);
+    const float available = buttons.Value().min.x - barBounds.Value().min.x;
+    const float narrow = 800 - (available - 100);
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(frame(narrow));
+    }
+
+    CHECK(!bench.bar->IsMenuHidden(0) && bench.bar->IsMenuHidden(2));
+    // 다시 넓히면 모두 돌아온다.
+    for (int i = 0; i < 3; ++i) {
+        REQUIRE(frame(800));
+    }
+
+    CHECK(!bench.bar->IsMenuHidden(1) && !bench.bar->IsMenuHidden(2));
+}
+
+TEST(UiFramework_MenuHiddenMenuAcceleratorOpensItsSubMenu) {
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.bar->RegisterAccelerators());
+    REQUIRE(bench.canvas->RemoveChild(*bench.bar));
+    REQUIRE(bench.canvas->TryAddSlot(bench.bar, {.offset = {0, 0, 100, 24}, .alignment = {0, 0}}));
+    REQUIRE(bench.Frame());
+    REQUIRE(bench.Frame());
+    REQUIRE(bench.bar->IsMenuHidden(1));
+    // Alt+E(숨은 Edit)는 넘침 메뉴를 열고 그 안의 Edit 하위 메뉴까지 연다(첫 항목 초점).
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::KeyDown(input::Key::LeftAlt)));
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::KeyDown(input::Key::E)));
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::KeyUp(input::Key::LeftAlt)));
+    REQUIRE(bench.Frame());
+    MenuBarButton* overflow = bench.bar->OverflowButton();
+    REQUIRE(overflow && overflow->IsOpen());
+    auto* panel = static_cast<MenuPanel*>(overflow->MenuContent());
+    REQUIRE(panel);
+    MenuRow* edit = RowAt(*panel, 0);
+    REQUIRE(edit->IsOpen());
+    auto* sub = static_cast<MenuPanel*>(edit->MenuContent());
+    REQUIRE(sub);
+    CHECK(bench.app.GetFocus(0).Get() == sub->ChildAt(0));
+}
+
+TEST(UiFramework_MenuReleaseOverSubMenuRowKeepsMenuOpen) {
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    MenuBarButton& file = *bench.bar->Button(0);
+    REQUIRE(bench.Press(file));
+    REQUIRE(bench.Frame());
+    MenuPanel* panel = bench.FilePanel();
+    REQUIRE(panel);
+    // 하위 메뉴 항목 위에서 놓으면 실행 대신 하위 메뉴를 연 채로 메뉴가 남는다.
+    REQUIRE(bench.Hover(*RowAt(*panel, 3)));
+    REQUIRE(bench.Release(*RowAt(*panel, 3)));
+    REQUIRE(bench.Frame());
+    CHECK(file.IsOpen() && RowAt(*panel, 3)->IsOpen());
+}
+
+TEST(UiFramework_MenuKeyboardMoveHidesHoverHighlight) {
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.Click(*bench.bar->Button(0)));
+    REQUIRE(bench.Frame());
+    MenuPanel* panel = bench.FilePanel();
+    REQUIRE(panel);
+    MenuRow& save = *RowAt(*panel, 0);
+    REQUIRE(bench.Hover(save));
+    CHECK(save.IsHighlighted());
+    // 포인터를 Save에 둔 채 아래 방향키: 강조는 키보드로 고른 Recent 하나다.
+    REQUIRE(bench.Key(input::Key::Down));
+    CHECK(!save.IsHighlighted() && RowAt(*panel, 3)->IsHighlighted());
+    CHECK(panel->IsKeyboardNavigating());
+    // 포인터가 다시 움직이면 hover 강조가 돌아온다.
+    REQUIRE(bench.Hover(save));
+    CHECK(!panel->IsKeyboardNavigating() && save.IsHighlighted());
+}
+
+TEST(UiFramework_MenuEnterOverEmptySpaceDoesNothing) {
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.Click(*bench.bar->Button(0)));
+    REQUIRE(bench.Frame());
+    MenuPanel* panel = bench.FilePanel();
+    REQUIRE(panel);
+    REQUIRE(bench.Hover(*RowAt(*panel, 0)));
+    // 패널 여백(항목 밖)으로 옮기면 초점이 패널로 돌아간다 — 강조 없는 Save를 Enter가 실행하지
+    // 않는다.
+    auto bounds = panel->GetGeometry().WindowBounds();
+    REQUIRE(bounds);
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Move, bounds.Value().min + Vec2{2, 2}}));
+    CHECK(bench.app.GetFocus(0).Get() == panel);
+    REQUIRE(bench.Key(input::Key::Enter));
+    CHECK(bench.saved == 0 && bench.bar->OpenIndex() == 0);
+}
+
+TEST(UiFramework_MenuTypeAheadUsesTypedCharacter) {
+    MenuBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.bar->OpenMenu(0, true));
+    REQUIRE(bench.Frame());
+    MenuPanel* panel = bench.FilePanel();
+    REQUIRE(panel);
+    // 글자 점프는 입력 문자 기준이다(물리 키 O가 아니라 문자 'o'): Other 하나 — 하위 메뉴를 연다.
+    REQUIRE(bench.app.RouteKey(0, input::InputEvent::Text('o')));
+    REQUIRE(bench.Frame());
+    CHECK(RowAt(*panel, 4)->IsOpen());
 }
 
 } // namespace rocks::ui

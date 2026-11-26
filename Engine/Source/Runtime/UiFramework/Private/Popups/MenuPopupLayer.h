@@ -10,11 +10,14 @@ public:
     MenuPopupLayer(Allocator& allocator, MenuAnchor& anchor) noexcept;
     void Disconnect() noexcept;
     Result<void> Arrange(const Geometry& geometry) noexcept override;
+    void SetPopupArea(const Optional<Box2<float>>& area) noexcept override;
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override;
     bool OnPreviewKeyDown(uint32 user, const input::InputEvent& event) noexcept override;
 
 private:
     MenuAnchor* anchor_;
+    // 호스트가 알린 배치 경계(층 로컬)다. 비면 층 전체다.
+    Optional<Box2<float>> popupArea_;
 };
 
 } // namespace rocks::ui

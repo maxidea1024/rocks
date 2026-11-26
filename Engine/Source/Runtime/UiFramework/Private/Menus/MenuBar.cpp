@@ -11,6 +11,8 @@ constexpr uint64 MenuAcceleratorDomain = 0x4D454E5542415221ull;
 constexpr uint64 FocusMenuBarIndex = 0;
 // 넘침 버튼 글자다(UE 툴바 넘침 표시처럼 오른쪽 겹화살괄호).
 constexpr StringView OverflowLabel = "\xC2\xBB";
+// 접힌 넘침 버튼의 원하는 크기를 직접 잴 때의 배율이다(배치 배율과 같다 — 1).
+constexpr float MeasureScale = 1.0f;
 
 } // namespace
 
@@ -141,7 +143,7 @@ MenuBarButton* MenuBar::OverflowButton() const noexcept {
 }
 
 bool MenuBar::IsMenuHidden(usize index) const noexcept {
-    return index < MenuCount() && buttons_[index]->GetVisibility() == Visibility::Collapsed;
+    return index < MenuCount() && buttons_[index]->GetVisibility() == Visibility::Hidden;
 }
 
 Result<void> MenuBar::AddMenu(StringView label, MenuFill fill) noexcept {
@@ -256,8 +258,15 @@ Result<void> MenuBar::OpenMenu(usize index, bool keyboard) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 넘쳐 숨은 메뉴는 넘침 메뉴로 연다(그 안의 하위 메뉴로 보인다).
+    // 넘쳐 숨은 메뉴는 넘침 메뉴로 열고 그 메뉴의 하위 메뉴까지 연다(넘침 메뉴의 항목은 숨은 메뉴
+    // 순서다).
+    usize hiddenRow = IndexNone;
     if (IsMenuHidden(index)) {
+        hiddenRow = 0;
+        for (usize i = 0; i < index; ++i) {
+            hiddenRow += IsMenuHidden(i) ? 1 : 0;
+        }
+
         index = buttons_.Size() - 1;
     }
 
@@ -292,6 +301,17 @@ Result<void> MenuBar::OpenMenu(usize index, bool keyboard) noexcept {
     auto* panel = static_cast<MenuPanel*>(button.MenuContent());
     if (!panel) {
         return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    if (hiddenRow != IndexNone) {
+        MenuRow* row = panel->FindRow(panel->ChildAt(hiddenRow));
+        if (row) {
+            if (keyboard) {
+                return row->OpenSubMenuFocused(0);
+            }
+
+            panel->SwitchSubMenu(row);
+        }
     }
 
     if (keyboard && panel->FocusFirstItem(0)) {
@@ -352,26 +372,15 @@ bool MenuBar::ReleaseOverMenu(Vec2 windowPoint) noexcept {
         top = top->Parent();
     }
 
-    // 놓은 지점의 항목을 찾는다: 열린 메뉴 사슬의 패널 직속 자식 중 초점을 받는 것(항목)이다.
+    // 놓은 지점의 열린 메뉴 항목이다(패널이 등록한 항목만 — 다른 요소를 항목으로 보지 않는다).
     Element* hit = top->HitTest(windowPoint);
-    if (!hit || !context_->IsInOpenMenus(*hit)) {
+    MenuRow* row = hit ? context_->FindOpenRow(*hit) : nullptr;
+    if (!row || !row->IsEnabled()) {
         return false;
     }
 
-    for (Element* current = hit; current && current->Parent(); current = current->Parent()) {
-        Element* parent = current->Parent();
-        if (!parent->SupportsKeyboardFocus() || !current->SupportsKeyboardFocus()) {
-            continue;
-        }
-
-        // 메뉴 패널(초점 받는 요소)의 직속 항목(MenuRow — 패널 안에서 초점 받는 것은 항목뿐)이다.
-        if (context_->IsInOpenMenus(*parent) && current->IsEnabled()) {
-            static_cast<MenuRow*>(current)->Invoke();
-            return true;
-        }
-    }
-
-    return false;
+    row->Invoke();
+    return true;
 }
 
 namespace {
@@ -382,7 +391,8 @@ usize NextVisible(const Array<SharedPtr<MenuBarButton>>& buttons, usize from, in
     usize index = from;
     for (usize tried = 0; tried < count; ++tried) {
         index = step > 0 ? (index + 1) % count : (index + count - 1) % count;
-        if (buttons[index]->GetVisibility() != Visibility::Collapsed) {
+        const Visibility visibility = buttons[index]->GetVisibility();
+        if (visibility != Visibility::Collapsed && visibility != Visibility::Hidden) {
             return index;
         }
     }
@@ -513,8 +523,54 @@ Result<void> MenuBar::RegisterAccelerators() noexcept {
     return added;
 }
 
+void MenuBar::ScheduleHiddenCleanup() noexcept {
+    if (cleanup_ || !context_) {
+        return;
+    }
+
+    auto self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{};
+    if (!self) {
+        return;
+    }
+
+    auto timer = context_->GetApplication().StartTimer(
+        self, 0, Delegate<void()>::CreateLambda([this]() noexcept { CleanupHidden(); }));
+    // 타이머를 못 만들면(메모리 부족) 숨은 메뉴가 열린 채 남는다 — 다음 배치가 다시 시도한다.
+    cleanup_ = timer ? Move(timer.Value()) : SharedPtr<UiTimer>{};
+}
+
+void MenuBar::CleanupHidden() noexcept {
+    cleanup_.Reset();
+    const usize count = MenuCount();
+    if (count == 0) {
+        return;
+    }
+
+    MenuBarButton& overflow = *buttons_[count];
+    Application& app = context_->GetApplication();
+    for (usize i = 0; i < count; ++i) {
+        if (!IsMenuHidden(i)) {
+            continue;
+        }
+
+        // 숨은 메뉴는 닫고(넘침 메뉴에서 다시 연다), 키보드 초점은 넘침 버튼으로 옮긴다.
+        if (buttons_[i]->IsOpen()) {
+            buttons_[i]->Close();
+        }
+
+        if (app.GetFocus(0).Get() == buttons_[i].Get()) {
+            (void)app.SetFocus(0, buttons_[count], app.GetFocusCause(0));
+        }
+    }
+
+    if (overflow.GetVisibility() == Visibility::Collapsed && overflow.IsOpen()) {
+        overflow.Close();
+    }
+}
+
 Vec2 MenuBar::ComputeDesiredSize(float) const noexcept {
-    // 원하는 크기는 모든 메뉴가 보일 때다(넘침 버튼은 넣지 않는다). 접힌 버튼도 원하는 크기는 잰다.
+    // 원하는 크기는 모든 메뉴가 보일 때다(넘침 버튼은 넣지 않는다). 숨은(Hidden) 버튼도 재므로
+    // 넓혀지면 다시 보인다.
     Vec2 size{};
     for (usize i = 0; i < MenuCount(); ++i) {
         const Vec2 desired = buttons_[i]->GetDesiredSize();
@@ -533,11 +589,14 @@ Result<void> MenuBar::Arrange(const Geometry& geometry) noexcept {
     }
 
     // 다 들어가면 넘침 버튼을 접고, 아니면 넘침 버튼 자리를 남기고 들어가는 앞 메뉴만 보인다.
+    // 숨는 메뉴는 Hidden이다(Collapsed면 원하는 크기가 0이 되어 막대가 받는 폭이 줄고 다음
+    // 프레임에 앞 메뉴까지 연쇄로 접힌다). 넘침 버튼은 막대 원하는 크기에 넣지 않으므로 접어도
+    // 된다.
     MenuBarButton& overflow = *buttons_[count];
-    const float overflowWidth = overflow.ComputeDesiredSize(1).x;
+    const float overflowWidth = overflow.ComputeDesiredSize(MeasureScale).x;
     float total = 0;
     for (usize i = 0; i < count; ++i) {
-        total += buttons_[i]->ComputeDesiredSize(1).x;
+        total += buttons_[i]->GetDesiredSize().x;
     }
 
     const bool overflowing = total > geometry.size.x;
@@ -546,15 +605,15 @@ Result<void> MenuBar::Arrange(const Geometry& geometry) noexcept {
     bool fits = true;
     for (usize i = 0; i < count; ++i) {
         MenuBarButton& button = *buttons_[i];
-        const float width = button.ComputeDesiredSize(1).x;
+        const float width = button.GetDesiredSize().x;
         fits = fits && x + width <= limit;
-        // 숨는 메뉴가 열려 있었으면 닫는다(넘침 메뉴에서 다시 연다).
-        if (!fits && button.IsOpen()) {
-            button.Close();
-        }
-
-        button.SetVisibility(fits ? Visibility::Visible : Visibility::Collapsed);
+        button.SetVisibility(fits ? Visibility::Visible : Visibility::Hidden);
         if (!fits) {
+            // 숨는 메뉴가 열려 있거나 초점을 들고 있으면 다음 프레임에 정리한다.
+            if (button.IsOpen() || context_->GetApplication().GetFocus(0).Get() == &button) {
+                ScheduleHiddenCleanup();
+            }
+
             continue;
         }
 
@@ -568,7 +627,7 @@ Result<void> MenuBar::Arrange(const Geometry& geometry) noexcept {
     }
 
     if (!overflowing && overflow.IsOpen()) {
-        overflow.Close();
+        ScheduleHiddenCleanup();
     }
 
     overflow.SetVisibility(overflowing ? Visibility::Visible : Visibility::Collapsed);

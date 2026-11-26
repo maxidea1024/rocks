@@ -58,6 +58,7 @@ public:
     Result<void> OnPaintOverlay(PaintList& list, int32 layer) const noexcept override;
     void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
+    PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
     void OnFocusReceived(uint32 user) noexcept override;
     void OnFocusLost(uint32 user) noexcept override;

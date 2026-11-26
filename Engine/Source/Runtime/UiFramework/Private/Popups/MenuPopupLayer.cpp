@@ -7,6 +7,15 @@ MenuPopupLayer::MenuPopupLayer(Allocator& allocator, MenuAnchor& anchor) noexcep
     SetClipToBounds(true);
 }
 
+void MenuPopupLayer::SetPopupArea(const Optional<Box2<float>>& area) noexcept {
+    const bool same = area.HasValue() == popupArea_.HasValue() &&
+                      (!area || (area->min == popupArea_->min && area->max == popupArea_->max));
+    if (!same) {
+        popupArea_ = area;
+        InvalidateArrangement();
+    }
+}
+
 void MenuPopupLayer::Disconnect() noexcept {
     anchor_ = nullptr;
 }
@@ -31,6 +40,11 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
     }
 
     const auto rect = bounds.Value();
+    // 배치 경계는 호스트가 알린 팝업 허용 영역(UW7d)이고, 없으면 층 전체다.
+    const Vec2 areaMin = popupArea_ ? popupArea_->min : Vec2{};
+    const Vec2 areaMax = popupArea_ ? popupArea_->max : geometry.size;
+    const Vec2 areaSize{math::Max(0.0f, areaMax.x - areaMin.x),
+                        math::Max(0.0f, areaMax.y - areaMin.y)};
     const Vec2 desired = menu->GetDesiredSize();
     const auto placement = anchor_->placement_;
     const bool fit = anchor_->fit_;
@@ -39,8 +53,8 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
     float width = combo ? math::Max(desired.x, rect.max.x - rect.min.x) : desired.x;
     float height = desired.y;
     if (fit) {
-        width = math::Min(width, geometry.size.x);
-        height = math::Min(height, geometry.size.y);
+        width = math::Min(width, areaSize.x);
+        height = math::Min(height, areaSize.y);
     }
 
     const bool side = placement == MenuPlacement::Left || placement == MenuPlacement::Right ||
@@ -48,8 +62,8 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
     float x = rect.min.x;
     float y = rect.max.y;
     if (side) {
-        const float left = math::Clamp(rect.min.x, 0.f, geometry.size.x);
-        const float right = geometry.size.x - math::Clamp(rect.max.x, 0.f, geometry.size.x);
+        const float left = math::Clamp(rect.min.x, areaMin.x, areaMax.x) - areaMin.x;
+        const float right = areaMax.x - math::Clamp(rect.max.x, areaMin.x, areaMax.x);
         bool useLeft = placement == MenuPlacement::Left;
         if (fit && width > (useLeft ? left : right) && (useLeft ? right > left : left > right)) {
             useLeft = !useLeft;
@@ -70,8 +84,8 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
             y = rect.max.y - height;
         }
     } else {
-        const float above = math::Clamp(rect.min.y, 0.f, geometry.size.y);
-        const float below = geometry.size.y - math::Clamp(rect.max.y, 0.f, geometry.size.y);
+        const float above = math::Clamp(rect.min.y, areaMin.y, areaMax.y) - areaMin.y;
+        const float below = areaMax.y - math::Clamp(rect.max.y, areaMin.y, areaMax.y);
         bool useAbove = placement == MenuPlacement::Above ||
                         placement == MenuPlacement::AboveRight ||
                         placement == MenuPlacement::CenteredAbove;
@@ -98,8 +112,8 @@ Result<void> MenuPopupLayer::Arrange(const Geometry& geometry) noexcept {
     x += anchor_->menuOffset_.x;
     y += anchor_->menuOffset_.y;
     if (fit) {
-        x = math::Clamp(x, 0.f, geometry.size.x - width);
-        y = math::Clamp(y, 0.f, geometry.size.y - height);
+        x = math::Clamp(x, areaMin.x, math::Max(areaMin.x, areaMax.x - width));
+        y = math::Clamp(y, areaMin.y, math::Max(areaMin.y, areaMax.y - height));
     }
 
     return menu->ArrangeIfNeeded(geometry.MakeChild({width, height}, {1, 0, 0, 1, x, y}, {}, {}));

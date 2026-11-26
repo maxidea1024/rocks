@@ -150,8 +150,9 @@ TEST(PlatformWindow_WorkAreaAtReturnsMonitorWorkAreaInClientSpace) {
     auto area = window.Value()->WorkAreaAt({0, 0});
     REQUIRE(area);
     CHECK(!area.Value().IsEmpty());
-    auto desktop = window.Value()->ClientToDesktop({0, 0});
-    REQUIRE(desktop);
+    // 새 창은 모니터 작업 영역 안에 놓이므로 client 원점을 덮는다.
+    const IntRect rect = area.Value();
+    CHECK(rect.min.x <= 0 && rect.min.y <= 0 && rect.max.x > 0 && rect.max.y > 0);
     // 같은 지점을 두 번 물으면 같은 답이다(창을 움직이지 않았다).
     auto again = window.Value()->WorkAreaAt({1, 1});
     REQUIRE(again);

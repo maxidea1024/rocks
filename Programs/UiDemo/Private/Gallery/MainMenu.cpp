@@ -86,7 +86,7 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
          "Save All",
          "Saves all unsaved levels and assets",
          {.key = input::Key::S, .shift = true, .control = true}},
-        {MenuCommand::Exit, "Exit", "Closes the gallery", {.key = input::Key::F4, .alt = true}},
+        {MenuCommand::Exit, "Exit", "Closes the gallery", {}},
         {MenuCommand::Undo,
          "Undo",
          "Undoes the last action",
@@ -171,7 +171,7 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
     };
 
     auto added = bar.Value()->AddMenu(
-        "File", MenuFill::CreateLambda([command](MenuBuilder& menu) noexcept -> Result<void> {
+        "File", MenuFill::CreateLambda([command, list](MenuBuilder& menu) noexcept -> Result<void> {
             menu.BeginSection("Level");
             command(menu, MenuCommand::New, NewIcon);
             command(menu, MenuCommand::Open, OpenIcon);
@@ -198,7 +198,13 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
             command(menu, MenuCommand::Save, SaveIcon);
             command(menu, MenuCommand::SaveAll);
             menu.BeginSection();
-            command(menu, MenuCommand::Exit);
+            // Alt+F4는 OS가 닫으므로 표시만 한다(명령으로 묶으면 닫기 요청이 두 번 간다).
+            menu.AddEntry("Exit",
+                          {.execute = Delegate<void()>::CreateLambda([list]() noexcept {
+                               (void)list->Execute(CommandId(MenuCommand::Exit));
+                           }),
+                           .toolTip = "Closes the gallery"},
+                          {.key = input::Key::F4, .alt = true});
             return Result<void>::Success();
         }));
     if (added) {

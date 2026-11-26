@@ -78,6 +78,31 @@ bool MenuContext::IsInOpenMenus(const Element& element) const noexcept {
     return false;
 }
 
+MenuRow* MenuContext::FindOpenRow(const Element& element) const noexcept {
+    const MenuAnchor* anchor = root_;
+    while (anchor) {
+        const auto* panel = static_cast<const MenuPanel*>(anchor->MenuContent());
+        if (!panel) {
+            return nullptr;
+        }
+
+        if (element.IsWithin(*panel)) {
+            for (const Element* current = &element; current && current != panel;
+                 current = current->Parent()) {
+                if (MenuRow* row = panel->FindRow(current)) {
+                    return row;
+                }
+            }
+
+            return nullptr;
+        }
+
+        anchor = panel->OpenSubMenu();
+    }
+
+    return nullptr;
+}
+
 void MenuContext::BeginSession(uint32 user, const Element& area) noexcept {
     const auto focus = application_.GetFocus(user);
     if (session_ && focus && (focus->IsWithin(area) || IsInOpenMenus(*focus))) {
