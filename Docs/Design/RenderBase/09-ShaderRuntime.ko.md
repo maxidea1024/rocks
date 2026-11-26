@@ -141,7 +141,7 @@
 | SX5 | 12.2절(라이브러리 형식) | 항목 표에 묶음 id 열(엔진 셰이더 = 0, 머티리얼은 셰이더 집합 id). 라이브러리 형식 버전 1을 확정하기 전에 넣는다 | UE 라이브러리는 셰이더 맵 hash → 셰이더 인덱스 범위로 묶는다(`ShaderCodeArchive.h:48–51, 221–230`) |
 | SX6 | 12.2절 | 항목마다 파라미터 레이아웃 서명. 열 때 검사(9.3절) | — |
 | SX7 | 12.2·12.3절 | 엔진 셰이더 집합 완결성 검사(쿠킹 라이브러리 형식은 시작 때, 필요 시 컴파일 형식은 공급 완료 뒤)를 완료 기준으로(9.2절) | — |
-| SX8 | 7.2절 3항(`ShaderBindingLayout`) | 상수 버퍼 항목에 파라미터 구조체 identity, 자원 항목에 파라미터 구조체 멤버 오프셋 | 9.5·9.6절 |
+| SX8 | 7.2절 3항(`ShaderBindingLayout`) | 상수 버퍼 항목에 파라미터 구조체 identity, 자원 항목에 파라미터 구조체 멤버 오프셋. **반영(셰이더 시스템 개정 54·55)**: 상수 버퍼·루트 상수 identity는 바인딩 layout v4(SH3a), 자원 항목 멤버 오프셋은 SH3b | 9.5·9.6절 |
 | SX9 | 7.2절 7항(정점 입력) | `ATTRIBUTEn` 상한 n ≤ 15(16개), 정점 배치 ⊇ 셰이더 입력 마스크 검사, 형식 기본 타입과 셰이더 입력 타입 일치 검사(정규화 → float, 정수 → int·uint, GLES 정수 attribute는 `glVertexAttribIPointer`) | 10.2절. 16은 Vulkan `maxVertexInputAttributes` 최소 보장(Vulkan 사양 Required Limits)과 OpenGL ES 3.x `GL_MAX_VERTEX_ATTRIBS` 최소값(glGet 참조 "must be at least 16")이다. UE는 선언당 17개(`RHI/Public/RHIDefinitions.h:269`) |
 | SX10 | 16절 SH2 | SH2 완료 기준에 지연 생성 경쟁 시험(게시 1회, 명시 gate), 완결성 음성 대조, 서명 불일치 음성 대조, 파이프라인 캐시 적중 계수를 더한다. SH2 범위는 결정 R8 | — |
 | SX11 | 6절 4항(구현 순서) | 셰이더 런타임 객체(RB3)를 SH2 안에 넣는다(결정 R8 권장안) | — |
@@ -332,3 +332,8 @@
 4. **이 절 밖(RS0).** 렌더러 slot 다섯의 선언(`RendererShaders`)과 등록, `ViewSet`·view마다 다시 묶기, 렌더 그래프 pass 안의 적용(`GraphPassContext`), 공유 자원 구조체(9.6절)는 렌더러 RS0이다. 셰이더가 공유 slot 구조체를 include하는 공용 `.rsh` 배치도 그때 정한다.
 
 **완료 기준.** EngineTests: 표 등록 규칙(양성, 이름·identity 중복, identity 없음, 루트 상수, 상한, Freeze 뒤 ScopeClosed), 지도(두 단계가 같은 slot을 다른 cbuffer 이름·slot 번호로 선언, 이름은 같지만 구조체가 다른 버퍼는 slot 아님, 크기 불일치 거부), 묶음(identity 다른 블록 거부, 미묶음 거부, 기록 장치에 낸 `SetConstantBuffer`·`SetConstantData` 열).
+
+**구현(2026-11-26, 개정 53).** 위 결정대로다.
+- 파일: `RenderBase/SharedConstantSlotTable.h`(`SharedConstantSlotDesc`·`SharedConstantSlotTable`·`MaxSharedConstantSlots` 8), `SharedConstantSlotMap.h`(`SharedConstantSlotUse`·`SharedConstantSlotMap`), `SharedConstantBindings.h`. `EngineShaderHost::SharedConstantSlots()`이고 `Freeze`가 등록부와 함께 닫는다. 바인딩 지도(`ShaderBindingMap::Build`)는 identity가 있는 표를 구조체 identity로 찾게 바꿨다(셰이더 시스템 16.2절 SH3a 메모) — 슬롯 지도는 그 규칙을 그대로 쓴다.
+- 시험: EngineTests `SharedConstantSlots_TableRegistrationRules`(순번·이름·identity 중복 AlreadyExists, 손으로 쓴 표·루트 상수·표 없음·이름 규칙 InvalidArgument, 조회, Freeze 전 지도 거부, 두 번 Freeze, 늦은 등록 ScopeClosed, 상한 8·9번째 CapacityExceeded), `SharedConstantSlots_MapFindsSlotsByStructIdentity`(VS가 다른 cbuffer 이름·slot 2, PS slot 0, 같은 이름이지만 다른 구조체는 slot 아님, 큰 버퍼 거부, 공유 slot 없는 파이프라인의 빈 지도), `SharedConstantSlots_BindingsApplyBlocksAndRejectMismatches`(identity 다른 블록·없는 slot 거부와 앞 값 유지, 미묶음이면 앞 자리만 묶고 InvalidArgument, slot 순서 `SetConstantData` 열과 값, null로 비움).
+- RS0로 남긴 것: 4항 그대로 — 렌더러 slot 다섯(`View`·`Scene`·`ForwardLight`·`Shadow`·`Fog`)의 파라미터 구조체 선언과 `RendererShaders` 등록(엔진 묶음 시작 때 `EngineShaderHost::SharedConstantSlots().Register`), `ViewSet`·view마다 다시 묶기, 렌더 그래프 pass 안의 적용(`GraphPassContext`), 공유 자원 구조체(SH3b 뒤), 공용 `.rsh` 배치.

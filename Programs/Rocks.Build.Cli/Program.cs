@@ -352,6 +352,15 @@ namespace Rocks.Build.Cli
                     return 1;
                 }
 
+                // 셰이더 파라미터 구조체 생성(Docs/Design/ShaderSystem 16.2절 SSD49)은 리플렉션 게시 뒤다(헤더가 리플렉션 생성 헤더를 include할 수 있다).
+                int shaderParameters = await ShaderParameterRunner.GenerateAsync(context, toolchain, plan, rules.Target, HostTool(root, "Rocks.MetaCompiler"),
+                    cancellationToken);
+                if (shaderParameters != 0)
+                {
+                    await evidence.FinishAsync("Shader parameter generation failed.");
+                    return 1;
+                }
+
                 // 파일 하나 컴파일: 메타 생성까지 평소처럼 한 뒤 고른 소스의 논리 명령만 돈다(증분 기록·보고서·평소 object는 그대로다).
                 if (options.TryGetValue(SingleFileCommand.Option, out string? files))
                 {

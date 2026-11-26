@@ -77,7 +77,7 @@ class SceneComponent;
 //   InvalidArgument다.
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
-ROCKS_CLASS(WorldOnly)
+ROCKS_CLASS(WorldOnly, ScriptExtensible)
 class ROCKS_WORLD_API Actor : public Object {
     ROCKS_GENERATED_BODY()
 
@@ -248,16 +248,16 @@ private:
     ROCKS_NATIVE() World* world_ = nullptr;
     // actors 포함 관계에서 유도되는 값이다(편입이 다시 채운다).
     ROCKS_NATIVE() ObjectHandle level_;
-    ROCKS_PROPERTY(ReadOnly, Required, Name = "components")
+    ROCKS_PROPERTY(ReadOnly, Required, Name = "components", ScriptReadOnly)
     ObjectRefArray<Component> components_;
     // UE AActor::RootComponent처럼 영속 강한 참조다. 늘 components_ 안의 객체라 새 생존 간선을
     // 만들지 않는다. 쓰기는 Registry SetReference로만 한다(Actor·World 구현).
-    ROCKS_PROPERTY(ReadOnly, Name = "rootComponent")
+    ROCKS_PROPERTY(ReadOnly, Name = "rootComponent", ScriptReadOnly)
     ObjectRef<SceneComponent> rootComponent_;
     // Tick 설정이다(A5c — 생성자 값은 클래스 기본값 레코드에 들어가고, 차이 저장이 기본값과 같은
     // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
     ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
-    ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "enabled", ScriptReadOnly) bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // 게임 논리 참조다(17.3절). 저장 여부는 Prefab·저장 단계가 정한다(지금은 실행 중 값).
     ROCKS_NATIVE() ObjectHandle owner_;

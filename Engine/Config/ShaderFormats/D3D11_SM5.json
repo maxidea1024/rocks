@@ -3,7 +3,7 @@
   "id": "D3D11_SM5",
   "status": "supported",
   "backend": "D3D11",
-  "processor": { "module": "ShaderFormatD3D", "version": 4 },
+  "processor": { "module": "ShaderFormatD3D", "version": 5 },
   "bindingConvention": 1,
   "tools": ["D3DCompiler", "DirectXShaderCompiler", "SpirvTools", "SpirvCross"],
   "language": { "hlsl2021": false },

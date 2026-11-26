@@ -101,6 +101,15 @@ StringView SimilarAttribute(StringView name) noexcept {
     return best;
 }
 
+uint32 LanguageOwnedNameCount() noexcept {
+    return static_cast<uint32>(detail::LanguageNames().Size());
+}
+
+StringView LanguageOwnedNameAt(uint32 index) noexcept {
+    const Span<const detail::LanguageName> names = detail::LanguageNames();
+    return index < names.Size() ? names[index].name : StringView();
+}
+
 Span<const UnityAlias> UnityAliases() noexcept {
     return Span<const UnityAlias>(Aliases, sizeof(Aliases) / sizeof(Aliases[0]));
 }

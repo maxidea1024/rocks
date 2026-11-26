@@ -12,22 +12,12 @@
 #include "/Engine/Private/Color/FilmicToneCurve.rsh"
 #include "/Engine/Private/Material/MaterialTextureSampling.rsh"
 
-// C++ 구조체는 RenderBase/EngineShaderTypes.h TextureInspectorConstants다(96 byte).
-struct TextureInspectorConstants {
-    // tone map 상수와 같은 배치다(x 노출 배율, y blue correction, z 색역 확장, w 곡선 양).
-    float4 exposure;
-    float4 film;
-    float4 filmWhite;
-    // x mip, y 층(배열 층·cube 배열 원소·volume z texel), z 고른 mip의 volume 깊이(texel 수),
-    // w 표시 방식
-    float4 selection;
-    // 쿠킹 swizzle 출처 번호 넷(MaterialTextureSampling.rsh SwizzleSource*)
-    float4 swizzle;
-    // 정수 형식: x 정수 값 → 표시 값 배율, y·z 고른 mip의 폭·높이(texel 수), w 0
-    float4 integer;
-};
-
-ROCKS_ROOT_CONSTANTS(TextureInspectorConstants, Inspector);
+// 그리기별 상수 Inspector는 C++ RenderBase/EngineShaderTypes.h TextureInspectorConstants의 생성 원문이다
+// (96 byte, ShaderSystem 16.2절). exposure·film·filmWhite는 tone map 상수와 같은 배치이고, selection(x mip,
+// y 층 — 배열 층·cube 배열 원소·volume z texel, z 고른 mip의 volume 깊이(texel 수), w 표시 방식),
+// swizzle(쿠킹 swizzle 출처 번호 넷 — MaterialTextureSampling.rsh SwizzleSource*), integer(x 정수 값 →
+// 표시 값 배율, y·z 고른 mip의 폭·높이(texel 수), w 0)다.
+#include "/Engine/Generated/RenderBase/TextureInspectorConstants.rsh"
 
 static const float InspectorLdr = 0.0;
 static const float InspectorHdr = 1.0;

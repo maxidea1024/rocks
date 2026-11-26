@@ -1,6 +1,7 @@
 #pragma once
 
 #include "JoltLayers.h"
+#include "JoltResponseSets.h"
 #include "JoltRuntime.h"
 #include "TaskJobSystem.h"
 
@@ -99,6 +100,8 @@ private:
         uint32 generation = 1;
         BodyMotion motion = BodyMotion::Static;
         bool live = false;
+        // 응답 묶음 표 색인이다(object 층 bit 11–31 — 7.1.6절).
+        uint32 responseSet = 0;
         // 형상을 다시 만들 때 쓰는 값이다(7.1.5절): scale 전 형상, 지금 형상에 구운 월드 scale,
         // 형상 교체 때 질량을 다시 계산할지(BodySettings::updateMassWhenScaleChanges).
         BodyGeometry geometry;
@@ -147,6 +150,10 @@ private:
 
     const BodySlot* FindSlot(PhysicsBodyHandle body) const noexcept;
 
+    // 접점 쓰기가 step 밖인지 확인한다(3.2절 — step 안의 job thread가 응답 묶음 표·body를 읽는다,
+    // 7.1.6절). step 안에서 부르면 Fatal이다.
+    void AssertNotStepping() const noexcept;
+
     // 형상 값·scale로 형상을 다시 만들어 바꾸고 깨운다(7.1.5절). 실패하면 이전 형상을 둔다.
     // 오류: 형상 없음·비유한 값(InvalidArgument).
     Result<void> ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
@@ -165,6 +172,8 @@ private:
     JoltRuntimeLease runtime_;
     BroadPhaseLayers broadPhaseLayers_;
     ObjectVsBroadPhaseFilter objectVsBroadPhase_;
+    // 쌍 필터가 빌리므로 그보다 먼저 생기고 늦게 사라진다.
+    ResponseSetTable responseSets_;
     ObjectLayerPairFilter layerPairs_;
     JPH::TempAllocatorImpl temp_;
     TaskJobSystem jobs_;
@@ -188,6 +197,8 @@ private:
     Array<JPH::uint64> slept_;
     Array<MovedBody> moved_;
     bool simulates_ = false;
+    // Step의 Update·Kinematic 목표 적용 중이다(AssertNotStepping).
+    bool stepping_ = false;
 };
 
 } // namespace physics

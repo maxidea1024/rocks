@@ -41,7 +41,7 @@ namespace rocks {
 //   거짓)는 World에 편입되기 전까지 World API를 쓰지 못한다(Destroy는 InvalidArgument).
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
-ROCKS_CLASS(WorldOnly)
+ROCKS_CLASS(WorldOnly, ScriptType)
 class ROCKS_WORLD_API Component : public Object {
     ROCKS_GENERATED_BODY()
 
@@ -198,7 +198,7 @@ private:
     // Tick 설정이다(A5c — 생성자 값은 클래스 기본값 레코드에 들어가고, 차이 저장이 기본값과 같은
     // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
     ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
-    ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "enabled", ScriptReadOnly) bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // World가 관리하는 수명 기록이다.
     ROCKS_NATIVE() ComponentState state_ = ComponentState::Constructed;

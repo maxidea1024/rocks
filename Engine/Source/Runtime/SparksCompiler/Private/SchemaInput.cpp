@@ -14,7 +14,8 @@ constexpr bool IsJsonTokenCharacter(char value) noexcept {
     return IsAsciiLetterOrDigit(value) || value == '.' || value == '+' || value == '-';
 }
 
-// text[index]부터 표기 하나를 읽는다. 성공하면 index는 표기 다음 자리다.
+// text[index]부터 표기 하나를 읽는다. 성공하면 index는 표기 다음 자리다. `?`는 최상위 표기에만
+// 붙는다 (타입 인자에는 `?`를 쓸 수 없다 — SL 4.2절·10.2절, Docs/Design/SparksBinding.ko.md B4).
 bool ReadNotation(StringView text, usize& index, uint32 depth) noexcept {
     if (depth > MaxSyntaxNesting) {
         return false;
@@ -63,6 +64,10 @@ bool ReadNotation(StringView text, usize& index, uint32 depth) noexcept {
     }
 
     if (index < text.ByteCount() && text.Data()[index] == '?') {
+        if (depth != 0) {
+            return false;
+        }
+
         ++index;
     }
 

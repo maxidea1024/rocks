@@ -459,6 +459,13 @@ public static class InstalledSdk
             return 1;
         }
 
+        // 셰이더 파라미터 구조체(Docs/Design/ShaderSystem 16.2절 SSD49 — 게임 모듈은 /Project 가상 루트).
+        if (await ShaderParameterRunner.GenerateAsync(context, toolchain, plan, rules.Target,
+                Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, gameProject: true) != 0)
+        {
+            return 1;
+        }
+
         // 파일 하나 컴파일(Docs/Design/ProjectFiles.ko.md 7.4절): 상대 경로는 게임 디렉터리 기준이다.
         if (options.TryGetValue(SingleFileCommand.Option, out string? files))
         {

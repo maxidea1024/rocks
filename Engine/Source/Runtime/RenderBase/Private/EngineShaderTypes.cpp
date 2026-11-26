@@ -1,5 +1,8 @@
 #include <RenderBase/EngineShaderTypes.h>
 
+#include <RenderBase/BuiltinResources.shaderparams.h>
+#include <RenderBase/EngineShaderTypes.shaderparams.h>
+
 // 엔진 셰이더 타입 desc다(Docs/Design/RenderBase 11.4절 2항). 원문 경로는 Engine/Shaders 아래다.
 namespace rocks::render {
 
@@ -19,13 +22,10 @@ constexpr bool BuiltinVertexInputOnly(shader::VertexInputTypeId vertexInputType,
     return vertexInputType == BuiltinVertexInputName.hash;
 }
 
-// BuiltinMeshConstants의 손으로 쓴 레이아웃 표다(ShaderSystem 7.2절 5항 — C++ 구조체는
-// RenderBase/BuiltinResources.h BuiltinMeshConstants).
-constexpr shader::ShaderParameterMember BuiltinMeshMembers[] = {
-    {"localToClip", shader::ShaderParameterType::Float4x4, 0, 0},
-    {"color", shader::ShaderParameterType::Float4, 64, 0}};
+// BuiltinMeshConstants의 생성 표다(ShaderSystem 16.2절 — C++ 구조체는
+// RenderBase/BuiltinResources.h).
 constexpr shader::ShaderParameterLayout BuiltinMeshLayouts[] = {
-    {"BuiltinMeshConstants", true, 80, BuiltinMeshMembers}};
+    shader::ShaderParameterLayoutOf<BuiltinMeshConstants>()};
 
 constexpr shader::ShaderTypeDesc MakeBuiltinMeshVertex() noexcept {
     shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
@@ -41,16 +41,14 @@ constexpr shader::ShaderTypeDesc MakeBuiltinMeshPixel() noexcept {
     shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
         BuiltinMeshPixelType, "/Engine/Private/Utility/BuiltinMesh.rsf", "BuiltinMeshPixel",
         shader::ShaderStagePixel, shader::ShaderTypeOwner::Engine);
+    // 원문이 두 단계 모두 생성 원문을 include한다(PS는 Draw를 읽지 않아 대조할 버퍼가 없다).
+    desc.parameterLayouts = BuiltinMeshLayouts;
     return desc;
 }
 
-// TonemapConstants의 손으로 쓴 레이아웃 표다(C++ 구조체는 RenderBase/EngineShaderTypes.h).
-constexpr shader::ShaderParameterMember TonemapMembers[] = {
-    {"exposure", shader::ShaderParameterType::Float4, 0, 0},
-    {"film", shader::ShaderParameterType::Float4, 16, 0},
-    {"filmWhite", shader::ShaderParameterType::Float4, 32, 0}};
+// TonemapConstants의 생성 표다(C++ 구조체는 RenderBase/EngineShaderTypes.h).
 constexpr shader::ShaderParameterLayout TonemapLayouts[] = {
-    {"TonemapConstants", true, sizeof(TonemapConstants), TonemapMembers}};
+    shader::ShaderParameterLayoutOf<TonemapConstants>()};
 
 constexpr shader::ShaderTypeDesc MakeTonemapPixel() noexcept {
     shader::ShaderTypeDesc desc = shader::MakeShaderTypeDesc(
@@ -60,17 +58,9 @@ constexpr shader::ShaderTypeDesc MakeTonemapPixel() noexcept {
     return desc;
 }
 
-// TextureInspectorConstants의 손으로 쓴 레이아웃 표다.
-constexpr shader::ShaderParameterMember TextureInspectorMembers[] = {
-    {"exposure", shader::ShaderParameterType::Float4, 0, 0},
-    {"film", shader::ShaderParameterType::Float4, 16, 0},
-    {"filmWhite", shader::ShaderParameterType::Float4, 32, 0},
-    {"selection", shader::ShaderParameterType::Float4, 48, 0},
-    {"swizzle", shader::ShaderParameterType::Float4, 64, 0},
-    {"integer", shader::ShaderParameterType::Float4, 80, 0}};
+// TextureInspectorConstants의 생성 표다.
 constexpr shader::ShaderParameterLayout TextureInspectorLayouts[] = {
-    {"TextureInspectorConstants", true, sizeof(TextureInspectorConstants),
-     TextureInspectorMembers}};
+    shader::ShaderParameterLayoutOf<TextureInspectorConstants>()};
 
 constexpr shader::ShaderTypeDesc MakeTextureInspector(shader::ShaderTypeName name,
                                                       StringView entry) noexcept {

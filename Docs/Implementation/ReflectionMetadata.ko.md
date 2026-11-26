@@ -118,6 +118,31 @@ public:
 
 `ROCKS_NATIVE()`는 저장·리플렉션하지 않는 런타임 멤버(GPU 핸들·캐시)이며 지정자를 받지 않는다. GC가 추적하지 않으므로 강한 객체 참조를 담을 수 없다: MetaCompiler가 Clang AST로 멤버 타입을 값으로 담는 필드·base·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 패턴 필드까지 재귀 검사해 `ObjectRef`·`RootRef`·`ObjectRefArray`·`StructRefArray`나 Object 파생 타입의 raw 포인터·참조가 있으면 RMC2205로 거부한다(`Array<참조 struct>`는 Clang의 `Array` static_assert가 먼저 실패하며 MetaCompiler가 그 진단을 RMC2205로 바꾼다 — 아래 "리플렉션 배열"). 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(`T**`·`ObjectRef<T>*`)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드(예: `World*`)의 필드는 그 소유자가 추적한다. 직접 멤버 타입이 (여러 겹의 포인터·참조와 cv·`__restrict`·`__unaligned`·주소 공간·`_Atomic`·배열을 거쳐) Object 파생 class나 강한 참조 래퍼를 가리키는지는 MetaCompiler의 탐침(`NativeMemberProbe`)이 판정한다: 첫 실행과 같은 번역 단위 끝에 멤버마다 `decltype(::Owner::member)` 판정 변수를 붙여 Clang을 한 번 더 실행하므로(경고 끔, 그 변수만 덤프, 탐침 이름은 모두 `rocks_meta_probe`·`RocksProbe`·`rocksProbe` 접두라 헤더의 매크로와 겹치지 않는다) 같은 namespace의 이름·inline namespace·별칭·부분/명시 특수화(식·enum·char 인자, 기본 인자)·CRTP·pack base를 Clang이 푼다. private 멤버는 `ROCKS_GENERATED_BODY`의 friend인 `GeneratedType` 특수화 안에서 본다. 대상 템플릿의 인스턴스화가 실패하면(hard error·재귀 깊이) 진단의 instantiation note를 탐침 변수 줄에 대응시켜 그 멤버만 RMC2205 "cannot verify (Clang: 그 멤버의 error 줄)"이고 나머지 멤버는 판정대로다(대응하지 않으면 묶음을 반으로 나눠 다시 판정한다. 판정 템플릿 자체가 컴파일되지 않으면 RMC3000 한 번). 대상 class가 불완전하면 모듈의 public 헤더를 더한 두 번째 탐침으로 다시 본다 — public 입력 헤더 철자의 첫 디렉터리 아래 `.h`(private 헤더 제외)에서 입력·생성 헤더와 이 모듈의 생성 헤더 철자를 직접 include하는 헤더를 빼고, 탐침 include 검색 순서에서 이 모듈의 출력 루트를 빼(빌드 상태와 무관하게 같은 판정), 실패하면 같은 격리와 함께 컴파일되지 않는 헤더를 하나씩 걸러 다시 실행한다. 그래도 불완전하거나 그 멤버의 탐침이 실패하면 허용한다(`World*` 같은 전방 선언 back-pointer, private 헤더·.cpp에만 정의가 있는 대상 포함). 대상 템플릿의 특수화가 입력(과 그 public 헤더)이 include하지 않는 헤더에만 있으면 탐침은 primary 템플릿으로 판정한다. Object 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않고, `WeakObjectRef`·`SoftObjectRef`·`ObjectHandle`은 허용한다(대상을 담지 않으므로 템플릿 인자도 따라가지 않는다). `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언한 타입(을 값으로 담는 타입)은 WorldOnly 클래스의 NATIVE 멤버로만 둘 수 있다(RMC2206). 생성 코드는 직접 멤버 타입의 강한 참조 래퍼(배열 원소, 래퍼를 가리키는 포인터와 참조 포함, 담는 타입의 필드는 제외)와 WorldOnly 형질을 `static_assert`(`IsNativeStrongReference`·`RequiresWorldOnlyOwner`, `<Object/NativeMemberTraits.h>`)로 한 번 더 둔다 — 형질은 대상 타입의 완전성에 기대지 않으므로(TU마다 값이 갈리면 ODR 위반이다) Object 파생 raw 포인터는 탐침만 판정한다. NATIVE 멤버는 영속 필드가 아니고 강한 간선을 담지 않으므로 생성 타입의 `completeFieldLayout`은 계속 true다. 수동 등록 매크로는 `ROCKS_NATIVE_TYPE`이다(이전 `ROCKS_NATIVE_CLASS`).
 
+### Sparks 노출 지정자([Sparks 엔진 binding](../Design/SparksBinding.ko.md) EI1a)
+
+노출은 opt-in이다(UE `BlueprintType`·`BlueprintReadOnly`와 같다). 지정자가 없는 타입·필드는 Sparks binding schema(`<out>/Metadata/<M>.sparkbind.json`)에 나오지 않는다. 런타임 생성 코드(TypeSchema flag)는 바뀌지 않고, descriptor(schema 4)가 실효 노출 flag를 싣는다.
+
+| 지정자 | 대상 | 뜻 |
+|---|---|---|
+| `ScriptType` | CLASS·STRUCT·ENUM | Sparks 타입으로 보인다. 클래스·struct는 **상속된다**(UE `BlueprintType`), enum은 자기 것만. `EditorOnly` 타입은 상속으로 노출되지 않고 직접 쓰면 RMC2607이다 |
+| `NotScriptType` | CLASS·STRUCT | 그 타입과 파생에서 노출 상속을 끊는다(파생이 다시 `ScriptType`을 쓰면 노출 — 그 `base`는 쓰지 않는다). 확장 가능 상속은 끊지 않는다(UE `NotBlueprintType`) |
+| `ScriptExtensible`·`NotScriptExtensible` | CLASS | Sparks class가 상속할 수 있다(`ScriptType`을 함께 뜻한다, 상속된다) / 그 상속을 끊는다 |
+| `ScriptReadOnly`·`ScriptWritable` | PROPERTY | 필드가 Sparks에 읽기 전용·읽기 쓰기로 보인다(둘 중 하나, `ReadOnly` 필드에 `ScriptWritable`은 RMC2603) |
+| `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
+
+필드 타입 대응(스칼라·`string`·`Text`·enum·struct·수학 미러 → `vec3` 등·객체 참조 `T?`·`Soft<T>?`·`Optional` → `T?`·`Array`·`Map`·`Set` — 타입 인자 안에는 `?`가 없다)과 노출할 수 없는 값 종류는 설계 B4 표다. 진단(메시지는 영어, 위치는 그 선언):
+
+| 코드 | 원인 |
+|---|---|
+| RMC2601 | Sparks에 대응 타입이 없는 필드(`Name`·`Guid`·`AssetId`·`ClassRef`·정적 배열·`InstancedStruct`·표 밖의 미러(enum 미러 포함)·중첩 컨테이너) |
+| RMC2602 | 필드 대상이 노출 타입이 아님(`rocks::Object`·노출하지 않은 클래스·enum·struct), `Soft<T>`의 대상이 asset이 아님 |
+| RMC2603 | 함께 쓸 수 없는 노출 지정자(`ScriptReadOnly`+`ScriptWritable`, `ReadOnly`+`ScriptWritable`, 노출 없는 `ScriptName`, 켜기·끄기 짝, `ScriptExtensible`+`NotScriptType`) |
+| RMC2604 | Sparks 이름 형식(필드의 `_`, `ScriptName`, 점이 든 타입 도구 이름, 대문자로 시작하지 않는 enum case) |
+| RMC2605 | 보이는 사슬(import 기반 포함) 안의 Sparks 필드 이름 겹침, 이 모듈과 import 모듈 사이 타입 이름 겹침(대소문자 무시) |
+| RMC2606 | 언어 이름 충돌 — 타입 이름이 언어 소유 이름(`Text`·`Asset` 등), object 종류(asset 아님) 필드 이름이 hook·`On`+hook·Unity hook 이름. 표는 `Programs/Rocks.MetaCompiler/SparksNames.json`(시험 `SparksBinding_NamesMatchCompiler`가 컴파일러와 대조) |
+| RMC2607 | 노출할 수 없는 타입·필드(`EditorOnly` 타입·필드와 EditorOnly 타입의 노출 필드, Binds 미러, Flags enum, 보이는 case가 없는 enum) |
+| RMC2608 | 노출하지 않은 타입의 노출 필드 |
+
 ### 리플렉션 enum(`ROCKS_ENUM`)
 
 ```cpp
@@ -394,7 +419,7 @@ Core 헤더를 컴파일하는 검사는 구성 매크로와 대상 OS 매크로
 
 ToolTests `meta`는 시험마다 자기 임시 디렉터리에서 MetaCompiler·Clang 프로세스를 띄우므로 기본으로 CPU 수만큼 함께 돌린다(`--jobs N`으로 바꾼다). 결과 줄은 끝난 순서로, JSON 보고서는 이름 순서로 남는다. 프로세스 전역 상태(환경 변수 등)를 바꾸는 시험은 `exclusive`로 등록해 병렬 묶음이 끝난 뒤 하나씩 돈다. 새 meta 시험은 저장소 파일을 읽기만 하고 쓰기는 자기 임시 디렉터리에 한다.
 
-MetaCompiler는 모듈 하나를 한 번에 생성한다. `--module`(모듈 이름), 짝을 이루는 `--input <헤더>`·`--include <철자>`(여러 번), private 헤더 표시 `--private <철자>`, 생성 루트 `--output-root`, descriptor `--descriptor <M>.rocksmeta.json`, 의존 모듈 descriptor `--import`(여러 번)를 받는다. 입력 헤더 전부를 include하는 번역 단위 하나를 Clang에 주므로 같은 모듈의 헤더 사이 base·참조가 풀린다. 생성 헤더는 `<생성 루트>/Public|Private/<철자의 .h를 .generated.h로 바꾼 경로>`에 쓴다. 위 예는 `out/Generated/SampleGame/Public/GameObject.generated.h`, 모듈 생성 헤더 `out/Generated/SampleGame/Public/SampleGame/SampleGame.module.generated.h`, 타입별 생성 소스 `out/Generated/SampleGame/Source/Public/GameObject.generated.cpp`, 모듈 생성 소스 `out/Generated/SampleGame/Source/SampleGame.module.generated.cpp`와 descriptor를 만든다. 타입별 생성 헤더는 `GeneratedType<T>` 특수화의 선언·컴파일 타임 형질·`Id()`·enum `IsDeclared()`·inline `Trace()`만 담고, 스키마·연산 표·등록·복사·검증·정적 검사 같은 본문은 타입별 생성 소스(`<생성 루트>/Source/Public|Private/<철자의 .h를 .generated.cpp로 바꾼 경로>`)가 한 번 정의한다. 그래서 `GeneratedType<T>::Schema()`·`Ops()`·`Register()` 등을 쓰는 코드는 그 타입의 모듈에 의존(링크)해야 한다. 생성 소스의 타입·필드 블록 앞에는 원본 선언을 가리키는 주석 `// <헤더 철자>:<줄> <타입>::<멤버>`가 있다. `--verify-sources`를 주면 생성 소스(타입별·모듈)도 게시 전에 구문 검사한다(빌드는 기본으로 주지 않는다 — 그 모듈의 compile action이 컴파일하고, 실패하면 빌드가 `RMC3000` 안내를 붙인다. 빌드 명령에 `--verify-metadata-sources on`을 주면 켠다). `--jobs <n>`은 게시 전 검증 컴파일을 함께 돌리는 수다(기본은 8과 프로세서 수 가운데 작은 값). 실제 빌드에서는 빌드 도구가 이 인자를 모두 구성한다.
+MetaCompiler는 모듈 하나를 한 번에 생성한다. `--module`(모듈 이름), 짝을 이루는 `--input <헤더>`·`--include <철자>`(여러 번), private 헤더 표시 `--private <철자>`, 생성 루트 `--output-root`, descriptor `--descriptor <M>.rocksmeta.json`, Sparks binding schema `--binding-schema <M>.sparkbind.json`(선택 — 빌드는 늘 넘긴다, 노출 규칙 검사는 언제나 한다), 의존 모듈 descriptor `--import`(여러 번)를 받는다. 입력 헤더 전부를 include하는 번역 단위 하나를 Clang에 주므로 같은 모듈의 헤더 사이 base·참조가 풀린다. 생성 헤더는 `<생성 루트>/Public|Private/<철자의 .h를 .generated.h로 바꾼 경로>`에 쓴다. 위 예는 `out/Generated/SampleGame/Public/GameObject.generated.h`, 모듈 생성 헤더 `out/Generated/SampleGame/Public/SampleGame/SampleGame.module.generated.h`, 타입별 생성 소스 `out/Generated/SampleGame/Source/Public/GameObject.generated.cpp`, 모듈 생성 소스 `out/Generated/SampleGame/Source/SampleGame.module.generated.cpp`와 descriptor를 만든다. 타입별 생성 헤더는 `GeneratedType<T>` 특수화의 선언·컴파일 타임 형질·`Id()`·enum `IsDeclared()`·inline `Trace()`만 담고, 스키마·연산 표·등록·복사·검증·정적 검사 같은 본문은 타입별 생성 소스(`<생성 루트>/Source/Public|Private/<철자의 .h를 .generated.cpp로 바꾼 경로>`)가 한 번 정의한다. 그래서 `GeneratedType<T>::Schema()`·`Ops()`·`Register()` 등을 쓰는 코드는 그 타입의 모듈에 의존(링크)해야 한다. 생성 소스의 타입·필드 블록 앞에는 원본 선언을 가리키는 주석 `// <헤더 철자>:<줄> <타입>::<멤버>`가 있다. `--verify-sources`를 주면 생성 소스(타입별·모듈)도 게시 전에 구문 검사한다(빌드는 기본으로 주지 않는다 — 그 모듈의 compile action이 컴파일하고, 실패하면 빌드가 `RMC3000` 안내를 붙인다. 빌드 명령에 `--verify-metadata-sources on`을 주면 켠다). `--jobs <n>`은 게시 전 검증 컴파일을 함께 돌리는 수다(기본은 8과 프로세서 수 가운데 작은 값). 실제 빌드에서는 빌드 도구가 이 인자를 모두 구성한다.
 
 컴파일러는 C++23, 예외·RTTI 비활성화와 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. macOS에서 위 예시의 `clang-cl`은 `clang++`로 바꾼다. annotation은 Clang 기능이며 지원하지 않는 컴파일러에서 빈 매크로로 대체하지 않는다.
 
@@ -406,7 +431,7 @@ C++ 구문은 원문 정규식이 아닌 실제 Clang JSON AST에서 읽는다. 
 
 생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 생성물은 출력 루트 옆의 고유 임시 디렉터리(`.rocks-meta-validation-*`)에 두고, 생성 헤더와 모듈 생성 헤더마다 따로 실제 Clang으로 검사한 뒤 게시한다(생성 소스는 `--verify-sources`를 준 경우에만 여기서 검사한다. 검사는 `--jobs` 수만큼 함께 돈다). 정상 종료와 관리된 실패에서 임시 디렉터리를 정리한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. 단독 실행은 입력에서 빠진 헤더의 이전 생성물을 지우지 않는다(지우기는 빌드의 게시 트랜잭션이 맡는다). `--check`는 모든 생성 헤더·모듈 생성 헤더·생성 소스·descriptor를 기존 출력과 비교하고 생성 루트(`Public`·`Private`·`Source`)에 남은 잉여 파일도 stale로 거부하며, 출력을 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
 
-C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 리플렉션 헤더(아래 "모듈 메타데이터"의 표지 헤더)가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 디렉터리 `<out>/Generated/<M>/Public`·`Private`는 각각 그 모듈의 public·private include 디렉터리가 되어 의존 모듈로 전파된다. `<out>/Generated/<M>/Source`의 생성 소스는 include 루트가 아니고 그 모듈의 번역 단위로 컴파일된다. 생성은 `<out>/.metadata-stage/`에 하고, 의존 모듈은 stage의 descriptor와 생성 루트를 본다(이전 빌드의 게시본을 보지 않는다). 모든 모듈의 생성·`ids verify`·`ids verify-set`이 성공하면 생성 헤더·생성 소스·descriptor(`<out>/Metadata/<M>.rocksmeta.json`)와 입력에서 빠진 헤더의 이전 생성물 삭제를 한 트랜잭션으로 게시한다. 게시 중 실패하면 교체와 삭제를 모두 되돌리며, 실행 동안 명세가 바뀌었으면 게시하지 않는다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 생성 헤더는 public include 헤더 검사에서 일반 엔진 헤더와 같은 경고 오류 기준으로 단독 컴파일된다.
+C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 리플렉션 헤더(아래 "모듈 메타데이터"의 표지 헤더)가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 디렉터리 `<out>/Generated/<M>/Public`·`Private`는 각각 그 모듈의 public·private include 디렉터리가 되어 의존 모듈로 전파된다. `<out>/Generated/<M>/Source`의 생성 소스는 include 루트가 아니고 그 모듈의 번역 단위로 컴파일된다. 생성은 `<out>/.metadata-stage/`에 하고, 의존 모듈은 stage의 descriptor와 생성 루트를 본다(이전 빌드의 게시본을 보지 않는다). 모든 모듈의 생성·`ids verify`·`ids verify-set`이 성공하면 생성 헤더·생성 소스·descriptor(`<out>/Metadata/<M>.rocksmeta.json`)·Sparks binding schema(`<out>/Metadata/<M>.sparkbind.json` — 노출 타입이 없어도 빈 `types`)와 입력에서 빠진 헤더의 이전 생성물 삭제를 한 트랜잭션으로 게시한다. 게시 중 실패하면 교체와 삭제를 모두 되돌리며, 실행 동안 명세가 바뀌었으면 게시하지 않는다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 생성 헤더는 public include 헤더 검사에서 일반 엔진 헤더와 같은 경고 오류 기준으로 단독 컴파일된다.
 
 ## 진단과 수정
 

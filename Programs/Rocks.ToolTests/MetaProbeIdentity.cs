@@ -6,6 +6,23 @@ namespace Rocks.ToolTests;
 // 저작 API가 한 번 발급하며 선언 본문에 GUID를 직접 넣지 않는다.
 internal static class MetaProbeIdentity
 {
+    // Sparks binding 시험(MetaTests.SparksBinding)의 타입이다. rocks::Asset은 probe가 asset 종류 판정을 위해 두는 최소 선언이다.
+    private static readonly string[] SparksBindingTypes =
+        ["rocks::Asset", "probe::Mood", "probe::Secret", "probe::Cut", "probe::Sound", "probe::Thing", "probe::Sealed", "probe::Internal",
+            "probe::Again", "probe::Vec3d", "probe::Both", "probe::Sword", "probe::Label", "probe::Empty"];
+
+    // Sparks binding 시험의 필드다.
+    private static readonly string[] SparksBindingFields =
+        ["probe::Base::count", "probe::Base::hidden", "probe::Cut::extra", "probe::Sound::variant", "probe::Thing::alive_",
+            "probe::Thing::score", "probe::Thing::label_", "probe::Thing::mood", "probe::Thing::next", "probe::Thing::owner", "probe::Thing::sound",
+            "probe::Thing::others", "probe::Thing::names", "probe::Thing::scores", "probe::Thing::tags", "probe::Thing::limit", "probe::Thing::leaf",
+            "probe::Thing::ratio", "probe::Thing::secret", "probe::Thing::label", "probe::Thing::kind", "probe::Thing::plain", "probe::Thing::any",
+            "probe::Thing::self", "probe::Thing::count", "probe::Thing::max_count", "probe::Thing::total", "probe::Thing::sum", "probe::Thing::tick",
+            "probe::Thing::onStart", "probe::Thing::update", "probe::Thing::note", "probe::Child::level", "probe::Child::other",
+            "probe::Value::where", "probe::Vec3d::x", "probe::Vec3d::y", "probe::Vec3d::z", "probe::Thing::tiny", "probe::Thing::small",
+            "probe::Thing::wide", "probe::Thing::big", "probe::Thing::huge", "probe::Thing::byMood", "probe::Thing::sounds", "probe::Thing::maybeMood",
+            "probe::Thing::leaves", "probe::Thing::key", "probe::Thing::grid", "probe::Tool::count"];
+
     public static void Create(string path)
     {
         StableIdManifest.Update(path, true, manifest =>
@@ -22,7 +39,7 @@ internal static class MetaProbeIdentity
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
                 "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow", "probe::Cell",
                 "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags", "probe::Tool" }
-                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
+                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes))
             {
                 manifest.Register("type", name);
             }
@@ -77,12 +94,12 @@ internal static class MetaProbeIdentity
                 "probe::Host::shape", "probe::RealBinding::a", "probe::Value::title", "probe::Value::lines",
                 "probe::Value::byKey", "probe::Value::titles", "probe::Flags::on", "probe::Flags::wide",
                 "probe::Flags::wider", "probe::Flags::widest", "probe::Flags::plain", "probe::Value::visible", "probe::Value::locked",
-                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag",
+                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag", "probe::Value::keyed",
                 "probe::Range::low", "probe::Range::high", "probe::Range::owner", "probe::Range::Inner::n", "probe::Hidden::range", "probe::Child::extra",
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
                 "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
-                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
+                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields))
             {
                 manifest.Register("field", name);
             }
