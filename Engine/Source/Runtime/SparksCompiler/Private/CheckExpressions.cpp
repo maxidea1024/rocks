@@ -355,9 +355,11 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
         return ExpressionValue{};
     }
 
-    // 식은 왼쪽으로 깊게 이어질 수 있다(구문 트리 깊이 상한 1024 — 8.1절). Debug 빌드의 stack 1 MiB
-    // 안에 들도록 재귀 경로의 frame에는 임시 값을 두지 않는다: 종류별 처리는 여기서 `return`으로
-    // 부르고(반환 자리에 바로 만든다), 판정·진단·타입 기록은 재귀가 끝난 뒤 부르는 함수가 한다.
+    // 식은 왼쪽으로 깊게 이어질 수 있다(구문 트리 깊이 상한 1024 — 8.1절). 왼쪽 사슬(이항·논리·
+    // 멤버·호출·인덱스·`as?`)은 CheckBinary·CheckLogical·CheckPostfix가 척추를 반복으로 돌아 사슬
+    // 길이가 stack 깊이가 되지 않는다(Release 인라이닝으로 이 frame이 커져도 — Release 시험이 그
+    // 사슬로 본다). 남은 재귀(괄호·단항·인자처럼 원문이 직접 감싼 것)를 위해 이 frame에는 임시 값을
+    // 두지 않는다: 종류별 처리는 여기서 `return`으로 부르고, 판정·진단·타입 기록은 그 함수가 한다.
     // 기대 타입을 모르는 자리는 리터럴(컬렉션·검증 리터럴)만 구별하고 그 밖의 식에는 없음과 같다.
     const SyntaxTree& tree = compilation_.trees_[context.module];
     switch (tree.Node(node).kind) {
@@ -373,11 +375,10 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
     case SyntaxKind::Identifier:
         return CheckIdentifier(context, node);
     case SyntaxKind::Member:
-        return CheckMember(context, node);
     case SyntaxKind::Call:
-        return CheckCall(context, node, expected);
     case SyntaxKind::Index:
-        return CheckIndex(context, node);
+    case SyntaxKind::CastTest:
+        return CheckPostfix(context, node, expected);
     case SyntaxKind::Binary:
         switch (tree.Tokens()[tree.Node(node).token].kind) {
         case TokenKind::AmpersandAmpersand:
@@ -390,8 +391,6 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
         }
     case SyntaxKind::Unary:
         return CheckUnary(context, node, expected == UnresolvedType ? NoType : expected);
-    case SyntaxKind::CastTest:
-        return CheckCast(context, node);
     case SyntaxKind::Try:
     case SyntaxKind::Await:
         return CheckAwaitTry(context, node);
@@ -402,6 +401,54 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
     default:
         return ExpressionValue{};
     }
+}
+
+ExpressionValue TypeChecker::CheckPostfix(const CheckContext& context, uint32 node,
+                                          uint32 expected) noexcept {
+    // 왼쪽으로 깊은 후위 사슬(`v.Normalize().Normalize()...`, `a[0][0]...`, `x as? T as? U ...` —
+    // 트리 깊이 상한까지)은 재귀하지 않는다: 받는 쪽(자식 0)으로 이어지는 멤버·호출·인덱스·`as?`
+    // 노드를 모아 가장 안쪽 받는 값만 Check하고 바깥으로 차례로 판정한다(CheckBinary와 같은 이유 —
+    // Release 인라이닝으로 frame이 커져도 사슬 길이가 stack을 정하지 않는다). 인자·색인 식은
+    // 각 단계 안에서 재귀한다.
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    Array<uint32> spine(allocator_);
+    uint32 leaf = node;
+    while (leaf != NoNode) {
+        const SyntaxKind kind = tree.Node(leaf).kind;
+        if (kind != SyntaxKind::Member && kind != SyntaxKind::Call && kind != SyntaxKind::Index &&
+            kind != SyntaxKind::CastTest) {
+            break;
+        }
+
+        if (auto pushed = spine.TryPushBack(leaf); !pushed) {
+            binder_.error_ = pushed.Error();
+            return ExpressionValue{};
+        }
+
+        leaf = tree.Child(leaf, 0);
+    }
+
+    ExpressionValue value = Check(context, leaf, NoType);
+    for (usize index = spine.Size(); index > 0 && binder_.error_ == ErrorCode::None; --index) {
+        const uint32 current = spine[index - 1];
+        switch (tree.Node(current).kind) {
+        case SyntaxKind::Member:
+            value = MemberOf(context, current, value);
+            break;
+        case SyntaxKind::Call:
+            // 기대 타입은 사슬 맨 바깥의 호출만 받는다(안쪽 호출은 다음 단계의 받는 값이다).
+            value = CallValue(context, current, index == 1 ? expected : NoType, value);
+            break;
+        case SyntaxKind::Index:
+            value = IndexValue(context, current, value);
+            break;
+        default:
+            value = CastOf(context, current, value);
+            break;
+        }
+    }
+
+    return value;
 }
 
 ExpressionValue TypeChecker::CheckParenthesized(const CheckContext& context, uint32 node,
@@ -636,24 +683,68 @@ ExpressionValue TypeChecker::ValueOfSymbol(const CheckContext& context, uint32 s
     }
 }
 
-ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 node) noexcept {
-    // 왼쪽으로 깊은 연쇄(`a + b + c ...`)의 frame에는 두 값만 둔다(판정·기록은 CombineBinary).
+bool TypeChecker::CollectBinarySpine(const CheckContext& context, uint32 node, bool logical,
+                                     Array<uint32>& spine) noexcept {
     const SyntaxTree& tree = compilation_.trees_[context.module];
-    const ExpressionValue left = Check(context, tree.Child(node, 0), NoType);
-    const ExpressionValue right =
-        Check(context, tree.Child(node, 1),
-              left.kind == ExpressionValue::Kind::Typed
-                  ? left.type
-                  : (left.kind == ExpressionValue::Kind::Error ? UnresolvedType : NoType));
-    return CombineBinary(context, node, left, right);
+    for (uint32 at = node; at != NoNode && tree.Node(at).kind == SyntaxKind::Binary;
+         at = tree.Child(at, 0)) {
+        const TokenKind op = tree.Tokens()[tree.Node(at).token].kind;
+        const bool isLogical = op == TokenKind::AmpersandAmpersand || op == TokenKind::PipePipe;
+        if (isLogical != logical || op == TokenKind::QuestionQuestion) {
+            break;
+        }
+
+        if (auto pushed = spine.TryPushBack(at); !pushed) {
+            binder_.error_ = pushed.Error();
+            return false;
+        }
+    }
+
+    return true;
+}
+
+ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 node) noexcept {
+    // 왼쪽으로 깊은 사슬(`a + b + c ...` — 트리 깊이 상한까지)은 재귀하지 않는다: 산술·비교 노드의
+    // 왼쪽 척추를 모아 가장 안쪽부터 차례로 판정한다(오른쪽 피연산자만 재귀 — IrLower의
+    // LowerBinary와 같다). Release 인라이닝으로 Check frame이 커져도 사슬 길이가 stack을 정하지
+    // 않는다.
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    Array<uint32> spine(allocator_);
+    if (!CollectBinarySpine(context, node, false, spine)) {
+        return ExpressionValue{};
+    }
+
+    ExpressionValue value = Check(context, tree.Child(spine[spine.Size() - 1], 0), NoType);
+    for (usize index = spine.Size(); index > 0 && binder_.error_ == ErrorCode::None; --index) {
+        const uint32 current = spine[index - 1];
+        const ExpressionValue right =
+            Check(context, tree.Child(current, 1),
+                  value.kind == ExpressionValue::Kind::Typed
+                      ? value.type
+                      : (value.kind == ExpressionValue::Kind::Error ? UnresolvedType : NoType));
+        value = CombineBinary(context, current, value, right);
+    }
+
+    return value;
 }
 
 ExpressionValue TypeChecker::CheckLogical(const CheckContext& context, uint32 node) noexcept {
-    // 재귀 경로(`a && b && c ...`)의 frame에는 두 값만 둔다(CheckBinary 참고).
+    // 왼쪽으로 깊은 `&&`·`||` 사슬도 척추를 반복으로 돈다(CheckBinary 참고 — 두 연산자는 섞여도
+    // 양쪽이 bool이다).
     const SyntaxTree& tree = compilation_.trees_[context.module];
-    const ExpressionValue left = Check(context, tree.Child(node, 0), boolType_);
-    const ExpressionValue right = Check(context, tree.Child(node, 1), boolType_);
-    return CombineLogical(context, node, left, right);
+    Array<uint32> spine(allocator_);
+    if (!CollectBinarySpine(context, node, true, spine)) {
+        return ExpressionValue{};
+    }
+
+    ExpressionValue value = Check(context, tree.Child(spine[spine.Size() - 1], 0), boolType_);
+    for (usize index = spine.Size(); index > 0 && binder_.error_ == ErrorCode::None; --index) {
+        const uint32 current = spine[index - 1];
+        const ExpressionValue right = Check(context, tree.Child(current, 1), boolType_);
+        value = CombineLogical(context, current, value, right);
+    }
+
+    return value;
 }
 
 ExpressionValue TypeChecker::CombineLogical(const CheckContext& context, uint32 node,
@@ -1184,13 +1275,6 @@ ExpressionValue TypeChecker::CheckUnaryValue(const CheckContext& context, uint32
     return result;
 }
 
-ExpressionValue TypeChecker::CheckIndex(const CheckContext& context, uint32 node) noexcept {
-    // 재귀 경로의 frame에는 받는 값만 둔다(`a[0][0]...` 연쇄 — CheckBinary와 같은 이유).
-    const ExpressionValue object =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return IndexValue(context, node, object);
-}
-
 ExpressionValue TypeChecker::IndexValue(const CheckContext& context, uint32 node,
                                         const ExpressionValue& object) noexcept {
     // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
@@ -1310,13 +1394,6 @@ ExpressionValue TypeChecker::CheckString(const CheckContext& context, uint32 nod
 
     Record(context, node, stringType_);
     return result;
-}
-
-ExpressionValue TypeChecker::CheckCast(const CheckContext& context, uint32 node) noexcept {
-    // 재귀 경로의 frame에는 피연산자만 둔다(Check 참고).
-    const ExpressionValue operand =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return CastOf(context, node, operand);
 }
 
 ExpressionValue TypeChecker::CastOf(const CheckContext& context, uint32 node,

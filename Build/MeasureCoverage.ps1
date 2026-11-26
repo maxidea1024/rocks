@@ -107,7 +107,9 @@ $merged = Join-Path $output 'merged.profdata'
 # line, so the raw profile list goes through an input file.
 $inputs = Join-Path $output 'profraw-inputs.txt'
 Set-Content -Path $inputs -Value $raw -Encoding utf8NoBOM
-& $profdata merge -sparse "--input-files=$inputs" -o $merged
+# A case that kills the program on purpose (lock and crash tests) can leave a truncated raw profile; skip unreadable
+# profiles with a warning and fail only when none can be read (llvm-profdata prints the skipped files).
+& $profdata merge -sparse --failure-mode=all "--input-files=$inputs" -o $merged
 if ($LASTEXITCODE -ne 0) {
     throw 'llvm-profdata merge failed.'
 }

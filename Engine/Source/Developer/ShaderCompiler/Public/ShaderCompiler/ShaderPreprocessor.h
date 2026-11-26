@@ -81,13 +81,18 @@ struct ShaderDefine {
     StringView value;
 };
 
-// 생성 include 연결 하나다(RenderBase 10.6절 2항 — 정점 입력 축 job의
-// VertexInputGeneratedIncludePath → 그 정점 입력 타입 원문). virtualPath를 include하면 sourcePath
-// 파일을 읽는다. include 폐포·#line·__FILE__에는 sourcePath가 남는다. 빌린 view이며 호출 동안 살아
-// 있어야 한다.
+// 생성 include 하나다. 두 모양이 있다.
+// - 연결(RenderBase 10.6절 2항 — 정점 입력 축 job의 VertexInputGeneratedIncludePath → 그 정점 입력
+//   타입 원문): virtualPath를 include하면 sourcePath 파일을 읽는다. include 폐포·#line·__FILE__에는
+//   sourcePath가 남는다.
+// - 메모리 원문(ShaderSystem 16.2절 SSD52 — 생성 파라미터 구조체 HLSL): contents가 비지 않으면
+//   virtualPath를 include할 때 트리 대신 contents를 읽는다(sourcePath는 비어야 한다). include
+//   폐포에는 virtualPath와 contents의 SHA-256이 남는다.
+// 빌린 view이며 호출 동안 살아 있어야 한다.
 struct ShaderGeneratedInclude {
     StringView virtualPath;
     StringView sourcePath;
+    StringView contents;
 };
 
 // include 폐포의 파일 하나다. sha256은 원래 파일 byte(BOM·CRLF 정규화 전)의 SHA-256이다.

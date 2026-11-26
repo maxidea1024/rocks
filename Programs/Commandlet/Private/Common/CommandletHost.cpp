@@ -8,6 +8,7 @@
 #include <AudioTools/SoundClipImporter.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
+#include "ProductAssetSetup.h"
 #include <Config/ConfigDump.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
@@ -221,16 +222,18 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
-    // 제품 임포터(텍스처·사운드)·텍스처 설정 정규화 hook·예약 인자 번역기다(Docs/Design/AssetSystem
-    // 12.12절, AudioSystem 3.36.3절 — 임포터 묶음은 명령보다 오래 산다. 사운드는 hook이 없고
-    // 번역기는 예약 인자 없는 원본을 그대로 통과시킨다).
+    // 제품 임포터(텍스처·사운드)·예약 인자 번역기다(Docs/Design/AssetSystem 12.12절, AudioSystem
+    // 3.36.3절 — 임포터 묶음은 명령보다 오래 산다. 번역기는 예약 인자 없는 사운드 원본을 그대로
+    // 통과시킨다).
     ProductImporters productImporters;
     assetContext.importers = {&RegisterProductImporters, &productImporters};
-    assetContext.typeHooks = {&RegisterTextureTypeHooks, nullptr};
+    // 타입 hook은 텍스처(설정 정규화·원본 재구성)와 애니메이션(Build 의존 —
+    // MeshAnimationAssets 7.6.1절 2)이다(사운드는 hook이 없다).
+    assetContext.typeHooks = {&RegisterProductTypeHooks, nullptr};
     assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
-    // 텍스처 쿠킹 처리기다(12.14절 — asset-cook이 처리기 표에 등록한다).
-    TextureCookProcessor textureCook;
-    assetContext.cookProcessors = {&RegisterTextureCookProcessors, &textureCook};
+    // 쿠킹 처리기다(텍스처 12.14절, 정적·스킨 메시·애니메이션 클립 — MeshAnimationAssets 13.1절 1).
+    ProductCookProcessors cookProcessors;
+    assetContext.cookProcessors = {&RegisterProductCookProcessors, &cookProcessors};
     // 종류별 임포터는 UX2b부터 등록한다(Docs/Design/UnrealExchange.ko.md 10.5절 7번).
     UnrealExchangeCommandContext unrealContext{&assetContext, {}};
     const bool settingsReady = BootSettings(settings, modules);

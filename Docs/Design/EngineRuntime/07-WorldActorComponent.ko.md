@@ -19,6 +19,7 @@
 | (레코드 제거) | `OnDestroy`·Component 해제·`RequestDestroy`·루트 반환 | 프레임의 안전 지점 |
 
 - 활성(`enabled`)은 상태와 별개 플래그이며 `OnEnable`/`OnDisable`을 부른다.
+- `PendingDestroy`인 Actor(와 그 Component)는 Registry 상태로는 프레임 끝 정리까지 살아 있다. 그래서 함수 리플렉션 호출([함수 리플렉션](../FunctionReflection.ko.md) FD8)의 대상 해석을 통과한다. 이 사이의 동작은 World가 정한다. 변경 API는 `Destroyed`로 거부한다(지금 World API와 같다 — `SetOwner`·`AddComponent`·Tick 의존 등). 읽기(`Const`) 함수는 마지막 값을 돌려준다(SL 10.2절 "PendingDestroy 대상에서의 동작"의 "읽기 허용"). `ROCKS_FUNCTION`으로 노출하는 변경 함수는 노출할 때 이 거부를 시험한다.
 - Level의 `actors_`(`Level::Actors()`)는 순서를 보장하지 않는다. Actor 레코드가 배열 위치를 기억하고, 파괴는 `RemoveReferenceAtSwap`으로 끝 원소와 바꿔 O(1)로 뗀 뒤 옮긴 Actor의 위치를 고친다. 위치와 배열이 어긋나면 Fatal이다(실패를 버리지 않는다). 측정(실험 16절): Actor 하나의 파괴가 Actor 10K → 100K에서 5.0 → 43.7us이던 것이 0.5–1.0us로 같다.
 - 꺼진(`enabled`가 거짓) 채 시작을 기다리는 Actor는 시작 큐에서 빼고 `startDeferred`로 표시한다. 활성화(`EnableActor`)가 표시를 보고 큐에 다시 넣는다(hook 안 활성화 포함 — 큐 용량은 Spawn에서 Actor마다 확보했다). 프레임마다 꺼진 Actor를 다시 훑지 않는다. 시작 순서는 다시 넣은 순서다.
 - `DestroyLevel`은 그 Level의 `actors_`만 훑는다(World 전체 Actor가 아니라 — 작은 Level 파괴 21 → 716us이던 것이 1.3–1.5us).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetDatabase/AssetImportBulk.h>
 #include <AssetDatabase/AssetImporter.h>
 #include <AssetRuntime/MemoryBulkSource.h>
 #include <Core/Containers/Array.h>
@@ -100,29 +101,6 @@ inline Result<ObjectHandle> OpenTyped(AssetImportContext& context, AssetId id, T
     return opened;
 }
 
-// MemoryBulkSource의 ref를 출력 패키지 bulk로 옮긴다(byte를 복사해 AddBulk에 넘긴다).
-inline Result<void> Transfer(AssetImportContext& context, ObjectHandle output,
-                             MemoryBulkSource& bulk, BulkDataRef& ref,
-                             Allocator& allocator) noexcept {
-    auto bytes = bulk.ReadBulk(ref);
-    if (!bytes) {
-        return Result<void>::Failure(bytes.Error());
-    }
-
-    Array<uint8> copy(allocator);
-    if (auto copied = copy.TryAppend(bytes.Value()); !copied) {
-        return copied;
-    }
-
-    auto added = context.AddBulk(output, Move(copy));
-    if (!added) {
-        return Result<void>::Failure(added.Error());
-    }
-
-    ref = added.Value();
-    return Result<void>::Success();
-}
-
 // 원본 메시를 영속 형태로 바꿔 그 bulk를 출력 패키지로 옮긴다.
 inline Result<void> StoreMesh(AssetImportContext& context, ObjectHandle output, NamePool& names,
                               const MeshSource& mesh, MeshSourceData& data,
@@ -132,12 +110,13 @@ inline Result<void> StoreMesh(AssetImportContext& context, ObjectHandle output, 
         return written;
     }
 
-    if (auto moved = Transfer(context, output, bulk, data.topology, allocator); !moved) {
+    if (auto moved = TransferImportBulk(context, output, bulk, data.topology, allocator); !moved) {
         return moved;
     }
 
     for (MeshAttributeRecord& record : data.attributes) {
-        if (auto moved = Transfer(context, output, bulk, record.data, allocator); !moved) {
+        if (auto moved = TransferImportBulk(context, output, bulk, record.data, allocator);
+            !moved) {
             return moved;
         }
     }

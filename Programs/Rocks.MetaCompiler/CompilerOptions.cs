@@ -15,6 +15,10 @@ internal sealed class CompilerOptions
 
     public required string Descriptor { get; init; }
 
+    // Sparks binding schema 출력 경로다(--binding-schema <M>.sparkbind.json — Docs/Design/SparksBinding.ko.md B2). 빌드는 늘 넘기고,
+    // 없으면 schema를 쓰지 않는다(노출 규칙 검사는 언제나 한다).
+    public string? BindingSchema { get; init; }
+
     public string? Compiler { get; init; }
 
     public string? IdentityManifest { get; init; }
@@ -132,7 +136,7 @@ internal sealed class CompilerOptions
 
             int equals = argument.IndexOf('=');
             string key = equals < 0 ? argument : argument[..equals];
-            if (key is not ("--module" or "--input" or "--include" or "--private" or "--output-root" or "--descriptor" or "--import" or
+            if (key is not ("--module" or "--input" or "--include" or "--private" or "--output-root" or "--descriptor" or "--binding-schema" or "--import" or
                 "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs" or "--definitions-header"))
             {
                 throw new MetadataException($"unknown option {key}", "RMC1000", "Use --module, paired --input/--include, --output-root, --descriptor and documented optional arguments.");
@@ -248,11 +252,18 @@ internal sealed class CompilerOptions
             throw new MetadataException("descriptor must use the .rocksmeta.json suffix", "RMC1000", "Pass <Module>.rocksmeta.json.");
         }
 
+        string? bindingSchema = single.TryGetValue("--binding-schema", out string? bindingText) ? Path.GetFullPath(bindingText) : null;
+        if (bindingSchema is not null && !bindingSchema.EndsWith(".sparkbind.json", StringComparison.Ordinal))
+        {
+            throw new MetadataException("binding schema must use the .sparkbind.json suffix", "RMC1000", "Pass <Module>.sparkbind.json.");
+        }
+
         // symlink 별칭으로 출력 루트가 입력을 담는 경우도 막도록 정규 경로로 비교한다.
         string canonicalRoot = CanonicalPath.Resolve(outputRoot);
         foreach (ModuleInput input in pairs)
         {
-            if (CanonicalPath.Equals(input.Path, descriptor) || DirectoryPath.IsStrictlyUnder(CanonicalPath.Resolve(input.Path), canonicalRoot))
+            if (CanonicalPath.Equals(input.Path, descriptor) || (bindingSchema is not null && CanonicalPath.Equals(input.Path, bindingSchema)) ||
+                DirectoryPath.IsStrictlyUnder(CanonicalPath.Resolve(input.Path), canonicalRoot))
             {
                 throw new MetadataException("input header must be outside the output root and descriptor", "RMC1000",
                     "Never overwrite an author header with generated output.");
@@ -342,6 +353,7 @@ internal sealed class CompilerOptions
             Inputs = pairs,
             OutputRoot = outputRoot,
             Descriptor = descriptor,
+            BindingSchema = bindingSchema,
             Compiler = single.GetValueOrDefault("--compiler"),
             IdentityManifest = manifest,
             IdentityInventory = inventory,

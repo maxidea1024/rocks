@@ -911,10 +911,10 @@ struct OutputScene {
         return Invoke(command, cook.run.context.allocator, extra);
     }
 
-    int32 Invoke(CommandFunction command, void* context,
-                 std::initializer_list<StringView> extra) noexcept {
+    int32 Invoke(CommandFunction command, void* context, std::initializer_list<StringView> extra,
+                 bool withProject = true) noexcept {
         StringView args[8] = {cook.project.View()};
-        usize count = 1;
+        usize count = withProject ? 1 : 0;
         for (StringView one : extra) {
             args[count++] = one;
         }
@@ -1110,6 +1110,25 @@ TEST(AssetCommands_OutputFailures) {
         &RunAssetAliasListCommand,   &RunAssetAliasRemoveCommand, &RunAssetAliasPruneCommand};
     for (CommandFunction command : plainCommands) {
         CHECK(sweep(none, [&]() noexcept { return scene.Plain(command, {"--bogus"}); }, 2));
+    }
+
+    // 도움말(`--help` 단독 — 표준 출력에 사용법, 종료 0).
+    for (CommandFunction command : assetCommands) {
+        CHECK(sweep(
+            none,
+            [&]() noexcept {
+                return scene.Invoke(command, &scene.cook.run.context, {"--help"}, false);
+            },
+            0));
+    }
+
+    for (CommandFunction command : plainCommands) {
+        CHECK(sweep(
+            none,
+            [&]() noexcept {
+                return scene.Invoke(command, scene.cook.run.context.allocator, {"--help"}, false);
+            },
+            0));
     }
 }
 

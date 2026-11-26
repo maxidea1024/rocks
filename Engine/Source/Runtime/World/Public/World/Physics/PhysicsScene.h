@@ -17,6 +17,9 @@ struct PhysicsSceneStats {
     uint32 activeBodies = 0;
     // 장면을 만든 뒤 진행한 step 수다.
     uint64 steps = 0;
+    // 쓰는 충돌 응답 묶음 수다(같은 응답의 body가 공유 — 늘 있는 모두 Block 묶음 포함,
+    // PhysicsModule 7.1.6절).
+    uint32 responseSets = 0;
 };
 
 // World가 부르는 물리 장면 접점이다(Docs/Design/PhysicsModule 2.2절 — UE UWorld::GetPhysicsScene이

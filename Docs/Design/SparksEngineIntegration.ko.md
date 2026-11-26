@@ -18,10 +18,10 @@
 
 | ID | 요구 | 상태 | 확인 근거 | 단계 | 정본 |
 |---|---|---|---|---|---|
-| SE-R1 | 함수 리플렉션(CU2): `ROCKS_FUNCTION` 매크로, 인자·반환 schema, FunctionId 발급, 호출 thunk 생성 | 없음 | `MetaSchema/Public/Meta/Annotations.h`의 매크로는 `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_ENUM`·`ROCKS_ENUMERATOR`·`ROCKS_STRUCT`·`ROCKS_NATIVE`·`ROCKS_GENERATED_BODY`뿐 | EI1·EI2 | UiToolkit CU2, SL 10절 |
+| SE-R1 | 함수 리플렉션(CU2): `ROCKS_FUNCTION` 매크로, 인자·반환 schema, FunctionId 발급, 호출 thunk 생성 | 없음 | `MetaSchema/Public/Meta/Annotations.h`의 매크로는 `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_ENUM`·`ROCKS_ENUMERATOR`·`ROCKS_STRUCT`·`ROCKS_NATIVE`·`ROCKS_GENERATED_BODY`뿐 | EI1·EI2 | [함수 리플렉션](FunctionReflection.ko.md)(CU2 — 이 세션이 맡음, 2026-11-26), UiToolkit CU2, SL 10절 |
 | SE-R2 | 이벤트 필드(CU3): `MulticastDelegate` 필드를 `FieldKind::Event`로 분류, 인자 이름 `Params` 지정자 | 없음 | `MetaSchema/Public/Meta/TypeSchema.h`의 `FieldKind`는 `Value`·`ObjectReference` | EI1·EI3 | UiToolkit CU3, SL 10.1절 |
-| SE-R3 | 스크립트 지정자: 클래스 `ScriptExtensible`, 필드 `ScriptName`·`ScriptWritable`, 함수의 lane·효과·자원 정책·파괴 지연·`NoFatalOnInput`·초당 값 인자, `TryX` → `X` 이름 규칙 | 없음 | `Programs/Rocks.MetaCompiler/Specifiers.cs`의 지정자 목록에 없다 | EI1 | SL 10.2·10.3절 |
-| SE-R4 | binding schema 출력: 메타 컴파일러가 모듈마다 `.sparkbind.json`을 생성한다(형식은 SL 10.2절 "binding schema 파일 형식", LC2a 확정 — 함수의 `overridable`(재정의 가능 가상 함수, SD65)은 LC2b, 문맥 이름의 타입 `World`·`PlaySession`·`InputSystem`·`Connection`(SL §3.10)은 LC2c, 효과·lane·자원 정책 key는 LC3 이후 더한다) | 없음 | — | EI1 | SL 10.2절 |
+| SE-R3 | 스크립트 지정자: 클래스 `ScriptExtensible`, 필드 `ScriptName`·`ScriptWritable`, 함수의 lane·효과·자원 정책·파괴 지연·`NoFatalOnInput`·초당 값 인자, `TryX` → `X` 이름 규칙 | 일부 | 타입·필드 지정자는 있다(EI1a — `ScriptType`·`NotScriptType`·`ScriptExtensible`·`NotScriptExtensible`·`ScriptReadOnly`·`ScriptWritable`·`ScriptName`, `Programs/Rocks.MetaCompiler/Specifiers.cs`). 함수의 lane·효과·자원 정책·`TryX` 이름 규칙은 CU2(EI1b) | EI1 | [SparksBinding](SparksBinding.ko.md) EI1a, SL 10.2·10.3절 |
+| SE-R4 | binding schema 출력: 메타 컴파일러가 모듈마다 `.sparkbind.json`을 생성한다(형식은 SL 10.2절 "binding schema 파일 형식", LC2a 확정 — 함수의 `overridable`(재정의 가능 가상 함수, SD65)은 LC2b, 문맥 이름의 타입 `World`·`PlaySession`·`InputSystem`·`Connection`(SL §3.10)은 LC2c, 효과·lane·자원 정책 key는 LC3 이후 더한다) | 일부 | 타입·필드·enum의 `.sparkbind.json` 생성은 있다(EI1a — `SparksBinding.cs`, `<out>/Metadata/<M>.sparkbind.json`, 시험 `Meta.SparksBinding*`·`SparksBinding_EngineSchemasCompile`). 함수·이벤트·계산 속성·`changed`는 EI1b–EI1d | EI1 | [SparksBinding](SparksBinding.ko.md) EI1a, SL 10.2절 |
 | SE-R5 | interface 표(CU9): `TypeInfo`의 interface 목록·slot 표, C++ `ROCKS_INTERFACE` | 없음 | 위 매크로 목록에 없다 | EI2 | SL 10.3절 |
 | SE-R6 | 편집 메타(CU1): 강제 범위(Min·Max), 편집 범위·단위·편집 조건 | 일부 | 필드 지정자 `Category`·`DisplayName`·`ReadOnly`·`MaxElements`는 있다(`Specifiers.cs`). 범위·단위·조건은 없다 | EI5 | UiToolkit CU1, SL 10.1절 |
 | SE-R7 | 변경 통지(CU5): native 필드의 `Changed`, 계산 속성(getter·setter 쌍) | 없음 | ObjectRuntime·MetaSchema 공개 헤더에 통지 API가 없다 | EI3 | UiToolkit CU5, SL 5.3·10.2절 |
@@ -127,3 +127,5 @@ LC8 도구가 연동 때 더할 것(작업 공간 설정 파일, headless World 
 - 개정 3(2026-11-25): LC9(AOT)를 미룬다는 사용자 결정(SL SD77)을 머리말에 반영했다. EI8은 그대로 LC9 뒤다.
 - 개정 4(2026-11-26): LC8 묶음 끝 리뷰 — 2.6절 아래에 도구 쪽 연동 항목 안내(SparksTools 13절)를 더했다.
 - 개정 5(2026-11-26): LC8 뒤 상태 재확인(`e8b36b31`) — 있음 SE-C6·W2·A1, 일부 SE-W1·A2·G1·G5·G12. 착수 가능한 연동 단계는 아직 없다: 모든 단계가 binding(EI1 — SE-R1–R4, 넷 다 없음) 위에 선다.
+- 개정 6(2026-11-26): SE-R3·R4 정본에 EI1 설계 [SparksBinding](SparksBinding.ko.md)(노출 opt-in — 지정자 이름 `ScriptType`·`ScriptReadOnly` 등)을 걸었다.
+- 개정 7(2026-11-26): EI1a 구현 — SE-R3·R4를 일부로(타입·필드·enum 지정자와 schema 생성, 함수·이벤트는 EI1b·EI1c).

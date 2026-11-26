@@ -96,15 +96,18 @@ void AppendName(Array<uint8>& out, StringView name) noexcept {
 void FillSampleLayout(ShaderBindingLayout& layout) noexcept {
     layout.stage = ShaderStagePixel;
     layout.rootConstantBytes = 64;
+    layout.rootConstantStructId = 0x0102030405060708ull;
     layout.renderTargetMask = 0b101;
     ShaderBindingResource view;
     view.kind = ShaderResourceKind::ConstantBuffer;
     view.slot = 0;
     view.name = "View";
     view.constantBufferBytes = 32;
+    view.structId = 0x1112131415161718ull;
     view.firstMember = 0;
     view.memberCount = 2;
     ShaderBindingResource pass = view;
+    pass.structId = 0;
     pass.slot = 1;
     pass.name = "Pass";
     pass.constantBufferBytes = 16;
@@ -400,6 +403,8 @@ TEST(ShaderCore_ParameterLayoutSignatureIsCanonicalBytes) {
     AppendU32(canonical, 2);
     for (const ShaderParameterLayout& layout : layouts) {
         AppendName(canonical, layout.name);
+        // 구조체 이름(손으로 쓴 표는 빈 값 — 16.2절 SSD53).
+        AppendName(canonical, layout.structName);
         REQUIRE(canonical.TryPushBack(layout.rootConstants ? 1 : 0));
         AppendU32(canonical, layout.totalBytes);
         AppendU32(canonical, static_cast<uint32>(layout.members.Size()));
@@ -457,10 +462,10 @@ TEST(ShaderCore_ParameterLayoutBytesRoundTrip) {
     REQUIRE(bytes.TryPushBack(0));
     CHECK(!DecodeShaderParameterLayouts(bytes.View(), decoded));
     (void)bytes.TryResize(bytes.Size() - 1);
-    // 첫 멤버 타입 byte(u32 수, u8 길이 + 이름 15, u8 표시, u32 크기, u32 멤버 수, u8 길이 + 이름
-    // 9).
-    const usize typeAt = 4 + 1 + 15 + 1 + 4 + 4 + 1 + 9;
-    bytes[typeAt] = 13;
+    // 첫 멤버 타입 byte(u32 수, u8 길이 + 이름 15, u8 구조체 이름 길이 0, u8 표시, u32 크기, u32
+    // 멤버 수, u8 길이 + 이름 9).
+    const usize typeAt = 4 + 1 + 15 + 1 + 1 + 4 + 4 + 1 + 9;
+    bytes[typeAt] = 14;
     CHECK(!DecodeShaderParameterLayouts(bytes.View(), decoded));
     bytes[typeAt] = static_cast<uint8>(ShaderParameterType::Float4x4);
     // 둘째 멤버(uvScale)를 float4x4로: uvBias와 겹친다.
@@ -497,19 +502,23 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     REQUIRE(EncodeShaderBindingLayout(layout, bytes));
     // 머리 golden(버전·단계·루트 상수·attribute·int·uint attribute·render target·단계 사이·자원
     // 수). v2: 단계 사이 마스크(0 — 시험 layout은 정하지 않았다)가 render target 마스크 뒤에 있다.
-    // v3: attribute 마스크 뒤에 int·uint attribute 마스크가 있다.
-    const uint8 header[] = {3, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 0, 5, 0, 0,  0, 0, 0, 0, 0, 6, 0, 0, 0};
+    // v3: attribute 마스크 뒤에 int·uint attribute 마스크가 있다. v4: 루트 상수 byte 뒤에 u64 루트
+    // 상수 구조체 identity가 있다(ShaderSystem 16.2절 SSD54).
+    const uint8 header[] = {4, 0, 0, 0, 2, 0, 0, 0, 64, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0,
+                            0, 0, 0, 0, 0, 0, 0, 0, 0,  0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0};
     REQUIRE(bytes.Size() > sizeof(header));
     CHECK(memcmp(bytes.Data(), header, sizeof(header)) == 0);
-    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 출처 0, 공유 0, 모양 0, 원소 0, stride 0,
-    // 멤버 2.
-    const uint8 first[] = {0, 0, 0, 4, 'V', 'i', 'e', 'w', 32, 0, 0,
-                           0, 0, 0, 0, 0,   0,   0,   0,   0,  2, 0};
+    // 첫 자원: 종류 0, 순번 0, 이름 "View", byte 32, 구조체 identity(v4), 출처 0, 공유 0, 모양 0,
+    // 원소 0, stride 0, 멤버 2.
+    const uint8 first[] = {0, 0, 0,    4,    'V',  'i',  'e',  'w',  32,   0,
+                           0, 0, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11,
+                           0, 0, 0,    0,    0,    0,    0,    0,    2,    0};
     CHECK(memcmp(bytes.Data() + sizeof(header), first, sizeof(first)) == 0);
 
     ShaderBindingLayout decoded(TestAllocator());
     REQUIRE(DecodeShaderBindingLayout(bytes.View(), decoded));
+    CHECK(decoded.rootConstantStructId == layout.rootConstantStructId);
+    CHECK(decoded.resources[0].structId == layout.resources[0].structId);
     CHECK(decoded.stage == layout.stage && decoded.rootConstantBytes == 64 &&
           decoded.renderTargetMask == 0b101 && decoded.attributeMask == 0);
     REQUIRE(decoded.resources.Size() == layout.resources.Size());
@@ -553,10 +562,10 @@ TEST(ShaderCore_BindingLayoutRoundTrip) {
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::CorruptPackage);
     (void)bytes.TryResize(bytes.Size() - 1);
-    bytes[0] = 2;
+    bytes[0] = 3;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
           ShaderReadError::UnsupportedVersion);
-    bytes[0] = 3;
+    bytes[0] = 4;
     // 종류 byte를 범위 밖으로(첫 자원).
     bytes[sizeof(header)] = 9;
     CHECK(DecodeShaderBindingLayout(bytes.View(), decoded).error ==
@@ -672,7 +681,10 @@ TEST(ShaderCore_BindingLayoutRules) {
     // 정상 바꿈은 받는다(대조).
     CHECK(!EncodeRejects(
         [](L& l) noexcept { l.resources[2].samplerSource = ShaderSamplerSource::SharedClamp; }));
-    CHECK(!EncodeRejects([](L& l) noexcept { l.rootConstantBytes = 0; }));
+    CHECK(!EncodeRejects([](L& l) noexcept {
+        l.rootConstantBytes = 0;
+        l.rootConstantStructId = 0;
+    }));
 }
 
 TEST(ShaderCore_StageLinkUsesLeadingInterStageOutputs) {
@@ -1000,6 +1012,147 @@ TEST(ShaderCore_LibraryOpenRejectsCorruption) {
     // 버전은 SHA보다 먼저 본다.
     bytes[4] = 2;
     CHECK(view.Open(bytes.View()).error == ShaderReadError::UnsupportedVersion);
+}
+
+} // namespace shader_core_format_tests_file
+
+namespace shader_core_format_tests_file {
+
+namespace {
+
+constexpr ShaderParameterMember InnerMembers[] = {{"color", ShaderParameterType::Float4, 0, 0},
+                                                  {"scale", ShaderParameterType::Float, 16, 0}};
+constexpr ShaderParameterLayout InnerLayout{"Inner", false, 32, InnerMembers};
+
+// 표 하나만 바꿔 검사한다.
+bool Accepts(const ShaderParameterLayout& layout) noexcept {
+    return static_cast<bool>(ValidateShaderParameterLayout(layout));
+}
+
+} // namespace
+
+// 중첩 구조체·identity·생성 원문 칸의 규칙이다(ShaderSystem 16.2절 SSD53 — 데이터 경로 표의 음성).
+TEST(ShaderCore_ParameterLayoutNestedAndIdentityRules) {
+    const ShaderParameterMember outer[] = {
+        {"tint", ShaderParameterType::Float4, 0, 0},
+        {"inner", ShaderParameterType::Struct, 16, 0, &InnerLayout}};
+    const ShaderParameterLayout good("Outer", false, 48, outer, "rocks::test::Outer",
+                                     "/Engine/Generated/Test/Outer.rsh", "cbuffer Outer {};");
+    CHECK(Accepts(good));
+    CHECK(good.structId == ShaderParameterStructId("rocks::test::Outer"));
+    CHECK(ShaderParameterMemberBytes(outer[1]) == 32);
+    CHECK(ShaderParameterStructId("") == 0);
+
+    // 중첩 표 없음, 배열, 16 byte 경계가 아님, 크기를 넘음.
+    const ShaderParameterMember missing[] = {{"inner", ShaderParameterType::Struct, 0, 0}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 32, missing)));
+    const ShaderParameterMember array[] = {
+        {"inner", ShaderParameterType::Struct, 0, 2, &InnerLayout}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 64, array)));
+    const ShaderParameterMember misaligned[] = {
+        {"a", ShaderParameterType::Float, 0, 0},
+        {"inner", ShaderParameterType::Struct, 8, 0, &InnerLayout}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 48, misaligned)));
+    CHECK(!Accepts(
+        ShaderParameterLayout("Outer", false, 32, Span<const ShaderParameterMember>(outer, 2))));
+    // 2단 중첩.
+    const ShaderParameterLayout middle("Middle", false, 48, outer);
+    const ShaderParameterMember twice[] = {{"middle", ShaderParameterType::Struct, 0, 0, &middle}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 48, twice)));
+    // 루트 상수 중첩 표.
+    const ShaderParameterLayout rootInner("Inner", true, 32, InnerMembers);
+    const ShaderParameterMember rootNested[] = {
+        {"inner", ShaderParameterType::Struct, 0, 0, &rootInner}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 32, rootNested)));
+    // 스칼라에 중첩 표를 달면 거부한다.
+    const ShaderParameterMember scalarWithLayout[] = {
+        {"a", ShaderParameterType::Float, 0, 0, &InnerLayout}};
+    CHECK(!Accepts(ShaderParameterLayout("Outer", false, 16, scalarWithLayout)));
+
+    // identity: 이름 해시와 달라야 거부, 정규 이름이 아니면 거부.
+    ShaderParameterLayout wrongId = good;
+    wrongId.structId = 1;
+    CHECK(!Accepts(wrongId));
+    for (const char* bad : {"rocks:test", "rocks::", "::rocks", "rocks::1x", "a b"}) {
+        ShaderParameterLayout named = good;
+        named.structName = StringView(bad);
+        named.structId = ShaderParameterStructId(named.structName);
+        CHECK(!Accepts(named));
+    }
+
+    // 원문: 경로만·원문만·Generated 밖·확장자.
+    ShaderParameterLayout pathOnly = good;
+    pathOnly.source = StringView();
+    CHECK(!Accepts(pathOnly));
+    ShaderParameterLayout textOnly = good;
+    textOnly.sourcePath = StringView();
+    CHECK(!Accepts(textOnly));
+    ShaderParameterLayout outside = good;
+    outside.sourcePath = "/Engine/Private/Outer.rsh";
+    CHECK(!Accepts(outside));
+    ShaderParameterLayout extension = good;
+    extension.sourcePath = "/Engine/Generated/Test/Outer.rsf";
+    CHECK(!Accepts(extension));
+
+    // 같은 원문 경로를 두 표가 쓰면 목록 거부.
+    ShaderParameterLayout other = good;
+    other.name = "Other";
+    const ShaderParameterLayout duplicatePath[] = {good, other};
+    CHECK(!ValidateShaderParameterLayouts(duplicatePath));
+
+    // 멤버 상한(257).
+    static ShaderParameterMember many[MaxShaderParameterMembers + 1];
+    static char names[MaxShaderParameterMembers + 1][8];
+    for (usize index = 0; index <= MaxShaderParameterMembers; ++index) {
+        (void)snprintf(names[index], sizeof(names[index]), "m%zu", index);
+        many[index] = ShaderParameterMember(StringView(names[index]), ShaderParameterType::Float4,
+                                            static_cast<uint32>(index * 16), 0);
+    }
+
+    CHECK(Accepts(
+        ShaderParameterLayout("Many", false, MaxShaderParameterMembers * 16,
+                              Span<const ShaderParameterMember>(many, MaxShaderParameterMembers))));
+    CHECK(!Accepts(ShaderParameterLayout(
+        "Many", false, (MaxShaderParameterMembers + 1) * 16,
+        Span<const ShaderParameterMember>(many, MaxShaderParameterMembers + 1))));
+    // 루트 상수 128 byte 초과.
+    CHECK(!Accepts(
+        ShaderParameterLayout("Root", true, 144, Span<const ShaderParameterMember>(many, 9))));
+
+    // 정규 byte 왕복: 중첩 표와 구조체 이름이 돌아오고 서명이 같다.
+    const ShaderParameterLayout list[] = {good};
+    Array<uint8> bytes(TestAllocator());
+    REQUIRE(EncodeShaderParameterLayouts(list, bytes));
+    CHECK(Sha256::Hash(bytes.View()) == ShaderParameterLayoutSignature(list));
+    ShaderParameterLayoutSet decoded(TestAllocator());
+    REQUIRE(DecodeShaderParameterLayouts(bytes.View(), decoded));
+    REQUIRE(decoded.View().Size() == 1);
+    CHECK(decoded.View()[0].structId == good.structId);
+    REQUIRE(decoded.View()[0].members[1].structLayout != nullptr);
+    CHECK(decoded.View()[0].members[1].structLayout->members[1].name == StringView("scale"));
+    CHECK(ShaderParameterLayoutSignature(decoded.View()) == ShaderParameterLayoutSignature(list));
+    for (usize length = 1; length < bytes.Size(); ++length) {
+        CHECK(!DecodeShaderParameterLayouts(bytes.View().Left(length), decoded));
+    }
+}
+
+// 값 1 v4 identity 규칙이다(SX8 — 상수 버퍼만, 루트 상수가 있을 때만).
+TEST(ShaderCore_BindingLayoutIdentityRules) {
+    ShaderBindingLayout layout(TestAllocator());
+    FillSampleLayout(layout);
+    Array<uint8> bytes(TestAllocator());
+    CHECK(EncodeShaderBindingLayout(layout, bytes));
+    layout.rootConstantBytes = 0;
+    CHECK(!EncodeShaderBindingLayout(layout, bytes));
+    layout.rootConstantBytes = 64;
+    for (ShaderBindingResource& resource : layout.resources) {
+        if (resource.kind == ShaderResourceKind::SampledTexture) {
+            resource.structId = 5;
+            break;
+        }
+    }
+
+    CHECK(!EncodeShaderBindingLayout(layout, bytes));
 }
 
 } // namespace shader_core_format_tests_file

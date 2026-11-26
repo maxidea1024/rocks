@@ -1,6 +1,6 @@
 # 입력 액션 계층 설계(CR21)
 
-기준일: 2026-11-25, 개정 5(IA2c 착수 전 보충 — 4.3절 키 판정·터치·무시 해제·chord 작업 배열·전달 뒤 정리, 4.4절 chord 억제 주체 정정(UE SourceAction = chord 트리거를 가진 쪽), 4.5절 hasPlayer). 개정 4(IA2 착수 전 보충·설계 리뷰 반영 — 객체와 평가기 데이터 사본의 경계 2.7절, 바인딩의 액션 참조는 Guid, `UpdateContext`, 액션 표 결정 순서, 액션 상태 짝짓기, 주입 액션 데이터, 키 이름 저장, PlayerController의 lease, IA2 세 단계, IAD10·IAD11). 개정 3(IA1 구현 리뷰 반영 — float 계산 예외·Enter와 숫자패드 Enter·DeadZone 임계 검증·FOV 문맥·chord 대상 표·RepeatedTap 시계). 개정 2(UE 원본 대조 리뷰 반영 — 값 변환·패드 원시 축·시간 dt·키 이벤트·정렬·chord·전달 순서·slot·커브·동적 진동·자원·오류). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR21의 설계다.
+기준일: 2026-11-26, 개정 6(5.1절 함수 바인딩 대비 — `ActionEventData`는 강한 참조 없는 리플렉션 struct, 바인딩은 함수 리플렉션 FR4 뒤). 개정 5(IA2c 착수 전 보충 — 4.3절 키 판정·터치·무시 해제·chord 작업 배열·전달 뒤 정리, 4.4절 chord 억제 주체 정정(UE SourceAction = chord 트리거를 가진 쪽), 4.5절 hasPlayer). 개정 4(IA2 착수 전 보충·설계 리뷰 반영 — 객체와 평가기 데이터 사본의 경계 2.7절, 바인딩의 액션 참조는 Guid, `UpdateContext`, 액션 표 결정 순서, 액션 상태 짝짓기, 주입 액션 데이터, 키 이름 저장, PlayerController의 lease, IA2 세 단계, IAD10·IAD11). 개정 3(IA1 구현 리뷰 반영 — float 계산 예외·Enter와 숫자패드 Enter·DeadZone 임계 검증·FOV 문맥·chord 대상 표·RepeatedTap 시계). 개정 2(UE 원본 대조 리뷰 반영 — 값 변환·패드 원시 축·시간 dt·키 이벤트·정렬·chord·전달 순서·slot·커브·동적 진동·자원·오류). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR21의 설계다.
 
 범위:
 - 입력 액션·매핑 컨텍스트·리바인딩·햅틱 출력(게임패드 진동)이다.

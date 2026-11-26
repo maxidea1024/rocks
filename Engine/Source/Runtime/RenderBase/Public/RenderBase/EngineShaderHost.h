@@ -12,6 +12,7 @@
 #include <Platform/Sync.h>
 #include <RenderBase/BuiltinResources.h>
 #include <RenderBase/ShaderSet.h>
+#include <RenderBase/SharedConstantSlotTable.h>
 #include <ShaderCore/ShaderLibrary.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 
@@ -114,6 +115,16 @@ public:
         return registry_;
     }
 
+    // 공유 상수 slot 표다(Docs/Design/RenderBase 9.14절 1항). 등록은 Freeze 전 로더 스레드에서 하고
+    // Freeze가 함께 닫는다(늦은 등록은 ScopeClosed). 렌더러 slot 등록은 RS0이다.
+    SharedConstantSlotTable& SharedConstantSlots() noexcept {
+        return sharedConstantSlots_;
+    }
+
+    const SharedConstantSlotTable& SharedConstantSlots() const noexcept {
+        return sharedConstantSlots_;
+    }
+
     // 원문 디렉터리를 더한다(문자열은 복사한다). 오류: Freeze 뒤 ScopeClosed, 가상 루트가
     // 디렉터리 규칙(CheckShaderVirtualDirectory)을 어기거나 /Engine이거나(공급자가 엔진 폴더로
     // 정한다) 폴더가 비면 InvalidArgument, 같은 루트가 이미 있으면 AlreadyExists, 표가 차면
@@ -158,6 +169,7 @@ private:
 
     Allocator& allocator_;
     shader::ShaderTypeRegistry registry_;
+    SharedConstantSlotTable sharedConstantSlots_;
     // 문자열 저장소는 항목마다 따로 할당해 표가 커져도 directories_의 view가 그대로다.
     Array<UniquePtr<DirectoryStorage>> storage_;
     Array<ShaderSourceDirectory> directories_;
