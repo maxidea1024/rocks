@@ -8,4 +8,4 @@
 - `TextureAsset`: 폭·높이·형식(RGBA8 sRGB)·픽셀. 행 순서는 위→아래.
 - `AssetManager`: 루트 디렉터리를 마운트해 에셋 파일 헤더를 읽고 `AssetId ↔ 경로` 목록을 만든다. `Load(AssetId)`는 참조 계수 핸들을 반환한다. 마지막 핸들이 사라지면 언로드한다. 이번 단계의 로드는 동기이며 비동기 로딩(`AsyncReadFile`, 로드 상태 Pending/Ready/Failed)은 후속이다.
 - `BitmapImporter`(AssetTools): 비압축 BMP(24·32비트, `BI_RGB`·`BI_BITFIELDS`, 상향·하향 행)를 RGBA8로 바꾼다. 압축 BMP·팔레트는 `Unsupported`다. Commandlet `import-texture <src.bmp> <dst.rasset>`로 실행한다.
-- GPU 텍스처는 `WorldIntegration`의 텍스처 캐시가 AssetId별로 만든다. 에셋 데이터와 GPU 자원의 수명은 분리한다.
+- GPU 텍스처는 `WorldIntegration`의 텍스처 캐시(`TextureRenderCache`)가 AssetId별로 만든다. 에셋 데이터와 GPU 자원의 수명은 분리한다: GPU 자원은 업로드 때 복사한 byte로 만들고, lease는 handle을 Retire한 뒤 놓는다([렌더 기반](../RenderBase/18-ScreenMilestone.ko.md) 18.5절 8항).
