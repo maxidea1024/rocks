@@ -8,3 +8,4 @@
 - 개정 2(2026-11-26): SP1 구현에 맞췄다. 설정을 설정 struct 대신 Engine 모듈의 `ui.splash.*` 부팅 CVar로(10절·SPD13 — 호스트마다 리플렉션 타입 등록이 필요 없다), 판정 입력의 bool 칸과 `MakeSplashVisibilityInput`(11절), 대화상자 hook의 bool 반환(9.5절), `Window::ShowAndActivate`와 Sandbox의 프레임 수 넘기기(9.4절), SDK의 스플래시 싣기를 SP6로(5.5절 — SDK가 아직 엔진 데이터 폴더를 싣지 않는다), 칸 배치 덮어쓰기·Custom 칸·창 연기 시험을 SP1b로(6.4·14·15절). SP1 구현 완료: 시험(Splash·SplashSettings 18개, Engine·PlatformWindow·Config·HostSettings)·format·policy 통과, Sandbox `--engine --window` 사람 확인(Windows 100%, 2026-11-26).
 - 개정 3(2026-11-26): 기본·템플릿 스플래시를 768×384(2:1, `@2x` 1536×768)로 낮췄다(사용자 의견 "높이가 다소 길다" — 12절). 생성기·모의 화면을 다시 만들었고 엔진 코드는 바꾸지 않았다.
 - 개정 4(2026-11-26): 최소 표시 시간(사용자 요구 "작업이 빨리 끝나도 2초는 보이게, 설정할 수 있게"): `ui.splash.min_seconds`(기본 2초), `CanHide()`, 넘기기 조건(9.7절·SPD15), 버린 대안에서 뺌(17절), 시험 8a.
+- 개정 5(2026-11-27): SP1b 설계 — 배치 덮어쓰기·Custom 칸·막대 덮어쓰기를 코드 API로(6.5절·SPD16, 설정 키 없음), 줄바꿈은 후속, 창 연기 시험은 `Sandbox --splash-self-test`(시험 10, 누수 검사는 후속).

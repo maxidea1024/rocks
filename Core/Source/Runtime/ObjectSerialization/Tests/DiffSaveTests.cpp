@@ -1,5 +1,6 @@
 #include <ReflectionTestFixtures/ClassDefaultsFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/OverrideSet.h>
@@ -212,7 +213,6 @@ TEST(OverrideSet_UnitNormalization) {
     const Guid nest = FieldNamed<DefaultsHolder>("nest");
     const Guid x = FieldNamed<DefaultsPoint>("x");
     const Guid y = FieldNamed<DefaultsPoint>("y");
-    const Guid note = FieldNamed<DefaultsPoint>("note");
     const Guid u = FieldNamed<DefaultsPair>("u");
     const Guid inner = FieldNamed<DefaultsNest>("inner");
     const Guid depth = FieldNamed<DefaultsNest>("depth");
@@ -233,14 +233,22 @@ TEST(OverrideSet_UnitNormalization) {
     const Guid pairUnit[] = {pair};
     const Guid pointX[] = {point, x};
     const Guid pointY[] = {point, y};
-    const Guid pointNote[] = {point, note};
     const Guid nestX[] = {nest, inner, x};
     const Guid nestDepth[] = {nest, depth};
     CHECK(set.Contains(Span<const Guid>(countUnit)) && set.Contains(Span<const Guid>(valuesUnit)) &&
           set.Contains(Span<const Guid>(pairUnit)) && set.Contains(Span<const Guid>(pointX)) &&
-          set.Contains(Span<const Guid>(pointY)) && set.Contains(Span<const Guid>(pointNote)) &&
-          set.Contains(Span<const Guid>(nestX)) && !set.Contains(Span<const Guid>(nestDepth)));
-    CHECK(set.Count() == 7);
+          set.Contains(Span<const Guid>(pointY)) && set.Contains(Span<const Guid>(nestX)) &&
+          !set.Contains(Span<const Guid>(nestDepth)));
+    // EditorOnly 멤버 note는 에디터 데이터가 있는 빌드에만 있다(없는 빌드는 point가 잎 둘로
+    // 펼쳐진다).
+#if ROCKS_WITH_EDITOR_DATA
+    const Guid pointNote[] = {point, FieldNamed<DefaultsPoint>("note")};
+    CHECK(set.Contains(Span<const Guid>(pointNote)));
+    constexpr usize PointLeaves = 3;
+#else
+    constexpr usize PointLeaves = 2;
+#endif
+    CHECK(set.Count() == 4 + PointLeaves);
     // 정렬 순(사전 순)이다.
     for (usize index = 1; index < set.Count(); ++index) {
         const Span<const Guid> left = set.At(index - 1);
@@ -251,7 +259,7 @@ TEST(OverrideSet_UnitNormalization) {
 
     // 같은 단위를 다시 더해도 하나다.
     REQUIRE(AddOverrideUnits(lease.Value(), single, set));
-    CHECK(set.Count() == 7);
+    CHECK(set.Count() == 4 + PointLeaves);
     // 지우기: 비Atomic struct 끝은 잎 모두, RemoveUnder는 접두 아래 모두.
     REQUIRE(RemoveOverrideUnits(lease.Value(), wholeStruct, set));
     CHECK(!set.Contains(Span<const Guid>(pointX)) && set.Count() == 4);

@@ -71,6 +71,11 @@ struct SplashScreen::Shared {
     SplashKind kind = SplashKind::Game;
     bool visible[SplashTextSlotCount]{};
     bool barVisible = true;
+    // 배치 덮어쓰기 복사본이다(Show가 쓰고 스플래시 스레드가 읽는다).
+    SplashTextPlacement placements[SplashTextSlotCount]{};
+    usize placementCount = 0;
+    SplashBarPlacement bar;
+    bool hasBar = false;
     SplashImagePaths paths;
     String windowTitle;
     SplashStatusSource source;
@@ -136,6 +141,8 @@ void SplashScreen::Shared::Run(void* context) noexcept {
     setup.standardPath = shared.paths.standard.View();
     setup.doublePath = shared.paths.doubled.View();
     setup.windowTitle = shared.windowTitle.View();
+    setup.placements = Span<const SplashTextPlacement>(shared.placements, shared.placementCount);
+    setup.bar = shared.hasBar ? &shared.bar : nullptr;
     const SplashCreateReport report = presenter.Create(setup);
     if (report.reason != SplashSkipReason::None) {
         Log::Warning(LogSplash,
@@ -242,7 +249,8 @@ Result<SplashScreen> SplashScreen::ShowWith(Allocator& allocator, const SplashSh
     if ((desc.engineDirectory.IsEmpty() && desc.configuredImage.IsEmpty()) ||
         factory.create == nullptr ||
         !platform::PlatformMath::IsFinite(desc.minimumDisplaySeconds) ||
-        desc.minimumDisplaySeconds < 0.0) {
+        desc.minimumDisplaySeconds < 0.0 || desc.placements.Size() > SplashTextSlotCount ||
+        !ValidateSplashPlacements(desc.placements, desc.bar)) {
         return fail(ErrorCode::InvalidArgument);
     }
 
@@ -291,6 +299,18 @@ Result<SplashScreen> SplashScreen::ShowWith(Allocator& allocator, const SplashSh
     shared.visible[SlotIndex(SplashTextSlot::Version)] = studio || desc.showVersion;
     shared.visible[SlotIndex(SplashTextSlot::Progress)] = studio || desc.showProgressText;
     shared.visible[SlotIndex(SplashTextSlot::Copyright)] = studio || desc.showCopyright;
+    for (usize index = SlotIndex(SplashTextSlot::Custom1); index < SplashTextSlotCount; ++index) {
+        shared.visible[index] = true;
+    }
+
+    for (const SplashTextPlacement& placement : desc.placements) {
+        shared.placements[shared.placementCount++] = placement;
+    }
+
+    if (desc.bar != nullptr) {
+        shared.bar = *desc.bar;
+        shared.hasBar = true;
+    }
     shared.barVisible = studio || desc.showProgressBar;
     for (const SplashTextValue& value : desc.texts) {
         shared.StorePending(value.slot, value.text);

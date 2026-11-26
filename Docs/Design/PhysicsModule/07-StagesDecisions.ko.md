@@ -327,6 +327,52 @@ PH3c는 둘로 나눈다(크기 — "순서대로").
 - 삼각형(메시) 형상의 back-face 모드는 메시 body가 들어오는 PH6에서 정한다.
 - 시험을 보강했다: 구가 상자 모서리를 맞힌 `impactNormal`, 시작 겹침만 있는 All의 반환 값, 길이 0의 값·버리기, ObjectTypes All과 시작 겹침, `ignoreTouches`와 막는 시작 겹침, Test의 시작 겹침, 이름 있는 상수.
 
+### 7.1.9 PH3c2 구현 세부(2026-11-27)
+
+**타입**(`World/Physics/`): `OverlapResult`(맞은 컴포넌트·Actor·`blockingHit` — UE `FOverlapResult`), `OverlapMode { Blocking, Any, All }`.
+
+**함수**(`WorldCollision.h`):
+- `bool OverlapBlocking(world, position, rotation, shape, filter, params)`는 막는 겹침이 있는지다. 겹침은 보지 않는다(UE `GeomOverlapBlockingTest` — `bIgnoreTouches`).
+- `bool OverlapAny(…)`는 겹침이든 막음이든 하나라도 있는지다(UE `GeomOverlapAnyTest` — AnyHit).
+- `Result<bool> OverlapAll(…, Array<OverlapResult>&)`는 겹친 컴포넌트를 모두 모은다. 같은 컴포넌트는 하나로 합치고 막음은 OR이다(UE `ConvertOverlapResults`). 순서는 body handle 순(PMD10)이다. 반환 값은 막는 겹침이 있는지다.
+- Line 형상은 겹침이 없다(UE는 구·캡슐·상자·convex만 받는다 — `SceneQuery.cpp:1113–1115`). 비유한 값, 0 quaternion, Cylinder는 hit 없음이다(shape trace와 같다). 크기가 거의 0인 형상은 바꾸지 않고 작은 형상으로 질의한다.
+- 판정은 4.4절 그대로이고, 두 표지는 UE `GeomOverlapMultiImp`(`SceneQuery.cpp:1120–1123`)와 같다. 겹침을 버리는 것(`bIgnoreTouches`)은 Blocking만이고, ObjectTypes 일치를 겹침으로 바꾸는 것(multitrace)은 Any만 끈다.
+  - Blocking: 겹침을 버린다. ObjectTypes 일치는 겹침이 되어 버려지므로 Blocking + ObjectTypes는 늘 거짓이다(UE와 같다).
+  - Any: 겹침을 남기고 ObjectTypes 일치는 막음이다(`ignoreBlocks`가 버리고 `ignoreTouches`는 상관없다).
+  - All: 겹침을 남기고 ObjectTypes 일치는 겹침으로 모은다(`ignoreTouches`가 버리고, 결과는 막음으로 보고한다).
+  - trace는 Test·First가 Blocking과, All이 All과 같은 표지다(7.1.7절 — 결과는 바뀌지 않는다).
+- Jolt `CollideShape`(분리 거리 0)로 모은다. 닿기만 한 형상(깊이 0)도 겹침이다.
+
+**컴포넌트 자기 형상 질의**(UE `ComponentSweepMulti`·`ComponentOverlapMulti` — `WorldCollision.cpp:368–565`, `PrimitiveComponent.cpp:4717–4723`):
+- `Result<bool> ComponentTraceAll(world, component, start, end, rotation, params, Array<HitResult>&)`:
+  - 컴포넌트 body의 Jolt 형상(scale이 구워진 그대로)을 rotation으로 start → end에 쓸고 간다.
+  - 채널은 컴포넌트 object type, 응답은 컴포넌트의 실효 응답 묶음이다.
+  - 컴포넌트의 소유 Actor 전체를 무시한다(UE — 형상이 가리키는 Actor를 모두 뺀다).
+  - 형상 값이 0인 컴포넌트(상자 반폭 0, 구 반경 0, 캡슐 반경·반높이 0 — UE `IsZeroExtent`)는 같은 채널·응답의 line trace다. UE처럼 이 경우에는 자기 Actor를 빼지 않는다. 다만 자기 컴포넌트는 뺀다: UE의 크기 0 형상은 맞을 수 없지만 Rocks body는 아주 작은 형상(`KindaSmallNumber`)으로 남아 line이 시작점에서 자기 body에 맞기 때문이다(결과를 UE와 같게 한다).
+  - 반환 값은 막는 hit가 있는지다. 결과는 time 순이고 shape trace All의 자르기·정렬을 그대로 쓴다.
+- `Result<bool> ComponentOverlapAll(world, component, position, rotation, params, Array<OverlapResult>&)`:
+  - 같은 채널·응답으로 컴포넌트 body 형상의 겹침을 모은다.
+  - 자기 컴포넌트만 뺀다(UE `AddIgnoredComponent` — 같은 Actor의 다른 컴포넌트는 맞는다).
+  - 반환 값은 겹침이 하나라도 있는지다(UE `ComponentOverlapMulti` — "object query returns true if any hit is found").
+- body가 없는 컴포넌트(장면 없음·NoCollision·형상 없음)는 hit 없음이다.
+- 한계: 컴포넌트 질의는 body 형상을 그대로 쓰므로, 상자 body의 Jolt 기본 convex radius(5 cm — 모서리를 둥글린다, PH2b)가 질의에도 보인다. 같은 상자라도 `OverlapShape`(질의 상자는 정확한 상자)와 모서리 근처에서 결과가 다르다(반폭 10 cm 상자의 꼭짓점은 약 2 cm 안쪽이다). UE는 정확한 상자다. body의 convex radius는 body 값(6.5절)을 정하는 PH5에서 함께 정한다. 다른 질의가 상자 body 모서리를 맞힐 때도 같은 차이가 있다.
+- 장면 접점은 셋이다. `OverlapShape(position, rotation, shape, filter, params, mode, all)`, `TraceBody(body, start, end, rotation, filter, params, all)`(그 body 칸의 Actor를 뺀다), `OverlapBody(body, position, rotation, filter, params, all)`(그 body의 컴포넌트를 뺀다)이다. `impactNormal` 규칙(7.1.8절)의 질의 종류는 body 형상 종류다.
+
+**PH3c2 리뷰 반영(2026-11-27).** 치명 0, 중요 4, 경미 5.
+- overlap의 ObjectTypes 판정을 UE 두 표지(겹침 버림·multitrace)로 바꿨다(위). 처음에 둔 "Blocking의 ObjectTypes는 막음(Rocks 규칙)"은 UE 결과(늘 거짓)와 달라서 버렸다.
+- 시험을 보강했다: 컴포넌트 질의의 위치·회전 인자, 크기 0 컴포넌트가 같은 Actor의 자식에 맞는 것(UE), Ignore 뒤 결과 비어 있음, 맞닿기만 한 형상.
+- 인자 검사(Profile·결과 포인터)를 형상·회전 검사 앞으로 옮겼다. 상자 body의 둥근 모서리를 한계로 적었다.
+
+**시험**(`PhysicsOverlapTests.cpp`):
+- Blocking·Any·All의 차이를 확인한다. 막는 상자·겹치는 상자·Ignore 상자·떨어진 상자를 두고, 무시 목록으로 막음을 빼면 Blocking은 거짓, Any는 참이다.
+- ObjectTypes All은 모두 막음이고, `ignoreTouches`면 비어 있다.
+- 회전한 상자만 닿는 배치에서 회전을 확인한다. Line·Cylinder·0 quaternion·장면 없는 World는 거짓이다.
+- 컴포넌트 trace:
+  - 자기 Actor의 자식 컴포넌트를 지나 벽에 맞는다.
+  - 컴포넌트 object type·응답을 쓴다(벽이 그 type을 Ignore하거나, 컴포넌트가 벽 type을 Ignore하면 hit 없음).
+  - 크기 0 컴포넌트는 line trace다.
+- 컴포넌트 overlap은 자기 컴포넌트를 빼고 같은 Actor의 자식은 포함한다. 반환 값은 겹침이 있는지다. body 없는 컴포넌트는 hit 없음이다.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -376,6 +422,7 @@ PH3c는 둘로 나눈다(크기 — "순서대로").
 
 ## 7.6 개정 이력
 
+- 개정 14(2026-11-27): PH3c1 완료(70cc3bcb), PH3c2 구현 세부(7.1.9절).
 - 개정 13(2026-11-26): PH3b 완료(eff5569c), PH3c 하위 단계와 PH3c1 구현 세부(7.1.8절).
 - 개정 12(2026-11-26): PH3a 완료(79b8779b), PH3b 구현 세부(7.1.7절).
 - 개정 11(2026-11-26): PH2d 완료(05226c41 — PH2 끝), PH3 하위 단계와 PH3a 구현 세부(7.1.6절).

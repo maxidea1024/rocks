@@ -250,7 +250,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 
 **빌드 구성과 지문**(교차 검증 필수 3):
 - 생성자 결정성 계약(A5a)에 더한다: 비EditorOnly 필드의 생성자 값은 빌드 구성(에디터·게임·전용 서버, Debug·Release)과 플랫폼에 무관해야 한다. cooked 지문은 쿠커(에디터 빌드)가 만들고 쿠킹 패키지를 읽는 런타임(게임 빌드)이 자기 레코드로 다시 계산해 비교하므로, 구성마다 값이 다르면 모든 쿠킹 패키지가 런타임에서 `UnsupportedVersion`이 된다. EditorOnly 필드는 cooked 레코드에 없어 이 계약 밖이다.
-- 대조 1(fixture golden): `ClassDefaults_FingerprintGolden` — 시험 fixture 모듈(ReflectionTestFixtures) 등록으로 `ForEachClassDefaults`를 돌려 `TypeId editor지문 cooked지문`(레코드 없는 타입·실패는 이유) 줄을 golden 파일과 비교한다. Windows·macOS·Debug·Release 체인이 같은 golden을 본다.
+- 대조 1(fixture golden): `ClassDefaults_FingerprintGolden` — 시험 fixture 모듈(ReflectionTestFixtures) 등록으로 `ForEachClassDefaults`를 돌려 `TypeId editor지문 cooked지문`(레코드 없는 타입·실패는 이유) 줄을 golden 파일과 비교한다. Windows·macOS·Debug·Release 체인이 같은 golden을 본다. 에디터 데이터가 없는 빌드(FoundationModular — `ROCKS_WITH_EDITOR_DATA=0`)도 같은 표를 쓰되 editor 지문 칸은 `-`로 두고 비교한다. 그 빌드에는 EditorOnly 필드가 없어서 그 칸이 다르다. cooked 지문은 같아야 하므로, 쿠커(에디터 빌드)와 런타임 빌드가 같은 기본값을 본다는 것도 이 대조로 확인된다(2026-11-27).
 - 대조 2(엔진 타입 구성 간): commandlet `class-defaults-dump`가 에셋 타입 모듈(AssetTypeModule)과 그 의존 모듈이 등록한 구체 클래스에 대해 `TypeId cooked지문`(또는 이유) 줄을 쓴다. 검증 체인이 구성(Debug·Release, 그리고 게임·전용 서버 대상이 생기면 그것)과 플랫폼마다 덤프를 만들고 서로 비교한다(golden 파일 없이 두 결과의 같음 — 엔진 타입이 바뀌어도 흔들리지 않는다). 다르면 그 타입을 보고하고 실패한다. 구성 사이 비교는 같은 모듈 구성(같은 대상 종류)끼리만 한다.
 
 **Tick 설정 리플렉션 이동**(ReflectionFoundations 결정 21):

@@ -89,7 +89,8 @@ private:
     void RefreshProgressText() noexcept;
 
     Line text_[SplashTextSlotCount]{};
-    bool visible_[SplashTextSlotCount]{true, true, true, true};
+    // 칸 표시다. 기본은 모두 보임이다(Custom 칸은 배치가 있을 때만 그려진다 — 그리는 쪽이 본다).
+    bool visible_[SplashTextSlotCount]{true, true, true, true, true, true, true, true, true, true};
     Line statusMessage_{};
     bool barVisible_ = true;
     bool determinate_ = false;
