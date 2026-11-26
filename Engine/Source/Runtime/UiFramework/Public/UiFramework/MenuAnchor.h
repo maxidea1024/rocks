@@ -51,7 +51,10 @@ public:
     Result<void> Open() noexcept;
     // 메뉴 안의 첫 포커스 가능 요소로 이동한다. 메뉴가 닫힐 때 그 안에 포커스가 남아 있으면
     // 열기 직전의 요소로 복귀한다. 사용자가 다른 곳으로 옮긴 포커스는 유지한다.
-    Result<void> OpenFocused(Application& app, uint32 user = 0) noexcept;
+    // cause는 메뉴를 연 입력이다(Enter·Space·게임패드면 Navigation — 첫 항목에 외곽선). 비우면 직전
+    // 초점의 원인을 쓴다.
+    Result<void> OpenFocused(Application& app, uint32 user = 0,
+                             Optional<FocusCause> cause = {}) noexcept;
     void SetPlacement(MenuPlacement placement) noexcept;
     void SetFitInWindow(bool fit) noexcept;
     Optional<Vec2> MenuPosition() const noexcept;
@@ -76,8 +79,7 @@ private:
     WeakPtr<Application*> app_;
     WeakPtr<Element> restoreFocus_;
     uint32 focusUser_ = 0;
-    // 메뉴를 열기 전 초점 원인이다. 키보드로 연 메뉴는 첫 항목과 닫은 뒤 복원에 외곽선을 잇는다.
-    FocusCause restoreCause_ = FocusCause::Direct;
+
     Delegate<void(bool)> openChanged_;
     bool opening_ = false;
 };

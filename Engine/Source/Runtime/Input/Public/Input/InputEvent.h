@@ -37,7 +37,10 @@ enum class InputEventType : uint8 {
     TextComposition,
     // IME가 확정한 한 덩어리다. 여러 코드 포인트도 편집 이력 하나를 만든다.
     TextCompositionCommit,
-    MouseLeave
+    MouseLeave,
+    // 창 테두리(제목 막대·가장자리)를 눌렀거나 창 옮기기·크기 조절을 시작했다. UI는 열린 메뉴와
+    // 툴팁을 닫는다(UE FSlateApplication::OnWindowAction ClickedNonClientArea → DismissAllMenus).
+    NonClientPressed
 };
 
 // 게임패드 한 개의 폴링 결과다. 축은 데드존을 적용하기 전의 정규화 값이다.
@@ -95,7 +98,8 @@ struct InputEvent {
     static InputEvent Composition(SharedPtr<const String> text = {}, usize caret = 0,
                                   bool commit = false) noexcept {
         InputEvent event;
-        event.type = commit ? InputEventType::TextCompositionCommit : InputEventType::TextComposition;
+        event.type =
+            commit ? InputEventType::TextCompositionCommit : InputEventType::TextComposition;
         event.composition = Move(text);
         event.compositionCaret = caret;
         return event;

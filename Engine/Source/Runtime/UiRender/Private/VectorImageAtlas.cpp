@@ -11,7 +11,7 @@
 #include <Platform/File.h>
 #include <TextLayout/FontAtlas.h>
 
-#include <RocksNanoSvg.h>
+#include "RocksNanoSvg.h"
 
 // 벡터 이미지 atlas다(Docs/Design/UiToolkit 17.2절).
 namespace rocks::ui {
@@ -64,7 +64,7 @@ RocksNanoSvgImage* ParseCopy(Allocator& allocator, Span<const uint8> source) noe
     return RocksNanoSvgParse(text.Data());
 }
 
-Vec2 ImageSize(const RocksNanoSvgImage& image) noexcept {
+Vec2 ParsedSize(const RocksNanoSvgImage& image) noexcept {
     Vec2 size;
     RocksNanoSvgSize(&image, &size.x, &size.y);
     return size;
@@ -167,7 +167,7 @@ Result<VectorImageKey> VectorImageAtlas::Register(StringView path, Span<const ui
 
     image.parsed =
         UniquePtr<RocksNanoSvgImage, ImageDeleter>(ParseCopy(state.allocator, svg), ImageDeleter{});
-    const Vec2 parsedSize = image.parsed ? ImageSize(*image.parsed) : Vec2{};
+    const Vec2 parsedSize = image.parsed ? ParsedSize(*image.parsed) : Vec2{};
     if (!image.parsed || !(parsedSize.x > 0) || !(parsedSize.y > 0) || !parsedSize.IsFinite()) {
         return Result<VectorImageKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -328,6 +328,14 @@ VectorImageKey VectorImageAtlas::ImageKey(usize index) const noexcept {
     return state_ && index < state_->images.Size() ? state_->images[index].key : VectorImageKey{};
 }
 
+Vec2 VectorImageAtlas::ImageSize(usize index) const noexcept {
+    if (!state_ || index >= state_->images.Size() || !state_->images[index].parsed) {
+        return {};
+    }
+
+    return ParsedSize(*state_->images[index].parsed);
+}
+
 Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32 width,
                                                       uint32 height) noexcept {
     if (!state_) {
@@ -370,7 +378,7 @@ Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32
         byte = 0;
     }
 
-    const Vec2 source = ImageSize(*image.parsed);
+    const Vec2 source = ParsedSize(*image.parsed);
     const float sx = static_cast<float>(width) / source.x;
     const float sy = static_cast<float>(height) / source.y;
     const int stride = static_cast<int>(width * RgbaBytes);

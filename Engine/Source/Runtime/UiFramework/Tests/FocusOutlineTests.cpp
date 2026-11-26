@@ -301,4 +301,50 @@ TEST(UiFramework_FocusOutlinePressDetachingFocusDoesNotFail) {
     CHECK(!bench.app.GetFocus(0));
 }
 
+TEST(UiFramework_FocusOutlineEmptyClickNeverFailsForUnfocusableTarget) {
+    FocusBench bench;
+    REQUIRE(bench.Build());
+    REQUIRE(bench.app.SetFocus(0, bench.first, FocusCause::Navigation));
+    // 외곽선이 켜진 초점 요소가 초점을 못 받게 돼도 빈 곳 클릭은 실패하지 않고 외곽선만 끈다.
+    bench.first->SetFocusable(false);
+    auto down = bench.app.RoutePointer({PointerEventType::Down, {80, 30}});
+    REQUIRE(down);
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Up, {80, 30}}));
+    CHECK(!bench.first->IsFocusOutlineVisible());
+    CHECK(bench.app.GetFocusCause(0) == FocusCause::Pointer);
+}
+
+TEST(UiFramework_FocusOutlineMenuRestoreUsesLastInput) {
+    SystemAllocator allocator;
+    ElementBuildScope scope(allocator);
+    auto root = SharedPtr<Overlay>::TryMake(allocator, allocator);
+    auto canvas = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto item = SharedPtr<Button>::TryMake(allocator, allocator);
+    auto anchor = SharedPtr<MenuAnchor>::TryMake(allocator, allocator);
+    REQUIRE(root && canvas && item && anchor);
+    item.Value()->SetDesiredSize({40, 20});
+    anchor.Value()->SetMenuFactory(MenuAnchor::MenuFactory::CreateLambda(
+        [menu = item.Value()]() noexcept { return Result<SharedPtr<Element>>::Success(menu); }));
+    REQUIRE(root.Value()->TryAddChild(canvas.Value()));
+    REQUIRE(
+        canvas.Value()->TryAddSlot(anchor.Value(), {.offset = {10, 10, 10, 10}, .alignment = {}}));
+    Application app(allocator);
+    app.SetRoot(root.Value());
+    const auto area = Geometry::Root({100, 80}, {});
+    REQUIRE(app.UpdatePaintCache(area, 1));
+    // 마우스로 잡은 초점이라도 Enter(Navigation)로 열면 첫 항목에 외곽선이 있다.
+    REQUIRE(app.SetFocus(0, anchor.Value(), FocusCause::Pointer));
+    REQUIRE(anchor.Value()->OpenFocused(app, 0, FocusCause::Navigation));
+    REQUIRE(app.UpdatePaintCache(area, 1));
+    CHECK(item.Value()->IsFocusOutlineVisible());
+    // 메뉴 안을 마우스로 누른 뒤 닫으면 복원 초점에 외곽선이 없다(마지막 입력이 마우스).
+    auto itemBounds = item.Value()->GetGeometry().WindowBounds();
+    REQUIRE(itemBounds);
+    const Vec2 inside = (itemBounds.Value().min + itemBounds.Value().max) * 0.5f;
+    REQUIRE(app.RoutePointer({PointerEventType::Down, inside}));
+    REQUIRE(app.RoutePointer({PointerEventType::Up, inside}));
+    anchor.Value()->Close();
+    CHECK(app.GetFocus(0) == anchor.Value() && !anchor.Value()->IsFocusOutlineVisible());
+}
+
 } // namespace rocks::ui

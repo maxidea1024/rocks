@@ -16,31 +16,31 @@ constexpr float SmallIcon = 16;
 constexpr float MediumIcon = 20;
 constexpr float LargeIcon = 32;
 // 견본 칸 폭·간격, 페이지 여백이다.
-constexpr float CellWidth = 236;
+constexpr float CellWidth = 260;
 constexpr float CellPadding = 6;
 constexpr float IconGap = 10;
 constexpr float PagePadding = 32;
 
-// 아이콘 하나를 크기·tint로 그리는 Image다.
+// 아이콘 하나를 높이 size·tint로 그리는 Image다. 폭은 원래 비율(aspect = 폭/높이)을 따른다.
 Result<SharedPtr<Element>> MakeIcon(GalleryContext& context, VectorImageKey key, float size,
-                                    ThemeSlot tint) noexcept {
+                                    float aspect, ThemeSlot tint) noexcept {
+    const Vec2 extent{size * aspect, size};
     auto image = SharedPtr<Image>::TryMake(context.allocator, context.allocator);
     if (!image) {
         return Result<SharedPtr<Element>>::Failure(image.Error());
     }
 
-    auto set =
-        image.Value()->SetBrush(Brush::Vector(key, {size, size}, DefaultThemeColors().Get(tint)));
+    auto set = image.Value()->SetBrush(Brush::Vector(key, extent, DefaultThemeColors().Get(tint)));
     if (!set) {
         return Result<SharedPtr<Element>>::Failure(set.Error());
     }
 
-    return Sized(context, image.Value(), {size, size});
+    return Sized(context, image.Value(), extent);
 }
 
 // 견본 칸: [16][20][32] Foreground, [20] Primary, [20] Warning, 그 아래 키 경로.
-Result<SharedPtr<Element>> MakeCell(GalleryContext& context, VectorImageKey key,
-                                    StringView path) noexcept {
+Result<SharedPtr<Element>> MakeCell(GalleryContext& context, VectorImageKey key, StringView path,
+                                    float aspect) noexcept {
     Allocator& allocator = context.allocator;
     auto row = SharedPtr<HorizontalStack>::TryMake(allocator, allocator);
     auto column = SharedPtr<VerticalStack>::TryMake(allocator, allocator);
@@ -60,7 +60,7 @@ Result<SharedPtr<Element>> MakeCell(GalleryContext& context, VectorImageKey key,
                                   {MediumIcon, ThemeSlot::Primary},
                                   {MediumIcon, ThemeSlot::Warning}};
     for (const Sample& sample : Samples) {
-        auto icon = MakeIcon(context, key, sample.size, sample.tint);
+        auto icon = MakeIcon(context, key, sample.size, aspect, sample.tint);
         if (!icon) {
             return icon;
         }
@@ -102,7 +102,10 @@ Result<SharedPtr<Element>> BuildIconsPage(GalleryContext& context) noexcept {
     const VectorImageAtlas* icons = context.icons;
     const usize count = icons ? icons->ImageCount() : 0;
     for (usize i = 0; i < count; ++i) {
-        auto cell = MakeCell(context, icons->ImageKey(i), icons->ImagePath(i));
+        // 정사각형이 아닌 아이콘(창 버튼 42x23)은 원래 비율로 그린다.
+        const Vec2 natural = icons->ImageSize(i);
+        const float aspect = natural.y > 0 ? natural.x / natural.y : 1.0f;
+        auto cell = MakeCell(context, icons->ImageKey(i), icons->ImagePath(i), aspect);
         if (!cell) {
             return cell;
         }

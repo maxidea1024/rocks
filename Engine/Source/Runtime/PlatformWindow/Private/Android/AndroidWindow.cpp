@@ -922,6 +922,11 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
         return fail(ErrorCode::InvalidArgument);
     }
 
+    // 직접 그린 창 테두리는 데스크톱 Windows만 지원한다.
+    if (desc.frame != WindowFrame::System) {
+        return fail(ErrorCode::Unsupported);
+    }
+
     // APK가 아닌 실행 파일(adb 시험)에는 액티비티가 없다.
     if (launch::android::CurrentActivity() == nullptr) {
         return fail(ErrorCode::Unsupported);

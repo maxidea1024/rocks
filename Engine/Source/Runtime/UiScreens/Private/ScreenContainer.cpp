@@ -249,12 +249,14 @@ Result<void> ScreenContainer::Attach(ObjectHandle handle, WidgetPool* pool) noex
     const bool first = pages_.IsEmpty();
     if (first) {
         previousFocus_ = WeakPtr<Element>(app_.GetFocus(userId_));
+        previousCause_ = app_.GetFocusCause(userId_);
+        lastCause_ = previousCause_;
     } else if (order_ == Order::Stack) {
         Deactivate(pages_[Top()]);
     }
 
     screen->container_ = this;
-    (void)pages_.TryPushBack({handle, Move(root.Value()), {}, pool});
+    (void)pages_.TryPushBack({handle, Move(root.Value()), {}, pool, FocusCause::Direct});
     if (first || order_ == Order::Stack) {
         (void)SetActiveIndex(Top());
         Activate(pages_[Top()]);
@@ -268,6 +270,8 @@ void ScreenContainer::Deactivate(Page& page) noexcept {
     auto focus = app_.GetFocus(userId_);
     if (focus && focus->IsWithin(*page.root)) {
         page.focus = WeakPtr<Element>(focus);
+        page.focusCause = app_.GetFocusCause(userId_);
+        lastCause_ = page.focusCause;
         (void)app_.SetFocus(userId_, {});
     }
 
@@ -290,7 +294,8 @@ void ScreenContainer::Activate(Page& page) noexcept {
     screen->OnActivated();
     if (screen->restoreFocus_) {
         auto focus = page.focus.Lock();
-        if (focus && focus->IsWithin(*page.root) && app_.SetFocus(userId_, focus)) {
+        if (focus && focus->IsWithin(*page.root) &&
+            app_.SetFocus(userId_, focus, page.focusCause)) {
             return;
         }
     }
@@ -299,13 +304,13 @@ void ScreenContainer::Activate(Page& page) noexcept {
         auto widget = objects_.Resolve<Widget>(objects_.OwnerAccess(), screen->FocusTarget());
         if (widget) {
             auto focus = widget.Value().Get().Value()->CachedElement();
-            if (focus && focus->IsWithin(*page.root) && app_.SetFocus(userId_, focus)) {
+            if (focus && focus->IsWithin(*page.root) && app_.SetFocus(userId_, focus, lastCause_)) {
                 return;
             }
         }
     }
 
-    (void)app_.MoveFocusWithin(userId_, page.root, true, false);
+    (void)app_.MoveFocusWithin(userId_, page.root, true, false, lastCause_);
 }
 
 Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {
@@ -346,7 +351,7 @@ Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {
             }
         } else {
             if (auto previous = previousFocus_.Lock()) {
-                (void)app_.SetFocus(userId_, previous);
+                (void)app_.SetFocus(userId_, previous, previousCause_);
             }
 
             previousFocus_ = {};

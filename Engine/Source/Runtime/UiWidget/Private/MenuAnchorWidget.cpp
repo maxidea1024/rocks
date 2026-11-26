@@ -61,7 +61,7 @@ Result<void> MenuAnchorWidget::Open() noexcept {
 
 Result<void> MenuAnchorWidget::OpenFocused(Application& app, uint32 user) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<MenuAnchor&>(*live).OpenFocused(app, user)
+    return live ? static_cast<MenuAnchor&>(*live).OpenFocused(app, user, {})
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 

@@ -233,7 +233,52 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
 
 Vec2 StackPanel::MeasureForWidth(float width) noexcept {
     if (direction_ != StackDirection::Vertical) {
-        return GetDesiredSize();
+        // 가로 쌓기는 배치(ArrangeStack)와 같은 규칙으로 잰다: Auto 칸은 원하는 폭 그대로이고, 넘칠
+        // 때 Fill 칸이 남는 폭을 가중치대로 나눠 그 폭에서 다시 잰다(Fill 칸이 없으면 원하는 크기
+        // 그대로).
+        const Vec2 desired = GetDesiredSize();
+        if (desired.x <= width) {
+            return desired;
+        }
+
+        float fixed = 0;
+        float weights = 0;
+        usize visible = 0;
+        for (usize i = 0; i < slots_.Size() && i < ChildCount(); ++i) {
+            const Element* child = ChildAt(i);
+            if (child->GetVisibility() == Visibility::Collapsed) {
+                continue;
+            }
+
+            ++visible;
+            fixed += slots_[i].before + slots_[i].after;
+            if (slots_[i].rule == StackSizeRule::Fill) {
+                weights += slots_[i].weight;
+            } else {
+                fixed += child->GetDesiredSize().x;
+            }
+        }
+
+        if (weights <= 0) {
+            return desired;
+        }
+
+        fixed += visible > 1 ? spacing_ * static_cast<float>(visible - 1) : 0.0f;
+        const float remaining = math::Max(0.0f, width - fixed);
+        float height = 0;
+        for (usize i = 0; i < slots_.Size() && i < ChildCount(); ++i) {
+            Element* child = ChildAt(i);
+            if (child->GetVisibility() == Visibility::Collapsed) {
+                continue;
+            }
+
+            const Vec2 size = slots_[i].rule == StackSizeRule::Fill
+                                  ? child->MeasureForWidth(remaining * slots_[i].weight / weights)
+                                  : child->GetDesiredSize();
+            height = math::Max(height, size.y + slots_[i].crossBefore + slots_[i].crossAfter);
+        }
+
+        return {width, height};
     }
 
     float along = 0;

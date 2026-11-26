@@ -5,6 +5,7 @@
 #include <UiFramework/AnchorCanvas.h>
 #include <UiFramework/Application.h>
 #include <UiFramework/Button.h>
+#include <UiFramework/InputAdapter.h>
 #include <UiFramework/ToolTip.h>
 
 namespace rocks::ui {
@@ -334,6 +335,77 @@ TEST(UiFramework_ToolTipPartsApiAndForeground) {
     REQUIRE(
         bright.Value()->Construct({.content = content.Value(), .style = &DefaultToolTipStyle()}));
     CHECK(bright.Value()->GetForegroundColor() == DefaultToolTipStyle().text.color);
+}
+
+TEST(UiFramework_ToolTipKeyboardFindsAncestorOwner) {
+    SystemAllocator allocator;
+    Application app(allocator);
+    auto root = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto box = SharedPtr<Frame>::TryMake(allocator, allocator);
+    auto field = SharedPtr<Button>::TryMake(allocator, allocator);
+    auto content = SharedPtr<Frame>::TryMake(allocator, allocator);
+    REQUIRE(root && box && field && content);
+    content.Value()->SetDesiredSize({30, 10});
+    // 툴팁은 상자에, 초점은 그 안의 칸에 있다(hover처럼 조상에서 소유자를 찾는다).
+    REQUIRE(box.Value()->SetToolTipFactory(Element::ToolTipFactory::CreateLambda(
+        [element = content.Value()]() noexcept -> Result<SharedPtr<Element>> {
+            return Result<SharedPtr<Element>>::Success(element);
+        })));
+    REQUIRE(box.Value()->TryAddChild(field.Value()));
+    REQUIRE(root.Value()->TryAddSlot(box.Value(), {.offset = {0, 0, 40, 20}, .alignment = {0, 0}}));
+    app.SetRoot(root.Value());
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    InputAdapter adapter(app);
+    // Ctrl+F1은 InputAdapter 경로로 지연 없이 연다.
+    REQUIRE(app.SetFocus(0, field.Value(), FocusCause::Pointer));
+    REQUIRE(adapter.Route(input::InputEvent::KeyDown(input::Key::LeftControl)));
+    REQUIRE(adapter.Route(input::InputEvent::KeyDown(input::Key::F1)));
+    REQUIRE(adapter.Route(input::InputEvent::KeyUp(input::Key::LeftControl)));
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
+    CHECK(app.IsToolTipOpen(0));
+}
+
+TEST(UiFramework_ToolTipHeaderWrapsInNarrowWindow) {
+    SystemAllocator allocator;
+    auto title = SharedPtr<TextLabel>::TryMake(allocator, allocator);
+    auto keys = SharedPtr<TextLabel>::TryMake(allocator, allocator);
+    auto tip = SharedPtr<ToolTip>::TryMake(allocator, allocator);
+    REQUIRE(title && keys && tip);
+    REQUIRE(ShapeWords(*title.Value(), "Save Current Level", 12));
+    REQUIRE(ShapeWords(*keys.Value(), "Ctrl+S", 12));
+    REQUIRE(tip.Value()->Construct({.title = title.Value(), .shortcut = keys.Value()}));
+    Application app(allocator);
+    app.SetRoot(tip.Value());
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({400, 80}, {}), 1));
+    const Vec2 wide = tip.Value()->GetDesiredSize();
+    // 좁은 폭에서는 제목이 줄을 나눠 높아지고, 단축키 표지는 한 줄 그대로다.
+    const Vec2 narrow = tip.Value()->MeasureForWidth(wide.x - 60);
+    CHECK(narrow.y > wide.y);
+    CHECK(keys.Value()->Layout().Lines().Size() == 1);
+}
+
+TEST(UiFramework_ToolTipHeaderArrangesInsideNarrowWindow) {
+    SystemAllocator allocator;
+    auto title = SharedPtr<TextLabel>::TryMake(allocator, allocator);
+    auto keys = SharedPtr<TextLabel>::TryMake(allocator, allocator);
+    auto tip = SharedPtr<ToolTip>::TryMake(allocator, allocator);
+    REQUIRE(title && keys && tip);
+    REQUIRE(ShapeWords(*title.Value(), "Save Current Level", 12));
+    REQUIRE(ShapeWords(*keys.Value(), "Ctrl+S", 12));
+    REQUIRE(tip.Value()->Construct({.title = title.Value(), .shortcut = keys.Value()}));
+    Application app(allocator);
+    app.SetRoot(tip.Value());
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({400, 80}, {}), 1));
+    const float narrow = tip.Value()->GetDesiredSize().x - 60;
+    // 좁은 칸에 실제로 놓아도 단축키 표지는 툴팁 안에 남고 제목은 줄을 나눈다.
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({narrow, 80}, {}), 1));
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({narrow, 80}, {}), 1));
+    auto tipBounds = tip.Value()->GetGeometry().WindowBounds();
+    auto keyBounds = keys.Value()->GetGeometry().WindowBounds();
+    REQUIRE(tipBounds && keyBounds);
+    CHECK(keyBounds.Value().max.x <= tipBounds.Value().max.x);
+    CHECK(title.Value()->Layout().Lines().Size() > 1);
 }
 
 } // namespace rocks::ui

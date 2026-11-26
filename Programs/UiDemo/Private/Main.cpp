@@ -23,6 +23,8 @@ using namespace rocks;
 using namespace rocks::ui;
 
 // UI 갤러리 창 크기다(Docs/Design/UiToolkit 16장).
+// 갤러리 창 제목이다(직접 그린 제목 막대와 OS 작업 표시줄에 같이 쓴다).
+constexpr StringView GalleryTitle = "Rocks UI Gallery";
 constexpr uint32 GalleryWidth = 1280;
 constexpr uint32 GalleryHeight = 800;
 // 탭 배치 저장 파일과 형식 판이다(갤러리 탭 ID가 바뀌면 판을 올린다).
@@ -160,10 +162,18 @@ int Run(launch::ApplicationContext& context) noexcept {
     }
 
     platform::WindowDesc desc;
-    desc.title = "Rocks UI Gallery";
+    desc.title = GalleryTitle;
     desc.width = GalleryWidth;
     desc.height = GalleryHeight;
+    // 에디터처럼 OS 테두리 없이 제목 막대·창 버튼을 직접 그린다(Docs/Design/UiToolkit 9.1절 UW7b).
+    desc.frame = platform::WindowFrame::Custom;
     auto window = platform::Window::Create(allocator, desc);
+    // 직접 그린 테두리를 지원하지 않는 플랫폼은 OS 테두리로 연다.
+    if (!window && window.Error() == ErrorCode::Unsupported) {
+        desc.frame = platform::WindowFrame::System;
+        window = platform::Window::Create(allocator, desc);
+    }
+
     if (!window) {
         return 8;
     }
@@ -184,9 +194,21 @@ int Run(launch::ApplicationContext& context) noexcept {
     }
 
     {
-        DockWindows windows(allocator, device, solid.Value(), textures, gallery.Commands(), icons,
-                            image.Value());
-        if (!windows.Run(Move(window.Value()), area.Value())) {
+        DockWindows windows(
+            allocator, device, solid.Value(), textures, gallery.Commands(), icons, image.Value(),
+            DockWindows::TitleFactory::CreateLambda(
+                [&allocator, &font](StringView title, const FontStyle& style) noexcept
+                    -> Result<SharedPtr<TextLabel>> {
+                    auto label = SharedPtr<TextLabel>::TryMake(allocator, allocator);
+                    if (!label) {
+                        return label;
+                    }
+
+                    auto shaped = font.SetText(*label.Value(), title, style);
+                    return shaped ? Move(label)
+                                  : Result<SharedPtr<TextLabel>>::Failure(shaped.Error());
+                }));
+        if (!windows.Run(Move(window.Value()), area.Value(), GalleryTitle)) {
             return 9;
         }
     }

@@ -8,6 +8,7 @@
 #include <UiCore/Styles/SliderStyle.h>
 #include <UiCore/Styles/TextStyle.h>
 #include <UiCore/Styles/ToolTipStyle.h>
+#include <UiCore/Styles/WindowStyle.h>
 
 namespace rocks::ui {
 
@@ -91,6 +92,8 @@ inline constexpr LinearColor BrightToolTipFill{0.79f, 0.79f, 0.79f, 1.0f};
 // 밝은 툴팁의 흐린 설명 글자색이다(UE "Documentation.SDocumentationTooltipSubdued" — (0.1, 0.1,
 // 0.1), StarshipStyle.cpp 3464–3466행).
 inline constexpr LinearColor BrightToolTipSubdued{0.1f, 0.1f, 0.1f, 1.0f};
+// 밝은 툴팁의 글자색이다(UE FLinearColor::Black — SToolTip.cpp 66행).
+inline constexpr LinearColor BrightToolTipText{0.0f, 0.0f, 0.0f, 1.0f};
 // 툴팁 단축키 표지다(UE "ToolTip.KeybindBorder" RB(#808080, 4)·"ToolTip.KeybindText" Bold 10 흰색 —
 // DocumentationStyleSet.cpp 65–69행, 여백 (4, 2)·제목과 9 — SDocumentationToolTip.cpp 189–193행).
 // 설명 줄 간격은 Padding(0, 5, 0, 0)(278행)이다.
@@ -111,6 +114,38 @@ ROCKS_UICORE_API const ToolTipStyle& DefaultToolTipStyle() noexcept;
 // DropdownOutline, 1), 여백 8, 글자 Regular 9·전경색). 제목·설명·단축키처럼 여러 부품을 담는 툴팁에
 // 쓴다.
 ROCKS_UICORE_API const ToolTipStyle& ContentToolTipStyle() noexcept;
+
+// 바탕·여백 없는 툴팁 스타일이다(UE UWidget::SetToolTip — SToolTip.TextMargin(0).BorderImage(
+// nullptr), Widget.cpp 1514–1516행). 모양을 스스로 그리는 사용자 위젯 툴팁에 쓴다.
+ROCKS_UICORE_API const ToolTipStyle& BareToolTipStyle() noexcept;
+
+// 창 버튼 판 크기(UE IMAGE_BRUSH_SVG(..., FVector2f(42, 23)) — StarshipCoreStyle.cpp 770–800행)다.
+inline constexpr Vec2 WindowButtonSize{42.0f, 23.0f};
+// 창 버튼 올림 바탕이다(UE "Window.MinMaxRestoreButtonHover" FColor(255, 255, 255, 40), 닫기
+// "Window.CloseButtonHover" FColor(255, 20, 20, 150) — 824–830행). 선형 색(sRGB 20 → 0.007).
+inline constexpr LinearColor WindowButtonHoverFill{1.0f, 1.0f, 1.0f, 40.0f / 255.0f};
+inline constexpr LinearColor WindowCloseHoverFill{1.0f, 0.007f, 0.007f, 150.0f / 255.0f};
+// 창 틀이다(UE "Window" — 815–820행: 바탕 Recessed, 틀 RB(Recessed, 2, WindowBorder, 2), 외곽선
+// RB(Recessed, 2, InputOutline, 1)을 2 안쪽(SWindow.cpp 620–624행), 내용 여백 3).
+inline constexpr float WindowCornerRadius = 2.0f;
+inline constexpr float WindowBorderThickness = 2.0f;
+inline constexpr float WindowOutlineInset = 2.0f;
+inline constexpr Vec4 WindowBorderPadding{3.0f, 3.0f, 3.0f, 3.0f};
+// 창 내용 여백이다(UE 메인 프레임의 도킹 영역이 창 가장자리에서 떨어진 간격 — 사용자 지적
+// 2026-11-26: 내용이 창 외곽선에 붙어 선이 두 겹으로 보였다).
+inline constexpr Vec4 WindowContentPadding{4.0f, 2.0f, 4.0f, 4.0f};
+// 제목 글자 여백(SWindowTitleBar.cpp 297행)과 작은 앱 아이콘(UE "AppIcon.Small" 24x24, 여백 (4, 4,
+// 0, 0) — StarshipCoreStyle.cpp 289–290행)이다.
+inline constexpr Vec4 WindowTitlePadding{5.0f, 2.0f, 5.0f, 2.0f};
+inline constexpr Vec2 WindowAppIconSize{24.0f, 24.0f};
+inline constexpr Vec4 WindowAppIconPadding{4.0f, 4.0f, 0.0f, 0.0f};
+// 비활성 창의 제목·앱 아이콘 불투명도다(UE FWidgetStyle::SubdueAmount 0.6 — WidgetStyle.cpp 11행).
+// UE Starship은 활성·비활성 제목 brush가 둘 다 없어 차이가 없다 — 어느 창이 활성인지 보이게 하는
+// Rocks 개선이다.
+inline constexpr float InactiveWindowTitleOpacity = 0.6f;
+
+// 직접 그린 창 테두리 기본 스타일이다(UE "Window").
+ROCKS_UICORE_API const WindowStyle& DefaultWindowStyle() noexcept;
 
 // 키보드 초점 외곽선이다(UE 핵심 스타일 "FocusRectangle" — StarshipCoreStyle.cpp 217행: 투명 채움,
 // 반경 FocusOutlineRadius, 외곽선 Primary·ControlOutlineThickness).

@@ -9,9 +9,8 @@ namespace rocks::ui {
 // 툴팁 상자다(Docs/Design/UiToolkit 9.1절 UW4t, UE SToolTip). 스타일 바탕과 여백 안에 내용을
 // 담는다. 세 가지 중 하나로 만든다(둘 이상 주면 InvalidArgument):
 // - text: 글자 툴팁. 레이블에 스타일 글자색과 줄바꿈 폭을 적용한다.
-// - title·shortcut·description: 제목(굵게)과 그 오른쪽 단축키 표지, 아래 설명으로 짠 툴팁(UE는
-// 에디터
-//   문서 모듈의 SDocumentationToolTip에만 있다). 셋 중 하나 이상이면 된다.
+// - title·shortcut·description: 제목(굵게)과 그 오른쪽 단축키 표지, 아래 설명으로 짠 툴팁. UE는
+//   에디터 문서 모듈의 SDocumentationToolTip에만 있다. 셋 중 하나 이상이면 된다.
 // - content: 임의 부품. 자식은 스타일 글자색을 전경색으로 물려받는다.
 // 레이블은 호출자가 스타일의 font(text·title·shortcut·description)로 shaping해 넘긴다.
 //

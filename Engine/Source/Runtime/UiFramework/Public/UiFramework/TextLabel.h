@@ -40,6 +40,8 @@ public:
                      text::TextWrapPolicy policy = text::TextWrapPolicy::WordOrCluster) noexcept;
     // 편집 컨트롤은 자식의 최종 위치를 정하기 전 이 폭으로 줄을 배치해 커서 좌표를 얻는다.
     Result<void> ArrangeForWidth(float width) noexcept;
+    // ArrangeForWidth처럼 그 폭으로 줄을 다시 나누고(배치 폭 기록도 바뀐다) 크기를 돌려준다. 실제로
+    // 놓을 폭으로만 부른다 — 다른 폭으로 부르면 다음 Arrange까지 줄 배치가 그 폭을 따른다.
     Vec2 MeasureForWidth(float width) noexcept override;
     Result<void> Arrange(const Geometry& geometry) noexcept override;
     Result<void> SetParagraphStyle(const text::ParagraphMetrics& metrics, Vec2 shadowOffset,

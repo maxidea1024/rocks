@@ -108,14 +108,16 @@ Result<WeakPtr<Application*>> Application::WeakContext() noexcept {
     return Result<WeakPtr<Application*>>::Success(WeakPtr<Application*>(context_));
 }
 
-Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
+Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user,
+                                     Optional<FocusCause> openCause) noexcept {
     auto context = app.WeakContext();
     if (!context) {
         return Result<void>::Failure(context.Error());
     }
 
     auto previous = app.GetFocus(user);
-    const FocusCause cause = previous ? app.GetFocusCause(user) : FocusCause::Direct;
+    const FocusCause cause =
+        openCause ? *openCause : (previous ? app.GetFocusCause(user) : FocusCause::Direct);
     if (!previous && Parent()) {
         previous = Parent()->FindChild(this);
     }
@@ -136,7 +138,6 @@ Result<void> MenuAnchor::OpenFocused(Application& app, uint32 user) noexcept {
         app_ = Move(context.Value());
         restoreFocus_ = WeakPtr<Element>(previous);
         focusUser_ = user;
-        restoreCause_ = cause;
     }
 
     return Result<void>::Success();
@@ -178,7 +179,8 @@ void MenuAnchor::Close() noexcept {
         if (app && *app && restore) {
             auto current = (*app)->GetFocus(focusUser_);
             if (current && current->IsWithin(*layer)) {
-                (void)(*app)->SetFocus(focusUser_, restore, restoreCause_);
+                // 메뉴 안에서 마지막으로 쓴 입력(키보드·마우스)을 복원 원인으로 잇는다.
+                (void)(*app)->SetFocus(focusUser_, restore, (*app)->GetFocusCause(focusUser_));
             }
         }
 

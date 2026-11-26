@@ -43,8 +43,9 @@ Result<void> Widget::ApplyToolTip(ObjectRegistry& objects, Element& owner, const
             return Result<void>::Failure(ErrorCode::CycleDetected);
         }
 
-        // 사용자 위젯은 내용 툴팁 상자에 담는다(UE UWidget::SetToolTip — SToolTip, Widget.cpp
-        // 1514행). 닫힌 지난 상자에 남은 내용은 떼어 새 상자에 담는다.
+        // 사용자 위젯은 바탕·여백 없는 툴팁 상자에 담는다(UE UWidget::SetToolTip —
+        // SToolTip.TextMargin(0).BorderImage(nullptr), Widget.cpp 1514–1516행). 닫힌 지난 상자에
+        // 남은 내용은 떼어 새 상자에 담는다.
         auto& boxAllocator = objects.ObjectAllocator();
         return owner.SetToolTipFactory(
             Element::ToolTipFactory::CreateLambda(
@@ -63,7 +64,8 @@ Result<void> Widget::ApplyToolTip(ObjectRegistry& objects, Element& owner, const
                         return Result<SharedPtr<Element>>::Failure(tip.Error());
                     }
 
-                    auto built = tip.Value()->Construct({.content = view});
+                    auto built =
+                        tip.Value()->Construct({.content = view, .style = &BareToolTipStyle()});
                     return built ? Result<SharedPtr<Element>>::Success(tip.Value())
                                  : Result<SharedPtr<Element>>::Failure(built.Error());
                 }),

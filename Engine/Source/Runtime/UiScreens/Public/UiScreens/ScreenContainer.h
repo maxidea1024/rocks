@@ -53,6 +53,8 @@ private:
         SharedPtr<Element> root;
         WeakPtr<Element> focus;
         WidgetPool* pool;
+        // 떠날 때의 초점 원인이다(돌아올 때 외곽선 여부를 잇는다).
+        FocusCause focusCause = FocusCause::Direct;
     };
 
     Result<void> Attach(ObjectHandle handle, WidgetPool* pool) noexcept;
@@ -68,6 +70,9 @@ private:
     Array<Pool> pools_;
     Array<Page> pages_;
     WeakPtr<Element> previousFocus_;
+    FocusCause previousCause_ = FocusCause::Direct;
+    // 마지막으로 떠난 화면의 초점 원인이다(새 화면의 첫 초점에 잇는다).
+    FocusCause lastCause_ = FocusCause::Direct;
     bool changing_ = false;
     bool backing_ = false;
 };

@@ -10,6 +10,8 @@
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
 #include <Windows.h>
+#include <dwmapi.h>
+#include <shellapi.h>
 #include <imm.h>
 #include <WtsApi32.h>
 #include <Xinput.h>
@@ -23,6 +25,10 @@ namespace {
 using input::Key;
 
 constexpr wchar_t WindowClassName[] = L"RocksWindow";
+// 직접 그린 창의 DWM 그림자를 살리는 위쪽 프레임 확장(화소)이다.
+constexpr int CustomFrameShadowMargin = 1;
+// 최대화 중 자동 숨김 작업 표시줄 쪽에 남기는 틈(화소)이다.
+constexpr LONG AutoHideTaskbarGap = 1;
 constexpr usize MaxTitleCharacters = 256;
 
 // 스캔코드 set 1(make code) → Key. 확장 키(E0 접두)는 ExtendedKey가 처리한다.
@@ -270,6 +276,7 @@ public:
         if (!initialized) {
             return initialized;
         }
+
         // 제목은 OS 호출 전에 바꿔 둔다. 잘못된 UTF-8은 입력 오류다(Window::Create가 먼저 거른다).
         wchar_t title[MaxTitleCharacters];
         if (!ToWide(desc.title, title)) {
@@ -293,11 +300,19 @@ public:
             }
         }
 
+        // 직접 그린 창도 OS 스타일(제목·시스템 메뉴·크기 조절 틀)은 그대로 둔다 — 화면 가장자리
+        // 붙이기·애니메이션·시스템 메뉴가 이 스타일에 달려 있다. 비클라이언트 영역은
+        // WM_NCCALCSIZE가 없앤다(UE FWindowsWindow도 같다).
+        customFrame_ = desc.frame == WindowFrame::Custom;
+        resizable_ = desc.resizable;
         const DWORD style = desc.resizable
                                 ? WS_OVERLAPPEDWINDOW
                                 : (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
         RECT rectangle = {0, 0, static_cast<LONG>(desc.width), static_cast<LONG>(desc.height)};
-        AdjustWindowRectEx(&rectangle, style, FALSE, 0);
+        if (!customFrame_) {
+            AdjustWindowRectEx(&rectangle, style, FALSE, 0);
+        }
+
         const int x = desc.useDesktopPosition ? desc.desktopPosition.x +
                                                     (desc.positionClientOrigin ? rectangle.left : 0)
                                               : CW_USEDEFAULT;
@@ -313,10 +328,20 @@ public:
 
         width_ = desc.width;
         height_ = desc.height;
+        if (customFrame_) {
+            // 프레임을 다시 계산하게 해 OS 테두리를 없애고, DWM 그림자는 위 1 px 확장으로 살린다.
+            const MARGINS shadow{0, 0, CustomFrameShadowMargin, 0};
+            (void)DwmExtendFrameIntoClientArea(window_, &shadow);
+            SetWindowPos(window_, nullptr, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                             SWP_FRAMECHANGED);
+        }
+
         if (desc.visible) {
             ShowWindow(window_, SW_SHOW);
             UpdateWindow(window_);
         }
+
         return Result<void>::Success();
     }
 
@@ -333,9 +358,11 @@ public:
                 closeRequested_ = true;
                 continue;
             }
+
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+
         queue_ = nullptr;
         // 프레임 경계: 이번 펌프에서 끝난 손가락 번호를 돌려받는다(TouchIndexAllocator).
         touches_.EndFrame();
@@ -361,6 +388,7 @@ public:
         if (!resized_) {
             return false;
         }
+
         resized_ = false;
         width = width_;
         height = height_;
@@ -390,12 +418,14 @@ public:
         if (shape == cursorShape_) {
             return;
         }
+
         LPCWSTR resource = reinterpret_cast<LPCWSTR>(IDC_ARROW);
         if (shape == input::MouseCursor::ResizeHorizontal) {
             resource = reinterpret_cast<LPCWSTR>(IDC_SIZEWE);
         } else if (shape == input::MouseCursor::ResizeVertical) {
             resource = reinterpret_cast<LPCWSTR>(IDC_SIZENS);
         }
+
         switch (shape) {
         case input::MouseCursor::Text:
             resource = reinterpret_cast<LPCWSTR>(IDC_IBEAM);
@@ -424,10 +454,12 @@ public:
         default:
             break;
         }
+
         HCURSOR cursor = LoadCursorW(nullptr, resource);
         if (!cursor) {
             return;
         }
+
         cursor_ = cursor;
         cursorShape_ = shape;
         // 입력 큐를 처리한 뒤에도 현재 창의 클라이언트 영역에서만 즉시 반영한다.
@@ -459,6 +491,7 @@ public:
         if (!::ClientToScreen(window_, &p)) {
             return Result<IntVec2>::Failure(ErrorCode::DependencyFailed);
         }
+
         return Result<IntVec2>::Success({static_cast<int32>(p.x), static_cast<int32>(p.y)});
     }
 
@@ -467,12 +500,86 @@ public:
         if (!::ScreenToClient(window_, &p)) {
             return Result<IntVec2>::Failure(ErrorCode::DependencyFailed);
         }
+
         return Result<IntVec2>::Success({static_cast<int32>(p.x), static_cast<int32>(p.y)});
     }
 
     bool IsAtDesktopPoint(IntVec2 point) const noexcept override {
         const HWND hit = WindowFromPoint({point.x, point.y});
         return hit && GetAncestor(hit, GA_ROOT) == window_;
+    }
+
+    void Minimize() noexcept override {
+        ShowWindow(window_, SW_MINIMIZE);
+    }
+
+    void ToggleMaximize() noexcept override {
+        // 크기 고정 창은 최대화하지 않는다(UE HasMaximizeBox).
+        if (resizable_) {
+            ShowWindow(window_, IsZoomed(window_) ? SW_RESTORE : SW_MAXIMIZE);
+        }
+    }
+
+    bool IsResizable() const noexcept override {
+        return resizable_;
+    }
+
+    // 최대화된 client 사각형에서 자동 숨김 작업 표시줄이 붙은 가장자리를 1 px 남긴다. 창이 화면을
+    // 꽉 채우면 OS가 그 작업 표시줄을 불러내지 못한다.
+    void LeaveAutoHideTaskbarEdge(RECT& client) const noexcept {
+        APPBARDATA query{};
+        query.cbSize = sizeof(query);
+        if ((SHAppBarMessage(ABM_GETSTATE, &query) & ABS_AUTOHIDE) == 0) {
+            return;
+        }
+
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            return;
+        }
+
+        const UINT edges[] = {ABE_LEFT, ABE_TOP, ABE_RIGHT, ABE_BOTTOM};
+        for (const UINT edge : edges) {
+            APPBARDATA bar{};
+            bar.cbSize = sizeof(bar);
+            bar.uEdge = edge;
+            bar.rc = monitor.rcMonitor;
+            if (!SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &bar)) {
+                continue;
+            }
+
+            switch (edge) {
+            case ABE_LEFT:
+                client.left += AutoHideTaskbarGap;
+                break;
+            case ABE_TOP:
+                client.top += AutoHideTaskbarGap;
+                break;
+            case ABE_RIGHT:
+                client.right -= AutoHideTaskbarGap;
+                break;
+            default:
+                client.bottom -= AutoHideTaskbarGap;
+                break;
+            }
+        }
+    }
+
+    void RequestClose() noexcept override {
+        PostMessageW(window_, WM_CLOSE, 0, 0);
+    }
+
+    bool IsMaximized() const noexcept override {
+        return IsZoomed(window_) != FALSE;
+    }
+
+    bool IsActive() const noexcept override {
+        return active_;
+    }
+
+    WindowFrame Frame() const noexcept override {
+        return customFrame_ ? WindowFrame::Custom : WindowFrame::System;
     }
 
     Result<void> SetTitle(StringView text) noexcept override {
@@ -509,13 +616,16 @@ private:
             highSurrogate_ = value;
             return;
         }
+
         uint32 codePoint = value;
         if (value >= 0xDC00 && value <= 0xDFFF) {
             if (highSurrogate_ == 0) {
                 return;
             }
+
             codePoint = 0x10000 + ((highSurrogate_ - 0xD800) << 10) + (value - 0xDC00);
         }
+
         highSurrogate_ = 0;
         // 제어 문자(Backspace·Enter 등)는 키 이벤트로 처리하므로 문자 입력에서 뺀다.
         if (codePoint >= 0x20 && codePoint != 0x7F) {
@@ -532,6 +642,7 @@ private:
             if (!capturedButtons_) {
                 SetCapture(window_);
             }
+
             capturedButtons_ |= bit;
             Push(input::InputEvent::MouseDown(button, x, y));
         } else {
@@ -539,6 +650,7 @@ private:
             if (!capturedButtons_ && GetCapture() == window_) {
                 ReleaseCapture();
             }
+
             Push(input::InputEvent::MouseUp(button, x, y));
         }
     }
@@ -549,18 +661,23 @@ private:
         if (regionHitTest_ && ScreenToClient(window_, &point)) {
             return regionHitTest_.Execute({point.x, point.y});
         }
+
         return input::WindowRegion::Client;
     }
 
     void ToggleBorderlessFullscreen() noexcept {
         if (fullscreenStyle_) {
-            SetWindowLongPtrW(window_, GWL_STYLE, fullscreenStyle_);
+            // 표지를 먼저 지운다 — 아래 SWP_FRAMECHANGED의 WM_NCCALCSIZE가 직접 그린 창 규칙(OS
+            // 테두리 없음)을 따라야 한다.
+            const LONG_PTR windowedStyle = fullscreenStyle_;
+            fullscreenStyle_ = 0;
+            SetWindowLongPtrW(window_, GWL_STYLE, windowedStyle);
             SetWindowPlacement(window_, &windowedPlacement_);
             SetWindowPos(window_, nullptr, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            fullscreenStyle_ = 0;
             return;
         }
+
         MONITORINFO monitor{};
         monitor.cbSize = sizeof(monitor);
         windowedPlacement_.length = sizeof(windowedPlacement_);
@@ -568,6 +685,7 @@ private:
             !GetWindowPlacement(window_, &windowedPlacement_)) {
             return;
         }
+
         fullscreenStyle_ = GetWindowLongPtrW(window_, GWL_STYLE);
         SetWindowLongPtrW(window_, GWL_STYLE,
                           (fullscreenStyle_ & ~static_cast<LONG_PTR>(WS_OVERLAPPEDWINDOW)) |
@@ -577,16 +695,252 @@ private:
                      bounds.bottom - bounds.top, SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 
+    WindowZone HitZone(IntVec2 clientPoint) const noexcept override {
+        const input::WindowRegion region =
+            regionHitTest_ ? regionHitTest_.Execute(clientPoint) : input::WindowRegion::Client;
+        if (!customFrame_) {
+            return region == input::WindowRegion::Client ? WindowZone::Client : WindowZone::Caption;
+        }
+
+        RECT client{};
+        if (resizable_ && !IsZoomed(window_) && !fullscreenStyle_ &&
+            GetClientRect(window_, &client)) {
+            const UINT dpi = GetDpiForWindow(window_);
+            const int border = MulDiv(CustomFrameResizeBorder, dpi, USER_DEFAULT_SCREEN_DPI);
+            const int corner =
+                border + MulDiv(CustomFrameCornerExtension, dpi, USER_DEFAULT_SCREEN_DPI);
+            const int x = clientPoint.x;
+            const int y = clientPoint.y;
+            const bool left = x < client.left + border;
+            const bool right = x >= client.right - border;
+            const bool top = y < client.top + border;
+            const bool bottom = y >= client.bottom - border;
+            // 한 축이 가장자리 안이면 다른 축은 모서리 폭(두께 + 확장)까지 모서리로 본다.
+            const bool nearLeft = x < client.left + corner;
+            const bool nearRight = x >= client.right - corner;
+            const bool nearTop = y < client.top + corner;
+            const bool nearBottom = y >= client.bottom - corner;
+            if ((top && nearLeft) || (left && nearTop)) {
+                return WindowZone::TopLeftBorder;
+            }
+
+            if ((top && nearRight) || (right && nearTop)) {
+                return WindowZone::TopRightBorder;
+            }
+
+            if ((bottom && nearLeft) || (left && nearBottom)) {
+                return WindowZone::BottomLeftBorder;
+            }
+
+            if ((bottom && nearRight) || (right && nearBottom)) {
+                return WindowZone::BottomRightBorder;
+            }
+
+            if (left) {
+                return WindowZone::LeftBorder;
+            }
+
+            if (right) {
+                return WindowZone::RightBorder;
+            }
+
+            if (top) {
+                return WindowZone::TopBorder;
+            }
+
+            if (bottom) {
+                return WindowZone::BottomBorder;
+            }
+        }
+
+        switch (region) {
+        case input::WindowRegion::Caption:
+        case input::WindowRegion::FullscreenCaption:
+            return WindowZone::Caption;
+        case input::WindowRegion::MinimizeButton:
+            return WindowZone::MinimizeButton;
+        case input::WindowRegion::MaximizeButton:
+            return WindowZone::MaximizeButton;
+        case input::WindowRegion::CloseButton:
+            return WindowZone::CloseButton;
+        case input::WindowRegion::SystemMenu:
+            return WindowZone::SystemMenu;
+        default:
+            return WindowZone::Client;
+        }
+    }
+
+    // 직접 그린 창의 비클라이언트 판정이다. 최대화 버튼만 HTMAXBUTTON(Win11 스냅 레이아웃은 그
+    // hover에만 뜬다 — 크기 고정 창은 최대화가 없어 HTCLIENT)이고, 최소화·닫기는 HTCLIENT로 두어
+    // UI 버튼이 평소 입력으로 처리한다(Docs/Design/UiToolkit 9.1절 UW7b).
+    LRESULT CustomHitTest(LPARAM coordinates) const noexcept {
+        POINT point{static_cast<short>(LOWORD(coordinates)),
+                    static_cast<short>(HIWORD(coordinates))};
+        if (!ScreenToClient(window_, &point)) {
+            return HTNOWHERE;
+        }
+
+        switch (HitZone({point.x, point.y})) {
+        case WindowZone::Caption:
+            return HTCAPTION;
+        case WindowZone::TopLeftBorder:
+            return HTTOPLEFT;
+        case WindowZone::TopBorder:
+            return HTTOP;
+        case WindowZone::TopRightBorder:
+            return HTTOPRIGHT;
+        case WindowZone::LeftBorder:
+            return HTLEFT;
+        case WindowZone::RightBorder:
+            return HTRIGHT;
+        case WindowZone::BottomLeftBorder:
+            return HTBOTTOMLEFT;
+        case WindowZone::BottomBorder:
+            return HTBOTTOM;
+        case WindowZone::BottomRightBorder:
+            return HTBOTTOMRIGHT;
+        case WindowZone::MaximizeButton:
+            return resizable_ ? HTMAXBUTTON : HTCLIENT;
+        case WindowZone::SystemMenu:
+            return HTSYSMENU;
+        default:
+            return HTCLIENT;
+        }
+    }
+
+    // 커서가 아직 이 창 위에 있는지다(클라이언트↔비클라이언트로 옮길 때 오는 leave를 거른다).
+    bool CursorStillInside() const noexcept {
+        POINT cursor{};
+        return GetCursorPos(&cursor) && WindowFromPoint(cursor) == window_;
+    }
+
+    void PushMouseLeave() noexcept {
+        input::InputEvent leave;
+        leave.type = input::InputEventType::MouseLeave;
+        Push(leave);
+    }
+
+    void PushNonClientPressed() noexcept {
+        input::InputEvent pressed;
+        pressed.type = input::InputEventType::NonClientPressed;
+        Push(pressed);
+    }
+
+    // 최대화 버튼 위 비클라이언트 마우스 메시지를 클라이언트 입력으로 바꾼다(UI 버튼의 올림·눌림).
+    // 눌린 뒤에는 캡처가 클라이언트 메시지로 이어진다.
+    LPARAM ScreenToClientParam(LPARAM coordinates) const noexcept {
+        POINT point{static_cast<short>(LOWORD(coordinates)),
+                    static_cast<short>(HIWORD(coordinates))};
+        (void)ScreenToClient(window_, &point);
+        return MAKELPARAM(static_cast<WORD>(static_cast<short>(point.x)),
+                          static_cast<WORD>(static_cast<short>(point.y)));
+    }
+
     LRESULT Handle(UINT message, WPARAM wParam, LPARAM lParam) noexcept {
         switch (message) {
+        case WM_NCCALCSIZE:
+            // 직접 그린 창은 창 전체가 client다. 최대화 중에는 OS가 화면 밖으로 내미는 테두리
+            // 두께만큼 안으로 들인다(UE WindowsApplication.cpp 2490–2520행).
+            if (customFrame_ && wParam && !fullscreenStyle_) {
+                if (IsZoomed(window_)) {
+                    WINDOWINFO info{};
+                    info.cbSize = sizeof(info);
+                    if (GetWindowInfo(window_, &info)) {
+                        auto* rects = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+                        const LONG inset = static_cast<LONG>(info.cxWindowBorders);
+                        rects->rgrc[0].left += inset;
+                        rects->rgrc[0].top += inset;
+                        rects->rgrc[0].right -= inset;
+                        rects->rgrc[0].bottom -= inset;
+                        LeaveAutoHideTaskbarEdge(rects->rgrc[0]);
+                        rects->rgrc[1] = rects->rgrc[0];
+                        return WVR_VALIDRECTS;
+                    }
+                }
+
+                return 0;
+            }
+            break;
+        case WM_NCACTIVATE:
+            active_ = wParam != FALSE;
+            repaint_ = true;
+            // 직접 그린 창은 OS가 옛 비클라이언트 틀을 다시 그리지 않게 한다.
+            if (customFrame_) {
+                return DefWindowProcW(window_, message, wParam, -1);
+            }
+            break;
+        case WM_NCMOUSEMOVE:
+            // 직접 그린 창은 비클라이언트(제목·가장자리) 이동도 UI에 보낸다 — 최대화 버튼에서 제목
+            // 빈 곳으로 옮기면 올림이 풀려야 한다(UE WindowsApplication.cpp 3527행). 기본 처리는
+            // 최대화 버튼만 막는다(OS 버튼 추적 대신 UI 버튼).
+            if (customFrame_) {
+                if (!trackingNonClient_) {
+                    TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE | TME_NONCLIENT,
+                                             window_, 0};
+                    trackingNonClient_ = TrackMouseEvent(&tracking) != FALSE;
+                }
+
+                const LPARAM local = ScreenToClientParam(lParam);
+                Push(input::InputEvent::MouseMove(
+                    static_cast<float>(static_cast<int16>(LOWORD(local))),
+                    static_cast<float>(static_cast<int16>(HIWORD(local)))));
+                if (wParam == HTMAXBUTTON) {
+                    return 0;
+                }
+            }
+            break;
+        case WM_NCMOUSELEAVE:
+            if (customFrame_) {
+                trackingNonClient_ = false;
+                // 클라이언트로 옮겨 간 것이면 버린다(뒤따르는 이동이 올림을 다시 정한다).
+                if (!CursorStillInside()) {
+                    PushMouseLeave();
+                }
+
+                return 0;
+            }
+            break;
+        case WM_NCLBUTTONDOWN:
+            if (customFrame_ && wParam == HTMAXBUTTON) {
+                MouseButton(input::MouseButton::Left, true, ScreenToClientParam(lParam));
+                return 0;
+            }
+
+            // 제목·가장자리 누름은 열린 메뉴·툴팁을 닫는다(기본 처리로 창 옮기기·크기 조절은
+            // 이어진다).
+            PushNonClientPressed();
+            break;
+        case WM_NCRBUTTONDOWN:
+            PushNonClientPressed();
+            break;
+        case WM_NCLBUTTONUP:
+            if (customFrame_ && wParam == HTMAXBUTTON) {
+                MouseButton(input::MouseButton::Left, false, ScreenToClientParam(lParam));
+                return 0;
+            }
+            break;
         case WM_NCHITTEST: {
+            if (customFrame_ && !fullscreenStyle_) {
+                return CustomHitTest(lParam);
+            }
+
             const auto frame = DefWindowProcW(window_, message, wParam, lParam);
-            if (frame == HTCLIENT && ClientRegion(lParam) != input::WindowRegion::Client) {
+            const input::WindowRegion region =
+                frame == HTCLIENT ? ClientRegion(lParam) : input::WindowRegion::Client;
+            if (region == input::WindowRegion::Caption ||
+                region == input::WindowRegion::FullscreenCaption) {
                 return HTCAPTION;
             }
+
             return frame;
         }
         case WM_NCLBUTTONDBLCLK:
+            // 최대화 버튼의 빠른 두 번 누름은 두 번째 누름으로 보낸다(UI 버튼이 처리).
+            if (customFrame_ && wParam == HTMAXBUTTON) {
+                MouseButton(input::MouseButton::Left, true, ScreenToClientParam(lParam));
+                return 0;
+            }
+
             if (wParam == HTCAPTION &&
                 ClientRegion(lParam) == input::WindowRegion::FullscreenCaption) {
                 ToggleBorderlessFullscreen();
@@ -608,6 +962,7 @@ private:
             break;
         case WM_ENTERSIZEMOVE:
             sizeMoveLoop_ = true;
+            PushNonClientPressed();
             return 0;
         case WM_EXITSIZEMOVE:
             sizeMoveLoop_ = false;
@@ -624,6 +979,7 @@ private:
                 liveResize_.Execute();
                 liveResizing_ = false;
             }
+
             return 0;
         case WM_SETFOCUS:
             focused_ = true;
@@ -670,6 +1026,7 @@ private:
             if (key != Key::None) {
                 Push(input::InputEvent::KeyDown(key, repeat));
             }
+
             // Alt+F4 같은 시스템 키 동작은 OS 기본 처리로 넘긴다.
             break;
         }
@@ -702,9 +1059,12 @@ private:
             return 0;
         case WM_MOUSELEAVE: {
             trackingMouse_ = false;
-            input::InputEvent leave;
-            leave.type = input::InputEventType::MouseLeave;
-            Push(leave);
+            // 직접 그린 창에서 비클라이언트(제목·최대화 버튼)로 옮겨 간 것이면 버린다 —
+            // 비클라이언트 이동이 이어서 온다.
+            if (!customFrame_ || !CursorStillInside()) {
+                PushMouseLeave();
+            }
+
             return 0;
         }
         case WM_MOUSEMOVE:
@@ -712,6 +1072,7 @@ private:
                 TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window_, 0};
                 trackingMouse_ = TrackMouseEvent(&tracking) != FALSE;
             }
+
             Push(input::InputEvent::MouseMove(
                 static_cast<float>(static_cast<int16>(LOWORD(lParam))),
                 static_cast<float>(static_cast<int16>(HIWORD(lParam)))));
@@ -748,11 +1109,13 @@ private:
             } else {
                 Push(input::InputEvent::MouseWheel(delta));
             }
+
             return 0;
         }
         default:
             break;
         }
+
         return DefWindowProcW(window_, message, wParam, lParam);
     }
 
@@ -841,10 +1204,12 @@ private:
             self->window_ = window;
             SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
         }
+
         auto* self = reinterpret_cast<Win64Window*>(GetWindowLongPtrW(window, GWLP_USERDATA));
         if (self == nullptr) {
             return DefWindowProcW(window, message, wParam, lParam);
         }
+
         return self->Handle(message, wParam, lParam);
     }
 
@@ -855,6 +1220,11 @@ private:
     LONG_PTR fullscreenStyle_ = 0;
     WINDOWPLACEMENT windowedPlacement_{};
     bool trackingMouse_ = false;
+    // 최대화 버튼 위 비클라이언트 이동을 추적 중인지다(WM_NCMOUSELEAVE).
+    bool trackingNonClient_ = false;
+    bool customFrame_ = false;
+    bool resizable_ = true;
+    bool active_ = false;
     input::MouseCursor cursorShape_ = input::MouseCursor::Arrow;
     HINSTANCE instance_ = nullptr;
     input::InputQueue* queue_ = nullptr;
@@ -905,6 +1275,7 @@ uint32 MapButtons(WORD buttons) noexcept {
             result |= 1u << static_cast<uint32>(mapping.button);
         }
     }
+
     return result;
 }
 
@@ -947,6 +1318,7 @@ public:
             if (!slot.connected && slot.lastProbe != 0 && now - slot.lastProbe < 1000000000ull) {
                 continue;
             }
+
             XINPUT_STATE state = {};
             const DWORD result = getState_(index, &state);
             if (result != ERROR_SUCCESS) {
@@ -955,14 +1327,17 @@ public:
                     slot.connected = false;
                     queue.Push(input::InputEvent::Gamepad(static_cast<uint8>(index), {}));
                 }
+
                 continue;
             }
+
             const bool changed = !slot.connected || state.dwPacketNumber != slot.packet;
             slot.connected = true;
             slot.packet = state.dwPacketNumber;
             if (!changed) {
                 continue;
             }
+
             input::GamepadSnapshot snapshot;
             snapshot.connected = true;
             snapshot.buttons = MapButtons(state.Gamepad.wButtons);

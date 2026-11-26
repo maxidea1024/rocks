@@ -74,6 +74,29 @@ void Application::SetRoot(const SharedPtr<Element>& root) noexcept {
     hitGrid_.Reset();
 }
 
+namespace {
+
+void DismissPopupsBelow(Element& element) noexcept {
+    element.DismissHostedPopups();
+    for (usize i = 0; i < element.ChildCount(); ++i) {
+        if (Element* child = element.ChildAt(i)) {
+            DismissPopupsBelow(*child);
+        }
+    }
+}
+
+} // namespace
+
+void Application::DismissPopups() noexcept {
+    while (!toolTips_.IsEmpty()) {
+        CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
+    }
+
+    if (auto root = root_) {
+        DismissPopupsBelow(*root);
+    }
+}
+
 void Application::ResetInput() noexcept {
     while (!toolTips_.IsEmpty()) {
         CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
@@ -312,8 +335,6 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
         previous->SetFocusOutlineVisible(false);
     }
 
-    ObserveFocusToolTip(userId, target, cause);
-
     if (outline) {
         target->SetFocusOutlineVisible(true);
     }
@@ -329,6 +350,8 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
     }
 
     focusChanging_ = false;
+    // 툴팁 층을 닫는 일은 트리를 바꾸므로 초점 알림이 모두 끝난 뒤에 한다.
+    ObserveFocusToolTip(userId, target, cause);
     return Result<void>::Success();
 }
 
@@ -679,19 +702,19 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
         // 빈 곳을 눌러도 초점은 두되 마우스 사용으로 바뀌었으니 외곽선은 끈다(UE는 창이 초점을
         // 가져가 외곽선이 사라진다 — SWindow.cpp 1783행. Rocks는 편집 중인 값의 확정을 피하려고
         // 초점은 유지한다).
-        // 누름 처리 중 페이지가 바뀌어 초점 요소가 떨어져 나갔을 수 있으니, 아직 붙어 있고 외곽선이
-        // 켜진 초점만 끈다(떨어진 초점은 다음 갱신의 ReleaseInactiveTargets가 놓는다).
+        // 초점 요소를 다시 정하지 않고(누름 중 떨어져 나갔거나 초점을 못 받게 됐을 수 있다) 원인을
+        // Pointer로 바꾸고 외곽선만 끈다 — 외형 정리라 실패할 길이 없다.
         if (!chosen) {
-            for (const auto& entry : focus_) {
-                if (entry.userId != event.userId || !entry.outline) {
+            for (auto& entry : focus_) {
+                if (entry.userId != event.userId) {
                     continue;
                 }
 
-                auto current = entry.target.Lock();
-                if (current && IsFocusablePath(current.Get())) {
-                    auto kept = SetFocus(event.userId, current, FocusCause::Pointer);
-                    if (!kept) {
-                        return Result<bool>::Failure(kept.Error());
+                entry.cause = FocusCause::Pointer;
+                if (entry.outline) {
+                    entry.outline = false;
+                    if (auto current = entry.target.Lock()) {
+                        current->SetFocusOutlineVisible(false);
                     }
                 }
 

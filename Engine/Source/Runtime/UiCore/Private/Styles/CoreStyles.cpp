@@ -1,4 +1,5 @@
 #include <UiCore/Styles/CoreStyles.h>
+
 #include <UiCore/Styles/CoreIcons.h>
 
 // Element 스타일 형식과 UE 5.8 에디터 핵심 스타일 기본값이다(Docs/Design/UiToolkit 9.1절 UW3b,
@@ -188,9 +189,9 @@ const ToolTipStyle& DefaultToolTipStyle() noexcept {
                                       BrightToolTipRadius};
         tip.padding = {TextToolTipPadding, TextToolTipPadding, TextToolTipPadding,
                        TextToolTipPadding};
-        tip.text = {{Typeface::Regular, ToolTipFontSize}, ColorRef::Specified({0, 0, 0, 1})};
+        tip.text = {{Typeface::Regular, ToolTipFontSize}, ColorRef::Specified(BrightToolTipText)};
         tip.wrapWidth = ToolTipWrapWidth;
-        AddToolTipParts(tip, ColorRef::Specified({0, 0, 0, 1}),
+        AddToolTipParts(tip, ColorRef::Specified(BrightToolTipText),
                         ColorRef::Specified(BrightToolTipSubdued));
         return tip;
     }();
@@ -208,6 +209,54 @@ const ToolTipStyle& ContentToolTipStyle() noexcept {
         tip.wrapWidth = ToolTipWrapWidth;
         AddToolTipParts(tip, ColorRef::FromTheme(ThemeSlot::ForegroundHover),
                         ColorRef::FromTheme(ThemeSlot::Foreground));
+        return tip;
+    }();
+    return style;
+}
+
+const WindowStyle& DefaultWindowStyle() noexcept {
+    static const WindowStyle style = [] {
+        WindowStyle window;
+        // 창 버튼은 바탕 없음, 올림만 반투명 바탕이다. 아이콘 색은 전경 Foreground·올림
+        // ForegroundHover다(UE 버튼 이미지 tint).
+        window.controlButton.hovered = StyleBrush::Color(ThemeSlot::White);
+        window.controlButton.hovered.fill = ColorRef::Specified(WindowButtonHoverFill);
+        window.controlButton.pressed = window.controlButton.hovered;
+        window.controlButton.normalForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        window.controlButton.hoveredForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        window.controlButton.pressedForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        window.controlButton.disabledForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        window.closeButton = window.controlButton;
+        window.closeButton.hovered.fill = ColorRef::Specified(WindowCloseHoverFill);
+        window.closeButton.pressed = window.closeButton.hovered;
+        window.minimizeIcon = icons::WindowMinimize;
+        window.maximizeIcon = icons::WindowMaximize;
+        window.restoreIcon = icons::WindowRestore;
+        window.closeIcon = icons::WindowClose;
+        window.buttonSize = WindowButtonSize;
+        window.title = NormalTextStyle();
+        window.titlePadding = WindowTitlePadding;
+        window.appIcon = icons::RocksLogo;
+        window.appIconSize = WindowAppIconSize;
+        window.appIconPadding = WindowAppIconPadding;
+        window.background = StyleBrush::Color(ThemeSlot::Recessed);
+        window.border = StyleBrush::RoundedBox(ThemeSlot::Recessed, WindowCornerRadius,
+                                               ThemeSlot::WindowBorder, WindowBorderThickness);
+        window.outline = StyleBrush::RoundedBox(ThemeSlot::Recessed, WindowCornerRadius,
+                                                ThemeSlot::InputOutline, ControlOutlineThickness);
+        window.outlineInset = WindowOutlineInset;
+        window.borderPadding = WindowBorderPadding;
+        window.contentPadding = WindowContentPadding;
+        return window;
+    }();
+    return style;
+}
+
+const ToolTipStyle& BareToolTipStyle() noexcept {
+    static const ToolTipStyle style = [] {
+        ToolTipStyle tip = ContentToolTipStyle();
+        tip.background = StyleBrush::None();
+        tip.padding = {};
         return tip;
     }();
     return style;

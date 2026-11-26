@@ -15,7 +15,7 @@ UE 5.8 에디터의 아이콘은 거의 모두 SVG 벡터 이미지다(`FSlateVe
 
 ### 17.2 Rocks 구성
 
-**외부 라이브러리.** nanosvg(memononen/nanosvg, zlib 라이선스, UE와 같은 라이브러리 — UD3)를 `Engine/Source/ThirdParty/NanoSvg`에 들인다. 공식 릴리스가 없어 commit `239e102ec2c6`(master, 2026-07-09)과 archive SHA-256으로 고정한다(Minimp3와 같은 방식). 들이는 파일은 `nanosvg.h`·`nanosvgrast.h`·`LICENSE.txt`다. glue 파일 하나가 구현을 한 번 컴파일하고, 표준 헤더를 먼저 넣은 다음 `malloc`·`realloc`·`free`를 Rocks hook으로 바꾼다. hook은 UiRender가 Core `LibraryHeap`(C 라이브러리용 malloc 호환 공용 힙 — HarfBuzz·ICU hook도 이것으로 옮겼다)으로 정의하므로 모든 할당이 Rocks 할당기를 지난다. 소비 모듈은 nanosvg 헤더를 보지 않고 Rocks 어댑터 `Adapter/RocksNanoSvg.h`(불투명 handle과 파싱·크기·그라데이션 여부·비균등 배율·래스터 함수)만 include한다 — nanosvg.h의 MSVC 경고 pragma가 소비자에게 닿지 않는다. 원본은 한 줄만 고쳤다(`nsvgParseFromFile`의 `size == -1l` 부호 비교 — `ThirdParty.json` modifications·`Rocks.patch`). 파일 API(`nsvgParseFromFile` — `fopen`)는 부르지 않는다. 색 해석의 `sscanf`(`%x`·`%u`)와 수 해석(`nsvg__atof` — 자체 구현)은 locale에 기대지 않는다.
+**외부 라이브러리.** nanosvg(memononen/nanosvg, zlib 라이선스, UE와 같은 라이브러리 — UD3)를 `Engine/Source/ThirdParty/NanoSvg`에 들인다. 공식 릴리스가 없어 commit `239e102ec2c6`(master, 2026-07-09)과 archive SHA-256으로 고정한다(Minimp3와 같은 방식). 들이는 파일은 `nanosvg.h`·`nanosvgrast.h`·`LICENSE.txt`다. glue 파일 하나가 구현을 한 번 컴파일하고, 표준 헤더를 먼저 넣은 다음 `malloc`·`realloc`·`free`를 Rocks hook으로 바꾼다. hook은 UiRender가 Core `LibraryHeap`(C 라이브러리용 malloc 호환 공용 힙 — HarfBuzz·ICU hook도 이것으로 옮겼다)으로 정의하므로 모든 할당이 Rocks 할당기를 지난다. 소비 모듈(UiRender)은 nanosvg 헤더를 보지 않고 자기 Private 헤더 `RocksNanoSvg.h`(불투명 handle과 파싱·크기·그라데이션 여부·비균등 배율·래스터 함수 선언)만 include한다 — nanosvg.h의 MSVC 경고 pragma가 소비자에게 닿지 않는다. 외부 원본 폴더에는 glue 소스만 둘 수 있어(third-party policy) 선언은 UiRender에 두고 glue에는 같은 원형을 둔다(둘을 함께 고친다). 원본은 한 줄만 고쳤다(`nsvgParseFromFile`의 `size == -1l` 부호 비교 — `ThirdParty.json` modifications·`Rocks.patch`). 파일 API(`nsvgParseFromFile` — `fopen`)는 부르지 않는다. 색 해석의 `sscanf`(`%x`·`%u`)와 수 해석(`nsvg__atof` — 자체 구현)은 locale에 기대지 않는다.
 
 **키.** `ui::VectorImageKey`(UiCore)는 아이콘 경로의 64비트 해시다. 경로는 아이콘 루트 기준 상대 경로에서 확장자를 뺀 것이고 구분자는 `/`다(예: `Common/Check`). `VectorImageKey::FromPath("Common/Check")`는 constexpr이라(Core `HashStringBytes`) 정적 스타일 값에 그대로 쓴다. 해시가 겹치면 등록 때 `AlreadyExists`로 막는다.
 
@@ -60,6 +60,8 @@ UE 5.8 에디터의 아이콘은 거의 모두 SVG 벡터 이미지다(`FSlateVe
 | `Common/Folder`·`FolderOpen`·`File`·`Save`·`Undo`·`Redo` | 같은 뜻 | 툴바·콘텐츠 |
 | `Common/Visible`·`Hidden`·`Lock`·`Unlock`·`Filter`·`Refresh` | 같은 뜻 | Outliner·디테일 |
 | `Common/Info`·`Warning`·`Error`·`Success` | 같은 뜻 | 알림·오류 표시 |
+| `CoreWidgets/Window/Minimize`·`Maximize`·`Restore`·`Close` | `Window/minimize`·`maximize`·`restore`·`close`(42×23 판) | 직접 그린 창 테두리 버튼(9.1절 UW7b) — 판 가운데 10 px 글리프, 1 px 선 |
+| `Common/RocksLogo` | `Common/unreal-small`("AppIcon.Small", 24×24) | 제목 막대 앱 아이콘(Rocks 자체 마크) |
 | `Common/Play`·`Pause`·`Stop` | 같은 뜻 | 툴바 재생 |
 
 ### 17.4 갤러리와 적용

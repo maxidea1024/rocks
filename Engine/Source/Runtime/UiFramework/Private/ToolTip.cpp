@@ -8,10 +8,19 @@ namespace rocks::ui {
 
 namespace {
 
-bool IsValidStyle(const ToolTipStyle& style) noexcept {
-    const Vec4 padding = style.padding;
+bool IsValidMargin(Vec4 padding) noexcept {
     return padding.IsFinite() && padding.x >= 0 && padding.y >= 0 && padding.z >= 0 &&
-           padding.w >= 0 && math::IsFinite(style.wrapWidth) && style.wrapWidth >= 0;
+           padding.w >= 0;
+}
+
+bool IsValidLength(float value) noexcept {
+    return math::IsFinite(value) && value >= 0;
+}
+
+bool IsValidStyle(const ToolTipStyle& style) noexcept {
+    return IsValidMargin(style.padding) && IsValidMargin(style.shortcutPadding) &&
+           IsValidLength(style.wrapWidth) && IsValidLength(style.shortcutGap) &&
+           IsValidLength(style.lineGap);
 }
 
 } // namespace
@@ -66,7 +75,9 @@ Result<SharedPtr<Element>> ToolTip::BuildParts(const Args& args,
 
     Result<void> status = Result<void>::Success();
     if (args.title) {
-        status = header.Value()->TryAddSlot(args.title, {.alignment = StackAlignment::Center});
+        // 제목은 Fill 칸이다 — 좁은 창에서 남는 폭으로 줄을 나누고 단축키 표지는 오른쪽에 남는다.
+        status = header.Value()->TryAddSlot(
+            args.title, {.rule = StackSizeRule::Fill, .alignment = StackAlignment::Center});
     }
 
     if (status && args.shortcut) {
@@ -126,7 +137,7 @@ const ToolTipStyle& ToolTip::GetStyle() const noexcept {
 }
 
 Result<void> ToolTip::ApplyTextStyle() noexcept {
-    // 글자와 설명은 줄바꿈 폭까지, 제목은 색만 적용한다.
+    // 글자·설명·제목에 색과 줄바꿈 폭을 적용한다.
     const auto apply = [this](TextLabel* label, const TextStyle& text,
                               bool wraps) noexcept -> Result<void> {
         if (!label) {
@@ -134,7 +145,9 @@ Result<void> ToolTip::ApplyTextStyle() noexcept {
         }
 
         label->SetColor(text.color);
-        return wraps ? label->SetLayoutOptions(style_.wrapWidth, text::TextAlignment::Left, true)
+        // 줄바꿈 폭이 0이면(단축키 표지) 한 줄로 둔다.
+        return wraps ? label->SetLayoutOptions(style_.wrapWidth, text::TextAlignment::Left,
+                                               style_.wrapWidth > 0)
                      : Result<void>::Success();
     };
     auto applied = apply(text_.Get(), style_.text, true);
@@ -143,7 +156,7 @@ Result<void> ToolTip::ApplyTextStyle() noexcept {
     }
 
     if (applied) {
-        applied = apply(title_.Get(), style_.title, false);
+        applied = apply(title_.Get(), style_.title, true);
     }
 
     if (!applied) {

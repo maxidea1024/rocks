@@ -9,6 +9,7 @@
 #include <UiFramework/Grid.h>
 #include <UiFramework/HorizontalStack.h>
 #include <UiFramework/Overlay.h>
+#include <UiFramework/WindowTitleBar.h>
 #include <UiFramework/ScaleLayer.h>
 #include <UiFramework/ScrollView.h>
 #include <UiFramework/SizeBox.h>
@@ -563,6 +564,45 @@ Result<SharedPtr<DockManager>> MakeDocking(GalleryContext& context) noexcept {
     return dock;
 }
 
+// 직접 그린 창의 제목 막대 견본이다(9.1절 UW7b). 실제 창 동작 대신 아무것도 하지 않는다.
+struct TitleBarSample {
+    StringView title;
+    float width;
+    bool active;
+    bool maximized;
+    bool canMaximize;
+};
+
+Result<SharedPtr<Element>> MakeTitleBar(GalleryContext& context,
+                                        const TitleBarSample& sample) noexcept {
+    const WindowStyle& style = DefaultWindowStyle();
+    auto title = MakeText(context, sample.title, style.title.font);
+    auto bar = SharedPtr<WindowTitleBar>::TryMake(context.allocator, context.allocator);
+    if (const ErrorCode error = FirstError(title, bar); error != ErrorCode::None) {
+        return Result<SharedPtr<Element>>::Failure(error);
+    }
+
+    GalleryContext* target = &context;
+    auto built = bar.Value()->Construct(
+        {.title = title.Value(),
+         .canMaximize = sample.canMaximize,
+         .makeLabel =
+             Delegate<Result<SharedPtr<TextLabel>>(StringView, const FontStyle&)>::CreateLambda(
+                 [target](StringView text, const FontStyle& font) noexcept {
+                     return MakeText(*target, text, font);
+                 })});
+    if (!built) {
+        return Result<SharedPtr<Element>>::Failure(built.Error());
+    }
+
+    bar.Value()->SetActive(sample.active);
+    bar.Value()->SetMaximized(sample.maximized);
+    return MakeStage(
+        context, bar.Value(),
+        {sample.width, WindowTitleBar::DesiredHeight(style, title.Value()->GetDesiredSize().y) +
+                           2 * StagePadding});
+}
+
 } // namespace
 
 Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
@@ -584,6 +624,29 @@ Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
     if (status.Take(docking, "Docking")) {
         one("Docking", "DockManager (split, tab drag)",
             MakeStage(context, docking.Value(), DockStage));
+    }
+
+    // 직접 그린 창 제목 막대: 활성·비활성(흐림)·최대화(복원 아이콘)·크기 고정(최대화 꺼짐)·좁은
+    // 폭(제목 잘림). 창 버튼에 올리면 툴팁, 누르면 올림·눌림 바탕(닫기는 빨강)을 본다.
+    {
+        constexpr float BarWidth = 420;
+        constexpr float NarrowWidth = 200;
+        const TitleBarSample samples[] = {
+            {"Rocks Editor", BarWidth, true, false, true},
+            {"Inactive Window", BarWidth, false, false, true},
+            {"Maximized Window", BarWidth, true, true, true},
+            {"Fixed Size Dialog", BarWidth, true, false, false},
+            {"A Very Long Window Title That Does Not Fit", NarrowWidth, true, false, true}};
+        constexpr StringView names[] = {
+            "Window Title Bar", "Window Title Bar (inactive)", "Window Title Bar (maximized)",
+            "Window Title Bar (fixed size)", "Window Title Bar (narrow)"};
+        constexpr StringView usages[] = {"WindowTitleBar + DefaultWindowStyle()",
+                                         "WindowTitleBar::SetActive(false)",
+                                         "WindowTitleBar::SetMaximized(true)",
+                                         "Args::canMaximize = false", "title clipped to its slot"};
+        for (usize i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
+            one(names[i], usages[i], MakeTitleBar(context, samples[i]));
+        }
     }
 
     one("Horizontal Stack", "HorizontalStack (Auto, Fill)", MakeStack(context, true));

@@ -60,6 +60,11 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         return Result<bool>::Success(false);
     }
 
+    if (event.type == input::InputEventType::NonClientPressed) {
+        application_.DismissPopups();
+        return Result<bool>::Success(false);
+    }
+
     if (event.type == input::InputEventType::FocusLost) {
         for (auto& buttons : gamepadButtons_) {
             buttons = 0;
@@ -79,20 +84,21 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
             return routed;
         }
 
-        constexpr FocusCause user = FocusCause::Navigation;
+        constexpr FocusCause navigation = FocusCause::Navigation;
         switch (event.key) {
         case input::Key::Left:
-            return application_.Navigate(event.userId, FocusDirection::Left, scope, user);
+            return application_.Navigate(event.userId, FocusDirection::Left, scope, navigation);
         case input::Key::Right:
-            return application_.Navigate(event.userId, FocusDirection::Right, scope, user);
+            return application_.Navigate(event.userId, FocusDirection::Right, scope, navigation);
         case input::Key::Up:
-            return application_.Navigate(event.userId, FocusDirection::Up, scope, user);
+            return application_.Navigate(event.userId, FocusDirection::Up, scope, navigation);
         case input::Key::Down:
-            return application_.Navigate(event.userId, FocusDirection::Down, scope, user);
+            return application_.Navigate(event.userId, FocusDirection::Down, scope, navigation);
         case input::Key::Tab: {
             const bool forward = !application_.IsShiftDown(event.userId);
-            return scope ? application_.MoveFocusWithin(event.userId, scope, forward, true, user)
-                         : application_.MoveFocus(event.userId, forward, false, user);
+            return scope ? application_.MoveFocusWithin(event.userId, scope, forward, true,
+                                                        navigation)
+                         : application_.MoveFocus(event.userId, forward, false, navigation);
         }
 
         // 닫힌 툴팁을 키보드로 다시 연다(UE에 없음 — 9.1절 UW4t).

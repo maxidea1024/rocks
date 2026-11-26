@@ -1,4 +1,5 @@
 #include "GallerySelfTest.h"
+#include <Core/ScopeExit.h>
 #include <UiCore/Styles/CoreStyles.h>
 
 #include <UiFramework/Application.h>
@@ -28,10 +29,6 @@ enum Failure : int {
     TabHeaderMissing = 52,
     TabClickIgnored = 53
 };
-
-// 툴팁 확인의 지연·나타나기 시간(초)이다(Application 기본값과 같다).
-constexpr double GalleryTipDelay = 0.15;
-constexpr double GalleryTipFade = 0.1;
 
 // 툴팁 확인용 시계다(지연을 기다리지 않고 결정적으로 연다).
 double galleryTipClock = 0;
@@ -203,10 +200,15 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     const auto tipPoint = Center(tipOwner);
     galleryTipClock = 0;
     app.SetToolTipClock(&ReadGalleryTipClock);
-    // 나타나기(fade)를 끄고 연 첫 프레임의 바탕을 그대로 본다.
-    (void)app.SetToolTipTiming(GalleryTipDelay, 0);
-    if (!tipPoint || !app.RoutePointer({PointerEventType::Move, *tipPoint})) {
+    // 나타나기(fade)를 끄고 연 첫 프레임의 바탕을 그대로 본다(앱 설정은 끝에 되돌린다).
+    const double savedDelay = app.ToolTipDelay();
+    const double savedFade = app.ToolTipFade();
+    (void)app.SetToolTipTiming(savedDelay, 0);
+    ROCKS_ON_SCOPE_EXIT {
         app.SetToolTipClock(nullptr);
+        (void)app.SetToolTipTiming(savedDelay, savedFade);
+    };
+    if (!tipPoint || !app.RoutePointer({PointerEventType::Move, *tipPoint})) {
         return ToolTipMissing;
     }
 
@@ -215,6 +217,7 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     if (cache) {
         cache = app.UpdatePaintCache(viewport, 1);
     }
+
     bool bright = false;
     if (cache) {
         for (const PaintBox& box : cache.Value()->List().Boxes()) {
@@ -224,8 +227,6 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
 
     const bool tipOpen = app.IsToolTipOpen(0);
     app.CloseToolTip(0);
-    app.SetToolTipClock(nullptr);
-    (void)app.SetToolTipTiming(GalleryTipDelay, GalleryTipFade);
     if (!tipOpen || !bright) {
         return ToolTipMissing;
     }

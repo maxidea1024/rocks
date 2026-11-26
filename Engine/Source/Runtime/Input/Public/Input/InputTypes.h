@@ -7,7 +7,19 @@
 namespace rocks::input {
 
 // 창의 클라이언트 영역 중 운영체제에 이동 및 최대화를 맡길 부분을 나타낸다.
-enum class WindowRegion : uint8 { Client, Caption, FullscreenCaption };
+// UI가 점마다 돌려주는 창 영역이다(UE EWindowZone — GenericApplicationMessageHandler.h 81행).
+// Caption은 끌어 옮기는 제목 영역, FullscreenCaption은 더블클릭이 테두리 없는 전체 화면을 바꾸는
+// 제목, 창 버튼 셋과 SystemMenu(앱 아이콘 — 누르면 OS 시스템 메뉴)는 직접 그린 창 테두리
+// (WindowFrame::Custom)에서 쓴다. 크기 조절 가장자리는 창 계층이 판정한다.
+enum class WindowRegion : uint8 {
+    Client,
+    Caption,
+    FullscreenCaption,
+    MinimizeButton,
+    MaximizeButton,
+    CloseButton,
+    SystemMenu
+};
 
 // 키보드 키다. 문자 배치(QWERTY·AZERTY)와 무관한 물리 위치 기준이다. 예: Key::W는 US 배열의 W
 // 자리이며 프랑스 배열에서는 Z가 찍히는 키다. 입력된 문자가 필요하면 InputEventType::Text를 쓴다.

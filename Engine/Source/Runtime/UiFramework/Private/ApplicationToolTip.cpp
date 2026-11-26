@@ -121,6 +121,14 @@ Result<void> Application::SetToolTipTiming(double delay, double fade) noexcept {
     return Result<void>::Success();
 }
 
+double Application::ToolTipDelay() const noexcept {
+    return toolTipDelay_;
+}
+
+double Application::ToolTipFade() const noexcept {
+    return toolTipFade_;
+}
+
 bool Application::IsToolTipOpen(uint32 user) const noexcept {
     auto i = FindToolTip(user);
     return i < toolTips_.Size() && toolTips_[i].layer && toolTips_[i].layer->Parent();
@@ -224,21 +232,48 @@ void Application::ObserveToolTip(const PointerEvent& event, Element* hit,
     }
 }
 
+SharedPtr<Element> Application::FindToolTipOwner(const SharedPtr<Element>& focus) const noexcept {
+    // hover 경로처럼 초점 잎에서 루트 방향으로 처음 툴팁을 가진 요소다(편집 칸을 담은 상자의 툴팁).
+    if (!focus || !root_) {
+        return {};
+    }
+
+    for (Element* node = focus.Get(); node; node = node->Parent()) {
+        if (node->HasToolTip()) {
+            if (node == focus.Get()) {
+                return focus;
+            }
+
+            return node == root_.Get()
+                       ? root_
+                       : (node->Parent() ? node->Parent()->FindChild(node) : SharedPtr<Element>{});
+        }
+
+        if (node == root_.Get()) {
+            break;
+        }
+    }
+
+    return {};
+}
+
 bool Application::ShowFocusToolTip(uint32 user) noexcept {
     auto target = GetFocus(user);
-    if (!target || !IsFocusablePath(target.Get()) || !target->HasToolTip()) {
+    auto owner =
+        target && IsFocusablePath(target.Get()) ? FindToolTipOwner(target) : SharedPtr<Element>{};
+    if (!owner) {
         return false;
     }
 
     CloseToolTip(user);
     auto added = toolTips_.TryPushBack({user,
-                                        WeakPtr<Element>(target),
+                                        WeakPtr<Element>(owner),
                                         {},
                                         Vec2{},
                                         ToolTipTime(),
                                         0,
                                         0,
-                                        target->ToolTipRevision(),
+                                        owner->ToolTipRevision(),
                                         false,
                                         true});
     return static_cast<bool>(added);
@@ -246,27 +281,38 @@ bool Application::ShowFocusToolTip(uint32 user) noexcept {
 
 void Application::ObserveFocusToolTip(uint32 user, const SharedPtr<Element>& target,
                                       FocusCause cause) noexcept {
+    // 초점이 키보드 툴팁 소유자 밖으로 나가면 닫는다.
     const usize i = FindToolTip(user);
-    if (i < toolTips_.Size() && toolTips_[i].keyboard &&
-        toolTips_[i].owner.Lock().Get() != target.Get()) {
-        CloseToolTip(user);
+    if (i < toolTips_.Size() && toolTips_[i].keyboard) {
+        auto owner = toolTips_[i].owner.Lock();
+        if (!owner || !target || !target->IsWithin(*owner)) {
+            CloseToolTip(user);
+        }
     }
 
     // UE는 툴팁을 마우스 hover로만 연다. Rocks는 키보드·게임패드로 옮긴 초점에도 같은 지연 뒤에
-    // 연다(9.1절 UW4t — 키보드 사용자도 설명을 볼 수 있게).
-    if (!target || cause != FocusCause::Navigation || !target->HasToolTip()) {
+    // 연다(9.1절 UW4t — 키보드 사용자도 설명을 볼 수 있게). 소유자는 hover처럼 조상까지 찾는다.
+    auto owner =
+        target && cause == FocusCause::Navigation ? FindToolTipOwner(target) : SharedPtr<Element>{};
+    if (!owner) {
+        return;
+    }
+
+    const usize open = FindToolTip(user);
+    if (open < toolTips_.Size() && toolTips_[open].keyboard &&
+        toolTips_[open].owner.Lock() == owner) {
         return;
     }
 
     CloseToolTip(user);
     (void)toolTips_.TryPushBack({user,
-                                 WeakPtr<Element>(target),
+                                 WeakPtr<Element>(owner),
                                  {},
                                  Vec2{},
                                  ToolTipTime() + toolTipDelay_,
                                  0,
                                  0,
-                                 target->ToolTipRevision(),
+                                 owner->ToolTipRevision(),
                                  false,
                                  true});
 }

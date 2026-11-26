@@ -168,11 +168,13 @@ void InputQueue::DrainTo(InputQueue& target) noexcept {
     if (&target == this) {
         return;
     }
+
     target.dropped_ += dropped_ - forwardedDropped_;
     forwardedDropped_ = dropped_;
     for (const auto& event : events_) {
         target.Push(event);
     }
+
     Clear();
 }
 
@@ -245,12 +247,14 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (event.key == Key::None || index >= KeyCount) {
                 break;
             }
+
             // 이미 눌린 키의 down(자동 반복 포함)은 edge를 만들지 않는다. 눌려 있지 않던 키는
             // repeat 표시가 있어도 눌림으로 본다: 키를 누른 채 포커스를 되찾으면 OS의 첫 down이
             // 반복으로 오며, 이를 무시하면 뗄 때 짝 없는 WasReleased만 생긴다.
             if (!keysDown_.Get(index)) {
                 keysPressed_.Set(index, true);
             }
+
             keysDown_.Set(index, true);
             break;
         }
@@ -259,9 +263,11 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (event.key == Key::None || index >= KeyCount) {
                 break;
             }
+
             if (keysDown_.Get(index)) {
                 keysReleased_.Set(index, true);
             }
+
             keysDown_.Set(index, false);
             break;
         }
@@ -275,6 +281,7 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
                         if (textCount_ == MaxTextPerFrame) {
                             break;
                         }
+
                         text_[textCount_++] = point;
                     }
                 }
@@ -293,10 +300,12 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (mouseTouchEmulation_ && touches_[EmulatedTouchIndex].down) {
                 ApplyTouch(InputEvent::TouchMoved(EmulatedTouchIndex, event.x, event.y));
             }
+
             if (mouseDeltaValid_) {
                 mouseDeltaX_ += event.x - mouseX_;
                 mouseDeltaY_ += event.y - mouseY_;
             }
+
             mouseX_ = event.x;
             mouseY_ = event.y;
             hasMousePosition_ = true;
@@ -312,9 +321,11 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
                 ApplyTouch(InputEvent::TouchBegan(EmulatedTouchIndex, mouseX_, mouseY_));
                 break;
             }
+
             if ((mouseDown_ & Bit(index)) == 0) {
                 mousePressed_ |= Bit(index);
             }
+
             mouseDown_ |= Bit(index);
             break;
         }
@@ -328,9 +339,11 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
                 ApplyTouch(InputEvent::TouchEnded(EmulatedTouchIndex, mouseX_, mouseY_));
                 break;
             }
+
             if ((mouseDown_ & Bit(index)) != 0) {
                 mouseReleased_ |= Bit(index);
             }
+
             mouseDown_ &= ~Bit(index);
             break;
         }
@@ -357,6 +370,8 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             break;
         case InputEventType::FocusLost:
             ReleaseAll();
+            break;
+        case InputEventType::NonClientPressed:
             break;
         }
     }

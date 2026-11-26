@@ -27,5 +27,14 @@ inline constexpr VectorImageKey CaretDown = VectorImageKey::FromPath("Common/Car
 inline constexpr VectorImageKey ChevronRight = VectorImageKey::FromPath("Common/ChevronRight");
 inline constexpr VectorImageKey CloseSmall = VectorImageKey::FromPath("Common/CloseSmall");
 inline constexpr VectorImageKey Search = VectorImageKey::FromPath("Common/Search");
+// 창 버튼(42x23 판)과 앱 아이콘(24x24)이다(UE "Starship/CoreWidgets/Window/*"·"AppIcon.Small").
+inline constexpr VectorImageKey WindowMinimize =
+    VectorImageKey::FromPath("CoreWidgets/Window/Minimize");
+inline constexpr VectorImageKey WindowMaximize =
+    VectorImageKey::FromPath("CoreWidgets/Window/Maximize");
+inline constexpr VectorImageKey WindowRestore =
+    VectorImageKey::FromPath("CoreWidgets/Window/Restore");
+inline constexpr VectorImageKey WindowClose = VectorImageKey::FromPath("CoreWidgets/Window/Close");
+inline constexpr VectorImageKey RocksLogo = VectorImageKey::FromPath("Common/RocksLogo");
 
 } // namespace rocks::ui::icons

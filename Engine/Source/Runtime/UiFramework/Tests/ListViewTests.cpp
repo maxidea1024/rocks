@@ -99,6 +99,8 @@ TEST(UiFramework_ListNavigationRealizesOnlyRequestedRowsAndKeepsSelectionByKey) 
     REQUIRE(app.UpdatePaintCache(area, 1));
     CHECK(list.ItemAtRow(2).key == 501);
     CHECK(app.GetFocus(0).Get() == list.ChildAt(2));
+    // 목록 안 이동은 늘 Navigation이다(외곽선이 보인다 — UE NavigateToWidget).
+    CHECK(app.GetFocusCause(0) == FocusCause::Navigation);
     CHECK(list.SelectedKey() && *list.SelectedKey() == 501 && source.lastSelection == 501);
     CHECK(source.created == 3);
     list.SetSelectOnNavigation(false);

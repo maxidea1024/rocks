@@ -9,6 +9,41 @@
 
 namespace rocks::platform {
 
+// 창 테두리를 누가 그리는지다(UE FGenericWindowDefinition::HasOSWindowBorder). System은 OS 제목
+// 막대·버튼(게임 기본), Custom은 테두리 없이 UI가 제목 막대와 최소화·최대화·닫기를 그린다(에디터 —
+// Docs/Design/UiToolkit 9.1절 UW7b). Custom에서도 OS 동작(시스템 메뉴 Alt+Space, Alt+F4, 화면
+// 가장자리 붙이기, Win11 최대화 버튼 스냅 레이아웃, 그림자, 크기 조절 가장자리)은 살아 있다.
+enum class WindowFrame : uint8 {
+    System,
+    Custom
+};
+
+// 직접 그린 창의 크기 조절 가장자리 두께(논리 단위 — 창 DPI 배율을 곱한다)다(UE SWindow
+// UserResizeBorder 5, SWindow.h 274행). 최대화 중에는 없다. 모서리는 가장자리 안에 들어온 축에서
+// 다른 축을 두께 + CustomFrameCornerExtension까지 넓혀 잡는다(UE SWindow::GetCurrentWindowZone —
+// SWindow.cpp 1949–1975행).
+inline constexpr int32 CustomFrameResizeBorder = 5;
+inline constexpr int32 CustomFrameCornerExtension = 5;
+
+// 창 안 한 점의 OS 판정 영역이다(UE EWindowZone — GenericApplicationMessageHandler.h 81행). 직접
+// 그린 창에서 창 계층이 OS에 돌려주는 판정과 같다.
+enum class WindowZone : uint8 {
+    Client,
+    Caption,
+    TopLeftBorder,
+    TopBorder,
+    TopRightBorder,
+    LeftBorder,
+    RightBorder,
+    BottomLeftBorder,
+    BottomBorder,
+    BottomRightBorder,
+    MinimizeButton,
+    MaximizeButton,
+    CloseButton,
+    SystemMenu
+};
+
 // 창 생성 설정이다.
 struct WindowDesc {
     // UTF-8 제목이다. 창이 복사한다(UTF-16 255단위를 넘으면 글자 경계에서 자른다). 잘못된 UTF-8은
@@ -22,6 +57,9 @@ struct WindowDesc {
     bool useDesktopPosition = false;
     IntVec2 desktopPosition{};
     bool positionClientOrigin = false;
+    // Custom은 Windows만 지원한다(다른 플랫폼은 Unsupported). Custom 창의 width·height는 창 전체
+    // 크기다(OS 테두리가 없어 client와 같다).
+    WindowFrame frame = WindowFrame::System;
 };
 
 // 창 계층의 로그 카테고리다(Docs/Design/LoggingSystem.ko.md 13절). 창 생성 실패는 창을 여는
@@ -135,6 +173,22 @@ public:
     virtual Result<IntVec2> ClientToDesktop(IntVec2 point) const noexcept;
     virtual Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept;
     virtual bool IsAtDesktopPoint(IntVec2 point) const noexcept;
+
+    // 창 동작이다(직접 그린 창 버튼이 부른다). Minimize는 작업 표시줄로 내리고, ToggleMaximize는
+    // 최대화와 복원을 바꾸며, RequestClose는 OS 닫기 요청(WM_CLOSE)을 보내 IsCloseRequested 경로를
+    // 그대로 탄다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+    virtual void Minimize() noexcept;
+    virtual void ToggleMaximize() noexcept;
+    virtual void RequestClose() noexcept;
+    virtual bool IsMaximized() const noexcept;
+    // 크기를 바꿀 수 있는 창인지다(WindowDesc::resizable). 아니면 최대화도 할 수 없다.
+    virtual bool IsResizable() const noexcept;
+    // client 좌표 한 점의 판정 영역이다. 직접 그린 창이면 크기 조절 가장자리 → UI 영역 순으로
+    // 정하고, OS 테두리 창은 UI 영역만 본다(Caption 또는 Client). 시험과 진단에도 쓴다.
+    virtual WindowZone HitZone(IntVec2 clientPoint) const noexcept;
+    // 활성 창(제목 막대를 활성 색으로 그린다)인지다. 기본은 HasFocus와 같다.
+    virtual bool IsActive() const noexcept;
+    virtual WindowFrame Frame() const noexcept;
 
     // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
     // 제목은 그대로다. OS 실패는 DependencyFailed다.

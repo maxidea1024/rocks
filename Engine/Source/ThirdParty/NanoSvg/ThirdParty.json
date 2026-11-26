@@ -21,14 +21,13 @@
     "NanoSvgGlue.c"
   ],
   "includeDirectories": [
-    "nanosvg-239e102ec2c6",
-    "Adapter"
+    "nanosvg-239e102ec2c6"
   ],
   "defines": [],
   "platformDefines": {},
   "consumerDefines": [],
   "adapterHeaders": [
-    "Adapter/RocksNanoSvg.h"
+    "nanosvg-239e102ec2c6/nanosvgrast.h"
   ],
   "files": {
     "LICENSE.txt": "e82bc3dd03400aecabe12201219ba14750dbc4b36faab58663a7a6068548d372",
@@ -48,11 +47,12 @@
     }
   ],
   "notes": [
-    "SVG parsing and rasterization for UI vector images and icons (Docs/Design/UiToolkit/17-VectorImages.ko.md section 17.2), the same library UE 5.8 uses (Engine/Source/ThirdParty/nanosvg, SlateSVGRasterizer.cpp). The only Rocks consumer is UiRender, which keeps it a private dependency and includes only the Rocks adapter RocksNanoSvg.h: the nanosvg types stay behind opaque handles and NanoSvgGlue.c implements the adapter.",
+    "SVG parsing and rasterization for UI vector images and icons (Docs/Design/UiToolkit/17-VectorImages.ko.md section 17.2), the same library UE 5.8 uses (Engine/Source/ThirdParty/nanosvg, SlateSVGRasterizer.cpp). The only Rocks consumer is UiRender, which keeps it a private dependency and declares the glue functions in its own private header (UiRender/Private/RocksNanoSvg.h): the nanosvg types stay behind opaque handles and NanoSvgGlue.c implements them.",
     "Allocation: NanoSvgGlue.c includes the standard headers and then renames malloc, realloc and free to RocksNanoSvgMalloc, RocksNanoSvgRealloc and RocksNanoSvgFree before it compiles the implementation, so every parser and rasterizer allocation goes through the Rocks library heap (Core LibraryHeap). The module that links NanoSvg defines the three hooks.",
     "Rocks never calls nsvgParseFromFile (fopen); callers read the file through the Rocks file system and pass a writable zero-terminated copy to nsvgParse. Colour parsing uses sscanf with %x and %u and number parsing uses the library's own nsvg__atof, so the results do not depend on the C locale.",
     "Upstream nanosvg has no non-uniform scale entry point (UE patches in nsvgRasterizeFull); UiRender scales the parsed points itself when the horizontal and vertical scales differ.",
-    "The two MSVC pragma warning lines of nanosvg.h sit inside the implementation part that only NanoSvgGlue.c compiles; consumers never include nanosvg.h, so the pragmas do not reach them. Rocks builds with clang, where #pragma warning has no effect."
+    "The two MSVC pragma warning lines of nanosvg.h sit inside the implementation part that only NanoSvgGlue.c compiles; consumers never include nanosvg.h, so the pragmas do not reach them. Rocks builds with clang, where #pragma warning has no effect.",
+    "Adapter header: nanosvgrast.h is the registered adapter header because it changes no diagnostics (nanosvg.h carries the two MSVC pragma lines without push/pop). In practice no engine source includes either upstream header; UiRender calls only the glue functions it declares in UiRender/Private/RocksNanoSvg.h."
   ],
   "modifications": [
     {

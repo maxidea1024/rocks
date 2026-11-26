@@ -59,13 +59,63 @@ DockWindows::Surface::~Surface() noexcept {
 DockWindows::DockWindows(Allocator& allocator, graphics::Device& device,
                          graphics::PipelineHandle pipeline, SlotArray<BrushTexture>& textures,
                          const SharedPtr<CommandList>& commands, VectorImageAtlas& icons,
-                         graphics::PipelineHandle imagePipeline) noexcept
+                         graphics::PipelineHandle imagePipeline, TitleFactory&& makeTitle) noexcept
     : allocator_(allocator), device_(device), pipeline_(pipeline), textures_(textures),
-      commands_(commands), icons_(icons), imagePipeline_(imagePipeline), windows_(allocator) {
+      commands_(commands), icons_(icons), imagePipeline_(imagePipeline),
+      makeTitle_(Move(makeTitle)), windows_(allocator) {
+}
+
+Result<void> DockWindows::AttachChrome(Surface& host, StringView title) noexcept {
+    if (host.window->Frame() != platform::WindowFrame::Custom) {
+        return Result<void>::Success();
+    }
+
+    auto bar = SharedPtr<WindowTitleBar>::TryMake(allocator_, allocator_);
+    auto chrome = SharedPtr<WindowChrome>::TryMake(allocator_, allocator_);
+    if (!bar || !chrome) {
+        return Result<void>::Failure(!bar ? bar.Error() : chrome.Error());
+    }
+
+    SharedPtr<TextLabel> label;
+    if (makeTitle_.IsBound()) {
+        auto made = makeTitle_.Execute(title, DefaultWindowStyle().title.font);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        label = Move(made.Value());
+    }
+
+    // 창 버튼은 그 창의 동작을 부른다(닫기는 OS 닫기 경로를 탄다). 창이 Surface보다 먼저 사라지지
+    // 않으므로 창 포인터를 그대로 잡는다.
+    platform::Window* window = host.window.Get();
+    auto built = bar.Value()->Construct(
+        {.title = Move(label),
+         .canMaximize = host.window->IsResizable(),
+         .makeLabel = DockWindows::TitleFactory::CreateLambda(
+             [this](StringView text, const FontStyle& font) noexcept {
+                 return makeTitle_.Execute(text, font);
+             }),
+         .onMinimize = Delegate<void()>::CreateLambda([window]() noexcept { window->Minimize(); }),
+         .onToggleMaximize =
+             Delegate<void()>::CreateLambda([window]() noexcept { window->ToggleMaximize(); }),
+         .onClose =
+             Delegate<void()>::CreateLambda([window]() noexcept { window->RequestClose(); })});
+    if (built) {
+        built = chrome.Value()->Construct({.titleBar = bar.Value(), .content = host.area});
+    }
+
+    if (!built) {
+        return built;
+    }
+
+    host.chrome = Move(chrome.Value());
+    host.app.SetRoot(host.chrome);
+    return Result<void>::Success();
 }
 
 Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
-                                    const SharedPtr<DockManager>& area) noexcept {
+                                    const SharedPtr<DockManager>& area, StringView title) noexcept {
     auto surface =
         UniquePtr<Surface>::TryMake(allocator_, allocator_, device_, Move(window), area, textures_);
     if (!surface) {
@@ -73,6 +123,10 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     auto& host = *surface.Value();
+    if (auto chromed = AttachChrome(host, title); !chromed) {
+        return Result<SlotHandle>::Failure(chromed.Error());
+    }
+
     host.app.SetVectorImageResolver(&icons_);
     host.surfaces.SetVectorImages(&icons_, imagePipeline_);
     auto initialized = host.app.SetCommands({}, commands_);
@@ -166,14 +220,43 @@ Result<void> DockWindows::FloatTab(Surface& source, StringView id, Vec2) noexcep
         return Result<void>::Failure(!desktop ? desktop.Error() : size.Error());
     }
 
+    // 떠 있는 탭 창도 에디터 창처럼 직접 그린 테두리다(UE 떠 있는 탭 창의 SWindow 제목 막대). 내용
+    // (도킹 영역)이 미리보기 자리에 오도록 창은 테두리 여백과 제목 막대만큼 크고 위·왼쪽으로
+    // 놓는다(UE SWindow::GetWindowSizeFromClientSize). 제목 높이는 실제 제목 글자로 잰다. 탭 id는
+    // 갤러리에서 곧 표시 이름이다(탭에 글자 이름이 생기면 그것을 쓴다 — UW4c).
+    const WindowStyle& frameStyle = DefaultWindowStyle();
+    float titleHeight = 0;
+    if (makeTitle_.IsBound()) {
+        if (auto label = makeTitle_.Execute(id, frameStyle.title.font)) {
+            titleHeight = label.Value()->GetDesiredSize().y;
+            if (titleHeight <= 0) {
+                (void)label.Value()->Prepass(1);
+                titleHeight = label.Value()->GetDesiredSize().y;
+            }
+        }
+    }
+
+    const Vec4 inset = frameStyle.borderPadding + frameStyle.contentPadding;
+    const float barHeight = WindowTitleBar::DesiredHeight(frameStyle, titleHeight);
     platform::WindowDesc desc;
     desc.title = id;
-    desc.width = static_cast<uint32>(size.Value().x);
-    desc.height = static_cast<uint32>(size.Value().y);
+    desc.width = static_cast<uint32>(size.Value().x + inset.x + inset.z);
+    desc.height = static_cast<uint32>(size.Value().y + inset.y + inset.w + barHeight);
     desc.positionClientOrigin = true;
     desc.useDesktopPosition = true;
-    desc.desktopPosition = desktop.Value();
+    desc.desktopPosition = {desktop.Value().x - static_cast<int32>(inset.x),
+                            desktop.Value().y - static_cast<int32>(inset.y + barHeight)};
+    desc.frame = platform::WindowFrame::Custom;
     auto window = platform::Window::Create(allocator_, desc);
+    // 직접 그린 테두리를 지원하지 않는 플랫폼은 OS 테두리로 연다.
+    if (!window && window.Error() == ErrorCode::Unsupported) {
+        desc.frame = platform::WindowFrame::System;
+        desc.width = static_cast<uint32>(size.Value().x);
+        desc.height = static_cast<uint32>(size.Value().y);
+        desc.desktopPosition = desktop.Value();
+        window = platform::Window::Create(allocator_, desc);
+    }
+
     if (!window) {
         return Result<void>::Failure(window.Error());
     }
@@ -183,7 +266,7 @@ Result<void> DockWindows::FloatTab(Surface& source, StringView id, Vec2) noexcep
         return Result<void>::Failure(area.Error());
     }
 
-    auto added = Add(Move(window.Value()), area.Value());
+    auto added = Add(Move(window.Value()), area.Value(), id);
     if (!added) {
         return Result<void>::Failure(added.Error());
     }
@@ -314,6 +397,12 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
 
     const Vec2 viewport(static_cast<float>(host.window->Width()),
                         static_cast<float>(host.window->Height()));
+    // 최대화하면 테두리·여백을 빼고 최대화 버튼을 복원 모양으로 바꾼다.
+    if (host.chrome) {
+        host.chrome->SetMaximized(host.window->IsMaximized());
+        host.chrome->SetActive(host.window->IsActive());
+    }
+
     auto arranged = host.app.PrepareLayout(Geometry::Root(viewport, {}), 1);
     if (!arranged) {
         return Result<bool>::Failure(arranged.Error());
@@ -400,8 +489,8 @@ Result<void> DockWindows::ReturnTabs(Surface& surface) noexcept {
 }
 
 Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
-                              const SharedPtr<DockManager>& area) noexcept {
-    auto main = Add(Move(window), area);
+                              const SharedPtr<DockManager>& area, StringView title) noexcept {
+    auto main = Add(Move(window), area, title);
     if (!main) {
         return Result<void>::Failure(main.Error());
     }

@@ -547,14 +547,16 @@ Result<void> ListView::Arrange(const Geometry& geometry) noexcept {
         if (user) {
             auto current = app_.GetFocus(*user);
             if (!current || !current->IsWithin(*target)) {
+                // 목록 안 이동(방향키·NavigateToIndex)은 늘 Navigation이다(UE
+                // STableViewBase::NavigateToWidget, STableViewBase.cpp 1277행).
                 auto focused =
-                    app_.MoveFocusWithin(*user, target, true, false, app_.GetFocusCause(*user));
+                    app_.MoveFocusWithin(*user, target, true, false, FocusCause::Navigation);
                 if (!focused) {
                     return Result<void>::Failure(focused.Error());
                 }
 
                 if (!focused.Value()) {
-                    return app_.SetFocus(*user, *this);
+                    return app_.SetFocus(*user, *this, FocusCause::Navigation);
                 }
             }
         }

@@ -71,6 +71,9 @@ public:
     usize ImageCount() const noexcept;
     StringView ImagePath(usize index) const noexcept;
     VectorImageKey ImageKey(usize index) const noexcept;
+    // 그림의 원래 크기(SVG width·height, 논리 단위)다. 정사각형이 아닌 아이콘(창 버튼 42x23)을
+    // 비율대로 그릴 때 쓴다. index가 범위 밖이면 0이다.
+    Vec2 ImageSize(usize index) const noexcept;
 
     Result<ResolvedVectorImage> Resolve(VectorImageKey key, uint32 width,
                                         uint32 height) noexcept override;

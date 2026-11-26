@@ -2,6 +2,35 @@
 
 namespace rocks::platform {
 
+void Window::Minimize() noexcept {
+}
+
+void Window::ToggleMaximize() noexcept {
+}
+
+void Window::RequestClose() noexcept {
+}
+
+bool Window::IsMaximized() const noexcept {
+    return false;
+}
+
+bool Window::IsResizable() const noexcept {
+    return true;
+}
+
+WindowZone Window::HitZone(IntVec2) const noexcept {
+    return WindowZone::Client;
+}
+
+bool Window::IsActive() const noexcept {
+    return HasFocus();
+}
+
+WindowFrame Window::Frame() const noexcept {
+    return WindowFrame::System;
+}
+
 bool Window::ConsumeRepaint() noexcept {
     return true;
 }

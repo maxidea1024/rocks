@@ -61,6 +61,8 @@ public:
     // 지연과 등장은 초 단위다. 주입한 시계는 시험이나 일시 정지 가능한 호스트에 사용한다.
     void SetToolTipClock(double (*clock)() noexcept) noexcept;
     Result<void> SetToolTipTiming(double delay, double fade) noexcept;
+    double ToolTipDelay() const noexcept;
+    double ToolTipFade() const noexcept;
     // 활성 화면의 접근성 트리를 부모 우선으로 복사한다. 첫 노드의 parent는 IndexNone이다.
     Result<Array<AccessibleNode>> AccessibleTree(uint32 user = 0) const noexcept;
     bool IsToolTipOpen(uint32 user) const noexcept;
@@ -109,6 +111,9 @@ public:
     // 초점 요소의 툴팁을 지연 없이 연다(키보드 사용자가 닫힌 툴팁을 다시 볼 때 — InputAdapter의
     // Ctrl+F1). 툴팁이 없거나 초점이 없으면 false다.
     bool ShowFocusToolTip(uint32 userId) noexcept;
+
+    // 열린 팝업(메뉴·콤보)과 툴팁을 모두 닫는다(창 테두리를 눌렀을 때 — UE DismissAllMenus).
+    void DismissPopups() noexcept;
 
     // 창 포커스 상실 등으로 포인터 입력이 중단되면 모든 capture를 해제한다.
     void CancelAllPointers() noexcept;
@@ -212,6 +217,7 @@ private:
     // 닫는다.
     void ObserveFocusToolTip(uint32 user, const SharedPtr<Element>& target,
                              FocusCause cause) noexcept;
+    SharedPtr<Element> FindToolTipOwner(const SharedPtr<Element>& focus) const noexcept;
     void ObserveToolTip(const PointerEvent& event, Element* hit,
                         const SharedPtr<Element>& scope) noexcept;
     void AdvanceToolTips() noexcept;
