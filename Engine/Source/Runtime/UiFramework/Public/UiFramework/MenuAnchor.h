@@ -56,8 +56,14 @@ public:
     Result<void> OpenFocused(Application& app, uint32 user = 0,
                              Optional<FocusCause> cause = {}) noexcept;
     void SetPlacement(MenuPlacement placement) noexcept;
+    // 메뉴 층이 메뉴 밖 누름을 받아 닫을지다(기본 켬). 하위 메뉴·메뉴 막대 버튼은 끈다 — 층이 창
+    // 전체를 덮으면 부모 메뉴나 막대의 hover·누름을 가로챈다. 끄면 층은 메뉴 영역만 받고, 바깥
+    // 누름은 루트 메뉴 층이나 Application 누름 관찰자(메뉴 막대)가 처리한다.
+    void SetCatchOutsidePresses(bool catchOutside) noexcept;
     void SetFitInWindow(bool fit) noexcept;
     Optional<Vec2> MenuPosition() const noexcept;
+    // 열린 메뉴 내용(factory가 만든 요소)이다. 닫혀 있으면 null이다.
+    Element* MenuContent() const noexcept;
     void SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept;
     void Close() noexcept;
     bool IsOpen() const noexcept;
@@ -76,6 +82,7 @@ private:
     friend class MenuPopupLayer;
     MenuPlacement placement_ = MenuPlacement::Below;
     bool fit_ = true;
+    bool catchOutside_ = true;
     WeakPtr<Application*> app_;
     WeakPtr<Element> restoreFocus_;
     uint32 focusUser_ = 0;

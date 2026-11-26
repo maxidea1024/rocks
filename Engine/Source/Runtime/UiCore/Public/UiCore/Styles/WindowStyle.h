@@ -18,6 +18,8 @@ struct WindowStyle {
     VectorImageKey maximizeIcon{};
     VectorImageKey restoreIcon{};
     VectorImageKey closeIcon{};
+    // 전체 화면 중 최대화 자리의 아이콘이다(UE ExitFullscreenButtonStyle).
+    VectorImageKey exitFullscreenIcon{};
     Vec2 buttonSize{};
     TextStyle title{};
     Vec4 titlePadding{};
@@ -29,8 +31,8 @@ struct WindowStyle {
     StyleBrush outline{};
     float outlineInset = 0.0f;
     Vec4 borderPadding{};
-    // 제목 막대 아래 내용(도킹 영역 등)을 창 틀에서 띄우는 여백이다(왼쪽·위·오른쪽·아래). 최대화해도
-    // 남는다 — 내용 가장자리가 창 외곽선에 붙어 선이 두 겹으로 보이지 않게.
+    // 제목 막대 아래 내용(도킹 영역 등)을 창 틀에서 띄우는 여백이다(왼쪽·위·오른쪽·아래).
+    // 최대화해도 남는다 — 내용 가장자리가 창 외곽선에 붙어 선이 두 겹으로 보이지 않게.
     Vec4 contentPadding{};
     bool operator==(const WindowStyle&) const noexcept = default;
 };

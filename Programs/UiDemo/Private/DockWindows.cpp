@@ -65,7 +65,7 @@ DockWindows::DockWindows(Allocator& allocator, graphics::Device& device,
       makeTitle_(Move(makeTitle)), windows_(allocator) {
 }
 
-Result<void> DockWindows::AttachChrome(Surface& host, StringView title) noexcept {
+Result<void> DockWindows::AttachChrome(Surface& host, StringView title, bool main) noexcept {
     if (host.window->Frame() != platform::WindowFrame::Custom) {
         return Result<void>::Success();
     }
@@ -86,19 +86,36 @@ Result<void> DockWindows::AttachChrome(Surface& host, StringView title) noexcept
         label = Move(made.Value());
     }
 
+    // 주 창은 제목 막대 왼쪽에 주 메뉴를 둔다(UE 에디터 메인 프레임).
+    SharedPtr<Element> menu;
+    if (main && makeMenu_.IsBound()) {
+        auto made = makeMenu_.Execute(host.app, *host.window);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        menu = Move(made.Value());
+    }
+
     // 창 버튼은 그 창의 동작을 부른다(닫기는 OS 닫기 경로를 탄다). 창이 Surface보다 먼저 사라지지
-    // 않으므로 창 포인터를 그대로 잡는다.
+    // 않으므로 창 포인터를 그대로 잡는다. 전체 화면이면 최대화 자리 버튼이 전체 화면을 끈다.
     platform::Window* window = host.window.Get();
     auto built = bar.Value()->Construct(
         {.title = Move(label),
+         .leftContent = Move(menu),
          .canMaximize = host.window->IsResizable(),
          .makeLabel = DockWindows::TitleFactory::CreateLambda(
              [this](StringView text, const FontStyle& font) noexcept {
                  return makeTitle_.Execute(text, font);
              }),
          .onMinimize = Delegate<void()>::CreateLambda([window]() noexcept { window->Minimize(); }),
-         .onToggleMaximize =
-             Delegate<void()>::CreateLambda([window]() noexcept { window->ToggleMaximize(); }),
+         .onToggleMaximize = Delegate<void()>::CreateLambda([window]() noexcept {
+             if (window->IsFullscreen()) {
+                 window->ToggleFullscreen();
+             } else {
+                 window->ToggleMaximize();
+             }
+         }),
          .onClose =
              Delegate<void()>::CreateLambda([window]() noexcept { window->RequestClose(); })});
     if (built) {
@@ -123,7 +140,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     auto& host = *surface.Value();
-    if (auto chromed = AttachChrome(host, title); !chromed) {
+    if (auto chromed = AttachChrome(host, title, windows_.IsEmpty()); !chromed) {
         return Result<SlotHandle>::Failure(chromed.Error());
     }
 
@@ -400,6 +417,7 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
     // 최대화하면 테두리·여백을 빼고 최대화 버튼을 복원 모양으로 바꾼다.
     if (host.chrome) {
         host.chrome->SetMaximized(host.window->IsMaximized());
+        host.chrome->SetFullscreen(host.window->IsFullscreen());
         host.chrome->SetActive(host.window->IsActive());
     }
 
@@ -489,7 +507,9 @@ Result<void> DockWindows::ReturnTabs(Surface& surface) noexcept {
 }
 
 Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
-                              const SharedPtr<DockManager>& area, StringView title) noexcept {
+                              const SharedPtr<DockManager>& area, StringView title,
+                              MainMenuFactory&& makeMenu) noexcept {
+    makeMenu_ = Move(makeMenu);
     auto main = Add(Move(window), area, title);
     if (!main) {
         return Result<void>::Failure(main.Error());

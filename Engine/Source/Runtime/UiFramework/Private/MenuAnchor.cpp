@@ -80,6 +80,11 @@ Result<void> MenuAnchor::Open() noexcept {
         return Result<void>::Failure(layer.Error());
     }
 
+    if (!catchOutside_) {
+        // 층 자신은 누름을 받지 않고 메뉴만 받는다.
+        layer.Value()->SetVisibility(Visibility::SelfHitTestInvisible);
+    }
+
     auto added = layer.Value()->TryAddChild(menu.Value());
     if (added) {
         added = AttachPopupLayer({layer.Value(), self, [](Element& owner) noexcept {
@@ -89,6 +94,8 @@ Result<void> MenuAnchor::Open() noexcept {
 
     if (added) {
         layer_ = Move(layer.Value());
+        // 열림 상태로 모양이 바뀌는 anchor(메뉴 막대 버튼·하위 메뉴 항목)를 다시 그린다.
+        InvalidatePaint();
         openChanged_.ExecuteIfBound(true);
     }
 
@@ -150,6 +157,10 @@ void MenuAnchor::SetPlacement(MenuPlacement placement) noexcept {
     }
 }
 
+void MenuAnchor::SetCatchOutsidePresses(bool catchOutside) noexcept {
+    catchOutside_ = catchOutside;
+}
+
 void MenuAnchor::SetFitInWindow(bool fit) noexcept {
     fit_ = fit;
     if (layer_) {
@@ -163,6 +174,10 @@ Optional<Vec2> MenuAnchor::MenuPosition() const noexcept {
     }
 
     return layer_->ChildAt(0)->GetGeometry().render.Apply({});
+}
+
+Element* MenuAnchor::MenuContent() const noexcept {
+    return IsOpen() ? layer_->ChildAt(0) : nullptr;
 }
 
 void MenuAnchor::SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept {
@@ -188,6 +203,8 @@ void MenuAnchor::Close() noexcept {
         if (auto* parent = layer->Parent()) {
             (void)parent->RemoveChild(*layer);
         }
+
+        InvalidatePaint();
 
         openChanged_.ExecuteIfBound(false);
     }

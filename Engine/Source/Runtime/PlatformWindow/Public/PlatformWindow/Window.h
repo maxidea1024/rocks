@@ -181,6 +181,10 @@ public:
     virtual void ToggleMaximize() noexcept;
     virtual void RequestClose() noexcept;
     virtual bool IsMaximized() const noexcept;
+    // 테두리 없는 전체 화면(창이 모니터를 덮는다 — UE WindowedFullscreen)을 켜고 끈다. 메뉴의
+    // "Enable Fullscreen"(Shift+F11 — UE MainFrame ToggleFullscreen)이 부른다.
+    virtual void ToggleFullscreen() noexcept;
+    virtual bool IsFullscreen() const noexcept;
     // 크기를 바꿀 수 있는 창인지다(WindowDesc::resizable). 아니면 최대화도 할 수 없다.
     virtual bool IsResizable() const noexcept;
     // client 좌표 한 점의 판정 영역이다. 직접 그린 창이면 크기 조절 가장자리 → UI 영역 순으로

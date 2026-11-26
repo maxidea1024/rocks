@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Result.h>
+#include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputTypes.h>
 
@@ -23,5 +24,10 @@ struct ROCKS_UICORE_API KeyChord {
     static Result<KeyChord> FromInputName(StringView name) noexcept;
     bool operator==(const KeyChord&) const noexcept = default;
 };
+
+// 단축키를 사람이 읽는 글자로 쓴다("Ctrl+Shift+S" — UE FInputChord::GetInputText의 Ctrl·Alt·
+// Shift·Cmd 순서). 메뉴 단축키 열과 키 선택기 표시가 같이 쓴다. out 끝에 덧붙인다. 빈 단축키는
+// 아무것도 쓰지 않는다. 메모리가 모자라면 OutOfMemory다.
+ROCKS_UICORE_API Result<void> FormatKeyChord(const KeyChord& chord, String& out) noexcept;
 
 } // namespace rocks::ui

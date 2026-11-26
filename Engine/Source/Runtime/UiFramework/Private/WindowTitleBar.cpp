@@ -12,6 +12,7 @@ constexpr StringView MinimizeToolTip = "Minimize";
 constexpr StringView MaximizeToolTip = "Maximize";
 constexpr StringView RestoreToolTip = "Restore Down";
 constexpr StringView CloseToolTip = "Close";
+constexpr StringView ExitFullscreenToolTip = "Exit Fullscreen";
 constexpr WindowButtonRole ButtonOrder[ButtonCount] = {
     WindowButtonRole::Minimize, WindowButtonRole::Maximize, WindowButtonRole::Close};
 
@@ -87,6 +88,7 @@ Result<void> WindowTitleBar::AttachToolTip(WindowControlButton& button,
         [this, &button, role]() noexcept -> Result<SharedPtr<Element>> {
             const StringView text = role == WindowButtonRole::Minimize ? MinimizeToolTip
                                     : role == WindowButtonRole::Close  ? CloseToolTip
+                                    : button.IsFullscreen()            ? ExitFullscreenToolTip
                                     : button.IsMaximized()             ? RestoreToolTip
                                                                        : MaximizeToolTip;
             auto label = makeLabel_.Execute(text, DefaultToolTipStyle().text.font);
@@ -147,6 +149,12 @@ float WindowTitleBar::DesiredHeight(const WindowStyle& style, float titleHeight)
     const float icon = style.appIconSize.y + style.appIconPadding.y + style.appIconPadding.w;
     const float title = titleHeight + style.titlePadding.y + style.titlePadding.w;
     return math::Max(math::Max(style.buttonSize.y, icon), title);
+}
+
+void WindowTitleBar::SetFullscreen(bool fullscreen) noexcept {
+    if (const auto& button = ControlButton(WindowButtonRole::Maximize)) {
+        button->SetFullscreen(fullscreen);
+    }
 }
 
 void WindowTitleBar::SetMaximized(bool maximized) noexcept {

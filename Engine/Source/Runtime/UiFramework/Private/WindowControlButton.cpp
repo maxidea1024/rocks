@@ -26,6 +26,17 @@ bool WindowControlButton::IsMaximized() const noexcept {
     return maximized_;
 }
 
+void WindowControlButton::SetFullscreen(bool fullscreen) noexcept {
+    if (fullscreen_ != fullscreen) {
+        fullscreen_ = fullscreen;
+        InvalidatePaint();
+    }
+}
+
+bool WindowControlButton::IsFullscreen() const noexcept {
+    return fullscreen_;
+}
+
 input::WindowRegion WindowControlButton::GetWindowRegion() const noexcept {
     switch (role_) {
     case WindowButtonRole::Minimize:
@@ -44,7 +55,9 @@ VectorImageKey WindowControlButton::CurrentIcon() const noexcept {
     case WindowButtonRole::Minimize:
         return style_.minimizeIcon;
     case WindowButtonRole::Maximize:
-        return maximized_ ? style_.restoreIcon : style_.maximizeIcon;
+        return fullscreen_  ? style_.exitFullscreenIcon
+               : maximized_ ? style_.restoreIcon
+                            : style_.maximizeIcon;
     case WindowButtonRole::Close:
         return style_.closeIcon;
     }

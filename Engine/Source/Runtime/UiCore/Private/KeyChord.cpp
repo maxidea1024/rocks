@@ -39,6 +39,26 @@ const char* KeyChord::InputName() const noexcept {
     return input::KeyName(key);
 }
 
+Result<void> FormatKeyChord(const KeyChord& chord, String& out) noexcept {
+    if (!chord.IsValid()) {
+        return Result<void>::Success();
+    }
+
+    const StringView parts[] = {chord.control ? StringView("Ctrl+") : StringView(),
+                                chord.alt ? StringView("Alt+") : StringView(),
+                                chord.shift ? StringView("Shift+") : StringView(),
+                                chord.super ? StringView("Super+") : StringView(),
+                                StringView(chord.InputName())};
+    for (StringView part : parts) {
+        auto appended = out.TryAppend(part);
+        if (!appended) {
+            return appended;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<KeyChord> KeyChord::FromInputName(StringView name) noexcept {
     for (uint32 i = 0; i < input::KeyCount; ++i) {
         const auto key = static_cast<input::Key>(i);

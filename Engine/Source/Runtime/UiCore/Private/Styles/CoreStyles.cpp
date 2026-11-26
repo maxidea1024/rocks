@@ -214,6 +214,65 @@ const ToolTipStyle& ContentToolTipStyle() noexcept {
     return style;
 }
 
+const MenuStyle& DefaultMenuStyle() noexcept {
+    static const MenuStyle style = [] {
+        MenuStyle menu;
+        menu.background = StyleBrush::RoundedBox(ThemeSlot::Dropdown, MenuPanelCornerRadius);
+        menu.outline = StyleBrush::RoundedBox(ThemeSlot::Dropdown, MenuPanelCornerRadius,
+                                              ThemeSlot::DropdownOutline, ControlOutlineThickness);
+        menu.outline.fill = ColorRef::Specified({0, 0, 0, 0});
+        menu.panelPadding = MenuPanelPadding;
+        // 항목 버튼은 바탕 없이 올림·눌림만 Primary 둥근 상자다(UE "Menu.Button" — 각진 것을 개선).
+        menu.row = NoBorderButtonStyle();
+        menu.row.hovered = StyleBrush::RoundedBox(ThemeSlot::Primary, MenuRowCornerRadius);
+        menu.row.pressed = menu.row.hovered;
+        menu.row.normalPadding = MenuButtonPadding;
+        menu.row.pressedPadding = MenuButtonPressedPadding;
+        menu.rowPadding = MenuRowPadding;
+        menu.iconSize = MenuIconSize;
+        menu.iconPadding = MenuIconPadding;
+        menu.labelPadding = MenuLabelPadding;
+        menu.keybindingGap = MenuKeybindingGap;
+        menu.keybindingPadding = MenuKeybindingPadding;
+        menu.subMenuGap = MenuSubMenuGap;
+        menu.subMenuIconSize = MenuSubMenuIconSize;
+        menu.separator = StyleBrush::Color(ThemeSlot::White25);
+        menu.separatorThickness = MenuSeparatorThickness;
+        menu.separatorPadding = MenuSeparatorPadding;
+        menu.label = NormalTextStyle();
+        menu.keybinding = {{Typeface::Regular, SmallFontSize}, {ColorSource::Foreground}};
+        menu.heading = {{Typeface::Bold, MenuHeadingFontSize, MenuHeadingLetterSpacing},
+                        ColorRef::FromTheme(ThemeSlot::White25)};
+        menu.headingPadding = MenuHeadingPadding;
+        menu.checkIcon = icons::MenuCheck;
+        menu.subMenuIcon = icons::ChevronRight;
+        menu.radioOff = StyleBrush::Pill(ThemeSlot::Input);
+        menu.radioOn = StyleBrush::Pill(ThemeSlot::White);
+        menu.radioSize = MenuRadioSize;
+        return menu;
+    }();
+    return style;
+}
+
+const MenuBarStyle& DefaultMenuBarStyle() noexcept {
+    static const MenuBarStyle style = [] {
+        MenuBarStyle bar;
+        // UE "WindowMenuBar.Button" = Menu.Button에 올림 Hover, 전경 Foreground·올림
+        // ForegroundHover.
+        bar.button = NoBorderButtonStyle();
+        bar.button.hovered = StyleBrush::RoundedBox(ThemeSlot::Hover, MenuBarButtonCornerRadius);
+        bar.button.normalForeground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        bar.button.hoveredForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        bar.button.pressedForeground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        bar.button.normalPadding = MenuBarButtonPadding;
+        bar.button.pressedPadding = MenuBarButtonPadding;
+        bar.openBrush = StyleBrush::RoundedBox(ThemeSlot::Primary, MenuBarButtonCornerRadius);
+        bar.label = NormalTextStyle();
+        return bar;
+    }();
+    return style;
+}
+
 const WindowStyle& DefaultWindowStyle() noexcept {
     static const WindowStyle style = [] {
         WindowStyle window;
@@ -233,6 +292,7 @@ const WindowStyle& DefaultWindowStyle() noexcept {
         window.maximizeIcon = icons::WindowMaximize;
         window.restoreIcon = icons::WindowRestore;
         window.closeIcon = icons::WindowClose;
+        window.exitFullscreenIcon = icons::WindowExitFullscreen;
         window.buttonSize = WindowButtonSize;
         window.title = NormalTextStyle();
         window.titlePadding = WindowTitlePadding;

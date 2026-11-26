@@ -60,6 +60,9 @@ public:
 
     // 지연과 등장은 초 단위다. 주입한 시계는 시험이나 일시 정지 가능한 호스트에 사용한다.
     void SetToolTipClock(double (*clock)() noexcept) noexcept;
+    // 타이머(StartTimer·StartFrameTimer) 시계(초)다. 시험이 지연을 결정적으로 진행할 때 주입한다.
+    // 비우면 단조 시계다. 바꾸기 전에 건 타이머는 옛 시계 기준 예정 시각을 그대로 쓴다.
+    void SetTimerClock(double (*clock)() noexcept) noexcept;
     Result<void> SetToolTipTiming(double delay, double fade) noexcept;
     double ToolTipDelay() const noexcept;
     double ToolTipFade() const noexcept;
@@ -114,6 +117,21 @@ public:
 
     // 열린 팝업(메뉴·콤보)과 툴팁을 모두 닫는다(창 테두리를 눌렀을 때 — UE DismissAllMenus).
     void DismissPopups() noexcept;
+
+    // 포인터 누름 관찰자다(UE FSlateApplication이 누름마다 메뉴 스택에서 누른 경로 밖 메뉴를 닫는
+    // 것 — MenuStack.DismissFrom). 누름(Down)을 경로로 보내기 전에 맞은 요소(없으면 null)와 함께
+    // 부르고, 관찰자가 true를 돌려주면 그 누름을 소비한다(경로로 보내지 않는다). 트리를 바꾼
+    // 관찰자(메뉴 닫기)는 true를 돌려줘야 한다. 알림 중 붙이기는 Busy, 떼기는 알림이 끝난 뒤
+    // 반영된다.
+    //
+    // 사용 예(메뉴 막대 — 열린 메뉴 밖을 누르면 닫고 그 누름을 삼킨다):
+    //   auto id = app.AddPressObserver(Application::PressObserver::CreateLambda(
+    //       [this](const PointerEvent&, Element* hit) noexcept { return CloseIfOutside(hit); }));
+    //   ...
+    //   app.RemovePressObserver(id.Value());
+    using PressObserver = Delegate<bool(const PointerEvent&, Element*)>;
+    Result<uint64> AddPressObserver(PressObserver&& observer) noexcept;
+    void RemovePressObserver(uint64 id) noexcept;
 
     // 창 포커스 상실 등으로 포인터 입력이 중단되면 모든 capture를 해제한다.
     void CancelAllPointers() noexcept;
@@ -227,6 +245,8 @@ private:
     double ToolTipTime() const noexcept;
     Array<ToolTipState> toolTips_;
     double (*toolTipClock_)() noexcept = nullptr;
+    double (*timerClock_)() noexcept = nullptr;
+    double TimerTime() const noexcept;
     double toolTipDelay_ = 0.15;
     double toolTipFade_ = 0.1;
     Array<Hover> hover_;
@@ -243,6 +263,16 @@ private:
     };
     Array<UserModifiers> modifiers_;
     Array<CommandScope> commandScopes_;
+    struct PressObserverEntry {
+        uint64 id;
+        PressObserver observer;
+        bool removed;
+    };
+    // 누름이 경로로 가기 전에 관찰자에게 알린다. 하나라도 소비하면 true다.
+    bool NotifyPressObservers(const PointerEvent& event, Element* hit) noexcept;
+    Array<PressObserverEntry> pressObservers_;
+    uint64 nextPressObserver_ = 1;
+    bool notifyingPress_ = false;
     SharedPtr<CommandList> globalCommands_;
     Result<KeyChord> UpdateChord(uint32 userId, const input::InputEvent& event) noexcept;
     bool ProcessCommands(const Element* scope, KeyChord chord, bool repeat) const noexcept;

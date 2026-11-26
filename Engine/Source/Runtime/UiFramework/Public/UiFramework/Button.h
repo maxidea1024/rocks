@@ -76,6 +76,9 @@ public:
     Result<void> SetContentPadding(Vec4 padding) noexcept;
     Vec4 GetContentPadding() const noexcept;
     bool IsHovered() const noexcept;
+    // 올림(hovered) 모양으로 그릴지다. 기본은 IsHovered()이고, 메뉴 항목처럼 하위 메뉴가 열린 동안
+    // 강조를 유지해야 하는 버튼이 넓힌다.
+    virtual bool IsHighlighted() const noexcept;
     void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
     bool IsPressed() const noexcept;

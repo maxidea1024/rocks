@@ -155,6 +155,10 @@ bool Button::IsHovered() const noexcept {
     return hoverCount_ != 0;
 }
 
+bool Button::IsHighlighted() const noexcept {
+    return IsHovered();
+}
+
 void Button::OnMouseEnter(uint32) noexcept {
     if (++hoverCount_ == 1) {
         InvalidatePaint();
@@ -347,7 +351,7 @@ const StyleBrush& Button::CurrentStyleBrush(bool disabled) const noexcept {
         return style_.disabled;
     }
 
-    return IsPressed() ? style_.pressed : IsHovered() ? style_.hovered : style_.normal;
+    return IsPressed() ? style_.pressed : IsHighlighted() ? style_.hovered : style_.normal;
 }
 
 ColorRef Button::PaintForegroundColor(bool disabled) const noexcept {
@@ -365,9 +369,9 @@ ColorRef Button::GetForegroundColor() const noexcept {
         return assigned;
     }
 
-    return IsPressed()   ? style_.pressedForeground
-           : IsHovered() ? style_.hoveredForeground
-                         : style_.normalForeground;
+    return IsPressed()       ? style_.pressedForeground
+           : IsHighlighted() ? style_.hoveredForeground
+                             : style_.normalForeground;
 }
 
 void Button::OnActivated() noexcept {

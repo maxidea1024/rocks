@@ -1,5 +1,7 @@
 #include "GalleryWindow.h"
 
+#include "MainMenu.h"
+
 #include "ColorsPage.h"
 #include "IconsPage.h"
 #include "TextPage.h"
@@ -27,6 +29,16 @@ GalleryWindow::GalleryWindow(Allocator& allocator, DemoText& text, const Gallery
     : allocator_(allocator), strings_(allocator),
       context_{allocator, text, strings_, textures, icons}, definitions_(allocator),
       bindings_(allocator) {
+}
+
+Result<SharedPtr<MenuBar>>
+GalleryWindow::BuildMainMenu(Application& app, platform::Window& window,
+                             const SharedPtr<DockManager>& area) noexcept {
+    if (!commands_) {
+        return Result<SharedPtr<MenuBar>>::Failure(ErrorCode::NotReady);
+    }
+
+    return gallery::BuildMainMenu(context_, app, definitions_, bindings_, *commands_, window, area);
 }
 
 const SharedPtr<CommandList>& GalleryWindow::Commands() const noexcept {

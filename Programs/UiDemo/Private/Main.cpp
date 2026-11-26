@@ -208,7 +208,19 @@ int Run(launch::ApplicationContext& context) noexcept {
                     return shaped ? Move(label)
                                   : Result<SharedPtr<TextLabel>>::Failure(shaped.Error());
                 }));
-        if (!windows.Run(Move(window.Value()), area.Value(), GalleryTitle)) {
+        auto mainArea = area.Value();
+        if (!windows.Run(Move(window.Value()), area.Value(), GalleryTitle,
+                         DockWindows::MainMenuFactory::CreateLambda(
+                             [&gallery, mainArea](
+                                 Application& app,
+                                 platform::Window& owner) noexcept -> Result<SharedPtr<Element>> {
+                                 auto bar = gallery.BuildMainMenu(app, owner, mainArea);
+                                 if (!bar) {
+                                     return Result<SharedPtr<Element>>::Failure(bar.Error());
+                                 }
+
+                                 return Result<SharedPtr<Element>>::Success(bar.Value());
+                             }))) {
             return 9;
         }
     }

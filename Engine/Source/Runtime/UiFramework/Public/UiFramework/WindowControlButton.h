@@ -30,6 +30,10 @@ public:
     // 최대화 버튼의 아이콘을 복원 모양으로 바꾼다(창이 최대화되어 있는지).
     void SetMaximized(bool maximized) noexcept;
     bool IsMaximized() const noexcept;
+    // 창이 전체 화면이면 최대화 버튼을 "전체 화면 나가기" 아이콘으로 바꾼다(UE SWindowTitleBar
+    // 501–520행).
+    void SetFullscreen(bool fullscreen) noexcept;
+    bool IsFullscreen() const noexcept;
 
     input::WindowRegion GetWindowRegion() const noexcept override;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
@@ -40,6 +44,7 @@ private:
     WindowStyle style_;
     WindowButtonRole role_;
     bool maximized_ = false;
+    bool fullscreen_ = false;
 };
 
 } // namespace rocks::ui

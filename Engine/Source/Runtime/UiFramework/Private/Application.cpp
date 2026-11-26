@@ -17,7 +17,7 @@ bool IsModifierKey(input::Key key) noexcept {
 Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
-      modifiers_(allocator), commandScopes_(allocator) {
+      modifiers_(allocator), commandScopes_(allocator), pressObservers_(allocator) {
     cache_.SetTheme(&theme_);
 }
 
@@ -86,6 +86,65 @@ void DismissPopupsBelow(Element& element) noexcept {
 }
 
 } // namespace
+
+Result<uint64> Application::AddPressObserver(PressObserver&& observer) noexcept {
+    if (!observer.IsBound()) {
+        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 알림 중에는 배열을 늘리지 않는다(실행 중인 delegate가 옮겨지지 않게).
+    if (notifyingPress_) {
+        return Result<uint64>::Failure(ErrorCode::Busy);
+    }
+
+    const uint64 id = nextPressObserver_++;
+    auto stored = pressObservers_.TryPushBack({id, Move(observer), false});
+    if (!stored) {
+        return Result<uint64>::Failure(stored.Error());
+    }
+
+    return Result<uint64>::Success(id);
+}
+
+void Application::RemovePressObserver(uint64 id) noexcept {
+    for (usize i = 0; i < pressObservers_.Size(); ++i) {
+        if (pressObservers_[i].id != id) {
+            continue;
+        }
+
+        // 알림 중이면 표시만 하고 알림이 끝난 뒤 지운다.
+        if (notifyingPress_) {
+            pressObservers_[i].removed = true;
+        } else {
+            (void)pressObservers_.TryRemoveAt(i);
+        }
+
+        return;
+    }
+}
+
+bool Application::NotifyPressObservers(const PointerEvent& event, Element* hit) noexcept {
+    if (pressObservers_.IsEmpty() || notifyingPress_) {
+        return false;
+    }
+
+    notifyingPress_ = true;
+    bool consumed = false;
+    for (usize i = 0; i < pressObservers_.Size() && !consumed; ++i) {
+        if (!pressObservers_[i].removed) {
+            consumed = pressObservers_[i].observer.Execute(event, hit);
+        }
+    }
+
+    notifyingPress_ = false;
+    for (usize i = pressObservers_.Size(); i > 0; --i) {
+        if (pressObservers_[i - 1].removed) {
+            (void)pressObservers_.TryRemoveAt(i - 1);
+        }
+    }
+
+    return consumed;
+}
 
 void Application::DismissPopups() noexcept {
     while (!toolTips_.IsEmpty()) {
@@ -576,6 +635,12 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             recorded.Reset();
             hit = root->HitTest(event.position);
         }
+    }
+
+    // 새 누름은 관찰자(메뉴 막대의 바깥 누름 닫기 등)가 먼저 본다. 트리를 바꾼 관찰자는 누름을
+    // 소비해야 한다(맞은 요소가 트리에서 떨어졌을 수 있다).
+    if (event.type == PointerEventType::Down && !captured && NotifyPressObservers(event, hit)) {
+        return Result<bool>::Success(true);
     }
 
     if (captured && captured->IsInputPathActive(*root, true)) {

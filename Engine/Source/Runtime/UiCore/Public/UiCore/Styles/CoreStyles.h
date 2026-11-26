@@ -3,6 +3,8 @@
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
+#include <UiCore/Styles/MenuBarStyle.h>
+#include <UiCore/Styles/MenuStyle.h>
 #include <UiCore/Styles/ProgressBarStyle.h>
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
@@ -143,6 +145,41 @@ inline constexpr Vec4 WindowAppIconPadding{4.0f, 4.0f, 0.0f, 0.0f};
 // UE Starship은 활성·비활성 제목 brush가 둘 다 없어 차이가 없다 — 어느 창이 활성인지 보이게 하는
 // Rocks 개선이다.
 inline constexpr float InactiveWindowTitleOpacity = 0.6f;
+
+// 메뉴 값이다(UE StarshipCoreStyle.cpp 2505–2653행·SMenuEntryBlock.cpp 583–664행): 항목 칸 여백
+// "Menu.Block.Padding" (12, 1, 5, 1), 아이콘 칸 "Menu.MenuIconSize" 14(+2)·여백 (2, 0, 6, 0), 라벨
+// 여백 (2, 0, 6, 0), 단축키 앞 25 + 여백 (16, 0, 4, 0), 하위 메뉴 표시 앞 7·chevron 16, 구분선
+// White25 1 px·여백 (12, 6), 묶음 제목 Bold 7·자간 250·White25·여백 (12, 6), 라디오 8x8(Input·
+// 켜면 White), 항목 버튼 여백 (0, 2)·눌림 (0, 3, 0, 1).
+inline constexpr Vec4 MenuRowPadding{12.0f, 1.0f, 5.0f, 1.0f};
+inline constexpr float MenuIconSize = 14.0f;
+inline constexpr Vec4 MenuIconPadding{2.0f, 0.0f, 6.0f, 0.0f};
+inline constexpr Vec4 MenuLabelPadding{2.0f, 0.0f, 6.0f, 0.0f};
+inline constexpr float MenuKeybindingGap = 25.0f;
+inline constexpr Vec4 MenuKeybindingPadding{16.0f, 0.0f, 4.0f, 0.0f};
+inline constexpr float MenuSubMenuGap = 7.0f;
+inline constexpr float MenuSubMenuIconSize = 16.0f;
+inline constexpr float MenuSeparatorThickness = 1.0f;
+inline constexpr Vec4 MenuSeparatorPadding{12.0f, 6.0f, 12.0f, 6.0f};
+inline constexpr float MenuHeadingFontSize = 7.0f;
+inline constexpr int32 MenuHeadingLetterSpacing = 250;
+inline constexpr Vec4 MenuHeadingPadding{12.0f, 6.0f, 12.0f, 6.0f};
+inline constexpr float MenuRadioSize = 8.0f;
+inline constexpr Vec4 MenuButtonPadding{0.0f, 2.0f, 0.0f, 2.0f};
+inline constexpr Vec4 MenuButtonPressedPadding{0.0f, 3.0f, 0.0f, 1.0f};
+// 메뉴 막대 버튼 여백이다("WindowMenuBar.MenuBar.Padding" (12, 4)).
+inline constexpr Vec4 MenuBarButtonPadding{12.0f, 4.0f, 12.0f, 4.0f};
+// 둥근 강조 값이다(UE보다 개선 — VS Code 메뉴처럼 패널 안쪽 여백 4·항목 반경 3·패널 반경 4).
+inline constexpr Vec4 MenuPanelPadding{4.0f, 4.0f, 4.0f, 4.0f};
+inline constexpr float MenuPanelCornerRadius = 4.0f;
+inline constexpr float MenuRowCornerRadius = 3.0f;
+inline constexpr float MenuBarButtonCornerRadius = 4.0f;
+
+// 펼친 메뉴 기본 스타일이다(UE "Menu").
+ROCKS_UICORE_API const MenuStyle& DefaultMenuStyle() noexcept;
+
+// 메뉴 막대 기본 스타일이다(UE "WindowMenuBar").
+ROCKS_UICORE_API const MenuBarStyle& DefaultMenuBarStyle() noexcept;
 
 // 직접 그린 창 테두리 기본 스타일이다(UE "Window").
 ROCKS_UICORE_API const WindowStyle& DefaultWindowStyle() noexcept;

@@ -4,7 +4,7 @@
 namespace rocks::ui {
 
 WindowChrome::WindowChrome(Allocator& allocator, const WindowStyle& style) noexcept
-    : Element(allocator), style_(style) {
+    : Overlay(allocator), style_(style) {
 }
 
 Result<void> WindowChrome::Construct(Args&& args) noexcept {
@@ -34,6 +34,18 @@ void WindowChrome::SetMaximized(bool maximized) noexcept {
     }
 }
 
+void WindowChrome::SetFullscreen(bool fullscreen) noexcept {
+    if (fullscreen_ != fullscreen) {
+        fullscreen_ = fullscreen;
+        InvalidateLayout();
+        InvalidatePaint();
+    }
+
+    if (titleBar_) {
+        titleBar_->SetFullscreen(fullscreen);
+    }
+}
+
 void WindowChrome::SetActive(bool active) noexcept {
     if (titleBar_) {
         titleBar_->SetActive(active);
@@ -53,15 +65,15 @@ const SharedPtr<Element>& WindowChrome::Content() const noexcept {
 }
 
 Vec4 WindowChrome::Inset() const noexcept {
-    return maximized_ ? Vec4{} : style_.borderPadding;
+    return maximized_ || fullscreen_ ? Vec4{} : style_.borderPadding;
 }
 
 Vec2 WindowChrome::ComputeDesiredSize(float) const noexcept {
     const Vec4 inset = Inset();
     const Vec2 bar = titleBar_ ? titleBar_->GetDesiredSize() : Vec2{};
     const Vec4 pad = style_.contentPadding;
-    const Vec2 body = content_ ? content_->GetDesiredSize() + Vec2{pad.x + pad.z, pad.y + pad.w}
-                               : Vec2{};
+    const Vec2 body =
+        content_ ? content_->GetDesiredSize() + Vec2{pad.x + pad.z, pad.y + pad.w} : Vec2{};
     return {math::Max(bar.x, body.x) + inset.x + inset.z, bar.y + body.y + inset.y + inset.w};
 }
 
@@ -84,8 +96,25 @@ Result<void> WindowChrome::Arrange(const Geometry& geometry) noexcept {
         const Vec4 pad = style_.contentPadding;
         const Vec2 body{math::Max(0.0f, width - pad.x - pad.z),
                         math::Max(0.0f, height - barHeight - pad.y - pad.w)};
-        return content_->ArrangeIfNeeded(GetGeometry().MakeChild(
+        auto placed = content_->ArrangeIfNeeded(GetGeometry().MakeChild(
             body, {1, 0, 0, 1, inset.x + pad.x, inset.y + barHeight + pad.y}, {}, {}));
+        if (!placed) {
+            return placed;
+        }
+    }
+
+    // 나머지 자식은 팝업 층이다 — 창 전체를 덮는다(층이 메뉴를 anchor 옆에 놓는다).
+    for (usize i = 0; i < ChildCount(); ++i) {
+        Element* child = ChildAt(i);
+        if (child == titleBar_.Get() || child == content_.Get() ||
+            child->GetVisibility() == Visibility::Collapsed) {
+            continue;
+        }
+
+        auto placed = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
+        if (!placed) {
+            return placed;
+        }
     }
 
     return Result<void>::Success();
@@ -103,7 +132,7 @@ Result<void> WindowChrome::OnPaint(PaintList& list, int32 layer) const noexcept 
     };
     const Geometry& whole = GetGeometry();
     auto painted = draw(style_.background, whole);
-    if (!painted || maximized_) {
+    if (!painted || maximized_ || fullscreen_) {
         return painted;
     }
 

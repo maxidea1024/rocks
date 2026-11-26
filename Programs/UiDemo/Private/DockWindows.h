@@ -16,6 +16,8 @@ class DockWindows {
 public:
     // 글자 레이블을 font로 shaping해 만든다(직접 그린 창 테두리의 제목과 창 버튼 툴팁).
     using TitleFactory = Delegate<Result<SharedPtr<TextLabel>>(StringView, const FontStyle&)>;
+    // 주 창 제목 막대 왼쪽에 둘 주 메뉴를 만든다(그 창의 Application과 창 — UiToolkit 9.1절 UW7c).
+    using MainMenuFactory = Delegate<Result<SharedPtr<Element>>(Application&, platform::Window&)>;
 
     // icons는 SVG brush를 래스터화할 atlas이고 imagePipeline으로 페이지를
     // 올린다(Docs/Design/UiToolkit 17.2절). 창들보다 오래 살아야 한다.
@@ -24,8 +26,9 @@ public:
                 VectorImageAtlas& icons, graphics::PipelineHandle imagePipeline,
                 TitleFactory&& makeTitle) noexcept;
     // title은 직접 그린 창 테두리(WindowFrame::Custom)의 제목이다.
+    // makeMenu는 주 창의 주 메뉴다(비우면 메뉴 없이).
     Result<void> Run(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
-                     StringView title) noexcept;
+                     StringView title, MainMenuFactory&& makeMenu = {}) noexcept;
 
 private:
     struct Surface {
@@ -57,7 +60,7 @@ private:
     Result<SlotHandle> Add(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                            StringView title) noexcept;
     // Custom 창이면 제목 막대와 테두리를 만들어 루트로 둔다(창 버튼은 그 창의 동작에 건다).
-    Result<void> AttachChrome(Surface& surface, StringView title) noexcept;
+    Result<void> AttachChrome(Surface& surface, StringView title, bool main) noexcept;
     Result<bool> Update(Surface& surface) noexcept;
     // 펌프 없이 크기 반영·배치·그리기·present를 한다. 크기 조절 콜백(UiToolkit 9.1절 UW7a)도 쓴다.
     Result<bool> Render(Surface& surface, bool refreshCursor) noexcept;
@@ -73,6 +76,7 @@ private:
     VectorImageAtlas& icons_;
     graphics::PipelineHandle imagePipeline_;
     TitleFactory makeTitle_;
+    MainMenuFactory makeMenu_;
     SlotArray<UniquePtr<Surface>> windows_;
     SlotHandle primary_{};
 };

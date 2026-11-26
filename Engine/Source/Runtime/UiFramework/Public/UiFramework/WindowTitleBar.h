@@ -42,6 +42,9 @@ public:
 
     // 창이 최대화되어 있으면 최대화 버튼을 복원 모양으로 바꾼다.
     void SetMaximized(bool maximized) noexcept;
+    // 전체 화면이면 최대화 버튼을 "전체 화면 나가기"로 바꾼다(누르면 onToggleMaximize — 호출자가
+    // 전체 화면을 끈다).
+    void SetFullscreen(bool fullscreen) noexcept;
     // 비활성 창은 제목과 앱 아이콘을 흐리게 그린다(InactiveWindowTitleOpacity).
     void SetActive(bool active) noexcept;
     bool IsActive() const noexcept;

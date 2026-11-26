@@ -44,10 +44,8 @@ Result<void> InputKeySelector::RefreshCaption(KeyChord chord, bool selecting) no
         return caption_.Execute("None");
     }
 
-    StringBuilder<> label(allocator_);
-    auto result = label.TryAppendFormat("{}{}{}{}{}", chord.control ? "Ctrl+" : "",
-                                        chord.alt ? "Alt+" : "", chord.shift ? "Shift+" : "",
-                                        chord.super ? "Super+" : "", chord.InputName());
+    String label(allocator_);
+    auto result = FormatKeyChord(chord, label);
     if (!result) {
         return result;
     }

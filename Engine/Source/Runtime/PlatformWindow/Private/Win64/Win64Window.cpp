@@ -524,6 +524,14 @@ public:
         return resizable_;
     }
 
+    void ToggleFullscreen() noexcept override {
+        ToggleBorderlessFullscreen();
+    }
+
+    bool IsFullscreen() const noexcept override {
+        return fullscreenStyle_ != 0;
+    }
+
     // 최대화된 client 사각형에서 자동 숨김 작업 표시줄이 붙은 가장자리를 1 px 남긴다. 창이 화면을
     // 꽉 채우면 OS가 그 작업 표시줄을 불러내지 못한다.
     void LeaveAutoHideTaskbarEdge(RECT& client) const noexcept {

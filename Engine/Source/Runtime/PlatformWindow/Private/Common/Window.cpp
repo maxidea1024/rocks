@@ -15,6 +15,13 @@ bool Window::IsMaximized() const noexcept {
     return false;
 }
 
+void Window::ToggleFullscreen() noexcept {
+}
+
+bool Window::IsFullscreen() const noexcept {
+    return false;
+}
+
 bool Window::IsResizable() const noexcept {
     return true;
 }

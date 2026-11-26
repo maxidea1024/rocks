@@ -6,7 +6,9 @@
 #include "WidgetsPage.h"
 
 #include <UiFramework/Commands.h>
+#include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
+#include <UiFramework/MenuBar.h>
 
 // UI 갤러리 창이다(UE SStarshipGallery, Docs/Design/UiToolkit 16장). 탭 묶음 하나에 "Colors"·
 // "Text"·"Widgets"·"Layout"·"Behavior"·"Effects"를 두고 UE처럼 "Widgets"를 앞에 연다. 창이 열려
@@ -38,6 +40,10 @@ public:
     // 문자열 표를 읽고 탭을 만든다. 문자열 파일이 없으면 NotFound다.
     Result<SharedPtr<DockManager>> Create() noexcept;
     const SharedPtr<CommandList>& Commands() const noexcept;
+    // 주 메뉴(File·Edit·View·Help)를 만든다(Create 뒤 — MainMenu.h). 명령은 갤러리 명령 목록에
+    // 들어가 단축키로도 실행된다. 한 번만 부른다.
+    Result<SharedPtr<MenuBar>> BuildMainMenu(Application& app, platform::Window& window,
+                                             const SharedPtr<DockManager>& area) noexcept;
 
     // 탭의 행 격자와 배치 탭의 도킹 영역이다(Create 뒤에만 유효하다 — self-test가 쓴다).
     const GalleryGrid* Widgets() const noexcept;

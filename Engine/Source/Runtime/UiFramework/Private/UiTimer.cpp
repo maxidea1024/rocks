@@ -10,7 +10,8 @@ Result<SharedPtr<UiTimer>> Application::StartTimer(const SharedPtr<Element>& own
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, interval, Move(callback));
+    auto timer =
+        SharedPtr<UiTimer>::TryMake(allocator_, owner, interval, Move(callback), TimerTime());
     if (!timer) {
         return timer;
     }
@@ -25,7 +26,7 @@ Result<SharedPtr<UiTimer>> Application::StartFrameTimer(const SharedPtr<Element>
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, Move(frame));
+    auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, Move(frame), TimerTime());
     if (!timer) {
         return timer;
     }
@@ -40,7 +41,7 @@ void Application::AdvanceTimers() noexcept {
     }
 
     runningTimers_ = true;
-    const auto now = static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9;
+    const double now = TimerTime();
     usize limit = timers_.Size();
     for (usize i = 0; i < limit;) {
         auto timer = timers_[i].Lock();
@@ -60,16 +61,23 @@ void Application::AdvanceTimers() noexcept {
     runningTimers_ = false;
 }
 
-UiTimer::UiTimer(const SharedPtr<Element>& owner, double interval,
-                 Delegate<void()>&& callback) noexcept
-    : owner_(owner), interval_(interval),
-      due_(static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9 + interval),
-      callback_(Move(callback)) {
+UiTimer::UiTimer(const SharedPtr<Element>& owner, double interval, Delegate<void()>&& callback,
+                 double start) noexcept
+    : owner_(owner), interval_(interval), due_(start + interval), callback_(Move(callback)) {
 }
 
-UiTimer::UiTimer(const SharedPtr<Element>& owner, Delegate<void(double)>&& frame) noexcept
-    : owner_(owner), interval_(0),
-      due_(static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9), frame_(Move(frame)) {
+UiTimer::UiTimer(const SharedPtr<Element>& owner, Delegate<void(double)>&& frame,
+                 double start) noexcept
+    : owner_(owner), interval_(0), due_(start), frame_(Move(frame)) {
+}
+
+void Application::SetTimerClock(double (*clock)() noexcept) noexcept {
+    timerClock_ = clock;
+}
+
+double Application::TimerTime() const noexcept {
+    return timerClock_ ? timerClock_()
+                       : static_cast<double>(platform::MonotonicNanoseconds()) * 1.e-9;
 }
 
 void UiTimer::Advance(double now, const Element& root) noexcept {
