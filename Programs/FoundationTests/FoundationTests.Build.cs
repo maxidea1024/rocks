@@ -102,6 +102,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly Dictionary<string, string[]> TestGroupModules = new(StringComparer.Ordinal)
     {
         ["Animation"] = ["AssetTestFixtures"],
+        ["AnimationTools"] = ["AssetTestFixtures"],
         ["AssetCommandlets"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetCooker"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetDatabase"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],

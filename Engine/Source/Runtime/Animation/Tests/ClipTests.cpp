@@ -466,7 +466,7 @@ TEST(Clip_BuildResamples) {
 // 진단 이름표: 모든 ClipIssue가 고유한 이름이고 열거 밖은 "Unknown"이다. 새 코드는 4.6절 이름표에
 // 있고 ToAssetDiagnostic은 위치를 detail로 옮긴다.
 TEST(Clip_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(ClipIssue::UnknownBoneTrack);
+    constexpr uint32 last = static_cast<uint32>(ClipIssue::DuplicateTrackBone);
     for (uint32 index = 0; index <= last; ++index) {
         const StringView name(ClipIssueName(static_cast<ClipIssue>(index)));
         CHECK(name != StringView("Unknown"));

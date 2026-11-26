@@ -125,6 +125,12 @@ ROCKS_ANIMATION_API Result<void> LoadClipSource(const ClipSourceData& data, cons
                                                 NamePool& names, ClipSource& out,
                                                 ClipDiagnostic* failure = nullptr) noexcept;
 
+// 같은 규칙으로 bulk 원본(열린 에디터 패키지의 bulk 저장소 — 쿠킹 처리기, 7.6.1절 3)에서 읽는다.
+// 오류는 위와 같다(bulk를 못 읽으면 CorruptPackage(BulkUnreadable)와 ReadBulk의 오류).
+ROCKS_ANIMATION_API Result<void> LoadClipSource(const ClipSourceData& data, PackageBulkSource& bulk,
+                                                NamePool& names, ClipSource& out,
+                                                ClipDiagnostic* failure = nullptr) noexcept;
+
 // source 트랙 track의 seconds 시간 값이다(7.5절 8 — UE UAnimDataModel::Evaluate의 키 선택과
 // FTransform:: Blend). track은 범위 안이어야 하고 source는 ValidateClipSource를 통과한 것이어야
 // 한다.
@@ -209,5 +215,24 @@ ROCKS_ANIMATION_API Result<void> StoreClipPlayback(const ClipPlayback& playback,
 ROCKS_ANIMATION_API Result<void> LoadClipPlayback(const ClipPlaybackData& data,
                                                   const Package& package, ClipPlayback& out,
                                                   ClipDiagnostic* failure = nullptr) noexcept;
+
+// 쿠킹 클립 clip의 재생 데이터를 package에서 읽고(LoadClipPlayback) skeleton과 대조한다(7.6.1절 4):
+// trackToBone 본 번호 < 스켈레톤 본 수(TrackBoneIndex), 같은 본이 두 트랙에 없음
+// (DuplicateTrackBone), 회전 키 |길이² − 1| ≤ BoneRotationNormalizedTolerance
+// (RotationNotNormalized). 소비자가 부른다(PostLoad 없음 — 메시 로드 검증과 같은 규칙).
+//
+// 사용 예(쿠킹 클립과 그 스켈레톤을 로드한 뒤):
+//   ClipPlayback playback(allocator);
+//   ClipDiagnostic failure;
+//   if (!ValidateCookedAnimationClip(clip, package, skeleton, playback, &failure)) {
+//       Report(ClipIssueName(failure.issue), failure.index);
+//   }
+//
+// 오류: LoadClipPlayback의 오류, 대조 위반은 CorruptPackage·InvalidArgument(issue 위, index =
+// 트랙), 할당 실패는 그 오류다. 실패하면 out은 그대로다. 스레드: package의 Registry 소유 스레드.
+ROCKS_ANIMATION_API Result<void>
+ValidateCookedAnimationClip(const AnimationClip& clip, const Package& package,
+                            const Skeleton& skeleton, ClipPlayback& out,
+                            ClipDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

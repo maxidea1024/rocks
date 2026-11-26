@@ -435,4 +435,48 @@ Result<void> LoadClipPlayback(const ClipPlaybackData& data, const Package& packa
     return Result<void>::Success();
 }
 
+Result<void> ValidateCookedAnimationClip(const AnimationClip& clip, const Package& package,
+                                         const Skeleton& skeleton, ClipPlayback& out,
+                                         ClipDiagnostic* failure) noexcept {
+    Allocator& allocator = out.tracks.GetAllocator();
+    ClipPlayback loaded(allocator);
+    if (auto read = LoadClipPlayback(clip.playback, package, loaded, failure); !read) {
+        return read;
+    }
+
+    // 본마다 그 본을 처음 쓴 트랙 + 1이다(0 = 아직 없음).
+    const usize boneCount = skeleton.bones.bones.Size();
+    Array<uint32> owner(allocator);
+    if (auto resized = owner.TryResize(boneCount); !resized) {
+        return resized;
+    }
+
+    for (uint32 track = 0; track < loaded.trackToBone.Size(); ++track) {
+        const uint16 bone = loaded.trackToBone[track];
+        if (bone >= boneCount) {
+            return CorruptPlayback(failure, ClipIssue::TrackBoneIndex, track);
+        }
+
+        if (owner[bone] != 0) {
+            return animation_detail::ClipFail(
+                failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+                ClipIssue::DuplicateTrackBone, track, owner[bone] - 1);
+        }
+
+        owner[bone] = track + 1;
+        for (const Quat& rotation : loaded.tracks[track].rotation) {
+            const double length = static_cast<double>(rotation.x) * rotation.x +
+                                  static_cast<double>(rotation.y) * rotation.y +
+                                  static_cast<double>(rotation.z) * rotation.z +
+                                  static_cast<double>(rotation.w) * rotation.w;
+            if (math::Abs(length - 1.0) > BoneRotationNormalizedTolerance) {
+                return CorruptPlayback(failure, ClipIssue::RotationNotNormalized, track);
+            }
+        }
+    }
+
+    out = Move(loaded);
+    return Result<void>::Success();
+}
+
 } // namespace rocks

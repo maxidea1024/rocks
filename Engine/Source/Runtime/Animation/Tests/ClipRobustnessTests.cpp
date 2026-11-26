@@ -1,5 +1,6 @@
 #include "ClipTestSupport.h"
 
+#include <Base/InitializerList.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <TestSupport/NFailAllocator.h>
 #include <stdio.h>
@@ -781,6 +782,52 @@ TEST(Clip_FuzzSources) {
     printf("Clip_FuzzSources: %u valid, %u invalid, %u incompatible\n", valid, invalid,
            incompatible);
     CHECK(valid > 100 && invalid > 20 && incompatible > 10);
+}
+
+// 쿠킹 로드의 스켈레톤 대조(7.6.1절 4): 정규화된 회전은 통과하고, 회전 키 하나가 단위가 아니면
+// RotationNotNormalized(CorruptPackage, index = 트랙)이며 out은 그대로다.
+TEST(Clip_CookedValidationRotation) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterAnimationTypes(env.modules));
+    Skeleton skeleton(env.allocator);
+    REQUIRE(FillHumanSkeleton(env.names, skeleton));
+    for (const bool broken : {false, true}) {
+        ObjectHandle package{};
+        const ObjectHandle made =
+            MakeClip(env, broken ? 0x7201 : 0x7200, PackageKind::Cooked, package);
+        REQUIRE(!made.IsNull());
+        AnimationClip* clip = asset_test::Pointer<AnimationClip>(*env.source, made);
+        REQUIRE(clip != nullptr);
+        ClipPlayback crafted(env.allocator);
+        crafted.sampleRate = Rate(30);
+        crafted.sampleCount = 2;
+        ClipPlaybackTrack track(env.allocator);
+        REQUIRE(track.translation.TryPushBack(Vec3(0, 0, 0)) &&
+                track.rotation.TryPushBack(Quat(0, 0, 0, 1)) &&
+                track.rotation.TryPushBack(broken ? Quat(2, 0, 0, 0) : Quat(0, 0, 0, 1)) &&
+                track.scale.TryPushBack(Vec3(1, 1, 1)));
+        REQUIRE(crafted.trackToBone.TryPushBack(3) && crafted.tracks.TryPushBack(Move(track)));
+        MemoryBulkSource bulk(env.allocator);
+        REQUIRE(StoreClipPlayback(crafted, bulk, clip->playback));
+        LoadedClip loaded(env.allocator);
+        REQUIRE(WriteAndLoad(env, package, PackageKind::Cooked, bulk, loaded));
+        const AnimationClip* read = asset_test::Pointer<AnimationClip>(*env.target, loaded.clip);
+        const Package* raw = asset_test::Pointer<Package>(*env.target, loaded.package);
+        REQUIRE(read != nullptr && raw != nullptr);
+        ClipPlayback out(env.allocator);
+        out.sampleCount = 77;
+        ClipDiagnostic failure;
+        const Result<void> validated =
+            ValidateCookedAnimationClip(*read, *raw, skeleton, out, &failure);
+        if (broken) {
+            CHECK(!validated && failure.code == AssetDiagnosticCode::CorruptPackage &&
+                  failure.issue == ClipIssue::RotationNotNormalized && failure.index == 0);
+            CHECK(out.sampleCount == 77 && out.tracks.IsEmpty());
+        } else {
+            CHECK(validated.IsOk() && out.sampleCount == 2 && out.trackToBone[0] == 3);
+        }
+    }
 }
 
 } // namespace clip_robustness_tests_file
