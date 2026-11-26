@@ -5,12 +5,12 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
 #include <Engine/Engine.h>
-#include <EngineAudio/AttenuationSettings.generated.h>
+#include <AudioAssets/AttenuationSettings.generated.h>
 #include <EngineAudio/AudioEngineSettings.h>
 #include <EngineAudio/AudioEngineSubsystem.h>
-#include <EngineAudio/EngineAudioTypes.h>
-#include <EngineAudio/SoundClip.generated.h>
-#include <EngineAudio/SoundSource.generated.h>
+#include <AudioAssets/AudioAssetsTypes.h>
+#include <AudioAssets/SoundClip.generated.h>
+#include <AudioAssets/SoundSource.generated.h>
 #include <ModuleLoader/HostServices.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/PlatformMath.h>
@@ -159,7 +159,7 @@ TEST(EngineAudio_MakePlayableCopiesAttenuationSnapshot) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
-    REQUIRE(RegisterEngineAudioTypes(registration));
+    REQUIRE(RegisterAudioAssetsTypes(registration));
     {
         ObjectRegistry objects(allocator, types, {0x45415544494f3031ull, 1});
         auto clip = objects.NewObject<SoundClip>(objects.OwnerAccess(), TypeIdOf<SoundClip>());

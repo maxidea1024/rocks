@@ -1079,6 +1079,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NuggetConflict";
     case AssetDiagnosticCode::SourceCleared:
         return "SourceCleared";
+    case AssetDiagnosticCode::IgnoredSourceChunks:
+        return "IgnoredSourceChunks";
     }
 
     return "Unknown";
@@ -1094,6 +1096,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::PreserveBorderWithWrap:
     case AssetDiagnosticCode::NuggetConflict:
     case AssetDiagnosticCode::SourceCleared:
+    case AssetDiagnosticCode::IgnoredSourceChunks:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

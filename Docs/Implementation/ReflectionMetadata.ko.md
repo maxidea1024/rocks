@@ -143,6 +143,37 @@ public:
 | RMC2607 | 노출할 수 없는 타입·필드(`EditorOnly` 타입·필드와 EditorOnly 타입의 노출 필드, Binds 미러, Flags enum, 보이는 case가 없는 enum) |
 | RMC2608 | 노출하지 않은 타입의 노출 필드 |
 
+### 리플렉션 함수(`ROCKS_FUNCTION`)
+
+`ROCKS_CLASS` 클래스의 멤버 함수(인스턴스·`static`) 선언 바로 앞에 둔다([함수 리플렉션](../Design/FunctionReflection.ko.md) FR1, UE `UFUNCTION` 대응). 메타 컴파일러가 함수마다 호출 frame·thunk·실행 schema(`TypeSchema::functions`)·연산표(`RuntimeTypeOps::functions`)를 만들고, `TypeRegistry::FindFunctionByName`·`FindFunction`과 `FunctionCall`로 부른다.
+
+```cpp
+ROCKS_CLASS()
+class Door : public rocks::Object {
+    ROCKS_GENERATED_BODY()
+
+public:
+    ROCKS_FUNCTION() void Open() noexcept;
+    ROCKS_FUNCTION(Pure) bool IsOpen() const noexcept;
+    ROCKS_FUNCTION(Name = "Rename") rocks::Result<void> SetLabel(rocks::StringView text) noexcept;
+    ROCKS_FUNCTION() static rocks::int32 Count(const rocks::Array<rocks::int32>& values) noexcept;
+#if ROCKS_WITH_EDITOR
+    ROCKS_FUNCTION(EditorOnly) void Inspect() noexcept;
+#endif
+};
+```
+
+지정자는 `Pure`(반환 값 필수)·`EditorOnly`(`#if ROCKS_WITH_EDITOR` 바로 안)·`Name="X"`(도구 이름)다. 함수는 `noexcept`, 이름에 C++ 오버로드가 없고, 매개변수는 모두 이름이 있고 기본 인자가 없으며 16개까지다. private·protected 함수는 `ROCKS_GENERATED_BODY`가 필요하다. 매개변수는 값 또는 `const&` 입력이고 복사할 수 없는 형식(`String`·컨테이너·`SoftObjectRef`)은 `const&`로 받는다(`StringView`는 값). 반환은 `void`·값·`Result<void>`·`Result<T>`다. descriptor schema 5의 클래스 `functions`가 모듈 사이 상속 이름 검사에 쓰인다. 진단:
+
+| 코드 | 원인 |
+|---|---|
+| RMC2701 | 자리·모양: struct·자유 함수·함수 템플릿·생성자, 연산자·변환 함수와 ASCII 아닌 함수·매개변수 이름, 삭제 함수, `noexcept` 없음·조건부 `noexcept`(`noexcept(true)`는 받는다), 참조 한정자, 이름 없는 매개변수, 기본 인자, 매개변수 17개 이상, GENERATED_BODY 없는 private·protected 함수, 클래스 하나에 함수 4097개 이상 |
+| RMC2702 | 리플렉션 함수 이름의 C++ 오버로드 |
+| RMC2703 | 기반 체인(import 기반 포함)의 리플렉션 함수와 이름 겹침(대소문자 무시), 잘못된 `Name` |
+| RMC2704 | frame에 둘 수 없는 형식: 포인터·비 `const` 참조(출력)·rvalue 참조·참조 반환, `StringView` 반환, `ObjectRef`와 그 컨테이너, 컨테이너 안 `ObjectHandle`(`WeakObjectRef<Object>`로), `InstancedStruct`, 정적 배열, 리플렉션 값 종류가 아닌 형식, 강한 참조를 담는 struct·복사할 수 없는 값 매개변수(생성 static_assert) |
+| RMC2705 | 반환 값 없는 `Pure` |
+| RMC2706 | `EditorOnly` 지정과 `#if ROCKS_WITH_EDITOR` 블록 위치가 다름(양방향) |
+
 ### 리플렉션 enum(`ROCKS_ENUM`)
 
 ```cpp

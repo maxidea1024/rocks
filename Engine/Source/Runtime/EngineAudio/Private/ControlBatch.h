@@ -5,7 +5,7 @@
 #include <Core/Math/Vector3.h>
 #include <EngineAudio/AudioControlStats.h>
 #include <EngineAudio/AudioPlayback.h>
-#include <EngineAudio/SoundSourceRef.h>
+#include <AudioAssets/SoundSourceRef.h>
 
 // 게임 ↔ 제어 pipe 일괄 묶음이다(Docs/Design/AudioSystem 3.35.5절). 게임이 한 프레임 명령을 모아
 // OnFrameEnd에 넘기고, 제어 쪽이 처리한 뒤 결과를 같은 묶음에 적어 돌려준다. 한 묶음은 한 번에 한

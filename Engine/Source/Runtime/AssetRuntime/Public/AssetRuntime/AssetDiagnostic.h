@@ -144,7 +144,10 @@ enum class AssetDiagnosticCode : uint16 {
     NuggetConflict,
     // 텍스처 원본 묶음(AssetSystem 12.14절 A5j2): 원본 재구성이 원본을 비웠다(SourceCleared — 경고,
     // Volume 원본 2D·타일이 원본을 만들지 못함, UE와 같이 비우고 알린다).
-    SourceCleared
+    SourceCleared,
+    // 사운드 원본(AudioSystem 3.36.2절 — AU4): 모르는 chunk를 건너뛰었다(IgnoredSourceChunks —
+    // 경고, detail = 건너뛴 chunk 수).
+    IgnoredSourceChunks
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

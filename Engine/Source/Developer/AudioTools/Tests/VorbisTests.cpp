@@ -1,5 +1,6 @@
 #include "SourceAudioTestSupport.h"
 #include "VorbisTestFixtures.h"
+#include "SourceAudioReference.h"
 
 #include <AudioTools/SourceAudio.h>
 #include <Base/Compiler.h>
@@ -37,13 +38,12 @@ constexpr double Order51Frequencies[Order51Channels] = {300.0, 500.0, 700.0, 60.
 constexpr uint64 Order51Frames = 8820;
 
 // x86-64 Windows(UCRT libm)에서 VorbisStereo 디코드 결과(모든 채널 planar float32)의 SHA-256이다.
-constexpr const char* StereoDigestX64 =
-    "df80529fcc7983afcd3810f287a338aad25381eeb623e73ade462c6909028a84";
+constexpr const char* StereoDigestX64 = sourcereference::VorbisStereoDigestX64;
 
 // 시험 입력의 rate·frame 수(마지막 page granule)다.
 constexpr uint32 Rate44100 = 44100;
 constexpr uint32 Rate22050 = 22050;
-constexpr uint64 StereoFrames = 11025;
+constexpr uint64 StereoFrames = sourcereference::VorbisStereoFrames;
 constexpr uint64 Mono22kFrames = 2205;
 constexpr uint64 Mono44kFrames = 4410;
 constexpr uint64 Mono44kShortFrames = 2205;

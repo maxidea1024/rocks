@@ -8,7 +8,7 @@
 
 ### 30.1 모듈과 에셋 참조
 
-- 모듈은 새 `WorldIntegration`(`Engine/Source/Runtime/WorldIntegration`, 3절)이다. World는 에셋 모듈을 참조하지 않는다(3절 `World` 행). 메시 컴포넌트는 `StaticMesh`(Mesh 모듈)와 `MaterialBase`(Material 모듈)를 기대 타입으로 쓰므로 World 위 모듈에 둔다. 의존은 공개 World·Mesh·Material이다. RenderBase는 RenderScene 추출(RS 단계)이 붙을 때 더한다(지금 쓰지 않는 의존을 두지 않는다).
+- 모듈은 새 `WorldIntegration`(`Engine/Source/Runtime/WorldIntegration`, 3절)이다. World는 에셋 모듈을 참조하지 않는다(3절 `World` 행). 메시 컴포넌트는 `StaticMesh`(Mesh 모듈)와 `MaterialBase`(Material 모듈)를 기대 타입으로 쓰므로 World 위 모듈에 둔다. 의존은 공개 World·Mesh·Material이다. Texture·RenderBase는 텍스처 렌더 캐시(SM8 — [렌더 기반](../RenderBase/18-ScreenMilestone.ko.md) 18.5절 8항)가 더했다.
 - **World 객체 → 에셋 참조는 `SoftObjectRef`다**([엔진 구현 계획](../EngineImplementationPlan.ko.md) 638행 "World 객체 → 에셋은 Soft 참조, 런타임 보유는 AssetLease"). World 객체는 World Registry에, 에셋 객체는 에셋 Registry에 있어 `ObjectRef`(같은 Registry 안 강한 간선)로 가리킬 수 없다(다른 Registry handle은 WrongContext — ReflectionExtensions 쓰기 검증). 저장 wire는 `SoftObjectReference`(AssetId 16 byte + 객체 경로)다.
   - UE는 `TObjectPtr<UStaticMesh>`(하드 참조 — 레벨과 함께 로드)다. Rocks의 "함께 로드"는 로드 시스템 몫이다: 컴포넌트 시작 준비 hook(CR4 `IsReadyToStart` — 17.4절)이 메시 lease를 기다리고, 쿠킹은 레벨의 soft 참조를 의존으로 센다. 둘 다 메시 로드·렌더 연결 단계에서 붙인다(30.6절).
   - 런타임 보유(AssetLease)와 로드된 메시 객체로의 접근은 이 단계에 없다. 대신 로드 시스템이 메시를 붙일 때 부를 **로드 정보 사본**(30.3절 `ApplyLoadedMeshInfo`)을 둔다: 확장 bounds와 머티리얼 슬롯 수만 값으로 복사하고 에셋 객체 포인터는 쥐지 않는다(Registry 수명이 다르다).

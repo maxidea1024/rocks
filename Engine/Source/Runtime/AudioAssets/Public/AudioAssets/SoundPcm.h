@@ -19,7 +19,7 @@
 //   SharedPtr<const SoundPcm> pcm = Move(made.Value());   // 이 뒤로 바꾸지 않는다
 namespace rocks {
 
-class ROCKS_ENGINEAUDIO_API SoundPcm {
+class ROCKS_AUDIOASSETS_API SoundPcm {
 public:
     // channelCount·frameCount·sampleRate를 검사하지 않은 빈 객체다. TryAllocate를 쓴다.
     explicit SoundPcm(Allocator& allocator) noexcept;

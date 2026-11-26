@@ -1,4 +1,5 @@
 #include "FlacTestFixtures.h"
+#include "SourceAudioReference.h"
 
 #include <AudioTools/SourceAudio.h>
 #include <Core/Containers/Array.h>
@@ -26,9 +27,9 @@ constexpr uint32 BitsPerWord = 32;
 
 // 시험 입력의 형식이다.
 constexpr uint32 Stereo16Rate = 44100;
-constexpr uint64 Stereo16Frames = 1000;
+constexpr uint64 Stereo16Frames = sourcereference::FlacStereo16Frames;
 constexpr uint32 Mono24Rate = 96000;
-constexpr uint64 Mono24Frames = 600;
+constexpr uint64 Mono24Frames = sourcereference::FlacMono24Frames;
 constexpr uint32 Mono16Rate = 48000;
 constexpr uint64 Mono16Frames = 500;
 constexpr uint32 Bits16 = 16;

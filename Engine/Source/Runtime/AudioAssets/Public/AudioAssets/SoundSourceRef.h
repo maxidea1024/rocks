@@ -3,7 +3,7 @@
 #include <Audio/DistanceAttenuation.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
-#include <EngineAudio/SoundPcm.h>
+#include <AudioAssets/SoundPcm.h>
 #include <Object/AssetId.h>
 
 // 재생 요청이 넘기는 사운드 스냅숏이다(Docs/Design/AudioSystem 3.35.3절). 재생은 시작 때의
@@ -48,7 +48,7 @@ struct SoundPlayable {
     uint64 revision = 0;
 };
 
-class ROCKS_ENGINEAUDIO_API SoundSourceRef {
+class ROCKS_AUDIOASSETS_API SoundSourceRef {
 public:
     SoundSourceRef() noexcept = default;
 
@@ -80,6 +80,6 @@ private:
 };
 
 // 스냅숏 검사만 한다(TryCreate와 같은 규칙). AttenuationSettings 등이 값 확인에 쓴다.
-ROCKS_ENGINEAUDIO_API Result<void> ValidateSoundAttenuation(const SoundAttenuation& value) noexcept;
+ROCKS_AUDIOASSETS_API Result<void> ValidateSoundAttenuation(const SoundAttenuation& value) noexcept;
 
 } // namespace rocks

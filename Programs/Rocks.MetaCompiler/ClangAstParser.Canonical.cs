@@ -595,6 +595,30 @@ internal sealed partial class ClangAstParser
                 }
             }
 
+            // 리플렉션 함수의 매개변수·반환 형식(Docs/Design/FunctionReflection.ko.md FD4·FD5)은 멤버 함수 포인터 형식을 RocksFunctionShape로
+            // 나눠 묻는다(이름에 오버로드가 없다 — RMC2702). 답은 cv·참조를 담은 정규 철자다(값 종류 판정이 벗긴다).
+            foreach (FunctionModel function in model.Functions)
+            {
+                string shape = $"typename ::rocks_meta_canon::RocksFunctionShape<decltype(&{owner}::{function.Name})>";
+                for (int index = 0; index < function.Parameters.Count; ++index)
+                {
+                    FieldModel slot = function.Parameters[index];
+                    string written = slot.NativeSpelling;
+                    MetadataException Fail(string clang) =>
+                        new MetadataException($"{model.Name}::{function.Name}: Clang did not name the parameter type '{written}' (Clang: {clang})", "RMC2001", hint).At(function.Site);
+                    string question = $"{shape}::template rocksParameter<{index}>";
+                    answers.Add((batch.Add(position => CanonicalTypeProbe.TypeLine(position, question)), answer => slot.NativeSpelling = answer, Fail));
+                }
+
+                if (function.Result is FieldModel result)
+                {
+                    string written = result.NativeSpelling;
+                    MetadataException Fail(string clang) =>
+                        new MetadataException($"{model.Name}::{function.Name}: Clang did not name the return type '{written}' (Clang: {clang})", "RMC2001", hint).At(function.Site);
+                    answers.Add((batch.Add(position => CanonicalTypeProbe.TypeLine(position, $"{shape}::rocksResult")), answer => result.NativeSpelling = answer, Fail));
+                }
+            }
+
             foreach (NativeMemberModel native in model.NativeMembers)
             {
                 string member = $"decltype({owner}::{native.Name})";

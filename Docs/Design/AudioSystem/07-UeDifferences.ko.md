@@ -28,4 +28,6 @@
 | 5.1 서라운드 쌍 | 장치 마스크(Windows 기본 BL·BR 210°·150°) | SL·SR 250°·110° 고정, 장치 마스크 대응은 AU9 | ITU-R BS.775 배치, 내부 순서 고정(3.3절) |
 | HPF 계수 | `FastTan` 근사 | `PlatformMath::Tan` | 정확한 기준값 대조 |
 | 다채널 분리 임포트 | `_L`·`_R` 파일 묶음 임포트 | 받지 않음 | 수요 생기면 |
+| 파일 loop 구간 | `USoundWave` looping은 늘 파형 전체, `smpl` loop는 cue point(loop region)로만 남고 믹서가 쓰지 않는다 | looping이면 사용자 `loopOverride` > 파일 loop > 전체(개정 33, 3.36.2절) | intro + loop 음악을 그래프 없이 |
+| 원본 bulk 정밀도 | 16비트 교차 WAV byte | 디코드 PCM planar, Int16·Int24·Float32(3.10.1절) | 24비트·float 원본 정밀도 유지 |
 | 합성 사운드 에셋 | Sound Cue(`USoundNode` 트리)와 MetaSounds 둘 다 | `SoundGraph`(MetaSounds 대응) 하나 | UE도 새 작업은 MetaSounds가 주력이고 Sound Cue 기능(랜덤·레이어·switch·지연·loop)은 그래프 노드로 덮인다. 두 체계를 따로 유지하지 않는다(AD29) |

@@ -38,6 +38,9 @@ internal sealed class ConditionalScan
     // 파일(정규 경로) → 허용된 에디터 데이터 블록 첫 가지의 줄 범위(여는 #if 줄부터 닫는 #else·#elif·#endif 줄까지)다.
     private readonly Dictionary<string, List<(int First, int Last)>> editorDataBlocks = new(PathComparer);
 
+    // 허용된 에디터 블록(#if ROCKS_WITH_EDITOR의 첫 가지)의 줄 범위다(EditorOnly 함수 일치 — Docs/Design/FunctionReflection.ko.md FD14).
+    private readonly Dictionary<string, List<(int First, int Last)>> editorBlocks = new(PathComparer);
+
     private enum BlockKind { EditorData, Editor, Other }
 
     private sealed class Block(BlockKind kind, int line)
@@ -75,6 +78,10 @@ internal sealed class ConditionalScan
     public bool InEditorDataBlock(string file, int line) =>
         editorDataBlocks.TryGetValue(Key(file), out List<(int First, int Last)>? blocks) && blocks.Any(block => line > block.First && line < block.Last);
 
+    // 함수 줄이 허용된 에디터 블록(#if ROCKS_WITH_EDITOR) 안인지다(EditorOnly 함수 일치).
+    public bool InEditorBlock(string file, int line) =>
+        editorBlocks.TryGetValue(Key(file), out List<(int First, int Last)>? blocks) && blocks.Any(block => line > block.First && line < block.Last);
+
     private static string Key(string path) => File.Exists(path) ? CanonicalPath.Resolve(path) : Path.GetFullPath(path);
 
     private void ScanFile(string path, string text)
@@ -82,6 +89,7 @@ internal sealed class ConditionalScan
         string[] lines = CppSourceText.WithoutCommentsAndLiterals(text).Split('\n');
         var stack = new List<Block>();
         var blocks = new List<(int First, int Last)>();
+        var editor = new List<(int First, int Last)>();
         for (int index = 0; index < lines.Length; ++index)
         {
             int lineNumber = index + 1;
@@ -113,11 +121,11 @@ internal sealed class ConditionalScan
                         stack.Add(new(BlockKind.Other, lineNumber));
                         break;
                     case "elif" or "elifdef" or "elifndef" or "else" when stack.Count != 0:
-                        Close(stack[^1], lineNumber, blocks);
+                        Close(stack[^1], lineNumber, blocks, editor);
                         stack[^1].FirstBranch = false;
                         break;
                     case "endif" when stack.Count != 0:
-                        Close(stack[^1], lineNumber, blocks);
+                        Close(stack[^1], lineNumber, blocks, editor);
                         stack.RemoveAt(stack.Count - 1);
                         break;
                 }
@@ -150,11 +158,21 @@ internal sealed class ConditionalScan
         {
             editorDataBlocks[Key(path)] = blocks;
         }
+
+        if (editor.Count != 0)
+        {
+            editorBlocks[Key(path)] = editor;
+        }
     }
 
-    // 블록의 첫 가지가 끝난다. 허용된 에디터 데이터 블록이면 그 줄 범위를 남긴다.
-    private static void Close(Block block, int lineNumber, List<(int First, int Last)> blocks)
+    // 블록의 첫 가지가 끝난다. 허용된 에디터 데이터 블록·에디터 블록이면 그 줄 범위를 남긴다.
+    private static void Close(Block block, int lineNumber, List<(int First, int Last)> blocks, List<(int First, int Last)> editor)
     {
+        if (block.FirstBranch && block.Kind == BlockKind.Editor)
+        {
+            editor.Add((block.Line, lineNumber));
+        }
+
         if (block.FirstBranch && block.Kind == BlockKind.EditorData)
         {
             blocks.Add((block.Line, lineNumber));
