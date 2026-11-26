@@ -19,7 +19,7 @@
 | IA6a | 에셋 타입(2.8절 — `InputAction`·`InputContext`의 `Asset` 파생, `HapticEffectAsset`, 실효 id, lease 읽기 도우미) | 리플렉션 형태(기반 `Asset`·필드), 쿠킹 패키지 로드(Hard 참조 액션 함께 로드)와 모은 bundle = source에서 모은 bundle(트리거·모디파이어·매핑 설정·프로필 override까지), 하위 객체 액션, 실효 id(0이면 AssetId), 도우미 `TypeMismatch`·무효·회수 lease·`WrongThread`·할당 실패(시도마다) 시 출력 그대로, 햅틱 사본·lease 재생과 그 실패 |
 | IA6b | PlayerController 에셋 컨텍스트(5.4절) | Add(쥠·같은 에셋 다시 넣기는 lease를 가져가 놓음·다른 원천 같은 id 거부·실패 시 lease 그대로)·Remove(등록 횟수 0에 놓음)·Refresh(데이터 변경 반영·id 변경 거부·회수 lease)·직접 뺀 컨텍스트와 빼고 다시 넣은 같은 id(세대) 정리·EndPlay 해제·World 전체 Refresh |
 | IA6c | 편집기(입력 에셋 편집 화면·키 선택·액션 고르기가 실효 id를 적음·복제 때 `id` 0으로 되돌림 — 2.8절) | Studio 단계 |
-| IA7 | 함수 바인딩(`(객체 handle, FunctionId)` → `BindAction` — 5.1절, [함수 리플렉션](../FunctionReflection.ko.md) FR4 뒤) | 서명 검사 거부·객체 사라짐 건너뛰기·쿠킹 EditorOnly 함수 거부 |
+| IA7 | 함수 바인딩(`(객체 handle, FunctionId)` → `BindAction` — 5.1절, 재사용 값 `FunctionBinding` — [이벤트 리플렉션](../EventReflection.ko.md) EV1a 뒤) | 서명 검사 거부·객체 사라짐 건너뛰기·쿠킹 EditorOnly 함수 거부 |
 
 단계마다 구현 → 바뀐 시험 → 리뷰어 1명 → 커밋·push다.
 
