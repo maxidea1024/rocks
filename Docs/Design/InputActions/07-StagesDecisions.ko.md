@@ -15,6 +15,7 @@
 | IA3 | Gameplay 연결(5.1절) | 바인딩 전달 순서·Started 먼저·콜백 중 변경·값 바인딩·pause |
 | IA4 | 사용자 설정·리바인딩·저장(5.2·5.3절) | 등록 slot, Map·Unmap, 프로필 전환, 재생성 반영, JSON 왕복·모르는 이름 |
 | IA5 | 햅틱(6절), `input::MotorValues`, `GamepadBackend::SetMotors`(Windows) | 커브 평가·duration·loop·tag 교체·pause·최댓값 합성·scale·끔, XInput 모터 변환(순수 함수로 시험) |
+| IA5b | Android 패드 진동(6.4절 — 입력 스레드 JNI, `VIBRATE` 권한) | 세기 바이트 변환·1초 다시 쓰기·포커스 0(시각을 인자로 준 시간열), Android 빌드 |
 | IA6 | 에셋 감싸기·편집기(후속) | — |
 
 단계마다 구현 → 바뀐 시험 → 리뷰어 1명 → 커밋·push다.

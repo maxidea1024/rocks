@@ -82,11 +82,25 @@ UE `UForceFeedbackComponent`는 7.4절이다.
 
 `GamepadBackend::SetMotors(uint32 index, const input::MotorValues&) → Result<void>`
 - 게임 스레드에서 `Poll`과 같은 스레드로 부른다.
-- 가상 함수이고 기본 구현은 `Unsupported`다(Android·Mac backend는 진동을 붙일 때 덮어쓴다).
+- 가상 함수이고 기본 구현은 `Unsupported`다(Mac backend는 진동을 붙일 때 덮어쓴다).
 - Windows XInput(UE `XInputInterface.cpp:373-385`). `XInputSetState`는 선택 함수다(찾지 못하면 SetMotors가 `Unsupported` — 입력은 그대로):
   - wLeftMotorSpeed = round(max(leftLarge, rightLarge) · 65535)
   - wRightMotorSpeed = round(max(leftSmall, rightSmall) · 65535)
 - 변환 결과(16비트 두 값)가 직전에 쓴 값과 다를 때만 `XInputSetState`를 부른다. 패드가 새로 연결되면 직전 값을 0으로 되돌린다.
-- 범위 밖 index는 `InvalidArgument`, 연결되지 않은 패드는 `NotFound`, 비유한 값은 `InvalidArgument`, 지원하지 않는 플랫폼은 `Unsupported`다(Android 패드 진동은 AndroidPlatform 후속). `XInputSetState`가 실패하면 `IoError`다(직전 값은 그대로 — 다음에 다시 쓴다).
+- 범위 밖 index는 `InvalidArgument`, 연결되지 않은 패드는 `NotFound`, 비유한 값은 `InvalidArgument`, 지원하지 않는 플랫폼은 `Unsupported`다. `XInputSetState`가 실패하면 `IoError`다(직전 값은 그대로 — 다음에 다시 쓴다).
 - 백엔드가 없어지면(소멸자) 연결된 패드에 0을 쓴다.
 - 변환은 순수 함수 `XInputMotorSpeeds(MotorValues)`로 따로 두고 시험한다. 입력은 [0, 1]로 잘라 쓴다.
+
+Android 패드(UE `AndroidInputInterface.cpp:598-651` `UpdateControllerVibeMotors`, `GameActivity.java.template:7339-7370` `AndroidThunkJava_SetInputDeviceVibrators` — 2026-11-26):
+- 세기: 왼쪽 = 바이트(max(leftLarge, leftSmall)), 오른쪽 = 바이트(max(rightLarge, rightSmall))다. 바이트(v) = clamp(⌊v·255⌋, 0, 255)(UE `ConvertToByte` — 버림). XInput과 짝짓는 방식이 다르다(XInput은 큰·작은 모터, Android는 왼쪽·오른쪽 진동자 — 둘 다 UE 그대로).
+- 진동자: 패드 `InputDevice`의 `getVibratorManager()`(API 31)가 있으면 진동자가 하나면 그것에 max(왼쪽, 오른쪽), 둘 이상이면 첫째에 왼쪽·둘째에 오른쪽이다. 메서드가 없으면(API 31 미만) `getVibrator()` 하나에 max다(UE는 SDK 버전을 보고, Rocks는 메서드가 있는지 본다 — 같은 결과).
+- 한 번 쓰기: 세기가 1 이상이면 `vibrate(VibrationEffect.createOneShot(1000 ms, 세기))`, 0이면 `cancel()`이다.
+- 다시 쓰기: one-shot이 1초 뒤 멈추므로, 0이 아닌 값을 쓴 지 1초(UE `MaxVibeTime` 1000) 이상 지났으면 직전 값을 0으로 보고 같은 값도 다시 쓴다. 그 밖에는 바뀐 세기만 쓴다. 판단은 순수 함수 `NextAndroidVibration(상태, MotorValues, 포커스, 지금 ms, 쓸 값)`(Common)이고 시험은 시각을 인자로 준다(벽시계에 기대지 않는다).
+- 호출 빈도: UE는 입력 인터페이스가 Tick마다 스스로 다시 건다. Rocks는 다시 걸기와 포커스 끄기가 `SetMotors` 안에 있으므로, 호스트는 진동하는 동안 같은 값이라도 프레임마다 부른다(Sandbox 호스트가 그렇게 한다 — 바뀔 때만 부르면 Android 진동이 1초 뒤 멈춘다).
+- 스레드: 게임 스레드는 JavaVM에 붙어 있지 않다. `SetMotors`는 쓸 요청(장치 ID·두 세기)을 패드 저장소의 그 슬롯에 두고(아직 처리되지 않은 요청은 새 요청이 덮는다) 창 입력 스레드의 looper를 깨운다. JavaVM에 붙은 입력 스레드가 JNI로 쓴다(UE는 `runOnUiThread`로 UI 스레드에 넘긴다 — 다른 점. 바뀐 값만 쓰고 처리 전 요청을 덮으므로 binder 호출은 많아야 프레임마다 패드당 진동자 수다). 창이 없거나 입력 스레드가 JavaVM에 붙지 못했으면 `Unsupported`다.
+- 포커스: 앱이 포커스를 잃으면 0으로 쓴다(UE `IsGameInFocus`). 포커스가 없는 동안 요청은 0이다. one-shot이 이미 끝난 뒤 포커스를 잃으면 쓰지 않는다(UE는 지난 세기로 판단해 0을 한 번 더 쓴다 — 결과는 같다).
+- 패드 진동자 판정: UE는 `Android.UseControllerFeedback`과 장치 정보의 모터 수(`FeedbackMotorCount > 0`)를 본다. Rocks는 그 설정이 없고 모든 패드에 JNI로 물어본다(진동자 id가 비었거나 진동자가 없으면 아무것도 하지 않는다).
+- 권한: `android.permission.VIBRATE`를 manifest에 늘 넣는다(UE `UEDeployAndroid.cs:3080` — UE는 Meta Quest 패키지와 manifest 요구 재정의가 있을 때만 뺀다).
+- 장치가 사라졌거나(`getDevice`가 null) 진동자가 없거나 Java 예외가 나면 그 요청을 버린다(예외는 지운다). 비동기라 `SetMotors`의 결과로 돌려주지 못한다 — 요청을 넣으면 성공이다.
+- 휴대폰 본체 진동(패드가 없을 때 UE `AndroidThunkCpp_Vibrate`)은 들이지 않는다(후속 — `SetMotors`는 패드 슬롯 단위다).
+- 백엔드가 없어지면 0이 아닌 값을 쓴 슬롯에 0 요청을 넣는다. 입력 스레드는 끝나기 전에 남은 요청을 쓴다. 창(입력 스레드)이 먼저 없어졌으면 요청을 넣지 못하고, 진동은 one-shot 길이(1초) 안에 스스로 멈춘다.

@@ -52,6 +52,11 @@ public:
     void DestroyBody(PhysicsBodyHandle body) noexcept override;
     void SetBodyTransform(PhysicsBodyHandle body, const Transform& worldTransform,
                           TeleportMode mode) noexcept override;
+    void SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion, bool wake) noexcept override;
+    void SetBodyCollision(PhysicsBodyHandle body,
+                          const ResolvedCollision& collision) noexcept override;
+    Result<void> SetBodyGeometry(PhysicsBodyHandle body,
+                                 const BodyGeometry& geometry) noexcept override;
     Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept override;
 
     // 한 step(seconds초, collision step 1)을 진행한다. 오류: seconds가 양의 유한값이 아님
@@ -94,6 +99,11 @@ private:
         uint32 generation = 1;
         BodyMotion motion = BodyMotion::Static;
         bool live = false;
+        // 형상을 다시 만들 때 쓰는 값이다(7.1.5절): scale 전 형상, 지금 형상에 구운 월드 scale,
+        // 형상 교체 때 질량을 다시 계산할지(BodySettings::updateMassWhenScaleChanges).
+        BodyGeometry geometry;
+        Vec3d scale = Vec3d::One();
+        bool updateMassOnShapeChange = true;
         // 결과 목록에 이미 있는지다(중복 방지).
         bool pendingResult = false;
         // kinematicTargets_에 이미 있는지다(중복 방지 — hasTarget과 따로: teleport가 목표를 지워도
@@ -136,6 +146,11 @@ private:
     };
 
     const BodySlot* FindSlot(PhysicsBodyHandle body) const noexcept;
+
+    // 형상 값·scale로 형상을 다시 만들어 바꾸고 깨운다(7.1.5절). 실패하면 이전 형상을 둔다.
+    // 오류: 형상 없음·비유한 값(InvalidArgument).
+    Result<void> ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
+                              const Vec3d& scale) noexcept;
 
     // body user data(칸 번호·세대)의 칸을 결과 목록에 한 번만 넣는다(살아 있는 Dynamic만).
     void MarkMoved(JPH::uint64 userData) noexcept;

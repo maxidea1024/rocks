@@ -102,7 +102,7 @@ SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 LC4d에서 함께 했�
 | SE-B10 | 디버거(DAP) 전송: 소켓과 VM 디버거 연결 | 없음 | `PlatformBase` 공개 헤더에 소켓이 없다 | EI7 | SL 13절 |
 | SE-B11 | (선택) Sparks 전용 시험 실행 파일 | 없음 | Engine 층 시험은 EngineTests에만 들어가고(Graphics·Vulkan까지 링크) CI는 Foundation·Commandlet만 돌린다 | — | UnityBuildPch·빌드 규칙 |
 
-SE-B7은 Commandlet의 표준 출력 구현을 PlatformBase로 올리고 표준 입력 읽기를 더하는 작업이다. SE-B3이 없는 동안 `Math.Sin` 등은 Core의 플랫폼 수학 함수를 부른다. VM과 AOT는 같은 함수를 부르므로 backend 사이 결과는 같고, 플랫폼 사이 비트 동일성만 보장하지 않는다.
+LC8 도구가 연동 때 더할 것(작업 공간 설정 파일, headless World fixture host, 리터럴 인자 자동완성, schema `doc`의 hover 표시)은 [SparksTools](SparksTools.ko.md) 13절에 모았다. 필요한 엔진 항목은 SE-A5·SE-G2(사전)와 EI1(schema 생성)이다. SE-B7은 Commandlet의 표준 출력 구현을 PlatformBase로 올리고 표준 입력 읽기를 더하는 작업이다. SE-B3이 없는 동안 `Math.Sin` 등은 Core의 플랫폼 수학 함수를 부른다. VM과 AOT는 같은 함수를 부르므로 backend 사이 결과는 같고, 플랫폼 사이 비트 동일성만 보장하지 않는다.
 
 ## 3. 연동 단계
 
@@ -125,3 +125,4 @@ SE-B7은 Commandlet의 표준 출력 구현을 PlatformBase로 올리고 표준 
 - 개정 1(2026-11-20): 첫 목록. SL 초안 1.3의 17.2절에 있던 코드 쪽 후속 항목을 옮기고 현재 상태를 코드로 확인하였다. 리뷰어 1명이 상태 표기와 "언어 코어에 밖의 선행이 없다"는 주장을 코드와 대조하였다(상태 정정 8건, 항목 추가 9건, LC4의 ID manifest와 LC8의 표준 출력 반영). 리뷰어가 확인하지 못한 것: macOS·Android backend 세부, 로그 카테고리의 실행 중 등록 가능 여부.
 - 개정 2(2026-11-22): SE-G7에 오디오 설계([오디오 시스템](AudioSystem/03-Design/03.17-Sparks.ko.md) 3.17절)를 반영했다.
 - 개정 3(2026-11-25): LC9(AOT)를 미룬다는 사용자 결정(SL SD77)을 머리말에 반영했다. EI8은 그대로 LC9 뒤다.
+- 개정 4(2026-11-26): LC8 묶음 끝 리뷰 — 2.6절 아래에 도구 쪽 연동 항목 안내(SparksTools 13절)를 더했다.
