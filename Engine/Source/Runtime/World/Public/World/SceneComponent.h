@@ -251,9 +251,12 @@ public:
         return mobility_;
     }
 
-    void SetMobility(ComponentMobility mobility) noexcept {
-        mobility_ = mobility;
-    }
+    // Mobility를 바꾼다(UE SetMobility). 값이 바뀌고 등록돼 있으면 시스템 상태를 종류마다 그
+    // 자리에서 다시 만든다(UE는 재등록 — Docs/Design/PhysicsModule 7.1.5절, 물리 body의 Static ↔
+    // Movable). Movable이 되면 자식도 Movable로 바꾼다(Static 자식을 Movable 부모 아래 둘 수 없다 —
+    // UE와 같다). 다시 만들기 실패는 그 종류 없이 두고 Warning SystemStateRecreateFailed다(값은
+    // 바뀐다).
+    void SetMobility(ComponentMobility mobility) noexcept;
 
     // --- 가시성(23.3절) ---
 

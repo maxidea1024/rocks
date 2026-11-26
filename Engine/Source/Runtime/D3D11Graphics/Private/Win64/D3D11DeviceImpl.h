@@ -270,6 +270,8 @@ public:
                                             const TextureViewDesc& desc) noexcept override;
     Result<TextureSubresources>
     GetTextureSubresources(TextureHandle texture) const noexcept override;
+    Result<TextureViewInfo> GetTextureViewInfo(TextureHandle texture) noexcept override;
+    Result<BufferViewInfo> GetBufferViewInfo(BufferViewHandle view) noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
@@ -390,7 +392,9 @@ private:
     void SetVertexBuffers(uint32 firstStream,
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
-    void SetTexture(TextureHandle texture) noexcept override;
+    void SetTexture(ShaderStage stage, uint32 slot, TextureHandle texture) noexcept override;
+    Result<void> SetSampler(ShaderStage stage, uint32 slot,
+                            const SamplerDesc* sampler) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void SetConstantBuffer(ShaderStage stage, uint32 slot,
@@ -529,7 +533,11 @@ private:
 
     Result<ID3D11SamplerState*> SamplerFor(const SamplerDesc& desc) noexcept;
     // 파이프라인 slot 표의 자원을 지금 기록의 단계 slot에 건다(그리기·dispatch 직전).
-    void ApplySlots(const PipelineRecord& pipeline) noexcept;
+    // 파이프라인 slot 표대로 자원을 건다. 공유 샘플러에 준 값이 없으면 아무것도 걸지 않고
+    // 거짓이다(그리기·dispatch를 무시한다, RenderBase 9.13절 3항).
+    bool ApplySlots(const PipelineRecord& pipeline) noexcept;
+    // 단계·slot에 묶인 텍스처 기록이다(없거나 SRV가 없으면 흰 텍스처).
+    const TextureRecord* BoundTexture(uint32 stage, uint32 slot) const noexcept;
     // --- 버퍼 view(D3D11Buffers.cpp) ---
     Result<TextureHandle> CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
                                                     const ResolvedSubresourceRange& range,
@@ -662,10 +670,12 @@ private:
     // context와 command list가 기록 동안 참조를 잡는다).
     ComRef<ID3D11RenderTargetView> passRtvs_[MaxColorTargets];
     ComRef<ID3D11DepthStencilView> passDsv_;
-    // compute 쓰기 slot에 묶인 텍스처 쓰기 view(버퍼 view와 같은 slot 공간)와 SetTexture로 묶은
-    // 텍스처 기록이다(dispatch가 CS t0·s0에 걸고, 그리기가 PS t0을 다시 건다).
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view(버퍼 view와 같은 slot 공간)다.
     TextureHandle boundWriteTextures_[MaxDrawBufferViews];
-    SlotHandle boundTexture_;
+    // 단계·텍스처 slot마다 SetTexture로 묶은 텍스처 기록(null이면 흰 텍스처)과 샘플러 slot마다
+    // SetSampler로 준 값(null이면 없음 — 객체는 SamplerFor 캐시가 소유)이다(RenderBase 9.13절).
+    SlotHandle boundTextures_[ConstantBufferStageCount][MaxResourceSlots] = {};
+    ID3D11SamplerState* boundSamplers_[ConstantBufferStageCount][MaxResourceSlots] = {};
     uint32 stencilReference_ = 0;
     // dispatch가 UAV를 묶어 런타임이 입력 binding(정점·index·SRV)을 풀었을 수 있다. 다음 그리기가
     // 정점·index 버퍼를 다시 묶는다.

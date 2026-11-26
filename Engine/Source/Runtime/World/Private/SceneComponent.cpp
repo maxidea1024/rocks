@@ -354,6 +354,31 @@ bool SceneComponent::IsVisible() const noexcept {
     return !(gameWorld && hiddenInGame_);
 }
 
+void SceneComponent::SetMobility(ComponentMobility mobility) noexcept {
+    if (mobility_ == mobility) {
+        return;
+    }
+
+    mobility_ = mobility;
+    if (IsRegistered()) {
+        for (uint32 index = 0; index < SystemStateKindCount; ++index) {
+            // 실패는 RecreateSystemStateNow가 Warning으로 남긴다(값 변경은 유지 — ERD25).
+            (void)RecreateSystemStateNow(static_cast<SystemStateKind>(index));
+        }
+    }
+
+    // 자식의 다시 만들기 hook이 이 목록을 바꿀 수 있으므로 handle 사본을 색인으로 돈다(UE도
+    // GetAttachChildren 사본을 돈다).
+    if (mobility == ComponentMobility::Movable && HasWorld()) {
+        for (usize index = 0; index < children_.Size(); ++index) {
+            const ObjectHandle child = children_[index];
+            (void)GetWorld().With<SceneComponent>(child, [](SceneComponent& scene) noexcept {
+                scene.SetMobility(ComponentMobility::Movable);
+            });
+        }
+    }
+}
+
 void SceneComponent::SetVisibility(bool visible, bool propagateToChildren) noexcept {
     ApplyVisibility(visible, hiddenInGame_, true, propagateToChildren);
 }

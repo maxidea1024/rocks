@@ -54,13 +54,15 @@ void FillBytes(Span<uint8> bytes, uint32 seed) noexcept {
 // --- 셰이더 ---
 // 정점 버퍼 없이 화면을 덮는 삼각형이다. 픽셀 셰이더는 대상의 열(x)로 읽을 자리를 고른다.
 
-// 셰이더는 FullScreen.rsf·Texture.rsf다(텍스처 이름은 파이프라인 이름 표 bindings.texture).
+// 셰이더는 FullScreen.rsf·Texture.rsf다(텍스처 slot은 값 1에서 이름으로 찾는다).
 
 // 대상 하나와 파이프라인 하나로 텍스처를 그려 대상 픽셀을 읽는다(대상은 columns × 1 RGBA8Unorm).
 struct Bench {
     Device* device = nullptr;
     TextureHandle target;
     PipelineHandle pipeline;
+    // PS 텍스처 slot이다(값 1 위치).
+    uint32 slot = MaxResourceSlots;
     uint32 columns = 0;
     uint8 pixels[16 * 4] = {};
 
@@ -75,7 +77,7 @@ struct Bench {
         desc.usage = TextureUsage::RenderTarget;
         auto created = owner.CreateTexture(desc, {});
         PipelineDesc pipelineDesc;
-        pipelineDesc.bindings.texture = texture;
+        slot = shaders::TextureSlot(pixel, texture);
         pipelineDesc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         auto made =
             shaders::CreateGraphicsPipeline(owner, shaders::FullScreenVS, pixel, pipelineDesc);
@@ -102,7 +104,7 @@ struct Bench {
             frame.Value()->Transition(before);
         }
         frame.Value()->SetPipeline(pipeline);
-        frame.Value()->SetTexture(texture);
+        frame.Value()->SetTexture(ShaderStage::Pixel, slot, texture);
         frame.Value()->Draw(3);
         return device->EndFrame().IsOk() &&
                device->ReadPixels(target, Span<uint8>(pixels, columns * 4)).IsOk();

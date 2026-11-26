@@ -363,6 +363,8 @@ PipelineBinding MapBinding(const PipelineSlotBinding& slot) noexcept {
     out.set = slot.stage == ShaderStage::Pixel ? 1u : 0u;
     out.binding = slot.location;
     out.slot = slot.slot;
+    out.stage = ConstantBufferStageIndex(slot.stage);
+    out.pair = slot.pair;
     const bool typed = slot.shape == shader::ShaderResourceShape::TypedBuffer;
     switch (slot.role) {
     case PipelineSlotRole::Texture:
@@ -372,6 +374,10 @@ PipelineBinding MapBinding(const PipelineSlotBinding& slot) noexcept {
     case PipelineSlotRole::Sampler:
         out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
         out.source = BindingSource::Sampler;
+        break;
+    case PipelineSlotRole::SharedSampler:
+        out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
+        out.source = BindingSource::SharedSampler;
         break;
     case PipelineSlotRole::BufferView:
         out.type =

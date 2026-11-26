@@ -31,7 +31,7 @@ auto Logged(uint32 id) noexcept {
 auto Sampling(uint32 id, GraphTexture texture) noexcept {
     return [id, texture](GraphPassContext& pass) noexcept {
         passLog.Add(id);
-        pass.Commands().SetTexture(pass.Texture(texture));
+        pass.Commands().SetTexture(graphics::ShaderStage::Pixel, 0, pass.Texture(texture));
         pass.Commands().Draw(3);
     };
 }

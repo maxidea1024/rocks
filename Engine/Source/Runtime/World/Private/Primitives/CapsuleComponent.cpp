@@ -35,6 +35,7 @@ Result<void> CapsuleComponent::SetCapsuleSize(float radius, float halfHeight) no
         capsuleHalfHeight_ = raisedHalfHeight;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();

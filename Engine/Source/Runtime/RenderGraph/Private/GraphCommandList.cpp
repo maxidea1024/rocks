@@ -64,9 +64,12 @@ void GraphCommandList::SetIndexBuffer(BufferHandle buffer, graphics::IndexFormat
     Push(command);
 }
 
-void GraphCommandList::SetTexture(TextureHandle texture) noexcept {
+void GraphCommandList::SetTexture(graphics::ShaderStage stage, uint32 slot,
+                                  TextureHandle texture) noexcept {
     Command command;
     command.op = Op::SetTexture;
+    command.a = static_cast<uint32>(stage);
+    command.b = slot;
     command.first = texture.slot;
     Push(command);
 }
@@ -99,6 +102,19 @@ void GraphCommandList::SetConstantBuffer(graphics::ShaderStage stage, uint32 slo
 }
 
 // byte는 arena에 복사하고 재생 때 장치 ring에 올린다(RenderBase 9.11절 8항).
+Result<void> GraphCommandList::SetSampler(graphics::ShaderStage stage, uint32 slot,
+                                          const graphics::SamplerDesc* sampler) noexcept {
+    Command command;
+    command.op = Op::SetSampler;
+    command.a = static_cast<uint32>(stage);
+    command.b = slot;
+    command.data = sampler != nullptr
+                       ? Copy(sampler, sizeof(*sampler), alignof(graphics::SamplerDesc))
+                       : nullptr;
+    Push(command);
+    return Result<void>::Success();
+}
+
 Result<void> GraphCommandList::SetConstantData(graphics::ShaderStage stage, uint32 slot,
                                                Span<const uint8> bytes) noexcept {
     Command command;
@@ -310,7 +326,8 @@ Result<void> GraphCommandList::Replay(graphics::CommandContext& target) const no
                                   static_cast<graphics::IndexFormat>(command.a), command.x);
             break;
         case Op::SetTexture:
-            target.SetTexture(TextureHandle{command.first});
+            target.SetTexture(static_cast<graphics::ShaderStage>(command.a), command.b,
+                              TextureHandle{command.first});
             break;
         case Op::SetBufferView:
             target.SetBufferView(command.a, BufferViewHandle{command.first});
@@ -322,6 +339,10 @@ Result<void> GraphCommandList::Replay(graphics::CommandContext& target) const no
         case Op::SetConstantBuffer:
             target.SetConstantBuffer(static_cast<graphics::ShaderStage>(command.a), command.b,
                                      graphics::ConstantBufferHandle{command.first});
+            break;
+        case Op::SetSampler:
+            keep(target.SetSampler(static_cast<graphics::ShaderStage>(command.a), command.b,
+                                   static_cast<const graphics::SamplerDesc*>(command.data)));
             break;
         case Op::SetConstantData:
             keep(target.SetConstantData(

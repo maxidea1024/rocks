@@ -341,12 +341,16 @@ struct ViewBench {
 
     // view를 묶어 그린 뒤 (1, 1) 픽셀을 읽는다.
     bool Render(TextureHandle view, PipelineHandle pipeline, uint8 (&color)[4]) noexcept {
+        // 두 파이프라인의 텍스처 slot(Depth·Stencil)이다.
+        const uint32 slot = pipeline == stencilLoad
+                                ? shaders::TextureSlot(shaders::FormatLoadStencilPS, "Stencil")
+                                : shaders::TextureSlot(shaders::FormatLoadFloatPS, "Depth");
         auto frame = device->BeginOffscreen(target, {});
         if (!frame) {
             return false;
         }
         frame.Value()->SetPipeline(pipeline);
-        frame.Value()->SetTexture(view);
+        frame.Value()->SetTexture(ShaderStage::Pixel, slot, view);
         frame.Value()->Draw(3);
         if (!device->EndFrame() ||
             !device->ReadPixels(target, Span<uint8>(pixels, sizeof(pixels)))) {
@@ -513,10 +517,8 @@ void RunViewChecks(Device& device, Allocator& allocator) noexcept {
     auto target = device.CreateTexture(targetDesc, {});
     PipelineDesc pipelineDesc;
     pipelineDesc.colorFormats[0] = PixelFormat::RGBA8Unorm;
-    pipelineDesc.bindings.texture = "Depth";
     auto floatLoad = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS,
                                                      shaders::FormatLoadFloatPS, pipelineDesc);
-    pipelineDesc.bindings.texture = "Stencil";
     auto stencilLoad = shaders::CreateGraphicsPipeline(device, shaders::FullScreenVS,
                                                        shaders::FormatLoadStencilPS, pipelineDesc);
     Check(target.IsOk() && floatLoad.IsOk() && stencilLoad.IsOk(), PixelFormat::RGBA8Unorm,
