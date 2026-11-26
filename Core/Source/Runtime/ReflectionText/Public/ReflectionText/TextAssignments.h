@@ -106,7 +106,7 @@ public:
     }
 
     const ObjectAccessContext& Access() const noexcept {
-        return *access_;
+        return access_;
     }
 
     ObjectHandle Handle() const noexcept {
@@ -133,7 +133,10 @@ private:
 
     Kind kind_ = Kind::Live;
     ObjectRegistry* registry_ = nullptr;
-    const ObjectAccessContext* access_ = nullptr;
+    // 값으로 복사해 든다: 호출자는 흔히 값을 돌려주는 Access()(EditorPackageSet·World)를 그대로
+    // 넘기므로 주소를 들면 문장 끝에 사라진 임시를 가리킨다(Release에서 WrongContext — 리플렉션
+    // B9 대입 대상, Docs/Design/ReflectionExtensions 10.2절).
+    ObjectAccessContext access_{};
     ObjectHandle object_{};
     ConstructionContext* transaction_ = nullptr;
     const TypeLease* structType_ = nullptr;
