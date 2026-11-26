@@ -73,6 +73,11 @@ public:
         return index < IrEntryCount ? entryFeatures_[index] : NoMaterialContextFeatures;
     }
 
+    // 보간 값(Interpolate) 성분 수의 합이다(6.9절 MS2b4a — 보간 배정).
+    uint32 InterpolantComponents() const noexcept {
+        return interpolantComponents_;
+    }
+
     // 결과에서 닿는 문맥 값의 최소 기능 등급 중 가장 높은 것이다(6.9절 — 형식 거르기가 쓴다).
     MaterialCapabilityTier RequiredTier() const noexcept {
         return requiredTier_;
@@ -88,6 +93,7 @@ public:
         }
 
         requiredTier_ = MaterialCapabilityTier::Mobile;
+        interpolantComponents_ = 0;
     }
 
 private:
@@ -99,6 +105,7 @@ private:
     Sha256Digest hash_{};
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};
     MaterialCapabilityTier requiredTier_ = MaterialCapabilityTier::Mobile;
+    uint32 interpolantComponents_ = 0;
 };
 
 // builder의 값에서 results가 닿는 값만 골라 out을 채운다. 결과는 진입점 순서로 안정 정렬한다.

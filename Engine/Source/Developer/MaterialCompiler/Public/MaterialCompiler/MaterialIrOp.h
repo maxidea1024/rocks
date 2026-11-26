@@ -108,11 +108,15 @@ enum class IrOp : uint8 {
 
     // 문맥 값이다(6.9절). 즉시값 [0]은 문맥 값 표 번호, [1]은 IrExternVariant이고, 피연산자는
     // 함수형 값의 인자(0–3개)다.
-    Extern = 82
+    Extern = 82,
+
+    // 정점 → 픽셀 보간 값이다(6.9절 MS2b4a — VertexInterpolator). 피연산자는 정점 문맥 값, 즉시값
+    // [0]은 모듈이 정한 첫 성분 번호(성분 단위 오프셋)다.
+    Interpolate = 83
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 83;
+inline constexpr uint32 IrOpCount = 84;
 
 // 연산이 받는 피연산자 수다(Constant 0, 단항 1, 이항 2, 삼항·선택·분기 3, Append 2). 인자 수가
 // 값마다 다른 Extern은 0이다(값의 operandCount를 본다).

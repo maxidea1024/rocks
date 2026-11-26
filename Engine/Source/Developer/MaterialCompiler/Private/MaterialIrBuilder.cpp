@@ -471,7 +471,7 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
             static_cast<uint8>(operand) > static_cast<uint8>(frequency) ? operand : frequency;
     }
 
-    if (value.op == IrOp::Ddx || value.op == IrOp::Ddy) {
+    if (value.op == IrOp::Ddx || value.op == IrOp::Ddy || value.op == IrOp::Interpolate) {
         frequency = IrFrequency::Pixel;
     }
 
@@ -1097,6 +1097,26 @@ Result<IrValueId> IrBuilder::Extern(uint32 index, IrExternVariant variant, IrTyp
 
     value.immediate[0] = index;
     value.immediate[1] = static_cast<uint64>(variant);
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::Interpolate(IrValueId vertex) noexcept {
+    if (!IsValid(vertex) || values_[vertex].type.scalar != IrScalar::Float ||
+        values_[vertex].type.IsMatrix()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (IsConstant(vertex)) {
+        // 상수는 보간해도 같은 값이다.
+        return Result<IrValueId>::Success(vertex);
+    }
+
+    IrValue value;
+    value.type = values_[vertex].type;
+    value.op = IrOp::Interpolate;
+    value.frequency = IrFrequency::Pixel;
+    value.operandCount = 1;
+    value.operands[0] = vertex;
     return Intern(value);
 }
 

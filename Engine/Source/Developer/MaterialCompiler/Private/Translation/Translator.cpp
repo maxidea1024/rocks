@@ -36,11 +36,17 @@ constexpr OutputSlot OutputSlots[] = {
 
 // MS2a가 번역하지 않는 출력 핀이다(연결이 있으면 NotYetLowered — Surface·Attributes·Displacement는
 // MS2d, CustomizedUv는 MS2b).
-constexpr StringView PendingOutputPins[] = {
-    "Surface",       "Attributes",    "Displacement",  "CustomizedUv0",
-    "CustomizedUv1", "CustomizedUv2", "CustomizedUv3", "CustomizedUv4",
-    "CustomizedUv5", "CustomizedUv6", "CustomizedUv7",
-};
+constexpr StringView PendingOutputPins[] = {"Surface", "Attributes", "Displacement"};
+
+// CustomizedUv 출력 핀 키이자 Vertex 결과 slot이다(UE MP_CustomizedUVs0–7).
+constexpr StringView CustomizedUvPins[] = {"CustomizedUv0", "CustomizedUv1", "CustomizedUv2",
+                                           "CustomizedUv3", "CustomizedUv4", "CustomizedUv5",
+                                           "CustomizedUv6", "CustomizedUv7"};
+
+// 보간 벡터(float4) 상한이다(6.9절 MS2b4a — V9 보간 예산, TEXCOORDn n ≤ 15).
+constexpr uint32 MaxInterpolantVectors = 16;
+// 보간 벡터 하나의 성분 수다.
+constexpr uint32 InterpolantVectorComponents = 4;
 
 // 영역의 진단용 영어 이름이다(V6 문구).
 StringView DomainText(MaterialDomain domain) noexcept {
@@ -123,9 +129,10 @@ bool IsOutputActive(StringView pin, const MaterialTraitsDesc& traits) noexcept {
 Translator::Translator(Allocator& allocator, const MaterialTranslationInput& input,
                        MaterialTranslation& out) noexcept
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), nodes_(allocator),
-      edges_(allocator), outputs_(allocator), states_(allocator), lowerings_(allocator),
-      lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator),
-      results_(allocator) {
+      edges_(allocator), outputsVertex_(allocator), outputsPrevious_(allocator),
+      outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
+      statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
+      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -210,7 +217,7 @@ Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
 }
 
 Result<void> Translator::RecordOutput(Guid node, Name pin, IrValueId value) noexcept {
-    auto inserted = outputs_.Insert(PinKey{node, pin}, value);
+    auto inserted = Outputs().Insert(PinKey{node, pin}, value);
     if (!inserted) {
         return Result<void>::Failure(inserted.Error());
     }
@@ -275,8 +282,8 @@ Result<void> Translator::BuildIndex() noexcept {
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
     const Span<const LoweringEntry> groups[] = {
-        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),  ContextValueLowerings(),
-        CoordinateLowerings(), TransformLowerings(), SwitchLowerings()};
+        ConstantLowerings(),   MathLowerings(),      FlowLowerings(),   ContextValueLowerings(),
+        CoordinateLowerings(), TransformLowerings(), SwitchLowerings(), InterpolatorLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -359,7 +366,7 @@ Result<IrValueId> Translator::LowerConnection(const nodegraph::GraphNode& consum
                 return Result<IrValueId>::Success(NoIrValue);
             }
 
-            const NodeState* state = states_.Find(source->id);
+            const NodeState* state = States().Find(source->id);
             if (state != nullptr && *state == NodeState::Visiting) {
                 if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
                                            MaterialDiagnosticCode::Cycle, source->id, edge.fromPin,
@@ -372,12 +379,12 @@ Result<IrValueId> Translator::LowerConnection(const nodegraph::GraphNode& consum
                 return Result<IrValueId>::Success(NoIrValue);
             }
 
-            if (auto marked = states_.InsertOrAssign(source->id, NodeState::Visiting); !marked) {
+            if (auto marked = States().InsertOrAssign(source->id, NodeState::Visiting); !marked) {
                 return Result<IrValueId>::Failure(marked.Error());
             }
 
             auto passed = LowerConnection(*source, inputPin.Value(), connected);
-            states_.Erase(source->id);
+            States().Erase(source->id);
             return passed;
         }
 
@@ -389,11 +396,11 @@ Result<IrValueId> Translator::LowerConnection(const nodegraph::GraphNode& consum
 }
 
 Result<IrValueId> Translator::LowerNodeOutput(const nodegraph::GraphNode& node, Name pin) noexcept {
-    if (const IrValueId* known = outputs_.Find(PinKey{node.id, pin})) {
+    if (const IrValueId* known = Outputs().Find(PinKey{node.id, pin})) {
         return Result<IrValueId>::Success(*known);
     }
 
-    const NodeState* state = states_.Find(node.id);
+    const NodeState* state = States().Find(node.id);
     if (state == nullptr) {
         // 계획 밖의 요청이다(의존을 미리 알 수 없었다). 깊이 상한 안에서 재귀로 번역한다.
         if (depth_ >= MaxLoweringDepth) {
@@ -425,11 +432,11 @@ Result<IrValueId> Translator::LowerNodeOutput(const nodegraph::GraphNode& node, 
             return Result<IrValueId>::Failure(lowered.Error());
         }
 
-        if (const IrValueId* value = outputs_.Find(PinKey{node.id, pin})) {
+        if (const IrValueId* value = Outputs().Find(PinKey{node.id, pin})) {
             return Result<IrValueId>::Success(*value);
         }
 
-        state = states_.Find(node.id);
+        state = States().Find(node.id);
     }
 
     if (state != nullptr && *state == NodeState::Visiting) {
@@ -456,7 +463,7 @@ Result<IrValueId> Translator::LowerNodeOutput(const nodegraph::GraphNode& node, 
 }
 
 Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcept {
-    if (auto marked = states_.InsertOrAssign(node.id, NodeState::Visiting); !marked) {
+    if (auto marked = States().InsertOrAssign(node.id, NodeState::Visiting); !marked) {
         return Result<void>::Failure(marked.Error());
     }
 
@@ -516,7 +523,7 @@ Result<void> Translator::LowerNodeOnce(const nodegraph::GraphNode& node) noexcep
 
     const NodeState state =
         errorCount_ == errorsBefore && !poisoned ? NodeState::Done : NodeState::Failed;
-    if (auto marked = states_.InsertOrAssign(node.id, state); !marked) {
+    if (auto marked = States().InsertOrAssign(node.id, state); !marked) {
         return Result<void>::Failure(marked.Error());
     }
 
@@ -628,7 +635,8 @@ Result<void> Translator::RootStarts(const nodegraph::GraphNode& output, Span<con
 Result<void> Translator::LowerPlanned(Span<const usize> order) noexcept {
     for (usize index : order) {
         const nodegraph::GraphNode& node = graph_->nodes[index];
-        if (node.enableState == nodegraph::NodeEnableState::Disabled || states_.Contains(node.id)) {
+        if (node.enableState == nodegraph::NodeEnableState::Disabled ||
+            States().Contains(node.id)) {
             continue;
         }
 
@@ -663,7 +671,7 @@ Result<void> Translator::PlanOrder(Span<const usize> starts, Array<usize>& order
     }
 
     for (usize index = 0; index < marks.Size(); ++index) {
-        const NodeState* state = states_.Find(graph_->nodes[index].id);
+        const NodeState* state = States().Find(graph_->nodes[index].id);
         marks[index] = state == nullptr                ? Mark::White
                        : *state == NodeState::Visiting ? Mark::Gray
                                                        : Mark::Black;
@@ -799,7 +807,7 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto marked = states_.InsertOrAssign(output.id, NodeState::Visiting); !marked) {
+    if (auto marked = States().InsertOrAssign(output.id, NodeState::Visiting); !marked) {
         return Result<void>::Failure(marked.Error());
     }
 
@@ -863,7 +871,7 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
         }
     }
 
-    if (auto marked = states_.InsertOrAssign(output.id, NodeState::Done); !marked) {
+    if (auto marked = States().InsertOrAssign(output.id, NodeState::Done); !marked) {
         return Result<void>::Failure(marked.Error());
     }
 
@@ -922,6 +930,18 @@ Result<void> Translator::CheckContextValues() noexcept {
             }
         }
 
+        if (vertex) {
+            // 픽셀 진입점이 보간하는 정점 값도 정점 단계다.
+            for (usize id = 0; id < builder_.Count(); ++id) {
+                const IrValue& value = builder_.Value(static_cast<IrValueId>(id));
+                if (value.op == IrOp::Interpolate) {
+                    if (auto pushed = stack.TryPushBack(value.operands[0]); !pushed) {
+                        return pushed;
+                    }
+                }
+            }
+        }
+
         while (!stack.IsEmpty()) {
             auto popped = stack.TryPopBack();
             if (!popped) {
@@ -935,6 +955,11 @@ Result<void> Translator::CheckContextValues() noexcept {
 
             visited[id] = true;
             const IrValue& value = builder_.Value(id);
+            if (value.op == IrOp::Interpolate) {
+                // 보간 값 아래는 정점 단계다(정점 단계 차례에 본다 — 6.9절 MS2b4a).
+                continue;
+            }
+
             if (vertex && (value.op == IrOp::Ddx || value.op == IrOp::Ddy)) {
                 if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
                                            MaterialDiagnosticCode::StageViolation, value.site.node,
@@ -1058,6 +1083,100 @@ Result<void> Translator::CheckContextValues() noexcept {
     return Result<void>::Success();
 }
 
+Result<IrValueId> Translator::LowerInContext(EvaluationContext context,
+                                             const nodegraph::GraphNode& consumer, Name pin,
+                                             bool& connected) noexcept {
+    const EvaluationContext saved = context_;
+    context_ = context;
+    auto value = LowerConnection(consumer, pin, connected);
+    context_ = saved;
+    return value;
+}
+
+Result<void> Translator::TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept {
+    // UE: 픽셀이 쓰는 UV 채널 수만큼 정점 단계로 컴파일하고, i < NumCustomizedUVs이고 연결이 있으면
+    // 그 값, 아니면 정점 TexCoord(i) 그대로(HLSLMaterialTranslator.cpp:1684–1697,
+    // Material.cpp:7254–7268).
+    const MaterialNodeDefinition* definition = input_.catalog.Find(output.type);
+    if (definition == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    context_ = EvaluationContext::Vertex;
+    LoweringContext context(*this, output, *definition);
+    const uint32 limit = input_.traits.customizedUvCount;
+    for (uint32 index = 0; index < sizeof(CustomizedUvPins) / sizeof(CustomizedUvPins[0]);
+         ++index) {
+        const StringView pin = CustomizedUvPins[index];
+        auto connected = context.IsConnected(pin);
+        if (!connected) {
+            return Result<void>::Failure(connected.Error());
+        }
+
+        if (connected.Value() && index >= limit) {
+            if (auto reported = context.Warning(MaterialDiagnosticCode::InactiveOutput, pin,
+                                                "Customized UV pin is beyond the material's "
+                                                "customized UV count; it is ignored");
+                !reported) {
+                return reported;
+            }
+        }
+
+        if (index >= pixelTexCoords_) {
+            continue;
+        }
+
+        IrValueId value = NoIrValue;
+        if (connected.Value() && index < limit) {
+            auto custom = context.Input(pin);
+            if (!custom) {
+                return Result<void>::Failure(custom.Error());
+            }
+
+            auto coerced = context.Coerce(custom.Value(), MaterialPinType::Float2, pin);
+            if (!coerced) {
+                return Result<void>::Failure(coerced.Error());
+            }
+
+            value = coerced.Value();
+        } else {
+            auto slot = builder_.UIntConstant(Span<const uint32>(&index, 1));
+            if (!slot) {
+                return Result<void>::Failure(slot.Error());
+            }
+
+            const IrValueId arguments[] = {slot.Value()};
+            auto passthrough = context.ContextValue("TexCoord", arguments);
+            if (!passthrough) {
+                return Result<void>::Failure(passthrough.Error());
+            }
+
+            value = passthrough.Value();
+        }
+
+        if (value == NoIrValue) {
+            continue;
+        }
+
+        if (auto added = results_.TryPushBack(IrResult{IrEntry::Vertex, pin, value}); !added) {
+            return added;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> Translator::CheckInterpolantBudget() noexcept {
+    const uint32 components = out_.module.InterpolantComponents();
+    if (components <= MaxInterpolantVectors * InterpolantVectorComponents) {
+        return Result<void>::Success();
+    }
+
+    out_.module.Clear();
+    return Report(nodegraph::GraphDiagnosticSeverity::Error, MaterialDiagnosticCode::BudgetExceeded,
+                  Guid{}, Name(), "Maximum number of custom vertex interpolators exceeded");
+}
+
 Result<void> Translator::Run() noexcept {
     out_.module.Clear();
     out_.diagnostics.items.Clear();
@@ -1123,8 +1242,6 @@ Result<void> Translator::Run() noexcept {
         }
 
         context_ = context;
-        outputs_.Clear();
-        states_.Clear();
         if (auto rooted = ContextRoots(roots); !rooted) {
             return rooted;
         }
@@ -1147,6 +1264,10 @@ Result<void> Translator::Run() noexcept {
         }
     }
 
+    if (auto customized = TranslateCustomizedUvs(*output); !customized) {
+        return customized;
+    }
+
     if (auto checked = CheckContextValues(); !checked) {
         return checked;
     }
@@ -1157,6 +1278,14 @@ Result<void> Translator::Run() noexcept {
 
     if (auto built = BuildIrModule(builder_, results_.View(), out_.module); !built) {
         return built;
+    }
+
+    if (auto budget = CheckInterpolantBudget(); !budget) {
+        return budget;
+    }
+
+    if (failed_) {
+        return Result<void>::Success();
     }
 
     out_.succeeded = true;

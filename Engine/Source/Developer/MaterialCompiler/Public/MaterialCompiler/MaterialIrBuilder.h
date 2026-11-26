@@ -65,6 +65,9 @@ public:
     // 넘거나 빌더 밖이면 InvalidArgument.
     Result<IrValueId> Extern(uint32 index, IrExternVariant variant, IrType type,
                              IrFrequency frequency, Span<const IrValueId> arguments) noexcept;
+    // 정점 값 vertex를 픽셀로 보간한 값이다(6.9절 MS2b4a — Float 벡터·스칼라만, 상수는 그 상수).
+    // 오류: Float가 아니거나 빌더 밖이면 InvalidArgument.
+    Result<IrValueId> Interpolate(IrValueId vertex) noexcept;
 
     const IrValue& Value(IrValueId id) const noexcept;
 

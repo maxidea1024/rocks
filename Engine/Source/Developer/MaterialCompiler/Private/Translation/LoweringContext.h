@@ -104,6 +104,10 @@ public:
     // 동적 입력 key의 값이다. 연결이 없으면 fallback(있으면 Float 스칼라 상수)이고, 없고 required면
     // MissingInput이다.
     Result<IrValueId> DynamicInput(Name key, Optional<float> fallback, bool required) noexcept;
+    // 정적 입력 key를 context 문맥에서 번역한 값이다(VertexInterpolator — 6.9절 MS2b4a). 연결이
+    // 없으면 NoIrValue다.
+    Result<IrValueId> InputInContext(EvaluationContext context, StringView key) noexcept;
+
     // 키 원문으로 찾는 동적 입력이다(필수 아님 — 연결이 없으면 fallback).
     Result<IrValueId> NamedDynamicInput(StringView key, Optional<float> fallback) noexcept;
 

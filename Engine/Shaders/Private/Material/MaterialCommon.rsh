@@ -23,6 +23,10 @@
 struct MaterialVertexResult {
     // world 공간 위치 오프셋(cm)이다(UE WorldPositionOffset).
     float3 worldPositionOffset;
+    // 픽셀 TexCoord로 보간할 UV다(UE CustomizedUVs — 앞 MATERIAL_NUM_CUSTOMIZED_UVS개, 6.9절).
+    float2 customizedUvs[MATERIAL_MAX_TEXCOORDS];
+    // 사용자 보간 값이다(VertexInterpolator — 앞 MATERIAL_NUM_INTERPOLANT_VECTORS개).
+    float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];
 };
 
 // float 비트에서 부호를 뺀 마스크와 지수가 모두 1인 값이다(NaN·Inf 판정).

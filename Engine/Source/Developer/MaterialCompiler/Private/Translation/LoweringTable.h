@@ -24,7 +24,7 @@ struct LoweringEntry {
 };
 
 // 묶음별 표다(파일마다 하나 —
-// LowerConstants·LowerMath·LowerFlow·LowerContextValues·LowerCoordinates·LowerTransforms·LowerSwitches).
+// LowerConstants·LowerMath·LowerFlow·LowerContextValues·LowerCoordinates·LowerTransforms·LowerSwitches·LowerInterpolators).
 Span<const LoweringEntry> ConstantLowerings() noexcept;
 Span<const LoweringEntry> MathLowerings() noexcept;
 Span<const LoweringEntry> FlowLowerings() noexcept;
@@ -32,5 +32,6 @@ Span<const LoweringEntry> ContextValueLowerings() noexcept;
 Span<const LoweringEntry> CoordinateLowerings() noexcept;
 Span<const LoweringEntry> TransformLowerings() noexcept;
 Span<const LoweringEntry> SwitchLowerings() noexcept;
+Span<const LoweringEntry> InterpolatorLowerings() noexcept;
 
 } // namespace rocks::material::detail

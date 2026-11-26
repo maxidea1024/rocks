@@ -9,6 +9,10 @@
 
 #include "/Engine/Private/Material/MaterialDouble.rsh"
 
+// UV channel and custom interpolant vector limits (Docs/Design/MaterialSystem 6.9).
+#define MATERIAL_MAX_TEXCOORDS 8
+#define MATERIAL_MAX_INTERPOLANT_VECTORS 16
+
 // Supply flags (0 unless the pass defines them).
 #ifndef MATERIAL_SUPPLY_VIEW
 #define MATERIAL_SUPPLY_VIEW 0
@@ -172,6 +176,7 @@ struct MaterialVertexInputs {
 
 struct MaterialInputs {
     float4 svPosition;
+    float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];
     float3 cameraVector;
     float deltaTime;
     float3 lightVector;

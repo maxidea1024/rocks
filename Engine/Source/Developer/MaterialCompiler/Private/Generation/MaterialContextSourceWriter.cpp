@@ -20,7 +20,10 @@ constexpr StringView ContextHeader =
     "// supplied return the Unreal Engine default value, so generated material source compiles in\n"
     "// every pass.\n"
     "#pragma once\n\n"
-    "#include \"/Engine/Private/Material/MaterialDouble.rsh\"\n";
+    "#include \"/Engine/Private/Material/MaterialDouble.rsh\"\n\n"
+    "// UV channel and custom interpolant vector limits (Docs/Design/MaterialSystem 6.9).\n"
+    "#define MATERIAL_MAX_TEXCOORDS 8\n"
+    "#define MATERIAL_MAX_INTERPOLANT_VECTORS 16\n";
 
 // 원문 타입 이름이다. 원문 타입이 없는 핀 타입은 빈 문자열이다.
 StringView ContextTypeName(MaterialPinType type) noexcept {
@@ -161,8 +164,9 @@ Result<void> AppendStruct(StringBuilder<>& out, StringView name, MaterialStageMa
                           Span<const MaterialContextValue> table) noexcept {
     out << "\nstruct " << name << " {\n";
     if (stage == MaterialPixelStage) {
-        // pass가 늘 채우는 고정 칸이다(7.7절).
-        out << "    float4 svPosition;\n";
+        // pass가 늘 채우는 고정 칸이다(7.7절, 보간 값 — 6.9절 MS2b4a).
+        out << "    float4 svPosition;\n"
+            << "    float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];\n";
     }
 
     for (const MaterialContextValue& value : table) {

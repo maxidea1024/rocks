@@ -107,6 +107,17 @@ public:
         return context_;
     }
 
+    // context 문맥에서 consumer 노드 입력 pin의 값이다(VertexInterpolator가 입력을 정점 문맥으로
+    // 번역한다 — 6.9절 MS2b4a). 끝나면 지금 문맥으로 돌아온다.
+    Result<IrValueId> LowerInContext(EvaluationContext context,
+                                     const nodegraph::GraphNode& consumer, Name pin,
+                                     bool& connected) noexcept;
+
+    // 픽셀 문맥이 TexCoord(index)를 읽었다(CustomizedUv 수 — 6.9절 MS2b4a).
+    void NotePixelTexCoord(uint32 index) noexcept {
+        pixelTexCoords_ = index + 1 > pixelTexCoords_ ? index + 1 : pixelTexCoords_;
+    }
+
     // 번역 대상이다. field를 읽은 항목으로 기록한다(6.9절 MS2b3).
     const MaterialTranslationTarget& Target(MaterialTargetField field) noexcept {
         out_.consultedTarget |= ToMask(field);
@@ -155,6 +166,28 @@ private:
     Result<void> ContextRoots(Array<Name>& roots) const noexcept;
     // V4(단계 — 미분·문맥 값 단계 집합)·V6(문맥 값 영역) 검사다(6.9절).
     Result<void> CheckContextValues() noexcept;
+    // CustomizedUv 출력 핀의 정점 결과다(픽셀 문맥 뒤 — 6.9절 MS2b4a).
+    Result<void> TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept;
+    // 보간 성분 수 V9 검사다(모듈을 만든 뒤).
+    Result<void> CheckInterpolantBudget() noexcept;
+
+    HashMap<PinKey, IrValueId, PinKeyHash>& Outputs() noexcept {
+        return context_ == EvaluationContext::Vertex           ? outputsVertex_
+               : context_ == EvaluationContext::VertexPrevious ? outputsPrevious_
+                                                               : outputsPixel_;
+    }
+
+    HashMap<Guid, NodeState>& States() noexcept {
+        return context_ == EvaluationContext::Vertex           ? statesVertex_
+               : context_ == EvaluationContext::VertexPrevious ? statesPrevious_
+                                                               : statesPixel_;
+    }
+
+    const HashMap<Guid, NodeState>& States() const noexcept {
+        return context_ == EvaluationContext::Vertex           ? statesVertex_
+               : context_ == EvaluationContext::VertexPrevious ? statesPrevious_
+                                                               : statesPixel_;
+    }
     // node가 기대는 노드들이다(들어오는 간선의 출발 노드, 이름 있는 재경유의 선언).
     Result<void> CollectDependencies(usize node, Array<Dependency>& out) noexcept;
     // 출력 노드 roots 핀(활성 핀)에 들어오는 간선의 출발 노드다(간선 저장 순서).
@@ -176,8 +209,15 @@ private:
     const nodegraph::Graph* graph_ = nullptr;
     HashMap<Guid, usize> nodes_;
     HashMap<PinKey, usize, PinKeyHash> edges_;
-    HashMap<PinKey, IrValueId, PinKeyHash> outputs_;
-    HashMap<Guid, NodeState> states_;
+    // 노드 결과·상태는 평가 문맥마다다(6.9절 — 문맥을 바꿔도 지우지 않는다, MS2b4a).
+    HashMap<PinKey, IrValueId, PinKeyHash> outputsVertex_;
+    HashMap<PinKey, IrValueId, PinKeyHash> outputsPrevious_;
+    HashMap<PinKey, IrValueId, PinKeyHash> outputsPixel_;
+    HashMap<Guid, NodeState> statesVertex_;
+    HashMap<Guid, NodeState> statesPrevious_;
+    HashMap<Guid, NodeState> statesPixel_;
+    // 픽셀 문맥이 쓴 TexCoord의 최대 상수 색인 + 1이다(CustomizedUv 수 — 6.9절 MS2b4a).
+    uint32 pixelTexCoords_ = 0;
     HashMap<Name, LoweringFn> lowerings_;
     // 늦은 입력 노드 종류 → 계획에 넣는 입력 키 원문이다.
     HashMap<Name, Span<const StringView>> lazyNodes_;

@@ -21,6 +21,8 @@ constexpr uint64 WriterSwizzleMask = (uint64{1} << WriterSwizzleBits) - 1;
 constexpr uint32 WriterFloatMagnitudeMask = static_cast<uint32>(NumericLimits<int32>::Max());
 // DefaultLit shading model 번호다(Renderer 14.2절 — SurfaceAttributes.rsh ShadingModelDefaultLit).
 constexpr uint32 WriterDefaultLitShadingModel = 1;
+// 보간 벡터(float4) 하나의 성분 수다(6.9절 MS2b4a).
+constexpr uint64 WriterInterpolantComponents = 4;
 // 함수 몸체 들여쓰기다.
 constexpr StringView WriterIndent = "    ";
 
@@ -315,6 +317,8 @@ private:
     Result<void> DoubleExpression(const IrValue& value) noexcept;
     Result<void> UsageDefines() noexcept;
     Result<void> VertexFunction(StringView signature, IrEntry entry) noexcept;
+    Result<void> Interpolated(const IrValue& value) noexcept;
+    Result<void> WriteInterpolants() noexcept;
     Result<void> Vertex() noexcept;
     Result<void> Surface() noexcept;
     Result<void> ScalarFunction(StringView signature, IrEntry entry, StringView slot,
@@ -756,6 +760,8 @@ Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
     switch (value.op) {
     case IrOp::Extern:
         return Extern(value);
+    case IrOp::Interpolate:
+        return Interpolated(value);
     case IrOp::Splat: {
         if (auto type = TypeName(value.type); !type) {
             return type;
@@ -922,7 +928,8 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
     // 피연산자 번호는 늘 그 값보다 작으므로 큰 번호부터 내려가며 퍼뜨리면 한 번에 끝난다.
     for (usize index = values.Size(); index > 0; --index) {
         const IrValue& value = values[index - 1];
-        if (!reached_[index - 1]) {
+        if (!reached_[index - 1] || value.op == IrOp::Interpolate) {
+            // 보간 값 아래(정점 값)는 정점 함수가 낸다(6.9절 MS2b4a).
             continue;
         }
 
@@ -1129,6 +1136,98 @@ Result<void> SourceWriter::UsageDefines() noexcept {
     return Result<void>::Success();
 }
 
+Result<void> SourceWriter::Interpolated(const IrValue& value) noexcept {
+    // c.interpolants[k].<성분>(성분이 float4 경계를 넘으면 floatN(…)으로 잇는다 — 6.9절 MS2b4a).
+    static constexpr char Channels[] = {'x', 'y', 'z', 'w'};
+    const uint8 count = value.type.components;
+    if (count > 1) {
+        if (auto type = TypeName(value.type); !type) {
+            return type;
+        }
+
+        if (auto open = Raw("("); !open) {
+            return open;
+        }
+    }
+
+    for (uint8 index = 0; index < count; ++index) {
+        const uint64 slot = value.immediate[0] + index;
+        if (index > 0) {
+            if (auto comma = Raw(", "); !comma) {
+                return comma;
+            }
+        }
+
+        if (auto head = Raw("c.interpolants["); !head) {
+            return head;
+        }
+
+        if (auto vector = Uint(slot / WriterInterpolantComponents); !vector) {
+            return vector;
+        }
+
+        const char channel[] = {']', '.', Channels[slot % WriterInterpolantComponents]};
+        if (auto tail = Raw(StringView(channel, sizeof(channel))); !tail) {
+            return tail;
+        }
+    }
+
+    return count > 1 ? Raw(")") : Result<void>::Success();
+}
+
+Result<void> SourceWriter::WriteInterpolants() noexcept {
+    // 정점 함수가 보간 값의 정점 쪽을 계산해 r.interpolants에 쓴다(성분마다 — 6.9절 MS2b4a).
+    static constexpr char Channels[] = {'x', 'y', 'z', 'w'};
+    const Span<const IrValue> values = module_.Values();
+    for (const IrValue& value : values) {
+        if (value.op != IrOp::Interpolate) {
+            continue;
+        }
+
+        const IrValueId roots[] = {value.operands[0]};
+        if (auto body = Values(roots); !body) {
+            return body;
+        }
+
+        for (uint8 index = 0; index < value.type.components; ++index) {
+            const uint64 slot = value.immediate[0] + index;
+            if (auto head = Raw("    r.interpolants["); !head) {
+                return head;
+            }
+
+            if (auto vector = Uint(slot / WriterInterpolantComponents); !vector) {
+                return vector;
+            }
+
+            const char channel[] = {']', '.', Channels[slot % WriterInterpolantComponents]};
+            if (auto tail = Raw(StringView(channel, sizeof(channel))); !tail) {
+                return tail;
+            }
+
+            if (auto assign = Raw(" = "); !assign) {
+                return assign;
+            }
+
+            if (auto operand = Operand(value.operands[0]); !operand) {
+                return operand;
+            }
+
+            if (value.type.components > 1) {
+                const char pick[] = {'.', Channels[index]};
+                if (auto component = Raw(StringView(pick, sizeof(pick))); !component) {
+                    return component;
+                }
+            }
+
+            if (auto end = Raw(";\n"); !end) {
+                return end;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> SourceWriter::VertexFunction(StringView signature, IrEntry entry) noexcept {
     const StringView head[] = {"\n", signature, " {\n"};
     for (StringView part : head) {
@@ -1153,6 +1252,41 @@ Result<void> SourceWriter::VertexFunction(StringView signature, IrEntry entry) n
 
         if (auto end = Raw(";\n"); !end) {
             return end;
+        }
+    }
+
+    if (entry == IrEntry::Vertex) {
+        // CustomizedUv 결과(6.9절 MS2b4a)와 보간 값의 정점 쪽이다.
+        for (const IrResult& result : module_.Results()) {
+            if (result.entry != IrEntry::Vertex ||
+                result.slot == StringView("WorldPositionOffset")) {
+                continue;
+            }
+
+            const IrValueId roots[] = {result.value};
+            if (auto body = Values(roots); !body) {
+                return body;
+            }
+
+            const StringView digit(result.slot.Data() + result.slot.ByteCount() - 1, 1);
+            const StringView parts[] = {"    r.customizedUvs[", digit, "] = "};
+            for (StringView part : parts) {
+                if (auto written = Raw(part); !written) {
+                    return written;
+                }
+            }
+
+            if (auto operand = Operand(result.value); !operand) {
+                return operand;
+            }
+
+            if (auto end = Raw(";\n"); !end) {
+                return end;
+            }
+        }
+
+        if (auto interpolants = WriteInterpolants(); !interpolants) {
+            return interpolants;
         }
     }
 
@@ -1375,7 +1509,33 @@ Result<void> SourceWriter::Run() noexcept {
         return defined;
     }
 
-    if (auto defined = Define("MATERIAL_NUM_INTERPOLANT_VECTORS", "0"); !defined) {
+    // 보간 벡터 수(⌈성분 수 / 4⌉)와 CustomizedUv 결과 수다(6.9절 MS2b4a).
+    StringBuilder<> vectors(allocator_);
+    vectors << (module_.InterpolantComponents() + WriterInterpolantComponents - 1) /
+                   WriterInterpolantComponents;
+    uint32 customized = 0;
+    for (const IrResult& result : module_.Results()) {
+        customized +=
+            result.entry == IrEntry::Vertex && result.slot != StringView("WorldPositionOffset")
+                ? 1u
+                : 0u;
+    }
+
+    StringBuilder<> customizedText(allocator_);
+    customizedText << customized;
+    if (auto status = vectors.Status(); !status) {
+        return status;
+    }
+
+    if (auto status = customizedText.Status(); !status) {
+        return status;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_INTERPOLANT_VECTORS", vectors.View()); !defined) {
+        return defined;
+    }
+
+    if (auto defined = Define("MATERIAL_NUM_CUSTOMIZED_UVS", customizedText.View()); !defined) {
         return defined;
     }
 

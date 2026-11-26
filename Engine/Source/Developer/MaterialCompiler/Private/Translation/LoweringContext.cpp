@@ -159,6 +159,14 @@ Result<IrValueId> LoweringContext::ContextValue(StringView name,
         frequency = IrFrequency::Vertex;
     }
 
+    if (translator_.Context() == EvaluationContext::Pixel && value.name == StringView("TexCoord") &&
+        arguments.Size() == 1) {
+        const IrValue& slot = Builder().Value(arguments[0]);
+        if (slot.op == IrOp::Constant) {
+            translator_.NotePixelTexCoord(static_cast<uint32>(slot.immediate[0]));
+        }
+    }
+
     const IrExternVariant variant =
         translator_.Context() == EvaluationContext::VertexPrevious && value.hasPrevious
             ? IrExternVariant::Previous
@@ -171,6 +179,22 @@ IrBuilder& LoweringContext::Builder() noexcept {
     IrBuilder& builder = translator_.Builder();
     builder.SetSite(IrSite{node_.id, StringView()});
     return builder;
+}
+
+Result<IrValueId> LoweringContext::InputInContext(EvaluationContext context,
+                                                  StringView key) noexcept {
+    auto name = PinName(key);
+    if (!name) {
+        return Result<IrValueId>::Failure(name.Error());
+    }
+
+    bool connected = false;
+    auto value = translator_.LowerInContext(context, node_, name.Value(), connected);
+    if (value && connected && value.Value() == NoIrValue) {
+        poisoned_ = true;
+    }
+
+    return value;
 }
 
 Result<IrValueId> LoweringContext::NamedDynamicInput(StringView key,

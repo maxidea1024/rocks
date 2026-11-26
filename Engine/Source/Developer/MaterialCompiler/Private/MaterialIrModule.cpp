@@ -133,12 +133,43 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     out.results_ = Move(ordered);
 
     // 진입점마다 닿는 문맥 값의 공급 기능과 필요 기능 등급이다(6.9절). 피연산자 번호는 늘 그 값보다
-    // 작으므로 큰 번호부터 내려가며 표시를 퍼뜨리면 한 번에 끝난다.
+    // 작으므로 큰 번호부터 내려가며 표시를 퍼뜨리면 한 번에 끝난다. 픽셀 진입점에서 보간 값을
+    // 만나면 그 아래(정점 값)는 Vertex 진입점의 사용으로 센다(6.9절 MS2b4a).
     const Span<const MaterialContextValue> table = MaterialContextValues();
     Array<bool> reached(out.values_.GetAllocator());
+    Array<bool> interpolated(out.values_.GetAllocator());
     if (auto sized = reached.TryResize(out.values_.Size()); !sized) {
         return FailBuild(out, Move(sized));
     }
+
+    if (auto sized = interpolated.TryResize(out.values_.Size()); !sized) {
+        return FailBuild(out, Move(sized));
+    }
+
+    for (bool& item : interpolated) {
+        item = false;
+    }
+
+    const auto account = [&](uint32 entry, Span<const bool> marks) noexcept -> Result<void> {
+        for (usize index = 0; index < out.values_.Size(); ++index) {
+            const IrValue& value = out.values_[index];
+            if (!marks[index] || value.op != IrOp::Extern) {
+                continue;
+            }
+
+            if (value.immediate[0] >= table.Size()) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            const MaterialContextValue& context = table[static_cast<usize>(value.immediate[0])];
+            out.entryFeatures_[entry] |= ToMask(context.feature);
+            if (static_cast<uint8>(context.minimumTier) > static_cast<uint8>(out.requiredTier_)) {
+                out.requiredTier_ = context.minimumTier;
+            }
+        }
+
+        return Result<void>::Success();
+    };
 
     for (uint32 entry = 0; entry < IrEntryCount; ++entry) {
         for (bool& item : reached) {
@@ -163,23 +194,43 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
             }
 
             const IrValue& value = out.values_[index - 1];
-            for (uint8 operand = 0; operand < value.operandCount; ++operand) {
-                reached[value.operands[operand]] = true;
-            }
-
-            if (value.op != IrOp::Extern) {
+            if (value.op == IrOp::Interpolate) {
+                interpolated[value.operands[0]] = true;
                 continue;
             }
 
-            if (value.immediate[0] >= table.Size()) {
-                return FailBuild(out, Result<void>::Failure(ErrorCode::InvalidArgument));
+            for (uint8 operand = 0; operand < value.operandCount; ++operand) {
+                reached[value.operands[operand]] = true;
             }
+        }
 
-            const MaterialContextValue& context = table[static_cast<usize>(value.immediate[0])];
-            out.entryFeatures_[entry] |= ToMask(context.feature);
-            if (static_cast<uint8>(context.minimumTier) > static_cast<uint8>(out.requiredTier_)) {
-                out.requiredTier_ = context.minimumTier;
-            }
+        if (auto counted = account(entry, reached.View()); !counted) {
+            return FailBuild(out, Move(counted));
+        }
+    }
+
+    // 보간 값 아래(정점 값)는 Vertex 진입점의 사용이다.
+    for (usize index = out.values_.Size(); index > 0; --index) {
+        if (!interpolated[index - 1]) {
+            continue;
+        }
+
+        const IrValue& value = out.values_[index - 1];
+        for (uint8 operand = 0; operand < value.operandCount; ++operand) {
+            interpolated[value.operands[operand]] = true;
+        }
+    }
+
+    if (auto counted = account(static_cast<uint32>(IrEntry::Vertex), interpolated.View());
+        !counted) {
+        return FailBuild(out, Move(counted));
+    }
+
+    // 보간 배정: 모듈 번호 순으로 성분을 이어 붙인다(6.4절 — UE GetVertexInterpolatorsOffsets).
+    for (IrValue& value : out.values_) {
+        if (value.op == IrOp::Interpolate) {
+            value.immediate[0] = out.interpolantComponents_;
+            out.interpolantComponents_ += value.type.components;
         }
     }
 
