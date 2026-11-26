@@ -73,15 +73,17 @@ struct AssetImportOutput {
     AssetId id{};
 };
 
-// asset-import 결과다(7.1절 18 A2f1b): 주 출력 id·경로와 다른 출력들.
+// asset-import 결과다(7.1절 18 A2f1b): 주 출력 id·경로와 다른 출력들, 임포터가 EditAsset으로
+// 고쳐 함께 저장한 다른 에셋(7.1절 20 A2f4 — key는 비고 경로·id, 저장 순서).
 struct AssetImportResult {
     explicit AssetImportResult(Allocator& allocator) noexcept
-        : path(allocator), outputs(allocator) {
+        : path(allocator), outputs(allocator), edited(allocator) {
     }
 
     AssetId id{};
     String path;
     Array<AssetImportOutput> outputs;
+    Array<AssetImportOutput> edited;
 };
 
 // 묶음 임포트 구성원 하나다(7.1절 19 A2f3d UXR11 — AssetService::ImportGroup). 새 임포트면
@@ -534,7 +536,9 @@ private:
                                  Array<EditorWarning>* warnings, AssetDiagnostic* failure) noexcept;
     Result<void> StageImport(ImportRun& run,
                              Span<const asset_database_detail::ImportGroupMember> members,
-                             usize memberIndex, reflection_text::TextDiagnostics& diagnostics,
+                             usize memberIndex, Span<const AssetId> before,
+                             Span<const AssetId> groupOwned,
+                             reflection_text::TextDiagnostics& diagnostics,
                              Array<EditorWarning>* warnings, AssetDiagnostic* failure) noexcept;
 
     // 타입 도구 이름의 클래스 lease다(에셋 클래스만이면 requireAsset).

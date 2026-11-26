@@ -109,6 +109,10 @@ public:
         return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
     }
 
+    Result<ObjectHandle> EditAsset(AssetId) noexcept override {
+        return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+    }
+
     usize GroupSize() const noexcept override {
         return 1;
     }
