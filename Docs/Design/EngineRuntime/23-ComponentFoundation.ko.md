@@ -78,7 +78,7 @@ virtual ComponentTypeRules TypeRules() const noexcept { return {}; }
 - 이미 있는 Component를 지워 `required`가 깨지는 경우는 막지 않는다. UE·Unity도 파괴를 막지 않는다. 의존하는 쪽이 `OnTick` 등에서 직접 확인한다.
 
 **태그·EditorOnly(CR5 런타임).**
-- **태그는 미룬다.** UE `ComponentTags`(`TArray<FName>`)에 대응하는 태그는 `Name`이 필요하다. 그런데 World Registry에는 NamePool이 없다(`WorldDesc::objects.names` 기본 null — `Name` 필드는 pool 없는 문맥에서 만들 수 없다). 태그 사전(EIP 20.1절)도 계획만 있다. 그래서 태그는 World 이름 기반(엔진 NamePool을 World에 빌려주거나 태그 사전)이 생길 때 그 기반과 함께 넣는다. 영속 필드라 Component 생성자가 allocator를 받게 바뀌는데, 그 변경도 그때 한다(Component 파생 생성자 전부).
+- **태그는 미룬다(31장에서 넣는다 — 엔진 이름 pool·TG1·TG2).** UE `ComponentTags`(`TArray<FName>`)에 대응하는 태그는 `Name`이 필요하다. 그런데 World Registry에는 NamePool이 없다(`WorldDesc::objects.names` 기본 null — `Name` 필드는 pool 없는 문맥에서 만들 수 없다). 태그 사전(EIP 20.1절)도 계획만 있다. 그래서 엔진 이름 pool을 World에 빌려주는 기반과 함께 31장에서 넣었다(2026-11-26). 영속 필드라 Component 생성자가 allocator를 받게 바뀌었다(Component 파생 생성자 전부 — 31.3절).
 - `virtual bool IsEditorOnly() const`(UE `bIsEditorOnly`). Game·Tryout World에서 `AddComponent`하면 만들지 않고 `Unsupported`를 돌려준다. Editor·Preview World에서는 만든다. 쿠킹 제외는 에셋 세션이 클래스 지정자로 한다(위). 런타임은 그 결과와 별개로 같은 판정을 한 번 더 한다.
 
 ### 23.3 CM0b — SceneComponent

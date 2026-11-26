@@ -599,12 +599,12 @@ TEST(MeshComponent_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(Primitive 53, Actor 4). MeshComponent가 4, StaticMeshComponent가
-    // 27을 더한다.
+    // 필드 수는 상속분을 포함한다(Primitive 54, Actor 5 — 태그 ER 31.4절 포함). MeshComponent가 4,
+    // StaticMeshComponent가 27을 더한다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<MeshComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 57, true},
-        {ObjectTypeIdOf<StaticMeshComponent>(), ObjectTypeIdOf<MeshComponent>(), 84, false},
-        {ObjectTypeIdOf<StaticMeshActor>(), ObjectTypeIdOf<Actor>(), 4, false},
+        {ObjectTypeIdOf<MeshComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 58, true},
+        {ObjectTypeIdOf<StaticMeshComponent>(), ObjectTypeIdOf<MeshComponent>(), 85, false},
+        {ObjectTypeIdOf<StaticMeshActor>(), ObjectTypeIdOf<Actor>(), 5, false},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

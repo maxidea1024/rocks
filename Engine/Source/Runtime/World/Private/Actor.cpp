@@ -1,3 +1,5 @@
+#include "WorldTags.h"
+
 #include <Platform/Fatal.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
@@ -97,6 +99,48 @@ Result<void> Actor::SetTickEnabled(bool enabled) noexcept {
     }
 
     return world_->SetActorTickEnabled(Handle(), enabled);
+}
+
+// 태그(Docs/Design/EngineRuntime 31.4절).
+
+bool Actor::HasTag(Name tag) const noexcept {
+    return world_tags::Contains(tags_.View(), tag);
+}
+
+Result<void> Actor::AddTag(Name tag) noexcept {
+    if (!HasWorld()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ActorState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Add(tags_, GetWorld().Objects(), tag);
+}
+
+Result<void> Actor::RemoveTag(Name tag) noexcept {
+    if (!HasWorld()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ActorState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Remove(tags_, tag);
+}
+
+Result<void> Actor::SetTags(Span<const Name> tags) noexcept {
+    if (!HasWorld()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ActorState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Set(tags_, GetWorld().Objects(), tags);
 }
 
 } // namespace rocks

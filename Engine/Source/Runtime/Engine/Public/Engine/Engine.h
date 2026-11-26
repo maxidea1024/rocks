@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Core/Text/NamePool.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ModuleTypeRegistrations.h>
@@ -199,6 +200,9 @@ inline constexpr char EngineStageStopped[] = "Engine.Stopped";
 struct EngineConfig {
     // 엔진 Registry(World보다 오래 사는 객체, 예: GameInstance)의 실행 문맥이다.
     ContextId context = {0x524f434b53454e47ull, 1};
+    // 엔진 이름 pool 한도다(Docs/Design/EngineRuntime 31.2절 — 엔진 Registry·모든 World가 함께 쓰고
+    // entry는 엔진 종료까지 회수하지 않는다. 한도에 닿으면 새 이름 intern이 CapacityExceeded다).
+    NamePoolConfig names;
     Span<const EngineSubsystemType> subsystems;
     EngineLoopHooks* hooks = nullptr;
     EngineClient* client = nullptr;
@@ -252,6 +256,7 @@ struct EngineConfig {
 struct WorldCreateDesc {
     StringView name;
     TimeStepPolicy timeStep;
+    // World 객체 Registry 설정이다. names가 null이면 엔진 이름 pool을 쓴다(31.2절).
     RegistryOptions objects;
     GcBudget gcBudget;
     // World GC 일정이다(WorldDesc::gcSchedule).
@@ -439,6 +444,20 @@ public:
     // World보다 오래 사는 객체의 Registry다(Initialize 전에는 Fatal).
     ObjectRegistry& Objects() noexcept;
 
+    // 엔진 이름 pool이다(UE 전역 FName 표 — Docs/Design/EngineRuntime 31.2절). 엔진 Registry와
+    // CreateWorld가 만든 World가 이 pool을 쓰므로 Name 값을 그 사이에 그대로 옮길 수 있다. 다른
+    // Subsystem도 빌려 쓸 수 있다(에셋 객체 Registry 연결은 에셋 세션 몫). 한도는
+    // EngineConfig::names다. Initialize가 엔진 Registry보다 먼저 열고 Shutdown이 마지막에 닫는다.
+    // Initialize 전·Shutdown 뒤에는 Fatal이다. NamePool은 스레드 안전하다(엔진 allocator가 스레드
+    // 안전해야 한다).
+    //
+    // 사용 예:
+    //   auto enemy = engine.Names().TryIntern("Enemy");
+    //   if (enemy) {
+    //       (void)actor.AddTag(enemy.Value());
+    //   }
+    NamePool& Names() noexcept;
+
     Allocator& GetAllocator() const noexcept {
         return allocator_;
     }
@@ -535,6 +554,8 @@ private:
     ModuleLoader* attachedModules_ = nullptr;
     // 이 Engine이 로더의 엔진 묶음 사용자다(StartEngineGroup 성공).
     bool engineGroupStarted_ = false;
+    // 엔진 이름 pool이다(31.2절). Registry·World보다 먼저 선언해 나중에 소멸시킨다.
+    UniquePtr<NamePool> names_;
     UniquePtr<TypeRegistry> types_;
     // TypeRegistry 뒤에 선언해 먼저 소멸시킨다(붙잡은 lease를 TypeRegistry::Shutdown 전에 놓는다).
     UniquePtr<ModuleRegistration> modules_;
