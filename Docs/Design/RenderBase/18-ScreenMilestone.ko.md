@@ -98,7 +98,7 @@ SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 
 | SM5 | 엔진 렌더 경로 self-test | 없음 | 구현(18.5절 5항): 숨긴 창, D3D12·D3D11·Vulkan·GLES 미리보기, tone map 결과 = CPU 기준, Thread = Inline, backend 사이 대조, 검증 오류 0 | 4 |
 | SM6 | 텍스처 표시 pass(엔진 셰이더 `Debug/TextureInspector.rsf` — 다섯 차원·slice·mip, HDR은 노출 + filmic)와 표시 대상·slice 고르기 입력 | 없음 | 구현(18.5절 6항): 셰이더·pass·입력은 이번에 lane에서 만든 절차 생성 텍스처로 시험하고, 쿠킹 텍스처 연결은 다음 단계 | 5 |
 | SM7 | 다섯 차원·형식별 쿠킹 텍스처 장면 대조(18.1절 완료 기준 3항) | — | 구현(18.5절 7항, 설계 개정 48·구현 개정 49): 6.5절 업로드(RenderBase `CookedTexture.h`), swizzle 셰이더 복제, TextureInspector 정수 엔트리, Sandbox 표시 목록·쿠킹 시험 콘텐츠·장면 대조 — **구현 개정 49** | 6 |
-| SM8 | WorldIntegration 텍스처 컴포넌트(`RenderHandle` 예약 → 프레임 packet) | 모듈은 메시 세션이 만들었다(D2b). 변환·업로드 연결은 Sandbox(SM7) | 설계(18.5절 8항, 개정 54): 텍스처 에셋마다 GPU 자원 하나를 만드는 `TextureRenderCache`(UE `UTexture::UpdateResource` 자리). 리플렉션 World 컴포넌트는 만들지 않는다(UE 대응 없음 — 첫 World 사용자는 `BillboardComponent` CM2·머티리얼 MS). 변환 `PlatformTextureSource`를 Sandbox에서 옮긴다 | 8 |
+| SM8 | WorldIntegration 텍스처 컴포넌트(`RenderHandle` 예약 → 프레임 packet) | 모듈은 메시 세션이 만들었다(D2b). 변환·업로드 연결은 Sandbox(SM7) | 구현(18.5절 8항, 설계 개정 54·구현 개정 55): 텍스처 에셋마다 GPU 자원 하나를 만드는 `TextureRenderCache`(UE `UTexture::UpdateResource` 자리). 리플렉션 World 컴포넌트는 만들지 않는다(UE 대응 없음 — 첫 World 사용자는 `BillboardComponent` CM2·머티리얼 MS). 변환 `PlatformTextureSource`를 Sandbox에서 옮겼다 — **구현 개정 55** | 8 |
 | SM9 | RR12 `ParameterBatch` 자원 부분·장치 다중 텍스처 slot | 18.3절 후속 | 구현(9.13절, 설계 개정 50·구현 개정 51): 렌더러 RS0 전에 당겼다(2026-11-26 렌더 세션 순서) | 7 |
 | SM10 | RR13 공유 상수 slot 표 | 18.3절 후속 | 기반(표·파이프라인 지도·묶음)은 구현(9.14절 개정 53). 렌더러 slot 등록·view마다 묶기는 RS0(view 상수 slot이 첫 소비자다) | — |
 | SM11 | 셰이더 시스템 SH3(파라미터 구조체 P7·생성 HLSL·그래프 파라미터 수집기) | 손으로 쓴 레이아웃 표 | 렌더러 RS0 전으로 옮김: 마일스톤 셰이더(유틸리티·tone map·텍스처 표시)는 루트 상수와 텍스처 하나라 손으로 쓴 표(셰이더 시스템 7.2절 5항)로 충분하다. 생성 구조체의 첫 소비자는 view 상수(SM10)와 머티리얼(MS)이다 | SH3a(상수 멤버·생성 C++ 표·HLSL·바인딩 layout v4 identity·엔진 셰이더 이관)는 구현(셰이더 시스템 16.2절 개정 55), SH3b(자원 멤버)·SH3c(그래프 수집기)는 남음 | — |
@@ -247,3 +247,10 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
      - (다) 캐시를 EngineSubsystem으로 두기: Engine은 Graphics·lane을 모른다.
      - (라) 준비 callback 안에서 곧바로 업로드: callback은 Pump 안이라 lease 객체 접근 범위가 겹친다. 같은 프레임 hook에서 올려도 지연이 없다.
      - (마) `ResourceRetired`까지 lease를 쥐기: GPU 자원이 패키지 byte를 빌리지 않으므로 필요 없다. 게다가 종료 때 lease는 `CompleteInFlightWork`까지 놓아야 하는데 회수 대기(`DrainRetires`)는 그 뒤 단계라 계약과 부딪힌다.
+
+**구현(개정 55, 2026-11-26).** 8항을 위 설계대로 구현했다.
+- 파일: WorldIntegration `Textures/PlatformTextureSource.h`(Sandbox에서 옮김 — `GraphicsTextureDimension`), `Textures/TextureRenderInfo.h`(`TextureRenderState`·`TextureRenderInfo`), `Textures/TextureRenderCache.h`. 모듈 의존에 Texture·RenderBase. RenderBase 시험 기록 장치에 형식 능력·텍스처 생성 오류 주입(`SetPixelFormatCaps`·`SetCreateTextureError`). Sandbox `CookedTextureLibrary`(캐시를 가지고 `Acquire`·`Update`·`Release`), `ScreenHost::AddCachedTexture`·`AttachTextureCache`(거둔 통지를 캐시에 넘김, 캐시 handle은 Retire하지 않음)·`Device()`.
+- 설계와 다르게 정한 것: (1) 캐시는 Sandbox `CookedTextureLibrary`가 가진다(엔진 호스트·쿠킹 self-test 둘 다 이 목록을 쓰므로). 목록 `Release`가 사용을 놓고 캐시 `Shutdown`을 부른다(종료 hook `BeginShutdown`). (2) 항목 표는 AssetId 해시 표, 통지 대조는 handle → AssetId 해시 표다(텍스처 수에 비례하지 않게).
+- 시험(Debug):
+  - EngineTests `WorldIntegration_PlatformTextureSource*` 셋·`WorldIntegration_TextureRenderCache*` 일곱이 모두 PASS다(위 8항 시험 목록). `RenderBase_*`·`RenderGraph*`·`MeshComponent_*`도 그대로 PASS다.
+  - Sandbox `--texture-self-test`: 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) Thread·Inline 두 모드 0 failures. 쿠킹 장면은 캐시 경로로 13 텍스처·53 표본점이다. GL core 위 ES만 49 표본점이다: `RGBA16Unorm` 하나가 NOT RUN이고, 사유는 SM7과 같다.
