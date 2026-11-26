@@ -42,9 +42,16 @@ inline constexpr uint32 UnrealExchangeMaxDiagnostics = 4096;
 inline constexpr usize UnrealExchangeBlobChunkBytes = 64 * 1024;
 
 // 임포트한 에셋의 색인 태그 키다(9.2절 — 지금 UE objectPath와 묶음 redirect로 알게 된 옛 경로들,
-// 기존 에셋 조회가 찾는다, 10.5절 4번). 임포터 키는 `<임포터 이름>.` 접두다(AssetSystem 7절).
+// 기존 에셋 조회가 찾는다, 10.5절 4번). 키 접두는 교환 임포터들의 태그 접두 UnrealExchangeTagPrefix다
+// (AssetSystem 7.1절 21 A2f5).
 inline constexpr StringView UnrealExchangeObjectPathTag = "UnrealExchange.ObjectPath";
 inline constexpr StringView UnrealExchangeFormerPathsTag = "UnrealExchange.FormerPaths";
+
+// 교환 A2f 임포터의 원본 역할·가변 원본 역할 접두(10.6절 2번 — `blob:<64자 hex>`)와 태그 접두(7번 —
+// AssetSystem 7.1절 21 A2f5 tagPrefix, 태그 키 UnrealExchangeObjectPathTag의 앞부분)다.
+inline constexpr StringView UnrealExchangeAssetRole = "asset";
+inline constexpr StringView UnrealExchangeBlobRolePrefix = "blob:";
+inline constexpr StringView UnrealExchangeTagPrefix = "UnrealExchange";
 
 // 에셋·의존 번호가 없음을 나타내는 값이다.
 inline constexpr uint32 ExchangeNoIndex = NumericLimits<uint32>::Max();

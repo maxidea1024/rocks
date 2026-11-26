@@ -310,6 +310,11 @@ Result<Array<uint8>> ImportBuildTag(Allocator& allocator, const ImportTagInput& 
     return item.Build();
 }
 
+// 입력의 태그 접두다(비면 importerName — A2f5).
+StringView ImportInputTagPrefix(const ImportRecordInput& input) noexcept {
+    return input.tagPrefix.IsEmpty() ? input.importerName : input.tagPrefix;
+}
+
 // 소유 기록 입력의 규칙을 본다(참이면 유효). 할당 실패는 그 오류다.
 Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
                                    const ImportRecordInput& input) noexcept {
@@ -317,7 +322,8 @@ Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
         !ImportValidText(input.importerName, 1, MaxImporterNameBytes) || input.sources.IsEmpty() ||
         input.sources.Size() > MaxImportSources || input.outputs.IsEmpty() ||
         input.outputs.Size() > MaxImportOutputs || input.tags.Size() > MaxImportTags ||
-        (!input.options.IsEmpty() && !ReadRecordHeader(input.options))) {
+        (!input.options.IsEmpty() && !ReadRecordHeader(input.options)) ||
+        (!input.tagPrefix.IsEmpty() && !ImportValidText(input.tagPrefix, 1, MaxImporterNameBytes))) {
         return Result<bool>::Success(false);
     }
 
@@ -334,7 +340,7 @@ Result<bool> ImportOwnerInputValid(Allocator& allocator, AssetId self,
     }
 
     for (const ImportTagInput& tag : input.tags) {
-        if (!IsValidImportTag(input.importerName, tag.key, tag.value)) {
+        if (!IsValidImportTag(ImportInputTagPrefix(input), tag.key, tag.value)) {
             return Result<bool>::Success(false);
         }
     }
@@ -610,7 +616,7 @@ Result<void> ImportReadTags(Allocator& allocator, const RecordReader& record,
 
         const StringView keyText = ImportTextOf(key.Value());
         const StringView valueText = ImportTextOf(value.Value());
-        if (!IsValidImportTag(out.importerName.View(), keyText, valueText) ||
+        if (!IsValidImportTag(out.TagPrefix(), keyText, valueText) ||
             (index != 0 && !ImportTagLess(out.tags[index - 1].key.View(),
                                           out.tags[index - 1].value.View(), keyText, valueText))) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -668,8 +674,9 @@ Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
             return Result<Out>::Failure(ErrorCode::InvalidArgument);
         }
     } else if (!(input.importerId == Guid{}) || !input.importerName.IsEmpty() ||
-               input.importerVersion != 0 || !input.sources.IsEmpty() || !input.options.IsEmpty() ||
-               !input.outputs.IsEmpty() || !input.tags.IsEmpty()) {
+               !input.tagPrefix.IsEmpty() || input.importerVersion != 0 ||
+               !input.sources.IsEmpty() || !input.options.IsEmpty() || !input.outputs.IsEmpty() ||
+               !input.tags.IsEmpty()) {
         return Result<Out>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -692,6 +699,12 @@ Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
 
     if (step) {
         step = ImportAddGuid(record, ImportRecordOwnerField, input.owner.value);
+    }
+
+    // 태그 접두는 importerName과 다를 때만 쓴다(한 꼴 — A2f5).
+    if (step && owned && !input.tagPrefix.IsEmpty() && input.tagPrefix != input.importerName) {
+        step = record.AddField(ImportRecordTagPrefixField, WireType::String,
+                               ImportBytesOf(input.tagPrefix));
     }
 
     if (!step) {
@@ -750,6 +763,7 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
     auto options = reader.Find(ImportRecordOptionsField);
     auto outputs = reader.Find(ImportRecordOutputsField);
     auto tags = reader.Find(ImportRecordTagsField);
+    auto tagPrefix = reader.Find(ImportRecordTagPrefixField);
     if (!out.OwnedBy(self)) {
         // 참조 기록: owner만 의미가 있다.
         if (!(out.importerId == Guid{}) || !name.IsEmpty() || out.importerVersion != 0 ||
@@ -760,7 +774,8 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
         return Result<Out>::Success(Move(out));
     }
 
-    const usize expectedFields = ImportOwnerRecordFields + (options ? 1 : 0) + (tags ? 1 : 0);
+    const usize expectedFields =
+        ImportOwnerRecordFields + (options ? 1 : 0) + (tags ? 1 : 0) + (tagPrefix ? 1 : 0);
     if (out.importerId == Guid{} || !ImportValidText(name, 1, MaxImporterNameBytes) || !sources ||
         !outputs || reader.FieldCount() != expectedFields ||
         !ImportFieldIs(sources.Value(), WireType::RecordList, 0) ||
@@ -770,6 +785,19 @@ Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
 
     if (auto assigned = out.importerName.TryAssign(name); !assigned) {
         return Result<Out>::Failure(assigned.Error());
+    }
+
+    // 태그 접두(A2f5)는 importerName과 다른 1–MaxImporterNameBytes byte다(같으면 쓰지 않는 꼴).
+    if (tagPrefix) {
+        const StringView prefix = ImportTextOf(tagPrefix.Value());
+        if (!ImportFieldIs(tagPrefix.Value(), WireType::String, 0) ||
+            !ImportValidText(prefix, 1, MaxImporterNameBytes) || prefix == name) {
+            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto assigned = out.tagPrefix.TryAssign(prefix); !assigned) {
+            return Result<Out>::Failure(assigned.Error());
+        }
     }
 
     if (auto read = ImportReadSources(allocator, reader, sources.Value(), out); !read) {

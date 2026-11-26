@@ -104,8 +104,13 @@ AssetImporterTable::AssetImporterTable(Allocator& allocator, TypeRegistry& types
 
 Result<void> AssetImporterTable::Validate(const AssetImporterInfo& info, Entry& entry) noexcept {
     auto invalid = []() noexcept { return Result<void>::Failure(ErrorCode::InvalidArgument); };
+    // 태그 접두(A2f5)는 비면 이름이고, 있으면 이름과 같은 규칙이다.
+    const bool tagPrefixValid =
+        info.tagPrefix.IsEmpty() || (IsToken(info.tagPrefix, MaxImporterNameBytes, true, false) &&
+                                     !IsReservedImporterName(info.tagPrefix));
     if (info.id == Guid{} || !IsToken(info.name, MaxImporterNameBytes, true, false) ||
-        IsReservedImporterName(info.name) || info.extensions.Size() > MaxImporterExtensions ||
+        IsReservedImporterName(info.name) || !tagPrefixValid ||
+        info.extensions.Size() > MaxImporterExtensions ||
         info.roles.Size() > MaxImportSources || HasDuplicate(info.extensions) ||
         HasDuplicate(info.roles)) {
         return invalid();

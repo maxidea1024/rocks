@@ -29,7 +29,8 @@
 //     5 options Record(임포터 스키마), 6 outputs RecordList[Record(ImportOutputSchema){
 //       1 outputKey String, 2 assetId Guid, 3 typeId Guid }], 7 ownerAssetId Guid,
 //     8 tags RecordList[Record(ImportTagSchema){ 1 key String, 2 value String }] (소유 기록, 태그가
-//     있을 때만 — A2f3a UXR8) }
+//     있을 때만 — A2f3a UXR8), 9 tagPrefix String(소유 기록, 태그 접두가 importerName과 다를 때만 —
+//     A2f5) }
 //
 // 사용 예(텍스처 하나를 임포트한 소유 기록):
 //   const ImportSourceInput sources[] = {{"source", "Raw", "Textures/Rock.png", digest, size}};
@@ -60,6 +61,7 @@ inline constexpr Guid ImportRecordOptionsField{0, 5};
 inline constexpr Guid ImportRecordOutputsField{0, 6};
 inline constexpr Guid ImportRecordOwnerField{0, 7};
 inline constexpr Guid ImportRecordTagsField{0, 8};
+inline constexpr Guid ImportRecordTagPrefixField{0, 9};
 inline constexpr Guid ImportTagKeyField{0, 1};
 inline constexpr Guid ImportTagValueField{0, 2};
 
@@ -119,6 +121,8 @@ struct ImportRecordInput {
     AssetId owner{};
     Guid importerId{};
     StringView importerName{};
+    // 태그 키 접두다(A2f5 — 비거나 importerName과 같으면 필드를 쓰지 않는다).
+    StringView tagPrefix{};
     uint32 importerVersion = 0;
     Span<const ImportSourceInput> sources{};
     Span<const uint8> options{};
@@ -162,8 +166,8 @@ struct ImportTag {
 // 기본값·빈 목록이다. outputs는 outputKey byte 순, tags는 (key, value) byte 순이다.
 struct ImportRecord {
     explicit ImportRecord(Allocator& allocator) noexcept
-        : importerName(allocator), sources(allocator), options(allocator), outputs(allocator),
-          tags(allocator) {
+        : importerName(allocator), tagPrefix(allocator), sources(allocator), options(allocator),
+          outputs(allocator), tags(allocator) {
     }
 
     ImportRecord(ImportRecord&&) noexcept = default;
@@ -174,11 +178,18 @@ struct ImportRecord {
     AssetId owner{};
     Guid importerId{};
     String importerName;
+    // 기록의 태그 접두다(A2f5 — 필드가 없으면 빈 값: 접두는 importerName).
+    String tagPrefix;
     uint32 importerVersion = 0;
     Array<ImportSource> sources;
     Array<uint8> options;
     Array<ImportOutput> outputs;
     Array<ImportTag> tags;
+
+    // 태그 키 접두다(tagPrefix, 비면 importerName — A2f5).
+    StringView TagPrefix() const noexcept {
+        return tagPrefix.IsEmpty() ? importerName.View() : tagPrefix.View();
+    }
 
     // 패키지 self의 기록이 소유 기록인지다(owner == self).
     bool OwnedBy(AssetId self) const noexcept {

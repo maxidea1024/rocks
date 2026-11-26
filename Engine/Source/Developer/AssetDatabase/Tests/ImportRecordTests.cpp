@@ -295,6 +295,76 @@ StringView LongValue(usize count) noexcept {
 
 } // namespace
 
+// 태그 접두(7.1절 21 A2f5): 접두가 이름과 다르면 필드 9에 쓰고 읽기가 그 접두로 태그를 대조한다.
+// 이름과 같은 접두는 쓰지 않는다(한 꼴). 접두 길이·참조 기록 위반은 쓰기 InvalidArgument이고, 읽기는
+// 이름과 같은 접두·형식 위반·접두가 다른 태그 키를 거부한다.
+TEST(ImportRecord_TagPrefix) {
+    SystemAllocator allocator;
+    WriteScene scene(allocator);
+    const ImportTagInput tags[] = {{"Shared.Path", "/Game/A"}};
+    scene.input.tags = tags;
+    scene.input.tagPrefix = "Shared";
+    auto written = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(written);
+    auto read = ReadImportRecord(allocator, Self, written.Value().View());
+    REQUIRE(read);
+    CHECK(SameText(read.Value().tagPrefix, "Shared") && read.Value().TagPrefix() == "Shared" &&
+          read.Value().tags.Size() == 1);
+
+    // 이름 접두 키는 다른 접두의 기록에 쓸 수 없다.
+    const ImportTagInput named[] = {{"TextureImporter.Path", "/Game/A"}};
+    scene.input.tags = named;
+    CHECK(WriteImportRecord(allocator, Self, scene.input).Error() == ErrorCode::InvalidArgument);
+
+    // 이름과 같은 접두는 쓰지 않는다(읽으면 빈 값, 접두는 이름).
+    scene.input.tagPrefix = "TextureImporter";
+    auto same = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(same);
+    auto sameRead = ReadImportRecord(allocator, Self, same.Value().View());
+    REQUIRE(sameRead);
+    CHECK(sameRead.Value().tagPrefix.IsEmpty() &&
+          sameRead.Value().TagPrefix() == "TextureImporter");
+    scene.input.tagPrefix = {};
+    auto plain = WriteImportRecord(allocator, Self, scene.input);
+    REQUIRE(plain);
+    CHECK(plain.Value().Size() == same.Value().Size() &&
+          memcmp(plain.Value().Data(), same.Value().Data(), plain.Value().Size()) == 0);
+
+    // 접두 길이 상한.
+    char longPrefix[MaxImporterNameBytes + 1];
+    memset(longPrefix, 'p', sizeof(longPrefix));
+    scene.input.tags = {};
+    scene.input.tagPrefix = StringView(longPrefix, sizeof(longPrefix));
+    CHECK(WriteImportRecord(allocator, Self, scene.input).Error() == ErrorCode::InvalidArgument);
+    scene.input.tagPrefix = StringView(longPrefix, MaxImporterNameBytes);
+    CHECK(WriteImportRecord(allocator, Self, scene.input));
+
+    // 참조 기록은 접두가 없다.
+    ImportRecordInput reference;
+    reference.owner = Other;
+    reference.tagPrefix = "Shared";
+    CHECK(WriteImportRecord(allocator, Self, reference).Error() == ErrorCode::InvalidArgument);
+
+    // 읽기 거부: 이름과 같은 접두, 빈 접두, wire 종류, 접두와 다른 태그 키.
+    const auto readRejects = [&](StringView prefix, WireType wire, StringView key) noexcept {
+        RawScene raw(allocator);
+        raw.top.Set(ImportRecordTagPrefixField, wire,
+                    Span<const uint8>(reinterpret_cast<const uint8*>(prefix.Data()),
+                                      prefix.ByteCount()));
+        Array<RawRecord> items(allocator);
+        CHECK(items.TryPushBack(TagItem(allocator, key, "1")));
+        const Array<uint8> list = ListPayload(allocator, items);
+        raw.top.Set(ImportRecordTagsField, WireType::RecordList, list.View());
+        return ReadImportRecord(allocator, Self, raw.Build().View()).Error() ==
+               ErrorCode::InvalidArgument;
+    };
+    CHECK(readRejects("TextureImporter", WireType::String, "TextureImporter.A"));
+    CHECK(readRejects("", WireType::String, "Shared.A"));
+    CHECK(readRejects("Shared", WireType::Bytes, "Shared.A"));
+    CHECK(readRejects("Shared", WireType::String, "TextureImporter.A"));
+    CHECK(!readRejects("Shared", WireType::String, "Shared.A"));
+}
+
 // 임포터 태그(7.1절 19 A2f3a UXR8): 쓰기는 (key, value) byte 순으로 정렬해 필드 8에 쓰고 읽기가 그
 // 순서로 돌려준다. 태그가 없으면 필드를 쓰지 않는다. 버전 1 기록은 읽지 않는다(Unsupported —
 // 하위호환 없음). 접두·길이·개수·같은 쌍·참조 기록 규칙 위반은 쓰기 InvalidArgument이고, 읽기는
