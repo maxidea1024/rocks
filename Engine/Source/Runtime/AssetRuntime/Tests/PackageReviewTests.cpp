@@ -148,7 +148,7 @@ PrepareResult PrepareOnly(AssetEnv& env, Array<uint8>&& bytes, PackageKind kind)
 
 bool CorruptAt(const PrepareResult& result, PackageSectionKind section, uint64 detail) noexcept {
     return !result.prepared && result.failure.code == AssetDiagnosticCode::CorruptPackage &&
-           result.failure.error == ErrorCode::InvalidArgument &&
+           result.failure.error == ErrorCode::CorruptData &&
            result.failure.section == static_cast<uint32>(section) &&
            result.failure.detail == detail;
 }
@@ -680,7 +680,7 @@ TEST(AssetPackage_ExportNameRulesOnLoad) {
         CHECK(ReadPackage(allocator, edit.Build().View(), PackageReadOptions{}));
         const PrepareResult result = PrepareOnly(env, edit.Build(), PackageKind::Cooked);
         CHECK(!result.prepared && result.failure.code == AssetDiagnosticCode::CorruptPackage &&
-              result.failure.error == ErrorCode::InvalidArgument &&
+              result.failure.error == ErrorCode::CorruptData &&
               result.failure.section == static_cast<uint32>(PackageSectionKind::Objects));
     }
 }

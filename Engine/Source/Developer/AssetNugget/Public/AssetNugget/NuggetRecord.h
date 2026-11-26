@@ -123,9 +123,10 @@ ROCKS_ASSETNUGGET_API Result<void> ValidateNuggetRecord(const NuggetRecord& reco
 ROCKS_ASSETNUGGET_API Result<Array<uint8>> WriteNuggetRecord(Allocator& allocator,
                                                              const NuggetRecord& record) noexcept;
 
-// Record TLV를 읽는다. schema·버전(다른 schema InvalidArgument, 더 새 버전 Unsupported), 필드
+// Record TLV를 읽는다. schema·버전(다른 schema CorruptData, 더 새 버전 Unsupported), 필드
 // 1–6이 정확히 그 순서·wire로 있는지, 값 표 길이(160의 배수), 정규 형식을 본다. 오류: 형식·정규
-// 위반 InvalidArgument, 1 MiB 초과 CapacityExceeded, 더 새 버전 Unsupported, 할당 실패.
+// 위반 CorruptData(읽은 데이터 손상 — AssetSystem 19장), 1 MiB 초과 CapacityExceeded, 더 새 버전
+// Unsupported, 할당 실패.
 ROCKS_ASSETNUGGET_API Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator,
                                                             Span<const uint8> bytes) noexcept;
 

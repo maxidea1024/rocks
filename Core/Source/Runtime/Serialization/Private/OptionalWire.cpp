@@ -51,14 +51,14 @@ Result<OptionalWireReader> OptionalWireReader::Open(ArchiveReader&& payload, uin
     }
 
     ArchiveReader archive = Move(payload);
-    auto present = archive.ReadBool(); // 0·1 밖은 InvalidArgument
+    auto present = archive.ReadBool(); // 0·1 밖은 CorruptData
     if (!present) {
         return Result<OptionalWireReader>::Failure(present.Error());
     }
 
     if (!present.Value()) {
         if (!archive.AtEnd()) {
-            return Result<OptionalWireReader>::Failure(ErrorCode::InvalidArgument);
+            return Result<OptionalWireReader>::Failure(ErrorCode::CorruptData);
         }
 
         return Result<OptionalWireReader>::Success(
@@ -71,7 +71,7 @@ Result<OptionalWireReader> OptionalWireReader::Open(ArchiveReader&& payload, uin
     }
 
     if (!WireSlotShape(WireSlot::OptionalInner, stored.Value())) {
-        return Result<OptionalWireReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<OptionalWireReader>::Failure(ErrorCode::CorruptData);
     }
 
     if (stored.Value() != innerWire) {
@@ -96,7 +96,7 @@ Result<OptionalWireReader> OptionalWireReader::Open(ArchiveReader&& payload, uin
     }
 
     if (!InnerSizeMatches(innerWire, resolved.Value(), inner)) {
-        return Result<OptionalWireReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<OptionalWireReader>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<OptionalWireReader>::Success(
@@ -129,7 +129,7 @@ Span<const uint8> OptionalWireReader::RecordBytes() const noexcept {
 
 Result<void> OptionalWireReader::Finish() const noexcept {
     if (!archive_.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();

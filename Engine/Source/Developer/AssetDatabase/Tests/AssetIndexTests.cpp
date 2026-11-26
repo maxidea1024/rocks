@@ -790,7 +790,7 @@ TEST(AssetIndex_Diagnostics) {
     using C = AssetDiagnosticCode;
     const ExpectedDiagnostic expected[] = {
         {C::InvalidPath, ErrorCode::InvalidArgument, "Bad#Name.rasset"},
-        {C::CorruptPackage, ErrorCode::InvalidArgument, "BadTags.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "BadTags.rasset"},
         {junkFailure.code, junkError, "Broken.rasset"},
         {C::CorruptPackage, cookedError, "Cooked.rasset"},
         {C::DuplicateAssetId, ErrorCode::AlreadyExists, "Copy/HeroCopy.rasset"},
@@ -1013,20 +1013,19 @@ TEST(AssetIndex_ImportRecords) {
     AssetIndex index(env.allocator, layout);
     REQUIRE(index.Rebuild(files, PackageReadOptions{}));
     using C = AssetDiagnosticCode;
-    constexpr ErrorCode Invalid = ErrorCode::InvalidArgument;
     const ExpectedDiagnostic expected[] = {
         {C::UnsupportedVersion, ErrorCode::Unsupported, "C-OtherSchema.rasset"},
         {C::UnsupportedVersion, ErrorCode::Unsupported, "D-Newer.rasset"},
-        {C::CorruptPackage, Invalid, "E-Corrupt.rasset"},
-        {C::CorruptPackage, Invalid, "F-DependencyOnly.rasset"},
-        {C::CorruptPackage, Invalid, "G-ReferenceNoDependency.rasset"},
-        {C::CorruptPackage, Invalid, "H-ReferenceWrongOwner.rasset"},
-        {C::CorruptPackage, Invalid, "I-OwnedWithDependency.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "E-Corrupt.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "F-DependencyOnly.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "G-ReferenceNoDependency.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "H-ReferenceWrongOwner.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "I-OwnedWithDependency.rasset"},
         {C::UnsupportedVersion, ErrorCode::Unsupported, "J-OtherSchemaWithDependency.rasset"},
-        {C::CorruptPackage, Invalid, "K-CorruptAndBadTags.rasset"},
-        {C::CorruptPackage, Invalid, "K-CorruptAndBadTags.rasset"},
-        {C::CorruptPackage, Invalid, "L-DependencyAndBadTags.rasset"},
-        {C::CorruptPackage, Invalid, "L-DependencyAndBadTags.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "K-CorruptAndBadTags.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "K-CorruptAndBadTags.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "L-DependencyAndBadTags.rasset"},
+        {C::CorruptPackage, ErrorCode::CorruptData, "L-DependencyAndBadTags.rasset"},
     };
     CHECK(SameDiagnostics(index.Diagnostics(), expected));
     REQUIRE(index.Diagnostics().Size() == 12);
@@ -1237,9 +1236,9 @@ TEST(AssetIndex_DiagnosticLines) {
          "TypeMismatch: Content/Dir/A.rasset: dependency 5e570000-a55e-7000-0000-000000000835 has "
          "a "
          "different representative type\n"},
-        {C::CorruptPackage, ErrorCode::InvalidArgument,
+        {C::CorruptPackage, ErrorCode::CorruptData,
          "CorruptPackage: Content/Dir/A.rasset: package check failed (section 3, detail 40, "
-         "InvalidArgument)\n"},
+         "CorruptData)\n"},
     };
     test::NFailAllocator failing(allocator);
     // 줄 앞에 0 … LinePrefixBytes byte를 미리 채워 저장소가 자라는 지점을 줄의 모든 조각(코드·

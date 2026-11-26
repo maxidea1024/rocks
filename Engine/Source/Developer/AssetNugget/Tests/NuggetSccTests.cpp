@@ -85,10 +85,10 @@ TEST(NuggetScc_Rejects) {
     }
 
     const uint8 odd[NuggetSccMemberBytes + 1] = {};
-    CHECK(FindNuggetSccMember(odd, Member(1)).Error() == ErrorCode::InvalidArgument);
+    CHECK(FindNuggetSccMember(odd, Member(1)).Error() == ErrorCode::CorruptData);
     Array<uint8> huge(allocator);
     REQUIRE(huge.TryResize((NuggetSccMaxMembers + 1) * NuggetSccMemberBytes));
-    CHECK(FindNuggetSccMember(huge.View(), Member(1)).Error() == ErrorCode::InvalidArgument);
+    CHECK(FindNuggetSccMember(huge.View(), Member(1)).Error() == ErrorCode::CorruptData);
 
     test::NFailAllocator failing(allocator);
     Array<uint8> failingMeta(failing);

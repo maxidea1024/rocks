@@ -135,9 +135,9 @@ public:
     // 정확히(모르는 키·빠진 키 없음), path는 논리 경로 규칙, asset은 36자 소문자 non-null,
     // created는 ISO 8601, days 1–AssetAliasMaxDays, 경로 키 중복 없음, 항목 수·파일 크기 상한.
     // 정렬이 어긋난 파일은 받는다(다음 쓰기가 정렬한다). 실패하면 표는 비고 읽지 않은 상태다.
-    // 오류(failure 진단): 위반 InvalidArgument(코드 CorruptAliasTable, section = AssetAliasField,
-    // detail = 항목 번호 또는 AssetAliasNoEntry — JSON 문법은 줄·열), 파일 크기 상한
-    // CapacityExceeded(같은 진단, 칸 File), 읽기 IO(진단 None과 그 오류), 할당 실패.
+    // 오류(failure 진단): 위반 CorruptData(코드 CorruptAliasTable — AssetSystem 19장, section =
+    // AssetAliasField, detail = 항목 번호 또는 AssetAliasNoEntry — JSON 문법은 줄·열), 파일 크기
+    // 상한 CapacityExceeded(같은 진단, 칸 File), 읽기 IO(진단 None과 그 오류), 할당 실패.
     Result<void> Load(platform::FileSystem& files, AssetDiagnostic* failure = nullptr) noexcept;
 
     bool IsLoaded() const noexcept {

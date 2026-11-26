@@ -186,7 +186,7 @@ TEST(InstancedStructGraph_FieldWireIsEmptyPayloadOrRecord) {
         auto bad = ValueGraph(allocator, trailing.View());
         auto trailed =
             LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(), bad.View());
-        CHECK(!trailed && trailed.Error() == ErrorCode::InvalidArgument);
+        CHECK(!trailed && trailed.Error() == ErrorCode::CorruptData);
         const uint8 junk[] = {1, 2, 3};
         auto notRecord = ValueGraph(allocator, Span<const uint8>(junk, 3));
         CHECK(!LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(), notRecord.View()));
@@ -292,7 +292,8 @@ TEST(InstancedStructGraph_UnknownStructTypeFollowsDecodePolicy) {
 }
 
 // 담을 수 없는 struct(강한 참조·Required·InstancedStruct를 담음)와 struct가 아닌 레코드(클래스)는
-// decode가 정책과 무관하게 InvalidArgument이고, Emplace(lease 판)도 InvalidArgument다(값은 그대로).
+// decode가 정책과 무관하게 CorruptData이고(AssetSystem 19장), Emplace(lease 판)는
+// InvalidArgument다(값은 그대로).
 TEST(InstancedStructGraph_UncontainableStructsAreRejected) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -311,7 +312,7 @@ TEST(InstancedStructGraph_UncontainableStructsAreRejected) {
             auto graph = ValueGraph(allocator, record.View());
             auto loaded = LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(),
                                           graph.View(), lenient);
-            CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+            CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
         }
 
         CHECK(recorder.count == 0);

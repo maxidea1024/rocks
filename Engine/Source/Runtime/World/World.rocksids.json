@@ -24,6 +24,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::Actor::tags_",
+      "id": "ba077f6157b34155a17182b814cb49ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Actor::tickSettings_",
       "id": "5103c0c5088547639a54f60302e0455a",
       "aliases": [],
@@ -96,6 +103,13 @@
       "kind": "field",
       "name": "rocks::CapsuleComponent::capsuleRadius_",
       "id": "11c6f88a49ab446a9bc90799e9404dbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Component::componentTags_",
+      "id": "4a16812809304f3c832598238a6ab8bf",
       "aliases": [],
       "retired": false
     },

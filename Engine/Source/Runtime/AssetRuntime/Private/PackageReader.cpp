@@ -27,8 +27,8 @@ constexpr uint32 SectionKindValue(PackageSectionKind kind) noexcept {
 // 손상 판정 하나를 진단과 함께 돌려준다.
 template <class T>
 Result<T> Corrupt(AssetDiagnostic* failure, AssetId asset, uint32 section, uint64 detail) noexcept {
-    return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
-                        asset, section, detail);
+    return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, asset,
+                        section, detail);
 }
 
 template <class T>
@@ -87,7 +87,7 @@ RecordLimits SummaryLimits() noexcept {
 // Record 필드 payload를 고정 폭 값으로 읽는다(wire가 다르거나 크기가 다르면 실패).
 Result<uint32> FieldU32(const FieldView& field) noexcept {
     if (field.wireType != static_cast<uint32>(WireType::U32) || field.payload.Size() != 4) {
-        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+        return Result<uint32>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<uint32>::Success(LoadLittleEndian<uint32>(field.payload.Data()));
@@ -95,7 +95,7 @@ Result<uint32> FieldU32(const FieldView& field) noexcept {
 
 Result<Guid> FieldGuid(const FieldView& field) noexcept {
     if (field.wireType != static_cast<uint32>(WireType::Guid) || field.payload.Size() != 16) {
-        return Result<Guid>::Failure(ErrorCode::InvalidArgument);
+        return Result<Guid>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<Guid>::Success(LoadGuid(field.payload.Data()));
@@ -122,23 +122,23 @@ Result<void> ReadVersionList(const RecordReader& parent, const FieldView& field,
     for (usize index = 0; index < list.Value().ItemCount(); ++index) {
         auto item = list.Value().OpenItem(index, 2);
         if (!item || item.Value().FieldCount() != 2) {
-            return Result<void>::Failure(item ? ErrorCode::InvalidArgument : item.Error());
+            return Result<void>::Failure(item ? ErrorCode::CorruptData : item.Error());
         }
 
         auto idField = item.Value().Find(VersionItemIdField);
         auto versionField = item.Value().Find(VersionItemVersionField);
         if (!idField || !versionField) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto id = FieldGuid(idField.Value());
         auto version = FieldU32(versionField.Value());
         if (!id || !version) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (!out.IsEmpty() && !GuidLess(out[out.Size() - 1].type, id.Value())) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         Entry entry;
@@ -172,24 +172,24 @@ Result<void> ReadClassDefaultsList(const RecordReader& parent, const FieldView& 
     for (usize index = 0; index < list.Value().ItemCount(); ++index) {
         auto item = list.Value().OpenItem(index, 2);
         if (!item || item.Value().FieldCount() != 2) {
-            return Result<void>::Failure(item ? ErrorCode::InvalidArgument : item.Error());
+            return Result<void>::Failure(item ? ErrorCode::CorruptData : item.Error());
         }
 
         auto idField = item.Value().Find(ClassDefaultsItemIdField);
         auto digestField = item.Value().Find(ClassDefaultsItemFingerprintField);
         if (!idField || !digestField) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto id = FieldGuid(idField.Value());
         const FieldView& digest = digestField.Value();
         if (!id || digest.wireType != static_cast<uint32>(WireType::Bytes) ||
             digest.payload.Size() != Sha256Digest::Bytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (!out.IsEmpty() && !GuidLess(out[out.Size() - 1].type, id.Value())) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         PackageClassDefaults row;
@@ -231,7 +231,7 @@ Result<EngineVersion> ReadEngineVersion(Allocator& allocator, const RecordReader
                                         const FieldView& field) noexcept {
     auto record = parent.OpenRecordField(allocator, field, EngineVersionSchema, 1, 1, 3);
     if (!record || record.Value().FieldCount() != 3) {
-        return Result<EngineVersion>::Failure(record ? ErrorCode::InvalidArgument : record.Error());
+        return Result<EngineVersion>::Failure(record ? ErrorCode::CorruptData : record.Error());
     }
 
     uint32 parts[3] = {};
@@ -240,7 +240,7 @@ Result<EngineVersion> ReadEngineVersion(Allocator& allocator, const RecordReader
         auto part = record.Value().Find(ids[index]);
         auto value = part ? FieldU32(part.Value()) : Result<uint32>::Failure(part.Error());
         if (!value || value.Value() > NumericLimits<uint16>::Max()) {
-            return Result<EngineVersion>::Failure(ErrorCode::InvalidArgument);
+            return Result<EngineVersion>::Failure(ErrorCode::CorruptData);
         }
 
         parts[index] = value.Value();
@@ -262,14 +262,14 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
     RecordReader& record = reader.Value();
     const usize expected = kind == PackageKind::Editor ? 5 : 6;
     if (record.FieldCount() != expected) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto types = record.Find(SummaryTypesField);
     auto customs = record.Find(SummaryCustomVersionsField);
     auto defaults = record.Find(SummaryClassDefaultsField);
     if (!types || !customs || !defaults) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto read = ReadClassDefaultsList(record, defaults.Value(), summary.classDefaults); !read) {
@@ -297,7 +297,7 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
         auto saved = record.Find(SummarySavedByField);
         auto compatible = record.Find(SummaryCompatibleWithField);
         if (!saved || !compatible) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto savedBy = ReadEngineVersion(allocator, record, saved.Value());
@@ -311,7 +311,7 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
         // compatibleWith는 savedBy의 기준선(주·부·0)과 정확히 같다(writer 규칙 — 같은 객체로 풀리는
         // 다른 byte를 받지 않는다, AS 5.7절 15).
         if (!(summary.compatibleWith == summary.savedBy.CompatibleBaseline())) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         return Result<void>::Success();
@@ -321,19 +321,19 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
     auto settings = record.Find(SummaryProfileSettingsField);
     auto cooker = record.Find(SummaryCookerVersionField);
     if (!profile || !settings || !cooker) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const FieldView& profileField = profile.Value();
     if (profileField.wireType != static_cast<uint32>(WireType::String) ||
         profileField.payload.Size() == 0 || profileField.payload.Size() > PackageMaxStringBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const StringView profileText(reinterpret_cast<const char*>(profileField.payload.Data()),
                                  profileField.payload.Size());
     if (!profileText.IsValidUtf8()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto assigned = summary.profileId.TryAssign(profileText); !assigned) {
@@ -343,7 +343,7 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
     const FieldView& settingsField = settings.Value();
     if (settingsField.wireType != static_cast<uint32>(WireType::Bytes) ||
         settingsField.payload.Size() != Sha256Digest::Bytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     for (usize index = 0; index < Sha256Digest::Bytes; ++index) {
@@ -424,7 +424,7 @@ Result<void> ReadExports(Span<const uint8> bytes, PackageContents& contents) noe
     ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
     if (!count || count.Value() == 0 || count.Value() > PackageMaxExports) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = contents.exports.TryReserve(count.Value()); !reserved) {
@@ -437,7 +437,7 @@ Result<void> ReadExports(Span<const uint8> bytes, PackageContents& contents) noe
         auto outer = in.ReadU32();
         auto flags = in.ReadU32();
         if (!name || !type || !outer || !flags) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         PackageExportEntry entry;
@@ -449,7 +449,7 @@ Result<void> ReadExports(Span<const uint8> bytes, PackageContents& contents) noe
     }
 
     if (!in.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -479,16 +479,16 @@ Result<uint64> ValidateExports(Allocator& allocator, const PackageContents& cont
         const bool primary = (entry.flags & static_cast<uint32>(PackageExportFlags::Primary)) != 0;
         if ((entry.flags & ~static_cast<uint32>(PackageExportFlags::Primary)) != 0 ||
             entry.type == TypeId{}) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         if (index == 1) {
             if (!primary || entry.name.ByteCount() != 0 || entry.outerIndex != 0) {
-                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+                return Result<uint64>::Failure(ErrorCode::CorruptData);
             }
         } else if (primary || entry.name.ByteCount() == 0 || entry.outerIndex == 0 ||
                    entry.outerIndex >= index) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         // outer가 경로에 있어야 한다(깊이 우선). 경로를 outer까지 줄인다.
@@ -497,12 +497,12 @@ Result<uint64> ValidateExports(Allocator& allocator, const PackageContents& cont
         }
 
         if (path.IsEmpty()) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         PathFrame& parent = path[path.Size() - 1];
         if (parent.hasChild && !BytesLess(parent.lastChild, entry.name)) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         parent.hasChild = true;
@@ -518,7 +518,7 @@ Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noe
     ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
     if (!count || count.Value() == 0 || count.Value() > PackageMaxObjectImports) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = contents.imports.TryReserve(count.Value()); !reserved) {
@@ -531,7 +531,7 @@ Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noe
         auto name = in.ReadStringView();
         auto type = in.ReadGuid();
         if (!asset || !outer || !name || !type) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         PackageImportEntry entry;
@@ -543,7 +543,7 @@ Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noe
     }
 
     if (!in.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -579,14 +579,14 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
         const PackageImportEntry& entry = imports[position];
         if (entry.asset.IsNull() || entry.asset == contents.header.assetId ||
             entry.type == TypeId{}) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         if (entry.outerImportIndex != 0) {
             const usize outer = entry.outerImportIndex - 1;
             if (outer >= position || !(imports[outer].asset == entry.asset) ||
                 imports[outer].name.ByteCount() == 0 || entry.name.ByteCount() == 0) {
-                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+                return Result<uint64>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -599,7 +599,7 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
         // 에셋이 바뀌면 더 큰 assetId여야 하고 깊이 우선 경로는 대표 에셋 자리에서 다시 시작한다.
         if (position == 0 || !(imports[position - 1].asset == entry.asset)) {
             if (position > 0 && !GuidLess(imports[position - 1].asset.value, entry.asset.value)) {
-                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+                return Result<uint64>::Failure(ErrorCode::CorruptData);
             }
 
             path.Clear();
@@ -611,12 +611,12 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
         }
 
         if (path.IsEmpty()) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         PathFrame& parent = path[path.Size() - 1];
         if (parent.hasChild && !BytesLess(parent.lastChild, entry.name)) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         parent.hasChild = true;
@@ -627,7 +627,7 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
                                                         : pathBytes[entry.outerImportIndex - 1] +
                                                               1 + entry.name.ByteCount();
         if (bytes > MaxObjectPathBytes) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         pathBytes[position] = static_cast<uint32>(bytes);
@@ -651,7 +651,7 @@ Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents
     // 상한을 두지 않고 섹션 크기가 묶는다). 크기가 맞으면 아래 칸 읽기는 실패하지 않는다.
     if (!count || count.Value() == 0 ||
         bytes.Size() != sizeof(uint32) + uint64{count.Value()} * DependencyEntryBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = contents.dependencies.TryReserve(count.Value()); !reserved) {
@@ -668,7 +668,7 @@ Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents
         if (kind.Value() < static_cast<uint32>(PackageDependencyKind::Hard) ||
             kind.Value() > static_cast<uint32>(PackageDependencyKind::ImportOwner) ||
             (flags.Value() & ~DependencyRequiredFlag) != 0) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         PackageDependencyEntry entry;
@@ -689,23 +689,23 @@ Result<uint64> ValidateDependencies(const PackageContents& contents) noexcept {
     for (usize index = 0; index < dependencies.Size(); ++index) {
         const PackageDependencyEntry& entry = dependencies[index];
         if (entry.asset.IsNull() || entry.asset == contents.header.assetId) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         if (contents.header.kind == PackageKind::Cooked &&
             entry.kind != PackageDependencyKind::Hard &&
             entry.kind != PackageDependencyKind::Soft) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         // Hard만 expectedType을 가지고 Hard는 반드시 가진다(writer 규칙 — 대상 대표 에셋 타입, AS
         // 5.7절 5·14).
         if ((entry.kind == PackageDependencyKind::Hard) != (entry.expectedType != TypeId{})) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         if (index > 0 && !DependencyLess(dependencies[index - 1], entry)) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -719,7 +719,7 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
     // 않는다.
     if (!count || count.Value() == 0 ||
         bytes.Size() != sizeof(uint32) + uint64{count.Value()} * BulkIndexEntryBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = contents.bulkEntries.TryReserve(count.Value()); !reserved) {
@@ -744,7 +744,7 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
         entry.storedBytes = stored.Value();
         entry.rawBytes = raw.Value();
         if (codec.Value() > static_cast<uint32>(BulkCodec::Zstd)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         entry.codec = static_cast<BulkCodec>(codec.Value());
@@ -779,14 +779,14 @@ Result<void> ValidateBulkLayout(const PackageContents& contents, uint64 bulkByte
             (contents.header.kind == PackageKind::Cooked && entry.flags != 0) ||
             (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes) ||
             entry.offset > bulkBytes || entry.storedBytes > bulkBytes - entry.offset) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         end = entry.offset + entry.storedBytes;
     }
 
     if (end != bulkBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -806,13 +806,13 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
     for (const PackageBulkEntry& entry : contents.bulkEntries) {
         if (!AllZero(contents.bulk.Slice(static_cast<usize>(end),
                                          static_cast<usize>(entry.offset - end)))) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         const Span<const uint8> stored = contents.bulk.Slice(static_cast<usize>(entry.offset),
                                                              static_cast<usize>(entry.storedBytes));
         if (Crc32(stored) != entry.crc32) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint64>::Failure(ErrorCode::CorruptData);
         }
 
         end = entry.offset + entry.storedBytes;
@@ -860,10 +860,10 @@ Result<bool> TypeTableMatchesExports(Allocator& allocator,
 // 컨테이너·rawSize ≠ raw 크기(할당 전에 본다 — 해제 결과 크기가 아니라 헤더로)·블록 해제 실패는
 // InvalidArgument, 할당 실패는 OutOfMemory다.
 // 블록 컨테이너 오류를 bulk 해제 오류로 바꾼다: 할당 실패는 그대로, 나머지(형식·CRC·손상)는
-// 저장 byte가 틀린 것이라 InvalidArgument다.
+// 저장 byte가 틀린 것이라 CorruptData다(AssetSystem 19장).
 Result<void> ContainerFailure(ErrorCode error) noexcept {
     return Result<void>::Failure(error == ErrorCode::OutOfMemory ? ErrorCode::OutOfMemory
-                                                                 : ErrorCode::InvalidArgument);
+                                                                 : ErrorCode::CorruptData);
 }
 
 Result<void> DecodeBulkContainer(Span<const uint8> stored, Span<uint8> raw,
@@ -875,7 +875,7 @@ Result<void> DecodeBulkContainer(Span<const uint8> stored, Span<uint8> raw,
 
     if (reader.Value().Format() != CompressionFormat::Zstd ||
         reader.Value().RawSize() != raw.Size()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto context = CompressedBlocksReadContext::TryCreate(reader.Value(), allocator);
@@ -897,7 +897,7 @@ namespace package_detail {
 Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noexcept {
     auto header = ReadRecordHeader(bytes);
     if (!header) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     RecordLimits limits;
@@ -910,7 +910,7 @@ Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noe
     if (!record) {
         return Result<void>::Failure(record.Error() == ErrorCode::OutOfMemory
                                          ? ErrorCode::OutOfMemory
-                                         : ErrorCode::InvalidArgument);
+                                         : ErrorCode::CorruptData);
     }
 
     Guid previous{};
@@ -918,7 +918,7 @@ Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noe
         auto field = record.Value().Next();
         ROCKS_ASSERT(field.IsOk());
         if (index > 0 && !GuidLess(previous, field.Value().id)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         previous = field.Value().id;
@@ -1472,7 +1472,7 @@ Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource&
         case PackageSectionKind::ImportRecord:
             // 내용 스키마는 A2(AssetDatabase)가 정한다. 여기서는 Record envelope만 확인한다.
             if (auto record = ReadRecordHeader(bytes); !record) {
-                read = Result<void>::Failure(ErrorCode::InvalidArgument);
+                read = Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             contents.importRecord = bytes;
@@ -1702,7 +1702,7 @@ Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const ui
     }
 
     if (!(Sha256::Hash(Span<const uint8>(raw.Data(), raw.Size())) == entry.sha256)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -1722,7 +1722,7 @@ Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const ui
 
         // 형식은 해제(DecodeBulkContainer)가 본다 — 여기서는 할당 크기만 먼저 확인한다.
         if (reader.Value().RawSize() != entry.rawBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -1851,7 +1851,7 @@ Result<PackageFingerprint> ReadPackageFingerprint(Allocator& allocator, PackageR
     if (Crc32(table.View().Slice(0, tableBytes)) !=
         LoadLittleEndian<uint32>(table.Data() + tableBytes)) {
         (void)Corrupt<void>(failure, asset, 0, parsed.Value().sectionTableOffset);
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     Sha256 hash;
@@ -1960,7 +1960,7 @@ Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
         }
 
         if (crc.Value() != entry.crc32) {
-            return SectionFailure<void>(failure, ErrorCode::InvalidArgument, asset,
+            return SectionFailure<void>(failure, ErrorCode::CorruptData, asset,
                                         PackageSectionKind::BulkIndex, 0);
         }
 

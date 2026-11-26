@@ -62,7 +62,7 @@ ArchiveReader& SetWireReader::Elements() noexcept {
 
 Result<void> SetWireReader::Finish() const noexcept {
     if (!archive_.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();

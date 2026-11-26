@@ -331,12 +331,12 @@ TEST(PackageBulkEntry_Decode) {
             PackageBulkEntry wrongHash = entry;
             wrongHash.sha256.bytes[0] = static_cast<uint8>(wrongHash.sha256.bytes[0] ^ 1);
             CHECK(DecodePackageBulkEntry(wrongHash, stored, raw.View(), env.allocator).Error() ==
-                  ErrorCode::InvalidArgument);
+                  ErrorCode::CorruptData);
             if (entry.codec == BulkCodec::Zstd) {
                 Array<uint8> corrupt = Copy(env.allocator, stored);
                 corrupt[0] = static_cast<uint8>(corrupt[0] ^ 1);
                 CHECK(DecodePackageBulkEntry(entry, corrupt.View(), raw.View(), env.allocator)
-                          .Error() == ErrorCode::InvalidArgument);
+                          .Error() == ErrorCode::CorruptData);
                 test::NFailAllocator failing(env.allocator);
                 uint32 failures = 0;
                 for (uint64 attempt = 1;; ++attempt) {
@@ -636,12 +636,12 @@ TEST(PackageBulkEntry_DecodeIntoArray) {
     PackageBulkEntry huge = entry;
     huge.rawBytes = uint64{1} << 44;
     CHECK(DecodePackageBulkEntry(huge, stored, none, env.allocator).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(none.IsEmpty());
     Array<uint8> corrupt = Copy(env.allocator, stored);
     corrupt[0] = static_cast<uint8>(corrupt[0] ^ 1);
     CHECK(DecodePackageBulkEntry(entry, corrupt.View(), none, env.allocator).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     test::NFailAllocator failing(env.allocator);
     uint32 failures = 0;
     for (uint64 attempt = 1;; ++attempt) {

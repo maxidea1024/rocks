@@ -27,8 +27,7 @@ bool SameRotation(const Quatd& a, const Quatd& b, double tolerance) noexcept {
 
 } // namespace
 
-MovementComponent::MovementComponent(Allocator& allocator) noexcept {
-    (void)allocator;
+MovementComponent::MovementComponent(Allocator& allocator) noexcept : Component(allocator) {
     // UE TG_PrePhysics(MovementComponent.cpp:25).
     TickSettings& tick = PrimaryTick();
     tick.tick = true;

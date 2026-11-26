@@ -512,18 +512,18 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). Primitive가 42(bodySettings 포함 —
-    // CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 5 — 태그 ER 31.4절 포함). Primitive가
+    // 42(bodySettings 포함 — CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 53, true},
-        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 56, true},
-        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
-        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 57, false},
-        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 58, false},
-        {ObjectTypeIdOf<TriggerBase>(), ObjectTypeIdOf<Actor>(), 4, true},
-        {ObjectTypeIdOf<TriggerBox>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
-        {ObjectTypeIdOf<TriggerSphere>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
-        {ObjectTypeIdOf<TriggerCapsule>(), ObjectTypeIdOf<TriggerBase>(), 4, false},
+        {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 54, true},
+        {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 57, true},
+        {ObjectTypeIdOf<BoxComponent>(), ObjectTypeIdOf<ShapeComponent>(), 58, false},
+        {ObjectTypeIdOf<SphereComponent>(), ObjectTypeIdOf<ShapeComponent>(), 58, false},
+        {ObjectTypeIdOf<CapsuleComponent>(), ObjectTypeIdOf<ShapeComponent>(), 59, false},
+        {ObjectTypeIdOf<TriggerBase>(), ObjectTypeIdOf<Actor>(), 5, true},
+        {ObjectTypeIdOf<TriggerBox>(), ObjectTypeIdOf<TriggerBase>(), 5, false},
+        {ObjectTypeIdOf<TriggerSphere>(), ObjectTypeIdOf<TriggerBase>(), 5, false},
+        {ObjectTypeIdOf<TriggerCapsule>(), ObjectTypeIdOf<TriggerBase>(), 5, false},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

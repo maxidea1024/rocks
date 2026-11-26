@@ -372,12 +372,12 @@ TEST(ObjectGraphMalformedKnownFieldsNeverPublishObjects) {
     };
 
     const Case cases[] = {{NumberId, WireType::U64, {1}, 8, ErrorCode::TypeMismatch},
-                          {NumberId, WireType::U32, {1}, 5, ErrorCode::InvalidArgument},
+                          {NumberId, WireType::U32, {1}, 5, ErrorCode::CorruptData},
                           {SmallId, WireType::U32, {0, 1}, 4, ErrorCode::Overflow},
-                          {BoolId, WireType::Bool, {2}, 1, ErrorCode::InvalidArgument},
+                          {BoolId, WireType::Bool, {2}, 1, ErrorCode::CorruptData},
                           // 강한 참조는 U32 local ID다(graph v2): 범위 밖 번호는 InvalidArgument,
                           // U64 wire는 TypeMismatch다.
-                          {LeftId, WireType::U32, {2}, 4, ErrorCode::InvalidArgument},
+                          {LeftId, WireType::U32, {2}, 4, ErrorCode::CorruptData},
                           {LeftId, WireType::U64, {1}, 8, ErrorCode::TypeMismatch}};
     ObjectGraphLoadOptions options;
     for (const auto& example : cases) {

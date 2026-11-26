@@ -141,7 +141,7 @@ bool NotTrustedAt(Allocator& allocator, Span<const uint8> envelope, const Conten
 bool CorruptAt(Allocator& allocator, Span<const uint8> envelope, const ContentTrust& trust,
                Field field) noexcept {
     return FailsAt(allocator, envelope, trust, AssetDiagnosticCode::CorruptPackage,
-                   ErrorCode::InvalidArgument, field);
+                   ErrorCode::CorruptData, field);
 }
 
 bool UnsupportedAt(Allocator& allocator, Span<const uint8> envelope, const ContentTrust& trust,

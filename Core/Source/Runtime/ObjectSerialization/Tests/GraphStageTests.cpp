@@ -100,7 +100,7 @@ TEST(GraphStage_NodeDescriptorsAndInputSource) {
             ObjectGraphInput wrongType = input;
             wrongType.nodes = mismatched;
             const uint32 constructed = ConstructedNodes;
-            CHECK(RunStage(allocator, registry, types, wrongType) == ErrorCode::InvalidArgument);
+            CHECK(RunStage(allocator, registry, types, wrongType) == ErrorCode::CorruptData);
             CHECK(ConstructedNodes == constructed);
             CHECK(registry.Stats().liveObjects == 0 && registry.Stats().reservedObjects == 0);
             // 기준 Outer 요약의 pathBytes가 4 KiB를 넘으면 노드 출처 단계의
@@ -177,38 +177,38 @@ TEST(GraphStage_NodeTableRulesRejectBeforeConstructors) {
                   {NodeType, 1, "Body", node.View()},
                   {NodeType, 1, "BODY", node.View()}},
                  3,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 // 대표 자식 둘(빈 비교 키 중복).
                 {{{NodeType, 0, {}, node.View()},
                   {NodeType, 1, {}, node.View()},
                   {NodeType, 1, {}, node.View()}},
                  3,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 // 대표 자식이 있는 Outer의 이름 있는 자식과 그 반대.
                 {{{NodeType, 0, {}, node.View()},
                   {NodeType, 1, {}, node.View()},
                   {NodeType, 1, "A", node.View()}},
                  3,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 {{{NodeType, 0, {}, node.View()},
                   {NodeType, 1, "A", node.View()},
                   {NodeType, 1, {}, node.View()}},
                  3,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 // outermost가 아닌 Outer의 빈 이름.
                 {{{NodeType, 0, {}, node.View()},
                   {NodeType, 1, "A", node.View()},
                   {NodeType, 2, {}, node.View()}},
                  3,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 // 이름 형식.
                 {{{NodeType, 0, {}, node.View()}, {NodeType, 1, "a.b", node.View()}},
                  2,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 // 최상위 이름 공간의 형제 중복.
                 {{{NodeType, 0, "Top", node.View()}, {NodeType, 0, "tOP", node.View()}},
                  2,
-                 ErrorCode::InvalidArgument}};
+                 ErrorCode::CorruptData}};
             for (const Case& entry : plainCases) {
                 const Span<const test::graph::Node> nodes(entry.nodes, entry.count);
                 const Array<uint8> graph = MakeGraph(allocator, nodes, true);
@@ -227,7 +227,7 @@ TEST(GraphStage_NodeTableRulesRejectBeforeConstructors) {
                                                    {NodeType, 1, "BODY", node.View()}};
                 const Array<uint8> graph = MakeGraph(allocator, nodes, true);
                 CHECK(LoadObjectGraph(allocator, plain, types, plain.OwnerAccess(), graph.View())
-                          .Error() == ErrorCode::InvalidArgument);
+                          .Error() == ErrorCode::CorruptData);
                 const test::graph::Node distinct[] = {{NodeType, 0, {}, first.View()},
                                                       {NodeType, 1, "Body", second.View()},
                                                       {NodeType, 1, "Arm", node.View()}};
@@ -265,13 +265,13 @@ TEST(GraphStage_NodeTableRulesRejectBeforeConstructors) {
                  ErrorCode::Unsupported},
                 {{{PackType, 0, {}, pack.View()}, {NodeType, 0, {}, node.View()}},
                  2,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 {{{PackType, 0, {}, pack.View()}, {PackType, 0, "Named", pack.View()}},
                  2,
-                 ErrorCode::InvalidArgument},
+                 ErrorCode::CorruptData},
                 {{{PackType, 0, {}, pack.View()}, {PackType, 1, {}, pack.View()}},
                  2,
-                 ErrorCode::InvalidArgument}};
+                 ErrorCode::CorruptData}};
             for (const Case& entry : packageCases) {
                 const Span<const test::graph::Node> nodes(entry.nodes, entry.count);
                 const Array<uint8> graph = MakeGraph(allocator, nodes, true);
@@ -296,7 +296,7 @@ TEST(GraphStage_NodeTableRulesRejectBeforeConstructors) {
                 input.nodes = Span<const GraphNodeDesc>(descs, entry.count);
                 return RunStage(allocator, registry, types, input);
             };
-            CHECK(runDescribed(plain, plainCases[0]) == ErrorCode::InvalidArgument);
+            CHECK(runDescribed(plain, plainCases[0]) == ErrorCode::CorruptData);
             for (const Case& entry : packageCases) {
                 CHECK(runDescribed(packaged, entry) == entry.expected);
             }
@@ -317,7 +317,7 @@ TEST(GraphStage_NodeTableRulesRejectBeforeConstructors) {
                 input.hasBase = true;
                 input.base = OuterSummary::ForNewOutermost(false);
                 CHECK(RunStage(allocator, plain, types, input, base.Value()) ==
-                      ErrorCode::InvalidArgument);
+                      ErrorCode::CorruptData);
             }
 
             CHECK(ConstructedNodes == constructed);

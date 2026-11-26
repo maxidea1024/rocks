@@ -521,13 +521,13 @@ TEST(ObjectRefMapGraph_DuplicateKeysAndBadTargetsAreRejected) {
             const RawEntry valid[] = {{"a", 2}, {"b", 0}};
             CHECK(LoadCode(allocator, objects, types,
                            RawGraph(allocator, field, duplicate, false).View()) ==
-                  ErrorCode::InvalidArgument);
+                  ErrorCode::CorruptData);
             CHECK(LoadCode(allocator, objects, types,
                            RawGraph(allocator, field, wrongType, true).View()) ==
                   ErrorCode::TypeMismatch);
             CHECK(LoadCode(allocator, objects, types,
                            RawGraph(allocator, field, outOfRange, false).View()) ==
-                  ErrorCode::InvalidArgument);
+                  ErrorCode::CorruptData);
             CHECK(objects.Stats().liveObjects == 0 && objects.Stats().reservedObjects == 0);
             CHECK(LoadCode(allocator, objects, types,
                            RawGraph(allocator, field, valid, false).View()) == ErrorCode::None);

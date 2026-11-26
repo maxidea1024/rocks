@@ -140,7 +140,7 @@ public:
     static constexpr uint32 MaxHierarchyDepth = 4096;
 
     explicit SceneComponent(Allocator& allocator) noexcept
-        : children_(allocator), attachSocket_(allocator) {
+        : Component(allocator), children_(allocator), attachSocket_(allocator) {
     }
 
     const Transform& RelativeTransform() const noexcept {

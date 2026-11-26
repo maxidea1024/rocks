@@ -164,11 +164,11 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
             ErrorCode expected;
         };
 
-        const Case cases[] = {{"group", WireType::I64, 5, ErrorCode::InvalidArgument},
-                              {"group", WireType::I64, 256 + 7, ErrorCode::InvalidArgument},
-                              {"group", WireType::I64, -1, ErrorCode::InvalidArgument},
-                              {"bias", WireType::I64, 2, ErrorCode::InvalidArgument},
-                              {"channels", WireType::I64, 16, ErrorCode::InvalidArgument},
+        const Case cases[] = {{"group", WireType::I64, 5, ErrorCode::CorruptData},
+                              {"group", WireType::I64, 256 + 7, ErrorCode::CorruptData},
+                              {"group", WireType::I64, -1, ErrorCode::CorruptData},
+                              {"bias", WireType::I64, 2, ErrorCode::CorruptData},
+                              {"channels", WireType::I64, 16, ErrorCode::CorruptData},
                               {"group", WireType::U32, 7, ErrorCode::TypeMismatch}};
         for (const Case& example : cases) {
             ArchiveWriter payload(allocator);

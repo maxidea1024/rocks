@@ -24,7 +24,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
 
     for (usize index = 0; index < sizeof(Magic); ++index) {
         if (magic.Value()[index] != Magic[index]) {
-            return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+            return Result<Envelope>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -45,7 +45,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
     const bool nodeTable = (flags.Value() & NodeTableFlag) != 0;
     if ((flags.Value() & ~KnownFlags) != 0 ||
         ((flags.Value() & BaseOuterFlag) != 0 && !nodeTable)) {
-        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+        return Result<Envelope>::Failure(ErrorCode::CorruptData);
     }
 
     auto count = envelope.Value().ReadU32();
@@ -54,7 +54,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
     }
 
     if (count.Value() == 0) {
-        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+        return Result<Envelope>::Failure(ErrorCode::CorruptData);
     }
 
     if (count.Value() > budget.limits.maxObjects) {
@@ -73,7 +73,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
     // 노드마다 최소 byte(Record 길이 prefix와 header, NodeTable이면 항목)를 할당 전에 확인한다.
     const usize perNode = RecordPrefixBytes + RecordHeaderBytes + (nodeTable ? NodeEntryBytes : 0);
     if (static_cast<uint64>(count.Value()) * perNode > envelope.Value().Remaining()) {
-        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+        return Result<Envelope>::Failure(ErrorCode::CorruptData);
     }
 
     auto spent = budget.Spend(envelope.Value().WorkUsed());
@@ -116,7 +116,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
         }
 
         if (type.Value() == Guid{}) {
-            return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+            return Result<Envelope>::Failure(ErrorCode::CorruptData);
         }
 
         auto outer = body.Value().ReadU32();
@@ -144,7 +144,7 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
     }
 
     if (!body.Value().AtEnd()) {
-        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
+        return Result<Envelope>::Failure(ErrorCode::CorruptData);
     }
 
     spent = budget.Spend(body.Value().WorkUsed());

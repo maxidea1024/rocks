@@ -148,6 +148,9 @@ public abstract class TestsModule : ModuleRules
         // World render lane) and build resource maps from the generated shader parameter fixture structs (Docs/Design/ShaderSystem section 16.2 SSD64).
         ["RenderBase"] = ["Config", "ConfigTestFixtures", "CoreTypeBindings", "Engine", "ObjectRuntime", "ReflectionTestFixtures", "ReflectionText",
             "Serialization", "ShaderParameterTestFixtures", "TraceAnalysis", "World"],
+        // The render graph parameter collector tests add passes from the generated shader parameter fixture structs (Docs/Design/ShaderSystem section
+        // 16.2 SSD65).
+        ["RenderGraph"] = ["ShaderParameterTestFixtures"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
         // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers; the shader

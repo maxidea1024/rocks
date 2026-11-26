@@ -432,7 +432,7 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
 
             // 등록 enum이 정적 enum보다 넓어도 2단계가 입력 때문에 실패하지 않게 한다.
             if (!GeneratedType<Element>::IsDeclared(parsed.signedInteger)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -491,7 +491,7 @@ inline Result<void> DecodeByteArray(Array<uint8>* target, const FieldView& field
     }
 
     if (!reader.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const usize count = bytes.Value().Size();

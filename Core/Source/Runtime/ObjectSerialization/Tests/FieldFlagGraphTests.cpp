@@ -236,7 +236,7 @@ TEST(FieldFlagGraph_IncludeFlagsSaveAndLoadPerMember) {
         REQUIRE(full);
         CHECK(LoadAndCheck(allocator, fixture.types, full.Value().View(), includeLoad, nullptr,
                            [](ObjectRegistry&, ObjectHandle) noexcept {}) ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // 최상위가 모두 SaveGame인 클래스의 전부 저장 파일: struct 멤버·원소 멤버의 dropped가 포함 필터
@@ -252,7 +252,7 @@ TEST(FieldFlagGraph_IncludeFlagsSaveAndLoadPerMember) {
         FieldDecodePolicy includeLoad;
         includeLoad.includeFlags = SaveGameFlag;
         const ObjectHandle roots[] = {slot.Handle(), list.Handle(), atom.Handle()};
-        const ErrorCode expected[] = {ErrorCode::InvalidArgument, ErrorCode::InvalidArgument,
+        const ErrorCode expected[] = {ErrorCode::CorruptData, ErrorCode::CorruptData,
                                       ErrorCode::None};
         for (usize index = 0; index < 3; ++index) {
             auto full = Save(allocator, objects, roots[index], {});
@@ -338,7 +338,7 @@ TEST(FieldFlagGraph_IncludeFlagsReachContainerStructMembers) {
         REQUIRE(full);
         CHECK(LoadAndCheck(allocator, fixture.types, full.Value().View(), includeLoad, nullptr,
                            [](ObjectRegistry&, ObjectHandle) noexcept {}) ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     REQUIRE(objects.Collect(objects.OwnerAccess()));

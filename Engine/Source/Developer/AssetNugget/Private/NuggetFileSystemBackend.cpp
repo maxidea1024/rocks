@@ -106,7 +106,7 @@ EntryState OpenEntry(Allocator& allocator, platform::FileSystem& files, StringVi
 
     error = view.Error();
     switch (view.Error()) {
-    case ErrorCode::InvalidArgument:
+    case ErrorCode::CorruptData:
         return EntryState::Corrupt;
     case ErrorCode::Unsupported:
         return EntryState::Unsupported;
@@ -427,11 +427,11 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
 
     NuggetFileView& file = view.Value();
     if (!(file.record.key == request.key)) {
-        return corrupt(ErrorCode::InvalidArgument);
+        return corrupt(ErrorCode::CorruptData);
     }
 
     if (file.record.bucket.View() != request.bucket) {
-        result.error = ErrorCode::InvalidArgument;
+        result.error = ErrorCode::CorruptData;
         return result;
     }
 
@@ -489,7 +489,7 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
             NuggetValue value(*allocator_);
             value.id = file.record.values[index].id;
             if (auto read = ReadNuggetValue(file, reader, index, stored); !read) {
-                if (read.Error() == ErrorCode::InvalidArgument) {
+                if (read.Error() == ErrorCode::CorruptData) {
                     return corrupt(read.Error());
                 }
 
@@ -501,7 +501,7 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
             if (auto decoded = DecodeNuggetValue(*allocator_, file.record.values[index],
                                                  stored.View(), value.bytes);
                 !decoded) {
-                if (decoded.Error() == ErrorCode::InvalidArgument) {
+                if (decoded.Error() == ErrorCode::CorruptData) {
                     return corrupt(decoded.Error());
                 }
 
@@ -727,8 +727,8 @@ NuggetPutResult NuggetFileSystemBackend::Settle(const Sha256Digest& key, StringV
                 if (auto verified = VerifyNuggetValue(view.Value(), reader, index, buffer.View());
                     !verified) {
                     error = verified.Error();
-                    state = verified.Error() == ErrorCode::InvalidArgument ? EntryState::Corrupt
-                                                                           : EntryState::Failed;
+                    state = verified.Error() == ErrorCode::CorruptData ? EntryState::Corrupt
+                                                                       : EntryState::Failed;
                 }
             }
         }

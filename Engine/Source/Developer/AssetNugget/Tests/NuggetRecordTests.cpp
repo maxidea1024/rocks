@@ -265,22 +265,22 @@ TEST(NuggetRecord_FormatTampering) {
     }
 
     CHECK(ReadNuggetRecord(allocator, RawRecord(allocator, Guid{1, 1}, 1, good).View()).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 2, good).View())
               .Error() == ErrorCode::Unsupported);
     const uint8 garbage[] = {1, 2, 3};
-    CHECK(ReadNuggetRecord(allocator, garbage).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadNuggetRecord(allocator, garbage).Error() == ErrorCode::CorruptData);
 
     // 필드 빠짐(마지막)·순서 바꿈·wire 바꿈·추가 필드.
     CHECK(ReadNuggetRecord(
               allocator,
               RawRecord(allocator, NuggetRecordSchema, 1, Span<const RawField>(good, 5)).View())
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::CorruptData);
     {
         RawField swapped[6] = {good[1], good[0], good[2], good[3], good[4], good[5]};
         CHECK(
             ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, swapped).View())
-                .Error() == ErrorCode::InvalidArgument);
+                .Error() == ErrorCode::CorruptData);
     }
 
     for (usize index = 0; index < 6; ++index) {
@@ -289,7 +289,7 @@ TEST(NuggetRecord_FormatTampering) {
             changed[index].wire == WireType::Bytes ? WireType::String : WireType::Bytes;
         CHECK(
             ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, changed).View())
-                .Error() == ErrorCode::InvalidArgument);
+                .Error() == ErrorCode::CorruptData);
     }
 
     {
@@ -301,7 +301,7 @@ TEST(NuggetRecord_FormatTampering) {
                              good[5],
                              {Guid{0, 7}, WireType::Bytes, {}}};
         CHECK(ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, extra).View())
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     // key 크기·행 길이(160 배수 아님)·reserved·정규 형식(읽은 뒤 Validate).
@@ -310,7 +310,7 @@ TEST(NuggetRecord_FormatTampering) {
                                 good[3], good[4], good[5]};
         CHECK(ReadNuggetRecord(allocator,
                                RawRecord(allocator, NuggetRecordSchema, 1, shortKey).View())
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     uint8 row[NuggetValueRowBytes] = {};
@@ -320,7 +320,7 @@ TEST(NuggetRecord_FormatTampering) {
                                good[4], good[5]};
         CHECK(
             ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, oddRows).View())
-                .Error() == ErrorCode::InvalidArgument);
+                .Error() == ErrorCode::CorruptData);
     }
 
     for (usize at = 5; at < 8; ++at) {
@@ -329,7 +329,7 @@ TEST(NuggetRecord_FormatTampering) {
         RawField rows[6] = {good[0], good[1], good[2], {Guid{0, 4}, WireType::Bytes, reserved},
                             good[4], good[5]};
         CHECK(ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, rows).View())
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     {
@@ -341,7 +341,7 @@ TEST(NuggetRecord_FormatTampering) {
                                good[5]};
         CHECK(
             ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, badName).View())
-                .Error() == ErrorCode::InvalidArgument);
+                .Error() == ErrorCode::CorruptData);
     }
 
     // 입력 항목: 다른 schema·필드 빠짐·key 크기.
@@ -388,7 +388,7 @@ TEST(NuggetRecord_FormatTampering) {
             good[5]};
         auto read =
             ReadNuggetRecord(allocator, RawRecord(allocator, NuggetRecordSchema, 1, fields).View());
-        CHECK(item.ok ? static_cast<bool>(read) : read.Error() == ErrorCode::InvalidArgument);
+        CHECK(item.ok ? static_cast<bool>(read) : read.Error() == ErrorCode::CorruptData);
     }
 
     // 1 MiB 넘는 입력.
@@ -514,8 +514,7 @@ TEST(NuggetRecord_EveryByteFlip) {
         copy[at] ^= 0x01;
         auto read = ReadNuggetRecord(allocator, copy.View());
         if (!read) {
-            CHECK(read.Error() == ErrorCode::InvalidArgument ||
-                  read.Error() == ErrorCode::Unsupported);
+            CHECK(read.Error() == ErrorCode::CorruptData || read.Error() == ErrorCode::Unsupported);
             ++rejected;
             continue;
         }

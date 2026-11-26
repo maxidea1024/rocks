@@ -213,19 +213,19 @@ TEST(MapGraph_DuplicateKeysAreRejected) {
             return LoadCode(allocator, objects, types, graph.View());
         };
 
-        CHECK(load("counts", MapWireTag, counts(5, 5)) == ErrorCode::InvalidArgument);
+        CHECK(load("counts", MapWireTag, counts(5, 5)) == ErrorCode::CorruptData);
         CHECK(load("counts", MapWireTag, counts(5, 6)) == ErrorCode::None);
-        CHECK(load("words", SetWireTag, words("a", "a")) == ErrorCode::InvalidArgument);
+        CHECK(load("words", SetWireTag, words("a", "a")) == ErrorCode::CorruptData);
         CHECK(load("words", SetWireTag, words("a", "A")) == ErrorCode::None);
         CHECK(load("perPlatform", MapWireTag, platforms("Socket", "SOCKET")) ==
-              ErrorCode::InvalidArgument);
-        CHECK(load("perPlatform", MapWireTag, platforms("", "none")) == ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
+        CHECK(load("perPlatform", MapWireTag, platforms("", "none")) == ErrorCode::CorruptData);
         CHECK(load("perPlatform", MapWireTag, platforms("Socket_1", "Socket_01")) ==
               ErrorCode::None);
         auto tags = SetPayload(allocator, WireType::String, 2, [](ArchiveWriter& out) noexcept {
             return out.WriteString("Tag_7").IsOk() && out.WriteString("tag_7").IsOk();
         });
-        CHECK(load("tags", SetWireTag, tags) == ErrorCode::InvalidArgument);
+        CHECK(load("tags", SetWireTag, tags) == ErrorCode::CorruptData);
         const Sha256Digest digest = DigestOf(1);
         auto flags = MapPayload(
             allocator, WireType::Bytes, WireType::Bool, 2, [&](ArchiveWriter& out) noexcept {
@@ -233,7 +233,7 @@ TEST(MapGraph_DuplicateKeysAreRejected) {
                 return out.WriteBytes(bytes).IsOk() && out.WriteBool(true).IsOk() &&
                        out.WriteBytes(bytes).IsOk() && out.WriteBool(false).IsOk();
             });
-        CHECK(load("digestFlags", MapWireTag, flags) == ErrorCode::InvalidArgument);
+        CHECK(load("digestFlags", MapWireTag, flags) == ErrorCode::CorruptData);
         REQUIRE(objects.Collect(objects.OwnerAccess()));
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
     }
@@ -266,11 +266,11 @@ TEST(MapGraph_KeyPositionRejectsReplacementPolicies) {
             allocator, WireType::I64, WireType::String, 1, [](ArchiveWriter& out) noexcept {
                 return out.WriteI64(0).IsOk() && out.WriteString("none").IsOk();
             });
-        CHECK(load("colorNames", MapWireTag, colorKey) == ErrorCode::InvalidArgument);
+        CHECK(load("colorNames", MapWireTag, colorKey) == ErrorCode::CorruptData);
         auto colorElement =
             SetPayload(allocator, WireType::I64, 1,
                        [](ArchiveWriter& out) noexcept { return out.WriteI64(8).IsOk(); });
-        CHECK(load("colors", SetWireTag, colorElement) == ErrorCode::InvalidArgument);
+        CHECK(load("colors", SetWireTag, colorElement) == ErrorCode::CorruptData);
         const Guid unknown{0x4d4150, 0xdead};
         auto classKey = MapPayload(
             allocator, WireType::Guid, WireType::String, 1, [&](ArchiveWriter& out) noexcept {
@@ -398,31 +398,31 @@ TEST(MapGraph_WireErrorsAreRejected) {
             MapPayload(allocator, WireType::F32, WireType::I64, 1, [](ArchiveWriter& out) noexcept {
                 return out.WriteF32(1).IsOk() && out.WriteI64(1).IsOk();
             });
-        CHECK(load("counts", MapWireTag, floatKey) == ErrorCode::InvalidArgument);
+        CHECK(load("counts", MapWireTag, floatKey) == ErrorCode::CorruptData);
         auto counted =
             MapPayload(allocator, WireType::U32, WireType::I64, 9, [](ArchiveWriter& out) noexcept {
                 return out.WriteU32(1).IsOk() && out.WriteI64(1).IsOk();
             });
-        CHECK(load("counts", MapWireTag, counted) == ErrorCode::InvalidArgument);
+        CHECK(load("counts", MapWireTag, counted) == ErrorCode::CorruptData);
         auto trailing =
             MapPayload(allocator, WireType::U32, WireType::I64, 1, [](ArchiveWriter& out) noexcept {
                 return out.WriteU32(1).IsOk() && out.WriteI64(1).IsOk() && out.WriteU32(0).IsOk();
             });
-        CHECK(load("counts", MapWireTag, trailing) == ErrorCode::InvalidArgument);
+        CHECK(load("counts", MapWireTag, trailing) == ErrorCode::CorruptData);
         auto shortDigest = MapPayload(
             allocator, WireType::Bytes, WireType::Bool, 1, [](ArchiveWriter& out) noexcept {
                 uint8 bytes[31] = {};
                 return out.WriteBytes(Span<const uint8>(bytes, 31)).IsOk() &&
                        out.WriteBool(true).IsOk();
             });
-        CHECK(load("digestFlags", MapWireTag, shortDigest) == ErrorCode::InvalidArgument);
+        CHECK(load("digestFlags", MapWireTag, shortDigest) == ErrorCode::CorruptData);
         auto badRecord = MapPayload(allocator, WireType::String, WireType::Record, 1,
                                     [](ArchiveWriter& out) noexcept {
                                         uint8 junk[60] = {};
                                         return out.WriteString("p").IsOk() &&
                                                out.WriteBytes(Span<const uint8>(junk, 60)).IsOk();
                                     });
-        CHECK(load("points", MapWireTag, badRecord) == ErrorCode::InvalidArgument);
+        CHECK(load("points", MapWireTag, badRecord) == ErrorCode::CorruptData);
         // 가변 키라 사전 검사는 합계 하한만 본다: 둘째 키의 길이 prefix가 남은 byte보다 길면 항목
         // 중간에서 잘린 입력이다(InvalidArgument).
         auto cut = MapPayload(
@@ -431,7 +431,7 @@ TEST(MapGraph_WireErrorsAreRejected) {
                 return out.WriteString("a").IsOk() && out.WriteF32(1).IsOk() &&
                        out.WriteU64(100).IsOk() && out.WriteRaw(Span<const uint8>(tail, 4)).IsOk();
             });
-        CHECK(load("ratios", MapWireTag, cut) == ErrorCode::InvalidArgument);
+        CHECK(load("ratios", MapWireTag, cut) == ErrorCode::CorruptData);
         REQUIRE(objects.Collect(objects.OwnerAccess()));
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
     }

@@ -31,7 +31,7 @@ Result<TextWireValue> ReadLocalized(ArchiveReader& in) noexcept {
     }
 
     if (id.Value() == Guid{}) {
-        return Result<TextWireValue>::Failure(ErrorCode::InvalidArgument);
+        return Result<TextWireValue>::Failure(ErrorCode::CorruptData);
     }
 
     auto revision = in.ReadU64();
@@ -40,7 +40,7 @@ Result<TextWireValue> ReadLocalized(ArchiveReader& in) noexcept {
     }
 
     if (revision.Value() == 0) {
-        return Result<TextWireValue>::Failure(ErrorCode::InvalidArgument);
+        return Result<TextWireValue>::Failure(ErrorCode::CorruptData);
     }
 
     auto source = in.ReadStringView();
@@ -93,7 +93,7 @@ Result<TextWireValue> ReadTextWire(ArchiveReader& in) noexcept {
         return Result<TextWireValue>::Failure(form.Error());
     }
 
-    Result<TextWireValue> value = Result<TextWireValue>::Failure(ErrorCode::InvalidArgument);
+    Result<TextWireValue> value = Result<TextWireValue>::Failure(ErrorCode::CorruptData);
     switch (form.Value()) {
     case static_cast<uint8>(TextWireForm::Empty):
         return Result<TextWireValue>::Success(TextWireValue{});

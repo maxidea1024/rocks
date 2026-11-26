@@ -548,7 +548,7 @@ TEST(RequiredCheck_PresentIsNotedOncePerStoredMember) {
             PresentContext context(allocator, cooked);
             Note value;
             CHECK(DecodeNote(allocator, view, withHint.Value().View(), context, value).Error() ==
-                  ErrorCode::InvalidArgument);
+                  ErrorCode::CorruptData);
             for (usize index = 0; index < context.notes && index < 4; ++index) {
                 CHECK(context.noted[index] != HintId);
             }

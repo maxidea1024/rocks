@@ -533,7 +533,7 @@ TEST(CookedManifest_RoundTrip) {
     CHECK(emptyRead.Value().Find(FixedId(10)) == nullptr);
 
     // 진단 out 인자 없이도 같은 오류다(읽기·검증·쓰기).
-    CHECK(ReadCookedManifest(allocator, Span<const uint8>()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadCookedManifest(allocator, Span<const uint8>()).Error() == ErrorCode::CorruptData);
     empty.profileId.Clear();
     CHECK(ValidateCookedManifest(empty, allocator).Error() == ErrorCode::InvalidArgument);
     Array<uint8> refused(allocator);
@@ -553,8 +553,8 @@ TEST(CookedManifest_FieldRules) {
         CookedManifest manifest(allocator);
         REQUIRE(MakeBase(manifest));
         violation.mutate(manifest);
-        auto same = [&](const AssetDiagnostic& failure) {
-            return CorruptAt(failure, violation.field, violation.detail) &&
+        auto same = [&](const AssetDiagnostic& failure, ErrorCode error) {
+            return CorruptAt(failure, violation.field, violation.detail, error) &&
                    SameIds(failure, violation.asset, violation.related);
         };
         AssetDiagnostic validated;
@@ -566,7 +566,8 @@ TEST(CookedManifest_FieldRules) {
         CHECK(IsPrefilled(out));
         AssetDiagnostic read;
         CHECK(!ReadCookedManifest(allocator, EncodeManifest(allocator, manifest).View(), &read));
-        if (!same(validated) || !same(written) || !same(read)) {
+        if (!same(validated, ErrorCode::InvalidArgument) ||
+            !same(written, ErrorCode::InvalidArgument) || !same(read, ErrorCode::CorruptData)) {
             test::RecordFailure(violation.name, __FILE__, __LINE__);
         }
     }
@@ -889,7 +890,7 @@ TEST(CookedManifest_StructureTampering) {
         AssetDiagnostic failure;
         auto result = ReadCookedManifest(allocator, cut.View(), &failure);
         CHECK(!result && failure.code == AssetDiagnosticCode::CorruptPackage &&
-              failure.error == ErrorCode::InvalidArgument);
+              failure.error == ErrorCode::CorruptData);
         ++truncated;
     }
 
@@ -1321,7 +1322,7 @@ TEST(CookedManifest_PackageCrossCheck) {
     auto expect = [&](const CookedManifest& m, const CookedManifestEntry& e, Span<const uint8> file,
                       const PackageContents& c, CookedManifestField field, uint64 related = NoId) {
         AssetDiagnostic failure;
-        return CheckCookedPackage(m, e, file, c, &failure).Error() == ErrorCode::InvalidArgument &&
+        return CheckCookedPackage(m, e, file, c, &failure).Error() == ErrorCode::CorruptData &&
                CorruptAt(failure, field, CookedManifestNoEntry) && failure.asset == e.asset &&
                failure.related == ExpectedId(related);
     };
@@ -1530,11 +1531,11 @@ TEST(CookedManifest_JudgementOrder) {
     {
         AssetDiagnostic validated;
         CHECK(!ValidateCookedManifest(mixed, allocator, &validated) &&
-              CorruptAt(validated, F::Flags, 0) && SameIds(validated, 10, NoId));
+              ModelCorruptAt(validated, F::Flags, 0) && SameIds(validated, 10, NoId));
         Array<uint8> out = Prefilled(allocator);
         AssetDiagnostic written;
         CHECK(!WriteCookedManifest(allocator, mixed, out, &written) &&
-              CorruptAt(written, F::Flags, 0) && IsPrefilled(out));
+              ModelCorruptAt(written, F::Flags, 0) && IsPrefilled(out));
         AssetDiagnostic decoded;
         CHECK(!read(EncodeManifest(allocator, mixed), decoded) &&
               CorruptAt(decoded, F::BundleCount, 1) && SameIds(decoded, 11, NoId));
@@ -1548,11 +1549,11 @@ TEST(CookedManifest_JudgementOrder) {
     {
         AssetDiagnostic validated;
         CHECK(!ValidateCookedManifest(crossed, allocator, &validated) &&
-              CorruptAt(validated, F::PathHint, 2) && SameIds(validated, 12, NoId));
+              ModelCorruptAt(validated, F::PathHint, 2) && SameIds(validated, 12, NoId));
         Array<uint8> out = Prefilled(allocator);
         AssetDiagnostic written;
         CHECK(!WriteCookedManifest(allocator, crossed, out, &written) &&
-              CorruptAt(written, F::PathHint, 2) && IsPrefilled(out));
+              ModelCorruptAt(written, F::PathHint, 2) && IsPrefilled(out));
         CHECK(readCorrupt(EncodeManifest(allocator, crossed), F::PathHint, 2));
     }
 
@@ -1640,11 +1641,11 @@ TEST(CookedManifest_EntryCountLimit) {
 
     AssetDiagnostic failure;
     CHECK(!ValidateCookedManifest(manifest, allocator, &failure));
-    CHECK(CorruptAt(failure, F::EntryCount, Head));
+    CHECK(ModelCorruptAt(failure, F::EntryCount, Head));
     Array<uint8> out = Prefilled(allocator);
     CHECK(WriteCookedManifest(allocator, manifest, out, &failure).Error() ==
           ErrorCode::InvalidArgument);
-    CHECK(IsPrefilled(out) && CorruptAt(failure, F::EntryCount, Head));
+    CHECK(IsPrefilled(out) && ModelCorruptAt(failure, F::EntryCount, Head));
 }
 
 // 표 칸 잘림(10.3.1절 A4f2 3·4번): backend 표와 artifact 표의 마지막 항목 안 모든 위치로 자르고
@@ -1846,7 +1847,7 @@ TEST(CookedManifest_ArtifactFileCheck) {
     auto expect = [&](const Array<uint8>& bytes, CookedManifestField field) {
         AssetDiagnostic failure;
         return CheckCookedArtifactFile(*artifact, bytes.View(), &failure).Error() ==
-                   ErrorCode::InvalidArgument &&
+                   ErrorCode::CorruptData &&
                CorruptAt(failure, field, Head) && failure.asset.IsNull();
     };
     Array<uint8> longer = Copy(allocator, file.View());
@@ -1876,9 +1877,9 @@ TEST(CookedManifest_TableJudgementOrder) {
         AssetDiagnostic decoded;
         Array<uint8> out = Prefilled(allocator);
         return !ValidateCookedManifest(manifest, allocator, &validated) &&
-               CorruptAt(validated, field, detail) &&
+               ModelCorruptAt(validated, field, detail) &&
                !WriteCookedManifest(allocator, manifest, out, &written) &&
-               CorruptAt(written, field, detail) && IsPrefilled(out) &&
+               ModelCorruptAt(written, field, detail) && IsPrefilled(out) &&
                !ReadCookedManifest(allocator, EncodeManifest(allocator, manifest).View(),
                                    &decoded) &&
                CorruptAt(decoded, field, detail);
@@ -1901,7 +1902,7 @@ TEST(CookedManifest_TableJudgementOrder) {
     SetBackendName(structureFirst, 0, "DX12");
     AssetDiagnostic validated;
     CHECK(!ValidateCookedManifest(structureFirst, allocator, &validated) &&
-          CorruptAt(validated, F::Backend, 0));
+          ModelCorruptAt(validated, F::Backend, 0));
     ManifestRaw raw;
     raw.overrideArtifactCount = true;
     raw.artifactCount = CookedManifestMaxArtifacts + 1;

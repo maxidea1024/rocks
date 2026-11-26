@@ -86,9 +86,11 @@ void KeepFirst(Result<void>& outcome, const char*& failedStage, Result<void>&& s
 
 // 엔진 Registry는 서브시스템 초기화 동안 영구 창을 연다(Docs/Design/GarbageCollectionScale.ko.md
 // 13.7절).
-RegistryOptions EngineRegistryOptions() noexcept {
+RegistryOptions EngineRegistryOptions(NamePool& names) noexcept {
     RegistryOptions options;
     options.permanentRegion = true;
+    // 엔진 이름 pool이다(31.2절).
+    options.names = &names;
     return options;
 }
 
@@ -209,6 +211,14 @@ ObjectRegistry& Engine::Objects() noexcept {
     return *objects_;
 }
 
+NamePool& Engine::Names() noexcept {
+    if (!names_) {
+        Log::Fatal(LogEngine, "Engine::Names called before initialization");
+    }
+
+    return *names_;
+}
+
 Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     // 호출 순서 오류는 호출자가 다룬다(로그를 남기지 않는다).
     if (state_ != EngineState::Uninitialized) {
@@ -276,10 +286,21 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
 
     {
         InitStageContext stage(InitStage::ObjectRegistry);
+        // 엔진 이름 pool을 Registry보다 먼저 연다(31.2절 — Registry·World가 빌린다).
+        auto names = UniquePtr<NamePool>::TryMake(allocator_, allocator_);
+        if (!names) {
+            return fail(InitStage::ObjectRegistry, names.Error());
+        }
+
+        if (auto opened = names.Value()->Initialize(config_.names); !opened) {
+            return fail(InitStage::ObjectRegistry, opened.Error());
+        }
+
+        names_ = Move(names.Value());
         // 서브시스템 초기화 동안 만든 객체는 영구 영역에 둔다(GC 표식·sweep 비용 없음 — GC 설계
         // 13.7절, Docs/Design/GarbageCollectionScale.ko.md). 초기화 뒤 닫는다.
-        auto objects = UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_,
-                                                          config_.context, EngineRegistryOptions());
+        auto objects = UniquePtr<ObjectRegistry>::TryMake(
+            allocator_, allocator_, *types_, config_.context, EngineRegistryOptions(*names_));
         if (!objects) {
             return fail(InitStage::ObjectRegistry, objects.Error());
         }
@@ -469,6 +490,18 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
         types_.Reset();
     }
 
+    // 엔진 이름 pool은 마지막에 닫는다(Registry가 모두 닫혔다 — 남은 lease는 수명 위반).
+    if (names_) {
+        if (auto closed = names_->Shutdown(); !closed) {
+            Log::Fatal(LogEngine,
+                       "Engine {Registry} could not shut down after initialization failure at "
+                       "{Stage}: {Error}",
+                       "NamePool", stage, ErrorCodeName(closed.Error()));
+        }
+
+        names_.Reset();
+    }
+
     initializedSteps_ = 0;
 }
 
@@ -583,6 +616,10 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.context = {WorldContextHigh, nextWorldContext_++};
     worldDesc.timeStep = desc.timeStep;
     worldDesc.objects = desc.objects;
+    // 호출자가 pool을 주지 않으면 엔진 이름 pool이다(31.2절).
+    if (worldDesc.objects.names == nullptr) {
+        worldDesc.objects.names = names_.Get();
+    }
     worldDesc.gcBudget = desc.gcBudget;
     worldDesc.gcSchedule = desc.gcSchedule;
     worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
@@ -1052,6 +1089,16 @@ Result<void> Engine::Shutdown() noexcept {
         }
 
         types_.Reset();
+    }
+
+    // 엔진 이름 pool은 마지막에 닫는다(31.2절 — Registry·World가 모두 닫혔다).
+    if (names_) {
+        if (auto closed = names_->Shutdown(); !closed) {
+            LogShutdownFailure("NamePool", closed.Error());
+            return closed;
+        }
+
+        names_.Reset();
     }
 
     initializedSteps_ = 0;

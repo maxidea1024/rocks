@@ -1102,27 +1102,27 @@ TEST(Environment_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). 더하는 수는 대기·안개 1, decal 9,
-    // 후처리 6, 반사 캡처 기반 8, Sphere·Box·Plane 1, 환경 Actor 0이다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 5 — 태그 ER 31.4절 포함). 더하는 수는
+    // 대기·안개 1, decal 9, 후처리 6, 반사 캡처 기반 8, Sphere·Box·Plane 1, 환경 Actor 0이다.
     const Expected expected[] = {
-        {ObjectTypeIdOf<SkyAtmosphereComponent>(), ObjectTypeIdOf<SceneComponent>(), 12, false},
-        {ObjectTypeIdOf<HeightFogComponent>(), ObjectTypeIdOf<SceneComponent>(), 12, false},
-        {ObjectTypeIdOf<DecalComponent>(), ObjectTypeIdOf<SceneComponent>(), 20, false},
-        {ObjectTypeIdOf<PostProcessComponent>(), ObjectTypeIdOf<SceneComponent>(), 17, false},
-        {ObjectTypeIdOf<ReflectionCaptureComponent>(), ObjectTypeIdOf<SceneComponent>(), 19, true},
+        {ObjectTypeIdOf<SkyAtmosphereComponent>(), ObjectTypeIdOf<SceneComponent>(), 13, false},
+        {ObjectTypeIdOf<HeightFogComponent>(), ObjectTypeIdOf<SceneComponent>(), 13, false},
+        {ObjectTypeIdOf<DecalComponent>(), ObjectTypeIdOf<SceneComponent>(), 21, false},
+        {ObjectTypeIdOf<PostProcessComponent>(), ObjectTypeIdOf<SceneComponent>(), 18, false},
+        {ObjectTypeIdOf<ReflectionCaptureComponent>(), ObjectTypeIdOf<SceneComponent>(), 20, true},
         {ObjectTypeIdOf<SphereReflectionCaptureComponent>(),
-         ObjectTypeIdOf<ReflectionCaptureComponent>(), 20, false},
+         ObjectTypeIdOf<ReflectionCaptureComponent>(), 21, false},
         {ObjectTypeIdOf<BoxReflectionCaptureComponent>(),
-         ObjectTypeIdOf<ReflectionCaptureComponent>(), 20, false},
+         ObjectTypeIdOf<ReflectionCaptureComponent>(), 21, false},
         {ObjectTypeIdOf<PlaneReflectionCaptureComponent>(),
-         ObjectTypeIdOf<ReflectionCaptureComponent>(), 20, false},
-        {ObjectTypeIdOf<SkyAtmosphere>(), ObjectTypeIdOf<Actor>(), 4, false},
-        {ObjectTypeIdOf<HeightFog>(), ObjectTypeIdOf<Actor>(), 4, false},
-        {ObjectTypeIdOf<DecalActor>(), ObjectTypeIdOf<Actor>(), 4, false},
-        {ObjectTypeIdOf<ReflectionCapture>(), ObjectTypeIdOf<Actor>(), 4, true},
-        {ObjectTypeIdOf<SphereReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 4, false},
-        {ObjectTypeIdOf<BoxReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 4, false},
-        {ObjectTypeIdOf<PlaneReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 4, false},
+         ObjectTypeIdOf<ReflectionCaptureComponent>(), 21, false},
+        {ObjectTypeIdOf<SkyAtmosphere>(), ObjectTypeIdOf<Actor>(), 5, false},
+        {ObjectTypeIdOf<HeightFog>(), ObjectTypeIdOf<Actor>(), 5, false},
+        {ObjectTypeIdOf<DecalActor>(), ObjectTypeIdOf<Actor>(), 5, false},
+        {ObjectTypeIdOf<ReflectionCapture>(), ObjectTypeIdOf<Actor>(), 5, true},
+        {ObjectTypeIdOf<SphereReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
+        {ObjectTypeIdOf<BoxReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
+        {ObjectTypeIdOf<PlaneReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);

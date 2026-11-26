@@ -314,8 +314,7 @@ TEST(MapGraph_KeyDomainLimitsTheDuplicateIndexReservation) {
         auto graph = HolderGraph(allocator, fields);
         ObjectGraphLoadOptions options;
         options.limits.maxWork = 16 * 1024 * 1024;
-        CHECK(LoadCode(allocator, objects, types, graph.View(), options) ==
-              ErrorCode::InvalidArgument);
+        CHECK(LoadCode(allocator, objects, types, graph.View(), options) == ErrorCode::CorruptData);
 
         // 영역 안의 서로 다른 원소는 그대로 왕복한다.
         auto two = SetPayload(allocator, WireType::Bool, 2, [](ArchiveWriter& out) noexcept {

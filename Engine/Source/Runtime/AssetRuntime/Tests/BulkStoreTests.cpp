@@ -146,12 +146,12 @@ TEST(FilePackageBulkStore_LazyFailures) {
         REQUIRE(attached.files.Set(ScenePath, corrupt.View()));
         AssetDiagnostic failure;
         CHECK(attached.store.Read(RefOf(attached.bulk.entries[0]), &failure).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
         CHECK(failure.section == static_cast<uint32>(PackageSectionKind::Bulk));
         CHECK(failure.detail == 1 && failure.asset == attached.bulk.asset);
         CHECK(attached.store.ReadBulk(RefOf(attached.bulk.entries[0])).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(attached.store.Read(RefOf(attached.bulk.entries[1])));
     }
 
@@ -166,7 +166,7 @@ TEST(FilePackageBulkStore_LazyFailures) {
         REQUIRE(other.Attach(ScenePath, attached.bulk.fingerprint, attached.bulk.asset,
                              attached.bulk.bulkOffset, entries.View()));
         AssetDiagnostic failure;
-        CHECK(other.Read(RefOf(entries[0]), &failure).Error() == ErrorCode::InvalidArgument);
+        CHECK(other.Read(RefOf(entries[0]), &failure).Error() == ErrorCode::CorruptData);
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
     }
 
@@ -696,7 +696,7 @@ TEST(FilePackageBulkStore_Detach) {
     corrupt[at] = static_cast<uint8>(corrupt[at] ^ 1);
     REQUIRE(attached.files.Set(ScenePath, corrupt.View()));
     AssetDiagnostic failure;
-    CHECK(attached.store.Detach(&failure).Error() == ErrorCode::InvalidArgument);
+    CHECK(attached.store.Detach(&failure).Error() == ErrorCode::CorruptData);
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage && failure.detail == 3);
     CHECK(attached.store.IsAttached());
 }
@@ -846,7 +846,7 @@ TEST(FilePackageBulkStore_HugeRawBytesRejectedBeforeAllocation) {
     REQUIRE(store.Attach(ScenePath, attached.bulk.fingerprint, attached.bulk.asset,
                          attached.bulk.bulkOffset, entries.View()));
     AssetDiagnostic failure;
-    CHECK(store.Read(RefOf(entries[0]), &failure).Error() == ErrorCode::InvalidArgument);
+    CHECK(store.Read(RefOf(entries[0]), &failure).Error() == ErrorCode::CorruptData);
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
 }
 

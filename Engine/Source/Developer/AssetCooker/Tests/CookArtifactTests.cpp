@@ -762,9 +762,9 @@ TEST(CookEngine_PublishesEngineLibraries) {
     REQUIRE(scene.files.AddFile(manifestName.View(), junk));
     CookProjectResult repaired(env.allocator);
     REQUIRE(CookEngine(env.allocator, scene.Request(), repaired));
-    CHECK(repaired.published && scene.stage.offered == 0 &&
-          HasDiagnostic(repaired, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
-                        true));
+    CHECK(
+        repaired.published && scene.stage.offered == 0 &&
+        HasDiagnostic(repaired, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, true));
 
     CookEngineRequest missing = scene.Request();
     missing.stages = nullptr;

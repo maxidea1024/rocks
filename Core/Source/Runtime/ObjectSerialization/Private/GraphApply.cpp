@@ -205,7 +205,7 @@ public:
         if ((local.Value() & ExternalReferenceBit) != 0) {
             const uint32 external = local.Value() & ~ExternalReferenceBit;
             if (external == 0 || external > imports_.Size()) {
-                return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+                return Result<DecodedReference>::Failure(ErrorCode::CorruptData);
             }
 
             // null handle import는 미해결이라 그 참조는 null이다(ObjectFoundations 5.4절).
@@ -215,7 +215,7 @@ public:
         }
 
         if (local.Value() > nodes_.Size()) {
-            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+            return Result<DecodedReference>::Failure(ErrorCode::CorruptData);
         }
 
         decoded.handle = nodes_[local.Value() - 1].handle;
@@ -238,7 +238,7 @@ public:
         }
 
         if ((local.Value() & ExternalReferenceBit) != 0 || local.Value() > nodes_.Size()) {
-            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+            return Result<DecodedReference>::Failure(ErrorCode::CorruptData);
         }
 
         decoded.handle = nodes_[local.Value() - 1].handle;

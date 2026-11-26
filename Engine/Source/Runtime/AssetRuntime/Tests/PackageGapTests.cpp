@@ -85,7 +85,7 @@ TEST(AssetPackage_HeaderUpperBounds) {
         const Array<uint8> bytes = header(table, 1);
         AssetDiagnostic failure;
         CHECK(ReadPackageHeader(bytes.View(), table + PackageSectionEntryBytes + 4, &failure)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
     }
 
@@ -105,8 +105,7 @@ TEST(AssetPackage_HeaderUpperBounds) {
           ErrorCode::Unsupported);
     PackageReadOptions editorRead;
     editorRead.expectedKind = PackageKind::Editor;
-    CHECK(ReadPackage(env.allocator, file.View(), editorRead).Error() ==
-          ErrorCode::InvalidArgument);
+    CHECK(ReadPackage(env.allocator, file.View(), editorRead).Error() == ErrorCode::CorruptData);
 }
 
 // 대표 에셋 타입(AS 5.7절 10): export 1 타입과 그 노드 Record가 함께 Asset이 아닌
@@ -593,7 +592,7 @@ TEST(AssetPackage_RequiredReferenceZeroed) {
         if (kind == PackageKind::Cooked) {
             CHECK(!loaded);
             CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
-                  failure.error == ErrorCode::InvalidArgument &&
+                  failure.error == ErrorCode::CorruptData &&
                   failure.section == static_cast<uint32>(PackageSectionKind::Objects));
             CHECK(env.target->Stats().liveObjects == 0);
         } else {
@@ -757,7 +756,7 @@ TEST(AssetPackage_BulkWriterRules) {
     AssetDiagnostic failure;
     CHECK(WritePackage(allocator, registry, registry.OwnerAccess(), lone.package.Handle(), options,
                        sink, &failure)
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::CorruptData);
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
           failure.section == static_cast<uint32>(PackageSectionKind::Bulk) && failure.detail == 4);
 }

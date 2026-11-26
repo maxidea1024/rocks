@@ -51,7 +51,7 @@ bool DependencyFailedOn(const AssetLoadStatus& status, uint64 asset, uint64 rela
 }
 
 bool CorruptOn(const AssetLoadStatus& status, uint64 asset, CookedManifestField field) noexcept {
-    return status.state == AssetLoadState::Failed && status.error == ErrorCode::InvalidArgument &&
+    return status.state == AssetLoadState::Failed && status.error == ErrorCode::CorruptData &&
            status.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
            status.diagnostic.asset == FixedId(asset) &&
            status.diagnostic.section == static_cast<uint32>(field);
@@ -312,7 +312,7 @@ TEST(AssetLoader_CorruptionIsDiagnosed) {
         });
         CHECK(status.state == AssetLoadState::Failed &&
               status.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
-              status.error == ErrorCode::InvalidArgument);
+              status.error == ErrorCode::CorruptData);
     }
 
     {

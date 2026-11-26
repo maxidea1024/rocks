@@ -240,7 +240,7 @@ TEST(NuggetBackend_RoundTrip) {
     NuggetGetResult none = backend.Get(NuggetBackendGet{NuggetBucketTexture, Key(2)});
     CHECK(none.status == NuggetStatus::Miss && none.error == ErrorCode::None);
     NuggetGetResult other = backend.Get(NuggetBackendGet{NuggetBucketShader, Key(1)});
-    CHECK(other.status == NuggetStatus::Miss && other.error == ErrorCode::InvalidArgument);
+    CHECK(other.status == NuggetStatus::Miss && other.error == ErrorCode::CorruptData);
     const String path = EntryPath(allocator, project.Root(), Key(1));
     CHECK(Exists(platform::PhysicalFileSystem(), path.View()));
 
@@ -326,7 +326,7 @@ TEST(NuggetBackend_CorruptionAndVersions) {
         broken[at] ^= 0x01;
         REQUIRE(WriteAll(files, path.View(), broken.View()));
         NuggetGetResult got = backend.Get(NuggetBackendGet{NuggetBucketTexture, Key(1)});
-        CHECK(got.status == NuggetStatus::Corrupt && got.error == ErrorCode::InvalidArgument &&
+        CHECK(got.status == NuggetStatus::Corrupt && got.error == ErrorCode::CorruptData &&
               got.values.IsEmpty() && !Exists(files, path.View()));
     }
 

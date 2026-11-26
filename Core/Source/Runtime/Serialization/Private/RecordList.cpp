@@ -254,7 +254,7 @@ RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Gu
     // 외부 count만 믿고 큰 index를 먼저 할당하지 않는다: 남은 byte가 항목 최소 크기만큼 있어야
     // 한다.
     if (count.Value() > archive.Remaining() / MinimumItemBytes) {
-        return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordListReader>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto spent = archive.Spend(count.Value()); !spent) {
@@ -276,7 +276,7 @@ RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Gu
         }
 
         if (length.Value() < RecordListHeaderBytes || length.Value() > archive.Remaining()) {
-            return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
+            return Result<RecordListReader>::Failure(ErrorCode::CorruptData);
         }
 
         Span<const uint8> item;
@@ -299,7 +299,7 @@ RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Gu
         }
 
         if (!IsRecordEnvelope(item)) {
-            return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
+            return Result<RecordListReader>::Failure(ErrorCode::CorruptData);
         }
 
         if (!result.items_.TryPushBack(item)) {
@@ -308,7 +308,7 @@ RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Gu
     }
 
     if (!archive.AtEnd()) {
-        return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordListReader>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<RecordListReader>::Success(Move(result));

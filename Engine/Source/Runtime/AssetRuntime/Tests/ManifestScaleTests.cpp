@@ -390,7 +390,7 @@ TEST(CookedManifest_LargeManifest) {
     constexpr usize Removed = Count / 2;
     REQUIRE(manifest.entries.TryRemoveAt(Removed, 1));
     CHECK(!ValidateCookedManifest(manifest, allocator, &failure));
-    CHECK(CorruptAt(failure, CookedManifestField::Dependency, Removed - 1) &&
+    CHECK(ModelCorruptAt(failure, CookedManifestField::Dependency, Removed - 1) &&
           failure.related == FixedId(10000 + Removed));
 }
 
@@ -550,7 +550,7 @@ TEST(CookedManifest_FixedSeedMutationFuzz) {
         if (!read) {
             ++rejected;
             const bool corrupt = failure.code == AssetDiagnosticCode::CorruptPackage &&
-                                 read.Error() == ErrorCode::InvalidArgument;
+                                 read.Error() == ErrorCode::CorruptData;
             const bool version = failure.code == AssetDiagnosticCode::UnsupportedVersion &&
                                  read.Error() == ErrorCode::Unsupported;
             CHECK(corrupt || version);
