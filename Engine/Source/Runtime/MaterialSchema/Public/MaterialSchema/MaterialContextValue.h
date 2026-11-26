@@ -79,7 +79,13 @@ struct MaterialContextValue {
     MaterialContextDefault defaultValue;
     // 이전 프레임 변형이 있다(UE 정의의 <PREV> — 19.3.5절).
     bool hasPrevious = false;
+    // 0 이상이면 공급하지 않았을 때 그 번호의 인자를 그대로 돌려준다(defaultValue 대신 — UE
+    // DynamicParameter의 노드 기본값, MaterialTemplate.ush:302–354). 아니면 NoDefaultArgument다.
+    int8 defaultArgument = -1;
 };
+
+// defaultArgument의 "인자 아님" 표지다.
+inline constexpr int8 NoDefaultArgument = -1;
 
 // 표 전체다(정적 data — 수명은 프로세스).
 ROCKS_MATERIALSCHEMA_API Span<const MaterialContextValue> MaterialContextValues() noexcept;

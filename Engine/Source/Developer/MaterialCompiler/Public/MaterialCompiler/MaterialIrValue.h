@@ -15,8 +15,9 @@ using IrValueId = uint32;
 // "값 없음" 표지다.
 inline constexpr IrValueId NoIrValue = NumericLimits<uint32>::Max();
 
-// 값 하나가 받는 피연산자의 최대 수다(삼항 연산·선택·분기).
-inline constexpr uint32 MaxIrOperands = 3;
+// 값 하나가 받는 피연산자의 최대 수다(삼항 연산·선택·분기는 3, 함수형 문맥 값은 4 — 6.9절
+// MS2b4b).
+inline constexpr uint32 MaxIrOperands = 4;
 
 // 즉시값 칸 수다(상수 성분 넷 — 행렬 상수는 두지 않는다).
 inline constexpr uint32 IrImmediateSlots = 4;
@@ -43,7 +44,7 @@ struct IrValue {
     IrOp op = IrOp::Constant;
     uint8 operandCount = 0;
     IrFrequency frequency = IrFrequency::Constant;
-    IrValueId operands[MaxIrOperands] = {NoIrValue, NoIrValue, NoIrValue};
+    IrValueId operands[MaxIrOperands] = {NoIrValue, NoIrValue, NoIrValue, NoIrValue};
     // 상수는 성분별 비트 패턴(float·int·uint 32 bit, double 64 bit, bool 0·1), Swizzle은 [0]에
     // 성분 번호(2 bit씩, 성분 0이 하위)다. 그 밖의 연산은 0이다.
     uint64 immediate[IrImmediateSlots] = {0, 0, 0, 0};

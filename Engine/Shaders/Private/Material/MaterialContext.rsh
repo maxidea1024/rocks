@@ -332,6 +332,7 @@ struct MaterialInputs {
 #define MaterialContextCapabilityTierSm6(c) MaterialPassCapabilityTierSm6(c)
 #define MaterialContextGlobalIlluminationPass(c) MaterialPassGlobalIlluminationPass(c)
 #define MaterialContextRayTracingPass(c) MaterialPassRayTracingPass(c)
+#define MaterialContextPostProcessVolumeFlagTest(c, a0) MaterialPassPostProcessVolumeFlagTest(c, a0)
 #else
 #define MaterialContextCameraVector(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextDeltaTime(c) (0.0)
@@ -413,6 +414,7 @@ struct MaterialInputs {
 #define MaterialContextCapabilityTierSm6(c) (false)
 #define MaterialContextGlobalIlluminationPass(c) (false)
 #define MaterialContextRayTracingPass(c) (false)
+#define MaterialContextPostProcessVolumeFlagTest(c, a0) (0.0)
 #endif
 
 #if MATERIAL_SUPPLY_VERTEX
@@ -615,8 +617,12 @@ struct MaterialInputs {
 
 #if MATERIAL_SUPPLY_LIGHT
 #define MaterialContextLightVector(c) ((c).lightVector)
+#define MaterialContextMainDirectionalLightIlluminance(c) MaterialPassMainDirectionalLightIlluminance(c)
+#define MaterialContextMainDirectionalLightDirection(c) MaterialPassMainDirectionalLightDirection(c)
 #else
 #define MaterialContextLightVector(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextMainDirectionalLightIlluminance(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextMainDirectionalLightDirection(c) float3(0.0, 0.0, 1.0)
 #endif
 
 #if MATERIAL_SUPPLY_SKY
@@ -633,7 +639,7 @@ struct MaterialInputs {
 #else
 #define MaterialContextAtmosphericLightVector(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextAtmosphericLightColor(c) float3(0.0, 0.0, 0.0)
-#define MaterialContextSkyAtmosphereAerialPerspective(c, a0) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextSkyAtmosphereAerialPerspective(c, a0) float4(0.0, 0.0, 0.0, 1.0)
 #define MaterialContextSkyAtmosphereDistantLightScatteredLuminance(c) float3(0.0, 0.0, 0.0)
 #define MaterialContextSkyAtmosphereLightDirection(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextSkyAtmosphereLightDiskLuminance(c, a0, a1) float3(0.0, 0.0, 0.0)
@@ -657,10 +663,14 @@ struct MaterialInputs {
 #define MaterialContextDecalColor(c) MaterialPassDecalColor(c)
 #define MaterialContextDecalLifetimeOpacity(c) MaterialPassDecalLifetimeOpacity(c)
 #define MaterialContextDecalMipmapLevel(c, a0) MaterialPassDecalMipmapLevel(c, a0)
+#define MaterialContextDecalDerivativeX(c) MaterialPassDecalDerivativeX(c)
+#define MaterialContextDecalDerivativeY(c) MaterialPassDecalDerivativeY(c)
 #else
 #define MaterialContextDecalColor(c) float4(0.0, 0.0, 0.0, 0.0)
 #define MaterialContextDecalLifetimeOpacity(c) (0.0)
 #define MaterialContextDecalMipmapLevel(c, a0) (0.0)
+#define MaterialContextDecalDerivativeX(c) float2(0.0, 0.0)
+#define MaterialContextDecalDerivativeY(c) float2(0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_PARTICLE
@@ -696,6 +706,7 @@ struct MaterialInputs {
 #define MaterialContextTransformParticlePositionToTranslatedWorld(c, a0) MaterialPassTransformParticlePositionToTranslatedWorld(c, a0)
 #define MaterialContextPreviousTransformParticlePositionToTranslatedWorld(c, a0) MaterialPassPreviousTransformParticlePositionToTranslatedWorld(c, a0)
 #define MaterialContextTransformParticleVectorToTranslatedWorld(c, a0) MaterialPassTransformParticleVectorToTranslatedWorld(c, a0)
+#define MaterialContextDynamicParameter(c, a0, a1) MaterialPassDynamicParameter(c, a0, a1)
 #else
 #define MaterialContextParticleColor(c) float4(1.0, 1.0, 1.0, 1.0)
 #define MaterialContextParticleDirection(c) float3(0.0, 0.0, 0.0)
@@ -729,6 +740,49 @@ struct MaterialInputs {
 #define MaterialContextTransformParticlePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextPreviousTransformParticlePositionToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
 #define MaterialContextTransformParticleVectorToTranslatedWorld(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextDynamicParameter(c, a0, a1) (a0)
+#endif
+
+#if MATERIAL_SUPPLY_DISTANCE_FIELD
+#define MaterialContextDistanceToNearestSurface(c, a0) MaterialPassDistanceToNearestSurface(c, a0)
+#define MaterialContextDistanceFieldGradient(c, a0) MaterialPassDistanceFieldGradient(c, a0)
+#define MaterialContextDistanceFieldApproxAo(c, a0, a1, a2, a3) MaterialPassDistanceFieldApproxAo(c, a0, a1, a2, a3)
+#else
+#define MaterialContextDistanceToNearestSurface(c, a0) (0.0)
+#define MaterialContextDistanceFieldGradient(c, a0) float3(0.0, 0.0, 0.001)
+#define MaterialContextDistanceFieldApproxAo(c, a0, a1, a2, a3) (1.0)
+#endif
+
+#if MATERIAL_SUPPLY_HAIR
+#define MaterialContextHairUv(c) MaterialPassHairUv(c)
+#define MaterialContextHairDimensions(c) MaterialPassHairDimensions(c)
+#define MaterialContextHairSeed(c) MaterialPassHairSeed(c)
+#define MaterialContextHairTangent(c, a0) MaterialPassHairTangent(c, a0)
+#define MaterialContextHairRootUv(c) MaterialPassHairRootUv(c)
+#define MaterialContextHairBaseColor(c) MaterialPassHairBaseColor(c)
+#define MaterialContextHairRoughness(c) MaterialPassHairRoughness(c)
+#define MaterialContextHairDepth(c) MaterialPassHairDepth(c)
+#define MaterialContextHairCoverage(c) MaterialPassHairCoverage(c)
+#define MaterialContextHairAuxilaryData(c) MaterialPassHairAuxilaryData(c)
+#define MaterialContextHairAtlasUvs(c) MaterialPassHairAtlasUvs(c)
+#define MaterialContextHairGroupIndex(c) MaterialPassHairGroupIndex(c)
+#define MaterialContextHairAo(c) MaterialPassHairAo(c)
+#define MaterialContextHairClumpId(c) MaterialPassHairClumpId(c)
+#else
+#define MaterialContextHairUv(c) float2(0.0, 0.0)
+#define MaterialContextHairDimensions(c) float2(0.0, 0.0)
+#define MaterialContextHairSeed(c) (0.0)
+#define MaterialContextHairTangent(c, a0) float3(0.0, 0.0, 0.0)
+#define MaterialContextHairRootUv(c) float2(0.0, 0.0)
+#define MaterialContextHairBaseColor(c) float3(0.0, 0.0, 0.0)
+#define MaterialContextHairRoughness(c) (0.0)
+#define MaterialContextHairDepth(c) (0.0)
+#define MaterialContextHairCoverage(c) (0.0)
+#define MaterialContextHairAuxilaryData(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextHairAtlasUvs(c) float2(0.0, 0.0)
+#define MaterialContextHairGroupIndex(c) (0.0)
+#define MaterialContextHairAo(c) (0.0)
+#define MaterialContextHairClumpId(c) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_VOLUME
@@ -753,10 +807,12 @@ struct MaterialInputs {
 #define MaterialContextRuntimeVirtualTextureOutputLevel(c) ((c).runtimeVirtualTextureOutputLevel)
 #define MaterialContextRuntimeVirtualTextureOutputDerivative(c) ((c).runtimeVirtualTextureOutputDerivative)
 #define MaterialContextRuntimeVirtualTextureMaxLevel(c) ((c).runtimeVirtualTextureMaxLevel)
+#define MaterialContextRuntimeVirtualTextureCustomData(c) MaterialPassRuntimeVirtualTextureCustomData(c)
 #else
 #define MaterialContextRuntimeVirtualTextureOutputLevel(c) (0.0)
 #define MaterialContextRuntimeVirtualTextureOutputDerivative(c) float2(0.0, 0.0)
 #define MaterialContextRuntimeVirtualTextureMaxLevel(c) (0.0)
+#define MaterialContextRuntimeVirtualTextureCustomData(c) float4(0.0, 0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_MESH_PAINT
@@ -765,6 +821,28 @@ struct MaterialInputs {
 #else
 #define MaterialContextMeshPaintTextureCoordinateIndex(c) (0.0)
 #define MaterialContextMeshPaintTextureValid(c) (false)
+#endif
+
+#if MATERIAL_SUPPLY_PHYSICS_FIELD
+#define MaterialContextSamplePhysicsVectorField(c, a0, a1) MaterialPassSamplePhysicsVectorField(c, a0, a1)
+#define MaterialContextSamplePhysicsScalarField(c, a0, a1) MaterialPassSamplePhysicsScalarField(c, a0, a1)
+#define MaterialContextSamplePhysicsIntegerField(c, a0, a1) MaterialPassSamplePhysicsIntegerField(c, a0, a1)
+#define MaterialContextEvaluatePhysicsVectorField(c, a0, a1) MaterialPassEvaluatePhysicsVectorField(c, a0, a1)
+#define MaterialContextEvaluatePhysicsScalarField(c, a0, a1) MaterialPassEvaluatePhysicsScalarField(c, a0, a1)
+#define MaterialContextEvaluatePhysicsIntegerField(c, a0, a1) MaterialPassEvaluatePhysicsIntegerField(c, a0, a1)
+#else
+#define MaterialContextSamplePhysicsVectorField(c, a0, a1) float3(0.0, 0.0, 0.0)
+#define MaterialContextSamplePhysicsScalarField(c, a0, a1) (0.0)
+#define MaterialContextSamplePhysicsIntegerField(c, a0, a1) (0.0)
+#define MaterialContextEvaluatePhysicsVectorField(c, a0, a1) float3(0.0, 0.0, 0.0)
+#define MaterialContextEvaluatePhysicsScalarField(c, a0, a1) (0.0)
+#define MaterialContextEvaluatePhysicsIntegerField(c, a0, a1) (0.0)
+#endif
+
+#if MATERIAL_SUPPLY_SPEED_TREE
+#define MaterialContextSpeedTreeVertexOffset(c, a0, a1, a2) MaterialPassSpeedTreeVertexOffset(c, a0, a1, a2)
+#else
+#define MaterialContextSpeedTreeVertexOffset(c, a0, a1, a2) float3(0.0, 0.0, 0.0)
 #endif
 
 #if MATERIAL_SUPPLY_FIRST_PERSON

@@ -10,6 +10,7 @@
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
+#include <MaterialSchema/MaterialTraitsDesc.h>
 #include <MaterialSchema/NodePropertyReader.h>
 #include <NodeGraph/GraphDiagnostic.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
@@ -62,6 +63,9 @@ public:
 
     // 지금 번역 중인 평가 문맥이다(6.9절).
     EvaluationContext Context() const noexcept;
+
+    // 번역 중인 머티리얼의 기본 속성(영역·블렌드 모드)이다.
+    const MaterialTraitsDesc& Traits() const noexcept;
 
     // 번역 대상이다. field를 읽은 항목으로 기록한다(6.9절 MS2b3 — 쿠킹 번역 키).
     const MaterialTranslationTarget& Target(MaterialTargetField field) noexcept;

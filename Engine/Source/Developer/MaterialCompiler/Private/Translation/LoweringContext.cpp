@@ -111,6 +111,10 @@ EvaluationContext LoweringContext::Context() const noexcept {
     return translator_.Context();
 }
 
+const MaterialTraitsDesc& LoweringContext::Traits() const noexcept {
+    return translator_.Input().traits;
+}
+
 const MaterialTranslationTarget& LoweringContext::Target(MaterialTargetField field) noexcept {
     return translator_.Target(field);
 }

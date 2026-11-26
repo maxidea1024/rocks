@@ -7,7 +7,7 @@ namespace rocks::material {
 namespace {
 
 // IR hash 바이트의 형식 표지다(형식을 바꾸면 올린다).
-constexpr uint32 IrHashFormatVersion = 1;
+constexpr uint32 IrHashFormatVersion = 2;
 
 // 깊이 우선 순회 칸 하나다(재귀 없이 — 그래프가 깊어도 스택을 넘지 않는다).
 struct Visit {

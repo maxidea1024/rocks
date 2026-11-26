@@ -142,7 +142,9 @@ Result<void> AppendAccessor(StringBuilder<>& out, const MaterialContextValue& va
         << value.name;
     AppendParameters(out, value.argumentCount);
     out << " ";
-    if (!supplied) {
+    if (!supplied && value.defaultArgument != NoDefaultArgument) {
+        out << "(a" << value.defaultArgument << ")";
+    } else if (!supplied) {
         if (auto literal = AppendDefault(out, value); !literal) {
             return literal;
         }

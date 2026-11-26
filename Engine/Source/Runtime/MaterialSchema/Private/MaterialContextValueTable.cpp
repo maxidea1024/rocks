@@ -32,6 +32,14 @@ ContextValue(StringView name, StringView unrealName, MaterialPinType type,
     return value;
 }
 
+// value가 공급하지 않을 때 argument 번호 인자를 돌려주게 한다(UE DynamicParameter의 노드 기본값 —
+// MaterialTemplate.ush:302–354).
+constexpr MaterialContextValue WithDefaultArgument(MaterialContextValue value,
+                                                   int8 argument) noexcept {
+    value.defaultArgument = argument;
+    return value;
+}
+
 constexpr MaterialContextValue ContextValues[] = {
     // UE AtmosphericLightVector.
     ContextValue("AtmosphericLightVector", "AtmosphericLightVector", MaterialPinType::Float3,
@@ -338,7 +346,8 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("SkyAtmosphereAerialPerspective", "SkyAtmosphereAerialPerspective",
                  MaterialPinType::Float4, MaterialContextValueForm::Function, 1,
                  MaterialContextFeature::Sky, AllMaterialDomains, MaterialPixelStage,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware,
+                 {0.0f, 0.0f, 0.0f, 1.0f}, false),
     // UE SkyAtmosphereDistantLightScatteredLuminance.
     ContextValue("SkyAtmosphereDistantLightScatteredLuminance",
                  "SkyAtmosphereDistantLightScatteredLuminance", MaterialPinType::Float3,
@@ -997,6 +1006,153 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Function, 0, MaterialContextFeature::PathTracing,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::Zero, {}, false),
+    // UE ComputeDecalDDX(Parameters)(MaterialTemplate.ush:1364).
+    ContextValue("DecalDerivativeX", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::Decal,
+                 ToMask(MaterialDomain::DeferredDecal), MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE ComputeDecalDDY(Parameters).
+    ContextValue("DecalDerivativeY", "", MaterialPinType::Float2,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::Decal,
+                 ToMask(MaterialDomain::DeferredDecal), MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetDynamicParameter(Parameters.Particle, 기본값, 번호)(HLSLMaterialTranslator.cpp:11533).
+    WithDefaultArgument(ContextValue("DynamicParameter", "", MaterialPinType::Float4,
+                                     MaterialContextValueForm::Function, 2,
+                                     MaterialContextFeature::Particle, AllMaterialDomains,
+                                     AllMaterialStages, MaterialCapabilityTier::Mobile,
+                                     MaterialDerivative::Zero, {}, false),
+                        0),
+    // UE MaterialExpressionMainDirectionalLightIlluminance().
+    ContextValue("MainDirectionalLightIlluminance", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::Light,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MaterialExpressionMainDirectionalLightDirection()(공급하지 않으면 (0, 0, 1)).
+    ContextValue("MainDirectionalLightDirection", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::Light,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {0.0f, 0.0f, 1.0f}, false),
+    // UE PostVolumeUserFlagTest(bit)(MaterialTemplate.ush:1198).
+    ContextValue("PostProcessVolumeFlagTest", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::View,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetDistanceToNearestSurfaceGlobal(position).
+    ContextValue("DistanceToNearestSurface", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::DistanceField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetDistanceFieldGradientGlobal(position)(대체값 (0, 0, 0.001)).
+    ContextValue("DistanceFieldGradient", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::DistanceField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {0.0f, 0.0f, 0.001f}, false),
+    // UE CalculateDistanceFieldApproxAO(position, normal, N, step, S, bias, max)(대체값 1 — 인자:
+    // 위치, 노멀, (step, S, bias, max), N).
+    ContextValue("DistanceFieldApproxAo", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 4, MaterialContextFeature::DistanceField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {1.0f}, false),
+    // UE GetHairUV(Parameters).
+    ContextValue("HairUv", "", MaterialPinType::Float2, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairDimensions(Parameters).
+    ContextValue("HairDimensions", "", MaterialPinType::Float2, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairSeed(Parameters).
+    ContextValue("HairSeed", "", MaterialPinType::Float1, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairTangent(Parameters, useTangentSpace).
+    ContextValue("HairTangent", "", MaterialPinType::Float3, MaterialContextValueForm::Function, 1,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairRootUV(Parameters).
+    ContextValue("HairRootUv", "", MaterialPinType::Float2, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairBaseColor(Parameters).
+    ContextValue("HairBaseColor", "", MaterialPinType::Float3, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairRoughness(Parameters).
+    ContextValue("HairRoughness", "", MaterialPinType::Float1, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairDepth(Parameters)(정점 overload는 0).
+    ContextValue("HairDepth", "", MaterialPinType::Float1, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairCoverage(Parameters).
+    ContextValue("HairCoverage", "", MaterialPinType::Float1, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairAuxilaryData(Parameters).
+    ContextValue("HairAuxilaryData", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 0, MaterialContextFeature::Hair,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MaterialExpressionGetAtlasUVs(Parameters).
+    ContextValue("HairAtlasUvs", "", MaterialPinType::Float2, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairGroupIndex(Parameters).
+    ContextValue("HairGroupIndex", "", MaterialPinType::Float1, MaterialContextValueForm::Function,
+                 0, MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairAO(Parameters).
+    ContextValue("HairAo", "", MaterialPinType::Float1, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetHairClumpID(Parameters).
+    ContextValue("HairClumpId", "", MaterialPinType::Float3, MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::Hair, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::NotAware, {}, false),
+    // UE GetRuntimeVirtualTextureCustomData()(RVT 출력 노드 입력 범위 — MS2d).
+    ContextValue("RuntimeVirtualTextureCustomData", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 0,
+                 MaterialContextFeature::RuntimeVirtualTexture, AllMaterialDomains,
+                 AllMaterialStages, MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {},
+                 false),
+    // UE MatPhysicsField_SamplePhysicsVectorField(position, target).
+    ContextValue("SamplePhysicsVectorField", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MatPhysicsField_SamplePhysicsScalarField(position, target).
+    ContextValue("SamplePhysicsScalarField", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MatPhysicsField_SamplePhysicsIntegerField(position, target)(float로).
+    ContextValue("SamplePhysicsIntegerField", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MatPhysicsField_EvalPhysicsVectorField(position, target).
+    ContextValue("EvaluatePhysicsVectorField", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MatPhysicsField_EvalPhysicsScalarField(position, target).
+    ContextValue("EvaluatePhysicsScalarField", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE MatPhysicsField_EvalPhysicsIntegerField(position, target)(float로).
+    ContextValue("EvaluatePhysicsIntegerField", "", MaterialPinType::Float1,
+                 MaterialContextValueForm::Function, 2, MaterialContextFeature::PhysicsField,
+                 AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE GetSpeedTreeVertexOffset(Parameters, …)(인자: (geometry, wind, lod), (threshold, 이전
+    // 프레임, extra bend 여부), extra bend).
+    ContextValue("SpeedTreeVertexOffset", "", MaterialPinType::Float3,
+                 MaterialContextValueForm::Function, 3, MaterialContextFeature::SpeedTree,
+                 AllMaterialDomains, MaterialVertexStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
 };
 
 } // namespace
