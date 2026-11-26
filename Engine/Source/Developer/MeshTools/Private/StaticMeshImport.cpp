@@ -21,7 +21,6 @@ using mesh_import::OpenTyped;
 using mesh_import::PreservedSlot;
 using mesh_import::ReferencesPerSlot;
 using mesh_import::StoreMesh;
-using mesh_import::Transfer;
 
 // 검증을 마친 이름들이다(Borrow 밖에서 intern).
 struct InternedNames {
@@ -315,11 +314,13 @@ Result<void> ImportStaticMesh(AssetImportContext& context, ObjectHandle output,
             return context.Fail(AssetDiagnosticCode::None, written.Error(), index);
         }
 
-        if (auto moved = Transfer(context, output, bulk, convex.vertices, allocator); !moved) {
+        if (auto moved = TransferImportBulk(context, output, bulk, convex.vertices, allocator);
+            !moved) {
             return context.Fail(AssetDiagnosticCode::None, moved.Error(), index);
         }
 
-        if (auto moved = Transfer(context, output, bulk, convex.indices, allocator); !moved) {
+        if (auto moved = TransferImportBulk(context, output, bulk, convex.indices, allocator);
+            !moved) {
             return context.Fail(AssetDiagnosticCode::None, moved.Error(), index);
         }
     }
