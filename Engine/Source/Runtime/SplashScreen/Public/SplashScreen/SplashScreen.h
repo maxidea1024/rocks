@@ -3,6 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <SplashScreen/SplashLayout.h>
 #include <SplashScreen/SplashTypes.h>
 
 // 시작 화면(스플래시) 창이다(Docs/Design/SplashScreen 9·11절, UE FPlatformSplash 대응). 호스트가
@@ -48,6 +49,11 @@ struct SplashShowDesc {
     bool showProgressText = false;
     bool showCopyright = true;
     bool showProgressBar = true;
+    // 배치 덮어쓰기(6.5절)다. 칸마다 하나이고 Custom 칸은 여기 있는 칸만 그린다. Show가 검사하고
+    // 복사한다(범위 밖·중복 칸은 InvalidArgument).
+    Span<const SplashTextPlacement> placements;
+    // 막대 배치 덮어쓰기다. nullptr이면 기본(6.2절)이다. Show가 복사한다.
+    const SplashBarPlacement* bar = nullptr;
     // 진행 원천이다. 비어도 된다(막대는 불확정 표시). Show가 소유를 넘겨받는다(성공·실패 모두 —
     // release는 Hide·소멸 때, Show가 스레드를 띄우기 전에 실패하면 Show 안에서 부른다).
     SplashStatusSource source;

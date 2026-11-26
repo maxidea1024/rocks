@@ -8,7 +8,7 @@
 |---|---|---|---|
 | SP0 | 이 문서, 기본 이미지·템플릿 이미지·생성기 | — | 이 개정 |
 | SP1 | `SplashScreen` 모듈·판정·이미지 찾기·기본 배치·모델·가짜 presenter, Windows presenter(스레드 DPI), `Engine` 모듈의 `ui.splash.*`, `Window::ShowAndActivate`, 대화상자 hook, Sandbox `--window` 연결(`--no-splash`, 제목·불확정 막대, 숨긴 주 창 넘기기) | — | 시험 1–4a·6·8·9, 사람 확인(Windows) |
-| SP1b | 칸 배치 덮어쓰기(6.4절)·Custom 칸, 창 연기 시험(시험 10) | SP1 | 시험 4 덮어쓰기·10 |
+| SP1b | 칸 배치 덮어쓰기·Custom 칸·막대 덮어쓰기(6.5절, 코드 API), `Sandbox --splash-self-test`(시험 10) | SP1 | 시험 4 덮어쓰기·10 |
 | SP2 | `StartupProgress`·`StartupSplashSource`, `Engine::Initialize`·`ModuleLoader::StartPhase` 구간 보고, 작업 표시줄 진행, 기본 가중치 측정 | ProgressReporting PG2 | 시험 5, 사람 확인 |
 | SP3 | macOS presenter | MacPlatform(`feature/platform-mac`) 병합 | 사람 확인(Mac) |
 | SP4 | Studio 연결(`StudioSplash`, 끌기, Suspend·Resume 자리) | Studio | 사람 확인 |

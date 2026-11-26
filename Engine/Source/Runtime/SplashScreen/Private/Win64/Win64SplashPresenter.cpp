@@ -335,7 +335,7 @@ private:
         const SplashImageVariant variant =
             ChooseSplashVariant(scale, !setup.standardPath.IsEmpty(), !setup.doublePath.IsEmpty());
         const usize chosen = variant == SplashImageVariant::Double ? 1 : 0;
-        layout_ = ComputeSplashLayout(logical.Value(), scale);
+        layout_ = ComputeSplashLayout(logical.Value(), scale, setup.placements, setup.bar);
 
         ComRef<IWICFormatConverter> converter;
         result = factory->CreateFormatConverter(converter.Out());
@@ -455,6 +455,10 @@ private:
 
     void CreateFonts() noexcept {
         for (usize index = 0; index < SplashTextSlotCount; ++index) {
+            if (!layout_.placed[index]) {
+                continue;
+            }
+
             const SplashTextStyle& style = layout_.style[index];
             fonts_[index] = CreateFontW(
                 -style.fontPixels, 0, 0, 0, style.semibold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE,
@@ -485,14 +489,14 @@ private:
         }
 
         auto* pixels = static_cast<uint32*>(backBits_);
-        const uint32 fill = ToPixel(SplashBarFillColor);
+        const uint32 fill = ToPixel(layout_.barFillColor);
         for (int32 y = bar.top; y < bar.bottom; ++y) {
             uint32* row = pixels + static_cast<usize>(y) * layout_.window.width;
             for (int32 x = 0; x < width; ++x) {
                 uint32& pixel = row[bar.left + x];
                 pixel = (x >= fillStart && x < fillEnd)
                             ? fill
-                            : BlendPixel(pixel, SplashBarTrackColor, SplashBarTrackAlpha);
+                            : BlendPixel(pixel, layout_.barTrackColor, layout_.barTrackAlpha);
             }
         }
     }
@@ -503,7 +507,7 @@ private:
         for (usize index = 0; index < SplashTextSlotCount; ++index) {
             const auto slot = static_cast<SplashTextSlot>(index);
             const StringView utf8 = model.Text(slot);
-            if (!model.IsVisible(slot) || utf8.IsEmpty()) {
+            if (!layout_.placed[index] || !model.IsVisible(slot) || utf8.IsEmpty()) {
                 continue;
             }
 
