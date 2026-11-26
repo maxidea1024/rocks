@@ -44,6 +44,26 @@
 
 ### 6.4 그리기 규칙
 
-- 글자는 칸 폭을 넘으면 끝을 말줄임(`…`)으로 자른다(Windows `DT_END_ELLIPSIS`, macOS `NSLineBreakByTruncatingTail`). 줄바꿈은 `Custom` 칸의 `wordWrap`만.
+- 글자는 칸 폭을 넘으면 끝을 말줄임(`…`)으로 자른다(Windows `DT_END_ELLIPSIS`, macOS `NSLineBreakByTruncatingTail`). 줄바꿈은 하지 않는다(UE `ESplashTextFlags::WordWrap`은 후속).
 - 바뀐 칸과 막대 영역만 다시 그린다. 이미지는 창 크기 DIB(macOS `CGImage`) 하나로 미리 만들어 둔다.
-- 칸 배치 덮어쓰기(후속 — SP1은 기본 배치만, 개정 2. 보이기는 10.1절 `show_*`만 정한다): 칸마다 `anchor`·`x`·`fromBottom`·`width`·`size`·`weight`·`color`·`align`·`outline`, 막대의 `margin`·`fromBottom`·`height`·`trackColor`·`fillColor`. 값 범위는 등록 지정자로 막는다(위치는 0–논리 크기, 크기 8–48 px).
+- 칸 배치 덮어쓰기는 6.5절이다(SP1b). 보이기는 10.1절 `show_*`만 정한다.
+
+### 6.5 배치 덮어쓰기와 Custom 칸(SP1b, 개정 5)
+
+- **코드 API로만 연다.** 호스트(게임 실행 파일·Studio)가 `SplashShowDesc::placements`·`bar`로 넘긴다. UE도 `RegisterUserSplashText`·`RegisterUserSplashImage`(`GPS` — Show 전에만)처럼 코드로만 연다. 설정(CVar)으로 열지 않는 이유는 칸 10개 × 필드 9개로 이름이 90개가 되고, 배치를 바꿀 만큼 이미지를 손보는 프로젝트는 자기 호스트 코드를 가지기 때문이다.
+- `SplashTextPlacement` 하나가 칸 하나의 배치 **전체**를 정한다(빠진 필드를 기본 배치에서 가져오지 않는다 — 덮어쓴 결과를 읽는 그대로 알 수 있게).
+
+| 필드 | 뜻 | 범위 |
+|---|---|---|
+| `slot` | 칸(`Title`…`Copyright`, `Custom1`–`Custom6`) | 한 칸에 하나(중복은 거부) |
+| `anchor` | 기준 모서리 `BottomLeft`·`BottomRight`·`TopLeft`·`TopRight` | — |
+| `x` | 기준 쪽 좌우 가장자리에서 사각형 가까운 쪽 가장자리까지(논리 px) | 0–4096(`MaxSplashImageDimension`) |
+| `y` | Bottom 기준이면 아래 가장자리에서 사각형 위쪽까지, Top 기준이면 위 가장자리에서 사각형 위쪽까지 | 0–4096 |
+| `width` | 폭. 0이면 반대쪽 여백(`SplashSideMargin`)까지 | 0–4096 |
+| `height` | 높이 | 1–`MaxSplashTextHeight`(96) |
+| `fontPixels` | 글꼴 em 높이 | `MinSplashFontPixels`(8)–`MaxSplashFontPixels`(48) |
+| `semibold`·`color`(0xRRGGBB)·`align`(Left·Right) | 모양 | color ≤ 0xFFFFFF |
+
+- 범위를 벗어나거나 칸이 겹쳐 등록되면 Show가 `InvalidArgument`다(시작 전 코드 오류라 조용히 고치지 않는다). Show 때는 이미지 크기를 모르므로 위치는 이미지 크기 상한으로만 막고, 창 밖으로 나간 부분은 창 안으로 잘린다(기존 규칙).
+- **Custom 칸**(UE `User1–6`)은 배치를 준 칸만 그린다. 글자는 `texts`·`SetText`로 넣고, 표시는 늘 켜져 있다(빈 글자는 그리지 않는다).
+- **막대** `SplashBarPlacement`: `margin`(좌우, 0–2048)·`fromBottom`(0–4096)·`height`(1–`MaxSplashBarHeight` 16)·`trackColor`·`trackAlpha`(0–1)·`fillColor`. 주지 않으면 기본(6.2절)이다. 막대를 끄는 것은 `showProgressBar`다.
