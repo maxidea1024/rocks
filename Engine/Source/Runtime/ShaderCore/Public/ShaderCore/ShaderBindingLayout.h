@@ -8,7 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderReadStatus.h>
 
-// 셰이더 바인딩 layout v3(셰이더 Record 값 1 BindingLayout)이다(Docs/Design/ShaderSystem 7.2절 3항,
+// 셰이더 바인딩 layout v4(셰이더 Record 값 1 BindingLayout)이다(Docs/Design/ShaderSystem 7.2절 3항,
 // 12.2.1절 SSD26, UE FShaderParameterMap·FVulkanShaderHeader 대응).
 //
 // 워커가 형식별 리플렉션을 이 공통 모양으로 바꿔 값 1로 내고(SH2b·SH2c), 장치가 파이프라인 layout을
@@ -16,15 +16,17 @@
 //
 // byte 형식(모두 little-endian, 이 순서):
 //   u32 형식 버전(= ShaderBindingLayoutVersion), u32 단계(ShaderStageBits 한 비트),
-//   u32 루트 상수 byte 수(0 = 없음), u32 정점 입력 attribute 마스크(ATTRIBUTEn — VS만),
+//   u32 루트 상수 byte 수(0 = 없음), u64 루트 상수 파라미터 구조체 identity(0 = 없음 — 루트 상수가
+//   없으면 0, v4), u32 정점 입력 attribute 마스크(ATTRIBUTEn — VS만),
 //   u32 int attribute 마스크·u32 uint attribute 마스크(attribute 마스크의 부분, 서로 겹치지 않음 —
 //   나머지는 float, v3),
 //   u32 render target 마스크(SV_Target0–7 — PS만), u32 단계 사이 마스크(TEXCOORD0–15 — VS 출력·PS
 //   입력, v2), u32 자원 수, 자원 표. 자원 하나: u8 종류, u16 순번, u8 이름 byte 수, 이름 byte, u32
-//   상수 버퍼 byte 수(상수 버퍼만, 아니면 0), u8 샘플러 출처(SRV 텍스처만, 아니면 None), u8 공유
-//   샘플러 표시(샘플러만, 0·1), u8 모양(ShaderResourceShape, v3), u8 원소 타입(ShaderComponentType
-//   — typed 자원만, v3), u32 구조화 원소 byte(구조화 버퍼만, v3), u16 멤버 수(상수 버퍼만),
-//   멤버마다 (u8 이름 byte 수, 이름 byte, u32 오프셋, u32 byte 수).
+//   상수 버퍼 byte 수(상수 버퍼만, 아니면 0), u64 파라미터 구조체 identity(상수 버퍼만, 0 = 없음 —
+//   RenderBase SX8, ShaderSystem 16.2절 SSD54, v4), u8 샘플러 출처(SRV 텍스처만, 아니면 None), u8
+//   공유 샘플러 표시(샘플러만, 0·1), u8 모양(ShaderResourceShape, v3), u8 원소
+//   타입(ShaderComponentType — typed 자원만, v3), u32 구조화 원소 byte(구조화 버퍼만, v3), u16 멤버
+//   수(상수 버퍼만), 멤버마다 (u8 이름 byte 수, 이름 byte, u32 오프셋, u32 byte 수).
 // 자원 표는 (종류, 순번) 오름차순이고 같은 (종류, 순번)은 하나다. 멤버는 오프셋 오름차순이고 겹치지
 // 않으며 상수 버퍼 안에 있다. 이름은 64 byte 이하 식별자다.
 //
@@ -34,7 +36,7 @@
 //   for (const ShaderBindingResource& resource : layout.resources) { ... }
 namespace rocks::shader {
 
-inline constexpr uint32 ShaderBindingLayoutVersion = 3;
+inline constexpr uint32 ShaderBindingLayoutVersion = 4;
 // 단계 하나의 최대 자원 수다(형식 상한 합보다 넉넉하다).
 inline constexpr usize MaxShaderBindingResources = 1024;
 // 상수 버퍼 하나의 최대 멤버 수다(ShaderParameterLayout과 같다).
@@ -123,6 +125,9 @@ struct ShaderBindingResource {
     uint16 slot = 0;
     StringView name;
     uint32 constantBufferBytes = 0;
+    // 상수 버퍼의 파라미터 구조체 identity(ShaderCore ShaderParameterStructId — 생성 표와 대조된
+    // 버퍼만, 그 밖은 0)다(v4).
+    uint64 structId = 0;
     ShaderSamplerSource samplerSource = ShaderSamplerSource::None;
     bool sharedSampler = false;
     // 모양·원소 타입·구조화 원소 byte다(v3). 종류마다 허용 값: SRV 텍스처는 텍스처
@@ -147,6 +152,8 @@ struct ROCKS_SHADERCORE_API ShaderBindingLayout {
 
     uint32 stage = 0;
     uint32 rootConstantBytes = 0;
+    // 루트 상수 블록의 파라미터 구조체 identity(v4, 없으면 0)다.
+    uint64 rootConstantStructId = 0;
     uint32 attributeMask = 0;
     // attribute 가운데 int·uint 입력이다(v3, 나머지는 float).
     uint32 attributeIntMask = 0;

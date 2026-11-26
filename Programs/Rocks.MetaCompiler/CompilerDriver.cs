@@ -914,7 +914,7 @@ internal static class CompilerDriver
 
     // 메타 컴파일러가 정하는 타깃 매크로 넷이다(Docs/Design/BuildTargets 3.4절 BS2c). 에디터 조합은 에디터 코드·데이터가 있고, 게임 조합은 둘 다
     // 없다. 서버·클라이언트 코드는 둘 다 있다(그 조건 안의 리플렉션 선언은 어휘 스캔이 막는다).
-    private static IEnumerable<string> TargetMacroArguments(bool clangCl, bool editor)
+    internal static IEnumerable<string> TargetMacroArguments(bool clangCl, bool editor)
     {
         string prefix = clangCl ? "/D" : "-D";
         string bit = editor ? "1" : "0";
@@ -1021,7 +1021,7 @@ internal static class CompilerDriver
         }
     }
 
-    private static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
+    internal static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
         string root, IReadOnlyDictionary<string, string?> environment)
     {
         // 허용된 프로필의 의미를 추측해 우회 인자 목록을 계속 추가하지 않는다. 프로필 확장은
@@ -1166,7 +1166,7 @@ internal static class CompilerDriver
 
     // 조립된 결과에서 검사하므로 C# 문자열을 나눠 내장 이름을 만들어도 빠져나가지 않는다.
     // 입력 파일의 내용은 여기서 펼치지 않으며 생성기 자신이 만든 C++만 검사한다.
-    private static string ValidateGeneratedCode(string source)
+    internal static string ValidateGeneratedCode(string source)
     {
         if (CompilerTypeTraits.FirstGeneratedBuiltinUse(source) is string intrinsic)
         {
@@ -1181,7 +1181,7 @@ internal static class CompilerDriver
         "unsupported compiler option override: " + argument, "RMC1000",
         "Use the documented native profile, explicit -D or /D definitions, and --include-dir; unsupported flags require a reviewed profile extension.");
 
-    private static void ValidateIncludeBinding(string input, string include, IEnumerable<string> directories)
+    internal static void ValidateIncludeBinding(string input, string include, IEnumerable<string> directories)
     {
         string? target = directories.Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
             .FirstOrDefault(File.Exists);
@@ -1228,7 +1228,7 @@ internal static class CompilerDriver
         return notes.ToString();
     }
 
-    private static string? FindRoot()
+    internal static string? FindRoot()
     {
         for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {

@@ -1,0 +1,17 @@
+// 생성 셰이더 파라미터 구조체 self-test 셰이더다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 상수는 C++
+// Private/SandboxShaderParameters.h의 생성 원문이다(cbuffer GeneratedProbe·루트 상수 GeneratedDraw).
+#include "/Plugin/Sandbox/Common.rsh"
+#include "/Engine/Generated/Sandbox/GeneratedProbeParameters.rsh"
+#include "/Engine/Generated/Sandbox/GeneratedProbeDraw.rsh"
+
+float4 GeneratedParametersVS(uint id : SV_VertexID) : SV_Position {
+    return FullScreenPosition(id);
+}
+
+// 채널마다 다른 멤버를 읽는다(행렬 행 우선, 3성분 뒤 스칼라, int 슬롯, 배열 원소, 중첩 구조체, 루트 상수).
+float4 GeneratedParametersPS(float4 position : SV_Position) : SV_Target0 {
+    const float red = mul(float4(tint, 1.0), transform).y * exposure + GeneratedDraw.bias.y * GeneratedDraw.scale;
+    const float green = weights[1].z + weights[2].w + float(offsets.y + layer) / 64.0 + float(GeneratedDraw.select.z) / 32.0;
+    const float blue = light.color.x * light.intensity + light.direction.z + tail;
+    return float4(red, green, blue, 1.0);
+}

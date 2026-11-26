@@ -293,7 +293,7 @@ TEST(ShaderFormat_RejectsUnknownProperties) {
     CHECK(FailsWith("D3D12_SM6", "\"shaderModel\": \"6_6\",",
                     "\"shaderModel\": \"6_6\", \"esslVersion\": 320,",
                     ShaderFormatErrorCode::UnknownProperty, "compiler.esslVersion"));
-    CHECK(FailsWith("D3D12_SM6", "\"version\": 4 }", "\"version\": 4, \"name\": \"x\" }",
+    CHECK(FailsWith("D3D12_SM6", "\"version\": 5 }", "\"version\": 5, \"name\": \"x\" }",
                     ShaderFormatErrorCode::UnknownProperty, "processor.name"));
     // uniformVectors는 GLES 에뮬레이션만의 상한이다.
     CHECK(FailsWith("VULKAN_SM5", "\"rootConstantBytes\": 128",
@@ -399,7 +399,7 @@ TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
     const char* const changes[][2] = {
         {"\"storageImages\": 4,", "\"storageImages\": 3,"},
         {"\"hlsl2021\": true", "\"hlsl2021\": false"},
-        {"\"version\": 4 }", "\"version\": 5 }"},
+        {"\"version\": 5 }", "\"version\": 6 }"},
         {"\"bindingConvention\": 1,", "\"bindingConvention\":  1,"},
     };
     for (const auto& change : changes) {
