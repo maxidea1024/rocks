@@ -72,6 +72,97 @@ void HashName(Sha256& hasher, StringView name) noexcept {
     hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>(name.Data()), name.ByteCount()));
 }
 
+// C++ 정규 이름(::로 이은 식별자)인가.
+bool IsStructName(StringView name) noexcept {
+    if (name.IsEmpty() || name.ByteCount() > MaxShaderParameterStructNameBytes) {
+        return false;
+    }
+
+    const char* text = name.Data();
+    usize start = 0;
+    usize index = 0;
+    while (true) {
+        while (index < name.ByteCount() && text[index] != ':') {
+            ++index;
+        }
+
+        if (!core_detail::IsShaderIdentifier(StringView(text + start, index - start),
+                                             MaxShaderParameterStructNameBytes)) {
+            return false;
+        }
+
+        if (index == name.ByteCount()) {
+            return true;
+        }
+
+        if (index + 1 >= name.ByteCount() || text[index + 1] != ':') {
+            return false;
+        }
+
+        index += 2;
+        start = index;
+    }
+}
+
+// 생성 원문 경로(/<루트…>/Generated/<…>.rsh)인가.
+bool IsGeneratedSourcePath(StringView path) noexcept {
+    const StringView directory("/Generated/");
+    const StringView extension(".rsh");
+    if (path.IsEmpty() || path.ByteCount() > MaxShaderParameterSourcePathBytes ||
+        path.Data()[0] != '/' || !path.EndsWith(extension, StringComparison::CaseSensitive)) {
+        return false;
+    }
+
+    for (usize index = 0; index + directory.ByteCount() <= path.ByteCount(); ++index) {
+        if (StringView(path.Data() + index, directory.ByteCount()) == directory) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// 표 하나의 정규 byte(공개 헤더의 "표 byte")를 hasher에 더한다.
+void HashLayout(Sha256& hasher, const ShaderParameterLayout& layout) noexcept {
+    HashName(hasher, layout.name);
+    HashName(hasher, layout.structName);
+    HashU8(hasher, layout.rootConstants ? 1 : 0);
+    HashU32(hasher, layout.totalBytes);
+    HashU32(hasher, static_cast<uint32>(layout.members.Size()));
+    for (const ShaderParameterMember& member : layout.members) {
+        HashName(hasher, member.name);
+        HashU8(hasher, static_cast<uint8>(member.type));
+        HashU32(hasher, member.offset);
+        HashU32(hasher, member.arrayCount);
+        if (member.type == ShaderParameterType::Struct && member.structLayout != nullptr) {
+            HashLayout(hasher, *member.structLayout);
+        }
+    }
+}
+
+void WriteName(ByteWriter& writer, StringView name) noexcept {
+    writer.WriteU8(static_cast<uint8>(name.ByteCount()));
+    writer.WriteBytes(
+        Span<const uint8>(reinterpret_cast<const uint8*>(name.Data()), name.ByteCount()));
+}
+
+void WriteLayout(ByteWriter& writer, const ShaderParameterLayout& layout) noexcept {
+    WriteName(writer, layout.name);
+    WriteName(writer, layout.structName);
+    writer.WriteU8(layout.rootConstants ? 1 : 0);
+    writer.WriteU32LE(layout.totalBytes);
+    writer.WriteU32LE(static_cast<uint32>(layout.members.Size()));
+    for (const ShaderParameterMember& member : layout.members) {
+        WriteName(writer, member.name);
+        writer.WriteU8(static_cast<uint8>(member.type));
+        writer.WriteU32LE(member.offset);
+        writer.WriteU32LE(member.arrayCount);
+        if (member.type == ShaderParameterType::Struct && member.structLayout != nullptr) {
+            WriteLayout(writer, *member.structLayout);
+        }
+    }
+}
+
 } // namespace parameter_layout_detail
 
 uint32 ShaderParameterTypeBytes(ShaderParameterType type) noexcept {
@@ -96,16 +187,38 @@ const char* ShaderParameterTypeName(ShaderParameterType type) noexcept {
 }
 
 uint64 ShaderParameterMemberBytes(const ShaderParameterMember& member) noexcept {
+    if (member.type == ShaderParameterType::Struct) {
+        return member.structLayout == nullptr ? 0 : member.structLayout->totalBytes;
+    }
+
     const uint64 element = ShaderParameterTypeBytes(member.type);
     return member.arrayCount == 0 ? element : element * member.arrayCount;
 }
 
-Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
-                                           const char** reason) noexcept {
-    using namespace parameter_layout_detail;
+namespace parameter_layout_detail {
+
+Result<void> ValidateLayout(const ShaderParameterLayout& layout, bool nested,
+                            const char** reason) noexcept {
     if (!IsName(layout.name)) {
         return Reject(reason, "shader parameter layout name must be an identifier of at most 64 "
                               "bytes");
+    }
+
+    if (!layout.structName.IsEmpty() && !IsStructName(layout.structName)) {
+        return Reject(reason, "shader parameter struct name must be a qualified C++ name of at "
+                              "most 128 bytes");
+    }
+
+    if (layout.structId != ShaderParameterStructId(layout.structName)) {
+        return Reject(reason, "shader parameter struct identity must be the hash of the struct "
+                              "name (ShaderParameterStructId)");
+    }
+
+    if (layout.source.ByteCount() > MaxShaderParameterSourceBytes ||
+        (!layout.sourcePath.IsEmpty() && !IsGeneratedSourcePath(layout.sourcePath)) ||
+        layout.sourcePath.IsEmpty() != layout.source.IsEmpty()) {
+        return Reject(reason, "generated shader parameter source needs a /<root>/Generated/... "
+                              ".rsh path and text of at most 64 KiB together");
     }
 
     if (layout.members.IsEmpty() || layout.members.Size() > MaxShaderParameterMembers) {
@@ -120,6 +233,10 @@ Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
 
     if (layout.rootConstants && layout.totalBytes > MaxShaderRootConstantBytes) {
         return Reject(reason, "root constants must be at most 128 bytes");
+    }
+
+    if (nested && layout.rootConstants) {
+        return Reject(reason, "a nested shader parameter struct cannot be root constants");
     }
 
     uint64 previousEnd = 0;
@@ -139,9 +256,46 @@ Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
             }
         }
 
-        if (!IsKnownType(member.type)) {
+        if (member.offset < previousEnd) {
+            return Reject(reason, "shader parameter members must be in offset order without "
+                                  "overlap");
+        }
+
+        if (member.type == ShaderParameterType::Struct) {
+            if (nested) {
+                return Reject(reason, "shader parameter structs nest only one level");
+            }
+
+            if (member.structLayout == nullptr) {
+                return Reject(reason, "a struct member needs its nested layout");
+            }
+
+            if (member.arrayCount != 0) {
+                return Reject(reason, "arrays of structs are not allowed in shader parameters");
+            }
+
+            if (member.offset % ShaderConstantSlotBytes != 0) {
+                return Reject(reason, "a nested struct must start on a 16-byte boundary");
+            }
+
+            if (auto valid = ValidateLayout(*member.structLayout, true, reason); !valid) {
+                return valid;
+            }
+
+            const uint64 end = member.offset + uint64{member.structLayout->totalBytes};
+            if (end > layout.totalBytes) {
+                return Reject(reason, "shader parameter member ends past the layout size");
+            }
+
+            previousEnd = end;
+            previousSlot = NumericLimits<uint64>::Max();
+            continue;
+        }
+
+        if (!IsKnownType(member.type) || member.structLayout != nullptr) {
             return Reject(reason, "shader parameter member type is outside the allowed types "
-                                  "(4-byte scalars, their 2-4 component vectors, float4x4)");
+                                  "(4-byte scalars, their 2-4 component vectors, float4x4, "
+                                  "nested structs)");
         }
 
         const TypeInfo& info = Types[static_cast<usize>(member.type)];
@@ -153,11 +307,6 @@ Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
         if (member.arrayCount != 0 && info.bytes % ShaderConstantSlotBytes != 0) {
             return Reject(reason, "shader parameter arrays need an element size that is a "
                                   "multiple of 16 bytes (pack scalars into float4 arrays)");
-        }
-
-        if (member.offset < previousEnd) {
-            return Reject(reason, "shader parameter members must be in offset order without "
-                                  "overlap");
         }
 
         const uint64 end = member.offset + ShaderParameterMemberBytes(member);
@@ -178,6 +327,13 @@ Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
     return Result<void>::Success();
 }
 
+} // namespace parameter_layout_detail
+
+Result<void> ValidateShaderParameterLayout(const ShaderParameterLayout& layout,
+                                           const char** reason) noexcept {
+    return parameter_layout_detail::ValidateLayout(layout, false, reason);
+}
+
 Result<void> ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
                                             const char** reason) noexcept {
     using namespace parameter_layout_detail;
@@ -194,6 +350,11 @@ Result<void> ValidateShaderParameterLayouts(Span<const ShaderParameterLayout> la
         for (usize other = 0; other < index; ++other) {
             if (layouts[other].name == layouts[index].name) {
                 return Reject(reason, "shader parameter layout names must be unique");
+            }
+
+            if (!layouts[other].sourcePath.IsEmpty() &&
+                layouts[other].sourcePath == layouts[index].sourcePath) {
+                return Reject(reason, "generated shader parameter source paths must be unique");
             }
         }
 
@@ -216,16 +377,7 @@ Sha256Digest ShaderParameterLayoutSignature(Span<const ShaderParameterLayout> la
     Sha256 hasher;
     HashU32(hasher, static_cast<uint32>(layouts.Size()));
     for (const ShaderParameterLayout& layout : layouts) {
-        HashName(hasher, layout.name);
-        HashU8(hasher, layout.rootConstants ? 1 : 0);
-        HashU32(hasher, layout.totalBytes);
-        HashU32(hasher, static_cast<uint32>(layout.members.Size()));
-        for (const ShaderParameterMember& member : layout.members) {
-            HashName(hasher, member.name);
-            HashU8(hasher, static_cast<uint8>(member.type));
-            HashU32(hasher, member.offset);
-            HashU32(hasher, member.arrayCount);
-        }
+        HashLayout(hasher, layout);
     }
 
     return hasher.Finish();
@@ -233,29 +385,16 @@ Sha256Digest ShaderParameterLayoutSignature(Span<const ShaderParameterLayout> la
 
 Result<void> EncodeShaderParameterLayouts(Span<const ShaderParameterLayout> layouts,
                                           Array<uint8>& out) noexcept {
+    using namespace parameter_layout_detail;
     if (auto valid = ValidateShaderParameterLayouts(layouts); !valid) {
         return valid;
     }
 
     const usize start = out.Size();
     ByteWriter writer(out);
-    const auto writeName = [&](StringView name) noexcept {
-        writer.WriteU8(static_cast<uint8>(name.ByteCount()));
-        writer.WriteBytes(
-            Span<const uint8>(reinterpret_cast<const uint8*>(name.Data()), name.ByteCount()));
-    };
     writer.WriteU32LE(static_cast<uint32>(layouts.Size()));
     for (const ShaderParameterLayout& layout : layouts) {
-        writeName(layout.name);
-        writer.WriteU8(layout.rootConstants ? 1 : 0);
-        writer.WriteU32LE(layout.totalBytes);
-        writer.WriteU32LE(static_cast<uint32>(layout.members.Size()));
-        for (const ShaderParameterMember& member : layout.members) {
-            writeName(member.name);
-            writer.WriteU8(static_cast<uint8>(member.type));
-            writer.WriteU32LE(member.offset);
-            writer.WriteU32LE(member.arrayCount);
-        }
+        WriteLayout(writer, layout);
     }
 
     if (auto written = writer.Status(); !written) {
@@ -276,27 +415,120 @@ const ShaderParameterLayout* ShaderParameterLayoutSet::Find(StringView name) con
     return nullptr;
 }
 
-ShaderReadStatus DecodeShaderParameterLayouts(Span<const uint8> bytes,
-                                              ShaderParameterLayoutSet& out) noexcept {
-    out.layouts.Clear();
-    out.members.Clear();
-    if (bytes.IsEmpty()) {
-        return ShaderReadStatus::Success();
+namespace parameter_layout_detail {
+
+// 읽은 표 하나의 멤버 범위(out.members[first, first + count))다.
+struct LayoutRange {
+    usize first = 0;
+    usize count = 0;
+};
+
+// Struct 멤버 하나의 연결 대기다: out.members[member]가 out.nested[nested]를 가리켜야 한다. 배열이 다
+// 자란 뒤 포인터로 잇는다.
+struct NestedLink {
+    usize member = 0;
+    usize nested = 0;
+};
+
+// 디코딩 중 상태다.
+struct DecodeState {
+    explicit DecodeState(Allocator& allocator) noexcept
+        : nestedRanges(allocator), links(allocator) {
     }
 
-    ByteReader reader(bytes);
+    Array<LayoutRange> nestedRanges;
+    Array<NestedLink> links;
+};
+
+// 표 byte 하나를 읽는다. nested가 참이면 중첩 표(Struct 멤버를 받지 않는다)다. 실패하면 영어 이유다.
+const char* ReadLayout(ByteReader& reader, bool nested, ShaderParameterLayoutSet& out,
+                       DecodeState& state, ShaderParameterLayout& layout,
+                       LayoutRange& range) noexcept {
     const auto readName = [&]() noexcept {
         const uint8 length = reader.ReadU8();
         const Span<const uint8> name = reader.Take(length);
         return StringView(reinterpret_cast<const char*>(name.Data()), name.Size());
     };
-    // 멤버 범위(표마다 첫 멤버·수)를 먼저 모으고 끝에 Span을 잇는다(멤버 배열이 자랄 수 있다).
-    struct Range {
-        usize first;
-        usize count;
-    };
+    layout.name = readName();
+    layout.structName = readName();
+    layout.structId = ShaderParameterStructId(layout.structName);
+    const uint8 root = reader.ReadU8();
+    layout.totalBytes = reader.ReadU32LE();
+    const uint32 memberCount = reader.ReadU32LE();
+    if (reader.Failed() || root > 1 || memberCount > MaxShaderParameterMembers) {
+        return "parameter layout is truncated or out of range";
+    }
 
-    Range ranges[MaxShaderParameterLayouts] = {};
+    layout.rootConstants = root != 0;
+    // 중첩 표의 멤버가 같은 배열에 끼어들므로 이 표의 멤버를 먼저 모아 끝에 붙인다.
+    ShaderParameterMember own[MaxShaderParameterMembers];
+    usize ownNested[MaxShaderParameterMembers];
+    for (uint32 member = 0; member < memberCount; ++member) {
+        ShaderParameterMember value;
+        value.name = readName();
+        const uint8 type = reader.ReadU8();
+        value.offset = reader.ReadU32LE();
+        value.arrayCount = reader.ReadU32LE();
+        if (reader.Failed()) {
+            return "parameter layout member is truncated";
+        }
+
+        value.type = static_cast<ShaderParameterType>(type);
+        ownNested[member] = NumericLimits<usize>::Max();
+        if (value.type == ShaderParameterType::Struct) {
+            if (nested) {
+                return "parameter layout nests structs more than one level";
+            }
+
+            ShaderParameterLayout inner;
+            LayoutRange innerRange;
+            if (const char* failed = ReadLayout(reader, true, out, state, inner, innerRange);
+                failed != nullptr) {
+                return failed;
+            }
+
+            ownNested[member] = out.nested.Size();
+            if (!out.nested.TryPushBack(inner) || !state.nestedRanges.TryPushBack(innerRange)) {
+                return "out of memory reading parameter layouts";
+            }
+        } else if (ShaderParameterTypeBytes(value.type) == 0) {
+            return "parameter layout member has an unknown type";
+        }
+
+        own[member] = value;
+    }
+
+    range.first = out.members.Size();
+    range.count = memberCount;
+    for (uint32 member = 0; member < memberCount; ++member) {
+        if (ownNested[member] != NumericLimits<usize>::Max() &&
+            !state.links.TryPushBack(NestedLink{out.members.Size(), ownNested[member]})) {
+            return "out of memory reading parameter layouts";
+        }
+
+        if (!out.members.TryPushBack(own[member])) {
+            return "out of memory reading parameter layouts";
+        }
+    }
+
+    return nullptr;
+}
+
+} // namespace parameter_layout_detail
+
+ShaderReadStatus DecodeShaderParameterLayouts(Span<const uint8> bytes,
+                                              ShaderParameterLayoutSet& out) noexcept {
+    using namespace parameter_layout_detail;
+    out.layouts.Clear();
+    out.members.Clear();
+    out.nested.Clear();
+    if (bytes.IsEmpty()) {
+        return ShaderReadStatus::Success();
+    }
+
+    ByteReader reader(bytes);
+    LayoutRange ranges[MaxShaderParameterLayouts] = {};
+    DecodeState state(out.members.GetAllocator());
     const uint32 count = reader.ReadU32LE();
     if (reader.Failed() || count == 0 || count > MaxShaderParameterLayouts) {
         return ShaderReadStatus::Corrupt("parameter layout list is truncated or has a bad count");
@@ -304,32 +536,9 @@ ShaderReadStatus DecodeShaderParameterLayouts(Span<const uint8> bytes,
 
     for (uint32 index = 0; index < count; ++index) {
         ShaderParameterLayout layout;
-        layout.name = readName();
-        const uint8 root = reader.ReadU8();
-        layout.totalBytes = reader.ReadU32LE();
-        const uint32 memberCount = reader.ReadU32LE();
-        if (reader.Failed() || root > 1 || memberCount > MaxShaderParameterMembers) {
-            return ShaderReadStatus::Corrupt("parameter layout is truncated or out of range");
-        }
-
-        layout.rootConstants = root != 0;
-        ranges[index] = Range{out.members.Size(), memberCount};
-        for (uint32 member = 0; member < memberCount; ++member) {
-            ShaderParameterMember value;
-            value.name = readName();
-            const uint8 type = reader.ReadU8();
-            value.offset = reader.ReadU32LE();
-            value.arrayCount = reader.ReadU32LE();
-            if (reader.Failed() ||
-                ShaderParameterTypeBytes(static_cast<ShaderParameterType>(type)) == 0) {
-                return ShaderReadStatus::Corrupt("parameter layout member is truncated or has an "
-                                                 "unknown type");
-            }
-
-            value.type = static_cast<ShaderParameterType>(type);
-            if (!out.members.TryPushBack(value)) {
-                return ShaderReadStatus::Corrupt("out of memory reading parameter layouts");
-            }
+        if (const char* failed = ReadLayout(reader, false, out, state, layout, ranges[index]);
+            failed != nullptr) {
+            return ShaderReadStatus::Corrupt(failed);
         }
 
         if (!out.layouts.TryPushBack(layout)) {
@@ -341,9 +550,19 @@ ShaderReadStatus DecodeShaderParameterLayouts(Span<const uint8> bytes,
         return ShaderReadStatus::Corrupt("parameter layout list has trailing bytes");
     }
 
+    // 배열이 다 자랐으므로 멤버 Span과 중첩 포인터를 잇는다.
+    for (usize index = 0; index < out.nested.Size(); ++index) {
+        out.nested[index].members = out.members.View().Slice(state.nestedRanges[index].first,
+                                                             state.nestedRanges[index].count);
+    }
+
     for (uint32 index = 0; index < count; ++index) {
         out.layouts[index].members =
             out.members.View().Slice(ranges[index].first, ranges[index].count);
+    }
+
+    for (const NestedLink& link : state.links) {
+        out.members[link.member].structLayout = &out.nested[link.nested];
     }
 
     const char* reason = nullptr;

@@ -472,11 +472,23 @@ private:
             return;
         }
 
-        const ShaderGeneratedInclude vertexInput{StringView(VertexInputGeneratedIncludePath),
-                                                 job.vertexInputSource};
-        const Span<const ShaderGeneratedInclude> generated =
-            job.vertexInputSource.IsEmpty() ? Span<const ShaderGeneratedInclude>()
-                                            : Span<const ShaderGeneratedInclude>(&vertexInput, 1);
+        // 정점 입력 연결 하나와 레이아웃 표의 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체 정의는
+        // 바깥 원문 안에 있다)이다.
+        ShaderGeneratedInclude includes[MaxShaderParameterLayouts + 1];
+        usize includeCount = 0;
+        if (!job.vertexInputSource.IsEmpty()) {
+            includes[includeCount++] = ShaderGeneratedInclude{
+                StringView(VertexInputGeneratedIncludePath), job.vertexInputSource, StringView()};
+        }
+
+        for (const ShaderParameterLayout& layout : job.parameterLayouts) {
+            if (!layout.source.IsEmpty() && includeCount < MaxShaderParameterLayouts + 1) {
+                includes[includeCount++] =
+                    ShaderGeneratedInclude{layout.sourcePath, StringView(), layout.source};
+            }
+        }
+
+        const Span<const ShaderGeneratedInclude> generated(includes, includeCount);
         const ShaderSourceStatus preprocessed =
             PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed,
                              ShaderPreprocessLimits{}, generated);

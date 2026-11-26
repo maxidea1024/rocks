@@ -411,7 +411,8 @@ private:
         return nullptr;
     }
 
-    // 손으로 쓴 표와 대조한다(7.3절 (a) — 이름·타입·오프셋·원소 수·전체 크기).
+    // 레이아웃 표와 대조한다(7.3절 (a) — 이름·타입·오프셋·원소 수·전체 크기, 중첩 구조체는 그 표와
+    // 재귀로, 16.2절 SSD55).
     bool CompareLayout(const ShaderReflectedResource& resource, uint32 level,
                        const ShaderParameterLayout& layout, uint64 totalBytes) noexcept {
         if (layout.rootConstants != resource.rootConstants) {
@@ -419,6 +420,23 @@ private:
                              "root constants flag does not match the shader declaration");
         }
 
+        if (!CompareLevel(resource, level, layout, layout)) {
+            return false;
+        }
+
+        if (layout.totalBytes != totalBytes) {
+            return FailNamed("parameter layout", layout.name,
+                             "total size does not match the shader declaration");
+        }
+
+        return true;
+    }
+
+    // level 아래 리플렉션 멤버(한 층)를 표 table의 멤버와 1:1로 대조한다. owner는 진단에 쓰는 바깥
+    // 표다.
+    bool CompareLevel(const ShaderReflectedResource& resource, uint32 level,
+                      const ShaderParameterLayout& table,
+                      const ShaderParameterLayout& owner) noexcept {
         usize member = 0;
         const uint32 last = resource.firstMember + resource.memberCount;
         for (uint32 index = resource.firstMember; index < last; ++index) {
@@ -427,26 +445,28 @@ private:
                 continue;
             }
 
-            uint32 bytes = 0;
-            uint32 alignment = 0;
-            ShaderParameterType type = ShaderParameterType::Float;
-            if (reflected.base == ShaderReflectedBase::Struct ||
-                !Describe(reflected, bytes, alignment, type)) {
-                return FailNamed("parameter layout", layout.name,
-                                 "hand-written layout tables cannot describe struct members yet "
-                                 "(ShaderSystem SH3)");
-            }
-
-            if (member >= layout.members.Size()) {
-                return FailNamed("parameter layout", layout.name,
+            if (member >= table.members.Size()) {
+                return FailNamed("parameter layout", owner.name,
                                  "the shader declares more members than the C++ layout table");
             }
 
-            const ShaderParameterMember& expected = layout.members[member++];
-            if (expected.name != reflected.name || expected.type != type ||
-                expected.offset != reflected.offset || expected.arrayCount != reflected.elements) {
+            const ShaderParameterMember& expected = table.members[member++];
+            bool same = expected.name == reflected.name && expected.offset == reflected.offset &&
+                        expected.arrayCount == reflected.elements;
+            if (reflected.base == ShaderReflectedBase::Struct) {
+                same = same && expected.type == ShaderParameterType::Struct &&
+                       expected.structLayout != nullptr;
+            } else {
+                uint32 bytes = 0;
+                uint32 alignment = 0;
+                ShaderParameterType type = ShaderParameterType::Float;
+                same = same && Describe(reflected, bytes, alignment, type) &&
+                       expected.type == type;
+            }
+
+            if (!same) {
                 Text("parameter layout '");
-                Text(layout.name);
+                Text(owner.name);
                 Text("' member '");
                 Text(expected.name);
                 Text("' does not match the shader member '");
@@ -455,17 +475,23 @@ private:
                 Number(reflected.offset);
                 return Fail(" (name, type, offset and array count must be the same)");
             }
+
+            if (reflected.base == ShaderReflectedBase::Struct &&
+                !CompareLevel(resource, index, *expected.structLayout, owner)) {
+                return false;
+            }
         }
 
-        if (member != layout.members.Size() || layout.totalBytes != totalBytes) {
-            return FailNamed("parameter layout", layout.name,
-                             "member count or total size does not match the shader declaration");
+        if (member != table.members.Size()) {
+            return FailNamed("parameter layout", owner.name,
+                             "member count does not match the shader declaration");
         }
 
         return true;
     }
 
-    bool CheckConstantBuffer(const ShaderReflectedResource& resource, uint32& bytesOut) noexcept {
+    bool CheckConstantBuffer(const ShaderReflectedResource& resource, uint32& bytesOut,
+                             uint64& structIdOut) noexcept {
         const uint32 wrapper = WrapperOf(resource);
         const uint64 base = 0;
         uint64 end = 0;
@@ -487,6 +513,8 @@ private:
             if (!CompareLayout(resource, wrapper, *layout, totalBytes)) {
                 return false;
             }
+
+            structIdOut = layout->structId;
         }
 
         bytesOut = static_cast<uint32>(totalBytes);
@@ -559,7 +587,8 @@ private:
                 rootSeen_ = true;
                 const usize membersBefore = members_.Size();
                 uint32 bytes = 0;
-                if (!CheckConstantBuffer(resource, bytes)) {
+                uint64 structId = 0;
+                if (!CheckConstantBuffer(resource, bytes, structId)) {
                     return false;
                 }
 
@@ -575,6 +604,7 @@ private:
                 }
 
                 out_.rootConstantBytes = bytes;
+                out_.rootConstantStructId = structId;
                 continue;
             }
 
@@ -594,7 +624,7 @@ private:
             binding.structureStride = resource.structureStride;
             if (constantBuffer) {
                 binding.firstMember = static_cast<uint32>(members_.Size());
-                if (!CheckConstantBuffer(resource, binding.constantBufferBytes)) {
+                if (!CheckConstantBuffer(resource, binding.constantBufferBytes, binding.structId)) {
                     return false;
                 }
 

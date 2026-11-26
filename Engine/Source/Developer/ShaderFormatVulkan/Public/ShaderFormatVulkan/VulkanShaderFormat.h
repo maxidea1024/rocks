@@ -12,7 +12,7 @@
 namespace rocks::shader {
 
 // 처리기 버전이다(형식 정의 processor.version).
-inline constexpr uint32 VulkanShaderProcessorVersion = 4;
+inline constexpr uint32 VulkanShaderProcessorVersion = 5;
 
 class ROCKS_SHADERFORMATVULKAN_API VulkanShaderFormatBackend final : public ShaderFormatBackend {
 public:
