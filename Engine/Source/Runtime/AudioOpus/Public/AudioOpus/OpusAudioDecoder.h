@@ -34,4 +34,9 @@ namespace rocks::audio {
 // - MaxFramesPerCall = 960이다. 디코드 중 힙 할당은 없지만 libopus가 스택 가변 배열을 쓴다.
 ROCKS_AUDIOOPUS_API Result<void> RegisterOpusAudioDecoder(AudioDecoderTable& table) noexcept;
 
+// 위 Opus 디코더를 하나 만든다(AudioDecoderFactory 모양 - 모듈 Startup이 AudioDecoderRegistry에
+// 넣는다, Docs/Design/AudioSystem 3.37.1절). 할당 실패는 OutOfMemory다.
+ROCKS_AUDIOOPUS_API Result<UniquePtr<AudioDecoder>>
+CreateOpusAudioDecoder(Allocator& allocator) noexcept;
+
 } // namespace rocks::audio
