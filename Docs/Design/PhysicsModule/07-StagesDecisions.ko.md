@@ -276,6 +276,57 @@ PC02(질의 결과를 x64와 비교)는 플랫폼별 실행이 필요해 PH3c의
 - 무시 목록의 null은 건너뛴다. 임시 목록은 All만 쓴다.
 - 문구를 고쳤다: 같은 거리 기준은 "먼저 만든 body"가 아니라 body handle 순이다. line의 `location`과 `impactPoint`는 계산이 달라 반올림만큼 다를 수 있다. 6.3절 표를 구현에 맞췄다.
 
+### 7.1.8 PH3c 하위 단계와 PH3c1 구현 세부(2026-11-26)
+
+PH3c는 둘로 나눈다(크기 — "순서대로").
+
+| 하위 단계 | 내용 |
+|---|---|
+| PH3c1 | 질의 형상 `CollisionShape`(Collision 모듈 — 4.3절), shape trace(Test·First·All), 시작 겹침 MTD, 작은 형상의 line 전환, 길이 0 sweep, PA08 sweep |
+| PH3c2 | overlap(Blocking·Any·All)과 `OverlapResult`, 컴포넌트 자기 형상 질의(`ComponentTraceAll`·`ComponentOverlapAll` — 5.1·5.3절이 쓴다) |
+
+**질의 형상**(Collision 모듈, UE `FCollisionShape` — `PhysicsCore/Public/CollisionShape.h`):
+- 파일 둘이다. `CollisionShapeKind.h`는 `{ Line, Box, Sphere, Capsule, Cylinder }`이고, `CollisionShape.h`는 값(cm)과 만들기 함수 `Box(halfExtent)`·`Sphere(radius)`·`Capsule(radius, halfHeight)`·`CapsuleFromExtent(extent)`(반경 = max(x, y), 반높이 = z — UE `SetCapsule`)를 가진다.
+- `IsNearlyZero()`는 UE와 같다(`CollisionShape.h:139–158`): 상자는 세 반폭이 모두 `KindaSmallNumber` 이하, 구·캡슐은 반경이 `KindaSmallNumber` 이하(캡슐은 높이를 보지 않는다), Line은 참.
+- Jolt 형상: 상자는 convex radius 0(질의 형상은 모서리를 둥글리지 않는다 — UE 질의도 정확한 상자다). 구는 그대로다. 캡슐은 원통 반길이 = max(반높이 − 반경, `KindaSmallNumber`)이다(UE `GetCapsuleAxisHalfLength` — `:185–189`).
+- Cylinder 질의는 CY2(Jolt 실린더 convex radius 정책 — Cylinder 4.2절) 전에는 `Unsupported`로 hit 없음이다.
+
+**함수**(`WorldCollision.h`): `ShapeTraceTest(world, start, end, rotation, shape, filter, params)`, `ShapeTraceFirst(…, HitResult&)`, `Result<bool> ShapeTraceAll(…, Array<HitResult>&)`.
+- 형상이 Line이거나 `IsNearlyZero`면 같은 인자의 line trace다(UE `WorldCollision.cpp:151–155`). 이때 길이 0이면 hit 없음이다.
+- 형상 trace는 길이 0도 질의한다(UE `SceneQuery.cpp:515` — sweep은 길이와 상관없이 한다). 길이 0이면 시작 겹침만 나온다. 끝점·회전·형상 값이 비유한이면 hit 없음이다.
+- 장면 접점은 `PhysicsScene::TraceShape(start, end, rotation, shape, filter, params, mode, first, all) const → Result<bool>`이다.
+
+**판정과 모으기**(line의 4.4·6.3절 판정을 그대로 쓰고, 시작 겹침 규칙을 더한다 — UE `CollisionQueryFilterCallback.cpp:203–223`, `SQVisitor.h:418–441`):
+- 시작 겹침(Jolt fraction 0 — `ShapeCastSettings::mReturnDeepestPoint`로 MTD를 받는다)은 `findInitialOverlaps`가 거짓이면 버린다. 멀어지는 방향의 시작 겹침도 찾도록 `mBackFaceModeConvex`를 `CollideWithBackFaces`로 둔다(UE는 방향과 상관없이 시작 겹침을 낸다 — Jolt 기본 `IgnoreBackFaces`는 버린다).
+- Test·First에서는 막는 시작 겹침도 후보다. 순서 key는 Jolt `GetEarlyOutFraction()`(시작 겹침은 −깊이)이므로 시작 겹침이 앞이고, 그중 가장 깊은 것이다. 같은 key면 칸 번호가 작은 쪽이다. early-out은 key의 `NextUp`이다.
+- All에서 막는 시작 겹침은 자르기 기준이 아니다(겹침으로 모은다). 결과에서는 막음·시작 겹침으로 보고한다. 자르기 기준은 시작 겹침이 아닌 가장 가까운 막음이다.
+- 정렬은 time, 그다음 보고된 막음 여부(겹침이 앞), 그다음 칸 번호다(UE `FCompareFHitResultTime`은 보고된 `bBlockingHit`으로 정렬한다). line trace도 같은 key로 맞춘다(결과는 바뀌지 않는다).
+- All의 반환 값은 보고된 막음이 하나라도 있는지다(UE `bHadBlockingHit` — 막는 시작 겹침 포함).
+- 길이 0은 Jolt `CollideShape`(분리 거리 0)로 겹침을 모아 모두 시작 겹침으로 다룬다. Jolt cast의 길이 0 처리에 기대지 않는다.
+
+**결과 변환**:
+- 시작 겹침(UE `ConvertOverlappedShapeToImpactHit` — `CollisionConversions.cpp:582–671`): `time` 0, `distance` 0, `location` = 시작, `impactPoint` = 맞은 body 쪽 MTD 접촉점, `normal` = `impactNormal` = 형상을 밀어낼 방향(Jolt −penetration axis), `penetrationDepth` = MTD 깊이다. MTD 방향을 못 구하면 +Z·0이다.
+- 그 밖: `time` = fraction, `location` = 시작 + time·(끝 − 시작), `impactPoint` = 접촉점이다. `normal`은 쓸고 간 형상 쪽 법선(−penetration axis)이다. `impactNormal`은 UE `FindGeomOpposingNormal`(`CollisionConversions.cpp:115–140`)이다: 구·캡슐 질의가 상자 body를 맞히면 상자 로컬 축 가운데 `normal` 성분이 있는 면들 중 sweep 방향에 가장 맞서는 면의 법선(ChaosCore `AABB::FindGeometryOpposingNormal`), 그 밖(상자 질의, 구·캡슐 body)은 `normal` 그대로다.
+
+**시험**(`PhysicsSweepTests.cpp`):
+- PA08 sweep: 구를 바닥으로 쓸면 `impactNormal`·`normal`이 +Z이고, `location.z`는 반경이다.
+- 회전한 상자의 모서리가 벽면에 닿는 time, 캡슐(축 Z)을 벽으로 쓸 때의 위치를 확인한다.
+- 시작 겹침: 값(깊이·법선·위치)을 확인하고, `findInitialOverlaps` 거짓이면 hit 없음이다. First는 더 깊은 시작 겹침을 고른다.
+- All의 순서: 막는 시작 겹침 → 겹침 → 막음이고, 반환 값은 참이다.
+- 반경 0 구는 line trace와 같은 hit이다.
+- 길이 0 sweep은 겹치면 시작 겹침, 아니면 없음이다.
+- 무시 목록·채널 응답이 sweep에도 적용된다.
+
+**PH3c1 리뷰 반영(2026-11-26).** 치명 0, 중요 2, 경미 7.
+- `impactNormal`을 UE `FindGeomOpposingNormal` 규칙으로 바꿨다(위). 가장 가까운 면을 고르는 Jolt `GetSurfaceNormal`은 모서리에서 UE와 다른 면을 골랐다.
+- 회전 quaternion은 정규화해 쓰고, 0·비유한이면 hit 없음이다. Jolt 회전 assert(Fatal)를 막는다.
+- Jolt 허용 오차 안의 분리(fraction 0, 부호 있는 깊이 < 0)는 시작 겹침이 아니라 time 0의 일반 hit다.
+- MTD가 없을 때의 대체 법선은 UE와 같다: 겹침은 −trace 방향, 막음은 +Z다.
+- 질의 형상은 stack에 만든다(질의마다 힙에 할당하지 않는다).
+- Cylinder는 World가 hit 없음으로 돌려준다(All도 오류가 아니다).
+- 삼각형(메시) 형상의 back-face 모드는 메시 body가 들어오는 PH6에서 정한다.
+- 시험을 보강했다: 구가 상자 모서리를 맞힌 `impactNormal`, 시작 겹침만 있는 All의 반환 값, 길이 0의 값·버리기, ObjectTypes All과 시작 겹침, `ignoreTouches`와 막는 시작 겹침, Test의 시작 겹침, 이름 있는 상수.
+
 ## 7.2 시험 원칙
 
 - 각 단계 시험은 UE 원본 동작을 기대값으로 둔다(행 인용). 수치 적분은 step 크기에서 유도한 허용 오차, 방향·단위 사상은 정확 일치(어댑터 경계 9절).
@@ -325,6 +376,7 @@ PC02(질의 결과를 x64와 비교)는 플랫폼별 실행이 필요해 PH3c의
 
 ## 7.6 개정 이력
 
+- 개정 13(2026-11-26): PH3b 완료(eff5569c), PH3c 하위 단계와 PH3c1 구현 세부(7.1.8절).
 - 개정 12(2026-11-26): PH3a 완료(79b8779b), PH3b 구현 세부(7.1.7절).
 - 개정 11(2026-11-26): PH2d 완료(05226c41 — PH2 끝), PH3 하위 단계와 PH3a 구현 세부(7.1.6절).
 - 개정 10(2026-11-26): PH2c 완료(e67a082b), PH2d 구현 세부(7.1.5절 — 운동 종류 전환·필터·형상·scale·Mobility, 리뷰 반영).

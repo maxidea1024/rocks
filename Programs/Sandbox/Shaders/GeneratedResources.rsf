@@ -1,0 +1,23 @@
+// 생성 셰이더 파라미터 구조체의 자원 멤버 self-test 셰이더다(Docs/Design/ShaderSystem 16.2절 SSD66 4).
+// 상수와 자원은 C++ Private/SandboxShaderParameters.h GeneratedResourceParameters의 생성 원문이다(cbuffer
+// GeneratedResources, albedo·albedoSampler, codes, lights). 열 x가 자원 하나를 보여 준다.
+#include "/Plugin/Sandbox/Common.rsh"
+#include "/Engine/Generated/Sandbox/GeneratedResourceParameters.rsh"
+
+float4 GeneratedResourcesVS(uint id : SV_VertexID) : SV_Position {
+    return FullScreenPosition(id);
+}
+
+float4 GeneratedResourcesPS(float4 position : SV_Position) : SV_Target0 {
+    const uint column = uint(position.x);
+    if (column == 0) {
+        // u = 1.25: Wrap이면 왼쪽 texel, Clamp면 오른쪽 texel이다(2 × 1 텍스처, 점 필터).
+        return albedo.SampleLevel(albedoSampler, float2(1.25, 0.5), 0.0) * scale;
+    }
+
+    if (column == 1) {
+        return float4(codes.Load(int3(0, 0, 0))) / 255.0;
+    }
+
+    return lights.Load(0);
+}

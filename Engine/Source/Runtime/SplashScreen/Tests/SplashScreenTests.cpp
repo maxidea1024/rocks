@@ -639,6 +639,81 @@ TEST(SplashScreen_ShowInputErrorsReleaseTheSource) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 최소 표시 시간(9.7절): 주입 시계로 창이 뜬 뒤 1.9초에는 거짓, 2.0초에는 참이다. 생성 중에는 거짓,
+// 최소 0이면 뜨자마자 참, 생성 실패면 참, 음수는 Show가 거부한다.
+TEST(SplashScreen_MinimumDisplayTimeGatesCanHide) {
+    struct FakeClock {
+        platform::Atomic<uint64> now{1'000'000};
+
+        static uint64 Read(void* context) noexcept {
+            return static_cast<FakeClock*>(context)->now.Load<platform::MemoryOrder::Acquire>();
+        }
+    };
+    constexpr uint64 Second = 1'000'000'000;
+    SystemAllocator allocator;
+    ShowEnvironment environment;
+    REQUIRE(environment.ready);
+    {
+        FakeRecord record;
+        FakeClock clock;
+        SplashShowDesc desc = environment.Desc();
+        desc.nowNanoseconds = &FakeClock::Read;
+        desc.clockContext = &clock;
+        auto shown = SplashScreenTestAccess::Show(allocator, desc,
+                                                  SplashPresenterFactory{&CreateFake, &record});
+        REQUIRE(shown);
+        record.createEntered.Wait();
+        CHECK(!shown.Value().CanHide()); // 아직 만드는 중
+        record.allowCreate.Open();
+        record.presented.Wait(); // Shown 뒤 첫 그리기 — 창이 뜬 시각은 시계를 움직이기 전 값이다
+        CHECK(shown.Value().State() == SplashState::Shown);
+        CHECK(!shown.Value().CanHide());
+        clock.now.Store<platform::MemoryOrder::Release>(1'000'000 + 19 * Second / 10);
+        CHECK(!shown.Value().CanHide());
+        clock.now.Store<platform::MemoryOrder::Release>(1'000'000 + 2 * Second);
+        CHECK(shown.Value().CanHide());
+        shown.Value().Hide();
+        CHECK(shown.Value().CanHide());
+    }
+
+    {
+        FakeRecord record;
+        record.allowCreate.Open();
+        FakeClock clock;
+        SplashShowDesc desc = environment.Desc();
+        desc.nowNanoseconds = &FakeClock::Read;
+        desc.clockContext = &clock;
+        desc.minimumDisplaySeconds = 0.0;
+        auto shown = SplashScreenTestAccess::Show(allocator, desc,
+                                                  SplashPresenterFactory{&CreateFake, &record});
+        REQUIRE(shown);
+        record.presented.Wait();
+        CHECK(shown.Value().CanHide());
+        shown.Value().Hide();
+    }
+
+    {
+        FakeRecord record;
+        record.allowCreate.Open();
+        record.failWith = SplashSkipReason::WindowFailed;
+        auto shown = SplashScreenTestAccess::Show(allocator, environment.Desc(),
+                                                  SplashPresenterFactory{&CreateFake, &record});
+        REQUIRE(shown);
+        record.destroyed.Wait();
+        CHECK(shown.Value().CanHide()); // 창이 없으면 기다리지 않는다
+        shown.Value().Hide();
+    }
+
+    FakeRecord unused;
+    SplashShowDesc negative = environment.Desc();
+    negative.minimumDisplaySeconds = -1.0;
+    CHECK(SplashScreenTestAccess::Show(allocator, negative,
+                                       SplashPresenterFactory{&CreateFake, &unused})
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(unused.creates.Load<platform::MemoryOrder::Acquire>() == 0);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // 떠 있는 동안 스플래시가 대화상자 hook을 갖고, Hide가 푼다(hook은 하나 — 9.5절).
 TEST(SplashScreen_DialogHookIsHeldWhileShown) {
     SystemAllocator allocator;

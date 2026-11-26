@@ -38,6 +38,9 @@ struct SplashSettingValues {
     // Studio 스플래시 이미지 경로와 저작권 글자다. Studio 칸 표시는 고정이다(설계 6.3절).
     StringView studioImage;
     StringView studioCopyright;
+    // 최소 표시 시간(초, `ui.splash.min_seconds`, 기본 2, 0–10)이다. 0이면 기다리지 않는다
+    // (Docs/Design/SplashScreen 9.7절).
+    float minimumSeconds = 2.0f;
 };
 
 // `ui.splash.*`를 등록한다. Engine 모듈의 RegisterSettings가 부르고, 호스트 없이 설정 문맥을 만드는

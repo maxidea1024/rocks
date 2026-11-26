@@ -4,7 +4,7 @@
 
 ## 11. API 초안
 
-SP1에서 구현한 부분(`SplashTypes.h`·`SplashImage.h`·`SplashLayout.h`·`SplashModel.h`·`SplashScreen.h`)은 헤더가 정본이다. 아래와 다른 점: 판정 입력은 `HostKind`·`RunTraits` 대신 같은 뜻의 bool 칸(`interactiveHost`·`headless`·`unattended`)이고 플랫폼 값은 `MakeSplashVisibilityInput()`이 채운다(AppInfo 구현 전), 칸 표시는 `SplashShowDesc`의 `show*` bool, `SplashState`·`SetText`·`Suspend`·`Resume`·`Hide`는 아래와 같다. `StartupProgress`는 SP2다.
+SP1에서 구현한 부분(`SplashTypes.h`·`SplashImage.h`·`SplashLayout.h`·`SplashModel.h`·`SplashScreen.h`)은 헤더가 정본이다. 아래와 다른 점: 판정 입력은 `HostKind`·`RunTraits` 대신 같은 뜻의 bool 칸(`interactiveHost`·`headless`·`unattended`)이고 플랫폼 값은 `MakeSplashVisibilityInput()`이 채운다(AppInfo 구현 전), 칸 표시는 `SplashShowDesc`의 `show*` bool, `SplashState`·`SetText`·`Suspend`·`Resume`·`Hide`는 아래와 같다. `StartupProgress`는 SP2다. 개정 4에서 `SplashShowDesc::minimumDisplaySeconds`와 `SplashScreen::CanHide()`를 더했다(9.7절).
 
 ```cpp
 namespace rocks::splash {

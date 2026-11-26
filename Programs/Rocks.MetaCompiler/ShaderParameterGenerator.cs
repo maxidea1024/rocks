@@ -9,7 +9,8 @@ namespace Rocks.MetaCompiler;
 // 셰이더 파라미터 구조체 생성 모드다(Docs/Design/ShaderSystem 16.2절 SSD49–SSD53, 13절 P7). 리플렉션 메타 단계와 따로 돈다:
 // `Rocks.MetaCompiler shader-parameters --module M --input <헤더> --include <철자> ... --output-root <디렉터리>`.
 // 모듈 헤더의 ROCKS_SHADER_PARAMETERS 구조체마다 Clang이 정한 C++ 오프셋을 읽어 7.2절 5항 규칙으로 검사하고, 생성 C++ 표
-// (<출력>/Include/<철자의 .h를 .shaderparams.h로>)와 생성 HLSL(<출력>/Shaders/<C++ 이름>.rsh)을 쓴다. 오류는 RMC6xxx다.
+// (<출력>/Include/<철자의 .h를 .shaderparams.h로>)와 생성 HLSL(<출력>/Shaders/<C++ 이름>.rsh)을 쓴다. 자원 멤버(RenderBase·RenderGraph 틀 +
+// ShaderCore 서술자, 16.2절 SSD59–SSD62)는 상수 부분 뒤에 와서 표의 자원 목록과 HLSL 전역 선언이 된다. 오류는 RMC6xxx다.
 internal static class ShaderParameterGenerator
 {
     // 표지 annotation 이름이다(Meta/Annotations.h ROCKS_SHADER_PARAMETERS).
@@ -17,6 +18,7 @@ internal static class ShaderParameterGenerator
 
     // ShaderCore 한도다(ShaderCore/ShaderParameterLayout.h와 같다).
     private const int MaxMembers = 256;
+    private const int MaxResources = 256;
     private const int MaxNameBytes = 64;
     private const int MaxConstantBufferBytes = 65536;
     private const int MaxRootConstantBytes = 128;
@@ -34,6 +36,76 @@ internal static class ShaderParameterGenerator
     public const string ShadersDirectoryName = "Shaders";
 
     private static readonly Regex Identifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
+
+    // 생성 HLSL이 쓸 수 없는 예약 전역 이름이다(공유 샘플러와 그 짝, PS 진단 버퍼 — 7.2절 9·12항).
+    private static readonly HashSet<string> ReservedNames =
+        new(["SharedWrap", "SharedClamp", "SharedWrapSampler", "SharedClampSampler", "RocksDebugBuffer"], StringComparer.Ordinal);
+
+    // 자원 멤버 틀의 범주다(16.2절 SSD59).
+    private enum Category { TextureSrv, BufferSrv, TextureUav, BufferUav, Access, RenderTargets }
+
+    // 자원 틀(C++ 정규 철자, 템플릿 이름) → ShaderParameterResourceKind 열거자와 범주다.
+    private static readonly Dictionary<string, (string Kind, Category Category)> Holders = new(StringComparer.Ordinal)
+    {
+        ["rocks::render::DeviceTextureParameter"] = ("DeviceTexture", Category.TextureSrv),
+        ["rocks::render::DeviceBufferParameter"] = ("DeviceBuffer", Category.BufferSrv),
+        ["rocks::render::GraphTextureParameter"] = ("GraphTexture", Category.TextureSrv),
+        ["rocks::render::GraphTextureSrvParameter"] = ("GraphTextureSrv", Category.TextureSrv),
+        ["rocks::render::GraphTextureUavParameter"] = ("GraphTextureUav", Category.TextureUav),
+        ["rocks::render::GraphBufferSrvParameter"] = ("GraphBufferSrv", Category.BufferSrv),
+        ["rocks::render::GraphBufferUavParameter"] = ("GraphBufferUav", Category.BufferUav),
+        ["rocks::render::GraphTextureAccessParameter"] = ("GraphTextureAccess", Category.Access),
+        ["rocks::render::GraphBufferAccessParameter"] = ("GraphBufferAccess", Category.Access),
+        ["rocks::render::GraphRenderTargetParameter"] = ("RenderTargets", Category.RenderTargets),
+    };
+
+    // HLSL 자원 서술자다(ShaderCore/ShaderResourceTypes.h): 범주, ShaderResourceShape 열거자, HLSL 타입, image 형식 인자, 짝 샘플러 인자.
+    private sealed record Descriptor(Category Category, string Shape, string Hlsl, bool Format, bool Sampler);
+
+    private static readonly Dictionary<string, Descriptor> Descriptors = new(StringComparer.Ordinal)
+    {
+        ["rocks::shader::ShaderTexture1D"] = new(Category.TextureSrv, "Texture1D", "Texture1D", false, true),
+        ["rocks::shader::ShaderTexture1DArray"] = new(Category.TextureSrv, "Texture1DArray", "Texture1DArray", false, true),
+        ["rocks::shader::ShaderTexture2D"] = new(Category.TextureSrv, "Texture2D", "Texture2D", false, true),
+        ["rocks::shader::ShaderTexture2DArray"] = new(Category.TextureSrv, "Texture2DArray", "Texture2DArray", false, true),
+        ["rocks::shader::ShaderTexture3D"] = new(Category.TextureSrv, "Texture3D", "Texture3D", false, true),
+        ["rocks::shader::ShaderTextureCube"] = new(Category.TextureSrv, "TextureCube", "TextureCube", false, true),
+        ["rocks::shader::ShaderTextureCubeArray"] = new(Category.TextureSrv, "TextureCubeArray", "TextureCubeArray", false, true),
+        ["rocks::shader::ShaderTexture2DMS"] = new(Category.TextureSrv, "Texture2DMultisample", "Texture2DMS", false, false),
+        ["rocks::shader::ShaderTexture2DMSArray"] = new(Category.TextureSrv, "Texture2DMultisampleArray", "Texture2DMSArray", false, false),
+        ["rocks::shader::ShaderBuffer"] = new(Category.BufferSrv, "TypedBuffer", "Buffer", false, false),
+        ["rocks::shader::ShaderStructuredBuffer"] = new(Category.BufferSrv, "StructuredBuffer", "StructuredBuffer", false, false),
+        ["rocks::shader::ShaderByteAddressBuffer"] = new(Category.BufferSrv, "RawBuffer", "ByteAddressBuffer", false, false),
+        ["rocks::shader::ShaderRWTexture2D"] = new(Category.TextureUav, "Texture2D", "RWTexture2D", true, false),
+        ["rocks::shader::ShaderRWTexture2DArray"] = new(Category.TextureUav, "Texture2DArray", "RWTexture2DArray", true, false),
+        ["rocks::shader::ShaderRWTexture3D"] = new(Category.TextureUav, "Texture3D", "RWTexture3D", true, false),
+        ["rocks::shader::ShaderRWBuffer"] = new(Category.BufferUav, "TypedBuffer", "RWBuffer", true, false),
+        ["rocks::shader::ShaderRWStructuredBuffer"] = new(Category.BufferUav, "StructuredBuffer", "RWStructuredBuffer", false, false),
+        ["rocks::shader::ShaderRWByteAddressBuffer"] = new(Category.BufferUav, "RawBuffer", "RWByteAddressBuffer", false, false),
+    };
+
+    // SRV 텍스처 서술자의 기본 원소다(ShaderCore/ShaderResourceTypes.h).
+    private const string DefaultTextureElement = "rocks::shader::ShaderFloat4";
+
+    // 비교 짝 샘플러 태그다(ShaderFilterSampler가 기본).
+    private const string ComparisonSamplerTag = "rocks::shader::ShaderComparisonSampler";
+
+    // UAV image 형식 태그 → ROCKS_IMAGE_FORMAT 철자·기본 타입·채널 수다(7.2절 1항).
+    private static readonly Dictionary<string, (string Spelling, Base Base, int Channels)> ImageFormats = new(StringComparer.Ordinal)
+    {
+        ["rocks::shader::ShaderImageRgba8"] = ("rgba8", Base.Float, 4),
+        ["rocks::shader::ShaderImageRgba8Snorm"] = ("rgba8snorm", Base.Float, 4),
+        ["rocks::shader::ShaderImageRgba16f"] = ("rgba16f", Base.Float, 4),
+        ["rocks::shader::ShaderImageRgba32f"] = ("rgba32f", Base.Float, 4),
+        ["rocks::shader::ShaderImageR11g11b10f"] = ("r11g11b10f", Base.Float, 3),
+        ["rocks::shader::ShaderImageR16f"] = ("r16f", Base.Float, 1),
+        ["rocks::shader::ShaderImageRg16f"] = ("rg16f", Base.Float, 2),
+        ["rocks::shader::ShaderImageR32f"] = ("r32f", Base.Float, 1),
+        ["rocks::shader::ShaderImageRg32f"] = ("rg32f", Base.Float, 2),
+        ["rocks::shader::ShaderImageR32ui"] = ("r32ui", Base.Uint, 1),
+        ["rocks::shader::ShaderImageR32i"] = ("r32i", Base.Int, 1),
+        ["rocks::shader::ShaderImageRgba32ui"] = ("rgba32ui", Base.Uint, 4),
+    };
 
     // 표지 뒤 구조체 이름(어휘)이다. 헤더마다 어느 구조체가 그 헤더에 있는지 정한다(AST 위치는 파일이 바뀔 때만 실려 있다).
     private static readonly Regex DeclaredStruct = new(
@@ -92,11 +164,47 @@ internal static class ShaderParameterGenerator
 
         public bool RootConstants { get; set; }
 
+        // 표의 totalBytes(상수 부분 byte)다.
         public int Size { get; set; }
+
+        // C++ sizeof다(자원 멤버가 있으면 Size보다 크다).
+        public int CppSize { get; set; }
 
         public int Alignment { get; set; }
 
         public List<Member> Members { get; } = [];
+
+        // 자원 멤버(포함 구조체는 펼친 것, 오프셋 순)다.
+        public List<ResourceEntry> Resources { get; } = [];
+
+        // 포함한 자원 구조체 멤버(이름, 오프셋, 구조체)다.
+        public List<(string Name, int Offset, StructDecl Struct)> Includes { get; } = [];
+    }
+
+    // 자원 멤버 하나다(16.2절 SSD62 — ShaderParameterResource 한 줄). Kind·Shape·Component·Sampler는 C++ 열거자 이름이다.
+    private sealed class ResourceEntry
+    {
+        public required string Name { get; init; }
+
+        public required string Kind { get; init; }
+
+        public required int Offset { get; init; }
+
+        public string Shape { get; init; } = "None";
+
+        public string Component { get; init; } = "None";
+
+        public int Stride { get; init; }
+
+        public string Sampler { get; init; } = "None";
+
+        // HLSL 선언의 타입 부분("Texture2D<float4>", "ROCKS_IMAGE_FORMAT(r32f) RWTexture2D<float>")이다. 셰이더에 묶지 않는 멤버는 null이다.
+        public string? Declaration { get; init; }
+
+        // 바깥 C++ 멤버 이름이다(static_assert). 포함 구조체에서 펼친 자원은 null이다.
+        public string? Member { get; init; }
+
+        public string SamplerName => Sampler == "None" ? "" : Name + "Sampler";
     }
 
     // 표 멤버 하나다(padding 포함).
@@ -608,7 +716,7 @@ internal static class ShaderParameterGenerator
 
     private static int AlignUp(int value, int alignment) => (value + alignment - 1) / alignment * alignment;
 
-    // 멤버 표를 만들고 7.2절 5항 규칙을 C++ 오프셋으로 검사한다(16.2절 SSD50).
+    // 멤버 표를 만들고 7.2절 5항 규칙을 C++ 오프셋으로 검사한다(16.2절 SSD50). 자원 멤버(SSD59–SSD61)는 상수 부분 뒤에 오며 자원 목록으로 모은다.
     private static void Layout(StructDecl declaration, List<StructDecl> owned)
     {
         ApplySpecifiers(declaration);
@@ -626,19 +734,13 @@ internal static class ShaderParameterGenerator
                 "Declare the struct alignas(16) or add members so that its size is a multiple of 16 bytes.");
         }
 
-        int limit = declaration.RootConstants ? MaxRootConstantBytes : MaxConstantBufferBytes;
-        if (size > limit)
-        {
-            throw new MetadataException($"{where}: shader parameter struct is {size} bytes, above the {(declaration.RootConstants ? "root constants" : "constant buffer")} limit of {limit}",
-                "RMC6006", declaration.RootConstants ? "Move large values to a constant buffer struct (without RootConstants)." : "Split the struct.");
-        }
-
-        declaration.Size = (int)size;
+        declaration.CppSize = (int)size;
         declaration.Alignment = (int)alignment;
         int end = 0;
         int padding = 0;
         int lastSlot = -1;
         Base lastBase = Base.Float;
+        bool resourcePart = false;
         for (int index = 0; index < fields.Count; ++index)
         {
             FieldFacts facts = fields[index];
@@ -660,14 +762,77 @@ internal static class ShaderParameterGenerator
             string spelling = array ? facts.Element : facts.Type;
             ScalarType? scalar = Types.FirstOrDefault(type => type.Cpp == spelling);
             StructDecl? nested = scalar is null ? owned.FirstOrDefault(other => other.Qualified == spelling) : null;
-            if (scalar is null && nested is null)
+            int offset = (int)facts.Offset;
+            ResourceEntry? resource = scalar is null && nested is null ? ResourceOf(member, name, spelling, offset) : null;
+            if (scalar is null && nested is null && resource is null)
             {
                 throw new MetadataException($"{member}: type '{facts.Type}' is not a shader parameter type", "RMC6007",
-                    "Use float, int32, uint32, the ShaderCore aligned types (ShaderFloat2-ShaderUint4, ShaderFloat4x4) or a shader parameter struct " +
-                    "of this module; Core Matrix4/Vector3, bool, double, pointers and other types are rejected (ShaderSystem 7.2 item 5).");
+                    "Use float, int32, uint32, the ShaderCore aligned types (ShaderFloat2-ShaderUint4, ShaderFloat4x4), a shader parameter struct " +
+                    "of this module or a resource member (RenderBase Device*Parameter, RenderGraph Graph*Parameter); Core Matrix4/Vector3, bool, " +
+                    "double, pointers and other types are rejected (ShaderSystem 7.2 item 5, 16.2 SSD59).");
             }
 
-            int offset = (int)facts.Offset;
+            bool include = nested is not null && nested.Resources.Count != 0;
+            if (resource is not null || include)
+            {
+                if (array)
+                {
+                    throw new MetadataException($"{member}: resource arrays are not shader parameters", "RMC6007",
+                        "Declare one member per resource (resource arrays wait for the material system).");
+                }
+
+                if (declaration.RootConstants)
+                {
+                    throw new MetadataException($"{member}: root constants take scalar, vector and matrix members only", "RMC6009",
+                        "Move resource members to a constant buffer or resource struct (without RootConstants).");
+                }
+
+                if (offset % SlotBytes != 0)
+                {
+                    throw new MetadataException($"{member}: a resource member must start on a 16-byte boundary (offset {offset})", "RMC6008",
+                        "Use the RenderBase and RenderGraph resource member types, which are alignas(16).");
+                }
+
+                resourcePart = true;
+                if (resource is not null)
+                {
+                    declaration.Resources.Add(resource);
+                    continue;
+                }
+
+                if (nested!.Members.Count != 0 || nested.Includes.Count != 0 ||
+                    nested.Resources.Any(entry => !IsShaderBound(entry.Kind)))
+                {
+                    throw new MetadataException($"{member}: an included resource struct holds shader resources only and nests one level", "RMC6007",
+                        "Keep constants, access-only and render target members in the pass struct; include only resource structs of " +
+                        "texture, buffer and sampler members.");
+                }
+
+                declaration.Includes.Add((name, offset, nested));
+                foreach (ResourceEntry inner in nested.Resources)
+                {
+                    declaration.Resources.Add(new ResourceEntry
+                    {
+                        Name = name + "_" + inner.Name,
+                        Kind = inner.Kind,
+                        Offset = offset + inner.Offset,
+                        Shape = inner.Shape,
+                        Component = inner.Component,
+                        Stride = inner.Stride,
+                        Sampler = inner.Sampler,
+                        Declaration = inner.Declaration,
+                    });
+                }
+
+                continue;
+            }
+
+            if (resourcePart)
+            {
+                throw new MetadataException($"{member}: constant members come before resource members", "RMC6009",
+                    "Move the constant member above the first resource member (the constant part is the front of the struct, ShaderSystem 16.2 SSD60).");
+            }
+
             if (nested is not null)
             {
                 if (ReferenceEquals(nested, declaration) || nested.Members.Count == 0)
@@ -747,18 +912,214 @@ internal static class ShaderParameterGenerator
             end = offset + added.HlslBytes;
         }
 
-        if (declaration.Members.Count == 0 || declaration.Members.Count > MaxMembers)
+        if ((declaration.Members.Count == 0 && declaration.Resources.Count == 0) || declaration.Members.Count > MaxMembers)
         {
             throw new MetadataException($"{where}: shader parameter structs have 1 to 256 members including padding ({declaration.Members.Count})", "RMC6006",
                 "Split the struct.");
         }
 
-        if (AlignUp(end, SlotBytes) != declaration.Size)
+        if (declaration.Resources.Count > MaxResources)
         {
-            throw new MetadataException($"{where}: C++ size {declaration.Size} does not match the shader size {AlignUp(end, SlotBytes)}", "RMC6006",
+            throw new MetadataException($"{where}: shader parameter structs have at most 256 resource members ({declaration.Resources.Count})", "RMC6006",
+                "Split the struct.");
+        }
+
+        // 표의 totalBytes는 상수 부분 byte(cbuffer 크기)다. 자원 멤버가 없으면 C++ 크기와 같다(SSD60).
+        int constantBytes = AlignUp(end, SlotBytes);
+        if (declaration.Resources.Count == 0 && constantBytes != declaration.CppSize)
+        {
+            throw new MetadataException($"{where}: C++ size {declaration.CppSize} does not match the shader size {constantBytes}", "RMC6006",
                 "Remove trailing alignment padding beyond the next 16-byte boundary.");
         }
+
+        if (declaration.Resources.Count != 0 && declaration.Resources[0].Offset < constantBytes)
+        {
+            throw new MetadataException($"{where}: the first resource member is inside the constant part ({constantBytes} bytes)", "RMC6008",
+                "Use the RenderBase and RenderGraph resource member types, which are alignas(16).");
+        }
+
+        int limit = declaration.RootConstants ? MaxRootConstantBytes : MaxConstantBufferBytes;
+        if (constantBytes > limit)
+        {
+            throw new MetadataException($"{where}: shader parameter struct is {constantBytes} bytes, above the {(declaration.RootConstants ? "root constants" : "constant buffer")} limit of {limit}",
+                "RMC6006", declaration.RootConstants ? "Move large values to a constant buffer struct (without RootConstants)." : "Split the struct.");
+        }
+
+        declaration.Size = constantBytes;
+        if (declaration.Resources.Count(entry => entry.Kind == "RenderTargets") > 1)
+        {
+            throw new MetadataException($"{where}: a shader parameter struct has at most one render target member", "RMC6007",
+                "Declare all color and depth targets in one GraphRenderTargetParameter.");
+        }
+
+        CheckGlobalNames(declaration);
     }
+
+    // 셰이더 전역 이름(cbuffer 이름·상수 멤버·자원·짝 샘플러)이 겹치지 않고 예약 이름이 아닌지 본다(16.2절 SSD61).
+    private static void CheckGlobalNames(StructDecl declaration)
+    {
+        if (declaration.Resources.Count == 0)
+        {
+            return;
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (declaration.Members.Count != 0)
+        {
+            names.Add(declaration.Name);
+            foreach (Member member in declaration.Members)
+            {
+                names.Add(member.Name);
+            }
+        }
+
+        foreach (ResourceEntry resource in declaration.Resources.Where(entry => IsShaderBound(entry.Kind)))
+        {
+            foreach (string name in resource.SamplerName.Length == 0 ? new[] { resource.Name } : [resource.Name, resource.SamplerName])
+            {
+                if (Encoding.UTF8.GetByteCount(name) > MaxNameBytes || ReservedNames.Contains(name) || !names.Add(name))
+                {
+                    throw new MetadataException($"{declaration.Qualified}: shader resource name '{name}' repeats another shader name, is reserved or is longer than 64 bytes",
+                        "RMC6010", "Rename the member; generated names are <member>, <member>Sampler and <include>_<member> " +
+                        "(SharedWrap, SharedClamp, SharedWrapSampler, SharedClampSampler and RocksDebugBuffer are reserved).");
+                }
+            }
+        }
+    }
+
+    // 자원 멤버 타입(틀<서술자>)을 푼다(16.2절 SSD59). 자원 틀이 아니면 null이다.
+    private static ResourceEntry? ResourceOf(string member, string name, string spelling, int offset)
+    {
+        (string holder, List<string> arguments) = SplitTemplate(spelling);
+        if (!Holders.TryGetValue(holder, out (string Kind, Category Category) info))
+        {
+            return null;
+        }
+
+        if (info.Category is Category.Access or Category.RenderTargets)
+        {
+            return new ResourceEntry { Name = name, Kind = info.Kind, Offset = offset, Member = name };
+        }
+
+        (string descriptorName, List<string> parameters) = arguments.Count == 1 ? SplitTemplate(arguments[0]) : ("", []);
+        if (!Descriptors.TryGetValue(descriptorName, out Descriptor? descriptor) || descriptor.Category != info.Category)
+        {
+            throw new MetadataException($"{member}: '{spelling}' needs a {CategoryText(info.Category)} descriptor of ShaderCore/ShaderResourceTypes.h",
+                "RMC6011", "Use the ShaderTexture*, ShaderBuffer*, ShaderStructuredBuffer*, ShaderByteAddressBuffer and ShaderRW* descriptors that fit " +
+                "the resource member type (ShaderSystem 16.2 SSD59).");
+        }
+
+        if (descriptor.Shape == "RawBuffer")
+        {
+            return new ResourceEntry { Name = name, Kind = info.Kind, Offset = offset, Shape = "RawBuffer", Declaration = descriptor.Hlsl, Member = name };
+        }
+
+        // Clang 정규 철자는 기본 템플릿 인자를 생략한다(ShaderTexture2D<> — 원소 ShaderFloat4, 짝 ShaderFilterSampler).
+        if (parameters.Count == 0 && descriptor.Category == Category.TextureSrv)
+        {
+            parameters.Add(DefaultTextureElement);
+        }
+
+        ScalarType? element = parameters.Count == 0 ? null : Types.FirstOrDefault(type => type.Cpp == parameters[0]);
+        bool structured = descriptor.Shape == "StructuredBuffer";
+        if (element is null || (element.Enum == "Float4x4" && !structured))
+        {
+            throw new MetadataException($"{member}: '{(parameters.Count == 0 ? "" : parameters[0])}' is not a shader resource element type", "RMC6011",
+                "Use float, int32, uint32 or a ShaderCore aligned vector (structured buffers also take ShaderFloat4x4).");
+        }
+
+        if (structured && element.Bytes == 12)
+        {
+            throw new MetadataException($"{member}: structured buffer elements cannot be 3-component vectors (C++ 16 bytes, HLSL stride 12)", "RMC6011",
+                "Use a 4-component element.");
+        }
+
+        string format = "";
+        if (descriptor.Format)
+        {
+            string tag = parameters.Count > 1 ? parameters[1] : "";
+            if (!ImageFormats.TryGetValue(tag, out (string Spelling, Base Base, int Channels) image) || image.Base != element.Base ||
+                image.Channels != Channels(element))
+            {
+                throw new MetadataException($"{member}: image format '{tag}' does not fit the element {element.Hlsl}", "RMC6011",
+                    "Use a ShaderImage* format tag whose base type and channel count match the element (r32ui with uint32, rgba16f with ShaderFloat4).");
+            }
+
+            format = $"ROCKS_IMAGE_FORMAT({image.Spelling}) ";
+        }
+
+        string sampler = "None";
+        if (descriptor.Sampler && element.Base == Base.Float)
+        {
+            sampler = parameters.Count > 1 && parameters[1] == ComparisonSamplerTag ? "Comparison" : "Filter";
+        }
+        else if (descriptor.Sampler && parameters.Count > 1 && parameters[1] == ComparisonSamplerTag)
+        {
+            throw new MetadataException($"{member}: comparison samplers pair with float textures only", "RMC6011",
+                "Use a float element for depth comparison textures.");
+        }
+
+        return new ResourceEntry
+        {
+            Name = name,
+            Kind = info.Kind,
+            Offset = offset,
+            Shape = descriptor.Shape,
+            Component = structured ? "None" : element.Base.ToString(),
+            Stride = structured ? element.Bytes : 0,
+            Sampler = sampler,
+            Declaration = $"{format}{descriptor.Hlsl}<{element.Hlsl}>",
+            Member = name,
+        };
+    }
+
+    private static int Channels(ScalarType element) =>
+        char.IsDigit(element.Hlsl[^1]) ? element.Hlsl[^1] - '0' : 1;
+
+    private static string CategoryText(Category category) => category switch
+    {
+        Category.TextureSrv => "shader resource texture",
+        Category.BufferSrv => "shader resource buffer",
+        Category.TextureUav => "read-write texture",
+        Category.BufferUav => "read-write buffer",
+        _ => "resource",
+    };
+
+    // "이름<인자, 인자<…>>"를 이름과 최상위 인자로 나눈다. 템플릿이 아니면 인자가 없다.
+    private static (string Name, List<string> Arguments) SplitTemplate(string spelling)
+    {
+        string text = spelling.Trim();
+        int open = text.IndexOf('<', StringComparison.Ordinal);
+        if (open < 0 || !text.EndsWith('>'))
+        {
+            return (text, []);
+        }
+
+        var arguments = new List<string>();
+        var current = new StringBuilder();
+        int depth = 0;
+        foreach (char character in text[(open + 1)..^1])
+        {
+            depth += character == '<' ? 1 : character == '>' ? -1 : 0;
+            if (character == ',' && depth == 0)
+            {
+                arguments.Add(current.ToString().Trim());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(character);
+        }
+
+        if (current.Length != 0)
+        {
+            arguments.Add(current.ToString().Trim());
+        }
+
+        return (text[..open].Trim(), arguments);
+    }
+
+    private static bool IsShaderBound(string kind) => kind is not ("GraphTextureAccess" or "GraphBufferAccess" or "RenderTargets");
 
     private static void CheckModuleNames(List<StructDecl> owned, string module)
     {
@@ -783,6 +1144,20 @@ internal static class ShaderParameterGenerator
         {
             string array = member.ArrayCount == 0 ? "" : $"[{member.ArrayCount.ToString(CultureInfo.InvariantCulture)}]";
             text.Append(CultureInfo.InvariantCulture, $"    {HlslType(member)} {member.Name}{array};\n");
+        }
+    }
+
+    // 자원 멤버의 HLSL 전역 선언이다(16.2절 SSD61).
+    private static void AppendResources(StringBuilder text, StructDecl declaration)
+    {
+        foreach (ResourceEntry resource in declaration.Resources.Where(entry => entry.Declaration is not null))
+        {
+            text.Append(CultureInfo.InvariantCulture, $"{resource.Declaration} {resource.Name};\n");
+            if (resource.Sampler != "None")
+            {
+                string state = resource.Sampler == "Comparison" ? "SamplerComparisonState" : "SamplerState";
+                text.Append(CultureInfo.InvariantCulture, $"{state} {resource.SamplerName};\n");
+            }
         }
     }
 
@@ -812,11 +1187,21 @@ internal static class ShaderParameterGenerator
             AppendStruct(text, declaration);
             text.Append(CultureInfo.InvariantCulture, $"ROCKS_ROOT_CONSTANTS({declaration.Simple}, {declaration.Name});\n");
         }
-        else
+        else if (declaration.Members.Count != 0)
         {
             text.Append(CultureInfo.InvariantCulture, $"cbuffer {declaration.Name} {{\n");
             AppendMembers(text, declaration);
             text.Append("};\n");
+        }
+
+        if (declaration.Resources.Any(entry => entry.Declaration is not null))
+        {
+            if (declaration.Members.Count != 0)
+            {
+                text.Append('\n');
+            }
+
+            AppendResources(text, declaration);
         }
 
         return text.ToString();
@@ -837,8 +1222,10 @@ internal static class ShaderParameterGenerator
                 $"// Generated by Rocks.MetaCompiler (shader parameters, Docs/Design/ShaderSystem section 16.2) from {input.Include}. Do not edit.\n");
             text.Append("#pragma once\n\n");
             text.Append(CultureInfo.InvariantCulture, $"#include <{input.Include}>\n");
-            foreach (string other in header.SelectMany(declaration => declaration.Members).Where(member => member.Struct is not null &&
-                         member.Struct.Input != input).Select(member => member.Struct!.Input!.Include).Distinct().Order(StringComparer.Ordinal))
+            IEnumerable<StructDecl> linked = header.SelectMany(declaration => declaration.Members.Where(member => member.Struct is not null)
+                .Select(member => member.Struct!).Concat(declaration.Includes.Select(entry => entry.Struct)));
+            foreach (string other in linked.Where(nested => nested.Input != input).Select(nested => nested.Input!.Include).Distinct()
+                         .Order(StringComparer.Ordinal))
             {
                 text.Append(CultureInfo.InvariantCulture, $"#include <{other[..^2]}{GeneratedHeaderSuffix}>\n");
             }
@@ -849,28 +1236,61 @@ internal static class ShaderParameterGenerator
                 string type = CanonicalTypeProbe.Spell(declaration.Qualified);
                 string hlsl = HlslOf(declaration);
                 text.Append(CultureInfo.InvariantCulture, $"template <>\nstruct ShaderParameterStruct<{type}> {{\n");
-                text.Append("    static constexpr ShaderParameterMember Members[] = {\n");
-                foreach (Member member in declaration.Members)
+                if (declaration.Members.Count == 0)
                 {
-                    string kind = member.Struct is not null ? "Struct" : member.Scalar!.Enum;
-                    string nested = member.Struct is not null
-                        ? $", &ShaderParameterStruct<{CanonicalTypeProbe.Spell(member.Struct.Qualified)}>::Layout" : "";
-                    text.Append(CultureInfo.InvariantCulture,
-                        $"        {{\"{member.Name}\", ShaderParameterType::{kind}, {member.Offset}, {member.ArrayCount}{nested}}},\n");
+                    text.Append("    static constexpr Span<const ShaderParameterMember> Members{};\n");
+                }
+                else
+                {
+                    text.Append("    static constexpr ShaderParameterMember Members[] = {\n");
+                    foreach (Member member in declaration.Members)
+                    {
+                        string kind = member.Struct is not null ? "Struct" : member.Scalar!.Enum;
+                        string nested = member.Struct is not null
+                            ? $", &ShaderParameterStruct<{CanonicalTypeProbe.Spell(member.Struct.Qualified)}>::Layout" : "";
+                        text.Append(CultureInfo.InvariantCulture,
+                            $"        {{\"{member.Name}\", ShaderParameterType::{kind}, {member.Offset}, {member.ArrayCount}{nested}}},\n");
+                    }
+
+                    text.Append("    };\n");
                 }
 
-                text.Append("    };\n");
+                if (declaration.Resources.Count == 0)
+                {
+                    text.Append("    static constexpr Span<const ShaderParameterResource> Resources{};\n");
+                }
+                else
+                {
+                    text.Append("    static constexpr ShaderParameterResource Resources[] = {\n");
+                    foreach (ResourceEntry resource in declaration.Resources)
+                    {
+                        text.Append(CultureInfo.InvariantCulture,
+                            $"        {{\"{resource.Name}\", \"{resource.SamplerName}\", ShaderParameterResourceKind::{resource.Kind}, {resource.Offset}, " +
+                            $"ShaderResourceShape::{resource.Shape}, ShaderComponentType::{resource.Component}, {resource.Stride}, ShaderParameterSampler::{resource.Sampler}}},\n");
+                    }
+
+                    text.Append("    };\n");
+                }
+
                 text.Append(CultureInfo.InvariantCulture, $"    static constexpr StringView Source = StringView(\n        {CppString(hlsl)});\n");
                 text.Append(CultureInfo.InvariantCulture,
                     $"    static constexpr ShaderParameterLayout Layout{{\"{declaration.Name}\", {(declaration.RootConstants ? "true" : "false")}, {declaration.Size}, Members,\n" +
-                    $"                                                \"{declaration.Qualified}\", \"{VirtualPath(options, declaration)}\", Source}};\n");
+                    $"                                                Resources, \"{declaration.Qualified}\", \"{VirtualPath(options, declaration)}\", Source}};\n");
                 text.Append("};\n\n");
                 text.Append(CultureInfo.InvariantCulture,
-                    $"static_assert(sizeof({type}) == {declaration.Size} && alignof({type}) <= 16, \"{declaration.Qualified} layout changed; rebuild to regenerate\");\n");
+                    $"static_assert(sizeof({type}) == {declaration.CppSize} && alignof({type}) <= 16, \"{declaration.Qualified} layout changed; rebuild to regenerate\");\n");
                 foreach (Member member in declaration.Members.Where(member => !member.Padding))
                 {
                     text.Append(CultureInfo.InvariantCulture,
                         $"static_assert(ROCKS_OFFSET_OF({type}, {member.Name}) == {member.Offset}, \"{declaration.Qualified}::{member.Name} offset changed\");\n");
+                }
+
+                IEnumerable<(string Name, int Offset)> placed = declaration.Resources.Where(entry => entry.Member is not null)
+                    .Select(entry => (entry.Member!, entry.Offset)).Concat(declaration.Includes.Select(entry => (entry.Name, entry.Offset)));
+                foreach ((string name, int offset) in placed.OrderBy(entry => entry.Offset))
+                {
+                    text.Append(CultureInfo.InvariantCulture,
+                        $"static_assert(ROCKS_OFFSET_OF({type}, {name}) == {offset}, \"{declaration.Qualified}::{name} offset changed\");\n");
                 }
 
                 text.Append('\n');

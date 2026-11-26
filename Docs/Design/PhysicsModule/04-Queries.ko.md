@@ -91,7 +91,7 @@ UE와 같은 규칙이다(`CH/Private/Chaos/CollisionFilterData.cpp:434–513`, 
 | `time` | 0–1 비율(시작 → 끝). sweep 이동은 pullback 때문에 조금 작다(5.1절) |
 | `distance` | 시작점에서 `location`까지 거리(cm). 시작 겹침이면 0 |
 | `location` | 형상 중심이 닿은 위치 = 시작 + time·(끝 − 시작) |
-| `impactPoint` | 실제 접촉점. 시작 겹침이면 `location` |
+| `impactPoint` | 실제 접촉점. 시작 겹침이면 shape trace는 MTD 접촉점(UE `ConvertOverlappedShapeToImpactHit`), line trace는 시작점 |
 | `normal` | 쓸고 간 형상 쪽 법선(line은 `impactNormal`과 같다) |
 | `impactNormal` | 맞은 표면 법선(바깥 방향, 어댑터 경계 5절) |
 | `traceStart`·`traceEnd` | 시작·시도한 끝 |

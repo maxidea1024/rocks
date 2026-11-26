@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Collision/CollisionShape.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
 #include <Core/Result.h>
@@ -94,6 +95,16 @@ public:
     virtual Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                                    const QueryParams& params, TraceMode mode, HitResult* first,
                                    Array<HitResult>* all) const noexcept = 0;
+
+    // rotation으로 놓은 shape를 start → end로 쓸고 가는 trace다(4.4·4.5절, 7.1.8절 — 시작 겹침 규칙
+    // 포함). 값은 유한하고 shape는 Line이 아니며 거의 0이 아니어야 한다(World가 line trace로
+    // 바꾼다). rotation은 정규화해 쓴다. 길이 0이면 시작 겹침만 찾는다. 결과 포인터·반환 값은
+    // TraceLine과 같다(All의 반환 값은 보고된 막는 hit가 있는지). 오류: TraceLine의 오류, 0·비유한
+    // rotation(InvalidArgument), Cylinder(CY2 전 — Unsupported).
+    virtual Result<bool> TraceShape(const Vec3d& start, const Vec3d& end, const Quatd& rotation,
+                                    const CollisionShape& shape, const QueryFilter& filter,
+                                    const QueryParams& params, TraceMode mode, HitResult* first,
+                                    Array<HitResult>* all) const noexcept = 0;
 
 protected:
     PhysicsScene() noexcept = default;

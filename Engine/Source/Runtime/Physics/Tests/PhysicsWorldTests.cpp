@@ -164,6 +164,12 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
                                TraceMode, HitResult*, Array<HitResult>*) const noexcept override {
             return Result<bool>::Success(false);
         }
+
+        Result<bool> TraceShape(const Vec3d&, const Vec3d&, const Quatd&, const CollisionShape&,
+                                const QueryFilter&, const QueryParams&, TraceMode, HitResult*,
+                                Array<HitResult>*) const noexcept override {
+            return Result<bool>::Success(false);
+        }
     };
 
     NullScene first;
