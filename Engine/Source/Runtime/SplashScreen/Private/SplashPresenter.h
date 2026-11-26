@@ -3,6 +3,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
 #include <SplashScreen/SplashImage.h>
+#include <SplashScreen/SplashLayout.h>
 #include <SplashScreen/SplashModel.h>
 
 // 스플래시의 OS 창 부분이다(Docs/Design/SplashScreen 9.2절). 플랫폼마다 구현(Private/<Platform>/)이
@@ -17,6 +18,9 @@ struct SplashPresenterSetup {
     StringView doublePath;
     // 창 제목(작업 표시줄·Alt+Tab에 보이는 이름 — Studio)이다.
     StringView windowTitle;
+    // 배치 덮어쓰기다(검사를 통과한 값). Create 동안 유효하다.
+    Span<const SplashTextPlacement> placements;
+    const SplashBarPlacement* bar = nullptr;
 };
 
 // 실패한 OS 호출 이름의 최대 byte 수(NUL 포함)다.
