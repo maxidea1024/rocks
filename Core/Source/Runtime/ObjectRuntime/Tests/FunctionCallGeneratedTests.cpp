@@ -79,11 +79,11 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
         REQUIRE(type);
         const Span<const FunctionSchema> functions = type.Value().Schema().functions;
 #if ROCKS_WITH_EDITOR
-        REQUIRE(functions.Size() == 13);
+        REQUIRE(functions.Size() == 14);
         CHECK(View(functions[11].name) == StringView("Reset"));
         CHECK(functions[11].flags == Flags(FunctionFlags::EditorOnly));
 #else
-        REQUIRE(functions.Size() == 12);
+        REQUIRE(functions.Size() == 13);
 #endif
         CHECK(View(functions[0].name) == StringView("Add"));
         CHECK(functions[1].flags == (Flags(FunctionFlags::Const) | Flags(FunctionFlags::Pure)));

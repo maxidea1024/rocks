@@ -4220,6 +4220,13 @@
     },
     {
       "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Relay",
+      "id": "4f262b53802a4584b64e79bbda232b4f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
       "name": "rocks::reflection_fixture::CallTarget::Remember",
       "id": "dc2759aeea4a4f26bdda7bdd57e2e392",
       "aliases": [],
