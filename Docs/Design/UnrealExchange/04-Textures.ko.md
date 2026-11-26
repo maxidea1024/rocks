@@ -62,3 +62,81 @@ UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 �
 7. **자기 시험.** `RocksExport.TextureExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 텍스처 8개(BGRA8 PNG, G8 JPEG, RGBA16F, BGRE8 UE Delta 큐브, BGRA8 큐브·볼륨·2D 배열, R32F 볼륨)를 내보내고, blob마다 `FTextureSource::GetMipData(Out, Block, Layer, Mip)`(LockMip을 거치는 다른 경로)로 꺼낸 원본과 SHA-256·`bytes`·blob 파일 내용·`count`·`layout`을 대조한다. `settings`에 `Source`가 없고 `SRGB`·`CompressionSettings`가 있는지, `format`·`lossyOrigin`·`longLat`·블록·층 수도 본다. 결정성은 `ExportDeterminism`(정육면체 닫힘에 텍스처 2개가 든다)이 본다. 수동 검증(2026-11-22): 엔진 텍스처 15개와 시험 프로젝트에 임포트한 16비트 PNG 2개(G16·RGBA16 — 엔진 콘텐츠에 없다)를 닫힘과 함께 내보낸 묶음(에셋 20개, 원본 형식 G8·BGRA8·BGRE8·G16·RGBA16·RGBA16F·RGBA32F·R32F, 보관 형식 None·PNG·JPEG·UEDELTA, 2D·큐브(위도경도 포함)·2D 배열·볼륨)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, Rocks 리더(`UnrealExchange_ExternalBundle`)가 blob 전부의 크기·SHA-256을 확인해 20개 모두 Ready였다. R16F 원본과 TextureCubeArray는 엔진 콘텐츠에 없어 확인하지 못했다.
 
 8. **mip 크기 불일치(개정 15).** 블록·mip·층마다 `GetMipDataWithInfo` 결과가 있고 크기가 그 mip 정보(`GetImageSizeBytes`)와 같은지 blob을 쓰기 전에 모두 본다. 하나라도 어긋나면 그 에셋의 `data.source`는 `null`이고 error `SourceReadFailed`다(전에는 내보내기 전체가 실패했다). 묶음의 다른 에셋은 영향을 받지 않는다.
+
+### 4.6 Rocks 임포트(UX2b)
+
+설계일 2026-11-26. 공통 틀은 10.6절이다. UX2b1은 10.6절 틀과 4.6절 2·3번 순수 변환(원본·설정)과 그 시험, UX2b2는 A2f 임포터·종류별 임포터·제품 연결과 그 시험이다. 모두 권장안으로 정했다.
+
+1. **임포터.** 교환 클래스마다 A2f 임포터 하나다(주 출력 타입이 고정이라 — A2f 등록 규칙). 확장자 기본은 없고(이름으로만 고른다), 고정 역할 `asset`, 가변 역할 접두 `blob:`, 옵션 `UnrealExchangeImportOptions`, 버전 1이다.
+
+   | 교환 클래스 | 이름 | 출력 | id |
+   |---|---|---|---|
+   | Texture2D | `unreal_texture_2d` | `Texture2D` | `337d13db-1df4-4802-ba47-55da35a5b39d` |
+   | TextureCube | `unreal_texture_cube` | `TextureCube` | `93f7e0e1-1176-4305-a63e-6497472c9260` |
+   | Texture2DArray | `unreal_texture_2d_array` | `Texture2DArray` | `12ee1fb9-5e52-41a5-9405-dfe8d9406ca1` |
+   | TextureCubeArray | `unreal_texture_cube_array` | `TextureCubeArray` | `a49f013e-97bc-4fe4-b46d-fb6b0f126a37` |
+   | VolumeTexture | `unreal_volume_texture` | `VolumeTexture` | `babb45b2-7cbe-49c3-ac8a-9bad95195d23` |
+
+   종류별 임포터 하나(`ExchangeTextureKind`)가 다섯 클래스에 등록되고 클래스로 임포터 이름을 고른다.
+2. **원본 변환(`ConvertExchangeTextureSource`).** `data.source`(4.5절 1번)에서 Rocks `TextureSource` 값과 픽셀 byte를 만든다. 검사 순서와 실패(코드 / 오류):
+   1. `source`가 null(플러그인 오류 진단이 있어 문서 읽기가 이미 거부한다)·형식 위반 → `CorruptBundle` / `InvalidArgument`.
+   2. `numLayers` ≠ 1, `numBlocks` ≠ 1, `longLat` 참 → `UnsupportedSourceLayout` / `Unsupported`(4.1절 — 다층·UDIM·위도경도 큐브).
+   3. 층 0의 `format`이 `source.format`과 같고 4.2절 9종 가운데 하나다 → 아니면 `CorruptBundle`.
+   4. 블록 0의 `blockX`·`blockY`가 0이고 `mips`가 `numMips`개다. 첫 mip만 쓴다(Rocks 원본 mip은 1 — AssetSystem 12.4.4절 계약. 원본 mip을 쓰는 `LeaveExistingMips`는 계약 설정이라 설정 판정이 알린다). 첫 mip의 크기가 블록 크기와 같다 → 아니면 `CorruptBundle`.
+   5. slice 수가 클래스와 맞다: Texture2D 1, TextureCube 6, Texture2DArray 1 이상, TextureCubeArray 6의 배수(6 이상), VolumeTexture 1 이상 → 아니면 `InvalidSource` / `InvalidArgument`. 크기 상한은 파일 임포트와 같다(`image::ImageDecodeLimits` 기본 — 넘으면 `InvalidSource` / `CapacityExceeded`).
+   6. 첫 mip `pixels[0]` blob의 배치가 형식과 맞다(4.5절 2번 — `count` = sizeX × sizeY × numSlices) → 아니면 `CorruptBundle`.
+   7. 형식 대응(4.2절 표): G8·RGBA16·RGBA16F·G16·RGBA32F·R16F·R32F는 byte 그대로, BGRA8 → RGBA8(texel마다 B·R 교환), BGRE8 → RGBA32F(UE `FColor::FromRGBE` — 지수 0이면 (0, 0, 0, 1), 아니면 성분마다 (값 + 0.5) · 2^(e − 136), 알파 1, float로 계산).
+3. **설정 표(10.6절 8번 — `ExchangeTextureSettingRows`).** 행 번호는 표 순서(0부터)이고 `UnsupportedSetting` detail이다. UE 기본값은 UE 5.8 생성자 값이다(Texture.cpp 148행 — Rocks 기본값과 같다, AssetSystem 12.8절).
+
+   | 행 | UE 키 | 처리 | 비고 |
+   |---|---|---|---|
+   | 0–7 | `AdjustBrightness`·`AdjustBrightnessCurve`·`AdjustVibrance`·`AdjustSaturation`·`AdjustRGBCurve`·`AdjustHue`·`AdjustMinAlpha`·`AdjustMaxAlpha` | Same | 계약 설정 — 판정은 AssetSystem `CheckTextureSettings` |
+   | 8–10 | `CompressionNoAlpha`·`CompressionForceAlpha`·`CompressionNone` | Same | |
+   | 11 | `LossyCompressionAmount` | Enum | |
+   | 12 | `OodleTextureSdkVersion` | Same | Name |
+   | 13 | `MaxTextureSize` | Same | |
+   | 14 | `CompressionQuality` | Enum | |
+   | 15 | `CompressionCacheId` | Guid | |
+   | 16 | `bDoScaleMipsForAlphaCoverage` | Same | |
+   | 17 | `AlphaCoverageThresholds` | Same | `{X,Y,Z,W}` |
+   | 18–20 | `bUseNewMipFilter`·`bPreserveBorder`·`bFlipGreenChannel` | Same | |
+   | 21 | `PowerOfTwoMode` | Enum | |
+   | 22 | `PaddingColor` | Same | `{B,G,R,A}` |
+   | 23–25 | `bPadWithBorderColor`·`ResizeDuringBuildX`·`ResizeDuringBuildY` | Same | |
+   | 26–28 | `bChromaKeyTexture`·`ChromaKeyThreshold`·`ChromaKeyColor` | Same | |
+   | 29 | `MipGenSettings` | Enum | |
+   | 30 | `CompositeTexture` | Reference | |
+   | 31 | `CompositeTextureMode` | Enum | |
+   | 32 | `CompositePower` | Same | |
+   | 33 | `LayerFormatSettings` | Struct 배열(멤버 `CompressionSettings` Enum, 나머지 Same) | 계약 |
+   | 34 | `LODBias` | Same | |
+   | 35 | `CompressionSettings` | Enum | |
+   | 36 | `Filter` | Enum | |
+   | 37 | `MipLoadOptions` | Enum | |
+   | 38 | `VirtualTextureStreamingPriority` | Enum | |
+   | 39 | `VirtualTexturePrefetchMips` | Same | |
+   | 40 | `CookPlatformTilingSettings` | Enum | |
+   | 41 | `bOodlePreserveExtremes` | Same | |
+   | 42 | `LODGroup` | Enum | |
+   | 43 | `Downscale` | PerPlatformFloat | |
+   | 44 | `DownscaleOptions` | Enum | |
+   | 45 | `Availability` | Enum | |
+   | 46–48 | `SRGB`·`bNormalizeNormals`·`bUseLegacyGamma` | Same | |
+   | 49 | `SourceColorSettings` | Struct(`EncodingOverride`·`ColorSpace`·`ChromaticAdaptationMethod` Enum, 좌표 Same) | |
+   | 50–53 | `bNoTiling`·`VirtualTextureStreaming`·`bUseVirtualTextureStreamingPriority`·`CompressionYCoCg` | Same | |
+   | 54–56 | `NumCinematicMipLevels`·`NeverStream`·`bGlobalForceMipLevelsToBeResident` | Same | UStreamableRenderAsset |
+   | 57–59 | `AddressX`·`AddressY`·`AddressZ` | Enum | 차원 클래스(없는 클래스에서는 `ImportJson`이 모르는 키로 거부하므로 그 클래스 출력이 아니면 버린다 — 행에 클래스 집합) |
+   | 60 | `AddressMode` | Enum | VolumeTexture |
+   | 61 | `SourceTextures` | ReferenceArray | Texture2DArray·TextureCubeArray |
+   | 62 | `Source2DTexture` | Reference | VolumeTexture |
+   | 63–64 | `Source2DTileSizeX`·`Source2DTileSizeY` | Same | VolumeTexture |
+   | 65 | `AssetUserData` | Unsupported(기본 `[]`) | 사용자 데이터 객체 — 후속 |
+   | 66 | `NoRefStreamingLODBias` | Unsupported(기본 `{"Default": -1, "PerQuality": []}`) | UE 품질 단계별 스트리밍 편향 — 후속 |
+   | 67 | `CPUCopyTexture` | Unsupported(기본 null) | UE 5.8 CPU 사본 텍스처 — Rocks는 `Availability`로 한다 |
+   | 68–72 | `LightingGuid`·`AssetImportData`·`ImportedSize`·`FirstResourceMemMip`·`bHasBeenPaintedInEditor` | Ignore | 설정 아님(조명 식별·임포트 기록·표시용·런타임·에디터 상태) |
+
+   Rocks 확장 `BorderColor`(UE에 없다)는 기본값으로 둔다. 표는 UE 5.8 엔진 콘텐츠를 내보낸 묶음(4.5절 7번 수동 검증의 20개)이 내는 키 전부다.
+4. **감마 대조(4.2절).** 층 0 `gammaSpace`의 기대 설정: `Linear` → `SRGB` 거짓, `sRGB` → `SRGB` 참·`bUseLegacyGamma` 거짓, `Pow22` → `SRGB` 참·`bUseLegacyGamma` 참. 번역한 설정과 다르면 `GammaMismatch` 경고(detail = 층 `gammaSpace` 번호 0·1·2)를 내고 설정을 따른다(UE `GetGammaSpace`도 설정에서 계산한다 — 다르게 나오는 것은 16비트·float 원본에서 `SRGB`가 켜진 경우처럼 UE가 감마를 무시하는 때다).
+5. **쓰기.** 출력(빈 key, 임포터 클래스)을 만들고 픽셀을 `AddBulk`, `source`(format·크기·slice·`numMips` 1·`numLayers` 1·bulk)를 쓴 뒤 설정을 `ImportJson`·게시한다. 파일 임포트의 새 임포트 기본값(UE `ApplyDefaultsForNewlyImportedTextures`)은 적용하지 않는다(UE 설정을 그대로 가져온다). 설정 정규화 hook(AssetSystem 12.12절)은 서비스가 다른 임포트와 같이 부른다. 손실 원본(4.3절)은 받는다(경고 없음).
+6. **시험(UX2b1).** 원본 변환: 9종 형식 각각(BGRA 교환·BGRE 해제의 UE 식 대조, 지수 0), 층·블록·위도경도 거부, slice 수 규칙, 배치 불일치. 설정 번역: 행 처리 종류마다 양성·음성(enum 접두, Guid 순서, PerPlatform 비지 않음, Unsupported 기본값·비기본값, 모르는 키, 클래스 밖 주소 키 버림, 참조 null·배열 null 원소), 엔진 콘텐츠 묶음 설정 20개(`Tex1` — fixture로 복사)가 경고 없이(기본값) 번역되고 `ImportJson`을 통과. 공통: `ReadExchangeAssetDocument`가 묶음 리더와 같은 진단(기존 시험 그대로 통과 + byte 입력 시험), `VerifyExchangeBlob`, `ExternalTarget`.
+7. **시험(UX2b2).** 서비스 위 임포트: 클래스 다섯의 새 임포트(원본·설정·태그·참조), 재임포트(id 유지·blob 집합 바뀜·FormerPaths 누적), 일반 `asset-reimport`가 같은 결과, 검사 순서 6번의 실패 하나하나, 감마 경고, 묶음 밖 기존 에셋 참조(`ExternalTarget`). 명령: `asset-import-unreal`이 fixture 묶음의 텍스처를 만들고 다시 실행하면 재임포트. 제품 실행 파일 C# 확인(`Rocks.Commandlet.Tests`).

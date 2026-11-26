@@ -8,7 +8,8 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
 | UX1c | Rocks | 임포트 계획과 명령(10.5절): `--only` 닫힘, 기존 에셋 조회 `ExchangeIndexLookup`(태그 `UnrealExchange.ObjectPath`·`FormerPaths`), 재임포트 대상 경로, 종류별 임포터 표와 실행 순서·실패 전파, Commandlet 명령 `asset-import-unreal`(`--dry-run` 포함) 등록. 실제 에셋 쓰기(종류별 임포터)는 UX2b 이후이고 그 전제 프레임워크 보강은 UXR8–UXR11 | UX1b, A2f |
 | UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다. **구현**(2026-11-22, 4.5절) | UX1b |
-| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 JPEG·UEJPEG 원본 허용, 4.4절 설정 대조) | UX2a, UX1c, A5, UXR8·UXR9 |
+| UX2b1 | Rocks | 종류별 임포트 공통 틀(10.6절 — 에셋 문서 byte 읽기·blob 검사·계획의 묶음 밖 대상 id·옵션 struct·설정 번역 틀)과 텍스처 순수 변환(4.6절 2·3번 — 원본 형식 대응, 설정 표), 새 진단 `UnsupportedSourceLayout`·`GammaMismatch` | UX2a, UX1c, A5, UXR8·UXR9 |
+| UX2b2 | Rocks | 텍스처 임포트(4.6절 — A2f 임포터 다섯, 종류별 임포터, 감마 대조, 제품 Commandlet 연결, 서비스·명령·C# 시험) | UX2b1 |
 | UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
 | UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3, UXR8–UXR11(UXR11은 complex collision 메시 순환) |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |

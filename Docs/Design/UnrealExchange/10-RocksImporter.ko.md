@@ -115,3 +115,38 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
    플러그인 Private coverage는 줄 99.4%·분기 99.1%·함수 100%다. 계획·실행·리더 파일은 모두 100%다. 닿지 않는 것은 사유를 남긴다.
    - `ExchangeCommand.cpp`의 할당 실패 경로(인자 목록·출력 줄 조립·단계 실패·임포터 등록·실행·캐시 쓰기의 OutOfMemory)는 닿지 않는다. 명령 하나가 세션 열기(색인 만들기)에서 수천 번 할당해 n번째 실패 반복이 너무 길다. 다른 에셋 명령 시험도 명령 단위 할당 실패를 돌지 않는다. 그 아래 함수(계획·조회·실행)의 할당 실패는 시험이 닿는다.
    - `ExchangeIndexLookup::PathTaken`의 같은 경로 키 둘(`AlreadyExists`)은 대소문자를 무시하는 파일 시스템(시험 플랫폼 Windows)에서 만들 수 없어 닿지 않는다.
+
+### 10.6 종류별 임포트 공통(UX2b1)
+
+설계일 2026-11-26(사용자 지시 "순서대로" — MeshAnimationAssets MA7 다음). 첫 실제 종류별 임포트(텍스처, 4.6절)가 쓰는 틀이고 UX3b 이후도 같은 틀을 쓴다. 10.5절 7번 "요청 형태는 첫 실제 임포터가 다시 본다"를 여기서 닫는다. 모두 권장안으로 정했다.
+
+1. **두 층.** 종류별 임포터(`ExchangeKindImporter`)는 에셋 서비스 임포트를 부르는 얇은 층이다. 에셋 내용은 A2f 임포터(`AssetImporter`, 이름 `unreal_<종류>`)가 원본 byte(에셋 JSON·blob)에서 만든다. 그래서 ImportRecord가 9.2절대로 원본(역할 `asset`·`blob:<sha256>`)과 옵션을 담고, 묶음 파일이 그 자리에 있으면 일반 `asset-reimport`도 같은 결과를 낸다(UE `FReimportHandler`가 원본 파일을 다시 읽는 것과 같다). 버린 대안: 종류별 임포터가 출력 객체를 직접 채우기 — ImportRecord·재임포트 길이 없고 A2f 저장·되돌리기 규칙을 다시 만들어야 한다.
+2. **원본 입력.** 역할 `asset` = `<묶음>/<asset.file>`, 역할 `blob:<64자 hex>` = `<묶음>/blobs/<앞 2자>/<hex>.bin`(3.1절)이고 blob은 `asset.blobs` 순이다. 원본 루트는 파일 임포트와 같다: 묶음 디렉터리가 프로젝트 원본 루트(AssetSystem `AssetSources.json`) 아래면 상대 경로로 기록하고, 아니면 절대 경로로 기록하고 서비스 경고 `AbsoluteSourcePath`를 낸다. 새 에셋은 `AssetService::Import`(임포터 이름), 기존 에셋은 `AssetService::Reimport(replaceSources = 참)`(원본 목록 전체 교체 — UE에서 고쳐 blob 집합이 바뀌어도 된다)다. 서비스 실패 진단은 묶음 진단(asset = 이 에셋)으로 옮기고(코드·오류 그대로, 세부 규칙 `ServiceFailure`, text = 서비스 진단의 path), 서비스 경고는 `request.warnings`에 모인다(10.5절 9번 출력).
+3. **임포트 옵션 struct `UnrealExchangeImportOptions`**(UnrealExchange 모듈의 `ROCKS_STRUCT` — A2f 임포터 `optionsType`):
+   - `objectPath`(String) — 이 에셋의 objectPath.
+   - `formerPaths`(Array<String>) — 묶음 `redirects` 가운데 `to`가 이 objectPath인 `from`(byte 순).
+   - `references`(OrderedMap<String, AssetId>) — 참조로 걸 대상: 이 에셋 의존마다 묶음 안이면 `request.resolved[target]`, 묶음 밖이면 계획이 찾은 기존 에셋(4번). 못 찾은 대상(null id)은 넣지 않는다. 키는 의존의 objectPath(redirect를 풀기 전 원문 — 설정 덤프의 참조 값과 같다), 의존 순(objectPath byte 순)이다.
+   옵션은 서비스 대입 텍스트로 넘긴다(`objectPath=<값>`·`formerPaths=<목록>`·`references=<k:v 목록>` — ReflectionText 목록 escape 표로 `,`·`;`·키의 `:`를 escape한다). ImportRecord options에 남아 일반 재임포트가 그대로 쓴다. 필드 이름은 출력 타입의 노출 속성과 겹치지 않아야 한다(A2f 등록 규칙 — 텍스처 클래스에는 없다). 종류별 옵션(`--mesh-normals` 등)은 그 단계가 필드를 더한다.
+4. **계획의 묶음 밖 대상 id.** 계획이 찾은 묶음 밖 Hard 대상의 기존 에셋(`Found`)을 의존마다 남긴다: `ExchangeImportPlan::ExternalTarget(asset, dependency)`(dependency는 `asset.dependencies` 번호 — 묶음 안 대상·못 찾음·모호함·Soft는 null id). 계획은 이미 그 조회를 하므로(10.5절 5번) 실행이 다시 찾지 않는다(dry run과 같은 결과). Soft 참조 연결은 후속이다(텍스처 설정에는 없다).
+5. **에셋 문서 다시 읽기.** A2f 임포터는 원본 byte를 믿지 않는다(묶음 읽기와 임포트 사이, 또는 일반 재임포트 때 파일이 바뀌었을 수 있다).
+   - `ReadExchangeAssetDocument(bytes, allocator, out, diagnostics)`: 묶음 리더의 에셋 JSON 검사(10.4절 5–9·11번 — 키·`objectPath`·`class`·`ueClass`·의존·플러그인 진단·`settings`·`data` 객체·blob 참조 수집·플러그인 오류 진단)를 byte 입력으로 한다. bundle.json 대조(`ManifestMismatch`)만 빠지고, `className`·`exchangeClass`·`objectPath`는 문서에서 채운다. 의존의 `target`은 `ExchangeNoIndex`다. 묶음 리더도 파일을 읽은 뒤 이 검사를 부른다(동작 불변 — 같은 진단).
+   - `VerifyExchangeBlob(ref, bytes)`: 크기·SHA-256·가변 배치 검사(`LoadExchangeBlob`이 파일을 읽은 뒤 하던 것 — 그 함수도 이것을 부른다).
+6. **A2f 임포터 공통 검사 순서**(실패는 `context.Fail` — 코드 / 오류 / detail):
+   1. 원본 `asset`을 문서로 읽는다: 실패 `CorruptBundle` / 그 오류(진단의 세부 규칙은 버린다 — 한계: 서비스 진단은 코드·detail만 담는다).
+   2. 문서 교환 클래스가 임포터의 클래스와 같다: 아니면 `InvalidSource` / `InvalidArgument`.
+   3. 옵션 `objectPath`가 문서 objectPath와 같다: 아니면 `InvalidImportOption` / `InvalidArgument`.
+   4. 문서 blob 참조마다 역할 `blob:<hex>` 원본이 있다: 없으면 `MissingSource` / `NotFound`(detail = blob 번호). 참조하지 않는 blob 역할 원본이 있으면 `InvalidImportOption` / `InvalidArgument`(detail = 원본 번호).
+   5. blob마다 `VerifyExchangeBlob`: 실패 `CorruptBundle` / `InvalidArgument`(detail = blob 번호).
+7. **태그(UXR8 — A2f3a `AddTag`).** `UnrealExchange.ObjectPath` = 옵션 objectPath. `UnrealExchange.FormerPaths` = 옵션 formerPaths ∪ 옛 기록의 FormerPaths ∪ 옛 기록의 ObjectPath(지금과 다르면) — 값마다 한 쌍, 같은 값은 한 번(문맥이 byte 순으로 쌓는다). 그래서 UE에서 두 번 이름을 바꾸고 redirector를 하나 지워도 앞 경로로 다시 찾는다(9.2절). 태그 수가 `MaxImportTags`를 넘으면 `AddTag` 오류로 실패한다(옛 경로가 255개 쌓이는 경우 — 한계).
+8. **설정 번역.** UE 설정 덤프(`settings`)를 Rocks 리플렉션 JSON(ReflectionText `ImportJson` 표기)으로 바꿔 출력 객체에 `ImportJson`하고 게시한다. 클래스마다 행 표(UE 키 → 처리)를 두고(텍스처는 4.6절 3번), 키 짝맞추기는 `ImportJson`의 대소문자 무시를 그대로 쓴다. 처리 종류:
+   - `Same`: 키의 bool 접두 `b`(뒤가 대문자)만 떼고 값 그대로(`bFlipGreenChannel` → `FlipGreenChannel` → 필드 `flipGreenChannel`).
+   - `Enum`: UE 값 이름의 접두(첫 `_`까지, 접두가 대문자·숫자만일 때 — `TC_HDR_Compressed` → `HDR_Compressed`, `TEXTUREGROUP_World` → `World`)를 떼고, 접두가 없으면 그대로(`Default`·`GPU`). enum에 없는 값이 정수로 온 것(11.7절 13번)은 그대로 넘겨 `ImportJson`이 거부한다.
+   - `Guid`: `{A,B,C,D}`(int32 넷 — UE FGuid)를 UE `DigitsWithHyphens` 순서(`A-B상위-B하위-C상위-C하위D`, 소문자)의 36자 문자열로 바꾼다.
+   - `PerPlatformFloat`: `Default` → `defaultValue`. `PerPlatform`이 비어 있지 않으면 버리고 `UnsupportedSetting` 경고(UE 플랫폼 이름과 TargetProfile 이름의 대응은 후속).
+   - `Reference`·`ReferenceArray`: `{ "objectPath" }`를 resolver 텍스트(objectPath 그대로)로 바꾼다. resolver는 옵션 `references`에서 id를 찾아 `context.OpenAsset(id)`로 Hard 참조를 건다(대상 타입은 codec이 필드 타입으로 확인). `references`에 없는 objectPath(묶음에도 기존 에셋에도 없는 대상 — 계획이 `MissingUnrealDependency`를 이미 냈다)는 null로 둔다. 배열은 null 원소를 뺀다.
+   - `Struct`: 멤버 행 표로 재귀한다(값 struct — `SourceColorSettings`의 enum 멤버 접두 떼기).
+   - `Ignore`: 설정이 아닌 UE 멤버(`LightingGuid`·`AssetImportData` 등 — 버림).
+   - `Unsupported`: Rocks 필드가 없는 UE 설정이다. 값이 UE 기본값과 다르면 `UnsupportedSetting` 경고를 내고 버린다.
+   표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `InvalidArgument` 실패다(번역 표의 오류 — 시험이 엔진 콘텐츠 묶음으로 막는다).
+9. **모듈 의존.** UnrealExchange가 ReflectionText(`ImportJson`), Texture(출력 타입)에 공개 의존한다. 제품 Commandlet은 A2f 임포터 등록(`AssetImporterSetup`)과 종류별 임포터 등록(`ExchangeKindSetup`)을 `ProductAssetSetup`(MeshAnimationAssets 13.1절 1)에 더한다.
+10. **새 진단.** 코드 `UnsupportedSourceLayout`(오류)·`GammaMismatch`(경고)를 AssetRuntime 진단 표에 더한다(AssetSystem 4.6절 표에 이미 있다 — 10.3절). 세부 규칙 `ServiceFailure`(2번)를 더한다.
