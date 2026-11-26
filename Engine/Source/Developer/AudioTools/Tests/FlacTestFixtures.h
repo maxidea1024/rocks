@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 
-// FLAC 디코더 시험 입력이다(Docs/Design/AudioSystem.ko.md 3.27.3절). 만드는 방법은 3.27.3절에 있다.
+// FLAC 디코더 시험 입력이다(Docs/Design/AudioSystem 3.27.3절). 만드는 방법은 3.27.3절에 있다.
 // frame 위치는 생성기가 frame 머리 CRC-8로 확인해 적었다(<이름>FrameOffsets: frame 시작,
 // <이름>SubframeOffsets: 그 frame의 첫 subframe 머리).
 namespace rocks::audio::flacfixtures {

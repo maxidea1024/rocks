@@ -18,6 +18,10 @@
 // 대조한다. 서명 봉투(ContentSigning)는 검증한 같은 버퍼의 매니페스트 byte를 reader에 넘긴다.
 namespace rocks {
 
+// 서명하지 않은 쿠킹 매니페스트 파일 이름이다(쿠킹 루트 바로 아래 — 쿠커가 쓰고 EngineAssets가
+// 읽는다, 서명 봉투는 ContentEnvelopeFileName).
+inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
+
 // 매니페스트 magic이다(파일 앞 4 byte).
 inline constexpr uint8 CookedManifestMagic[4] = {'R', 'M', 'A', 'N'};
 

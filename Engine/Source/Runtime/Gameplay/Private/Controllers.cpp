@@ -302,7 +302,9 @@ void AiController::OnFrameworkEndPlay(EndPlayReason reason) noexcept {
 
 // --- PlayerController ---
 
-PlayerController::PlayerController(Allocator& allocator) noexcept : Controller(allocator) {
+PlayerController::PlayerController(Allocator& allocator) noexcept
+    : Controller(allocator), actionInput_(allocator), actionBindings_(allocator),
+      haptics_(allocator) {
     wantsPlayerState = true;
     // pause 중에도 Tick한다(UE PlayerController.cpp:204 — TickPlayerInput·Tick).
     PrimaryTick().tick = true;
@@ -311,10 +313,12 @@ PlayerController::PlayerController(Allocator& allocator) noexcept : Controller(a
 
 PlayerController::~PlayerController() noexcept = default;
 
-void PlayerController::SetPlayer(ObjectHandle localPlayer,
-                                 const input::InputState* source) noexcept {
+void PlayerController::SetPlayer(ObjectHandle localPlayer, const input::InputState* source,
+                                 uint32 gamepad, input::InputUserSettings* userSettings) noexcept {
     localPlayer_ = localPlayer;
     inputSource_ = source;
+    gamepad_ = gamepad;
+    actionInput_.SetUserSettings(userSettings);
     playerInput_ = input::InputState();
     gestures_.Reset();
 }
@@ -326,6 +330,49 @@ void PlayerController::OnTick(const TickContext& context) noexcept {
     // 제스처 인식은 입력 스냅숏 다음이다(UE UPlayerInput이 FGestureRecognizer를 부르는 자리).
     if (gestureRecognizerEnabled_) {
         gestures_.Update(playerInput_, static_cast<float>(context.unscaledDeltaSeconds));
+    }
+
+    // 입력 액션: 평가 → 전달 → 전달 뒤 정리(Docs/Design/InputActions 5.1절). pause 중에도 한다(막는
+    // 것은 액션의 triggerWhenPaused다).
+    input::ActionEvalContext actionContext;
+    actionContext.deltaSeconds = context.unscaledDeltaSeconds;
+    actionContext.timeDilation = GetWorld().Clock().TimeScale();
+    actionContext.paused = context.paused;
+    actionContext.hasPlayer = true;
+    actionContext.gamepad = gamepad_;
+    if (!cameraDirector_.IsNull()) {
+        auto viewed = GetWorld().With<CameraDirector>(
+            cameraDirector_, [&actionContext](CameraDirector& camera) noexcept {
+                actionContext.fov = static_cast<float>(camera.View().fov);
+            });
+        (void)viewed;
+    }
+
+    auto evaluated = actionInput_.Evaluate(playerInput_, actionContext);
+    if (!evaluated && !inputEvaluationFailing_) {
+        Log::Warning(LogGameplay,
+                     "Input action evaluation failed: {Error}; it evaluated with the previous "
+                     "mappings or dropped event records ({Code})",
+                     ErrorCodeName(evaluated.Error()), DiagInputEvaluationFailed);
+    }
+
+    inputEvaluationFailing_ = !evaluated;
+
+    actionBindings_.Dispatch(actionInput_);
+    actionInput_.FinishDispatch();
+
+    // 진동 합성(Docs/Design/InputActions 6.3절 — UE ProcessForceFeedbackAndHaptics). 전달 뒤라 이번
+    // 틱 콜백이 시작한 효과도 기여한다. pause 중 deltaSeconds는 unscaled delta다(TickWhenPaused).
+    if (localPlayer_.IsNull()) {
+        motorOutput_ = {};
+    } else {
+        input::HapticUpdateContext hapticContext;
+        hapticContext.deltaSeconds = context.deltaSeconds;
+        hapticContext.unscaledDeltaSeconds = context.unscaledDeltaSeconds;
+        hapticContext.paused = context.paused;
+        hapticContext.scale = hapticScale_;
+        hapticContext.enabled = hapticsEnabled_;
+        motorOutput_ = haptics_.Update(hapticContext);
     }
 
     if (!context.paused) {

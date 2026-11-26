@@ -168,7 +168,8 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
     const graphics::VertexBufferBinding binding{processor->buffer, 0};
     commands.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));
     auto texture = context.Handles().Texture(packet.texture);
-    commands.SetTexture(texture ? texture.Value() : graphics::TextureHandle{});
+    commands.SetTexture(graphics::ShaderStage::Pixel, 0,
+                        texture ? texture.Value() : graphics::TextureHandle{});
     for (const DrawItem& item : packet.items) {
         const TintConstants constants = {{item.red, 0.0f, 0.0f, 1.0f}};
         auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(constants));

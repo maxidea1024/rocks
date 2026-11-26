@@ -5,6 +5,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/Memory.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureImport.h>
@@ -227,6 +228,7 @@ struct RebuildScene {
 
 const StringView SourceTextures[] = {"sourceTextures"};
 const StringView Source2D[] = {"source2DTexture"};
+const StringView TileSizeY[] = {"source2DTileSizeY"};
 
 } // namespace
 
@@ -330,8 +332,9 @@ TEST(TextureSourceRebuild_CubeArray) {
           sink.failCode == AssetDiagnosticCode::InvalidSetting && sink.failDetail == 42);
 }
 
-// 원소 판정: null·원본 없음·크기·형식·sRGB 여부(legacy gamma는 sRGB가 아님, G16 + SRGB on은
-// 선형이라 G16과 같다)·numLayers·byte 한도(할당 전), 빈 목록 → 빈 원본, 임포트한 배열 보호.
+// 원소 판정: null·원본 없음·numLayers·numMips·byte 한도(할당 전), 빈 목록 → 빈 원본, 임포트한 배열
+// 보호. 크기·형식·감마가 다른 원소는 거부하지 않고 A5j2b 변환을
+// 탄다(TextureSourceRebuild_ArrayConversion).
 TEST(TextureSourceRebuild_ArrayChecks) {
     RebuildScene scene;
     REQUIRE(scene.ready);
@@ -339,15 +342,6 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     const TypeId plane = TypeIdOf<Texture2D>();
     const ObjectHandle good = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 1, true);
     const ObjectHandle empty = scene.Make(plane);
-    const ObjectHandle wide = scene.Element(sink, plane, TextureSourceFormat::G8, 8, 4, 1, 2, true);
-    const ObjectHandle rgba =
-        scene.Element(sink, plane, TextureSourceFormat::RGBA8, 4, 4, 1, 3, true);
-    const ObjectHandle legacy =
-        scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 4, true);
-    REQUIRE(scene.Edit(legacy, [](Texture& texture) noexcept {
-        texture.useLegacyGamma = 1;
-        return true;
-    }));
     const ObjectHandle layered =
         scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 5, true);
     REQUIRE(scene.Edit(layered, [](Texture& texture) noexcept {
@@ -368,9 +362,6 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     const Case cases[] = {
         {ObjectHandle{}, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {empty, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument},
-        {wide, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
-        {rgba, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
-        {legacy, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument},
         {layered, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
         {mipped, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported},
     };
@@ -437,6 +428,196 @@ TEST(TextureSourceRebuild_ArrayChecks) {
     CHECK(scene.Rebuild(cleared, SourceTextures, sink).Error() == ErrorCode::InvalidArgument &&
           sink.failCode == AssetDiagnosticCode::InvalidSetting);
     sink.importRecord = false;
+}
+
+namespace {
+
+// 배열을 만들어 list로 재구성하고 결과 원본과 byte를 돌려준다(실패면 null).
+const Texture* Rebuilt(RebuildScene& scene, FakeSink& sink, bool cube,
+                       Span<const ObjectHandle> list, Array<uint8>& bytes) noexcept {
+    const ObjectHandle array =
+        scene.Make(cube ? TypeIdOf<TextureCubeArray>() : TypeIdOf<Texture2DArray>());
+    if (array.IsNull() || !scene.SetList(array, cube, list) ||
+        !scene.Rebuild(array, SourceTextures, sink)) {
+        return nullptr;
+    }
+
+    const Texture* made = scene.Read(array);
+    if (made == nullptr) {
+        return nullptr;
+    }
+
+    auto read = sink.bulk.ReadBulk(made->source.bulk);
+    if (!read || !bytes.TryAppend(read.Value())) {
+        return nullptr;
+    }
+
+    return made;
+}
+
+} // namespace
+
+// A5j2b 변환(12.14절): 형식이 다른 원소는 공통 형식(G8 + RGBA8 → RGBA8, 첫 원소는 (L, L, L, 255)
+// 복제, 둘째는 byte 그대로), sRGB와 legacy gamma(Pow22)가 섞이면 RGBA32F 선형(SRGB off), 둘 다
+// sRGB가 아니면 같은 형식은 byte 그대로(legacy 원소도), G16 선형 + RGBA8 sRGB → RGBA32F, R16F +
+// RGBA16F → RGBA16F의 (v, 0, 0, 1), 크기가 다른 2DArray 원소는 최대 X·Y(같은 크기 원소는 byte
+// 그대로). CubeArray는 형식이 달라도 받고 크기가 다르면 InvalidSetting이다.
+TEST(TextureSourceRebuild_ArrayConversion) {
+    RebuildScene scene;
+    REQUIRE(scene.ready);
+    FakeSink sink(scene.env.allocator);
+    const TypeId plane = TypeIdOf<Texture2D>();
+    const ObjectHandle gray =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 10, true);
+    const ObjectHandle rgba =
+        scene.Element(sink, plane, TextureSourceFormat::RGBA8, 2, 2, 1, 50, true);
+    {
+        const ObjectHandle list[] = {gray, rgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA8 && made->srgb == 1 &&
+              bytes.Size() == 2 * 2 * 4 * 2);
+        for (uint32 texel = 0; texel < 4; ++texel) {
+            const uint8 value = static_cast<uint8>(10 + texel);
+            CHECK(bytes[texel * 4] == value && bytes[texel * 4 + 1] == value &&
+                  bytes[texel * 4 + 2] == value && bytes[texel * 4 + 3] == 255);
+        }
+
+        for (uint32 index = 0; index < 16; ++index) {
+            CHECK(bytes[16 + index] == static_cast<uint8>(50 + index));
+        }
+    }
+
+    // sRGB + Pow22: 감마가 갈려 RGBA32F 선형이다.
+    const ObjectHandle legacy =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 20, true);
+    REQUIRE(scene.Edit(legacy, [](Texture& texture) noexcept {
+        texture.useLegacyGamma = 1;
+        return true;
+    }));
+    {
+        const ObjectHandle list[] = {gray, legacy};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA32F && made->srgb == 0 &&
+              bytes.Size() == 2 * 2 * 16 * 2);
+    }
+
+    // Pow22 + 선형: 둘 다 sRGB가 아니라 같은 형식은 byte 그대로(UE memcpy), SRGB off.
+    const ObjectHandle plain = scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 30);
+    {
+        const ObjectHandle list[] = {legacy, plain};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->srgb == 0 &&
+              bytes.Size() == 8 && bytes[0] == 20 && bytes[3] == 23 && bytes[4] == 30);
+    }
+
+    // 크기만 다른 Pow22 원소는 배열 감마(선형)로 재해석해 재표본한다(같은 크기 Pow22 원소의 byte
+    // 그대로와 같은 뜻 — 12.14절 A5j2b 3번): 균일 값 20의 2×2 Pow22 원소를 4×2 선형 원소와 묶으면
+    // 20 그대로다.
+    const ObjectHandle uniform =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 0, true);
+    REQUIRE(scene.Edit(uniform, [&](Texture& texture) noexcept {
+        texture.useLegacyGamma = 1;
+        return true;
+    }));
+    {
+        Array<uint8> flat(scene.env.allocator);
+        REQUIRE(flat.TryResize(4));
+        for (uint8& value : flat) {
+            value = 20;
+        }
+
+        auto ref = sink.bulk.Add(Move(flat));
+        REQUIRE(ref);
+        REQUIRE(scene.Edit(uniform, [&](Texture& texture) noexcept {
+            texture.source.bulk = ref.Value();
+            return true;
+        }));
+        const ObjectHandle wideLinear =
+            scene.Element(sink, plane, TextureSourceFormat::G8, 4, 2, 1, 70);
+        const ObjectHandle list[] = {uniform, wideLinear};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->srgb == 0 &&
+              bytes.Size() == 16);
+        bool kept = true;
+        for (usize index = 0; index < 8; ++index) {
+            kept = kept && bytes[index] == 20;
+        }
+
+        CHECK(kept);
+    }
+
+    // G16 선형 + RGBA8 sRGB → RGBA32F.
+    const ObjectHandle wide16 = scene.Element(sink, plane, TextureSourceFormat::G16, 2, 2, 1, 40);
+    {
+        const ObjectHandle list[] = {wide16, rgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA32F && made->srgb == 0);
+    }
+
+    // R16F + RGBA16F → RGBA16F: R16F 원소는 (v, 0, 0, 1)이다.
+    const ObjectHandle red = scene.Element(sink, plane, TextureSourceFormat::R16F, 2, 2, 1, 0);
+    const ObjectHandle half4 = scene.Element(sink, plane, TextureSourceFormat::RGBA16F, 2, 2, 1, 0);
+    {
+        const ObjectHandle list[] = {red, half4};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr && made->source.format == TextureSourceFormat::RGBA16F);
+        constexpr uint16 HalfOne = 0x3C00;
+        for (uint32 texel = 0; texel < 4; ++texel) {
+            const uint8* out = bytes.Data() + texel * 8;
+            const uint16 r = static_cast<uint16>(out[0] | (out[1] << 8));
+            const uint16 expected = static_cast<uint16>(texel * 2 | ((texel * 2 + 1) << 8));
+            CHECK(r == expected && out[2] == 0 && out[3] == 0 && out[4] == 0 && out[5] == 0 &&
+                  static_cast<uint16>(out[6] | (out[7] << 8)) == HalfOne);
+        }
+    }
+
+    // 크기가 다른 2DArray 원소: 최대 X·Y로, 같은 크기 원소는 byte 그대로.
+    const ObjectHandle wide =
+        scene.Element(sink, plane, TextureSourceFormat::G8, 4, 2, 1, 60, true);
+    {
+        const ObjectHandle list[] = {gray, wide};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, false, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::G8 && made->source.sizeX == 4 &&
+              made->source.sizeY == 2 && made->srgb == 1 && bytes.Size() == 4 * 2 * 2);
+        for (uint32 index = 0; index < 8; ++index) {
+            CHECK(bytes[8 + index] == static_cast<uint8>(60 + index));
+        }
+    }
+
+    // CubeArray: 형식이 달라도 받고(G8 + RGBA8 → RGBA8), 크기가 다르면 거부한다.
+    const ObjectHandle cubeGray =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::G8, 2, 2, 6, 1, true);
+    const ObjectHandle cubeRgba =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::RGBA8, 2, 2, 6, 2, true);
+    const ObjectHandle cubeWide =
+        scene.Element(sink, TypeIdOf<TextureCube>(), TextureSourceFormat::G8, 4, 4, 6, 3, true);
+    {
+        const ObjectHandle list[] = {cubeGray, cubeRgba};
+        Array<uint8> bytes(scene.env.allocator);
+        const Texture* made = Rebuilt(scene, sink, true, list, bytes);
+        REQUIRE(made != nullptr);
+        CHECK(made->source.format == TextureSourceFormat::RGBA8 && made->source.numSlices == 12 &&
+              bytes.Size() == 2 * 2 * 4 * 12);
+        const ObjectHandle bad = scene.Make(TypeIdOf<TextureCubeArray>());
+        const ObjectHandle mixed[] = {cubeGray, cubeWide};
+        REQUIRE(scene.SetList(bad, true, mixed));
+        sink.failCode = AssetDiagnosticCode::None;
+        CHECK(scene.Rebuild(bad, SourceTextures, sink).Error() == ErrorCode::InvalidArgument &&
+              sink.failCode == AssetDiagnosticCode::InvalidSetting && sink.failDetail == 1);
+    }
 }
 
 // Propagate: 바뀐 원소를 가리키는 배열만 다시 복사하고(대입 필드 없이), 가리키지 않으면 그대로다.
@@ -574,6 +755,199 @@ TEST(TextureSourceRebuild_Volume) {
     CHECK(scene.Rebuild(fresh, Source2D, sink).Error() == ErrorCode::InvalidArgument &&
           sink.failCode == AssetDiagnosticCode::InvalidSetting);
     sink.importRecord = false;
+}
+
+namespace {
+
+// 할당 실패 전수의 장면 하나다(대상 객체·대입 필드 — sink 까닭도 여기서 정한다).
+using RebuildSetup = bool (*)(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                              Span<const StringView>& fields);
+
+// hook 한 번의 결과다(성공이면 대상 원본과 그 byte).
+struct RebuildOutcome {
+    explicit RebuildOutcome(Allocator& allocator) noexcept : bytes(allocator) {
+    }
+
+    ErrorCode error = ErrorCode::None;
+    TextureSource source;
+    Array<uint8> bytes;
+    usize warnings = 0;
+    usize rebuilds = 0;
+};
+
+// 새 장면에서 객체 Registry·sink 할당의 failAt번째를 실패시키고(0이면 없음) hook을 부른다. 시도가
+// failAt보다 적었으면 exhausted다. 장면을 만들지 못했거나 할당 실패에 진단을 남겼으면 false다.
+bool RunRebuild(RebuildSetup setup, uint64 failAt, RebuildOutcome& out, bool& exhausted) noexcept {
+    RebuildScene scene;
+    FakeSink sink(scene.env.objectAllocator);
+    ObjectHandle target{};
+    Span<const StringView> fields;
+    if (!scene.ready || !setup(scene, sink, target, fields)) {
+        return false;
+    }
+
+    scene.env.objectAllocator.FailOnAttempt(failAt);
+    const Result<void> done = scene.Rebuild(target, fields, sink);
+    exhausted = scene.env.objectAllocator.Attempts() < failAt;
+    scene.env.objectAllocator.DisableFailure();
+    out.error = done ? ErrorCode::None : done.Error();
+    out.warnings = sink.warnings.Size();
+    out.rebuilds = sink.rebuilds;
+    if (!done) {
+        return sink.failCode == AssetDiagnosticCode::None;
+    }
+
+    const Texture* made = scene.Read(target);
+    if (made == nullptr) {
+        return false;
+    }
+
+    out.source = made->source;
+    if (made->source.bulk.IsEmpty()) {
+        return true;
+    }
+
+    auto bytes = sink.bulk.ReadBulk(made->source.bulk);
+    return bytes && out.bytes.TryAppend(bytes.Value());
+}
+
+bool SameOutcome(const RebuildOutcome& a, const RebuildOutcome& b) noexcept {
+    return a.error == b.error && a.source.format == b.source.format &&
+           a.source.sizeX == b.source.sizeX && a.source.sizeY == b.source.sizeY &&
+           a.source.numSlices == b.source.numSlices && a.source.numMips == b.source.numMips &&
+           a.source.numLayers == b.source.numLayers && a.warnings == b.warnings &&
+           a.rebuilds == b.rebuilds && a.bytes.Size() == b.bytes.Size() &&
+           platform::MemoryEquals(a.bytes.Data(), b.bytes.Data(), a.bytes.Size());
+}
+
+// setup 장면의 hook을 n번째 할당 실패마다 부르고 OutOfMemory로 끝난 수를 돌려준다.
+uint32 SweepRebuild(RebuildSetup setup) noexcept {
+    SystemAllocator allocator;
+    RebuildOutcome reference(allocator);
+    bool exhausted = false;
+    const bool ran = RunRebuild(setup, 0, reference, exhausted);
+    CHECK(ran && reference.error == ErrorCode::None);
+    if (!ran || reference.error != ErrorCode::None) {
+        return 0;
+    }
+
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        RebuildOutcome out(allocator);
+        if (!RunRebuild(setup, attempt, out, exhausted)) {
+            CHECK(false);
+            return failures;
+        }
+
+        if (out.error == ErrorCode::None) {
+            CHECK(SameOutcome(out, reference));
+        } else {
+            ++failures;
+            CHECK(out.error == ErrorCode::OutOfMemory && !exhausted);
+        }
+
+        if (exhausted) {
+            return failures;
+        }
+    }
+}
+
+// 2DArray 처음 만들기(G8 4×4 둘 — byte 그대로 잇기).
+bool SetupArrayConcat(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                      Span<const StringView>& fields) noexcept {
+    const TypeId plane = TypeIdOf<Texture2D>();
+    const ObjectHandle a = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 10, true);
+    const ObjectHandle b = scene.Element(sink, plane, TextureSourceFormat::G8, 4, 4, 1, 100, true);
+    target = scene.Make(TypeIdOf<Texture2DArray>());
+    const ObjectHandle list[] = {a, b};
+    fields = SourceTextures;
+    return !a.IsNull() && !b.IsNull() && !target.IsNull() && scene.SetList(target, false, list);
+}
+
+// 2DArray 변환(G8 2×2 + RGBA8 4×2 — 공통 형식·최대 크기로 재표본).
+bool SetupArrayConvert(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                       Span<const StringView>& fields) noexcept {
+    const TypeId plane = TypeIdOf<Texture2D>();
+    const ObjectHandle a = scene.Element(sink, plane, TextureSourceFormat::G8, 2, 2, 1, 10, true);
+    const ObjectHandle b =
+        scene.Element(sink, plane, TextureSourceFormat::RGBA8, 4, 2, 1, 50, true);
+    target = scene.Make(TypeIdOf<Texture2DArray>());
+    const ObjectHandle list[] = {a, b};
+    fields = SourceTextures;
+    return !a.IsNull() && !b.IsNull() && !target.IsNull() && scene.SetList(target, false, list);
+}
+
+// CubeArray(Cube 원소 둘 — slice 12).
+bool SetupCubeArray(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                    Span<const StringView>& fields) noexcept {
+    const TypeId cube = TypeIdOf<TextureCube>();
+    const ObjectHandle a =
+        scene.Element(sink, cube, TextureSourceFormat::RGBA8, 2, 2, TextureCubeFaces, 1);
+    const ObjectHandle b =
+        scene.Element(sink, cube, TextureSourceFormat::RGBA8, 2, 2, TextureCubeFaces, 7);
+    target = scene.Make(TypeIdOf<TextureCubeArray>());
+    const ObjectHandle list[] = {a, b};
+    fields = SourceTextures;
+    return !a.IsNull() && !b.IsNull() && !target.IsNull() && scene.SetList(target, true, list);
+}
+
+// 원소 재임포트 전파(바뀐 원소를 가리키는 2DArray — 대입 필드 없음).
+bool SetupArrayPropagate(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                         Span<const StringView>& fields) noexcept {
+    const ObjectHandle a =
+        scene.Element(sink, TypeIdOf<Texture2D>(), TextureSourceFormat::G8, 2, 2, 1, 1);
+    target = scene.Make(TypeIdOf<Texture2DArray>());
+    const ObjectHandle list[] = {a};
+    sink.cause = AssetSourceRebuildCause::Propagate;
+    sink.changed = a;
+    fields = {};
+    return !a.IsNull() && !target.IsNull() && scene.SetList(target, false, list);
+}
+
+// Volume 기본 타일(8×8 → 4×4·깊이 4).
+bool SetupVolume(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                 Span<const StringView>& fields) noexcept {
+    const ObjectHandle atlas =
+        scene.Element(sink, TypeIdOf<Texture2D>(), TextureSourceFormat::G8, 8, 8, 1, 0);
+    target = scene.Make(TypeIdOf<VolumeTexture>());
+    fields = Source2D;
+    return !atlas.IsNull() && !target.IsNull() && scene.SetSource2D(target, atlas, 0, 0);
+}
+
+// Volume 타일 0 → 빈 원본 + SourceCleared 경고(sink 경고 할당).
+bool SetupVolumeCleared(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                        Span<const StringView>& fields) noexcept {
+    const ObjectHandle atlas =
+        scene.Element(sink, TypeIdOf<Texture2D>(), TextureSourceFormat::G8, 8, 8, 1, 0);
+    target = scene.Make(TypeIdOf<VolumeTexture>());
+    fields = TileSizeY;
+    return !atlas.IsNull() && !target.IsNull() && scene.SetSource2D(target, atlas, 0, 4);
+}
+
+// asset-new Volume 기본 원본(1×1 RGBA8).
+bool SetupVolumeNew(RebuildScene& scene, FakeSink& sink, ObjectHandle& target,
+                    Span<const StringView>& fields) noexcept {
+    target = scene.Make(TypeIdOf<VolumeTexture>());
+    sink.cause = AssetSourceRebuildCause::New;
+    fields = {};
+    return !target.IsNull();
+}
+
+} // namespace
+
+// 할당 실패 전수(14.1.103 빌드 때 항목 — 14.1.119 후속 1번): 객체 Registry 할당자(hook의
+// ObjectAllocator — 원소 목록·판정 표·잇기·변환)와 sink(bulk 더하기·경고)의 n번째 할당이 실패하면
+// hook은 OutOfMemory이고 진단을 남기지 않는다(실패한 편집은 서비스가 패키지를 닫아 버린다 —
+// AssetService). 실패가 없으면(시도가 다 쓰이면) 기준과 같은 원본·byte·경고·다시 쓰기 수다. 장면은
+// 시도마다 새로 만든다(성공한 시도가 원본을 바꾼다). 장면: 2DArray 잇기·변환, CubeArray, 전파,
+// Volume 기본 타일·빈 원본 경고·asset-new 기본 원본.
+TEST(TextureSourceRebuild_AllocationFailures) {
+    const RebuildSetup setups[] = {SetupArrayConcat,    SetupArrayConvert, SetupCubeArray,
+                                   SetupArrayPropagate, SetupVolume,       SetupVolumeCleared,
+                                   SetupVolumeNew};
+    for (RebuildSetup setup : setups) {
+        CHECK(SweepRebuild(setup) > 0);
+    }
 }
 
 } // namespace texture_source_rebuild_tests_file

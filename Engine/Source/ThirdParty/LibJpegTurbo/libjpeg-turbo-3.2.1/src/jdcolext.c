@@ -33,8 +33,8 @@ ycc_rgb_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
 {
   (void)input_buf;
   (void)input_row;
-  (void)num_rows;
   (void)output_buf;
+  (void)num_rows;
 #if BITS_IN_JSAMPLE != 16
   my_cconvert_ptr cconvert = (my_cconvert_ptr)cinfo->cconvert;
   register int y, cb, cr;

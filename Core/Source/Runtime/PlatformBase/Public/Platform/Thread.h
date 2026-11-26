@@ -93,11 +93,55 @@ private:
 // 않는다.
 ROCKS_PLATFORMBASE_API void SleepFor(uint32 milliseconds) noexcept;
 
+// millisecond 아래 시간을 자는 대기 객체다(오디오 Null 출력 타이머 — Docs/Design/AudioSystem
+// 3.33.5절). Windows의 Sleep은 기본 timer tick(약 15.6 ms)으로 깨므로 짧은 주기를 지킬 수 없다.
+// UE는 프로세스 전체에 timeBeginPeriod(1)을 걸지만, 여기서는 프로세스 전역 설정을 바꾸지 않고 이
+// 객체만 고해상도 waitable timer(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, Windows 10 1803+)로 잔다.
+// 그 flag가 없는 OS에서는 보통 waitable timer로 만든다(해상도는 tick). POSIX는 nanosleep이다.
+//
+// 스레드 계약: 한 객체는 한 스레드만 쓴다(waitable timer 하나를 공유하지 않는다). Initialize 전이나
+// 실패 뒤에도 SleepNanoseconds는 동작한다(SleepFor로 millisecond를 올림해 잔다).
+//
+// 사용 예:
+//   PreciseSleeper sleeper;
+//   (void)sleeper.Initialize();
+//   sleeper.SleepNanoseconds(2'500'000);  // 2.5 ms
+class ROCKS_PLATFORMBASE_API PreciseSleeper {
+public:
+    PreciseSleeper() noexcept = default;
+    ~PreciseSleeper() noexcept;
+    PreciseSleeper(const PreciseSleeper&) = delete;
+    PreciseSleeper& operator=(const PreciseSleeper&) = delete;
+
+    // OS 대기 객체를 만든다. 만들지 못하면 false다(다시 불러도 된다). 이미 만들었으면 true다.
+    bool Initialize() noexcept;
+
+    // nanoseconds 이상 잔다(0은 즉시 반환). 깨는 시점의 늦음은 OS 스케줄링이 정한다.
+    void SleepNanoseconds(uint64 nanoseconds) noexcept;
+
+private:
+    // Windows waitable timer HANDLE이다(POSIX는 쓰지 않는다). 공개 헤더는 OS를 가르지 않으므로 늘
+    // 둔다.
+    [[maybe_unused]] void* timer_ = nullptr;
+};
+
 // 현재 스레드의 OS 이름을 buffer에 UTF-8로 복사하고(NUL 포함) 길이(NUL 제외)를 돌려준다. 이름이
 // 없거나 조회할 수 없거나 capacity가 모자라면 0이다(buffer는 capacity가 0이 아니면 빈 문자열).
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.
 ROCKS_PLATFORMBASE_API usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
 ROCKS_PLATFORMBASE_API void YieldThread() noexcept;
+
+// 현재 스레드에 실제로 적용된 OS 우선순위를 가장 가까운 ThreadPriority 단계로 읽는다. 조회하면
+// true이고 priority에 쓴다(실패하면 false, priority는 그대로). ThreadOptions::priority는 OS가
+// 거부해도 Start가 성공하므로(권한 부족 등) 실제 값을 진단 로그에 남길 때 쓴다(오디오 AudioRT —
+// Docs/Design/ AudioSystem 3.2절). OS 값은 ThreadPriority의 OS별 대응(위 표)과 같은 눈금으로
+// 비교한다.
+//
+// 사용 예:
+//   ThreadPriority applied = ThreadPriority::Normal;
+//   if (TryGetCurrentThreadPriority(applied) && applied != ThreadPriority::Highest) { /* 거부됨 */
+//   }
+ROCKS_PLATFORMBASE_API bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept;
 // 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — affinity·컨테이너 제한을 따른다). 작업
 // 스레드 수의 기본값을 정할 때 쓴다(예: 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면
 // 1이다. Android는 sched_getaffinity, Apple은 sysconf, Windows는 활성 프로세서 수와 프로세스

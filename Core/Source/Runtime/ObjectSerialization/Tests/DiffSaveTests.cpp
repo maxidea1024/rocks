@@ -54,15 +54,9 @@ Guid FieldNamed(StringView name) noexcept {
     platform::Fatal("fixture field missing");
 }
 
-// 노드 하나짜리 그래프(NodeTable 없음)의 노드 Record다.
+// 노드 하나짜리 저장 그래프의 노드 Record다(NodeTable을 건너뛴다 — GraphTestSupport.h).
 Span<const uint8> NodeRecord(Span<const uint8> graph) noexcept {
-    constexpr usize LengthBytes = 8;
-    uint64 length = 0;
-    for (usize index = 0; index < LengthBytes; ++index) {
-        length |= static_cast<uint64>(graph[test::graph::HeaderBytes + index]) << (8 * index);
-    }
-
-    return graph.Slice(test::graph::HeaderBytes + LengthBytes, static_cast<usize>(length));
+    return test::graph::NodeRecordAt(graph, 0);
 }
 
 // Record의 필드 ID 목록이다(저장 순서).
@@ -148,6 +142,13 @@ private:
     const OverrideSet& set_;
 };
 
+// 값을 돌려주는 도우미 안의 전제다(REQUIRE는 void 시험 함수에서만 쓴다).
+void RequireOrFatal(bool condition, const char* message) noexcept {
+    if (!condition) {
+        platform::Fatal(message);
+    }
+}
+
 // 객체 하나를 차이 저장한 노드 Record 필드 목록이다(edit가 값을 바꾼다).
 template <class Edit>
 Array<Guid> DiffFields(Allocator& allocator, TypeRegistry& types, Edit&& edit,
@@ -157,22 +158,13 @@ Array<Guid> DiffFields(Allocator& allocator, TypeRegistry& types, Edit&& edit,
     {
         auto created =
             objects.NewObject<DefaultsHolder>(objects.OwnerAccess(), TypeIdOf<DefaultsHolder>());
-        if (!created) {
-            platform::Fatal("diff test object creation failed");
-        }
-
+        RequireOrFatal(static_cast<bool>(created), "diff save helper: created");
         {
             auto borrowed =
                 objects.Resolve<DefaultsHolder>(objects.OwnerAccess(), created.Value().Handle());
-            if (!borrowed) {
-                platform::Fatal("diff test object resolve failed");
-            }
-
+            RequireOrFatal(static_cast<bool>(borrowed), "diff save helper: borrowed");
             auto value = borrowed.Value().Get();
-            if (!value) {
-                platform::Fatal("diff test object borrow failed");
-            }
-
+            RequireOrFatal(static_cast<bool>(value), "diff save helper: value");
             edit(*value.Value());
         }
 
@@ -183,10 +175,7 @@ Array<Guid> DiffFields(Allocator& allocator, TypeRegistry& types, Edit&& edit,
         options.overrides = overrides != nullptr ? &lookup : nullptr;
         auto saved = SaveObjectGraph(allocator, objects, objects.OwnerAccess(),
                                      created.Value().Handle(), options);
-        if (!saved) {
-            platform::Fatal("diff test graph save failed");
-        }
-
+        RequireOrFatal(static_cast<bool>(saved), "diff save helper: saved");
         const Array<uint8> bytes = Move(saved.Value());
         const TypeSchema& schema = TypeOf<DefaultsHolder>();
         fields = FieldsOf(allocator, NodeRecord(bytes.View()), schema.id, schema.version);

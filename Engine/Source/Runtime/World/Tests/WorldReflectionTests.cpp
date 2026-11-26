@@ -258,10 +258,10 @@ TEST(WorldReflection_TypesAreWorldOnlyReflectedClasses) {
     const Expected expected[] = {
         // tickSettings(A5c)가 Actor·Component에 하나씩 더해졌다(파생은 상속 필드를 함께 센다).
         {ObjectTypeIdOf<Level>(), TypeId{}, 2},
-        // Actor·Component: 바탕 필드 + A5c tickSettings(9.1절).
         {ObjectTypeIdOf<Actor>(), TypeId{}, 4},
         {ObjectTypeIdOf<Component>(), TypeId{}, 2},
-        // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절).
+        // SceneComponent: relativeTransform + CM0b 부착·절대·Mobility·가시성 8개(23.3절) + 상속
+        // tickSettings.
         {ObjectTypeIdOf<SceneComponent>(), ObjectTypeIdOf<Component>(), 11},
         {ObjectTypeIdOf<SaveActor>(), ObjectTypeIdOf<Actor>(), 7},
         {ObjectTypeIdOf<SaveComponent>(), ObjectTypeIdOf<SceneComponent>(), 13},

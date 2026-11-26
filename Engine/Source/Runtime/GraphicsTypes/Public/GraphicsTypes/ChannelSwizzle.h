@@ -4,10 +4,13 @@
 #include <Core/Text/StringView.h>
 
 // 텍스처 view의 성분 대응(swizzle)이다(AssetSystem A0-G, ShaderSystem 5.2절 G1). 셰이더가 읽는 출력
-// R·G·B·A마다 형식의 어느 성분(또는 상수 0·1)을 낼지 정한다. 쿠킹 데이터(TexturePlatformData)가
-// 담고 렌더러가 view swizzle로 적용한다. backend 대응: D3D12 Shader4ComponentMapping, Vulkan
-// VkComponentMapping, Metal MTLTextureSwizzleChannels, OpenGL ES 채널별 TEXTURE_SWIZZLE_R/G/B/A
-// (TEXTURE_SWIZZLE_RGBA는 ES에 없다). D3D11은 view swizzle이 없어 항등이 아니면 Unsupported다.
+// R·G·B·A마다 형식의 어느 성분(또는 상수 0·1)을 낼지 정한다. backend 대응: D3D12
+// Shader4ComponentMapping, Vulkan VkComponentMapping, Metal MTLTextureSwizzleChannels, OpenGL ES
+// 채널별 TEXTURE_SWIZZLE_R/G/B/A(TEXTURE_SWIZZLE_RGBA는 ES에 없다). D3D11은 view swizzle이 없어
+// 항등이 아니면 Unsupported다.
+// 쿠킹 데이터(TexturePlatformData)의 swizzle은 같은 번호(SwizzleSource)를 쓰지만 뜻은 UE sampler
+// type 계약이다. 렌더러는 쿠킹 텍스처의 view swizzle을 항등으로 두고 셰이더가 적용한다(RenderBase
+// 6.5절 — 모든 backend 결과를 같게, 두 번 적용하지 않게).
 // 열거값은 에셋 파일에 저장되므로 바꾸지 않고 추가만 한다.
 namespace rocks::graphics {
 

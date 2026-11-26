@@ -4,7 +4,7 @@
 #include <Audio/DynamicsProcessor.h>
 #include <Base/NumericLimits.h>
 
-// 믹서 설정·handle·명령·파라미터·결과 형식이다(Docs/Design/AudioSystem.ko.md 3.22절).
+// 믹서 설정·handle·명령·파라미터·결과 형식이다(Docs/Design/AudioSystem 3.22절).
 namespace rocks::audio {
 
 // 블록 크기 Q의 기본값이다(계획 §18). 허용값은 64·128·256·512·1024다.

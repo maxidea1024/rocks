@@ -27,6 +27,7 @@ Result<void> BoxComponent::SetBoxExtent(const Vec3d& extent) noexcept {
         boxExtent_ = extent;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();
@@ -45,6 +46,12 @@ Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TryBox(
         WorldLocation(), WorldQuaternion(),
         Vec3d(math::Abs(extent.x), math::Abs(extent.y), math::Abs(extent.z)));
+}
+
+bool BoxComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Box;
+    geometry.halfExtent = boxExtent_;
+    return true;
 }
 
 } // namespace rocks

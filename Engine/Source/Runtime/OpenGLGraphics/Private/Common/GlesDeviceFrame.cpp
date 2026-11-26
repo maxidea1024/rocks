@@ -259,7 +259,12 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
     gl_.Enable(GL_SCISSOR_TEST);
     gl_.Scissor(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     // 텍스처는 그리기·dispatch 때 파이프라인 텍스처 유닛에 건다(ApplySlots, 비면 흰색).
-    boundTexture_ = {};
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = NoBoundSampler;
+        }
+    }
 }
 
 void GlesDevice::BindPassTexture(const TextureRecord& record, GLuint unit) noexcept {
@@ -390,11 +395,51 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
     ApplyIndexBuffer();
 }
 
-void GlesDevice::SetTexture(TextureHandle handle) noexcept {
+void GlesDevice::SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots) {
+        return;
+    }
+
     const TextureRecord* record = textures_.Find(handle.slot);
     const bool substitute = record == nullptr || record->writable;
     nullTextureBindings_ += substitute ? 1 : 0;
-    boundTexture_ = substitute ? white_.slot : handle.slot;
+    boundTextures_[stageIndex][slot] = substitute ? white_.slot : handle.slot;
+}
+
+Result<void> GlesDevice::SetSampler(ShaderStage stage, uint32 slot,
+                                    const SamplerDesc* sampler) noexcept {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        (void)Fail("SetSampler needs a recording, a stage and slot in range and a valid sampler "
+                   "description");
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (sampler == nullptr) {
+        boundSamplers_[stageIndex][slot] = NoBoundSampler;
+        return Result<void>::Success();
+    }
+
+    for (uint32 index = 0; index < samplerCacheCount_; ++index) {
+        if (samplerCache_[index].desc == *sampler) {
+            boundSamplers_[stageIndex][slot] = static_cast<uint16>(index);
+            return Result<void>::Success();
+        }
+    }
+
+    if (samplerCacheCount_ == SamplerCacheCapacity) {
+        (void)Fail("SetSampler: the sampler cache of the device is full");
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    SamplerCacheEntry& entry = samplerCache_[samplerCacheCount_];
+    entry.desc = *sampler;
+    entry.filtering = CreateSampler(*sampler, true);
+    entry.point = CreateSampler(*sampler, false);
+    boundSamplers_[stageIndex][slot] = static_cast<uint16>(samplerCacheCount_++);
+    return Result<void>::Success();
 }
 
 Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

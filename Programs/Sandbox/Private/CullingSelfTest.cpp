@@ -160,7 +160,6 @@ struct Bench {
         };
         const VertexStream streams[] = {{sizeof(Vertex), VertexStepRate::Vertex}};
         PipelineDesc desc;
-        desc.bindings.texture = "Albedo";
         desc.layout = {attributes, streams};
         desc.drawConstantBytes = sizeof(sample::ObjectConstants);
         desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
@@ -230,7 +229,8 @@ void RunWindingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept 
             const sample::ObjectConstants identity;
             Check(commands.SetDrawConstants(DrawConstantBytes(identity)).IsOk(),
                   "identity draw constants are accepted");
-            commands.SetTexture({});
+            commands.SetTexture(ShaderStage::Pixel,
+                                shaders::TextureSlot(shaders::SamplePS, "Albedo"), {});
             const VertexBufferBinding binding{bench.winding, 0};
             commands.SetVertexBuffers(0, Span<const VertexBufferBinding>(&binding, 1));
             commands.Draw(WindingVertexCount);

@@ -331,7 +331,8 @@ TEST(AssetFixId_ImportRecords) {
             if (shape == 2) {
                 // 남는 Leaf의 기록을 읽지 못한다(형식 위반 — 칸 ImportRecord): Base를 적는지 알 수
                 // 없다.
-                const Array<uint8> corrupt = OneFieldRecord(env.allocator, ImportRecordSchema);
+                const Array<uint8> corrupt =
+                    OneFieldRecord(env.allocator, ImportRecordSchema, ImportRecordVersion);
                 PackageWriteOptions options = EditorOptions();
                 options.importRecord = corrupt.View();
                 const Array<uint8> leaf =

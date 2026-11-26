@@ -19,6 +19,7 @@
 #include <Object/ObjectRegistryOptions.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureCook.h>
@@ -179,10 +180,10 @@ struct CookScene {
 
     Result<void> Cook(const TextureCookProcessor& processor, CookOut& out,
                       NuggetCache* nuggets = nullptr, bool verify = false,
-                      PackageSink* sink = nullptr) noexcept {
+                      PackageSink* sink = nullptr, Allocator* scratch = nullptr) noexcept {
         entry.id = asset;
         CookContext context;
-        context.allocator = &allocator;
+        context.allocator = scratch != nullptr ? scratch : &allocator;
         context.registry = editor.Get();
         context.access = EditorAccess();
         context.package = package.Handle();
@@ -403,7 +404,7 @@ bool HasWarning(const Array<CookDiagnostic>& warnings, AssetDiagnosticCode code)
 TEST(TextureCook_NuggetHeader) {
     SystemAllocator allocator;
     TextureBuildOutputInfo info;
-    info.pixelFormat = PixelFormat::RGBA8Unorm;
+    info.pixelFormat = graphics::PixelFormat::RGBA8Unorm;
     info.srgb = true;
     info.swizzle[3] = TextureSwizzle::One;
     const uint8 bytes[16] = {};
@@ -414,7 +415,7 @@ TEST(TextureCook_NuggetHeader) {
     CHECK(header.Size() == 21 + 2 * 20);
     TextureNuggetHeader read(allocator);
     REQUIRE(ReadTextureNuggetHeader(header.View(), read));
-    CHECK(read.output.pixelFormat == PixelFormat::RGBA8Unorm && read.output.srgb &&
+    CHECK(read.output.pixelFormat == graphics::PixelFormat::RGBA8Unorm && read.output.srgb &&
           read.output.swizzle[0] == TextureSwizzle::R &&
           read.output.swizzle[3] == TextureSwizzle::One && read.numSlices == 6);
     REQUIRE(read.mips.Size() == 2);
@@ -543,8 +544,9 @@ TEST(TextureCook_Dimensions) {
         const TexturePlatformData* data = CookAndLoad(scene, processor, out, loaded);
         REQUIRE(data != nullptr);
         CHECK(data->dimension == item.dimension &&
-              data->pixelFormat == static_cast<uint8>(PixelFormat::R8Unorm) && !data->srgb &&
-              data->swizzleG == TextureSwizzle::R && data->swizzleA == TextureSwizzle::One);
+              data->pixelFormat == static_cast<uint8>(graphics::PixelFormat::R8Unorm) &&
+              !data->srgb && data->swizzleG == TextureSwizzle::R &&
+              data->swizzleA == TextureSwizzle::One);
         CHECK(data->sizeX == item.x && data->sizeY == item.y && data->sizeZ == item.sizeZ &&
               data->numMips == item.numMips && data->numSlices == item.numSlices &&
               data->residentTailMips == item.numMips && data->mips.Size() == item.numMips);
@@ -800,13 +802,16 @@ TEST(TextureCook_SamplerAndNorm16) {
     struct Norm16 {
         TextureSourceFormat format;
         uint32 channels;
-        PixelFormat supported;
-        PixelFormat fallback;
+        graphics::PixelFormat supported;
+        graphics::PixelFormat fallback;
     };
     const Norm16 formats[] = {
-        {TextureSourceFormat::G16, 1, PixelFormat::R16Unorm, PixelFormat::R16Float},
-        {TextureSourceFormat::GA16, 2, PixelFormat::RG16Unorm, PixelFormat::RG16Float},
-        {TextureSourceFormat::RGBA16, 4, PixelFormat::RGBA16Unorm, PixelFormat::RGBA16Float},
+        {TextureSourceFormat::G16, 1, graphics::PixelFormat::R16Unorm,
+         graphics::PixelFormat::R16Float},
+        {TextureSourceFormat::GA16, 2, graphics::PixelFormat::RG16Unorm,
+         graphics::PixelFormat::RG16Float},
+        {TextureSourceFormat::RGBA16, 4, graphics::PixelFormat::RGBA16Unorm,
+         graphics::PixelFormat::RGBA16Float},
     };
     uint64 id = 20;
     for (const Norm16& item : formats) {
@@ -912,7 +917,8 @@ TEST(TextureCook_FailuresKeepEditorObject) {
         REQUIRE(scene.Load(windows.sink.Bytes(), first));
         const Texture* texture = scene.LoadedTexture(first);
         REQUIRE(texture != nullptr);
-        CHECK(texture->platformData.pixelFormat == static_cast<uint8>(PixelFormat::R16Unorm));
+        CHECK(texture->platformData.pixelFormat ==
+              static_cast<uint8>(graphics::PixelFormat::R16Unorm));
         first.root.Reset();
         CHECK(!(windows.sink.Bytes().Size() == android.sink.Bytes().Size() &&
                 platform::MemoryEquals(windows.sink.Bytes().Data(), android.sink.Bytes().Data(),
@@ -931,6 +937,53 @@ TEST(TextureCook_FailuresKeepEditorObject) {
         CookOut out(scene.allocator);
         CHECK(!scene.Cook(processor, out));
     }
+}
+
+// 할당 실패 전수(14.1.101 — 빌드 때 더한 것): 쿠킹 문맥 Allocator의 n번째 할당이 실패하면 쿠킹은
+// OutOfMemory(진단 None)이고 에디터 객체는 그대로다. 실패가 없으면(시도가 다 쓰이면) 기준과 같은
+// byte다. 너겟 캐시가 있는 쿠킹(미적중 → Put, 적중 → Get)도 같다.
+TEST(TextureCook_AllocationFailures) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    TextureCookProcessor processor;
+    REQUIRE(scene.MakeGray(1, 64, 32));
+    CookOut reference(scene.allocator);
+    REQUIRE(scene.Cook(processor, reference));
+    const auto sweep = [&](NuggetCache* nuggets) noexcept {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(scene.allocator);
+            failing.FailOnAttempt(attempt);
+            CookOut out(scene.allocator);
+            auto cooked = scene.Cook(processor, out, nuggets, false, nullptr, &failing);
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(cooked);
+                CHECK(out.sink.Bytes().Size() == reference.sink.Bytes().Size() &&
+                      platform::MemoryEquals(out.sink.Bytes().Data(), reference.sink.Bytes().Data(),
+                                             reference.sink.Bytes().Size()));
+                break;
+            }
+
+            if (cooked) {
+                continue;
+            }
+
+            ++failures;
+            CHECK(cooked.Error() == ErrorCode::OutOfMemory &&
+                  out.failure.code == AssetDiagnosticCode::None);
+            CHECK(scene.EditorUntouched());
+        }
+
+        return failures;
+    };
+    CHECK(sweep(nullptr) > 0);
+    NuggetScene nuggets(scene.allocator, "texture-cook-allocation");
+    REQUIRE(nuggets.ready);
+    // 첫 sweep의 성공 시도가 너겟을 Put하므로 둘째 sweep은 적중(Get) 경로다.
+    CHECK(sweep(nuggets.cache.Get()) > 0);
+    CHECK(sweep(nuggets.cache.Get()) > 0);
 }
 
 // 빌드 경고(12.14절 10번): SrgbIgnored(Masks + SRGB)·PreserveBorderWithWrap가 대상 id의 경고로
@@ -1176,7 +1229,7 @@ TEST(TextureCook_Nuggets) {
             REQUIRE(header.TryResize(header.Size() - 20));
             break;
         case Broken::Format:
-            header[4] = static_cast<uint8>(PixelFormat::R16Unorm);
+            header[4] = static_cast<uint8>(graphics::PixelFormat::R16Unorm);
             break;
         }
 

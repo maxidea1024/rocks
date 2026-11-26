@@ -206,7 +206,8 @@ MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool& pool, GpuTrace
 //       .RenderTarget(output.Value());
 //   graph.AddPass(TonemapName, GraphPassKind::Raster, GraphPassFlags::None, tonemapAccesses,
 //                 [=](GraphPassContext& pass) noexcept {
-//                     pass.Commands().SetTexture(pass.Texture(scene.Value()));
+//                     pass.Commands().SetTexture(graphics::ShaderStage::Pixel, sceneSlot,
+//                                                pass.Texture(scene.Value()));
 //                     pass.Commands().Draw(3);
 //                 });
 //   auto history = graph.ExportTexture(scene.Value());   // 다음 프레임에 ImportTexture로 읽는다
@@ -439,7 +440,9 @@ public:
     //       .RenderTarget(output, GraphLoadAction::DontCare);
     //   graph.AddFullscreenPass(CopyName, GraphPassFlags::None, accesses, cache, copyRequest,
     //                           [=](GraphPassContext& pass) noexcept {
-    //                               pass.Commands().SetTexture(pass.Texture(sceneColor));
+    //                               pass.Commands().SetTexture(graphics::ShaderStage::Pixel,
+    //                                                          sourceSlot,
+    //                                                          pass.Texture(sceneColor));
     //                           });
     template <class Bind>
     Result<GraphPass> AddFullscreenPass(TraceScopeName& name, GraphPassFlags flags,

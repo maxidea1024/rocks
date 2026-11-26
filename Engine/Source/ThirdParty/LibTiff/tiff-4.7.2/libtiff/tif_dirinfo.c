@@ -648,7 +648,8 @@ int _TIFFMergeFields(TIFF *tif, const TIFFField info[], uint32_t n)
     }
     if (!tif_newfields)
     {
-        tif->tif_nfields = 0;
+        /* Rocks: a failed realloc keeps the old array and its count, so
+         * TIFFCleanup still frees it (Rocks.patch) */
         TIFFErrorExtR(tif, module, "Failed to allocate fields array");
         return 0;
     }

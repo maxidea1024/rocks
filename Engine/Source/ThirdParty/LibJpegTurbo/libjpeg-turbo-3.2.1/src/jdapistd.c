@@ -383,8 +383,8 @@ noop_convert(j_decompress_ptr cinfo, _JSAMPIMAGE input_buf,
   (void)cinfo;
   (void)input_buf;
   (void)input_row;
-  (void)num_rows;
   (void)output_buf;
+  (void)num_rows;
 }
 
 
@@ -395,8 +395,8 @@ noop_quantize(j_decompress_ptr cinfo, _JSAMPARRAY input_buf,
 {
   (void)cinfo;
   (void)input_buf;
-  (void)num_rows;
   (void)output_buf;
+  (void)num_rows;
 }
 
 

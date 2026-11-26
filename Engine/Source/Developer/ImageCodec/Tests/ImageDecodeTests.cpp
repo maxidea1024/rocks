@@ -161,7 +161,7 @@ Array<uint8> Bmp(Allocator& allocator, uint32 headerSize, int32 width, int32 hei
 TEST(ImageDecode_Bmp) {
     SystemAllocator allocator;
     // 2×2 24비트 아래→위(행 4 byte 정렬 — 6 + 2 패딩). 아래 행이 먼저다.
-    const uint8 rows24[] = {0, 0, 255, 0, 255, 0, 0, 0, 255, 0, 0, 255, 255, 255, 0, 0};
+    const uint8 rows24[] = {0, 0, 255, 0, 255, 0, 0, 0, 255, 0, 0, 255, 255, 0, 0, 0};
     const Array<uint8> bmp24 = Bmp(allocator, 40, 2, 2, 24, 0, {}, {}, rows24);
     // 위 행(저장 둘째 행): 파랑·청록, 아래 행(저장 첫 행): 빨강·초록.
     const uint8 expect24[] = {0, 0, 255, 255, 0, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255};
@@ -481,7 +481,7 @@ TEST(ImageDecode_Png) {
     // 팔레트 밖 index는 불투명 검정(libpng 읽기 — UE와 같다).
     const uint8 outside[] = {0, 5, 0};
     spec.raw = outside;
-    const uint8 expectOutside[] = {0, 0, 0, 255, 4, 5, 6, 255};
+    const uint8 expectOutside[] = {0, 0, 0, 255, 1, 2, 3, 7};
     CHECK(Pixels(Decode(allocator, Png(allocator, spec).View()), TextureSourceFormat::RGBA8, 2, 1,
                  expectOutside));
     // RGBA 8비트, 필터 1(Sub)·2(Up)·3(Average)·4(Paeth) — 2×2.

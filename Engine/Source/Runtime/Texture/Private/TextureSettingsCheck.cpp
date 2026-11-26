@@ -8,7 +8,11 @@
 #include <Texture/Texture.h>
 
 // 텍스처 설정 판정이다(Docs/Design/AssetSystem 12.8절). 계약 필드 표와 영향 조건, 값 판정을 둔다.
+// 판정 대상이 에디터 데이터라 에디터 데이터가 없는 빌드에는 판정이 없다(Unsupported — 빌드·쿠킹은
+// 에디터 빌드에서만 돈다).
 namespace rocks {
+
+#if ROCKS_WITH_EDITOR_DATA
 namespace {
 
 // 계약 필드가 결과를 바꾸는 조건이다(거짓이면 판정하지 않는다 — UE 새 텍스처 설정이 걸리지 않게).
@@ -317,5 +321,15 @@ Result<void> CheckTextureSettings(ObjectRegistry& registry, const ObjectAccessCo
 
     return Result<void>::Success();
 }
+
+#else
+
+Result<void> CheckTextureSettings(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                                  Allocator&, Array<TextureSettingIssue>& out) noexcept {
+    out.Clear();
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+#endif
 
 } // namespace rocks

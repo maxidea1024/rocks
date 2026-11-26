@@ -59,14 +59,6 @@ public:
     exr_context_t context = nullptr;
 };
 
-// 빈 decode pipeline이다(EXR_DECODE_PIPELINE_INITIALIZER와 같은 값 — 매크로의 부분 초기화는
-// -Wmissing-field-initializers에 걸린다).
-exr_decode_pipeline_t EmptyDecodePipeline() noexcept {
-    exr_decode_pipeline_t pipeline{};
-    pipeline.pipe_size = sizeof(exr_decode_pipeline_t);
-    return pipeline;
-}
-
 class ExrDecoding {
 public:
     explicit ExrDecoding(exr_const_context_t context) noexcept : context_(context) {
@@ -81,7 +73,9 @@ public:
     ExrDecoding(const ExrDecoding&) = delete;
     ExrDecoding& operator=(const ExrDecoding&) = delete;
 
-    exr_decode_pipeline_t pipeline = EmptyDecodePipeline();
+    // EXR_DECODE_PIPELINE_INITIALIZER({크기, 0})는 C++에서 -Wmissing-field-initializers라 값
+    // 초기화한다 (pipe_size는 OpenEXR이 읽지 않는다).
+    exr_decode_pipeline_t pipeline{};
     bool initialized = false;
 
 private:

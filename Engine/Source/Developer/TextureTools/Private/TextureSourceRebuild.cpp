@@ -6,8 +6,9 @@
 #include <Platform/Memory.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureImport.h>
+#include <TextureTools/TextureSourceConvert.h>
 
-// 텍스처 원본 묶음 재구성이다(Docs/Design/AssetSystem 12.14절 A5j2a — UE
+// 텍스처 원본 묶음 재구성이다(Docs/Design/AssetSystem 12.14절 A5j2a·A5j2b — UE
 // UTexture2DArray·UTextureCubeArray::UpdateSourceFromSourceTextures, UVolumeTexture::
 // UpdateSourceFromSourceTexture·SetDefaultSource2DTileSize). 묶음 원소의 mip 0 byte를 이어 자기
 // 원본으로 복사한다(쿠킹은 자기 원본만 읽는다 — Build 의존 없음).
@@ -50,14 +51,6 @@ bool HasSource(const TextureSource& source) noexcept {
            source.sizeX != 0 && source.sizeY != 0 && source.numSlices != 0;
 }
 
-// UE GetGammaSpace(0) == sRGB다(Texture.cpp 3189–3213 — 8비트 정수 형식·SRGB on·legacy gamma off).
-bool SourceIsSrgb(const Texture& texture) noexcept {
-    const TextureSourceFormat format = texture.source.format;
-    const bool eightBit = format == TextureSourceFormat::G8 || format == TextureSourceFormat::GA8 ||
-                          format == TextureSourceFormat::RGBA8;
-    return texture.srgb != 0 && texture.useLegacyGamma == 0 && eightBit;
-}
-
 // x × y × slices × texel byte다(넘치거나 한도를 넘으면 false).
 bool SourceBytes(TextureSourceFormat format, uint64 x, uint64 y, uint64 slices,
                  uint64& out) noexcept {
@@ -75,10 +68,23 @@ bool SourceBytes(TextureSourceFormat format, uint64 x, uint64 y, uint64 slices,
     return out <= BundleMaxSourceBytes;
 }
 
+// 원소 원본의 감마다(UE GetGammaSpace(0) — Texture.cpp 3189–3213: 8비트 정수 형식·SRGB on이면 sRGB,
+// legacy gamma면 Pow22, 그 밖은 선형).
+TextureSourceGamma SourceGamma(const Texture& texture) noexcept {
+    const TextureSourceFormat format = texture.source.format;
+    const bool eightBit = format == TextureSourceFormat::G8 || format == TextureSourceFormat::GA8 ||
+                          format == TextureSourceFormat::RGBA8;
+    if (!eightBit || texture.srgb == 0) {
+        return TextureSourceGamma::Linear;
+    }
+
+    return texture.useLegacyGamma != 0 ? TextureSourceGamma::Pow22 : TextureSourceGamma::Srgb;
+}
+
 // 원소 하나의 값 사본이다(Borrow를 오래 쥐지 않는다).
 struct ElementFacts {
     TextureSource source;
-    bool srgb = false;
+    TextureSourceGamma gamma = TextureSourceGamma::Linear;
     TextureCompressionSettings compression = TextureCompressionSettings::Default;
     TextureGroup lodGroup = TextureGroup::World;
 };
@@ -98,7 +104,7 @@ Result<ElementFacts> ReadElement(const AssetTypeHookContext& context,
     const Texture& texture = *value.Value();
     ElementFacts facts;
     facts.source = texture.source;
-    facts.srgb = SourceIsSrgb(texture);
+    facts.gamma = SourceGamma(texture);
     facts.compression = texture.compressionSettings;
     facts.lodGroup = texture.lodGroup;
     return Result<ElementFacts>::Success(facts);
@@ -252,11 +258,13 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
                              index);
         }
 
+        // Cube 원소는 면 여섯이다(UE의 longlat 한 장 원소는 Rocks에 longlat 원본이 없어 받지
+        // 않는다). CubeArray는 크기가 다르면 거부한다(UE CheckArrayTexturesCompatibility — 12.14절
+        // A5j2b 3번).
         const ElementFacts* first = facts.IsEmpty() ? &element : &facts[0];
         if (element.source.numSlices != slicesPerElement ||
-            element.source.sizeX != first->source.sizeX ||
-            element.source.sizeY != first->source.sizeY ||
-            element.source.format != first->source.format || element.srgb != first->srgb) {
+            (cube && (element.source.sizeX != first->source.sizeX ||
+                      element.source.sizeY != first->source.sizeY))) {
             return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
                              index);
         }
@@ -264,14 +272,30 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
         (void)facts.TryPushBack(element);
     }
 
-    // 3. 새 원본(원소마다 mip 0 byte를 원소 순으로 잇는다).
+    // 3. 공통 형식·감마·크기(UE 순서로 접는다 — 감마가 갈리면 RGBA32F 선형, 형식은
+    // GetCommonSourceFormat, 2DArray 크기는 최대 X·Y — 12.14절 A5j2b 1·3번).
     const ElementFacts& first = facts[0];
+    TextureSourceFormat format = first.source.format;
+    bool srgb = first.gamma == TextureSourceGamma::Srgb;
+    uint32 sizeX = first.source.sizeX;
+    uint32 sizeY = first.source.sizeY;
+    for (usize index = 1; index < facts.Size(); ++index) {
+        const ElementFacts& element = facts[index];
+        sizeX = element.source.sizeX > sizeX ? element.source.sizeX : sizeX;
+        sizeY = element.source.sizeY > sizeY ? element.source.sizeY : sizeY;
+        if ((element.gamma == TextureSourceGamma::Srgb) != srgb) {
+            srgb = false;
+            format = TextureSourceFormat::RGBA32F;
+        }
+
+        if (format != element.source.format) {
+            format = CommonTextureSourceFormat(format, element.source.format);
+        }
+    }
+
     const uint64 slices = uint64{slicesPerElement} * elements.Size();
     uint64 total = 0;
-    uint64 perElement = 0;
-    if (!SourceBytes(first.source.format, first.source.sizeX, first.source.sizeY, slices, total) ||
-        !SourceBytes(first.source.format, first.source.sizeX, first.source.sizeY, slicesPerElement,
-                     perElement)) {
+    if (!SourceBytes(format, sizeX, sizeY, slices, total)) {
         return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::CapacityExceeded, 0);
     }
 
@@ -280,11 +304,48 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
         return reserved;
     }
 
+    // 4. 원소마다 mip 0 byte를 원소 순으로 잇는다. 형식·크기가 같으면 byte 그대로(UE memcpy — Pow22
+    // 원소도), 아니면 원소 감마로 풀어 공통 형식·감마·크기로 바꾼다.
+    const TextureSourceGamma target = srgb ? TextureSourceGamma::Srgb : TextureSourceGamma::Linear;
     for (usize index = 0; index < elements.Size(); ++index) {
-        if (auto appended =
-                AppendMip0(sink, elements[index], facts[index].source, perElement, index, bytes);
+        const TextureSource& source = facts[index].source;
+        uint64 elementBytes = 0;
+        if (!SourceBytes(source.format, source.sizeX, source.sizeY, slicesPerElement,
+                         elementBytes)) {
+            return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::CapacityExceeded,
+                             index);
+        }
+
+        if (source.format == format && source.sizeX == sizeX && source.sizeY == sizeY) {
+            if (auto appended =
+                    AppendMip0(sink, elements[index], source, elementBytes, index, bytes);
+                !appended) {
+                return appended;
+            }
+
+            continue;
+        }
+
+        Array<uint8> raw(allocator);
+        if (auto appended = AppendMip0(sink, elements[index], source, elementBytes, index, raw);
             !appended) {
             return appended;
+        }
+
+        // 형식이 같고 크기만 다르면 원소를 배열 감마로 재해석한다 — 같은 크기 원소의 byte 그대로와
+        // 같은 뜻이다(Pow22 원소 — UE는 Pow22 대상 재표본이 check에 걸려 정한 동작이 없다, 12.14절
+        // A5j2b 3번).
+        const TextureSourceGamma gamma = source.format == format ? target : facts[index].gamma;
+        const TextureSourceImage image{source.format,    gamma,     source.sizeX, source.sizeY,
+                                       slicesPerElement, raw.View()};
+        if (auto converted =
+                ConvertTextureSource(allocator, image, format, target, sizeX, sizeY, bytes);
+            !converted) {
+            if (converted.Error() == ErrorCode::OutOfMemory) {
+                return Result<void>::Failure(converted.Error());
+            }
+
+            return sink.Fail(AssetDiagnosticCode::InvalidSetting, converted.Error(), index);
         }
     }
 
@@ -299,16 +360,16 @@ Result<void> RebuildArray(const AssetTypeHookContext& context,
     const bool creating = selfEmpty && sink.Cause() != AssetSourceRebuildCause::Propagate;
     return WriteSelf(context, sink, [&](Texture& self) noexcept {
         TextureSource source;
-        source.format = first.source.format;
-        source.sizeX = first.source.sizeX;
-        source.sizeY = first.source.sizeY;
+        source.format = format;
+        source.sizeX = sizeX;
+        source.sizeY = sizeY;
         source.numSlices = static_cast<uint32>(slices);
         source.numMips = 1;
         source.numLayers = 1;
         source.bulk = ref;
         self.source = source;
-        // 4. 배열 SRGB = 첫 원소의 sRGB 여부.
-        self.srgb = first.srgb ? 1 : 0;
+        // 배열 SRGB = 접은 결과(감마가 갈리면 off — UE SRGB = bSRGB).
+        self.srgb = srgb ? 1 : 0;
         if (creating) {
             if (!HasField(assignedFields, CompressionSettingsField)) {
                 self.compressionSettings = first.compression;

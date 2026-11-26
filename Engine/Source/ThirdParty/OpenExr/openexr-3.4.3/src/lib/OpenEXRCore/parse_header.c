@@ -772,11 +772,11 @@ extract_attr_bytes(
         return ctxt->print_error (
             ctxt,
             EXR_ERR_ATTR_SIZE_MISMATCH,
-            "Attribute '%s': Invalid size %d (exp '%s' size >= %d)",
+            "Attribute '%s': Invalid size %d (exp '%s' size >= %zu)",
             aname,
             attrsz,
             tname,
-            (int) sizeof(uint32_t));
+            sizeof(uint32_t));
 
     rv = scratch->sequential_read (scratch, &hint_length, sizeof (uint32_t));
     if (rv != EXR_ERR_SUCCESS)

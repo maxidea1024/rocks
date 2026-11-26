@@ -3,9 +3,11 @@
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
+#include <RenderBase/CookedShaderFormat.h>
 #include <ModuleLoader/HostServices.h>
 #include <ShaderCore/ShaderVirtualPath.h>
 #include <stdio.h>
+#include <string.h>
 
 // 엔진 호스트의 셰이더 연결(Docs/Design/RenderBase 9.12절 RR11)이다. 규칙은 공개 헤더 주석을
 // 따른다.
@@ -211,12 +213,28 @@ Result<void> EngineRenderResources::Open(graphics::Device& device,
     // 앞서 실패했거나 Retire한 집합은 여기서 부순다(lease는 주인이 이미 비웠다).
     set_.Reset();
     problem_[0] = '\0';
+    format_[0] = '\0';
     cooked_ = false;
-    const StringView format = EngineShaderFormat(device.Info().backend);
+    StringView format = EngineShaderFormat(device.Info().backend);
     if (!host.IsFrozen()) {
         return Fail(ErrorCode::NotReady, format, "shader type registry",
                     "the registry is not frozen (freeze it after the modules start and before "
                     "the render lane starts)");
+    }
+
+    // 쿠킹 원천이 있으면 매니페스트 순서로 장치 형식을 고른다(ShaderSystem SSD15·SSD47). 장치
+    // backend가 쿠킹에 없을 때(NotFound)만 고정 표 형식으로 공급자에 간다(SSD16).
+    CookedShaderFormatChoice choice(allocator_);
+    bool opened = false;
+    if (CookedShaderLibrarySource* source = host.CookedLibraries()) {
+        auto selected =
+            SelectCookedShaderFormat(*source, device, shader::ShaderLibraryKind::Engine, choice);
+        if (selected) {
+            format = choice.FormatId();
+            opened = true;
+        } else if (selected.Error() != ErrorCode::NotFound) {
+            return Fail(selected.Error(), format, "cooked shader library", choice.Problem());
+        }
     }
 
     if (format.IsEmpty()) {
@@ -224,12 +242,14 @@ Result<void> EngineRenderResources::Open(graphics::Device& device,
                     "the device backend has no engine shader format");
     }
 
+    memcpy(format_, format.Data(), format.ByteCount());
+    format_[format.ByteCount()] = '\0';
     ShaderSetDesc desc;
     desc.allocator = &allocator_;
     desc.device = &device;
     desc.registry = &host.Registry();
     desc.library = shader::ShaderLibraryKind::Engine;
-    desc.formatId = format;
+    desc.formatId = StringView(format_);
     auto created = UniquePtr<ShaderSet>::TryMake(allocator_, desc);
     if (!created) {
         return Fail(created.Error(), format, "engine shader set", "out of memory");
@@ -237,19 +257,9 @@ Result<void> EngineRenderResources::Open(graphics::Device& device,
 
     set_ = Move(created.Value());
     ShaderSet& set = *set_;
-    bool opened = false;
-    if (CookedShaderLibrarySource* source = host.CookedLibraries()) {
-        Array<uint8> bytes(allocator_);
-        auto read = source->ReadLibrary(format, shader::ShaderLibraryKind::Engine, bytes);
-        if (read) {
-            (void)set.OpenCooked(Move(bytes));
-            opened = true;
-            cooked_ = true;
-        } else if (read.Error() != ErrorCode::NotFound) {
-            set.Retire();
-            return Fail(read.Error(), format, "cooked shader library",
-                        StringView(ErrorCodeName(read.Error())));
-        }
+    if (opened) {
+        (void)set.OpenCooked(Move(choice.bytes));
+        cooked_ = true;
     }
 
     if (!opened) {

@@ -46,6 +46,7 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
         }
 
         value.dirtySystemStates_ = 0;
+        value.systemStateQueued_ = false;
         return registered;
     });
     if (unregistering && unregistering.Value()) {

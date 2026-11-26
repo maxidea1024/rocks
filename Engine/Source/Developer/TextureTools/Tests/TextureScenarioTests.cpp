@@ -326,8 +326,9 @@ TEST(TextureScenario_ImportEditCookLoad) {
     // 1. 임포트와 다시 열기(같은 id·원본 픽셀).
     auto wall = scene.Import("/Game/T/Wall", "SourceArt/Wall.png", 1);
     auto wall2 = scene.Import("/Game/T/Wall2", "SourceArt/Wall2.png", 2);
+    // 임포트는 연 패키지를 닫는다 — 다시 연다.
     REQUIRE(wall && wall2);
-    REQUIRE(scene.service->Packages().Close(wall.Value()));
+    CHECK(scene.service->Packages().Find(wall.Value()) == nullptr);
     auto reopened = scene.service->Packages().Open(wall.Value());
     REQUIRE(reopened);
     {
@@ -391,8 +392,9 @@ TEST(TextureScenario_ImportEditCookLoad) {
         const Texture* texture = scene.Load(entry->asset, entry->packageSha256);
         REQUIRE(texture != nullptr);
         const TexturePlatformData& data = texture->platformData;
-        CHECK(data.pixelFormat == static_cast<uint8>(PixelFormat::RGBA8Unorm) && !data.srgb &&
-              data.numMips == 4 && data.sizeX == Side / 2 && data.residentTailMips == 4);
+        CHECK(data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::RGBA8Unorm) &&
+              !data.srgb && data.numMips == 4 && data.sizeX == Side / 2 &&
+              data.residentTailMips == 4);
         CHECK(texture->source.bulk.IsEmpty() && texture->source.sizeX == 0);
         const Span<const uint8> tail = scene.Bulk(data.tailBulk);
         REQUIRE(tail.Size() == 8 * 8 * 4 + 4 * 4 * 4 + 2 * 2 * 4 + 4);
@@ -421,7 +423,7 @@ TEST(TextureScenario_ImportEditCookLoad) {
         const Texture* texture = scene.Load(entry->asset, entry->packageSha256);
         REQUIRE(texture != nullptr);
         CHECK(texture->platformData.pixelFormat ==
-                  static_cast<uint8>(PixelFormat::RGBA8UnormSrgb) &&
+                  static_cast<uint8>(graphics::PixelFormat::RGBA8UnormSrgb) &&
               texture->platformData.srgb && texture->platformData.numMips == 5 &&
               texture->platformData.residentTailMips == 5);
     }
@@ -433,7 +435,7 @@ TEST(TextureScenario_ImportEditCookLoad) {
         REQUIRE(texture != nullptr);
         const TexturePlatformData& data = texture->platformData;
         CHECK(data.dimension == TextureDimension::Texture2DArray &&
-              data.pixelFormat == static_cast<uint8>(PixelFormat::RGBA8UnormSrgb) &&
+              data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::RGBA8UnormSrgb) &&
               data.numSlices == 2 && data.numMips == 1 && data.residentTailMips == 1 &&
               data.tailBulk.rawBytes == usize{Side} * Side * 4 * 2);
         CHECK(static_cast<const Texture2DArray*>(texture)->sourceTextures.Size() == 0 &&

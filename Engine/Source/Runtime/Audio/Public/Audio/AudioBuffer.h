@@ -4,7 +4,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 
-// planar float32 오디오 버퍼와 그 보기다(Docs/Design/AudioSystem.ko.md 3.20.2절).
+// planar float32 오디오 버퍼와 그 보기다(Docs/Design/AudioSystem 3.20.2절).
 //
 // 믹서 내부의 모든 PCM은 채널마다 따로 이어진 float32 배열(planar)이다. PlanarBuffer가 메모리를
 // 소유하고, 처리 함수는 소유하지 않는 PlanarView·PlanarConstView를 받는다. 보기는 채널 포인터를

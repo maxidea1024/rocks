@@ -14,6 +14,8 @@
 //   LspServer.cpp         수명·문서 저장소·분석·진단 발행·요청 분기·서식
 //   LspSemanticTokens.cpp 의미 강조(T12)
 //   LspQueries.cpp        커서의 이름·hover·정의 이동(11.2–11.4절)
+//   LspCompletion.cpp     자동완성 후보(11.6절)
+//   LspCodeActions.cpp    빠른 수정 편집(11.7절)
 namespace rocks::sparks::tools::detail {
 
 // 의미 강조 legend다(10.7절 — 순서가 번호다).
@@ -66,6 +68,73 @@ Result<bool> LspAppendHover(const Compilation& compilation, const SourceSet& sou
 // 이름·해석하지 못한 import)이다.
 bool LspDefinition(const Compilation& compilation, const LspNamed& named, SourceId& source,
                    SourceSpan& span) noexcept;
+
+// 자동완성 구멍 식별자다(11.6절 — 커서 자리에 넣어 snapshot을 컴파일한다).
+inline constexpr StringView LspCompletionHole = "SparksCompletionHole";
+
+// 자동완성 결과 상한이다(넘으면 isIncomplete).
+inline constexpr usize MaxLspCompletionItems = 1000;
+
+// 자동완성 후보의 출처다(detail 모양이 다르다).
+enum class LspCompletionSource : uint8 {
+    Symbol,    // 심볼(선언 모양)
+    Hook,      // 수명 hook(`on Tick(dt: float)`)
+    Attribute, // attribute(`@edit`)
+    Keyword,   // 키워드
+    Module,    // import 경로 segment(`import Tools.Kit`)
+    Changed    // `on 필드.Changed`
+};
+
+// 자동완성 후보 하나다. 글자는 compilation·원문·정적 표를 가리킨다(그것들이 사는 동안 유효).
+struct LspCompletionItem {
+    StringView label;
+    StringView filterText; // Unity 이름(그 이름으로 찾는 같은 항목 — 아니면 빈 글자)
+    StringView text;       // Hook은 인자 표기, Module은 앞 경로(`Tools.`)
+    uint32 symbol = NoSymbol;
+    uint32 order = 0; // 모은 순서(같은 이름 사이의 결정적 순서)
+    uint8 kind = 0;   // LSP CompletionItemKind
+    uint8 rank = 0;   // 가까움 순위(sortText 첫 글자)
+    LspCompletionSource source = LspCompletionSource::Symbol;
+};
+
+// snapshot compilation의 module에서 구멍 토큰(hole)의 자동완성 후보를 접두(prefix — ASCII 대소문자
+// 무시)로 걸러 정렬해 items에 둔다(11.6절). 값은 상한으로 잘랐는지(isIncomplete)다. 실패: 할당.
+Result<bool> LspCollectCompletions(Allocator& allocator, const Compilation& compilation,
+                                   const SourceSet& sources, uint32 module, uint32 hole,
+                                   StringView prefix, Array<LspCompletionItem>& items) noexcept;
+
+// 빠른 수정 하나다(11.7절 — 편집 하나: 원문 byte 범위 [begin, end)를 text로 바꾼다).
+struct LspFix {
+    explicit LspFix(Allocator& allocator) noexcept : title(allocator), text(allocator) {
+    }
+
+    String title; // 영어(실행 중 문구)
+    uint32 begin = 0;
+    uint32 end = 0;
+    String text;
+};
+
+// compilation의 module 진단 하나에 대한 빠른 수정을 fixes 뒤에 붙인다(11.7절 표 Q1–Q10 — 없으면
+// 붙이지 않는다). 실패: 할당.
+Result<void> LspCollectFixes(Allocator& allocator, const Compilation& compilation,
+                             const SourceSet& sources, uint32 module, const Diagnostic& diagnostic,
+                             Array<LspFix>& fixes) noexcept;
+
+// 식별자 글자(ASCII 영문·숫자·`_`)인지다(자동완성 접두).
+constexpr bool LspIsNameByte(char value) noexcept {
+    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+           (value >= '0' && value <= '9') || value == '_';
+}
+
+// id 파일의 offset이 주석·문서 주석·문자열 조각(보간 밖)·verbatim 문자열 안인지다(11.6절 — 그
+// 자리는 자동완성 후보가 없다). 파일은 IsUsable()이어야 한다. 실패: 할당.
+Result<bool> LspInCommentOrString(Allocator& allocator, const SourceSet& sources, SourceId id,
+                                  uint32 offset) noexcept;
+
+// 후보의 detail 한 줄을 out에 붙인다. 실패: 할당.
+Result<void> LspAppendCompletionDetail(const Compilation& compilation,
+                                       const LspCompletionItem& item,
+                                       StringBuilderBase& out) noexcept;
 
 template <typename Visit>
 Result<void> LspVisitNames(const Compilation& compilation, uint32 module, uint32 node,

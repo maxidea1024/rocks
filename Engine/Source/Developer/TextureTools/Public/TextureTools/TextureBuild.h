@@ -80,7 +80,7 @@ struct TextureBuildResult {
 };
 
 // 빌드 규칙 버전이다(12.5·12.13절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
-inline constexpr uint32 TextureBuildVersion = 1;
+inline constexpr uint32 TextureBuildVersion = 2;
 
 // 빌드 경고 수 상한이다(SrgbIgnored·PreserveBorderWithWrap).
 inline constexpr usize TextureBuildMaxWarnings = 2;

@@ -8,6 +8,8 @@ using Rocks.Build.Rules;
 // MetaSchema is used only for the Development check of Object reference fields in transferred types.
 // TraceCapture is used by GPU instrumentation (RB7, GpuTrace). ModuleLoader gives the module lifetime object the host trace session
 // service, so Startup registers the GPU trace channel and types (Docs/Design/ModuleLoader section 3.12).
+// AssetRuntime: the cooked manifest v2 shader library source (CookedManifestShaderLibraries — artifact paths and file checks, Docs/Design/ShaderSystem
+// section 16.1 SSD47).
 public sealed class RenderBase : EngineModuleRules
 {
     protected override string ModuleName => "RenderBase";
@@ -18,5 +20,5 @@ public sealed class RenderBase : EngineModuleRules
     protected override string[] PublicDependencies => ["Graphics", "ShaderCore", "Task", "MetaSchema", "TraceCapture"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["ModuleLoader"];
+    protected override string[] PrivateDependencies => ["ModuleLoader", "AssetRuntime"];
 }

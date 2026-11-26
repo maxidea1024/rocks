@@ -190,6 +190,33 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
     static_cast<void>(setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), nice));
 }
 
+// nice 값을 PosixSetCurrentThreadPriority의 다섯 눈금(19·10·0·-4·-8) 중 가장 가까운 단계로 바꾼다.
+// getpriority는 -1도 정상 값이라 errno로 실패를 가린다.
+bool PosixGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    errno = 0;
+    const int nice = getpriority(PRIO_PROCESS, static_cast<id_t>(gettid()));
+    if (nice == -1 && errno != 0) {
+        return false;
+    }
+
+    const int steps[] = {19, 10, 0, -4, -8};
+    const ThreadPriority levels[] = {ThreadPriority::Lowest, ThreadPriority::BelowNormal,
+                                     ThreadPriority::Normal, ThreadPriority::AboveNormal,
+                                     ThreadPriority::Highest};
+    int best = 0;
+    for (int index = 1; index < 5; ++index) {
+        const int distance = nice - steps[index];
+        const int bestDistance = nice - steps[best];
+        if ((distance < 0 ? -distance : distance) <
+            (bestDistance < 0 ? -bestDistance : bestDistance)) {
+            best = index;
+        }
+    }
+
+    priority = levels[best];
+    return true;
+}
+
 // Android 공개 NDK 라이브러리(libvulkan.so 등)는 링커 namespace가 이름으로 찾아야 한다. 앱
 // namespace는 /system 절대 경로 열기를 막을 수 있으므로(Android 7 이후) 이름 그대로 넘긴다.
 const char* PosixSystemLibraryDirectory() noexcept {

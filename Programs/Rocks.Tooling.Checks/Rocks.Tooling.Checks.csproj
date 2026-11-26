@@ -10,4 +10,8 @@
     <!-- The Release exclusion policy (ReleaseExclusion) evaluates module and target rules (RuleLoader). -->
     <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- C# member blank line check (CSharpMemberSpacing) reads syntax trees only. One exact version (Docs/CodingStyle.md). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="[5.9.0]" />
+  </ItemGroup>
 </Project>

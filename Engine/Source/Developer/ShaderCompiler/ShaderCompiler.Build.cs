@@ -5,7 +5,9 @@ using Rocks.Build.Rules;
 /// Shader compile management module (main process) (Docs/Design/ShaderSystem sections 3, 10 and 11.1). It holds the shader source tree and the
 /// preprocessor (SC2, SC3), preprocess define assembly (SC10), compile options (SC9), job keys and the shader nugget record values and location (P5),
 /// and grows the compile manager and worker pool (SH1). Format definitions come from ShaderCompilerCommon. AssetNugget: key writer and the nugget
-/// cache. HostConfig: the engine folder used as the nugget root without a project. It checks tool names against the tool table (ShaderToolTable)
+/// cache. AssetCooker: the shader library cook artifact stage (ShaderSystem section 16.1 SSD44 — this module registers it at Startup).
+/// ModuleLoader: the cook stage starts the engine module set to fill the shader type registry (BuildTargets section 3.10 item 4).
+/// HostConfig: the engine folder used as the nugget root without a project. It checks tool names against the tool table (ShaderToolTable)
 /// but never opens tool binaries (policy check shader-tool-binary-load).
 /// </summary>
 public sealed class ShaderCompiler : EngineModuleRules
@@ -17,8 +19,8 @@ public sealed class ShaderCompiler : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ShaderCore", "ShaderCompilerCommon", "AssetNugget", "PlatformBase", "Core"];
+    protected override string[] PublicDependencies => ["ShaderCore", "ShaderCompilerCommon", "AssetNugget", "AssetCooker", "PlatformBase", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["HostConfig"];
+    protected override string[] PrivateDependencies => ["HostConfig", "ModuleLoader", "TargetProfiles"];
 }

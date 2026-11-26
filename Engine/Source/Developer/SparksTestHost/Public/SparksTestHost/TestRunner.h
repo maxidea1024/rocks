@@ -49,7 +49,7 @@ inline constexpr double TestFrameSeconds = 1.0 / 60.0;
 enum class TestOutcome : uint8 {
     Passed,
     Faulted,        // VM fault(AssertFailed 포함 — fault)
-    EndedWithError, // `Result`가 아닌 시험의 `try` 실패(SL 8.4절 — errorCode)
+    EndedWithError, // `Result`가 아닌 시험의 `try` 실패(SL 8.2절 — errorCode)
     NeedsEngine,    // headless host가 거부한 엔진 기능(detail — 처음 거부한 묶음 이름)
     DidNotFinish    // maxFrames 프레임 뒤에도 정지해 있다
 };

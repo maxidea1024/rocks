@@ -7,7 +7,7 @@
 
 #include <string.h>
 
-// Audio DSP1 시험(Docs/Design/AudioSystem.ko.md 3.20.8절)이 함께 쓰는 버퍼 생성·비교 도구다.
+// Audio DSP1 시험(Docs/Design/AudioSystem 3.20.8절)이 함께 쓰는 버퍼 생성·비교 도구다.
 namespace rocks::audio::audiotest {
 
 // 시험 버퍼는 늘 유효한 인자로 만든다(실패는 시험 코드 오류다).

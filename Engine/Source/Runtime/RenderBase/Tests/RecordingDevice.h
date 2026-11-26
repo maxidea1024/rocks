@@ -31,7 +31,11 @@ public:
         SetPipeline,
         SetVertexBuffers,
         SetIndexBuffer,
+        // value는 ResourceValue(단계, slot, 묶은 텍스처가 유효하면 1)다.
         SetTexture,
+        // value는 ResourceValue(단계, slot, 준 값이 있으면 1 + 필터 번호, 지우면 0)다. 거부된
+        // 호출은 넣지 않는다.
+        SetSampler,
         // value는 받은 byte 수(위 32 bit)와 첫 float × 255(아래 32 bit)다. 거부된 호출은 넣지
         // 않는다.
         SetDrawConstants,
@@ -96,6 +100,12 @@ public:
 
     // Op::SetConstantBuffer·SetConstantData의 value다.
     static constexpr uint64 ConstantValue(graphics::ShaderStage stage, uint32 slot,
+                                          uint32 word) noexcept {
+        return (static_cast<uint64>(stage) << 40) | (static_cast<uint64>(slot) << 32) | word;
+    }
+
+    // Op::SetTexture·SetSampler의 value다.
+    static constexpr uint64 ResourceValue(graphics::ShaderStage stage, uint32 slot,
                                           uint32 word) noexcept {
         return (static_cast<uint64>(stage) << 40) | (static_cast<uint64>(slot) << 32) | word;
     }
@@ -287,6 +297,10 @@ public:
                                                 Span<const uint8> initial) noexcept override;
     Result<graphics::TextureSubresources>
     GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
+    Result<graphics::TextureViewInfo>
+    GetTextureViewInfo(graphics::TextureHandle texture) noexcept override;
+    Result<graphics::BufferViewInfo>
+    GetBufferViewInfo(graphics::BufferViewHandle view) noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
     Result<graphics::TransientHeapHandle>
@@ -410,6 +424,11 @@ public:
         caps_.limits.computeGroupCount[2] = z;
     }
 
+    // 장치 능력을 바꾼다(쿠킹 형식 선택의 한도·장치 요구 시험). 장치를 쓰기 전에 고친다.
+    graphics::DeviceCaps& MutableCaps() noexcept {
+        return caps_;
+    }
+
     // 살아 있는 버퍼 view 수다(그래프가 view를 모두 Retire했는지).
     usize LiveBufferViews() const noexcept {
         return bufferViews_.Size();
@@ -457,6 +476,10 @@ private:
     struct BufferViewState {
         SlotHandle buffer;
         graphics::ViewAccess access = graphics::ViewAccess::Read;
+        // GetBufferViewInfo 값이다(종류·typed 값 계열·구조화 원소 byte).
+        graphics::BufferViewKind kind = graphics::BufferViewKind::Typed;
+        graphics::PixelShaderType shaderType = graphics::PixelShaderType::None;
+        uint32 stride = 0;
     };
 
     // 상수 버퍼 하나다(내용은 첫 32 bit만 기억한다).
@@ -481,6 +504,10 @@ private:
         SlotHandle source;
         graphics::ResolvedSubresourceRange range;
         graphics::ViewAccess access = graphics::ViewAccess::Read;
+        // GetTextureViewInfo 값이다(view는 view 차원·형식, 표본 수·비교 여부는 원 텍스처).
+        graphics::PixelFormat format = graphics::PixelFormat::Unknown;
+        uint32 sampleCount = 1;
+        bool comparison = false;
     };
 
     // view가 묶이는 원 텍스처 범위의 상태가 모두 allowed 가운데 하나인지 본다(아니면 검증 오류).
@@ -536,7 +563,10 @@ private:
                           Span<const graphics::VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
                         uint64 offset) noexcept override;
-    void SetTexture(graphics::TextureHandle texture) noexcept override;
+    void SetTexture(graphics::ShaderStage stage, uint32 slot,
+                    graphics::TextureHandle texture) noexcept override;
+    Result<void> SetSampler(graphics::ShaderStage stage, uint32 slot,
+                            const graphics::SamplerDesc* sampler) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     void SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
                            graphics::ConstantBufferHandle buffer) noexcept override;
@@ -596,6 +626,8 @@ private:
     Array<PlacedState> placedBuffers_;
     graphics::DeviceOwnership ownership_;
     SlotArray<graphics::ResourceAccess> buffers_;
+    // 버퍼 slot 번호마다 BufferDesc::stride다(구조화 view의 GetBufferViewInfo).
+    Array<uint32> bufferStrides_;
     Allocator& allocator_;
     SlotArray<TextureState> textures_;
     Array<TransitionCall> transitions_;

@@ -193,8 +193,9 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     // (RenderBase 9.11절 5항).
     auto srvs =
         srvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SrvCapacity, false);
+    // 샘플러 원본도 CPU 전용이고 그리기 때 shader-visible sampler ring으로 복사한다(9.13절 4항).
     auto samplers = samplers_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
-                                         SamplerCapacity, true);
+                                         SamplerCapacity, false);
     if (!rtvs || !dsvs || !srvs || !samplers) {
         return Fail("descriptor heap creation failed");
     }

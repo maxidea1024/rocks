@@ -10,6 +10,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
+#include <Object/OverrideSet.h>
 #include <Platform/File.h>
 #include <ReflectionText/TextAssignments.h>
 #include <ReflectionText/TextCodecOptions.h>

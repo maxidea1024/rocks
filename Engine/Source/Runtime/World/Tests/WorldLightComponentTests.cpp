@@ -877,9 +877,9 @@ TEST(Light_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4 — A5c tickSettings 포함). 광원
-    // 클래스가 더하는 수는 LightComponentBase 11·LightComponent 14·LocalLight 3·Point 5·Spot 2·Rect
-    // 4·Directional 15·Sky 8, 광원 Actor 0이다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). 광원 클래스가 더하는 수는
+    // LightComponentBase 11·LightComponent 14·LocalLight 3·Point 5·Spot 2·Rect 4·Directional 15·Sky
+    // 8, 광원 Actor 0이다.
     const Expected expected[] = {
         {ObjectTypeIdOf<LightComponentBase>(), ObjectTypeIdOf<SceneComponent>(), 22, true},
         {ObjectTypeIdOf<LightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 36, true},

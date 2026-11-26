@@ -951,8 +951,8 @@ TEST(Movement_ReflectionAndSaveRoundTrip) {
         usize fields;
     };
 
-    // 필드 수는 상속분 포함(Component 2, SceneComponent 11 — A5c tickSettings 포함). Movement 9,
-    // Rotating 3, Projectile 20, PathMover 9, SpringArm 16.
+    // 필드 수는 상속분 포함(Component 2, SceneComponent 11). Movement 9, Rotating 3, Projectile 20,
+    // PathMover 9, SpringArm 16.
     const Expected expected[] = {
         {ObjectTypeIdOf<MovementComponent>(), ObjectTypeIdOf<Component>(), 11},
         {ObjectTypeIdOf<RotatingMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 14},

@@ -60,25 +60,22 @@ struct ShaderCodeDesc {
     Span<const uint8> glesBindingHeader;
 };
 
-// 그리기 기록의 고정 slot(CommandContext SetTexture·SetBufferView·SetWritableBufferView·
-// SetWritableTexture)과 셰이더 자원 이름을 잇는 표다. 파라미터 묶음(RenderBase GX6) 전의 개발
-// 경로다. 셰이더 원문은 register를 적지 않으므로(ShaderSystem 7.2절 1항) slot은 이름으로 정한다.
-// 셰이더가 선언한 자원이 이 표에 없으면 파이프라인 생성이 InvalidArgument다(루트 상수는 표 밖이다 —
-// drawConstantBytes).
-// - texture: SetTexture가 묶는 SRV 텍스처. 짝 샘플러는 같은 단계의 <texture>Sampler다
-//   (ShaderSystem 7.2절 9항). 그래픽은 PS, compute는 CS만 읽는다.
+// 버퍼 view·compute 쓰기의 고정 slot(CommandContext SetBufferView·SetWritableBufferView·
+// SetWritableTexture)과 셰이더 자원 이름을 잇는 표다. 셰이더 원문은 register를 적지 않으므로
+// (ShaderSystem 7.2절 1항) slot은 이름으로 정한다. 셰이더가 선언한 버퍼 view·쓰기 자원이 이 표에
+// 없으면 파이프라인 생성이 InvalidArgument다. 상수 버퍼·텍스처·샘플러는 이 표 밖이다 — 값 1 slot
+// (backend 위치)으로 묶는다(SetConstantBuffer·SetTexture·SetSampler, RenderBase 9.11·9.13절). 버퍼
+// view의 위치 묶기는 후속이다(RenderBase 9.13절 7항).
 // - bufferViews[n]: SetBufferView(n)이 묶는 typed(SRV 텍스처 종류)·구조화·raw(구조화 SRV 종류)
 //   버퍼. VS·PS가 같은 이름이면 같은 view를 본다.
 // - writableBuffers[n]·writableTextures[n]: compute 쓰기 slot n(같은 번호 공간이라 한 slot에 둘 중
 //   하나만 이름을 준다).
 //
-// 사용 예(PS가 Texture2D Albedo·SamplerState AlbedoSampler와 Buffer<float4> Lights를 읽는다):
-//   desc.bindings.texture = "Albedo";
+// 사용 예(PS가 Buffer<float4> Lights를 읽는다):
 //   desc.bindings.bufferViews[0] = "Lights";
 inline constexpr uint32 MaxPipelineNamedSlots = 4;
 
 struct PipelineBindingNames {
-    StringView texture;
     StringView bufferViews[MaxPipelineNamedSlots];
     StringView writableBuffers[MaxPipelineNamedSlots];
     StringView writableTextures[MaxPipelineNamedSlots];

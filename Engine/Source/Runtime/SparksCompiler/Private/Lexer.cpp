@@ -2,6 +2,7 @@
 
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
+#include <SparksCompiler/LanguageCatalog.h>
 #include <SparksCompiler/Literal.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -30,6 +31,7 @@ struct Keyword {
     StringView text;
     StringView quoted; // 진단 문장용 표기
     TokenKind kind;
+    bool fullOnly = false; // core 패키지에서 쓸 수 없다(1.3절 full — S1113)
 };
 
 constexpr Keyword Keywords[] = {
@@ -64,8 +66,8 @@ constexpr Keyword Keywords[] = {
     {"true", "'true'", TokenKind::True},
     {"false", "'false'", TokenKind::False},
     {"null", "'null'", TokenKind::Null},
-    {"interface", "'interface'", TokenKind::Interface},
-    {"open", "'open'", TokenKind::Open},
+    {"interface", "'interface'", TokenKind::Interface, true},
+    {"open", "'open'", TokenKind::Open, true},
 };
 
 constexpr bool IsAsciiLetter(char value) noexcept {
@@ -1107,6 +1109,18 @@ Result<void> TokenizeWithComments(const SourceSet& sources, SourceId id,
 
     Lexer lexer(file, id, diagnostics, tokens, tokens.GetAllocator(), &comments);
     return lexer.Run();
+}
+
+uint32 LanguageKeywordCount() noexcept {
+    return static_cast<uint32>(sizeof(Keywords) / sizeof(Keywords[0]));
+}
+
+LanguageWord LanguageKeywordAt(uint32 index) noexcept {
+    if (index >= LanguageKeywordCount()) {
+        return LanguageWord{StringView(), false};
+    }
+
+    return LanguageWord{Keywords[index].text, Keywords[index].fullOnly};
 }
 
 } // namespace rocks::sparks

@@ -1102,8 +1102,8 @@ TEST(Environment_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4 — A5c tickSettings 포함). 더하는 수는
-    // 대기·안개 1, decal 9, 후처리 6, 반사 캡처 기반 8, Sphere·Box·Plane 1, 환경 Actor 0이다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). 더하는 수는 대기·안개 1, decal 9,
+    // 후처리 6, 반사 캡처 기반 8, Sphere·Box·Plane 1, 환경 Actor 0이다.
     const Expected expected[] = {
         {ObjectTypeIdOf<SkyAtmosphereComponent>(), ObjectTypeIdOf<SceneComponent>(), 12, false},
         {ObjectTypeIdOf<HeightFogComponent>(), ObjectTypeIdOf<SceneComponent>(), 12, false},

@@ -41,7 +41,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 구현(장치 쪽 2026-11-18: attachment 시작·dispatch·간접 명령·복사·UAV clear, 여러 기록 객체는 RG3 기록 목록으로 대체. 그룹 수 도우미·그래프 compute pass·그래프 버퍼 view는 개정 37, 4.4절 "GX3·GX4 compute 연결 설계". 후속: 접는 그룹 수·그룹 수 콜백) | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
 | GX5 | 명시 접근 상태와 전이 | 구현(전이 API·분리 전이(begin·end)·D3D12·D3D11·OpenGL ES·Vulkan·기록 장치. pipe와 queue 사이 대기는 RG4, 8절 개정 32) | GX2·GX4 | RG1 | M–L | 4.4절 |
-| GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 구현(상수 버퍼 묶기 — 설계 개정 38·구현 개정 39, 9.11절. 공유 slot 표·`ParameterBatch` 자원 부분은 이 절 밖) | P2·SH2 | RB4 | L | 4.4절, 9절 |
+| GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 구현(상수 버퍼 묶기 — 설계 개정 38·구현 개정 39, 9.11절. 장치 다중 텍스처·샘플러 slot과 `ParameterBatch` 자원 부분 — 설계 개정 50·구현 개정 51, 9.13절. 공유 slot 표는 RR13) | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
 | GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 구현(`GpuScope`는 RB7에서 구현) | GX7 | RB7 | M | 4.4절, 13절 |
@@ -52,7 +52,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 | RB2 | 장치 자원 소유자·내장 자원 팩·대체 자원 | 부분(lease·Retire는 RB1·RG1 `RenderHandleTable`. 내장 자원 팩 1차·`Pending`·`Failed` 대체는 개정 40 — 18.3절 RR7, 장치 재생성은 후속 RR18) | GX2·GX7·GX8·GX11 | RB6 | M | 6절 |
 | RB3 | 셰이더 집합 | 구현(SH2e3, 엔진 호스트 연결 RR11은 개정 45 — 9.12절, 남은 것은 18.3절 RR9) | SH2·P14·P6b·GX1·GX11·CP7 | RB4 | M | 9.2절 |
-| RB4 | 바인딩 지도·상수 블록·파이프라인 캐시·교체 | 부분(SH2e3·GX3·GX4·GX6. 교체는 개정 40 RR8, 남은 것 RR12–RR14) | GX3·GX6·GX8·CP3 | RG1 파라미터 구조체 | L | 9.3–9.8·9.11절 |
+| RB4 | 바인딩 지도·상수 블록·파이프라인 캐시·교체 | 부분(SH2e3·GX3·GX4·GX6. 교체는 개정 40 RR8, 자원 묶음 RR12는 설계 개정 50·구현 개정 51 — 9.13절, 남은 것 RR13·RR14) | GX3·GX6·GX8·CP3 | RG1 파라미터 구조체 | L | 9.3–9.8·9.11절 |
 | RB5 | 정점 입력 타입 | 부분(개정 40 RR4–RR6, 남은 것 RR15·RR16) | P14·SX4·GX3·GX4 | 메시 렌더링 | M | 10절 |
 | RB6 | 공용 자원·그리기 유틸리티 | 개정 40(RR1–RR3·RR7, 남은 것 RR17) | GX3·GX4·RB2 | 화면 마일스톤 | M | 11절 |
 | RB7 | GPU 계측 | 구현 | GX9·CP5 | RG1 | M | 13절 |

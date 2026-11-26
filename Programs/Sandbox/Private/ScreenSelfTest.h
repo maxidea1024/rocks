@@ -19,6 +19,14 @@ namespace sandbox {
 rocks::uint32 RunScreenChecks(const char* name, rocks::graphics::Device& device,
                               rocks::Allocator& allocator, rocks::ModuleLoader& modules) noexcept;
 
+// 같은 화면 검사를 쿠킹 엔진 셰이더 라이브러리로 돈다(Docs/Design/ShaderSystem 16.1절 SSD48): 시험
+// 호스트와 따로 RenderBase 엔진 타입만 등록한 호스트에 엔진 쿠킹 루트의 매니페스트 원천을 붙이고,
+// 집합이 쿠킹 라이브러리로 열렸는지와 고른 형식을 더 확인한다. 엔진 쿠킹 결과가 없으면 NOT RUN
+// (`asset-cook --engine --profile=<host>`)이다. 실패 수를 돌려준다.
+rocks::uint32 RunCookedScreenChecks(const char* name, rocks::graphics::Device& device,
+                                    rocks::Allocator& allocator,
+                                    rocks::ModuleLoader& modules) noexcept;
+
 // 카메라 입력 경로를 헤드리스 엔진으로 확인한다(18.5절 5항 (e)): W를 누른 채 돌린 두 프레임 사이
 // 카메라 이동 = 1200 cm/s × 프레임 수 × 고정 delta, 오른쪽 화살표 회전율 45 °/s. 실패 수를
 // 돌려준다.

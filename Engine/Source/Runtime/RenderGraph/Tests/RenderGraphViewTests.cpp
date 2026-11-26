@@ -87,7 +87,7 @@ TEST(RenderGraph_TextureViewsLowerToDeviceViews) {
                         bases[mip] = 99;
                     }
 
-                    pass.Commands().SetTexture(pass.View(read));
+                    pass.Commands().SetTexture(graphics::ShaderStage::Pixel, 0, pass.View(read));
                     pass.Commands().SetWritableTexture(0, pass.View(write));
                     pass.Commands().Dispatch(1, 1);
                 }));

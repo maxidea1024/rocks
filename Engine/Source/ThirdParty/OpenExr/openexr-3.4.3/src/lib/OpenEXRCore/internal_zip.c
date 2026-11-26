@@ -20,7 +20,8 @@
 #    include <emmintrin.h>
 #    include <mmintrin.h>
 #endif
-#if defined __SSE4_1__
+/* Rocks: clang-cl defines _MSC_VER but needs SSE4.1 enabled for the intrinsics (Rocks.patch) */
+#if defined __SSE4_1__ || (_MSC_VER >= 1300 && (_M_IX86 || _M_X64) && !defined(__clang__))
 #    define IMF_HAVE_SSE4_1 1
 #    include <smmintrin.h>
 #endif

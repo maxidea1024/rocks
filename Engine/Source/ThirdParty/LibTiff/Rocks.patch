@@ -1,142 +1,15 @@
-diff --git a/libtiff/tif_hash_set.c b/libtiff/tif_hash_set.c
---- a/libtiff/tif_hash_set.c
-+++ b/libtiff/tif_hash_set.c
-@@ -29,6 +29,7 @@
- #include "tif_config.h"
- 
- #include "tif_hash_set.h"
-+#include "tiffio.h" /* Rocks: _TIFFmalloc family (Rocks.patch) */
- 
- #include <assert.h>
- #include <stdbool.h>
-@@ -139,17 +140,17 @@ TIFFHashSet *TIFFHashSetNew(TIFFHashSetHashFunc fnHashFunc,
-                             TIFFHashSetEqualFunc fnEqualFunc,
-                             TIFFHashSetFreeEltFunc fnFreeEltFunc)
- {
--    TIFFHashSet *set = (TIFFHashSet *)malloc(sizeof(TIFFHashSet));
-+    TIFFHashSet *set = (TIFFHashSet *)_TIFFmalloc((tmsize_t)sizeof(TIFFHashSet));
-     if (set == NULL)
-         return NULL;
-     set->fnHashFunc = fnHashFunc ? fnHashFunc : TIFFHashSetHashPointer;
-     set->fnEqualFunc = fnEqualFunc ? fnEqualFunc : TIFFHashSetEqualPointer;
-     set->fnFreeEltFunc = fnFreeEltFunc;
-     set->nSize = 0;
--    set->tabList = (TIFFList **)(calloc(53, sizeof(TIFFList *)));
-+    set->tabList = (TIFFList **)(_TIFFcalloc(53, (tmsize_t)sizeof(TIFFList *)));
-     if (set->tabList == NULL)
-     {
--        free(set);
-+        _TIFFfree(set);
-         return NULL;
-     }
-     set->nIndiceAllocatedSize = 0;
-@@ -198,7 +199,7 @@ static TIFFList *TIFFHashSetGetNewListElt(TIFFHashSet *set)
-         return psRet;
-     }
- 
--    return (TIFFList *)malloc(sizeof(TIFFList));
-+    return (TIFFList *)_TIFFmalloc((tmsize_t)sizeof(TIFFList));
- }
- 
- /************************************************************************/
-@@ -215,7 +216,7 @@ static void TIFFHashSetReturnListElt(TIFFHashSet *set, TIFFList *psList)
-     }
-     else
-     {
--        free(psList);
-+        _TIFFfree(psList);
-     }
- }
- 
-@@ -235,7 +236,7 @@ static void TIFFHashSetClearInternal(TIFFHashSet *set, bool bFinalize)
-                 set->fnFreeEltFunc(cur->pData);
-             TIFFList *psNext = cur->psNext;
-             if (bFinalize)
--                free(cur);
-+                _TIFFfree(cur);
-             else
-                 TIFFHashSetReturnListElt(set, cur);
-             cur = psNext;
-@@ -264,7 +265,7 @@ static void TIFFListDestroy(TIFFList *psList)
-     while (psCurrent)
-     {
-         TIFFList *const psNext = psCurrent->psNext;
--        free(psCurrent);
-+        _TIFFfree(psCurrent);
-         psCurrent = psNext;
-     }
- }
-@@ -287,9 +288,9 @@ void TIFFHashSetDestroy(TIFFHashSet *set)
-     if (set)
-     {
-         TIFFHashSetClearInternal(set, true);
--        free(set->tabList);
-+        _TIFFfree(set->tabList);
-         TIFFListDestroy(set->psRecyclingList);
--        free(set);
-+        _TIFFfree(set);
-     }
- }
- 
-@@ -367,7 +368,7 @@ static bool TIFFHashSetRehash(TIFFHashSet *set)
- {
-     int nNewAllocatedSize = anPrimes[set->nIndiceAllocatedSize];
-     TIFFList **newTabList =
--        (TIFFList **)(calloc((size_t)nNewAllocatedSize, sizeof(TIFFList *)));
-+        (TIFFList **)(_TIFFcalloc((tmsize_t)nNewAllocatedSize, (tmsize_t)sizeof(TIFFList *)));
-     if (newTabList == NULL)
-         return false;
- #ifdef HASH_DEBUG
-@@ -395,7 +396,7 @@ static bool TIFFHashSetRehash(TIFFHashSet *set)
-             cur = psNext;
-         }
-     }
--    free(set->tabList);
-+    _TIFFfree(set->tabList);
-     set->tabList = newTabList;
-     set->nAllocatedSize = nNewAllocatedSize;
-     set->bRehash = false;
-diff --git a/libtiff/tif_dirread.c b/libtiff/tif_dirread.c
---- a/libtiff/tif_dirread.c
-+++ b/libtiff/tif_dirread.c
-@@ -5770,7 +5770,7 @@ int _TIFFCheckDirNumberAndOffset(TIFF *tif, tdir_t dirn, uint64_t diroff)
-     if (tif->tif_map_dir_offset_to_number == NULL)
-     {
-         tif->tif_map_dir_offset_to_number = TIFFHashSetNew(
--            hashFuncOffsetToNumber, equalFuncOffsetToNumber, free);
-+            hashFuncOffsetToNumber, equalFuncOffsetToNumber, _TIFFfree);
-         if (tif->tif_map_dir_offset_to_number == NULL)
-         {
-             TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
-@@ -5852,8 +5852,8 @@ int _TIFFCheckDirNumberAndOffset(TIFF *tif, tdir_t dirn, uint64_t diroff)
-                                   foundEntryOld);
-             }
- 
--            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)malloc(
--                sizeof(TIFFOffsetAndDirNumber));
-+            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)_TIFFmalloc(
-+                (tmsize_t)sizeof(TIFFOffsetAndDirNumber));
-             if (entryPtr == NULL)
-             {
-                 return 0;
-@@ -5891,7 +5891,7 @@ int _TIFFCheckDirNumberAndOffset(TIFF *tif, tdir_t dirn, uint64_t diroff)
-     }
- 
-     TIFFOffsetAndDirNumber *entryPtr =
--        (TIFFOffsetAndDirNumber *)malloc(sizeof(TIFFOffsetAndDirNumber));
-+        (TIFFOffsetAndDirNumber *)_TIFFmalloc((tmsize_t)sizeof(TIFFOffsetAndDirNumber));
-     if (entryPtr == NULL)
-     {
-         TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
-@@ -7799,7 +7799,7 @@ static int TIFFFetchStripThing(TIFF *tif, TIFFDirEntry *dir, uint32_t nstrips,
-     {
-         uint64_t *resizeddata;
-         const TIFFField *fip = TIFFFieldWithTag(tif, dir->tdir_tag);
--        const char *pszMax = getenv("LIBTIFF_STRILE_ARRAY_MAX_RESIZE_COUNT");
-+        const char *pszMax = ((const char *)NULL) /* Rocks: no environment override */;
-         uint32_t max_nstrips = 1000000;
-         if (pszMax)
-             max_nstrips = (uint32_t)atoi(pszMax);
+diff --git a/libtiff/tif_compress.c b/libtiff/tif_compress.c
+--- a/libtiff/tif_compress.c
++++ b/libtiff/tif_compress.c
+@@ -237,7 +237,7 @@
+         char *codec_name;
+         cd->info = (TIFFCodec *)((uint8_t *)cd + sizeof(codec_t));
+         codec_name = (char *)((uint8_t *)cd->info + sizeof(TIFFCodec));
+-        strcpy(codec_name, name);
++        memcpy(codec_name, name, strlen(name) + 1);
+         cd->info->name = codec_name;
+         cd->info->scheme = scheme;
+         cd->info->init = init;
 diff --git a/libtiff/tif_config.h b/libtiff/tif_config.h
 new file mode 100644
 --- /dev/null
@@ -178,66 +51,319 @@ new file mode 100644
 +#endif
 +
 +#endif /* ROCKS_TIF_CONFIG_H */
-diff --git a/libtiff/tiffconf.h b/libtiff/tiffconf.h
-new file mode 100644
---- /dev/null
-+++ b/libtiff/tiffconf.h
-@@ -0,0 +1,55 @@
-+/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
-+   libtiff CMake build generates from tiffconf.h.cmake.in. Every Rocks target is little endian with IEEE floating point. The codecs
-+   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib) plus JPEG and
-+   old JPEG through the Rocks libjpeg-turbo (section 12.11 - UE enables them on Mac and Linux only); PixarLog, SGILog, JBIG, LERC,
-+   LZMA, WebP and ZSTD are not built.
-+   DEFAULT_EXTRASAMPLE_AS_ALPHA matches UE: a fourth sample without an ExtraSamples value is alpha. */
-+#ifndef _TIFFCONF_
-+#define _TIFFCONF_
-+
-+#include <inttypes.h>
-+#include <stddef.h>
-+#include <stdint.h>
-+
-+#define TIFF_INT16_T int16_t
-+#define TIFF_INT32_T int32_t
-+#define TIFF_INT64_T int64_t
-+#define TIFF_INT8_T int8_t
-+#define TIFF_UINT16_T uint16_t
-+#define TIFF_UINT32_T uint32_t
-+#define TIFF_UINT64_T uint64_t
-+#define TIFF_UINT8_T uint8_t
-+
-+#if SIZE_MAX == UINT64_MAX
-+#define TIFF_SSIZE_T int64_t
-+#else
-+#define TIFF_SSIZE_T int32_t
-+#endif
-+
-+#define HAVE_IEEEFP 1
-+#define HOST_FILLORDER FILLORDER_LSB2MSB
-+#define HOST_BIGENDIAN 0
-+
-+#define CCITT_SUPPORT 1
-+#define JPEG_SUPPORT 1
-+#define LZW_SUPPORT 1
-+#define NEXT_SUPPORT 1
-+#define OJPEG_SUPPORT 1
-+#define PACKBITS_SUPPORT 1
-+#define THUNDER_SUPPORT 1
-+#define ZIP_SUPPORT 1
-+
-+#define STRIPCHOP_DEFAULT TIFF_STRIPCHOP
-+#define SUBIFD_SUPPORT 1
-+#define DEFAULT_EXTRASAMPLE_AS_ALPHA 1
-+#define CHECK_JPEG_YCBCR_SUBSAMPLING 1
-+#define MDI_SUPPORT 1
-+
-+#define COLORIMETRY_SUPPORT
-+#define YCBCR_SUPPORT
-+#define CMYK_SUPPORT
-+#define ICC_SUPPORT
-+#define PHOTOSHOP_SUPPORT
-+#define IPTC_SUPPORT
-+
-+#endif /* _TIFFCONF_ */
+diff --git a/libtiff/tif_dir.c b/libtiff/tif_dir.c
+--- a/libtiff/tif_dir.c
++++ b/libtiff/tif_dir.c
+@@ -183,6 +183,14 @@
+ 
+     td->td_extrasamples = (uint16_t)*v;
+     _TIFFsetShortArrayExt(tif, &td->td_sampleinfo, va, td->td_extrasamples);
++    /* Rocks: a failed copy (allocation failure) leaves no extra samples, not a count without
++     * values that the directory writer would read (Rocks.patch) */
++    if (td->td_extrasamples > 0 && td->td_sampleinfo == NULL)
++    {
++        td->td_extrasamples = 0;
++        TIFFClrFieldBit(tif, FIELD_EXTRASAMPLES);
++        return 0;
++    }
+     return 1;
+ 
+ #undef EXTRASAMPLE_COREL_UNASSALPHA
+@@ -454,6 +462,21 @@
+                                   va_arg(ap, uint16_t *), v32);
+             _TIFFsetShortArrayExt(tif, &td->td_colormap[2],
+                                   va_arg(ap, uint16_t *), v32);
++            /* Rocks: a failed copy (allocation failure) leaves no colormap and fails the set,
++             * not a set tag with null arrays that the directory writer would read (Rocks.patch) */
++            if (td->td_colormap[0] == NULL || td->td_colormap[1] == NULL ||
++                td->td_colormap[2] == NULL)
++            {
++                for (v32 = 0; v32 < 3; v32++)
++                {
++                    if (td->td_colormap[v32] != NULL)
++                        _TIFFfreeExt(tif, td->td_colormap[v32]);
++                    td->td_colormap[v32] = NULL;
++                }
++                TIFFClrFieldBit(tif, FIELD_COLORMAP);
++                status = 0;
++                goto end;
++            }
+             break;
+         case TIFFTAG_EXTRASAMPLES:
+             if (!setExtraSamples(tif, ap, &v))
+@@ -465,6 +488,14 @@
+             {
+                 uint16_t sv = EXTRASAMPLE_ASSOCALPHA;
+                 _TIFFsetShortArrayExt(tif, &td->td_sampleinfo, &sv, 1);
++                /* Rocks: a failed copy leaves no extra samples (Rocks.patch) */
++                if (td->td_sampleinfo == NULL)
++                {
++                    td->td_extrasamples = 0;
++                    TIFFClrFieldBit(tif, FIELD_EXTRASAMPLES);
++                    status = 0;
++                    goto end;
++                }
+             }
+             break;
+         case TIFFTAG_TILEWIDTH:
+@@ -576,12 +607,35 @@
+             for (i = 0; i < v; i++)
+                 _TIFFsetShortArrayExt(tif, &td->td_transferfunction[i],
+                                       va_arg(ap, uint16_t *), count);
++            /* Rocks: a failed copy (allocation failure) leaves no transfer function and fails the
++             * set, not a set tag with null arrays (Rocks.patch) */
++            for (i = 0; i < v && td->td_transferfunction[i] != NULL; i++)
++                ;
++            if (i < v)
++            {
++                for (i = 0; i < 3; i++)
++                {
++                    if (td->td_transferfunction[i] != NULL)
++                        _TIFFfreeExt(tif, td->td_transferfunction[i]);
++                    td->td_transferfunction[i] = NULL;
++                }
++                TIFFClrFieldBit(tif, FIELD_TRANSFERFUNCTION);
++                status = 0;
++                goto end;
++            }
+             break;
+         }
+         case TIFFTAG_REFERENCEBLACKWHITE:
+             /* XXX should check for null range */
+             _TIFFsetFloatArrayExt(tif, &td->td_refblackwhite,
+                                   va_arg(ap, float *), 6);
++            /* Rocks: a failed copy leaves no reference black and white (Rocks.patch) */
++            if (td->td_refblackwhite == NULL)
++            {
++                TIFFClrFieldBit(tif, FIELD_REFBLACKWHITE);
++                status = 0;
++                goto end;
++            }
+             break;
+         case TIFFTAG_INKNAMES:
+         {
+diff --git a/libtiff/tif_dirinfo.c b/libtiff/tif_dirinfo.c
+--- a/libtiff/tif_dirinfo.c
++++ b/libtiff/tif_dirinfo.c
+@@ -648,7 +648,8 @@
+     }
+     if (!tif_newfields)
+     {
+-        tif->tif_nfields = 0;
++        /* Rocks: a failed realloc keeps the old array and its count, so
++         * TIFFCleanup still frees it (Rocks.patch) */
+         TIFFErrorExtR(tif, module, "Failed to allocate fields array");
+         return 0;
+     }
+diff --git a/libtiff/tif_dirread.c b/libtiff/tif_dirread.c
+--- a/libtiff/tif_dirread.c
++++ b/libtiff/tif_dirread.c
+@@ -5770,7 +5770,7 @@
+     if (tif->tif_map_dir_offset_to_number == NULL)
+     {
+         tif->tif_map_dir_offset_to_number = TIFFHashSetNew(
+-            hashFuncOffsetToNumber, equalFuncOffsetToNumber, free);
++            hashFuncOffsetToNumber, equalFuncOffsetToNumber, _TIFFfree);
+         if (tif->tif_map_dir_offset_to_number == NULL)
+         {
+             TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
+@@ -5852,8 +5852,8 @@
+                                   foundEntryOld);
+             }
+ 
+-            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)malloc(
+-                sizeof(TIFFOffsetAndDirNumber));
++            TIFFOffsetAndDirNumber *entryPtr = (TIFFOffsetAndDirNumber *)_TIFFmalloc(
++                (tmsize_t)sizeof(TIFFOffsetAndDirNumber));
+             if (entryPtr == NULL)
+             {
+                 return 0;
+@@ -5891,7 +5891,7 @@
+     }
+ 
+     TIFFOffsetAndDirNumber *entryPtr =
+-        (TIFFOffsetAndDirNumber *)malloc(sizeof(TIFFOffsetAndDirNumber));
++        (TIFFOffsetAndDirNumber *)_TIFFmalloc((tmsize_t)sizeof(TIFFOffsetAndDirNumber));
+     if (entryPtr == NULL)
+     {
+         TIFFErrorExtR(tif, "_TIFFCheckDirNumberAndOffset",
+@@ -7799,7 +7799,8 @@
+     {
+         uint64_t *resizeddata;
+         const TIFFField *fip = TIFFFieldWithTag(tif, dir->tdir_tag);
+-        const char *pszMax = getenv("LIBTIFF_STRILE_ARRAY_MAX_RESIZE_COUNT");
++        /* Rocks: the environment is not read (Rocks.patch) */
++        const char *pszMax = NULL;
+         uint32_t max_nstrips = 1000000;
+         if (pszMax)
+             max_nstrips = (uint32_t)atoi(pszMax);
+diff --git a/libtiff/tif_extension.c b/libtiff/tif_extension.c
+--- a/libtiff/tif_extension.c
++++ b/libtiff/tif_extension.c
+@@ -103,7 +103,7 @@
+     psLink->next = tif->tif_clientinfo;
+     psLink->name = (char *)_TIFFmallocExt(tif, (tmsize_t)(strlen(name) + 1));
+     assert(psLink->name != NULL);
+-    strcpy(psLink->name, name);
++    memcpy(psLink->name, name, strlen(name) + 1);
+     psLink->data = data;
+ 
+     tif->tif_clientinfo = psLink;
+diff --git a/libtiff/tif_hash_set.c b/libtiff/tif_hash_set.c
+--- a/libtiff/tif_hash_set.c
++++ b/libtiff/tif_hash_set.c
+@@ -29,6 +29,7 @@
+ #include "tif_config.h"
+ 
+ #include "tif_hash_set.h"
++#include "tiffio.h" /* Rocks: _TIFFmalloc family (Rocks.patch) */
+ 
+ #include <assert.h>
+ #include <stdbool.h>
+@@ -139,17 +140,17 @@
+                             TIFFHashSetEqualFunc fnEqualFunc,
+                             TIFFHashSetFreeEltFunc fnFreeEltFunc)
+ {
+-    TIFFHashSet *set = (TIFFHashSet *)malloc(sizeof(TIFFHashSet));
++    TIFFHashSet *set = (TIFFHashSet *)_TIFFmalloc((tmsize_t)sizeof(TIFFHashSet));
+     if (set == NULL)
+         return NULL;
+     set->fnHashFunc = fnHashFunc ? fnHashFunc : TIFFHashSetHashPointer;
+     set->fnEqualFunc = fnEqualFunc ? fnEqualFunc : TIFFHashSetEqualPointer;
+     set->fnFreeEltFunc = fnFreeEltFunc;
+     set->nSize = 0;
+-    set->tabList = (TIFFList **)(calloc(53, sizeof(TIFFList *)));
++    set->tabList = (TIFFList **)(_TIFFcalloc(53, (tmsize_t)sizeof(TIFFList *)));
+     if (set->tabList == NULL)
+     {
+-        free(set);
++        _TIFFfree(set);
+         return NULL;
+     }
+     set->nIndiceAllocatedSize = 0;
+@@ -198,7 +199,7 @@
+         return psRet;
+     }
+ 
+-    return (TIFFList *)malloc(sizeof(TIFFList));
++    return (TIFFList *)_TIFFmalloc((tmsize_t)sizeof(TIFFList));
+ }
+ 
+ /************************************************************************/
+@@ -215,7 +216,7 @@
+     }
+     else
+     {
+-        free(psList);
++        _TIFFfree(psList);
+     }
+ }
+ 
+@@ -235,7 +236,7 @@
+                 set->fnFreeEltFunc(cur->pData);
+             TIFFList *psNext = cur->psNext;
+             if (bFinalize)
+-                free(cur);
++                _TIFFfree(cur);
+             else
+                 TIFFHashSetReturnListElt(set, cur);
+             cur = psNext;
+@@ -264,7 +265,7 @@
+     while (psCurrent)
+     {
+         TIFFList *const psNext = psCurrent->psNext;
+-        free(psCurrent);
++        _TIFFfree(psCurrent);
+         psCurrent = psNext;
+     }
+ }
+@@ -287,9 +288,9 @@
+     if (set)
+     {
+         TIFFHashSetClearInternal(set, true);
+-        free(set->tabList);
++        _TIFFfree(set->tabList);
+         TIFFListDestroy(set->psRecyclingList);
+-        free(set);
++        _TIFFfree(set);
+     }
+ }
+ 
+@@ -367,7 +368,7 @@
+ {
+     int nNewAllocatedSize = anPrimes[set->nIndiceAllocatedSize];
+     TIFFList **newTabList =
+-        (TIFFList **)(calloc((size_t)nNewAllocatedSize, sizeof(TIFFList *)));
++        (TIFFList **)(_TIFFcalloc((tmsize_t)nNewAllocatedSize, (tmsize_t)sizeof(TIFFList *)));
+     if (newTabList == NULL)
+         return false;
+ #ifdef HASH_DEBUG
+@@ -395,7 +396,7 @@
+             cur = psNext;
+         }
+     }
+-    free(set->tabList);
++    _TIFFfree(set->tabList);
+     set->tabList = newTabList;
+     set->nAllocatedSize = nNewAllocatedSize;
+     set->bRehash = false;
+diff --git a/libtiff/tif_jpeg.c b/libtiff/tif_jpeg.c
+--- a/libtiff/tif_jpeg.c
++++ b/libtiff/tif_jpeg.c
+@@ -409,7 +409,8 @@
+     sp->cinfo.d.progress = &sp->progress;
+     sp->progress.progress_monitor = TIFFjpeg_progress_monitor;
+     sp->otherSettings.max_allowed_scan_number = 100;
+-    sz_max_allowed_scan_number = getenv("LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER");
++    /* Rocks: the environment is not read (Rocks.patch) */
++    sz_max_allowed_scan_number = NULL;
+     if (sz_max_allowed_scan_number)
+         sp->otherSettings.max_allowed_scan_number =
+             atoi(sz_max_allowed_scan_number);
+@@ -1339,7 +1340,7 @@
+ 
+         if (sp->cinfo.d.mem->max_memory_to_use > 0 &&
+             nRequiredMemory > (toff_t)(sp->cinfo.d.mem->max_memory_to_use) &&
+-            getenv("LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC") == NULL)
++            1 /* Rocks: the environment is not read (Rocks.patch) */)
+         {
+             TIFFErrorExtR(
+                 tif, module,
+@@ -2637,6 +2638,13 @@
+             }
+             _TIFFsetByteArrayExt(tif, &sp->otherSettings.jpegtables,
+                                  va_arg(ap, void *), v32);
++            /* Rocks: a failed copy leaves no tables, not a length without
++             * bytes (Rocks.patch) */
++            if (sp->otherSettings.jpegtables == NULL)
++            {
++                sp->otherSettings.jpegtables_length = 0;
++                return (0);
++            }
+             sp->otherSettings.jpegtables_length = v32;
+             TIFFSetFieldBit(tif, FIELD_JPEGTABLES);
+             break;
+@@ -2803,7 +2811,7 @@
+         if (sp->cinfo.c.mem->max_memory_to_use > 0)
+         {
+             /* This is to address bug related in ticket GDAL #1795. */
+-            if (getenv("JPEGMEM") == NULL)
++            if (1) /* Rocks: the environment is not read (Rocks.patch) */
+             {
+                 /* Increase the max memory usable. This helps when creating
+                  * files */
+diff --git a/libtiff/tif_open.c b/libtiff/tif_open.c
+--- a/libtiff/tif_open.c
++++ b/libtiff/tif_open.c
+@@ -373,7 +373,7 @@
+     }
+     _TIFFmemset(tif, 0, sizeof(*tif));
+     tif->tif_name = (char *)tif + sizeof(TIFF);
+-    strcpy(tif->tif_name, name);
++    memcpy(tif->tif_name, name, strlen(name) + 1);
+     tif->tif_mode = m & ~(O_CREAT | O_TRUNC);
+     tif->tif_curdir = TIFF_NON_EXISTENT_DIR_NUMBER; /* non-existent directory */
+     tif->tif_curdircount = TIFF_NON_EXISTENT_DIR_NUMBER;
 diff --git a/libtiff/tif_rocks.c b/libtiff/tif_rocks.c
 new file mode 100644
 --- /dev/null
@@ -391,69 +517,63 @@ new file mode 100644
 +#endif
 +
 +#endif /* TIF_ROCKS_H */
-diff --git a/libtiff/tif_compress.c b/libtiff/tif_compress.c
---- a/libtiff/tif_compress.c
-+++ b/libtiff/tif_compress.c
-@@ -237,7 +237,7 @@ TIFFCodec *TIFFRegisterCODEC(uint16_t scheme, const char *name,
-         char *codec_name;
-         cd->info = (TIFFCodec *)((uint8_t *)cd + sizeof(codec_t));
-         codec_name = (char *)((uint8_t *)cd->info + sizeof(TIFFCodec));
--        strcpy(codec_name, name);
-+        memcpy(codec_name, name, strlen(name) + 1);
-         cd->info->name = codec_name;
-         cd->info->scheme = scheme;
-         cd->info->init = init;
-diff --git a/libtiff/tif_extension.c b/libtiff/tif_extension.c
---- a/libtiff/tif_extension.c
-+++ b/libtiff/tif_extension.c
-@@ -103,7 +103,7 @@ void TIFFSetClientInfo(TIFF *tif, void *data, const char *name)
-     psLink->next = tif->tif_clientinfo;
-     psLink->name = (char *)_TIFFmallocExt(tif, (tmsize_t)(strlen(name) + 1));
-     assert(psLink->name != NULL);
--    strcpy(psLink->name, name);
-+    memcpy(psLink->name, name, strlen(name) + 1);
-     psLink->data = data;
- 
-     tif->tif_clientinfo = psLink;
-diff --git a/libtiff/tif_jpeg.c b/libtiff/tif_jpeg.c
---- a/libtiff/tif_jpeg.c
-+++ b/libtiff/tif_jpeg.c
-@@ -409,7 +409,7 @@ static int TIFFjpeg_start_decompress(JPEGState *sp)
-     sp->cinfo.d.progress = &sp->progress;
-     sp->progress.progress_monitor = TIFFjpeg_progress_monitor;
-     sp->otherSettings.max_allowed_scan_number = 100;
--    sz_max_allowed_scan_number = getenv("LIBTIFF_JPEG_MAX_ALLOWED_SCAN_NUMBER");
-+    sz_max_allowed_scan_number = ((const char *)NULL) /* Rocks: no environment override */;
-     if (sz_max_allowed_scan_number)
-         sp->otherSettings.max_allowed_scan_number =
-             atoi(sz_max_allowed_scan_number);
-@@ -1339,7 +1339,7 @@ static int JPEGComputeStrileWidthHeightBytesPerLine(TIFF *tif, uint16_t s)
- 
-         if (sp->cinfo.d.mem->max_memory_to_use > 0 &&
-             nRequiredMemory > (toff_t)(sp->cinfo.d.mem->max_memory_to_use) &&
--            getenv("LIBTIFF_ALLOW_LARGE_LIBJPEG_MEM_ALLOC") == NULL)
-+            ((const char *)NULL) /* Rocks: no environment override */ == NULL)
-         {
-             TIFFErrorExtR(
-                 tif, module,
-@@ -2803,7 +2803,7 @@ static int JPEGInitializeLibJPEG(TIFF *tif, int decompress)
-         if (sp->cinfo.c.mem->max_memory_to_use > 0)
-         {
-             /* This is to address bug related in ticket GDAL #1795. */
--            if (getenv("JPEGMEM") == NULL)
-+            if (((const char *)NULL) /* Rocks: no environment override */ == NULL)
-             {
-                 /* Increase the max memory usable. This helps when creating
-                  * files */
-diff --git a/libtiff/tif_open.c b/libtiff/tif_open.c
---- a/libtiff/tif_open.c
-+++ b/libtiff/tif_open.c
-@@ -373,7 +373,7 @@ TIFF *TIFFClientOpenExt(const char *name, const char *mode,
-     }
-     _TIFFmemset(tif, 0, sizeof(*tif));
-     tif->tif_name = (char *)tif + sizeof(TIFF);
--    strcpy(tif->tif_name, name);
-+    memcpy(tif->tif_name, name, strlen(name) + 1);
-     tif->tif_mode = m & ~(O_CREAT | O_TRUNC);
-     tif->tif_curdir = TIFF_NON_EXISTENT_DIR_NUMBER; /* non-existent directory */
-     tif->tif_curdircount = TIFF_NON_EXISTENT_DIR_NUMBER;
+diff --git a/libtiff/tiffconf.h b/libtiff/tiffconf.h
+new file mode 100644
+--- /dev/null
++++ b/libtiff/tiffconf.h
+@@ -0,0 +1,55 @@
++/* Rocks configuration header for libtiff 4.7.2 (Docs/Design/AssetSystem section 12.10), written by hand in place of the file the
++   libtiff CMake build generates from tiffconf.h.cmake.in. Every Rocks target is little endian with IEEE floating point. The codecs
++   are the lossless ones UE 5.8 also enables (CCITT, LZW, NeXT, PackBits, ThunderScan, ZIP through the Rocks zlib) plus JPEG and
++   old JPEG through the Rocks libjpeg-turbo (section 12.11 - UE enables them on Mac and Linux only); PixarLog, SGILog, JBIG, LERC,
++   LZMA, WebP and ZSTD are not built.
++   DEFAULT_EXTRASAMPLE_AS_ALPHA matches UE: a fourth sample without an ExtraSamples value is alpha. */
++#ifndef _TIFFCONF_
++#define _TIFFCONF_
++
++#include <inttypes.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#define TIFF_INT16_T int16_t
++#define TIFF_INT32_T int32_t
++#define TIFF_INT64_T int64_t
++#define TIFF_INT8_T int8_t
++#define TIFF_UINT16_T uint16_t
++#define TIFF_UINT32_T uint32_t
++#define TIFF_UINT64_T uint64_t
++#define TIFF_UINT8_T uint8_t
++
++#if SIZE_MAX == UINT64_MAX
++#define TIFF_SSIZE_T int64_t
++#else
++#define TIFF_SSIZE_T int32_t
++#endif
++
++#define HAVE_IEEEFP 1
++#define HOST_FILLORDER FILLORDER_LSB2MSB
++#define HOST_BIGENDIAN 0
++
++#define CCITT_SUPPORT 1
++#define JPEG_SUPPORT 1
++#define LZW_SUPPORT 1
++#define NEXT_SUPPORT 1
++#define OJPEG_SUPPORT 1
++#define PACKBITS_SUPPORT 1
++#define THUNDER_SUPPORT 1
++#define ZIP_SUPPORT 1
++
++#define STRIPCHOP_DEFAULT TIFF_STRIPCHOP
++#define SUBIFD_SUPPORT 1
++#define DEFAULT_EXTRASAMPLE_AS_ALPHA 1
++#define CHECK_JPEG_YCBCR_SUBSAMPLING 1
++#define MDI_SUPPORT 1
++
++#define COLORIMETRY_SUPPORT
++#define YCBCR_SUPPORT
++#define CMYK_SUPPORT
++#define ICC_SUPPORT
++#define PHOTOSHOP_SUPPORT
++#define IPTC_SUPPORT
++
++#endif /* _TIFFCONF_ */

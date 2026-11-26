@@ -149,13 +149,13 @@
   "defines": [
     "JPH_CROSS_PLATFORM_DETERMINISTIC",
     "JPH_ENABLE_ASSERTS",
-    "JPH_OBJECT_LAYER_BITS=16"
+    "JPH_OBJECT_LAYER_BITS=32"
   ],
   "platformDefines": {},
   "consumerDefines": [
     "JPH_CROSS_PLATFORM_DETERMINISTIC",
     "JPH_ENABLE_ASSERTS",
-    "JPH_OBJECT_LAYER_BITS=16"
+    "JPH_OBJECT_LAYER_BITS=32"
   ],
   "adapterHeaders": [
     "JoltPhysics-5.7.0/Jolt/AABBTree/AABBTreeBuilder.h",
@@ -800,8 +800,8 @@
     "Jolt/Physics/Constraints/ConstraintPart/RotationQuatConstraintPart.h": "05005a972547ad598203607dece11c02eee3c42cf8e3b51c92e9ce63bf676330",
     "Jolt/Physics/Constraints/ConstraintPart/SpringPart.h": "1dd204dac74a1f74f2949f8d80ebb87564ae523b774b3185b5d3cb0b24d56f9f",
     "Jolt/Physics/Constraints/ConstraintPart/SwingTwistConstraintPart.h": "0a96a8cf3e7656b51849fb19e9f171fda6995df093b470e2e7176932ab5cf28a",
-    "Jolt/Physics/Constraints/ContactConstraintManager.cpp": "a8f58e2e600781dbe63a97ddc2fdc0898d22b421230c19b6b9c137b10ad3220a",
-    "Jolt/Physics/Constraints/ContactConstraintManager.h": "890cfc17f1d477f4718bb98882274be0c26a7478cdce2d670b5a6cd2b7cf1591",
+    "Jolt/Physics/Constraints/ContactConstraintManager.cpp": "be8a521c9c4c022a129bc4415666818b91af4df6c3887d73ad80a496130bff2d",
+    "Jolt/Physics/Constraints/ContactConstraintManager.h": "8cad3eeaa0201ee8777e0a6f9d67d164cadf3fd2642668aa55ade1f90b42f48a",
     "Jolt/Physics/Constraints/DistanceConstraint.cpp": "808e9ca1d485a0328ec4b19191f99c7531e47651d519e78e033bb718becd52ef",
     "Jolt/Physics/Constraints/DistanceConstraint.h": "97bb0f2749b1714a91eda4fe016f4ec8c79c97850132dcd45bad1471c938970c",
     "Jolt/Physics/Constraints/FixedConstraint.cpp": "8b302274dc086257efcc089c773cca8c2dfe35c8a6aa60b82f34537842a9a448",
@@ -848,7 +848,7 @@
     "Jolt/Physics/PhysicsSettings.h": "4126ea1380dc6c54c720eb08d3c78331323cfda615a0e2f2ececdc5bb8ebb08f",
     "Jolt/Physics/PhysicsStepListener.h": "8c8fca84377ad2b77759bcd145ee7eefe95e1668c95b0eb9aa2779180acf548e",
     "Jolt/Physics/PhysicsSystem.cpp": "e3373f560e60cdd60ac0f237a4508cc78bf226789b07f0e8a7df11626cbece3d",
-    "Jolt/Physics/PhysicsSystem.h": "fcb6f9500c59535c86d8823c4b9f31863e272df5d4646e33e4d745d171986bd4",
+    "Jolt/Physics/PhysicsSystem.h": "3cf68bd1475cf8178c4b325d72157e81f659bca93e265e347dc4d75fe3ea7cfe",
     "Jolt/Physics/PhysicsUpdateContext.cpp": "85a87b2eb177bf1764eeb02c1a4f5b101d09de2a70370738e3bd04bcff53d9f5",
     "Jolt/Physics/PhysicsUpdateContext.h": "40747829f5bfef75de566ae9f8f75625f9095b25dbf107fcf47b70e938758fd8",
     "Jolt/Physics/Ragdoll/Ragdoll.cpp": "01096a2955ea4ffb4dbba3ad854f44ce0b3714974842c76a07181e7b453c6a19",
@@ -962,5 +962,23 @@
     "Global state: JPH::Factory::sInstance, the allocation, Trace and AssertFailed function pointers and RegisterTypes/UnregisterTypes are process wide.",
     "Renderer/ sources are built as in Jolt.cmake and compile out without JPH_DEBUG_RENDERER; ObjectStream/SerializableObject.cpp is required even without JPH_OBJECT_STREAM because it implements the RTTI of SerializableObject.",
     "Differences from the Jolt CMake defaults (built outside CMake): FLOATING_POINT_EXCEPTIONS_ENABLED, ENABLE_OBJECT_STREAM, DEBUG_RENDERER_IN_DEBUG_AND_RELEASE, PROFILER_IN_DEBUG_AND_RELEASE and the USE_SSE4_1..USE_FMADD ISA options are off; JPH_DEBUG (Jolt.cmake defines it for Debug) is defined in no configuration, for the library and consumers alike. Consumers call VerifyJoltVersionID() before RegisterTypes(), which aborts on a feature bit mismatch."
+  ],
+  "patch": "Rocks.patch",
+  "modifications": [
+    {
+      "file": "Jolt/Physics/Constraints/ContactConstraintManager.cpp",
+      "upstreamSha256": "a8f58e2e600781dbe63a97ddc2fdc0898d22b421230c19b6b9c137b10ad3220a",
+      "reason": "Add GetAppliedContactImpulse (ContactConstraintManager and the PhysicsSystem forwarder that locks the body with the larger BodyID for its rotation): sums lambda * world contact normal over the manifolds of a body pair from the read contact cache after PhysicsSystem::Update, looked up the same way as WereBodiesInContact. GetContactsFromCache clears the copied impulses of a manifold that gets no constraint in the step (sensor or zero inverse mass scale from the listener, or the constraint buffer is full), as the new manifold path already does, so stale impulses are not reported; this also starts the warm start of such a manifold from zero. Upstream has no public way to read the impulse the solver applied; Rocks hit events report the solver impulse like UE (Docs/Design/PhysicsJoltAdapter.ko.md section 10.6, PhysicsModule section 6.4)."
+    },
+    {
+      "file": "Jolt/Physics/Constraints/ContactConstraintManager.h",
+      "upstreamSha256": "890cfc17f1d477f4718bb98882274be0c26a7478cdce2d670b5a6cd2b7cf1591",
+      "reason": "Add GetAppliedContactImpulse (ContactConstraintManager and the PhysicsSystem forwarder that locks the body with the larger BodyID for its rotation): sums lambda * world contact normal over the manifolds of a body pair from the read contact cache after PhysicsSystem::Update, looked up the same way as WereBodiesInContact. GetContactsFromCache clears the copied impulses of a manifold that gets no constraint in the step (sensor or zero inverse mass scale from the listener, or the constraint buffer is full), as the new manifold path already does, so stale impulses are not reported; this also starts the warm start of such a manifold from zero. Upstream has no public way to read the impulse the solver applied; Rocks hit events report the solver impulse like UE (Docs/Design/PhysicsJoltAdapter.ko.md section 10.6, PhysicsModule section 6.4)."
+    },
+    {
+      "file": "Jolt/Physics/PhysicsSystem.h",
+      "upstreamSha256": "fcb6f9500c59535c86d8823c4b9f31863e272df5d4646e33e4d745d171986bd4",
+      "reason": "Add GetAppliedContactImpulse (ContactConstraintManager and the PhysicsSystem forwarder that locks the body with the larger BodyID for its rotation): sums lambda * world contact normal over the manifolds of a body pair from the read contact cache after PhysicsSystem::Update, looked up the same way as WereBodiesInContact. GetContactsFromCache clears the copied impulses of a manifold that gets no constraint in the step (sensor or zero inverse mass scale from the listener, or the constraint buffer is full), as the new manifold path already does, so stale impulses are not reported; this also starts the warm start of such a manifold from zero. Upstream has no public way to read the impulse the solver applied; Rocks hit events report the solver impulse like UE (Docs/Design/PhysicsJoltAdapter.ko.md section 10.6, PhysicsModule section 6.4)."
+    }
   ]
 }

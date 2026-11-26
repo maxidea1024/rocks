@@ -409,7 +409,8 @@ static int TIFFjpeg_start_decompress(JPEGState *sp)
     sp->cinfo.d.progress = &sp->progress;
     sp->progress.progress_monitor = TIFFjpeg_progress_monitor;
     sp->otherSettings.max_allowed_scan_number = 100;
-    sz_max_allowed_scan_number = ((const char *)NULL) /* Rocks: no environment override */;
+    /* Rocks: the environment is not read (Rocks.patch) */
+    sz_max_allowed_scan_number = NULL;
     if (sz_max_allowed_scan_number)
         sp->otherSettings.max_allowed_scan_number =
             atoi(sz_max_allowed_scan_number);
@@ -1339,7 +1340,7 @@ static int JPEGComputeStrileWidthHeightBytesPerLine(TIFF *tif, uint16_t s)
 
         if (sp->cinfo.d.mem->max_memory_to_use > 0 &&
             nRequiredMemory > (toff_t)(sp->cinfo.d.mem->max_memory_to_use) &&
-            ((const char *)NULL) /* Rocks: no environment override */ == NULL)
+            1 /* Rocks: the environment is not read (Rocks.patch) */)
         {
             TIFFErrorExtR(
                 tif, module,
@@ -2637,6 +2638,13 @@ static int JPEGVSetField(TIFF *tif, uint32_t tag, va_list ap)
             }
             _TIFFsetByteArrayExt(tif, &sp->otherSettings.jpegtables,
                                  va_arg(ap, void *), v32);
+            /* Rocks: a failed copy leaves no tables, not a length without
+             * bytes (Rocks.patch) */
+            if (sp->otherSettings.jpegtables == NULL)
+            {
+                sp->otherSettings.jpegtables_length = 0;
+                return (0);
+            }
             sp->otherSettings.jpegtables_length = v32;
             TIFFSetFieldBit(tif, FIELD_JPEGTABLES);
             break;
@@ -2803,7 +2811,7 @@ static int JPEGInitializeLibJPEG(TIFF *tif, int decompress)
         if (sp->cinfo.c.mem->max_memory_to_use > 0)
         {
             /* This is to address bug related in ticket GDAL #1795. */
-            if (((const char *)NULL) /* Rocks: no environment override */ == NULL)
+            if (1) /* Rocks: the environment is not read (Rocks.patch) */
             {
                 /* Increase the max memory usable. This helps when creating
                  * files */

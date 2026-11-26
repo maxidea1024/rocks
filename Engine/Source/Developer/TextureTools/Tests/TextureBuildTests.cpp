@@ -76,7 +76,7 @@ TEST(TextureBuild_SimpleAverage) {
                                   100, 120, 140, 160, 120, 140, 160, 180};
         Built built(allocator);
         REQUIRE(Build(allocator, Gray(4, 4), pixels, built));
-        CHECK(built.result.pixelFormat == PixelFormat::R8Unorm && !built.result.srgb &&
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R8Unorm && !built.result.srgb &&
               built.result.swizzle[1] == TextureSwizzle::R &&
               built.result.swizzle[3] == TextureSwizzle::One);
         REQUIRE(built.result.mips.Size() == 3);
@@ -192,7 +192,7 @@ TEST(TextureBuild_PowerOfTwoMode) {
         Built built(allocator);
         REQUIRE(Build(allocator, settings, pixels, built));
         REQUIRE(built.result.mips.Size() == 1);
-        CHECK(built.result.pixelFormat == PixelFormat::RGBA8UnormSrgb);
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8UnormSrgb);
         const Array<uint8>& top = built.result.mips[0].bytes;
         CHECK(built.result.mips[0].sizeX == 4 && built.result.mips[0].sizeY == 2);
         CHECK(top[0] == 10 && top[2 * 4] == 30 && top[3 * 4] == 200 && top[7 * 4] == 200);
@@ -409,7 +409,7 @@ TEST(TextureBuild_Linearization) {
         settings.encodingOverride = item.encoding;
         Built built(allocator);
         REQUIRE(Build(allocator, settings, gray, built));
-        CHECK(built.result.pixelFormat == PixelFormat::R16Float &&
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
               Le16(built.result.mips[0].bytes, 0) == half(item.expected));
     }
 
@@ -435,7 +435,7 @@ TEST(TextureBuild_Linearization) {
     color.srgb = true;
     color.flipGreenChannel = true;
     REQUIRE(Build(allocator, color, rgba, built));
-    CHECK(built.result.pixelFormat == PixelFormat::RGBA16Float);
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float);
     CHECK(Le16(built.result.mips[0].bytes, 2) == half(1.0f - deterministic::SrgbByteToLinear(64)));
     CHECK(Le16(built.result.mips[0].bytes, 6) == half(static_cast<float>(128.0 / 255.0)));
     CHECK(HasWarning(built.result, AssetDiagnosticCode::SrgbIgnored));
@@ -449,53 +449,54 @@ TEST(TextureBuild_OutputFormats) {
     struct Case {
         TextureCompressionSettings compression;
         TextureSourceFormat format;
-        PixelFormat expected;
+        graphics::PixelFormat expected;
         TextureSwizzle swizzleG;
         TextureSwizzle swizzleA;
     };
     const Case cases[] = {
-        {TextureCompressionSettings::Default, TextureSourceFormat::G8, PixelFormat::R8Unorm,
-         TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Default, TextureSourceFormat::GA8, PixelFormat::RG8Unorm,
-         TextureSwizzle::R, TextureSwizzle::G},
-        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA8, PixelFormat::RGBA8Unorm,
-         TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Default, TextureSourceFormat::G16, PixelFormat::R16Unorm,
-         TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA16, PixelFormat::RGBA16Unorm,
-         TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Default, TextureSourceFormat::R32F, PixelFormat::R16Float,
-         TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Normalmap, TextureSourceFormat::G8, PixelFormat::RGBA8Unorm,
-         TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Masks, TextureSourceFormat::RGBA16, PixelFormat::RGBA16Unorm,
-         TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA8, PixelFormat::R8Unorm,
-         TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA16F, PixelFormat::R16Float,
-         TextureSwizzle::R, TextureSwizzle::One},
+        {TextureCompressionSettings::Default, TextureSourceFormat::G8,
+         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::One},
+        {TextureCompressionSettings::Default, TextureSourceFormat::GA8,
+         graphics::PixelFormat::RG8Unorm, TextureSwizzle::R, TextureSwizzle::G},
+        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA8,
+         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::Default, TextureSourceFormat::G16,
+         graphics::PixelFormat::R16Unorm, TextureSwizzle::R, TextureSwizzle::One},
+        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA16,
+         graphics::PixelFormat::RGBA16Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::Default, TextureSourceFormat::R32F,
+         graphics::PixelFormat::R16Float, TextureSwizzle::R, TextureSwizzle::One},
+        {TextureCompressionSettings::Normalmap, TextureSourceFormat::G8,
+         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::Masks, TextureSourceFormat::RGBA16,
+         graphics::PixelFormat::RGBA16Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        // Grayscale·Alpha·DistanceFieldFont는 UE sampler type 계약 .rrrr(12.16.4).
+        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA8,
+         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
+        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA16F,
+         graphics::PixelFormat::R16Float, TextureSwizzle::R, TextureSwizzle::R},
         {TextureCompressionSettings::Displacementmap, TextureSourceFormat::G16,
-         PixelFormat::R16Unorm, TextureSwizzle::Zero, TextureSwizzle::One},
+         graphics::PixelFormat::R16Unorm, TextureSwizzle::Zero, TextureSwizzle::One},
         {TextureCompressionSettings::VectorDisplacementmap, TextureSourceFormat::RGBA8,
-         PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::HDR, TextureSourceFormat::G8, PixelFormat::RGBA16Float,
-         TextureSwizzle::G, TextureSwizzle::A},
+         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::HDR, TextureSourceFormat::G8,
+         graphics::PixelFormat::RGBA16Float, TextureSwizzle::G, TextureSwizzle::A},
         {TextureCompressionSettings::EditorIcon, TextureSourceFormat::RGBA32F,
-         PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Alpha, TextureSourceFormat::RGBA8, PixelFormat::R8Unorm,
-         TextureSwizzle::Zero, TextureSwizzle::One},
+         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::Alpha, TextureSourceFormat::RGBA8,
+         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
         {TextureCompressionSettings::DistanceFieldFont, TextureSourceFormat::G16,
-         PixelFormat::R8Unorm, TextureSwizzle::Zero, TextureSwizzle::One},
+         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
         {TextureCompressionSettings::HDR_Compressed, TextureSourceFormat::RGBA8,
-         PixelFormat::RGBA16Float, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::BC7, TextureSourceFormat::G8, PixelFormat::RGBA8Unorm,
-         TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::HalfFloat, TextureSourceFormat::RGBA8, PixelFormat::R16Float,
-         TextureSwizzle::Zero, TextureSwizzle::One},
-        {TextureCompressionSettings::SingleFloat, TextureSourceFormat::G8, PixelFormat::R32Float,
-         TextureSwizzle::Zero, TextureSwizzle::One},
-        {TextureCompressionSettings::HDR_F32, TextureSourceFormat::RGBA16, PixelFormat::RGBA32Float,
-         TextureSwizzle::G, TextureSwizzle::A},
+         graphics::PixelFormat::RGBA16Float, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::BC7, TextureSourceFormat::G8,
+         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
+        {TextureCompressionSettings::HalfFloat, TextureSourceFormat::RGBA8,
+         graphics::PixelFormat::R16Float, TextureSwizzle::Zero, TextureSwizzle::One},
+        {TextureCompressionSettings::SingleFloat, TextureSourceFormat::G8,
+         graphics::PixelFormat::R32Float, TextureSwizzle::Zero, TextureSwizzle::One},
+        {TextureCompressionSettings::HDR_F32, TextureSourceFormat::RGBA16,
+         graphics::PixelFormat::RGBA32Float, TextureSwizzle::G, TextureSwizzle::A},
     };
     uint8 source[16] = {};
     for (const Case& item : cases) {
@@ -522,7 +523,7 @@ TEST(TextureBuild_OutputFormats) {
     settings.srgb = true;
     const uint8 gray[1] = {128};
     REQUIRE(Build(allocator, settings, gray, built));
-    CHECK(built.result.pixelFormat == PixelFormat::RGBA8UnormSrgb && built.result.srgb &&
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8UnormSrgb && built.result.srgb &&
           built.result.swizzle[1] == TextureSwizzle::G &&
           built.result.swizzle[3] == TextureSwizzle::A);
     const uint8 expandedGray[4] = {128, 128, 128, 255};
@@ -538,7 +539,7 @@ TEST(TextureBuild_OutputFormats) {
     settings.compression = TextureCompressionSettings::Normalmap;
     const uint8 rgba[4] = {1, 2, 3, 4};
     REQUIRE(Build(allocator, settings, rgba, built));
-    CHECK(built.result.pixelFormat == PixelFormat::RGBA8Unorm &&
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8Unorm &&
           HasWarning(built.result, AssetDiagnosticCode::SrgbIgnored) &&
           built.result.warnings.Size() == 1);
     settings.format = TextureSourceFormat::R32F;
@@ -549,13 +550,13 @@ TEST(TextureBuild_OutputFormats) {
     settings.format = TextureSourceFormat::G16;
     const uint8 wide[2] = {0xff, 0xff};
     REQUIRE(Build(allocator, settings, wide, built));
-    CHECK(built.result.pixelFormat == PixelFormat::R16Unorm && !built.result.srgb &&
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Unorm && !built.result.srgb &&
           built.result.warnings.IsEmpty() && Le16(built.result.mips[0].bytes, 0) == 0xffff);
     settings.format = TextureSourceFormat::RGBA16;
     const uint8 wideColor[8] = {0x00, 0x80, 0, 0, 0, 0, 0xff, 0xff};
     REQUIRE(Build(allocator, settings, wideColor, built));
-    CHECK(built.result.pixelFormat == PixelFormat::RGBA16Unorm && built.result.warnings.IsEmpty() &&
-          Le16(built.result.mips[0].bytes, 0) == 0x8000);
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Unorm &&
+          built.result.warnings.IsEmpty() && Le16(built.result.mips[0].bytes, 0) == 0x8000);
 
     // HDR_Compressed는 알파 1(half 0x3c00).
     settings.format = TextureSourceFormat::RGBA8;
@@ -594,13 +595,14 @@ TEST(TextureBuild_Quantization) {
           built.result.mips[0].bytes[3] == 0);
 
     // UE float 식 (uint8)(0.5f + v × 255.0f): 0.5/255는 1, 그 바로 아래 float도 1(0.5 +
-    // 0.49999997이 float로 1.0 — UE와 같다), 0.49/255는 0.
+    // 0.49999997이 float로 1.0 — UE와 같다), 0.49/255는 0. float 원본에서 8비트 출력(R8)을 내는
+    // 설정은 DistanceFieldFont다(Grayscale은 float 원본이면 R16F — 위 출력 규칙).
     const float half = static_cast<float>(0.5 / 255.0);
     uint8 edge[4];
     platform::MemoryCopy(edge, &half, sizeof(half));
     TextureBuildSettings gray = Gray(1, 1);
     gray.format = TextureSourceFormat::R32F;
-    gray.compression = TextureCompressionSettings::Grayscale;
+    gray.compression = TextureCompressionSettings::DistanceFieldFont;
     gray.srgb = false;
     REQUIRE(Build(allocator, gray, edge, built));
     CHECK(built.result.mips[0].bytes[0] == 1);
@@ -612,6 +614,38 @@ TEST(TextureBuild_Quantization) {
     platform::MemoryCopy(edge, &under, sizeof(under));
     REQUIRE(Build(allocator, gray, edge, built));
     CHECK(built.result.mips[0].bytes[0] == 0);
+}
+
+// 1채널 float 원본의 풀기(12.13절 — UE CopyImage, 2026-11-25 A5j2b에서 고침): R32F·R16F 원본은
+// (v, 0, 0, 1)이라 RGBA16F 출력(HDR)의 G·B는 0, A는 1이다(회색 원본처럼 복제하지 않는다).
+TEST(TextureBuild_SingleChannelFloatDecode) {
+    SystemAllocator allocator;
+    constexpr uint16 HalfHalf = 0x3800;
+    constexpr uint16 HalfOne = 0x3C00;
+    const auto load16 = [](const uint8* data) noexcept {
+        return static_cast<uint16>(data[0] | (data[1] << 8));
+    };
+    TextureBuildSettings settings = Gray(1, 1);
+    settings.format = TextureSourceFormat::R32F;
+    settings.compression = TextureCompressionSettings::HDR;
+    settings.srgb = false;
+    const float value = 0.5f;
+    uint8 single[4];
+    platform::MemoryCopy(single, &value, sizeof(value));
+    Built built(allocator);
+    REQUIRE(Build(allocator, settings, single, built));
+    REQUIRE(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
+            built.result.mips[0].bytes.Size() == 8);
+    const uint8* out = built.result.mips[0].bytes.Data();
+    CHECK(load16(out) == HalfHalf && load16(out + 2) == 0 && load16(out + 4) == 0 &&
+          load16(out + 6) == HalfOne);
+
+    settings.format = TextureSourceFormat::R16F;
+    const uint8 half[2] = {0x00, 0x38};
+    REQUIRE(Build(allocator, settings, half, built));
+    out = built.result.mips[0].bytes.Data();
+    CHECK(load16(out) == HalfHalf && load16(out + 2) == 0 && load16(out + 4) == 0 &&
+          load16(out + 6) == HalfOne);
 }
 
 // PreserveBorder(UE GenerateMipBorder — 테두리 texel을 직전 mip 2×2 발자국의 원본 테두리 평균으로,

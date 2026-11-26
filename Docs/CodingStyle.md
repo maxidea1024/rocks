@@ -123,7 +123,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
 - 대상: 선언 목록 안에서 선언이 바로 앞 선언 뒤에 올 때, **앞 선언의 마지막 줄 바로 다음 줄이 빈 줄**이어야 한다(공백만 있는 줄도 빈 줄이다). MS C# 규칙의 "메서드·속성 정의 사이에 빈 줄"을 모든 멤버로 넓힌 것이다.
   - 선언 목록: 형식 본문(class·struct·record·interface)의 멤버, namespace 본문(file-scoped 포함)과 컴파일 단위의 형식·대리자·namespace 선언.
   - 멤버: 메서드·생성자·소멸자·속성·인덱서·이벤트·연산자·변환 연산자·중첩 형식·대리자·필드. 인터페이스의 본문 없는 선언과 한 줄 자동 속성도 대상이다.
-  - 대상 아님: 레코드 위치 매개변수·primary constructor 매개변수(매개변수 목록), 객체 초기화자·익명 형식 멤버(editorconfig new_line 규칙 몫), 지역 함수(문장 — IDE2003 몫).
+  - 대상 아님: 레코드 위치 매개변수·primary constructor 매개변수(매개변수 목록), 객체 초기화자·익명 형식 멤버(editorconfig new_line 규칙 몫), 지역 함수와 최상위 문장(top-level statements — `GlobalStatementSyntax`, 문장이라 IDE2003 몫. 최상위 문장 바로 뒤의 선언도 보지 않는다).
 - 예외:
   - 필드(`const` 포함)와 이벤트 필드가 연속하면 빈 줄 없이 묶어도 된다(.NET 런타임 관례 — 필드 무리).
   - 열거형 멤버는 대상이 아니다.
@@ -133,7 +133,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
 - 구현: `Rocks.Tooling.Checks`의 `CSharpMemberSpacing`이 `Microsoft.CodeAnalysis.CSharp` 5.9.0(정확한 버전 하나로 고정)의 구문 트리만 쓴다. 파싱 언어 버전은 `LanguageVersion.CSharp14`(Programs/Directory.Build.props의 LangVersion 14.0과 같다)이고, 컴파일·의미 분석은 하지 않는다.
   - 대상 파일은 `Build/Format/Rocks.Format.slnx` 프로젝트들의 Compile 항목이다(서식 검사의 소속 확인과 같은 목록).
   - 위반은 `경로:행: member-blank-line: 내용`으로 알린다. 행은 뒤 선언의 첫 줄(주석·특성 포함)이다. 구문 오류가 있는 파일은 건너뛰지 않고 `경로:행: member-blank-line: parse error`로 알린다.
-  - `--write`는 뒤 선언 leading trivia의 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 줄 끝 문자(CRLF·LF)는 그 파일의 기존 줄 끝을 따르고, 인코딩·BOM은 그대로 둔다. 빈 줄 하나만 넣으므로 IDE2000(연속 빈 줄)을 만들지 않는다.
+  - `--write`는 뒤 선언 leading trivia의 맨 앞(들여쓰기 앞)에 줄 끝 하나를 넣는다. 줄 끝 문자(CRLF·LF)는 그 파일의 첫 줄 끝을 따르고(줄 끝이 섞인 파일도 첫 줄 끝), 인코딩·BOM은 그대로 둔다. 두 선언이 같은 줄에 있으면 앞 선언 뒤 공백을 지우고 줄 끝 둘과 앞 선언 첫 줄의 들여쓰기를 넣는다. UTF-8이 아닌 파일은 고치지 않고 `경로:0: member-blank-line: not UTF-8`로 알린다(잘못된 byte를 바꿔 다시 쓰지 않는다). 한계: 전처리 기호 없이 파싱하므로 실제 빌드에서 켜지는 `#if` 쪽(`NET…_OR_GREATER` 등)도 disabled text로 보고 보지 않는다. 빈 줄 하나만 넣으므로 IDE2000(연속 빈 줄)을 만들지 않는다.
   - 순서(`--write`): 빈 줄 수정 → dotnet format 수정 → 둘 다 다시 검증. 검사만 할 때는 dotnet format 검증과 빈 줄 검사를 함께 알린다.
 - 버린 대안:
   - 빌드 분석기(Roslyn analyzer 프로젝트를 모든 C# 프로젝트에 참조): `TreatWarningsAsErrors`라 위반이 곧 빌드 실패가 된다. 서식은 빌드가 아니라 format 검사의 몫이라는 지금 구조와도 어긋난다.
@@ -142,6 +142,7 @@ C# 멤버 사이 빈 줄 규칙(`member-blank-line`, 2026-11-25 — 교차 검�
   1. 검사기·시험 커밋과 기계적 `--write` 수정 커밋(동작 불변)으로 나눈다.
   2. 수정 커밋 전에 `git status`로 다른 세션이 고치고 있는 `.cs`를 확인한다. 겹치면 worktree에서 커밋해 update-ref로 반영하거나, 그 파일은 그 세션에 알리고 빼 둔다.
   3. 두 커밋은 함께 push한다(CI format 검사가 중간에 실패하지 않게).
+  - 도입 때(2026-11-25) 저장소 C# 소스의 위반은 0곳이었다(처음 센 52곳은 최상위 문장 오탐 — 대상에서 뺐다). 그래서 수정 커밋 없이 검사기 커밋 하나로 켰다.
 - 시험(Rocks.ToolTests, 결정적 입력 문자열): 예외마다 양성·음성 쌍, 주석·특성 위치(위의 모호한 사례 포함), namespace·컴파일 단위 목록, 구문 오류 보고, 지시문 사이, CRLF·LF 보존, `--write` 뒤 재검사 0과 IDE2000 없음.
 
 빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용, 날 형식 한계 리터럴(`raw-limit-literal`)을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.

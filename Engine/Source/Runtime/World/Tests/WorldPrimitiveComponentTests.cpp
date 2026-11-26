@@ -512,8 +512,8 @@ TEST(Primitive_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4 — A5c tickSettings 포함). Primitive가
-    // 42(bodySettings 포함 — CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 11, Actor 4). Primitive가 42(bodySettings 포함 —
+    // CD2), Shape가 3, Box·Sphere 가 1, Capsule이 2를 더한다.
     const Expected expected[] = {
         {ObjectTypeIdOf<PrimitiveComponent>(), ObjectTypeIdOf<SceneComponent>(), 53, true},
         {ObjectTypeIdOf<ShapeComponent>(), ObjectTypeIdOf<PrimitiveComponent>(), 56, true},

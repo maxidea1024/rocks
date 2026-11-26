@@ -29,6 +29,7 @@ Result<void> SphereComponent::SetSphereRadius(float radius) noexcept {
         sphereRadius_ = radius;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();
@@ -44,6 +45,12 @@ bool SphereComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
 
 Result<VolumeShape> SphereComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TrySphere(WorldLocation(), static_cast<double>(ScaledSphereRadius()));
+}
+
+bool SphereComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Sphere;
+    geometry.radius = static_cast<double>(sphereRadius_);
+    return true;
 }
 
 } // namespace rocks

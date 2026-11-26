@@ -161,6 +161,38 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
     static_cast<void>(pthread_setschedparam(pthread_self(), SCHED_OTHER, &parameters));
 }
 
+// SCHED_OTHER 우선순위 값을 PosixSetCurrentThreadPriority의 다섯 눈금 중 가장 가까운 단계로 바꾼다.
+bool PosixGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    const int minimum = sched_get_priority_min(SCHED_OTHER);
+    const int maximum = sched_get_priority_max(SCHED_OTHER);
+    int policy = 0;
+    sched_param parameters{};
+    // ThreadPriority 대응(ThreadOptions)은 SCHED_OTHER 눈금이다. 다른 정책(실시간 RR·FIFO 등)은 그
+    // 눈금으로 읽을 수 없으므로 조회하지 못한 것으로 본다.
+    if (minimum < 0 || maximum < minimum ||
+        pthread_getschedparam(pthread_self(), &policy, &parameters) != 0 || policy != SCHED_OTHER) {
+        return false;
+    }
+
+    const int normal = (minimum + maximum) / 2;
+    const int steps[] = {minimum, (minimum + normal) / 2, normal, (normal + maximum) / 2, maximum};
+    const ThreadPriority levels[] = {ThreadPriority::Lowest, ThreadPriority::BelowNormal,
+                                     ThreadPriority::Normal, ThreadPriority::AboveNormal,
+                                     ThreadPriority::Highest};
+    int best = 0;
+    for (int index = 1; index < 5; ++index) {
+        const int distance = parameters.sched_priority - steps[index];
+        const int bestDistance = parameters.sched_priority - steps[best];
+        if ((distance < 0 ? -distance : distance) <
+            (bestDistance < 0 ? -bestDistance : bestDistance)) {
+            best = index;
+        }
+    }
+
+    priority = levels[best];
+    return true;
+}
+
 // macOS 시스템 라이브러리는 dyld 공유 캐시에 있어 파일이 없어도 /usr/lib 절대 경로로 열린다. 이름만
 // 넘기면 dyld가 DYLD_LIBRARY_PATH·현재 디렉터리 같은 대체 경로도 찾으므로 절대 경로로 연다.
 const char* PosixSystemLibraryDirectory() noexcept {

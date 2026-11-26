@@ -34,8 +34,8 @@ struct TextureSettingIssue {
 //   compressionSettings LQ·EncodedReflectionCapture는 InvalidSetting이다.
 // - 레코드 없는 타입(손 함수표 파생)은 값 판정만 한다.
 //
-// 오류(out은 빈다): Texture가 아닌 객체 TypeMismatch, 객체 접근·FindChangedFields의 오류(레코드
-// 실패 포함), 할당 실패 OutOfMemory.
+// 오류(out은 빈다): 에디터 데이터가 없는 빌드(ROCKS_WITH_EDITOR_DATA 0) Unsupported, Texture가 아닌
+// 객체 TypeMismatch, 객체 접근·FindChangedFields의 오류(레코드 실패 포함), 할당 실패 OutOfMemory.
 //
 // 사용 예(빌드 앞):
 //   Array<TextureSettingIssue> issues(allocator);

@@ -2,6 +2,7 @@
 #include "VulkanFormats.h"
 
 #include <Platform/Memory.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 // 장치 능력(RenderBase 4.4절 GX1), 버퍼 view·ReadBuffer(GX2), 그리기 descriptor set이다
 // (Docs/Design/VulkanGraphics.ko.md 6절). 그리기 descriptor set은 파이프라인 layout마다 다르므로
@@ -97,6 +98,12 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     features.hdrOutput = false;
     features.resourceBindingTier = 0;
     features.shaderModel = 0;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements — Info().apiVersion과 같은
+    // 실효 판).
+    const uint32 apiVersion =
+        properties_.apiVersion < RequestedApiVersion ? properties_.apiVersion : RequestedApiVersion;
+    features.shaderDeviceRequirements =
+        apiVersion >= VK_API_VERSION_1_1 ? shader::DeviceRequiresVulkan1_1 : 0u;
 }
 
 const DeviceCaps& VulkanDevice::Caps() const noexcept {
@@ -344,8 +351,8 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
             // 늘어난다).
             const uint32 sets = DescriptorSetsPerPool << record.poolCount;
             const VkDescriptorPoolSize sizes[] = {
-                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, sets},
-                {VK_DESCRIPTOR_TYPE_SAMPLER, sets},
+                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, sets * DescriptorTexturesPerSet},
+                {VK_DESCRIPTOR_TYPE_SAMPLER, sets * DescriptorTexturesPerSet},
                 {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, sets * 2},
                 {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, sets},
                 {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2},
@@ -428,6 +435,15 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
     if (pipeline == nullptr) {
         return false;
+    }
+
+    // 공유 샘플러는 준 값이 있어야 그린다(RenderBase 9.13절 3항).
+    for (uint32 index = 0; index < pipeline->bindingCount; ++index) {
+        const PipelineBinding& binding = pipeline->bindings[index];
+        if (binding.source == BindingSource::SharedSampler &&
+            boundSamplers_[binding.stage][binding.binding] == VK_NULL_HANDLE) {
+            return false;
+        }
     }
 
     // 묶인 view가 파이프라인 slot 배치를 채우는지는 매 그리기 본다(view가 Retire되면 stale이다).
@@ -521,11 +537,6 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
         return true;
     }
 
-    const TextureRecord* texture = textures_.Find(boundTexture_.slot);
-    if (texture == nullptr) {
-        texture = textures_.Find(white_.slot);
-    }
-
     VkDescriptorImageInfo images[MaxPipelineBindings] = {};
     VkDescriptorBufferInfo buffers[MaxPipelineBindings] = {};
     VkBufferView texelViews[MaxPipelineBindings] = {};
@@ -555,13 +566,21 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
             write.descriptorCount = 1;
             write.descriptorType = binding.type;
             if (binding.source == BindingSource::Texture) {
+                const TextureRecord* texture = BoundTexture(binding.stage, binding.binding);
                 images[count] = {VK_NULL_HANDLE,
                                  texture != nullptr ? texture->view : VK_NULL_HANDLE,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
                 write.pImageInfo = &images[count];
-            } else if (binding.source == BindingSource::Sampler) {
-                images[count] = {texture != nullptr ? texture->sampler : VK_NULL_HANDLE,
-                                 VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
+            } else if (binding.source == BindingSource::Sampler ||
+                       binding.source == BindingSource::SharedSampler) {
+                // 준 값, 없으면 짝 텍스처의 샘플러다.
+                VkSampler sampler = boundSamplers_[binding.stage][binding.binding];
+                if (sampler == VK_NULL_HANDLE) {
+                    const TextureRecord* texture = BoundTexture(binding.stage, binding.pair);
+                    sampler = texture != nullptr ? texture->sampler : VK_NULL_HANDLE;
+                }
+
+                images[count] = {sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
                 write.pImageInfo = &images[count];
             } else if (binding.source == BindingSource::ConstantBuffer) {
                 const bool dynamic = binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;

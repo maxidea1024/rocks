@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 #include <Core/Result.h>
 
-// 거리 감쇠 식이다(Docs/Design/AudioSystem.ko.md 3.20.7절). UE
+// 거리 감쇠 식이다(Docs/Design/AudioSystem 3.20.7절). UE
 // FBaseAttenuationSettings::AttenuationEval (Engine/Private/Attenuation.cpp)과 같은 식이다. 거리는
 // cm(UE 단위)다.
 //

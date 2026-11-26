@@ -9,8 +9,15 @@ using Rocks.Build.Rules;
 // module, whose module lifetime object attaches the development provider (Developer ShaderCompiler, the shader compile worker and the user tool
 // store) that builds each device format's library in memory. Release Game targets must not reach Developer modules, so Release Sandbox has no
 // provider and its drawing self-tests report NOT RUN.
+// With an engine-only cook (asset-cook --engine --profile=<host>, Engine/Saved/Cooked/<profile>) the --engine run adds the EngineAssets
+// subsystem and opens the cooked engine shader libraries instead (ShaderSystem section 16.1 SSD48); the --engine run registers only the engine
+// module shader types so that its type set matches the cooker.
+// Texture: the screen path converts cooked TexturePlatformData (engine procedural textures, memory scenes and the cooked test content of
+// Programs/Sandbox/TestContent) into RenderBase cooked texture uploads (Docs/Design/RenderBase section 18.5 item 7 — SM7).
 // The OpenGL ES backend is the GLES31_PC preview on Windows and is kept out of Release Windows executables (ShaderSystem section 9, UE keeps the
 // ES preview out of shipping Windows builds as well); Android always links it (GLES31_ANDROID).
+// --audio-tone plays a test tone through Audio's output device; it links AudioMiniaudio, whose module lifetime object registers the
+// miniaudio backend factory in the AudioOutputBackendRegistry host service (Docs/Design/AudioSystem section 3.34.5 — the host code never calls it).
 public sealed class SandboxProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context)
@@ -30,11 +37,12 @@ public sealed class SandboxProgram : ModuleRules
                 ? new AndroidPackage("com.rocks.sandbox", context.PathInRoot("Programs/Sandbox/AndroidAssets"))
                 : null,
             Sources = context.Sources("Programs/Sandbox/Private"),
-            PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
+            // The engine shader probe ids are shared by the probe shaders and the self-test (Docs/Design/EngineShaders section 7.6).
+            PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private"), context.PathInRoot("Programs/Sandbox/EngineShaderTests/Shared")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "Engine", "Collision", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
-                "D3D11Graphics", "VulkanGraphics",
+            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
+                "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),
                 .. (traceAnalysis ? ["TraceAnalysis"] : Array.Empty<string>())]

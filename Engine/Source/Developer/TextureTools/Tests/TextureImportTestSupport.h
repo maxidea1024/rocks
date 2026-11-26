@@ -9,6 +9,7 @@
 #include <Meta/GeneratedType.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureImport.h>
@@ -17,19 +18,23 @@
 // 가짜 임포트 문맥(ObjectRegistry 위 — 출력·bulk·경고·실패를 모은다), PNG·TGA·DDS 원본 생성기.
 namespace rocks::texture_import_test {
 
-// 텍스처 타입을 등록한 TypeRegistry와 객체 Registry다.
+// 텍스처 타입을 등록한 TypeRegistry와 객체 Registry다. 객체 Registry 할당자(임포터·재구성 hook이
+// 쓰는 ObjectAllocator)는 objectAllocator를 거친다 — 할당 실패 전수 시험만 실패를 켠다.
 struct TextureEnv {
     TextureEnv() noexcept
-        : types(allocator), registration(types, allocator),
+        : objectAllocator(allocator), types(allocator), registration(types, allocator),
           ready(RegisterTextureTypes(registration).IsOk()),
-          objects(allocator, types, ContextId{0x54584954ull, 1}) {
+          objects(objectAllocator, types, ContextId{0x54584954ull, 1}) {
     }
 
+    // 객체가 남아 있으면 타입 해제가 Busy이므로 객체 Registry를 먼저 닫는다.
     ~TextureEnv() noexcept {
+        CHECK(objects.Shutdown(objects.OwnerAccess()));
         CHECK(registration.Unregister());
     }
 
     SystemAllocator allocator;
+    test::NFailAllocator objectAllocator;
     TypeRegistry types;
     ModuleRegistration registration;
     bool ready = false;

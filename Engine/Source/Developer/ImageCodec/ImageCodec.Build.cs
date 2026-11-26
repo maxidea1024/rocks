@@ -20,6 +20,7 @@ public sealed class ImageCodec : EngineModuleRules
     protected override string[] PublicDependencies => ["Core", "Texture", "AssetRuntime"];
 
     // OpenEXR (OpenEXRCore), libtiff and libjpeg-turbo decode EXR, TIFF and JPEG sources (sections 12.10 and 12.11); as private
-    // dependencies their headers and consumer defines stay private to this module (Docs/Design/BuildTargets BS3a).
-    protected override string[] PrivateDependencies => ["Compression", "OpenExr", "LibTiff", "LibJpegTurbo"];
+    // dependencies their headers and consumer defines stay private to this module (BuildTargets BS3a). LibTiff comes before LibJpegTurbo and Zlib so that a left-to-right static linker resolves its
+    // references.
+    protected override string[] PrivateDependencies => ["Compression", "OpenExr", "LibTiff", "LibJpegTurbo", "Zlib"];
 }

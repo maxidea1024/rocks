@@ -1,6 +1,7 @@
 #include "GlesDevice.h"
 
 #include <Platform/Memory.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 // 장치 능력(RenderBase 4.4절 GX1)과 버퍼 view·ReadBuffer(GX2)다. typed view는 버퍼 텍스처
 // (GL_TEXTURE_BUFFER, ES 3.2 core)라 텍스처 유닛을 차지하고(ShaderSystem 7.2절 4항 RQ10),
@@ -122,7 +123,20 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     features.resourceBindingTier = 0;
     features.shaderModel = 0;
     apiVersion_ = Query(gl_, GL_MAJOR_VERSION) * 100 + Query(gl_, GL_MINOR_VERSION) * 10;
-    (void)desktopContext;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements). 데스크톱 core context는
+    // ARB_ES3_2_compatibility·ARB_clip_control이 있어야 만들어진다(WglPlatform).
+    constexpr uint32 DesktopGl4_3 = 430;
+    constexpr uint32 Es3_2 = 320;
+    uint32 requirements = 0;
+    if (desktopContext) {
+        requirements = shader::DeviceRequiresGlArbEs32Compatibility |
+                       shader::DeviceRequiresGlArbClipControl |
+                       (apiVersion_ >= DesktopGl4_3 ? shader::DeviceRequiresOpenGL4_3 : 0u);
+    } else if (apiVersion_ >= Es3_2) {
+        requirements = shader::DeviceRequiresOpenGLES3_2;
+    }
+
+    features.shaderDeviceRequirements = requirements;
 
     // MSAA 표본 수는 렌더 타깃·깊이 형식마다 glGetInternalformativ(GL_TEXTURE_2D_MULTISAMPLE)다
     // (ES 3.1 core, 정수 형식의 한도는 구현이 반영한다).
@@ -356,25 +370,58 @@ bool GlesDevice::BufferViewsBound(const PipelineRecord& pipeline) const noexcept
     return DrawBufferSlotsSatisfied(pipeline.bufferSlots, bound);
 }
 
-void GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
+const TextureRecord* GlesDevice::BoundTexture(uint32 stage, uint32 unit) const noexcept {
+    const TextureRecord* texture =
+        unit < MaxResourceSlots ? textures_.Find(boundTextures_[stage][unit]) : nullptr;
+    if (texture == nullptr || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
+bool GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
+    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
+        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
+        if (binding.role == PipelineSlotRole::SharedSampler &&
+            boundSamplers_[ConstantBufferStageIndex(binding.stage)][binding.location] ==
+                NoBoundSampler) {
+            return false;
+        }
+    }
+
     for (uint32 index = 0; index < pipeline.slots.count; ++index) {
         const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
         const GLuint location = binding.location;
+        const uint32 stage = ConstantBufferStageIndex(binding.stage);
         switch (binding.role) {
         case PipelineSlotRole::Texture: {
-            const TextureRecord* texture = textures_.Find(boundTexture_);
-            if (texture == nullptr || texture->writable) {
-                texture = textures_.Find(white_.slot);
+            const TextureRecord* texture = BoundTexture(stage, location);
+            if (texture == nullptr) {
+                break;
             }
 
-            if (texture != nullptr) {
-                BindPassTexture(*texture, location);
+            BindPassTexture(*texture, location);
+            // 유닛의 샘플러 출처(자기·공유 샘플러 slot, pair)에 준 값이 있으면 그 객체로 바꾼다.
+            // 없으면 텍스처 desc 샘플러 그대로다(RenderBase 9.13절 3항).
+            const uint16 given =
+                binding.pair != NoPairedSlot ? boundSamplers_[stage][binding.pair] : NoBoundSampler;
+            if (given != NoBoundSampler) {
+                const SamplerCacheEntry& entry = samplerCache_[given];
+                const PixelFormatKind kind = GetPixelFormatInfo(texture->format).kind;
+                const bool depth =
+                    kind == PixelFormatKind::Depth || kind == PixelFormatKind::DepthStencil;
+                const bool filterable = HasPixelFormatCaps(GetPixelFormatCaps(texture->format),
+                                                           PixelFormatCaps::Filterable) ||
+                                        (entry.desc.comparison && depth);
+                gl_.BindSampler(location, filterable ? entry.filtering : entry.point);
             }
 
             break;
         }
         case PipelineSlotRole::Sampler:
-            // GLES 샘플러는 텍스처 유닛의 샘플러 객체다(BindPassTexture).
+        case PipelineSlotRole::SharedSampler:
+            // GLES 샘플러는 텍스처 유닛의 샘플러 객체다(위 Texture 항, BindPassTexture).
             break;
         case PipelineSlotRole::BufferView: {
             const BufferViewRecord* view = bufferViews_.Find(boundViews_[binding.slot].slot);
@@ -442,6 +489,8 @@ void GlesDevice::ApplySlots(const PipelineRecord& pipeline) noexcept {
         }
         }
     }
+
+    return true;
 }
 
 } // namespace rocks::graphics::gles

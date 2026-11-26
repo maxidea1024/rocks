@@ -5,6 +5,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <Graphics/GraphicsLog.h>
+#include <Graphics/ShaderBindings.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/HostServices.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
@@ -26,7 +27,7 @@ namespace {
 #define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter) &Variable,
 const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
-};
+    &MathFloatProbe, &MathUintProbe, &ColorFloatProbe, &ShadingFloatProbe};
 #undef SANDBOX_VERTEX
 #undef SANDBOX_PIXEL
 #undef SANDBOX_COMPUTE
@@ -46,10 +47,10 @@ SystemAllocator& ProcessAllocator() noexcept {
 render::EngineRenderResources* active = nullptr;
 bool hostPrepared = false;
 
-// Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제 Programs/Sandbox/Shaders)를 한 번
-// 넣는다.
-Result<void> PrepareHost(render::EngineShaderHost& host) noexcept {
-    if (hostPrepared) {
+// self-test면 Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제
+// Programs/Sandbox/Shaders)를 한 번 넣는다. 엔진 실행은 아무것도 넣지 않는다(SSD48).
+Result<void> PrepareHost(render::EngineShaderHost& host, SandboxShaderScope scope) noexcept {
+    if (hostPrepared || scope == SandboxShaderScope::Engine) {
         return Result<void>::Success();
     }
 
@@ -79,6 +80,16 @@ Result<void> PrepareHost(render::EngineShaderHost& host) noexcept {
         return added;
     }
 
+    // 엔진 셰이더 시험 루트(Docs/Design/EngineShaders 7.6절 — 쿠킹하지 않는 시험 전용 플러그인
+    // 루트).
+    snprintf(path, sizeof(path), "%s/../Programs/Sandbox/EngineShaderTests", engine);
+    if (auto added = host.AddSourceDirectory("/Plugin/EngineShaderTests", StringView(path));
+        !added) {
+        Log::Error(graphics::LogGraphics, "Engine shader test sources could not be added: {Error}",
+                   ErrorCodeName(added.Error()));
+        return added;
+    }
+
     hostPrepared = true;
     return Result<void>::Success();
 }
@@ -94,9 +105,9 @@ render::EngineShaderHost& Host() noexcept {
     return host;
 }
 
-Result<void> AttachHost(ModuleLoader& modules) noexcept {
+Result<void> AttachHost(ModuleLoader& modules, SandboxShaderScope scope) noexcept {
     render::EngineShaderHost& host = Host();
-    if (auto prepared = PrepareHost(host); !prepared) {
+    if (auto prepared = PrepareHost(host, scope); !prepared) {
         return prepared;
     }
 
@@ -114,7 +125,7 @@ void DetachHost(ModuleLoader& modules) noexcept {
 }
 
 SelfTestShaderHost::SelfTestShaderHost(ModuleLoader& modules) noexcept : modules_(modules) {
-    attached_ = AttachHost(modules).IsOk();
+    attached_ = AttachHost(modules, SandboxShaderScope::SelfTest).IsOk();
     if (!attached_) {
         return;
     }
@@ -202,6 +213,15 @@ Result<graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept {
     }
 
     return set->DeviceShader(entry.Value());
+}
+
+uint32 TextureSlot(const shader::ShaderBindingLayout* layout, StringView name) noexcept {
+    if (layout == nullptr) {
+        return graphics::MaxResourceSlots;
+    }
+
+    auto slot = graphics::FindTextureSlot(*layout, name);
+    return slot ? slot.Value() : graphics::MaxResourceSlots;
 }
 
 Result<graphics::PipelineHandle> CreateGraphicsPipeline(graphics::Device& device,

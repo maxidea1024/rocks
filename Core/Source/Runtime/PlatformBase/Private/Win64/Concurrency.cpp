@@ -22,30 +22,6 @@ extern "C" NTSYSAPI BOOLEAN NTAPI RtlDllShutdownInProgress(VOID);
 
 namespace rocks::platform {
 
-ConditionVariable::ConditionVariable() noexcept {
-    static_assert(sizeof(CONDITION_VARIABLE) <= sizeof(storage_));
-    static_assert(alignof(CONDITION_VARIABLE) <= alignof(ConditionVariable));
-    InitializeConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
-ConditionVariable::~ConditionVariable() noexcept = default;
-
-WaitResult ConditionVariable::Wait(Mutex& mutex, uint32 timeoutMs) noexcept {
-    if (SleepConditionVariableSRW(reinterpret_cast<CONDITION_VARIABLE*>(storage_),
-                                  reinterpret_cast<SRWLOCK*>(mutex.storage_), timeoutMs, 0)) {
-        return WaitResult::Signaled;
-    }
-    return GetLastError() == ERROR_TIMEOUT ? WaitResult::TimedOut : WaitResult::Failed;
-}
-
-void ConditionVariable::NotifyOne() noexcept {
-    WakeConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
-void ConditionVariable::NotifyAll() noexcept {
-    WakeAllConditionVariable(reinterpret_cast<CONDITION_VARIABLE*>(storage_));
-}
-
 void SleepFor(uint32 milliseconds) noexcept {
     // wait API의 무한 sentinel과 달리 SleepFor의 최댓값도 유한 시간으로 취급한다.
     if (milliseconds == InfiniteTimeout) {
@@ -54,6 +30,62 @@ void SleepFor(uint32 milliseconds) noexcept {
     } else if (milliseconds != 0) {
         Sleep(milliseconds);
     }
+}
+
+namespace {
+
+// CREATE_WAITABLE_TIMER_HIGH_RESOLUTION(Windows 10 1803 SDK)이다. 오래된 SDK 머리에 없을 수 있어
+// 값을 둔다.
+constexpr DWORD HighResolutionWaitableTimerFlag = 0x00000002;
+// waitable timer의 기한 단위(100 ns)다.
+constexpr uint64 NanosecondsPerTimerUnit = 100;
+constexpr uint64 NanosecondsPerSleepMillisecond = 1000000;
+
+} // namespace
+
+PreciseSleeper::~PreciseSleeper() noexcept {
+    if (timer_ != nullptr) {
+        CloseHandle(static_cast<HANDLE>(timer_));
+    }
+}
+
+bool PreciseSleeper::Initialize() noexcept {
+    if (timer_ != nullptr) {
+        return true;
+    }
+
+    HANDLE timer =
+        CreateWaitableTimerExW(nullptr, nullptr, HighResolutionWaitableTimerFlag, TIMER_ALL_ACCESS);
+    if (timer == nullptr) {
+        // flag를 모르는 OS(ERROR_INVALID_PARAMETER)는 보통 timer로 만든다.
+        timer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+    }
+
+    timer_ = timer;
+    return timer != nullptr;
+}
+
+void PreciseSleeper::SleepNanoseconds(uint64 nanoseconds) noexcept {
+    if (nanoseconds == 0) {
+        return;
+    }
+
+    if (timer_ != nullptr) {
+        LARGE_INTEGER due;
+        // 음수는 상대 기한이다. 100 ns 단위로 올림한다(일찍 깨지 않게).
+        due.QuadPart = -static_cast<LONGLONG>((nanoseconds + NanosecondsPerTimerUnit - 1) /
+                                              NanosecondsPerTimerUnit);
+        if (SetWaitableTimerEx(static_cast<HANDLE>(timer_), &due, 0, nullptr, nullptr, nullptr,
+                               0) &&
+            WaitForSingleObject(static_cast<HANDLE>(timer_), INFINITE) == WAIT_OBJECT_0) {
+            return;
+        }
+    }
+
+    const uint64 milliseconds =
+        (nanoseconds + NanosecondsPerSleepMillisecond - 1) / NanosecondsPerSleepMillisecond;
+    SleepFor(milliseconds >= InfiniteTimeout ? InfiniteTimeout - 1
+                                             : static_cast<uint32>(milliseconds));
 }
 
 void YieldThread() noexcept {
@@ -236,6 +268,32 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
 
     static_cast<void>(SetThreadPriority(GetCurrentThread(), priority));
 }
+
+} // namespace detail
+
+// GetThreadPriority의 값을 가장 가까운 단계로 바꾼다(TIME_CRITICAL·IDLE도 양 끝 단계로).
+bool TryGetCurrentThreadPriority(ThreadPriority& priority) noexcept {
+    const int value = GetThreadPriority(GetCurrentThread());
+    if (value == THREAD_PRIORITY_ERROR_RETURN) {
+        return false;
+    }
+
+    if (value >= THREAD_PRIORITY_HIGHEST) {
+        priority = ThreadPriority::Highest;
+    } else if (value >= THREAD_PRIORITY_ABOVE_NORMAL) {
+        priority = ThreadPriority::AboveNormal;
+    } else if (value >= THREAD_PRIORITY_NORMAL) {
+        priority = ThreadPriority::Normal;
+    } else if (value >= THREAD_PRIORITY_BELOW_NORMAL) {
+        priority = ThreadPriority::BelowNormal;
+    } else {
+        priority = ThreadPriority::Lowest;
+    }
+
+    return true;
+}
+
+namespace detail {
 
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(HANDLE) <= sizeof(state.native));

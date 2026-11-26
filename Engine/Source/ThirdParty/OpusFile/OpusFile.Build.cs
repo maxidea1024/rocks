@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 // opusfile 0.12 (Xiph.Org, BSD-3-Clause) without HTTP support: Ogg Opus file decoder for the audio importer
-// (Docs/Design/AudioSystem.ko.md section 3.29). Rocks.patch only adds parentheses that clang asks for. The ThirdParty.json in the
+// (Docs/Design/AudioSystem section 3.29). Rocks.patch only adds parentheses that clang asks for. The ThirdParty.json in the
 // same folder is the single source of sources, licenses, file hashes and traceable modifications.
 public sealed class OpusFile : ThirdPartyModuleRules
 {

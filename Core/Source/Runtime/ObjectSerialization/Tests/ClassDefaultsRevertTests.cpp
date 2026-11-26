@@ -69,15 +69,9 @@ struct RevertFixture {
     ModuleRegistration registration;
 };
 
-// 노드 하나짜리 그래프(NodeTable 없음)의 노드 Record다: header 24 byte 뒤 u64 길이 + Record.
+// 노드 하나짜리 저장 그래프의 노드 Record다(NodeTable을 건너뛴다 — GraphTestSupport.h).
 Span<const uint8> NodeRecord(Span<const uint8> graph) noexcept {
-    constexpr usize LengthBytes = 8;
-    uint64 length = 0;
-    for (usize index = 0; index < LengthBytes; ++index) {
-        length |= static_cast<uint64>(graph[test::graph::HeaderBytes + index]) << (8 * index);
-    }
-
-    return graph.Slice(test::graph::HeaderBytes + LengthBytes, static_cast<usize>(length));
+    return test::graph::NodeRecordAt(graph, 0);
 }
 
 // 객체 하나를 기본 정책(전부 — 기준 없음)으로 저장한 그래프다.

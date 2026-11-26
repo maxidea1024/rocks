@@ -17,7 +17,7 @@ using namespace rocks::audio::audiotest;
 using platform::PlatformMath;
 
 // Audio DSP1의 1극 필터·선형 리샘플러
-// 시험이다(Docs/Design/AudioSystem.ko.md 3.20.4–3.20.5절, 3.20.8절).
+// 시험이다(Docs/Design/AudioSystem 3.20.4–3.20.5절, 3.20.8절).
 
 namespace {
 

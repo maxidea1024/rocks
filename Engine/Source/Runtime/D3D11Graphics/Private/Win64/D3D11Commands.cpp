@@ -421,24 +421,44 @@ void D3D11Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
     boundWriteViews_[slot] = {};
 }
 
-void D3D11Device::ApplySlots(const PipelineRecord& pipeline) noexcept {
-    const TextureRecord* texture = textures_.Find(boundTexture_);
+const TextureRecord* D3D11Device::BoundTexture(uint32 stage, uint32 slot) const noexcept {
+    const TextureRecord* texture =
+        slot < MaxResourceSlots ? textures_.Find(boundTextures_[stage][slot]) : nullptr;
     if (texture == nullptr || !texture->srv) {
         texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
+bool D3D11Device::ApplySlots(const PipelineRecord& pipeline) noexcept {
+    for (uint32 index = 0; index < pipeline.slots.count; ++index) {
+        const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
+        if (binding.role == PipelineSlotRole::SharedSampler &&
+            boundSamplers_[ConstantBufferStageIndex(binding.stage)][binding.location] == nullptr) {
+            return false;
+        }
     }
 
     for (uint32 index = 0; index < pipeline.slots.count; ++index) {
         const PipelineSlotBinding& binding = pipeline.slots.bindings[index];
         const UINT location = binding.location;
+        const uint32 stage = ConstantBufferStageIndex(binding.stage);
         ID3D11ShaderResourceView* view = nullptr;
         ID3D11SamplerState* sampler = nullptr;
         ID3D11UnorderedAccessView* unordered = nullptr;
         switch (binding.role) {
         case PipelineSlotRole::Texture:
-            view = texture->srv.Get();
+            view = BoundTexture(stage, location)->srv.Get();
             break;
         case PipelineSlotRole::Sampler:
-            sampler = texture->sampler;
+        case PipelineSlotRole::SharedSampler:
+            // 준 값, 없으면 짝 텍스처 desc 샘플러다(9.13절 3항).
+            sampler = boundSamplers_[stage][location];
+            if (sampler == nullptr) {
+                sampler = BoundTexture(stage, binding.pair)->sampler;
+            }
+
             break;
         case PipelineSlotRole::BufferView: {
             const BufferViewRecord* record = bufferViews_.Find(boundViews_[binding.slot].slot);
@@ -459,7 +479,8 @@ void D3D11Device::ApplySlots(const PipelineRecord& pipeline) noexcept {
         }
         }
 
-        if (binding.role == PipelineSlotRole::Sampler) {
+        if (binding.role == PipelineSlotRole::Sampler ||
+            binding.role == PipelineSlotRole::SharedSampler) {
             switch (binding.stage) {
             case ShaderStage::Vertex:
                 deferred_->VSSetSamplers(location, 1, &sampler);
@@ -487,6 +508,8 @@ void D3D11Device::ApplySlots(const PipelineRecord& pipeline) noexcept {
             break;
         }
     }
+
+    return true;
 }
 
 bool D3D11Device::PrepareDraw(bool indexed) noexcept {
@@ -522,8 +545,7 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
         inputsDirty_ = false;
     }
 
-    ApplySlots(*pipeline);
-    return true;
+    return ApplySlots(*pipeline);
 }
 
 bool D3D11Device::PrepareDispatch() noexcept {
@@ -566,9 +588,8 @@ bool D3D11Device::PrepareDispatch() noexcept {
     ID3D11ShaderResourceView* none[MaxBoundShaderResources] = {};
     deferred_->VSSetShaderResources(0, MaxBoundShaderResources, none);
     deferred_->PSSetShaderResources(0, MaxBoundShaderResources, none);
-    ApplySlots(*pipeline);
     inputsDirty_ = true;
-    return true;
+    return ApplySlots(*pipeline);
 }
 
 void D3D11Device::FinishDispatch() noexcept {
