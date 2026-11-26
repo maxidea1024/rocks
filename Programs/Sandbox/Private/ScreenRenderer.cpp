@@ -2,6 +2,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
+#include <Graphics/ShaderBindings.h>
 #include <RenderBase/FullscreenPass.h>
 #include <RenderBase/PipelineStatePresets.h>
 #include <RenderGraph/RenderGraph.h>
@@ -169,6 +170,17 @@ Result<void> ScreenRenderer::CreateSwapChain(graphics::Device& device,
     return Result<void>::Success();
 }
 
+namespace {
+
+// layout의 PS 텍스처 slot이다(없으면 SetTexture가 무시하는 범위 밖 slot).
+uint32 TextureSlotOf(const shader::ShaderBindingLayout* layout, StringView name) noexcept {
+    auto slot = layout != nullptr ? graphics::FindTextureSlot(*layout, name)
+                                  : Result<uint32>::Failure(ErrorCode::NotFound);
+    return slot ? slot.Value() : graphics::MaxResourceSlots;
+}
+
+} // namespace
+
 Result<void> ScreenRenderer::PrepareRequests() noexcept {
     render::ShaderSet* set = resources_.Shaders();
     const render::BuiltinShaderEntries& entries = resources_.Builtins().ShaderEntries();
@@ -184,8 +196,10 @@ Result<void> ScreenRenderer::PrepareRequests() noexcept {
             index == BackFaceMesh ? render::BackFaceCull() : render::FrontFaceCull();
         request.state.depthStencil = render::DepthReadWrite();
         request.state.drawConstantBytes = sizeof(render::BuiltinMeshConstants);
-        request.state.bindings.texture = render::BuiltinMeshAlbedoName;
     }
+
+    meshTextureSlot_ =
+        TextureSlotOf(set->BindingLayout(entries.meshPixel), render::BuiltinMeshAlbedoName);
 
     auto tonemap = set->FindEntry(render::TonemapPixelType.hash);
     if (!tonemap) {
@@ -198,7 +212,8 @@ Result<void> ScreenRenderer::PrepareRequests() noexcept {
     }
 
     tonemapRequest_ = request.Value();
-    tonemapRequest_.state.bindings.texture = render::TonemapSceneColorName;
+    tonemapTextureSlot_ =
+        TextureSlotOf(set->BindingLayout(tonemap.Value()), render::TonemapSceneColorName);
     tonemapRequest_.state.drawConstantBytes = sizeof(render::TonemapConstants);
     for (uint32 view = 0; view < InspectorKindCount; ++view) {
         auto entry = set->FindEntry(InspectorKinds[view].type.hash);
@@ -212,7 +227,8 @@ Result<void> ScreenRenderer::PrepareRequests() noexcept {
         }
 
         inspectorRequests_[view] = inspector.Value();
-        inspectorRequests_[view].state.bindings.texture = InspectorKinds[view].texture;
+        inspectorTextureSlots_[view] =
+            TextureSlotOf(set->BindingLayout(entry.Value()), InspectorKinds[view].texture);
         inspectorRequests_[view].state.drawConstantBytes =
             sizeof(render::TextureInspectorConstants);
     }
@@ -350,8 +366,9 @@ void ScreenRenderer::RenderInspector(render::RenderFrameContext& context,
     constants.integer[1] = static_cast<float>(graphics::MipExtent(target.width, mip));
     constants.integer[2] = static_cast<float>(graphics::MipExtent(target.height, mip));
     const uint32 view = kind;
-    auto bind = [texture, constants](render::GraphPassContext& pass) noexcept {
-        pass.Commands().SetTexture(texture);
+    const uint32 slot = inspectorTextureSlots_[view];
+    auto bind = [texture, constants, slot](render::GraphPassContext& pass) noexcept {
+        pass.Commands().SetTexture(graphics::ShaderStage::Pixel, slot, texture);
         (void)pass.Commands().SetDrawConstants(Bytes(&constants, sizeof(constants)));
     };
     render::RenderGraph graph(render::MakeRenderGraphDesc(context, *pool_));
@@ -456,12 +473,12 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
         .DepthTarget(depthTarget);
     (void)graph.AddPass(
         BasePassName, render::GraphPassKind::Raster, render::GraphPassFlags::None, base,
-        [items](render::GraphPassContext& pass) noexcept {
+        [items, meshSlot = renderer.meshTextureSlot_](render::GraphPassContext& pass) noexcept {
             graphics::CommandContext& commands = pass.Commands();
             for (const ResolvedItem& item : items) {
                 commands.SetPipeline(item.pipeline);
                 (void)commands.SetDrawConstants(Bytes(&item.constants, sizeof(item.constants)));
-                commands.SetTexture(item.texture);
+                commands.SetTexture(graphics::ShaderStage::Pixel, meshSlot, item.texture);
                 const graphics::VertexBufferBinding vertices[] = {{item.mesh->vertices, 0}};
                 commands.SetVertexBuffers(0, vertices);
                 commands.SetIndexBuffer(item.mesh->indices, item.mesh->indexFormat);
@@ -469,8 +486,9 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
             }
         });
     const render::TonemapConstants tonemap = packet.tonemap;
-    auto bindTonemap = [sceneColor, tonemap](render::GraphPassContext& pass) noexcept {
-        pass.Commands().SetTexture(pass.Texture(sceneColor));
+    auto bindTonemap = [sceneColor, tonemap, slot = renderer.tonemapTextureSlot_](
+                           render::GraphPassContext& pass) noexcept {
+        pass.Commands().SetTexture(graphics::ShaderStage::Pixel, slot, pass.Texture(sceneColor));
         (void)pass.Commands().SetDrawConstants(Bytes(&tonemap, sizeof(tonemap)));
     };
     render::GraphPassAccesses present(graph);

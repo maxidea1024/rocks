@@ -55,18 +55,41 @@ bool IsTextureShape(ShaderResourceShape shape) noexcept {
 }
 
 PixelShaderType PixelTypeOf(ShaderComponentType component) noexcept {
-    switch (component) {
-    case ShaderComponentType::Float:
-        return PixelShaderType::Float;
-    case ShaderComponentType::Int:
-        return PixelShaderType::Int;
-    case ShaderComponentType::Uint:
-        return PixelShaderType::Uint;
-    case ShaderComponentType::None:
-        break;
+    return PixelShaderTypeOf(component);
+}
+
+constexpr char SharedWrapSamplerName[] = "SharedWrapSampler";
+constexpr char SharedClampSamplerName[] = "SharedClampSampler";
+
+// 텍스처를 샘플링하는 샘플러의 위치다: 자기 샘플러(<texture>Sampler), 아니면 값 1 출처의 공유
+// 샘플러. 없으면 NoPairedSlot이다.
+uint16 TextureSamplerSlot(const shader::ShaderBindingLayout& layout,
+                          const shader::ShaderBindingResource& texture) noexcept {
+    constexpr usize SuffixBytes = sizeof(SamplerSuffix) - 1;
+    char own[shader::MaxShaderBindingNameBytes + SuffixBytes] = {};
+    const usize bytes = texture.name.ByteCount();
+    if (bytes <= shader::MaxShaderBindingNameBytes) {
+        memcpy(own, texture.name.Data(), bytes);
+        memcpy(own + bytes, SamplerSuffix, SuffixBytes);
+        if (auto slot = FindSamplerSlot(layout, StringView(own, bytes + SuffixBytes))) {
+            return static_cast<uint16>(slot.Value());
+        }
     }
 
-    return PixelShaderType::None;
+    const char* shared = nullptr;
+    if (texture.samplerSource == shader::ShaderSamplerSource::SharedWrap) {
+        shared = SharedWrapSamplerName;
+    } else if (texture.samplerSource == shader::ShaderSamplerSource::SharedClamp) {
+        shared = SharedClampSamplerName;
+    }
+
+    if (shared != nullptr) {
+        if (auto slot = FindSamplerSlot(layout, StringView(shared))) {
+            return static_cast<uint16>(slot.Value());
+        }
+    }
+
+    return NoPairedSlot;
 }
 
 // 이름이 slot 표 names[0..count)의 몇 번째인가(없으면 -1).
@@ -78,14 +101,6 @@ int32 FindName(const StringView (&names)[MaxPipelineNamedSlots], StringView name
     }
 
     return -1;
-}
-
-// 이름이 <texture>Sampler인가.
-bool IsTextureSampler(StringView texture, StringView name) noexcept {
-    const usize suffix = sizeof(SamplerSuffix) - 1;
-    return !texture.IsEmpty() && name.ByteCount() == texture.ByteCount() + suffix &&
-           memcmp(name.Data(), texture.Data(), texture.ByteCount()) == 0 &&
-           memcmp(name.Data() + texture.ByteCount(), SamplerSuffix, suffix) == 0;
 }
 
 int NameLength(StringView name) noexcept {
@@ -195,6 +210,8 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
         const char* stageName = ShaderStageName(stage);
         const shader::ShaderBindingLayout& layout = code.Layout();
         out.rootConstantBytes[index] = layout.rootConstantBytes;
+        uint32 textures = 0;
+        uint32 samplers = 0;
         if (layout.rootConstantBytes > drawConstantBytes) {
             return Reject(error,
                           "%s shader reads %u bytes of draw constants but the pipeline declares "
@@ -228,13 +245,17 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
 
                 continue;
             case ShaderResourceKind::SampledTexture: {
-                if (!names.texture.IsEmpty() && name == names.texture) {
+                if (++textures > MaxStageTextures) {
+                    why = "exceeds MaxStageTextures shader resource views in one stage";
+                    break;
+                }
+
+                if (IsTextureShape(resource.shape)) {
+                    // 텍스처는 이름 표 없이 값 1 slot으로 받는다(RenderBase 9.13절 1항).
                     binding.role = PipelineSlotRole::Texture;
-                    fits = stage != ShaderStage::Vertex && IsTextureShape(resource.shape);
-                    why = stage == ShaderStage::Vertex ? "is a texture read by the vertex shader "
-                                                         "(the texture slot is pixel or compute)"
-                                                       : "is named as the texture but is a typed "
-                                                         "buffer";
+                    binding.pair = TextureSamplerSlot(layout, resource);
+                    fits = resource.slot < MaxResourceSlots;
+                    why = "uses a texture slot outside MaxResourceSlots";
                     break;
                 }
 
@@ -252,13 +273,41 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
                       "that slot as a different kind";
                 break;
             }
-            case ShaderResourceKind::Sampler:
+            case ShaderResourceKind::Sampler: {
+                if (++samplers > MaxStageSamplers) {
+                    why = "exceeds MaxStageSamplers samplers in one stage";
+                    break;
+                }
+
+                if (resource.slot >= MaxResourceSlots) {
+                    why = "uses a sampler slot outside MaxResourceSlots";
+                    break;
+                }
+
+                if (resource.sharedSampler) {
+                    binding.role = PipelineSlotRole::SharedSampler;
+                    fits = true;
+                    break;
+                }
+
+                // 자기 샘플러는 같은 단계의 짝 텍스처(X ↔ XSampler)와 잇는다.
                 binding.role = PipelineSlotRole::Sampler;
-                fits = !resource.sharedSampler && stage != ShaderStage::Vertex &&
-                       IsTextureSampler(names.texture, name);
-                why = "is not the sampler of the pipeline texture (<texture>Sampler; shared "
-                      "samplers need parameter batches)";
+                constexpr usize SuffixBytes = sizeof(SamplerSuffix) - 1;
+                if (name.ByteCount() > SuffixBytes &&
+                    memcmp(name.Data() + name.ByteCount() - SuffixBytes, SamplerSuffix,
+                           SuffixBytes) == 0) {
+                    auto texture = FindTextureSlot(
+                        layout, StringView(name.Data(), name.ByteCount() - SuffixBytes));
+                    if (texture) {
+                        binding.pair = static_cast<uint16>(texture.Value());
+                        fits = true;
+                    }
+                }
+
+                why = "is neither a shared sampler nor the sampler of a texture in the same stage "
+                      "(<texture>Sampler)";
                 break;
+            }
             case ShaderResourceKind::StorageBufferRead: {
                 const int32 slot = FindName(names.bufferViews, name);
                 if (slot < 0) {
@@ -342,6 +391,69 @@ Result<void> ResolvePipelineSlots(Span<const DeviceShaderCode* const> stages,
     }
 
     return Result<void>::Success();
+}
+
+Result<uint32> FindTextureSlot(const shader::ShaderBindingLayout& layout,
+                               StringView name) noexcept {
+    for (const shader::ShaderBindingResource& resource : layout.resources) {
+        if (resource.kind == ShaderResourceKind::SampledTexture && IsTextureShape(resource.shape) &&
+            resource.name == name) {
+            return Result<uint32>::Success(resource.slot);
+        }
+    }
+
+    return Result<uint32>::Failure(ErrorCode::NotFound);
+}
+
+Result<uint32> FindSamplerSlot(const shader::ShaderBindingLayout& layout,
+                               StringView name) noexcept {
+    for (const shader::ShaderBindingResource& resource : layout.resources) {
+        if (resource.kind == ShaderResourceKind::Sampler && resource.name == name) {
+            return Result<uint32>::Success(resource.slot);
+        }
+    }
+
+    return Result<uint32>::Failure(ErrorCode::NotFound);
+}
+
+bool TextureShapeAccepts(ShaderResourceShape shape, TextureDimension dimension,
+                         uint32 sampleCount) noexcept {
+    const bool single = sampleCount == 1;
+    switch (shape) {
+    case ShaderResourceShape::Texture2D:
+        return dimension == TextureDimension::Texture2D && single;
+    case ShaderResourceShape::Texture2DMultisample:
+        return dimension == TextureDimension::Texture2D && !single;
+    case ShaderResourceShape::Texture2DArray:
+        return dimension == TextureDimension::Texture2DArray && single;
+    case ShaderResourceShape::Texture2DMultisampleArray:
+        return dimension == TextureDimension::Texture2DArray && !single;
+    case ShaderResourceShape::Texture3D:
+        return dimension == TextureDimension::Texture3D && single;
+    case ShaderResourceShape::TextureCube:
+        return dimension == TextureDimension::TextureCube && single;
+    case ShaderResourceShape::TextureCubeArray:
+        return dimension == TextureDimension::TextureCubeArray && single;
+    default:
+        break;
+    }
+
+    return false;
+}
+
+PixelShaderType PixelShaderTypeOf(ShaderComponentType component) noexcept {
+    switch (component) {
+    case ShaderComponentType::Float:
+        return PixelShaderType::Float;
+    case ShaderComponentType::Int:
+        return PixelShaderType::Int;
+    case ShaderComponentType::Uint:
+        return PixelShaderType::Uint;
+    case ShaderComponentType::None:
+        break;
+    }
+
+    return PixelShaderType::None;
 }
 
 Result<uint32> FindConstantBufferSlot(const shader::ShaderBindingLayout& layout,

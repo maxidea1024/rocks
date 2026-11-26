@@ -55,10 +55,8 @@ struct LevelConstants {
 // 셰이더는 FullScreen.rsf·SliceAttachment.rsf다.
 
 Result<PipelineHandle> MakePipeline(Device& device, const shaders::ShaderTypeDesc& pixel,
-                                    uint32 constants, PixelFormat depth,
-                                    const char* texture = nullptr) noexcept {
+                                    uint32 constants, PixelFormat depth) noexcept {
     PipelineDesc desc;
-    desc.bindings.texture = texture != nullptr ? StringView(texture) : StringView();
     desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
     desc.drawConstantBytes = constants;
     desc.depthFormat = depth;
@@ -156,7 +154,8 @@ void RunMipChain(Device& device, Allocator& allocator, PipelineHandle half) noex
         LevelConstants level;
         level.values[0] = static_cast<float>(TextureViewBaseMip(device.Caps().features, mip0));
         frame.Value()->SetPipeline(half);
-        frame.Value()->SetTexture(view.Value());
+        frame.Value()->SetTexture(
+            ShaderStage::Pixel, shaders::TextureSlot(shaders::SliceHalfPS, "Source"), view.Value());
         drawn = drawn && frame.Value()->SetDrawConstants(DrawConstantBytes(level)).IsOk();
         frame.Value()->Draw(3);
     }
@@ -360,7 +359,7 @@ void RunMsaaArray(Device& device, Allocator& allocator) noexcept {
     auto msaa = device.CreateTexture(msaaDesc, {});
     auto layers = device.CreateTexture(arrayDesc, {});
     auto color = device.CreateTexture(ColorDesc(TextureDimension::Texture2D, 2, 1, 1, 1), {});
-    auto read = MakePipeline(device, shaders::SliceMsaaLayerPS, 0, PixelFormat::Unknown, "Layers");
+    auto read = MakePipeline(device, shaders::SliceMsaaLayerPS, 0, PixelFormat::Unknown);
     Check(msaa && layers && color && read, "MSAA 2D array, resolve target and reader");
     if (msaa && layers && color && read) {
         const bool cleared =
@@ -385,7 +384,9 @@ void RunMsaaArray(Device& device, Allocator& allocator) noexcept {
         auto drawn = device.BeginPass(draw);
         if (drawn) {
             drawn.Value()->SetPipeline(read.Value());
-            drawn.Value()->SetTexture(msaa.Value());
+            drawn.Value()->SetTexture(ShaderStage::Pixel,
+                                      shaders::TextureSlot(shaders::SliceMsaaLayerPS, "Layers"),
+                                      msaa.Value());
             drawn.Value()->Draw(3);
         }
 
@@ -428,8 +429,8 @@ uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& all
     backendName = name;
     const uint64 validationBefore = device.ValidationErrorCount();
     auto white = MakePipeline(device, shaders::SliceWhitePS, 0, PixelFormat::Unknown);
-    auto half = MakePipeline(device, shaders::SliceHalfPS, sizeof(LevelConstants),
-                             PixelFormat::Unknown, "Source");
+    auto half =
+        MakePipeline(device, shaders::SliceHalfPS, sizeof(LevelConstants), PixelFormat::Unknown);
     auto depthWhite = MakePipeline(device, shaders::SliceWhitePS, 0, PixelFormat::D32Float);
     // 다중 plane 깊이(D24S8) 파이프라인은 그 형식이 깊이 attachment일 때만 만든다.
     const bool stencilDepth = HasPixelFormatCaps(
