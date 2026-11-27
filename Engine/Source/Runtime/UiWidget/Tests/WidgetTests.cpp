@@ -60,6 +60,11 @@ TEST(UiWidget_ScreenKeepsReflectedTreeAliveUntilDetached) {
     }
 
     app.SetRoot({});
+    // root 해제(ReleaseRootWidget·OnDestruct)는 다음 프레임 시작으로 미뤄진다(UiToolkit 21.4절 —
+    // 소멸자에서 사용자 코드를 부르지 않는다). 그 전에는 트리가 살아 있다.
+    REQUIRE(objects.Collect(access));
+    CHECK(objects.Resolve<UserWidget>(access, screenHandle));
+    CHECK(app.RunDeferredTeardown() == 1);
     REQUIRE(objects.Collect(access));
     CHECK(!objects.Resolve<UserWidget>(access, screenHandle));
     CHECK(!objects.Resolve<OverlayWidget>(access, panelHandle));

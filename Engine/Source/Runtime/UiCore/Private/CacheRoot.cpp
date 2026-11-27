@@ -76,11 +76,63 @@ Result<void> CacheRoot::Update(const Element& root, int32 layer, LinearColor inh
         return Rebuild(root, layer);
     }
 
+    // volatile 여부만 바뀌었으면 다시 기록하지 않고 항목의 매 프레임 표지만 다시 계산한다
+    // (Docs/Design/UiToolkit 20.12절 UV2 — 바뀐 Element는 Paint 무효화로 Refresh가 기록한다).
+    if (volatility_ != root.volatilityRevision_) {
+        if (auto marked = RemarkVolatile(); !marked) {
+            return marked;
+        }
+
+        volatility_ = root.volatilityRevision_;
+    }
+
     if (volatileEntries_.IsEmpty() && paint_ == root.subtreePaintRevision_) {
         return Result<void>::Success();
     }
 
     return Refresh(root, layer);
+}
+
+Result<void> CacheRoot::IndexVolatile(Array<Entry>& entries) noexcept {
+    usize count = 0;
+    for (const Entry& entry : entries) {
+        count += entry.everyFrame ? 1 : 0;
+    }
+
+    auto reserved = volatileEntries_.TryEnsureCapacity(count);
+    if (!reserved) {
+        return reserved;
+    }
+
+    volatileEntries_.Clear();
+    for (usize i = 0; i < entries.Size(); ++i) {
+        if (entries[i].everyFrame) {
+            (void)volatileEntries_.TryPushBack(i);
+        }
+    }
+
+    usize volatileIndex = 0;
+    for (usize i = 0; i < entries.Size(); ++i) {
+        while (volatileIndex < volatileEntries_.Size() && volatileEntries_[volatileIndex] < i) {
+            ++volatileIndex;
+        }
+
+        entries[i].subtreeVolatile = volatileIndex < volatileEntries_.Size() &&
+                                     volatileEntries_[volatileIndex] < entries[i].subtreeEnd;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> CacheRoot::RemarkVolatile() noexcept {
+    // 항목은 트리 앞 순서라 부모 본문이 언제나 먼저 온다. 본문·전경 항목 모두 기록 때와 같은
+    // 규칙(자기 volatile 또는 물려받은 volatile — Element::PaintSubtree)을 쓴다.
+    for (Entry& entry : entries_) {
+        const bool inherited = entry.parentBody != MaxSize && entries_[entry.parentBody].everyFrame;
+        entry.everyFrame = inherited || entry.element->IsVolatile();
+    }
+
+    return IndexVolatile(entries_);
 }
 
 Result<void> CacheRoot::Record(const Element& element, int32 layer, bool overlay, bool everyFrame,
@@ -132,6 +184,7 @@ Result<void> CacheRoot::Rebuild(const Element& root, int32 layer) noexcept {
     next_.Clear();
     const uint64 plan = root.planRevision_;
     const uint64 paint = root.subtreePaintRevision_;
+    const uint64 volatility = root.volatilityRevision_;
     int32 highest = layer;
     auto recorded = root.PaintSubtree(scratch_, layer, highest, this, false);
     if (!recorded) {
@@ -142,34 +195,12 @@ Result<void> CacheRoot::Rebuild(const Element& root, int32 layer) noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
-    usize count = 0;
-    for (const Entry& entry : next_) {
-        count += entry.everyFrame ? 1 : 0;
-    }
-
-    auto reserved = volatileEntries_.TryEnsureCapacity(count);
-    if (!reserved) {
-        return reserved;
-    }
-
-    volatileEntries_.Clear();
-    for (usize i = 0; i < next_.Size(); ++i) {
-        if (next_[i].everyFrame) {
-            (void)volatileEntries_.TryPushBack(i);
-        }
-    }
-
-    usize volatileIndex = 0;
-    for (usize i = 0; i < next_.Size(); ++i) {
-        while (volatileIndex < volatileEntries_.Size() && volatileEntries_[volatileIndex] < i) {
-            ++volatileIndex;
-        }
-
-        next_[i].subtreeVolatile = volatileIndex < volatileEntries_.Size() &&
-                                   volatileEntries_[volatileIndex] < next_[i].subtreeEnd;
+    if (auto indexed = IndexVolatile(next_); !indexed) {
+        return indexed;
     }
 
     stats_.rebuilt = true;
+    volatility_ = volatility;
     verticesOnly_ = false;
     root_ = &root;
     plan_ = plan;

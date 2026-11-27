@@ -123,11 +123,14 @@ KeyReply RadialSlider::OnKeyEvent(const KeyEvent& key) noexcept {
             return KeyReply::Handled();
         }
 
-        // 위·아래는 값 증감이다(오른쪽·왼쪽으로 바꿔 넘긴다).
+        // 위·아래는 값 증감이다(오른쪽·왼쪽으로 바꿔 넘긴다). Slider는 navigation 방향으로 값을
+        // 바꾸므로(UiToolkit 20.8절) 키와 함께 방향도 바꾼다.
         if (event.key == input::Key::Up || event.key == input::Key::Down) {
+            const bool up = event.key == input::Key::Up;
             auto mapped = event;
-            mapped.key = event.key == input::Key::Up ? input::Key::Right : input::Key::Left;
-            const KeyEvent remapped{key.user, mapped, key.chord, key.navigation, key.action};
+            mapped.key = up ? input::Key::Right : input::Key::Left;
+            const KeyEvent remapped{key.user, mapped, key.chord,
+                                    up ? FocusDirection::Right : FocusDirection::Left, key.action};
             return Slider::OnKeyEvent(remapped);
         }
     }

@@ -425,6 +425,8 @@ protected:
     // 보이기·clip만 보는 hit 판정이다(HitTest가 자르기 전에 쓴다).
     Element* HitTestVisible(Vec2 position) noexcept;
     void InvalidatePaintPlan() noexcept;
+    // volatile 여부 변경을 자신과 조상의 cache root에 알린다(Docs/Design/UiToolkit 20.12절 UV2).
+    void InvalidateVolatility() noexcept;
 
     virtual CacheRoot* LocalPaintCache() const noexcept;
     float MeasuredLayoutScale() const noexcept;
@@ -498,6 +500,8 @@ private:
     uint64 paintRevision_ = 0;
     uint64 subtreePaintRevision_ = 0;
     uint64 planRevision_ = 0;
+    // 자신이나 자손의 volatile 여부가 바뀐 횟수다(cache root가 그리기 계획과 따로 본다).
+    uint64 volatilityRevision_ = 0;
     Visibility visibility_ = Visibility::Visible;
     bool enabled_ = true;
     bool clipToBounds_ = false;

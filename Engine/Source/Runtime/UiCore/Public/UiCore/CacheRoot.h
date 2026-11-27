@@ -79,6 +79,10 @@ private:
                         int32& highest) noexcept;
     Result<void> Rebuild(const Element& root, int32 layer) noexcept;
     Result<void> Refresh(const Element& root, int32 layer) noexcept;
+    // entries의 매 프레임 항목 목록과 가지별 volatile 표지를 만든다.
+    Result<void> IndexVolatile(Array<Entry>& entries) noexcept;
+    // volatile 여부만 바뀐 판: 기록한 항목의 everyFrame을 Element 상태로 다시 계산한다.
+    Result<void> RemarkVolatile() noexcept;
     void Publish() noexcept;
 
     PaintList list_, scratch_;
@@ -88,7 +92,7 @@ private:
     Array<PaintRange> ranges_;
     PaintList assembled_;
     const Element* root_ = nullptr;
-    uint64 plan_ = 0, paint_ = 0, revision_ = 0;
+    uint64 plan_ = 0, paint_ = 0, revision_ = 0, volatility_ = 0;
     int32 layer_ = 0, highest_ = 0;
     LinearColor rootForeground_{1, 1, 1, 1};
     bool rootDisabled_ = false;

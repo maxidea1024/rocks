@@ -162,6 +162,16 @@ TEST(UiFramework_ParityCacheRootReusesAndRepaintsOnlyVolatile) {
     REQUIRE(cache);
     CHECK(moving.Value()->paints == movingPaints + 1);
     CHECK(still.Value()->paints == stillPaints);
+    // volatile 여부 변경은 그 요소만 무효화한다(UE SWidget::Invalidate — PaintAndVolatility,
+    // UiToolkit 20.12절). 다시 끄면 한 번 더 기록해 최신 모양을 남기고, 그 뒤로는 그리지 않는다.
+    moving.Value()->SetVolatile(false);
+    const int lastMoving = moving.Value()->paints;
+    REQUIRE(app.UpdatePaintCache(viewport, 1));
+    cache = app.UpdatePaintCache(viewport, 1);
+    REQUIRE(cache);
+    CHECK(cache.Value()->LastUpdate().paintCalls == 0);
+    CHECK(moving.Value()->paints == lastMoving + 1);
+    CHECK(still.Value()->paints == stillPaints);
     // 창 전체 cache 없는 기본 경로는 매번 전부 그린다.
     PaintList list(allocator);
     REQUIRE(app.BuildPaintList(viewport, 1, list));

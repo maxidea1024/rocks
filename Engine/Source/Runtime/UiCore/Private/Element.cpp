@@ -741,10 +741,20 @@ void Element::InvalidateArrangement() noexcept {
     InvalidatePaint();
 }
 
+void Element::InvalidateVolatility() noexcept {
+    for (auto* p = this; p; p = p->parent_) {
+        ++p->volatilityRevision_;
+    }
+}
+
+// volatile 여부 변경은 그 Element만 Paint로 무효화한다(UE SWidget::Invalidate — Volatility는
+// PaintAndVolatility, SWidget.cpp 1317–1359행). 형제를 다시 그리지 않도록 그리기 계획은 그대로
+// 둔다(Docs/Design/UiToolkit 20.12절 UV2).
 void Element::SetVolatile(bool enabled) noexcept {
     if (volatile_ != enabled) {
         volatile_ = enabled;
-        InvalidatePaintPlan();
+        InvalidateVolatility();
+        InvalidatePaint();
     }
 }
 
@@ -796,7 +806,8 @@ LinearColor Element::ResolveForeground(const ThemeColors& theme, LinearColor inh
 void Element::SetForceVolatile(bool enabled) noexcept {
     if (forceVolatile_ != enabled) {
         forceVolatile_ = enabled;
-        InvalidatePaintPlan();
+        InvalidateVolatility();
+        InvalidatePaint();
     }
 }
 

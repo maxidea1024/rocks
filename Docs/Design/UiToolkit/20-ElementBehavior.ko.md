@@ -212,6 +212,7 @@
   - 사유 정규화: RenderTransform·Visibility 변경은 부모 Layout이다.
   - 크기 불변 Layout은 부모로 전파하지 않는다.
   - cache root 빠른 경로를 다시 쓰고, volatile Element만 다시 그린다.
+  - volatile 여부 변경(`SetVolatile`·`SetForceVolatile`)은 그 Element만 Paint로 무효화한다(UE `SWidget::Invalidate`가 Volatility를 PaintAndVolatility로 넓히고 fast path는 그 위젯의 `UpdateFastPathVolatility`만 한다 — SWidget.cpp 1317–1359행). 그리기 계획 revision은 올리지 않는다. 대신 자신과 조상의 volatility revision을 올린다. cache root는 계획이 같고 volatility revision만 다르면 다시 기록하지 않고 항목의 `everyFrame`(자기 volatile 또는 부모 본문 항목의 `everyFrame`)과 volatile 목록만 트리 순서로 다시 계산한다. 형제는 다시 그리지 않는다. 다시 비volatile이 된 Element는 Paint 무효화로 한 번 더 기록되어 캐시에 최신 모양이 남는다.
   - 기본 경로(창 전체 cache 꺼짐)의 다시 그린 Element 수를 센다.
   - 보이기 묶음 평가 순서(20.6절)와 Hidden 하위 트리 갱신을 본다.
 - **UV3 입력 라우팅.**

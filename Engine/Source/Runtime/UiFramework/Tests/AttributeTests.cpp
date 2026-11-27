@@ -38,13 +38,18 @@ TEST(UiFramework_BoundColorOnlyRepaintsOnChangeAndTracksReparenting) {
     REQUIRE(app.UpdatePaintCache(viewport, 1));
     CHECK(calls == 3);
     app.SetRoot(second.Value());
+    // Hidden은 공간을 차지하므로 묶음을 계속 평가하고, Collapsed만 건너뛴다(UE
+    // SWidget::UpdateAttributes — Docs/Design/UiToolkit 20.6절).
     leaf.Value()->SetVisibility(Visibility::Hidden);
     REQUIRE(app.UpdatePaintCache(viewport, 1));
-    CHECK(calls == 3);
+    CHECK(calls == 4);
+    leaf.Value()->SetVisibility(Visibility::Collapsed);
+    REQUIRE(app.UpdatePaintCache(viewport, 1));
+    CHECK(calls == 4);
     leaf.Value()->SetVisibility(Visibility::Visible);
     REQUIRE(app.UpdatePaintCache(viewport, 1));
-    CHECK(calls == 4);
+    CHECK(calls == 5);
     leaf.Value()->SetColor(color);
     REQUIRE(app.UpdatePaintCache(viewport, 1));
-    CHECK(calls == 4);
+    CHECK(calls == 5);
 }
