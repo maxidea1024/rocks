@@ -103,6 +103,12 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 - `WorldWidgetPresenter`는 게임 lane 기록기만 남는다(UiCore 계약만). 위젯 트리를 보관 렌더 타깃(Premultiplied)에 그리는 pass와 그 안 표면 pass를 draw buffer에 쌓고(`Prepare`), 평면 꼭짓점 투영(`Project`)을 돌려준다.
 - 3D 평면 합성은 장면 렌더러의 장면 pass 기록 함수가 Render lane에서 `WorldWidgetPlane`으로 한다(보관 타깃의 렌더 handle과 투영 결과를 장면 packet에 담는다). `WorldWidgetPlane`은 lane 쪽 그리기 부품이라 장치 타입을 그대로 쓴다.
 
+- **셰이더 감시 교체(최종 동기화 — ShaderSystem 16.3절 SSD76, RenderBase 9.8절 "SH4 연결").**
+  - `UiLaneRenderer::Open(device, EngineRenderResources&, format)`으로 열면 `Render` 맨 앞에서 `ApplyShaderUpdates(nullptr)`를 부른다. UI 파이프라인은 캐시를 거치지 않고 장치에 직접 만들기 때문에 캐시를 넘기지 않는다.
+  - 집합이 바뀌면 `ReloadShaders`가 새 집합으로 파이프라인·텍스처 slot을 모두 만든다. 다 만든 뒤에만 옛 것을 Retire한다(실패하면 옛 것 유지, Error 로그, 그 프레임은 실패 보고).
+  - 처리기가 자기 그래프에 `AddPasses`로 UI를 더하면서 교체를 스스로 받는 경우(Sandbox `ScreenRenderer`)는 `ShaderSet` 판 `Open`과 `ReloadShaders`를 쓴다.
+  - UiDemo `DemoLaneProcessor`는 집합 원천 판으로 연다.
+
 ### 18.5 UiDemo를 RenderLane으로(UW6c)
 
 - **lane 모드.** 실행 기본은 `RenderLaneMode::Thread`다(`--self-test`·`--snapshot` 포함). `--lane=inline`은 같은 경로를 Inline 모드로 돌린다. Thread 모드도 명시 대기(표지·읽기)로 결정적으로 단언할 수 있고, 실제 실행 경로의 회귀를 비우지 않으려는 것이다. 두 모드의 snapshot을 18.5절 기준 캡처와 byte 비교한다.

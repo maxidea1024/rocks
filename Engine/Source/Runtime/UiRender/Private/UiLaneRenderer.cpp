@@ -1,6 +1,7 @@
 #include <UiRender/UiLaneRenderer.h>
 #include <Base/InitializerList.h>
 #include <Core/Diagnostics/Log.h>
+#include <RenderBase/EngineShaderHost.h>
 #include <RenderBase/ShaderSet.h>
 #include <RenderGraph/GraphPassAccesses.h>
 #include <TraceCapture/TraceCpuScope.h>
@@ -118,6 +119,69 @@ bool UiLaneRenderer::IsOpen() const noexcept {
     return pipelines_.Get() != nullptr;
 }
 
+Result<void> UiLaneRenderer::Open(graphics::Device& device,
+                                  render::EngineRenderResources& resources,
+                                  graphics::PixelFormat format) noexcept {
+    render::ShaderSet* shaders = resources.Shaders();
+    if (!shaders) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    auto opened = Open(device, *shaders, format);
+    if (opened) {
+        resources_ = &resources;
+    }
+
+    return opened;
+}
+
+namespace {
+
+// 파이프라인 handle 한 쌍(지금 것, 새 것)이다.
+struct Swap {
+    graphics::PipelineHandle* old;
+    graphics::PipelineHandle* fresh;
+};
+
+} // namespace
+
+Result<void> UiLaneRenderer::ReloadShaders(graphics::Device& device,
+                                           render::ShaderSet& shaders) noexcept {
+    if (!IsOpen()) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    auto made = UniquePtr<Pipelines>::TryMake(allocator_);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    auto built = BuildPipelines(device, shaders, format_, *made.Value());
+    if (!built) {
+        return built;
+    }
+
+    // 새 파이프라인이 다 만들어진 뒤에만 옛 것을 놓는다(배경 텍스처는 그대로 둔다).
+    Pipelines& current = *pipelines_;
+    Pipelines& next = *made.Value();
+    for (auto [old, fresh] :
+         {Swap{&current.solid, &next.solid}, Swap{&current.image, &next.image},
+          Swap{&current.mask, &next.mask}, Swap{&current.retained, &next.retained},
+          Swap{&current.rounded, &next.rounded}, Swap{&current.blur, &next.blur}}) {
+        if (!old->IsNull()) {
+            device.Retire(*old);
+        }
+
+        *old = *fresh;
+        *fresh = {};
+    }
+
+    current.textureSlot = next.textureSlot;
+    current.backdropSlot = next.backdropSlot;
+    shaders_ = &shaders;
+    return Result<void>::Success();
+}
+
 Result<void> UiLaneRenderer::Open(graphics::Device& device, render::ShaderSet& shaders,
                                   graphics::PixelFormat format) noexcept {
     if (IsOpen()) {
@@ -129,7 +193,28 @@ Result<void> UiLaneRenderer::Open(graphics::Device& device, render::ShaderSet& s
         return Result<void>::Failure(made.Error());
     }
 
-    Pipelines& pipelines = *made.Value();
+    auto built = BuildPipelines(device, shaders, format, *made.Value());
+    if (!built) {
+        return built;
+    }
+
+    auto pool = UniquePtr<render::GraphResourcePool>::TryMake(allocator_, allocator_, device);
+    if (!pool) {
+        made.Value()->Retire(device);
+        return Result<void>::Failure(pool.Error());
+    }
+
+    shaders_ = &shaders;
+    resources_ = nullptr;
+    format_ = format;
+    pool_ = Move(pool.Value());
+    pipelines_ = Move(made.Value());
+    return Result<void>::Success();
+}
+
+Result<void> UiLaneRenderer::BuildPipelines(graphics::Device& device, render::ShaderSet& shaders,
+                                            graphics::PixelFormat format,
+                                            Pipelines& pipelines) noexcept {
     const auto fail = [&](ErrorCode error) noexcept {
         pipelines.Retire(device);
         return Result<void>::Failure(error);
@@ -174,15 +259,6 @@ Result<void> UiLaneRenderer::Open(graphics::Device& device, render::ShaderSet& s
 
     pipelines.textureSlot = image.Value();
     pipelines.backdropSlot = blur.Value();
-    auto pool = UniquePtr<render::GraphResourcePool>::TryMake(allocator_, allocator_, device);
-    if (!pool) {
-        return fail(pool.Error());
-    }
-
-    shaders_ = &shaders;
-    format_ = format;
-    pool_ = Move(pool.Value());
-    pipelines_ = Move(made.Value());
     return Result<void>::Success();
 }
 
@@ -742,6 +818,21 @@ void UiLaneRenderer::Render(render::RenderFrameContext& context, UiFramePacket& 
     if (!IsOpen()) {
         context.ReportFailure(ErrorCode::NotReady);
         return;
+    }
+
+    // 감시 재컴파일의 셰이더 교체를 프레임 경계에서 받는다(ShaderSystem 16.3절 SSD76). UI
+    // 파이프라인은 캐시를 거치지 않고 장치에 직접 만들므로 캐시는 넘기지 않는다.
+    if (resources_ && resources_->ApplyShaderUpdates(nullptr)) {
+        render::ShaderSet* swapped = resources_->Shaders();
+        auto reloaded = swapped ? ReloadShaders(context.Device(), *swapped)
+                                : Result<void>::Failure(ErrorCode::NotReady);
+        if (!reloaded) {
+            Log::Error(LogUiLane,
+                       "The UI pipelines could not be rebuilt after a shader swap: {Error}",
+                       ErrorCodeName(reloaded.Error()));
+            context.ReportFailure(reloaded.Error());
+            return;
+        }
     }
 
     for (UiFrameTarget& target : packet.Targets()) {

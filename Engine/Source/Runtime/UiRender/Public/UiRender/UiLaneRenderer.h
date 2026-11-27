@@ -16,6 +16,7 @@ class UiScenePassContext;
 
 namespace rocks::render {
 
+class EngineRenderResources;
 class ShaderSet;
 
 } // namespace rocks::render
@@ -61,6 +62,16 @@ public:
     // NotFound, 장치 오류는 그 오류.
     Result<void> Open(graphics::Device& device, render::ShaderSet& shaders,
                       graphics::PixelFormat format) noexcept;
+    // resources의 지금 집합으로 연다. 프레임마다(Render 맨 앞) resources.ApplyShaderUpdates를 불러
+    // 감시 재컴파일의 셰이더 교체를 받고, 바뀌면 UI 파이프라인을 새 집합으로 다시
+    // 만든다(ShaderSystem 16.3절 SSD76 — Docs/Design/UiToolkit 18.4절). resources는 이 객체가 닫힐
+    // 때까지 산다. 처리기가 자기 그래프에 AddPasses로 UI를 더하면서 교체를 스스로 받는 경우는
+    // ShaderSet 판 Open과 ReloadShaders를 쓴다.
+    Result<void> Open(graphics::Device& device, render::EngineRenderResources& resources,
+                      graphics::PixelFormat format) noexcept;
+    // shaders로 UI 파이프라인을 다시 만든다(셰이더 교체 뒤). 새 파이프라인을 모두 만든 뒤에만 옛
+    // 것을 Retire하고 바꾼다 — 실패하면 옛 파이프라인·집합을 그대로 둔다. 닫혀 있으면 NotReady다.
+    Result<void> ReloadShaders(graphics::Device& device, render::ShaderSet& shaders) noexcept;
     // 렌더 lane에서 닫는다(파이프라인·배경 텍스처·풀·남은 창 표면을 Retire한다).
     void Close(graphics::Device& device) noexcept;
     bool IsOpen() const noexcept;
@@ -115,6 +126,10 @@ public:
 private:
     struct Pipelines;
 
+    // shaders로 UI 파이프라인·텍스처 slot을 pipelines에 만든다. 실패하면 만든 것을 Retire한다.
+    Result<void> BuildPipelines(graphics::Device& device, render::ShaderSet& shaders,
+                                graphics::PixelFormat format, Pipelines& pipelines) noexcept;
+
     struct WindowSurface {
         UiWindowSurfaceId id{};
         graphics::SwapChainHandle swapChain{};
@@ -145,6 +160,8 @@ private:
 
     Allocator& allocator_;
     render::ShaderSet* shaders_ = nullptr;
+    // Open(resources)로 열었으면 프레임마다 셰이더 교체를 받는 원천이다.
+    render::EngineRenderResources* resources_ = nullptr;
     graphics::PixelFormat format_ = graphics::PixelFormat::RGBA8UnormSrgb;
     UniquePtr<Pipelines> pipelines_;
     UniquePtr<render::GraphResourcePool> pool_;

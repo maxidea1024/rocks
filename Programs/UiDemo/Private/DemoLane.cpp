@@ -27,7 +27,8 @@ Result<void> DemoLaneProcessor::OnLaneStart(render::RenderLaneContext& context) 
         return opened;
     }
 
-    return ui_.Open(device, *resources_.Shaders(), graphics::PixelFormat::RGBA8UnormSrgb);
+    // 집합 원천으로 연다 — 감시 재컴파일의 셰이더 교체를 프레임마다 받는다(SSD76).
+    return ui_.Open(device, resources_, graphics::PixelFormat::RGBA8UnormSrgb);
 }
 
 void DemoLaneProcessor::OnLaneStop(render::RenderLaneContext& context) noexcept {
