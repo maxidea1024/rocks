@@ -5,6 +5,7 @@
 #include <Core/Math/Vector3.h>
 #include <EngineAudio/AudioControlStats.h>
 #include <EngineAudio/AudioPlayback.h>
+#include <EngineAudio/AudioSpatialization.h>
 #include <AudioAssets/SoundSourceRef.h>
 
 // 게임 ↔ 제어 pipe 일괄 묶음이다(Docs/Design/AudioSystem 3.35.5절). 게임이 한 프레임 명령을 모아
@@ -39,12 +40,43 @@ struct ControlCommand {
     // 실효 우선순위(옵션 재정의 또는 사운드 값)와 voice를 잃어도 남을지다(3.41.1절).
     float priority = DefaultSoundPriority;
     bool remainActiveIfDropped = false;
+    // 동시 발음 소유자와 실효 그룹(옵션 재정의 또는 사운드 것 — 3.41.2절)이다.
+    uint64 owner = 0;
+    uint32 concurrencyCount = 0;
+    SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
     // Stop.
     uint32 fadeFrames = 0;
     // SetParameter.
     PlaybackParameter parameter = PlaybackParameter::Volume;
     float value = 0.0f;
     uint32 rampFrames = 0;
+};
+
+// 가상화 설정 기본값이다(UE au.VirtualLoops.UpdateRate.Min·Max·PerfDistance·
+// ForceUpdateListenerMoveDistance — AudioVirtualLoop.cpp:9–42). CVar 정의도 이 값을 쓴다.
+inline constexpr float DefaultVirtualUpdateMinSeconds = 0.1f;
+inline constexpr float DefaultVirtualUpdateMaxSeconds = 3.0f;
+inline constexpr float DefaultVirtualPerfDistance = 15000.0f;
+inline constexpr float DefaultVirtualForceUpdateDistance = 2500.0f;
+
+// 가상화 설정이다(Docs/Design/AudioSystem 3.41.3절, UE au.VirtualLoops.* —
+// AudioVirtualLoop.cpp:9–42).
+struct VirtualizationSettings {
+    // audio.virtual.enabled다(UE au.VirtualLoops.Enabled).
+    bool enabled = true;
+    // audio.virtual.allowplaywhensilent다(UE bAllowPlayWhenSilent). 끄면 PlayWhenSilent를 Restart로
+    // 본다.
+    bool allowPlayWhenSilent = true;
+    // 검사 간격 하한·상한(초)과 그 사이를 거리로 보간하는 길이(cm)다(UE
+    // UpdateRate.Min·Max·PerfDistance).
+    float updateMinSeconds = DefaultVirtualUpdateMinSeconds;
+    float updateMaxSeconds = DefaultVirtualUpdateMaxSeconds;
+    float perfDistance = DefaultVirtualPerfDistance;
+    // 리스너가 묶음 사이에 이만큼(cm)보다 많이 움직이면 바로 검사한다(UE
+    // ForceUpdateListenerMoveDistance).
+    float forceUpdateDistance = DefaultVirtualForceUpdateDistance;
+    // 최대 가청 거리가 이 값 이상이면 늘 들린다(UE au.MaxWorldDistance).
+    float maxWorldDistance = MaxAudioWorldDistance;
 };
 
 // scene 리스너 스냅숏이다(바뀐 프레임에만).
@@ -72,6 +104,10 @@ struct ControlBatch {
     Array<EmitterUpdate> emitters;
     Array<ControlCommand> commands;
     float masterGain = 1.0f;
+    // audio.concurrency.mindistancedelta(cm — StopFarthest 동거리 폭, 3.41.2절)다.
+    float concurrencyMinDistanceDelta = 0.0f;
+    // audio.virtual.* 값이다(3.41.3절 — 묶음마다 읽는다).
+    VirtualizationSettings virtualization;
     // 제어 → 게임.
     Array<PlaybackEvent> events;
     AudioControlStats stats;

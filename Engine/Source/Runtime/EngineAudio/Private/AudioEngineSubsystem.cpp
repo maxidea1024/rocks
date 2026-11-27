@@ -362,6 +362,12 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
     }
 
     current_->masterGain = MasterGainTarget(engine);
+    current_->concurrencyMinDistanceDelta =
+        engine.Settings() != nullptr ? engine_audio_detail::ConcurrencyMinDistanceDeltaVar.Get()
+                                     : 0.0f;
+    current_->virtualization = engine.Settings() != nullptr
+                                   ? engine_audio_detail::VirtualizationFromSettings()
+                                   : VirtualizationSettings{};
     SnapshotScenes();
     SubmitCurrent();
 }
@@ -766,6 +772,14 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (options.overrideConcurrency) {
+        if (auto valid =
+                ValidateSoundConcurrencyEntries(options.concurrency, options.concurrencyCount);
+            !valid) {
+            return valid;
+        }
+    }
+
     if (playable->looping && playable->loopEnd != 0 && options.startFrame >= playable->loopEnd) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -820,6 +834,16 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.priority =
             options.priority.HasValue() ? options.priority.Value() : sound.Get()->priority;
         command.remainActiveIfDropped = options.remainActiveIfDropped;
+        command.owner = options.owner;
+        const SoundPlayable& playable = *sound.Get();
+        const SoundConcurrencyEntry* entries =
+            options.overrideConcurrency ? options.concurrency : playable.concurrency;
+        command.concurrencyCount =
+            options.overrideConcurrency ? options.concurrencyCount : playable.concurrencyCount;
+        for (uint32 index = 0; index < command.concurrencyCount; ++index) {
+            command.concurrency[index] = entries[index];
+        }
+
         if (!current_->commands.TryPushBack(Move(command))) {
             return Accepted::Failure(ErrorCode::OutOfMemory);
         }

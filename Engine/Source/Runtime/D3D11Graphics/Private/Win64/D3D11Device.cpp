@@ -451,6 +451,11 @@ usize D3D11Device::PendingRetireCount() const noexcept {
     return retired_.Size();
 }
 
+uint64 D3D11Device::PresentCount() const noexcept {
+    platform::LockGuard lock(gate_);
+    return presents_;
+}
+
 void D3D11Device::ReclaimCompleted() noexcept {
     if (!ownership_.Check()) {
         return;

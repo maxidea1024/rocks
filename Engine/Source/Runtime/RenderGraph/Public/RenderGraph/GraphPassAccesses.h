@@ -12,8 +12,9 @@ enum class GraphTargetKind : uint8 {
     None,
     // 그래프 텍스처 attachment(색 0–8, 깊이 하나, 장치 BeginPass)다.
     Texture,
-    // 스왑체인 백버퍼(BeginFrame, 기록 끝에 present)다. 그래프 밖 출력이므로 그 pass는 부수 효과
-    // pass다.
+    // 스왑체인 백버퍼(장치 BeginFrame)다. 그래프 밖 출력이므로 그 pass는 부수 효과 pass다. 한
+    // 그래프에서 같은 스왑체인의 pass들은 백버퍼 하나를 함께 쓰고, 그 스왑체인의 마지막 pass 기록이
+    // 끝날 때 한 번 present한다(RenderBase 8절 "스왑체인 공유 설계").
     SwapChain
 };
 
@@ -52,7 +53,7 @@ struct GraphDepthTarget {
 };
 
 // Raster pass의 렌더 타깃이다. Texture는 색 attachment colorCount개(0–MaxColorTargets)와 깊이
-// attachment 하나(hasDepth)를 장치 BeginPass로 붙이고, SwapChain은 스왑체인 백버퍼에 clear로
+// attachment 하나(hasDepth)를 장치 BeginPass로 붙이고, SwapChain은 스왑체인 백버퍼에 load 동작으로
 // 그린다(BeginFrame). attachment 전이는 장치가 낸다(RenderBase 8절 RG1 남은 것 A부).
 struct GraphRenderTarget {
     GraphTargetKind kind = GraphTargetKind::None;
@@ -61,7 +62,8 @@ struct GraphRenderTarget {
     GraphDepthTarget depth;
     bool hasDepth = false;
     graphics::SwapChainHandle swapChain;
-    // 스왑체인 백버퍼의 clear 색이다.
+    // 스왑체인 백버퍼의 시작 동작과 clear 색이다.
+    GraphLoadAction load = GraphLoadAction::Clear;
     graphics::ClearColor clear;
 };
 
@@ -142,8 +144,18 @@ public:
     // 깊이 attachment를 정한다(다시 부르면 바꾼다).
     GraphPassAccesses& DepthTarget(const GraphDepthTarget& target) noexcept;
 
-    // 스왑체인 백버퍼를 렌더 타깃으로 정한다(present pass).
+    // 스왑체인 백버퍼를 렌더 타깃으로 정한다. load는 이 pass의 시작 동작이다: 같은 그래프의 앞
+    // pass가 그린 백버퍼에 이어 그리려면 Load, 새로 그리려면 Clear(clear 색)·DontCare(백버퍼 전체를
+    // 덮을 때)다. 그 스왑체인의 그래프 첫 pass가 Load면 AddPass가 검증 오류로 거부한다(present 뒤
+    // 백버퍼 내용은 정의되지 않는다). present는 그래프가 그 스왑체인의 마지막 pass에서 한 번 낸다
+    // (RenderBase 8절 "스왑체인 공유 설계").
+    //
+    // 사용 예(장면 tone map 뒤 같은 창에 UI):
+    //   tonemap.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
+    //       .SwapChainTarget(swapChain, GraphLoadAction::Clear, background);
+    //   ui.SwapChainTarget(swapChain, GraphLoadAction::Load);   // 이 pass 뒤 present
     GraphPassAccesses& SwapChainTarget(graphics::SwapChainHandle swapChain,
+                                       GraphLoadAction load = GraphLoadAction::Clear,
                                        const graphics::ClearColor& clear = {}) noexcept;
 
     Span<const GraphResourceAccess> Accesses() const noexcept {

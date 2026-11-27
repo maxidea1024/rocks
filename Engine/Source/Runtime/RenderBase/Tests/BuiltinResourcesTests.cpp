@@ -246,6 +246,16 @@ TEST(RenderBase_BuiltinResourcesCreateFallbackAndResolve) {
           entries.fullscreenVertex != NoShaderSetEntry && entries.copyPixel != NoShaderSetEntry);
     // 깊이 대체는 clear pass 하나로 채운다.
     CHECK(CountOps(device, RecordingDevice::Op::EndFrame) == 1);
+    // noise 시스템 텍스처 둘(11.5절): 2D·3D RGBA8Unorm, SRV 있음, 비교 샘플러 아님.
+    auto noise2D = device.GetTextureViewInfo(pack.Texture(BuiltinTexture::PerlinGradient2D));
+    auto noise3D = device.GetTextureViewInfo(pack.Texture(BuiltinTexture::PerlinGradient3D));
+    REQUIRE(noise2D && noise3D);
+    CHECK(noise2D.Value().dimension == graphics::TextureDimension::Texture2D &&
+          noise2D.Value().format == graphics::PixelFormat::RGBA8Unorm && noise2D.Value().sampled &&
+          !noise2D.Value().comparison);
+    CHECK(noise3D.Value().dimension == graphics::TextureDimension::Texture3D &&
+          noise3D.Value().format == graphics::PixelFormat::RGBA8Unorm && noise3D.Value().sampled &&
+          !noise3D.Value().comparison);
 
     using Shape = shader::ShaderResourceShape;
     using Component = shader::ShaderComponentType;

@@ -6,6 +6,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Material/Material.generated.h>
+#include <Material/MaterialBase.generated.h>
 #include <Mesh/StaticMesh/StaticMesh.generated.h>
 #include <Meta/TypeSchema.h>
 #include <ObjectSerialization/ObjectGraph.h>

@@ -1,10 +1,14 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
 #include <Core/Math/Quaternion.h>
 #include <Core/Math/Rotator.h>
 #include <Core/Math/Vector3.h>
 #include <Meta/Annotations.h>
 #include <World/Component.h>
+#include <World/Physics/HitResult.h>
+#include <World/Physics/MoveOptions.h>
+#include <World/Physics/TeleportMode.h>
 
 namespace rocks {
 
@@ -25,8 +29,9 @@ enum class PlaneConstraintAxis : uint8 {
 };
 
 // 다른 SceneComponent(갱신 대상)를 움직이는 컴포넌트의 기반이다(UE UMovementComponent —
-// Docs/Design/EngineRuntime 26.3절). 충돌 sweep 없이 움직인다: 모든 이동은 순간 이동이고 충돌은
-// 일어나지 않는다(물리 CR16 때 sweep이 붙는다).
+// Docs/Design/EngineRuntime 26.3절). 기본 파생(회전·발사체·경로 이동)은 sweep 없이 움직인다(순간
+// 이동 — 캐릭터 이동 CM12 때 sweep으로 바꾼다). sweep 이동(MoveUpdatedComponent 5인자)과 침투
+// 해소(SafeMoveUpdatedComponent)는 Docs/Design/PhysicsModule 7.1.13절이다.
 //
 // 규약:
 // - 갱신 대상은 영속하지 않는다(UE Transient). autoRegisterUpdatedComponent면 OnRegister·OnAwake·
@@ -49,6 +54,14 @@ public:
     // IsExceedingMaxSpeed의 여유 배율(1.01)이다.
     static constexpr double QuaternionTolerance = 1.0e-8;
     static constexpr double MaxSpeedSlack = 1.01;
+
+    // 침투 해소 상수(cm — Docs/Design/PhysicsModule 7.1.13절): 밀어낼 때 더 빼는 거리(UE CVar
+    // p.PenetrationPullbackDistance), 밀어낸 자리 겹침 시험의
+    // 부풀림(p.PenetrationOverlapCheckInflation), 깊이가 없는 시작 겹침의 깊이(UE
+    // GetPenetrationAdjustment 리터럴)다.
+    static constexpr double PenetrationPullbackDistance = 0.125;
+    static constexpr double PenetrationOverlapCheckInflation = 0.100;
+    static constexpr double DefaultPenetrationDepth = 0.125;
 
     explicit MovementComponent(Allocator& allocator) noexcept;
 
@@ -172,6 +185,43 @@ public:
     // 대상 없음(InvalidArgument), Mobility 위반, 비유한 값.
     Result<void> MoveUpdatedComponent(const Vec3d& delta, const Quatd& rotation) noexcept;
 
+    // 갱신 대상을 delta(평면 제약 적용)만큼 옮기고 월드 회전을 rotation으로 둔다(UE
+    // MoveUpdatedComponent — Docs/Design/PhysicsModule 7.1.13절). 대상이 PrimitiveComponent면
+    // MoveComponent(sweep이면 막는 hit 앞에 멈춘다 — outHit), 아니면 sweep 없이 옮긴다(outHit는
+    // trace 끝점만 채운 빈 hit). 반환 값은 움직였는지다(MoveComponent와 같다). 오류: 대상
+    // 없음(InvalidArgument), Mobility 위반, 비유한 값.
+    //
+    // 사용 예:
+    //   HitResult hit;
+    //   (void)MoveUpdatedComponent(delta, rotation, true, &hit, TeleportMode::None);
+    Result<bool> MoveUpdatedComponent(const Vec3d& delta, const Quatd& rotation, bool sweep,
+                                      HitResult* outHit, TeleportMode teleport) noexcept;
+
+    // 시작 겹침 hit를 빠져나갈 조정량이다(UE GetPenetrationAdjustment — 7.1.13절): 시작 겹침이
+    // 아니면 0, 아니면 hit.normal × (깊이(없으면 DefaultPenetrationDepth) +
+    // PenetrationPullbackDistance)를 평면 제약한 값이다.
+    virtual Vec3d GetPenetrationAdjustment(const HitResult& hit) const noexcept;
+
+    // 시작 겹침에서 adjustment만큼 빠져나간다(UE ResolvePenetrationImpl — 7.1.13절): 밀어낸 자리가
+    // 비었으면 teleport, 아니면 sweep(그다음 두 조정량 합, 조정량 + 원래 이동, 원래 이동 순으로
+    // 시도). 반환 값은 움직였는지다(조정량이 0·대상이 Primitive가 아님·소유 Actor 없음이면 거짓).
+    // 오류: 이동 실패(대상 없음·Mobility 위반 등).
+    virtual Result<bool> ResolvePenetration(const Vec3d& adjustment, const HitResult& hit,
+                                            const Quatd& rotation) noexcept;
+
+    // 박힌 채 시작하는 이동을 풀어 주는 sweep 이동이다(UE SafeMoveUpdatedComponent — 7.1.13절).
+    // 먼저 막는 시작 겹침을 무시하지 않고 옮기고, 시작 겹침이면 ResolvePenetration 뒤 원래 이동을
+    // 다시 한다. 반환 값은 마지막 이동이 움직였는지다. 대상이 없으면 outHit를 비우고(time 1)
+    // 거짓이다. 오류: 이동 실패.
+    //
+    // 사용 예(파생 OnTick):
+    //   HitResult hit;
+    //   (void)SafeMoveUpdatedComponent(Velocity() * dt, UpdatedRotation(), true, hit,
+    //                                  TeleportMode::None);
+    virtual Result<bool> SafeMoveUpdatedComponent(const Vec3d& delta, const Quatd& rotation,
+                                                  bool sweep, HitResult& outHit,
+                                                  TeleportMode teleport) noexcept;
+
     // 대상이 없거나 Movable이 아니면 참이다(UE ShouldSkipUpdate — 렌더 판정은 렌더 단계).
     bool ShouldSkipUpdate() const noexcept;
 
@@ -188,6 +238,19 @@ protected:
     // 비어 있고 autoRegisterUpdatedComponent면 소유 Actor root를 쓴다.
     void AutoRegisterUpdatedComponent() noexcept;
 
+    // MoveUpdatedComponent의 이동 선택 판이다(SafeMove·ResolvePenetration이 표지를 넘긴다 — UE
+    // MoveComponentFlags 범위 대신 인자).
+    virtual Result<bool> MoveUpdatedComponentWith(const Vec3d& delta, const Quatd& rotation,
+                                                  bool sweep, HitResult* outHit,
+                                                  const MoveOptions& options) noexcept;
+
+    // location에 갱신 대상 형상을 inflation만큼 부풀려 놓았을 때 막는 겹침이 있는지다(UE
+    // OverlapTest — 채널·응답은 대상 것, 소유 Actor와 이동 무시 목록 제외).
+    // 질의를 마치지 못하면 참(막힘)이다. const가 아닌 것은 무시 목록 버퍼를 재사용하기
+    // 때문이다(UE는 const).
+    virtual bool OverlapTest(const Vec3d& location, const Quatd& rotation,
+                             double inflation) noexcept;
+
     ROCKS_PROPERTY(ReadOnly, Name = "velocity") Vec3d velocity_;
 
 private:
@@ -203,6 +266,8 @@ private:
     bool autoUpdateTickRegistration_ = true;
     ROCKS_PROPERTY(ReadOnly, Name = "tickBeforeOwner") bool tickBeforeOwner_ = true;
     ROCKS_NATIVE() ObjectHandle updatedComponent_;
+    // OverlapTest가 재사용하는 무시 Actor 목록이다(이동 무시 목록 + 소유 Actor).
+    ROCKS_NATIVE() Array<ObjectHandle> overlapIgnoreActors_;
 };
 
 } // namespace rocks

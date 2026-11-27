@@ -236,8 +236,8 @@ Result<EventBlockLayout> ValidateEventList(const TypeSchema& schema,
         if (event.fieldId != field.id || event.bind == nullptr || event.unbind == nullptr ||
             event.unbindFunction == nullptr || event.unbindAll == nullptr ||
             event.clear == nullptr || event.compact == nullptr || event.bindings == nullptr ||
-            event.broadcastFromFrame == nullptr || event.construct == nullptr ||
-            event.destroy == nullptr || event.frameSize == 0 ||
+            event.keepUnresolved == nullptr || event.broadcastFromFrame == nullptr ||
+            event.construct == nullptr || event.destroy == nullptr || event.frameSize == 0 ||
             !IsPowerOfTwo(event.frameAlignment) || count > MaxFunctionParameters ||
             event.parameters.Size() != count || expected == nullptr ||
             expected->size != event.frameSize || expected->alignment != event.frameAlignment ||

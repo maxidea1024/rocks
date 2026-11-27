@@ -371,6 +371,8 @@ Result<void> GlesDevice::ResizeSwapChain(SwapChainHandle handle, uint32 width,
     entry.objects[0] = record->texture;
     entry.objects[2] = record->framebuffer;
     SwapChainRecord resized = *record;
+    // 새 백버퍼라 그리는 중인 프레임을 버린다.
+    resized.frameOpen = false;
     if (!CreateBackBuffer(resized, width, height)) {
         return Fail("swap chain back buffer resize failed");
     }
@@ -1063,6 +1065,10 @@ Result<void> GlesDevice::WaitIdle() noexcept {
 
 usize GlesDevice::PendingRetireCount() const noexcept {
     return retired_.Size();
+}
+
+uint64 GlesDevice::PresentCount() const noexcept {
+    return presents_;
 }
 
 StringView GlesDevice::LastError() const noexcept {

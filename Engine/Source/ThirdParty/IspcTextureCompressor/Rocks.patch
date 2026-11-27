@@ -1,0 +1,66 @@
+diff --git a/ispc_texcomp/kernel.ispc b/ispc_texcomp/kernel.ispc
+index 5bffd92..8d0f394 100644
+--- a/ispc_texcomp/kernel.ispc
++++ b/ispc_texcomp/kernel.ispc
+@@ -255,10 +255,11 @@ inline void compute_axis3(float axis[3], float covar[6], uniform const int power
+ 	for (uniform int p=0; p<3; p++) axis[p] = vec[p];
+ }
+ 
+-inline void compute_axis(float axis[4], float covar[10], uniform const int powerIterations, uniform int channels)
+-{
+-	float vec[4] = {1,1,1,1};
++// Rocks: margin of the minor-axis test in compute_axis (see there).
++static const uniform float axis_restart_ratio = 0.5f;
+ 
++inline void power_iterate(float axis[4], float covar[10], float vec[4], uniform const int powerIterations, uniform int channels)
++{
+     for (uniform int i=0; i<powerIterations; i++)
+ 	{
+ 		if (channels == 3) ssymv3(axis, covar, vec);
+@@ -279,6 +280,46 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
+ 	for (uniform int p=0; p<channels; p++) axis[p] = vec[p];
+ }
+ 
++inline void compute_axis(float axis[4], float covar[10], uniform const int powerIterations, uniform int channels)
++{
++	float vec[4] = {1,1,1,1};
++	power_iterate(axis, covar, vec, powerIterations, channels);
++
++	// Rocks: with exact IEEE arithmetic (no fast-math, no FMA) a principal axis orthogonal to the start vector {1,1,1,1}
++	// (for example R up and G down by the same steps) stays orthogonal, and the iteration ends on a minor axis. The
++	// principal eigenvalue is at least trace/channels, so a Rayleigh quotient below that proves the axis is not the
++	// principal one; only then restart from the covariance column with the largest diagonal. The test uses half of that
++	// bound (axis_restart_ratio): an isotropic covariance (a solid block, eps on the diagonal) meets the bound exactly,
++	// and one ulp of rounding must not restart it. Blocks that never restart keep the upstream result.
++	float cv[4];
++	if (channels == 3) ssymv3(cv, covar, axis);
++	if (channels == 4) ssymv4(cv, covar, axis);
++	float quotient = 0;
++	float norm_sq = 0;
++	for (uniform int p=0; p<channels; p++)
++	{
++		quotient += axis[p]*cv[p];
++		norm_sq += axis[p]*axis[p];
++	}
++
++	float trace = covar[0] + covar[4] + covar[7];
++	if (channels == 4) trace += covar[9];
++	if (quotient * channels < trace * norm_sq * axis_restart_ratio)
++	{
++		int k = 0;
++		float largest = covar[0];
++		if (covar[4] > largest) { largest = covar[4]; k = 1; }
++		if (covar[7] > largest) { largest = covar[7]; k = 2; }
++		if (channels == 4 && covar[9] > largest) { k = 3; }
++		vec[0] = k == 0 ? covar[0] : (k == 1 ? covar[1] : (k == 2 ? covar[2] : covar[3]));
++		vec[1] = k == 0 ? covar[1] : (k == 1 ? covar[4] : (k == 2 ? covar[5] : covar[6]));
++		vec[2] = k == 0 ? covar[2] : (k == 1 ? covar[5] : (k == 2 ? covar[7] : covar[8]));
++		vec[3] = 0;
++		if (channels == 4) vec[3] = k == 0 ? covar[3] : (k == 1 ? covar[6] : (k == 2 ? covar[8] : covar[9]));
++		power_iterate(axis, covar, vec, powerIterations, channels);
++	}
++}
++
+ ///////////////////////////////////////////////////////////
+ //					 BC1/BC3 encoding
+ 

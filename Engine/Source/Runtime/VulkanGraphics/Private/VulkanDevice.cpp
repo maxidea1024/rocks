@@ -929,6 +929,11 @@ usize VulkanDevice::PendingRetireCount() const noexcept {
     return retired_.Size();
 }
 
+uint64 VulkanDevice::PresentCount() const noexcept {
+    platform::LockGuard lock(gate_);
+    return presents_;
+}
+
 } // namespace rocks::graphics::vulkan
 
 namespace rocks::graphics {

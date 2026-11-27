@@ -8,6 +8,7 @@
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/BodyKinematics.h>
 #include <World/Physics/HitResult.h>
+#include <World/Physics/MtdResult.h>
 #include <World/Physics/OverlapMode.h>
 #include <World/Physics/OverlapResult.h>
 #include <World/Physics/PhysicsBodyHandle.h>
@@ -85,6 +86,17 @@ public:
     // 형상 없음·비유한 값(InvalidArgument — 이전 형상을 둔다).
     virtual Result<void> SetBodyGeometry(PhysicsBodyHandle body,
                                          const BodyGeometry& geometry) noexcept = 0;
+
+    // 시뮬레이션 접촉 hit를 모을지 바꾼다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
+    // 다음 step부터 적용된다. 없는 handle·옛 세대는 무시한다.
+    virtual void SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept = 0;
+
+    // rotation으로 position에 놓은 shape가 body와 겹치면 참이고 out에 shape를 밀어낼 방향·거리를
+    // 쓴다(UE FBodyInstance::OverlapTest의 MTD — 7.1.13절). 닿기만 해도 겹침이다(거리 0). 없는
+    // handle·옛 세대, Line·Cylinder(CY2 전)·비유한 값·0 회전이면 거짓이다(out은 그대로).
+    virtual bool ComputePenetration(PhysicsBodyHandle body, const CollisionShape& shape,
+                                    const Vec3d& position, const Quatd& rotation,
+                                    MtdResult& out) const noexcept = 0;
 
     // body의 현재 운동 상태다. 오류: 없는 handle·옛 세대(StaleHandle).
     virtual Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept = 0;

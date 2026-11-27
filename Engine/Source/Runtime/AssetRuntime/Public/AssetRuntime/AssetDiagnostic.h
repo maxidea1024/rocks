@@ -40,6 +40,10 @@ enum class AssetDiagnosticCode : uint16 {
     CorruptEntry,
     IncompatibleCook,
     NeverCookReferenced,
+    // 쿠킹 쓰기가 이벤트 바인딩을 쓸 수 없다(Docs/Design/EventReflection.ko.md ED24 — 미해결
+    // 레코드나 EditorOnly 함수를 가리키는 바인딩, section = Objects, detail = 이유 1 EditorOnly
+    // 함수·2 미해결)
+    EventBindingNotCookable,
     // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
     // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
     ContentNotTrusted,
@@ -156,7 +160,13 @@ enum class AssetDiagnosticCode : uint16 {
     // 형식을 샘플링 보장하지 않아 대체했다(PlatformFormatFallback — 경고, detail = 바꾸기 전
     // PixelFormat 번호).
     EncoderUnavailable,
-    PlatformFormatFallback
+    PlatformFormatFallback,
+    // 커브 에셋(Docs/Design/CurveAssets 5.1·5.3절 — CA3·CA4): 임포트가 원본의 행·항목 하나 또는
+    // 행의 칸 일부를 건너뛰었다(CurveImportRowSkipped — 경고, detail = CSV 물리 줄 번호 또는 JSON
+    // 배열 원소 번호, 1부터), 쿠킹이 커브 표의 모드가 쓰지 않는 맵을 비웠다(CurveTableUnusedRows —
+    // 경고, 쿠킹 진단 setting = 버린 행 수).
+    CurveImportRowSkipped,
+    CurveTableUnusedRows
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

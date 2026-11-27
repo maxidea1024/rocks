@@ -48,13 +48,17 @@ inline constexpr float MaxAudioWorldDistance = 2097152.0f;
 // 자른다. 최대 감쇠 거리는 falloffDistance(distanceScale로 나눔)이고, NaturalSound Hold면 world
 // 최대, NaturalSound Continues면 falloffDistance × (−60 dB ÷ min(naturalSoundAttenuationDb,
 // −1e-4))다. distanceScale이 0이면 감쇠하지 않으므로 world 최대다.
-ROCKS_ENGINEAUDIO_API float MaxAudibleDistance(const SoundAttenuation& attenuation) noexcept;
+// maxWorldDistance는 audio.virtual.maxworlddistance(기본 MaxAudioWorldDistance)다.
+ROCKS_ENGINEAUDIO_API float
+MaxAudibleDistance(const SoundAttenuation& attenuation,
+                   float maxWorldDistance = MaxAudioWorldDistance) noexcept;
 
 // 거리로 본 가청 여부다(UE FAudioVirtualLoop::IsInAudibleRange — AudioVirtualLoop.cpp:239–273).
 // attenuate가 꺼졌거나 최대 가청 거리가 world 최대 이상이면 늘 들리고, 아니면 리스너까지 거리 <
 // 최대 가청 거리다. 감쇠 스냅숏이 없는 재생·NonSpatial 배치는 호출자가 늘 들리는 것으로 본다.
-ROCKS_ENGINEAUDIO_API bool IsWithinAudibleRange(const SoundAttenuation& attenuation,
-                                                const Vec3d& listenerPosition,
-                                                const Vec3d& sourcePosition) noexcept;
+ROCKS_ENGINEAUDIO_API bool
+IsWithinAudibleRange(const SoundAttenuation& attenuation, const Vec3d& listenerPosition,
+                     const Vec3d& sourcePosition,
+                     float maxWorldDistance = MaxAudioWorldDistance) noexcept;
 
 } // namespace rocks

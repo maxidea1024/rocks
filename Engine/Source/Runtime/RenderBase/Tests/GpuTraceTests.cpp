@@ -31,7 +31,7 @@ struct GpuPacket {
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(GpuPacket);
+ROCKS_LANE_TRANSFERABLE(GpuPacket);
 
 namespace {
 

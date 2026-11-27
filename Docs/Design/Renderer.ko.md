@@ -102,7 +102,7 @@
 
 | 모듈 | 위치 | 직접 의존 | 책임 | 금지 |
 |---|---|---|---|---|
-| `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
+| `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, lane 전달 가능 등록(`ROCKS_LANE_TRANSFERABLE` — MetaSchema, RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
 | `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수(`MaterialShaderTraits`를 받는다, 14.3절), `GBufferLayout` 정의와 shading model의 GBuffer 의미, 파라미터 구조체 선언 | 장치·Renderer |
 | `Renderer` | `Engine/Source/Runtime/Renderer` | RendererShaders·RenderGraph·RenderBase·RenderData·MaterialRuntime·TextureStreaming·SpatialIndex·Task·Core | `RenderScene`·`RenderView`·가시성·`GpuScene`·light grid·그림자·두 경로의 pass 조립·`PostChain`·GI 연결점 | World·ObjectRuntime·AssetRuntime |
 | `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제. 받는 컴포넌트 목록과 RS 단계별 도입 순서는 [컴포넌트 도입](ComponentCatalog/03-RequiredComponents.ko.md) 3·4.6절(CR12) | Renderer 내부 주소 |
@@ -619,7 +619,7 @@ ForwardOpaquePS
 
 ## 14. 렌더러가 머티리얼에 요구하는 계약
 
-이 절은 렌더러 쪽 요구만 정한다. 머티리얼 그래프·IR·컴파일러·인스턴스·에디터는 [머티리얼 시스템](MaterialSystem.ko.md)(개정 2)과 계획 14.5–14.9절이 맡는다. 겹치는 곳은 14.6절 경계표로 나눈다. 두 문서의 다른 점은 머티리얼 시스템 10.4절 "정합 결과"로 맞췄다(이 문서 개정 3).
+이 절은 렌더러 쪽 요구만 정한다. 머티리얼 그래프·IR·컴파일러·인스턴스·에디터는 [머티리얼 시스템](MaterialSystem/README.ko.md)(개정 2)과 계획 14.5–14.9절이 맡는다. 겹치는 곳은 14.6절 경계표로 나눈다. 두 문서의 다른 점은 머티리얼 시스템 10.4절 "정합 결과"로 맞췄다(이 문서 개정 3).
 
 ### 14.1 표면 속성(`SurfaceAttributes`)과 머티리얼 함수
 

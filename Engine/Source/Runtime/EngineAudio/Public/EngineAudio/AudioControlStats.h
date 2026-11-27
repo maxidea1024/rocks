@@ -28,6 +28,17 @@ struct AudioControlStats {
     uint64 inaudibleEnds = 0;
     uint64 resumeFailures = 0;
     uint64 headroomCuts = 0;
+    // 동시 발음(3.41.2절): 그룹이 받지 않은 재생 수, 그룹이 빼앗은 재생 수(누계), 지금 쓰는 그룹
+    // 수.
+    uint64 concurrencyRejects = 0;
+    uint64 concurrencySteals = 0;
+    uint32 concurrencyGroups = 0;
+    // 가상화(3.41.3절): 지금 가상 재생 수, 가상이 된 수·실현된 수(누계).
+    uint32 virtualPlaybacks = 0;
+    uint64 virtualizations = 0;
+    uint64 realizations = 0;
+    // 실현 때 동시 발음 그룹 표가 가득해 가상으로 남은 수(누계 — 다음 간격에 다시 본다)다.
+    uint64 failedRealizations = 0;
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;

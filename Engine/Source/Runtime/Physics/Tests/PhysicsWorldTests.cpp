@@ -156,6 +156,14 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 
+        void SetBodyNotifyContacts(PhysicsBodyHandle, bool) noexcept override {
+        }
+
+        bool ComputePenetration(PhysicsBodyHandle, const CollisionShape&, const Vec3d&,
+                                const Quatd&, MtdResult&) const noexcept override {
+            return false;
+        }
+
         Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle) const noexcept override {
             return Result<BodyKinematics>::Failure(ErrorCode::StaleHandle);
         }

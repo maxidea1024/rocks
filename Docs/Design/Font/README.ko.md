@@ -5,7 +5,7 @@
 **왜 이 문서가 따로 필요한가.** 글꼴은 [UI 툴킷](../UiToolkit/README.ko.md)(이하 UiToolkit) 2절 `TextLayout` 모듈과 3.12절 텍스트 표, UD3(라이브러리 구성)에 들어 있다. 그러나 거기에는 **글리프를 그리는 쪽**만 있고, 다음이 빠져 있다.
 - 글꼴 에셋 타입(UE `UFontFace`·`UFont`)과 그 저장·쿠킹·로딩 방식(LazyLoad·Stream·Inline)
 - 임포터(ttf·ttc·otf·otc → FontFace, 미리 구운 글꼴 atlas 생성)와 재임포트
-- UI 밖 사용처: Canvas 텍스트, `TextRenderComponent`([컴포넌트 목록](../ComponentCatalog/README.ko.md) CR18), 머티리얼 글꼴 표현식([머티리얼](../MaterialSystem.ko.md) "후속"), 엔진 기본 글꼴([전체 계획](../EngineImplementationPlan.ko.md) 9.6절 내장 UI font)
+- UI 밖 사용처: Canvas 텍스트, `TextRenderComponent`([컴포넌트 목록](../ComponentCatalog/README.ko.md) CR18), 머티리얼 글꼴 표현식([머티리얼](../MaterialSystem/README.ko.md) "후속"), 엔진 기본 글꼴([전체 계획](../EngineImplementationPlan.ko.md) 9.6절 내장 UI font)
 - 서드파티 라이브러리 도입 절차와 서버 타깃 제외 규칙
 - WOFF2 해제를 "글꼴 모듈의 몫"으로 넘긴 [압축](../Compression.ko.md) 13절의 받는 쪽
 

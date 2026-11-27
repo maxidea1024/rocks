@@ -29,7 +29,7 @@
 이동 컴포넌트(D4·CM12)가 쓰는 도우미다(UE `UMovementComponent::SafeMoveUpdatedComponent`·`ResolvePenetration` — `E/Private/Components/MovementComponent.cpp:558–699`).
 
 - `PrimitiveComponent::ComputePenetration(MtdResult&, shape, position, rotation)`: 이 컴포넌트와 주어진 형상의 최소 이동 방향·거리(UE `PrimitiveComponent.h:3177`). Jolt `CollideShape`의 `mPenetrationAxis`·`mPenetrationDepth`(J11)로 구한다.
-- `SafeMove`: sweep 이동이 시작 겹침이면 `ResolvePenetration` 뒤 원래 이동을 다시 시도한다. 조정량 = `normal · (depth 또는 0.125) + PenetrationPullbackDistance 0.125 cm`. 0.1 cm 부풀린 겹침 시험이 비면 teleport, 막히면 sweep, 그다음 MTD 합산, 그다음 이동량을 더한 시도 순이다(UE와 같은 순서·같은 상수 — 이름 있는 상수).
+- `SafeMove`(`MovementComponent::SafeMoveUpdatedComponent` — 7.1.13절): sweep 이동이 시작 겹침이면 `ResolvePenetration` 뒤 원래 이동을 다시 시도한다. 조정량 = `normal × ((depth 또는 0.125) + PenetrationPullbackDistance 0.125 cm)`. 0.1 cm 부풀린 겹침 시험이 비면 teleport, 막히면 sweep, 그다음 MTD 합산, 그다음 이동량을 더한 시도 순이다(UE와 같은 순서·같은 상수 — 이름 있는 상수).
 - D4의 이동 컴포넌트는 지금 sweep 없이 동작한다(엔진 런타임 26장). CM12 때 이 도우미로 바꾼다.
 
 ## 5.3 overlap
@@ -57,7 +57,7 @@ UE `UpdateOverlapsImpl`(`PrimitiveComponent.cpp:4464–4653`)과 같다. overlap
 | 시뮬레이션 접촉 | `notifyRigidBodyCollision`이 참인 body의 접촉 쌍마다 `ContactNotice` 하나(첫 접촉점 + 접촉점들 + 누적 충격량). step 안에서는 값만 복사하고 PhysicsResults에서 스텝 순서대로 발행. 상대도 켰으면 상대 쪽 항목이 따로 생긴다 | `PhysScene_Chaos.cpp:1043–1130`·`1195–1218`, `Actor.cpp:5690–5736` |
 
 - 시뮬레이션 hit의 `HitResult`는 첫 접촉으로 만들고 `normalImpulse`는 누적 충격량(N·s → kg·cm/s)이다. Jolt에서 solver 충격량을 읽는 방법은 6.4절.
-- 같은 쌍이 한 프레임의 여러 고정 스텝에 걸쳐 접촉하면 UE처럼 쌍마다 하나로 합친다(첫 스텝의 첫 접촉점, 충격량 합).
+- 한 스텝 안의 같은 쌍 접촉은 하나로 합친다(첫 접촉점, 충격량 합). 스텝이 다르면 따로 발행한다(UE key가 쌍과 solver 시간 — 7.1.12절).
 - 발행은 Actor·컴포넌트 이벤트(구독형 통지 — 컴포넌트 도입 CR7)가 있어야 한다. CR7 전에는 가상 hook(`Actor::NotifyHit`·`NotifyActorBeginOverlap` 등)만 부른다(7.1절 단계 선행).
 
 ## 5.5 게임 코드 접점

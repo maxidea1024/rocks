@@ -111,6 +111,7 @@ Result<void> VulkanDevice::CreateSwapChainTarget(SwapChainRecord& record) noexce
     }
 
     record.targetLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    record.frameOpen = false;
     return Result<void>::Success();
 }
 
@@ -133,6 +134,7 @@ void VulkanDevice::DestroySwapChainTarget(SwapChainRecord& record) noexcept {
     record.target = VK_NULL_HANDLE;
     record.targetMemory = MemoryAllocation();
     record.targetLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    record.frameOpen = false;
 }
 
 void VulkanDevice::DestroySwapChainImages(SwapChainRecord& record, bool keepSwapchain) noexcept {

@@ -645,24 +645,10 @@ struct AlphaBlock {
     }
 };
 
-// AlphaBlockDXT5::evaluatePalette(BlockDXT.cpp 343–380 — 바닥 나눗셈)다.
+// AlphaBlockDXT5::evaluatePalette(BlockDXT.cpp 343–380 — 바닥 나눗셈)다. 디코더와 같은
+// 함수다(Texture TextureBlockAlphaPalette — 12.17.7).
 void AlphaPalette(const AlphaBlock& block, uint8 (&alpha)[AlphaPaletteSize]) noexcept {
-    const uint32 a0 = block.Alpha0();
-    const uint32 a1 = block.Alpha1();
-    alpha[0] = static_cast<uint8>(a0);
-    alpha[1] = static_cast<uint8>(a1);
-    if (a0 > a1) {
-        for (uint32 k = 1; k <= 6; ++k) {
-            alpha[1 + k] = static_cast<uint8>(((7 - k) * a0 + k * a1) / 7);
-        }
-    } else {
-        for (uint32 k = 1; k <= 4; ++k) {
-            alpha[1 + k] = static_cast<uint8>(((5 - k) * a0 + k * a1) / 5);
-        }
-
-        alpha[6] = 0x00;
-        alpha[7] = 0xFF;
-    }
+    TextureBlockAlphaPalette(block.Alpha0(), block.Alpha1(), alpha);
 }
 
 // computeAlphaIndices(QuickCompressDXT.cpp 294–325)다.
@@ -798,93 +784,15 @@ void ChannelValues(const uint8 (&texels)[TextureBlockRgbaBytes], uint32 channel,
     }
 }
 
-uint64 ReadLittle64(const uint8* bytes) noexcept {
-    uint64 value = 0;
-    for (uint32 i = 0; i < SmallBlockBytes; ++i) {
-        value |= uint64{bytes[i]} << (8 * i);
-    }
-
-    return value;
-}
-
-// 알파 블록 하나를 16 값으로 푼다(AlphaBlockDXT5::decodeBlock).
-void DecodeAlpha(const uint8* bytes, uint8 (&values)[TextureBlockTexels]) noexcept {
-    AlphaBlock block;
-    block.u = ReadLittle64(bytes);
-    uint8 palette[AlphaPaletteSize];
-    AlphaPalette(block, palette);
-    for (uint32 i = 0; i < TextureBlockTexels; ++i) {
-        values[i] = palette[block.Index(i)];
-    }
-}
-
-// 색 블록 하나를 RGBA로 푼다(BlockDXT1::decodeBlock — 끝점 비교로 4색·3색).
-void DecodeColour(const uint8* bytes, uint8 (&texels)[TextureBlockRgbaBytes]) noexcept {
-    const uint32 col0 = uint32{bytes[0]} | (uint32{bytes[1]} << 8);
-    const uint32 col1 = uint32{bytes[2]} | (uint32{bytes[3]} << 8);
-    const auto expand = [](uint32 c, uint8(&rgb)[3]) noexcept {
-        const uint32 r = (c >> 11) & 0x1F;
-        const uint32 g = (c >> 5) & 0x3F;
-        const uint32 b = c & 0x1F;
-        rgb[0] = static_cast<uint8>((r << 3) | (r >> 2));
-        rgb[1] = static_cast<uint8>((g << 2) | (g >> 4));
-        rgb[2] = static_cast<uint8>((b << 3) | (b >> 2));
-    };
-    uint8 palette[4][4] = {};
-    uint8 c0[3];
-    uint8 c1[3];
-    expand(col0, c0);
-    expand(col1, c1);
-    for (uint32 k = 0; k < 3; ++k) {
-        palette[0][k] = c0[k];
-        palette[1][k] = c1[k];
-        if (col0 > col1) {
-            palette[2][k] = static_cast<uint8>((2 * c0[k] + c1[k]) / 3);
-            palette[3][k] = static_cast<uint8>((2 * c1[k] + c0[k]) / 3);
-        } else {
-            palette[2][k] = static_cast<uint8>((c0[k] + c1[k]) / 2);
-            palette[3][k] = 0;
-        }
-    }
-
-    palette[0][3] = 0xFF;
-    palette[1][3] = 0xFF;
-    palette[2][3] = 0xFF;
-    palette[3][3] = col0 > col1 ? 0xFF : 0x00;
-    for (uint32 i = 0; i < TextureBlockTexels; ++i) {
-        const uint32 index = (bytes[4 + i / 4] >> (2 * (i % 4))) & 0x3;
-        for (uint32 k = 0; k < 4; ++k) {
-            texels[i * TextureBlockTexelBytes + k] = palette[index][k];
-        }
-    }
-}
-
 } // namespace bc_encode
 
 using bc_encode::ChannelValues;
 using bc_encode::CompressAlpha;
 using bc_encode::CompressColour;
-using bc_encode::DecodeAlpha;
-using bc_encode::DecodeColour;
 using bc_encode::LargeBlockBytes;
 using bc_encode::SmallBlockBytes;
 
 } // namespace
-
-uint32 TextureBlockBytes(TextureBlockFormat format) noexcept {
-    switch (format) {
-    case TextureBlockFormat::Bc1:
-    case TextureBlockFormat::Bc4:
-        return SmallBlockBytes;
-    case TextureBlockFormat::Bc3:
-    case TextureBlockFormat::Bc5:
-    case TextureBlockFormat::Bc6h:
-    case TextureBlockFormat::Bc7:
-        return LargeBlockBytes;
-    }
-
-    return 0;
-}
 
 uint32 TextureBlockSourceTexelBytes(TextureBlockFormat format) noexcept {
     return format == TextureBlockFormat::Bc6h ? TextureBlockHalfTexelBytes : TextureBlockTexelBytes;
@@ -898,30 +806,6 @@ StringView IspcBcEncoderIdentity() noexcept {
 #else
     return {};
 #endif
-}
-
-Result<uint64> TextureBlockOutputBytes(TextureBlockFormat format, uint32 sizeX, uint32 sizeY,
-                                       uint32 numSlices) noexcept {
-    if (sizeX == 0 || sizeY == 0 || numSlices == 0 || TextureBlockBytes(format) == 0) {
-        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    const uint64 blocksX = (uint64{sizeX} + TextureBlockSize - 1) / TextureBlockSize;
-    const uint64 blocksY = (uint64{sizeY} + TextureBlockSize - 1) / TextureBlockSize;
-    // blocksX·blocksY는 2^30 이하라 둘의 곱은 넘치지 않는다. 블록 byte·slice를 곱할 때 넘칠 수
-    // 있다.
-    const uint64 blocks = blocksX * blocksY;
-    const uint64 blockBytes = TextureBlockBytes(format);
-    if (blocks > NumericLimits<uint64>::Max() / blockBytes) {
-        return Result<uint64>::Failure(ErrorCode::CapacityExceeded);
-    }
-
-    const uint64 perSlice = blocks * blockBytes;
-    if (perSlice > NumericLimits<uint64>::Max() / numSlices) {
-        return Result<uint64>::Failure(ErrorCode::CapacityExceeded);
-    }
-
-    return Result<uint64>::Success(perSlice * numSlices);
 }
 
 void EncodeTextureBlock(TextureBlockFormat format, const uint8 (&texels)[TextureBlockRgbaBytes],
@@ -960,61 +844,6 @@ void EncodeTextureBlock(TextureBlockFormat format, const uint8 (&texels)[Texture
 
         break;
     }
-}
-
-void DecodeTextureBlock(TextureBlockFormat format, const uint8* block,
-                        uint8 (&texels)[TextureBlockRgbaBytes]) noexcept {
-    uint8 first[TextureBlockTexels];
-    uint8 second[TextureBlockTexels];
-    switch (format) {
-    case TextureBlockFormat::Bc1:
-        DecodeColour(block, texels);
-        break;
-    case TextureBlockFormat::Bc3:
-        DecodeColour(block + SmallBlockBytes, texels);
-        DecodeAlpha(block, first);
-        for (uint32 i = 0; i < TextureBlockTexels; ++i) {
-            texels[i * TextureBlockTexelBytes + 3] = first[i];
-        }
-
-        break;
-    case TextureBlockFormat::Bc4:
-        DecodeAlpha(block, first);
-        for (uint32 i = 0; i < TextureBlockTexels; ++i) {
-            uint8* texel = texels + i * TextureBlockTexelBytes;
-            texel[0] = first[i];
-            texel[1] = 0;
-            texel[2] = 0;
-            texel[3] = 0xFF;
-        }
-
-        break;
-    case TextureBlockFormat::Bc5:
-        DecodeAlpha(block, first);
-        DecodeAlpha(block + SmallBlockBytes, second);
-        for (uint32 i = 0; i < TextureBlockTexels; ++i) {
-            uint8* texel = texels + i * TextureBlockTexelBytes;
-            texel[0] = first[i];
-            texel[1] = second[i];
-            texel[2] = 0;
-            texel[3] = 0xFF;
-        }
-
-        break;
-    case TextureBlockFormat::Bc7:
-        texture_block_detail::DecodeBc7Block(block, texels);
-        break;
-    case TextureBlockFormat::Bc6h:
-        for (uint8& value : texels) {
-            value = 0;
-        }
-
-        break;
-    }
-}
-
-void DecodeTextureBlockHalf(const uint8* block, uint16 (&halfs)[TextureBlockTexels * 4]) noexcept {
-    texture_block_detail::DecodeBc6hBlock(block, halfs);
 }
 
 Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockImage& image,

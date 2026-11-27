@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/NamePool.h>
+#include <Engine/PendingWorkRegistry.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ModuleTypeRegistrations.h>
@@ -305,7 +306,8 @@ struct EngineStats {
 //   engine.Shutdown();                               // 여러 번 호출해도 안전
 //
 // 프레임 순서(RunFrame): 1) hooks.PumpEvents -> 2) 시간 갱신·설정 sync 지점(EngineConfig.settings가
-// 있으면 ConfigContext::Sync) -> 3) hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick ->
+// 있으면 ConfigContext::Sync) -> 3) hooks.BeginFrame·PendingWork().ApplyCompleted·
+// Subsystem.OnFrameBegin·client.OnEngineTick ->
 // 4) World마다 Tick -> 5) 지연 작업(World 파괴) -> 6) Subsystem.OnFrameEnd·hooks.EndFrame.
 //
 // 수명 규약:
@@ -316,7 +318,8 @@ struct EngineStats {
 //   client.OnEngineReady. 어느 단계든 실패하면 이미 한 단계를 역순으로 정리하고 Failed가
 //   된다(PostEngineInit 실패는 client.OnEngineShutdown 뒤, OnEngineReady 실패는 Shutdown과 같은
 //   정상 종료 순서).
-// - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
+// - 종료 순서(계획 3.2절): PendingWork().Shutdown -> BeginShutdown(Subsystem 역순 → hooks) ->
+//   client.OnEngineShutdown -> 모든
 //   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
 //   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
 //   MaxShutdownCollectPasses) -> hooks.VerifyShutdownClosure -> hooks.StopExecutors -> 엔진
@@ -481,6 +484,16 @@ public:
         return subsystems_.Find(key);
     }
 
+    // 대기 작업 등록소다(Docs/Design/ProgressReporting 8장, UE FAssetCompilingManager). 엔진은 매
+    // 프레임 시작 hook 뒤 ApplyCompleted를 부르고, Shutdown 처음에 Shutdown(남은 일 취소)을
+    // 부른다. 비동기 빌드 모듈이 source를 등록한다. 소유 스레드는 Initialize를 부른 스레드다.
+    //
+    // 사용 예(저장 전):
+    //   (void)engine.PendingWork().FinishAll();
+    PendingWorkRegistry& PendingWork() noexcept {
+        return pendingWork_;
+    }
+
     // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
     OuterSubsystemLookup SubsystemLookup() const noexcept;
 
@@ -565,6 +578,9 @@ private:
     // GC 표식 scheduler다(17.4절). World보다 먼저 선언해 나중에 소멸시킨다 — Shutdown은 World를
     // 모두 파괴한 뒤 끝낸다.
     UniquePtr<WorkerScheduler> gcScheduler_;
+    // 대기 작업 등록소다(Docs/Design/ProgressReporting 8장). Subsystem보다 먼저 선언해 나중에
+    // 소멸시킨다(source를 등록한 Subsystem이 Deinitialize에서 Unregister한다).
+    PendingWorkRegistry pendingWork_;
     SubsystemCollection<EngineSubsystem, Engine> subsystems_;
     Array<WorldContext> worlds_;
     EngineTime time_;

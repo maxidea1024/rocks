@@ -1,5 +1,6 @@
 #include <Base/NumericLimits.h>
 #include <Collision/BodySettings.generated.h>
+#include <Collision/CollisionShape.h>
 #include <Collision/CollisionSettings.generated.h>
 #include <Collision/CollisionTypes.generated.h>
 #include <Core/Diagnostics/Log.h>
@@ -484,6 +485,35 @@ void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
 
     // 다시 만들지 않고 바꾼다(UE UpdateInstanceSimulatePhysics — 켜면 startAwake일 때 깨운다).
     scene->SetBodyMotion(bodyHandle_, motion, bodySettings_.startAwake);
+}
+
+bool PrimitiveComponent::ComputePenetration(MtdResult& out, const CollisionShape& shape,
+                                            const Vec3d& position,
+                                            const Quatd& rotation) const noexcept {
+    // UE: body가 없으면 거짓이다.
+    if (bodyHandle_.IsNull() || !HasWorld()) {
+        return false;
+    }
+
+    const PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    return scene != nullptr &&
+           scene->ComputePenetration(bodyHandle_, shape, position, rotation, out);
+}
+
+CollisionShape PrimitiveComponent::GetCollisionShape(double inflation) const noexcept {
+    // UE: 형상 클래스가 덮어쓰는 큰 bounds 상자다.
+    return CollisionShape::Box(Bounds().boxExtent).Inflate(inflation);
+}
+
+void PrimitiveComponent::SetNotifyRigidBodyCollision(bool notify) noexcept {
+    bodySettings_.notifyRigidBodyCollision = notify;
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
+        scene->SetBodyNotifyContacts(bodyHandle_, notify);
+    }
 }
 
 void PrimitiveComponent::UpdateBodyCollision() noexcept {
@@ -1019,6 +1049,25 @@ void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
     reversed.normal = hit.normal * -1.0;
     reversed.impactNormal = hit.impactNormal * -1.0;
     notify(hit.actor, hit.component, owner, self, false, reversed);
+}
+
+void PrimitiveComponent::DispatchPhysicsHit(World& world, const PhysicsContactHit& hit) noexcept {
+    // 앞선 hit의 hook이 자기 컴포넌트·Actor를 파괴했을 수 있다(UE Info0.Actor.Get() 약한 참조,
+    // IsActorValidToNotify).
+    auto component = world.GetComponentState(hit.myComponent);
+    if (!component || component.Value() == ComponentState::PendingDestroy) {
+        return;
+    }
+
+    auto actor = world.GetActorState(hit.myActor);
+    if (!actor || actor.Value() == ActorState::PendingDestroy) {
+        return;
+    }
+
+    (void)world.With<Actor>(hit.myActor, [&](Actor& target) noexcept {
+        target.OnHit(hit.myComponent, hit.otherActor, hit.otherComponent, true, hit.normalImpulse,
+                     hit.hit);
+    });
 }
 
 Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,

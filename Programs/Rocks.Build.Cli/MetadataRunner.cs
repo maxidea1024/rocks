@@ -14,6 +14,13 @@ namespace Rocks.Build.Cli;
 /// </summary>
 public static class MetadataRunner
 {
+    // 모듈 하나의 메타 생성(MetaCompiler·Clang) 제한이다. 성능 예산이 아니라 멈춘 도구를 끊는 장치이고, 큰 모듈(헤더 200개 안팎)을
+    // 부하가 큰 기계에서 돌려도 넘지 않게 넉넉히 둔다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절).
+    private static readonly TimeSpan MetaCompilerModuleTimeout = TimeSpan.FromMinutes(20);
+
+    // ids 명령(identity 명세 읽기·쓰기) 하나의 제한이다. 뜻은 MetaCompilerModuleTimeout과 같다.
+    private static readonly TimeSpan MetaIdsCommandTimeout = TimeSpan.FromMinutes(10);
+
     private static readonly StringComparer PathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -182,8 +189,13 @@ public static class MetadataRunner
                 // 리플렉션 클래스·struct의 표지(ROCKS_GENERATED_BODY)를 요구한다(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절).
                 arguments.Add("--require-generated-body");
 
-                var generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory,
-                    toolchain.Environment, Timeout: TimeSpan.FromMinutes(3)), cancellationToken);
+                // 인자는 응답 파일로 넘긴다: 헤더가 많은 모듈은 --input·--include 쌍만으로 Windows 명령줄 상한(32,767자)을 넘는다
+                // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 파일은 한 줄에 인자 하나이고 모듈 출력 루트 밖(stage 바로
+                // 아래)에 둔다 — 출력 루트 안이면 --check의 남는 파일 검사와 게시 대상에 섞인다.
+                string responseFile = Path.Combine(stage, run.Name + ".metacompiler.rsp");
+                File.WriteAllText(responseFile, string.Join('\n', arguments.Skip(1)) + "\n", new System.Text.UTF8Encoding(false));
+                var generated = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, "@" + responseFile], context.RootDirectory,
+                    toolchain.Environment, Timeout: MetaCompilerModuleTimeout), cancellationToken);
                 Console.Write(generated.StdOut);
                 Console.Error.Write(generated.StdErr);
                 if (generated.ExitCode != 0)
@@ -332,7 +344,7 @@ public static class MetadataRunner
         IReadOnlyList<string> command, CancellationToken cancellationToken)
     {
         var result = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, .. command], context.RootDirectory,
-            toolchain.Environment, Timeout: TimeSpan.FromMinutes(2)), cancellationToken);
+            toolchain.Environment, Timeout: MetaIdsCommandTimeout), cancellationToken);
         Console.Write(result.StdOut);
         Console.Error.Write(result.StdErr);
         return result.ExitCode;

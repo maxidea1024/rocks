@@ -6,6 +6,7 @@
 #include <AssetCommandlets/AssetIndexCommandlet.h>
 #include <AssetCommandlets/ClassDefaultsCommandlet.h>
 #include <AudioTools/SoundClipImporter.h>
+#include <CurveAssetTools/CurveAssetImporterSet.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include "ProductAssetSetup.h"
@@ -33,13 +34,14 @@ namespace {
 constexpr StringView UnrealExchangeModuleName = "UnrealExchange";
 
 // 명령 호스트의 임포터 칸은 하나라서(AssetCommandContext::importers) 제품 임포터를 한 묶음으로
-// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나 → Unreal 교환 A2f
-// 임포터(텍스처 다섯·정적 메시 — Docs/Design/UnrealExchange 10.6절 9번, 5.5절 10번 — 일반
-// asset-reimport도 교환 에셋을 다시 임포트한다).
-// 교환 임포터는 옵션 타입이 UnrealExchange 모듈에 있어 그 모듈이 시작했을 때만 건다.
+// 등록한다(Docs/Design/AudioSystem 3.36.3절): 텍스처 9개 → 사운드 하나 → 커브 에셋
+// 다섯(Docs/Design/CurveAssets 5.1절) → Unreal 교환 A2f 임포터(텍스처 다섯·정적 메시 —
+// Docs/Design/UnrealExchange 10.6절 9번, 5.5절 10번 — 일반 asset-reimport도 교환 에셋을 다시
+// 임포트한다). 교환 임포터는 옵션 타입이 UnrealExchange 모듈에 있어 그 모듈이 시작했을 때만 건다.
 struct ProductImporters {
     TextureImporterSet textures;
     SoundClipImporter sound;
+    CurveAssetImporterSet curves;
     UnrealExchangeImporterSet unrealImporters;
     bool unrealExchange = false;
 };
@@ -57,6 +59,10 @@ Result<void> RegisterProductImporters(void* state, AssetImporterTable& table,
 
     if (auto sound = RegisterSoundClipImporter(&importers.sound, table, tokens); !sound) {
         return sound;
+    }
+
+    if (auto curves = RegisterCurveAssetImporters(&importers.curves, table, tokens); !curves) {
+        return curves;
     }
 
     return importers.unrealExchange

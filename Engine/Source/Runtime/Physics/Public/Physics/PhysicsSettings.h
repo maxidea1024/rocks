@@ -26,7 +26,8 @@ ROCKS_STRUCT(Settings(Branch = "Engine", Section = "Physics"))
 struct PhysicsSettings {
     ROCKS_GENERATED_BODY()
 
-    // 리플렉션 검증 hook이다: 용량이 0이거나 중력이 유한하지 않으면 InvalidArgument다.
+    // 리플렉션 검증 hook이다: 용량이 0이거나 중력이 유한하지 않거나 hit 문턱이 음수·비유한이면
+    // InvalidArgument다.
     ROCKS_PHYSICS_API static Result<void> Validate(const PhysicsSettings& settings) noexcept;
 
     // 월드 Z축 중력 가속도(cm/s²)다. 음수가 아래(−Z)다.
@@ -39,6 +40,10 @@ struct PhysicsSettings {
     ROCKS_PROPERTY() uint32 maxContactConstraints = DefaultPhysicsMaxContactConstraints;
     // World마다 미리 잡는 Jolt 임시 할당기 크기(byte)다.
     ROCKS_PROPERTY() uint32 tempAllocatorBytes = DefaultPhysicsTempAllocatorBytes;
+    // 시뮬레이션 접촉 hit 문턱(cm/s — UE MinDeltaVelocityForHitEvents,
+    // PhysicsModule 6.4절·7.1.12절) 이다. 0보다 크면 두 body의 선속도 변화가 성분마다 모두 이 값
+    // 이하인 접촉은 hit를 내지 않는다. 0이면 모두 낸다.
+    ROCKS_PROPERTY() float minDeltaVelocityForHitEvents = 0.0f;
 };
 
 // Physics 모듈의 리플렉션 타입(PhysicsSettings)을 registration에 등록한다

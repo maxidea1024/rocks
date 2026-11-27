@@ -339,6 +339,10 @@ SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&, ObjectH
 // 직접 한다).
 struct ObjectGraphLoadOptions {
     ObjectGraphLimits limits;
+    // Commit 뒤 바인딩 단계가 함수 없음·서명 다름 이벤트 바인딩을 미해결 레코드로 보존할지다
+    // (Docs/Design/EventReflection.ko.md ED24 — 에디터 로드는 켜서 다시 저장할 때 잃지 않고, 게임은
+    // 끄고 버린다. 보존하면 EventBindingUnresolved, 버리면 EventBindingDropped 진단이다).
+    bool keepUnresolvedEventBindings = false;
     // 미선언 enum·높은 버전·모르는 필드의 처리와 이 데이터에 없어야 하는 플래그(excludedFlags —
     // 쿠킹 로드의 EditorOnly, 있으면 InvalidArgument)다(기본은 미선언 enum·높은 버전 거부, 모르는
     // 필드는 진단 후 건너뛰기). Record에 없는 필드·멤버는 정책이 아니라 형식 규칙으로 기준

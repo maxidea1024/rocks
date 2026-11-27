@@ -1,4 +1,7 @@
+#include <AudioAssets/AudioObjectKey.h>
+
 #include <AudioAssets/AttenuationSettings.generated.h>
+#include <AudioAssets/ConcurrencyGroup.generated.h>
 #include <AudioAssets/SoundClip.generated.h>
 #include <AudioAssets/SoundSource.generated.h>
 #include <AssetRuntime/PackageWriter.h>
@@ -79,6 +82,45 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
         }
 
         playable.attenuation = snapshot.Value();
+    }
+
+    // 동시 발음: 재정의면 이 사운드만의 그룹 하나(키는 이 객체), 아니면 참조한 그룹들(3.41.2절).
+    if (overrideConcurrency) {
+        playable.concurrencyCount = 1;
+        playable.concurrency[0].key = AudioObjectKey(Handle());
+        playable.concurrency[0].isOverride = true;
+        playable.concurrency[0].settings = concurrencyOverrides;
+    } else {
+        if (concurrency.Size() > MaxConcurrencyGroups) {
+            return Made::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        for (usize index = 0; index < concurrency.Size(); ++index) {
+            auto group = registry.Resolve<ConcurrencyGroup>(access, concurrency[index]);
+            if (!group) {
+                return Made::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto resolved = group.Value().Get();
+            if (!resolved) {
+                return Made::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto entry = resolved.Value()->MakeEntry();
+            if (!entry) {
+                return Made::Failure(entry.Error());
+            }
+
+            // 같은 그룹을 두 번 참조했으면 하나로 본다(UE ConcurrencySet은 집합).
+            bool duplicate = false;
+            for (uint32 earlier = 0; earlier < playable.concurrencyCount; ++earlier) {
+                duplicate = duplicate || playable.concurrency[earlier].key == entry.Value().key;
+            }
+
+            if (!duplicate) {
+                playable.concurrency[playable.concurrencyCount++] = entry.Value();
+            }
+        }
     }
 
     return SoundSourceRef::TryCreate(allocator, playable);

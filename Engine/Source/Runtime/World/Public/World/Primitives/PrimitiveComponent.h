@@ -10,11 +10,16 @@
 #include <World/Physics/BodyMotion.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
+#include <World/Physics/MtdResult.h>
 #include <World/Physics/PhysicsBodyHandle.h>
+#include <World/Physics/PhysicsContactHit.h>
 #include <World/SceneComponent.h>
 #include <World/Primitives/PrimitiveTypes.h>
 
 namespace rocks {
+
+// 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
+struct CollisionShape;
 
 // 그리거나 충돌하는 Component의 기반이다(UE UPrimitiveComponent —
 // Docs/Design/EngineRuntime 24.3절). 데이터만 있다: 렌더 proxy(RS1)·충돌(CR16) 연결 전에는 아무것도
@@ -421,6 +426,15 @@ public:
     //   ball.SetSimulatePhysics(true);   // 다음 고정 스텝부터 떨어진다
     void SetSimulatePhysics(bool simulate) noexcept;
 
+    // 시뮬레이션 접촉 hit를 받을지 바꾼다(UE SetNotifyRigidBodyCollision —
+    // bodySettings.notifyRigidBodyCollision, PhysicsModule 5.4절·7.1.12절). 켜면 이 컴포넌트의
+    // body가 닿는 스텝마다(solver 충격량이 있거나 probe 접촉) 소유 Actor의 OnHit가 불린다. body가
+    // 있으면 다음 step부터 적용된다.
+    //
+    // 사용 예:
+    //   ball.SetNotifyRigidBodyCollision(true);   // 바닥에 닿으면 Actor::OnHit
+    void SetNotifyRigidBodyCollision(bool notify) noexcept;
+
     // 이 컴포넌트를 delta만큼 옮기고 rotation으로 돌린다(UE MoveComponent —
     // Docs/Design/PhysicsModule 5.1절·7.1.10절). sweep이면 자기 body 형상으로 쓸고 가(채널·응답은
     // 자기 것, 자기 Actor와 이동 무시 목록은 뺀다) 막는 hit 앞(pullback)에 멈추고 hit를
@@ -436,6 +450,22 @@ public:
     //   if (hit.IsValidBlockingHit()) { ... }   // 벽에 닿았다
     Result<bool> MoveComponent(const Vec3d& delta, const Quatd& rotation, bool sweep,
                                HitResult* outHit, const MoveOptions& options) noexcept;
+
+    // 주어진 형상을 rotation으로 position에 놓았을 때 이 컴포넌트의 body와 겹치면 참이고 out에
+    // 형상을 밀어낼 단위 방향과 거리(cm)를 쓴다(UE ComputePenetration — Docs/Design/PhysicsModule
+    // 5.2절·7.1.13절). body·물리 장면이 없거나 겹치지 않으면 거짓이다(out은 그대로).
+    //
+    // 사용 예:
+    //   MtdResult mtd;
+    //   if (wall.ComputePenetration(mtd, CollisionShape::Sphere(20.0), at, Quatd())) {
+    //       at += mtd.direction * mtd.distance;   // 벽 밖으로
+    //   }
+    bool ComputePenetration(MtdResult& out, const CollisionShape& shape, const Vec3d& position,
+                            const Quatd& rotation) const noexcept;
+
+    // 이 컴포넌트의 충돌 형상을 inflation(cm)만큼 부풀린 질의 형상이다(UE GetCollisionShape —
+    // 7.1.13절). 기본은 월드 bounds 상자이고 구·상자·캡슐은 자기 크기(scale 반영)다.
+    virtual CollisionShape GetCollisionShape(double inflation) const noexcept;
 
     // 이동 sweep에서 무시할 Actor·컴포넌트다(UE IgnoreActorWhenMoving·IgnoreComponentWhenMoving —
     // 실행 상태, 저장하지 않는다). ignore가 참이면 더하고(이미 있으면 그대로) 거짓이면 뺀다. 오류:
@@ -492,6 +522,12 @@ public:
     // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
     // 돌려준다 — SetWorldLocationAndRotation).
     Result<void> ApplyPhysicsTransform(const Vec3d& location, const Quatd& rotation) noexcept;
+
+    // 시뮬레이션 접촉 hit 하나를 발행한다(UE AActor::DispatchPhysicsCollisionHit — PhysicsModule
+    // 7.1.12절, Physics의 PhysicsResults만 부른다). hit.myComponent나 그 소유 Actor가 사라졌거나
+    // 파괴 대기면 하지 않는다. 소유 Actor의 OnHit(myComponent, otherActor, otherComponent,
+    // selfMoved 참, normalImpulse, hit)다.
+    static void DispatchPhysicsHit(World& world, const PhysicsContactHit& hit) noexcept;
 
     // 실효 충돌 값이다(CollisionData 5절 ResolveCollision — World의 profile 표, 이름은
     // CollisionProfileName). profileName은 World 표가 살아 있는 동안 유효하다. 오류: World 장부 밖

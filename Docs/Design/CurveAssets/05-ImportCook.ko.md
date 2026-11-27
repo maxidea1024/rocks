@@ -25,7 +25,7 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - 단일 커브: 모든 채널의 키를 비우고 다시 넣는다(UE `ResetCurve`).
   - 임포트가 정하지 않는 필드는 그대로 둔다(기본값·외삽·색 조정·`eventCurve`).
   - UE 팩터리는 단일 커브를 기존 객체 자리에 `NewObject`로 다시 만든다(`CSVImportFactory.cpp:383`). 그래서 임포트하지 않은 필드도 기본값으로 돌아갈 수 있다(확실치 않음 — 7.5절). Rocks는 제자리 갱신이라 그 필드를 지킨다(◇ 7.2절 13).
-- **텍스트 디코딩**: UE `LoadFileToString`처럼 BOM을 본다.
+- **텍스트 디코딩**: UE `LoadFileToString`처럼 BOM을 본다. UTF-16 변환은 Core `TryAppendUtf16AsUtf8`(`Core/Text/Utf16.h`)이다.
   - UTF-8 BOM이 있으면 뗀다. Excel "CSV UTF-8"이 BOM을 쓴다.
   - UTF-16 LE·BE BOM이 있으면 UTF-8로 바꾼다(Core 문자 변환).
   - BOM이 없으면 UTF-8로 읽는다.
@@ -37,15 +37,16 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - UE가 빈 표로 끝내는 경우도 실패이고, 기존 에셋을 지킨다(★ 7.2절 6). 시간 중복이나 행 부족이 그 예다. UE 팩터리는 임포트 전에 기존 표를 `EmptyTable()`한다(`CSVImportFactory.cpp:354-360`).
 - **위치(detail)**:
   - CSV는 그 행이 시작하는 원본의 물리 줄 번호(1부터)다. 빈 줄 건너뛰기나 따옴표 안 줄바꿈이 있어도 사람이 편집기에서 찾는 줄이다.
-  - JSON은 최상위 배열 원소 번호(1부터)다.
+  - JSON은 최상위 배열 원소 번호(1부터)다. 문서 오류(파싱 실패·배열 아님·빈 배열)는 0이다.
+  - 할당·용량 실패(이름 intern 포함)는 원본 탓이 아니라 진단 없이 그 오류를 돌려준다.
 - **숫자 칸**:
-  - 앞뒤 ASCII 공백·탭을 떼고 Core 엄격 float 파싱(`TryParseFloat` — 칸 전체 소비)을 한다. UE 파서는 칸을 trim하지 않지만 `Atof`가 앞 공백을 건너뛴다. 그래서 `1, 2`가 읽혀야 한다.
+  - 앞뒤 ASCII 공백·탭을 떼고 Core 엄격 파싱(`TryParseDouble` — 칸 전체 소비)으로 double을 읽어 float로 바꾼다(UE Windows `Atof` = `(float)_tstof` — 같은 이중 반올림, 7.2절 20). UE 파서는 칸을 trim하지 않지만 `Atof`가 앞 공백을 건너뛴다. 그래서 `1, 2`가 읽혀야 한다.
   - 비유한 값(`inf`·`nan`)은 시간·값 모두 실패다(★ 7.2절 5).
 - **표 모드**:
   - `interp`가 Cubic이면 Tangent 모드다. 행 커브의 키는 모두 보간 Cubic이다.
   - Linear·Constant면 Plain 모드다. 커브 하나에 보간 하나(`PlainCurveInterp`)다.
   - UE `:676`과 같다. Rich는 키마다 `SetKeyInterpMode`를 부르고, 이 함수가 자동 접선까지 계산한다(`RichCurve.cpp:520-531`).
-  - Rocks도 키를 넣을 때마다 보간을 정하고 `AutoSetTangents`를 부른다. 결과 접선이 UE와 같다.
+  - Rocks는 키를 넣을 때마다 보간을 정하고, 행의 키를 다 넣은 뒤 `AutoSetTangents`를 한 번 부른다. UE `AutoSetTangents`(`RichCurve.cpp:680-755`)는 첫 키의 도착·끝 키의 출발·Linear 안쪽 키의 접선을 옛 값으로 두지만, 임포트는 키를 더하기만 하고(시간 중복은 미리 거른다) 안쪽 키가 끝 키로 바뀌지 않으므로 키마다 부른 UE의 최종 접선과 같다.
 
 #### 5.1.2 CSV 표(`curve_table_csv`)
 
@@ -70,19 +71,21 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - 최상위가 배열이 아님
   - 빈 배열
   - 한 객체 안 중복 키: Core JSON이 문서 오류로 낸다(`Json.h:22, 175`). UE `FJsonObject`는 뒤의 값이 이긴다(◇ 7.2절 14).
+- **행 이름**: 멤버 키 `Name`을 대소문자 무시로 찾고(UE `FJsonObject` 키 비교), 여럿이면 뒤의 것이다(UE `TMap` 덮어쓰기). 값은 UE `GetStringField`(`AsString`)처럼 문자열 그대로, bool은 `true`·`false`, 숫자는 원문 토큰이다(UE `SanitizeFloat` 서식과 다를 수 있다 — 7.2절 18).
 - **원소 오류는 그 원소를 건너뛰고 경고를 남긴다.**
   - 원소가 객체가 아님
-  - `Name`이 없음
-  - 이름 중복
+  - `Name`이 없음(이름이 비거나 None)
+  - 이름 중복(대소문자 무시)
 - **항목 오류는 그 시간 항목만 건너뛰고 경고를 남긴다.** 행은 남는다(UE `:931-944` 안쪽 `continue`).
   - 시간 키가 float로 읽히지 않음
-  - 같은 시간이 둘
   - 값이 숫자로 읽히지 않음
+- **한 행 안에 같은 시간이 둘이면 그 행 전체를 건너뛰고 경고를 남긴다**(UE `FindDuplicateXValues` → 행 `continue` — `:962-985`).
 - **값으로 받는 것**은 UE `TryGetNumber`와 같다(`JsonValue.h:451-462`, `JsonValue.cpp:476-480`).
-  - 숫자
-  - 숫자로 읽히는 문자열
+  - 숫자(double을 거쳐 float)
+  - UE `FString::IsNumeric` 규칙의 문자열(`[+|-]` 뒤 숫자와 `.` 하나 — 지수·공백 없음, 숫자가 없는 `.`·`-`는 0)
   - bool(참 1, 거짓 0)
   - 비유한 값은 실패한다.
+- 시간 키는 숫자 칸 규칙(앞뒤 공백 trim·칸 전체)이다. UE `LexTryParseString`은 `Atof` 결과가 0이 아니면 뒤 쓰레기(`2abc`)도 받는다(★ 7.2절 17).
 - 키 순서는 객체 멤버 순서다.
 - UE는 시간 중복 행에서 커브를 지우지 않는 누수가 있다(`:982-985`). Rocks에는 해당하지 않는다.
 
@@ -99,13 +102,14 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
 ### 5.2 Core `CsvReader`(UE `FCsvParser`와 같은 규칙)
 
 - 위치는 `Core/Text/Csv.h`다.
-  - 서명: `Result<void> TryParseCsv(StringView text, Allocator&, CsvRows& out)`.
-  - `CsvRows`는 행마다 칸의 사본(따옴표 해제 결과)과 그 행이 시작하는 물리 줄 번호를 담는다.
+  - 서명: `Result<void> TryParseCsv(StringView text, Array<CsvRow>& out)`(out의 allocator로 만든다).
+  - `CsvRow`는 칸의 사본(`Array<String>` — 따옴표 해제 결과)과 그 행이 시작하는 물리 줄 번호를 담는다.
 - 파일을 UE와 같은 칸으로 나누려고 규칙을 UE `FCsvParser`(`Runtime/Core/Private/Serialization/Csv/CsvParser.cpp`)와 같게 둔다. RFC 4180보다 관대하다.
   - 빈 줄은 건너뛴다(`:40-45`). 공백만 있는 줄은 건너뛰지 않는다.
   - 따옴표는 칸 맨 앞에서만 인식한다(`:64`). `""`는 따옴표 하나로 해제한다(`:63-100`).
   - 닫는 따옴표 뒤 글자는 칸에 이어 붙인다. 예: `"ab"cd` → `abcd`(`:95-99, 125-131`).
   - 닫히지 않은 따옴표는 문자열 끝까지, 줄바꿈·쉼표를 포함해 한 칸으로 삼킨다. 오류로 보지 않는다(`:74-101, 135`).
+  - NUL byte는 문자열 끝이다. 비지 않은 입력은 첫 byte가 NUL이어도 빈 칸 하나짜리 행이 생긴다(UE와 같다).
   - 줄 끝은 `\r\n`·`\r`·`\n`이다(`:138-152`).
   - 끝 쉼표는 빈 칸 하나를 더한다(`:114-122`).
   - 칸을 trim하지 않는다. 숫자 칸 trim은 임포터가 한다(5.1.1절).
@@ -115,8 +119,9 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
 
 - `FloatCurveAsset`·`VectorCurveAsset`·`ColorCurveAsset`은 기본 처리기다(A4c2 — 필드 그대로). UE도 커브 에셋에 쿠킹 변형이 없다(tagged property 그대로).
 - `CurveTableAsset`은 처리기 `CurveTableCookProcessor`(Developer `CurveAssetTools`)를 쓴다. 에디터 객체가 아니라 쓰기용 사본에서 다음을 한다(★ 7.2절 7).
-  1. 모드가 쓰지 않는 맵을 비운다. 비어 있지 않았으면 경고 `CurveTableUnusedRows`를 남긴다(3.2.1절).
+  1. 모드가 쓰지 않는 맵을 비운다. 비어 있지 않았으면 경고 `CurveTableUnusedRows`(쿠킹 진단의 setting = 버린 행 수)를 남긴다(3.2.1절).
   2. 행마다 중복 키를 제거한다(UE `CurveTable.cpp:215-232` — `CurveTable.RemoveRedundantKeys` CVar 기본 1).
+     - 키가 3개 이상인 행만 한다(UE `RemoveRedundantKeys`가 `Keys.Num() < 3`이면 바로 반환 — `SimpleCurve.cpp:454-462`, `RichCurve.cpp:921-929`).
      - Plain은 `TryRemoveRedundantKeys(0)`다(UE `FSimpleCurve::RemoveRedundantKeys(0.f)`).
      - Tangent는 표본 속도 없이 `TryRemoveRedundantKeys(0)`를 부르고, 키가 3개 이상이었으면 이어서 `AutoSetTangents()`를 부른다.
        - UE `RemoveRedundantAutoTangentKeys(0.f)` = `RemoveRedundantKeys(0, FFrameRate(0, 0))`다(`RichCurve.cpp:916-929`).
@@ -124,6 +129,11 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
        - Rocks `TryRemoveRedundantKeys`는 접선을 다시 계산하지 않는다(CurveData D10). 그래서 처리기가 그 차이를 메운다.
 - 끄는 설정은 두지 않는다. UE 기본은 켬이고, 끄는 요구가 생기면 쿠킹 설정 키를 더한다(◇ 7.2절 10).
   - 처리기 버전 Guid가 이 동작의 정체성이다. 동작을 바꾸면 버전을 올려 너겟 키를 바꾼다(AssetSystem 10.2절).
+- 쓰기 방식: 사본 맵을 에디터 객체에 이동으로 넣어 쓰고, 성공·실패 모두 원래 맵을 이동으로 되돌린다(애니메이션 클립 처리기와 같은 방식 — 되돌리기가 할당하지 않는다). 사본은 에디터 객체 맵의 allocator로 만든다.
+- 너겟은 쓰지 않는다(빌드 비용이 작다). 경고는 입력만으로 정해지므로 다시 쿠킹해도 같다. 쿠커가 byte를 재사용하는 대상은 처리기를 부르지 않으므로 그때는 경고도 나오지 않는다(모든 처리기에 공통인 쿠커 동작 — AssetSystem 10장).
+- 한계: 되돌리기의 쓰기 borrow가 실패하면(앞의 두 borrow가 성공한 뒤라 Busy·ShuttingDown 정도) 에디터 객체에 쿠킹 사본이 남고 원래 맵을 잃는다. 그 오류를 돌려주고, 쓰기 오류와 겹치면 쓰기 오류를 돌려준다(되돌릴 객체에 닿을 다른 방법이 없다).
+- 중복 키 판정에서 비교 차가 NaN이면 Rocks는 키를 남기고 UE는 지운다(UE는 `>` 비교 — CurveData 15절). 비유한 키 값이 든 표는 쿠킹 키 수가 UE와 다를 수 있다(7.2절 21).
+- 제품 쿠커(`Programs/Commandlet` `ProductCookProcessors`)가 등록한다.
 - `ColorCurveAtlas`는 4.3절 처리기다(`Texture2D` 처리기를 감싼다).
 
 ### 5.4 새로 만들기·명령행

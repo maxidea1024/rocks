@@ -13,7 +13,7 @@ static const uint ShadingModelDefaultLit = 1u;
 // 기본값은 UE 5.8 머티리얼 속성 기본값과 같다(SRC/Runtime/Engine/Private/Materials/
 // MaterialAttributeDefinitionMap.cpp — BaseColor 0, Metallic 0, Specular 0.5, Roughness 0.5,
 // Anisotropy 0, Emissive 0, Opacity 1, OpacityMask 1, Normal (0,0,1), Tangent (1,0,0), CustomData0 1,
-// CustomData1 0.1, AmbientOcclusion 1)이다.
+// CustomData1 0.1, AmbientOcclusion 1, SubsurfaceColor 1)이다.
 static const float DefaultSurfaceSpecular = 0.5;
 static const float DefaultSurfaceRoughness = 0.5;
 static const float DefaultSurfaceCustomData0 = 1.0;
@@ -34,6 +34,9 @@ struct SurfaceAttributes {
     float customData1;
     float3 tangent;
     float anisotropy;
+    // UE MP_SubsurfaceColor(Subsurface·TwoSidedFoliage·Cloth의 색 — Docs/Design/MaterialSystem 6.11절,
+    // 16절 MRD17).
+    float3 subsurfaceColor;
 };
 
 // 기본 표면(DefaultLit)이다. normal·tangent 기본값은 world 축이다 — 머티리얼 생성 코드가 정점 법선·
@@ -54,5 +57,6 @@ SurfaceAttributes DefaultSurfaceAttributes() {
     surface.customData1 = DefaultSurfaceCustomData1;
     surface.tangent = float3(1.0, 0.0, 0.0);
     surface.anisotropy = 0.0;
+    surface.subsurfaceColor = float3(1.0, 1.0, 1.0);
     return surface;
 }

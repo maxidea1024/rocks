@@ -42,6 +42,18 @@ public:
     // 여유가 없을 때 정지 fade 중 voice를 끊는 fade(mix frame)다(UE StopNow 대신 짧은 fade — 끊김
     // 방지).
     static constexpr uint32 MinStopFadeFrames = 64;
+    // 동시 발음 그룹 표 용량이다(3.41.2절 — 차면 그 재생은 Failed).
+    static constexpr uint32 MaxActiveConcurrencyGroups = 1024;
+    // 이 값 이하인 동시 발음 volume scale은 0으로 본다(UE au.Concurrency.MinVolumeScale).
+    static constexpr float MinConcurrencyVolumeScale = 1.0e-3f;
+    // steal fader의 끝 dB다(UE FVolumeFader Logarithmic 바닥 KINDA_SMALL_NUMBER = −80 dB).
+    static constexpr float StealFadeFloorDb = -80.0f;
+    // volume scale ramp의 dB 바닥이다(MinConcurrencyVolumeScale = −60 dB).
+    static constexpr float ConcurrencyScaleFloorDb = -60.0f;
+    // cull 규칙 그룹의 loop가 이 초보다 짧게 voice를 냈으면 steal fade 없이 멈춘다(UE AS 825–856).
+    static constexpr double StealImmediateSeconds = 0.1;
+    // cull·순위 정렬의 동률 판정 폭이다(UE IsNearlyEqual·UE_KINDA_SMALL_NUMBER).
+    static constexpr double ConcurrencyTieTolerance = 1.0e-4;
 
     // 믹서 범위로 자른 실효 pitch다(사용자 ramp 값 × 사운드 pitch — 믹서가 쓰는 값과 같다).
     static float ClampVoicePitch(float value) noexcept {
@@ -85,7 +97,60 @@ private:
         Deferred,
         Submitted,
         // 살아 있지만 voice가 없다(3.41.1절 — 새 재생, 상한 밖 loop·remainActive, 무음 loop).
-        Voiceless
+        Voiceless,
+        // 가상이다(3.41.3절 — 가청 거리 밖 loop, 동시 발음 거부·빼앗김). voice 경쟁에 나가지 않고
+        // 검사 간격마다 실현을 시도한다.
+        Virtual
+    };
+
+    // 동시 발음 그룹 모드다(UE FSoundConcurrencyManager 맵 넷 — SoundConcurrency.h:439–450).
+    enum class ConcurrencyMode : uint8 {
+        // 에셋 그룹(전역 공유).
+        Group,
+        // 에셋 그룹 × 소유자.
+        Owner,
+        // 사운드 재정의(사운드마다).
+        Sound,
+        // 사운드 재정의 × 소유자.
+        OwnerPerSound
+    };
+
+    // dB 선형 ramp다(동시 발음 volume scale·steal fader — UE SC 200–240·FVolumeFader Logarithmic).
+    // 선형값 0은 floorDb로 본다. frames가 0이면 목표값이다.
+    struct DecibelRamp {
+        float fromDb = 0.0f;
+        float toDb = 0.0f;
+        float floorDb = 0.0f;
+        uint64 startFrame = 0;
+        uint32 frames = 0;
+
+        void Set(float linear, float floor) noexcept;
+        void StartTo(float targetLinear, uint64 frame, uint32 length) noexcept;
+        float At(uint64 frame) const noexcept;
+        bool IsRamping(uint64 frame) const noexcept;
+    };
+
+    // 재생이 속한 동시 발음 그룹 하나다(멤버십은 재생 기록이 쥔다 — 그룹 표는 수만 센다).
+    struct ConcurrencyLink {
+        uint32 group = 0;
+        // Default 순서의 세대(들어올 때 그룹 수)·Distance/Priority 순서의 자리다.
+        uint32 generation = 0;
+        // 이 그룹의 volume scale과 그 목표(선형)다.
+        DecibelRamp scale;
+        float target = 1.0f;
+        // 이번 묶음에 들어왔다(Distance/Priority 순서의 첫 목표는 바로 적용 — UE).
+        bool fresh = true;
+    };
+
+    // 동시 발음 그룹 표의 칸이다.
+    struct ConcurrencyGroupState {
+        bool used = false;
+        ConcurrencyMode mode = ConcurrencyMode::Group;
+        uint64 owner = 0;
+        uint64 key = 0;
+        SoundConcurrencySettings settings;
+        uint32 count = 0;
+        uint64 lastPlayMixFrame = 0;
     };
 
     // 제어 쪽 값 ramp다(3.35.6절 — mix clock으로 평가한다). frames가 0이면 target이다.
@@ -158,6 +223,30 @@ private:
         // 이번 묶음의 들리는 크기 추정 v와 볼륨 가중 우선순위 W다(3.41.1절).
         float estimate = 0.0f;
         float weight = 0.0f;
+        // 동시 발음(3.41.2절): 속한 그룹, 감기지 않는 pitch 보정 재생 시간(mix frame — StopOldest),
+        // 그룹 scale의 곱, scale을 빼기 전 크기(StopQuietest), 지금 voice가 시작한 mix frame,
+        // steal fader(사용자 ramp와 따로)와 그 끝.
+        uint32 linkCount = 0;
+        ConcurrencyLink links[MaxConcurrencyGroups];
+        double playbackTime = 0.0;
+        uint64 playbackMixFrame = 0;
+        // voice가 실제로 소리를 낸 pitch 보정 누적 시간(mix frame — UE PlaybackTimeNonVirtualized,
+        // steal 즉시 예외)이다.
+        double voicedTime = 0.0;
+        float concurrencyScale = 1.0f;
+        float unscaledEstimate = 0.0f;
+        uint64 voiceStartMixFrame = 0;
+        bool stealing = false;
+        DecibelRamp stealFader;
+        uint64 stealFadeEnd = 0;
+        // 동시 발음 그룹 항목과 소유자다(가상 재생을 실현할 때 다시 평가한다 — 3.41.3절).
+        uint64 owner = 0;
+        uint32 concurrencyCount = 0;
+        SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
+        // 다음 가상 검사 mix frame과 마지막으로 정한 검사 간격(들리지만 실현이 거부되면 간격을
+        // 그대로 다시 쓴다 — UE AVL 339–352)이다.
+        uint64 virtualCheckFrame = 0;
+        uint64 virtualInterval = 0;
     };
 
     struct ClipEntry {
@@ -182,6 +271,9 @@ private:
         uint32 epoch = 0;
         Vec3d listenerPosition;
         Quatd listenerRotation = Quatd::Identity();
+        // 이번 묶음에 리스너가 forceUpdateDistance보다 많이 움직였다(가상 재생을 바로 검사
+        // — 3.41.3절).
+        bool listenerJumped = false;
     };
 
     struct ControlEmitter {
@@ -202,6 +294,15 @@ private:
         float weight = 0.0f;
         uint64 sequence = 0;
         uint32 stopFade = audio::DefaultStopFadeFrames;
+        // 떼어 낸 재생의 scene이다(scene 해제가 fade 중 voice도 짧게 끊는다 — 3.41.3절).
+        uint32 scene = 0;
+        uint32 sceneEpoch = 0;
+        // 동시 발음 steal fade를 이 voice에서 마저 한다(재생은 가상이 됐다 — 3.41.2절). 떼어 낼
+        // 때의 파라미터에 fader를 곱해 묶음마다 게시하고, 끝나면 믹서 정지 fade다.
+        bool fading = false;
+        DecibelRamp fader;
+        uint64 fadeEnd = 0;
+        audio::AudioVoiceParams params;
     };
 
     // voice 배정 후보다.
@@ -209,6 +310,15 @@ private:
         uint32 slot = 0;
         float weight = 0.0f;
         uint64 sequence = 0;
+    };
+
+    // 동시 발음 평가 결과다(3.41.2절).
+    enum class ConcurrencyOutcome : uint8 {
+        Accepted,
+        // 그룹이 받지 않았다(Ended(Concurrency)).
+        Rejected,
+        // 그룹 표가 찼다(Failed).
+        TableFull
     };
 
     // voice 시작 결과다.
@@ -238,16 +348,47 @@ private:
 
     // voice 배정(AudioVoiceAllocation.cpp — 3.41.1절).
     void UpdateEstimates(ControlBatch& batch, uint64 now) noexcept;
+    void UpdateWeights(uint64 now) noexcept;
     void AssignVoices(ControlBatch& batch, uint64 now) noexcept;
     void HandleSilent(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
     void DropVoice(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
     StartOutcome StartVoice(uint32 slot, uint64 now) noexcept;
     void OnStartFailure(uint32 slot, StartOutcome outcome, ControlBatch& batch) noexcept;
-    void DetachVoice(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
+    void DetachVoice(uint32 slot, ControlBatch& batch, uint64 now,
+                     uint32 stealFadeFrames = 0) noexcept;
     void ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept;
     bool CutStoppingVoice(bool streamOnly) noexcept;
     void EndVoiceless(uint32 slot, PlaybackEndReason reason, ControlBatch& batch) noexcept;
-    bool IsAudible(const Record& record) const noexcept;
+    // ignorePlayWhenSilentSetting이면 PlayWhenSilent를 audio.virtual.allowplaywhensilent와 상관없이
+    // 늘 들리는 것으로 본다(짧은 one-shot 판정 — UE AD 6356은 사운드 모드만 본다).
+    bool IsAudible(const Record& record, bool ignorePlayWhenSilentSetting = false) const noexcept;
+
+    // 동시 발음(AudioConcurrency.cpp — 3.41.2절).
+    ConcurrencyOutcome EvaluateConcurrency(uint32 slot, ControlBatch& batch, uint64 now,
+                                           bool realization) noexcept;
+
+    // 가상화(AudioVirtualization.cpp — 3.41.3절).
+    bool IsVirtualizable(const Record& record) const noexcept;
+    // voice를 놓고(steal이면 stealFadeFrames 동안 분리 fade) 그룹에서 빼고 가상으로 둔다.
+    void Virtualize(uint32 slot, ControlBatch& batch, uint64 now,
+                    uint32 stealFadeFrames = 0) noexcept;
+    // 상태를 Virtual로 바꾸고 첫 검사를 정한다(voice·그룹은 이미 정리됐다).
+    void EnterVirtual(uint32 slot, uint64 now) noexcept;
+    void UpdateVirtualization(ControlBatch& batch, uint64 now) noexcept;
+    uint64 VirtualCheckDelay(const Record& record) const noexcept;
+    uint32 FindConcurrencyGroup(ConcurrencyMode mode, uint64 owner, uint64 key) const noexcept;
+    void GatherGroupMembers(uint32 group, uint32 except) noexcept;
+    bool CanPlayInGroup(uint32 group, uint32 slot, bool realization, uint64 now,
+                        uint32& victim) noexcept;
+    void JoinConcurrencyGroup(uint32 slot, uint32 group, uint64 now) noexcept;
+    void LeaveConcurrencyGroups(uint32 slot, uint64 now) noexcept;
+    void StealPlayback(uint32 slot, bool evict, ControlBatch& batch, uint64 now) noexcept;
+    void UpdateConcurrency(ControlBatch& batch, uint64 now) noexcept;
+    void CullConcurrencyGroup(uint32 group, ControlBatch& batch, uint64 now) noexcept;
+    void RankConcurrencyGroup(uint32 group, uint64 now) noexcept;
+    double ListenerDistanceSquared(const Record& record) const noexcept;
+    uint32 SecondsToMixFrames(double seconds) const noexcept;
+    bool ConcurrencyRamping(const Record& record, uint64 now) const noexcept;
 
     Record* FindRecord(PlaybackHandle handle) noexcept;
     audio::AudioVoiceParams ParamsFor(const Record& record, uint64 frame) const noexcept;
@@ -283,6 +424,9 @@ private:
     Array<uint32> awaitingStart_;
     Array<audio::AudioVoiceTerminal> terminalScratch_;
     Array<VoiceCandidate> candidates_;
+    Array<ConcurrencyGroupState> groups_;
+    // cull·순위 정렬의 재생 슬롯 scratch다.
+    Array<uint32> groupScratch_;
     float masterGain_ = audio::DefaultMasterGain;
     // 첫 마스터 gain은 ramp 0으로 보낸다(음소거·비활성 시작에서 처음 블록이 새지 않게).
     bool masterGainSent_ = false;
@@ -290,6 +434,9 @@ private:
     bool shuttingDown_ = false;
     // 다음 수락 순번이다.
     uint64 nextSequence_ = 0;
+    // 이 묶음의 audio.concurrency.mindistancedelta(cm)·audio.virtual.* 값이다.
+    float minDistanceDelta_ = 0.0f;
+    VirtualizationSettings virtual_;
     AudioControlStats stats_;
 };
 
