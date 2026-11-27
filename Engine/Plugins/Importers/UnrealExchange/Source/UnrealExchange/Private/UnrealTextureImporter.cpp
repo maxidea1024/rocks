@@ -213,7 +213,7 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
     }
 
     if (!parsed.Succeeded()) {
-        return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
+        return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData);
     }
 
     ReferenceResolver resolver(context, options.references);
@@ -225,7 +225,12 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
         reflection_text::AssignmentTarget::Live(context.Registry(), context.Access(), output),
         codec, diagnostics);
     if (!prepared) {
-        return Fail(context, AssetDiagnosticCode::InvalidSource, prepared.Error());
+        // 진단을 남긴 거부(값 형식·범위·모르는 키)는 덤프 내용의 문제다(10.3절 오류 값). 진단이
+        // 없는 InvalidArgument는 호출 오류라 그대로다.
+        const bool content =
+            prepared.Error() == ErrorCode::InvalidArgument && diagnostics.Count() != 0;
+        return Fail(context, AssetDiagnosticCode::InvalidSource,
+                    content ? ErrorCode::CorruptData : prepared.Error());
     }
 
     if (auto published = prepared.Value().Publish(); !published) {

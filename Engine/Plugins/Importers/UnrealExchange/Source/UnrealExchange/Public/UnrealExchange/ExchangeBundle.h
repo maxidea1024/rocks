@@ -228,7 +228,7 @@ private:
 // - diagnostics: 진단을 더한다(비우지 않는다).
 //
 // 반환: 묶음 수준 오류(bundle.json 읽기 실패·손상·버전·정렬·상한, 10.4절 2번)는 실패이고 out은 빈
-// 상태다(CorruptBundle은 InvalidArgument·CapacityExceeded 또는 파일 오류, 버전은 Unsupported).
+// 상태다(CorruptBundle은 CorruptData·CapacityExceeded 또는 파일 오류, 버전은 Unsupported).
 // 에셋 수준 오류는 성공이고 그 에셋이 Failed다. 할당 실패는 진단 없이 그 오류다.
 ROCKS_UNREALEXCHANGE_API Result<void> ReadExchangeBundle(platform::FileSystem& files,
                                                          StringView directory,
@@ -238,7 +238,7 @@ ROCKS_UNREALEXCHANGE_API Result<void> ReadExchangeBundle(platform::FileSystem& f
 
 // asset 번호 에셋의 blob 참조 하나를 out에 읽는다(out은 먼저 비운다). 크기·SHA-256·가변 배치를 다시
 // 확인한다(읽기와 임포트 사이에 파일이 바뀌어도 잡는다). 실패하면 diagnostics에 CorruptBundle(asset
-// 번호, 파일 Blob)을 더하고 InvalidArgument 또는 파일 오류를 돌려주며 out은 빈 상태다. 할당 실패는
+// 번호, 파일 Blob)을 더하고 CorruptData 또는 파일 오류를 돌려주며 out은 빈 상태다. 할당 실패는
 // 진단 없이 그 오류다. const 묶음을 여러 스레드가 함께 써도 된다(diagnostics·out은 호출마다 따로).
 ROCKS_UNREALEXCHANGE_API Result<void> LoadExchangeBlob(const ExchangeBundle& bundle, uint32 asset,
                                                        const ExchangeBlobRef& blob,
@@ -252,7 +252,7 @@ ROCKS_UNREALEXCHANGE_API Result<void> LoadExchangeBlob(const ExchangeBundle& bun
 // target은 ExchangeNoIndex다. out의 문자열·JSON 값은 out.document를 가리킨다.
 //
 // 반환: 성공이면 out.state가 Ready다. 거부는 diagnostics(asset = ExchangeNoIndex, file AssetJson)에
-// 이유를 더하고 그 오류(CorruptBundle은 InvalidArgument·CapacityExceeded, 플러그인 error 진단은
+// 이유를 더하고 그 오류(CorruptBundle은 CorruptData·CapacityExceeded, 플러그인 error 진단은
 // InvalidArgument)이며 out은 Failed·빈 값이다. 할당 실패는 진단 없이 그 오류다.
 //
 // 사용 예(A2f 임포터):
@@ -267,7 +267,7 @@ ReadExchangeAssetDocument(Span<const uint8> bytes, Allocator& allocator, Exchang
 
 // blob byte가 참조와 맞는지 본다(10.6절 5번): 크기, 가변 배치, SHA-256(LoadExchangeBlob과 같은
 // 검사). 실패하면 issue(null 가능)에 세부 규칙(BlobSize·BlobHash·BlobLayout)을 쓰고
-// InvalidArgument다.
+// CorruptData다.
 ROCKS_UNREALEXCHANGE_API Result<void> VerifyExchangeBlob(const ExchangeBlobRef& blob,
                                                          Span<const uint8> bytes,
                                                          ExchangeIssue* issue = nullptr) noexcept;
@@ -279,7 +279,7 @@ ROCKS_UNREALEXCHANGE_API Result<void> AppendExchangeBlobPath(StringView director
                                                              StringBuilderBase& out) noexcept;
 
 // 교환 JSON의 실수 값을 읽는다(3.2절): JSON 숫자이거나 문자열 "nan"·"inf"·"-inf"다. 그 밖은
-// InvalidArgument다. 종류별 단계가 settings·data를 읽을 때 쓴다.
+// CorruptData다. 종류별 단계가 settings·data를 읽을 때 쓴다.
 //
 // 사용 예:
 //   double roughness = 0.0;

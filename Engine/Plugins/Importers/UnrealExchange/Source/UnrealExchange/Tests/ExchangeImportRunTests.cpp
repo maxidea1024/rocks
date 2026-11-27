@@ -545,7 +545,7 @@ TEST(UnrealExchange_RunPlanFailuresAndDryRun) {
     }
 
     {
-        // 읽기에 실패한 에셋의 결과 코드(CorruptBundle → InvalidArgument).
+        // 읽기에 실패한 에셋의 결과 코드(CorruptBundle → CorruptData).
         const SyntheticAsset assets[] = {{"/Game/A/T.T", "Texture2D", {}, "[]"}};
         RunScene scene(allocator);
         REQUIRE(ReadSynthetic(allocator, Span<const SyntheticAsset>(assets), scene.bundle,
@@ -553,7 +553,7 @@ TEST(UnrealExchange_RunPlanFailuresAndDryRun) {
         REQUIRE(scene.Plan());
         REQUIRE(scene.Run({}, true));
         CHECK(scene.result.Outcome(0).failure == AssetDiagnosticCode::CorruptBundle &&
-              scene.result.Outcome(0).error == ErrorCode::InvalidArgument);
+              scene.result.Outcome(0).error == ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

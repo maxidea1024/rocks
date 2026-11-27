@@ -591,7 +591,7 @@ TEST(StaticMeshCook_NuggetHeader) {
         StaticMeshRenderData out(allocator);
         Array<MeshCookWarning> outWarnings(allocator);
         return ReadStaticMeshNuggetHeader(broken.View(), out, outWarnings).Error() ==
-               ErrorCode::InvalidArgument;
+               ErrorCode::CorruptData;
     };
     CHECK(rejects([](Array<uint8>& b) noexcept { b[0] = 9; }));
     CHECK(rejects([](Array<uint8>& b) noexcept { b[4] = 9; }));

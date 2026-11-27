@@ -8,6 +8,7 @@
 #include <Graphics/PipelineState.h>
 #include <Graphics/ShaderCode.h>
 #include <GraphicsTypes/ChannelSwizzle.h>
+#include <GraphicsTypes/GraphicsBackend.h>
 #include <GraphicsTypes/IndexFormat.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
@@ -18,19 +19,7 @@
 // 않는다. 픽셀 형식·샘플러는 GraphicsTypes 모듈에 있다.
 namespace rocks::graphics {
 
-// 그래픽 backend다. D3D12·D3D11·OpenGL·Vulkan은 구현 모듈(D3D12Graphics·D3D11Graphics·
-// OpenGLGraphics·VulkanGraphics)이 있고, Metal은 자리만 둔다(구현 모듈이 아직 없어 선택하면
-// Unsupported).
-enum class Backend : uint8 {
-    D3D12,
-    D3D11,
-    OpenGL,
-    Vulkan,
-    Metal
-};
-
-// "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
-ROCKS_GRAPHICS_API const char* BackendName(Backend backend) noexcept;
+// 그래픽 backend(Backend·BackendName)는 GraphicsTypes/GraphicsBackend.h에 있다(쿠커도 쓴다).
 
 // backend 장치가 받는 셰이더 코드 종류다(D3D12 Dxil, D3D11 Dxbc, OpenGL Essl, Vulkan Spirv, Metal
 // Metallib).

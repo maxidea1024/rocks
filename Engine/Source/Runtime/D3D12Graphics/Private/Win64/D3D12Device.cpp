@@ -1,6 +1,7 @@
 #include "D3D12DeviceImpl.h"
 
 #include <DxgiGraphics/DxgiAdapter.h>
+#include <GraphicsTypes/CookSampling.h>
 
 namespace rocks::graphics::d3d12 {
 
@@ -217,6 +218,20 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
         }
 
         formatCaps_[number] = formatCaps;
+    }
+
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): FL 11_0 필수 형식이 표의 보장 칸이다. 빠진
+    // 능력이 있으면 backend 대응표의 오류이므로 장치를 받지 않는다.
+    const PixelFormat missing = FindMissingCookSampling(Backend::D3D12, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (missing != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::D3D12, HostGraphicsPlatform(),
+                                   missing);
+        auto failed = Fail(detail);
+        (void)failed;
+        failureTruncated_ = CopyStage("CookSamplingGuarantee");
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     // 버퍼 view slot이 비었을 때 묶는 null SRV다(셰이더가 읽지 않는 table도 채워 둔다).

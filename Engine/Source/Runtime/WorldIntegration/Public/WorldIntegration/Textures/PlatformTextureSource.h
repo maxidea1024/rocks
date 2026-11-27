@@ -16,7 +16,7 @@
 //   PlatformTextureSource converted(allocator);
 //   auto made = MakePlatformTextureSource(texture.platformData, &ReadPackageBulk, &package,
 //                                         converted);
-//   if (!made) { /* InvalidArgument(CorruptEntry)·reader 오류·할당 실패 */ }
+//   if (!made) { /* CorruptData(CorruptEntry)·reader 오류·할당 실패 */ }
 //   auto upload = render::PrepareCookedTexture(allocator, converted.source, device, handle);
 //
 // 스레드: 순수 변환이라 어느 스레드에서나 부를 수 있다(reader가 허용하는 스레드 — 패키지 bulk는
@@ -52,8 +52,8 @@ GraphicsTextureDimension(TextureDimension dimension) noexcept;
 // 한다(여기서는 번호·enum 범위와 bulk 유무만 본다). 스트리밍 mip(앞쪽 numMips −
 // residentTailMips개)은 mip bulk를, 상주 mip은 tailBulk 안 오프셋을 쓴다. 오류: 모르는
 // 차원·PixelFormat 번호·샘플러 enum·swizzle 값, mip 배열 수 ≠ numMips, 스트리밍 mip·꼬리의 빈 bulk
-// ref는 InvalidArgument(CorruptEntry), reader의 오류는 그대로, 할당 실패. 실패해도 out은 일부
-// 채워질 수 있으며 쓰지 않는다.
+// ref는 CorruptData(CorruptEntry — RenderBase 6.6절), reader의 오류는 그대로, 할당 실패. 실패해도
+// out은 일부 채워질 수 있으며 쓰지 않는다.
 ROCKS_WORLDINTEGRATION_API Result<void>
 MakePlatformTextureSource(const TexturePlatformData& data, PlatformBulkReader reader, void* context,
                           PlatformTextureSource& out) noexcept;

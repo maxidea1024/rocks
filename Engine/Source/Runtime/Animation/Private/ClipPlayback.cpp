@@ -308,7 +308,7 @@ namespace {
 Result<void> CorruptPlayback(ClipDiagnostic* failure, ClipIssue issue, uint32 index = ClipNoIndex,
                              uint32 related = ClipNoIndex) noexcept {
     return animation_detail::ClipFail(failure, AssetDiagnosticCode::CorruptPackage,
-                                      ErrorCode::InvalidArgument, issue, index, related);
+                                      ErrorCode::CorruptData, issue, index, related);
 }
 
 // 쿠킹 트랙 하나를 푼다(원소 수 셋, 값 — 7.5절 10).
@@ -458,9 +458,7 @@ Result<void> ValidateCookedAnimationClip(const AnimationClip& clip, const Packag
         }
 
         if (owner[bone] != 0) {
-            return animation_detail::ClipFail(
-                failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
-                ClipIssue::DuplicateTrackBone, track, owner[bone] - 1);
+            return CorruptPlayback(failure, ClipIssue::DuplicateTrackBone, track, owner[bone] - 1);
         }
 
         owner[bone] = track + 1;

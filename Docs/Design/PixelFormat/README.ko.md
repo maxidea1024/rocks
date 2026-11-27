@@ -1,8 +1,8 @@
 # 픽셀 형식(PixelFormat) 설계
 
-기준일: 2026-11-25, 개정 6(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-26, 개정 7(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
 - 형식 목록과 고정 번호표, UE 대응표, 제외 형식과 사유
-- 형식 정보 표(`PixelFormatInfo`)와 형식 능력 플래그(`PixelFormatCaps`)
+- 형식 정보 표(`PixelFormatInfo`)와 형식 능력 플래그(`PixelFormatCaps`), 쿠킹 보장 샘플링 표(7.1절)
 - backend 대응 표(D3D12·D3D11·Vulkan·OpenGL ES·Metal)와 장치 능력 질의(GX1)의 연결
 - sRGB 표현, 깊이·스텐실, 비디오 형식(다중 plane)
 - 이름 변경(`Format` → `PixelFormat`)과 구현 단계
@@ -42,7 +42,7 @@
 - [4. UE 5.8 조사](04-UeSurvey.ko.md)
 - [5. Rocks 형식 목록](05-FormatList.ko.md)
 - [6. 형식 정보(`PixelFormatInfo`)](06-FormatInfo.ko.md)
-- [7. 형식 능력 플래그(`PixelFormatCaps`)](07-FormatCaps.ko.md)
+- [7. 형식 능력 플래그(`PixelFormatCaps`)](07-FormatCaps.ko.md) — 7.1 쿠킹 보장 샘플링 표
 - [8. backend 대응 표](08-BackendMapping.ko.md)
 - [9. sRGB 표현(결정 PX1)](09-Srgb.ko.md)
 - [10. 깊이·스텐실](10-DepthStencil.ko.md)

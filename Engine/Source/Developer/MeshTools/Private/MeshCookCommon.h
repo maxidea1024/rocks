@@ -90,13 +90,13 @@ inline void PutHeaderWarnings(ByteWriter& writer, Span<const MeshCookWarning> wa
     }
 }
 
-// 경고 수와 항목을 읽는다(수 상한·남은 byte·알려진 진단 코드·lod < lodCount). 위반 InvalidArgument.
+// 경고 수와 항목을 읽는다(수 상한·남은 byte·알려진 진단 코드·lod < lodCount). 위반 CorruptData.
 inline Result<void> ReadHeaderWarnings(ByteReader& reader, uint32 lodCount,
                                        Array<MeshCookWarning>& warnings) noexcept {
     const uint32 count = reader.ReadU32LE();
     if (reader.Failed() || count > HeaderMaxWarnings ||
         reader.Remaining() < usize{count} * HeaderWarningBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = warnings.TryReserve(count); !reserved) {
@@ -109,7 +109,7 @@ inline Result<void> ReadHeaderWarnings(ByteReader& reader, uint32 lodCount,
         const auto value = static_cast<AssetDiagnosticCode>(code);
         if (code > NumericLimits<uint16>::Max() || value == AssetDiagnosticCode::None ||
             StringView(AssetDiagnosticName(value)) == StringView("Unknown") || lod >= lodCount) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         (void)warnings.TryPushBack(MeshCookWarning{value, lod});
@@ -143,7 +143,7 @@ void PutHeaderLodStreams(ByteWriter& writer, const Lod& lod) noexcept {
 template <class Lod>
 Result<void> ReadHeaderLodStreams(ByteReader& reader, Lod& lod) noexcept {
     if (reader.Remaining() < HeaderLodStreamBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     lod.vertexCount = reader.ReadU32LE();
@@ -152,7 +152,7 @@ Result<void> ReadHeaderLodStreams(ByteReader& reader, Lod& lod) noexcept {
     ReadHeaderStream(reader, lod.tangentBasis);
     const uint32 texCoords = reader.ReadU32LE();
     if (texCoords > MeshMaxTexCoordStreams) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     for (uint32 stream = 0; stream < texCoords; ++stream) {
@@ -190,14 +190,14 @@ void PutHeaderLodIndices(ByteWriter& writer, const Lod& lod) noexcept {
 template <class Lod>
 Result<void> ReadHeaderLodIndices(ByteReader& reader, Lod& lod) noexcept {
     if (reader.Remaining() < HeaderLodIndexBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     lod.indexFormat = reader.ReadU32LE();
     ReadHeaderStream(reader, lod.indices);
     const uint32 sections = reader.ReadU32LE();
     if (sections > HeaderMaxSections || reader.Remaining() < usize{sections} * HeaderSectionBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto reserved = lod.sections.TryReserve(sections); !reserved) {
@@ -215,7 +215,7 @@ Result<void> ReadHeaderLodIndices(ByteReader& reader, Lod& lod) noexcept {
         for (uint8& flag : flags) {
             flag = reader.ReadU8();
             if (flag > 1) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 

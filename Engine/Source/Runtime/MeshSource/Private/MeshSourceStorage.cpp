@@ -305,13 +305,13 @@ Result<Array<uint8>> EncodeAttribute(Allocator& allocator,
     return out;
 }
 
-// 로드 배치 위반이다(CorruptPackage / InvalidArgument).
+// 로드 배치 위반이다(CorruptPackage / CorruptData).
 Result<void> CorruptLayout(MeshDiagnostic* failure, MeshIssue issue,
                            MeshElement element = MeshElement::Invalid,
                            uint32 attribute = MeshNoAttribute,
                            uint32 index = MeshNoIndex) noexcept {
     return rocks::mesh_source_detail::Fail(failure, AssetDiagnosticCode::CorruptPackage,
-                                           ErrorCode::InvalidArgument, issue, element, attribute,
+                                           ErrorCode::CorruptData, issue, element, attribute,
                                            index);
 }
 
@@ -928,15 +928,19 @@ Result<void> MeshSource::LoadFrom(const MeshSourceData& data, const MeshSourceBu
 
     MeshDiagnostic content;
     if (auto valid = ValidateMeshSource(loaded, MeshValidateOptions{}, &content); !valid) {
+        // 저장된 원본이 모델 규칙을 어긴 것은 손상이다(한도 초과는 그대로 — AssetSystem 19장).
+        const ErrorCode error =
+            valid.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : valid.Error();
         if (content.code != AssetDiagnosticCode::None) {
             content.code = AssetDiagnosticCode::CorruptPackage;
+            content.error = error;
         }
 
         if (failure != nullptr) {
             *failure = content;
         }
 
-        return valid;
+        return Result<void>::Failure(error);
     }
 
     *this = Move(loaded);

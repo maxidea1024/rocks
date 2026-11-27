@@ -43,15 +43,15 @@ Result<void> PutName(ByteWriter& writer, NamePool& names, Name name) noexcept {
 Result<Name> ReadName(ByteReader& reader, NamePool& names) noexcept {
     const uint32 size = reader.ReadU32LE();
     if (reader.Failed() || reader.Remaining() < size) {
-        return Result<Name>::Failure(ErrorCode::InvalidArgument);
+        return Result<Name>::Failure(ErrorCode::CorruptData);
     }
 
     const Span<const uint8> bytes = reader.Take(size);
     auto name = names.TryIntern(StringView(reinterpret_cast<const char*>(bytes.Data()), size));
     if (!name) {
-        return Result<Name>::Failure(name.Error() == ErrorCode::OutOfMemory
-                                         ? ErrorCode::OutOfMemory
-                                         : ErrorCode::InvalidArgument);
+        // 이름 byte 위반(잘못된 UTF-8 등)은 손상이고 pool 상태 오류는 그대로다.
+        return Result<Name>::Failure(
+            name.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : name.Error());
     }
 
     return name;
@@ -66,7 +66,7 @@ void PutBoneList(ByteWriter& writer, Span<const uint16> bones) noexcept {
 
 Result<void> ReadBoneList(ByteReader& reader, uint32 count, Array<uint16>& out) noexcept {
     if (count > MeshMaxBones || reader.Remaining() < usize{count} * sizeof(uint16)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto resized = out.TryResize(count); !resized) {
@@ -151,13 +151,13 @@ Result<void> ReadSkeletalMeshNuggetHeader(Span<const uint8> bytes, NamePool& nam
     ByteReader reader(bytes);
     if (bytes.Size() < SkinHeaderFixedBytes ||
         reader.ReadU32LE() != SkeletalMeshNuggetHeaderVersion) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint32 lodCount = reader.ReadU32LE();
     mesh_cook::ReadHeaderBounds(reader, out.box, out.sphereRadius);
     if (lodCount > SkeletalMeshMaxLods) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto read = mesh_cook::ReadHeaderWarnings(reader, lodCount, warnings); !read) {
@@ -175,7 +175,7 @@ Result<void> ReadSkeletalMeshNuggetHeader(Span<const uint8> bytes, NamePool& nam
         }
 
         if (reader.Remaining() < HeaderSkinBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         lod.influencesPerVertex = reader.ReadU32LE();
@@ -196,7 +196,7 @@ Result<void> ReadSkeletalMeshNuggetHeader(Span<const uint8> bytes, NamePool& nam
         const uint32 profiles = reader.ReadU32LE();
         if (profiles > HeaderMaxNamedStreams ||
             reader.Remaining() < usize{profiles} * HeaderProfileBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (auto reserved = lod.skinWeightProfiles.TryReserve(profiles); !reserved) {
@@ -219,7 +219,7 @@ Result<void> ReadSkeletalMeshNuggetHeader(Span<const uint8> bytes, NamePool& nam
         const uint32 morphs = reader.ReadU32LE();
         if (morphs > HeaderMaxNamedStreams ||
             reader.Remaining() < usize{morphs} * HeaderMorphBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (auto reserved = lod.morphTargets.TryReserve(morphs); !reserved) {
@@ -240,14 +240,14 @@ Result<void> ReadSkeletalMeshNuggetHeader(Span<const uint8> bytes, NamePool& nam
         }
 
         if (reader.Failed()) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         (void)out.lods.TryPushBack(Move(lod));
     }
 
     return reader.Failed() || reader.Remaining() != 0
-               ? Result<void>::Failure(ErrorCode::InvalidArgument)
+               ? Result<void>::Failure(ErrorCode::CorruptData)
                : Result<void>::Success();
 }
 

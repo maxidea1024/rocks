@@ -27,7 +27,7 @@ struct TranslateState {
 };
 
 Result<void> Invalid() noexcept {
-    return Result<void>::Failure(ErrorCode::InvalidArgument);
+    return Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 bool IsUpper(char value) noexcept {
@@ -323,7 +323,8 @@ Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row,
         break;
     }
 
-    return Invalid();
+    // 여기 오면 행 종류 표의 결함이다(덤프 내용이 아니다).
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
 // object를 rows로 번역해 객체 하나를 쓴다. top이면 최상위 표(경고 detail = 행 번호)이고, 아니면

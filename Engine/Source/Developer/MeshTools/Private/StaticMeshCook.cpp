@@ -301,13 +301,13 @@ Result<void> ReadStaticMeshNuggetHeader(Span<const uint8> bytes, StaticMeshRende
     warnings.Clear();
     ByteReader reader(bytes);
     if (bytes.Size() < HeaderFixedBytes || reader.ReadU32LE() != StaticMeshNuggetHeaderVersion) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint32 lodCount = reader.ReadU32LE();
     mesh_cook::ReadHeaderBounds(reader, out.box, out.sphereRadius);
     if (lodCount > StaticMeshMaxLods) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto read = mesh_cook::ReadHeaderWarnings(reader, lodCount, warnings); !read) {
@@ -332,7 +332,7 @@ Result<void> ReadStaticMeshNuggetHeader(Span<const uint8> bytes, StaticMeshRende
     }
 
     return reader.Failed() || reader.Remaining() != 0
-               ? Result<void>::Failure(ErrorCode::InvalidArgument)
+               ? Result<void>::Failure(ErrorCode::CorruptData)
                : Result<void>::Success();
 }
 

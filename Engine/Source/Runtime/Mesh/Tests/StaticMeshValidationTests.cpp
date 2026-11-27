@@ -80,8 +80,9 @@ bool Fails(const StaticMeshRenderData& data, MeshIssue issue, uint32 index,
            uint64 count = 0) noexcept {
     MeshDiagnostic failure;
     auto checked = ValidateStaticMeshRenderData(data, &failure);
-    return !checked && checked.Error() == ErrorCode::InvalidArgument &&
-           failure.code == AssetDiagnosticCode::CorruptPackage && failure.issue == issue &&
+    return !checked && checked.Error() == ErrorCode::CorruptData &&
+           failure.code == AssetDiagnosticCode::CorruptPackage &&
+           failure.error == ErrorCode::CorruptData && failure.issue == issue &&
            failure.index == index && failure.count == count;
 }
 

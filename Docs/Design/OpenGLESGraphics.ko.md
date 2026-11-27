@@ -1,6 +1,6 @@
 # OpenGL ES 그래픽 backend(P11)
 
-기준일: 2026-11-25, 개정 5. [셰이더 시스템](ShaderSystem/README.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
+기준일: 2026-11-26, 개정 6. [셰이더 시스템](ShaderSystem/README.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
 
 UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runtime/OpenGLDrv`이며, 아래 경로는 `Runtime/OpenGLDrv/Private/` 기준이다(셰이더 컴파일러는 `Developer/ShaderFormatOpenGL/Private/`). 레거시·deprecated 경로와 데스크톱 GL SM5 경로는 보지 않았다.
 
@@ -159,6 +159,8 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 `CreateOpenGLDevice(allocator, desc, [options,] report)`의 `DeviceCreateReport`([로깅](LoggingSystem.ko.md) 13절 모양)에 실패 단계(호출 이름), 원본 오류(GL error, EGL error, Win32 `GetLastError`, 버전 비교면 major×10+minor), 설명을 적는다. 장치 안 실패는 `LastError`에 직전 GL 오류 이름·값을 덧붙인다. 로그(LG3 API, 13절 표): 장치 생성 성공 Info(`Created {Backend} device on {Adapter} (validation {Validation})`), 검증 계층 메시지 Warning(`Graphics.OpenGL.Validation`, 원문, 메시지 ID마다 1회, 할당 없이 ID 64개까지 기억), present 실패 Error(연속 실패는 1회), 장치 손실 전이 Error(1회). 생성 실패·셰이더 컴파일 실패 로그는 결정하는 호출자가 남긴다(report·`LastError`).
 
+쿠킹 보장 샘플링(개정 6, [PixelFormat](PixelFormat/07-FormatCaps.ko.md) 7.1절): Android 장치는 형식 능력을 정한 직후 표의 OpenGL·Android 열(ES 3.2 core — ETC2·EAC·ASTC LDR 포함, 32F는 샘플만)과 대조하고, 빠진 형식이 있으면 `Unsupported`(stage `CookSamplingGuarantee`)다. ES 3.2 core만 쓰므로 정상 장치에서는 실패하지 않는다(대응표 오류 검출). Windows 미리보기는 쿠킹 대상이 아니라 대조하지 않는다. Sandbox self-test가 미리보기를 Android 열과 견준 차이만 보고한다.
+
 ### 5.8 파이프라인·패스·명령 기록 확장(GX3·GX4, 2026-11-18)
 
 - 파이프라인 상태는 프로그램과 함께 기억했다가 `SetPipeline`이 건다: 타깃별 `glEnablei`·`glBlendFuncSeparatei`·`glBlendEquationSeparatei`·`glColorMaski`(ES 3.2 core), `GL_SAMPLE_ALPHA_TO_COVERAGE`, 컬, `glPolygonOffset`(상한은 `GL_EXT_polygon_offset_clamp`의 `glPolygonOffsetClampEXT`, 없으면 `depthBiasClamp` 거짓), 깊이 clamp(`GL_EXT_depth_clamp`), 깊이 시험·쓰기(쓰기만 켜면 `GL_ALWAYS` 시험), `glStencilFuncSeparate`·`glStencilOpSeparate`·`glStencilMaskSeparate`(기준 값은 `SetStencilReference`가 다시 건다), 기본도형.
@@ -234,3 +236,4 @@ Engine/Source/Runtime/OpenGLGraphics/
 - 개정 3(2026-11-18): GX1·GX2 리뷰 반영(A8 texel buffer 능력 제외, 그래픽 단계 image uniform·유닛 0 밖 sampler 거부, 구조화 stride 대조, viewport 수 1)과 RenderBase GX3·GX4(5.8절).
 - 개정 4(2026-11-25): SH2e2 반영. 쿠킹된 ESSL을 장치 셰이더로 받고 파이프라인 생성 때 컴파일·link한다. 루트 상수는 값 2 복사 표로, 정점 입력·자원 위치는 값 1로 얻는다(1·2·5.5·5.8·7·8·9·10절). 손으로 쓴 GLSL 원문(`ShaderSource::glsl`) 경로 서술을 지웠다.
 - 개정 5(2026-11-25): RenderBase GX6 반영 — 상수 버퍼 배열을 값 2 복사 표로 올리는 묶기(1·10절).
+- 개정 6(2026-11-26): Android 장치 생성의 쿠킹 보장 샘플링 대조(5.7절, PixelFormat 7.1절).

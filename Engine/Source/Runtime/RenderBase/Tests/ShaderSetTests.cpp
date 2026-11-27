@@ -267,7 +267,11 @@ TEST(ShaderSet_IncompatibleLibrariesFailWithTheirProblem) {
             opened = OpenWith(set, types, cases[index].options);
         }
 
-        CHECK(!opened && opened.Error() == ErrorCode::DependencyFailed);
+        // 라이브러리 byte 손상만 CorruptData이고 그 밖의 검사 실패는 DependencyFailed다(6.6절).
+        const ErrorCode expected = cases[index].problem == ShaderSetProblem::CorruptLibrary
+                                       ? ErrorCode::CorruptData
+                                       : ErrorCode::DependencyFailed;
+        CHECK(!opened && opened.Error() == expected);
         CHECK(set.State() == ShaderSetState::Failed);
         CHECK(set.Problem() == cases[index].problem);
         const StringView detail = set.ProblemDetail();

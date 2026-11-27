@@ -233,7 +233,7 @@ public:
     // 순서다.
     //
     // 오류: 배치·내용 위반은 failure->code CorruptPackage(formatVersion만 UnsupportedVersion)와
-    // ErrorCode InvalidArgument(버전은 Unsupported, bulk를 못 읽으면 Package::BulkBytes의 오류)이고
+    // ErrorCode CorruptData(버전은 Unsupported, bulk를 못 읽으면 Package::BulkBytes의 오류)이고
     // 세부 규칙은 failure->issue다. 레코드 이름 pool 오류(ShuttingDown·StaleHandle 등)와 할당
     // 실패는 진단 코드 없이(None) 그 오류다. 실패하면 이 객체는 그대로다.
     //

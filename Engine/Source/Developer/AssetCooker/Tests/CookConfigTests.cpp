@@ -391,6 +391,16 @@ TEST(CookConfig_Hashes) {
         REQUIRE(scene.Profile("Windows", changed, nullptr));
         changed.bulkAlignment = 8;
         CHECK(distinct(HashTargetProfile(context, changed).Value()));
+        // 오디오 쿠킹 칸(중첩 struct·bool·uint32·float — Docs/Design/AudioSystem 3.39.1절).
+        REQUIRE(scene.Profile("Windows", changed, nullptr));
+        changed.audioCook.resampleForDevice = true;
+        CHECK(distinct(HashTargetProfile(context, changed).Value()));
+        REQUIRE(scene.Profile("Windows", changed, nullptr));
+        changed.audioCook.lowSampleRate = 11025;
+        CHECK(distinct(HashTargetProfile(context, changed).Value()));
+        REQUIRE(scene.Profile("Windows", changed, nullptr));
+        changed.audioCook.compressionQualityModifier = 0.5f;
+        CHECK(distinct(HashTargetProfile(context, changed).Value()));
     }
 
     CookSettings settings(scene.env.allocator);
@@ -420,6 +430,30 @@ TEST(CookConfig_Hashes) {
 
 // 경계: failure 없이 문법 오류, 숫자·밑줄 id(엔진 파일 없음까지 간다), 설정 타입이 등록되지 않은
 // 문맥(읽기·SHA-256 모두 NotFound — 거부 아님).
+// 프로파일 실패 칸 대응(10.3.1절 — 같은 이름 값 1:1): TargetProfileField 값마다 같은 이름의
+// CookConfigField다(새 칸을 더하면 여기도 더한다).
+TEST(CookConfig_ProfileFieldMapping) {
+    struct Pair {
+        TargetProfileField profile;
+        CookConfigField config;
+    };
+    const Pair pairs[] = {
+        {TargetProfileField::None, CookConfigField::None},
+        {TargetProfileField::File, CookConfigField::File},
+        {TargetProfileField::Json, CookConfigField::Json},
+        {TargetProfileField::Text, CookConfigField::Text},
+        {TargetProfileField::Id, CookConfigField::Id},
+        {TargetProfileField::BulkAlignment, CookConfigField::BulkAlignment},
+        {TargetProfileField::TextureLodGroup, CookConfigField::TextureLodGroup},
+        {TargetProfileField::GraphicsBackends, CookConfigField::GraphicsBackends},
+        {TargetProfileField::ShaderFormats, CookConfigField::ShaderFormats},
+        {TargetProfileField::AudioCook, CookConfigField::AudioCook},
+    };
+    for (const Pair& pair : pairs) {
+        CHECK(ToCookConfigField(pair.profile) == pair.config);
+    }
+}
+
 TEST(CookConfig_Boundaries) {
     ConfigScene scene;
     REQUIRE(scene.Ready());

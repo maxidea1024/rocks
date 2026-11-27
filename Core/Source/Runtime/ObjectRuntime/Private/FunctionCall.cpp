@@ -72,8 +72,8 @@ Result<FunctionHandle> TypeRegistry::FindFunction(TypeId type, Guid functionId) 
     return Result<FunctionHandle>::Failure(ErrorCode::NotFound);
 }
 
-Result<FunctionHandle> TypeRegistry::FindFunctionByName(TypeId type,
-                                                        Span<const char> name) noexcept {
+Result<FunctionHandle> TypeRegistry::FindFunctionByName(TypeId type, StringView text) noexcept {
+    const Span<const char> name(text.Data(), text.ByteCount());
     platform::LockGuard lock(gate_);
     if (closed_) {
         return Result<FunctionHandle>::Failure(ErrorCode::ShuttingDown);

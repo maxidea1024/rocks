@@ -164,6 +164,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundClip::sampleRateQuality",
+      "id": "688d128c5ee74636b3385bf18ba89d3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClip::source",
       "id": "11c258993b384b159bdb5b72a94a3f8c",
       "aliases": [],
@@ -348,6 +355,13 @@
       "kind": "type",
       "name": "rocks::SoundNaturalFalloffMode",
       "id": "3dd09f5d6a33484e82f8fac30414e090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundSampleRateQuality",
+      "id": "0d3c37dabf584eccb06760fd97fb5926",
       "aliases": [],
       "retired": false
     },
