@@ -79,7 +79,8 @@
   - 색: 참조는 조정 적용, 인라인은 원값
   - `TryFlattenInto` 실패 시 out 불변
   - 할당 실패
-  - 원천 struct를 `Array` 원소·Map 값에 넣으면 메타 컴파일러가 거부하는지(RMC 진단 golden)
+  - 벡터·색 원천의 채널별 할당 실패와 풀리지 않는 참조에서 out 불변, out 채널마다의 allocator 유지
+  - (참조 struct를 `Array` 원소·Map 값에 넣는 것의 거부는 메타 컴파일러 RMC2304–2306 자체 시험이 덮는다)
 - **`CurveTable_`**
   - 모드 정하기, 다른 모드 추가 TypeMismatch, 같은 이름 대입의 자리 유지
   - 지우기·이름 바꾸기 순서(끝으로)

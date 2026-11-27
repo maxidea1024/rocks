@@ -11,7 +11,7 @@
 | struct | 인라인 | 참조 | UE |
 |---|---|---|---|
 | `FloatCurveSource` | `TangentCurve curve` | `ObjectRef<FloatCurveAsset> asset` | `EditorCurveData`·`ExternalCurve`(`CurveFloat.h:11-27`) |
-| `VectorCurveSource` | `VectorCurveValue inlineCurves` | `ObjectRef<VectorCurveAsset> asset` | `VectorCurves[3]`·`ExternalCurve`(`CurveVector.h:11-27`) |
+| `VectorCurveSource` | `VectorCurveValue curves` | `ObjectRef<VectorCurveAsset> asset` | `VectorCurves[3]`·`ExternalCurve`(`CurveVector.h:11-27`) |
 | `ColorCurveSource` | `TangentCurve r, g, b, a` | `ObjectRef<ColorCurveAsset> asset` | `ColorCurves[4]`·`ExternalCurve`(`CurveLinearColor.h:13-25`) |
 
 - **참조 struct다(CAD7).** `ObjectRef`는 복사·이동이 막혀 있고, 소유 객체 밖의 버퍼(Array 원소)에 둘 수 없다(`Object/ObjectRefs.h:175-206`). 그래서 원천 struct를 둘 수 있는 자리는 두 곳뿐이다.
@@ -34,7 +34,7 @@ Rocks 객체 참조는 포인터가 아니라 handle이다. 그래서 참조를 
 
 - `Result<float> FloatCurveSource::TryEvaluate(ObjectRegistry&, const ObjectAccessContext&, float time) const`
   - 참조가 null이면 `curve.Evaluate(time)`, 아니면 그 에셋의 `Evaluate(time)`이다.
-  - 참조가 풀리지 않으면(회수·다른 타입) Resolve 오류(StaleHandle·TypeMismatch)를 그대로 돌려준다.
+  - 참조가 풀리지 않으면 Resolve 오류를 그대로 돌려준다. 원천이 강한 간선이라 대상은 회수되지 않으므로 실제로 나는 것은 파괴 요청된 대상의 `Destroyed`와 다른 스레드의 `WrongThread`다(다른 타입은 `SetReference`가 막는다).
   - UE는 외부 커브가 null일 때만 `GetRichCurveConst()`가 인라인으로 대신한다. 구조체에 `Eval`이 없어 소비자가 `Eval`을 직접 부른다.
   - Rocks는 풀리지 않는 참조를 인라인으로 조용히 대신하지 않고 오류로 돌려준다(CAD8, ◇ 7.2절 2).
 - 벡터·색 원천도 같은 규칙이다.

@@ -99,7 +99,7 @@
 
 #### 2.4.3 HSV 변환(UE float판)
 
-Core `LinearColor::LinearRGBToHSV`·`HSVToLinearRGB`는 UE와 같지 않다. 그래서 조정 평가는 UE 식을 `CurveAssets` 안에 float로 따로 둔다(`CurveAssets/Private/ColorAdjust.cpp`). Core는 바꾸지 않는다. 그 함수의 다른 사용처에 영향이 없게 하려는 것이다. Core와 UE의 차이는 Core 담당에 알린다.
+Core `LinearColor::LinearRGBToHSV`·`HSVToLinearRGB`는 UE와 같지 않다. 그래서 조정 평가는 UE 식을 `CurveAssets` 안에 float로 따로 둔다(공개 `CurveAssets/ColorCurveEvaluate.h` — `EvaluateUnadjustedColorCurve`·`EvaluateAdjustedColorCurve`, 조정 값은 `ColorCurveAdjustments.h`). 비교 도우미(Max·Min·Max3·Min3·Clamp)는 UE 5.8.4 형태다(`GenericPlatformMath.h:944-972` `(B < A) ? A : B`·`(A < B) ? A : B`, `UnrealMathUtility.h:551-561`·`592-595` `Max(Min(X, Hi), Lo)` — 같은 값이면 오른쪽이라 명도 −0이 +0으로 잘리는 것까지 같다). Core는 바꾸지 않는다. 그 함수의 다른 사용처에 영향이 없게 하려는 것이다. Core와 UE의 차이는 Core 담당에 알린다.
 
 | | Core | UE |
 |---|---|---|
@@ -136,4 +136,5 @@ Core `LinearColor::LinearRGBToHSV`·`HSVToLinearRGB`는 UE와 같지 않다. 그
 | `VectorCurveValue` | `TangentCurve x, y, z` | `Vec3d Evaluate(float)` — 2.3절과 같다 |
 | `ColorCurveValue` | `TangentCurve r, g, b, a`, 조정 일곱, `bool adjusted` | `adjusted`면 2.4.2절, 아니면 2.4.1절 |
 
-- `ColorCurveAsset`과 `VectorCurveAsset`의 평가는 이 값 struct의 평가 함수를 같이 쓴다. 이 함수들은 커브 참조를 받는 자유 함수로 둔다. 그래서 에셋과 값이 같은 식을 쓴다.
+- 색 평가는 에셋·값·원천이 모두 `ColorCurveEvaluate.h`의 자유 함수를 쓴다(같은 식). 벡터 평가는 성분마다 `Evaluate`라 각자 둔다.
+- 평탄 값의 복사(`TryCopyFrom`)와 원천의 평탄화는 대상 채널마다 그 채널의 allocator로 사본을 만들고, 모두 성공한 뒤에 옮긴다(대상의 수명 계약을 바꾸지 않는다).
