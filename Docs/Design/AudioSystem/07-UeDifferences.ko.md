@@ -31,3 +31,4 @@
 | 파일 loop 구간 | `USoundWave` looping은 늘 파형 전체, `smpl` loop는 cue point(loop region)로만 남고 믹서가 쓰지 않는다 | looping이면 사용자 `loopOverride` > 파일 loop > 전체(개정 33, 3.36.2절) | intro + loop 음악을 그래프 없이 |
 | 원본 bulk 정밀도 | 16비트 교차 WAV byte | 디코드 PCM planar, Int16·Int24·Float32(3.10.1절) | 24비트·float 원본 정밀도 유지 |
 | 합성 사운드 에셋 | Sound Cue(`USoundNode` 트리)와 MetaSounds 둘 다 | `SoundGraph`(MetaSounds 대응) 하나 | UE도 새 작업은 MetaSounds가 주력이고 Sound Cue 기능(랜덤·레이어·switch·지연·loop)은 그래프 노드로 덮인다. 두 체계를 따로 유지하지 않는다(AD29) |
+| Opus 플랫폼 rate | `bResampleForDevice`면 Opus도 등급 rate(8·12·16·24·48 kHz 중)로 인코드 | Opus 플랫폼 데이터는 늘 48 kHz, 등급 rate는 PCM16·ADPCM만 | 디코더·청크 규칙을 rate 하나로 둔다(3.32절), byte는 품질 배수로 줄인다(3.39.3절) |

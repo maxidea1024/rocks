@@ -130,6 +130,8 @@ CookConfigField ToCookConfigField(TargetProfileField field) noexcept {
         return CookConfigField::GraphicsBackends;
     case TargetProfileField::ShaderFormats:
         return CookConfigField::ShaderFormats;
+    case TargetProfileField::AudioCook:
+        return CookConfigField::AudioCook;
     }
 
     return CookConfigField::None;

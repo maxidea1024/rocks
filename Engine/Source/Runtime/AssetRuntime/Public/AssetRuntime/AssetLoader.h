@@ -1,7 +1,7 @@
 #pragma once
 
 #include <AssetRuntime/AssetDiagnostic.h>
-#include <AssetRuntime/CancelToken.h>
+#include <Core/CancelToken.h>
 #include <AssetRuntime/CookedManifest.h>
 #include <AssetRuntime/CookedPackageIo.h>
 #include <AssetRuntime/PackageLoad.h>
