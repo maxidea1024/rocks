@@ -48,6 +48,15 @@ constexpr uint32 DuplicateExcludedFlags =
     static_cast<uint32>(FieldFlags::DuplicateTransient) |
     static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient);
 
+// 이벤트 필드가 받는 플래그다(Docs/Design/EventReflection.ko.md ED15 — EditorOnly는 에디터 데이터
+// 빌드에만 있다, Transient·SaveGame·복제 제외 둘은 바인딩 저장·복제(EV3a)가 쓴다 — 지금은 효과
+// 없음).
+constexpr uint32 EventFieldFlags = static_cast<uint32>(FieldFlags::Transient) |
+                                   static_cast<uint32>(FieldFlags::EditorOnly) |
+                                   static_cast<uint32>(FieldFlags::SaveGame) |
+                                   static_cast<uint32>(FieldFlags::DuplicateTransient) |
+                                   static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient);
+
 bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     if (left.Size() != right.Size()) {
         return false;
@@ -193,12 +202,24 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // 있다(저장이 null을 검사하려면 접근기·codec이 있어야 한다). Optional은 대상 종류가 내부
         // 종류이고 Optional 내부 종류는 모두 Required를 받지 않으므로 같은 판정이 거부한다(성질
         // 표의 불변식 — Meta/TypeSchema.h static_assert). 도구 이름은 비어 있거나 ASCII 식별자다.
+        // 이벤트 필드(Docs/Design/EventReflection.ko.md ED15)는 클래스에만 두고 값 모양이 없다
+        // (Opaque·0, bundle 없음), 이름은 ASCII 식별자, flag는 EventFieldFlags만이다. 인자는
+        // ValidateEventList가 본다. 이벤트가 아닌 필드(struct 멤버 포함)는 인자가 없다.
+        const bool event = IsEventField(field);
+        if ((event && (structMembers || field.value.kind != ValueKind::Opaque ||
+                       !IsAsciiIdentifier(field.name) || field.assetBundles.Size() != 0 ||
+                       (field.flags & ~EventFieldFlags) != 0)) ||
+            (!event && field.eventParameters.Size() != 0)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
              (field.flags & DuplicateExcludedFlags) != 0) ||
             (HasFlag(field.flags, FieldFlags::Required) &&
              !ValueKindAcceptsRequired(target.kind)) ||
-            (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
+            (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference &&
+             !event) ||
             !SupportedFieldKind(field.value.kind, structMembers) || !arrayShape || !keyShape ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
@@ -277,7 +298,8 @@ bool ContainsInheritedFields(Span<const FieldSchema> base,
                 field.key.kind == inherited.key.kind && field.key.type == inherited.key.type &&
                 field.maxElements == inherited.maxElements && field.flags == inherited.flags &&
                 SameBytes(EffectiveToolName(field), EffectiveToolName(inherited)) &&
-                SameBytes(field.assetBundles, inherited.assetBundles)) {
+                SameBytes(field.assetBundles, inherited.assetBundles) &&
+                detail::SameEventParameters(field, inherited)) {
                 matched = true;
                 break;
             }
@@ -315,10 +337,23 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         return Result<TypeRegistrationToken>::Failure(validated.Error());
     }
 
+    // 이벤트 필드는 typed 필드가 아니고 RuntimeFieldOps도 없다(RuntimeEventOps — ED15).
+    usize eventFields = 0;
+    for (const FieldSchema& field : schema.fields) {
+        eventFields += IsEventField(field) ? 1 : 0;
+    }
+
     if (typedFields != ops.fields.Size() ||
-        (ops.completeFieldLayout && typedFields != schema.fields.Size())) {
+        (ops.completeFieldLayout && typedFields + eventFields != schema.fields.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
+
+    auto eventsChecked = detail::ValidateEventList(schema, ops);
+    if (!eventsChecked) {
+        return Result<TypeRegistrationToken>::Failure(eventsChecked.Error());
+    }
+
+    detail::EventBlockLayout eventBlock = eventsChecked.Value();
 
     if (auto listed = ValidateEditorOnlyFieldIds(schema.fields, schema.editorOnlyFieldIds);
         !listed) {
@@ -339,7 +374,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     if (ops.completeFieldLayout) {
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
-            if (HasFlag(schemaField.flags, FieldFlags::Transient)) {
+            if (HasFlag(schemaField.flags, FieldFlags::Transient) || IsEventField(schemaField)) {
                 continue;
             }
 
@@ -409,11 +444,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     // 리플렉션 함수 배열(서술·매개변수·연산 — FD10)을 색인 뒤에 둔다.
     const usize functionsEnd =
         functionBlock.Place(opsIndexOffset + schema.fields.Size() * sizeof(uint32));
+    // 이벤트 필드 인자·연산(ED15)을 함수 배열 뒤에 둔다.
+    const usize eventsEnd = eventBlock.Place(functionsEnd);
     // EditorOnly 필드 ID 목록(Guid 정렬)을 문자열보다 먼저 둔다.
-    const usize idsOffset = (functionsEnd + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
+    const usize idsOffset = (eventsEnd + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
     usize bytes = idsOffset + schema.editorOnlyFieldIds.Size() * sizeof(Guid);
     if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size()) ||
-        !AddBytes(bytes, functionBlock.textBytes)) {
+        !AddBytes(bytes, functionBlock.textBytes) || !AddBytes(bytes, eventBlock.textBytes)) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
 
@@ -617,9 +654,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     Span<const RuntimeFunctionOps> functionOps;
     detail::CopyFunctions(functionBlock, static_cast<uint8*>(memory.Value()), schema, ops, cursor,
                           record->schema.functions, functionOps);
+    Span<const RuntimeEventOps> eventOps;
+    detail::CopyEvents(eventBlock, static_cast<uint8*>(memory.Value()), schema, ops, cursor, fields,
+                       eventOps);
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};
     record->ops.functions = functionOps;
+    record->ops.events = eventOps;
     record->base = base;
 
     platform::LockGuard lock(gate_);

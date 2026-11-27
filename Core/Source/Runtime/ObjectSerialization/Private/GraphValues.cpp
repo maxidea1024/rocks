@@ -30,7 +30,14 @@ Result<const RuntimeFieldOps*> FindOps(const TypeLease& type, Guid id, Budget& b
 Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
     const auto& schema = type.Schema();
     const auto& ops = type.Ops();
-    if (!ops.completeFieldLayout || schema.fields.Size() != ops.fields.Size()) {
+    // 이벤트 필드는 값으로 저장하지 않고 RuntimeFieldOps도 없다(Docs/Design/EventReflection.ko.md
+    // 3.1절 — 바인딩 저장은 EV3a).
+    usize eventFields = 0;
+    for (const FieldSchema& field : schema.fields) {
+        eventFields += IsEventField(field) ? 1 : 0;
+    }
+
+    if (!ops.completeFieldLayout || schema.fields.Size() != ops.fields.Size() + eventFields) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
@@ -40,6 +47,10 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
 
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const auto& field = schema.fields[index];
+        if (IsEventField(field)) {
+            continue;
+        }
+
         // 필드 단위 wire(배열은 원소에 따라 ValueArray·RecordList)가 있어야 한다.
         auto wire = detail::FieldWireType(field, ReferenceWire);
         if (!wire) {

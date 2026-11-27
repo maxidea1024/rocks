@@ -40,3 +40,4 @@
 - [3.36 AU4 구현 세부 — 사운드 에셋 모듈·`SoundClipImporter`·에디터 재생(개정 33)](03.36-Au4Import.ko.md)
 - [3.37 AU5 구현 세부 — 디코더 등록·쿠킹 처리기·쿠킹 재생(개정 34)](03.37-Au5Cook.ko.md)
 - [3.38 읽기 손상 오류 `CorruptData` 이전(개정 35)](03.38-CorruptData.ko.md)
+- [3.39 AU5d 구현 세부 — 플랫폼 쿠킹 재정의(개정 36)](03.39-Au5dPlatformOverrides.ko.md)

@@ -11,8 +11,9 @@
 // 넷이다.
 // - 임포트 결과(channelCount·sampleRate·frameCount·sourceCodec·파일 loop·cues): 임포터가 매번 전부
 //   쓴다.
-// - 사용자 설정(looping·loopOverride·compression·compressionQuality, SoundSource의 volume·pitch·
-//   attenuation): 임포터가 건드리지 않는다.
+// - 사용자 설정(looping·loopOverride·compression·compressionQuality·sampleRateQuality,
+// SoundSource의
+//   volume·pitch·attenuation): 임포터가 건드리지 않는다.
 // - 에디터 원본(source — EditorOnly): 디코드한 PCM bulk다. 쿠킹 패키지에 넣지 않는다.
 // - 쿠킹 결과(platformData): 쿠킹 처리기가 쓰는 플랫폼 데이터 bulk다. 에디터 패키지에서는 비어
 //   있다. 쿠킹 패키지의 sampleRate·frameCount·loop·cue는 인코딩 rate 기준이다(3.37.3절).
@@ -85,6 +86,9 @@ public:
     // 압축 품질 [MinAudioCompressionQuality, MaxAudioCompressionQuality]다(UE CompressionQuality —
     // Opus만 쓴다, 범위 밖이면 쿠킹이 InvalidSetting으로 실패한다).
     ROCKS_PROPERTY() uint32 compressionQuality = audio::DefaultAudioCompressionQuality;
+    // 플랫폼 rate 등급이다(UE SampleRateQuality — 대상 프로파일이 resampleForDevice를 켤 때만
+    // PCM16· ADPCM 인코딩 rate를 낮춘다, 3.39절).
+    ROCKS_PROPERTY() SoundSampleRateQuality sampleRateQuality = SoundSampleRateQuality::Max;
 
     // --- 임포트 결과 ---
 

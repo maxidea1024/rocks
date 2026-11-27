@@ -9,12 +9,19 @@
 #include <AudioTools/CookResampler.h>
 #include <AudioTools/OpusAudioEncoder.h>
 #include <Base/NumericLimits.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Math/MathUtility.h>
 #include <Core/Move.h>
 #include <Core/Text/String.h>
 #include <Object/ObjectRegistry.h>
 
 // 사운드 clip 쿠킹 처리기다(Docs/Design/AudioSystem 3.37.2·3.37.3절 — AU5b).
 namespace rocks {
+
+static_assert(AudioCookMinSampleRate == audio::MinPlatformSampleRate &&
+                  AudioCookMaxSampleRate == audio::MaxPlatformSampleRate,
+              "TargetProfile audio cook rate range must match the audio platform data rate range");
+
 // 유니티 빌드에서 다른 처리기의 같은 이름 도우미와 겹치지 않게 파일 전용 namespace에 둔다.
 namespace sound_clip_cook {
 
@@ -29,6 +36,11 @@ constexpr uint32 ByteMask = 0xFFu;
 // uint32 십진 자릿수 상한과 기수다.
 constexpr usize MaxDecimalDigits = 10;
 constexpr uint32 DecimalBase = 10;
+// clip 정규화 기준(최대 절댓값 — full scale)이다(3.39.4절).
+constexpr float SoundCookClipPeak = 1.0f;
+
+constexpr LogCategory LogSoundCook{"SoundCook"};
+
 // 쿠킹 패키지 bulk 최소 정렬이다(0 = 프로파일 값 그대로 — AU5는 플랫폼 데이터 전체를 bulk 하나에
 // 넣고 렌더처럼 큰 정렬 요구가 없다. 청크 sidecar는 AU6).
 constexpr uint32 SoundCookBulkAlignment = 0;
@@ -111,6 +123,8 @@ struct ClipFacts {
     SoundClipSource source;
     SoundCompression compression = SoundCompression::PlatformDefault;
     uint32 quality = 0;
+    // 대상 프로파일 배수를 곱한 실효 품질이다(인코더·너겟 키가 쓴다 — 3.39.3절).
+    uint32 effectiveQuality = 0;
     uint32 channels = 0;
     uint32 sampleRate = 0;
     uint32 frames = 0;
@@ -197,6 +211,8 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, const ClipFacts& f
     writer.WriteU32(facts.sampleRate);
     writer.WriteU32(facts.frames);
     writer.WriteU32(static_cast<uint32>(layout.codec));
+    // 인코딩 rate(대상 프로파일 재정의의 정규화 값 — 3.39.4절)다.
+    writer.WriteU32(layout.sampleRate);
     // 재생 loop 구간(원본 rate)이다 — 머리 loop를 정한다. 파일 loop·override·cue 위치는 쿠킹 필드라
     // 너겟 값에 들지 않는다(layout이 매번 다시 계산한다).
     writer.WriteU32(facts.sourceLoopBegin);
@@ -213,7 +229,8 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, const ClipFacts& f
     usize settingsLength = 0;
     if (layout.codec == AudioCodecId::Opus) {
         for (uint32 index = 0; index < OpusSettingsBytes; ++index) {
-            settings[index] = static_cast<uint8>((facts.quality >> (index * ByteBits)) & ByteMask);
+            settings[index] =
+                static_cast<uint8>((facts.effectiveQuality >> (index * ByteBits)) & ByteMask);
         }
 
         settingsLength = OpusSettingsBytes;
@@ -290,10 +307,43 @@ Result<void> BuildPlatformData(const CookContext& context, const ClipFacts& fact
         return CookFail(context, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
     }
 
+    // clip 정규화(3.39.4절, UE AudioDerivedData "Clip Normalize"): 최대 절댓값이 1을 넘으면(float
+    // 원본· 리샘플 overshoot) 전체를 1/max로 낮춘다. 넘지 않으면 복사하지 않는다.
+    float peak = 0.0f;
+    for (uint32 channel = 0; channel < view.channelCount; ++channel) {
+        const float* samples = view.channels[channel];
+        for (uint32 frame = 0; frame < view.frameCount; ++frame) {
+            peak = math::Max(peak, math::Abs(samples[frame]));
+        }
+    }
+
+    Array<float> normalized(allocator);
+    if (peak > SoundCookClipPeak) {
+        Log::Info(LogSoundCook,
+                  "Audio clipped during cook: the asset is normalized by a factor of 1/{Peak}; "
+                  "consider attenuating it",
+                  peak);
+        const usize total = static_cast<usize>(view.channelCount) * view.frameCount;
+        if (auto resized = normalized.TryResize(total); !resized) {
+            return CookFail(context, AssetDiagnosticCode::None, resized.Error());
+        }
+
+        const float scale = SoundCookClipPeak / peak;
+        for (uint32 channel = 0; channel < view.channelCount; ++channel) {
+            float* target = normalized.Data() + static_cast<usize>(channel) * view.frameCount;
+            const float* samples = view.channels[channel];
+            for (uint32 frame = 0; frame < view.frameCount; ++frame) {
+                target[frame] = samples[frame] * scale;
+            }
+
+            view.channels[channel] = target;
+        }
+    }
+
     audio::AudioEncoder* encoder = encoders.For(layout.codec);
     audio::EncodedAudio encoded(allocator);
     audio::AudioEncodeSettings settings;
-    settings.quality = facts.quality;
+    settings.quality = facts.effectiveQuality;
     if (auto done =
             encoder->Encode(view, layout.sampleRate, audio::DefaultAudioChannelMask(facts.channels),
                             settings, encoded);
@@ -392,13 +442,73 @@ void ClampSoundCookedLoop(uint32& begin, uint32& end, uint32 frames) noexcept {
     end = end < frames ? end : frames;
 }
 
+uint32 SoundCookEncodingRate(audio::AudioCodecId codec, uint32 sourceRate,
+                             SoundSampleRateQuality quality,
+                             const AudioCookOverrides& overrides) noexcept {
+    if (codec == audio::AudioCodecId::Opus) {
+        return audio::OpusPlatformSampleRate;
+    }
+
+    if ((codec != audio::AudioCodecId::Pcm16 && codec != audio::AudioCodecId::Adpcm) ||
+        !overrides.resampleForDevice) {
+        return sourceRate;
+    }
+
+    uint32 platformRate = 0;
+    switch (quality) {
+    case SoundSampleRateQuality::Max:
+        platformRate = overrides.maxSampleRate;
+        break;
+    case SoundSampleRateQuality::High:
+        platformRate = overrides.highSampleRate;
+        break;
+    case SoundSampleRateQuality::Medium:
+        platformRate = overrides.mediumSampleRate;
+        break;
+    case SoundSampleRateQuality::Low:
+        platformRate = overrides.lowSampleRate;
+        break;
+    case SoundSampleRateQuality::Min:
+        platformRate = overrides.minSampleRate;
+        break;
+    }
+
+    return platformRate != 0 && platformRate < sourceRate ? platformRate : sourceRate;
+}
+
+uint32 SoundCookEffectiveQuality(uint32 quality, float modifier) noexcept {
+    float scaled = static_cast<float>(quality);
+    if (math::IsFinite(modifier) && modifier >= 0.0f) {
+        // UE와 같은 float 곱이다(정수로 바꾸기 전에 범위를 본다 — 큰 배수의 곱은 inf다).
+        scaled = static_cast<float>(quality) * modifier;
+        if (!math::IsFinite(scaled)) {
+            return audio::MaxAudioCompressionQuality;
+        }
+
+        scaled = math::Floor(scaled);
+    }
+
+    if (scaled < static_cast<float>(audio::MinAudioCompressionQuality)) {
+        return audio::MinAudioCompressionQuality;
+    }
+
+    if (scaled >= static_cast<float>(audio::MaxAudioCompressionQuality)) {
+        return audio::MaxAudioCompressionQuality;
+    }
+
+    return static_cast<uint32>(scaled);
+}
+
 Result<void> ComputeSoundCookedLayout(const SoundClip& clip, audio::AudioCodecId codec,
-                                      SoundCookedLayout& out) noexcept {
+                                      uint32 encodingRate, SoundCookedLayout& out) noexcept {
     using namespace sound_clip_cook;
     const uint32 frames = clip.frameCount;
     const uint32 rate = clip.sampleRate;
     if (codec == AudioCodecId::None || clip.channelCount == 0 || frames == 0 ||
-        rate < audio::MinPlatformSampleRate || rate > audio::MaxPlatformSampleRate) {
+        rate < audio::MinPlatformSampleRate || rate > audio::MaxPlatformSampleRate ||
+        encodingRate < audio::MinPlatformSampleRate ||
+        encodingRate > audio::MaxPlatformSampleRate ||
+        (codec == AudioCodecId::Opus && encodingRate != audio::OpusPlatformSampleRate)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -415,7 +525,7 @@ Result<void> ComputeSoundCookedLayout(const SoundClip& clip, audio::AudioCodecId
     }
 
     out.codec = codec;
-    out.sampleRate = codec == AudioCodecId::Opus ? audio::OpusPlatformSampleRate : rate;
+    out.sampleRate = encodingRate;
     out.resampled = out.sampleRate != rate;
     out.frames = frames;
     if (out.resampled) {
@@ -543,7 +653,14 @@ Result<void> SoundClipCookProcessor::Cook(CookContext& context) const noexcept {
                             ErrorCode::InvalidArgument);
         }
 
-        if (auto computed = ComputeSoundCookedLayout(clip, codec, layout); !computed) {
+        const AudioCookOverrides overrides =
+            context.profile != nullptr ? context.profile->audioCook : AudioCookOverrides{};
+        facts.effectiveQuality =
+            SoundCookEffectiveQuality(facts.quality, overrides.compressionQualityModifier);
+        const uint32 encodingRate =
+            SoundCookEncodingRate(codec, facts.sampleRate, clip.sampleRateQuality, overrides);
+        if (auto computed = ComputeSoundCookedLayout(clip, codec, encodingRate, layout);
+            !computed) {
             return CookFail(context, AssetDiagnosticCode::InvalidSetting, computed.Error());
         }
     }

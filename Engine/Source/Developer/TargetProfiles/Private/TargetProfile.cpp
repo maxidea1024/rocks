@@ -2,6 +2,7 @@
 
 #include <AssetRuntime/CookedManifest.h>
 #include <Core/FileRead.h>
+#include <Core/Math/MathUtility.h>
 #include <Core/Text/Json.h>
 #include <HostConfig/HostSettings.h>
 #include <Meta/GeneratedType.h>
@@ -76,6 +77,36 @@ Result<void> CheckLodGroups(const TargetProfile& profile, TargetProfileFailure* 
                                TargetProfileField::TextureLodGroup, ErrorCode::InvalidArgument,
                                static_cast<uint32>(entry.key));
         }
+    }
+
+    return Result<void>::Success();
+}
+
+// 오디오 쿠킹 칸 검증이다(Docs/Design/AudioSystem 3.39.1절): rate는 0 또는 범위 안, 배수는 유한하고
+// 0 이상이다(index = AudioCookFieldIndex).
+static_assert(static_cast<uint32>(AudioCookFieldIndex::MinSampleRate) -
+                      static_cast<uint32>(AudioCookFieldIndex::MaxSampleRate) + 1 ==
+                  5,
+              "AudioCookFieldIndex rate entries must stay contiguous from Max to Min");
+Result<void> CheckAudioCook(const TargetProfile& profile, TargetProfileFailure* failure) noexcept {
+    const AudioCookOverrides& audio = profile.audioCook;
+    const uint32 rates[] = {audio.maxSampleRate, audio.highSampleRate, audio.mediumSampleRate,
+                            audio.lowSampleRate, audio.minSampleRate};
+    constexpr uint32 FirstRateField = static_cast<uint32>(AudioCookFieldIndex::MaxSampleRate);
+    for (uint32 index = 0; index < sizeof(rates) / sizeof(rates[0]); ++index) {
+        const uint32 rate = rates[index];
+        if (rate != 0 && (rate < AudioCookMinSampleRate || rate > AudioCookMaxSampleRate)) {
+            return ProfileFail(failure, TargetProfileFile::None, TargetProfileField::AudioCook,
+                               ErrorCode::InvalidArgument, FirstRateField + index);
+        }
+    }
+
+    constexpr uint32 ModifierField =
+        static_cast<uint32>(AudioCookFieldIndex::CompressionQualityModifier);
+    const float modifier = audio.compressionQualityModifier;
+    if (!math::IsFinite(modifier) || modifier < 0.0f) {
+        return ProfileFail(failure, TargetProfileFile::None, TargetProfileField::AudioCook,
+                           ErrorCode::InvalidArgument, ModifierField);
     }
 
     return Result<void>::Success();
@@ -328,6 +359,10 @@ Result<void> ReadTargetProfile(const TargetProfileContext& context, StringView i
     }
 
     if (auto checked = CheckLodGroups(out, failure); !checked) {
+        return checked;
+    }
+
+    if (auto checked = CheckAudioCook(out, failure); !checked) {
         return checked;
     }
 

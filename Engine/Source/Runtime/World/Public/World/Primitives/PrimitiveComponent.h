@@ -8,6 +8,8 @@
 #include <World/Lights/LightingChannels.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
+#include <World/Physics/HitResult.h>
+#include <World/Physics/MoveOptions.h>
 #include <World/Physics/PhysicsBodyHandle.h>
 #include <World/SceneComponent.h>
 #include <World/Primitives/PrimitiveTypes.h>
@@ -39,7 +41,8 @@ public:
     static constexpr const char* PrimitiveCollisionProfileName = "BlockAll";
 
     explicit PrimitiveComponent(Allocator& allocator) noexcept
-        : SceneComponent(allocator), collisionProfileName_(allocator), bodySettings_(allocator) {
+        : SceneComponent(allocator), collisionProfileName_(allocator), bodySettings_(allocator),
+          moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator) {
     }
 
     // --- 거리 ---
@@ -417,6 +420,44 @@ public:
     //   ball.SetSimulatePhysics(true);   // 다음 고정 스텝부터 떨어진다
     void SetSimulatePhysics(bool simulate) noexcept;
 
+    // 이 컴포넌트를 delta만큼 옮기고 rotation으로 돌린다(UE MoveComponent —
+    // Docs/Design/PhysicsModule 5.1절·7.1.10절). sweep이면 자기 body 형상으로 쓸고 가(채널·응답은
+    // 자기 것, 자기 Actor와 이동 무시 목록은 뺀다) 막는 hit 앞(pullback)에 멈추고 hit를
+    // 발행한다(자기 Actor·상대 Actor의 OnHit). 시작 겹침에서 빠져나가는 이동은 막히지 않는다.
+    // outHit가 있으면 막는 hit를, 없으면 trace 시작·끝만 채운 빈 hit를 쓴다. 반환 값은
+    // 움직였는지다(sweep 최소 이동 이하·같은 회전이면 움직이지 않고 참 — UE). 오류:
+    // Static·Stationary 이동(InvalidArgument — StaticComponentMoved), 0·비유한 rotation·비유한
+    // delta(InvalidArgument), 질의 할당 실패.
+    //
+    // 사용 예:
+    //   HitResult hit;
+    //   (void)box.MoveComponent(velocity * dt, box.WorldQuaternion(), true, &hit, {});
+    //   if (hit.IsValidBlockingHit()) { ... }   // 벽에 닿았다
+    Result<bool> MoveComponent(const Vec3d& delta, const Quatd& rotation, bool sweep,
+                               HitResult* outHit, const MoveOptions& options) noexcept;
+
+    // 이동 sweep에서 무시할 Actor·컴포넌트다(UE IgnoreActorWhenMoving·IgnoreComponentWhenMoving —
+    // 실행 상태, 저장하지 않는다). ignore가 참이면 더하고(이미 있으면 그대로) 거짓이면 뺀다. 오류:
+    // 할당 실패.
+    Result<void> IgnoreActorWhenMoving(ObjectHandle actor, bool ignore) noexcept;
+    Result<void> IgnoreComponentWhenMoving(ObjectHandle component, bool ignore) noexcept;
+
+    void ClearMoveIgnoreActors() noexcept {
+        moveIgnoreActors_.Clear();
+    }
+
+    void ClearMoveIgnoreComponents() noexcept {
+        moveIgnoreComponents_.Clear();
+    }
+
+    Span<const ObjectHandle> MoveIgnoreActors() const noexcept {
+        return moveIgnoreActors_.View();
+    }
+
+    Span<const ObjectHandle> MoveIgnoreComponents() const noexcept {
+        return moveIgnoreComponents_.View();
+    }
+
     // 물리 결과를 컴포넌트에 쓴다(Docs/Design/PhysicsModule 3.4절 — Physics의 PhysicsResults만
     // 부른다). 월드 위치(cm)·회전으로 옮기되 자기 body로 되돌려 보내지 않는다(UE
     // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
@@ -546,6 +587,9 @@ protected:
     void UpdateBodyGeometry() noexcept;
 
 private:
+    // 막는 hit를 자기 Actor와 상대 Actor에 발행한다(UE DispatchBlockingHit — 7.1.10절).
+    void DispatchBlockingHit(const HitResult& hit) noexcept;
+
     // body에 넘기는 월드 transform(위치·회전·scale 따로 — 행렬 분해 없음)이다.
     Transform BodyWorldTransform() const noexcept;
 
@@ -564,6 +608,9 @@ private:
     ROCKS_NATIVE() PhysicsBodyHandle bodyHandle_;
     // ApplyPhysicsTransform 안이다(OnTransformUpdated가 body로 되돌려 보내지 않는다).
     ROCKS_NATIVE() bool applyingPhysicsResult_ = false;
+    // 이동 sweep 무시 목록이다(UE MoveIgnoreActors·MoveIgnoreComponents — Transient).
+    ROCKS_NATIVE() Array<ObjectHandle> moveIgnoreActors_;
+    ROCKS_NATIVE() Array<ObjectHandle> moveIgnoreComponents_;
 };
 
 } // namespace rocks

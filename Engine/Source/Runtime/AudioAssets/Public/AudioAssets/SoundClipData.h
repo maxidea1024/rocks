@@ -28,6 +28,17 @@ enum class SoundCompression : uint8 {
     Opus = 3
 };
 
+// 플랫폼 rate 등급이다(3.39.2절, UE ESoundwaveSampleRateSettings). 대상 프로파일
+// audioCook.resampleForDevice가 켜지면 PCM16·ADPCM을 그 등급의 rate 이하로 쿠킹한다.
+ROCKS_ENUM()
+enum class SoundSampleRateQuality : uint8 {
+    Max = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3,
+    Min = 4
+};
+
 // 원본 bulk의 표본 저장 형식이다(3.10.1절 저장 규칙). planar, little-endian, 헤더 없음.
 ROCKS_ENUM()
 enum class SoundSourceStorage : uint8 {
