@@ -19,6 +19,8 @@
 //   auto processor = table.Find(entry.type);   // 가장 가까운 등록 처리기, 없으면 기본 처리기
 namespace rocks {
 
+class WorkerScheduler;
+
 // 처리기 하나의 쿠킹 문맥이다(실행기가 채운다 — A4c2). 포인터는 Cook 동안만 유효하다.
 struct CookContext {
     Allocator* allocator = nullptr;
@@ -41,6 +43,11 @@ struct CookContext {
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
     AssetDiagnostic* failure = nullptr;
+    // 처리기 안 병렬 실행이다(AssetSystem 12.17.9 4 — 텍스처 블록 압축). scheduler가 있으면
+    // scratch는 동시 Allocate·Deallocate가 안전한 allocator여야 한다. 결과 byte와 무관하다(너겟
+    // 키에 넣지 않는다).
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
     // 처리기 경고를 받는 곳이다(null이면 버린다 — 12.14절 10번). 처리기는 warning = true·asset =
     // 대상 id로 넣고, 실행기가 실행 진단으로 옮긴다(게시를 막지 않는다). push의 할당 실패는
     // OutOfMemory로 돌려준다.
