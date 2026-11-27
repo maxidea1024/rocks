@@ -158,6 +158,7 @@ internal static class InputValidation
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
             ValidateReflectionSources(module);
+            ValidateIspcSources(module, request.Toolchain.Platform);
             foreach (string argument in module.AdditionalCompileArguments)
             {
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true, posix);
@@ -344,7 +345,8 @@ internal static class InputValidation
             foreach (NativeModuleInput module in byName.Values.Where(module => built.Contains(module.Name))
                 .OrderBy(module => module.Name, StringComparer.Ordinal))
             {
-                bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0;
+                bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0 ||
+                    module.IspcSources.Count != 0;
                 if (hasCode && !entries.Contains(module.Name) && LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, false) &&
                     !boot.Contains(module.Name))
                 {
@@ -389,6 +391,48 @@ internal static class InputValidation
         {
             throw new ArgumentException($"Module {module.Name}: invalid Android package name '{package.PackageName}' " +
                 "(two or more dot-separated segments of ASCII letters, digits and underscores, each starting with a letter).");
+        }
+    }
+
+    // ISPC 원본(NativeModuleInput.IspcSources — Docs/Design/BuildTargets 3.12절 BD46)은 .ispc 경로여야 한다. 같은 basename 둘은 생성 헤더
+    // (<원본 이름>_ispc.h)가 겹치므로 거부한다(대소문자를 무시한다 — Windows·macOS 파일 시스템). Android 대상은 지원하지 않는다(쿠커는
+    // 데스크톱 호스트에서만 돈다). ISPC 고정 인자는 모듈 인자로 바꿀 수 없다 — 모듈 인자는 C++ compile에만 간다.
+    private static void ValidateIspcSources(NativeModuleInput module, NativePlatform platform)
+    {
+        if (module.IspcSources.Count == 0)
+        {
+            return;
+        }
+
+        // ISPC 원본만 있는 엔진 모듈은 받지 않는다: C++ 번역 단위가 없으면 Modular 공유 라이브러리의 API 매크로·export 판정(C++ 원본 기준)과
+        // 맞지 않는다. ISPC 커널은 C++ 래퍼와 함께 둔다(서드파티 정적 라이브러리는 ISPC만 있어도 된다).
+        if (!module.ThirdParty && module.Sources.Count == 0)
+        {
+            throw new ArgumentException($"Module {module.Name}: an engine module with ISPC sources needs C++ sources too (wrap the ISPC kernel " +
+                "in a C++ API), or declare the kernel in a third-party library (ThirdParty.json ispcUnits).");
+        }
+
+        if (platform == NativePlatform.Android)
+        {
+            throw new ArgumentException($"Module {module.Name}: ISPC sources are not supported for Android targets (Docs/Design/BuildTargets " +
+                "section 3.12, BD46). Declare IspcSources only for desktop platforms.");
+        }
+
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string source in module.IspcSources)
+        {
+            if (string.IsNullOrWhiteSpace(source) || source.Contains('\0') ||
+                !source.EndsWith(IspcTools.SourceExtension, StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Module {module.Name}, IspcSources: '{source}' must be the path of a .ispc source.");
+            }
+
+            string name = Path.GetFileNameWithoutExtension(source);
+            if (!names.TryAdd(name, source))
+            {
+                throw new ArgumentException($"Module {module.Name}, IspcSources: '{names[name]}' and '{source}' have the same file name; the " +
+                    $"generated headers ({IspcTools.HeaderName(source)}) would collide.");
+            }
         }
     }
 

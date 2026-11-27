@@ -63,9 +63,15 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             Name = ModuleName,
             ModuleDirectory = library,
             Sources = code ? manifest.TranslationUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray() : [],
+            // ISPC sources (manifest ispcUnits) are compiled with the pinned ISPC (Docs/Design/BuildTargets section 3.12).
+            IspcSources = manifest.IspcUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray(),
             PublicIncludeDirectories = manifest.IncludeDirectories.Select(directory => context.PathInRoot($"{library}/{directory}")).ToArray(),
             // Consumer defines go to dependents only: the library sources #define some of them themselves (BS3a).
-            ConsumerDefines = manifest.ConsumerDefines,
+            // A library with ISPC sources also tells its consumers the ISPC identity (version, target and fixed arguments — BD50); encoders put it
+            // in their nugget key. Android has no ISPC build (BD46), so no identity there either.
+            ConsumerDefines = manifest.IspcUnits.Count != 0 && context.Platform != NativePlatform.Android
+                ? [.. manifest.ConsumerDefines, IspcTools.IdentityDefine(context.Platform, context.Architecture)]
+                : manifest.ConsumerDefines,
             PrivateDefines = code ? manifest.DefinesFor(context.Platform.ToString(), context.Architecture.ToString()) : [],
             // Manifest compileArguments use GCC-style spellings, which clang-cl accepts as is (ThirdPartyManifest.AllowedCompileArguments).
             // The /clang: escape is not used because build input validation rejects it.
