@@ -776,6 +776,15 @@ internal static partial class SchemaValidator
             foreach (FieldModel field in model.OwnFields)
             {
                 ResolveKind(field);
+                // 변경 통지 대상은 클래스의 이벤트가 아닌 EditorOnly 아닌 필드다(Docs/Design/ChangeNotification.ko.md CN-D1).
+                if (field.Spec.Notify && (model.IsStruct || field.IsEvent || field.Spec.EditorOnly))
+                {
+                    string where = model.IsStruct ? "a struct member" : field.IsEvent ? "an Event field" : "an EditorOnly field";
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Notify cannot apply to {where}", "RMC2901",
+                        "Notify marks class fields whose changes are announced at run time; a struct value is announced through the class field " +
+                        "that holds it, events are not values, and editor-only fields are not in game builds.").At(field.Site);
+                }
+
                 if (field.IsEvent)
                 {
                     continue;
@@ -890,6 +899,16 @@ internal static partial class SchemaValidator
                 {
                     throw new MetadataException($"{function.Owner}::{function.Name}: a Pure function must return a value", "RMC2705",
                         "Remove Pure or return the computed value (Pure functions only read state and produce a result).").At(function.Site);
+                }
+
+                // 계산 값의 변경 통지 대상은 매개변수 없이 값을 돌려주는 Pure const 멤버다(Docs/Design/ChangeNotification.ko.md CN-D1 —
+                // UE FieldNotify 함수 조건).
+                if (function.Spec.Notify && (!function.Spec.Pure || !function.IsConst || function.IsStatic || function.Spec.EditorOnly ||
+                    function.Result is null || function.Parameters.Count != 0))
+                {
+                    throw new MetadataException($"{function.Owner}::{function.Name}: Notify needs a Pure const member function without parameters that " +
+                        "returns a value and is not EditorOnly", "RMC2902",
+                        "Notify on a function marks a computed value; declare it as ROCKS_FUNCTION(Pure, Notify) T Name() const noexcept.").At(function.Site);
                 }
             }
 

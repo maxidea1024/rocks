@@ -4,7 +4,7 @@
 
 ## 26. 이동 컴포넌트(D4)
 
-설계일 2026-11-25. [24장](24-ComponentData.ko.md) 데이터 먼저 묶음의 D4다. 충돌 sweep 없이 **끝까지 동작**한다. 모든 이동은 순간 이동(teleport)이고 충돌은 일어나지 않는다. sweep·충돌 응답·bounce는 물리(CR16) 때 붙인다. UE 경로 약어: `MC` = `Engine/Source/Runtime/Engine/Private/Components/MovementComponent.cpp`, `PMC` = `…/ProjectileMovementComponent.cpp`, `SA` = `…/Private/GameFramework/SpringArmComponent.cpp`, `IT` = `…/Private/Components/InterpToMovementComponent.cpp`.
+설계일 2026-11-25. [24장](24-ComponentData.ko.md) 데이터 먼저 묶음의 D4다. 충돌 sweep 없이 **끝까지 동작**한다. 모든 이동은 순간 이동(teleport)이고 충돌은 일어나지 않는다. sweep·충돌 응답·bounce는 물리(CR16) 때 붙인다. UE 경로 약어(`RE` = `Engine/Source/Runtime/Engine`): `MC` = `Engine/Source/Runtime/Engine/Private/Components/MovementComponent.cpp`, `PMC` = `…/ProjectileMovementComponent.cpp`, `SA` = `…/Private/GameFramework/SpringArmComponent.cpp`, `IT` = `…/Private/Components/InterpToMovementComponent.cpp`.
 
 ### 26.1 클래스
 
@@ -16,7 +16,16 @@
 | `PathMoverComponent` | `UInterpToMovementComponent`(이름은 [컴포넌트 도입](../ComponentCatalog/06-Decisions.ko.md) CD6) | `MovementComponent` | PrePhysics |
 | `SpringArmComponent` | `USpringArmComponent` | `SceneComponent` | PostPhysics(UE `TG_PostPhysics`) |
 
-UE 이벤트 delegate(`OnProjectileStop`·`OnInterpToReverse` 등)는 CR7 이벤트 체계가 없어 protected virtual hook으로 둔다(파생이 재정의한다). CR7이 생기면 hook 자리에서 이벤트를 낸다.
+UE 이벤트 delegate는 protected virtual hook(파생이 재정의)과 그 바로 뒤에 발행하는 리플렉션 `Event` 필드다(2026-11-28 — CR7 해소, 카탈로그 개정 10. 물리 PH4e Actor hit의 hook → 이벤트와 같은 꼴, ERD47). 인자는 UE delegate 그대로다(충돌 없는 이동이라 충돌 결과는 빈 `HitResult` — 충돌 sweep이 붙으면 그 결과):
+
+| Rocks 이벤트 | UE delegate | 인자(`Params`) | 발행 |
+|---|---|---|---|
+| `ProjectileMovementComponent::projectileStopped` | `OnProjectileStop`(`RE/Classes/GameFramework/ProjectileMovementComponent.h:211`) | `impactResult`(`const HitResult&`) | `StopSimulating` — hook `OnProjectileStop()` 뒤 |
+| `PathMoverComponent::pathReversed` | `OnInterpToReverse`(`RE/Classes/Components/InterpToMovementComponent.h:106`) | `impactResult`, `time`(float) | 방향 반전 — hook `OnPathReverse` 뒤 |
+| `PathMoverComponent::pathStopped` | `OnInterpToStop`(같은 헤더 `:110`) | 같음 | 정지(`StopMovementImmediately`·끝) — hook `OnPathStop` 뒤 |
+| `PathMoverComponent::pathReset` | `OnResetDelegate`(같은 헤더 `:122`) | 같음 | 처음으로 되돌림 — hook `OnPathReset` 뒤 |
+
+충돌로만 나는 UE delegate(`OnProjectileBounce`, `OnWaitBeginDelegate`·`OnWaitEndDelegate` — 충돌 때 멈춤)는 충돌 sweep 이동(CM12)과 함께 더한다. World 장부 밖 객체에서는 이벤트를 발행하지 않는다(hook은 부른다).
 
 ### 26.2 기반 보강
 
@@ -92,9 +101,9 @@ UE `SA:18–289`. 필드(영속): `targetArmLength` 300, `socketOffset`·`target
 | ID | 항목 | 결정 | 근거 |
 |---|---|---|---|
 | ERD46 | 충돌 없는 이동 | 모든 이동은 teleport, 충돌 데이터는 영속만 | 물리(CR16) 전 끝까지 동작 |
-| ERD47 | UE delegate | protected virtual hook | CR7 없음 |
+| ERD47 | UE delegate | protected virtual hook + 그 뒤 `Event` 필드 발행(개정 2026-11-28 — 처음에는 hook만) | CR7 해소 — 이벤트 필드, PH4e Actor hit와 같은 꼴 |
 | ERD48 | 이름 없는 socket | 부모 `GetSocketTransform(빈 이름)`을 늘 쓴다 | UE 부착 규칙, SpringArm |
 | ERD49 | Pawn 회전 | Actor virtual `TryGetViewRotation` | World는 Gameplay를 모른다 |
 | ERD50 | 공용 수학 | VInterpTo·QInterpTo·ClampedToMaxSize·평면 투영·방향 회전을 Core에 | 공용 기능 중복 금지 |
 
-시험 `World/Tests/WorldMovementComponentTests.cpp`(`Movement_` 접두): 갱신 대상 자동 등록·Tick 간선, 평면 제약 셋과 snap, 정지·속도·최대 속도, Static 대상 거부; 회전(local·world·pivot); 발사체 초기 속도(local·속도), 중력 궤적(Verlet — 손계산), substep 분할, 최대 속도, homing, 회전 따름·수직 유지, `StopSimulating`; PathMover 네 동작(OneShot 정지 위치·hook, Reverse, LoopReset, PingPong 반전), 상대·절대 점, speedMultiplier; SpringArm 팔 끝 위치·자식 카메라 위치(이름 없는 부착), socketOffset·targetOffset, inherit 끄기, 위치·회전 지연(substep 포함, 최대 거리), Pawn control rotation(Gameplay 시험). Core 수학은 `Core/Tests`에 UE 식 대조 시험을 더한다.
+시험 `World/Tests/WorldMovementComponentTests.cpp`(`Movement_` 접두): 갱신 대상 자동 등록·Tick 간선, 평면 제약 셋과 snap, 정지·속도·최대 속도, Static 대상 거부; 회전(local·world·pivot); 발사체 초기 속도(local·속도), 중력 궤적(Verlet — 손계산), substep 분할, 최대 속도, homing, 회전 따름·수직 유지, `StopSimulating`; PathMover 네 동작(OneShot 정지 위치·hook, Reverse, LoopReset, PingPong 반전), 상대·절대 점, speedMultiplier; SpringArm 팔 끝 위치·자식 카메라 위치(이름 없는 부착), socketOffset·targetOffset, inherit 끄기, 위치·회전 지연(substep 포함, 최대 거리), Pawn control rotation(Gameplay 시험). Core 수학은 `Core/Tests`에 UE 식 대조 시험을 더한다. 이벤트 필드(2026-11-28): hook과 같은 횟수·인자(시간)로 발행, 빈 충돌 결과, hook 뒤 순서, World 밖 미발행.

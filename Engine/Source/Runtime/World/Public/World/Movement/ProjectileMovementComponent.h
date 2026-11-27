@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Meta/Annotations.h>
+#include <Object/Event.h>
 #include <World/Movement/MovementComponent.h>
+#include <World/Physics/HitResult.h>
 #include <World/Movement/RotatingMovementComponent.h>
 
 namespace rocks {
@@ -206,8 +208,13 @@ public:
     // 대상이 없거나 컴포넌트가 꺼져 있다(UE HasStoppedSimulation).
     bool HasStoppedSimulation() const noexcept;
 
-    // velocity·힘을 0으로, 대상 해제(Tick 꺼짐), OnProjectileStop()(UE StopSimulating).
+    // velocity·힘을 0으로, 대상 해제(Tick 꺼짐), OnProjectileStop() 뒤 projectileStopped(UE
+    // StopSimulating).
     void StopSimulating() noexcept;
+
+    // 투사체가 멈췄다(UE OnProjectileStop — Docs/Design/EngineRuntime 26.1절). 충돌 없는 이동이라
+    // impactResult는 빈 HitResult다. hook OnProjectileStop 바로 뒤에 발행한다.
+    ROCKS_PROPERTY(Params = "impactResult") Event<const HitResult&> projectileStopped;
 
 protected:
     // 초기 속도·회전을 정한다(UE InitializeComponent — 26.5절).
