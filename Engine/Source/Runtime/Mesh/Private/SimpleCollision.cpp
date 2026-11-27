@@ -21,7 +21,7 @@ bool FiniteRotator(const Rotator<double>& value) noexcept {
 }
 
 Result<void> Fail(CollisionDiagnostic* failure, AssetDiagnosticCode code, ErrorCode error,
-                  CollisionIssue issue, CollisionShapeKind shape, uint32 index,
+                  CollisionIssue issue, SimpleCollisionShapeKind shape, uint32 index,
                   uint32 related = CollisionNoIndex) noexcept {
     if (failure != nullptr) {
         CollisionDiagnostic diagnostic;
@@ -37,8 +37,9 @@ Result<void> Fail(CollisionDiagnostic* failure, AssetDiagnosticCode code, ErrorC
     return Result<void>::Failure(error);
 }
 
-Result<void> Invalid(CollisionDiagnostic* failure, CollisionIssue issue, CollisionShapeKind shape,
-                     uint32 index, uint32 related = CollisionNoIndex) noexcept {
+Result<void> Invalid(CollisionDiagnostic* failure, CollisionIssue issue,
+                     SimpleCollisionShapeKind shape, uint32 index,
+                     uint32 related = CollisionNoIndex) noexcept {
     return Fail(failure, AssetDiagnosticCode::InvalidCollisionData, ErrorCode::InvalidArgument,
                 issue, shape, index, related);
 }
@@ -154,7 +155,7 @@ ShapeCheck CheckShape(const CollisionConvex& convex) noexcept {
 }
 
 template <class Shape>
-Result<void> CheckShapes(const Array<Shape>& shapes, CollisionShapeKind kind,
+Result<void> CheckShapes(const Array<Shape>& shapes, SimpleCollisionShapeKind kind,
                          CollisionDiagnostic* failure) noexcept {
     for (uint32 index = 0; index < shapes.Size(); ++index) {
         const ShapeCheck check = CheckShape(shapes[index]);
@@ -207,21 +208,21 @@ const char* CollisionIssueName(CollisionIssue issue) noexcept {
     return "Unknown";
 }
 
-const char* CollisionShapeKindName(CollisionShapeKind kind) noexcept {
+const char* SimpleCollisionShapeKindName(SimpleCollisionShapeKind kind) noexcept {
     switch (kind) {
-    case CollisionShapeKind::None:
+    case SimpleCollisionShapeKind::None:
         return "None";
-    case CollisionShapeKind::Sphere:
+    case SimpleCollisionShapeKind::Sphere:
         return "Sphere";
-    case CollisionShapeKind::Box:
+    case SimpleCollisionShapeKind::Box:
         return "Box";
-    case CollisionShapeKind::Capsule:
+    case SimpleCollisionShapeKind::Capsule:
         return "Capsule";
-    case CollisionShapeKind::TaperedCapsule:
+    case SimpleCollisionShapeKind::TaperedCapsule:
         return "TaperedCapsule";
-    case CollisionShapeKind::Cylinder:
+    case SimpleCollisionShapeKind::Cylinder:
         return "Cylinder";
-    case CollisionShapeKind::Convex:
+    case SimpleCollisionShapeKind::Convex:
         return "Convex";
     }
 
@@ -270,72 +271,76 @@ Result<void> ValidateSimpleCollision(const SimpleCollision& collision,
                                      CollisionDiagnostic* failure) noexcept {
     if (collision.ElementCount() > CollisionMaxElements) {
         return Fail(failure, AssetDiagnosticCode::InvalidCollisionData, ErrorCode::CapacityExceeded,
-                    CollisionIssue::TooManyElements, CollisionShapeKind::None, CollisionNoIndex);
+                    CollisionIssue::TooManyElements, SimpleCollisionShapeKind::None,
+                    CollisionNoIndex);
     }
 
-    if (auto checked = CheckShapes(collision.spheres, CollisionShapeKind::Sphere, failure);
+    if (auto checked = CheckShapes(collision.spheres, SimpleCollisionShapeKind::Sphere, failure);
         !checked) {
         return checked;
     }
 
-    if (auto checked = CheckShapes(collision.boxes, CollisionShapeKind::Box, failure); !checked) {
+    if (auto checked = CheckShapes(collision.boxes, SimpleCollisionShapeKind::Box, failure);
+        !checked) {
         return checked;
     }
 
-    if (auto checked = CheckShapes(collision.capsules, CollisionShapeKind::Capsule, failure);
+    if (auto checked = CheckShapes(collision.capsules, SimpleCollisionShapeKind::Capsule, failure);
+        !checked) {
+        return checked;
+    }
+
+    if (auto checked = CheckShapes(collision.taperedCapsules,
+                                   SimpleCollisionShapeKind::TaperedCapsule, failure);
         !checked) {
         return checked;
     }
 
     if (auto checked =
-            CheckShapes(collision.taperedCapsules, CollisionShapeKind::TaperedCapsule, failure);
+            CheckShapes(collision.cylinders, SimpleCollisionShapeKind::Cylinder, failure);
         !checked) {
         return checked;
     }
 
-    if (auto checked = CheckShapes(collision.cylinders, CollisionShapeKind::Cylinder, failure);
-        !checked) {
-        return checked;
-    }
-
-    return CheckShapes(collision.convexes, CollisionShapeKind::Convex, failure);
+    return CheckShapes(collision.convexes, SimpleCollisionShapeKind::Convex, failure);
 }
 
 Result<void> ValidateConvexGeometry(const ConvexGeometry& geometry,
                                     CollisionDiagnostic* failure) noexcept {
     const usize vertices = geometry.vertices.Size();
     if (vertices < CollisionConvexMinVertices) {
-        return Invalid(failure, CollisionIssue::TooFewVertices, CollisionShapeKind::Convex,
+        return Invalid(failure, CollisionIssue::TooFewVertices, SimpleCollisionShapeKind::Convex,
                        CollisionNoIndex);
     }
 
     if (vertices > CollisionConvexMaxVertices) {
         return Fail(failure, AssetDiagnosticCode::InvalidCollisionData, ErrorCode::CapacityExceeded,
-                    CollisionIssue::TooManyVertices, CollisionShapeKind::Convex, CollisionNoIndex);
+                    CollisionIssue::TooManyVertices, SimpleCollisionShapeKind::Convex,
+                    CollisionNoIndex);
     }
 
     for (uint32 at = 0; at < vertices; ++at) {
         if (!FiniteVector(geometry.vertices[at])) {
-            return Invalid(failure, CollisionIssue::NonFiniteVertex, CollisionShapeKind::Convex,
-                           CollisionNoIndex, at);
+            return Invalid(failure, CollisionIssue::NonFiniteVertex,
+                           SimpleCollisionShapeKind::Convex, CollisionNoIndex, at);
         }
     }
 
     const usize indices = geometry.indices.Size();
     if (indices % 3 != 0) {
-        return Invalid(failure, CollisionIssue::IndexCount, CollisionShapeKind::Convex,
+        return Invalid(failure, CollisionIssue::IndexCount, SimpleCollisionShapeKind::Convex,
                        CollisionNoIndex);
     }
 
     // 닫힌 볼록 다면체 삼각 분할의 삼각형 수 상한(Euler: F = 2V − 4).
     if (indices / 3 > 2 * vertices - 4) {
-        return Invalid(failure, CollisionIssue::TooManyTriangles, CollisionShapeKind::Convex,
+        return Invalid(failure, CollisionIssue::TooManyTriangles, SimpleCollisionShapeKind::Convex,
                        CollisionNoIndex);
     }
 
     for (uint32 at = 0; at < indices; ++at) {
         if (geometry.indices[at] >= vertices) {
-            return Invalid(failure, CollisionIssue::IndexRange, CollisionShapeKind::Convex,
+            return Invalid(failure, CollisionIssue::IndexRange, SimpleCollisionShapeKind::Convex,
                            CollisionNoIndex, at);
         }
     }
@@ -402,14 +407,14 @@ Result<Span<const uint8>> ReadConvexBulk(const Package& package, const BulkDataR
     auto bytes = package.BulkBytes(ref);
     if (!bytes) {
         (void)Fail(failure, AssetDiagnosticCode::CorruptPackage, bytes.Error(),
-                   CollisionIssue::BulkUnreadable, CollisionShapeKind::Convex, CollisionNoIndex,
-                   component);
+                   CollisionIssue::BulkUnreadable, SimpleCollisionShapeKind::Convex,
+                   CollisionNoIndex, component);
         return bytes;
     }
 
     if (bytes.Value().Size() % element != 0) {
         (void)Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
-                   CollisionIssue::BulkLength, CollisionShapeKind::Convex, CollisionNoIndex,
+                   CollisionIssue::BulkLength, SimpleCollisionShapeKind::Convex, CollisionNoIndex,
                    component);
         return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
@@ -466,7 +471,7 @@ Result<void> LoadConvexGeometry(const CollisionConvex& convex, const Package& pa
         return Fail(failure, AssetDiagnosticCode::CorruptPackage,
                     valid.Error() == ErrorCode::CapacityExceeded ? ErrorCode::CapacityExceeded
                                                                  : ErrorCode::CorruptData,
-                    validation.issue, CollisionShapeKind::Convex, CollisionNoIndex,
+                    validation.issue, SimpleCollisionShapeKind::Convex, CollisionNoIndex,
                     validation.related);
     }
 
