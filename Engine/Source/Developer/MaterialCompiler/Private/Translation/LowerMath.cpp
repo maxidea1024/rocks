@@ -1,6 +1,7 @@
 #include <MaterialSchema/Nodes/Math/MathNodeEnums.h>
 
 #include "LoweringContext.h"
+#include "PowerValue.h"
 #include "LoweringTable.h"
 
 // 수학 노드 lowering이다(Docs/Design/MaterialSystem 6.8절 lowering 표). 근거는 UE
@@ -248,6 +249,71 @@ Result<void> LowerPeriodic(LoweringContext& context) noexcept {
     return Emit(context, "Result", context.Unary(Op, argument, NumberRule::FloatOnly));
 }
 
+} // namespace
+
+// UE FHLSLMaterialTranslator::Power(HLSLMaterialTranslator.cpp:9819)다(PowerValue.h).
+Result<IrValueId> PowerValue(LoweringContext& context, IrValueId base, IrValueId exponent,
+                             StringView pin) noexcept {
+    if (base == NoIrValue || exponent == NoIrValue) {
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    const IrType type = context.TypeOf(base);
+    if (context.TypeOf(exponent).scalar == IrScalar::Bool) {
+        if (auto reported = context.Error(MaterialDiagnosticCode::TypeMismatch, pin,
+                                          "Exponent must be numeric");
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (context.Builder().Value(exponent).op == IrOp::Constant) {
+        // 상수 지수의 지름길 전에 UE처럼 두 타입이 산술로 맞는지 본다(GetArithmeticResultType).
+        const IrValueId operands[] = {base, exponent};
+        auto common = context.CommonType(Span<const IrValueId>(operands, 2), NumberRule::FloatOnly);
+        if (!common || !common.Value()) {
+            return common ? Result<IrValueId>::Success(NoIrValue)
+                          : Result<IrValueId>::Failure(common.Error());
+        }
+
+        if (IsConstant(context, exponent, 1)) {
+            return Result<IrValueId>::Success(base);
+        }
+
+        if (IsConstant(context, exponent, 0)) {
+            return context.One(type);
+        }
+
+        if (IsConstant(context, base, 0)) {
+            return context.Zero(type);
+        }
+    }
+
+    auto scalarExponent = context.CoerceTo(exponent, IrFloat(1), pin);
+    if (!scalarExponent || scalarExponent.Value() == NoIrValue) {
+        return scalarExponent;
+    }
+
+    auto e = context.Splat(scalarExponent.Value(), type.components);
+    auto floor = context.FloatScalar(PositiveClampedPowFloor);
+    auto zero = context.Zero(type);
+    if (!e || !floor || !zero) {
+        return Result<IrValueId>::Failure(!e ? e.Error() : !floor ? floor.Error() : zero.Error());
+    }
+
+    auto small = context.Binary(IrOp::LessThanOrEquals, base, floor.Value(), NumberRule::FloatOnly);
+    auto power = context.Binary(IrOp::Pow, base, e.Value(), NumberRule::FloatOnly);
+    if (!small || !power) {
+        return Result<IrValueId>::Failure(!small ? small.Error() : power.Error());
+    }
+
+    return context.Select(small.Value(), zero.Value(), power.Value());
+}
+
+namespace {
+
 Result<void> LowerPower(LoweringContext& context) noexcept {
     // UE FHLSLMaterialTranslator::Power(HLSLMaterialTranslator.cpp:9819): 결과는 Base 타입이고
     // 지수는 float 스칼라로 맞춘다(CoerceParameter(Exponent, MCT_Float) — 벡터면 첫 성분). 상수
@@ -264,54 +330,7 @@ Result<void> LowerPower(LoweringContext& context) noexcept {
         return b ? Result<void>::Success() : Result<void>::Failure(b.Error());
     }
 
-    const IrType type = context.TypeOf(b.Value());
-    if (context.TypeOf(exponent.Value()).scalar == IrScalar::Bool) {
-        return context.Error(MaterialDiagnosticCode::TypeMismatch, "Exponent",
-                             "Exponent must be numeric");
-    }
-
-    if (context.Builder().Value(exponent.Value()).op == IrOp::Constant) {
-        // 상수 지수의 지름길 전에 UE처럼 두 타입이 산술로 맞는지 본다(GetArithmeticResultType).
-        const IrValueId operands[] = {b.Value(), exponent.Value()};
-        auto common = context.CommonType(Span<const IrValueId>(operands, 2), NumberRule::FloatOnly);
-        if (!common || !common.Value()) {
-            return common ? Result<void>::Success() : Result<void>::Failure(common.Error());
-        }
-
-        if (IsConstant(context, exponent.Value(), 1)) {
-            return context.Output("Result", b.Value());
-        }
-
-        if (IsConstant(context, exponent.Value(), 0)) {
-            return Emit(context, "Result", context.One(type));
-        }
-
-        if (IsConstant(context, b.Value(), 0)) {
-            return Emit(context, "Result", context.Zero(type));
-        }
-    }
-
-    auto scalarExponent = context.CoerceTo(exponent.Value(), IrFloat(1), "Exponent");
-    if (!scalarExponent || scalarExponent.Value() == NoIrValue) {
-        return scalarExponent ? Result<void>::Success()
-                              : Result<void>::Failure(scalarExponent.Error());
-    }
-
-    auto e = context.Splat(scalarExponent.Value(), type.components);
-    auto floor = context.FloatScalar(PositiveClampedPowFloor);
-    auto zero = context.Zero(type);
-    if (!e || !floor || !zero) {
-        return Result<void>::Failure(!e ? e.Error() : !floor ? floor.Error() : zero.Error());
-    }
-
-    auto small =
-        context.Binary(IrOp::LessThanOrEquals, b.Value(), floor.Value(), NumberRule::FloatOnly);
-    auto power = context.Binary(IrOp::Pow, b.Value(), e.Value(), NumberRule::FloatOnly);
-    if (!small || !power) {
-        return Result<void>::Failure(!small ? small.Error() : power.Error());
-    }
-
-    return Emit(context, "Result", context.Select(small.Value(), zero.Value(), power.Value()));
+    return Emit(context, "Result", PowerValue(context, b.Value(), exponent.Value(), "Exponent"));
 }
 
 Result<void> LowerLinearInterpolate(LoweringContext& context) noexcept {

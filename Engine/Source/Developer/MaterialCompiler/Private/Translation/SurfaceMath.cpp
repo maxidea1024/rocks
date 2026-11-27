@@ -170,6 +170,18 @@ IrValueId SurfaceMath::Cos(IrValueId value) noexcept {
     return Unary(IrOp::Cos, value);
 }
 
+IrValueId SurfaceMath::Sin(IrValueId value) noexcept {
+    return Unary(IrOp::Sin, value);
+}
+
+IrValueId SurfaceMath::Cross(IrValueId left, IrValueId right) noexcept {
+    return Binary(IrOp::Cross, left, right);
+}
+
+IrValueId SurfaceMath::Length(IrValueId value) noexcept {
+    return Unary(IrOp::Length, value);
+}
+
 IrValueId SurfaceMath::Dot(IrValueId left, IrValueId right) noexcept {
     return Binary(IrOp::Dot, left, right);
 }

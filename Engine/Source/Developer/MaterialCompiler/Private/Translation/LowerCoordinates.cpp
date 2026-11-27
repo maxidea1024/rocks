@@ -4,6 +4,7 @@
 #include <MaterialSchema/Nodes/Coordinates/CoordinatesNodeEnums.h>
 #include <MaterialSchema/Nodes/Vectors/VectorsNodeEnums.h>
 
+#include "CoordinateValues.h"
 #include "LoweringContext.h"
 #include "LoweringTable.h"
 #include "Translator.h"
@@ -57,17 +58,6 @@ Result<IrValueId> ComponentOrScalar(LoweringContext& context, IrValueId value,
     return context.Swizzle(value, component);
 }
 
-// TexCoord(index) 문맥 값이다(UInt 상수 인자).
-Result<IrValueId> TexCoord(LoweringContext& context, uint32 index) noexcept {
-    auto slot = context.Builder().UIntConstant(Span<const uint32>(&index, 1));
-    if (!slot) {
-        return slot;
-    }
-
-    const IrValueId arguments[] = {slot.Value()};
-    return context.ContextValue("TexCoord", arguments);
-}
-
 // key 입력이 연결되면 그 값, 아니면 fallback 문맥 값이다.
 Result<IrValueId> InputOrContext(LoweringContext& context, StringView key,
                                  StringView fallback) noexcept {
@@ -77,27 +67,6 @@ Result<IrValueId> InputOrContext(LoweringContext& context, StringView key,
     }
 
     return connected.Value() ? context.Input(key) : context.ContextValue(fallback);
-}
-
-// Coordinate 입력이 연결되면 그 값, 아니면 TexCoord(constCoordinate)다(UE Panner·Rotator).
-Result<IrValueId> CoordinateOrTexCoord(LoweringContext& context) noexcept {
-    auto connected = context.IsConnected("Coordinate");
-    if (!connected) {
-        return Result<IrValueId>::Failure(connected.Error());
-    }
-
-    if (connected.Value()) {
-        return context.Input("Coordinate");
-    }
-
-    int64 index = 0;
-    auto read = context.ReadInteger("constCoordinate", 0, index);
-    if (!read || !read.Value()) {
-        return read ? Result<IrValueId>::Success(NoIrValue)
-                    : Result<IrValueId>::Failure(read.Error());
-    }
-
-    return TexCoord(context, static_cast<uint32>(index));
 }
 
 // UE TextureCoordinate(MaterialExpressions.cpp:5324–5346, HLSLMaterialTranslator.cpp:6686–6727).
@@ -795,6 +764,38 @@ constexpr LoweringEntry CoordinateEntries[] = {
 };
 
 } // namespace
+
+// CoordinateValues.h다.
+Result<IrValueId> TexCoord(LoweringContext& context, uint32 index) noexcept {
+    auto slot = context.Builder().UIntConstant(Span<const uint32>(&index, 1));
+    if (!slot) {
+        return slot;
+    }
+
+    const IrValueId arguments[] = {slot.Value()};
+    return context.ContextValue("TexCoord", arguments);
+}
+
+// CoordinateValues.h다.
+Result<IrValueId> CoordinateOrTexCoord(LoweringContext& context) noexcept {
+    auto connected = context.IsConnected("Coordinate");
+    if (!connected) {
+        return Result<IrValueId>::Failure(connected.Error());
+    }
+
+    if (connected.Value()) {
+        return context.Input("Coordinate");
+    }
+
+    int64 index = 0;
+    auto read = context.ReadInteger("constCoordinate", 0, index);
+    if (!read || !read.Value()) {
+        return read ? Result<IrValueId>::Success(NoIrValue)
+                    : Result<IrValueId>::Failure(read.Error());
+    }
+
+    return TexCoord(context, static_cast<uint32>(index));
+}
 
 Span<const LoweringEntry> CoordinateLowerings() noexcept {
     return CoordinateEntries;

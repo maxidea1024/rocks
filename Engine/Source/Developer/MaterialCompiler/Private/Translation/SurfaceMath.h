@@ -5,7 +5,8 @@
 #include <MaterialCompiler/MaterialIrOp.h>
 #include <MaterialCompiler/MaterialIrValue.h>
 
-// 표면 접기·내보내기 식을 IR로 펼치는 도우미다(Docs/Design/MaterialSystem 6.11절 MS2d2). 연산마다
+// 식을 IR로 펼치는 도우미다(Docs/Design/MaterialSystem 6.11절 MS2d2 표면 접기·내보내기, 6.13절
+// MS2f1 고급 노드). 연산마다
 // Result를 확인하지 않도록 첫 시스템 실패를 기억하고(Status), 실패 뒤의 연산은 NoIrValue를
 // 돌려준다. 피연산자에 NoIrValue가 있으면 결과도 NoIrValue다(LoweringContext 규칙과 같다). 실수
 // 연산은 Float 규칙(NumberRule::FloatOnly), UInt 연산은 정수를 그대로 둔다.
@@ -59,6 +60,9 @@ public:
     IrValueId Log(IrValueId value) noexcept;
     IrValueId Abs(IrValueId value) noexcept;
     IrValueId Cos(IrValueId value) noexcept;
+    IrValueId Sin(IrValueId value) noexcept;
+    IrValueId Cross(IrValueId left, IrValueId right) noexcept;
+    IrValueId Length(IrValueId value) noexcept;
     IrValueId Dot(IrValueId left, IrValueId right) noexcept;
     IrValueId Normalize(IrValueId value) noexcept;
     IrValueId Smoothstep(IrValueId low, IrValueId high, IrValueId value) noexcept;

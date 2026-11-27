@@ -290,8 +290,8 @@ TEST(MaterialTranslator_GraphErrors) {
     {
         GraphFixture fixture(env);
         const Guid unknown = fixture.Add("Material.DoesNotExist");
-        // 아직 번역하지 않는 단계의 노드(MS2f)다.
-        const Guid later = fixture.Add("Material.Desaturation");
+        // 아직 번역하지 않는 단계의 노드(MS2f5)다.
+        const Guid later = fixture.Add("Material.CustomHlsl");
         fixture.Connect(unknown, "Result", OutputNodeId, "AmbientOcclusion");
         fixture.Connect(later, "Result", OutputNodeId, "PixelDepthOffset");
         REQUIRE(fixture.ready);
