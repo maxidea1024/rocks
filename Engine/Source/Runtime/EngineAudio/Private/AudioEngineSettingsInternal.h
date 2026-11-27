@@ -30,6 +30,9 @@ extern cvar::BootCVar<int32> MixerBlockFramesVar;
 extern cvar::BootCVar<int32> MixerBufferCountVar;
 extern cvar::BootCVar<int32> MixerSampleRateVar;
 extern cvar::BootCVar<int32> MaxVoicesVar;
+extern cvar::BootCVar<int32> StreamRingFramesVar;
+extern cvar::BootCVar<int32> StreamMaxStreamsVar;
+extern cvar::CVar<int32> StreamDefaultLoadingVar;
 
 } // namespace engine_audio_detail
 
