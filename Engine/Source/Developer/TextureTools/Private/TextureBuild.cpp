@@ -699,6 +699,10 @@ TextureBlockFormat BlockFormatOf(TextureFormatEncoding encoding) noexcept {
         return TextureBlockFormat::Bc4;
     case TextureFormatEncoding::Bc5:
         return TextureBlockFormat::Bc5;
+    case TextureFormatEncoding::Bc6h:
+        return TextureBlockFormat::Bc6h;
+    case TextureFormatEncoding::Bc7:
+        return TextureBlockFormat::Bc7;
     default:
         return TextureBlockFormat::Bc1;
     }
@@ -706,34 +710,46 @@ TextureBlockFormat BlockFormatOf(TextureFormatEncoding encoding) noexcept {
 
 // 출력 부호화 선택이다(12.17.5 3).
 struct EncodeOptions {
-    // HDR_Compressed의 RGBA16F 출력은 알파 1이다(UE BC6H는 알파가 없다).
-    bool opaqueAlpha = false;
+    // BC7이 알파 프로필을 쓰는지다(12.17.6 4 — TextureFormatChoice::alphaProfile).
+    bool alphaProfile = false;
     // norm16 대체(G16 → R16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0이다(12.14절).
     bool clampUnit = false;
 };
 
 // level을 choice 형식으로 부호화한다(slice·깊이 평면을 차례로, 행 사이 패딩 없음). BC는 RGBA8(같은
-// sRGB 부호화)을 만들어 EncodeTextureBlocks로 압축한다.
+// sRGB 부호화 — BC6H는 선형 RGBA16F, 가장 가까운 짝수 반올림)을 만들어 EncodeTextureBlocks로
+// 압축한다.
 Result<void> Encode(Allocator& allocator, const Level& level, const TextureFormatChoice& choice,
                     const EncodeOptions& options, Array<uint8>& out) noexcept {
     const usize texels = level.texels.Size() / Channels;
     const bool srgb = choice.srgb;
     if (choice.encoding != TextureFormatEncoding::Uncompressed) {
+        const TextureBlockFormat block = BlockFormatOf(choice.encoding);
+        const usize texelBytes = TextureBlockSourceTexelBytes(block);
         Array<uint8> rgba(allocator);
-        if (auto sized = rgba.TryResize(texels * TextureBlockTexelBytes); !sized) {
+        if (auto sized = rgba.TryResize(texels * texelBytes); !sized) {
             return sized;
         }
 
         for (usize index = 0; index < texels; ++index) {
             const float* texel = level.texels.Data() + index * Channels;
-            uint8* target = rgba.Data() + index * TextureBlockTexelBytes;
+            uint8* target = rgba.Data() + index * texelBytes;
+            if (block == TextureBlockFormat::Bc6h) {
+                // UE CopyTo(RGBA16F, Linear) 뒤 SanitizeFloat16AndSetAlphaOpaqueForBC6H — 정리는
+                // 인코더가 한다.
+                for (uint32 c = 0; c < Channels; ++c) {
+                    StoreLe16(target + c * 2, QuantizeHalf(texel[c]));
+                }
+
+                continue;
+            }
+
             target[0] = EncodeUnorm8(texel[Red], srgb);
             target[1] = EncodeUnorm8(texel[Green], srgb);
             target[2] = EncodeUnorm8(texel[Blue], srgb);
             target[3] = QuantizeUnorm8(texel[Alpha]);
         }
 
-        const TextureBlockFormat block = BlockFormatOf(choice.encoding);
         const uint32 planes = level.layers * level.depth;
         auto bytes = TextureBlockOutputBytes(block, level.width, level.height, planes);
         if (!bytes) {
@@ -749,7 +765,9 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
         image.sizeX = level.width;
         image.sizeY = level.height;
         image.numSlices = planes;
-        return EncodeTextureBlocks(block, image, out.View());
+        TextureBlockOptions blockOptions;
+        blockOptions.alphaProfile = options.alphaProfile;
+        return EncodeTextureBlocks(block, image, blockOptions, out.View());
     }
 
     const graphics::PixelFormat format = choice.pixelFormat;
@@ -765,7 +783,7 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
     for (usize index = 0; index < texels; ++index) {
         const float* texel = level.texels.Data() + index * Channels;
         uint8* target = out.Data() + index * texelBytes;
-        const float alpha = options.opaqueAlpha ? 1.0f : texel[Alpha];
+        const float alpha = texel[Alpha];
         switch (format) {
         case graphics::PixelFormat::R8Unorm:
             target[0] = QuantizeUnorm8(texel[Red]);
@@ -1026,7 +1044,7 @@ EncodeOptions EncodeOptionsFor(const TextureBuildSettings& settings,
                                const TextureFormatChoice& choice) noexcept {
     EncodeOptions options;
     (void)settings;
-    options.opaqueAlpha = choice.opaqueAlpha;
+    options.alphaProfile = choice.alphaProfile;
     options.clampUnit = choice.norm16Remapped;
     return options;
 }
@@ -1337,11 +1355,12 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         return Fail(out, AssetDiagnosticCode::None, decoded.Error(), 0);
     }
 
-    // 알파 판정(AutoDXT일 때만): 원본의 모든 slice(PowerOfTwoMode·크기 조정 전)다 — UE 주 경로의
-    // 원본 층 ColorMin·ColorMax(TextureDerivedData.cpp 886–894 →
-    // DetermineAlphaChannelTransparency)와 같은 대상이다(12.17.5 3).
+    // 알파 판정(AutoDXT·BC7일 때만 — TextureFormatNeedsAlpha): 원본의 모든
+    // slice(PowerOfTwoMode·크기 조정 전)다 — UE 주 경로의 원본 층
+    // ColorMin·ColorMax(TextureDerivedData.cpp 886–894 → DetermineAlphaChannelTransparency)와 같은
+    // 대상이다(12.17.5 3).
     const bool alphaTransparent =
-        TextureFormatDependsOnAlpha(request, target) && HasTransparentAlpha(level);
+        TextureFormatNeedsAlpha(request, target) && HasTransparentAlpha(level);
 
     // 3. PowerOfTwoMode.
     if (targetX != level.width || targetY != level.height || targetZ != level.depth) {
@@ -1453,7 +1472,7 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         Replicate(mip, choice.replicate);
     }
 
-    // 6c. 원본 알파 판정 결과로 형식을 다시 고른다(AutoDXT).
+    // 6c. 원본 알파 판정 결과로 형식을 다시 고른다(AutoDXT 형식·BC7 프로필).
     if (alphaTransparent) {
         if (!SelectTextureFormat(request, target, alphaTransparent, choice)) {
             return Fail(out, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,

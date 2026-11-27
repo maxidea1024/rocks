@@ -7,7 +7,8 @@
 #include <Object/ObjectRefs.h>
 
 // 재생할 수 있는 사운드 에셋의 기반이다(Docs/Design/AudioSystem 3.9·3.35.3절, UE USoundBase 대응).
-// AU3은 volume·pitch·감쇠 참조만 가진다(분류·동시 발음·가상화·버스는 AU7).
+// volume·pitch·감쇠 참조와 재생 관리(우선순위·가상화 — 3.41절)를 가진다(분류·동시 발음·버스는 AU7
+// 뒤 단계).
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드(게임 스레드) 전용이다.
 namespace rocks {
@@ -29,6 +30,14 @@ public:
     ROCKS_PROPERTY() float pitch = 1.0f;
     // 비었으면 2D다. 같은 에셋 Registry 안의 간선이다(값은 ObjectRegistry::SetReference로 바꾼다).
     ROCKS_PROPERTY() ObjectRef<AttenuationSettings> attenuation;
+    // 재생 우선순위다([MinSoundPriority, MaxSoundPriority], UE Priority 기본 1). voice 상한을
+    // 넘으면 들리는 크기 × 우선순위가 낮은 재생부터 voice를 잃는다(3.41.1절).
+    ROCKS_PROPERTY() float priority = DefaultSoundPriority;
+    // 켜면 voice 배정에서 들리는 크기를 곱하지 않고 우선순위만 본다(UE
+    // bBypassVolumeScaleForPriority).
+    ROCKS_PROPERTY() bool bypassVolumeScaleForPriority = false;
+    // loop 재생의 가상화 모드다(UE VirtualizationMode 기본 Restart — 3.41.3절).
+    ROCKS_PROPERTY() SoundVirtualizationMode virtualizationMode = SoundVirtualizationMode::Restart;
 
     // 재생 스냅숏을 만든다(3.35.3절): 파생 클래스의 PCM·loop와 이 클래스의 volume·pitch, 감쇠
     // 참조가 가리키는 값을 복사한다. registry·access는 이 객체와 감쇠 객체를 가진 Registry와 그

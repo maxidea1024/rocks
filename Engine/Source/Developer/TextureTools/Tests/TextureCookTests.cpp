@@ -22,7 +22,10 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
+#include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureCook.h>
+
+#include <string.h>
 
 // 텍스처 쿠킹 처리기 시험이다(Docs/Design/AssetSystem 12.14절 — 14.1.101절 대조표): 너겟 머리
 // 왕복·손상, 상주 꼬리 R 표·샘플러 필터 표, 차원 다섯의 쿠킹 패키지(EditorOnly 원본 없음·
@@ -1393,6 +1396,75 @@ TEST(TextureCook_FormatTargets) {
 
 // 등록: null state InvalidArgument, Texture 파생 다섯이 이 처리기를 찾고 다른 타입은 fallback이다,
 // 두 번 등록 AlreadyExists.
+// BC6H·BC7 쿠킹(12.17.6 6·9): BC7 알파 원본은 BC7UnormSrgb이고 둘째 쿠킹은 적중(빌드 한 번 — 같은
+// 출력 byte)이다. ForceAlpha를 켜면 키가 바뀐다(알파 판정이 프로필을 바꾼다 — 설정이 키에 있다).
+// HDR_Compressed는 BC6HUfloat이다. ISPC 커널이 없는 대상(Android)은 건너뛴다.
+TEST(TextureCook_IspcFormats) {
+    if (IspcBcEncoderIdentity().IsEmpty()) {
+        return;
+    }
+
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-ispc");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    Array<uint8> pixels = Pattern(scene.allocator, 8 * 8 * 4, 9);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 8, 8, 1, pixels.View()));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 1;
+        texture.compressionSettings = TextureCompressionSettings::BC7;
+        return true;
+    }));
+    const auto cooked = [&](CookOut& out, graphics::PixelFormat& format) noexcept {
+        Loaded loaded;
+        if (!scene.Cook(processor, out, nuggets.cache.Get()) ||
+            !scene.Load(out.sink.Bytes(), loaded)) {
+            return false;
+        }
+
+        const Texture* texture = scene.LoadedTexture(loaded);
+        if (texture == nullptr) {
+            return false;
+        }
+
+        auto number = graphics::PixelFormatFromNumber(texture->platformData.pixelFormat);
+        format = number ? number.Value() : graphics::PixelFormat::Unknown;
+        return true;
+    };
+    CookOut first(scene.allocator);
+    CookOut second(scene.allocator);
+    graphics::PixelFormat format = graphics::PixelFormat::Unknown;
+    REQUIRE(cooked(first, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && first.warnings.IsEmpty());
+    REQUIRE(cooked(second, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && second.warnings.IsEmpty());
+    CHECK(processor.Builds() == 1);
+    CHECK(first.sink.Bytes().Size() == second.sink.Bytes().Size() &&
+          memcmp(first.sink.Bytes().Data(), second.sink.Bytes().Data(),
+                 first.sink.Bytes().Size()) == 0);
+    const Sha256Digest bc7 = processor.LastNuggetKey();
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionForceAlpha = 1;
+        return true;
+    }));
+    CookOut forced(scene.allocator);
+    REQUIRE(cooked(forced, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && processor.Builds() == 2 &&
+          !(processor.LastNuggetKey() == bc7));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionForceAlpha = 0;
+        // HDR류는 sRGB를 막으므로(켜 두면 SrgbIgnored 경고) 끈다.
+        texture.srgb = 0;
+        texture.compressionSettings = TextureCompressionSettings::HDR_Compressed;
+        return true;
+    }));
+    CookOut hdr(scene.allocator);
+    REQUIRE(cooked(hdr, format));
+    CHECK(format == graphics::PixelFormat::BC6HUfloat && hdr.warnings.IsEmpty());
+}
+
 TEST(TextureCook_Registration) {
     CookScene scene;
     REQUIRE(scene.ready);

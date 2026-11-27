@@ -75,8 +75,8 @@ struct TextureBuildResult {
                                  TextureSwizzle::A};
     // Volume 1, 그 밖 원본 slice 수다.
     uint32 numSlices = 1;
-    // AutoDXT 알파 판정 결과다(12.17.5 3 — 판정하지 않으면 false). 쿠킹 적중 검증이 같은 값으로
-    // 형식을 다시 계산한다.
+    // 원본 알파 판정 결과다(12.17.5 3 — AutoDXT 형식과 BC7 프로필이 쓴다, TextureFormatNeedsAlpha가
+    // 거짓이면 판정하지 않고 false). 쿠킹 적중 검증은 AutoDXT만 머리 형식으로 이 값을 되살린다.
     bool alphaTransparent = false;
     // 상위 mip부터다.
     Array<TextureBuiltMip> mips;

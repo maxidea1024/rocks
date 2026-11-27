@@ -122,6 +122,21 @@ struct EventMemberTraits<Event<Args...> Class::*> {
                 });
         }
 
+        static Result<void> Bindings(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                     ObjectHandle publisher, EventBindingVisitor visitor,
+                                     void* user) noexcept {
+            if (visitor == nullptr) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            return WithEvent<Result<void>, false>(
+                registry, access, publisher, [&](Event<Args...>& event) noexcept {
+                    return event.ForEachBinding([&](ObjectHandle target, Guid functionId) noexcept {
+                        return visitor(user, target, functionId);
+                    });
+                });
+        }
+
         static Result<void> BroadcastFromFrame(ObjectRegistry& registry,
                                                const ObjectAccessContext& access,
                                                ObjectHandle publisher, void* frame) noexcept {
@@ -197,6 +212,7 @@ RuntimeEventOps MakeEventOps(Guid fieldId) noexcept {
     ops.unbindAll = &Thunks::UnbindAll;
     ops.clear = &Thunks::Clear;
     ops.compact = &Thunks::Compact;
+    ops.bindings = &Thunks::Bindings;
     ops.broadcastFromFrame = &Thunks::BroadcastFromFrame;
     ops.construct = &Thunks::Construct;
     ops.destroy = &Thunks::Destroy;

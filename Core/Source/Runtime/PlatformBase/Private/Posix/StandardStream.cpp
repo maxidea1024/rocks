@@ -1,6 +1,7 @@
 #include <Platform/StandardStream.h>
 #include "PosixFileError.h"
 #include <errno.h>
+#include <poll.h>
 #include <unistd.h>
 
 // POSIX 표준 스트림이다(SparksTools T2): descriptor 0·1·2에 read·write(EINTR 재시도)로 byte
@@ -64,6 +65,45 @@ FileTransfer ReadStandardInput(void* buffer, usize capacity) noexcept {
         }
 
         return result;
+    }
+}
+
+FileTransfer ReadStandardInput(void* buffer, usize capacity, uint32 timeoutMilliseconds) noexcept {
+    if (timeoutMilliseconds == InfiniteTimeout || buffer == nullptr || capacity == 0) {
+        return ReadStandardInput(buffer, capacity);
+    }
+
+    FileTransfer result;
+    pollfd descriptor{};
+    descriptor.fd = STDIN_FILENO;
+    descriptor.events = POLLIN;
+    // poll의 시간 인자는 int 밀리초다(InfiniteTimeout은 위에서 걸렀다).
+    constexpr uint32 MaxPollMilliseconds = static_cast<uint32>(NumericLimits<int>::Max());
+    const int timeout = static_cast<int>(
+        timeoutMilliseconds < MaxPollMilliseconds ? timeoutMilliseconds : MaxPollMilliseconds);
+    for (;;) {
+        const int ready = ::poll(&descriptor, 1, timeout);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            result.status = detail::PosixFileError(errno);
+            return result;
+        }
+
+        if (ready == 0) {
+            result.status.code = FileCode::NoProgress;
+            return result;
+        }
+
+        if ((descriptor.revents & POLLNVAL) != 0) {
+            result.status = FileStatus{FileCode::NotOpen, uint32(EBADF)};
+            return result;
+        }
+
+        // 읽을 것이 있거나 쓰는 쪽이 닫혔다(POLLHUP — read가 EOF를 준다).
+        return ReadStandardInput(buffer, capacity);
     }
 }
 

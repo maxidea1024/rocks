@@ -83,6 +83,14 @@ public:
     Result<AudioRtCommand> PreparePlay(AudioVoiceHandle voice, AudioClipId clip, uint32 startFrame,
                                        bool loop, const AudioVoiceParams& params) noexcept;
 
+    // PreparePlay로 만든 Play 명령을 장치에 보내지 않고 버린다(명령 링이 차서 미뤘던 Play를 제어
+    // 쪽이 거둘 때 — Docs/Design/AudioSystem 3.41.1절). voice는 Reserved로 돌아가고(ReleaseVoice로
+    // 바로 놓을 수 있다) clip 사용 수를 내린다. AudioRT는 그 명령을 본 적이 없으므로 순번 틈은
+    // 문제가 없다(순번은 voice 수명 안에서만 비교한다). 호출자 계약: 그 명령을 Submit하지 않았어야
+    // 한다(보냈다면 AudioRT가 낡은 generation의 Play로 버린다 — 소리는 나지 않지만 쓰지 말 것).
+    // 오류: 이전 generation은 StaleHandle, Play를 준비한 상태가 아니면 InvalidArgument.
+    Result<void> AbandonPreparedPlay(AudioVoiceHandle voice) noexcept;
+
     // 시각 지정 Stop·SetParams·SetMasterGain 명령을 만들고 순번을 매긴다. Reserved voice는
     // InvalidArgument, 이전 generation은 StaleHandle, 범위 밖 파라미터는 InvalidArgument.
     Result<AudioRtCommand> MakeStop(AudioVoiceHandle voice, uint64 mixFrame,

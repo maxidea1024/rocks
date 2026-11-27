@@ -54,6 +54,11 @@ struct SaveNode {
 // 집합으로 덮어쓴다 — 지연 항목 메모리도 위치 표처럼 그래프 바이트 누계·작업량에 청구한다.
 class GraphEncodeContext final : public FieldEncodeContext {
 public:
+    // 그래프 저장은 이벤트 바인딩 기록을 쓴다(Docs/Design/EventReflection.ko.md ED19).
+    bool WritesEventBindings() const noexcept override {
+        return true;
+    }
+
     GraphEncodeContext(Allocator& allocator, ObjectRegistry& registry,
                        const ObjectAccessContext& access, Array<SaveNode>& nodes, Budget& budget,
                        const ObjectGraphSaveOptions& options) noexcept

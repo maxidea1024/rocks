@@ -232,6 +232,11 @@ TextureFormatEncoding EncodingOf(PixelFormat format) noexcept {
         return TextureFormatEncoding::Bc4;
     case PixelFormat::BC5Unorm:
         return TextureFormatEncoding::Bc5;
+    case PixelFormat::BC6HUfloat:
+        return TextureFormatEncoding::Bc6h;
+    case PixelFormat::BC7Unorm:
+    case PixelFormat::BC7UnormSrgb:
+        return TextureFormatEncoding::Bc7;
     default:
         return TextureFormatEncoding::Uncompressed;
     }
@@ -278,10 +283,11 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
         name = UncompressedFallback(request);
     }
 
-    // AutoDXT(ForceNoAlpha가 ForceAlpha보다 먼저 — GetTextureExpectsAlphaInPixelFormat).
+    // 유효 알파(ForceNoAlpha가 ForceAlpha보다 먼저 — GetTextureExpectsAlphaInPixelFormat)다.
+    // AutoDXT의 형식과 BC7 프로필이 쓴다.
+    const bool alpha =
+        !request.compressionNoAlpha && (request.compressionForceAlpha || alphaTransparent);
     if (name == FormatName::AutoDxt) {
-        const bool alpha =
-            !request.compressionNoAlpha && (request.compressionForceAlpha || alphaTransparent);
         name = alpha ? FormatName::Dxt5 : FormatName::Dxt1;
     }
 
@@ -315,15 +321,8 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
         format = pair;
     }
 
-    // 7. 단계 사이 대체(TD11 — BC6H·BC7 인코더는 TC3).
-    if (name == FormatName::Bc7 || name == FormatName::Bc6h) {
-        const PixelFormat before = format;
-        format = name == FormatName::Bc7
-                     ? (srgb ? PixelFormat::BGRA8UnormSrgb : PixelFormat::BGRA8Unorm)
-                     : PixelFormat::RGBA16Float;
-        out.opaqueAlpha = name == FormatName::Bc6h;
-        AddWarning(out, AssetDiagnosticCode::EncoderUnavailable, before);
-    }
+    // 7. 단계 사이 대체(TD11)는 TC3에서 없어졌다: BC6H·BC7은 ISPC Texture Compressor로
+    // 압축한다(12.17.6 6). Android는 TC4까지 2–4번 비압축 강제로 BC에 닿지 않는다.
 
     // 8. 샘플링 검증(TD12).
     const PixelFormatCaps required =
@@ -346,6 +345,7 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
     out.srgbIgnored =
         request.srgb && (prevented || (IsHdrSource(request.sourceFormat) && IsFloatFormat(format)));
     out.encoding = EncodingOf(format);
+    out.alphaProfile = out.encoding == TextureFormatEncoding::Bc7 && alpha;
     out.norm16Remapped = norm16Remapped;
 
     // swizzle(sampler type 계약 — CompressionSettings로만)과 채널 복제.
@@ -378,15 +378,15 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
     return Result<void>::Success();
 }
 
-bool DependsOnAlpha(const TextureFormatRequest& request,
-                    const TextureFormatTarget& target) noexcept {
+bool NeedsAlpha(const TextureFormatRequest& request, const TextureFormatTarget& target) noexcept {
     TextureFormatChoice opaque;
     TextureFormatChoice transparent;
     if (!Select(request, target, false, opaque) || !Select(request, target, true, transparent)) {
         return false;
     }
 
-    return opaque.pixelFormat != transparent.pixelFormat;
+    return opaque.pixelFormat != transparent.pixelFormat ||
+           opaque.alphaProfile != transparent.alphaProfile;
 }
 
 } // namespace format_select
@@ -399,9 +399,9 @@ Result<void> SelectTextureFormat(const TextureFormatRequest& request,
     return format_select::Select(request, target, alphaTransparent, out);
 }
 
-bool TextureFormatDependsOnAlpha(const TextureFormatRequest& request,
-                                 const TextureFormatTarget& target) noexcept {
-    return format_select::DependsOnAlpha(request, target);
+bool TextureFormatNeedsAlpha(const TextureFormatRequest& request,
+                             const TextureFormatTarget& target) noexcept {
+    return format_select::NeedsAlpha(request, target);
 }
 
 } // namespace rocks
