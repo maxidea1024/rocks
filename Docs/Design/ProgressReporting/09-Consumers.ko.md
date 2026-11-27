@@ -57,13 +57,15 @@ CommandProgressArgument ParseCommandProgressArgument(StringView argument, Comman
 class ROCKS_PROGRESS_API CommandProgress {     // 이동 불가
 public:
     Result<void> Start(Allocator&, const CommandProgressOptions&, const CommandProgressDesc& = {}) noexcept;
+    void Flush() noexcept;                      // JSONL: 간격 무시하고 지금 progress 줄
     void Stop() noexcept;                       // 소멸도 부른다
 };
 ```
 
 - **인자.** `--progress=console`·`--progress=jsonl`·`--no-progress`·`--parent-control`(AppInfoCommandLine `--kebab`). 모드 인자는 한 번만이다(둘째 모드 인자·모르는 값은 `Invalid` — 명령의 사용법 오류). 그 밖의 인자는 `NotProgress`라 명령이 자기 인자로 읽는다.
 - **`Start`.** hub가 꺼져 있으면 켜고 `Stop`에서 끈다(이미 켜져 있으면 — 프로세스 안 시험·다른 호스트 — 그 hub를 쓰고 끄지 않는다). 모드대로 `ConsoleProgressReporter`·`ProgressJsonlWriter`를 만들고 `ProgressPumpThread`(간격 `ChildControlPollMilliseconds`)가 펌프한다. `Off`도 `desc.terminationRequested`가 있으면 종료 요청 확인을 위해 펌프 스레드를 돌린다(펌프는 아무 일도 하지 않는다). `parentControl`이면 `ParentControlListener`를 켠다. 실패하면 켠 것을 되돌리고 그 오류다.
+- **첫 Pump·`Flush`.** `Start`가 펌프 스레드를 띄우기 전에 그 스레드에서 한 번 Pump해 사건 cursor를 지금으로 맞춘다(cursor 0 = "지금부터" — 펌프 스레드의 첫 Tick 전에 시작하고 끝난 작업도 begin·end 줄이 나가게). `Flush`는 JSONL 모드에서 간격과 상관없이 progress 줄을 쓴다 — 명령이 작업을 끝내기 직전에 불러 마지막 계수(done = total)가 end 줄 앞에 나가게 한다. 보고기는 펌프 스레드와 `Flush`가 잠금 하나로 나눠 쓴다.
 - **`Stop`.** 부모 제어 수신 → 펌프 스레드(마지막 Tick — 끝 사건 줄) → JSONL `Flush`(남은 progress 줄) → 소유한 hub `Shutdown` 순이다. 두 번째부터는 아무 일도 하지 않는다.
 - **`CommandProgressDesc`.** 시험·호스트가 바꿀 것만: JSONL 줄 출력(`ProgressLineWriter` — 비면 표준 출력), 사람용 줄 출력(`ProgressLogWriter` — 비면 Log API), 부모 제어 읽기(`ParentControlReader` — 비면 표준 입력), 종료 요청 확인(Launch `IsTerminationRequested`를 감싼 함수 — Progress는 Launch에 의존하지 않는다).
-- **명령의 의무.** 최상위 작업을 `UserCancellable`로 열고 일은 작업 token으로 취소를 본다. 취소로 끝나면 `Finish(Cancelled)`하고 종료 코드는 `ProgressCancelledExitCode`(130)다. JSONL 모드면 명령의 다른 표준 출력 줄은 표준 오류로 보낸다(9.3절). `Stop`은 작업을 끝낸 뒤 부른다(끝 줄이 빠지지 않게).
+- **명령의 의무.** 최상위 작업을 `UserCancellable`로 열고 일은 작업 token으로 취소를 본다. 취소로 끝나면 `Finish(Cancelled)`하고 종료 코드는 `ProgressCancelledExitCode`(130)다(Core `CommandletRegistry`는 일반 코드 0–125에 더해 `CommandletCancelledExitCode` 130을 받는다 — 같은 값을 `static_assert`로 묶었다). JSONL 모드면 명령의 다른 표준 출력 줄은 표준 오류로 보낸다(9.3절). 작업을 끝내기 직전에 `Flush`, 끝낸 뒤 `Stop`을 부른다(마지막 계수 줄과 끝 줄이 빠지지 않게).
 - 버린 대안: 명령마다 직접 잇기(같은 순서 규칙 — 수신 → 펌프 → Flush → hub — 를 명령 수만큼 되풀이하고, 쿠킹·임포트와 셰이더 명령이 서로 다른 인자 철자를 갖게 된다).

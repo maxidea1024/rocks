@@ -54,6 +54,6 @@
 - 시간이 짧은 실행에서 막대는 앞 단계를 금방 지나 FirstFrame 몫 안에서 머문다. 진행 문구는 "Showing the first frame"이고 퍼센트는 99에서 막힌다(7.2절).
 
 **PG5 연결(2026-11-27, 렌더 세션 — 진행 보고 12장).** Sandbox의 엔진 셰이더 준비를 `Shaders` 단계로 보고한다.
-- 단계: 창 렌더 경로를 열면 `SandboxStartupSteps`가 `HostServices → Engine → Shaders → FirstFrame`이다(아니면 `Shaders` 없이). 장치를 만든 뒤 렌더 lane을 시작하기 직전에 `Enter(Shaders)`, 첫 프레임을 낸 직후(첫 `SubmitFrame` — lane 시작 작업이 끝나야 첫 프레임 slot이 나온다, RenderBase 5.5절) `Enter(FirstFrame)`이다. 그래서 `Shaders`는 lane 시작(엔진 렌더 자원 — 셰이더 집합 열기와 내장 자원 팩)이고 `FirstFrame`은 첫 프레임 제출·표시다.
+- 단계: 창 렌더 경로를 열면 `SandboxStartupSteps`가 `HostServices → Engine → Shaders → FirstFrame`이다(아니면 `Shaders` 없이). 창 렌더 경로를 열기 직전(장치 생성 전)에 `Enter(Shaders)`, 첫 프레임을 낸 직후(첫 `SubmitFrame` — lane 시작 작업이 끝나야 첫 프레임 slot이 나온다, RenderBase 5.5절) `Enter(FirstFrame)`이다. 그래서 `Shaders`는 장치 생성과 lane 시작(엔진 렌더 자원 — 셰이더 집합 열기와 내장 자원 팩)이고 `FirstFrame`은 첫 프레임 제출부터 준비 표시(`MarkReady`)까지다. 렌더 경로가 열리지 않으면(장치·lane 실패) 그 자리에서 `FirstFrame`으로 넘어간다.
 - 계수: `Shaders`에 들어갈 때 `MakeStepCounter(0)`을 `EngineShaderHost::SetPreparationProgress`에 건다(RenderBase 9.12절 6항). Development 공급자가 컴파일할 job 수를 `AddTotal`로, 끝난 job을 `Add`로 보낸다(너겟 적중 포함). 쿠킹 라이브러리로 연 형식은 보고가 없어 0 / 0이다(단계 몫은 시간 보정 — 8.2절 — 이 정한다). 단계를 나갈 때 떼고 Info `Startup shader preparation reported <끝남> of <전체> shader job(s)`을 남긴다.
-- 확인: Sandbox `--self-test` 엔진 호스트 자식 `--engine --window --frames 3 --graphics=opengl`(Windows 쿠킹 프로필에 없는 형식이라 공급자가 만든다)의 그 줄이 N of N(N > 0)이다(진행 보고 14장 32). 스플래시를 띄우지 않는 실행(데스크톱 세션 끊김)은 판정 불가다.
+- 확인: Sandbox `--self-test` 엔진 호스트 자식 `--engine --window --frames 3 --graphics=opengl`(Windows 쿠킹 프로필에 없는 형식이라 공급자가 만든다)의 그 줄이 N of N(N > 0)이다(진행 보고 14장 32). 데스크톱 세션이 끊겼거나 자식이 화면 렌더를 시작하지 못한 기기(OpenGL ES 장치·lane 실패 — 그때는 0 / 0)는 판정 불가다.
