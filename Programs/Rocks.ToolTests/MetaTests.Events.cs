@@ -81,6 +81,27 @@ internal static partial class MetaTests
             }
         });
 
+        // 손자 클래스가 물려받은 이벤트(다른 헤더의 조부모 선언)의 연산표는 조부모의 NativeTypeKey를 쓴다 — 생성 소스가 직접 base뿐
+        // 아니라 이벤트를 선언한 조상의 생성 헤더도 include해야 컴파일된다(UiWidget TileViewWidget → ListViewWidget → ListViewBaseWidget).
+        suite.Add("Meta.InheritedEventFromAGrandparentHeaderCompiles", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            probe.WriteHeader("Root.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Object/Event.h>\n" +
+                "namespace probe {\nROCKS_CLASS()\nclass Root : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Root(rocks::Allocator& allocator) noexcept : changed(allocator) {}\n" +
+                "ROCKS_PROPERTY(Params = \"amount\") rocks::Event<rocks::int32> changed;\n};\n}\n");
+            probe.WriteHeader("Middle.h", "#pragma once\n#include <Root.h>\nnamespace probe {\nROCKS_CLASS()\nclass Middle : public Root {\n" +
+                "ROCKS_GENERATED_BODY()\npublic:\nexplicit Middle(rocks::Allocator& allocator) noexcept : Root(allocator) {}\n};\n}\n");
+            await probe.GenerateAsync("#pragma once\n#include <Middle.h>\nnamespace probe {\nROCKS_CLASS()\nclass Leaf final : public Middle {\n" +
+                "ROCKS_GENERATED_BODY()\npublic:\nexplicit Leaf(rocks::Allocator& allocator) noexcept : Middle(allocator) {}\n};\n}\n",
+                extra: ["--input", probe.HeaderPath("Root.h"), "--include", "Root.h", "--input", probe.HeaderPath("Middle.h"), "--include", "Middle.h"]);
+            string generated = Compact(File.ReadAllText(probe.Source));
+            Verify.That(generated.Contains("detail::MakeEventOps<&::probe::Root::changed>(", StringComparison.Ordinal), "inherited event ops entry");
+            Verify.That(generated.Contains("#include<Root.generated.h>", StringComparison.Ordinal), "grandparent generated header");
+            ProcessResult compiled = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, compiled.ExitCode, "inherited grandparent event compiles: " + compiled.StdOut + compiled.StdErr);
+        });
+
         // ROCKS_NATIVE 이벤트(RMC2801 — 저장·Sparks·도구가 보지 못한다).
         AddRejectGroup(context, "Meta.EventNeedsProperty", [
             EventValue("ROCKS_NATIVE() rocks::Event<rocks::int32> changed;", "changed(allocator)")],
