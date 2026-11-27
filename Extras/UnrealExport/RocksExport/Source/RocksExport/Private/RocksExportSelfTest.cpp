@@ -854,6 +854,18 @@ void RocksExportSelfTest::RunSkeletalExtraction(TArray<FString>& Errors)
 	Expect(Errors, MeshData->GetArrayField(TEXT("bones")).Num() == Mesh->GetRefSkeleton().GetRawBoneNum()
 		&& MeshData->GetArrayField(TEXT("lods")).Num() == Mesh->GetLODNum(), TEXT("mesh bones or LOD count"));
 
+	// 머티리얼 슬롯(6.3절 13번): 수와 슬롯 이름이 GetMaterials()와 같다.
+	const TArray<TSharedPtr<FJsonValue>>& Materials = MeshData->GetArrayField(TEXT("materials"));
+	bool bMaterialsMatch = Materials.Num() == Mesh->GetMaterials().Num();
+	for (int32 Slot = 0; bMaterialsMatch && Slot < Materials.Num(); ++Slot)
+	{
+		const TSharedPtr<FJsonObject> Info = Materials[Slot]->AsObject();
+		bMaterialsMatch = Info->GetStringField(TEXT("MaterialSlotName")) == Mesh->GetMaterials()[Slot].MaterialSlotName.ToString()
+			&& Info->HasField(TEXT("ImportedMaterialSlotName")) && Info->HasField(TEXT("MaterialInterface"));
+	}
+
+	Expect(Errors, bMaterialsMatch, TEXT("skeletal mesh material slots differ from GetMaterials()"));
+
 	// LOD 0 원본의 스킨 가중치: 영향 수 합이 메시 설명과 같다(BoneInfluences 시작 표 마지막 값).
 	FMeshDescription Source;
 	const bool bSource = Mesh->CloneMeshDescription(0, Source);

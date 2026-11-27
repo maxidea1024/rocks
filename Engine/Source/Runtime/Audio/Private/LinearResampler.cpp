@@ -136,6 +136,35 @@ uint32 LinearResampler::OutputFramesBefore(int64 inputFrame) const noexcept {
     return frames;
 }
 
+uint32 LinearResampler::OutputFramesFor(uint32 inputFrames, uint32 maxOutputFrames) const noexcept {
+    // InputFramesNeeded와 같은 경로를 한 frame씩 밟으며, 그 frame까지의 요구가 입력을 넘기 전에
+    // 멈춘다(요구는 단조 증가).
+    const uint32 limit = maxOutputFrames < MaxBlockFrames ? maxOutputFrames : MaxBlockFrames;
+    const int64 available = inputFrames;
+    int64 position = position_;
+    int64 needed = 0;
+    uint32 done = ratioDone_;
+    uint32 frames = 0;
+    while (frames < limit) {
+        const uint32 nextDone = done < ratioTotal_ ? done + 1 : done;
+        const int64 next = position + StepAt(nextDone);
+        int64 need = ReadNeed(position);
+        need = need > needed ? need : needed;
+        const int64 consumed = CeilFrames(next);
+        need = consumed > need ? consumed : need;
+        if (need > available) {
+            break;
+        }
+
+        needed = need;
+        position = next;
+        done = nextDone;
+        ++frames;
+    }
+
+    return frames;
+}
+
 Result<uint32> LinearResampler::Process(const PlanarConstView& input,
                                         const PlanarView& output) noexcept {
     if (input.channelCount != channelCount_ || output.channelCount != channelCount_) {

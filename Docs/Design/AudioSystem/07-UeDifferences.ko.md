@@ -32,3 +32,5 @@
 | 원본 bulk 정밀도 | 16비트 교차 WAV byte | 디코드 PCM planar, Int16·Int24·Float32(3.10.1절) | 24비트·float 원본 정밀도 유지 |
 | 합성 사운드 에셋 | Sound Cue(`USoundNode` 트리)와 MetaSounds 둘 다 | `SoundGraph`(MetaSounds 대응) 하나 | UE도 새 작업은 MetaSounds가 주력이고 Sound Cue 기능(랜덤·레이어·switch·지연·loop)은 그래프 노드로 덮인다. 두 체계를 따로 유지하지 않는다(AD29) |
 | Opus 플랫폼 rate | `bResampleForDevice`면 Opus도 등급 rate(8·12·16·24·48 kHz 중)로 인코드 | Opus 플랫폼 데이터는 늘 48 kHz, 등급 rate는 PCM16·ADPCM만 | 디코더·청크 규칙을 rate 하나로 둔다(3.32절), byte는 품질 배수로 줄인다(3.39.3절) |
+| 짧은 loop 디코드 | non-streaming은 길이와 상관없이 `DTYPE_RealTime`(`AudioDevice.cpp:7027`), loop는 디코더 seek | loop 길이가 1 s(`StreamMinLoopSeconds`) 미만인 looping clip은 로드 때 통째 디코드(3.40.3절) | 스트림 디코더가 바퀴마다 loop 시작을 다시 열고 pre-roll을 디코드하므로(3.40.2절) 짧은 loop의 비용 상한 |
+| 스트림 디코드 지연 | 렌더 스레드가 디코드 작업 완료를 기다림(`AudioMixerSourceBuffer.cpp:550` `EnsureCompletion`) — 늦으면 렌더가 멈춤 | AudioRT는 기다리지 않음 — 링이 모자라면 그 voice만 무음(굶음)이고 이어 재생(3.40.1절) | AudioRT 무대기 계약(3.2절), 한 스트림의 지연이 전체 출력을 멈추지 않게 |

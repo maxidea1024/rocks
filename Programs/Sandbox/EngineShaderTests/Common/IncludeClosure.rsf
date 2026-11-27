@@ -22,17 +22,31 @@
 #include "/Engine/Private/Math/UnitVectorEncoding.rsh"
 #include "/Engine/Private/Math/VectorMath.rsh"
 #include "/Engine/Private/Color/ChromaticAdaptation.rsh"
+#include "/Engine/Private/Color/ColorMaps.rsh"
 #include "/Engine/Private/Color/ColorSpaces.rsh"
 #include "/Engine/Private/Color/FilmicToneCurve.rsh"
+#include "/Engine/Private/Color/LutCoordinates.rsh"
 #include "/Engine/Private/Color/TransferFunctions.rsh"
 #include "/Engine/Private/Shading/DiffuseTerms.rsh"
 #include "/Engine/Private/Shading/EnvironmentBrdf.rsh"
 #include "/Engine/Private/Shading/MicrofacetTerms.rsh"
 #include "/Engine/Private/Shading/SurfaceAttributes.rsh"
 #include "/Engine/Private/Shading/SurfaceShading.rsh"
+#include "/Engine/Private/Utility/TextureSamplingHelpers.rsh"
 #include "/Engine/Shared/ReservedBindingSpaces.h"
 #include "/Engine/Shared/ShaderStaticAssert.h"
 #include "/Engine/Shared/ShaderTypeAliases.h"
+
+// SL1 파일(Docs/Design/EngineShaders 14장): 출력 장치 부호화는 장치 번호를, 그룹 연산은 그룹 스레드 수를
+// include 전에 정한다. CS 전용 API는 CS에서만 include한다.
+#define DISPLAY_OUTPUT_DEVICE 0
+#include "/Engine/Private/Color/DisplayEncoding.rsh"
+
+#if defined(ROCKS_COMPUTE_SHADER)
+#define GROUP_OPERATION_THREADS 64
+#include "/Engine/Private/Common/ComputeDispatch.rsh"
+#include "/Engine/Private/Common/WaveOperations.rsh"
+#endif
 
 ROCKS_SHADER_STATIC_ASSERT(ReservedRootConstantsSpace == 3u, "root constants live in space 3");
 
@@ -81,6 +95,12 @@ IncludeClosurePixelOutput IncludeClosurePixel(float4 position : SV_Position) {
 RWStructuredBuffer<float4> IncludeClosureOutput;
 
 [numthreads(64, 1, 1)]
-void IncludeClosureCompute(uint3 id : SV_DispatchThreadID) {
-    IncludeClosureOutput[id.x] = IncludeClosureValue(id.x) + float4(UnpackRGB10A2Unorm(id.x).xyz, 0.0);
+void IncludeClosureCompute(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex) {
+#if defined(ROCKS_COMPUTE_SHADER)
+    const uint total = GroupSumUint(DivideAndRoundUp(id.x, 3u), groupIndex);
+#else
+    const uint total = groupIndex;
+#endif
+    IncludeClosureOutput[id.x] = IncludeClosureValue(id.x) + float4(UnpackRGB10A2Unorm(id.x).xyz, 0.0) +
+                                 float4(TurboColorMap((float)total), EncodeDisplayColor(LutTexelCenterCoordinate(float3(0.5, 0.5, 0.5), 32.0)).x);
 }

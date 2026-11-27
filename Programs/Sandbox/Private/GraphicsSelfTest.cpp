@@ -17,6 +17,7 @@
 #include "ShaderReloadSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
+#include "UtilityPassSelfTest.h"
 #include "FormatSelfTest.h"
 #include "TextureSelfTest.h"
 #include "MsaaSelfTest.h"
@@ -539,6 +540,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
 
     // 엔진 셰이더 SL0 GPU probe(Docs/Design/EngineShaders 7.6절): CPU 기준 대조와 장치 사이 기록.
     failures += RunEngineShaderChecks(name, device, result.triangle.GetAllocator());
+    // 엔진 셰이더 SL1 유틸리티 pass(Docs/Design/EngineShaders 14.6절 3항): 밉 생성·clear·기본
+    // 텍스처·깊이 복사·자리표시.
+    failures += RunUtilityPassChecks(name, device, result.triangle.GetAllocator());
     if (engineShadersOnly) {
         result.passed = failures == before;
         printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);

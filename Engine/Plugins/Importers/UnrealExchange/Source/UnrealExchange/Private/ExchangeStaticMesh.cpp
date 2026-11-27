@@ -8,7 +8,7 @@
 #include <UnrealExchange/ExchangeStaticMesh.h>
 #include <UnrealExchange/ExchangeStaticMeshSettings.h>
 
-#include "ExchangeJsonRead.h"
+#include "ExchangeMeshCommon.h"
 
 // 교환 정적 메시 → 정적 메시 임포트 명세 변환이다(Docs/Design/UnrealExchange 5.5절 1–9번).
 
@@ -16,11 +16,7 @@ namespace rocks {
 
 namespace exchange_static_mesh {
 
-using exchange_detail::Member;
-using exchange_detail::ReadBool;
-using exchange_detail::ReadInt32;
-using exchange_detail::ReadString;
-using exchange_detail::ReadUInt;
+using namespace exchange_detail;
 using SettingRow = ExchangeStaticMeshSettingRow;
 
 // 표에 없는 자리다(LodMeshes).
@@ -28,9 +24,6 @@ constexpr uint32 NoMesh = NumericLimits<uint32>::Max();
 // UE FMeshSectionInfoMap 키 = LODIndex << 16 | SectionIndex(StaticMesh.cpp GetMeshMaterialKey)다.
 constexpr uint32 SectionKeyShift = 16;
 constexpr uint64 SectionKeyMask = 0xffff;
-// UE FName None의 덤프 이름이다(빈 이름으로 본다).
-constexpr StringView NoneName = "None";
-
 // UE ECollisionEnabled 값 이름(CollisionEnabled 순서 — MeshAnimationAssets 4.8절 1)이다.
 constexpr StringView CollisionEnabledNames[] = {"NoCollision",     "QueryOnly", "PhysicsOnly",
                                                 "QueryAndPhysics", "ProbeOnly", "QueryAndProbe"};
@@ -51,239 +44,20 @@ constexpr UnsupportedShapeKey UnsupportedShapes[] = {
     {"SkinnedTriangleMeshElems", UnsupportedCollisionFeature::SkinnedTriangleMesh},
 };
 
-template <usize Count>
-usize FindName(const StringView (&names)[Count], StringView name) noexcept {
-    for (usize index = 0; index < Count; ++index) {
-        if (names[index] == name) {
-            return index;
-        }
-    }
-
-    return Count;
-}
-
-// UE None을 빈 이름으로 본다.
-StringView WithoutNone(StringView name) noexcept {
-    return name == NoneName ? StringView() : name;
-}
-
-bool Number(JsonValue value, double& out) noexcept {
-    return static_cast<bool>(ReadExchangeNumber(value, out));
-}
-
-// 없는 키는 그대로 두고 참, 있으면 종류가 맞아야 참이다(아래 Opt* 모두).
-bool OptNumber(JsonValue value, double& out) noexcept {
-    return !value.IsValid() || Number(value, out);
-}
-
-bool OptFloat(JsonValue value, float& out) noexcept {
-    double read = out;
-    if (!OptNumber(value, read)) {
-        return false;
-    }
-
-    out = static_cast<float>(read);
-    return true;
-}
-
-bool OptBool(JsonValue value, bool& out) noexcept {
-    return !value.IsValid() || ReadBool(value, out);
-}
-
-bool OptInt32(JsonValue value, int32& out) noexcept {
-    return !value.IsValid() || ReadInt32(value, out);
-}
-
-bool OptString(JsonValue value, StringView& out) noexcept {
-    return !value.IsValid() || ReadString(value, out);
-}
-
-// UE FVector `{X, Y, Z}`다.
-bool OptVector(JsonValue value, Vec3d& out) noexcept {
-    if (!value.IsValid()) {
-        return true;
-    }
-
-    Vec3d read;
-    if (!Number(Member(value, "X"), read.x) || !Number(Member(value, "Y"), read.y) ||
-        !Number(Member(value, "Z"), read.z)) {
-        return false;
-    }
-
-    out = read;
-    return true;
-}
-
-// UE FRotator `{Pitch, Yaw, Roll}`(도 — Rocks Rotator와 같은 순서·단위)다.
-bool OptRotator(JsonValue value, Rotator<double>& out) noexcept {
-    if (!value.IsValid()) {
-        return true;
-    }
-
-    Rotator<double> read;
-    if (!Number(Member(value, "Pitch"), read.pitch) || !Number(Member(value, "Yaw"), read.yaw) ||
-        !Number(Member(value, "Roll"), read.roll)) {
-        return false;
-    }
-
-    out = read;
-    return true;
-}
-
-// UE FQuat `{X, Y, Z, W}`다.
-bool OptQuat(JsonValue value, Quatd& out) noexcept {
-    if (!value.IsValid()) {
-        return true;
-    }
-
-    Quatd read;
-    if (!Number(Member(value, "X"), read.x) || !Number(Member(value, "Y"), read.y) ||
-        !Number(Member(value, "Z"), read.z) || !Number(Member(value, "W"), read.w)) {
-        return false;
-    }
-
-    out = read;
-    return true;
-}
-
-// 없는 키는 빈 배열로 보고, 있으면 배열이어야 한다.
-bool OptArray(JsonValue value) noexcept {
-    return !value.IsValid() || value.IsArray();
-}
-
 } // namespace exchange_static_mesh
 
 // ExchangeStaticMesh::Build의 단계들이다(private 상태에 쓴다).
-struct ExchangeStaticMeshBuilder {
+struct ExchangeStaticMeshBuilder : exchange_detail::ExchangeMeshContext {
     ExchangeStaticMesh& mesh;
     const ExchangeStaticMeshInput& input;
-    ExchangeMeshFailure& failure;
-    Allocator& allocator;
-    NamePool& names;
     // 모든 기록에서 NFC로 바뀐 이름 수다.
     uint64 normalized = 0;
 
-    // 할당 실패는 코드 없이, 그 밖은 code로 실패한다.
-    Result<void> Fail(AssetDiagnosticCode code, ErrorCode error, uint64 detail) noexcept {
-        failure.code = error == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None : code;
-        failure.detail = detail;
-        return Result<void>::Failure(error);
-    }
-
-    Result<void> Corrupt(uint64 detail) noexcept {
-        return Fail(AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData, detail);
-    }
-
-    Result<void> Warn(AssetDiagnosticCode code, uint64 detail, StringView key) noexcept {
-        ExchangeSettingWarning warning;
-        warning.code = code;
-        warning.detail = detail;
-        warning.key = key;
-        return mesh.warnings_.TryPushBack(warning);
-    }
-
-    // 번역한 JSON 객체 json을 값 struct value에 ImportJson한다(없는 키면 그대로). 진단을 남긴
-    // 거부는 덤프 내용의 문제다(InvalidSource / CorruptData — 10.3절 오류 값).
-    template <class T>
-    Result<void> ImportValue(JsonValue json, T& value, uint64 detail) noexcept {
-        if (!json.IsValid()) {
-            return Result<void>::Success();
-        }
-
-        auto lease = input.registry->Types().AcquireValueType(TypeIdOf<T>(), TypeKind::Struct);
-        if (!lease) {
-            return Result<void>::Failure(lease.Error());
-        }
-
-        reflection_text::TextCodecOptions codec;
-        reflection_text::TextDiagnostics diagnostics(allocator);
-        auto prepared = reflection_text::ImportJson(
-            json,
-            reflection_text::AssignmentTarget::Value(*input.registry, input.access, lease.Value(),
-                                                     &value, allocator),
-            codec, diagnostics);
-        if (!prepared) {
-            // 진단이 없는 실패(타입 표·문맥·한도·할당)는 덤프 내용이 아니라 코드 없이 그대로다.
-            const bool content =
-                prepared.Error() == ErrorCode::InvalidArgument && diagnostics.Count() != 0;
-            return content
-                       ? Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, detail)
-                       : Result<void>::Failure(prepared.Error());
-        }
-
-        auto published = prepared.Value().Publish();
-        return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
-    }
-
-    // 번역한 참조(objectPath 문자열 — references에 있는 것만 남았다 — 또는 null)의 id다.
-    Result<void> TranslatedReference(JsonValue value, AssetId& out, uint64 detail) noexcept {
-        out = AssetId{};
-        if (!value.IsValid() || value.IsNull()) {
-            return Result<void>::Success();
-        }
-
-        if (!value.IsString()) {
-            return Corrupt(detail);
-        }
-
-        const AssetId* id =
-            input.references != nullptr ? input.references->Find(value.GetString()) : nullptr;
-        out = id != nullptr ? *id : AssetId{};
-        return Result<void>::Success();
-    }
-
-    // 덤프 원문의 참조(`{objectPath}` 또는 null)의 id다(references에 없으면 비운다).
-    Result<void> DumpReference(JsonValue value, AssetId& out, bool& present,
-                               uint64 detail) noexcept {
-        using namespace exchange_static_mesh;
-        out = AssetId{};
-        present = false;
-        if (!value.IsValid() || value.IsNull()) {
-            return Result<void>::Success();
-        }
-
-        StringView path;
-        if (!value.IsObject() || value.Size() != 1 ||
-            !ReadString(Member(value, "objectPath"), path)) {
-            return Corrupt(detail);
-        }
-
-        present = true;
-        const AssetId* id = input.references != nullptr ? input.references->Find(path) : nullptr;
-        out = id != nullptr ? *id : AssetId{};
-        return Result<void>::Success();
-    }
-
     // 설정 덤프를 표로 번역해 mesh.translated_에 둔다(경고는 mesh.warnings_ 뒤).
     Result<void> Translate() noexcept {
-        StringBuilder<> text(allocator);
-        JsonWriter writer(text);
-        ExchangeSettingInput settings;
-        settings.settings = input.asset->settings;
-        settings.rows = ExchangeStaticMeshSettingRows();
-        settings.output = ExchangeClass::StaticMesh;
-        settings.references = input.references;
-        // 번역의 CorruptData만 덤프 내용(값이 행 종류와 맞지 않음)이다. 그 밖(행 표의 결함
-        // InvalidArgument, writer 한도·할당)은 코드 없이 그대로다.
-        if (auto translated = TranslateExchangeSettings(settings, writer, mesh.warnings_);
-            !translated) {
-            return translated.Error() == ErrorCode::CorruptData
-                       ? Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, 0)
-                       : Result<void>::Failure(translated.Error());
-        }
-
-        if (auto finished = writer.Finish(); !finished) {
-            return Result<void>::Failure(finished.Error());
-        }
-
-        const JsonError parsed = mesh.translated_.Parse(text.View());
-        if (parsed.code == JsonErrorCode::OutOfMemory) {
-            return Result<void>::Failure(ErrorCode::OutOfMemory);
-        }
-
-        // writer가 쓴 원문이라 읽기 실패는 코드 결함이다(진단 코드 없이).
-        return parsed.Succeeded() ? Result<void>::Success()
-                                  : Result<void>::Failure(ErrorCode::InvalidArgument);
+        return ExchangeMeshContext::Translate(input.asset->settings,
+                                              ExchangeStaticMeshSettingRows(),
+                                              ExchangeClass::StaticMesh, mesh.translated_);
     }
 
     // 기록 하나를 적재해 mesh.meshes_ 번호를 index에 둔다.
@@ -416,45 +190,9 @@ struct ExchangeStaticMeshBuilder {
     // 슬롯이다(5.5절 6번).
     Result<void> ReadSlots() noexcept {
         using namespace exchange_static_mesh;
-        constexpr uint64 Detail = static_cast<uint64>(SettingRow::StaticMaterials);
-        const JsonValue slots = Member(mesh.translated_.Root(), "StaticMaterials");
-        if (!OptArray(slots)) {
-            return Corrupt(Detail);
-        }
-
-        for (usize index = 0; index < slots.Size(); ++index) {
-            const JsonValue item = slots.At(index);
-            StaticMeshImportSlot slot;
-            if (!item.IsObject() || !OptString(Member(item, "MaterialSlotName"), slot.slotName) ||
-                !OptString(Member(item, "ImportedMaterialSlotName"), slot.importedSlotName)) {
-                return Corrupt(Detail);
-            }
-
-            slot.slotName = WithoutNone(slot.slotName);
-            slot.importedSlotName = WithoutNone(slot.importedSlotName);
-            if (auto read =
-                    TranslatedReference(Member(item, "MaterialInterface"), slot.material, Detail);
-                !read) {
-                return read;
-            }
-
-            if (auto read = TranslatedReference(Member(item, "OverlayMaterialInterface"),
-                                                slot.overlayMaterial, Detail);
-                !read) {
-                return read;
-            }
-
-            if (auto read = ImportValue(Member(item, "UVChannelData"), slot.uvDensity, Detail);
-                !read) {
-                return read;
-            }
-
-            if (auto pushed = mesh.slots_.TryPushBack(slot); !pushed) {
-                return pushed;
-            }
-        }
-
-        return Result<void>::Success();
+        return ExchangeMeshContext::ReadSlots(Member(mesh.translated_.Root(), "StaticMaterials"),
+                                              mesh.slots_,
+                                              static_cast<uint64>(SettingRow::StaticMaterials));
     }
 
     // 섹션 정보다(5.5절 7번 — 키를 풀어 (lod, section) 엄격 증가로 넣는다).
@@ -813,12 +551,6 @@ struct ExchangeStaticMeshBuilder {
         return Result<void>::Success();
     }
 
-    // PerPlatform 값(번역 결과 `{defaultValue}`)의 기본값이다.
-    bool PerPlatformInt(JsonValue value, int32& out) noexcept {
-        using namespace exchange_static_mesh;
-        return !value.IsValid() || ReadInt32(Member(value, "defaultValue"), out);
-    }
-
     // 에셋 설정이다(5.5절 5번).
     Result<void> ReadAssetSettings() noexcept {
         using namespace exchange_static_mesh;
@@ -916,7 +648,10 @@ Result<void> ExchangeStaticMesh::Build(const ExchangeStaticMeshInput& input,
 
     started_ = true;
 
-    ExchangeStaticMeshBuilder builder{*this, input, failure, *allocator_, *input.registry->Names()};
+    ExchangeStaticMeshBuilder builder{{failure, *allocator_, *input.registry, input.access,
+                                       input.references, *input.registry->Names(), warnings_},
+                                      *this,
+                                      input};
     if (auto done = builder.Translate(); !done) {
         return done;
     }

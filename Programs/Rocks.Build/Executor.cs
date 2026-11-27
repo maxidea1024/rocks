@@ -37,7 +37,21 @@ internal static class Executor
         // 컴파일러가 쓰는 depfile이다(의존 기록의 원천). response file처럼 이름의 '+'로 staged 출력과 겹치지 않게 한다.
         string depfile = Path.Combine(temporaryRoot, DepfileName);
         // 펼친 인자다. key는 위에서 자리 표시 인자로 이미 계산했으므로 아래 response file·depfile 경로는 key에 들어가지 않는다.
-        string[] arguments = action.ResolveArguments(stagedOutputs, depfile);
+        // StageWorkingDirectory action은 임시 디렉터리에서 돌고 출력·depfile을 그 안의 파일 이름으로 받는다(NativeAction).
+        string workingDirectory = action.StageWorkingDirectory ? temporaryRoot : request.RootDirectory;
+        string[] arguments = action.StageWorkingDirectory
+            ? action.ResolveArguments(stagedOutputs.Select(path => Path.GetFileName(path)).ToArray(), DepfileName)
+            : action.ResolveArguments(stagedOutputs, depfile);
+        // Windows에서 stage 실행 action의 절대 경로 인자(원본·include 디렉터리)는 stage 기준 상대 경로로 넘긴다. Windows ISPC는 명령줄의
+        // 비 ASCII 절대 경로 파일을 열지 못한다(실측 1.32.0 — 상대 경로는 연다). 루트 위의 공통 조상(사용자 폴더 등)이 비 ASCII여도 상대
+        // 경로에는 그 부분이 없다. Windows는 ".."를 문자열로 정규화하므로 출력 디렉터리가 링크여도 같다. POSIX 커널은 ".."를 실제
+        // 디렉터리로 풀어 출력이 symlink면 다른 곳을 가리키므로 절대 경로 그대로 둔다. key·BuildInfo는 계획의 절대 경로 인자를 쓴다
+        // (IspcTools.StageRelative — 계획이 같은 규칙으로 미리 검사한다).
+        if (action.StageWorkingDirectory && request.Toolchain.Platform == NativePlatform.Windows)
+        {
+            arguments = arguments.Select(argument => Path.IsPathFullyQualified(argument) ? Path.GetRelativePath(temporaryRoot, argument) : argument).ToArray();
+        }
+
         ResponseFileQuoting? quoting = NativeCommandLine.QuotingOf(request.Toolchain, action);
         ResponseFileQuoting? syntax = NativeCommandLine.ResponseFileSyntax(request.ResponseFiles, quoting, action.Tool, arguments);
         NativeActionResult? result = null;
@@ -71,7 +85,7 @@ internal static class Executor
                 }
 
                 process = await (runProcess ?? ProcessRunner.RunAsync)(new ProcessSpec(action.Tool,
-                    processArguments, request.RootDirectory, request.Toolchain.Environment, MeasureUsage: request.MeasureProcesses), cancellationToken);
+                    processArguments, workingDirectory, request.Toolchain.Environment, MeasureUsage: request.MeasureProcesses), cancellationToken);
                 usage = process.Usage;
             }
 
@@ -79,7 +93,7 @@ internal static class Executor
             string? dependencyFailure = null;
             if (process.ExitCode == 0 && action.DependencyRecord is string dependencyRecord)
             {
-                dependencyFailure = WriteDependencyRecord(request, action, inputs, depfile,
+                dependencyFailure = WriteDependencyRecord(action, inputs, depfile, workingDirectory,
                     stagedOutputs[IndexOfOutput(action, dependencyRecord)]);
             }
 
@@ -207,7 +221,7 @@ internal static class Executor
     // 대신한다). 이 action의 산출물(object 자신)과 이 plan의 다른 산출물은 넣지 않는다 — 산출물 입력은 선언 입력이다. 해시는 빌드의 입력
     // 메모에서 가져온다(빌드 시작 때의 내용 — 빌드 중 바뀌면 엔진의 InputSnapshot 비교가 이 실행의 기록을 버린다). 실패하면 사유를
     // 돌려주고 기록을 쓰지 않는다.
-    private static string? WriteDependencyRecord(NativeBuildRequest request, NativeAction action, BuildInputs inputs, string depfile, string staged)
+    private static string? WriteDependencyRecord(NativeAction action, BuildInputs inputs, string depfile, string workingDirectory, string staged)
     {
         try
         {
@@ -217,7 +231,11 @@ internal static class Executor
             }
 
             var entries = new List<DependencyEntry>();
-            foreach (string path in Depfile.Parse(File.ReadAllText(depfile), request.RootDirectory))
+            string text = File.ReadAllText(depfile);
+            IReadOnlyList<string> paths = action.DependencyFormat == DependencyFileFormat.Lines
+                ? IspcTools.ParseDependencies(text, workingDirectory)
+                : Depfile.Parse(text, workingDirectory);
+            foreach (string path in paths)
             {
                 if (inputs.IsToolchainOwned(path) || inputs.IsProduced(path))
                 {

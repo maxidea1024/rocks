@@ -2039,7 +2039,7 @@ if (OperatingSystem.IsWindows())
 
 // asset-import-unreal(UnrealExchange 10.5절, 텍스처 10.6절·4.6절 — UX2b): 저장소 fixture 묶음의 dry run(텍스처 하나 계획), 실행
 // (텍스처 임포터 연결 — 새로 만듦, 다시 실행하면 재임포트, 일반 asset-reimport도 교환 원본을 다시 읽는다), 임포터 없는 클래스(건너뜀
-// 경고), golden 묶음의 정적 메시(새로 만듦·--mesh-normals=rocks 재임포트 — UX3b), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+// 경고), golden 묶음의 정적 메시(새로 만듦·--mesh-normals=rocks 재임포트 — UX3b)·스킨 메시와 스켈레톤(UX7b), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");
 try
 {
@@ -2117,6 +2117,13 @@ try
     ReportUnreal("asset-import-unreal static mesh reimported", meshReimported.ExitCode == 0 &&
         meshReimported.StdOut.Contains("asset-import-unreal: 0 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
         meshReimported);
+
+    // 스킨 메시(UnrealExchange 6.4절 — UX7b): golden SK_Column은 Hard 닫힘의 스켈레톤과 함께 둘이 만들어진다.
+    ProcessResult skinnedCreated = await RunUnreal("asset-import-unreal", golden,
+        "--only=/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column", projectOption);
+    ReportUnreal("asset-import-unreal skeletal mesh and skeleton created", skinnedCreated.ExitCode == 0 &&
+        skinnedCreated.StdOut.Contains("asset-import-unreal: 2 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        skinnedCreated);
 
     ProcessResult unrealHelp = await RunUnreal("asset-import-unreal", "--help");
     ReportUnreal("asset-import-unreal help", unrealHelp.ExitCode == 0 &&

@@ -191,8 +191,9 @@ internal static class Fingerprints
 
     // .c도 포함한다: 외부 C 라이브러리는 다른 .c를 include해 한 번역 단위로 빌드할 수 있다
     // (예: LZ4의 lz4hc.c가 lz4.c를 포함). include된 .c가 바뀌면 그 번역 단위를 다시 컴파일해야 한다.
+    // .isph는 ISPC include 파일이다(Docs/Design/BuildTargets 3.12절 BD48 — 원본 디렉터리에 새로 생긴 같은 이름 .isph를 놓치지 않는다).
     internal static readonly HashSet<string> HeaderExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp", ".c" };
+        { ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp", ".c", ".isph" };
 
     /// <summary>
     /// root 아래 파일을 결정적 순서로 연다. headersOnly 열거(include 디렉터리 inventory — 액션 key·InputSnapshot·도구 빌드 ID가

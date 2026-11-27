@@ -20,6 +20,24 @@ internal static class IdentityInventoryTests
             temp.Write("ProjectData/Schema/nested.rocksids.json", "after");
             Verify.That(nested != SourceSnapshot.Capture(temp.Root), "nested identity manifest escaped source evidence");
         });
+        // 실행 산출물 폴더(.gitignore와 같은 고정 경로 — Docs/Design/SplashScreen 8.2절)의 파일은 소스 증거에 들지 않는다. 같은 이름의
+        // 소스 폴더는 그대로 센다.
+        suite.Add("SourceSnapshot.IgnoresRunOutputFoldersOnly", () =>
+        {
+            using TemporaryDirectory temp = new();
+            temp.Write("Engine/Source/A.cpp", "a");
+            temp.Write("Engine/Saved/Startup/StartupProfile.json", "1");
+            temp.Write("Engine/Intermediate/AssetNuggets/00/x.rnug", "1");
+            temp.Write("Saved/Startup/root.rocksids.json", "1");
+            temp.Write("Engine/Source/Runtime/Engine/Public/Engine/Saved/SaveGame.h", "1");
+            var before = SourceSnapshot.Capture(temp.Root);
+            temp.Write("Engine/Saved/Startup/StartupProfile.json", "2");
+            temp.Write("Engine/Intermediate/AssetNuggets/01/y.rnug", "2");
+            temp.Write("Saved/Startup/root.rocksids.json", "2");
+            Verify.That(before == SourceSnapshot.Capture(temp.Root), "run output folders changed source evidence");
+            temp.Write("Engine/Source/Runtime/Engine/Public/Engine/Saved/SaveGame.h", "2");
+            Verify.That(before != SourceSnapshot.Capture(temp.Root), "a source folder named Saved escaped source evidence");
+        });
         suite.Add("IdentityInventory.DetectsMissingRenamesAndDuplicateDefinitions", () =>
         {
             using TemporaryDirectory temp = new();

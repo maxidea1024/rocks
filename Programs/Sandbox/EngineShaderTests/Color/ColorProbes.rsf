@@ -2,10 +2,16 @@
 // 결과를 쓴다. 기대값은 Sandbox EngineShaderReferenceColor.cpp(CPU double)다.
 #include "/Engine/Private/Common/ShaderPrelude.rsh"
 #include "/Engine/Private/Color/ChromaticAdaptation.rsh"
+#include "/Engine/Private/Color/ColorMaps.rsh"
 #include "/Engine/Private/Color/ColorSpaces.rsh"
 #include "/Engine/Private/Color/FilmicToneCurve.rsh"
+#include "/Engine/Private/Color/LutCoordinates.rsh"
 #include "/Engine/Private/Color/TransferFunctions.rsh"
 #include "/Plugin/EngineShaderTests/Common/ProbeCommon.rsh"
+
+// SDR sRGB 출력 장치(DisplayEncoding.rsh는 include 전에 장치 번호를 요구한다)다.
+#define DISPLAY_OUTPUT_DEVICE 0
+#include "/Engine/Private/Color/DisplayEncoding.rsh"
 
 // 행렬 번호(ProbeMatrix*)의 행렬이다.
 float3x3 SelectColorMatrix(uint index) {
@@ -108,6 +114,65 @@ float4 ColorFloatProbePixel(float4 position : SV_Position) : SV_Target0 {
     if (f == ProbeColorTemperature) {
         const float kelvin = Probe.parameters.x + (float)c * Probe.parameters.y;
         return float4(PlanckianLocusXy(kelvin), ColorTemperatureToXy(kelvin, true));
+    }
+
+    // SL1 A03(Docs/Design/EngineShaders 14.3절): LUT 좌표·SDR 부호화·색 지도·구분 색.
+    if (f == ProbeLutCoordinates) {
+        const float size = (float)DefaultLutSize;
+        if (s == 0u) {
+            return float4(LutTexelCenterCoordinate(color, size), size);
+        }
+
+        if (s == 1u) {
+            // 넓은 범위 선형 색: 성분마다 2^(-12 … 7).
+            const uint3 scales = uint3(ProbeBits(c, 3u), ProbeBits(c, 4u), ProbeBits(c, 5u)) % 20u;
+            const float3 scene = color * float3(ProbePowerOfTwo((int)scales.x - 12), ProbePowerOfTwo((int)scales.y - 12),
+                                                ProbePowerOfTwo((int)scales.z - 12));
+            return float4(LinearColorToLutCoordinate(scene, size), 0.0);
+        }
+
+        if (s == 2u) {
+            // 32³ texel 전부(사례 번호 = r + 32·g + 1024·b).
+            const uint3 texel = uint3(c % DefaultLutSize, (c / DefaultLutSize) % DefaultLutSize,
+                                      c / (DefaultLutSize * DefaultLutSize));
+            return float4(LutTexelToLinearColor(texel, size), LutTexelToNeutralColor(texel, size).x);
+        }
+
+        // 2D 펼친 LUT 픽셀 전부(1024 × 32).
+        const uint2 pixel = uint2(c % (DefaultLutSize * DefaultLutSize), c / (DefaultLutSize * DefaultLutSize));
+        return float4(float3(UnwrappedLutPixelToTexel(pixel, DefaultLutSize)), 0.0);
+    }
+
+    if (f == ProbeDisplayEncoding) {
+        if (s == 0u) {
+            // 8 bit 부호 256개의 선형 값과 SDR 범위 밖(1.5배·음수).
+            const float x = SrgbToLinear((float)(c & 0xffu) / 255.0);
+            return float4(EncodeSdrSrgbDisplay(float3(x, x * 1.5, x - 0.5)), EncodeDisplayColor(float3(x, x, x)).x);
+        }
+
+        return float4(EncodeDisplayColor(color * 2.0 - 0.25), 0.0);
+    }
+
+    if (f == ProbeColorMaps) {
+        // t ∈ [-0.25, 1.25](saturate 밖 포함, 사례 1024개 — c · 1.5/1023 − 0.25).
+        const float t = (float)c * (1.5 / 1023.0) - 0.25;
+        if (s == 0u) {
+            return float4(TurboColorMapSrgb(t), t);
+        }
+
+        if (s == 1u) {
+            return float4(ViridisColorMapSrgb(t), t);
+        }
+
+        if (s == 2u) {
+            return float4(TurboColorMap(t), t);
+        }
+
+        return float4(ViridisColorMap(t), t);
+    }
+
+    if (f == ProbeDistinctColor) {
+        return float4(DistinctIndexColor(c), 0.0);
     }
 
     if (f == ProbeTransfer) {

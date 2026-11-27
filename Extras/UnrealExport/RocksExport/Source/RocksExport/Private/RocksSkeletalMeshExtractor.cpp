@@ -125,6 +125,18 @@ bool FRocksSkeletalMeshExtractor::Extract(USkeletalMesh& Mesh, FRocksBundleWrite
 	}
 
 	Data.EndArray();
+
+	// 머티리얼 슬롯: USkeletalMesh::Materials는 transient UPROPERTY(에셋 Serialize가 따로 저장)라 settings 덤프에 들지
+	// 않으므로 FSkeletalMaterial마다 구조체 덤프로 따로 쓴다(6.3절 13번 — 정적 메시 BodySetup과 같은 방식).
+	FRocksPropertyDumper MaterialsDumper(&Mesh);
+	Data.Key(TEXT("materials"));
+	Data.BeginArray();
+	for (const FSkeletalMaterial& Material : Mesh.GetMaterials())
+	{
+		MaterialsDumper.DumpStruct(FSkeletalMaterial::StaticStruct(), &Material, Data);
+	}
+
+	Data.EndArray();
 	Data.EndObject();
 	OutBody.Data = Data.FinishFragment();
 
@@ -135,5 +147,7 @@ bool FRocksSkeletalMeshExtractor::Extract(USkeletalMesh& Mesh, FRocksBundleWrite
 	Dumper.DumpObject(&Mesh, Settings);
 	OutBody.Settings = Settings.FinishFragment();
 	OutBody.References = Dumper.GetReferences();
+	// 같은 경로는 의존을 합칠 때 하나가 된다(Hard 우선 — RocksExporter MergeReferences).
+	OutBody.References.Append(MaterialsDumper.GetReferences());
 	return true;
 }
