@@ -25,3 +25,4 @@
   - 7.1절 PlatformBase 행, 8.3절 0단계(Launch가 캡처, 실패 종료 코드는 `commandLineFailureExitCode`)를 맞췄다.
   - 18절 AP1: 크래시 처리 설계가 먼저 구현한 부분을 적고, 남은 일(`ApplicationKind` → `HostKind`, `suppressSystemErrorDialogs` ← `RunTraits::unattended`)을 적었다. 크래시 메타데이터에 가린 명령줄(CL2 뒤)·`--crash-*` 호스트 공용 옵션(CL4 뒤)·`BuildDescription`(AP2 뒤)을 더하는 일은 그 설계 21절에 있다.
 - **개정 4(2026-11-22)**: [오디오 시스템](../AudioSystem/README.ko.md) 요구로 오디오 실행 성격을 열었다. `RunTraits::audioOutput`(부트가 Server 대상·commandlet·benchmark·`--no-sound`로 정함)·`audioMuted`(`--mute-audio`), 비출시 `--allow-commandlet-audio`. UE `-enablesound`는 두지 않는다. 볼륨 배수는 오디오 CVar로 넘겼다(8.6절).
+- **개정 5(2026-11-27)**: [시작 화면](../SplashScreen/README.ko.md) 요구로 8.3절 부트 표에 9a단계(진행 중계·스플래시 판정·Show)를, 10.2절에 `--no-splash`를 더했다. 같은 날 문서를 장 파일로 나눴다(내용 변경 없음).

@@ -38,6 +38,7 @@
 | `--no-sound` | `audioOutput = false` | 받는다 | `-nosound`(`APP` 436, `-enablesound`는 두지 않는다 — 뒤 값이 앞 값을 덮는다) |
 | `--mute-audio` | `audioMuted = true` | 받는다 | `-muteaudio`(`APP` 443–453) |
 | `--allow-commandlet-audio` | commandlet에서도 `audioOutput`을 끄지 않는다 | 받지 않는다 | `IsAllowCommandletAudio()`(`APP` 437) |
+| `--no-splash` | 시작 화면을 띄우지 않는다([시작 화면](../SplashScreen/README.ko.md) 4절 `DisabledByCommandLine`, 개정 5). 실행 성격이 아니라 호스트 옵션이라 `RunTraits`에 두지 않고 판정 입력으로만 넘긴다 | 받는다 | `-NOSPLASH`(`Runtime/ApplicationCore/Private/Windows/WindowsPlatformSplash.cpp` 706행) |
 | `--instance-id <guid>` | AppInfo `instanceId` | 받지 않는다 | `-InstanceId=`(`APPC` 182–188) |
 | `--session-id <guid>`·`--session-name <text>` | AppInfo `sessionId`·`sessionName` | 받지 않는다 | `-SessionId=`·`-SessionName=`(`APPC` 191–203). UE도 `InitializeSession`을 비출시에서만 부른다(`LEL` 6880–6886) |
 

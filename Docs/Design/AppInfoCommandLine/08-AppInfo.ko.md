@@ -77,6 +77,7 @@ Config 5.4절 부트 순서 앞뒤에 다음을 끼운다.
 | 4 | `HostSettings::Initialize` — `projectName`·`projectDir`를 AppInfo에서 채운다. 설정 등록 코드는 여기서 `AppInfo::Get().Traits()`를 읽을 수 있다(10.1절) | 기존과 같다 |
 | 5–8 | 층 파일 → `--config` 파일 → `--set` 값 → `CompleteStartup`(기존 2–5단계). `--set` 값은 파싱한 배열을 그대로 받는다(14.3절) | 기존과 같다 |
 | 9 | LogHost 설치 → 시작 로그 묶음(D14) → 1단계에서 미룬 경고 | 기존과 같다 |
+| 9a | 창 호스트만: 진행 중계 `ProgressHub::Initialize` → 시작 화면 판정(`DecideSplashVisibility` — `HostKind`·`RunTraits`·`--no-splash`·`ui.splash.enabled`) → `StartupProgress::Begin` → `SplashScreen::Show`([시작 화면](../SplashScreen/README.ko.md) 10.3절, 개정 5) | 스플래시를 띄우지 못해도 Warning 뒤 계속한다 |
 | 10 | trace 세션 → `--trace` 목록 적용 → 엔진 루프 | 기존과 같다 |
 
 - 2단계의 대화상자 정책은 AppInfo를 거치지 않고 PlatformBase 값 하나로 둔다. 0–2단계의 Fatal도 같은 값을 본다.

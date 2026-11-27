@@ -1,6 +1,6 @@
 # 앱 정보와 명령줄 설계
 
-기준일: 2026-11-22, 개정 4(오디오 실행 성격 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`·`--allow-commandlet-audio` — [오디오 시스템](../AudioSystem/03-Design/03.08-EngineAndWorld.ko.md) 3.8.4절). 개정 3: 크래시 수집·실행 진입점 반영. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](../CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
+기준일: 2026-11-27, 개정 5(시작 화면 부트 단계·`--no-splash`). 이전: 2026-11-22, 개정 4(오디오 실행 성격 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`·`--allow-commandlet-audio` — [오디오 시스템](../AudioSystem/03-Design/03.08-EngineAndWorld.ko.md) 3.8.4절). 개정 3: 크래시 수집·실행 진입점 반영. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](../CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
 
 **착수 시점.** 고정 구현 순서(Curve → A0-G → A1–A6 → 화면 마일스톤)를 바꾸지 않는다. 이 문서의 단계(AP·CL — 18절)는 그 순서 안에 끼워 넣지 않으며 착수 시점은 사용자가 정한다. AP3(프레임 시간 전달)은 렌더 기반 RB1의 프레임 packet과 CVar 설계의 worker 묶음 장치에 기대므로 그 단계들과 함께 간다.
 
