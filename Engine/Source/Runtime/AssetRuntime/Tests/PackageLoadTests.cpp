@@ -420,7 +420,7 @@ TEST(AssetPackage_LoadHooksClassifyDiagnostics) {
 
 // 진단 이름표(AS 4.6절): 모든 코드가 고유한 이름을 갖고 열거 밖 값은 "Unknown"이다.
 TEST(AssetPackage_DiagnosticNames) {
-    constexpr uint32 last = static_cast<uint32>(AssetDiagnosticCode::IgnoredSourceChunks);
+    constexpr uint32 last = static_cast<uint32>(AssetDiagnosticCode::PlatformFormatFallback);
     for (uint32 index = 0; index <= last; ++index) {
         const char* name = AssetDiagnosticName(static_cast<AssetDiagnosticCode>(index));
         CHECK(StringView(name) != StringView("Unknown"));
