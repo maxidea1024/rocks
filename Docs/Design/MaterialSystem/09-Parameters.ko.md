@@ -43,7 +43,7 @@
 | Collection 참조 | 컬렉션 에셋 | static 변형(layout이 원문에 들어간다) | MAT2 |
 | Layer Stack | 레이어·혼합 함수 목록 | static 변형 | MAT3 |
 | Double Vector(절대 위치 등) | `Double4`(5.3절 — uniform은 double high·low 두 slot) | 없음 | MS2c(19장) |
-| 가상 텍스처·텍스처 컬렉션·sparse volume·커브 atlas | 해당 에셋 참조 | 없음 | TODO — 노드 서술과 속성은 MS1b, lowering은 선행(19.4.1절 `MPQ-RuntimeVirtualTexture`·`MPQ-TextureCollection`·`MPQ-SparseVolumeTexture`·`MPQ-CurveAsset`) 뒤 |
+| 가상 텍스처·텍스처 컬렉션·sparse volume·커브 atlas | 해당 에셋 참조 | 없음 | TODO — 노드 서술과 속성은 MS1b, lowering은 선행(19.4.1절 `MPQ-RuntimeVirtualTexture`·`MPQ-TextureCollection`·`MPQ-SparseVolumeTexture`) 뒤. 커브 atlas는 MS2c5(6.10절)에서 구현 — 행 번호 scalar 파라미터 |
 | font | — | — | TODO(`MPQ-Font`, 19.4.1절). 파라미터 노드 `FontSampleParameter`, 값은 (미리 구운 Font, 페이지). 함께 들일 비파라미터 노드 `FontSample`·`FontSignedDistance`, 단계 FT7 — [글꼴 설계](../Font/07-Consumers.ko.md) 7.4절 |
 
 - **IR 정체(6.12절 MS2e2).** 번역은 파라미터를 ParameterKey에서 만든 정체 Guid로 구분한다: 주 그래프 파라미터는 ParameterId, 함수 안은 SHA-256(소유 에셋, ParameterId[, 호출 경로 — "공유"가 아니면]) 앞 128 bit. static 값 입력과 IR 파라미터·텍스처 표는 이 정체로 찾는다.

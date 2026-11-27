@@ -166,6 +166,7 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
       pendingImpulses_(allocator), frameForces_(allocator), slept_(allocator), moved_(allocator),
       contactHits_(allocator), takenContactHits_(allocator),
       minDeltaVelocityForHitEvents_(static_cast<double>(settings.minDeltaVelocityForHitEvents)),
+      maxAngularVelocityDegrees_(static_cast<double>(settings.maxAngularVelocity)),
       maxAngularVelocityRadians_(
           static_cast<float>(static_cast<double>(settings.maxAngularVelocity) * RadiansPerDegree)),
       maxLinearVelocityMeters_(static_cast<float>(
@@ -722,6 +723,11 @@ Result<BodyKinematics> JoltPhysicsScene::ReadKinematics(PhysicsBodyHandle body) 
     kinematics.location = FromJoltPosition(bodies.GetPosition(slot->body), origin_);
     kinematics.rotation = FromJoltRotation(bodies.GetRotation(slot->body));
     kinematics.centerOfMass = FromJoltPosition(bodies.GetCenterOfMassPosition(slot->body), origin_);
+    // UE는 rigid body(Dynamic·Kinematic)만 질량·관성을 낸다(GetMass_AssumesLocked).
+    if (slot->motion != BodyMotion::Static) {
+        kinematics.mass = static_cast<double>(slot->massProperties.mMass);
+        kinematics.inertia = FromJoltInertiaDiagonal(slot->massProperties.mInertia);
+    }
     kinematics.linearVelocity = FromJoltLinearVelocity(bodies.GetLinearVelocity(slot->body));
     kinematics.angularVelocityRadians =
         FromJoltAngularVelocity(bodies.GetAngularVelocity(slot->body));

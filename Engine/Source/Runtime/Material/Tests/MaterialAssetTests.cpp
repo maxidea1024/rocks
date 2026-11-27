@@ -27,6 +27,8 @@
 #include <MaterialSchema/Nodes/MaterialAttributes/AttributeLayersProperties.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/LayerStackLayer.generated.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/LayerStackLayer.h>
+#include <MaterialSchema/Nodes/Parameters/CurveAtlasRowParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/CurveAtlasRowParameterProperties.h>
 #include <ObjectSerialization/StructRecord.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
@@ -738,9 +740,14 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
             call.materialFunction.assetId = asset_test::FixedId(0x6a3);
             material::ColorRampProperties ramp;
             ramp.colorCurve.assetId = asset_test::FixedId(0x6a6);
+            material::CurveAtlasRowParameterProperties row;
+            row.curve.assetId = asset_test::FixedId(0x6a8);
+            row.atlas.assetId = asset_test::FixedId(0x6a7);
             value.graph.domain = source.Names()->TryIntern("MaterialFunction").Value();
             return AddGraphNode(env, value.graph, Guid{0x30, 1}, "Material.FunctionCall", call) &&
-                   AddGraphNode(env, value.graph, Guid{0x30, 2}, "Material.ColorRamp", ramp);
+                   AddGraphNode(env, value.graph, Guid{0x30, 2}, "Material.ColorRamp", ramp) &&
+                   AddGraphNode(env, value.graph, Guid{0x30, 3}, "Material.CurveAtlasRowParameter",
+                                row);
         }));
 
     AssetTypeHookTable table(env.allocator, env.types);
@@ -761,10 +768,12 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
     AssetDependencySink functionSink(env.allocator);
     REQUIRE(table.CollectBuildDependencies(source, access, function, TypeOf<MaterialFunction>(),
                                            asset_test::FixedId(0x6a1), functionSink));
-    REQUIRE(functionSink.Dependencies().Size() == 2);
+    REQUIRE(functionSink.Dependencies().Size() == 3);
     CHECK(functionSink.Dependencies()[0].asset == asset_test::FixedId(0x6a3));
     // ColorRamp 색 커브도 번역이 읽는 Build 의존이다(6.13절 MS2f4).
     CHECK(functionSink.Dependencies()[1].asset == asset_test::FixedId(0x6a6));
+    // CurveAtlasRowParameter는 atlas(행 목록)만이다 — 커브 값은 atlas가 굽는다(6.10절 MS2c5).
+    CHECK(functionSink.Dependencies()[2].asset == asset_test::FixedId(0x6a7));
     registrations.Clear();
 }
 #endif

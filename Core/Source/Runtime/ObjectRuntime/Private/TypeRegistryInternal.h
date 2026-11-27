@@ -57,6 +57,12 @@ struct TypeRegistry::Record {
     uint32 leases = 0;
     uint32 dependents = 0;
     Record* base = nullptr;
+    // 변경 통지 대상 표다(Docs/Design/ChangeNotification.ko.md CN-D2 — 클래스만): notifyIds는 통지
+    // 번호 → 대상 ID(필드 → 기반부터의 함수, 각각 선언 순서), notifyOrder는 ID 정렬 순의
+    // 번호다(같은 블록, 대상이 없으면 둘 다 null).
+    Guid* notifyIds = nullptr;
+    uint32* notifyOrder = nullptr;
+    uint32 notifyCount = 0;
     // 클래스 기본값 슬롯이다(null = 아직 없음). acquire로 읽고 생성 잠금(defaultsGate_) 안에서
     // release로 한 번만 게시한다(TypeLease::ResolveClassDefaults).
     ClassDefaultsState* defaults = nullptr;

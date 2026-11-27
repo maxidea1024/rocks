@@ -201,7 +201,7 @@
 | `UMaterialExpressionStaticComponentMaskParameter` | `Material.StaticComponentMaskParameter` | 구현 | MS2c | — |  |
 | `UMaterialExpressionCollectionParameter` | `Material.ParameterCollectionValue` | 구현 | MS2c | `src:Collection` |  |
 | `UMaterialExpressionCollectionTransform` | `Material.ParameterCollectionTransform` | 구현 | MS2c | `src:Collection` |  |
-| `UMaterialExpressionCurveAtlasRowParameter` | `Material.CurveAtlasRowParameter` | TODO | MS2c | `MPQ-CurveAsset` | 커브 atlas 에셋 |
+| `UMaterialExpressionCurveAtlasRowParameter` | `Material.CurveAtlasRowParameter` | 구현 | MS2c | — | 커브 atlas 에셋(MS2c5 — 선행이던 커브 atlas 에셋은 CurveAssets CA6로 생겨 19.4.1절 표에서 지움) |
 
 ### 19.6.10 텍스처(24)
 

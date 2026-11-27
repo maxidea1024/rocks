@@ -87,8 +87,14 @@ struct alignas(64) ObjectRegistry::Slot {
     registry_detail::SlotState state = registry_detail::SlotState::Free;
     // Retired 슬롯이 든 회수 대상 목록이다(그 밖의 상태는 None).
     RetiredQueue queue = RetiredQueue::None;
-    bool indexed = false; // 이름 색인에 있다
-    bool linked = false;  // 부모 고리에 있다
+    // 이름 색인에 있다·부모 고리에 있다·변경 통지 상태가 있다(notifyStates_ — Docs/Design/
+    // ChangeNotification.ko.md CN-D4). 한 byte의 bit다(hot 레코드에 빈칸이 없다). 이 byte의 모든
+    // 쓰기(이름 색인·Retire·Discard·생성 되돌리기·통지 상태)는 소유 스레드에서만 한다 — bit field의
+    // read-modify-write가 다른 스레드와 겹치지 않는다(병렬 mark는 processing_ 동안에만 돌고 이
+    // byte를 쓰지 않는다).
+    bool indexed : 1 = false;
+    bool linked : 1 = false;
+    bool notified : 1 = false;
     // 클러스터 장부의 inCount다(ClusterCell 주석 — 클러스터를 켠 Registry만 쓴다). 같은 클러스터 안
     // 간선(가장 흔한 쓰기)은 이 계수만 바꾸고, 참조 추가는 대상 슬롯을 검증으로 이미 읽었으므로
     // 장부 칸을 따로 읽지 않는다(GcScaleExperiment.ko.md 14절). 공개 전 가입
@@ -557,6 +563,35 @@ inline ObjectRegistry::SlotCold& ObjectRegistry::ColdOf(const Slot& slot) const 
 inline uptr ObjectRegistry::StorageStartOf(const Slot& slot) noexcept {
     return reinterpret_cast<uptr>(slot.object) - slot.type.ObjectOffset();
 }
+
+// 객체 하나의 변경 통지 상태다(Docs/Design/ChangeNotification.ko.md CN-D4 — notifyStates_의 값,
+// 소유 스레드만 쓴다). bits는 구독이 있는 통지 번호(64개씩), lists는 번호 순 정렬의 대상별
+// 구독(delegate는 주소가 고정이어야 한다 — 발행 중 이동·파괴 금지, Core MulticastDelegate), all은
+// 모든 대상 구독이다. active는 이 객체의 진행 중인 통지 수이고, 그동안 상태를 비우면 released만
+// 세우고 반환은 가장 바깥 통지가 끝난 뒤로 미룬다(CN-D11). 빈 목록 정리도 active가 0일 때만 한다.
+struct ObjectRegistry::NotifyState {
+    using Multicast = MulticastDelegate<void(ObjectHandle, Guid)>;
+
+    // serial은 목록이 만들어질 때의 Registry 일련번호다(해제 handle이 사라졌다 다시 생긴 목록의 새
+    // 구독을 지우지 않게 — ABA).
+    struct List {
+        uint32 index = 0;
+        uint64 serial = 0;
+        UniquePtr<Multicast> delegate;
+    };
+
+    explicit NotifyState(Allocator& allocator) noexcept
+        : bits(allocator), lists(allocator), all(allocator) {
+    }
+
+    Array<uint64> bits;
+    Array<List> lists;
+    Multicast all;
+    // all의 일련번호다(상태가 만들어질 때).
+    uint64 allSerial = 0;
+    uint32 active = 0;
+    bool released = false;
+};
 
 inline ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
     if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {

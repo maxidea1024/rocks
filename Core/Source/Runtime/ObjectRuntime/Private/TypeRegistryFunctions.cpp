@@ -87,6 +87,16 @@ Result<FunctionBlockLayout> ValidateFunctionList(const TypeSchema& schema,
         const bool returnsResult =
             (function.flags & static_cast<uint32>(FunctionFlags::ReturnsResult)) != 0;
         const bool hasResult = function.result.value.kind != ValueKind::Opaque;
+        // 변경 통지 대상 함수는 매개변수 없이 값을 돌려주는 Pure·Const 멤버다(Static·EditorOnly
+        // 아님 — Docs/Design/ChangeNotification.ko.md CN-D1, UE FieldNotify 함수 조건).
+        const bool notify = (function.flags & static_cast<uint32>(FunctionFlags::Notify)) != 0;
+        const bool editorOnly =
+            (function.flags & static_cast<uint32>(FunctionFlags::EditorOnly)) != 0;
+        if (notify && (!pure || !isConst || isStatic || editorOnly || !hasResult ||
+                       function.parameters.Size() != 0)) {
+            return Result<FunctionBlockLayout>::Failure(ErrorCode::InvalidArgument);
+        }
+
         if (function.id == Guid{} || functionOps.functionId != function.id ||
             (function.flags & ~KnownFunctionFlags) != 0 || (isStatic && isConst) ||
             (pure && !hasResult) || !ValidName(function.name) ||
