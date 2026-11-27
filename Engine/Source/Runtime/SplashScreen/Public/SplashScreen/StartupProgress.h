@@ -65,6 +65,15 @@ inline constexpr uint32 StartupStepCount = static_cast<uint32>(StartupStep::Coun
 inline constexpr double DefaultStartupStepWeights[StartupStepCount] = {10.0, 40.0, 20.0,
                                                                        15.0, 10.0, 5.0};
 
+// 보정 프로필(8.2절, SP5)의 형식 버전·섞는 비율(새 값의 몫)·단계 최소 몫(합 대비)·읽기 상한이다.
+inline constexpr uint64 StartupProfileVersion = 1;
+inline constexpr double StartupProfileBlend = 0.5;
+inline constexpr double StartupStepWeightFloor = 0.02;
+inline constexpr uint64 MaxStartupProfileBytes = uint64{64} * 1024;
+// 단계 시간의 상한(초)이다. 저장값이 넘으면 깨진 항목, 이번 측정값은 잘라 쓴다(디버거 중단 같은
+// 이상값이 여러 실행에 걸쳐 막대를 왜곡하지 않게).
+inline constexpr double MaxStartupStepSeconds = 600.0;
+
 // 단계 이름이다(로그·프로필 키, 예: "HostServices"). 범위 밖은 "Unknown".
 ROCKS_SPLASHSCREEN_API const char* StartupStepName(StartupStep step) noexcept;
 
@@ -77,6 +86,13 @@ struct StartupProgressDesc {
     // 단계 시간 측정 시계(나노초)다. null이면 단조 시계다.
     uint64 (*nowNanoseconds)(void* context) noexcept = nullptr;
     void* clockContext = nullptr;
+    // 보정 프로필 파일(8.2절)이다. 비면 보정을 끈다(코드 기본 가중치, 쓰지 않음). 프로젝트 호스트는
+    // {SavedDir}/Startup/StartupProfile.json, 프로젝트가 없는 엔진 프로그램은
+    // {EngineDir}/Saved/Startup/StartupProfile.json. Begin이 복사한다.
+    StringView profilePath;
+    // 프로필 안의 대상 이름(예: "Sandbox")이다. profilePath가 있으면 비면 안 되고 "v"(형식 버전
+    // 키)일 수 없다.
+    StringView profileTarget;
 };
 
 // 단계마다 걸린 시간(초)이다. 들어가지 않은 단계는 0이다.
@@ -94,9 +110,10 @@ public:
     // Finish 없이 소멸하면 시작 작업이 Abandoned로 끝난다(ProgressHub Warning).
     ~StartupProgress() noexcept;
 
-    // 시작 작업을 열고 이 스레드를 Primary로 묶는다. 오류: appTitle 없음·단계 중복·범위 밖
-    // InvalidArgument, ProgressHub Begin·Bind의 오류(NotReady·ShuttingDown 등), 할당 실패는 그
-    // 오류.
+    // 시작 작업을 열고 이 스레드를 Primary로 묶는다. profilePath가 있으면 지난 실행의 단계 시간을
+    // 읽어 가중치로 쓴다(깨진 파일은 Warning 뒤 코드 기본값). 오류: appTitle 없음·단계 중복·범위
+    // 밖·profilePath만 있고 profileTarget 없음 InvalidArgument, ProgressHub Begin·Bind의
+    // 오류(NotReady·ShuttingDown 등), 할당 실패는 그 오류.
     static Result<StartupProgress> Begin(Allocator& allocator,
                                          const StartupProgressDesc& desc) noexcept;
 
@@ -120,6 +137,11 @@ public:
     // 닫기·엔진 실패) 호스트가 Abandoned·Failed로 부른다(소멸에 맡기면 ProgressHub Warning이
     // 남는다). 두 번째부터는 아무 일도 하지 않는다.
     void Finish(ProgressOutcome outcome = ProgressOutcome::Succeeded) noexcept;
+
+    // 실제 시작 일이 끝났다(주 창 첫 프레임을 낸 뒤 — 9.4절 1). 지금 단계의 시간을 닫고, 그 뒤(최소
+    // 표시 시간 대기·넘기기 프레임)는 단계 시간·프로필에 넣지 않는다. 구간·진행은 그대로다. 두
+    // 번째부터는 아무 일도 하지 않는다.
+    void MarkReady() noexcept;
 
     // 지금까지의 단계 시간이다(Finish 뒤면 확정 값).
     StartupStepTimes StepTimes() const noexcept;

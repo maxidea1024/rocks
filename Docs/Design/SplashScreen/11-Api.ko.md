@@ -72,7 +72,8 @@ struct StartupProgressDesc {
     Span<const StartupStep> steps;             // 들어갈 단계(가중치 합) — 비면 전부, 중복은 InvalidArgument
     uint64 (*nowNanoseconds)(void*) = nullptr; // nullptr이면 단조 시계
     void* clockContext = nullptr;
-    // SP5: StringView profileTarget, profilePath(보정 프로필, 8.2절)
+    StringView profilePath;                    // 보정 프로필(8.2절) — 비면 끔
+    StringView profileTarget;                  // 프로필 안의 대상 이름(profilePath가 있으면 필수)
 };
 
 class ROCKS_SPLASHSCREEN_API StartupProgress {  // 이동만(같은 호스트 스레드) — 바인딩·구간은 따로 할당
@@ -82,6 +83,7 @@ public:
     Result<ProgressCounter> MakeStepCounter(uint64 total) noexcept;   // 현재 단계 구간 계수(아무 스레드 Add)
     Result<SplashStatusSource> MakeSplashSource(Allocator&, const CatalogSnapshot*) noexcept;
     void Finish(ProgressOutcome = ProgressOutcome::Succeeded) noexcept;   // 구간·바인딩 닫기, 작업 결과, Succeeded면 단계 시간 Info 로그(SP5: 프로필 저장)
+    void MarkReady() noexcept;                  // 실제 시작 일 끝(첫 프레임 뒤) — 그 뒤 대기는 단계 시간·프로필에 넣지 않음(SP5)
     StartupStepTimes StepTimes() const noexcept;
     ProgressTaskId TaskId() const noexcept;
     ~StartupProgress();                         // Finish 없이 소멸하면 Abandoned, 프로필은 쓰지 않음
