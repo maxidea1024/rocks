@@ -21,6 +21,8 @@ using Rocks.Build.Rules;
 // miniaudio backend factory in the AudioOutputBackendRegistry host service (Docs/Design/AudioSystem section 3.34.5 — the host code never calls it).
 // --engine runs AudioEngineSubsystem and AudioWorldSubsystem from EngineAudio (keys 1-3 audio check, Docs/Design/AudioSystem section 3.35.11);
 // AudioOpus registers its decoder factory in the AudioDecoderRegistry host service for the engine decoder table (section 3.37.1).
+// UiCore, UiFramework and UiRender: the --engine window draws a UI status panel over the scene on the same swap chain, and the window swap
+// chain is a UI window surface (Docs/Design/RenderBase section 18.5 item 9); UiRender's module lifetime object registers the UI shader types.
 public sealed class SandboxProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context)
@@ -44,7 +46,7 @@ public sealed class SandboxProgram : ModuleRules
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private"), context.PathInRoot("Programs/Sandbox/EngineShaderTests/Shared")],
             PrivateDefines = [$"SANDBOX_OPENGL={(openGl ? 1 : 0)}",
                 $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
-            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "SplashScreen", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics",
+            PublicDependencies = ["Launch", "Engine", "EngineAssets", "Texture", "WorldIntegration", "Collision", "Physics", "Gameplay", "HostConfig", "PlatformWindow", "SplashScreen", "RenderBase", "RenderGraph", "ShaderCore", "UiCore", "UiFramework", "UiRender", "D3D12Graphics",
                 "D3D11Graphics", "VulkanGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio",
                 .. (openGl ? ["OpenGLGraphics"] : Array.Empty<string>()),
                 .. (shaderProvider ? ["DevelopmentShaderProvider"] : Array.Empty<string>()),

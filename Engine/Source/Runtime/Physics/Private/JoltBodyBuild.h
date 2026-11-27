@@ -22,6 +22,7 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Body/AllowedDOFs.h>
 #include <Jolt/Physics/Body/MassProperties.h>
 // clang-format on
 
@@ -61,6 +62,26 @@ struct BodyMassValues {
     Vec3d centerOfMassOffset = Vec3d::Zero();
     Vec3d inertiaTensorScale = Vec3d::One();
 };
+
+// body 자유도 잠금이다(UE CreateDOFLock — 7.1.16절). allowed는 Jolt 월드 축 허용 자유도(축 A로
+// 재배치)다. constraint면 body 대 월드 Jolt SixDOFConstraint를 건다: 법선 constraintNormal(Rocks
+// 단위 벡터 — CustomPlane이 축과 나란하지 않을 때) 평면의 법선 방향
+// 이동(lockNormalTranslation)·평면 안 두 축 회전(lockPlaneRotation)을 잠그거나, 모든 자유도를
+// 잠근다(lockAll — Jolt 허용 자유도로는 표현할 수 없다, UE도 6축 구속으로 멈춘다).
+struct DofLock {
+    JPH::EAllowedDOFs allowed = JPH::EAllowedDOFs::All;
+    bool constraint = false;
+    Vec3d constraintNormal = Vec3d::Zero();
+    bool lockNormalTranslation = false;
+    bool lockPlaneRotation = false;
+    bool lockAll = false;
+
+    // 회전 축 하나라도 잠갔는지다(gyroscopic 힘을 끈다 — Jolt가 그 힘의 각속도를 축 마스크로 거르지
+    // 않는다).
+    bool LocksRotation() const noexcept;
+};
+
+DofLock ResolveDofLock(const BodySettings* settings, SettingsDof projectDefault) noexcept;
 
 // BodySettings(nullptr이면 기본값)의 질량 칸이다.
 BodyMassValues MassValuesOf(const BodySettings* settings) noexcept;

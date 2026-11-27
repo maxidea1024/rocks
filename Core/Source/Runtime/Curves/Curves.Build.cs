@@ -15,4 +15,8 @@ public sealed class Curves : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectRuntime"];
+
+    // DeterministicMath: the cooking evaluation math policy (CurveMathDeterministic — Docs/Design/CurveData section 5.9 D22). Not used by
+    // the public headers.
+    protected override string[] PrivateDependencies => ["DeterministicMath"];
 }

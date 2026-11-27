@@ -789,6 +789,11 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
             device = Move(created.Value());
             auto host = UniquePtr<screen::ScreenHost>::TryMake(allocator, allocator, *device,
                                                                shaders::Host());
+            // 창 화면에는 상태 패널(UI overlay)을 켠다(Docs/Design/RenderBase 18.5절 9항 — F1).
+            if (host) {
+                host.Value()->EnableOverlay();
+            }
+
             if (host &&
                 host.Value()->Start(*window, render::RenderLaneMode::Thread, bridge.LanePump())) {
                 screenHost = Move(host.Value());

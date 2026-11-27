@@ -21,7 +21,9 @@
 // - 가중 접선 3차 방정식은 근이 2개일 때 채워지지 않은 세 번째 칸을 읽지 않는다.
 // 가중 경로는 C 런타임의 atanf·acos·cos·pow·sqrt를 부른다. 이 함수들은 플랫폼마다 마지막 비트가
 // 다를 수 있으므로 플랫폼 사이의 비트 동일성은 보장하지 않는다(UE와 같은 수준 — D17). CurveSinCos는
-// C 런타임을 쓰지 않는 다항식이라 플랫폼과 무관하게 결정적이다.
+// C 런타임을 쓰지 않는 다항식이라 플랫폼과 무관하게 결정적이다. 가중 경로의 함수는 수학 정책 인자
+// (MathPolicy — 기본 CurveMathPlatform)를 받는다. 쿠킹 byte에 들어가는 평가는 Curves 모듈의
+// CurveMathDeterministic을 넘긴다(설계 5.9절 D22). √는 IEEE 기본 연산이라 정책에 넣지 않는다.
 //
 // 모든 함수는 상태가 없고 할당하지 않으며 어느 스레드에서나 부를 수 있다. Fatal로 가는 경로가 없다.
 namespace rocks::math {
@@ -160,6 +162,28 @@ inline void CurveSinCos(float radians, float& sine, float& cosine) noexcept {
     cosine = sign * p;
 }
 
+// 가중 경로의 기본 수학 정책이다(C 런타임 — Windows x64에서 UE와 같은 비트, D17). 정책은
+// Atan(float)·Acos(double)·Cos(double)·CubeRoot(double) 네 정적 함수다(CubeRoot: 0은 0, 음수는
+// −CubeRoot(−x) — UE SolveCubic의 cbrt와 같다).
+struct CurveMathPlatform {
+    static float Atan(float x) noexcept {
+        return ::rocks::math::Atan(x);
+    }
+
+    static double Acos(double x) noexcept {
+        return ::rocks::math::Acos(x);
+    }
+
+    static double Cos(double x) noexcept {
+        return ::rocks::math::Cos(x);
+    }
+
+    static double CubeRoot(double x) noexcept {
+        return x > 0.0 ? platform::PlatformMath::Pow(x, 1.0 / 3.0)
+                       : (x < 0.0 ? -platform::PlatformMath::Pow(-x, 1.0 / 3.0) : 0.0);
+    }
+};
+
 // SolveCurveCubic의 결과다. roots[0..count)만 뜻이 있고 나머지 칸은 0이다.
 struct CurveCubicRoots {
     double roots[3] = {0.0, 0.0, 0.0};
@@ -178,13 +202,11 @@ struct CurveCubicRoots {
 // 사용 예:
 //   const double coefficients[4] = {-6.0, 11.0, -6.0, 1.0};   // (x−1)(x−2)(x−3)
 //   const math::CurveCubicRoots solved = math::SolveCurveCubic(coefficients);   // count 3
-inline CurveCubicRoots SolveCurveCubic(const double (&coefficients)[4]) noexcept {
+template <class MathPolicy = CurveMathPlatform>
+CurveCubicRoots SolveCurveCubic(const double (&coefficients)[4]) noexcept {
     constexpr double SmallNumber = 1.e-8; // UE_DOUBLE_SMALL_NUMBER
     constexpr double PiValue = 3.141592653589793238462643383279502884197169399; // UE_DOUBLE_PI
-    const auto cubeRoot = [](double x) noexcept -> double {
-        return x > 0.0 ? platform::PlatformMath::Pow(x, 1.0 / 3.0)
-                       : (x < 0.0 ? -platform::PlatformMath::Pow(-x, 1.0 / 3.0) : 0.0);
-    };
+    const auto cubeRoot = [](double x) noexcept -> double { return MathPolicy::CubeRoot(x); };
 
     CurveCubicRoots result;
     const double denominator = coefficients[3] != 0.0 ? coefficients[3] : SmallNumber * SmallNumber;
@@ -210,11 +232,11 @@ inline CurveCubicRoots SolveCurveCubic(const double (&coefficients)[4]) noexcept
             result.count = 2;
         }
     } else if (discriminant < 0) {
-        const double phi = 1.0 / 3 * Acos(-q / Sqrt(-cubeOfP));
+        const double phi = 1.0 / 3 * MathPolicy::Acos(-q / Sqrt(-cubeOfP));
         const double t = 2 * Sqrt(-p);
-        result.roots[0] = t * Cos(phi);
-        result.roots[1] = -t * Cos(phi + PiValue / 3);
-        result.roots[2] = -t * Cos(phi - PiValue / 3);
+        result.roots[0] = t * MathPolicy::Cos(phi);
+        result.roots[1] = -t * MathPolicy::Cos(phi + PiValue / 3);
+        result.roots[2] = -t * MathPolicy::Cos(phi - PiValue / 3);
         result.count = 3;
     } else {
         const double squareRootOfD = Sqrt(discriminant);
@@ -248,7 +270,7 @@ struct CurveWeightedControls {
     float valueY2 = 0.0f;
 };
 
-template <CurveSegmentKey Key>
+template <class MathPolicy = CurveMathPlatform, CurveSegmentKey Key>
 CurveWeightedControls WeightedCurveControls(const Key& k1, const Key& k2) noexcept {
     const double time1 = k1.time;
     const double time2 = k2.time;
@@ -257,7 +279,7 @@ CurveWeightedControls WeightedCurveControls(const Key& k1, const Key& k2) noexce
 
     float sine;
     float cosine;
-    float angle = Atan(k1.leaveTangent);
+    float angle = MathPolicy::Atan(k1.leaveTangent);
     CurveSinCos(angle, sine, cosine);
     float leaveWeight;
     const uint8 leaveMode = detail::CurveCode(k1.tangentWeight);
@@ -272,7 +294,7 @@ CurveWeightedControls WeightedCurveControls(const Key& k1, const Key& k2) noexce
         static_cast<float>(static_cast<double>(cosine * leaveWeight) + time1);
     const float key1TangentY = sine * leaveWeight + k1.value;
 
-    angle = Atan(k2.arriveTangent);
+    angle = MathPolicy::Atan(k2.arriveTangent);
     CurveSinCos(angle, sine, cosine);
     float arriveWeight;
     const uint8 arriveMode = detail::CurveCode(k2.tangentWeight);
@@ -313,7 +335,7 @@ CurveWeightedControls WeightedCurveControls(const Key& k1, const Key& k2) noexce
 //
 // 사용 예:
 //   const float value = math::WeightedCurveSegment(key1, key2, 0.25f);
-template <CurveSegmentKey Key>
+template <class MathPolicy = CurveMathPlatform, CurveSegmentKey Key>
 float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
     const float difference = k2.time - k1.time;
     if (!(difference > 0.0f)) {
@@ -321,7 +343,7 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
     }
 
     const float alpha = (time - k1.time) / difference;
-    const CurveWeightedControls controls = WeightedCurveControls(k1, k2);
+    const CurveWeightedControls controls = WeightedCurveControls<MathPolicy>(k1, k2);
     const float normalizedX1 = controls.normalizedX1;
     const float normalizedX2 = controls.normalizedX2;
 
@@ -337,7 +359,7 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
     coefficients[0] = 0.0;
     coefficients[0] = coefficients[0] - static_cast<double>(alpha);
 
-    const CurveCubicRoots solved = SolveCurveCubic(coefficients);
+    const CurveCubicRoots solved = SolveCurveCubic<MathPolicy>(coefficients);
     double parameter;
     if (solved.count == 1) {
         parameter = solved.roots[0];
@@ -376,7 +398,7 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
 //
 // 사용 예:
 //   const float value = math::EvalCurveSegment(keys[index - 1], keys[index], time);
-template <CurveSegmentKey Key>
+template <class MathPolicy = CurveMathPlatform, CurveSegmentKey Key>
 float EvalCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
     const float difference = k2.time - k1.time;
     if (!(difference > 0.0f)) {
@@ -402,7 +424,7 @@ float EvalCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
         return BezierCurveValue(p0, p1, p2, p3, alpha);
     }
 
-    return WeightedCurveSegment(k1, k2, time);
+    return WeightedCurveSegment<MathPolicy>(k1, k2, time);
 }
 
 // ---- 시간 재배치 ----

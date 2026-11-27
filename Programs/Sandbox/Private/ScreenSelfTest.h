@@ -13,9 +13,10 @@ namespace sandbox {
 
 // 엔진 창 렌더 경로를 실제 장치로 확인한다(Docs/Design/RenderBase 18.5절 5항 — SM5). 숨긴 창과
 // Sandbox 게임(GameInstance·SandboxPawn)으로 엔진을 몇 프레임 돌리고 ScreenHost가 렌더 lane으로
-// 그린다. 단언: 화면의 HDR cube·과노출 cube·배경·Pending 텍스처 cube 픽셀 = CPU 기준 tone map(채널
-// ±2), Thread·Inline 모드 픽셀 동일, 검증 오류 0, 남은 lane 작업·handle·장치 회수 0. device는 호출
-// 스레드가 소유한다. 실패 수를 돌려준다(진단은 stdout).
+// 그린다(상태 패널을 켠 채 — 18.5절 9항). 단언: 화면의 HDR cube·과노출 cube·배경·Pending 텍스처
+// cube 픽셀 = CPU 기준 tone map(채널 ±2), 패널 바탕 = 패널 색·mip 막대 채움, 프레임마다 present 1과
+// UI pass, Thread·Inline 모드 픽셀 동일, 검증 오류 0, 남은 lane 작업·handle·장치 회수 0. device는
+// 호출 스레드가 소유한다. 실패 수를 돌려준다(진단은 stdout).
 rocks::uint32 RunScreenChecks(const char* name, rocks::graphics::Device& device,
                               rocks::Allocator& allocator, rocks::ModuleLoader& modules) noexcept;
 

@@ -55,3 +55,37 @@ PH5는 넷으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설�
 **PH5a 리뷰 반영(2026-11-27).** 치명 0, 중요 2, 경미 6. 반발 문턱을 UE 5.8이 실제로 쓰는 Chaos 가속도 문턱 × dt로 바꿨다(`bounceThresholdVelocity` 칸은 ID 은퇴 — UE에서 읽히지 않는다). 질량 중심을 옮긴 상자에서 질의의 반대면 법선 보정(7.1.8절 `FindGeomOpposingNormal`)이 `OffsetCenterOfMassShape` subtype 때문에 빠지던 것을 고쳤다(안쪽 형상을 본다). 비유한 질량 칸 거부·0 주축 하한·질량 중심 이동 계산 한 곳, solver 반복 뜻 차이·UE 결합 방식 한계 기록, 각속도 상한 상수 중복 제거(Collision `DefaultMaxAngularVelocityDegrees`), 6.5·6.8절 표 갱신, 시험 보강(결합 함수, 반폭이 다른 상자, 문턱 쌍, 형상 변경 세 경우, 옮긴 상자 sweep)과 시험 상수·include 정리.
 
 **후속(PH5 밖).** Sparks 이벤트 노출(EV4 — rocks-ee 22686a3d1)이 들어와 PH4e 이벤트 필드에 `ScriptAssignable`을 붙일 수 있다. 인자 struct `HitResult`에 `ScriptType`이 필요하고, 이름은 LevelScript LD9의 물리 이벤트 이름(`TriggerEntered`·`CollisionEntered` 등)과 겹치지 않게 정한다. 물리 단계 뒤 연동 단계에서 한다.
+
+### 7.1.16 PH5b 구현 세부(2026-11-28)
+
+자유도(DOF) 잠금이다(6.5절 `dofMode`·`lock*` 행, PMD19). UE `FBodyInstance::CreateDOFLock`·`ResolveDOFMode`·`GetLockedAxis`(`E/Private/PhysicsEngine/BodyInstance.cpp:802–925`, 호출 `InitDynamicProperties` `:4727`)를 따른다.
+
+**UE 동작.** body 대 월드 구속(`FConstraintInstance`, 상대 없음) 하나를 body 초기화 때 만든다. 구속 frame은 월드 축이고 월드 쪽 위치는 만들 때의 body 위치다(그래서 잠근 축의 값은 만들 때의 위치·자세다).
+- `ResolveDOFMode`: `Default`는 물리 설정 `DefaultDegreesOfFreedom`(`Full3D` → SixDOF, `YZPlane`·`XZPlane`·`XYPlane` → 같은 평면)이다.
+- 평면(`YZPlane` 법선 X, `XZPlane` 법선 Y, `XYPlane` 법선 Z, `CustomPlane` 법선 `customDofPlaneNormal`): 법선 방향 이동을 잠그고, 법선 둘레 회전(twist)만 남기고 평면 안 두 축 회전(swing)을 잠근다. 축 평면은 `lockTranslation`·`lockRotation` 표지와 상관없이 잠근다(UE 조건 `bLock… || DOFMode != CustomPlane`). `CustomPlane`만 두 표지를 따른다.
+- `SixDOF`: 월드 X·Y·Z 이동과 X·Y·Z 축 둘레 회전을 `lock*Translation`·`lock*Rotation`마다 잠근다(하나도 없으면 구속 없음).
+- `None`, 잠금 축이 0(평면 법선 0 — `CustomPlane`), Static body는 잠금이 없다.
+
+**Rocks 구현.**
+- 축 평면과 SixDOF는 Jolt `EAllowedDOFs`(월드 축 이동·회전 속도 마스크 — `Physics/Body/AllowedDOFs.h:14–19`)로 표현한다. 축 A로 재배치한다: Rocks X → Jolt Z, Y → X, Z → Y(회전 축도 같다 — 행렬식 +1). Jolt는 속도만 막으므로 잠근 축의 값은 그 축의 마지막 값에 머문다(PMD19).
+- `CustomPlane`: 법선 성분이 모두 `KindaSmallNumber` 이하(UE `IsNearlyZero`)이거나 두 표지가 거짓이면 잠금이 없다. 정규화한 법선이 축과 나란하면(성분 하나의 절댓값이 1 ± 1e-6) 축 평면과 같은 bit로 하되 표지마다 따로다(`lockTranslation` → 그 축 이동, `lockRotation` → 다른 두 축 회전). 비스듬하면 Jolt `SixDOFConstraint`(body 대 `Body::sFixedToWorld`, 월드 공간, X축 = 법선, Y축 = 법선에 수직인 축)를 건다: `lockTranslation`이면 `TranslationX` 고정, `lockRotation`이면 `RotationY`·`RotationZ` 고정.
+- **구속 기준.** 구속 위치는 body 원점이다(UE `CreateDOFLock`의 `Pos2` = body 위치 — 질량 중심 이동이 있어도 같은 점). 기준 자세는 붙이는 때다: 만들 때, Kinematic → Dynamic 전환, teleport(`SetBodyTransform`), 형상 변경(질량 중심이 옮겨질 수 있고 Jolt 구속은 body 변경을 모른다 — `Constraint.h:162–166`). teleport 뒤 기준을 새 자리로 옮기는 것은 축 bit 잠금과 같은 동작이다(PMD19 한계 1 — UE는 생성 때 frame에 끌려 돌아간다). 구속은 칸이 쥐고 body를 지울 때 먼저 뗀다.
+- **모두 잠긴 조합**(SixDOF 여섯 표지 — Jolt `EAllowedDOFs::None`은 허용되지 않는다, `AllowedDOFs.h:12`): 허용 자유도는 `All`로 두고 여섯 축을 모두 고정한 구속으로 제자리에 둔다(UE도 6축 구속으로 멈춘다). 진단은 없다.
+- **Dynamic에만 적용한다.** Jolt 허용 자유도는 Kinematic의 `MoveKinematic` 속도도 막으므로(UE 구속은 Kinematic에 효과가 없다), Kinematic·Static은 `All`이고 구속이 없다. `SetBodyMotion`이 Kinematic ↔ Dynamic으로 바꾸면 칸에 둔 질량 속성으로 `MotionProperties::SetMassProperties(자유도, 질량)`를 다시 넣고, 남은 속도를 `SetLinearVelocityClamped`·`SetAngularVelocityClamped`로 새 마스크에 거른 뒤(`SetMassProperties`는 속도를 거르지 않는다) 구속을 붙이거나 뗀다. 형상 변경의 질량 다시 계산도 칸의 자유도를 쓴다.
+- **gyroscopic 힘**은 회전 축을 하나라도 bit로 잠그면 끈다(Jolt `ApplyGyroscopicForceInternal`이 각속도를 축 마스크로 거르지 않아 잠긴 축으로 샌다). UE Chaos는 gyroscopic을 구속 뒤에 풀어 잠금이 이긴다 — Rocks는 그 경우 gyroscopic 효과가 없다(한계).
+- **QueryOnly**: UE는 `CollisionEnabled`가 물리 없음이어도 Dynamic이면 구속을 만든다. Rocks는 물리 없는 body를 Jolt sensor·비활성으로 두므로(3.4절) 잠금이 효과가 없다 — 같은 결과다.
+- 물리 설정 `defaultDegreesOfFreedom`(`SettingsDof { Full3D, YZPlane, XZPlane, XYPlane }`, 기본 Full3D — 6.8절).
+- 실행 중 바꾸는 setter(UE `SetDOFLock`)는 PH5c(body 값 setter)다. 결합(PC07 weld) body의 잠금은 PH6 결합 때 부모 body 설정을 따른다.
+
+**시험**(Jolt body를 직접 읽으므로 Monolithic — `PhysicsDofSceneTests.cpp`):
+- `ResolveDofLock` bit: SixDOF 축 잠금 여섯이 저마다 축 A의 bit 하나만 지운다(회전 잠금이면 gyroscopic 끔). 모두 잠금은 6축 구속이다. `XZPlane`은 Y 이동·X·Z 회전이다. `CustomPlane` 축 법선(0, 0, −3)은 표지마다 bit(이동 → Z 이동, 회전 → X·Y 회전), 법선 0·표지 없음은 잠금 없음, 비스듬한 법선은 구속(정규화한 법선)이다.
+- SixDOF X 이동 잠금: X·Y 속도를 준 구가 Y로만 움직인다. 회전 잠금: 잠근 축 둘레 각속도가 0이다.
+- `XYPlane`: 중력이 있어도 Z에 머물고(법선 이동 잠금), Z축 둘레 회전만 남는다. 표지(`lockTranslation` 거짓)와 상관없이 잠근다.
+- `Default` + 설정 `YZPlane`: X 이동이 잠긴다.
+- `CustomPlane`(법선 (1, 1, 0)/√2, 두 표지 참): 법선 방향으로 움직이지 않고 평면 안으로는 움직인다. 법선 둘레 각속도는 남고 평면 안 축 둘레는 막힌다. 표지가 거짓이면 구속이 없다.
+- 모두 잠금: 중력·속도에도 제자리다(구속 1).
+- Kinematic은 잠금이 없고(잠긴 축으로 옮겨진다), Dynamic으로 바꾸면 잠긴다. Dynamic → Kinematic → Dynamic에서 CustomPlane 구속 수가 1 → 0 → 1이고 body를 지우면 0이다. Kinematic에 남은 잠긴 축 속도는 전환 때 0이 된다.
+- teleport한 CustomPlane body는 새 자리를 기준으로 잠긴다. scale 변경 뒤에도 축 bit 잠금이 남는다.
+- Static은 자유도 설정이 있어도 구속이 없다.
+
+**리뷰 반영**(치명 0, 중요 4, 경미 8): 모두 잠금을 무시하던 것을 UE처럼 6축 구속으로 바꿨다(경고·`AllDegreesOfFreedomLocked` 삭제). 전환 뒤 남은 속도를 새 마스크로 거른다. 구속 위치를 질량 중심에서 body 원점으로 바꾸고 teleport·형상 변경 때 다시 붙인다. 회전 bit 잠금에서 gyroscopic을 끈다. 축과 나란한 CustomPlane은 bit로 한다. 법선 0 판정을 성분마다(UE `IsNearlyZero`)로 맞췄다. `BodySettings.h` 주석(축 평면은 표지를 보지 않는다)과 시험 상수 이름을 고쳤다.

@@ -204,6 +204,8 @@ private:
         context.bulkSource = info.store;
         context.nuggets = request_.nuggets;
         context.verifyNuggets = request_.verifyNuggets;
+        context.scheduler = request_.scheduler;
+        context.scratch = request_.scratch;
         context.sink = &sink;
         context.failure = &failure;
         context.warnings = &warnings_;

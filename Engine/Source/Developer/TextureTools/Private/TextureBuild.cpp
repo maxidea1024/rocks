@@ -750,6 +750,8 @@ struct EncodeOptions {
     bool alphaProfile = false;
     // ASTC 채널 배치다(12.17.8 3 — TextureFormatChoice::astcMode).
     TextureAstcMode astcMode = TextureAstcMode::Rgba;
+    // 블록 압축 실행 방법이다(12.17.9 4 — BuildTexture 인자 그대로).
+    TextureBuildExecution execution{};
     // norm16 대체(G16 → R16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0이다(12.14절).
     bool clampUnit = false;
 };
@@ -821,6 +823,8 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
         blockOptions.alphaProfile = options.alphaProfile;
         blockOptions.astcMode = options.astcMode;
         blockOptions.srgb = srgb;
+        blockOptions.scheduler = options.execution.scheduler;
+        blockOptions.scratch = options.execution.scratch;
         return EncodeTextureBlocks(block, image, blockOptions, out.View());
     }
 
@@ -1329,11 +1333,16 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
 }
 
 Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
-                          Span<const uint8> sourcePixels, TextureBuildResult& out) noexcept {
+                          Span<const uint8> sourcePixels, TextureBuildResult& out,
+                          const TextureBuildExecution& execution) noexcept {
     out.mips.Clear();
     out.warnings.Clear();
     out.failure = TextureBuildFailure{};
     out.pixelFormat = graphics::PixelFormat::Unknown;
+    // 병렬에는 helper 작업을 할당할 scratch가 필요하다(일을 하기 전에 거부한다 — 12.17.9 3).
+    if (execution.scheduler != nullptr && execution.scratch == nullptr) {
+        return Fail(out, AssetDiagnosticCode::None, ErrorCode::InvalidArgument, 0);
+    }
     out.srgb = false;
     const bool volume = settings.dimension == TextureDimension::Volume;
     const bool cube = settings.dimension == TextureDimension::TextureCube ||
@@ -1547,7 +1556,9 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     }
 
     // 7·8. 쿠킹 편향과 출력.
-    const EncodeOptions options = EncodeOptionsFor(settings, choice);
+    EncodeOptions options = EncodeOptionsFor(settings, choice);
+    options.execution = execution;
+
     for (uint32 mip = dropped; mip < chain; ++mip) {
         const Level& current = mips[mip];
         TextureBuiltMip built(allocator);
