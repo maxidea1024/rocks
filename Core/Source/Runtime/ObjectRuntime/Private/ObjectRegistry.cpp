@@ -24,7 +24,7 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
       gcWork_(allocator), gcShade_(allocator),
       clustersEnabled_(options.clusters || options.permanentRegion ||
                        (options.policy.packageNativeType != nullptr && options.packageClusters)),
-      permanentOpen_(options.permanentRegion) {
+      permanentOpen_(options.permanentRegion), notifyStates_(allocator) {
     if (options_.permanentRegion && options_.policy.packageNativeType != nullptr) {
         platform::Fatal("A package-policy ObjectRegistry cannot open a permanent region");
     }
@@ -437,16 +437,22 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
     {
         platform::LockGuard lock(gate_);
         auto requested = RequestDestroyLocked(handle, object, requireBorrow, slot);
-        if (!requested || slot == nullptr) {
+        if (!requested) {
             return requested;
         }
     }
 
     // 클러스터 소속의 이탈(13.4절): 처리 표시 아래 잠금 밖에서 Trace로 장부 몫을 뺀 뒤 잠가 뺀다.
-    LeaveTrace(*slot);
-    platform::LockGuard lock(gate_);
-    FinishLeaveLocked(*slot);
-    processing_ = false;
+    if (slot != nullptr) {
+        LeaveTrace(*slot);
+        platform::LockGuard lock(gate_);
+        FinishLeaveLocked(*slot);
+        processing_ = false;
+    }
+
+    // 파괴 요청은 그 객체의 변경 통지 구독을 알림 없이 비운다(Docs/Design/ChangeNotification.ko.md
+    // CN-D11 — 잠금·처리 표시 밖, 소유 스레드).
+    ReleaseNotifyState(handle.slot);
     return Result<void>::Success();
 }
 
@@ -712,6 +718,8 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
     stats.borrows = totalBorrows_;
     stats.chunks = chunkCount_;
     stats.namedObjects = nameLive_;
+    stats.notifiedObjects = notifiedObjects_;
+    stats.droppedNotifications = droppedNotifications_;
     if constexpr (IsDebugBuild) {
         // Debug 회계: 슬롯 전체를 다시 세어 갱신 누락을 바로 잡아내고, 빈 슬롯·회수 대상 목록이 그
         // 상태의 슬롯을 빠짐없이 한 번씩 담는지(지연 목록에는 회수 가능한 슬롯이 없는지) 본다.

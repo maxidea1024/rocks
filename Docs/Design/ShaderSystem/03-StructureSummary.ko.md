@@ -21,3 +21,11 @@ Programs/ShaderCompileWorker                       워커 프로세스(ShaderWor
 ShaderCore만 Runtime 계층에 두고(런타임이 쿠킹된 라이브러리를 연다), 컴파일러 쪽은 Developer·Programs에 둔다.
 
 가상 경로는 `/Engine/{Public,Private,Shared,Generated}`·`/Plugin/<이름>`·`/Project`이고, 규칙은 UE `CheckVirtualShaderFilePath`(`Runtime/RenderCore/Private/ShaderCore.cpp:1620–1670`)를 따르되 확장자는 `.rsf`·`.rsh`, 공유 디렉터리만 `.h`다(UE의 `/ThirdParty/` 예외는 두지 않는다). 키는 두 층이다: 셰이더 맵 키(엔트리 파일과 include 폐포의 내용 SHA-256, 낡음 판정)와 job 키(10절, 너겟 키). UE는 원본 파일 해시에 SHA-1(`ShaderCore.cpp:3282–3409`), 셰이더 맵 ID와 코드 해시에 XxHash64(`ShaderCore.cpp:1536–1551`, `Runtime/Engine/Private/Materials/MaterialShader.cpp:1341–1344`), job 키에 BLAKE3(`ShaderCore.cpp:4612–4671`)를 쓴다. Rocks는 모두 Core SHA-256이다.
+
+생성 include 연결(개정 64 표로 정리, 16.4절 SSD83). 고정 가상 경로의 include를 전처리기가 job이 준 원문으로 잇는다(`ShaderGeneratedInclude` — 디스크 파일 경로 또는 메모리 텍스트). 이은 원문은 전처리 결과에 들어가므로 키 5행(전처리 결과 SHA-256)이 연결마다 다르다. 연결이 없는 job이 그 경로를 include하면 전처리 오류(`GeneratedSource`)다.
+
+| 가상 경로 | job 칸 | 원문 | 경로 상수 | 근거 |
+|---|---|---|---|---|
+| `/Engine/Generated/VertexInput.rsh` | `ShaderCompileJob::vertexInputSource` | 정점 입력 타입의 `.rsh` 파일 | ShaderCore `VertexInputGeneratedIncludePath`(`ShaderType.h`) | 12.2.1절 SSD6, RenderBase 10.6절 |
+| `/Engine/Generated/Material.rsh` | `ShaderCompileJob::materialSource` | 머티리얼 생성 원문(메모리 텍스트) | ShaderCore `MaterialGeneratedIncludePath`(`ShaderType.h`, 위 상수 옆) | MaterialSystem 7.8절·16절 MSR3 |
+| `/Engine/Generated/<모듈>/<이름>.rsh` 등 | `ShaderParameterLayout::sourcePath`·`source`(`parameterLayouts`) | MetaCompiler 생성 파라미터 HLSL(실행 파일 안 텍스트) | 표의 `sourcePath` | 16.2절 SSD52 |

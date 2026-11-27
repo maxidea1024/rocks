@@ -133,3 +133,25 @@ PH5는 넷으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설�
 
 **PH5c1 리뷰 반영(2026-11-28).** 치명 0, 중요 2, 경미 7. 고정 스텝 밖에서 준 힘이 0스텝 프레임에 쌓이거나 다스텝 프레임의 첫 스텝에만 들어가던 것을 프레임 힘(UE `bAllowSubstepping`)으로 고쳤다(`World::InFixedSteps`, `BodyForce::everyFixedStep`, `EndFrame`). 구로만 보던 월드 관성·Local 힘 시험을 돈 비대칭 상자·회전축과 다른 힘 방향으로 바꿨다. Kinematic 전환의 힘 지우기 중복(Jolt가 한다)을 없앴고, float 넘침을 막았고, 범위 밖 방사가 깨우지 않음·방사 힘 중심 일치·경고 수 시험을 더했다. 속도 setter의 Kinematic 차이·상한 되읽기·radius 0 한계와 접점 사용 예를 적었다.
 
+### 7.1.18 PH5c2 구현 세부(2026-11-28)
+
+질량 API·각속도 상한 API·body 값 setter다(2.6절). UE `UPrimitiveComponent`(`E/Private/PrimitiveComponentPhysics.cpp:190–198`·`470–477`·`493–515`·`571–818`) → `FBodyInstance`(`BodyInstance.cpp:736–740`·`849–853`·`2182–2186`·`2961–2985`·`3387–3500`·`3568–3578`·`3668–3693`·`3951–3971`·`4010–4026`·`4055–4071`)를 따른다.
+
+**컴포넌트 API**(이름은 UE 그대로, 뼈 이름 인자는 CM7 때). 값은 `bodySettings`(영속)를 바꾸고 body가 있으면 바로 넣는다. body가 없으면 값만 바뀐다(다음 생성이 쓴다 — UE `FBodyInstance` 값과 같다).
+- 질량: `GetMass()`(kg — Static·body 없음 0, UE `GetMass_AssumesLocked`는 rigid만), `SetMassOverrideInKg(massInKg, overrideMass = true)`, `SetMassScale(scale)`·`GetMassScale()`, `GetCenterOfMass()`(월드 질량 중심 cm — body 없음 0), `SetCenterOfMass(offset)`(UE `COMNudge` — body 공간 cm), `GetInertiaTensor()`(kg·cm², body 축 대각 — UE `GetLocalInertiaTensor`는 주값이고 축 정렬 형상(상자·구·캡슐)에서 같다, 비대각 형상(convex·compound — PH6)은 고유값으로 바꿔야 한다, Static·body 없음 0). 질량 setter는 UE `UpdateMassProperties`처럼 7.1.15절 규칙으로 다시 계산한다(깨우지 않는다). 형상의 질량 중심 감싸기는 이동 값이 바뀐 때만 다시 넣는다(UE는 형상을 건드리지 않는다 — 형상 교체는 Jolt broadphase·접촉 cache를 새로 한다). 형상을 다시 만들지 못하면(할당 실패) 이전 질량을 두고 Warning `BodyMassUpdateFailed`다. Static은 값만 둔다(UE `IsRigidBody` 거짓).
+- 각속도 상한: `SetPhysicsMaxAngularVelocityInDegrees/InRadians(value, addToCurrent = false)`(UE `SetMaxAngularVelocityInRadians(…, bUpdateOverrideMaxAngularVelocity 참)` — `overrideMaxAngularVelocity`를 켜고 `maxAngularVelocity`(도/s)에 넣는다, addToCurrent면 지금 실효 값에 더한다 — body가 없으면 더하지 않는다, UE는 physics actor가 있을 때만 옛 값을 읽는다 `:3677–3686`), `GetPhysicsMaxAngularVelocityInDegrees/InRadians()`(덮어쓰기면 그 값, 아니면 물리 설정 `maxAngularVelocity` — 장면이 없으면 Collision `DefaultMaxAngularVelocityDegrees`).
+- 그 밖: `SetEnableGravity`·`IsGravityEnabled`(켜면 Dynamic body를 깨운다 — UE), `SetLinearDamping`·`GetLinearDamping`, `SetAngularDamping`·`GetAngularDamping`, `SetUseCCD`(Jolt `EMotionQuality::LinearCast`·`Discrete`), `SetGyroscopicTorqueEnabled`·`GetGyroscopicTorqueEnabled`, `SetConstraintMode(DofMode)`(UE `SetDOFLock` — 7.1.16절 잠금을 다시 풀어 넣는다, 잠금 표지는 그대로).
+- 잘못된 호출 경고(7.1.17절 규칙): `SetMassOverrideInKg`·`SetMassScale`·`SetCenterOfMass`·`SetPhysicsMaxAngularVelocity…`는 Mobility만, `GetMass`는 body 경고까지(UE 그대로 — 시뮬레이션 꺼짐·물리 충돌 없음). 그 밖은 경고하지 않는다.
+- 잘못된 값: 비유한 값과 음수 각속도 상한·음수 감쇠(Jolt assert — `MotionProperties.h:83·92·96`)·모르는 `DofMode`는 값을 바꾸지 않고 Warning `InvalidBodyValue`다(UE는 검사하지 않는다 — 편집기 ClampMin만). 음수 질량·배율은 7.1.15절 최소 질량 1 g이 받는다(UE와 같다).
+
+**World 접점.** `UpdateBodySettings(body, settings, BodySettingsChange)`(바뀐 묶음 하나 — `Gravity`·`Damping`·`ContinuousCollision`·`MaxAngularVelocity`·`GyroscopicTorque`·`Mass`·`DegreesOfFreedom`)와 `DefaultMaxAngularVelocityDegrees()`(물리 설정 값). `BodyKinematics`에 `mass`(kg)·`inertia`(kg·cm², body 축 대각)를 더한다(칸의 UE 질량 속성 — 자유도 잠금과 무관, Static은 0).
+- `Mass`: 칸 질량 입력을 바꾸고 형상(질량 중심 감싸기)·질량 속성을 다시 넣는다(Dynamic이면 자유도와 함께, 구속은 다시 붙인다). 깨우지 않는다.
+- `DegreesOfFreedom`: `ResolveDofLock`을 다시 하고 구속을 떼었다 붙이며 gyroscopic 표지를 다시 정한다(`gyroscopicTorque` && 회전 bit 잠금 없음).
+- `MaxAngularVelocity`: 덮어쓰기면 그 값, 아니면 장면 기본을 `MotionProperties::SetMaxAngularVelocity`에 넣는다.
+
+**시험.**
+- 장면(Monolithic — `PhysicsBodyValueSetterSceneTests.cpp`): 묶음마다 Jolt 값(중력 계수·감쇠·motion quality·각속도 상한·gyroscopic 표지·허용 자유도와 구속), 질량 다시 계산(override·scale·질량 중심 이동의 감싸기·관성), Static은 질량 그대로, 중력 켬이 잠든 body를 깨움, 질량 변경은 깨우지 않음.
+- 컴포넌트(`PhysicsBodyValueTests.cpp`): PA04 정확 — `SetMassOverrideInKg(2)` 뒤 `GetMass()` 2, `AddImpulse((0, 0, 200))` → 한 스텝 뒤 Δv 100 cm/s(감쇠 배율). `GetInertiaTensor`가 구 2/5·m·r², `SetCenterOfMass`가 `GetCenterOfMass`를 옮김, 각속도 상한 덮어쓰기·더하기·기본, 중력 끔(떨어지지 않음), CCD·감쇠·`SetConstraintMode` 왕복, body 없음 기본값, 잘못된 값 거부.
+
+**PH5c2 리뷰 반영(2026-11-28).** 치명 0, 중요 1, 경미 9. 시험 공백을 메웠다: 구속이 있는 body의 질량 중심 변경(구속 다시 붙임·잠금 유지), 질량 중심 변경 전후 원점 유지, 반폭이 다른 상자의 관성 세 성분, 회전 잠금 해제 뒤 gyroscopic 복귀·잠긴 body의 gyroscopic 요청, Kinematic은 중력을 켜도 깨지 않음, 덮어쓰기 아닌 상한에 더하기. 질량만 바뀌면 형상을 바꾸지 않고(접촉 cache 유지), 형상 실패를 경고하고 칸을 그대로 두며, body 없는 addToCurrent를 UE처럼 더하지 않게, 모르는 `DofMode`를 거르게 고쳤다. 관성이 텐서 대각(축 정렬 형상에서 주값)임을 적었다. 2.6절 표·주석 정리.
+

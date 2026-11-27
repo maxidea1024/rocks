@@ -30,24 +30,23 @@ enum class MaterialPrerequisite : uint8 {
     VirtualTexture = 3,
     ExternalTexture = 4,
     Font = 5,
-    CurveAsset = 6,
-    MaterialAggregate = 7,
-    SubsurfaceProfile = 8,
-    SpecularProfile = 9,
-    ToonShading = 10,
-    NeuralProfile = 11,
-    PhysicalMaterial = 12,
-    VirtualizedGeometry = 13,
-    ColoredTransmittance = 14,
-    AlphaHoldout = 15,
-    LightBake = 16,
+    MaterialAggregate = 6,
+    SubsurfaceProfile = 7,
+    SpecularProfile = 8,
+    ToonShading = 9,
+    NeuralProfile = 10,
+    PhysicalMaterial = 11,
+    VirtualizedGeometry = 12,
+    ColoredTransmittance = 13,
+    AlphaHoldout = 14,
+    LightBake = 15,
     // 렌더러 noise 시스템 텍스처(UE View PerlinNoiseGradientTexture·PerlinNoise3DTexture — 6.13절
     // MS2f3).
-    NoiseTexture = 17,
+    NoiseTexture = 16,
 };
 
 // 선행 수다(None 포함, 마지막 값 + 1).
-inline constexpr uint32 MaterialPrerequisiteCount = 18;
+inline constexpr uint32 MaterialPrerequisiteCount = 17;
 
 // "MPQ-<이름>" 문자열이다(19.4.1절 ID). None·범위 밖이면 빈 문자열이다.
 ROCKS_MATERIALSCHEMA_API StringView

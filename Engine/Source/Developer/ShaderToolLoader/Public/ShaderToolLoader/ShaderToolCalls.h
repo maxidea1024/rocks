@@ -13,11 +13,11 @@
 // (정책 shader-tool-binary-load 안 — 형식 처리기와 워커만 부른다).
 //
 // 결과 분류(ShaderToolOutcome):
-// - Success: 결과가 out에 있다(경고가 diagnostics에 남을 수 있다 — 형식 처리기는 경고를 오류로
-// 다루는
-//   인자를 준다).
-// - CompileError: 원문 때문의 실패다(DXC·FXC 컴파일 오류, SPIRV-Cross가 받지 않는 구성).
-// - ToolError: 도구 호출 실패(함수 표가 비었음, COM·HRESULT 실패, spirv-val 거부, 메모리 부족)다.
+// - Success: 결과가 out에 있다. 도구가 낸 경고는 diagnostics에 남는다(경고를 오류로 다루지 않는
+//   요청 — warningsAsErrors false — 이 돌려받는다, ShaderSystem 16.4절 SSD79).
+// - CompileError: 원문 때문의 실패다(DXC·FXC 컴파일 오류·경고 오류, SPIRV-Cross가 받지 않는 구성).
+// - ToolError: 도구 호출 실패(함수 표가 비었음, COM 실패, 원문 진단 없는 HRESULT 실패, spirv-val
+//   거부, 메모리 부족)다.
 // - UnsupportedHost: 이 호스트에 그 도구 구현이 없다(Windows 밖의 DXC·FXC).
 // 실패하면 diagnostics에 영어 진단(도구 원문 포함)이 있다. 결과·진단은 먼저 비운다.
 //
@@ -60,10 +60,13 @@ struct SpirvCompileRequest {
     // -Zi(OpSource·OpString·OpLine 디버그 정보 — 값 3 SPIR-V debug module, ShaderSystem 16.3절
     // SSD73)다.
     bool debugInfo = false;
+    // -WX(경고는 오류 — ShaderSystem 16.4절 SSD79)다.
+    bool warningsAsErrors = true;
 };
 
-// DXC로 SPIR-V(-spirv -fspv-target-env=vulkan1.1, -Zpr, -WX)를 만들고 spirv-val(Vulkan 1.1)로
-// 검증한다. 검증 거부는 ToolError다(DXC 출력이 검증을 통과하지 못하면 도구 쪽 결함이다).
+// DXC로 SPIR-V(-spirv -fspv-target-env=vulkan1.1, -Zpr, warningsAsErrors면 -WX)를 만들고
+// spirv-val(Vulkan 1.1)로 검증한다. 검증 거부는 ToolError다(DXC 출력이 검증을 통과하지 못하면
+// 도구 쪽 결함이다). 성공하면 diagnostics는 DXC 경고(없으면 빈 값)다.
 ROCKS_SHADERTOOLLOADER_API ShaderToolOutcome CompileHlslToSpirv(const ShaderToolSet& tools,
                                                                 const SpirvCompileRequest& request,
                                                                 Array<uint8>& spirv,
@@ -182,6 +185,8 @@ struct FxcCompileRequest {
     // D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_BINARY로 컴파일해 PDB를 떼어 낸다(ShaderSystem
     // 16.3절 SSD73). symbols가 null이면 무시한다.
     bool debugSymbols = false;
+    // D3DCOMPILE_WARNINGS_ARE_ERRORS(ShaderSystem 16.4절 SSD79)다.
+    bool warningsAsErrors = true;
 };
 
 // FXC 디버그 심볼이다: D3DGetBlobPart(D3D_BLOB_PDB)와 D3D_BLOB_DEBUG_NAME part의 파일 이름.
@@ -193,12 +198,21 @@ struct FxcSymbols {
     String name;
 };
 
-// FXC로 DXBC를 만든다(행 우선 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 경고는 오류
-// D3DCOMPILE_WARNINGS_ARE_ERRORS, 원문 이름 없음 — 11.1절 E3). E_FAIL과 오류 blob이면
-// CompileError, 그 밖의 실패는 ToolError(진단에 HRESULT)다. request.debugSymbols이고 symbols가
+// FXC로 DXBC를 만든다(행 우선 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, warningsAsErrors면
+// D3DCOMPILE_WARNINGS_ARE_ERRORS, 원문 이름 없음 — 11.1절 E3). 성공하면 diagnostics는 FXC
+// 경고다. 실패 분류(ShaderSystem 16.4절 SSD80): E_OUTOFMEMORY는 ToolError, 실패 HRESULT이고 오류
+// blob에 원문 진단(FxcHasSourceDiagnostic)이 있으면 CompileError(FXC는 원문 오류를 E_FAIL이 아닌
+// HRESULT로도 돌려준다), 그 밖은 ToolError다. 실패 진단 앞에는 HRESULT를 적는다.
+// request.debugSymbols이고 symbols가
 // null이 아니면 PDB·이름을 symbols에 두고 object는 D3DStripShader(D3DCOMPILER_STRIP_DEBUG_INFO)로
 // 디버그 정보를 뗀 DXBC다(디버그 이름 part는 남는다 — 디버거가 PDB를 이름으로 찾는다). PDB를 얻지
 // 못하면 ToolError다. Windows 구현만 있다(그 밖은 UnsupportedHost).
+// FXC 오류 문구에 원문 진단이 있는가다(ShaderSystem 16.4절 SSD80): FXC 진단 `error X<번호>`
+// (위치 `(<줄>,<열>): ` 유무와 무관, 경고 오류 X3129 포함)나 FXC 내부 오류 문구 `internal error:`·
+// `Internal Compiler Error:`(UE D3DShaderCompiler.cpp CompileErrorsContainInternalError).
+// 대소문자를 가린다. 모든 호스트에서 쓸 수 있다(시험이 직접 대조한다).
+ROCKS_SHADERTOOLLOADER_API bool FxcHasSourceDiagnostic(StringView errors) noexcept;
+
 ROCKS_SHADERTOOLLOADER_API ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc,
                                                             const FxcCompileRequest& request,
                                                             Array<uint8>& object,

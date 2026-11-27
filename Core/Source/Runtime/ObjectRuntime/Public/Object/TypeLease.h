@@ -266,6 +266,22 @@ public:
     const RuntimeEventOps* EventOps(usize schemaIndex) const& noexcept;
     const RuntimeEventOps* EventOps(usize schemaIndex) const&& = delete;
 
+    // Class lease의 변경 통지 대상(Notify 필드·함수 — Docs/Design/ChangeNotification.ko.md CN-D2)
+    // 수다. 통지 번호는 0부터 이 값 미만이다(필드 → 기반부터의 함수, 각각 선언 순서 — 등록 때 정해
+    // 지는 실행 중 값이라 저장하지 않는다). Class가 아닌 lease는 0이다. 빈 lease는 Fatal이다.
+    uint32 NotifyCount() const noexcept;
+
+    // 대상 ID(필드 FieldId·함수 FunctionId)의 통지 번호다(정렬 표의 이진 탐색). 통지 대상이 아니면
+    // NotifyIndexNone이다. 빈 lease는 Fatal이다.
+    //
+    // 사용 예:
+    //   const uint32 index = lease.NotifyIndex(healthId);
+    //   if (index != NotifyIndexNone) { /* 구독할 수 있다 */ }
+    uint32 NotifyIndex(Guid targetId) const noexcept;
+
+    // 통지 번호의 대상 ID다. index가 NotifyCount() 이상이면 Fatal이다.
+    Guid NotifyTarget(uint32 index) const noexcept;
+
     // Class·Struct lease에서 필드 ID의 스키마 위치다(필드 ID 정렬 색인의 이진 탐색 — 상속 필드도
     // 파생 스키마의 같은 ID로 찾는다). 없으면 NoField다(Enum lease는 필드가 없어 항상 NoField). 빈
     // lease는 Fatal이다.

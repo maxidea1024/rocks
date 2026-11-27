@@ -29,4 +29,4 @@
 
 ### 6.3 World·게임플레이에서의 참조
 
-World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 수 없다. World 객체의 영속 참조는 `SoftObjectRef<T>`(필드), 런타임 보유는 `AssetLease`(`ROCKS_NATIVE` 멤버)다. "하드" 의미(함께 로드·쿠킹)는 그 World 데이터를 담는 레벨·prefab 패키지(후속)의 Dependencies(Hard)로 표현한다. 에셋이 다른 에셋을 런타임에 붙잡아야 하면 lease가 아니라 Hard 참조를 쓴다(11.4절). 계획 §7.1의 `ObjectRef<MaterialAsset>` 예시는 이 규칙으로 바꾼다(17절).
+World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 수 없다. World 객체의 영속 참조는 `SoftObjectRef<T>`(필드), 런타임 보유는 `AssetLease`(`ROCKS_NATIVE` 멤버)다. "하드" 의미(함께 로드·쿠킹)는 그 World 데이터를 담는 레벨·prefab 패키지(후속)의 Dependencies(Hard)로 표현한다. prefab 패키지는 새 섹션 없는 일반 에셋 패키지이고(대표 에셋 `PrefabAsset`의 값으로 원형 본문을 담는다), 본문의 Soft 참조와 기준·중첩 prefab을 저장 hook이 Hard로 내준다([Prefab](../Prefab/04-StoragePropagationRuntime.ko.md) 3.6절). 에셋이 다른 에셋을 런타임에 붙잡아야 하면 lease가 아니라 Hard 참조를 쓴다(11.4절). 계획 §7.1의 `ObjectRef<MaterialAsset>` 예시는 이 규칙으로 바꾼다(17절).

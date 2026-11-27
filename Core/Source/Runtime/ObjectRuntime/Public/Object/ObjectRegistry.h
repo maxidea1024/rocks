@@ -1,11 +1,14 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Containers/HashMap.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefMap.h>
 #include <Object/ObjectRefs.h>
+#include <Object/FieldNotifications.h>
 #include <Object/ObjectDiagnostics.h>
 #include <Object/ObjectIdentity.h>
 #include <Object/ObjectRegistryOptions.h>
@@ -588,6 +591,58 @@ public:
     //   }
     Result<usize> TakeDestroyRequests(const ObjectAccessContext&, Span<ObjectHandle> out) noexcept;
 
+    // 실행 중 필드 변경 통지(Docs/Design/ChangeNotification.ko.md 3.1절 — CN1, UE
+    // INotifyFieldValueChanged). 소유 스레드·접근 문맥에서만 부른다(CN-D8). 구독은 객체를 GC root로
+    // 만들지 않고, 구독자 생존은 delegate 대상이 판정한다(Core Delegate C1). 동적 모듈의 lambda를
+    // 등록했으면 그 모듈을 내리기 전에 Unsubscribe한다. 객체를 파괴 요청·Discard·회수하면 그 구독은
+    // 알림 없이 사라진다(CN-D11).
+    //
+    // TrySubscribe: target(Notify 필드의 FieldId 또는 Notify 함수의 FunctionId)이 바뀌었을 수 있을
+    // 때 delegate를 부른다. 오류: 접근(WrongThread·WrongContext), 종료 뒤 ShuttingDown, 재진입·묶음
+    // 구간 Busy, handle 규칙(StaleHandle·Destroyed 등 — 살아 있는 객체만), 그 타입에 없는 대상
+    // NotFound, 통지 대상이 아닌 필드·함수 InvalidArgument, 할당 실패.
+    //
+    // 사용 예:
+    //   auto subscribed = registry.TrySubscribe(access, widget, NotifyTarget{textId},
+    //       FieldChangeDelegate::CreateLambda([&](ObjectHandle, Guid) noexcept { ++changes; }));
+    Result<FieldNotifyHandle> TrySubscribe(const ObjectAccessContext& access, ObjectHandle object,
+                                           NotifyTarget target,
+                                           FieldChangeDelegate&& delegate) noexcept;
+
+    // 모든 통지 대상을 한 delegate로 받는다(UE에 없음 — Inspector 갱신·디버거·Sparks host의 발행자
+    // 단위 연결). 오류는 TrySubscribe와 같다(대상 검사 대신 그 타입에 통지 대상이 하나도 없으면
+    // InvalidArgument).
+    Result<FieldNotifyHandle> TrySubscribeAll(const ObjectAccessContext& access,
+                                              ObjectHandle object,
+                                              FieldChangeDelegate&& delegate) noexcept;
+
+    // 구독 하나를 지운다. 없거나 이미 사라진 구독(객체 파괴 등)이면 false다. 통지 중에 불러도
+    // 된다(그 구독은 바로 호출 대상에서 빠진다 — CN-D7). 접근이 맞지 않으면 false다.
+    bool Unsubscribe(const ObjectAccessContext& access, const FieldNotifyHandle& handle) noexcept;
+
+    // 객체의 구독을 모두 지우고 그 수를 돌려준다. 오류는 접근·종료·재진입 규칙(handle은 회수 전이면
+    // 어느 상태든 받는다 — 회수된 handle은 StaleHandle).
+    Result<usize> UnsubscribeAll(const ObjectAccessContext& access, ObjectHandle object) noexcept;
+
+    // 생존 판정이 거짓인 구독(대상이 죽은 delegate — C1)을 지우고 그 수를 돌려준다. 오류는
+    // UnsubscribeAll과 같다.
+    Result<usize> CompactNotifications(const ObjectAccessContext& access,
+                                       ObjectHandle object) noexcept;
+
+    // target이 바뀌었을 수 있음을 그 구독자에게 동기로 알린다(CN-D6). 구독자가 없으면 슬롯의 통지
+    // bit 하나를 읽고 끝난다(할당·잠금 없음 — CN-D12). 오류: 접근, 종료 뒤 ShuttingDown, 처리 표시·
+    // 묶음 게시 구간 Busy(구독자를 부르지 않는다 — CN-D11), StaleHandle(회수된 handle), 그 타입의
+    // 통지 대상이 아닌 target InvalidArgument(구독자가 있을 때만 판정한다). 깊이
+    // 상한(MaxNotifyDepth)을 넘는 통지는 부르지 않고 Success를 돌려주며
+    // ObjectStats::droppedNotifications에 센다.
+    Result<void> Notify(const ObjectAccessContext& access, ObjectHandle object,
+                        NotifyTarget target) noexcept;
+
+    // 통지 번호(TypeLease::NotifyIndex)로 알린다(생성 코드용 — ID 조회가 없다). 범위 밖 번호는
+    // InvalidArgument다. 그 밖은 Notify와 같다.
+    Result<void> NotifyIndex(const ObjectAccessContext& access, ObjectHandle object,
+                             uint32 index) noexcept;
+
     // 객체가 지금 클러스터 소속인지다(진단·시험용 — 장기 smoke가 경계 비율 안전장치의 해체를 모델에
     // 맞춘다). 클러스터를 켜지 않은 Registry는 언제나 false다. handle·접근 규칙과 오류는
     // InspectLifecycle과 같다(cutoff white는 false). 결과는 반환 후에도 바뀔 수 있다.
@@ -717,6 +772,7 @@ private:
 
     struct Slot;
     struct SlotCold;
+    struct NotifyState;
     struct Chunk;
     struct MarkState;
     struct NameRecord;
@@ -928,6 +984,18 @@ private:
     void ReleaseGcGrowth(GcGrowth& growth) noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
     Result<void> CheckLive(Slot*, const void*) const noexcept;
+
+    // 변경 통지 상태(ObjectRegistryNotify.cpp — Docs/Design/ChangeNotification.ko.md CN1). 모두
+    // 소유 스레드에서 부른다. Release는 진행 중인 통지가 있으면 비우기만 하고 반환을 미룬다.
+    Result<NotifyState*> EnsureNotifyState(Slot& slot) noexcept;
+    void EraseNotifyState(uint32 slotIndex) noexcept;
+    void ReleaseNotifyState(uint32 slotIndex) noexcept;
+    void TidyNotifyState(uint32 slotIndex, NotifyState& state) noexcept;
+    void ClearNotifyLists(NotifyState& state) noexcept;
+    Result<Slot*> NotifySlot(const ObjectAccessContext& access, ObjectHandle object,
+                             bool requireAlive) noexcept;
+    Result<void> NotifyChecked(const ObjectAccessContext& access, ObjectHandle object,
+                               Guid targetId, uint32 index) noexcept;
     Result<ObjectAccessContext> ScopedAccess() const noexcept;
     Result<ObjectLifecycle> InspectChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
                                            bool requireBorrow) const noexcept;
@@ -1328,6 +1396,15 @@ private:
     uint64 batchApplied_ = 0;
     bool batchActive_ = false;
     bool batchPublished_ = false;
+    // 객체별 변경 통지 상태(Docs/Design/ChangeNotification.ko.md CN-D4 — 슬롯 index → 상태, 첫 구독
+    // 때 만들고 비면 반환한다). 상태가 있는 슬롯은 hot 레코드의 notified bit가 켜져 있다. 소유
+    // 스레드만 읽고 바꾼다. 통지 중 깊이(CN-D6)와 구독 목록 일련번호(해제 handle의 ABA 방지)다.
+    HashMap<uint32, UniquePtr<NotifyState>> notifyStates_;
+    uint32 notifyDepth_ = 0;
+    uint64 notifySerial_ = 0;
+    // 아래 둘은 Stats가 읽으므로 잠금(gate_) 안에서 바꾼다.
+    uint32 notifiedObjects_ = 0;
+    uint32 droppedNotifications_ = 0;
 };
 
 } // namespace rocks

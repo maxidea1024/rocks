@@ -211,6 +211,50 @@ const RuntimeFieldOps* TypeLease::FieldOps(usize schemaIndex) const& noexcept {
     return position == TypeRegistry::Record::NoOps ? nullptr : &record->ops.fields[position];
 }
 
+uint32 TypeLease::NotifyCount() const noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record) {
+        platform::Fatal("TypeLease::NotifyCount called on an empty lease");
+    }
+
+    return record->notifyCount;
+}
+
+uint32 TypeLease::NotifyIndex(Guid targetId) const noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record) {
+        platform::Fatal("TypeLease::NotifyIndex called on an empty lease");
+    }
+
+    usize low = 0;
+    usize high = record->notifyCount;
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        const uint32 index = record->notifyOrder[middle];
+        const Guid id = record->notifyIds[index];
+        if (id == targetId) {
+            return index;
+        }
+
+        if (id.high < targetId.high || (id.high == targetId.high && id.low < targetId.low)) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return NotifyIndexNone;
+}
+
+Guid TypeLease::NotifyTarget(uint32 index) const noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || index >= record->notifyCount) {
+        platform::Fatal("TypeLease::NotifyTarget called on an empty lease or out of range");
+    }
+
+    return record->notifyIds[index];
+}
+
 const RuntimeEventOps* TypeLease::EventOps(usize schemaIndex) const& noexcept {
     const auto* record = static_cast<TypeRegistry::Record*>(record_);
     if (!record || record->kind != TypeKind::Class || schemaIndex >= record->schema.fields.Size()) {
