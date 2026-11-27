@@ -3,6 +3,7 @@
 #include <CoreTypeBindings/CoreValueTypes.h>
 #include <MaterialSchema/Nodes/Functions/FunctionsNodeEnums.h>
 
+#include "ClassicSurface.h"
 #include "LoweringContext.h"
 #include "LoweringTable.h"
 
@@ -19,6 +20,10 @@ constexpr StringView FunctionInputResultPin = "Result";
 // 레이어 노드 입력·결과 핀 키다.
 constexpr StringView LayerInputPin = "Input";
 constexpr StringView LayerResultPin = "Result";
+// 미리보기 속성 집합·표면의 emissive 칸이다(UE CompilePreviewValue — EmissiveColor =
+// previewValue.xyz).
+constexpr StringView PreviewEmissiveAttribute = "EmissiveColor";
+constexpr usize PreviewEmissiveComponents = 3;
 // previewValue(Vec4) 칸 이름이다.
 constexpr StringView FunctionPreviewChannels[MaxIrComponents] = {"x", "y", "z", "w"};
 
@@ -128,6 +133,37 @@ Result<IrValueId> FitFunctionInput(LoweringContext& context, IrValueId value, Ir
     return context.Coerce(value, pin, StringView());
 }
 
+// previewValue(Vec4)다. 읽지 못하면 InvalidProperty를 진단하고 false다.
+Result<bool> ReadPreviewValue(LoweringContext& context, NodePropertyReader& properties,
+                              float (&components)[MaxIrComponents]) noexcept {
+    auto preview = properties.OpenStruct("previewValue", GeneratedType<Vec4>::Schema());
+    Result<void> read = preview ? Result<void>::Success() : Result<void>::Failure(preview.Error());
+    for (usize at = 0; read && at < MaxIrComponents; ++at) {
+        auto channel = preview.Value().ReadFloat(FunctionPreviewChannels[at], 0.0f);
+        if (channel) {
+            components[at] = channel.Value();
+        } else {
+            read = Result<void>::Failure(channel.Error());
+        }
+    }
+
+    if (read) {
+        return Result<bool>::Success(true);
+    }
+
+    if (read.Error() == ErrorCode::OutOfMemory) {
+        return Result<bool>::Failure(read.Error());
+    }
+
+    if (auto reported = context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                      "Node vector property cannot be read");
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
 // FunctionInput이다(UE UMaterialExpressionFunctionInput::Compile — ME:16545–16629, 호출 연결은
 // LinkIntoCaller — ME:14274–14303).
 Result<void> LowerFunctionInput(LoweringContext& context) noexcept {
@@ -206,40 +242,23 @@ Result<void> LowerFunctionInput(LoweringContext& context) noexcept {
             }
 
             value = preview.Value();
-        } else if (type == FunctionInputType::MaterialAttributes) {
-            // UE CompilePreviewValue의 속성 집합은 기본값(칸 없음)이다.
-            auto empty = context.MakeAttributes({});
-            if (!empty) {
-                return Result<void>::Failure(empty.Error());
-            }
-
-            value = empty.Value();
-        } else if (type <= FunctionInputType::Vector4) {
-            // previewValue 상수다(UE CompilePreviewValue — 입력 폭만큼).
-            auto preview =
-                properties.Value()->OpenStruct("previewValue", GeneratedType<Vec4>::Schema());
+        } else if (type <= FunctionInputType::Vector4 ||
+                   type == FunctionInputType::MaterialAttributes ||
+                   type == FunctionInputType::Surface) {
+            // previewValue다(UE CompilePreviewValue — ME:16502–16540).
             float components[MaxIrComponents] = {};
-            Result<void> read =
-                preview ? Result<void>::Success() : Result<void>::Failure(preview.Error());
-            for (usize at = 0; read && at < MaxIrComponents; ++at) {
-                auto channel = preview.Value().ReadFloat(FunctionPreviewChannels[at], 0.0f);
-                if (channel) {
-                    components[at] = channel.Value();
-                } else {
-                    read = Result<void>::Failure(channel.Error());
-                }
-            }
-
+            auto read = ReadPreviewValue(context, *properties.Value(), components);
             if (!read) {
-                if (read.Error() == ErrorCode::OutOfMemory) {
-                    return read;
-                }
-
-                return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
-                                     "Node vector property cannot be read");
+                return Result<void>::Failure(read.Error());
             }
 
-            const usize width = static_cast<usize>(type) + 1;
+            if (!read.Value()) {
+                return Result<void>::Success();
+            }
+
+            const bool record =
+                type == FunctionInputType::MaterialAttributes || type == FunctionInputType::Surface;
+            const usize width = record ? PreviewEmissiveComponents : static_cast<usize>(type) + 1;
             auto constant =
                 context.FloatConstant(Span<const float>(components, width), StringView());
             if (!constant) {
@@ -247,6 +266,30 @@ Result<void> LowerFunctionInput(LoweringContext& context) noexcept {
             }
 
             value = constant.Value();
+            if (record && value != NoIrValue) {
+                // 속성 집합은 EmissiveColor 칸만 previewValue.xyz다(나머지 기본값). 표면은 같은
+                // 기록의 표면 변환이다(UE CompileDefaultSlab(previewValue.xyz) — emissive만 덮은
+                // 기본 slab).
+                const MaterialAttributeDefinition* emissive =
+                    context.FindAttributeByName(PreviewEmissiveAttribute);
+                if (emissive == nullptr) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                const AttributeEntry entries[] = {{emissive->id, value}};
+                auto made = type == FunctionInputType::Surface
+                                ? ClassicSurfaceFromAttributes(context, entries)
+                                : context.MakeAttributes(entries);
+                if (!made) {
+                    return Result<void>::Failure(made.Error());
+                }
+
+                value = made.Value();
+            }
+        } else if (type == FunctionInputType::Texture3D) {
+            // UE CompilePreviewValue의 default 가지다(Texture3D는 목록에 없다).
+            return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                 "Unknown input type");
         } else {
             return FunctionInputError(context, MaterialDiagnosticCode::MissingInput,
                                       "Missing Preview connection for function input '", name);
@@ -297,10 +340,11 @@ Result<void> LowerLayers(LoweringContext& context) noexcept {
 }
 
 // 미리보기 Preview 입력만 계획 밖이다(호출 연결이 있으면 번역하지 않는다 — UE LinkIntoCaller).
-// 레이어 노드의 입력은 합성 호출이 읽는다(LayerStack 동적 입력은 계획에 넣지 않는다).
+// 레이어 노드의 입력은 합성 호출이 읽는다(계획에 넣지 않는다 — AttributeLayers Input은 통과일 때만
+// 노드가 직접 읽는다).
 constexpr LoweringEntry FunctionEntries[] = {
     {"Material.FunctionInput", &LowerFunctionInput, true, {}},
-    {"Material.AttributeLayers", &LowerLayers},
+    {"Material.AttributeLayers", &LowerLayers, true, {}},
     {"Material.LayerStack", &LowerLayers, true, {}},
 };
 

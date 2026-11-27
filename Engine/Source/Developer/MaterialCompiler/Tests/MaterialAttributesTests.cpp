@@ -404,4 +404,67 @@ TEST(MaterialAttributes_CustomAttributes) {
     CHECK(HasErrorAt(cachedOut, MaterialDiagnosticCode::PrerequisiteMissing, OutputNodeId));
 }
 
+// 리뷰 반영 규칙: BlendAttributes 같은 값은 Alpha 없이도 남고, useMaterialAttributes의
+// CustomizedUv· Displacement 개별 핀은 V5, Displacement 칸은 늦은 진단, Aggregate 모르는 이름
+// 문구다.
+TEST(MaterialAttributes_ReviewRules) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    {
+        GraphFixture fixture(env);
+        const Guid value = AddConstant(fixture, 0.3f);
+        const Guid a = fixture.Add("Material.MakeAttributes");
+        const Guid b = fixture.Add("Material.MakeAttributes");
+        fixture.Connect(value, "Result", a, "Metallic");
+        fixture.Connect(value, "Result", b, "Metallic");
+        BlendAttributesProperties properties;
+        const Guid blend = fixture.Add("Material.BlendAttributes", env.Save(properties));
+        fixture.Connect(a, "Result", blend, "A");
+        fixture.Connect(b, "Result", blend, "B");
+        fixture.Connect(blend, "Result", OutputNodeId, "Attributes");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, AttributesTraits(), out));
+        REQUIRE(out.succeeded);
+        CHECK(AttributesNear(AttributesConstant(out, IrEntry::Surface, "Metallic"), 0.3f));
+    }
+
+    {
+        GraphFixture fixture(env);
+        fixture.Connect(fixture.Add("Material.MakeAttributes"), "Result", OutputNodeId,
+                        "Attributes");
+        fixture.Connect(AddConstant(fixture, 0.5f), "Result", OutputNodeId, "CustomizedUv0");
+        fixture.Connect(AddConstant(fixture, 0.5f), "Result", OutputNodeId, "Displacement");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, AttributesTraits(), out));
+        CHECK(out.succeeded);
+        CHECK(CountDiagnostics(out, MaterialDiagnosticCode::InactiveOutput,
+                               nodegraph::GraphDiagnosticSeverity::Warning) == 2);
+    }
+
+    {
+        GraphFixture fixture(env);
+        const Guid make = fixture.Add("Material.MakeAttributes");
+        fixture.Connect(AddConstant(fixture, 0.5f), "Result", make, "Displacement");
+        fixture.Connect(make, "Result", OutputNodeId, "Attributes");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, AttributesTraits(), out));
+        CHECK(!out.succeeded);
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::NotYetLowered, OutputNodeId));
+        CHECK(AttributesMessage(out, "Displacement attribute is not translated in this stage yet"));
+    }
+
+    {
+        GraphFixture fixture(env);
+        AggregateProperties properties(env.allocator);
+        REQUIRE(properties.attributeNames.TryPushBack(env.Intern("Bogus")));
+        const Guid aggregate = fixture.Add("Material.Aggregate", env.Save(properties));
+        fixture.Connect(AddConstant(fixture, 0.35f), "Result", aggregate, "Bogus");
+        EmitThroughUnlit(fixture, aggregate, "BogusOut");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, Traits(), out));
+        CHECK(!out.succeeded);
+        CHECK(AttributesMessage(out, "Unknown material attribute 'Bogus'"));
+    }
+}
+
 } // namespace material_attributes_tests_file

@@ -36,6 +36,8 @@ constexpr Guid LayerInputId{0x4d414c494e505554ull, 1};
 constexpr Guid LayerInputSecondId{0x4d414c494e505554ull, 2};
 constexpr Guid LayerParameterId{0x4d414c5041524d31ull, 1};
 constexpr uint64 LayerIdHigh = 0x4c41594552494431ull;
+// 번역기 레이어 수 상한(MaxMaterialLayers — Private 상수)과 같은 시험 값이다.
+constexpr usize MaxMaterialLayersForTest = 32;
 
 // 레이어 항목 하나다(시험 입력).
 struct LayerSpec {
@@ -372,9 +374,11 @@ TEST(MaterialLayers_FunctionUsage) {
     MaterialTranslation out(env.allocator);
     REQUIRE(TranslateWithSources(main, &sources, out));
     CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::LayerStackRule, call));
-    CHECK(HasMessageAt(out, call,
-                       "LayerValidation:Layer TwoInputs: can only have up to 1 Material Attributes "
-                       "type output node. It has 2"));
+    // UE는 함수 스택 안에서 낸다(경로에 그 함수 이름 — ME:14258).
+    CHECK(
+        HasMessageAt(out, call,
+                     "(Function TwoInputs) LayerValidation:Layer TwoInputs: can only have up to 1 "
+                     "Material Attributes type output node. It has 2"));
 }
 
 // LayerStack: 혼합이 없으면 위 레이어의 MaterialAttributes 입력에 아래 레이어 결과를 잇는다.
@@ -449,6 +453,221 @@ TEST(MaterialLayers_LayerStackValidation) {
         CHECK(HasMessageAt(out, stack,
                            "LayerValidation:LayerStack Available Layers/Blends contain invalid "
                            "functions."));
+    }
+}
+
+// MaterialSample로 펼친 머티리얼 안 레이어 노드의 진단은 주 그래프의 MaterialSample 위치다.
+TEST(MaterialLayers_SampleOwnedLayers) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture referenced(env);
+    const LayerSpec specs[] = {{Guid{LayerAssetHigh, 99}, Guid{}}};
+    EmitBaseColor(referenced, AddAttributeLayers(referenced, specs));
+    MaterialGraphSnapshot snapshot;
+    snapshot.asset = Guid{LayerAssetHigh, 50};
+    snapshot.name = "M";
+    snapshot.document = &referenced.document;
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddMaterial(snapshot));
+    GraphFixture main(env);
+    MaterialSampleProperties properties;
+    properties.materialReference.assetId = AssetId{snapshot.asset};
+    const Guid sample = main.Add("Material.MaterialSample", env.Save(properties));
+    main.Connect(sample, "Front Material", OutputNodeId, "Surface");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWithSources(main, &sources, out));
+    CHECK(!out.succeeded);
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::MissingInput, sample));
+    CHECK(HasMessageAt(out, sample, "(Function M) Material function asset is not available"));
+}
+
+// 가운데 불투명 레이어(혼합 없음)는 다음 혼합의 아래 입력이 된다. relevance가 없는 혼합 입력은 정렬
+// 순 첫째가 아래다(같은 입력을 두 번 고르지 않는다).
+TEST(MaterialLayers_ChainRules) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    FunctionFixture low(env, LayerLow, "Low");
+    BuildConstantLayer(low, 0.2f);
+    FunctionFixture middle(env, LayerPass, "Middle");
+    BuildConstantLayer(middle, 0.5f);
+    FunctionFixture high(env, LayerHigh, "High");
+    BuildConstantLayer(high, 0.8f);
+    FunctionFixture keepBottom(env, BlendBottom, "KeepBottom");
+    BuildBlend(keepBottom, false);
+    FunctionFixture general(env, BlendTop, "General");
+    general.snapshot.usage = MaterialFunctionUsage::LayerBlend;
+    const Guid first =
+        AddBlendInput(general.graph, LayerInputId, BlendInputRelevance::General, 0, "First");
+    AddBlendInput(general.graph, LayerInputSecondId, BlendInputRelevance::General, 1, "Second");
+    const Guid generalOutput = AddLayerOutput(general.graph, LayerOutputId);
+    general.graph.Connect(first, "Result", generalOutput, "A");
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(low.snapshot));
+    REQUIRE(sources.AddFunction(middle.snapshot));
+    REQUIRE(sources.AddFunction(high.snapshot));
+    REQUIRE(sources.AddFunction(keepBottom.snapshot));
+    REQUIRE(sources.AddFunction(general.snapshot));
+    {
+        GraphFixture main(env);
+        const LayerSpec specs[] = {
+            {LayerLow, Guid{}}, {LayerPass, Guid{}}, {LayerHigh, BlendBottom}};
+        EmitBaseColor(main, AddAttributeLayers(main, specs));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        CHECK(LayersNear(EmissiveConstant(out), 0.5f));
+    }
+
+    {
+        GraphFixture main(env);
+        const LayerSpec specs[] = {{LayerLow, Guid{}}, {LayerHigh, BlendTop}};
+        EmitBaseColor(main, AddAttributeLayers(main, specs));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        CHECK(LayersNear(EmissiveConstant(out), 0.2f));
+    }
+}
+
+// AttributeLayers 검사 문구 나머지(UE 그대로)와 레이어 수 상한이다.
+TEST(MaterialLayers_MoreValidation) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    FunctionFixture two(env, LayerLow, "Two");
+    BuildConstantLayer(two, 0.2f);
+    AddFunctionInput(two.graph, LayerInputId, FunctionInputType::MaterialAttributes);
+    AddFunctionInput(two.graph, LayerInputSecondId, FunctionInputType::Scalar);
+    FunctionFixture high(env, LayerHigh, "High");
+    BuildConstantLayer(high, 0.8f);
+    FunctionFixture wrongUsage(env, BlendTop, "Wrong");
+    BuildBlend(wrongUsage, true);
+    wrongUsage.snapshot.usage = MaterialFunctionUsage::Layer;
+    FunctionFixture single(env, BlendBottom, "Single");
+    single.snapshot.usage = MaterialFunctionUsage::LayerBlend;
+    const Guid only = AddBlendInput(single.graph, LayerInputId, BlendInputRelevance::Top, 0, "Top");
+    const Guid singleOutput = AddLayerOutput(single.graph, LayerOutputId);
+    single.graph.Connect(only, "Result", singleOutput, "A");
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(two.snapshot));
+    REQUIRE(sources.AddFunction(high.snapshot));
+    REQUIRE(sources.AddFunction(wrongUsage.snapshot));
+    REQUIRE(sources.AddFunction(single.snapshot));
+    const struct {
+        LayerSpec specs[2];
+        usize count;
+        StringView message;
+    } cases[] = {
+        {{{LayerLow, Guid{}}, {}},
+         1,
+         "LayerValidation:Layer 0, Two, must have one MaterialAttributes input only."},
+        {{{LayerHigh, Guid{}}, {LayerHigh, BlendTop}},
+         2,
+         "LayerValidation:Blend 0, Wrong, not set for layer blend usage."},
+        {{{LayerHigh, Guid{}}, {LayerHigh, BlendBottom}},
+         2,
+         "LayerValidation:Blend 0, Single, must have two MaterialAttributes inputs."},
+    };
+    for (const auto& item : cases) {
+        GraphFixture main(env);
+        const Guid layers = AddAttributeLayers(main, Span<const LayerSpec>(item.specs, item.count));
+        EmitBaseColor(main, layers);
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(!out.succeeded);
+        CHECK(HasMessageAt(out, layers, item.message));
+    }
+
+    GraphFixture many(env);
+    LayerSpec specs[MaxMaterialLayersForTest + 1];
+    for (LayerSpec& spec : specs) {
+        spec = LayerSpec{LayerHigh, Guid{}};
+    }
+
+    const Guid layers = AddAttributeLayers(many, specs);
+    EmitBaseColor(many, layers);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWithSources(many, &sources, out));
+    CHECK(HasMessageAt(out, layers, "LayerValidation:Material layer count exceeds the limit"));
+}
+
+// LayerStack: 혼합 사슬, 개수 문구, layerInputs 배선(레이어 입력), static 노드 검사다.
+TEST(MaterialLayers_LayerStackRules) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    FunctionFixture low(env, LayerLow, "Low");
+    BuildConstantLayer(low, 0.2f);
+    FunctionFixture high(env, LayerHigh, "High");
+    BuildConstantLayer(high, 0.8f);
+    FunctionFixture top(env, BlendTop, "KeepTop");
+    BuildBlend(top, true);
+    FunctionFixture tinted(env, LayerPass, "Tinted");
+    tinted.snapshot.usage = MaterialFunctionUsage::Layer;
+    const Guid tint = AddFunctionInput(tinted.graph, LayerInputId, FunctionInputType::Vector3,
+                                       false, 0.0f, "Tint");
+    const Guid make = tinted.graph.Add("Material.MakeAttributes");
+    tinted.graph.Connect(tint, "Result", make, "BaseColor");
+    const Guid tintedOutput = AddLayerOutput(tinted.graph, LayerOutputId);
+    tinted.graph.Connect(make, "Result", tintedOutput, "A");
+    FunctionFixture staticLayer(env, LayerParameter, "S");
+    BuildConstantLayer(staticLayer, 0.1f);
+    staticLayer.graph.Add("Material.StaticBool");
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(low.snapshot));
+    REQUIRE(sources.AddFunction(high.snapshot));
+    REQUIRE(sources.AddFunction(top.snapshot));
+    REQUIRE(sources.AddFunction(tinted.snapshot));
+    REQUIRE(sources.AddFunction(staticLayer.snapshot));
+    const Guid available[] = {LayerLow, LayerHigh};
+    const Guid blends[] = {BlendTop};
+    {
+        GraphFixture main(env);
+        const LayerSpec specs[] = {{LayerLow, Guid{}}, {LayerHigh, BlendTop}};
+        EmitBaseColor(main, AddLayerStack(main, specs, available, blends));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        CHECK(LayersNear(EmissiveConstant(out), 0.8f));
+    }
+
+    {
+        GraphFixture main(env);
+        const LayerSpec specs[] = {{LayerLow, Guid{}}, {LayerHigh, BlendTop}, {LayerHigh, Guid{}}};
+        const Guid stack = AddLayerStack(main, specs, available, blends);
+        EmitBaseColor(main, stack);
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(HasMessageAt(out, stack,
+                           "LayerValidation:Invalid number of layers (3) or blends (1) assigned. "
+                           "Number of blends must be equal to 0, or 1 less than the number of "
+                           "active layers."));
+    }
+
+    {
+        GraphFixture main(env);
+        const Guid tintedAvailable[] = {LayerPass};
+        const LayerSpec specs[] = {{LayerPass, Guid{}}};
+        const StringView inputs[] = {"tint"};
+        const Guid stack = AddLayerStack(main, specs, tintedAvailable, {}, inputs);
+        main.Connect(AddConstant(main, 0.6f), "Result", stack, "tint");
+        EmitBaseColor(main, stack);
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        // 이름 비교는 대소문자를 무시한다(UE FName).
+        CHECK(LayersNear(EmissiveConstant(out), 0.6f));
+    }
+
+    {
+        GraphFixture main(env);
+        const Guid staticAvailable[] = {LayerParameter};
+        const LayerSpec specs[] = {{LayerParameter, Guid{}}};
+        const Guid stack = AddLayerStack(main, specs, staticAvailable, {});
+        EmitBaseColor(main, stack);
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(HasMessageAt(out, stack,
+                           "LayerValidation:Function S: cannot contain any static nodes as these "
+                           "are incompatible with the layering."));
     }
 }
 

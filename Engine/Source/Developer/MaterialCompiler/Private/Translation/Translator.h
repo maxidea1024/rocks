@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Hash.h>
@@ -66,6 +67,9 @@ inline constexpr usize MaxExpandedMaterialNodes = 65536;
 
 // 함수 호출 깊이 상한이다(주 그래프 호출이 1 — 넘으면 V9).
 inline constexpr uint32 MaxFunctionCallDepth = 64;
+
+// ReportInFunction의 "안쪽 함수 없음" 표지다.
+inline constexpr uint32 NoInnerFunction = NumericLimits<uint32>::Max();
 
 // 레이어 노드 하나의 레이어 수 상한이다(6.12절 MS2e3 — UE에는 상한이 없다, 넘으면 V14).
 inline constexpr usize MaxMaterialLayers = 32;
@@ -196,6 +200,10 @@ public:
     // 호출 노드)다.
     Guid ParameterIdentity(Guid node, Guid parameterId, bool shared) const noexcept;
 
+    // consumer 사본 노드의 속성이 가리키는 원본 그래프 노드 id를 같은 호출의 사본 id로 바꾼다
+    // (NamedRerouteUsage declaration — 6.12절 MS2e2 노드 id 속성). 주 그래프 노드면 그대로다.
+    Guid CopiedNodeId(Guid consumer, Guid original) const noexcept;
+
     // MaterialSample로 펼친 사본(그 안의 함수 사본 포함)인가(custom 출력 제외 — 6.12절 MS2e2).
     bool IsSampledCopy(Guid node) const noexcept;
 
@@ -250,7 +258,16 @@ private:
     Result<const MaterialGraphSnapshot*>
     LoadSnapshot(Guid asset, bool sample, const nodegraph::Graph*& graph, uint32& index) noexcept;
     // 함수 그래프의 입출력 목록이다(정렬 순 — 6.12절 MS2e3).
-    Result<void> ReadSignature(const nodegraph::Graph& source, FunctionSignature& out) noexcept;
+    // classifyOutputs가 거짓이면 출력의 MaterialAttributes 판정을 하지 않는다(용도 검사가 없는 호출
+    // — 판정은 중첩 호출을 따라 snapshot을 읽는다).
+    Result<void> ReadSignature(const nodegraph::GraphDocument* document,
+                               const nodegraph::Graph& source, FunctionSignature& out, uint32 depth,
+                               bool classifyOutputs) noexcept;
+    // 함수 그래프 node의 입력 pin에 들어오는 값이 MaterialAttributes 형인가(6.12절 MS2e3 —
+    // 재경유·이름 있는 재경유·동적 핀·중첩 호출을 따라간다, depth는 호출 깊이).
+    Result<bool> OutputIsAttributes(const nodegraph::GraphDocument* document,
+                                    const nodegraph::Graph& source, Guid node, Name pin,
+                                    uint32 depth) noexcept;
     // index 레이어 노드를 펼친다(합성 호출·간선 — 6.12절 MS2e3).
     Result<void> ExpandLayers(usize index, bool stack) noexcept;
     // 레이어 노드 owner의 합성 호출을 붙이고 펼친다(id = Hash(owner, layerId, role)).
@@ -269,6 +286,11 @@ private:
     // 함수 용도(Layer·LayerBlend) 규칙 오류를 진단한다(6.12절 MS2e3 — UE ValidateFunctionUsage
     // 문구).
     Result<void> ReportUsageError(const nodegraph::GraphNode& node) noexcept;
+    // 함수 안에서 나는 호출 오류다(UE PushFunction 뒤 — 경로에 innerSnapshot 함수 이름까지 붙인다,
+    // 6.12절 MS2e2 진단 위치). innerSnapshot이 NoInnerFunction이면 Report와 같다.
+    Result<void> ReportInFunction(nodegraph::GraphDiagnosticSeverity severity,
+                                  MaterialDiagnosticCode code, Guid node, Name pin,
+                                  StringView message, uint32 innerSnapshot) noexcept;
     // 진단을 그대로 남긴다(Report가 사본 위치를 바꾼 뒤).
     Result<void> ReportAt(nodegraph::GraphDiagnosticSeverity severity, MaterialDiagnosticCode code,
                           Guid node, Name pin, StringView message) noexcept;
@@ -375,7 +397,9 @@ private:
         // 호출 노드 속성을 읽지 못한다.
         Unreadable = 7,
         // 함수 용도(Layer·LayerBlend)의 입출력 규칙을 어긴다(6.12절 MS2e3 함수 용도 검사).
-        InvalidUsage = 8
+        InvalidUsage = 8,
+        // MaterialSample 참조 머티리얼에 출력 노드가 없다.
+        MissingSurface = 9
     };
 
     struct CallInfo {
@@ -401,6 +425,11 @@ private:
         uint32 firstDiagnostic = 0;
         uint32 diagnosticCount = 0;
     };
+
+    // at의 바깥 사슬 한 칸이다(6.12절 MS2e2 진단 위치): 함수·MaterialSample 사본이면 origin이 그
+    // 출처, at이 호출 노드가 되고, 레이어 합성 호출이면 origin이 nullptr, at이 레이어 노드가 된다.
+    // 더 없으면 false다.
+    bool ClimbOrigin(Guid& at, const ExpandedOrigin*& origin) const noexcept;
 
     Allocator& allocator_;
     const MaterialTranslationInput& input_;

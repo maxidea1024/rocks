@@ -329,29 +329,47 @@ LoweringFn Translator::FindLowering(Name type) const noexcept {
 Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
                                 MaterialDiagnosticCode code, Guid node, Name pin,
                                 StringView message) noexcept {
-    if (!origins_.Contains(node)) {
-        // 레이어 합성 호출의 진단은 그 레이어 노드 위치다(6.12절 MS2e3).
-        const Guid* owner = syntheticOwners_.Find(node);
-        return owner == nullptr ? ReportAt(severity, code, node, pin, message)
-                                : ReportAt(severity, code, *owner, Name(), message);
-    }
+    return ReportInFunction(severity, code, node, pin, message, NoInnerFunction);
+}
 
+Result<void> Translator::ReportInFunction(nodegraph::GraphDiagnosticSeverity severity,
+                                          MaterialDiagnosticCode code, Guid node, Name pin,
+                                          StringView message, uint32 innerSnapshot) noexcept {
     // 펼친 사본의 진단은 주 그래프의 가장 바깥 호출 노드 위치에 내고 호출 경로와 노드 종류를 문구
-    // 앞에 붙인다(6.12절 MS2e2 — UE HLSLMaterialTranslator.cpp:4392–4437).
+    // 앞에 붙인다(6.12절 MS2e2 — UE HLSLMaterialTranslator.cpp:4392–4437). 함수 사본 → 호출 노드,
+    // 레이어 합성 호출 → 레이어 노드를 번갈아 끝까지 올라간다(합성 호출은 경로 이름에 넣지 않는다).
     SystemAllocator scratch;
     Array<uint32> chain(scratch);
-    Guid outer = node;
-    for (const ExpandedOrigin* origin = origins_.Find(outer); origin != nullptr;
-         origin = origins_.Find(outer)) {
-        if (auto added = chain.TryPushBack(origin->snapshot); !added) {
+    if (innerSnapshot != NoInnerFunction) {
+        if (auto added = chain.TryPushBack(innerSnapshot); !added) {
             return added;
         }
-
-        outer = origin->call;
     }
 
-    if (const Guid* owner = syntheticOwners_.Find(outer)) {
-        outer = *owner;
+    Guid outer = node;
+    bool moved = false;
+    for (usize step = 0; step <= origins_.Count() + syntheticOwners_.Count(); ++step) {
+        if (const ExpandedOrigin* origin = origins_.Find(outer)) {
+            if (auto added = chain.TryPushBack(origin->snapshot); !added) {
+                return added;
+            }
+
+            outer = origin->call;
+            moved = true;
+            continue;
+        }
+
+        if (const Guid* owner = syntheticOwners_.Find(outer)) {
+            outer = *owner;
+            moved = true;
+            continue;
+        }
+
+        break;
+    }
+
+    if (chain.IsEmpty()) {
+        return ReportAt(severity, code, outer, moved ? Name() : pin, message);
     }
 
     String text(scratch);
@@ -367,7 +385,7 @@ Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
         built = text.TryAppend(") ");
     }
 
-    const nodegraph::GraphNode* located = FindNode(node);
+    const nodegraph::GraphNode* located = origins_.Contains(node) ? FindNode(node) : nullptr;
     if (built && located != nullptr && !(located->type == functionCallType_) &&
         !(located->type == functionInputType_) && !(located->type == functionOutputType_)) {
         auto type = input_.names.Acquire(located->type);
@@ -837,7 +855,8 @@ Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out)
             if (reader) {
                 auto declaration = reader.Value().ReadGuid("declaration", Guid{});
                 if (declaration) {
-                    if (const usize* source = nodes_.Find(declaration.Value())) {
+                    if (const usize* source =
+                            nodes_.Find(CopiedNodeId(consumer.id, declaration.Value()))) {
                         if (auto added =
                                 out.TryPushBack(Dependency{*source, PinKey{consumer.id, Name()}});
                             !added) {
@@ -1085,7 +1104,12 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
     }
 
     LoweringContext context(*this, output, *definition);
+    // 속성 집합 출력이면 개별 핀은 비활성(V5)이다(아래 — 6.12절 MS2e1).
     for (StringView pin : PendingOutputPins) {
+        if (input_.traits.useMaterialAttributes) {
+            break;
+        }
+
         auto connected = context.IsConnected(pin);
         if (!connected) {
             return Result<void>::Failure(connected.Error());
@@ -1110,6 +1134,21 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
         if (!record) {
             return record;
         }
+
+        // Displacement 칸은 개별 핀처럼 아직 번역하지 않는다(6.12절 MS2e1 —
+        // MPQ-VirtualizedGeometry).
+        const MaterialAttributeDefinition* displacement = FindAttributeByName("Displacement");
+        for (const AttributeEntry& entry : entries) {
+            if (context_ == EvaluationContext::Pixel && displacement != nullptr &&
+                entry.id == displacement->id) {
+                if (auto reported =
+                        context.Error(MaterialDiagnosticCode::NotYetLowered, "Attributes",
+                                      "Displacement attribute is not translated in this stage yet");
+                    !reported) {
+                    return reported;
+                }
+            }
+        }
     } else if (context_ == EvaluationContext::Pixel) {
         auto connected = context.IsConnected("Attributes");
         if (!connected) {
@@ -1129,8 +1168,11 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
 
     if (attributes && context_ == EvaluationContext::Pixel) {
         const StringView ignored[] = {
-            "Surface",    "Opacity",          "OpacityMask",      "AmbientOcclusion",
-            "Refraction", "SurfaceThickness", "PixelDepthOffset", "WorldPositionOffset"};
+            "Surface",       "Opacity",          "OpacityMask",      "AmbientOcclusion",
+            "Refraction",    "SurfaceThickness", "PixelDepthOffset", "WorldPositionOffset",
+            "Displacement",  "CustomizedUv0",    "CustomizedUv1",    "CustomizedUv2",
+            "CustomizedUv3", "CustomizedUv4",    "CustomizedUv5",    "CustomizedUv6",
+            "CustomizedUv7"};
         for (StringView pin : ignored) {
             auto connected = context.IsConnected(pin);
             if (!connected) {
@@ -1546,7 +1588,8 @@ Result<void> Translator::TranslateCustomizedUvs(const nodegraph::GraphNode& outp
             return Result<void>::Failure(connected.Error());
         }
 
-        if (connected.Value() && index >= limit) {
+        // 속성 집합 출력이면 개별 핀은 이미 V5다(TranslateOutputs — 경고는 하나).
+        if (connected.Value() && index >= limit && !input_.traits.useMaterialAttributes) {
             if (auto reported = context.Warning(MaterialDiagnosticCode::InactiveOutput, pin,
                                                 "Customized UV pin is beyond the material's "
                                                 "customized UV count; it is ignored");

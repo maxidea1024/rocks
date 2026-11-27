@@ -2,6 +2,7 @@
 
 #include "DiagnosticText.h"
 #include "ExpandedGuid.h"
+#include "FunctionNodeNames.h"
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
@@ -20,18 +21,13 @@ namespace rocks::material::detail {
 
 namespace {
 
-// 검사 문구 접두다(UE MaterialAttributeLayers::LogError — 띄어 쓰지 않는다).
-constexpr StringView LayerValidationPrefix = "LayerValidation:";
 // 합성 호출 id의 역할 값이다(Hash(레이어 노드, layerId, 역할)).
 constexpr uint64 LayerCallRole = 1;
 constexpr uint64 BlendCallRole = 2;
+// 함수 역할 수다(레이어·혼합 — 목록 둘을 차례로 본다).
+constexpr usize LayerFunctionRoleCount = 2;
 // AttributeLayers 입력 핀 키다.
 constexpr StringView LayerNodeInputPin = "Input";
-// 레이어·혼합 함수의 입력 수 규칙이다(UE AcceptableNum* —
-// MaterialExpressionMaterialAttributeLayers.h:21–23).
-constexpr usize LayerAcceptableInputs = 1;
-constexpr usize BlendAcceptableInputs = 2;
-constexpr usize LayerAcceptableOutputs = 1;
 
 // 레이어 항목 하나다(LayerStackLayer — 아래(0)부터 위 순서).
 struct LayerEntry {
@@ -88,12 +84,18 @@ void BlendInputs(const FunctionSignature& signature, bool attributesOnly,
         return;
     }
 
-    if (bottom == nullptr && !signature.inputs.IsEmpty()) {
-        bottom = &signature.inputs[0];
+    // relevance가 없는 쪽은 아직 고르지 않은 입력 중 정렬 순 첫째다(아래 먼저 — 같은 입력을 두 번
+    // 고르지 않는다).
+    for (const FunctionSignaturePin& pin : signature.inputs) {
+        if (bottom == nullptr && &pin != top) {
+            bottom = &pin;
+        }
     }
 
-    if (top == nullptr && signature.inputs.Size() > 1) {
-        top = &signature.inputs[1];
+    for (const FunctionSignaturePin& pin : signature.inputs) {
+        if (top == nullptr && &pin != bottom) {
+            top = &pin;
+        }
     }
 }
 
@@ -106,13 +108,22 @@ Result<void> Translator::AddExpandedEdge(Guid fromNode, Name fromPin, Guid toNod
     edge.fromPin = fromPin;
     edge.toNode = toNode;
     edge.toPin = toPin;
+    // 입력 하나에 간선은 하나다. 나중 간선(사슬)이 앞 간선(layerInputs)을 덮는다(UE
+    // MaterialExpressionLayerStack.cpp:541).
+    for (nodegraph::GraphEdge& existing : expanded_.edges) {
+        if (existing.toNode == toNode && existing.toPin == toPin) {
+            existing = edge;
+            return Result<void>::Success();
+        }
+    }
+
     return expanded_.edges.TryPushBack(edge);
 }
 
 Result<Guid> Translator::AddLayerCall(Guid owner, Guid layerId, uint32 role, Guid asset,
                                       bool parentSampled, FunctionSignature& signature) noexcept {
     if (!functionCallType_.IsValid()) {
-        auto interned = input_.names.TryIntern("Material.FunctionCall");
+        auto interned = input_.names.TryIntern(FunctionCallTypeName);
         if (!interned) {
             return Result<Guid>::Failure(interned.Error());
         }
@@ -229,7 +240,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         if (read && stack) {
             const StringView lists[] = {"availableLayers", "availableBlends"};
             Array<Guid>* targets[] = {&availableLayers, &availableBlends};
-            for (usize which = 0; read && which < 2; ++which) {
+            for (usize which = 0; read && which < sizeof(lists) / sizeof(lists[0]); ++which) {
                 auto list = reader.Value().OpenStructArray(
                     lists[which], GeneratedType<MaterialAssetReference>::Schema());
                 read = list ? Result<void>::Success() : Result<void>::Failure(list.Error());
@@ -300,12 +311,20 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
     }
 
     // 함수 호출 사본 안의 레이어 노드는 쓸 수 없다(MaterialSample 사본은 머티리얼 문맥이다).
+    // 레이어 합성 호출도 넘어 끝까지 올라간다(레이어 함수 안의 레이어 노드도 함수 안이다).
     bool insideFunction = false;
     bool parentSampled = false;
-    for (const ExpandedOrigin* origin = origins_.Find(owner); origin != nullptr;
-         origin = origins_.Find(origin->call)) {
-        const CallInfo* call = calls_.Find(origin->call);
-        insideFunction = insideFunction || call == nullptr || !call->sample;
+    Guid at = owner;
+    const ExpandedOrigin* origin = nullptr;
+    for (usize step = 0;
+         step <= origins_.Count() + syntheticOwners_.Count() && ClimbOrigin(at, origin); ++step) {
+        if (origin == nullptr) {
+            continue;
+        }
+
+        const CallInfo* call = calls_.Find(at);
+        insideFunction =
+            insideFunction || call == nullptr || !call->sample || syntheticOwners_.Contains(at);
         parentSampled = parentSampled || origin->sampled;
     }
 
@@ -353,7 +372,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         found = true;
         name = snapshot.Value()->name;
         usage = snapshot.Value()->usage;
-        return ReadSignature(*graph, signature);
+        return ReadSignature(snapshot.Value()->document, *graph, signature, 0, true);
     };
 
     usize activeLayers = 0;
@@ -363,7 +382,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         // 쓸 수 있는 함수 목록 검사다(UE LayerStack::ValidateLayerConfiguration — 하나라도 실패하면
         // 끝).
         bool availableValid = true;
-        for (usize which = 0; which < 2; ++which) {
+        for (usize which = 0; which < LayerFunctionRoleCount; ++which) {
             const bool blends = which == 1;
             for (Guid asset : blends ? availableBlends : availableLayers) {
                 StringView name;
@@ -406,7 +425,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
                     availableValid = false;
                 }
 
-                if (inspected.AttributeOutputs() != LayerAcceptableOutputs) {
+                if (inspected.AttributeOutputs() != AcceptableLayerBlendAttributeOutputs) {
                     const DiagnosticTextPart parts[] = {
                         DiagnosticWord("Function "), DiagnosticWord(name),
                         DiagnosticWord(
@@ -421,7 +440,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
                 }
 
                 const usize inputs = inspected.AttributeInputs();
-                if (!blends && inputs > LayerAcceptableInputs) {
+                if (!blends && inputs > AcceptableLayerAttributeInputs) {
                     // UE 문구 그대로다("output node" — MaterialExpressionLayerStack.cpp:358).
                     const DiagnosticTextPart parts[] = {
                         DiagnosticWord("Layer "), DiagnosticWord(name),
@@ -436,7 +455,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
                     availableValid = false;
                 }
 
-                if (blends && inputs != BlendAcceptableInputs) {
+                if (blends && inputs != AcceptableBlendAttributeInputs) {
                     const DiagnosticTextPart parts[] = {
                         DiagnosticWord("Blend "), DiagnosticWord(name),
                         DiagnosticWord(
@@ -498,7 +517,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         bool listed = true;
         for (usize at = 0; at < entries.Size(); ++at) {
             const LayerEntry& entry = entries[at];
-            for (usize which = 0; which < 2; ++which) {
+            for (usize which = 0; which < LayerFunctionRoleCount; ++which) {
                 const bool blends = which == 1;
                 const Guid asset = blends ? entry.blend : entry.layer;
                 if (asset == Guid{} || (blends && at == 0)) {
@@ -571,7 +590,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
                     if (auto added = diagnose(parts, true); !added) {
                         return added;
                     }
-                } else if (found && inspected.inputs.Size() > LayerAcceptableInputs) {
+                } else if (found && inspected.inputs.Size() > AcceptableLayerAttributeInputs) {
                     const DiagnosticTextPart parts[] = {
                         DiagnosticWord("Layer "), DiagnosticNumber(at), DiagnosticWord(", "),
                         DiagnosticWord(name),
@@ -602,7 +621,7 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
                     if (auto added = diagnose(parts, true); !added) {
                         return added;
                     }
-                } else if (found && inspected.inputs.Size() != BlendAcceptableInputs) {
+                } else if (found && inspected.inputs.Size() != AcceptableBlendAttributeInputs) {
                     const DiagnosticTextPart parts[] = {
                         DiagnosticWord("Blend "), DiagnosticNumber(at - 1), DiagnosticWord(", "),
                         DiagnosticWord(name),
@@ -643,6 +662,34 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         return finish();
     }
 
+    // LayerStack layerInputs 배선이다: 호출 입력 중 이름(대소문자 무시 — UE FName)·종류가 같은 것 ←
+    // 그 동적 입력의 연결(UE ProcessFunctionCallers — 레이어·혼합 둘 다).
+    const auto wireLayerInputs = [&](Guid call,
+                                     const FunctionSignature& signature) noexcept -> Result<void> {
+        for (const FunctionSignaturePin& pin : signature.inputs) {
+            for (const LayerStackInputEntry& item : layerInputs) {
+                if (!NameTextEquals(item.name, pin.name) || item.type != pin.type) {
+                    continue;
+                }
+
+                for (usize edge = 0; edge < expanded_.edges.Size(); ++edge) {
+                    const nodegraph::GraphEdge source = expanded_.edges[edge];
+                    if (source.toNode == owner && source.toPin == item.key) {
+                        if (auto added =
+                                AddExpandedEdge(source.fromNode, source.fromPin, call, pin.key);
+                            !added) {
+                            return added;
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        return Result<void>::Success();
+    };
+
     // 활성 레이어·혼합 합성 호출이다(활성 순 — UE caller 색인).
     Array<Guid> layerCalls(scratch);
     Array<FunctionSignature> layerSignatures(scratch);
@@ -672,25 +719,8 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
         }
 
         if (stack) {
-            for (const FunctionSignaturePin& pin : signature.inputs) {
-                for (const LayerStackInputEntry& item : layerInputs) {
-                    if (!(item.name == pin.name) || item.type != pin.type) {
-                        continue;
-                    }
-
-                    for (usize edge = 0; edge < expanded_.edges.Size(); ++edge) {
-                        const nodegraph::GraphEdge source = expanded_.edges[edge];
-                        if (source.toNode == owner && source.toPin == item.key) {
-                            if (auto added = AddExpandedEdge(source.fromNode, source.fromPin,
-                                                             call.Value(), pin.key);
-                                !added) {
-                                return added;
-                            }
-
-                            break;
-                        }
-                    }
-                }
+            if (auto wired = wireLayerInputs(call.Value(), signature); !wired) {
+                return wired;
             }
         }
 
@@ -717,6 +747,11 @@ Result<void> Translator::ExpandLayers(usize index, bool stack) noexcept {
             }
 
             blendCall = added.Value();
+            if (stack) {
+                if (auto wired = wireLayerInputs(blendCall, blendSignature); !wired) {
+                    return wired;
+                }
+            }
         }
 
         if (auto added = blendCalls.TryPushBack(blendCall); !added) {
@@ -894,11 +929,13 @@ Result<void> Translator::ReportUsageError(const nodegraph::GraphNode& node) noex
             return built;
         }
 
-        return Report(nodegraph::GraphDiagnosticSeverity::Error,
-                      MaterialDiagnosticCode::LayerStackRule, node.id, Name(), text.View());
+        // 함수 용도 검사는 UE가 PushFunction 뒤에 낸다(ME:14258 — 경로에 그 함수 이름까지).
+        return ReportInFunction(nodegraph::GraphDiagnosticSeverity::Error,
+                                MaterialDiagnosticCode::LayerStackRule, node.id, Name(),
+                                text.View(), call->snapshot);
     };
 
-    if (call->attributeOutputs != LayerAcceptableOutputs) {
+    if (call->attributeOutputs != AcceptableLayerBlendAttributeOutputs) {
         const DiagnosticTextPart parts[] = {
             DiagnosticWord("Function "), DiagnosticWord(snapshot.name),
             DiagnosticWord(", must have exactly 1 Material Attributes type output node. It has "),
@@ -908,7 +945,7 @@ Result<void> Translator::ReportUsageError(const nodegraph::GraphNode& node) noex
         }
     }
 
-    if (!blend && call->attributeInputs > LayerAcceptableInputs) {
+    if (!blend && call->attributeInputs > AcceptableLayerAttributeInputs) {
         const DiagnosticTextPart parts[] = {
             DiagnosticWord("Layer "), DiagnosticWord(snapshot.name),
             DiagnosticWord(": can only have up to 1 Material Attributes type output node. It has "),
@@ -918,7 +955,7 @@ Result<void> Translator::ReportUsageError(const nodegraph::GraphNode& node) noex
         }
     }
 
-    if (blend && call->attributeInputs != BlendAcceptableInputs) {
+    if (blend && call->attributeInputs != AcceptableBlendAttributeInputs) {
         const DiagnosticTextPart parts[] = {
             DiagnosticWord("Blend "), DiagnosticWord(snapshot.name),
             DiagnosticWord(": must have exactly 2 Material Attributes type input node. It has "),

@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Optional.h>
 #include <Core/Result.h>
+#include <Core/Text/NamePool.h>
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialCollectionLayout.h>
@@ -73,6 +74,9 @@ public:
     }
 
     IrBuilder& Builder() noexcept;
+
+    // 번역 입력의 이름 pool이다(동적 핀 키 원문 등).
+    NamePool& Names() noexcept;
 
     // 지금 번역 중인 평가 문맥이다(6.9절).
     EvaluationContext Context() const noexcept;

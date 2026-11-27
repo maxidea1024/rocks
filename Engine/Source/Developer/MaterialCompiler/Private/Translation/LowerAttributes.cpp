@@ -449,7 +449,7 @@ Result<IrValueId> AttributeBlend(LoweringContext& context, MaterialAttributeBlen
         return Result<IrValueId>::Success(find(b));
     }
 
-    if (definition.type == MaterialPinType::Surface || alpha == NoIrValue) {
+    if (definition.type == MaterialPinType::Surface) {
         return Result<IrValueId>::Success(NoIrValue);
     }
 
@@ -459,8 +459,13 @@ Result<IrValueId> AttributeBlend(LoweringContext& context, MaterialAttributeBlen
         return !x ? Move(x) : Move(y);
     }
 
+    // 같은 값이면 Alpha를 보기 전에 그 값이다(UE ME:7108–7112 — Alpha가 없어도 칸이 남는다).
     if (x.Value() == y.Value() || x.Value() == NoIrValue || y.Value() == NoIrValue) {
         return x;
+    }
+
+    if (alpha == NoIrValue) {
+        return Result<IrValueId>::Success(NoIrValue);
     }
 
     if (definition.type == MaterialPinType::ShadingModel) {
@@ -802,8 +807,22 @@ Result<void> LowerAggregate(LoweringContext& context) noexcept {
 
         const MaterialAttributeDefinition* definition = found.Value();
         if (definition == nullptr) {
+            auto name = context.Names().Acquire(pin.key);
+            if (!name) {
+                return Result<void>::Failure(name.Error());
+            }
+
+            SystemAllocator scratch;
+            String message(scratch);
+            const StringView parts[] = {"Unknown material attribute '", name.Value().View(), "'"};
+            for (StringView part : parts) {
+                if (auto appended = message.TryAppend(part); !appended) {
+                    return appended;
+                }
+            }
+
             return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
-                                 "Unknown material attribute in aggregate");
+                                 message.View());
         }
 
         auto value = context.DynamicInput(pin.key, Optional<float>(), false);

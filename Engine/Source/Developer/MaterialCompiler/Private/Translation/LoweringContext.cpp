@@ -109,6 +109,15 @@ StringView LoweringTypeName(IrType type) noexcept {
         }
     }
 
+    // 속성 집합·표면은 UE DescribeType 이름이다(HLSLMaterialTranslator.cpp:3132·3143 — 6.12절).
+    if (type.scalar == IrScalar::Attributes) {
+        return "MaterialAttributes";
+    }
+
+    if (type.scalar == IrScalar::Surface) {
+        return "Substrate";
+    }
+
     if (type.components < 1 || type.components > MaxIrComponents) {
         return "unknown";
     }
@@ -118,7 +127,7 @@ StringView LoweringTypeName(IrType type) noexcept {
     case IrScalar::Texture:
     case IrScalar::Surface:
     case IrScalar::Attributes:
-        // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
+        // 위에서 돌려준다.
         break;
     case IrScalar::Float:
         return Floats[index];
@@ -203,18 +212,14 @@ LoweringContext::FindAttributeByName(StringView name) const noexcept {
 }
 
 Result<const MaterialAttributeDefinition*> LoweringContext::FindAttributeByKey(Name key) noexcept {
-    for (const MaterialAttributeDefinition& definition : BuiltinMaterialAttributes()) {
-        auto name = translator_.Names().TryIntern(definition.name);
-        if (!name) {
-            return Result<const MaterialAttributeDefinition*>::Failure(name.Error());
-        }
-
-        if (name.Value() == key) {
-            return Result<const MaterialAttributeDefinition*>::Success(&definition);
-        }
+    // 키 = 속성 이름이다(내장 → 등록 표 — 6.12절 MS2e1 Aggregate).
+    auto text = translator_.Names().Acquire(key);
+    if (!text) {
+        return Result<const MaterialAttributeDefinition*>::Failure(text.Error());
     }
 
-    return Result<const MaterialAttributeDefinition*>::Success(nullptr);
+    return Result<const MaterialAttributeDefinition*>::Success(
+        FindAttributeByName(text.Value().View()));
 }
 
 Result<IrValueId>
@@ -483,6 +488,10 @@ IrBuilder& LoweringContext::Builder() noexcept {
     return builder;
 }
 
+NamePool& LoweringContext::Names() noexcept {
+    return translator_.Names();
+}
+
 Result<IrValueId> LoweringContext::InputInContext(EvaluationContext context,
                                                   StringView key) noexcept {
     auto name = PinName(key);
@@ -705,6 +714,13 @@ bool LoweringContext::FunctionInputBinding(Guid& call, Name& pin) const noexcept
 }
 
 Result<IrValueId> LoweringContext::LayerValue(bool& passThrough) noexcept {
+    passThrough = false;
+    // 계획 때 순환(V2)으로 끊긴 의존이다(진단했다 — NamedRerouteUsage와 같게 실패로 끝난다).
+    if (translator_.IsCut(node_.id, Name())) {
+        poisoned_ = true;
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
     return translator_.LowerLayers(node_, passThrough);
 }
 
@@ -1045,7 +1061,9 @@ Result<void> LoweringContext::OutputByName(Name key, IrValueId value) noexcept {
 Result<IrValueId> LoweringContext::NodeOutput(Guid node, StringView expectedType, StringView pin,
                                               bool& found) noexcept {
     found = false;
-    const nodegraph::GraphNode* target = translator_.FindNode(node);
+    // 사본 노드의 속성 id는 원본 그래프 id다(6.12절 MS2e2 노드 id 속성).
+    const nodegraph::GraphNode* target =
+        translator_.FindNode(translator_.CopiedNodeId(node_.id, node));
     if (target == nullptr) {
         return Result<IrValueId>::Success(NoIrValue);
     }

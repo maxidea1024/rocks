@@ -2,6 +2,7 @@
 
 #include "DiagnosticText.h"
 #include "ExpandedGuid.h"
+#include "FunctionNodeNames.h"
 
 #include <Base/NumericLimits.h>
 #include <Core/Encoding/Sha256.h>
@@ -13,7 +14,10 @@
 #include <MaterialSchema/NodePropertyReader.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallInput.generated.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallOutput.generated.h>
+#include <MaterialSchema/MaterialPinType.h>
 #include <NodeGraph/GraphClone.h>
+#include <NodeGraph/NodeTypeDescriptor.h>
+#include <NodeGraph/NodeTypeRegistry.h>
 
 // 함수 호출·MaterialSample 펼치기다(Docs/Design/MaterialSystem 6.12절 MS2e2). 번역 전에 주 그래프를
 // 복사하고 호출된 그래프의 노드·간선을 사본(id = SHA-256(호출 노드, 원래 id) 앞 128 bit)으로
@@ -24,22 +28,6 @@ namespace rocks::material::detail {
 
 namespace {
 
-constexpr StringView FunctionCallTypeName = "Material.FunctionCall";
-constexpr StringView FunctionInputTypeName = "Material.FunctionInput";
-constexpr StringView FunctionOutputTypeName = "Material.FunctionOutput";
-constexpr StringView MaterialSampleTypeName = "Material.MaterialSample";
-constexpr StringView LayerOutputTypeName = "Material.LayerOutput";
-constexpr StringView AttributeLayersTypeName = "Material.AttributeLayers";
-constexpr StringView LayerStackTypeName = "Material.LayerStack";
-// UE IsStaticExpression이 참인 노드 종류다(6.12절 MS2e3 LayerStack 검사).
-constexpr StringView StaticNodeTypeNames[] = {
-    "Material.StaticBool", "Material.StaticSwitch", "Material.StaticSwitchParameter",
-    "Material.StaticComponentMaskParameter", "Material.StaticBoolParameter"};
-// 함수 용도 검사의 개수 규칙이다(UE AcceptableNum* —
-// MaterialExpressionMaterialAttributeLayers.h:21–23).
-constexpr usize AcceptableLayerAttributeInputs = 1;
-constexpr usize AcceptableBlendAttributeInputs = 2;
-constexpr usize AcceptableLayerBlendAttributeOutputs = 1;
 // 함수 호출 입출력 동적 핀 키 접두다(19.13.3절 P_<id>).
 constexpr StringView FunctionCallPinPrefix = "P_";
 // FunctionOutput 값 입력·출력 노드 Surface 입력·MaterialSample 출력 핀 키다.
@@ -143,6 +131,31 @@ Guid Translator::ParameterIdentity(Guid node, Guid parameterId, bool shared) con
 
     const Guid parts[] = {asset, parameterId, origin->call};
     return DeriveExpandedGuid(parts);
+}
+
+Guid Translator::CopiedNodeId(Guid consumer, Guid original) const noexcept {
+    const ExpandedOrigin* origin = origins_.Find(consumer);
+    if (origin == nullptr) {
+        return original;
+    }
+
+    const Guid parts[] = {origin->call, original};
+    return DeriveExpandedGuid(parts);
+}
+
+bool Translator::ClimbOrigin(Guid& at, const ExpandedOrigin*& origin) const noexcept {
+    origin = origins_.Find(at);
+    if (origin != nullptr) {
+        at = origin->call;
+        return true;
+    }
+
+    if (const Guid* owner = syntheticOwners_.Find(at)) {
+        at = *owner;
+        return true;
+    }
+
+    return false;
 }
 
 bool Translator::IsSampledCopy(Guid node) const noexcept {
@@ -336,14 +349,17 @@ Result<const MaterialGraphSnapshot*> Translator::LoadSnapshot(Guid asset, bool s
     return Result<const MaterialGraphSnapshot*>::Success(snapshot);
 }
 
-Result<void> Translator::ReadSignature(const nodegraph::Graph& source,
-                                       FunctionSignature& out) noexcept {
+Result<void> Translator::ReadSignature(const nodegraph::GraphDocument* document,
+                                       const nodegraph::Graph& source, FunctionSignature& out,
+                                       uint32 depth, bool classifyOutputs) noexcept {
     out.inputs.Clear();
     out.outputs.Clear();
     out.hasStatic = false;
     SystemAllocator scratch;
-    Name statics[sizeof(StaticNodeTypeNames) / sizeof(StaticNodeTypeNames[0])];
-    for (usize at = 0; at < sizeof(StaticNodeTypeNames) / sizeof(StaticNodeTypeNames[0]); ++at) {
+    constexpr usize StaticNodeTypeCount =
+        sizeof(StaticNodeTypeNames) / sizeof(StaticNodeTypeNames[0]);
+    Name statics[StaticNodeTypeCount];
+    for (usize at = 0; at < StaticNodeTypeCount; ++at) {
         auto name = input_.names.TryFind(StaticNodeTypeNames[at]);
         statics[at] = name ? name.Value() : Name();
     }
@@ -425,51 +441,17 @@ Result<void> Translator::ReadSignature(const nodegraph::Graph& source,
             pin.relevance = static_cast<BlendInputRelevance>(relevance.Value());
             pin.attributes = pin.type == FunctionInputType::MaterialAttributes;
         } else {
-            // MaterialAttributes 출력 판정이다(6.12절 MS2e3 — LayerOutput, MaterialAttributes 형
-            // FunctionInput 출발, 정적 출력 핀 타입 MaterialAttributes인 출발).
-            pin.attributes = layerOutput;
-            for (const nodegraph::GraphEdge& edge : source.edges) {
-                if (pin.attributes || !(edge.toNode == node.id) ||
-                    !(edge.toPin == valuePin.Value())) {
-                    continue;
+            // MaterialAttributes 출력 판정이다(6.12절 MS2e3).
+            if (layerOutput) {
+                pin.attributes = true;
+            } else if (classifyOutputs) {
+                auto attributes =
+                    OutputIsAttributes(document, source, node.id, valuePin.Value(), depth);
+                if (!attributes) {
+                    return Result<void>::Failure(attributes.Error());
                 }
 
-                for (const nodegraph::GraphNode& from : source.nodes) {
-                    if (!(from.id == edge.fromNode)) {
-                        continue;
-                    }
-
-                    const MaterialNodeDefinition* fromDefinition = input_.catalog.Find(from.type);
-                    if (fromDefinition == nullptr) {
-                        break;
-                    }
-
-                    if (functionInputType_.IsValid() && from.type == functionInputType_ &&
-                        fromDefinition->propertiesSchema != nullptr) {
-                        auto fromReader =
-                            NodePropertyReader::Open(scratch, from.properties.bytes.View(),
-                                                     fromDefinition->propertiesSchema());
-                        auto kind = fromReader ? fromReader.Value().ReadInteger(
-                                                     "inputType",
-                                                     static_cast<int64>(FunctionInputType::Vector3))
-                                               : Result<int64>::Failure(fromReader.Error());
-                        pin.attributes =
-                            kind && kind.Value() ==
-                                        static_cast<int64>(FunctionInputType::MaterialAttributes);
-                        break;
-                    }
-
-                    for (const MaterialPinDefinition& definitionPin : fromDefinition->pins) {
-                        auto key = input_.names.TryFind(definitionPin.key);
-                        pin.attributes =
-                            pin.attributes ||
-                            (definitionPin.direction == nodegraph::PinDirection::Output && key &&
-                             key.Value() == edge.fromPin &&
-                             definitionPin.type == MaterialPinType::MaterialAttributes);
-                    }
-
-                    break;
-                }
+                pin.attributes = attributes.Value();
             }
         }
 
@@ -482,6 +464,176 @@ Result<void> Translator::ReadSignature(const nodegraph::Graph& source,
     SortSignaturePins(out.inputs);
     SortSignaturePins(out.outputs);
     return Result<void>::Success();
+}
+
+Result<bool> Translator::OutputIsAttributes(const nodegraph::GraphDocument* document,
+                                            const nodegraph::Graph& source, Guid node, Name pin,
+                                            uint32 depth) noexcept {
+    SystemAllocator scratch;
+    const auto find = [&](StringView text) noexcept {
+        auto name = input_.names.TryFind(text);
+        return name ? name.Value() : Name();
+    };
+
+    const Name reroute = find(nodegraph::RerouteNodeTypeName);
+    const Name rerouteIn = find(nodegraph::ReroutePinIn);
+    const Name namedUsage = find(NamedRerouteUsageTypeName);
+    const Name namedDeclaration = find(NamedRerouteDeclarationTypeName);
+    const Name declarationInput = find(NamedRerouteDeclarationInputPin);
+    Guid current = node;
+    Name currentPin = pin;
+    // 재경유·이름 있는 재경유는 따라간다(깊이 상한 MaxLoweringDepth — 순환 보호).
+    for (uint32 step = 0; step < MaxLoweringDepth; ++step) {
+        const nodegraph::GraphEdge* edge = nullptr;
+        for (const nodegraph::GraphEdge& candidate : source.edges) {
+            if (candidate.toNode == current && candidate.toPin == currentPin) {
+                edge = &candidate;
+                break;
+            }
+        }
+
+        const nodegraph::GraphNode* from = nullptr;
+        for (usize at = 0; edge != nullptr && at < source.nodes.Size(); ++at) {
+            if (source.nodes[at].id == edge->fromNode) {
+                from = &source.nodes[at];
+            }
+        }
+
+        if (from == nullptr) {
+            return Result<bool>::Success(false);
+        }
+
+        const auto is = [](Name type, Name expected) noexcept {
+            return expected.IsValid() && type == expected;
+        };
+
+        if (is(from->type, reroute)) {
+            current = from->id;
+            currentPin = rerouteIn;
+            continue;
+        }
+
+        if (is(from->type, namedDeclaration)) {
+            current = from->id;
+            currentPin = declarationInput;
+            continue;
+        }
+
+        const MaterialNodeDefinition* definition = input_.catalog.Find(from->type);
+        if (definition == nullptr) {
+            return Result<bool>::Success(false);
+        }
+
+        Optional<NodePropertyReader> properties;
+        if (definition->propertiesSchema != nullptr) {
+            auto opened = NodePropertyReader::Open(scratch, from->properties.bytes.View(),
+                                                   definition->propertiesSchema());
+            if (!opened) {
+                return opened.Error() == ErrorCode::OutOfMemory
+                           ? Result<bool>::Failure(opened.Error())
+                           : Result<bool>::Success(false);
+            }
+
+            properties.Emplace(Move(opened.Value()));
+        }
+
+        if (is(from->type, namedUsage) && properties.HasValue()) {
+            auto declaration = properties->ReadGuid("declaration", Guid{});
+            if (!declaration) {
+                return Result<bool>::Success(false);
+            }
+
+            current = declaration.Value();
+            // 선언 노드의 출력을 읽는 것과 같다(선언 노드의 Input을 따라간다).
+            for (const nodegraph::GraphNode& candidate : source.nodes) {
+                if (candidate.id == current) {
+                    currentPin = declarationInput;
+                }
+            }
+
+            continue;
+        }
+
+        if (is(from->type, functionInputType_) && properties.HasValue()) {
+            auto kind = properties->ReadInteger("inputType",
+                                                static_cast<int64>(FunctionInputType::Vector3));
+            return Result<bool>::Success(
+                kind && kind.Value() == static_cast<int64>(FunctionInputType::MaterialAttributes));
+        }
+
+        if (is(from->type, functionCallType_) && properties.HasValue()) {
+            // 중첩 호출은 그 함수 출력의 같은 판정이다(호출 깊이 상한까지).
+            if (depth + 1 >= MaxFunctionCallDepth) {
+                return Result<bool>::Success(false);
+            }
+
+            auto reference = properties->OpenStruct(
+                "materialFunction", GeneratedType<MaterialAssetReference>::Schema());
+            auto asset = reference ? reference.Value().ReadGuid("assetId", Guid{})
+                                   : Result<Guid>::Failure(reference.Error());
+            if (!asset) {
+                return Result<bool>::Success(false);
+            }
+
+            const nodegraph::Graph* callee = nullptr;
+            uint32 calleeIndex = 0;
+            auto snapshot = LoadSnapshot(asset.Value(), false, callee, calleeIndex);
+            if (!snapshot) {
+                return Result<bool>::Failure(snapshot.Error());
+            }
+
+            if (snapshot.Value() == nullptr) {
+                return Result<bool>::Success(false);
+            }
+
+            FunctionSignature signature(scratch);
+            if (auto read =
+                    ReadSignature(snapshot.Value()->document, *callee, signature, depth + 1, true);
+                !read) {
+                return Result<bool>::Failure(read.Error());
+            }
+
+            for (const FunctionSignaturePin& output : signature.outputs) {
+                if (output.key == edge->fromPin) {
+                    return Result<bool>::Success(output.attributes);
+                }
+            }
+
+            return Result<bool>::Success(false);
+        }
+
+        for (const MaterialPinDefinition& definitionPin : definition->pins) {
+            auto key = input_.names.TryFind(definitionPin.key);
+            if (definitionPin.direction == nodegraph::PinDirection::Output && key &&
+                key.Value() == edge->fromPin) {
+                return Result<bool>::Success(definitionPin.type ==
+                                             MaterialPinType::MaterialAttributes);
+            }
+        }
+
+        // 동적 핀 출력은 그 노드의 동적 핀 함수 결과 타입이다.
+        if (definition->dynamicPins != nullptr && document != nullptr) {
+            nodegraph::PinList pins(scratch);
+            const nodegraph::DynamicPinsInput pinsInput{*document, source, *from, input_.names};
+            if (auto computed = definition->dynamicPins(pinsInput, pins); !computed) {
+                return computed.Error() == ErrorCode::OutOfMemory
+                           ? Result<bool>::Failure(computed.Error())
+                           : Result<bool>::Success(false);
+            }
+
+            for (const nodegraph::PinDescriptor& descriptor : pins.View()) {
+                if (descriptor.direction == nodegraph::PinDirection::Output &&
+                    descriptor.key == edge->fromPin) {
+                    return Result<bool>::Success(descriptor.type ==
+                                                 ToPinTypeId(MaterialPinType::MaterialAttributes));
+                }
+            }
+        }
+
+        return Result<bool>::Success(false);
+    }
+
+    return Result<bool>::Success(false);
 }
 
 Result<void> Translator::ExpandAsset(Guid callId, Guid asset, bool sample, bool parentSampled,
@@ -510,9 +662,16 @@ Result<void> Translator::ExpandAsset(Guid callId, Guid asset, bool sample, bool 
         return store(CallStatus::Recursive);
     }
 
+    // 레이어 합성 호출도 넘어 끝까지 올라간다(레이어 함수 안의 재귀·깊이 — 6.12절 MS2e3).
     uint32 depth = 1;
-    for (const ExpandedOrigin* origin = origins_.Find(callId); origin != nullptr;
-         origin = origins_.Find(origin->call)) {
+    Guid at = callId;
+    const ExpandedOrigin* origin = nullptr;
+    for (usize step = 0;
+         step <= origins_.Count() + syntheticOwners_.Count() && ClimbOrigin(at, origin); ++step) {
+        if (origin == nullptr) {
+            continue;
+        }
+
         if (snapshots_[origin->snapshot]->asset == asset) {
             info.snapshot = origin->snapshot;
             return store(CallStatus::Recursive);
@@ -554,9 +713,13 @@ Result<void> Translator::ExpandAsset(Guid callId, Guid asset, bool sample, bool 
         }
 
         if (sampledOutput == source->nodes.Size()) {
-            return store(CallStatus::Unavailable);
+            return store(CallStatus::MissingSurface);
         }
-    } else if (auto read = ReadSignature(*source, pins); !read) {
+    } else if (auto read =
+                   ReadSignature(snapshot.Value()->document, *source, pins, 0,
+                                 snapshot.Value()->usage == MaterialFunctionUsage::Layer ||
+                                     snapshot.Value()->usage == MaterialFunctionUsage::LayerBlend);
+               !read) {
         return read;
     }
 
@@ -661,7 +824,7 @@ Result<void> Translator::ExpandAsset(Guid callId, Guid asset, bool sample, bool 
 
     for (const FunctionSignaturePin& item : pins.inputs) {
         const Guid parts[] = {callId, source->nodes[item.node].id};
-        // 같은 id의 입력 노드가 둘이면 처음 것이 잇는다.
+        // 입력 노드마다 사본이 그 호출 핀에 묶인다(같은 id 둘이면 둘 다 같은 핀을 읽는다).
         if (auto bound =
                 functionInputs_.Insert(DeriveExpandedGuid(parts), PinKey{callId, item.key});
             !bound) {
@@ -733,9 +896,22 @@ Result<IrValueId> Translator::LowerCallOutput(const nodegraph::GraphNode& node, 
 
     const PinKey* target = callOutputs_.Find(PinKey{node.id, pin});
     if (target == nullptr) {
-        if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
-                                   MaterialDiagnosticCode::InvalidProperty, node.id, pin,
-                                   "Output pin has no value");
+        // 함수에 그 출력이 없다(UE "Invalid function (%s) output" — ME:15797–15800, 호출 쪽 경로).
+        SystemAllocator scratch;
+        String message(scratch);
+        const StringView name =
+            call->snapshot < snapshots_.Size() ? snapshots_[call->snapshot]->name : StringView();
+        const DiagnosticTextPart parts[] = {DiagnosticWord("Invalid function ("),
+                                            DiagnosticWord(name), DiagnosticWord(") output")};
+        Result<void> built = call->sample ? message.TryAssign("Output pin has no value")
+                                          : AppendDiagnosticText(message, parts);
+        if (!built) {
+            return Result<IrValueId>::Failure(built.Error());
+        }
+
+        if (auto reported =
+                Report(nodegraph::GraphDiagnosticSeverity::Error,
+                       MaterialDiagnosticCode::InvalidProperty, node.id, Name(), message.View());
             !reported) {
             return Result<IrValueId>::Failure(reported.Error());
         }
@@ -779,9 +955,10 @@ Result<IrValueId> Translator::LowerCallOutput(const nodegraph::GraphNode& node, 
             return Result<IrValueId>::Failure(built.Error());
         }
 
-        if (auto reported =
-                Report(nodegraph::GraphDiagnosticSeverity::Error,
-                       MaterialDiagnosticCode::MissingInput, node.id, Name(), message.View());
+        // 함수 출력 연결 없음은 UE가 PushFunction 뒤에 낸다(ME:14267 — 경로에 그 함수 이름까지).
+        if (auto reported = ReportInFunction(
+                nodegraph::GraphDiagnosticSeverity::Error, MaterialDiagnosticCode::MissingInput,
+                node.id, Name(), message.View(), call->sample ? NoInnerFunction : call->snapshot);
             !reported) {
             return Result<IrValueId>::Failure(reported.Error());
         }
@@ -815,6 +992,9 @@ Result<void> Translator::ReportCallError(const nodegraph::GraphNode& node) noexc
     switch (call->status) {
     case CallStatus::Expanded:
     case CallStatus::InvalidUsage:
+        break;
+    case CallStatus::MissingSurface:
+        built = message.TryAssign("Referenced material has no Surface connection");
         break;
     case CallStatus::Unreadable:
         code = MaterialDiagnosticCode::InvalidProperty;

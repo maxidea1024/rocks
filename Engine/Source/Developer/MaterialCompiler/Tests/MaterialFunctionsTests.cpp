@@ -183,7 +183,8 @@ TEST(MaterialFunctions_CallErrors) {
         MaterialTranslation out(env.allocator);
         REQUIRE(TranslateWithSources(main, &sources, out));
         CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::MissingInput, call));
-        CHECK(HasMessageAt(out, call, "Missing function output connection 'Result'"));
+        // UE는 함수 스택 안에서 낸다(경로에 그 함수 이름 — ME:14267).
+        CHECK(HasMessageAt(out, call, "(Function F) Missing function output connection 'Result'"));
     }
 
     {
@@ -445,6 +446,168 @@ TEST(MaterialFunctions_CallCycle) {
     REQUIRE(TranslateWithSources(main, &sources, out));
     CHECK(!out.succeeded);
     CHECK(HasError(out, MaterialDiagnosticCode::Cycle));
+}
+
+// 함수 사본 안의 이름 있는 재경유는 같은 호출의 사본 선언을 읽는다.
+TEST(MaterialFunctions_NamedRerouteInFunction) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    FunctionFixture function(env, FunctionAssetF, "F");
+    const Guid declaration = function.graph.Add("Material.NamedRerouteDeclaration");
+    function.graph.Connect(AddConstant(function.graph, 0.4f), "Result", declaration, "Input");
+    NamedRerouteUsageProperties usage;
+    usage.declaration = declaration;
+    const Guid use = function.graph.Add("Material.NamedRerouteUsage", env.Save(usage));
+    const Guid output = AddFunctionOutput(function.graph, FunctionOutputIdOut);
+    function.graph.Connect(use, "Result", output, "A");
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(function.snapshot));
+    GraphFixture main(env);
+    const Guid outputs[] = {FunctionOutputIdOut};
+    const Guid first = AddCall(main, FunctionAssetF, {}, outputs);
+    const Guid second = AddCall(main, FunctionAssetF, {}, outputs);
+    const Guid add = main.Add("Material.Add");
+    main.Connect(first, PinKey(env, FunctionOutputIdOut), add, "A");
+    main.Connect(second, PinKey(env, FunctionOutputIdOut), add, "B");
+    EmitEmissive(main, add, "Result");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWithSources(main, &sources, out));
+    REQUIRE(out.succeeded);
+    CHECK(EmissiveConstant(out) == 0.8f);
+}
+
+// 미리보기: 호출 쪽이 연결되면 Preview 하위 그래프는 번역하지 않고, 속성 집합 미리보기는
+// EmissiveColor = previewValue.xyz다(UE CompilePreviewValue). 불투명 형 맞춤 문구는 UE 형 이름이다.
+TEST(MaterialFunctions_PreviewRules) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const Guid inputs[] = {FunctionInputIdIn};
+    const Guid outputs[] = {FunctionOutputIdOut};
+    {
+        FunctionFixture function(env, FunctionAssetF, "F");
+        BuildPassThrough(function, true, 0.5f);
+        const Guid broken = function.graph.Add("Material.Abs");
+        function.graph.Connect(broken, "Result", function.graph.Main().nodes[0].id, "Preview");
+        MemorySources sources(env.allocator);
+        REQUIRE(sources.AddFunction(function.snapshot));
+        GraphFixture main(env);
+        const Guid call = AddCall(main, FunctionAssetF, inputs, outputs);
+        main.Connect(AddConstant(main, 0.3f), "Result", call, PinKey(env, FunctionInputIdIn));
+        EmitEmissive(main, call, PinKey(env, FunctionOutputIdOut));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        CHECK(EmissiveConstant(out) == 0.3f);
+    }
+
+    {
+        FunctionFixture function(env, FunctionAssetF, "F");
+        const Guid input = AddFunctionInput(function.graph, FunctionInputIdIn,
+                                            FunctionInputType::MaterialAttributes, true, 0.25f);
+        const Guid output = AddFunctionOutput(function.graph, FunctionOutputIdOut);
+        function.graph.Connect(input, "Result", output, "A");
+        MemorySources sources(env.allocator);
+        REQUIRE(sources.AddFunction(function.snapshot));
+        GraphFixture main(env);
+        const Guid call = AddCall(main, FunctionAssetF, inputs, outputs);
+        const Guid breaker = main.Add("Material.BreakAttributes");
+        main.Connect(call, PinKey(env, FunctionOutputIdOut), breaker, "MaterialAttributes");
+        EmitEmissive(main, breaker, "EmissiveColor");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        REQUIRE(out.succeeded);
+        CHECK(EmissiveConstant(out) == 0.25f);
+
+        GraphFixture wrong(env);
+        const Guid wrongCall = AddCall(wrong, FunctionAssetF, inputs, outputs);
+        wrong.Connect(AddConstant(wrong, 0.3f), "Result", wrongCall,
+                      PinKey(env, FunctionInputIdIn));
+        const Guid wrongBreaker = wrong.Add("Material.BreakAttributes");
+        wrong.Connect(wrongCall, PinKey(env, FunctionOutputIdOut), wrongBreaker,
+                      "MaterialAttributes");
+        EmitEmissive(wrong, wrongBreaker, "EmissiveColor");
+        MaterialTranslation wrongOut(env.allocator);
+        REQUIRE(TranslateWithSources(wrong, &sources, wrongOut));
+        CHECK(HasMessageAt(wrongOut, wrongCall,
+                           "(Function F) Cannot cast from float to MaterialAttributes for function "
+                           "input 'In'"));
+    }
+}
+
+// 출력 색인·출력 없음, MaterialSample 오류, 같은 scope의 V8이다.
+TEST(MaterialFunctions_MoreCallErrors) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    FunctionFixture function(env, FunctionAssetF, "F");
+    BuildPassThrough(function, true, 0.5f);
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(function.snapshot));
+    const Guid stale{0x5354414c45ull, 9};
+    {
+        GraphFixture main(env);
+        const Guid outputs[] = {FunctionOutputIdOut, stale};
+        const Guid call = AddCall(main, FunctionAssetF, {}, outputs);
+        EmitEmissive(main, call, PinKey(env, FunctionOutputIdOut));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(HasMessageAt(out, call, "Function (F) call output with index 1 is unset."));
+    }
+
+    {
+        GraphFixture main(env);
+        const Guid outputs[] = {FunctionOutputIdOut};
+        const Guid call = AddCall(main, FunctionAssetF, {}, outputs);
+        EmitEmissive(main, call, PinKey(env, stale));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::InvalidProperty, call));
+        CHECK(HasMessageAt(out, call, "Invalid function (F) output"));
+    }
+
+    GraphFixture headless(env);
+    headless.Main().nodes.Clear();
+    MaterialGraphSnapshot headlessSnapshot;
+    headlessSnapshot.asset = SampleAssetM;
+    headlessSnapshot.name = "M";
+    headlessSnapshot.document = &headless.document;
+    REQUIRE(sources.AddMaterial(headlessSnapshot));
+    const struct {
+        Guid asset;
+        StringView message;
+    } samples[] = {{Guid{}, "Material Sample has no material reference"},
+                   {Guid{FunctionAssetHigh, 99}, "Material asset is not available"},
+                   {SampleAssetM, "Referenced material has no Surface connection"}};
+    for (const auto& item : samples) {
+        GraphFixture main(env);
+        MaterialSampleProperties properties;
+        properties.materialReference.assetId = AssetId{item.asset};
+        const Guid sample = main.Add("Material.MaterialSample", env.Save(properties));
+        main.Connect(sample, "Front Material", OutputNodeId, "Surface");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(!out.succeeded);
+        CHECK(HasMessageAt(out, sample, item.message));
+    }
+
+    {
+        // 같은 함수 안(같은 호출 scope)의 같은 이름 다른 종류는 V8이다.
+        FunctionFixture conflicted(env, FunctionAssetG, "G");
+        const Guid scalar = AddScalarParameter(conflicted.graph, FunctionParameterId, "P", false);
+        VectorParameterProperties vector(env.allocator);
+        vector.parameterName = env.Intern("P");
+        vector.parameterId = Guid{0x56454354ull, 2};
+        conflicted.graph.Add("Material.VectorParameter", env.Save(vector));
+        const Guid output = AddFunctionOutput(conflicted.graph, FunctionOutputIdOut);
+        conflicted.graph.Connect(scalar, "Result", output, "A");
+        REQUIRE(sources.AddFunction(conflicted.snapshot));
+        GraphFixture main(env);
+        const Guid outputs[] = {FunctionOutputIdOut};
+        const Guid call = AddCall(main, FunctionAssetG, {}, outputs);
+        EmitEmissive(main, call, PinKey(env, FunctionOutputIdOut));
+        MaterialTranslation out(env.allocator);
+        REQUIRE(TranslateWithSources(main, &sources, out));
+        CHECK(HasErrorAt(out, MaterialDiagnosticCode::ParameterConflict, call));
+    }
 }
 
 } // namespace material_functions_tests_file
