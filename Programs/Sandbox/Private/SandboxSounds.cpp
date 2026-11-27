@@ -83,7 +83,7 @@ Result<SandboxSounds> MakeSandboxSounds(Allocator& allocator) noexcept {
     loopPlayable.pcm = loop.Value();
     loopPlayable.looping = true;
     SoundAttenuation attenuation;
-    attenuation.innerRadius = LoopInnerRadius;
+    attenuation.shapeExtents.x = LoopInnerRadius;
     attenuation.distance.falloffDistance = LoopFalloffDistance;
     loopPlayable.attenuation = attenuation;
     auto clickSound = SoundSourceRef::TryCreate(allocator, clickPlayable);

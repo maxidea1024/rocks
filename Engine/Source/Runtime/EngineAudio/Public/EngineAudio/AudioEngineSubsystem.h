@@ -4,6 +4,8 @@
 #include <Audio/AudioOutputDevice.h>
 #include <Audio/AudioStreamService.h>
 #include <AudioAssets/SoundClip.h>
+#include <EngineAudio/AudioAttenuation.h>
+#include <EngineAudio/AudioOcclusionQuery.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/BoundedSpscQueue.h>
 #include <Core/Math/Quaternion.h>
@@ -34,6 +36,8 @@ namespace rocks {
 
 class AudioDeviceContext;
 struct ControlBatch;
+struct ControlCommand;
+struct OcclusionRequest;
 
 // 진단·시험용 계수다.
 struct AudioEngineStats {
@@ -109,12 +113,28 @@ public:
     void SetSceneListener(AudioSceneId scene, const Vec3d& position,
                           const Quatd& rotation) noexcept;
 
-    // 부착 재생의 위치 원천을 잡는다. 오류: 죽은·무효 scene이나 비유한 위치는 InvalidArgument,
-    // 표 가득(MaxAudioEmitters)은 CapacityExceeded.
-    Result<AudioEmitterId> RegisterEmitter(AudioSceneId scene, const Vec3d& position) noexcept;
+    // 부착 재생의 위치·회전 원천을 잡는다(회전은 상자·캡슐·원뿔 감쇠의 축 — 3.42.2절, UE component
+    // 회전). 오류: 죽은·무효 scene, 비유한 위치, 0 quaternion은 InvalidArgument, 표
+    // 가득(MaxAudioEmitters)은 CapacityExceeded.
+    Result<AudioEmitterId> RegisterEmitter(AudioSceneId scene, const Vec3d& position,
+                                           const Quatd& rotation = Quatd::Identity()) noexcept;
 
-    // emitter 위치를 바꾼다(다음 프레임 끝 묶음에 실린다). 낡은 id·비유한 위치는 무시한다.
-    void UpdateEmitter(AudioEmitterId emitter, const Vec3d& position) noexcept;
+    // emitter 위치·회전을 바꾼다(다음 프레임 끝 묶음에 실린다). 낡은 id·비유한 위치·0 quaternion은
+    // 무시한다.
+    void UpdateEmitter(AudioEmitterId emitter, const Vec3d& position,
+                       const Quatd& rotation = Quatd::Identity()) noexcept;
+
+    // 장치 전체 focus 배수다(UE FAudioDevice::SetGlobalFocusSettings — AudioDevice.cpp:7578–7589,
+    // 3.42.5절). 다음 프레임 끝 묶음부터 쓰인다. 칸이 음수·비유한이면 InvalidArgument다.
+    Result<void> SetGlobalFocusSettings(const GlobalFocusSettings& settings) noexcept;
+
+    // scene의 차폐 질의 공급자다(3.42.7절 — nullptr이면 차폐되지 않음). 수명은 호출자 책임이고
+    // scene 해제가 놓는다. 낡은 id는 무시한다.
+    void SetSceneOcclusionQuery(AudioSceneId scene, AudioOcclusionQuery* query) noexcept;
+
+    const GlobalFocusSettings& FocusSettings() const noexcept {
+        return focusSettings_;
+    }
 
     // emitter를 놓는다(멱등). 붙은 재생은 EmitterRemoved로 끝난다.
     void UnregisterEmitter(AudioEmitterId emitter) noexcept;
@@ -125,6 +145,11 @@ public:
                                          PlayOptions options = {}) noexcept;
     Result<PlaybackHandle> PlayAtInScene(AudioSceneId scene, const SoundSourceRef& sound,
                                          const Vec3d& position, PlayOptions options = {}) noexcept;
+    // 회전(UE PlaySoundAtLocation의 Rotation — 상자·캡슐·원뿔 감쇠 축)을 함께 주는 고정 위치
+    // 재생이다. 0 quaternion은 InvalidArgument다.
+    Result<PlaybackHandle> PlayAtInScene(AudioSceneId scene, const SoundSourceRef& sound,
+                                         const Vec3d& position, const Quatd& rotation,
+                                         PlayOptions options = {}) noexcept;
     Result<PlaybackHandle> PlayAttachedInScene(AudioSceneId scene, AudioEmitterId emitter,
                                                const SoundSourceRef& sound,
                                                PlayOptions options = {}) noexcept;
@@ -190,6 +215,7 @@ private:
         Vec3d listenerPosition;
         Quatd listenerRotation = Quatd::Identity();
         bool listenerDirty = false;
+        AudioOcclusionQuery* occlusionQuery = nullptr;
     };
 
     struct GameEmitter {
@@ -198,6 +224,7 @@ private:
         uint32 scene = 0;
         uint32 sceneEpoch = 0;
         Vec3d position;
+        Quatd rotation = Quatd::Identity();
         // 현재 묶음 안의 위치 갱신 색인 + 1(0 = 없음)과 그 묶음 번호다(합치기).
         uint64 updateBatch = 0;
         uint32 updateIndex = 0;
@@ -207,6 +234,7 @@ private:
     struct Placement {
         PlayPlacement kind = PlayPlacement::NonSpatial;
         Vec3d position;
+        Quatd rotation = Quatd::Identity();
         AudioEmitterId emitter;
     };
 
@@ -215,7 +243,15 @@ private:
     Result<PlaybackHandle> Accept(const SoundSourceRef& sound, PlayOptions& options,
                                   AudioSceneId scene, const Placement& placement) noexcept;
     bool IsLiveScene(AudioSceneId scene) const noexcept;
+    // Play 수락 때의 첫 차폐 검사다(3.42.7절 — 공급자·위치가 있을 때만 checked).
+    void FirstOcclusionCheck(const SoundSourceRef& sound, AudioSceneId scene,
+                             const Placement& placement, uint64 owner,
+                             ControlCommand& command) const noexcept;
     void PushEmitterUpdate(uint32 slot) noexcept;
+    // 제어 쪽 차폐 요청에 답한다(다음 묶음의 SetOcclusion 명령).
+    void AnswerOcclusion(const OcclusionRequest& request) noexcept;
+    bool OcclusionDisabled(Engine& engine) const noexcept;
+    void FlushDeferredOcclusionAnswers() noexcept;
     void SnapshotScenes() noexcept;
     Result<void> ValidateOptions(const SoundSourceRef& sound,
                                  const PlayOptions& options) const noexcept;
@@ -246,6 +282,18 @@ private:
     Array<GameScene> scenes_;
     Array<uint32> sceneEpochs_;
     Array<GameEmitter> emitters_;
+    GlobalFocusSettings focusSettings_;
+    // 이번 프레임 끝에 정한 차폐 허용(mute·audio.occlusion.disable이 아님)이다. 다음 프레임의 Play
+    // 첫 검사와 요청 응답이 쓴다.
+    bool occlusionEnabled_ = true;
+    // 묶음에 넣지 못한 차폐 응답이다(다음 프레임 끝에 다시 넣는다 — 제어 쪽 대기가 남지 않게).
+    struct DeferredOcclusionAnswer {
+        PlaybackHandle handle;
+        uint32 sequence = 0;
+        bool occluded = false;
+    };
+
+    Array<DeferredOcclusionAnswer> deferredOcclusionAnswers_;
     Array<uint32> freeEmitters_;
     // 아직 제어 쪽에 보내지 못한 scene 해제다(명령 할당 실패 — 다음 프레임 끝에 다시 보낸다).
     Array<AudioSceneId> pendingSceneRemovals_;

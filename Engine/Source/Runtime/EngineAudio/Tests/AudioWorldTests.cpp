@@ -28,7 +28,7 @@ constexpr float WideInnerRadius = 100000.0f;
 
 SoundAttenuation PanOnly() {
     SoundAttenuation attenuation;
-    attenuation.innerRadius = WideInnerRadius;
+    attenuation.shapeExtents.x = WideInnerRadius;
     return attenuation;
 }
 
@@ -157,7 +157,8 @@ TEST(EngineAudioWorld_SpatialParamsFollowListenerFrame) {
     // 같은 자리는 방향이 없어 비공간화 1이다.
     CHECK(ComputeSpatialParams(linear, 1, origin, Quatd::Identity(), origin).nonSpatializedAmount ==
           1.0f);
-    // attenuate·spatialize는 따로다. stereo 원본은 Direct에 감쇠만 한다.
+    // attenuate·spatialize는 따로다. stereo 원본은 좌우 방위각으로 패닝한다(stereo spread
+    // — 3.42.6절).
     SoundAttenuation panOnly = linear;
     panOnly.attenuate = false;
     const SpatialParams noAttenuation =
@@ -170,7 +171,8 @@ TEST(EngineAudioWorld_SpatialParamsFollowListenerFrame) {
                .azimuthPan);
     const SpatialParams stereo =
         ComputeSpatialParams(linear, 2, origin, Quatd::Identity(), Vec3d(2200.0, 0.0, 0.0));
-    CHECK(!stereo.azimuthPan);
+    CHECK(stereo.azimuthPan);
+    CHECK(stereo.azimuthDegrees > 180.0f && stereo.rightAzimuthDegrees < 180.0f);
     CHECK(math::Abs(stereo.attenuationGain - 0.5f) < 1.0e-5f);
 }
 
@@ -647,7 +649,7 @@ TEST(EngineAudioWorld_TwoDimensionalPlaysIgnoreAttenuation) {
     REQUIRE(scope.audio != nullptr);
     const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.5f, 480);
     SoundAttenuation farAway;
-    farAway.innerRadius = 0.0f;
+    farAway.shapeExtents.x = 0.0f;
     // Play2D는 감쇠 스냅숏이 있어도 2D다(UE PlaySound2D).
     const SoundSourceRef attenuated = MakeSound(fixture.allocator, pcm, true, 0, 0, farAway);
     auto flat = scope.audio->Play2D(attenuated);

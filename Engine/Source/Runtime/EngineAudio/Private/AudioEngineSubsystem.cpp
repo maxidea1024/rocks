@@ -31,6 +31,8 @@ static_assert(MaxActiveVoicesSetting < audio::AudioRtCommandCapacity);
 
 // 묶음 하나에 올 수 있는 결과 수의 상한이다(재생 하나는 결과 두 개 이하).
 constexpr usize EventsPerBatch = 2 * MaxPlaybacks;
+// 묶음마다 미리 잡는 차폐 요청 칸이다(넘치면 제어 쪽이 다음 묶음에 다시 낸다).
+constexpr usize OcclusionRequestsPerBatch = 256;
 // 전달 목록 상한이다: 묶음 결과 전체(슬롯마다 둘 이하) + Ignored 끝.
 constexpr usize DeliveringCapacity = 3 * MaxPlaybacks;
 
@@ -74,7 +76,8 @@ struct AudioEngineSubsystem::Control {
 AudioEngineSubsystem::AudioEngineSubsystem(Allocator& allocator) noexcept
     : allocator_(allocator), playbacks_(allocator), freeSlots_(allocator), ignored_(allocator),
       delivering_(allocator), scenes_(allocator), sceneEpochs_(allocator), emitters_(allocator),
-      freeEmitters_(allocator), pendingSceneRemovals_(allocator), freeBatches_(allocator) {
+      deferredOcclusionAnswers_(allocator), freeEmitters_(allocator),
+      pendingSceneRemovals_(allocator), freeBatches_(allocator) {
 }
 
 AudioEngineSubsystem::~AudioEngineSubsystem() {
@@ -104,6 +107,7 @@ Result<void> AudioEngineSubsystem::Initialize(Engine& engine) noexcept {
     if (!playbacks_.TryResize(MaxPlaybacks) || !freeSlots_.TryReserve(MaxPlaybacks) ||
         !ignored_.TryReserve(MaxPlaybacks) || !delivering_.TryReserve(DeliveringCapacity) ||
         !freeBatches_.TryReserve(ControlBatchCount) || !scenes_.TryResize(MaxAudioScenes) ||
+        !deferredOcclusionAnswers_.TryReserve(OcclusionRequestsPerBatch * ControlBatchCount) ||
         !sceneEpochs_.TryResize(MaxAudioScenes) || !emitters_.TryResize(MaxAudioEmitters) ||
         !freeEmitters_.TryReserve(MaxAudioEmitters) ||
         !pendingSceneRemovals_.TryReserve(MaxAudioScenes)) {
@@ -288,7 +292,8 @@ Result<void> AudioEngineSubsystem::StartControl() noexcept {
 
     control_ = Move(control.Value());
     for (ControlBatch& batch : control_->batches) {
-        if (!batch.events.TryReserve(EventsPerBatch)) {
+        if (!batch.events.TryReserve(EventsPerBatch) ||
+            !batch.occlusionRequests.TryReserve(OcclusionRequestsPerBatch)) {
             return Result<void>::Failure(ErrorCode::OutOfMemory);
         }
     }
@@ -323,6 +328,10 @@ void AudioEngineSubsystem::OnFrameBegin(Engine& engine) noexcept {
         while (returned_.TryPop(batch)) {
             for (const PlaybackEvent& event : batch->events) {
                 (void)delivering_.TryPushBack(event);
+            }
+
+            for (const OcclusionRequest& request : batch->occlusionRequests) {
+                AnswerOcclusion(request);
             }
 
             lastControlStats_ = batch->stats;
@@ -368,6 +377,19 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
     current_->virtualization = engine.Settings() != nullptr
                                    ? engine_audio_detail::VirtualizationFromSettings()
                                    : VirtualizationSettings{};
+    current_->focus = focusSettings_;
+    current_->occlusion.disabled = OcclusionDisabled(engine);
+    current_->occlusion.muted = traits_.audioMuted;
+    occlusionEnabled_ = !current_->occlusion.disabled && !current_->occlusion.muted;
+    FlushDeferredOcclusionAnswers();
+    current_->occlusion.checkIntervalSeconds =
+        engine.Settings() != nullptr ? engine_audio_detail::OcclusionCheckIntervalVar.Get()
+                                     : OcclusionSettings{}.checkIntervalSeconds;
+    current_->occlusion.filterScale =
+        engine.Settings() != nullptr && engine_audio_detail::OcclusionFilterScaleVar.Get() != 0;
+    current_->focusInitializeOnFirstUpdate =
+        engine.Settings() == nullptr ||
+        engine_audio_detail::FocusInitializeOnFirstUpdateVar.Get() != 0;
     SnapshotScenes();
     SubmitCurrent();
 }
@@ -409,13 +431,23 @@ Result<PlaybackHandle> AudioEngineSubsystem::PlayAtInScene(AudioSceneId scene,
                                                            const SoundSourceRef& sound,
                                                            const Vec3d& position,
                                                            PlayOptions options) noexcept {
-    if (!position.IsFinite()) {
+    return PlayAtInScene(scene, sound, position, Quatd::Identity(), Move(options));
+}
+
+Result<PlaybackHandle> AudioEngineSubsystem::PlayAtInScene(AudioSceneId scene,
+                                                           const SoundSourceRef& sound,
+                                                           const Vec3d& position,
+                                                           const Quatd& rotation,
+                                                           PlayOptions options) noexcept {
+    auto normalized = rotation.TryNormalize();
+    if (!position.IsFinite() || !normalized) {
         return Result<PlaybackHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
     Placement placement;
     placement.kind = PlayPlacement::Fixed;
     placement.position = position;
+    placement.rotation = normalized.Value();
     return Accept(sound, options, scene, placement);
 }
 
@@ -504,9 +536,11 @@ void AudioEngineSubsystem::SetSceneListener(AudioSceneId scene, const Vec3d& pos
 }
 
 Result<AudioEmitterId> AudioEngineSubsystem::RegisterEmitter(AudioSceneId scene,
-                                                             const Vec3d& position) noexcept {
+                                                             const Vec3d& position,
+                                                             const Quatd& rotation) noexcept {
     using Registered = Result<AudioEmitterId>;
-    if (!IsLiveScene(scene) || !position.IsFinite()) {
+    auto normalized = rotation.TryNormalize();
+    if (!IsLiveScene(scene) || !position.IsFinite() || !normalized) {
         return Registered::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -529,13 +563,16 @@ Result<AudioEmitterId> AudioEngineSubsystem::RegisterEmitter(AudioSceneId scene,
     emitter.scene = scene.index;
     emitter.sceneEpoch = scene.epoch;
     emitter.position = position;
+    emitter.rotation = normalized.Value();
     emitter.updateBatch = 0;
     PushEmitterUpdate(slot);
     return Registered::Success(AudioEmitterId{slot, emitter.generation});
 }
 
-void AudioEngineSubsystem::UpdateEmitter(AudioEmitterId id, const Vec3d& position) noexcept {
-    if (id.slot >= emitters_.Size() || !position.IsFinite()) {
+void AudioEngineSubsystem::UpdateEmitter(AudioEmitterId id, const Vec3d& position,
+                                         const Quatd& rotation) noexcept {
+    auto normalized = rotation.TryNormalize();
+    if (id.slot >= emitters_.Size() || !position.IsFinite() || !normalized) {
         return;
     }
 
@@ -545,7 +582,107 @@ void AudioEngineSubsystem::UpdateEmitter(AudioEmitterId id, const Vec3d& positio
     }
 
     emitter.position = position;
+    emitter.rotation = normalized.Value();
     PushEmitterUpdate(id.slot);
+}
+
+void AudioEngineSubsystem::SetSceneOcclusionQuery(AudioSceneId scene,
+                                                  AudioOcclusionQuery* query) noexcept {
+    if (IsLiveScene(scene)) {
+        scenes_[scene.index].occlusionQuery = query;
+    }
+}
+
+bool AudioEngineSubsystem::OcclusionDisabled(Engine& engine) const noexcept {
+    // audio.occlusion.disable(UE au.DisableOcclusion)다.
+    return engine.Settings() != nullptr && engine_audio_detail::OcclusionDisableVar.Get() != 0;
+}
+
+void AudioEngineSubsystem::FlushDeferredOcclusionAnswers() noexcept {
+    usize sent = 0;
+    for (; sent < deferredOcclusionAnswers_.Size(); ++sent) {
+        const DeferredOcclusionAnswer& answer = deferredOcclusionAnswers_[sent];
+        ControlCommand command;
+        command.type = ControlCommandType::SetOcclusion;
+        command.handle = answer.handle;
+        command.occluded = answer.occluded;
+        command.occlusionSequence = answer.sequence;
+        if (!current_->commands.TryPushBack(Move(command))) {
+            break;
+        }
+    }
+
+    if (sent != 0) {
+        (void)deferredOcclusionAnswers_.TryRemoveAt(0, sent);
+    }
+}
+
+void AudioEngineSubsystem::FirstOcclusionCheck(const SoundSourceRef& sound, AudioSceneId scene,
+                                               const Placement& placement, uint64 owner,
+                                               ControlCommand& command) const noexcept {
+    const SoundPlayable& playable = *sound.Get();
+    if (placement.kind == PlayPlacement::NonSpatial || !playable.attenuation.HasValue() ||
+        !playable.attenuation.Value().enableOcclusion || !IsLiveScene(scene) ||
+        !occlusionEnabled_) {
+        return;
+    }
+
+    const GameScene& target = scenes_[scene.index];
+    if (target.occlusionQuery == nullptr) {
+        return;
+    }
+
+    Vec3d source = placement.position;
+    if (placement.kind == PlayPlacement::Emitter) {
+        if (placement.emitter.slot >= emitters_.Size() ||
+            emitters_[placement.emitter.slot].generation != placement.emitter.generation) {
+            return;
+        }
+
+        source = emitters_[placement.emitter.slot].position;
+    }
+
+    command.occlusionChecked = true;
+    command.occluded = target.occlusionQuery->IsOccluded(source, target.listenerPosition, owner);
+}
+
+void AudioEngineSubsystem::AnswerOcclusion(const OcclusionRequest& request) noexcept {
+    if (current_ == nullptr || drained_) {
+        return;
+    }
+
+    // 공급자가 없거나 scene이 끝났으면 차폐되지 않은 것으로 답한다(대기를 풀어 다음 간격에 다시
+    // 본다).
+    bool occluded = false;
+    if (request.scene < scenes_.Size()) {
+        const GameScene& scene = scenes_[request.scene];
+        if (scene.epoch == request.sceneEpoch && scene.occlusionQuery != nullptr &&
+            occlusionEnabled_) {
+            occluded =
+                scene.occlusionQuery->IsOccluded(request.source, request.listener, request.owner);
+        }
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::SetOcclusion;
+    command.handle = request.handle;
+    command.occluded = occluded;
+    command.occlusionSequence = request.sequence;
+    if (!current_->commands.TryPushBack(Move(command))) {
+        // 넣지 못하면(할당 실패) 다음 프레임 끝에 다시 넣는다(제어 쪽 대기가 남지 않게).
+        (void)deferredOcclusionAnswers_.TryPushBack(
+            DeferredOcclusionAnswer{request.handle, request.sequence, occluded});
+    }
+}
+
+Result<void>
+AudioEngineSubsystem::SetGlobalFocusSettings(const GlobalFocusSettings& settings) noexcept {
+    if (!IsValidGlobalFocusSettings(settings)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    focusSettings_ = settings;
+    return Result<void>::Success();
 }
 
 void AudioEngineSubsystem::UnregisterEmitter(AudioEmitterId id) noexcept {
@@ -593,15 +730,17 @@ void AudioEngineSubsystem::PushEmitterUpdate(uint32 slot) noexcept {
     }
 
     GameEmitter& emitter = emitters_[slot];
-    // 같은 묶음 안에서는 최신 위치 하나로 합친다.
+    // 같은 묶음 안에서는 최신 위치·회전 하나로 합친다.
     if (emitter.updateBatch == batchSerial_ && emitter.updateIndex != 0) {
         current_->emitters[emitter.updateIndex - 1].position = emitter.position;
+        current_->emitters[emitter.updateIndex - 1].rotation = emitter.rotation;
         return;
     }
 
     EmitterUpdate update;
     update.emitter = AudioEmitterId{slot, emitter.generation};
     update.position = emitter.position;
+    update.rotation = emitter.rotation;
     if (current_->emitters.TryPushBack(update)) {
         emitter.updateBatch = batchSerial_;
         emitter.updateIndex = static_cast<uint32>(current_->emitters.Size());
@@ -826,7 +965,9 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.sceneEpoch = scene.epoch;
         command.placement = placement.kind;
         command.position = placement.position;
+        command.rotation = placement.rotation;
         command.emitter = placement.emitter;
+        FirstOcclusionCheck(sound, scene, placement, options.owner, command);
         command.volume = options.volume;
         command.pitch = options.pitch;
         command.startFrame = options.startFrame;

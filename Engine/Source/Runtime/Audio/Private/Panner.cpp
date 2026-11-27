@@ -75,8 +75,68 @@ float ComputeAzimuthDegrees(const Vec3& listenerForward, const Vec3& listenerRig
 Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
                                  float nonSpatializedAmount, float lfeBleed,
                                  Span<float> out) noexcept {
+    float omni[MaxOutputChannels] = {};
+    if (auto computed = ComputeOmniGains(layout, AudioOmniMode::OmniDirectional, 0, 1,
+                                         Span<float>(omni, MaxOutputChannels));
+        !computed) {
+        return computed;
+    }
+
+    return ComputeChannelGains(layout, azimuthDegrees, nonSpatializedAmount, lfeBleed,
+                               Span<const float>(omni, ChannelCount(layout)), out);
+}
+
+Result<void> ComputeOmniGains(ChannelLayout layout, AudioOmniMode mode, uint32 sourceChannel,
+                              uint32 sourceChannels, Span<float> out) noexcept {
     const uint32 channels = ChannelCount(layout);
-    if (out.Size() < channels || !math::IsFinite(azimuthDegrees) ||
+    if (out.Size() < channels || sourceChannels == 0 || sourceChannels > MaxAzimuthSourceChannels ||
+        sourceChannel >= sourceChannels || static_cast<uint32>(mode) >= AudioOmniModeCount) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (layout == ChannelLayout::Mono) {
+        out[0] = 1.0f;
+        return Result<void>::Success();
+    }
+
+    const bool mono = sourceChannels == 1;
+    const bool left = sourceChannel == 0;
+    // 측면(5.1)·후면(7.1) 채널을 쓰는 Surround2D다(UE는 6·8채널 출력만 — 스테레오 출력은 앞만).
+    const bool surround = mode == AudioOmniMode::Surround2D;
+    const bool backs = channels == ChannelCount(ChannelLayout::Surround71);
+    const bool sides = channels == ChannelCount(ChannelLayout::Surround51);
+    const float monoGain = MonoUpmixLinearGain;
+    for (uint32 index = 0; index < channels; ++index) {
+        const AudioChannel channel = ChannelAt(layout, index);
+        if (mode == AudioOmniMode::OmniDirectional) {
+            out[index] = 1.0f / static_cast<float>(channels);
+            continue;
+        }
+
+        float gain = 0.0f;
+        const bool front =
+            channel == AudioChannel::FrontLeft || channel == AudioChannel::FrontRight;
+        const bool side = channel == AudioChannel::SideLeft || channel == AudioChannel::SideRight;
+        const bool back = channel == AudioChannel::BackLeft || channel == AudioChannel::BackRight;
+        const bool leftSide = channel == AudioChannel::FrontLeft ||
+                              channel == AudioChannel::SideLeft ||
+                              channel == AudioChannel::BackLeft;
+        const bool used = front || (surround && ((sides && side) || (backs && back)));
+        if (used) {
+            gain = mono ? monoGain : (leftSide == left ? 1.0f : 0.0f);
+        }
+
+        out[index] = gain;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
+                                 float nonSpatializedAmount, float lfeBleed,
+                                 Span<const float> omniGains, Span<float> out) noexcept {
+    const uint32 channels = ChannelCount(layout);
+    if (out.Size() < channels || omniGains.Size() < channels || !math::IsFinite(azimuthDegrees) ||
         !IsUnitInterval(nonSpatializedAmount) || !IsUnitInterval(lfeBleed)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -124,7 +184,6 @@ Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
     const float nextPan = math::Clamp(PlatformMath::Sin(angle), 0.0f, 1.0f);
     const float prevPan = math::Clamp(PlatformMath::Cos(angle), 0.0f, 1.0f);
 
-    const float omni = 1.0f / static_cast<float>(channels);
     for (uint32 index = 0; index < channels; ++index) {
         float pan = 0.0f;
         if (ChannelAt(layout, index) == AudioChannel::LowFrequency) {
@@ -138,7 +197,7 @@ Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
             pan = nextPan;
         }
 
-        out[index] = math::Lerp(pan, omni, nonSpatializedAmount);
+        out[index] = math::Lerp(pan, omniGains[index], nonSpatializedAmount);
     }
 
     return Result<void>::Success();

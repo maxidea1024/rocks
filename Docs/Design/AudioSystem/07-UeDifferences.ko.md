@@ -43,6 +43,8 @@
 | 여유 부족 때 정지 중 voice 끊기 | `StopNow`(fade 없음 — `AudioDevice.cpp:4377–4446`), 동률이면 배열 앞쪽, 정지 중 voice가 없으면 loop 아닌 voice·아무 voice | 64 frame fade(`MinStopFadeFrames`), 동률이면 먼저 수락한 재생, 정지 중 voice만(스트림 슬롯 부족이면 스트림 clip을 쥔 것만 — 3.41.1절) | 끊김 방지·결정성, 자리 안 활성 voice는 상한 정렬이 지킴 |
 | 최대 가청 거리의 거리 배수 | 없음(`GetMaxFalloffDistance`) | `falloffDistance ÷ distanceScale`(3.41.3절) | Rocks 감쇠 평가의 `distanceScale` 칸과 같은 끝 |
 | 차폐 질의 시점 | 기본은 매 검사 동기 trace(`au.UseAsyncOcclusionTraces` 0 — `ActiveSound.cpp:25–27·1602`) | 첫 검사만 Play 때 동기, 이후는 제어 쪽 요청 → 게임 쪽 공급자 → 명령 왕복(3.42.7절) | 제어 쪽은 게임 스레드에서 질의할 수 없다. 결과가 한 프레임 이상 늦다 |
+| 첫 차폐 검사의 focus 볼륨 조건 | 첫 검사도 parse 안이라 focus 볼륨 뒤 `Volume > 0`일 때만(`ActiveSound.cpp:2178`) | Play 때 게임 쪽에서 하므로 focus 볼륨을 보지 않는다(3.42.8절) | 게임 쪽은 focus 계수를 모른다. 이후 검사는 같은 조건이다 |
+| focus 첫 갱신 보간(`InitializeFocusFactorOnFirstUpdate` 0) | 첫 parse의 게임 delta만큼 움직인다 | 첫 갱신이 수락과 같은 묶음이라 dt 0 — 다음 묶음부터 움직인다(3.42.8절) | 수락과 첫 갱신을 같은 묶음에서 한다. 한 묶음 차이다 |
 | 차폐 보간 시간 | `FDynamicParameter`가 게임 delta로 진행, 값은 한 프레임 늦게 읽음 | mix frame으로 세고 그 묶음 값을 씀(3.42.7절) | 오프라인 렌더·Inline 시험 결정성 |
 | focus 보간 dt | 게임 delta | 묶음 사이 mix frame(3.42.5절) | 같은 이유 |
 | 스테레오 spread의 영거리 방위각 | L 90°·R 270°(`AudioMixerSource.cpp:2187–2188` — 좌우가 바뀜) | L 270°·R 90°(3.42.6절) | 좌우를 맞춘다. 비공간화 반경이 0이면 이 거리에서 출력이 다르다 |
