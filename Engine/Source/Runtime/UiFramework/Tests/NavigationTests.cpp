@@ -29,6 +29,9 @@ TEST(UiFramework_ArrowNavigationUsesScreenPositionAndAlignedRow) {
     REQUIRE(adapter.Route(input::InputEvent::KeyDown(input::Key::Left)).Value());
     REQUIRE(adapter.Route(input::InputEvent::KeyDown(input::Key::Down)).Value());
     CHECK(app.GetFocus(0).Get() == below.Value().Get());
-    CHECK(!adapter.Route(input::InputEvent::KeyDown(input::Key::Down)).Value());
+    // 갈 곳이 없어도 navigation 키는 처리된 것이다(UE FReply::SetNavigation — 20.7절). 초점은
+    // 그대로다.
+    CHECK(adapter.Route(input::InputEvent::KeyDown(input::Key::Down)).Value());
+    CHECK(app.GetFocus(0).Get() == below.Value().Get());
 }
 } // namespace rocks::ui

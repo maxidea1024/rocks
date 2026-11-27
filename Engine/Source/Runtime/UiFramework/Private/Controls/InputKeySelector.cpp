@@ -119,6 +119,11 @@ bool InputKeySelector::OnPreviewKeyChord(uint32 user, const input::InputEvent& e
         return false;
     }
 
+    // 패드 버튼은 키가 없는 키 이벤트로 온다(20.8절) — 그 버튼을 고른다.
+    if (chord.gamepad != input::GamepadButton::Count) {
+        return HandleGamepadButton(user, chord.gamepad);
+    }
+
     if (event.repeat || event.key == input::Key::None || KeyModifierBit(event.key)) {
         return true;
     }

@@ -88,7 +88,7 @@
 - **기본 처리(UE `SWidget::OnKeyDown`).** 기본 구현은 Element가 초점을 받을 수 있고 KeyDown이며 `KeyEvent::navigation`이 있으면 navigation 응답이다. 키를 쓰고 싶은 override는 처리함을, 아니면 `Super::OnKeyEvent`를 돌려준다(UE 관례). override 13곳을 옮긴다.
 - **navigation 이벤트(UE `OnNavigation`).**
   - navigation 응답이 나오면 키 라우팅을 멈춘다(조상은 키를 받지 않는다).
-  - 그 뒤 초점 경로를 초점 Element부터 루트로 올라가며 `OnNavigation(NavigationEvent)`를 부른다. 결과 `NavigationReply`가 Escape가 아니면 거기서 멈추고 그 규칙(Explicit·Custom·CustomBoundary·Stop·Wrap)과 경계 Element로 탐색한다(UE `FSlateApplication::AttemptNavigation`).
+  - 그 뒤 초점 경로를 초점 Element부터 루트로 올라가며 `OnNavigation(사용자, 방향)`을 부른다. 결과 `NavigationBoundary`가 Escape가 아니면 거기서 멈추고 그 규칙(Explicit·Custom·CustomBoundary·Stop·Wrap)과 경계 Element로 탐색한다(UE `FSlateApplication::AttemptNavigation`). 스스로 처리했다는 응답(`handled` 표지)이면 탐색하지 않는다.
   - 기본 `OnNavigation`은 Element의 navigation 규칙(`SetNavigationRule`)을 돌려준다.
   - 조상이 키로 하던 방향 처리를 `OnNavigation`으로 옮긴다:
     - `MenuPanel`: Up·Down의 구분선 건너뛰기, Left의 하위 메뉴 닫기, Tab
@@ -109,7 +109,9 @@
 - 버튼 누름·뗌(`GamepadState`)을 같은 키 경로의 KeyDown·KeyUp으로 보낸다. `input::Key`(Input 모듈 — 다른 시스템과 공유)에 가상 키를 더하지 않고, `KeyEvent::chord.gamepad`에 버튼을 싣는다. 방향(D-pad)·동작(South 확인, East 뒤로)은 `NavigationConfig`가 정한다. `OnGamepadButtonDown`은 지우고, 패드를 직접 다루던 Slider(조종 잠금)·InputKeySelector(버튼 고르기)는 `OnKeyEvent`의 패드 분기로 옮긴다.
 - 패드 상태(지난 버튼·스틱 반복)는 `Application`이 패드 자리마다 든다(`RouteGamepadState`). UI가 받지 않는 입력(Game 모드, 초기 초점으로 소비)도 `SyncGamepadState`로 상태를 맞춘다. 그래야 누르고 있던 버튼이 다음에 새 누름으로 보이지 않는다.
 - 왼쪽 스틱은 임계값을 넘는 순간과 반복 간격(프레임 시각)으로 방향 navigation을 만든다(UE `GetNavigationDirectionFromAnalog` 83–105행 — 첫 반복 0.5초, 다음 0.25초, 0.9보다 세면 절반). 두 축이 모두 넘으면 더 크게 민 축이다. 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다.
-- `ScreenInputRouter`의 직접 `Navigate`·Enter 합성을 지운다. 확인·뒤로는 `NavigationConfig` 동작으로 처리한다(South = 확인, East = 뒤로 — UE `Virtual_Gamepad_Accept`·`Back`).
+- `ScreenInputRouter`의 직접 `Navigate`·Enter 합성을 지운다. 확인·뒤로는 `NavigationConfig` 동작으로 처리한다(South = 확인, East = 뒤로 — UE `Virtual_Gamepad_Accept`·`Back`). 키를 보던 분기(메뉴 닫기 Escape, 콤보 고르기 Enter, 메뉴 팝업 preview)는 동작이나 패드 버튼으로 판정한다. 순서는 키보드와 같이 화면 action 매핑이 먼저다.
+- 끊긴 패드와 UI가 받지 않는 입력(Game 모드, 매핑·초기 초점이 소비)의 뗌은 초점 경로에 누름 취소(`OnKeyCancelled`)로 보낸다. 뗌으로 보내면 버튼이 눌린다.
+- 스틱을 민 채 이벤트가 오지 않아도(backend는 상태가 바뀔 때만 보낸다) `PrepareLayout`이 프레임마다 반복을 잇는다(UE는 analog를 매 tick 보낸다).
 - **초기 초점.** UE Slate는 초점이 없으면 아무것도 하지 않고, 게임 UI는 화면 활성화 때 원하는 초점 대상에 초점을 준다(UE `UUserWidget::DesiredFocusWidget`, CommonUI `GetDesiredFocusTarget`). Rocks도 `Application`은 초점 없는 navigation을 하지 않는다. 대신 UiScreens 화면이 활성화될 때와 초점이 사라진 채 navigation·확인 입력이 올 때 화면의 원하는 초점 대상에 초점을 준다. 지금 Navigation.cpp 66행의 "첫 후보" 동작은 이 정책으로 옮긴다.
 
 ### 20.9 방향 탐색 UE 규칙(UW8f — UW8b·UW8c·UW8e1 뒤)

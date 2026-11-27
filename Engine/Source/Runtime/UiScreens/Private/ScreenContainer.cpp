@@ -295,6 +295,16 @@ void ScreenContainer::Activate(Page& page) noexcept {
     (void)ApplyDesiredFocus(page, *screen);
 }
 
+bool ScreenContainer::FocusDesiredTarget() noexcept {
+    if (pages_.IsEmpty()) {
+        return false;
+    }
+
+    Page& page = pages_[Top()];
+    auto screen = objects_.Resolve<Screen>(objects_.OwnerAccess(), page.screen);
+    return screen && ApplyDesiredFocus(page, *screen.Value().Get().Value());
+}
+
 bool ScreenContainer::ApplyDesiredFocus(Page& page, const Screen& screen) noexcept {
     if (screen.restoreFocus_) {
         auto focus = page.focus.Lock();

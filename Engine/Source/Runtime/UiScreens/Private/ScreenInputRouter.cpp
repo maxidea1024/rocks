@@ -130,7 +130,7 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
     if (!allowUi) {
         // UI가 받지 않아도 패드 상태는 맞춘다(다음에 UI가 받을 때 누른 버튼을 새 누름으로 보지
         // 않게).
-        app_.SyncGamepadState(index, pad);
+        app_.SyncGamepadState(screens_.UserId(), index, pad);
         return Result<bool>::Success(false);
     }
 
@@ -141,9 +141,22 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
         Mask(input::GamepadButton::DPadLeft) | Mask(input::GamepadButton::DPadRight) |
         Mask(input::GamepadButton::DPadUp) | Mask(input::GamepadButton::DPadDown) |
         Mask(input::GamepadButton::South);
-    if ((pressed & navigationButtons) && !app_.GetFocus(user) && screens_.FocusDesiredTarget()) {
-        app_.SyncGamepadState(index, pad);
+    const bool stick = static_cast<bool>(app_.GetNavigationConfig(user).DirectionFromAnalog(
+        pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)],
+        pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)]));
+    if (((pressed & navigationButtons) || stick) && !app_.GetFocus(user) &&
+        screens_.FocusDesiredTarget()) {
+        app_.SyncGamepadState(screens_.UserId(), index, pad);
         return Result<bool>::Success(true);
+    }
+
+    // 화면 action 매핑이 먼저다(키보드와 같은 순서). 받으면 패드 상태만 맞춘다.
+    if (pressed) {
+        auto mapped = Dispatch(input::Key::None, pressed);
+        if (!mapped || mapped.Value()) {
+            app_.SyncGamepadState(user, index, pad);
+            return mapped;
+        }
     }
 
     // 버튼·스틱은 키 경로로 간다(D-pad navigation, South 확인, East 뒤로 — 20.8절).
@@ -157,11 +170,6 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
 
     if (!pressed) {
         return Result<bool>::Success(false);
-    }
-
-    auto mapped = Dispatch(input::Key::None, pressed);
-    if (!mapped || mapped.Value()) {
-        return mapped;
     }
 
     // 아무도 받지 않은 뒤로는 화면 뒤로 가기다.

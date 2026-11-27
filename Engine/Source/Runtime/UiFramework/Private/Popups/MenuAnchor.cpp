@@ -242,10 +242,10 @@ Result<void> MenuAnchor::Arrange(const Geometry& geometry) noexcept {
 }
 
 KeyReply MenuAnchor::OnKeyEvent(const KeyEvent& key) noexcept {
-    const uint32 user = key.user;
     const input::InputEvent& event = key.input;
+    // 뒤로 동작(Escape·패드 East)이면 닫는다(20.8절).
     if (IsOpen() && event.type == input::InputEventType::KeyDown &&
-        event.key == input::Key::Escape) {
+        key.action == NavigationAction::Back) {
         Close();
         return KeyReply::Handled();
     }

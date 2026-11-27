@@ -14,7 +14,8 @@ public:
     Result<void> Arrange(const Geometry& geometry) noexcept override;
     void SetPopupArea(const Optional<Box2<float>>& area) noexcept override;
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override;
-    bool OnPreviewKeyDown(uint32 user, const input::InputEvent& event) noexcept override;
+    bool OnPreviewKeyChord(uint32 user, const input::InputEvent& event,
+                           KeyChord chord) noexcept override;
 
 private:
     MenuAnchor* anchor_;

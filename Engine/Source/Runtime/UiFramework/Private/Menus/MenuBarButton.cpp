@@ -38,7 +38,6 @@ PointerReply MenuBarButton::OnPointerEvent(const PointerEvent& event) noexcept {
 }
 
 KeyReply MenuBarButton::OnKeyEvent(const KeyEvent& key) noexcept {
-    const uint32 user = key.user;
     const input::InputEvent& event = key.input;
     if (event.type == input::InputEventType::KeyDown && !IsOpen()) {
         switch (event.key) {

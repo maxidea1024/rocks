@@ -149,7 +149,7 @@ public:
     // 패드 상태 기억을 지운다(창 초점 잃음·입력 넘침).
     void ResetGamepads() noexcept;
     // 보내지 않고 패드 상태만 기억한다(UI가 이 입력을 받지 않을 때 — 다음 누름·뗌 판정이 맞게).
-    void SyncGamepadState(uint32 index, const input::GamepadSnapshot& pad) noexcept;
+    void SyncGamepadState(uint32 user, uint32 index, const input::GamepadSnapshot& pad) noexcept;
     Result<bool> RouteKey(uint32 userId, const input::InputEvent& event) noexcept;
 
     Result<bool> RouteKeyWithin(uint32 userId, const input::InputEvent& event,
@@ -342,11 +342,20 @@ private:
         Optional<FocusDirection> analog{};
         double analogLast = 0;
         uint32 analogRepeats = 0;
+        // 스틱을 민 채 이벤트가 오지 않아도 프레임마다 반복한다(UE는 analog를 매 tick 보낸다).
+        float analogPressure = 0;
+        uint32 user = 0;
+        WeakPtr<Element> scope;
+        bool scoped = false;
     };
+    // 스틱 반복을 진행한다(PrepareLayout — 20.8절).
+    void AdvanceAnalogRepeats() noexcept;
+    // 패드 누름을 취소로 끝낸다(끊김·UI 밖으로 넘김 — 뗌을 보내면 버튼이 눌린다).
+    void CancelGamepadKeys(uint32 user) noexcept;
+    Result<bool> RouteAnalogNavigation(uint32 index) noexcept;
     PadState pads_[input::MaxGamepads]{};
     // 키 경로 본체다(키보드·패드 공용 — 초점 경로 preview·명령·OnKeyEvent·navigation 응답).
     Result<bool> RouteKeyEvent(const KeyEvent& key, const SharedPtr<Element>& scope) noexcept;
-    Array<UserNavigation> navigationConfigs_;
     // KeyDown의 navigation 응답을 실행한다(다음·이전은 tree 순서, 방향은 기하 — 20.7절).
     Result<bool> PerformNavigation(uint32 userId, FocusDirection direction,
                                    const SharedPtr<Element>& scope) noexcept;
@@ -392,6 +401,7 @@ private:
     bool notifyingPress_ = false;
     SharedPtr<CommandList> globalCommands_;
     Array<SharedPtr<CommandList>> windowCommands_;
+    Array<UserNavigation> navigationConfigs_;
     Result<KeyChord> UpdateChord(uint32 userId, const input::InputEvent& event) noexcept;
     bool ProcessCommands(const Element* scope, KeyChord chord, bool repeat) const noexcept;
     uint64 focusVersion_ = 0;

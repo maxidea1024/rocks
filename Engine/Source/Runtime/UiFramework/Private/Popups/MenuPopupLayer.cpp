@@ -129,8 +129,11 @@ PointerReply MenuPopupLayer::OnPreviewPointerDown(const PointerEvent& event) noe
     return {};
 }
 
-bool MenuPopupLayer::OnPreviewKeyDown(uint32, const input::InputEvent& event) noexcept {
-    if (anchor_ && event.key == input::Key::Escape) {
+bool MenuPopupLayer::OnPreviewKeyChord(uint32, const input::InputEvent& event,
+                                       KeyChord chord) noexcept {
+    // Escape 또는 패드 뒤로(East)면 닫는다(20.8절).
+    if (anchor_ && event.type == input::InputEventType::KeyDown &&
+        (event.key == input::Key::Escape || chord.gamepad == input::GamepadButton::East)) {
         anchor_->Close();
         return true;
     }

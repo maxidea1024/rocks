@@ -99,6 +99,11 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
 
         return Result<bool>::Success(false);
     };
+    // 초점 경로의 요소가 방향을 스스로 처리했다(목록·메뉴) — 그 요소가 초점을 이미 옮겼다.
+    if (policy.handled) {
+        return Result<bool>::Success(false);
+    }
+
     // Explicit·Custom은 탐색 전에 정한다(UE CalculateDestinationWidget — SlateApplication.cpp
     // 6498행 — 처리했다는 응답 NavigationBoundary::Handled도 여기서 끝난다).
     if (policy.rule == NavigationRule::Custom || policy.rule == NavigationRule::Explicit) {

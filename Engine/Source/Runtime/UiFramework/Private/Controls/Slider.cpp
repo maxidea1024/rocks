@@ -179,20 +179,6 @@ bool Slider::HandleGamepadButton(uint32 user, input::GamepadButton button) noexc
         return true;
     }
 
-    if (requiresControllerLock_ && !controllerCaptured_) {
-        return false;
-    }
-
-    if (button == (vertical_ ? B::DPadDown : B::DPadLeft)) {
-        SetInteractiveValue(value_ - step_);
-        return true;
-    }
-
-    if (button == (vertical_ ? B::DPadUp : B::DPadRight)) {
-        SetInteractiveValue(value_ + step_);
-        return true;
-    }
-
     return false;
 }
 
@@ -243,28 +229,30 @@ bool Slider::SupportsKeyboardFocus() const noexcept {
 
 KeyReply Slider::OnKeyEvent(const KeyEvent& key) noexcept {
     const input::InputEvent& event = key.input;
-    // 패드 버튼은 키 경로로 온다(Docs/Design/UiToolkit 20.8절 — chord.gamepad). 누름만 본다.
-    if (key.chord.gamepad != input::GamepadButton::Count) {
-        if (event.type == input::InputEventType::KeyDown &&
-            HandleGamepadButton(key.user, key.chord.gamepad)) {
+    if (event.type != input::InputEventType::KeyDown) {
+        return Element::OnKeyEvent(key);
+    }
+
+    // 패드 조종 잠금(South 잡기·East 놓기)이다(20.8절).
+    if (key.chord.gamepad != input::GamepadButton::Count &&
+        HandleGamepadButton(key.user, key.chord.gamepad)) {
+        return KeyReply::Handled();
+    }
+
+    // 값은 navigation 방향으로 바꾼다(UE SSlider::OnKeyDown — GetNavigationDirectionFromKey).
+    // 키보드 방향키·패드 D-pad·스틱이 같다. 잠겼거나 조종 잠금이 필요한데 잡지 않았거나 다른
+    // 사용자가 잡았으면 넘긴다(navigation).
+    const bool blocked = locked_ ||
+                         (requiresControllerLock_ && !controllerCaptured_ &&
+                          key.chord.gamepad != input::GamepadButton::Count) ||
+                         (controllerCaptured_ && controllerUser_ != key.user);
+    if (key.navigation && !blocked) {
+        const FocusDirection decrease = vertical_ ? FocusDirection::Down : FocusDirection::Left;
+        const FocusDirection increase = vertical_ ? FocusDirection::Up : FocusDirection::Right;
+        if (*key.navigation == decrease || *key.navigation == increase) {
+            SetInteractiveValue(*key.navigation == decrease ? value_ - step_ : value_ + step_);
             return KeyReply::Handled();
         }
-
-        return Element::OnKeyEvent(key);
-    }
-
-    if (locked_ || event.type != input::InputEventType::KeyDown) {
-        return Element::OnKeyEvent(key);
-    }
-
-    if (event.key == (vertical_ ? input::Key::Down : input::Key::Left)) {
-        SetInteractiveValue(value_ - step_);
-        return KeyReply::Handled();
-    }
-
-    if (event.key == (vertical_ ? input::Key::Up : input::Key::Right)) {
-        SetInteractiveValue(value_ + step_);
-        return KeyReply::Handled();
     }
 
     return Element::OnKeyEvent(key);

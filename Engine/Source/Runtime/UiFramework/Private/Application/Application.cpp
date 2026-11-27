@@ -542,6 +542,7 @@ Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutSc
     frameBegun_ = false;
     AdvanceTimers();
     AdvanceToolTips();
+    AdvanceAnalogRepeats();
     SharedPtr<Element> root = root_;
     if (!root) {
         ReleaseInactiveTargets();
@@ -756,17 +757,30 @@ Result<bool> Application::RouteGamepadState(uint32 user, uint32 index,
 
     EnsureFrame();
     PadState& state = pads_[index];
-    const uint32 buttons = pad.connected ? pad.buttons : 0;
-    const uint32 pressed = buttons & ~state.buttons;
-    const uint32 released = state.buttons & ~buttons;
-    state.buttons = buttons;
+    state.user = user;
+    state.scope = WeakPtr<Element>(scope);
+    state.scoped = static_cast<bool>(scope);
+    // 끊긴 패드의 뗌은 누름 취소다(뗌으로 보내면 버튼이 눌린다 — 예전 ScreenInputRouter와 같다).
+    if (!pad.connected) {
+        if (state.buttons != 0) {
+            CancelGamepadKeys(user);
+        }
+
+        state = {};
+        return Result<bool>::Success(false);
+    }
+
+    const uint32 pressed = pad.buttons & ~state.buttons;
+    const uint32 released = state.buttons & ~pad.buttons;
+    state.buttons = pad.buttons;
     bool handled = (pressed | released) && RouteGamepadButtons(user, pressed, released, scope);
 
     // 왼쪽 스틱: 임계값을 넘는 순간 한 번, 그 뒤 반복 간격마다(UE GetNavigationDirectionFromAnalog
-    // 83–105행). 간격은 프레임 시각으로 잰다(20.3절).
+    // 83–105행). 간격은 프레임 시각으로 잰다(20.3절). 민 채 이벤트가 끊겨도 AdvanceAnalogRepeats가
+    // 프레임마다 잇는다.
     const NavigationConfig& config = GetNavigationConfig(user);
-    const float x = pad.connected ? pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)] : 0;
-    const float y = pad.connected ? pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)] : 0;
+    const float x = pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)];
+    const float y = pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)];
     const auto direction = config.DirectionFromAnalog(x, y);
     if (!direction) {
         state.analog = {};
@@ -774,25 +788,13 @@ Result<bool> Application::RouteGamepadState(uint32 user, uint32 index,
         return Result<bool>::Success(handled);
     }
 
-    const double now = frameTime_.current;
-    const float pressure = math::Max(x < 0 ? -x : x, y < 0 ? -y : y);
-    const bool fresh = state.analog != direction;
-    if (!fresh && now - state.analogLast <=
-                      NavigationConfig::AnalogRepeatInterval(pressure, state.analogRepeats - 1)) {
-        return Result<bool>::Success(handled);
-    }
-
-    if (fresh) {
+    state.analogPressure = math::Max(x < 0 ? -x : x, y < 0 ? -y : y);
+    if (state.analog != direction) {
         state.analog = direction;
         state.analogRepeats = 0;
     }
 
-    state.analogLast = now;
-    ++state.analogRepeats;
-    // 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다(초점 요소가 쓸 수 있다).
-    const auto event = input::InputEvent::KeyDown(input::Key::None);
-    const KeyEvent key{user, event, {}, direction, NavigationAction::None};
-    auto routed = RouteKeyEvent(key, scope);
+    auto routed = RouteAnalogNavigation(index);
     if (!routed) {
         return routed;
     }
@@ -800,20 +802,68 @@ Result<bool> Application::RouteGamepadState(uint32 user, uint32 index,
     return Result<bool>::Success(handled || routed.Value());
 }
 
-void Application::SyncGamepadState(uint32 index, const input::GamepadSnapshot& pad) noexcept {
+Result<bool> Application::RouteAnalogNavigation(uint32 index) noexcept {
+    PadState& state = pads_[index];
+    if (!state.analog) {
+        return Result<bool>::Success(false);
+    }
+
+    const double now = frameTime_.current;
+    if (state.analogRepeats != 0 &&
+        now - state.analogLast <=
+            NavigationConfig::AnalogRepeatInterval(state.analogPressure, state.analogRepeats - 1)) {
+        return Result<bool>::Success(false);
+    }
+
+    state.analogLast = now;
+    ++state.analogRepeats;
+    const SharedPtr<Element> scope = state.scoped ? state.scope.Lock() : SharedPtr<Element>{};
+    if (state.scoped && !scope) {
+        return Result<bool>::Success(false);
+    }
+
+    // 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다(초점 요소가 쓸 수 있다).
+    const auto event = input::InputEvent::KeyDown(input::Key::None);
+    const KeyEvent key{state.user, event, {}, state.analog, NavigationAction::None};
+    return RouteKeyEvent(key, scope);
+}
+
+void Application::AdvanceAnalogRepeats() noexcept {
+    for (uint32 i = 0; i < input::MaxGamepads; ++i) {
+        if (pads_[i].analog) {
+            (void)RouteAnalogNavigation(i);
+        }
+    }
+}
+
+void Application::CancelGamepadKeys(uint32 user) noexcept {
+    auto target = GetFocus(user);
+    for (Element* node = target.Get(); node; node = node->Parent()) {
+        node->OnKeyCancelled(user, input::Key::None);
+    }
+}
+
+void Application::SyncGamepadState(uint32 user, uint32 index,
+                                   const input::GamepadSnapshot& pad) noexcept {
     if (index >= input::MaxGamepads) {
         return;
     }
 
     PadState& state = pads_[index];
-    state.buttons = pad.connected ? pad.buttons : 0;
-    const NavigationConfig& config = NavigationConfig::Default();
+    const uint32 buttons = pad.connected ? pad.buttons : 0;
+    // UI가 뗌을 받지 못하므로 눌려 있던 패드 키는 취소로 끝낸다.
+    if (state.buttons & ~buttons) {
+        CancelGamepadKeys(user);
+    }
+
+    state.buttons = buttons;
+    const NavigationConfig& config = GetNavigationConfig(user);
     const auto direction =
         pad.connected
             ? config.DirectionFromAnalog(pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)],
                                          pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)])
             : Optional<FocusDirection>{};
-    // 밀고 있던 스틱은 이어지는 방향으로 본다(반복 간격부터 센다).
+    // 민 채 넘긴 스틱은 이어지는 방향으로 본다(반복 간격부터 센다).
     if (direction != state.analog) {
         state.analog = direction;
         state.analogRepeats = direction ? 1 : 0;
@@ -899,9 +949,11 @@ Result<bool> Application::RouteKeyEvent(const KeyEvent& key,
     const bool down = event.type == input::InputEventType::KeyDown;
     SharedPtr<Element> target = GetFocus(userId);
     if (!target || !IsFocusablePath(target.Get())) {
-        auto cleared = SetFocus(userId, {});
-        if (!cleared) {
-            return Result<bool>::Failure(cleared.Error());
+        if (target) {
+            auto cleared = SetFocus(userId, {});
+            if (!cleared) {
+                return Result<bool>::Failure(cleared.Error());
+            }
         }
 
         return Result<bool>::Success(down && !scope &&

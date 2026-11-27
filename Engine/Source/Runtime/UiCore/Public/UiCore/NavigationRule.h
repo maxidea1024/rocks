@@ -26,11 +26,13 @@ enum class NavigationRule : uint8 {
 struct NavigationBoundary {
     NavigationRule rule = NavigationRule::Escape;
     Guid target{};
+    // OnNavigation이 방향을 스스로 처리했다(탐색이 초점을 옮기지 않는다 —
+    // Docs/Design/UiToolkit 20.7절). 규칙 값과 따로 둔다(SetNavigationRule의 대상 없는 Explicit과
+    // 겹치지 않게).
+    bool handled = false;
 
-    // OnNavigation이 방향을 스스로 처리했다(대상 없는 Explicit — 탐색이 초점을 옮기지 않는다,
-    // Docs/Design/UiToolkit 20.7절).
     static NavigationBoundary Handled() noexcept {
-        return {NavigationRule::Explicit, Guid{}};
+        return {NavigationRule::Explicit, Guid{}, true};
     }
 };
 using NavigationHandler = Delegate<Guid(uint32, FocusDirection)>;

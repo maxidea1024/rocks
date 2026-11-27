@@ -296,7 +296,6 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
 }
 
 KeyReply ComboBox::OnKeyEvent(const KeyEvent& key) noexcept {
-    const uint32 user = key.user;
     const input::InputEvent& event = key.input;
     if (event.type == input::InputEventType::KeyDown && count_) {
         const bool up = event.key == input::Key::Up;
@@ -314,7 +313,8 @@ KeyReply ComboBox::OnKeyEvent(const KeyEvent& key) noexcept {
             return KeyReply::Handled();
         }
 
-        if (IsOpen() && event.key == input::Key::Enter) {
+        // 확인 동작(Enter·Space·패드 South)이면 강조 항목을 고른다(20.8절).
+        if (IsOpen() && key.action == NavigationAction::Accept) {
             (void)Select(highlighted_);
             return KeyReply::Handled();
         }
