@@ -292,13 +292,20 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
 
     if ((name == FormatName::R32f || name == FormatName::Rgba32f) && !request.pointFilter) {
         const PixelFormat wide = LinearFormat(name);
-        if (!Guaranteed(target, wide, graphics::CookSamplingCaps)) {
+        // 검증을 끈 대상은 플랫폼 기본이다(UE — Android만 32F 필터를 못 한다,
+        // AndroidTargetPlatformControls.cpp 500).
+        const bool filterable = target.backends == 0
+                                    ? target.platform != GraphicsPlatform::Android
+                                    : Guaranteed(target, wide, graphics::CookSamplingCaps);
+        if (!filterable) {
             name = name == FormatName::R32f ? FormatName::R16f : FormatName::Rgba16f;
         }
     }
 
+    bool norm16Remapped = false;
     if (name == FormatName::G16 && !target.norm16Supported) {
         name = FormatName::R16f;
+        norm16Remapped = true;
     }
 
     // PixelFormat(sRGB 짝이 있으면 그것).
@@ -314,6 +321,7 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
         format = name == FormatName::Bc7
                      ? (srgb ? PixelFormat::BGRA8UnormSrgb : PixelFormat::BGRA8Unorm)
                      : PixelFormat::RGBA16Float;
+        out.opaqueAlpha = name == FormatName::Bc6h;
         AddWarning(out, AssetDiagnosticCode::EncoderUnavailable, before);
     }
 
@@ -338,6 +346,7 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
     out.srgbIgnored =
         request.srgb && (prevented || (IsHdrSource(request.sourceFormat) && IsFloatFormat(format)));
     out.encoding = EncodingOf(format);
+    out.norm16Remapped = norm16Remapped;
 
     // swizzle(sampler type 계약 — CompressionSettings로만)과 채널 복제.
     switch (request.compression) {

@@ -51,8 +51,9 @@ constexpr uint32 TextureFormatBackendBit(graphics::Backend backend) noexcept {
 // 쿠킹 대상이다(프로필에서 만든다 — 12.17.5 4).
 struct TextureFormatTarget {
     graphics::GraphicsPlatform platform = graphics::GraphicsPlatform::Windows;
-    // Backend 비트 집합(TextureFormatBackendBit)이다. 0이면 샘플링 보장 검증(TD12)을 끄고 32F 선형
-    // 필터는 된다고 본다(프로필 없는 빌드·시험 — UE 데스크톱 기본).
+    // Backend 비트 집합(TextureFormatBackendBit)이다. 0이면 샘플링 보장 검증(TD12)을 끈다. 32F 선형
+    // 필터는 플랫폼 기본으로 본다(Windows·Mac 됨, Android 안 됨 — UE
+    // bSupportFilteredFloat32Textures).
     uint32 backends = 0;
     // 16비트 unorm 형식을 쓸 수 있는지다(못 하면 R16Unorm → R16Float — 12.14절).
     bool norm16Supported = true;
@@ -97,6 +98,12 @@ struct TextureFormatChoice {
                                  TextureSwizzle::A};
     TextureFormatEncoding encoding = TextureFormatEncoding::Uncompressed;
     TextureChannelReplicate replicate = TextureChannelReplicate::None;
+    // G16 → R16F norm16 대체를 했는지다(빌드가 값을 0…1로 자른다 — 12.14절. 사용자가 고른 R16F인
+    // HalfFloat는 자르지 않는다).
+    bool norm16Remapped = false;
+    // BC6H 단계 사이 대체(RGBA16F — TD11)인지다. BC6H에는 알파가 없으므로 빌드가 알파를 1로 쓴다.
+    // HDR_Compressed의 다른 RGBA16F 대체(비압축 강제)는 UE처럼 원본 알파를 지킨다.
+    bool opaqueAlpha = false;
     usize warningCount = 0;
     TextureFormatWarning warnings[TextureFormatMaxWarnings];
 };

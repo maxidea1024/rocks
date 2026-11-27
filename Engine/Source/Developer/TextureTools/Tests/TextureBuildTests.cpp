@@ -10,6 +10,8 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
+#include <GraphicsTypes/GraphicsBackend.h>
+#include <GraphicsTypes/GraphicsPlatform.h>
 #include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureBuild.h>
 
@@ -571,12 +573,13 @@ TEST(TextureBuild_OutputFormats) {
           Le16(built.result.mips[0].bytes, 0) == 0x3c00);
     settings.norm16Supported = true;
 
-    // HDR_Compressed는 알파 1(half 0x3c00).
+    // HDR_Compressed 1×1은 비압축 강제의 RGBA16F라 원본 알파를 지킨다(BC6H 대체만 알파 1 — UE
+    // TextureFormatUncompressed, 12.17.5 2).
     settings.format = TextureSourceFormat::RGBA8;
     settings.compression = TextureCompressionSettings::HDR_Compressed;
     settings.srgb = false;
     REQUIRE(Build(allocator, settings, rgba, built));
-    CHECK(Le16(built.result.mips[0].bytes, 6) == 0x3c00);
+    CHECK(Le16(built.result.mips[0].bytes, 6) == Float16::FromFloat(4.0f / 255.0f).bits);
 }
 
 // 블록 압축 출력(12.17.5 3): 4의 배수 상위 mip이면 BC다. AutoDXT는 사슬 mip 0의 알파(254 이하 —
@@ -699,6 +702,125 @@ TEST(TextureBuild_BlockCompressedOutput) {
     }
 
     CHECK(warned);
+}
+
+// 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 BC6H 대체(8×8)만 알파
+// 1이다. norm16 대체 G16 → R16F만 0…1로 자르고 HalfFloat의 R16F는 넘친 값을 지킨다. 알파 판정은
+// 원본(채움 전)이라 불투명 원본 + 반투명 채움 색은 BC1이다. Android(검증 끔)는 32F 필터를 못 해
+// RGBA16F, Android OpenGL의 RGBA8 대체는 R, G, B, A byte 순서다. CPU Availability는 비압축이다.
+TEST(TextureBuild_ReviewedFormatRules) {
+    SystemAllocator allocator;
+    // HDR_Compressed 알파.
+    {
+        uint8 pixels[8 * 8 * 4];
+        for (usize index = 0; index < sizeof(pixels); ++index) {
+            pixels[index] = index % 4 == 3 ? 51 : static_cast<uint8>(index);
+        }
+
+        TextureBuildSettings settings = Gray(6, 6);
+        settings.format = TextureSourceFormat::RGBA8;
+        settings.compression = TextureCompressionSettings::HDR_Compressed;
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, 6 * 6 * 4), built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
+              Le16(built.result.mips[0].bytes, 6) == 0x3266);
+        settings.sizeX = 8;
+        settings.sizeY = 8;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
+              Le16(built.result.mips[0].bytes, 6) == 0x3c00);
+    }
+
+    // norm16 대체만 자른다(0·65535를 번갈아 둔 4×4를 8×8로 확대 — Catmull-Rom 넘침).
+    {
+        uint8 pixels[4 * 4 * 2];
+        for (usize index = 0; index < 16; ++index) {
+            const uint16 value = index % 2 != 0 ? 0xFFFF : 0;
+            pixels[index * 2] = static_cast<uint8>(value);
+            pixels[index * 2 + 1] = static_cast<uint8>(value >> 8);
+        }
+
+        TextureBuildSettings settings = Gray(4, 4);
+        settings.format = TextureSourceFormat::G16;
+        settings.norm16Supported = false;
+        settings.powerOfTwoMode = TexturePowerOfTwoSetting::ResizeToSpecificResolution;
+        settings.resizeX = 8;
+        settings.resizeY = 8;
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        const auto overshoots = [&](const Array<uint8>& bytes) noexcept {
+            bool over = false;
+            for (usize at = 0; at + 1 < bytes.Size(); at += 2) {
+                const uint16 half = static_cast<uint16>(bytes[at] | (bytes[at + 1] << 8));
+                over = over || half > 0x3C00;
+            }
+
+            return over;
+        };
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
+              !overshoots(built.result.mips[0].bytes));
+        settings.compression = TextureCompressionSettings::HalfFloat;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
+              overshoots(built.result.mips[0].bytes));
+    }
+
+    // 알파 판정은 원본(채움 전): 불투명 6×4 + 반투명 채움 색 → 8×4 BC1.
+    {
+        uint8 pixels[6 * 4 * 4];
+        for (usize index = 0; index < sizeof(pixels); ++index) {
+            pixels[index] = index % 4 == 3 ? 255 : static_cast<uint8>(index * 5);
+        }
+
+        TextureBuildSettings settings = Gray(6, 4);
+        settings.format = TextureSourceFormat::RGBA8;
+        settings.compression = TextureCompressionSettings::Default;
+        settings.powerOfTwoMode = TexturePowerOfTwoSetting::PadToPowerOfTwo;
+        settings.paddingColor = Color(0, 0, 0, 128);
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.mips[0].sizeX == 8 &&
+              built.result.pixelFormat == graphics::PixelFormat::BC1Unorm &&
+              !built.result.alphaTransparent);
+    }
+
+    // Android: 검증 끔이면 32F 필터를 못 하고, OpenGL 대상의 RGBA8 대체는 R, G, B, A 순서다.
+    {
+        const float texel[4] = {0.5f, 0.25f, 1.0f, 1.0f};
+        uint8 pixels[16];
+        platform::MemoryCopy(pixels, texel, sizeof(texel));
+        TextureBuildSettings settings = Gray(1, 1);
+        settings.format = TextureSourceFormat::RGBA32F;
+        settings.compression = TextureCompressionSettings::HDR_F32;
+        settings.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float);
+        settings.samplerPointFilter = true;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA32Float);
+        const uint8 rgba[4] = {1, 2, 3, 4};
+        TextureBuildSettings color = Gray(1, 1);
+        color.format = TextureSourceFormat::RGBA8;
+        color.compression = TextureCompressionSettings::Default;
+        color.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+        color.cookBackends = uint32{1} << static_cast<uint32>(graphics::Backend::OpenGL);
+        REQUIRE(Build(allocator, color, rgba, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8Unorm &&
+              memcmp(built.result.mips[0].bytes.Data(), rgba, 4) == 0);
+        bool fallback = false;
+        for (const TextureBuildWarning& warning : built.result.warnings) {
+            fallback =
+                fallback ||
+                (warning.code == AssetDiagnosticCode::PlatformFormatFallback &&
+                 warning.detail == graphics::PixelFormatNumber(graphics::PixelFormat::BGRA8Unorm));
+        }
+
+        CHECK(fallback);
+    }
 }
 
 // 상위 mip 크기 함수(12.17.5 3)는 BuildTexture의 상위 mip과 같다: PowerOfTwoMode(Pad·Stretch·
@@ -980,8 +1102,9 @@ TEST(TextureBuild_DiagnosticsAndResolve) {
         TextureBuildResult result(allocator);
         REQUIRE(ResolveTextureBuildSettings(texture, TextureDimension::Texture2D,
                                             TextureLodGroupValues{}, settings, result));
+        // CPU Availability는 mip이 없고 압축하지 않는다(12.17.5 2 — 플랫폼 데이터가 CPU 사본이다).
         CHECK(settings.mipGenSettings == TextureMipGenSettings::NoMipmaps &&
-              settings.addressY == TextureAddress::Mirror);
+              settings.addressY == TextureAddress::Mirror && settings.compressionNone);
         texture.source.format = TextureSourceFormat::Invalid;
         CHECK(!ResolveTextureBuildSettings(texture, TextureDimension::Texture2D,
                                            TextureLodGroupValues{}, settings, result) &&

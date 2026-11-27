@@ -1025,9 +1025,9 @@ Result<void> ChooseFormat(const TextureBuildSettings& settings, bool alphaTransp
 EncodeOptions EncodeOptionsFor(const TextureBuildSettings& settings,
                                const TextureFormatChoice& choice) noexcept {
     EncodeOptions options;
-    options.opaqueAlpha = settings.compression == TextureCompressionSettings::HDR_Compressed;
-    options.clampUnit = choice.pixelFormat == graphics::PixelFormat::R16Float &&
-                        settings.format == TextureSourceFormat::G16 && !settings.norm16Supported;
+    (void)settings;
+    options.opaqueAlpha = choice.opaqueAlpha;
+    options.clampUnit = choice.norm16Remapped;
     return options;
 }
 
@@ -1177,8 +1177,9 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     }
 
     // CPU에서 읽는 Texture2D는 mip이 없다(UE GetTextureBuildSettings).
-    if (dimension == TextureDimension::Texture2D &&
-        texture.availability == TextureAvailability::CPU) {
+    const bool cpuAvailable = dimension == TextureDimension::Texture2D &&
+                              texture.availability == TextureAvailability::CPU;
+    if (cpuAvailable) {
         mipGen = TextureMipGenSettings::NoMipmaps;
     }
 
@@ -1212,7 +1213,9 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     out.maxTextureSize = texture.maxTextureSize;
     out.minLodSize = group.minLodSize;
     out.maxLodSize = group.maxLodSize;
-    out.compressionNone = texture.compressionNone != 0;
+    // CPU에서 읽는 텍스처는 압축하지 않는다(12.17.5 2 — UE는 GPU 자리표시를 BC1로 쿠킹하고 CPU
+    // 사본을 따로 두지만 Rocks는 플랫폼 데이터가 CPU 사본이라 읽을 수 있어야 한다).
+    out.compressionNone = texture.compressionNone != 0 || cpuAvailable;
     out.compressionNoAlpha = texture.compressionNoAlpha != 0;
     out.compressionForceAlpha = texture.compressionForceAlpha != 0;
     out.lodGroup = texture.lodGroup;
@@ -1334,6 +1337,12 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         return Fail(out, AssetDiagnosticCode::None, decoded.Error(), 0);
     }
 
+    // 알파 판정(AutoDXT일 때만): 원본의 모든 slice(PowerOfTwoMode·크기 조정 전)다 — UE 주 경로의
+    // 원본 층 ColorMin·ColorMax(TextureDerivedData.cpp 886–894 →
+    // DetermineAlphaChannelTransparency)와 같은 대상이다(12.17.5 3).
+    const bool alphaTransparent =
+        TextureFormatDependsOnAlpha(request, target) && HasTransparentAlpha(level);
+
     // 3. PowerOfTwoMode.
     if (targetX != level.width || targetY != level.height || targetZ != level.depth) {
         Result<void> changed = Result<void>::Success();
@@ -1444,10 +1453,8 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         Replicate(mip, choice.replicate);
     }
 
-    // 6c. 알파 판정(AutoDXT일 때만 — 사슬의 mip 0, 쿠킹 편향으로 버리기 전, 12.17.5 3).
-    bool alphaTransparent = false;
-    if (TextureFormatDependsOnAlpha(request, target)) {
-        alphaTransparent = HasTransparentAlpha(mips[0]);
+    // 6c. 원본 알파 판정 결과로 형식을 다시 고른다(AutoDXT).
+    if (alphaTransparent) {
         if (!SelectTextureFormat(request, target, alphaTransparent, choice)) {
             return Fail(out, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
                         settings.cookBackends);
