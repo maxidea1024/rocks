@@ -2,6 +2,7 @@
 
 #include <Audio/AudioFormat.h>
 #include <Audio/DynamicsProcessor.h>
+#include <Audio/Panner.h>
 #include <Base/NumericLimits.h>
 
 // 믹서 설정·handle·명령·파라미터·결과 형식이다(Docs/Design/AudioSystem 3.22절).
@@ -102,7 +103,9 @@ struct AudioStreamClipDesc {
 enum class AudioPanMode : uint8 {
     // mono는 양쪽 0.5(UE Linear 업믹스), stereo는 L→L·R→R.
     Direct,
-    // 방위각 equal-power(3.20.6절). mono clip만.
+    // 방위각 equal-power(3.20.6절). mono clip은 azimuthDegrees 하나, stereo clip은 L 채널
+    // azimuthDegrees·R 채널 rightAzimuthDegrees(stereo spread — 3.42.6절). 3채널 이상 clip은 받지
+    // 않는다.
     Azimuth
 };
 
@@ -112,7 +115,10 @@ struct AudioVoiceParams {
     float pitch = 1.0f;
     AudioPanMode panMode = AudioPanMode::Direct;
     float azimuthDegrees = 0.0f;
+    float rightAzimuthDegrees = 0.0f;
     float nonSpatializedAmount = 0.0f;
+    // 비공간화 비율로 섞는 이득의 배치다(3.42.6절).
+    AudioOmniMode omniMode = AudioOmniMode::OmniDirectional;
     float lowPassCutoffHz = 20000.0f;
     float highPassCutoffHz = 0.0f;
 };

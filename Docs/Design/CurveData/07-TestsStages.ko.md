@@ -39,7 +39,7 @@
 | CV8 | `PackedTangentCurve` 형식 결정·양자화·배치·평가·풀기, 정합 hook과 평가 진입 대조(D21), golden byte 시험 | CV4·CV5 | M | 완료 `b958ed24` |
 | CV9 | `InterpCurve<T>` 미러 다섯 형식(미러 private 멤버 접근 보강, `InterpCurveMode` enum 미러), `TryCalcBounds`(D19) | CV3 | M | 완료 `c257e5f4` |
 | CV10 | 문서 반영(에셋 시스템 Curve 행·Core 상세 G09·InterpCurve 구현 문서·ReflectionExtensions 정리·이 문서의 구현 결과), 묶음 끝 스펙·문서 관점 리뷰 | CV1–CV9 | S | 완료 `36217451`·묶음 끝 리뷰 반영(개정 13) |
-| CV11 | 쿠킹용 결정적 평가(5.9절, D22): CV11a DeterministicMath `Cos`·`Atan`(CoreDataFoundations 2.2절 — 생성 표·기준값·digest), CV11b 수학 정책 인자와 `TangentCurve::EvaluateDeterministic` | CV10 | M | 착수 2026-11-27 |
+| CV11 | 쿠킹용 결정적 평가(5.9절, D22): CV11a DeterministicMath `Cos`·`Atan`(CoreDataFoundations 2.2절 — 생성 표·기준값·digest), CV11b 수학 정책 인자와 `TangentCurve::EvaluateDeterministic` | CV10 | M | 완료 `19bad2267`·`ba0aa736c`(CV11a)·`7983b256f`(CV11b) |
 
 ### 17.1 구현(CV1·CV2)에서 정한 점
 

@@ -321,8 +321,9 @@ constexpr double PiOverTwoPart2 = BitCast<double>(uint64{0x3DD0B4611A600000});
 constexpr double PiOverTwoPart3 = BitCast<double>(uint64{0x3BA3198A2E000000});
 constexpr double PiOverTwoPart3Tail = BitCast<double>(uint64{0x397B839A252049C1});
 
-// 축소가 정확한 4분면 번호의 상한이다(n < 2^20 — n·조각이 오차 없다). 넘으면 Cos는 CosPi(|x|/π)로
-// 결정적인 [−1, 1] 값을 낸다(정확도는 보장하지 않는다).
+// 축소가 정확한 4분면 번호의 상한이다(n ≤ 2^20 — n·조각이 오차 없다, 2^20은 2의 거듭제곱이라
+// 조각 곱이 정확하다). 넘으면 Cos는 CosPi(|x|/π)로 결정적인 [−1, 1] 값을 낸다(정확도는 보장하지
+// 않는다).
 constexpr double CosExactQuadrantLimit = 1048576.0; // 2^20
 
 // atan(k/8)(k = 0..8)의 double-double이다(hi = 가장 가까운 double, lo = 나머지의 가장 가까운 double
@@ -352,6 +353,10 @@ double AtanTail(double r) noexcept {
 
     return r * y * sum;
 }
+
+// 이 이상이면 atan(x) = π/2 − 1/x가 π/2의 hi로 반올림된다(1/x ≤ 2^−53 < ulp(π/2)/2 — 1/x의
+// double-double 나눗셈이 Veltkamp 분할에서 넘치기 전에 끊는다).
+constexpr double AtanHalfPiLimit = 9007199254740992.0; // 2^53
 
 // 너무 작아 atan(x)가 x로 반올림되는 크기의 경계다(|x| < 2^−27이면 x³/3 < ulp(x)/2).
 constexpr double AtanIdentityLimit = BitCast<double>(uint64{0x3E40000000000000}); // 2^−27
@@ -594,7 +599,7 @@ double Cos(double x) noexcept {
     // 오차 없고, 첫 뺄셈은 Sterbenz로 정확하다 — n ≥ 1이면 |x|와 n·조각1이 두 배 안이다).
     const double magnitude = Magnitude(x);
     const double n = RoundHalfEven(magnitude * InversePiOverTwo);
-    if (n >= CosExactQuadrantLimit) {
+    if (n > CosExactQuadrantLimit) {
         return CosPi(magnitude / Pi);
     }
 
@@ -632,7 +637,7 @@ double Atan(double x) noexcept {
     const bool negative = (BitCast<uint64>(x) & SignBit) != 0;
     const double magnitude = Magnitude(x);
     const DoubleDouble halfPi{0.5 * PiExtended.hi, 0.5 * PiExtended.lo};
-    if (IsInfinite(x)) {
+    if (IsInfinite(x) || magnitude >= AtanHalfPiLimit) {
         return negative ? -halfPi.hi : halfPi.hi;
     }
 

@@ -68,18 +68,18 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 | `simulatePhysics`·Mobility | `EMotionType` | 2.5절. Static ↔ Movable은 재등록이라(2.3.1절) `mAllowDynamicOrKinematic`(Static으로 만든 body에만 필요 — `Physics/Body/BodyCreationSettings.h:99`)은 쓰지 않는다 |
 | `startAwake` | `EActivation` | 2.3절(소유 Actor BeginPlay 전이면 잠든 채) |
 | `enableGravity` | `mGravityFactor` 1 / 0 | |
-| `overrideMass`·`massInKgOverride`·`massScale` | `mOverrideMassProperties`·`mMassPropertiesOverride` | 계산 질량(형상 밀도 — 6.6절)에 배율 → 덮어쓰기면 `ScaleToMass(override)` |
+| `overrideMass`·`massInKgOverride`·`massScale` | `mOverrideMassProperties`(`MassAndInertiaProvided`)·`mMassPropertiesOverride` | UE 질량 규칙(7.1.15절): 균일 밀도 질량^0.75(`RaiseMassToPower`) × `massScale`, 덮어쓰기면 그 값, 하한 1 g, 관성 × 질량 비 |
 | `centerOfMassOffset` | `OffsetCenterOfMassShape`로 형상을 감쌈 | cm → m, 축 A |
-| `inertiaTensorScale` | `EOverrideMassProperties::MassAndInertiaProvided` | 계산 관성의 주축값에 축별 배율(축 A로 재배치) |
+| `inertiaTensorScale` | `EOverrideMassProperties::MassAndInertiaProvided` | Chaos `ScaleInertia`(질량 미포함, 1e-3 넘게 다를 때 — Rocks 축에서 계산, 7.1.15절) |
 | `updateMassWhenScaleChanges` | scale 갱신 때 질량 재계산 여부 | 참이면 새 형상으로 다시 계산, 거짓이면 이전 질량·관성을 `MassAndInertiaProvided`로 유지 |
 | `linearDamping`·`angularDamping` | `mLinearDamping`·`mAngularDamping` | 값 그대로(1/s). Jolt 기본 0.05에 맡기지 않는다 |
 | `overrideMaxAngularVelocity`·`maxAngularVelocity` | `mMaxAngularVelocity` | 도/s → rad/s. 덮어쓰기가 아니면 물리 설정 값(6.8절) |
 | (없음) | `mMaxLinearVelocity` | 물리 설정 `maxLinearVelocity`(cm/s → m/s). 기본은 UE처럼 사실상 없음(PMD18 — 6.8절) |
 | `continuousCollision` | `EMotionQuality::LinearCast` | |
 | `smoothEdgeCollisions` | `mEnhancedInternalEdgeRemoval` | |
-| `overrideSolverIterations`·`positionIterations`·`velocityIterations` | `mNumPositionStepsOverride`·`mNumVelocityStepsOverride` | 덮어쓰기면 값, 아니면 0(장면 기본) |
+| `overrideSolverIterations`·`positionIterations`·`velocityIterations` | `mNumPositionStepsOverride`·`mNumVelocityStepsOverride` | 덮어쓰기면 값, 아니면 0(장면 기본). 뜻이 다르다(한계 — 7.1.15절): Chaos는 position 반복(기본 8)이 본 해 풀기이고 velocity(2)는 후처리인데 Jolt는 velocity steps(기본 10)가 본 해 풀기다. UE 기본값(8/2)으로 덮어쓰면 Jolt velocity steps가 2로 줄어 약해진다. 0은 Chaos 0회, Jolt 장면 기본이다 |
 | `gyroscopicTorque` | `mApplyGyroscopicForce` | |
-| `dofMode`·`lock*` | `mAllowedDOFs`(월드 축 bit) | 축 bit는 A로 재배치(Rocks X → Jolt Z, Y → X, Z → Y). 잠금 축은 **월드 축**이고 잠근 값은 body를 만들 때의 위치·자세다(PMD19 — UE `CreateDOFLock`은 body 대 월드 joint로, 월드 쪽 frame이 월드 X·Y 축과 생성 시점 위치다, `E/Private/PhysicsEngine/BodyInstance.cpp:856–925`, 생성은 `InitDynamicProperties` — `:4727`). 평면 방식(`YZPlane` 등)은 법선 방향 이동과 법선에 수직인 두 축 회전을 잠근다(UE `:890–903` — 평면 안 이동과 법선 축 회전만 남는다). **모든 자유도를 잠근 조합**(Jolt `EAllowedDOFs::None`은 허용되지 않는다 — `Physics/Body/AllowedDOFs.h:12`)은 진단 후 Kinematic처럼 다루지 않고 잠금을 적용하지 않는다(경고 `AllDegreesOfFreedomLocked`). **CustomPlane**(임의 법선 평면)은 월드 축 bit로 표현할 수 없어 Jolt `SixDOFConstraint`(body 대 고정)로 구현한다(PH5) |
+| `dofMode`·`lock*` | `mAllowedDOFs`(월드 축 bit) | 축 bit는 A로 재배치(Rocks X → Jolt Z, Y → X, Z → Y). 잠금 축은 **월드 축**이고 잠근 값은 body를 만들 때의 위치·자세다(PMD19 — UE `CreateDOFLock`은 body 대 월드 joint로, 월드 쪽 frame이 월드 X·Y 축과 생성 시점 위치다, `E/Private/PhysicsEngine/BodyInstance.cpp:856–925`, 생성은 `InitDynamicProperties` — `:4727`). 평면 방식(`YZPlane` 등)은 법선 방향 이동과 법선에 수직인 두 축 회전을 잠근다(UE `:890–903` — 평면 안 이동과 법선 축 회전만 남는다). **모든 자유도를 잠근 조합**(Jolt `EAllowedDOFs::None`은 허용되지 않는다 — `Physics/Body/AllowedDOFs.h:12`)은 허용 자유도를 `All`로 두고 6축 고정 `SixDOFConstraint`로 제자리에 둔다(UE와 같다). **CustomPlane**은 법선이 축과 나란하면 축 bit로, 비스듬하면 Jolt `SixDOFConstraint`(body 대 고정, 위치 = body 원점)로 구현한다(7.1.16절) |
 | `generateWakeEvents` | `BodyActivationListener` | 2.7절 |
 | `notifyRigidBodyCollision` | 접촉 수집 표지 | 6.4절 |
 | `autoWeld` | compound | 2.8절 |
@@ -89,8 +89,8 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 
 - Jolt에서 마찰·반발은 **body 값**이다(`BodyCreationSettings::mFriction` 기본 0.2·`mRestitution` 기본 0 — `Physics/Body/BodyCreationSettings.h:107–108`, 접촉 결합 `Physics/Constraints/ContactConstraintManager.h:555–556`). Jolt `PhysicsMaterial`에는 값이 없다(디버그 이름·색뿐). 그래서 재질 값은 body 생성 때 `mFriction`·`mRestitution`에 넣는다.
 - 물리 재질 에셋(UE `UPhysicalMaterial` — 마찰·반발·밀도·결합 방식·표면 종류)은 에셋 단계에서 들인다. 그 전에는 UE 기본값(마찰 0.7, 정지 마찰 0, 반발 0.3, 밀도 1 g/cm³ — `PC/Private/PhysicalMaterial.cpp:45–49`)을 모든 body에 쓴다. 밀도는 형상 밀도로 넣는다(g/cm³ → kg/m³ — K1 `GramsPerCubicCentimeterToKilogramsPerCubicMeter`).
-- 결합 방식(UE `EFrictionCombineMode` Average·Min·Multiply·Max — `PC/Public/PhysicsSettingsEnums.h:14–19`, 마찰·반발 둘 다 기본 Average: `UPhysicsSettingsCore`가 값을 정하지 않아 0 = Average)은 `PhysicsSystem::SetCombineFriction`·`SetCombineRestitution`으로 맞춘다(Jolt 기본은 마찰 기하평균·반발 최대 — 그대로 두면 UE와 다르다). 결합 함수는 상태 없는 함수 포인터라(`ContactConstraintManager.h:53` `CombineFunction`) 모드는 **프로세스 전역**이다(물리 설정 값 — UE도 프로젝트 설정 하나다). body별 재질의 결합 모드 덮어쓰기(UE `bOverrideFrictionCombineMode`)는 재질 에셋 단계에서 body user data로 함수 안에서 고른다.
-- 반발 문턱: UE `BounceThresholdVelocity`(200 cm/s — `PC/Private/PhysicsSettingsCore.cpp:42`)를 Jolt `PhysicsSettings::mMinVelocityForRestitution`(m/s)에 넣는다(Jolt 기본 1 m/s = 100 cm/s와 다르다).
+- 결합 방식(UE `EFrictionCombineMode` Average·Min·Multiply·Max — `PC/Public/PhysicsSettingsEnums.h:14–19`, 마찰·반발 둘 다 기본 Average: `UPhysicsSettingsCore`가 값을 정하지 않아 0 = Average)은 `PhysicsSystem::SetCombineFriction`·`SetCombineRestitution`으로 맞춘다(Jolt 기본은 마찰 기하평균·반발 최대 — 그대로 두면 UE와 다르다). 결합 함수는 상태 없는 함수 포인터지만 PhysicsSystem(장면)마다 따로 넣는다(`ContactConstraintManager.h:53` `CombineFunction` — 모드는 장면의 물리 설정 값, 7.1.15절 정정). body별 재질의 결합 모드 덮어쓰기(UE `bOverrideFrictionCombineMode`)는 재질 에셋 단계에서 body user data로 함수 안에서 고른다.
+- 반발 문턱: UE Chaos `RestitutionThreshold`(가속도 1000 cm/s² — `CH/Public/Chaos/PBDRigidsEvolutionGBF.h:70`)에 solver step dt를 곱한 속도(`CH/Private/Chaos/Collision/PBDCollisionContainerSolver.cpp:89·163` — 60 Hz면 약 16.7 cm/s)를 Jolt `PhysicsSettings::mMinVelocityForRestitution`(m/s)에 step마다 넣는다(dt가 바뀔 때만). UE 설정 `BounceThresholdVelocity`(200 cm/s)는 UE 5.8에서 읽히지 않는다(PhysX 시절 칸 — 7.1.15절 정정).
 
 ## 6.7 job·할당·hook
 
@@ -108,7 +108,8 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 | `defaultGravityZ` | −980 cm/s² | `DefaultGravityZ`(`PC/Private/PhysicsSettingsCore.cpp:29`) |
 | `maxAngularVelocity` | 3600 도/s | `MaxAngularVelocity`(`:43`) |
 | `maxLinearVelocity` | `UnlimitedLinearVelocity` = √FLT_MAX cm/s(이름 있는 상수 — 사실상 없음) | body마다 `SetMaxLinearVelocity(√FLT_MAX)`(`E/Private/PhysicsEngine/BodyInstance.cpp:1331`, 제곱해도 넘치지 않는 최대 — `PC/Private/ChaosEngineInterface.cpp:693–701`). 임시 상한 CVar `p.HackMaxVelocity2`는 기본 −1(끔 — `CH/Private/Chaos/PBDRigidsEvolutionGBF.cpp:53–54`) |
-| `bounceThresholdVelocity` | 200 cm/s | `BounceThresholdVelocity`(`:42`) |
+| `restitutionThreshold` | 1000 cm/s²(× step dt) | Chaos `DefaultRestitutionThreshold`(`CH/Public/Chaos/PBDRigidsEvolutionGBF.h:70`), CVar `p.CollisionRestitutionThreshold` |
+| `collisionMarginFraction`·`collisionMarginMax` | 0.05·10 cm | Chaos `DefaultCollisionMarginFraction`·`DefaultCollisionMarginMax`(`:65–66`) — 상자 margin(7.1.15절) |
 | `minDeltaVelocityForHitEvents` | 0 cm/s | `MinDeltaVelocityForHitEvents`(`E/Private/PhysicsEngine/PhysicsSettings.cpp:31`) |
 | `defaultDegreesOfFreedom` | `Full3D`(`SettingsDof { Full3D, YZPlane, XZPlane, XYPlane }`) | `ESettingsDOF`(`E/Classes/PhysicsEngine/PhysicsSettings.h:73–78`·`:278`, 값을 정하지 않아 0 = Full3D) |
 | `frictionCombineMode`·`restitutionCombineMode` | Average·Average | `UPhysicsSettingsCore` |

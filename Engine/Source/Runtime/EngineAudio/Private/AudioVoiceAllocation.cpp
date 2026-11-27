@@ -34,14 +34,21 @@ bool KeepsWithoutVoice(const SoundPlayable& playable, bool remainActive) noexcep
 
 } // namespace
 
-bool AudioDeviceContext::IsAudible(const Record& record,
-                                   bool ignorePlayWhenSilentSetting) const noexcept {
+bool AudioDeviceContext::IsAudible(const Record& record, bool shortSound) const noexcept {
     const SoundPlayable& playable = *record.sound.Get();
     // NonSpatial 배치·감쇠 없음·PlayWhenSilent(허용될 때)는 늘 들린다(UE IsInAudibleRange
     // — 3.41.3절).
     if (record.placement == PlayPlacement::NonSpatial || !playable.attenuation.HasValue() ||
         (playable.virtualizationMode == SoundVirtualizationMode::PlayWhenSilent &&
-         (virtual_.allowPlayWhenSilent || ignorePlayWhenSilentSetting))) {
+         (virtual_.allowPlayWhenSilent || shortSound))) {
+        return true;
+    }
+
+    // 짧은 소리 판정은 focus 거리 배수가 하나라도 1이 아니면 늘 들린다(UE AD 6362–6375).
+    const SoundAttenuation& attenuation = playable.attenuation.Value();
+    if (shortSound &&
+        (attenuation.focusDistanceScale != 1.0f || attenuation.nonFocusDistanceScale != 1.0f ||
+         focus_.focusDistanceScale != 1.0f || focus_.nonFocusDistanceScale != 1.0f)) {
         return true;
     }
 
@@ -53,8 +60,9 @@ bool AudioDeviceContext::IsAudible(const Record& record,
     }
 
     const ControlScene& scene = scenes_[record.scene];
-    return IsWithinAudibleRange(playable.attenuation.Value(), scene.listenerPosition, position,
-                                virtual_.maxWorldDistance);
+    return IsWithinAudibleRange(attenuation, scene.listenerPosition, position,
+                                virtual_.maxWorldDistance,
+                                shortSound ? 1.0f : record.focus.distance);
 }
 
 void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexcept {
@@ -110,9 +118,15 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
             record.playbackMixFrame = now;
         }
 
-        record.unscaledEstimate =
-            record.volume.At(now) * playable.volume * record.spatial.attenuationGain;
+        record.unscaledEstimate = UnscaledEstimate(record, now);
     }
+}
+
+float AudioDeviceContext::UnscaledEstimate(const Record& record, uint64 now) const noexcept {
+    // 동시 발음 scale을 빼기 전의 들리는 크기다(3.41.1절 v — 사용자·사운드 볼륨 × 감쇠 × focus
+    // 볼륨).
+    return record.volume.At(now) * record.sound.Get()->volume * record.spatial.attenuationGain *
+           record.focus.volume * record.occlusionVolume.At(now);
 }
 
 void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
@@ -140,10 +154,10 @@ void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
         // UE FWaveInstance::GetVolumeWeightedPriority(Audio.cpp:1328–1359).
         if (record.estimate > 0.0f) {
             record.weight = playable.bypassVolumeScaleForPriority
-                                ? record.priority
-                                : record.estimate * record.priority;
+                                ? record.voicePriority
+                                : record.estimate * record.voicePriority;
         } else {
-            record.weight = record.priority - InaudibleWeightOffset;
+            record.weight = record.voicePriority - InaudibleWeightOffset;
         }
     }
 }

@@ -17,4 +17,8 @@ public sealed class CurveAssets : EngineModuleRules
 
     // Curves for the curve value types, ObjectRuntime for the reflected classes and object references, AssetRuntime for the Asset base.
     protected override string[] PublicDependencies => ["Core", "Curves", "ObjectRuntime", "AssetRuntime"];
+
+    // DeterministicMath: the cooking color evaluation's power (DeterministicPowf — Docs/Design/CurveAssets section 2.4.5). Not used by
+    // the public headers.
+    protected override string[] PrivateDependencies => ["DeterministicMath"];
 }

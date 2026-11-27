@@ -24,9 +24,8 @@ namespace {
 static_assert(MaxMixBlockFrames < MaxBlockFrames,
               "Mix blocks must be shorter than the resampler count limit");
 
-// Direct 패닝의 mono → stereo 이득(UE EMonoChannelUpmixMethod::Linear 기본값)과 stereo → mono 이득
-// (UE ToMonoMatrix의 FL·FR)이다.
-constexpr float MonoUpmixLinearGain = 0.5f;
+// stereo → mono 이득(UE ToMonoMatrix의 FL·FR)이다. mono → stereo 이득은 Panner.h
+// MonoUpmixLinearGain(UE EMonoChannelUpmixMethod::Linear 기본값)이다.
 constexpr float StereoToMonoGain = 0.707f;
 
 // 스트림 refill 수위 = 링 용량 / 이 값이다(3.40.1절 — 절반).
@@ -46,11 +45,17 @@ enum SeqlockWord : uint32 {
     SeqlockPitch,
     SeqlockPanMode,
     SeqlockAzimuth,
+    SeqlockRightAzimuth,
     SeqlockNonSpatialized,
     SeqlockLowPass,
     SeqlockHighPass,
     SeqlockWordCount
 };
+
+// pan mode word의 omni 배치 bit 위치·mask다(한 word에 pan mode와 omni 배치를 함께 담는다).
+constexpr uint32 OmniModeShift = 8;
+constexpr uint32 PanModeMask = 0xFFu;
+constexpr uint32 OmniModeMask = 0xFFu;
 
 // seqlock version의 홀수 bit(쓰는 중)다.
 constexpr uint32 SeqlockWritingBit = 1;
@@ -64,10 +69,12 @@ bool IsValidParams(const AudioVoiceParams& params) noexcept {
     return math::IsFinite(params.gain) && params.gain >= 0.0f && params.gain <= MaxVoiceGain &&
            math::IsFinite(params.pitch) && params.pitch >= MinPitch && params.pitch <= MaxPitch &&
            static_cast<uint32>(params.panMode) <= static_cast<uint32>(AudioPanMode::Azimuth) &&
-           math::IsFinite(params.azimuthDegrees) && math::IsFinite(params.nonSpatializedAmount) &&
-           params.nonSpatializedAmount >= 0.0f && params.nonSpatializedAmount <= 1.0f &&
-           math::IsFinite(params.lowPassCutoffHz) && params.lowPassCutoffHz >= 0.0f &&
-           math::IsFinite(params.highPassCutoffHz) && params.highPassCutoffHz >= 0.0f;
+           static_cast<uint32>(params.omniMode) < AudioOmniModeCount &&
+           math::IsFinite(params.azimuthDegrees) && math::IsFinite(params.rightAzimuthDegrees) &&
+           math::IsFinite(params.nonSpatializedAmount) && params.nonSpatializedAmount >= 0.0f &&
+           params.nonSpatializedAmount <= 1.0f && math::IsFinite(params.lowPassCutoffHz) &&
+           params.lowPassCutoffHz >= 0.0f && math::IsFinite(params.highPassCutoffHz) &&
+           params.highPassCutoffHz >= 0.0f;
 }
 
 // 범위 밖 값을 자르거나 기본값으로 바꾸고 바꾼 수를 센다(실시간 경로는 실패를 돌려줄 곳이 없다).
@@ -355,10 +362,11 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     uint32 loopBegin = 0;
     uint32 loopEnd = 0;
     LoopRange(desc, loopBegin, loopEnd);
-    // 방위각 패닝은 mono clip만이다(stereo spread는 AU3).
-    const bool azimuthOnStereo = params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1;
+    // 방위각 패닝은 mono·stereo clip만이다(3.42.6절).
+    const bool azimuthOnWide =
+        params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels;
     if (slot->state != ControlState::Reserved || startFrame >= desc.frameCount ||
-        (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnStereo) {
+        (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnWide) {
         return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -427,7 +435,7 @@ Result<AudioRtCommand> AudioMixer::MakeSetParams(AudioVoiceHandle voice, uint64 
 
     const AudioClipDesc& desc = clips_[controlVoices_[voice.index].clipIndex].desc;
     if (!IsValidParams(params) ||
-        (params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1)) {
+        (params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels)) {
         return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -464,7 +472,7 @@ Result<void> AudioMixer::PublishParams(AudioVoiceHandle voice,
 
     const AudioClipDesc& desc = clips_[controlVoices_[voice.index].clipIndex].desc;
     if (!IsValidParams(params) ||
-        (params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1)) {
+        (params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -479,8 +487,10 @@ Result<void> AudioMixer::PublishParams(AudioVoiceHandle voice,
                                         static_cast<uint32>(sequence >> HighWordShift),
                                         FloatBits(params.gain),
                                         FloatBits(params.pitch),
-                                        static_cast<uint32>(params.panMode),
+                                        static_cast<uint32>(params.panMode) |
+                                            (static_cast<uint32>(params.omniMode) << OmniModeShift),
                                         FloatBits(params.azimuthDegrees),
+                                        FloatBits(params.rightAzimuthDegrees),
                                         FloatBits(params.nonSpatializedAmount),
                                         FloatBits(params.lowPassCutoffHz),
                                         FloatBits(params.highPassCutoffHz)};
@@ -793,8 +803,11 @@ bool AudioMixer::ReadSeqlock(uint32 index, uint32& generation, uint64& sequence,
                words[SeqlockSequenceLow];
     params.gain = BitsFloat(words[SeqlockGain]);
     params.pitch = BitsFloat(words[SeqlockPitch]);
-    params.panMode = static_cast<AudioPanMode>(words[SeqlockPanMode]);
+    params.panMode = static_cast<AudioPanMode>(words[SeqlockPanMode] & PanModeMask);
+    params.omniMode =
+        static_cast<AudioOmniMode>((words[SeqlockPanMode] >> OmniModeShift) & OmniModeMask);
     params.azimuthDegrees = BitsFloat(words[SeqlockAzimuth]);
+    params.rightAzimuthDegrees = BitsFloat(words[SeqlockRightAzimuth]);
     params.nonSpatializedAmount = BitsFloat(words[SeqlockNonSpatialized]);
     params.lowPassCutoffHz = BitsFloat(words[SeqlockLowPass]);
     params.highPassCutoffHz = BitsFloat(words[SeqlockHighPass]);
@@ -847,6 +860,13 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
     params.azimuthDegrees =
         ClampCounted(params.azimuthDegrees, -NumericLimits<float>::Max(),
                      NumericLimits<float>::Max(), defaults.azimuthDegrees, clamped);
+    params.rightAzimuthDegrees =
+        ClampCounted(params.rightAzimuthDegrees, -NumericLimits<float>::Max(),
+                     NumericLimits<float>::Max(), defaults.rightAzimuthDegrees, clamped);
+    if (static_cast<uint32>(params.omniMode) >= AudioOmniModeCount) {
+        ++clamped;
+        params.omniMode = defaults.omniMode;
+    }
     params.nonSpatializedAmount = ClampCounted(params.nonSpatializedAmount, 0.0f, 1.0f,
                                                defaults.nonSpatializedAmount, clamped);
     params.lowPassCutoffHz = ClampCounted(params.lowPassCutoffHz, 0.0f, NumericLimits<float>::Max(),
@@ -855,8 +875,8 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
         ClampCounted(params.highPassCutoffHz, 0.0f, NumericLimits<float>::Max(),
                      defaults.highPassCutoffHz, clamped);
     if (static_cast<uint32>(params.panMode) > static_cast<uint32>(AudioPanMode::Azimuth) ||
-        (params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1)) {
-        // 방위각 패닝은 mono clip만이다(stereo spread는 AU3).
+        (params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels)) {
+        // 방위각 패닝은 mono·stereo clip만이다(3.42.6절).
         ++clamped;
         params.panMode = AudioPanMode::Direct;
     }
@@ -889,11 +909,23 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
     float targets[MaxClipChannels][MaxClipChannels] = {};
     const uint32 outputs = OutputChannelCount();
     if (params.panMode == AudioPanMode::Azimuth) {
-        const Result<void> computed =
-            ComputeChannelGains(config_.layout, params.azimuthDegrees, params.nonSpatializedAmount,
-                                0.0f, Span<float>(targets[0], MaxClipChannels));
-        ROCKS_ASSERT(computed);
-        (void)computed;
+        // 원본 채널마다 제 방위각과 omni 행으로 출력 행을 만든다(stereo는 L·R — 3.42.6절).
+        for (uint32 source = 0; source < desc.channelCount; ++source) {
+            float omni[MaxOutputChannels] = {};
+            const bool omniComputed =
+                ComputeOmniGains(config_.layout, params.omniMode, source, desc.channelCount,
+                                 Span<float>(omni, MaxOutputChannels))
+                    .IsOk();
+            const float azimuth = source == 0 ? params.azimuthDegrees : params.rightAzimuthDegrees;
+            const bool computed =
+                omniComputed &&
+                ComputeChannelGains(config_.layout, azimuth, params.nonSpatializedAmount, 0.0f,
+                                    Span<const float>(omni, outputs),
+                                    Span<float>(targets[source], MaxClipChannels))
+                    .IsOk();
+            ROCKS_ASSERT(computed);
+            (void)computed;
+        }
     } else if (desc.channelCount == 1) {
         targets[0][0] = outputs == 1 ? 1.0f : MonoUpmixLinearGain;
         targets[0][1] = outputs == 1 ? 0.0f : MonoUpmixLinearGain;

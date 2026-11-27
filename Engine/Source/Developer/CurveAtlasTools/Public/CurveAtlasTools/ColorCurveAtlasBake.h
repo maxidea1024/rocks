@@ -25,9 +25,10 @@ inline constexpr uint32 ColorCurveAtlasTexelBytes = 8;
 
 // curves(null 원소는 흰 행)를 굽는다. 너비 W = max(width, MinColorCurveAtlasWidth), 높이 =
 // max(커브 수, 1)이다(커브가 없으면 흰 한 줄). texel x는 시간 float(x) × (1 / float(W − 1))의
-// 색이다 (UE 식 그대로 — 역수 곱). 색은 disableAdjustments면 EvaluateUnadjusted, 아니면
-// Evaluate(조정 적용 — UE GetLinearColorValue)이고 float16은
-// Float16::FromFloat(round-to-nearest-even, UE FFloat16 Set과 같다)이다.
+// 색이다(UE 식 그대로 — 역수 곱). 색은 결정적 색 평가(CurveAssets 2.4.5절 — 호스트와 무관한
+// 비트)로 disableAdjustments면 EvaluateUnadjustedDeterministic, 아니면 EvaluateDeterministic(조정
+// 적용 — UE GetLinearColorValue 대응)이고 float16은 Float16::FromFloat(round-to-nearest-even, UE
+// FFloat16 Set과 같다 — NaN은 고정 quiet NaN이라 half 0x7E00)이다.
 //
 // 오류: W 또는 높이가 MaxColorCurveAtlasDimension 초과 CapacityExceeded, 할당 실패 OutOfMemory.
 // 실패하면 out은 그대로다. 성공하면 out.bytes는 out의 allocator로 다시 만든다.

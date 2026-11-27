@@ -188,10 +188,28 @@ private:
         uint32 sceneEpoch = 0;
         PlayPlacement placement = PlayPlacement::NonSpatial;
         Vec3d position;
+        Quatd rotation = Quatd::Identity();
         AudioEmitterId emitter;
         // 고정 위치·emitter 재생이면서 감쇠 스냅숏이 있으면 묶음마다 공간 값을 다시 계산한다.
         bool spatialized = false;
         SpatialParams spatial;
+        // focus(3.42.5절): 계수와 첫 갱신 표지·마지막 갱신 mix frame, 지금 배수다.
+        float focusFactor = 1.0f;
+        bool focusInitialized = false;
+        uint64 focusMixFrame = 0;
+        FocusScales focus;
+        // 차폐(3.42.7절): 응답 대기, 첫 결과를 받음, 마지막 요청 mix frame, LPF·볼륨 보간(목표는
+        // ramp target)이다.
+        bool occlusionPending = false;
+        bool occlusionChecked = false;
+        // 마지막 요청 순번이다(늦게 온 옛 요청의 응답을 새 요청의 답으로 받지 않게).
+        uint32 occlusionSequence = 0;
+        uint64 occlusionCheckFrame = 0;
+        ValueRamp occlusionVolume;
+        ValueRamp occlusionFilter;
+        // 실효 우선순위(3.42.4절): voice 배정 W의 P_v와 동시 발음 우선순위 P_c다.
+        float voicePriority = DefaultSoundPriority;
+        float concurrencyPriority = DefaultSoundPriority;
         // 지금 voice가 시작했다(started)와 이 재생이 한 번이라도 시작했다(everStarted — Started
         // 이벤트는 한 번만).
         bool started = false;
@@ -279,6 +297,7 @@ private:
     struct ControlEmitter {
         uint32 generation = 0;
         Vec3d position;
+        Quatd rotation = Quatd::Identity();
     };
 
     struct ReleasingVoice {
@@ -338,7 +357,15 @@ private:
     void ApplyRemoveScene(const ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplyRemoveEmitter(const ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplySnapshots(const ControlBatch& batch) noexcept;
-    void UpdateSpatial(Record& record) noexcept;
+    // 공간 갱신(3.42.8절 — UE 순서: 우선순위 감쇠 → focus → 거리 감쇠 → 공기 흡수). accepting이면
+    // UE 수락 때 규칙(focus 계수는 spatialize·focus일 때만, H = 1 — 3.42.5절)이다.
+    void UpdateSpatial(Record& record, uint64 now, bool accepting) noexcept;
+    // 차폐(3.42.7절): 간격이 된 재생의 질의를 묶음에 싣고, 응답·첫 검사 결과로 목표를 정한다.
+    void UpdateOcclusion(ControlBatch& batch, uint64 now) noexcept;
+    void ApplySetOcclusion(const ControlCommand& command, uint64 now) noexcept;
+    // immediate면 보간 없이 바로 맞춘다(첫 결과·audio.occlusion.disable).
+    void ApplyOcclusionResult(Record& record, bool occluded, uint64 now, bool immediate) noexcept;
+    float OcclusionFilterAt(const Record& record, uint64 frame) const noexcept;
     void ApplyMasterGain(float gain) noexcept;
     void PublishParams(uint64 now) noexcept;
     void CollectStarted(ControlBatch& batch) noexcept;
@@ -359,9 +386,10 @@ private:
     void ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept;
     bool CutStoppingVoice(bool streamOnly) noexcept;
     void EndVoiceless(uint32 slot, PlaybackEndReason reason, ControlBatch& batch) noexcept;
-    // ignorePlayWhenSilentSetting이면 PlayWhenSilent를 audio.virtual.allowplaywhensilent와 상관없이
-    // 늘 들리는 것으로 본다(짧은 one-shot 판정 — UE AD 6356은 사운드 모드만 본다).
-    bool IsAudible(const Record& record, bool ignorePlayWhenSilentSetting = false) const noexcept;
+    // shortSound면 짧은 one-shot 판정(UE SoundIsAudible — AD 6355–6380)이다: PlayWhenSilent는
+    // 허용값과 상관없이, focus 거리 배수(에셋·전역)가 1이 아니면 늘 들린다. 아니면 가상화
+    // 판정(focus Distance 배수로 나눔)이다.
+    bool IsAudible(const Record& record, bool shortSound = false) const noexcept;
 
     // 동시 발음(AudioConcurrency.cpp — 3.41.2절).
     ConcurrencyOutcome EvaluateConcurrency(uint32 slot, ControlBatch& batch, uint64 now,
@@ -375,6 +403,9 @@ private:
     // 상태를 Virtual로 바꾸고 첫 검사를 정한다(voice·그룹은 이미 정리됐다).
     void EnterVirtual(uint32 slot, uint64 now) noexcept;
     void UpdateVirtualization(ControlBatch& batch, uint64 now) noexcept;
+    // 가상 재생을 voice 후보(Voiceless)로 돌린다(공간 값·크기 추정을 지금으로).
+    void Realize(Record& record, uint64 now) noexcept;
+    float UnscaledEstimate(const Record& record, uint64 now) const noexcept;
     uint64 VirtualCheckDelay(const Record& record) const noexcept;
     uint32 FindConcurrencyGroup(ConcurrencyMode mode, uint64 owner, uint64 key) const noexcept;
     void GatherGroupMembers(uint32 group, uint32 except) noexcept;
@@ -437,6 +468,11 @@ private:
     // 이 묶음의 audio.concurrency.mindistancedelta(cm)·audio.virtual.* 값이다.
     float minDistanceDelta_ = 0.0f;
     VirtualizationSettings virtual_;
+    GlobalFocusSettings focus_;
+    bool focusInitializeOnFirstUpdate_ = true;
+    OcclusionSettings occlusion_;
+    // 차폐 요청 순회 시작 slot이다(요청 칸이 찰 때 뒤 slot이 늘 밀리지 않게 묶음마다 이어 간다).
+    uint32 occlusionCursor_ = 0;
     AudioControlStats stats_;
 };
 

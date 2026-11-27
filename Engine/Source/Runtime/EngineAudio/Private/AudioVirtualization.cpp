@@ -25,7 +25,7 @@ uint64 AudioDeviceContext::VirtualCheckDelay(const Record& record) const noexcep
     if (record.placement != PlayPlacement::NonSpatial && playable.attenuation.HasValue()) {
         const double distance = math::Sqrt(ListenerDistanceSquared(record));
         const double maxDistance = static_cast<double>(
-            MaxAudibleDistance(playable.attenuation.Value(), virtual_.maxWorldDistance));
+            AudibleRange(playable.attenuation.Value(), virtual_.maxWorldDistance));
         beyond = distance - maxDistance;
     }
 
@@ -63,12 +63,27 @@ void AudioDeviceContext::Virtualize(uint32 slot, ControlBatch& batch, uint64 now
 void AudioDeviceContext::EnterVirtual(uint32 slot, uint64 now) noexcept {
     Record& record = records_[slot];
     record.state = RecordState::Virtual;
+    // 가상 사본은 차폐 응답을 기다리지 않는다(목표·현재값·첫 검사 표지는 남긴다 — UE
+    // CreateVirtualCopy, AS 206–213).
+    record.occlusionPending = false;
     // 가상 사본은 소리 낸 시간을 0부터 센다(UE CreateVirtualCopy — PlaybackTimeNonVirtualized = 0,
     // AS 217).
     record.voicedTime = 0.0;
     record.virtualInterval = VirtualCheckDelay(record);
     record.virtualCheckFrame = now + record.virtualInterval;
     ++stats_.virtualizations;
+}
+
+void AudioDeviceContext::Realize(Record& record, uint64 now) noexcept {
+    // 가상 동안 공간 값은 검사 때만 갱신했고 크기 추정은 이 단계 전에 정해졌다. 같은 묶음의 voice
+    // 배정이 지금 값을 보도록 둘 다 다시 계산한다(실현 묶음에 무음 컬링되지 않게 — 3.42.8절).
+    if (record.spatialized) {
+        UpdateSpatial(record, now, false);
+    }
+
+    record.unscaledEstimate = UnscaledEstimate(record, now);
+    record.state = RecordState::Voiceless;
+    ++stats_.realizations;
 }
 
 void AudioDeviceContext::UpdateVirtualization(ControlBatch& batch, uint64 now) noexcept {
@@ -78,14 +93,18 @@ void AudioDeviceContext::UpdateVirtualization(ControlBatch& batch, uint64 now) n
             // 가상화를 끄면 남은 가상 재생을 새 재생처럼 다시 수락한다(UE UpdateVirtualLoops의
             // disabled 분기 — AD 7480–7495, 실현 표지 없는 AddNewActiveSound). 거부되면 끝난다.
             if (!virtual_.enabled) {
+                // 평가 전에 공간·우선순위를 지금으로 맞춘다(가상 동안은 검사 때만 갱신했다).
+                if (record.spatialized) {
+                    UpdateSpatial(record, now, false);
+                }
+
                 ConcurrencyOutcome outcome = ConcurrencyOutcome::Accepted;
                 if (record.concurrencyCount != 0) {
                     outcome = EvaluateConcurrency(slot, batch, now, false);
                 }
 
                 if (outcome == ConcurrencyOutcome::Accepted) {
-                    record.state = RecordState::Voiceless;
-                    ++stats_.realizations;
+                    Realize(record, now);
                 } else if (outcome == ConcurrencyOutcome::TableFull) {
                     ++stats_.failedPlays;
                     EndVoiceless(slot, PlaybackEndReason::Failed, batch);
@@ -103,6 +122,11 @@ void AudioDeviceContext::UpdateVirtualization(ControlBatch& batch, uint64 now) n
                 continue;
             }
 
+            // 검사 때 focus·공간 값을 다시 계산한다(UE AVL 275–295·415).
+            if (record.spatialized) {
+                UpdateSpatial(record, now, false);
+            }
+
             if (!IsAudible(record)) {
                 record.virtualInterval = VirtualCheckDelay(record);
                 record.virtualCheckFrame = now + record.virtualInterval;
@@ -117,8 +141,7 @@ void AudioDeviceContext::UpdateVirtualization(ControlBatch& batch, uint64 now) n
             }
 
             if (outcome == ConcurrencyOutcome::Accepted) {
-                record.state = RecordState::Voiceless;
-                ++stats_.realizations;
+                Realize(record, now);
             } else {
                 if (outcome == ConcurrencyOutcome::TableFull) {
                     ++stats_.failedRealizations;

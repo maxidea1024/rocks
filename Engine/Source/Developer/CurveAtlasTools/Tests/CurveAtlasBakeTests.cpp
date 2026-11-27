@@ -6,7 +6,9 @@
 #include <CurveAtlas/CurveAtlasConstants.h>
 #include <CurveAtlasTools/ColorCurveAtlasBake.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Platform/Memory.h>
 #include <TestSupport/Test.h>
+#include <stdio.h>
 
 // 색 커브 atlas 굽기 시험이다(Docs/Design/CurveAssets 4.3절 — CA6): 표본 시간(UE 역수 곱 — 나눗셈과
 // 갈리는 너비), 너비 0·1 → 2, 높이 max(커브 수, 1), null 커브·커브 없음 흰색, 조정 적용·원값,
@@ -17,6 +19,10 @@ using namespace rocks;
 namespace curve_atlas_bake_tests_file {
 
 namespace {
+
+// 굽기 golden byte의 FNV-1a digest다(CurveAtlasBake_GoldenBytes — 결과 비트가 바뀌면 함께
+// 갱신한다).
+constexpr uint64 BakeDigestValue = 0x4790815F7100D65Eull;
 
 // texel (x, row)의 성분 channel(0 r, 1 g, 2 b, 3 a) half bit다.
 uint16 HalfAt(const ColorCurveAtlasPixels& pixels, uint32 x, uint32 row, uint32 channel) noexcept {
@@ -59,7 +65,7 @@ TEST(CurveAtlasBake_SampleTimes) {
     CHECK(HalfAt(pixels, Probe, 0, 0) == HalfOf(1.0f));
     for (uint32 x = 0; x < Width; ++x) {
         const float time = static_cast<float>(x) * (1.0f / static_cast<float>(Width - 1));
-        CHECK(HalfAt(pixels, x, 1, 0) == HalfOf(ramp.EvaluateUnadjusted(time).r));
+        CHECK(HalfAt(pixels, x, 1, 0) == HalfOf(ramp.EvaluateUnadjustedDeterministic(time).r));
         // 키 없는 G·B는 0, 알파 키가 없으면 A = 1(UE GetUnadjustedLinearColorValue).
         CHECK(HalfAt(pixels, x, 1, 1) == HalfOf(0.0f) && HalfAt(pixels, x, 1, 2) == HalfOf(0.0f));
         CHECK(HalfAt(pixels, x, 1, 3) == HalfOf(1.0f));
@@ -104,7 +110,7 @@ TEST(CurveAtlasBake_SizesAndWhiteRows) {
         }
     }
 
-    CHECK(HalfAt(rows, 2, 1, 0) == HalfOf(ramp.Evaluate(1.0f).r));
+    CHECK(HalfAt(rows, 2, 1, 0) == HalfOf(ramp.EvaluateDeterministic(1.0f).r));
 }
 
 // 조정 적용(UE GetLinearColorValue — Evaluate)과 원값(disableAdjustments — EvaluateUnadjusted).
@@ -120,8 +126,8 @@ TEST(CurveAtlasBake_Adjustments) {
     ColorCurveAtlasPixels raw(allocator);
     REQUIRE(BakeColorCurveAtlas(Span<const ColorCurveAsset* const>(curves), 2, false, adjusted));
     REQUIRE(BakeColorCurveAtlas(Span<const ColorCurveAsset* const>(curves), 2, true, raw));
-    const LinearColor expectedAdjusted = curve.Evaluate(0.0f);
-    const LinearColor expectedRaw = curve.EvaluateUnadjusted(0.0f);
+    const LinearColor expectedAdjusted = curve.EvaluateDeterministic(0.0f);
+    const LinearColor expectedRaw = curve.EvaluateUnadjustedDeterministic(0.0f);
     const float adjustedChannels[] = {expectedAdjusted.r, expectedAdjusted.g, expectedAdjusted.b,
                                       expectedAdjusted.a};
     const float rawChannels[] = {expectedRaw.r, expectedRaw.g, expectedRaw.b, expectedRaw.a};
@@ -195,6 +201,43 @@ TEST(CurveAtlasBake_AtlasDefaults) {
     CHECK(atlas.curves.IsEmpty() && atlas.RowOf(ObjectHandle{}) == IndexNone);
     atlas.width = 1;
     CHECK(atlas.EffectiveWidth() == MinColorCurveAtlasWidth);
+}
+
+// 굽기 byte를 digest로 고정한다(호스트와 무관 — 결정적 색 평가, CAD12). 조정 커브 둘(명도
+// 지수·활기· 색조)과 null 행, 원값 굽기를 섞는다. NaN 결과는 고정 half NaN 0x7E00이다.
+TEST(CurveAtlasBake_GoldenBytes) {
+    SystemAllocator allocator;
+    ColorCurveAsset first(allocator);
+    REQUIRE(first.r.TryAddKey(0.0f, 0.1f) && first.r.TryAddKey(1.0f, 1.8f));
+    REQUIRE(first.g.TryAddKey(0.0f, 0.6f) && first.g.TryAddKey(1.0f, 0.2f));
+    REQUIRE(first.b.TryAddKey(0.0f, 0.9f));
+    first.adjustBrightnessCurve = 0.7f;
+    first.adjustVibrance = 0.5f;
+    first.adjustHue = 15.0f;
+    ColorCurveAsset second(allocator);
+    REQUIRE(MakeRamp(second));
+    second.adjustSaturation = 0.4f;
+    const ColorCurveAsset* curves[] = {&first, nullptr, &second};
+    uint64 hash = 0xCBF29CE484222325ull;
+    for (bool raw : {false, true}) {
+        ColorCurveAtlasPixels pixels(allocator);
+        REQUIRE(BakeColorCurveAtlas(Span<const ColorCurveAsset* const>(curves), 17, raw, pixels));
+        for (uint8 byte : pixels.bytes) {
+            hash ^= byte;
+            hash *= 0x100000001B3ull;
+        }
+    }
+
+    printf("CurveAtlasBake golden digest: 0x%016llX\n", static_cast<unsigned long long>(hash));
+    CHECK(hash == BakeDigestValue);
+
+    // HDR 원본(R 1.8)에서 명도 배율 NaN은 RGB를 NaN으로 만든다 — half는 고정 0x7E00이다.
+    first.adjustBrightness = platform::BitCast<float>(0xFFC00321u);
+    const ColorCurveAsset* broken[] = {&first};
+    ColorCurveAtlasPixels nan(allocator);
+    REQUIRE(BakeColorCurveAtlas(Span<const ColorCurveAsset* const>(broken), 2, false, nan));
+    CHECK(HalfAt(nan, 1, 0, 0) == 0x7E00u && HalfAt(nan, 1, 0, 1) == 0x7E00u &&
+          HalfAt(nan, 1, 0, 2) == 0x7E00u);
 }
 
 } // namespace curve_atlas_bake_tests_file

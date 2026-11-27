@@ -1,5 +1,6 @@
 #pragma once
 
+#include "JoltBodyBuild.h"
 #include "JoltLayers.h"
 #include "JoltResponseSets.h"
 #include "JoltRuntime.h"
@@ -20,6 +21,7 @@
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
+#include <Jolt/Physics/Constraints/Constraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 // clang-format on
 
@@ -154,6 +156,14 @@ private:
         BodyGeometry geometry;
         Vec3d scale = Vec3d::One();
         bool updateMassOnShapeChange = true;
+        // 질량 계산 입력이다(형상을 바꿀 때 UE 질량 규칙으로 다시 계산 — 7.1.15절).
+        BodyMassValues mass;
+        // 지금 질량 속성이다(운동 종류 전환 때 자유도와 함께 다시 넣는다 — 7.1.16절).
+        JPH::MassProperties massProperties;
+        // 자유도 잠금(7.1.16절)이다: Dynamic일 때 쓰는 허용 자유도와 CustomPlane 구속(Dynamic일
+        // 때만 걸려 있다).
+        DofLock dof;
+        JPH::Ref<JPH::Constraint> dofConstraint;
         // 결과 목록에 이미 있는지다(중복 방지).
         bool pendingResult = false;
         // 시뮬레이션 접촉 hit를 모으는지다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
@@ -321,6 +331,10 @@ private:
     // 7.1.6절). step 안에서 부르면 Fatal이다.
     void AssertNotStepping() const noexcept;
 
+    // 운동 종류에 맞는 자유도를 body에 넣고 CustomPlane 구속을 붙이거나 뗀다(7.1.16절 — Dynamic만).
+    void ApplyDegreesOfFreedom(BodySlot& slot) noexcept;
+    void DetachDofConstraint(BodySlot& slot) noexcept;
+
     // 형상 값·scale로 형상을 다시 만들어 바꾸고 깨운다(7.1.5절). 실패하면 이전 형상을 둔다.
     // 오류: 형상 없음·비유한 값(InvalidArgument).
     Result<void> ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
@@ -387,6 +401,16 @@ private:
     uint64 lostContactHits_ = 0;
     // 접촉 hit 문턱(cm/s — PhysicsSettings::minDeltaVelocityForHitEvents)이다.
     double minDeltaVelocityForHitEvents_ = 0.0;
+    // body 형상·값을 정하는 장면 설정이다(7.1.15절): 상자 margin, 각속도 상한(rad/s — body가
+    // 덮어쓰지 않을 때), 선속도 상한(m/s).
+    BodyShapeOptions shapeOptions_;
+    float maxAngularVelocityRadians_ = 0.0f;
+    float maxLinearVelocityMeters_ = 0.0f;
+    // 반발 문턱(cm/s² — 물리 설정)과 그 값을 Jolt에 넣은 step dt(초 — 0이면 아직)다.
+    double restitutionThreshold_ = 0.0;
+    float restitutionStepSeconds_ = 0.0f;
+    // body dofMode Default의 자유도(물리 설정 — 7.1.16절)다.
+    SettingsDof defaultDegreesOfFreedom_ = SettingsDof::Full3D;
     // 질의 All이 모으는 임시 목록이다(재사용 — 질의는 게임 thread에서 하나씩).
     mutable Array<QueryHitRecord> queryHits_;
     bool simulates_ = false;

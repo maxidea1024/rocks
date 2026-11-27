@@ -3,8 +3,113 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::AttenuationSettings::absorptionDistanceMax",
+      "id": "e26501e58de34b89b5bd341e3bf2c8b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::absorptionDistanceMin",
+      "id": "da5fc6c5954645fa9f9f9e25ef3c57f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::absorptionMethod",
+      "id": "b1e5c8b2f21e4c5d930ed0f595786de4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AttenuationSettings::attenuate",
       "id": "229e82c9328942e7a887cc27b5c259a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::attenuateWithLowPass",
+      "id": "a5a264848cf5488295fd3fc1af69eecd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::coneOffset",
+      "id": "9a0f753ace684776913465e04e33622c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::coneSphereFalloffDistance",
+      "id": "ef74b435e5cc4ff9ad8088b60e604864",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::coneSphereRadius",
+      "id": "8099eba388794ad599bf5964f0ec8502",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::customDistanceCurve",
+      "id": "63505494a8514b638e66433bdfdf6990",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::customHighPassAbsorptionCurve",
+      "id": "9cc3aa82573e4f8092f76cc44edf44a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::customLowPassAbsorptionCurve",
+      "id": "7a66cc3ea25e46a8b84391b8aaf42e7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::customPriorityAttenuationCurve",
+      "id": "35497670fa6b44148925345356ab2d66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::enableFocusInterpolation",
+      "id": "a2e479431a8a4a4aa5336506c6cb6ef1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::enableListenerFocus",
+      "id": "1e376900e0f1475e9c3a8cac28c1d74f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::enableOcclusion",
+      "id": "78b077e9218b4f10875ac72c6f0232e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::enablePriorityAttenuation",
+      "id": "12247745b9554aa48c231823aebc1ba5",
       "aliases": [],
       "retired": false
     },
@@ -17,8 +122,92 @@
     },
     {
       "kind": "field",
+      "name": "rocks::AttenuationSettings::focusAttackInterpSpeed",
+      "id": "4b2480095c064625b0a5c267bb781ac6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::focusAzimuth",
+      "id": "76f1888ddaa0450197b619a1ba77125d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::focusDistanceScale",
+      "id": "bbcf09bcea4c44fda9968e8618d1a4c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::focusPriorityScale",
+      "id": "9708760877b241da8cce6fa38cbaf4db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::focusReleaseInterpSpeed",
+      "id": "fc7702e0d7c14b979a13be7b15d694c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::focusVolumeAttenuation",
+      "id": "cf7cbce842184240a8ce5022a8b90959",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::highPassFrequencyAtMax",
+      "id": "d6ca87f7b75c4d89b504e81a8ea31b3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::highPassFrequencyAtMin",
+      "id": "e132b5b37bfd411abd7c24c96c5cfdbd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AttenuationSettings::innerRadius",
       "id": "c334095034d948f7b619bce6edd02d0c",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::logFrequencyScaling",
+      "id": "a9a47e4a35654b1da79d662f5dc17bee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::lowPassFrequencyAtMax",
+      "id": "6a86e404d188474fb462d90d190be734",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::lowPassFrequencyAtMin",
+      "id": "deff5a3e8f7b49f9801506576b9b45d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::manualPriorityAttenuation",
+      "id": "718f900dc558474286fcb5326d9b5823",
       "aliases": [],
       "retired": false
     },
@@ -45,8 +234,43 @@
     },
     {
       "kind": "field",
+      "name": "rocks::AttenuationSettings::nonFocusAzimuth",
+      "id": "b342fa3ee5d04e0b8df2cef0720f38e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonFocusDistanceScale",
+      "id": "b3ea86b94b2a418aa394cac6511db099",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonFocusPriorityScale",
+      "id": "da89c5fb8c584d6d93574cac0bc31d1c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonFocusVolumeAttenuation",
+      "id": "e89e0f1dc8774de6866de6caa184309a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AttenuationSettings::nonSpatializedRadiusEnd",
       "id": "43dc31b89fe145b8a1c35d56a793059f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::nonSpatializedRadiusMode",
+      "id": "554ad875512744e98ebb2055e00d812d",
       "aliases": [],
       "retired": false
     },
@@ -59,8 +283,85 @@
     },
     {
       "kind": "field",
+      "name": "rocks::AttenuationSettings::occlusionInterpolationSeconds",
+      "id": "81aea0a7f8a44fefb236ee33ec5440f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::occlusionLowPassFrequency",
+      "id": "9189c8e335d342f895cdd41cc450d98e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::occlusionVolumeAttenuation",
+      "id": "b7e1a820df79469fae3934011d5f4ea9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::priorityAttenuationDistanceMax",
+      "id": "1d8e90ed40df48e8abd2327c6dad27d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::priorityAttenuationDistanceMin",
+      "id": "f4152345d2ed404793e8024f67d85372",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::priorityAttenuationMax",
+      "id": "d0af64c65b8647aeb45ab96857ae1755",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::priorityAttenuationMethod",
+      "id": "0c177c77e6eb4d00b802d2614ca0988c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::priorityAttenuationMin",
+      "id": "387b46eb8c454ecf946504e4370c4d8f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::shape",
+      "id": "04b04e9f224b43aeb3218dde78943f9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::shapeExtents",
+      "id": "d3362b7ae21f41c2a4238859d6f40149",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AttenuationSettings::spatialize",
       "id": "9fd8aa51a8c74f47a5c106b301b29dc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::stereoSpread",
+      "id": "06e8bd29fa92473a90ce9965e467535e",
       "aliases": [],
       "retired": false
     },
@@ -430,6 +731,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::SoundAbsorptionMethod",
+      "id": "fc3f6ccc6d344af5bf28789f74b496d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundAttenuationShape",
+      "id": "72fdbced7f2c450ca1459c70e78cfd34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SoundClip",
       "id": "9ed7206fa51f48458308082fdbd3df1a",
       "aliases": [],
@@ -516,6 +831,20 @@
       "kind": "type",
       "name": "rocks::SoundNaturalFalloffMode",
       "id": "3dd09f5d6a33484e82f8fac30414e090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundNonSpatializedMode",
+      "id": "84c8901a531c46aeaf92dc7c4492b094",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundPriorityAttenuationMethod",
+      "id": "7b7fa82760da45058f12de08ec426ba7",
       "aliases": [],
       "retired": false
     },

@@ -15,6 +15,7 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
+#include <Jolt/Physics/Constraints/SixDOFConstraint.h>
 // clang-format on
 #include <Platform/Fatal.h>
 
@@ -30,6 +31,49 @@ constexpr int CollisionStepsPerStep = 1;
 
 // Jolt body 잠금 수다(0 = Jolt 기본값).
 constexpr JPH::uint BodyMutexCount = 0;
+
+// 도/s → rad/s 배율이다.
+constexpr double RadiansPerDegree = math::Pi<double> / 180.0;
+
+// 두 값의 결합이다(UE EFrictionCombineMode — 7.1.15절).
+float CombineValues(CombineMode mode, float a, float b) noexcept {
+    switch (mode) {
+    case CombineMode::Min:
+        return a < b ? a : b;
+    case CombineMode::Multiply:
+        return a * b;
+    case CombineMode::Max:
+        return a < b ? b : a;
+    case CombineMode::Average:
+        break;
+    }
+
+    return 0.5f * (a + b);
+}
+
+// Jolt 결합 함수(상태 없는 함수 포인터 — 장면마다 넣는다)다: 마찰·반발 × 결합 방식.
+template <bool Friction, CombineMode Mode>
+float CombineBodies(const JPH::Body& a, const JPH::SubShapeID&, const JPH::Body& b,
+                    const JPH::SubShapeID&) {
+    return Friction ? CombineValues(Mode, a.GetFriction(), b.GetFriction())
+                    : CombineValues(Mode, a.GetRestitution(), b.GetRestitution());
+}
+
+template <bool Friction>
+JPH::ContactConstraintManager::CombineFunction CombineFunctionOf(CombineMode mode) noexcept {
+    switch (mode) {
+    case CombineMode::Min:
+        return &CombineBodies<Friction, CombineMode::Min>;
+    case CombineMode::Multiply:
+        return &CombineBodies<Friction, CombineMode::Multiply>;
+    case CombineMode::Max:
+        return &CombineBodies<Friction, CombineMode::Max>;
+    case CombineMode::Average:
+        break;
+    }
+
+    return &CombineBodies<Friction, CombineMode::Average>;
+}
 
 // 접촉 listener 용량의 하한, 지난 step 대비 배수, 알림 body 하나당 잡는 수다(7.1.12절).
 constexpr usize MinContactNoticeCapacity = 64;
@@ -121,7 +165,14 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
       pendingResults_(allocator), kinematicTargets_(allocator), kinematicMoving_(allocator),
       slept_(allocator), moved_(allocator), contactHits_(allocator), takenContactHits_(allocator),
       minDeltaVelocityForHitEvents_(static_cast<double>(settings.minDeltaVelocityForHitEvents)),
-      queryHits_(allocator) {
+      maxAngularVelocityRadians_(
+          static_cast<float>(static_cast<double>(settings.maxAngularVelocity) * RadiansPerDegree)),
+      maxLinearVelocityMeters_(static_cast<float>(
+          math::CentimetersToMeters(static_cast<double>(settings.maxLinearVelocity)))),
+      restitutionThreshold_(static_cast<double>(settings.restitutionThreshold)),
+      defaultDegreesOfFreedom_(settings.defaultDegreesOfFreedom), queryHits_(allocator) {
+    shapeOptions_.collisionMarginFraction = static_cast<double>(settings.collisionMarginFraction);
+    shapeOptions_.collisionMarginMax = static_cast<double>(settings.collisionMarginMax);
     system_.Init(settings.maxBodies, BodyMutexCount, settings.maxBodyPairs,
                  settings.maxContactConstraints, broadPhaseLayers_, objectVsBroadPhase_,
                  layerPairs_);
@@ -129,6 +180,10 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
     system_.SetContactListener(&contacts_);
     system_.SetGravity(
         ToJoltAcceleration(Vec3d(0.0, 0.0, static_cast<double>(settings.defaultGravityZ))));
+    // 결합 방식(6.6절·7.1.15절 — Jolt 기본 마찰 기하평균·반발 최대 대신 UE). 반발 문턱은 step dt에
+    // 따라 Step이 넣는다.
+    system_.SetCombineFriction(CombineFunctionOf<true>(settings.frictionCombineMode));
+    system_.SetCombineRestitution(CombineFunctionOf<false>(settings.restitutionCombineMode));
 }
 
 JoltPhysicsScene::~JoltPhysicsScene() {
@@ -181,7 +236,12 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         return Result<PhysicsBodyHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto shape = MakeJoltShape(desc.geometry, desc.worldTransform.scale);
+    const BodyMassValues mass = MassValuesOf(desc.settings);
+    if (!AreMassValuesValid(mass)) {
+        return Result<PhysicsBodyHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto shape = MakeBodyShape(desc.geometry, desc.worldTransform.scale, shapeOptions_, mass);
     if (!shape) {
         return Result<PhysicsBodyHandle>::Failure(shape.Error());
     }
@@ -223,7 +283,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     }
 
     JPH::BodyCreationSettings settings(
-        shape.Value(), ToJoltPosition(desc.worldTransform.translation, origin_),
+        shape.Value().shape, ToJoltPosition(desc.worldTransform.translation, origin_),
         ToJoltRotation(desc.worldTransform.rotation), ToJoltMotion(desc.motion),
         ObjectLayerFor(desc.collision, desc.motion, responseSet.Value()));
     // body 값(PH2b 몫 — 7.1.3절). Jolt 기본 감쇠 0.05에 맡기지 않는다. settings가 없으면
@@ -237,6 +297,43 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     // CCD(6.5절 — UE bUseCCD).
     if (desc.settings != nullptr && desc.settings->continuousCollision) {
         settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+    }
+
+    // 질량·관성은 UE 규칙으로 계산해 넣는다(7.1.15절 — Jolt 형상 기본 계산 대신).
+    settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
+    settings.mMassPropertiesOverride =
+        ComputeBodyMass(*shape.Value().inner, mass, desc.worldTransform.scale);
+    // 기본 물리 재질(6.6절 — 재질 에셋 전).
+    settings.mFriction = DefaultPhysicalMaterialFriction;
+    settings.mRestitution = DefaultPhysicalMaterialRestitution;
+    // 속도 상한·solver·그 밖(6.5절 표).
+    settings.mMaxAngularVelocity = maxAngularVelocityRadians_;
+    if (desc.settings != nullptr && desc.settings->overrideMaxAngularVelocity) {
+        settings.mMaxAngularVelocity = static_cast<float>(
+            static_cast<double>(desc.settings->maxAngularVelocity) * RadiansPerDegree);
+    }
+
+    settings.mMaxLinearVelocity = maxLinearVelocityMeters_;
+    if (desc.settings != nullptr) {
+        if (desc.settings->overrideSolverIterations) {
+            settings.mNumPositionStepsOverride = desc.settings->positionIterations;
+            settings.mNumVelocityStepsOverride = desc.settings->velocityIterations;
+        }
+
+        settings.mApplyGyroscopicForce = desc.settings->gyroscopicTorque;
+        settings.mEnhancedInternalEdgeRemoval = desc.settings->smoothEdgeCollisions;
+    }
+
+    // 자유도 잠금(7.1.16절 — Dynamic만, 모두 잠긴 조합은 잠그지 않는다).
+    const DofLock dof = ResolveDofLock(desc.settings, defaultDegreesOfFreedom_);
+    if (desc.motion == BodyMotion::Dynamic) {
+        settings.mAllowedDOFs = dof.allowed;
+    }
+
+    // gyroscopic 힘은 회전 축을 잠그면 끈다(Jolt ApplyGyroscopicForceInternal이 각속도를 축
+    // 마스크로 거르지 않아 잠긴 축으로 샌다 — 7.1.16절 한계).
+    if (dof.LocksRotation()) {
+        settings.mApplyGyroscopicForce = false;
     }
 
     settings.mUserData = PackUserData(index, slots_[index].generation);
@@ -263,6 +360,14 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     slot.scale = desc.worldTransform.scale;
     slot.updateMassOnShapeChange =
         desc.settings == nullptr || desc.settings->updateMassWhenScaleChanges;
+    slot.mass = mass;
+    slot.massProperties = settings.mMassPropertiesOverride;
+    slot.dof = dof;
+    slot.dofConstraint = nullptr;
+    if (desc.motion == BodyMotion::Dynamic) {
+        ApplyDegreesOfFreedom(slot);
+    }
+
     slot.pendingResult = false;
     slot.notifyContacts = desc.settings != nullptr && desc.settings->notifyRigidBodyCollision;
     slot.stepStartStamp = 0;
@@ -283,6 +388,8 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     }
 
     BodySlot& slot = slots_[body.index];
+    // 구속을 body보다 먼저 뗀다(구속이 body를 가리킨다).
+    DetachDofConstraint(slot);
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
     bodies.RemoveBody(slot.body);
     bodies.DestroyBody(slot.body);
@@ -368,6 +475,12 @@ void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform&
     // SetGlobalPose가 잠든 입자를 깨운다 — ChaosEngineInterface.cpp:2559, Jolt는 Static이면
     // 무시한다).
     bodies.SetPositionAndRotation(slot.body, position, rotation, JPH::EActivation::Activate);
+    // 자유도 구속은 옮긴 자세를 새 기준으로 다시 붙인다(PMD19 — teleport한 값을 유지한다, 축 bit
+    // 잠금과 같다).
+    if (slot.dofConstraint != nullptr) {
+        DetachDofConstraint(slot);
+        ApplyDegreesOfFreedom(slot);
+    }
 }
 
 void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
@@ -399,11 +512,91 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
         bodies.SetMotionType(slot.body, JPH::EMotionType::Kinematic,
                              JPH::EActivation::DontActivate);
         bodies.SetLinearAndAngularVelocity(slot.body, JPH::Vec3::sZero(), JPH::Vec3::sZero());
+        // Kinematic은 자유도를 막지 않는다(7.1.16절 — Jolt 허용 자유도는 MoveKinematic 속도도
+        // 막는다).
+        ApplyDegreesOfFreedom(slot);
         return;
     }
 
     bodies.SetMotionType(slot.body, JPH::EMotionType::Dynamic,
                          wake ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+    ApplyDegreesOfFreedom(slot);
+}
+
+void JoltPhysicsScene::ApplyDegreesOfFreedom(BodySlot& slot) noexcept {
+    const bool dynamic = slot.motion == BodyMotion::Dynamic;
+    {
+        JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
+        if (!lock.Succeeded() || lock.GetBody().IsStatic()) {
+            return;
+        }
+
+        // 허용 자유도는 질량 속성과 함께 넣고(Jolt가 잠긴 축의 역질량·역관성을 0으로 둔다), 남은
+        // 속도를 새 마스크로 거른다(SetMassProperties는 속도를 거르지 않는다 — Body.cpp:424의
+        // 순서).
+        JPH::MotionProperties* motion = lock.GetBody().GetMotionProperties();
+        motion->SetMassProperties(dynamic ? slot.dof.allowed : JPH::EAllowedDOFs::All,
+                                  slot.massProperties);
+        motion->SetLinearVelocityClamped(motion->GetLinearVelocity());
+        motion->SetAngularVelocityClamped(motion->GetAngularVelocity());
+    }
+
+    if (!dynamic || !slot.dof.constraint) {
+        DetachDofConstraint(slot);
+        return;
+    }
+
+    if (slot.dofConstraint != nullptr) {
+        return;
+    }
+
+    // body 대 월드 6자유도 구속(월드 공간, 위치 = 지금 body 원점 — UE CreateDOFLock의 Pos2, X축 =
+    // 법선). 기준은 붙이는 때의 자세다(만들 때·Dynamic 전환·teleport·형상 변경 — PMD19).
+    JPH::SixDOFConstraintSettings constraint;
+    constraint.mSpace = JPH::EConstraintSpace::WorldSpace;
+    const JPH::Vec3 normal =
+        slot.dof.lockAll ? JPH::Vec3::sAxisX() : ToJoltNormal(slot.dof.constraintNormal);
+    constraint.mAxisX1 = normal;
+    constraint.mAxisX2 = normal;
+    constraint.mAxisY1 = normal.GetNormalizedPerpendicular();
+    constraint.mAxisY2 = constraint.mAxisY1;
+    if (slot.dof.lockAll) {
+        for (int axis = 0; axis < static_cast<int>(JPH::SixDOFConstraintSettings::EAxis::Num);
+             ++axis) {
+            constraint.MakeFixedAxis(static_cast<JPH::SixDOFConstraintSettings::EAxis>(axis));
+        }
+    } else {
+        if (slot.dof.lockNormalTranslation) {
+            constraint.MakeFixedAxis(JPH::SixDOFConstraintSettings::EAxis::TranslationX);
+        }
+
+        if (slot.dof.lockPlaneRotation) {
+            constraint.MakeFixedAxis(JPH::SixDOFConstraintSettings::EAxis::RotationY);
+            constraint.MakeFixedAxis(JPH::SixDOFConstraintSettings::EAxis::RotationZ);
+        }
+    }
+
+    {
+        JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
+        if (!lock.Succeeded()) {
+            return;
+        }
+
+        constraint.mPosition1 = lock.GetBody().GetPosition();
+        constraint.mPosition2 = constraint.mPosition1;
+        slot.dofConstraint = constraint.Create(JPH::Body::sFixedToWorld, lock.GetBody());
+    }
+
+    system_.AddConstraint(slot.dofConstraint.GetPtr());
+}
+
+void JoltPhysicsScene::DetachDofConstraint(BodySlot& slot) noexcept {
+    if (slot.dofConstraint == nullptr) {
+        return;
+    }
+
+    system_.RemoveConstraint(slot.dofConstraint.GetPtr());
+    slot.dofConstraint = nullptr;
 }
 
 void JoltPhysicsScene::SetBodyCollision(PhysicsBodyHandle body,
@@ -460,15 +653,33 @@ Result<void> JoltPhysicsScene::SetBodyGeometry(PhysicsBodyHandle body,
 
 Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
                                             const Vec3d& scale) noexcept {
-    auto shape = MakeJoltShape(geometry, scale);
+    auto shape = MakeBodyShape(geometry, scale, shapeOptions_, slot.mass);
     if (!shape) {
         return Result<void>::Failure(shape.Error());
     }
 
     // UE UpdateBodyScale: 형상을 바꾸고 깨우며, updateMassWhenScaleChanges면 질량을 다시 계산한다
-    // (BodyInstance.cpp:2545-2575). Jolt는 Static을 깨우지 않는다.
-    system_.GetBodyInterface().SetShape(slot.body, shape.Value().GetPtr(),
-                                        slot.updateMassOnShapeChange, JPH::EActivation::Activate);
+    // (BodyInstance.cpp:2545-2575). 질량은 Jolt 기본 계산 대신 UE 규칙으로 넣는다(7.1.15절). Jolt는
+    // Static을 깨우지 않는다.
+    system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
+                                        JPH::EActivation::Activate);
+    if (slot.updateMassOnShapeChange && slot.motion != BodyMotion::Static) {
+        JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
+        if (lock.Succeeded()) {
+            slot.massProperties = ComputeBodyMass(*shape.Value().inner, slot.mass, scale);
+            lock.GetBody().GetMotionProperties()->SetMassProperties(
+                slot.motion == BodyMotion::Dynamic ? slot.dof.allowed : JPH::EAllowedDOFs::All,
+                slot.massProperties);
+        }
+    }
+
+    // 형상이 바뀌면 질량 중심이 옮겨질 수 있다(질량 중심 이동 × scale) — 구속은 body 변경을
+    // 모르므로 다시 붙인다(Jolt Constraint.h:162-166).
+    if (slot.dofConstraint != nullptr) {
+        DetachDofConstraint(slot);
+        ApplyDegreesOfFreedom(slot);
+    }
+
     slot.geometry = geometry;
     slot.scale = scale;
     return Result<void>::Success();
@@ -901,6 +1112,16 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     };
 
     StepCall call{this, seconds, JPH::EPhysicsUpdateError::None};
+    // 반발 문턱 = 가속도 문턱 × step dt(UE Chaos — PBDCollisionContainerSolver.cpp:89, 7.1.15절).
+    // dt가 바뀔 때만 다시 넣는다.
+    if (seconds != restitutionStepSeconds_) {
+        restitutionStepSeconds_ = seconds;
+        JPH::PhysicsSettings joltSettings = system_.GetPhysicsSettings();
+        joltSettings.mMinVelocityForRestitution = static_cast<float>(
+            math::CentimetersToMeters(restitutionThreshold_ * static_cast<double>(seconds)));
+        system_.SetPhysicsSettings(joltSettings);
+    }
+
     // listener는 step 중 할당하지 않으므로 지난 step 수에 맞춰 미리 늘린다(실패하면 넘친 몫을
     // 센다).
     (void)contacts_.Reserve(LargestOf(MinContactNoticeCapacity,
