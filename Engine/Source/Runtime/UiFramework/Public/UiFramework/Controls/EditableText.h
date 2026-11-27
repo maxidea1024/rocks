@@ -206,6 +206,8 @@ private:
     void RequestCaretInView() noexcept;
     // 스크롤을 [0, 내용 - 보이는 크기]로 자른다.
     void ClampScroll() noexcept;
+    // 조합 중 누름의 조합 확정이다(22.12절 — 서비스를 Deactivate·Activate해 OS 조합을 완료한다).
+    void CommitCompositionForPointer() noexcept;
     // 초점 잃음 처리다(문맥 메뉴가 열린 동안은 미룬다 — 22.7a절).
     void HandleFocusLost(uint32 user) noexcept;
     // 편집 명령이다(키와 문맥 메뉴가 함께 쓴다 — 사용자 편집이라 통지·이력이 있다).

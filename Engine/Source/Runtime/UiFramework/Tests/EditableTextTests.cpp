@@ -17,7 +17,7 @@
 // 교체는 통지·이력 없음, Enter·초점 잃음 확정, 비밀번호 선택 막기, Initialize 전에 정한 힌트,
 // 이력 99단계·힌트 불투명도·caret 폭(22.5절), 상자의 상태별 바탕·전경·여백·오류 표지와
 // 팝업(22.2·22.6절), 스크롤 유지·휠·여러 줄 상자의 스크롤 막대(22.7절), 편집 문맥 메뉴·오른쪽
-// 끌기 스크롤·Application::Find(22.7a절).
+// 끌기 스크롤·Application::Find(22.7a절), 조합 중 누름 확정·조합 점선 밑줄(22.12절).
 
 namespace rocks::ui {
 
@@ -1178,6 +1178,103 @@ TEST(UiFramework_EditableTextFocusSelectAllDoesNotScroll) {
     REQUIRE(app.PrepareLayout(area, 1));
     CHECK(editor.SelectedText() == text.View());
     CHECK(editor.ScrollOffset() == 0);
+}
+
+namespace {
+
+// 플랫폼처럼 Deactivate가 만들던 글자를 확정하는 시험 텍스트 입력 서비스다(19.2절).
+class CompletingTextInput final : public TextInputService {
+public:
+    void Activate(TextInputContext& context) noexcept override {
+        active = &context;
+        ++activations;
+    }
+
+    void Deactivate(TextInputContext& context) noexcept override {
+        if (active == &context && context.IsComposing()) {
+            context.EndComposition();
+        }
+
+        active = active == &context ? nullptr : active;
+        ++deactivations;
+    }
+
+    void CancelComposition(TextInputContext&) noexcept override {
+        ++cancels;
+    }
+
+    void NotifyLayoutChanged(TextInputContext&) noexcept override {
+    }
+
+    void Process(uint32) noexcept override {
+    }
+
+    TextInputContext* active = nullptr;
+    uint32 activations = 0;
+    uint32 deactivations = 0;
+    uint32 cancels = 0;
+};
+
+} // namespace
+
+TEST(UiFramework_EditableTextPressCommitsCompositionAndDrawsDottedUnderline) {
+    SystemAllocator allocator;
+    EditBench bench(allocator);
+    REQUIRE(MakeEditor(allocator, bench));
+    EditableText& editor = *bench.editor;
+    REQUIRE(editor.Initialize("ab", EditFontSize));
+    auto service = SharedPtr<CompletingTextInput>::TryMake(allocator);
+    REQUIRE(service);
+    Application app(allocator);
+    REQUIRE(app.SetTextInputService(service.Value()));
+    app.SetRoot(bench.editor);
+    const Geometry area = Geometry::Root({400, 40}, {});
+    REQUIRE(app.PrepareLayout(area, 1));
+    REQUIRE(app.SetFocus(EditUser, bench.editor));
+    REQUIRE(service.Value()->active == &editor);
+    // 끝에 "xy"를 조합한다(미리보기 — 위젯 글자는 그대로).
+    editor.MoveCaret(2, false);
+    const char16_t composing[] = {u'x', u'y'};
+    editor.BeginComposition();
+    editor.SetText(2, 0, composing);
+    editor.UpdateCompositionRange(2, 2);
+    REQUIRE(editor.IsComposing());
+    REQUIRE(app.PrepareLayout(area, 1));
+    // 조합 구간(16 px) 아래 1 px 점선 — 칠 1 px·빔 1 px라 조각 8개, 위상은 줄 왼쪽 기준(첫 조각이
+    // 조합 시작 16 px), 색은 스타일 composition이다(UE HyperlinkDotted — 22.12절).
+    PaintList list(allocator);
+    REQUIRE(editor.OnPaint(list, 0));
+    const LinearColor composition = editor.GetStyle().composition.Resolve(list.Theme(), {});
+    usize dashes = 0;
+    float first = -1;
+    for (const PaintBox& box : list.Boxes()) {
+        if (box.geometry.size == Vec2(1, 1)) {
+            first = first < 0 ? box.geometry.layout.tx : first;
+            ++dashes;
+            CHECK(box.color == composition);
+        }
+    }
+
+    CHECK(dashes == 8);
+    CHECK(first == 16);
+    // 누르면 먼저 조합을 확정하고(Deactivate·Activate — 확정이지 취소가 아니다) 누른 자리로 caret을
+    // 옮긴다(UE MoveCursor).
+    const Vec2 press = editor.Label().GetGeometry().render.Apply({1, 2});
+    REQUIRE(app.RoutePointer({PointerEventType::Down, press, 0}));
+    REQUIRE(app.RoutePointer({PointerEventType::Up, press, 0}));
+    CHECK(!editor.IsComposing());
+    CHECK(editor.GetText() == "abxy");
+    CHECK(service.Value()->deactivations == 1 && service.Value()->activations == 2);
+    CHECK(service.Value()->active == &editor && service.Value()->cancels == 0);
+    uint32 begin = 0;
+    uint32 length = 0;
+    editor.GetSelection(begin, length);
+    CHECK(begin == 0 && length == 0);
+    // 확정은 사용자 편집 하나다(통지·되돌리기).
+    CHECK(bench.changes.Size() == 1);
+    Press(editor, input::Key::Z, {.control = true});
+    CHECK(editor.GetText() == "ab");
+    app.Shutdown();
 }
 
 } // namespace rocks::ui

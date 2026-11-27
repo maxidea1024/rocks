@@ -21,8 +21,11 @@ constexpr usize MaxUndoSteps = 99;
 constexpr float CaretWidthPercent = 0.08f;
 constexpr float MinCaretWidth = 1.0f;
 constexpr float MaxCaretWidth = 2.0f;
-// 조합 밑줄 두께(px)다.
+// 조합 밑줄 두께(px)와 점선 무늬(칠·빔 길이, px)다(UE CompositionBackground "Old/HyperlinkDotted"
+// — 22.12절).
 constexpr float CompositionUnderlineThickness = 1.0f;
+constexpr float CompositionDashLength = 1.0f;
+constexpr float CompositionGapLength = 1.0f;
 // caret 깜박임(UE EditableTextDefs — TextEditHelper.h 20–24행): 상호작용 뒤 이 시간(초)은 늘
 // 보이고, 그 뒤는 초당 이 횟수로 켜짐·꺼짐을 되풀이한다(SlateEditableTextTypes.cpp 127–130행).
 constexpr double CaretBlinkPauseTime = 0.1;
@@ -609,6 +612,18 @@ void EditableText::OnFocusLost(uint32 user) noexcept {
     HandleFocusLost(user);
 }
 
+void EditableText::CommitCompositionForPointer() noexcept {
+    // 서비스를 쥐고 Deactivate·Activate한다 — Deactivate가 OS 조합을 완료하고(CPS_COMPLETE) 확정을
+    // 적용한다(19.2절). 한국어에서 취소하면 쓰던 음절이 사라지므로 확정이다.
+    if (const SharedPtr<TextInputService> service = textInput_) {
+        service->Deactivate(*this);
+        service->Activate(*this);
+    }
+
+    // 서비스가 확정하지 못했으면 미리보기를 그대로 확정한다(19.2절 Deactivate 규칙).
+    EndComposition();
+}
+
 void EditableText::HandleFocusLost(uint32 user) noexcept {
     if (!focused_ || user != focusUser_) {
         return;
@@ -1182,6 +1197,11 @@ usize EditableText::PointerOffset(Vec2 point) const noexcept {
 }
 
 PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
+    // 조합 중 누름은 조합을 확정한 뒤 평소대로 처리한다(UE MoveCursor 2386–2395행 — 22.12절).
+    if (composing_ && event.type == PointerEventType::Down) {
+        CommitCompositionForPointer();
+    }
+
     if ((event.source == PointerSource::Mouse && event.button == input::MouseButton::Right &&
          event.type != PointerEventType::Wheel) ||
         (rightPressed_ && event.pointerId == rightPointer_ && event.userId == rightUser_)) {
@@ -1410,14 +1430,37 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
         for (usize i = 0; i < line.visualCount; ++i) {
             const auto& visual = layout.VisualClusters()[line.firstVisual + i];
             const auto cluster = label_->ShapedClusters()[visual.logicalIndex];
-            if (begin < cluster.byteEnd && cluster.byteEnd <= end && visual.advance > 0) {
-                const float thickness = CompositionUnderlineThickness;
+            if (begin >= cluster.byteEnd || cluster.byteEnd > end || visual.advance <= 0) {
+                continue;
+            }
+
+            if (!composing_) {
                 const auto box = label_->GetGeometry().MakeChild(
-                    {visual.advance, composing_ ? thickness : line.height},
-                    {1, 0, 0, 1, visual.x,
-                     composing_ ? line.y + label_->LineHeight() - thickness : line.y},
-                    {}, {});
+                    {visual.advance, line.height}, {1, 0, 0, 1, visual.x, line.y}, {}, {});
                 auto added = list.TryAddBox({box, color, layer});
+                if (!added) {
+                    return added;
+                }
+
+                continue;
+            }
+
+            // 조합 점선이다. 무늬 위상은 줄 왼쪽 끝 기준이라 클러스터 경계에서 끊기지 않는다.
+            const float thickness = CompositionUnderlineThickness;
+            const float y = line.y + label_->LineHeight() - thickness;
+            const float period = CompositionDashLength + CompositionGapLength;
+            const float right = visual.x + visual.advance;
+            for (float start = math::Floor(visual.x / period) * period; start < right;
+                 start += period) {
+                const float left = math::Max(start, visual.x);
+                const float stop = math::Min(start + CompositionDashLength, right);
+                if (stop <= left) {
+                    continue;
+                }
+
+                const auto dash = label_->GetGeometry().MakeChild({stop - left, thickness},
+                                                                  {1, 0, 0, 1, left, y}, {}, {});
+                auto added = list.TryAddBox({dash, color, layer});
                 if (!added) {
                     return added;
                 }
