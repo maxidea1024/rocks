@@ -22,7 +22,7 @@ Result<void> StyleSet::Store(Array<Entry<T>>& entries, StringView name, const T&
 
     ++revision_;
     for (auto& entry : entries) {
-        if (entry.name.View() == name) {
+        if (SameStyleName(entry.name.View(), name)) {
             entry.value = value;
             return Result<void>::Success();
         }
@@ -39,7 +39,7 @@ Result<void> StyleSet::Store(Array<Entry<T>>& entries, StringView name, const T&
 template <typename T>
 const T* StyleSet::Lookup(const Array<Entry<T>>& entries, StringView name) noexcept {
     for (const auto& entry : entries) {
-        if (entry.name.View() == name) {
+        if (SameStyleName(entry.name.View(), name)) {
             return &entry.value;
         }
     }
@@ -216,8 +216,9 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
         added = styles.Set<TextStyle>("Text.Large", large);
     }
 
-    // 그 밖의 Element 스타일 기본값이다(UE 키: Checkbox·Docking.Tab·Slider·ProgressBar·ScrollBar·
-    // ToolTip·Window, Rocks 이름: Menu·MenuBar).
+    // 그 밖의 Element 스타일 기본값이다(UE 키: Checkbox·Docking.Tab·Slider·ProgressBar·Scrollbar·
+    // Window, Rocks 이름: ToolTip·Menu·MenuBar — UE에는 ToolTip.Font·ToolTip.Background 같은 낱개
+    // 키만 있다).
     if (added) {
         added = styles.Set<CheckBoxStyle>("Checkbox", DefaultCheckBoxStyle());
     }
@@ -235,7 +236,7 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
     }
 
     if (added) {
-        added = styles.Set<ScrollBarStyle>("ScrollBar", DefaultScrollBarStyle());
+        added = styles.Set<ScrollBarStyle>("Scrollbar", DefaultScrollBarStyle());
     }
 
     if (added) {

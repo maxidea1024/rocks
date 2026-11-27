@@ -11,13 +11,16 @@ Result<void> StyleRegistry::Register(StringView name, const SharedPtr<StyleSet>&
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    ++revision_;
     for (auto& entry : sets_) {
-        if (entry.name.View() == name) {
+        if (SameStyleName(entry.name.View(), name)) {
+            // 빠지는 집합의 revision을 접어 넣어 합이 줄지 않게 한다.
+            revision_ += entry.set->Revision() + 1;
             entry.set = set;
             return Result<void>::Success();
         }
     }
+
+    ++revision_;
 
     String key(allocator_);
     if (auto assigned = key.TryAssign(name); !assigned) {
@@ -29,8 +32,8 @@ Result<void> StyleRegistry::Register(StringView name, const SharedPtr<StyleSet>&
 
 void StyleRegistry::Unregister(StringView name) noexcept {
     for (usize i = 0; i < sets_.Size(); ++i) {
-        if (sets_[i].name.View() == name) {
-            ++revision_;
+        if (SameStyleName(sets_[i].name.View(), name)) {
+            revision_ += sets_[i].set->Revision() + 1;
             (void)sets_.TryRemoveAt(i);
             return;
         }
@@ -39,7 +42,7 @@ void StyleRegistry::Unregister(StringView name) noexcept {
 
 SharedPtr<StyleSet> StyleRegistry::FindSet(StringView name) const noexcept {
     for (const auto& entry : sets_) {
-        if (entry.name.View() == name) {
+        if (SameStyleName(entry.name.View(), name)) {
             return entry.set;
         }
     }
@@ -49,7 +52,7 @@ SharedPtr<StyleSet> StyleRegistry::FindSet(StringView name) const noexcept {
 
 const StyleSet* StyleRegistry::FindSetRaw(StringView name) const noexcept {
     for (const auto& entry : sets_) {
-        if (entry.name.View() == name) {
+        if (SameStyleName(entry.name.View(), name)) {
             return entry.set.Get();
         }
     }

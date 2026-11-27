@@ -135,4 +135,60 @@ TEST(UiFramework_StandardStyleRegistryHoldsTheThreeUeSets) {
     CHECK(plain.Value()->GetStyle() == DefaultButtonStyle());
 }
 
+TEST(UiFramework_StyleRevisionNeverRepeatsAndMissingKeysFallBack) {
+    SystemAllocator allocator;
+    StyleBench bench(allocator);
+    REQUIRE(Build(allocator, bench));
+    auto root = SharedPtr<Element>::TryMake(allocator, allocator);
+    auto plain = SharedPtr<Button>::TryMake(allocator, allocator);
+    REQUIRE(root && plain);
+    REQUIRE(plain.Value()->Construct({}));
+    REQUIRE(root.Value()->TryAddChild(plain.Value()));
+    bench.app.SetRoot(root.Value());
+    const auto viewport = Geometry::Root({200, 100}, {});
+    REQUIRE(bench.app.SetAppStyle(EditorStyleName));
+
+    // 값을 여러 번 바꾼 집합을 덜 바꾼 집합으로 같은 이름에 다시 등록해도 revision이 줄지 않고,
+    // 버튼은 새 집합 값을 받는다(활성 집합을 이름으로 푼다).
+    ButtonStyle custom = DefaultButtonStyle();
+    for (int32 i = 0; i < 3; ++i) {
+        custom.normalPadding = {static_cast<float>(i), 0, 0, 0};
+        REQUIRE(bench.editor->Set<ButtonStyle>("Button", custom));
+    }
+
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    CHECK(plain.Value()->GetStyle().normalPadding == Vec4(2, 0, 0, 0));
+    auto replacement = SharedPtr<StyleSet>::TryMake(allocator, allocator);
+    REQUIRE(replacement);
+    REQUIRE(replacement.Value()->SetParentName(CoreStyleName));
+    custom.normalPadding = {6, 6, 6, 6};
+    REQUIRE(replacement.Value()->Set<ButtonStyle>("Button", custom));
+    const uint64 before = bench.registry->Revision();
+    REQUIRE(bench.registry->Register(EditorStyleName, replacement.Value()));
+    CHECK(bench.registry->Revision() > before);
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    CHECK(plain.Value()->GetStyle().normalPadding == Vec4(6, 6, 6, 6));
+
+    // 루트를 바꾼 사이에 집합이 바뀌어도, 깨끗한 트리를 다시 붙이면 새 값을 받는다.
+    auto other = SharedPtr<Element>::TryMake(allocator, allocator);
+    REQUIRE(other);
+    bench.app.SetRoot(other.Value());
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    REQUIRE(bench.app.SetAppStyle(CoreStyleName));
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    bench.app.SetRoot(root.Value());
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    CHECK(plain.Value()->GetStyle() == DefaultButtonStyle());
+
+    // 활성 집합에 키가 없으면 앞서 받은 값이 아니라 내장 기본값이다.
+    REQUIRE(bench.app.SetAppStyle(EditorStyleName));
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    CHECK(plain.Value()->GetStyle().normalPadding == Vec4(6, 6, 6, 6));
+    auto empty = SharedPtr<StyleSet>::TryMake(allocator, allocator);
+    REQUIRE(empty);
+    REQUIRE(bench.registry->Register(EditorStyleName, empty.Value()));
+    REQUIRE(bench.app.PrepareLayout(viewport, 1));
+    CHECK(plain.Value()->GetStyle() == DefaultButtonStyle());
+}
+
 } // namespace rocks::ui

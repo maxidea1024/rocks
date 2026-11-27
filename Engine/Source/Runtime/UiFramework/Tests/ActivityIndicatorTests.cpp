@@ -24,7 +24,7 @@ TEST(UiFramework_ThrobberUsesPieceBrushAndIndependentAxes) {
     SystemAllocator allocator;
     ActivityIndicator widget(allocator, false);
     PaintList list(allocator);
-    auto host = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto host = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
     REQUIRE(host);
     REQUIRE(widget.SetUiHostServices(host.Value()));
     const IndicatorClock clock{host.Value(), &list};
@@ -66,7 +66,7 @@ TEST(UiFramework_CircularThrobberUsesRadiusPeriodAndProgressivePieceSize) {
     SystemAllocator allocator;
     ActivityIndicator ring(allocator, true);
     PaintList list(allocator);
-    auto host = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto host = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
     REQUIRE(host);
     REQUIRE(ring.SetUiHostServices(host.Value()));
     const IndicatorClock clock{host.Value(), &list};

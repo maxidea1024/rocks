@@ -27,13 +27,20 @@
 //   const ButtonStyle* primary = styles.Find<ButtonStyle>("PrimaryButton");
 namespace rocks::ui {
 
+// 스타일·집합 이름 비교다. UE FName처럼 ASCII 대소문자를 가리지 않는다("Scrollbar"와 "ScrollBar"는
+// 같다 — UE도 두 철자로 같은 키를 찾는다, StarshipStyle.cpp 170행).
+inline bool SameStyleName(StringView a, StringView b) noexcept {
+    return a.ByteCount() == b.ByteCount() && a.StartsWith(b, StringComparison::IgnoreAsciiCase);
+}
+
 class ROCKS_UICORE_API StyleSet {
 public:
     explicit StyleSet(Allocator& allocator) noexcept;
     StyleSet(const StyleSet&) = delete;
     StyleSet& operator=(const StyleSet&) = delete;
 
-    // 같은 이름이 있으면 값을 바꾼다. 빈 이름은 InvalidArgument, 할당 실패면 표를 바꾸지 않는다.
+    // 같은 이름(ASCII 대소문자 무시)이 있으면 값을 바꾼다. 빈 이름은 InvalidArgument, 할당 실패면
+    // 표를 바꾸지 않는다.
     // 바꿀 때마다 Revision이 오른다(등록부를 쓰는 Application이 배치·그리기를 다시 한다).
     template <typename T>
     Result<void> Set(StringView name, const T& value) noexcept {

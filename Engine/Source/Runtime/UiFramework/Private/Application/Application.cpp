@@ -101,7 +101,7 @@ const SharedPtr<Element>& Application::GetRoot() const noexcept {
 
 UiHostServices* Application::EnsureHostServices() noexcept {
     if (!host_) {
-        auto made = SharedPtr<UiHostServices>::TryMake(allocator_);
+        auto made = SharedPtr<UiHostServices>::TryMake(allocator_, allocator_);
         if (!made) {
             return nullptr;
         }
@@ -205,12 +205,9 @@ const FrameTime& Application::GetFrameTime() const noexcept {
 
 void Application::SetStyleRegistry(SharedPtr<StyleRegistry> registry) noexcept {
     styles_ = Move(registry);
-    UiHostServices* host = EnsureHostServices();
-    if (host) {
-        host->SetStyles(styles_,
-                        styles_ ? styles_->FindSet(appStyleName_.IsEmpty() ? CoreStyleName
-                                                                           : appStyleName_.View())
-                                : SharedPtr<StyleSet>{});
+    if (UiHostServices* host = EnsureHostServices()) {
+        (void)host->SetStyles(styles_,
+                              appStyleName_.IsEmpty() ? CoreStyleName : appStyleName_.View());
     }
 }
 
@@ -233,8 +230,7 @@ Result<void> Application::SetAppStyle(StringView name) noexcept {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
-    host->SetStyles(styles_, Move(set));
-    return Result<void>::Success();
+    return host->SetStyles(styles_, name);
 }
 
 namespace {

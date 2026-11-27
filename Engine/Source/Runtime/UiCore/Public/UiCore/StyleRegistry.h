@@ -27,6 +27,9 @@ public:
     Result<void> Register(StringView name, const SharedPtr<StyleSet>& set) noexcept;
     void Unregister(StringView name) noexcept;
     SharedPtr<StyleSet> FindSet(StringView name) const noexcept;
+    // 소유권 없이 찾는다(다음 Register·Unregister 전까지 유효). 이름은 ASCII 대소문자를 가리지
+    // 않는다.
+    const StyleSet* FindSetRaw(StringView name) const noexcept;
 
     // set에서 시작해 부모로 올라가며 name을 찾는다. 없으면 nullptr이다.
     template <typename T>
@@ -44,7 +47,8 @@ public:
         return nullptr;
     }
 
-    // 등록·해제와 등록된 집합의 값 변경을 모두 센다.
+    // 등록·해제와 등록된 집합의 값 변경을 모두 센다. 늘 늘어나기만 한다 — 집합을 바꾸거나 빼면 그
+    // 집합의 revision을 기준값에 접어 넣는다(합이 줄지 않게).
     uint64 Revision() const noexcept;
 
 private:
@@ -52,8 +56,6 @@ private:
         String name;
         SharedPtr<StyleSet> set;
     };
-
-    const StyleSet* FindSetRaw(StringView name) const noexcept;
 
     Allocator& allocator_;
     Array<Entry> sets_;

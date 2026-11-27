@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
+#include <UiCore/Styles/GameWidgetStyles.h>
 #include <UiFramework/Controls/Button.h>
 #include <UiFramework/Controls/Slider.h>
 #include <UiWidget/BorderWidget.generated.h>

@@ -142,9 +142,9 @@ Result<void> ProgressBar::SetStyle(const ProgressBarStyle& style) noexcept {
 
 void ProgressBar::ApplyStyles(const UiHostServices& host) noexcept {
     if (!styleExplicit_) {
-        if (const ProgressBarStyle* style = host.FindStyle<ProgressBarStyle>("ProgressBar")) {
-            (void)ApplyStyle(*style);
-        }
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
+        const ProgressBarStyle* style = host.FindStyle<ProgressBarStyle>("ProgressBar");
+        (void)ApplyStyle(style ? *style : DefaultProgressBarStyle());
     }
 }
 

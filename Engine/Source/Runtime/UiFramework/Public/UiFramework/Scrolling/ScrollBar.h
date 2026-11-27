@@ -40,7 +40,7 @@ public:
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnPointerCaptureLost(PointerSource source, uint32 user, uint32 pointer) noexcept override;
     // 손잡이·트랙 모양이다(UE FScrollBarStyle — 기본 "Scrollbar"). 올림·끌기 상태가 있다.
-    // 명시 스타일이다. 부르지 않으면 활성 앱 스타일의 "ScrollBar"(없으면
+    // 명시 스타일이다. 부르지 않으면 활성 앱 스타일의 "Scrollbar"(없으면
     // DefaultScrollBarStyle)다(20.11절).
     Result<void> SetStyle(const ScrollBarStyle& style) noexcept;
     const ScrollBarStyle& GetStyle() const noexcept;

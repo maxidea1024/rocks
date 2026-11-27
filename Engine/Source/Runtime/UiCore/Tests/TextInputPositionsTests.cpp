@@ -93,8 +93,8 @@ TEST(UiCore_TextInputServiceIsFoundFromTheNearestAncestor) {
     REQUIRE(middle.Value()->TryAddChild(leaf.Value()));
     CHECK(!leaf.Value()->FindTextInputService());
 
-    auto outerHost = SharedPtr<UiHostServices>::TryMake(allocator);
-    auto innerHost = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto outerHost = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
+    auto innerHost = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
     REQUIRE(outerHost && innerHost);
     outerHost.Value()->SetTextInputService(outer.Value());
     innerHost.Value()->SetTextInputService(inner.Value());

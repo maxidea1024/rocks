@@ -363,9 +363,9 @@ Result<void> Slider::SetStyle(const SliderStyle& style) noexcept {
 
 void Slider::ApplyStyles(const UiHostServices& host) noexcept {
     if (!styleExplicit_) {
-        if (const SliderStyle* style = host.FindStyle<SliderStyle>("Slider")) {
-            (void)ApplyStyle(*style);
-        }
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
+        const SliderStyle* style = host.FindStyle<SliderStyle>("Slider");
+        (void)ApplyStyle(style ? *style : DefaultSliderStyle());
     }
 }
 
@@ -385,7 +385,14 @@ Result<void> Slider::ApplyStyle(const SliderStyle& style) noexcept {
     }
 
     if (style_ != style) {
+        // 막대 두께·손잡이 크기는 원하는 크기에 들어간다.
+        const bool resized =
+            style_.barThickness != style.barThickness || style_.thumbSize != style.thumbSize;
         style_ = style;
+        if (resized) {
+            InvalidateLayout();
+        }
+
         InvalidatePaint();
     }
 

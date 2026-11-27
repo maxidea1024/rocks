@@ -2,6 +2,9 @@
 
 namespace rocks::ui {
 
+UiHostServices::UiHostServices(Allocator& allocator) noexcept : appStyle_(allocator) {
+}
+
 void UiHostServices::SetPopupWorkArea(PopupWorkArea&& provider) noexcept {
     popupWorkArea_ = Move(provider);
 }
@@ -26,11 +29,16 @@ const FrameTime& UiHostServices::Time() const noexcept {
     return time_;
 }
 
-void UiHostServices::SetStyles(SharedPtr<StyleRegistry> registry,
-                               SharedPtr<StyleSet> appStyle) noexcept {
+Result<void> UiHostServices::SetStyles(SharedPtr<StyleRegistry> registry,
+                                       StringView appStyle) noexcept {
+    if (auto assigned = appStyle_.TryAssign(appStyle); !assigned) {
+        return assigned;
+    }
+
+    // 빠지는 등록부의 revision을 접어 넣어 합이 줄지 않게 한다.
+    styleChanges_ += 1 + (registry_ ? registry_->Revision() : 0);
     registry_ = Move(registry);
-    appStyle_ = Move(appStyle);
-    ++styleChanges_;
+    return Result<void>::Success();
 }
 
 uint64 UiHostServices::StyleRevision() const noexcept {

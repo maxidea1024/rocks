@@ -160,9 +160,9 @@ Result<void> ScrollBar::SetStyle(const ScrollBarStyle& style) noexcept {
 
 void ScrollBar::ApplyStyles(const UiHostServices& host) noexcept {
     if (!styleExplicit_) {
-        if (const ScrollBarStyle* style = host.FindStyle<ScrollBarStyle>("ScrollBar")) {
-            (void)ApplyStyle(*style);
-        }
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
+        const ScrollBarStyle* style = host.FindStyle<ScrollBarStyle>("Scrollbar");
+        (void)ApplyStyle(style ? *style : DefaultScrollBarStyle());
     }
 }
 

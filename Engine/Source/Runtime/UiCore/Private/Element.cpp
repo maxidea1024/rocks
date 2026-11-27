@@ -617,6 +617,19 @@ Result<void> Element::Prepass(float scale) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 스타일이 바뀌었거나 처음 측정이면 활성 집합의 스타일을 받는다(20.11절). 측정이 깨끗해도 먼저
+    // 본다 — 깨끗한 하위 트리가 다른 집합의 앱으로 옮겨지거나(창 사이 탭 이동) 루트로 다시 붙을 수
+    // 있다. 받으면 자기와 자식을 다시 측정한다(자식도 같은 확인을 한다).
+    if (const UiHostServices* host = FindUiHostServices()) {
+        const uint64 revision = host->StyleRevision();
+        if (revision != styleRevision_) {
+            styleRevision_ = revision;
+            ApplyStyles(*host);
+            layoutDirty_ = true;
+            measureChildren_ = true;
+        }
+    }
+
     if (!layoutDirty_ && !measureChildren_ && measuredScale_ == scale) {
         return Result<void>::Success();
     }
@@ -625,15 +638,6 @@ Result<void> Element::Prepass(float scale) noexcept {
     if (scale != measuredScale_) {
         layoutDirty_ = true;
         InvalidatePaintPlan();
-    }
-
-    // 스타일이 바뀌었거나 처음 측정이면 활성 집합의 스타일을 받는다(20.11절).
-    if (const UiHostServices* host = FindUiHostServices()) {
-        const uint64 revision = host->StyleRevision();
-        if (revision != styleRevision_) {
-            styleRevision_ = revision;
-            ApplyStyles(*host);
-        }
     }
 
     if (visibility_ == Visibility::Collapsed) {

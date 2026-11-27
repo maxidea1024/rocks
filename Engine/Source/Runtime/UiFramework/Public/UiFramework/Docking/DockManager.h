@@ -4,6 +4,7 @@
 #include <Core/Delegate.h>
 #include <Core/Text/String.h>
 #include <UiCore/Element.h>
+#include <UiCore/Styles/CoreStyles.h>
 
 namespace rocks::ui {
 
@@ -121,6 +122,9 @@ public:
     void OnPointerCaptureLost(PointerSource source, uint32 user, uint32 pointer) noexcept override;
 
 private:
+    // 활성 앱 스타일의 "Docking.Tab"이다(측정·그리기가 같은 값을 쓰게 Prepass에서 받는다
+    // — 20.11절).
+    void ApplyStyles(const UiHostServices& host) noexcept override;
     enum class Kind : uint8 {
         Stack,
         Horizontal,
@@ -181,6 +185,7 @@ private:
     void EndDrag() noexcept;
 
     Allocator& allocator_;
+    DockTabStyle tabStyle_ = DefaultDockTabStyle();
     Array<Tab> tabs_;
     SlotArray<Node> nodes_;
     Array<SharedPtr<Element>> visible_;

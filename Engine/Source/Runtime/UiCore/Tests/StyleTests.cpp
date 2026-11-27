@@ -104,7 +104,9 @@ TEST(UiCore_StyleSetFindsReplacesAndFallsBack) {
             styles.Find<ButtonStyle>("SimpleButton"));
     CHECK(*styles.Find<ButtonStyle>("PrimaryButton") == PrimaryButtonStyle());
     // 이름은 대소문자를 가리고, 없는 이름은 nullptr다(부품의 내장 기본값은 부품이 쓴다).
-    CHECK(styles.Find<ButtonStyle>("button") == nullptr);
+    // UE FName처럼 ASCII 대소문자를 가리지 않는다.
+    CHECK(styles.Find<ButtonStyle>("button") == styles.Find<ButtonStyle>("Button"));
+    CHECK(styles.Find<ScrollBarStyle>("ScrollBar") == styles.Find<ScrollBarStyle>("Scrollbar"));
     CHECK(!styles.Find<ButtonStyle>("Missing"));
     CHECK(!styles.Find<TextStyle>("Missing"));
     // 같은 이름은 값을 바꾸고, 빈 이름은 거부한다.
@@ -168,8 +170,8 @@ TEST(UiCore_GameWidgetStylesMatchUmgCoreStyle) {
     CHECK(noBorder.pressedPadding == Vec4(0, 1, 0, 0));
     CHECK(noBorder.normalForeground == ColorRef{ColorSource::Foreground});
     // 238–243·266–267행 글자: Regular 10·8, 색 상속.
-    CHECK(GameNormalTextStyle().font == FontStyle{Typeface::Regular, 10});
-    CHECK(GameSmallTextStyle().font == FontStyle{Typeface::Regular, 8});
+    CHECK((GameNormalTextStyle().font == FontStyle{Typeface::Regular, 10}));
+    CHECK((GameSmallTextStyle().font == FontStyle{Typeface::Regular, 8}));
     CHECK(GameNormalTextStyle().color == ColorRef{ColorSource::Foreground});
     // 722–730행 Slider: 막대 흰색(비활성 Gray 0.5 — Color.cpp 18행), 두께 2, 손잡이 8×14.
     const SliderStyle& slider = GameSliderStyle();
@@ -197,7 +199,7 @@ TEST(UiCore_GameWidgetStyleSetHasNoParentAndOnlyPortableKeys) {
     CHECK(!game.Find<ButtonStyle>("PrimaryButton"));
     CHECK(!game.Find<CheckBoxStyle>("Checkbox"));
     CHECK(!game.Find<ProgressBarStyle>("ProgressBar"));
-    CHECK(!game.Find<ScrollBarStyle>("ScrollBar"));
+    CHECK(!game.Find<ScrollBarStyle>("Scrollbar"));
     CHECK(!game.Find<WindowStyle>("Window"));
 }
 

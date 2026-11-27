@@ -123,9 +123,9 @@ Result<void> Button::SetStyle(const ButtonStyle& style) noexcept {
 
 void Button::ApplyStyles(const UiHostServices& host) noexcept {
     if (!styleExplicit_) {
-        if (const ButtonStyle* style = host.FindStyle<ButtonStyle>("Button")) {
-            (void)ApplyStyle(*style);
-        }
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
+        const ButtonStyle* style = host.FindStyle<ButtonStyle>("Button");
+        (void)ApplyStyle(style ? *style : DefaultButtonStyle());
     }
 }
 

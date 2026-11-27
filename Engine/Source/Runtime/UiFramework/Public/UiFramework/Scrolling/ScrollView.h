@@ -65,10 +65,13 @@ public:
     float GetMaxScrollOffset() const noexcept;
 
 private:
+    // 활성 앱 스타일의 "Scrollbar"이다(그리기가 측정 때 받은 값을 쓰게 — 20.11절).
+    void ApplyStyles(const UiHostServices& host) noexcept override;
     bool GetTrack(Vec2& position, Vec2& size) const noexcept;
     bool GetThumb(Vec2& position, Vec2& size) const noexcept;
     bool ToLocal(Vec2 position, Vec2& local) const noexcept;
 
+    ScrollBarStyle barStyle_ = DefaultScrollBarStyle();
     StackDirection direction_;
     float offset_ = 0;
     float maxOffset_ = 0;

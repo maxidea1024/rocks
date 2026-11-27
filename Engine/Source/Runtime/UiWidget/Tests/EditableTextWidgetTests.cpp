@@ -392,7 +392,7 @@ TEST(UiWidget_EditableTextInputContextFollowsPlatformOrder) {
     live.Value().Reset();
     auto orphan = widget->TakeElement(objects);
     REQUIRE(orphan);
-    auto orphanHost = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto orphanHost = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
     REQUIRE(orphanHost);
     orphanHost.Value()->SetTextInputService(service.Value());
     REQUIRE(orphan.Value()->SetUiHostServices(orphanHost.Value()));

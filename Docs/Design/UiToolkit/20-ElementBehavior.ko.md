@@ -165,7 +165,7 @@
   - `UiHostServices`가 활성 집합 이름과 집합 revision을 든다. 기본은 `CoreStyle`이다.
   - 에디터 호스트는 `EditorStyle`(부모 `CoreStyle`)로 바꾼다. 게임 Widget 기본은 `GameWidgetStyle`(UMGCoreStyle)이다.
 - **조회 시점.** 측정·배치·그리기 모두 같은 값을 써야 한다. 크기를 정하는 여백·글꼴이 측정과 그리기에서 달라지면 안 되기 때문이다.
-  - 부품의 `Args::style`이 nullptr이면 부품은 처음 측정될 때 `FindUiHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 그 주소를 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다.
+  - 부품의 `Args::style`(`Optional`)이 비었으면 부품은 처음 측정될 때 `FindUiHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 값을 복사해 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다. 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
   - 집합 revision이 바뀌면(집합 교체·값 변경) `Application`이 테마 revision처럼 전체 Layout·그리기 cache를 무효화한다. 부품은 다음 측정 때 다시 찾는다.
 - **형식별 표.** 지금 있는 스타일 구조체 전부를 표로 둔다: 버튼, 체크, 텍스트, 편집 텍스트, 스크롤 막대, 진행 막대, 슬라이더, 콤보, 표 머리, 독 탭, 창, 메뉴, 툴팁. 색·brush·실수·여백 표도 둔다.
 - **구현(UW8h1).**
@@ -173,6 +173,14 @@
   - 기본 함수를 그 자리에서 부르던 곳(독 탭 크기, 스크롤 막대, 메뉴·제목 막대 툴팁 글꼴)은 `Element::FindStyle(키, 기본값)`으로 그 자리에서 찾는다.
   - revision이 바뀌면 `Application`이 테마 revision을 올리고 트리 전체 측정을 다시 하게 한다(`SyncStyleRevision`).
   - 한계: `ToolTip`은 생성 때(트리에 붙기 전) 스타일로 부분을 짜므로 아직 활성 집합을 쓰지 않는다(툴팁 factory가 명시 스타일을 넘긴다). Widget 층(`ButtonWidget` 등)은 늘 명시 스타일을 넘긴다 — 게임 Widget 기본 집합(`GameWidgetStyle`)은 UW8h2에서 Widget 기본값의 출처로 맞춘다.
+- **리뷰 반영(UW8h).**
+  - 이름은 UE `FName`처럼 ASCII 대소문자를 가리지 않는다. UE도 "Scrollbar"로 등록하고 "ScrollBar"로 찾는다(StarshipCoreStyle.cpp 194행, StarshipStyle.cpp 170행). Rocks 등록 철자는 UE 철자 "Scrollbar"다.
+  - `UiHostServices`는 활성 집합을 포인터가 아니라 이름으로 들고, 찾을 때마다 등록부에서 푼다. 같은 이름으로 다시 등록한 집합을 본다.
+  - revision은 늘어나기만 한다. 집합을 바꾸거나 빼거나 등록부를 바꾸면, 빠지는 쪽의 revision을 기준값에 접어 넣는다. 합이 같아져 무효화를 놓치는 일을 막는다.
+  - `Element::Prepass`는 측정이 깨끗해도 스타일 revision을 먼저 본다. 깨끗한 하위 트리가 다른 앱으로 옮겨지거나 루트로 다시 붙는 경우 때문이다. 다르면 다시 받고 자기와 자식을 다시 측정한다.
+  - 그리기 때 즉석 조회하던 독 탭·스크롤 막대 스타일은 `ApplyStyles`에서 받아 둔다(측정·그리기 같은 값).
+  - `Slider`는 막대 두께·손잡이 크기가 바뀌면 Layout을 무효화한다.
+  - 857ad29dc는 `CoreStyles.h` include가 빠져 그 커밋만으로는 빌드되지 않는다(a4cb3110d에서 해결 — bisect 주의).
 - **두 단계.**
   - UW8h1은 등록부·앱 스타일·조회·무효화와 `CoreStyle`의 지금 값(함수 기본값 옮김)이다.
   - UW8h2는 세 집합 값을 4.2절 출처(StarshipCoreStyle.cpp, StarshipStyle.cpp, UMGCoreStyle.cpp)에서 옮기고 출처 행 대조 시험을 단다(UV8 일부). Rocks 구조체가 없는 항목은 15장 빈칸 목록에 남긴다.

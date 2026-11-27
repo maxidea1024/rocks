@@ -36,8 +36,8 @@ const ButtonStyle& GameNoBorderButtonStyle() noexcept {
     // 307–312행: brush 없음, 여백 (0,0,0,1)·(0,1,0,0), 전경은 상속이다.
     static const ButtonStyle style = [] {
         ButtonStyle noBorder;
-        noBorder.normalPadding = {0.0f, 0.0f, 0.0f, 1.0f};
-        noBorder.pressedPadding = {0.0f, 1.0f, 0.0f, 0.0f};
+        noBorder.normalPadding = GameNoBorderPadding;
+        noBorder.pressedPadding = GameNoBorderPressedPadding;
         return noBorder;
     }();
     return style;

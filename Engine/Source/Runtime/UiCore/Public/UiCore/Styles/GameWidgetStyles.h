@@ -21,6 +21,9 @@ inline constexpr LinearColor GameForegroundHoverColor{0.0f, 1.0f, 1.0f, 1.0f};
 // 슬라이더 막대 색이다(FColor::White, FLinearColor::Gray — Color.cpp 18행).
 inline constexpr LinearColor GameSliderBarColor{1.0f, 1.0f, 1.0f, 1.0f};
 inline constexpr LinearColor GameSliderDisabledBarColor{0.5f, 0.5f, 0.5f, 1.0f};
+// NoBorder 보통·눌림 여백이다(310–311행).
+inline constexpr Vec4 GameNoBorderPadding{0.0f, 0.0f, 0.0f, 1.0f};
+inline constexpr Vec4 GameNoBorderPressedPadding{0.0f, 1.0f, 0.0f, 0.0f};
 // 버튼 brush 크기(Icon32x32)·반경, 슬라이더 막대 두께·손잡이 크기다(407–409·722–730행).
 inline constexpr Vec2 GameButtonImageSize{32.0f, 32.0f};
 inline constexpr float GameButtonCornerRadius = 4.0f;

@@ -225,7 +225,7 @@ TEST(UiCore_SurfaceRecorderRedrawsRetainedOnlyWhenNeeded) {
     SurfaceRecorder recorder(allocator, renderer);
     UiDrawBuffer buffer(allocator);
     // 루트에 단 묶음의 프레임 시각이 장면 진행에 간다(20.3절).
-    auto host = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto host = SharedPtr<UiHostServices>::TryMake(allocator, allocator);
     REQUIRE(host);
     host.Value()->SetFrameTime({3.0, 0.5});
     REQUIRE(tree.root->SetUiHostServices(host.Value()));
