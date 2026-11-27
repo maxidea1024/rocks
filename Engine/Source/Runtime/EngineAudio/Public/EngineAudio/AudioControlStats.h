@@ -7,17 +7,27 @@
 namespace rocks {
 
 struct AudioControlStats {
-    // 지금 voice를 쥔 재생 수(놓기 대기 제외)와 놓기 대기 voice 수.
+    // voice 상한에 세는 voice 수(정지 fade 중 제외 — 3.41.1절), 정지·steal fade 중이거나 재생에서
+    // 떼어 낸 voice 수, 놓기 대기 voice 수.
     uint32 activeVoices = 0;
+    uint32 stoppingVoices = 0;
     uint32 releasingVoices = 0;
+    // 지금 voice 없이 살아 있는 재생 수(상한 밖 loop·remainActive, 무음 loop — 3.41.1절).
+    uint32 voicelessPlaybacks = 0;
     // 등록된 clip 수(해제 대기 포함).
     uint32 registeredClips = 0;
     // 명령 링이 차서 미룬 Play 수(누계)와 지금 미룬 수.
     uint64 deferredPlays = 0;
     uint32 pendingDeferred = 0;
-    // voice 상한·clip 실패로 끝낸 재생 수(누계).
+    // 상한 밖이라 시작하지 못한 새 one-shot 수, clip 실패로 끝낸 재생 수(누계).
     uint64 voiceLimitRejects = 0;
     uint64 failedPlays = 0;
+    // 상한으로 voice를 빼앗은 수, 들리지 않아 끝낸 재생 수, 복귀 때 voice·슬롯을 얻지 못한 수,
+    // 여유가 없어 정지 fade 중 voice를 짧게 끊은 수(누계 — 3.41.1절).
+    uint64 voiceSteals = 0;
+    uint64 inaudibleEnds = 0;
+    uint64 resumeFailures = 0;
+    uint64 headroomCuts = 0;
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;

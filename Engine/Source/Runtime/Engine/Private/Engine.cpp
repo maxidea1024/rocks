@@ -216,7 +216,7 @@ void Engine::RequestExit() noexcept {
 }
 
 Engine::Engine(Allocator& allocator) noexcept
-    : allocator_(allocator), subsystems_(allocator), worlds_(allocator) {
+    : allocator_(allocator), pendingWork_(allocator), subsystems_(allocator), worlds_(allocator) {
 }
 
 Engine::~Engine() {
@@ -259,6 +259,12 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     state_ = EngineState::Initializing;
     config_ = config;
     ownerThread_ = platform::CurrentThreadId();
+    // 대기 작업 등록소도 이 스레드가 소유한다(등록이 없을 때만 바뀐다). 못 바꾸면 프레임마다
+    // ApplyCompleted가 WrongThread가 되므로 알린다.
+    if (auto adopted = pendingWork_.AdoptCurrentThread(); !adopted) {
+        Log::Error(LogEngine, "Pending work registry kept its previous owner thread: {Error}",
+                   ErrorCodeName(adopted.Error()));
+    }
     // 크래시 기록의 단계 이름이다(설계 LC6). 프레임마다가 아니라 단계가 바뀔 때만 쓴다.
     platform::SetRunPhase(platform::RunPhase::Startup, EngineStageInitialize);
     // 실패를 확정하는 곳이 여기라 한 번만 기록한다(호스트는 다시 기록하지 않는다).
@@ -904,6 +910,11 @@ Result<void> Engine::RunFrame() noexcept {
 
     {
         ObjectAccessScope scope(objects_->OwnerAccess());
+        // 3-1) 비동기 빌드의 끝난 결과를 Subsystem Tick 전에 프레임 예산 안에서 적용한다
+        //      (Docs/Design/ProgressReporting 8장, UE FAssetCompilingManager::ProcessAsyncTasks).
+        PendingWorkPumpParams pump;
+        pump.timeBudgetNanoseconds = PendingWorkFrameBudgetNanoseconds;
+        (void)pendingWork_.ApplyCompleted(pump);
         for (usize index = 0; index < subsystems_.Count(); ++index) {
             subsystems_.At(index)->OnFrameBegin(*this);
         }
@@ -1038,6 +1049,8 @@ Result<void> Engine::Shutdown() noexcept {
         WarnIfCrashFilterReplaced();
         Log::Info(LogEngine, "Engine shutting down with {Worlds} worlds after {Frames} frames",
                   static_cast<uint32>(worlds_.Size()), time_.frameIndex);
+        // 비동기 빌드의 남은 일을 먼저 취소하고 안전해질 때까지 기다린다(Subsystem이 내려가기 전).
+        pendingWork_.Shutdown();
     }
 
     const char* failedStage = "ShutdownHooks";

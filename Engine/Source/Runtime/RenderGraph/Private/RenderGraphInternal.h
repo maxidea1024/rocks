@@ -389,6 +389,14 @@ struct ConstantRecord {
     SlotHandle device;
 };
 
+// 그래프가 그리는 스왑체인 하나다(AddPass가 적는다). 스왑체인 pass는 culling 뿌리라 lastPass가
+// 실행에서도 그 스왑체인의 마지막 pass다(RenderBase 8절 "스왑체인 공유 설계").
+struct SwapChainUse {
+    graphics::SwapChainHandle swapChain;
+    uint32 firstPass = GraphIndexNone;
+    uint32 lastPass = GraphIndexNone;
+};
+
 // 오류 문구 버퍼 크기다(영어 진단 문구 하나).
 inline constexpr usize GraphErrorMessageBytes = 256;
 
@@ -416,6 +424,8 @@ struct GraphState {
     ArenaArray<ViewRecord> views;
     ArenaArray<ConstantRecord> constants;
     ArenaArray<ScopeRecord> scopes;
+    // 그래프가 그리는 스왑체인이다(처음 쓴 순서).
+    ArenaArray<SwapChainUse> swapChains;
     // 선언 중 지금 열린 가장 안쪽 구간이다.
     uint32 currentScope = GraphIndexNone;
     // 실행 중 열린 구간 사슬과 지금 장치 기록에 push한 구간 marker 수다.
@@ -462,6 +472,8 @@ struct GraphState {
     bool traceFrameOpen = false;
     // 지금 장치 기록을 연 Raster pass다(attachment 없는 기록·기록 없음이면 None).
     uint32 recordingPass = GraphIndexNone;
+    // 지금 장치 기록이 닫힐 때 present한다(스왑체인의 마지막 pass가 연 기록).
+    bool recordingPresents = false;
     // Deferred 실행에서 다음에 낼 전이 기록 번호다.
     usize nextTransition = 0;
 

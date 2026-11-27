@@ -373,7 +373,7 @@ void ScreenRenderer::RenderInspector(render::RenderFrameContext& context,
     };
     render::RenderGraph graph(render::MakeRenderGraphDesc(context, *pool_));
     render::GraphPassAccesses present(graph);
-    present.SwapChainTarget(swapChain_, packet.clear);
+    present.SwapChainTarget(swapChain_, render::GraphLoadAction::Clear, packet.clear);
     (void)graph.AddFullscreenPass(InspectorName, render::GraphPassFlags::None, present, *cache_,
                                   inspectorRequests_[view], bind);
     graphics::TextureHandle captureTexture;
@@ -506,7 +506,7 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
     };
     render::GraphPassAccesses present(graph);
     present.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
-        .SwapChainTarget(renderer.swapChain_, packet.clear);
+        .SwapChainTarget(renderer.swapChain_, render::GraphLoadAction::Clear, packet.clear);
     (void)graph.AddFullscreenPass(TonemapName, render::GraphPassFlags::None, present,
                                   *renderer.cache_, renderer.tonemapRequest_, bindTonemap);
     graphics::TextureHandle captureTexture;

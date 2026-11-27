@@ -67,10 +67,21 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 **swizzle의 뜻과 적용(2026-11-25 에셋 세션 합의, 개정 48).** 메타의 swizzle은 UE sampler type 계약 데이터다(단일 채널 복제, 노멀 채널 배치 — AssetSystem 12.4.3·12.16.4절). 렌더는 이것을 view swizzle로 적용하지 않는다.
 - 텍스처 view swizzle은 늘 항등이다(`TextureDesc::swizzle` 기본값). 셰이더가 sampler type에 따라 복제한다. UE도 같다: 머티리얼 셰이더가 sampler type별 함수로 단일 채널을 복제한다(`Engine/Shaders/Private/MaterialTexture.ush:168–204`, sampler type은 `MaterialExpressionUtils.cpp` `GetSamplerTypeForTexture`).
-- 값: Grayscale·LinearGrayscale·Alpha·DistanceFieldFont는 `.rrrr`이다. Color sampler(Displacementmap·HalfFloat·SingleFloat 포함)는 복제하지 않는다(r001 — 형식 규칙대로 읽은 값 그대로).
+- 값(개정 63 — AssetSystem 12.4.3절 표, TC2): swizzle은 CompressionSettings만으로 정해지고 출력 형식과 무관하다.
+  - Grayscale·LinearGrayscale·Alpha·DistanceFieldFont는 `.rrrr`이다.
+  - Displacementmap은 `r001`이다. Color sampler라 복제하지 않는다(형식 규칙대로 읽은 값 그대로 — 단일 채널 형식은 장치가 이미 (r, 0, 0, 1)로 읽는다).
+  - Normalmap은 `rg01`이다(BC5와 비압축 대체 BGRA8·RGBA8 모두). Normal sampler다: 셰이더가 x·y를 [-1, 1]로 펴고 z = sqrt(saturate(1 − x² − y²))로 복원한다. UE `UnpackNormalMap`(`Engine/Shaders/Private/Common.ush:1698–1711`)과 같은 뜻이고, 머티리얼은 sampler type `SAMPLERTYPE_Normal`에서 그것을 부른다(`MaterialTexture.ush:227`, `HLSLMaterialTranslator.cpp:6953–6955`). BGRA8 대체의 B 채널(쿠킹이 남긴 z)은 읽지 않는다.
+  - 다른 설정(Default·Masks·HDR류·HalfFloat·SingleFloat·BC7·EditorIcon)은 항등이다.
 - 이유: D3D11에는 view swizzle이 없다(`DeviceFeatures::textureViewSwizzle`). view swizzle을 쓰면 backend마다 결과가 갈리거나, 셰이더 복제와 겹쳐 두 번 적용된다.
-- 셰이더 공용 함수는 `/Engine/Private/Material/MaterialTextureSampling.rsh`(엔진 셰이더 A05)다. sampler type 함수(`ReplicateRedChannel`)와 쿠킹 swizzle 값을 그대로 받는 함수(`ApplyCookedChannelSwizzle` — 텍스처 표시처럼 sampler type 대신 메타를 읽는 도구용)를 둔다. 머티리얼 생성 코드는 sampler type 함수를 쓴다(MS 단계).
+- 셰이더 공용 함수는 `/Engine/Private/Material/MaterialTextureSampling.rsh`(엔진 셰이더 A05)다. sampler type 함수(`ReplicateRedChannel`, 노멀 맵 법선 복원 `DecodeTangentNormal` — 개정 63)와 쿠킹 swizzle 값을 그대로 받는 함수(`ApplyCookedChannelSwizzle` — 텍스처 표시처럼 sampler type 대신 메타를 읽는 도구용)를 둔다. 머티리얼 생성 코드는 sampler type 함수를 쓴다(MS 단계).
+- 텍스처 표시(`Debug/TextureInspector.rsf`)는 swizzle이 `rg01`이면 노멀 맵으로 보고, swizzle 뒤 `DecodeTangentNormal`로 복원한 법선 n을 n × 0.5 + 0.5 색으로 보인다(표시 방식 `Normal`, 개정 63). UE 텍스처 편집기 미리보기와 같은 표시다(`SimpleElementTexture2DPreviewPixelShader.usf:115–121` — `UnpackNormalMap` 뒤 `Normal.xyz * 0.5 + 0.5`). `rg01`은 Normalmap에만 쓰이므로 표시 쪽이 따로 CompressionSettings를 받지 않는다.
 - `TextureDesc::swizzle`(view swizzle) 기능 자체는 장치 계약에 남는다(D3D12·Vulkan·GLES 시험, A0-G). 쿠킹 텍스처 경로가 쓰지 않을 뿐이다.
+
+**블록 압축 형식과 비압축 대체(개정 63 — 에셋 빌드 TC2, AssetSystem 12.17.5절·12.16절).** 쿠킹 형식은 에셋 빌드가 정하고 렌더 업로드는 받은 형식을 그대로 올린다(압축 해제·채널 재배치 없음).
+- 데스크톱(Windows·Mac) 쿠킹: 최상위 mip 두 변이 4의 배수면 Default·Masks → BC1·BC3(원본 알파로 고르는 AutoDXT — sRGB는 `BC1UnormSrgb`·`BC3UnormSrgb`), Normalmap → `BC5Unorm`, Alpha → `BC4Unorm`이다. BC6H·BC7은 TC3 전까지 `RGBA16Float`·`BGRA8Unorm(Srgb)` 대체다(`EncoderUnavailable` 경고).
+- 4보다 작은 아래 mip도 같은 블록 형식이다. 블록 하나이고 크기는 위 "바이트 배치" 공식(블록 수 올림)이다. 블록 배수 검사는 최상위 mip에만 한다(아래 "BC 최상위 블록 배수 아님").
+- 비압축 대체는 UE와 같다: 4채널 8비트는 `BGRA8Unorm(Srgb)`(byte 순서 B, G, R, A — 장치 형식이 BGRA8이라 셰이더는 (r, g, b, a)로 읽는다), float 원본은 `RGBA16Float`, Grayscale·Displacementmap·DistanceFieldFont의 회색 원본은 `R8Unorm`·`R16Unorm`, 회색 원본 + sRGB는 `BGRA8UnormSrgb`다. 전 판의 RG8·RG16·`RGBA16Unorm`·`RGBA8` 기본 출력은 없어졌다.
+- Android(TC4 전)는 비압축이다. GLES는 BGRA8 샘플링 보장이 없어 `RGBA8Unorm(Srgb)` 대체(`PlatformFormatFallback` 경고)다. Windows 쿠킹은 GLES 대상이 아니다: Windows의 GLES 미리보기 장치가 BC를 샘플링할 수 있으면 그대로 그리고, 못 하면 `UnsupportedCapability`다(self-test는 NOT RUN 사유 — 18.5절 7항).
 
 **렌더 쪽 검사.** 텍스처를 만들 때 다음을 확인한다(구현은 아래 "업로드").
 - 메타의 mip 크기·바이트 크기가 위 공식과 맞는지. 다르면 `CorruptEntry`다.
@@ -88,7 +99,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 패키지 게시에서 시작한다: 쿠킹 텍스처에는 PostLoad hook이 없고(AssetSystem 12.15절 A5k), 샘플러도 쿠킹 때 정해진다. 그래서 업로드는 AssetManager 준비 callback(패키지 공개) 뒤 게임 lane이 낸다(`TextureRenderCache::Update`). 상주 수명은 그 lease가 정한다(lease를 놓기 전에 handle을 `Retire`한다).
 - CPU Availability 텍스처(AssetSystem 12.4.1절)는 쿠킹 mip을 올리지 않는다. 그리는 쪽이 내장 검정 2D(`BuiltinTexture::Black2D`)로 대체한다(UE는 쿠킹 때 작은 검정 placeholder를 GPU에 둔다 — `Engine/Private/Texture.cpp:4477–4481`). Availability는 에셋 칸이라 변환 층이 본다.
 
-**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 에셋 세션과 함께 확정한다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](../PixelFormat/05-FormatList.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.
+**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 에셋 세션 압축 단계(AssetSystem 12.17절 TC1–TC5)가 정한다 — BC1·BC3·BC4·BC5는 TC2에서 들어왔고(위 "블록 압축 형식과 비압축 대체"), BC6H·BC7(TC3)·Android ASTC(TC4)가 남았다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](../PixelFormat/05-FormatList.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.
 
 ### 6.6 손상 데이터 오류(`CorruptData`, 개정 58)
 

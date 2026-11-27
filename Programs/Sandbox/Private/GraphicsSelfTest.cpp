@@ -23,6 +23,7 @@
 #include "MsaaSelfTest.h"
 #include "SliceAttachmentSelfTest.h"
 #include "StorageTargetSelfTest.h"
+#include "SwapChainShareSelfTest.h"
 #include "ViewDimensionSelfTest.h"
 #include "TextureViewSelfTest.h"
 #include "TransientHeapSelfTest.h"
@@ -790,6 +791,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 스왑체인 공유: 한 그래프의 스왑체인 pass 둘이 백버퍼 하나에 그리고 present는 하나다.
+    failures += RunSwapChainShareChecks(name, device, result.triangle.GetAllocator());
     // 렌더 쪽 compute(GX3·GX4 compute 연결): 파이프라인 캐시·그래프 버퍼 view·직접·간접 dispatch.
     failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
     // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.

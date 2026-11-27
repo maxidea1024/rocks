@@ -108,7 +108,7 @@ internal static class IspcTests
         NativeAction ispc = plan.Actions.Single(action => action.Kind == "Ispc");
         string[] expected =
         [
-            .. IspcTools.Arguments(kernel.Toolchain.Platform, kernel.Toolchain.Architecture), "-I", Path.Combine(fixture, "kernel"), source,
+            .. IspcTools.Arguments(kernel.Toolchain.Platform, kernel.Toolchain.Architecture), "--werror", "-I", Path.Combine(fixture, "kernel"), source,
             "-o", "{OUTPUT0}", "-h", "{OUTPUT1}", "-MMM", NativeAction.DepfilePlaceholder
         ];
         Check(ispc.Arguments.SequenceEqual(expected), "Ispc arguments:\n" + string.Join('\n', ispc.Arguments));
@@ -133,13 +133,15 @@ internal static class IspcTests
         Check(plan.LogicalCompiles.Single(compile => compile.Module == "Kernel").Arguments.Contains((windows ? "/I" : "-I") + headers),
             "the logical compile (compile database) sees the generated header directory");
 
-        // ISPC 원본만 있는 서드파티 모듈도 archive를 만든다.
+        // ISPC 원본만 있는 서드파티 모듈도 archive를 만들고, 서드파티 ISPC 경고는 끈다(--woff).
         NativePlan only = ActionGraph.Create(kernel with
         {
             Ispc = fake,
             Modules = [kernel.Modules[0] with { Sources = [], ThirdParty = true }, kernel.Modules[1]]
         });
         Check(only.Actions.Any(action => action.Kind == "Archive" && action.Module == "Kernel"), "an ISPC-only module has an archive");
+        NativeAction thirdParty = only.Actions.Single(action => action.Kind == "Ispc");
+        Check(thirdParty.Arguments.Contains("--woff") && !thirdParty.Arguments.Contains("--werror"), "third-party ISPC warnings are off");
 
         // IDE 계획은 Ispc action 없이 include 디렉터리만 보인다(ISPC가 없어도 된다).
         NativePlan ide = ActionGraph.Create(kernel with { PlanMode = NativePlanMode.Ide, OutputDirectory = Path.Combine(fixture, "ide-out") });

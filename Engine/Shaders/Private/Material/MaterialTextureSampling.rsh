@@ -4,10 +4,12 @@
 // 그래서 단일 채널 복제와 노멀 채널 배치는 셰이더가 한다(UE MaterialTexture.ush의 sampler type별
 // 복제와 같은 규칙).
 //
-// 지금 담는 것(RB 18.5절 7항 — SM7에서 먼저): sampler type 복제와 쿠킹 swizzle 적용. view mip bias
-// 표본·법선 복원·sampling scale·미분 지정 표본은 SL2에서 더한다.
+// 지금 담는 것(RB 18.5절 7항 — SM7·TC2에서 먼저): sampler type 복제, 노멀 맵 법선 복원, 쿠킹 swizzle
+// 적용. view mip bias 표본·sampling scale·미분 지정 표본은 SL2에서 더한다.
 
 #pragma once
+
+#include "/Engine/Private/Math/UnitVectorEncoding.rsh"
 
 // 쿠킹 swizzle 한 칸의 출처 번호다(GraphicsTypes SwizzleSource·Texture TextureSwizzle과 같은 번호).
 static const float SwizzleSourceRed = 0.0;
@@ -22,6 +24,15 @@ static const float SwizzleSourceOne = 5.0;
 // 인자: 텍스처에서 읽은 값. 반환: (r, r, r, r).
 float4 ReplicateRedChannel(float4 value) {
     return value.rrrr;
+}
+
+// Normal sampler type(Normalmap — 쿠킹 swizzle rg01)의 tangent 공간 법선 복원이다. 노멀 맵은 x·y만
+// 담는다(BC5의 두 채널, 비압축 대체 BGRA8·RGBA8의 R·G — 형식과 무관하게 같은 함수). [0, 1] 값을
+// [-1, 1]로 펴고 z = sqrt(saturate(1 - x^2 - y^2))로 복원한다(|xy| > 1이면 z = 0). UE
+// UnpackNormalMap(Common.ush)과 같은 뜻이다.
+// 인자: 텍스처에서 읽은 값(r = x, g = y — b·a는 보지 않는다). 반환: (x, y, z, 1).
+float4 DecodeTangentNormal(float4 value) {
+    return float4(ReconstructNormalZ(value.rg * 2.0 - 1.0), 1.0);
 }
 
 // 출처 번호 하나의 값이다(Red–Alpha는 value의 그 칸, Zero·One은 상수). 범위 밖 번호는 0이다.

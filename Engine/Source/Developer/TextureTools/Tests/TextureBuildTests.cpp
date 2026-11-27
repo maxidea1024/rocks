@@ -689,25 +689,55 @@ TEST(TextureBuild_BlockCompressedOutput) {
               memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
     }
 
-    // TD11: BC7은 BGRA8 대체 + EncoderUnavailable(detail = BC7 형식 번호).
+    // TC3(12.17.6 4·6): BC7은 BC7UnormSrgb이고 경고가 없다. 알파 판정이 프로필을 고른다 —
+    // 불투명이면 RGB 프로필, 254가 하나라도 있으면 알파 프로필(입력 RGBA8을 직접 압축한 결과와
+    // byte가 같다).
+    const auto bc7 = [&](const uint8* rgba, bool alphaProfile, Array<uint8>& out) noexcept {
+        auto bytes = TextureBlockOutputBytes(TextureBlockFormat::Bc7, Size, Size, 1);
+        if (!bytes || !out.TryResize(static_cast<usize>(bytes.Value()))) {
+            return false;
+        }
+
+        TextureBlockImage image;
+        image.rgba = Span<const uint8>(rgba, usize{Size} * Size * 4);
+        image.sizeX = Size;
+        image.sizeY = Size;
+        TextureBlockOptions options;
+        options.alphaProfile = alphaProfile;
+        return static_cast<bool>(
+            EncodeTextureBlocks(TextureBlockFormat::Bc7, image, options, out.View()));
+    };
+    // BC6H·BC7 인코더가 없는 대상(Android — ISPC 커널 없음)은 건너뛴다.
+    if (IspcBcEncoderIdentity().IsEmpty()) {
+        return;
+    }
+
     settings.compression = TextureCompressionSettings::BC7;
     settings.srgb = true;
     REQUIRE(Build(allocator, settings, pixels, built));
-    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb);
-    bool warned = false;
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC7UnormSrgb &&
+          !built.result.alphaTransparent);
     for (const TextureBuildWarning& warning : built.result.warnings) {
-        warned = warned || (warning.code == AssetDiagnosticCode::EncoderUnavailable &&
-                            warning.detail ==
-                                graphics::PixelFormatNumber(graphics::PixelFormat::BC7UnormSrgb));
+        CHECK(warning.code != AssetDiagnosticCode::EncoderUnavailable);
     }
 
-    CHECK(warned);
+    REQUIRE(bc7(pixels, false, want));
+    CHECK(built.result.mips[0].bytes.Size() == want.Size() &&
+          memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    pixels[5 * 4 + 3] = 254;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC7UnormSrgb &&
+          built.result.alphaTransparent);
+    REQUIRE(bc7(pixels, true, want));
+    CHECK(built.result.mips[0].bytes.Size() == want.Size() &&
+          memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    pixels[5 * 4 + 3] = 255;
 }
 
-// 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 BC6H 대체(8×8)만 알파
-// 1이다. norm16 대체 G16 → R16F만 0…1로 자르고 HalfFloat의 R16F는 넘친 값을 지킨다. 알파 판정은
-// 원본(채움 전)이라 불투명 원본 + 반투명 채움 색은 BC1이다. Android(검증 끔)는 32F 필터를 못 해
-// RGBA16F, Android OpenGL의 RGBA8 대체는 R, G, B, A byte 순서다. CPU Availability는 비압축이다.
+// 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 8×8은 BC6H(알파
+// 없음 — TC3)다. norm16 대체 G16 → R16F만 0…1로 자르고 HalfFloat의 R16F는 넘친 값을 지킨다. 알파
+// 판정은 원본(채움 전)이라 불투명 원본 + 반투명 채움 색은 BC1이다. Android(검증 끔)는 32F 필터를 못
+// 해 RGBA16F, Android OpenGL의 RGBA8 대체는 R, G, B, A byte 순서다. CPU Availability는 비압축이다.
 TEST(TextureBuild_ReviewedFormatRules) {
     SystemAllocator allocator;
     // HDR_Compressed 알파.
@@ -725,11 +755,18 @@ TEST(TextureBuild_ReviewedFormatRules) {
         REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, 6 * 6 * 4), built));
         CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
               Le16(built.result.mips[0].bytes, 6) == 0x3266);
-        settings.sizeX = 8;
-        settings.sizeY = 8;
-        REQUIRE(Build(allocator, settings, pixels, built));
-        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
-              Le16(built.result.mips[0].bytes, 6) == 0x3c00);
+        // 8×8은 BC6H다(TC3 — 알파는 형식에 없고 기준 디코더가 1.0으로 푼다). ISPC 커널이 없는
+        // 대상(Android)은 건너뛴다.
+        if (!IspcBcEncoderIdentity().IsEmpty()) {
+            settings.sizeX = 8;
+            settings.sizeY = 8;
+            REQUIRE(Build(allocator, settings, pixels, built));
+            REQUIRE(built.result.pixelFormat == graphics::PixelFormat::BC6HUfloat &&
+                    built.result.mips[0].bytes.Size() == 4 * 16);
+            uint16 halfs[TextureBlockTexels * 4];
+            DecodeTextureBlockHalf(built.result.mips[0].bytes.Data(), halfs);
+            CHECK(halfs[3] == 0x3c00);
+        }
     }
 
     // norm16 대체만 자른다(0·65535를 번갈아 둔 4×4를 8×8로 확대 — Catmull-Rom 넘침).

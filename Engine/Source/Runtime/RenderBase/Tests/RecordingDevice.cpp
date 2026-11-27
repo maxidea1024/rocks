@@ -570,6 +570,8 @@ Result<void> RecordingDevice::ResizeSwapChain(SwapChainHandle swapChain, uint32 
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 새 백버퍼라 그리는 중인 프레임을 버린다.
+    *swapChains_.Find(swapChain.slot) = 0;
     Record(Op::ResizeSwapChain, (static_cast<uint64>(width) << 32) | height);
     return Result<void>::Success();
 }
@@ -763,9 +765,7 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
     return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
-Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
-                                                    const ClearColor& clear) noexcept {
-    (void)clear;
+Result<CommandContext*> RecordingDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -775,14 +775,32 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
-    if (recording_ || !swapChains_.IsValid(swapChain.slot)) {
+    if (recording_ || !swapChains_.IsValid(desc.swapChain.slot)) {
         return Result<CommandContext*>::Failure(recording_ ? ErrorCode::Busy
                                                            : ErrorCode::StaleHandle);
     }
 
+    if (beginFrameError_ != ErrorCode::None) {
+        if (beginFrameSuccesses_ == 0) {
+            const ErrorCode error = beginFrameError_;
+            beginFrameError_ = ErrorCode::None;
+            return Result<CommandContext*>::Failure(error);
+        }
+
+        --beginFrameSuccesses_;
+    }
+
+    uint8& frameOpen = *swapChains_.Find(desc.swapChain.slot);
+    if (desc.load == LoadAction::Load && frameOpen == 0) {
+        return Result<CommandContext*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    frameOpen = 1;
+    frameSwapChain_ = desc.swapChain;
+    presentOnEnd_ = desc.present;
     recording_ = true;
     recordingQueue_ = QueueKind::Graphics;
-    Record(Op::BeginFrame);
+    Record(Op::BeginFrame, SwapChainPassValue(desc.load, desc.present));
     return Result<CommandContext*>::Success(this);
 }
 
@@ -966,6 +984,18 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     timestamps_.Close(value, true);
     timeline_.Submitted(value, nullptr);
     Record(Op::EndFrame, value);
+    // 스왑체인 기록이면 present한다(기록 중 Retire한 스왑체인은 생략한다).
+    if (!frameSwapChain_.IsNull()) {
+        uint8* frameOpen = swapChains_.Find(frameSwapChain_.slot);
+        if (presentOnEnd_ && frameOpen != nullptr) {
+            *frameOpen = 0;
+            ++presents_;
+            Record(Op::Present, frameSwapChain_.slot.index);
+        }
+
+        frameSwapChain_ = {};
+        presentOnEnd_ = false;
+    }
     bool hold = false;
     {
         platform::LockGuard lock(gate_);
@@ -1749,6 +1779,10 @@ void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transition
 
 usize RecordingDevice::PendingRetireCount() const noexcept {
     return retired_.Size();
+}
+
+uint64 RecordingDevice::PresentCount() const noexcept {
+    return presents_;
 }
 
 void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {

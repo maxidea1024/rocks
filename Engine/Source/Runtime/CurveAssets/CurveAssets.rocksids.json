@@ -220,6 +220,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::CurveTableImportOptions::interp",
+      "id": "db9ff5c1b8d943db8bf83de2e53420bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::CurveTableRowRef::row",
       "id": "a59e5b093f1b4b9bbe850b1a1eb89b61",
       "aliases": [],
@@ -348,6 +355,13 @@
       "kind": "type",
       "name": "rocks::CurveTableAsset",
       "id": "b481fd3bd9ab4befa811750d8963036e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableImportOptions",
+      "id": "acc52f738fc64d2b8aa84352136bf194",
       "aliases": [],
       "retired": false
     },

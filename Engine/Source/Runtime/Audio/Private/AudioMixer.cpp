@@ -386,6 +386,23 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     return Result<AudioRtCommand>::Success(command);
 }
 
+Result<void> AudioMixer::AbandonPreparedPlay(AudioVoiceHandle voice) noexcept {
+    ControlVoice* slot = FindControl(voice);
+    if (slot == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (slot->state != ControlState::Submitted ||
+        slot->requestedStopFade != NumericLimits<uint32>::Max()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ROCKS_ASSERT(clips_[slot->clipIndex].users > 0);
+    --clips_[slot->clipIndex].users;
+    slot->state = ControlState::Reserved;
+    return Result<void>::Success();
+}
+
 Result<AudioRtCommand> AudioMixer::MakeStop(AudioVoiceHandle voice, uint64 mixFrame,
                                             uint32 fadeFrames) noexcept {
     if (auto checked = CheckCommandTarget(voice); !checked) {
