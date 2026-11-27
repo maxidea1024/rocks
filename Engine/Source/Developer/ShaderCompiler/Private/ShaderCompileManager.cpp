@@ -8,6 +8,7 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
+#include <Progress/ProgressCounter.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
 #include <ShaderCore/ShaderType.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
@@ -28,6 +29,11 @@ constexpr usize MaxPidDigits = 10;
 using platform::AtomicFetchAdd;
 using platform::AtomicFetchSub;
 using platform::AtomicLoad;
+using platform::MemoryOrder;
+
+// token으로 취소된 job과 실행 실패로 돌지 못한 job의 진단이다.
+constexpr StringView CancelledJobMessage = "shader compile was cancelled";
+constexpr StringView StoppedJobMessage = "the shader compile stopped before this job ran";
 
 bool AppendText(String& text, StringView part) noexcept {
     return static_cast<bool>(text.TryAppend(part));
@@ -118,6 +124,7 @@ struct ShaderCompileManager::State {
     uint64 total = 0;
     uint64 completed = 0;
     uint64 failed = 0;
+    uint64 cancelled = 0;
     uint64 cacheHits = 0;
     uint64 provisional = 0;
     uint64 batches = 0;
@@ -126,10 +133,6 @@ struct ShaderCompileManager::State {
 };
 
 namespace compile_manager_detail {
-
-void ProvisionalJob(void* context, uint32) noexcept {
-    (void)AtomicFetchAdd(&static_cast<ShaderCompileManager::State*>(context)->provisional, 1u);
-}
 
 // 묶음 하나다(요청 byte·결과·ticket·job 색인).
 struct Batch {
@@ -218,6 +221,18 @@ ShaderNuggetAction ClassifyShaderNuggetGet(const NuggetCacheGetResult& result,
     }
 
     return ShaderNuggetAction::Recompile;
+}
+
+ShaderCompileProgressSink MakeShaderCompileCounterSink(ProgressCounter& counter) noexcept {
+    ShaderCompileProgressSink sink;
+    sink.added = [](void* context, uint64 jobs) noexcept {
+        static_cast<ProgressCounter*>(context)->AddTotal(jobs);
+    };
+    sink.finished = [](void* context, uint64 jobs) noexcept {
+        static_cast<ProgressCounter*>(context)->Add(jobs);
+    };
+    sink.context = &counter;
+    return sink;
 }
 
 ShaderCompileManager::ShaderCompileManager(const ShaderCompileManagerConfig& config) noexcept
@@ -317,7 +332,7 @@ Result<void> ShaderCompileManager::Start() noexcept {
         launch.worker = index;
         launch.keepInput = config_.keepInput;
         launch.testHooks = config_.testHooks;
-        if (auto started = channel->Start(launch); !started) {
+        if (auto started = channel->Start(launch, config_.channelHooks); !started) {
             Shutdown();
             return started;
         }
@@ -352,6 +367,7 @@ ShaderCompileProgress ShaderCompileManager::Progress() const noexcept {
     progress.total = AtomicLoad(&state_->total);
     progress.completed = AtomicLoad(&state_->completed);
     progress.failed = AtomicLoad(&state_->failed);
+    progress.cancelled = AtomicLoad(&state_->cancelled);
     progress.cacheHits = AtomicLoad(&state_->cacheHits);
     progress.provisional = AtomicLoad(&state_->provisional);
     progress.batches = AtomicLoad(&state_->batches);
@@ -371,9 +387,12 @@ class Session final {
 public:
     Session(ShaderCompileManager::State& state, const ShaderCompileManagerConfig& config,
             Span<const ShaderCompileJob> jobs, Array<ShaderCompileJobResult>& out,
-            bool asynchronous) noexcept
+            bool asynchronous, const ShaderCompileControl& control) noexcept
         : state_(state), config_(config), jobs_(jobs), out_(out), asynchronous_(asynchronous),
-          pending_(state.allocator), batches_(state.allocator) {
+          control_(control), pending_(state.allocator), batches_(state.allocator) {
+        sinkCount_ = control.sinks.Size() < MaxShaderCompileProgressSinks
+                         ? control.sinks.Size()
+                         : MaxShaderCompileProgressSinks;
     }
 
     ~Session() noexcept {
@@ -395,25 +414,62 @@ public:
         }
 
         (void)AtomicFetchAdd(&state_.total, static_cast<uint64>(jobs_.Size()));
+        for (usize sink = 0; sink < sinkCount_; ++sink) {
+            const ShaderCompileProgressSink& target = control_.sinks[sink];
+            if (target.added != nullptr && !jobs_.IsEmpty()) {
+                target.added(target.context, static_cast<uint64>(jobs_.Size()));
+            }
+        }
+
         for (usize index = 0; index < jobs_.Size(); ++index) {
+            if (control_.cancel.IsCancellationRequested()) {
+                CancelRemaining();
+                break;
+            }
+
             Prepare(index);
         }
 
-        if (auto looked = LookUp(); !looked) {
-            return looked;
+        Result<void> outcome = Result<void>::Success();
+        if (control_.cancel.IsCancellationRequested()) {
+            CancelRemaining();
+        } else if (auto looked = LookUp(); !looked) {
+            outcome = Move(looked);
+        } else if (control_.cancel.IsCancellationRequested()) {
+            CancelRemaining();
+        } else if (auto compiled = CompileMisses(); !compiled) {
+            outcome = Move(compiled);
         }
 
-        if (auto compiled = CompileMisses(); !compiled) {
-            return compiled;
+        if (outcome) {
+            // 취소 뒤에도 이미 성공한 결과는 게시한다(내용 주소 너겟이라 맞는 값이다).
+            Publish();
+        } else {
+            // 실행 실패(할당)로 멈췄으면 돌지 못한 job을 실패로 끝낸다(sink 합계 = job 수).
+            for (usize index = 0; index < out_.Size(); ++index) {
+                if (counted_[index] == Uncounted) {
+                    Fail(index, ShaderCompileStatus::ToolError, StoppedJobMessage,
+                         StringView(ErrorCodeName(outcome.Error())));
+                }
+            }
+
+            return outcome;
         }
 
-        Publish();
         // 남은 job(없어야 한다)도 계수에 넣는다.
         for (usize index = 0; index < out_.Size(); ++index) {
             Count(index);
         }
 
-        return Result<void>::Success();
+        return tokenCancelled_ ? Result<void>::Failure(ErrorCode::Cancelled)
+                               : Result<void>::Success();
+    }
+
+    // 워커 job 줄 하나다(채널 스레드 — 진행 보고 10.3절의 잠정 완료).
+    void Provisional() noexcept {
+        (void)AtomicFetchAdd(&state_.provisional, 1u);
+        (void)provisional_.FetchAdd<MemoryOrder::AcquireRelease>(1u);
+        Report();
     }
 
 private:
@@ -421,18 +477,66 @@ private:
     static constexpr uint8 Uncounted = 0;
     static constexpr uint8 CountedCompleted = 1;
     static constexpr uint8 CountedFailed = 2;
+    static constexpr uint8 CountedCancelled = 3;
+
+    // sink에 끝난 수를 보낸다(아무 스레드). 끝난 수 = 최종 상태를 정한 job + 잠정 완료다. 정산이
+    // 잠정 값을 먼저 빼므로 합이 잠시 줄 수 있어, 높은 물 표시(FetchMax)로 늘 때만 차이를 보낸다 —
+    // 두 번 세지 않고 job 수를 넘지 않는다.
+    void Report() noexcept {
+        if (sinkCount_ == 0) {
+            return;
+        }
+
+        uint64 done =
+            final_.Load<MemoryOrder::Acquire>() + provisional_.Load<MemoryOrder::Acquire>();
+        const uint64 total = static_cast<uint64>(jobs_.Size());
+        done = done < total ? done : total;
+        const uint64 previous = reported_.FetchMax<MemoryOrder::AcquireRelease>(done);
+        if (done <= previous) {
+            return;
+        }
+
+        for (usize sink = 0; sink < sinkCount_; ++sink) {
+            const ShaderCompileProgressSink& target = control_.sinks[sink];
+            if (target.finished != nullptr) {
+                target.finished(target.context, done - previous);
+            }
+        }
+    }
 
     // job 하나의 최종 상태를 계수에 넣는다(진행 보고 12절 — 끝난 즉시). 성공으로 센 job이 뒤에
-    // 실패하면(required 캐시 게시 실패) 완료에서 실패로 옮긴다.
+    // 실패하면(required 캐시 게시 실패) 완료에서 실패로 옮긴다. Cancelled는 cancelled에 센다.
     void Count(usize index) noexcept {
-        const bool success = out_[index].status == ShaderCompileStatus::Success;
+        const ShaderCompileStatus status = out_[index].status;
+        const bool success = status == ShaderCompileStatus::Success;
         if (counted_[index] == Uncounted) {
-            counted_[index] = success ? CountedCompleted : CountedFailed;
-            (void)AtomicFetchAdd(success ? &state_.completed : &state_.failed, 1u);
+            uint64* counter = &state_.failed;
+            counted_[index] = CountedFailed;
+            if (success) {
+                counter = &state_.completed;
+                counted_[index] = CountedCompleted;
+            } else if (status == ShaderCompileStatus::Cancelled) {
+                counter = &state_.cancelled;
+                counted_[index] = CountedCancelled;
+            }
+
+            (void)AtomicFetchAdd(counter, 1u);
+            (void)final_.FetchAdd<MemoryOrder::AcquireRelease>(1u);
+            Report();
         } else if (counted_[index] == CountedCompleted && !success) {
             counted_[index] = CountedFailed;
             (void)AtomicFetchSub(&state_.completed, 1u);
             (void)AtomicFetchAdd(&state_.failed, 1u);
+        }
+    }
+
+    // 아직 끝나지 않은 job을 모두 취소로 끝낸다(token 취소 — Compile은 Cancelled를 돌려준다).
+    void CancelRemaining() noexcept {
+        for (usize index = 0; index < out_.Size(); ++index) {
+            if (counted_[index] == Uncounted) {
+                tokenCancelled_ = true;
+                Fail(index, ShaderCompileStatus::Cancelled, CancelledJobMessage);
+            }
         }
     }
 
@@ -755,7 +859,8 @@ private:
             batch->ticket.request = batch->request.View();
             batch->ticket.out = &batch->result;
             batch->ticket.progress.job = &ProvisionalJob;
-            batch->ticket.progress.context = &state_;
+            batch->ticket.progress.context = this;
+            batch->ticket.cancel = control_.cancel;
             ShaderWorkerChannel& channel =
                 *state_.channels[state_.nextChannel++ % state_.channels.Size()];
             (void)AtomicFetchAdd(&state_.batches, 1u);
@@ -765,8 +870,9 @@ private:
         for (Batch* batch : batches_) {
             ShaderWorkerChannel::Wait(batch->ticket);
             // 잠정 값을 실제 결과로 바꾼다(진행 보고 10.3절).
-            (void)AtomicFetchSub(&state_.provisional,
-                                 static_cast<uint64>(batch->result.reportedJobs));
+            const uint64 reported = static_cast<uint64>(batch->result.reportedJobs);
+            (void)AtomicFetchSub(&state_.provisional, reported);
+            (void)provisional_.FetchSub<MemoryOrder::AcquireRelease>(reported);
             Collect(*batch);
         }
 
@@ -838,6 +944,15 @@ private:
 
     void Collect(Batch& batch) noexcept {
         const ShaderWorkerBatchResult& result = batch.result;
+        if (result.outcome == ShaderWorkerBatchOutcome::Cancelled) {
+            for (const usize index : batch.jobs) {
+                tokenCancelled_ = true;
+                Fail(index, ShaderCompileStatus::Cancelled, CancelledJobMessage);
+            }
+
+            return;
+        }
+
         if (result.outcome != ShaderWorkerBatchOutcome::Completed ||
             result.response.jobs.Size() != batch.jobs.Size()) {
             char detail[96];
@@ -972,21 +1087,34 @@ private:
     Span<const ShaderCompileJob> jobs_;
     Array<ShaderCompileJobResult>& out_;
     bool asynchronous_;
+    const ShaderCompileControl& control_;
+    usize sinkCount_ = 0;
     Array<usize> pending_;
     Array<Batch*> batches_;
     Array<usize> publish_{state_.allocator};
     Array<uint8> counted_{state_.allocator};
+    // sink 계수다: 최종 상태를 정한 job 수(조정 스레드가 올림)·잠정 완료(채널 스레드)·보낸 수.
+    platform::Atomic<uint64> final_{0};
+    platform::Atomic<uint64> provisional_{0};
+    platform::Atomic<uint64> reported_{0};
+    // token 취소로 끝난 job이 있다(Compile이 Cancelled를 돌려준다).
+    bool tokenCancelled_ = false;
 };
+
+void ProvisionalJob(void* context, uint32) noexcept {
+    static_cast<Session*>(context)->Provisional();
+}
 
 } // namespace compile_manager_detail
 
 Result<void> ShaderCompileManager::Compile(Span<const ShaderCompileJob> jobs,
-                                           Array<ShaderCompileJobResult>& out) noexcept {
+                                           Array<ShaderCompileJobResult>& out,
+                                           const ShaderCompileControl& control) noexcept {
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    compile_manager_detail::Session session(*state_, config_, jobs, out, true);
+    compile_manager_detail::Session session(*state_, config_, jobs, out, true, control);
     return session.Run();
 }
 
@@ -997,8 +1125,9 @@ Result<void> ShaderCompileManager::CompileNow(const ShaderCompileJob& job,
     }
 
     Array<ShaderCompileJobResult> results(state_->allocator);
+    const ShaderCompileControl control;
     compile_manager_detail::Session session(*state_, config_, Span<const ShaderCompileJob>(&job, 1),
-                                            results, false);
+                                            results, false, control);
     if (auto ran = session.Run(); !ran) {
         return ran;
     }

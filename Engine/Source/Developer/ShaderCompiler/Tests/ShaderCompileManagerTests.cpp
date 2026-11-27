@@ -472,8 +472,9 @@ TEST(ShaderCompileCommand_ReportsJobsAndWritesOutputs) {
                       "--define=SCALE=2", StringView(outOption), compute, pixel}));
     CHECK(Contains(captured.out, "shader-compile: D3D12_SM6 /Project/Test.rsf:CSMain:compute "));
     CHECK(Contains(captured.out, " miss Success "));
-    CHECK(Contains(captured.out,
-                   "shader-compile: jobs 4 completed 4 failed 0 cache-hits 0 workers "));
+    CHECK(
+        Contains(captured.out,
+                 "shader-compile: jobs 4 completed 4 failed 0 cancelled 0 cache-hits 0 workers "));
     const char* const files[] = {"Out/D3D12_SM6/+Project+Test.rsf.CSMain.compute.dxil",
                                  "Out/D3D12_SM6/+Project+Test.rsf.PSMain.pixel.dxil",
                                  "Out/VULKAN_SM5/+Project+Test.rsf.CSMain.compute.spv",

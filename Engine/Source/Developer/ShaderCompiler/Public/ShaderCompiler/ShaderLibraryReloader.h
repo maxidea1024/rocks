@@ -112,9 +112,11 @@ public:
     ShaderLibraryReloader& operator=(const ShaderLibraryReloader&) = delete;
 
     // formatId의 라이브러리를 처음 만든다(이미 있으면 아무 일도 하지 않고 성공). report는 그
-    // 만들기의 보고서다. 오류: desc 누락 InvalidArgument, 형식 정의를 읽지 못함 NotFound, job 실패
-    // DependencyFailed(report.failures), 그 밖은 CompileShaderLibrary의 오류.
-    Result<void> Build(StringView formatId, ShaderLibraryCookReport& report) noexcept;
+    // 만들기의 보고서다. control은 관리자 Compile의 취소·진행이다(PG5). 오류: desc 누락
+    // InvalidArgument, 형식 정의를 읽지 못함 NotFound, job 실패 DependencyFailed(report.failures),
+    // 취소 Cancelled(만들지 않는다), 그 밖은 CompileShaderLibrary의 오류.
+    Result<void> Build(StringView formatId, ShaderLibraryCookReport& report,
+                       const ShaderCompileControl& control = {}) noexcept;
 
     // 만든 라이브러리 byte를 out에 복사하고 revision(1부터)을 돌려준다. 없으면 NotFound, 할당 실패
     // OutOfMemory다.
@@ -127,10 +129,11 @@ public:
     usize FormatCount() const noexcept;
 
     // changed(가상 경로)가 바뀌었다. everything이면(감시 이벤트 손실) 의존과 관계없이 모두 다시
-    // 만든다. report는 먼저 비운다. 실행 실패(할당·관리자 오류)만 Result 실패이고 job 실패는
-    // report.outcome Failed다.
-    Result<void> Reload(Span<const StringView> changed, bool everything,
-                        ShaderReloadReport& report) noexcept;
+    // 만든다. report는 먼저 비운다. control은 관리자 Compile의 취소·진행이다(PG5). 실행
+    // 실패(할당·관리자 오류)와 취소(Cancelled — 다시 만들지 못한 형식은 이전 라이브러리·revision
+    // 그대로)만 Result 실패이고 job 실패는 report.outcome Failed다.
+    Result<void> Reload(Span<const StringView> changed, bool everything, ShaderReloadReport& report,
+                        const ShaderCompileControl& control = {}) noexcept;
 
     // virtualPath에 의존하는 셰이더 타입 이름 해시를 out에 둔다(out은 먼저 비운다 — 시험·진단).
     Result<void> DependentTypes(StringView virtualPath, Array<uint64>& out) const noexcept;
