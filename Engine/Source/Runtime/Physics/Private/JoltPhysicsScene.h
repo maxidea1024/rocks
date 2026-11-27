@@ -82,6 +82,17 @@ public:
                             const CollisionShape& shape, const QueryFilter& filter,
                             const QueryParams& params, TraceMode mode, HitResult* first,
                             Array<HitResult>* all) const noexcept override;
+    Result<bool> OverlapShape(const Vec3d& position, const Quatd& rotation,
+                              const CollisionShape& shape, const QueryFilter& filter,
+                              const QueryParams& params, OverlapMode mode,
+                              Array<OverlapResult>* all) const noexcept override;
+    Result<bool> TraceBody(PhysicsBodyHandle body, const Vec3d& start, const Vec3d& end,
+                           const Quatd& rotation, const QueryFilter& filter,
+                           const QueryParams& params,
+                           Array<HitResult>& all) const noexcept override;
+    Result<bool> OverlapBody(PhysicsBodyHandle body, const Vec3d& position, const Quatd& rotation,
+                             const QueryFilter& filter, const QueryParams& params,
+                             Array<OverlapResult>& all) const noexcept override;
 
     // 한 step(seconds초, collision step 1)을 진행한다. 오류: seconds가 양의 유한값이 아님
     // (InvalidArgument), Jolt 용량 초과(CapacityExceeded — step은 진행했고 경고 로그를 남긴다).
@@ -198,6 +209,28 @@ private:
     class RayHitCollector;
     template <class CollectorBase>
     class ShapeHitCollector;
+    class OverlapCollector;
+
+    // 질의에서 더 뺄 body다(컴포넌트 질의 — 7.1.9절). null이면 빼지 않는다.
+    struct QueryExclusion {
+        ObjectHandle actor;
+        ObjectHandle component;
+    };
+
+    // Jolt 형상(Jolt 좌표·scale이 구워진 형상)으로 하는 shape trace다(TraceShape·TraceBody의 공통
+    // 경로 — 7.1.8절). queryKind는 impactNormal 규칙에 쓴다. rotation은 단위 quaternion이다.
+    Result<bool> TraceJoltShape(const JPH::Shape& shape, CollisionShapeKind queryKind,
+                                const Vec3d& start, const Vec3d& end, const Quatd& rotation,
+                                const QueryFilter& filter, const QueryParams& params,
+                                TraceMode mode, HitResult* first, Array<HitResult>* all,
+                                const QueryExclusion& exclusion) const noexcept;
+
+    // Jolt 형상으로 하는 overlap이다(OverlapShape·OverlapBody의 공통 경로 — 7.1.9절).
+    Result<bool> OverlapJoltShape(const JPH::Shape& shape, const Vec3d& position,
+                                  const Quatd& rotation, const QueryFilter& filter,
+                                  const QueryParams& params, OverlapMode mode,
+                                  Array<OverlapResult>* all,
+                                  const QueryExclusion& exclusion) const noexcept;
 
     // 모은 hit 하나를 HitResult로 바꾼다(UE ConvertQueryImpactHit — line, shape는 시작 겹침의
     // ConvertOverlappedShapeToImpactHit 포함).

@@ -162,7 +162,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
     const uint8* bytes = file.Data();
     if (file.Size() < RiffHeaderBytes || !IsTag(bytes + RiffFormOffset, "WAVE") ||
         !(IsTag(bytes, "RIFF") || IsTag(bytes, "RIFX"))) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const bool bigEndian = IsTag(bytes, "RIFX");
@@ -184,7 +184,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
         const bool isData = IsTag(header, "data");
         if (size > riffEnd - body) {
             // 끝을 넘는 data는 끝까지로 잘라 받는다(UE와 같다). 다른 chunk가 넘치면 거기서 멈추고
-            // 센다 — 그 뒤 fmt·data가 없으면 아래에서 InvalidArgument다.
+            // 센다 — 그 뒤 fmt·data가 없으면 아래에서 CorruptData다.
             if (!isData) {
                 out.CountIgnoredChunk();
                 break;
@@ -219,7 +219,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
     }
 
     if (!format.present || !data.present || format.size < FmtMinimumBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* fmt = bytes + format.offset;
@@ -230,7 +230,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
     const uint32 bits = ReadU16(fmt + FmtBitsOffset, bigEndian);
     if (tag == FormatExtensible) {
         if (format.size < FmtExtensibleBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         const uint32 validBits = ReadU16(fmt + FmtValidBitsOffset, bigEndian);
@@ -248,7 +248,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
         }
 
         if (validBits > bits) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         tag = data1 & GuidTagMask;
@@ -272,7 +272,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
     }
 
     if (channels == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (channels > MaxSourceChannels || sampleRate < MinSourceSampleRate ||
@@ -282,13 +282,13 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
 
     const uint32 bytesPerSample = bits / BitsPerByte;
     if (blockAlign != channels * bytesPerSample) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // data 크기가 blockAlign의 배수가 아니면 남는 byte를 버린다(UE와 같다).
     const uint64 frames = data.size / blockAlign;
     if (frames == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(channels, sampleRate, frames, FormatOf(bytesPerSample, encoding),
@@ -299,7 +299,7 @@ Result<void> DecodeWavInto(Span<const uint8> file, DecodedSourceAudio& out) noex
 
     if (!DeinterleaveToFloat(bytes + data.offset, channels, frames, bytesPerSample, encoding,
                              bigEndian, pcm.Value())) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto loops = ReadSampler(bytes, sampler, bigEndian, frames, out); !loops) {

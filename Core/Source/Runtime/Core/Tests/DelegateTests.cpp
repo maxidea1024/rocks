@@ -495,6 +495,71 @@ TEST(MulticastDelegate_CompactAllowsReentrantTargets) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// 생존을 밖에서 판정하는 lambda 대상(SL 5.5절 C1): 호출 대상의 IsAlive가 false면 IsBound·
+// ExecuteIfBound가 그것을 따르고 MulticastDelegate는 부르지 않으며 CompactDead가 한 pass로
+// 해제한다. inline·heap 저장 모두.
+struct LivenessTarget {
+    const bool* alive;
+    int* calls;
+
+    void operator()(int value) noexcept {
+        *calls += value;
+    }
+
+    bool IsAlive() const noexcept {
+        return *alive;
+    }
+};
+
+struct LargeLivenessTarget {
+    const bool* alive;
+    int* calls;
+    unsigned char padding[DelegateInlineBytes];
+
+    void operator()(int value) noexcept {
+        *calls += value;
+    }
+
+    bool IsAlive() const noexcept {
+        return *alive;
+    }
+};
+
+static_assert(detail::DelegateCallableHasLiveness<LivenessTarget>);
+static_assert(!detail::DelegateCallableHasLiveness<decltype([](int) noexcept {})>);
+
+TEST(Delegate_ExternalLiveness) {
+    SystemAllocator allocator;
+    {
+        bool alive = true;
+        int calls = 0;
+        auto single = Delegate<void(int)>::CreateLambda(LivenessTarget{&alive, &calls});
+        auto heap = Delegate<void(int)>::TryCreateLambda(allocator,
+                                                         LargeLivenessTarget{&alive, &calls, {}});
+        REQUIRE(heap);
+        CHECK(single.IsBound() && heap.Value().IsBound());
+        CHECK(single.ExecuteIfBound(1) && heap.Value().ExecuteIfBound(2));
+        CHECK(calls == 3);
+
+        MulticastDelegate<void(int)> event(allocator);
+        REQUIRE(event.TryAddLambda(LivenessTarget{&alive, &calls}));
+        REQUIRE(event.TryAdd(Move(heap.Value())));
+        int others = 0;
+        REQUIRE(event.TryAddLambda([&](int value) noexcept { others += value; }));
+        event.Broadcast(10);
+        CHECK(calls == 23 && others == 10);
+
+        alive = false;
+        CHECK(!single.IsBound() && !single.ExecuteIfBound(1));
+        CHECK(event.Stats().bound == 1);
+        event.Broadcast(10);
+        CHECK(calls == 23 && others == 20);
+        CHECK(event.CompactDead() == 0); // Broadcast 끝의 정리가 이미 거뒀다
+        CHECK(event.Stats().entries == 1);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
 } // namespace delegate_tests_file
 
 } // namespace rocks::test

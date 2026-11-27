@@ -52,12 +52,12 @@ Result<void> CheckPage(const ogg_page& page, OggStreamCursor& cursor,
     if (!cursor.open) {
         // stream 밖에서는 새 stream의 BOS page만 올 수 있다. 같은 serial이 다시 오면 규격 위반이다.
         if (!ogg_page_bos(&page)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         for (usize index = 0; index < seenSerials.Size(); ++index) {
             if (seenSerials[index] == serial) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
 
@@ -71,14 +71,14 @@ Result<void> CheckPage(const ogg_page& page, OggStreamCursor& cursor,
     } else if (serial != cursor.serial) {
         // 열린 stream 안에 다른 stream의 BOS가 오면 다중화다. 그 밖은 끼어든 page라 손상이다.
         return Result<void>::Failure(ogg_page_bos(&page) ? ErrorCode::Unsupported
-                                                         : ErrorCode::InvalidArgument);
+                                                         : ErrorCode::CorruptData);
     } else if (ogg_page_bos(&page)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // page 번호가 이어져야 한다(빠지거나 겹친 page).
     if (number != cursor.nextPage) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     ++cursor.nextPage;
@@ -116,7 +116,7 @@ Result<void> ValidateOggPages(Span<const uint8> file, Allocator& allocator) noex
 
             // 음수는 page가 아닌 byte(쓰레기·CRC 불일치)를 건너뛴 것이다.
             if (result < 0) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             consumed += static_cast<usize>(result);
@@ -128,7 +128,7 @@ Result<void> ValidateOggPages(Span<const uint8> file, Allocator& allocator) noex
 
     // 끝에 덜 찬 page가 남거나, stream이 EOS 없이 끝났거나(잘림), page가 하나도 없으면 손상이다.
     if (consumed != file.Size() || cursor.open || seenSerials.Size() == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();

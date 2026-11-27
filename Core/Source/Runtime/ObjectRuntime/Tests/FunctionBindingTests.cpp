@@ -78,6 +78,7 @@ TEST(FunctionBinding_FrameLayoutMatchesGeneratedFrames) {
         };
         const Case cases[] = {{"Add", detail::FrameLayoutOf<int32>()},
                               {"Bump", detail::FrameLayoutOf<>()},
+                              {"Relay", detail::FrameLayoutOf<>()},
                               {"Remember", detail::FrameLayoutOf<WeakObjectRef<CallTarget>>()},
                               {"Note", detail::FrameLayoutOf<const String&>()},
                               {"Place", detail::FrameLayoutOf<const CallPoint&>()},

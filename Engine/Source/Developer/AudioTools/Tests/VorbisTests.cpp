@@ -177,10 +177,10 @@ TEST(Audio_Vorbis_Rejects) {
     SystemAllocator allocator;
     // Ogg가 아님·빈 입력·첫 page만.
     const uint8 notOgg[] = {'f', 'L', 'a', 'C', 0, 0, 0, 0};
-    CHECK(VorbisError(Bytes(notOgg), allocator) == ErrorCode::InvalidArgument);
-    CHECK(VorbisError(Span<const uint8>(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(VorbisError(Bytes(notOgg), allocator) == ErrorCode::CorruptData);
+    CHECK(VorbisError(Span<const uint8>(), allocator) == ErrorCode::CorruptData);
     CHECK(VorbisError(Span<const uint8>(VorbisStereo, OggPageHeaderBytes), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // audio page byte 하나가 바뀌면 page CRC가 맞지 않아 그 page가 빠진다(OV_HOLE 또는 길이
     // 불일치).
@@ -188,7 +188,7 @@ TEST(Audio_Vorbis_Rejects) {
     REQUIRE(corrupted.TryAppend(Bytes(VorbisStereo)));
     const usize middle = VorbisStereoPageOffsets[2] + IntoPageBytes;
     corrupted[middle] = static_cast<uint8>(corrupted[middle] ^ CorruptionMask);
-    CHECK(VorbisError(corrupted.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(VorbisError(corrupted.View(), allocator) == ErrorCode::CorruptData);
 
     // 실패하면 앞 결과를 비운다.
     DecodedSourceAudio audio(allocator);
@@ -218,16 +218,16 @@ TEST(Audio_Vorbis_PageIntegrity) {
           secondStart + IntoPageBytes / 2}) {
         const Array<uint8> chain = JoinCorrupted(allocator, first, second, at);
         REQUIRE(chain.Size() > 0);
-        CHECK(VorbisError(chain.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(VorbisError(chain.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // page 중간에서 잘림, page 경계에서 잘림(EOS 없음).
     const Array<uint8> chain = Join(allocator, first, second);
     REQUIRE(chain.Size() > 0);
     CHECK(VorbisError(chain.View().Left(chain.Size() - IntoPageBytes), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(VorbisError(chain.View().Left(secondStart + VorbisNoiseBPageOffsets[3]), allocator) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // page 하나가 통째로 빠짐(page 번호 끊김).
     {
@@ -235,19 +235,19 @@ TEST(Audio_Vorbis_PageIntegrity) {
         REQUIRE(missing.TryAppend(first.Left(VorbisNoiseAPageOffsets[2])));
         REQUIRE(missing.TryAppend(Span<const uint8>(first.Data() + VorbisNoiseAPageOffsets[3],
                                                     first.Size() - VorbisNoiseAPageOffsets[3])));
-        CHECK(VorbisError(missing.View(), allocator) == ErrorCode::InvalidArgument);
+        CHECK(VorbisError(missing.View(), allocator) == ErrorCode::CorruptData);
     }
 
     // 같은 serial을 다시 이음(규격 위반), 앞·뒤 쓰레기.
     const Array<uint8> sameSerial = Join(allocator, first, first);
     REQUIRE(sameSerial.Size() > 0);
-    CHECK(VorbisError(sameSerial.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(VorbisError(sameSerial.View(), allocator) == ErrorCode::CorruptData);
     const uint8 junk[JunkBytes] = {1, 2, 3, 4};
     const Array<uint8> leading = Join(allocator, Bytes(junk), first);
     const Array<uint8> trailing = Join(allocator, first, Bytes(junk));
     REQUIRE(leading.Size() > 0 && trailing.Size() > 0);
-    CHECK(VorbisError(leading.View(), allocator) == ErrorCode::InvalidArgument);
-    CHECK(VorbisError(trailing.View(), allocator) == ErrorCode::InvalidArgument);
+    CHECK(VorbisError(leading.View(), allocator) == ErrorCode::CorruptData);
+    CHECK(VorbisError(trailing.View(), allocator) == ErrorCode::CorruptData);
 
     // 다중화: 첫 stream이 열린 채 둘째 stream의 BOS page가 온다.
     {
@@ -264,14 +264,14 @@ TEST(Audio_Vorbis_PageIntegrity) {
 TEST(Audio_Vorbis_TruncatedAndCorruptedInputs) {
     SystemAllocator allocator;
     DecodedSourceAudio audio(allocator);
-    // 모든 앞부분 길이(43 byte 간격): 받으면 길이가 원본 이하, 아니면 InvalidArgument다.
+    // 모든 앞부분 길이(43 byte 간격): 받으면 길이가 원본 이하, 아니면 CorruptData다.
     constexpr usize PrefixStep = 43;
     for (usize size = 0; size <= sizeof(VorbisStereo); size += PrefixStep) {
         const Result<void> decoded = DecodeVorbis(Span<const uint8>(VorbisStereo, size), audio);
         if (decoded) {
             CHECK(audio.FrameCount() > 0 && audio.FrameCount() <= StereoFrames);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument);
+            CHECK(decoded.Error() == ErrorCode::CorruptData);
         }
     }
 
@@ -303,7 +303,7 @@ TEST(Audio_Vorbis_TruncatedAndCorruptedInputs) {
 
             CHECK(finite);
         } else {
-            CHECK(decoded.Error() == ErrorCode::InvalidArgument ||
+            CHECK(decoded.Error() == ErrorCode::CorruptData ||
                   decoded.Error() == ErrorCode::Unsupported ||
                   decoded.Error() == ErrorCode::CapacityExceeded);
         }

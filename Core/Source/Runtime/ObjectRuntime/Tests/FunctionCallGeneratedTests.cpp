@@ -21,10 +21,6 @@ namespace function_call_generated_tests_file {
 
 namespace {
 
-Span<const char> Text(const char* text) noexcept {
-    return Span<const char>(text, StringView(text).ByteCount());
-}
-
 StringView View(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
@@ -57,7 +53,7 @@ const CallTarget* Read(ObjectRegistry& registry, ObjectHandle handle) noexcept {
 
 // 이름(도구 이름, 대소문자 무시)으로 함수를 찾는다.
 Result<FunctionHandle> Find(TypeRegistry& types, const char* name) noexcept {
-    return types.FindFunctionByName(TypeIdOf<CallTarget>(), Text(name));
+    return types.FindFunctionByName(TypeIdOf<CallTarget>(), name);
 }
 
 } // namespace
@@ -79,11 +75,11 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
         REQUIRE(type);
         const Span<const FunctionSchema> functions = type.Value().Schema().functions;
 #if ROCKS_WITH_EDITOR
-        REQUIRE(functions.Size() == 13);
+        REQUIRE(functions.Size() == 14);
         CHECK(View(functions[11].name) == StringView("Reset"));
         CHECK(functions[11].flags == Flags(FunctionFlags::EditorOnly));
 #else
-        REQUIRE(functions.Size() == 12);
+        REQUIRE(functions.Size() == 13);
 #endif
         CHECK(View(functions[0].name) == StringView("Add"));
         CHECK(functions[1].flags == (Flags(FunctionFlags::Const) | Flags(FunctionFlags::Pure)));
@@ -92,8 +88,8 @@ TEST(FunctionCall_GeneratedTablesRegisterAndCall) {
         CHECK(functions[4].flags == Flags(FunctionFlags::Static));
         CHECK(functions[3].parameters.Size() == 3);
         CHECK(functions[3].parameters[1].value.kind == ValueKind::Enum);
-        CHECK(types.FindFunctionByName(TypeIdOf<CallTarget>(), Text("rename")));
-        CHECK(!types.FindFunctionByName(TypeIdOf<CallTarget>(), Text("SetLabel")));
+        CHECK(types.FindFunctionByName(TypeIdOf<CallTarget>(), "rename"));
+        CHECK(!types.FindFunctionByName(TypeIdOf<CallTarget>(), "SetLabel"));
         CHECK(types.FindFunction(TypeIdOf<CallTarget>(), functions[0].id));
 
         {

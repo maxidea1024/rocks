@@ -12,11 +12,13 @@
 // Vorbis(libvorbis), Opus(opusfile).
 //
 // 오류 코드(임포터가 진단으로 옮긴다):
-// - InvalidArgument: 필수 chunk·MPEG frame·STREAMINFO 없음, 크기·길이 불일치,
-//   float 표본 NaN·무한대, FLAC CRC·MD5 불일치(InvalidSource)
+// - CorruptData: 빈 파일, 필수 chunk·MPEG frame·STREAMINFO 없음, 크기·길이 불일치, float 표본
+//   NaN·무한대, FLAC CRC·MD5 불일치, Ogg page 손상·누락·잘림(InvalidSource — 3.38절)
 // - Unsupported: 모르는 부호화, Layer I·II, 9채널 이상, rate 범위 밖, stream 중간 형식 변경
 //   (UnsupportedSourceFormat)
 // - CapacityExceeded: 디코드한 PCM이 MaxSoundClipPcmBytes를 넘음(할당 전에 판정)
+// - InvalidArgument: libFLAC 디코더 초기화 실패(메모리 밖 — 콜백·상태 오류), vorbisfile OV_EFAULT
+//   (내부 논리 오류) — 데이터와 무관
 // - OutOfMemory: 할당 실패
 //
 // 사용 예:
@@ -154,14 +156,14 @@ ROCKS_AUDIOTOOLS_API Result<void> DecodeAiff(Span<const uint8> file,
 
 // FLAC(native, Ogg FLAC 제외)을 디코드한다(3.27절). STREAMINFO에 길이·MD5가 있으면 맞춰 보고, frame
 // CRC 불일치·머리 오류·frame 사이 손상(sync를 잃은 뒤 이어지는 audio)·frame 번호 끊김은
-// InvalidArgument다 (마지막 frame 뒤 쓰레기는 받는다). 형식이 frame마다 바뀌면 Unsupported다. 표본
+// CorruptData다 (마지막 frame 뒤 쓰레기는 받는다). 형식이 frame마다 바뀌면 Unsupported다. 표본
 // 형식은 bit 수(≤16 Int16, ≤24 Int24, 그 위 Int32), 코덱은 Flac이다. out은 먼저 비우고, 실패하면
 // 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeFlac(Span<const uint8> file,
                                              DecodedSourceAudio& out) noexcept;
 
 // Ogg Vorbis를 디코드한다(3.28절). 디코드 전에 page 구조(CRC, BOS·EOS, page 번호 연속)를 확인하므로
-// page 손상·누락·잘림은 InvalidArgument다. 길이는 granule 기준(encoder 앞뒤 자르기 반영)이다.
+// page 손상·누락·잘림은 CorruptData다. 길이는 granule 기준(encoder 앞뒤 자르기 반영)이다.
 // 연결된 stream의 link마다 채널·rate가 같아야 하고(다르면 Unsupported), 다중화된 stream도
 // Unsupported다. 표본 형식은 Lossy, 코덱은 Vorbis다. out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeVorbis(Span<const uint8> file,
@@ -169,14 +171,14 @@ ROCKS_AUDIOTOOLS_API Result<void> DecodeVorbis(Span<const uint8> file,
 
 // Ogg Opus를 디코드한다(3.29절). 출력 rate는 언제나 48000 Hz다. page 구조를 먼저 확인하고(Vorbis와
 // 같다), pre-skip과 끝 자르기는 granule로 반영한다. 연결된 stream의 link마다 채널 수가 같아야
-// 하고(다르면 Unsupported), packet 손상은 InvalidArgument다. 표본 형식은 Lossy, 코덱은 Opus다.
+// 하고(다르면 Unsupported), packet 손상은 CorruptData다. 표본 형식은 Lossy, 코덱은 Opus다.
 // out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeOpus(Span<const uint8> file,
                                              DecodedSourceAudio& out) noexcept;
 
 // MPEG-1·2·2.5 Layer III(MP3)를 디코드한다(3.26절). ID3v2·ID3v1·APEv2 tag는 건너뛰고,
 // Xing/Info(LAME) tag가 있으면 encoder delay·padding을 잘라 원본 길이로 맞춘다. 채널·rate가 중간에
-// 바뀌거나 Layer I·II면 Unsupported, MPEG frame이 없으면 InvalidArgument다. 표본 형식은 Lossy,
+// 바뀌거나 Layer I·II면 Unsupported, MPEG frame이 없으면 CorruptData다. 표본 형식은 Lossy,
 // 코덱은 Mp3다. out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeMp3(Span<const uint8> file,
                                             DecodedSourceAudio& out) noexcept;

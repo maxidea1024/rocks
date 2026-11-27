@@ -359,7 +359,7 @@ TEST(Codec_EditorOnlyFieldIdsWithoutEditorData) {
                     CHECK(hooks.diagnostics[index].kind != FieldDiagnosticKind::UnknownField);
                 }
             } else {
-                CHECK(loaded.Error() == ErrorCode::InvalidArgument);
+                CHECK(loaded.Error() == ErrorCode::CorruptData);
             }
         }
 

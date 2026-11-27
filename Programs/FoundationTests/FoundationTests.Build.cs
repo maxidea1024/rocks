@@ -126,8 +126,9 @@ public abstract class TestsModule : ModuleRules
         // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars).
         ["EngineAudio"] = ["ConfigTestFixtures"],
         ["ImageCodec"] = ["Compression"],
-        // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support.
-        ["InputActions"] = ["AssetTestFixtures"],
+        // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support; the function binding tests
+        // (IA7) bind to the reflected handlers of InputActionsTestFixtures.
+        ["InputActions"] = ["AssetTestFixtures", "InputActionsTestFixtures"],
         // MemoryFileSystem.h(AssetDatabase Tests — header only): the profile tests read layered JSON from memory.
         ["TargetProfiles"] = ["AssetDatabase"],
         ["Texture"] = ["ObjectSerialization"],
@@ -263,12 +264,14 @@ public abstract class TestsModule : ModuleRules
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
         // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
         // test types that derive from World types), the asset fixture (AssetTestFixtures: test asset classes that derive from AssetRuntime's Asset) and the
-        // shader parameter fixture (ShaderParameterTestFixtures: generated shader parameter structs, Docs/Design/ShaderSystem section 16.2).
+        // shader parameter fixture (ShaderParameterTestFixtures: generated shader parameter structs, Docs/Design/ShaderSystem section 16.2) and the
+        // input actions fixture (InputActionsTestFixtures: reflected handlers for the function binding tests, Docs/Design/InputActions section 5.1).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
             TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures"],
-            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures", "ShaderParameterTestFixtures"]
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures", "ShaderParameterTestFixtures",
+                "InputActionsTestFixtures"]
         };
         return new()
         {

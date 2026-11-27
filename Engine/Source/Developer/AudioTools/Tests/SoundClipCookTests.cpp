@@ -47,6 +47,9 @@ constexpr double ToneAmplitude = 0.3;
 constexpr double MinimumSignalToNoise = 100.0;
 // 시작·끝 과도 응답을 빼는 frame 수다.
 constexpr uint32 EdgeFrames = 4800;
+// 플랫폼 데이터 머리의 형식 판·codec id 칸 위치다(3.30.1절 배치 — magic 4 byte 뒤 u16, 그 뒤 u8).
+constexpr usize PlatformDataVersionOffset = 4;
+constexpr usize PlatformDataCodecOffset = 6;
 constexpr double PerfectSignalToNoise = 1.0e30;
 // PCM16 왕복 허용오차(1 LSB)다.
 constexpr float Pcm16Lsb = 1.0f / 32768.0f;
@@ -1035,8 +1038,9 @@ TEST(SoundClipCook_FailuresLeaveEditorObject) {
     }));
 }
 
-// LoadCookedPcm 오류(3.37.4절): platformData 없음 NotReady, 손상 payload·머리와 필드 불일치
-// CorruptData, 디코더 없음 NotFound, 채널 셋 Unsupported. 실패는 앞 PCM을 그대로 둔다.
+// LoadCookedPcm 오류(3.37.4·3.38절): platformData 없음 NotReady, 손상 payload·형식 위반·잘림·머리와
+// 필드 불일치 CorruptData, 디코더 없음 NotFound, 채널 셋·다른 형식 판·표 밖 codec id Unsupported.
+// 실패는 앞 PCM을 그대로 둔다.
 TEST(SoundClipCook_LoadCookedPcmErrors) {
     CookScene scene;
     REQUIRE(scene.ready);
@@ -1069,6 +1073,21 @@ TEST(SoundClipCook_LoadCookedPcmErrors) {
     CHECK(
         cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &broken, scene.decoders).Error() ==
         ErrorCode::CorruptData);
+    // 잘린 데이터(payload 마지막 byte가 없다 — Parse는 받지만 전체가 아니다, 3.38절).
+    Array<uint8> truncated = scene.PlatformBytes(loaded);
+    REQUIRE(truncated.TryResize(truncated.Size() - 1));
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &truncated, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    // 다른 형식 판(새 쿠커의 데이터)은 손상이 아니라 Unsupported다(하부 값을 그대로 넘긴다).
+    Array<uint8> newer = scene.PlatformBytes(loaded);
+    newer[PlatformDataVersionOffset] = static_cast<uint8>(newer[PlatformDataVersionOffset] + 1);
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &newer, scene.decoders).Error() ==
+          ErrorCode::Unsupported);
+    Array<uint8> unknownCodec = scene.PlatformBytes(loaded);
+    unknownCodec[PlatformDataCodecOffset] = static_cast<uint8>(audio::MaxAudioCodecs);
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &unknownCodec, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    CHECK(!cooked->Pcm());
 
     // 정상 로드 뒤 머리와 필드가 다르면 CorruptData이고 앞 PCM을 둔다.
     REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
