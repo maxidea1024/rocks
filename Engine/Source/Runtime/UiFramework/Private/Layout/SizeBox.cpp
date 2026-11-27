@@ -91,8 +91,9 @@ Result<void> SizeBox::SetAspectRatioRange(float minimum, float maximum) noexcept
 
 Vec2 SizeBox::ComputeDesiredSize(float) const noexcept {
     const Element* child = ChildAt(0);
-    const Vec2 size =
-        child && child->GetVisibility() != Visibility::Collapsed ? child->GetDesiredSize() : Vec2{};
+    const Vec2 size = child && child->GetVisibility() != Visibility::Collapsed
+                          ? child->SlotDesiredSize()
+                          : Vec2{};
     return Vec2(math::Clamp(widthOverride_ ? overrideSize_.x : size.x, minimum_.x, maximum_.x),
                 math::Clamp(heightOverride_ ? overrideSize_.y : size.y, minimum_.y, maximum_.y));
 }
@@ -112,7 +113,7 @@ Result<void> SizeBox::Arrange(const Geometry& geometry) noexcept {
         }
 
         const auto offset = (geometry.size - size) * 0.5f;
-        return child->ArrangeIfNeeded(
+        return child->ArrangeInSlot(
             GetGeometry().MakeChild(size, {1, 0, 0, 1, offset.x, offset.y}, {}, {}));
     }
 

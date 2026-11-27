@@ -3,7 +3,7 @@
 #include <Core/Delegate.h>
 #include <UiWidget/Widget.h>
 #include <UiWidget/WidgetSlot.h>
-#include <UiFramework/Layout/SlotPresenter.h>
+#include <UiCore/SlotPlacement.h>
 
 namespace rocks::ui {
 

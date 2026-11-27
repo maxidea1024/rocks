@@ -8,13 +8,12 @@ namespace rocks::ui {
 Result<void> ScrollBoxWidget::ApplySlotSize(Element& panel, Element& child, StackSizeRule rule,
                                             float weight) noexcept {
     auto& stack = static_cast<StackPanel&>(ChildHost(panel));
-    // 여백 또는 내용 정렬이 있으면 슬롯의 직접 자식은 SlotPresenter다.
-    auto* entry = child.Parent() == &stack ? &child : child.Parent();
-    if (!entry || entry->Parent() != &stack) {
+    // 여백·정렬은 자식의 slot 배치라 슬롯의 직접 자식이 그 요소다(20.10절).
+    if (child.Parent() != &stack) {
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
-    return stack.SetSlotLayout(*entry, {.rule = rule, .weight = weight});
+    return stack.SetSlotLayout(child, {.rule = rule, .weight = weight});
 }
 
 Result<void> ScrollBoxWidget::AttachChild(ObjectRegistry& objects, ObjectHandle slot,

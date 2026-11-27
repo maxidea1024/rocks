@@ -24,7 +24,61 @@ public:
     UniquePtr<VisibilityAttribute> visibility;
     // 평가 중에 풀린 묶음이다(그 갱신이 끝나면 해제한다 — 루프가 잡은 다음 묶음일 수 있다).
     UniquePtr<VisibilityAttribute> retiredVisibility;
+    Optional<SlotPlacement> slot{};
 };
+
+Result<void> Element::SetSlotPlacement(const SlotPlacement& placement) noexcept {
+    if (!placement.IsValid()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const SlotPlacement* current = GetSlotPlacement();
+    if (placement.IsIdentity() ? !current : (current && *current == placement)) {
+        return Result<void>::Success();
+    }
+
+    if (placement.IsIdentity()) {
+        semantics_->slot = {};
+    } else {
+        auto ready = EnsureSemantics();
+        if (!ready) {
+            return ready;
+        }
+
+        semantics_->slot = placement;
+    }
+
+    if (parent_) {
+        parent_->InvalidateLayout();
+    }
+
+    InvalidateArrangement();
+    return Result<void>::Success();
+}
+
+const SlotPlacement* Element::GetSlotPlacement() const noexcept {
+    return semantics_ && semantics_->slot ? &*semantics_->slot : nullptr;
+}
+
+Vec2 Element::SlotDesiredSize() const noexcept {
+    const SlotPlacement* slot = GetSlotPlacement();
+    return slot ? slot->PaddedSize(GetDesiredSize()) : GetDesiredSize();
+}
+
+Vec2 Element::MeasureInSlot(float width) noexcept {
+    const SlotPlacement* slot = GetSlotPlacement();
+    if (!slot) {
+        return MeasureForWidth(width);
+    }
+
+    const float inner = math::Max(0.0f, width - slot->padding.x - slot->padding.z);
+    return slot->PaddedSize(MeasureForWidth(inner));
+}
+
+Result<void> Element::ArrangeInSlot(const Geometry& area) noexcept {
+    const SlotPlacement* slot = GetSlotPlacement();
+    return slot ? slot->ArrangeChild(*this, area) : ArrangeIfNeeded(area);
+}
 
 Result<void> Element::BindVisibility(Delegate<Visibility()>&& getter) noexcept {
     if (!getter.IsBound()) {

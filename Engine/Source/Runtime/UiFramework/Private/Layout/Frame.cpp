@@ -87,7 +87,7 @@ Result<void> Frame::SetPadding(Vec4 padding) noexcept {
 Vec2 Frame::ComputeDesiredSize(float) const noexcept {
     const Element* child = ChildAt(0);
     const Vec2 childSize = child != nullptr && child->GetVisibility() != Visibility::Collapsed
-                               ? child->GetDesiredSize()
+                               ? child->SlotDesiredSize()
                                : Vec2{};
     const Vec2 size(childSize.x + padding_.x + padding_.z, childSize.y + padding_.y + padding_.w);
     return Vec2(math::Max(size.x, desiredSize_.Get().x), math::Max(size.y, desiredSize_.Get().y));
@@ -100,7 +100,7 @@ Vec2 Frame::MeasureForWidth(float width) noexcept {
     }
 
     const float inner = math::Max(0.0f, width - padding_.x - padding_.z);
-    const Vec2 measured = child->MeasureForWidth(inner);
+    const Vec2 measured = child->MeasureInSlot(inner);
     return {math::Max(measured.x + padding_.x + padding_.z, desiredSize_.Get().x),
             math::Max(measured.y + padding_.y + padding_.w, desiredSize_.Get().y)};
 }
@@ -138,13 +138,13 @@ Result<void> Frame::Arrange(const Geometry& geometry) noexcept {
     if (child != nullptr && child->GetVisibility() != Visibility::Collapsed) {
         const Vec2 area(math::Max(0.0f, geometry.size.x - padding_.x - padding_.z),
                         math::Max(0.0f, geometry.size.y - padding_.y - padding_.w));
-        const Vec2 desired = child->GetDesiredSize();
+        const Vec2 desired = child->SlotDesiredSize();
         Vec2 size;
         Vec2 start;
         PlaceAxis(horizontal_, area.x, desired.x, size.x, start.x);
         PlaceAxis(vertical_, area.y, desired.y, size.y, start.y);
         const AffineTransform2D offset{1, 0, 0, 1, padding_.x + start.x, padding_.y + start.y};
-        return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, offset, {}, {}));
+        return child->ArrangeInSlot(GetGeometry().MakeChild(size, offset, {}, {}));
     }
 
     return Result<void>::Success();

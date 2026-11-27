@@ -2,7 +2,6 @@
 #include <UiWidget/CarouselWidget.generated.h>
 #include <UiFramework/Layout/HorizontalStack.h>
 #include <UiFramework/Layout/SizeBox.h>
-#include <UiFramework/Layout/SlotPresenter.h>
 
 namespace rocks::ui {
 
@@ -86,15 +85,10 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
                     }
                 }
             }));
-        auto wrapper = SharedPtr<SlotPresenter>::TryMake(allocator, allocator,
-                                                         SlotPlacement{.padding = buttonPadding_});
-        if (!wrapper) {
-            return Result<void>::Failure(wrapper.Error());
-        }
-
-        auto added = wrapper.Value()->TryAddChild(button.Value());
+        // 단추 여백은 단추의 slot 배치다(20.10절 — wrapper를 끼우지 않는다).
+        auto added = button.Value()->SetSlotPlacement(SlotPlacement{.padding = buttonPadding_});
         if (added) {
-            added = row.Value()->TryAddChild(wrapper.Value());
+            added = row.Value()->TryAddChild(button.Value());
         }
 
         if (!added) {

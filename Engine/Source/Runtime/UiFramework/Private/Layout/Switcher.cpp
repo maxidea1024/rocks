@@ -44,14 +44,14 @@ Span<const SharedPtr<Element>> Switcher::ActiveChildren() const noexcept {
 
 Vec2 Switcher::ComputeDesiredSize(float) const noexcept {
     const Element* child = ActiveChild();
-    return child ? child->GetDesiredSize() : Vec2{};
+    return child ? child->SlotDesiredSize() : Vec2{};
 }
 
 Result<void> Switcher::Arrange(const Geometry& geometry) noexcept {
     SetGeometry(geometry);
     Element* child = ActiveChild();
     if (child && child->GetVisibility() != Visibility::Collapsed) {
-        return child->ArrangeIfNeeded(GetGeometry());
+        return child->ArrangeInSlot(GetGeometry());
     }
 
     return Result<void>::Success();

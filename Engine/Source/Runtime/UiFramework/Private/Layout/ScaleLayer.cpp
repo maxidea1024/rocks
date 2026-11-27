@@ -32,7 +32,7 @@ float ScaleLayer::RelativeLayoutScale() const noexcept {
 
 Vec2 ScaleLayer::ComputeDesiredSize(float) const noexcept {
     const Element* child = ChildAt(0);
-    return child ? child->GetDesiredSize() * scale_ : Vec2{};
+    return child ? child->SlotDesiredSize() * scale_ : Vec2{};
 }
 
 Result<void> ScaleLayer::Arrange(const Geometry& geometry) noexcept {
@@ -48,7 +48,7 @@ Result<void> ScaleLayer::Arrange(const Geometry& geometry) noexcept {
     }
 
     const AffineTransform2D transform{scale_, 0, 0, scale_, 0, 0};
-    return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, transform, {}, {}));
+    return child->ArrangeInSlot(GetGeometry().MakeChild(size, transform, {}, {}));
 }
 
 } // namespace rocks::ui

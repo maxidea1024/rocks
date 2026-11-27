@@ -1,4 +1,4 @@
-#include <UiFramework/Layout/SlotPresenter.h>
+#include <UiCore/SlotPlacement.h>
 #include <UiFramework/Layout/StackPanel.h>
 
 namespace rocks::ui {
@@ -179,7 +179,7 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
             }
         }
 
-        const Vec2 desired = ChildAt(i)->GetDesiredSize();
+        const Vec2 desired = ChildAt(i)->SlotDesiredSize();
         if (!visibleSlots.IsEmpty()) {
             slot.before += spacing_;
         }
@@ -221,8 +221,8 @@ Result<void> StackPanel::Arrange(const Geometry& geometry) noexcept {
                                    : Vec2{placement.size, geometry.size.y};
         const AffineTransform2D offset{
             1, 0, 0, 1, vertical ? 0.0f : placement.offset, vertical ? placement.offset : 0.0f};
-        auto childResult =
-            content.ArrangeChild(*child, GetGeometry().MakeChild(size, offset, {}, {}));
+        auto childResult = child->ArrangeInSlot(content.PlaceChild(
+            child->SlotDesiredSize(), GetGeometry().MakeChild(size, offset, {}, {})));
         if (!childResult) {
             return childResult;
         }
@@ -255,7 +255,7 @@ Vec2 StackPanel::MeasureForWidth(float width) noexcept {
             if (slots_[i].rule == StackSizeRule::Fill) {
                 weights += slots_[i].weight;
             } else {
-                fixed += child->GetDesiredSize().x;
+                fixed += child->SlotDesiredSize().x;
             }
         }
 
@@ -273,8 +273,8 @@ Vec2 StackPanel::MeasureForWidth(float width) noexcept {
             }
 
             const Vec2 size = slots_[i].rule == StackSizeRule::Fill
-                                  ? child->MeasureForWidth(remaining * slots_[i].weight / weights)
-                                  : child->GetDesiredSize();
+                                  ? child->MeasureInSlot(remaining * slots_[i].weight / weights)
+                                  : child->SlotDesiredSize();
             height = math::Max(height, size.y + slots_[i].crossBefore + slots_[i].crossAfter);
         }
 
@@ -291,7 +291,7 @@ Vec2 StackPanel::MeasureForWidth(float width) noexcept {
         }
 
         const float inner = math::Max(0.0f, width - slots_[i].crossBefore - slots_[i].crossAfter);
-        const Vec2 size = child->MeasureForWidth(inner);
+        const Vec2 size = child->MeasureInSlot(inner);
         if (hasVisible) {
             along += spacing_;
         }
@@ -316,7 +316,7 @@ Vec2 StackPanel::ComputeDesiredSize(float) const noexcept {
             continue;
         }
 
-        const Vec2 size = child->GetDesiredSize();
+        const Vec2 size = child->SlotDesiredSize();
         const float childAlong = vertical ? size.y : size.x;
         const float childAcross = vertical ? size.x : size.y;
         if (hasVisible) {

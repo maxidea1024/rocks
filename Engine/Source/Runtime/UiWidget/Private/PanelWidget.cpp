@@ -81,54 +81,35 @@ Result<ObjectHandle> PanelWidget::AddAlignedChild(ObjectRegistry& objects, Objec
 
 Result<void> PanelWidget::UpdateAlignedSlot(ObjectRegistry& objects, ObjectHandle, Element& panel,
                                             Element& child, const SlotPlacement& layout) noexcept {
-    auto& host = ChildHost(panel);
-    if (child.Parent() == &host) {
-        if (layout.padding == Vec4{} && layout.horizontal == StackAlignment::Fill &&
-            layout.vertical == StackAlignment::Fill) {
-            return Result<void>::Success();
-        }
-
-        return SlotPresenter::WrapChild(objects.ObjectAllocator(), child, layout);
-    }
-
-    if (!child.Parent() || child.Parent()->Parent() != &host) {
+    // 여백·정렬은 자식의 slot 배치다(Docs/Design/UiToolkit 20.10절 — wrapper Element를 끼우지
+    // 않는다).
+    (void)objects;
+    if (child.Parent() != &ChildHost(panel)) {
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
-    static_cast<SlotPresenter&>(*child.Parent()).SetPlacement(layout);
-    return Result<void>::Success();
+    return child.SetSlotPlacement(layout);
 }
 
 Result<void> PanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandle id, Element& panel,
                                       const SharedPtr<Element>& child) noexcept {
     auto slot = objects.Resolve<AlignedWidgetSlot>(objects.OwnerAccess(), id);
-    if (!slot) {
-        return slot.Error() == ErrorCode::TypeMismatch ? ChildHost(panel).TryAddChild(child)
-                                                       : Result<void>::Failure(slot.Error());
+    if (!slot && slot.Error() != ErrorCode::TypeMismatch) {
+        return Result<void>::Failure(slot.Error());
     }
 
-    const auto layout = slot.Value().Get().Value()->Layout();
+    // 여백·정렬이 없는 slot이면 기본 배치(다른 패널에서 쓰던 값을 지운다 — 20.10절).
+    const SlotPlacement layout = slot ? slot.Value().Get().Value()->Layout() : SlotPlacement{};
     if (!layout.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (layout.padding == Vec4{} && layout.horizontal == StackAlignment::Fill &&
-        layout.vertical == StackAlignment::Fill) {
-        return ChildHost(panel).TryAddChild(child);
+    auto placed = child->SetSlotPlacement(layout);
+    if (!placed) {
+        return placed;
     }
 
-    auto& allocator = objects.ObjectAllocator();
-    auto presenter = SharedPtr<SlotPresenter>::TryMake(allocator, allocator, layout);
-    if (!presenter) {
-        return Result<void>::Failure(presenter.Error());
-    }
-
-    auto attached = presenter.Value()->TryAddChild(child);
-    if (!attached) {
-        return attached;
-    }
-
-    return ChildHost(panel).TryAddChild(presenter.Value());
+    return ChildHost(panel).TryAddChild(child);
 }
 
 Result<void> PanelWidget::ValidateNewChild(ObjectRegistry& objects,

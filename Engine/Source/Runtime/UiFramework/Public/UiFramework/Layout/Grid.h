@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Math/Vector4.h>
-#include <UiFramework/Layout/SlotPresenter.h>
+#include <UiCore/SlotPlacement.h>
 
 namespace rocks::ui {
 

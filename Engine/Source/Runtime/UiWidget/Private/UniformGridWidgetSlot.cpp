@@ -1,5 +1,5 @@
 #include <UiWidget/UniformGridWidgetSlot.h>
-#include <UiFramework/Layout/SlotPresenter.h>
+#include <UiCore/SlotPlacement.h>
 
 #include "UpdateLiveWidgetSlot.h"
 #include <UiWidget/UniformGridPanelWidget.generated.h>

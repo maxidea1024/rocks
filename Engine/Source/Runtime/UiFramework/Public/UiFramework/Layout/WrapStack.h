@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiFramework/Layout/StackPanel.h>
-#include <UiFramework/Layout/SlotPresenter.h>
+#include <UiCore/SlotPlacement.h>
 
 namespace rocks::ui {
 

@@ -13,6 +13,7 @@
 #include <UiCore/ColorRef.h>
 #include <UiCore/FocusCause.h>
 #include <UiCore/PaintList.h>
+#include <UiCore/SlotPlacement.h>
 #include <UiCore/Styles/StyleBrush.h>
 #include <UiCore/UiHostServices.h>
 
@@ -351,6 +352,20 @@ public:
     Result<void> BindVisibility(Delegate<Visibility()>&& getter) noexcept;
 
     Visibility GetVisibility() const noexcept;
+
+    // 부모 slot 안에서의 여백·정렬이다(Docs/Design/UiToolkit 20.10절 — UE FSimpleSlot·패널 slot).
+    // 단일 자식 호스트(Frame·SizeBox·ScaleLayer·Switcher·Overlay·StackPanel)가 이 요소를
+    // 측정·배치할 때 쓴다(SlotDesiredSize·MeasureInSlot·ArrangeInSlot). 기본값이면 지운다. 바꾸면
+    // 부모 배치를 다시 한다.
+    Result<void> SetSlotPlacement(const SlotPlacement& placement) noexcept;
+    // 기본값이면 nullptr이다.
+    const SlotPlacement* GetSlotPlacement() const noexcept;
+    // slot 여백을 더한 원하는 크기다.
+    Vec2 SlotDesiredSize() const noexcept;
+    // slot 여백을 뺀 폭으로 측정하고 여백을 더한다.
+    Vec2 MeasureInSlot(float width) noexcept;
+    // slot 여백·정렬을 적용해 area 안에 배치한다.
+    Result<void> ArrangeInSlot(const Geometry& area) noexcept;
 
     void SetEnabled(bool enabled) noexcept;
 

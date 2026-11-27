@@ -124,7 +124,7 @@ Vec2 Overlay::ComputeDesiredSize(float) const noexcept {
     for (usize i = 0; i < ChildCount(); ++i) {
         const Element* child = ChildAt(i);
         if (child->GetVisibility() != Visibility::Collapsed) {
-            const Vec2 desired = child->GetDesiredSize();
+            const Vec2 desired = child->SlotDesiredSize();
             size.x = math::Max(size.x, desired.x);
             size.y = math::Max(size.y, desired.y);
         }
@@ -147,7 +147,7 @@ Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
             child->SetPopupArea(PopupLayerArea(*child));
         }
 
-        auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
+        auto arranged = child->ArrangeInSlot(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
         if (!arranged) {
             return arranged;
         }
