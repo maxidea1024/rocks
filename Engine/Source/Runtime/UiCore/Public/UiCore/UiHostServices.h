@@ -77,8 +77,11 @@ public:
     // 대기열을 지금 돌린다. 다시 들어오면 0이다. 돈 항목 수다.
     usize RunFrameActions() noexcept;
     usize PendingFrameActionCount() const noexcept;
-    // 돌리지 않고 버린다. 버린 수다.
+    // 돌리지 않고 버린다. 버린 수다. 버림 세대(FrameActionEpoch)가 오른다.
     usize DiscardFrameActions() noexcept;
+    // 버림 세대다. 항목을 넣은 쪽이 기억했다가 다르면 그 항목은 버려진 것이다(다시 넣는다
+    // — 22.6절).
+    uint64 FrameActionEpoch() const noexcept;
 
     // 이 묶음을 가진 상위 층 객체다(Docs/Design/UiToolkit 22.7a절 — UiFramework Application이
     // 자기를 달고 Application::Find가 찾는다). UiCore는 형식을 모르므로 표지 kind(형식마다 하나인
@@ -102,6 +105,7 @@ private:
     void* owner_ = nullptr;
     bool runningTeardown_ = false;
     bool runningFrameActions_ = false;
+    uint64 frameActionEpoch_ = 0;
     uint64 styleChanges_ = 1;
 };
 

@@ -219,7 +219,7 @@ public:
             lock_ = 0;
             pendingUpgrade_ = false;
             if (services_) {
-                services_->OnUnlocked();
+                services_->FlushEdits();
             }
 
             return S_OK;
@@ -600,8 +600,9 @@ public:
         return CanWrite(lock_) ? E_NOTIMPL : TS_E_NOLOCK;
     }
 
-    // ITfContextOwnerCompositionSink(UE FTextStoreACP 764–850행). 잠금 안에서 오므로 풀 때 기록이
-    // 된다. 잠금 밖에서 오면 바로 낸다.
+    // ITfContextOwnerCompositionSink(UE FTextStoreACP 764–850행). 시작·끝은 잠금 안이라도 그
+    // 자리에서 기록을 낸다 — 한 잠금 안의 끝 → 시작이 확정·시작으로 나뉘어야 앞 음절이 확정된다
+    // (22.13절 조합 경계 — 큐 기록이라 TSF 알림 금지와 무관). 범위 갱신은 잠금을 풀 때 낸다.
     HRESULT STDMETHODCALLTYPE OnStartComposition(ITfCompositionView* view,
                                                  BOOL* accepted) override {
         if (accepted == nullptr) {
@@ -613,6 +614,8 @@ public:
             return S_OK;
         }
 
+        // 시작 전의 편집(조합 밖 삽입 등)은 따로 확정 편집으로 낸다.
+        FlushNow();
         view->AddRef();
         composition_.Attach(view);
         windows::ComRef<ITfRange> range;
@@ -651,14 +654,20 @@ public:
 
         composition_.Reset();
         document_.EndComposition();
-        FlushOutsideLock();
+        FlushNow();
         return S_OK;
     }
 
 private:
     void FlushOutsideLock() noexcept {
-        if (lock_ == 0 && services_) {
-            services_->OnUnlocked();
+        if (lock_ == 0) {
+            FlushNow();
+        }
+    }
+
+    void FlushNow() noexcept {
+        if (services_) {
+            services_->FlushEdits();
         }
     }
 
@@ -909,7 +918,9 @@ void Win64TextServices::Detach(bool complete) noexcept {
         TerminateComposition();
     }
 
-    // 창의 문서 연결을 붙이기 전으로 되돌린다(없으면 CUAS·IMM 기본 — 문맥 밖 게임 문자 입력).
+    // 창의 문서 연결을 붙이기 전으로 되돌린다. 되돌린 문서 관리자가 있고 창에 초점이 있으면 거기에
+    // 초점을 둔다. 없으면 창이 WM_IME_SETCONTEXT를 다시 보내(RefreshInputMethodContext) CUAS가 IMM
+    // 문맥 문서로 초점을 옮긴다 — 문맥 밖 게임 문자 입력은 IMM 경로다(22.13절).
     ITfDocumentMgr* replaced = nullptr;
     if (SUCCEEDED(threadManager_->AssociateFocus(window_, previous_.Get(), &replaced)) &&
         replaced != nullptr) {
@@ -950,8 +961,22 @@ void Win64TextServices::Sync(bool layoutChanged) noexcept {
     TextInputDocument& document = store_->Document();
     if (session_.PendingCount() == 0 && !document.HasUnflushedEdits()) {
         const uint32 length = client_->GetTextLength();
+        if (length > MaxTextInputDocumentCodeUnits) {
+            // 멈춘 거울로 엉뚱한 자리에 쓰지 않게 문서를 떼고 IMM으로 받는다(22.13절).
+            if (!loggedTooLong_) {
+                loggedTooLong_ = true;
+                Log::Warning(LogWin64TextServices,
+                             "Text grew to {Length} code units, over the TSF document capacity; "
+                             "IME uses IMM for it",
+                             length);
+            }
+
+            Detach(true);
+            return;
+        }
+
         Array<char16_t> text(allocator_);
-        if (length <= MaxTextInputDocumentCodeUnits && client_->GetText(0, length, text)) {
+        if (client_->GetText(0, length, text)) {
             uint32 begin = 0;
             uint32 selected = 0;
             client_->GetSelection(begin, selected);
@@ -980,7 +1005,7 @@ bool Win64TextServices::HasPendingRecords() const noexcept {
     return session_.PendingCount() != 0;
 }
 
-void Win64TextServices::OnUnlocked() noexcept {
+void Win64TextServices::FlushEdits() noexcept {
     if (store_ == nullptr) {
         return;
     }

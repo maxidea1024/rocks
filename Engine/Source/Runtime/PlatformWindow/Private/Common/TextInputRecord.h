@@ -11,7 +11,10 @@ enum class TextInputRecordKind : uint8 {
     Commit,
     End,
     // TSF 거울 문서의 편집을 그대로 옮기는 기록이다(Docs/Design/UiToolkit 22.13절). 위치는 기록을
-    // 앞에서부터 적용한 뒤의 문맥 글자 기준이다.
+    // 앞에서부터 적용한 뒤의 문맥 글자 기준이고, Rebase 어긋남을 더한다.
+    // 이번 Flush 위치의 기준(거울이 본 선택 시작)이다. 조합 중이 아니면 "지금 문맥 선택 시작 −
+    // 기준"을 어긋남으로 잡는다(TIP를 통과한 키가 큐에서 먼저 적용된 만큼 — 22.13절 위치 기준).
+    Rebase,
     // 조합을 시작한다(이미 조합 중이면 아무 일도 없다).
     CompositionBegin,
     // [begin, begin + length)를 글자로 바꾼다. 조합 중이면 미리보기에, 아니면 확정 편집 하나다.

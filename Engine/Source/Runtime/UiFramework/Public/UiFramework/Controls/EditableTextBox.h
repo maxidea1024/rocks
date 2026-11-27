@@ -64,6 +64,8 @@ public:
     Vec2 ComputeDesiredSize(float scale) const noexcept override;
     Result<void> Arrange(const Geometry& geometry) noexcept override;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
+    // 편집기가 덮지 않는 상자 칸(표지·막대 옆 여백)을 눌러도 편집기가 초점을 받는다(22.2절).
+    PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
     void ApplyStyles(const UiHostServices& host) noexcept override;
@@ -103,8 +105,11 @@ private:
     uint32 hoverCount_ = 0;
     bool multiline_;
     bool styleExplicit_ = false;
-    // 프레임 동작 대기열에 팝업 열기가 들어 있다(한 상자에 하나).
+    // 프레임 동작 대기열에 팝업 열기가 들어 있다(한 상자에 하나). 넣은 묶음과 그 버림 세대를
+    // 기억한다 — 대기열이 버려졌으면 다시 붙을 때 새로 넣는다(22.6절).
     bool popupQueued_ = false;
+    const UiHostServices* queuedHost_ = nullptr;
+    uint64 queuedEpoch_ = 0;
     // 표지에 준 팝업 어긋남이다(상자 아래 끝까지 — 22.6절).
     Vec2 popupOffset_{};
 };

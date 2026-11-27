@@ -27,6 +27,9 @@ struct PopupRequest {
     SharedPtr<Element> layer;
     SharedPtr<Element> anchor;
     void (*close)(Element&) noexcept = nullptr;
+    // anchor가 숨어도(고르지 않은 탭 등) 닫지 않고 층만 접는다(Docs/Design/UiToolkit 22.6절 —
+    // 초점을 받지 않는 오류 팝업). 거짓이면 호스트가 닫는다.
+    bool keepWhileHidden = false;
 };
 
 // 요소가 커서를 정하지 않았다는 표지다(cursorOverride_ — 부모나 기본 커서를 쓴다).

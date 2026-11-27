@@ -72,9 +72,10 @@ public:
     void UpdateComposition(uint32 start, uint32 end) noexcept;
     void EndComposition() noexcept;
 
-    // 기준 뒤 바뀐 것을 session에 TSF 기록으로 낸다(22.13절 순서): 조합 시작 → 글자 바꿈 → 조합
-    // 범위 → 조합 확정 → 선택. 그다음 기준을 거울로 옮긴다. 마지막 기록 번호(없으면 비어 있음)와
-    // 넘침을 돌려준다.
+    // 기준 뒤 바뀐 것을 session에 TSF 기록으로 낸다(22.13절 순서): 위치 기준(Rebase) → (기준과 조합
+    // 세대가 다르면 앞 조합 확정) → 조합 시작 → 글자 바꿈 → 조합 범위 → 조합 확정 → 선택. 그다음
+    // 기준을 거울로 옮긴다. 넘치면 남은 기록은 내지 않는다(버려진 기록을 전제로 한 위치라서).
+    // 마지막 기록 번호(없으면 비어 있음)와 넘침을 돌려준다.
     TextInputRecordResult Flush(TextInputSession& session) noexcept;
 
 private:
@@ -91,6 +92,8 @@ private:
     bool composing_ = false;
     uint32 compositionStart_ = 0;
     uint32 compositionEnd_ = 0;
+    // 조합 세대다(시작마다 오른다 — 한 잠금 안의 끝 → 시작을 가른다).
+    uint32 generation_ = 0;
     // 기준 — 내보낸 기록을 다 적용한 뒤 문맥이 가질 상태다.
     char16_t baseText_[MaxTextInputDocumentCodeUnits]{};
     uint32 baseLength_ = 0;
@@ -99,6 +102,7 @@ private:
     bool baseComposing_ = false;
     uint32 baseCompositionStart_ = 0;
     uint32 baseCompositionEnd_ = 0;
+    uint32 baseGeneration_ = 0;
 };
 
 } // namespace rocks::platform

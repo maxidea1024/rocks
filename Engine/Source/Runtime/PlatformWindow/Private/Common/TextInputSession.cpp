@@ -30,6 +30,7 @@ usize TextInputSession::PendingCount() const noexcept {
 void TextInputSession::Activate(TextInputClient& client) noexcept {
     Clear();
     composing_ = false;
+    offset_ = 0;
     active_ = &client;
 }
 
@@ -173,6 +174,12 @@ void TextInputSession::BeginIfNeeded() noexcept {
     active_->BeginComposition();
 }
 
+uint32 TextInputSession::Shift(uint32 position) const noexcept {
+    const int64 shifted = static_cast<int64>(position) + offset_;
+    const int64 length = static_cast<int64>(active_->GetTextLength());
+    return static_cast<uint32>(shifted < 0 ? 0 : (shifted > length ? length : shifted));
+}
+
 void TextInputSession::Apply(const Entry& entry) noexcept {
     TextInputClient& client = *active_;
     const Span<const char16_t> text(text_ + entry.offset, entry.length);
@@ -205,32 +212,52 @@ void TextInputSession::Apply(const Entry& entry) noexcept {
             client.EndComposition();
         }
         break;
+    case TextInputRecordKind::Rebase: {
+        // 조합 중이면 키는 IME가 먹으므로 어긋남이 없다(22.13절 위치 기준).
+        offset_ = 0;
+        if (!composing_) {
+            uint32 begin = 0;
+            uint32 length = 0;
+            client.GetSelection(begin, length);
+            offset_ = static_cast<int64>(begin) - static_cast<int64>(entry.rangeBegin);
+        }
+        break;
+    }
     case TextInputRecordKind::CompositionBegin:
         BeginIfNeeded();
         break;
-    case TextInputRecordKind::TextReplace:
+    case TextInputRecordKind::TextReplace: {
+        const uint32 begin = Shift(entry.rangeBegin);
+        const uint32 end = Shift(entry.rangeBegin + entry.rangeLength);
         if (composing_) {
-            client.SetText(entry.rangeBegin, entry.rangeLength, text);
+            client.SetText(begin, end - begin, text);
         } else {
             // 조합 밖 편집은 확정 하나다(이력·변경 알림 한 번 — 자동 고침·이모지 패널).
             client.BeginComposition();
-            client.SetText(entry.rangeBegin, entry.rangeLength, text);
+            client.SetText(begin, end - begin, text);
             client.EndComposition();
         }
         break;
-    case TextInputRecordKind::CompositionRange:
+    }
+    case TextInputRecordKind::CompositionRange: {
         BeginIfNeeded();
-        client.UpdateCompositionRange(entry.rangeBegin, entry.rangeLength);
+        // 세션도 범위를 따라간다 — 넘침 '끝'이 이 범위를 지운다.
+        compositionBegin_ = Shift(entry.rangeBegin);
+        compositionLength_ = Shift(entry.rangeBegin + entry.rangeLength) - compositionBegin_;
+        client.UpdateCompositionRange(compositionBegin_, compositionLength_);
         break;
+    }
     case TextInputRecordKind::CompositionCommit:
         if (composing_) {
             composing_ = false;
             client.EndComposition();
         }
         break;
-    case TextInputRecordKind::Selection:
-        client.SetSelection(entry.rangeBegin, entry.rangeLength);
+    case TextInputRecordKind::Selection: {
+        const uint32 begin = Shift(entry.rangeBegin);
+        client.SetSelection(begin, Shift(entry.rangeBegin + entry.rangeLength) - begin);
         break;
+    }
     }
 }
 

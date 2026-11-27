@@ -7,6 +7,7 @@
 #include <UiFramework/Controls/EditableTextBox.h>
 #include <UiFramework/Layout/AnchorCanvas.h>
 #include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Layout/Switcher.h>
 #include <UiFramework/Menus/MenuHeading.h>
 #include <UiFramework/Menus/MenuRow.h>
 #include <UiFramework/Popups/MenuAnchor.h>
@@ -1275,6 +1276,142 @@ TEST(UiFramework_EditableTextPressCommitsCompositionAndDrawsDottedUnderline) {
     Press(editor, input::Key::Z, {.control = true});
     CHECK(editor.GetText() == "ab");
     app.Shutdown();
+}
+
+// 리뷰 2026-11-28 반영 시험이다(22장).
+TEST(UiFramework_EditableTextDoubleClickPastTheEndSelectsTheLastWord) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    REQUIRE(pointer.Start(allocator, "hello world", false, false));
+    // 글자 오른쪽 빈 곳(끝)을 두 번 누르면 마지막 단어다(UE GetWordAt "끝이면 끝").
+    pointer.Click(11, 2, 0, 20);
+    CHECK(pointer.bench.editor->SelectedText() == "world");
+}
+
+TEST(UiFramework_EditableTextAnswersUtf16TextInputQueries) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    // a(1) + 이모지(서로게이트 쌍 2) + 한(1) = UTF-16 4.
+    REQUIRE(pointer.Start(allocator, "a\xF0\x9F\x98\x80\xED\x95\x9C", false, false));
+    EditableText& editor = *pointer.bench.editor;
+    CHECK(editor.GetTextLength() == 4);
+    Array<char16_t> units(allocator);
+    REQUIRE(editor.GetText(1, 2, units));
+    REQUIRE(units.Size() == 2);
+    CHECK(units[0] == 0xD83D && units[1] == 0xDE00);
+    units.Clear();
+    REQUIRE(editor.GetText(3, 1, units));
+    CHECK(units.Size() == 1 && units[0] == 0xD55C);
+    // 범위 밖은 거부한다.
+    CHECK(editor.GetText(2, 3, units).Error() == ErrorCode::InvalidArgument);
+    // 입력란 사각형과 점 → 위치(UTF-16): 셋째 글자(한) 왼쪽 끝은 3이다.
+    Box2<float> screen;
+    REQUIRE(editor.GetScreenBounds(screen));
+    CHECK(screen.max.x > screen.min.x && screen.max.y > screen.min.y);
+    const Vec2 han = editor.Label().GetGeometry().render.Apply({2 * 8 + 1, 2});
+    REQUIRE(editor.GetCharacterIndexFromPoint(han));
+    CHECK(*editor.GetCharacterIndexFromPoint(han) == 3);
+    // Initialize 전 편집기는 빈 글자로 답한다.
+    EditBench bare(allocator);
+    REQUIRE(MakeEditor(allocator, bare));
+    CHECK(bare.editor->GetTextLength() == 0);
+    CHECK(bare.editor->GetText(0, 0, units));
+    CHECK(bare.editor->GetText(0, 1, units).Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(UiFramework_EditableTextBoxRequeuesTheErrorPopupAfterADiscardedFrame) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false));
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required && bench.box->SetError(required.Value()));
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    // 팝업 호스트(루트 Overlay)에 붙기 전에 오류를 정했다 — 붙을 때 대기한다.
+    REQUIRE(bench.Place());
+    // 붙어 대기 → Shutdown이 대기열을 버린다(세대가 오른다).
+    bench.app.SetRoot(bench.root);
+    const UiHostServices* host = bench.box->FindUiHostServices();
+    REQUIRE(host != nullptr && host->PendingFrameActionCount() == 1);
+    const uint64 epoch = host->FrameActionEpoch();
+    bench.app.Shutdown();
+    CHECK(host->PendingFrameActionCount() == 0 && host->FrameActionEpoch() == epoch + 1);
+    // 같은 앱에 다시 붙이면 새로 넣고 다음 프레임에 연다(버려진 대기를 믿지 않는다).
+    bench.app.SetRoot(bench.root);
+    CHECK(host->PendingFrameActionCount() == 1);
+    bench.app.BeginFrame(FrameTime{1, 0});
+    REQUIRE(bench.box->ErrorMarker() != nullptr);
+    CHECK(bench.box->ErrorMarker()->IsOpen());
+    bench.app.Shutdown();
+}
+
+TEST(UiFramework_HiddenAnchorsCloseMenusButKeepErrorPopups) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false));
+    auto switcher = SharedPtr<Switcher>::TryMake(allocator, allocator);
+    auto other = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto menuOwner = SharedPtr<MenuAnchor>::TryMake(allocator, allocator);
+    auto item = SharedPtr<Button>::TryMake(allocator, allocator);
+    REQUIRE(switcher && other && menuOwner && item);
+    // 루트 Overlay → Switcher[0: 상자와 메뉴 anchor가 있는 캔버스, 1: 빈 캔버스].
+    REQUIRE(bench.root->RemoveChild(*bench.canvas));
+    REQUIRE(switcher.Value()->TryAddChild(bench.canvas));
+    REQUIRE(switcher.Value()->TryAddChild(other.Value()));
+    REQUIRE(bench.root->TryAddChild(switcher.Value()));
+    REQUIRE(bench.Place());
+    REQUIRE(
+        bench.canvas->TryAddSlot(menuOwner.Value(), {.offset = {10, 60, 40, 20}, .alignment = {}}));
+    item.Value()->SetDesiredSize({40, 20});
+    menuOwner.Value()->SetMenuFactory(MenuAnchor::MenuFactory::CreateLambda(
+        [made = item.Value()]() noexcept { return Result<SharedPtr<Element>>::Success(made); }));
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required);
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    REQUIRE(bench.box->SetError(required.Value()));
+    MenuAnchor* marker = bench.box->ErrorMarker();
+    REQUIRE(marker != nullptr && marker->IsOpen());
+    // 초점을 받는 메뉴를 연다.
+    REQUIRE(menuOwner.Value()->OpenFocused(bench.app, EditUser));
+    REQUIRE(bench.Layout());
+    CHECK(bench.app.GetFocus(EditUser).Get() == item.Value().Get());
+    // 다른 페이지로 넘기면(ActiveChildren 밖) 메뉴는 닫히고 오류 팝업은 접힌다.
+    REQUIRE(switcher.Value()->SetActiveIndex(1));
+    REQUIRE(bench.Layout());
+    CHECK(!menuOwner.Value()->IsOpen());
+    CHECK(marker->IsOpen());
+    Element* errorLayer = nullptr;
+    for (usize i = 0; i < bench.root->ChildCount(); ++i) {
+        Element* child = bench.root->ChildAt(i);
+        errorLayer = child != switcher.Value().Get() ? child : errorLayer;
+    }
+
+    REQUIRE(errorLayer != nullptr);
+    CHECK(errorLayer->GetVisibility() == Visibility::Collapsed);
+    // 돌아오면 오류 팝업이 다시 보인다.
+    REQUIRE(switcher.Value()->SetActiveIndex(0));
+    REQUIRE(bench.Layout());
+    CHECK(marker->IsOpen() && errorLayer->GetVisibility() != Visibility::Collapsed);
+    bench.app.Shutdown();
+}
+
+TEST(UiFramework_EditableTextBoxPaddingBesideTheMarkerFocusesTheEditor) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false) && bench.Place());
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required && bench.box->SetError(required.Value()));
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    // 표지 오른쪽 여백 띠(편집기가 덮지 않는다)를 누른다.
+    const Geometry& box = bench.box->GetGeometry();
+    const Vec2 strip = box.render.Apply({box.size.x - 2, box.size.y * 0.5f});
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Down, strip, 0}));
+    REQUIRE(bench.app.RoutePointer({PointerEventType::Up, strip, 0}));
+    CHECK(bench.app.GetFocus(EditUser).Get() == &bench.box->Editor());
+    bench.app.Shutdown();
 }
 
 } // namespace rocks::ui

@@ -77,7 +77,12 @@ usize UiHostServices::PendingFrameActionCount() const noexcept {
 usize UiHostServices::DiscardFrameActions() noexcept {
     const usize count = frameActions_.Size();
     frameActions_.Clear();
+    ++frameActionEpoch_;
     return count;
+}
+
+uint64 UiHostServices::FrameActionEpoch() const noexcept {
+    return frameActionEpoch_;
 }
 
 void UiHostServices::SetOwner(const void* kind, void* owner) noexcept {

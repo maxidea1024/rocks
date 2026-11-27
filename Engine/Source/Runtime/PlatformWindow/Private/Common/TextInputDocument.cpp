@@ -105,7 +105,7 @@ uint32 TextInputDocument::CompositionEnd() const noexcept {
 }
 
 bool TextInputDocument::HasUnflushedEdits() const noexcept {
-    return CommonPrefix() != length_ || length_ != baseLength_ ||
+    return CommonPrefix() != length_ || length_ != baseLength_ || generation_ != baseGeneration_ ||
            selectionStart_ != baseSelectionStart_ || selectionEnd_ != baseSelectionEnd_ ||
            composing_ != baseComposing_ ||
            (composing_ &&
@@ -184,6 +184,7 @@ bool TextInputDocument::InsertAtSelection(Span<const char16_t> text,
 
 void TextInputDocument::StartComposition(uint32 start, uint32 end) noexcept {
     composing_ = true;
+    ++generation_;
     UpdateComposition(start, end);
 }
 
@@ -208,8 +209,28 @@ void TextInputDocument::Merge(TextInputRecordResult& total,
 
 TextInputRecordResult TextInputDocument::Flush(TextInputSession& session) noexcept {
     TextInputRecordResult total;
-    if (composing_ && !baseComposing_) {
-        Merge(total, session.RecordEdit(TextInputRecordKind::CompositionBegin, 0, 0));
+    if (!HasUnflushedEdits()) {
+        return total;
+    }
+
+    // 넘치면 남은 기록은 내지 않는다 — 세션이 앞 기록을 버리고 '끝'을 넣었다(22.13절 넘침).
+    const auto emit = [&](TextInputRecordKind kind, uint32 begin, uint32 length,
+                          Span<const char16_t> text = {}) noexcept {
+        if (!total.overflowed) {
+            Merge(total, session.RecordEdit(kind, begin, length, text));
+        }
+    };
+
+    emit(TextInputRecordKind::Rebase, baseSelectionStart_, 0);
+    const bool restarted = composing_ && baseComposing_ && generation_ != baseGeneration_;
+    if (restarted) {
+        // 한 잠금 안에서 앞 조합이 끝나고 새 조합이 시작됐다(저장소가 경계에서 바로 내지 못한
+        // 경우의 안전망) — 앞 조합을 확정하고 새로 시작한다.
+        emit(TextInputRecordKind::CompositionCommit, 0, 0);
+    }
+
+    if (composing_ && (!baseComposing_ || restarted)) {
+        emit(TextInputRecordKind::CompositionBegin, 0, 0);
     }
 
     const uint32 prefix = CommonPrefix();
@@ -217,26 +238,24 @@ TextInputRecordResult TextInputDocument::Flush(TextInputSession& session) noexce
     if (textChanged) {
         // 공통 앞·뒤를 뺀 한 구간이다(조합 중이면 미리보기, 아니면 확정 편집 하나).
         const uint32 suffix = CommonSuffix(prefix);
-        Merge(total, session.RecordEdit(TextInputRecordKind::TextReplace, prefix,
-                                        baseLength_ - suffix - prefix,
-                                        {text_ + prefix, length_ - suffix - prefix}));
+        emit(TextInputRecordKind::TextReplace, prefix, baseLength_ - suffix - prefix,
+             {text_ + prefix, length_ - suffix - prefix});
     }
 
     if (composing_ &&
-        (textChanged || !baseComposing_ || compositionStart_ != baseCompositionStart_ ||
-         compositionEnd_ != baseCompositionEnd_)) {
-        Merge(total, session.RecordEdit(TextInputRecordKind::CompositionRange, compositionStart_,
-                                        compositionEnd_ - compositionStart_));
+        (textChanged || !baseComposing_ || restarted ||
+         compositionStart_ != baseCompositionStart_ || compositionEnd_ != baseCompositionEnd_)) {
+        emit(TextInputRecordKind::CompositionRange, compositionStart_,
+             compositionEnd_ - compositionStart_);
     }
 
     if (!composing_ && baseComposing_) {
-        Merge(total, session.RecordEdit(TextInputRecordKind::CompositionCommit, 0, 0));
+        emit(TextInputRecordKind::CompositionCommit, 0, 0);
     }
 
     if (textChanged || selectionStart_ != baseSelectionStart_ ||
         selectionEnd_ != baseSelectionEnd_) {
-        Merge(total, session.RecordEdit(TextInputRecordKind::Selection, selectionStart_,
-                                        selectionEnd_ - selectionStart_));
+        emit(TextInputRecordKind::Selection, selectionStart_, selectionEnd_ - selectionStart_);
     }
 
     CommitBase();
@@ -254,6 +273,7 @@ void TextInputDocument::CommitBase() noexcept {
     baseComposing_ = composing_;
     baseCompositionStart_ = compositionStart_;
     baseCompositionEnd_ = compositionEnd_;
+    baseGeneration_ = generation_;
 }
 
 uint32 TextInputDocument::CommonPrefix() const noexcept {

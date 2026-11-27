@@ -458,13 +458,11 @@ public:
 
     void TakeEvents(input::InputQueue& queue) noexcept override {
         AssertOwnerThread();
-        // 입력기 종류(TSF·IMM)가 바뀌었으면 활성 문맥을 새 경로로 다시 붙인다(조합은 확정).
+        // 입력기 종류(TSF·IMM)가 바뀌었으면 활성 문맥의 길을 바꾼다. 남은 기록을 지금 적용하지
+        // 않고(앞선 키보다 먼저 들어가지 않게) 확정 기록은 표지로 큐 순서를 지킨다(22.13절).
         if (textServicesProfileChanged_) {
             textServicesProfileChanged_ = false;
-            if (TextInputClient* client = textInput_.Active()) {
-                DeactivateTextInput(*client);
-                ActivateTextInput(*client);
-            }
+            SwitchInputMethodPath();
         }
 
         pending_.DrainTo(queue);
@@ -632,6 +630,12 @@ public:
             textInput_.Activate(client);
             // 활성 입력기가 TIP이면 TSF 문서로 받는다(아니면 IMM — 22.13절).
             (void)textServices_.Attach(client);
+        } else if (textServices_.HasDocument() && !client.AllowsInputMethod()) {
+            // 같은 문맥이 비밀번호·읽기 전용이 됐다 — 문서를 뗀다(TIP 조합·평문 거울이 남지 않게).
+            textServices_.Detach(true);
+        } else if (!textServices_.HasDocument() && client.AllowsInputMethod()) {
+            // IME를 다시 허용했다 — TIP이면 문서를 붙인다.
+            (void)textServices_.Attach(client);
         }
 
         AssociateInputMethod(client.AllowsInputMethod());
@@ -692,9 +696,11 @@ public:
             return;
         }
 
-        // TSF는 거울을 맞추고 배치 바뀜을 알린다(후보 창은 TSF가 GetTextExt로 당긴다).
+        // TSF는 거울을 맞추고 배치 바뀜을 알린다(후보 창은 TSF가 GetTextExt로 당긴다). 글자가
+        // 거울 용량을 넘으면 Sync가 문서를 떼므로 IMM 문맥을 다시 맞춘다.
         if (textServices_.HasDocument()) {
             textServices_.Sync(true);
+            RefreshInputMethodContext();
         } else {
             PositionInputMethodWindows();
         }
@@ -709,19 +715,44 @@ public:
             NotifyInputMethod(CPS_CANCEL);
         }
 
-        if (textServicesOverflowed_) {
-            // TSF 기록이 넘쳤다 — TSF 조합도 끝낸다(넘침 '끝' 기록이 문맥 조합을 이미 지웠다).
-            // 아래 처리 뒤 거울을 문맥으로 다시 맞춘다(22.13절).
+        const bool applied = textInput_.Process(record);
+        if (textServicesOverflowed_ && textInput_.PendingCount() == 0) {
+            // TSF 기록이 넘쳤다. 넘침 '끝'이 문맥 조합(세션이 따라간 범위)을 지웠다. TSF 조합도
+            // 끝내고, 그 잠금이 낸 기록(버려진 기록을 전제로 한 위치)은 버린 뒤 거울을 문맥으로
+            // 다시 맞춘다(22.13절 넘침).
             textServicesOverflowed_ = false;
             textServices_.TerminateComposition();
+            if (TextInputClient* client = textInput_.Active()) {
+                (void)textInput_.Cancel(*client);
+            }
         }
 
-        const bool applied = textInput_.Process(record);
         if (textServices_.HasDocument()) {
             textServices_.Sync(applied);
+            RefreshInputMethodContext();
         } else if (applied) {
             PositionInputMethodWindows();
         }
+    }
+
+    // 입력기 종류가 바뀐 뒤 활성 문맥의 길을 바꾼다(22.13절). TSF → IMM: 문서를 뗀다(확정 기록은
+    // 표지로). IMM → TSF: IMM 조합을 확정(기록·표지)한 뒤 문서를 붙인다(거울은 그 기록을 적용한 뒤
+    // 표지 처리에서 다시 맞춘다).
+    void SwitchInputMethodPath() noexcept {
+        TextInputClient* client = textInput_.Active();
+        if (client == nullptr) {
+            return;
+        }
+
+        if (textServices_.HasDocument() && !textServices_.IsInputProcessorActive()) {
+            textServices_.Detach(true);
+        } else if (!textServices_.HasDocument() && textServices_.IsInputProcessorActive() &&
+                   client->AllowsInputMethod()) {
+            NotifyInputMethod(CPS_COMPLETE);
+            (void)textServices_.Attach(*client);
+        }
+
+        RefreshInputMethodContext();
     }
 
     bool HasFocus() const noexcept override {
@@ -931,7 +962,10 @@ private:
         }
 
         inputMethodAccepted_ = accepts;
-        if (GetFocus() == window_) {
+        // TSF 문서가 붙은 동안은 다시 받지 않는다 — IMM 문맥 활성이 CUAS 문서로 TSF 초점을 옮길 수
+        // 있다. 문서를 뗀 뒤에는 다시 받아 CUAS가 IMM 문맥 문서로 초점을 옮기게 한다(22.13절 —
+        // 문맥 밖 게임 문자 입력).
+        if (GetFocus() == window_ && !textServices_.HasDocument()) {
             (void)SendMessageW(window_, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
         }
     }

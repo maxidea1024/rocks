@@ -850,10 +850,16 @@ bool EditableText::IsComposing() const noexcept {
 }
 
 uint32 EditableText::GetTextLength() const noexcept {
-    return text_input::Utf16Length(label_->GetText());
+    return label_ ? text_input::Utf16Length(label_->GetText()) : 0;
 }
 
 void EditableText::GetSelection(uint32& begin, uint32& length) const noexcept {
+    if (!label_) {
+        begin = 0;
+        length = 0;
+        return;
+    }
+
     const StringView text = label_->GetText();
     const uint32 first = text_input::ToUtf16Index(text, anchor_ < caret_ ? anchor_ : caret_);
     const uint32 last = text_input::ToUtf16Index(text, anchor_ < caret_ ? caret_ : anchor_);
@@ -870,6 +876,16 @@ void EditableText::SetSelection(uint32 begin, uint32 length) noexcept {
 
 Result<void> EditableText::GetText(uint32 begin, uint32 length,
                                    Array<char16_t>& out) const noexcept {
+    // 범위 밖은 InvalidArgument다(TextInputContext 계약 — TSF 거울이 길이를 믿고 읽는다).
+    const uint64 end = static_cast<uint64>(begin) + length;
+    if (end > GetTextLength()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!label_) {
+        return Result<void>::Success();
+    }
+
     const StringView text = label_->GetText();
     const usize first = ByteOffset(begin);
     const usize last = ByteOffset(begin + length);
@@ -1332,9 +1348,14 @@ bool EditableText::WordAt(Span<const usize> breaks, usize offset, usize& begin,
 
     // UE FTextLayout::GetWordAt(TextLayout.cpp 2524–2569행): offset 뒤 경계(끝이면 끝)부터 거꾸로
     // 가며 공백이 아닌 글자가 있는 첫 구간을 고른다 — 단어 뒤 공백을 눌러도 앞 단어다.
+    // 끝(글자 오른쪽 빈 곳)이면 마지막 구간에서 거꾸로 찾는다(UE "끝이면 끝" — 리뷰 2026-11-28).
     usize index = 0;
-    while (index < breaks.Size() && breaks[index] <= offset && offset < length) {
-        ++index;
+    if (offset >= length) {
+        index = breaks.Size() - 1;
+    } else {
+        while (index < breaks.Size() && breaks[index] <= offset) {
+            ++index;
+        }
     }
 
     if (index >= breaks.Size()) {

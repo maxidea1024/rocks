@@ -61,15 +61,17 @@ public:
     // 버리거나 처리한 뒤 Sync로 거울을 다시 맞춘다.
     void TerminateComposition() noexcept;
     // 적용 전 기록이 없으면 문맥 글자·선택으로 거울을 맞추고 TSF에 알린다(OnTextChange·
-    // OnSelectionChange). layoutChanged면 OnLayoutChange도 보낸다.
+    // OnSelectionChange). layoutChanged면 OnLayoutChange도 보낸다. 문맥 글자가 거울 용량을 넘었으면
+    // 조합을 확정하고 문서를 뗀다(IMM으로 받는다 — 호출자는 HasDocument를 다시 본다).
     void Sync(bool layoutChanged) noexcept;
 
     // 프로필 sink가 부른다(입력기 바뀜).
     void OnProfileActivated() noexcept;
     // 문맥에 아직 적용하지 않은 기록이 있는지다(저장소의 위치 근사 판정).
     bool HasPendingRecords() const noexcept;
-    // 저장소가 바깥 잠금을 풀 때 부른다 — 거울의 바뀐 것을 기록으로 낸다.
-    void OnUnlocked() noexcept;
+    // 거울의 바뀐 것을 기록으로 낸다. 저장소가 바깥 잠금을 풀 때와 조합 시작·끝(잠금 안이라도 —
+    // 22.13절 조합 경계)에 부른다.
+    void FlushEdits() noexcept;
 
 private:
     void RefreshProfile() noexcept;

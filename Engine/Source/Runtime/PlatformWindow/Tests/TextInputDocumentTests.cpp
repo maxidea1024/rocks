@@ -228,8 +228,8 @@ TEST(PlatformWindow_TextInputDocumentFlushesCompositionAsTsfRecords) {
     CHECK(document.HasUnflushedEdits());
     auto flushed = document.Flush(session);
     REQUIRE(flushed.serial && !flushed.overflowed);
-    // CompositionBegin·TextReplace·CompositionRange·Selection 넷이다.
-    CHECK(session.PendingCount() == 4);
+    // Rebase·CompositionBegin·TextReplace·CompositionRange·Selection 다섯이다.
+    CHECK(session.PendingCount() == 5);
     CHECK(!document.HasUnflushedEdits());
     CHECK(session.Process(*flushed.serial));
     CHECK(client.TextIs(u"abㅎ"));
@@ -242,15 +242,15 @@ TEST(PlatformWindow_TextInputDocumentFlushesCompositionAsTsfRecords) {
     document.UpdateComposition(2, 3);
     flushed = document.Flush(session);
     REQUIRE(flushed.serial);
-    CHECK(session.PendingCount() == 3);
+    CHECK(session.PendingCount() == 4);
     CHECK(session.Process(*flushed.serial));
     CHECK(client.TextIs(u"ab하"));
     CHECK(client.begins == 1 && client.ends == 0);
-    // 끝: 확정 하나뿐이다(글자·선택은 그대로).
+    // 끝: Rebase와 확정 하나뿐이다(글자·선택은 그대로).
     document.EndComposition();
     flushed = document.Flush(session);
     REQUIRE(flushed.serial);
-    CHECK(session.PendingCount() == 1);
+    CHECK(session.PendingCount() == 2);
     CHECK(session.Process(*flushed.serial));
     CHECK(client.ends == 1 && !session.IsComposing());
     // 아무것도 바뀌지 않으면 기록이 없다.
@@ -275,7 +275,7 @@ TEST(PlatformWindow_TextInputDocumentFlushesEditsOutsideComposition) {
     REQUIRE(document.InsertAtSelection(Units(u"!"), change));
     auto flushed = document.Flush(session);
     REQUIRE(flushed.serial);
-    CHECK(session.PendingCount() == 2);
+    CHECK(session.PendingCount() == 3);
     CHECK(session.Process(*flushed.serial));
     CHECK(client.TextIs(u"ab!"));
     CHECK(client.begins == 1 && client.ends == 1 && !session.IsComposing());
@@ -284,7 +284,7 @@ TEST(PlatformWindow_TextInputDocumentFlushesEditsOutsideComposition) {
     REQUIRE(document.SetSelection(0, 1, false));
     flushed = document.Flush(session);
     REQUIRE(flushed.serial);
-    CHECK(session.PendingCount() == 1);
+    CHECK(session.PendingCount() == 2);
     CHECK(session.Process(*flushed.serial));
     CHECK(client.selectionBegin == 0 && client.selectionLength == 1);
     CHECK(client.begins == 1);
@@ -322,6 +322,125 @@ TEST(PlatformWindow_TextInputDocumentSyncReportsContextChanges) {
     // 문맥 선택이 글자를 넘으면 글자 끝으로 자른다.
     synced = document.Sync(Units(u"ab"), 9, 3);
     CHECK(document.SelectionStart() == 2 && document.SelectionEnd() == 2);
+}
+
+// 클라이언트에 글자를 넣는다(시험 준비).
+void Fill(DocumentClient& client, const char16_t* text, uint32 caret) noexcept {
+    client.text.Clear();
+    for (const char16_t unit : Units(text)) {
+        (void)client.text.TryPushBack(unit);
+    }
+
+    client.selectionBegin = caret;
+    client.selectionLength = 0;
+}
+
+// 리뷰 2026-11-28: TIP를 통과한 키(공백)가 기록보다 먼저 문맥에 들어가도 새 조합은 그 뒤에 온다.
+TEST(PlatformWindow_TextInputDocumentRebasesOnKeysAppliedBeforeTheRecords) {
+    SystemAllocator allocator;
+    DocumentClient client(allocator);
+    Fill(client, u"\uAC00", 1);
+    TextInputSession session;
+    session.Activate(client);
+    ROCKS_TEST_DOCUMENT(document);
+    (void)document.Sync(Units(u"\uAC00"), 1, 0);
+    // TSF는 거울(caret 1)에서 "ㄴ" 조합을 시작한다.
+    TextInputChange change;
+    document.StartComposition(1, 1);
+    REQUIRE(document.Replace(1, 1, Units(u"\u3134"), change));
+    document.UpdateComposition(1, 2);
+    const auto flushed = document.Flush(session);
+    REQUIRE(flushed.serial);
+    // 그 사이 큐에서 먼저 처리된 Space가 문맥에 들어갔다(거울은 모른다).
+    Fill(client, u"\uAC00 ", 2);
+    CHECK(session.Process(*flushed.serial));
+    CHECK(client.TextIs(u"\uAC00 \u3134"));
+    CHECK(client.rangeBegin == 2 && client.rangeLength == 1);
+    CHECK(client.selectionBegin == 3);
+}
+
+// 리뷰 2026-11-28: 한 잠금 안에서 조합이 끝나고 새로 시작해도(Flush 없이) 앞 조합은 확정된다.
+TEST(PlatformWindow_TextInputDocumentCommitsAndRestartsWithinOneLock) {
+    SystemAllocator allocator;
+    DocumentClient client(allocator);
+    Fill(client, u"", 0);
+    TextInputSession session;
+    session.Activate(client);
+    ROCKS_TEST_DOCUMENT(document);
+    (void)document.Sync({}, 0, 0);
+    TextInputChange change;
+    document.StartComposition(0, 0);
+    REQUIRE(document.Replace(0, 0, Units(u"\uD55C"), change));
+    document.UpdateComposition(0, 1);
+    auto flushed = document.Flush(session);
+    REQUIRE(flushed.serial && session.Process(*flushed.serial));
+    CHECK(client.begins == 1 && client.ends == 0);
+    // 끝 → 시작(다음 음절)을 한 번에 낸다.
+    document.EndComposition();
+    document.StartComposition(1, 1);
+    REQUIRE(document.Replace(1, 1, Units(u"\u3131"), change));
+    document.UpdateComposition(1, 2);
+    flushed = document.Flush(session);
+    REQUIRE(flushed.serial && session.Process(*flushed.serial));
+    // 앞 조합 확정 한 번, 새 조합 시작 한 번.
+    CHECK(client.ends == 1 && client.begins == 2 && session.IsComposing());
+    CHECK(client.TextIs(u"\uD55C\u3131"));
+    CHECK(client.rangeBegin == 1 && client.rangeLength == 1);
+}
+
+// TIP가 조합 글자를 비우고 끝내면(취소) 문맥 글자는 조합 전으로 돌아온다.
+TEST(PlatformWindow_TextInputDocumentCancelledCompositionRestoresText) {
+    SystemAllocator allocator;
+    DocumentClient client(allocator);
+    Fill(client, u"ab", 2);
+    TextInputSession session;
+    session.Activate(client);
+    ROCKS_TEST_DOCUMENT(document);
+    (void)document.Sync(Units(u"ab"), 2, 0);
+    TextInputChange change;
+    document.StartComposition(2, 2);
+    REQUIRE(document.Replace(2, 2, Units(u"\u314E"), change));
+    document.UpdateComposition(2, 3);
+    auto flushed = document.Flush(session);
+    REQUIRE(flushed.serial && session.Process(*flushed.serial));
+    REQUIRE(document.Replace(2, 3, {}, change));
+    document.EndComposition();
+    flushed = document.Flush(session);
+    REQUIRE(flushed.serial && session.Process(*flushed.serial));
+    CHECK(client.TextIs(u"ab") && client.ends == 1 && !session.IsComposing());
+    CHECK(client.selectionBegin == 2);
+}
+
+// 리뷰 2026-11-28: TSF 기록이 넘치면 남은 기록은 내지 않고, 넘침 '끝'이 세션이 따라간 조합 범위를
+// 지워 문맥은 조합 전 글자로 돌아온다.
+TEST(PlatformWindow_TextInputDocumentOverflowRestoresTheTextBeforeComposition) {
+    SystemAllocator allocator;
+    DocumentClient client(allocator);
+    Fill(client, u"ab", 2);
+    TextInputSession session;
+    session.Activate(client);
+    ROCKS_TEST_DOCUMENT(document);
+    (void)document.Sync(Units(u"ab"), 2, 0);
+    TextInputChange change;
+    document.StartComposition(2, 2);
+    REQUIRE(document.Replace(2, 2, Units(u"\u314E"), change));
+    document.UpdateComposition(2, 3);
+    auto flushed = document.Flush(session);
+    REQUIRE(flushed.serial && session.Process(*flushed.serial));
+    REQUIRE(client.TextIs(u"ab\u314E") && session.IsComposing());
+    // 처리하지 않은 채 조합 안 caret만 오가게 해 버퍼(기록 64)를 넘긴다.
+    bool overflowed = false;
+    uint32 last = *flushed.serial;
+    for (uint32 i = 0; i < MaxTextInputRecords && !overflowed; ++i) {
+        REQUIRE(document.SetSelection(2 + (i % 2), 2 + (i % 2), false));
+        flushed = document.Flush(session);
+        overflowed = flushed.overflowed;
+        last = flushed.serial ? *flushed.serial : last;
+    }
+
+    REQUIRE(overflowed);
+    CHECK(session.Process(last));
+    CHECK(client.TextIs(u"ab") && !session.IsComposing() && client.ends == 1);
 }
 
 #undef ROCKS_TEST_DOCUMENT

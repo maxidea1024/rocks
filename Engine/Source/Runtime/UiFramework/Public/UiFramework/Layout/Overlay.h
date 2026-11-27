@@ -38,9 +38,10 @@ private:
         void (*close)(Element&) noexcept;
         // 층을 붙일 때의 보이기다(anchor가 다시 보이면 되돌린다 — 22.6절).
         Visibility shown;
+        bool keepWhileHidden;
     };
-    // anchor가 보이는 경로에 없는 팝업 층을 접고, 다시 보이면 되돌린다(22.6절 — 고르지 않은 탭의
-    // 오류 팝업이 다른 탭 위에 남지 않게).
+    // anchor가 보이는 경로에 없는 팝업을 처리한다(22.6절): 보통 팝업은 닫고, keepWhileHidden 팝업은
+    // 층을 접었다가 다시 보이면 되돌린다(고르지 않은 탭의 오류 팝업이 다른 탭 위에 남지 않게).
     void SyncPopupVisibility() noexcept;
     Array<OpenPopup> popups_;
     bool dismissingPopups_ = false;

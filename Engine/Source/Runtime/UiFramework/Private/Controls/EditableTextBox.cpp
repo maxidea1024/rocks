@@ -4,6 +4,7 @@
 
 #include <UiCore/PaintList.h>
 #include <UiCore/UiHostServices.h>
+#include <UiFramework/Application/Application.h>
 #include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Scrolling/ScrollBar.h>
 
@@ -198,6 +199,8 @@ Result<SharedPtr<MenuAnchor>> EditableTextBox::MakeMarker() noexcept {
     marker.SetFocusable(false);
     marker.SetPlacement(MenuPlacement::Below);
     marker.SetCatchOutsidePresses(false);
+    // 숨은 탭에서도 닫지 않고 접었다가 돌아오면 다시 보인다(초점을 받지 않는 팝업 — 22.6절).
+    marker.SetKeepOpenWhileHidden(true);
     marker.SetMenuFactory(
         MenuAnchor::MenuFactory::CreateRaw(this, &EditableTextBox::MakeErrorPopup));
     return anchor;
@@ -293,11 +296,17 @@ void EditableTextBox::SyncErrorPopup() noexcept {
 
 void EditableTextBox::OnUiHostServicesChanged() noexcept {
     Element::OnUiHostServicesChanged();
+    const SharedPtr<UiHostServices> host = FindUiHostServicesRef();
+    // 넣은 항목이 버려졌으면(다른 묶음·버림 세대가 바뀜) 대기가 아니다 — 다시 넣는다.
+    if (popupQueued_ &&
+        (!host || host.Get() != queuedHost_ || host->FrameActionEpoch() != queuedEpoch_)) {
+        popupQueued_ = false;
+    }
+
     if (!marker_ || marker_->IsOpen() || popupQueued_ || !Parent()) {
         return;
     }
 
-    const SharedPtr<UiHostServices> host = FindUiHostServicesRef();
     const SharedPtr<Element> self = Parent()->FindChild(this);
     if (!host || !self) {
         return;
@@ -313,6 +322,8 @@ void EditableTextBox::OnUiHostServicesChanged() noexcept {
         }));
     if (queued) {
         popupQueued_ = true;
+        queuedHost_ = host.Get();
+        queuedEpoch_ = host->FrameActionEpoch();
     }
 }
 
@@ -541,6 +552,19 @@ ColorRef EditableTextBox::CurrentForeground() const noexcept {
 
 SharedPtr<Element> EditableTextBox::FocusDelegate() const noexcept {
     return editor_;
+}
+
+PointerReply EditableTextBox::OnPointerEvent(const PointerEvent& event) noexcept {
+    // 편집기가 덮지 않는 칸(표지·막대 오른쪽 여백 띠, 그 열의 위·아래 여백)을 누른 것이다 —
+    // 편집기에 초점을 준다(UE 상자는 받은 초점을 안쪽으로 넘긴다 — 22.2절).
+    if (event.type == PointerEventType::Down && editor_ && editor_->IsEnabled()) {
+        if (Application* app = Application::Find(*this)) {
+            (void)app->SetFocus(event.userId, editor_, FocusCause::Pointer);
+            return {.handled = true};
+        }
+    }
+
+    return Element::OnPointerEvent(event);
 }
 
 void EditableTextBox::OnMouseEnter(uint32 user) noexcept {
