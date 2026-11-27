@@ -343,6 +343,9 @@ struct SwapChainRecord {
     // present가 OUT_OF_DATE를 알렸다(다음 EndFrame이 acquire 전에 다시 만든다).
     bool outOfDate = false;
     bool surfaceLost = false;
+    // present하지 않은 기록이 중간 이미지에 그렸다(그리는 중인 프레임, SwapChainPassDesc). load
+    // Load는 이때만 받는다(그때 targetLayout은 attachment layout이다).
+    bool frameOpen = false;
 };
 
 struct ReadbackRecord {
@@ -506,8 +509,8 @@ public:
                              Span<uint8> out) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
-    Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
-                                       const ClearColor& clear) noexcept override;
+    using Device::BeginFrame;
+    Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept override;
     Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
@@ -563,6 +566,7 @@ public:
     uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+    uint64 PresentCount() const noexcept override;
     // --- transient heap·placed 자원(GX12, VulkanTransient.cpp) ---
     Result<TransientHeapHandle>
     CreateTransientHeap(const TransientHeapDesc& desc) noexcept override;
@@ -1085,7 +1089,11 @@ private:
     bool recording_ = false;
     bool insideRenderPass_ = false;
     Target target_;
+    // 지금 기록의 스왑체인(BeginFrame)과 EndFrame이 present할지다.
     SwapChainHandle presentTarget_;
+    bool presentOnEnd_ = false;
+    // EndFrame이 낸 present 수다(PresentCount).
+    uint64 presents_ = 0;
     TextureHandle white_;
     SlotHandle boundPipeline_;
     BoundVertexBuffer boundVertex_[MaxVertexStreams];

@@ -428,6 +428,11 @@ usize D3D12Device::PendingRetireCount() const noexcept {
     return retired_.Size();
 }
 
+uint64 D3D12Device::PresentCount() const noexcept {
+    platform::LockGuard lock(gate_);
+    return presents_;
+}
+
 StringView D3D12Device::LastError() const noexcept {
     return lastError_.View();
 }
