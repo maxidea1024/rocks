@@ -62,10 +62,10 @@ ROCKS_TEXTURE_API void
 TextureBlockAlphaPalette(uint32 alpha0, uint32 alpha1,
                          uint8 (&palette)[TextureBlockAlphaPaletteSize]) noexcept;
 
-// format 블록 하나를 4 × 4 RGBA8로 푼다. Bc1·Bc3·Bc7은 RGBA(Bc1 3색 모드의 index 3은 투명 검정, Bc7
-// 예약 모드는 투명 검정), Bc4는 (R, 0, 0, 255), Bc5는 (R, G, 0, 255)다. Bc6h는
-// DecodeTextureBlockHalf를 쓴다 (여기서는 0으로 채운다). block은 TextureBlockBytes(format) byte
-// 이상이어야 한다.
+// format 블록 하나를 4 × 4 RGBA8로 푼다. Bc1·Bc3·Bc7은 RGBA(Bc1 3색 모드의 index 3은 투명 검정, Bc3
+// 색 블록은 끝점 순서와 무관하게 늘 4색 — D3D 명세, Bc7 예약 모드는 투명 검정), Bc4는 (R, 0, 0,
+// 255), Bc5는 (R, G, 0, 255)다. Bc6h는 DecodeTextureBlockHalf를 쓴다 (여기서는 0으로 채운다).
+// block은 TextureBlockBytes(format) byte 이상이어야 한다.
 ROCKS_TEXTURE_API void DecodeTextureBlock(TextureBlockFormat format, const uint8* block,
                                           uint8 (&texels)[TextureBlockRgbaBytes]) noexcept;
 

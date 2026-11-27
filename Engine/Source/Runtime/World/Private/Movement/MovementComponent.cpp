@@ -7,11 +7,14 @@
 #include <World/Movement/MovementComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
-#include <World/World.h>
 #include <World/ComponentValueChecks.h>
+#include <World/Physics/WorldCollision.h>
+#include <World/Primitives/PrimitiveComponent.generated.h>
+#include <World/Primitives/PrimitiveComponent.h>
+#include <World/World.h>
 
-// 이동 컴포넌트 기반·회전·발사체다(Docs/Design/EngineRuntime 26.3–26.5절, D4). 충돌 sweep 없이
-// 움직인다.
+// 이동 컴포넌트 기반·회전·발사체다(Docs/Design/EngineRuntime 26.3–26.5절, D4). 기본 파생은 sweep
+// 없이 움직이고, sweep 이동·침투 해소 도우미는 Docs/Design/PhysicsModule 7.1.13절이다.
 namespace rocks {
 
 namespace {
@@ -27,7 +30,8 @@ bool SameRotation(const Quatd& a, const Quatd& b, double tolerance) noexcept {
 
 } // namespace
 
-MovementComponent::MovementComponent(Allocator& allocator) noexcept : Component(allocator) {
+MovementComponent::MovementComponent(Allocator& allocator) noexcept
+    : Component(allocator), overlapIgnoreActors_(allocator) {
     // UE TG_PrePhysics(MovementComponent.cpp:25).
     TickSettings& tick = PrimaryTick();
     tick.tick = true;
@@ -272,6 +276,213 @@ Result<void> MovementComponent::MoveUpdatedComponent(const Vec3d& delta,
 
         return scene.SetWorldLocationAndRotation(scene.WorldLocation() + constrained, rotation);
     });
+}
+
+Result<bool> MovementComponent::MoveUpdatedComponent(const Vec3d& delta, const Quatd& rotation,
+                                                     bool sweep, HitResult* outHit,
+                                                     TeleportMode teleport) noexcept {
+    MoveOptions options;
+    options.teleport = teleport;
+    return MoveUpdatedComponentWith(delta, rotation, sweep, outHit, options);
+}
+
+Result<bool> MovementComponent::MoveUpdatedComponentWith(const Vec3d& delta, const Quatd& rotation,
+                                                         bool sweep, HitResult* outHit,
+                                                         const MoveOptions& options) noexcept {
+    if (updatedComponent_.IsNull() || !HasWorld() || !component_checks::FiniteVector(delta)) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // UE MoveUpdatedComponentImpl: 평면 제약한 delta로 대상의 MoveComponent를 부른다.
+    const Vec3d constrained = ConstrainDirectionToPlane(delta);
+    World& world = GetWorld();
+    auto swept = world.With<PrimitiveComponent>(
+        updatedComponent_, [&](PrimitiveComponent& primitive) noexcept {
+            return primitive.MoveComponent(constrained, rotation, sweep, outHit, options);
+        });
+    if (swept || swept.Error() != ErrorCode::TypeMismatch) {
+        return swept;
+    }
+
+    // Primitive가 아닌 대상은 sweep 없이 옮긴다(UE USceneComponent::MoveComponentImpl).
+    return world.With<SceneComponent>(
+        updatedComponent_, [&](SceneComponent& scene) noexcept -> Result<bool> {
+            const Vec3d start = scene.WorldLocation();
+            if (outHit != nullptr) {
+                *outHit = HitResult{};
+                outHit->traceStart = start;
+                outHit->traceEnd = start + constrained;
+            }
+
+            if (constrained.LengthSquared() == 0.0 &&
+                SameRotation(scene.WorldQuaternion(), rotation, QuaternionTolerance)) {
+                return Result<bool>::Success(true);
+            }
+
+            auto moved = scene.SetWorldLocationAndRotation(start + constrained, rotation);
+            if (!moved) {
+                return Result<bool>::Failure(moved.Error());
+            }
+
+            return Result<bool>::Success(true);
+        });
+}
+
+Vec3d MovementComponent::GetPenetrationAdjustment(const HitResult& hit) const noexcept {
+    if (!hit.startPenetrating) {
+        return Vec3d::Zero();
+    }
+
+    const double depth =
+        hit.penetrationDepth > 0.0 ? hit.penetrationDepth : DefaultPenetrationDepth;
+    return ConstrainDirectionToPlane(hit.normal * (depth + math::Abs(PenetrationPullbackDistance)));
+}
+
+bool MovementComponent::OverlapTest(const Vec3d& location, const Quatd& rotation,
+                                    double inflation) noexcept {
+    // 질의를 마치지 못하면(대상을 빌리지 못함·충돌 해석 실패·할당 실패) 막힌 것으로 본다: teleport
+    // 대신 sweep으로 가므로 벽 안으로 순간 이동하지 않는다.
+    World& world = GetWorld();
+    bool blocked = true;
+    (void)world.With<PrimitiveComponent>(
+        updatedComponent_, [&](PrimitiveComponent& primitive) noexcept {
+            auto collision = primitive.TryResolveCollision();
+            if (!collision) {
+                return;
+            }
+
+            // UE InitCollisionParams → InitSweepCollisionParams: 대상 응답, 이동 무시 목록과 소유
+            // Actor를 뺀다.
+            const ObjectHandle owner = primitive.GetOwner();
+            const Span<const ObjectHandle> moveIgnore = primitive.MoveIgnoreActors();
+            overlapIgnoreActors_.Clear();
+            if (!overlapIgnoreActors_.TryAppend(moveIgnore) ||
+                !overlapIgnoreActors_.TryPushBack(owner)) {
+                return;
+            }
+
+            QueryParams params;
+            params.ignoreActors = overlapIgnoreActors_.View();
+            params.ignoreComponents = primitive.MoveIgnoreComponents();
+            blocked = OverlapBlocking(
+                world, location, rotation, primitive.GetCollisionShape(inflation),
+                QueryFilter::ByChannel(collision.Value().objectType, collision.Value().responses),
+                params);
+        });
+    return blocked;
+}
+
+Result<bool> MovementComponent::ResolvePenetration(const Vec3d& adjustment, const HitResult& hit,
+                                                   const Quatd& rotation) noexcept {
+    const Vec3d constrained = ConstrainDirectionToPlane(adjustment);
+    if (constrained.LengthSquared() == 0.0 || updatedComponent_.IsNull() || !HasWorld()) {
+        return Result<bool>::Success(false);
+    }
+
+    // SceneComponent는 박힐 수 없다 — Primitive이고 소유 Actor가 있을 때만 한다(UE).
+    World& world = GetWorld();
+    auto owner = world.With<PrimitiveComponent>(
+        updatedComponent_,
+        [](PrimitiveComponent& primitive) noexcept { return primitive.GetOwner(); });
+    if (!owner || owner.Value().IsNull()) {
+        return Result<bool>::Success(false);
+    }
+
+    MoveOptions teleport;
+    teleport.teleport = TeleportMode::TeleportPhysics;
+    // 밀어낸 자리가 비었으면 sweep 없이 옮긴다(겹침 시험은 조금 부풀려 더 엄격히 — UE).
+    if (!OverlapTest(hit.traceStart + constrained, rotation, PenetrationOverlapCheckInflation)) {
+        auto moved = MoveUpdatedComponentWith(constrained, rotation, false, nullptr, teleport);
+        if (!moved) {
+            return moved;
+        }
+
+        return Result<bool>::Success(true);
+    }
+
+    // 막혔으면 sweep으로 할 수 있는 만큼 나온다(neverIgnoreBlockingOverlaps 없이 — 빠져나가는 시작
+    // 겹침은 무시된다).
+    HitResult sweepOut;
+    auto moved = MoveUpdatedComponentWith(constrained, rotation, true, &sweepOut, teleport);
+    if (!moved) {
+        return moved;
+    }
+
+    bool done = moved.Value();
+    if (!done && sweepOut.startPenetrating) {
+        // 두 MTD를 합쳐 여러 면에서 나오는 방향을 찾는다.
+        const Vec3d second = GetPenetrationAdjustment(sweepOut);
+        const Vec3d combined = constrained + second;
+        if (!(second == constrained) && combined.LengthSquared() != 0.0) {
+            auto retried = MoveUpdatedComponentWith(combined, rotation, true, nullptr, teleport);
+            if (!retried) {
+                return retried;
+            }
+
+            done = retried.Value();
+        }
+    }
+
+    if (!done) {
+        // 조정량 + 원래 이동, 그다음 (같은 쪽이면) 원래 이동만 sweep한다.
+        const Vec3d moveDelta = ConstrainDirectionToPlane(hit.traceEnd - hit.traceStart);
+        if (moveDelta.LengthSquared() != 0.0) {
+            auto adjusted = MoveUpdatedComponentWith(constrained + moveDelta, rotation, true,
+                                                     nullptr, teleport);
+            if (!adjusted) {
+                return adjusted;
+            }
+
+            done = adjusted.Value();
+            if (!done && Dot(moveDelta, constrained) > 0.0) {
+                auto original =
+                    MoveUpdatedComponentWith(moveDelta, rotation, true, nullptr, teleport);
+                if (!original) {
+                    return original;
+                }
+
+                done = original.Value();
+            }
+        }
+    }
+
+    return Result<bool>::Success(done);
+}
+
+Result<bool> MovementComponent::SafeMoveUpdatedComponent(const Vec3d& delta, const Quatd& rotation,
+                                                         bool sweep, HitResult& outHit,
+                                                         TeleportMode teleport) noexcept {
+    if (updatedComponent_.IsNull() || !HasWorld()) {
+        outHit = HitResult{};
+        return Result<bool>::Success(false);
+    }
+
+    // 막는 시작 겹침을 무시하지 않고 그 hit를 발행하지 않는다(UE CVar
+    // p.MoveIgnoreFirstBlockingOverlap 기본 0 — 먼저 밀어낸다).
+    MoveOptions first;
+    first.teleport = teleport;
+    first.neverIgnoreBlockingOverlaps = true;
+    first.disableBlockingOverlapDispatch = true;
+    auto moved = MoveUpdatedComponentWith(delta, rotation, sweep, &outHit, first);
+    if (!moved) {
+        return moved;
+    }
+
+    if (!outHit.startPenetrating) {
+        return moved;
+    }
+
+    auto resolved = ResolvePenetration(GetPenetrationAdjustment(outHit), outHit, rotation);
+    if (!resolved) {
+        return resolved;
+    }
+
+    if (!resolved.Value()) {
+        return moved;
+    }
+
+    // 원래 이동을 다시 한다(기본 표지).
+    return MoveUpdatedComponent(delta, rotation, sweep, &outHit, teleport);
 }
 
 bool MovementComponent::ShouldSkipUpdate() const noexcept {

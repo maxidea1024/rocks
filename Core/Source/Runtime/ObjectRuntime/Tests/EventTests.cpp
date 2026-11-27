@@ -481,6 +481,95 @@ TEST(Event_PublisherDestroyedDuringBroadcast) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 미해결 레코드(ED24): 발행에 끼지 않고, 나열은 바인딩과 같은 등록 번호 순서로 resolved 거짓으로
+// 오며, null 대상·0 FunctionId는 InvalidArgument, 같은 쌍 보존은 AlreadyExists, 같은 쌍 TryBind
+// 성공·Unbind·UnbindAll·Compact·Clear가 지운다.
+TEST(Event_UnresolvedRecords) {
+    struct Visited {
+        ObjectHandle target;
+        Guid functionId;
+        bool resolved;
+    };
+
+    SystemAllocator allocator;
+    {
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Start());
+        ObjectRegistry& registry = fixture.registry;
+        const ObjectAccessContext& access = fixture.access;
+        const EventContext context{registry, access, fixture.publisher.Handle()};
+        const Guid add = IdOf(fixture.types, "Add");
+        const Guid missing{7, 7};
+        const ObjectHandle a = fixture.a.Handle();
+        const ObjectHandle b = fixture.b.Handle();
+        Event<int32> event(allocator);
+        Array<Visited> visited(allocator);
+        auto list = [&]() noexcept {
+            visited.Clear();
+            return event.ForEachBinding(
+                [&](ObjectHandle target, Guid functionId, bool resolved) noexcept {
+                    return visited.TryPushBack(Visited{target, functionId, resolved});
+                });
+        };
+
+        // 미해결 레코드만 있으면 발행할 것이 없다(delegate 항목이 없다).
+        REQUIRE(event.TryKeepUnresolved(a, missing));
+        CHECK(event.UnresolvedCount() == 1 && !event.IsBound() && event.BindingCount() == 0);
+        REQUIRE(event.TryBroadcast(context, 4));
+        CHECK(TotalOf(registry, a) == 0);
+        auto again = event.TryKeepUnresolved(a, missing);
+        CHECK(!again && again.Error() == ErrorCode::AlreadyExists);
+        CHECK(ResultError(event.TryKeepUnresolved(ObjectHandle{}, missing)) ==
+              ErrorCode::InvalidArgument);
+        CHECK(ResultError(event.TryKeepUnresolved(a, Guid{})) == ErrorCode::InvalidArgument);
+
+        // 살아 있는 바인딩과 같은 쌍은 보존하지 않는다.
+        REQUIRE(event.TryBind(registry, access, b, add));
+        auto bound = event.TryKeepUnresolved(b, add);
+        CHECK(!bound && bound.Error() == ErrorCode::AlreadyExists);
+
+        // 나열: 바인딩과 미해결 레코드가 등록 번호 순서로 섞인다(a 미해결 → b 바인딩 → b 미해결).
+        REQUIRE(event.TryKeepUnresolved(b, missing));
+        REQUIRE(list());
+        REQUIRE(visited.Size() == 3);
+        CHECK(visited[0].target == a && visited[0].functionId == missing && !visited[0].resolved);
+        CHECK(visited[1].target == b && visited[1].functionId == add && visited[1].resolved);
+        CHECK(visited[2].target == b && visited[2].functionId == missing && !visited[2].resolved);
+
+        // 같은 쌍 TryBind 성공은 그 미해결 레코드를 지운다(a의 Add를 미해결로 둔 뒤 바인딩).
+        REQUIRE(event.TryKeepUnresolved(a, add));
+        CHECK(event.UnresolvedCount() == 3);
+        REQUIRE(event.TryBind(registry, access, a, add));
+        CHECK(event.UnresolvedCount() == 2);
+
+        // 바인딩 실패는 미해결 레코드를 건드리지 않는다.
+        CHECK(!event.TryBind(registry, access, a, missing));
+        CHECK(event.UnresolvedCount() == 2);
+
+        // Unbind(target, fn)은 미해결 레코드만 있어도 참이다.
+        CHECK(event.Unbind(a, missing));
+        CHECK(event.UnresolvedCount() == 1 && !event.Unbind(a, missing));
+
+        // UnbindAll(target)은 바인딩과 미해결 레코드를 함께 센다.
+        CHECK(event.UnbindAll(b) == 2);
+        CHECK(event.UnresolvedCount() == 0);
+
+        // Compact는 대상이 사라진 미해결 레코드도 지운다(살아 있는 대상의 것은 둔다).
+        REQUIRE(event.TryKeepUnresolved(a, missing));
+        REQUIRE(event.TryKeepUnresolved(b, missing));
+        REQUIRE(registry.RequestDestroy(access, b));
+        CHECK(event.Compact(registry, access) == 1);
+        CHECK(event.UnresolvedCount() == 1);
+
+        // Clear는 전부 지운다.
+        event.Clear();
+        CHECK(event.UnresolvedCount() == 0 && event.BindingCount() == 0);
+        REQUIRE(list());
+        CHECK(visited.Size() == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // 상태·레코드·delegate 항목 할당이 몇 번째에서 실패해도 그 오류를 돌려주고 아무것도 남기지 않는다.
 TEST(Event_AllocationFailureLeavesNothing) {
     SystemAllocator allocator;

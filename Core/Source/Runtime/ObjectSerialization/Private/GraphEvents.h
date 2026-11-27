@@ -29,7 +29,9 @@ struct PendingEventBinding {
     Guid functionId{};
 };
 
-// publisher의 이벤트 필드(ops)에서 살아 있는 리플렉션 바인딩을 out에 기록한다. 바인딩이 없으면
+// publisher의 이벤트 필드(ops)에서 살아 있는 리플렉션 바인딩과 미해결 레코드를 out에 기록한다
+// (쿠킹 — EditorOnly 제외 정책 — 은 미해결 레코드·EditorOnly 함수 바인딩을 EventBindingNotCookable
+// 진단 뒤 InvalidArgument로 거부한다). 바인딩이 없으면
 // written이 false이고 아무것도 쓰지 않는다(필드를 빼야 한다). 대상은 그래프 약한 참조 정책대로 쓴다
 // (집합 밖 null + ExternalReference, Include 지연 덮어쓰기). 실패: 나열(Registry 오류)·쓰기·한도
 // 오류.
@@ -48,11 +50,12 @@ Result<void> DecodeEventBindings(const FieldView& field, FieldDecodeContext& con
                                  TypeId publisherType, usize schemaIndex,
                                  const RuntimeEventOps* ops) noexcept;
 
-// Commit 뒤 보류 바인딩을 만든다(nodes = 게시된 노드 handle). 실패한 바인딩은 버리고
+// Commit 뒤 보류 바인딩을 만든다(nodes = 게시된 노드 handle). keepUnresolved면 함수 없음·서명
+// 다름 바인딩을 미해결 레코드로 보존한다(ED24). 실패한 바인딩은 버리고(보존한 것도 진단은 낸다)
 // EventBindingDropped 진단을 hooks에 낸다(hooks가 없으면 조용히 버린다). 발행자가 그 사이 살아 있지
 // 않으면 진단 없이 건너뛴다. 반환: 만든 바인딩 수.
 usize BindPendingEvents(ObjectRegistry& registry, const ObjectAccessContext& access,
                         Span<const ObjectHandle> nodes, Span<const PendingEventBinding> pending,
-                        FieldCodecHooks* hooks) noexcept;
+                        FieldCodecHooks* hooks, bool keepUnresolved) noexcept;
 
 } // namespace rocks::graph_detail
