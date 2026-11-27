@@ -227,7 +227,7 @@ TEST(TextureFormatSelect_UncompressedConditions) {
     CHECK(Choose(lut, target, false, &choice) == F::BGRA8Unorm && choice.srgbIgnored);
 }
 
-// 32F 필터·norm16 대체와 Android(TC4 전 비압축 — 경고 없음).
+// 32F 필터·norm16 대체와 Android 압축(ASTC — 표는 TextureFormatSelect_AndroidRemap).
 TEST(TextureFormatSelect_FloatNorm16AndAndroid) {
     TextureFormatTarget windows;
     // 검증을 끈 대상은 32F 선형 필터를 된다고 본다.
@@ -237,10 +237,10 @@ TEST(TextureFormatSelect_FloatNorm16AndAndroid) {
     TextureFormatTarget android;
     android.platform = GraphicsPlatform::Android;
     TextureFormatChoice choice;
-    CHECK(Choose(Request(C::Default, S::RGBA8, false), android, true, &choice) == F::BGRA8Unorm);
+    CHECK(Choose(Request(C::Default, S::RGBA8, false), android, true, &choice) == F::ASTC6x6Unorm);
     CHECK(choice.warningCount == 0);
-    CHECK(Choose(Request(C::Normalmap, S::RGBA8, false), android, false) == F::BGRA8Unorm);
-    CHECK(Choose(Request(C::BC7, S::RGBA8, false), android, false, &choice) == F::BGRA8Unorm &&
+    CHECK(Choose(Request(C::Normalmap, S::RGBA8, false), android, false) == F::ASTC6x6Unorm);
+    CHECK(Choose(Request(C::BC7, S::RGBA8, false), android, false, &choice) == F::ASTC4x4Unorm &&
           choice.warningCount == 0);
     // Android OpenGL: 32F 선형 필터 보장이 없으면(쿠킹 보장 표) 필터가 Point가 아닐 때만 16F다.
     android.backends = TextureFormatBackendBit(Backend::OpenGL);
@@ -269,7 +269,9 @@ TEST(TextureFormatSelect_SamplingFallback) {
     const Backend gl[] = {Backend::OpenGL};
     const Span<const Backend> glList(gl, 1);
     TextureFormatChoice choice;
-    const PixelFormat got = Choose(Request(C::Default, S::RGBA8, true), android, false, &choice);
+    // 비압축 BGRA8 설정(VectorDisplacementmap)으로 대체를 본다(압축 설정은 Android에서 ASTC다).
+    const PixelFormat got =
+        Choose(Request(C::VectorDisplacementmap, S::RGBA8, true), android, false, &choice);
     const PixelFormat expected =
         graphics::HasPixelFormatCaps(
             graphics::CookSamplingGuarantee(glList, GraphicsPlatform::Android, F::BGRA8UnormSrgb),
@@ -301,9 +303,9 @@ TEST(TextureFormatSelect_SamplingFallback) {
 }
 
 // 불변식(전체 조합 — 설정 15 × 원본 10 × sRGB 2 × 알파 2 × 크기 2 × 플랫폼 2): 결과가 있고, 블록
-// 형식은 4의 배수 크기·데스크톱에서만, sRGB 출력은 막지 않는 설정에서만, 인코딩은 형식과 맞고,
-// swizzle·채널 복제는 CompressionSettings로만 정해지며, 알파 의존은 Default·Masks의 압축
-// 경로뿐이다.
+// 형식은 4의 배수 크기에서만, sRGB 출력은 막지 않는 설정에서만, 인코딩은 형식과 맞고, swizzle·채널
+// 복제는 CompressionSettings로만 정해지며(예외: Android ASTC 노멀 LA의 Y = A — 12.17.8 6), 알파
+// 의존은 Default·Masks·BC7의 압축 경로뿐이다.
 TEST(TextureFormatSelect_Invariants) {
     usize checked = 0;
     for (const C compression : VisibleCompressions) {
@@ -321,7 +323,7 @@ TEST(TextureFormatSelect_Invariants) {
                         const bool alphaDependent =
                             (compression == C::Default || compression == C::Masks ||
                              compression == C::BC7) &&
-                            size == 256 && platform == GraphicsPlatform::Windows;
+                            size == 256;
                         CHECK(depends == alphaDependent);
                         for (const bool alpha : {false, true}) {
                             TextureFormatChoice choice;
@@ -329,8 +331,12 @@ TEST(TextureFormatSelect_Invariants) {
                             const PixelFormat format = choice.pixelFormat;
                             CHECK(format != F::Unknown);
                             if (IsBlock(format)) {
-                                CHECK(size == 256 && platform == GraphicsPlatform::Windows);
+                                CHECK(size == 256);
                             }
+
+                            CHECK((choice.encoding == TextureFormatEncoding::Astc ||
+                                   choice.encoding == TextureFormatEncoding::EacR11) ==
+                                  (platform == GraphicsPlatform::Android && IsBlock(format)));
 
                             const bool prevented =
                                 compression == C::Alpha || compression == C::Normalmap ||
@@ -357,10 +363,15 @@ TEST(TextureFormatSelect_Invariants) {
                                                            : TextureChannelReplicate::None));
                             const bool rrrr = red || compression == C::DistanceFieldFont;
                             CHECK(choice.swizzle[0] == TextureSwizzle::R);
+                            const bool laNormal = compression == C::Normalmap &&
+                                                  choice.astcMode == TextureAstcMode::NormalLa;
+                            CHECK(laNormal == (compression == C::Normalmap &&
+                                               choice.encoding == TextureFormatEncoding::Astc));
                             CHECK(choice.swizzle[1] == (rrrr ? TextureSwizzle::R
                                                         : compression == C::Displacementmap
                                                             ? TextureSwizzle::Zero
-                                                            : TextureSwizzle::G));
+                                                        : laNormal ? TextureSwizzle::A
+                                                                   : TextureSwizzle::G));
                             CHECK(choice.swizzle[3] == (rrrr ? TextureSwizzle::R
                                                         : compression == C::Displacementmap ||
                                                                 compression == C::Normalmap
@@ -375,6 +386,92 @@ TEST(TextureFormatSelect_Invariants) {
     }
 
     CHECK(checked == 15u * 10u * 2u * 2u * 2u * 2u);
+}
+
+// Android 재대응 표(12.17.8 6 — UE ASTCRemap·GetQualityFormat): 품질 다섯 단계 + Default, HQ(BC7)
+// 기본 4×4, 노멀은 품질과 무관하게 6×6 LA, BC4 → EAC R11, HDR_Compressed → ASTC RGB 선형, 알파 없는
+// RGBA·RGBA HQ → Rgb 배치, 볼륨·4의 배수 아님 → 비압축, 데스크톱은 품질을 보지 않는다.
+TEST(TextureFormatSelect_AndroidRemap) {
+    TextureFormatTarget android;
+    android.platform = GraphicsPlatform::Android;
+    using Q = TextureCompressionQuality;
+    struct Quality {
+        Q quality;
+        PixelFormat normal;
+        PixelFormat hq;
+    };
+    for (const Quality one : {Quality{Q::Default, F::ASTC6x6UnormSrgb, F::ASTC4x4UnormSrgb},
+                              Quality{Q::Lowest, F::ASTC12x12UnormSrgb, F::ASTC12x12UnormSrgb},
+                              Quality{Q::Low, F::ASTC10x10UnormSrgb, F::ASTC10x10UnormSrgb},
+                              Quality{Q::Medium, F::ASTC8x8UnormSrgb, F::ASTC8x8UnormSrgb},
+                              Quality{Q::High, F::ASTC6x6UnormSrgb, F::ASTC6x6UnormSrgb},
+                              Quality{Q::Highest, F::ASTC4x4UnormSrgb, F::ASTC4x4UnormSrgb}}) {
+        TextureFormatRequest color = Request(C::Default, S::RGBA8, true);
+        color.compressionQuality = one.quality;
+        TextureFormatChoice choice;
+        CHECK(Choose(color, android, false, &choice) == one.normal);
+        CHECK(choice.encoding == TextureFormatEncoding::Astc && choice.srgb &&
+              choice.astcMode == TextureAstcMode::Rgb);
+        CHECK(Choose(color, android, true, &choice) == one.normal &&
+              choice.astcMode == TextureAstcMode::Rgba);
+        TextureFormatRequest hq = Request(C::BC7, S::RGBA8, true);
+        hq.compressionQuality = one.quality;
+        CHECK(Choose(hq, android, false, &choice) == one.hq &&
+              choice.astcMode == TextureAstcMode::Rgb && !choice.alphaProfile);
+        CHECK(Choose(hq, android, true, &choice) == one.hq &&
+              choice.astcMode == TextureAstcMode::Rgba);
+        TextureFormatRequest normal = Request(C::Normalmap, S::RGBA8, true);
+        normal.compressionQuality = one.quality;
+        CHECK(Choose(normal, android, false, &choice) == F::ASTC6x6Unorm);
+        CHECK(choice.astcMode == TextureAstcMode::NormalLa && choice.srgbIgnored);
+        CHECK(choice.swizzle[0] == TextureSwizzle::R && choice.swizzle[1] == TextureSwizzle::A &&
+              choice.swizzle[2] == TextureSwizzle::Zero &&
+              choice.swizzle[3] == TextureSwizzle::One);
+        // 데스크톱은 품질을 보지 않는다.
+        CHECK(Choose(color, TextureFormatTarget{}, false) == F::BC1UnormSrgb);
+    }
+
+    TextureFormatChoice choice;
+    // compressionNoAlpha(BC1)는 알파 판정과 무관하게 Rgb다.
+    TextureFormatRequest noAlpha = Request(C::Default, S::RGBA8, false);
+    noAlpha.compressionNoAlpha = true;
+    CHECK(Choose(noAlpha, android, true, &choice) == F::ASTC6x6Unorm &&
+          choice.astcMode == TextureAstcMode::Rgb);
+    // Masks는 sRGB를 막는다.
+    CHECK(Choose(Request(C::Masks, S::RGBA8, true), android, true, &choice) == F::ASTC6x6Unorm &&
+          choice.astcMode == TextureAstcMode::Rgba);
+    // BC4 → EAC R11(선형, rrrr).
+    CHECK(Choose(Request(C::Alpha, S::G8, false), android, false, &choice) == F::EACR11Unorm);
+    CHECK(choice.encoding == TextureFormatEncoding::EacR11 && !choice.srgb &&
+          choice.swizzle[1] == TextureSwizzle::R && choice.swizzle[3] == TextureSwizzle::R);
+    // HDR_Compressed → ASTC RGB 선형(UE FallbackForASTCHDRProfile 0).
+    CHECK(Choose(Request(C::HDR_Compressed, S::RGBA16F, true), android, true, &choice) ==
+          F::ASTC6x6Unorm);
+    CHECK(choice.astcMode == TextureAstcMode::Rgb && choice.srgbIgnored);
+    // 볼륨·4의 배수 아님은 비압축이다.
+    TextureFormatRequest volume = Request(C::Default, S::RGBA8, true);
+    volume.dimension = TextureDimension::Volume;
+    CHECK(Choose(volume, android, false, &choice) == F::BGRA8UnormSrgb &&
+          choice.encoding == TextureFormatEncoding::Uncompressed);
+    CHECK(Choose(volume, TextureFormatTarget{}, false) == F::BC1UnormSrgb);
+    CHECK(Choose(Request(C::Default, S::RGBA8, true, 6), android, false) == F::BGRA8UnormSrgb);
+    // 알파 의존: 형식은 같고 배치가 다르다.
+    CHECK(TextureFormatNeedsAlpha(Request(C::Default, S::RGBA8, true), android));
+    CHECK(TextureFormatNeedsAlpha(Request(C::BC7, S::RGBA8, true), android));
+    CHECK(!TextureFormatNeedsAlpha(Request(C::Normalmap, S::RGBA8, true), android));
+    CHECK(!TextureFormatNeedsAlpha(Request(C::HDR_Compressed, S::RGBA16F, false), android));
+    // Android backend(OpenGL ES·Vulkan)는 ASTC LDR·EAC R11을 보장한다(대체 경고 없음).
+    android.backends =
+        TextureFormatBackendBit(Backend::OpenGL) | TextureFormatBackendBit(Backend::Vulkan);
+    for (const C compression : {C::Default, C::BC7, C::Normalmap, C::Alpha, C::HDR_Compressed}) {
+        CHECK(Choose(Request(compression, S::RGBA8, true), android, true, &choice) != F::Unknown);
+        CHECK(IsBlock(choice.pixelFormat) && choice.warningCount == 0);
+    }
+
+    // 범위 밖 품질은 InvalidArgument다.
+    TextureFormatRequest wrong = Request(C::Default, S::RGBA8, true);
+    wrong.compressionQuality = static_cast<Q>(6);
+    CHECK(SelectTextureFormat(wrong, android, false, choice).Error() == ErrorCode::InvalidArgument);
 }
 
 // 인자 오류: 원본 Invalid·범위 밖, 크기 0, 숨김 설정(LQ·EncodedReflectionCapture), 범위 밖

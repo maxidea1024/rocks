@@ -92,6 +92,9 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     const uint64 now = mixer_.CompletedMixFrame();
     minDistanceDelta_ = batch.concurrencyMinDistanceDelta;
     virtual_ = batch.virtualization;
+    focus_ = batch.focus;
+    focusInitializeOnFirstUpdate_ = batch.focusInitializeOnFirstUpdate;
+    occlusion_ = batch.occlusion;
     ApplySnapshots(batch);
     RetryDeferred();
     // 수거를 먼저 한다(3.41.4절 — 이번 묶음에 끝난 voice가 배정의 상한 수에 들어가지 않게).
@@ -116,16 +119,22 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
         case ControlCommandType::RemoveEmitter:
             ApplyRemoveEmitter(command, batch);
             break;
+        case ControlCommandType::SetOcclusion:
+            ApplySetOcclusion(command, now);
+            break;
         }
     }
 
+    // 가상 재생은 검사 때만 갱신한다(UE FAudioVirtualLoop::UpdateFocusData — AVL 275–295).
     for (Record& record : records_) {
-        if (record.state != RecordState::Inactive && record.spatialized) {
-            UpdateSpatial(record);
+        if (record.state != RecordState::Inactive && record.state != RecordState::Virtual &&
+            record.spatialized) {
+            UpdateSpatial(record, now, false);
         }
     }
 
     if (!shuttingDown_) {
+        UpdateOcclusion(batch, now);
         UpdateEstimates(batch, now);
         UpdateVirtualization(batch, now);
         UpdateConcurrency(batch, now);
@@ -312,13 +321,33 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     record.sceneEpoch = command.sceneEpoch;
     record.placement = command.placement;
     record.position = command.position;
+    record.rotation = command.rotation;
     record.emitter = command.emitter;
+    record.priority = command.priority;
+    // 감쇠 경로가 없는 재생의 실효 우선순위는 사운드 값 그대로다(3.42.4절).
+    record.voicePriority = command.priority;
+    record.concurrencyPriority = command.priority;
+    record.focusFactor = 1.0f;
+    record.focusInitialized = false;
+    record.focusMixFrame = now;
+    record.focus = FocusScales{};
+    record.occlusionPending = false;
+    record.occlusionChecked = false;
+    record.occlusionSequence = 0;
+    record.occlusionCheckFrame = now;
+    record.occlusionVolume.Set(1.0f);
+    record.occlusionFilter.Set(MaxAttenuationFilterFrequency);
     // Play2D(NonSpatial)는 감쇠가 있어도 2D다(UE PlaySound2D). 위치 재생에 감쇠가 없으면 2D다.
     record.spatialized =
         command.placement != PlayPlacement::NonSpatial && playable.attenuation.HasValue();
     record.spatial = SpatialParams{};
     if (record.spatialized) {
-        UpdateSpatial(record);
+        UpdateSpatial(record, now, true);
+        // 게임 쪽 첫 검사 결과는 보간 없이 바로 쓴다(UE 첫 검사 — ActiveSound.cpp:1600–1615).
+        if (command.occlusionChecked && playable.attenuation.Value().enableOcclusion &&
+            !occlusion_.disabled) {
+            ApplyOcclusionResult(record, command.occluded, now, true);
+        }
     }
 
     record.started = false;
@@ -330,7 +359,6 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     record.stopFade = NoPendingStop;
     record.resumePending = false;
     record.sequence = ++nextSequence_;
-    record.priority = command.priority;
     record.remainActive = command.remainActiveIfDropped;
     record.startFrame = command.startFrame;
     record.voiceStartFrame = command.startFrame;
@@ -437,6 +465,7 @@ void AudioDeviceContext::ApplySnapshots(const ControlBatch& batch) noexcept {
             ControlEmitter& emitter = emitters_[update.emitter.slot];
             emitter.generation = update.emitter.generation;
             emitter.position = update.position;
+            emitter.rotation = update.rotation;
         }
     }
 }
@@ -507,22 +536,78 @@ void AudioDeviceContext::ApplyRemoveEmitter(const ControlCommand& command,
     }
 }
 
-void AudioDeviceContext::UpdateSpatial(Record& record) noexcept {
+void AudioDeviceContext::UpdateSpatial(Record& record, uint64 now, bool accepting) noexcept {
     const SoundPlayable& playable = *record.sound.Get();
+    const SoundAttenuation& attenuation = playable.attenuation.Value();
     const ControlScene& scene = scenes_[record.scene];
-    Vec3d source = record.position;
     if (record.placement == PlayPlacement::Emitter) {
         const ControlEmitter& emitter = emitters_[record.emitter.slot];
         // emitter가 사라졌으면 마지막 위치를 그대로 쓴다(재생은 RemoveEmitter가 끝낸다).
         if (emitter.generation == record.emitter.generation) {
             record.position = emitter.position;
+            record.rotation = emitter.rotation;
         }
-
-        source = record.position;
     }
 
-    record.spatial = ComputeSpatialParams(playable.attenuation.Value(), playable.ChannelCount(),
-                                          scene.listenerPosition, scene.listenerRotation, source);
+    // 1) 우선순위 거리 감쇠(UE AS 2080–2103 — 모양 반경을 빼지 않은 거리).
+    const float listenerDistance =
+        static_cast<float>((record.position - scene.listenerPosition).Length());
+    const float attenuated =
+        record.priority * PriorityAttenuationScale(attenuation, listenerDistance);
+    const auto factorNow = [&]() noexcept {
+        return FocusFactor(
+            attenuation, focus_,
+            FocusAzimuthDegrees(scene.listenerPosition, scene.listenerRotation, record.position));
+    };
+
+    // 2) focus(UE AS 2105–2130). 수락 때는 계수를 spatialize·focus일 때만 계산하고
+    // Priority·Distance 배수는 그 계수로 늘 정한다(UE AD 6279·6293–6309·6745–6750 — Volume은 아직
+    // 적용하지 않는다). 갱신 블록이 돌지 않는 감쇠(spatialize·focus 둘 다 꺼짐)는 수락 때 배수를
+    // 그대로 두고 H = 1이다.
+    if (accepting) {
+        const float factor =
+            attenuation.spatialize && attenuation.enableListenerFocus ? factorNow() : 1.0f;
+        record.focus = ComputeFocusScales(attenuation, focus_, factor);
+        record.focus.volume = 1.0f;
+        record.voicePriority = math::Clamp(attenuated, 0.0f, MaxSoundPriority);
+        record.concurrencyPriority =
+            math::Clamp(record.focus.priority, 0.0f, MaxSoundPriority) * record.priority;
+    } else if (attenuation.spatialize || attenuation.enableListenerFocus) {
+        const float target = factorNow();
+        if (attenuation.enableFocusInterpolation &&
+            (record.focusInitialized || !focusInitializeOnFirstUpdate_)) {
+            const double seconds = static_cast<double>(now - record.focusMixFrame) /
+                                   static_cast<double>(mixer_.Config().sampleRate);
+            record.focusFactor = InterpolateFocusFactor(
+                record.focusFactor, target, static_cast<float>(seconds),
+                attenuation.focusAttackInterpSpeed, attenuation.focusReleaseInterpSpeed);
+        } else {
+            record.focusFactor = target;
+        }
+
+        record.focusInitialized = true;
+        record.focusMixFrame = now;
+        record.focus = attenuation.enableListenerFocus
+                           ? ComputeFocusScales(attenuation, focus_, record.focusFactor)
+                           : FocusScales{};
+        // UE PriorityHighest(AS 1073·2117–2122): 1에서 시작해 focus 배수 전의 P × pa로 올라간다.
+        const float highest = math::Max(1.0f, attenuated);
+        record.voicePriority =
+            math::Clamp(attenuated * record.focus.priority, 0.0f, MaxSoundPriority);
+        record.concurrencyPriority =
+            math::Clamp(highest * record.focus.priority, 0.0f, MaxSoundPriority) * record.priority;
+    } else {
+        // 블록이 돌지 않으면 배수는 기본값 1이고 PriorityHighest는 1이다(UE FocusDataToApply —
+        // ActiveSound.cpp:2052–2053·2318).
+        record.focus = FocusScales{};
+        record.voicePriority = math::Clamp(attenuated, 0.0f, MaxSoundPriority);
+        record.concurrencyPriority = record.priority;
+    }
+
+    // 3) 거리 감쇠·공기 흡수·패닝(UE AS 2135–2156·2257–2276).
+    record.spatial = ComputeSpatialParams(attenuation, playable.ChannelCount(),
+                                          scene.listenerPosition, scene.listenerRotation,
+                                          record.position, record.rotation, record.focus.distance);
     record.paramsDirty = true;
 }
 
@@ -737,13 +822,19 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
     params.gain =
         ClampGain(record.volume.At(frame) * playable.volume * record.spatial.attenuationGain *
-                  record.resume.At(frame) * record.concurrencyScale * record.stealFader.At(frame));
+                  record.focus.volume * record.occlusionVolume.At(frame) * record.resume.At(frame) *
+                  record.concurrencyScale * record.stealFader.At(frame));
+    // LPF는 공기 흡수와 차폐의 최솟값이다(UE FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
+    params.lowPassCutoffHz = math::Min(record.spatial.lowPassHz, OcclusionFilterAt(record, frame));
+    params.highPassCutoffHz = record.spatial.highPassHz;
     params.pitch = ClampVoicePitch(record.pitch.At(frame) * playable.pitch);
     params.panMode = audio::AudioPanMode::Direct;
     if (record.spatial.azimuthPan) {
         params.panMode = audio::AudioPanMode::Azimuth;
         params.azimuthDegrees = record.spatial.azimuthDegrees;
+        params.rightAzimuthDegrees = record.spatial.rightAzimuthDegrees;
         params.nonSpatializedAmount = record.spatial.nonSpatializedAmount;
+        params.omniMode = record.spatial.omniMode;
     }
 
     return params;

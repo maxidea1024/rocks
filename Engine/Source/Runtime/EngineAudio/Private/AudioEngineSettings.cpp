@@ -77,6 +77,33 @@ constinit cvar::CVar<float> ConcurrencyMinDistanceDeltaVar =
               "equally far. Read every frame.")
         .Range(0.0f, MaxAudioWorldDistance);
 
+// focus 첫 갱신(3.42.5절, UE au.FocusData.InitializeFocusFactorOnFirstUpdate —
+// ActiveSound.cpp:48–53).
+constinit cvar::CVar<int32> FocusInitializeOnFirstUpdateVar =
+    cvar::Var("audio.focus.initializeonfirstupdate", 1)
+        .Help(
+            "1 sets the listener focus factor straight to its target on a sound's first update; 0 "
+            "interpolates from out of focus. Read every frame.")
+        .Range(0, 1);
+
+// 차폐(3.42.7절, UE
+// DefaultOcclusionCheckInterval·au.DisableOcclusion·au.EnableOcclusionFilterScale).
+constinit cvar::CVar<float> OcclusionCheckIntervalVar =
+    cvar::Var("audio.occlusion.checkinterval", OcclusionSettings{}.checkIntervalSeconds)
+        .Help("Seconds between occlusion queries of a playing sound; below 0 queries only when the "
+              "sound starts. Read every frame.")
+        .Range(MinOcclusionCheckSeconds, MaxOcclusionCheckSeconds);
+
+constinit cvar::CVar<int32> OcclusionDisableVar =
+    cvar::Var("audio.occlusion.disable", 0)
+        .Help("1 skips occlusion queries and treats every sound as unoccluded. Read every frame.")
+        .Range(0, 1);
+
+constinit cvar::CVar<int32> OcclusionFilterScaleVar =
+    cvar::Var("audio.occlusion.filterscale", 0)
+        .Help("1 scales the occlusion low-pass frequency by 0.25. Read every frame.")
+        .Range(0, 1);
+
 // 가상화(3.41.3절, UE au.VirtualLoops.* — AudioVirtualLoop.cpp:9–42, au.MaxWorldDistance).
 constinit cvar::CVar<int32> VirtualEnabledVar =
     cvar::Var("audio.virtual.enabled", 1)
@@ -143,7 +170,8 @@ Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcep
     return context.Register(
         MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar, MixerBufferCountVar,
         MixerSampleRateVar, MaxVoicesVar, StreamRingFramesVar, StreamMaxStreamsVar,
-        StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar, VirtualEnabledVar,
+        StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar, FocusInitializeOnFirstUpdateVar,
+        OcclusionCheckIntervalVar, OcclusionDisableVar, OcclusionFilterScaleVar, VirtualEnabledVar,
         VirtualAllowPlayWhenSilentVar, VirtualUpdateMinVar, VirtualUpdateMaxVar,
         VirtualPerfDistanceVar, VirtualForceUpdateDistanceVar, VirtualMaxWorldDistanceVar);
 }

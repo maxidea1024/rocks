@@ -18,6 +18,7 @@
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/Shape/DecoratedShape.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
 #include <Jolt/Physics/Collision/TransformedShape.h>
 // clang-format on
@@ -520,7 +521,18 @@ HitResult JoltPhysicsScene::MakeShapeHit(const Vec3d& start, const Vec3d& end,
     }
 
     JPH::BodyLockRead lock(system_.GetBodyLockInterface(), record.body);
-    if (!lock.Succeeded() || lock.GetBody().GetShape()->GetSubType() != JPH::EShapeSubType::Box) {
+    if (!lock.Succeeded()) {
+        return hit;
+    }
+
+    // 질량 중심 이동 body는 형상이 OffsetCenterOfMassShape로 감싸여 있다(7.1.15절) — 안쪽을
+    // 본다(상자는 body 원점 중심이고 회전만 쓴다).
+    const JPH::Shape* bodyShape = lock.GetBody().GetShape();
+    if (bodyShape->GetSubType() == JPH::EShapeSubType::OffsetCenterOfMass) {
+        bodyShape = static_cast<const JPH::DecoratedShape*>(bodyShape)->GetInnerShape();
+    }
+
+    if (bodyShape->GetSubType() != JPH::EShapeSubType::Box) {
         return hit;
     }
 

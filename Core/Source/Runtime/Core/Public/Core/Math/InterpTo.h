@@ -12,6 +12,26 @@ namespace rocks::math {
 // VInterpTo·QInterpTo가 "도착"으로 보는 허용 오차다(UE UE_KINDA_SMALL_NUMBER).
 inline constexpr double InterpToArrivalTolerance = 1.0e-4;
 
+// 스칼라판(UE FMath::FInterpTo — UnrealMathUtility.h:1509–1531): current에서 target 쪽으로
+// clamp(deltaSeconds·speed, 0, 1)만큼 옮긴다. speed ≤ 0이거나 차² < SmallNumber면 target이다(UE는
+// 스칼라판만 UE_SMALL_NUMBER를 쓴다).
+//
+// 사용 예(오디오 focus 계수, speed 5):
+//   factor = math::FInterpTo(factor, target, deltaSeconds, 5.0f);
+template <typename T>
+T FInterpTo(T current, T target, T deltaSeconds, T speed) noexcept {
+    if (speed <= static_cast<T>(0)) {
+        return target;
+    }
+
+    const T distance = target - current;
+    if (distance * distance < SmallNumber<T>) {
+        return target;
+    }
+
+    return current + distance * Clamp(deltaSeconds * speed, static_cast<T>(0), static_cast<T>(1));
+}
+
 // current에서 target 쪽으로 clamp(deltaSeconds·speed, 0, 1)만큼 옮긴다(UE VInterpTo). speed ≤
 // 0이거나 거리² < InterpToArrivalTolerance면 target이다. 단위는 입력과 같다(위치면 cm).
 //

@@ -39,6 +39,8 @@ struct AudioControlStats {
     uint64 realizations = 0;
     // 실현 때 동시 발음 그룹 표가 가득해 가상으로 남은 수(누계 — 다음 간격에 다시 본다)다.
     uint64 failedRealizations = 0;
+    // 차폐 질의 요청 수(누계 — 3.42.7절)다.
+    uint64 occlusionRequests = 0;
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;

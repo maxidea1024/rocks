@@ -500,6 +500,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::TextureBuildSettings::compressionQuality",
+      "id": "62e22ca4f98847b6b2519a0ade9f5db5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::TextureBuildSettings::cookBackends",
       "id": "52d04c667a1d4d319280ba5932903772",
       "aliases": [],
