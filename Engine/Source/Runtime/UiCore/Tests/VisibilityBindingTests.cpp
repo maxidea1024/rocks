@@ -111,6 +111,34 @@ TEST(UiCore_VisibilityBindingRunsBeforeOtherBindingsInOnePass) {
     REQUIRE(root.Value()->RemoveChild(*probe.Value()));
     probe.Value().Reset();
     root.Value()->UpdateBoundAttributes();
+    // 새 요소의 묶음은 정상으로 평가된다(옛 계수가 남지 않았다).
+    auto again = SharedPtr<ProbeElement>::TryMake(allocator, allocator);
+    REQUIRE(again);
+    REQUIRE(root.Value()->TryAddChild(again.Value()));
+    int againCalls = 0;
+    again.Value()->BindWidth(&againCalls);
+    root.Value()->UpdateBoundAttributes();
+    CHECK(againCalls == 1);
+}
+
+TEST(UiCore_VisibilityGetterMayRebindItsOwnBinding) {
+    SystemAllocator allocator;
+    auto root = SharedPtr<Element>::TryMake(allocator, allocator);
+    auto child = SharedPtr<Element>::TryMake(allocator, allocator);
+    REQUIRE(root && child);
+    REQUIRE(root.Value()->TryAddChild(child.Value()));
+    Element* target = child.Value().Get();
+    // getter가 자기 묶음을 값으로 바꿔도 안전하다(옛 묶음은 갱신이 끝난 뒤 해제된다).
+    REQUIRE(child.Value()->BindVisibility(Delegate<Visibility()>::CreateLambda([target]() noexcept {
+        target->SetVisibility(Visibility::Hidden);
+        return Visibility::Collapsed;
+    })));
+    root.Value()->UpdateBoundAttributes();
+    CHECK(child.Value()->GetVisibility() == Visibility::Collapsed);
+    // 묶음은 풀렸다 — 다음 갱신은 값을 바꾸지 않는다.
+    child.Value()->SetVisibility(Visibility::Visible);
+    root.Value()->UpdateBoundAttributes();
+    CHECK(child.Value()->GetVisibility() == Visibility::Visible);
 }
 
 } // namespace visibility_binding_tests_file

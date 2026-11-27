@@ -22,6 +22,8 @@ public:
     SharedPtr<Element::ToolTipFactory> tip;
     SharedPtr<UiHostServices> host;
     UniquePtr<VisibilityAttribute> visibility;
+    // 평가 중에 풀린 묶음이다(그 갱신이 끝나면 해제한다 — 루프가 잡은 다음 묶음일 수 있다).
+    UniquePtr<VisibilityAttribute> retiredVisibility;
 };
 
 Result<void> Element::BindVisibility(Delegate<Visibility()>&& getter) noexcept {
@@ -41,13 +43,29 @@ Result<void> Element::BindVisibility(Delegate<Visibility()>&& getter) noexcept {
         return Result<void>::Failure(made.Error());
     }
 
+    UnbindVisibility();
     semantics_->visibility = Move(made.Value());
     return Result<void>::Success();
 }
 
 void Element::UnbindVisibility() noexcept {
+    if (!semantics_ || !semantics_->visibility) {
+        return;
+    }
+
+    if (updatingBindings_) {
+        // 갱신 루프가 이 묶음을 다음으로 잡았거나 지금 실행 중일 수 있다 — 목록에서만 빼고 미룬다.
+        semantics_->visibility->Retire();
+        semantics_->retiredVisibility = Move(semantics_->visibility);
+        return;
+    }
+
+    semantics_->visibility.Reset();
+}
+
+void Element::ReleaseRetiredVisibility() noexcept {
     if (semantics_) {
-        semantics_->visibility.Reset();
+        semantics_->retiredVisibility.Reset();
     }
 }
 

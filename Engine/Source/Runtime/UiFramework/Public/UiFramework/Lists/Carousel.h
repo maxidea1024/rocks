@@ -5,8 +5,9 @@
 
 namespace rocks::ui {
 
-// 입력은 현재 페이지로만 전달한다. 전환 동안에는 이전 페이지도 함께 그리며, 완료되면
-// 시간 속성의 등록을 해제해 정지 화면에서 측정·배치·그리기 기록을 재사용한다.
+// 전환 동안에는 이전 페이지도 함께 그리고, 보이는 두 쪽 모두 포인터 hit 대상이다(그리기 자식 —
+// Docs/Design/UiToolkit 20.4절). 키 입력은 현재 페이지로 간다. 완료되면 시간 속성의 등록을 해제해
+// 정지 화면에서 측정·배치·그리기 기록을 재사용한다.
 class ROCKS_UIFRAMEWORK_API Carousel final : public Switcher {
 public:
     explicit Carousel(Allocator& allocator) noexcept;

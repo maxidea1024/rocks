@@ -30,7 +30,7 @@
   - `Application::BeginFrame()`이 프레임마다 한 번 시계를 읽는다. `currentTime`은 읽은 값 그대로다.
   - 간격이 1/8초(`MaxFrameDeltaSeconds`)를 넘으면 이전 시각(`lastTime`)만 당겨 `deltaTime`을 자른다. 누적 시각을 따로 두지 않으므로 타이머 마감과 시간 기준이 갈라지지 않는다.
   - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다.
-  - 한 번도 `BeginFrame`을 부르지 않은 호스트(시험·단순 호스트)는 암묵 시작이다. 프레임이 열려 있지 않으면 입력 처리(`RoutePointer`·`RouteKey` 등)나 `PrepareLayout`이 먼저 연다. `PrepareLayout`이 그 프레임을 닫는다. 호스트가 `BeginFrame`을 한 번이라도 부르면 그 뒤로는 암묵 시작을 하지 않는다. 한 틱 안의 여러 `PrepareLayout`(월드 위젯 입력마다 배치)이 프레임을 여러 번 여는 일과, 바깥 시각과 앱 시계가 한 틱 안에서 섞이는 일을 막는다.
+  - 한 번도 `BeginFrame`을 부르지 않은 호스트(시험·단순 호스트)는 암묵 시작이다. 프레임이 열려 있지 않으면 입력 처리(`RoutePointer`·`RouteKey` 등), 예약(`StartTimer`·`StartFrameTimer`·`SetFocus`의 키보드 툴팁)이나 `PrepareLayout`이 먼저 연다. 입력이 연 프레임은 그 `PrepareLayout`까지 이어지므로, 입력과 배치 사이에 흐른 시간은 다음 프레임에 반영된다(UE 틱 순서와 같다). `PrepareLayout`이 그 프레임을 닫는다. 호스트가 `BeginFrame`을 한 번이라도 부르면 그 뒤로는 암묵 시작을 하지 않는다. 한 틱 안의 여러 `PrepareLayout`(월드 위젯 입력마다 배치)이 프레임을 여러 번 여는 일과, 바깥 시각과 앱 시계가 한 틱 안에서 섞이는 일을 막는다.
   - 프레임 타이머는 프레임마다 한 번, 자른 `deltaTime` 이하만 진행한다(UE active timer에 앱 DeltaTime). interval 타이머 마감은 시각 그대로 본다.
   - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) `WorldWidgetPresenter::Prepare`가 그리기 프레임마다 앱 시계로 `BeginFrame()`을 부른다.
 - **읽는 곳.**

@@ -28,7 +28,8 @@ TEST(UiFramework_HitGridFollowsOverlayPaintOrder) {
     auto front = MakeFrame(allocator);
     auto back = MakeFrame(allocator);
     REQUIRE(overlay && front && back);
-    // 먼저 넣었어도 z가 높은 쪽이 나중에 그려지고(위 layer) 위에서 맞는다.
+    // 먼저 넣었어도 z가 높은 쪽이 나중에 그려지고(위 layer) 위에서 맞는다. Overlay는 z 순서로
+    // 자식을 두므로 활성 자식과 그리기 자식이 같다 — 둘이 다른 경우는 아래 Carousel 시험이 본다.
     REQUIRE(overlay.Value()->TryAddSlot(front.Value(), 1));
     REQUIRE(overlay.Value()->TryAddSlot(back.Value(), 0));
     Application app(allocator);
@@ -70,8 +71,8 @@ TEST(UiFramework_HitGridUsesCarouselSlidePaintChildren) {
     CHECK(carousel.Value()->HitTest(center) == contents[0].Get());
 
     // 슬라이드가 시작되면(진행 0 — 시각이 흐르지 않음) 이전 쪽이 아직 화면에 있고 다음 쪽은 오른쪽
-    // 밖이다. 그리기 자식(두 쪽)으로 걸으므로 이전 쪽이 맞는다 — 활성 자식만 걸으면 아무것도 안
-    // 맞는다.
+    // 밖이다. 그리기 자식(두 쪽)으로 걸으므로 이전 쪽이 맞는다 — 활성 자식만 걸으면 Carousel 자신이
+    // 맞는다(다음 쪽은 화면 밖이다).
     REQUIRE(carousel.Value()->Show(1, true, 1));
     REQUIRE(app.UpdatePaintCache(viewport, 1));
     HitGrid grid(allocator);

@@ -237,7 +237,8 @@ SharedPtr<Element> HitGrid::CandidateFromTop(usize fromTop, Box2<float>& area) c
 SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope,
                                  bool ignoreEnabled) const noexcept {
     const auto owner = root_.Lock();
-    if (!point.IsFinite() || !owner || !scope.IsInputPathActive(*owner, true, false)) {
+    // scope 위의 비활성 조상도 경로를 자른다(UE는 창 루트부터 자른다 — 20.5절).
+    if (!point.IsFinite() || !owner || !scope.IsInputPathActive(*owner, true, !ignoreEnabled)) {
         return {};
     }
 

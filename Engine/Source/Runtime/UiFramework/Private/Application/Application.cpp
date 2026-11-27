@@ -542,13 +542,16 @@ Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutSc
     frameBegun_ = false;
     AdvanceTimers();
     AdvanceToolTips();
-    ReleaseInactiveTargets();
     SharedPtr<Element> root = root_;
     if (!root) {
+        ReleaseInactiveTargets();
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
+    // 묶음(보이기 포함)을 먼저 평가한 뒤 숨거나 접힌 요소의 초점·capture·hover를 푼다(같은
+    // 프레임에).
     root->UpdateBoundAttributes();
+    ReleaseInactiveTargets();
     auto measured = root->Prepass(layoutScale);
     if (!measured) {
         return measured;
@@ -626,6 +629,8 @@ Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& targ
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // 키보드 툴팁 예약이 프레임 시각을 본다 — 암묵 시작 호스트면 프레임을 연다(20.3절).
+    EnsureFrame();
     if (target && (!target->SupportsKeyboardFocus() || !IsFocusablePath(target.Get()))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

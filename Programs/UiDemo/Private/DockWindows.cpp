@@ -248,6 +248,8 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
             // 버퍼로 그 창만 그린다. 그 프레임의 present까지 기다린다(OS 크기 변경 루프가 다음
             // 메시지로 가기 전 — Docs/Design/UiToolkit 18.5절).
             UiDrawBuffer buffer(allocator_);
+            // 크기 조절 루프 동안에도 프레임 시각이 흐른다(Docs/Design/UiToolkit 20.3절).
+            source->app.BeginFrame();
             auto rendered = Render(*source, false, buffer);
             Result<void> drawn = Result<void>::Success();
             if (rendered) {

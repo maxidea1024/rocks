@@ -38,15 +38,18 @@ TEST(UiFramework_ToolTipDelayFadeAndAccessibleSummary) {
     REQUIRE(app.UpdatePaintCache(area, 1));
     REQUIRE(app.RoutePointer({PointerEventType::Move, {8, 4}}));
     tipClock = 0.14;
+    app.BeginFrame();
     REQUIRE(app.UpdatePaintCache(area, 1));
     CHECK(!app.IsToolTipOpen(0));
     tipClock = 0.16;
+    app.BeginFrame();
     REQUIRE(app.UpdatePaintCache(area, 1));
     REQUIRE(app.IsToolTipOpen(0));
     REQUIRE(label.Value()->Parent());
     CHECK(label.Value()->GetGeometry().layout.Apply({}) == Vec2(20, 20));
     CHECK(label.Value()->Parent()->GetRenderOpacity() == 0);
     tipClock = 0.22;
+    app.BeginFrame();
     REQUIRE(app.UpdatePaintCache(area, 1));
     CHECK(label.Value()->Parent()->GetRenderOpacity() > 0.5f);
     auto tree = app.AccessibleTree();

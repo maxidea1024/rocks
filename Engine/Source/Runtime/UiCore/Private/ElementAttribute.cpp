@@ -90,10 +90,13 @@ void Element::UpdateBoundAttributes() noexcept {
     }
 
     ++bindingPass_;
+    updatingBindings_ = true;
     // 보이기 묶음을 먼저 평가한다 — Collapsed여도 다시 보일 수 있게(UE
     // UpdateOnlyVisibilityAttributes, SWidget.cpp 1846–1849행, Docs/Design/UiToolkit 20.6절).
     EvaluateVisibilityBinding(bindingPass_);
     if (visibility_ == Visibility::Collapsed) {
+        updatingBindings_ = false;
+        ReleaseRetiredVisibility();
         return;
     }
 
@@ -104,6 +107,10 @@ void Element::UpdateBoundAttributes() noexcept {
         binding->Evaluate(bindingPass_);
         binding = next;
     }
+
+    // 자식으로 내려가기 전에 끝낸다 — 자식 갱신은 이 요소의 묶음 목록을 돌지 않는다.
+    updatingBindings_ = false;
+    ReleaseRetiredVisibility();
 
     for (const auto& child : ActiveChildren()) {
         if (child->subtreeBindings_) {

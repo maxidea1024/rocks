@@ -347,6 +347,7 @@ public:
     //   (void)panel->BindVisibility(Delegate<Visibility()>::CreateLambda(
     //       [&model]() noexcept { return model.open ? Visibility::Visible : Visibility::Collapsed;
     //       }));
+    // 이 요소의 묶음을 평가하는 중(getter 안)에 부르면 옛 묶음은 그 갱신이 끝난 뒤 해제된다.
     Result<void> BindVisibility(Delegate<Visibility()>&& getter) noexcept;
 
     Visibility GetVisibility() const noexcept;
@@ -400,6 +401,9 @@ private:
     void ApplyVisibility(Visibility visibility) noexcept;
     void UnbindVisibility() noexcept;
     void EvaluateVisibilityBinding(uint64 pass) noexcept;
+    // 갱신 중에 풀린 보이기 묶음을 해제한다(UpdateBoundAttributes 끝).
+    void ReleaseRetiredVisibility() noexcept;
+    bool updatingBindings_ = false;
     SharedPtr<ElementSemantics> semantics_;
     Guid navigationIdentity_{};
     Guid navigationDomain_{};

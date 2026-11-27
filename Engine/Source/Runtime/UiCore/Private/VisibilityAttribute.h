@@ -14,6 +14,11 @@ public:
         SetRegistered(true);
     }
 
+    // 묶음 목록에서 뺀다(평가 중 교체 — 객체는 갱신이 끝난 뒤 해제된다).
+    void Retire() noexcept {
+        SetRegistered(false);
+    }
+
 private:
     void EvaluateValue() noexcept override {
         Owner().ApplyVisibility(getter_.Execute());

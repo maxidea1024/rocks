@@ -9,6 +9,9 @@ Result<SharedPtr<UiTimer>> Application::StartTimer(const SharedPtr<Element>& own
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 예약은 프레임 시각을 본다 — 암묵 시작 호스트면 프레임을 연다(20.3절).
+    EnsureFrame();
+
     auto timer =
         SharedPtr<UiTimer>::TryMake(allocator_, owner, interval, Move(callback), TimerTime());
     if (!timer) {
@@ -24,6 +27,8 @@ Result<SharedPtr<UiTimer>> Application::StartFrameTimer(const SharedPtr<Element>
     if (!owner || !frame) {
         return Result<SharedPtr<UiTimer>>::Failure(ErrorCode::InvalidArgument);
     }
+
+    EnsureFrame();
 
     auto timer = SharedPtr<UiTimer>::TryMake(allocator_, owner, Move(frame), TimerTime());
     if (!timer) {

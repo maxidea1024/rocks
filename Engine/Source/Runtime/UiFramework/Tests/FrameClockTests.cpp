@@ -1,3 +1,4 @@
+#include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/ManualClock.h>
@@ -50,7 +51,7 @@ TEST(UiFramework_FrameClockClampsDeltaButKeepsClockTime) {
     app.BeginFrame(FrameTime{100.0, 5.0});
     CHECK(app.GetFrameTime().current == 100.0);
     CHECK(app.GetFrameTime().delta == MaxFrameDeltaSeconds);
-    app.BeginFrame(FrameTime{NumericLimits<double>::Infinity(), 0});
+    app.BeginFrame(FrameTime{platform::PlatformMath::Infinity<double>(), 0});
     CHECK(app.GetFrameTime().current == 100.0);
 }
 
