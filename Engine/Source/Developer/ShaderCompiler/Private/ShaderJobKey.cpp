@@ -104,7 +104,7 @@ Result<void> WriteShaderJobKeyBody(NuggetKeyWriter& writer,
     }
 
     if (!ValidateShaderCompileOptions(*input.options)) {
-        return Fail(writer, ErrorCode::Unsupported);
+        return Fail(writer, ErrorCode::InvalidArgument);
     }
 
     // 2행.
