@@ -3,6 +3,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
@@ -145,6 +146,13 @@ ROCKS_SHADERCOMPILER_API ShaderSourceStatus ValidateShaderVirtualPath(StringView
 ROCKS_SHADERCOMPILER_API ShaderSourceStatus
 ValidateShaderVirtualDirectory(StringView directory) noexcept;
 
+// 감시 이벤트 경로를 가상 경로로 바꾼다(16.3절 SSD69): virtualRoot(mount 가상 디렉터리) + "/" +
+// relative(감시 루트 기준 상대 경로, 구분자 '/'). 원문 확장자(.rsf·.rsh·.h — UE .usf·.ush·.h)가
+// 아니거나 결과가 가상 경로 규칙(ValidateShaderVirtualPath)에 맞지 않으면 false이고 out은 비어
+// 있다. 할당 실패도 false다.
+ROCKS_SHADERCOMPILER_API bool MakeWatchedShaderPath(StringView virtualRoot, StringView relative,
+                                                    String& out) noexcept;
+
 // 가상 루트 → 실제 디렉터리 mount 표다. 이동만 된다.
 class ROCKS_SHADERCOMPILER_API ShaderSourceTree final {
 public:
@@ -178,6 +186,17 @@ public:
     StringView MountedDirectory(usize index) const noexcept {
         return mounts_[index].virtualDirectory.View();
     }
+
+    // i번째 mount의 실제 디렉터리다(Mount에 준 그대로 — 감시 루트, ShaderSystem 16.3절 SSD77).
+    StringView MountedRealDirectory(usize index) const noexcept {
+        return mounts_[index].realDirectory.View();
+    }
+
+    // 가상 경로의 디스크 경로를 out에 만든다(UE FShaderCompilerError::GetShaderSourceFilePath 대응
+    // — 오류 위치 로그, 16.3절 SSD72). 파일이 있는지는 보지 않는다. 오류: 가상 경로 규칙 위반
+    // InvalidArgument, mount 밖·<루트>/Generated/…(메모리 원문 — 디스크 경로 없음) NotFound, 할당
+    // 실패 OutOfMemory. 실패하면 out은 비어 있다.
+    Result<void> ResolveDiskPath(StringView virtualPath, String& out) const noexcept;
 
     Allocator& GetAllocator() const noexcept {
         return *allocator_;

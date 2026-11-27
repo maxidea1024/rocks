@@ -99,8 +99,6 @@ const char* ShaderOptionErrorName(ShaderOptionError code) noexcept {
         return "InvalidValue";
     case ShaderOptionError::Duplicate:
         return "Duplicate";
-    case ShaderOptionError::Unsupported:
-        return "Unsupported";
     }
 
     return "unknown";
@@ -165,10 +163,6 @@ ShaderOptionStatus ParseShaderCompileOptions(Span<const StringView> assignments,
         if (!valid) {
             return Failure(ShaderOptionError::InvalidValue, index, name);
         }
-
-        if (kind == OptionKind::DebugSymbols && parsed.debugSymbols) {
-            return Failure(ShaderOptionError::Unsupported, index, name);
-        }
     }
 
     options = parsed;
@@ -176,11 +170,6 @@ ShaderOptionStatus ParseShaderCompileOptions(Span<const StringView> assignments,
 }
 
 ShaderOptionStatus ValidateShaderCompileOptions(const ShaderCompileOptions& options) noexcept {
-    if (options.debugSymbols) {
-        return compile_options_detail::Failure(ShaderOptionError::Unsupported, 0,
-                                               compile_options_detail::DebugSymbolsName);
-    }
-
     if (static_cast<uint8>(options.optimization) > static_cast<uint8>(ShaderOptimization::O3) ||
         options.matrixLayout != ShaderMatrixLayout::Row) {
         return compile_options_detail::Failure(ShaderOptionError::InvalidValue, 0, StringView());

@@ -153,7 +153,25 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         return;
     }
 
+    // 디버그 심볼(16.3절 SSD73): 같은 원문을 -Zi로 한 번 더 컴파일한 SPIR-V(OpSource·OpLine)가 값
+    // 3이다. 값 0은 심볼을 끈 job과 같은 byte로 남는다(따로 컴파일하므로).
+    Array<uint8> debugModule(allocator);
+    if (job.options.debugSymbols) {
+        request.debugInfo = true;
+        const ShaderToolOutcome debug =
+            CompileHlslToSpirv(*context.tools, request, debugModule, diagnostics);
+        if (debug != ShaderToolOutcome::Success) {
+            FailShaderJob(result, VulkanJobStatus(debug), "SPIR-V debug module",
+                          diagnostics.View());
+            return;
+        }
+    }
+
     SucceedShaderJob(result, code, bound.bindingLayout);
+    if (job.options.debugSymbols) {
+        AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::SpirvModule, StringView(),
+                                 debugModule.View());
+    }
 }
 
 } // namespace rocks::shader

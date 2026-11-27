@@ -152,6 +152,38 @@ void World::ProcessStarts() noexcept {
         }
 
         updated->state = ActorState::Playing;
+        // 초기 겹침(UE AActor::BeginPlay → UpdateInitialOverlaps — Actor.cpp:4801·2386): 이 Actor
+        // 안에서 맨 위인 SceneComponent(부모가 없거나 부모가 다른 Actor 것)마다 갱신하고 자식으로
+        // 내려간다(PhysicsModule 7.1.11절). UE는 루트 하나에서 시작하지만 Rocks Actor는 루트를
+        // 자동으로 정하지 않아 맨 위 컴포넌트가 여럿일 수 있다. 알림이 목록을 바꾸거나 이 Actor를
+        // 파괴할 수 있으므로 칸을 하나씩 다시 읽고 상태를 다시 본다.
+        for (usize componentIndex = 0;; ++componentIndex) {
+            record = FindActorRecord(actor);
+            if (record == nullptr || record->state != ActorState::Playing) {
+                break;
+            }
+
+            const ComponentSlot slot = ComponentSlotAt(actor, componentIndex);
+            if (componentIndex >= slot.count) {
+                break;
+            }
+
+            (void)With<SceneComponent>(
+                slot.component, [this, actor](SceneComponent& scene) noexcept {
+                    const ObjectHandle parent = scene.Parent();
+                    auto parentOwner = With<Component>(
+                        parent, [](Component& value) noexcept { return value.GetOwner(); });
+                    if (parent.IsNull() || !parentOwner || parentOwner.Value() != actor) {
+                        scene.UpdateOverlaps();
+                    }
+                });
+        }
+
+        updated = FindActorRecord(actor);
+        if (updated == nullptr || updated->state != ActorState::Playing) {
+            continue;
+        }
+
         // 시작 전에 건 LifeSpan을 지금부터 센다.
         if (updated->pendingLifeSpan > 0.0) {
             const double seconds = updated->pendingLifeSpan;

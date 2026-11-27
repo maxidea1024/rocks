@@ -4,6 +4,7 @@
 #include <Core/Memory/FrameArena.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Move.h>
+#include <Core/Optional.h>
 #include <Graphics/Device.h>
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/RenderNotices.h>
@@ -303,9 +304,13 @@ public:
     void AttachSettings(const FrameTicket& ticket, RenderSettingsRef settings) noexcept;
 
     // 프레임 packet을 렌더 lane에 넘긴다. lane이 render(context, packet)를 부르고, 그 안의 장치
-    // 제출 fence가 이 slot의 GPU 완료 표지가 된다. 성공하면 ticket을 소비한다. 실패: 잘못된 ticket
-    // InvalidArgument, 종료 단계 ShuttingDown, Development 전달 검사 InvalidArgument, 게시 실패는
-    // 그 오류(ticket은 그대로 남아 AbandonFrame할 수 있다). packet은 실패해도 소비된다.
+    // 제출 fence가 이 slot의 GPU 완료 표지가 된다. 성공하면 ticket을 소비한다. 실패: 잘못된 ticket·
+    // 빈 함수 InvalidArgument, 게임 lane 밖 WrongThread, 종료 단계 ShuttingDown, Development 전달
+    // 검사 InvalidArgument, 게시 실패는 그 오류(ticket은 그대로 남아 AbandonFrame할 수 있다).
+    // packet은 진입하자마자 옮겨 가므로 모든 반환 경로에서 소비되고(실패하면 이 호출 안에서
+    // 파괴된다), 성공하면 lane이 render 직후 — slot을 돌려주기(lane 처리 완료 표지) 전에 —
+    // 파괴한다(Docs/Design/RenderBase 5.3절 "프레임 packet 수명": packet이 가리키는 프레임 arena는
+    // 그 뒤 게임 lane이 비운다).
     template <RenderTransferable T>
     Result<void> SubmitFrame(FrameTicket&& ticket, T&& packet,
                              RenderFrameFunction<T> render) noexcept;
@@ -560,6 +565,8 @@ Result<void> RenderLane::PostLaneTask(Body&& body) noexcept {
 template <RenderTransferable T>
 Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
                                      RenderFrameFunction<T> render) noexcept {
+    // 모든 반환 경로에서 packet을 소비한다(5.3절 "프레임 packet 수명").
+    Optional<T> held(Move(packet));
     auto checked = CheckRenderTransfer<T>();
     if (!checked || render == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -582,15 +589,17 @@ Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto posted =
-        PostLaneTask([this, slot, frame, render, value = Move(packet)]() mutable noexcept {
-            ProcessInbox();
-            const graphics::GpuFencePoint before = device_.LastSubmittedFence();
-            RenderFrameContext context(*this, slot, frame, settings_[slot]);
-            render(context, value);
-            FinishDeferredRetires();
-            FinishFrame(slot, frame, before);
-        });
+    auto posted = PostLaneTask([this, slot, frame, render, value = Move(held)]() mutable noexcept {
+        ProcessInbox();
+        const graphics::GpuFencePoint before = device_.LastSubmittedFence();
+        RenderFrameContext context(*this, slot, frame, settings_[slot]);
+        render(context, *value);
+        // slot을 돌려주기 전에 packet을 부순다(그 뒤 게임 lane이 프레임 arena를 비운다). 소멸자가
+        // 요청한 Retire도 이 프레임의 지연 Retire로 처리한다.
+        value.Reset();
+        FinishDeferredRetires();
+        FinishFrame(slot, frame, before);
+    });
     if (!posted) {
         CancelSubmit(slot);
         return posted;

@@ -12,6 +12,7 @@ class TypeRegistry;
 class TypeLease;
 struct RuntimeTypeOps;
 struct RuntimeFieldOps;
+struct RuntimeEventOps;
 struct RuntimeStructOps;
 struct RuntimeStructFieldOps;
 
@@ -247,6 +248,23 @@ public:
     //   const RuntimeFieldOps* ops = index != TypeLease::NoField ? lease.FieldOps(index) : nullptr;
     const RuntimeFieldOps* FieldOps(usize schemaIndex) const& noexcept;
     const RuntimeFieldOps* FieldOps(usize schemaIndex) const&& = delete;
+
+    // Class lease에서 schemaIndex 필드의 이벤트 연산표다(FieldKind::Event 필드 — Docs/Design/
+    // EventReflection.ko.md ED16). 이벤트 필드가 아니면 nullptr이다. 반환 포인터는 이 lease 수명
+    // 동안 유효하다. Class가 아닌 lease·빈 lease·범위 밖 index는 Fatal이다.
+    //
+    // 사용 예(도구가 이벤트에 바인딩한다):
+    //   const usize index = lease.FieldIndex(diedId);
+    //   const RuntimeEventOps* died = nullptr;
+    //   if (index != TypeLease::NoField) {
+    //       died = lease.EventOps(index);
+    //   }
+    //
+    //   if (died) {
+    //       auto bound = died->bind(registry, access, actor, listener, onDiedId);
+    //   }
+    const RuntimeEventOps* EventOps(usize schemaIndex) const& noexcept;
+    const RuntimeEventOps* EventOps(usize schemaIndex) const&& = delete;
 
     // Class·Struct lease에서 필드 ID의 스키마 위치다(필드 ID 정렬 색인의 이진 탐색 — 상속 필드도
     // 파생 스키마의 같은 ID로 찾는다). 없으면 NoField다(Enum lease는 필드가 없어 항상 NoField). 빈

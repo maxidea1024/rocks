@@ -27,9 +27,9 @@
 // - nothrow 이동 생성·nothrow 소멸이어야 하고 참조·포인터 타입 자체는 등록할 수 없다(컴파일 오류).
 // - 강제 범위: C++ 타입 검사로는 trivially copyable 구조체 안의 원시 포인터를 걸러낼 수 없다. 등록
 //   타입이 리플렉션 스키마를 가지면(생성 헤더를 포함한 번역 단위에서 작업을 게시할 때) Development·
-//   Debug 구성에서 Object 참조(ObjectRef·ObjectRefArray·ObjectRefMap)·WeakObjectRef 필드가 있으면
-//   게시를 InvalidArgument로 거부한다. 중첩 struct 안의 필드는 보지 않는다. 이 두 단계가 강제할 수
-//   있는 범위다.
+//   Debug 구성에서 Object 참조(ObjectRef·ObjectRefArray·ObjectRefMap)·WeakObjectRef 필드나 이벤트
+//   필드(Event<Args...> — 구독 대상·발행자를 붙잡는다)가 있으면 게시를 InvalidArgument로 거부한다.
+//   중첩 struct 안의 필드는 보지 않는다. 이 두 단계가 강제할 수 있는 범위다.
 namespace rocks::render {
 
 // 등록 표지다. ROCKS_RENDER_TRANSFERABLE이 특수화한다. 직접 특수화하지 않는다.
@@ -43,7 +43,8 @@ concept RenderTransferable = RenderTransferRegistered<T> && !IsReferenceV<T> && 
 
 namespace detail {
 
-// 스키마에 Object 참조·WeakObjectRef 필드가 없으면 true다(중첩 struct 안은 보지 않는다).
+// 스키마에 Object 참조·WeakObjectRef 필드와 이벤트 필드(IsEventField)가 없으면 true다(중첩 struct
+// 안은 보지 않는다).
 ROCKS_RENDERBASE_API bool SchemaHasNoObjectReferences(const TypeSchema& schema) noexcept;
 
 } // namespace detail

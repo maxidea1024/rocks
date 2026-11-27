@@ -192,10 +192,14 @@ struct FxcFunctions {
     enum Index : usize {
         Compile,
         Reflect,
+        // 디버그 심볼(ShaderSystem 16.3절 SSD73): PDB·디버그 이름 part 읽기와 디버그 정보 떼기.
+        GetBlobPart,
+        StripShader,
         Count
     };
 
-    static constexpr const char* Symbols[Count] = {"D3DCompile", "D3DReflect"};
+    static constexpr const char* Symbols[Count] = {"D3DCompile", "D3DReflect", "D3DGetBlobPart",
+                                                   "D3DStripShader"};
     void* address[Count] = {};
 };
 
@@ -399,11 +403,15 @@ struct DxcCompileRequest {
 // 있다. 성공해도 경고가 diagnostics에 있을 수 있다.
 struct DxcCompileResult {
     explicit DxcCompileResult(Allocator& allocator) noexcept
-        : object(allocator), diagnostics(allocator) {
+        : object(allocator), diagnostics(allocator), pdb(allocator), pdbName(allocator) {
     }
 
     Array<uint8> object;
     String diagnostics;
+    // -Zi로 컴파일했으면 DXC_OUT_PDB와 그 이름(UTF-8, 디렉터리 없음 — -Zsb면 "<hash>.pdb")이다
+    // (ShaderSystem 16.3절 SSD73). 없으면 빈 값이다.
+    Array<uint8> pdb;
+    String pdbName;
     bool compiled = false;
 };
 
