@@ -179,6 +179,17 @@ private:
         uint32 requestedStopFade = NumericLimits<uint32>::Max();
     };
 
+    // 장면 일시정지 상태다(3.44.5절).
+    enum class PauseState : uint8 {
+        Running,
+        // pause gain을 0으로 내리는 중이다(원본은 읽는다).
+        PausingOut,
+        // 원본을 읽지 않는다(출력 0, 정지 fade만 진행).
+        Paused,
+        // pause gain을 1로 올리는 중이다.
+        ResumingIn
+    };
+
     // RT 스레드만 쓴다.
     struct VoiceSlot {
         uint32 generation = 0;
@@ -196,6 +207,14 @@ private:
         AudioVoiceEndReason stopReason = AudioVoiceEndReason::Stopped;
         // 스트림 원본이 시작 수위를 기다리는 중이다(시작 시각을 아직 출판하지 않았다).
         bool awaitingStream = false;
+        // 일시정지된 Play라 시작을 미뤘다(시작 시각·원본 소비 없음 — 3.44.5절).
+        bool startDeferred = false;
+        // 일시정지 상태·전용 gain ramp(slot.gain과 따로 — 공간 재생은 묶음마다 gain을 다시 낸다)와
+        // 읽지 않은 누적 mix frame, 이번 구간에 게시할 변화가 있는지다.
+        PauseState pauseState = PauseState::Running;
+        GainRamp pauseGain;
+        uint64 unreadFrames = 0;
+        bool unreadDirty = false;
         LinearResampler resampler;
         OnePoleLowPass lowPass;
         OnePoleHighPass highPass;
@@ -227,6 +246,13 @@ private:
         uint64 endMixFrame = UnsetMixFrame;
         uint64 releaseMixFrame = UnsetMixFrame;
         uint64 terminal = 0;
+        // 읽지 않은 누적 frame seqlock(3.44.5절 — RT가 쓰고 제어가 읽는다): version(홀수 = 쓰는
+        // 중)과 generation·Paused 표지·누적·기준 frame.
+        uint32 unreadVersion = 0;
+        uint32 unreadGeneration = 0;
+        uint32 unreadPaused = 0;
+        uint64 unreadFrames = 0;
+        uint64 unreadAsOfFrame = 0;
     };
 
     AudioMixer(const AudioMixerConfig& config, Allocator& allocator) noexcept;
@@ -249,6 +275,12 @@ private:
     void ApplyCommand(const AudioRtCommand& command, uint64 frame) noexcept;
     void StartVoice(uint32 index, VoiceSlot& slot, const AudioRtCommand& command,
                     uint64 frame) noexcept;
+    // 시작 시각을 출판하거나(비스트림) 스트림 시작 대기에 들어간다.
+    void BeginPlayback(uint32 index, VoiceSlot& slot, uint64 frame) noexcept;
+    // paused 파라미터를 보고 일시정지 상태를 옮긴다(구간 시작마다).
+    static void UpdatePauseState(VoiceSlot& slot) noexcept;
+    void PublishUnread(uint32 index, const VoiceSlot& slot, uint64 asOfFrame) noexcept;
+    void ReadUnread(uint32 index, uint32 generation, AudioVoiceStatus& status) const noexcept;
     void ApplyParams(VoiceSlot& slot, const AudioVoiceParams& params, uint32 rampFrames,
                      bool immediate) noexcept;
     void Finish(uint32 index, VoiceSlot& slot, AudioVoiceEndReason reason, uint64 frame) noexcept;

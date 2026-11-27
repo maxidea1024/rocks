@@ -35,30 +35,30 @@
 
 ### 5.1 선행 조건
 
-| 선행 | 내용 | 상태(2026-11-17) |
+| 선행 | 내용 | 상태(2026-11-28) |
 |---|---|---|
-| 리플렉션 B9 | WeakObjectRef PROPERTY(B9d1), Map·Set·PathKey(B9f), 필드 플래그 DuplicateTransient 계열(B9h1), 저장 불가 객체(B9h2), 대입 묶음·`OverridePaths`(B9i), InstancedStruct(B9j), struct 상속(B9k) | B9a–B9i 구현, B9j–B9m 진행 중 |
-| A1 | 패키지 포맷 v1·`Package`·AssetManager·AssetLease·Dependencies(Hard)·패키지 Discard 통지 | 계획 |
-| A2 | 저장·복제(`asset-duplicate` 제외 정책)·인덱스 | 계획 |
-| A5 | 클래스 기본값 레코드·차이 쓰기·override 집합·지문, 차이 형식의 "기준(base)" 명시 API(RCM 72행) | 계획 |
-| RCM 개정 | 59·60·68행: subobject 지역 번호 참조를 레코드의 허용 참조로, subobject 기본값 레코드(3.2절) | 이 문서가 제안(7절) |
-| ObjectRuntime·Serialization | graph v2 "기존 default subobject" 노드 종류(OF 5.1절), 경로 위치 부분 Record staged 디코드 `ApplyPathWire`(3.5절), decode 정책의 제외 필드 건너뛰기(3.3절 7항), Transient 참조 필드의 GC Trace 방문 확인(3.3절 9항) | 이 문서가 제안 |
-| MetaCompiler | subobject 지정자·subobject 표·SubobjectGuid 발급 | 이 문서가 제안 |
-| World 단계 | 부착 계층 영속(WeakObjectRef 부모 — RF 결정 21), 레벨 편입 계약(ER 4.6절), `worldOnlyCreationKey`, Component Outer = Actor, `spawnedActors`, 객체 생성 출처, 앵커 부모 행렬, 편집 World 모드(게임 hook 없음), Actor 영속 Entity Guid(Unpack), 영속 Entity 참조(셀 사이·D12) | 자리만 |
+| 리플렉션 B9 | WeakObjectRef PROPERTY(B9d1), Map·Set·PathKey(B9f), 필드 플래그 DuplicateTransient 계열(B9h1), 저장 불가 객체(B9h2), 대입 묶음·`OverridePaths`(B9i), InstancedStruct(B9j), struct 상속(B9k) | 끝(B9a–B9m) |
+| A1 | 패키지 포맷 v1·`Package`·AssetManager·AssetLease·Dependencies(Hard)·패키지 Discard 통지 | 구현. **Discard 통지 구독 API는 없다**(AssetManager에 `OnReady`만) — PF2에서 더한다 |
+| A2 | 저장·복제(`asset-duplicate` 제외 정책)·인덱스 | 구현 |
+| A5 | 클래스 기본값 레코드·차이 쓰기·override 집합·지문, 차이 형식의 "기준(base)" 명시 API(RCM 72행) | A5a 레코드·A5b 차이 쓰기와 `OverrideSet`·A5c Summary 지문 구현. 기준 일반화는 남음 — 노드별 기준 제공자(PF1), `PlanRevert` 기준 인자(PF4) |
+| RCM 개정 | 58·59·68행: 선언형 subobject, 표가 정한 subobject 참조, subobject 기본값 레코드(3.2절) | PF0에서 반영(7절) |
+| ObjectRuntime·Serialization | graph v2 "선언 subobject" 노드 종류·형식 3(PF1), `ApplyPathWire`(PF4), decode 정책 `skippedFlags`(PF2), Transient 참조 필드의 GC Trace 방문 | Trace 방문 확인(`CppEmitter.cs:487-491`). decode 정책은 지금 제외 필드를 거부(3.3절 7항). 나머지 미구현 |
+| MetaCompiler | `Subobject` 지정자·subobject 표·C++ `subobject` ID kind·`InitSubobjectDefaults` 탐지 | 미구현(Sparks `subobject` kind만 있음) |
+| World 단계 | 부착 계층 영속, 레벨 편입 계약, SpawnActor 한 트랜잭션·Component Outer(PF1), staged 묶음 등록 키 `worldOnlyCreationKey`, `spawnedActors`, 생성 출처, 앵커 부모 행렬, 편집 World 모드, Actor 영속 Entity Guid(Unpack), 영속 Entity 참조(셀 사이·D12) | 부착 계층 영속 끝(`attachParent`, ER 29절). GC-S7 Level 클러스터 병합. 나머지 미구현 |
 | 레벨 패키지 | WorldOnly 그래프의 패키지 저장·export 집합 규칙(OF 5.6절 "레벨 패키지(WorldOnly, 후속)"), 배치 기록 필드 | 후속 |
-| CU4·CU5 | 소유형 경로 `OwnedPropertyPath`와 Record 형식(RX 20절), Undo transaction, setter·통지 hook(World 필드 ReadOnly — ER 4.6절) | 후속 |
-| Sparks L2 | component `let` 필드 초기값(SL 4.5절) — PF1과 함께 열린다 | 후속 |
-| GC-S7(선택) | Level 클러스터(GCS 13절) — 없어도 동작하며 성능 gate에만 관여 | 실험 브랜치 |
+| CU4·CU5 | 소유형 경로 `OwnedPropertyPath`와 Record 형식(RX 20절), Undo transaction, setter·통지 hook(World 필드 ReadOnly — ER 4.6절) | CU4 미구현. CU5 진행 중(변경 통지 CN1a만, World setter hook 없음) |
+| Sparks L2 | component `let` 필드 초기값(SL 4.5절) — PF1과 함께 열린다 | 언어 코어 LC 끝, 엔진 통합 EI 대기 |
+| GC-S7 | Level 클러스터(GCS 13절) | 병합 |
 
 ### 5.2 단계
 
 | 단계 | 내용 | 규모 | 선행 |
 |---|---|---|---|
-| PF0 | (설계 확정) 교차검증 2차(이번 개정 반영 확인), 4절 결정, 한도 값 확정, 7절 다른 문서 개정안 작성 | S | — |
-| PF1 | (클래스 원형) MetaCompiler subobject 지정자·표·SubobjectGuid, World instancing의 subobject 생성, subobject 기본값 레코드(결정성 대조), 지역 번호 참조 wire, graph v2 "기존 subobject" 노드, 파생 클래스 덮기, 생성 출처 표시 | L | A5, RCM 개정, Sparks L2(Sparks 부분만) |
-| PF2 | (원형 데이터 형식) `PrefabAsset`·`PrefabNodeInfo`·NodeGuid, 본문 인코딩(편집 World → graph v2 + 레코드 대비 차이), 두 revision, A1 저장·로드, Summary 본문 타입 지문, 해석된 원형 캐시(사슬 없는 경우), 제외 필드 건너뛰기 decode | M | A1, A5, PF1, 부착 계층 영속 |
-| PF3 | (실행 중 생성) `World::SpawnPrefab`·`SpawnPrefabBatch`, 부분 그래프 복원·그래프 사이 참조, `spawnedActors`, 구움 Transform, 다중 root Commit, hook 묶음, `PrefabUsage` 장부·lease, Level 클러스터 가입, 벤치 | M | PF2, `worldOnlyCreationKey` |
-| PF4 | (override) `PrefabOverrideSet` 형식(노드 주소 표·참조 번호·타입 버전), `ApplyPathWire`, 값·Map/Set key·노드 추가·삭제, 명시 집합 ∪ 차이 수집, key 추출, Revert | L | PF3, CU4 소유형 경로 |
+| PF0 | (설계 확정) 교차검증 2차 반영, 4절 결정, 한도 값 확정, 7절 다른 문서 개정 — **끝(2026-11-28, 개정 6)** | S | — |
+| PF1 | (클래스 원형 — 3.2절) MetaCompiler `Subobject` 지정자·subobject 표·C++ `subobject` ID kind, ObjectRuntime `ConstructionContext`의 subobject 생성, SpawnActor 한 트랜잭션·Component Outer = Actor, subobject 기본값 레코드(`InitSubobjectDefaults`, 결정성 대조), 표 참조와 같음 판정, graph v2 형식 3 "선언 subobject" 노드·A1 Exports 칸, 노드별 차이 기준, 파생 클래스 덮기, 생성 출처 slot 표지, ERD37 엔진 Actor root 이전 | L | A5(끝), RCM 개정(PF0 반영), Sparks L2(Sparks 부분만) |
+| PF2 | (원형 데이터 형식) `PrefabAsset`·`PrefabNodeInfo`·NodeGuid, 본문 인코딩(편집 World → graph v2 + 레코드 대비 차이), 두 revision, A1 저장·로드, Summary 본문 타입 지문, 해석된 원형 캐시(사슬 없는 경우), 제외 필드 건너뛰기 decode(`skippedFlags`), Summary `ClassDefaults` 본문 타입 행·Hard 의존을 내주는 저장 hook, AssetManager Discard 통지 | M | A1, A5, PF1, 부착 계층 영속 |
+| PF3 | (실행 중 생성) `Prefab` 모듈(World 위)·`SpawnPrefab`·`SpawnPrefabBatch`, World staged 묶음 등록 키, Level 소속 유도·`levelPosition`의 `spawnedActors` 처리, 부분 그래프 복원·그래프 사이 참조, `spawnedActors`, 구움 Transform, 다중 root Commit, hook 묶음, `PrefabUsage` 장부·lease, Level 클러스터 가입, 벤치 | M | PF2, `worldOnlyCreationKey` |
+| PF4 | (override) `PrefabOverrideSet` 형식(노드 주소 표·참조 번호·타입 버전), `ApplyPathWire`, 값·Map/Set key·노드 추가·삭제, 명시 집합 ∪ 차이 수집, key 추출, Revert(`PlanRevert` 기준 인자 일반화) | L | PF3, CU4 소유형 경로 |
 | PF5 | (레벨 배치) `PrefabPlacement`, 추적 인스턴스 장부·앵커 행렬, 파생 ID, 로드 시 spawn, 편집 World 모드 | M | PF4, 레벨 패키지 |
 | PF6 | (중첩·variant) 기준 사슬·중첩 해석, 주소 경로, 순환·점진 한도 검사, 우선순위, 해석 입력 복사(Game)·해석(worker) | L | PF4 |
 | PF7 | (전파) resolvedRevision 비교, 제자리 갱신·재생성, override 마이그레이션, 충돌 분류·고아 보존, Apply to source·Make variant·Unpack API | L | PF6, CU5(제자리 갱신), Actor 영속 Entity Guid(Unpack) |
@@ -71,12 +71,12 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
 
 | 단계 | 시험 |
 |---|---|
-| PF1 | `DefaultSubobject_TableGeneratedWithStableGuid`, `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_RecordIsDeterministic`(두 번 생성 대조), `DefaultSubobject_LocalNumberReferenceResolves`(rootComponent·부착 부모), `DefaultSubobject_RenameKeepsGuidAndOverride`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_GraphNodeBindsExistingSubobject`, `DefaultSubobject_NoSharedMutableComponent`, `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `CreationOrigin_RuntimeComponentsNotSaved` |
+| PF1 | `DefaultSubobject_TableGeneratedWithStableGuid`, `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_RecordIsDeterministic`(두 번 생성 대조), `DefaultSubobject_TableReferencesResolve`(rootComponent·부착 부모·소유 필드), `DefaultSubobject_TableReferencesEqualBaseline`(차이 쓰기에 안 나옴), `DefaultSubobject_RenameKeepsGuidAndOverride`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_GraphNodeBindsExistingSubobject`, `DefaultSubobject_NoSharedMutableComponent`, `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `CreationOrigin_RuntimeComponentsNotSaved`, `DefaultSubobject_SpawnActorSingleTransaction`(실패 시 subobject 남지 않음), `DefaultSubobject_ComponentOuterIsActor`, `DefaultSubobject_IdKindChangeRejected`(field ↔ subobject), `DefaultSubobject_EngineActorRootSavedAsSubobject`(ERD37 Actor 레벨 저장·로드), `GraphV3_DeclaredSubobjectNodeRoundTrip` |
 | PF2 | `PrefabAsset_RoundTripNodesAndBody`, `PrefabAsset_BodyIsDiffAgainstClassRecord`, `PrefabAsset_DuplicateTransientKeptInBodyExcludedAtSpawn`, `PrefabAsset_NodeInfoMustMatchNodeTable`, `PrefabAsset_RejectsUnsaveableAndNativeDerivedNodes`, `PrefabAsset_RejectsExternalWorldReference`, `PrefabAsset_SummaryCarriesBodyTypeFingerprints`, `PrefabAsset_NodeLimitIsCapacityExceeded`, `PrefabRevision_ResolvedChangesWithBaseNestedAndTypeFingerprint` |
 | PF3 | `SpawnPrefab_GraphMatchesArchetype`, `SpawnPrefab_InternalReferencesPointToNewObjects`, `SpawnPrefab_CrossGraphStrongAndWeakReferences`, `SpawnPrefab_TwiceHasNoNameConflict`, `SpawnPrefab_TwoInstancesShareNoObjects`, `SpawnPrefab_ExpandedActorsInTransientList`, `SpawnPrefab_BakedRootTransformChildTimesParent`, `SpawnPrefab_ShearFailsWithoutLeftovers`, `SpawnPrefab_AttachParentComposition`, `SpawnPrefab_AwakeFailureDestroysWholeBatch`, `SpawnPrefab_LeaseReleasedWhenLastActorDies`, `SpawnPrefab_CacheHoldsNoLeaseAndDropsOnDiscard`, `SpawnPrefab_UntrackedLeavesNoInstanceRecord`, `SpawnPrefab_JoinsLevelCluster`, `SpawnPrefabBatch_OneCommitPerBatch`, 벤치 3.9절 |
 | PF4 | `PrefabOverride_FieldValueSurvivesArchetypeChange`, `PrefabOverride_SameValueExplicitOverrideIsKept`, `PrefabOverride_TransformTranslationOnlyFollowsRotation`, `PrefabOverride_AtomicStructAppliedByPathWire`, `PrefabOverride_ArrayOptionalInstancedStructWholeUnit`, `PrefabOverride_MapKeyAddChangeRemoveExtractedFromPublish`, `PrefabOverride_ArrayHasNoIndexOverride`, `PrefabOverride_AddAndRemoveNodes`, `PrefabOverride_RemoveClassSubobjectRejected`, `PrefabOverride_ReferenceToRemovedNodeBecomesNull`, `PrefabOverride_RevertRestoresArchetypeValue`, `PrefabOverride_OwnedContainerNotOverridable` |
 | PF5 | `PrefabPlacement_LevelSavesPlacementNotExpandedObjects`, `PrefabPlacement_LevelSaveSucceedsWithExpandedActors`, `PrefabPlacement_DerivedIdsStableAcrossSaveLoad`, `PrefabPlacement_DuplicateReissuesInstanceAndDerivedIds`, `PrefabPlacement_PieKeepsIds`, `PrefabAnchor_RootRelativeStaysByteEqual`(배치 이동 뒤 override 0), `PrefabAnchor_NonUniformScaleWithRotatedRoots`, `EditWorld_NoGameHooksRun` |
 | PF6 | `PrefabNesting_SamePrefabTwiceHasDistinctAddresses`, `PrefabNesting_OuterOverrideBeatsInner`, `PrefabVariant_ChainAppliesBaseFirst`, `PrefabVariant_AddedNodesOnlyInOverrides`, `PrefabChain_CycleRejectedOnSaveLoadCook`(variant·중첩·override 추가 중첩 섞인 순환 포함), `PrefabChain_LimitsStopIncrementally`, `PrefabResolve_WorkerUsesCopiedBytesOnly`, `DeriveGuid_DomainAndLengthPrefixSeparateInputs` |
 | PF7 | `PrefabRebase_NonOverriddenFollowsNewBase`, `PrefabRebase_OverriddenKept`, `PrefabRebase_InPlaceKeepsHandles`, `PrefabRebase_StructuralChangeRecreatesWithSameIds`, `PrefabRebase_OrphanOverrideKeptAndReported`, `PrefabRebase_PartialRecordMigration`, `PrefabRebase_MigratedMapFieldOrphansKeyEntries`, `PrefabRebase_AddedNodeNameConflictRenamed`, `PrefabApply_MovesOverridesToSource`, `PrefabMakeVariant_MovesAddedNodeGuids`, `PrefabUnpack_FreezesDerivedIds` |
-| PF8 | `PrefabCook_FlattenedEqualsEditorResolved`(같은 입력 → 같은 byte), `PrefabCook_SplitsOver4096IntoPartialGraphs`, `PrefabCook_EditorOnlyStripped`, `PrefabCook_OrphanOverrideFails`, `PrefabCook_HardDependencyBudget`, `PrefabCook_RevisionMismatchIsUnsupportedVersion`, `PrefabCook_BaseChangeRecooksDependents` |
+| PF8 | `PrefabCook_FlattenedEqualsCookedConfigResolved`(Cooked 구성 해석과 같은 입력 → 같은 byte), `PrefabCook_SplitsOver4096IntoPartialGraphs`, `PrefabCook_EditorOnlyStripped`, `PrefabCook_OrphanOverrideFails`, `PrefabCook_HardDependencyBudget`, `PrefabCook_RevisionMismatchIsUnsupportedVersion`, `PrefabCook_BaseChangeRecooksDependents` |
 | 통합 | 전파·GC·Undo·save/load·cell unload를 함께 도는 soak(EIP 20.3절 M5 gate), 결정성(같은 입력 두 번 → 같은 파생 ID·같은 그래프 byte) |

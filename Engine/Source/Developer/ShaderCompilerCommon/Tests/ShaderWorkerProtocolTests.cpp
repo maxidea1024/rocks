@@ -58,6 +58,8 @@ void FillRequest(ShaderWorkerRequest& request) noexcept {
             "#line 1 \"/Engine/Private/A.rsf\"\nfloat4 PSMain() : SV_Target { return 1; }\n"));
         job.Value()->options.hlsl2021 = index == 0;
         job.Value()->options.optimization = static_cast<uint8>(index);
+        // 경고 오류 옵션(ShaderSystem 16.4절 SSD79, 메시지 버전 4)은 job마다 따로 간다.
+        job.Value()->options.warningsAsErrors = index == 0;
         CHECK(job.Value()->layout.TryAppend(bytes));
         if (index == 1) {
             auto first = job.Value()->hookArguments.TryEmplaceBack(allocator);
@@ -97,6 +99,7 @@ TEST(ShaderWorkerProtocol_RequestRoundTrips) {
               a.formatId.View() == b.formatId.View() && a.entry.View() == b.entry.View() &&
               a.source.View() == b.source.View() && a.options.hlsl2021 == b.options.hlsl2021 &&
               a.options.optimization == b.options.optimization &&
+              a.options.warningsAsErrors == b.options.warningsAsErrors &&
               a.layout.Size() == b.layout.Size() &&
               a.hookArguments.Size() == b.hookArguments.Size());
     }
@@ -120,6 +123,8 @@ TEST(ShaderWorkerProtocol_ResponseRoundTrips) {
     value.Value()->id = 0;
     const uint8 code[] = {'D', 'X', 'B', 'C', 9};
     CHECK(value.Value()->bytes.TryAppend(code));
+    // 성공 job의 경고는 진단으로 간다(SSD79).
+    AddShaderJobWarnings(*job.Value(), "DXC", "warning: w");
     auto failed = response.jobs.TryEmplaceBack(allocator);
     REQUIRE(failed);
     FailShaderJob(*failed.Value(), ShaderWorkerJobStatus::CompileError, "DXC compile failed",
@@ -143,7 +148,7 @@ TEST(ShaderWorkerProtocol_ResponseRoundTrips) {
     REQUIRE(back.jobs.Size() == 2 && back.tools.Size() == 1 && back.systemTools.Size() == 1);
     CHECK(back.jobs[0].status == ShaderWorkerJobStatus::Success &&
           back.jobs[0].values.Size() == 1 && back.jobs[0].values[0].bytes.Size() == 5 &&
-          back.jobs[0].diagnostics.IsEmpty());
+          back.jobs[0].diagnostics.View() == StringView("DXC: warning: w\n"));
     CHECK(back.jobs[1].status == ShaderWorkerJobStatus::CompileError &&
           back.jobs[1].values.IsEmpty() &&
           back.jobs[1].diagnostics.View() == StringView("DXC compile failed: error: x"));

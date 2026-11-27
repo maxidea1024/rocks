@@ -263,9 +263,6 @@ constexpr StringView ReduceShader =
     "    histogram[id.x] = id.x + size.z;\n"
     "}\n";
 
-constexpr StringView Formats[] = {"D3D12_SM6", "D3D11_SM5",      "VULKAN_SM5", "VULKAN_ANDROID",
-                                  "GLES31_PC", "GLES31_ANDROID", "METAL_SM5",  "METAL_IOS"};
-
 // 값 1의 상수 버퍼 밖 자원마다 구조체 identity·멤버 오프셋이 표와 같은지 본다. 셰이더가 쓰는 자원
 // 멤버 수(짝 샘플러 포함)를 matched에 둔다.
 void CheckResources(StringView id, const ShaderParameterLayout& layout,
@@ -372,7 +369,7 @@ TEST(ShaderParameterStructs_ResourceCompileMatrix) {
     constexpr usize JobsPerFormat = 4;
     Array<UniquePtr<ShaderFormatSnapshot>> snapshots(TestAllocator());
     Array<ShaderCompileJob> jobs(TestAllocator());
-    for (const StringView id : Formats) {
+    for (const StringView id : ShaderFormatIds) {
         auto snapshot = UniquePtr<ShaderFormatSnapshot>::TryMake(TestAllocator(), TestAllocator());
         REQUIRE(snapshot);
         REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, id, *snapshot.Value()));
@@ -417,7 +414,7 @@ TEST(ShaderParameterStructs_ResourceCompileMatrix) {
     REQUIRE(manager.Compile(jobs.View(), results));
     REQUIRE(results.Size() == jobs.Size());
     for (usize format = 0; format < snapshots.Size(); ++format) {
-        const StringView id = Formats[format];
+        const StringView id = ShaderFormatIds[format];
         const ShaderCompileJobResult* group = &results[format * JobsPerFormat];
         if (snapshots[format]->definition.stages == 0 ||
             group[0].status == ShaderCompileStatus::UnsupportedCapability ||

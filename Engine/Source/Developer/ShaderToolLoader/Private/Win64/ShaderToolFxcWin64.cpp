@@ -26,19 +26,23 @@ constexpr UINT OptimizationFlags[ShaderOptimizationLevels] = {
 // HRESULT 진단 버퍼 크기다.
 constexpr usize HresultTextBytes = 64;
 
-void AppendBlob(String& diagnostics, ID3DBlob* blob) noexcept {
+// blob의 문구다(FXC 문구 blob은 끝 NUL을 크기에 넣는다). blob이 없으면 빈 view다.
+StringView BlobText(ID3DBlob* blob) noexcept {
     if (blob == nullptr) {
-        return;
+        return StringView();
     }
 
-    // FXC 문구 blob은 끝 NUL을 크기에 넣는다.
     const char* text = static_cast<const char*>(blob->GetBufferPointer());
     usize bytes = blob->GetBufferSize();
     while (bytes > 0 && text[bytes - 1] == '\0') {
         --bytes;
     }
 
-    (void)diagnostics.TryAppend(StringView(text, bytes));
+    return StringView(text, bytes);
+}
+
+void AppendBlob(String& diagnostics, ID3DBlob* blob) noexcept {
+    (void)diagnostics.TryAppend(BlobText(blob));
 }
 
 // D3DGetBlobPart·D3DStripShader 함수 형이다(SDK 헤더에 함수 포인터 typedef가 없다).
@@ -134,7 +138,7 @@ ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc, const FxcCompileReques
 
     const bool debug = request.debugSymbols && symbols != nullptr;
     const UINT flags = OptimizationFlags[request.optimization] | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR |
-                       D3DCOMPILE_WARNINGS_ARE_ERRORS |
+                       (request.warningsAsErrors ? D3DCOMPILE_WARNINGS_ARE_ERRORS : 0u) |
                        (debug ? D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_BINARY : 0u);
     platform::windows::ComRef<ID3DBlob> code;
     platform::windows::ComRef<ID3DBlob> errors;
@@ -156,18 +160,15 @@ ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc, const FxcCompileReques
         return ShaderToolOutcome::Success;
     }
 
-    // E_FAIL과 오류 blob만 원문 탓의 컴파일 오류다(SC10 — 그 밖은 도구 오류).
-    if (compiled == E_FAIL && errors) {
-        AppendBlob(diagnostics, errors.Get());
-        return ShaderToolOutcome::CompileError;
-    }
-
+    // 원문 진단이 있는 실패만 원문 탓의 컴파일 오류다(16.4절 SSD80 — FXC는 경고 오류·원문 오류를
+    // E_FAIL이 아닌 HRESULT로도 돌려준다). 메모리 부족과 원문 진단 없는 실패는 도구 오류다.
+    const bool source = compiled != E_OUTOFMEMORY && FxcHasSourceDiagnostic(BlobText(errors.Get()));
     char text[HresultTextBytes];
-    snprintf(text, sizeof(text), "FXC failed with HRESULT 0x%08lx",
-             static_cast<unsigned long>(compiled));
+    snprintf(text, sizeof(text),
+             "FXC failed with HRESULT 0x%08lx: ", static_cast<unsigned long>(compiled));
     (void)diagnostics.TryAppend(StringView(text));
     AppendBlob(diagnostics, errors.Get());
-    return ShaderToolOutcome::ToolError;
+    return source ? ShaderToolOutcome::CompileError : ShaderToolOutcome::ToolError;
 }
 
 } // namespace rocks::shader

@@ -14,7 +14,7 @@
 //
 // 사용 예:
 //   ShaderCompileOptions options = DefaultShaderCompileOptions(format);
-//   const StringView given[] = {"optimization=O1", "hlsl2021=false"};
+//   const StringView given[] = {"optimization=O1", "warningsAsErrors=false"};
 //   if (auto parsed = ParseShaderCompileOptions(given, options); !parsed) {
 //       // parsed.code, parsed.index(몇 번째 항목), parsed.name
 //   }
@@ -49,6 +49,11 @@ struct ShaderCompileOptions {
     // 생긴다 (D3D PDB·SPIR-V debug module, 텍스트 형식은 없음).
     ROCKS_PROPERTY() bool debugSymbols = false;
     ROCKS_PROPERTY() ShaderMatrixLayout matrixLayout = ShaderMatrixLayout::Row;
+    // 경고를 오류로 다룬다(ShaderSystem 16.4절 SSD79 — DXC -WX, FXC
+    // D3DCOMPILE_WARNINGS_ARE_ERRORS). 엔진 셰이더는 true(결정 7), 머티리얼 job은 false를 준다
+    // (UE r.Shaders.WarningsAsErrors 기본 0과 같다). false면 경고가 job을 실패시키지 않고 결과
+    // 진단(ShaderCompileJobResult::diagnostics)에 남는다(너겟 적중 결과에는 없다).
+    ROCKS_PROPERTY() bool warningsAsErrors = true;
 };
 
 // 옵션 이름의 최대 byte 수(NUL 포함, 오류 보고 버퍼)다.
@@ -85,7 +90,8 @@ ROCKS_SHADERCOMPILER_API ShaderCompileOptions
 DefaultShaderCompileOptions(const ShaderFormatDefinition& format) noexcept;
 
 // "이름=값" 목록을 options에 적용한다(주지 않은 옵션은 그대로). 이름은 필드 이름 그대로
-// (hlsl2021·optimization·debugSymbols·matrixLayout), 값은 bool `true`·`false`, enum 열거자 이름
+// (hlsl2021·optimization·debugSymbols·matrixLayout·warningsAsErrors), 값은 bool `true`·`false`,
+// enum 열거자 이름
 // (`O0`–`O3`, `Row`)이고 공백을 받지 않는다. 오류: InvalidSyntax, UnknownName, InvalidValue,
 // Duplicate. 실패하면 options는 바뀌지 않는다.
 ROCKS_SHADERCOMPILER_API ShaderOptionStatus ParseShaderCompileOptions(

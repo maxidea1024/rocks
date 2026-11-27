@@ -19,3 +19,4 @@
 - [16.1 SH2 설계](16.01-SH2Design.ko.md)
 - [16.2 SH3 설계](16.02-SH3Design.ko.md)
 - [16.3 SH4 설계](16.03-SH4Design.ko.md)
+- [16.4 컴파일 경고·FXC 분류·워커 분배](16.04-CompileFollowups.ko.md)

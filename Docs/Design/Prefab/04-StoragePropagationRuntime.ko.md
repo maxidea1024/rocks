@@ -21,14 +21,14 @@
 - `body`의 노드 수는 graph v2 `maxObjects`(4096 — OF 5.6절)로 묶이며 이 값을 `MaxPrefabNodes`로 이름 붙여 쓴다. `body`는 64 MiB(`maxValueBytes`) 이하다. 큰 본문을 Bulk entry로 옮길지는 PF2에서 크기를 재고 정한다.
 - **두 가지 revision**(교차검증 I8):
   - `contentRevision` = SHA-256(이 패키지의 `base`·`body`·`nodeInfo`·`crossReferences`·`overrides`의 인코딩). 저장 때 계산한다. 편집기 dirty 판정과 쿡 입력 지문에 쓴다.
-  - `resolvedRevision` = SHA-256(도메인 문자열, 자기 `contentRevision`, 기준의 `resolvedRevision`, 중첩 노드마다 대상의 `resolvedRevision`(노드 순서), 해석 결과가 쓰는 타입들의 (TypeId, 스키마 버전, 클래스 레코드·subobject 기본값 레코드 지문) TypeId 정렬 목록). 저장하지 않고 해석 때 계산한다(cooked는 쿠커가 계산해 저장한다).
+  - `resolvedRevision` = SHA-256(도메인 문자열, 구성(Editor·Cooked — 클래스 레코드 지문이 구성마다 다르다, `Object/ClassDefaults.h:19-22`), 자기 `contentRevision`, 기준의 `resolvedRevision`, 중첩 노드마다 대상의 `resolvedRevision`(노드 순서), 해석 결과가 쓰는 타입들의 (TypeId, 스키마 버전, 클래스 레코드·subobject 기본값 레코드 지문) TypeId 정렬 목록). 저장하지 않고 해석 때 계산한다(cooked는 쿠커가 계산해 저장한다).
   - 쓰임: 원형 캐시 키 = (AssetId, `resolvedRevision`). 레벨 배치 기록의 `baseRevision` = 저장 당시 `resolvedRevision`이라서 기준 사슬·중첩·코드 기본값이 바뀌어도 전파가 일어난다(3.7절). cooked 검증 = cooked `PrefabAsset`에 저장한 `resolvedRevision`과 cooked 레벨 배치 기록의 `baseRevision` 대조(다르면 `UnsupportedVersion` — 다시 쿠킹). 쿠커 재계산 = prefab의 cookKey 입력에 기준·중첩 prefab의 cookKey와 타입 지문 목록을 넣어 기준이 바뀌면 그것을 쓰는 prefab과 배치 레벨이 다시 쿠킹된다.
 - **의존**: 원형 본문의 에셋 참조(World 객체의 Soft 참조)는 이 패키지의 Dependencies(Hard)로 기록한다 — "하드 의미는 그 World 데이터를 담는 레벨·prefab 패키지의 Dependencies(Hard)로 표현한다"(AS 6.3절). 기준 prefab과 중첩 prefab도 Hard다. override하지 않은 값의 클래스 레코드 참조도 포함한다(RCM 68행). prefab별 하드 의존 크기 예산은 쿡이 검사한다(SL 7.2절). Hard 의존 덕분에 prefab A가 상주하는 동안 그 기준·중첩 prefab도 상주한다.
 - **레벨 배치 인스턴스.** 레벨에 놓인 인스턴스는 펼친 객체가 아니라 **배치 기록** `PrefabPlacement{instanceGuid, prefab(SoftObjectRef), baseRevision, transform, overrides}`로 저장한다(UE Level Instance가 World 에셋 + 배치 Actor인 구조 — 2.5절, 4절 D3). 배치 기록은 Level의 영속 struct 배열 필드다. 펼친 Actor·Component는 Transient 소유 목록에 있으므로(3.3절 9항) 레벨 저장에 들어가지 않는다. `baseRevision`이 다르면 로드 때 전파(3.7절)를 거친다.
-- **펼친 노드를 가리키는 레벨 참조**(4절 D22): 레벨에 직접 저장하는 Record(직접 배치 Actor·LevelScript와 그 component)의 weak 참조가 같은 Level의 배치 인스턴스가 펼친 노드를 가리키면, 펼친 객체는 Transient 목록에 있어(3.3절 9항) 그 handle을 저장할 수 없다. 레벨 저장은 Record의 그 자리를 null로 쓰고 Level의 영속 struct 배열 `placementNodeReferences`에 `{참조하는 객체(레벨 graph v2 노드 번호), 소유형 PropertyPath, instanceGuid, PrefabNodeAddress}`를 둔다. 로드는 배치를 펼친 뒤(PF5) 주소를 D6 규칙(인스턴스 Guid + 주소 → 추적 인스턴스의 노드 대응표, `World::FindPrefabNode`)으로 해석해 Commit 전 staged 경로 쓰기로 채운다(D17의 사후 쓰기와 같은 방식). 대상 노드가 없으면(배치 override로 삭제, 원형에서 사라짐) null로 두고 `PrefabPlacementReferenceOrphaned`를 낸다. 강한 참조는 지금처럼 graph v2가 집합 밖 참조로 거부한다. 영속 Entity Guid가 생기면 그 표현(D12의 영속 Entity 참조)으로 바꾼다.
+- **펼친 노드를 가리키는 레벨 참조**(4절 D22): 레벨에 직접 저장하는 Record(직접 배치 Actor·LevelScript와 그 component)의 weak 참조가 같은 Level의 배치 인스턴스가 펼친 노드를 가리키면, 펼친 객체는 Transient 목록에 있어(3.3절 9항) 그 handle을 저장할 수 없다. 레벨 저장은 Record의 그 자리를 null로 쓰고 Level의 영속 struct 배열 `placementNodeReferences`에 `{참조하는 객체(레벨 graph v2 노드 번호), 소유형 PropertyPath, instanceGuid, PrefabNodeAddress}`를 둔다. 로드는 배치를 펼친 뒤(PF5) 주소를 D6 규칙(인스턴스 Guid + 주소 → 추적 인스턴스의 노드 대응표, `FindPrefabNode`)으로 해석해 Commit 전 staged 경로 쓰기로 채운다(D17의 사후 쓰기와 같은 방식). 대상 노드가 없으면(배치 override로 삭제, 원형에서 사라짐) null로 두고 `PrefabPlacementReferenceOrphaned`를 낸다. 강한 참조는 지금처럼 graph v2가 집합 밖 참조로 거부한다. 영속 Entity Guid가 생기면 그 표현(D12의 영속 Entity 참조)으로 바꾼다.
 - **실행 중 spawn한 인스턴스**는 저장하지 않는다. 세이브게임은 원형 ID·인스턴스 Guid·spawn/despawn 기록과 SaveGame 필드를 저장한다(EIP 951행 — 세이브게임 계층).
-- **쿠킹**(4절 D8): 쿠커는 variant 사슬과 중첩을 펼친 **평탄화 원형**을 cooked `PrefabAsset`에 저장한다. 펼친 노드가 `MaxPrefabNodes`(graph v2 `maxObjects`)를 넘을 수 있으므로 평탄화 본문은 **부분 그래프 여러 개**(각각 4096 이하 — 원래의 원형 경계를 따라 나누고, 한 원형이 4096을 넘을 수는 없다) + 노드 주소 표 + 그래프 사이 참조 표다. 그래프 사이 참조는 3.3절 6항 규칙(강한 = 같은 트랜잭션 import, weak = 참조 표)을 그대로 쓴다. `base`·`overrides`는 비운다(UE cooked 빠른 경로가 차이 블록을 미리 만드는 것과 같은 목적 — 2.4절). 편집기 해석 결과와 cooked 평탄화 결과는 같은 입력에서 같은 byte여야 한다(PF8 시험). EditorOnly 필드·노드는 뺀다. 레벨 배치 인스턴스의 cooked 형태는 4절 D9.
-- **A1과의 관계**: prefab은 새 섹션을 만들지 않는다. 일반 에셋 패키지이고, 원형 본문은 대표 에셋의 값이다. 패키지 Summary의 타입 표에는 `PrefabAsset`과 함께 **원형 본문이 쓰는 World 타입들**의 (TypeId, 스키마 버전, 클래스 레코드 지문)을 넣는다 — 본문 Record가 그 타입들의 레코드 대비 차이이기 때문이다(RCM 69행 지문 규칙을 본문 타입까지 넓힌다 — 7절). 지문이 다르면 편집기는 진단 뒤 열고 cooked는 `UnsupportedVersion`이다.
+- **쿠킹**(4절 D8): 쿠커는 variant 사슬과 중첩을 펼친 **평탄화 원형**을 cooked `PrefabAsset`에 저장한다. 펼친 노드가 `MaxPrefabNodes`(graph v2 `maxObjects`)를 넘을 수 있으므로 평탄화 본문은 **부분 그래프 여러 개**(각각 4096 이하 — 원래의 원형 경계를 따라 나누고, 한 원형이 4096을 넘을 수는 없다) + 노드 주소 표 + 그래프 사이 참조 표다. 그래프 사이 참조는 3.3절 6항 규칙(강한 = 같은 트랜잭션 import, weak = 참조 표)을 그대로 쓴다. `base`·`overrides`는 비운다(UE cooked 빠른 경로가 차이 블록을 미리 만드는 것과 같은 목적 — 2.4절). 편집기 해석 결과를 **Cooked 구성**(EditorOnly 필드·노드 제외, Cooked 클래스 레코드 기준)으로 낸 것과 cooked 평탄화 결과는 같은 입력에서 같은 byte여야 한다(PF8 시험). cooked `PrefabAsset`은 `body`·`nodeInfo` 대신 부분 그래프 목록 `cookedGraphs`(`Array<PrefabCookedGraph{Array<uint8> graph; Array<PrefabNodeInfo> nodeInfo}>`)와 노드 주소 표·그래프 사이 참조 표를 담는다(필드 배치는 PF8에서 확정). 레벨 배치 인스턴스의 cooked 형태는 4절 D9.
+- **A1과의 관계**: prefab은 새 섹션을 만들지 않는다. 일반 에셋 패키지이고, 원형 본문은 대표 에셋의 값이다. 패키지 Summary의 클래스 기본값 지문 필드 `ClassDefaults`(RecordList `{id, fingerprint}` — 지금은 export 구체 타입만, RCM A5c 명세)에 **원형 본문이 쓰는 World 타입들**과 subobject 기본값 레코드의 지문을 더한다 — 본문 Record가 그 레코드 대비 차이이기 때문이다(7절). 본문은 `Array<uint8>` 값이라 패키지 writer가 그 안의 타입과 Soft 참조를 보지 못하므로, prefab 저장 hook이 본문 타입 행과 Hard 의존 목록을 직접 내준다(PF2). 지문이 다르면 편집기는 진단 뒤 열고 cooked는 `UnsupportedVersion`이다.
 - 원점 규약 버전 칸은 두지 않는다(하위호환 없음 — 규약이 바뀌면 원형을 다시 만든다).
 
 ### 3.7 원형 변경 전파와 충돌 처리
@@ -74,7 +74,7 @@
 - **우선순위**(바깥이 이긴다): 클래스 레코드 → subobject 기본값 레코드 → 가장 안쪽 원형 본문 → 그 원형의 variant 사슬(기준부터) → 바깥 원형이 그 중첩 노드에 둔 override → … → 레벨 배치 override → spawn 인자.
 - **순환 금지**: 해석은 방문 중인 AssetId 집합을 들고 깊이 우선으로 내려가며 다시 만나면 `PrefabCycle`로 실패한다. 기준 사슬, 본문의 중첩 노드, **override가 추가한 중첩 인스턴스 노드**(variant `overrides`와 중첩 노드의 override 안)를 모두 같은 집합으로 본다(A가 B를 품고 B가 A의 variant인 경우도 순환이다). 편집기 저장·로드·쿡이 모두 검사한다(UE는 편집기 로드의 `CheckForLoop`과 쿡 검증 `ValidateCircularReference`로 나눠 검사한다 — 2.5절. EIP 20.3절의 "cooker가 거부"보다 이르게 막는다).
 - **한도는 해석 도중 점진적으로 검사한다**: 깊이는 내려갈 때마다, 누적 노드 수·override 수는 노드를 펼칠 때마다 비교해 넘는 순간 멈춘다(큰 입력을 다 펼친 뒤 거부하지 않는다 — 작업량도 한도 안).
-- **한도**(이름 붙은 상수 — `Prefab/PrefabLimits.h`, 값은 PF0 확정 때 다시 본다):
+- **한도**(이름 붙은 상수 — `Prefab/PrefabLimits.h`, 값은 PF0에서 확정 — 2026-11-28):
 
 | 상수 | 제안 값 | 근거 |
 |---|---|---|
@@ -83,15 +83,22 @@
 | `MaxPrefabNodes` | 4096 | 원형 하나의 `body` 노드 수 = graph v2 `maxObjects`(OF 5.6절) |
 | `MaxPrefabInstanceNodes` | 65536 | 펼친 인스턴스 하나의 전체 노드 수(중첩 포함). spawn 한 번의 staged 객체 상한 |
 | `MaxPrefabOverrides` | 65536 | override 집합 하나의 항목 수 |
+| `MaxPrefabOverrideAddresses` | 65536 | override 집합 머리의 노드 주소 표 크기(= `MaxPrefabInstanceNodes`) |
+| `MaxPrefabOverrideValueBytes` | 1 MiB | override 값 하나의 wire byte |
+| `MaxPrefabOverrideSetBytes` | 64 MiB | override 집합 하나의 전체 byte(graph v2 `maxValueBytes`와 같다) |
+| `MaxPrefabCrossReferences` | 65536 | 그래프 사이 참조 표(`crossReferences`) 항목 수 |
+| `MaxPrefabPlacementsPerLevel` | 65536 | Level 하나의 `PrefabPlacement` 수 |
+| `MaxPlacementNodeReferences` | 65536 | Level 하나의 `placementNodeReferences` 수(D22) |
+| `MaxClassSubobjects` | 256 | 클래스 하나(base 포함)의 선언 subobject 수(3.2절). ObjectRuntime 상수이며 넘으면 MetaCompiler 오류 |
 
-  넘으면 `CapacityExceeded`다. `MaxPrefabInstanceNodes`가 graph v2 단일 그래프 한도보다 크므로 spawn은 부분 그래프마다 graph v2 복원을 따로 하고 한 ConstructionContext에 모은다(3.3절 3항).
+  넘으면 `CapacityExceeded`이고 진단은 상수 묶음마다 하나다: 깊이 두 상수 → `PrefabDepthExceeded`, `MaxPrefabNodes`·`MaxPrefabInstanceNodes` → `PrefabNodeLimit`, override 네 상수 → `PrefabOverrideLimit`, `MaxPrefabCrossReferences` → `PrefabCrossReferenceLimit`, 배치 두 상수 → `PrefabPlacementLimit`. `MaxPrefabInstanceNodes`가 graph v2 단일 그래프 한도보다 크므로 spawn은 부분 그래프마다 graph v2 복원을 따로 하고 한 ConstructionContext에 모은다(3.3절 3항).
 
 ### 3.9 실행 중 생성 비용·인스턴스 장부·GC
 
 **spawn 경로에서 하지 않는 일**: 원형 사슬 해석, 원형과의 비교, 문자열 경로 해석, 원형 객체 복제. 모두 해석된 원형을 만들 때 한 번 한다.
 
 - **해석된 원형 캐시**(교차검증 I7): 키는 (AssetId, `resolvedRevision`)이고 **lease를 쥐지 않는다.** lease를 쥐면 캐시가 자기 에셋을 영원히 붙잡는 순환이 된다. 캐시 항목은 본문 타입의 TypeLease만 쥔다(타입 등록이 원형보다 먼저 사라지지 않게 — RCM 55행 레코드와 같은 규칙). 항목은 AssetManager의 패키지 Discard 통지(그 AssetId의 패키지가 상주에서 빠질 때)로 버린다. 상주는 인스턴스 장부의 lease와 Hard 의존이 정한다. cooked는 쿠커가 이미 평탄화했으므로(3.6절) 로드가 곧 해석이다.
-- **인스턴스 장부**(World 쪽, 4절 D21):
+- **인스턴스 장부**(4절 D21): Prefab 모듈이 World마다 둔다. World는 prefab 타입을 모르므로 `ActorRecord`의 불투명 u32 칸과 Actor 레코드 제거 통지만 내준다(정확한 모양은 PF3에서 확정 — 3.3절 API).
 
 | 장부 | 언제 | 내용 | 1M 규모 비용 |
 |---|---|---|---|
@@ -102,7 +109,7 @@
   - lease 반납: `PrefabUsage`의 살아 있는 Actor 수가 0이 되면(마지막 Actor의 레코드 제거 — ER 7.2절) lease를 반납하고 항목을 지운다. Component는 소유 Actor와 함께 죽으므로 따로 세지 않는다.
   - 노드 대응표(`PrefabInstanceMap`)는 spawn 동안 임시로 만들고 끝나면 버린다. 추적 인스턴스는 `FindPrefabNode`를 처음 부를 때 다시 만든다(지연 생성 — 최상위 Actor부터 노드 순서로 소유 목록을 따라가며 맞춘다). 추적하지 않는 실행 중 spawn은 노드 대응표·인스턴스 항목을 전혀 남기지 않는다.
 - **spawn 비용**: O(노드 수 + 실효 Record 크기 + 인스턴스 override 수). 실행 중 spawn은 보통 인스턴스 override가 없으므로 노드 수와 Record 크기에 비례한다. 할당은 staged 객체와 그 값뿐이다(장부는 `PrefabUsage` 계수 증가와 Actor 칸 하나).
-- **대량 spawn**: `World::SpawnPrefabBatch(prefab, Span<const SpawnPrefabParams>)`로 여러 인스턴스를 한 ConstructionContext·한 Commit으로 만든다. Commit·클러스터 가입·관찰자 보고가 묶음마다 한 번이다. 묶음 크기는 `MaxPrefabInstanceNodes`로 나눈다.
+- **대량 spawn**: `SpawnPrefabBatch(World&, prefab, Span<const SpawnPrefabParams>)`로 여러 인스턴스를 한 ConstructionContext·한 Commit으로 만든다. Commit·클러스터 가입·관찰자 보고가 묶음마다 한 번이다. 묶음 크기는 `MaxPrefabInstanceNodes`로 나눈다.
 - **GC**:
   - 원형은 Registry 객체가 아니므로 GC 표식·sweep 비용이 0이다. 원형 수가 많아도 GC와 무관하다.
   - 펼친 객체는 일반 World 객체다. Rocks World 클러스터는 **Level 하나**이고 World API 생성의 Commit에서 가입한다(GCS 13.3절, 개정 2). prefab spawn도 같은 경로로 대상 Level 클러스터에 가입한다. **UE와 다르다**: UE Level 클러스터는 로드 때 한 번 만들어지고 실행 중 spawn한 Actor는 들어가지 않는다(2.9절). Rocks는 간선 쓰기마다 장부를 고치므로 spawn한 객체도 가입한다. prefab 단위 클러스터는 두지 않는다(UE에도 없다).
@@ -124,6 +131,7 @@
 - **override**: `Transform`은 비Atomic이라 멤버 단위 override다(RCM 64행, RX 3.1절). 인스턴스에서 이동만 바꾸면 회전·scale은 원형 변경을 따른다(RX 301행이 말한 UE 동작).
 - **저장**: 배치 기록의 `transform`은 인스턴스 원점 Transform(부착 부모 없으면 월드)이다. 최상위 root의 상대 Transform 편집은 prefab 공간 값의 override로 그대로 저장한다(역변환 없음).
 - **큰 좌표**: 인스턴스 Transform과 앵커 행렬은 double이다. 렌더용 float 좁히기(Transform3f)는 렌더 계약을 따른다.
+- **절대 성분**: SceneComponent의 `absoluteLocation`·`absoluteRotation`·`absoluteScale`(`WD/SceneComponent.h:406-410`)이 켜진 성분은 부모 행렬을 무시하고 월드 기준이다. 앵커는 "부모 행렬"이므로 그 성분에는 앵커도 적용하지 않는다(UE와 같다). 그래서 최상위 root에 절대 성분이 있으면 배치 이동이 그 성분을 움직이지 않는다.
 
 ### 3.11 오류·진단
 
@@ -132,13 +140,14 @@
 | 진단 | ErrorCode | 때 |
 |---|---|---|
 | `PrefabCycle` | InvalidArgument(편집)·CorruptPackage(로드) | 기준·중첩·추가 중첩 순환 |
-| `PrefabDepthExceeded`·`PrefabNodeLimit`·`PrefabOverrideLimit` | CapacityExceeded | 3.8절 한도 |
+| `PrefabDepthExceeded`·`PrefabNodeLimit`·`PrefabOverrideLimit`·`PrefabCrossReferenceLimit`·`PrefabPlacementLimit` | CapacityExceeded | 3.8절 한도(상수 대응은 3.8절) |
 | `PrefabMissingBase`·`PrefabMissingNested` | MissingDependency | 기준·중첩 prefab 로드 실패 |
 | `PrefabDuplicateNodeGuid` | CorruptPackage | 노드 정보·추가 노드 GUID 중복 |
 | `PrefabNodeTableMismatch` | CorruptPackage | `nodeInfo`와 NodeTable의 길이·순서 불일치 |
 | `PrefabNodeNameConflict` | InvalidArgument(추가)·진단(전파) | 같은 Actor 안 노드 이름 중복 |
 | `PrefabUnsaveableNode` | Unsupported | Transient·Deprecated 클래스, native 파생, Runtime 출처 노드, LevelScript 파생 클래스(1.3절) |
 | `PrefabExternalReference` | InvalidArgument | 원형 밖 World 객체 참조 저장(3.5절) |
+| `PrefabReferenceToRemovedNode` | 진단만(값은 null) | override 값·그래프 사이 참조가 삭제된 노드를 가리킨다(3.3절 6항) |
 | `PrefabOverrideOrphaned`·`PrefabOverrideTypeMismatch`·`PrefabOverrideNeedsReview`·`PrefabAddedNodeParentMissing` | 편집기: 진단만, cooked: InvalidArgument | 3.7절 충돌 |
 | `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상, 편집 위치 위반(편집기 쓰기 경로 — [UI 툴킷](../UiToolkit/README.ko.md) 7.3절 (a)) |
 | `PrefabEditScopeViolation` | 편집기: 진단만(값은 적용), cooked: InvalidArgument | 저장물의 편집 위치 위반: 원형 저장물(`PrefabAsset`의 본문·variant `overrides`·중첩 노드 override)에 `EditScope = "Instance"` 필드가 클래스 레코드와 다른 값, 배치 저장물(`PrefabPlacement.overrides`·레벨 직접 배치 Record)에 `"Archetype"` 필드가 원형과 다른 값(UI 툴킷 7.3절 (a)) |
