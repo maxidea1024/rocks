@@ -40,6 +40,6 @@ Rocks 이름은 서술형이다(값 커브 `TangentCurve`와 헷갈리지 않게
 
 - **Runtime `CurveAssets`**(`Engine/Source/Runtime/CurveAssets`, 의존 Core·ObjectRuntime·Curves·AssetRuntime): 2·3장의 클래스와 struct. Engine 층이고 Core 층이 아니다 — `Asset`(AssetRuntime)에 기대기 때문이다. 소비자(InputActions·Audio·Material·게임 모듈)가 이 모듈을 의존한다.
 - **Runtime `Texture`에 기대는 atlas**: `ColorCurveAtlas`는 `Texture2D` 파생이라 `CurveAssets`가 `Texture`를 의존하면 모든 커브 소비자가 텍스처 모듈을 끌고 온다. 그래서 atlas는 따로 Runtime `CurveAtlas` 모듈(의존 CurveAssets·Texture)에 둔다(CAD2).
-- **Developer `CurveAssetTools`**(`Engine/Source/Developer/CurveAssetTools`, 의존 CurveAssets·AssetDatabase·AssetCooker): 임포터 셋·커브 표 쿠킹 처리기. atlas 굽기·쿠킹은 Developer `CurveAtlasTools`(의존 CurveAtlas·CurveAssetTools·TextureTools — 4장).
+- **Developer `CurveAssetTools`**(`Engine/Source/Developer/CurveAssetTools`, 의존 CurveAssets·AssetDatabase·AssetCooker): 임포터 셋·커브 표 쿠킹 처리기. atlas 굽기는 Developer `CurveAtlasTools`(의존 CurveAtlas·CurveAssets·Texture·AssetRuntime — 굽기 함수와 타입 hook 셋: 원본 재구성·Build 의존·정규화, 4장). atlas 쿠킹은 텍스처 처리기다.
 - **Core `CsvReader`**(`Core/Text/Csv.h`): 범용 기능이라 Core에 둔다(공용 기능은 기능 모듈에 자체 구현하지 않는다). 데이터 표(DataTable 대응)도 같은 것을 쓴다.
 - 한 파일에 한 클래스, 범주 폴더(`CurveAssets/` 아래 `FloatCurveAsset.h` 등)다.
