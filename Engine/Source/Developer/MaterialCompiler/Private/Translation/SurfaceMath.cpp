@@ -130,6 +130,16 @@ IrValueId SurfaceMath::Lerp(IrValueId from, IrValueId to, IrValueId alpha) noexc
     return Check(context_.Ternary(IrOp::Lerp, from, to, alpha, NumberRule::FloatOnly));
 }
 
+IrValueId SurfaceMath::NodeLerp(IrValueId from, IrValueId to, IrValueId alpha) noexcept {
+    // 두 끝이 같은 값이면 그 끝이다(UE 번역기 Lerp — HLSLMaterialTranslator.cpp:10378: 같은 값
+    // 번호, hash-consing으로 같은 상수도 같은 번호다).
+    if (!failed_ && from != NoIrValue && from == to && alpha != NoIrValue) {
+        return from;
+    }
+
+    return Lerp(from, to, alpha);
+}
+
 IrValueId SurfaceMath::Clamp(IrValueId value, IrValueId low, IrValueId high) noexcept {
     if (failed_ || value == NoIrValue || low == NoIrValue || high == NoIrValue) {
         return NoIrValue;

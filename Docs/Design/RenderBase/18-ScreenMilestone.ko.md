@@ -333,3 +333,10 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
 - 리뷰(리뷰어 1명, 2026-11-28) 반영: 스왑체인 첫 pass 결과 확인, UI 실패 범위 문구, 흐림 패널로 흐림 셰이더 장치 시험, capture 크기를 창 크기로, 배율 1 가정 `static_assert`.
 - 함께 고친 것(UI 셰이더 GLES): Sandbox가 UiRender를 링크하자 OpenGL ES 두 장치의 엔진 셰이더 집합이 `ProviderFailed`로 열리지 않았다. 원인은 `UiBackdropBlur.rsf`가 `UiBackdrop`을 샘플러 표본과 샘플러 없는 접근(`Load`·`GetDimensions`)으로 함께 읽은 것이다. GLES 결합 샘플러 계획(`ShaderGlesBindings`)은 샘플러 쓰임이 있는 텍스처에 dummy 샘플러를 만들지 않으므로, SPIRV-Cross가 "texelFetch without sampler"로 실패한다. UiDemo는 D3D11 전용이라 드러나지 않았다. 셰이더는 표본만 쓰게 고쳤다: texel 반 크기는 화면 변환(2 / 폭, −2 / 높이)에서 얻고(배경 = 패스 대상 크기), 흐림 없는 복사는 그 픽셀 texel 가운데 `SampleLevel`이다(같은 값). 같은 텍스처의 표본·Load 혼용을 GLES 계획이 받게 하는 것은 셰이더 시스템 후속이다.
 - 시험(Debug, 엔진·TestContent 다시 쿠킹): Sandbox `--self-test` 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) 0 failures다. 화면 검사는 패널을 켠 채 Thread·Inline 두 모드 8 프레임이다. 프레임마다 present 1(그래프·장치), UI 프레임 8/8, 패널 바탕·mip 막대 픽셀, 기존 장면·텍스처 표시 픽셀, 두 모드 byte 동일, 검증 오류 0이다. 쿠킹 화면도 D3D·Vulkan 여섯 장치에서 UI 셰이더가 든 쿠킹 라이브러리로 PASS다(OpenGL ES는 쿠킹 형식이 없어 NOT RUN — 이전과 같다). `--texture-self-test`·`--shader-reload-self-test`도 0 failures다.
+
+**시작 시간 측정(개정 71, 2026-11-28).** `Sandbox --engine --window --frames 30 --graphics=d3d12`(Debug, GTX 1060, 같은 기계 다른 세션 빌드 동시 진행)의 시작을 재고 느린 원인을 확정했다.
+- 쿠킹 엔진 셰이더 경로: 프로세스 시작 → 장치 생성 0.45 s, 화면 그리기 시작 0.58 s(셰이더 단계 0개 job).
+- Development 공급자 경로(쿠킹 라이브러리 없음): 장치 생성 뒤 화면 그리기 시작까지 3.0–3.4 s였다. 시작 단계 Shaders가 2.5–3.7 s로 거의 전부다. 원인은 공급자가 너겟 캐시를 쓰지 못해 매 시작마다 엔진 셰이더 118개를 다시 컴파일한 것이다(ShaderSystem 12.3.1절 SSD16 "너겟 캐시를 쓰지 못하던 결함과 처리", 개정 63). 수정 뒤 118개 모두 적중하고 만들기가 631–899 ms다.
+- 스플래시 hand-off(주 창을 첫 프레임 제출 뒤 보임)는 원인이 아니다. 창을 보이는 시점이 셰이더 준비 뒤라 빈 창 구간은 셰이더 준비가 끝난 다음이다.
+- 남은 것: 캐시가 빈 첫 실행의 병렬(워커 묶음 32개 고정 — ShaderSystem 11.2절 SC4 개선), Debug 전처리·키 계산 비용(631–899 ms의 대부분).
+

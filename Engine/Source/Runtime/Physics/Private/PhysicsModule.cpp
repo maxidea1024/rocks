@@ -40,7 +40,9 @@ Result<void> PhysicsSettings::Validate(const PhysicsSettings& settings) noexcept
         !nonNegative(settings.restitutionThreshold) ||
         !nonNegative(settings.collisionMarginFraction) ||
         !nonNegative(settings.collisionMarginMax) || !knownMode(settings.frictionCombineMode) ||
-        !knownMode(settings.restitutionCombineMode)) {
+        !knownMode(settings.restitutionCombineMode) ||
+        static_cast<uint8>(settings.defaultDegreesOfFreedom) >
+            static_cast<uint8>(SettingsDof::XYPlane)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -10,7 +10,9 @@ namespace rocks::material {
 // 의존 역할이다.
 enum class MaterialDependencyRole : uint8 {
     Function = 0,
-    Material = 1
+    Material = 1,
+    // ColorRamp의 색 커브다(6.13절 MS2f4).
+    ColorCurve = 2
 };
 
 struct MaterialTranslationDependency {

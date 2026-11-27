@@ -54,6 +54,8 @@ public abstract class TestsModule : ModuleRules
         "Engine/Source/Runtime/Physics/Tests/PhysicsAdapterTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsBodyValueSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsContactSceneTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsDofSceneTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsForceSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp"
     ];
 
@@ -147,8 +149,9 @@ public abstract class TestsModule : ModuleRules
         ["Material"] = ["AssetTestFixtures"],
         // The dynamic pin tests write node properties with the reflection codec (SaveStructRecord) before reading them back as a node would.
         ["MaterialSchema"] = ["ObjectSerialization"],
-        // The translator tests build material graphs whose node properties and pin values are written with the reflection codec.
-        ["MaterialCompiler"] = ["ObjectSerialization"],
+        // The translator tests build material graphs whose node properties and pin values are written with the reflection codec; the MS2 completion
+        // corpus compiles the generated material source with the shader compile manager and its test support (Docs/Design/MaterialSystem section 7.8).
+        ["MaterialCompiler"] = ["ObjectSerialization", "ShaderCompiler"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],

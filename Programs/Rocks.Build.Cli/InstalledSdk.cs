@@ -451,17 +451,22 @@ public static class InstalledSdk
         var plan = layout.Metadata;
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
+        // 메타 단계 세션(Docs/Design/BuildReuse 2장 — 도구 ID는 SDK의 MetaCompiler 디렉터리다).
+        MetadataSession metaSession = MetadataSession.Create(context, toolchain);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
             Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets,
-            jobs: BuildCommand.Jobs(options), verifySources: BuildCommand.VerifyMetadataSources(options));
+            jobs: BuildCommand.Jobs(options), verifySources: BuildCommand.VerifyMetadataSources(options), session: metaSession);
         if (metadata != 0)
         {
+            metaSession.Finish(succeeded: false);
             return 1;
         }
 
         // 셰이더 파라미터 구조체(Docs/Design/ShaderSystem 16.2절 SSD49 — 게임 모듈은 /Project 가상 루트).
-        if (await ShaderParameterRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-                Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, gameProject: true) != 0)
+        int shaderParameters = await ShaderParameterRunner.GenerateAsync(context, toolchain, plan, rules.Target,
+            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, gameProject: true, session: metaSession);
+        metaSession.Finish(shaderParameters == 0);
+        if (shaderParameters != 0)
         {
             return 1;
         }
@@ -481,7 +486,8 @@ public static class InstalledSdk
             Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
             Adaptive = BuildCommand.Switch(options, BuildCommand.AdaptiveOption),
             Timing = BuildCommand.Timing(options),
-            TimingLabel = rules.Target.Name
+            TimingLabel = rules.Target.Name,
+            InputMemo = metaSession.Memo
         }, cancellationToken);
         BuildCommand.Print(result);
         // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.

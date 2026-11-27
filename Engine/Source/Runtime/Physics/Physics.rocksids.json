@@ -24,6 +24,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PhysicsSettings::defaultDegreesOfFreedom",
+      "id": "89380bfc1ef84bbf910f73f11984ea95",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PhysicsSettings::defaultGravityZ",
       "id": "cf2eb6bb4dd445a59ca8410db2bca628",
       "aliases": [],
@@ -110,6 +117,13 @@
       "kind": "type",
       "name": "rocks::PhysicsSettings",
       "id": "8d5be02abef64362bd881f6a871a5eb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SettingsDof",
+      "id": "edb5c554cfa44908aa14d124709eedc4",
       "aliases": [],
       "retired": false
     }

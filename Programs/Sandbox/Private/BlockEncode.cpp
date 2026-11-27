@@ -503,6 +503,16 @@ bool EncodeBlockImage(graphics::PixelFormat format, Span<const uint8> rgba, uint
                 case TextureBlockFormat::Bc7:
                     block_encode::EncodeBc7(texels, target);
                     break;
+                case TextureBlockFormat::EacR11:
+                case TextureBlockFormat::Astc4x4:
+                case TextureBlockFormat::Astc6x6:
+                case TextureBlockFormat::Astc8x8:
+                case TextureBlockFormat::Astc10x10:
+                case TextureBlockFormat::Astc12x12:
+                    // 메모리 장면 인코더는 BC만 만든다. TextureBlockFormatOf가 EAC·ASTC를
+                    // 돌려주지 않으므로 여기에 오지 않는다(EAC·ASTC 장면은 TC4 렌더 대응 —
+                    // RenderBase 18.5절 7항).
+                    return false;
                 }
 
                 target += blockBytes;

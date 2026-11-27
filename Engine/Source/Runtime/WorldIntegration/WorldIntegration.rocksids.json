@@ -219,6 +219,209 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::TimelineColorTrack::curve",
+      "id": "3c51725b4a71430c877d5f37ea9e3eec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineColorTrack::curveAsset",
+      "id": "bffb5cc5eb914eb98da0e386f68de957",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineColorTrack::trackName",
+      "id": "e9b9e868533b4d9894dcc45f437c2ce4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::colorTrackUpdated",
+      "id": "a83afeba42854c0eab01e49f678b0e59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::colorTracks_",
+      "id": "55013b71835841218b8211132dc81397",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::eventKeyReached",
+      "id": "d3c410fa2cad45d5b9cb22f9bdea9297",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::eventKeys_",
+      "id": "9b6a6ef9f5e1401e87d49b032c791c4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::finished",
+      "id": "90484166ee944281bdcd250a349bafe1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::floatTrackUpdated",
+      "id": "ad599db37c40494cae5683ee05ee627a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::floatTracks_",
+      "id": "87898ce2ec654d4ba5ef21f2a908a475",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::ignoreTimeDilation_",
+      "id": "08cb9fbb10f04300a4878d807c9f8157",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::lengthMode_",
+      "id": "804ab3b620f7454a99a066195349a9b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::length_",
+      "id": "def4c20bce7e4fa4b038e3ddb478177b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::looping_",
+      "id": "49f6112c6fa54a63b56a277a2551cad9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::playRate_",
+      "id": "c4d58edc8dac4265b1dec6992f7ba911",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::playing_",
+      "id": "8f731b9630d941bc8e229c01677ed93f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::position_",
+      "id": "d6fe33e6186b4953a4f0faff9c50086a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::reversePlayback_",
+      "id": "eb7bb9ab349c4903bc220ddf687f27be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::updated",
+      "id": "8e45a376c42247e5a0c24cb71231abae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::vectorTrackUpdated",
+      "id": "378629fd4fce42a0bf83e982378b8789",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineComponent::vectorTracks_",
+      "id": "9c87e86dcc7f4d5a9344fe5cc368403b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineEventKey::eventName",
+      "id": "21afb97ddbf34f9d8573e6a4ea6ca94b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineEventKey::time",
+      "id": "bc260f44b4d841b187f3d144a53af822",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineFloatTrack::curve",
+      "id": "f1a0a9eaf0934e9896850ca5b2028fb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineFloatTrack::curveAsset",
+      "id": "68b9bb8720e644b7ac0cd537dcf57943",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineFloatTrack::trackName",
+      "id": "3cc860cb217c4770a6c4ff2ef577c11b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineVectorTrack::curve",
+      "id": "2480305cb06348ec90019d598aaca262",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineVectorTrack::curveAsset",
+      "id": "cad1133372b14adb88c5422841f9d566",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TimelineVectorTrack::trackName",
+      "id": "ee57e5998f7447fab5773ce91d61b761",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::MeshComponent",
       "id": "70d6a4d821104096959861418e8dbe11",
@@ -236,6 +439,48 @@
       "kind": "type",
       "name": "rocks::StaticMeshComponent",
       "id": "d497df3489794f9ebd69e787c0ad12eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineColorTrack",
+      "id": "57e74b98c2aa44ddbf24ca633b2b6f29",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineComponent",
+      "id": "12b515727f374efda0b8cb716654d1ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineEventKey",
+      "id": "51bcb6b1702b4e5b9d7110cdccad98f9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineFloatTrack",
+      "id": "bc583135dc5a43c7b1bc362c34c497ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineLengthMode",
+      "id": "0abd14fcd3c14ddc9bbe98a102f8e7c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TimelineVectorTrack",
+      "id": "c40c6d76736940b9bf93285d66b4b225",
       "aliases": [],
       "retired": false
     }

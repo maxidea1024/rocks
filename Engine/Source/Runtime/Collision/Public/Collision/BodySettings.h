@@ -16,8 +16,10 @@ namespace rocks {
 // 자유도 제한 방식이다(UE EDOFMode — BodyInstance.h:39).
 // - Default: 프로젝트 물리 설정의 기본 방식을 따른다.
 // - SixDOF: 축별 잠금(lock*Translation·lock*Rotation)을 쓴다.
-// - YZPlane·XZPlane·XYPlane: 그 평면 안에서만 움직인다(lockTranslation·lockRotation).
-// - CustomPlane: customDofPlaneNormal에 수직인 평면이다.
+// - YZPlane·XZPlane·XYPlane: 그 평면 안에서만 움직인다(법선 이동·평면 안 두 축 회전을 늘 잠근다 —
+//   lockTranslation·lockRotation 표지는 보지 않는다, UE와 같다).
+// - CustomPlane: customDofPlaneNormal에 수직인 평면이다(lockTranslation이면 법선 이동,
+//   lockRotation이면 평면 안 두 축 회전을 잠근다).
 // - None: 제한하지 않는다.
 ROCKS_ENUM()
 enum class DofMode : uint8 {

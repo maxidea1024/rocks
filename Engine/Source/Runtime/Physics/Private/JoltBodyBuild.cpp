@@ -127,6 +127,156 @@ Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(const BodyGeometry& geometry, co
     return Invalid();
 }
 
+namespace {
+
+// Rocks 축 허용(이동 X·Y·Z, 회전 X·Y·Z)을 Jolt bit로 바꾼다(축 A — Rocks X → Jolt Z, Y → X, Z → Y,
+// 회전 축도 같다).
+uint8 JoltDofBits(const bool (&allow)[6]) noexcept {
+    constexpr JPH::EAllowedDOFs JoltAxis[6] = {
+        JPH::EAllowedDOFs::TranslationZ, JPH::EAllowedDOFs::TranslationX,
+        JPH::EAllowedDOFs::TranslationY, JPH::EAllowedDOFs::RotationZ,
+        JPH::EAllowedDOFs::RotationX,    JPH::EAllowedDOFs::RotationY};
+    uint8 bits = 0;
+    for (int axis = 0; axis < 6; ++axis) {
+        if (allow[axis]) {
+            bits |= static_cast<uint8>(JoltAxis[axis]);
+        }
+    }
+
+    return bits;
+}
+
+// 법선 축 index(0 X, 1 Y, 2 Z)의 평면 잠금을 Rocks 축 허용에 적는다: 법선 이동, 다른 두 축 회전.
+void LockAxisPlane(int normalAxis, bool translation, bool rotation, bool (&allow)[6]) noexcept {
+    if (translation) {
+        allow[normalAxis] = false;
+    }
+
+    if (rotation) {
+        for (int axis = 0; axis < 3; ++axis) {
+            if (axis != normalAxis) {
+                allow[3 + axis] = false;
+            }
+        }
+    }
+}
+
+// 축과 나란한 단위 법선인지(축 index, 아니면 −1)다.
+constexpr double AxisAlignedTolerance = 1.0e-6;
+
+int AlignedAxis(const Vec3d& unit) noexcept {
+    const double components[3] = {unit.x, unit.y, unit.z};
+    for (int axis = 0; axis < 3; ++axis) {
+        if (math::Abs(math::Abs(components[axis]) - 1.0) <= AxisAlignedTolerance) {
+            return axis;
+        }
+    }
+
+    return -1;
+}
+
+} // namespace
+
+bool DofLock::LocksRotation() const noexcept {
+    const uint8 rotation = static_cast<uint8>(JPH::EAllowedDOFs::RotationX) |
+                           static_cast<uint8>(JPH::EAllowedDOFs::RotationY) |
+                           static_cast<uint8>(JPH::EAllowedDOFs::RotationZ);
+    return (static_cast<uint8>(allowed) & rotation) != rotation;
+}
+
+DofLock ResolveDofLock(const BodySettings* settings, SettingsDof projectDefault) noexcept {
+    DofLock lock;
+    DofMode mode = settings != nullptr ? settings->dofMode : DofMode::Default;
+    if (mode == DofMode::Default) {
+        switch (projectDefault) {
+        case SettingsDof::YZPlane:
+            mode = DofMode::YZPlane;
+            break;
+        case SettingsDof::XZPlane:
+            mode = DofMode::XZPlane;
+            break;
+        case SettingsDof::XYPlane:
+            mode = DofMode::XYPlane;
+            break;
+        case SettingsDof::Full3D:
+            mode = DofMode::SixDOF;
+            break;
+        }
+    }
+
+    bool allow[6] = {true, true, true, true, true, true};
+    switch (mode) {
+    case DofMode::SixDOF:
+        if (settings != nullptr) {
+            allow[0] = !settings->lockXTranslation;
+            allow[1] = !settings->lockYTranslation;
+            allow[2] = !settings->lockZTranslation;
+            allow[3] = !settings->lockXRotation;
+            allow[4] = !settings->lockYRotation;
+            allow[5] = !settings->lockZRotation;
+        }
+
+        break;
+    // 축 평면: 법선 이동과 평면 안 두 축 회전을 잠근다(표지와 상관없이 — UE :893-898).
+    case DofMode::YZPlane:
+        LockAxisPlane(0, true, true, allow);
+        break;
+    case DofMode::XZPlane:
+        LockAxisPlane(1, true, true, allow);
+        break;
+    case DofMode::XYPlane:
+        LockAxisPlane(2, true, true, allow);
+        break;
+    case DofMode::CustomPlane: {
+        // 법선이 0이면 잠금이 없다(UE LockedAxis.IsNearlyZero — 성분마다 KindaSmallNumber).
+        const Vec3d normal = settings != nullptr ? settings->customDofPlaneNormal : Vec3d::Zero();
+        const double tiny = math::KindaSmallNumber<double>;
+        const bool finite =
+            math::IsFinite(normal.x) && math::IsFinite(normal.y) && math::IsFinite(normal.z);
+        if (!finite || (math::Abs(normal.x) <= tiny && math::Abs(normal.y) <= tiny &&
+                        math::Abs(normal.z) <= tiny)) {
+            return lock;
+        }
+
+        const bool translation = settings->lockTranslation;
+        const bool rotation = settings->lockRotation;
+        if (!translation && !rotation) {
+            return lock;
+        }
+
+        const Vec3d unit = normal * (1.0 / normal.Length());
+        // 축과 나란하면 축 평면처럼 bit로 한다(구속보다 싸고 teleport·형상 변경에 따로 할 일이
+        // 없다).
+        if (const int axis = AlignedAxis(unit); axis >= 0) {
+            LockAxisPlane(axis, translation, rotation, allow);
+            break;
+        }
+
+        lock.constraint = true;
+        lock.constraintNormal = unit;
+        lock.lockNormalTranslation = translation;
+        lock.lockPlaneRotation = rotation;
+        return lock;
+    }
+
+    case DofMode::None:
+    case DofMode::Default:
+        return lock;
+    }
+
+    const uint8 bits = JoltDofBits(allow);
+    // 모두 잠긴 조합은 Jolt 허용 자유도로 표현할 수 없다(AllowedDOFs.h:12) — UE처럼 6축 구속으로
+    // 멈춘다(허용 자유도는 All로 두고 구속이 모두 막는다).
+    if (bits == 0) {
+        lock.constraint = true;
+        lock.lockAll = true;
+        return lock;
+    }
+
+    lock.allowed = static_cast<JPH::EAllowedDOFs>(bits);
+    return lock;
+}
+
 BodyMassValues MassValuesOf(const BodySettings* settings) noexcept {
     BodyMassValues values;
     if (settings == nullptr) {

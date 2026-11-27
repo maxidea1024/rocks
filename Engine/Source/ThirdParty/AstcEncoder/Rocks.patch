@@ -48,6 +48,21 @@ index 5dc3801..6d3e9db 100644
  	int texels_int = block_x * block_y * block_z;
  	if (texels_int < 25)
  	{
+diff --git a/Source/astcenc_image.cpp b/Source/astcenc_image.cpp
+index 079f69f..539f4e9 100644
+--- a/Source/astcenc_image.cpp
++++ b/Source/astcenc_image.cpp
+@@ -291,7 +291,9 @@ void load_image_block_fast_ldr(
+ 	vmask4 grayscalev(true);
+ 	int idx = 0;
+ 
+-	const uint8_t* plane = static_cast<const uint8_t*>(img.data[0]);
++	// Rocks: read the block's own slice. Upstream reads data[0] for every zpos, so a multi-slice image with 2D blocks and
++	// an identity swizzle compressed slice 0 for every slice (load_image_block reads data[zpos]).
++	const uint8_t* plane = static_cast<const uint8_t*>(img.data[zpos]);
+ 	for (unsigned int y = ypos; y < ypos + bsd.ydim; y++)
+ 	{
+ 		unsigned int yi = astc::min(y, ysize - 1);
 diff --git a/Source/astcenc_rocks_angular_tables.h b/Source/astcenc_rocks_angular_tables.h
 new file mode 100644
 index 0000000..7c96be8

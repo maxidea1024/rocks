@@ -762,7 +762,8 @@ Result<void> LowerTextureSample(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(value.immediate[2] >> IrTextureSamplerTypeShift);
+        samplerType = static_cast<uint8>((value.immediate[2] >> IrTextureSamplerTypeShift) &
+                                         IrTextureSamplerTypeMask);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
@@ -1224,8 +1225,9 @@ Result<void> LowerParticleSubUv(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(context.Builder().Value(texture).immediate[2] >>
-                                         IrTextureSamplerTypeShift);
+        samplerType = static_cast<uint8>(
+            (context.Builder().Value(texture).immediate[2] >> IrTextureSamplerTypeShift) &
+            IrTextureSamplerTypeMask);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),

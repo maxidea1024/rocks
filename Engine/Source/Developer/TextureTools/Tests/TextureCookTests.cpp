@@ -20,11 +20,13 @@
 #include <Platform/File.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Task/WorkerScheduler.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureCook.h>
 
+#include <stdio.h>
 #include <string.h>
 
 // 텍스처 쿠킹 처리기 시험이다(Docs/Design/AssetSystem 12.14절 — 14.1.101절 대조표): 너겟 머리
@@ -192,6 +194,9 @@ struct CookScene {
         });
     }
 
+    // 처리기 안 병렬 압축 scheduler다(12.17.9 4 — null이면 직렬).
+    WorkerScheduler* scheduler = nullptr;
+
     Result<void> Cook(const TextureCookProcessor& processor, CookOut& out,
                       NuggetCache* nuggets = nullptr, bool verify = false,
                       PackageSink* sink = nullptr, Allocator* scratch = nullptr) noexcept {
@@ -207,6 +212,8 @@ struct CookScene {
         context.bulkSource = &sourceBulk;
         context.nuggets = nuggets;
         context.verifyNuggets = verify;
+        context.scheduler = scheduler;
+        context.scratch = scheduler != nullptr ? &allocator : nullptr;
         context.sink = sink != nullptr ? sink : &out.sink;
         context.failure = &out.failure;
         context.warnings = &out.warnings;
@@ -1553,6 +1560,69 @@ TEST(TextureCook_AndroidAstcAndEac) {
     CookOut alpha(scene.allocator);
     REQUIRE(cooked(alpha, format));
     CHECK(format == graphics::PixelFormat::EACR11Unorm && alpha.warnings.IsEmpty());
+}
+
+// 병렬 압축 쿠킹(12.17.9 4·5): scheduler가 있어도 쿠킹 byte·너겟 키가 직렬과 같고(실행 방법은 키에
+// 넣지 않는다 — 직렬 너겟을 그대로 적중), verify(다시 만들어 byte 대조)가 통과한다. Windows BC와
+// Android ASTC·EAC 셋을 본다.
+TEST(TextureCook_ParallelMatchesSerial) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    WorkerScheduler workers(scene.allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 4;
+    REQUIRE(workers.Start(config));
+    TextureCookProcessor processor;
+    Array<uint8> pixels = Pattern(scene.allocator, 64 * 64 * 4, 21);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 64, 64, 1, pixels.View()));
+    struct Case {
+        const char* profile;
+        TextureCompressionSettings compression;
+    };
+    const Case cases[] = {{"Windows", TextureCompressionSettings::Default},
+                          {"Android", TextureCompressionSettings::Default},
+                          {"Android", TextureCompressionSettings::Alpha}};
+    usize index = 0;
+    for (const Case& one : cases) {
+        REQUIRE(scene.profile.id.TryAssign(one.profile));
+        const TextureCompressionSettings compression = one.compression;
+        REQUIRE(scene.Edit([compression](Texture& texture) noexcept {
+            texture.compressionSettings = compression;
+            texture.srgb = compression == TextureCompressionSettings::Alpha ? 0 : 1;
+            return true;
+        }));
+        char tag[48];
+        snprintf(tag, sizeof(tag), "texture-cook-parallel-%u", static_cast<unsigned>(index++));
+        NuggetScene nuggets(scene.allocator, tag);
+        REQUIRE(nuggets.ready);
+        scene.scheduler = nullptr;
+        CookOut serial(scene.allocator);
+        REQUIRE(scene.Cook(processor, serial, nuggets.cache.Get()));
+        const Sha256Digest serialKey = processor.LastNuggetKey();
+        const uint64 builds = processor.Builds();
+        // 새 캐시에서 병렬로 다시 만든다(같은 키·같은 byte).
+        char freshTag[48];
+        snprintf(freshTag, sizeof(freshTag), "texture-cook-parallel-fresh-%u",
+                 static_cast<unsigned>(index));
+        NuggetScene fresh(scene.allocator, freshTag);
+        REQUIRE(fresh.ready);
+        scene.scheduler = &workers;
+        CookOut parallel(scene.allocator);
+        REQUIRE(scene.Cook(processor, parallel, fresh.cache.Get()));
+        CHECK(processor.Builds() == builds + 1);
+        CHECK(processor.LastNuggetKey() == serialKey);
+        CHECK(parallel.sink.Bytes().Size() == serial.sink.Bytes().Size() &&
+              memcmp(parallel.sink.Bytes().Data(), serial.sink.Bytes().Data(),
+                     serial.sink.Bytes().Size()) == 0);
+        // verify: 직렬로 만든 너겟을 병렬로 다시 만들어 byte 대조한다.
+        CookOut verified(scene.allocator);
+        REQUIRE(scene.Cook(processor, verified, nuggets.cache.Get(), true));
+        CHECK(verified.failure.code == AssetDiagnosticCode::None);
+        scene.scheduler = nullptr;
+    }
+
+    REQUIRE(workers.Shutdown());
 }
 
 TEST(TextureCook_Registration) {

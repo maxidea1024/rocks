@@ -145,6 +145,9 @@ internal static class ShaderParameterGenerator
         public string? DefinitionsHeader;
         public readonly List<string> IncludeDirectories = [];
         public readonly List<string> ClangArguments = [];
+        // 의존 기록·단계 보고 출력 경로다(Docs/Design/BuildReuse 2.4·2.8절 — 리플렉션 모드와 같은 형식).
+        public string? DependencyRecord;
+        public string? PhaseReport;
     }
 
     // 선언 하나다.
@@ -230,6 +233,31 @@ internal static class ShaderParameterGenerator
     public static async Task<int> RunAsync(string[] arguments)
     {
         Options options = Parse(arguments);
+        MetaRunRecorder recorder = MetaRunRecorder.Begin();
+        try
+        {
+            int exit = await GenerateAsync(options, recorder);
+            if (options.DependencyRecord is not null)
+            {
+                recorder.WriteDependencyRecord(options.DependencyRecord);
+            }
+
+            return exit;
+        }
+        finally
+        {
+            if (options.PhaseReport is not null)
+            {
+                recorder.WritePhaseReport(options.PhaseReport);
+            }
+        }
+    }
+
+    private static async Task<int> GenerateAsync(Options options, MetaRunRecorder recorder)
+    {
+        recorder.Mark("environment");
+        // 자기 출력은 입력이 아니다(Docs/Design/BuildReuse 2.4절 제외 규칙).
+        recorder.Exclude(options.OutputRoot);
         string root = CompilerDriver.FindRoot() ?? Directory.GetCurrentDirectory();
         Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync(options.Compiler);
         string compiler = NativeEnvironment.FindExecutable(options.Compiler ?? (OperatingSystem.IsWindows() ? "clang-cl" : "clang++"), environment);
@@ -263,8 +291,9 @@ internal static class ShaderParameterGenerator
         }
 
         string unit = string.Concat(options.Inputs.Select(input => $"#include \"{input.Path.Replace('\\', '/')}\"\n"));
+        recorder.Mark("ast");
         List<string> astArguments = [.. baseArguments, .. clangCl ? new[] { "/clang:-Xclang", "/clang:-ast-dump=json" } : ["-Xclang", "-ast-dump=json"], "-"];
-        ProcessResult ast = await ProcessRunner.RunAsync(new(compiler, astArguments, root, environment, CompilerDriver.ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)));
+        ProcessResult ast = await ClangInvocation.RunAsync(new(compiler, astArguments, root, environment, CompilerDriver.ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)), clangCl);
         if (ast.ExitCode != 0 || ast.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
         {
             throw new MetadataException("Clang rejected shader parameter input:\n" + ast.StdErr, "RMC6000",
@@ -280,7 +309,9 @@ internal static class ShaderParameterGenerator
                 "Pass only headers that declare shader parameter structs.");
         }
 
+        recorder.Mark("probes");
         await ProbeAsync(owned, compiler, baseArguments, unit, root, environment, clangCl);
+        recorder.Mark("write");
         foreach (StructDecl declaration in OrderNestedFirst(owned))
         {
             Layout(declaration, owned);
@@ -347,9 +378,16 @@ internal static class ShaderParameterGenerator
                 case "--include-dir":
                     options.IncludeDirectories.Add(value);
                     break;
+                case "--dependency-record":
+                    options.DependencyRecord = Path.GetFullPath(value);
+                    break;
+                case "--phase-report":
+                    options.PhaseReport = Path.GetFullPath(value);
+                    break;
                 default:
                     throw new MetadataException("unknown shader-parameters option: " + argument, "RMC1000",
-                        "Use --module, --input/--include, --private, --output-root, --compiler, --virtual-root, --definitions-header, --include-dir and --clang-arg=.");
+                        "Use --module, --input/--include, --private, --output-root, --compiler, --virtual-root, --definitions-header, --include-dir, " +
+                        "--dependency-record, --phase-report and --clang-arg=.");
             }
         }
 
@@ -659,8 +697,8 @@ internal static class ShaderParameterGenerator
         List<string> probeArguments = [.. baseArguments,
             .. clangCl ? new[] { "/w", "/clang:-Xclang", "/clang:-ast-dump=json", "/clang:-Xclang", "/clang:-ast-dump-filter=" + CanonicalTypeProbe.Filter }
                        : ["-w", "-Xclang", "-ast-dump=json", "-Xclang", "-ast-dump-filter=" + CanonicalTypeProbe.Filter], "-"];
-        ProcessResult probed = await ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment,
-            CompilerDriver.ValidateGeneratedCode(unit + "#include <Base/Compiler.h>\n" + lines), TimeSpan.FromMinutes(2)));
+        ProcessResult probed = await ClangInvocation.RunAsync(new(compiler, probeArguments, root, environment,
+            CompilerDriver.ValidateGeneratedCode(unit + "#include <Base/Compiler.h>\n" + lines), TimeSpan.FromMinutes(2)), clangCl);
         Dictionary<int, string>? answers = probed.ExitCode == 0 ? CanonicalTypeProbe.Read(probed.StdOut) : null;
         if (answers is null)
         {

@@ -40,6 +40,12 @@ constexpr MaterialContextValue WithDefaultArgument(MaterialContextValue value,
     return value;
 }
 
+// pass가 늘 채우는 고정 칸이다(alwaysSupplied — 7.3절).
+constexpr MaterialContextValue AlwaysSupplied(MaterialContextValue value) noexcept {
+    value.alwaysSupplied = true;
+    return value;
+}
+
 constexpr MaterialContextValue ContextValues[] = {
     // UE AtmosphericLightVector.
     ContextValue("AtmosphericLightVector", "AtmosphericLightVector", MaterialPinType::Float3,
@@ -623,10 +629,11 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
     // UE 템플릿 필드 Parameters.SvPosition(TemporalSobol — Docs/Design/MaterialSystem 6.13절
-    // MS2f2).
-    ContextValue("SvPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
-                 MaterialContextFeature::View, AllMaterialDomains, MaterialPixelStage,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
+    // MS2f2). 픽셀 입력이라 pass가 늘 채운다(7.3절 고정 칸).
+    AlwaysSupplied(
+        ContextValue("SvPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
+                     MaterialContextFeature::View, AllMaterialDomains, MaterialPixelStage,
+                     MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false)),
     // UE View.StateFrameIndexMod8(TemporalSobol — 6.13절 MS2f2).
     ContextValue("StateFrameIndexMod8", "", MaterialPinType::UInt1, MaterialContextValueForm::Field,
                  0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,

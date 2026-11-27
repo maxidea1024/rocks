@@ -305,23 +305,36 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
     }
 
-    // 텍스처 표: 닿는 Texture의 표 항목을 (출처, id) 순으로 모으고 즉시값 [3]을 다시 매긴다(6.10절
-    // MS2c3 — 결정적 slot 순서).
+    // 텍스처 표: 닿는 Texture의 표 항목을 (출처, id, 샘플러 출처)마다 하나씩 (출처, id, 샘플러
+    // 출처) 순으로 모으고 즉시값 [3]을 다시 매긴다(6.10절 MS2c3 텍스처 표 — 결정적 slot 순서,
+    // slot마다 샘플러 출처 하나). 샘플하지 않는 값은 같은 (출처, id)의 샘플 slot이 있으면 그것을
+    // 쓴다.
     const Span<const IrTexture> sourceTextures = builder.Textures();
-    for (const IrValue& value : out.values_) {
-        if (value.op != IrOp::Texture) {
-            continue;
-        }
+    const auto samplerOf = [](const IrValue& value) noexcept {
+        return static_cast<IrTextureSampler>((value.immediate[2] >> IrTextureSamplerShift) &
+                                             IrTextureSamplerMask);
+    };
 
-        const IrTexture& texture = sourceTextures[static_cast<usize>(value.immediate[3])];
-        bool known = false;
-        for (const IrTexture& existing : out.textures_) {
-            known = known || (existing.source == texture.source && existing.id == texture.id);
-        }
+    for (uint32 pass = 0; pass < 2; ++pass) {
+        // 0: 샘플 판, 1: 샘플하지 않는 판(같은 (출처, id) slot이 없을 때만).
+        for (const IrValue& value : out.values_) {
+            if (value.op != IrOp::Texture ||
+                (samplerOf(value) == IrTextureSampler::None) != (pass == 1)) {
+                continue;
+            }
 
-        if (!known) {
-            if (auto added = out.textures_.TryPushBack(texture); !added) {
-                return FailBuild(out, Move(added));
+            IrTexture texture = sourceTextures[static_cast<usize>(value.immediate[3])];
+            texture.sampler = samplerOf(value);
+            bool known = false;
+            for (const IrTexture& existing : out.textures_) {
+                known = known || (existing.source == texture.source && existing.id == texture.id &&
+                                  (pass == 1 || existing.sampler == texture.sampler));
+            }
+
+            if (!known) {
+                if (auto added = out.textures_.TryPushBack(texture); !added) {
+                    return FailBuild(out, Move(added));
+                }
             }
         }
     }
@@ -331,8 +344,12 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
             return static_cast<uint8>(left.source) < static_cast<uint8>(right.source);
         }
 
-        return left.id.high < right.id.high ||
-               (left.id.high == right.id.high && left.id.low < right.id.low);
+        if (!(left.id == right.id)) {
+            return left.id.high < right.id.high ||
+                   (left.id.high == right.id.high && left.id.low < right.id.low);
+        }
+
+        return static_cast<uint8>(left.sampler) < static_cast<uint8>(right.sampler);
     };
 
     for (usize index = 1; index < out.textures_.Size(); ++index) {
@@ -351,9 +368,13 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         const Guid id{value.immediate[0], value.immediate[1]};
         const IrTextureSource source =
             static_cast<IrTextureSource>(value.immediate[2] & IrTextureSourceMask);
-        for (usize index = 0; index < out.textures_.Size(); ++index) {
-            if (out.textures_[index].source == source && out.textures_[index].id == id) {
-                value.immediate[3] = index;
+        const IrTextureSampler sampler = samplerOf(value);
+        // 샘플하지 않는 값은 같은 (출처, id)의 첫 slot(샘플러 출처 번호가 가장 작은 것)이다.
+        for (usize index = out.textures_.Size(); index > 0; --index) {
+            const IrTexture& slot = out.textures_[index - 1];
+            if (slot.source == source && slot.id == id &&
+                (sampler == IrTextureSampler::None || slot.sampler == sampler)) {
+                value.immediate[3] = index - 1;
             }
         }
     }

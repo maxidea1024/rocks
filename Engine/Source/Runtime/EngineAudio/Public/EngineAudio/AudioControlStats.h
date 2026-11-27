@@ -41,6 +41,12 @@ struct AudioControlStats {
     uint64 failedRealizations = 0;
     // 차폐 질의 요청 수(누계 — 3.42.7절)다.
     uint64 occlusionRequests = 0;
+    // 믹스(3.43절): 지금 활성 믹스 수, 표가 차서 무시한 push·passive·base·override·분류 거리
+    // 배수(누계).
+    uint32 activeMixes = 0;
+    uint64 mixRejects = 0;
+    uint64 mixOverrideRejects = 0;
+    uint64 categoryScaleRejects = 0;
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;

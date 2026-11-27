@@ -3,8 +3,57 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::AudioComponent::alwaysPlay",
+      "id": "20e1eda9309f4303b09a84915b657a5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AudioComponent::autoActivate",
       "id": "265bbe21e1a449aba7efe57a284d4184",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::enableHighPassFilter",
+      "id": "72fc45a074e94ed491d75aa2fba6a765",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::enableLowPassFilter",
+      "id": "65cea200288b45f982f57fe2c66ed648",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::highPassFilterFrequency",
+      "id": "71d3bc18187e4b53a7719bb691d90744",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::isUiSound",
+      "id": "d273668827bd408f8fffef824b8b28de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::lowPassFilterFrequency",
+      "id": "df308dce6a0041a784fbe0c0672f39c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::occlusionCheckInterval",
+      "id": "dd627c87315a4fc9bb321ac1b50bbebd",
       "aliases": [],
       "retired": false
     },

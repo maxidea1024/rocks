@@ -4,6 +4,7 @@
 #include <Base/Types.h>
 #include <Core/Function.h>
 #include <Core/Optional.h>
+#include <AudioAssets/SoundCategoryChain.h>
 #include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundPlaybackSettings.h>
 
@@ -120,17 +121,34 @@ struct PlayOptions {
     bool overrideConcurrency = false;
     uint32 concurrencyCount = 0;
     SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
+    // 사운드 분류 대신 쓸 분류 사슬이다(UE UAudioComponent::SoundClassOverride — 3.43.1절).
+    // 비었으면 사운드 것, 그것도 없으면 엔진 기본 분류(SetDefaultCategory)다.
+    SoundCategoryChainRef category;
+    // 분류 값과 OR한다(UE bAlwaysPlay·bIsUISound — 3.43.4절).
+    bool alwaysPlay = false;
+    bool isUiSound = false;
+    // 재생 LPF·HPF(Hz, [0, 20000] — UE bEnableLowPassFilter·LowPassFilterFrequency,
+    // bEnableHighPassFilter·HighPassFilterFrequency, 3.43.1절)다. 범위 밖은 InvalidArgument다.
+    Optional<float> lowPassFrequency;
+    Optional<float> highPassFrequency;
+    // 차폐 검사 간격(초, [−1, 60] — UE OcclusionCheckInterval)이다. 없으면
+    // audio.occlusion.checkinterval이다.
+    Optional<float> occlusionCheckInterval;
     // 결과 콜백이다(게임 스레드의 OnFrameBegin — 비어도 된다). 잡은 대상의 수명은 호출자 책임이다.
     // 엔진 종료 뒤에는 부르지 않는다.
     PlaybackEventCallback onEvent;
 };
 
+// SetParameter로 바꾸는 값이다. 필터는 ramp 없이 바로 바뀌고 20000(LPF)·0(HPF)이 끔이다(UE
+// SetLowPassFilterFrequency — 3.43.1절).
 enum class PlaybackParameter : uint8 {
     Volume,
-    Pitch
+    Pitch,
+    LowPassFrequency,
+    HighPassFrequency
 };
 
-inline constexpr uint32 PlaybackParameterCount = 2;
+inline constexpr uint32 PlaybackParameterCount = 4;
 
 inline constexpr uint32 PlaybackParameterIndex(PlaybackParameter parameter) noexcept {
     return static_cast<uint32>(parameter);
