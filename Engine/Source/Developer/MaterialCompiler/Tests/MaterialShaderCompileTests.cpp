@@ -23,6 +23,8 @@
 #include <MaterialSchema/Nodes/Noise/NoiseProperties.h>
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.generated.h>
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.h>
+#include <MaterialSchema/Nodes/Parameters/CurveAtlasRowParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/CurveAtlasRowParameterProperties.h>
 #include <MaterialSchema/Nodes/Parameters/ScalarParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Parameters/ScalarParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.generated.h>
@@ -107,6 +109,9 @@ constexpr StringView OperatorInputKeys[OperatorTestInputs] = {"A", "B", "C"};
 constexpr Guid CorpusBrickId{0x434f5250ull, 1};
 constexpr Guid CorpusSkyId{0x434f5250ull, 2};
 constexpr Guid CorpusCurveId{0x434f5250ull, 3};
+constexpr Guid CorpusAtlasId{0x434f5250ull, 4};
+// atlas 행 목록이다(ColorRamp 커브가 행 1 — CurveAtlasRowParameter가 찾는다).
+const Guid CorpusAtlasRows[] = {Guid{}, CorpusCurveId};
 // 시험 probe 파라미터 id의 상위 값이다("PROB").
 constexpr uint64 ProbeIdHigh = 0x50524f42ull;
 
@@ -119,9 +124,10 @@ MaterialTextureFacts CorpusFacts(Guid asset, IrTextureKind kind) noexcept {
 
 const MaterialTextureFacts CorpusTextures[] = {
     CorpusFacts(CorpusBrickId, IrTextureKind::Texture2D),
-    CorpusFacts(CorpusSkyId, IrTextureKind::TextureCube)};
+    CorpusFacts(CorpusSkyId, IrTextureKind::TextureCube),
+    CorpusFacts(CorpusAtlasId, IrTextureKind::Texture2D)};
 
-// ColorRamp 커브 하나를 공급하는 provider다.
+// ColorRamp 커브 하나와 atlas 하나를 공급하는 provider다.
 class CorpusSources final : public MaterialSourceProvider {
 public:
     explicit CorpusSources(const MaterialColorCurveSnapshot& curve) noexcept : curve_(curve) {
@@ -139,8 +145,13 @@ public:
         return asset == CorpusCurveId ? &curve_ : nullptr;
     }
 
+    const MaterialCurveAtlasSnapshot* FindCurveAtlas(Guid asset) const noexcept override {
+        return asset == CorpusAtlasId ? &atlas_ : nullptr;
+    }
+
 private:
     const MaterialColorCurveSnapshot& curve_;
+    MaterialCurveAtlasSnapshot atlas_{CorpusAtlasRows};
 };
 
 // 공급 전부 퍼뮤테이션이 정의해야 하는 함수형 문맥 값(MaterialPass<이름>·이전 프레임 판)의 0 값
@@ -821,6 +832,29 @@ bool BuildRampAndTextures(GraphFixture& fixture, StringView code, Guid& sink, bo
     return true;
 }
 
+// CurveAtlasRowParameter(행 파라미터·실행 값 시간 — 공유 Clamp 샘플)의 출력 전부다.
+bool BuildCurveAtlasRow(GraphFixture& fixture, StringView code, Guid& sink, bool& hasSink,
+                        const void*) noexcept {
+    ProbeSource probes(fixture, true);
+    CurveAtlasRowParameterProperties properties;
+    properties.parameterName = fixture.env.Intern("AtlasRow");
+    properties.parameterId = Guid{ProbeIdHigh, ++fixture.nextId};
+    properties.curve.assetId = AssetId{CorpusCurveId};
+    properties.atlas.assetId = AssetId{CorpusAtlasId};
+    const Guid row = fixture.Add("Material.CurveAtlasRowParameter", fixture.env.Save(properties));
+    fixture.Connect(probes.Add(1), "Result", row, "InputTime");
+    SinkList outputs;
+    (void)outputs.Add(fixture, row, "Result", MaterialPinType::Float3);
+    const StringView channels[] = {"R", "G", "B", "A"};
+    for (StringView key : channels) {
+        (void)outputs.Add(fixture, row, key, MaterialPinType::Float1);
+    }
+
+    sink = outputs.Connect(fixture, code, false);
+    hasSink = true;
+    return true;
+}
+
 // Operator 연산 하나의 입력 모양이다(번역되는 첫 모양을 고른다).
 enum class OperatorInputs : uint8 {
     // 실수 Float3 셋.
@@ -1168,6 +1202,7 @@ TEST(MaterialShaders_CompileCorpus) {
         {"RampAndTextures", HandRecipe(&BuildRampAndTextures), Traits()},
         {"Operators", HandRecipe(&BuildOperators, &operators), Traits()},
         {"ViewProperties", HandRecipe(&BuildViewProperties), Traits()},
+        {"CurveAtlasRow", HandRecipe(&BuildCurveAtlasRow), Traits()},
         {"BentNormal", HandRecipe(&BuildBentNormal), Traits()}};
     for (const HandItem& item : hand) {
         const CorpusOutcome outcome =
