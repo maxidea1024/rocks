@@ -29,7 +29,7 @@
 | RocksCommandlet·도구 | Commandlet·Tool | false | — |
 | 시험 실행기·probe | TestRunner | false | — |
 
-- `HostKind`·`RunTraits`는 AppInfo([앱 정보와 명령줄](../AppInfoCommandLine.ko.md) 8절) 값이다. AppInfo 구현 전에는 호스트가 같은 뜻의 값을 채워 넘긴다(Sandbox는 자기 명령줄에서).
+- `HostKind`·`RunTraits`는 AppInfo([앱 정보와 명령줄](../AppInfoCommandLine/README.ko.md) 8절) 값이다. AppInfo 구현 전에는 호스트가 같은 뜻의 값을 채워 넘긴다(Sandbox는 자기 명령줄에서).
 - Server 대상에는 `SplashScreen` 모듈이 없으므로 판정 자체를 하지 않는다.
 - 판정 뒤 이미지 찾기 실패(`ImageNotFound`·`ImageInvalid`)와 창 생성 실패(`WindowFailed`)도 같은 enum으로 보고한다. 로그 수준은 1–3·9가 Debug, 4–8이 Info, 이미지·창 실패가 Warning이다(요구 6). 범주는 `LogSplash`(`"Splash"`).
 - Studio의 Tryout을 별도 프로세스로 띄울 때(나중)는 자식에 `--no-splash`를 넘긴다.
