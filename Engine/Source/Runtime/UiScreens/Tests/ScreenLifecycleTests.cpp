@@ -81,4 +81,45 @@ TEST(UiScreens_DroppedContainerDefersDeactivationAndDestruct) {
     CHECK(find()->deactivatedBeforeDestruct);
 }
 
+TEST(UiScreens_InactivePagesStillGetDeferredDestruct) {
+    // 회귀(21.4절 리뷰): 비활성 페이지는 측정되지 않는다. 묶음을 붙을 때 기억하므로 컨테이너를
+    // 버려도 다음 프레임에 OnDestruct를 받는다(OnConstruct와 짝).
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration modules(types, allocator);
+    REQUIRE(RegisterScreenTypes(modules));
+    auto token = RegisterNativeClass<LifecycleScreen>(types);
+    REQUIRE(token);
+    ObjectRegistry objects(allocator, types, {0x534352, 4});
+    const auto access = objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    Application app(allocator);
+    auto first = objects.NewObject<LifecycleScreen>(access, ObjectTypeIdOf<LifecycleScreen>());
+    auto second = objects.NewObject<LifecycleScreen>(access, ObjectTypeIdOf<LifecycleScreen>());
+    REQUIRE(first && second);
+    const ObjectHandle under = first.Value().Handle();
+    const ObjectHandle top = second.Value().Handle();
+    const auto find = [&](ObjectHandle handle) noexcept -> const LifecycleScreen* {
+        auto screen = objects.Resolve<LifecycleScreen>(access, handle);
+        return screen ? screen.Value().Get().Value() : nullptr;
+    };
+    {
+        auto stack = SharedPtr<ScreenStack>::TryMake(allocator, objects, app, 0u);
+        REQUIRE(stack);
+        app.SetRoot(stack.Value());
+        // 같은 프레임에 둘을 넣는다 — 아래 화면은 한 번도 측정되지 않는다.
+        REQUIRE(stack.Value()->AddScreen(under));
+        REQUIRE(stack.Value()->AddScreen(top));
+        REQUIRE(app.PrepareLayout(Geometry::Root({100, 60}, {}), 1));
+        REQUIRE(find(under) && find(top));
+        CHECK(find(under)->deactivations == 1 && find(top)->activations == 1);
+        app.SetRoot({});
+    }
+
+    CHECK(find(under)->destructs == 0 && find(top)->destructs == 0);
+    app.BeginFrame();
+    CHECK(find(under)->destructs == 1);
+    CHECK(find(top)->deactivations == 1 && find(top)->destructs == 1);
+}
+
 } // namespace rocks::ui

@@ -159,13 +159,25 @@ void WidgetTree::DetachHost(ObjectRegistry& objects, Element& host) noexcept {
         return;
     }
 
-    host_ = {};
-    auto child = host.ChildRefAt(0);
-    if (!child) {
+    const bool attached = host.ChildCount() > 0;
+    DetachHostElements(host);
+    if (attached) {
+        ReleaseRootWidget(objects);
+    }
+}
+
+void WidgetTree::DetachHostElements(Element& host) noexcept {
+    if (auto live = host_.Lock(); live && live.Get() != &host) {
         return;
     }
 
-    (void)host.RemoveChild(*child);
+    host_ = {};
+    if (auto child = host.ChildRefAt(0)) {
+        (void)host.RemoveChild(*child);
+    }
+}
+
+void WidgetTree::ReleaseRootWidget(ObjectRegistry& objects) noexcept {
     auto borrowed = objects.Resolve<Widget>(objects.OwnerAccess(), root_.Handle());
     if (borrowed) {
         borrowed.Value().Get().Value()->ReleaseElements();

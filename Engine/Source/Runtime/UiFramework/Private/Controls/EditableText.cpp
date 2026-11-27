@@ -1,5 +1,7 @@
 #include <UiFramework/Controls/EditableText.h>
 
+#include <Core/Assert.h>
+
 #include <UiCore/TextInputPositions.h>
 
 namespace rocks::ui {
@@ -341,10 +343,16 @@ Result<void> EditableText::ShapePassword(StringView text, float size) noexcept {
 }
 
 TextLabel& EditableText::Label() const noexcept {
+    ROCKS_ASSERT(label_);
     return *label_;
 }
 
 Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
+    // Initialize 전에는 빈 편집기다.
+    if (!label_) {
+        return {padding_ * 2, fontSize_ + padding_ * 2};
+    }
+
     Vec2 text = label_->GetDesiredSize();
     if (hint_ && label_->GetText().IsEmpty()) {
         text.x = math::Max(text.x, hint_->GetDesiredSize().x);
@@ -357,6 +365,11 @@ Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
 }
 
 Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
+    if (!label_) {
+        SetGeometry(geometry);
+        return Result<void>::Success();
+    }
+
     const float width = math::Max(1.0f, geometry.size.x - padding_ * 2);
     const float height = math::Max(1.0f, geometry.size.y - padding_ * 2);
     float errorHeight = 0;
@@ -461,6 +474,10 @@ void EditableText::OnFocusLost(uint32 user) noexcept {
 }
 
 void EditableText::MoveCaret(usize pos, bool extend) noexcept {
+    if (!label_) {
+        return;
+    }
+
     // 새로 삽입한 코드 포인트가 다음 문자와 한 클러스터로 결합하는 경우 그 끝에 둔다.
     if (pos != 0 && pos < label_->GetText().ByteCount()) {
         for (const auto& cluster : label_->ShapedClusters()) {

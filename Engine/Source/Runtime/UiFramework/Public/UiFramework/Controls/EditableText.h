@@ -26,8 +26,9 @@ namespace rocks::ui {
 // EndComposition에서 한 번 바뀐다. 조합 중 선택(anchor_·caret_)은 미리보기 안 위치다.
 //
 // 사용 예:
-//   auto name = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper, platform, false,
-//   true); (void)name.Value()->Initialize("Untitled", 13);
+//   auto name = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper, platform,
+//                                                /*multiline*/ false, /*boxed*/ true);
+//   (void)name.Value()->Initialize("Untitled", 13);
 //   name.Value()->SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
 //       [](StringView text, TextCommitReason) noexcept { Rename(text); }));
 class ROCKS_UIFRAMEWORK_API EditableText final : public Element, public TextInputContext {
@@ -72,7 +73,8 @@ public:
     void SetOnTextChanged(Delegate<void(StringView)>&& callback) noexcept;
     void SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>&& callback) noexcept;
 
-    // 글자 레이블이다(배치 설정 — 줄바꿈·정렬 — 을 바꿀 때 쓴다).
+    // 글자 레이블이다(배치 설정 — 줄바꿈·정렬 — 을 바꿀 때 쓴다). Initialize 뒤에만 부른다(전에는
+    // assert). Initialize 전의 측정·배치·그리기는 빈 편집기로 다룬다.
     TextLabel& Label() const noexcept;
     // 조합을 버린다. 미리보기와 IME 조합이 함께 취소된다.
     void CancelComposition() noexcept;

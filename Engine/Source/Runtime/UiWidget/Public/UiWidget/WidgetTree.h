@@ -41,6 +41,12 @@ public:
     Result<ObjectHandle> FindWidget(ObjectRegistry& objects, Guid stableId) const noexcept;
     Result<void> AttachHost(ObjectRegistry& objects, const SharedPtr<Element>& host) noexcept;
     void DetachHost(ObjectRegistry& objects, Element& host) noexcept;
+    // DetachHost를 두 단계로 나눈 것이다(Docs/Design/UiToolkit 21.4절 — 소멸자 규칙). 앞 단계는
+    // 엔진 정리(호스트에서 Element 떼기)만 하고, 뒤 단계는 루트 Widget의 ReleaseElements(중첩
+    // UserWidget의 OnDestruct 등 사용자 hook)를 부른다. 소멸자는 앞 단계만 하고 뒤 단계는 해체
+    // 대기열에서 돌린다.
+    void DetachHostElements(Element& host) noexcept;
+    void ReleaseRootWidget(ObjectRegistry& objects) noexcept;
 
 private:
     ROCKS_NATIVE() Platform platform_;

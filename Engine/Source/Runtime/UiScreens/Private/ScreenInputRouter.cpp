@@ -78,8 +78,10 @@ bool ScreenInputRouter::ApplyInputConfig() noexcept {
     // (1888–1899행).
     const bool oldIgnoreMove = appliedConfig_ && appliedConfig_->ignoreMove;
     const bool oldIgnoreLook = appliedConfig_ && appliedConfig_->ignoreLook;
-    // 앞선 값이 없으면 Game이다(UE GetActiveInputMode 기본값).
-    const ScreenInputMode oldMode = appliedConfig_ ? appliedConfig_->mode : ScreenInputMode::Game;
+    // 앞선 값이 없으면 GameAndMenu다(UE GetActiveInputMode 기본 인자 ECommonInputMode::All —
+    // CommonUIActionRouterBase.h 94행).
+    const ScreenInputMode oldMode =
+        appliedConfig_ ? appliedConfig_->mode : ScreenInputMode::GameAndMenu;
     appliedConfig_ = next;
     if (oldIgnoreMove != next.ignoreMove) {
         inputHost_->SetIgnoreMoveInput(next.ignoreMove);

@@ -12,6 +12,9 @@ public static partial class PolicyChecks
     private static readonly Regex UiDestructorUserCall = Pattern(
         @"\b(?:OnDestruct|OnDeactivated|ReleaseRow|ExecuteIfBound|Broadcast)\s*\(|(?:\.|->)\s*Execute\s*\(");
 
+    // 대기열에 넣는 lambda다(CreateLambda·TryCreateLambda).
+    private static readonly Regex UiDeferredLambda = Pattern(@"\b(?:Try)?CreateLambda\s*\(");
+
     private const string UiDestructorRule = "ui-destructor-user-code";
 
     /// <summary>
@@ -72,7 +75,7 @@ public static partial class PolicyChecks
     private static string WithoutDeferredLambdas(string body)
     {
         char[] text = body.ToCharArray();
-        foreach (Match lambda in Regex.Matches(body, @"\bCreateLambda\s*\("))
+        foreach (Match lambda in UiDeferredLambda.Matches(body))
         {
             int depth = 0;
             for (int i = lambda.Index + lambda.Length - 1; i < text.Length; ++i)

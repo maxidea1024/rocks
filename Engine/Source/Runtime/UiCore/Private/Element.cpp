@@ -73,8 +73,22 @@ Result<void> Element::TryInsertChild(usize index, const SharedPtr<Element>& chil
         }
     }
 
+    // 묶음 있는 트리에 들어가면 하위 트리에 알린다(측정되지 않는 페이지도 — 21.4절).
+    if (FindUiHostServices()) {
+        child->NotifyUiHostAttached();
+    }
+
     InvalidateLayout();
     return Result<void>::Success();
+}
+
+void Element::NotifyUiHostAttached() noexcept {
+    styleHost_ = nullptr;
+    styleRevision_ = 0;
+    OnUiHostServicesChanged();
+    for (usize i = 0; i < children_.Size(); ++i) {
+        children_[i]->NotifyUiHostAttached();
+    }
 }
 
 Result<void> Element::AttachPopupLayer(const PopupRequest& popup) noexcept {
@@ -626,13 +640,8 @@ Result<void> Element::Prepass(float scale) noexcept {
     if (const UiHostServices* host = FindUiHostServices()) {
         const uint64 revision = host->StyleRevision();
         if (revision != styleRevision_ || host != styleHost_) {
-            const bool moved = host != styleHost_;
             styleRevision_ = revision;
             styleHost_ = host;
-            if (moved) {
-                OnUiHostServicesChanged();
-            }
-
             ApplyStyles(*host);
             layoutDirty_ = true;
             measureChildren_ = true;

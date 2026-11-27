@@ -127,7 +127,7 @@ TEST(UiFramework_ShutdownDeliversAndDestructionDiscardsTeardown) {
         REQUIRE(probe);
         app.SetRoot(probe.Value());
         REQUIRE(app.PrepareLayout(TeardownViewport, 1));
-        probe = {};
+        probe.Value() = {};
         // Shutdown이 루트를 떼고 통지를 돌린다.
         app.Shutdown();
         CHECK(delivered == 1);
@@ -140,7 +140,7 @@ TEST(UiFramework_ShutdownDeliversAndDestructionDiscardsTeardown) {
         REQUIRE(probe);
         app.SetRoot(probe.Value());
         REQUIRE(app.PrepareLayout(TeardownViewport, 1));
-        probe = {};
+        probe.Value() = {};
         // Shutdown 없이 부수면 통지는 돌지 않는다(경고 로그만).
     }
 
@@ -163,7 +163,7 @@ TEST(UiFramework_ElementsHearWhenMovedToAnotherApplication) {
     REQUIRE(second.PrepareLayout(TeardownViewport, 1));
     CHECK(hostChanges == 2);
     second.SetRoot({});
-    probe = {};
+    probe.Value() = {};
     CHECK(first.PendingTeardownCount() == 0);
     CHECK(second.PendingTeardownCount() == 1);
     CHECK(second.RunDeferredTeardown() == 1 && delivered == 1);

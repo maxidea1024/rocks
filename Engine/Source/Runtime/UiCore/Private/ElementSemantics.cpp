@@ -145,7 +145,12 @@ Result<void> Element::SetUiHostServices(const SharedPtr<UiHostServices>& service
 
     auto ready = EnsureSemantics();
     if (ready) {
+        const bool changed = semantics_->host.Get() != services.Get();
         semantics_->host = services;
+        // 묶음을 단 루트가 되면 하위 트리에 알린다(21.4절).
+        if (changed && services) {
+            NotifyUiHostAttached();
+        }
     }
 
     return ready;

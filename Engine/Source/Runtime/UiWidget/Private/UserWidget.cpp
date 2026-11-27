@@ -126,24 +126,33 @@ public:
         const auto handle = tree_;
         tree_ = {};
         const auto access = objects_.OwnerAccess();
+        // 엔진 정리(호스트에서 Element 떼기)만 지금 한다. 루트 Widget의 ReleaseElements(중첩
+        // UserWidget·목록·화면 컨테이너의 사용자 hook)는 대기열에서 이 위젯의 OnDestruct보다 먼저
+        // 돈다.
         auto tree = objects_.Resolve<WidgetTree>(access, handle);
         if (tree) {
-            tree.Value().Get().Value()->DetachHost(objects_, *this);
+            tree.Value().Get().Value()->DetachHostElements(*this);
         }
 
         auto host = host_.Lock();
         if (!host) {
-            // 앱에 붙어 측정된 적이 없다 — 통지할 자리가 없다(명시 ReleaseElements를 쓴다).
+            // 앱에 붙은 적이 없다 — 통지할 자리가 없다(명시 ReleaseElements를 쓴다). OnConstruct는
+            // TakeElement 때 돌았으므로 짝이 깨진다(경고).
             Log::Warning(LogUiWidget,
-                         "A user widget element was dropped without ReleaseElements before any "
-                         "application measured it; OnDestruct is skipped");
+                         "A user widget element was dropped without ReleaseElements before it was "
+                         "attached to any application; OnDestruct is skipped");
             owner_.Reset();
             return;
         }
 
-        auto queued = host->DeferTeardown(
-            Delegate<void()>::CreateLambda([objects = &objects_, owner = Move(owner_)]() noexcept {
-                auto widget = objects->Resolve<UserWidget>(objects->OwnerAccess(), owner.Handle());
+        auto queued = host->DeferTeardown(Delegate<void()>::CreateLambda(
+            [objects = &objects_, owner = Move(owner_), handle]() noexcept {
+                const auto ownerAccess = objects->OwnerAccess();
+                if (auto widgets = objects->Resolve<WidgetTree>(ownerAccess, handle)) {
+                    widgets.Value().Get().Value()->ReleaseRootWidget(*objects);
+                }
+
+                auto widget = objects->Resolve<UserWidget>(ownerAccess, owner.Handle());
                 if (widget) {
                     widget.Value().Get().Value()->StopAllAnimations();
                     widget.Value().Get().Value()->OnDestruct();

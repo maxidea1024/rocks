@@ -70,7 +70,9 @@ Application::~Application() noexcept {
     }
 
     ResetInput();
-    // 트리를 먼저 놓아 요소 소멸자가 넣는 해체 통지를 센 뒤 버린다(돌리지 않는다 — 21.4절).
+    // 루트에서 묶음을 뗀 뒤(밖에서 루트를 붙잡아도 죽은 앱의 묶음을 쥐지 않게) 트리를 놓는다. 요소
+    // 소멸자가 넣는 해체 통지는 묶음이 아직 살아 있어 세어 버린다(돌리지 않는다 — 21.4절).
+    DetachHostServices();
     root_ = {};
     if (host_) {
         if (const usize dropped = host_->DiscardDeferredTeardown()) {
@@ -81,7 +83,6 @@ Application::~Application() noexcept {
         }
     }
 
-    DetachHostServices();
     if (host_) {
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
         host_->SetPopupWorkArea({});

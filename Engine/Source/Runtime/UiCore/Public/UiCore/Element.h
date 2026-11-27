@@ -390,8 +390,9 @@ protected:
     // 스타일이 바뀌었거나(등록부·활성 집합) 처음 측정된다(20.11절). 명시 스타일이 없는 부품은
     // host의 활성 집합에서 자기 키로 스타일을 받는다. 측정(Prepass) 앞에서 불린다.
     virtual void ApplyStyles(const UiHostServices& host) noexcept;
-    // 이 요소를 측정하는 호스트 묶음이 바뀌었다(처음 측정 포함 — Prepass가 부른다). 소멸자에서 미룬
-    // 해체 통지를 넣을 묶음을 기억하는 요소가 쓴다(21.4절).
+    // 이 요소가 호스트 묶음이 있는 트리에 붙었다(묶음을 단 루트가 되거나, 묶음 있는 트리에 하위
+    // 트리로 들어감 — 측정 여부와 무관하게 비활성 Switcher 페이지·안 고른 탭도 받는다). 소멸자에서
+    // 미룬 해체 통지를 넣을 묶음을 기억하는 요소가 FindUiHostServicesRef로 받아 둔다(21.4절).
     virtual void OnUiHostServicesChanged() noexcept;
 
 public:
@@ -460,6 +461,9 @@ private:
     // 마지막으로 ApplyStyles를 부른 스타일 revision이다.
     uint64 styleRevision_ = 0;
     // 마지막으로 스타일을 받은 호스트 묶음이다(다른 앱으로 옮겨지면 revision이 같아도 다시 받는다).
+    // 이 요소와 모든 자식(비활성 포함)에 OnUiHostServicesChanged를 알리고 스타일 기억을 비운다
+    // (다른 묶음의 같은 주소 재사용에도 다시 받게).
+    void NotifyUiHostAttached() noexcept;
     const UiHostServices* styleHost_ = nullptr;
 
     // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다. disabled는 이 요소나

@@ -91,9 +91,11 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 - **구현(UW9d).**
   - 대기열은 `UiHostServices::DeferTeardown`·`RunDeferredTeardown`(통지 안에서 넣은 통지도 같은 호출에서 돈다, 상한 64바퀴, 재진입은 0)이다. `Application`이 프레임 시작(`StartFrame` — `BeginFrame`과 암묵 프레임 모두)과 `Shutdown()`(루트를 떼고 돌림)에서 돌린다.
   - 소멸 때 남은 통지는 `DiscardDeferredTeardown`으로 버리고 개수를 경고로 남긴다. 소멸자는 루트를 먼저 놓아, 그때 넣어지는 통지까지 센다.
-  - 소멸자는 부모 사슬이 이미 끊겼을 수 있어 묶음을 찾을 수 없다. 그래서 요소가 측정될 때 묶음을 기억한다. `Element::OnUiHostServicesChanged`는 Prepass가 측정하는 묶음이 바뀔 때(처음 측정 포함) 부르는 hook이다. `UserWidgetRoot`는 여기서 묶음의 약한 참조를 남긴다.
-  - 같은 확인으로 스타일도 묶음이 바뀌면 다시 받는다. revision이 같아도 다른 앱이면 다시 받는다(20.11절 리뷰 반영 보강).
-  - 측정된 적 없이 버려진 `UserWidget` Element는 통지할 자리가 없다. `OnDestruct`를 건너뛰고 경고를 남긴다. 명시 `ReleaseElements`를 쓰라는 뜻이다.
+  - 소멸자는 부모 사슬이 이미 끊겼을 수 있어 묶음을 찾을 수 없다. 그래서 요소가 **붙을 때** 묶음을 기억한다. `Element::OnUiHostServicesChanged`는 요소가 묶음 있는 트리에 붙을 때 부르는 hook이다(묶음을 단 루트가 되거나, 묶음 있는 트리에 하위 트리로 들어갈 때 — 측정 여부와 무관). 그래서 비활성 Switcher 페이지·고르지 않은 탭도 받는다. `UserWidgetRoot`는 여기서 묶음의 약한 참조를 남긴다.
+  - 붙을 때 그 하위 트리의 스타일 기억도 비운다. 다른 묶음이 같은 주소를 재사용해도 다시 받는다(20.11절 리뷰 반영 보강).
+  - 앱에 붙은 적 없이 버려진 `UserWidget` Element는 통지할 자리가 없다. `OnDestruct`를 건너뛰고 경고를 남긴다. `OnConstruct`는 `TakeElement` 때 돌았으므로 짝이 깨지는 유일한 경우다. 명시 `ReleaseElements`를 쓰라는 뜻이다.
+  - 미룬 해체는 루트 Widget의 `ReleaseElements`도 대기열에서 부른다. 중첩 UserWidget·목록 행 원본·화면 컨테이너의 사용자 hook이 소멸자 안에서 돌지 않게 하기 위해서다(`WidgetTree::DetachHostElements` — 엔진 정리 / `ReleaseRootWidget` — 사용자 hook). 소멸자에서는 엔진 정리만 한다.
+  - `Application` 소멸은 루트에서 묶음을 먼저 떼고 트리를 놓는다. 밖에서 루트를 붙잡아도 죽은 앱의 묶음을 쥐지 않는다. 대기열 항목이 `RootRef`를 쥐므로 `ObjectRegistry`는 `Application`보다 오래 살아야 한다.
   - `ScreenContainer`는 생성 때 받은 `Application`의 대기열을 쓴다.
   - 시험: `DeferredTeardownTests`가 Element·Application 수준을 본다(소멸자 안 0회 → 다음 프레임 1회, 중첩·재진입, Shutdown, 소멸 때 버림, 앱 사이 이동, ListView 명시 해제). `UserWidget`·`Screen` hook 횟수는 리플렉션 시험 클래스가 필요해 UW9e의 시험 fixture와 함께 본다.
 - **ListView.** 소멸자는 행 원본을 부르지 않는다. 행 Widget의 풀 반환은 `ReleaseAllRows`나 `WidgetPool` 소멸이 맡는다(UE `ResetPool`).

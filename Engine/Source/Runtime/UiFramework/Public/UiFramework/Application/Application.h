@@ -121,7 +121,9 @@ public:
     usize RunDeferredTeardown() noexcept;
     usize PendingTeardownCount() const noexcept;
     // 루트를 떼고 미룬 해체 통지를 모두 돌린다. 호스트가 Application을 부수기 전에 부른다 —
-    // 부르지 않으면 소멸 때 남은 통지는 돌지 않고(소멸자 규칙) 경고 로그에 개수가 남는다.
+    // 부르지 않으면 소멸 때 남은 통지는 돌지 않고(소멸자 규칙) 경고 로그에 개수가 남는다. 대기열
+    // 항목은 UserWidget 등을 RootRef로 붙잡으므로 ObjectRegistry는 이 Application보다 오래 살아야
+    // 한다(버릴 때도 RootRef가 저장소를 만진다).
     void Shutdown() noexcept;
     // 바깥 시간으로 프레임을 시작한다(월드 위젯 — World 시간, UE WidgetComponent). 유한하지 않은
     // 시각은 무시하고, 간격은 0과 MaxFrameDeltaSeconds 사이로 자른다.

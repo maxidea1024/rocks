@@ -638,6 +638,15 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::effectMaterial_",
+      "id": "3bd4ab7f3c324f798bb9c674fff0abb3",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::effectMaterial_"
+      ],
+      "retired": true
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::OffscreenLayerWidget::effectTint_",
       "id": "984858b5f9c44330b381ea5a8bfdde3f",
       "aliases": [
@@ -662,6 +671,15 @@
         "rocks::ui::RetainerBoxWidget::phase_"
       ],
       "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::textureParameter_",
+      "id": "318c51ce84fa4eac8cd9e15dfaf6c4fc",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::textureParameter_"
+      ],
+      "retired": true
     },
     {
       "kind": "field",
@@ -865,20 +883,6 @@
       "id": "5a0d8dc7746b4ce383cb2353d820403d",
       "aliases": [],
       "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::RetainerBoxWidget::effectMaterial_",
-      "id": "3bd4ab7f3c324f798bb9c674fff0abb3",
-      "aliases": [],
-      "retired": true
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::RetainerBoxWidget::textureParameter_",
-      "id": "318c51ce84fa4eac8cd9e15dfaf6c4fc",
-      "aliases": [],
-      "retired": true
     },
     {
       "kind": "field",

@@ -103,8 +103,8 @@ TEST(UiCore_StyleSetFindsReplacesAndFallsBack) {
     REQUIRE(styles.Find<ButtonStyle>("Button") && styles.Find<ButtonStyle>("PrimaryButton") &&
             styles.Find<ButtonStyle>("SimpleButton"));
     CHECK(*styles.Find<ButtonStyle>("PrimaryButton") == PrimaryButtonStyle());
-    // 이름은 대소문자를 가리고, 없는 이름은 nullptr다(부품의 내장 기본값은 부품이 쓴다).
-    // UE FName처럼 ASCII 대소문자를 가리지 않는다.
+    // 이름은 UE FName처럼 ASCII 대소문자를 가리지 않고, 없는 이름은 nullptr다(부품의 내장 기본값은
+    // 부품이 쓴다).
     CHECK(styles.Find<ButtonStyle>("button") == styles.Find<ButtonStyle>("Button"));
     CHECK(styles.Find<ScrollBarStyle>("ScrollBar") == styles.Find<ScrollBarStyle>("Scrollbar"));
     CHECK(!styles.Find<ButtonStyle>("Missing"));
