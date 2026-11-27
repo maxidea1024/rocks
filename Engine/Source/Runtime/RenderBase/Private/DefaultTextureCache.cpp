@@ -13,8 +13,8 @@ using graphics::PixelFormat;
 using graphics::TextureDimension;
 
 // cube 면 수와, 기본 텍스처 하나가 가질 수 있는 slice 수 상한(cube 배열 cube 1 = 면 6)이다.
-constexpr uint32 CubeFaces = 6;
-constexpr uint32 MaxDefaultSlices = CubeFaces;
+constexpr uint32 DefaultCubeFaces = 6;
+constexpr uint32 MaxDefaultSlices = DefaultCubeFaces;
 
 // 부호화 값의 종류다.
 enum class TexelEncoding : uint8 {
@@ -99,7 +99,7 @@ void StoreBytes(uint8* out, usize offset, const void* value, usize bytes) noexce
     platform::MemoryCopy(out + offset, value, bytes);
 }
 
-bool SameKey(const uint32 (&a)[4], const uint32 (&b)[4]) noexcept {
+bool SameValueBits(const uint32 (&a)[4], const uint32 (&b)[4]) noexcept {
     return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
 }
 
@@ -218,7 +218,7 @@ DefaultTextureCache::Find(graphics::Device& device, TextureDimension dimension, 
     for (usize index = 0; index < count_; ++index) {
         const Entry& entry = entries_[index];
         if (entry.dimension == dimension && entry.format == format &&
-            SameKey(entry.valueBits, bits)) {
+            SameValueBits(entry.valueBits, bits)) {
             return Result<graphics::TextureHandle>::Success(entry.texture);
         }
     }
