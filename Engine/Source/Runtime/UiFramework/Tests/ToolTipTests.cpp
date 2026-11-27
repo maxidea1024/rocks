@@ -129,7 +129,7 @@ TEST(UiFramework_ToolTipOpensForKeyboardFocus) {
         root.Value()->TryAddSlot(second.Value(), {.offset = {40, 0, 20, 10}, .alignment = {0, 0}}));
     app.SetRoot(root.Value());
     keyboardTipClock = 0;
-    app.SetToolTipClock(&ReadKeyboardTipClock);
+    app.SetClock(ClockFunction::CreateStatic(&ReadKeyboardTipClock));
     REQUIRE(app.SetToolTipTiming(0.5, 0));
     const auto frame = [&app]() noexcept {
         return static_cast<bool>(app.UpdatePaintCache(Geometry::Root({100, 60}, {}), 1));
@@ -158,7 +158,7 @@ TEST(UiFramework_ToolTipOpensForKeyboardFocus) {
     keyboardTipClock = 2;
     REQUIRE(frame());
     CHECK(!app.IsToolTipOpen(0));
-    app.SetToolTipClock(nullptr);
+    app.SetClock({});
 }
 
 namespace {
@@ -203,7 +203,7 @@ struct TipBench {
 
         app.SetRoot(root);
         benchClock = 0;
-        app.SetToolTipClock(&ReadBenchClock);
+        app.SetClock(ClockFunction::CreateStatic(&ReadBenchClock));
         return app.SetToolTipTiming(0.5, 0) && Step();
     }
 
@@ -223,7 +223,7 @@ struct TipBench {
     }
 
     ~TipBench() noexcept {
-        app.SetToolTipClock(nullptr);
+        app.SetClock({});
     }
 };
 

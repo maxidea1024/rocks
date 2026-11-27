@@ -1,6 +1,7 @@
 #include <UiFramework/Application/Application.h>
 #include <Core/Diagnostics/Log.h>
 #include <Platform/Clock.h>
+#include <UiCore/TimeUnits.h>
 
 namespace rocks::ui {
 
@@ -83,53 +84,104 @@ const SharedPtr<Element>& Application::GetRoot() const noexcept {
     return root_;
 }
 
-Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept {
-    SharedPtr<Element::PopupWorkArea> shared;
-    if (provider.IsBound()) {
-        auto made = SharedPtr<Element::PopupWorkArea>::TryMake(allocator_, Move(provider));
+UiHostServices* Application::EnsureHostServices() noexcept {
+    if (!host_) {
+        auto made = SharedPtr<UiHostServices>::TryMake(allocator_);
         if (!made) {
-            return Result<void>::Failure(made.Error());
+            return nullptr;
         }
 
-        shared = Move(made.Value());
+        host_ = Move(made.Value());
+        host_->SetFrameTime(frameTime_);
+        ApplyHostServices();
     }
 
-    popupWorkArea_ = Move(shared);
-    if (root_) {
-        auto applied = root_->SetPopupWorkArea(popupWorkArea_);
-        if (!applied) {
-            return applied;
-        }
+    return host_.Get();
+}
 
+Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept {
+    UiHostServices* host = EnsureHostServices();
+    if (!host) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    host->SetPopupWorkArea(Move(provider));
+    if (root_) {
         root_->InvalidateArrangement();
     }
 
     return Result<void>::Success();
 }
 
+double Application::ReadClock() const noexcept {
+    return clock_.IsBound()
+               ? clock_.Execute()
+               : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
+}
+
+void Application::BeginFrame() noexcept {
+    const double now = ReadClock();
+    if (!clockStarted_ || !(now >= lastClock_)) {
+        // 첫 프레임이거나 시계가 거꾸로 갔다(바꾼 시계) — 간격 0에서 다시 센다.
+        lastClock_ = now;
+        clockStarted_ = true;
+    }
+
+    // UE TickTime: 시각은 시계 그대로, 간격만 자른다(앞 시각을 당긴다).
+    if (now - lastClock_ > MaxFrameDeltaSeconds) {
+        lastClock_ = now - MaxFrameDeltaSeconds;
+    }
+
+    BeginFrame(FrameTime{now, now - lastClock_});
+    lastClock_ = now;
+}
+
+void Application::BeginFrame(const FrameTime& time) noexcept {
+    frameTime_ = time;
+    frameBegun_ = true;
+    if (host_) {
+        host_->SetFrameTime(frameTime_);
+    }
+}
+
+const FrameTime& Application::GetFrameTime() const noexcept {
+    return frameTime_;
+}
+
+void Application::SetClock(ClockFunction&& clock) noexcept {
+    while (!toolTips_.IsEmpty()) {
+        CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
+    }
+
+    clock_ = Move(clock);
+    clockStarted_ = false;
+}
+
 Result<void> Application::SetTextInputService(SharedPtr<TextInputService> service) noexcept {
-    textInput_ = Move(service);
-    return root_ ? root_->SetTextInputService(textInput_) : Result<void>::Success();
+    UiHostServices* host = EnsureHostServices();
+    if (!host) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    host->SetTextInputService(Move(service));
+    return Result<void>::Success();
 }
 
 bool Application::ProcessTextInput(uint32 record) noexcept {
-    if (!textInput_) {
+    if (!host_ || !host_->TextInput()) {
         return false;
     }
 
-    textInput_->Process(record);
+    // 처리 중 서비스가 바뀌어도 이 호출 동안 살아 있게 쥔다.
+    const SharedPtr<TextInputService> service = host_->TextInput();
+    service->Process(record);
     return true;
 }
 
 void Application::ApplyHostServices() noexcept {
-    if (root_ && popupWorkArea_) {
-        // 실패(메모리 부족)하면 팝업이 창 경계만 지킨다 — 화면 밖에 걸칠 수는 있어도 동작은 한다.
-        (void)root_->SetPopupWorkArea(popupWorkArea_);
-    }
-
-    if (root_ && textInput_) {
-        // 실패(메모리 부족)하면 편집 요소가 서비스를 못 찾는다 — IME 글자가 Text 이벤트로 온다.
-        (void)root_->SetTextInputService(textInput_);
+    if (root_ && host_) {
+        // 실패(메모리 부족)하면 팝업은 창 경계만 지키고 IME 글자는 Text 이벤트로 온다.
+        (void)root_->SetUiHostServices(host_);
     }
 }
 
@@ -391,6 +443,7 @@ Result<void> Application::BuildPaintList(const Geometry& geometry, float layoutS
     list.Clear();
     list.SetTheme(&theme_, themeRevision_);
     list.SetVectorImageResolver(vectorImages_);
+    list.SetFrameTime(frameTime_);
     auto painted = root_->Paint(list, 0);
     return painted ? hitGrid_.Update(root_) : Move(painted);
 }
@@ -411,6 +464,7 @@ Result<const CacheRoot*> Application::UpdateArrangedPaintCache() noexcept {
     }
 
     SyncVectorRevision();
+    cache_.SetFrameTime(frameTime_);
     auto updated = cache_.Update(*root_, 0);
     if (updated) {
         updated = hitGrid_.Update(root_);
@@ -424,6 +478,12 @@ Result<const CacheRoot*> Application::UpdateArrangedPaintCache() noexcept {
 }
 
 Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutScale) noexcept {
+    // 호스트가 BeginFrame을 부르지 않았으면 여기서 프레임을 시작한다(20.3절).
+    if (!frameBegun_) {
+        BeginFrame();
+    }
+
+    frameBegun_ = false;
     AdvanceTimers();
     AdvanceToolTips();
     ReleaseInactiveTargets();

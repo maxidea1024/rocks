@@ -25,7 +25,7 @@ public:
     explicit SplitScene(Allocator& allocator) noexcept : allocator_(allocator) {
     }
 
-    Result<void> Advance(uint64) noexcept override {
+    Result<void> Advance(uint64, const FrameTime&) noexcept override {
         return Result<void>::Success();
     }
 

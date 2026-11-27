@@ -488,6 +488,8 @@ Result<bool> DockWindows::Update(Surface& host, UiDrawBuffer& buffer) noexcept {
     }
 
     const bool hadInput = !host.queue.Events().IsEmpty();
+    // 프레임 시각을 입력 처리 전에 정한다(Docs/Design/UiToolkit 20.3절).
+    host.app.BeginFrame();
     auto routed = host.adapter.RouteBatch(host.queue.Events(), host.consumed.View(),
                                           host.queue.DroppedCount());
     host.queue.Clear();

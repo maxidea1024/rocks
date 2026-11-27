@@ -33,7 +33,7 @@ TEST(UiFramework_ToolTipDelayFadeAndAccessibleSummary) {
                                             AccessibleBehavior::ToolTip, true));
     app.SetRoot(owner.Value());
     tipClock = 0;
-    app.SetToolTipClock(ReadTipClock);
+    app.SetClock(ClockFunction::CreateStatic(&ReadTipClock));
     const Geometry area = Geometry::Root({120, 60}, {});
     REQUIRE(app.UpdatePaintCache(area, 1));
     REQUIRE(app.RoutePointer({PointerEventType::Move, {8, 4}}));

@@ -160,8 +160,12 @@ TEST(UiFramework_ProgressBarPaintsStyleAndFillOverride) {
     REQUIRE(paint());
     CHECK(list.Boxes()[1].color == LinearColor(1, 0, 0, 1));
     // marquee는 덮은 채움이 아니라 스타일 marquee다(UE FProgressBarStyle.MarqueeImage).
+    // 위상은 프레임 시각이다(20.3절). 0.6초면 막대가 가운데쯤에 있다(시각 0은 왼쪽 밖에서 막
+    // 들어오는 순간이라 폭이 0이다).
     bar.SetMarquee(true);
+    list.SetFrameTime({0.6, 0});
     REQUIRE(paint());
+    REQUIRE(list.Boxes().Size() == 2);
     CHECK(list.Boxes()[1].color == ValueStyleColor(ThemeSlot::PrimaryHover));
     bar.SetMarquee(false);
     bar.ClearFillBrush();

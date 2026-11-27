@@ -21,7 +21,9 @@ TEST(UiFramework_SecondsUntilNextTimerFollowsTimersAndFrames) {
     SystemAllocator allocator;
     deadlineClock = 10.0;
     Application app(allocator);
-    app.SetTimerClock(&DeadlineClock);
+    app.SetClock(ClockFunction::CreateStatic(&DeadlineClock));
+    // 타이머는 프레임 시각으로 등록된다(20.3절) — 프레임을 시작해 10초에 둔다.
+    app.BeginFrame();
     auto root = SharedPtr<Element>::TryMake(allocator, allocator);
     REQUIRE(root);
     app.SetRoot(root.Value());

@@ -45,7 +45,8 @@ void RecordScene(UiScenePassContext&, ScenePacket& packet) noexcept {
 
 class FakeScene final : public ViewportSource {
 public:
-    Result<void> Advance(uint64 frame) noexcept override {
+    Result<void> Advance(uint64 frame, const FrameTime& time) noexcept override {
+        lastTime = time;
         if (frame != lastFrame) {
             lastFrame = frame;
             ++advances;
@@ -64,6 +65,8 @@ public:
     }
 
     uint64 lastFrame = 0;
+
+    FrameTime lastTime{};
     int advances = 0;
     ViewportTarget lastTarget{};
 };

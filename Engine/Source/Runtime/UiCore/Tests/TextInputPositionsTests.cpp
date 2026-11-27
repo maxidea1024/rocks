@@ -93,17 +93,26 @@ TEST(UiCore_TextInputServiceIsFoundFromTheNearestAncestor) {
     REQUIRE(middle.Value()->TryAddChild(leaf.Value()));
     CHECK(!leaf.Value()->FindTextInputService());
 
-    REQUIRE(root.Value()->SetTextInputService(outer.Value()));
+    auto outerHost = SharedPtr<UiHostServices>::TryMake(allocator);
+    auto innerHost = SharedPtr<UiHostServices>::TryMake(allocator);
+    REQUIRE(outerHost && innerHost);
+    outerHost.Value()->SetTextInputService(outer.Value());
+    innerHost.Value()->SetTextInputService(inner.Value());
+    outerHost.Value()->SetFrameTime({2.5, 0.25});
+    REQUIRE(root.Value()->SetUiHostServices(outerHost.Value()));
     CHECK(leaf.Value()->FindTextInputService().Get() == outer.Value().Get());
-    REQUIRE(middle.Value()->SetTextInputService(inner.Value()));
+    CHECK(leaf.Value()->FindFrameTime().current == 2.5);
+    REQUIRE(middle.Value()->SetUiHostServices(innerHost.Value()));
     CHECK(leaf.Value()->FindTextInputService().Get() == inner.Value().Get());
     CHECK(root.Value()->FindTextInputService().Get() == outer.Value().Get());
+    CHECK(leaf.Value()->FindFrameTime().current == 0);
 
     // 빈 포인터는 뗀다.
-    REQUIRE(middle.Value()->SetTextInputService({}));
+    REQUIRE(middle.Value()->SetUiHostServices({}));
     CHECK(leaf.Value()->FindTextInputService().Get() == outer.Value().Get());
     CHECK(middle.Value()->RemoveChild(*leaf.Value()));
     CHECK(!leaf.Value()->FindTextInputService());
+    CHECK(!leaf.Value()->FindUiHostServices());
 }
 
 } // namespace text_input_positions_tests_file

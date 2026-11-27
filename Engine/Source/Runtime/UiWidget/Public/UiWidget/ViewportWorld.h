@@ -36,7 +36,7 @@ public:
     Result<ViewportCameraView> Camera(uint32 width, uint32 height) const noexcept;
     void SetBackground(LinearColor color) noexcept;
     LinearColor Background() const noexcept override;
-    Result<void> Advance(uint64 frame) noexcept override;
+    Result<void> Advance(uint64 frame, const FrameTime& time) noexcept override;
     Result<void> Extract(UiSceneExtract& extract, const ViewportTarget& target) noexcept override;
 
 private:
@@ -50,7 +50,6 @@ private:
     float fieldOfView_ = 90;
     LinearColor background_{0, 0, 0, 1};
     uint64 lastFrame_ = 0;
-    uint64 lastTime_ = 0;
     bool advanced_ = false;
 };
 

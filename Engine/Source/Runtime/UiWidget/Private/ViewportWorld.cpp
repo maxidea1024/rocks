@@ -1,8 +1,6 @@
-#include <UiCore/TimeUnits.h>
 #include <UiWidget/ViewportWorld.h>
 #include <Core/Guid.h>
 #include <Core/Math/MatrixFactory.h>
-#include <Platform/Clock.h>
 
 namespace rocks::ui {
 
@@ -96,7 +94,7 @@ Result<ViewportCameraView> ViewportWorld::Camera(uint32 width, uint32 height) co
         {location_, rotation_, view.Value(), projection.Value(), width, height});
 }
 
-Result<void> ViewportWorld::Advance(uint64 frame) noexcept {
+Result<void> ViewportWorld::Advance(uint64 frame, const FrameTime& time) noexcept {
     if (!world_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -112,15 +110,12 @@ Result<void> ViewportWorld::Advance(uint64 frame) noexcept {
         }
     }
 
-    const uint64 now = platform::MonotonicNanoseconds();
-    // 숨겨졌다가 돌아온 화면이 보이지 않았던 시간을 한꺼번에 시뮬레이션하지 않는다.
-    const double dt = advanced_ && frame - lastFrame_ == 1
-                          ? static_cast<double>(now - lastTime_) * SecondsPerNanosecond
-                          : 0.0;
+    // 숨겨졌다가 돌아온 화면이 보이지 않았던 시간을 한꺼번에 시뮬레이션하지 않는다. 간격은 UI
+    // 프레임 시각의 것이다(20.3절 — 이미 1/8초로 잘려 있다).
+    const double dt = advanced_ && frame - lastFrame_ == 1 ? time.delta : 0.0;
     auto ticked = world_->Tick(dt);
     if (ticked) {
         lastFrame_ = frame;
-        lastTime_ = now;
         advanced_ = true;
     }
 

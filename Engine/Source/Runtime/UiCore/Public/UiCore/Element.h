@@ -12,7 +12,7 @@
 #include <UiCore/FocusCause.h>
 #include <UiCore/PaintList.h>
 #include <UiCore/Styles/StyleBrush.h>
-#include <UiCore/TextInputService.h>
+#include <UiCore/UiHostServices.h>
 
 namespace rocks::ui {
 
@@ -146,26 +146,24 @@ public:
     virtual AccessibleRole GetAccessibleRole() const noexcept;
     virtual StringView DefaultAccessibleText() const noexcept;
 
-    // 팝업 허용 영역 공급자다(Docs/Design/UiToolkit 9.1절 UW7d — 시스템 규칙). 창 좌표 지점을 받아
-    // 그 지점이 놓인 모니터의 작업 영역을 창 좌표로 area에 쓰고 true를 돌려준다(모르면 false).
-    // 창 호스트가 Application::SetPopupWorkArea로 등록하면 Application이 루트에 단다. 팝업
-    // 호스트(Overlay)는 팝업 층마다 앵커 지점으로 물어 층을 그 영역 안에 놓는다.
-    using PopupWorkArea = Delegate<bool(Vec2 window, Box2<float>& area)>;
-    // 이 요소에 공급자를 단다(빈 포인터면 뗀다). 공급자는 여러 루트가 나눠 쓸 수 있게 공유한다.
-    Result<void> SetPopupWorkArea(const SharedPtr<PopupWorkArea>& provider) noexcept;
-    const SharedPtr<PopupWorkArea>& GetPopupWorkArea() const noexcept;
-    // 자신부터 조상으로 올라가 가장 가까운 공급자에게 묻는다. 공급자가 없거나 모르면 false다.
-    bool QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept;
-
-    // 창의 텍스트 입력 서비스다(Docs/Design/UiToolkit 19.2절). 창 호스트가
-    // Application::SetTextInputService로 등록하면 Application이 루트에 단다(빈 포인터면 뗀다).
-    // 편집 요소는 초점을 받을 때 FindTextInputService로 찾아 Activate한다.
+    // 창 호스트 서비스 묶음이다(Docs/Design/UiToolkit 20.2절 — 팝업 허용 영역·텍스트 입력·프레임
+    // 시각). Application이 루트에 단다(빈 포인터면 뗀다). Element는 아래 Find 함수로 루트까지
+    // 올라가 찾는다.
     //
     // 사용 예:
     //   if (auto service = FindTextInputService()) { service->Activate(*this); }
-    Result<void> SetTextInputService(const SharedPtr<TextInputService>& service) noexcept;
-    // 자신부터 조상으로 올라가 가장 가까운 서비스다(없으면 빈 포인터 — 헤드리스·서비스 없는 창).
+    //   const double now = FindFrameTime().current;
+    using PopupWorkArea = UiHostServices::PopupWorkArea;
+    Result<void> SetUiHostServices(const SharedPtr<UiHostServices>& services) noexcept;
+    // 자신부터 조상으로 올라가 가장 가까운 묶음이다. 없으면 nullptr이다(트리에 붙기 전·헤드리스).
+    // 돌려준 주소는 그 묶음을 단 Element가 살아 있는 동안 유효하다.
+    const UiHostServices* FindUiHostServices() const noexcept;
+    // 팝업 허용 영역을 묻는다(9.1절 UW7d). 묶음이나 공급자가 없거나 모르면 false다.
+    bool QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept;
+    // 창의 텍스트 입력 서비스다(19.2절). 없으면 빈 포인터다.
     SharedPtr<TextInputService> FindTextInputService() const noexcept;
+    // 그 프레임의 UI 시각이다(20.3절). 묶음이 없으면 0이다.
+    FrameTime FindFrameTime() const noexcept;
 
     using ToolTipFactory = Delegate<Result<SharedPtr<Element>>()>;
     Result<void> SetToolTipFactory(ToolTipFactory&& factory, StringView description = {},

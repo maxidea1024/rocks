@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Math/Color.h>
+#include <UiCore/FrameTime.h>
 #include <UiCore/Rendering/UiSceneExtract.h>
 #include <UiCore/Rendering/ViewportTarget.h>
 
@@ -14,8 +15,9 @@ public:
     virtual ~ViewportSource() noexcept = default;
 
     // 이번 프레임의 장면 상태를 진행한다(World tick 등). 같은 frame으로 두 번 불려도 한 번만
-    // 진행해야 한다.
-    virtual Result<void> Advance(uint64 frame) noexcept = 0;
+    // 진행해야 한다. time은 viewport가 놓인 UI의 프레임 시각이다(Docs/Design/UiToolkit 20.3절 —
+    // 실제 시계를 직접 읽지 않는다).
+    virtual Result<void> Advance(uint64 frame, const FrameTime& time) noexcept = 0;
     virtual LinearColor Background() const noexcept = 0;
     // 이번 프레임의 장면 pass packet을 게시한다. 게시하지 않으면 대상은 Background로 지워진다.
     virtual Result<void> Extract(UiSceneExtract& extract,

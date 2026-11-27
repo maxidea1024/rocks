@@ -150,7 +150,7 @@ struct MenuBench {
 
         app.SetRoot(root);
         menuClock = 0;
-        app.SetTimerClock(&ReadMenuClock);
+        app.SetClock(ClockFunction::CreateStatic(&ReadMenuClock));
         return Frame();
     }
 
@@ -216,7 +216,7 @@ struct MenuBench {
     }
 
     ~MenuBench() noexcept {
-        app.SetTimerClock(nullptr);
+        app.SetClock({});
     }
 };
 

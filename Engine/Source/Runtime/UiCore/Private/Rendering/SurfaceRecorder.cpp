@@ -336,6 +336,7 @@ Result<bool> SurfaceRecorder::Update(Entry& entry, uint64 frame, uint32 width, u
 
         entry.list.Clear();
         entry.list.SetVectorImageResolver(vectorImages_);
+        entry.list.SetFrameTime(time_);
         auto recorded = source.RecordContent(entry.list);
         if (recorded) {
             recorded = entry.batch.Build(entry.list);
@@ -366,7 +367,7 @@ Result<bool> SurfaceRecorder::Update(Entry& entry, uint64 frame, uint32 width, u
 
         entry.target = target.Value();
         if (kind == WidgetSurfaceKind::Scene) {
-            if (auto advanced = scene->Advance(frame); !advanced) {
+            if (auto advanced = scene->Advance(frame, time_); !advanced) {
                 return Result<bool>::Failure(advanced.Error());
             }
 
@@ -402,6 +403,8 @@ Result<bool> SurfaceRecorder::Record(const SharedPtr<Element>& root, uint64 fram
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 표면 기록과 장면 진행은 루트가 놓인 UI의 프레임 시각을 쓴다(20.3절).
+    time_ = root->FindFrameTime();
     if (root_.Lock().Get() != root.Get() || revision_ != root->PaintPlanRevision()) {
         root_ = {};
         order_.Clear();

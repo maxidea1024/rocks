@@ -70,7 +70,7 @@ private:
     ProgressFillStyle fillStyle_ = ProgressFillStyle::Scale;
     Vec2 borderPadding_{};
     bool marquee_ = false;
-    uint64 marqueeStart_ = 0;
+    double marqueeStart_ = 0;
     LinearColor fillColor_{1.0f, 1.0f, 1.0f, 1.0f};
     ProgressBarStyle style_ = DefaultProgressBarStyle();
     // SetFillBrush로 채움 brush를 정했는지다.

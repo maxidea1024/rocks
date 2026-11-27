@@ -398,6 +398,9 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
                 local->SetVectorImageResolver(list.GetVectorImageResolver());
             }
 
+            // 프레임 시각도 바깥 목록의 것이다(20.3절).
+            local->SetFrameTime(list.GetFrameTime());
+
             auto updated = local->Update(*this, layer, list.foreground_, list.disabled_);
             if (!updated) {
                 return updated;

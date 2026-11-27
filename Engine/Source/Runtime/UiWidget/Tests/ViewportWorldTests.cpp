@@ -51,8 +51,9 @@ TEST(UiWidget_ViewportsOwnIndependentWorldsAndRetainCameraAcrossRebuilds) {
     auto center = camera.Value().view.TransformPoint({});
     CHECK(center == Vec3(0, 0, 4));
     CHECK(!preview->Camera(0, 1));
-    REQUIRE(preview->Advance(8));
-    REQUIRE(preview->Advance(8));
+    // 같은 프레임 번호는 한 번만 진행한다(간격은 UI 프레임 시각의 것 — 20.3절).
+    REQUIRE(preview->Advance(8, FrameTime{1.0, 1.0 / 60}));
+    REQUIRE(preview->Advance(8, FrameTime{1.0, 1.0 / 60}));
     CHECK(left.Value()->State() == WorldState::Playing);
     CHECK(right.Value()->State() == WorldState::Initialized);
     view.ReleaseElements();

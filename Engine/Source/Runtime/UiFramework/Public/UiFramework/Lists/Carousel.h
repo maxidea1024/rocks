@@ -25,7 +25,7 @@ private:
     void Finish() noexcept;
     SharedPtr<Element> sliding_[2]{};
     ElementAttribute<float, InvalidateReason::Arrangement> progress_;
-    uint64 start_ = 0;
+    double start_ = 0;
     float speed_ = 0;
     float direction_ = 1;
     bool cache_ = true;

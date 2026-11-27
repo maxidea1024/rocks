@@ -1,7 +1,14 @@
 #include <UiFramework/Controls/ProgressBar.h>
-#include <Platform/Clock.h>
 
 namespace rocks::ui {
+
+namespace {
+
+// marquee 막대가 한 번 지나가는 시간(초)이다. Rocks 값이다(UE SProgressBar는 marquee 이미지를
+// 흘린다).
+constexpr double MarqueePeriodSeconds = 1.2;
+
+} // namespace
 
 ProgressBar::ProgressBar(Allocator& allocator) noexcept : Frame(allocator), value_(*this, 0.0f) {
 }
@@ -96,7 +103,7 @@ void ProgressBar::SetMarquee(bool enabled) noexcept {
 
     marquee_ = enabled;
     if (enabled) {
-        marqueeStart_ = platform::MonotonicNanoseconds();
+        marqueeStart_ = FindFrameTime().current;
     }
 
     SetVolatile(enabled);
@@ -170,10 +177,9 @@ Result<void> ProgressBar::OnPaint(PaintList& list, int32 layer) const noexcept {
     Vec2 size = area.size;
     Vec2 offset{};
     if (marquee_) {
-        constexpr uint64 period = 1200000000;
+        const double elapsed = math::Max(0.0, list.GetFrameTime().current - marqueeStart_);
         const float phase =
-            static_cast<float>((platform::MonotonicNanoseconds() - marqueeStart_) % period) /
-            period;
+            static_cast<float>(math::Fmod(elapsed, MarqueePeriodSeconds) / MarqueePeriodSeconds);
         const float start = phase * 1.25f - 0.25f;
         const float left = math::Max(start, 0.0f);
         offset.x = left * size.x;

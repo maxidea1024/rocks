@@ -36,6 +36,12 @@ void CacheRoot::SetVectorImageResolver(VectorImageResolver* resolver) noexcept {
     Reset();
 }
 
+void CacheRoot::SetFrameTime(const FrameTime& time) noexcept {
+    list_.SetFrameTime(time);
+    scratch_.SetFrameTime(time);
+    assembled_.SetFrameTime(time);
+}
+
 const PaintList& CacheRoot::List() const noexcept {
     return list_;
 }

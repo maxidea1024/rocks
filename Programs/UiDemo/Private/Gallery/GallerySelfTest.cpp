@@ -199,13 +199,15 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
 
     const auto tipPoint = Center(tipOwner);
     galleryTipClock = 0;
-    app.SetToolTipClock(&ReadGalleryTipClock);
+    app.SetClock(ClockFunction::CreateStatic(&ReadGalleryTipClock));
+    // 바꾼 시계로 프레임을 시작한다 — 툴팁 예약은 프레임 시각을 본다(Docs/Design/UiToolkit 20.3절).
+    app.BeginFrame();
     // 나타나기(fade)를 끄고 연 첫 프레임의 바탕을 그대로 본다(앱 설정은 끝에 되돌린다).
     const double savedDelay = app.ToolTipDelay();
     const double savedFade = app.ToolTipFade();
     (void)app.SetToolTipTiming(savedDelay, 0);
     ROCKS_ON_SCOPE_EXIT {
-        app.SetToolTipClock(nullptr);
+        app.SetClock({});
         (void)app.SetToolTipTiming(savedDelay, savedFade);
     };
     if (!tipPoint || !app.RoutePointer({PointerEventType::Move, *tipPoint})) {

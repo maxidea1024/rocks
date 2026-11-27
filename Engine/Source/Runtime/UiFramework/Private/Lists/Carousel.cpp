@@ -1,5 +1,3 @@
-#include <UiCore/TimeUnits.h>
-#include <Platform/Clock.h>
 #include <UiFramework/Lists/Carousel.h>
 
 namespace rocks::ui {
@@ -54,8 +52,8 @@ Result<void> Carousel::SetCacheChildren(bool cache) noexcept {
 }
 
 float Carousel::Progress() const noexcept {
-    const double elapsed =
-        static_cast<double>(platform::MonotonicNanoseconds() - start_) * SecondsPerNanosecond;
+    // 프레임 시각이다(20.3절 — 속성 갱신·배치에서 읽어도 그 프레임 안에서는 같은 값).
+    const double elapsed = math::Max(0.0, FindFrameTime().current - start_);
     return static_cast<float>(math::Min(1.0, elapsed * speed_));
 }
 
@@ -99,7 +97,7 @@ Result<void> Carousel::Show(usize index, bool forward, float speed) noexcept {
     sliding_[0] = Move(previous);
     sliding_[1] = Move(next);
     if (speed > 0 && sliding_[0]) {
-        start_ = platform::MonotonicNanoseconds();
+        start_ = FindFrameTime().current;
         speed_ = speed;
         direction_ = forward ? 1.f : -1.f;
         progress_.Set(0);

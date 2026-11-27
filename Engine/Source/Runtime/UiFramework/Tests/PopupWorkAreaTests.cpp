@@ -153,9 +153,9 @@ TEST(UiFramework_ToolTipStaysInsideWorkAreaOnTemporaryHost) {
     app.SetRoot(root.Value());
     REQUIRE(app.SetPopupWorkArea(WorkArea(true)));
     workTipClock = 0;
-    app.SetToolTipClock(&ReadWorkTipClock);
+    app.SetClock(ClockFunction::CreateStatic(&ReadWorkTipClock));
     ROCKS_ON_SCOPE_EXIT {
-        app.SetToolTipClock(nullptr);
+        app.SetClock({});
     };
     REQUIRE(app.SetToolTipTiming(0.5, 0));
     const auto frame = [&]() noexcept {
@@ -230,9 +230,9 @@ TEST(UiFramework_CursorToolTipUsesCursorMonitor) {
     app.SetRoot(root.Value());
     REQUIRE(app.SetPopupWorkArea(TwoMonitors()));
     workTipClock = 0;
-    app.SetToolTipClock(&ReadWorkTipClock);
+    app.SetClock(ClockFunction::CreateStatic(&ReadWorkTipClock));
     ROCKS_ON_SCOPE_EXIT {
-        app.SetToolTipClock(nullptr);
+        app.SetClock({});
     };
     REQUIRE(app.SetToolTipTiming(0.5, 0));
     const auto frame = [&]() noexcept {

@@ -115,9 +115,8 @@ private:
 } // namespace
 
 double Application::ToolTipTime() const noexcept {
-    return toolTipClock_
-               ? toolTipClock_()
-               : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
+    // 프레임 시각이다(20.3절 — UE도 툴팁 지연을 프레임 시각으로 잰다).
+    return frameTime_.current;
 }
 
 usize Application::FindToolTip(uint32 user) const noexcept {
@@ -128,14 +127,6 @@ usize Application::FindToolTip(uint32 user) const noexcept {
     }
 
     return toolTips_.Size();
-}
-
-void Application::SetToolTipClock(double (*clock)() noexcept) noexcept {
-    while (!toolTips_.IsEmpty()) {
-        CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
-    }
-
-    toolTipClock_ = clock;
 }
 
 Result<void> Application::SetToolTipTiming(double delay, double fade) noexcept {
@@ -379,7 +370,8 @@ Result<void> Application::AttachToolTip(const PopupRequest& popup) noexcept {
 
 double Application::SecondsUntilNextToolTip() const noexcept {
     double wait = NoTimerDeadline;
-    const double now = ToolTipTime();
+    // 대기 시간은 지금 시계로 잰다(프레임 시각 뒤로 흐른 시간을 뺀다 — 20.3절).
+    const double now = ReadClock();
     for (const ToolTipState& state : toolTips_) {
         if (!state.attempted) {
             wait = math::Min(wait, math::Max(0.0, state.due - now));

@@ -75,6 +75,8 @@ private:
     Array<Entry*> order_;
     WeakPtr<Element> root_;
     uint64 revision_ = 0;
+    // 이번 Record의 프레임 시각이다.
+    FrameTime time_{};
     VectorImageResolver* vectorImages_ = nullptr;
 };
 

@@ -18,10 +18,10 @@
 
 ### 20.2 host 서비스 묶음
 
-시계·스타일·텍스트 입력·팝업 허용 영역은 모두 "창 호스트가 주고 Element가 루트로 올라가 찾는" 값이다. 지금은 Element semantics에 하나씩 들어 있다. 이것을 `HostServices`(UiCore, 공유 레코드) 하나로 묶는다.
-- `Application::ApplyHostServices`가 루트(툴팁 임시 호스트 포함)에 단다. `Element::FindHostServices()`는 한 번 올라가서 찾는다.
+시계·스타일·텍스트 입력·팝업 허용 영역은 모두 "창 호스트가 주고 Element가 루트로 올라가 찾는" 값이다. 지금은 Element semantics에 하나씩 들어 있다. 이것을 `UiHostServices`(UiCore, 공유 레코드) 하나로 묶는다.
+- `Application::ApplyHostServices`가 루트(툴팁 임시 호스트 포함)에 단다. `Element::FindUiHostServices()`는 한 번 올라가서 찾는다.
 - 트리에 아직 붙지 않은 Element는 못 찾는다. 이때 시각은 0, 스타일은 내장 기본값이다. 붙으면 `TryAddChild`의 Layout 무효화로 다시 측정한다.
-- 묶음은 여러 Application(창마다 하나, `WorldWidgetComponent`마다 하나)이 나눠 쓸 수 있다. 호스트가 한 번 만들어 모두에게 준다.
+- 묶음은 Application마다 하나다. 프레임 시각이 Application마다 다르기 때문이다(월드 위젯은 World 시간). 여러 Application이 나눠 쓰는 자원(스타일 등록부)은 묶음 안의 공유 포인터로, 호스트가 한 번 만들어 모든 Application에 준다.
 
 ### 20.3 시계(UW8a)
 
@@ -29,11 +29,11 @@
 - **프레임 시각(UE `TickTime`).**
   - `Application::BeginFrame()`이 프레임마다 한 번 시계를 읽는다. `currentTime`은 읽은 값 그대로다.
   - 간격이 1/8초(`MaxFrameDeltaSeconds`)를 넘으면 이전 시각(`lastTime`)만 당겨 `deltaTime`을 자른다. 누적 시각을 따로 두지 않으므로 타이머 마감과 시간 기준이 갈라지지 않는다.
-  - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다.
-  - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick).
+  - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다. 부르지 않은 채 `PrepareLayout`이 오면 그것이 먼저 부른다(시험·단순 호스트). 그때 그 프레임의 입력은 지난 프레임 시각을 본다.
+  - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) 월드 위젯은 자기 Application 시계로 `PrepareLayout`이 프레임을 시작한다.
 - **읽는 곳.**
-  - `HostServices`가 그 프레임의 `FrameTime`을 든다. Element는 그리기 밖(속성 갱신·Arrange·`Show`·`SetMarquee`)에서도 `FindHostServices()->Time()`으로 같은 값을 읽는다.
-  - `PaintList`도 같은 값을 든다(UE `FPaintArgs`). 애니메이션 부품(`ActivityIndicator`·`ProgressBar` marquee·`Carousel`)은 이 값으로 위상을 계산하고 자기 시계 멤버를 지운다.
+  - `UiHostServices`가 그 프레임의 `FrameTime`을 든다. Element는 그리기 밖(속성 갱신·Arrange·`Show`·`SetMarquee`)에서도 `FindUiHostServices()->Time()`으로 같은 값을 읽는다.
+  - `PaintList`도 같은 값을 든다(UE `FPaintArgs`). cache root·표면 기록(`SurfaceRecorder`)의 목록도 같은 값을 받는다. `ViewportSource::Advance`는 프레임 번호와 함께 이 값을 받는다. 애니메이션 부품(`ActivityIndicator`·`ProgressBar` marquee·`Carousel`)은 이 값으로 위상을 계산하고 자기 시계 멤버를 지운다.
   - 툴팁 지연·타이머 등록·마감은 프레임 시각을 쓴다(UE `RegisterActiveTimer`가 `GetCurrentTime()` — SWidget.cpp 1898행). `SetToolTipClock`·`SetTimerClock`은 `SetClock` 하나로 합친다.
   - 호스트 대기 시간(`SecondsUntilNextTimer`)은 시계를 다시 읽어 마감까지 남은 시간을 계산한다(대기 계산만 — 상태는 바꾸지 않는다).
 - **결정성.** UiDemo `--snapshot`·`--self-test`는 `ManualClock`을 0초에서 시작해 프레임마다 1/60초 올린다. 그러면 Widgets 탭도 실행마다 byte가 같다.
@@ -139,12 +139,12 @@
 
 ### 20.11 스타일 등록부(UW8h1·UW8h2)
 
-- **`StyleRegistry`(UiCore, 공유 — UE `FSlateStyleRegistry`).** 이름 있는 `StyleSet`을 등록한다. 집합은 부모 집합 이름을 가질 수 있고, 찾지 못한 이름은 부모로 올라간다(UE `FSlateStyleSet::ParentStyleName`). 호스트가 한 번 만들어 `HostServices`로 모든 Application에 준다. 전역은 아니다.
+- **`StyleRegistry`(UiCore, 공유 — UE `FSlateStyleRegistry`).** 이름 있는 `StyleSet`을 등록한다. 집합은 부모 집합 이름을 가질 수 있고, 찾지 못한 이름은 부모로 올라간다(UE `FSlateStyleSet::ParentStyleName`). 호스트가 한 번 만들어 `UiHostServices`로 모든 Application에 준다. 전역은 아니다.
 - **앱 스타일(UE `FAppStyle`).**
-  - `HostServices`가 활성 집합 이름과 집합 revision을 든다. 기본은 `CoreStyle`이다.
+  - `UiHostServices`가 활성 집합 이름과 집합 revision을 든다. 기본은 `CoreStyle`이다.
   - 에디터 호스트는 `EditorStyle`(부모 `CoreStyle`)로 바꾼다. 게임 Widget 기본은 `GameWidgetStyle`(UMGCoreStyle)이다.
 - **조회 시점.** 측정·배치·그리기 모두 같은 값을 써야 한다. 크기를 정하는 여백·글꼴이 측정과 그리기에서 달라지면 안 되기 때문이다.
-  - 부품의 `Args::style`이 nullptr이면 부품은 처음 측정될 때 `FindHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 그 주소를 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다.
+  - 부품의 `Args::style`이 nullptr이면 부품은 처음 측정될 때 `FindUiHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 그 주소를 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다.
   - 집합 revision이 바뀌면(집합 교체·값 변경) `Application`이 테마 revision처럼 전체 Layout·그리기 cache를 무효화한다. 부품은 다음 측정 때 다시 찾는다.
 - **형식별 표.** 지금 있는 스타일 구조체 전부를 표로 둔다: 버튼, 체크, 텍스트, 편집 텍스트, 스크롤 막대, 진행 막대, 슬라이더, 콤보, 표 머리, 독 탭, 창, 메뉴, 툴팁. 색·brush·실수·여백 표도 둔다.
 - **두 단계.**
@@ -180,7 +180,7 @@
 
 | 단계 | 범위 | 완료 판정 |
 |---|---|---|
-| UW8a | `HostServices` 묶음(20.2절), `ui::Clock`·`ManualClock`, `BeginFrame`(delta 자름), 프레임 시각을 그리기 안팎에서 읽기, 애니메이션 부품·툴팁·타이머·`ViewportWorld` 이관, 월드 위젯 World 시간, UiDemo 수동 시계 | 시계 전진 시험(툴팁·타이머·throbber 위상, 긴 간격 자름 뒤 타이머 마감), snapshot 7탭 모두 실행마다 byte 동일 |
+| UW8a | `UiHostServices` 묶음(20.2절), `ui::Clock`·`ManualClock`, `BeginFrame`(delta 자름), 프레임 시각을 그리기 안팎에서 읽기, 애니메이션 부품·툴팁·타이머·`ViewportWorld` 이관, 월드 위젯 World 시간, UiDemo 수동 시계 | 시계 전진 시험(툴팁·타이머·throbber 위상, 긴 간격 자름 뒤 타이머 마감), snapshot 7탭 모두 실행마다 byte 동일 |
 | UW8b | 그리기 중 hit grid 등록(`HitGridBuilder`, (layer, 순번) 키), cache root·`RetainerBox` grid 조각, `HitGrid::Update` 제거, 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서, CachePanel·RetainerBox 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
 | UW8c | `IsInputPathActive` 활성 인자 분리, 비활성 경로 자름, 툴팁·영역 지도 비활성 무시 | 비활성 버튼 클릭 → 부모, 비활성 위젯 툴팁 표시 |
 | UW8d | `BindVisibility`, 보이기 먼저 평가, Hidden 갱신 | 접힌 Element가 묶음으로 다시 보임, Hidden Element 원하는 크기 갱신 |

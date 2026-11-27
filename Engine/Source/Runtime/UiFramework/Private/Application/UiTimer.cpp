@@ -42,7 +42,8 @@ double Application::SecondsUntilNextTimer() const noexcept {
         return wait;
     }
 
-    const double now = TimerTime();
+    // 대기 시간은 지금 시계로 잰다(20.3절).
+    const double now = ReadClock();
     for (const auto& weak : timers_) {
         auto timer = weak.Lock();
         if (!timer) {
@@ -96,14 +97,9 @@ UiTimer::UiTimer(const SharedPtr<Element>& owner, Delegate<void(double)>&& frame
     : owner_(owner), interval_(0), due_(start), frame_(Move(frame)) {
 }
 
-void Application::SetTimerClock(double (*clock)() noexcept) noexcept {
-    timerClock_ = clock;
-}
-
 double Application::TimerTime() const noexcept {
-    return timerClock_
-               ? timerClock_()
-               : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
+    // 등록·진행 모두 프레임 시각이다(UE RegisterActiveTimer가 GetCurrentTime — SWidget.cpp 1898행).
+    return frameTime_.current;
 }
 
 void UiTimer::Advance(double now, const Element& root) noexcept {

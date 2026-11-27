@@ -28,6 +28,9 @@ public:
     void SetTheme(const ThemeColors* theme, uint64 revision = 0) noexcept;
     // 기록 목록들에 벡터 brush resolver를 넘기고 전체를 다시 만든다(17.2절).
     void SetVectorImageResolver(VectorImageResolver* resolver) noexcept;
+    // 기록 목록들에 이번 프레임 시각을 넘긴다(20.3절). 기록을 버리지 않는다 — 시각에 따라 그림이
+    // 바뀌는 요소는 volatile이라 매 프레임 다시 기록된다.
+    void SetFrameTime(const FrameTime& time) noexcept;
     // inheritedForeground는 root가 부모에게서 물려받은 전경색이다(창 루트는 흰색). 기록 때와 다르면
     // 전체를 다시 만든다.
     // inheritedDisabled는 root의 조상이 비활성인지다(비활성 효과 — PaintList::IsDisabledEffect).

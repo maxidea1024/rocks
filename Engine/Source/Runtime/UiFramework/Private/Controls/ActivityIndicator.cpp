@@ -1,6 +1,4 @@
-#include <UiCore/TimeUnits.h>
 #include <UiFramework/Controls/ActivityIndicator.h>
-#include <Platform/Clock.h>
 
 namespace rocks::ui {
 
@@ -16,11 +14,9 @@ constexpr double PieceDelay = 0.05;
 
 } // namespace
 
-ActivityIndicator::ActivityIndicator(Allocator& allocator, bool circular, Clock clock) noexcept
-    : Element(allocator), clock_(clock ? clock : platform::MonotonicNanoseconds),
-      period_(circular ? CircularPeriod : BarPeriod), count_(circular ? CircularPieces : BarPieces),
-      circular_(circular) {
-    origin_ = clock_();
+ActivityIndicator::ActivityIndicator(Allocator& allocator, bool circular) noexcept
+    : Element(allocator), period_(circular ? CircularPeriod : BarPeriod),
+      count_(circular ? CircularPieces : BarPieces), circular_(circular) {
     SetVisibility(Visibility::HitTestInvisible);
     UpdateVolatility();
 }
@@ -29,10 +25,8 @@ double ActivityIndicator::Cycle() const noexcept {
     return circular_ ? period_ : period_ + (count_ - 1) * PieceDelay;
 }
 
-double ActivityIndicator::Elapsed(uint64 now) const noexcept {
-    const double delta = animating_ && now >= origin_
-                             ? static_cast<double>(now - origin_) * SecondsPerNanosecond
-                             : 0.0;
+double ActivityIndicator::Elapsed(double now) const noexcept {
+    const double delta = animating_ && now >= origin_ ? now - origin_ : 0.0;
     return math::Fmod(elapsed_ + delta, Cycle());
 }
 
@@ -43,7 +37,7 @@ void ActivityIndicator::UpdateVolatility() noexcept {
 
 void ActivityIndicator::SetAnimating(bool animate) noexcept {
     if (animate != animating_) {
-        const uint64 now = clock_();
+        const double now = FindFrameTime().current;
         elapsed_ = Elapsed(now);
         origin_ = now;
         animating_ = animate;
@@ -115,7 +109,7 @@ Result<void> ActivityIndicator::SetPeriod(float seconds) noexcept {
     }
 
     if (period_ != seconds) {
-        const uint64 now = clock_();
+        const double now = FindFrameTime().current;
         const double phase = Elapsed(now) / Cycle();
         period_ = seconds;
         elapsed_ = phase * Cycle();
@@ -141,7 +135,7 @@ Result<void> ActivityIndicator::OnPaint(PaintList& list, int32 layer) const noex
         return Result<void>::Success();
     }
 
-    const double elapsed = Elapsed(animating_ ? clock_() : origin_);
+    const double elapsed = Elapsed(animating_ ? list.GetFrameTime().current : origin_);
     const Vec2 desired = brush_.imageSize;
     for (uint32 i = 0; i < count_; ++i) {
         float scaleX = 1, scaleY = 1, alpha = 1;

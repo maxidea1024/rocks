@@ -80,8 +80,22 @@ public:
     bool IsShiftDown(uint32 userId) const noexcept;
     bool IsAltDown(uint32 userId) const noexcept;
 
-    // 지연과 등장은 초 단위다. 주입한 시계는 시험이나 일시 정지 가능한 호스트에 사용한다.
-    void SetToolTipClock(double (*clock)() noexcept) noexcept;
+    // UI 시계다(Docs/Design/UiToolkit 20.3절 — 툴팁 지연·타이머·애니메이션 부품이 모두 이것을
+    // 본다). 비우면 단조 시계다. 시험·snapshot은 ManualClock을 준다. 바꾸면 열린 툴팁을 닫고 다음
+    // BeginFrame을 첫 프레임(간격 0)으로 본다.
+    void SetClock(ClockFunction&& clock) noexcept;
+    // 프레임을 시작한다: 시계를 한 번 읽어 프레임 시각을 정하고(간격은 MaxFrameDeltaSeconds로
+    // 자른다 — UE TickTime) host 묶음에 싣는다. 호스트는 입력 처리 전에 부른다. 부르지 않은 채
+    // PrepareLayout이 오면 그것이 먼저 부른다.
+    //
+    // 사용 예(호스트 루프):
+    //   app.BeginFrame();
+    //   adapter.RouteBatch(events, consumed, dropped);
+    //   app.PrepareLayout(root, scale);
+    void BeginFrame() noexcept;
+    // 바깥 시간으로 프레임을 시작한다(월드 위젯 — World 시간, UE WidgetComponent).
+    void BeginFrame(const FrameTime& time) noexcept;
+    const FrameTime& GetFrameTime() const noexcept;
     // 다음 타이머·툴팁 마감까지 남은 초다. 호스트가 펌프 대기 시간을 정한다(Docs/Design/UiToolkit
     // 19.2절 — caret 깜빡임·툴팁 지연·하위 메뉴 지연). 프레임 타이머나 진행 중인 툴팁 페이드가
     // 있으면 0, 기다릴 것이 없으면 NoTimerDeadline이다. 이미 지난 마감도 0이다.
@@ -91,9 +105,6 @@ public:
     //   platform::WaitForMessages(ToMilliseconds(wait));   // 입력·깨움·마감 중 먼저 온 것까지
     double SecondsUntilNextTimer() const noexcept;
 
-    // 타이머(StartTimer·StartFrameTimer) 시계(초)다. 시험이 지연을 결정적으로 진행할 때 주입한다.
-    // 비우면 단조 시계다. 바꾸기 전에 건 타이머는 옛 시계 기준 예정 시각을 그대로 쓴다.
-    void SetTimerClock(double (*clock)() noexcept) noexcept;
     Result<void> SetToolTipTiming(double delay, double fade) noexcept;
     double ToolTipDelay() const noexcept;
     double ToolTipFade() const noexcept;
@@ -289,15 +300,20 @@ private:
     void AdvanceToolTips() noexcept;
     Result<void> AttachToolTip(const PopupRequest& popup) noexcept;
     WeakPtr<Element> toolTipHost_;
-    SharedPtr<Element::PopupWorkArea> popupWorkArea_;
-    SharedPtr<TextInputService> textInput_;
-    // 지금 루트에 공급자를 단다. 할당에 실패하면 팝업이 창 경계만 지키는 것으로 물러난다.
+    // host 서비스 묶음이다(20.2절 — 처음 필요할 때 만든다).
+    SharedPtr<UiHostServices> host_;
+    UiHostServices* EnsureHostServices() noexcept;
+    // 지금 루트에 묶음을 단다. 할당에 실패하면 팝업은 창 경계만 지키고 IME 글자는 Text로 온다.
     void ApplyHostServices() noexcept;
+    double ReadClock() const noexcept;
+    ClockFunction clock_;
+    FrameTime frameTime_{};
+    double lastClock_ = 0;
+    bool clockStarted_ = false;
+    bool frameBegun_ = false;
     usize FindToolTip(uint32 user) const noexcept;
     double ToolTipTime() const noexcept;
     Array<ToolTipState> toolTips_;
-    double (*toolTipClock_)() noexcept = nullptr;
-    double (*timerClock_)() noexcept = nullptr;
     double TimerTime() const noexcept;
     double toolTipDelay_ = 0.15;
     double toolTipFade_ = 0.1;

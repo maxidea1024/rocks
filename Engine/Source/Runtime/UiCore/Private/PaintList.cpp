@@ -354,6 +354,14 @@ StyleColorContext PaintList::ColorContext() const noexcept {
     return {foreground_, foreground_};
 }
 
+void PaintList::SetFrameTime(const FrameTime& time) noexcept {
+    frameTime_ = time;
+}
+
+const FrameTime& PaintList::GetFrameTime() const noexcept {
+    return frameTime_;
+}
+
 void PaintList::Clear() noexcept {
     opacity_ = 1;
     foreground_ = {1, 1, 1, 1};

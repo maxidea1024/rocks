@@ -7,6 +7,7 @@
 #include <UiCore/Geometry.h>
 #include <UiCore/Brush.h>
 #include <UiCore/ColorRef.h>
+#include <UiCore/FrameTime.h>
 
 namespace rocks::ui {
 
@@ -95,6 +96,11 @@ public:
     // 빌리므로 소유자가 목록보다 오래 살아야 한다. Clear는 resolver를 유지한다.
     void SetVectorImageResolver(VectorImageResolver* resolver) noexcept;
     VectorImageResolver* GetVectorImageResolver() const noexcept;
+
+    // 이번 프레임 UI 시각이다(UE FPaintArgs — Docs/Design/UiToolkit 20.3절). 애니메이션 부품은
+    // OnPaint에서 이것으로 위상을 계산한다. Clear는 시각을 유지한다.
+    void SetFrameTime(const FrameTime& time) noexcept;
+    const FrameTime& GetFrameTime() const noexcept;
     uint64 ThemeRevision() const noexcept;
 
     // 지금 그리는 요소가 물려받은 전경색이다(UE FWidgetStyle::GetForegroundColor). 루트는 흰색이다.
@@ -139,6 +145,7 @@ private:
     float opacity_ = 1;
     const ThemeColors* theme_ = nullptr;
     VectorImageResolver* vectorImages_ = nullptr;
+    FrameTime frameTime_{};
     uint64 themeRevision_ = 0;
     LinearColor foreground_{1, 1, 1, 1};
     bool disabled_ = false;

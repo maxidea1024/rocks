@@ -5,6 +5,7 @@
 #include <AssetDatabase/AtomicFileWrite.h>
 #include <Core/ScopeExit.h>
 #include <Core/Text/StringBuilder.h>
+#include <UiCore/ManualClock.h>
 #include <UiCore/Rendering/SurfaceRecorder.h>
 #include <UiFramework/Application/Application.h>
 
@@ -18,6 +19,8 @@ constexpr usize RgbaBytes = 4;
 constexpr usize RgbBytes = 3;
 // 캡처 바탕색이다(내용이 덮지 않는 틈 — 이전 직접 읽기 경로와 같은 색).
 constexpr LinearColor GalleryCaptureClear{0.025f, 0.03f, 0.04f, 1};
+// 캡처 한 장마다 올리는 수동 시계 간격(초)이다(60 Hz 한 프레임 — 20.3절 결정성).
+constexpr double CaptureFrameSeconds = 1.0 / 60.0;
 
 // 지금 앞에 있는 탭을 그려 RGBA를 읽는다.
 Result<void> Render(Allocator& allocator, UiRenderer& renderer, UiTextureId target,
@@ -102,7 +105,10 @@ Result<void> CaptureGallery(Allocator& allocator, UiRenderer& renderer,
     ROCKS_ON_SCOPE_EXIT {
         renderer.ReleaseTexture(target.Value());
     };
+    // 애니메이션이 실행마다 같은 위상에서 찍히도록 수동 시계를 쓴다(Docs/Design/UiToolkit 20.3절).
+    ManualClock clock;
     Application app(allocator);
+    app.SetClock(clock.Function());
     app.SetRoot(area);
     app.SetVectorImageResolver(&icons);
     uint64 frame = 0;
@@ -113,6 +119,8 @@ Result<void> CaptureGallery(Allocator& allocator, UiRenderer& renderer,
             return activated;
         }
 
+        clock.Advance(CaptureFrameSeconds);
+        app.BeginFrame();
         auto rendered = Render(allocator, renderer, target.Value(), app, area, icons, width, height,
                                frame++, rgba);
         if (!rendered) {
