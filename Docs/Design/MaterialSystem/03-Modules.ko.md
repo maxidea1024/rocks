@@ -21,7 +21,7 @@ UE는 번역기·에셋·실행 상태를 한 모듈에 두어 쿠커와 게임�
 | **MaterialCompiler** | Engine Developer | 그래프 검증, 함수·레이어 펼치기, IR 생성·분석·최적화, HLSL 생성, 상수 식 생성, layout, 진단·원문 위치 지도 | MaterialSchema·ShaderCore·Core | 장치·프로세스 실행(셰이더 컴파일은 하지 않는다)·EditorFramework |
 | **MaterialRuntime** | Engine Runtime | `MaterialRenderState`, 상수 식 실행, 상수 블록 채움, 텍스처 handle 해석, 셰이더 집합 열기, 기본 머티리얼 대체 | MaterialSchema·RenderBase·ShaderCore·GraphicsTypes | ObjectRuntime·AssetRuntime(렌더 층 "Object 없음", 계획 3.1절)·그래프·컴파일러 |
 | **Material**(계획의 MaterialAssetBridge) | Engine Runtime | 에셋 클래스(`MaterialBase`·`Material`·`MaterialInstance`·`MaterialFunction`·`MaterialFunctionInstance`·`ParameterCollection`), `DynamicMaterialInstance`, 쿠킹 데이터 → `MaterialRenderState` 생성 | AssetRuntime·ObjectRuntime·MaterialSchema·MaterialRuntime | 컴파일러·셰이더 도구 |
-| **MaterialCook** | Engine Developer | 번역 너겟·셰이더 job 목록·쿠킹 처리기·퍼뮤테이션 보고 | Material·MaterialCompiler·RendererShaders(pass 셰이더 타입 목록)·AssetCooker·AssetNugget·ShaderCompiler | Release 링크 금지 |
+| **MaterialCook** | Engine Developer | 번역 너겟·셰이더 job 목록·쿠킹 처리기·퍼뮤테이션 보고 | Material·MaterialCompiler·ShaderCore 셰이더 타입 등록부(pass 셰이더 타입 — `RendererShaders`가 등록, 링크하지 않음 — 12.8절)·AssetCooker·AssetNugget·ShaderCompiler | Release 링크 금지 |
 | **EditorMaterial** | Engine Editor | `CompileCoordinator`·`PreviewSession`·그래프 편집 명령(계획 14.6절) | 위 모듈·EditorBackend·Renderer·GraphView | 화면 코드에서 shader 의미·검증 재구현 금지(계획 14.6절) |
 
 계획과 다른 점:
@@ -36,7 +36,7 @@ UE는 번역기·에셋·실행 상태를 한 모듈에 두어 쿠커와 게임�
 
 ```text
 EditorMaterial → { MaterialCook, MaterialCompiler, Material, Renderer, EditorBackend, GraphView }
-MaterialCook   → { Material, MaterialCompiler, RendererShaders, 정점 입력 타입 선언(16절 MRB8), AssetCooker, AssetNugget, ShaderCompiler }
+MaterialCook   → { Material, MaterialCompiler, ShaderCore 셰이더 타입 등록부(RendererShaders가 등록 — 링크하지 않음, 12.8절), 정점 입력 타입 선언(16절 MRB8), AssetCooker, AssetNugget, ShaderCompiler }
 MaterialCompiler → { MaterialSchema, ShaderCore, Core }
 Material(Runtime) → { AssetRuntime, ObjectRuntime, MaterialSchema, MaterialRuntime }
 MaterialRuntime → { MaterialSchema, RenderBase, ShaderCore, GraphicsTypes }
@@ -45,6 +45,6 @@ Renderer → { RendererShaders, MaterialRuntime, RenderBase, RenderGraph, … } 
 RendererShaders(Renderer 3.2절) → { ShaderCore, RenderData, MaterialSchema }
 ```
 
-**pass 셰이더 선언 모듈.** 쿠커는 "이 머티리얼에 어떤 pass 셰이더가 필요한가"를 알아야 한다. UE는 pass 셰이더 타입을 Renderer 모듈이 정적으로 등록하고(예 `RR/Private/BasePassRendering.cpp:180–192`), 셰이더 맵 layout을 만들 때 등록된 셰이더 타입 전체를 훑는다(`RE/Private/Materials/MaterialShader.cpp:3210–3310`). 그래서 Renderer 모듈이 로드되어야 표가 찬다. Rocks는 Renderer 스펙이 장치 없는 `RendererShaders` 모듈을 두었다(Renderer 3.2절, 결정 RN11). MaterialCook과 Renderer가 모두 이 모듈을 링크한다. 정점 입력 타입 선언도 같은 이유로 장치 없는 위치에 있어야 한다(16절 MRB8).
+**pass 셰이더 선언 모듈.** 쿠커는 "이 머티리얼에 어떤 pass 셰이더가 필요한가"를 알아야 한다. UE는 pass 셰이더 타입을 Renderer 모듈이 정적으로 등록하고(예 `RR/Private/BasePassRendering.cpp:180–192`), 셰이더 맵 layout을 만들 때 등록된 셰이더 타입 전체를 훑는다(`RE/Private/Materials/MaterialShader.cpp:3210–3310`). 그래서 Renderer 모듈이 로드되어야 표가 찬다. Rocks는 Renderer 스펙이 장치 없는 `RendererShaders` 모듈을 두었다(Renderer 3.2절, 결정 RN11). Renderer는 이 모듈을 링크하고, MaterialCook은 링크하지 않고 그 모듈이 ShaderCore 셰이더 타입 등록부에 `ShaderTypeMaterialShader` 표지로 등록한 타입을 등록부 원천으로 본다(12.8절 — 쿠커는 엔진 라이브러리 단계와 같은 등록부 원천을 쓴다). 정점 입력 타입 선언도 같은 이유로 장치 없는 위치에 있어야 한다(16절 MRB8).
 
 **번호표와 순환.** `RendererShaders`는 거르기 함수 인자 `MaterialShaderTraits` 때문에 MaterialSchema에 의존한다. 번호표를 `RendererShaders`에 두면 MaterialSchema → `RendererShaders` → MaterialSchema 순환이 생긴다. 그래서 번호표의 정의 권한은 Renderer 스펙에 두고(결정 RN5), C++ 열거는 장치 없는 `RenderData`에, HLSL 상수는 `/Engine/Shared/`의 C++·HLSL 공용 `.h`(셰이더 시스템 3절)에 둔다(Renderer 3.2절, 10.4절 D2). 의존은 `RendererShaders` → MaterialSchema → `RenderData`로 한 방향이다.

@@ -25,7 +25,7 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 | 클래스 | 필드(EditorOnly 표시) | 쿠킹 데이터 |
 |---|---|---|
 | `MaterialBase`(Abstract) | profile 목록·조명 굽기 설정·텍스처 sampling scale(19.11절) | sampling scale |
-| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(UE `UMaterial` 속성 대응 전부 — 19.9절), 물리 재질 필드(19.9절, TODO MPQ-PhysicalMaterial), `usage : VertexInputUsage`, `parameterCollections : ObjectRefArray<ParameterCollection>`(Hard — 함수 Build 의존은 hook, 4.4·4.6.1절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
+| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(UE `UMaterial` 속성 대응 전부 — 19.9절), 물리 재질 필드(19.9절, TODO MPQ-PhysicalMaterial), `usage : VertexInputUsage`, `parameterCollections : ObjectRefArray<ParameterCollection>`(Hard — 함수 Build 의존은 hook, 4.4·4.6.1절), `referencedTextures : ObjectRefArray<Texture>`(Hard — 그래프·함수 닫힘의 텍스처, 참조 동기화가 채운다, 12.8절 MS3c; 함수도 같은 필드), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
 | `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절, 19.11절), static override 셋(`staticSwitchOverrides`·`staticComponentMaskOverrides`·`staticEnumOverrides`), `traitOverrides : MaterialTraitOverrides`(값마다 Optional, 19.11절), `overridesLayerStack`·`layerStack`(EditorOnly) | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
 | `MaterialFunction` | `graph`(EditorOnly), `usage : {General, Layer, LayerBlend}`, `exposeToLibrary`(EditorOnly), 입출력 선언 | 없다(쿠킹 런타임에 함수는 필요 없다. 함수를 쓰는 머티리얼에 펼쳐져 들어간다) |
 | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunctionBase>`, 파라미터 기본값 override(모두 EditorOnly — 4.6.1절) | 없다 |
@@ -62,7 +62,7 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 | 셰이더 job 너겟 | 셰이더 시스템 10절 그대로. 생성 원문은 전처리 결과(7항)에 들어간다 |
 | cookKey | AssetSystem 10절 그대로. 처리기 build key에 번역 키와 job 키 목록이 들어가고, 유도 사용 대상(8.4절)이 지역 입력으로 들어간다 |
 
-**파라미터 기본값**(scalar·vector·텍스처·dynamic bool)은 번역 키에 넣지 않는다. 기본값은 uniform 빈도라 접히지 않으므로 원문을 바꾸지 않는다(6.5절). 텍스처는 종류(2D·Cube 등)와 샘플 종류만 원문을 바꾼다. 쿠킹 처리기는 기본값과 기본 텍스처를 그래프에서 직접 읽어 쿠킹 데이터에 넣고, 기본값 변경은 cookKey(에디터 패키지 콘텐츠 해시)로만 다시 쿠킹된다. static 파라미터 기본값은 원문을 바꾸므로 키에 들어간다. UE는 텍스처 참조 hash를 셰이더 맵 키에 넣는다(`RE/Public/MaterialShared.h:1370–1379` `TextureReferencesHash`). Rocks는 기본값 교체로 셰이더를 다시 만들지 않는다.
+**파라미터 기본값**(scalar·vector·텍스처·dynamic bool)은 번역 키에 넣지 않는다. 기본값은 uniform 빈도라 접히지 않으므로 원문을 바꾸지 않는다(6.5절). 텍스처는 사실(종류·압축·sRGB·주소 모드 — V10·주소 모드 lowering)만 원문을 바꾸므로 키에는 참조 위치별 사실을 넣고 AssetId는 넣지 않는다(12.2절 — 사실이 같은 텍스처로 바꾸면 적중). 쿠킹 처리기는 기본값과 기본 텍스처를 그래프에서 직접 읽어 쿠킹 데이터에 넣고, 기본값 변경은 cookKey(에디터 패키지 콘텐츠 해시)로만 다시 쿠킹된다. static 파라미터 기본값은 원문을 바꾸므로 키에 들어간다. UE는 텍스처 참조 hash를 셰이더 맵 키에 넣는다(`RE/Public/MaterialShared.h:1370–1379` `TextureReferencesHash`). Rocks는 기본값 교체로 셰이더를 다시 만들지 않는다.
 
 ### 4.6 클래스·타입 배치(단계 MS3b)
 
