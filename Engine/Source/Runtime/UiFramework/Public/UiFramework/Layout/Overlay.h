@@ -22,13 +22,16 @@ public:
 
     Result<void> Arrange(const Geometry& geometry) noexcept override;
 
+protected:
+    // 품은 팝업 층의 배치 경계(Overlay ∩ 기준 지점의 팝업 허용 영역 — UW7d, Overlay 로컬)다.
+    // 팝업 층이 아니거나 허용 영역을 모르면 비어 있다(층 전체). Arrange를 대신하는 파생
+    // 클래스(WindowChrome)도 팝업 층에 이 경계를 준다(19.5절).
+    Optional<Box2<float>> PopupLayerArea(const Element& child) const noexcept;
+
 private:
     bool StartsPaintLayer(usize previous, usize next) const noexcept override;
 
     void OnDescendantDetached(const Element& subtree) noexcept override;
-    // 품은 팝업 층의 배치 경계(Overlay ∩ 기준 지점의 팝업 허용 영역 — UW7d, Overlay 로컬)다.
-    // 팝업 층이 아니거나 허용 영역을 모르면 비어 있다(층 전체).
-    Optional<Box2<float>> PopupLayerArea(const Element& child) const noexcept;
     struct OpenPopup {
         WeakPtr<Element> anchor;
         Element* layer;

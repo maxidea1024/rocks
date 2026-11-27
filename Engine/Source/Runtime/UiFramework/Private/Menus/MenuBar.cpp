@@ -533,8 +533,10 @@ void MenuBar::ScheduleHiddenCleanup() noexcept {
         return;
     }
 
-    auto timer = context_->GetApplication().StartTimer(
-        self, 0, Delegate<void()>::CreateLambda([this]() noexcept { CleanupHidden(); }));
+    // 다음 프레임 시작에 한 번 정리한다(StartTimer는 간격 0을 거부한다 — 19.5절). CleanupHidden이
+    // 토큰을 놓아 한 번으로 끝난다.
+    auto timer = context_->GetApplication().StartFrameTimer(
+        self, Delegate<void(double)>::CreateLambda([this](double) noexcept { CleanupHidden(); }));
     // 타이머를 못 만들면(메모리 부족) 숨은 메뉴가 열린 채 남는다 — 다음 배치가 다시 시도한다.
     cleanup_ = timer ? Move(timer.Value()) : SharedPtr<UiTimer>{};
 }

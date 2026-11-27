@@ -15,6 +15,13 @@ namespace rocks::ui {
 
 // 포인터 이벤트를 전달한다. 콜백 전에 경로의 참조를 보관하므로 처리 중 Element를 제거해도
 // 현재 이벤트의 전달 대상이 소멸하지 않는다.
+// BuildWindowRegionMap의 작업량이다(Docs/Design/UiToolkit 19.5절 — 선형 상한 시험·진단용).
+struct WindowRegionMapStats {
+    // 본 hit 후보 수와 사각형 겹침 비교 수다.
+    usize candidates = 0;
+    usize comparisons = 0;
+};
+
 class ROCKS_UIFRAMEWORK_API Application {
 public:
     explicit Application(Allocator& allocator) noexcept;
@@ -230,7 +237,8 @@ public:
     //   input::WindowRegionMap map;
     //   app.BuildWindowRegionMap(map);
     //   if (!map.SameAs(published)) { window->PublishRegionMap(map); published = map; }
-    void BuildWindowRegionMap(input::WindowRegionMap& map) const noexcept;
+    void BuildWindowRegionMap(input::WindowRegionMap& map,
+                              WindowRegionMapStats* stats = nullptr) const noexcept;
     input::MouseCursor QueryMouseCursor(Vec2 position, uint32 userId = 0) const noexcept;
 
     // 창 입력이 끊어지면 모든 사용자의 포인터 캡처와 키보드 포커스를 해제한다.

@@ -41,6 +41,8 @@ constexpr StringView TabArgument = "--tab=";
 constexpr StringView SnapshotHeightArgument = "--snapshot-height=";
 // 렌더 lane 작업을 게임 스레드에서 돌린다(RenderLaneMode::Inline — Thread 모드 결과와 비교용).
 constexpr StringView InlineLaneArgument = "--lane=inline";
+// 창마다 단계별 프레임 시간을 로그로 남긴다(Docs/Design/UiToolkit 19.5절 — 진단용).
+constexpr StringView FrameStatsArgument = "--frame-stats";
 constexpr uint32 MaxSnapshotHeight = 8192;
 
 int Run(launch::ApplicationContext& context) noexcept {
@@ -50,6 +52,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     bool selfTest = false;
     bool surfaceTest = false;
     bool inlineLane = false;
+    bool frameStats = false;
     StringView startTab;
     for (StringView argument : context.Arguments()) {
         if (argument == "--surface-test") {
@@ -72,6 +75,10 @@ int Run(launch::ApplicationContext& context) noexcept {
 
         if (argument == InlineLaneArgument) {
             inlineLane = true;
+        }
+
+        if (argument == FrameStatsArgument) {
+            frameStats = true;
         }
 
         if (argument.StartsWith(SnapshotHeightArgument)) {
@@ -227,6 +234,7 @@ int Run(launch::ApplicationContext& context) noexcept {
                     return shaped ? Move(label)
                                   : Result<SharedPtr<TextLabel>>::Failure(shaped.Error());
                 }));
+        windows.SetFrameStats(frameStats);
         auto mainArea = area.Value();
         if (!windows.Run(Move(window.Value()), area.Value(), GalleryTitle,
                          DockWindows::MainMenuFactory::CreateLambda(

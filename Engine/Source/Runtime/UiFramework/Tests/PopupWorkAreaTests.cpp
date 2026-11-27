@@ -7,6 +7,8 @@
 #include <UiFramework/Layout/Frame.h>
 #include <UiFramework/Layout/Overlay.h>
 #include <UiFramework/Popups/MenuAnchor.h>
+#include <UiFramework/Window/WindowChrome.h>
+#include <UiFramework/Window/WindowTitleBar.h>
 
 // 팝업 허용 영역 시험이다(Docs/Design/UiToolkit 9.1절 UW7d — 시스템 규칙). 창 호스트가 등록한
 // 공급자의 영역(모니터 작업 영역)을 메뉴·하위 메뉴·툴팁이 개별 처리 없이 지키는지 단언한다.
@@ -86,6 +88,39 @@ TEST(UiFramework_PopupLayerStaysInsideWorkArea) {
     // 팝업 층은 Overlay 전체를 덮고(바깥 누름을 놓치지 않는다) 내용만 작업 영역 안이다.
     REQUIRE(bench.root->ChildCount() == 2);
     CHECK((bench.root->ChildAt(1)->GetGeometry().size == WindowSize));
+}
+
+TEST(UiFramework_WindowChromePopupLayerStaysInsideWorkArea) {
+    // 회귀(19.5절): 직접 그린 테두리(WindowChrome)는 Overlay::Arrange를 대신하므로 팝업 층에 허용
+    // 영역을 따로 줘야 한다. 주지 않으면 메뉴가 창 끝(400)까지 가 작업 표시줄(350 너머)에 가린다.
+    SystemAllocator allocator;
+    Application app(allocator);
+    auto chrome = SharedPtr<WindowChrome>::TryMake(allocator, allocator);
+    auto bar = SharedPtr<WindowTitleBar>::TryMake(allocator, allocator);
+    auto canvas = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto anchor = SharedPtr<MenuAnchor>::TryMake(allocator, allocator);
+    auto menu = SharedPtr<Frame>::TryMake(allocator, allocator);
+    REQUIRE(chrome && bar && canvas && anchor && menu);
+    menu.Value()->SetDesiredSize({120, 80});
+    anchor.Value()->SetPlacement(MenuPlacement::Below);
+    anchor.Value()->SetMenuFactory(MenuAnchor::MenuFactory::CreateLambda(
+        [item = menu.Value()]() noexcept { return Result<SharedPtr<Element>>::Success(item); }));
+    REQUIRE(canvas.Value()->TryAddSlot(anchor.Value(),
+                                       {.offset = {300, 10, 40, 20}, .alignment = {0, 0}}));
+    REQUIRE(bar.Value()->Construct({}));
+    REQUIRE(chrome.Value()->Construct({.titleBar = bar.Value(), .content = canvas.Value()}));
+    app.SetRoot(chrome.Value());
+    REQUIRE(app.SetPopupWorkArea(WorkArea(true)));
+    const auto step = [&]() noexcept {
+        return static_cast<bool>(app.UpdatePaintCache(Geometry::Root(WindowSize, {}), 1));
+    };
+    REQUIRE(step());
+    REQUIRE(anchor.Value()->Open());
+    REQUIRE(step());
+    auto bounds = menu.Value()->GetGeometry().WindowBounds();
+    REQUIRE(bounds);
+    CHECK(bounds.Value().max.x <= WorkMax.x);
+    app.SetRoot({});
 }
 
 TEST(UiFramework_PopupFlipsAboveAtWorkAreaBottom) {

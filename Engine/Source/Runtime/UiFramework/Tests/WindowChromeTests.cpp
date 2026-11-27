@@ -4,7 +4,9 @@
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreStyles.h>
 #include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/Button.h>
 #include <UiFramework/Layout/Frame.h>
+#include <UiFramework/Layout/VerticalStack.h>
 #include <UiFramework/Window/WindowChrome.h>
 
 namespace rocks::ui {
@@ -161,6 +163,35 @@ TEST(UiFramework_RegionMapIsEmptyBeforePaintAndFollowsFullscreen) {
     }
 
     CHECK(!caption);
+    IntVec2 mismatch;
+    CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
+}
+
+TEST(UiFramework_RegionMapIsLinearInTheNumberOfCandidates) {
+    // 회귀(19.5절): 겹침 판정은 비 Client 답(제목 막대·창 버튼 몇 개)과만 한다. 예전에는 Client
+    // 답마다 그 아래 답 전부를 봐서 후보 수의 제곱이었다(긴 메뉴·목록에서 프레임마다).
+    constexpr usize ButtonCount = 60;
+    // 제목 막대·제목·아이콘·창 버튼 셋·테두리를 넉넉히 덮는 비 Client 답 수 상한이다.
+    constexpr usize MaxNonClientAnswers = 8;
+    ChromeBench bench;
+    REQUIRE(bench.Build());
+    auto stack = SharedPtr<VerticalStack>::TryMake(bench.allocator, bench.allocator);
+    REQUIRE(stack);
+    for (usize i = 0; i < ButtonCount; ++i) {
+        auto button = SharedPtr<Button>::TryMake(bench.allocator, bench.allocator);
+        REQUIRE(button);
+        REQUIRE(button.Value()->Construct({}));
+        REQUIRE(stack.Value()->TryAddChild(button.Value()));
+    }
+
+    REQUIRE(bench.content->TryAddChild(stack.Value()));
+    REQUIRE(bench.Step());
+    input::WindowRegionMap map;
+    WindowRegionMapStats stats;
+    bench.app.BuildWindowRegionMap(map, &stats);
+    CHECK(stats.candidates > ButtonCount);
+    CHECK(stats.comparisons <= stats.candidates * MaxNonClientAnswers);
+    // 결과는 점마다 질의와 같다(19.2절).
     IntVec2 mismatch;
     CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
 }

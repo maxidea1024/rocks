@@ -479,7 +479,8 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
     return RegionOfTarget(snapshot ? hit.Get() : root_->HitTest(position, true));
 }
 
-void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexcept {
+void Application::BuildWindowRegionMap(input::WindowRegionMap& map,
+                                       WindowRegionMapStats* stats) const noexcept {
     map = {};
     if (!root_ || !hitGrid_.HasSnapshot()) {
         return;
@@ -491,9 +492,16 @@ void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexce
         input::WindowRegion region;
     };
     Array<Answer> answers(allocator_);
+    // 비 Client 답의 위치다(겹침 판정은 이것과만 한다 — 막대·테두리 몇 개라 O(n·m)).
+    Array<usize> blockers(allocator_);
     const usize count = hitGrid_.CandidateCount();
     if (!answers.TryReserve(count)) {
         return;
+    }
+
+    if (stats) {
+        *stats = {};
+        stats->candidates = count;
     }
 
     for (usize fromTop = 0; fromTop < count; ++fromTop) {
@@ -507,8 +515,11 @@ void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexce
         const bool outward =
             region == input::WindowRegion::Client || region == input::WindowRegion::Popup;
         const IntRect rect = ToClientRect(area, outward);
-        if (!rect.IsEmpty()) {
-            (void)answers.TryPushBack({rect, region});
+        if (!rect.IsEmpty() && answers.TryPushBack({rect, region}) &&
+            region != input::WindowRegion::Client) {
+            if (!blockers.TryPushBack(answers.Size() - 1)) {
+                return;
+            }
         }
 
         map.popupOpen |= region == input::WindowRegion::Popup;
@@ -519,9 +530,17 @@ void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexce
     bool overflow = false;
     for (usize index = 0; index < answers.Size() && !overflow; ++index) {
         bool needed = answers[index].region != input::WindowRegion::Client;
-        for (usize below = index + 1; below < answers.Size() && !needed; ++below) {
-            needed = answers[below].region != input::WindowRegion::Client &&
-                     Overlaps(answers[index].rect, answers[below].rect);
+        // Client 답은 그 아래(뒤 순번)의 비 Client 답을 가릴 때만 구멍으로 담는다.
+        for (usize b = 0; b < blockers.Size() && !needed; ++b) {
+            if (blockers[b] <= index) {
+                continue;
+            }
+
+            if (stats) {
+                ++stats->comparisons;
+            }
+
+            needed = Overlaps(answers[index].rect, answers[blockers[b]].rect);
         }
 
         if (needed) {

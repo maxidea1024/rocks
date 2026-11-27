@@ -161,17 +161,17 @@
   - 둘을 가르려면 계측이 필요하다.
 - **조치.**
   - (a) 커서 모양은 입력 처리 직후 한 번 정하고, 배치 뒤에도 한 번 더 정한다. 배치가 바뀌면 커서 아래 Element가 달라질 수 있어서다. UE도 입력 이벤트 처리 중 커서 질의(`QueryCursor`)를 한다.
-  - (b) 영역 지도는 hit grid 계획 revision·팝업 열림이 그대로면 다시 만들지 않는다. 겹침 판정은 비 Client 항목만 먼저 모아 그것과만 대조한다(O(n·m), m은 막대·테두리 몇 개). 결과 지도는 전과 같아야 한다(`SameAs`).
+  - (b) 영역 지도의 겹침 판정은 비 Client 항목만 먼저 모아 그것과만 대조한다(O(n·m), m은 막대·테두리 몇 개). 결과 지도는 전과 같다. 다시 만들지 않는 캐시는 두지 않는다 — 지도는 hit grid 계획에 들어 있지 않은 실시간 상태(후보의 보이기·입력 경로)에도 기대므로 계획 revision만으로는 바뀜을 알 수 없다. 게시는 지금처럼 바뀐 때만 한다(`SameAs`).
   - (c) UiDemo `--frame-stats`는 창마다 단계별 시간(입력·배치·기록·paint cache·영역 지도·batch·제출 대기)과 hit 후보 수를 60프레임마다 로그로 남긴다. 진단용이며 시험이 시간에 기대지 않는다.
   - (d) 프레임 페이싱(H2 — frame-latency waitable 또는 표시 주기 제출)은 (c)로 확인한 뒤 18.4절에서 정한다. 증거 없이 vsync 기본을 바꾸지 않는다.
 - **곁가지 결함(같은 조사에서 찾음).**
   - `MenuBar::ScheduleHiddenCleanup`이 간격 0으로 `StartTimer`를 부르는데 `StartTimer`는 0 이하를 거부한다. 넘쳐 숨은 메뉴의 정리가 돌지 않는다. 다음 프레임 정리로 바꾼다.
   - `WindowChrome::Arrange`가 `Overlay::Arrange`를 대신하면서 팝업 층의 `SetPopupArea`를 하지 않는다. 직접 그린 테두리 창의 팝업이 모니터 작업 영역 제한(UW7d)을 받지 않는다.
 - **시험.**
-  - 영역 지도: 잎 N개 + Caption 막대 트리에서 비교 횟수 상한을 단언한다(통계 노출). 수정 전 알고리즘과 같은 지도인지도 본다.
-  - 다시 만들지 않음: 바뀐 것이 없으면 지도 생성 횟수가 늘지 않는다.
-  - 커서: 가짜 창에서 MouseMove 하나의 `Update`가 Render 전에 새 모양으로 `SetMouseCursor`를 부르는지 호출 순서를 기록해 단언한다.
-  - 곁가지 결함 둘의 회귀 시험.
+  - 영역 지도: 버튼 60개 + 제목 막대 트리에서 비교 횟수 상한(후보 수 × 8)을 단언하고(`WindowRegionMapStats`), 점마다 질의와 같은지 본다(`RegionMapMatchesQuery`).
+  - WindowChrome 팝업 허용 영역: 메뉴 오른쪽 끝이 작업 영역 안이다(`PopupWorkAreaTests`).
+  - 숨은 메뉴 정리: 넓혀졌을 때 열린 넘침 메뉴가 닫히는 기존 시험(`MenuBarOverflowHidesMenusThatDoNotFit`)이 이제 다음 프레임 정리로 통과한다.
+  - 커서 호출 순서: UiDemo 창 호스트(`DockWindows`)에는 단위 시험 틀이 없다. 최종 빌드 뒤 사람 확인으로 본다.
 - **사람 확인.** 최종 빌드 뒤 Debug·Release에서 `--frame-stats`로 증상을 다시 본다. 남으면 H2로 페이싱을 정한다.
 
 ### 19.3 단계

@@ -111,6 +111,11 @@ Result<void> WindowChrome::Arrange(const Geometry& geometry) noexcept {
             continue;
         }
 
+        // 팝업이 모니터 작업 영역을 넘지 않게 한다(UW7d — Overlay::Arrange와 같다, 19.5절).
+        if (IsHostedPopupLayer(*child)) {
+            child->SetPopupArea(PopupLayerArea(*child));
+        }
+
         auto placed = child->ArrangeIfNeeded(GetGeometry().MakeChild(geometry.size, {}, {}, {}));
         if (!placed) {
             return placed;

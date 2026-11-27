@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DemoTextInput.h"
+#include "FrameStats.h"
 
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
@@ -30,6 +31,9 @@ public:
     // makeMenu는 주 창의 주 메뉴다(비우면 메뉴 없이).
     Result<void> Run(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                      StringView title, MainMenuFactory&& makeMenu = {}) noexcept;
+    // 창마다 단계별 프레임 시간을 로그로 남긴다(--frame-stats, Docs/Design/UiToolkit 19.5절). Run
+    // 전에 부른다.
+    void SetFrameStats(bool enabled) noexcept;
 
 private:
     struct Surface {
@@ -60,6 +64,8 @@ private:
         ErrorCode liveResizeError = ErrorCode::None;
         // 창의 텍스트 입력 서비스다(19.2절 — 만들지 못하면 IME 글자가 Text 이벤트로 온다).
         SharedPtr<DemoTextInput> textInput;
+        // --frame-stats 단계별 시간이다(제출은 모든 창을 한 번에 하므로 DockWindows가 센다).
+        FrameStats stats;
     };
     Result<SlotHandle> Add(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                            StringView title) noexcept;
@@ -86,6 +92,9 @@ private:
     TitleFactory makeTitle_;
     MainMenuFactory makeMenu_;
     SlotArray<UniquePtr<Surface>> windows_;
+    // --frame-stats이면 창마다·제출의 단계별 시간을 남긴다.
+    bool frameStats_ = false;
+    FrameStats submitStats_;
     // 모든 창이 함께 쓰는 스타일 등록부다(첫 창을 만들 때 — 앱 스타일은 EditorStyle, 20.11절).
     SharedPtr<StyleRegistry> styles_;
     SlotHandle primary_{};

@@ -208,6 +208,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     auto& host = *surface.Value();
+    host.stats.SetEnabled(frameStats_);
     // 편집기 룩 창이라 UE 에디터처럼 앱 스타일이 EditorStyle이다(Docs/Design/UiToolkit 20.11절).
     if (!styles_) {
         auto styles = CreateStandardStyleRegistry(allocator_);
@@ -509,9 +510,17 @@ Result<bool> DockWindows::Update(Surface& host, UiDrawBuffer& buffer) noexcept {
     const bool hadInput = !host.queue.Events().IsEmpty();
     // 프레임 시각을 입력 처리 전에 정한다(Docs/Design/UiToolkit 20.3절).
     host.app.BeginFrame();
+    host.stats.Begin();
     auto routed = host.adapter.RouteBatch(host.queue.Events(), host.consumed.View(),
                                           host.queue.DroppedCount());
     host.queue.Clear();
+    // 커서 모양은 입력 처리 직후 정한다(무거운 프레임 처리 동안 OS가 이전 위치의 모양을 쓰지 않게 —
+    // 19.5절). 배치로 커서 아래 Element가 바뀌면 Render가 한 번 더 정한다.
+    if (hadInput) {
+        host.window->SetMouseCursor(host.adapter.MouseCursor());
+    }
+
+    host.stats.Mark(FrameStage::Input);
     // 입력 처리 오류는 UI 버그다. 앱을 닫지 않고 남겨 원인을 찾게 한다(넘친 큐는 정상 상황).
     if (!routed && routed.Error() != ErrorCode::CapacityExceeded) {
         Log::Error(LogUiDemo, "Input routing failed: {Error}", ErrorCodeName(routed.Error()));
@@ -579,6 +588,8 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
         return Result<bool>::Failure(arranged.Error());
     }
 
+    host.stats.Mark(FrameStage::Layout);
+
     auto prepared = host.surfaces.Record(host.area, host.frameNumber++, host.window->Width(),
                                          host.window->Height(), buffer);
     if (!prepared) {
@@ -589,20 +600,27 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
     // 쌓인 표면 pass가 있으면(바깥 보관 표면 안쪽만 바뀐 경우 포함) 창과 함께 제출한다. 버리면 표면
     // 기록기는 그렸다고 알지만 타깃은 비어 있게 된다.
     repaint |= prepared.Value() || buffer.PendingPassCount() > 0;
+    host.stats.Mark(FrameStage::Record);
     auto cache = host.app.UpdateArrangedPaintCache();
     if (!cache) {
         buffer.DiscardPending();
         return Result<bool>::Failure(cache.Error());
     }
 
+    host.stats.Mark(FrameStage::PaintCache);
+
     // 이번 배치의 영역 지도를 창에 게시한다(바뀐 때만 — Docs/Design/UiToolkit 19.2절). OS 영역
     // 질의는 UI 트리 대신 이 지도를 읽는다.
     input::WindowRegionMap regions;
-    host.app.BuildWindowRegionMap(regions);
+    WindowRegionMapStats regionStats;
+    host.app.BuildWindowRegionMap(regions, &regionStats);
     if (!regions.SameAs(host.regions)) {
         host.window->PublishRegionMap(regions);
         host.regions = regions;
     }
+
+    host.stats.Mark(FrameStage::Regions);
+    host.stats.NoteCandidates(regionStats.candidates);
 
     // 미리보기 표시에 실패해도 원래 탭과 드롭 처리는 유지한다. 같은 끌기 동안 다시 시도하도록
     // 제스처 기록을 되돌린다.
@@ -629,6 +647,8 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
         repaint = true;
     }
 
+    host.stats.Mark(FrameStage::Batch);
+    host.stats.EndFrame("Window");
     if (!repaint) {
         return Result<bool>::Success(false);
     }
@@ -645,6 +665,11 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
 
     host.presented = true;
     return Result<bool>::Success(true);
+}
+
+void DockWindows::SetFrameStats(bool enabled) noexcept {
+    frameStats_ = enabled;
+    submitStats_.SetEnabled(enabled);
 }
 
 uint32 DockWindows::IdleWaitMilliseconds() const noexcept {
@@ -731,7 +756,11 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
             }
         }
 
-        if (auto drawn = DrawFrame(frame); !drawn) {
+        submitStats_.Begin();
+        auto drawn = DrawFrame(frame);
+        submitStats_.Mark(FrameStage::Submit);
+        submitStats_.EndFrame("Submit");
+        if (!drawn) {
             return drawn;
         }
 
