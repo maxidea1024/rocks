@@ -130,7 +130,8 @@ TEST(UnrealExchange_AnimationClipGolden) {
         REQUIRE(spec.curves.Size() == 1);
         CHECK(spec.curves[0].name == "Bulge" && spec.curves[0].editable &&
               !spec.curves[0].metadata && !spec.curves[0].disabled &&
-              spec.curves[0].curve != nullptr && spec.curves[0].curve->KeyCount() >= 2);
+              spec.curves[0].curve != nullptr && spec.curves[0].curve->KeyCount() >= 2 &&
+              !spec.curves[0].curve->defaultValue.HasValue());
         CHECK(spec.transformCurves.IsEmpty() && spec.events.IsEmpty() &&
               spec.syncMarkers.IsEmpty());
         REQUIRE(spec.eventTracks.Size() == 1);
@@ -281,7 +282,6 @@ TEST(UnrealExchange_AnimationClipEdits) {
             {{"data.events", R"([{"time": 0, "track": 0, "name": "E", "type": 1}])"}, 0},
             {{"data.syncMarkers", R"([{"name": "M"}])"}, 0},
             {{"settings.RateScale", R"("x")"}, RowOf("RateScale")},
-            {{"settings.Interpolation", R"("Cubic")"}, RowOf("Interpolation")},
             {{"settings.PlatformTargetFrameRate",
               R"({"Default": {"Numerator": 0, "Denominator": 1}, "PerPlatform": []})"},
              RowOf("PlatformTargetFrameRate")},
@@ -302,12 +302,148 @@ TEST(UnrealExchange_AnimationClipEdits) {
             }
         }
 
-        // EnumMap에 없는 값은 번역 거부(InvalidSource)다.
-        const JsonEdit badEnum[] = {{"settings.AdditiveAnimType", R"("AAT_Bogus")"}};
-        Attempt translated(allocator);
-        Run(env, allocator, golden, badEnum, translated);
-        CHECK(translated.error == ErrorCode::CorruptData &&
-              translated.failure.code == AssetDiagnosticCode::InvalidSource);
+        // EnumMap에 없는 값(이름·범위 밖 정수)은 번역 거부(InvalidSource)다 — 네 enum 행이 같다.
+        const JsonEdit badEnums[] = {
+            {"settings.AdditiveAnimType", R"("AAT_Bogus")"},
+            {"settings.RefPoseType", "7"},
+            {"settings.RootMotionRootLock", R"("Nope")"},
+            {"settings.Interpolation", R"("Cubic")"},
+            {"settings.Interpolation", "5"},
+        };
+        for (const JsonEdit& edit : badEnums) {
+            Attempt translated(allocator);
+            Run(env, allocator, golden, Span<const JsonEdit>(&edit, 1), translated);
+            CHECK(translated.error == ErrorCode::CorruptData &&
+                  translated.failure.code == AssetDiagnosticCode::InvalidSource);
+        }
+
+        // 키 시간 순서 위반은 TrySetKeys의 거부라 CorruptBundle이다.
+        StringBuilder<> unordered(allocator);
+        REQUIRE(unordered.TryAppendFormat(
+            R"([{{"name": "Back", "flags": 0, "curve": {{"keys": [{}, {}], "preInfinityExtrap":)"
+            R"( "RCCE_Constant", "postInfinityExtrap": "RCCE_Constant", "defaultValue": 0}}}}])",
+            R"({"interpMode": "RCIM_Linear", "tangentMode": "RCTM_Auto", "tangentWeightMode":)"
+            R"( "RCTWM_WeightedNone", "time": 1, "value": 0, "arriveTangent": 0,)"
+            R"( "arriveTangentWeight": 0, "leaveTangent": 0, "leaveTangentWeight": 0})",
+            R"({"interpMode": "RCIM_Linear", "tangentMode": "RCTM_Auto", "tangentWeightMode":)"
+            R"( "RCTWM_WeightedNone", "time": 0, "value": 0, "arriveTangent": 0,)"
+            R"( "arriveTangentWeight": 0, "leaveTangent": 0, "leaveTangentWeight": 0})"));
+        const JsonEdit backwards[] = {{"data.curves", unordered.View()}};
+        Attempt order(allocator);
+        Run(env, allocator, golden, backwards, order);
+        CHECK(order.error == ErrorCode::CorruptData &&
+              order.failure.code == AssetDiagnosticCode::CorruptBundle &&
+              order.failure.detail == 0);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 값 대응 표 전부(EnumMap 셋·커브 열거 넷)와 RefPoseSeq 참조.
+TEST(UnrealExchange_AnimationClipValueTables) {
+    SystemAllocator allocator;
+    {
+        MeshEnv env(allocator);
+        REQUIRE(env.registered);
+        Golden golden(allocator);
+        REQUIRE(OpenGolden(allocator, golden));
+        const struct {
+            StringView ue;
+            AdditiveType rocks;
+        } additive[] = {{R"("AAT_None")", AdditiveType::None},
+                        {R"("AAT_LocalSpaceBase")", AdditiveType::LocalSpace},
+                        {R"("AAT_RotationOffsetMeshSpace")", AdditiveType::MeshSpaceRotation}};
+        for (const auto& item : additive) {
+            const JsonEdit edit[] = {{"settings.AdditiveAnimType", item.ue}};
+            Attempt attempt(allocator);
+            Run(env, allocator, golden, edit, attempt);
+            CHECK(attempt.error == ErrorCode::None &&
+                  attempt.clip.Spec().additive.type == item.rocks);
+        }
+
+        const struct {
+            StringView ue;
+            AdditiveBasePose rocks;
+        } basePoses[] = {{R"("ABPT_None")", AdditiveBasePose::None},
+                         {R"("ABPT_RefPose")", AdditiveBasePose::RefPose},
+                         {R"("ABPT_AnimScaled")", AdditiveBasePose::Scaled},
+                         {R"("ABPT_AnimFrame")", AdditiveBasePose::Frame},
+                         {R"("ABPT_LocalAnimFrame")", AdditiveBasePose::LocalFrame}};
+        for (const auto& item : basePoses) {
+            const JsonEdit edit[] = {{"settings.RefPoseType", item.ue}};
+            Attempt attempt(allocator);
+            Run(env, allocator, golden, edit, attempt);
+            CHECK(attempt.error == ErrorCode::None &&
+                  attempt.clip.Spec().additive.basePose == item.rocks);
+        }
+
+        const struct {
+            StringView ue;
+            RootMotionRootLock rocks;
+        } locks[] = {{R"("RefPose")", RootMotionRootLock::RefPose},
+                     {R"("AnimFirstFrame")", RootMotionRootLock::FirstFrame},
+                     {R"("Zero")", RootMotionRootLock::Zero}};
+        for (const auto& item : locks) {
+            const JsonEdit edit[] = {{"settings.RootMotionRootLock", item.ue}};
+            Attempt attempt(allocator);
+            Run(env, allocator, golden, edit, attempt);
+            CHECK(attempt.error == ErrorCode::None &&
+                  attempt.clip.Spec().rootMotion.rootLock == item.rocks);
+        }
+
+        // 커브 열거: 키 하나마다 이름 하나씩(UE 이름 순서 = Rocks 열거 순서).
+        constexpr StringView Interps[] = {"RCIM_Linear", "RCIM_Constant", "RCIM_Cubic"};
+        constexpr StringView Tangents[] = {"RCTM_Auto", "RCTM_User", "RCTM_Break"};
+        constexpr StringView Weights[] = {"RCTWM_WeightedNone", "RCTWM_WeightedArrive",
+                                          "RCTWM_WeightedLeave", "RCTWM_WeightedBoth"};
+        constexpr StringView Extrapolations[] = {"RCCE_Cycle", "RCCE_CycleWithOffset",
+                                                 "RCCE_Oscillate", "RCCE_Linear", "RCCE_Constant"};
+        StringBuilder<> keys(allocator);
+        for (usize index = 0; index < 4; ++index) {
+            REQUIRE((index == 0 || keys.TryAppend(", ")) &&
+                    keys.TryAppendFormat(
+                        R"({{"interpMode": "{}", "tangentMode": "{}", "tangentWeightMode": "{}",)"
+                        R"( "time": {}, "value": 0, "arriveTangent": 0, "arriveTangentWeight": 0,)"
+                        R"( "leaveTangent": 0, "leaveTangentWeight": 0}})",
+                        Interps[index % 3], Tangents[index % 3], Weights[index], index));
+        }
+
+        for (usize pre = 0; pre < 5; ++pre) {
+            StringBuilder<> curves(allocator);
+            REQUIRE(curves.TryAppendFormat(
+                R"([{{"name": "Enum", "flags": 4, "curve": {{"keys": [{}], "preInfinityExtrap": "{}",)"
+                R"( "postInfinityExtrap": "{}", "defaultValue": 0}}}}])",
+                keys.View(), Extrapolations[pre], Extrapolations[4 - pre]));
+            const JsonEdit edit[] = {{"data.curves", curves.View()}};
+            Attempt attempt(allocator);
+            Run(env, allocator, golden, edit, attempt);
+            REQUIRE(attempt.error == ErrorCode::None);
+            const TangentCurve& curve = *attempt.clip.Spec().curves[0].curve;
+            REQUIRE(curve.KeyCount() == 4);
+            CHECK(curve.preExtrapolation == static_cast<CurveExtrapolation>(pre) &&
+                  curve.postExtrapolation == static_cast<CurveExtrapolation>(4 - pre));
+            for (usize index = 0; index < 4; ++index) {
+                CHECK(curve.Keys()[index].interp == static_cast<CurveInterp>(index % 3) &&
+                      curve.Keys()[index].tangentMode == static_cast<CurveTangentMode>(index % 3) &&
+                      curve.Keys()[index].tangentWeight == static_cast<CurveTangentWeight>(index));
+            }
+        }
+
+        // RefPoseSeq: references에 있으면 기준 클립 id, 없으면 비운다.
+        OrderedMap<String, AssetId> references(allocator);
+        const AssetId baseId{Guid{0x91, 0x92}};
+        String base(allocator);
+        REQUIRE(base.TryAssign("/Game/A/Base.Base") && references.Insert(Move(base), baseId));
+        const JsonEdit refPose[] = {
+            {"settings.RefPoseSeq", R"({"objectPath": "/Game/A/Base.Base"})"}};
+        Attempt resolved(allocator);
+        Run(env, allocator, golden, refPose, resolved, &references);
+        REQUIRE(resolved.error == ErrorCode::None);
+        CHECK(resolved.clip.Spec().additive.basePoseClip == baseId);
+        Attempt missing(allocator);
+        Run(env, allocator, golden, refPose, missing);
+        CHECK(missing.error == ErrorCode::None &&
+              missing.clip.Spec().additive.basePoseClip == AssetId{});
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

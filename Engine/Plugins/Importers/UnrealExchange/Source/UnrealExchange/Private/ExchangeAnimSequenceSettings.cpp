@@ -27,6 +27,13 @@ constexpr ExchangeSettingRow BasePoseValues[] = {
     EnumValue("ABPT_LocalAnimFrame", "LocalFrame"),
 };
 
+// UE EAnimInterpolationType(AnimTypes.h) → ClipInterpolation(이름이 같아도 EnumMap으로 둔다 — 범위
+// 밖 정수 값을 다른 enum 행과 같은 번역 거부로 받는다).
+constexpr ExchangeSettingRow InterpolationValues[] = {
+    EnumValue("Linear", "Linear"),
+    EnumValue("Step", "Step"),
+};
+
 // UE ERootMotionRootLock(AnimEnums.h) → RootMotionRootLock.
 constexpr ExchangeSettingRow RootLockValues[] = {
     EnumValue("RefPose", "RefPose"),
@@ -43,7 +50,7 @@ constexpr ExchangeSettingRow AnimSequenceRows[] = {
     Row("RefFrameIndex"),
     Row("RefPoseSeq", Kind::Reference),
     Row("RetargetSource"),
-    Row("Interpolation", Kind::Enum),
+    StructRow("Interpolation", Kind::EnumMap, InterpolationValues),
     Row("bEnableRootMotion"),
     StructRow("RootMotionRootLock", Kind::EnumMap, RootLockValues),
     Row("bForceRootLock"),

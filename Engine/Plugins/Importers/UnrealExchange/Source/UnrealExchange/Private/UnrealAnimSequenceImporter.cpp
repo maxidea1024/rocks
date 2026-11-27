@@ -58,15 +58,15 @@ Result<void> UnrealAnimSequenceImporter::Import(AssetImportContext& context) noe
     input.references = &options->references;
     input.registry = &context.Registry();
     input.access = context.Access();
-    ExchangeAnimationClip mesh(allocator);
+    ExchangeAnimationClip clip(allocator);
     ExchangeMeshFailure failure;
-    if (auto built = mesh.Build(input, failure); !built) {
+    if (auto built = clip.Build(input, failure); !built) {
         return failure.code == AssetDiagnosticCode::None
                    ? Result<void>::Failure(built.Error())
                    : context.Fail(failure.code, built.Error(), failure.detail);
     }
 
-    for (const ExchangeSettingWarning& warning : mesh.Warnings()) {
+    for (const ExchangeSettingWarning& warning : clip.Warnings()) {
         if (auto warned = context.Warn(warning.code, warning.detail); !warned) {
             return warned;
         }
@@ -77,7 +77,7 @@ Result<void> UnrealAnimSequenceImporter::Import(AssetImportContext& context) noe
         return Result<void>::Failure(output.Error());
     }
 
-    if (auto imported = ImportAnimationClip(context, output.Value(), mesh.Spec()); !imported) {
+    if (auto imported = ImportAnimationClip(context, output.Value(), clip.Spec()); !imported) {
         return imported;
     }
 

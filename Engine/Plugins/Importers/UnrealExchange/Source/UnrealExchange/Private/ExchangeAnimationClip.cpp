@@ -35,6 +35,12 @@ constexpr StringView AdditiveTypeNames[] = {"None", "LocalSpace", "MeshSpaceRota
 constexpr StringView BasePoseNames[] = {"None", "RefPose", "Scaled", "Frame", "LocalFrame"};
 constexpr StringView RootLockNames[] = {"RefPose", "FirstFrame", "Zero"};
 constexpr StringView InterpolationNames[] = {"Linear", "Step"};
+// 성분 blob은 little-endian f32를 패딩 없이 이어 쓴 것이다(3.3절). 지원 대상은 모두
+// little-endian이라 메모리 배치 그대로 복사한다.
+static_assert(sizeof(Vec3) == VectorComponents * sizeof(float) &&
+                  sizeof(Quat) == RotationComponents * sizeof(float),
+              "Vec3 and Quat must be packed float components to copy f32 blob bytes");
+
 // 커브 키의 숫자 칸이다.
 constexpr StringView KeyNumberFields[] = {
     "time", "value", "arriveTangent", "arriveTangentWeight", "leaveTangent", "leaveTangentWeight"};
@@ -509,7 +515,6 @@ Result<void> ExchangeAnimationClip::Build(const ExchangeAnimationClipInput& inpu
     }
 
     started_ = true;
-    // 트랙 수만큼 미리 잡아 Finish의 추가가 실패하지 않게 한다.
     ExchangeAnimationClipBuilder builder{{failure, *allocator_, *input.registry, input.access,
                                           input.references, *input.registry->Names(), warnings_},
                                          *this,
@@ -524,6 +529,7 @@ Result<void> ExchangeAnimationClip::Build(const ExchangeAnimationClipInput& inpu
         return done;
     }
 
+    // 트랙 수만큼 미리 잡아 Finish의 추가가 실패하지 않게 한다.
     if (auto reserved = tracks_.TryReserve(trackParts_.Size()); !reserved) {
         return reserved;
     }
