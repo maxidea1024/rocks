@@ -71,6 +71,7 @@
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 71(2026-11-28): 18.5절 끝 "시작 시간 측정" — Sandbox 쿠킹·Development 경로 시작 시간, 느린 원인(Development 공급자 너겟 캐시 미사용, ShaderSystem 개정 63)과 수정 뒤 값.
 - 개정 70(2026-11-28): 18.5절 9항 구현 기록 — 파일, 표면 작업 값 정리(`SurfaceReleaseWait`), UI 배경 흐림 셰이더의 GLES 교차 컴파일 실패(표본과 `Load`·`GetDimensions` 혼용 — dummy 샘플러 없음)를 표본만 쓰게 고침, 여덟 장치 시험 결과.
 - 개정 69(2026-11-27): 18.5절 9항 Sandbox UI overlay(UiToolkit 18.6절 요청 2 — UT5). 창 스왑체인은 UI 창 표면이다(UE Slate가 창 viewport를 갖고 게임 viewport가 그 백버퍼에 바로 그리는 구조 — `UiLaneRenderer::WindowSwapChain` 조회 추가). `ScreenPacket`에 창 id·크기·`UiFramePacket` 자리를 두고, 프레임 순서는 장면 → tone map(Clear) → UI(Load) → capture 복사(`CopyPassTarget`, `HasSideEffects`)다. 크기는 장면 pass 전에 맞추고, 셰이더 교체는 `ReloadShaders`(실패 시 옛 UI 파이프라인)로 받는다. 글자 없는 상태 패널(글꼴 FT3 뒤 글자), 쿠커·쿠킹 시험 호스트에 UI 셰이더 타입을 더하고, 화면 self-test 단언(present 1·UI 픽셀·두 모드 동일)을 정했다. 1항 구조·표면 작업 문구를 함께 고쳤다.
 - 개정 68(2026-11-27): 9.12절 6항 엔진 셰이더 준비 진행(`SetPreparationProgress`·`ReportPreparation…` — 진행 보고 PG5, 시작 화면 `Shaders` 단계).
