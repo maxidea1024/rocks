@@ -5,6 +5,7 @@
 #include <UiWidget/ComboBoxWidgetBase.generated.h>
 #include <UiWidget/EditableTextWidget.generated.h>
 #include <UiWidget/ExpandableAreaWidget.generated.h>
+#include <UiWidget/InputChordValue.generated.h>
 #include <UiWidget/InputKeySelectorWidget.generated.h>
 #include <UiWidget/RadialSliderWidget.generated.h>
 #include <UiWidget/ScrollBarWidget.generated.h>
@@ -16,132 +17,127 @@ namespace rocks::ui {
 Result<WidgetEventCatalog> WidgetEventCatalog::CreateStandard(Allocator& allocator) noexcept {
     WidgetEventCatalog catalog(allocator);
     auto registered = catalog.RegisterEvent(
-        widgetEvents::ButtonClicked, widgetSignatures::NoArguments, &ButtonWidget::SetOnClicked);
+        widgetEvents::ButtonClicked, widgetSignatures::NoArguments, &ButtonWidget::OnClicked);
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::CheckBoxChanged, widgetSignatures::Boolean,
-                                           &CheckBoxWidget::SetOnChanged);
+                                           &CheckBoxWidget::OnChanged);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::CheckBoxStateChanged, widgetSignatures::CheckState,
-                                  &CheckBoxWidget::SetOnStateChanged);
+                                  &CheckBoxWidget::OnStateChanged);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::ComboSelectionChanged, widgetSignatures::Integer,
-                                  &ComboBoxWidgetBase::SetOnSelectionChanged);
+                                  &ComboBoxWidgetBase::OnSelectionChanged);
     }
 
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::TextChanged, widgetSignatures::String,
-                                           &EditableTextWidget::SetOnChanged);
+                                           &EditableTextWidget::OnChanged);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::TextCommitted, widgetSignatures::TextCommit,
-                                  &EditableTextWidget::SetOnCommitted);
+                                  &EditableTextWidget::OnCommitted);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::ExpansionChanged, widgetSignatures::Boolean,
-                                  &ExpandableAreaWidget::SetOnExpansionChanged);
+                                  &ExpandableAreaWidget::OnExpansionChanged);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::InputKeySelected, widgetSignatures::KeyChord,
-                                  &InputKeySelectorWidget::SetOnSelected);
+                                  &InputKeySelectorWidget::OnSelected);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::RadialSliderChanged, widgetSignatures::Number,
-                                  &RadialSliderWidget::SetOnChanged);
+                                  &RadialSliderWidget::OnChanged);
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::ScrollBarScrolled, widgetSignatures::Number,
-                                  &ScrollBarWidget::SetOnScrolled);
+        registered = catalog.RegisterEvent(widgetEvents::ScrollBarScrolled,
+                                           widgetSignatures::Number, &ScrollBarWidget::OnScrolled);
     }
 
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::SliderChanged, widgetSignatures::Number,
-                                           &SliderWidget::SetOnChanged);
+                                           &SliderWidget::OnChanged);
     }
 
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::SpinBoxChanged, widgetSignatures::Number,
-                                           &SpinBoxWidget::SetOnChanged);
+                                           &SpinBoxWidget::OnChanged);
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::ButtonPressed, widgetSignatures::NoArguments,
-                                  &ButtonWidget::SetOnPressed);
+        registered = catalog.RegisterEvent(widgetEvents::ButtonPressed,
+                                           widgetSignatures::NoArguments, &ButtonWidget::OnPressed);
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::ButtonReleased, widgetSignatures::NoArguments,
-                                  &ButtonWidget::SetOnReleased);
+        registered = catalog.RegisterEvent(
+            widgetEvents::ButtonReleased, widgetSignatures::NoArguments, &ButtonWidget::OnReleased);
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::ButtonHovered, widgetSignatures::NoArguments,
-                                  &ButtonWidget::SetOnHovered);
+        registered = catalog.RegisterEvent(widgetEvents::ButtonHovered,
+                                           widgetSignatures::NoArguments, &ButtonWidget::OnHovered);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::ButtonUnhovered, widgetSignatures::NoArguments,
-                                  &ButtonWidget::SetOnUnhovered);
+                                  &ButtonWidget::OnUnhovered);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::SliderCaptureBegin, widgetSignatures::NoArguments,
-                                  &SliderWidget::SetOnCaptureBegin);
+                                  &SliderWidget::OnCaptureBegin);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::SliderCaptureEnd, widgetSignatures::NoArguments,
-                                  &SliderWidget::SetOnCaptureEnd);
+                                  &SliderWidget::OnCaptureEnd);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::SpinDragBegin, widgetSignatures::NoArguments,
-                                  &SpinBoxWidget::SetOnDragBegin);
+                                  &SpinBoxWidget::OnDragBegin);
     }
 
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::SpinDragEnd, widgetSignatures::Number,
-                                           &SpinBoxWidget::SetOnDragEnd);
+                                           &SpinBoxWidget::OnDragEnd);
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::SpinCommitted, widgetSignatures::SpinCommit,
-                                  &SpinBoxWidget::SetOnCommitted);
+        registered = catalog.RegisterEvent(
+            widgetEvents::SpinCommitted, widgetSignatures::SpinCommit, &SpinBoxWidget::OnCommitted);
     }
 
     if (registered) {
         registered = catalog.RegisterEvent(widgetEvents::SliderControllerBegin,
                                            widgetSignatures::NoArguments,
-                                           &SliderWidget::SetOnControllerCaptureBegin);
+                                           &SliderWidget::OnControllerCaptureBegin);
     }
 
     if (registered) {
         registered =
             catalog.RegisterEvent(widgetEvents::SliderControllerEnd, widgetSignatures::NoArguments,
-                                  &SliderWidget::SetOnControllerCaptureEnd);
+                                  &SliderWidget::OnControllerCaptureEnd);
     }
 
     if (!registered) {

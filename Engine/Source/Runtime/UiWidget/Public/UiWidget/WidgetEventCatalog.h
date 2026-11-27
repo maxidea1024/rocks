@@ -2,6 +2,7 @@
 
 #include <Core/Delegate.h>
 #include <Object/ConstructionContext.h>
+#include <Object/Event.h>
 #include <UiWidget/WidgetEventBinding.h>
 
 namespace rocks::ui {
@@ -18,17 +19,19 @@ public:
     static Result<WidgetEventCatalog> CreateStandard(Allocator& allocator) noexcept;
 
     // 식별자는 코드 이름을 바꾸더라도 유지한다. 시그니처 변경에는 새 시그니처 ID를 부여한다.
+    // accessor는 Widget의 리플렉션 이벤트 접근자다(Docs/Design/UiToolkit 21.5a절 — 예:
+    // &ButtonWidget::OnClicked). 연결은 그 이벤트에 native 구독을 더한다.
     template <class Owner, class... Args>
     Result<void> RegisterEvent(Guid id, Guid signature,
-                               void (Owner::*setter)(Delegate<void(Args...)>&&) noexcept) noexcept {
-        if (!setter) {
+                               Event<Args...>& (Owner::*accessor)() noexcept) noexcept {
+        if (!accessor) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         auto attach = Attach::CreateLambda(
-            [setter](ConstructionContext& stage, ObjectHandle sender, ObjectRegistry& objects,
-                     ObjectHandle controller,
-                     const SharedPtr<MethodList>& methods) noexcept -> Result<void> {
+            [accessor](ConstructionContext& stage, ObjectHandle sender, ObjectRegistry& objects,
+                       ObjectHandle controller,
+                       const SharedPtr<MethodList>& methods) noexcept -> Result<void> {
                 auto source = stage.GetForWrite<Owner>(sender);
                 if (!source) {
                     return Result<void>::Failure(source.Error());
@@ -41,8 +44,8 @@ public:
                             method->invoke.Execute(objects, controller, args...);
                         }
                     });
-                (source.Value()->*setter)(Move(callback));
-                return Result<void>::Success();
+                auto added = (source.Value()->*accessor)().TryAdd(Move(callback));
+                return added ? Result<void>::Success() : Result<void>::Failure(added.Error());
             });
         return AddEvent({{id, signature, GeneratedType<Owner>::Id(), NativeSignature<Args...>()},
                          Move(attach)});

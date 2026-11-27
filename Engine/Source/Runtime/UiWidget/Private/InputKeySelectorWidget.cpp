@@ -1,4 +1,5 @@
 #include <UiWidget/InputKeySelectorWidget.h>
+#include <UiWidget/InputChordValue.generated.h>
 #include "ControlCaption.h"
 #include <UiFramework/Controls/InputKeySelector.h>
 #include <UiWidget/InputKeySelectorWidget.generated.h>

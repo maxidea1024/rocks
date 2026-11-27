@@ -1,5 +1,5 @@
 #include <UiFramework/Controls/EditableText.h>
-#include <UiWidget/EditableTextWidget.h>
+#include <UiWidget/EditableTextWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {

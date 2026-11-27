@@ -175,6 +175,9 @@ public:
                                    const SharedPtr<Element>& scope = {}) noexcept;
     // 패드 상태 기억을 지운다(창 초점 잃음·입력 넘침).
     void ResetGamepads() noexcept;
+    // 패드 누름을 취소로 끝낸다(끊김·UI 밖으로 넘김 — 뗌을 보내면 버튼이 눌린다). 화면 입력 경로(ScreenInputRouter)가
+    // UI 입력을 끌 때도 부른다.
+    void CancelGamepadKeys(uint32 user) noexcept;
     // 보내지 않고 패드 상태만 기억한다(UI가 이 입력을 받지 않을 때 — 다음 누름·뗌 판정이 맞게).
     void SyncGamepadState(uint32 user, uint32 index, const input::GamepadSnapshot& pad) noexcept;
     Result<bool> RouteKey(uint32 userId, const input::InputEvent& event) noexcept;
@@ -378,8 +381,6 @@ private:
     };
     // 스틱 반복을 진행한다(PrepareLayout — 20.8절).
     void AdvanceAnalogRepeats() noexcept;
-    // 패드 누름을 취소로 끝낸다(끊김·UI 밖으로 넘김 — 뗌을 보내면 버튼이 눌린다).
-    void CancelGamepadKeys(uint32 user) noexcept;
     Result<bool> RouteAnalogNavigation(uint32 index) noexcept;
     PadState pads_[input::MaxGamepads]{};
     // 키 경로 본체다(키보드·패드 공용 — 초점 경로 preview·명령·OnKeyEvent·navigation 응답).

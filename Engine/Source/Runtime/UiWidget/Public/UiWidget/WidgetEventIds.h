@@ -34,12 +34,17 @@ namespace rocks::ui::widgetSignatures {
 
 inline constexpr Guid NoArguments{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858200ULL};
 inline constexpr Guid Boolean{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858201ULL};
-inline constexpr Guid CheckState{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858202ULL};
+// WidgetCheckState 인자다(21.5a절 — 옛 CheckState 인자 0x…202는 은퇴).
+inline constexpr Guid CheckState{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858209ULL};
 inline constexpr Guid Integer{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858203ULL};
-inline constexpr Guid String{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858204ULL};
-inline constexpr Guid TextCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858205ULL};
-inline constexpr Guid KeyChord{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858206ULL};
+// const String& 인자다(옛 StringView 인자 0x…204는 은퇴).
+inline constexpr Guid String{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820aULL};
+// (const String&, WidgetTextCommitReason)다(옛 0x…205는 은퇴).
+inline constexpr Guid TextCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820bULL};
+// const InputChordValue& 인자다(옛 KeyChord 인자 0x…206은 은퇴).
+inline constexpr Guid KeyChord{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820cULL};
 inline constexpr Guid Number{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858207ULL};
-inline constexpr Guid SpinCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858208ULL};
+// (float, WidgetSpinCommitReason)다(옛 0x…208은 은퇴).
+inline constexpr Guid SpinCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820dULL};
 
 } // namespace rocks::ui::widgetSignatures
