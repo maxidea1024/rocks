@@ -60,6 +60,10 @@ public:
     // UE 물리 형상 크기의 캡슐이다(28.3절 — 반지름은 max(|sx|, |sy|) 배, 0.1 cm 하한).
     Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
 
+    // ScaledCapsuleRadius·ScaledCapsuleHalfHeight 캡슐을 부풀린 형상이다(UE
+    // UCapsuleComponent::GetCollisionShape).
+    CollisionShape GetCollisionShape(double inflation) const noexcept override;
+
     // 반경·반높이(반구 포함, 로컬 +Z)의 캡슐이다(Docs/Design/PhysicsModule 2.4절 — scale은
     // Physics가 굽는다).
     bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;

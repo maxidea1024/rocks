@@ -1,3 +1,4 @@
+#include <Collision/CollisionShape.h>
 #include <Core/Math/MathUtility.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
@@ -39,6 +40,10 @@ bool BoxComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
     local.boxExtent = boxExtent_;
     local.sphereRadius = boxExtent_.Length();
     return true;
+}
+
+CollisionShape BoxComponent::GetCollisionShape(double inflation) const noexcept {
+    return CollisionShape::Box(ScaledBoxExtent()).Inflate(inflation);
 }
 
 Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
