@@ -18,10 +18,15 @@ ListView::ListView(Allocator& allocator, Application& app,
     retainedSource_ = source.AsSharedPtr();
 }
 
-ListView::~ListView() noexcept {
-    for (usize i = 0; i < items_.Size(); ++i) {
-        source_.ReleaseRow(*ChildAt(i), items_[i]);
+// 행 원본(사용자 코드)을 부르지 않는다 — 명시 해제는 ReleaseAllRows다(21.4절).
+ListView::~ListView() noexcept = default;
+
+void ListView::ReleaseAllRows() noexcept {
+    for (usize i = items_.Size(); i > 0; --i) {
+        RecycleRow(i - 1);
     }
+
+    InvalidateLayout();
 }
 
 Result<void> ListView::SetRowHeight(float height) noexcept {

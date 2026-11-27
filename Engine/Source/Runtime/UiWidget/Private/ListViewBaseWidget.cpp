@@ -208,6 +208,8 @@ void ListViewBaseWidget::CancelScrollIntoView() noexcept {
 void ListViewBaseWidget::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
         auto& view = StaticElementCast<ListView>(*live);
+        // 행 Widget을 풀에 돌려준다(UE ReleaseSlateResources → HandleRowReleased).
+        view.ReleaseAllRows();
         view.SetOnItemClicked({});
         view.SetOnSelectionChanged({});
         view.SetOnItemScrolledIntoView({});

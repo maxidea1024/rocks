@@ -2,7 +2,47 @@
 
 namespace rocks::ui {
 
-UiHostServices::UiHostServices(Allocator& allocator) noexcept : appStyle_(allocator) {
+UiHostServices::UiHostServices(Allocator& allocator) noexcept
+    : appStyle_(allocator), teardown_(allocator) {
+}
+
+Result<void> UiHostServices::DeferTeardown(Delegate<void()>&& teardown) noexcept {
+    if (!teardown.IsBound()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return teardown_.TryPushBack(Move(teardown));
+}
+
+usize UiHostServices::RunDeferredTeardown() noexcept {
+    if (runningTeardown_) {
+        return 0;
+    }
+
+    runningTeardown_ = true;
+    usize ran = 0;
+    for (usize round = 0; round < MaxTeardownRounds && !teardown_.IsEmpty(); ++round) {
+        // 통지가 새 항목을 넣을 수 있으므로 이번 바퀴의 목록을 떼어 돌린다.
+        // 옮긴 뒤 teardown_은 같은 allocator의 빈 배열이다.
+        Array<Delegate<void()>> batch = Move(teardown_);
+        for (auto& item : batch) {
+            item.ExecuteIfBound();
+            ++ran;
+        }
+    }
+
+    runningTeardown_ = false;
+    return ran;
+}
+
+usize UiHostServices::PendingTeardownCount() const noexcept {
+    return teardown_.Size();
+}
+
+usize UiHostServices::DiscardDeferredTeardown() noexcept {
+    const usize count = teardown_.Size();
+    teardown_.Clear();
+    return count;
 }
 
 void UiHostServices::SetPopupWorkArea(PopupWorkArea&& provider) noexcept {

@@ -165,6 +165,16 @@ const UiHostServices* Element::FindUiHostServices() const noexcept {
     return nullptr;
 }
 
+SharedPtr<UiHostServices> Element::FindUiHostServicesRef() const noexcept {
+    for (const Element* current = this; current; current = current->parent_) {
+        if (current->semantics_ && current->semantics_->host) {
+            return current->semantics_->host;
+        }
+    }
+
+    return {};
+}
+
 bool Element::QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept {
     const UiHostServices* host = FindUiHostServices();
     return host && host->QueryPopupWorkArea(window, area);

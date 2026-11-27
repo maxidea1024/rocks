@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
+#include <Core/Delegate.h>
 #include <Core/Math/Rect.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Text/String.h>
@@ -46,6 +48,21 @@ public:
         return set ? registry_->FindStyle<T>(*set, name) : nullptr;
     }
 
+    // 미룬 해체 통지다(Docs/Design/UiToolkit 21.4절). Element·Widget 소멸자는 사용자
+    // 코드(OnDestruct· OnDeactivated 등)를 부르지 않고 여기에 넣는다. Application이 프레임 시작과
+    // Shutdown에서 돌린다. 항목은 대상 Object를 RootRef로 붙잡아 통지 전에 GC되지 않게 한다. 할당
+    // 실패면 OutOfMemory이고 항목은 버려진다(호출자가 경고를 남긴다).
+    Result<void> DeferTeardown(Delegate<void()>&& teardown) noexcept;
+    // 대기열을 넣은 순서대로 돌린다. 도는 중 더해진 항목도 같은 호출에서 돈다(상한
+    // MaxTeardownRounds 바퀴 — 넘는 항목은 다음 호출로 남는다). 다시 들어오면 0이다. 돈 항목 수다.
+    usize RunDeferredTeardown() noexcept;
+    usize PendingTeardownCount() const noexcept;
+    // 돌리지 않고 버린다(호스트 소멸 — 소멸자에서 사용자 코드를 부르지 않는다). 버린 수다.
+    usize DiscardDeferredTeardown() noexcept;
+
+    // 한 번의 RunDeferredTeardown이 도는 바퀴(통지 안에서 다시 넣은 통지) 상한이다.
+    static constexpr usize MaxTeardownRounds = 64;
+
     // 스타일이 바뀐 횟수다(등록부·집합 값·활성 집합). 0이 아니고 늘어나기만 한다(처음 측정에서 한
     // 번 적용하게, 등록부를 바꿔도 줄지 않게).
     uint64 StyleRevision() const noexcept;
@@ -56,6 +73,8 @@ private:
     FrameTime time_{};
     SharedPtr<StyleRegistry> registry_;
     String appStyle_;
+    Array<Delegate<void()>> teardown_;
+    bool runningTeardown_ = false;
     uint64 styleChanges_ = 1;
 };
 

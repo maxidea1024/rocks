@@ -25,6 +25,9 @@ public:
     ListView(Allocator& allocator, Application& app,
              const SharedRef<TableRowSource>& source) noexcept;
     ~ListView() noexcept override;
+    // 보이는 행을 모두 원본에 돌려준다(TableRowSource::ReleaseRow — UE HandleRowReleased). Widget의
+    // 명시 해제가 부른다. 다음 배치에서 행을 다시 만든다(소멸자는 원본을 부르지 않는다 — 21.4절).
+    void ReleaseAllRows() noexcept;
     Result<void> SetRowHeight(float height) noexcept;
     Result<void> SetScrollOffset(double offset) noexcept;
     double ScrollOffset() const noexcept;

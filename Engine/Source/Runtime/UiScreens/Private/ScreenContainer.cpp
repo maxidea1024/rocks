@@ -1,3 +1,4 @@
+#include <Core/Diagnostics/Log.h>
 #include <Core/ScopeExit.h>
 #include <UiScreens/ScreenContainer.h>
 #include <UiScreens/Screen.generated.h>
@@ -5,6 +6,12 @@
 #include <UiWidget/Widget.generated.h>
 
 namespace rocks::ui {
+
+namespace {
+
+constexpr LogCategory LogUiScreens{"UiScreens"};
+
+} // namespace
 
 ScreenStack::ScreenStack(ObjectRegistry& objects, Application& app, uint32 userId) noexcept
     : ScreenContainer(objects, app, userId, Order::Stack) {
@@ -20,16 +27,39 @@ ScreenContainer::ScreenContainer(ObjectRegistry& objects, Application& app, uint
       order_(order), pools_(objects.ObjectAllocator()), pages_(objects.ObjectAllocator()) {
 }
 
+// 활성 화면의 OnDeactivated(사용자 hook)는 소멸자에서 부르지 않고 앱의 해체 대기열로 미룬다
+// (Docs/Design/UiToolkit 21.4절 — 명시 해제는 ScreenContainerWidget::ReleaseElements의
+// ClearScreens).
 ScreenContainer::~ScreenContainer() noexcept {
     changing_ = true;
+    const auto access = objects_.OwnerAccess();
     for (auto& page : pages_) {
-        auto borrowed = objects_.ResolveForWrite<Screen>(objects_.OwnerAccess(), page.screen);
+        auto borrowed = objects_.ResolveForWrite<Screen>(access, page.screen);
         if (borrowed) {
             auto* screen = borrowed.Value().Get().Value();
             screen->container_ = nullptr;
             if (screen->active_) {
                 screen->active_ = false;
-                screen->OnDeactivated();
+                auto pinned = objects_.TryPin<Screen>(access, page.screen);
+                Result<void> queued =
+                    pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
+                if (queued) {
+                    queued = app_.DeferTeardown(Delegate<void()>::CreateLambda(
+                        [objects = &objects_, screen = Move(pinned.Value())]() noexcept {
+                            auto live = objects->ResolveForWrite<Screen>(objects->OwnerAccess(),
+                                                                         screen.Handle());
+                            if (live) {
+                                live.Value().Get().Value()->OnDeactivated();
+                            }
+                        }));
+                }
+
+                if (!queued) {
+                    Log::Warning(LogUiScreens,
+                                 "Could not queue a screen deactivation ({Error}); OnDeactivated "
+                                 "is skipped",
+                                 queued.Error());
+                }
             }
         }
 

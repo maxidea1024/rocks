@@ -1,3 +1,4 @@
+#include <Core/Diagnostics/Log.h>
 #include <UiFramework/Layout/Overlay.h>
 
 #include <UiWidget/Widget.generated.h>
@@ -5,6 +6,12 @@
 #include <UiWidget/UserWidget.generated.h>
 
 namespace rocks::ui {
+
+namespace {
+
+constexpr LogCategory LogUiWidget{"UiWidget"};
+
+} // namespace
 
 UserWidget::UserWidget(Allocator& allocator) noexcept : animations_(allocator) {
 }
@@ -21,8 +28,14 @@ public:
         : Overlay(allocator), objects_(objects), owner_(Move(owner)) {
     }
 
+    // 사용자 hook(OnDestruct·애니메이션 정지 통지)을 소멸자에서 부르지 않는다. 명시 해제 없이
+    // 버려지면 마지막으로 측정한 앱의 해체 대기열로 미룬다(Docs/Design/UiToolkit 21.4절).
     ~UserWidgetRoot() noexcept override {
-        Detach();
+        DetachDeferred();
+    }
+
+    void OnUiHostServicesChanged() noexcept override {
+        host_ = WeakPtr<UiHostServices>(FindUiHostServicesRef());
     }
 
     bool SupportsKeyboardFocus() const noexcept override {
@@ -103,6 +116,48 @@ public:
         owner_.Reset();
     }
 
+    // 엔진 정리(트리에서 떼기)만 지금 하고 사용자 통지는 대기열로 넘긴다. 대기열 항목이 owner를
+    // RootRef로 붙잡아 통지 전에 GC되지 않는다.
+    void DetachDeferred() noexcept {
+        if (tree_.IsNull()) {
+            return;
+        }
+
+        const auto handle = tree_;
+        tree_ = {};
+        const auto access = objects_.OwnerAccess();
+        auto tree = objects_.Resolve<WidgetTree>(access, handle);
+        if (tree) {
+            tree.Value().Get().Value()->DetachHost(objects_, *this);
+        }
+
+        auto host = host_.Lock();
+        if (!host) {
+            // 앱에 붙어 측정된 적이 없다 — 통지할 자리가 없다(명시 ReleaseElements를 쓴다).
+            Log::Warning(LogUiWidget,
+                         "A user widget element was dropped without ReleaseElements before any "
+                         "application measured it; OnDestruct is skipped");
+            owner_.Reset();
+            return;
+        }
+
+        auto queued = host->DeferTeardown(
+            Delegate<void()>::CreateLambda([objects = &objects_, owner = Move(owner_)]() noexcept {
+                auto widget = objects->Resolve<UserWidget>(objects->OwnerAccess(), owner.Handle());
+                if (widget) {
+                    widget.Value().Get().Value()->StopAllAnimations();
+                    widget.Value().Get().Value()->OnDestruct();
+                }
+            }));
+        if (!queued) {
+            Log::Warning(LogUiWidget,
+                         "Could not queue a user widget teardown ({Error}); OnDestruct is skipped",
+                         queued.Error());
+        }
+
+        owner_.Reset();
+    }
+
 private:
     UserWidget* LiveOwner() const noexcept {
         if (tree_.IsNull()) {
@@ -115,6 +170,8 @@ private:
 
     ObjectRegistry& objects_;
     RootRef<UserWidget> owner_;
+    // 마지막으로 측정한 앱의 호스트 묶음이다(미룬 해체 통지 자리).
+    WeakPtr<UiHostServices> host_;
     ObjectHandle tree_{};
 };
 

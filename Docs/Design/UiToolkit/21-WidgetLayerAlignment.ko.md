@@ -84,10 +84,18 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - `ListViewBaseWidget::ReleaseElements` → `ListView::ReleaseAllRows`(행마다 `ReleaseRow` — UE `HandleRowReleased`)
 - **미룬 해체 통지.** 명시 해제 없이 Element가 부서지면 소멸자는 통지를 `UiHostServices`의 해체 대기열에 넣고 끝낸다.
   - 대기열 항목은 대상 Object의 `RootRef`를 들어, 통지가 돌 때까지 GC가 수거하지 않는다.
-  - 대기열은 다음 때 한 번에 돈다: `Application::BeginFrame` 맨 앞, 그리고 호스트가 창을 부수기 전에 부르는 `Application::RunDeferredTeardown()`.
+  - 대기열은 다음 때 한 번에 돈다: 프레임 시작, 그리고 호스트가 창을 부수기 전에 부르는 `Application::Shutdown()`.
   - 결과적으로 해체 통지는 항상 한 번, 소멸자 밖에서 돈다.
   - 호스트 묶음을 찾을 수 없는 Element(앱에 붙은 적 없음)는 생성 통지도 받은 적이 없으므로 넣을 것이 없다.
   - `Application` 소멸 때 남은 항목은 부르지 않고 경고 로그로 개수를 남긴다(소멸자 규칙).
+- **구현(UW9d).**
+  - 대기열은 `UiHostServices::DeferTeardown`·`RunDeferredTeardown`(통지 안에서 넣은 통지도 같은 호출에서 돈다, 상한 64바퀴, 재진입은 0)이다. `Application`이 프레임 시작(`StartFrame` — `BeginFrame`과 암묵 프레임 모두)과 `Shutdown()`(루트를 떼고 돌림)에서 돌린다.
+  - 소멸 때 남은 통지는 `DiscardDeferredTeardown`으로 버리고 개수를 경고로 남긴다. 소멸자는 루트를 먼저 놓아, 그때 넣어지는 통지까지 센다.
+  - 소멸자는 부모 사슬이 이미 끊겼을 수 있어 묶음을 찾을 수 없다. 그래서 요소가 측정될 때 묶음을 기억한다. `Element::OnUiHostServicesChanged`는 Prepass가 측정하는 묶음이 바뀔 때(처음 측정 포함) 부르는 hook이다. `UserWidgetRoot`는 여기서 묶음의 약한 참조를 남긴다.
+  - 같은 확인으로 스타일도 묶음이 바뀌면 다시 받는다. revision이 같아도 다른 앱이면 다시 받는다(20.11절 리뷰 반영 보강).
+  - 측정된 적 없이 버려진 `UserWidget` Element는 통지할 자리가 없다. `OnDestruct`를 건너뛰고 경고를 남긴다. 명시 `ReleaseElements`를 쓰라는 뜻이다.
+  - `ScreenContainer`는 생성 때 받은 `Application`의 대기열을 쓴다.
+  - 시험: `DeferredTeardownTests`가 Element·Application 수준을 본다(소멸자 안 0회 → 다음 프레임 1회, 중첩·재진입, Shutdown, 소멸 때 버림, 앱 사이 이동, ListView 명시 해제). `UserWidget`·`Screen` hook 횟수는 리플렉션 시험 클래스가 필요해 UW9e의 시험 fixture와 함께 본다.
 - **ListView.** 소멸자는 행 원본을 부르지 않는다. 행 Widget의 풀 반환은 `ReleaseAllRows`나 `WidgetPool` 소멸이 맡는다(UE `ResetPool`).
 - **policy.** UI 모듈 Element·Widget 소멸자 본문에서 사용자 hook 이름(`OnDestruct`·`OnDeactivated`·`ReleaseRow`·`Execute`)을 부르는 줄을 거부한다(`ui-destructor-user-code`). 엔진 내부 정리는 hook 이름을 쓰지 않으므로 걸리지 않는다.
 

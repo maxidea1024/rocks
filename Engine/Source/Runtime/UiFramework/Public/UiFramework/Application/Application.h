@@ -107,6 +107,15 @@ public:
     //   adapter.RouteBatch(events, consumed, dropped);
     //   app.PrepareLayout(root, scale);
     void BeginFrame() noexcept;
+    // 미룬 해체 통지를 넣는다(Docs/Design/UiToolkit 21.4절 — 소멸자에서 사용자 코드를 부르지 않는
+    // 요소가 쓴다). 프레임 시작(BeginFrame·암묵 프레임)과 Shutdown에서 돈다.
+    Result<void> DeferTeardown(Delegate<void()>&& teardown) noexcept;
+    // 대기열을 지금 돌린다(돈 항목 수). 호스트가 창을 부수기 전에 Shutdown으로 부른다.
+    usize RunDeferredTeardown() noexcept;
+    usize PendingTeardownCount() const noexcept;
+    // 루트를 떼고 미룬 해체 통지를 모두 돌린다. 호스트가 Application을 부수기 전에 부른다 —
+    // 부르지 않으면 소멸 때 남은 통지는 돌지 않고(소멸자 규칙) 경고 로그에 개수가 남는다.
+    void Shutdown() noexcept;
     // 바깥 시간으로 프레임을 시작한다(월드 위젯 — World 시간, UE WidgetComponent). 유한하지 않은
     // 시각은 무시하고, 간격은 0과 MaxFrameDeltaSeconds 사이로 자른다.
     void BeginFrame(const FrameTime& time) noexcept;

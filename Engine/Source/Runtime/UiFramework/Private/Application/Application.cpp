@@ -70,6 +70,17 @@ Application::~Application() noexcept {
     }
 
     ResetInput();
+    // 트리를 먼저 놓아 요소 소멸자가 넣는 해체 통지를 센 뒤 버린다(돌리지 않는다 — 21.4절).
+    root_ = {};
+    if (host_) {
+        if (const usize dropped = host_->DiscardDeferredTeardown()) {
+            Log::Warning(LogUiApplication,
+                         "Application destroyed with {Count} deferred teardown notifications; "
+                         "call Shutdown first to deliver them",
+                         dropped);
+        }
+    }
+
     DetachHostServices();
     if (host_) {
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
@@ -176,7 +187,28 @@ void Application::StartFrame(const FrameTime& time, bool external) noexcept {
     ++frameSerial_;
     if (host_) {
         host_->SetFrameTime(frameTime_);
+        // 앞 프레임에 버려진 요소의 해체 통지다(소멸자 밖의 안전한 자리 — 21.4절).
+        (void)host_->RunDeferredTeardown();
     }
+}
+
+Result<void> Application::DeferTeardown(Delegate<void()>&& teardown) noexcept {
+    UiHostServices* host = EnsureHostServices();
+    return host ? host->DeferTeardown(Move(teardown))
+                : Result<void>::Failure(ErrorCode::OutOfMemory);
+}
+
+usize Application::RunDeferredTeardown() noexcept {
+    return host_ ? host_->RunDeferredTeardown() : 0;
+}
+
+usize Application::PendingTeardownCount() const noexcept {
+    return host_ ? host_->PendingTeardownCount() : 0;
+}
+
+void Application::Shutdown() noexcept {
+    SetRoot({});
+    (void)RunDeferredTeardown();
 }
 
 void Application::EnsureFrame() noexcept {

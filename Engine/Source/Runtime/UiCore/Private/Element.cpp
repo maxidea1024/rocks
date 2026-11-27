@@ -321,6 +321,9 @@ KeyReply Element::OnKeyEvent(const KeyEvent& key) noexcept {
 void Element::ApplyStyles(const UiHostServices&) noexcept {
 }
 
+void Element::OnUiHostServicesChanged() noexcept {
+}
+
 NavigationBoundary Element::OnNavigation(uint32, FocusDirection direction) noexcept {
     return GetNavigationRule(direction);
 }
@@ -622,8 +625,14 @@ Result<void> Element::Prepass(float scale) noexcept {
     // 있다. 받으면 자기와 자식을 다시 측정한다(자식도 같은 확인을 한다).
     if (const UiHostServices* host = FindUiHostServices()) {
         const uint64 revision = host->StyleRevision();
-        if (revision != styleRevision_) {
+        if (revision != styleRevision_ || host != styleHost_) {
+            const bool moved = host != styleHost_;
             styleRevision_ = revision;
+            styleHost_ = host;
+            if (moved) {
+                OnUiHostServicesChanged();
+            }
+
             ApplyStyles(*host);
             layoutDirty_ = true;
             measureChildren_ = true;
