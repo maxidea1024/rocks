@@ -7,7 +7,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 blob 시험이다(Docs/Design/UnrealExchange.ko.md 3.3절, 10.4절 11·12번): fixture blob
+// Unreal 교환 blob 시험이다(Docs/Design/UnrealExchange 3.3절, 10.4절 11·12번): fixture blob
 // 파일 변조(없음·잘림·SHA 불일치·같은 hex 다른 bytes·파일 실패), 가변 배치(names·boneInfluences·
 // sparseVec3) 규칙, 64 KiB 조각 경계, 흘려 읽기(읽기 중 검증)와 메모리 읽기(LoadExchangeBlob)의
 // 판정 일치 퍼징.
@@ -98,7 +98,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         ExchangeDiagnostics diagnostics(allocator);
         REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
         CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(positionUsers),
-                            ExchangeIssue::BlobSize, ErrorCode::InvalidArgument));
+                            ExchangeIssue::BlobSize, ErrorCode::CorruptData));
     }
 
     {
@@ -115,7 +115,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
         const uint32 skinned[] = {SkinnedMeshAsset};
         CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(skinned),
-                            ExchangeIssue::BlobHash, ErrorCode::InvalidArgument));
+                            ExchangeIssue::BlobHash, ErrorCode::CorruptData));
 
         // 검증을 끄면 읽기는 통과하고 임포트 때 LoadExchangeBlob이 잡는다.
         ExchangeBundle unverified(allocator);
@@ -127,7 +127,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         Array<uint8> out(allocator);
         CHECK(LoadExchangeBlob(unverified, SkinnedMeshAsset,
                                unverified.Assets()[SkinnedMeshAsset].blobs[1], out, later)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
         CHECK(out.IsEmpty());
         const ExchangeDiagnostic* error = later.Find(AssetDiagnosticCode::CorruptBundle);
         REQUIRE(error != nullptr);
@@ -148,7 +148,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         const uint32 conflicted[] = {SkinnedMeshAsset, RockMeshAsset, CollisionMeshAsset,
                                      RockTextureAsset};
         CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(conflicted),
-                            ExchangeIssue::BlobConflict, ErrorCode::InvalidArgument));
+                            ExchangeIssue::BlobConflict, ErrorCode::CorruptData));
     }
 
     const FileFault faults[] = {FileFault::Stat, FileFault::Open, FileFault::Size, FileFault::Read,
@@ -164,7 +164,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         ExchangeDiagnostics diagnostics(allocator);
         REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
         const ErrorCode expected =
-            fault == FileFault::Short ? ErrorCode::InvalidArgument : FileErrorCode(FaultStatus);
+            fault == FileFault::Short ? ErrorCode::CorruptData : FileErrorCode(FaultStatus);
         CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(positionUsers),
                             fault == FileFault::Short ? ExchangeIssue::BlobSize
                                                       : ExchangeIssue::ReadFailed,
@@ -204,7 +204,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
         ExchangeDiagnostics diagnostics(allocator);
         REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
         CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(positionUsers),
-                            ExchangeIssue::NotRegularFile, ErrorCode::InvalidArgument));
+                            ExchangeIssue::NotRegularFile, ErrorCode::CorruptData));
         CHECK(files.OpenHandles() == 0);
     }
 
@@ -252,10 +252,10 @@ TEST(UnrealExchange_LoadBlob) {
               FileErrorCode(FaultStatus));
         files.fault = FileFault::Short;
         CHECK(LoadExchangeBlob(bundle, RockTextureAsset, blob, out, diagnostics).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         files.fault = FileFault::None;
         CHECK(LoadExchangeBlob(bundle, RockTextureAsset, blob, out, diagnostics).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::BlobHash) == 1);
         CHECK(out.IsEmpty() && files.OpenHandles() == 0);

@@ -12,7 +12,7 @@
 #include <Core/Math/Vector3.h>
 #include <Meta/Annotations.h>
 
-// 메시 단순 충돌 값 타입과 검증이다(Docs/Design/MeshAnimationAssets.ko.md 4.6·4.8절, UE
+// 메시 단순 충돌 값 타입과 검증이다(Docs/Design/MeshAnimationAssets 4.6·4.8절, UE
 // FKAggregateGeom·FKShapeElem 대응). 물리 형상으로 옮기는 것은 물리 어댑터(PhysicsJoltAdapter.ko.md
 // 4절), StaticMesh 필드 연결은 MA2b다.
 namespace rocks {
@@ -278,7 +278,7 @@ ROCKS_MESH_API Result<void> StoreConvexGeometry(const ConvexGeometry& geometry,
 // convex의 bulk를 package에서 읽어 out을 다시 만든다. 배치(원소 크기의 배수)와
 // ValidateConvexGeometry를 본다.
 //
-// 오류: 위반은 CorruptPackage·InvalidArgument(원래 판정은 issue), bulk를 못 읽으면
+// 오류: 위반은 CorruptPackage·CorruptData(원래 판정은 issue), bulk를 못 읽으면
 // CorruptPackage(BulkUnreadable)와 Package::BulkBytes의 오류, 할당 실패는 그 오류다. 실패하면 out은
 // 그대로다. 스레드: package를 읽으므로 그 Registry 소유 스레드에서 부른다.
 ROCKS_MESH_API Result<void> LoadConvexGeometry(const CollisionConvex& convex,

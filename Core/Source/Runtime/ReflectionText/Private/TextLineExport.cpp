@@ -115,6 +115,12 @@ Result<void> LineExporter::WriteField(const SchemaScope& scope, usize index,
         return Result<void>::Success();
     }
 
+    // 이벤트 필드는 값이 아니라 텍스트 표기가 없다 — 통째로 뺀다(Docs/Design/EventReflection.ko.md
+    // 3.1절).
+    if (IsEventField(*slot.field)) {
+        return Result<void>::Success();
+    }
+
     if (detail::HasNoJsonForm(*slot.field)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }

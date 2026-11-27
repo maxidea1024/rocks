@@ -8,7 +8,7 @@
 #include <World/SceneComponent.generated.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 이동 컴포넌트 기반·회전·발사체다(Docs/Design/EngineRuntime 26.3–26.5절, D4). 충돌 sweep 없이
 // 움직인다.
@@ -27,8 +27,7 @@ bool SameRotation(const Quatd& a, const Quatd& b, double tolerance) noexcept {
 
 } // namespace
 
-MovementComponent::MovementComponent(Allocator& allocator) noexcept {
-    (void)allocator;
+MovementComponent::MovementComponent(Allocator& allocator) noexcept : Component(allocator) {
     // UE TG_PrePhysics(MovementComponent.cpp:25).
     TickSettings& tick = PrimaryTick();
     tick.tick = true;

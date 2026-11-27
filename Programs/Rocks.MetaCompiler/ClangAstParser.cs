@@ -861,7 +861,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     // 기본 도구 이름(한정하지 않은 C++ 이름)과 같은 Name은 지정하지 않은 것과 같다.
                     ToolName = (classSpec?.ToolName ?? structSpec!.ToolName) is string toolName && toolName != TypeToolName.Default(qualified) ? toolName : "",
                     BindsSpelling = structSpec?.Binds ?? "",
-                    BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
+                    BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null,
+                    Script = classSpec?.Script ?? structSpec!.Script
                 };
                 if (isStruct)
                 {
@@ -993,6 +994,12 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         continue;
                     }
 
+                    // 리플렉션 클래스의 이벤트는 ROCKS_PROPERTY로만 둔다(EventReflection ED14 — 지정자 없는 멤버의 일반 진단보다 먼저 알린다).
+                    if (Annotation(member, "rocks.field.arguments") is null && EventRules.MentionsWritten(TypeSpelling(member)))
+                    {
+                        throw new MetadataException($"{symbol}: an Event member must be declared with ROCKS_PROPERTY", "RMC2801", EventRules.Hint);
+                    }
+
                     string fieldSpecifiers = FieldArguments(member, symbol);
                     if (memberName.Length == 0)
                     {
@@ -1027,6 +1034,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     });
                 }
 
+                // 리플렉션 함수(ROCKS_FUNCTION — Docs/Design/FunctionReflection.ko.md)다.
+                ParseFunctions(model, members, qualified, isStruct, Text(node, "tagUsed") == "class" ? "private" : "public", generatedBody);
                 classes.Add(qualified, model);
             }
 

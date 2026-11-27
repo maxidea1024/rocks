@@ -1,0 +1,712 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::action",
+      "id": "a157af7f39b94fabad425cebc05bcb18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::elapsedSeconds",
+      "id": "311f774b7e674aea81bb5b377cb8a361",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::events",
+      "id": "72ac386e72af4fd78cf32246a747fefd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::triggeredSeconds",
+      "id": "b3393f23286d4ca2bcdc89e4739bf418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::ActionEventData::value",
+      "id": "24a31863e46446a3bb5e15dd33b2df44",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsLeftLarge",
+      "id": "034b2243b89943879d3582f606a3b85f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsLeftSmall",
+      "id": "b6f7e05e30994009afedd7dc5cb728c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsRightLarge",
+      "id": "8af2a377dc0b498898017b1673fd67f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::affectsRightSmall",
+      "id": "6503293b7eb745c8989ae4c75dd014b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticChannel::curve",
+      "id": "b24191c06d6141f59a24a0068861fdf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticEffect::channels",
+      "id": "c46b21e58d394c6bbcb59a8b2b5c017b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticEffect::id",
+      "id": "78769542cdf0494296e30ef9a010087a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::HapticEffectAsset::effect",
+      "id": "01b52baefbac4baa9bec79808379e014",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputAction::id",
+      "id": "8518726a6f0d4ab29bdd89ac8d0e533d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputAction::settings",
+      "id": "48102cd10eef4e9db31f3ca1ac79b1dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionData::id",
+      "id": "dcf4270a657d4334920f3a2956eb0822",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionData::settings",
+      "id": "c2f543be0a4c44babe2d9f1a8e346853",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::accumulation",
+      "id": "69ee0a61aa3945ad8bfb63b9620bcdf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::consumeInput",
+      "id": "2bea3231f0eb4434a60f2f91cde0b6ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::description",
+      "id": "4024ce80fa4d4ae1a04f92dd07249707",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::mappingSettings",
+      "id": "a238a9546b5c44ff93b240ae673670c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::modifiers",
+      "id": "014181e8504c47168f8beccf5012b67b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::reserveAllMappings",
+      "id": "54ef5bfce04444339f696ae29cd8567d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::triggerWhenPaused",
+      "id": "57a30cbfb0534f429311638d73de7586",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::triggers",
+      "id": "c2ebf9ccbd2245d0bfd0329716fa73ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputActionSettings::valueType",
+      "id": "24259204fea64665a9ff1a501880c5cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::action",
+      "id": "223d1293dfa2491d999a47fc4eb2e3c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::key",
+      "id": "d4a4dd007d914d5eb5e2acc1947ca7b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::mappingSettings",
+      "id": "ef0050c4e8ae45d9bc5d5a3dd3dcced0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::modifiers",
+      "id": "5b0e37b87be24f15970fcd9a308004bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::settingBehavior",
+      "id": "c67587830d91466d964ff7feddc75a62",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputBinding::triggers",
+      "id": "e7e8b86089ea4ab590734e4cdc4fa16e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContext::actions",
+      "id": "0857ac6be0da4ee5a169a353b5db9ade",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContext::data",
+      "id": "7f4c5cc89f374504a76ff0939dca2a21",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContext::id",
+      "id": "f6a50d3553bb44fdbc0c0f77e2c7f22f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContextData::bindings",
+      "id": "6c88924f0e714f3faac32b98c4804905",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContextData::profileOverrides",
+      "id": "89f6fa887a7342f6b95185ac25bae3a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputContextData::registrationTracking",
+      "id": "a61651b4915b4a248b21456042f04110",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::curveExponent",
+      "id": "53eda37b41dc4b11b35eed285f76ee97",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::deadZoneType",
+      "id": "aaf61bad7a6a425e8a9c69af756bfbf5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::easingExponent",
+      "id": "3bcc9aae5209411e9edfafdbe0fca392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::fovScale",
+      "id": "389fbcbba35e4c71925c27b5712e52c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::kind",
+      "id": "a610f6d129874d00bd5b57820cbd4154",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::lowerThreshold",
+      "id": "58c4e964787142d0be6eef36a2ca89e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::negateX",
+      "id": "75685a752fe14106a78b4aef859b24c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::negateY",
+      "id": "00dadb9bbfca4d81ae4c042da96ff2cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::negateZ",
+      "id": "0bd2a3d4581d4433805e460ef1e01731",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::responseX",
+      "id": "44bdc69a56454dbeb21bbc275f1fe047",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::responseY",
+      "id": "71183c361c3f442399bcbd9173633be5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::responseZ",
+      "id": "d31934522b284271ab7e453c8adde951",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::scalar",
+      "id": "8033c4f8a53b431db73c08df4b410f18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::smoothMethod",
+      "id": "34296dfb1a3f4ae5a7dd4bee2d6ba138",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::smoothSpeed",
+      "id": "017631a9c6e4496d9ddb40121fa7a107",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::swizzle",
+      "id": "50bb2b0fab0745a19706736e0f8c453a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::upperThreshold",
+      "id": "907a3010eb4e4de8ade52a4a1b6f68d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputProfileBindings::bindings",
+      "id": "dfb1eb4a4091454980734a533b1daaf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputProfileBindings::profile",
+      "id": "e94ce9a529ec48de9b2fbb7a2f9b6a49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::actuationThreshold",
+      "id": "241cb4a40f8943688495634abfafddd1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::affectedByTimeDilation",
+      "id": "0678822b3f764888904b90a31819492b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::chordActionId",
+      "id": "c277c6b6398d43c4accd5fe5c0aba628",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::holdAndReleaseTime",
+      "id": "83710f4795eb4ebf95ea21e80fb69556",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::holdTime",
+      "id": "239ad267527b49d0b58b5354a899c713",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::oneShot",
+      "id": "08acd5c8341347cfab197847e1157a94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::pulseInterval",
+      "id": "65edd2add2e0454aaabc5e333ea8036b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::repeatDelay",
+      "id": "00249edbf6fa4fc2bdd205f77f6823d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::tapCount",
+      "id": "a974c113fe2045bc97ea02cf23be5f10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::tapReleaseTime",
+      "id": "7261c27b2cac4dacafdf4854871cea67",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::triggerLimit",
+      "id": "7bbe77f831154397a7e7bbb836f7f5bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::triggerOnStart",
+      "id": "3940079265d24e318a32855642b3df53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputTrigger::type",
+      "id": "47365637dc8e4630a5584012d20cc8ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputValue::type",
+      "id": "bbaa23ebb0564006907e48a1f9d95507",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputValue::value",
+      "id": "1f23b73059734d519581d4bc5ac80dca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::PlayerMappingSettings::displayCategory",
+      "id": "63b32af1bd0541349b8c2afced85c05e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::PlayerMappingSettings::displayName",
+      "id": "e880ce7098e9410fa3b12fc7e79b3303",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::PlayerMappingSettings::name",
+      "id": "a877536ff5634526960959cdef052b52",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::PlayerMappingSettings::supportedProfiles",
+      "id": "22150a7598a04180b55b4925d42ef638",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ActionAccumulation",
+      "id": "6c9fc881fd114d87b207818202c9f323",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ActionEvent",
+      "id": "36a9a21795d44c42ba02910ba551eefe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ActionEventData",
+      "id": "5bcc60b4c9514d03915431fcc1379a36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::ContextRegistrationTracking",
+      "id": "ff8ce90ed74c490993f81ef077236e5f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::DeadZoneType",
+      "id": "452db0f2d706493e9bc8324c24fa680f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticChannel",
+      "id": "41e6b301b9374428a372bb3f56168775",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticEffect",
+      "id": "5f6a6e01b28e4e43b6cca9447a586a35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::HapticEffectAsset",
+      "id": "6f1cf60ecdad45a2b67604167840af15",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputAction",
+      "id": "a53cb6b0fed242a78f212e89a3403959",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputActionData",
+      "id": "24a72f56a25847f4b79263780f815cbc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputActionSettings",
+      "id": "f9476e97203c46ab89377537e7ef9ed3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputBinding",
+      "id": "3537b9e7de2847188f51822ab69b07d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputContext",
+      "id": "ccac2c42149e4d0f82747ce315e04122",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputContextData",
+      "id": "d167cde246a44fa1b80fe270e0840d68",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputModifier",
+      "id": "06e3ee71f0d541c08887f7f2d433fe50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputModifierKind",
+      "id": "c3485611cdc24159985a14f79105bfe3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputProfileBindings",
+      "id": "52f7ae65baae467ab3a0d1efe0c8447f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputTrigger",
+      "id": "243d46d21fdb4461b7300d7cd894ab05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputTriggerType",
+      "id": "d98d41ff96e744a48a258ab6f79eedf5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputValue",
+      "id": "1ef14f863d324676914330ce9a7cf4fd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::InputValueType",
+      "id": "93fedf64f9a94003bf187c1c7bbe9fc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::MappingSettingBehavior",
+      "id": "862bbb8a30a94df58f058ea0c095df42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::PlayerMappingSettings",
+      "id": "af5c186e5d264b5994a8cccaf4ce30df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::SmoothDeltaMethod",
+      "id": "8029df4597c94d9fa3cce8d88b827804",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::input::SwizzleOrder",
+      "id": "8fe989a110ba48369e96dab87615a08a",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

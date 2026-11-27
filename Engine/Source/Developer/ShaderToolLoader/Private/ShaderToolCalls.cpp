@@ -101,6 +101,10 @@ ShaderToolOutcome CompileHlslToSpirv(const ShaderToolSet& tools, const SpirvComp
         arguments[count++] = "-fspv-reflect";
     }
 
+    if (request.debugInfo) {
+        arguments[count++] = "-Zi";
+    }
+
     DxcCompileRequest dxc;
     dxc.source = request.source;
     dxc.arguments = Span<const StringView>(arguments, count);

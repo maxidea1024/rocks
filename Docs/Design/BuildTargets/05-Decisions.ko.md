@@ -30,7 +30,7 @@
 | BD26 | `ROCKS_WITH_EDITOR_DATA=0` 빌드는 에디터 패키지(쿠킹하지 않은 패키지)를 저장하지 않는다(Unsupported). 건너뛴 `EditorOnly` 값을 잃지 않기 위해서다 | 권장안 |
 | BD27 | 빌드가 모듈마다 `ROCKS_<MODULE>_API`를 정의한다. `Monolithic`이면 빈 값, `Modular`이면 자기 모듈은 export·다른 모듈은 import다(UE `<MODULE>_API`). 가시성·rpath 옵션은 UE와 같다. 규칙 파일은 이 매크로를 정의할 수 없고, 다른 모듈의 API 매크로를 붙이면 정책 오류다. 다른 모듈이 상속하는 클래스는 클래스 단위 export가 필요하다(메타 컴파일러 진단) | 권장안 |
 | BD28 | 메타 컴파일러는 생성 `.cpp`(UE `.gen.cpp` — 리플렉션 헤더마다 하나, 모듈마다 등록용 하나: [리플렉션 생성 소스](../ReflectionGeneratedSources.ko.md) GSD2)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
-| BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
+| BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다. Monolithic 시험 실행 파일(`GlobalStateTestConsumer`)은 세지 않는다(3.8절 — 개정 38) | 권장안 |
 | BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](../ModuleLoader/README.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests — 타깃 `FoundationModular`)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 개정 22(사용자 결정): 시험은 시험 실행 파일 모듈(호스트) 하나에 두고 시험이 부르는 모듈 내부 선언에 그 모듈의 API 매크로를 붙인다(비공개 헤더는 정책 허용 목록). 처음 안(모듈 `Private/` 시험 묶음을 그 모듈 공유 라이브러리에 링크 — UE `Private/Tests`)은 6개 모듈의 시험이 그 모듈에 의존하는 fixture·모듈을 써서 순환이 생겨 버렸다. 시험 등록 표는 호스트에 한 벌이다 | 확정(사용자 결정) |
 | BD32 | 엔진 저장소의 규칙 평가는 `Engine/Plugins`를 늘 찾고, 끈 플러그인까지 기술자 검증·규칙 대조를 한다(3.9절) | 권장안 |
@@ -46,3 +46,9 @@
 | BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
 | BD43 | 쿠커(Commandlet)의 모듈 집합은 쿠킹 대상 출시 타깃(Game·Client, Release)의 모듈 집합과 같아야 한다: 엔진 몫은 Commandlet이 엔진 저장소 출시 타깃(지금 Sandbox) 폐포의 Runtime·ClientOnly 엔진 모듈을 링크(정책 `cooker-module-set`), 프로젝트·플러그인 몫은 ML5b 뒤 모듈 로더로 적재, 쿠커가 이름으로 대조(3.10절, 렌더 세션 요청 — 셰이더 시스템 SSD3). 버린 안: 대상 타깃마다 쿠커 링크, 모듈 없이 셰이더 타입 manifest로 쿠킹 | 권장안 |
 | BD44 | 타깃 속성 `PrerequisiteTargets`(`PrerequisiteTarget` — 이름과 조건 칸 `Platforms`·`Configurations`): `build`·`test`가 주 타깃 메타 생성 전에 선행 타깃을 자기 규칙으로 같은 구성·도구 체인·빌드 방식에서 따로 빌드한다(깊이 우선 후위, 중복 한 번, 출력은 자기 기본 출력·`--output`이면 형제). 선행 타깃은 Program이고, 주 타깃이 Developer 모듈을 빼는 구성(출시 타깃 Release)에서는 건너뛰며 그 구성을 명시하면 오류다. 없는 이름·자기 자신·중복·순환·선행 타깃을 가진 동반 타깃은 규칙 로드 오류다(3.11절, UE `PreBuildTargets`). 버린 안: Game 타깃 동반 허용(매크로 조합·빌드 정보 TU 공유가 남음), Game 매크로 워커 타깃 추가, `TestPrograms` 재사용, `Rocks.proj`에서 두 번 부르기 | 권장안 |
+| BD45 | ISPC 도구 고정(3.12절): `Build/Toolchain.json` `ispc`(버전·호스트별 url·sha256), `InstallIspc.ps1`, `ROCKS_ISPC` → 기본 위치, 버전 대조 실패는 빌드 오류, ISPC 원본이 대상에 있을 때만 요구 |
+| BD46 | ISPC 원본 선언(3.12절): `NativeModuleInput.IspcSources`·manifest `ispcUnits`(명시 목록만), Android 대상은 Unsupported |
+| BD47 | action `Ispc`(3.12절): 원본마다 object·`_ispc.h`·`.deps`, 아키텍처당 타깃 하나(X64 `sse4-i32x4`, Arm64 `neon-i32x4`), `--opt=disable-fma`, fast-math·다중 타깃 금지(모듈 인자로 못 바꿈) |
+| BD48 | ISPC 생성 헤더(3.12절): `<out>/Ispc/<모듈>/`(계획 때 만듦, Private include, 입력 스냅샷·목록 제외), 같은 모듈 C++ compile이 의존하고 DeclaredInputs로 받음 |
+| BD49 | ISPC 증분 key(3.12절): Identity에 버전·실행 파일 sha256(찾을 때 한 번)·타깃·인자, `.isph`는 depfile(`-MMM`)·헤더 확장자 목록 |
+| BD50 | ISPC 빌드 ID·인코더 신원(3.12절): 도구 빌드 ID가 Ispc action을 원본 키로 셈, `ToolchainFingerprint`는 그대로(실행 파일 간 대조 계약), ISPC 신원은 생성 정의 `ROCKS_ISPC_IDENTITY`로 인코더 너겟 키에 |

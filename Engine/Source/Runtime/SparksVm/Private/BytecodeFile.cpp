@@ -362,15 +362,17 @@ public:
         }
 
         rejection_ = VerifyBytecode(out_);
+        // 도구가 쓴 파일의 형식·verifier 거부는 읽은 byte의 손상이다(CorruptData — AssetSystem 19장
+        // 규칙).
         return rejection_.error == BytecodeLoadError::None
                    ? Result<void>::Success()
-                   : Result<void>::Failure(ErrorCode::InvalidArgument);
+                   : Result<void>::Failure(ErrorCode::CorruptData);
     }
 
 private:
     Result<void> Reject(BytecodeLoadError error) noexcept {
         rejection_ = BytecodeRejection{error, NoBytecodeIndex, NoBytecodeIndex};
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     Result<void> Section(const uint8 (&tag)[TagBytes],

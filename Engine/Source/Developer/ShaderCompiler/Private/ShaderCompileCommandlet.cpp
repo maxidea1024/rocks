@@ -1,5 +1,7 @@
 #include <ShaderCompiler/ShaderCompileCommandlet.h>
 
+#include "ShaderCompileReflection.h"
+
 #include <AssetNugget/NuggetFileSystemBackend.h>
 #include <Base/InitializerList.h>
 #include <Core/Text/NumberText.h>
@@ -10,6 +12,7 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
+#include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <Task/WorkerScheduler.h>
 #include <stdio.h>
 #include <string.h>
@@ -233,29 +236,6 @@ const char* CodeExtension(const ShaderFormatDefinition& format) noexcept {
     return "bin";
 }
 
-// 이 실행 파일 옆의 워커다.
-bool FindWorker(char (&out)[MaxCommandPathBytes]) noexcept {
-    usize bytes = 0;
-    if (!platform::GetExecutablePath(out, sizeof(out), bytes)) {
-        return false;
-    }
-
-    while (bytes > 0 && out[bytes - 1] != '/' && out[bytes - 1] != '\\') {
-        --bytes;
-    }
-
-    for (const char* name : {"ShaderCompileWorker.exe", "ShaderCompileWorker"}) {
-        const int written = snprintf(out + bytes, sizeof(out) - bytes, "%s", name);
-        bool exists = false;
-        if (written > 0 && platform::PhysicalFileSystem().FileExists(out, strlen(out), exists) &&
-            exists) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 bool WriteFile(const char* path, Span<const uint8> bytes) noexcept {
     platform::File file;
     if (!file.Open(path, platform::FileOpenMode::CreateAlways)) {
@@ -266,30 +246,8 @@ bool WriteFile(const char* path, Span<const uint8> bytes) noexcept {
     return static_cast<bool>(file.Close()) && static_cast<bool>(written.status);
 }
 
-// 리플렉션 문맥이다(옵션 기록 — 키 6행).
-struct Reflection {
-    explicit Reflection(Allocator& allocator) noexcept
-        : types(allocator), registration(types, allocator),
-          objects(allocator, types, {ShaderCompileCommandContextId, 1}),
-          access(objects.OwnerAccess()) {
-        registered = static_cast<bool>(RegisterShaderCompilerTypes(registration));
-    }
-
-    ~Reflection() noexcept {
-        (void)objects.Shutdown(objects.OwnerAccess());
-        (void)registration.Unregister();
-        (void)types.Shutdown();
-    }
-
-    // 명령 전용 레지스트리 문맥 id다("SHCM").
-    static constexpr uint32 ShaderCompileCommandContextId = 0x5348434d;
-
-    TypeRegistry types;
-    ModuleRegistration registration;
-    ObjectRegistry objects;
-    ObjectAccessContext access;
-    bool registered = false;
-};
+// 명령 전용 레지스트리 문맥 id다("SHCM").
+constexpr uint32 ShaderCompileCommandContextId = 0x5348434d;
 
 class Command final {
 public:
@@ -360,7 +318,7 @@ private:
             snprintf(worker_, sizeof(worker_), "%.*s",
                      static_cast<int>(context_.workerExecutable.ByteCount()),
                      context_.workerExecutable.Data());
-        } else if (!FindWorker(worker_)) {
+        } else if (!compile_support::FindWorkerNextToExecutable(worker_)) {
             return Fail(output_, ExitFailed,
                         "%s: ShaderCompileWorker is not next to this executable\n", CommandName);
         }
@@ -442,7 +400,7 @@ private:
             return mounted;
         }
 
-        Reflection reflection(allocator_);
+        compile_support::KeyReflection reflection(allocator_, ShaderCompileCommandContextId);
         if (!reflection.registered) {
             return Fail(output_, ExitFailed, "%s: cannot register the reflection types\n",
                         CommandName);
@@ -470,8 +428,7 @@ private:
 
         config.allocator = &allocator_;
         config.tree = &tree;
-        config.reflection = ShaderKeyReflection{&reflection.objects, reflection.access,
-                                                &reflection.types, &allocator_};
+        config.reflection = reflection.Reflection();
         config.workerExecutable = StringView(worker_);
         config.workRoot = workRoot_.View();
         config.workerCount = workers;
@@ -649,7 +606,35 @@ private:
             return false;
         }
 
-        return WriteFile(file, result.values.Part(ShaderNuggetValue::Code).View());
+        if (!WriteFile(file, result.values.Part(ShaderNuggetValue::Code).View())) {
+            return false;
+        }
+
+        // 값 3(debugSymbols=true — ShaderSystem 16.3절 SSD73·SSD74)은 같은 폴더에 심볼 이름(D3D
+        // PDB — 디버거가 DXIL·DXBC의 디버그 이름으로 찾는다), 이름이 없으면
+        // <name>.<entry>.<stage><확장자>로 쓴다.
+        if (!result.values.Has(ShaderNuggetValue::DebugSymbols)) {
+            return true;
+        }
+
+        const auto symbols =
+            DecodeShaderDebugSymbols(result.values.Part(ShaderNuggetValue::DebugSymbols).View());
+        if (!symbols) {
+            return false;
+        }
+
+        char symbolFile[MaxCommandPathBytes];
+        const StringView symbolName = symbols.Value().name;
+        const int symbolBytes =
+            symbolName.IsEmpty()
+                ? snprintf(symbolFile, sizeof(symbolFile), "%.*s/%s.%.*s.%.*s%s", directoryBytes,
+                           file, name, static_cast<int>(spec.entry.ByteCount()), spec.entry.Data(),
+                           static_cast<int>(spec.stageName.ByteCount()), spec.stageName.Data(),
+                           ShaderDebugSymbolExtension(symbols.Value().kind))
+                : snprintf(symbolFile, sizeof(symbolFile), "%.*s/%.*s", directoryBytes, file,
+                           static_cast<int>(symbolName.ByteCount()), symbolName.Data());
+        return symbolBytes > 0 && static_cast<usize>(symbolBytes) < sizeof(symbolFile) &&
+               WriteFile(symbolFile, symbols.Value().contents);
     }
 
     const ShaderCompileCommandContext& context_;

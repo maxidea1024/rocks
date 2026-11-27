@@ -16,6 +16,26 @@
     };
 #define ROCKS_PROPERTY(...) [[clang::annotate("rocks", "rocks.field.arguments", #__VA_ARGS__)]]
 
+// 리플렉션 함수다(UE UFUNCTION 대응 — Docs/Design/FunctionReflection.ko.md). ROCKS_CLASS 클래스의
+// noexcept 멤버 함수(인스턴스·static) 선언 바로 앞에 둔다. 접근 수준은 제한하지 않는다(생성 thunk는
+// ROCKS_GENERATED_BODY의 friend로 부른다). 이름에 C++ 오버로드가 없어야 하고, 매개변수는 값·const&
+// 입력(강한 참조 ObjectRef와 그것을 담는 형식 제외), 반환은 void·값·Result<void>·Result<T>다.
+// 지정자: Pure(관찰 가능한 상태를 바꾸지 않는다 — 반환값 필수), EditorOnly(#if ROCKS_WITH_EDITOR
+// 안), Name="…"(도구 이름). 생성 코드가 TypeSchema::functions와 호출 thunk를 만들고 FunctionCall로
+// 부른다.
+//
+// 사용 예:
+//   ROCKS_CLASS()
+//   class Door : public rocks::Component {
+//       ROCKS_GENERATED_BODY()
+//
+//   public:
+//       using rocks::Component::Component;
+//       ROCKS_FUNCTION() rocks::Result<void> Open(rocks::ObjectHandle opener) noexcept;
+//       ROCKS_FUNCTION(Pure) bool IsOpen() const noexcept;
+//   };
+#define ROCKS_FUNCTION(...) [[clang::annotate("rocks", "rocks.function", #__VA_ARGS__)]]
+
 // 리플렉션 enum이다(Docs/Design/ReflectionFoundations.ko.md 3.4절). 바로 뒤에 underlying을 명시한
 // enum class 정의가 와야 한다(UE와 같은 정수 8종 uint8·uint16·uint32·uint64·int8·int16·int32·int64,
 // 열거자 하나 이상, 값 별칭 금지, uint64 열거자 값은 int64 최댓값 이하 — RMC2401, Docs/Design/

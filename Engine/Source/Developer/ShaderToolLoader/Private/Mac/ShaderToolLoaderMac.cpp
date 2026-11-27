@@ -62,7 +62,7 @@ ShaderToolLoadStatus CompileWithDxc(const DxcFunctions&, const DxcCompileRequest
 
 // FXC는 Windows 도구다(Windows 밖에는 구현이 없다 — 11.1절 SH1e E3).
 ShaderToolOutcome CompileWithFxc(const FxcFunctions&, const FxcCompileRequest&,
-                                 Array<uint8>& object, String& diagnostics) noexcept {
+                                 Array<uint8>& object, String& diagnostics, FxcSymbols*) noexcept {
     object.Clear();
     diagnostics.Clear();
     (void)diagnostics.TryAppend("FXC runs only on Windows");

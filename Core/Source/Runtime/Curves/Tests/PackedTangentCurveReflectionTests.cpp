@@ -288,7 +288,7 @@ TEST(PackedCurveReflection_DecodeRejectsBrokenPacked) {
             ObjectRegistry target(fixture.system, fixture.types, {0x5043, 3});
             auto loaded = LoadObjectGraph(fixture.system, target, fixture.types,
                                           target.OwnerAccess(), bytes.View());
-            CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+            CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
             CHECK(target.Stats().liveObjects == 0);
             REQUIRE(target.Shutdown(target.OwnerAccess()));
         }

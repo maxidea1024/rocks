@@ -1,3 +1,5 @@
+#include "WorldTags.h"
+
 #include <Platform/Fatal.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
@@ -43,6 +45,48 @@ Result<void> Component::SetTickEnabled(bool enabled) noexcept {
     }
 
     return world_->SetComponentTickEnabled(Handle(), enabled);
+}
+
+// 태그(Docs/Design/EngineRuntime 31.4절).
+
+bool Component::HasTag(Name tag) const noexcept {
+    return world_tags::Contains(componentTags_.View(), tag);
+}
+
+Result<void> Component::AddTag(Name tag) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ComponentState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Add(componentTags_, world_->Objects(), tag);
+}
+
+Result<void> Component::RemoveTag(Name tag) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ComponentState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Remove(componentTags_, tag);
+}
+
+Result<void> Component::SetTags(Span<const Name> tags) noexcept {
+    if (world_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (GetState() == ComponentState::PendingDestroy) {
+        return Result<void>::Failure(ErrorCode::Destroyed);
+    }
+
+    return world_tags::Set(componentTags_, world_->Objects(), tags);
 }
 
 } // namespace rocks

@@ -1,6 +1,6 @@
 # 엔진 셰이더 설계(UE 5.8 `Engine/Shaders` 대응)
 
-기준일: 2026-11-25, 개정 4(초안, 교차 검증 1차 반영 — 13장). 결정 SLD1–SLD21은 권장안으로 확정했다(3·10장). SL0(공통 라이브러리 1차, SS SH2g(SL0))만 구현한다(7장, 개정 3). 나머지는 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며, 이 문서는 그 순서를 바꾸지 않는다. 다만 렌더러 없이 쓸 수 있는 공통 라이브러리(SL0)는 셰이더 시스템 SH2와 함께 할 수 있다(6·7장).
+기준일: 2026-11-27, 개정 8(초안, 교차 검증 1차 반영 — 13장). 결정 SLD1–SLD28은 권장안으로 확정했다(3·10·14장). SL0(공통 라이브러리 1차, SS SH2g(SL0) — 7장, 개정 3)과 SL1 나머지(RB 18.4절 SM13 — 14장, 개정 6)를 구현한다. 나머지는 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9 → Curve → A0-G → A1–A6 → 화면 마일스톤)를 따르며, 이 문서는 그 순서를 바꾸지 않는다. 다만 렌더러 없이 쓸 수 있는 공통 라이브러리(SL0)는 셰이더 시스템 SH2와 함께 할 수 있다(6·7장).
 
 **사용자 지시(2026-11-23).** "UE `C:\github\UnrealEngine\Engine\Shaders`에 있는 것 대부분을 Rocks도 구현해야 한다." 원문 복사가 아니라 같은 기능을 Rocks가 직접 구현한다는 뜻이다. 같은 날 추가 지시: Nanite·Lumen·Substrate·Niagara·레이 트레이싱·패스 트레이싱 같은 큰 기능은 **후속**으로 확정한다(결정 항목으로 올리지 않는다). 문서의 중심은 기본(플랫폼·공통, 수학·인코딩, 색·톤매핑, BRDF·기본 셰이딩 모델, 머티리얼 템플릿·정점 입력, 베이스 패스, 라이트 컬링, 기본 라이팅·섀도, 스카이·포그·반투명, 기본 포스트 프로세스, 유틸리티, 컴퓨트 유틸)이다. 또 [컴포넌트 도입](../ComponentCatalog/README.ko.md)의 렌더링 필수 컴포넌트가 화면에 나오는 데 필요한 셰이더를 기본 영역에 빠짐없이 넣는다(5장).
 
@@ -14,7 +14,7 @@
 
 **근거 문서 약어.** SS = [셰이더 시스템](../ShaderSystem/README.ko.md)(개정 28), RN = [렌더러](../Renderer.ko.md)(개정 13), RB = [렌더 기반](../RenderBase/README.ko.md), MS = [머티리얼 시스템](../MaterialSystem/README.ko.md)(개정 9), EIP = [엔진 구현 계획](../EngineImplementationPlan.ko.md), CC = [컴포넌트 도입](../ComponentCatalog/README.ko.md)(개정 7), UI = [UI 툴킷](../UiToolkit.ko.md).
 
-자주 인용하는 장 파일: SS [1절 결정](../ShaderSystem/01-Decisions.ko.md), [2절 형식](../ShaderSystem/02-FormatsAndConversion.ko.md), [3절 구조](../ShaderSystem/03-StructureSummary.ko.md), [7절 바인딩 규약](../ShaderSystem/07-BindingConventions.ko.md), [11절 워커·SH1(SC1–SC14)](../ShaderSystem/11-WorkerCommunication.ko.md), [12절 형식 정의·셰이더 타입·쿠킹](../ShaderSystem/12-FormatDefinitionsCooking.ko.md), [15절 결정 사항](../ShaderSystem/15-OpenDecisions.ko.md), [16절 이후 단계(SH0–SH6)](../ShaderSystem/16-LaterStages.ko.md); CC [3절 필수 컴포넌트](../ComponentCatalog/03-RequiredComponents.ko.md), [5절 묶음 순서](../ComponentCatalog/05-BundleOrder.ko.md), [8절 폴더 밖](../ComponentCatalog/08-OutsideFolder.ko.md), [9절 플러그인](../ComponentCatalog/09-Plugins.ko.md).
+자주 인용하는 장 파일: SS [1절 결정](../ShaderSystem/01-Decisions.ko.md), [2절 형식](../ShaderSystem/02-FormatsAndConversion.ko.md), [3절 구조](../ShaderSystem/03-StructureSummary.ko.md), [7절 바인딩 규약](../ShaderSystem/07-BindingConventions.ko.md), [11절 워커·SH1(SC1–SC14)](../ShaderSystem/11-WorkerCommunication.ko.md), [12절 형식 정의·셰이더 타입·쿠킹](../ShaderSystem/12-FormatDefinitionsCooking.ko.md), [15절 결정 사항](../ShaderSystem/15-OpenDecisions.ko.md), [16절 이후 단계(SH0–SH6)](../ShaderSystem/16-LaterStages/README.ko.md); CC [3절 필수 컴포넌트](../ComponentCatalog/03-RequiredComponents.ko.md), [5절 묶음 순서](../ComponentCatalog/05-BundleOrder.ko.md), [8절 폴더 밖](../ComponentCatalog/08-OutsideFolder.ko.md), [9절 플러그인](../ComponentCatalog/09-Plugins.ko.md).
 
 **좌표·단위 규약(절대 규칙).** UE 5.8과 같다: 왼손 +X 전방·+Y 오른쪽·+Z 위, 길이 cm, 행 벡터 `p·M`과 셰이더 `mul(v, M)`·행 우선 packing, view +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면, 앞면 화면 반시계(EIP 2.2절, SS 7.2절 6·8항, RN 1절). 엔진 셰이더 규약은 3.4절이다.
 
@@ -33,6 +33,7 @@
 - [11. UE 대응표(Rocks 파일 → UE 파일)](11-UnrealMapping.ko.md)
 - [12. UE 파일 전수 분류](12-UnrealInventory.ko.md)
 - [13. 개정 기록](13-Revisions.ko.md)
+- [14. SL1 나머지(RB 18.4절 SM13)](14-ScreenMilestoneScope.ko.md)
 
 ## 요약
 

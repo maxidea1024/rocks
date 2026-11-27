@@ -7,7 +7,7 @@
 #include <Core/Text/String.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
-// Unreal 교환 묶음 진단이다(Docs/Design/UnrealExchange.ko.md 10.3·10.4절). 리더(ExchangeBundle.h)와
+// Unreal 교환 묶음 진단이다(Docs/Design/UnrealExchange 10.3·10.4절). 리더(ExchangeBundle.h)와
 // 임포트 순서(ExchangeImportOrder.h)가 진단을 하나씩 쌓고, 호출자(명령·시험)는 끝난 뒤 목록을 본다.
 //
 // 사용 예:
@@ -70,7 +70,9 @@ enum class ExchangeIssue : uint8 {
     AmbiguousExisting, // 기존 에셋 조회가 둘 이상(UnrealPathCollision, text = objectPath)
     HardCycle,         // Hard만의 순환 단위 — 다중 에셋 원자 저장 전까지(UnsupportedCycle)
     NoKindImporter,    // 교환 클래스의 임포터가 없음(UnsupportedAsset, text = 클래스 이름)
-    PathTaken // 새 에셋의 대응 경로를 다른 Rocks 에셋이 씀(UnrealPathCollision, text = 경로)
+    PathTaken, // 새 에셋의 대응 경로를 다른 Rocks 에셋이 씀(UnrealPathCollision, text = 경로)
+    // 종류별 임포터의 서비스 임포트가 실패함(10.6절 2번 — 코드·오류는 서비스 진단, text = 그 path)
+    ServiceFailure
 };
 
 // 세부 규칙 이름이다(예: BlobHash → "BlobHash"). 모르는 값은 "Unknown"이다. 정적 수명이다.
@@ -87,8 +89,8 @@ struct ExchangeDiagnostic {
     // AssetSystem 4.6절 진단 이름(CorruptBundle 등)이다.
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
     ExchangeSeverity severity = ExchangeSeverity::Error;
-    // 원본 오류 코드다(손상 InvalidArgument, 버전 Unsupported, 파일 오류는 그대로). 경고·정보는
-    // None.
+    // 원본 오류 코드다(손상 CorruptData, 상한 CapacityExceeded, 버전 Unsupported, 파일 오류는
+    // 그대로). 경고·정보는 None.
     ErrorCode error = ErrorCode::None;
     ExchangeIssue issue = ExchangeIssue::None;
     ExchangeFile file = ExchangeFile::None;

@@ -8,7 +8,7 @@
 #include <Curves/TangentCurve.h>
 #include <Object/ObjectRefs.h>
 
-// 애니메이션 클립 에셋이다(Docs/Design/MeshAnimationAssets.ko.md 7절·7.5절, UE UAnimSequenceBase·
+// 애니메이션 클립 에셋이다(Docs/Design/MeshAnimationAssets 7절·7.5절, UE UAnimSequenceBase·
 // UAnimSequence·UAnimDataModel 대응).
 namespace rocks {
 

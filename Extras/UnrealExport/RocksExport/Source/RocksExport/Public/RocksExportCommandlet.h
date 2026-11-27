@@ -5,7 +5,7 @@
 
 #include "RocksExportCommandlet.generated.h"
 
-// commandlet 진입점 -run=RocksExport다(UnrealExchange.ko.md 11.2절).
+// commandlet 진입점 -run=RocksExport다(UnrealExchange 11.2절).
 //
 //   UnrealEditor-Cmd.exe <프로젝트>.uproject -run=RocksExport -Assets=<선택>[,<선택>...] -Out=<묶음 디렉터리>
 //                        [-Closure | -NoClosure] [-unattended -nullrhi -nopause]

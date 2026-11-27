@@ -45,6 +45,9 @@ internal static partial class MetaTests
 
         public string Descriptor => MetaCompilerArguments.Descriptor(temporary.Root);
 
+        // Sparks binding schema 출력이다(Docs/Design/SparksBinding.ko.md B2).
+        public string BindingSchema => MetaCompilerArguments.BindingSchema(temporary.Root);
+
         // 모듈 생성 헤더(등록 함수 선언)의 경로다.
         public string Aggregate => MetaCompilerArguments.AggregatePath(temporary.Root);
 

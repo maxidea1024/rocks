@@ -6,6 +6,8 @@ Core(기반 라이브러리) 위에 올라가는 게임 엔진 계층이다. Wor
 
 ```text
 Engine/
+  Content/
+    Splash/               기본 시작 화면 이미지(Splash·StudioSplash, 1x·@2x — Docs/Design/SplashScreen)
   Source/
     Engine.Target.cs      게임이 링크하는 런타임 모듈 묶음(Installed SDK 기본 타깃)
     Runtime/<Module>/     게임에 들어가는 엔진 모듈(<Module>.Build.cs는 EngineModuleRules 상속)

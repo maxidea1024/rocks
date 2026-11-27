@@ -183,14 +183,13 @@ TEST(WireSlot_ReadPrefixedRecordRejectsMalformedContentWithoutMovingCursor) {
     };
 
     constexpr usize NoPatch = IndexNone;
-    const Case cases[] = {
-        {76, 75, NoPatch, 0, ErrorCode::InvalidArgument},  // 길이가 남은 byte보다 크다
-        {0, 0, NoPatch, 0, ErrorCode::InvalidArgument},    // 0 byte는 Record가 아니다
-        {40, 40, NoPatch, 0, ErrorCode::InvalidArgument},  // header보다 짧다
-        {76, 76, 0, 'X', ErrorCode::InvalidArgument},      // magic
-        {76, 76, 8, 2, ErrorCode::Unsupported},            // envelope version
-        {76, 76, 28, 0, ErrorCode::InvalidArgument},       // schema version 0
-        {75, 76, NoPatch, 0, ErrorCode::InvalidArgument}}; // 길이가 Record보다 1 짧다
+    const Case cases[] = {{76, 75, NoPatch, 0, ErrorCode::CorruptData}, // 길이가 남은 byte보다 크다
+                          {0, 0, NoPatch, 0, ErrorCode::CorruptData},   // 0 byte는 Record가 아니다
+                          {40, 40, NoPatch, 0, ErrorCode::CorruptData}, // header보다 짧다
+                          {76, 76, 0, 'X', ErrorCode::CorruptData},     // magic
+                          {76, 76, 8, 2, ErrorCode::Unsupported},       // envelope version
+                          {76, 76, 28, 0, ErrorCode::CorruptData},      // schema version 0
+                          {75, 76, NoPatch, 0, ErrorCode::CorruptData}}; // 길이가 Record보다 1 짧다
     for (const Case& item : cases) {
         Array<uint8> bytes(allocator);
         AppendU64(bytes, item.length);
@@ -210,7 +209,7 @@ TEST(WireSlot_ReadPrefixedRecordRejectsMalformedContentWithoutMovingCursor) {
     const uint8 truncated[] = {76, 0, 0, 0, 0, 0, 0};
     auto truncatedReader = ArchiveReader::Create(truncated);
     REQUIRE(truncatedReader);
-    CHECK(ReadPrefixedRecord(truncatedReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadPrefixedRecord(truncatedReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(truncatedReader.Value().Position() == 0);
 
     // 길이가 maxValueBytes를 넘으면 CapacityExceeded다.

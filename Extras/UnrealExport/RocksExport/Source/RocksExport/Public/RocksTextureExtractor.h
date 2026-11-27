@@ -7,7 +7,7 @@ class FRocksBundleWriter;
 class UTexture;
 struct FRocksAssetBody;
 
-// 텍스처 추출이다(UnrealExchange.ko.md 4절, 4.5절 — 11.6절 FRocksTextureExtractor).
+// 텍스처 추출이다(UnrealExchange 4절, 4.5절 — 11.6절 FRocksTextureExtractor).
 //
 // - settings: 텍스처 객체(UTexture와 차원별 클래스)의 UPROPERTY 덤프(11.5절). `Source`는 data에 쓰므로 뺀다.
 // - data.source: FTextureSource의 형식·크기·압축·손실 원본·위도경도 표시·층별 형식과 감마, 블록별 mip 사슬.

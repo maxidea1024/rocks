@@ -35,7 +35,7 @@ Result<OpusCodecHeader> ParseOpusCodecHeader(Span<const uint8> bytes,
                                              const AudioPlatformDataHeader& header) noexcept {
     const uint32 channels = header.channels;
     if (bytes.Size() != OpusCodecHeaderBytes || channels == 0 || channels > MaxOutputChannels) {
-        return Result<OpusCodecHeader>::Failure(ErrorCode::InvalidArgument);
+        return Result<OpusCodecHeader>::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* data = bytes.Data();
@@ -50,13 +50,13 @@ Result<OpusCodecHeader> ParseOpusCodecHeader(Span<const uint8> bytes,
         parsed.coupledStreams > parsed.streams || codedChannels != channels ||
         data[OpusReservedOffset] != 0 || LoadLittleEndian<uint16>(data + OpusGainOffset) != 0 ||
         parsed.preSkip != header.encoderDelay) {
-        return Result<OpusCodecHeader>::Failure(ErrorCode::InvalidArgument);
+        return Result<OpusCodecHeader>::Failure(ErrorCode::CorruptData);
     }
 
     for (uint32 channel = 0; channel < MaxOutputChannels; ++channel) {
         const uint8 value = data[OpusMappingOffset + channel];
         if (channel < channels ? value >= codedChannels : value != 0) {
-            return Result<OpusCodecHeader>::Failure(ErrorCode::InvalidArgument);
+            return Result<OpusCodecHeader>::Failure(ErrorCode::CorruptData);
         }
 
         parsed.mapping[channel] = value;

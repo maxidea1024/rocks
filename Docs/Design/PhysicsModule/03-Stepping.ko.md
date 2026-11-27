@@ -35,7 +35,7 @@ UE `SetBodyTransform`(`E/Private/PhysicsEngine/BodyInstance.cpp:2767–2839`)을
 | Dynamic | 즉시 옮기고 속도는 그대로(UE `SetGlobalPose` — `:2544–2560`) | 같다(UE 단일 body는 `ResetPhysics`도 `TeleportPhysics`와 같은 경로) |
 | Static | 즉시 옮긴다(broadphase 갱신) | 같다 |
 
-- **목표 없는 스텝의 Kinematic 정지.** Jolt `MoveKinematic`은 위치가 아니라 **속도**를 정하고, 그 속도는 다음 스텝에도 남는다(`Physics/Body/Body.h:221`). 그래서 PhysicsSimulate는 이번 스텝에 목표가 없는 Kinematic body의 선·각속도를 0으로 둔다(현재 자세로 `MoveKinematic`). 같은 프레임의 고정 스텝 여러 번에서 목표는 첫 스텝이 쓰고(도달), 나머지 스텝은 정지다. 이동이 부드러워야 하는 Kinematic(움직이는 발판)은 Fixed hook에서 스텝마다 옮긴다. UE는 프레임당 물리 step이 기본 한 번이라 이 문제가 없다(3.5절). `MoveKinematic` 대신 teleport로만 옮기면 밀린 Dynamic body가 이동 속도를 받지 못한다(UnrealJolt가 그렇다 — 어댑터 경계 11.5절).
+- **목표 없는 스텝의 Kinematic 정지.** Jolt `MoveKinematic`은 위치가 아니라 **속도**를 정하고, 그 속도는 다음 스텝에도 남는다(`Physics/Body/Body.h:221`). 그래서 PhysicsSimulate는 이번 스텝에 목표가 없는 Kinematic body의 선·각속도를 0으로 둔다(`SetLinearAndAngularVelocity(0)` — 현재 자세로 `MoveKinematic`하는 것과 같은 결과). 같은 프레임의 고정 스텝 여러 번에서 목표는 첫 스텝이 쓰고(도달), 나머지 스텝은 정지다. 이동이 부드러워야 하는 Kinematic(움직이는 발판)은 Fixed hook에서 스텝마다 옮긴다. UE는 프레임당 물리 step이 기본 한 번이라 이 문제가 없다(3.5절). `MoveKinematic` 대신 teleport로만 옮기면 밀린 Dynamic body가 이동 속도를 받지 못한다(UnrealJolt가 그렇다 — 어댑터 경계 11.5절).
 - **Editor·Preview World**는 Kinematic 이동도 언제나 teleport다(UE `BodyInstance.cpp:2796–2802` — `bEditorWorld`).
 - 컴포넌트 이동 경로: `SceneComponent` transform이 바뀌면(부착 전파 포함) `PrimitiveComponent::OnTransformUpdated` 가상 hook이 body가 있으면 `SetBodyTransform`을 부른다(UE `OnUpdateTransform` → `SendPhysicsTransform` — `E/Private/Components/PrimitiveComponent.cpp:1061–1083`). 결과 반영(3.4절)이 부른 이동은 `skipPhysics` 표지로 body에 되돌려 보내지 않는다(UE `MOVECOMP_SkipPhysicsMove`).
 - teleport 표지는 `SceneComponent`의 이동 API 인자(`TeleportMode`)로 전한다. D2·D4의 이동 API에 인자를 더하는 일은 7.4절 요청이다.

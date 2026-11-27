@@ -28,3 +28,21 @@
 | 5.1 서라운드 쌍 | 장치 마스크(Windows 기본 BL·BR 210°·150°) | SL·SR 250°·110° 고정, 장치 마스크 대응은 AU9 | ITU-R BS.775 배치, 내부 순서 고정(3.3절) |
 | HPF 계수 | `FastTan` 근사 | `PlatformMath::Tan` | 정확한 기준값 대조 |
 | 다채널 분리 임포트 | `_L`·`_R` 파일 묶음 임포트 | 받지 않음 | 수요 생기면 |
+| 파일 loop 구간 | `USoundWave` looping은 늘 파형 전체, `smpl` loop는 cue point(loop region)로만 남고 믹서가 쓰지 않는다 | looping이면 사용자 `loopOverride` > 파일 loop > 전체(개정 33, 3.36.2절) | intro + loop 음악을 그래프 없이 |
+| 원본 bulk 정밀도 | 16비트 교차 WAV byte | 디코드 PCM planar, Int16·Int24·Float32(3.10.1절) | 24비트·float 원본 정밀도 유지 |
+| 합성 사운드 에셋 | Sound Cue(`USoundNode` 트리)와 MetaSounds 둘 다 | `SoundGraph`(MetaSounds 대응) 하나 | UE도 새 작업은 MetaSounds가 주력이고 Sound Cue 기능(랜덤·레이어·switch·지연·loop)은 그래프 노드로 덮인다. 두 체계를 따로 유지하지 않는다(AD29) |
+| Opus 플랫폼 rate | `bResampleForDevice`면 Opus도 등급 rate(8·12·16·24·48 kHz 중)로 인코드 | Opus 플랫폼 데이터는 늘 48 kHz, 등급 rate는 PCM16·ADPCM만 | 디코더·청크 규칙을 rate 하나로 둔다(3.32절), byte는 품질 배수로 줄인다(3.39.3절) |
+| 짧은 loop 디코드 | non-streaming은 길이와 상관없이 `DTYPE_RealTime`(`AudioDevice.cpp:7027`), loop는 디코더 seek | loop 길이가 1 s(`StreamMinLoopSeconds`) 미만인 looping clip은 로드 때 통째 디코드(3.40.3절) | 스트림 디코더가 바퀴마다 loop 시작을 다시 열고 pre-roll을 디코드하므로(3.40.2절) 짧은 loop의 비용 상한 |
+| voice 상한 동률 | 볼륨 가중 우선순위 `Sort`(안정 정렬 아님 — 동률 순서 미정) | 동률은 먼저 수락한 재생이 voice를 갖는다(3.41.1절) | 결정적 출력·시험 |
+| SeekRestart 위치 | voice가 있던 wave에서만 기록(`AudioVirtualLoop.cpp:129–152`) — 수락 때부터 가상이던 loop는 처음부터, 상한으로 빠졌던 loop는 낡은 `SeekRestartTimes`(`SoundWave.cpp:3720–3733`) | 언제나 논리 커서(pitch 적분)에서, `ResumeFadeFrames` 256 fade-in(3.41.1·3.41.3절). Restart는 UE처럼 `startFrame`부터 | 정식 기능, 가운데 시작의 끊김 방지(UE 믹서 초기 ramp 여부는 미확인) |
+| 동시 발음 재시작 간격·ducking·steal fade 시간 | 실시간(`FPlatformTime`)·게임 delta | mix clock frame(3.41.2절) | 오프라인 렌더·Inline 시험 결정성 |
+| 동시 발음 그룹 목록 순서 | `RemoveSwap`으로 지워 순서가 섞임 | 수락 순을 지킴(3.41.2절) | `StopOldest` 동률·cull 동률이 결정적 |
+| 2D 재생의 동시 발음 거리 | ActiveSound Transform 위치로 잼 | 위치가 없어 0(3.41.2절) | NonSpatial 재생은 위치를 갖지 않는다 |
+| 기본 동시 발음 | `UAudioSettings::DefaultSoundConcurrency`(BaseEngine.ini에서는 비어 있음) | 두지 않음 — 그룹 없는 사운드는 제한 없음(3.41.2절) | 필요해지면 프로젝트 설정 개정 |
+| voice 상한 단위 | render cost 합(`au.EnableRelativeRenderCostVoiceLimit` 1, wave 1.0) | 개수(3.41.1절) | wave만 있는 동안 같다. SoundGraph(AU10)에서 다시 본다 |
+| 여유 부족 때 정지 중 voice 끊기 | `StopNow`(fade 없음 — `AudioDevice.cpp:4377–4446`), 동률이면 배열 앞쪽, 정지 중 voice가 없으면 loop 아닌 voice·아무 voice | 64 frame fade(`MinStopFadeFrames`), 동률이면 먼저 수락한 재생, 정지 중 voice만(스트림 슬롯 부족이면 스트림 clip을 쥔 것만 — 3.41.1절) | 끊김 방지·결정성, 자리 안 활성 voice는 상한 정렬이 지킴 |
+| 최대 가청 거리의 거리 배수 | 없음(`GetMaxFalloffDistance`) | `falloffDistance ÷ distanceScale`(3.41.3절) | Rocks 감쇠 평가의 `distanceScale` 칸과 같은 끝 |
+| 빈 retrigger 그룹 | 비어도 영구히 남음 | 간격이 지나면 지움(3.41.2절) | 동작은 같고 표가 쌓이지 않음 |
+| 살아 있는 재생 수 | 제한 없음(ActiveSound 배열) | `MaxPlaybacks` 1024(voice 없는·가상 포함), 그룹 8개·활성 그룹 1024 | 고정 용량 표(3.35.4절) |
+| 정지 fade 중 voice의 경쟁 | stopping이면 `v × P − 101`로 정렬에 남음 | 정지·steal fade 중인 재생은 경쟁하지 않고 voice를 끝까지 쥠, 상한 수에 세지 않음(3.41.1절) | 별도 stopping 풀(UE `NumStoppingSources`)과 같은 자리를 믹서 여유 voice가 받음 |
+| 스트림 디코드 지연 | 렌더 스레드가 디코드 작업 완료를 기다림(`AudioMixerSourceBuffer.cpp:550` `EnsureCompletion`) — 늦으면 렌더가 멈춤 | AudioRT는 기다리지 않음 — 링이 모자라면 그 voice만 무음(굶음)이고 이어 재생(3.40.1절) | AudioRT 무대기 계약(3.2절), 한 스트림의 지연이 전체 출력을 멈추지 않게 |

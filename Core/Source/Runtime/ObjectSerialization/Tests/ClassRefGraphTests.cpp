@@ -423,7 +423,7 @@ TEST(ClassRefGraph_DecodeChecksStaticBase) {
         REQUIRE(types.Register(alias, GeneratedType<ClassHolder>::Ops()));
         ObjectRegistry objects(allocator, types, {0x435247, 9});
         const TypeId values[] = {TypeIdOf<ClassBase>(), TypeIdOf<ClassLeaf>()};
-        const ErrorCode expected[] = {ErrorCode::InvalidArgument, ErrorCode::None};
+        const ErrorCode expected[] = {ErrorCode::CorruptData, ErrorCode::None};
         for (usize index = 0; index < 2; ++index) {
             Array<uint8> payload = GuidPayload(allocator, values[index]);
             Array<uint8> record =

@@ -10,10 +10,10 @@
 
 **관계 문서.**
 - [로깅 시스템](LoggingSystem.ko.md) 11절·14.1.8절(LG18): 종료 hook과 최소 처리기. 처리기 소유권은 이 문서로 옮긴다(19절). 로깅 문서 개정 13(`feature/logging`, 이 구현 병합 대기)이 이관을 반영한다(19.6절).
-- [앱 정보와 명령줄](AppInfoCommandLine.ko.md) 개정 3: `ProcessCommandLine`·대화상자 억제 API(AP1의 일부)를 이번에 구현했다. 나머지 경계는 21절에 적었다.
+- [앱 정보와 명령줄](AppInfoCommandLine/README.ko.md) 개정 3: `ProcessCommandLine`·대화상자 억제 API(AP1의 일부)를 이번에 구현했다. 나머지 경계는 21절에 적었다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(크래시 수집은 사전 확보 저장소·제한 시간·불완전 표시), 종료 코드 계약(2479행).
 - [플랫폼 계층](PlatformLayer.ko.md): OS 경계와 자식 프로세스.
-- [동기화](Synchronization.ko.md): 설계만 있다. 크래시 경로는 그 잠금을 쓰지 않는다(OS 이벤트·원자 변수만 쓴다).
+- [동기화](Synchronization/README.ko.md): 설계만 있다. 크래시 경로는 그 잠금을 쓰지 않는다(OS 이벤트·원자 변수만 쓴다).
 - [모듈 로더](ModuleLoader/README.ko.md) 개정 2(ML0 병합 `77cb1817`): 모든 C++ 모듈·실행 파일의 모듈 진입점. Launch 통합은 그 문서의 ML1이다(21절).
 - [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)(GS1 병합 `493f9a0d`): 모듈 생성 헤더는 등록 함수 선언만 담는다. 이 구현의 새 소스는 모듈 생성 헤더를 include하지 않는다.
 
@@ -1439,7 +1439,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 
 ## 21. 다른 설계와의 경계
 
-- **[앱 정보와 명령줄](AppInfoCommandLine.ko.md)**
+- **[앱 정보와 명령줄](AppInfoCommandLine/README.ko.md)**
   - **이번에 구현한다(AP1의 일부).**
     - `ProcessCommandLine`(7.3절)
     - PlatformBase 대화상자 억제 API(13.3절)
@@ -1458,7 +1458,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **ML1(그 문서, 이 구현 병합 뒤).** Launch가 로더를 소유한다(`ApplicationContext`, 전역 접근자 없음, MD4). 8.1절 7단계(도구 로그) 뒤·8단계(본문) 전에 로더 생성·`Prepare`·부트 모듈(Launch 의존 폐포)과 `EarliestPossible` 시작, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 실패 정리는 Launch 단계 실행기의 "시작한 단계만 역순"을 그대로 쓴다. Launch 모듈 규칙에 `ModuleLoader` 의존을 더한다. 이 문서 8.1·8.2절과 7.4절(`ApplicationContext`)의 고침은 ML1에서 한다(그 문서 8절).
   - **경계.** 크래시 수집 설치(1단계)와 명령줄 캡처(3단계)는 로더보다 먼저다. 모듈 `Startup`의 크래시도 그래서 보고된다. 로더는 크래시 경로에 끼지 않는다.
 - **[플랫폼 계층](PlatformLayer.ko.md)**: "크래시 수집과 프로세스 진입" 절(공개 헤더·구현 파일·OS 경계·capability 표·동기화 primitive를 쓰지 않는 규칙)과 UE 대조 후속 목록의 크래시 처리 행을 더했다(LC8).
-- **[동기화](Synchronization.ko.md)**: 크래시 경로는 그 잠금을 쓰지 않는다. `WaiterSignal`·주소 대기가 생겨도 크래시 경로는 OS 이벤트·세마포어를 유지한다. 크래시 때 사용자 공간 대기열 상태를 믿지 않기 위해서다.
+- **[동기화](Synchronization/README.ko.md)**: 크래시 경로는 그 잠금을 쓰지 않는다. `WaiterSignal`·주소 대기가 생겨도 크래시 경로는 OS 이벤트·세마포어를 유지한다. 크래시 때 사용자 공간 대기열 상태를 믿지 않기 위해서다.
 - **breadcrumb(계획 29.4절 "사전 확보 breadcrumb 저장소")**: 이번 범위 밖이다. 연관 파일 칸(`SetCrashAnnotation`)을 그 시작점으로 둔다.
 
 ## 22. 결정
@@ -1802,7 +1802,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **주석 정리.** clang-format이 깨뜨린 줄바꿈(`ProcessEntry.h` 머리 주석, Win64 수집기 머리 주석, `Application.h` 두 곳, Sandbox `EngineHost.h`, `LaunchTests.cpp`)을 다시 썼다.
 - LC8 문서 반영(2026-11-19, 커밋 전).
   - 이 문서: 머리말 개정 4, 7.3절 상한, 19.3절 인터페이스를 공개 헤더와 맞춤(멈춘 스레드 수 원자 포인터, `Unregister` 참조, `SetCrashAnnotation`), 19.6절 로깅 문서 대응, 21절·D7의 "LC8에서 고친다"를 반영 완료로.
-  - [앱 정보와 명령줄](AppInfoCommandLine.ko.md) 개정 3: 12절 구현 상태와 상한, `GetCommandLineW` 직접 분해 삭제(D7), 7.1절·8.3절·17절·18절 AP1·D15.
+  - [앱 정보와 명령줄](AppInfoCommandLine/README.ko.md) 개정 3: 12절 구현 상태와 상한, `GetCommandLineW` 직접 분해 삭제(D7), 7.1절·8.3절·17절·18절 AP1·D15.
   - [플랫폼 계층](PlatformLayer.ko.md): "크래시 수집과 프로세스 진입" 절, UE 대조 후속 목록의 크래시 처리 행.
   - `Docs/Implementation`: 사용 안내 [CrashHandlingAndLaunch.ko.md](../Implementation/CrashHandlingAndLaunch.ko.md)를 새로 썼다. `FoundationStatus.ko.md`에 2026-11-19 절을 더하고 로깅 줄의 "남은 것: crash 수집"을 고쳤다. `CoreUtilities.ko.md`의 `PrepareAutomatedTestProcess`를 Launch TestRunner로 고쳤다.
   - 로깅 문서([LoggingSystem.ko.md](LoggingSystem.ko.md) 14.1.8·15.1절, `Docs/Implementation/Logging.ko.md`)는 로깅 세션 소유라 고치지 않았다. 고칠 내용은 19.6절과 보고서에 따로 적었다.

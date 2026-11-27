@@ -3,19 +3,27 @@
 #include "CommandSelfTest.h"
 #include "ComputeSelfTest.h"
 #include "ConstantSelfTest.h"
+#include "CookSamplingSelfTest.h"
+#include "ShaderParameterSelfTest.h"
+#include "ShaderResourceSelfTest.h"
+#include "MultiTextureSelfTest.h"
 #include "CullingSelfTest.h"
 #include "EngineShaderSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "RenderUtilitySelfTest.h"
 #include "ScreenSelfTest.h"
+#include "TextureSceneSelfTest.h"
+#include "ShaderReloadSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
+#include "UtilityPassSelfTest.h"
 #include "FormatSelfTest.h"
 #include "TextureSelfTest.h"
 #include "MsaaSelfTest.h"
 #include "SliceAttachmentSelfTest.h"
 #include "StorageTargetSelfTest.h"
+#include "SwapChainShareSelfTest.h"
 #include "ViewDimensionSelfTest.h"
 #include "TextureViewSelfTest.h"
 #include "TransientHeapSelfTest.h"
@@ -98,6 +106,14 @@ struct BackendResult {
 uint32 failures = 0;
 // 엔진 셰이더 probe만 도는 실행인가(--engine-shader-self-test).
 bool engineShadersOnly = false;
+// 쿠킹 엔진 셰이더 라이브러리 화면 검사만 도는 실행인가(--cooked-shader-self-test, ShaderSystem
+// 16.1절 SSD48).
+bool cookedShadersOnly = false;
+bool texturesOnly = false;
+// 감시 재컴파일 검사만 도는 실행인가(--shader-reload-self-test, ShaderSystem 16.3절 SSD78).
+bool shaderReloadOnly = false;
+// 감시 재컴파일 검사를 돈 장치 수다(장치마다 다른 색을 고른다).
+uint32 reloadDevices = 0;
 // 렌더 lane 검사의 엔진이 쓰는 프로세스 모듈 로더다(RunGraphicsSelfTest 동안 유효).
 ModuleLoader* selfTestModules = nullptr;
 
@@ -479,6 +495,30 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.adapterName.Data(), info.validationEnabled ? "on" : "off",
            info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
+    // 쿠킹 보장 샘플링 표와 장치 능력 대조(Docs/Design/PixelFormat 7.1절)는 셰이더가 필요 없어
+    // 전체 검사와 텍스처 검사에서 돈다.
+    if (!engineShadersOnly && !cookedShadersOnly) {
+        failures += RunCookSamplingChecks(name, device);
+    }
+
+    if (texturesOnly) {
+        // 쿠킹 텍스처 장면 대조만 돈다(RenderBase 18.5절 7항).
+        failures += RunTextureSceneChecks(name, device, result.triangle.GetAllocator());
+        failures +=
+            RunCookedTextureChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
+
+    if (cookedShadersOnly) {
+        // 쿠킹 엔진 라이브러리 화면 검사만 돈다(공급자 없이 — Release 실행 파일에서도 된다).
+        failures +=
+            RunCookedScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
 
     // 장치 형식의 셰이더 집합이다(ShaderSystem 16.1절 SSD19 — Development 공급자). 열지 못하면 그
     // backend의 그리기 검사를 하지 않는다(Release 실행 파일은 공급자가 없다).
@@ -491,8 +531,19 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         return;
     }
 
+    if (shaderReloadOnly) {
+        failures +=
+            RunShaderReloadChecks(name, device, result.triangle.GetAllocator(), reloadDevices++);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
+
     // 엔진 셰이더 SL0 GPU probe(Docs/Design/EngineShaders 7.6절): CPU 기준 대조와 장치 사이 기록.
     failures += RunEngineShaderChecks(name, device, result.triangle.GetAllocator());
+    // 엔진 셰이더 SL1 유틸리티 pass(Docs/Design/EngineShaders 14.6절 3항): 밉 생성·clear·기본
+    // 텍스처·깊이 복사·자리표시.
+    failures += RunUtilityPassChecks(name, device, result.triangle.GetAllocator());
     if (engineShadersOnly) {
         result.passed = failures == before;
         printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
@@ -740,16 +791,31 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 스왑체인 공유: 한 그래프의 스왑체인 pass 둘이 백버퍼 하나에 그리고 present는 하나다.
+    failures += RunSwapChainShareChecks(name, device, result.triangle.GetAllocator());
     // 렌더 쪽 compute(GX3·GX4 compute 연결): 파이프라인 캐시·그래프 버퍼 view·직접·간접 dispatch.
     failures += RunComputeChecks(name, device, result.triangle.GetAllocator());
     // 상수 버퍼 묶기(GX6, RenderBase 9.11절): handle 두 수명·기록 명령·갱신 순서·D3D12 root 예산.
     failures += RunConstantChecks(name, device, result.triangle.GetAllocator());
+    // 생성 셰이더 파라미터 구조체(ShaderSystem 16.2절 SH3a): cbuffer·루트 상수를 C++ 구조체 그대로
+    // 올린 픽셀.
+    failures += RunShaderParameterChecks(name, device, result.triangle.GetAllocator());
+    // 생성 구조체의 자원 멤버(ShaderSystem 16.2절 SH3b): 생성 표 자원 지도와 SetParameters로 묶은
+    // 장치 텍스처·짝 샘플러 override·typed 버퍼.
+    failures += RunShaderResourceChecks(name, device, result.triangle.GetAllocator());
+    // 다중 텍스처·샘플러 slot과 자원 묶음(RR12, RenderBase 9.13절): VS·PS 텍스처 다섯, 샘플러 값
+    // 지정, 공유 샘플러, 파이프라인 전환 뒤 묶음 유지.
+    failures += RunMultiTextureChecks(name, device, result.triangle.GetAllocator());
     // RenderBase 그리기 유틸리티(RB6, RenderBase 11.4절): 엔진 셰이더 전체화면 복사(장치·그래프).
     failures += RunRenderUtilityChecks(name, device, result.triangle.GetAllocator());
     // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
     failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 감시 재컴파일(ShaderSystem 16.3절 SSD78): 시험 루트 원문을 고쳐 쓰고 교체·픽셀·실패 유지.
+    // 활성 집합을 바꾸므로 그 집합을 쓰는 검사들 뒤에 둔다.
+    failures +=
+        RunShaderReloadChecks(name, device, result.triangle.GetAllocator(), reloadDevices++);
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: 파이프라인 대상 형식과 다른 대상에 그리면
@@ -794,6 +860,14 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     // 엔진 창 렌더 경로(RenderBase 18.5절 SM1–SM5): 엔진 장면 → tone map → 스왑체인, CPU 기준 대조.
     failures += RunScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+    // 쿠킹 텍스처 업로드 경로의 장면 대조(RenderBase 18.5절 7항 SM7 — 메모리 플랫폼 데이터).
+    failures += RunTextureSceneChecks(name, device, result.triangle.GetAllocator());
+    // 시험 콘텐츠 쿠킹의 텍스처(쿠킹이 없으면 NOT RUN).
+    failures +=
+        RunCookedTextureChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
+    // 같은 화면 경로를 쿠킹 엔진 셰이더 라이브러리로(SSD48 — 엔진 쿠킹 결과가 없으면 NOT RUN).
+    failures +=
+        RunCookedScreenChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
 }
@@ -910,9 +984,13 @@ void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendRe
 } // namespace
 
 int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuValidation,
-                        bool engineShadersOnlyRun) noexcept {
+                        GraphicsSelfTestScope scope) noexcept {
     selfTestModules = &modules;
-    engineShadersOnly = engineShadersOnlyRun;
+    engineShadersOnly = scope == GraphicsSelfTestScope::EngineShaders;
+    cookedShadersOnly = scope == GraphicsSelfTestScope::CookedShaders;
+    texturesOnly = scope == GraphicsSelfTestScope::Textures;
+    shaderReloadOnly = scope == GraphicsSelfTestScope::ShaderReload;
+    reloadDevices = 0;
     ResetEngineShaderRecords();
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -942,14 +1020,14 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software, &report), warp,
                &report);
-    if (!engineShadersOnly) {
+    if (!engineShadersOnly && !texturesOnly) {
         RunD3D12CreateReportProbe(allocator);
     }
 
     RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
     RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
                &report);
-    if (!engineShadersOnly) {
+    if (!engineShadersOnly && !texturesOnly) {
         RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
         RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
     }
@@ -973,10 +1051,14 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
     // 엔진 셰이더 probe의 장치 사이 대조(Docs/Design/EngineShaders 8.5절)와 coverage 사유.
     failures += ReportEngineShaderCrossDevice();
-    if (engineShadersOnly) {
+    if (engineShadersOnly || cookedShadersOnly || texturesOnly || shaderReloadOnly) {
         const bool ranAny = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran ||
                             glesProfile.ran || glesDesktop.ran || vulkan.ran || vulkanSoftware.ran;
-        printf("Engine shader self-test: %s (%u failure%s)\n",
+        printf("%s self-test: %s (%u failure%s)\n",
+               engineShadersOnly   ? "Engine shader"
+               : cookedShadersOnly ? "Cooked shader"
+               : shaderReloadOnly  ? "Shader reload"
+                                   : "Texture",
                failures == 0 && ranAny ? "PASS" : (ranAny ? "FAIL" : "NOT RUN"), failures,
                failures == 1 ? "" : "s");
         return failures == 0 ? 0 : 1;

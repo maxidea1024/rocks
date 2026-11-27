@@ -3,14 +3,14 @@
 // 프레임 기록·CommandContext·present다(GlesDevice.h).
 namespace rocks::graphics::gles {
 
-Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
-                                               const ClearColor& clear) noexcept {
+Result<CommandContext*> GlesDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
     }
 
-    const SwapChainRecord* record = swapChains_.Find(handle.slot);
+    SwapChainRecord* record = swapChains_.Find(handle.slot);
     if (record == nullptr) {
         return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
     }
@@ -23,6 +23,15 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
+    // present 뒤의 백버퍼 내용은 다른 backend에서 정의되지 않으므로 같은 규칙을 둔다(이어 그리기는
+    // 그리는 중인 프레임만).
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        Diagnostic message;
+        message.Text("swap chain load without a frame drawn since its present");
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<CommandContext*>::Failure(rejected.Error());
+    }
+
     if (!MakeCurrentForResources()) {
         return FailWith<CommandContext*>("cannot make the OpenGL context current");
     }
@@ -30,6 +39,8 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     // 스왑체인은 offscreen 색 텍스처(첫 행 = 이미지 위쪽)에 그리고 EndFrame의 present가 창에
     // 옮긴다(ShaderSystem 7.2절 8항). 그래서 창·RenderTarget 패스의 규약이 같다.
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     pass_ = {};
     pass_.framebuffer = record->framebuffer;
     pass_.width = record->width;
@@ -39,7 +50,8 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     pass_.colorCount = 1;
     PassDesc pass;
     pass.colorCount = 1;
-    pass.colors[0].clear = clear;
+    pass.colors[0].load = desc.load;
+    pass.colors[0].clear = desc.clear;
     StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
@@ -111,15 +123,18 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     }
 
     Result<void> outcome = Result<void>::Success();
-    if (!presentTarget_.IsNull()) {
+    if (!presentTarget_.IsNull() && presentOnEnd_) {
         // 기록 중 Retire된 스왑체인은 present를 생략한다.
-        const SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
+        SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
         if (record != nullptr) {
+            record->frameOpen = false;
             Diagnostic error;
             if (!PresentBlit(*record)) {
                 outcome = Fail("present blit failed: cannot make the window surface current");
             } else if (!platform_->Present(record->surface, record->vsync, error)) {
                 outcome = Reject(error, ErrorCode::DependencyFailed);
+            } else {
+                ++presents_;
             }
 
             // present 실패는 장치가 남긴다(LoggingSystem 13절). 연속 실패는 한 번만 남긴다.
@@ -259,7 +274,12 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
     gl_.Enable(GL_SCISSOR_TEST);
     gl_.Scissor(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     // 텍스처는 그리기·dispatch 때 파이프라인 텍스처 유닛에 건다(ApplySlots, 비면 흰색).
-    boundTexture_ = {};
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = NoBoundSampler;
+        }
+    }
 }
 
 void GlesDevice::BindPassTexture(const TextureRecord& record, GLuint unit) noexcept {
@@ -390,11 +410,51 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
     ApplyIndexBuffer();
 }
 
-void GlesDevice::SetTexture(TextureHandle handle) noexcept {
+void GlesDevice::SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots) {
+        return;
+    }
+
     const TextureRecord* record = textures_.Find(handle.slot);
     const bool substitute = record == nullptr || record->writable;
     nullTextureBindings_ += substitute ? 1 : 0;
-    boundTexture_ = substitute ? white_.slot : handle.slot;
+    boundTextures_[stageIndex][slot] = substitute ? white_.slot : handle.slot;
+}
+
+Result<void> GlesDevice::SetSampler(ShaderStage stage, uint32 slot,
+                                    const SamplerDesc* sampler) noexcept {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        (void)Fail("SetSampler needs a recording, a stage and slot in range and a valid sampler "
+                   "description");
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (sampler == nullptr) {
+        boundSamplers_[stageIndex][slot] = NoBoundSampler;
+        return Result<void>::Success();
+    }
+
+    for (uint32 index = 0; index < samplerCacheCount_; ++index) {
+        if (samplerCache_[index].desc == *sampler) {
+            boundSamplers_[stageIndex][slot] = static_cast<uint16>(index);
+            return Result<void>::Success();
+        }
+    }
+
+    if (samplerCacheCount_ == SamplerCacheCapacity) {
+        (void)Fail("SetSampler: the sampler cache of the device is full");
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    SamplerCacheEntry& entry = samplerCache_[samplerCacheCount_];
+    entry.desc = *sampler;
+    entry.filtering = CreateSampler(*sampler, true);
+    entry.point = CreateSampler(*sampler, false);
+    boundSamplers_[stageIndex][slot] = static_cast<uint16>(samplerCacheCount_++);
+    return Result<void>::Success();
 }
 
 Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

@@ -2,6 +2,7 @@
 
 #include <Core/Containers/HashMap.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Text/StringView.h>
 #include <Meta/TypeSchema.h>
 #include <Object/RuntimeTypeOps.h>
 #include <Object/TypeLease.h>
@@ -10,6 +11,7 @@
 namespace rocks {
 
 class TypeRegistry;
+class FunctionHandle;
 
 struct TypeRegistrationToken {
     uint64 registry = 0;
@@ -171,6 +173,19 @@ public:
     //   auto lease = types.AcquireDerivedClass(stored, TypeIdOf<Pawn>());
     //   if (!lease) { return Result<void>::Failure(lease.Error()); }
     Result<TypeLease> AcquireDerivedClass(TypeId type, TypeId base) noexcept;
+
+    // 클래스 type과 그 기반 체인에서 리플렉션 함수를 찾는다(ROCKS_FUNCTION — Docs/Design/
+    // FunctionReflection.ko.md FD10). ID로 찾거나 실효 이름(도구 이름, 없으면 C++ 이름 — 대소문자
+    // 무시)으로 찾는다. 돌려준 FunctionHandle은 함수를 선언한 클래스의 lease를 쥔다. 클래스가 아닌
+    // 레코드는 TypeMismatch, 타입·함수가 없으면 NotFound, 종료 중 ShuttingDown이다. 이름은
+    // StringView다(문자열 literal을 그대로 넘긴다 — Span<const char>는 literal의 끝 NUL까지 세어
+    // 이름이 맞지 않았다). 정의는
+    // FunctionCall.cpp(Object/FunctionCall.h를 include해 쓴다).
+    //
+    // 사용 예:
+    //   auto function = types.FindFunctionByName(TypeIdOf<Door>(), "Open");
+    Result<FunctionHandle> FindFunction(TypeId type, Guid functionId) noexcept;
+    Result<FunctionHandle> FindFunctionByName(TypeId type, StringView name) noexcept;
 
     Result<bool> IsA(TypeId actual, TypeId expected) noexcept;
     Result<void> Unregister(TypeRegistrationToken) noexcept;

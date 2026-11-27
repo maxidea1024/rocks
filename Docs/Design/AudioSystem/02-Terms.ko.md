@@ -11,8 +11,8 @@
 | `FAudioThread`·`GAudioPipe` | 오디오 제어 pipe(`AudioControlPipe`) | 직렬 task |
 | 오디오 렌더 스레드 | AudioRT 스레드 | 계획 §8.1 lane 이름 그대로 |
 | `USoundWave` | `SoundClip` | 사운드 원본·재생 단위 에셋 |
-| `USoundCue`·`USoundNode*` | `SoundEvent` | 레이어·랜덤·switch(AU10) |
-| `USoundBase` | `SoundSource`(추상) | `SoundClip`·`SoundEvent`의 공통 기반 |
+| `USoundCue`·`USoundNode*` | 대응 없음 | 합성 사운드는 `SoundGraph`만 쓴다(AD29, 7절) |
+| `USoundBase` | `SoundSource`(추상) | `SoundClip`·`SoundGraph`의 공통 기반 |
 | `FActiveSound` | 재생(`Playback`), 핸들 `PlaybackHandle` | 게임이 시작한 논리 재생 하나 |
 | `FWaveInstance` | 재생층(`PlaybackLayer`) | 재생이 평가한 clip 하나 |
 | `FMixerSource`·`FMixerSourceVoice` | `AudioVoice`, 핸들 `AudioVoiceHandle` | 실제 샘플을 만드는 슬롯 |
@@ -28,7 +28,7 @@
 | `FInteriorSettings` | `ZoneInteriorSettings` | |
 | `FAudioVirtualLoop` | 가상 재생(virtual playback) | |
 | Quartz | `BeatClock` | AU10 |
-| MetaSounds | `SoundGraph` | M7 |
+| MetaSounds | `SoundGraph` | 합성·절차 사운드 그래프(AU10, M7) |
 | `ISoundGenerator` | `SoundGenerator` | procedural source 입력 |
 | `IAudioFormat` | `AudioEncoder` | 쿠킹 쪽 |
 | `ICompressedAudioInfo`·`IAudioInfoFactory` | `AudioDecoder`·`AudioDecoderTable` | 런타임 쪽 |

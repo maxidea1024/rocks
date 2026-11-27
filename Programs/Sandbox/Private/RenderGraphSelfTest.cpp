@@ -536,7 +536,10 @@ bool RunHzbGraph(GraphBench& bench, Allocator& allocator) noexcept {
                                   level.values[1] = static_cast<float>(size);
                                   CommandContext& commands = pass.Commands();
                                   commands.SetPipeline(reducePipeline);
-                                  commands.SetTexture(pass.View(read));
+                                  commands.SetTexture(
+                                      ShaderStage::Compute,
+                                      shaders::TextureSlot(shaders::TextureViewReduceCS, "Source"),
+                                      pass.View(read));
                                   commands.SetWritableTexture(0, pass.View(write));
                                   Check(commands.SetDrawConstants(DrawConstantBytes(level)).IsOk(),
                                         "HZB reduce draw constants are accepted");
@@ -721,7 +724,10 @@ bool RunAsyncComputeGraph(GraphBench& bench, Allocator& allocator, RenderHandle 
                              level.values[1] = static_cast<float>(size);
                              CommandContext& commands = pass.Commands();
                              commands.SetPipeline(reducePipeline);
-                             commands.SetTexture(pass.View(read));
+                             commands.SetTexture(
+                                 ShaderStage::Compute,
+                                 shaders::TextureSlot(shaders::TextureViewReduceCS, "Source"),
+                                 pass.View(read));
                              commands.SetWritableTexture(0, pass.View(write));
                              Check(commands.SetDrawConstants(DrawConstantBytes(level)).IsOk(),
                                    "async HZB reduce draw constants are accepted");

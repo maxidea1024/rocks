@@ -66,8 +66,26 @@ ROCKS_SPARKSCOMPILER_API LanguageWord LanguageAttributeAt(uint32 index) noexcept
 ROCKS_SPARKSCOMPILER_API uint32 LanguageKeywordCount() noexcept;
 ROCKS_SPARKSCOMPILER_API LanguageWord LanguageKeywordAt(uint32 index) noexcept;
 
+// name과 비슷한 hook·attribute 이름이다(ASCII 대소문자 무시 편집 거리 2 이하 중 가장 가까운 것,
+// 같으면 목록 순서의 앞 — S0803·S0620의 수정 예와 언어 서버 빠른 수정이 같은 제안을 쓴다). 없으면
+// 빈 글자다.
+ROCKS_SPARKSCOMPILER_API StringView SimilarHook(StringView name) noexcept;
+ROCKS_SPARKSCOMPILER_API StringView SimilarAttribute(StringView name) noexcept;
+
 // Unity 이름 대응 전부다.
 ROCKS_SPARKSCOMPILER_API Span<const UnityAlias> UnityAliases() noexcept;
+
+// 언어 소유 이름 전부다(내장 타입·prelude 타입·prelude 값·검증 리터럴 — binding schema 타입
+// 이름으로 쓸 수 없다). 메타 컴파일러의 이름 표(Programs/Rocks.MetaCompiler/SparksNames.json)가 이
+// 목록과 같은지 시험이 본다(Docs/Design/SparksBinding.ko.md B6). index가 범위 밖이면 빈 이름이다.
+ROCKS_SPARKSCOMPILER_API uint32 LanguageOwnedNameCount() noexcept;
+ROCKS_SPARKSCOMPILER_API StringView LanguageOwnedNameAt(uint32 index) noexcept;
+
+// 언어 소유 이름 밖의 예약 이름 전부다(핵심 엔진 타입·문맥 이름·RPC 접두·`Changed` — 부록 A, 사용자
+// 선언과 엔진 binding 멤버 이름으로 쓸 수 없다). 메타 컴파일러 이름 표의 reservedNames가 이 목록과
+// 같은지 시험이 본다(Docs/Design/SparksBinding.ko.md B13). index가 범위 밖이면 빈 이름이다.
+ROCKS_SPARKSCOMPILER_API uint32 ReservedNameCount() noexcept;
+ROCKS_SPARKSCOMPILER_API StringView ReservedNameAt(uint32 index) noexcept;
 
 // 언어 이름 심볼(BuiltinType·PreludeType·PreludeValue)이 원문에 쓸 수 있는 이름인지다: 이름만
 // 예약한 타입(`WorldPosition` — S0318)과 언어 이름 표 밖의 타입(문맥 이름 `Time`의 타입)은

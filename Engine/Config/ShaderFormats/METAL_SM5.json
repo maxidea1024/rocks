@@ -3,7 +3,7 @@
   "id": "METAL_SM5",
   "status": "supported",
   "backend": "Metal",
-  "processor": { "module": "ShaderFormatMetal", "version": 3 },
+  "processor": { "module": "ShaderFormatMetal", "version": 5 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler", "SpirvTools", "SpirvCross", "MetalToolchain"],
   "language": { "hlsl2021": true },

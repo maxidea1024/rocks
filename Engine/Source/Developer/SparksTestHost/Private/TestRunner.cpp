@@ -291,7 +291,7 @@ Result<void> RunTests(Allocator& allocator, const Compilation& compilation,
 
         BytecodeRejection rejection;
         if (auto read = ReadBytecodeFile(file.View(), unit.loaded, rejection); !read) {
-            if (read.Error() != ErrorCode::InvalidArgument) {
+            if (read.Error() != ErrorCode::CorruptData) {
                 return read;
             }
 

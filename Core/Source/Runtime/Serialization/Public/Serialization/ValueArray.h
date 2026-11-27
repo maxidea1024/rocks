@@ -40,9 +40,9 @@
 //       }
 //   }
 //
-//   return array.Value().Finish(); // 남은 byte는 InvalidArgument
+//   return array.Value().Finish(); // 남은 byte는 CorruptData
 //
-// 오류는 Archive 규약을 따른다: 잘림·잘못된 tag·크기 불일치·남은 byte는 InvalidArgument, 기대 원소
+// 오류는 Archive 규약을 따른다: 잘림·잘못된 tag·크기 불일치·남은 byte는 CorruptData, 기대 원소
 // tag와 다른 저장 tag는 TypeMismatch, 개수·크기 한도 초과는 CapacityExceeded다.
 namespace rocks {
 
@@ -68,12 +68,12 @@ public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 읽고 검사한다. 검사 순서(모두 할당 전):
     // elementWire 자체가 원소 tag가 아니거나 shape가 elementWire와 모순이면 InvalidArgument(이때는
     // payload를 옮기지 않아 호출자 reader가 그대로다) → 저장 tag가 원소 tag가
-    // 아니면(Record·RecordList·ValueArray·Optional·Set·Map·모르는 값) InvalidArgument → 저장 tag가
+    // 아니면(Record·RecordList·ValueArray·Optional·Set·Map·모르는 값) CorruptData → 저장 tag가
     // elementWire와 다르면 TypeMismatch → count > maxCount면 CapacityExceeded → count × max(wire
-    // 최소, shape 최소)가 남은 byte보다 크면 InvalidArgument(wire가 고정 폭이거나 shape.exact면
+    // 최소, shape 최소)가 남은 byte보다 크면 CorruptData(wire가 고정 폭이거나 shape.exact면
     // 남은 byte가 정확히 count × 크기가 아닐 때도) → count만큼 work를 청구한다(한도면
     // CapacityExceeded) → 가변 wire에 shape.exact면 원소마다 길이 prefix가 그 크기를 만드는지
-    // 본다(아니면 InvalidArgument — 남은 byte를 크기 간격으로 훑으며 할당하지 않는다). shape
+    // 본다(아니면 CorruptData — 남은 byte를 크기 간격으로 훑으며 할당하지 않는다). shape
     // 기본값은 wire 크기만 쓴다.
     static Result<ValueArrayReader> Open(ArchiveReader&& payload, uint32 elementWire,
                                          uint32 maxCount, WireValueShape shape = {}) noexcept;
@@ -110,7 +110,7 @@ public:
     // 내용(bool 0/1·UTF-8·길이·Text 형태·Record header)은 그 Read*가 검사한다.
     ArchiveReader& Elements() noexcept;
 
-    // 모든 원소를 읽은 뒤 부른다. 남은 byte가 있으면 InvalidArgument다.
+    // 모든 원소를 읽은 뒤 부른다. 남은 byte가 있으면 CorruptData다.
     Result<void> Finish() const noexcept;
 
 private:

@@ -301,9 +301,28 @@ private:
         }
 
         Array<uint8> bytes(context_.allocator);
-        if (const ShaderSourceStatus loaded =
-                context_.tree.Load(path, bytes, context_.limits.fileBytes);
-            !loaded) {
+        const ShaderGeneratedInclude* memory = nullptr;
+        for (const ShaderGeneratedInclude& generated : context_.generated) {
+            if (!generated.contents.IsEmpty() && generated.virtualPath == path) {
+                memory = &generated;
+                break;
+            }
+        }
+
+        if (memory != nullptr) {
+            // 메모리 원문이다(16.2절 SSD52 — 트리의 <루트>/Generated/ 자리).
+            if (memory->contents.ByteCount() > context_.limits.fileBytes ||
+                !bytes.TryResize(memory->contents.ByteCount())) {
+                return context_.Fail(ShaderSourceError::FileTooLarge, includeLine,
+                                     "generated shader source is too large", path);
+            }
+
+            if (!bytes.IsEmpty()) {
+                platform::MemoryCopy(bytes.Data(), memory->contents.Data(), bytes.Size());
+            }
+        } else if (const ShaderSourceStatus loaded =
+                       context_.tree.Load(path, bytes, context_.limits.fileBytes);
+                   !loaded) {
             if (includeLine == 0) {
                 context_.status = loaded;
                 return false;
@@ -725,6 +744,18 @@ private:
         for (const ShaderGeneratedInclude& generated : context_.generated) {
             if (generated.virtualPath != path) {
                 continue;
+            }
+
+            if (!generated.contents.IsEmpty()) {
+                // 메모리 원문은 경로를 바꾸지 않는다(LoadFile이 contents를 읽는다).
+                if (!generated.sourcePath.IsEmpty()) {
+                    return context_.Fail(ShaderSourceError::InvalidArgument, line,
+                                         "a generated include is either a link or memory "
+                                         "contents",
+                                         path);
+                }
+
+                break;
             }
 
             if (const ShaderSourceStatus valid = ValidateShaderVirtualPath(generated.sourcePath);

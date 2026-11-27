@@ -361,7 +361,7 @@ TEST(StructRecord_WeakReferencesAreWrittenNull) {
     WeakLink kept;
     kept.slot = 9;
     auto loaded = env.Load(bad.View(), kept);
-    CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+    CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
     CHECK(kept.slot == 9);
 }
 
@@ -634,7 +634,7 @@ TEST(StructRecord_NameWithoutPoolAndEmptyInput) {
 
     OptionalTag kept;
     auto empty = env.Load(Span<const uint8>(), kept);
-    CHECK(!empty && empty.Error() == ErrorCode::InvalidArgument);
+    CHECK(!empty && empty.Error() == ErrorCode::CorruptData);
     StructRecordOptions noHooks;
     noHooks.decodePolicy.newerVersion = NewerVersionPolicy::LoadNewerSkippingUnknown;
     auto rejected = env.Load(bytes.Value().View(), kept, noHooks);

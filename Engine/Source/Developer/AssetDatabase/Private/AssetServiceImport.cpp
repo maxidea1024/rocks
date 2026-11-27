@@ -242,6 +242,22 @@ struct MadeOutput {
     bool used = true;
 };
 
+// EditAsset으로 연 다른 에셋 하나다(7.1절 20 A2f4). wasOpen은 이번 실행 전부터 열려
+// 있었는지다(실패하면 메모리 값이 디스크와 달라지므로 dirty로 둔다).
+struct EditedAsset {
+    AssetId id{};
+    ObjectHandle asset{};
+    bool wasOpen = false;
+};
+
+// before(id 순)에 id가 있는지다.
+bool WasOpenBefore(Span<const AssetId> before, AssetId id) noexcept {
+    const usize at = algo::LowerBound(before, id, [](AssetId left, AssetId key) noexcept {
+        return GuidLess(left.value, key.value);
+    });
+    return at < before.Size() && before[at] == id;
+}
+
 using asset_database_detail::ImportGroupMember;
 
 // 서비스가 임포터에 주는 문맥이다: 새 출력은 저장하지 않은 새 패키지, 재임포트는 기존 출력을
@@ -256,7 +272,7 @@ public:
         : allocator_(allocator), set_(set), types_(types), index_(index), aliases_(aliases),
           path_(path), info_(info), sources_(sources), options_(options), mainId_(mainId),
           warnings_(warnings), reimport_(reimport), previousTags_(previousTags),
-          access_(set.Access()), outputs_(allocator), tags_(allocator) {
+          access_(set.Access()), outputs_(allocator), tags_(allocator), edited_(allocator) {
     }
 
     // 기존 출력 하나를 등록한다(아직 청하지 않음 — 재임포트의 기록·고아 출력, 또는 묶음이 미리
@@ -447,7 +463,8 @@ public:
     }
 
     Result<void> AddTag(StringView key, StringView value) noexcept override {
-        if (!IsValidImportTag(info_.name, key, value)) {
+        const StringView prefix = info_.tagPrefix.IsEmpty() ? info_.name : info_.tagPrefix;
+        if (!IsValidImportTag(prefix, key, value)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -526,6 +543,96 @@ public:
                               : refuse(AssetDiagnosticCode::None, representative.Error());
     }
 
+    Result<ObjectHandle> EditAsset(AssetId asset) noexcept override {
+        using Out = Result<ObjectHandle>;
+        auto refuse = [&](AssetDiagnosticCode code, ErrorCode error, AssetId related) noexcept {
+            failure_ = AssetDiagnostic{};
+            failure_.code = error == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None : code;
+            failure_.error = error;
+            failure_.asset = mainId_;
+            failure_.related = related;
+            return Out::Failure(error);
+        };
+        // 자기 출력과 묶음 구성원의 출력(주 출력·재임포트 기록 출력)은 고치지 않는다(구성원은 자기
+        // 임포터가 만들고 그 출력 단계에서 저장한다).
+        bool own = asset.IsNull() || asset == mainId_;
+        for (const MadeOutput& made : outputs_) {
+            own = own || made.id == asset;
+        }
+
+        for (AssetId owned : groupOwned_) {
+            own = own || owned == asset;
+        }
+
+        for (const ImportGroupMember& member : members_) {
+            own = own || member.id == asset;
+        }
+
+        if (own) {
+            return refuse(AssetDiagnosticCode::None, ErrorCode::InvalidArgument, asset);
+        }
+
+        for (const EditedAsset& edited : edited_) {
+            if (edited.id == asset) {
+                return Out::Success(edited.asset);
+            }
+        }
+
+        if (edited_.Size() >= MaxImportEditedAssets) {
+            return refuse(AssetDiagnosticCode::None, ErrorCode::CapacityExceeded, asset);
+        }
+
+        auto found = index_.FindById(asset);
+        if (!found) {
+            return refuse(found.Error() == ErrorCode::NotFound
+                              ? AssetDiagnosticCode::MissingDependency
+                              : AssetDiagnosticCode::DuplicateAssetId,
+                          found.Error(), asset);
+        }
+
+        // 전부터 열려 있고 저장하지 않은 편집이 있으면 그 편집까지 저장하게 되므로 Busy다(전파
+        // 대상·재임포트 구성원과 같은 규칙).
+        const bool wasOpen = WasOpenBefore(before_, asset);
+        const EditorPackageInfo* openInfo = set_.Find(asset);
+        if (wasOpen && openInfo != nullptr && openInfo->dirty) {
+            return refuse(AssetDiagnosticCode::None, ErrorCode::Busy, asset);
+        }
+
+        if (auto reserved = edited_.TryReserve(edited_.Size() + 1); !reserved) {
+            return refuse(AssetDiagnosticCode::None, reserved.Error(), asset);
+        }
+
+        AssetDiagnostic diagnostic;
+        auto opened = set_.Open(asset, warnings_, &diagnostic);
+        if (!opened) {
+            // 열기 진단의 코드·세부는 두고 asset·related를 문맥 규칙(주 출력·대상)으로 맞춘다.
+            failure_ = diagnostic;
+            failure_.error = opened.Error();
+            failure_.asset = mainId_;
+            failure_.related = asset;
+            return Out::Failure(opened.Error());
+        }
+
+        // 저장할 수 없는 대상은 지금 거부한다(Save와 같은 진단 — 출력을 저장하기 전에).
+        const EditorPackageInfo* info = set_.Find(asset);
+        if (info != nullptr && info->readOnly) {
+            return refuse(AssetDiagnosticCode::NewerVersion, ErrorCode::Unsupported, asset);
+        }
+
+        if (info != nullptr && !info->unresolved.IsEmpty()) {
+            return refuse(AssetDiagnosticCode::MissingDependency, ErrorCode::InvalidArgument,
+                          info->unresolved[0].target);
+        }
+
+        auto representative = set_.Registry().FindChild(access_, opened.Value(), "");
+        if (!representative) {
+            return refuse(AssetDiagnosticCode::None, representative.Error(), asset);
+        }
+
+        (void)edited_.TryPushBack(EditedAsset{asset, representative.Value(), wasOpen});
+        return Out::Success(representative.Value());
+    }
+
     usize GroupSize() const noexcept override {
         return members_.Size();
     }
@@ -542,6 +649,21 @@ public:
     void SetGroup(Span<const ImportGroupMember> members, usize index) noexcept {
         members_ = members;
         groupIndex_ = index;
+    }
+
+    // 묶음 전에 열려 있던 패키지 id(id 순)다(EditAsset의 Busy 판정 — 7.1절 20 A2f4).
+    void SetOpenBefore(Span<const AssetId> before) noexcept {
+        before_ = before;
+    }
+
+    // 묶음 구성원의 출력 id(주 출력·재임포트 기록 출력)다(EditAsset이 거부한다).
+    void SetGroupOwned(Span<const AssetId> owned) noexcept {
+        groupOwned_ = owned;
+    }
+
+    // EditAsset으로 연 다른 에셋(부른 순서, id마다 하나)이다.
+    Span<const EditedAsset> Edited() const noexcept {
+        return edited_.View();
     }
 
     Span<const MadeOutput> Outputs() const noexcept {
@@ -574,9 +696,12 @@ private:
     Span<const ImportTag> previousTags_;
     Span<const ImportGroupMember> members_{};
     usize groupIndex_ = 0;
+    Span<const AssetId> before_{};
+    Span<const AssetId> groupOwned_{};
     ObjectAccessContext access_;
     Array<MadeOutput> outputs_;
     Array<ImportTag> tags_;
+    Array<EditedAsset> edited_;
     AssetDiagnostic failure_;
 };
 
@@ -739,6 +864,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
             result.id = AssetId{};
             result.path.Clear();
             result.outputs.Clear();
+            result.edited.Clear();
         }
     };
     clearResults();
@@ -776,7 +902,41 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
         (void)before.TryPushBack(set_.At(index).id);
     }
 
+    // 고친 다른 에셋(7.1절 20 A2f4 — 묶음 전체에서 id마다 한 번, 구성원 순서·부른 순서)과 그 가운데
+    // 저장을 마친 수(앞에서부터)다.
+    Array<AssetId> edited(allocator);
+    usize editedSaved = 0;
+    // EditAsset으로 고친, 전부터 열려 있던 대상은 실패하면 메모리 값이 디스크와 다르므로 dirty로
+    // 둔다(이번 실행이 연 대상은 CloseOpened가 버린다). 이미 저장한 대상은 디스크와 같으므로 두지
+    // 않는다.
+    auto markEditedDirty = [&]() noexcept {
+        for (const UniquePtr<ImportRun>& run : runs) {
+            if (run->context.Get() == nullptr) {
+                continue;
+            }
+
+            for (const EditedAsset& one : run->context->Edited()) {
+                bool saved = false;
+                for (usize at = 0; at < editedSaved; ++at) {
+                    saved = saved || edited[at] == one.id;
+                }
+
+                if (one.wasOpen && !saved) {
+                    (void)set_.MarkDirty(one.id);
+                }
+            }
+        }
+    };
+    // 일 전부터 열려 있던 전파 대상이다(실패하면 메모리 값이 디스크와 달라지므로 dirty로 둔다).
+    Array<AssetId> propagatedOpen(allocator);
+    auto markOpenDirty = [&]() noexcept {
+        for (AssetId id : propagatedOpen) {
+            (void)set_.MarkDirty(id);
+        }
+    };
     auto abandon = [&](const Result<void>& failed) noexcept {
+        markOpenDirty();
+        markEditedDirty();
         (void)set_.CloseOpened(before.View());
         clearResults();
         return mark(failed.Error());
@@ -870,10 +1030,21 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
         (void)table.TryPushBack(ImportGroupMember{run.mainId, asset});
     }
 
+    // 구성원 출력 id(주 출력·재임포트 기록 출력)다 — EditAsset이 거부한다(7.1절 20 A2f4).
+    Array<AssetId> groupOwned(allocator);
+    for (current = 0; current < runs.Size(); ++current) {
+        for (const ImportRun::Existing& existing : runs[current]->existing) {
+            if (auto pushed = groupOwned.TryPushBack(existing.id); !pushed) {
+                return abandon(
+                    FailImport<void>(failure, AssetDiagnosticCode::None, pushed.Error()));
+            }
+        }
+    }
+
     // 구성원 순서대로 임포터를 부른다(구성원마다 자기 문맥).
     for (current = 0; current < runs.Size(); ++current) {
-        if (auto staged =
-                StageImport(*runs[current], table.View(), current, diagnostics, warnings, failure);
+        if (auto staged = StageImport(*runs[current], table.View(), current, before.View(),
+                                      groupOwned.View(), diagnostics, warnings, failure);
             !staged) {
             return abandon(staged);
         }
@@ -886,13 +1057,6 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
     // 없는 대상(읽기 전용· 미해결 import)·저장하지 않은 편집이 있는 열린 대상(Busy)이면 아무것도
     // 저장하지 않는다.
     Array<AssetId> propagated(allocator);
-    // 일 전부터 열려 있던 전파 대상이다(실패하면 메모리 값이 디스크와 달라지므로 dirty로 둔다).
-    Array<AssetId> propagatedOpen(allocator);
-    auto markOpenDirty = [&]() noexcept {
-        for (AssetId id : propagatedOpen) {
-            (void)set_.MarkDirty(id);
-        }
-    };
     for (current = 0; current < runs.Size(); ++current) {
         ImportRun& run = *runs[current];
         if (!run.member->reimport) {
@@ -908,7 +1072,6 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
         if (auto listed = index_.Referencers(
                 run.mainId, DependencyKindBit(PackageDependencyKind::EditorOnly), referencers);
             !listed) {
-            markOpenDirty();
             return abandon(FailImport<void>(failure, AssetDiagnosticCode::None, listed.Error()));
         }
 
@@ -935,7 +1098,6 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
             const bool wasOpen = at < before.Size() && before[at] == referencer->id;
             const EditorPackageInfo* openInfo = set_.Find(referencer->id);
             if (wasOpen && openInfo != nullptr && openInfo->dirty) {
-                markOpenDirty();
                 return abandon(FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::Busy,
                                                 referencer->id));
             }
@@ -947,7 +1109,6 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                     *failure = diagnostic;
                 }
 
-                markOpenDirty();
                 return abandon(Result<void>::Failure(opened.Error()));
             }
 
@@ -1002,8 +1163,32 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
                     }
                 }
 
-                markOpenDirty();
                 return abandon(Result<void>::Failure(step.Error()));
+            }
+        }
+    }
+
+    // 고친 다른 에셋을 모은다(묶음 전체 수도 MaxImportEditedAssets 이하 — 구성원마다 문맥이 보고,
+    // 여기서 합을 본다).
+    for (current = 0; current < runs.Size(); ++current) {
+        for (const EditedAsset& one : runs[current]->context->Edited()) {
+            bool seen = false;
+            for (AssetId id : edited) {
+                seen = seen || id == one.id;
+            }
+
+            if (seen) {
+                continue;
+            }
+
+            if (edited.Size() >= MaxImportEditedAssets) {
+                return abandon(FailImport<void>(failure, AssetDiagnosticCode::None,
+                                                ErrorCode::CapacityExceeded, one.id));
+            }
+
+            if (auto pushed = edited.TryPushBack(one.id); !pushed) {
+                return abandon(
+                    FailImport<void>(failure, AssetDiagnosticCode::None, pushed.Error()));
             }
         }
     }
@@ -1048,6 +1233,7 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
     // 지운다(못 지우면 경고 OrphanNotDeleted).
     auto rollback = [&](const AssetDiagnostic& diagnostic) noexcept {
         markOpenDirty();
+        markEditedDirty();
         (void)set_.CloseOpened(before.View());
         for (usize index = 0; index < savedFiles.Size() && !existingSaved; ++index) {
             target.Clear();
@@ -1083,12 +1269,25 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
             AssetImportResult& result = *run->result;
             if (existingSaved && run->mainSaved) {
                 result.id = run->mainId;
+                // 저장한 고친 에셋만 남긴다(할당하지 않는다).
+                for (usize at = result.edited.Size(); at > 0; --at) {
+                    bool saved = false;
+                    for (usize done = 0; done < editedSaved; ++done) {
+                        saved = saved || edited[done] == result.edited[at - 1].id;
+                    }
+
+                    if (!saved) {
+                        (void)result.edited.TryRemoveAt(at - 1);
+                    }
+                }
+
                 continue;
             }
 
             result.id = AssetId{};
             result.path.Clear();
             result.outputs.Clear();
+            result.edited.Clear();
         }
 
         if (failure != nullptr) {
@@ -1143,12 +1342,43 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
 
         return Result<void>::Success();
     };
-    // 저장 순서(7.1절 19 A2f3d): 새 비주 출력 → 새 주 출력 → 기존 비주 출력 → 기존 주 출력(무리
-    // 안에서는 구성원 순서·Output 순서). 새 파일을 먼저 써서 교체한 기존 파일이 없는 새 파일을
-    // 가리키는 일이 없게 하고, 주 출력(소유 기록 — 출력 목록)은 그 무리의 출력 뒤에 쓴다.
+    // 고친 다른 에셋을 저장한다(기존 파일 — 기록은 그대로, 실패는 기존 파일 단계의 되돌리기).
+    auto saveEdited = [&]() noexcept -> Result<void> {
+        for (AssetId id : edited) {
+            AssetDiagnostic diagnostic;
+            (void)set_.MarkDirty(id);
+            Result<void> saved = reserveWarnings();
+            if (saved) {
+                saved = set_.Save(id, lock, save, warnings, &diagnostic);
+            } else {
+                diagnostic.error = saved.Error();
+                diagnostic.asset = id;
+            }
+
+            if (!saved) {
+                return rollback(diagnostic);
+            }
+
+            existingSaved = true;
+            ++editedSaved;
+        }
+
+        return Result<void>::Success();
+    };
+    // 저장 순서(7.1절 19 A2f3d·20 A2f4): 새 비주 출력 → 새 주 출력 → 고친 다른 에셋 → 기존 비주
+    // 출력 → 기존 주 출력(무리 안에서는 구성원 순서·Output 순서). 새 파일을 먼저 써서 교체한 기존
+    // 파일이 없는 새 파일을 가리키는 일이 없게 하고, 고친 에셋(스켈레톤 본 등)은 그것에 기대는 기존
+    // 출력보다 먼저, 주 출력(소유 기록 — 출력 목록)은 그 무리의 출력 뒤에 쓴다.
     constexpr int SavePasses = 4;
+    constexpr int FirstExistingPass = 2;
     for (int pass = 0; pass < SavePasses; ++pass) {
-        const bool fresh = pass < 2;
+        if (pass == FirstExistingPass) {
+            if (auto saved = saveEdited(); !saved) {
+                return saved;
+            }
+        }
+
+        const bool fresh = pass < FirstExistingPass;
         const bool mains = pass == 1 || pass == 3;
         for (current = 0; current < runs.Size(); ++current) {
             ImportRun& run = *runs[current];
@@ -1188,6 +1418,16 @@ Result<void> AssetService::RunImportGroup(const AssetDatabaseLock& lock,
 
     // 전파한 묶음 에셋을 원소 뒤에 저장한다(기존 파일 — 실패는 다른 기존 출력과 같은 되돌리기).
     for (AssetId id : propagated) {
+        // 고친 에셋 단계에서 이미 저장했다.
+        bool already = false;
+        for (AssetId one : edited) {
+            already = already || one == id;
+        }
+
+        if (already) {
+            continue;
+        }
+
         AssetDiagnostic diagnostic;
         (void)set_.MarkDirty(id);
         Result<void> saved = reserveWarnings();
@@ -1352,7 +1592,8 @@ Result<void> AssetService::PrepareImport(ImportRun& run, AssetDiagnostic* failur
 }
 
 Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMember> members,
-                                       usize memberIndex, TextDiagnostics& diagnostics,
+                                       usize memberIndex, Span<const AssetId> before,
+                                       Span<const AssetId> groupOwned, TextDiagnostics& diagnostics,
                                        Array<EditorWarning>* warnings,
                                        AssetDiagnostic* failure) noexcept {
     Allocator& allocator = *allocator_;
@@ -1523,6 +1764,8 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
     run.context = rocks::Move(createdContext.Value());
     ImportContext& context = *run.context;
     context.SetGroup(members, memberIndex);
+    context.SetOpenBefore(before);
+    context.SetGroupOwned(groupOwned);
     for (const ImportRun::Existing& existing : run.existing) {
         if (auto added = context.AddExisting(existing.key.View(), existing.path.View(), existing.id,
                                              existing.type, existing.asset, existing.created);
@@ -1643,6 +1886,30 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
         step = result.outputs.TryReserve(context.Outputs().Size());
     }
 
+    if (step) {
+        step = result.edited.TryReserve(context.Edited().Size());
+    }
+
+    // 고친 다른 에셋(7.1절 20 A2f4 — 경로는 색인 항목의 논리 경로, EditAsset이 고유함을 확인했다).
+    for (const EditedAsset& edited : context.Edited()) {
+        if (!step) {
+            break;
+        }
+
+        auto found = index_.FindById(edited.id);
+        if (!found) {
+            step = Result<void>::Failure(found.Error());
+            break;
+        }
+
+        AssetImportOutput entry(allocator);
+        step = entry.path.TryAssign(found.Value()->path.View());
+        entry.id = edited.id;
+        if (step) {
+            (void)result.edited.TryPushBack(rocks::Move(entry));
+        }
+    }
+
     for (const MadeOutput& made : context.Outputs()) {
         if (!step || made.key.IsEmpty() || !made.used) {
             continue;
@@ -1687,6 +1954,7 @@ Result<void> AssetService::StageImport(ImportRun& run, Span<const ImportGroupMem
     owned.tags = run.recordTags.View();
     owned.importerId = info.id;
     owned.importerName = info.name;
+    owned.tagPrefix = info.tagPrefix;
     owned.importerVersion = info.version;
     owned.sources = run.recordSources.View();
     owned.options = run.optionsRecord.View();

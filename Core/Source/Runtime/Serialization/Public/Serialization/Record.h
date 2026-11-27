@@ -67,10 +67,10 @@ struct RecordHeader {
 
 // record(Record 하나의 전체 byte)의 envelope header만 검사해 읽는다. 담긴 struct ID를 미리 알 수
 // 없는 InstancedStruct처럼 schema를 먼저 알아야 Record를 열 수 있을 때 쓴다. 검사 순서: 44 byte보다
-// 짧으면 먼저 InvalidArgument(RecordReader::Open은 잘린 입력도 앞에서부터 읽으므로 magic·envelope가
-// 맞는 짧은 입력에서 오류 코드가 다를 수 있다) → magic이 다르면 InvalidArgument → envelope
+// 짧으면 먼저 CorruptData(RecordReader::Open은 잘린 입력도 앞에서부터 읽으므로 magic·envelope가
+// 맞는 짧은 입력에서 오류 코드가 다를 수 있다) → magic이 다르면 CorruptData → envelope
 // version이 1이 아니면 Unsupported → schema 0·schema version 0, payloadBytes ≠ 크기 − 44,
-// fieldCount × 28 > payloadBytes면 InvalidArgument(schema는 0만 본다 — 기대 schema와의 비교는
+// fieldCount × 28 > payloadBytes면 CorruptData(schema는 0만 본다 — 기대 schema와의 비교는
 // Open의 TypeMismatch다). 필드 TLV 경계·중복 ID·필드 수 한도는 보지 않는다(Record를 열 때
 // RecordReader::Open· OpenNestedRecord가 본다). 할당·예산 청구가 없고 record는 호출 동안만 빌린다.
 //
@@ -242,7 +242,7 @@ public:
     // 범위 검사는 OpenValue와 같고(이 Record 밖이면 InvalidArgument), wire가 Record가 아니면
     // TypeMismatch다. 크기 한도는 이 reader의 것이고 필드 수 한도는 maxFields다. 바깥 Open이
     // payload 바이트를 이미 청구했으므로 header·TLV 색인·정렬 비용만 청구한다(중첩 깊이만큼 작업이
-    // 불어나지 않는다). schemaVersion 0은 InvalidArgument, 범위 밖은 Unsupported, schema 불일치는
+    // 불어나지 않는다). schemaVersion 0은 CorruptData, 범위 밖은 Unsupported, schema 불일치는
     // TypeMismatch다.
     //
     // 사용 예:
@@ -258,7 +258,7 @@ public:
     // 하나를 청구하고, record가 이 Record 입력 밖이면(빈 범위 포함) InvalidArgument, 바깥 Open이 그
     // byte를 이미 청구했으므로 header·TLV 색인·정렬 비용만 청구한다(중첩 깊이만큼 작업이 불어나지
     // 않는다). 크기 한도는 이 reader의 것이고 필드 수 한도는 maxFields다. 그 밖의 오류는 Open과
-    // 같다(schema version 0은 InvalidArgument, 범위 밖 버전은 Unsupported, schema 불일치는
+    // 같다(schema version 0은 CorruptData, 범위 밖 버전은 Unsupported, schema 불일치는
     // TypeMismatch). 이동된 reader는 InvalidArgument다. 반환 reader는 이 reader의 원본 byte를
     // 빌린다.
     //

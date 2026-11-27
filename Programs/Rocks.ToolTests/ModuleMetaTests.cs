@@ -98,6 +98,9 @@ internal static partial class ModuleMetaTests
         RegisterStructs(suite, options, environment);
         RegisterArrays(suite, options, environment);
         RegisterBitfields(suite, options, environment);
+        RegisterSparksBinding(suite, options, environment);
+        RegisterFunctions(suite, options, environment);
+        RegisterEvents(suite, options, environment);
     }
 
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).
@@ -177,6 +180,25 @@ internal static partial class ModuleMetaTests
         public string ModuleSource(string module) => Generated(module, Path.Combine("Source", module + ".module.generated.cpp"));
 
         public string Descriptor(string module) => Path.Combine(temporary.Root, "out", module + ".rocksmeta.json");
+
+        // Sparks binding schema 출력이다(descriptor 옆 — Docs/Design/SparksBinding.ko.md B2).
+        public string BindingSchema(string module) => Path.Combine(temporary.Root, "out", module + ".sparkbind.json");
+
+        // 모듈 하나를 생성한다: 원본은 <module>/Public/<include>이고 dependencies의 원본·생성 Public을 include 경로에, 그 descriptor를 import로
+        // 넣는다(빌드처럼 닫힌 집합을 호출자가 준다).
+        public Task<ProcessResult> RunModuleAsync(string module, string include, IReadOnlyList<string> dependencies)
+        {
+            Directory.CreateDirectory(Generated(module, "Public"));
+            Directory.CreateDirectory(Generated(module, "Private"));
+            List<string> arguments = ["--module", module, "--input", Source($"{module}/Public/{include}"), "--include", include];
+            foreach (string dependency in dependencies)
+            {
+                arguments.AddRange(["--import", Descriptor(dependency)]);
+            }
+
+            return RunAsync(module, arguments, [Source($"{module}/Public")], [],
+                dependencies.SelectMany(dependency => new[] { Source($"{dependency}/Public"), Generated(dependency, "Public") }).ToList());
+        }
 
         public void Write(string relative, string text) => temporary.Write(relative, text);
 
@@ -309,7 +331,7 @@ internal static partial class ModuleMetaTests
 
         public string Source(string relative) => temporary.FilePath(relative);
 
-        public void Manifest(string module, string[] types, string[] fields)
+        public void Manifest(string module, string[] types, string[] fields, string[]? functions = null)
         {
             StableIdManifest.Update(Source(module + "/" + module + ".rocksids.json"), true, manifest =>
             {
@@ -321,6 +343,11 @@ internal static partial class ModuleMetaTests
                 foreach (string field in fields)
                 {
                     manifest.Register("field", field);
+                }
+
+                foreach (string function in functions ?? [])
+                {
+                    manifest.Register("function", function);
                 }
 
                 return 0;
@@ -350,6 +377,7 @@ internal static partial class ModuleMetaTests
             }
 
             arguments.AddRange(["--output-root", Path.Combine(temporary.Root, "out", module), "--descriptor", descriptor ?? Descriptor(module),
+                "--binding-schema", BindingSchema(module),
                 "--compiler", options.Required("compiler"), "--identity-manifest", Source((manifestModule ?? module) + "/" + (manifestModule ?? module) + ".rocksids.json")]);
             IEnumerable<string> includes = ownPublic.Append(Generated(module, "Public"))
                 .Concat(ownPrivate).Append(Generated(module, "Private"))

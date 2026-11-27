@@ -88,7 +88,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
   - **구멍(한계).** UE는 칸 단위 구멍(재질 색인 255 — `HeightField.cpp:83`)이고 Jolt는 표본 단위 구멍(`cNoCollisionValue`, 그 표본을 쓰는 삼각형 전부 제거 — `HeightFieldShape.h:23`·`:34`)이다. 칸 하나만 비우는 UE 구멍은 Jolt 표본 구멍으로 정확히 옮길 수 없다(표본 하나를 비우면 주변 최대 6개 삼각형이 빠진다). 처리 방식(구멍 칸 주변을 Jolt mesh 조각으로 대신하는 방안 등)은 지형 충돌 단계(CM18, CR35)에서 정하고, 그 전까지 구멍 있는 heightfield 쿠킹은 진단을 내고 거부한다.
   - 정사각 제약: UE landscape 충돌 컴포넌트는 정사각(`ComponentSizeQuads + 1`)이라 맞는다. 비정사각 입력은 쿠킹이 거부한다.
 - **convex·compound.** convex 점은 A와 cm → m로 바꾸고, compound 자식의 상대 변환은 이동을 A·(cm → m), 회전을 (A·v, w)로 바꾼다.
-- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
+- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/04-CommonSettings.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
 
   | Rocks 형상 | 값의 의미(UE와 같음) | Jolt 형상 |
   |---|---|---|
@@ -159,7 +159,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 
 남은 항목: U2(물리 gate와 무관). K1은 2026-11-25에 구현했다.
 
-## 9. 수용 시험(미구현)
+## 9. 수용 시험(PH2a부터 단계별 구현 — 물리 모듈 7.1.2절 배정)
 
 시험은 왕복 확인만으로 갈음하지 않고 Rocks 쪽 기대값을 구체 수치로 고정한다. 정확 일치는 방향 사상(성분 재배치)과 정확히 표현되는 단위 변환에만 쓰고, 적분 결과는 step 크기에서 유도한 허용 오차로 비교한다.
 
@@ -167,7 +167,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 |---|---|---|
 | PA01 | 방향 상수 사상 | `Forward`·`Right`·`Up`·반대 방향 6개가 A의 결과와 정확히 같고 A⁻¹로 정확히 돌아온다 |
 | PA02 | 각속도·quaternion | Rocks +Z 축 각속도 +ω(rad/s, yaw +)로 t초 적분한 body의 전방이 Rocks `Quaternion::FromUnitAxisAngle(Up, ω·t)`의 전방과 같다(+X → +Y 쪽으로 돈다). 되읽은 각속도가 (0, 0, ω) rad/s 그대로다(cm 배율이 붙지 않는다 — 11.2절) |
-| PA03 | 중력 | 기본 중력에서 자유 낙하 1초 뒤 속도 (0, 0, −980) cm/s, 변위 −490 cm(적분 오차 허용) |
+| PA03 | 중력 | 기본 중력에서 1/60 s 60 step 자유 낙하 뒤 속도 (0, 0, −980) cm/s, 변위는 Jolt 반암시 Euler 식 −980·dt²·n(n + 1)/2 = −498.17 cm(연속 해 −490 cm와 g·dt·t/2 차이 — step에서 유도한 기대값) |
 | PA04 | 힘·충격량 | 질량 2 kg body에 충격량 (0, 0, 200) kg·cm/s → 속도 변화 (0, 0, 100) cm/s. 힘 (0, 0, 1960) kg·cm/s²로 중력 상쇄 |
 | PA05 | 토크·관성 | 주축 관성 I(kg·cm²) body에 토크 τ(kg·cm²/s²) → 각가속도 τ/I rad/s², 비대칭 관성 텐서가 A·I·Aᵀ로 같은 운동을 낸다. 크기 판정: τ = 10⁴ kg·cm²/s²가 Jolt에 1 N·m로 들어간다(배율 10⁻⁴ — 11.2절) |
 | PA06 | 메시 앞면 | 수학 구현 2.1절의 렌더 메시 삼각형 A(100,0,0)·B(100,10,0)·C(100,0,10) cm를 쿠킹하고 (0, 2, 2) cm에서 +X로 ray(꼭짓점·모서리를 피한 내부 점): 앞면 hit, 거리 100 cm, `ImpactNormal` (−1, 0, 0) |
@@ -204,14 +204,14 @@ PC09(전체 구현 계획 16.4절)는 이 표의 통과를 뜻한다.
 | `JPH_CROSS_PLATFORM_DETERMINISTIC` | 켬 | 아래 결정 |
 | `JPH_DOUBLE_PRECISION` | 끔 | float build + PhysicsRegion이 기본안(16.5절), double 채택은 PC07 측정 뒤 |
 | `JPH_ENABLE_ASSERTS` | 모든 구성에서 켬 | Rocks `ROCKS_ASSERT`가 모든 구성에서 켜져 있는 것과 같다. 이 정의는 구조체 배치를 바꾸므로(`MotionProperties.h:325-328`, `BroadPhaseQuadTree.h:63-66`, `Core/Mutex.h:162`, `PhysicsLock.h:136`의 assert 전용 필드) 라이브러리와 소비자가 같아야 하고, 버전 ID 기능 bit에도 들어간다. 구성별 정의를 manifest가 받지 않으므로 한 값으로 고정한다. 비용은 PC07과 함께 측정한다 |
-| `JPH_OBJECT_LAYER_BITS` | 16(Jolt 기본값을 명시) | 충돌 채널 32개(UE `ECollisionChannel`)는 5 bit로 충분하다. 넓혀야 하면 충돌 데이터 설계에서 다시 정한다 |
+| `JPH_OBJECT_LAYER_BITS` | 32(PH1 — 2026-11-25에 16에서 바꿨다) | object 층 하나에 채널 6 bit·운동 묶음 2 bit·참여 표지 3 bit·응답 묶음 색인 21 bit를 담는다([물리 모듈](PhysicsModule/06-JoltMapping.ko.md) 6.1절 PMD12 — broadphase 층은 object 층만 보고 정하므로 운동 묶음이 층에 들어가야 한다). 버전 ID 기능 bit가 바뀌므로 소비자 정의가 어긋나면 `VerifyJoltVersionID`가 잡는다 |
 | `JPH_DEBUG_RENDERER`·`JPH_PROFILE_ENABLED`·`JPH_EXTERNAL_PROFILE` | 끔 | 디버그 그리기는 물리 디버그 단계, 프로파일 연결(Trace)은 물리 모듈 단계에서 정한다 |
 | `JPH_FLOATING_POINT_EXCEPTIONS_ENABLED` | 끔 | Rocks는 FP 예외 trap을 켜지 않는다 |
 | `JPH_DISABLE_CUSTOM_ALLOCATOR`·`JPH_DISABLE_TEMP_ALLOCATOR` | 끔(할당 hook과 임시 할당기를 쓴다) | 16.4절 할당 hook |
 | GPU compute(`JPH_USE_DX12`·`JPH_USE_VK`·`JPH_USE_MTL`·`JPH_USE_CPU_COMPUTE`) | 끔 | 10.1절 |
 | SIMD 정의(`JPH_USE_SSE4_1`·`AVX`·`AVX2`·`FMADD` 등) | 주지 않음 | Jolt가 컴파일러 기준 매크로로 고른다(`Core/Core.h:142-231`). Rocks 빌드는 ISA 인자를 금지하므로 x64는 SSE2, ARM64는 NEON이다. FMA는 결정성 build가 끈다(`Core/Core.h:150`·`:192`) |
 | `JPH_DEBUG` | 라이브러리·소비자 모두 정의하지 않음 | Jolt.cmake는 Debug 구성에서 정의하고(`Jolt.cmake:843`), 정의되면 `Core/Core.h:13`이 assert를 자동으로 켜며 `JPH_IF_DEBUG` inline이 달라진다. 구성별 정의를 쓰지 않으므로 모든 구성에서 같게 둔다 |
-| `consumerDefines` | `JPH_CROSS_PLATFORM_DETERMINISTIC`, `JPH_ENABLE_ASSERTS`, `JPH_OBJECT_LAYER_BITS=16` | Jolt 버전 ID(`JPH_VERSION_ID`, `Core/Core.h:22-88`)의 기능 bit(`JPH_DOUBLE_PRECISION`, `JPH_CROSS_PLATFORM_DETERMINISTIC`, `JPH_FLOATING_POINT_EXCEPTIONS_ENABLED`, `JPH_PROFILE_ENABLED`, `JPH_EXTERNAL_PROFILE`, `JPH_DEBUG_RENDERER`, 두 allocator 끔, `JPH_OBJECT_LAYER_BITS`, `JPH_ENABLE_ASSERTS`, `JPH_OBJECT_STREAM`)와 구조체 배치에 드는 정의는 소비자에도 같아야 한다. 소비자는 `RegisterTypes` 전에 `VerifyJoltVersionID()`로 확인한다(`RegisterTypes`는 bit가 다르면 바로 abort — `RegisterTypes.cpp:66-94`) |
+| `consumerDefines` | `JPH_CROSS_PLATFORM_DETERMINISTIC`, `JPH_ENABLE_ASSERTS`, `JPH_OBJECT_LAYER_BITS=32` | Jolt 버전 ID(`JPH_VERSION_ID`, `Core/Core.h:22-88`)의 기능 bit(`JPH_DOUBLE_PRECISION`, `JPH_CROSS_PLATFORM_DETERMINISTIC`, `JPH_FLOATING_POINT_EXCEPTIONS_ENABLED`, `JPH_PROFILE_ENABLED`, `JPH_EXTERNAL_PROFILE`, `JPH_DEBUG_RENDERER`, 두 allocator 끔, `JPH_OBJECT_LAYER_BITS`, `JPH_ENABLE_ASSERTS`, `JPH_OBJECT_STREAM`)와 구조체 배치에 드는 정의는 소비자에도 같아야 한다. 소비자는 `RegisterTypes` 전에 `VerifyJoltVersionID()`로 확인한다(`RegisterTypes`는 bit가 다르면 바로 abort — `RegisterTypes.cpp:66-94`) |
 | 스레드·FP 인자 | 비Windows는 `-pthread`(`Jolt.cmake:1037-1040`, Rocks 빌드가 이미 thread 라이브러리를 링크하는지 JL1 빌드로 확인), `/fp:fast` 계열 금지(`Build/CMakeLists.txt:204-207` — Rocks 빌드가 이미 거부) | CMake 밖에서 빌드하므로 Jolt.cmake가 거는 인자를 따로 맞춘다. `NDEBUG`·`-fno-strict-aliasing`은 Jolt 소스가 쓰지 않아 필요 없다 |
 | CMake 기본값과 다른 점 | `FLOATING_POINT_EXCEPTIONS_ENABLED` 기본 켬(`Build/CMakeLists.txt:40`) → 끔, `ENABLE_OBJECT_STREAM` 기본 켬(`:107`) → 끔, `DEBUG_RENDERER_IN_DEBUG_AND_RELEASE`·`PROFILER_IN_DEBUG_AND_RELEASE` 기본 켬 → 끔, `USE_AVX2` 등 기본 켬 → 끔 | manifest notes에도 적는다 |
 | `globalState` | 참 | `Factory::sInstance`, 할당·`Trace`·`AssertFailed` 전역 함수 포인터, `RegisterTypes` |

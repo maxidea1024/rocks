@@ -69,7 +69,7 @@ enum class SampleEncoding : uint8 {
 };
 
 // 교차 표본 byte를 planar float로 바꾼다. bytesPerSample은 1·2·3·4(정수) 또는 4·8(float)이다.
-// float 표본이 NaN·무한대이거나 float32 범위를 넘으면 false다(InvalidArgument로 옮긴다).
+// float 표본이 NaN·무한대이거나 float32 범위를 넘으면 false다(호출자가 CorruptData로 옮긴다).
 bool DeinterleaveToFloat(const uint8* data, uint32 channels, uint64 frames, uint32 bytesPerSample,
                          SampleEncoding encoding, bool bigEndian, float* planar) noexcept;
 

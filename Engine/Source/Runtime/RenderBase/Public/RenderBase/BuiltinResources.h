@@ -7,6 +7,7 @@
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/ShaderSet.h>
 #include <ShaderCore/ShaderBindingLayout.h>
+#include <ShaderCore/ShaderParameterTypes.h>
 
 // 내장 자원 팩이다(Docs/Design/RenderBase 6.3절·11.1절, 11.4절 5·6항, 계획 9.6절 Builtin Resource
 // Pack). 렌더 lane 시작 단계(RenderLaneProcessor::OnLaneStart)에서 만들고, 반환 뒤 RenderLane이
@@ -116,14 +117,14 @@ struct BuiltinMeshBuffers {
     uint32 indexCount = 0;
 };
 
-// fallback 메시 셰이더의 그리기별 상수다(BuiltinMesh.rsf BuiltinMeshConstants, 80 byte). 변환은
-// 행 벡터 p·M(행 우선)이다.
+// fallback 메시 셰이더의 그리기별 상수다(80 byte, 생성 HLSL
+// /Engine/Generated/RenderBase/BuiltinMeshConstants.rsh — 셰이더는 Draw.<멤버>,
+// ShaderSystem 16.2절). 변환은 행 벡터 p·M(행 우선)이다.
+ROCKS_SHADER_PARAMETERS(Name = "Draw", RootConstants)
 struct alignas(16) BuiltinMeshConstants {
-    float localToClip[4][4] = {};
-    float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    shader::ShaderFloat4x4 localToClip;
+    shader::ShaderFloat4 color = {1.0f, 1.0f, 1.0f, 1.0f};
 };
-
-static_assert(sizeof(BuiltinMeshConstants) == 80, "BuiltinMeshConstants must match the shader");
 
 // fallback 셰이더 항목(엔진 셰이더 집합의 항목 번호)이다.
 struct BuiltinShaderEntries {
@@ -147,6 +148,11 @@ public:
     // 셰이더 항목이 없음 NotFound, 장치 자원·셰이더 생성 실패는 그 오류. 실패하면 만든 것을 모두
     // Retire하고 LastFailure에 영어 이유(자원 이름)를 둔다.
     Result<void> Create(graphics::Device& device, ShaderSet& engineShaders) noexcept;
+
+    // 셰이더 교체 뒤 fallback 셰이더 항목을 새 집합에서 다시 찾는다(Docs/Design/RenderBase 9.8절
+    // "SH4 연결" — 장치 자원은 그대로다, 장치 셰이더는 첫 사용에서 만든다). 실패: 준비 전 NotReady,
+    // 항목이 없음 NotFound(그때 항목은 바뀌지 않고 LastFailure에 이름을 둔다).
+    Result<void> AdoptShaders(ShaderSet& engineShaders) noexcept;
 
     // 모든 자원을 장치에 Retire한다(종료 4단계 — 마지막 사용 fence 뒤 해제). 만들지 않았으면 아무
     // 것도 하지 않는다. 다시 Create할 수 있다.

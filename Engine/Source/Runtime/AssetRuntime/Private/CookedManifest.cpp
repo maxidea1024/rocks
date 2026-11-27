@@ -44,8 +44,8 @@ using Field = CookedManifestField;
 template <class T>
 Result<T> ManifestCorrupt(AssetDiagnostic* failure, Field field, uint64 detail, AssetId asset = {},
                           AssetId related = {}) noexcept {
-    return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
-                        asset, static_cast<uint32>(field), detail, related);
+    return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, asset,
+                        static_cast<uint32>(field), detail, related);
 }
 
 template <class T>
@@ -260,7 +260,7 @@ Result<void> CheckPathHint(StringView path, Allocator& scratch, StringBuilderBas
 template <class T>
 Result<T> FieldFailure(AssetDiagnostic* failure, ErrorCode error, Field field, uint64 detail,
                        AssetId asset) noexcept {
-    if (error == ErrorCode::InvalidArgument) {
+    if (error == ErrorCode::InvalidArgument || error == ErrorCode::CorruptData) {
         return ManifestCorrupt<T>(failure, field, detail, asset);
     }
 
@@ -472,8 +472,33 @@ const CookedManifestEntry* CookedManifest::Find(AssetId asset) const noexcept {
     return low < entries.Size() && entries[low].asset == asset ? &entries[low] : nullptr;
 }
 
+namespace {
+
+// 모델 규칙 판정이다: 위반은 CorruptPackage / CorruptData(읽기 — 파싱한 모델의 손상). 공개
+// ValidateCookedManifest·쓰기는 호출자가 넘긴 모델이라 InvalidArgument로 바꾼다(AssetSystem 19장).
+Result<void> ValidateManifestModel(const CookedManifest& manifest, Allocator& scratch,
+                                   AssetDiagnostic* failure) noexcept;
+
+} // namespace
+
 Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& scratch,
                                     AssetDiagnostic* failure) noexcept {
+    auto valid = ValidateManifestModel(manifest, scratch, failure);
+    if (!valid && valid.Error() == ErrorCode::CorruptData) {
+        if (failure != nullptr) {
+            failure->error = ErrorCode::InvalidArgument;
+        }
+
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return valid;
+}
+
+namespace {
+
+Result<void> ValidateManifestModel(const CookedManifest& manifest, Allocator& scratch,
+                                   AssetDiagnostic* failure) noexcept {
     const StringView profile = manifest.profileId.View();
     // String은 유효한 UTF-8만 담으므로(Core String 불변식) UTF-8은 다시 보지 않는다 — byte의
     // UTF-8은 reader의 문자열 읽기가 본다.
@@ -558,6 +583,8 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
 
     return ValidateArtifacts(manifest, failure);
 }
+
+} // namespace
 
 namespace package_detail {
 
@@ -970,7 +997,7 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
         return ManifestCorrupt<Out>(failure, Field::File, CookedManifestNoEntry);
     }
 
-    if (auto valid = ValidateCookedManifest(manifest, allocator, failure); !valid) {
+    if (auto valid = ValidateManifestModel(manifest, allocator, failure); !valid) {
         return Result<Out>::Failure(valid.Error());
     }
 

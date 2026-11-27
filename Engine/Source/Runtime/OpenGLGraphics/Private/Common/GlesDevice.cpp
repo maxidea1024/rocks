@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include <GraphicsTypes/CookSampling.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -120,6 +121,10 @@ GlesDevice::~GlesDevice() {
         gl_.DeleteProgram(stencilReadProgram_);
         gl_.DeleteVertexArrays(1, &readVertexArray_);
         gl_.DeleteSamplers(1, &readSampler_);
+        for (uint32 index = 0; index < samplerCacheCount_; ++index) {
+            gl_.DeleteSamplers(1, &samplerCache_[index].filtering);
+            gl_.DeleteSamplers(1, &samplerCache_[index].point);
+        }
 
         for (const SwapChainRecord& record : swapChains_) {
             gl_.DeleteFramebuffers(1, &record.framebuffer);
@@ -187,6 +192,18 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
             IsValidPixelFormat(pixelFormat) ? FindTextureFormat(pixelFormat) : nullptr;
         formatCaps_[number] =
             entry != nullptr ? TextureFormatCaps(*entry, features_) : PixelFormatCaps::None;
+    }
+
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): Android는 ES 3.2 core 형식(ETC2·EAC·ASTC
+    // LDR 포함)이 표의 보장 칸이다. Windows 미리보기는 쿠킹 대상이 아니라 대조하지 않는다.
+    const PixelFormat missing = FindMissingCookSampling(Backend::OpenGL, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (missing != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::OpenGL, HostGraphicsPlatform(),
+                                   missing);
+        failure.Set(ErrorCode::Unsupported, "CookSamplingGuarantee", 0, detail);
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     // 장치 능력(GX1)과 MSAA 표본 수(Multisample 능력)를 채운다.
@@ -354,6 +371,8 @@ Result<void> GlesDevice::ResizeSwapChain(SwapChainHandle handle, uint32 width,
     entry.objects[0] = record->texture;
     entry.objects[2] = record->framebuffer;
     SwapChainRecord resized = *record;
+    // 새 백버퍼라 그리는 중인 프레임을 버린다.
+    resized.frameOpen = false;
     if (!CreateBackBuffer(resized, width, height)) {
         return Fail("swap chain back buffer resize failed");
     }
@@ -1048,6 +1067,10 @@ usize GlesDevice::PendingRetireCount() const noexcept {
     return retired_.Size();
 }
 
+uint64 GlesDevice::PresentCount() const noexcept {
+    return presents_;
+}
+
 StringView GlesDevice::LastError() const noexcept {
     return lastError_.View();
 }
@@ -1636,6 +1659,33 @@ GlesDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
 
     return Result<TextureSubresources>::Success(
         TextureSubresources{record->mipLevels, record->slices});
+}
+
+Result<TextureViewInfo> GlesDevice::GetTextureViewInfo(TextureHandle texture) noexcept {
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->writable ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = !record->writable &&
+                   HasPixelFormatCaps(GetPixelFormatCaps(record->format), PixelFormatCaps::Sampled);
+    info.comparison = record->samplerDesc.comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> GlesDevice::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
 }
 
 } // namespace rocks::graphics::gles

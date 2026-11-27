@@ -56,7 +56,7 @@ ReadInstancedStructField(ArchiveReader& payload) noexcept;
 
 // 원소·Map 값 자리: u64 길이 + 내용 하나를 읽는다. 길이 0은 비어 있음, 아니면 내용이 Record
 // 하나여야 한다(ReadRecordHeader의 오류). 길이 prefix가 잘렸거나 길이가 남은 byte보다 크면
-// InvalidArgument, maxValueBytes를 넘으면 CapacityExceeded다. 실패하면 cursor는 호출 전 위치다.
+// CorruptData, maxValueBytes를 넘으면 CapacityExceeded다. 실패하면 cursor는 호출 전 위치다.
 // 예산은 ReadPrefixedRecord와 같다.
 ROCKS_SERIALIZATION_API Result<InstancedStructWire>
 ReadInstancedStructElement(ArchiveReader& elements) noexcept;

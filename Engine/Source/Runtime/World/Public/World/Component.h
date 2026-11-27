@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
+#include <Core/Containers/Span.h>
+#include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <World/WorldTypes.h>
@@ -13,6 +16,7 @@ namespace rocks {
 //   class Health final : public Component {
 //       ROCKS_NATIVE_TYPE(Health, Component, 0x...ull, 0x...ull)
 //   public:
+//       using Component::Component;   // allocator 생성자(Docs/Design/EngineRuntime 31.3절)
 //       int32 value = 100;
 //   };
 //   RegisterNativeClass<Health>(types);                // World 기본 타입 등록 뒤
@@ -41,12 +45,15 @@ namespace rocks {
 //   거짓)는 World에 편입되기 전까지 World API를 쓰지 못한다(Destroy는 InvalidArgument).
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
-ROCKS_CLASS(WorldOnly)
+ROCKS_CLASS(WorldOnly, ScriptType)
 class ROCKS_WORLD_API Component : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
-    Component() noexcept = default;
+    // allocator는 태그 목록용이다(파생은 받은 allocator를 넘긴다 — 31.3절).
+    explicit Component(Allocator& allocator) noexcept : componentTags_(allocator) {
+    }
+
     virtual ~Component() noexcept = default;
 
     // 소속 World다. AddComponent가 연결한 뒤에만 유효하다(생성자 안이나 World 장부 밖 객체에서는
@@ -86,6 +93,38 @@ public:
     }
 
     Result<void> SetTickEnabled(bool enabled) noexcept;
+
+    // ---- 태그(Docs/Design/EngineRuntime 31.4절 — UE UActorComponent::ComponentTags) ----
+
+    // tag가 들어 있는지다. None은 늘 거짓이다(UE ComponentHasTag).
+    bool HasTag(Name tag) const noexcept;
+
+    // 태그 목록이다(순서·중복 그대로). 바꾸면 무효다.
+    Span<const Name> ComponentTags() const noexcept {
+        return componentTags_.View();
+    }
+
+    // tag를 더한다(이미 있으면 아무것도 하지 않고 성공). tag는 이 객체 Registry의 이름 pool에서
+    // 발급한 토큰이어야 한다(엔진 World는 Engine::Names()).
+    //
+    // 사용 예:
+    //   auto enemy = engine.Names().TryIntern("Enemy");
+    //   if (enemy) {
+    //       (void)value.AddTag(enemy.Value());
+    //   }
+    //
+    // 오류(값 그대로): World 장부 밖 객체 InvalidArgument, 파괴 대기 Destroyed, None·다른 pool·옛
+    // 토큰 InvalidArgument, Registry에 이름 pool이 없으면 Unsupported, 할당 실패 OutOfMemory다.
+    // 스레드: World의 게임 스레드다.
+    Result<void> AddTag(Name tag) noexcept;
+
+    // 같은 tag를 모두 뺀다(없으면 아무것도 하지 않고 성공). 오류: 장부 밖 InvalidArgument, 파괴
+    // 대기 Destroyed, None InvalidArgument다.
+    Result<void> RemoveTag(Name tag) noexcept;
+
+    // 태그 목록을 통째로 바꾼다(중복은 그대로 둔다). 원소마다 AddTag와 같은 검사를 하고, 하나라도
+    // 거부하면 값 그대로다. 오류는 AddTag와 같다.
+    Result<void> SetTags(Span<const Name> tags) noexcept;
 
     virtual Result<void> OnAwake() noexcept {
         return Result<void>::Success();
@@ -133,6 +172,20 @@ public:
     // 아무것도 하지 않고 성공한다. 같은 프레임의 중복 표시는 한 번이다. 오류: 범위 밖 종류
     // InvalidArgument, 할당 실패.
     Result<void> MarkSystemStateDirty(SystemStateKind kind) noexcept;
+
+    // 그 종류의 시스템 상태를 그 자리에서 다시 만든다(UE RecreatePhysicsState·
+    // EnsurePhysicsStateCreated — 23.2절). 있으면 지우고, WantsSystemState가 참이면 만든다(없던
+    // 것도 만든다). 그 종류의 대기 표시는 지운다. 같은 프레임의 다음 질의가 바뀐 상태를 봐야 하는
+    // setter가 부른다.
+    //
+    // 사용 예:
+    //   collisionEnabled_ = enabled;
+    //   (void)RecreateSystemStateNow(SystemStateKind::Physics);   // 실패해도 값은 바뀌었다
+    //
+    // 등록 전·해제 뒤·파괴 대기면 아무것도 하지 않고 성공한다. 오류: 범위 밖 종류 InvalidArgument,
+    // 같은 종류의 Create·Destroy 안에서 다시 부르면 Busy, Create 실패는 그 오류(그 종류 없이 두고
+    // Warning SystemStateRecreateFailed).
+    Result<void> RecreateSystemStateNow(SystemStateKind kind) noexcept;
 
     // --- 타입 규칙·EditorOnly(23.2절 CR5·CR6) ---
 
@@ -184,7 +237,9 @@ private:
     // Tick 설정이다(A5c — 생성자 값은 클래스 기본값 레코드에 들어가고, 차이 저장이 기본값과 같은
     // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
     ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
-    ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "enabled", ScriptReadOnly) bool enabled_ = true;
+    // 태그다(31.4절 — 바꾸기는 AddTag·RemoveTag·SetTags).
+    ROCKS_PROPERTY(ReadOnly, Name = "componentTags") Array<Name> componentTags_;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // World가 관리하는 수명 기록이다.
     ROCKS_NATIVE() ComponentState state_ = ComponentState::Constructed;
@@ -195,6 +250,13 @@ private:
     // 있는 시스템 상태와 다시 만들 표시다(종류마다 비트).
     ROCKS_NATIVE() uint8 systemStates_ = 0;
     ROCKS_NATIVE() uint8 dirtySystemStates_ = 0;
+    // 지금 다시 만드는 중인 종류다(즉시·갱신 지점 모두 — 같은 종류 재진입은 Busy).
+    ROCKS_NATIVE() uint8 recreatingSystemStates_ = 0;
+    // 갱신 지점이 이 Component에서 아직 처리하지 않은 종류다(즉시 다시 만들기가 지운다).
+    ROCKS_NATIVE() uint8 flushingSystemStates_ = 0;
+    // World의 갱신 목록에 들어 있다(표시 비트와 따로 — 즉시 다시 만들기가 비트를 지워도 한 번만
+    // 들어간다).
+    ROCKS_NATIVE() bool systemStateQueued_ = false;
     // 단독 파괴(DestroyComponent)의 정리 이유다(먼저 정한 것을 유지한다).
     ROCKS_NATIVE() EndPlayReason endReason_ = EndPlayReason::Destroyed;
     ROCKS_NATIVE() TickHandle ticks_[detail::TickHookCount];

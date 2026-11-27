@@ -4,7 +4,7 @@
 #include <TestSupport/Test.h>
 #include <UnrealExchange/ExchangeImportRun.h>
 
-// Unreal 교환 임포트 실행 시험이다(Docs/Design/UnrealExchange.ko.md 10.5절 7·8번): 종류별 임포터
+// Unreal 교환 임포트 실행 시험이다(Docs/Design/UnrealExchange 10.5절 7·8번): 종류별 임포터
 // 표, 단위 순서와 참조 id 표, 새로 만듦·재임포트, Hard 순환 단위 실패, 임포터 없는 클래스 건너뜀과
 // 의존자(텍스처는 경고, 그 밖은 실패), 임포터 실패의 진단 코드, 계획 실패의 결과 코드, 범위 밖
 // 선택, dry run, 할당 실패.
@@ -545,7 +545,7 @@ TEST(UnrealExchange_RunPlanFailuresAndDryRun) {
     }
 
     {
-        // 읽기에 실패한 에셋의 결과 코드(CorruptBundle → InvalidArgument).
+        // 읽기에 실패한 에셋의 결과 코드(CorruptBundle → CorruptData).
         const SyntheticAsset assets[] = {{"/Game/A/T.T", "Texture2D", {}, "[]"}};
         RunScene scene(allocator);
         REQUIRE(ReadSynthetic(allocator, Span<const SyntheticAsset>(assets), scene.bundle,
@@ -553,7 +553,7 @@ TEST(UnrealExchange_RunPlanFailuresAndDryRun) {
         REQUIRE(scene.Plan());
         REQUIRE(scene.Run({}, true));
         CHECK(scene.result.Outcome(0).failure == AssetDiagnosticCode::CorruptBundle &&
-              scene.result.Outcome(0).error == ErrorCode::InvalidArgument);
+              scene.result.Outcome(0).error == ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

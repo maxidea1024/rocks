@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
+#include <Core/Guid.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
@@ -47,6 +48,12 @@
 //   }
 namespace rocks::shader {
 
+// 셰이더 라이브러리 쿠커의 처리기 Guid다(cookKey 머리 — Docs/Design/ShaderSystem 16.1절 SSD46,
+// 비에셋 산출물 단계 정체성의 processor). 바꾸면 모든 라이브러리 cookKey가 바뀐다.
+inline constexpr Guid ShaderLibraryCookerGuid{0x52534c434f4f4b31ull, 0x9d2e4b7a1c3f5e01ull};
+// cookKey byte 배치 버전이다(SSD46 — 배치를 바꾸면 올린다).
+inline constexpr uint32 ShaderLibraryCookKeyVersion = 1;
+
 struct ShaderLibraryCookDesc {
     Allocator* allocator = nullptr;
     // Freeze된 등록부다.
@@ -61,6 +68,13 @@ struct ShaderLibraryCookDesc {
     StringView outputDirectory;
     // 파일 시스템(null이면 실제 파일 시스템)이다.
     platform::FileSystem* files = nullptr;
+    // 모든 job을 debugSymbols=true로 컴파일한다(값 3 — ShaderSystem 16.3절 SSD73, UE
+    // r.Shaders.Symbols). 값 3은 라이브러리에 넣지 않는다.
+    bool debugSymbols = false;
+    // 비지 않으면 성공한 job의 값 3을 <symbolDirectory>/<형식 id>/<이름>에 쓴다(SSD74 — 임시 파일 →
+    // Replace, 같은 byte면 쓰지 않는다). 이름은 값 3의 이름, 비면 "<job 키 hex>.<확장자>"다. 쓰기
+    // 실패는 라이브러리 실패가 아니고 형식 줄의 symbolFailures에 센다.
+    StringView symbolDirectory;
 };
 
 enum class ShaderLibraryCookOutcome : uint8 {
@@ -110,17 +124,41 @@ struct ShaderLibraryCookFormat {
     uint32 failedJobs = 0;
     uint32 entries = 0;
     uint32 codes = 0;
+    // 너겟에서 온 job 수다.
+    uint32 cacheHits = 0;
+    // 라이브러리 재사용 키다(SSD46 — 라이브러리 byte를 만든 줄만, hasCookKey). 입력(형식 정의·
+    // 타입 집합·항목 표·job 키·includeDevelopment)이 같으면 같다.
+    Sha256Digest cookKey{};
+    bool hasCookKey = false;
+    // 심볼 파일(SSD74): 새로 쓴 수, 같은 byte라 둔 수, 쓰기·읽기 실패 수다.
+    uint32 symbolFiles = 0;
+    uint32 symbolsUnchanged = 0;
+    uint32 symbolFailures = 0;
     // BuildFailed·WriteFailed의 영어 이유(정적 수명)다.
     const char* reason = "";
 };
 
+// 원문 하나와 그것을 읽은 셰이더 타입이다(ShaderSystem 16.3절 SSD69 — 감시 재컴파일의 의존 지도).
+struct ShaderLibrarySourceUse {
+    explicit ShaderLibrarySourceUse(Allocator& allocator) noexcept
+        : virtualPath(allocator), types(allocator) {
+    }
+
+    String virtualPath;
+    // 셰이더 타입 이름 해시다(한 번씩, 처음 나온 순서).
+    Array<uint64> types;
+};
+
 struct ShaderLibraryCookReport {
     explicit ShaderLibraryCookReport(Allocator& allocator) noexcept
-        : formats(allocator), failures(allocator) {
+        : formats(allocator), failures(allocator), sources(allocator) {
     }
 
     Array<ShaderLibraryCookFormat> formats;
     Array<ShaderLibraryCookJobFailure> failures;
+    // 모든 형식 job의 전처리 include 폐포(엔트리·Platform.rsh·include·정점 입력 원문 — 전처리까지
+    // 간 job은 컴파일이 실패해도 들어간다)를 원문별로 모은 것이다(가상 경로 처음 나온 순서).
+    Array<ShaderLibrarySourceUse> sources;
 };
 
 // desc대로 형식마다 라이브러리를 쿠킹한다(위 설명). report는 먼저 비우고 형식마다 한 줄을 남긴다.

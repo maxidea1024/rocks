@@ -9,6 +9,11 @@ ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Texture)
 
 namespace rocks {
 
+using graphics::GetPixelFormatInfo;
+using graphics::PixelFormat;
+using graphics::PixelFormatFromNumber;
+using graphics::PixelFormatKind;
+
 Result<void> RegisterTextureTypes(ModuleRegistration& registration) noexcept {
     return generated::Texture::RegisterModuleTypes(registration);
 }
@@ -55,11 +60,13 @@ Result<void> TexturePlatformData::Validate(const TexturePlatformData& data) noex
         return Result<void>::Success();
     }
 
-    // 번호는 쿠킹 데이터의 저장 형식이다 — 모르는 번호·비압축 색이 아닌 형식은 거부한다(블록 압축은
-    // 압축 단계에서 받는다).
+    // 번호는 쿠킹 데이터의 저장 형식이다 — 모르는 번호와 색이 아닌 형식(깊이·다중 plane)은
+    // 거부한다. 비압축 색과 블록 압축 색(BC·ASTC·ETC2 — AssetSystem 12.17.5)을 받는다.
     auto format = graphics::PixelFormatFromNumber(data.pixelFormat);
-    if (!format ||
-        graphics::GetPixelFormatInfo(format.Value()).kind != graphics::PixelFormatKind::Color) {
+    const graphics::PixelFormatKind kind = format
+                                               ? graphics::GetPixelFormatInfo(format.Value()).kind
+                                               : graphics::PixelFormatKind::Unknown;
+    if (kind != graphics::PixelFormatKind::Color && kind != graphics::PixelFormatKind::Compressed) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

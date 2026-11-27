@@ -126,3 +126,27 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - Vulkan: 버퍼 view 형식은 버퍼의 모든 texel usage(읽기 용도면 UNIFORM, 쓰기 용도면 STORAGE)를 지원해야 하므로(VUID-VkBufferViewCreateInfo-format-08778) 쓰기·atomic 능력은 읽기도 되는 형식만 공개하고, 읽기·쓰기 버퍼의 view는 두 능력을 모두 요구한다(아니면 `Unsupported`).
 - D3D11: WARP가 `RGB9E5Ufloat`에 `SUPPORT_BUFFER`를 알리고도 버퍼 SRV 생성 안에서 멈추므로 D3D11은 그 형식의 texel buffer 능력을 공개하지 않는다.
 - 측정(typed view 생성 ⇔ 능력, 47개 비압축 단일 plane 색 형식): D3D12·D3D11 GTX 1060 읽기 36·쓰기 33, D3D12 WARP 39·36, D3D11 WARP 38·35, Vulkan GTX 1060 42·33, lavapipe 44·34, GLES(두 context) 26·10(성분 대응으로 흉내 내는 A8Unorm은 버퍼 텍스처에 대응을 걸 수 없어 GX1·GX2 리뷰 반영에서 뺐다). 모두 "능력 ⇔ 생성" 실패 0이다.
+
+### 14.4 쿠킹 보장 샘플링 표(PF7, 개정 7)
+
+| ID | 내용 | 상태 | 위치 |
+|---|---|---|---|
+| PF7 | 7.1절 표·대체·이름표, D3D12·D3D11·Vulkan·OpenGL ES 장치 생성 대조 | **구현** | `GraphicsTypes/CookSampling.h`·`GraphicsBackend.h`·`GraphicsPlatform.h`, 시험 `GraphicsTypes/Tests/CookSamplingTests.cpp`, 장치 대조 Sandbox `CookSamplingSelfTest.cpp` |
+
+- `Backend`·`BackendName`을 Graphics `DeviceTypes.h`에서 GraphicsTypes `GraphicsBackend.h`로 옮겼다(`DeviceTypes.h`가 포함하므로 사용처 변경 없음).
+- 장치 생성 대조 위치: D3D12·D3D11 `Initialize`의 형식 능력 질의 직후, Vulkan `Initialize`의 `QueryFormatCaps`·`QueryDeviceCaps` 직후, OpenGL ES `Initialize`의 형식 능력 표 직후. 모두 stage `CookSamplingGuarantee`, 오류 `Unsupported`이고 진단 문장은 `WriteCookSamplingRejection` 하나를 함께 쓴다.
+
+검증(2026-11-27, Sandbox `--texture-self-test`, 검증 계층 켬, lavapipe는 `VK_ADD_DRIVER_FILES`):
+
+| 장치 | 대조 열 | 보장(필터·샘플만·엔진 요구) | 빠짐 |
+|---|---|---|---|
+| D3D12 GTX 1060 | D3D12·Windows | 36·0·0 | 0 |
+| D3D12 WARP | D3D12·Windows | 36·0·0 | 0 |
+| D3D11 GTX 1060 | D3D11·Windows | 36·0·0 | 0 |
+| D3D11 WARP | D3D11·Windows | 36·0·0 | 0 |
+| Vulkan GTX 1060 | Vulkan·Windows | 34·0·17 | 0 |
+| Vulkan lavapipe(llvmpipe) | Vulkan·Windows | 34·0·17 | 0 |
+| OpenGL ES 미리보기, ES 3.2 context | OpenGL·Android(보고만) | 32·4·0 | 0 |
+| OpenGL ES 미리보기, 데스크톱 GL 4.3 core context | OpenGL·Android(보고만) | 32·4·0 | 10(ASTC LDR 전부 — 데스크톱 드라이버가 `GL_KHR_texture_compression_astc_ldr`를 내지 않고, 8.2절 규칙대로 확장 이름으로만 켠다) |
+
+backend Private 표를 고친 곳은 없다(보장 칸과 다른 장치 능력이 없었다). 데스크톱 core 미리보기의 ASTC 차이는 미리보기 한계이고 Android 장치(ES 3.2 core)의 보장과 무관하다.

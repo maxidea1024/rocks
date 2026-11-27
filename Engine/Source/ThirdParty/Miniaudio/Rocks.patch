@@ -1,0 +1,13 @@
+diff --git a/miniaudio.h b/miniaudio.h
+index b8f6137..ebb70c0 100644
+--- a/miniaudio.h
++++ b/miniaudio.h
+@@ -69662,7 +69662,7 @@ static ma_uint32 ma_hash_32(const void* key, int len, ma_uint32 seed)
+ }
+ 
+ #if defined(__clang__) || (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)))
+-    #pragma GCC diagnostic push
++    #pragma GCC diagnostic pop
+ #endif
+ /* End MurmurHash3 */
+ 

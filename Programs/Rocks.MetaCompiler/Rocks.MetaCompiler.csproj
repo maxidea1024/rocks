@@ -4,6 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="../../.clang-format" Link=".clang-format" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Sparks language names checked against the Sparks compiler by a C++ test (Docs/Design/SparksBinding.ko.md B6). -->
+    <EmbeddedResource Include="SparksNames.json" LogicalName="SparksNames.json" />
     <ProjectReference Include="../Rocks.Tooling.Common/Rocks.Tooling.Common.csproj" />
   </ItemGroup>
 </Project>

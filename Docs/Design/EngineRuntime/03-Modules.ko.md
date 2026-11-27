@@ -26,7 +26,7 @@
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
 | `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](../RenderBase/README.ko.md) RB1) | ObjectRuntime·World 참조 |
-| `WorldIntegration` | World, RenderBase, AssetRuntime | SpriteComponent 등 렌더 컴포넌트, RenderScene 추출, 텍스처 GPU 캐시 | Engine 내부 상태 변경 |
+| `WorldIntegration` | World, Mesh, Material, Texture, RenderBase | 에셋을 참조하는 컴포넌트(메시 컴포넌트 D2b — 30장, SpriteComponent 등 렌더 컴포넌트), RenderScene 추출, 텍스처 GPU 캐시(`TextureRenderCache` — [렌더 기반](../RenderBase/18-ScreenMilestone.ko.md) 18.5절 8항). World 객체 → 에셋 참조는 `SoftObjectRef`(30.1절) | Engine 내부 상태 변경 |
 
 정식 렌더러 모듈(`Renderer`, Forward+·Deferred, 계획 11절)은 아직 없다. 내장 메시·원문 셰이더로 그리던 최소 렌더러는 엔진 핵심이 아니라 시험 샘플이므로 `Programs/Sandbox/Private/SampleRenderer`로 옮겼다(2026-11-17). `Renderer` 이름은 정식 렌더러가 다시 쓴다.
 

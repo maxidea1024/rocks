@@ -1,0 +1,11 @@
+# 작업 진행 보고와 취소 — 개정 이력
+
+[목차](README.ko.md)
+
+## 개정 이력
+
+- 개정 1(2026-11-23): 초안. UE 5.8 세 층 구조 조사, Rocks 구조(어느 스레드에서나 보고·스냅샷 pull·소비자별 사건 cursor·UI 펌프 hook·프로세스 경계), API·오류 코드·한도 상수, 단계 PG1–PG6. 교차 검증 1차(리뷰어 1명, 필수 15·권장 8) 반영: UI 스레드 막는 작업(UI 펌프 hook), 발행 상태 seqlock 합성, 비율 합성 규칙, 자동 바인딩 제거, `RunParallelFor` 호출 스레드 처리(`ProgressBindingSuspend`·`ProgressParallelFor`), `Text` Clone 계약, 원문·id 추출, 기존 `ErrorCode`만 사용, 등록소 UE 정합(대상별·`Shutdown`·매개변수·순환 수락)과 Engine 배치·소유 스레드, 자식 pipe 소유·stderr·`--parent-control`, 셰이더 `job` 줄의 ShaderSystem 선개정, 소비자별 cursor, push 관찰자 제거.
+- 개정 2(2026-11-27): 문서를 장 파일로 나눴다. 사용자 결정으로 시작 화면 세션이 PG1·PG2를 맡았다. PG1 완료(4장 구현 메모·13장 상태), 12장에 시작 화면 받는 쪽 행.
+- 개정 3(2026-11-27): PG2 완료. 상수 이름에서 `k` 접두를 뗐다(Rocks 규칙 — `ProgressUiPumpInterval`·`DefaultProgressEventLogCapacity`는 뜻이 드러나게 바꿈). 하위 작업은 `externalCancel`을 받지 않는다(5.2절 — 취소 source는 부모 하나에만 연결), 오류 표 보강(빈 handle·`Initialize` 두 번·설정 범위·사슬 깊이), `ProgressBinding`은 같은 스레드 안 이동만, `ProgressParallelFor` 실제 서명(6.5절), 펌프는 활성 구간에서만, cursor 의미·마지막 진행 시각·재초기화·`Stats`(7장), 새 상수 넷(11장), 모듈 의존(3장), 비용 측정치(15.5절), 시험 파일(14장). 리뷰어 1명 교차 검증 반영: UI 펌프 등록 경쟁, 바인딩 소멸 검사에 기록 비교, 끝 사건 비율(5.3절), 작업 수준 계수 우선(5.5절), 끝난 작업 위 구간 no-op·깊이 넘친 구간의 취소(6.2절), `Shutdown` 로그를 잠금 밖으로, seqlock 읽기 회전 pause, 시험 보강.
+- 개정 4(2026-11-27): PG3 완료. 9.1절(줄 형식·Info 수준·첫 Pump·Tick), 9.3절(writer Flush·begin 보충·문구 칸 8 KiB), 10.1절(`SetExternalProgress`·하위 작업 취소 불가·자손 대응표 정리·정상 종료 130·대응표와 hub 상한), 10.2절(시간 제한 표준 입력 읽기·버린 대안 둘·유예 시간), 11장 상수 이름·새 상수, 13·14장. 같은 날 리뷰어 1명 교차 검증 반영: JSONL `self`·`weight`·`selfWeight`(부모 쪽 합성 일치), 부모 begin 먼저·유실 end 보충, 대응표에 없는 부모의 자식은 안 만듦, 자식 종료를 EOF 없이도 봄, `Terminate` 재시도, 취소 대기(7.4절), Windows 콘솔 stdin은 `Unsupported`, 자식 시험 순서를 줄로 고정, 한계 15장 9·10.
+- 개정 5(2026-11-27): PG4 완료(8장 구현 메모 — `AlreadyExists`·`ShuttingDown`·`Busy` 오류, 위상 정렬과 순환 처리, `FinishAll` 진행, Engine 연결), 13·14장. 같은 날 리뷰어 1명 교차 검증 반영: 순환 처리·`FinishAll`(모든 source, 끼우기 없음)·`Shutdown` 순서(정방향)를 UE 5.8 코드대로 고침(처음 "UE와 같다"는 서술이 틀렸다), source 계약, 프레임 시간 예산 16 ms·객체 접근 scope, `Shutdown` 스레드 검사, `Unregister` 순서 제자리 수정, 할당 실패와 순환 구분, 빈 대상 목록, 버린 것·한계.

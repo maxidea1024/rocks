@@ -1,3 +1,6 @@
+#include "LiveCountingAllocator.h"
+#include "ImageFuzz.h"
+
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
@@ -14,6 +17,8 @@
 using namespace rocks;
 using namespace rocks::image;
 namespace exr_decode_tests_file {
+
+using image_codec_test::LiveCountingAllocator;
 
 namespace {
 
@@ -415,6 +420,129 @@ TEST(ExrDecode_DamageAndAllocation) {
     }
 
     CHECK(failures > 0);
+}
+
+// 쓰기 할당 실패 전수(12.10.1절 — 14.1.119 후속 1번): EncodeExr의 n번째 할당(OpenEXRCore 묶음, 출력
+// 파일, 0 버퍼 — 출력 Array도 같은 Allocator)이 실패하면 OutOfMemory이고 out은 비며 받은 블록이
+// 모두 돌아온다. 실패가 없으면 기준과 같은 byte다. 구성: Zip scanline, Piz tile mip level, part 둘
+// RLE.
+TEST(ExrEncode_AllocationFailures) {
+    SystemAllocator allocator;
+    constexpr int32 Size = 16;
+    uint16 halves[Size * Size] = {};
+    for (int32 index = 0; index < Size * Size; ++index) {
+        halves[index] = Float16::FromFloat(static_cast<float>(index % 11) * 0.25f).bits;
+    }
+
+    const Span<const uint8> bytes(reinterpret_cast<const uint8*>(halves), sizeof(halves));
+    const ExrChannelWrite channels[] = {{"R", ExrPixelType::Half, bytes},
+                                        {"G", ExrPixelType::Half, bytes}};
+    ExrWriteImage images[3];
+    for (ExrWriteImage& image : images) {
+        image.width = Size;
+        image.height = Size;
+        image.channels = channels;
+    }
+
+    images[0].compression = ExrCompression::Zip;
+    images[1].compression = ExrCompression::Piz;
+    images[1].storage = ExrStorage::Tiled;
+    images[1].tileWidth = 8;
+    images[1].tileHeight = 8;
+    images[1].levels = ExrLevelMode::MipmapLevels;
+    images[2].compression = ExrCompression::Rle;
+    images[2].parts = 2;
+    for (const ExrWriteImage& image : images) {
+        Array<uint8> reference(allocator);
+        REQUIRE(EncodeExr(allocator, image, reference));
+        uint32 failures = 0;
+        uint64 firstLeak = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            LiveCountingAllocator counted(allocator);
+            test::NFailAllocator failing(counted);
+            bool exhausted = false;
+            bool ok = false;
+            bool expected = true;
+            {
+                Array<uint8> out(failing);
+                failing.FailOnAttempt(attempt);
+                const Result<void> encoded = EncodeExr(failing, image, out);
+                exhausted = failing.Attempts() < attempt;
+                failing.DisableFailure();
+                ok = encoded.IsOk();
+                expected =
+                    ok ? out.Size() == reference.Size() &&
+                             platform::MemoryEquals(out.Data(), reference.Data(), reference.Size())
+                       : encoded.Error() == ErrorCode::OutOfMemory && out.IsEmpty();
+            }
+
+            if (counted.Live() != 0 && firstLeak == 0) {
+                firstLeak = attempt;
+            }
+
+            CHECK(expected);
+            if (!ok) {
+                ++failures;
+            }
+
+            if (exhausted) {
+                CHECK(ok);
+                break;
+            }
+        }
+
+        CHECK(firstLeak == 0);
+        CHECK(failures > 0);
+    }
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): OpenEXR(무압축 RGB
+// half, Zip RGBA, Piz tile, RLE 단일 float) 씨앗. 변조한 파일은 결과가 서로 맞는 성공이거나 다섯
+// 분류의 실패이고, 할당 블록을 다 돌려준다.
+TEST(ExrDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    const Halves r(1.0f, 16);
+    const Halves g(10.0f, 16);
+    const Halves b(20.0f, 16);
+    const Halves a(30.0f, 16);
+    ExrSpec spec;
+    spec.width = 4;
+    spec.height = 4;
+    const ExrChannelSpec rgb[] = {{"B", ExrPixelType::Half, b.Bytes()},
+                                  {"G", ExrPixelType::Half, g.Bytes()},
+                                  {"R", ExrPixelType::Half, r.Bytes()}};
+    spec.channels = rgb;
+    const Array<uint8> plain = WriteExr(allocator, spec);
+    const ExrChannelSpec rgba[] = {{"A", ExrPixelType::Half, a.Bytes()},
+                                   {"B", ExrPixelType::Half, b.Bytes()},
+                                   {"G", ExrPixelType::Half, g.Bytes()},
+                                   {"R", ExrPixelType::Half, r.Bytes()}};
+    spec.channels = rgba;
+    spec.compression = ExrCompression::Zip;
+    const Array<uint8> zip = WriteExr(allocator, spec);
+    spec.compression = ExrCompression::Piz;
+    spec.storage = ExrStorage::Tiled;
+    spec.tileWidth = 2;
+    spec.tileHeight = 2;
+    const Array<uint8> piz = WriteExr(allocator, spec);
+    ExrSpec single;
+    single.width = 4;
+    single.height = 2;
+    single.compression = ExrCompression::Rle;
+    const ExrChannelSpec y[] = {{"Y", ExrPixelType::Half, Span<const uint8>(r.Bytes().Data(), 16)}};
+    single.channels = y;
+    const Array<uint8> rle = WriteExr(allocator, single);
+    const Span<const uint8> seeds[] = {plain.View(), zip.View(), piz.View(), rle.View()};
+    for (const Span<const uint8>& seed : seeds) {
+        REQUIRE(!seed.IsEmpty());
+    }
+
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Exr, 0x5EED0E52ull, 3000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace exr_decode_tests_file

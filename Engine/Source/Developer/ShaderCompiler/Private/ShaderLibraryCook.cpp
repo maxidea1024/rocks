@@ -1,8 +1,10 @@
 #include <ShaderCompiler/ShaderLibraryCook.h>
 
+#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
 #include <Platform/Process.h>
+#include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderPermutation.h>
 #include <stdio.h>
@@ -193,6 +195,222 @@ ShaderLibraryCookOutcome PublishFile(platform::FileSystem& files, Allocator& all
     return ShaderLibraryCookOutcome::Written;
 }
 
+// 결과의 include 폐포를 원문별 타입 목록에 더한다(ShaderSystem 16.3절 SSD69).
+Result<void> CollectSources(const Array<ShaderLibraryCombination>& plans,
+                            const Array<ShaderCompileJobResult>& results,
+                            Array<ShaderLibrarySourceUse>& sources) noexcept {
+    for (usize index = 0; index < results.Size(); ++index) {
+        const uint64 type = plans[index].type->nameHash;
+        for (const ShaderIncludeFile& include : results[index].preprocessed.includes) {
+            ShaderLibrarySourceUse* found = nullptr;
+            for (ShaderLibrarySourceUse& use : sources) {
+                if (use.virtualPath.View() == include.virtualPath.View()) {
+                    found = &use;
+                    break;
+                }
+            }
+
+            if (found == nullptr) {
+                auto added = sources.TryEmplaceBack(sources.GetAllocator());
+                if (!added || !added.Value()->virtualPath.TryAssign(include.virtualPath.View())) {
+                    return Fail(ErrorCode::OutOfMemory);
+                }
+
+                found = added.Value();
+            }
+
+            bool known = false;
+            for (const uint64 existing : found->types) {
+                known = known || existing == type;
+            }
+
+            if (!known && !found->types.TryPushBack(type)) {
+                return Fail(ErrorCode::OutOfMemory);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+enum class SymbolWrite : uint8 {
+    Written,
+    Unchanged,
+    Failed
+};
+
+// 성공한 job의 값 3을 <directory>/<형식 id>/<이름>에 쓴다(SSD74). 같은 byte가 있으면 두고, 다르면
+// 임시 파일에 쓴 뒤 Replace로 덮어쓴다(PDB 이름은 출력 binary hash라 주석만 바꾸면 같은 이름에 다른
+// PDB가 온다 — 최신 원문을 따른다).
+SymbolWrite WriteSymbolFile(platform::FileSystem& files, Allocator& allocator, StringView directory,
+                            StringView formatId, const ShaderCompileJobResult& result) noexcept {
+    const auto decoded =
+        DecodeShaderDebugSymbols(result.values.Part(ShaderNuggetValue::DebugSymbols).View());
+    if (!decoded) {
+        return SymbolWrite::Failed;
+    }
+
+    const ShaderDebugSymbolsView& symbols = decoded.Value();
+    String folder(allocator);
+    String path(allocator);
+    if (!folder.TryAssign(directory) || !folder.TryAppend("/") || !folder.TryAppend(formatId) ||
+        !path.TryAssign(folder.View()) || !path.TryAppend("/")) {
+        return SymbolWrite::Failed;
+    }
+
+    if (symbols.name.IsEmpty()) {
+        char hex[Sha256Digest::HexBytes + 1];
+        result.key.ToHex(hex);
+        if (!path.TryAppend(StringView(hex)) ||
+            !path.TryAppend(StringView(ShaderDebugSymbolExtension(symbols.kind)))) {
+            return SymbolWrite::Failed;
+        }
+    } else if (!path.TryAppend(symbols.name)) {
+        return SymbolWrite::Failed;
+    }
+
+    if (!platform::MakeDirectoryTree(files, folder.CStr(), folder.View().ByteCount())) {
+        return SymbolWrite::Failed;
+    }
+
+    Array<uint8> existing(allocator);
+    bool existed = false;
+    if (ReadWholeFile(files, path.View(), symbols.contents.Size(), existing, existed) && existed &&
+        existing.Size() == symbols.contents.Size() &&
+        (existing.IsEmpty() ||
+         memcmp(existing.Data(), symbols.contents.Data(), existing.Size()) == 0)) {
+        return SymbolWrite::Unchanged;
+    }
+
+    String temporary(allocator);
+    char suffix[TemporarySuffixBytes];
+    (void)snprintf(suffix, sizeof(suffix), ".%u.tmp",
+                   static_cast<unsigned>(platform::CurrentProcessId()));
+    if (!temporary.TryAssign(path.View()) || !temporary.TryAppend(StringView(suffix))) {
+        return SymbolWrite::Failed;
+    }
+
+    platform::File file;
+    platform::FileStatus status = file.Open(files, temporary.CStr(), temporary.View().ByteCount(),
+                                            platform::FileOpenMode::CreateAlways);
+    if (status) {
+        status = file.WriteAll(symbols.contents.Data(), symbols.contents.Size()).status;
+    }
+
+    if (status) {
+        status = file.Flush();
+    }
+
+    const platform::FileStatus closed = file.IsOpen() ? file.Close() : platform::FileStatus{};
+    if (status && closed &&
+        files.Replace(temporary.CStr(), temporary.View().ByteCount(), path.CStr(),
+                      path.View().ByteCount())) {
+        return SymbolWrite::Written;
+    }
+
+    (void)files.Delete(temporary.CStr(), temporary.View().ByteCount());
+    return SymbolWrite::Failed;
+}
+
+// 성공한 job의 값 3을 모두 쓰고 형식 줄에 센다.
+void WriteSymbolFiles(const ShaderLibraryCookDesc& desc, platform::FileSystem& files,
+                      Allocator& allocator, StringView formatId,
+                      const Array<ShaderCompileJobResult>& results,
+                      ShaderLibraryCookFormat& line) noexcept {
+    if (desc.symbolDirectory.IsEmpty()) {
+        return;
+    }
+
+    for (const ShaderCompileJobResult& result : results) {
+        if (result.status != ShaderCompileStatus::Success ||
+            !result.values.Has(ShaderNuggetValue::DebugSymbols)) {
+            continue;
+        }
+
+        switch (WriteSymbolFile(files, allocator, desc.symbolDirectory, formatId, result)) {
+        case SymbolWrite::Written:
+            ++line.symbolFiles;
+            break;
+        case SymbolWrite::Unchanged:
+            ++line.symbolsUnchanged;
+            break;
+        case SymbolWrite::Failed:
+            ++line.symbolFailures;
+            break;
+        }
+    }
+}
+
+// cookKey 입력 writer다(정수는 little-endian — SSD46).
+class CookKeyWriter {
+public:
+    void U8(uint8 value) noexcept {
+        hasher_.Update(Span<const uint8>(&value, 1));
+    }
+
+    void U32(uint32 value) noexcept {
+        uint8 bytes[sizeof(uint32)];
+        for (usize index = 0; index < sizeof(bytes); ++index) {
+            bytes[index] = static_cast<uint8>(value >> (index * 8));
+        }
+
+        hasher_.Update(Span<const uint8>(bytes, sizeof(bytes)));
+    }
+
+    void U64(uint64 value) noexcept {
+        U32(static_cast<uint32>(value));
+        U32(static_cast<uint32>(value >> 32));
+    }
+
+    void Digest(const Sha256Digest& digest) noexcept {
+        hasher_.Update(Span<const uint8>(digest.bytes, Sha256Digest::Bytes));
+    }
+
+    Sha256Digest Finish() noexcept {
+        return hasher_.Finish();
+    }
+
+private:
+    Sha256 hasher_;
+};
+
+// 라이브러리 cookKey다(Docs/Design/ShaderSystem 16.1절 SSD46). entries는 BuildShaderLibrary에 넘긴
+// 항목 표(조합 순서), jobKeys는 정렬할 job 키 사본이다.
+Sha256Digest LibraryCookKey(const ShaderLibraryCookDesc& desc, const ShaderFormatSnapshot& format,
+                            const Sha256Digest& typeSet,
+                            Span<const ShaderLibraryBuildEntry> entries,
+                            Span<Sha256Digest> jobKeys) noexcept {
+    CookKeyWriter writer;
+    writer.U64(ShaderLibraryCookerGuid.high);
+    writer.U64(ShaderLibraryCookerGuid.low);
+    writer.U32(ShaderLibraryCookKeyVersion);
+    writer.U32(ShaderLibraryVersion);
+    writer.U8(static_cast<uint8>(desc.library));
+    writer.U8(desc.includeDevelopment ? 1 : 0);
+    writer.Digest(format.definition.sha256);
+    writer.Digest(typeSet);
+    writer.U32(static_cast<uint32>(entries.Size()));
+    for (const ShaderLibraryBuildEntry& entry : entries) {
+        writer.U64(entry.key.nameHash);
+        writer.U64(entry.key.vertexInputType);
+        writer.U32(entry.key.permutationId);
+        writer.U32(entry.stage);
+        writer.Digest(entry.layoutSignature);
+        writer.U32(entry.runtimeFeatures);
+        writer.U8(entry.developmentOnly ? 1 : 0);
+    }
+
+    algo::Sort(jobKeys, [](const Sha256Digest& left, const Sha256Digest& right) noexcept {
+        return memcmp(left.bytes, right.bytes, Sha256Digest::Bytes) < 0;
+    });
+    writer.U32(static_cast<uint32>(jobKeys.Size()));
+    for (const Sha256Digest& key : jobKeys) {
+        writer.Digest(key);
+    }
+
+    return writer.Finish();
+}
+
 // 라이브러리 파일 경로다.
 Result<void> BuildPath(const ShaderLibraryCookDesc& desc, StringView formatId,
                        const Sha256Digest& fileSha, String& out) noexcept {
@@ -247,6 +465,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
                           Array<uint8>* memory) noexcept {
     report.formats.Clear();
     report.failures.Clear();
+    report.sources.Clear();
     if (desc.allocator == nullptr || desc.registry == nullptr || desc.manager == nullptr ||
         (memory == nullptr && desc.outputDirectory.IsEmpty()) ||
         (memory != nullptr && desc.formats.Size() != 1)) {
@@ -310,6 +529,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             job.stage = plan.type->stage;
             job.defines = Span<const ShaderDefine>(defines.defines, defines.defineCount);
             job.options = defaults;
+            job.options.debugSymbols = desc.debugSymbols;
             if (plan.type->hlsl2021 != ShaderHlsl2021::FormatDefault) {
                 job.options.hlsl2021 = plan.type->hlsl2021 == ShaderHlsl2021::On;
             }
@@ -329,6 +549,16 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         if (auto compiled = desc.manager->Compile(jobs.View(), results); !compiled) {
             return compiled;
         }
+
+        for (const ShaderCompileJobResult& result : results) {
+            line.cacheHits += result.cacheHit ? 1u : 0u;
+        }
+
+        if (auto collected = CollectSources(plans, results, report.sources); !collected) {
+            return collected;
+        }
+
+        WriteSymbolFiles(desc, files, allocator, snapshot->definition.Id(), results, line);
 
         // 실패를 모은다.
         for (usize index = 0; index < results.Size(); ++index) {
@@ -381,6 +611,19 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             (void)entries.TryPushBack(entry);
         }
 
+        // job 키 사본(정렬용)이다. 성공한 job은 키가 있다(키 계산이 컴파일 앞이다).
+        Array<Sha256Digest> jobKeys(allocator);
+        if (!jobKeys.TryReserve(results.Size())) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+
+        for (const ShaderCompileJobResult& result : results) {
+            (void)jobKeys.TryPushBack(result.key);
+        }
+
+        line.cookKey = LibraryCookKey(desc, *snapshot, typeSet, entries.View(),
+                                      Span<Sha256Digest>(jobKeys.Data(), jobKeys.Size()));
+        line.hasCookKey = true;
         ShaderLibraryBuildDesc build;
         build.kind = desc.library;
         build.facts = facts;

@@ -1,6 +1,7 @@
 #include "D3D12DeviceImpl.h"
 
 #include <DxgiGraphics/DxgiAdapter.h>
+#include <GraphicsTypes/CookSampling.h>
 
 namespace rocks::graphics::d3d12 {
 
@@ -193,8 +194,9 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     // (RenderBase 9.11절 5항).
     auto srvs =
         srvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SrvCapacity, false);
+    // 샘플러 원본도 CPU 전용이고 그리기 때 shader-visible sampler ring으로 복사한다(9.13절 4항).
     auto samplers = samplers_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
-                                         SamplerCapacity, true);
+                                         SamplerCapacity, false);
     if (!rtvs || !dsvs || !srvs || !samplers) {
         return Fail("descriptor heap creation failed");
     }
@@ -216,6 +218,20 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
         }
 
         formatCaps_[number] = formatCaps;
+    }
+
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): FL 11_0 필수 형식이 표의 보장 칸이다. 빠진
+    // 능력이 있으면 backend 대응표의 오류이므로 장치를 받지 않는다.
+    const PixelFormat missing = FindMissingCookSampling(Backend::D3D12, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (missing != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::D3D12, HostGraphicsPlatform(),
+                                   missing);
+        auto failed = Fail(detail);
+        (void)failed;
+        failureTruncated_ = CopyStage("CookSamplingGuarantee");
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     // 버퍼 view slot이 비었을 때 묶는 null SRV다(셰이더가 읽지 않는 table도 채워 둔다).
@@ -410,6 +426,11 @@ uint64 D3D12Device::RejectedCalls() const noexcept {
 usize D3D12Device::PendingRetireCount() const noexcept {
     platform::LockGuard lock(gate_);
     return retired_.Size();
+}
+
+uint64 D3D12Device::PresentCount() const noexcept {
+    platform::LockGuard lock(gate_);
+    return presents_;
 }
 
 StringView D3D12Device::LastError() const noexcept {

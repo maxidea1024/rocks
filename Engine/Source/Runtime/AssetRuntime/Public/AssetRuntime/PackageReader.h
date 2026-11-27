@@ -166,11 +166,11 @@ struct PackageContents {
 // fileBytes와 같아야 한다). AssetIndex처럼 범위만 읽는 도구가 먼저 부른다.
 //
 // 오류(진단 코드 / ErrorCode): 크기 < 64·magic·headerCrc·flags(Editor·Cooked 중 정확히 하나가
-// 아님)는 CorruptPackage / InvalidArgument, formatVersion이 현재보다 높으면 에디터
+// 아님)는 CorruptPackage / CorruptData, formatVersion이 현재보다 높으면 에디터
 // NewerVersion·쿠킹 UnsupportedVersion / Unsupported, 낮으면 UnsupportedVersion /
 // Unsupported(하위호환 없음 — v2는 A5c 차이 형식·클래스 기본값 목록), headerBytes·
 // bulkAlignment·reserved·sectionCount(1–32)·sectionTableOffset 정렬·fileBytes 식·Stat 크기
-// 불일치·64 GiB 초과는 CorruptPackage / InvalidArgument다.
+// 불일치·64 GiB 초과는 CorruptPackage / CorruptData다(읽은 데이터 손상 — AssetSystem 19장).
 ROCKS_ASSETRUNTIME_API Result<PackageHeader>
 ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
                   AssetDiagnostic* failure = nullptr) noexcept;
@@ -180,7 +180,7 @@ ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
 // 한다.
 //
 // 인자: allocator(결과 배열·문자열), file(패키지 byte 전체 — 결과가 빌린다), options.
-// 오류: ReadPackageHeader의 오류, 섹션 표·섹션 내용 위반은 CorruptPackage / InvalidArgument, 버전
+// 오류: ReadPackageHeader의 오류, 섹션 표·섹션 내용 위반은 CorruptPackage / CorruptData, 버전
 // 축은 UnsupportedVersion·NewerVersion / Unsupported, 할당 실패와 options.types 조회의 버전 판정
 // 밖 실패(종료된 TypeRegistry의 ShuttingDown 등)는 그 오류(진단 코드 None)다. 실패하면
 // failure(있으면)에 분류와 섹션·위치를 채운다.
@@ -242,7 +242,7 @@ ReadPackageForEdit(Allocator& allocator, PackageRangeReader& reader,
 // 패키지 파일의 지문(헤더 + 섹션 표 + tableCrc의 SHA-256 — PackageContents::fingerprint와 같다)을
 // 범위 읽기로 얻는다(AS 5.5절 1, 7.1절 15 — 저장의 외부 변경 검출·지연 읽기의 지문 대조). 헤더
 // 판정과 섹션 표 CRC만 본다. 오류: ReadPackageHeader의 진단, 표 CRC 위반 CorruptPackage /
-// InvalidArgument, 범위 읽기 오류는 진단 None과 그 오류, 할당 실패.
+// CorruptData, 범위 읽기 오류는 진단 None과 그 오류, 할당 실패.
 ROCKS_ASSETRUNTIME_API Result<PackageFingerprint>
 ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
                        AssetDiagnostic* failure = nullptr) noexcept;
@@ -261,8 +261,9 @@ ROCKS_ASSETRUNTIME_API Result<void> VerifyPackageFile(Allocator& allocator,
                                                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // bulk entry 하나의 저장 byte(stored — entry.storedBytes)를 raw(entry.rawBytes)에 풀고 SHA-256을
-// 확인한다(DecodePackageBulk와 에디터 지연 읽기가 같이 쓴다). 오류: 크기 불일치·컨테이너 형식·
-// rawSize 불일치·해제 실패·SHA-256 불일치는 InvalidArgument, 할당 실패.
+// 확인한다(DecodePackageBulk와 에디터 지연 읽기가 같이 쓴다). 오류: stored·raw 크기가 entry와
+// 다르면 InvalidArgument(호출자 인자), 컨테이너 형식·rawSize 불일치·해제 실패·SHA-256 불일치는
+// CorruptData, 할당 실패.
 ROCKS_ASSETRUNTIME_API Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry,
                                                            Span<const uint8> stored,
                                                            Span<uint8> raw,
@@ -282,7 +283,7 @@ ROCKS_ASSETRUNTIME_API Result<void> DecodePackageBulkEntry(const PackageBulkEntr
 // 않으면 해제하지 않는다).
 //
 // 오류: 컨테이너 형식·Zstd가 아닌 codec·rawSize 불일치·블록 해제 실패·SHA-256 불일치는
-// CorruptPackage / InvalidArgument(진단 detail = bulkId), 할당 실패는 OutOfMemory다. 실패하면
+// CorruptPackage / CorruptData(진단 detail = bulkId), 할당 실패는 OutOfMemory다. 실패하면
 // out·slots는 호출 전 길이로 돌아간다.
 ROCKS_ASSETRUNTIME_API Result<void>
 DecodePackageBulk(const PackageContents& contents, Array<uint8>& out, Array<PackageBulkSlot>& slots,

@@ -2,8 +2,8 @@
 
 namespace rocks::graphics::d3d12 {
 
-Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
-                                                const ClearColor& clear) noexcept {
+Result<CommandContext*> D3D12Device::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -28,6 +28,12 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
 
+    // present 뒤의 백버퍼 내용은 정의되지 않는다(flip discard). 이어 그리기는 그리는 중인 프레임만.
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        return FailCode<CommandContext*>(ErrorCode::InvalidArgument,
+                                         "swap chain load without a frame drawn since its present");
+    }
+
     const uint32 backBuffer = record->swapChain->GetCurrentBackBufferIndex();
     auto begun = BeginRecording();
     if (!begun) {
@@ -44,9 +50,12 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
     target_.colorCount = 1;
     target_.rtvs[0] = target_.rtv;
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     PassDesc pass;
     pass.colorCount = 1;
-    pass.colors[0].clear = clear;
+    pass.colors[0].load = desc.load;
+    pass.colors[0].clear = desc.clear;
     StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
@@ -123,13 +132,16 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     SettleTracking(true);
 
     Result<void> outcome = Result<void>::Success();
-    if (!presentTarget_.IsNull()) {
+    if (!presentTarget_.IsNull() && presentOnEnd_) {
         SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
         if (record != nullptr) {
+            record->frameOpen = false;
             const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
             if (FAILED(presented)) {
                 // Fail이 장치 제거를 판정해 손실 전이 때 한 번 Error로 남긴다.
                 outcome = Fail("IDXGISwapChain::Present", presented);
+            } else {
+                ++presents_;
             }
         }
     }
@@ -240,7 +252,12 @@ void D3D12Device::ResetBindings() noexcept {
         view = {};
     }
 
-    boundTexture_ = white_.slot;
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = NoBoundSampler;
+        }
+    }
 
     for (auto& stage : boundConstants_) {
         for (BoundConstant& bound : stage) {
@@ -359,7 +376,7 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     // root signature·table은 그리기·dispatch 직전에 묶인 파이프라인 것으로 건다(ApplyRootBindings).
     appliedGraphicsRoot_ = nullptr;
     appliedComputeRoot_ = nullptr;
-    ID3D12DescriptorHeap* heaps[] = {online_.Get(), samplers_.Heap()};
+    ID3D12DescriptorHeap* heaps[] = {online_.Get(), onlineSamplers_.Get()};
     list_->SetDescriptorHeaps(2, heaps);
     list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list_->OMSetStencilRef(0);
@@ -429,51 +446,83 @@ void D3D12Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
     list_->IASetIndexBuffer(&view);
 }
 
-void D3D12Device::SetTexture(TextureHandle handle) noexcept {
+void D3D12Device::SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots) {
+        return;
+    }
+
     TextureRecord* record = textures_.Find(handle.slot);
-    SlotHandle slot = handle.slot;
+    SlotHandle bound = handle.slot;
     if (record == nullptr || !record->hasSrv || record->writable) {
         record = textures_.Find(white_.slot);
-        slot = white_.slot;
+        bound = white_.slot;
         ++nullTextureBindings_;
     }
 
-    if (record != nullptr) {
-        // view는 자원 상태를 원 텍스처 기록이 추적한다(원 텍스처는 view가 남아 있는 동안 표에
-        // 남는다, Retire 참고).
-        TextureRecord* owner = record;
-        SlotHandle ownerSlot = slot;
-        if (record->view) {
-            ownerSlot = record->source;
-            owner = textures_.Find(ownerSlot);
-        }
-
-        // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
-        // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
-        // 읽기 상태는 묶인 파이프라인 종류를 따른다: compute는 NON_PIXEL(SrvCompute), 그 밖은
-        // PIXEL(SrvGraphics)이다. 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를
-        // 다시 바꾸지 않는다(RG1 남은 것 B부).
-        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
-        const D3D12_RESOURCE_STATES readState = pipeline != nullptr && pipeline->compute
-                                                    ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-                                                    : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        const ResolvedSubresourceRange& range = record->viewRange;
-        bool readable = true;
-        for (uint32 slice = range.firstSlice;
-             owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
-            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
-                readable = readable && (owner->current.At(mip, slice) & readState) != 0;
-            }
-        }
-
-        if (owner != nullptr && !readable && recording_) {
-            TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
-        }
-
-        // table은 그리기·dispatch 직전에 건다(ApplyRootBindings).
-        boundTexture_ = slot;
+    if (record == nullptr) {
+        return;
     }
+
+    // view는 자원 상태를 원 텍스처 기록이 추적한다(원 텍스처는 view가 남아 있는 동안 표에 남는다,
+    // Retire 참고).
+    TextureRecord* owner = record;
+    SlotHandle ownerSlot = bound;
+    if (record->view) {
+        ownerSlot = record->source;
+        owner = textures_.Find(ownerSlot);
+    }
+
+    // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더 그래프를
+    // 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부). 읽기 상태는
+    // 묶인 파이프라인 종류를 따른다: compute는 NON_PIXEL(SrvCompute), 그 밖은
+    // PIXEL(SrvGraphics)이다. 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를 다시
+    // 바꾸지 않는다(RG1 남은 것 B부).
+    const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+    const D3D12_RESOURCE_STATES readState = pipeline != nullptr && pipeline->compute
+                                                ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                                                : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    const ResolvedSubresourceRange& range = record->viewRange;
+    bool readable = true;
+    for (uint32 slice = range.firstSlice;
+         owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            readable = readable && (owner->current.At(mip, slice) & readState) != 0;
+        }
+    }
+
+    if (owner != nullptr && !readable && recording_) {
+        TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
+    }
+
+    // table은 그리기·dispatch 직전에 건다(ApplyRootBindings).
+    boundTextures_[stageIndex][slot] = bound;
+}
+
+Result<void> D3D12Device::SetSampler(ShaderStage stage, uint32 slot,
+                                     const SamplerDesc* sampler) noexcept {
+    platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        return FailCode<void>(ErrorCode::InvalidArgument,
+                              "SetSampler needs a recording, a stage and slot in range and a valid "
+                              "sampler description");
+    }
+
+    if (sampler == nullptr) {
+        boundSamplers_[stageIndex][slot] = NoBoundSampler;
+        return Result<void>::Success();
+    }
+
+    auto made = SamplerFor(*sampler);
+    if (!made) {
+        return FailCode<void>(made.Error(), "the sampler cache of the device is full");
+    }
+
+    boundSamplers_[stageIndex][slot] = made.Value();
+    return Result<void>::Success();
 }
 
 Result<void> D3D12Device::SetDrawConstants(Span<const uint8> bytes) noexcept {

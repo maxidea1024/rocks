@@ -62,6 +62,8 @@ bool IsValidTickEdgeSource(TickEdgeSource source) noexcept {
 
 const char* EngineStageName(EngineStage stage) noexcept {
     switch (stage) {
+    case EngineStage::PhysicsSimulate:
+        return "PhysicsSimulate";
     case EngineStage::PhysicsResults:
         return "PhysicsResults";
     case EngineStage::SkeletalPhysicsFinalize:
@@ -639,9 +641,15 @@ Result<void> World::RunEngineStage(EngineStage stage, TickPhase phase,
     context.unscaledDeltaSeconds = frame.unscaledDeltaSeconds;
     context.frameIndex = frame.frameIndex;
     context.paused = frame.paused;
+    // 고정 스텝마다의 자리는 그 스텝 번호를 받는다(사용자 Fixed hook과 같다 — 15.4절).
+    if (stage == EngineStage::PhysicsSimulate) {
+        context.fixedStepIndex = frame.fixedStepIndex;
+    }
+
     const uint64 started = platform::MonotonicNanoseconds();
     auto ran = slot.function(*this, context, slot.user);
-    engineStageNanoseconds_[static_cast<uint32>(stage)] =
+    // 프레임 안 모든 실행의 합이다(PhysicsSimulate는 스텝마다 돈다 — 프레임 시작에 0으로 둔다).
+    engineStageNanoseconds_[static_cast<uint32>(stage)] +=
         platform::MonotonicNanoseconds() - started;
     if (!ran) {
         ++engineStageFailures_;
@@ -675,6 +683,7 @@ bool StageRunsAtStart(EngineStage stage) noexcept {
 // 그 단계 끝·시작의 엔진 단계 자리다(15.4절).
 bool StageBelongsTo(EngineStage stage, TickPhase phase) noexcept {
     switch (stage) {
+    case EngineStage::PhysicsSimulate:
     case EngineStage::PhysicsResults:
     case EngineStage::SkeletalPhysicsFinalize:
         return phase == TickPhase::Physics;
@@ -711,10 +720,13 @@ Result<void> World::DumpTickGraph(String& out) noexcept {
         for (uint32 stage = 0; written && stage < EngineStageCount; ++stage) {
             const auto kind = static_cast<EngineStage>(stage);
             if (StageBelongsTo(kind, phase) && StageRunsAtStart(kind) == atStart) {
-                written = AppendFormatted(out, "    [engine stage {} at {} {}]\n",
-                                          EngineStageName(kind), atStart ? "start" : "end",
-                                          engineStages_[stage].function != nullptr ? "registered"
-                                                                                   : "empty");
+                // PhysicsSimulate는 고정 스텝마다 그 스텝의 Tick 항목 뒤에 돈다.
+                const char* place = atStart                                ? "at start"
+                                    : kind == EngineStage::PhysicsSimulate ? "after each fixed step"
+                                                                           : "at end";
+                written = AppendFormatted(
+                    out, "    [engine stage {} {} {}]\n", EngineStageName(kind), place,
+                    engineStages_[stage].function != nullptr ? "registered" : "empty");
             }
         }
     };

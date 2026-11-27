@@ -222,10 +222,12 @@ GraphPassAccesses& GraphPassAccesses::DepthTarget(const GraphDepthTarget& target
 }
 
 GraphPassAccesses& GraphPassAccesses::SwapChainTarget(graphics::SwapChainHandle swapChain,
+                                                      GraphLoadAction load,
                                                       const graphics::ClearColor& clear) noexcept {
     target_ = {};
     target_.kind = GraphTargetKind::SwapChain;
     target_.swapChain = swapChain;
+    target_.load = load;
     target_.clear = clear;
     return *this;
 }
@@ -925,6 +927,37 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                                        "pass '{}' renders to a null swap chain", passName));
     }
 
+    // 스왑체인 공유(RenderBase 8절 "스왑체인 공유 설계"): 같은 스왑체인의 pass들은 백버퍼 하나를
+    // 쓴다. 이 그래프의 앞 pass가 그리지 않은 백버퍼를 load하면 생산 전 읽기와 같은 검증 오류다.
+    usize swapChainUse = state.swapChains.Size();
+    if (target.kind == GraphTargetKind::SwapChain) {
+        for (usize index = 0; index < state.swapChains.Size(); ++index) {
+            if (state.swapChains[index].swapChain == target.swapChain) {
+                swapChainUse = index;
+            }
+        }
+
+        const bool drawn = swapChainUse < state.swapChains.Size() &&
+                           state.swapChains[swapChainUse].firstPass != GraphIndexNone;
+        if (target.load == GraphLoadAction::Load && !drawn) {
+            return reject(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                           "pass '{}' loads a swap chain back buffer no earlier "
+                                           "pass of this graph drew",
+                                           passName));
+        }
+
+        if (swapChainUse == state.swapChains.Size()) {
+            SwapChainUse use;
+            use.swapChain = target.swapChain;
+            auto added = state.swapChains.TryPushBack(arena_, use);
+            if (!added) {
+                return reject(RecordGraphError(state, added.Error(), false,
+                                               "pass '{}' could not be recorded ({})", passName,
+                                               ErrorCodeName(added.Error())));
+            }
+        }
+    }
+
     const uint32 passIndex = static_cast<uint32>(state.passes.Size());
     const usize firstUse = state.uses.Size();
     const usize firstView = state.passViews.Size();
@@ -1226,6 +1259,15 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
         return rollback(RecordGraphError(state, pushed.Error(), false,
                                          "pass '{}' could not be recorded ({})", passName,
                                          ErrorCodeName(pushed.Error())));
+    }
+
+    if (target.kind == GraphTargetKind::SwapChain) {
+        SwapChainUse& use = state.swapChains[swapChainUse];
+        if (use.firstPass == GraphIndexNone) {
+            use.firstPass = passIndex;
+        }
+
+        use.lastPass = passIndex;
     }
 
     // pass를 넣은 뒤에만 마지막 생산자를 바꾼다(실패한 pass가 생산자로 남지 않는다). 접근을 선언한

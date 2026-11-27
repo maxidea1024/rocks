@@ -311,7 +311,7 @@ TEST(AssetManager_LoadBlockingFailures) {
 
     AssetDiagnostic diagnostic;
     auto broken = rig.manager->LoadBlocking(RequestOf(3), "Corrupt", &diagnostic);
-    CHECK(broken.Error() == ErrorCode::InvalidArgument);
+    CHECK(broken.Error() == ErrorCode::CorruptData);
     CHECK(diagnostic.code == AssetDiagnosticCode::CorruptPackage && diagnostic.asset == FixedId(3));
 
     LoadTicket ticket = rig.Request(1);

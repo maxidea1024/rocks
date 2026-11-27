@@ -52,7 +52,7 @@ struct AttachmentRules {
 
 // SceneComponent가 움직일 수 있는지다(UE EComponentMobility). Static·Stationary는 게임 World에서
 // 초기화 뒤 옮길 수 없다(23.3절).
-ROCKS_ENUM()
+ROCKS_ENUM(ScriptType)
 enum class ComponentMobility : uint8 {
     Static,
     Stationary,
@@ -140,7 +140,7 @@ public:
     static constexpr uint32 MaxHierarchyDepth = 4096;
 
     explicit SceneComponent(Allocator& allocator) noexcept
-        : children_(allocator), attachSocket_(allocator) {
+        : Component(allocator), children_(allocator), attachSocket_(allocator) {
     }
 
     const Transform& RelativeTransform() const noexcept {
@@ -151,7 +151,7 @@ public:
     // 바꾸지 않는다. 아래 세 함수는 해당 성분만 바꾸며 실패 조건이 같다.
     Result<void> SetRelativeTransform(const Transform& transform) noexcept;
     // 부모 기준 위치(cm)다. UE SetRelativeLocation과 같은 단위다.
-    Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
+    ROCKS_FUNCTION(ScriptCallable) Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
     // 부모 기준 회전(단위 quaternion, 왼손 양의 각)이다. 도 단위 Rotator는 ToQuaternion으로 바꾼다.
     Result<void> SetRelativeRotation(const Quatd& rotation) noexcept;
     // 부모 기준 scale(무차원 배율, 1 = 원래 크기)이다.
@@ -162,10 +162,11 @@ public:
     Mat4d WorldMatrix() const noexcept;
 
     // 월드 변환을 TRS로 분해한다. shear가 있으면 Unsupported, 0 scale이면 InvalidArgument다.
-    Result<Transform> TryWorldTransform() const noexcept;
+    // Sparks에는 WorldTransform으로 보인다(Result 함수의 TryX → X — SparksBinding B13).
+    ROCKS_FUNCTION(Pure, ScriptCallable) Result<Transform> TryWorldTransform() const noexcept;
 
     // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
-    Vec3d WorldLocation() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) Vec3d WorldLocation() const noexcept;
 
     // 월드 위치·회전을 정한다(UE SetWorldLocationAndRotation — 부모 frame 기준 상대 값으로 바꿔
     // 쓴다, 절대 성분은 그대로, scale은 유지). 오류: 비유한 위치·0 quaternion, 부모 frame 역변환
@@ -251,9 +252,18 @@ public:
         return mobility_;
     }
 
-    void SetMobility(ComponentMobility mobility) noexcept {
-        mobility_ = mobility;
-    }
+    // Mobility를 바꾼다(UE SetMobility). 값이 바뀌고 등록돼 있으면 시스템 상태를 종류마다 그
+    // 자리에서 다시 만든다(UE는 재등록 — Docs/Design/PhysicsModule 7.1.5절, 물리 body의 Static ↔
+    // Movable). Movable이 되면 자식도 Movable로 바꾼다(Static 자식을 Movable 부모 아래 둘 수 없다 —
+    // UE와 같다). 다시 만들기 실패는 그 종류 없이 두고 Warning SystemStateRecreateFailed다(값은
+    // 바뀐다).
+    ROCKS_FUNCTION(ScriptCallable) void SetMobility(ComponentMobility mobility) noexcept;
+
+    // overlap을 다시 계산한다(UE USceneComponent::UpdateOverlaps — Docs/Design/PhysicsModule 5.3절·
+    // 7.1.11절). 이 클래스는 자식만 갱신하고(복사본으로 돈다), PrimitiveComponent는 자기 장부를
+    // 갱신한 뒤 자식으로 내려간다. 소유 Actor가 Playing이 아니면 하지 않는다. transform을 바꾸는
+    // setter는 루트 통지 끝에 이것을 부른다.
+    virtual void UpdateOverlaps() noexcept;
 
     // --- 가시성(23.3절) ---
 
@@ -272,7 +282,7 @@ public:
     }
 
     // 보이는지다: visible이고, 게임 World(Game·Tryout)면 hiddenInGame도 아니다(UE ShouldRender).
-    bool IsVisible() const noexcept;
+    ROCKS_FUNCTION(Pure, ScriptCallable) bool IsVisible() const noexcept;
 
     // --- 속도·bounds(23.3절) ---
 
@@ -356,11 +366,22 @@ protected:
     // affectsWorld). 막으면 InvalidArgument와 Warning 진단 ComponentDataLockedInGame이다.
     Result<void> CheckChangeBeforeGameInitialization(const char* property) const noexcept;
 
-private:
-    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다.
+    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다. action은 진단
+    // 문구의 동작 이름이다.
     Result<void> CheckMovable(const char* action) const noexcept;
-    // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한다.
+
+    // 참이면 루트 transform 통지 뒤의 overlap 갱신을 하지 않고 overlapUpdateSkipped_를 켠다
+    // (MoveComponent·ApplyPhysicsTransform이 옮기기를 끝낸 뒤 직접 갱신하는 동안 — PhysicsModule
+    // 7.1.11절).
+    ROCKS_NATIVE() bool overlapUpdateDeferred_ = false;
+    ROCKS_NATIVE() bool overlapUpdateSkipped_ = false;
+
+private:
+    // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한 뒤 overlap을
+    // 갱신한다(루트 통지 — 7.1.11절).
     void NotifyTransformUpdated() noexcept;
+    // NotifyTransformUpdated의 전파 몫이다(자식 전파는 overlap을 갱신하지 않는다).
+    void PropagateTransformUpdated() noexcept;
     // 링크만 바꾼다(검사·규칙 계산 뒤).
     Result<void> LinkParent(ObjectHandle parent, StringView socket) noexcept;
     void ApplyVisibility(bool visible, bool hidden, bool setVisible, bool propagate) noexcept;
@@ -371,7 +392,7 @@ private:
     Result<void> AddChild(ObjectHandle child) noexcept;
     void RemoveChild(ObjectHandle child) noexcept;
 
-    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform") Transform relative_;
+    ROCKS_PROPERTY(ReadOnly, Name = "relativeTransform", ScriptReadOnly) Transform relative_;
     // 월드 행렬 캐시다(Component::world_를 가리지 않게 worldMatrix_라 한다).
     ROCKS_NATIVE() mutable Mat4d worldMatrix_;
     ROCKS_NATIVE() mutable bool worldDirty_ = true;
@@ -379,15 +400,18 @@ private:
     // parent_에서 유도되는 값이다(UE AttachChildren처럼 Transient — 편입이 다시 만든다).
     ROCKS_NATIVE() Array<ObjectHandle> children_;
     // 부착 부모·socket이다(영속 — 23.3절 CR3, 편입이 계층을 복원한다). parent_와 같은 값이다.
-    ROCKS_PROPERTY(ReadOnly, Name = "attachParent") WeakObjectRef<SceneComponent> attachParent_;
+    ROCKS_PROPERTY(ReadOnly, Name = "attachParent", ScriptReadOnly)
+    WeakObjectRef<SceneComponent> attachParent_;
     ROCKS_PROPERTY(ReadOnly, Name = "attachSocket") String attachSocket_;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation") bool absoluteLocation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation") bool absoluteRotation_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale") bool absoluteScale_ = false;
-    ROCKS_PROPERTY(ReadOnly, Name = "mobility")
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteLocation", ScriptReadOnly)
+    bool absoluteLocation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteRotation", ScriptReadOnly)
+    bool absoluteRotation_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "absoluteScale", ScriptReadOnly) bool absoluteScale_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "mobility", ScriptReadOnly)
     ComponentMobility mobility_ = ComponentMobility::Movable;
-    ROCKS_PROPERTY(ReadOnly, Name = "visible") bool visible_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame") bool hiddenInGame_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "visible", ScriptReadOnly) bool visible_ = true;
+    ROCKS_PROPERTY(ReadOnly, Name = "hiddenInGame", ScriptReadOnly) bool hiddenInGame_ = false;
     ROCKS_NATIVE() Vec3d velocity_;
     ROCKS_NATIVE() mutable ComponentBounds bounds_;
     ROCKS_NATIVE() mutable bool boundsDirty_ = true;

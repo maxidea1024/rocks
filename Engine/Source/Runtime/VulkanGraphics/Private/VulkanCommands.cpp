@@ -118,7 +118,13 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     }
 
     boundIndex_ = {};
-    boundTexture_ = white_;
+    for (uint32 stage = 0; stage < ConstantBufferStageCount; ++stage) {
+        for (uint32 slot = 0; slot < MaxResourceSlots; ++slot) {
+            boundTextures_[stage][slot] = {};
+            boundSamplers_[stage][slot] = VK_NULL_HANDLE;
+        }
+    }
+
     for (BufferViewHandle& view : boundViews_) {
         view = {};
     }
@@ -142,8 +148,8 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     return Result<void>::Success();
 }
 
-Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
-                                                 const ClearColor& clear) noexcept {
+Result<CommandContext*> VulkanDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -169,6 +175,14 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
         return Result<CommandContext*>::Failure(failed.Error());
     }
 
+    // present 뒤의 중간 이미지는 blit 원본이었고 처음에는 UNDEFINED다. 이어 그리기는 그리는 중인
+    // 프레임만(그때 layout은 attachment다).
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        auto failed = FailCode("BeginFrame", ErrorCode::InvalidArgument,
+                               "swap chain load without a frame drawn since its present");
+        return Result<CommandContext*>::Failure(failed.Error());
+    }
+
     auto begun = BeginRecording();
     if (!begun) {
         return Result<CommandContext*>::Failure(begun.Error());
@@ -186,13 +200,17 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
     target_.colorCount = 1;
     target_.key.colorCount = 1;
     target_.key.colors[0] = VK_FORMAT_R8G8B8A8_SRGB;
-    target_.key.colorLoad[0] = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    target_.key.colorLoad[0] = desc.load == LoadAction::Load       ? VK_ATTACHMENT_LOAD_OP_LOAD
+                               : desc.load == LoadAction::DontCare ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                                                                   : VK_ATTACHMENT_LOAD_OP_CLEAR;
     target_.key.colorStore[0] = VK_ATTACHMENT_STORE_OP_STORE;
-    target_.clears[0].color.float32[0] = clear.r;
-    target_.clears[0].color.float32[1] = clear.g;
-    target_.clears[0].color.float32[2] = clear.b;
-    target_.clears[0].color.float32[3] = clear.a;
+    target_.clears[0].color.float32[0] = desc.clear.r;
+    target_.clears[0].color.float32[1] = desc.clear.g;
+    target_.clears[0].color.float32[2] = desc.clear.b;
+    target_.clears[0].color.float32[3] = desc.clear.a;
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     renderPassSuspended_ = false;
     StartPass();
     return Result<CommandContext*>::Success(this);
@@ -264,9 +282,14 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         presentTarget_.IsNull() ? nullptr : swapChains_.Find(presentTarget_.slot);
     uint32 imageIndex = 0;
     VkSemaphore acquired = VK_NULL_HANDLE;
-    if (present != nullptr) {
+    if (present != nullptr && presentOnEnd_) {
+        present->frameOpen = false;
         outcome = RecordPresentBlit(*present, imageIndex, acquired);
         present->targetLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    } else if (present != nullptr) {
+        // present하지 않는 기록은 중간 이미지를 attachment layout으로 두고(render pass 끝 layout),
+        // 다음 BeginFrame이 attachment 쓰기 뒤에서 잇는다.
+        present->targetLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
     // offscreen 대상은 렌더 타깃 상태 그대로 둔다(GX5: 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
@@ -342,7 +365,9 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         info.pSwapchains = &present->swapchain;
         info.pImageIndices = &imageIndex;
         result = functions_.vkQueuePresentKHR(queue_, &info);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+            ++presents_;
+        } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             // 크기 경합이다. 프레임은 제출됐고 다음 EndFrame이 acquire 전에 다시 만든다.
             present->outOfDate = true;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
@@ -432,7 +457,7 @@ void VulkanDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint6
     platform::LockGuard lock(gate_);
     boundIndex_ = {buffer, format, offset};
     const BufferRecord* record = buffers_.Find(buffer.slot);
-    if (!recording_ || record == nullptr || offset >= record->size ||
+    if (!recording_ || record == nullptr || offset >= record->size || !IsValidIndexFormat(format) ||
         offset % IndexFormatSize(format) != 0) {
         return;
     }
@@ -442,9 +467,10 @@ void VulkanDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint6
                                                                   : VK_INDEX_TYPE_UINT32);
 }
 
-void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
+void VulkanDevice::SetTexture(ShaderStage stage, uint32 binding, TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_) {
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || binding >= MaxResourceSlots) {
         return;
     }
 
@@ -462,7 +488,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     // view는 image view만 자기 것이고 이미지 상태는 원 텍스처 기록이 추적한다. descriptor는 다음
     // 그리기가 쓴다(PrepareDescriptors).
-    boundTexture_ = TextureHandle{slot};
+    boundTextures_[stageIndex][binding] = slot;
     descriptorsDirty_ = true;
     // view는 자기 mip·slice 범위만 전이한다(텍스처 GX2 A부).
     const ResolvedSubresourceRange range = record->viewRange;
@@ -497,6 +523,70 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         TrackTransition(*record, slot, range, readState, false);
         ResumeRenderPass();
     }
+}
+
+Result<void> VulkanDevice::SetSampler(ShaderStage stage, uint32 slot,
+                                      const SamplerDesc* sampler) noexcept {
+    platform::LockGuard lock(gate_);
+    const uint32 stageIndex = ConstantBufferStageIndex(stage);
+    if (!recording_ || stageIndex >= ConstantBufferStageCount || slot >= MaxResourceSlots ||
+        (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        return FailCode("SetSampler", ErrorCode::InvalidArgument,
+                        "needs a recording, a stage and slot in range and a valid sampler "
+                        "description");
+    }
+
+    VkSampler bound = VK_NULL_HANDLE;
+    if (sampler != nullptr) {
+        auto made = SamplerFor(*sampler);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        bound = made.Value();
+    }
+
+    boundSamplers_[stageIndex][slot] = bound;
+    descriptorsDirty_ = true;
+    return Result<void>::Success();
+}
+
+const TextureRecord* VulkanDevice::BoundTexture(uint32 stage, uint32 slot) const noexcept {
+    const TextureRecord* texture =
+        slot < MaxResourceSlots ? textures_.Find(boundTextures_[stage][slot]) : nullptr;
+    if (texture == nullptr || texture->view == VK_NULL_HANDLE || texture->writable) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    return texture;
+}
+
+Result<TextureViewInfo> VulkanDevice::GetTextureViewInfo(TextureHandle texture) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->writable ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = record->view != VK_NULL_HANDLE && !record->writable;
+    info.comparison = record->comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> VulkanDevice::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
 }
 
 Result<void> VulkanDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

@@ -134,6 +134,48 @@ Result<void> SceneComponent::CheckMovable(const char* action) const noexcept {
 }
 
 void SceneComponent::NotifyTransformUpdated() noexcept {
+    PropagateTransformUpdated();
+    // 루트 통지 끝에 overlap을 갱신한다(UE는 transform setter가 MoveComponent를 거쳐 갱신한다 —
+    // PhysicsModule 7.1.11절). 자식 전파 중에는 부르지 않는다(루트의 갱신이 자식으로 내려간다).
+    if (overlapUpdateDeferred_) {
+        overlapUpdateSkipped_ = true;
+        return;
+    }
+
+    UpdateOverlaps();
+}
+
+void SceneComponent::UpdateOverlaps() noexcept {
+    if (children_.Size() == 0 || !HasWorld()) {
+        return;
+    }
+
+    World& world = GetWorld();
+    auto state = world.GetActorState(GetOwner());
+    if (!state || state.Value() != ActorState::Playing) {
+        return;
+    }
+
+    // overlap 알림이 자식 목록을 바꿀 수 있으므로 복사본으로 돈다(UE AttachedChildren 복사). 복사
+    // 할당이 실패하면 handle을 하나씩 다시 읽는다(발행 중 목록이 줄면 일부를 건너뛸 수 있다).
+    Array<ObjectHandle> children(children_.GetAllocator());
+    if (children.TryAppend(children_.View())) {
+        for (const ObjectHandle child : children) {
+            (void)world.With<SceneComponent>(
+                child, [](SceneComponent& scene) noexcept { scene.UpdateOverlaps(); });
+        }
+
+        return;
+    }
+
+    for (usize index = 0; index < children_.Size(); ++index) {
+        const ObjectHandle child = children_[index];
+        (void)world.With<SceneComponent>(
+            child, [](SceneComponent& scene) noexcept { scene.UpdateOverlaps(); });
+    }
+}
+
+void SceneComponent::PropagateTransformUpdated() noexcept {
     boundsDirty_ = true;
     if (HasSystemState(SystemStateKind::Render)) {
         auto marked = MarkSystemStateDirty(SystemStateKind::Render);
@@ -148,8 +190,9 @@ void SceneComponent::NotifyTransformUpdated() noexcept {
     World& world = GetWorld();
     for (usize index = 0; index < children_.Size(); ++index) {
         const ObjectHandle child = children_[index];
-        auto notified = world.With<SceneComponent>(
-            child, [](SceneComponent& component) noexcept { component.NotifyTransformUpdated(); });
+        auto notified = world.With<SceneComponent>(child, [](SceneComponent& component) noexcept {
+            component.PropagateTransformUpdated();
+        });
         (void)notified;
     }
 }
@@ -352,6 +395,31 @@ bool SceneComponent::IsVisible() const noexcept {
     const bool gameWorld = HasWorld() && (GetWorld().Kind() == WorldKind::Game ||
                                           GetWorld().Kind() == WorldKind::Tryout);
     return !(gameWorld && hiddenInGame_);
+}
+
+void SceneComponent::SetMobility(ComponentMobility mobility) noexcept {
+    if (mobility_ == mobility) {
+        return;
+    }
+
+    mobility_ = mobility;
+    if (IsRegistered()) {
+        for (uint32 index = 0; index < SystemStateKindCount; ++index) {
+            // 실패는 RecreateSystemStateNow가 Warning으로 남긴다(값 변경은 유지 — ERD25).
+            (void)RecreateSystemStateNow(static_cast<SystemStateKind>(index));
+        }
+    }
+
+    // 자식의 다시 만들기 hook이 이 목록을 바꿀 수 있으므로 handle 사본을 색인으로 돈다(UE도
+    // GetAttachChildren 사본을 돈다).
+    if (mobility == ComponentMobility::Movable && HasWorld()) {
+        for (usize index = 0; index < children_.Size(); ++index) {
+            const ObjectHandle child = children_[index];
+            (void)GetWorld().With<SceneComponent>(child, [](SceneComponent& scene) noexcept {
+                scene.SetMobility(ComponentMobility::Movable);
+            });
+        }
+    }
 }
 
 void SceneComponent::SetVisibility(bool visible, bool propagateToChildren) noexcept {
@@ -772,9 +840,13 @@ void SceneComponent::DetachForDestroy() noexcept {
 
     // 자식은 루트가 된다(상대 Transform 유지). 이미 계산된 월드 행렬은 죽은 부모를 포함하므로 다시
     // 계산하도록 자손까지 dirty로 표시한다.
+    // 통지(overlap 알림 포함 — PhysicsModule 7.1.11절)가 다른 부착을 바꿀 수 있으므로 목록을 떼어
+    // 낸 뒤 모두 고아로 만들고 나서 통지한다.
     World& world = GetWorld();
     const ObjectHandle self = Handle();
-    for (ObjectHandle child : children_) {
+    Array<ObjectHandle> orphans(Move(children_));
+    children_ = Array<ObjectHandle>(orphans.GetAllocator());
+    for (const ObjectHandle child : orphans) {
         world.UpdateAttachmentTicks(child, self, {});
         auto orphaned = world.With<SceneComponent>(child, [](SceneComponent& component) noexcept {
             component.parent_ = {};
@@ -782,13 +854,15 @@ void SceneComponent::DetachForDestroy() noexcept {
             component.attachSocket_.Clear();
             component.worldDirty_ = false;
             component.MarkDirty();
-            // 루트가 되어 월드 Transform이 바뀌었다(23.3절 통지).
-            component.NotifyTransformUpdated();
         });
         (void)orphaned;
     }
 
-    children_.Clear();
+    // 루트가 되어 월드 Transform이 바뀌었다(23.3절 통지).
+    for (const ObjectHandle child : orphans) {
+        (void)world.With<SceneComponent>(
+            child, [](SceneComponent& component) noexcept { component.NotifyTransformUpdated(); });
+    }
 }
 
 } // namespace rocks

@@ -1,3 +1,5 @@
+#include "ImageFuzz.h"
+
 #include <Compression/Compression.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -761,6 +763,43 @@ TEST(ImageDecode_DetectionLimitsAndFailures) {
                 AssetDiagnosticCode::UnsupportedSourceFormat));
     CHECK(Fails(Decode(allocator, webp("VP8X").View()),
                 AssetDiagnosticCode::UnsupportedSourceFormat));
+    // 애니메이션(ANMF)은 프레임 머리 16 byte 뒤 첫 이미지 chunk로 가른다. 이미지 chunk가 없으면
+    // InvalidSource다.
+    const auto frames = [&](const char* inner) noexcept {
+        Bytes file(allocator);
+        file.Text("RIFF");
+        file.Le32(42);
+        file.Text("WEBP");
+        file.Text("ANMF");
+        file.Le32(26);
+        for (uint32 index = 0; index < 16; ++index) {
+            file.U8(0);
+        }
+
+        file.Text(inner);
+        file.Le32(2);
+        file.U8(0);
+        file.U8(0);
+        return Move(file.data);
+    };
+    CHECK(Fails(Decode(allocator, frames("VP8 ").View()), AssetDiagnosticCode::LossySource));
+    CHECK(Fails(Decode(allocator, frames("VP8L").View()),
+                AssetDiagnosticCode::UnsupportedSourceFormat));
+    CHECK(Fails(Decode(allocator, webp("ICCP").View()), AssetDiagnosticCode::InvalidSource));
+    const struct {
+        ImageFileFormat format;
+        const char* name;
+    } names[] = {{ImageFileFormat::Unknown, "Unknown"}, {ImageFileFormat::Bmp, "Bmp"},
+                 {ImageFileFormat::Tga, "Tga"},         {ImageFileFormat::Png, "Png"},
+                 {ImageFileFormat::Psd, "Psd"},         {ImageFileFormat::Dds, "Dds"},
+                 {ImageFileFormat::Tiff, "Tiff"},       {ImageFileFormat::Hdr, "Hdr"},
+                 {ImageFileFormat::Exr, "Exr"},         {ImageFileFormat::Jpeg, "Jpeg"},
+                 {ImageFileFormat::WebP, "WebP"}};
+    for (const auto& item : names) {
+        CHECK(StringView(ImageFileFormatName(item.format)) == item.name);
+    }
+
+    CHECK(StringView(ImageFileFormatName(static_cast<ImageFileFormat>(0xFF))) == "Unknown");
 
     // 한도: 한 변 1보다 큰 그림.
     const uint8 rows[] = {0, 0, 255, 0, 255, 0, 0, 0};
@@ -796,6 +835,106 @@ TEST(ImageDecode_DetectionLimitsAndFailures) {
     }
 
     CHECK(failures > 0);
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): BMP(24·32·16비트,
+// 8비트 색표, RLE8)·TGA(32비트, 회색, 색표, RLE 회색)·PNG(회색 8·16비트, RGBA 필터 Sub·Up, 팔레트 +
+// tRNS)·PSD(RGB raw·RLE, 회색 16비트 + 알파) 씨앗. 변조한 파일은 결과가 서로 맞는 성공이거나 다섯
+// 분류의 실패이고, 할당 블록을 다 돌려준다.
+TEST(ImageDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    const uint8 rows24[48] = {0,  0,  255, 0,  255, 0,  255, 0,  0,  9,  9,  9,  1,  2,  3,  4,
+                              5,  6,  7,   8,  9,   10, 11,  12, 13, 14, 15, 16, 17, 18, 19, 20,
+                              21, 22, 23,  24, 25,  26, 27,  28, 29, 30, 31, 32, 33, 34, 35, 36};
+    const Array<uint8> bmp24 = Bmp(allocator, 40, 4, 4, 24, 0, {}, {}, rows24);
+    const uint8 argb[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    const Array<uint8> bmp32 = Bmp(allocator, 40, 2, 2, 32, 0, {}, {}, argb);
+    const uint8 rgb555[4] = {0x00, 0x7C, 0xE0, 0x03};
+    const Array<uint8> bmp16 = Bmp(allocator, 40, 2, 1, 16, 0, {}, {}, rgb555);
+    const uint8 palette[] = {10, 20, 30, 0, 40, 50, 60, 0};
+    const uint8 indices[8] = {1, 0, 1, 0, 0, 1, 0, 1};
+    const Array<uint8> bmp8 = Bmp(allocator, 40, 4, 2, 8, 0, {}, palette, indices);
+    const uint8 rle8[] = {2, 1, 0, 0, 2, 0, 0, 1};
+    const Array<uint8> bmpRle = Bmp(allocator, 40, 2, 2, 8, 1, {}, palette, rle8);
+    const Span<const uint8> bmpSeeds[] = {bmp24.View(), bmp32.View(), bmp16.View(), bmp8.View(),
+                                          bmpRle.View()};
+    FuzzStats bmp;
+    CHECK(FuzzDecode(allocator, bmpSeeds, ImageFileFormat::Bmp, 0x5EED0B3Bull, 4000, bmp));
+    CHECK(bmp.Clean() && bmp.rejected > 0);
+
+    const uint8 bgra[32] = {10, 20, 30, 40, 50, 60, 70, 80, 1,  2,  3,  4,  5,  6,  7,  8,
+                            9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24};
+    const Array<uint8> tga32 = Tga(allocator, 2, 4, 2, 32, 8, {}, 0, bgra);
+    const uint8 gray[] = {1, 2, 3, 4};
+    const Array<uint8> tgaGray = Tga(allocator, 3, 2, 2, 8, 0x20, {}, 0, gray);
+    const uint8 tgaPalette[] = {0, 0, 255, 0, 255, 0};
+    const uint8 tgaIndices[] = {1, 0};
+    const Array<uint8> tgaMapped = Tga(allocator, 1, 2, 1, 8, 0, tgaPalette, 24, tgaIndices);
+    const uint8 tgaRle[] = {0x82, 9, 0x00, 7};
+    const Array<uint8> tgaRunLength = Tga(allocator, 11, 2, 2, 8, 0, {}, 0, tgaRle);
+    const Span<const uint8> tgaSeeds[] = {tga32.View(), tgaGray.View(), tgaMapped.View(),
+                                          tgaRunLength.View()};
+    FuzzStats tga;
+    CHECK(FuzzDecode(allocator, tgaSeeds, ImageFileFormat::Tga, 0x5EED07A0ull, 4000, tga));
+    CHECK(tga.Clean() && tga.rejected > 0);
+
+    PngSpec spec;
+    spec.width = 4;
+    spec.height = 2;
+    const uint8 gray8[] = {0, 10, 20, 30, 40, 1, 5, 5, 5, 5};
+    spec.raw = gray8;
+    const Array<uint8> pngGray = Png(allocator, spec);
+    spec = PngSpec{};
+    spec.width = 2;
+    spec.depth = 16;
+    const uint8 gray16[] = {0, 0x12, 0x34, 0x56, 0x78};
+    spec.raw = gray16;
+    const Array<uint8> pngGray16 = Png(allocator, spec);
+    spec = PngSpec{};
+    spec.width = 2;
+    spec.height = 2;
+    spec.colorType = 6;
+    const uint8 subUp[] = {1, 10, 20, 30, 40, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+    spec.raw = subUp;
+    const Array<uint8> pngRgba = Png(allocator, spec);
+    spec = PngSpec{};
+    spec.width = 2;
+    spec.colorType = 3;
+    const uint8 pngPalette[] = {1, 2, 3, 4, 5, 6};
+    const uint8 pngAlpha[] = {7};
+    const uint8 pngIndexed[] = {0, 1, 0};
+    spec.raw = pngIndexed;
+    spec.palette = pngPalette;
+    spec.transparency = pngAlpha;
+    const Array<uint8> pngMapped = Png(allocator, spec);
+    const Span<const uint8> pngSeeds[] = {pngGray.View(), pngGray16.View(), pngRgba.View(),
+                                          pngMapped.View()};
+    FuzzStats png;
+    CHECK(FuzzDecode(allocator, pngSeeds, ImageFileFormat::Png, 0x5EED0B46ull, 6000, png));
+    CHECK(png.Clean() && png.rejected > 0);
+
+    PsdSpec psd;
+    psd.width = 2;
+    psd.height = 2;
+    const uint8 planes[12] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
+    psd.planes = planes;
+    const Array<uint8> psdRaw = Psd(allocator, psd);
+    psd.compression = 1;
+    const Array<uint8> psdRle = Psd(allocator, psd);
+    psd = PsdSpec{};
+    psd.mode = 1;
+    psd.channels = 2;
+    psd.depth = 16;
+    const uint8 grayAlpha[] = {0x12, 0x34, 0xAB, 0xCD};
+    psd.planes = grayAlpha;
+    const Array<uint8> psdGray = Psd(allocator, psd);
+    const Span<const uint8> psdSeeds[] = {psdRaw.View(), psdRle.View(), psdGray.View()};
+    FuzzStats photoshop;
+    CHECK(FuzzDecode(allocator, psdSeeds, ImageFileFormat::Psd, 0x5EED0B5Dull, 4000, photoshop));
+    CHECK(photoshop.Clean() && photoshop.rejected > 0);
 }
 
 } // namespace image_decode_tests_file

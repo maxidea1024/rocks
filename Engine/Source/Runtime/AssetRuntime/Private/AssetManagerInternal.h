@@ -240,6 +240,9 @@ struct AssetManager::Impl {
     HashMap<ObjectHandle, uint32> edgeNodeOf;
     Array<ManagerEdgeNode> edgeNodes;
     Array<uint32> freeEdgeNodes;
+    // 이번 묶음에서 간선이 빠져 빌 수 있는 이웃 칸이다(묶음 끝에 비었으면 해제한다 — 같은 묶음의
+    // 뒤 간선이 그 칸에 다시 이을 수 있다).
+    Array<ObjectHandle> emptiedEdgeNodes;
     uint64 lateEdgesIntoDiscarding = 0;
     bool lateEdgeWarned = false;
 
@@ -302,6 +305,8 @@ struct AssetManager::Impl {
     void CoalesceChanges() noexcept;
     void LinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
     void UnlinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
+    // 묶음에서 빈 이웃 칸을 해제한다(ApplyEdgeChanges 끝).
+    void ReleaseEmptiedEdgeNodes() noexcept;
     int64 InboundOf(uint32 unit) const noexcept;
     void CheckCycle(uint32 from, uint32 to) noexcept;
     void MergeUnits() noexcept;

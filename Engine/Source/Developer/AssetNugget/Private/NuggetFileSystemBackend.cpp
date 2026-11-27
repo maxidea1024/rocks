@@ -106,7 +106,7 @@ EntryState OpenEntry(Allocator& allocator, platform::FileSystem& files, StringVi
 
     error = view.Error();
     switch (view.Error()) {
-    case ErrorCode::InvalidArgument:
+    case ErrorCode::CorruptData:
         return EntryState::Corrupt;
     case ErrorCode::Unsupported:
         return EntryState::Unsupported;
@@ -195,7 +195,7 @@ int64 NuggetSystemClock::NowTicks() noexcept {
 NuggetFileSystemBackend::NuggetFileSystemBackend(Allocator& allocator, platform::FileSystem& files,
                                                  StringView root, NuggetClock& clock) noexcept
     : allocator_(&allocator), files_(&files), root_(allocator), clock_(&clock) {
-    (void)root_.TryAssign(root);
+    rootStored_ = static_cast<bool>(root_.TryAssign(root));
 }
 
 Result<void> NuggetFileSystemBackend::EntryPath(const Sha256Digest& key,
@@ -228,6 +228,12 @@ Result<void> NuggetFileSystemBackend::EntryPath(const Sha256Digest& key,
 }
 
 Result<void> NuggetFileSystemBackend::Open() noexcept {
+    // 생성자의 root 복사 실패는 할당 실패다(빈 루트로 보면 InvalidArgument로 잘못 보고한다 —
+    // 14.1.119 할당 실패 전수가 찾음).
+    if (!rootStored_) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
     if (root_.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -421,11 +427,11 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
 
     NuggetFileView& file = view.Value();
     if (!(file.record.key == request.key)) {
-        return corrupt(ErrorCode::InvalidArgument);
+        return corrupt(ErrorCode::CorruptData);
     }
 
     if (file.record.bucket.View() != request.bucket) {
-        result.error = ErrorCode::InvalidArgument;
+        result.error = ErrorCode::CorruptData;
         return result;
     }
 
@@ -483,7 +489,7 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
             NuggetValue value(*allocator_);
             value.id = file.record.values[index].id;
             if (auto read = ReadNuggetValue(file, reader, index, stored); !read) {
-                if (read.Error() == ErrorCode::InvalidArgument) {
+                if (read.Error() == ErrorCode::CorruptData) {
                     return corrupt(read.Error());
                 }
 
@@ -495,7 +501,7 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
             if (auto decoded = DecodeNuggetValue(*allocator_, file.record.values[index],
                                                  stored.View(), value.bytes);
                 !decoded) {
-                if (decoded.Error() == ErrorCode::InvalidArgument) {
+                if (decoded.Error() == ErrorCode::CorruptData) {
                     return corrupt(decoded.Error());
                 }
 
@@ -721,8 +727,8 @@ NuggetPutResult NuggetFileSystemBackend::Settle(const Sha256Digest& key, StringV
                 if (auto verified = VerifyNuggetValue(view.Value(), reader, index, buffer.View());
                     !verified) {
                     error = verified.Error();
-                    state = verified.Error() == ErrorCode::InvalidArgument ? EntryState::Corrupt
-                                                                           : EntryState::Failed;
+                    state = verified.Error() == ErrorCode::CorruptData ? EntryState::Corrupt
+                                                                       : EntryState::Failed;
                 }
             }
         }

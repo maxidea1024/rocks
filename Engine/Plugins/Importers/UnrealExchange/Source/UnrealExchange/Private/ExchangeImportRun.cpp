@@ -1,6 +1,6 @@
 #include <UnrealExchange/ExchangeImportRun.h>
 
-// Unreal 교환 임포트 실행이다(Docs/Design/UnrealExchange.ko.md 10.5절 7·8번): 단위 순서, 임포터
+// Unreal 교환 임포트 실행이다(Docs/Design/UnrealExchange 10.5절 7·8번): 단위 순서, 임포터
 // 없는 클래스 건너뜀, 실행 중 실패 전파, 임포터 계약 확인.
 
 namespace rocks {
@@ -28,6 +28,8 @@ ErrorCode PlanFailureError(AssetDiagnosticCode code) noexcept {
         return ErrorCode::CycleDetected;
     case AssetDiagnosticCode::MissingDependency:
         return ErrorCode::NotFound;
+    case AssetDiagnosticCode::CorruptBundle:
+        return ErrorCode::CorruptData;
     default:
         return ErrorCode::InvalidArgument;
     }

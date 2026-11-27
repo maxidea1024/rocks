@@ -101,8 +101,9 @@ Result<void> D3D12Device::ResizeSwapChain(SwapChainHandle handle, uint32 width,
     for (ComRef<ID3D12Resource>& buffer : record->buffers) {
         buffer.Reset();
     }
-    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다.
+    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다. 그리는 중인 프레임도 버린다.
     record->broken = true;
+    record->frameOpen = false;
     const HRESULT resized = record->swapChain->ResizeBuffers(SwapChainBufferCount, width, height,
                                                              DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(resized)) {
@@ -1080,6 +1081,34 @@ D3D12Device::GetTextureSubresources(TextureHandle texture) const noexcept {
 
     return Result<TextureSubresources>::Success(
         TextureSubresources{record->mipLevels, record->slices});
+}
+
+Result<TextureViewInfo> D3D12Device::GetTextureViewInfo(TextureHandle texture) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureViewInfo info;
+    info.dimension = record->dimension;
+    info.format = record->format;
+    info.sampleCount = record->sampleCount;
+    info.access = record->writable ? ViewAccess::ReadWrite : ViewAccess::Read;
+    info.sampled = record->hasSrv;
+    info.comparison = record->comparison;
+    return Result<TextureViewInfo>::Success(info);
+}
+
+Result<BufferViewInfo> D3D12Device::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    const BufferViewRecord* record = bufferViews_.Find(view.slot);
+    if (record == nullptr) {
+        return Result<BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<BufferViewInfo>::Success(
+        BufferViewInfo{record->kind, record->access, record->shaderType, record->stride});
 }
 
 } // namespace rocks::graphics::d3d12

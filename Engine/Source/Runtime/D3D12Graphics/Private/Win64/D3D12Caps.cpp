@@ -1,6 +1,7 @@
 #include "D3D12Caps.h"
 
 #include <DxgiGraphics/DxgiAdapter.h>
+#include <ShaderCore/ShaderFormatTypes.h>
 
 namespace rocks::graphics::d3d12 {
 
@@ -200,6 +201,19 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     features.rayTracingTier = static_cast<uint8>(rayTracing);
     features.rayTracingPipeline = rayTracing >= D3D12_RAYTRACING_TIER_1_0;
     features.rayQuery = rayTracing >= D3D12_RAYTRACING_TIER_1_1;
+    // 형식 장치 요구 비트다(DeviceFeatures::shaderDeviceRequirements). 장치는 FL 11.0 이상으로만
+    // 만든다.
+    constexpr uint8 ShaderModel6_6 = 66;
+    uint32 requirements = shader::DeviceRequiresD3DFeatureLevel11_0;
+    if (features.shaderModel >= ShaderModel6_6) {
+        requirements |= shader::DeviceRequiresD3D12ShaderModel6_6;
+    }
+
+    if (optionsKnown && options.TypedUAVLoadAdditionalFormats) {
+        requirements |= shader::DeviceRequiresD3D12TypedUavLoadAdditionalFormats;
+    }
+
+    features.shaderDeviceRequirements = requirements;
     return caps;
 }
 

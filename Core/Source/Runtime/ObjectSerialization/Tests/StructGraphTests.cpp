@@ -686,7 +686,7 @@ TEST(StructGraph_EditorOnlyExclusionAndCookedLoad) {
             const uint32 constructed = Owner::Constructed;
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   editor.Value().View(), load)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(Owner::Constructed == constructed);
         }
 
@@ -830,7 +830,7 @@ TEST(StructGraph_UnknownAndMissingMembers) {
             const uint32 constructed = Owner::Constructed;
             CHECK(LoadObjectGraph(allocator, plain, plainTypes, plain.OwnerAccess(),
                                   shadowBytes.Value().View(), load)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(Owner::Constructed == constructed);
 
             auto plainBytes = SaveFixture(allocator, plain);
@@ -1093,7 +1093,7 @@ TEST(StructGraph_VersionEdgeCases) {
             REQUIRE(PatchNestedVersion(bytes.Value(), LeafId, 0));
             CHECK(LoadObjectGraph(allocator, plain, plainTypes, plain.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
 
             StructHooks hooks;
             ObjectGraphLoadOptions load;
@@ -1102,7 +1102,7 @@ TEST(StructGraph_VersionEdgeCases) {
             load.policy.unknownField = UnknownFieldPolicy::Reject;
             CHECK(LoadObjectGraph(allocator, plain, plainTypes, plain.OwnerAccess(),
                                   newer.Value().View(), load)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
 
             ObjectGraphLoadOptions wrong;
             wrong.migrateStruct = &WrongSchemaOverride;
@@ -1138,7 +1138,7 @@ TEST(StructGraph_UndeclaredEnumInsideStruct) {
             const uint32 constructed = Owner::Constructed;
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   bytes.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(Owner::Constructed == constructed);
             StructHooks hooks;
             ObjectGraphLoadOptions load;

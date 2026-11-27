@@ -4,6 +4,7 @@
 #include <Input/TouchIndexAllocator.h>
 #include <PlatformWindow/Window.h>
 
+#include "../Common/GamepadMotorMapping.h"
 #include "../Common/PointerTouchMapping.h"
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
@@ -373,6 +374,15 @@ public:
                                               : Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
+    void ShowAndActivate() noexcept override {
+        // 숨긴 채 만든 창을 보이고 앞으로 가져온다. 같은 프로세스의 창(스플래시)이 전경이면 OS가
+        // 허용하고, 사용자가 다른 앱으로 옮겼으면 SetForegroundWindow가 실패해 작업 표시줄 단추만
+        // 깜빡인다(강제하지 않는다 — Docs/Design/SplashScreen 9.4절).
+        ShowWindow(window_, SW_SHOW);
+        UpdateWindow(window_);
+        (void)SetForegroundWindow(window_);
+    }
+
 private:
     // 실패한 OS 호출과 오류를 기억하고 DependencyFailed를 돌려준다(Window::Create가 report로
     // 옮긴다).
@@ -684,12 +694,24 @@ float StickAxis(SHORT value) noexcept {
 }
 
 using XInputGetStateFunction = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
+using XInputSetStateFunction = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
 
 class XInputGamepads final : public GamepadBackend {
 public:
     ~XInputGamepads() override {
+        // 진동 중인 패드를 멈춘다(엔진 종료 — Docs/Design/InputActions 6.3절).
+        for (DWORD index = 0; index < input::MaxGamepads; ++index) {
+            const Slot& slot = slots_[index];
+            if (setState_ != nullptr && slot.connected &&
+                !(slot.motors == platform::gamepad::XInputMotorPair{})) {
+                XINPUT_VIBRATION stop = {};
+                (void)setState_(index, &stop);
+            }
+        }
+
         // 함수 표를 먼저 놓아야 DLL을 내릴 수 있다.
         getState_ = nullptr;
+        setState_ = nullptr;
         lease_.Reset();
         (void)library_.Close();
     }
@@ -705,7 +727,46 @@ public:
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
 
+        // 진동은 선택이다(없으면 SetMotors가 Unsupported — 입력은 그대로 쓴다).
+        void* setState = nullptr;
+        if (library_.Find("XInputSetState", setState, lease_)) {
+            setState_ = reinterpret_cast<XInputSetStateFunction>(setState);
+        }
+
         getState_ = reinterpret_cast<XInputGetStateFunction>(getState);
+        return Result<void>::Success();
+    }
+
+    Result<void> SetMotors(uint32 index, const input::MotorValues& values) noexcept override {
+        if (index >= input::MaxGamepads || !platform::gamepad::MotorValuesAreFinite(values)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (setState_ == nullptr) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        Slot& slot = slots_[index];
+        if (!slot.connected) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+
+        // 바뀐 값만 쓴다(UE XInputInterface.cpp:373-385).
+        const platform::gamepad::XInputMotorPair speeds =
+            platform::gamepad::XInputMotorSpeeds(values);
+        if (speeds == slot.motors) {
+            return Result<void>::Success();
+        }
+
+        XINPUT_VIBRATION vibration = {};
+        vibration.wLeftMotorSpeed = speeds.left;
+        vibration.wRightMotorSpeed = speeds.right;
+        if (setState_(static_cast<DWORD>(index), &vibration) != ERROR_SUCCESS) {
+            // 직전 값은 그대로다(다음 호출이 다시 쓴다).
+            return Result<void>::Failure(ErrorCode::IoError);
+        }
+
+        slot.motors = speeds;
         return Result<void>::Success();
     }
 
@@ -728,6 +789,11 @@ public:
                 continue;
             }
             const bool changed = !slot.connected || state.dwPacketNumber != slot.packet;
+            // 새로 연결된 패드는 모터가 멈춘 상태다(직전 값을 0으로 — 6.4절).
+            if (!slot.connected) {
+                slot.motors = {};
+            }
+
             slot.connected = true;
             slot.packet = state.dwPacketNumber;
             if (!changed) {
@@ -757,12 +823,15 @@ private:
         bool connected = false;
         DWORD packet = 0;
         uint64 lastProbe = 0;
+        // 마지막으로 장치에 쓴 모터 속도다.
+        platform::gamepad::XInputMotorPair motors;
     };
 
     // lease_가 살아 있는 동안 getState_가 유효하다. 소멸자가 lease_를 먼저 놓고 library_를 닫는다.
     DynamicLibrary library_;
     DynamicLibraryLease lease_;
     XInputGetStateFunction getState_ = nullptr;
+    XInputSetStateFunction setState_ = nullptr;
     Slot slots_[input::MaxGamepads];
 };
 

@@ -543,7 +543,7 @@ try
         "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)",
         $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'",
         $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'",
-        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, CorruptData)",
         "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
         $"MissingDependency: Content/Copy/Hero2.rasset: dependency {missingId} is not in the index",
         $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index",
@@ -1807,6 +1807,38 @@ try
     ReportImport("asset-import unknown importer name", named.ExitCode == 1 &&
         named.StdErr.Contains("asset-import: UnsupportedSourceFormat: /Game/Rock", StringComparison.Ordinal), named);
 
+    // 사운드 임포터는 텍스처와 같은 칸에 묶어 등록한다(Docs/Design/AudioSystem 3.36.3절): 16비트 mono WAV 4 frame을 임포트하면
+    // 에셋이 생긴다. `volume`은 A2f 예약 이름이라 `--volume=`은 사용법 오류다(사운드 volume은 asset-edit로 정한다 — 한계).
+    string wav = Path.Combine(importDirectory, "Click.wav");
+    byte[] samples = [0x00, 0x00, 0x00, 0x40, 0x00, 0xC0, 0xFF, 0x7F];
+    using (var wavStream = new MemoryStream())
+    using (var writer = new BinaryWriter(wavStream))
+    {
+        writer.Write("RIFF"u8.ToArray());
+        writer.Write(4 + 8 + 16 + 8 + samples.Length);
+        writer.Write("WAVE"u8.ToArray());
+        writer.Write("fmt "u8.ToArray());
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write((short)1);
+        writer.Write(48000);
+        writer.Write(48000 * 2);
+        writer.Write((short)2);
+        writer.Write((short)16);
+        writer.Write("data"u8.ToArray());
+        writer.Write(samples.Length);
+        writer.Write(samples);
+        writer.Flush();
+        File.WriteAllBytes(wav, wavStream.ToArray());
+    }
+
+    ProcessResult sound = await RunImport("asset-import", "/Game/Click", wav, projectOption);
+    ReportImport("asset-import sound clip", sound.ExitCode == 0 &&
+        File.Exists(Path.Combine(project, "Content", "Click.rasset")), sound);
+    ProcessResult soundVolume = await RunImport("asset-import", "/Game/Quiet", wav, "--volume=0.5", projectOption);
+    ReportImport("asset-import sound --volume is reserved", soundVolume.ExitCode == 2 &&
+        soundVolume.StdErr.StartsWith("usage: asset-import", StringComparison.Ordinal), soundVolume);
+
     string[][] importUsage =
     [
         ["asset-import", projectOption],
@@ -1887,9 +1919,10 @@ finally
 
 // asset-cook(AssetSystem 13절, 10.2절 "A4e 구현 세부" — A4e1): 제품 실행 파일이 쿠커 모듈을 시작해 설정·보고서 타입을
 // 등록하고 엔진 프로파일(실행 파일 위쪽 Engine/Config)로 쿠킹한다. 전체 쿠킹 게시·두 번째는 전부 재사용·--json·사용법·도움말. 진단 줄·
-// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다. 제품 실행 파일에는 셰이더 산출물 단계가 아직
-// 없으므로(SH2d 전 — 10.3절 1항: backend가 있는 프로필은 UnsupportedCapability) 실행 파일을 임시 배치에 복사하고 그 위쪽
-// Engine/Config의 Windows 프로필을 셰이더 없는 프로필(graphicsBackends·shaderFormats 비움)로 둔다.
+// 설정 거부·너겟 설정·verify는 EngineTests가 명령 함수를 프로세스 안에서 부른다. 셰이더 산출물(SH2d 셰이더 라이브러리 단계)은
+// 아래 asset-cook --engine 시험이 보므로, 여기서는 실행 파일을 임시 배치에 복사하고 그 위쪽 Engine/Config의 Windows 프로필을
+// 셰이더 없는 프로필(graphicsBackends·shaderFormats 비움)로 둔다 — 프로젝트 에셋 쿠킹 시험이 셰이더 컴파일(시간·DXC 호스트)과
+// 저장소 Engine/Saved에 기대지 않게 한다.
 string cookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-{Environment.ProcessId}");
 try
 {
@@ -1933,15 +1966,80 @@ try
     ReportCook("asset-cook usage", usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-cook", StringComparison.Ordinal), usage);
     ProcessResult help = await RunCook("asset-cook", "--help");
     ReportCook("asset-cook help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-cook", StringComparison.Ordinal), help);
+
+    // 제품 쿠킹 처리기 연결(MeshAnimationAssets 13.1절 2): 빈 StaticMesh·SkeletalMesh·AnimationClip은 각 처리기가 거부한다
+    // (메시 둘은 쓸 LOD가 없어 InvalidSource, 클립은 스켈레톤이 없어 MissingDependency). 기본 처리기였다면 모두 성공한다.
+    ProcessResult rock = await RunCook("asset-new", "StaticMesh", "/Game/Rock", projectOption);
+    ProcessResult body = await RunCook("asset-new", "SkeletalMesh", "/Game/Body", projectOption);
+    ProcessResult walk = await RunCook("asset-new", "AnimationClip", "/Game/Walk", projectOption);
+    ProcessResult failedNew = rock.ExitCode != 0 ? rock : body.ExitCode != 0 ? body : walk;
+    ReportCook("asset-new mesh and clip types", rock.ExitCode == 0 && body.ExitCode == 0 && walk.ExitCode == 0, failedNew);
+    ProcessResult wired = await RunCook("asset-cook", "--profile=Windows", projectOption);
+    ReportCook("asset-cook mesh and clip processors", wired.ExitCode == 1 &&
+        wired.StdErr.Contains("InvalidSource: /Game/Rock: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("InvalidSource: /Game/Body: error", StringComparison.Ordinal) &&
+        wired.StdErr.Contains("MissingDependency: /Game/Walk: error", StringComparison.Ordinal), wired);
 }
 finally
 {
     Directory.Delete(cookDirectory, true);
 }
 
-// asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
-// dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
-// 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+// asset-cook --engine(ShaderSystem 16.1절 SSD44–SSD46, AssetSystem 10.3.1절 A4f4): 제품 실행 파일이 ShaderCompiler 모듈을 시작해
+// 셰이더 라이브러리 단계를 등록하고, 단계가 엔진 묶음(RenderBase 엔진 셰이더 타입)을 시작해 Windows 프로필의 형식마다 Engine 라이브러리를
+// 엔진 쿠킹 루트에 게시한다. 두 번째 쿠킹은 같은 cookKey라 라이브러리를 재사용한다. 저장소 Engine/Saved를 건드리지 않게 실행 파일·워커와
+// Engine/Config·Engine/Shaders를 임시 배치에 복사한다(엔진 너겟 root도 그 배치다). DXIL·DXBC를 만드는 호스트(Windows)에서만 돈다.
+if (OperatingSystem.IsWindows())
+{
+    string engineCookDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cook-engine-{Environment.ProcessId}");
+    try
+    {
+        string engineCookExecutable = EngineCookLayout(executable, engineCookDirectory);
+        string shaders = Path.Combine(engineCookDirectory, "Engine", "Saved", "Cooked", "Windows", "Shaders");
+
+        async Task<ProcessResult> RunEngineCook(params string[] arguments) =>
+            await ProcessRunner.RunAsync(new(engineCookExecutable, arguments, Path.GetDirectoryName(engineCookExecutable)!,
+                Timeout: TimeSpan.FromSeconds(600)));
+
+        void ReportEngineCook(string label, bool passed, ProcessResult result)
+        {
+            Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+            if (!passed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+            }
+        }
+
+        string[] Libraries() => Directory.Exists(shaders)
+            ? [.. Directory.EnumerateFiles(shaders, "*.rshl").Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)]
+            : [];
+
+        bool HasLibrary(string[] files, string format) => files.Any(file => file.StartsWith($"Engine-{format}-", StringComparison.Ordinal));
+
+        ProcessResult first = await RunEngineCook("asset-cook", "--engine", "--profile=Windows");
+        string[] published = Libraries();
+        ReportEngineCook("asset-cook --engine publishes the engine shader libraries", first.ExitCode == 0 &&
+            first.StdOut.StartsWith("asset-cook: Windows published targets 0 ", StringComparison.Ordinal) && published.Length == 3 &&
+            HasLibrary(published, "D3D12_SM6") && HasLibrary(published, "D3D11_SM5") && HasLibrary(published, "VULKAN_SM5") &&
+            File.Exists(Path.Combine(engineCookDirectory, "Engine", "Saved", "Cooked", "Windows", "CookedManifest.rman")), first);
+        ProcessResult second = await RunEngineCook("asset-cook", "--engine", "--profile=Windows", "--json");
+        int reused = second.StdOut.Split("\"reused\": true", StringSplitOptions.None).Length - 1;
+        ReportEngineCook("asset-cook --engine reuses unchanged libraries", second.ExitCode == 0 && reused == 3 &&
+            second.StdOut.Contains("\"kind\": \"ShaderLibrary\"", StringComparison.Ordinal) && Libraries().SequenceEqual(published), second);
+    }
+    finally
+    {
+        if (Directory.Exists(engineCookDirectory))
+        {
+            Directory.Delete(engineCookDirectory, true);
+        }
+    }
+}
+
+// asset-import-unreal(UnrealExchange 10.5절, 텍스처 10.6절·4.6절 — UX2b): 저장소 fixture 묶음의 dry run(텍스처 하나 계획), 실행
+// (텍스처 임포터 연결 — 새로 만듦, 다시 실행하면 재임포트, 일반 asset-reimport도 교환 원본을 다시 읽는다), 임포터 없는 클래스(건너뜀
+// 경고), golden 묶음의 정적 메시(새로 만듦·--mesh-normals=rocks 재임포트 — UX3b)·스킨 메시와 스켈레톤(UX7b)·애니메이션 클립(UX8b), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");
 try
 {
@@ -1971,10 +2069,24 @@ try
         dryRun.StdOut.Contains("asset-import-unreal: plan-create /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock\n",
             StringComparison.Ordinal) &&
         dryRun.StdOut.Contains("asset-import-unreal: 1 to create, 0 to reimport, 0 failed, 0 skipped", StringComparison.Ordinal), dryRun);
-    ProcessResult noImporter = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
-    ReportUnreal("asset-import-unreal without a kind importer", noImporter.ExitCode == 0 &&
-        noImporter.StdOut.Contains("asset-import-unreal: skipped /Game/Textures/T_Rock.T_Rock no-importer", StringComparison.Ordinal) &&
-        noImporter.StdErr.Contains("warning NoKindImporter Texture2D", StringComparison.Ordinal), noImporter);
+    ProcessResult created = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
+    ReportUnreal("asset-import-unreal texture created", created.ExitCode == 0 &&
+        created.StdOut.Contains("asset-import-unreal: created /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock ",
+            StringComparison.Ordinal) &&
+        created.StdOut.Contains("asset-import-unreal: 1 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal) &&
+        File.Exists(Path.Combine(project, "Content", "Unreal", "Game", "Textures", "T_Rock.rasset")), created);
+    ProcessResult reimported = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
+    ReportUnreal("asset-import-unreal texture reimported", reimported.ExitCode == 0 &&
+        reimported.StdOut.Contains("asset-import-unreal: reimported /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock ",
+            StringComparison.Ordinal) &&
+        reimported.StdOut.Contains("asset-import-unreal: 0 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        reimported);
+    ProcessResult plainReimport = await RunUnreal("asset-reimport", "/Game/Unreal/Game/Textures/T_Rock", projectOption);
+    ReportUnreal("asset-reimport of an exchange texture", plainReimport.ExitCode == 0, plainReimport);
+    ProcessResult noImporter = await RunUnreal("asset-import-unreal", bundle, "--only=/Game/Materials/M_Base.M_Base", projectOption);
+    ReportUnreal("asset-import-unreal skips a class without a kind importer", noImporter.ExitCode == 0 &&
+        noImporter.StdOut.Contains("asset-import-unreal: skipped /Game/Materials/M_Base.M_Base no-importer", StringComparison.Ordinal) &&
+        noImporter.StdErr.Contains("warning NoKindImporter Material", StringComparison.Ordinal), noImporter);
     ProcessResult notFound = await RunUnreal("asset-import-unreal", bundle, "--only=/Game/Nope.Nope", "--dry-run", projectOption);
     ReportUnreal("asset-import-unreal only not in the bundle", notFound.ExitCode == 1 &&
         notFound.StdErr.Contains("asset-import-unreal: NotFound: /Game/Nope.Nope: not in the bundle", StringComparison.Ordinal), notFound);
@@ -1990,6 +2102,36 @@ try
         ReportUnreal($"asset-import-unreal usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption && argument != bundle))}",
             usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-import-unreal", StringComparison.Ordinal), usage);
     }
+
+    // 정적 메시(UnrealExchange 5.5절 — UX3b): golden 묶음의 엔진 정적 메시(Cube)를 만들고 다시 실행하면 재임포트다.
+    string golden = Path.Combine(FindRepositoryRoot(executable).FullName, "Engine", "Plugins", "Importers", "UnrealExchange", "Tests",
+        "Bundles", "Golden.rxbundle");
+    const string cubeOnly = "--only=/Engine/BasicShapes/Cube.Cube";
+    ProcessResult meshCreated = await RunUnreal("asset-import-unreal", golden, cubeOnly, projectOption);
+    ReportUnreal("asset-import-unreal static mesh created", meshCreated.ExitCode == 0 &&
+        meshCreated.StdOut.Contains("asset-import-unreal: created /Engine/BasicShapes/Cube.Cube /Game/Unreal/Engine/BasicShapes/Cube ",
+            StringComparison.Ordinal) &&
+        meshCreated.StdOut.Contains("asset-import-unreal: 1 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        meshCreated);
+    ProcessResult meshReimported = await RunUnreal("asset-import-unreal", golden, cubeOnly, "--mesh-normals=rocks", projectOption);
+    ReportUnreal("asset-import-unreal static mesh reimported", meshReimported.ExitCode == 0 &&
+        meshReimported.StdOut.Contains("asset-import-unreal: 0 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        meshReimported);
+
+    // 스킨 메시(UnrealExchange 6.4절 — UX7b): golden SK_Column은 Hard 닫힘의 스켈레톤과 함께 둘이 만들어진다.
+    ProcessResult skinnedCreated = await RunUnreal("asset-import-unreal", golden,
+        "--only=/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column", projectOption);
+    ReportUnreal("asset-import-unreal skeletal mesh and skeleton created", skinnedCreated.ExitCode == 0 &&
+        skinnedCreated.StdOut.Contains("asset-import-unreal: 2 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        skinnedCreated);
+
+    // 애니메이션 클립(UnrealExchange 7.2절 — UX8b): golden 기둥 클립은 Hard 닫힘의 스켈레톤과 함께 만들어진다(스켈레톤은
+    // 앞 경우가 이미 만들었으므로 재임포트).
+    ProcessResult clipCreated = await RunUnreal("asset-import-unreal", golden,
+        "--only=/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.SK_Column_Anim", projectOption);
+    ReportUnreal("asset-import-unreal animation clip created", clipCreated.ExitCode == 0 &&
+        clipCreated.StdOut.Contains("asset-import-unreal: 1 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        clipCreated);
 
     ProcessResult unrealHelp = await RunUnreal("asset-import-unreal", "--help");
     ReportUnreal("asset-import-unreal help", unrealHelp.ExitCode == 0 &&
@@ -2290,6 +2432,39 @@ static DirectoryInfo FindRepositoryRoot(string executable)
     }
 
     return root ?? throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
+}
+
+// 엔진 전용 쿠킹 배치다: 저장소 Engine/Config·Engine/Shaders를 root/Engine 아래로, 실행 파일과 그 옆 ShaderCompileWorker를 root/bin으로
+// 복사해 복사한 실행 파일 경로를 돌려준다(FindEngineDirectory가 실행 파일 위쪽의 Engine/Config로 root/Engine을 찾는다).
+static string EngineCookLayout(string executable, string root)
+{
+    DirectoryInfo repository = FindRepositoryRoot(executable);
+    foreach (string folder in new[] { "Config", "Shaders" })
+    {
+        string source = Path.Combine(repository.FullName, "Engine", folder);
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string destination = Path.Combine(root, "Engine", folder, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, true);
+        }
+    }
+
+    string bin = Path.Combine(root, "bin");
+    Directory.CreateDirectory(bin);
+    string directory = Path.GetDirectoryName(Path.GetFullPath(executable))!;
+    foreach (string name in new[] { "ShaderCompileWorker.exe", "ShaderCompileWorker" })
+    {
+        string worker = Path.Combine(directory, name);
+        if (File.Exists(worker))
+        {
+            File.Copy(worker, Path.Combine(bin, name), true);
+        }
+    }
+
+    string copied = Path.Combine(bin, Path.GetFileName(executable));
+    File.Copy(executable, copied, true);
+    return copied;
 }
 
 // CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.

@@ -813,7 +813,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 runtime reference graph와 cook build-dependency graph를 분리한다. 단순 AssetId 참조는 상대 cooked payload의 완료를 자동 선행 조건으로 만들지 않는다. 실제 산출물 의존이 순환하면 지원 가능한 SCC를 하나의 cook 단위로 축약하고, 정렬된 구성원 source/settings/schema·내부 edge ID·외부 component의 확정 digest로 key를 계산한다. 구성원 output은 component key+local output ID에서 파생하며 서로의 cooked hash를 재귀 정의하지 않는다. 지원하지 않는 순환 변환은 cycle 경로와 함께 거부한다. A↔B·3-node cycle 및 외부 변경 fixture에서 clean/incremental/local/remote 결과를 대조한다.
 
-Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange.ko.md), 2026-11-20).
+Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange/README.ko.md), 2026-11-20).
 
 ### 9.2 로딩 상태와 취소
 
@@ -1267,7 +1267,7 @@ native 고해상도 기준 영상과 비교하여 SSIM/이미지 차이, edge fl
 
 ### 13.1 GPU-driven 기준 경로
 
-StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 3–5절이다.
+StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/03-MeshSource.ko.md) 3–5절이다.
 
 GPU Scene은 RenderInstanceId별 transform, previous transform, mesh/material handle, bounds, flags를 저장한다. 변경 범위만 upload하고 frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다. material table·descriptor table도 version과 deferred retirement를 적용한다. GPU에는 Object 주소나 ObjectHandle을 직접 전달하지 않는다.
 
@@ -1359,7 +1359,7 @@ Deferred와 Forward 모두 공통 GI 결과를 조명 입력으로 소비한다.
 
 고급 공통 Material IR은 clear coat·anisotropy·subsurface/profile skin·cloth·eye·two-sided foliage·thin translucent·water를 명시 shading model로 정의한다. detail normal·UV transform·vertex color·material function/layer instance·parameter collection·per-instance data·WPO와 이전 WPO를 지원한다. 모델별 Deferred encoding과 Forward evaluation을 모두 제공하며 표현 한계는 capability로 노출한다. Unreal 재질 분류를 비교 기준으로 사용한다. [S32](https://dev.epicgames.com/documentation/en-us/unreal-engine/shading-models-in-unreal-engine)
 
-Substrate 유사 임의 closure/layer 체계는 기존 PBR에 자동 포함되지 않는다. 재질 compiler·GBuffer 저장·ray evaluation·shader permutation 비용을 별도 연구 gate에서 검증한다. [S33](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
+Substrate 유사 임의 closure/layer 체계는 기존 PBR에 자동 포함되지 않는다. 대신 필수 후속으로 지원한다(2026-11-27 사용자 지시, [다층 표면 후속 계획](LayeredSurface.ko.md)). 재질 compiler·GBuffer 저장·ray evaluation·shader permutation 비용은 그 문서의 LS0 단계에서 측정한다. [S33](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
 
 Transparency는 blend mode·sort key·depth write·two-sided·refraction·separate translucency·velocity/DOF 정책을 포함한다. planar reflection·scene capture·render-to-texture·orthographic view와 recursion depth 제한을 M6–M8에 추가한다. OIT는 선택 후속 알고리즘이며 기본 sorted transparency의 한계를 숨기지 않는다. baked lightmap·irradiance probe·reflection capture는 정적 조명 축(14.3절)으로 제공한다.
 
@@ -1506,7 +1506,7 @@ LT01–03·LT05–06의 static/basic probe·CPU bake 사례는 M4 필수다. LT0
 
 ## 15. Skeletal Mesh와 Animation
 
-SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 6–7절이다.
+SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets/06-SkeletonSkinned.ko.md) 6–7절이다.
 
 AnimationClip은 position·rotation·scale track, curve, notify, root motion을 포함한다. ACL을 압축·복호화 후보로 사용하며 CPU 작업 메모리와 시간·오차를 adapter에서 계측한다. [S9](https://github.com/nfrechette/acl)
 

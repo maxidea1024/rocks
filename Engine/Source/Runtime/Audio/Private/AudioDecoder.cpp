@@ -5,6 +5,8 @@
 #include <Core/Assert.h>
 #include <Core/Move.h>
 
+ROCKS_DEFINE_HOST_SERVICE(rocks::audio::AudioDecoderRegistry)
+
 namespace rocks::audio {
 
 namespace {
@@ -16,8 +18,8 @@ bool CodecInRange(AudioCodecId codec) noexcept {
 
 // 내장 디코더(PCM16·ADPCM)가 받을 머리인지 본다(codec·채널·rate). 검증하지 않은 머리로 Open해도
 // PlanarView 범위 밖을 쓰지 않게 채널 수를 여기서도 본다.
-bool BuiltInHeaderValid(const AudioPlatformDataHeader& header, AudioCodecId codec) noexcept {
-    return header.codec == codec && header.channels > 0 && header.channels <= MaxOutputChannels &&
+bool BuiltInHeaderValid(const AudioPlatformDataHeader& header) noexcept {
+    return header.channels > 0 && header.channels <= MaxOutputChannels &&
            header.sampleRate >= MinPlatformSampleRate && header.sampleRate <= MaxPlatformSampleRate;
 }
 
@@ -46,8 +48,12 @@ public:
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        if (!BuiltInHeaderValid(header, AudioCodecId::Pcm16) || codecHeader.Size() != 0) {
+        if (header.codec != AudioCodecId::Pcm16) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (!BuiltInHeaderValid(header) || codecHeader.Size() != 0) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         channels_ = header.channels;
@@ -60,11 +66,13 @@ public:
         payload_ = Span<const uint8>();
         finished_ = false;
         const uint64 frameBytes = uint64{channels_} * Pcm16SampleBytes;
-        if (!open_ || chunk.preRollFrames != 0 || payload.Size() != chunk.payloadBytes ||
-            payload.Size() != uint64{chunk.frameCount} * frameBytes ||
-            startCodecFrame < chunk.firstFrame ||
+        if (!open_ || payload.Size() != chunk.payloadBytes || startCodecFrame < chunk.firstFrame ||
             startCodecFrame - chunk.firstFrame >= chunk.frameCount) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (chunk.preRollFrames != 0 || payload.Size() != uint64{chunk.frameCount} * frameBytes) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         payload_ = payload;
@@ -144,8 +152,12 @@ public:
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        if (!BuiltInHeaderValid(header, AudioCodecId::Adpcm) || codecHeader.Size() != 0) {
+        if (header.codec != AudioCodecId::Adpcm) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (!BuiltInHeaderValid(header) || codecHeader.Size() != 0) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         channels_ = header.channels;
@@ -157,11 +169,14 @@ public:
                             uint64 startCodecFrame) noexcept override {
         payload_ = Span<const uint8>();
         finished_ = false;
-        if (!open_ || chunk.preRollFrames != 0 || payload.Size() != chunk.payloadBytes ||
-            payload.Size() != AdpcmPayloadBytes(channels_, chunk.frameCount) ||
-            startCodecFrame < chunk.firstFrame ||
+        if (!open_ || payload.Size() != chunk.payloadBytes || startCodecFrame < chunk.firstFrame ||
             startCodecFrame - chunk.firstFrame >= chunk.frameCount) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (chunk.preRollFrames != 0 ||
+            payload.Size() != AdpcmPayloadBytes(channels_, chunk.frameCount)) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         payload_ = payload;
@@ -377,7 +392,7 @@ Result<void> DecodeAllInto(const AudioPlatformDataView& view, const AudioDecoder
             }
 
             if (count > chunkEnd - codecFrame) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             // codec frame [codecFrame, codecFrame + count) 중 유효 구간만 옮긴다.
@@ -398,7 +413,7 @@ Result<void> DecodeAllInto(const AudioPlatformDataView& view, const AudioDecoder
 
         // 디코더가 청크 frame 수만큼 정확히 내야 한다.
         if (codecFrame != chunkEnd) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
     }
 

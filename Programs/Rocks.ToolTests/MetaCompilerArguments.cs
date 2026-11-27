@@ -15,6 +15,9 @@ internal static class MetaCompilerArguments
 
     public static string Descriptor(string directory) => Path.Combine(directory, Module + ".rocksmeta.json");
 
+    // Sparks binding schema(Docs/Design/SparksBinding.ko.md B2)는 descriptor 옆이다. 빌드처럼 늘 넘긴다.
+    public static string BindingSchema(string directory) => Path.Combine(directory, Module + ".sparkbind.json");
+
     public static string GeneratedPath(string directory, string include) =>
         Path.Combine(OutputRoot(directory), "Public", include[..^2] + ".generated.h");
 
@@ -37,5 +40,5 @@ internal static class MetaCompilerArguments
     // module은 생성할 모듈 이름이다(Binds 시험은 CoreTypeBindings로 실행한다). descriptor 경로는 모듈과 무관하게 같다.
     public static string[] Single(string directory, string input, string include, string module = Module) =>
         ["--module", module, "--input", input, "--include", include, "--output-root", OutputRoot(directory), "--descriptor", Descriptor(directory),
-            VerifySources, "--jobs", VerifyJobs];
+            "--binding-schema", BindingSchema(directory), VerifySources, "--jobs", VerifyJobs];
 }

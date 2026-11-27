@@ -279,6 +279,12 @@ public sealed record NativeModuleInput
 
     public IReadOnlyList<string> Sources { get; init; } = [];
 
+    // ISPC 원본(.ispc)이다(Docs/Design/BuildTargets 3.12절 BD46). 자동 탐색은 없고 규칙이 명시한 목록만 컴파일한다. 원본마다 object 하나가
+    // 이 모듈의 archive에 들어가고, 생성 헤더 <원본 이름>_ispc.h는 이 모듈의 C++ 번역 단위에만 보인다(<out>/Ispc/<모듈>/ — 비공개).
+    // 같은 basename 둘·Android 대상은 입력 오류다. 사용 예(ThirdParty manifest ispcUnits가 채운다):
+    // IspcSources = [context.PathInRoot("Engine/Source/ThirdParty/IspcTextureCompressor/kernel.ispc")]
+    public IReadOnlyList<string> IspcSources { get; init; } = [];
+
     public IReadOnlyList<string> PublicIncludeDirectories { get; init; } = [];
 
     public IReadOnlyList<string> PrivateIncludeDirectories { get; init; } = [];
@@ -421,6 +427,11 @@ public sealed record NativeModuleInput
     // 3.8절 BD29·BS8c). 켜진 모듈을 직접 의존(두 의존 목록)하는 모듈이 둘 이상이면 입력 오류다(InputValidation): Modular에서 서드파티는
     // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
     public bool HasGlobalState { get; init; }
+
+    // Monolithic 시험 실행 파일이 HasGlobalState 서드파티를 소유 모듈과 함께 직접 소비한다는 표지다(Docs/Design/BuildTargets 3.8절 BD29
+    // 시험 실행 파일 예외 — 개정 38). 실행 파일만 켤 수 있고, LinkType Monolithic에서만 소비 모듈로 세지 않는다(한 이미지라 상태가 한 벌이다).
+    // Modular에서 켜면 입력 오류다(Modular 시험은 그 서드파티를 의존하지 않는다).
+    public bool GlobalStateTestConsumer { get; init; }
 
     // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
@@ -679,6 +690,10 @@ public sealed record NativeBuildRequest
     // 계획 방식이다(Docs/Design/ProjectFiles.ko.md 8.1절). Ide는 IDE 프로젝트 파일 생성용 계획으로, 출력에 아무것도 쓰지 않고 생성물의
     // 존재를 요구하지 않는다. BuildAsync는 받지 않는다(IdePlanner.Plan만 쓴다).
     public NativePlanMode PlanMode { get; init; } = NativePlanMode.Build;
+
+    // ISPC 컴파일러다(Docs/Design/BuildTargets 3.12절 BD45). null이면 빌드 엔진이 ISPC 원본을 가진 모듈이 있을 때만 찾는다
+    // (IspcTools.DiscoverAsync — ROCKS_ISPC, 그다음 기본 위치). 시험은 직접 넣는다. IDE 계획은 쓰지 않는다.
+    public IspcTool? Ispc { get; init; }
 
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;

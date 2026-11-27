@@ -49,7 +49,7 @@
 - 엔진 내장 라이브러리를 만드는 `shader-compile --engine`(셰이더 시스템 12.3절)은 지금 `Engine/Shaders` 원문만 다룬다. 엔진 기본 머티리얼 에셋을 번역해 넣는 경로를 더해야 한다(16절 MSR11). 필요 시 컴파일 형식(`GLES31_PC`)은 RenderBase SX14 셰이더 공급자가 엔진 기본 머티리얼 번역도 맡는다(16절 MRB1).
 - 셰이더 시스템 12.2·12.3절은 "필요한 셰이더가 없으면 `IncompatibleCook`"이다. 머티리얼 셰이더는 그 예외로 위 표의 조합 단위 대체를 쓴다(16절 MSR10). 엔진 셰이더와 엔진 기본 머티리얼은 그 규칙 그대로다.
 
-**엔진 내장 "구운 표면" 머티리얼**(Unreal 교환 UXR4, 2026-11-20). 다른 엔진에서 가져온 머티리얼을 그래프로 번역하지 못했을 때, 그쪽에서 구운 텍스처를 받는 부모 머티리얼이다([Unreal 교환 형식](../UnrealExchange.ko.md) 8.5절 결과 2번). 기본 머티리얼과 달리 대체용이 아니라 보통 머티리얼이며 사용 대상 거르기를 받는다.
+**엔진 내장 "구운 표면" 머티리얼**(Unreal 교환 UXR4, 2026-11-20). 다른 엔진에서 가져온 머티리얼을 그래프로 번역하지 못했을 때, 그쪽에서 구운 텍스처를 받는 부모 머티리얼이다([Unreal 교환 형식](../UnrealExchange/08-Material.ko.md) 8.5절 결과 2번). 기본 머티리얼과 달리 대체용이 아니라 보통 머티리얼이며 사용 대상 거르기를 받는다.
 - 영역 Surface, Opaque와 Masked(블렌드 모드는 static 파라미터), 기본 표면 모델.
 - 텍스처 파라미터: BaseColor, Normal(접선 공간), Metallic, Roughness, Specular, Emissive(HDR), Opacity, OpacityMask, AmbientOcclusion. 스칼라 파라미터: Emissive 배율, OpacityMask 기준값. 비어 있는 텍스처 파라미터는 엔진 기본 텍스처(흰색·평면 법선·검정)를 쓴다.
 - 엔진 콘텐츠 `/Engine` 마운트는 후속이다(AssetSystem 4.2절). 그 전까지는 `UnrealExchange` 플러그인이 자기 콘텐츠로 이 머티리얼을 갖고, `/Engine` 마운트가 생기면 엔진 콘텐츠로 옮긴다.

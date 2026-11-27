@@ -1,7 +1,7 @@
 #include <Mesh/MeshBuildSettings.h>
 #include <Platform/Memory.h>
 
-// 빌드 설정 필드 번호의 이름·상태·기본값 비교다(Docs/Design/MeshAnimationAssets.ko.md 4.1절).
+// 빌드 설정 필드 번호의 이름·상태·기본값 비교다(Docs/Design/MeshAnimationAssets 4.1절).
 namespace rocks {
 
 namespace {

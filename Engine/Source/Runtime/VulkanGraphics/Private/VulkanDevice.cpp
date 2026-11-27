@@ -1,5 +1,6 @@
 #include "VulkanDeviceImpl.h"
 
+#include <GraphicsTypes/CookSampling.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -377,6 +378,16 @@ Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport
     // 능력(GX1)도 켠 기능 기준이다.
     QueryFormatCaps();
     QueryDeviceCaps();
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): 데스크톱은 BC·16비트 unorm·32F 필터,
+    // Android는 ASTC LDR·ETC2를 엔진이 요구한다. 보장 칸의 능력이 없는 장치는 받지 않는다.
+    const PixelFormat lacking = FindMissingCookSampling(Backend::Vulkan, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (lacking != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::Vulkan, HostGraphicsPlatform(),
+                                   lacking);
+        return FailCode("CookSamplingGuarantee", ErrorCode::Unsupported, detail);
+    }
 
     auto shared = CreateSharedObjects(desc);
     if (!shared) {
@@ -916,6 +927,11 @@ uint64 VulkanDevice::ValidationErrorCount() const noexcept {
 usize VulkanDevice::PendingRetireCount() const noexcept {
     platform::LockGuard lock(gate_);
     return retired_.Size();
+}
+
+uint64 VulkanDevice::PresentCount() const noexcept {
+    platform::LockGuard lock(gate_);
+    return presents_;
 }
 
 } // namespace rocks::graphics::vulkan

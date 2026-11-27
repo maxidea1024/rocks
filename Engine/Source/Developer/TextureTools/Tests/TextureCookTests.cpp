@@ -19,9 +19,13 @@
 #include <Object/ObjectRegistryOptions.h>
 #include <Platform/File.h>
 #include <Platform/Memory.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
+#include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureCook.h>
+
+#include <string.h>
 
 // 텍스처 쿠킹 처리기 시험이다(Docs/Design/AssetSystem 12.14절 — 14.1.101절 대조표): 너겟 머리
 // 왕복·손상, 상주 꼬리 R 표·샘플러 필터 표, 차원 다섯의 쿠킹 패키지(EditorOnly 원본 없음·
@@ -30,6 +34,8 @@
 // → Put → 적중·SCC meta·키 변이·verify·손상 적중·Conflict 경고), 빌드 경고, 처리기 등록.
 using namespace rocks;
 namespace texture_cook_tests_file {
+
+using graphics::PixelFormat;
 
 using rocks::asset_database_test::TempProject;
 
@@ -65,6 +71,11 @@ public:
 // 쿠킹 한 번의 출력이다.
 struct CookOut {
     explicit CookOut(Allocator& allocator) noexcept : sink(allocator), warnings(allocator) {
+    }
+
+    // 경고 모음만 다른 Allocator로 둔다(경고 기록 실패 시험).
+    CookOut(Allocator& allocator, Allocator& warningAllocator) noexcept
+        : sink(allocator), warnings(warningAllocator) {
     }
 
     MemoryPackageSink sink;
@@ -145,6 +156,12 @@ struct CookScene {
             value.source.numLayers = 1;
             value.source.bulk = bulk;
             value.srgb = 0;
+            // G8 원본은 Grayscale로 둔다(R8 비압축 — mip byte를 그대로 본다, AssetSystem 12.17.5
+            // 2).
+            if (format == TextureSourceFormat::G8) {
+                value.compressionSettings = TextureCompressionSettings::Grayscale;
+            }
+
             return true;
         });
     }
@@ -177,10 +194,10 @@ struct CookScene {
 
     Result<void> Cook(const TextureCookProcessor& processor, CookOut& out,
                       NuggetCache* nuggets = nullptr, bool verify = false,
-                      PackageSink* sink = nullptr) noexcept {
+                      PackageSink* sink = nullptr, Allocator* scratch = nullptr) noexcept {
         entry.id = asset;
         CookContext context;
-        context.allocator = &allocator;
+        context.allocator = scratch != nullptr ? scratch : &allocator;
         context.registry = editor.Get();
         context.access = EditorAccess();
         context.package = package.Handle();
@@ -543,7 +560,7 @@ TEST(TextureCook_Dimensions) {
         CHECK(data->dimension == item.dimension &&
               data->pixelFormat == static_cast<uint8>(graphics::PixelFormat::R8Unorm) &&
               !data->srgb && data->swizzleG == TextureSwizzle::R &&
-              data->swizzleA == TextureSwizzle::One);
+              data->swizzleA == TextureSwizzle::R);
         CHECK(data->sizeX == item.x && data->sizeY == item.y && data->sizeZ == item.sizeZ &&
               data->numMips == item.numMips && data->numSlices == item.numSlices &&
               data->residentTailMips == item.numMips && data->mips.Size() == item.numMips);
@@ -802,13 +819,11 @@ TEST(TextureCook_SamplerAndNorm16) {
         graphics::PixelFormat supported;
         graphics::PixelFormat fallback;
     };
+    // norm16이 형식을 바꾸는 것은 G16 원본의 Grayscale·Displacementmap뿐이다(UE G16 — 그 밖의
+    // 16비트 원본은 압축하거나 BGRA8로 낸다, 12.17.5 2).
     const Norm16 formats[] = {
         {TextureSourceFormat::G16, 1, graphics::PixelFormat::R16Unorm,
          graphics::PixelFormat::R16Float},
-        {TextureSourceFormat::GA16, 2, graphics::PixelFormat::RG16Unorm,
-         graphics::PixelFormat::RG16Float},
-        {TextureSourceFormat::RGBA16, 4, graphics::PixelFormat::RGBA16Unorm,
-         graphics::PixelFormat::RGBA16Float},
     };
     uint64 id = 20;
     for (const Norm16& item : formats) {
@@ -826,6 +841,7 @@ TEST(TextureCook_SamplerAndNorm16) {
             scene.profile.textureNorm16Supported = norm16;
             REQUIRE(scene.Make(id++, TypeIdOf<Texture2D>(), item.format, 4, 4, 1, pixels.View()));
             REQUIRE(scene.Edit([](Texture& texture) noexcept {
+                texture.compressionSettings = TextureCompressionSettings::Grayscale;
                 texture.powerOfTwoMode = TexturePowerOfTwoSetting::ResizeToSpecificResolution;
                 texture.resizeDuringBuildX = 8;
                 texture.resizeDuringBuildY = 8;
@@ -902,6 +918,10 @@ TEST(TextureCook_FailuresKeepEditorObject) {
         const Array<uint8> pixels = Pattern(scene.allocator, 4 * 4 * 2, 9);
         REQUIRE(
             scene.Make(4, TypeIdOf<Texture2D>(), TextureSourceFormat::G16, 4, 4, 1, pixels.View()));
+        REQUIRE(scene.Edit([](Texture& texture) noexcept {
+            texture.compressionSettings = TextureCompressionSettings::Grayscale;
+            return true;
+        }));
         CookOut windows(scene.allocator);
         REQUIRE(scene.Cook(processor, windows));
         CHECK(scene.EditorUntouched());
@@ -936,6 +956,53 @@ TEST(TextureCook_FailuresKeepEditorObject) {
     }
 }
 
+// 할당 실패 전수(14.1.101 — 빌드 때 더한 것): 쿠킹 문맥 Allocator의 n번째 할당이 실패하면 쿠킹은
+// OutOfMemory(진단 None)이고 에디터 객체는 그대로다. 실패가 없으면(시도가 다 쓰이면) 기준과 같은
+// byte다. 너겟 캐시가 있는 쿠킹(미적중 → Put, 적중 → Get)도 같다.
+TEST(TextureCook_AllocationFailures) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    TextureCookProcessor processor;
+    REQUIRE(scene.MakeGray(1, 64, 32));
+    CookOut reference(scene.allocator);
+    REQUIRE(scene.Cook(processor, reference));
+    const auto sweep = [&](NuggetCache* nuggets) noexcept {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(scene.allocator);
+            failing.FailOnAttempt(attempt);
+            CookOut out(scene.allocator);
+            auto cooked = scene.Cook(processor, out, nuggets, false, nullptr, &failing);
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(cooked);
+                CHECK(out.sink.Bytes().Size() == reference.sink.Bytes().Size() &&
+                      platform::MemoryEquals(out.sink.Bytes().Data(), reference.sink.Bytes().Data(),
+                                             reference.sink.Bytes().Size()));
+                break;
+            }
+
+            if (cooked) {
+                continue;
+            }
+
+            ++failures;
+            CHECK(cooked.Error() == ErrorCode::OutOfMemory &&
+                  out.failure.code == AssetDiagnosticCode::None);
+            CHECK(scene.EditorUntouched());
+        }
+
+        return failures;
+    };
+    CHECK(sweep(nullptr) > 0);
+    NuggetScene nuggets(scene.allocator, "texture-cook-allocation");
+    REQUIRE(nuggets.ready);
+    // 첫 sweep의 성공 시도가 너겟을 Put하므로 둘째 sweep은 적중(Get) 경로다.
+    CHECK(sweep(nuggets.cache.Get()) > 0);
+    CHECK(sweep(nuggets.cache.Get()) > 0);
+}
+
 // 빌드 경고(12.14절 10번): SrgbIgnored(Masks + SRGB)·PreserveBorderWithWrap가 대상 id의 경고로
 // 남고 쿠킹은 성공한다. 너겟 적중이어도 같은 경고다.
 TEST(TextureCook_Warnings) {
@@ -965,6 +1032,46 @@ TEST(TextureCook_Warnings) {
     }
 
     CHECK(processor.Builds() == 1);
+}
+
+// 경고 기록 실패(14.1.119 후속 2번): 경고 모음(호출자 Allocator)의 n번째 할당이 실패하면 쿠킹은
+// OutOfMemory이고 실패 진단은 None이다. 너겟 미적중·적중이 같다. 실패가 없으면 경고 둘이다.
+TEST(TextureCook_WarningAllocationFailures) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-warning-failures");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    const Array<uint8> pixels = Pattern(scene.allocator, 8 * 8 * 4, 2);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 8, 8, 1, pixels.View()));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 1;
+        texture.compressionSettings = TextureCompressionSettings::Masks;
+        texture.preserveBorder = 1;
+        return true;
+    }));
+    for (int round = 0; round < 2; ++round) {
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(scene.allocator);
+            failing.FailOnAttempt(attempt);
+            CookOut out(scene.allocator, failing);
+            auto cooked = scene.Cook(processor, out, nuggets.cache.Get());
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(cooked && out.warnings.Size() == 2);
+                break;
+            }
+
+            ++failures;
+            CHECK(!cooked && cooked.Error() == ErrorCode::OutOfMemory &&
+                  out.failure.code == AssetDiagnosticCode::None);
+        }
+
+        CHECK(failures > 0);
+    }
 }
 
 // 너겟(12.14절 5·6번): 미적중 → Put(SCC meta 구성원 0·ValueId 0..N) → 같은 키 적중(빌드 없음·같은
@@ -1018,7 +1125,8 @@ TEST(TextureCook_Nuggets) {
                                Outside::ProfileId, Outside::Address,     Outside::Norm16};
     for (Outside change : outside) {
         if (change == Outside::ProfileId) {
-            REQUIRE(scene.profile.id.TryAssign("Other"));
+            // 출력이 같은 다른 플랫폼(Mac — 검증 끔 대상의 BC 표가 같다)은 너겟을 같이 쓴다.
+            REQUIRE(scene.profile.id.TryAssign("Mac"));
         } else if (change == Outside::Norm16) {
             // 8비트 원본은 norm16과 무관하다(키 정규화 — Windows·Android가 너겟을 함께 쓴다).
             scene.profile.textureNorm16Supported = false;
@@ -1095,11 +1203,15 @@ TEST(TextureCook_Nuggets) {
         REQUIRE(seen.TryPushBack(processor.LastNuggetKey()));
     }
 
-    // 16비트 원본은 norm16이 출력을 바꾸므로 키가 다르다.
+    // G16 Grayscale은 norm16이 출력을 바꾸므로(R16Unorm·R16Float) 키가 다르다.
     {
         const Array<uint8> pixels = Pattern(scene.allocator, 4 * 4 * 2, 13);
         REQUIRE(
             scene.Make(3, TypeIdOf<Texture2D>(), TextureSourceFormat::G16, 4, 4, 1, pixels.View()));
+        REQUIRE(scene.Edit([](Texture& texture) noexcept {
+            texture.compressionSettings = TextureCompressionSettings::Grayscale;
+            return true;
+        }));
         scene.profile.textureNorm16Supported = true;
         CookOut supported(scene.allocator);
         REQUIRE(scene.Cook(processor, supported, nuggets.cache.Get()));
@@ -1199,8 +1311,160 @@ TEST(TextureCook_Nuggets) {
     }
 }
 
+// 형식 대상(12.17.5 4): 프로필 id의 플랫폼과 graphicsBackends로 형식을 고른다. AutoDXT의 알파
+// 판정은 너겟 적중에서도 같은 형식(머리 형식이 맞는 후보)이고, Android OpenGL은 BGRA8 보장이 없어
+// RGBA8 대체 + PlatformFormatFallback(setting = 바꾸기 전 형식 번호)이다 — 적중·미적중 경고가 같고
+// 키가 Windows와 다르다. 모르는 플랫폼 id·backend 이름은 InvalidSetting이다.
+TEST(TextureCook_FormatTargets) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-targets");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    Array<uint8> pixels = Pattern(scene.allocator, 8 * 8 * 4, 5);
+    for (usize index = 3; index < pixels.Size(); index += 4) {
+        pixels[index] = 255;
+    }
+
+    pixels[3] = 100;
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 8, 8, 1, pixels.View()));
+    const auto cookAndFormat = [&](CookOut& out) noexcept {
+        if (!scene.Cook(processor, out, nuggets.cache.Get())) {
+            return graphics::PixelFormat::Unknown;
+        }
+
+        Loaded loaded;
+        if (!scene.Load(out.sink.Bytes(), loaded)) {
+            return graphics::PixelFormat::Unknown;
+        }
+
+        const Texture* texture = scene.LoadedTexture(loaded);
+        const auto format = texture != nullptr
+                                ? graphics::PixelFormatFromNumber(texture->platformData.pixelFormat)
+                                : Result<graphics::PixelFormat>::Failure(ErrorCode::NotFound);
+        return format ? format.Value() : graphics::PixelFormat::Unknown;
+    };
+    // Windows(검증 끔): 알파가 있어 BC3 — 둘째는 적중(빌드 한 번).
+    for (int round = 0; round < 2; ++round) {
+        CookOut out(scene.allocator);
+        CHECK(cookAndFormat(out) == graphics::PixelFormat::BC3Unorm);
+        CHECK(out.warnings.IsEmpty());
+    }
+
+    CHECK(processor.Builds() == 1);
+    const Sha256Digest windows = processor.LastNuggetKey();
+    // Android OpenGL.
+    REQUIRE(scene.profile.id.TryAssign("Android"));
+    String gl(scene.allocator);
+    REQUIRE(gl.TryAssign("OpenGL"));
+    REQUIRE(scene.profile.graphicsBackends.TryPushBack(Move(gl)));
+    for (int round = 0; round < 2; ++round) {
+        CookOut out(scene.allocator);
+        CHECK(cookAndFormat(out) == graphics::PixelFormat::RGBA8Unorm);
+        bool fallback = false;
+        for (const CookDiagnostic& warning : out.warnings) {
+            fallback = fallback || (warning.code == AssetDiagnosticCode::PlatformFormatFallback &&
+                                    warning.setting == graphics::PixelFormatNumber(
+                                                           graphics::PixelFormat::BGRA8Unorm) &&
+                                    warning.asset == scene.asset);
+        }
+
+        CHECK(fallback && out.warnings.Size() == 1);
+    }
+
+    CHECK(processor.Builds() == 2 && !(processor.LastNuggetKey() == windows));
+    // 모르는 backend 이름·플랫폼 id.
+    REQUIRE(scene.profile.graphicsBackends[0].TryAssign("Glide"));
+    {
+        CookOut out(scene.allocator);
+        CHECK(!scene.Cook(processor, out, nuggets.cache.Get()));
+        CHECK(out.failure.code == AssetDiagnosticCode::InvalidSetting &&
+              out.failure.error == ErrorCode::InvalidArgument);
+    }
+
+    scene.profile.graphicsBackends.Clear();
+    REQUIRE(scene.profile.id.TryAssign("Other"));
+    {
+        CookOut out(scene.allocator);
+        CHECK(!scene.Cook(processor, out, nuggets.cache.Get()));
+        CHECK(out.failure.code == AssetDiagnosticCode::InvalidSetting);
+    }
+
+    REQUIRE(scene.profile.id.TryAssign("Windows"));
+}
+
 // 등록: null state InvalidArgument, Texture 파생 다섯이 이 처리기를 찾고 다른 타입은 fallback이다,
 // 두 번 등록 AlreadyExists.
+// BC6H·BC7 쿠킹(12.17.6 6·9): BC7 알파 원본은 BC7UnormSrgb이고 둘째 쿠킹은 적중(빌드 한 번 — 같은
+// 출력 byte)이다. ForceAlpha를 켜면 키가 바뀐다(알파 판정이 프로필을 바꾼다 — 설정이 키에 있다).
+// HDR_Compressed는 BC6HUfloat이다. ISPC 커널이 없는 대상(Android)은 건너뛴다.
+TEST(TextureCook_IspcFormats) {
+    if (IspcBcEncoderIdentity().IsEmpty()) {
+        return;
+    }
+
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-ispc");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    Array<uint8> pixels = Pattern(scene.allocator, 8 * 8 * 4, 9);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 8, 8, 1, pixels.View()));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 1;
+        texture.compressionSettings = TextureCompressionSettings::BC7;
+        return true;
+    }));
+    const auto cooked = [&](CookOut& out, graphics::PixelFormat& format) noexcept {
+        Loaded loaded;
+        if (!scene.Cook(processor, out, nuggets.cache.Get()) ||
+            !scene.Load(out.sink.Bytes(), loaded)) {
+            return false;
+        }
+
+        const Texture* texture = scene.LoadedTexture(loaded);
+        if (texture == nullptr) {
+            return false;
+        }
+
+        auto number = graphics::PixelFormatFromNumber(texture->platformData.pixelFormat);
+        format = number ? number.Value() : graphics::PixelFormat::Unknown;
+        return true;
+    };
+    CookOut first(scene.allocator);
+    CookOut second(scene.allocator);
+    graphics::PixelFormat format = graphics::PixelFormat::Unknown;
+    REQUIRE(cooked(first, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && first.warnings.IsEmpty());
+    REQUIRE(cooked(second, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && second.warnings.IsEmpty());
+    CHECK(processor.Builds() == 1);
+    CHECK(first.sink.Bytes().Size() == second.sink.Bytes().Size() &&
+          memcmp(first.sink.Bytes().Data(), second.sink.Bytes().Data(),
+                 first.sink.Bytes().Size()) == 0);
+    const Sha256Digest bc7 = processor.LastNuggetKey();
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionForceAlpha = 1;
+        return true;
+    }));
+    CookOut forced(scene.allocator);
+    REQUIRE(cooked(forced, format));
+    CHECK(format == graphics::PixelFormat::BC7UnormSrgb && processor.Builds() == 2 &&
+          !(processor.LastNuggetKey() == bc7));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionForceAlpha = 0;
+        // HDR류는 sRGB를 막으므로(켜 두면 SrgbIgnored 경고) 끈다.
+        texture.srgb = 0;
+        texture.compressionSettings = TextureCompressionSettings::HDR_Compressed;
+        return true;
+    }));
+    CookOut hdr(scene.allocator);
+    REQUIRE(cooked(hdr, format));
+    CHECK(format == graphics::PixelFormat::BC6HUfloat && hdr.warnings.IsEmpty());
+}
+
 TEST(TextureCook_Registration) {
     CookScene scene;
     REQUIRE(scene.ready);

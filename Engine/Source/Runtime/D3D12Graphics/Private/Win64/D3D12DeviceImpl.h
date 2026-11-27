@@ -72,6 +72,16 @@ constexpr uint64 BufferUploadAlignment = 16;
 // 기록 하나가 그리기 때 table을 복사해 넣는 shader-visible descriptor ring의 칸 수다(queue마다,
 // RenderBase 9.11절 5항). 같은 원본 목록은 다시 복사하지 않는다.
 constexpr uint32 OnlineDescriptorsPerQueue = 131'072;
+// 그리기 때 Sampler table을 복사해 넣는 shader-visible sampler ring의 칸 수다(queue마다 — 두 queue
+// 합이 D3D12 shader-visible sampler heap 최대 2048, RenderBase 9.13절 4항).
+constexpr uint32 OnlineSamplersPerQueue = 1024;
+// 단계 Sampler table 원본이 비었음을 나타내는 boundSamplers_ 값이다(텍스처 desc 샘플러를 쓴다).
+constexpr uint32 NoBoundSampler = NumericLimits<uint32>::Max();
+// table 캐시 종류 번호다(D3D12Device::CopyTable).
+constexpr uint32 SrvTableKind = 0;
+constexpr uint32 UavTableKind = 1;
+constexpr uint32 SamplerTableKind = 2;
+constexpr uint32 TableKindCount = 3;
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
 // 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
@@ -259,17 +269,18 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 }
 
 // 단계 하나의 root table 배치다(RenderBase 9.11절 5항). 매개변수 번호가 -1이면 그 table이 없다.
-// srvBindings·uavBindings는 PipelineSlots::bindings 색인이고 table 안 순서다.
+// srvBindings·samplerBindings·uavBindings는 PipelineSlots::bindings 색인이고 table 안 순서다.
 struct RootStageTables {
     ShaderStage stage = ShaderStage::Vertex;
     int32 srvParam = -1;
     uint32 srvCount = 0;
-    uint8 srvBindings[MaxPipelineSlotBindings] = {};
+    uint16 srvBindings[MaxStageTextures + MaxDrawBufferViews] = {};
     int32 samplerParam = -1;
-    uint8 samplerBinding = 0;
+    uint32 samplerCount = 0;
+    uint16 samplerBindings[MaxStageSamplers] = {};
     int32 uavParam = -1;
     uint32 uavCount = 0;
-    uint8 uavBindings[MaxPipelineSlotBindings] = {};
+    uint16 uavBindings[MaxDrawBufferViews] = {};
     // 넘친 CBV table의 range [cbvFirst, cbvFirst + cbvCount)다.
     int32 cbvParam = -1;
     uint32 cbvFirst = 0;
@@ -333,7 +344,7 @@ struct ConstantBufferRecord {
 // queue의 제출 fence로 닫는다.
 struct TransientRings {
     explicit TransientRings(Allocator& allocator) noexcept
-        : constants(allocator), descriptors(allocator) {
+        : constants(allocator), descriptors(allocator), samplers(allocator) {
     }
 
     UploadRingAllocator constants;
@@ -342,6 +353,9 @@ struct TransientRings {
     D3D12_GPU_VIRTUAL_ADDRESS address = 0;
     UploadRingAllocator descriptors;
     uint32 descriptorBase = 0;
+    // Sampler table ring(onlineSamplers_ 안 구간)이다.
+    UploadRingAllocator samplers;
+    uint32 samplerBase = 0;
 };
 
 struct SwapChainRecord {
@@ -354,6 +368,9 @@ struct SwapChainRecord {
     // ResizeBuffers·버퍼 재취득이 실패해 버퍼가 없는 상태다. 다음 Resize가 성공할 때까지
     // BeginFrame은 DependencyFailed다.
     bool broken = false;
+    // present하지 않은 기록이 이 백버퍼에 그렸다(그리는 중인 프레임, SwapChainPassDesc). load
+    // Load는 이때만 받는다.
+    bool frameOpen = false;
 };
 
 // fence 완료 뒤에 해제할 자원과 descriptor다.
@@ -651,6 +668,10 @@ public:
     // 텍스처 mip·plane 하나를 동기로 읽는다(시험·캡처용). ReadPixels와 같은 경로다.
     Result<TextureSubresources>
     GetTextureSubresources(TextureHandle texture) const noexcept override;
+
+    Result<TextureViewInfo> GetTextureViewInfo(TextureHandle texture) noexcept override;
+
+    Result<BufferViewInfo> GetBufferViewInfo(BufferViewHandle view) noexcept override;
     Result<void> ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
 
@@ -658,8 +679,8 @@ public:
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
 
-    Result<CommandContext*> BeginFrame(SwapChainHandle handle,
-                                       const ClearColor& clear) noexcept override;
+    using Device::BeginFrame;
+    Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept override;
 
     Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
 
@@ -750,6 +771,8 @@ public:
     uint64 RejectedCalls() const noexcept override;
 
     usize PendingRetireCount() const noexcept override;
+
+    uint64 PresentCount() const noexcept override;
 
     StringView LastError() const noexcept override;
 
@@ -1011,9 +1034,15 @@ private:
                                                    uint32& bytes) const noexcept;
     // 파이프라인이 읽는 상수 버퍼가 모두 묶였는지다(ConstantBuffersSatisfied).
     bool ConstantsBound(const PipelineRecord& pipeline) const noexcept;
-    // table 하나를 원본 목록(srvs_ 칸)으로 채운다. 바로 앞 같은 목록이면 그 구간을 다시 쓴다.
+    // table 하나를 원본 목록(SRV·UAV는 srvs_ 칸, Sampler는 samplers_ 칸)으로 채운다. 바로 앞 같은
+    // 목록이면 그 구간을 다시 쓴다.
     bool CopyTable(uint32 cacheStage, uint32 cacheKind, const uint32* sources, uint32 count,
                    D3D12_GPU_DESCRIPTOR_HANDLE& gpu) noexcept;
+    // shader-visible sampler ring에서 count칸을 잡는다.
+    bool AllocateOnlineSamplers(uint32 count, D3D12_CPU_DESCRIPTOR_HANDLE& cpu,
+                                D3D12_GPU_DESCRIPTOR_HANDLE& gpu) noexcept;
+    // 단계·slot에 묶인 텍스처 기록이다(없거나 SRV가 없으면 흰 텍스처).
+    const TextureRecord* BoundTexture(uint32 stage, uint32 slot) const noexcept;
 
     // 묶인 파이프라인의 root signature·루트 상수·slot table을 지금 기록에 건다(그리기·dispatch
     // 직전).
@@ -1180,7 +1209,10 @@ private:
 
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
 
-    void SetTexture(TextureHandle handle) noexcept override;
+    void SetTexture(ShaderStage stage, uint32 slot, TextureHandle handle) noexcept override;
+
+    Result<void> SetSampler(ShaderStage stage, uint32 slot,
+                            const SamplerDesc* sampler) noexcept override;
 
     Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
 
@@ -1321,7 +1353,11 @@ private:
     // 마지막으로 신호한 graphics queue fence 값이다.
     uint64 fenceValue_ = 0;
     Target target_;
+    // 지금 기록의 스왑체인(BeginFrame)과 EndFrame이 present할지다.
     SwapChainHandle presentTarget_;
+    bool presentOnEnd_ = false;
+    // EndFrame이 낸 present 수다(PresentCount).
+    uint64 presents_ = 0;
     TextureHandle white_;
     SlotHandle boundPipeline_;
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
@@ -1385,8 +1421,10 @@ private:
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
     TextureHandle boundWriteTextures_[MaxDrawBufferViews];
-    // SetTexture로 묶은 텍스처 기록이다(compute t0·s0를 dispatch 때 건다).
-    SlotHandle boundTexture_;
+    // 단계·텍스처 slot마다 SetTexture로 묶은 텍스처 기록(null이면 흰 텍스처)과 샘플러 slot마다
+    // SetSampler로 준 값의 샘플러 원본 칸(NoBoundSampler면 없음)이다(RenderBase 9.13절).
+    SlotHandle boundTextures_[ConstantBufferStageCount][MaxResourceSlots] = {};
+    uint32 boundSamplers_[ConstantBufferStageCount][MaxResourceSlots] = {};
     uint32 nullBufferUav_ = 0;
     DescriptorPool cpuUavs_;
     uint32 scratchDsv_ = 0;
@@ -1417,6 +1455,9 @@ private:
     TransientRings computeRings_;
     ComRef<ID3D12DescriptorHeap> online_;
     uint32 onlineIncrement_ = 0;
+    // Sampler table ring(queue마다 OnlineSamplersPerQueue칸)이다. samplers_는 CPU 전용 원본이다.
+    ComRef<ID3D12DescriptorHeap> onlineSamplers_;
+    uint32 onlineSamplerIncrement_ = 0;
     D3D12_GPU_VIRTUAL_ADDRESS zeroConstants_ = 0;
     ComRef<ID3D12Resource> debugBuffer_;
     struct BoundConstant {
@@ -1426,15 +1467,15 @@ private:
         uint32 bytes = 0;
     };
     BoundConstant boundConstants_[ConstantBufferStageCount][MaxConstantBufferSlots] = {};
-    // 단계(VS·PS·CS)와 종류(SRV·UAV)마다 바로 앞에 복사한 table 원본 목록과 그 구간이다(기록마다
-    // 비운다).
+    // 단계(VS·PS·CS)와 종류(SRV·UAV·Sampler — TableKind)마다 바로 앞에 복사한 table 원본 목록과 그
+    // 구간이다(기록마다 비운다).
     struct TableCache {
         bool valid = false;
         uint32 count = 0;
-        uint32 sources[MaxPipelineSlotBindings] = {};
+        uint32 sources[MaxStageTextures + MaxDrawBufferViews] = {};
         D3D12_GPU_DESCRIPTOR_HANDLE gpu = {};
     };
-    TableCache tableCache_[ConstantBufferStageCount][2] = {};
+    TableCache tableCache_[ConstantBufferStageCount][TableKindCount] = {};
     // 단계마다 바로 앞에 만든 넘친 CBV table(range 첫 slot·칸 수·주소 목록)과 그 구간이다.
     struct CbvTableCache {
         bool valid = false;

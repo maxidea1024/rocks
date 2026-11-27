@@ -26,12 +26,17 @@ public:
         CreateBuffer,
         CreateTexture,
         CreatePipeline,
+        // 스왑체인 기록 시작이다. value는 SwapChainPassValue(load, present)다.
         BeginFrame,
         BeginOffscreen,
         SetPipeline,
         SetVertexBuffers,
         SetIndexBuffer,
+        // value는 ResourceValue(단계, slot, 묶은 텍스처가 유효하면 1)다.
         SetTexture,
+        // value는 ResourceValue(단계, slot, 준 값이 있으면 1 + 필터 번호, 지우면 0)다. 거부된
+        // 호출은 넣지 않는다.
+        SetSampler,
         // value는 받은 byte 수(위 32 bit)와 첫 float × 255(아래 32 bit)다. 거부된 호출은 넣지
         // 않는다.
         SetDrawConstants,
@@ -91,11 +96,24 @@ public:
         UpdateConstantBuffer,
         RetireConstantBuffer,
         SetConstantBuffer,
-        SetConstantData
+        SetConstantData,
+        // present한 스왑체인 기록의 present다(EndFrame 바로 뒤). value는 스왑체인 slot 번호다.
+        Present
     };
+
+    // Op::BeginFrame의 value다: 아래 bit가 present, 그 위가 load 동작 번호(graphics::LoadAction)다.
+    static constexpr uint64 SwapChainPassValue(graphics::LoadAction load, bool present) noexcept {
+        return (static_cast<uint64>(load) << 1) | (present ? 1u : 0u);
+    }
 
     // Op::SetConstantBuffer·SetConstantData의 value다.
     static constexpr uint64 ConstantValue(graphics::ShaderStage stage, uint32 slot,
+                                          uint32 word) noexcept {
+        return (static_cast<uint64>(stage) << 40) | (static_cast<uint64>(slot) << 32) | word;
+    }
+
+    // Op::SetTexture·SetSampler의 value다.
+    static constexpr uint64 ResourceValue(graphics::ShaderStage stage, uint32 slot,
                                           uint32 word) noexcept {
         return (static_cast<uint64>(stage) << 40) | (static_cast<uint64>(slot) << 32) | word;
     }
@@ -272,6 +290,8 @@ public:
     graphics::DeviceInfo Info() const noexcept override;
     const graphics::DeviceCaps& Caps() const noexcept override;
     uint32 GetPixelFormatSampleCounts(graphics::PixelFormat format) const noexcept override;
+    graphics::PixelFormatCaps
+    GetPixelFormatCaps(graphics::PixelFormat format) const noexcept override;
     Result<graphics::PipelineHandle>
     CreateComputePipeline(const graphics::ComputePipelineDesc& desc) noexcept override;
     Result<graphics::BufferViewHandle>
@@ -287,6 +307,10 @@ public:
                                                 Span<const uint8> initial) noexcept override;
     Result<graphics::TextureSubresources>
     GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
+    Result<graphics::TextureViewInfo>
+    GetTextureViewInfo(graphics::TextureHandle texture) noexcept override;
+    Result<graphics::BufferViewInfo>
+    GetBufferViewInfo(graphics::BufferViewHandle view) noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
     Result<graphics::TransientHeapHandle>
@@ -313,9 +337,11 @@ public:
     // CreatedShaders·RetiredShaders로 센다.
     Result<graphics::ShaderHandle>
     CreateShader(const graphics::ShaderCodeDesc& desc) noexcept override;
+    using graphics::Device::BeginFrame;
+    // 스왑체인마다 그리는 중인 프레임(present하지 않은 기록)을 추적하고 load Load는 그때만 받는다
+    // (실제 backend와 같은 규칙). SetBeginFrameFailure로 실패를 주입한다.
     Result<graphics::CommandContext*>
-    BeginFrame(graphics::SwapChainHandle swapChain,
-               const graphics::ClearColor& clear) noexcept override;
+    BeginFrame(const graphics::SwapChainPassDesc& desc) noexcept override;
     Result<graphics::CommandContext*> BeginPass(const graphics::PassDesc& pass) noexcept override;
     Result<graphics::GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
@@ -384,6 +410,14 @@ public:
     uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+    uint64 PresentCount() const noexcept override;
+
+    // 성공한 BeginFrame이 succeeding번 나온 뒤의 BeginFrame이 error로 실패하게 한다(한 번, 스왑체인
+    // acquire 실패 경로 시험). error가 None이면 끈다. 장치를 쓰기 전에 부른다.
+    void SetBeginFrameFailure(uint32 succeeding, ErrorCode error) noexcept {
+        beginFrameSuccesses_ = succeeding;
+        beginFrameError_ = error;
+    }
 
     // CreateShader를 arrivals번째 호출이 들어올 때까지 붙잡는다(명시 gate — 경쟁하는 생성이 모두
     // 장치 생성까지 간 뒤에 게시하게 한다). 0이면 끈다.
@@ -408,6 +442,23 @@ public:
         caps_.limits.computeGroupCount[0] = x;
         caps_.limits.computeGroupCount[1] = y;
         caps_.limits.computeGroupCount[2] = z;
+    }
+
+    // 장치 능력을 바꾼다(쿠킹 형식 선택의 한도·장치 요구 시험). 장치를 쓰기 전에 고친다.
+    graphics::DeviceCaps& MutableCaps() noexcept {
+        return caps_;
+    }
+
+    // 모든 형식의 능력(GetPixelFormatCaps)을 caps로 둔다(쿠킹 텍스처 업로드 시험 — 기본은 None).
+    // 장치를 쓰기 전에 부른다.
+    void SetPixelFormatCaps(graphics::PixelFormatCaps caps) noexcept {
+        pixelFormatCaps_ = caps;
+    }
+
+    // None이 아니면 CreateTexture가 이 오류로 실패한다(장치 생성 실패 경로 시험). 장치를 쓰기 전에
+    // 부른다.
+    void SetCreateTextureError(ErrorCode error) noexcept {
+        createTextureError_ = error;
     }
 
     // 살아 있는 버퍼 view 수다(그래프가 view를 모두 Retire했는지).
@@ -457,6 +508,10 @@ private:
     struct BufferViewState {
         SlotHandle buffer;
         graphics::ViewAccess access = graphics::ViewAccess::Read;
+        // GetBufferViewInfo 값이다(종류·typed 값 계열·구조화 원소 byte).
+        graphics::BufferViewKind kind = graphics::BufferViewKind::Typed;
+        graphics::PixelShaderType shaderType = graphics::PixelShaderType::None;
+        uint32 stride = 0;
     };
 
     // 상수 버퍼 하나다(내용은 첫 32 bit만 기억한다).
@@ -481,6 +536,10 @@ private:
         SlotHandle source;
         graphics::ResolvedSubresourceRange range;
         graphics::ViewAccess access = graphics::ViewAccess::Read;
+        // GetTextureViewInfo 값이다(view는 view 차원·형식, 표본 수·비교 여부는 원 텍스처).
+        graphics::PixelFormat format = graphics::PixelFormat::Unknown;
+        uint32 sampleCount = 1;
+        bool comparison = false;
     };
 
     // view가 묶이는 원 텍스처 범위의 상태가 모두 allowed 가운데 하나인지 본다(아니면 검증 오류).
@@ -536,7 +595,10 @@ private:
                           Span<const graphics::VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
                         uint64 offset) noexcept override;
-    void SetTexture(graphics::TextureHandle texture) noexcept override;
+    void SetTexture(graphics::ShaderStage stage, uint32 slot,
+                    graphics::TextureHandle texture) noexcept override;
+    Result<void> SetSampler(graphics::ShaderStage stage, uint32 slot,
+                            const graphics::SamplerDesc* sampler) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     void SetConstantBuffer(graphics::ShaderStage stage, uint32 slot,
                            graphics::ConstantBufferHandle buffer) noexcept override;
@@ -584,6 +646,15 @@ private:
     graphics::FenceTimeline timeline_;
     graphics::FenceTimeline computeTimeline_;
     graphics::DeviceCaps caps_;
+    graphics::PixelFormatCaps pixelFormatCaps_ = graphics::PixelFormatCaps::None;
+    ErrorCode createTextureError_ = ErrorCode::None;
+    // BeginFrame 실패 주입이다(SetBeginFrameFailure).
+    uint32 beginFrameSuccesses_ = 0;
+    ErrorCode beginFrameError_ = ErrorCode::None;
+    // 지금 기록의 스왑체인과 EndFrame이 present할지, 낸 present 수다.
+    graphics::SwapChainHandle frameSwapChain_;
+    bool presentOnEnd_ = false;
+    uint64 presents_ = 0;
     uint64 computeFenceValue_ = 0;
     // 지금 기록의 queue다.
     graphics::QueueKind recordingQueue_ = graphics::QueueKind::Graphics;
@@ -596,6 +667,8 @@ private:
     Array<PlacedState> placedBuffers_;
     graphics::DeviceOwnership ownership_;
     SlotArray<graphics::ResourceAccess> buffers_;
+    // 버퍼 slot 번호마다 BufferDesc::stride다(구조화 view의 GetBufferViewInfo).
+    Array<uint32> bufferStrides_;
     Allocator& allocator_;
     SlotArray<TextureState> textures_;
     Array<TransitionCall> transitions_;
@@ -614,6 +687,7 @@ private:
     SlotArray<uint32> pipelines_;
     // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).
     graphics::PipelineHandle boundPipeline_;
+    // 스왑체인마다 그리는 중인 프레임이 있으면 1이다(SwapChainPassDesc 규칙).
     SlotArray<uint8> swapChains_;
     // 장치 셰이더(단계)다. shaderGate_가 지킨다.
     platform::Mutex shaderGate_;

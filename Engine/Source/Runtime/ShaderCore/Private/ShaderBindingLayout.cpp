@@ -7,7 +7,7 @@
 #include <Core/Encoding/ByteWriter.h>
 #include <ShaderCore/ShaderParameterLayout.h>
 
-// 셰이더 바인딩 layout v3(Docs/Design/ShaderSystem 7.2절 3항, 12.2.1절 SSD26)이다. byte 형식과
+// 셰이더 바인딩 layout v5(Docs/Design/ShaderSystem 7.2절 3항, 12.2.1절 SSD26)이다. byte 형식과
 // 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
@@ -107,6 +107,10 @@ const char* CheckLayout(const ShaderBindingLayout& layout) noexcept {
         return "binding layout root constants must be a multiple of 16 bytes of at most 128";
     }
 
+    if (layout.rootConstantBytes == 0 && layout.rootConstantStructId != 0) {
+        return "binding layout root constant identity needs root constants";
+    }
+
     if ((layout.attributeMask & ~AttributeBits) != 0 ||
         (layout.attributeMask != 0 && layout.stage != ShaderStageVertex)) {
         return "binding layout attribute mask is only for vertex shaders (ATTRIBUTE0-15)";
@@ -167,8 +171,14 @@ const char* CheckLayout(const ShaderBindingLayout& layout) noexcept {
             if (resource.memberCount > MaxShaderBindingMembers) {
                 return "binding layout constant buffer has more than 256 members";
             }
+
+            if (resource.memberOffset != NoShaderParameterMember) {
+                return "binding layout constant buffers have no parameter struct member offset";
+            }
         } else if (resource.constantBufferBytes != 0 || resource.memberCount != 0) {
             return "binding layout size and members are only for constant buffers";
+        } else if ((resource.structId == 0) != (resource.memberOffset == NoShaderParameterMember)) {
+            return "binding layout resource struct identity and member offset come together";
         }
 
         if (static_cast<uint32>(resource.samplerSource) >= ShaderSamplerSourceCount ||
@@ -275,6 +285,7 @@ Result<void> EncodeShaderBindingLayout(const ShaderBindingLayout& layout,
     writer.WriteU32LE(ShaderBindingLayoutVersion);
     writer.WriteU32LE(layout.stage);
     writer.WriteU32LE(layout.rootConstantBytes);
+    writer.WriteU64LE(layout.rootConstantStructId);
     writer.WriteU32LE(layout.attributeMask);
     writer.WriteU32LE(layout.attributeIntMask);
     writer.WriteU32LE(layout.attributeUintMask);
@@ -286,6 +297,8 @@ Result<void> EncodeShaderBindingLayout(const ShaderBindingLayout& layout,
         writer.WriteU16LE(resource.slot);
         WriteName(writer, resource.name);
         writer.WriteU32LE(resource.constantBufferBytes);
+        writer.WriteU64LE(resource.structId);
+        writer.WriteU32LE(resource.memberOffset);
         writer.WriteU8(static_cast<uint8>(resource.samplerSource));
         writer.WriteU8(resource.sharedSampler ? 1 : 0);
         writer.WriteU8(static_cast<uint8>(resource.shape));
@@ -319,11 +332,12 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
     }
 
     if (version != ShaderBindingLayoutVersion) {
-        return ShaderReadStatus::Unsupported("binding layout version is not 3");
+        return ShaderReadStatus::Unsupported("binding layout version is not 5");
     }
 
     out.stage = reader.ReadU32LE();
     out.rootConstantBytes = reader.ReadU32LE();
+    out.rootConstantStructId = reader.ReadU64LE();
     out.attributeMask = reader.ReadU32LE();
     out.attributeIntMask = reader.ReadU32LE();
     out.attributeUintMask = reader.ReadU32LE();
@@ -344,6 +358,8 @@ ShaderReadStatus DecodeShaderBindingLayout(Span<const uint8> bytes,
         resource.slot = reader.ReadU16LE();
         resource.name = ReadName(reader);
         resource.constantBufferBytes = reader.ReadU32LE();
+        resource.structId = reader.ReadU64LE();
+        resource.memberOffset = reader.ReadU32LE();
         const uint8 source = reader.ReadU8();
         const uint8 shared = reader.ReadU8();
         resource.shape = static_cast<ShaderResourceShape>(reader.ReadU8());

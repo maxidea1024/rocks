@@ -71,6 +71,8 @@ class StatefulComponent final : public Component {
     ROCKS_NATIVE_TYPE(StatefulComponent, Component, 0x91c7e3a05d2b4f86ull, 0x5b0f8d2e7a1c4639ull)
 
 public:
+    using Component::Component;
+
     Result<void> OnAwake() noexcept override {
         Record("awake");
         return Result<void>::Success();
@@ -96,6 +98,9 @@ public:
     static inline bool pingPong = false;
     static inline int32 failKind = -1;
     static inline uint32 failOnCreateCount = 0;
+    // Create 안에서 같은 종류를 즉시 다시 만들어 본다(재진입 — Busy여야 한다).
+    static inline bool recreateInside = false;
+    static inline ErrorCode insideError = ErrorCode::None;
 
 protected:
     Result<void> OnRegister() noexcept override {
@@ -114,6 +119,10 @@ protected:
 
     Result<void> CreateSystemState(SystemStateKind kind) noexcept override {
         Record(StateEvent(true, kind));
+        if (recreateInside) {
+            auto inside = RecreateSystemStateNow(kind);
+            insideError = inside ? ErrorCode::None : inside.Error();
+        }
         // 다시 만들기 중 다른 종류를 표시한다(Render ↔ Physics 순환 — 처리 중 표시는 다음 지점).
         if (pingPong && IsRegistered()) {
             const SystemStateKind other = kind == SystemStateKind::Render ? SystemStateKind::Physics
@@ -143,6 +152,8 @@ class UniqueComponent : public Component {
     ROCKS_NATIVE_TYPE(UniqueComponent, Component, 0x2e7b4c19a0d6f853ull, 0xd94f1a63c0b8e725ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         ComponentTypeRules rules;
         rules.unique = true;
@@ -157,12 +168,17 @@ public:
 
 class DerivedUnique final : public UniqueComponent {
     ROCKS_NATIVE_TYPE(DerivedUnique, UniqueComponent, 0x7c0a5e2d9b14f368ull, 0x16e9b4d8f2a07c53ull)
+
+public:
+    using UniqueComponent::UniqueComponent;
 };
 
 class NeedsScene final : public Component {
     ROCKS_NATIVE_TYPE(NeedsScene, Component, 0xb3f61d8e2a5c0974ull, 0x48a2e0c7f19d5b36ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         static const TypeId needs[] = {ObjectTypeIdOf<SceneComponent>()};
         ComponentTypeRules rules;
@@ -175,6 +191,8 @@ class Blocker final : public Component {
     ROCKS_NATIVE_TYPE(Blocker, Component, 0x0d8e3b6f1c92a475ull, 0xe57c2a9d4b16f083ull)
 
 public:
+    using Component::Component;
+
     ComponentTypeRules TypeRules() const noexcept override {
         static const TypeId blocked[] = {ObjectTypeIdOf<NeedsScene>()};
         ComponentTypeRules rules;
@@ -202,6 +220,8 @@ class EditorMarker final : public Component {
     ROCKS_NATIVE_TYPE(EditorMarker, Component, 0x5f19c0e84a7d2b36ull, 0x9b2d6e0f3c48a517ull)
 
 public:
+    using Component::Component;
+
     bool IsEditorOnly() const noexcept override {
         return true;
     }
@@ -228,6 +248,8 @@ struct Fixture {
         StatefulComponent::pingPong = false;
         StatefulComponent::failKind = -1;
         StatefulComponent::failOnCreateCount = 0;
+        StatefulComponent::recreateInside = false;
+        StatefulComponent::insideError = ErrorCode::None;
     }
 
     ~Fixture() {
@@ -365,6 +387,118 @@ TEST(ComponentFoundation_MarkSystemStateDirtyRecreatesOncePerFrame) {
     REQUIRE(fixture.Frame());
     const char* const destroyed[] = {"disable", "destroy", "destroy:Render", "unregister"};
     CHECK(EventsAre(destroyed));
+    REQUIRE(world.Shutdown());
+}
+
+// 23.2절 즉시 다시 만들기: 그 자리에서 Destroy → (원하면) Create, 없던 상태도 만들고 원하지 않으면
+// 지우기만 한다. 대기 표시는 지워져 갱신 지점에서 두 번 하지 않는다. 실패는 그 종류 없이 오류,
+// 같은 종류 재진입은 Busy, 범위 밖은 InvalidArgument, 파괴 대기는 아무 일 없음.
+TEST(ComponentFoundation_RecreateSystemStateNow) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActor<EmptyActor>();
+    REQUIRE(actor);
+    auto component = world.AddComponent<StatefulComponent>(actor.Value());
+    REQUIRE(component);
+    REQUIRE(fixture.Frame());
+    auto recreate = [&](SystemStateKind kind) noexcept {
+        return world.With<Component>(component.Value(), [kind](Component& value) noexcept {
+            return value.RecreateSystemStateNow(kind);
+        });
+    };
+    auto mark = [&](SystemStateKind kind) noexcept {
+        return world.With<Component>(component.Value(), [kind](Component& value) noexcept {
+            return value.MarkSystemStateDirty(kind);
+        });
+    };
+    auto has = [&](SystemStateKind kind) noexcept {
+        auto read = world.With<Component>(component.Value(), [kind](Component& value) noexcept {
+            return value.HasSystemState(kind);
+        });
+        return read && read.Value();
+    };
+
+    // 표시한 뒤 즉시 다시 만들면 그 자리에서 한 번, 갱신 지점에서는 다시 하지 않는다.
+    ResetEvents();
+    REQUIRE(mark(SystemStateKind::Render));
+    REQUIRE(recreate(SystemStateKind::Render));
+    const char* const now[] = {"destroy:Render", "create:Render"};
+    CHECK(EventsAre(now));
+    REQUIRE(fixture.Frame());
+    CHECK(EventsAre(now));
+    // 목록 표시는 따로라 다음 표시도 한 번만 처리한다.
+    ResetEvents();
+    REQUIRE(mark(SystemStateKind::Render));
+    REQUIRE(mark(SystemStateKind::Render));
+    REQUIRE(fixture.Frame());
+    CHECK(EventsAre(now));
+
+    // 원하게 되면 없던 상태를 만들고, 원하지 않게 되면 지우기만 한다.
+    ResetEvents();
+    StatefulComponent::wantPhysics = true;
+    REQUIRE(recreate(SystemStateKind::Physics));
+    CHECK(has(SystemStateKind::Physics));
+    StatefulComponent::wantPhysics = false;
+    REQUIRE(recreate(SystemStateKind::Physics));
+    CHECK(!has(SystemStateKind::Physics));
+    const char* const physics[] = {"create:Physics", "destroy:Physics"};
+    CHECK(EventsAre(physics));
+
+    // 실패: 그 종류 없이 오류.
+    StatefulComponent::failKind = static_cast<int32>(SystemStateKind::Audio);
+    auto failed = recreate(SystemStateKind::Audio);
+    CHECK(!failed && failed.Error() == ErrorCode::DependencyFailed);
+    CHECK(!has(SystemStateKind::Audio));
+    StatefulComponent::failKind = -1;
+    REQUIRE(recreate(SystemStateKind::Audio));
+    CHECK(has(SystemStateKind::Audio));
+
+    // 재진입: Create 안의 같은 종류는 Busy, 바깥은 성공.
+    StatefulComponent::recreateInside = true;
+    REQUIRE(recreate(SystemStateKind::Render));
+    StatefulComponent::recreateInside = false;
+    CHECK(StatefulComponent::insideError == ErrorCode::Busy);
+    CHECK(has(SystemStateKind::Render));
+
+    // 갱신 지점의 Create 안에서 같은 종류도 Busy다(이중 생성 없음).
+    ResetEvents();
+    REQUIRE(mark(SystemStateKind::Render));
+    StatefulComponent::recreateInside = true;
+    StatefulComponent::insideError = ErrorCode::None;
+    REQUIRE(fixture.Frame());
+    StatefulComponent::recreateInside = false;
+    CHECK(StatefulComponent::insideError == ErrorCode::Busy);
+    CHECK(EventsAre(now));
+
+    // 표시 → 즉시 다시 만들기(비트 0) → 같은 프레임 다시 표시: 목록에는 한 번이라, 처리 중 hook이
+    // 남긴 표시(pingPong)는 그 지점에서 다시 처리되지 않는다.
+    StatefulComponent::wantPhysics = true;
+    REQUIRE(recreate(SystemStateKind::Physics));
+    StatefulComponent::pingPong = true;
+    REQUIRE(mark(SystemStateKind::Render));
+    REQUIRE(recreate(SystemStateKind::Render));
+    REQUIRE(mark(SystemStateKind::Render));
+    ResetEvents();
+    REQUIRE(fixture.Frame());
+    const char* const onePass[] = {"destroy:Render", "create:Render", "destroy:Physics",
+                                   "create:Physics"};
+    CHECK(EventsAre(onePass));
+    StatefulComponent::pingPong = false;
+    REQUIRE(fixture.Frame());
+    REQUIRE(fixture.Frame());
+    StatefulComponent::wantPhysics = false;
+    REQUIRE(recreate(SystemStateKind::Physics));
+    CHECK(recreate(SystemStateKind::Count).Error() == ErrorCode::InvalidArgument);
+
+    // 파괴 대기면 아무 일도 없다.
+    REQUIRE(world.DestroyComponent(component.Value()));
+    ResetEvents();
+    auto pending = recreate(SystemStateKind::Render);
+    CHECK(pending);
+    CHECK(eventCount == 0);
     REQUIRE(world.Shutdown());
 }
 

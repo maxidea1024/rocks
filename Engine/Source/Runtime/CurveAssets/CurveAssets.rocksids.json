@@ -1,0 +1,418 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::a",
+      "id": "14303302625c4a248128e2479a37619f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustBrightness",
+      "id": "aa70223b18fa4cd7b2233f1c0d078090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustBrightnessCurve",
+      "id": "e51a0d8f29914d00986edcf88be3fdff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustHue",
+      "id": "4f7bd221e83c4164b60d8f2c8d27765c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustMaxAlpha",
+      "id": "cb48c52b9389443b9a8836c7f51fe02e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustMinAlpha",
+      "id": "35e5611f420e486ab5ba1f1003f06403",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustSaturation",
+      "id": "b756ea16fc36411395cf6515a42c0c22",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::adjustVibrance",
+      "id": "1a60faf703c640308274c9cda79494de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::b",
+      "id": "ae2a30f20b4645dfa5f7c10c7a4cd762",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::g",
+      "id": "bc46d8841bb34954bfeacd26b117bddb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAsset::r",
+      "id": "4db3e5af63b94555814aea1168337fca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveSource::a",
+      "id": "74b6612b68f447b68195012efd3d921a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveSource::asset",
+      "id": "d27ec32acbac42f08e82fa24912b7f91",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveSource::b",
+      "id": "ed4965b8f70c421a8dc4eb2bf4169658",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveSource::g",
+      "id": "e8f58cbb2ef249cfb6ab9fa28428dfc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveSource::r",
+      "id": "0c7f3da45cbb4c3a9b90671d24b99b90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::a",
+      "id": "e831dc0b72f147b3b92afad21f259083",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustBrightness",
+      "id": "751c5764e4d5416497dbaaea750a36b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustBrightnessCurve",
+      "id": "8014e6aa126a4d8189aa7dc8add427b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustHue",
+      "id": "25794c34814b4487a0291fc1c499236c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustMaxAlpha",
+      "id": "3a8133952d1041ea8efa2bfb9bb7eafc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustMinAlpha",
+      "id": "6924e06981364ab8871c5a0b037d0de1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustSaturation",
+      "id": "c084330826034368ab196179ebde8fae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjustVibrance",
+      "id": "44d000aa05b645b3806636440b7a3e2d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::adjusted",
+      "id": "edb5b64b761746d4b633b532bae4232e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::b",
+      "id": "cee31738fbee442787a1ad424ea784d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::g",
+      "id": "54aafcb385854efdb6c7a5dd00022fcb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveValue::r",
+      "id": "053af18dafe14458bee6c7bbdfd8e0e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableAsset::mode",
+      "id": "cf4ad230fa2441ab8edc89e220be3b37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableAsset::plainRows",
+      "id": "8211ef4b325c4d9b95f1282bab1e20c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableAsset::tangentRows",
+      "id": "50c98e01f3044141bb485a831a66fc93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableImportOptions::interp",
+      "id": "db9ff5c1b8d943db8bf83de2e53420bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableRowRef::row",
+      "id": "a59e5b093f1b4b9bbe850b1a1eb89b61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableRowRef::table",
+      "id": "0ce165d775434894a763ee7d1bdd33cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::FloatCurveAsset::curve",
+      "id": "0710b8cee63e401c915f05c1e7179046",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::FloatCurveAsset::eventCurve",
+      "id": "477fa85eb1bf400caa731421a856ce51",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::FloatCurveSource::asset",
+      "id": "ea25b66702a948d19ef8001a787307d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::FloatCurveSource::curve",
+      "id": "06169c01c701413caa9bb379b367b37e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveAsset::x",
+      "id": "da81c459cf5d488e99bf7d5f411a0c6a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveAsset::y",
+      "id": "c9b6b768b42d45c48f562b39e3bd8864",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveAsset::z",
+      "id": "b06ba6d0f3624f878b9d1de337c2dd1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveSource::asset",
+      "id": "a13e42ca5d6349689a0d3b655c70e68f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveSource::curves",
+      "id": "77c5b5afe9a94bb1973601180075fef1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveValue::x",
+      "id": "8cac88a5e6c24dc88ade14662ce9d9a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveValue::y",
+      "id": "41f7c584f90346bea54fcf373d40439f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VectorCurveValue::z",
+      "id": "62b07198f3c94122956ed2298af7dbe6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ColorCurveAsset",
+      "id": "06a5934ca0454a56bdf45580e319f960",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ColorCurveSource",
+      "id": "40921986ea7f446795a920b322b58c33",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ColorCurveValue",
+      "id": "a0356a960a1f4df8a808f90b92b59229",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveAsset",
+      "id": "62fcc99e2eb94b0ca7ff27285a192940",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableAsset",
+      "id": "b481fd3bd9ab4befa811750d8963036e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableImportOptions",
+      "id": "acc52f738fc64d2b8aa84352136bf194",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableMode",
+      "id": "a7fe602c5eba410184bea3d5b72f7004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableRowRef",
+      "id": "f0a4fb69908345a2966ef9fd0126f2ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::FloatCurveAsset",
+      "id": "3470b177edcc4c81a336b645af6e4595",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::FloatCurveSource",
+      "id": "3ae3eb89801847e886812bffcd9be45f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VectorCurveAsset",
+      "id": "0fde40d7336c41e2b7cca61a4ae0c17b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VectorCurveSource",
+      "id": "4322dc6ed27a481d89a585e5c62722ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VectorCurveValue",
+      "id": "95f56d9ef08343cd85b67f14bbb484e0",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

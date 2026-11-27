@@ -82,8 +82,8 @@ struct ImageDecodeWarning {
     uint32 detail = 0;
 };
 
-// 실패의 분류다: 구조·길이·CRC·체크섬 위반 InvalidSource/InvalidArgument, 받지 않는 변형
-// UnsupportedSourceFormat/Unsupported, 손실 형식 LossySource/Unsupported, 한도
+// 실패의 분류다: 구조·길이·CRC·체크섬 위반 InvalidSource/CorruptData(AssetSystem 19장), 받지 않는
+// 변형 UnsupportedSourceFormat/Unsupported, 손실 형식 LossySource/Unsupported, 한도
 // InvalidSource/CapacityExceeded, 할당 실패 None/OutOfMemory. offset은 판정한 byte 위치(진단용)다.
 struct ImageDecodeFailure {
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
@@ -124,7 +124,7 @@ inline constexpr usize ImagePeekBytes = 148;
 // 선택, UE는 DDS 차원으로 텍스처 클래스를 고른다). file은 파일 앞 ImagePeekBytes byte면 충분하다
 // (더 짧은 파일은 전부). DDS(서명 "DDS ")면 머리의 차원(DecodeImage의 dimension과 같은 규칙 — 크기·
 // 형식·한도는 보지 않는다), 그 밖은 Texture2D다(판별·디코딩은 DecodeImage가 한다). 오류: DDS 머리가
-// 짧거나 resource dimension이 범위 밖이면 InvalidArgument(failure — InvalidSource, offset).
+// 짧거나 resource dimension이 범위 밖이면 CorruptData(failure — InvalidSource, offset).
 ROCKS_IMAGECODEC_API Result<TextureDimension>
 PeekImageDimension(Span<const uint8> file, ImageDecodeFailure* failure = nullptr) noexcept;
 

@@ -12,6 +12,8 @@
 #include <Platform/Sync.h>
 #include <RenderBase/BuiltinResources.h>
 #include <RenderBase/ShaderSet.h>
+#include <RenderBase/ShaderSetSlot.h>
+#include <RenderBase/SharedConstantSlotTable.h>
 #include <ShaderCore/ShaderLibrary.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 
@@ -22,7 +24,7 @@
 //   대응 — 공급자만 읽는다), 공급자 자리(SX14), 쿠킹 라이브러리 원천 자리를 가진다.
 // - EngineRenderResources: 렌더 lane 시작 단계에서 엔진 셰이더 집합과 내장 자원 팩을 연다.
 // - CookedShaderLibrarySource: 쿠킹 라이브러리(매니페스트 v2·.rshl) 원천 interface다. 구현은
-//   에셋 쪽이 붙인다(지금은 없다 — 모든 형식이 공급자 경로다).
+//   CookedManifestShaderLibraries(RenderBase/CookedManifestShaderLibraries.h)다.
 //
 // 사용 예(엔진 호스트):
 //   render::EngineShaderHost shaders(allocator);
@@ -58,13 +60,28 @@ struct ShaderSourceDirectory {
     StringView directory;
 };
 
-// 쿠킹 라이브러리 원천이다(9.12절 3항). 호스트가 AttachCookedLibraries로 붙인다.
+// 쿠킹 라이브러리 원천이다(9.12절 3항, ShaderSystem 16.1절 SSD47). 호스트가 AttachCookedLibraries로
+// 붙인다. 구현은 매니페스트 v2를 읽는 CookedManifestShaderLibraries다(시험은 가짜 원천).
+// EngineRenderResources::Open이 SelectCookedShaderFormat으로 장치 형식을 고를 때 쓴다. 모든 호출은
+// 렌더 lane 스레드(또는 장치 소유 스레드) 하나에서 차례로 온다.
 class CookedShaderLibrarySource {
 public:
-    // formatId·library의 라이브러리 byte를 out에 담는다. 그 형식이 없으면 NotFound(공급자 경로로
-    // 넘어간다), 읽기 실패는 그 오류다. 렌더 lane 스레드에서 불린다.
+    // 쿠킹한 backend 순서(매니페스트 머리 graphicsBackends)다. 빈 목록이면 셰이더 없는 쿠킹이다.
+    // 원천이 사는 동안 유효하다.
+    virtual Span<const graphics::Backend> Backends() const noexcept = 0;
+
+    // backend의 선호 순서 형식 id(매니페스트 머리 shaderFormats)다. 쿠킹에 그 backend가 없으면 빈
+    // 목록이다. 원천이 사는 동안 유효하다.
+    virtual Span<const StringView> Formats(graphics::Backend backend) const noexcept = 0;
+
+    // formatId·library의 라이브러리 byte를 out에 담는다. 그 항목이 없으면 NotFound(형식 선택이 다음
+    // 형식으로 넘어간다), 크기·SHA-256 불일치·파일 없음은 손상(InvalidArgument — Problem에
+    // CorruptPackage 설명), 읽기 실패는 그 오류다.
     virtual Result<void> ReadLibrary(StringView formatId, shader::ShaderLibraryKind library,
                                      Array<uint8>& out) noexcept = 0;
+
+    // 마지막 ReadLibrary 실패의 영어 설명이다(없으면 빈 값). 다음 ReadLibrary까지 유효하다.
+    virtual StringView Problem() const noexcept = 0;
 
 protected:
     ~CookedShaderLibrarySource() = default;
@@ -97,6 +114,16 @@ public:
 
     const shader::ShaderTypeRegistry& Registry() const noexcept {
         return registry_;
+    }
+
+    // 공유 상수 slot 표다(Docs/Design/RenderBase 9.14절 1항). 등록은 Freeze 전 로더 스레드에서 하고
+    // Freeze가 함께 닫는다(늦은 등록은 ScopeClosed). 렌더러 slot 등록은 RS0이다.
+    SharedConstantSlotTable& SharedConstantSlots() noexcept {
+        return sharedConstantSlots_;
+    }
+
+    const SharedConstantSlotTable& SharedConstantSlots() const noexcept {
+        return sharedConstantSlots_;
     }
 
     // 원문 디렉터리를 더한다(문자열은 복사한다). 오류: Freeze 뒤 ScopeClosed, 가상 루트가
@@ -143,6 +170,7 @@ private:
 
     Allocator& allocator_;
     shader::ShaderTypeRegistry registry_;
+    SharedConstantSlotTable sharedConstantSlots_;
     // 문자열 저장소는 항목마다 따로 할당해 표가 커져도 directories_의 view가 그대로다.
     Array<UniquePtr<DirectoryStorage>> storage_;
     Array<ShaderSourceDirectory> directories_;
@@ -163,16 +191,19 @@ ROCKS_RENDERBASE_API StringView EngineShaderFormat(graphics::Backend backend) no
 class ROCKS_RENDERBASE_API EngineRenderResources final {
 public:
     explicit EngineRenderResources(Allocator& allocator) noexcept;
-    // 집합을 파괴한다(Retire하지 않는다 — 주인이 종료 단계에서 Retire한다).
+    // 남은 집합을 파괴한다(Retire하지 않는다 — 주인이 종료 단계에서 Retire한다).
     ~EngineRenderResources() noexcept;
     EngineRenderResources(const EngineRenderResources&) = delete;
     EngineRenderResources& operator=(const EngineRenderResources&) = delete;
 
-    // 엔진 셰이더 집합(쿠킹 원천 → 공급자)을 열고 검사한 뒤 내장 자원 팩을 만든다. host와 device는
-    // Retire까지 산다. 실패: 등록부가 Freeze되지 않음 NotReady, 형식 없음 Unsupported, 이미 엶
-    // Busy, 공급자 없음 UnsupportedCapability, 집합 검사·공급 실패 DependencyFailed, 쿠킹 원천의
-    // 읽기 오류, 팩 생성 오류(빠진 fallback 셰이더 NotFound). 실패는 Error 로그를 남기고 Problem에
-    // 영어 설명을 둔다. 실패하면 만든 것을 Retire한다.
+    // 엔진 셰이더 집합을 열고 검사한 뒤 내장 자원 팩을 만든다. host와 device는 Retire까지 산다.
+    // 쿠킹 원천이 붙어 있으면 SelectCookedShaderFormat(매니페스트 backend·형식 순서, 상한·장치
+    // 요구)으로 고른 형식의 라이브러리를 열고, 장치 backend가 쿠킹에 없으면(NotFound) 고정 표
+    // 형식(EngineShaderFormat)으로 공급자에 간다(ShaderSystem SSD16). 실패: 등록부가 Freeze되지
+    // 않음 NotReady, 형식 없음·셰이더 없는 쿠킹·맞는 쿠킹 형식 없음 Unsupported, 이미 엶 Busy,
+    // 공급자 없음 UnsupportedCapability, 집합 검사·공급 실패 DependencyFailed, 쿠킹 원천의 손상
+    // (InvalidArgument)·읽기 오류, 팩 생성 오류(빠진 fallback 셰이더 NotFound). 실패는 Error 로그를
+    // 남기고 Problem에 영어 설명을 둔다. 실패하면 만든 것을 Retire한다.
     Result<void> Open(graphics::Device& device, const EngineShaderHost& host) noexcept;
 
     // 팩 → 집합 순으로 Retire한다(5.5절 종료 4단계). lease가 남지 않았으면 집합 객체도
@@ -180,13 +211,37 @@ public:
     // 하지 않는다.
     void Retire(graphics::Device& device) noexcept;
 
+    // 감시 재컴파일의 셰이더 교체를 프레임 경계에서 적용한다(Docs/Design/RenderBase 9.8절 "SH4
+    // 연결", ShaderSystem 16.3절 SSD76). 주인(렌더 lane 처리기)이 프레임 작업 맨 앞에서 부른다:
+    // 공급자로 연 집합이고 공급자 revision이 지금 집합보다 크면 같은 형식의 새 집합을 열어
+    // ShaderSetSlot에 Propose하고(검사 실패면 거부 — Error 로그, 그 revision은 다시 열지 않는다),
+    // ApplyPending이 교체하면 옛 집합의 cache 항목을 회수하고 내장 자원 팩의 셰이더 항목을 새
+    // 집합에서 다시 찾는다. 교체했으면 true다 — 주인은 집합 포인터·항목 번호를 든 파이프라인 요청을
+    // 다시 만든다. 쿠킹 라이브러리로 열었거나 준비 전이면 아무 일도 하지 않는다. lease가 풀린 옛
+    // 집합은 이 자리에서 파괴한다. 장치 소유 스레드에서 부른다.
+    bool ApplyShaderUpdates(PipelineCache* cache) noexcept;
+
     bool IsReady() const noexcept {
         return ready_;
     }
 
-    // 연 집합이다(Ready일 때). 없으면 null이다.
+    // 연 집합(교체 뒤면 새 집합)이다(Ready일 때). 없으면 null이다. 다음 ApplyShaderUpdates까지
+    // 유효하다.
     ShaderSet* Shaders() noexcept {
-        return ready_ ? set_.Get() : nullptr;
+        return ready_ ? slot_.Current() : nullptr;
+    }
+
+    // 지금 집합의 공급자 revision(공급자 경로가 아니면 0)과 교체·거부 수다.
+    uint64 ShaderRevision() const noexcept {
+        return revision_;
+    }
+
+    uint64 ShaderSwaps() const noexcept {
+        return slot_.Swaps();
+    }
+
+    uint64 ShaderRejections() const noexcept {
+        return slot_.Rejections();
     }
 
     BuiltinResources& Builtins() noexcept {
@@ -202,6 +257,11 @@ public:
         return cooked_;
     }
 
+    // 연 집합의 셰이더 형식 id다(마지막 Open이 고른 형식 — 없으면 빈 값).
+    StringView FormatId() const noexcept {
+        return StringView(format_);
+    }
+
     // 마지막 실패의 영어 설명이다(없으면 빈 문자열).
     StringView Problem() const noexcept {
         return StringView(problem_);
@@ -212,9 +272,18 @@ private:
                       StringView detail) noexcept;
 
     Allocator& allocator_;
-    UniquePtr<ShaderSet> set_;
+    // 집합 교체 자리다(9.8절 — 첫 집합은 Install, 교체는 Propose·ApplyPending).
+    ShaderSetSlot slot_;
     BuiltinResources builtins_;
+    // Open이 쓴 호스트(공급자 조회)와 revision: 지금 집합, 마지막으로 열어 본 revision.
+    const EngineShaderHost* host_ = nullptr;
+    graphics::Device* device_ = nullptr;
+    uint64 revision_ = 0;
+    uint64 attemptedRevision_ = 0;
+    uint64 pendingRevision_ = 0;
     char problem_[512] = {};
+    // 집합 desc가 가리키는 형식 id 저장소다(집합보다 오래 산다).
+    char format_[shader::MaxShaderFormatIdBytes] = {};
     bool ready_ = false;
     bool cooked_ = false;
 };

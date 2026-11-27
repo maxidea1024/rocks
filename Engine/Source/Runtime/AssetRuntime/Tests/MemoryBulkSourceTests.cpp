@@ -3,7 +3,7 @@
 #include <AssetRuntime/MemoryBulkSource.h>
 #include <TestSupport/NFailAllocator.h>
 
-// MemoryBulkSource 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.7절 2 — 저장 전 bulk raw byte의
+// MemoryBulkSource 시험이다(Docs/Design/MeshAnimationAssets 3.7절 2 — 저장 전 bulk raw byte의
 // 메모리 원본): 임시 bulkId 발급·크기·SHA-256, 0 byte entry, 없는 ref, 할당 실패 시 무변경, 그리고
 // WritePackage가 그 ref로 읽어 패키지에 쓰는지.
 using namespace rocks;

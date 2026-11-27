@@ -10,7 +10,7 @@
 #include <World/Primitives/ShapeComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 후처리 볼륨 컴포넌트다(Docs/Design/EngineRuntime 27.5·28.4절).
 namespace rocks {

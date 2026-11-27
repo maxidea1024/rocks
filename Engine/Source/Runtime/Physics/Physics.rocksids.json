@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::defaultGravityZ",
+      "id": "cf2eb6bb4dd445a59ca8410db2bca628",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::maxBodies",
+      "id": "bf954ca2310b49a0a370d0716d800d3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::maxBodyPairs",
+      "id": "83616ccef3434b089f2a7022b26a0cb3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::maxContactConstraints",
+      "id": "5886a3c9ab7e42a9ac19cf8d7578b9c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::minDeltaVelocityForHitEvents",
+      "id": "a41f2ea36cae4c0b9076417b40668e6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::tempAllocatorBytes",
+      "id": "946995f2f2364c21becb64c5ffcb892e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PhysicsSettings",
+      "id": "8d5be02abef64362bd881f6a871a5eb4",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

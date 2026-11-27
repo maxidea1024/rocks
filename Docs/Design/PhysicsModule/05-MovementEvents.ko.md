@@ -15,13 +15,13 @@
    - 무시: `moveIgnoreActors`·`moveIgnoreComponents`, 자기 Actor(`WorldCollision.cpp:535–557`).
    - 자기 `generateOverlapEvents`가 거짓이면 겹침을 무시한다(`ignoreTouches` — `:3351`).
    - 형상: 컴포넌트의 단순(convex) 형상 각각(complex 제외).
-4. **pullback.** 모든 hit의 `time`에서 clamp(0.1, 0.1/거리, 1/거리) + 0.001을 뺀다(약 0.1 cm — `:3095–3099`·`:3361`). 이름 있는 상수(`SweepPullbackDistance` 0.1 cm 등)로 둔다.
+4. **pullback.** 모든 hit의 `time`에서 clamp(0.1, 0.1/D, 1/D) + 0.001을 뺀다(D = 이동 거리 cm — `:3095–3099`·`:3361`). D가 10 cm를 넘으면 거리로 1 cm + 0.001·D다(개정 15 정정 — 전에는 "약 0.1 cm"라 적었다). 이름 있는 상수(`PullbackTime` 0.1, `PullbackTimeSlack` 0.001)로 둔다.
 5. **막는 hit 고르기.** 시작 겹침 중 `impactNormal · delta`가 가장 작은 것, 없으면 첫 시작 겹침 아닌 막음(`:3380–3395`). 빠져나가는 방향(내적 > `InitialOverlapTolerance` 0)의 시작 겹침은 무시한다(`MoveFlags::NeverIgnoreBlockingOverlaps`면 무시하지 않음 — `:3135–3162`).
 6. **도착.** 시작 + time·delta. 이동이 너무 작으면 시작점에 머문다(`:3434–3456`).
 7. **겹침 수집.** 상대도 `generateOverlapEvents`이고 막는 hit의 time 이전인 겹침을 중복 없이 대기 목록에 둔다(`:3399–3420`).
 8. **반영.** transform 적용(부착 전파·body 이동 — 3.3절) → `UpdateOverlaps(대기 목록)`(5.3절) → 막는 hit가 있으면 hit 발행(5.4절, `DispatchBlockingHit` — `:3588–3603`).
 
-- `MoveFlags`: `SkipPhysicsMove`(3.4절 결과 반영), `NeverIgnoreBlockingOverlaps`, `DisableBlockingOverlapDispatch`(시작 겹침 hit 발행 안 함 — `:3539`). UE의 다른 표지는 쓰는 곳이 생길 때 더한다.
+- `MoveOptions`(UE `EMoveComponentFlags` — bool 칸의 값 struct, 7.1.10절): `skipPhysicsMove`(3.4절 결과 반영), `neverIgnoreBlockingOverlaps`, `disableBlockingOverlapDispatch`(시작 겹침 hit 발행 안 함 — `:3539`), `teleport`. UE의 다른 표지는 쓰는 곳이 생길 때 더한다.
 - 묶은 이동(UE `FScopedMovementUpdate` — 여러 이동의 overlap 갱신을 끝에 한 번)은 캐릭터 이동(CM13) 때 더한다.
 
 ## 5.2 침투 해소
@@ -57,7 +57,7 @@ UE `UpdateOverlapsImpl`(`PrimitiveComponent.cpp:4464–4653`)과 같다. overlap
 | 시뮬레이션 접촉 | `notifyRigidBodyCollision`이 참인 body의 접촉 쌍마다 `ContactNotice` 하나(첫 접촉점 + 접촉점들 + 누적 충격량). step 안에서는 값만 복사하고 PhysicsResults에서 스텝 순서대로 발행. 상대도 켰으면 상대 쪽 항목이 따로 생긴다 | `PhysScene_Chaos.cpp:1043–1130`·`1195–1218`, `Actor.cpp:5690–5736` |
 
 - 시뮬레이션 hit의 `HitResult`는 첫 접촉으로 만들고 `normalImpulse`는 누적 충격량(N·s → kg·cm/s)이다. Jolt에서 solver 충격량을 읽는 방법은 6.4절.
-- 같은 쌍이 한 프레임의 여러 고정 스텝에 걸쳐 접촉하면 UE처럼 쌍마다 하나로 합친다(첫 스텝의 첫 접촉점, 충격량 합).
+- 한 스텝 안의 같은 쌍 접촉은 하나로 합친다(첫 접촉점, 충격량 합). 스텝이 다르면 따로 발행한다(UE key가 쌍과 solver 시간 — 7.1.12절).
 - 발행은 Actor·컴포넌트 이벤트(구독형 통지 — 컴포넌트 도입 CR7)가 있어야 한다. CR7 전에는 가상 hook(`Actor::NotifyHit`·`NotifyActorBeginOverlap` 등)만 부른다(7.1절 단계 선행).
 
 ## 5.5 게임 코드 접점

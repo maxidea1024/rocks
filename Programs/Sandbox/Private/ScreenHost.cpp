@@ -1,5 +1,7 @@
 #include "ScreenHost.h"
 
+#include "MemoryPlatformTexture.h"
+
 #include <Core/Diagnostics/Log.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Memory/FrameArena.h>
@@ -49,6 +51,117 @@ constexpr SceneObject Scene[] = {
      {1.0f, 1.0f, 1.0f, 1.0f},
      render::BuiltinTexture::White2D,
      true}};
+
+// 엔진 절차 텍스처의 색이다(선형 RGBA — RGBA8Unorm에 정확히 담긴다).
+constexpr float Red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+constexpr float Green[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+constexpr float Blue[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+constexpr float White[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+constexpr float Cyan[4] = {0.0f, 1.0f, 1.0f, 1.0f};
+constexpr float Magenta[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+constexpr float Yellow[4] = {1.0f, 1.0f, 0.0f, 1.0f};
+// cube 면 순서(+X, -X, +Y, -Y, +Z, -Z)의 색이다.
+constexpr const float* CubeFaceColors[6] = {Red, Cyan, Green, Magenta, Blue, Yellow};
+constexpr const float* LayerColors[4] = {Red, Green, Blue, White};
+// 2D 절차 텍스처의 크기와 mip 수, 배열 층·cube 배열 cube·volume 깊이 수다.
+constexpr uint32 Engine2DSize = 4;
+constexpr uint32 Engine2DMips = 3;
+constexpr uint32 EngineArrayLayers = 3;
+constexpr uint32 EngineCubeArrayCubes = 2;
+constexpr uint32 EngineVolumeDepth = 4;
+
+void CopyColor(const float* from, float (&value)[4]) noexcept {
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        value[channel] = from[channel];
+    }
+}
+
+// 절차 텍스처의 texel이다(context는 InspectorView).
+void EngineTexel(void* context, uint32 level, uint32 slice, uint32 x, uint32 y, uint32 z,
+                 float (&value)[4]) noexcept {
+    switch (*static_cast<const InspectorView*>(context)) {
+    case InspectorView::Texture2D:
+        CopyColor(level == 0 ? ((x + y) % 2 == 0 ? Red : Green) : (level == 1 ? Blue : White),
+                  value);
+        return;
+    case InspectorView::Hdr2D:
+        value[0] = InspectorHdrColor[0];
+        value[1] = InspectorHdrColor[1];
+        value[2] = InspectorHdrColor[2];
+        value[3] = 1.0f;
+        return;
+    case InspectorView::Texture2DArray:
+        CopyColor(LayerColors[slice % 4], value);
+        return;
+    case InspectorView::Cube:
+        CopyColor(CubeFaceColors[slice % graphics::CubeFaceCount], value);
+        return;
+    case InspectorView::CubeArray:
+        CopyColor(slice < graphics::CubeFaceCount ? CubeFaceColors[slice] : White, value);
+        return;
+    case InspectorView::Volume:
+        CopyColor(LayerColors[z % 4], value);
+        return;
+    case InspectorView::None:
+        break;
+    }
+}
+
+// 절차 텍스처의 메모리 플랫폼 데이터 설정이다(점 표본·clamp — SM6과 같다).
+MemoryTextureSpec EngineSpec(InspectorView view) noexcept {
+    MemoryTextureSpec spec;
+    spec.sampler.filter = TextureSamplerFilter::Point;
+    spec.sampler.addressU = TextureAddress::Clamp;
+    spec.sampler.addressV = TextureAddress::Clamp;
+    spec.sampler.addressW = TextureAddress::Clamp;
+    switch (view) {
+    case InspectorView::Texture2D:
+        spec.width = spec.height = Engine2DSize;
+        spec.mips = Engine2DMips;
+        break;
+    case InspectorView::Hdr2D:
+        spec.format = graphics::PixelFormat::RGBA16Float;
+        break;
+    case InspectorView::Texture2DArray:
+        spec.dimension = TextureDimension::Texture2DArray;
+        spec.slices = EngineArrayLayers;
+        break;
+    case InspectorView::Cube:
+        spec.dimension = TextureDimension::TextureCube;
+        spec.slices = graphics::CubeFaceCount;
+        break;
+    case InspectorView::CubeArray:
+        spec.dimension = TextureDimension::TextureCubeArray;
+        spec.slices = graphics::CubeFaceCount * EngineCubeArrayCubes;
+        break;
+    case InspectorView::Volume:
+        spec.dimension = TextureDimension::Volume;
+        spec.depth = EngineVolumeDepth;
+        break;
+    case InspectorView::None:
+        break;
+    }
+
+    return spec;
+}
+
+constexpr const char* EngineTextureNames[InspectorViewCount] = {"",
+                                                                "Engine/Texture2D",
+                                                                "Engine/Hdr2D",
+                                                                "Engine/Texture2DArray",
+                                                                "Engine/Cube",
+                                                                "Engine/CubeArray",
+                                                                "Engine/Volume"};
+
+void CopyName(StringView name, char (&out)[MaxInspectorNameBytes]) noexcept {
+    const usize bytes =
+        name.ByteCount() < MaxInspectorNameBytes - 1 ? name.ByteCount() : MaxInspectorNameBytes - 1;
+    for (usize index = 0; index < bytes; ++index) {
+        out[index] = name.Data()[index];
+    }
+
+    out[bytes] = '\0';
+}
 
 Mat4 ToFloat(const Mat4d& matrix) noexcept {
     Mat4 out = Mat4::Zero();
@@ -150,6 +263,43 @@ Result<UniquePtr<graphics::Device>> CreateScreenDevice(Allocator& allocator, Scr
     return created;
 }
 
+Result<UniquePtr<graphics::Device>> CreateScreenDeviceInOrder(Allocator& allocator,
+                                                              Span<const graphics::Backend> order,
+                                                              bool validation) noexcept {
+    Result<UniquePtr<graphics::Device>> created =
+        Result<UniquePtr<graphics::Device>>::Failure(ErrorCode::Unsupported);
+    for (const graphics::Backend backend : order) {
+        ScreenBackend screen = ScreenBackend::Auto;
+        switch (backend) {
+        case graphics::Backend::D3D12:
+            screen = ScreenBackend::D3D12;
+            break;
+        case graphics::Backend::D3D11:
+            screen = ScreenBackend::D3D11;
+            break;
+        case graphics::Backend::Vulkan:
+            screen = ScreenBackend::Vulkan;
+            break;
+        case graphics::Backend::OpenGL:
+            screen = ScreenBackend::OpenGL;
+            break;
+        case graphics::Backend::Metal:
+            break;
+        }
+
+        if (screen == ScreenBackend::Auto) {
+            continue;
+        }
+
+        created = CreateScreenDevice(allocator, screen, validation);
+        if (created) {
+            break;
+        }
+    }
+
+    return created;
+}
+
 bool CanOpenEngineShaders(const render::EngineShaderHost& host) noexcept {
     return host.Provider() != nullptr || host.CookedLibraries() != nullptr;
 }
@@ -211,9 +361,61 @@ Span<const SceneObject> SandboxScene() noexcept {
     return Span<const SceneObject>(Scene);
 }
 
+bool IsNormalMapSwizzle(const graphics::ChannelSwizzle& swizzle) noexcept {
+    return swizzle.red == graphics::SwizzleSource::Red &&
+           swizzle.green == graphics::SwizzleSource::Green &&
+           swizzle.blue == graphics::SwizzleSource::Zero &&
+           swizzle.alpha == graphics::SwizzleSource::One;
+}
+
+void DescribeInspectorTexture(graphics::PixelFormat format, const graphics::ChannelSwizzle& swizzle,
+                              InspectorTexture& out) noexcept {
+    const graphics::PixelFormatInfo& info = graphics::GetPixelFormatInfo(format);
+    out.swizzle = swizzle;
+    out.integerScale = 1.0f;
+    out.display = render::TextureInspectorDisplay::Ldr;
+    switch (info.shaderType) {
+    case graphics::PixelShaderType::Uint:
+    case graphics::PixelShaderType::Int: {
+        out.component = info.shaderType == graphics::PixelShaderType::Uint
+                            ? InspectorComponent::Uint
+                            : InspectorComponent::Int;
+        // 성분 bit 수의 최대값(부호 있는 형식은 양수 최대값)으로 나눈다.
+        const uint32 texelBytes = info.blockBytes == 0 ? 1u : info.blockBytes;
+        uint32 count = 0;
+        for (uint8 bits = info.channels; bits != 0; bits = static_cast<uint8>(bits >> 1)) {
+            count += bits & 1u;
+        }
+
+        const uint32 componentBits = count == 0 ? 8u : (texelBytes * 8u) / count;
+        const double maximum = info.shaderType == graphics::PixelShaderType::Uint
+                                   ? static_cast<double>((uint64{1} << componentBits) - 1)
+                                   : static_cast<double>((uint64{1} << (componentBits - 1)) - 1);
+        out.integerScale = static_cast<float>(1.0 / maximum);
+        return;
+    }
+
+    default:
+        out.component = InspectorComponent::Float;
+        if (IsNormalMapSwizzle(swizzle)) {
+            // Normal sampler type 계약(쿠킹 swizzle rg01)은 형식과 무관하다(BC5·BGRA8·RGBA16F).
+            out.display = render::TextureInspectorDisplay::Normal;
+        } else if (info.componentType == graphics::PixelComponentType::Float ||
+                   info.componentType == graphics::PixelComponentType::Ufloat) {
+            out.display = render::TextureInspectorDisplay::Hdr;
+        }
+
+        return;
+    }
+}
+
 ScreenHost::ScreenHost(Allocator& allocator, graphics::Device& device,
                        const render::EngineShaderHost& host) noexcept
-    : device_(device), renderer_(allocator, host), lane_(allocator, device) {
+    : device_(device), renderer_(allocator, host), lane_(allocator, device), allocator_(allocator),
+      inspectors_(allocator), notices_(allocator) {
+    for (uint32& entry : engineEntries_) {
+        entry = NoInspectorEntry;
+    }
 }
 
 ScreenHost::~ScreenHost() noexcept {
@@ -263,6 +465,8 @@ Result<void> ScreenHost::Start(platform::Window& window, render::RenderLaneMode 
         pending_ = pending.Value();
     }
 
+    AddEngineTextures();
+
     Log::Info(LogSandboxScreen, "Screen rendering started on {Backend} ({Width}x{Height}, {Mode})",
               graphics::BackendName(device_.Info().backend), width_, height_,
               mode == render::RenderLaneMode::Thread ? "thread" : "inline");
@@ -274,6 +478,7 @@ void ScreenHost::SubmitFrame(GameInstanceClient* client) noexcept {
         return;
     }
 
+    ProcessNotices();
     auto ticket = lane_.BeginFrame();
     if (!ticket) {
         failed_ = true;
@@ -329,7 +534,11 @@ void ScreenHost::SubmitFrame(GameInstanceClient* client) noexcept {
     packet.tonemap = tonemap_;
     packet.capture = capture_;
     packet.captureSlot = captureSlot_;
-    packet.inspector = inspector_;
+    packet.inspecting = selected_ < inspectors_.Size();
+    if (packet.inspecting) {
+        packet.inspector = inspectors_[selected_].texture;
+    }
+
     packet.inspectorLayer = inspectorLayer_;
     packet.inspectorMip = inspectorMip_;
     if (!lane_.SubmitFrame(Move(ticket.Value()), Move(packet), &RenderScreen)) {
@@ -343,15 +552,255 @@ void ScreenHost::SubmitFrame(GameInstanceClient* client) noexcept {
 
 void ScreenHost::SetInspector(InspectorView view, uint32 layer, uint32 mip) noexcept {
     const uint32 index = static_cast<uint32>(view);
-    if (index >= InspectorViewCount) {
+    SetInspectorEntry(index < InspectorViewCount ? engineEntries_[index] : NoInspectorEntry, layer,
+                      mip);
+}
+
+void ScreenHost::SetInspectorEntry(uint32 index, uint32 layer, uint32 mip) noexcept {
+    if (index >= inspectors_.Size()) {
+        selected_ = NoInspectorEntry;
+        inspectorLayer_ = 0;
+        inspectorMip_ = 0;
         return;
     }
 
-    inspector_ = view;
-    const uint32 layers = InspectorLayers[index];
-    const uint32 mips = InspectorMips[index];
-    inspectorLayer_ = layers == 0 ? 0 : (layer < layers ? layer : layers - 1);
-    inspectorMip_ = mips == 0 ? 0 : (mip < mips ? mip : mips - 1);
+    selected_ = index;
+    const InspectorTexture& texture = inspectors_[index].texture;
+    inspectorMip_ = mip < texture.mips ? mip : texture.mips - 1;
+    const uint32 layers = InspectorLayerCount(texture, inspectorMip_);
+    inspectorLayer_ = layer < layers ? layer : layers - 1;
+}
+
+uint32 ScreenHost::EngineEntry(InspectorView view) const noexcept {
+    const uint32 index = static_cast<uint32>(view);
+    return index < InspectorViewCount ? engineEntries_[index] : NoInspectorEntry;
+}
+
+uint32 ScreenHost::PendingUploads() const noexcept {
+    uint32 count = 0;
+    for (const InspectorEntry& entry : inspectors_) {
+        count += entry.state == InspectorEntryState::Pending ? 1u : 0u;
+    }
+
+    return count;
+}
+
+void ScreenHost::ProcessNotices() noexcept {
+    if (!started_) {
+        return;
+    }
+
+    notices_.Clear();
+    if (!lane_.Notices().TakeAll(notices_)) {
+        return;
+    }
+
+    if (cache_ != nullptr) {
+        (void)cache_->HandleNotices(notices_.View());
+    }
+
+    for (const render::RenderNotice& notice : notices_) {
+        if (notice.kind != render::RenderNoticeKind::ResourceReady &&
+            notice.kind != render::RenderNoticeKind::ResourceFailed) {
+            continue;
+        }
+
+        for (InspectorEntry& entry : inspectors_) {
+            if (entry.state != InspectorEntryState::Pending ||
+                !(entry.texture.handle == notice.handle)) {
+                continue;
+            }
+
+            entry.state = notice.kind == render::RenderNoticeKind::ResourceReady
+                              ? InspectorEntryState::Ready
+                              : InspectorEntryState::Failed;
+            entry.error = notice.error;
+            if (entry.state == InspectorEntryState::Failed) {
+                Log::Warning(LogSandboxScreen, "Texture {Name} could not be uploaded: {Error}",
+                             StringView(entry.name), ErrorCodeName(notice.error));
+            }
+        }
+    }
+}
+
+Result<uint32> ScreenHost::AppendEntry(StringView name, const InspectorTexture& texture,
+                                       InspectorEntryState state) noexcept {
+    InspectorEntry entry;
+    CopyName(name, entry.name);
+    entry.texture = texture;
+    entry.state = state;
+    if (auto pushed = inspectors_.TryPushBack(entry); !pushed) {
+        return Result<uint32>::Failure(pushed.Error());
+    }
+
+    return Result<uint32>::Success(static_cast<uint32>(inspectors_.Size() - 1));
+}
+
+Result<uint32> ScreenHost::AddTexture(StringView name, const TexturePlatformData& data,
+                                      PlatformBulkReader reader, void* context, bool cpuPlaceholder,
+                                      render::CookedTextureIssue* issue) noexcept {
+    if (issue != nullptr) {
+        *issue = render::CookedTextureIssue::None;
+    }
+
+    if (!started_) {
+        return Result<uint32>::Failure(ErrorCode::NotReady);
+    }
+
+    InspectorTexture texture;
+    if (cpuPlaceholder) {
+        texture.cpuPlaceholder = true;
+        return AppendEntry(name, texture, InspectorEntryState::Placeholder);
+    }
+
+    PlatformTextureSource source(allocator_);
+    if (auto made = MakePlatformTextureSource(data, reader, context, source); !made) {
+        return Result<uint32>::Failure(made.Error());
+    }
+
+    auto handle = lane_.ReserveHandle(render::RenderResourceKind::Texture);
+    if (!handle) {
+        return Result<uint32>::Failure(handle.Error());
+    }
+
+    auto upload =
+        render::PrepareCookedTexture(allocator_, source.source, device_, handle.Value(), issue);
+    if (!upload) {
+        (void)lane_.Retire(handle.Value());
+        return Result<uint32>::Failure(upload.Error());
+    }
+
+    texture.handle = handle.Value();
+    texture.dimension = source.source.dimension;
+    texture.width = source.source.width;
+    texture.height = source.source.height;
+    texture.depth = source.source.depth;
+    texture.layers = source.source.dimension == graphics::TextureDimension::TextureCubeArray
+                         ? source.source.slices / graphics::CubeFaceCount
+                         : (source.source.dimension == graphics::TextureDimension::Texture2DArray
+                                ? source.source.slices
+                                : 1u);
+    texture.mips = static_cast<uint32>(source.source.mips.Size());
+    DescribeInspectorTexture(source.source.format, source.swizzle, texture);
+    auto appended = AppendEntry(name, texture, InspectorEntryState::Pending);
+    if (!appended) {
+        (void)lane_.Retire(handle.Value());
+        return appended;
+    }
+
+    if (auto posted = lane_.PostResource(Move(upload.Value()), &render::CreateCookedTextureOnLane);
+        !posted) {
+        (void)inspectors_.TryPopBack();
+        (void)lane_.Retire(handle.Value());
+        return Result<uint32>::Failure(posted.Error());
+    }
+
+    return appended;
+}
+
+Result<uint32> ScreenHost::AddCachedTexture(StringView name,
+                                            const TextureRenderInfo& info) noexcept {
+    if (!started_) {
+        return Result<uint32>::Failure(ErrorCode::NotReady);
+    }
+
+    InspectorTexture texture;
+    InspectorEntryState state = InspectorEntryState::Pending;
+    switch (info.state) {
+    case TextureRenderState::CpuPlaceholder:
+        texture.cpuPlaceholder = true;
+        return AppendEntry(name, texture, InspectorEntryState::Placeholder);
+    case TextureRenderState::Uploading:
+        state = InspectorEntryState::Pending;
+        break;
+    case TextureRenderState::Ready:
+        state = InspectorEntryState::Ready;
+        break;
+    case TextureRenderState::Failed:
+        state = InspectorEntryState::Failed;
+        break;
+    case TextureRenderState::Loading:
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (info.handle.IsNull()) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    texture.handle = info.handle;
+    texture.dimension = info.dimension;
+    texture.width = info.width;
+    texture.height = info.height;
+    texture.depth = info.depth;
+    texture.layers =
+        info.dimension == graphics::TextureDimension::TextureCubeArray
+            ? info.slices / graphics::CubeFaceCount
+            : (info.dimension == graphics::TextureDimension::Texture2DArray ? info.slices : 1u);
+    texture.mips = info.mips;
+    DescribeInspectorTexture(info.format, info.swizzle, texture);
+    auto appended = AppendEntry(name, texture, state);
+    if (appended) {
+        InspectorEntry& entry = inspectors_[appended.Value()];
+        entry.cacheOwned = true;
+        entry.error = info.error;
+    }
+
+    return appended;
+}
+
+Result<uint32> ScreenHost::AddUnchecked(StringView name, render::CookedTextureUpload&& upload,
+                                        const InspectorTexture& texture) noexcept {
+    if (!started_) {
+        return Result<uint32>::Failure(ErrorCode::NotReady);
+    }
+
+    auto handle = lane_.ReserveHandle(render::RenderResourceKind::Texture);
+    if (!handle) {
+        return Result<uint32>::Failure(handle.Error());
+    }
+
+    InspectorTexture entry = texture;
+    entry.handle = handle.Value();
+    upload.handle = handle.Value();
+    auto appended = AppendEntry(name, entry, InspectorEntryState::Pending);
+    if (!appended) {
+        (void)lane_.Retire(handle.Value());
+        return appended;
+    }
+
+    if (auto posted = lane_.PostResource(Move(upload), &render::CreateCookedTextureOnLane);
+        !posted) {
+        (void)inspectors_.TryPopBack();
+        (void)lane_.Retire(handle.Value());
+        return Result<uint32>::Failure(posted.Error());
+    }
+
+    return appended;
+}
+
+void ScreenHost::AddEngineTextures() noexcept {
+    for (uint32 index = 1; index < InspectorViewCount; ++index) {
+        InspectorView view = static_cast<InspectorView>(index);
+        if (view == InspectorView::CubeArray && !device_.Caps().features.textureCubeArray) {
+            continue;
+        }
+
+        MemoryPlatformTexture memory(allocator_);
+        render::CookedTextureIssue issue = render::CookedTextureIssue::None;
+        auto built = memory.Build(EngineSpec(view), &EngineTexel, &view);
+        auto added = built ? AddTexture(EngineTextureNames[index], memory.Data(),
+                                        &MemoryPlatformTexture::ReadBulk, &memory, false, &issue)
+                           : Result<uint32>::Failure(built.Error());
+        if (!added) {
+            Log::Warning(LogSandboxScreen,
+                         "Engine texture {Name} could not be uploaded: {Error} ({Issue})",
+                         StringView(EngineTextureNames[index]), ErrorCodeName(added.Error()),
+                         render::CookedTextureIssueName(issue));
+            continue;
+        }
+
+        engineEntries_[index] = added.Value();
+    }
 }
 
 void ScreenHost::HandleInspectorInput(const input::InputState& input) noexcept {
@@ -359,15 +808,30 @@ void ScreenHost::HandleInspectorInput(const input::InputState& input) noexcept {
         input::Key::Digit0, input::Key::Digit1, input::Key::Digit2, input::Key::Digit3,
         input::Key::Digit4, input::Key::Digit5, input::Key::Digit6};
     constexpr uint32 FirstGamepad = 0;
-    InspectorView view = inspector_;
+    uint32 entry = selected_;
     uint32 layer = inspectorLayer_;
     uint32 mip = inspectorMip_;
     for (uint32 index = 0; index < InspectorViewCount; ++index) {
         if (input.WasPressed(ViewKeys[index])) {
-            view = static_cast<InspectorView>(index);
+            entry = EngineEntry(static_cast<InspectorView>(index));
             layer = 0;
             mip = 0;
         }
+    }
+
+    const uint32 count = InspectorEntryCount();
+    if (count != 0 && (input.WasPressed(input::Key::Period) ||
+                       input.WasPressed(FirstGamepad, input::GamepadButton::DPadRight))) {
+        entry = entry >= count ? 0 : (entry + 1 == count ? NoInspectorEntry : entry + 1);
+        layer = 0;
+        mip = 0;
+    }
+
+    if (count != 0 && (input.WasPressed(input::Key::Comma) ||
+                       input.WasPressed(FirstGamepad, input::GamepadButton::DPadLeft))) {
+        entry = entry >= count ? count - 1 : (entry == 0 ? NoInspectorEntry : entry - 1);
+        layer = 0;
+        mip = 0;
     }
 
     if ((input.WasPressed(input::Key::LeftBracket) ||
@@ -389,10 +853,14 @@ void ScreenHost::HandleInspectorInput(const input::InputState& input) noexcept {
         ++mip;
     }
 
-    if (view != inspector_ || layer != inspectorLayer_ || mip != inspectorMip_) {
-        SetInspector(view, layer, mip);
-        Log::Info(LogSandboxScreen, "Texture inspector view {View} layer {Layer} mip {Mip}",
-                  static_cast<uint32>(inspector_), inspectorLayer_, inspectorMip_);
+    if (entry != selected_ || layer != inspectorLayer_ || mip != inspectorMip_) {
+        SetInspectorEntry(entry, layer, mip);
+        if (selected_ < inspectors_.Size()) {
+            Log::Info(LogSandboxScreen, "Texture inspector {Name} layer {Layer} mip {Mip}",
+                      StringView(inspectors_[selected_].name), inspectorLayer_, inspectorMip_);
+        } else {
+            Log::Info(LogSandboxScreen, "Texture inspector off (scene)");
+        }
     }
 }
 
@@ -478,6 +946,16 @@ Result<uint64> ScreenHost::DrainRetires() noexcept {
 
         if (!capture_.IsNull()) {
             (void)lane_.Retire(capture_);
+        }
+    }
+
+    if (!inspectorsRetired_) {
+        inspectorsRetired_ = true;
+        for (const InspectorEntry& entry : inspectors_) {
+            // 캐시 handle은 캐시 Shutdown(엔진 종료 hook BeginShutdown)이 Retire했다.
+            if (!entry.texture.handle.IsNull() && !entry.cacheOwned) {
+                (void)lane_.Retire(entry.texture.handle);
+            }
         }
     }
 

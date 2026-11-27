@@ -67,7 +67,7 @@ class LoggingComponent : public Component {
     ROCKS_NATIVE_TYPE(LoggingComponent, Component, 0xfb5782f76d854126ull, 0x931d5877944c5b96ull)
 
 public:
-    LoggingComponent() noexcept {
+    explicit LoggingComponent(Allocator& allocator) noexcept : Component(allocator) {
         PrimaryTick().tick = true;
     }
 
@@ -1537,13 +1537,14 @@ TEST(World_NativeDerivedTypesInheritReflectedBase) {
     };
 
     const Expected expected[] = {
-        {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 2},
-        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 4},
-        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 11},
+        // 상속 필드 수다(Actor 5·Component 3·SceneComponent 12 — 태그 31.4절 포함).
+        {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 3},
+        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 12},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

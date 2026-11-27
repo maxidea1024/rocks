@@ -49,7 +49,7 @@ public:
         if (header.channels == 0 || header.channels > MaxOutputChannels ||
             header.sampleRate != OpusPlatformSampleRate ||
             header.channelMask != DefaultAudioChannelMask(header.channels)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto parsed = ParseOpusCodecHeader(codecHeader, header);
@@ -61,7 +61,7 @@ public:
         const opus_int32 stateBytes =
             opus_multistream_decoder_get_size(opus.streams, opus.coupledStreams);
         if (stateBytes <= 0) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (static_cast<usize>(stateBytes) > stateBytes_) {
@@ -90,7 +90,7 @@ public:
         if (opus_multistream_decoder_init(state_, static_cast<opus_int32>(OpusPlatformSampleRate),
                                           static_cast<int>(header.channels), opus.streams,
                                           opus.coupledStreams, mapping) != OPUS_OK) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         channels_ = header.channels;
@@ -201,28 +201,31 @@ private:
     // 거른다(3.30.2절).
     Result<void> CheckChunk(const AudioChunkEntry& chunk,
                             Span<const uint8> payload) const noexcept {
-        if (!open_ || payload.Size() != chunk.payloadBytes || chunk.frameCount == 0 ||
-            chunk.frameCount % OpusPacketFrames != 0 ||
-            chunk.preRollFrames % OpusPacketFrames != 0) {
+        if (!open_ || payload.Size() != chunk.payloadBytes) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (chunk.frameCount == 0 || chunk.frameCount % OpusPacketFrames != 0 ||
+            chunk.preRollFrames % OpusPacketFrames != 0) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         uint64 packets = 0;
         for (usize offset = 0; offset < payload.Size();) {
             if (payload.Size() - offset < OpusLengthPrefixBytes) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             const usize length = LoadLittleEndian<uint16>(payload.Data() + offset);
             if (length == 0 || length > payload.Size() - offset - OpusLengthPrefixBytes) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             const unsigned char* packet = payload.Data() + offset + OpusLengthPrefixBytes;
             if (opus_packet_get_nb_samples(packet, static_cast<opus_int32>(length),
                                            static_cast<opus_int32>(OpusPlatformSampleRate)) !=
                 static_cast<int>(OpusPacketFrames)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             offset += OpusLengthPrefixBytes + length;
@@ -230,7 +233,7 @@ private:
         }
 
         if (packets * OpusPacketFrames != uint64{chunk.preRollFrames} + chunk.frameCount) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         return Result<void>::Success();
@@ -262,7 +265,7 @@ private:
             opus_multistream_decode_float(state_, packet, static_cast<opus_int32>(length),
                                           scratch_.Data(), static_cast<int>(OpusPacketFrames), 0);
         if (decoded != static_cast<int>(OpusPacketFrames)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         position_ += OpusLengthPrefixBytes + length;
@@ -302,7 +305,9 @@ private:
     bool finished_ = false;
 };
 
-Result<UniquePtr<AudioDecoder>> CreateOpusDecoder(Allocator& allocator) noexcept {
+} // namespace
+
+Result<UniquePtr<AudioDecoder>> CreateOpusAudioDecoder(Allocator& allocator) noexcept {
     auto made = UniquePtr<OpusChunkDecoder>::TryMake(allocator, allocator);
     if (!made) {
         return Result<UniquePtr<AudioDecoder>>::Failure(made.Error());
@@ -311,10 +316,8 @@ Result<UniquePtr<AudioDecoder>> CreateOpusDecoder(Allocator& allocator) noexcept
     return Result<UniquePtr<AudioDecoder>>::Success(UniquePtr<AudioDecoder>(Move(made.Value())));
 }
 
-} // namespace
-
 Result<void> RegisterOpusAudioDecoder(AudioDecoderTable& table) noexcept {
-    return table.Register(AudioCodecId::Opus, &CreateOpusDecoder);
+    return table.Register(AudioCodecId::Opus, &CreateOpusAudioDecoder);
 }
 
 } // namespace rocks::audio

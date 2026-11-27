@@ -195,7 +195,7 @@ TEST(EngineAssets_SignedContentRejections) {
         {Kind::OtherScope,
          {ErrorCode::AuthenticationFailed, "content signature (Scope)", "ContentNotTrusted"}},
         {Kind::InvalidTrust, {ErrorCode::InvalidArgument, "content signature (None)", "None"}},
-        {Kind::CorruptManifest, {ErrorCode::InvalidArgument, "manifest parse", "CorruptPackage"}},
+        {Kind::CorruptManifest, {ErrorCode::CorruptData, "manifest parse", "CorruptPackage"}},
     };
     for (const Case& expected : cases) {
         char tag[32] = {};

@@ -2,6 +2,7 @@
 
 #include <Core/Build/BuildInfo.h>
 #include <Core/FileError.h>
+#include <Core/Text/Path.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Platform/File.h>
@@ -9,6 +10,20 @@
 
 // 에셋 명령의 공용 도구 구현이다(Docs/Design/AssetSystem 13절).
 namespace rocks::commandlet_host {
+namespace {
+
+// 할당 실패는 진단 줄로 바꾸지 않고 함수 오류로 돌려준다(호스트가 쓴다 — 다른 명령과 같다,
+// 14.1.119 할당 실패 전수가 찾음). 참이면 failure를 채웠다.
+bool FailOnOutOfMemory(ErrorCode error, Result<int32>& failure) noexcept {
+    if (error != ErrorCode::OutOfMemory) {
+        return false;
+    }
+
+    failure = Result<int32>::Failure(error);
+    return true;
+}
+
+} // namespace
 
 bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView command,
                  StringView project, ProjectLayout& layout, Result<int32>& failure) noexcept {
@@ -18,13 +33,20 @@ bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView comm
         // 현재 디렉터리를 절대 경로로 만든 뒤(layout이 작업 디렉터리 기준으로 푼다) 위로 찾는다.
         ProjectLayout working(allocator);
         if (auto initialized = working.Initialize("."); !initialized) {
-            failure =
-                Fail(output, allocator, command, 1, "cannot resolve the current directory ({})",
-                     ErrorCodeName(initialized.Error()));
+            if (!FailOnOutOfMemory(initialized.Error(), failure)) {
+                failure =
+                    Fail(output, allocator, command, 1, "cannot resolve the current directory ({})",
+                         ErrorCodeName(initialized.Error()));
+            }
+
             return false;
         }
 
         if (auto found = FindProjectFrom(working.Root(), directory, name); !found) {
+            if (FailOnOutOfMemory(found.Error(), failure)) {
+                return false;
+            }
+
             failure =
                 found.Error() == ErrorCode::NotFound
                     ? Fail(output, allocator, command, 1,
@@ -40,8 +62,12 @@ bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView comm
     }
 
     if (auto initialized = layout.Initialize(project); !initialized) {
-        failure = Fail(output, allocator, command, 1, "'{}' is not a usable project directory ({})",
-                       project, ErrorCodeName(initialized.Error()));
+        if (!FailOnOutOfMemory(initialized.Error(), failure)) {
+            failure =
+                Fail(output, allocator, command, 1, "'{}' is not a usable project directory ({})",
+                     project, ErrorCodeName(initialized.Error()));
+        }
+
         return false;
     }
 
@@ -49,8 +75,11 @@ bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView comm
     String descriptorDirectory(allocator);
     auto found = FindProjectFrom(layout.Root(), descriptorDirectory, name);
     if (!found && found.Error() != ErrorCode::NotFound) {
-        failure = Fail(output, allocator, command, 1, "cannot search for the project ({})",
-                       ErrorCodeName(found.Error()));
+        if (!FailOnOutOfMemory(found.Error(), failure)) {
+            failure = Fail(output, allocator, command, 1, "cannot search for the project ({})",
+                           ErrorCodeName(found.Error()));
+        }
+
         return false;
     }
 
@@ -133,6 +162,41 @@ StringView AssetTextDiagnosticName(reflection_text::TextDiagnosticCode code) noe
     return code == reflection_text::TextDiagnosticCode::HiddenEnumerator
                ? StringView(AssetDiagnosticName(AssetDiagnosticCode::InvalidSetting))
                : reflection_text::TextDiagnosticCodeName(code);
+}
+
+Result<String> AbsoluteCommandPath(Allocator& allocator, StringView path,
+                                   bool* workingFailed) noexcept {
+    if (workingFailed != nullptr) {
+        *workingFailed = false;
+    }
+
+    auto kind = Path::Root(path);
+    if (!kind || kind.Value() != PathRoot::Relative) {
+        String copy(allocator);
+        if (auto assigned = copy.TryAssign(path); !assigned) {
+            return Result<String>::Failure(assigned.Error());
+        }
+
+        return Result<String>::Success(rocks::Move(copy));
+    }
+
+    Array<char> working(allocator);
+    if (auto sized = working.TryResize(MaxNativePathBytes() + 1); !sized) {
+        return Result<String>::Failure(sized.Error());
+    }
+
+    usize bytes = 0;
+    if (auto got = platform::GetStandardDirectory(platform::StandardDirectory::Working,
+                                                  working.Data(), working.Size(), bytes);
+        !got) {
+        if (workingFailed != nullptr) {
+            *workingFailed = true;
+        }
+
+        return Result<String>::Failure(FileErrorCode(got));
+    }
+
+    return Path::MakeAbsolute(allocator, StringView(working.Data(), bytes), path);
 }
 
 bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {

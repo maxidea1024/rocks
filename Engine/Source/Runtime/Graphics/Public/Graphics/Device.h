@@ -14,7 +14,7 @@ namespace rocks::graphics {
 // 돌려주며 EndFrame까지만 유효하다. 기록 순서대로 실행된다.
 //
 // async compute 기록(PassDesc::queue = AsyncCompute, RenderBase 8절 RG4)은 compute 명령만 받는다:
-// SetPipeline(compute 파이프라인)·SetTexture·SetBufferView·SetWritableBufferView·
+// SetPipeline(compute 파이프라인)·SetTexture·SetSampler·SetBufferView·SetWritableBufferView·
 // SetWritableTexture·SetDrawConstants·SetConstantBuffer·SetConstantData·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
 // 전이(IsComputeQueueAccess 상태 사이, 분리 전이 포함)·WriteTimestamp·PushMarker·PopMarker. 그 밖의
 // 호출(그리기·viewport·scissor·스텐실 기준·graphics 파이프라인·그 밖 상태의 전이)은 무시하고
@@ -41,14 +41,45 @@ public:
     virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
                                 uint64 offset = 0) noexcept = 0;
 
-    // 텍스처 slot에 묶는다(파이프라인 이름 표 PipelineBindingNames::texture와 그 짝 샘플러). null
-    // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
-    // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
-    // ReadWrite view는 흰 텍스처로 대신한다. 흰 텍스처로 대신한 묶기(null·stale·ReadWrite view)는
-    // Device::NullTextureBindings가 센다(RenderBase 경로는 0이어야 한다 — RenderBase 11.4절 4항).
-    // 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는 SrvCompute, 그 밖은 SrvGraphics)면
-    // 바꾸지 않으므로, 명시 전이(렌더 그래프)와 함께 쓰는 compute pass는 SetPipeline을 먼저 부른다.
-    virtual void SetTexture(TextureHandle texture) noexcept = 0;
+    // --- 텍스처·샘플러(RenderBase 9.13절) ---
+    //
+    // slot은 그 단계 셰이더 바인딩 layout(값 1)의 SRV 텍스처·샘플러 slot(backend 위치, 0 –
+    // MaxResourceSlots-1)이다: D3D t·s register, Vulkan binding, GLES 텍스처 유닛(VS 16부터)과
+    // 샘플러 선언 순번. 형식마다 다르므로 값 1에서 얻는다(RenderBase 자원 지도, 또는
+    // FindTextureSlot·FindSamplerSlot). 묶음은 단계마다 따로이고 기록 안에서 SetPipeline을 넘어
+    // 유지되며 기록 시작 때 모두 빈다. 범위 밖 stage·slot은 무시한다.
+
+    // 텍스처(또는 Read view)를 묶는다. null·stale handle, ReadWrite view, SRV가 없는 텍스처는 1x1
+    // 흰색 텍스처로 대신 묶고 Device::NullTextureBindings가 센다(RenderBase 경로는 0이어야 한다 —
+    // RenderBase 11.4절 4항). 묶지 않은 slot도 흰 텍스처를 읽는다(세지 않는다). Read view면 그
+    // mip·slice 범위만 셰이더 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로
+    // 함께 묶을 수 있다). 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는 SrvCompute, 그
+    // 밖은 SrvGraphics)면 바꾸지 않으므로, 명시 전이(렌더 그래프)와 함께 쓰는 compute pass는
+    // SetPipeline을 먼저 부른다.
+    //
+    // 사용 예(PS Texture2D Albedo·Texture2DArray Layers):
+    //   auto albedo = FindTextureSlot(pixelLayout, "Albedo");
+    //   commands.SetTexture(ShaderStage::Pixel, albedo.Value(), albedoTexture);
+    //   commands.SetTexture(ShaderStage::Pixel, layersSlot, layersTexture);
+    virtual void SetTexture(ShaderStage stage, uint32 slot, TextureHandle texture) noexcept = 0;
+
+    // 샘플러 slot의 값을 준다(결정 R12). 자기 샘플러(<texture>Sampler) slot은 준 값이 있으면 그
+    // 값, 없으면 짝 텍스처 slot에 묶인 텍스처의 TextureDesc::sampler를 쓴다. 공유 샘플러
+    // (SharedWrapSampler·SharedClampSampler) slot은 준 값만 쓰며, 값이 없으면 그리기·dispatch를
+    // 무시하고 IgnoredDraws를 올린다. sampler가 null이면 준 값을 지운다. 값은 장치의 desc 캐시로
+    // 풀며(같은 desc는 같은 backend 객체) 호출 뒤 sampler를 버려도 된다. 비교 여부는 셰이더
+    // 선언(SamplerComparisonState)과 같아야 한다(장치는 검사하지 않는다). AnisotropicPoint는
+    // CreateTexture와 같이 하드웨어 대응이 없으면 AnisotropicLinear로 만든다.
+    //
+    // 사용 예(PS가 SharedClampSampler로 샘플링한다):
+    //   SamplerDesc clamp;
+    //   clamp.addressU = clamp.addressV = AddressMode::Clamp;
+    //   auto set = commands.SetSampler(ShaderStage::Pixel, sharedClampSlot, &clamp);
+    //
+    // 실패: 기록 중 아님·범위 밖 stage·slot·IsValidSamplerDesc 위반 InvalidArgument, desc 캐시가
+    // 가득 참 CapacityExceeded, API 실패는 그 오류다. 실패하면 그 slot의 앞 값은 그대로다.
+    virtual Result<void> SetSampler(ShaderStage stage, uint32 slot,
+                                    const SamplerDesc* sampler) noexcept = 0;
 
     // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 이름 표, GX2).
     // null handle이면 slot을 비운다. 그리기는 파이프라인이 읽는 slot마다 같은 종류(Typed는 같은 값
@@ -176,7 +207,7 @@ public:
     //
     // 사용 예(mip k를 읽어 mip k + 1을 쓴다):
     //   commands.SetPipeline(downsample);
-    //   commands.SetTexture(mipK);              // Read view, firstMip k, mipCount 1
+    //   commands.SetTexture(ShaderStage::Compute, sourceSlot, mipK);  // Read view, mip k
     //   commands.SetWritableTexture(0, mipK1);  // ReadWrite view, firstMip k + 1
     //   commands.Dispatch(groupsX, groupsY);
     virtual void SetWritableTexture(uint32 slot, TextureHandle view) noexcept = 0;
@@ -569,6 +600,14 @@ public:
         return Result<TextureSubresources>::Failure(ErrorCode::Unsupported);
     }
 
+    // 묶을 텍스처·view의 차원·형식·표본 수·접근·SRV 유무·기본 샘플러 비교 여부다(RenderBase 9.13절
+    // 6항 자원 묶음 검증). 실패: 모르는 handle StaleHandle. 소유 스레드가 부른다.
+    virtual Result<TextureViewInfo> GetTextureViewInfo(TextureHandle texture) noexcept = 0;
+
+    // 묶을 버퍼 view의 종류·접근·typed 값 계열·구조화 원소 byte다. 실패: 모르는 handle
+    // StaleHandle. 소유 스레드가 부른다.
+    virtual Result<BufferViewInfo> GetBufferViewInfo(BufferViewHandle view) noexcept = 0;
+
     // 텍스처 mip 하나의 plane 하나를 out(TextureMipPlaneBytes 크기: 그 mip의 모든 slice·깊이 면을
     // 초기 픽셀과 같은 순서로, 행 위→아래, 블록 형식은 블록 행)으로 읽는다. swizzle은 적용하지
     // 않는다(저장된 값 그대로). 렌더 타깃이 아닌 텍스처·블록 압축·깊이·비디오 plane도 읽는다. GPU
@@ -605,9 +644,24 @@ public:
     virtual Result<PipelineHandle>
     CreateComputePipeline(const ComputePipelineDesc& desc) noexcept = 0;
 
-    // 스왑체인의 다음 백버퍼에 그리기를 시작한다(clear 포함). 장치 손실 뒤에는 Destroyed다.
-    virtual Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
-                                               const ClearColor& clear) noexcept = 0;
+    // 스왑체인 백버퍼에 기록을 시작한다(SwapChainPassDesc). 시작 때 백버퍼를 RenderTarget으로
+    // 전이하고 load 동작을 한다. desc.present가 거짓이면 EndFrame이 present하지 않고 백버퍼를
+    // 그대로 두어 다음 BeginFrame이 이어 그린다(RenderBase 8절 "스왑체인 공유 설계").
+    //
+    // 실패: stale handle StaleHandle, load Load인데 그 스왑체인에 그리는 중인 프레임이
+    // 없으면(present 뒤·처음·크기 변경 뒤) InvalidArgument, 크기 변경 실패로 버퍼가 없으면
+    // DependencyFailed, 기록 중 Busy, 장치 손실 Destroyed.
+    virtual Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept = 0;
+
+    // 스왑체인의 다음 백버퍼에 clear로 그리기를 시작하고 EndFrame에서 present한다(BeginFrame의
+    // 간단한 형태).
+    Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
+                                       const ClearColor& clear) noexcept {
+        SwapChainPassDesc desc;
+        desc.swapChain = swapChain;
+        desc.clear = clear;
+        return BeginFrame(desc);
+    }
 
     // attachment들(PassDesc)에 기록을 시작한다(GX4). 색 attachment는 RenderTarget, 깊이는
     // DepthStencil 텍스처이고 크기가 모두 같아야 한다. 시작 때 attachment를 RenderTarget·DepthWrite
@@ -627,10 +681,11 @@ public:
     }
 
     // 기록을 그 기록의 queue(PassDesc::queue)에 제출하고 그 완료 지점을 돌려준다.
-    // BeginFrame이었으면 present한다. compute queue 기록이면 쌓인 업로드를 먼저 graphics queue에
-    // 제출하고 compute 제출이 그것을 기다린다(업로드는 다음 제출 전에 실행된다). 진행 중인 프레임이
-    // 없으면 InvalidArgument다. 제출은 했지만 present가 실패하면 실패를 돌려주며 제출의 완료 지점은
-    // LastSubmittedFence로 읽는다. 장치 손실이 드러나면 Destroyed다.
+    // present를 요청한 BeginFrame(SwapChainPassDesc::present)이었으면 present한다. compute queue
+    // 기록이면 쌓인 업로드를 먼저 graphics queue에 제출하고 compute 제출이 그것을 기다린다(업로드는
+    // 다음 제출 전에 실행된다). 진행 중인 프레임이 없으면 InvalidArgument다. 제출은 했지만
+    // present가 실패하면 실패를 돌려주며 제출의 완료 지점은 LastSubmittedFence로 읽는다. 장치
+    // 손실이 드러나면 Destroyed다.
     virtual Result<GpuFencePoint> EndFrame() noexcept = 0;
 
     // 이 호출 뒤 queue에 내는 모든 제출이 point(다른 queue에 제출한 지점)가 끝난 뒤에 실행되게
@@ -831,6 +886,10 @@ public:
 
     // 회수 대기 중인 자원 수다(진단·시험: 해제 누락 0 확인).
     virtual usize PendingRetireCount() const noexcept = 0;
+
+    // EndFrame이 낸 present의 장치 수명 누적 수다(실패한 present는 세지 않는다). 시험이 "프레임당
+    // present 하나"를 확인할 때 쓴다(RenderBase 8절 "스왑체인 공유 설계").
+    virtual uint64 PresentCount() const noexcept = 0;
 };
 
 } // namespace rocks::graphics

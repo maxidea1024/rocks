@@ -64,21 +64,24 @@ int32 DecodeNibble(DecodeState& state, uint32 nibble) noexcept {
 } // namespace
 
 Result<void> DecodeAdpcmBlock(Span<const uint8> block, uint32 frames, Span<float> out) noexcept {
-    if (frames == 0 || frames > AdpcmFramesPerBlock || out.Size() < frames ||
-        block.Size() < AdpcmPreambleBytes) {
+    if (frames == 0 || frames > AdpcmFramesPerBlock || out.Size() < frames) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (block.Size() < AdpcmPreambleBytes) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 머리 뒤 nibble 쌍 하나가 2 frame이다. 첫 두 frame은 머리에 있다.
     const uint32 nibbleFrames = frames > 2 ? frames - 2 : 0;
     if (block.Size() < AdpcmPreambleBytes + (nibbleFrames + 1) / 2) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* bytes = block.Data();
     const uint32 coefficientIndex = bytes[0];
     if (coefficientIndex >= AdpcmCoefficientSets) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     DecodeState state;
@@ -118,7 +121,7 @@ Result<void> DecodeAdpcmFrames(Span<const uint8> payload, uint32 channels, uint6
     if (payload.Size() % groupBytes != 0 || blocks == 0 ||
         totalFrames > blocks * AdpcmFramesPerBlock ||
         totalFrames <= (blocks - 1) * AdpcmFramesPerBlock) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 블록 하나 분량의 scratch다(스택, 4 KiB 남짓).

@@ -2,7 +2,7 @@
 
 #include <Core/Assert.h>
 
-// 원본 메시 이웃 조회 표다(Docs/Design/MeshAnimationAssets.ko.md 3.7절 11).
+// 원본 메시 이웃 조회 표다(Docs/Design/MeshAnimationAssets 3.7절 11).
 namespace rocks {
 
 namespace {

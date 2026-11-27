@@ -658,7 +658,7 @@ TEST(PackageTags_WriteAndRead) {
         CHECK(WritePackageTags(allocator, pair).Error() == ErrorCode::InvalidArgument);
     }
 
-    // 다른 스키마 Guid의 Record는 Unsupported, 깨진 byte는 InvalidArgument다.
+    // 다른 스키마 Guid의 Record는 Unsupported, 깨진 byte는 CorruptData다.
     const uint8 value[4] = {1, 2, 3, 4};
     RecordBuilder other(allocator, Guid{0x7A, 0x6B}, 1);
     REQUIRE(other.AddField(Guid{1, 1}, WireType::U32, value));
@@ -666,7 +666,7 @@ TEST(PackageTags_WriteAndRead) {
     REQUIRE(otherBytes);
     CHECK(ReadPackageTags(allocator, otherBytes.Value().View()).Error() == ErrorCode::Unsupported);
     const uint8 junk[] = {1, 2, 3};
-    CHECK(ReadPackageTags(allocator, junk).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadPackageTags(allocator, junk).Error() == ErrorCode::CorruptData);
     // 손으로 만든 Record(writer가 만들지 않는 모양): 항목마다 키·값 필드의 유무·wire 종류·byte와
     // 항목 버전, Record마다 목록 필드의 모양과 Record 버전을 고른다.
     struct ItemSpec {
@@ -745,25 +745,25 @@ TEST(PackageTags_WriteAndRead) {
         uint32 version;
         ErrorCode expected;
     };
-    const ErrorCode invalidArgument = ErrorCode::InvalidArgument;
+    const ErrorCode corrupt = ErrorCode::CorruptData; // 읽은 byte의 손상(AssetSystem 19장)
     const RecordCase cases[] = {
         {&a, &b, ListShape::List, PackageTagsVersion, ErrorCode::None},
-        {&b, &a, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&a, &a, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&noKey, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&noValue, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&keyBytes, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&valueBytes, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&emptyKey, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&longKeyItem, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&badKey, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&badValue, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&longValueItem, nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
-        {&wrongItemBytes.Value(), nullptr, ListShape::List, PackageTagsVersion, invalidArgument},
+        {&b, &a, ListShape::List, PackageTagsVersion, corrupt},
+        {&a, &a, ListShape::List, PackageTagsVersion, corrupt},
+        {&noKey, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&noValue, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&keyBytes, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&valueBytes, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&emptyKey, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&longKeyItem, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&badKey, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&badValue, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&longValueItem, nullptr, ListShape::List, PackageTagsVersion, corrupt},
+        {&wrongItemBytes.Value(), nullptr, ListShape::List, PackageTagsVersion, corrupt},
         {&newerItem, nullptr, ListShape::List, PackageTagsVersion, ErrorCode::Unsupported},
         {&a, nullptr, ListShape::List, PackageTagsVersion + 1, ErrorCode::Unsupported},
-        {&a, nullptr, ListShape::Missing, PackageTagsVersion, invalidArgument},
-        {&a, nullptr, ListShape::WrongWire, PackageTagsVersion, invalidArgument},
+        {&a, nullptr, ListShape::Missing, PackageTagsVersion, corrupt},
+        {&a, nullptr, ListShape::WrongWire, PackageTagsVersion, corrupt},
     };
     for (usize index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
         const RecordCase& one = cases[index];

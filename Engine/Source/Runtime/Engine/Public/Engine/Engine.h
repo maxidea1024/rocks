@@ -2,6 +2,8 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Core/Text/NamePool.h>
+#include <Engine/PendingWorkRegistry.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ModuleTypeRegistrations.h>
@@ -199,6 +201,9 @@ inline constexpr char EngineStageStopped[] = "Engine.Stopped";
 struct EngineConfig {
     // 엔진 Registry(World보다 오래 사는 객체, 예: GameInstance)의 실행 문맥이다.
     ContextId context = {0x524f434b53454e47ull, 1};
+    // 엔진 이름 pool 한도다(Docs/Design/EngineRuntime 31.2절 — 엔진 Registry·모든 World가 함께 쓰고
+    // entry는 엔진 종료까지 회수하지 않는다. 한도에 닿으면 새 이름 intern이 CapacityExceeded다).
+    NamePoolConfig names;
     Span<const EngineSubsystemType> subsystems;
     EngineLoopHooks* hooks = nullptr;
     EngineClient* client = nullptr;
@@ -252,6 +257,7 @@ struct EngineConfig {
 struct WorldCreateDesc {
     StringView name;
     TimeStepPolicy timeStep;
+    // World 객체 Registry 설정이다. names가 null이면 엔진 이름 pool을 쓴다(31.2절).
     RegistryOptions objects;
     GcBudget gcBudget;
     // World GC 일정이다(WorldDesc::gcSchedule).
@@ -300,7 +306,8 @@ struct EngineStats {
 //   engine.Shutdown();                               // 여러 번 호출해도 안전
 //
 // 프레임 순서(RunFrame): 1) hooks.PumpEvents -> 2) 시간 갱신·설정 sync 지점(EngineConfig.settings가
-// 있으면 ConfigContext::Sync) -> 3) hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick ->
+// 있으면 ConfigContext::Sync) -> 3) hooks.BeginFrame·PendingWork().ApplyCompleted·
+// Subsystem.OnFrameBegin·client.OnEngineTick ->
 // 4) World마다 Tick -> 5) 지연 작업(World 파괴) -> 6) Subsystem.OnFrameEnd·hooks.EndFrame.
 //
 // 수명 규약:
@@ -311,7 +318,8 @@ struct EngineStats {
 //   client.OnEngineReady. 어느 단계든 실패하면 이미 한 단계를 역순으로 정리하고 Failed가
 //   된다(PostEngineInit 실패는 client.OnEngineShutdown 뒤, OnEngineReady 실패는 Shutdown과 같은
 //   정상 종료 순서).
-// - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
+// - 종료 순서(계획 3.2절): PendingWork().Shutdown -> BeginShutdown(Subsystem 역순 → hooks) ->
+//   client.OnEngineShutdown -> 모든
 //   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
 //   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
 //   MaxShutdownCollectPasses) -> hooks.VerifyShutdownClosure -> hooks.StopExecutors -> 엔진
@@ -392,6 +400,12 @@ public:
         return config_.settings;
     }
 
+    // 호스트가 넘긴 프로세스 모듈 로더다(EngineConfig::modules — 초기화 뒤 null이 아니다).
+    // Subsystem이 호스트 서비스(HostServices)를 찾는 길이다. 게임 스레드에서 쓴다.
+    ModuleLoader* Modules() const noexcept {
+        return config_.modules;
+    }
+
     // --- World ---
 
     // World를 만들어 초기화한다(desc.beginPlay면 BeginPlay까지). Running에서만 가능하다. 반환
@@ -433,6 +447,20 @@ public:
     // World보다 오래 사는 객체의 Registry다(Initialize 전에는 Fatal).
     ObjectRegistry& Objects() noexcept;
 
+    // 엔진 이름 pool이다(UE 전역 FName 표 — Docs/Design/EngineRuntime 31.2절). 엔진 Registry와
+    // CreateWorld가 만든 World가 이 pool을 쓰므로 Name 값을 그 사이에 그대로 옮길 수 있다. 다른
+    // Subsystem도 빌려 쓸 수 있다(에셋 객체 Registry 연결은 에셋 세션 몫). 한도는
+    // EngineConfig::names다. Initialize가 엔진 Registry보다 먼저 열고 Shutdown이 마지막에 닫는다.
+    // Initialize 전·Shutdown 뒤에는 Fatal이다. NamePool은 스레드 안전하다(엔진 allocator가 스레드
+    // 안전해야 한다).
+    //
+    // 사용 예:
+    //   auto enemy = engine.Names().TryIntern("Enemy");
+    //   if (enemy) {
+    //       (void)actor.AddTag(enemy.Value());
+    //   }
+    NamePool& Names() noexcept;
+
     Allocator& GetAllocator() const noexcept {
         return allocator_;
     }
@@ -454,6 +482,16 @@ public:
     // 키로 EngineSubsystem을 찾는다(바깥 계층 조회 창 — 16.3절). 없으면 nullptr이다.
     EngineSubsystem* FindSubsystem(SubsystemKey key) const noexcept {
         return subsystems_.Find(key);
+    }
+
+    // 대기 작업 등록소다(Docs/Design/ProgressReporting 8장, UE FAssetCompilingManager). 엔진은 매
+    // 프레임 시작 hook 뒤 ApplyCompleted를 부르고, Shutdown 처음에 Shutdown(남은 일 취소)을
+    // 부른다. 비동기 빌드 모듈이 source를 등록한다. 소유 스레드는 Initialize를 부른 스레드다.
+    //
+    // 사용 예(저장 전):
+    //   (void)engine.PendingWork().FinishAll();
+    PendingWorkRegistry& PendingWork() noexcept {
+        return pendingWork_;
     }
 
     // 엔진이 World에 넣는 기본 바깥 조회 창이다(EngineSubsystem만).
@@ -529,6 +567,8 @@ private:
     ModuleLoader* attachedModules_ = nullptr;
     // 이 Engine이 로더의 엔진 묶음 사용자다(StartEngineGroup 성공).
     bool engineGroupStarted_ = false;
+    // 엔진 이름 pool이다(31.2절). Registry·World보다 먼저 선언해 나중에 소멸시킨다.
+    UniquePtr<NamePool> names_;
     UniquePtr<TypeRegistry> types_;
     // TypeRegistry 뒤에 선언해 먼저 소멸시킨다(붙잡은 lease를 TypeRegistry::Shutdown 전에 놓는다).
     UniquePtr<ModuleRegistration> modules_;
@@ -538,6 +578,9 @@ private:
     // GC 표식 scheduler다(17.4절). World보다 먼저 선언해 나중에 소멸시킨다 — Shutdown은 World를
     // 모두 파괴한 뒤 끝낸다.
     UniquePtr<WorkerScheduler> gcScheduler_;
+    // 대기 작업 등록소다(Docs/Design/ProgressReporting 8장). Subsystem보다 먼저 선언해 나중에
+    // 소멸시킨다(source를 등록한 Subsystem이 Deinitialize에서 Unregister한다).
+    PendingWorkRegistry pendingWork_;
     SubsystemCollection<EngineSubsystem, Engine> subsystems_;
     Array<WorldContext> worlds_;
     EngineTime time_;

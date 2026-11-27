@@ -33,7 +33,9 @@
   - `GraphSharedData`(7.3절)는 넣지 않았다.
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
-- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 그래프 attachment resolve와 그래프 구간 `GraphScope`·번호 trace 표지는 개정 28에서 넣었다(아래 "RG1 남은 것 설계 2"). attachment 기록·렌더 타깃 없는 기록·풀 desc 확장·`GraphTextureView`·`GraphSharedData`·`SceneTextureTable`(`GraphViewTable`)은 개정 26에서 넣었다(아래 "구현(2026-11-19, RG1 남은 것 A–C부)"). export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+- 남은 것(RG1): 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 그래프 attachment resolve와 그래프 구간 `GraphScope`·번호 trace 표지는 개정 28에서 넣었다(아래 "RG1 남은 것 설계 2"). attachment 기록·렌더 타깃 없는 기록·풀 desc 확장·`GraphTextureView`·`GraphSharedData`·`SceneTextureTable`(`GraphViewTable`)은 개정 26에서 넣었다(아래 "구현(2026-11-19, RG1 남은 것 A–C부)"). export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+
+**파라미터 구조체 수집기(개정 57, 셰이더 시스템 16.2절 SH3c).** 구현했다: `CollectGraphPassAccesses`가 생성 파라미터 구조체의 그래프 멤버를 훑어 명시 선언 builder와 같은 접근 목록을 만들고, 구조체 판 `AddPass`가 그 목록으로 `AddPassWithAccesses`를 부른다(UE `SetupPassResources`). 셰이더가 쓰지 않는 멤버는 자원 지도로 거른다(9.6절). 완료 기준 동치 시험 `RenderGraph_ParameterStructCollectorMatchesExplicitAccesses`(두 경로의 기록 장치 명령 열 동일).
 
 **RG1 남은 것 설계(개정 26).** SH2·RB4·P7·CP4에 기대지 않는 부분을 세 부분으로 나눠 넣는다. 파라미터 구조체 수집기(RB4·SH2·P7)·그래프 설정 변수(CP4)·캡처 도구 수동 기록은 그대로 남는다.
 - **A부: attachment 기록과 풀 desc 확장.**
@@ -209,3 +211,45 @@
 - 프레임 안 재사용 보강: 렌더 타깃이었던 객체의 자리는 다음 Raster pass(새 기록)부터 넘긴다(`PhysicalResource::waitsForRecording`). 같은 기록 안의 Copy·Compute pass가 아직 attachment로 묶인 객체를 받으면 장치 `CopyTexture`의 "지금 패스의 attachment 아님" 계약을 어기기 때문이다(분리 전이 GPU 시험에서 드러났다).
 - 시험(EngineTests): `RenderGraphSplitTests`. 기대 열(Raster → Compute → Compute → Compute에서 텍스처·버퍼 분리 둘: begin은 생산 pass 그리기 뒤, end는 소비 pass 그리기 앞, end pass가 같은 두 묶음의 짝 번호, 단계별 before·after), 분리 켬·끔의 전이를 뺀 호출 열과 최종 상태 동일·검증 0, 나누지 않는 경우(바로 다음 pass, 사이 Raster pass, Immediate), 기록 장치 짝 검사(정상·이미 끝난 짝·다른 목록·열린 짝 건드림·끝나지 않은 짝). Graphics `SplitTransitionTrackerTests`. 기존 RG1 기대 열 시험은 분리를 끈 열로 둔다.
 - 시험(Sandbox self-test (g)): Raster A → Raster(새 기록) → Copy C ← A → Copy 버퍼 → Copy D ← C(텍스처 복사 대상 → 원본 분리) → Copy 버퍼(버퍼 분리) → Raster 합성. 분리 켬(분리 2)·끔(0)의 출력 픽셀(빨강)과 복사 버퍼 바이트가 같고 검증 오류 0이다. D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES 두 context는 end에서 낮추고, Vulkan(GTX 1060·lavapipe)은 synchronization2 event로 낸다. Vulkan은 검증 층 synchronization validation(`VK_KHRONOS_VALIDATION_VALIDATE_SYNC`)을 켠 실행에서도 확인했다.
+
+**스왑체인 공유 설계(개정 64, [UI 도구](../UiToolkit/README.ko.md) 18.6절 요청 1).** 한 그래프에서 같은 스왑체인을 대상으로 하는 Raster pass 여럿이 백버퍼 하나를 함께 쓰고, 그 스왑체인의 마지막 pass에서만 present한다(뒤 pass는 load). 장면 tone map 뒤 UI를 같은 창에 그리려는 것이다.
+- **지금(개정 63까지).** 스왑체인 타깃 pass마다 장치 `BeginFrame`(늘 clear)으로 기록을 열고 그 기록의 `EndFrame`이 present한다. 장면 pass와 UI pass가 같은 스왑체인을 대상으로 하면 present가 두 번이고 UI pass가 장면을 지운다.
+- **UE 방식.**
+  - 창 백버퍼는 그래프의 외부 텍스처다(`SlateRHIRenderer/Private/SlateRHIRenderer.cpp:984`). 외부 자원에 쓰는 pass는 culling 뿌리이고(7.1절 culling 행) transient 대상이 아니다(`RC/Private/RenderGraphBuilder.cpp:501–560`).
+  - UI pass의 시작 동작은 호출자가 정한다: 창이 clear를 요구하면(픽셀 투명 창·와이어프레임 등) clear, 아니면 load다(`SlateRHIRenderer.cpp:992–1072`). 같은 백버퍼에 장면을 먼저 그렸으면 load로 잇는다.
+  - present는 그래프 밖이다: 모든 창의 그래프를 `Execute`한 뒤(`:1489–1493`) 창마다 present 상태 전이와 `EndDrawingViewport`(present)를 낸다(`:1295–1320`, `:1503`). 그래서 한 프레임에 창마다 present 하나다.
+- **Rocks 구조.**
+  - **장치(GX).**
+    - `SwapChainPassDesc`(스왑체인, `load`, `clear`, `present`)와 `Device::BeginFrame(const SwapChainPassDesc&)`. `BeginFrame(swapChain, clear)`는 clear + present인 간단한 형태로 남는다(`BeginOffscreen`과 같은 자리).
+    - `present`가 거짓이면 `EndFrame`은 제출만 하고 present하지 않으며 백버퍼(D3D12 지금 백버퍼 번호, D3D11 백버퍼, Vulkan·OpenGL ES 스왑체인 중간 이미지)를 그대로 둔다. 다음 `BeginFrame`이 같은 백버퍼에 이어 그린다. D3D12 백버퍼 번호는 present 때만 바뀌고, Vulkan의 실제 acquire는 present하는 `EndFrame`의 blit 앞이므로(4.4절 GX5 Vulkan) 잡아 둔 swapchain image가 없다.
+    - 스왑체인마다 "그리는 중인 프레임" 표시를 둔다: `BeginFrame`이 켜고, present하는 `EndFrame`(present 성공·실패와 무관)과 `ResizeSwapChain`이 끈다. `load` `Load`는 이 표시가 켜져 있을 때만 받는다(아니면 `InvalidArgument`). present 뒤·처음 백버퍼 내용은 정의되지 않기 때문이다(DXGI flip discard, Vulkan 중간 이미지의 첫 layout UNDEFINED). `Clear`·`DontCare`는 늘 받는다.
+    - backend: D3D12는 기록마다 present → 렌더 타깃 → present 전이(지금과 같다). Vulkan은 present하지 않는 기록 끝에 중간 이미지를 attachment layout으로 두고 다음 기록이 attachment 쓰기 뒤에서 잇는다. load는 render pass `LOAD_OP_LOAD`·`DONT_CARE`로 낮춘다. D3D11·OpenGL ES는 clear를 생략한다.
+    - 진단 `Device::PresentCount()`(낸 present 누적 수, 실패한 present는 세지 않는다). 시험이 "프레임당 present 하나"를 장치에서 센다.
+  - **그래프.**
+    - `GraphPassAccesses::SwapChainTarget(swapChain, load = Clear, clear)`와 `GraphRenderTarget::load`. 시작 동작은 호출자가 정한다(UE와 같다). 그래프가 뒤 pass를 load로 바꾸지 않는다: 뒤 pass가 의도적으로 지울 수 있어야 하고, 앞 pass가 없을 때 load는 오류여야 하기 때문이다.
+    - 검증(`AddPass`): 그래프에서 그 스왑체인의 첫 pass가 `Load`면 검증 오류다(생산 전 읽기와 같은 성격 — 이 그래프의 앞 pass가 그리지 않은 백버퍼). 스왑체인은 그래프 자원이 아니므로 SRV·복사·UAV로 선언할 수 없다(handle이 없다). pass 안의 `CopyPassTarget`만 백버퍼를 읽는다(지금과 같다).
+    - 그래프는 스왑체인마다 (handle, 첫 pass, 마지막 pass)를 `AddPass` 때 적는다. 스왑체인 pass는 culling 뿌리라 제거되지 않으므로 적은 마지막 pass가 실행에서도 마지막이다.
+    - 실행(Deferred): 스왑체인 pass는 `BeginFrame({swapChain, load, clear, present = 그 스왑체인의 마지막 pass인가})`로 기록을 연다. 그래서 present는 그 스왑체인을 쓰는 마지막 pass의 기록이 닫힐 때 한 번이다. 그 사이 Compute·Copy pass·다른 타깃 pass가 있어도 된다(기록은 지금 규칙대로 나뉜다). 스왑체인이 둘이면 각자 마지막 pass에서 따로 present한다.
+    - 실행(Immediate): `AddPass`가 바로 실행하므로 뒤 pass를 알 수 없다. 스왑체인 pass는 모두 present 없이 열고, `Execute`가 성공하면 그래프 끝에서 스왑체인마다(처음 쓴 순서) 그리기 없는 present 기록 `BeginFrame({swapChain, Load, present})` 하나를 열고 닫는다. 그래서 즉시·지연 모드의 장치 호출 열은 이 present 기록만큼 다르다(완료 기준 (d)의 동치는 스왑체인이 없는 그래프로 대조한다).
+    - 실패: pass·기록 오류로 `Execute`가 멈추면 이미 닫은 present 없는 기록은 present되지 않고, 이 그래프의 그 스왑체인 present도 없다(그래프 진단 `LastError`에 실패한 pass). 첫 `BeginFrame` 실패(스왑체인 크기 변경 실패로 버퍼 없음·장치 손실)도 같다. 다음 그래프가 clear로 새 프레임을 그린다.
+    - 병렬 기록(RG3): present 여부는 소유 스레드가 기록을 열 때 정하므로 직렬·병렬 장치 호출 열이 같다. async compute(RG4): 스왑체인 pass는 Raster라 늘 graphics다. fork·join이 기록을 나눠도 present는 마지막 스왑체인 pass의 기록이다. transient aliasing(RG5): 스왑체인은 그래프 자원이 아니라 대상이 아니다.
+    - 크기 변경·표면 소실은 렌더 lane의 표면 작업이고 프레임 packet 처리(그래프 실행) 사이에 실행된다(5.3절). 그래서 한 그래프 안에서 스왑체인 크기·버퍼가 바뀌지 않는다. Vulkan OUT_OF_DATE는 present하는 `EndFrame`의 acquire가 다시 만들고 잇는다(지금과 같다).
+    - 진단: `GraphStats::presents`(present를 낸 기록 수 — 그래프가 닫은 present 기록 가운데 `EndFrame`이 성공한 수).
+- **버린 대안.**
+  - (가) 그래프는 present하지 않고 호출자(렌더 lane 처리기)가 `Execute` 뒤 `Device::Present(swapChain)`를 부른다(UE 구조에 가장 가깝다). 장치에 기록 밖 present가 새로 들고, Vulkan은 그 present를 위해 acquire·blit 기록을 하나 더 열어 제출해야 한다. 처리기마다 present를 잊지 않아야 하고 그래프 실패 때 present 여부도 처리기가 따로 정해야 한다. 그래프가 마지막 pass를 정확히 알므로 그 기록에서 낸다(present 횟수·위치는 UE와 같다).
+  - (나) 백버퍼를 그래프 텍스처로 import. 장치에 백버퍼 `TextureHandle`이 없고(D3D12 백버퍼 번호는 present마다 바뀌고 Vulkan·OpenGL ES는 중간 이미지다) SRV·복사·aliasing 배제 규칙을 새로 둬야 한다. 요청은 같은 백버퍼에 이어 그리기뿐이다.
+  - (다) 뒤 pass의 시작 동작을 그래프가 늘 load로 바꾸기. 뒤 pass가 의도적으로 clear할 수 없고, 앞 pass가 culling·조건으로 빠졌을 때 오류를 숨긴다.
+  - (라) 같은 스왑체인의 연속 pass를 기록 하나로 합치기. 사이에 다른 타깃 pass나 attachment 복사 pass가 끼면 안 되고 RG3 후속 render pass 병합과 겹친다. 기록 수 최적화는 병합 단계에서 본다.
+- **한계.**
+  - 마지막 스왑체인 기록 안(그 기록에 이어 쓴 Compute·Copy pass 포함)에서 실패하면 그 기록은 닫힐 때 제출되며 present된다(장치에 present 취소가 없다). 지금 동작(모든 스왑체인 pass가 present)과 같다.
+  - Immediate 모드는 present 기록 하나가 더 든다(디버그 모드).
+  - Sandbox `ScreenPacket`의 UI packet 자리와 `UiLaneRenderer::AddPasses` 호출(18.6절 요청 2)은 UI 타입이 engine-runtime에 없어 이번에 넣지 않는다. UI 브랜치 병합 뒤 게임 UI 단계(UT5)에서 Sandbox에 연결한다.
+- **완료 기준.**
+  - EngineTests(기록 장치): 같은 스왑체인 pass 둘(사이 Copy pass) → `BeginFrame` 둘(앞은 present 없음·clear, 뒤는 load·present), present 1, 뒤 pass load. 스왑체인 둘이 서로 다른 마지막 pass에서 present. 첫 pass `Load` 검증 오류, 첫 `BeginFrame` 실패·둘째 `BeginFrame` 실패에서 present 0과 그래프 진단. 장치 규칙: present 뒤 `Load`는 `InvalidArgument`. 병렬·직렬 기록의 장치 호출 열(present 표시 포함) 같음. Immediate 모드의 그래프 끝 present 기록. async compute가 끼어도 present 1.
+  - Sandbox `--self-test`(여덟 장치): 숨긴 창 스왑체인에 장면 → tone map(스왑체인 clear) → Copy pass → overlay(스왑체인 load, 가운데 사각형)를 그리고, overlay pass의 `CopyPassTarget` 캡처가 가장자리 = 장면 색·가운데 = overlay 색, 프레임마다 장치 `PresentCount` 증가 1, 직렬·병렬·즉시 모드 픽셀 같음, present 뒤 `Load` 거부, 검증 오류 0.
+- **구현(2026-11-27, 스왑체인 공유).** 위 설계대로다.
+  - Graphics: `SwapChainPassDesc`(`swapChain`·`load`·`clear`·`present`), 가상 `Device::BeginFrame(const SwapChainPassDesc&)`와 간단한 형태 `BeginFrame(swapChain, clear)`(비가상, backend는 `using Device::BeginFrame`), `Device::PresentCount()`. backend 넷: 스왑체인 기록의 `frameOpen` 표시(BeginFrame이 켜고 present하는 EndFrame·크기 변경·중간 이미지 재생성이 끈다), `Load`인데 꺼져 있으면 `InvalidArgument`, `presentOnEnd_`가 거짓이면 present 생략(D3D12·D3D11 `Present` 안 부름, OpenGL ES present blit 생략, Vulkan acquire·blit 생략과 중간 이미지 `COLOR_ATTACHMENT_OPTIMAL` 유지), load는 D3D12·D3D11·OpenGL ES clear 생략·Vulkan `LOAD_OP_LOAD`·`DONT_CARE`. 기록 장치: 같은 규칙, `Op::BeginFrame` value `SwapChainPassValue(load, present)`, `Op::Present`(EndFrame 바로 뒤), `SetBeginFrameFailure`(acquire 실패 주입).
+  - RenderGraph: `GraphRenderTarget::load`, `SwapChainTarget(swapChain, load, clear)`, 내부 `SwapChainUse`(스왑체인별 첫·마지막 pass, `AddPass`가 적음)와 첫 pass `Load` 검증 오류, 실행의 present 판정(Deferred 마지막 pass)·`recordingPresents`, Immediate의 `FinishGraph` present 기록, `GraphStats::presents`. Sandbox `ScreenRenderer` 두 호출은 `GraphLoadAction::Clear`를 명시한다.
+  - 시험(EngineTests `RenderGraphSwapChainTests` 8개): 백버퍼 공유(BeginFrame (Clear, present 없음) → (Load, present), Copy pass가 앞 스왑체인 기록 안, present는 마지막 EndFrame 바로 뒤 하나), 스왑체인 둘의 따로 present, 첫 pass `Load`·다른 스왑체인만 그린 뒤 `Load` 검증 오류, 첫·둘째 `BeginFrame` 실패의 present 0과 진단 및 다음 그래프 회복, 장치 규칙(처음·present 뒤·크기 변경 뒤 `Load` 거부, 간단한 형태 present), 병렬·직렬 장치 호출 열 동일, Immediate 그래프 끝 present 기록과 실패 그래프 present 0, async compute 사이 present 1. 기존 `RenderGraph`·`RenderLane`·`Builtin`·`GpuTrace`·`EngineShaderHost` 시험 통과.
+  - 시험(Sandbox `--self-test` `RunSwapChainShareChecks`, Programs/Sandbox/Private/SwapChainShareSelfTest.cpp): 숨긴 창 32×32 스왑체인에 장면(빨강) → 초록 → tone map(스왑체인 clear, 장면 전체) → Copy(초록 → 복사본) → overlay(스왑체인 load, 가운데 절반 사각형, `CopyPassTarget` 캡처). 직렬 3프레임·병렬 기록 1프레임·Immediate 1프레임 모두 프레임마다 장치 `PresentCount` +1·`GraphStats::presents` 1, 캡처 가장자리 빨강·가운데 초록(±8), 세 모드 픽셀 byte 동일, present 뒤 `Load` 거부, 검증 오류 0 — D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·OpenGL ES on GL core·Vulkan(GTX 1060)·Vulkan software(lavapipe). 병렬 기록에서 샘플 렌더러를 worker 여럿이 함께 쓰지 않도록(렌더러가 그리기 통계를 고친다) 그리는 pass마다 렌더러를 따로 둔다.
+  - 스펙과 다르게 정한 것: 없음. Metal backend(feature/platform-mac, 미병합)는 이 계약(`BeginFrame(const SwapChainPassDesc&)`·`PresentCount`)을 병합 때 따라야 한다.

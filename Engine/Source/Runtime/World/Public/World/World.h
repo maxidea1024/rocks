@@ -25,6 +25,7 @@ class ConfigContext;
 namespace rocks {
 
 class ConstructionContext;
+class PhysicsScene;
 class World;
 
 // World 수명과 같이하는 Subsystem의 기반이다(SubsystemCollection 참고).
@@ -360,6 +361,26 @@ public:
         return gcScheduler_;
     }
 
+    // 설정 문맥이다(WorldDesc::settings — 없으면 nullptr). 물리 설정처럼 World 수명 Subsystem이
+    // 등록된 설정 struct를 읽는 데 쓴다(FindSettings).
+    config::ConfigContext* Settings() const noexcept {
+        return settings_;
+    }
+
+    // 이 World의 물리 장면 접점이다(Docs/Design/PhysicsModule 2.2절 — UE UWorld::GetPhysicsScene).
+    // Physics 모듈의 PhysicsWorldSubsystem이 꽂고, 없으면 nullptr이다(물리 없는 World).
+    PhysicsScene* GetPhysicsScene() const noexcept {
+        return physicsScene_;
+    }
+
+    // 물리 장면 접점을 꽂거나(scene) 뗀다(nullptr). PhysicsWorldSubsystem만 부른다. World가
+    // Initialized(Subsystem 초기화 중과 BeginPlay 전)·TearingDown(정리 중)일 때만 받고 다른 상태는
+    // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 떼기는 body가 남아
+    // 있어도 성공한다: 초기화 되돌림은 Subsystem 정리가 Actor 정리보다 먼저이고, 장면이 없으면
+    // 컴포넌트는 body 지우기를 건너뛴다(PhysicsModule 7.1.5절). 장면은 뗄 때까지 살아 있어야 한다.
+    // PhysicsModule 7.1.1절.
+    Result<void> SetPhysicsScene(PhysicsScene* scene) noexcept;
+
     WorldState State() const noexcept {
         return state_;
     }
@@ -589,6 +610,26 @@ public:
             }
         }
     }
+
+    // --- 태그 찾기(Docs/Design/EngineRuntime 31.5절) ---
+
+    // tag를 가진 Actor를 out에 담는다(UE UGameplayStatics::GetAllActorsWithTag — 선형). out을 먼저
+    // 비운다. 순서는 정하지 않는다. 파괴 대기 Actor는 뺀다. None이면 빈 채 성공이다. 할당 실패는
+    // OutOfMemory이고 out은 빈다. 게임 스레드 전용이다.
+    //
+    // 사용 예:
+    //   Array<ObjectHandle> enemies(allocator);
+    //   (void)world.FindActorsWithTag(enemyTag, enemies);
+    Result<void> FindActorsWithTag(rocks::Name tag, Array<ObjectHandle>& out) noexcept;
+
+    // actor의 Component 중 type(또는 파생 — null이면 모두)이고 tag를 가진 것을 components 순서로
+    // 담는다(UE AActor::GetComponentsByTag). 파괴 대기 Component는 뺀다. None이면 빈 채 성공이다.
+    // 오류: 이 World의 Actor가 아니면 StaleHandle, 할당 실패 OutOfMemory(out은 빈다).
+    Result<void> FindComponentsByTag(ObjectHandle actor, TypeId type, rocks::Name tag,
+                                     Array<ObjectHandle>& out) noexcept;
+
+    // 위의 첫째다(UE AActor::FindComponentByTag). 없거나 이 World의 Actor가 아니면 null이다.
+    ObjectHandle FindComponentByTag(ObjectHandle actor, TypeId type, rocks::Name tag) noexcept;
 
     // actor의 Component 수와 handle(추가 순서)이다. out이 작으면 앞부분만 채우고 전체 수를
     // 반환한다.
@@ -827,6 +868,8 @@ private:
     ActorRecord* FindActorRecord(ObjectHandle actor) noexcept;
     const ActorRecord* FindActorRecord(ObjectHandle actor) const noexcept;
     ComponentSlot ComponentSlotAt(ObjectHandle actor, usize index) noexcept;
+    // component가 파괴 대기가 아니고 type(null이면 모두)이며 tag를 가졌는지다(31.5절 찾기).
+    bool ComponentMatchesTag(ObjectHandle component, TypeId type, rocks::Name tag) noexcept;
     // actor의 index번째 Component다. 범위 밖이거나 Actor에 접근할 수 없으면 null handle이다.
     ObjectHandle ComponentAt(ObjectHandle actor, usize index) noexcept;
     usize ComponentCountOf(ObjectHandle actor) noexcept;
@@ -1015,6 +1058,8 @@ private:
     WorkerScheduler* gcScheduler_ = nullptr;
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
+    // 물리 장면 접점이다(빌림 — PhysicsWorldSubsystem이 소유).
+    PhysicsScene* physicsScene_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
     CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;

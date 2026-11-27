@@ -166,7 +166,7 @@ TEST(FixtureAsset_ValidateHook) {
         CHECK(!LoadAll(env, *env.target, files, PackageKind::Cooked, nullptr, roots, handles,
                        &failure));
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
-        CHECK(failure.error == ErrorCode::InvalidArgument);
+        CHECK(failure.error == ErrorCode::CorruptData);
         CHECK(env.target->Stats().liveObjects == before);
     }
 }

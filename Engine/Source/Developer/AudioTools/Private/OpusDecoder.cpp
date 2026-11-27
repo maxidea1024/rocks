@@ -94,12 +94,12 @@ ErrorCode OpusErrorCode(int error) noexcept {
     }
 
     return error == OP_EIMPL || error == OP_EVERSION ? ErrorCode::Unsupported
-                                                     : ErrorCode::InvalidArgument;
+                                                     : ErrorCode::CorruptData;
 }
 
 Result<void> DecodeOpusInto(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
     if (file.Size() == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // opusfile도 CRC가 틀린 page와 빠진 link 끝·BOS page를 건너뛸 수 있으므로 page 구조를 먼저
@@ -128,7 +128,7 @@ Result<void> DecodeOpusInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     }
 
     if (firstChannels <= 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (static_cast<uint32>(firstChannels) > MaxSourceChannels) {
@@ -141,7 +141,7 @@ Result<void> DecodeOpusInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     const uint32 channels = static_cast<uint32>(firstChannels);
     const ogg_int64_t total = op_pcm_total(opus.Get(), OpusAllLinks);
     if (total <= 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint64 expectedFrames = static_cast<uint64>(total);
@@ -164,7 +164,7 @@ Result<void> DecodeOpusInto(Span<const uint8> file, DecodedSourceAudio& out) noe
         const usize before = interleaved.Size();
         // 미리 안 길이를 넘는 출력은 손상이다(상한도 그 길이로 이미 판정했다).
         if (before / channels > expectedFrames) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         auto space = interleaved.TryAppendUninitialized(readValues);
@@ -192,14 +192,14 @@ Result<void> DecodeOpusInto(Span<const uint8> file, DecodedSourceAudio& out) noe
         // 손상된 packet이 비유한 값을 낼 수 있다. 믹서까지 가지 않게 막는다.
         for (usize index = before; index < before + produced; ++index) {
             if (!math::IsFinite(interleaved[index])) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
         }
     }
 
     const uint64 frames = interleaved.Size() / channels;
     if (frames != expectedFrames) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(channels, OpusOutputRate, frames, SourceSampleFormat::Lossy,

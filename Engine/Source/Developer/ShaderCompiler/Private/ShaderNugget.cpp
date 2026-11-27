@@ -79,7 +79,7 @@ Result<void> MoveShaderValuesFromNugget(Array<NuggetValue>& record,
         const uint32 id = record[index].id;
         if (id >= ShaderNuggetValueCount || (index != 0 && id <= previous)) {
             values.Reset();
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         previous = id;

@@ -6,7 +6,7 @@ using Rocks.Build.Rules;
 /// provider interface with the Developer shader compiler (CompileShaderLibrary, the shader compile worker and the shader nugget cache) and builds
 /// each requested format's engine library in memory. Its module lifetime object attaches the provider to the host's EngineShaderHost service at
 /// Startup and detaches it at Shutdown, so an executable gets on-demand shader compiling by linking this module outside Release (Runtime modules
-/// never depend on it — RenderBase SX14). HostConfig: the engine folder that holds Shaders and Config/ShaderFormats.
+/// never depend on it — RenderBase SX14). HostConfig: the engine folder that holds Shaders and Config/ShaderFormats. It also owns watch recompile (ShaderSystem section 16.3 SH4): a source watch thread over the mounted shader folders rebuilds the dependent format libraries through ShaderLibraryReloader, and the CVars shader.recompile_on_save and shader.symbols (Config) control it.
 /// </summary>
 public sealed class DevelopmentShaderProvider : EngineModuleRules
 {
@@ -21,5 +21,5 @@ public sealed class DevelopmentShaderProvider : EngineModuleRules
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
     protected override string[] PrivateDependencies => ["ShaderCompiler", "ShaderCompilerCommon", "ShaderCore", "AssetNugget", "ObjectRuntime", "Task", "HostConfig",
-        "ModuleLoader", "PlatformBase"];
+        "ModuleLoader", "PlatformBase", "Config"];
 }

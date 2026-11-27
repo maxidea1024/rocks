@@ -11,14 +11,16 @@
 #include <ShaderCore/ShaderParameterLayout.h>
 #include <ShaderCore/ShaderType.h>
 
+#include <SandboxShaderParameters.shaderparams.h>
+
 // Sandbox 셰이더다(Docs/Design/ShaderSystem 16.1절 SSD19·SH2f). 원문은 Programs/Sandbox/Shaders이고
 // /Plugin/Sandbox로 mount한다(엔진 셰이더가 아니므로 Engine/Shaders에 두지 않는다). 셰이더 타입은
-// 이 실행 파일만 등록하고 쿠킹하지 않는다. 등록부·공급자·장치별 집합은 엔진 호스트 공용
-// 경로(Docs/Design/RenderBase 9.12절)를 쓴다: 이 실행 파일이 엔진 셰이더 호스트(EngineShaderHost)에
-// Sandbox 타입과 원문 디렉터리를 넣어 서비스로 올리고, 엔진 셰이더 타입은 RenderBase 모듈이,
-// 공급자는 Release 밖에서 링크한 DevelopmentShaderProvider 모듈이 Startup에서 넣는다. Release
-// 실행 파일에는 공급자가 없으므로 셰이더 집합을 열지 못한다(UnsupportedCapability — 그리기
-// self-test는 NOT RUN).
+// self-test 호스트만 등록하고 쿠킹하지 않는다(엔진 실행은 등록하지 않는다 — SSD48).
+// 등록부·공급자·장치별 집합은 엔진 호스트 공용 경로(Docs/Design/RenderBase 9.12절)를 쓴다: 이 실행
+// 파일이 엔진 셰이더 호스트(EngineShaderHost)에 Sandbox 타입과 원문 디렉터리를 넣어 서비스로
+// 올리고, 엔진 셰이더 타입은 RenderBase 모듈이, 공급자는 Release 밖에서 링크한
+// DevelopmentShaderProvider 모듈이 Startup에서 넣는다. Release 실행 파일에는 공급자가 없으므로
+// 셰이더 집합을 열지 못한다(UnsupportedCapability — 그리기 self-test는 NOT RUN).
 //
 // 사용 예(self-test):
 //   auto pipeline = shaders::CreateGraphicsPipeline(device, shaders::SampleVS, shaders::SamplePS,
@@ -103,6 +105,40 @@ constexpr ShaderTypeDesc DevelopmentOnly(ShaderTypeDesc desc) noexcept {
 #undef SANDBOX_PIXEL_IF
 #undef SANDBOX_PIXEL_DEV_IF
 
+// 생성 셰이더 파라미터 구조체 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD58 3). 두
+// 단계가 같은 원문을 include하므로 둘 다 표를 가진다(VS에는 쓰는 버퍼가 없어 대조하지 않는다).
+inline constexpr rocks::shader::ShaderParameterLayout GeneratedParameterLayouts[] = {
+    rocks::shader::ShaderParameterLayoutOf<GeneratedProbeParameters>(),
+    rocks::shader::ShaderParameterLayoutOf<GeneratedProbeDraw>()};
+
+constexpr ShaderTypeDesc WithGeneratedLayouts(ShaderTypeDesc desc) noexcept {
+    desc.parameterLayouts = GeneratedParameterLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GeneratedParametersVS = WithGeneratedLayouts(
+    SandboxType("SandboxGeneratedParametersVS", "/Plugin/Sandbox/GeneratedParameters.rsf",
+                "GeneratedParametersVS", rocks::shader::ShaderStageVertex));
+inline constexpr ShaderTypeDesc GeneratedParametersPS = WithGeneratedLayouts(
+    SandboxType("SandboxGeneratedParametersPS", "/Plugin/Sandbox/GeneratedParameters.rsf",
+                "GeneratedParametersPS", rocks::shader::ShaderStagePixel));
+
+// 생성 구조체 자원 멤버 self-test 타입이다(Docs/Design/ShaderSystem 16.2절 SSD66 4).
+inline constexpr rocks::shader::ShaderParameterLayout GeneratedResourceLayouts[] = {
+    rocks::shader::ShaderParameterLayoutOf<GeneratedResourceParameters>()};
+
+constexpr ShaderTypeDesc WithGeneratedResourceLayouts(ShaderTypeDesc desc) noexcept {
+    desc.parameterLayouts = GeneratedResourceLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GeneratedResourcesVS = WithGeneratedResourceLayouts(
+    SandboxType("SandboxGeneratedResourcesVS", "/Plugin/Sandbox/GeneratedResources.rsf",
+                "GeneratedResourcesVS", rocks::shader::ShaderStageVertex));
+inline constexpr ShaderTypeDesc GeneratedResourcesPS = WithGeneratedResourceLayouts(
+    SandboxType("SandboxGeneratedResourcesPS", "/Plugin/Sandbox/GeneratedResources.rsf",
+                "GeneratedResourcesPS", rocks::shader::ShaderStagePixel));
+
 // 엔진 셰이더 SL0 probe 타입이다(Docs/Design/EngineShaders 7.6절, 결정 SLD19). 원문은
 // Programs/Sandbox/EngineShaderTests를 /Plugin/EngineShaderTests로 mount한 시험 루트이고 쿠킹하지
 // 않는다. 그리기별 상수는 ProbeConstants(96 byte — Common/ProbeCommon.rsh)다.
@@ -136,6 +172,63 @@ inline constexpr ShaderTypeDesc ShadingFloatProbe = EngineShaderProbeType(
     "EngineShaderShadingFloatProbe", "/Plugin/EngineShaderTests/Shading/ShadingTestKernels.rsf",
     "ShadingFloatProbePixel");
 
+// 엔진 셰이더 SL1 probe 타입이다(Docs/Design/EngineShaders 14.6절 2항). CS 셋과 그룹 연산
+// CS(퍼뮤테이션 PROBE_GROUP_SIZE 64·256·100 스레드 × PROBE_FORCE_GROUPSHARED), 텍스처를 읽는
+// 유틸리티 PS 하나다.
+constexpr ShaderTypeDesc EngineShaderComputeProbeType(StringView name, StringView entry) noexcept {
+    ShaderTypeDesc desc = rocks::shader::MakeShaderTypeDesc(
+        rocks::shader::ShaderTypeName{name, rocks::shader::ShaderTypeNameHash(name)},
+        "/Plugin/EngineShaderTests/Common/ComputeProbes.rsf", entry,
+        rocks::shader::ShaderStageCompute, rocks::shader::ShaderTypeOwner::EnginePlugin);
+    desc.parameterLayouts = ProbeConstantLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc ComputeDispatchProbe =
+    EngineShaderComputeProbeType("EngineShaderComputeDispatchProbe", "ComputeDispatchProbe");
+inline constexpr ShaderTypeDesc WrappedDispatchProbe =
+    EngineShaderComputeProbeType("EngineShaderWrappedDispatchProbe", "WrappedDispatchProbe");
+inline constexpr ShaderTypeDesc WriteDispatchArgumentsProbe = EngineShaderComputeProbeType(
+    "EngineShaderWriteDispatchArgumentsProbe", "WriteDispatchArgumentsProbe");
+
+// 그룹 연산 probe의 그룹 스레드 수(PROBE_GROUP_SIZE 값 순서)다.
+inline constexpr rocks::uint32 GroupOperationProbeSizes[] = {64, 256, 100};
+inline constexpr rocks::uint32 GroupOperationProbeSizeCount = 3;
+inline constexpr StringView GroupOperationProbeSizeNames[] = {"Threads64", "Threads256",
+                                                              "Threads100"};
+inline constexpr rocks::shader::ShaderPermutationDimension GroupOperationProbeDimensions[] = {
+    rocks::shader::ShaderPermutationDimension::Enum("PROBE_GROUP_SIZE",
+                                                    GroupOperationProbeSizeNames),
+    rocks::shader::ShaderPermutationDimension::Bool("PROBE_FORCE_GROUPSHARED")};
+
+// 퍼뮤테이션 ID다(크기가 낮은 자리).
+constexpr rocks::uint32 GroupOperationProbePermutation(rocks::uint32 size,
+                                                       bool forceGroupshared) noexcept {
+    return size + GroupOperationProbeSizeCount * (forceGroupshared ? 1u : 0u);
+}
+
+constexpr ShaderTypeDesc MakeGroupOperationsProbe() noexcept {
+    ShaderTypeDesc desc =
+        EngineShaderComputeProbeType("EngineShaderGroupOperationsProbe", "GroupOperationsProbe");
+    desc.permutation.dimensions = GroupOperationProbeDimensions;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GroupOperationsProbe = MakeGroupOperationsProbe();
+inline constexpr ShaderTypeDesc MipPatternProbe =
+    EngineShaderProbeType("EngineShaderMipPatternProbe",
+                          "/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf", "MipPatternPixel");
+inline constexpr ShaderTypeDesc UtilityProbe = EngineShaderProbeType(
+    "EngineShaderUtilityProbe", "/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf",
+    "UtilityProbePixel");
+
+// 감시 재컴파일 self-test 타입이다(Docs/Design/ShaderSystem 16.3절 SSD78). 원문은 실행마다
+// Programs/Sandbox/ShaderReload를 복사한 임시 시험 루트(/Plugin/SandboxReload —
+// ReloadSourceDirectory)다.
+inline constexpr ShaderTypeDesc ReloadColorPS =
+    SandboxType("SandboxReloadColorPS", "/Plugin/SandboxReload/Reload.rsf", "ReloadColorPixel",
+                rocks::shader::ShaderStagePixel);
+
 // Sandbox가 등록하는 모든 셰이더 타입이다.
 rocks::Span<const ShaderTypeDesc* const> AllTypes() noexcept;
 
@@ -143,9 +236,20 @@ rocks::Span<const ShaderTypeDesc* const> AllTypes() noexcept;
 // 넣는다).
 rocks::render::EngineShaderHost& Host() noexcept;
 
-// Sandbox 셰이더 타입과 원문 디렉터리를 넣고 호스트를 modules의 서비스로 올린다(모듈 단계 시작
-// 전). 실패하면 Error 로그와 그 오류다. 한 프로세스에서 한 번 붙인다.
-rocks::Result<void> AttachHost(rocks::ModuleLoader& modules) noexcept;
+// 호스트에 넣는 셰이더 범위다(ShaderSystem 16.1절 SSD48).
+enum class SandboxShaderScope : rocks::uint8 {
+    // 엔진 실행(--engine): Sandbox 시험 타입·원문 디렉터리를 넣지 않는다. 등록부는 엔진 모듈
+    // 타입뿐이라 쿠커(asset-cook --engine)의 타입 집합과 같다 — 쿠킹 엔진 라이브러리를 열 수 있다.
+    Engine,
+    // self-test: Sandbox 시험 타입(/Plugin/Sandbox)과 엔진 셰이더 시험
+    // 루트(/Plugin/EngineShaderTests)를 넣는다(SSD17 — 시험 타입은 시험 runner 등록부에만, 공급자로
+    // 컴파일).
+    SelfTest
+};
+
+// scope의 타입과 원문 디렉터리를 넣고 호스트를 modules의 서비스로 올린다(모듈 단계 시작 전).
+// 실패하면 Error 로그와 그 오류다. 한 프로세스에서 한 번 붙인다.
+rocks::Result<void> AttachHost(rocks::ModuleLoader& modules, SandboxShaderScope scope) noexcept;
 
 // 호스트를 서비스에서 뗀다(모든 묶음 종료 뒤).
 void DetachHost(rocks::ModuleLoader& modules) noexcept;
@@ -191,6 +295,18 @@ private:
     bool active_ = false;
 };
 
+// 감시 재컴파일 self-test 시험 루트의 디스크 디렉터리다(self-test 범위에서 호스트를 붙인 뒤 —
+// 없으면 빈 값). SelfTestShaderHost가 파괴될 때 지운다.
+StringView ReloadSourceDirectory() noexcept;
+
+// 활성 엔진 렌더 자원의 셰이더 교체를 프레임 경계로 적용한다(EngineRenderResources::
+// ApplyShaderUpdates — 파이프라인 캐시 없이). 교체했으면 true다. 활성 자원이 없으면 false다.
+bool ApplyShaderUpdates() noexcept;
+
+// 활성 집합의 형식 id와 공급자 revision(없으면 빈 값·0)이다.
+StringView ActiveFormat() noexcept;
+rocks::uint64 ActiveRevision() noexcept;
+
 // 활성 집합에 타입이 있는가(거르기로 빠진 타입은 없다).
 bool Has(const ShaderTypeDesc& type) noexcept;
 
@@ -203,6 +319,16 @@ const rocks::render::BuiltinResources* ActiveBuiltins() noexcept;
 // 활성 집합에서 타입의 정규화 바인딩 layout(값 1)이다(상수 버퍼 slot 찾기 — RenderBase 9.11절).
 // 없으면 null이다.
 const rocks::shader::ShaderBindingLayout* Layout(const ShaderTypeDesc& type) noexcept;
+
+// layout의 텍스처 slot(Graphics FindTextureSlot — Docs/Design/RenderBase 9.13절)이다. layout이
+// 없거나 이름이 없으면 graphics::MaxResourceSlots(SetTexture가 무시하는 범위 밖 slot)다.
+rocks::uint32 TextureSlot(const rocks::shader::ShaderBindingLayout* layout,
+                          StringView name) noexcept;
+
+// 활성 집합에서 타입의 텍스처 slot이다(위와 같다).
+inline rocks::uint32 TextureSlot(const ShaderTypeDesc& type, StringView name) noexcept {
+    return TextureSlot(Layout(type), name);
+}
 
 // 활성 집합의 장치 셰이더(첫 사용 생성)다. 활성 집합이 없으면 NotReady다.
 rocks::Result<rocks::graphics::ShaderHandle> Get(const ShaderTypeDesc& type) noexcept;

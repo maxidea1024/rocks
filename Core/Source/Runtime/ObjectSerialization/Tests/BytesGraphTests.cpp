@@ -272,7 +272,7 @@ TEST(BytesGraph_TamperedLengthIsRejected) {
                 tampered[at] = length;
                 auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                               tampered.View());
-                CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+                CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
                 CHECK(target.Stats().liveObjects == before);
             }
         }
@@ -462,7 +462,7 @@ TEST(BytesGraph_NestedPositionsRoundTripAndRejectTampering) {
                     tampered[at] = length;
                     auto rejected = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                                     tampered.View());
-                    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+                    CHECK(!rejected && rejected.Error() == ErrorCode::CorruptData);
                     CHECK(target.Stats().liveObjects == before);
                 }
             }

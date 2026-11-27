@@ -13,13 +13,10 @@ using platform::AtomicStore;
 
 namespace {
 
-// 자유 목록 머리의 하위 32비트(색인 + 1)와 tag 한 칸이다.
-constexpr uint64 FreeIndexMask = NumericLimits<uint32>::Max();
-constexpr uint64 FreeTagUnit = 1ull << 32;
 // 페이지 정렬이다. 블록이 cache line 경계에서 시작하게 한다.
 constexpr usize PageAlignment = 64;
-// 블록 색인은 uint32이고, 색인 + 1을 자유 목록에 쓰므로 그보다 하나 적다.
-constexpr uint64 MaxPoolBlocks = NumericLimits<uint32>::Max() - 1;
+// 빈 블록 목록이 담을 수 있는 블록 수다.
+constexpr uint64 MaxPoolBlocks = IndexedFreeList<>::MaxCapacity;
 
 } // namespace
 
@@ -33,6 +30,13 @@ Result<void> TraceBlockPool::Initialize(Allocator& allocator, usize maxBytes) no
 
     auto table = allocator.Allocate(pages * sizeof(TraceBlock*), alignof(TraceBlock*));
     if (!table) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (!free_.Initialize(allocator, pages * TraceBlockLayout::PageBlocks,
+                          IndexedFreeListStart::Empty)) {
+        auto freed = allocator.Deallocate(table.Value());
+        (void)freed;
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -58,45 +62,21 @@ void TraceBlockPool::Release() noexcept {
     pages_ = nullptr;
     maxPages_ = 0;
     pageCount_ = 0;
-    freeHead_ = 0;
+    free_.Shutdown();
 }
 
 TraceBlock* TraceBlockPool::BlockAt(uint32 index) const noexcept {
     return pages_[index / TraceBlockLayout::PageBlocks] + index % TraceBlockLayout::PageBlocks;
 }
 
+// 빈 목록 pop(acquire)이 앞서 넣은 쪽의 release와 짝이라 블록 내용과 pages_ 칸을 본다.
 TraceBlock* TraceBlockPool::TryPop() noexcept {
-    uint64 head = AtomicLoad<MemoryOrder::Acquire>(&freeHead_);
-    for (;;) {
-        const uint32 slot = static_cast<uint32>(head & FreeIndexMask);
-        if (slot == 0) {
-            return nullptr;
-        }
-
-        // 다른 스레드가 먼저 꺼내 재사용한 블록의 freeNext를 읽을 수 있다. 그 경우 tag가 바뀌어
-        // CAS가 실패하므로 읽은 값은 쓰이지 않는다.
-        TraceBlock* block = BlockAt(slot - 1);
-        const uint32 next = AtomicLoad<MemoryOrder::Relaxed>(&block->header.freeNext);
-        const uint64 replacement = ((head & ~FreeIndexMask) + FreeTagUnit) | next;
-        if (AtomicCompareExchangeWeak<MemoryOrder::Acquire, MemoryOrder::Acquire>(&freeHead_, head,
-                                                                                  replacement)) {
-            return block;
-        }
-    }
+    uint32 index = 0;
+    return free_.TryPop(index) ? BlockAt(index) : nullptr;
 }
 
 void TraceBlockPool::Push(TraceBlock* block) noexcept {
-    uint64 head = AtomicLoad<MemoryOrder::Relaxed>(&freeHead_);
-    for (;;) {
-        AtomicStore<MemoryOrder::Relaxed>(&block->header.freeNext,
-                                          static_cast<uint32>(head & FreeIndexMask));
-        const uint64 replacement = ((head & ~FreeIndexMask) + FreeTagUnit) |
-                                   (static_cast<uint64>(block->header.index) + 1);
-        if (AtomicCompareExchangeWeak<MemoryOrder::Release, MemoryOrder::Relaxed>(&freeHead_, head,
-                                                                                  replacement)) {
-            return;
-        }
-    }
+    free_.Push(block->header.index);
 }
 
 void TraceBlockPool::CountAcquired() noexcept {

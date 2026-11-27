@@ -1,11 +1,13 @@
 #include <ReflectionTestFixtures/ClassDefaultsFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/GeneratedFieldCodec.h>
 #include <Object/ModuleRegistration.h>
 #include <ObjectSerialization/ClassDefaults.h>
+#include <Object/PropertyPath.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
@@ -259,7 +261,8 @@ TEST(ClassDefaults_RecordMatchesGraphSave) {
                   ExpectedFingerprint(1, record.Record(ClassDefaultsConfiguration::Cooked)));
             CHECK(!(record.Fingerprint(ClassDefaultsConfiguration::Editor) ==
                     record.Fingerprint(ClassDefaultsConfiguration::Cooked)));
-            // cooked에는 EditorOnly 필드가 없다.
+#if ROCKS_WITH_EDITOR_DATA
+            // cooked에는 EditorOnly 필드가 없다(에디터 데이터가 없는 빌드는 필드 자체가 없다).
             const TypeSchema& schema = lease.Schema();
             auto cooked =
                 RecordReader::Open(allocator, record.Record(ClassDefaultsConfiguration::Cooked),
@@ -269,6 +272,7 @@ TEST(ClassDefaults_RecordMatchesGraphSave) {
             REQUIRE(editorValue != TypeLease::NoField);
             CHECK(cooked.Value().Find(schema.fields[editorValue].id).Error() ==
                   ErrorCode::NotFound);
+#endif
             // 게시 한 번 — 같은 레코드.
             auto again = AcquireClassDefaults(lease, allocator);
             REQUIRE(again);
@@ -491,7 +495,8 @@ TEST(ClassDefaults_PublishedAcrossThreads) {
 
 // 경로 조회: 필드·비Atomic struct 멤버·두 단계 멤버는 payload, Atomic struct 통째는 payload이고 그
 // 멤버는 InvalidArgument, 원소 단계(정적 배열·배열)는 Unsupported, cooked의 EditorOnly 필드·멤버는
-// NotFound, struct가 아닌 값 뒤 단계는 TypeMismatch, 빈 경로는 InvalidArgument.
+// NotFound, struct가 아닌 값 뒤 단계는 TypeMismatch, 빈 경로는 InvalidArgument. 에디터 데이터가
+// 없는 빌드에는 EditorOnly 필드·멤버가 없어 경로 해석이 NotFound다.
 TEST(ClassDefaults_FindDefaultPayload) {
     SystemAllocator allocator;
     DefaultsFixture fixture(allocator);
@@ -524,9 +529,17 @@ TEST(ClassDefaults_FindDefaultPayload) {
     CHECK(atomic && atomic.Value().wire == static_cast<uint32>(WireType::Record));
     CHECK(find("pair.u", Editor).Error() == ErrorCode::InvalidArgument);
     CHECK(find("fixed[1]", Editor).Error() == ErrorCode::Unsupported);
+#if ROCKS_WITH_EDITOR_DATA
     CHECK(find("editorValue", Cooked).Error() == ErrorCode::NotFound);
     CHECK(find("point.note", Cooked).Error() == ErrorCode::NotFound);
     CHECK(find("point.note", Editor));
+#else
+    const StringView editorOnly[] = {"editorValue", "point.note"};
+    for (StringView one : editorOnly) {
+        PropertyPathBuffer missing;
+        CHECK(ParsePropertyPath(lease, one, missing).Error() == ErrorCode::NotFound);
+    }
+#endif
     CHECK(find("count", Cooked));
     PropertyPathBuffer empty;
     CHECK(FindDefaultPayload(lease, record, empty, Editor, allocator).Error() ==
@@ -619,6 +632,191 @@ TEST(ClassDefaults_Availability) {
 
     CHECK(fixture.types.Unregister(Move(incomplete.Value())));
     CHECK(fixture.types.Unregister(Move(manual.Value())));
+}
+
+namespace {
+
+// FindChangedFields 결과를 쉼표로 이은 텍스트 경로로 만든다(실패면 거짓).
+bool ChangedText(Allocator& allocator, Allocator& scratch, DefaultsFixture& fixture,
+                 ObjectRegistry& objects, ObjectHandle handle, TypeId type, String& out) noexcept {
+    Array<PropertyPathBuffer> changed(scratch);
+    if (!FindChangedFields(objects, objects.OwnerAccess(), handle, scratch, changed)) {
+        return changed.IsEmpty() && false;
+    }
+
+    const TypeLease lease = fixture.Lease(type);
+    for (const PropertyPathBuffer& path : changed) {
+        String one(allocator);
+        if (!FormatPropertyPath(lease, path.View(), one) ||
+            (!out.IsEmpty() && !out.TryAppend(",")) || !out.TryAppend(one.View())) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 기준과 다르게 고친 DefaultsHolder다(값·-0.0 비트·비Atomic 멤버 잎·Atomic 통째·배열·강한 참조·
+// weak 참조).
+struct ChangedScene {
+    ChangedScene(DefaultsFixture& fixture, Allocator& allocator) noexcept
+        : objects(allocator, fixture.types, {0x4348, 1}) {
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<DefaultsHolder>(access, TypeIdOf<DefaultsHolder>());
+        auto linked = objects.NewObject<DefaultsHolder>(access, TypeIdOf<DefaultsHolder>());
+        auto watched = objects.NewObject<DefaultsHolder>(access, TypeIdOf<DefaultsHolder>());
+        REQUIRE(holder && linked && watched);
+        handle = holder.Value().Handle();
+        weakTarget = watched.Value().Handle();
+        root = Move(holder.Value());
+        link = Move(linked.Value());
+        watch = Move(watched.Value());
+    }
+
+    void Change() noexcept {
+        auto borrowed = objects.ResolveForWrite<DefaultsHolder>(objects.OwnerAccess(), handle);
+        REQUIRE(borrowed);
+        auto value = borrowed.Value().Get();
+        REQUIRE(value);
+        DefaultsHolder& holder = *value.Value();
+        holder.count = 1;
+        holder.precise = 0.0;
+        holder.point.x = 30;
+        holder.pair.u = 1;
+        REQUIRE(holder.values.TryPushBack(5));
+        holder.weak = WeakObjectRef<Object>(weakTarget);
+        REQUIRE(objects.SetReference(objects.OwnerAccess(), handle, holder.link, link.Handle()));
+    }
+
+    void Shutdown() noexcept {
+        root.Reset();
+        link.Reset();
+        watch.Reset();
+        CHECK(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    ObjectRegistry objects;
+    ObjectHandle handle{};
+    ObjectHandle weakTarget{};
+    RootRef<DefaultsHolder> root;
+    RootRef<DefaultsHolder> link;
+    RootRef<DefaultsHolder> watch;
+};
+
+constexpr StringView ChangedAll = "count,precise,point.x,pair,values,link,weak";
+
+// 쉼표로 이은 경로 목록 둘이 같은 집합인지다(결과는 TypeSchema 필드 순서 — 선언 순서가 아니라 필드
+// id 순서라 집합으로 비교한다).
+bool SamePathSet(StringView actual, StringView expected) noexcept {
+    const auto count = [](StringView text) noexcept {
+        usize items = text.IsEmpty() ? 0 : 1;
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            items += text.Data()[index] == ',' ? 1 : 0;
+        }
+
+        return items;
+    };
+    if (count(actual) != count(expected)) {
+        return false;
+    }
+
+    usize start = 0;
+    for (usize index = 0; index <= expected.ByteCount(); ++index) {
+        if (index != expected.ByteCount() && expected.Data()[index] != ',') {
+            continue;
+        }
+
+        const StringView item = expected.SliceBytes(start, index - start);
+        bool found = false;
+        usize from = 0;
+        for (usize at = 0; at <= actual.ByteCount(); ++at) {
+            if (at != actual.ByteCount() && actual.Data()[at] != ',') {
+                continue;
+            }
+
+            found = found || actual.SliceBytes(from, at - from) == item;
+            from = at + 1;
+        }
+
+        if (!found) {
+            return false;
+        }
+
+        start = index + 1;
+    }
+
+    return true;
+}
+
+} // namespace
+
+// 기준과 다른 필드(RuntimeClassMetadata 'A5b2', 그 함수 주석): 새 객체는 없음, 값·-0.0(+0.0은
+// 비트가 다르다)·비Atomic 멤버 잎·Atomic 통째·배열·강한 참조·weak 참조가 나오고(TypeSchema 순서),
+// 죽은 weak 대상은 null(기준)과 같다. 레코드 실패 타입(NonDeterministic)은 그 오류이고 out은 빈다.
+TEST(ClassDefaults_FindChangedFields) {
+    SystemAllocator allocator;
+    DefaultsFixture fixture(allocator);
+    {
+        ChangedScene scene(fixture, allocator);
+        const TypeId type = TypeIdOf<DefaultsHolder>();
+        String fresh(allocator);
+        CHECK(ChangedText(allocator, allocator, fixture, scene.objects, scene.handle, type, fresh));
+        CHECK(fresh.IsEmpty());
+        scene.Change();
+        String changed(allocator);
+        CHECK(
+            ChangedText(allocator, allocator, fixture, scene.objects, scene.handle, type, changed));
+        CHECK(SamePathSet(changed.View(), ChangedAll));
+
+        // weak 대상을 놓고 거두면 그 필드는 기준(null)과 같다.
+        scene.watch.Reset();
+        REQUIRE(scene.objects.Collect(scene.objects.OwnerAccess()));
+        String collected(allocator);
+        CHECK(ChangedText(allocator, allocator, fixture, scene.objects, scene.handle, type,
+                          collected));
+        CHECK(SamePathSet(collected.View(), "count,precise,point.x,pair,values,link"));
+
+        auto counter = scene.objects.NewObject<DefaultsCounter>(scene.objects.OwnerAccess(),
+                                                                TypeIdOf<DefaultsCounter>());
+        REQUIRE(counter);
+        Array<PropertyPathBuffer> out(allocator);
+        auto failed = FindChangedFields(scene.objects, scene.objects.OwnerAccess(),
+                                        counter.Value().Handle(), allocator, out);
+        CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument && out.IsEmpty());
+        counter.Value().Reset();
+        scene.Shutdown();
+    }
+}
+
+// FindChangedFields 할당 실패 전수: scratch의 n번째 할당이 실패하면 OutOfMemory이고 out은 빈다.
+// 실패가 없으면 기준과 같은 목록이다.
+TEST(ClassDefaults_FindChangedAllocationFailures) {
+    SystemAllocator allocator;
+    DefaultsFixture fixture(allocator);
+    {
+        ChangedScene scene(fixture, allocator);
+        scene.Change();
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            test::NFailAllocator failing(allocator);
+            failing.FailOnAttempt(attempt);
+            Array<PropertyPathBuffer> out(failing);
+            auto found = FindChangedFields(scene.objects, scene.objects.OwnerAccess(), scene.handle,
+                                           failing, out);
+            const bool exhausted = failing.Attempts() < attempt;
+            failing.DisableFailure();
+            if (exhausted) {
+                CHECK(found && out.Size() == 7);
+                break;
+            }
+
+            CHECK(!found && found.Error() == ErrorCode::OutOfMemory && out.IsEmpty());
+            ++failures;
+        }
+
+        CHECK(failures > 0);
+        scene.Shutdown();
+    }
 }
 
 } // namespace class_defaults_tests_file

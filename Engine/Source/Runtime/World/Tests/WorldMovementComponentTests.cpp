@@ -951,14 +951,14 @@ TEST(Movement_ReflectionAndSaveRoundTrip) {
         usize fields;
     };
 
-    // 필드 수는 상속분 포함(Component 2, SceneComponent 11). Movement 9, Rotating 3, Projectile 20,
-    // PathMover 9, SpringArm 16.
+    // 필드 수는 상속분 포함(Component 3, SceneComponent 12 — 태그 ER 31.4절 포함). Movement 9,
+    // Rotating 3, Projectile 20, PathMover 9, SpringArm 16.
     const Expected expected[] = {
-        {ObjectTypeIdOf<MovementComponent>(), ObjectTypeIdOf<Component>(), 11},
-        {ObjectTypeIdOf<RotatingMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 14},
-        {ObjectTypeIdOf<ProjectileMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 31},
-        {ObjectTypeIdOf<PathMoverComponent>(), ObjectTypeIdOf<MovementComponent>(), 20},
-        {ObjectTypeIdOf<SpringArmComponent>(), ObjectTypeIdOf<SceneComponent>(), 27},
+        {ObjectTypeIdOf<MovementComponent>(), ObjectTypeIdOf<Component>(), 12},
+        {ObjectTypeIdOf<RotatingMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 15},
+        {ObjectTypeIdOf<ProjectileMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 32},
+        {ObjectTypeIdOf<PathMoverComponent>(), ObjectTypeIdOf<MovementComponent>(), 21},
+        {ObjectTypeIdOf<SpringArmComponent>(), ObjectTypeIdOf<SceneComponent>(), 28},
     };
     for (const Expected& entry : expected) {
         auto lease = fixture.types.Acquire(entry.id);

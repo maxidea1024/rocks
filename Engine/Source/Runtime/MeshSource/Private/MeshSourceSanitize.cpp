@@ -4,7 +4,7 @@
 #include <Core/Math/MathUtility.h>
 #include <MeshSource/MeshSourceValidation.h>
 
-// 원본 메시 값 정리와 스킨 가중치 정규화다(Docs/Design/MeshAnimationAssets.ko.md 3.2·3.3·3.7절).
+// 원본 메시 값 정리와 스킨 가중치 정규화다(Docs/Design/MeshAnimationAssets 3.2·3.3·3.7절).
 namespace rocks {
 
 namespace {

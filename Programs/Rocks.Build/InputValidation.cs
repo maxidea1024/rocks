@@ -105,6 +105,7 @@ internal static class InputValidation
         }
 
         ValidateModuleNameCase(request.Modules);
+        ValidateGlobalStateConsumers(request.Modules, request.LinkType);
         foreach (var module in request.Modules)
         {
             if (!Enum.IsDefined(module.Kind))
@@ -157,6 +158,7 @@ internal static class InputValidation
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
             ValidateReflectionSources(module);
+            ValidateIspcSources(module, request.Toolchain.Platform);
             foreach (string argument in module.AdditionalCompileArguments)
             {
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true, posix);
@@ -343,7 +345,8 @@ internal static class InputValidation
             foreach (NativeModuleInput module in byName.Values.Where(module => built.Contains(module.Name))
                 .OrderBy(module => module.Name, StringComparer.Ordinal))
             {
-                bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0;
+                bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0 ||
+                    module.IspcSources.Count != 0;
                 if (hasCode && !entries.Contains(module.Name) && LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, false) &&
                     !boot.Contains(module.Name))
                 {
@@ -388,6 +391,48 @@ internal static class InputValidation
         {
             throw new ArgumentException($"Module {module.Name}: invalid Android package name '{package.PackageName}' " +
                 "(two or more dot-separated segments of ASCII letters, digits and underscores, each starting with a letter).");
+        }
+    }
+
+    // ISPC 원본(NativeModuleInput.IspcSources — Docs/Design/BuildTargets 3.12절 BD46)은 .ispc 경로여야 한다. 같은 basename 둘은 생성 헤더
+    // (<원본 이름>_ispc.h)가 겹치므로 거부한다(대소문자를 무시한다 — Windows·macOS 파일 시스템). Android 대상은 지원하지 않는다(쿠커는
+    // 데스크톱 호스트에서만 돈다). ISPC 고정 인자는 모듈 인자로 바꿀 수 없다 — 모듈 인자는 C++ compile에만 간다.
+    private static void ValidateIspcSources(NativeModuleInput module, NativePlatform platform)
+    {
+        if (module.IspcSources.Count == 0)
+        {
+            return;
+        }
+
+        // ISPC 원본만 있는 엔진 모듈은 받지 않는다: C++ 번역 단위가 없으면 Modular 공유 라이브러리의 API 매크로·export 판정(C++ 원본 기준)과
+        // 맞지 않는다. ISPC 커널은 C++ 래퍼와 함께 둔다(서드파티 정적 라이브러리는 ISPC만 있어도 된다).
+        if (!module.ThirdParty && module.Sources.Count == 0)
+        {
+            throw new ArgumentException($"Module {module.Name}: an engine module with ISPC sources needs C++ sources too (wrap the ISPC kernel " +
+                "in a C++ API), or declare the kernel in a third-party library (ThirdParty.json ispcUnits).");
+        }
+
+        if (platform == NativePlatform.Android)
+        {
+            throw new ArgumentException($"Module {module.Name}: ISPC sources are not supported for Android targets (Docs/Design/BuildTargets " +
+                "section 3.12, BD46). Declare IspcSources only for desktop platforms.");
+        }
+
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string source in module.IspcSources)
+        {
+            if (string.IsNullOrWhiteSpace(source) || source.Contains('\0') ||
+                !source.EndsWith(IspcTools.SourceExtension, StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Module {module.Name}, IspcSources: '{source}' must be the path of a .ispc source.");
+            }
+
+            string name = Path.GetFileNameWithoutExtension(source);
+            if (!names.TryAdd(name, source))
+            {
+                throw new ArgumentException($"Module {module.Name}, IspcSources: '{names[name]}' and '{source}' have the same file name; the " +
+                    $"generated headers ({IspcTools.HeaderName(source)}) would collide.");
+            }
         }
     }
 
@@ -450,15 +495,29 @@ internal static class InputValidation
         ValidatePluginModules(modules, byFolded);
         ValidateModulePlugins(modules);
         ValidateSourceGroups(modules, byFolded);
-        ValidateGlobalStateConsumers(modules);
     }
 
     // 프로세스 전역 상태가 있는 서드파티(NativeModuleInput.HasGlobalState — Docs/Design/BuildTargets 3.8절 BD29·BS8c)는 직접 의존하는
     // 모듈이 하나여야 한다. Modular에서 서드파티는 직접 소비 모듈의 공유 라이브러리마다 링크되므로 둘이면 상태가 두 벌이 된다(Monolithic에서도
     // 같은 규칙으로 막아 Editor 빌드에서만 드러나지 않게 한다). 소비 모듈 이름을 모두 알린다. 표지는 서드파티 모듈만 가질 수 있다(Rocks 모듈의
     // 상태는 소유 모듈 .cpp에 두고 API로 노출한다).
-    private static void ValidateGlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules)
+    // Monolithic 시험 실행 파일(GlobalStateTestConsumer)은 소비 모듈로 세지 않는다(3.8절 시험 실행 파일 예외 — 개정 38).
+    private static void ValidateGlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules, NativeLinkType linkType)
     {
+        foreach (NativeModuleInput module in modules.Where(module => module.GlobalStateTestConsumer))
+        {
+            if (module.Kind != NativeModuleKind.Executable)
+            {
+                throw new ArgumentException($"Module {module.Name}: GlobalStateTestConsumer is only for a test executable.");
+            }
+
+            if (linkType != NativeLinkType.Monolithic)
+            {
+                throw new ArgumentException($"Module {module.Name}: GlobalStateTestConsumer is only allowed with LinkType Monolithic (a Modular " +
+                    "test executable must reach the library through its owning module).");
+            }
+        }
+
         foreach (NativeModuleInput library in modules.Where(module => module.HasGlobalState))
         {
             if (!library.ThirdParty)
@@ -468,7 +527,7 @@ internal static class InputValidation
 
             // 소비 모듈은 직접 의존하거나 서드파티 모듈만 거쳐 닿는 Rocks 모듈이다. 서드파티 정적 라이브러리는 그것을 쓰는 Rocks 모듈에
             // 함께 링크되므로(ICU를 쓰는 HarfBuzz) 서드파티 모듈 자체는 세지 않는다(Docs/Design/BuildTargets 3.8절 BD29).
-            string[] consumers = GlobalStateConsumers(modules, library.Name);
+            string[] consumers = GlobalStateConsumers(modules.Where(module => !module.GlobalStateTestConsumer).ToArray(), library.Name);
             if (consumers.Length > 1)
             {
                 throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +

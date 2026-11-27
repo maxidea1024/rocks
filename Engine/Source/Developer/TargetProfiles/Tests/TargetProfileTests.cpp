@@ -1,5 +1,6 @@
 #include "../../AssetDatabase/Tests/MemoryFileSystem.h"
 
+#include <Base/InitializerList.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
 #include <Object/ModuleRegistration.h>
@@ -221,6 +222,85 @@ TEST(TargetProfile_ShaderChecks) {
     CHECK(IsValidShaderFormatId(StringView(longId, ShaderFormatIdMaxBytes)) &&
           !IsValidShaderFormatId(longId) && !IsValidShaderFormatId("A-B") &&
           !IsValidShaderFormatId(""));
+}
+
+// 오디오 쿠킹 칸(Docs/Design/AudioSystem 3.39.1절): 기본값은 UE 기본(끔·48/32/24/12/8 kHz·배수 1),
+// 프로젝트가 칸 하나만 덮으면 나머지는 엔진 값이다(struct 병합). rate는 0 또는 [8000, 192000],
+// 배수는 0 이상이어야 한다(index = 칸 번호).
+TEST(TargetProfile_AudioCookFields) {
+    ProfileScene scene;
+    REQUIRE(scene.Ready());
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", "{}"));
+    {
+        TargetProfile profile(scene.allocator);
+        TargetProfileFailure failure;
+        REQUIRE(scene.Read("Windows", profile, failure, false));
+        const AudioCookOverrides& audio = profile.audioCook;
+        CHECK(!audio.resampleForDevice && audio.maxSampleRate == 48000 &&
+              audio.highSampleRate == 32000 && audio.mediumSampleRate == 24000 &&
+              audio.lowSampleRate == 12000 && audio.minSampleRate == 8000 &&
+              audio.compressionQualityModifier == 1.0f);
+    }
+
+    REQUIRE(
+        scene.Write("Engine/TargetProfiles/Windows.json",
+                    "{\"audioCook\": {\"resampleForDevice\": true, \"highSampleRate\": 22050}}"));
+    REQUIRE(scene.Write(
+        "Project/TargetProfiles/Windows.json",
+        "{\"audioCook\": {\"lowSampleRate\": 0, \"compressionQualityModifier\": 0.5}}"));
+    {
+        TargetProfile profile(scene.allocator);
+        TargetProfileFailure failure;
+        REQUIRE(scene.Read("Windows", profile, failure));
+        const AudioCookOverrides& audio = profile.audioCook;
+        CHECK(audio.resampleForDevice && audio.highSampleRate == 22050 &&
+              audio.lowSampleRate == 0 && audio.maxSampleRate == 48000 &&
+              audio.compressionQualityModifier == 0.5f);
+    }
+
+    scene.files.Remove("Project/TargetProfiles/Windows.json");
+    struct Case {
+        const char* text;
+        uint32 index;
+    };
+    const Case rejects[] = {
+        {"{\"audioCook\": {\"maxSampleRate\": 7999}}", 1},
+        {"{\"audioCook\": {\"highSampleRate\": 192001}}", 2},
+        {"{\"audioCook\": {\"mediumSampleRate\": 1}}", 3},
+        {"{\"audioCook\": {\"lowSampleRate\": 400000}}", 4},
+        {"{\"audioCook\": {\"minSampleRate\": 4000}}", 5},
+        {"{\"audioCook\": {\"compressionQualityModifier\": -0.25}}", 6},
+    };
+    for (const Case& item : rejects) {
+        REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", item.text));
+        TargetProfile profile(scene.allocator);
+        TargetProfileFailure failure;
+        auto read = scene.Read("Windows", profile, failure);
+        CHECK(!read && read.Error() == ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::InvalidSetting &&
+              failure.field == TargetProfileField::AudioCook && failure.index == item.index);
+    }
+
+    // NaN·Infinity는 프로파일 JSON(Strict — RFC 8259)의 문법이 막는다(Json 단계). 검증의 비유한
+    // 판정은 다른 출처(코드로 채운 프로파일)를 위한 것이다.
+    for (const char* text : {"{\"audioCook\": {\"compressionQualityModifier\": NaN}}",
+                             "{\"audioCook\": {\"compressionQualityModifier\": Infinity}}"}) {
+        REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", text));
+        TargetProfile profile(scene.allocator);
+        TargetProfileFailure failure;
+        auto read = scene.Read("Windows", profile, failure);
+        CHECK(!read && read.Error() == ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::InvalidSetting &&
+              failure.field == TargetProfileField::Json);
+    }
+
+    // 경계는 받는다: rate 0·8000·192000, 배수 0.
+    REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json",
+                        "{\"audioCook\": {\"maxSampleRate\": 192000, \"minSampleRate\": 8000, "
+                        "\"highSampleRate\": 0, \"compressionQualityModifier\": 0}}"));
+    TargetProfile profile(scene.allocator);
+    TargetProfileFailure failure;
+    CHECK(scene.Read("Windows", profile, failure));
 }
 
 // 설정 JSON 층 도우미: 없는 파일(existed false·성공), 크기 상한(File·CapacityExceeded), JSON

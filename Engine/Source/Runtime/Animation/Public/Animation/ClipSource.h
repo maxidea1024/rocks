@@ -5,7 +5,7 @@
 #include <Core/Math/Transform.h>
 
 // 애니메이션 클립의 메모리 형태(원본·쿠킹), 검증, 저장·로드, 샘플링, 쿠킹 변환이다
-// (Docs/Design/MeshAnimationAssets.ko.md 7.2·7.4·7.5절).
+// (Docs/Design/MeshAnimationAssets 7.2·7.4·7.5절).
 namespace rocks {
 
 // 샘플링에서 α가 이 값보다 작으면 앞 키, 1 − 이 값보다 크면 다음 키를 그대로 쓴다(UE
@@ -117,11 +117,17 @@ ROCKS_ANIMATION_API Result<void> StoreClipSource(const ClipSource& source, Memor
 // data의 본 트랙 bulk를 package에서 읽어 out을 다시 만든다. 배치(원소 크기·개수)·순서(이름 원문
 // 엄격 증가)·ValidateClipSource를 본다.
 //
-// 오류: 위반은 CorruptPackage·InvalidArgument(원래 판정은 issue)다. bulk를 못 읽으면
+// 오류: 위반은 CorruptPackage·CorruptData(원래 판정은 issue)다. bulk를 못 읽으면
 // CorruptPackage(BulkUnreadable)와 Package::BulkBytes의 오류, 이름 원문을 못 읽으면 그 pool 오류,
 // 할당 실패는 그 오류다. 실패하면 out은 그대로다.
 // 스레드: package를 읽으므로 그 Registry 소유 스레드에서 부른다.
 ROCKS_ANIMATION_API Result<void> LoadClipSource(const ClipSourceData& data, const Package& package,
+                                                NamePool& names, ClipSource& out,
+                                                ClipDiagnostic* failure = nullptr) noexcept;
+
+// 같은 규칙으로 bulk 원본(열린 에디터 패키지의 bulk 저장소 — 쿠킹 처리기, 7.6.1절 3)에서 읽는다.
+// 오류는 위와 같다(bulk를 못 읽으면 CorruptPackage(BulkUnreadable)와 ReadBulk의 오류).
+ROCKS_ANIMATION_API Result<void> LoadClipSource(const ClipSourceData& data, PackageBulkSource& bulk,
                                                 NamePool& names, ClipSource& out,
                                                 ClipDiagnostic* failure = nullptr) noexcept;
 
@@ -199,7 +205,7 @@ ROCKS_ANIMATION_API Result<void> StoreClipPlayback(const ClipPlayback& playback,
 
 // data를 package에서 읽어 out을 다시 만든다(배치·길이·값 유한, sampleCount 1–ClipMaxFrames + 1,
 // 비율 ≤ ClipMaxFrameRate, trackToBone 길이 = 트랙 수를 본다). 오류: 위반은
-// CorruptPackage·InvalidArgument (issue로 규칙 —
+// CorruptPackage·CorruptData (issue로 규칙 —
 // NoSamples·TooManyFrames·FrameRateTooHigh·BulkLength·TrackKeyCount·NonFiniteKey·
 // TrackBoneLength·TooManyTracks), bulk를 못 읽으면 그 오류, 할당 실패는 그 오류다. 실패하면 out은
 // 그대로다.
@@ -209,5 +215,24 @@ ROCKS_ANIMATION_API Result<void> StoreClipPlayback(const ClipPlayback& playback,
 ROCKS_ANIMATION_API Result<void> LoadClipPlayback(const ClipPlaybackData& data,
                                                   const Package& package, ClipPlayback& out,
                                                   ClipDiagnostic* failure = nullptr) noexcept;
+
+// 쿠킹 클립 clip의 재생 데이터를 package에서 읽고(LoadClipPlayback) skeleton과 대조한다(7.6.1절 4):
+// trackToBone 본 번호 < 스켈레톤 본 수(TrackBoneIndex), 같은 본이 두 트랙에 없음
+// (DuplicateTrackBone), 회전 키 |길이² − 1| ≤ BoneRotationNormalizedTolerance
+// (RotationNotNormalized). 소비자가 부른다(PostLoad 없음 — 메시 로드 검증과 같은 규칙).
+//
+// 사용 예(쿠킹 클립과 그 스켈레톤을 로드한 뒤):
+//   ClipPlayback playback(allocator);
+//   ClipDiagnostic failure;
+//   if (!ValidateCookedAnimationClip(clip, package, skeleton, playback, &failure)) {
+//       Report(ClipIssueName(failure.issue), failure.index);
+//   }
+//
+// 오류: LoadClipPlayback의 오류, 대조 위반은 CorruptPackage·CorruptData(issue 위, index =
+// 트랙), 할당 실패는 그 오류다. 실패하면 out은 그대로다. 스레드: package의 Registry 소유 스레드.
+ROCKS_ANIMATION_API Result<void>
+ValidateCookedAnimationClip(const AnimationClip& clip, const Package& package,
+                            const Skeleton& skeleton, ClipPlayback& out,
+                            ClipDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

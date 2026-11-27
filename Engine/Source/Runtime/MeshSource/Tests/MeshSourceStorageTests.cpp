@@ -4,7 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 
-// MeshSource 저장·로드 시험이다(Docs/Design/MeshAnimationAssets.ko.md 3.4·3.7·9.1·9.2절, 12절
+// MeshSource 저장·로드 시험이다(Docs/Design/MeshAnimationAssets 3.4·3.7·9.1·9.2절, 12절
 // "저장·로드 왕복의 비트 일치", "bulk 길이 변조·잘림·SHA 불일치", "morph -0.0 보존"): 실제 패키지
 // (TestMeshAsset)로 쓰고 다른 Registry에 로드한 뒤 Load한다. 포맷 필드와 bulk byte를 하나씩 바꿔
 // 정확한 규칙으로 거부되는지 본다.
@@ -536,7 +536,7 @@ TEST(MeshSource_LoadRecordNameTokens) {
     // 진단 없이 불러도 내용 위반(묶음 번호 범위)은 실패다.
     asset->mesh.polygonGroupCount = 0;
     auto content = out.Load(asset->mesh, *package, env.names);
-    CHECK(!content && content.Error() == ErrorCode::InvalidArgument);
+    CHECK(!content && content.Error() == ErrorCode::CorruptData);
     asset->mesh.polygonGroupCount = 1;
     CHECK(out.Load(asset->mesh, *package, env.names));
 }
@@ -1060,7 +1060,7 @@ TEST(MeshSource_LoadBoundsElementAllocations) {
                 return true;
             },
             out, diagnostic);
-        CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+        CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
         CHECK(HasIssue(diagnostic, AssetDiagnosticCode::CorruptPackage, item.issue));
         CHECK(bounded.Peak() <= limit);
     }

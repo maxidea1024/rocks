@@ -67,6 +67,9 @@ SANDBOX_COMPUTE(StorageFillFaceLayerCS, "StorageTarget.rsf", "FillFaceLayerCS")
 SANDBOX_COMPUTE(StorageFillFaceCS, "StorageTarget.rsf", "FillFaceCS")
 SANDBOX_PIXEL(StorageDrawPS, "StorageTarget.rsf", "DrawPS")
 
+SANDBOX_VERTEX(MultiTextureVS, "MultiTexture.rsf", "MultiVS")
+SANDBOX_PIXEL(MultiTexturePS, "MultiTexture.rsf", "MultiPS")
+
 SANDBOX_PIXEL(TextureArrayPS, "Texture.rsf", "ArrayPS")
 SANDBOX_PIXEL(TextureVolumePS, "Texture.rsf", "VolumePS")
 SANDBOX_PIXEL(TextureCubePS, "Texture.rsf", "CubePS")

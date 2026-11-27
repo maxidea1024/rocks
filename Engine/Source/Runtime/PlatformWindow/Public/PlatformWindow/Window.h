@@ -3,7 +3,9 @@
 #include <Core/Diagnostics/LogCategory.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
+#include <Core/Result.h>
 #include <Input/InputEvent.h>
+#include <Input/MotorValues.h>
 
 namespace rocks::platform {
 
@@ -106,6 +108,13 @@ public:
     // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
 
+    // 숨긴 채 만든 창(WindowDesc::visible = false)을 보이고 앞으로 가져온다. 이미 보이면 앞으로만
+    // 가져온다. 시작 화면(스플래시)에서 주 창으로 넘길 때 첫 프레임을 그린 뒤 부른다
+    // (Docs/Design/SplashScreen 9.4절). 다른 앱이 전경이면 OS가 앞으로 가져오기를 거부할 수 있다.
+    // 창 backend가 따로 보이기를 다루지 않는 플랫폼(Android)은 아무것도 하지 않는다.
+    virtual void ShowAndActivate() noexcept {
+    }
+
     // 렌더 surface를 잃었는지다(Android: 창이 사라진다 — Docs/Design/AndroidPlatform.ko.md 4절).
     // true를 돌려받은 호스트는 그 창의 swapchain·EGL window surface를 놓고 AcknowledgeSurfaceLost를
     // 부른다. 그 전까지 OS 콜백이 기다린다(제한 시간 4초). 데스크톱은 늘 false다. 게임 스레드에서
@@ -129,12 +138,13 @@ public:
     }
 };
 
-// 게임패드 입력 backend다. 폴링 결과를 GamepadState 이벤트로 큐에 넣는다. 상태가 바뀐
-// 패드(연결·해제 포함)만 이벤트를 만든다.
+// 게임패드 입력·진동 backend다. 폴링 결과를 GamepadState 이벤트로 큐에 넣는다. 상태가 바뀐
+// 패드(연결·해제 포함)만 이벤트를 만든다. 모터 출력은 SetMotors다(Docs/Design/InputActions 6.4절).
 //
 // 사용 예:
 //   auto gamepads = platform::GamepadBackend::Create(allocator);
 //   gamepads.Value()->Poll(queue);               // 프레임마다 입력 수집 단계에서
+//   (void)gamepads.Value()->SetMotors(0, motors); // 프레임 끝에 플레이어 진동 값으로
 class ROCKS_PLATFORMWINDOW_API GamepadBackend {
 public:
     // Windows는 XInput(최대 4개, 시스템 DLL을 실행 시 로드)이다. DLL을 찾지 못하면
@@ -146,6 +156,19 @@ public:
     // 연결된 패드를 폴링한다. 연결되지 않은 슬롯은 비용을 줄이려고 일정 간격(약 1초)으로만
     // 확인한다.
     virtual void Poll(input::InputQueue& queue) noexcept = 0;
+
+    // index번 패드의 모터 세기를 values로 둔다(0–1, 넘치면 자른다). 바뀐 값만 장치에 쓴다. Poll과
+    // 같은 게임 스레드에서 부른다. 진동하는 동안은 같은 값이라도 프레임마다 부른다(Android는 1초
+    // one-shot을 이 호출에서 다시 걸고, 포커스를 잃은 뒤의 끄기도 이 호출이 한다 — InputActions
+    // 6.4절). 오류: index가 MaxGamepads 이상이거나 값이 비유한 수면 InvalidArgument, 연결되지 않은
+    // 패드는 NotFound, 장치 쓰기 실패는 IoError, 진동이 없는 backend(기본 구현 — Mac은 후속)는
+    // Unsupported다. Android는 입력 스레드가 비동기로 쓰므로 쓰기 실패를 돌려주지 않는다(창이
+    // 없거나 입력 스레드가 JavaVM에 붙지 못했으면 Unsupported).
+    virtual Result<void> SetMotors(uint32 index, const input::MotorValues& values) noexcept {
+        (void)index;
+        (void)values;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
 };
 
 // 이 프로세스가 도는 데스크톱 세션이 표시 장치에 연결되어 있는지다(QueryDesktopSessionState).

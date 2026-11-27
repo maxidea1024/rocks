@@ -87,23 +87,23 @@ TEST(TextWire_MalformedFormsAreRejectedWithoutMovingCursor) {
         const uint8 bytes[] = {form, 0, 0, 0, 0, 0, 0, 0, 0};
         auto reader = ArchiveReader::Create(bytes);
         REQUIRE(reader);
-        CHECK(ReadTextWire(reader.Value()).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadTextWire(reader.Value()).Error() == ErrorCode::CorruptData);
         CHECK(reader.Value().Position() == 0);
     }
 
     // 빈 입력, 잘린 Invariant 원문, 잘못된 UTF-8.
     auto none = ArchiveReader::Create(Span<const uint8>());
     REQUIRE(none);
-    CHECK(ReadTextWire(none.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadTextWire(none.Value()).Error() == ErrorCode::CorruptData);
     const uint8 truncated[] = {1, 3, 0, 0, 0, 0, 0, 0, 0, 'a', 'b'};
     auto truncatedReader = ArchiveReader::Create(truncated);
     REQUIRE(truncatedReader);
-    CHECK(ReadTextWire(truncatedReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadTextWire(truncatedReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(truncatedReader.Value().Position() == 0);
     const uint8 badUtf8[] = {1, 2, 0, 0, 0, 0, 0, 0, 0, 0xc3, 0x28};
     auto utf8Reader = ArchiveReader::Create(badUtf8);
     REQUIRE(utf8Reader);
-    CHECK(ReadTextWire(utf8Reader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadTextWire(utf8Reader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(utf8Reader.Value().Position() == 0);
 
     // Localized: textId 0, sourceRevision 0, 각 칸의 잘림은 InvalidArgument이고 cursor는 그대로다.
@@ -120,7 +120,7 @@ TEST(TextWire_MalformedFormsAreRejectedWithoutMovingCursor) {
     for (usize length = 1; length < localized.Size(); ++length) {
         auto reader = ArchiveReader::Create(Span<const uint8>(localized.Data(), length));
         REQUIRE(reader);
-        CHECK(ReadTextWire(reader.Value()).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadTextWire(reader.Value()).Error() == ErrorCode::CorruptData);
         CHECK(reader.Value().Position() == 0);
     }
 
@@ -132,14 +132,14 @@ TEST(TextWire_MalformedFormsAreRejectedWithoutMovingCursor) {
 
     auto zeroIdReader = ArchiveReader::Create(zeroId.View());
     REQUIRE(zeroIdReader);
-    CHECK(ReadTextWire(zeroIdReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadTextWire(zeroIdReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(zeroIdReader.Value().Position() == 0);
     Array<uint8> zeroRevision(allocator);
     AppendBytes(zeroRevision, localized.View());
     zeroRevision[17] = 0;
     auto zeroRevisionReader = ArchiveReader::Create(zeroRevision.View());
     REQUIRE(zeroRevisionReader);
-    CHECK(ReadTextWire(zeroRevisionReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadTextWire(zeroRevisionReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(zeroRevisionReader.Value().Position() == 0);
 
     // 원문 길이가 maxValueBytes를 넘으면 CapacityExceeded다.

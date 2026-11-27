@@ -5,6 +5,7 @@
 #include <Core/Math/InterpCurve.h>
 #include <Core/Math/Quaternion.h>
 #include <Core/Math/Rotator.h>
+#include <Core/Math/Shapes.h>
 #include <Core/Math/Transform.h>
 #include <Core/Math/Vector2.h>
 #include <Core/Math/Vector3.h>
@@ -52,6 +53,7 @@ ROCKS_BOUND_CORE_VALUE(rocks::Transform)
 ROCKS_BOUND_CORE_VALUE(rocks::Transform3f)
 ROCKS_BOUND_CORE_VALUE(rocks::Transform3d)
 ROCKS_BOUND_CORE_VALUE(rocks::FrameRate)
+ROCKS_BOUND_CORE_VALUE(rocks::Box<double>)
 ROCKS_BOUND_CORE_VALUE(rocks::InterpCurvePoint<float>)
 ROCKS_BOUND_CORE_VALUE(rocks::InterpCurve<float>)
 ROCKS_BOUND_CORE_VALUE(rocks::InterpCurvePoint<rocks::Vec2d>)

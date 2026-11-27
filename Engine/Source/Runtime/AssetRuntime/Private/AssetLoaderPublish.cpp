@@ -81,6 +81,13 @@ void AssetLoader::Impl::InstantiateUnit(uint32 unit) noexcept {
         return;
     }
 
+    // 게시한 객체에 이벤트 바인딩을 다시 만든다(Docs/Design/EventReflection.ko.md ED21 — job이
+    // Stage를 쥐는 동안). 버린 바인딩은 패키지 hooks가 센다(런타임 로그 경로가 생기면 경고로
+    // 낸다 — ED22).
+    for (PackageLoadState* state : states) {
+        (void)state->BindEvents();
+    }
+
     LoaderUnit& target = units[unit];
     // jobs와 members는 같은 순서다(허가 때 members 순서로 만들었다). ReleaseRetired가 돌려준 칸을
     // 먼저 다시 쓴다(용량은 위에서 잡았다). 넘겨받을 기록은 PostLoad가 끝날 때(FinishUnit) 낸다.

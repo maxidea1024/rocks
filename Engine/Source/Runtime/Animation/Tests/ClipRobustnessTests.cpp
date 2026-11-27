@@ -1,11 +1,12 @@
 #include "ClipTestSupport.h"
 
+#include <Base/InitializerList.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <TestSupport/NFailAllocator.h>
 #include <stdio.h>
 
 // 애니메이션 클립의 패키지 왕복·변조·결정성·할당 실패·퍼징
-// 시험이다(Docs/Design/MeshAnimationAssets.ko.md 7.5절, 12절 "클립" — 상수 트랙 접기의 bit 보존,
+// 시험이다(Docs/Design/MeshAnimationAssets 7.5절, 12절 "클립" — 상수 트랙 접기의 bit 보존,
 // 커브 왕복, 상한).
 using namespace rocks;
 namespace clip_robustness_tests_file {
@@ -260,6 +261,10 @@ TEST(Clip_LoadRejectsSourceBytes) {
         }
 
         CHECK(!result && result.Error() != ErrorCode::NotFound);
+        // 읽은 byte의 위반은 손상이다(bulk를 못 읽으면 패키지의 오류 그대로 — 11.1절).
+        CHECK(
+            item.issue == ClipIssue::BulkUnreadable ||
+            (result.Error() == ErrorCode::CorruptData && failure.error == ErrorCode::CorruptData));
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage && failure.issue == item.issue &&
               failure.index == item.index);
     }
@@ -378,8 +383,12 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
         data.tracks = item.ref;
         REQUIRE(data.trackToBone.TryResize(item.bones));
         ClipDiagnostic failure;
-        CHECK(!LoadClipPlayback(data, *raw, out, &failure));
+        const Result<void> loaded = LoadClipPlayback(data, *raw, out, &failure);
+        CHECK(!loaded);
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage && failure.issue == item.issue);
+        CHECK(
+            item.issue == ClipIssue::BulkUnreadable ||
+            (loaded.Error() == ErrorCode::CorruptData && failure.error == ErrorCode::CorruptData));
         CHECK(out.tracks.Size() == 1);
     }
 
@@ -389,7 +398,7 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
     rate.tracks = good;
     rate.sampleCount = 1;
     ClipDiagnostic failure;
-    CHECK(!LoadClipPlayback(rate, *raw, out, &failure));
+    CHECK(LoadClipPlayback(rate, *raw, out, &failure).Error() == ErrorCode::CorruptData);
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
           failure.issue == ClipIssue::FrameRateTooHigh);
     // 저장 쪽 인자 오류.
@@ -781,6 +790,54 @@ TEST(Clip_FuzzSources) {
     printf("Clip_FuzzSources: %u valid, %u invalid, %u incompatible\n", valid, invalid,
            incompatible);
     CHECK(valid > 100 && invalid > 20 && incompatible > 10);
+}
+
+// 쿠킹 로드의 스켈레톤 대조(7.6.1절 4): 정규화된 회전은 통과하고, 회전 키 하나가 단위가 아니면
+// RotationNotNormalized(CorruptPackage, index = 트랙)이며 out은 그대로다.
+TEST(Clip_CookedValidationRotation) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterAnimationTypes(env.modules));
+    Skeleton skeleton(env.allocator);
+    REQUIRE(FillHumanSkeleton(env.names, skeleton));
+    for (const bool broken : {false, true}) {
+        ObjectHandle package{};
+        const ObjectHandle made =
+            MakeClip(env, broken ? 0x7201 : 0x7200, PackageKind::Cooked, package);
+        REQUIRE(!made.IsNull());
+        AnimationClip* clip = asset_test::Pointer<AnimationClip>(*env.source, made);
+        REQUIRE(clip != nullptr);
+        ClipPlayback crafted(env.allocator);
+        crafted.sampleRate = Rate(30);
+        crafted.sampleCount = 2;
+        ClipPlaybackTrack track(env.allocator);
+        REQUIRE(track.translation.TryPushBack(Vec3(0, 0, 0)) &&
+                track.rotation.TryPushBack(Quat(0, 0, 0, 1)) &&
+                track.rotation.TryPushBack(broken ? Quat(2, 0, 0, 0) : Quat(0, 0, 0, 1)) &&
+                track.scale.TryPushBack(Vec3(1, 1, 1)));
+        REQUIRE(crafted.trackToBone.TryPushBack(3) && crafted.tracks.TryPushBack(Move(track)));
+        MemoryBulkSource bulk(env.allocator);
+        REQUIRE(StoreClipPlayback(crafted, bulk, clip->playback));
+        LoadedClip loaded(env.allocator);
+        REQUIRE(WriteAndLoad(env, package, PackageKind::Cooked, bulk, loaded));
+        const AnimationClip* read = asset_test::Pointer<AnimationClip>(*env.target, loaded.clip);
+        const Package* raw = asset_test::Pointer<Package>(*env.target, loaded.package);
+        REQUIRE(read != nullptr && raw != nullptr);
+        ClipPlayback out(env.allocator);
+        out.sampleCount = 77;
+        ClipDiagnostic failure;
+        const Result<void> validated =
+            ValidateCookedAnimationClip(*read, *raw, skeleton, out, &failure);
+        if (broken) {
+            CHECK(!validated && validated.Error() == ErrorCode::CorruptData &&
+                  failure.code == AssetDiagnosticCode::CorruptPackage &&
+                  failure.error == ErrorCode::CorruptData &&
+                  failure.issue == ClipIssue::RotationNotNormalized && failure.index == 0);
+            CHECK(out.sampleCount == 77 && out.tracks.IsEmpty());
+        } else {
+            CHECK(validated.IsOk() && out.sampleCount == 2 && out.trackToBone[0] == 3);
+        }
+    }
 }
 
 } // namespace clip_robustness_tests_file

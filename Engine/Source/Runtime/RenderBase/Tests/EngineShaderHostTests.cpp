@@ -10,6 +10,8 @@
 #include <ModuleLoader/ModuleLoader.h>
 #include <RenderBase/EngineShaderHost.h>
 #include <RenderBase/EngineShaderTypes.h>
+#include <RenderBase/FullscreenPass.h>
+#include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderLane.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 #include <TestSupport/Test.h>
@@ -54,11 +56,24 @@ public:
     bool fail = false;
 };
 
-// 쿠킹 라이브러리 원천이다. 형식이 있으면 등록부의 라이브러리, 없으면 NotFound, error면 그 오류다.
+// 쿠킹 라이브러리 원천이다. 쿠킹 backend는 D3D12 하나(cookedBackend가 거짓이면 Vulkan — 장치
+// backend가 쿠킹에 없음), 형식은 D3D12_SM6이다. 형식이 있으면 등록부의 라이브러리, 없으면 NotFound,
+// error면 그 오류다.
 class FakeCookedSource final : public CookedShaderLibrarySource {
 public:
     explicit FakeCookedSource(const shader::ShaderTypeRegistry& registry) noexcept
         : registry_(registry) {
+    }
+
+    Span<const graphics::Backend> Backends() const noexcept override {
+        return cookedBackend ? Span<const graphics::Backend>(&d3d12_, 1)
+                             : Span<const graphics::Backend>(&vulkan_, 1);
+    }
+
+    Span<const StringView> Formats(graphics::Backend backend) const noexcept override {
+        return backend == graphics::Backend::D3D12 && cookedBackend
+                   ? Span<const StringView>(&format_, 1)
+                   : Span<const StringView>();
     }
 
     Result<void> ReadLibrary(StringView formatId, shader::ShaderLibraryKind library,
@@ -78,12 +93,20 @@ public:
                    : Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
+    StringView Problem() const noexcept override {
+        return error != ErrorCode::None ? StringView("fake read failure") : StringView();
+    }
+
     uint32 reads = 0;
     bool hasFormat = true;
+    bool cookedBackend = true;
     ErrorCode error = ErrorCode::None;
 
 private:
     const shader::ShaderTypeRegistry& registry_;
+    const graphics::Backend d3d12_ = graphics::Backend::D3D12;
+    const graphics::Backend vulkan_ = graphics::Backend::Vulkan;
+    const StringView format_ = "D3D12_SM6";
 };
 
 // 렌더 lane 시작 단계에서 엔진 렌더 자원을 여는 처리기다(9.12절 2항).
@@ -288,19 +311,33 @@ TEST(RenderBase_EngineRenderResourcesPreferCookedLibraries) {
         resources.Retire(device);
     }
 
-    cooked.hasFormat = false;
+    // 장치 backend(D3D12)가 쿠킹에 없으면 공급자 경로다(ShaderSystem SSD16) — 원천을 읽지 않는다.
+    cooked.cookedBackend = false;
     {
         EngineRenderResources resources(Allocator_());
         REQUIRE(resources.Open(device, host));
-        CHECK(!resources.OpenedFromCookedLibrary() && cooked.reads == 2 && provider.requests == 1);
+        CHECK(!resources.OpenedFromCookedLibrary() && cooked.reads == 1 && provider.requests == 1);
+        CHECK(resources.FormatId() == StringView("D3D12_SM6"));
         resources.Retire(device);
     }
 
+    // backend는 쿠킹에 있는데 그 형식의 라이브러리가 없으면 공급자로 넘기지 않고 Unsupported다.
+    cooked.cookedBackend = true;
+    cooked.hasFormat = false;
+    {
+        EngineRenderResources resources(Allocator_());
+        CHECK(resources.Open(device, host).Error() == ErrorCode::Unsupported);
+        CHECK(resources.Problem().Contains(StringView("no library of this kind")));
+        CHECK(cooked.reads == 2 && provider.requests == 1);
+    }
+
+    cooked.hasFormat = true;
     cooked.error = ErrorCode::Cancelled;
     {
         EngineRenderResources resources(Allocator_());
         CHECK(resources.Open(device, host).Error() == ErrorCode::Cancelled);
         CHECK(resources.Problem().Contains(StringView("cooked shader library")));
+        CHECK(resources.Problem().Contains(StringView("fake read failure")));
         CHECK(provider.requests == 1);
     }
 
@@ -308,6 +345,123 @@ TEST(RenderBase_EngineRenderResourcesPreferCookedLibraries) {
     CHECK(host.CookedLibraries() == &cooked);
     host.DetachCookedLibraries(cooked);
     CHECK(host.CookedLibraries() == nullptr);
+    host.DetachProvider(provider);
+    CHECK(device.WaitIdle());
+    CHECK(device.PendingRetireCount() == 0);
+}
+
+// 재컴파일하는 공급자다(ShaderSystem 16.3절 SSD76): revision을 시험이 올리고, fail이면 공급 실패다.
+class ReloadingProvider final : public ShaderProvider {
+public:
+    Result<void> RequestLibrary(const ShaderProvisionRequest& request,
+                                ShaderSet& set) noexcept override {
+        ++requests;
+        Array<uint8> bytes(Allocator_());
+        if (fail || !RegistryShaderSet::BuildLibrary(Allocator_(), *request.registry, bytes)) {
+            set.CompleteProvision(Result<void>::Failure(ErrorCode::DependencyFailed),
+                                  Array<uint8>(Allocator_()), "fake reload failed");
+            return Result<void>::Success();
+        }
+
+        set.CompleteProvision(Result<void>::Success(), Move(bytes), StringView());
+        return Result<void>::Success();
+    }
+
+    uint64 LibraryRevision(StringView formatId,
+                           shader::ShaderLibraryKind library) const noexcept override {
+        return formatId == StringView("D3D12_SM6") && library == shader::ShaderLibraryKind::Engine
+                   ? revision
+                   : 0;
+    }
+
+    uint32 requests = 0;
+    uint64 revision = 1;
+    bool fail = false;
+};
+
+// 감시 재컴파일의 교체 연결(9.8절 "SH4 연결"): revision이 오르면 프레임 경계에서 새 집합으로 바꾸고
+// 옛 집합의 cache 항목을 회수하며, 진행 중 프레임의 lease가 풀릴 때까지 옛 집합을 남긴다. 공급이
+// 실패한 revision은 거부하고 현재를 유지하며 다시 열지 않는다. 쿠킹 라이브러리 집합은 다시 열지
+// 않는다.
+TEST(RenderBase_EngineRenderResourcesSwapProviderRevisions) {
+    RecordingDevice device(Allocator_());
+    EngineShaderHost host(Allocator_());
+    REQUIRE(RegisterEngine(host.Registry()));
+    REQUIRE(host.Freeze());
+    ReloadingProvider provider;
+    REQUIRE(host.AttachProvider(provider));
+    {
+        EngineRenderResources resources(Allocator_());
+        PipelineCache cache(Allocator_(), device);
+        REQUIRE(resources.Open(device, host));
+        CHECK(resources.ShaderRevision() == 1 && provider.requests == 1);
+        // revision이 그대로면 아무 일도 하지 않는다.
+        CHECK(!resources.ApplyShaderUpdates(&cache) && provider.requests == 1);
+
+        ShaderSet* first = resources.Shaders();
+        REQUIRE(first != nullptr);
+        auto copy = first->FindEntry(CopyTexturePixelType.hash);
+        REQUIRE(copy);
+        auto request =
+            FullscreenPipelineRequest(*first, copy.Value(), graphics::PixelFormat::RGBA8Unorm);
+        REQUIRE(request);
+        REQUIRE(cache.FindOrCreate(request.Value()));
+        CHECK(cache.Size() == 1);
+        // 진행 중 프레임이 옛 집합을 잡고 있다.
+        REQUIRE(first->TryAcquireLease());
+
+        provider.revision = 2;
+        CHECK(resources.ApplyShaderUpdates(&cache));
+        ShaderSet* second = resources.Shaders();
+        REQUIRE(second != nullptr);
+        CHECK(second != first && second->Epoch() != first->Epoch());
+        CHECK(second->State() == ShaderSetState::Ready);
+        CHECK(first->State() == ShaderSetState::Retired && !first->TryAcquireLease());
+        CHECK(cache.Size() == 0);
+        CHECK(resources.ShaderRevision() == 2 && resources.ShaderSwaps() == 1 &&
+              provider.requests == 2);
+        // 내장 자원 팩은 새 집합의 항목을 가리킨다.
+        const BuiltinShaderEntries& entries = resources.Builtins().ShaderEntries();
+        CHECK(second->Entry(entries.copyPixel) != nullptr &&
+              entries.copyPixel == second->FindEntry(CopyTexturePixelType.hash).Value());
+        first->ReleaseLease();
+        CHECK(!resources.ApplyShaderUpdates(&cache));
+
+        // 공급 실패 revision은 거부하고 현재를 유지한다(다시 열지 않는다).
+        provider.fail = true;
+        provider.revision = 3;
+        CHECK(!resources.ApplyShaderUpdates(&cache));
+        CHECK(resources.Shaders() == second && resources.ShaderRevision() == 2 &&
+              resources.ShaderRejections() == 1 && provider.requests == 3);
+        CHECK(!resources.ApplyShaderUpdates(&cache) && provider.requests == 3);
+
+        // 고친 revision은 다시 교체한다.
+        provider.fail = false;
+        provider.revision = 4;
+        CHECK(resources.ApplyShaderUpdates(&cache));
+        CHECK(resources.Shaders() != second && resources.ShaderRevision() == 4 &&
+              resources.ShaderSwaps() == 2);
+        cache.Clear();
+        resources.Retire(device);
+        CHECK(!resources.IsReady() && resources.Shaders() == nullptr);
+        CHECK(!resources.ApplyShaderUpdates(&cache));
+    }
+
+    // 쿠킹 라이브러리로 연 집합은 revision이 올라도 다시 열지 않는다.
+    FakeCookedSource cooked(host.Registry());
+    REQUIRE(host.AttachCookedLibraries(cooked));
+    {
+        EngineRenderResources resources(Allocator_());
+        REQUIRE(resources.Open(device, host));
+        REQUIRE(resources.OpenedFromCookedLibrary());
+        const uint32 requests = provider.requests;
+        provider.revision = 9;
+        CHECK(!resources.ApplyShaderUpdates(nullptr) && provider.requests == requests);
+        CHECK(resources.ShaderRevision() == 0);
+        resources.Retire(device);
+    }
+
+    host.DetachCookedLibraries(cooked);
     host.DetachProvider(provider);
     CHECK(device.WaitIdle());
     CHECK(device.PendingRetireCount() == 0);

@@ -2,7 +2,7 @@
 #include <Base/Compiler.h>
 
 // 클립 설정·이벤트·동기 마커·커브 검증과 정렬, 클립 진단 이름이다
-// (Docs/Design/MeshAnimationAssets.ko.md 7.1·7.3·7.5절, UE FAnimNotifyEvent::operator<·
+// (Docs/Design/MeshAnimationAssets 7.1·7.3·7.5절, UE FAnimNotifyEvent::operator<·
 // UAnimSequence::SortSyncMarkers).
 namespace rocks {
 
@@ -273,6 +273,10 @@ const char* ClipIssueName(ClipIssue issue) noexcept {
         return "TargetFrameRateTooHigh";
     case ClipIssue::IncompatibleTargetFrameRate:
         return "IncompatibleTargetFrameRate";
+    case ClipIssue::TrackBoneIndex:
+        return "TrackBoneIndex";
+    case ClipIssue::DuplicateTrackBone:
+        return "DuplicateTrackBone";
     case ClipIssue::UnknownBoneTrack:
         return "UnknownBoneTrack";
     }

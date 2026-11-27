@@ -40,10 +40,10 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 
 | 단계 | Jolt 필터 | 판정 |
 |---|---|---|
-| 1 | `BroadPhaseLayerFilter` | `mobility`(Static·Dynamic 하나만) |
-| 2 | `ObjectLayerFilter` | query 표지가 없으면 제외. Channel 질의: 질의 응답의 body object type 응답 × body 묶음의 질의 채널 응답 = 최소, Ignore면 제외. ObjectTypes 질의: object type bit |
-| 3 | `BodyFilter` | 무시 목록(body handle 집합) |
-| 4 | `ShapeFilter` | `traceComplex`(단순·complex 형상 구분 — compound 하위 형상 표지), weld 자식의 충돌 켬 |
+| 1 | `BroadPhaseLayerFilter` | 쓰지 않는다(기본 — 모든 broadphase 층) |
+| 2 | `ObjectLayerFilter` | query 표지가 없으면 제외. Channel 질의: 질의 응답의 body object type 응답 × body 묶음의 질의 채널 응답 = 최소, Ignore면 제외. ObjectTypes 질의: object type bit. `ignoreTouches`·`ignoreBlocks`, Test·First의 겹침 제외도 여기서 한다(7.1.7절) |
+| 3 | `BodyFilter` | 무시 목록(컴포넌트·Actor — 장면 칸이 기억한 값과 비교)과 `mobility`(칸의 운동 종류 — QueryOnly body는 층에 운동 묶음이 없다) |
+| 4 | `ShapeFilter` | `traceComplex`(단순·complex 형상 구분 — compound 하위 형상 표지), weld 자식의 충돌 켬(PH6) |
 
 - 단계 2의 최소 응답이 Overlap인지 Block인지는 결과 분류(`blockingHit`)에 쓰이므로, 필터는 통과시키고 수집기(`CollisionCollector`)가 body 층에서 다시 계산해 기록한다.
 - `First` 질의는 "막는 것 중 가장 가까운 것"이어야 한다(겹침은 건너뜀). 수집기를 Rocks가 구현해 막음만 early-out 기준으로 쓴다. `All`은 모두 모은 뒤 4.5절 정렬·자르기.
@@ -51,12 +51,12 @@ Jolt 충돌 필터는 세 겹이다: broadphase 층(`BroadPhaseLayer`), object �
 ## 6.4 접촉·probe·hit
 
 - `ContactListener::OnContactAdded`·`OnContactPersisted`(step 안, worker thread 가능 — `Physics/Collision/ContactListener.h:74–108`)에서:
-  - **probe**(어느 한쪽이 probe 표지): `ioSettings.mIsSensor = true`로 그 접촉의 반작용을 끈다(`ContactListener.h:49` — 접촉 데이터는 나오지만 밀어내지 않는다. CCD 경로에서도 지켜진다 — `Physics/PhysicsSystem.cpp:2078`).
-  - 두 body 중 `notifyRigidBodyCollision`이 참인 쪽이 있으면 `ContactNotice`(body handle 둘, 첫 접촉점, 접촉점 수, 법선, 스텝 번호, 추정 충격량)를 worker별 버퍼에 복사한다.
+  - **probe**(어느 한쪽이 probe 표지): `ioSettings.mIsSensor = true`로 그 접촉의 반작용을 끈다(`ContactListener.h:49` — 접촉 데이터는 나오지만 밀어내지 않는다. CCD 경로에서도 지켜진다 — `Physics/PhysicsSystem.cpp:2078`). probe hit는 실제로 겹친 접촉(깊이 ≥ 0)만이다(7.1.12절).
+  - 두 body 중 `notifyRigidBodyCollision`이 참인 쪽이 있으면 `ContactNotice`(body user data 둘, 하위 형상, 첫 접촉점, 법선, 깊이, probe 여부, CCD body가 끼면 추정 충격량)를 미리 잡은 배열 하나에 mutex로 복사한다(7.1.12절).
   - 게임 코드를 부르지 않고, 다른 body 상태를 읽지 않는다(계획 16.2절).
-- **합치는 순서.** worker별 버퍼를 합친 뒤 (스텝 번호, 낮은 body handle, 높은 body handle) 순으로 정렬한다(worker 배정이 비결정적이므로). 같은 쌍의 여러 스텝 접촉은 하나로 합친다(5.4절).
-- **충격량.** UE처럼 solver가 실제로 쓴 충격량이다(PMD14). Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않으므로(`ContactListener.h:106–108`) 고정 스텝마다 `Update`가 끝난 뒤 그 스텝에 모은 `ContactNotice`의 body 쌍마다 `PhysicsSystem::GetAppliedContactImpulse`(Rocks 추적 가능한 수정 — 어댑터 경계 10.6절)로 받는 body 쪽 충격량 벡터(접촉마다 법선 방향 — UE `E/Private/PhysicsEngine/Experimental/PhysScene_Chaos.cpp:1068–1070`과 같다)를 읽는다. 변환은 운동량 벡터(축 A, kg·m/s → kg·cm/s ×100 — 어댑터 경계 3절). CCD로만 닿은 쌍(함수가 거짓)은 listener에서 `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 구해 둔 추정값을 쓴다. 같은 스텝에 discrete와 CCD가 섞인 쌍은 CCD 몫이 빠진다(한계 — 어댑터 경계 10.6절). 공개 구현 UnrealJolt는 늘 추정값을 쓴다(어댑터 경계 11.4절).
-- **hit 문턱.** UE `MinDeltaVelocityForHitEvents`(기본 0 — `E/Private/PhysicsEngine/PhysicsSettings.cpp:31`)를 물리 설정에 둔다. 상대 속도 변화가 이보다 작은 접촉은 통지하지 않는다(0이면 모두).
+- **합치는 순서.** 고정 스텝마다 `Update` 뒤 (낮은 칸 번호, 높은 칸 번호, 하위 형상, 값) 순으로 정렬한다(worker 배정이 비결정적이므로 — 7.1.12절). 같은 스텝의 같은 쌍 접촉은 하나로 합친다(스텝이 다르면 따로 — 5.4절).
+- **충격량.** UE처럼 solver가 실제로 쓴 충격량이다(PMD14). Jolt는 `OnContactAdded` 시점(해 풀기 전)에 충격량을 주지 않으므로(`ContactListener.h:106–108`) 고정 스텝마다 `Update`가 끝난 뒤 그 스텝에 모은 `ContactNotice`의 body 쌍마다 `PhysicsSystem::GetAppliedContactImpulse`(Rocks 추적 가능한 수정 — 어댑터 경계 10.6절)로 받는 body 쪽 충격량 벡터(접촉마다 법선 방향 — UE `E/Private/PhysicsEngine/Experimental/PhysScene_Chaos.cpp:1068–1070`과 같다)를 읽는다. 변환은 운동량 벡터(축 A, kg·m/s → kg·cm/s ×100 — 어댑터 경계 3절). CCD로만 닿은 쌍(함수가 거짓이거나 접촉점 0 — Jolt CCD 캐시 항목은 접촉점이 없다)은 listener에서 `EstimateCollisionResponse`(`Physics/Collision/EstimateCollisionResponse.h:37`)로 구해 둔 추정값을 쓴다. 같은 스텝에 discrete와 CCD가 섞인 쌍은 CCD 몫이 빠진다(한계 — 어댑터 경계 10.6절). 공개 구현 UnrealJolt는 늘 추정값을 쓴다(어댑터 경계 11.4절).
+- **hit 문턱.** UE `MinDeltaVelocityForHitEvents`(기본 0 — `E/Private/PhysicsEngine/PhysicsSettings.cpp:31`)를 물리 설정에 둔다. 0보다 크면 두 Dynamic body의 선속도 변화(step 시작 → 끝, 성분마다)가 모두 이 값 이하인 접촉은 통지하지 않는다(0이면 모두, probe는 거르지 않는다 — 7.1.12절).
 - `OnContactValidate`는 쓰지 않는다(필터 판정은 6.2절이 끝낸다).
 
 ## 6.5 body 값 사상

@@ -3,7 +3,7 @@
 #include <Core/FileError.h>
 #include <TestSupport/Test.h>
 
-// Unreal 교환 묶음 리더의 정상 읽기와 스키마 변조 시험이다(Docs/Design/UnrealExchange.ko.md 3절,
+// Unreal 교환 묶음 리더의 정상 읽기와 스키마 변조 시험이다(Docs/Design/UnrealExchange 3절,
 // 10.4절 2–11번, 12.1절): 저장소 fixture(실제·메모리 파일 시스템), bundle.json 묶음 수준 오류(버전·
 // 구문·BOM·필수 키·타입·정렬·objectPath·file·redirect·파일 실패), 에셋 JSON 에셋 수준 오류, 모르는
 // 키 경고.
@@ -180,89 +180,89 @@ TEST(UnrealExchange_ManifestTampering) {
         {"\"formatVersion\": 1,", "\"formatVersion\": 18446744073709551615,",
          ErrorCode::Unsupported, AssetDiagnosticCode::UnsupportedBundleVersion,
          ExchangeIssue::Version},
-        {"\"projectSettings\": {", "\"settings\": {", ErrorCode::InvalidArgument,
+        {"\"projectSettings\": {", "\"settings\": {", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
         {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"path\": \"assets/Game/Textures/T_Rock.json\"", ErrorCode::InvalidArgument,
+         "\"path\": \"assets/Game/Textures/T_Rock.json\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
         {"\"from\": \"/Game/Old/MI_Old.MI_Old\",", "\"source\": \"/Game/Old/MI_Old.MI_Old\",",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
         {"\"formatVersion\": 1,", "\"formatVersion\": -1,", ErrorCode::Unsupported,
          AssetDiagnosticCode::UnsupportedBundleVersion, ExchangeIssue::Version},
-        {"\"formatVersion\": 1,", "\"formatVersion\": \"1\",", ErrorCode::InvalidArgument,
+        {"\"formatVersion\": 1,", "\"formatVersion\": \"1\",", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"formatVersion\": 1,", "\"formatVersion\": 1.0,", ErrorCode::InvalidArgument,
+        {"\"formatVersion\": 1,", "\"formatVersion\": 1.0,", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"formatVersion\": 1,", "\"version\": 1,", ErrorCode::InvalidArgument,
+        {"\"formatVersion\": 1,", "\"version\": 1,", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
-        {"\"plugin\": \"RocksExport\",", "\"plugin\": 5,", ErrorCode::InvalidArgument,
+        {"\"plugin\": \"RocksExport\",", "\"plugin\": 5,", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
         {"\"engineCommit\": \"f45729c0b6f0\"", "\"commit\": \"f45729c0b6f0\"",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
-        {"\"exporter\": {", "\"exporterX\": {", ErrorCode::InvalidArgument,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
+        {"\"exporter\": {", "\"exporterX\": {", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
-        {"\"substrate\": false,", "\"substrate\": 0,", ErrorCode::InvalidArgument,
+        {"\"substrate\": false,", "\"substrate\": 0,", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"retainJpegFormat\": true", "\"retainJpegFormat\": null", ErrorCode::InvalidArgument,
+        {"\"retainJpegFormat\": true", "\"retainJpegFormat\": null", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"createdUtc\": \"2026-11-21T00:00:00Z\",", "\"createdUtc\": 5,",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
+        {"\"createdUtc\": \"2026-11-21T00:00:00Z\",", "\"createdUtc\": 5,", ErrorCode::CorruptData,
+         AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
         {"\"createdUtc\": \"2026-11-21T00:00:00Z\",", "\"environment\": [],",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"assets\": [", "\"assets\": [5, ", ErrorCode::InvalidArgument,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
+        {"\"assets\": [", "\"assets\": [5, ", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"assets\": [", "\"assets\": {}, \"list\": [", ErrorCode::InvalidArgument,
+        {"\"assets\": [", "\"assets\": {}, \"list\": [", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"assets\": [", "\"assets\": [,", ErrorCode::InvalidArgument,
+        {"\"assets\": [", "\"assets\": [,", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::JsonSyntax},
         {"\"objectPath\": \"/Game/Textures/T_Rock.T_Rock\",",
-         "\"objectPath\": \"/Game/Textures/T_Rock.T_Rock:Sub\",", ErrorCode::InvalidArgument,
+         "\"objectPath\": \"/Game/Textures/T_Rock.T_Rock:Sub\",", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::ObjectPathSyntax},
         {"\"objectPath\": \"/Game/Textures/T_Rock.T_Rock\",", "\"objectPath\": 1,",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
         {"\"class\": \"Texture2D\",\n      \"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"file\": \"assets/Game/Textures/T_Rock.json\"", ErrorCode::InvalidArgument,
+         "\"file\": \"assets/Game/Textures/T_Rock.json\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
         {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"file\": \"assets/Game/Textures/../T_Rock.json\"", ErrorCode::InvalidArgument,
+         "\"file\": \"assets/Game/Textures/../T_Rock.json\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::FileNameMismatch},
         {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"file\": \"assets/Game/Textures/T_Rock.jsom\"", ErrorCode::InvalidArgument,
+         "\"file\": \"assets/Game/Textures/T_Rock.jsom\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::FileNameMismatch},
         {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"file\": \"assetz/Game/Textures/T_Rock.json\"", ErrorCode::InvalidArgument,
+         "\"file\": \"assetz/Game/Textures/T_Rock.json\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::FileNameMismatch},
         {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
-         "\"file\": \"assets/Game/Textures/T_Rocc.json\"", ErrorCode::InvalidArgument,
+         "\"file\": \"assets/Game/Textures/T_Rocc.json\"", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::FileNameMismatch},
         // 첫 에셋을 맨 뒤 이름으로 바꾸면 정렬 위반이다.
         {"\"objectPath\": \"/Game/Characters/SKEL_Hero.SKEL_Hero\",\n      \"class\": "
          "\"Skeleton\",\n      \"file\": \"assets/Game/Characters/SKEL_Hero.json\"",
          "\"objectPath\": \"/Game/Z/SKEL_Hero.SKEL_Hero\",\n      \"class\": \"Skeleton\",\n     "
          " \"file\": \"assets/Game/Z/SKEL_Hero.json\"",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
         // 두 번째 에셋을 첫 에셋과 같게 하면 엄격 증가 위반이다.
         {"\"objectPath\": \"/Game/Characters/SK_Hero.SK_Hero\",\n      \"class\": "
          "\"SkeletalMesh\",\n      \"file\": \"assets/Game/Characters/SK_Hero.json\"",
          "\"objectPath\": \"/Game/Characters/SKEL_Hero.SKEL_Hero\",\n      \"class\": "
          "\"Skeleton\",\n      \"file\": \"assets/Game/Characters/SKEL_Hero.json\"",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
         {"\"from\": \"/Game/Old/MI_Old.MI_Old\",", "\"from\": \"/Game/Textures/T_Rock.T_Rock\",",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle,
          ExchangeIssue::RedirectConflict},
         {"\"to\": \"/Game/Materials/MI_Rock.MI_Rock\"", "\"to\": \"/Game/Old/MI_Old.MI_Old\"",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle,
          ExchangeIssue::RedirectConflict},
         {"\"to\": \"/Game/Materials/MI_Rock.MI_Rock\"", "\"to\": \"MI_Rock\"",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle,
          ExchangeIssue::ObjectPathSyntax},
         {"\"redirects\": [",
          "\"redirects\": [{\"from\": \"/Game/Zed/A.A\", \"to\": "
          "\"/Game/Textures/T_Rock.T_Rock\"}, ",
-         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
-        {"\"redirects\": [", "\"redirects\": [\"x\", ", ErrorCode::InvalidArgument,
+         ErrorCode::CorruptData, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::NotSorted},
+        {"\"redirects\": [", "\"redirects\": [\"x\", ", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
-        {"\"redirects\": [", "\"redirects\": {}, \"later\": [", ErrorCode::InvalidArgument,
+        {"\"redirects\": [", "\"redirects\": {}, \"later\": [", ErrorCode::CorruptData,
          AssetDiagnosticCode::CorruptBundle, ExchangeIssue::WrongType},
     };
     for (const ManifestCase& one : cases) {
@@ -310,7 +310,7 @@ TEST(UnrealExchange_ManifestVersionFirst) {
         REQUIRE(EditFixture(allocator, files, "bundle.json", "\"assets\": [", "\"assets\": [,"));
         ExchangeBundle bundle(allocator);
         ExchangeDiagnostics diagnostics(allocator);
-        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::CorruptData);
         const ExchangeDiagnostic* syntax = diagnostics.Find(AssetDiagnosticCode::CorruptBundle);
         REQUIRE(syntax != nullptr);
         CHECK(syntax->issue == ExchangeIssue::JsonSyntax && syntax->position.line == 14 &&
@@ -510,7 +510,7 @@ TEST(UnrealExchange_AssetTampering) {
               error->file == ExchangeFile::AssetJson);
         CHECK(error->error == (one.issue == ExchangeIssue::LimitExceeded
                                    ? ErrorCode::CapacityExceeded
-                                   : ErrorCode::InvalidArgument));
+                                   : ErrorCode::CorruptData));
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -556,15 +556,15 @@ TEST(UnrealExchange_AssetDocumentDetails) {
         REQUIRE(PrependBom(allocator, files, path.View()));
         ExchangeBundle bundle(allocator);
         ExchangeDiagnostics diagnostics(allocator);
-        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::ByteOrderMark) == 1);
         REQUIRE(files.PutText(path.View(), "[1, 2]"));
-        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::WrongType) == 1);
         REQUIRE(files.PutText(path.View(), ""));
-        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::JsonSyntax) == 1);
     }
@@ -584,7 +584,7 @@ TEST(UnrealExchange_NotRegularFiles) {
         REQUIRE(files.SetKind(path.View(), platform::FileType::Other, false));
         ExchangeBundle bundle(allocator);
         ExchangeDiagnostics diagnostics(allocator);
-        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::InvalidArgument);
+        CHECK(ReadFixture(files, bundle, diagnostics).Error() == ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::NotRegularFile) == 1);
         CHECK(files.opens == 0);
@@ -604,7 +604,7 @@ TEST(UnrealExchange_NotRegularFiles) {
         const ExchangeDiagnostic* error = FindAssetDiagnostic(diagnostics, RockMeshAsset);
         REQUIRE(error != nullptr);
         CHECK(error->issue == ExchangeIssue::NotRegularFile &&
-              error->error == ErrorCode::InvalidArgument);
+              error->error == ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

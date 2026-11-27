@@ -593,17 +593,17 @@ TEST(Audio_OpusCodec_CodecHeaderRejects) {
     };
 
     // 6채널: stream 4, coupled 2(coded 6). 칸 위치는 3.32.2절.
-    CHECK(openWith(0, 2) == ErrorCode::InvalidArgument); // family
-    CHECK(openWith(1, 0) == ErrorCode::InvalidArgument); // stream 0
-    CHECK(openWith(2, 5) == ErrorCode::InvalidArgument); // coupled > stream
-    CHECK(openWith(3, 1) == ErrorCode::InvalidArgument); // 예약
-    CHECK(openWith(4, static_cast<uint8>(valid[4] + 1)) == ErrorCode::InvalidArgument); // pre-skip
-    CHECK(openWith(6, 1) == ErrorCode::InvalidArgument);                                // gain
-    CHECK(openWith(1, 5) == ErrorCode::InvalidArgument);  // stream + coupled = 7 ≠ 채널 수
-    CHECK(openWith(8, 6) == ErrorCode::InvalidArgument);  // mapping 범위 밖
-    CHECK(openWith(14, 1) == ErrorCode::InvalidArgument); // 채널 수 뒤 mapping 칸
+    CHECK(openWith(0, 2) == ErrorCode::CorruptData); // family
+    CHECK(openWith(1, 0) == ErrorCode::CorruptData); // stream 0
+    CHECK(openWith(2, 5) == ErrorCode::CorruptData); // coupled > stream
+    CHECK(openWith(3, 1) == ErrorCode::CorruptData); // 예약
+    CHECK(openWith(4, static_cast<uint8>(valid[4] + 1)) == ErrorCode::CorruptData); // pre-skip
+    CHECK(openWith(6, 1) == ErrorCode::CorruptData);                                // gain
+    CHECK(openWith(1, 5) == ErrorCode::CorruptData);  // stream + coupled = 7 ≠ 채널 수
+    CHECK(openWith(8, 6) == ErrorCode::CorruptData);  // mapping 범위 밖
+    CHECK(openWith(14, 1) == ErrorCode::CorruptData); // 채널 수 뒤 mapping 칸
     CHECK(decoder.Open(view.Header(), Span<const uint8>(valid, 8)).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     const auto openHeader = [&](auto change) noexcept {
         AudioPlatformDataHeader header = view.Header();
@@ -612,17 +612,17 @@ TEST(Audio_OpusCodec_CodecHeaderRejects) {
     };
 
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept { h.sampleRate = NonOpusRate; }) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     // 6채널이지만 기본 배치(SL·SR)가 아니라 BL·BR이다.
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept {
               h.channelMask = AudioChannelFrontLeft | AudioChannelFrontRight |
                               AudioChannelFrontCenter | AudioChannelLowFrequency |
                               AudioChannelBackLeft | AudioChannelBackRight;
-          }) == ErrorCode::InvalidArgument);
+          }) == ErrorCode::CorruptData);
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept { h.channels = 0; }) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept { h.channels = 9; }) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept { h.codec = AudioCodecId::Adpcm; }) ==
           ErrorCode::InvalidArgument);
     CHECK(openHeader([](AudioPlatformDataHeader& h) noexcept { h.bitstreamVersion = 2; }) ==
@@ -646,7 +646,7 @@ TEST(Audio_OpusCodec_CodecHeaderRejects) {
     REQUIRE(decoder.Open(view.Header(), view.CodecHeader()));
     REQUIRE(decoder.BeginChunk(view.Chunk(0), view.ChunkPayload(0), 0));
     REQUIRE(decoder.DecodeNext(out));
-    CHECK(openWith(0, 2) == ErrorCode::InvalidArgument);
+    CHECK(openWith(0, 2) == ErrorCode::CorruptData);
     CHECK(decoder.DecodeNext(out).Error() == ErrorCode::InvalidArgument);
     CHECK(decoder.BeginChunk(view.Chunk(0), view.ChunkPayload(0), 0).Error() ==
           ErrorCode::InvalidArgument);
@@ -742,15 +742,15 @@ TEST(Audio_OpusCodec_ChunkCorruption) {
 
     // 첫 길이 0, 길이가 payload 밖, 남는 byte 하나.
     CHECK(withPayload([](Array<uint8>& p) noexcept { StoreLittleEndian<uint16>(p.Data(), 0); },
-                      0) == ErrorCode::InvalidArgument);
+                      0) == ErrorCode::CorruptData);
     CHECK(withPayload([](Array<uint8>& p) noexcept { StoreLittleEndian<uint16>(p.Data(), 0xFFFF); },
-                      0) == ErrorCode::InvalidArgument);
-    CHECK(withPayload([](Array<uint8>&) noexcept {}, 1) == ErrorCode::InvalidArgument);
+                      0) == ErrorCode::CorruptData);
+    CHECK(withPayload([](Array<uint8>&) noexcept {}, 1) == ErrorCode::CorruptData);
     // 끝에 붙은 단위의 길이가 남은 byte(0)보다 크다.
     CHECK(
         withPayload(
             [](Array<uint8>& p) noexcept { StoreLittleEndian<uint16>(p.Data() + p.Size() - 2, 5); },
-            2) == ErrorCode::InvalidArgument);
+            2) == ErrorCode::CorruptData);
 
     // 청크 표 값: payload byte 수 불일치, frame 수가 960 배수 아님, 패킷 수 불일치.
     AudioChunkEntry changed = chunk;
@@ -758,13 +758,13 @@ TEST(Audio_OpusCodec_ChunkCorruption) {
     CHECK(BeginError(view, changed, payload, 0) == ErrorCode::InvalidArgument);
     changed = chunk;
     changed.frameCount = chunk.frameCount - 1;
-    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::InvalidArgument);
+    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::CorruptData);
     changed = chunk;
     changed.frameCount = chunk.frameCount - OpusPacketFrames;
-    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::InvalidArgument);
+    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::CorruptData);
     changed = chunk;
     changed.preRollFrames = 1;
-    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::InvalidArgument);
+    CHECK(BeginError(view, changed, payload, 0) == ErrorCode::CorruptData);
     // startCodecFrame 범위 밖.
     CHECK(BeginError(view, chunk, payload, chunk.frameCount) == ErrorCode::InvalidArgument);
 
@@ -776,12 +776,12 @@ TEST(Audio_OpusCodec_ChunkCorruption) {
                   const uint8 lowBits = static_cast<uint8>(p[TocAt] & ((1u << TocConfigShift) - 1));
                   p[TocAt] = static_cast<uint8>((TocCeltFullband10Ms << TocConfigShift) | lowBits);
               },
-              0) == ErrorCode::InvalidArgument);
+              0) == ErrorCode::CorruptData);
     CHECK(withPayload(
               [](Array<uint8>& p) noexcept {
                   p[TocAt] = static_cast<uint8>((p[TocAt] & ~TocCodeMask) | TocCodeTwoFrames);
               },
-              0) == ErrorCode::InvalidArgument);
+              0) == ErrorCode::CorruptData);
 
     // 패킷 byte(길이 접두 밖) 무작위 교체: 오류 또는 성공, 멈추거나 범위 밖을 읽지 않는다.
     const AudioDecoderTable table = MakeTable();
@@ -805,7 +805,9 @@ TEST(Audio_OpusCodec_ChunkCorruption) {
         out.frameCount = OpusPacketFrames;
         out.channels[0] = scratch.Data();
         out.channels[1] = scratch.Data() + OpusPacketFrames;
-        if (!decoder.BeginChunk(chunk, copy.View(), 0)) {
+        // 손상 실패는 CorruptData다(3.38절 — 호출 순서·인자는 맞다).
+        if (auto begun = decoder.BeginChunk(chunk, copy.View(), 0); !begun) {
+            CHECK(begun.Error() == ErrorCode::CorruptData);
             continue;
         }
 
@@ -813,7 +815,12 @@ TEST(Audio_OpusCodec_ChunkCorruption) {
         while (calls < CorruptionRounds) {
             auto count = decoder.DecodeNext(out);
             ++calls;
-            if (!count || count.Value() == 0) {
+            if (!count) {
+                CHECK(count.Error() == ErrorCode::CorruptData);
+                break;
+            }
+
+            if (count.Value() == 0) {
                 break;
             }
         }

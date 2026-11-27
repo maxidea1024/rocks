@@ -71,7 +71,7 @@ void MetadataCallback(const FLAC__StreamDecoder*, const FLAC__StreamMetadata* me
 
     // STREAMINFO가 둘이면 libFLAC은 뒤 값(MD5 등)을 쓴다. 어느 쪽인지 모호하므로 거부한다.
     if (context.hasStreamInfo) {
-        context.failure = ErrorCode::InvalidArgument;
+        context.failure = ErrorCode::CorruptData;
         return;
     }
 
@@ -87,7 +87,7 @@ void MetadataCallback(const FLAC__StreamDecoder*, const FLAC__StreamMetadata* me
 ErrorCode CheckStreamInfo(FlacContext& context) noexcept {
     if (!context.hasStreamInfo || context.channels == 0 ||
         context.bits < FLAC__MIN_BITS_PER_SAMPLE || context.bits > FLAC__MAX_BITS_PER_SAMPLE) {
-        return ErrorCode::InvalidArgument;
+        return ErrorCode::CorruptData;
     }
 
     if (context.channels > MaxSourceChannels || context.sampleRate < MinSourceSampleRate ||
@@ -122,7 +122,7 @@ FLAC__StreamDecoderWriteStatus WriteCallback(const FLAC__StreamDecoder*, const F
     // 보고되고, libFLAC은 빠진 구간을 무음 frame으로 채워 길이를 맞춘다. 마지막 frame 뒤
     // 쓰레기(끝의 ID3v1)는 뒤따르는 write가 없으므로 받는다.
     if (context.failure == ErrorCode::None && context.lostSync) {
-        context.failure = ErrorCode::InvalidArgument;
+        context.failure = ErrorCode::CorruptData;
     }
 
     if (context.failure != ErrorCode::None) {
@@ -142,14 +142,14 @@ FLAC__StreamDecoderWriteStatus WriteCallback(const FLAC__StreamDecoder*, const F
     const uint64 decoded = context.interleaved.Size() / context.channels;
     if (header.number_type != FLAC__FRAME_NUMBER_TYPE_SAMPLE_NUMBER ||
         header.number.sample_number != decoded) {
-        context.failure = ErrorCode::InvalidArgument;
+        context.failure = ErrorCode::CorruptData;
         return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
 
     const uint64 frames = decoded + header.blocksize;
     // 길이를 알면 그보다 길 수 없고, 모르면 쌓는 동안 상한을 본다.
     if (context.totalFrames > 0 && frames > context.totalFrames) {
-        context.failure = ErrorCode::InvalidArgument;
+        context.failure = ErrorCode::CorruptData;
         return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
 
@@ -191,7 +191,7 @@ void ErrorCallback(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus st
             context.lostSync = true;
         }
     } else if (context.failure == ErrorCode::None) {
-        context.failure = ErrorCode::InvalidArgument;
+        context.failure = ErrorCode::CorruptData;
     }
 }
 
@@ -247,6 +247,7 @@ Result<void> DecodeFlacInto(Span<const uint8> file, DecodedSourceAudio& out) noe
         return Result<void>::Failure(
             initialized == FLAC__STREAM_DECODER_INIT_STATUS_MEMORY_ALLOCATION_ERROR
                 ? ErrorCode::OutOfMemory
+                // 콜백·상태 오류다(데이터와 무관 — 3.38절).
                 : ErrorCode::InvalidArgument);
     }
 
@@ -263,13 +264,13 @@ Result<void> DecodeFlacInto(Span<const uint8> file, DecodedSourceAudio& out) noe
     }
 
     if (!processed || !finished || !context.hasStreamInfo || context.interleaved.Size() == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const uint64 frames = context.interleaved.Size() / context.channels;
     // 길이를 알면 끝까지 있어야 한다(잘린 파일).
     if (context.totalFrames > 0 && frames != context.totalFrames) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(context.channels, context.sampleRate, frames,

@@ -7,7 +7,7 @@
 #include <World/Primitives/BoxComponent.generated.h>
 #include <World/Primitives/ShapeComponent.h>
 #include <World/Primitives/BoxComponent.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // Shape 컴포넌트다(Docs/Design/EngineRuntime 24.3.6절, D2). 기하·bounds는 끝까지 동작하고 충돌은
 // CR16이다.
@@ -27,6 +27,7 @@ Result<void> BoxComponent::SetBoxExtent(const Vec3d& extent) noexcept {
         boxExtent_ = extent;
         InvalidateBounds();
         MarkRenderStateDirtyIfPresent();
+        UpdateBodyGeometry();
     }
 
     return Result<void>::Success();
@@ -45,6 +46,12 @@ Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TryBox(
         WorldLocation(), WorldQuaternion(),
         Vec3d(math::Abs(extent.x), math::Abs(extent.y), math::Abs(extent.z)));
+}
+
+bool BoxComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    geometry.kind = BodyGeometryKind::Box;
+    geometry.halfExtent = boxExtent_;
+    return true;
 }
 
 } // namespace rocks

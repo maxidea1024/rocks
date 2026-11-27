@@ -25,6 +25,9 @@ inline constexpr StringView DefaultImportSourceRole = "source";
 // 기본 확장자 하나의 byte 상한과 임포터 하나의 확장자 수 상한이다.
 inline constexpr usize MaxImporterExtensionBytes = 16;
 inline constexpr usize MaxImporterExtensions = 32;
+// 임포트 실행 하나(구성원 하나, 그리고 묶음 전체의 서로 다른 대상 합)가 EditAsset으로 고칠 수
+// 있는 다른 에셋 수 상한이다(7.1절 20 A2f4).
+inline constexpr usize MaxImportEditedAssets = 64;
 
 // 명령 예약 이름이다(13절 — 옵션 필드 이름이 될 수 없다, 대소문자 무시).
 inline constexpr StringView ImportReservedNames[] = {
@@ -58,6 +61,11 @@ struct AssetImporterInfo {
     // 접두 역할 하나 이상이다(0개는 InvalidImportOption). 재임포트의 역할 없는 원본 하나
     // (`--source=`)는 받지 않는다(InvalidImportOption).
     bool variableSourcesOnly = false;
+    // 태그 키 접두다(Docs/Design/AssetSystem 7.1절 21 A2f5 — AddTag 키는 `<tagPrefix>.`로
+    // 시작한다). 비면 name이다. 여러 임포터가 같은 접두를 쓸 수 있다(한 기능 묶음 — Unreal 교환
+    // 임포터들이 `UnrealExchange`). 규칙은 name과 같다(1–MaxImporterNameBytes byte의
+    // `[A-Za-z0-9_]`, `Bundle` 금지 — 어기면 등록 InvalidArgument).
+    StringView tagPrefix{};
     // 옵션 struct(등록 ROCKS_STRUCT)다. 0이면 옵션 없음. 필드 이름은 outputType의 노출 속성
     // 이름·ImportReservedNames와 겹칠 수 없다(대소문자 무시 — 옵션과 설정을 첫 이름으로 나눈다).
     TypeId optionsType{};
@@ -104,10 +112,10 @@ public:
     virtual Result<void> Fail(AssetDiagnosticCode code, ErrorCode error,
                               uint64 detail = 0) noexcept = 0;
     // 주 출력 기록에 임포터 태그 한 쌍을 더한다(Docs/Design/AssetSystem 7.1절 19 A2f3a UXR8 —
-    // 저장이 패키지 Tags로 낸다, 색인 항목 태그에 나온다). key는 `<Info().name>.`으로 시작한다
-    // (IsValidImportTag). 같은 쌍은 한 번만 남는다. 이번 기록에는 이번에 더한 것만
-    // 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다). 오류: 규칙 위반·MaxImportTags
-    // 초과 InvalidArgument, 할당 실패.
+    // 저장이 패키지 Tags로 낸다, 색인 항목 태그에 나온다). key는 `<Info().tagPrefix>.`(비면
+    // `<Info().name>.`)으로 시작한다(IsValidImportTag — 7.1절 21 A2f5). 같은 쌍은 한 번만 남는다.
+    // 이번 기록에는 이번에 더한 것만 남는다(재임포트도 — 옛 값은 PreviousTags로 읽어 다시 더한다).
+    // 오류: 규칙 위반·MaxImportTags 초과 InvalidArgument, 할당 실패.
     virtual Result<void> AddTag(StringView key, StringView value) noexcept = 0;
     // 재임포트면 옛 소유 기록의 태그((key, value) byte 순), 새 임포트는 빈 목록이다. 수명은 Import
     // 호출 동안이다.
@@ -121,6 +129,26 @@ public:
     // MissingDependency, related = id), 같은 id 둘 AlreadyExists(진단 DuplicateAssetId), 열기 오류,
     // 할당 실패.
     virtual Result<ObjectHandle> OpenAsset(AssetId asset) noexcept = 0;
+    // 이번 실행의 출력·묶음 구성원이 아닌 기존 에셋을 고칠 대상으로 열어 대표 객체를 준다
+    // (Docs/Design/AssetSystem 7.1절 20 A2f4 — 스킨 메시 임포트가 스켈레톤에 본을 더할 때, UE
+    // MergeAllBonesToBoneTree). 임포터는 Registry().ResolveForWrite로 고치고, 임포트가 성공하면
+    // 그 패키지를 출력과 같은 저장 단계에서 저장한다(새 파일 뒤·기존 출력 앞). 참조는 걸지 않는다
+    // (필요하면 같은 id로 OpenAsset — 같은 객체). 같은 id를 다시 부르면 같은 객체다. 고친 에셋의
+    // ImportRecord는 바뀌지 않는다. 임포트가 실패하면 고친 값은 저장되지 않는다(이번 실행이 연
+    // 패키지는 버리고, 전부터 열려 있던 패키지는 dirty로 남는다).
+    //
+    // 사용 예(스켈레톤에 모자란 본 더하기):
+    //   auto skeleton = context.EditAsset(skeletonId);
+    //   if (!skeleton) { return Result<void>::Failure(skeleton.Error()); }
+    //   auto writable = context.Registry().ResolveForWrite<Skeleton>(context.Access(),
+    //                                                              skeleton.Value());
+    //
+    // 오류: 자기 출력·묶음 구성원의 출력(주 출력·재임포트 기록 출력) InvalidArgument, 색인에 없음
+    // NotFound(진단 MissingDependency, related = id), 같은 id 둘 AlreadyExists(DuplicateAssetId),
+    // 이번 실행 전부터 열려 있고 저장하지 않은 편집이 있음 Busy, 읽기 전용 패키지
+    // Unsupported(NewerVersion), 미해결 import가 있음 InvalidArgument(MissingDependency, related =
+    // 첫 대상), 대상 수가 MaxImportEditedAssets를 넘음 CapacityExceeded, 열기 오류, 할당 실패.
+    virtual Result<ObjectHandle> EditAsset(AssetId asset) noexcept = 0;
     // 묶음 임포트(Docs/Design/AssetSystem 7.1절 19 A2f3d UXR11 — AssetService::ImportGroup)의
     // 구성원 수(단일 Import·Reimport는 1)·이 구성원 번호·index번 구성원 주 출력 id(범위 밖은
     // null)다. 모든 구성원의 주 출력은 임포터 호출 전에 있으므로 다른 구성원은

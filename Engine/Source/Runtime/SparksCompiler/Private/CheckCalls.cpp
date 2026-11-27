@@ -53,13 +53,6 @@ bool TypeChecker::HasIncompleteMembers(uint32 type) const noexcept {
     return false;
 }
 
-ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 node) noexcept {
-    // 재귀 경로(`a.b.c ...`)의 frame에는 받는 값만 둔다(CheckBinary 참고).
-    const ExpressionValue receiver =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return MemberOf(context, node, receiver);
-}
-
 ExpressionValue TypeChecker::MemberOf(const CheckContext& context, uint32 node,
                                       const ExpressionValue& receiver) noexcept {
     // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
@@ -333,14 +326,6 @@ void TypeChecker::ReportStaleRead(const CheckContext& context, uint32 objectNode
                "object can be destroyed while the function waits.",
                fix.View());
     }
-}
-
-ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
-                                       uint32 expected) noexcept {
-    // 재귀 경로(`f().g().h() ...`)의 frame에는 부르는 값만 둔다(CheckBinary 참고).
-    const ExpressionValue callee =
-        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
-    return CallValue(context, node, expected, callee);
 }
 
 ExpressionValue TypeChecker::CallValue(const CheckContext& context, uint32 node, uint32 expected,
@@ -1151,14 +1136,26 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
         for (usize index = chain.Size(); index > 0; --index) {
             requireDeclared(chain[index - 1], 4);
         }
-    } else if (entry.kind == SymbolKind::EngineType) {
-        const BindingSchema& schema = compilation_.schemas_[entry.index].schema;
-        const SchemaType& source = schema.Types()[entry.item];
-        if (source.kind == SchemaTypeKind::Struct) {
+    } else if (IsEngineStruct(typeSymbol)) {
+        // 엔진 struct: 기반 struct의 필드부터(SL 10.2절 struct `base` — EI1a).
+        Array<uint32> chain(allocator_);
+        for (uint32 at = typeSymbol, step = 0;
+             IsEngineStruct(at) && step < compilation_.symbols_.Size();
+             at = compilation_.symbols_[at].base, ++step) {
+            if (auto pushed = chain.TryPushBack(at); !pushed) {
+                binder_.error_ = pushed.Error();
+                return result;
+            }
+        }
+
+        for (usize index = chain.Size(); index > 0; --index) {
+            const Symbol& owner = compilation_.symbols_[chain[index - 1]];
+            const BindingSchema& schema = compilation_.schemas_[owner.index].schema;
+            const SchemaType& source = schema.Types()[owner.item];
             for (uint32 at = source.firstField; at < source.firstField + source.fieldCount; ++at) {
                 const StringView fieldName = schema.Text(schema.Fields()[at].name);
                 const uint32 field =
-                    binder_.FindName(SpaceKey(NameSpaceKind::Members, typeSymbol), fieldName);
+                    binder_.FindName(SpaceKey(NameSpaceKind::Members, chain[index - 1]), fieldName);
                 if (field != NoSymbol) {
                     requireField(field, fieldName, compilation_.symbols_[field].type, false);
                 }

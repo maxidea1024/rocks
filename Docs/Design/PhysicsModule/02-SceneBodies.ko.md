@@ -7,7 +7,7 @@
 - World마다 물리 장면이 하나다(UE `UWorld::PhysicsScene` — `E/Classes/Engine/World.h:1588`, 생성 `E/Private/World.cpp:2461–2464`·`6807–6843`, 파괴 `:1540–1561`). Tryout 세션 둘이면 장면도 둘이다(계획 16.4절 "World·Tryout session마다 분리한 physics system").
 - 만드는 쪽은 Physics 모듈의 World subsystem `PhysicsWorldSubsystem`이다. `Initialize`에서 Jolt 장면을 만들어 World에 접점으로 꽂고(2.2절), `Deinitialize`에서 뗀 뒤 파괴한다. subsystem 정리는 초기화 역순이고(ERD8) 모든 Actor 정리 뒤이므로(16.5절 표), body는 장면보다 먼저 사라진다.
 - 생성 판정(`shouldCreate` — ERD9): World 종류가 Game·Tryout·Editor·Preview면 만든다. Inactive는 만들지 않는다. UE는 `InitWorld`의 `bCreatePhysicsScene`(기본 참)으로 편집·미리보기 World에도 장면을 만든다(편집기 picking·미리보기 충돌이 쓴다).
-- 프로세스 공유 자원(Jolt 할당 hook·`Factory`·`RegisterTypes`·형상 캐시)은 Physics 모듈 수명 객체가 `Startup`·`Shutdown`에서 맡는다(어댑터 경계 10.4절 순서). 종료 순서는 계획 16.4절: 진행 중 step 완료 → World 장면 해제 → 공유 형상 해제 → 프로세스 공유 자원 해제.
+- 프로세스 공유 자원(Jolt 할당 hook·`Factory`·`RegisterTypes`)은 장면마다 참조 수로 쥐어 첫 장면이 만들고 마지막 장면이 해제한다(어댑터 경계 10.4절 순서, PMD21 — 7.1.1절). 공유 형상 캐시의 수명은 PH6에서 정한다. 종료 순서는 계획 16.4절: 진행 중 step 완료 → World 장면 해제 → 공유 형상 해제 → 프로세스 공유 자원 해제.
 
 ## 2.2 World 쪽 접점
 
@@ -62,7 +62,7 @@ public:
 | 시작 잠듦 | `startAwake`가 거짓이고 **소유 Actor가 아직 BeginPlay 전**이면 Dynamic body를 잠든 채 넣는다(게임 중 Spawn한 Actor도 등록은 BeginPlay 전이므로 잠든 채 시작한다). BeginPlay 뒤 등록이면 깨어서 넣는다 | `PrimitiveComponent.cpp:955–961`(`HasActorBegunPlay`) |
 
 - scale 0은 아주 작은 값(`KINDA_SMALL_NUMBER` 대응 상수)으로 보정해 형상을 만든다. UE shipping 빌드는 세 축이 **모두** 0일 때만 보정한다(`PrimitiveComponent.cpp:909–925`). Rocks는 **어느 한 축**이라도 0이면 그 축을 보정한다(Jolt 형상은 0 크기 축을 받지 않는다 — `ScaleHelpers::cMinScale`, UE와 다른 점).
-- 실패: `CreateBody` 실패(형상 생성 실패·용량 초과)는 시스템 상태 실패로 돌아가 등록 실패가 된다(ERD26). 형상 값 오류(음수 반경 등)는 형상 컴포넌트 setter가 이미 막으므로 남는 실패는 용량·할당이다. 용량 한도(`PhysicsSettings::maxBodies`)는 Jolt `PhysicsSystem::Init`의 최대 body 수다.
+- 실패: `CreateBody` 실패(형상 생성 실패·용량 초과)는 시스템 상태 실패로 돌아가 등록 실패가 된다(ERD26). 형상 크기 0·음수는 실패가 아니라 UE처럼 clamp한다(구 반경·box 반폭 최소 `KindaSmallNumber`, 캡슐 0.1 cm 하한 — `ChaosInterfaceUtils.cpp:139–177`, 7.1.3절). 남는 실패는 비유한 값·용량·할당이다. 용량 한도(`PhysicsSettings::maxBodies`)는 Jolt `PhysicsSystem::Init`의 최대 body 수다.
 
 ### 2.3.1 바뀔 때
 
@@ -73,10 +73,10 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 | 실효 충돌 켬(`SetCollisionEnabled`·profile 이름) | `NoCollision`과 그 밖 사이를 넘으면 만들기·지우기, 그 밖이면 필터만 갱신(`UpdateBody`) | `PrimitiveComponentPhysics.cpp:1376–1393`·`1410–1418` |
 | 응답·object type | 필터만 갱신 | 같음(필터 데이터 갱신) |
 | `simulatePhysics` | 다시 만들지 않고 Kinematic ↔ Dynamic 전환(`UpdateBody`). 참으로 켜면(그리고 BeginPlay 때 이미 참이면) **부모에서 뗀다**(월드 transform 유지, 떼기의 overlap 갱신은 하지 않음) — 시뮬레이션하는 컴포넌트는 부착될 수 없다. weld 자식에게 `ApplyWeldOnChildren`(2.8절) | `:176–179`, `BodyInstance.cpp:2669–2724`·`2676–2686`, `PrimitiveComponent.cpp:4378–4392` |
-| Mobility | 컴포넌트 재등록(시스템 상태 전부 다시 — UE `FComponentReregisterContext`) | `SceneComponent.cpp:3098–3103` |
-| scale | 다시 만들지 않고 형상 scale 갱신(Jolt `SetShape` + scaled shape) | `SceneComponent.cpp:1865–1883`, `PrimitiveComponent.cpp:1079–1083` |
-| 형상 값(Box 크기 등) | 형상 갱신(`UpdateBody`) | `UBoxComponent::SetBoxExtent` → `UpdateBodySetup` + 재생성 |
-| `BodySettings`의 질량·감쇠·DOF·CCD 등 | 해당 속성만 갱신 | 각 setter |
+| Mobility | 시스템 상태 전부 즉시 다시 만들기(UE는 컴포넌트 재등록 `FComponentReregisterContext` — Rocks는 등록 hook을 다시 부르지 않는다, 7.1.5절). Movable이 되면 자식도 Movable | `SceneComponent.cpp:3098–3116` |
+| scale | 다시 만들지 않고 형상 갱신(Jolt `SetShape` — 깨움, 질량은 `updateMassWhenScaleChanges`면 다시 계산) | `SceneComponent.cpp:1865–1883`, `PrimitiveComponent.cpp:1079–1083`, `BodyInstance.cpp:2545–2575` |
+| 형상 값(Box 크기 등) | scale과 같은 형상 갱신 | `UBoxComponent::SetBoxExtent` → `UpdateBodyScale(scale, true)` — `BoxComponent.cpp:28–47` |
+| `BodySettings`의 질량·감쇠·DOF·CCD 등 | 해당 속성만 갱신(setter와 함께 PH5) | 각 setter |
 
 ## 2.4 형상
 

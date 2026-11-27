@@ -226,12 +226,12 @@ TEST(RenderGraph_ExportedTextureIsImportedByTheNextGraph) {
         GraphPassAccesses accesses(graph);
         accesses.Texture(previous.Value(), ResourceAccess::SrvGraphics)
             .RenderTarget(target.Value());
-        REQUIRE(graph.AddPass(ReadName, GraphPassKind::Raster, GraphPassFlags::HasSideEffects,
-                              accesses,
-                              [previous = previous.Value()](GraphPassContext& pass) noexcept {
-                                  pass.Commands().SetTexture(pass.Texture(previous));
-                                  pass.Commands().Draw(3);
-                              }));
+        REQUIRE(graph.AddPass(
+            ReadName, GraphPassKind::Raster, GraphPassFlags::HasSideEffects, accesses,
+            [previous = previous.Value()](GraphPassContext& pass) noexcept {
+                pass.Commands().SetTexture(graphics::ShaderStage::Pixel, 0, pass.Texture(previous));
+                pass.Commands().Draw(3);
+            }));
         REQUIRE(graph.Execute());
         // 이미 SRV 상태로 import했으므로 읽기 전이가 없다.
         CHECK(graph.Stats().transitions == 0);

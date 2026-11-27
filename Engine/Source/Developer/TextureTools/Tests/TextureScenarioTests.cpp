@@ -31,6 +31,8 @@
 using namespace rocks;
 namespace texture_scenario_tests_file {
 
+using graphics::PixelFormat;
+
 using rocks::asset_database_test::ManualAssetClock;
 using rocks::asset_database_test::MemoryFileSystem;
 using rocks::asset_database_test::TempProject;
@@ -365,9 +367,10 @@ TEST(TextureScenario_ImportEditCookLoad) {
                                     diagnostics);
     REQUIRE(array);
 
-    // 3. 설정 편집(Masks — 정규화가 SRGB를 끈다, LODBias 1).
+    // 3. 설정 편집(Masks — 정규화가 SRGB를 끈다, LODBias 1, 압축 끔 — mip byte를 BGRA8로 그대로
+    // 본다).
     Assignments edits(scene.allocator);
-    edits.Add("compressionSettings=Masks").Add("lodBias=1");
+    edits.Add("compressionSettings=Masks").Add("compressionNone=true").Add("lodBias=1");
     REQUIRE(scene.service->Set(scene.lock, "/Game/T/Wall", edits.list.View(), false, diagnostics,
                                nullptr, nullptr));
 
@@ -390,7 +393,7 @@ TEST(TextureScenario_ImportEditCookLoad) {
         const Texture* texture = scene.Load(entry->asset, entry->packageSha256);
         REQUIRE(texture != nullptr);
         const TexturePlatformData& data = texture->platformData;
-        CHECK(data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::RGBA8Unorm) &&
+        CHECK(data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::BGRA8Unorm) &&
               !data.srgb && data.numMips == 4 && data.sizeX == Side / 2 &&
               data.residentTailMips == 4);
         CHECK(texture->source.bulk.IsEmpty() && texture->source.sizeX == 0);
@@ -405,7 +408,9 @@ TEST(TextureScenario_ImportEditCookLoad) {
                     const uint8 expected = BoxAverage(
                         Texel(2 * i, 2 * j, c, 1), Texel(2 * i + 1, 2 * j, c, 1),
                         Texel(2 * i, 2 * j + 1, c, 1), Texel(2 * i + 1, 2 * j + 1, c, 1));
-                    const int32 actual = tail[(usize{j} * (Side / 2) + i) * 4 + c];
+                    // BGRA8 byte 순서(B, G, R, A)다.
+                    constexpr uint32 Bgra[4] = {2, 1, 0, 3};
+                    const int32 actual = tail[(usize{j} * (Side / 2) + i) * 4 + Bgra[c]];
                     const int32 difference = actual - static_cast<int32>(expected);
                     close = close && difference >= -1 && difference <= 1;
                 }
@@ -420,8 +425,9 @@ TEST(TextureScenario_ImportEditCookLoad) {
         REQUIRE(entry != nullptr);
         const Texture* texture = scene.Load(entry->asset, entry->packageSha256);
         REQUIRE(texture != nullptr);
+        // Default·sRGB·알파 200 → AutoDXT BC3 sRGB(12.17.5 2).
         CHECK(texture->platformData.pixelFormat ==
-                  static_cast<uint8>(graphics::PixelFormat::RGBA8UnormSrgb) &&
+                  static_cast<uint8>(graphics::PixelFormat::BC3UnormSrgb) &&
               texture->platformData.srgb && texture->platformData.numMips == 5 &&
               texture->platformData.residentTailMips == 5);
     }
@@ -433,9 +439,9 @@ TEST(TextureScenario_ImportEditCookLoad) {
         REQUIRE(texture != nullptr);
         const TexturePlatformData& data = texture->platformData;
         CHECK(data.dimension == TextureDimension::Texture2DArray &&
-              data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::RGBA8UnormSrgb) &&
+              data.pixelFormat == static_cast<uint8>(graphics::PixelFormat::BC3UnormSrgb) &&
               data.numSlices == 2 && data.numMips == 1 && data.residentTailMips == 1 &&
-              data.tailBulk.rawBytes == usize{Side} * Side * 4 * 2);
+              data.tailBulk.rawBytes == usize{Side / 4} * (Side / 4) * 16 * 2);
         CHECK(static_cast<const Texture2DArray*>(texture)->sourceTextures.Size() == 0 &&
               texture->source.bulk.IsEmpty());
     }

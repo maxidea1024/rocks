@@ -1,3 +1,5 @@
+#include "ImageFuzz.h"
+
 #include <Core/Math/Float16.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
@@ -594,6 +596,58 @@ TEST(DdsDecode_ValidationAndLimits) {
     for (usize length = 0; length < legacy.Size(); ++length) {
         CHECK(!Decode(allocator, legacy.View().Slice(0, length)).ok);
     }
+}
+
+using image_codec_test::FuzzDecode;
+using image_codec_test::FuzzStats;
+
+// 고정 seed 변조 fuzz(Docs/Design/AssetSystem 14.1.119 후속 3번 — ImageFuzz.h): DDS(DX10
+// RGBA8·RGBA16F, 옛 머리 BGRA mask, Cube, 2DArray, mip 사슬) 씨앗. 변조한 파일은 결과가 서로 맞는
+// 성공이거나 다섯 분류의 실패이고, 할당 블록을 다 돌려준다.
+TEST(DdsDecode_FixedSeedMutationFuzz) {
+    SystemAllocator allocator;
+    const uint8 texels[64] = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
+                              17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+                              33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+                              49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64};
+    DdsSpec rgba;
+    rgba.width = 2;
+    rgba.height = 2;
+    rgba.dxgi = 28;
+    rgba.data = Span<const uint8>(texels, 16);
+    const Array<uint8> dx10 = Dds(allocator, rgba);
+    DdsSpec half = rgba;
+    half.dxgi = 10;
+    half.data = Span<const uint8>(texels, 32);
+    const Array<uint8> half16 = Dds(allocator, half);
+    DdsSpec legacy;
+    legacy.width = 2;
+    legacy.height = 2;
+    legacy.pixelFlags = 0x41;
+    legacy.bitCount = 32;
+    legacy.masks[0] = 0x00FF0000u;
+    legacy.masks[1] = 0x0000FF00u;
+    legacy.masks[2] = 0x000000FFu;
+    legacy.masks[3] = 0xFF000000u;
+    legacy.data = Span<const uint8>(texels, 16);
+    const Array<uint8> bgra = Dds(allocator, legacy);
+    DdsSpec array = rgba;
+    array.width = 1;
+    array.height = 1;
+    array.arraySize = 4;
+    const Array<uint8> slices = Dds(allocator, array);
+    DdsSpec mips = rgba;
+    mips.width = 4;
+    mips.height = 2;
+    mips.mipCount = 3;
+    mips.mipFlag = true;
+    mips.data = Span<const uint8>(texels, 44);
+    const Array<uint8> chain = Dds(allocator, mips);
+    const Span<const uint8> seeds[] = {dx10.View(), half16.View(), bgra.View(), slices.View(),
+                                       chain.View()};
+    FuzzStats stats;
+    CHECK(FuzzDecode(allocator, seeds, ImageFileFormat::Dds, 0x5EED0DD5ull, 4000, stats));
+    CHECK(stats.Clean() && stats.rejected > 0);
 }
 
 } // namespace dds_decode_tests_file

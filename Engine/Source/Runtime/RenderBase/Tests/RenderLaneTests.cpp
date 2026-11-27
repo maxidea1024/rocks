@@ -2,8 +2,10 @@
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Engine/Engine.h>
+#include <Meta/TypeSchema.h>
 #include <Platform/Fatal.h>
 #include <RenderBase/RenderLane.h>
+#include <RenderBase/RenderTransfer.h>
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/WeakObjectRefFixture.generated.h>
 #include <TestSupport/Test.h>
@@ -168,7 +170,8 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
     const graphics::VertexBufferBinding binding{processor->buffer, 0};
     commands.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));
     auto texture = context.Handles().Texture(packet.texture);
-    commands.SetTexture(texture ? texture.Value() : graphics::TextureHandle{});
+    commands.SetTexture(graphics::ShaderStage::Pixel, 0,
+                        texture ? texture.Value() : graphics::TextureHandle{});
     for (const DrawItem& item : packet.items) {
         const TintConstants constants = {{item.red, 0.0f, 0.0f, 1.0f}};
         auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(constants));
@@ -885,4 +888,145 @@ TEST(RenderLane_UnsupportedTimestampsArePublishedAsNone) {
     REQUIRE(frames.Size() == 1);
     CHECK(frames[0].error == ErrorCode::None);
     CHECK(lane.Shutdown());
+}
+
+namespace {
+
+// packet 수명 시험 기록이다(Docs/Design/RenderBase 5.3절 "프레임 packet 수명"). lane 작업 안의
+// 소멸자가 쓰고 Drain·Shutdown 뒤 시험이 읽는다.
+struct PacketLifetimeLog {
+    RenderLane* lane = nullptr;
+    // 살아 있는 packet(옮겨 간 원본 제외)의 소멸 수다.
+    uint32 destroyed = 0;
+    // 마지막 소멸 때 lane 처리 완료 프레임 수(slot 반환 전이면 그 프레임은 아직 세지 않았다)다.
+    uint64 processedAtDestroy = 0;
+    // render 함수가 본 lane 처리 완료 프레임 수다.
+    uint64 processedAtRender = 0;
+};
+
+PacketLifetimeLog packetLog;
+
+// 소멸자가 표지를 남기는 프레임 packet이다. 옮기면 원본은 표지를 남기지 않는다.
+struct LifetimePacket {
+    LifetimePacket() noexcept = default;
+
+    LifetimePacket(LifetimePacket&& other) noexcept : live(other.live) {
+        other.live = false;
+    }
+
+    LifetimePacket& operator=(LifetimePacket&&) = delete;
+    LifetimePacket(const LifetimePacket&) = delete;
+    LifetimePacket& operator=(const LifetimePacket&) = delete;
+
+    ~LifetimePacket() noexcept {
+        if (!live) {
+            return;
+        }
+
+        ++packetLog.destroyed;
+        packetLog.processedAtDestroy =
+            packetLog.lane != nullptr ? packetLog.lane->Stats().framesProcessed : 0;
+    }
+
+    bool live = true;
+};
+
+} // namespace
+
+ROCKS_RENDER_TRANSFERABLE(LifetimePacket);
+
+namespace {
+
+void RenderLifetime(RenderFrameContext& context, LifetimePacket& packet) noexcept {
+    (void)context;
+    (void)packet;
+    packetLog.processedAtRender = packetLog.lane->Stats().framesProcessed;
+}
+
+} // namespace
+
+// 프레임 packet은 slot을 돌려주기 전(lane 처리 완료 표지 전)에 부서지고, 이른 실패 경로에서도
+// SubmitFrame이 돌아오기 전에 소비된다(5.3절 "프레임 packet 수명"). 순서는 Drain gate 뒤의 기록으로
+// 본다(시간에 기대지 않는다).
+TEST(RenderLane_FramePacketDiesBeforeTheSlotIsReturned) {
+    SystemAllocator allocator;
+    const RenderLaneMode modes[] = {RenderLaneMode::Inline, RenderLaneMode::Thread};
+    for (const RenderLaneMode mode : modes) {
+        RecordingDevice device(allocator);
+        TestProcessor processor;
+        RenderLane lane(allocator, device);
+        REQUIRE(lane.Start(MakeConfig(mode, processor)));
+        packetLog = {};
+        packetLog.lane = &lane;
+        for (uint32 frame = 0; frame < 3; ++frame) {
+            auto ticket = lane.BeginFrame();
+            REQUIRE(ticket);
+            const uint64 before = lane.Stats().framesProcessed;
+            LifetimePacket packet;
+            REQUIRE(lane.SubmitFrame(Move(ticket.Value()), Move(packet), &RenderLifetime));
+            REQUIRE(lane.Drain(RenderDrainReason::Test));
+            CHECK(packetLog.destroyed == frame + 1);
+            // render와 소멸 모두 이 프레임의 처리 완료 표지 앞이다.
+            CHECK(packetLog.processedAtRender == before && packetLog.processedAtDestroy == before);
+            CHECK(lane.Stats().framesProcessed == before + 1);
+        }
+
+        // 이른 실패: 빈 함수·잘못된 ticket·차단된 프레임 모두 packet을 소비한다.
+        const uint32 consumed = packetLog.destroyed;
+        {
+            auto ticket = lane.BeginFrame();
+            REQUIRE(ticket);
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(ticket.Value()), Move(packet),
+                                   RenderFrameFunction<LifetimePacket>{})
+                      .Error() == ErrorCode::InvalidArgument);
+            CHECK(packetLog.destroyed == consumed + 1 && !packet.live);
+            lane.AbandonFrame(Move(ticket.Value()));
+        }
+
+        {
+            FrameTicket empty;
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(empty), Move(packet), &RenderLifetime).Error() ==
+                  ErrorCode::InvalidArgument);
+            CHECK(packetLog.destroyed == consumed + 2);
+        }
+
+        lane.BlockFrames();
+        {
+            FrameTicket empty;
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(empty), Move(packet), &RenderLifetime).Error() ==
+                  ErrorCode::ShuttingDown);
+            CHECK(packetLog.destroyed == consumed + 3);
+        }
+
+        REQUIRE(lane.Shutdown());
+        packetLog.lane = nullptr;
+    }
+}
+
+// 이벤트 필드(FieldKind::Event — 구독 대상·발행자를 붙잡는다)가 있는 리플렉션 스키마는 렌더 전달
+// 검사가 거부한다(Docs/Design/RenderBase 5.2절 "전달 가능한 타입", 개정 61). 값 필드만 있는
+// 스키마는 통과한다. 생성 fixture에 이벤트 필드 타입이 아직 없어(EV2b) 손으로 만든 스키마를 쓴다.
+TEST(RenderTransfer_RejectsEventFields) {
+    const char valueName[] = "value";
+    const char eventName[] = "changed";
+    FieldSchema fields[2];
+    fields[0].id = Guid{1, 1};
+    fields[0].kind = FieldKind::Value;
+    fields[0].name = Span<const char>(valueName, sizeof(valueName) - 1);
+    fields[0].value = ValueType{ValueKind::UInt32, TypeId{}};
+    fields[1].id = Guid{1, 2};
+    fields[1].kind = FieldKind::Event;
+    fields[1].name = Span<const char>(eventName, sizeof(eventName) - 1);
+    TypeSchema values;
+    values.fields = Span<const FieldSchema>(fields, 1);
+    CHECK(render::detail::SchemaHasNoObjectReferences(values));
+    TypeSchema events;
+    events.fields = Span<const FieldSchema>(fields, 2);
+    CHECK(IsEventField(fields[1]) && !render::detail::SchemaHasNoObjectReferences(events));
+    TypeSchema onlyEvent;
+    onlyEvent.fields = Span<const FieldSchema>(fields + 1, 1);
+    CHECK(!render::detail::SchemaHasNoObjectReferences(onlyEvent));
 }

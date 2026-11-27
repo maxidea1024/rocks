@@ -14,7 +14,7 @@ Usage: Setup.bat [-Check] [-Yes] [-WithIde] [-Android] [-ToolchainRoot <director
   -Yes            Install without asking.
   -WithIde        Also check and install the Visual Studio IDE with the components in .vsconfig.
   -Android        Also check and install the pinned Android NDK.
-  -ToolchainRoot  Where LLVM and clang-format are unpacked (default %LOCALAPPDATA%\Rocks\toolchains).
+  -ToolchainRoot  Where LLVM, clang-format and ISPC are unpacked (default %LOCALAPPDATA%\Rocks\toolchains).
   -Skip           Leave out the named steps (for example 'FXC SDK' on machines that never run shader tests; CI uses it).
   -SelfTest       Run the unit checks of this script and exit.
 #>
@@ -552,6 +552,30 @@ function Get-RocksClangFormatStatus {
     return New-RocksStatus $true "$version at $configured"
 }
 
+# ISPC compiles the ISPC sources of the texture compressor (Docs/Design/BuildTargets section 3.12, BD45); builds find it through ROCKS_ISPC.
+function Get-RocksIspcStatus {
+    $version = (Get-RocksToolchainTable).ispc.version
+    $root = Get-RocksToolchainDirectory
+    $install = {
+        param($d)
+        Invoke-RocksBuildScript 'InstallIspc.ps1' @('-ToolchainRoot', $d.Root)
+        [void] (Set-RocksUserVariable 'ROCKS_ISPC' $d.Target)
+    }
+    $data = @{ Root = $root; Target = (Join-Path $root "ispc-$version\ispc.exe") }
+    $configured = Get-RocksEnvironmentValue 'ROCKS_ISPC'
+    if (-not $configured) { return New-RocksStatus $false "ROCKS_ISPC is not set (needs ISPC $version)" $install '' $data }
+    if (-not (Test-Path -LiteralPath $configured -PathType Leaf)) {
+        return New-RocksStatus $false "ROCKS_ISPC points to a missing file: $configured" $install '' $data
+    }
+
+    $line = Get-RocksFirstLine (Invoke-RocksNative $configured @('--version')).StdOut
+    if ($line -notmatch ('\(Intel\(r\) ISPC\), ' + [regex]::Escape($version) + '(?:\s|$)')) {
+        return New-RocksStatus $false "ROCKS_ISPC is '$line', needs $version" $install '' $data
+    }
+
+    return New-RocksStatus $true "$version at $configured"
+}
+
 function Get-RocksAndroidStatus {
     $version = (Get-RocksToolchainTable).android.ndk.version
     $sdk = @((Get-RocksEnvironmentValue 'ANDROID_HOME'), (Get-RocksEnvironmentValue 'ANDROID_SDK_ROOT')) | Where-Object { $_ } | Select-Object -First 1
@@ -872,7 +896,8 @@ $steps += @(
     @{ Name = 'C++ build tools'; Check = { Get-RocksBuildToolsStatus } },
     @{ Name = 'FXC SDK'; Check = { Get-RocksFxcSdkStatus } },
     @{ Name = 'LLVM'; Check = { Get-RocksLlvmStatus } },
-    @{ Name = 'clang-format'; Check = { Get-RocksClangFormatStatus } })
+    @{ Name = 'clang-format'; Check = { Get-RocksClangFormatStatus } },
+    @{ Name = 'ISPC'; Check = { Get-RocksIspcStatus } })
 if ($Android) { $steps += @{ Name = 'Android NDK'; Check = { Get-RocksAndroidStatus } } }
 $unknown = @($Skip | Where-Object { $name = $_; -not @($steps | Where-Object { $_.Name -eq $name }) })
 if ($unknown.Count -gt 0) { Write-Host "Unknown step in -Skip: $($unknown -join ', ')"; exit 2 }

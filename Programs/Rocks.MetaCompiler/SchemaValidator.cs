@@ -567,8 +567,28 @@ internal static partial class SchemaValidator
                 }
             }
 
-            foreach (FieldModel field in model.OwnFields)
+            // 필드(와 함수 매개변수·반환 칸 — FunctionReflection FD9)의 철자에서 값 종류·대상을 정한다.
+            void ResolveKind(FieldModel field)
             {
+                // 이벤트 필드(Docs/Design/EventReflection.ko.md ED18)다. 합성 칸(함수 매개변수·반환·이벤트 인자 — ID 없음)은 이벤트일 수 없다.
+                if (EventRules.Arguments(field.NativeSpelling) is List<string> eventArguments)
+                {
+                    if (field.Id.Length == 0)
+                    {
+                        throw new MetadataException($"{field.Owner}::{field.Name}: an Event cannot be a function parameter, return value or event argument",
+                            "RMC2802", EventRules.Hint).At(field.Site);
+                    }
+
+                    ResolveEvent(field, eventArguments);
+                    return;
+                }
+
+                if (EventRules.Mentions(field.CanonicalSpelling ?? field.NativeSpelling))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: an Event cannot be held in a container, Optional or static array ('{field.NativeSpelling}')",
+                        "RMC2802", EventRules.Hint).At(field.Site);
+                }
+
                 if (MapRules.IsUnordered(field.NativeSpelling))
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unordered container '{field.NativeSpelling}' cannot be reflected", "RMC2305",
@@ -606,6 +626,158 @@ internal static partial class SchemaValidator
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
                     hint: UnsupportedFieldHint(field.NativeSpelling)).At(field.Site);
+                }
+            }
+
+            // 이벤트 필드 하나다(ED14·ED18): struct 멤버·값 필드 지정자를 거부하고 Params 이름(lowerCamel, 겹침 없음, 수 = Args 수)과
+            // 인자 칸(함수 매개변수 규칙 + StringView 거부)을 정한다.
+            void ResolveEvent(FieldModel field, List<string> arguments)
+            {
+                string symbol = $"{field.Owner}::{field.Name}";
+                if (Find(field.Owner).IsStruct)
+                {
+                    throw new MetadataException($"{symbol}: an Event cannot be a struct member", "RMC2802",
+                        "Structs are values and an Event cannot be copied; declare the event in the owning reflected class.").At(field.Site);
+                }
+
+                PropertySpec spec = field.Spec;
+                string? rejected = spec.ReadOnly ? "ReadOnly" : spec.Required ? "Required" : spec.TextExportTransient ? "TextExportTransient"
+                    : spec.TextMapMergeByKey ? "TextMapMergeByKey" : spec.MaxElements != 0 ? "MaxElements" : spec.AssetBundles.Length != 0 ? "AssetBundles"
+                    : spec.HasSettings ? "settings specifiers" : spec.ScriptVisible ? "ScriptReadOnly/ScriptWritable" : spec.ScriptName.Length != 0 ? "ScriptName"
+                    : null;
+                if (rejected is not null)
+                {
+                    throw new MetadataException($"{symbol}: {rejected} cannot apply to an Event field", "RMC2805",
+                        "An Event field takes Params, Name, Category, DisplayName, Transient, SaveGame, DuplicateTransient, NonTryoutDuplicateTransient and " +
+                        "EditorOnly; script exposure of events comes with the Sparks event binding.").At(field.Site);
+                }
+
+                if (arguments.Count > FunctionRules.MaxParameters)
+                {
+                    throw new MetadataException($"{symbol}: an Event has at most {FunctionRules.MaxParameters} arguments", "RMC2803",
+                        "Group related arguments into a reflected struct passed as const&.").At(field.Site);
+                }
+
+                string[] names = spec.Params is null || spec.Params.Trim().Length == 0
+                    ? []
+                    : spec.Params.Split(',').Select(name => name.Trim()).ToArray();
+                if (names.Length != arguments.Count)
+                {
+                    throw new MetadataException(
+                        $"{symbol}: Params names {names.Length} argument(s) but the Event has {arguments.Count}", "RMC2803",
+                        "Name every event argument in order, e.g. ROCKS_PROPERTY(Params = \"killer,amount\") rocks::Event<WeakObjectRef<Actor>, int32> died;").At(field.Site);
+                }
+
+                HashSet<string> seen = new(StringComparer.Ordinal);
+                foreach (string name in names)
+                {
+                    if (!EventRules.IsParameterName(name) || !seen.Add(name))
+                    {
+                        throw new MetadataException($"{symbol}: event argument name '{name}' must be a distinct lowerCamel ASCII name ([a-z][A-Za-z0-9]*)",
+                            "RMC2803", "Write Params as comma-separated lowerCamel names, one per event argument, without repeats.").At(field.Site);
+                    }
+                }
+
+                for (int index = 0; index < arguments.Count; ++index)
+                {
+                    FieldModel slot = new()
+                    {
+                        Id = "",
+                        Site = field.Site,
+                        Name = names[index],
+                        Owner = field.Owner,
+                        NativeSpelling = arguments[index],
+                        Spec = new(false, false, "", "")
+                    };
+                    ResolveEventSlot(field, slot);
+                    field.EventParameters.Add(slot);
+                }
+
+                field.IsEvent = true;
+                field.Kind = "Opaque";
+            }
+
+            // 이벤트 인자 칸 하나다(ED1·ED14): 값 또는 const&(포인터·rvalue·비const 참조 거부), StringView 거부, ObjectHandle은 대상 없는 약한
+            // 참조 칸, 그 밖은 값 종류 판정 뒤 frame에 둘 수 없는 형식(강한 참조·InstancedStruct·정적 배열)을 거부한다. 복사에 할당이 드는
+            // 값(String·컨테이너·SoftObjectRef)은 const&로만 받는다(값 인자는 nothrow 복사여야 한다 — C++ static_assert가 그 밖을 본다).
+            void ResolveEventSlot(FieldModel field, FieldModel slot)
+            {
+                MetadataException Unsupported(string reason) => new MetadataException(
+                    $"{field.Owner}::{field.Name}: event argument '{slot.Name}' of type '{slot.NativeSpelling}' {reason}", "RMC2804",
+                    "Use a nothrow-copyable value or a const& of a reflected value type (no StringView, ObjectRef or containers of it, InstancedStruct, " +
+                    "C arrays, pointers or non-const references); pass objects as ObjectHandle, WeakObjectRef<T> or SoftObjectRef<T> (const&).").At(field.Site);
+                string spelling = slot.NativeSpelling.Trim();
+                if (spelling.EndsWith("&&", StringComparison.Ordinal) || spelling.EndsWith('*'))
+                {
+                    throw Unsupported("is a pointer or rvalue reference");
+                }
+
+                bool byReference = spelling.EndsWith('&');
+                if (byReference)
+                {
+                    if (!spelling.StartsWith("const ", StringComparison.Ordinal))
+                    {
+                        throw Unsupported("is a non-const reference");
+                    }
+
+                    spelling = spelling["const ".Length..^1].Trim();
+                }
+                else if (spelling.StartsWith("const ", StringComparison.Ordinal))
+                {
+                    spelling = spelling["const ".Length..].Trim();
+                }
+
+                slot.NativeSpelling = spelling;
+                if (spelling == FunctionRules.StringViewSpelling)
+                {
+                    throw Unsupported("is a string view; pass const rocks::String& (subscribers may outlive the viewed storage)");
+                }
+
+                if (spelling == FunctionRules.ObjectHandleSpelling)
+                {
+                    slot.Kind = "WeakObjectReference";
+                    slot.Reference = "rocks::Object";
+                    return;
+                }
+
+                try
+                {
+                    ResolveKind(slot);
+                }
+                catch (MetadataException error) when (error.Code is not ("RMC2804" or "RMC2802"))
+                {
+                    throw Unsupported("is not a reflected value type an event can carry (" + error.Message + ")");
+                }
+
+                if (slot.IsStaticArray || slot.IsInstancedStruct || slot.TargetKind == "InstancedStruct" || slot.IsObjectReferenceFieldKind ||
+                    slot.Kind == "ObjectReference" || slot.KeyKind == "ObjectReference")
+                {
+                    throw Unsupported("cannot live in an event frame");
+                }
+
+                if (!byReference && (slot.Kind is "Utf8String" or "SoftObjectReference" || slot.IsArray || slot.IsMap || slot.IsSet))
+                {
+                    throw Unsupported("copies with an allocation; pass it as const&");
+                }
+
+                if (slot.IsCounted)
+                {
+                    slot.MaxElements = ArrayRules.DefaultMaxElements;
+                }
+            }
+
+            foreach (FieldModel field in model.OwnFields)
+            {
+                ResolveKind(field);
+                if (field.IsEvent)
+                {
+                    continue;
+                }
+
+                if (field.Spec.Params is not null)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Params applies only to Event fields", "RMC2803",
+                        "Remove Params; it names the arguments of a rocks::Event<...> field.").At(field.Site);
                 }
 
                 // 철자 해석이 정한 종류가 성질 표에서 그 자리(배열이면 원소, 그리고 클래스 필드·struct 멤버)에 허용되는지 본다. 해석이
@@ -686,9 +858,158 @@ internal static partial class SchemaValidator
                 }
             }
 
+            // 리플렉션 함수의 매개변수·반환 칸(Docs/Design/FunctionReflection.ko.md FD4·FD5·FD14)이다. 정규 철자의 cv·참조를 벗기고 값 종류를
+            // 정한 뒤, 호출 frame에 값으로 둘 수 없는 형식(강한 참조와 그것을 담는 컨테이너·InstancedStruct·정적 배열)과 출력·참조 반환을
+            // 거부한다. 강한 참조를 담는 struct는 생성 static_assert가 막는다(struct 형질은 아직 계산 전이다).
+            foreach (FunctionModel function in model.Functions)
+            {
+                for (int index = 0; index < function.Parameters.Count; ++index)
+                {
+                    FieldModel slot = function.Parameters[index];
+                    bool byReference = slot.NativeSpelling.TrimEnd().EndsWith('&');
+                    ResolveFunctionSlot(function, slot, false);
+                    if (!byReference && slot.NativeSpelling != FunctionRules.StringViewSpelling)
+                    {
+                        function.ByValueParameters.Add(index);
+                    }
+                }
+
+                if (function.Result is FieldModel result)
+                {
+                    ResolveFunctionSlot(function, result, true);
+                }
+
+                if (function.Spec.Pure && function.Result is null)
+                {
+                    throw new MetadataException($"{function.Owner}::{function.Name}: a Pure function must return a value", "RMC2705",
+                        "Remove Pure or return the computed value (Pure functions only read state and produce a result).").At(function.Site);
+                }
+            }
+
+            // 함수 이름(실효 도구 이름)은 클래스와 기반 체인(import 포함 — descriptor)의 함수 사이에서 대소문자 무시로 유일하다(FD2). 필드와는
+            // 이름 공간이 다르다.
+            Dictionary<string, FunctionModel> functionNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (FunctionModel function in model.Functions)
+            {
+                if (!functionNames.TryAdd(function.EffectiveToolName, function))
+                {
+                    throw new MetadataException($"{function.Owner}::{function.Name}: function name '{function.EffectiveToolName}' is also used by {functionNames[function.EffectiveToolName].Name}", "RMC2703",
+                        "Give one of the functions a different name or tool name (Name = \"...\"); names compare without case.").At(function.Site);
+                }
+            }
+
+            for (string ancestor = model.IsStruct ? "" : model.Base; functionNames.Count != 0 && ancestor.Length != 0 && ancestor != "rocks::Object";
+                 ancestor = Find(ancestor).Base)
+            {
+                foreach (FunctionModel inherited in Find(ancestor).Functions)
+                {
+                    if (functionNames.TryGetValue(inherited.EffectiveToolName, out FunctionModel? own))
+                    {
+                        throw new MetadataException($"{own.Owner}::{own.Name}: function name '{own.EffectiveToolName}' is already a reflected function of the base {ancestor}", "RMC2703",
+                            "Override the base function in C++ without ROCKS_FUNCTION (the base declaration is reflected once), or give this function another name.").At(own.Site);
+                    }
+                }
+            }
+
+            void ResolveFunctionSlot(FunctionModel function, FieldModel slot, bool isResult)
+            {
+                string what = isResult ? "return type" : $"parameter '{slot.Name}'";
+                MetadataException Unsupported(string reason) => new MetadataException(
+                    $"{function.Owner}::{function.Name}: {what} '{slot.NativeSpelling}' {reason}", "RMC2704",
+                    "Use a value or const& input of a reflected value type (no ObjectRef or containers of it, InstancedStruct, C arrays, pointers or output references); " +
+                    "pass objects as ObjectHandle, WeakObjectRef<T> or SoftObjectRef<T>.").At(function.Site);
+                string spelling = slot.NativeSpelling.Trim();
+                // void를 typedef로 쓴 반환이다(정규 철자 void — 결과 칸이 없다).
+                if (isResult && spelling == "void")
+                {
+                    function.Result = null;
+                    return;
+                }
+
+                if (isResult && FunctionRules.ResultInner(spelling) is string inner)
+                {
+                    function.ReturnsResult = true;
+                    if (inner == "void")
+                    {
+                        function.Result = null;
+                        return;
+                    }
+
+                    spelling = inner;
+                }
+
+                if (spelling.EndsWith("&&", StringComparison.Ordinal) || spelling.EndsWith('*'))
+                {
+                    throw Unsupported("is a pointer or rvalue reference");
+                }
+
+                if (spelling.EndsWith('&'))
+                {
+                    if (isResult || !spelling.StartsWith("const ", StringComparison.Ordinal))
+                    {
+                        throw Unsupported(isResult ? "is a reference" : "is a non-const reference (an output parameter)");
+                    }
+
+                    spelling = spelling["const ".Length..^1].Trim();
+                }
+                else if (spelling.StartsWith("const ", StringComparison.Ordinal))
+                {
+                    spelling = spelling["const ".Length..].Trim();
+                }
+
+                slot.NativeSpelling = spelling;
+                if (spelling == FunctionRules.StringViewSpelling)
+                {
+                    // 반환 view는 호출이 소유하지 않는 저장소를 가리킨다(frame이 담는 동안 대상이 바뀌거나 사라질 수 있다).
+                    if (isResult)
+                    {
+                        throw Unsupported("is a string view; return rocks::String (a view would point into storage the call does not own)");
+                    }
+
+                    slot.Kind = "Utf8String";
+                    return;
+                }
+
+                if (spelling == FunctionRules.ObjectHandleSpelling)
+                {
+                    // 대상 타입 없는 객체 참조다(rocks::Object — 호출 frame은 handle을 그대로 담는다).
+                    slot.Kind = "WeakObjectReference";
+                    slot.Reference = "rocks::Object";
+                    return;
+                }
+
+                // 값 종류 판정의 실패(지원하지 않는 형식·컨테이너 안 ObjectHandle 등)는 필드 진단이 아니라 함수 칸 진단이다.
+                try
+                {
+                    ResolveKind(slot);
+                }
+                catch (MetadataException error) when (error.Code is not ("RMC2704" or "RMC2802"))
+                {
+                    throw Unsupported("is not a reflected value type a call frame can hold (" + error.Message + ")");
+                }
+
+                if (slot.IsStaticArray || slot.IsInstancedStruct || slot.TargetKind == "InstancedStruct" || slot.IsObjectReferenceFieldKind ||
+                    slot.Kind == "ObjectReference" || slot.KeyKind == "ObjectReference")
+                {
+                    throw Unsupported("cannot live in a call frame");
+                }
+
+                if (slot.IsCounted)
+                {
+                    slot.MaxElements = ArrayRules.DefaultMaxElements;
+                }
+            }
+
             // NATIVE 멤버의 직접 타입이 리플렉션 struct면 생성 코드가 그 struct의 형질로 RMC2205·2206을 한 번 더 확인한다.
             foreach (NativeMemberModel native in model.NativeMembers)
             {
+                // 이벤트는 ROCKS_PROPERTY로만 둔다(저장·Sparks·도구가 보지 못하는 이벤트를 막는다 — ED14).
+                if (EventRules.Mentions(native.Spelling))
+                {
+                    throw new MetadataException($"{model.Name}::{native.Name}: an Event member must be declared with ROCKS_PROPERTY, not ROCKS_NATIVE", "RMC2801",
+                        EventRules.Hint).At(native.Site);
+                }
+
                 // C 배열 멤버는 모든 차원을 벗긴 원소로 본다(StaticArrayProbe — `RefStruct cache[2]`도 원소 struct 형질로 확인한다).
                 native.Struct = ValueType(ClangAstParser.CleanType(native.ElementSpelling ?? native.Spelling), true, model.Name, native.Site)?.Name;
             }

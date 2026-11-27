@@ -2,7 +2,7 @@
 #include <Core/Math/MathUtility.h>
 #include <Mesh/SimpleCollision.h>
 
-// 단순 충돌 검증과 볼록 형상 bulk 저장·로드다(Docs/Design/MeshAnimationAssets.ko.md 4.6·4.8절).
+// 단순 충돌 검증과 볼록 형상 bulk 저장·로드다(Docs/Design/MeshAnimationAssets 4.6·4.8절).
 namespace rocks {
 
 namespace {
@@ -408,10 +408,10 @@ Result<Span<const uint8>> ReadConvexBulk(const Package& package, const BulkDataR
     }
 
     if (bytes.Value().Size() % element != 0) {
-        (void)Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+        (void)Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
                    CollisionIssue::BulkLength, CollisionShapeKind::Convex, CollisionNoIndex,
                    component);
-        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Span<const uint8>>::Failure(ErrorCode::CorruptData);
     }
 
     return bytes;
@@ -462,7 +462,10 @@ Result<void> LoadConvexGeometry(const CollisionConvex& convex, const Package& pa
 
     CollisionDiagnostic validation;
     if (auto valid = ValidateConvexGeometry(loaded, &validation); !valid) {
-        return Fail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+        // 형식 위반은 손상, 한도 초과는 그대로다(AssetSystem 19장).
+        return Fail(failure, AssetDiagnosticCode::CorruptPackage,
+                    valid.Error() == ErrorCode::CapacityExceeded ? ErrorCode::CapacityExceeded
+                                                                 : ErrorCode::CorruptData,
                     validation.issue, CollisionShapeKind::Convex, CollisionNoIndex,
                     validation.related);
     }

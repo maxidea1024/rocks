@@ -37,12 +37,21 @@ public:
     bool HasSystemState(SystemStateKind) const noexcept;
     // 다음 갱신 지점(PreRender 단계 끝)에 Destroy → Create로 다시 만든다(UE MarkRenderStateDirty → DoDeferredRenderUpdates).
     Result<void> MarkSystemStateDirty(SystemStateKind) noexcept;
+    // 그 자리에서 다시 만든다(UE RecreatePhysicsState·EnsurePhysicsStateCreated).
+    Result<void> RecreateSystemStateNow(SystemStateKind) noexcept;
 };
 ```
 
 - **만드는 때.** `OnRegister`가 성공하면 그 바로 뒤에 종류 순서(Render → Physics → Audio)대로, `WantsSystemState`가 참인 것만 만든다. 하나라도 실패하면 이미 만든 것을 역순으로 지우고 `OnUnregister`를 부른 뒤 등록을 실패로 돌린다(부분 등록 해제 — UE `RegisterComponentWithWorld` 실패 경로와 같은 짝 맞춤).
 - **지우는 때.** 등록 해제(파괴·Actor 정리)에서 `OnUnregister` 전에 역순으로 지운다. 꺼짐(`OnDisable`)은 시스템 상태를 지우지 않는다. 등록은 유지되기 때문이다. 다만 Render는 가시성으로 감춘다(23.4절).
-- **다시 보내기.** `MarkSystemStateDirty`는 World의 갱신 목록에 한 번만 넣는다(중복 무시). 처리 지점은 PreRender 단계 끝, 파괴 정리 전이다. UE `SendAllEndOfFrameUpdates`와 같은 자리다. 처리는 그 종류가 있으면 Destroy → Create이고, Create가 실패하면 그 종류가 없는 채로 둔다(Warning 진단 `SystemStateRecreateFailed`). 등록 전이거나 파괴 대기인 Component에서 부르면 아무것도 하지 않고 성공한다.
+- **다시 보내기.** `MarkSystemStateDirty`는 World의 갱신 목록에 한 번만 넣는다(중복 무시 — 목록에 들어 있는지는 표시 비트와 따로 둔다. 즉시 다시 만들기가 비트를 지워도 두 번 들어가지 않는다). 처리 지점은 PreRender 단계 끝, 파괴 정리 전이다. UE `SendAllEndOfFrameUpdates`와 같은 자리다. 처리는 그 종류가 있으면 Destroy → Create이고, Create가 실패하면 그 종류가 없는 채로 둔다(Warning 진단 `SystemStateRecreateFailed`). 등록 전이거나 파괴 대기인 Component에서 부르면 아무것도 하지 않고 성공한다.
+- **즉시 다시 만들기.** `RecreateSystemStateNow(kind)`는 갱신 지점을 기다리지 않고 그 자리에서 다시 만든다(UE `RecreatePhysicsState` — `ActorComponent.cpp:2594-2605`, `EnsurePhysicsStateCreated` — `PrimitiveComponent.cpp:998-1005`). 같은 프레임의 다음 질의·이동이 바뀐 상태를 봐야 하는 setter(충돌 켜기·형상 바꾸기·simulate 켜기 — PhysicsModule 2.3.1절)가 부른다.
+  - 그 종류가 있으면 Destroy하고, `WantsSystemState(kind)`가 참이면 Create한다. 그래서 없던 상태도 만든다(충돌을 켜서 원하게 된 경우 — UE `CreatePhysicsState`도 `ShouldCreatePhysicsState`를 본다). 원하지 않게 되었으면 지우기만 한다. `MarkSystemStateDirty`는 있는 상태만 다시 만드는 것과 다르다.
+  - 그 종류의 대기 중 표시(`MarkSystemStateDirty`)는 지운다(방금 새로 만들었다). 갱신 지점이 그 Component를 처리하는 중이고 그 종류가 아직 남았으면 그것도 지운다(두 번 하지 않는다). 다른 종류 표시는 그대로다.
+  - Create가 실패하면 그 종류 없이 두고 Warning `SystemStateRecreateFailed`를 남긴 뒤 그 오류를 돌려준다. 값을 바꾼 setter는 그 오류를 무시하고 성공을 돌려준다(영속 값은 바뀌었다 — ERD25와 같은 정책).
+  - 등록 전·해제 뒤·파괴 대기면 아무것도 하지 않고 성공한다(등록이 그때의 값으로 만든다).
+  - hook 안 규칙: Create·Destroy는 hook 범위(그 안에서 World 진입점 Initialize·Tick 등은 `Busy`)에서 부른다. 같은 Component의 같은 종류를 그 Create·Destroy 안에서 다시 부르면 `Busy`다(무한 재귀·이중 생성 방지). 갱신 지점(`MarkSystemStateDirty` 처리)과 등록·해제가 부르는 hook도 같다(등록·해제 중에는 `registered_`가 거짓이라 아무 일 없음). 다른 종류는 부를 수 있다.
+  - 범위 밖 종류는 `InvalidArgument`다.
 - **처리 중 표시.** 다시 만들기 hook(Create·Destroy)이 다른 종류나 다른 Component를 표시하면, 그것은 다음 갱신 지점(다음 프레임)에 처리한다. 종류 사이의 표시가 순환해도 한 지점에서 끝없이 돌지 않게 하려는 것이다.
 - **한계 — 우회 파괴.** World API를 거치지 않고 `Object::Destroy`로 파괴된 Component는 World가 다음 정리에서 장부와 간선만 고친다(7.4절). 객체가 이미 죽어 hook을 부를 수 없으므로 시스템 상태를 지우지 못한다. 시스템 상태를 갖는 Component는 반드시 World API(`DestroyComponent`·Actor 파괴)로 지운다. 시스템 쪽 장부(렌더·물리)는 자기 쪽 handle 만료로 정리한다. 이 계약은 RS0·물리 연결 때 그 시스템 문서에 함께 적는다.
 - **대량 등록 묶음.** CR1의 대량 등록 묶음(UE `FRegisterComponentContext`)은 등록이 많은 렌더 경로가 생길 때(CM1a·RS0) 측정과 함께 더한다. 지금은 Component마다 바로 만든다.
@@ -69,7 +78,7 @@ virtual ComponentTypeRules TypeRules() const noexcept { return {}; }
 - 이미 있는 Component를 지워 `required`가 깨지는 경우는 막지 않는다. UE·Unity도 파괴를 막지 않는다. 의존하는 쪽이 `OnTick` 등에서 직접 확인한다.
 
 **태그·EditorOnly(CR5 런타임).**
-- **태그는 미룬다.** UE `ComponentTags`(`TArray<FName>`)에 대응하는 태그는 `Name`이 필요하다. 그런데 World Registry에는 NamePool이 없다(`WorldDesc::objects.names` 기본 null — `Name` 필드는 pool 없는 문맥에서 만들 수 없다). 태그 사전(EIP 20.1절)도 계획만 있다. 그래서 태그는 World 이름 기반(엔진 NamePool을 World에 빌려주거나 태그 사전)이 생길 때 그 기반과 함께 넣는다. 영속 필드라 Component 생성자가 allocator를 받게 바뀌는데, 그 변경도 그때 한다(Component 파생 생성자 전부).
+- **태그는 미룬다(31장에서 넣는다 — 엔진 이름 pool·TG1·TG2).** UE `ComponentTags`(`TArray<FName>`)에 대응하는 태그는 `Name`이 필요하다. 그런데 World Registry에는 NamePool이 없다(`WorldDesc::objects.names` 기본 null — `Name` 필드는 pool 없는 문맥에서 만들 수 없다). 태그 사전(EIP 20.1절)도 계획만 있다. 그래서 엔진 이름 pool을 World에 빌려주는 기반과 함께 31장에서 넣었다(2026-11-26). 영속 필드라 Component 생성자가 allocator를 받게 바뀌었다(Component 파생 생성자 전부 — 31.3절).
 - `virtual bool IsEditorOnly() const`(UE `bIsEditorOnly`). Game·Tryout World에서 `AddComponent`하면 만들지 않고 `Unsupported`를 돌려준다. Editor·Preview World에서는 만든다. 쿠킹 제외는 에셋 세션이 클래스 지정자로 한다(위). 런타임은 그 결과와 별개로 같은 판정을 한 번 더 한다.
 
 ### 23.3 CM0b — SceneComponent

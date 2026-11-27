@@ -130,14 +130,14 @@ TEST(GraphFormat_HeaderVersionFlagsAndCounts) {
             const Case cases[] = {
                 {test::graph::VersionOffset, 1, ErrorCode::Unsupported},
                 {test::graph::VersionOffset, 3, ErrorCode::Unsupported},
-                {test::graph::FlagsOffset, 4, ErrorCode::InvalidArgument},
-                {test::graph::FlagsOffset, 1 | 8, ErrorCode::InvalidArgument},
-                {test::graph::FlagsOffset, test::graph::BaseOuterFlag, ErrorCode::InvalidArgument},
-                {test::graph::NodeCountOffset, 0, ErrorCode::InvalidArgument},
+                {test::graph::FlagsOffset, 4, ErrorCode::CorruptData},
+                {test::graph::FlagsOffset, 1 | 8, ErrorCode::CorruptData},
+                {test::graph::FlagsOffset, test::graph::BaseOuterFlag, ErrorCode::CorruptData},
+                {test::graph::NodeCountOffset, 0, ErrorCode::CorruptData},
                 {test::graph::NodeCountOffset, 4097, ErrorCode::CapacityExceeded},
                 // 노드 수에 비해 짧은 입력은 할당 전에 InvalidArgument다.
-                {test::graph::NodeCountOffset, 2, ErrorCode::InvalidArgument},
-                {test::graph::NodeCountOffset, 4096, ErrorCode::InvalidArgument},
+                {test::graph::NodeCountOffset, 2, ErrorCode::CorruptData},
+                {test::graph::NodeCountOffset, 4096, ErrorCode::CorruptData},
                 {test::graph::ExternalCountOffset, 65537, ErrorCode::CapacityExceeded},
                 {test::graph::ExternalCountOffset, 1, ErrorCode::InvalidArgument}};
             for (const Case& example : cases) {
@@ -161,9 +161,9 @@ TEST(GraphFormat_HeaderVersionFlagsAndCounts) {
             Array<uint8> magic(allocator);
             REQUIRE(magic.TryAppend(valid.Value().View()));
             magic[0] = 'X';
-            CHECK(Rejects(allocator, target, types, magic.View(), ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, magic.View(), ErrorCode::CorruptData));
             CHECK(Rejects(allocator, target, types, Span<const uint8>(valid.Value().Data(), 20),
-                          ErrorCode::InvalidArgument));
+                          ErrorCode::CorruptData));
             // maxObjects는 local ID가 외부 참조 비트와 겹치지 않게 2^31 − 1 이하다(옵션 오류).
             ObjectGraphLoadOptions huge;
             huge.limits.maxObjects = test::graph::ExternalBit;
@@ -192,15 +192,13 @@ TEST(GraphFormat_NodeTableAndRecordBoundaries) {
             REQUIRE(record);
             auto zero = test::graph::Single(allocator, TypeId{}, record.Value().View());
             REQUIRE(zero);
-            CHECK(
-                Rejects(allocator, target, types, zero.Value().View(), ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, zero.Value().View(), ErrorCode::CorruptData));
             auto unknown = test::graph::Single(allocator, TypeId{0x4746, 9}, record.Value().View());
             REQUIRE(unknown);
             CHECK(Rejects(allocator, target, types, unknown.Value().View(), ErrorCode::NotFound));
             auto alias = test::graph::Single(allocator, OtherType, record.Value().View());
             REQUIRE(alias);
-            CHECK(Rejects(allocator, target, types, alias.Value().View(),
-                          ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, alias.Value().View(), ErrorCode::CorruptData));
             // 버전은 Record header가 정한다: 높은 버전은 Unsupported, 0은 InvalidArgument다.
             auto newer = CellRecord(allocator, 0, CellType, 2);
             REQUIRE(newer);
@@ -215,7 +213,7 @@ TEST(GraphFormat_NodeTableAndRecordBoundaries) {
             auto zeroGraph = test::graph::Single(allocator, CellType, zeroVersion.View());
             REQUIRE(zeroGraph);
             CHECK(Rejects(allocator, target, types, zeroGraph.Value().View(),
-                          ErrorCode::InvalidArgument));
+                          ErrorCode::CorruptData));
 
             auto valid = test::graph::Single(allocator, CellType, record.Value().View());
             REQUIRE(valid);
@@ -224,24 +222,24 @@ TEST(GraphFormat_NodeTableAndRecordBoundaries) {
             Array<uint8> longer(allocator);
             REQUIRE(longer.TryAppend(valid.Value().View()));
             test::graph::PatchU32(longer, lengthAt, static_cast<uint32>(record.Value().Size() + 1));
-            CHECK(Rejects(allocator, target, types, longer.View(), ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, longer.View(), ErrorCode::CorruptData));
             Array<uint8> shorter(allocator);
             REQUIRE(shorter.TryAppend(valid.Value().View()));
             test::graph::PatchU32(shorter, lengthAt,
                                   static_cast<uint32>(record.Value().Size() - 1));
-            CHECK(Rejects(allocator, target, types, shorter.View(), ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, shorter.View(), ErrorCode::CorruptData));
             Array<uint8> trailing(allocator);
             REQUIRE(trailing.TryAppend(valid.Value().View()));
             REQUIRE(trailing.TryPushBack(uint8{0}));
-            CHECK(Rejects(allocator, target, types, trailing.View(), ErrorCode::InvalidArgument));
+            CHECK(Rejects(allocator, target, types, trailing.View(), ErrorCode::CorruptData));
             // 이름이 잘못된 UTF-8이면 InvalidArgument다(이름 byte는 header + Guid 16 + outer 4 +
             // 길이 8 뒤다 — writer는 잘못된 UTF-8을 쓰지 않으므로 쓴 뒤 바꾼다).
             const test::graph::Node named{CellType, 0, "x", record.Value().View()};
             auto badUtf8 = test::graph::Build(allocator, Span<const test::graph::Node>(&named, 1));
             REQUIRE(badUtf8);
             badUtf8.Value()[test::graph::HeaderBytes + 28] = 0xff;
-            CHECK(Rejects(allocator, target, types, badUtf8.Value().View(),
-                          ErrorCode::InvalidArgument));
+            CHECK(
+                Rejects(allocator, target, types, badUtf8.Value().View(), ErrorCode::CorruptData));
         }
 
         REQUIRE(target.Shutdown(target.OwnerAccess()));
@@ -274,7 +272,7 @@ TEST(GraphFormat_ReferenceValueBoundaries) {
                                               graph.Value().View());
                 // 2가 아니면 노드 2에 닿지 않으므로 도달 검사가 거부한다.
                 CHECK(loaded.IsOk() == (value == 2));
-                CHECK(loaded || loaded.Error() == ErrorCode::InvalidArgument);
+                CHECK(loaded || loaded.Error() == ErrorCode::CorruptData);
             }
 
             REQUIRE(target.Collect(target.OwnerAccess()));
@@ -288,7 +286,7 @@ TEST(GraphFormat_ReferenceValueBoundaries) {
                 auto graph = test::graph::Build(allocator, nodes);
                 REQUIRE(graph);
                 CHECK(Rejects(allocator, target, types, graph.Value().View(),
-                              ErrorCode::InvalidArgument));
+                              ErrorCode::CorruptData));
             }
 
             ArchiveWriter wide(allocator);

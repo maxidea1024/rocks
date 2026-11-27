@@ -43,7 +43,7 @@ enum class AssetDiagnosticCode : uint16 {
     // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
     // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
     ContentNotTrusted,
-    // 메시(MeshAnimationAssets.ko.md 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
+    // 메시(Docs/Design/MeshAnimationAssets 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
     InvalidMeshData,
     NonFiniteAttribute,
     UvOutOfRange,
@@ -51,28 +51,32 @@ enum class AssetDiagnosticCode : uint16 {
     TooManyInfluences,
     MaterialSlotFallback,
     NegativeBuildScale,
-    // 스킨 메시 빌드(MeshAnimationAssets.ko.md 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
+    // 스킨 메시 빌드(Docs/Design/MeshAnimationAssets 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
     // MissingInfluences.
     InfluencesTrimmed,
     MissingInfluences,
-    // 단순 충돌(MeshAnimationAssets.ko.md 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터 경고
-    // UnsupportedCollisionShape.
+    // 단순 충돌(Docs/Design/MeshAnimationAssets 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터
+    // 경고 UnsupportedCollisionShape.
     InvalidCollisionData,
     UnsupportedCollisionShape,
     // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
     UnsupportedSetting,
     InvalidSetting,
-    // 애니메이션(MeshAnimationAssets.ko.md 6.4·11절 — MA4a 스켈레톤이 내는 것)
+    // 애니메이션(Docs/Design/MeshAnimationAssets 6.4·11절 — MA4a 스켈레톤이 내는 것)
     InvalidSkeletonData,
     SkeletonMismatch,
-    // 클립(MeshAnimationAssets.ko.md 7.5절 — MA6a): 오류 InvalidClipData, 경고 UnknownBoneTrack,
-    // 임포터 경고 EventPropertiesDropped.
+    // 클립(Docs/Design/MeshAnimationAssets 7.5절 — MA6a): 오류 InvalidClipData, 경고
+    // UnknownBoneTrack, 임포터 경고 EventPropertiesDropped.
     InvalidClipData,
     UnknownBoneTrack,
     EventPropertiesDropped,
-    // Unreal 교환 묶음(UnrealExchange.ko.md 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
+    // Unreal 교환 묶음(UnrealExchange 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
     // CorruptBundle·UnsupportedBundleVersion·UnrealPathTooLong·UnrealPathCollision, 경고
-    // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed.
+    // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed. 종류별
+    // 임포트(10.6절·4.6절 — UX2b): 오류 UnsupportedSourceLayout(다층·UDIM·위도경도 큐브 원본), 경고
+    // GammaMismatch(원본 층 감마와 SRGB·bUseLegacyGamma 설정이 다름 — 설정을 따른다). 메시
+    // 임포트(5.5절 — UX3b): 경고 UnrealNameNormalized(메시 원본 속성 이름·Name 값을 NFC로 바꿨다 —
+    // detail = 바뀐 수).
     CorruptBundle,
     UnsupportedBundleVersion,
     UnknownField,
@@ -81,6 +85,9 @@ enum class AssetDiagnosticCode : uint16 {
     UnrealPathTooLong,
     UnrealPathCollision,
     MissingUnrealDependency,
+    UnsupportedSourceLayout,
+    GammaMismatch,
+    UnrealNameNormalized,
     // 감시 갱신(AssetSystem 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
     // 다시 나타나면 전체 검색).
     RootLost,
@@ -140,7 +147,22 @@ enum class AssetDiagnosticCode : uint16 {
     NuggetConflict,
     // 텍스처 원본 묶음(AssetSystem 12.14절 A5j2): 원본 재구성이 원본을 비웠다(SourceCleared — 경고,
     // Volume 원본 2D·타일이 원본을 만들지 못함, UE와 같이 비우고 알린다).
-    SourceCleared
+    SourceCleared,
+    // 사운드 원본(AudioSystem 3.36.2절 — AU4): 모르는 chunk를 건너뛰었다(IgnoredSourceChunks —
+    // 경고, detail = 건너뛴 chunk 수).
+    IgnoredSourceChunks,
+    // 텍스처 압축 형식(AssetSystem 12.17절 TD11·TD12 — TC2): 고른 압축 형식의 인코더가 아직 없어
+    // 대체했다(EncoderUnavailable — 경고, detail = 원래 PixelFormat 번호), 프로필 backend가 고른
+    // 형식을 샘플링 보장하지 않아 대체했다(PlatformFormatFallback — 경고, detail = 바꾸기 전
+    // PixelFormat 번호).
+    EncoderUnavailable,
+    PlatformFormatFallback,
+    // 커브 에셋(Docs/Design/CurveAssets 5.1·5.3절 — CA3·CA4): 임포트가 원본의 행·항목 하나 또는
+    // 행의 칸 일부를 건너뛰었다(CurveImportRowSkipped — 경고, detail = CSV 물리 줄 번호 또는 JSON
+    // 배열 원소 번호, 1부터), 쿠킹이 커브 표의 모드가 쓰지 않는 맵을 비웠다(CurveTableUnusedRows —
+    // 경고, 쿠킹 진단 setting = 버린 행 수).
+    CurveImportRowSkipped,
+    CurveTableUnusedRows
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

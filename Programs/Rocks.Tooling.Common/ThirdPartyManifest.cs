@@ -131,6 +131,12 @@ public sealed partial record ThirdPartyManifest(
     /// </summary>
     public bool RuntimeTypeInformation { get; init; }
 
+    /// <summary>
+    /// ISPC 원본(<c>.ispc</c>)이다(manifest <c>ispcUnits</c>, 생략하면 빈 목록 — Docs/Design/BuildTargets 3.12절 BD46). 라이브러리 폴더 기준
+    /// 경로이고 code 라이브러리만 적는다. 모듈 규칙이 <c>NativeModuleInput.IspcSources</c>로 옮기고, 빌드가 고정 버전 ISPC로 컴파일한다.
+    /// </summary>
+    public IReadOnlyList<string> IspcUnits { get; init; } = [];
+
     /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
     public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
 
@@ -278,7 +284,8 @@ public sealed partial record ThirdPartyManifest(
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
     private static readonly string[] OptionalTopLevel =
-        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch", "globalState", "rtti"];
+        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch", "globalState", "rtti",
+            "ispcUnits"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -609,6 +616,30 @@ public sealed partial record ThirdPartyManifest(
         }
 
         bool sanitizerInstrumentation = OptionalFalse(fields, "sanitizerInstrumentation");
+        // ISPC 원본(BuildTargets BD46)은 code 라이브러리만 적는다. 같은 basename 둘은 생성 헤더가 겹치므로 빌드 입력 검증도 거부한다.
+        IReadOnlyList<string> ispcUnits = [];
+        if (fields.TryGetValue("ispcUnits", out JsonElement ispcElement))
+        {
+            if (kind != ThirdPartyKind.Code)
+            {
+                throw new FormatException("ispcUnits: only a code library declares ISPC sources");
+            }
+
+            ispcUnits = Paths(ispcElement, "ispcUnits", nonEmpty: true);
+            foreach (string unit in ispcUnits)
+            {
+                if (!unit.EndsWith(".ispc", StringComparison.Ordinal))
+                {
+                    throw new FormatException($"ispcUnits: '{unit}' must be a .ispc file");
+                }
+            }
+
+            if (ispcUnits.Select(unit => unit[(unit.LastIndexOf('/') + 1)..]).Distinct(StringComparer.OrdinalIgnoreCase).Count() != ispcUnits.Count)
+            {
+                throw new FormatException("ispcUnits: two ISPC sources have the same file name (their generated headers would collide)");
+            }
+        }
+
         // code 라이브러리는 전역 상태 여부를 반드시 밝힌다(BuildTargets BD29 — 기본값으로 넘어가지 않게).
         bool globalState = false;
         if (fields.TryGetValue("globalState", out JsonElement globalStateElement))
@@ -732,6 +763,7 @@ public sealed partial record ThirdPartyManifest(
             SanitizerInstrumentation = sanitizerInstrumentation,
             GlobalState = globalState,
             RuntimeTypeInformation = runtimeTypeInformation,
+            IspcUnits = ispcUnits,
             Modifications = modifications,
             Patch = patch
         };

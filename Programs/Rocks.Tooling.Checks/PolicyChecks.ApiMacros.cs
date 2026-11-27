@@ -41,14 +41,20 @@ public static partial class PolicyChecks
         "Core/Source/Runtime/PlatformBase/Private/Common/CrashReportingInternal.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/DirectoryWatchInternal.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/ProcessEntryInternal.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/Sync/QueueMutex.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/Sync/SyncSeams.h",
         "Core/Source/Runtime/PlatformBase/Private/Common/VirtualMemoryBackend.h",
         "Core/Source/Runtime/PlatformBase/Private/Win64/CrashFiles.h",
         "Core/Source/Runtime/PlatformBase/Private/Win64/CrashHelper.h",
         "Core/Source/Runtime/ReflectionText/Private/TextAssignInternal.h",
         "Engine/Source/Runtime/AssetRuntime/Private/PackageInternal.h",
+        "Engine/Source/Runtime/AudioMiniaudio/Private/MiniaudioSupport.h",
         "Engine/Source/Runtime/EngineAssets/Private/EngineAssetsInternal.h",
+        "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadMotorMapping.h",
+        "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadSlotTable.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerTouchMapping.h",
-        "Engine/Source/Developer/MeshTools/Private/MeshBuildInternal.h"
+        "Engine/Source/Developer/MeshTools/Private/MeshBuildInternal.h",
+        "Engine/Source/Developer/TextureTools/Private/TextureImportInternal.h"
     ];
 
     /// <summary>

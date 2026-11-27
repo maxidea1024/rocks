@@ -17,6 +17,8 @@
 namespace rocks {
 
 class ConstructionContext;
+class DelegateHandle;
+struct FrameLayout;
 class ArchiveWriter;
 struct FieldView;
 class FieldEncodeContext;
@@ -609,6 +611,107 @@ struct RuntimeValueOps {
     Result<void> (*validateTree)(const void* value) noexcept = nullptr;
 };
 
+// 함수 매개변수·반환 칸 하나의 연산이다(Docs/Design/FunctionReflection.ko.md FD9). value는 칸
+// C++ 형식의 값 ops(생성·소멸·복사 — detail::ValueOpsOf<T>())다. write는 FieldValue를 칸에
+// 쓰고(필드 쓰기와 같은 변환·검사 — weak 대상 생존·기대 타입, Name 토큰 pool, ClassRef 등록, 정수
+// 폭), read는 칸을 FieldValue로 읽는다. struct·컨테이너 칸(FieldValue로 통째 읽고 쓰지 않는 형식)은
+// 둘 다 null이고 같은 C++ 형식의 값을 value.copy로 넣고 꺼낸다(FunctionCall::SetArgumentValue).
+struct RuntimeParameterOps {
+    const RuntimeValueOps* value = nullptr;
+    Result<void> (*write)(ObjectRegistry& registry, const ObjectAccessContext& access, void* slot,
+                          const FieldValue& value, Allocator& valueAllocator) noexcept = nullptr;
+    Result<void> (*read)(const void* slot, FieldValue& value) noexcept = nullptr;
+};
+
+// 리플렉션 함수 하나의 생성 연산이다(UE 생성 exec thunk·Parms 대응 — Docs/Design/
+// FunctionReflection.ko.md FD7). construct는 호출 frame(FunctionSchema::frameSize·frameAlignment의
+// 빈 저장소)에 모든 칸을 기본값으로 만들고(할당 실패면 만든 칸을 되돌린다), destroy는 소멸한다.
+// invoke는 대상 handle을 해석해(Const면 읽기 — Resolve, 그 밖은 쓰기 — ResolveForWrite, static은
+// VerifyAccess만) frame의 인자로 함수를 부르고 반환값·함수의 실패 코드를 frame에 쓴다. 대상 해석
+// 실패(WrongThread·WrongContext·StaleHandle·Destroyed·TypeMismatch·Busy·ShuttingDown)만 그
+// 오류이고, 함수 자신의 실패(ReturnsResult)는 성공으로 돌아와 errorOffset의 ErrorCode에 남는다.
+// invokeBase는 스크립트 재정의(FR3)의 비가상 호출 칸이다(지금은 null). parameters는 schema 매개변수
+// 순서다.
+struct RuntimeFunctionOps {
+    Guid functionId{};
+    Result<void> (*construct)(void* frame, Allocator& allocator) noexcept = nullptr;
+    void (*destroy)(void* frame) noexcept = nullptr;
+    Result<void> (*invoke)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                           ObjectHandle self, void* frame) noexcept = nullptr;
+    Result<void> (*invokeBase)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle self, void* frame) noexcept = nullptr;
+    Span<const RuntimeParameterOps> parameters{};
+    RuntimeParameterOps result{};
+    // frame 안 함수 실패 코드(ErrorCode)의 위치다(ReturnsResult 함수만 — 그 밖은 0이고 읽지
+    // 않는다).
+    uint32 errorOffset = 0;
+};
+
+// 이벤트 바인딩 나열의 방문 함수다(RuntimeEventOps::bindings — 바인딩 하나마다 대상·FunctionId).
+// 실패를 돌려주면 나열이 그 오류로 멈춘다.
+using EventBindingVisitor = Result<void> (*)(void* user, ObjectHandle target,
+                                             Guid functionId) noexcept;
+
+// 리플렉션 이벤트 필드 하나의 연산이다(Docs/Design/EventReflection.ko.md ED16 — 필드 형식
+// Event<Args...>). 모든 thunk는 publisher(이벤트 필드를 가진 객체 — Alive여야 한다)를 해석하고
+// 그 Registry 오류(WrongThread·WrongContext·StaleHandle·Destroyed·TypeMismatch·Busy·
+// ShuttingDown)를 그대로 돌려준다: 바꾸는 연산은 쓰기 Borrow(ResolveForWrite — encode 고정 중이면
+// Busy), 발행은 읽기 Borrow다. 생성 코드와 손으로 만든 함수표 모두
+// detail::MakeEventOps<&Class::member>(fieldId)(Object/EventOps.h)로 만든다 — thunk는 발행자
+// 클래스 모듈 image에 있고 RuntimeTypeOps::module이 코드 수명을 지킨다. 파괴 요청 뒤에는 연산표로
+// 지우지 않는다: 논리 파괴의 정리가 RequestDestroy 전에 비우고(ED8), 그 뒤에는 발행할 수 없으며
+// 회수 때 Event 소멸자가 남은 항목을 정리한다.
+//
+// - bind: target의 리플렉션 함수 functionId를 바인딩한다(Event::TryBind — AlreadyExists·NotFound·
+//   TypeMismatch·InvalidArgument·할당 실패).
+// - unbind: 리플렉션 바인딩 handle 하나를 지운다(Event::Unbind — native 구독 handle·없는 handle은
+//   NotFound).
+// - unbindFunction: target의 functionId 바인딩을 지운다(Event::Unbind(target, functionId) —
+//   handle은 저장해도 유지되지 않으므로 도구·저장 경로는 이 쌍으로 지운다, 없으면 NotFound).
+// - unbindAll: target을 대상으로 하는 리플렉션 바인딩을 모두 지우고 그 수를 돌려준다
+//   (Event::UnbindAll(target)).
+// - clear: native 구독까지 모두 지운다(Event::Clear — 발행자 논리 파괴).
+// - compact: 죽은 대상의 바인딩을 지우고 그 수를 돌려준다(Event::Compact).
+// - bindings: 살아 있는 리플렉션 바인딩을 등록 순서로 visitor(user, target, functionId)에 넘긴다
+//   (Event::ForEachBinding — 읽기 Borrow라 저장의 encode 고정 중에도 된다, ED20). native 구독은
+//   나열하지 않는다. visitor의 실패는 그대로 돌려준다. visitor 안에서 이 이벤트를 바꾸지 않는다.
+// - broadcastFromFrame: construct로 만든 발행 frame의 인자로 발행한다(Event::TryBroadcast). 발행
+//   동안 발행자 Borrow를 쥔다(리플렉션 함수 thunk와 같다 — 구독자가 부른 Collect는 Busy다). frame은
+//   바꾸지 않고, 배치는 검사하지 않는다(호출자가 construct로 만든 frame — 안전 래퍼는 EV4 host).
+// - construct·destroy: 발행 frame(frameSize·frameAlignment의 빈 저장소)의 칸을 기본값으로 만들고
+//   소멸한다. 칸 배치는 FieldSchema::eventParameters의 offset이고 BindingFrame<Args...>와 같다
+//   (ED17). parameters는 칸마다 값 연산이다(FunctionCall 쓰기·읽기와 같은 RuntimeParameterOps).
+// - frameLayout: 발행 frame의 기대 배치(FunctionSignatureMatches에 넘겨 바인딩 후보 함수를 거른다 —
+//   에디터 목록). 정적 저장소라 연산표와 수명이 같다.
+struct RuntimeEventOps {
+    Guid fieldId{};
+    Result<DelegateHandle> (*bind)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                   ObjectHandle publisher, ObjectHandle target,
+                                   Guid functionId) noexcept = nullptr;
+    Result<void> (*unbind)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                           ObjectHandle publisher, DelegateHandle handle) noexcept = nullptr;
+    Result<void> (*unbindFunction)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                   ObjectHandle publisher, ObjectHandle target,
+                                   Guid functionId) noexcept = nullptr;
+    Result<usize> (*unbindAll)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle publisher, ObjectHandle target) noexcept = nullptr;
+    Result<void> (*clear)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          ObjectHandle publisher) noexcept = nullptr;
+    Result<usize> (*compact)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                             ObjectHandle publisher) noexcept = nullptr;
+    Result<void> (*bindings)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                             ObjectHandle publisher, EventBindingVisitor visitor,
+                             void* user) noexcept = nullptr;
+    Result<void> (*broadcastFromFrame)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                       ObjectHandle publisher, void* frame) noexcept = nullptr;
+    Result<void> (*construct)(void* frame, Allocator& allocator) noexcept = nullptr;
+    void (*destroy)(void* frame) noexcept = nullptr;
+    Span<const RuntimeParameterOps> parameters{};
+    uint32 frameSize = 0;
+    uint32 frameAlignment = 0;
+    const FrameLayout* frameLayout = nullptr;
+};
+
 // 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
 // Trace는 읽기만 수행한다. 콜백 중 생성·간선 변경·수집 재진입은 Busy로 거부한다.
 // lease 반환과 통계 조회는 허용한다. 활성 ConstructionContext의 롤백/소멸 재진입은 금지한다.
@@ -658,6 +761,14 @@ struct RuntimeTypeOps {
     // 코드가 만들고(리플렉션 클래스), 표로 나타낼 수 없는 필드가 있으면 builder.Unsupported()로
     // trace에 남는다.
     void (*referenceLayout)(const Object&, detail::ReferenceLayoutBuilder&) noexcept = nullptr;
+    // 리플렉션 함수 연산이다(TypeSchema::functions와 같은 수·순서 — Docs/Design/
+    // FunctionReflection.ko.md FD10). 등록이 배열을 깊게 복사한다(함수 포인터·값 ops 표는 module이
+    // 수명을 보존한다).
+    Span<const RuntimeFunctionOps> functions{};
+    // 리플렉션 이벤트 필드 연산이다(schema의 FieldKind::Event 필드와 같은 수·순서 — 상속 필드
+    // 포함, Docs/Design/EventReflection.ko.md ED15). 이벤트 필드에는 RuntimeFieldOps가 없다. 등록이
+    // 배열과 매개변수 연산 배열을 깊게 복사한다.
+    Span<const RuntimeEventOps> events{};
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.

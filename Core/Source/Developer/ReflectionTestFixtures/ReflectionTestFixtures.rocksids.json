@@ -832,6 +832,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::CallPoint::x",
+      "id": "c121cedf723d4bf2820ffeab16b31897",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::CallPoint::y",
+      "id": "cf5d74db6b774a74a0bc7c57f71f1e66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::CallTarget::label",
+      "id": "c009c04f634e4be9828c944c190eb0a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::CallTarget::total",
+      "id": "d8f9edc0201048f598c86deca0d12088",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::ClassBase::value",
       "id": "44f1f56c3b2441c3beb1a13411abc0b0",
       "aliases": [],
@@ -1527,6 +1555,69 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::EnumFields::group",
       "id": "c264f1083bc74df2b508cc7ed53833dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::changed",
+      "id": "6c3494fdcc3c442a92e48f5e8f0e3440",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::count",
+      "id": "bc3150976d14489d97305f31dab98fcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::edited",
+      "id": "40d6877bca004f96845ab49c1ebd57db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::label",
+      "id": "8bb2212c551144aca6f607ef8c2e5ac6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::named",
+      "id": "985ef3246e11423f8bb7c3feae961ff0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::partner",
+      "id": "c13123a6358f4764b83b59551440ab68",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::pinged",
+      "id": "a84ecf8af4c54bd7b9634727c459900b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::placed",
+      "id": "b5a80183a1cb4a46a319433d631e988b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisherChild::extra",
+      "id": "8fdbdc809b8a47a9ac67bcae731eca7c",
       "aliases": [],
       "retired": false
     },
@@ -4149,6 +4240,104 @@
       "retired": false
     },
     {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Add",
+      "id": "7626af617f4e401dbda86c29cad0731f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Bump",
+      "id": "7f68f4b07fee4684b54955e00a8311c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Choose",
+      "id": "379e31ea430e4d7a91e86a1983c64619",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Mark",
+      "id": "e09df3c84279476697da706be7b877df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Note",
+      "id": "c9c3953a811b4058b32f40080f6caf70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Place",
+      "id": "954edd00c1cc4937b03ea96b2a14dccb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Relay",
+      "id": "4f262b53802a4584b64e79bbda232b4f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Remember",
+      "id": "dc2759aeea4a4f26bdda7bdd57e2e392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Reset",
+      "id": "c7507dc6377448b3a5a8df492b600572",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Same",
+      "id": "05daa69f05924ac89b2540a9d6968707",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::SetLabel",
+      "id": "4f73386f4b6149c2b767564ff771deb6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Sum",
+      "id": "e3af8bd8b8234419b54808fedd2aa7ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Total",
+      "id": "e6db85ffa3c14fdb81066af1f1161f00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::CallTarget::Twice",
+      "id": "a597cf2277db4ab3825e1461e5786780",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "identity_fixture::RenamedActor",
       "id": "c0100000000000000000000000000001",
@@ -4378,6 +4567,34 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::BytesHolder",
       "id": "f51103ef60074fa49ebcaf462cc6d8a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::CallMode",
+      "id": "f192100700df494798f6868892c24e61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::CallPoint",
+      "id": "69824d200b9f46e8a104642091c24ddc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::CallTarget",
+      "id": "ee3a89e6f29d47bd99d93ef9fa2f4982",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::CallTargetChild",
+      "id": "21cfc71f30ef4d88bf27fe507f6f0b54",
       "aliases": [],
       "retired": false
     },
@@ -4616,6 +4833,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::EnumFields",
       "id": "f84efdb19e974c0aa334ba161c400144",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventPublisher",
+      "id": "4f04477320eb4280a73ba9445b927ace",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventPublisherChild",
+      "id": "dc6791d9efa24bdbb9a35f759d6e9377",
       "aliases": [],
       "retired": false
     },

@@ -6,7 +6,8 @@
 
 // TIFF 쓰기다(Docs/Design/AssetSystem 12.10.1절 — libtiff 쓰기 API를 메모리 파일에). 값 조합은
 // libtiff가 받는 대로 쓴다. 할당은 디코더와 같은 스레드별 묶음(libtiff·libjpeg — JPEG TIFF)이고
-// 실패 표지로 OutOfMemory를 가른다.
+// 실패 표지로 OutOfMemory를 가른다. Rocks 쪽 할당(출력 파일·줄·tile 버퍼)은 묶음 밖이므로 그 오류를
+// 따로 들고 와 libtiff의 뒤따른 실패보다 앞세운다.
 namespace rocks::image {
 namespace {
 
@@ -19,7 +20,8 @@ struct TiffWriteFile {
 
     Array<uint8>& data;
     uint64 position = 0;
-    bool failed = false;
+    // 출력 버퍼를 늘리지 못한 오류다(None이면 실패 없음).
+    ErrorCode error = ErrorCode::None;
 };
 
 tmsize_t TiffWriteRead(thandle_t handle, void* buffer, tmsize_t size) noexcept {
@@ -42,9 +44,11 @@ tmsize_t TiffWriteWrite(thandle_t handle, void* buffer, tmsize_t size) noexcept 
     }
 
     const uint64 end = file->position + static_cast<uint64>(size);
-    if (end > file->data.Size() && !file->data.TryResize(static_cast<usize>(end))) {
-        file->failed = true;
-        return 0;
+    if (end > file->data.Size()) {
+        if (auto resized = file->data.TryResize(static_cast<usize>(end)); !resized) {
+            file->error = resized.Error();
+            return 0;
+        }
     }
 
     platform::MemoryCopy(file->data.Data() + file->position, buffer, static_cast<usize>(size));
@@ -127,20 +131,24 @@ bool TiffWriteFields(TIFF* tiff, const TiffWriteImage& image) noexcept {
     return true;
 }
 
-// 한 IFD의 표본을 strip 행 또는 tile로 쓴다.
-bool TiffWritePixels(Allocator& allocator, TIFF* tiff, const TiffWriteImage& image,
-                     uint32 rowSamples, usize rowBytes, uint32 planes) noexcept {
+// 한 IFD의 표본을 strip 행 또는 tile로 쓴다. 오류: 줄·tile 버퍼 할당 실패, libtiff가 거부한 쓰기
+// InvalidArgument.
+Result<void> TiffWritePixels(Allocator& allocator, TIFF* tiff, const TiffWriteImage& image,
+                             uint32 rowSamples, usize rowBytes, uint32 planes) noexcept {
+    const auto rejected = []() noexcept {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    };
     if (image.tileWidth != 0) {
         if (TIFFSetField(tiff, TIFFTAG_TILEWIDTH, image.tileWidth) != 1 ||
             TIFFSetField(tiff, TIFFTAG_TILELENGTH, image.tileHeight) != 1) {
-            return false;
+            return rejected();
         }
 
         const usize tileRowBytes =
             (static_cast<usize>(image.tileWidth) * rowSamples * image.bits + 7) / 8;
         Array<uint8> tile(allocator);
-        if (!tile.TryResize(tileRowBytes * image.tileHeight)) {
-            return false;
+        if (auto resized = tile.TryResize(tileRowBytes * image.tileHeight); !resized) {
+            return resized;
         }
 
         for (uint32 plane = 0; plane < planes; ++plane) {
@@ -160,23 +168,23 @@ bool TiffWritePixels(Allocator& allocator, TIFF* tiff, const TiffWriteImage& ima
                     const uint32 index = TIFFComputeTile(tiff, x, y, 0, static_cast<uint16>(plane));
                     if (TIFFWriteEncodedTile(tiff, index, tile.Data(),
                                              static_cast<tmsize_t>(tile.Size())) < 0) {
-                        return false;
+                        return rejected();
                     }
                 }
             }
         }
 
-        return true;
+        return Result<void>::Success();
     }
 
     if (image.rowsPerStrip != 0 &&
         TIFFSetField(tiff, TIFFTAG_ROWSPERSTRIP, image.rowsPerStrip) != 1) {
-        return false;
+        return rejected();
     }
 
     Array<uint8> line(allocator);
-    if (!line.TryResize(rowBytes)) {
-        return false;
+    if (auto resized = line.TryResize(rowBytes); !resized) {
+        return resized;
     }
 
     for (uint32 plane = 0; plane < planes; ++plane) {
@@ -184,12 +192,12 @@ bool TiffWritePixels(Allocator& allocator, TIFF* tiff, const TiffWriteImage& ima
             const usize source = (static_cast<usize>(plane) * image.height + row) * rowBytes;
             platform::MemoryCopy(line.Data(), image.raw.Data() + source, rowBytes);
             if (TIFFWriteScanline(tiff, line.Data(), row, static_cast<uint16>(plane)) != 1) {
-                return false;
+                return rejected();
             }
         }
     }
 
-    return true;
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -213,10 +221,16 @@ Result<void> EncodeTiff(Allocator& allocator, const TiffWriteImage& image,
     ExternalAllocationScope scope(allocator);
     detail::TiffAllocatorBinding tiffBinding;
     detail::JpegAllocatorBinding jpegBinding;
-    const auto failed = [&]() noexcept {
+    TiffWriteFile file(out);
+    // 오류는 할당 실패를 앞세운다: libtiff·libjpeg 할당(묶음 표지), 출력 버퍼, 그다음 error(줄·tile
+    // 버퍼 할당 실패나 libtiff 거부 InvalidArgument). 할당 실패 뒤의 libtiff 실패는 거부가 아니다.
+    const auto failed = [&](ErrorCode error) noexcept {
         out.Clear();
-        return Result<void>::Failure(scope.AllocationFailed() ? ErrorCode::OutOfMemory
-                                                              : ErrorCode::InvalidArgument);
+        if (scope.AllocationFailed()) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return Result<void>::Failure(file.error != ErrorCode::None ? file.error : error);
     };
     TIFFOpenOptions* options = TIFFOpenOptionsAlloc();
     if (options == nullptr) {
@@ -231,29 +245,31 @@ Result<void> EncodeTiff(Allocator& allocator, const TiffWriteImage& image,
         mode[2] = '8';
     }
 
-    TiffWriteFile file(out);
     TIFF* opened =
         TIFFClientOpenExt("memory", mode, &file, TiffWriteRead, TiffWriteWrite, TiffWriteSeek,
                           TiffWriteClose, TiffWriteSize, TiffWriteMap, TiffWriteUnmap, options);
     TIFFOpenOptionsFree(options);
     if (opened == nullptr) {
-        return failed();
+        return failed(ErrorCode::InvalidArgument);
     }
 
-    bool ok = true;
-    for (uint32 page = 0; ok && page < image.pages; ++page) {
-        ok =
-            TiffWriteFields(opened, image) && TiffWritePixels(allocator, opened, image, rowSamples,
-                                                              static_cast<usize>(rowBytes), planes);
-        if (ok && image.pages > 1) {
-            ok = TIFFWriteDirectory(opened) == 1;
+    ErrorCode error = ErrorCode::None;
+    for (uint32 page = 0; error == ErrorCode::None && page < image.pages; ++page) {
+        if (!TiffWriteFields(opened, image)) {
+            error = ErrorCode::InvalidArgument;
+        } else if (auto written = TiffWritePixels(allocator, opened, image, rowSamples,
+                                                  static_cast<usize>(rowBytes), planes);
+                   !written) {
+            error = written.Error();
+        } else if (image.pages > 1 && TIFFWriteDirectory(opened) != 1) {
+            error = ErrorCode::InvalidArgument;
         }
     }
 
     // TIFFClose가 마지막 디렉터리를 쓴다(실패는 쓰기 콜백의 표지로 안다).
     TIFFClose(opened);
-    if (!ok || file.failed || scope.AllocationFailed()) {
-        return failed();
+    if (error != ErrorCode::None || file.error != ErrorCode::None || scope.AllocationFailed()) {
+        return failed(error != ErrorCode::None ? error : ErrorCode::InvalidArgument);
     }
 
     return Result<void>::Success();

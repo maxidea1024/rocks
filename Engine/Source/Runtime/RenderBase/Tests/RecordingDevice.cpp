@@ -13,10 +13,10 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
       computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
       textureUses_(allocator), bufferUses_(allocator), heaps_(allocator),
       placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
-      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
-      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), shaders_(allocator),
-      bufferViews_(allocator), constantBuffers_(allocator), retired_(allocator),
-      readbacks_(allocator),
+      bufferStrides_(allocator), allocator_(allocator), textures_(allocator),
+      transitions_(allocator), splits_(allocator), pendingSplits_(allocator), pipelines_(allocator),
+      swapChains_(allocator), shaders_(allocator), bufferViews_(allocator),
+      constantBuffers_(allocator), retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -465,6 +465,13 @@ Result<BufferHandle> RecordingDevice::CreatePlacedBuffer(TransientHeapHandle hea
         return Result<BufferHandle>::Failure(added.Error());
     }
 
+    while (bufferStrides_.Size() <= added.Value().index) {
+        if (!bufferStrides_.TryPushBack(0u)) {
+            return Result<BufferHandle>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    bufferStrides_[added.Value().index] = desc.stride;
     Record(Op::CreateBuffer, desc.size);
     auto marked =
         MarkPlaced(placedBuffers_, added.Value().index, heap.slot, offset, placement.Value().bytes);
@@ -563,6 +570,8 @@ Result<void> RecordingDevice::ResizeSwapChain(SwapChainHandle swapChain, uint32 
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 새 백버퍼라 그리는 중인 프레임을 버린다.
+    *swapChains_.Find(swapChain.slot) = 0;
     Record(Op::ResizeSwapChain, (static_cast<uint64>(width) << 32) | height);
     return Result<void>::Success();
 }
@@ -583,6 +592,13 @@ Result<BufferHandle> RecordingDevice::CreateBuffer(const BufferDesc& desc,
         return Result<BufferHandle>::Failure(added.Error());
     }
 
+    while (bufferStrides_.Size() <= added.Value().index) {
+        if (!bufferStrides_.TryPushBack(0u)) {
+            return Result<BufferHandle>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    bufferStrides_[added.Value().index] = desc.stride;
     Record(Op::CreateBuffer, desc.size);
     return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
@@ -595,11 +611,18 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     }
 
     (void)pixels;
+    if (createTextureError_ != ErrorCode::None) {
+        return Result<TextureHandle>::Failure(createTextureError_);
+    }
+
     TextureState state;
     const uint32 mipLevels =
         desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
     const uint32 slices = TextureSliceCount(desc) == 0 ? 1u : TextureSliceCount(desc);
     state.dimension = desc.dimension;
+    state.format = desc.format;
+    state.sampleCount = desc.sampleCount;
+    state.comparison = desc.sampler.comparison;
     auto reset = state.states.Reset(allocator_, mipLevels, slices, ResourceAccess::SrvGraphics);
     if (!reset) {
         return Result<TextureHandle>::Failure(reset.Error());
@@ -638,7 +661,10 @@ Result<TextureHandle> RecordingDevice::CreateTextureView(TextureHandle texture,
     }
 
     TextureState state;
-    state.dimension = source->dimension;
+    state.dimension = TextureViewDimensionOf(source->dimension, desc);
+    state.format = desc.format != PixelFormat::Unknown ? desc.format : source->format;
+    state.sampleCount = source->sampleCount;
+    state.comparison = source->comparison;
     state.view = true;
     state.source = texture.slot;
     state.range = range.Value();
@@ -739,9 +765,7 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
     return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
-Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
-                                                    const ClearColor& clear) noexcept {
-    (void)clear;
+Result<CommandContext*> RecordingDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -751,14 +775,32 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
-    if (recording_ || !swapChains_.IsValid(swapChain.slot)) {
+    if (recording_ || !swapChains_.IsValid(desc.swapChain.slot)) {
         return Result<CommandContext*>::Failure(recording_ ? ErrorCode::Busy
                                                            : ErrorCode::StaleHandle);
     }
 
+    if (beginFrameError_ != ErrorCode::None) {
+        if (beginFrameSuccesses_ == 0) {
+            const ErrorCode error = beginFrameError_;
+            beginFrameError_ = ErrorCode::None;
+            return Result<CommandContext*>::Failure(error);
+        }
+
+        --beginFrameSuccesses_;
+    }
+
+    uint8& frameOpen = *swapChains_.Find(desc.swapChain.slot);
+    if (desc.load == LoadAction::Load && frameOpen == 0) {
+        return Result<CommandContext*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    frameOpen = 1;
+    frameSwapChain_ = desc.swapChain;
+    presentOnEnd_ = desc.present;
     recording_ = true;
     recordingQueue_ = QueueKind::Graphics;
-    Record(Op::BeginFrame);
+    Record(Op::BeginFrame, SwapChainPassValue(desc.load, desc.present));
     return Result<CommandContext*>::Success(this);
 }
 
@@ -942,6 +984,18 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     timestamps_.Close(value, true);
     timeline_.Submitted(value, nullptr);
     Record(Op::EndFrame, value);
+    // 스왑체인 기록이면 present한다(기록 중 Retire한 스왑체인은 생략한다).
+    if (!frameSwapChain_.IsNull()) {
+        uint8* frameOpen = swapChains_.Find(frameSwapChain_.slot);
+        if (presentOnEnd_ && frameOpen != nullptr) {
+            *frameOpen = 0;
+            ++presents_;
+            Record(Op::Present, frameSwapChain_.slot.index);
+        }
+
+        frameSwapChain_ = {};
+        presentOnEnd_ = false;
+    }
     bool hold = false;
     {
         platform::LockGuard lock(gate_);
@@ -989,6 +1043,11 @@ uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noe
     return 0;
 }
 
+PixelFormatCaps RecordingDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    (void)format;
+    return pixelFormatCaps_;
+}
+
 Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
                                                            const BufferViewDesc& desc) noexcept {
     auto owner = ownership_.Check();
@@ -1003,6 +1062,14 @@ Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
     BufferViewState state;
     state.buffer = buffer.slot;
     state.access = desc.access;
+    state.kind = desc.kind;
+    state.shaderType = desc.kind == BufferViewKind::Typed
+                           ? GetPixelFormatInfo(desc.format).shaderType
+                           : PixelShaderType::None;
+    state.stride =
+        desc.kind == BufferViewKind::Structured && buffer.slot.index < bufferStrides_.Size()
+            ? bufferStrides_[buffer.slot.index]
+            : 0u;
     auto added = bufferViews_.TryAdd(state);
     if (!added) {
         return Result<BufferViewHandle>::Failure(added.Error());
@@ -1454,6 +1521,34 @@ uint64 RecordingDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
 
+Result<graphics::TextureViewInfo>
+RecordingDevice::GetTextureViewInfo(TextureHandle texture) noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr) {
+        return Result<graphics::TextureViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    graphics::TextureViewInfo info;
+    info.dimension = state->dimension;
+    info.format = state->format;
+    info.sampleCount = state->sampleCount;
+    info.access = state->access;
+    info.sampled = state->access == ViewAccess::Read;
+    info.comparison = state->comparison;
+    return Result<graphics::TextureViewInfo>::Success(info);
+}
+
+Result<graphics::BufferViewInfo>
+RecordingDevice::GetBufferViewInfo(BufferViewHandle view) noexcept {
+    const BufferViewState* state = bufferViews_.Find(view.slot);
+    if (state == nullptr) {
+        return Result<graphics::BufferViewInfo>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<graphics::BufferViewInfo>::Success(
+        graphics::BufferViewInfo{state->kind, state->access, state->shaderType, state->stride});
+}
+
 Result<graphics::TextureSubresources>
 RecordingDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
     const TextureState* state = textures_.Find(texture.slot);
@@ -1686,6 +1781,10 @@ usize RecordingDevice::PendingRetireCount() const noexcept {
     return retired_.Size();
 }
 
+uint64 RecordingDevice::PresentCount() const noexcept {
+    return presents_;
+}
+
 void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {
     boundPipeline_ = pipelines_.IsValid(pipeline.slot) ? pipeline : PipelineHandle{};
     Record(Op::SetPipeline, pipelines_.IsValid(pipeline.slot) ? 1u : 0u);
@@ -1708,7 +1807,7 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
            (buffers_.IsValid(buffer.slot) ? 2u : 0u) | (format == IndexFormat::UInt32 ? 1u : 0u));
 }
 
-void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
+void RecordingDevice::SetTexture(ShaderStage stage, uint32 slot, TextureHandle texture) noexcept {
     const TextureState* state = textures_.Find(texture.slot);
     TouchTexture(texture.slot);
     // async compute 기록은 compute 읽기 상태여야 한다.
@@ -1736,7 +1835,19 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
         ++nullTextureBindings_;
     }
 
-    Record(Op::SetTexture, state != nullptr ? 1u : 0u);
+    Record(Op::SetTexture, ResourceValue(stage, slot, state != nullptr ? 1u : 0u));
+}
+
+Result<void> RecordingDevice::SetSampler(ShaderStage stage, uint32 slot,
+                                         const SamplerDesc* sampler) noexcept {
+    if (!recording_ || ConstantBufferStageIndex(stage) >= ConstantBufferStageCount ||
+        slot >= MaxResourceSlots || (sampler != nullptr && !IsValidSamplerDesc(*sampler))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint32 word = sampler != nullptr ? 1u + static_cast<uint32>(sampler->filter) : 0u;
+    Record(Op::SetSampler, ResourceValue(stage, slot, word));
+    return Result<void>::Success();
 }
 
 Result<void> RecordingDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {

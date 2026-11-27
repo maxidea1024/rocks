@@ -48,7 +48,7 @@ ROCKS_AUDIO_API void StoreOpusCodecHeader(const OpusCodecHeader& header, uint32 
 
 // codec 머리를 머리(채널 수·encoder delay)와 맞춰 읽는다. 크기 ≠ 16, family ≠ 1, stream 0,
 // coupled > stream, stream + coupled ≠ 채널 수, mapping 값 ≥ 채널 수, 채널 수 뒤 mapping 칸·예약 칸
-// ≠ 0, gain ≠ 0, pre-skip ≠ encoder delay, 채널 수 1–8 밖이면 InvalidArgument다.
+// ≠ 0, gain ≠ 0, pre-skip ≠ encoder delay, 채널 수 1–8 밖이면 CorruptData다(3.38절).
 ROCKS_AUDIO_API Result<OpusCodecHeader>
 ParseOpusCodecHeader(Span<const uint8> bytes, const AudioPlatformDataHeader& header) noexcept;
 

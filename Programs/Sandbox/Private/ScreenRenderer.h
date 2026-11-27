@@ -4,6 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Graphics/Device.h>
+#include <GraphicsTypes/ChannelSwizzle.h>
 #include <RenderBase/BuiltinResources.h>
 #include <RenderBase/EngineShaderHost.h>
 #include <RenderBase/EngineShaderTypes.h>
@@ -18,7 +19,8 @@
 //
 // 프레임 그래프: SceneColor(RGBA16Float)·SceneDepth(D32Float, reversed-Z clear 0) → BasePass(내장
 // 메시를 fallback 메시 셰이더로) → Tonemap(전체화면, 스왑체인) → (요청하면) TonemapCapture(capture
-// 텍스처).
+// 텍스처). 텍스처 표시 프레임은 장면 대신 TextureInspector 한 pass다(텍스처는 게임 lane이 올린
+// RenderHandle — 18.5절 7항).
 //
 // 사용 예(게임 lane):
 //   screen::ScreenRenderer renderer(allocator, shaders::Host());
@@ -42,8 +44,9 @@ struct ScreenItem {
     bool reverseCull = false;
 };
 
-// 텍스처 표시 view다(Docs/Design/RenderBase 18.5절 6항 — SM6). None이 아니면 장면 대신 lane이
-// 만든 절차 생성 텍스처 하나를 TextureInspector로 전체화면에 그린다.
+// 엔진 절차 텍스처다(Docs/Design/RenderBase 18.5절 6항 — SM6). 게임 lane(ScreenHost)이 메모리
+// TexturePlatformData로 만들어 쿠킹 텍스처와 같은 업로드 경로로 올리고(18.5절 7항), 표시 목록의 앞
+// 여섯 칸이 된다. None은 장면이다.
 enum class InspectorView : uint8 {
     None,
     // 2D 4×4 RGBA8Unorm, mip 셋(0 빨강·초록 바둑판, 1 파랑, 2 흰색)
@@ -61,14 +64,43 @@ enum class InspectorView : uint8 {
 };
 
 inline constexpr uint32 InspectorViewCount = 7;
-// 표시 텍스처의 층 수(배열 층·cube 배열 원소·volume z)와 mip 수다(None 칸은 0).
-inline constexpr uint32 InspectorLayers[InspectorViewCount] = {0, 1, 1, 3, 1, 2, 4};
-inline constexpr uint32 InspectorMips[InspectorViewCount] = {0, 3, 1, 1, 1, 1, 1};
 // HDR 표시 텍스처의 값이다(장면 가운데 cube와 같은 색 — self-test가 같은 CPU 기준을 쓴다).
 inline constexpr float InspectorHdrColor[3] = {2.0f, 1.0f, 0.5f};
 
-// lane이 frame마다 남길 수 있는 capture 자리 수다(self-test가 프레임마다 다른 view를 읽는다).
-inline constexpr uint32 MaxCaptureSlots = 8;
+// lane이 남길 수 있는 capture 자리 수다(self-test가 프레임마다 다른 표시를 읽는다).
+inline constexpr uint32 MaxCaptureSlots = 64;
+
+// 표시하는 텍스처의 셰이더 성분 계열이다(PixelFormatInfo::shaderType — 정수 형식은 Load 엔트리).
+enum class InspectorComponent : uint8 {
+    Float,
+    Uint,
+    Int
+};
+
+// 표시 하나다(18.5절 7항). 게임 lane의 표시 목록 항목이 담고, 고른 것을 프레임 packet에 넣는다.
+struct InspectorTexture {
+    // 장치 텍스처의 렌더 handle이다(Pending·Failed면 typed 대체로 그린다 — 6.2절).
+    render::RenderHandle handle;
+    graphics::TextureDimension dimension = graphics::TextureDimension::Texture2D;
+    InspectorComponent component = InspectorComponent::Float;
+    render::TextureInspectorDisplay display = render::TextureInspectorDisplay::Ldr;
+    // 쿠킹 swizzle(셰이더가 적용 — view swizzle은 항등)이다.
+    graphics::ChannelSwizzle swizzle;
+    // 정수 형식의 값 → 표시 배율이다.
+    float integerScale = 1.0f;
+    // mip 0 크기다(depth는 volume만).
+    uint32 width = 1;
+    uint32 height = 1;
+    uint32 depth = 1;
+    // 배열 층 수(2D 배열)·cube 수(cube 배열), 그 밖은 1이다.
+    uint32 layers = 1;
+    uint32 mips = 1;
+    // CPU Availability 텍스처다(올리지 않고 내장 검정 2D로 대체 — 6.5절).
+    bool cpuPlaceholder = false;
+};
+
+// 고른 mip에서 고를 수 있는 층 수다(배열 층·cube 배열 원소·volume z texel, 그 밖 1).
+uint32 InspectorLayerCount(const InspectorTexture& texture, uint32 mip) noexcept;
 
 // 프레임 packet이다. items는 그 slot의 프레임 arena에 있다.
 struct ScreenPacket {
@@ -79,8 +111,9 @@ struct ScreenPacket {
     // 스왑체인과 같은 크기)에도 그리고 lane이 captureSlot 자리에 읽어 둔다(self-test).
     render::RenderHandle capture;
     uint32 captureSlot = 0;
-    // 텍스처 표시다(SM6). 층·mip은 게임 lane이 범위 안으로 맞춘다.
-    InspectorView inspector = InspectorView::None;
+    // 참이면 장면 대신 텍스처 표시를 그린다(SM6·SM7). 층·mip은 게임 lane이 범위 안으로 맞춘다.
+    bool inspecting = false;
+    InspectorTexture inspector;
     uint32 inspectorLayer = 0;
     uint32 inspectorMip = 0;
 };
@@ -118,6 +151,9 @@ ROCKS_RENDER_TRANSFERABLE(sandbox::screen::CaptureCreate);
 
 namespace sandbox::screen {
 
+// 텍스처 표시 파이프라인 종류 수다(float 다섯 차원 + 정수 2D·2D 배열·volume × uint·int).
+inline constexpr uint32 InspectorKindCount = 11;
+
 // lane 쪽 통계다. lane이 끝난 뒤(Join) 게임 lane이 읽는다.
 struct ScreenRendererStats {
     uint64 framesRendered = 0;
@@ -128,6 +164,8 @@ struct ScreenRendererStats {
     uint64 resizes = 0;
     // 텍스처 표시로 그린 프레임 수다.
     uint64 inspectorFrames = 0;
+    // 텍스처 표시가 준비되지 않은 handle을 대체(typed 대체·검정)로 그린 프레임 수다.
+    uint64 inspectorFallbacks = 0;
 };
 
 // 렌더 lane 처리기다. 스왑체인·엔진 렌더 자원·파이프라인 캐시·그래프 풀을 lane에서 만들고 lane에서
@@ -153,13 +191,7 @@ public:
 
     // capture 자리의 마지막 픽셀(RGBA8, 첫 행이 위)이다(비었으면 그 자리에 capture가 없었다).
     const Array<uint8>& CapturedPixels(uint32 slot = 0) const noexcept {
-        return captured_[slot < MaxCaptureSlots ? slot : 0];
-    }
-
-    // lane 시작이 그 view의 표시 텍스처를 만들었는가(cube 배열은 장치 능력 — Retire 뒤에도 남는다,
-    // lane이 끝난 뒤 읽는다).
-    bool HasInspectorTexture(InspectorView view) const noexcept {
-        return (inspectorCreated_ & (1u << static_cast<uint32>(view))) != 0;
+        return captured_[slot < captured_.Size() ? slot : 0];
     }
 
     uint32 CaptureWidth() const noexcept {
@@ -175,6 +207,16 @@ public:
         return opened_;
     }
 
+    // 연 엔진 셰이더 집합이 쿠킹 라이브러리였는가와 그 셰이더 형식 id다(ShaderSystem 16.1절
+    // SSD48 — lane이 끝난 뒤 읽는다).
+    bool OpenedCookedShaders() const noexcept {
+        return resources_.OpenedFromCookedLibrary();
+    }
+
+    StringView ShaderFormat() const noexcept {
+        return resources_.FormatId();
+    }
+
 private:
     friend void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept;
     friend void CreateSurface(render::RenderLaneContext& context, SurfaceCreate& value) noexcept;
@@ -186,9 +228,6 @@ private:
                                  uint32 width, uint32 height) noexcept;
     // 메시 파이프라인(뒤면 컬 0, 앞면 컬 1)·tone map·텍스처 표시 파이프라인 요청을 준비한다.
     Result<void> PrepareRequests() noexcept;
-    // 텍스처 표시용 절차 생성 텍스처를 만든다(cube 배열은 능력이 있을 때만).
-    Result<void> CreateInspectorTextures(graphics::Device& device) noexcept;
-    void RetireInspectorTextures(graphics::Device& device) noexcept;
     // 그래프를 실행하고 capture를 slot 자리에 읽는다. 그래프가 실패하면 false다.
     bool FinishFrame(render::RenderFrameContext& context, render::RenderGraph& graph,
                      graphics::TextureHandle capture, uint32 slot) noexcept;
@@ -205,11 +244,13 @@ private:
     UniquePtr<render::GraphResourcePool> pool_;
     render::GraphicsPipelineRequest meshRequests_[2];
     render::GraphicsPipelineRequest tonemapRequest_;
-    render::GraphicsPipelineRequest inspectorRequests_[InspectorViewCount];
-    graphics::TextureHandle inspectorTextures_[InspectorViewCount];
-    // 만든 view의 비트 묶음이다(1 << view).
-    uint32 inspectorCreated_ = 0;
-    Array<uint8> captured_[MaxCaptureSlots];
+    // 차원·성분 계열마다의 텍스처 표시 요청이다(ScreenRenderer.cpp InspectorKinds 순서).
+    render::GraphicsPipelineRequest inspectorRequests_[InspectorKindCount];
+    // 요청마다 PS 텍스처 slot이다(값 1 위치 — Docs/Design/RenderBase 9.13절).
+    uint32 meshTextureSlot_ = graphics::MaxResourceSlots;
+    uint32 tonemapTextureSlot_ = graphics::MaxResourceSlots;
+    uint32 inspectorTextureSlots_[InspectorKindCount] = {};
+    Array<Array<uint8>> captured_;
     uint32 captureWidth_ = 0;
     uint32 captureHeight_ = 0;
     ScreenRendererStats stats_;

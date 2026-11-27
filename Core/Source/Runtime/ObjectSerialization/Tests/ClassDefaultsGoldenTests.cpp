@@ -1,4 +1,5 @@
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/ModuleRegistration.h>
@@ -9,8 +10,10 @@
 // 시험 fixture 모듈(ReflectionTestFixtures)의 구체 클래스마다 `<TypeId> present <editor 지문>
 // <cooked 지문>`·`<TypeId> without <이유>`·`<TypeId> failed <이유>` 줄을 만들어 아래 표와 비교한다.
 // 같은 표를 Windows·macOS·Debug·Release 체인이 함께 보므로 플랫폼·구성 사이 지문 차이(생성자
-// 값·codec wire·지문 공식)가 여기서 드러난다. fixture 타입·생성자·지문 공식을 바꾸면 표를 새로
-// 만든다(시험 실패 메시지의 실제 줄을 그대로 옮긴다).
+// 값·codec wire·지문 공식)가 여기서 드러난다. 에디터 데이터가 없는 빌드(FoundationModular —
+// ROCKS_WITH_EDITOR_DATA=0)는 EditorOnly 필드가 없어 editor 지문이 다르므로 그 칸을 `-`로 두고
+// 비교한다. cooked 지문은 같아야 한다(쿠커와 런타임이 같은 기본값을 본다). fixture 타입·생성자·지문
+// 공식을 바꾸면 표를 새로 만든다(시험 실패 메시지의 실제 줄을 그대로 옮긴다).
 using namespace rocks;
 namespace class_defaults_golden_tests_file {
 
@@ -52,6 +55,9 @@ constexpr const char* GoldenLines[] = {
     "1873a0982b04d25bf73a1668219a1a43a6581dc315d7651d9f9381568acc38c1 "
     "421aba3da253e75b279ac48d27ba759b59d835616e640c26e225e1242ab43c2f",
     "21cbfbf8-2bd1-4516-a3a7-5670e3f66ebb failed EncodeFailed",
+    "21cfc71f-30ef-4d88-bf27-fe507f6f0b54 present "
+    "5b2ec630d4f189a3f48b263f147188a066cc15032c98d3736e2d615fd34884b4 "
+    "4451a13bd1794863b00ab280c2114aa42ad97843d6089a4f5d152798a1513734",
     "2a57318a-d0a6-4f0d-a745-8e7b1545328a present "
     "7b5ed23cede675d3489d820d76e8f86369b1aed167b8f85059e023a8b5782b24 "
     "49ca6ac394b360343ec5eeb2993dc9b981b61ea916b28517c41210c708cd70a3",
@@ -70,6 +76,9 @@ constexpr const char* GoldenLines[] = {
     "4eaefb00-4408-464f-93e2-681eca617499 present "
     "ffad7cf20cfd9b83a3e88b1cbba04662482d256dad2763182a565f7a2d81fb72 "
     "a4d59ed2c09cfbab0ec6133a555938d8b1b67462f7500c977684024b0530171f",
+    "4f044773-20eb-4280-a73b-a9445b927ace present "
+    "75ea3ebf81db211bd05a11eafcb8cb7af93f4e609ddcc234c0f8943922103dc9 "
+    "f9f9e3d5e811dd506185b29922ea3af4ec56faf1867b4de7cfbe3ce16a316a25",
     "5426736c-ac7f-4886-9d13-5f5e315d3b02 present "
     "45885504dcefedcb29c677039a4c9130604f67d03168d0a5e1188989ba2e75f0 "
     "6d705f1edded213ada6862e5b66fdb39d098b1c4bbcc4f3f49807a5fd87d7d96",
@@ -217,6 +226,9 @@ constexpr const char* GoldenLines[] = {
     "d80c1331-4cc1-4445-bdf3-5acf709f49d2 present "
     "9a602f2bd0db385e5b9813839373e70e768ed860ae09c9e90dbf09ef73857864 "
     "28767019c5747894c49b2331f0d1f98960f5ee2cbc31bab841b09ee193424c57",
+    "dc6791d9-efa2-4bdb-b9a3-5f759d6e9377 present "
+    "4c11c6a925a041a00a50d7c2e3d39582c9c2c633a28007e6ec3e8e97700eb048 "
+    "8a2cdbd027442dd41b3728de1ac7e48e0d1354276e6d245fb0f9a6aff1bbde06",
     "dc90b8d3-bf1a-43db-9a83-f75ff3747a69 failed NonDeterministic",
     "def46cc9-deab-4697-9bde-f739425aac9c present "
     "470919ee0c2d0477c5e3bd91f54104da4953291841d0eb5d7d416db66b535327 "
@@ -230,6 +242,9 @@ constexpr const char* GoldenLines[] = {
     "eaebb41c-f48d-42d8-8cea-62952cf7b8bb present "
     "e7f16b0f5cd569d483cdd36bc00995f785769be1c9a0171fca4b6c2469da1f40 "
     "b7eeb9390a6a0dee2a344a89a68a63b6760c411f902e9fbaea3a73ad678290f3",
+    "ee3a89e6-f29d-47bd-99d9-3ef9fa2f4982 present "
+    "8607f6be1a70638e028255866a749c6e382b3939fb6031bbe7eee23ad135c361 "
+    "6f8639b89267e973ac61a67d22d4e1f4598b8017c07c5ffbbd5a6d508c69adce",
     "f51103ef-6007-4fa4-9ebc-af462cc6d8a3 present "
     "78bd511a987db639ad791cbc7b022e45d4f65c0e1f7dc979e4ef6662dd4e2c2d "
     "279394fae3cda937f4bfa7fb1516d2020849c828da43b18e4785ec288e28efec",
@@ -261,9 +276,11 @@ Result<void> AppendLine(void* user, TypeId type, const ClassDefaults* defaults,
                         const ClassDefaultsDiagnostic& diagnostic) noexcept {
     auto& out = *static_cast<Collected*>(user);
     if (defaults != nullptr) {
-        char editor[Sha256Digest::HexBytes + 1];
+        char editor[Sha256Digest::HexBytes + 1] = "-";
         char cooked[Sha256Digest::HexBytes + 1];
+#if ROCKS_WITH_EDITOR_DATA
         defaults->Fingerprint(ClassDefaultsConfiguration::Editor).ToHex(editor);
+#endif
         defaults->Fingerprint(ClassDefaultsConfiguration::Cooked).ToHex(cooked);
         return out.text.TryAppendFormat("{} present {} {}\n", type, StringView(editor),
                                         StringView(cooked));
@@ -310,7 +327,25 @@ TEST(ClassDefaults_FingerprintGolden) {
         StringBuilder<4096> expected(allocator);
         for (usize index = 0; filled && index < sizeof(GoldenLines) / sizeof(GoldenLines[0]);
              ++index) {
-            REQUIRE(expected.TryAppend(StringView(GoldenLines[index])));
+            const StringView line(GoldenLines[index]);
+#if ROCKS_WITH_EDITOR_DATA
+            REQUIRE(expected.TryAppend(line));
+#else
+            // `<TypeId> present <editor> <cooked>`의 editor 칸을 `-`로 바꾼다.
+            constexpr StringView Present = " present ";
+            const usize at = line.Find(Present, StringComparison::CaseSensitive);
+            if (at == StringView::NotFound) {
+                REQUIRE(expected.TryAppend(line));
+            } else {
+                const usize editorAt = at + Present.ByteCount();
+                const usize cookedAt = editorAt + Sha256Digest::HexBytes;
+                REQUIRE(cookedAt <= line.ByteCount());
+                REQUIRE(expected.TryAppend(StringView(line.Data(), editorAt)));
+                REQUIRE(expected.TryAppend("-"));
+                REQUIRE(expected.TryAppend(
+                    StringView(line.Data() + cookedAt, line.ByteCount() - cookedAt)));
+            }
+#endif
             REQUIRE(expected.TryAppend("\n"));
         }
 

@@ -205,7 +205,7 @@ TEST(SparksBindingSchema_ReadsEveryKind) {
         { "name": "Move", "id": "5a7e0000000000000000000000000005", "static": true,
           "async": true,
           "parameters": [ { "name": "velocity", "type": "vec3", "perSecond": true },
-                          { "name": "targets", "type": "Map<string, Array<Actor?>>" } ] }
+                          { "name": "targets", "type": "Map<string, Array<Actor>>" } ] }
       ],
       "events": [
         { "name": "Died", "id": "5a7e0000000000000000000000000006", "publisher": "server",
@@ -265,7 +265,7 @@ TEST(SparksBindingSchema_ReadsEveryKind) {
         REQUIRE(move.parameterCount == 2);
         CHECK(schema.Parameters()[move.firstParameter].perSecond);
         CHECK(schema.Text(schema.Parameters()[move.firstParameter + 1].type) ==
-              StringView("Map<string, Array<Actor?>>"));
+              StringView("Map<string, Array<Actor>>"));
         REQUIRE(actor.eventCount == 3);
         CHECK(schema.Events()[actor.firstEvent].publisher == SchemaPublisher::Server);
         CHECK(schema.Events()[actor.firstEvent + 1].publisher == SchemaPublisher::Owner);
@@ -381,7 +381,8 @@ TEST(SparksBindingSchema_TypeS1120) {
         CHECK(Rejects(ObjectType(allocator, "object", "\"base\": \"actor\"").View(), 10, 9));
         CHECK(Rejects(ObjectType(allocator, "object", "\"scriptExtensible\": 1").View(), 10, 21));
         // kind마다 허용하지 않는 key.
-        CHECK(Rejects(ObjectType(allocator, "struct", "\"base\": \"Actor\"").View(), 10, 9));
+        // struct는 기반 struct를 가질 수 있다(EI1a — 기반 종류는 이름 해석이 본다).
+        CHECK(Accepts(ObjectType(allocator, "struct", "\"base\": \"Actor\"").View()));
         CHECK(
             Rejects(ObjectType(allocator, "struct", "\"scriptExtensible\": true").View(), 10, 21));
         CHECK(Rejects(ObjectType(allocator, "object", "\"constructible\": false").View(), 10, 18));
@@ -533,7 +534,7 @@ TEST(SparksBindingSchema_TypeNotation) {
         };
         constexpr StringView Valid[] = {
             "int32", "Actor?", "Array<Actor>", "Map<string, Array<int>>", "Result<void>",
-            "Weapons.Sword", "T?", "Array<Array<Array<int?>>>?", "A1", "Map<string, int32>",
+            "Weapons.Sword", "T?", "Array<Array<Array<int>>>?", "A1", "Map<string, int32>",
             // 키워드는 대소문자를 구분한다.
             "In", "Classy"};
         for (const StringView type : Valid) {
@@ -544,7 +545,10 @@ TEST(SparksBindingSchema_TypeNotation) {
             "", "1int", "int ?", "Array<int", "Array<>", "Map<int,int>", "Map<int,  int>", "A..B",
             "A.", ".A", "A??", "Array<int>>", "a_b", "Array <int>", "int?x", " int",
             // 이름 구간은 키워드일 수 없다(3.1절).
-            "null", "Array<class>", "Weapons.in", "Map<string, fn>", "this?"};
+            "null", "Array<class>", "Weapons.in", "Map<string, fn>", "this?",
+            // 타입 인자에는 `?`를 쓸 수 없다(SL 4.2절 — EI1a).
+            "Array<Actor?>", "Map<string, Actor?>", "Map<Actor?, int>", "Array<Array<int?>>?",
+            "Soft<T?>"};
         for (const StringView type : Invalid) {
             CHECK(Rejects(field(type).View(), 13, 9));
         }
@@ -743,9 +747,9 @@ TEST(SparksBindingSchema_KindRestrictedKeys) {
 
     constexpr Restriction Restrictions[] = {
         {"base",
-         "object, asset and interface",
+         "object, asset, interface and struct",
          "'base' must be a PascalCase name.",
-         {"object", "asset", "interface", ""}},
+         {"object", "asset", "interface", "struct"}},
         {"scriptExtensible",
          "object and asset",
          "'scriptExtensible' must be true or false.",

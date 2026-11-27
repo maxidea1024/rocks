@@ -1,6 +1,6 @@
 #include <Core/Math/MathUtility.h>
 #include <World/Environment/HeightFogSettings.h>
-#include "../ComponentValueChecks.h"
+#include <World/ComponentValueChecks.h>
 
 // 높이 안개 설정 범위 검사다(Docs/Design/EngineRuntime 27.3절, D5).
 namespace rocks {

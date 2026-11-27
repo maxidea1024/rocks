@@ -2,7 +2,7 @@
 
 #include <TestSupport/NFailAllocator.h>
 
-// 본 계층 병합 시험이다(Docs/Design/MeshAnimationAssets.ko.md 6.2·6.4절, 12절 "병합 성공·부모 사슬
+// 본 계층 병합 시험이다(Docs/Design/MeshAnimationAssets 6.2·6.4절, 12절 "병합 성공·부모 사슬
 // 실패"): 빈 스켈레톤, 없는 본 더하기와 대응표, 대소문자만 다른 이름, 부모 사슬 실패·조상 없음,
 // 입력 검증과 결과 본 수 상한, 결정성, 할당 실패 주입, 고정 seed 퍼징.
 using namespace rocks;
