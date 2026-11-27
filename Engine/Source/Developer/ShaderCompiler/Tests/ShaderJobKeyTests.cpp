@@ -251,6 +251,9 @@ TEST(ShaderJobKey_EveryInputChangesTheKey) {
                   [](KeyCase& c) noexcept { c.options.hlsl2021 = !c.options.hlsl2021; }));
     CHECK(changes([](KeyCase& c) noexcept { c.options.optimization = ShaderOptimization::O1; },
                   [](KeyCase& c) noexcept { c.options.optimization = ShaderOptimization::O3; }));
+    // 디버그 심볼(ShaderSystem 16.3절 SSD73 — 켜면 모든 키가 달라진다).
+    CHECK(changes([](KeyCase& c) noexcept { c.options.debugSymbols = true; },
+                  [](KeyCase& c) noexcept { c.options.debugSymbols = false; }));
     // 형식 정의(byte SHA, id).
     CHECK(changes([](KeyCase& c) noexcept { c.format.sha256 = Digest(0x01); },
                   [](KeyCase& c) noexcept {
@@ -464,10 +467,10 @@ TEST(ShaderJobKey_RejectsInvalidInputs) {
     test.input.reflection.types = nullptr;
     CHECK(errorOf() == ErrorCode::InvalidArgument);
     test.input.reflection = test.env.Reflection();
-    // SH1은 디버그 심볼을 받지 않는다.
-    test.options.debugSymbols = true;
-    CHECK(errorOf() == ErrorCode::Unsupported);
-    test.options.debugSymbols = false;
+    // 범위 밖 옵션 값.
+    test.options.optimization = static_cast<ShaderOptimization>(4);
+    CHECK(errorOf() == ErrorCode::InvalidArgument);
+    test.options.optimization = ShaderOptimization::O3;
     // 자리만 둔 형식.
     test.format.state = ShaderFormatState::Placeholder;
     CHECK(errorOf() == ErrorCode::InvalidArgument);

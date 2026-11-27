@@ -211,6 +211,26 @@ const RuntimeFieldOps* TypeLease::FieldOps(usize schemaIndex) const& noexcept {
     return position == TypeRegistry::Record::NoOps ? nullptr : &record->ops.fields[position];
 }
 
+const RuntimeEventOps* TypeLease::EventOps(usize schemaIndex) const& noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || record->kind != TypeKind::Class || schemaIndex >= record->schema.fields.Size()) {
+        platform::Fatal("TypeLease::EventOps called on a non-class lease or out of range");
+    }
+
+    const FieldSchema& field = record->schema.fields[schemaIndex];
+    if (!IsEventField(field)) {
+        return nullptr;
+    }
+
+    for (const RuntimeEventOps& event : record->ops.events) {
+        if (event.fieldId == field.id) {
+            return &event;
+        }
+    }
+
+    return nullptr;
+}
+
 usize TypeLease::FieldIndex(Guid fieldId) const noexcept {
     if (!record_) {
         platform::Fatal("TypeLease::FieldIndex called on an empty lease");

@@ -12,6 +12,7 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
+#include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <Task/WorkerScheduler.h>
 #include <stdio.h>
 #include <string.h>
@@ -605,7 +606,35 @@ private:
             return false;
         }
 
-        return WriteFile(file, result.values.Part(ShaderNuggetValue::Code).View());
+        if (!WriteFile(file, result.values.Part(ShaderNuggetValue::Code).View())) {
+            return false;
+        }
+
+        // 값 3(debugSymbols=true — ShaderSystem 16.3절 SSD73·SSD74)은 같은 폴더에 심볼 이름(D3D
+        // PDB — 디버거가 DXIL·DXBC의 디버그 이름으로 찾는다), 이름이 없으면
+        // <name>.<entry>.<stage><확장자>로 쓴다.
+        if (!result.values.Has(ShaderNuggetValue::DebugSymbols)) {
+            return true;
+        }
+
+        const auto symbols =
+            DecodeShaderDebugSymbols(result.values.Part(ShaderNuggetValue::DebugSymbols).View());
+        if (!symbols) {
+            return false;
+        }
+
+        char symbolFile[MaxCommandPathBytes];
+        const StringView symbolName = symbols.Value().name;
+        const int symbolBytes =
+            symbolName.IsEmpty()
+                ? snprintf(symbolFile, sizeof(symbolFile), "%.*s/%s.%.*s.%.*s%s", directoryBytes,
+                           file, name, static_cast<int>(spec.entry.ByteCount()), spec.entry.Data(),
+                           static_cast<int>(spec.stageName.ByteCount()), spec.stageName.Data(),
+                           ShaderDebugSymbolExtension(symbols.Value().kind))
+                : snprintf(symbolFile, sizeof(symbolFile), "%.*s/%.*s", directoryBytes, file,
+                           static_cast<int>(symbolName.ByteCount()), symbolName.Data());
+        return symbolBytes > 0 && static_cast<usize>(symbolBytes) < sizeof(symbolFile) &&
+               WriteFile(symbolFile, symbols.Value().contents);
     }
 
     const ShaderCompileCommandContext& context_;

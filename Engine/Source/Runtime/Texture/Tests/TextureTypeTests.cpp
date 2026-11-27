@@ -227,7 +227,10 @@ TEST(Texture_ValidationHooks) {
     CHECK(TexturePlatformData::Validate(data));
     data.pixelFormat = static_cast<uint8>(graphics::PixelFormat::RGBA8Unorm);
     CHECK(TexturePlatformData::Validate(data));
+    // 블록 압축 색은 받고(AssetSystem 12.17.5), 깊이 형식은 거부한다.
     data.pixelFormat = static_cast<uint8>(graphics::PixelFormat::BC7Unorm);
+    CHECK(TexturePlatformData::Validate(data));
+    data.pixelFormat = static_cast<uint8>(graphics::PixelFormat::D32Float);
     CHECK(!TexturePlatformData::Validate(data));
     data.pixelFormat = 0xFF;
     CHECK(!TexturePlatformData::Validate(data));

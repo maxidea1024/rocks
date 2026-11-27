@@ -89,6 +89,7 @@ ExchangeSeverity ExchangeSeverityOf(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnsupportedAsset:
     case AssetDiagnosticCode::MissingUnrealDependency:
     case AssetDiagnosticCode::GammaMismatch:
+    case AssetDiagnosticCode::UnrealNameNormalized:
         return ExchangeSeverity::Warning;
     case AssetDiagnosticCode::UnrealPathRenamed:
         return ExchangeSeverity::Info;

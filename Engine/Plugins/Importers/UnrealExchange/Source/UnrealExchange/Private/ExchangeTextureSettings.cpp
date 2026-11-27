@@ -10,16 +10,16 @@ using Kind = ExchangeSettingKind;
 
 // 행을 만든다(모든 칸을 채운다).
 constexpr ExchangeSettingRow Row(StringView key, Kind kind, uint32 classes = 0) noexcept {
-    return ExchangeSettingRow{key, kind, classes, nullptr, 0, StringView()};
+    return ExchangeSettingRow{key, kind, classes, nullptr, 0, StringView(), StringView()};
 }
 
 constexpr ExchangeSettingRow StructRow(StringView key, Kind kind, const ExchangeSettingRow* members,
                                        usize count) noexcept {
-    return ExchangeSettingRow{key, kind, 0, members, count, StringView()};
+    return ExchangeSettingRow{key, kind, 0, members, count, StringView(), StringView()};
 }
 
 constexpr ExchangeSettingRow UnsupportedRow(StringView key, StringView defaultValue) noexcept {
-    return ExchangeSettingRow{key, Kind::Unsupported, 0, nullptr, 0, defaultValue};
+    return ExchangeSettingRow{key, Kind::Unsupported, 0, nullptr, 0, defaultValue, StringView()};
 }
 
 constexpr uint32 Texture2DBit = ExchangeClassBit(ExchangeClass::Texture2D);

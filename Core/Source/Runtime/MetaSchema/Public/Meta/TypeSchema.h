@@ -118,10 +118,16 @@ inline constexpr uint32 MaxStructDepth = 16;
 inline constexpr uint32 DefaultMaxElements = 65536;
 inline constexpr uint32 MaxArrayElements = 1048576;
 
+// 필드 종류다. Event는 리플렉션 이벤트 필드(Object/Event.h의 Event<Args...> — Docs/Design/
+// EventReflection.ko.md ED9·ED15)다: 값 의미가 없어(value는 Opaque) 값 경로(저장·diff·클래스
+// 기본값·텍스트·속성 경로)는 건너뛰고, 바인딩·발행은 RuntimeEventOps가 맡는다(IsEventField).
 enum class FieldKind : uint8 {
     Value,
-    ObjectReference
+    ObjectReference,
+    Event
 };
+
+struct ParameterSchema;
 
 // 저장/도구 경계에서 해석 가능한 필드 표현이다. Opaque는 기존 수동 메타데이터와의 호환 값이며
 // typed accessor/직렬화를 제공한다는 뜻이 아니다. ObjectReference는 scalar byte 복사가 금지된다.
@@ -564,7 +570,21 @@ struct FieldSchema {
     // 쓰고, EditorOnly 필드에는 쓰지 않는다(등록 InvalidArgument). 저장 때 bundle 태그만 읽는 편집
     // 정보라 UiToolkit 7.3 편집 메타데이터 블록(CU1)이 생기면 그리로 옮긴다.
     Span<const char> assetBundles{};
+    // 이벤트 필드(FieldKind::Event)의 인자다(Docs/Design/EventReflection.ko.md ED15·ED17 — 이름은
+    // Params 지정자, 형식·flag·원소 상한은 함수 매개변수와 같은 규칙, offset은 발행 frame 안 위치 —
+    // BindingFrame<Args...>와 같은 배치). 이벤트가 아닌 필드는 비어 있어야 한다. 등록이 깊게
+    // 복사한다.
+    Span<const ParameterSchema> eventParameters{};
 };
+
+// field가 리플렉션 이벤트 필드인지다(Docs/Design/EventReflection.ko.md 3.1절 — 값 경로는 이
+// 판정으로 이벤트 필드를 건너뛴다).
+//
+// 사용 예:
+//   if (IsEventField(field)) { continue; } // 값으로 저장하지 않는다
+constexpr bool IsEventField(const FieldSchema& field) noexcept {
+    return field.kind == FieldKind::Event;
+}
 
 // bundle 이름 하나의 byte 상한과 목록의 이름 수 상한이다(AssetSystem 10.2절 A4e2a).
 inline constexpr usize AssetBundleNameMaxBytes = 64;

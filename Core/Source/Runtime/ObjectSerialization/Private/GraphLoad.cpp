@@ -726,6 +726,12 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             continue;
         }
 
+        // 이벤트 필드는 값으로 저장되지 않는다(Docs/Design/EventReflection.ko.md 3.1절) — 레코드에
+        // 있으면 읽은 byte의 손상이다(Transient 이벤트도).
+        if (IsEventField(schema.fields[schemaIndex])) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
+        }
+
         if (HasFlag(schema.fields[schemaIndex].flags, FieldFlags::Transient)) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
