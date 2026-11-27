@@ -135,8 +135,7 @@ struct Rig {
     }
 
     Guid FunctionId(const char* name) noexcept {
-        auto function = types.FindFunctionByName(TypeIdOf<BindingTarget>(),
-                                                 Span<const char>(name, strlen(name)));
+        auto function = types.FindFunctionByName(TypeIdOf<BindingTarget>(), name);
         return function ? function.Value().Schema().id : Guid{};
     }
 

@@ -50,8 +50,8 @@ struct ExchangeTextureFailure {
 
 // asset(Ready, 텍스처 클래스)의 data.source를 out에 변환한다. blobBytes는 asset.blobs와 같은 순서의
 // blob byte다(VerifyExchangeBlob을 마친 것 — byte 수는 형식과 다시 대조한다). 검사 순서와 거부(코드
-// / 오류)는 4.6절 2번이다: 형식 위반 CorruptBundle / InvalidArgument, 다층·UDIM·위도경도
-// UnsupportedSourceLayout / Unsupported, 클래스 slice 규칙 InvalidSource / InvalidArgument, 크기
+// / 오류)는 4.6절 2번이다: 형식 위반 CorruptBundle / CorruptData, 다층·UDIM·위도경도
+// UnsupportedSourceLayout / Unsupported, 클래스 slice 규칙 InvalidSource / CorruptData, 크기
 // 상한 (ImageCodec ImageDecodeLimits 기본 — 파일 임포트와 같다) InvalidSource / CapacityExceeded.
 //
 // 반환: 거부면 failure를 채우고 그 오류, 할당 실패는 OutOfMemory(failure.code None)다. 실패하면

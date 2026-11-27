@@ -99,9 +99,9 @@ struct ExchangeSettingInput {
 // 더한다(설정 순서). 키 순서는 settings 순서다.
 //
 // 오류: settings가 객체가 아님·행 종류와 맞지 않는 값(Guid가 int32 넷 객체가 아님, 참조가 null도
-// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음, Unsupported
-// 기본값 텍스트가 JSON이 아님) InvalidArgument, writer 오류(중복 키·깊이 등 — writer는 실패 상태),
-// 할당 실패. 실패하면 writer·warnings 결과를 버린다.
+// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음 — 덤프 내용)
+// CorruptData, Unsupported 기본값 텍스트가 JSON이 아님(행 표의 결함) InvalidArgument, writer
+// 오류(중복 키·깊이 등 — writer는 실패 상태), 할당 실패. 실패하면 writer·warnings 결과를 버린다.
 ROCKS_UNREALEXCHANGE_API Result<void>
 TranslateExchangeSettings(const ExchangeSettingInput& input, JsonWriter& writer,
                           Array<ExchangeSettingWarning>& warnings) noexcept;

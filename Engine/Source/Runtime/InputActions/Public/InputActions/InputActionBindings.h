@@ -65,8 +65,7 @@ public:
     // 전달 때 그 함수를 부를 문맥이다(World 객체면 World::Access()). 대상은 handle만 쥔다.
     //
     // 사용 예:
-    //   // 이름은 길이를 준 Span이다(배열 생성자는 끝 NUL까지 센다).
-    //   auto jump = types.FindFunctionByName(TypeIdOf<MyPawn>(), Span<const char>("OnJump", 6));
+    //   auto jump = types.FindFunctionByName(TypeIdOf<MyPawn>(), "OnJump");
     //   if (jump) {
     //       (void)bindings.BindFunction(jumpId, ActionEvent::Started, world.Objects(),
     //                                   world.Access(), pawn, jump.Value().Schema().id);

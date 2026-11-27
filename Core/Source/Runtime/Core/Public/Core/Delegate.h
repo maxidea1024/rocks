@@ -50,6 +50,25 @@ private:
 
 namespace detail {
 
+// 생존을 밖에서 판정하는 lambda 대상이다(SL 5.5 C1): 호출 대상이 `bool IsAlive() const noexcept`를
+// 가지면 Delegate가 그것으로 생존을 본다(IsBound·ExecuteIfBound·MulticastDelegate 정리). 죽은
+// 대상은 호출하지 않고(Execute는 약한 대상처럼 Fatal) 다음 정리 때 제거된다. 예: Event의 리플렉션
+// 바인딩 항목(레코드 죽음 표시), Sparks 연결 항목(slot·generation key).
+template <typename Stored>
+concept DelegateCallableHasLiveness = requires(const Stored& stored) {
+    { stored.IsAlive() } noexcept;
+    requires IsSameV<decltype(stored.IsAlive()), bool>;
+};
+
+template <typename Stored>
+bool DelegateCallableAlive(const Stored& stored) noexcept {
+    if constexpr (DelegateCallableHasLiveness<Stored>) {
+        return stored.IsAlive();
+    } else {
+        return true;
+    }
+}
+
 template <typename Return, typename Callable, typename... Args>
 Return InvokeDelegateTarget(Callable& callable, Args&&... args) noexcept {
     if constexpr (IsSameV<Return, void>) {
@@ -77,7 +96,10 @@ Return InvokeDelegateTarget(Callable& callable, Args&&... args) noexcept {
 // - CreateRaw는 대상 객체의 수명을 추적하지 않는다(UE BindRaw와 같다). 객체가 먼저 사라질 수
 //   있으면 SharedPtr 대상의 CreateWeak/CreateWeakLambda를 쓴다. 이 둘은 호출 동안 대상을 강하게
 //   붙잡아(Lock) 호출 중 소멸하지 않게 하고, 대상이 사라지면 IsBound가 false가 된다.
-// - Execute는 바인딩이 없거나 약한 대상이 사라졌으면 Fatal이다. 반환값이 없는 delegate는
+// - lambda 호출 대상이 `bool IsAlive() const noexcept`를 가지면 그것이 생존 판정이다(C1 — 약한
+//   대상과 같게 IsBound·ExecuteIfBound·정리가 본다).
+// - Execute는 바인딩이 없거나 약한 대상이 사라졌으면(생존 판정이 false면) Fatal이다. 반환값이 없는
+// delegate는
 //   ExecuteIfBound로 실행 여부를 받는다(다른 스레드가 약한 대상을 놓을 수 있으면 이쪽을 쓴다).
 // - 실행 중인 delegate를 그 호출 안에서 Unbind하면 호출이 끝난 뒤 해제한다(한 번만 실행하는
 //   callback 패턴). 실행 중 재바인드·이동·파괴는 대상이 쓰는 저장소를 깨므로 Fatal이다.
@@ -283,16 +305,24 @@ private:
         }
 
         Return Call(Args&&... args) noexcept {
+            if (!detail::DelegateCallableAlive(callable)) {
+                platform::Fatal("Delegate::Execute called after its target reported dead");
+            }
+
             return detail::InvokeDelegateTarget<Return>(callable, Forward<Args>(args)...);
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
+            if (!detail::DelegateCallableAlive(callable)) {
+                return false;
+            }
+
             static_cast<void>(callable(Forward<Args>(args)...));
             return true;
         }
 
         bool IsAlive() const noexcept {
-            return true;
+            return detail::DelegateCallableAlive(callable);
         }
 
         const void* Object() const noexcept {
@@ -327,16 +357,24 @@ private:
         }
 
         Return Call(Args&&... args) noexcept {
+            if (!detail::DelegateCallableAlive(*callable)) {
+                platform::Fatal("Delegate::Execute called after its target reported dead");
+            }
+
             return detail::InvokeDelegateTarget<Return>(*callable, Forward<Args>(args)...);
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
+            if (!detail::DelegateCallableAlive(*callable)) {
+                return false;
+            }
+
             static_cast<void>((*callable)(Forward<Args>(args)...));
             return true;
         }
 
         bool IsAlive() const noexcept {
-            return true;
+            return detail::DelegateCallableAlive(*callable);
         }
 
         const void* Object() const noexcept {

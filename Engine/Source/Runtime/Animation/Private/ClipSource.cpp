@@ -446,7 +446,7 @@ Result<void> DecodeComponent(Span<const uint8> bytes, uint32 keys, uint32 index,
     const usize count = bytes.Size() / sizeof(T);
     if (bytes.Size() % sizeof(T) != 0 || !ValidKeyCount(count, keys)) {
         return animation_detail::ClipFail(failure, AssetDiagnosticCode::CorruptPackage,
-                                          ErrorCode::InvalidArgument, ClipIssue::BulkLength, index,
+                                          ErrorCode::CorruptData, ClipIssue::BulkLength, index,
                                           component);
     }
 
@@ -509,7 +509,7 @@ Result<void> LoadClipSourceFrom(const ClipSourceData& data, const ClipBulkReader
     // 키 수 계산이 넘치지 않게 프레임 상한을 배치보다 먼저 본다.
     if (data.frameCount > ClipMaxFrames || data.boneTracks.Size() > MeshMaxBones) {
         return animation_detail::ClipFail(
-            failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+            failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
             data.frameCount > ClipMaxFrames ? ClipIssue::TooManyFrames : ClipIssue::TooManyTracks);
     }
 
@@ -530,8 +530,8 @@ Result<void> LoadClipSourceFrom(const ClipSourceData& data, const ClipBulkReader
         if (index != 0 &&
             animation_detail::CompareFoldedText(previous.View(), lease.Value().View()) >= 0) {
             return animation_detail::ClipFail(failure, AssetDiagnosticCode::CorruptPackage,
-                                              ErrorCode::InvalidArgument, ClipIssue::TrackOrder,
-                                              index, index - 1);
+                                              ErrorCode::CorruptData, ClipIssue::TrackOrder, index,
+                                              index - 1);
         }
 
         previous = Move(lease.Value());
@@ -551,7 +551,7 @@ Result<void> LoadClipSourceFrom(const ClipSourceData& data, const ClipBulkReader
         }
 
         return animation_detail::ClipFail(failure, AssetDiagnosticCode::CorruptPackage,
-                                          ErrorCode::InvalidArgument, validation.issue,
+                                          ErrorCode::CorruptData, validation.issue,
                                           validation.index, validation.related);
     }
 

@@ -52,7 +52,7 @@ Result<void> Translate(
     Span<const ExchangeSettingRow> rows = Span<const ExchangeSettingRow>(SampleRows)) noexcept {
     JsonDocument document(allocator);
     if (!document.Parse(settings).Succeeded()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     JsonWriterOptions options;
@@ -223,7 +223,7 @@ TEST(UnrealExchange_SettingsEnumPrefix) {
         // 문자열·숫자가 아닌 enum 값은 거부한다.
         CHECK(Translate(allocator, R"({"E": true})", ExchangeClass::Texture2D, nullptr, out,
                         warnings, Span<const ExchangeSettingRow>(rows))
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -292,14 +292,18 @@ TEST(UnrealExchange_SettingsRejects) {
             R"({"Layers": {}})",
             R"({"Layers": [1]})",
             R"({"Color": []})",
-            R"({"BadDefault": 1})",
         };
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);
         for (const StringView text : bad) {
             CHECK(Translate(allocator, text, ExchangeClass::Texture2D, nullptr, out, warnings)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
         }
+
+        // 행 표의 기본값 텍스트가 JSON이 아니면 표의 결함이다(덤프 내용이 아니다).
+        CHECK(Translate(allocator, R"({"BadDefault": 1})", ExchangeClass::Texture2D, nullptr, out,
+                        warnings)
+                  .Error() == ErrorCode::InvalidArgument);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

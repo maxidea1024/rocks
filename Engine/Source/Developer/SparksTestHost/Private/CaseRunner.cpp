@@ -232,7 +232,7 @@ Result<void> CheckBytecodeRoundTrip(Allocator& allocator, const CaseInput& input
         BytecodeRejection rejection;
         StringBuilder<detail::MessageInlineBytes> message(allocator);
         if (auto read = ReadBytecodeFile(file.View(), loaded, rejection); !read) {
-            if (read.Error() != ErrorCode::InvalidArgument) {
+            if (read.Error() != ErrorCode::CorruptData) {
                 return read;
             }
 
