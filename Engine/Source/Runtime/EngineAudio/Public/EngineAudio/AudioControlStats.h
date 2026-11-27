@@ -28,6 +28,11 @@ struct AudioControlStats {
     uint64 inaudibleEnds = 0;
     uint64 resumeFailures = 0;
     uint64 headroomCuts = 0;
+    // 동시 발음(3.41.2절): 그룹이 받지 않은 재생 수, 그룹이 빼앗은 재생 수(누계), 지금 쓰는 그룹
+    // 수.
+    uint64 concurrencyRejects = 0;
+    uint64 concurrencySteals = 0;
+    uint32 concurrencyGroups = 0;
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;

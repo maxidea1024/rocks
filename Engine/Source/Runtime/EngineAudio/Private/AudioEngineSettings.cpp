@@ -8,6 +8,7 @@
 #include <Config/CVar.h>
 #include <Config/ConfigContext.h>
 #include <EngineAudio/AudioEngineSettings.h>
+#include <EngineAudio/AudioSpatialization.h>
 
 // `audio.*` CVar 정의다(3.35.10절). 부팅 값은 AudioEngineSubsystem::Initialize가 한 번 읽고, 볼륨은
 // 프레임 끝(OnFrameEnd)에 설정 sync 뒤 값을 읽는다.
@@ -70,13 +71,20 @@ constinit cvar::CVar<int32> StreamDefaultLoadingVar =
         .Range(int32{static_cast<uint8>(SoundLoadingBehavior::RetainOnLoad)},
                int32{static_cast<uint8>(SoundLoadingBehavior::LoadOnDemand)});
 
+constinit cvar::CVar<float> ConcurrencyMinDistanceDeltaVar =
+    cvar::Var("audio.concurrency.mindistancedelta", 0.0f)
+        .Help("Distance in centimeters within which StopFarthest concurrency rules treat sounds as "
+              "equally far. Read every frame.")
+        .Range(0.0f, MaxAudioWorldDistance);
+
 } // namespace engine_audio_detail
 
 Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcept {
     using namespace engine_audio_detail;
     return context.Register(MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar,
                             MixerBufferCountVar, MixerSampleRateVar, MaxVoicesVar,
-                            StreamRingFramesVar, StreamMaxStreamsVar, StreamDefaultLoadingVar);
+                            StreamRingFramesVar, StreamMaxStreamsVar, StreamDefaultLoadingVar,
+                            ConcurrencyMinDistanceDeltaVar);
 }
 
 } // namespace rocks
