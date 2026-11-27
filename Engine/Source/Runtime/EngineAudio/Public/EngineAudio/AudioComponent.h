@@ -39,6 +39,12 @@ public:
     ROCKS_PROPERTY() bool autoActivate = true;
     // 꺼지면(OnDisable) 재생을 멈춘다.
     ROCKS_PROPERTY() bool stopOnDisable = true;
+    // 켜면 사운드 우선순위 대신 priority를 쓴다(UE bOverridePriority·Priority — 3.41.1절).
+    ROCKS_PROPERTY() bool overridePriority = false;
+    ROCKS_PROPERTY() float priority = DefaultSoundPriority;
+    // 켜면 one-shot도 voice를 잃을 때 끝나지 않고 남아 다시 경쟁한다(UE
+    // bShouldRemainActiveIfDropped).
+    ROCKS_PROPERTY() bool remainActiveIfDropped = false;
 
     // 다음 Play부터 쓸 사운드다. 재생 중인 소리는 바꾸지 않는다(UE SetSound는 멈추고 다시
     // 재생하지만 여기서는 호출자가 Play를 부른다).

@@ -58,6 +58,9 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
 
     playable.volume = volume;
     playable.pitch = pitch;
+    playable.priority = priority;
+    playable.bypassVolumeScaleForPriority = bypassVolumeScaleForPriority;
+    playable.virtualizationMode = virtualizationMode;
     playable.asset = Id();
     if (!attenuation.Handle().IsNull()) {
         auto settings = registry.Resolve<AttenuationSettings>(access, attenuation.Handle());

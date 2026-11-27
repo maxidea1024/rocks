@@ -48,8 +48,9 @@ public:
     // Unsupported.
     Result<void> RequestCancel(ProgressTaskId id) noexcept;
 
-    // 취소 가능한 최상위 작업을 모두 취소한다(Ctrl-C·부모 cancel 줄). 잠금을 쓰므로 신호 처리기에서
-    // 부르지 않는다.
+    // 취소 가능한 최상위 작업을 모두 취소한다(Ctrl-C·부모 cancel 줄). 이 켜짐 동안 그 뒤 시작하는
+    // 취소 가능한 최상위 작업도 취소된 채 시작한다(요청이 명령의 첫 Begin보다 먼저 와도 사라지지
+    // 않게). 잠금을 쓰므로 신호 처리기에서 부르지 않는다.
     void RequestCancelAllTopLevel() noexcept;
 
     // 살아 있는 작업 트리와 cursor 뒤의 사건을 out에 담는다(7.2·7.3절). cursor는 소비자마다 따로
