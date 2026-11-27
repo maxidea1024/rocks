@@ -123,6 +123,11 @@ using ShaderVertexInputShouldCompileFunction = bool (*)(const ShaderTypeDesc& ty
 // include는 GeneratedSource 오류).
 inline constexpr char VertexInputGeneratedIncludePath[] = "/Engine/Generated/VertexInput.rsh";
 
+// 머티리얼 pass 셰이더가 include하는 생성 원문 가상 경로다(Docs/Design/MaterialSystem 7.2·7.8절,
+// MSR3). 셰이더 컴파일러가 job의 materialSource 텍스트로 잇는다(연결 없는 job의 include는 전처리
+// 오류).
+inline constexpr char MaterialGeneratedIncludePath[] = "/Engine/Generated/Material.rsh";
+
 // 정점 입력 타입 기술이다(RenderBase 10.2·10.6절, UE FVertexFactoryType 대응 — 셰이더 쪽 부분만:
 // 장치 쪽 정적 정점 배치는 RenderBase가 가진다). 읽기 전용 값이며 가리키는 문자열은 정적 수명이다.
 // MakeShaderVertexInputType으로 만든다. ShaderTypeRegistry::RegisterVertexInputTypes가 검사한다.

@@ -1,4 +1,6 @@
 #include <Core/Text/String.h>
+#include <CurveAssets/ColorCurveEvaluate.h>
+#include <Platform/FloatingPointEnvironment.h>
 
 #include "CoordinateValues.h"
 #include "LoweringContext.h"
@@ -6,9 +8,9 @@
 #include "PowerValue.h"
 #include "SurfaceMath.h"
 
-// 고급·보조 노드 lowering이다(Docs/Design/MaterialSystem 6.13절 MS2f1·MS2f2). UE 셰이더 보조 함수를
-// 부르지 않고 같은 식을 IR 기본 연산으로 펼친다(결정 MD2). UE가 C++에서 미리 계산하는 상수는 같은
-// float 식으로 번역 때 계산한다.
+// 고급·보조 노드 lowering이다(Docs/Design/MaterialSystem 6.13절 MS2f1·MS2f2·MS2f4). UE 셰이더 보조
+// 함수를 부르지 않고 같은 식을 IR 기본 연산으로 펼친다(결정 MD2). UE가 C++에서 미리 계산하는 상수는
+// 같은 float 식으로 번역 때 계산한다.
 namespace rocks::material::detail {
 
 namespace {
@@ -443,7 +445,7 @@ Result<void> LowerDesaturation(LoweringContext& context) noexcept {
         fraction = m.Track(context.Splat(fraction, AdvancedVector3));
     }
 
-    return AdvancedEmit(context, m, "Result", m.Lerp(color, m.Splat3(grey), fraction));
+    return AdvancedEmit(context, m, "Result", m.NodeLerp(color, m.Splat3(grey), fraction));
 }
 
 // 입력이 정확히 Float3·Float4인가(UE HsvToRgb·RgbToHsv — 아니면 입력을 그대로 낸다).
@@ -782,6 +784,175 @@ Result<void> LowerTemporalSobol(LoweringContext& context) noexcept {
     return AdvancedEmit(context, m, "Result", SobolFinish(m, sobol, seed));
 }
 
+// ColorRamp 구간 합의 벡터 칸 수다(UE 키 넷씩 float4 — ME:4949–4986).
+constexpr usize ColorRampVectorKeys = 4;
+
+// UE EvaluateCurve(ME:4917–5007)다: 키 0개 0, 1개 그 값, 2개 lerp(v0, v1, (x − t0) / (t1 −
+// t0))(자르지 않음), 그 밖은 v0 + Σ (v[i+1] − v[i]) · saturate((x − t[i]) / (t[i+1] − t[i]))이고
+// 넷씩 float4로 더한다(dot(…, 1)). 키 보간 방식·접선은 보지 않는다(UE와 같다 — 상수 입력만 커브
+// 평가식이다).
+IrValueId ColorRampChannel(SurfaceMath& m, const TangentCurve& curve, IrValueId x,
+                           IrValueId x4) noexcept {
+    LoweringContext& context = m.Context();
+    const Span<const TangentCurveKey> keys = curve.Keys();
+    if (keys.IsEmpty()) {
+        return m.Scalar(0.0f);
+    }
+
+    if (keys.Size() == 1) {
+        return m.Scalar(keys[0].value);
+    }
+
+    if (keys.Size() == 2) {
+        const IrValueId delta = m.Scalar(keys[1].time - keys[0].time);
+        const IrValueId fraction = m.Div(m.Sub(x, m.Scalar(keys[0].time)), delta);
+        return m.NodeLerp(m.Scalar(keys[0].value), m.Scalar(keys[1].value), fraction);
+    }
+
+    const auto vector = [&](usize at, bool value, usize shift) noexcept {
+        float components[ColorRampVectorKeys];
+        for (usize lane = 0; lane < ColorRampVectorKeys; ++lane) {
+            const TangentCurveKey& key = keys[at + lane + shift];
+            components[lane] = value ? key.value : key.time;
+        }
+
+        return m.Track(context.FloatConstant(components, StringView()));
+    };
+
+    const float ones[ColorRampVectorKeys] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const IrValueId one4 = m.Track(context.FloatConstant(ones, StringView()));
+    IrValueId result = m.Scalar(keys[0].value);
+    usize at = 0;
+    // UE `for (; i < NumKeys - 4; i += 4)`(int — 키 넷 이하면 돌지 않는다).
+    for (; at + ColorRampVectorKeys < keys.Size(); at += ColorRampVectorKeys) {
+        const IrValueId startTime = vector(at, false, 0);
+        const IrValueId endTime = vector(at, false, 1);
+        const IrValueId startValue = vector(at, true, 0);
+        const IrValueId endValue = vector(at, true, 1);
+        const IrValueId timeDelta = m.Sub(endTime, startTime);
+        const IrValueId valueDelta = m.Sub(endValue, startValue);
+        const IrValueId fraction = m.Saturate(m.Div(m.Sub(x4, startTime), timeDelta));
+        result = m.Add(result, m.Dot(m.Mul(valueDelta, fraction), one4));
+    }
+
+    for (; at + 1 < keys.Size(); ++at) {
+        const IrValueId timeDelta = m.Scalar(keys[at + 1].time - keys[at].time);
+        const IrValueId valueDelta = m.Scalar(keys[at + 1].value - keys[at].value);
+        const IrValueId fraction = m.Saturate(m.Div(m.Sub(x, m.Scalar(keys[at].time)), timeDelta));
+        result = m.Add(result, m.Mul(valueDelta, fraction));
+    }
+
+    return result;
+}
+
+// ColorRamp다(UE ME:4899–5014). 커브가 없으면 "Missing ColorCurve", 참조는 있는데 공급에 없으면
+// "Color curve asset is not available"다. Input이 연결되지 않으면 핀
+// 값(UE ConstInput 0.5)에서 커브 평가식(조정 포함 — UE GetLinearColorValue, CurveAssets
+// 결정적 판 EvaluateAdjustedColorCurveDeterministic)을 번역 때 계산한 상수이고, 연결되면 채널마다
+// 키 구간 합을 셰이더에서 계산한다(조정을 쓰지 않는다 — UE와 같다).
+Result<void> LowerColorRamp(LoweringContext& context) noexcept {
+    Guid asset;
+    if (auto read = context.ReadAssetReference("colorCurve", asset); !read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    constexpr StringView MissingCurve = "Missing ColorCurve";
+    if (asset == Guid{} || context.Sources() == nullptr) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, StringView(), MissingCurve);
+    }
+
+    auto curve = context.FindColorCurve(asset);
+    if (!curve) {
+        return Result<void>::Failure(curve.Error());
+    }
+
+    const MaterialColorCurveSnapshot* snapshot = curve.Value();
+    if (snapshot == nullptr) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
+                             "Color curve asset is not available");
+    }
+
+    if (snapshot->r == nullptr || snapshot->g == nullptr || snapshot->b == nullptr ||
+        snapshot->a == nullptr) {
+        return context.Error(MaterialDiagnosticCode::MissingInput, StringView(), MissingCurve);
+    }
+
+    auto connected = context.IsConnected("Input");
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    if (!connected.Value()) {
+        // 핀 사용자 값·정의 기본값(UE ConstInput)이다. 상수의 첫 성분을 시간으로 쓴다.
+        auto input = context.Input("Input");
+        if (!input || input.Value() == NoIrValue) {
+            return input ? Result<void>::Success() : Result<void>::Failure(input.Error());
+        }
+
+        // 다성분 사용자 값은 첫 성분이다(UE ConstInput은 float 하나).
+        auto first = context.Prefix(input.Value(), 1);
+        if (!first) {
+            return Result<void>::Failure(first.Error());
+        }
+
+        float time = 0.0f;
+        if (!context.ConstantFloat(first.Value(), time)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 쿠킹 byte라 결정적 판을 기준 부동소수점 환경에서 부른다(6.13절 MS2f4 — CurveAssets
+        // CAD12).
+        struct RampEvaluation {
+            const MaterialColorCurveSnapshot* snapshot;
+            float time;
+            LinearColor color;
+        };
+
+        RampEvaluation evaluation{snapshot, time, LinearColor()};
+        platform::RunWithDeterministicFloatingPoint(
+            [](void* job) noexcept {
+                RampEvaluation& run = *static_cast<RampEvaluation*>(job);
+                run.color = EvaluateAdjustedColorCurveDeterministic(
+                    *run.snapshot->r, *run.snapshot->g, *run.snapshot->b, *run.snapshot->a,
+                    run.snapshot->adjustments, run.time, false);
+            },
+            &evaluation);
+        const LinearColor color = evaluation.color;
+        const float components[] = {color.r, color.g, color.b, color.a};
+        // 비유한 값은 커브 데이터 탓이라 노드 위치에 V11을 진단한다.
+        auto value = context.FloatConstant(components, StringView());
+        if (!value || value.Value() == NoIrValue) {
+            return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
+        }
+
+        return context.Output("Result", value.Value());
+    }
+
+    SurfaceMath m(context);
+    // UE ComponentMask(Input, R)다(Double은 float로 낮춘다 — 6.13절 MS2f4). 수 값이 아니면 Rocks
+    // ComponentMask 문구다.
+    const IrValueId input = AdvancedInput(m, "Input");
+    if (input != NoIrValue) {
+        const IrType type = context.TypeOf(input);
+        if (type.scalar == IrScalar::Bool || type.IsMatrix() || type.IsOpaque()) {
+            return context.Error(MaterialDiagnosticCode::TypeMismatch, "Input",
+                                 "Not enough components in the input for the component mask");
+        }
+    }
+
+    const IrValueId x = m.Track(AdvancedCast(context, input, 1, false, "Input"));
+    if (x == NoIrValue) {
+        return m.Status();
+    }
+
+    const IrValueId x4 = m.Track(context.Splat(x, static_cast<uint8>(ColorRampVectorKeys)));
+    const IrValueId red = ColorRampChannel(m, *snapshot->r, x, x4);
+    const IrValueId green = ColorRampChannel(m, *snapshot->g, x, x4);
+    const IrValueId blue = ColorRampChannel(m, *snapshot->b, x, x4);
+    const IrValueId alpha = ColorRampChannel(m, *snapshot->a, x, x4);
+    return AdvancedEmit(context, m, "Result", AdvancedVector(m, red, green, blue, alpha));
+}
+
 constexpr LoweringEntry AdvancedEntries[] = {
     {"Material.RotateAboutAxis", &LowerRotateAboutAxis},
     {"Material.SphereMask", &LowerSphereMask},
@@ -796,6 +967,7 @@ constexpr LoweringEntry AdvancedEntries[] = {
     {"Material.HairColor", &LowerHairColor},
     {"Material.Sobol", &LowerSobol},
     {"Material.TemporalSobol", &LowerTemporalSobol},
+    {"Material.ColorRamp", &LowerColorRamp},
 };
 
 } // namespace

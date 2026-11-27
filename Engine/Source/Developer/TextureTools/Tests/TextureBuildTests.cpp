@@ -6,6 +6,7 @@
 #include <Meta/GeneratedType.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Task/WorkerScheduler.h>
@@ -869,6 +870,50 @@ TEST(TextureBuild_AndroidAstcEacEncoding) {
     REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(clamped, sizeof(clamped)),
                      options, want));
     CHECK(same(built, want));
+}
+
+// 결정적 부동소수 환경(12.17.9 6): 호출자가 FTZ·DAZ·0 쪽 반올림을 켜 두어도 빌드(sRGB 변환·mip
+// 생성·재표본· 인코딩) byte가 같다.
+TEST(TextureBuild_FloatingPointEnvironment) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 32;
+    uint8 pixels[Size * Size * 4];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = static_cast<uint8>(index % 3 == 0 ? 20 : 255);
+    }
+
+    TextureBuildSettings settings = Gray(Size, Size);
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.compression = TextureCompressionSettings::Default;
+    settings.srgb = true;
+    settings.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    settings.resizeX = 24;
+    settings.resizeY = 20;
+    for (const graphics::GraphicsPlatform platform :
+         {graphics::GraphicsPlatform::Windows, graphics::GraphicsPlatform::Android}) {
+        settings.cookPlatform = static_cast<uint8>(platform);
+        Built plain(allocator);
+        REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), plain));
+        const uint64 original = platform::detail::ReadFloatingPointControl();
+        platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit() |
+                                                    platform::detail::DenormalsAreZeroBit() |
+                                                    platform::detail::RoundTowardZeroBits());
+        Built disturbed(allocator);
+        const bool built =
+            Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), disturbed);
+        platform::detail::WriteFloatingPointControl(original);
+        REQUIRE(built);
+        REQUIRE(plain.result.mips.Size() == disturbed.result.mips.Size());
+        for (usize mip = 0; mip < plain.result.mips.Size(); ++mip) {
+            const Array<uint8>& left = plain.result.mips[mip].bytes;
+            const Array<uint8>& right = disturbed.result.mips[mip].bytes;
+            CHECK(left.Size() == right.Size() &&
+                  memcmp(left.Data(), right.Data(), left.Size()) == 0);
+        }
+    }
 }
 
 // 병렬 실행(12.17.9 4·5): TextureBuildExecution의 scheduler가 있어도 모든 mip byte가 직렬과

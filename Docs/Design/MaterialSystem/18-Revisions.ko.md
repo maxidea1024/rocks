@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 38(초안) | 2026-11-27 | 6.13절 MS2f4 ColorRamp: 원본 공급 `FindColorCurve`·`MaterialColorCurveSnapshot`(19.4.2절 이름 정정), 번역 의존 ColorCurve·Build 의존 hook, 상수 입력은 CurveAssets `EvaluateAdjustedColorCurve`(비트 동일), 연결 입력은 UE 키 구간 합(조정·보간 무시, 키 0개 알파 0). MS2f 교차 리뷰 반영(V13 우회 차단 목록, Noise CameraRelative 3성분·quality 클램프, RotateAboutAxis 스칼라 축 UE 오류, return 대소문자 무시, SceneTexture 입력 문법 후속). engine-runtime 병합: RenderBase 개정 48 문구(2절 `TextureSampleKind`)·UnrealExchange 장 파일 링크 |
 | 37(초안) | 2026-11-27 | 6.13절 MS2f5 CustomHlsl: 모듈 Custom 함수 표와 IR 연산 CustomArguments·CustomCall·CustomOutput(94–96), 함수 모양(문맥 c 첫 인자·텍스처 두 인자·Double 한 인자·inout 추가 출력·return 감싸기·정의·include), V13 토큰·include·clip 검사, MaterialAttributes 출력 거부(편차) |
 | 36(초안) | 2026-11-27 | UE Substrate 전체 지원을 필수 후속으로(사용자 결정 2026-11-27, 렌더 세션 요청): MD1·SF4·MS9·13장 표를 LayeredSurface.ko.md에 잇는다(범위·MD1 (나)·SF1–SF3 순서는 그대로), MS2f3 노드 표의 Noise 속성 선행 |
 | 35(초안) | 2026-11-27 | 6.13절 MS2f3 Noise: IR 라이브러리 호출 연산 `Library`(93)·MaterialNoise.rsh, Noise·VectorNoise 규칙(위치 원점·levels 클램프·LWC), LUT 함수는 새 선행 MPQ-NoiseTexture |

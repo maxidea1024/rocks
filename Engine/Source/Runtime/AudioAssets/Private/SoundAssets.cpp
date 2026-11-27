@@ -4,6 +4,7 @@
 #include <AudioAssets/ConcurrencyGroup.generated.h>
 #include <AudioAssets/SoundClip.generated.h>
 #include <AudioAssets/SoundSource.generated.h>
+#include <AudioAssets/SoundCategory.generated.h>
 #include <AssetRuntime/PackageWriter.h>
 #include <Base/Compiler.h>
 #include <Object/ObjectRegistry.h>
@@ -154,7 +155,27 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
     playable.priority = priority;
     playable.bypassVolumeScaleForPriority = bypassVolumeScaleForPriority;
     playable.virtualizationMode = virtualizationMode;
+    playable.normalizeStereo = normalizeStereo;
     playable.asset = Id();
+    if (!category.Handle().IsNull()) {
+        auto resolvedCategory = registry.Resolve<SoundCategory>(access, category.Handle());
+        if (!resolvedCategory) {
+            return Made::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto categoryObject = resolvedCategory.Value().Get();
+        if (!categoryObject) {
+            return Made::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto chain = categoryObject.Value()->MakeChain(allocator, registry, access);
+        if (!chain) {
+            return Made::Failure(chain.Error());
+        }
+
+        playable.category = chain.Value();
+    }
+
     if (!attenuation.Handle().IsNull()) {
         auto settings = registry.Resolve<AttenuationSettings>(access, attenuation.Handle());
         if (!settings) {
@@ -533,6 +554,11 @@ SoundLoadingBehavior
 SoundClip::EffectiveLoadingBehavior(const SoundCookedLoadOptions& options) const noexcept {
     if (loadingBehavior != SoundLoadingBehavior::Inherited) {
         return loadingBehavior;
+    }
+
+    // 분류 계층의 값이 다음이다(UE SoundClass LoadingBehavior — 3.12절).
+    if (options.categoryLoading != SoundLoadingBehavior::Inherited) {
+        return options.categoryLoading;
     }
 
     if (options.defaultLoading < SoundLoadingBehavior::RetainOnLoad) {

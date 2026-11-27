@@ -377,6 +377,25 @@ const MaterialTextureFacts* LoweringContext::FindTexture(Guid asset) const noexc
     return nullptr;
 }
 
+const MaterialSourceProvider* LoweringContext::Sources() const noexcept {
+    return translator_.Input().sources;
+}
+
+Result<const MaterialColorCurveSnapshot*> LoweringContext::FindColorCurve(Guid asset) noexcept {
+    const MaterialSourceProvider* sources = translator_.Input().sources;
+    const MaterialColorCurveSnapshot* snapshot =
+        sources == nullptr || asset == Guid{} ? nullptr : sources->FindColorCurve(asset);
+    if (snapshot == nullptr) {
+        return Result<const MaterialColorCurveSnapshot*>::Success(nullptr);
+    }
+
+    if (auto added = translator_.AddDependency(MaterialDependencyRole::ColorCurve, asset); !added) {
+        return Result<const MaterialColorCurveSnapshot*>::Failure(added.Error());
+    }
+
+    return Result<const MaterialColorCurveSnapshot*>::Success(snapshot);
+}
+
 Result<bool> LoweringContext::UseSampler(IrTextureSource source, Guid id) noexcept {
     uint32 count = 0;
     auto admitted = translator_.ReferenceSampler(static_cast<uint8>(source), id, count);

@@ -3,6 +3,7 @@
 #include "ControlBatch.h"
 #include "ValueRange.h"
 
+#include <AudioAssets/AudioObjectKey.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Math/MathUtility.h>
@@ -317,6 +318,11 @@ Result<void> AudioEngineSubsystem::StartControl() noexcept {
         (void)freeBatches_.TryPushBack(&control_->batches[index]);
     }
 
+    // 제어가 서기 전에 건 기본 base 믹스를 첫 묶음에 싣는다(3.43.5절).
+    if (defaultBaseMix_) {
+        (void)SetBaseMix(defaultBaseMix_);
+    }
+
     return Result<void>::Success();
 }
 
@@ -378,6 +384,18 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
                                    ? engine_audio_detail::VirtualizationFromSettings()
                                    : VirtualizationSettings{};
     current_->focus = focusSettings_;
+    if (engine.Settings() != nullptr) {
+        using namespace engine_audio_detail;
+        current_->userVolume.values[static_cast<uint32>(SoundUserVolume::Music)] =
+            MusicVolumeVar.Get();
+        current_->userVolume.values[static_cast<uint32>(SoundUserVolume::Effects)] =
+            EffectsVolumeVar.Get();
+        current_->userVolume.values[static_cast<uint32>(SoundUserVolume::Dialogue)] =
+            DialogueVolumeVar.Get();
+        current_->userVolume.values[static_cast<uint32>(SoundUserVolume::Interface)] =
+            InterfaceVolumeVar.Get();
+    }
+
     current_->occlusion.disabled = OcclusionDisabled(engine);
     current_->occlusion.muted = traits_.audioMuted;
     occlusionEnabled_ = !current_->occlusion.disabled && !current_->occlusion.muted;
@@ -675,6 +693,175 @@ void AudioEngineSubsystem::AnswerOcclusion(const OcclusionRequest& request) noex
     }
 }
 
+Result<void> AudioEngineSubsystem::PushMixCommand(ControlCommand& command) noexcept {
+    if (control_ == nullptr || drained_ || current_ == nullptr) {
+        return Result<void>::Success();
+    }
+
+    if (!current_->commands.TryPushBack(Move(command))) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return Result<void>::Success();
+}
+
+namespace {
+
+Result<void> CheckMix(const MixSnapshotRef& mix) noexcept {
+    if (!mix) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return ValidateMixSnapshotData(*mix.Get());
+}
+
+} // namespace
+
+Result<void> AudioEngineSubsystem::SetDefaultCategory(SoundCategoryChainRef chain) noexcept {
+    if (chain) {
+        if (auto valid = ValidateSoundCategoryChain(*chain.Get()); !valid) {
+            return valid;
+        }
+    }
+
+    defaultCategory_ = Move(chain);
+    return Result<void>::Success();
+}
+
+Result<void> AudioEngineSubsystem::PushMix(const MixSnapshotRef& mix) noexcept {
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::PushMix;
+    command.mix = mix;
+    return PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::PopMix(const MixSnapshotRef& mix) noexcept {
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::PopMix;
+    command.mix = mix;
+    return PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::ClearMix(const MixSnapshotRef& mix) noexcept {
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::ClearMix;
+    command.mix = mix;
+    return PushMixCommand(command);
+}
+
+void AudioEngineSubsystem::ClearAllMixes() noexcept {
+    ControlCommand command;
+    command.type = ControlCommandType::ClearAllMixes;
+    (void)PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::SetBaseMix(const MixSnapshotRef& mix) noexcept {
+    // null이면 아무것도 하지 않는다(UE SetBaseSoundMix).
+    if (!mix) {
+        return Result<void>::Success();
+    }
+
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::SetBaseMix;
+    command.mix = mix;
+    return PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::SetDefaultBaseMix(const MixSnapshotRef& mix) noexcept {
+    if (mix) {
+        if (auto valid = CheckMix(mix); !valid) {
+            return valid;
+        }
+    }
+
+    defaultBaseMix_ = mix;
+    return SetBaseMix(mix);
+}
+
+void AudioEngineSubsystem::RestoreDefaultBaseMix() noexcept {
+    (void)SetBaseMix(defaultBaseMix_);
+}
+
+Result<void> AudioEngineSubsystem::SetMixCategoryOverride(const MixSnapshotRef& mix,
+                                                          const SoundCategory& category,
+                                                          float volume, float pitch,
+                                                          float fadeSeconds,
+                                                          bool applyToChildren) noexcept {
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    if (category.Handle().IsNull() ||
+        !engine_audio_detail::IsFiniteInRange(volume, 0.0f, NumericLimits<float>::Max()) ||
+        !engine_audio_detail::IsFiniteInRange(pitch, 0.0f, MaxMixAdjusterPitch) ||
+        !engine_audio_detail::IsFiniteInRange(fadeSeconds, 0.0f, NumericLimits<float>::Max())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::SetMixCategoryOverride;
+    command.mix = mix;
+    command.categoryKey = AudioObjectKey(category.Handle());
+    command.value = volume;
+    command.overridePitch = pitch;
+    command.seconds = fadeSeconds;
+    command.applyToChildren = applyToChildren;
+    return PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::ClearMixCategoryOverride(const MixSnapshotRef& mix,
+                                                            const SoundCategory& category,
+                                                            float fadeSeconds) noexcept {
+    if (auto valid = CheckMix(mix); !valid) {
+        return valid;
+    }
+
+    if (category.Handle().IsNull() ||
+        !engine_audio_detail::IsFiniteInRange(fadeSeconds, 0.0f, NumericLimits<float>::Max())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::ClearMixCategoryOverride;
+    command.mix = mix;
+    command.categoryKey = AudioObjectKey(category.Handle());
+    command.seconds = fadeSeconds;
+    return PushMixCommand(command);
+}
+
+Result<void> AudioEngineSubsystem::SetCategoryDistanceScale(const SoundCategory& category,
+                                                            float scale, float seconds) noexcept {
+    if (category.Handle().IsNull() ||
+        !engine_audio_detail::IsFiniteInRange(scale, 0.0f, NumericLimits<float>::Max()) ||
+        !engine_audio_detail::IsFiniteInRange(seconds, 0.0f, NumericLimits<float>::Max())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::SetCategoryDistanceScale;
+    command.categoryKey = AudioObjectKey(category.Handle());
+    command.assetValue = category.attenuationDistanceScale;
+    command.value = scale;
+    command.seconds = seconds;
+    return PushMixCommand(command);
+}
+
 Result<void>
 AudioEngineSubsystem::SetGlobalFocusSettings(const GlobalFocusSettings& settings) noexcept {
     if (!IsValidGlobalFocusSettings(settings)) {
@@ -816,10 +1003,19 @@ Result<void> AudioEngineSubsystem::Stop(PlaybackHandle handle, uint32 fadeFrames
 
 Result<void> AudioEngineSubsystem::SetParameter(PlaybackHandle handle, PlaybackParameter parameter,
                                                 float value, uint32 rampFrames) noexcept {
-    const bool valid =
-        parameter == PlaybackParameter::Volume
-            ? engine_audio_detail::IsFiniteInRange(value, 0.0f, audio::MaxVoiceGain)
-            : engine_audio_detail::IsFiniteInRange(value, audio::MinPitch, audio::MaxPitch);
+    bool valid = false;
+    switch (parameter) {
+    case PlaybackParameter::Volume:
+        valid = engine_audio_detail::IsFiniteInRange(value, 0.0f, audio::MaxVoiceGain);
+        break;
+    case PlaybackParameter::Pitch:
+        valid = engine_audio_detail::IsFiniteInRange(value, audio::MinPitch, audio::MaxPitch);
+        break;
+    case PlaybackParameter::LowPassFrequency:
+    case PlaybackParameter::HighPassFrequency:
+        valid = engine_audio_detail::IsFiniteInRange(value, 0.0f, MaxAttenuationFilterFrequency);
+        break;
+    }
     if (!handle.IsValid() || !valid) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -919,6 +1115,26 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
         }
     }
 
+    // 재생 필터·차폐 간격·분류 사슬(3.43.1절).
+    if ((options.lowPassFrequency.HasValue() &&
+         !engine_audio_detail::IsFiniteInRange(options.lowPassFrequency.Value(), 0.0f,
+                                               MaxAttenuationFilterFrequency)) ||
+        (options.highPassFrequency.HasValue() &&
+         !engine_audio_detail::IsFiniteInRange(options.highPassFrequency.Value(), 0.0f,
+                                               MaxAttenuationFilterFrequency)) ||
+        (options.occlusionCheckInterval.HasValue() &&
+         !engine_audio_detail::IsFiniteInRange(options.occlusionCheckInterval.Value(),
+                                               MinOcclusionCheckSeconds,
+                                               MaxOcclusionCheckSeconds))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (options.category) {
+        if (auto valid = ValidateSoundCategoryChain(*options.category.Get()); !valid) {
+            return valid;
+        }
+    }
+
     if (playable->looping && playable->loopEnd != 0 && options.startFrame >= playable->loopEnd) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -967,6 +1183,20 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.position = placement.position;
         command.rotation = placement.rotation;
         command.emitter = placement.emitter;
+        // 분류 사슬: 옵션 > 사운드 > 엔진 기본(3.43.1절).
+        command.category = options.category        ? options.category
+                           : sound.Get()->category ? sound.Get()->category
+                                                   : defaultCategory_;
+        command.alwaysPlay = options.alwaysPlay;
+        command.isUiSound = options.isUiSound;
+        command.lowPassFrequency = options.lowPassFrequency.HasValue()
+                                       ? options.lowPassFrequency.Value()
+                                       : MaxAttenuationFilterFrequency;
+        command.highPassFrequency =
+            options.highPassFrequency.HasValue() ? options.highPassFrequency.Value() : 0.0f;
+        command.hasOcclusionInterval = options.occlusionCheckInterval.HasValue();
+        command.occlusionInterval =
+            command.hasOcclusionInterval ? options.occlusionCheckInterval.Value() : 0.0f;
         FirstOcclusionCheck(sound, scene, placement, options.owner, command);
         command.volume = options.volume;
         command.pitch = options.pitch;

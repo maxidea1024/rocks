@@ -18,5 +18,6 @@ public sealed class WorldIntegration : EngineModuleRules
     // World: the component and actor bases. Mesh: StaticMesh (the expected type of the mesh reference and the loaded mesh bounds).
     // Material: MaterialBase (the expected type of the material references). Texture: Texture and TexturePlatformData (the cooked data the
     // texture render cache uploads; AssetRuntime comes through it). RenderBase: the render lane, render handles and cooked texture uploads.
-    protected override string[] PublicDependencies => ["World", "Mesh", "Material", "Texture", "RenderBase"];
+    // CurveAssets: the timeline track curves (inline values and curve asset soft references — Docs/Design/EngineRuntime chapter 32).
+    protected override string[] PublicDependencies => ["World", "Mesh", "Material", "Texture", "RenderBase", "CurveAssets"];
 }

@@ -78,8 +78,7 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
         if (!record.cursorRunning) {
             record.cursorMixFrame = now;
         } else if (now > record.cursorMixFrame) {
-            const double pitch =
-                static_cast<double>(ClampVoicePitch(record.pitch.At(now) * playable.pitch));
+            const double pitch = static_cast<double>(EffectivePitch(record, now));
             const double elapsed = static_cast<double>(now - record.cursorMixFrame);
             record.cursor += elapsed * pitch * static_cast<double>(playable.SampleRate()) / mixRate;
             record.cursorMixFrame = now;
@@ -107,8 +106,7 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
         // 재생 시간(UE PlaybackTime — 감기지 않는 pitch 보정 경과, StopOldest)은 모든 상태에서
         // 진행한다.
         if (now > record.playbackMixFrame) {
-            const double pitch =
-                static_cast<double>(ClampVoicePitch(record.pitch.At(now) * playable.pitch));
+            const double pitch = static_cast<double>(EffectivePitch(record, now));
             const double elapsed = static_cast<double>(now - record.playbackMixFrame) * pitch;
             record.playbackTime += elapsed;
             if (record.state == RecordState::Submitted && record.started) {
@@ -125,8 +123,22 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
 float AudioDeviceContext::UnscaledEstimate(const Record& record, uint64 now) const noexcept {
     // 동시 발음 scale을 빼기 전의 들리는 크기다(3.41.1절 v — 사용자·사운드 볼륨 × 감쇠 × focus
     // 볼륨).
-    return record.volume.At(now) * record.sound.Get()->volume * record.spatial.attenuationGain *
-           record.focus.volume * record.occlusionVolume.At(now);
+    const SoundPlayable& playable = *record.sound.Get();
+    const float stereo =
+        playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
+    return record.volume.At(now) * playable.volume * stereo * record.categoryValues.volume *
+           record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(now);
+}
+
+float AudioDeviceContext::EffectivePitch(const Record& record, uint64 frame) const noexcept {
+    return ClampVoicePitch(record.pitch.At(frame) * record.sound.Get()->pitch *
+                           record.categoryValues.pitch);
+}
+
+float AudioDeviceContext::ConcurrencyPriorityOf(const Record& record) noexcept {
+    // UE GetConcurrencyPriority(AS 433–443): always-play면 + MAX_SOUND_PRIORITY + 1.
+    return record.alwaysPlay ? record.concurrencyPriority + AlwaysPlayConcurrencyOffset
+                             : record.concurrencyPriority;
 }
 
 void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
@@ -152,7 +164,11 @@ void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
         const SoundPlayable& playable = *record.sound.Get();
         record.estimate = record.unscaledEstimate * record.concurrencyScale;
         // UE FWaveInstance::GetVolumeWeightedPriority(Audio.cpp:1328–1359).
-        if (record.estimate > 0.0f) {
+        // always-play는 볼륨 가중·정지 강등 없이 맨 앞이다(UE SW 3846–3850, Audio.cpp:1330–1334
+        // — 3.43.4절).
+        if (record.alwaysPlay) {
+            record.weight = AlwaysPlayWeight;
+        } else if (record.estimate > 0.0f) {
             record.weight = playable.bypassVolumeScaleForPriority
                                 ? record.voicePriority
                                 : record.estimate * record.voicePriority;

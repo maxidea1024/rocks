@@ -20,6 +20,7 @@
 #include <MaterialSchema/Nodes/Parameters/VectorParameterProperties.h>
 
 #include "MaterialGraphFixture.h"
+#include "MaterialMathGraph.h"
 
 // 생성 원문 시험이다(Docs/Design/MaterialSystem 7.3·7.7절, 단계 MS2a3, MS-T1·MS-T2·MS-T3): fixture
 // 그래프를 번역·생성한 원문을 저장된 기대 원문(Tests/Golden)과 byte로 견주고, 같은 그래프·저장
@@ -145,65 +146,6 @@ bool Contains(StringView text, StringView part) noexcept {
     }
 
     return false;
-}
-
-// 여러 연산 철자를 지나는 그래프다(7.7절):
-// sin·cos·Append·ComponentMask·Power(Select)·If·DynamicBranch
-// (Branch)·Clamp·ArcsineFast·FloatToUInt(Convert)·Operator 비교.
-void BuildMathGraph(GraphFixture& fixture) noexcept {
-    TranslatorEnv& env = fixture.env;
-    const Guid wave = AddVarying(fixture, 0.5f);
-    CosineProperties flat;
-    flat.period = 0.0f;
-    const Guid cosine = fixture.Add("Material.Cosine", env.Save(flat));
-    fixture.Connect(wave, "Result", cosine, "Input");
-
-    // WPO = float3(x, x, cos(x)).
-    const Guid pair = fixture.Add("Material.Append");
-    fixture.Connect(wave, "Result", pair, "A");
-    fixture.Connect(wave, "Result", pair, "B");
-    const Guid triple = fixture.Add("Material.Append");
-    fixture.Connect(pair, "Result", triple, "A");
-    fixture.Connect(cosine, "Result", triple, "B");
-    fixture.Connect(triple, "Result", OutputNodeId, "WorldPositionOffset");
-
-    // OpacityMask = clamp(asinFast(pow(triple.z)), 0, 1).
-    ComponentMaskProperties blue;
-    blue.b = true;
-    const Guid component = fixture.Add("Material.ComponentMask", env.Save(blue));
-    fixture.Connect(triple, "Result", component, "Input");
-    const Guid power = fixture.Add("Material.Power");
-    fixture.Connect(component, "Result", power, "Base");
-    const Guid arcsine = fixture.Add("Material.ArcsineFast");
-    fixture.Connect(power, "Result", arcsine, "Input");
-    const Guid clamp = fixture.Add("Material.Clamp");
-    fixture.Connect(arcsine, "Result", clamp, "Input");
-    fixture.Connect(clamp, "Result", OutputNodeId, "OpacityMask");
-
-    // AO = if(x, 0 → 0.25, 0.5, 0.75).
-    const Guid choice = fixture.Add("Material.If");
-    fixture.Connect(wave, "Result", choice, "A");
-    fixture.Connect(AddConstant(fixture, 0.25f), "Result", choice, "AGreaterThanB");
-    fixture.Connect(AddConstant(fixture, 0.75f), "Result", choice, "ALessThanB");
-    fixture.Connect(AddConstant(fixture, 0.5f), "Result", choice, "AEqualsB");
-    fixture.Connect(choice, "Result", OutputNodeId, "AmbientOcclusion");
-
-    // PDO = branch(x < 1, float(uint(trunc(x))), 2).
-    OperatorProperties less(env.allocator);
-    less.operatorKind = OperatorKind::LessThan;
-    (void)less.dynamicInputs.TryPushBack(OperatorInput{});
-    (void)less.dynamicInputs.TryPushBack(OperatorInput{});
-    const Guid test = fixture.Add("Material.Operator", env.Save(less));
-    fixture.Connect(wave, "Result", test, "A");
-    const Guid toUInt = fixture.Add("Material.FloatToUInt");
-    fixture.Connect(wave, "Result", toUInt, "Input");
-    const Guid toFloat = fixture.Add("Material.UIntToFloat");
-    fixture.Connect(toUInt, "Result", toFloat, "Input");
-    const Guid branch = fixture.Add("Material.DynamicBranch");
-    fixture.Connect(test, "Result", branch, "Condition");
-    fixture.Connect(toFloat, "Result", branch, "True");
-    fixture.Connect(AddConstant(fixture, 2.0f), "Result", branch, "False");
-    fixture.Connect(branch, "Result", OutputNodeId, "PixelDepthOffset");
 }
 
 } // namespace

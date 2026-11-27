@@ -12,8 +12,9 @@ PH5는 넷으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설�
 |---|---|---|
 | PH5a | body 값 사상의 나머지(6.5절 — 질량·관성·질량 중심, 감쇠 외 속도 상한, solver 반복, gyroscopic, smooth edge), 기본 물리 재질·결합 방식·반발 문턱(6.6절), 상자 margin, 물리 설정 칸(6.8절) | PH4 |
 | PH5b | DOF(6.5절 — 축 잠금·평면·CustomPlane `SixDOFConstraint`·설정 기본 DOF·모두 잠금 경고) | PH5a |
-| PH5c | 힘·충격량·속도·질량 API와 body 값 setter(2.6절 — PA04·PA05를 컴포넌트 경로로) | PH5a |
-| PH5d | 잠듦·깨움 API·이벤트(2.7절 — `OnComponentWake`·`OnComponentSleep`, `generateWakeEvents`)와 `OnComponentPhysicsStateChanged` | PH5c |
+| PH5c1 | 힘·충격량·토크·방사 힘과 속도 API(2.6절 — PA04·PA05를 컴포넌트 경로로, 7.1.17절) | PH5a |
+| PH5c2 | 질량 API(`GetMass`·`SetMassOverrideInKg`·`SetMassScale`·`GetCenterOfMass`·`SetCenterOfMass`·`GetInertiaTensor`), 각속도 상한 API, body 값 setter(중력·감쇠·CCD·DOF·질량 다시 계산 표지) | PH5c1 |
+| PH5d | 잠듦·깨움 API·이벤트(2.7절 — `OnComponentWake`·`OnComponentSleep`, `generateWakeEvents`)와 `OnComponentPhysicsStateChanged` | PH5c2 |
 
 **질량(UE `BodyUtils::ComputeMassProperties`·`ApplyMassPropertiesModifiers` — `E/Private/PhysicsEngine/BodyUtils.cpp:48–141`, 호출 `BodyInstance.cpp:3486–3493`).** body를 만들거나 형상을 바꿀 때(질량 다시 계산이 참일 때) 다음 순서로 Jolt 질량 속성을 만들어 `EOverrideMassProperties::MassAndInertiaProvided`로 넣는다(Jolt 형상 기본 계산을 그대로 쓰지 않는다).
 1. 형상 밀도 = 물리 재질 밀도(기본 1 g/cm³ → 1000 kg/m³ — UE 하한 수소 0.09 kg/m³)로 형상(질량 중심 이동 전)의 질량·관성을 구한다(Jolt `Shape::GetMassProperties` — 균일 밀도).
@@ -89,3 +90,46 @@ PH5는 넷으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설�
 - Static은 자유도 설정이 있어도 구속이 없다.
 
 **리뷰 반영**(치명 0, 중요 4, 경미 8): 모두 잠금을 무시하던 것을 UE처럼 6축 구속으로 바꿨다(경고·`AllDegreesOfFreedomLocked` 삭제). 전환 뒤 남은 속도를 새 마스크로 거른다. 구속 위치를 질량 중심에서 body 원점으로 바꾸고 teleport·형상 변경 때 다시 붙인다. 회전 bit 잠금에서 gyroscopic을 끈다. 축과 나란한 CustomPlane은 bit로 한다. 법선 0 판정을 성분마다(UE `IsNearlyZero`)로 맞췄다. `BodySettings.h` 주석(축 평면은 표지를 보지 않는다)과 시험 상수 이름을 고쳤다.
+
+### 7.1.17 PH5c1 구현 세부(2026-11-28)
+
+힘·충격량·토크·방사 힘과 속도 API다(2.6절). UE `UPrimitiveComponent`(`E/Private/PrimitiveComponentPhysics.cpp:146–490`) → `FBodyInstance`(`E/Private/PhysicsEngine/BodyInstance.cpp:3631–3660`·`3769–3906`·`4214–4232`) → Chaos(`PhysicsCore/Private/ChaosEngineInterface.cpp:846–1110`, 외부 handle `CH/Public/PhysicsProxy/SingleParticlePhysicsProxy.h:706–880`·`322–340`)를 따른다.
+
+**컴포넌트 API**(`PrimitiveComponent` — 이름은 UE 그대로, 뼈 이름 인자는 CM7 때). 단위는 cm·kg·초, 각은 rad(`…InDegrees`는 도를 rad로 바꿔 같은 경로):
+- 충격량: `AddImpulse(impulse, velocityChange)`, `AddAngularImpulseInRadians/InDegrees(impulse, velocityChange)`, `AddImpulseAtLocation(impulse, location)`, `AddVelocityChangeImpulseAtLocation(velocityChange, location)`, `AddRadialImpulse(origin, radius, strength, falloff, velocityChange)`.
+- 힘: `AddForce(force, accelerationChange)`, `AddForceAtLocation(force, location)`, `AddForceAtLocationLocal(force, location)`, `AddTorqueInRadians/InDegrees(torque, accelerationChange)`, `AddRadialForce(origin, radius, strength, falloff, accelerationChange)`.
+- 속도: `SetPhysicsLinearVelocity(velocity, addToCurrent)`, `GetPhysicsLinearVelocity()`, `GetPhysicsLinearVelocityAtPoint(point)`, `SetPhysicsAngularVelocityInRadians/InDegrees(velocity, addToCurrent)`, `GetPhysicsAngularVelocityInRadians/InDegrees()`. body가 없으면 읽기는 0이다.
+- 방사 무시 표지 `ignoreRadialImpulse`·`ignoreRadialForce`(UE `bIgnoreRadialImpulse`·`bIgnoreRadialForce`, 기본 거짓 — 영속 필드, `SetIgnoreRadialImpulse`·`SetIgnoreRadialForce`): 참이면 방사 호출을 무시한다.
+- `RadialFalloff { Constant, Linear }`(UE `ERadialImpulseFalloff`).
+
+**판정·깨움(UE 그대로).**
+- 힘·충격량·토크는 Dynamic body에만 효력이 있다(UE `IsBodyDynamic` — Static·Kinematic은 무시). body가 없으면 무시한다.
+- 효력이 있으면 언제나 깨운다(Chaos 외부 handle의 `AddForce`·`AddTorque`·`SetLinearImpulse`·`SetAngularImpulse`가 값과 상관없이 `Dynamic` 상태로 바꾼다). 방사는 범위 안일 때만이다.
+- 속도 setter는 Dynamic에만 효력이 있다. UE는 Kinematic에도 값을 넣지만(`IsRigidBody`) Chaos Kinematic은 목표가 없으면 속도로 움직이지 않는다(`PBDRigidsEvolutionGBF.cpp:1187` 모드 None). Jolt Kinematic은 속도로 움직이므로 Rocks는 Kinematic을 무시한다(되읽기만 다르다 — 한계). 잠든 body는 최종 속도가 거의 0이 아니면(성분마다 `KindaSmallNumber` 초과 — UE `SetVBase`의 `IsNearlyZero`) 깨운다. 최종 속도는 허용 자유도로 거르고 속도 상한으로 자른다(`Set…VelocityClamped`).
+
+**충격량은 다음 step에 더한다(UE).** Chaos는 충격량을 호출 때 질량·월드 역관성으로 속도 변화로 바꿔 입자의 impulse velocity에 쌓고 다음 step 적분 때 속도에 더한다. 그래서 `AddImpulse` 바로 뒤 `GetPhysicsLinearVelocity`는 옛 속도이고, 같은 프레임의 `SetPhysicsLinearVelocity` 뒤에도 쌓인 몫이 더해진다. Rocks도 칸에 대기 속도 변화(Jolt 단위 Δv·Δω)를 쌓고(호출 때 Jolt 역질량·`MultiplyWorldSpaceInverseInertiaByVector`로 바꾼다), Step이 Jolt Update 직전(결정적 FP 환경 안)에 `Set…VelocityClamped(지금 + Δ)`로 더한다. body를 지우거나 Kinematic으로 바꾸면 대기 몫을 버린다(Kinematic은 forces도 지운다). 대기 목록 할당이 실패하면 그 자리에서 더한다(할당 실패 한정).
+- `velocityChange`: 선형 Δv = 값, 각 Δω = 값(UE `AddVelocity`·`AddAngularVelocityInRadians` — 질량·관성을 곱했다 나누므로 같다).
+- 위치 충격량: Δv = J/m, 각충격량 (위치 − 월드 질량 중심) × J. `AddVelocityChangeImpulseAtLocation`은 J = m·Δv(UE).
+- 방사 충격량(UE `AddRadialImpulse`): d = 질량 중심 − origin, |d| < radius일 때만(엄격). |d| > 0이면 방향 d/|d|, Constant면 strength, Linear면 strength × (radius − |d|)/radius. |d| = 0이면 (1, 0, 0) × strength. `velocityChange`면 속도 변화다.
+
+**힘·토크는 프레임의 고정 스텝마다 작용한다(UE `bAllowSubstepping`).** UE `UPrimitiveComponent::AddForce`는 `bAllowSubstepping` 참으로 부르고(substep마다 같은 힘), 기본은 프레임 dt 한 step이다. Rocks는 고정 스텝이라 한 프레임에 스텝이 0–상한 회다(3.5절). 그래서:
+- 고정 스텝 밖(Update 등 — `World::InFixedSteps()` 거짓)에서 준 힘·토크는 칸의 프레임 힘에 쌓아 그 프레임의 고정 스텝마다 Jolt 누적 힘에 다시 넣고, 결과 반영(PhysicsResults — `EndFrame`)이 지운다. 스텝이 둘이면 둘 다, 0이면 버린다. 프레임마다 다시 주는 지속 힘이 프레임 속도와 상관없이 같은 효과다(스텝마다 한 번).
+- Fixed hook 안에서 준 힘은 다음 스텝 한 번이다(Jolt `Body::AddForce`·`AddTorque`는 Update 한 번 뒤 지워진다 — `PhysicsSystem.cpp:2506`).
+- step하지 않는 장면(Editor·Preview)은 그 자리에서 Jolt 누적 힘에 넣는다.
+- `accelerationChange`: 힘 × m(칸 질량), 토크 = 월드 관성 × 값(Chaos `GetWorldInertia` — 칸 관성을 body 회전으로 돌린 R·I·Rᵀ).
+- 위치 힘: 토크 (위치 − 월드 질량 중심) × 힘. `…Local`은 위치·힘을 body 원점 transform(질량 중심 아님 — Chaos `GetActorWorldTransform`)으로 월드로 바꾼다.
+- 방사 힘(UE `AddRadialForce`): |d| > radius면 무시(경계 포함 — 충격량과 다르다, UE 그대로). |d| < 1e-4면 방향 (1, 0, 0), Linear는 (radius − |d|)/radius × strength. `accelerationChange`면 × m.
+- radius ≤ 0인 방사는 무시한다(UE Linear 힘이 0/0이 되는 경우를 피한다 — UE Constant·중심 일치·radius 0 한 점 경우는 +X·strength를 주지만 Rocks는 무시한다, 한계).
+
+**잘못된 값.** 비유한 벡터·위치·radius·strength와 Jolt float로 바꾸면 넘치는 값(제곱 길이가 넘치는 값 포함 — Jolt 속도 자르기가 assert한다)은 무시하고 Warning `NonFiniteBodyInput`이다(Jolt에 NaN·inf를 넣지 않는다 — UE는 검사하지 않는다). 속도 setter의 상한 자르기는 바로 일어난다(UE는 다음 적분 때 — Jolt `SetLinearVelocity`가 상한 초과를 assert하므로 `…Clamped`를 쓴다, 되읽기 한계). 충격량·힘 변환은 다른 접점 변환처럼 게임 thread의 FP 환경에서 하고, 적분만 결정적 FP 환경 안이다.
+
+**잘못된 호출 경고**(UE `WarnInvalidPhysicsOperations` — shipping·test 빌드 밖, `PrimitiveComponentPhysics.cpp:146–170`): 충격량·힘·토크 setter(방사 제외)는 먼저 Mobility를 본다(UE `CheckStaticMobilityAndWarn` — Rocks `SceneComponent::CheckMovable`, 게임 World 초기화 뒤 Movable이 아니면 Warning `StaticComponentMoved`). 그것을 통과하고 `simulatePhysics`가 거짓이면 `PhysicsOperationWithoutSimulation`, 충돌 켬이 NoCollision·QueryOnly면 `PhysicsOperationWithoutPhysicsCollision`이다. 속도 setter는 Mobility만 본다(UE가 body 인자 없이 부른다). UE처럼 호출마다 남긴다. 시뮬레이션·충돌 경고는 `ROCKS_BUILD_RELEASE`가 아닐 때만이다(UE shipping 대응 — Mobility 경고는 기존 `CheckMovable` 그대로).
+
+**World 접점**(`PhysicsScene`): `ApplyBodyForce(body, BodyForce)`(종류 `BodyForceKind` — 위 아홉, 값·위치·radius·strength·falloff·질량 무관 표지) 하나와 `SetBodyLinearVelocity(body, v, addToCurrent)`·`SetBodyAngularVelocity(body, ω, addToCurrent)`. 없는 handle·옛 세대는 무시한다. `BodyKinematics`에 월드 질량 중심 `centerOfMass`(cm)를 더한다(점 속도 v + ω × (점 − 질량 중심) — UE `GetUnrealWorldVelocityAtPoint`, PH5c2 `GetCenterOfMass`도 쓴다).
+
+**시험.**
+- 장면(Monolithic — `PhysicsForceSceneTests.cpp`): 대기 충격량은 step 전에 속도에 보이지 않고 step 뒤에 Δv = J/m이다, 같은 프레임 속도 setter 뒤에도 더해진다, Kinematic 전환·body 삭제가 버린다. 각충격량 Δω = I⁻¹·L(구 2/5·m·r²). 위치 충격량의 각 몫. 방사 충격량(경계 엄격·Linear 비율·중심 일치 (1, 0, 0)), 방사 힘(경계 포함·Linear). 힘·토크 accelerationChange가 질량·관성에 무관한 가속. Local 위치 힘의 회전. Static·Kinematic 무시, 잠든 body 깨움, 속도 setter의 깨움 문턱·자유도 거르기. 비유한 입력 무시.
+- 컴포넌트(`PhysicsForceTests.cpp`, World 경로): PA04 — 구에 `AddImpulse((0, 0, m·100))` → 바로 읽으면 옛 속도, 한 스텝 뒤 기준 구보다 100 cm/s(감쇠 배율) 빠르다(질량 m은 UE 규칙으로 계산 — 질량 덮어쓰기 API는 PH5c2, 2 kg 그대로의 PA04는 장면 시험), `AddForce((0, 0, m·980))`·`AddForce((0, 0, 980), true)`를 스텝마다 주면 중력 상쇄(높이 유지). PA05 — 반폭이 다른 상자(주축 관성 m·(h₁² + h₂²)/3)에 `AddTorqueInRadians(τ)` → 각가속도 τ/I, 비대칭 상자는 축마다 다른 가속, τ = 10⁴ kg·cm²/s²가 1 N·m로 들어간다. `…InDegrees` 변환, `ignoreRadial…`, 점 속도, 잘못된 호출 경고 셋, body 없음 0.
+
+**PH5c1 리뷰 반영(2026-11-28).** 치명 0, 중요 2, 경미 7. 고정 스텝 밖에서 준 힘이 0스텝 프레임에 쌓이거나 다스텝 프레임의 첫 스텝에만 들어가던 것을 프레임 힘(UE `bAllowSubstepping`)으로 고쳤다(`World::InFixedSteps`, `BodyForce::everyFixedStep`, `EndFrame`). 구로만 보던 월드 관성·Local 힘 시험을 돈 비대칭 상자·회전축과 다른 힘 방향으로 바꿨다. Kinematic 전환의 힘 지우기 중복(Jolt가 한다)을 없앴고, float 넘침을 막았고, 범위 밖 방사가 깨우지 않음·방사 힘 중심 일치·경고 수 시험을 더했다. 속도 setter의 Kinematic 차이·상한 되읽기·radius 0 한계와 접점 사용 예를 적었다.
+
