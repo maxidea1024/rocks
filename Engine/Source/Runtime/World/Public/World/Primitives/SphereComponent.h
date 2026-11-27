@@ -39,6 +39,9 @@ public:
     // 반지름 ScaledSphereRadius의 구다(28.3절).
     Result<VolumeShape> TryWorldVolumeShape() const noexcept override;
 
+    // 반경 ScaledSphereRadius 구를 부풀린 형상이다(UE USphereComponent::GetCollisionShape).
+    CollisionShape GetCollisionShape(double inflation) const noexcept override;
+
 protected:
     // 지역 (0, (R, R, R), R)다(UE SphereComponent.cpp:25).
     bool TryLocalBounds(ComponentBounds& local) const noexcept override;

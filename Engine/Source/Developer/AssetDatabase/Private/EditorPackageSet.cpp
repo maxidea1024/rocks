@@ -1096,18 +1096,24 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
     }
 
     // 게시한 객체에 이벤트 바인딩을 다시 만든다(Docs/Design/EventReflection.ko.md ED21). 버린
-    // 바인딩이 있으면 패키지마다 경고 하나(EV3a2 전에는 다시 저장하면 그 바인딩이 사라진다 — ED24).
+    // 바인딩·미해결 레코드로 보존한 바인딩(ED24)이 있으면 패키지마다 종류별 경고 하나다.
+    auto warn = [&](EditorWarningKind kind, usize slot, uint32 total) noexcept {
+        if (warnings == nullptr || total == 0) {
+            return;
+        }
+
+        EditorWarning warning;
+        warning.kind = kind;
+        warning.diagnostic =
+            EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, infos[slot].id);
+        warning.diagnostic.detail = total;
+        (void)warnings->TryPushBack(warning);
+    };
     for (usize slot = 0; slot < count; ++slot) {
         (void)states[slot]->BindEvents();
-        const uint32 dropped = states[slot]->DroppedEventBindings();
-        if (warnings != nullptr && dropped != 0) {
-            EditorWarning warning;
-            warning.kind = EditorWarningKind::DroppedEventBindings;
-            warning.diagnostic =
-                EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, infos[slot].id);
-            warning.diagnostic.detail = dropped;
-            (void)warnings->TryPushBack(warning);
-        }
+        warn(EditorWarningKind::DroppedEventBindings, slot, states[slot]->DroppedEventBindings());
+        warn(EditorWarningKind::UnresolvedEventBindings, slot,
+             states[slot]->UnresolvedEventBindings());
     }
 
     for (usize slot = 0; slot < count; ++slot) {

@@ -78,7 +78,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - `TextureDesc::swizzle`(view swizzle) 기능 자체는 장치 계약에 남는다(D3D12·Vulkan·GLES 시험, A0-G). 쿠킹 텍스처 경로가 쓰지 않을 뿐이다.
 
 **블록 압축 형식과 비압축 대체(개정 63 — 에셋 빌드 TC2, AssetSystem 12.17.5절·12.16절).** 쿠킹 형식은 에셋 빌드가 정하고 렌더 업로드는 받은 형식을 그대로 올린다(압축 해제·채널 재배치 없음).
-- 데스크톱(Windows·Mac) 쿠킹: 최상위 mip 두 변이 4의 배수면 Default·Masks → BC1·BC3(원본 알파로 고르는 AutoDXT — sRGB는 `BC1UnormSrgb`·`BC3UnormSrgb`), Normalmap → `BC5Unorm`, Alpha → `BC4Unorm`이다. BC6H·BC7은 TC3 전까지 `RGBA16Float`·`BGRA8Unorm(Srgb)` 대체다(`EncoderUnavailable` 경고).
+- 데스크톱(Windows·Mac) 쿠킹: 최상위 mip 두 변이 4의 배수면 Default·Masks → BC1·BC3(원본 알파로 고르는 AutoDXT — sRGB는 `BC1UnormSrgb`·`BC3UnormSrgb`), Normalmap → `BC5Unorm`, Alpha → `BC4Unorm`이다. TC3부터(AssetSystem 12.17.6) BC7 → `BC7Unorm`·`BC7UnormSrgb`(알파가 있으면 알파 프로필 — 형식은 같다), HDR_Compressed(float 원본의 기본 설정) → `BC6HUfloat`(알파 없음 — 셰이더는 1로 읽는다)다. TC3 전의 `RGBA16Float`·`BGRA8Unorm(Srgb)` 대체와 `EncoderUnavailable` 경고는 데스크톱에서 없어졌다(개정 65).
 - 4보다 작은 아래 mip도 같은 블록 형식이다. 블록 하나이고 크기는 위 "바이트 배치" 공식(블록 수 올림)이다. 블록 배수 검사는 최상위 mip에만 한다(아래 "BC 최상위 블록 배수 아님").
 - 비압축 대체는 UE와 같다: 4채널 8비트는 `BGRA8Unorm(Srgb)`(byte 순서 B, G, R, A — 장치 형식이 BGRA8이라 셰이더는 (r, g, b, a)로 읽는다), float 원본은 `RGBA16Float`, Grayscale·Displacementmap·DistanceFieldFont의 회색 원본은 `R8Unorm`·`R16Unorm`, 회색 원본 + sRGB는 `BGRA8UnormSrgb`다. 전 판의 RG8·RG16·`RGBA16Unorm`·`RGBA8` 기본 출력은 없어졌다.
 - Android(TC4 전)는 비압축이다. GLES는 BGRA8 샘플링 보장이 없어 `RGBA8Unorm(Srgb)` 대체(`PlatformFormatFallback` 경고)다. Windows 쿠킹은 GLES 대상이 아니다: Windows의 GLES 미리보기 장치가 BC를 샘플링할 수 있으면 그대로 그리고, 못 하면 `UnsupportedCapability`다(self-test는 NOT RUN 사유 — 18.5절 7항).
@@ -99,7 +99,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 패키지 게시에서 시작한다: 쿠킹 텍스처에는 PostLoad hook이 없고(AssetSystem 12.15절 A5k), 샘플러도 쿠킹 때 정해진다. 그래서 업로드는 AssetManager 준비 callback(패키지 공개) 뒤 게임 lane이 낸다(`TextureRenderCache::Update`). 상주 수명은 그 lease가 정한다(lease를 놓기 전에 handle을 `Retire`한다).
 - CPU Availability 텍스처(AssetSystem 12.4.1절)는 쿠킹 mip을 올리지 않는다. 그리는 쪽이 내장 검정 2D(`BuiltinTexture::Black2D`)로 대체한다(UE는 쿠킹 때 작은 검정 placeholder를 GPU에 둔다 — `Engine/Private/Texture.cpp:4477–4481`). Availability는 에셋 칸이라 변환 층이 본다.
 
-**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 에셋 세션 압축 단계(AssetSystem 12.17절 TC1–TC5)가 정한다 — BC1·BC3·BC4·BC5는 TC2에서 들어왔고(위 "블록 압축 형식과 비압축 대체"), BC6H·BC7(TC3)·Android ASTC(TC4)가 남았다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](../PixelFormat/05-FormatList.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.
+**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 에셋 세션 압축 단계(AssetSystem 12.17절 TC1–TC5)가 정한다 — BC1·BC3·BC4·BC5는 TC2, BC6H·BC7은 TC3에서 들어왔고(위 "블록 압축 형식과 비압축 대체"), Android ASTC(TC4)가 남았다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](../PixelFormat/05-FormatList.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.
 
 ### 6.6 손상 데이터 오류(`CorruptData`, 개정 58)
 

@@ -51,9 +51,10 @@ public:
     MemoryPlatformTexture(const MemoryPlatformTexture&) = delete;
     MemoryPlatformTexture& operator=(const MemoryPlatformTexture&) = delete;
 
-    // spec대로 만든다(앞 값은 지운다). 블록 압축 형식(TexelCodec IsBlockCodecFormat — BC1·BC3·BC4·
-    // BC5)은 fill 값을 RGBA8로 쓴 뒤 mip마다 TexelCodec EncodeBlockImage로 압축한다.
-    // 오류: TexelCodec이 다루지 않는 형식·0 크기·mip 수 0 InvalidArgument, 할당 실패.
+    // spec대로 만든다(앞 값은 지운다). 블록 압축 형식(BlockEncode IsBlockCodecFormat — BC1·BC3·
+    // BC4·BC5·BC6H·BC7)은 fill 값을 부호화 입력 형식(BlockStagingFormat — RGBA8, BC6H는
+    // RGBA16Float)으로 쓴 뒤 mip마다 EncodeBlockImage로 압축한다.
+    // 오류: TexelCodec·BlockEncode가 다루지 않는 형식·0 크기·mip 수 0 InvalidArgument, 할당 실패.
     Result<void> Build(const MemoryTextureSpec& spec, MemoryTexelFunction fill,
                        void* context) noexcept;
 

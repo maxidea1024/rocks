@@ -108,7 +108,8 @@ public abstract class TestsModule : ModuleRules
         ["AssetCooker"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetDatabase"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetNugget"] = ["AssetDatabase", "AssetRuntime", "AssetTestFixtures", "ObjectSerialization"],
-        ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        // The package event binding tests put the reflection fixture's event publisher and call target in a package (Docs/Design/EventReflection EV3a2).
+        ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves", "ReflectionTestFixtures"],
         // The Opus codec tests round-trip the AudioTools encoder through the AudioOpus decoder (AudioTools itself does not depend on it).
         ["AudioTools"] = ["AudioOpus"],
         ["Base"] = ["Core"],
