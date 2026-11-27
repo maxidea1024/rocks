@@ -6,6 +6,7 @@
 #include <Base/Compiler.h>
 #include <Core/Text/NamePool.h>
 #include <Material/Material.generated.h>
+#include <Material/MaterialBase.generated.h>
 #include <Mesh/SkeletalMesh/SkeletalMesh.generated.h>
 #include <MeshSource/MeshSourceValidation.h>
 #include <Object/ObjectRegistry.h>
