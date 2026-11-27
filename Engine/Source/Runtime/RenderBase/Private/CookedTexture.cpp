@@ -25,7 +25,7 @@ Result<T> Reject(CookedTextureIssue* out, CookedTextureIssue issue, ErrorCode co
 }
 
 Result<graphics::TextureDesc> Corrupt(CookedTextureIssue* out, CookedTextureIssue issue) noexcept {
-    return Reject<graphics::TextureDesc>(out, issue, ErrorCode::InvalidArgument);
+    return Reject<graphics::TextureDesc>(out, issue, ErrorCode::CorruptData);
 }
 
 Result<graphics::TextureDesc> Unsupported(CookedTextureIssue* out,
@@ -235,7 +235,7 @@ Result<RenderBlob> PackCookedTexturePixels(Allocator& allocator,
                                            const CookedTextureSource& source) noexcept {
     const uint32 count = static_cast<uint32>(source.mips.Size());
     if (source.residentTailMips > count) {
-        return Result<RenderBlob>::Failure(ErrorCode::InvalidArgument);
+        return Result<RenderBlob>::Failure(ErrorCode::CorruptData);
     }
 
     uint64 total = 0;
@@ -265,14 +265,14 @@ Result<RenderBlob> PackCookedTexturePixels(Allocator& allocator,
         const uint8* from = nullptr;
         if (level < streamed) {
             if (mip.bulk.Size() != bytes) {
-                return Result<RenderBlob>::Failure(ErrorCode::InvalidArgument);
+                return Result<RenderBlob>::Failure(ErrorCode::CorruptData);
             }
 
             from = mip.bulk.Data();
         } else {
             if (mip.tailOffset > source.tail.Size() ||
                 mip.byteSize > source.tail.Size() - mip.tailOffset) {
-                return Result<RenderBlob>::Failure(ErrorCode::InvalidArgument);
+                return Result<RenderBlob>::Failure(ErrorCode::CorruptData);
             }
 
             from = source.tail.Data() + mip.tailOffset;

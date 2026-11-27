@@ -409,7 +409,7 @@ TEST(WorldIntegration_TextureRenderCacheCpuAvailability) {
     CHECK(rig.ResidentUnits() == 0);
 }
 
-// 변환·검사 실패: 빈 mip bulk ref는 Failed(InvalidArgument, handle 없음), mip byte 수 불일치는
+// 변환·검사 실패: 빈 mip bulk ref는 Failed(CorruptData, handle 없음), mip byte 수 불일치는
 // Failed(MipByteSize — 예약한 handle을 그 자리에서 Retire)다. 장치 생성은 없다.
 TEST(WorldIntegration_TextureRenderCacheConversionFailures) {
     CacheRig rig;
@@ -428,11 +428,11 @@ TEST(WorldIntegration_TextureRenderCacheConversionFailures) {
     CHECK(cache.Update() == 2);
     const TextureRenderInfo corrupt = rig.InfoOf(TextureA);
     CHECK(corrupt.state == TextureRenderState::Failed && corrupt.handle.IsNull());
-    CHECK(corrupt.error == ErrorCode::InvalidArgument &&
+    CHECK(corrupt.error == ErrorCode::CorruptData &&
           corrupt.issue == render::CookedTextureIssue::None);
     const TextureRenderInfo checked = rig.InfoOf(TextureB);
     CHECK(checked.state == TextureRenderState::Failed && checked.handle.IsNull());
-    CHECK(checked.error == ErrorCode::InvalidArgument &&
+    CHECK(checked.error == ErrorCode::CorruptData &&
           checked.issue == render::CookedTextureIssue::MipByteSize);
     CHECK(cache.Update() == 0);
     REQUIRE(rig.lane.DrainRetires());

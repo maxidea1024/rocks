@@ -98,7 +98,7 @@ CookedManifestShaderLibraries::TryCreate(Allocator& allocator, platform::FileSys
     for (const CookedManifestBackend& backend : manifest.Backends()) {
         graphics::Backend parsed = graphics::Backend::D3D12;
         if (!ParseBackend(backend.name.View(), parsed)) {
-            return Out::Failure(ErrorCode::InvalidArgument);
+            return Out::Failure(ErrorCode::CorruptData);
         }
 
         if (!state.backends.TryPushBack(parsed) || !state.formats.TryEmplaceBack(allocator)) {
@@ -205,7 +205,7 @@ Result<void> CookedManifestShaderLibraries::ReadLibrary(StringView formatId,
         snprintf(problem_, sizeof(problem_), "CorruptPackage (%s): %s: %.*s", section, what,
                  static_cast<int>(path.View().ByteCount()), path.View().Data());
         out.Clear();
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     };
     if (!read) {
         // 매니페스트 크기보다 크면 크기 불일치다.

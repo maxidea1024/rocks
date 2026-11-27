@@ -10,7 +10,7 @@
 // 셰이더 워커 메시지(Docs/Design/ShaderSystem 11.1절 SC5) 인코딩이다. 최상위는 Record 하나,
 // job·형식·결과 목록은 RecordList, 작은 튜플 목록(처리기 버전·hook 인자·값·도구 확인)은 Bytes 값
 // 안의 Archive(u32 개수 + 항목)다. 읽기는 모든 필드의 wire tag와 값 끝을 확인하고, 손상은
-// InvalidArgument로 모은다(할당 실패만 OutOfMemory).
+// CorruptData로 모은다(할당 실패 OutOfMemory·한도 CapacityExceeded는 그대로 — ShaderSystem 11.2절).
 namespace rocks::shader {
 
 namespace worker_protocol_detail {
@@ -97,9 +97,11 @@ Result<void> Check(const Result<T>& result) noexcept {
     return result ? Result<void>::Success() : Failure(result.Error());
 }
 
-// 읽기 실패는 할당 실패만 그대로 두고 나머지는 손상(InvalidArgument)이다.
+// 읽기 실패는 할당 실패·한도 초과만 그대로 두고 나머지는 손상(CorruptData)이다.
 ErrorCode Damaged(ErrorCode error) noexcept {
-    return error == ErrorCode::OutOfMemory ? ErrorCode::OutOfMemory : ErrorCode::InvalidArgument;
+    return error == ErrorCode::OutOfMemory || error == ErrorCode::CapacityExceeded
+               ? error
+               : ErrorCode::CorruptData;
 }
 
 // 필드 하나를 한 번에 쓰는 도구다.
@@ -179,7 +181,7 @@ Result<void> Frame(const uint8 (&magic)[ShaderWorkerMagicBytes], Span<const uint
 Result<ArchiveReader> Value(RecordReader& record, Guid id, WireType type) noexcept {
     auto field = record.Find(id);
     if (!field || field.Value().wireType != static_cast<uint32>(type)) {
-        return Result<ArchiveReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<ArchiveReader>::Failure(ErrorCode::CorruptData);
     }
 
     return record.OpenValue(field.Value());
@@ -194,7 +196,7 @@ Result<T> Single(RecordReader& record, Guid id, WireType type, Read&& read) noex
 
     auto value = read(reader.Value());
     if (!value || !reader.Value().AtEnd()) {
-        return Result<T>::Failure(value ? ErrorCode::InvalidArgument : Damaged(value.Error()));
+        return Result<T>::Failure(value ? ErrorCode::CorruptData : Damaged(value.Error()));
     }
 
     return value;
@@ -242,7 +244,7 @@ Result<void> ReadDigest(RecordReader& record, Guid id, Sha256Digest& out) noexce
     }
 
     if (bytes.Value().Size() != Sha256Digest::Bytes) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     platform::MemoryCopy(out.bytes, bytes.Value().Data(), Sha256Digest::Bytes);
@@ -252,7 +254,7 @@ Result<void> ReadDigest(RecordReader& record, Guid id, Sha256Digest& out) noexce
 Result<void> ReadDigestFrom(ArchiveReader& reader, Sha256Digest& out) noexcept {
     auto bytes = reader.ReadBytes();
     if (!bytes || bytes.Value().Size() != Sha256Digest::Bytes) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     platform::MemoryCopy(out.bytes, bytes.Value().Data(), Sha256Digest::Bytes);
@@ -273,8 +275,12 @@ Result<void> ReadPacked(RecordReader& record, Guid id, ReadItem&& readItem) noex
     }
 
     auto count = reader.Value().ReadU32();
-    if (!count || count.Value() > MaxListItems) {
-        return Failure(ErrorCode::InvalidArgument);
+    if (!count) {
+        return Failure(Damaged(count.Error()));
+    }
+
+    if (count.Value() > MaxListItems) {
+        return Failure(ErrorCode::CapacityExceeded);
     }
 
     for (uint32 index = 0; index < count.Value(); ++index) {
@@ -283,7 +289,7 @@ Result<void> ReadPacked(RecordReader& record, Guid id, ReadItem&& readItem) noex
         }
     }
 
-    return reader.Value().AtEnd() ? Result<void>::Success() : Failure(ErrorCode::InvalidArgument);
+    return reader.Value().AtEnd() ? Result<void>::Success() : Failure(ErrorCode::CorruptData);
 }
 
 template <class T>
@@ -412,7 +418,7 @@ Result<void> DecodeJob(RecordReader& item, ShaderWorkerJob& job) noexcept {
     if (!kind || !stage || !features || !hlsl || !optimization || !debug || !matrix ||
         kind.Value() > static_cast<uint32>(ShaderWorkerJobKind::Assert) ||
         optimization.Value() > 3 || matrix.Value() != 0) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     job.kind = static_cast<ShaderWorkerJobKind>(kind.Value());
@@ -505,7 +511,7 @@ Result<void> DecodeResult(RecordReader& item, ShaderWorkerJobResult& result) noe
     auto status = ReadU32(item, StatusField);
     if (!status ||
         status.Value() > static_cast<uint32>(ShaderWorkerJobStatus::UnsupportedCapability)) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     result.status = static_cast<ShaderWorkerJobStatus>(status.Value());
@@ -517,7 +523,7 @@ Result<void> DecodeResult(RecordReader& item, ShaderWorkerJobResult& result) noe
         auto id = r.ReadU32();
         auto bytes = r.ReadBytes();
         if (!id || !bytes) {
-            return Failure(ErrorCode::InvalidArgument);
+            return Failure(ErrorCode::CorruptData);
         }
 
         auto value = Append(result.values);
@@ -536,7 +542,7 @@ Result<RecordReader> OpenMessage(Allocator& allocator, Span<const uint8> file,
                                  Guid schema) noexcept {
     auto version = ReadShaderWorkerMessageVersion(file, magic);
     if (!version) {
-        return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+        return Result<RecordReader>::Failure(ErrorCode::CorruptData);
     }
 
     if (version.Value() != ShaderWorkerMessageVersion) {
@@ -656,12 +662,12 @@ Result<uint32>
 ReadShaderWorkerMessageVersion(Span<const uint8> file,
                                const uint8 (&magic)[ShaderWorkerMagicBytes]) noexcept {
     if (file.Size() < ShaderWorkerPrefixBytes) {
-        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+        return Result<uint32>::Failure(ErrorCode::CorruptData);
     }
 
     for (usize index = 0; index < ShaderWorkerMagicBytes; ++index) {
         if (file[index] != magic[index]) {
-            return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+            return Result<uint32>::Failure(ErrorCode::CorruptData);
         }
     }
 
@@ -778,7 +784,7 @@ Result<void> DecodeShaderWorkerRequest(Span<const uint8> file, ShaderWorkerReque
     if (!kind || !math ||
         (kind.Value() != static_cast<uint32>(ShaderWorkerRequestKind::ToolQuery) &&
          kind.Value() != static_cast<uint32>(ShaderWorkerRequestKind::Compile))) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     out.kind = static_cast<ShaderWorkerRequestKind>(kind.Value());
@@ -796,7 +802,7 @@ Result<void> DecodeShaderWorkerRequest(Span<const uint8> file, ShaderWorkerReque
         auto id = r.ReadStringView();
         auto version = r.ReadU32();
         if (!id || !version || id.Value().ByteCount() >= MaxShaderFormatIdBytes) {
-            return Failure(ErrorCode::InvalidArgument);
+            return Failure(ErrorCode::CorruptData);
         }
 
         ShaderWorkerProcessorVersion entry;
@@ -814,7 +820,7 @@ Result<void> DecodeShaderWorkerRequest(Span<const uint8> file, ShaderWorkerReque
     auto formatsField = record.Find(FormatsField);
     auto jobsField = record.Find(JobsField);
     if (!formatsField || !jobsField) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     auto formats = RecordListReader::OpenField(record, formatsField.Value(), FormatSchema,
@@ -961,7 +967,7 @@ Result<void> DecodeShaderWorkerResponse(Span<const uint8> file,
             auto state = r.ReadU8();
             if (!name || !state ||
                 state.Value() > static_cast<uint8>(ShaderWorkerToolState::Failed)) {
-                return Failure(ErrorCode::InvalidArgument);
+                return Failure(ErrorCode::CorruptData);
             }
 
             auto tool = Append(out.tools);
@@ -984,7 +990,7 @@ Result<void> DecodeShaderWorkerResponse(Span<const uint8> file,
                 auto found = r.ReadBool();
                 auto version = r.ReadStringView();
                 if (!name || !found || !version) {
-                    return Failure(ErrorCode::InvalidArgument);
+                    return Failure(ErrorCode::CorruptData);
                 }
 
                 tool.Value()->found = found.Value();
@@ -1009,7 +1015,7 @@ Result<void> DecodeShaderWorkerResponse(Span<const uint8> file,
 
     auto resultsField = record.Find(ResultsField);
     if (!resultsField) {
-        return Failure(ErrorCode::InvalidArgument);
+        return Failure(ErrorCode::CorruptData);
     }
 
     auto results = RecordListReader::OpenField(record, resultsField.Value(), ResultSchema,
