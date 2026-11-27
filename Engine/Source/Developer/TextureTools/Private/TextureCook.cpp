@@ -71,17 +71,17 @@ Result<void> CookWarn(const CookContext& context, AssetDiagnosticCode code,
         CookDiagnostic{code, true, asset, {}, setting, ErrorCode::None});
 }
 
-// 객체 타입의 차원이다(Texture 파생 다섯 — 아니면 false).
-bool CookDimensionOf(TypeId type, TextureDimension& out) noexcept {
-    if (type == TypeIdOf<Texture2D>()) {
+// 객체 타입의 차원이다(Texture 파생 다섯과 그 파생 — 색 커브 atlas는 Texture2D, 아니면 false).
+bool CookDimensionOf(const TypeLease& type, TextureDimension& out) noexcept {
+    if (type.IsA(TypeIdOf<Texture2D>())) {
         out = TextureDimension::Texture2D;
-    } else if (type == TypeIdOf<TextureCube>()) {
+    } else if (type.IsA(TypeIdOf<TextureCube>())) {
         out = TextureDimension::TextureCube;
-    } else if (type == TypeIdOf<Texture2DArray>()) {
+    } else if (type.IsA(TypeIdOf<Texture2DArray>())) {
         out = TextureDimension::Texture2DArray;
-    } else if (type == TypeIdOf<TextureCubeArray>()) {
+    } else if (type.IsA(TypeIdOf<TextureCubeArray>())) {
         out = TextureDimension::TextureCubeArray;
-    } else if (type == TypeIdOf<VolumeTexture>()) {
+    } else if (type.IsA(TypeIdOf<VolumeTexture>())) {
         out = TextureDimension::Volume;
     } else {
         return false;
@@ -543,7 +543,7 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
 
     const TypeId typeId = type.Value().Id();
     TextureDimension dimension = TextureDimension::Texture2D;
-    if (!CookDimensionOf(typeId, dimension)) {
+    if (!CookDimensionOf(type.Value(), dimension)) {
         return CookFail(context, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch);
     }
 

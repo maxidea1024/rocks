@@ -1560,6 +1560,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::EventBeacon::hidden",
+      "id": "272d7570013244988cdffd44603a59ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventBeacon::linked",
+      "id": "bfcaf4eef8bb41669c0cdc6b56b86af9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventBeacon::pinged",
+      "id": "4f6530d02a8f49f18377781b91b16640",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventBeacon::scored",
+      "id": "8e7d99723c0748c8b1c2ea812699c322",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventBeacon::tagged",
+      "id": "8b77815eb7634d55a5d2c0a56f78d746",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::EventPublisher::changed",
       "id": "6c3494fdcc3c442a92e48f5e8f0e3440",
       "aliases": [],
@@ -4523,6 +4558,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::BeaconMood",
+      "id": "5711235e09584f888c004fd4ad608c99",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::Bias",
       "id": "6ba8da01a9a74de9a2971b6caa9bc101",
       "aliases": [],
@@ -4838,6 +4880,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::EventBeacon",
+      "id": "41b30a39560a4477a41eb7ad6347332b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::EventPublisher",
       "id": "4f04477320eb4280a73ba9445b927ace",
       "aliases": [],
@@ -4847,6 +4896,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::EventPublisherChild",
       "id": "dc6791d9efa24bdbb9a35f759d6e9377",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventRelay",
+      "id": "e42cd2ab3ac94426a9085883a492a601",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventRelayLeaf",
+      "id": "c2ddddd799e3437397ecfaf0bef7f698",
       "aliases": [],
       "retired": false
     },

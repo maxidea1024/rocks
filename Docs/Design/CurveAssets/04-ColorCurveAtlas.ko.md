@@ -29,7 +29,7 @@
 
 - `class ColorCurveAtlas : public Texture2D`(Runtime `CurveAtlas` 모듈 — 1.4절). UE처럼 텍스처 자체다. 그래야 머티리얼·렌더·쿠커가 일반 텍스처로 다룬다. `Texture2D`는 `final`을 뗀다(Texture 모듈 — 렌더·에셋 세션 합의 2026-11-27).
 - 필드:
-  - `ROCKS_PROPERTY() uint32 width = DefaultColorCurveAtlasWidth;`(이름 있는 상수 256 — UE 생성자 값). 굽기는 max(width, `MinColorCurveAtlasWidth` = 2)를 쓰고, 정규화 hook이 필드도 그 값으로 올린다(UE와 같다).
+  - `ROCKS_PROPERTY() uint32 width = DefaultColorCurveAtlasWidth;`(이름 있는 상수 256 — UE 생성자 값). 굽기는 max(width, `MinColorCurveAtlasWidth` = 2)를 쓰고, 정규화 hook이 필드도 그 값으로 올린다(UE와 같다). asset-new가 width를 대입하지 않으면 원본 재구성 hook(까닭 New)이 `NewColorCurveAtlasWidth`(64 — UE `UCurveLinearColorAtlasFactory`, `EditorFactories.cpp:2363, 2375`)로 둔다(팩토리 대응 — AssetSystem 12.14절 Volume 기본 원본과 같은 자리).
   - `ROCKS_PROPERTY() ObjectRefArray<ColorCurveAsset> curves;`(Hard — UE처럼 런타임 필드다. null 원소는 흰 행이다)
   - `ROCKS_PROPERTY(EditorOnly) bool disableAdjustments = false;`(UE `bDisableAllAdjustments` — UE처럼 편집기 전용. 굽기가 원본에 반영하므로 쿠커는 읽지 않는다)
 - 텍스처 설정 기본값은 UE 생성자 값이다. 생성자가 `mipGenSettings = NoMipmaps`, `filter = Bilinear`, `srgb = 0`, `addressX·Y = Clamp`, `compressionSettings = HDR`로 둔다.
@@ -49,14 +49,17 @@ UE처럼 **atlas가 자기 `TextureSource`에 구워 저장한다**. 쿠커에�
   - `Propagate`(텍스처 원소 재임포트 전파): 아무것도 하지 않는다(atlas 원본은 텍스처를 묶지 않는다).
 - hook은 assignedFields를 보지 않는다. 늘 굽고, 지금 원본과 비교한다. 같으면 아무것도 쓰지 않고, 다르면 `AddBulk` → `source` 교체 → `MarkRebuilt`다. 비교는 형식·크기·slice·mip·layer와 bulk 내용(`BulkDataRef::SameContent` — raw 길이·SHA-256)이다. 그래서 낡지 않은 atlas를 열어도 dirty가 되지 않는다. UE는 로드마다 다시 그린다(같은 값이면 결과도 같다).
 - 커브 변경의 즉시 전파(UE `OnCurveUpdated` — 커브를 asset-set으로 바꾸면 그 커브를 쓰는 atlas를 다시 구워 저장)는 지금 없다. 낡은 저장 원본은 다음 열기 때 다시 구워진다. 즉시 전파가 필요하면 에셋 세션에 요구로 적는다(rocks-5f 2026-11-27 — 정확성에는 필요 없다).
-- **Build 의존**: atlas의 Build 의존 hook이 `curves`의 각 패키지를 Build 의존으로 더한다(AssetSystem 16.2절). 저장된 atlas 원본이 낡아 있어도 커브 내용이 쿠킹 키에 들어가 너겟이 무효가 된다. 텍스처 처리기의 너겟 키는 처리기 입력 원본의 SHA-256(`TextureSource::bulk.sha256`)을 쓰는데, Open에서 다시 구운 저장 전 원본이면 그 값은 새 bulk의 SHA-256이다(`AddUnsaved`).
+- **Build 의존**: atlas의 Build 의존 hook이 `curves`의 각 패키지를 Build 의존으로 더한다(AssetSystem 16.2절). atlas와 같은 패키지의 커브(하위 객체)는 빼는데, 저장할 id(`context.asset`)가 아니라 outermost로 가른다(복제·ID 수정은 새 id로 저장하지만 객체는 원본이다). 저장된 atlas 원본이 낡아 있어도 커브 내용이 쿠킹 키에 들어가 너겟이 무효가 된다. 텍스처 처리기의 너겟 키는 처리기 입력 원본의 SHA-256(`TextureSource::bulk.sha256`)을 쓰는데, Open에서 다시 구운 저장 전 원본이면 그 값은 새 bulk의 SHA-256이다(`AddUnsaved`).
 - 굽기 함수 `BakeColorCurveAtlas(...)`(Developer `CurveAtlasTools`): 입력은 풀린 커브 목록(null 허용)·너비·`disableAdjustments`이고, 출력은 RGBA16F 픽셀 byte(행 우선, 성분 r g b a, little-endian)다.
   - 크기: 너비 W = max(width, 2), 높이 = max(커브 수, 1). 둘 중 하나가 `MaxColorCurveAtlasDimension`(16384 — 텍스처 원본 임포트 상한 `ImageDecodeLimits::DefaultMaxDimension`과 같다)을 넘으면 `InvalidSetting`(detail = 넘은 값)이다. UE는 상한 없이 굽고 빌드가 최대 크기로 줄인다(AssetSystem 12.5절 4번) — 7.2절 22.
   - 표본 시간은 float x × (1 / (W − 1))이다(UE 식 그대로 — 나눗셈 한 번이 아니라 역수 곱이라 반올림이 다르다).
   - 값은 `ColorCurveAsset`의 조정 평가(2.3절, `disableAdjustments`면 원값)이고 null 커브는 흰색 (1, 1, 1, 1)이다.
   - 조정 평가의 `powf`는 플랫폼 libm에 따라 비트가 다를 수 있다. 원본 byte 결정성은 CurveData D17과 같은 범위(Windows x64 기준)로 보장하고, 다른 호스트는 허용오차 대조다. 호스트가 달라 원본 byte가 다르면 Open이 dirty로 표시할 수 있다(저장하면 그 호스트 값이 된다).
   - float16 변환은 Core `Float16::FromFloat`(round-to-nearest-even — UE `FFloat16Color`의 `FFloat16::Set`과 같은 규칙)다.
-- 쿠커가 연 패키지가 dirty가 되어도 쿠킹은 에디터 패키지를 저장하지 않는다. 메모리 원본만 쓴다(CA6 시험이 본다).
+- 쿠커가 연 패키지가 dirty가 되어도 쿠킹은 에디터 패키지를 저장하지 않는다. 메모리 원본만 쓴다(CA6 시험이 본다). 쿠킹을 시작할 때 이미 열린 dirty 패키지가 있으면 쿠킹은 `Busy`다(CookRun — 오래 사는 집합이 낡은 atlas를 열면 저장해야 쿠킹할 수 있다). 명령행은 명령마다 새 집합이라 해당하지 않는다.
+- 실패:
+  - 굽기 실패(크기 상한·풀리지 않는 커브 — 아래)는 Edit·New면 명령 실패(저장하지 않는다), Open이면 그 열기 실패다(AssetSystem 12.14절 A5j2c — 이번에 연 패키지를 모두 닫는다). 그래서 상한을 넘게 저장된 atlas(외부 편집으로만 생긴다 — 정상 편집은 저장 전에 거부한다)는 그 atlas와 그것을 참조하는 패키지를 열 수 없다. UE `PostLoad`는 실패하지 않는다(7.2절 22).
+  - 풀리지 않는 커브(버린 패키지의 커브 등)는 `MissingDependency`(detail = 원소 번호)다. 의존 패키지가 빠져 미해결 import가 있는 atlas는 열 때 굽지 않고(A5j2c 건너뛰기) 쿠커는 `MissingDependency`로 거부한다. UE는 빠진 커브를 흰 행으로 굽는다(`RenderGradient`의 Cast 실패 — 7.2절 22).
 - Texture 쪽 변경(CA6 — 에셋 세션 합의, 이 세션이 작게 한다):
   - `Texture2D`의 `final` 해제.
   - `TextureCook.cpp`의 `CookDimensionOf`(정확한 TypeId 비교)가 파생 타입을 받게 한다(`IsA` — 정규화의 차원 판정 `TextureSettingsNormalize.cpp`와 같다).

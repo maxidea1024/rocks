@@ -34,8 +34,9 @@ struct ProductCookProcessors {
 // InvalidArgument, 처음 실패한 등록의 오류.
 Result<void> RegisterProductCookProcessors(void* state, CookProcessorTable& table) noexcept;
 
-// 텍스처 hook(설정 정규화·원본 재구성)과 애니메이션 hook(Build 의존)을 table에 등록한다(state는
-// 쓰지 않는다). 오류: 처음 실패한 등록의 오류.
+// 텍스처 hook(설정 정규화·원본 재구성), 애니메이션 hook(Build 의존), 색 커브 atlas hook(굽기·
+// Build 의존·정규화 — CurveAssets 4.3절)을 table에 등록한다(state는 쓰지 않는다). 오류: 처음 실패한
+// 등록의 오류.
 Result<void> RegisterProductTypeHooks(void* state, AssetTypeHookTable& table,
                                       Array<AssetTypeHookRegistration>& tokens) noexcept;
 

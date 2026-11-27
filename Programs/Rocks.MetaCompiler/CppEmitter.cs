@@ -347,6 +347,9 @@ internal static partial class CppEmitter
         IEnumerable<string> targetHeaders = ownFields
             .SelectMany(field => new[] { field.Reference, field.KeyReference })
             .Concat(own.Where(type => type.Base.Length != 0).Select(type => type.Base))
+            // 물려받은 이벤트의 연산표(MakeEventOps<&Owner::field>)는 선언한 클래스의 NativeTypeKey를 쓴다(ResolveForWrite<Owner>):
+            // 바로 위 base가 아닌 조상이 선언했어도 그 생성 헤더가 필요하다(Docs/Design/PhysicsModule 7.1.14절 — PointLight ← Light ← Actor).
+            .Concat(own.SelectMany(type => type.Fields).Where(field => field.IsEvent).Select(field => field.Owner))
             .Where(name => name is not null && (schema.Classes.ContainsKey(name) || schema.Imported.ContainsKey(name)))
             .Select(name => schema.Find(name!).Header)
             .Concat(ownFields.SelectMany(field => new[] { field.ReferenceId, field.KeyReferenceId })

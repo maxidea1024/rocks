@@ -210,3 +210,48 @@ overlap은 질의 기반 장부다(5.3절 — 시뮬레이션 접촉이 아니�
 - `GetCollisionShape`: 구·상자·캡슐이 scale·부풀리기를 반영하고 0 아래로 줄지 않는다. `CollisionShape::Inflate` 경계.
 - `GetPenetrationAdjustment`: 시작 겹침 아님 → 0, 깊이 0 → 기본 깊이, 평면 제약.
 - `SafeMoveUpdatedComponent`: 벽에 5 cm 박힌 상자를 옆으로 옮기면 밀려나(teleport) 원래 이동을 마친다. 밀려날 자리가 다른 벽에 막히면 sweep으로 나온다. 박혀 있지 않으면 보통 sweep(벽에 막힘). 갱신 대상이 Primitive가 아니면 sweep 없이 옮긴다.
+
+### 7.1.14 PH4e 구현 세부(2026-11-27)
+
+hit·overlap의 컴포넌트·Actor 이벤트 필드다(5.5절). 리플렉션 이벤트(`Event<Args...>` — EventReflection ED1, EV2b)를 클래스 필드로 두고 PH4a–PH4c의 가상 hook 자리에서 같이 발행한다. UE `UPrimitiveComponent::OnComponentHit`·`OnComponentBeginOverlap`·`OnComponentEndOverlap`, `AActor::OnActorHit`·`OnActorBeginOverlap`·`OnActorEndOverlap`(`PrimitiveComponent.h`·`Actor.h` 동적 multicast delegate)를 따른다.
+
+**이벤트 필드**(이름은 Rocks식 — UE 이름은 1.3절 대응표에 더한다):
+
+| 클래스 | 필드 | 인자(`Params`) | UE |
+|---|---|---|---|
+| `PrimitiveComponent` | `componentHit` | `hitComponent, otherActor, otherComponent, normalImpulse, hit` — `WeakObjectRef<PrimitiveComponent>, WeakObjectRef<Actor>, WeakObjectRef<PrimitiveComponent>, Vec3d, const HitResult&` | `OnComponentHit` |
+| | `componentOverlapBegan` | `overlappedComponent, otherActor, otherComponent, fromSweep, sweepResult` — 위 셋 + `bool, const HitResult&` | `OnComponentBeginOverlap`(`OtherBodyIndex`는 body가 하나라 뺀다) |
+| | `componentOverlapEnded` | `overlappedComponent, otherActor, otherComponent` | `OnComponentEndOverlap` |
+| `Actor` | `actorHit` | `selfActor, otherActor, normalImpulse, hit` — `WeakObjectRef<Actor>×2, Vec3d, const HitResult&` | `OnActorHit` |
+| | `actorOverlapBegan`·`actorOverlapEnded` | `overlappedActor, otherActor` — `WeakObjectRef<Actor>×2` | `OnActorBeginOverlap`·`OnActorEndOverlap` |
+
+- Actor·컴포넌트 인자는 `WeakObjectRef<T>`다: Sparks는 `ObjectHandle`을 노출하지 못한다(SparksBinding B14 — RMC2602). UE도 타입 있는 포인터를 넘긴다. 나중에 바꾸면 frame digest가 달라져 저장된 바인딩이 미해결(EventReflection ED24)이 되므로 지금 정한다.
+
+- 저장한다(Transient 아님): 에디터·Sparks가 건 리플렉션 바인딩은 그래프에 남는다(EV3a1 — native 구독은 저장하지 않는다). UE도 블루프린트 바인딩은 클래스에 남는다.
+- 생성자가 이벤트마다 allocator를 넘긴다(EV2b).
+
+**HitResult 리플렉션.** 이벤트 인자는 리플렉션 값 형식이어야 한다(바인딩 frame — EventReflection ED5). `HitResult`를 `ROCKS_STRUCT`로 바꾸고 값 칸(`time`·`distance`·`location`·`impactPoint`·`normal`·`impactNormal`·`traceStart`·`traceEnd`·`penetrationDepth`·`faceIndex`·`blockingHit`·`startPenetrating`)을 `ROCKS_PROPERTY`로 둔다. `component`·`actor`는 `ObjectHandle`이라 리플렉션 struct 필드가 될 수 없어(함수·이벤트 인자 전용) `ROCKS_NATIVE`다. 스크립트는 상대를 이벤트 인자(`otherActor`·`otherComponent` — 약한 참조)로 받는다(UE delegate도 따로 넘긴다). 버린 대안: `WeakObjectRef<PrimitiveComponent>` 필드 — 질의·이동·시험 전체의 handle 비교가 바뀐다. 발행하는 파일은 `World/Physics/HitResult.generated.h`를 include한다.
+
+**발행 순서**(가상 hook과 같은 자리 — UE 순서):
+- 막는 sweep hit·시뮬레이션 hit(UE `InternalDispatchBlockingHit` `Actor.cpp:3525–3556`, `DispatchPhysicsCollisionHit` `:5690–5736`): 한쪽마다 Actor `OnHit` → `actorHit` → 그 쪽 컴포넌트 `componentHit`. 단계마다 다시 본다: Actor가 알림을 받을 수 있으면 hook, 그 뒤에도 받을 수 있으면 `actorHit`, 컴포넌트가 살아 있으면 `componentHit`다(hook이 자기를 파괴하면 이어지는 이벤트는 없다 — UE `IsActorValidToNotify` 재검사). sweep은 자기 쪽 → 상대 쪽(뒤집은 hit)이다. sweep hit의 `normalImpulse`는 0이다.
+- overlap 시작(UE `BeginComponentOverlap` `PrimitiveComponent.cpp:4130–4166`): World가 Playing일 때 자기 `componentOverlapBegan` → 상대 `componentOverlapBegan`(sweep이면 뒤집은 hit) → 새 Actor 쌍이면 자기·상대 Actor `OnBeginOverlap` → 자기·상대 `actorOverlapBegan`.
+- overlap 끝(UE `EndComponentOverlap` `:4174–4231`): World가 Playing이고 상대 Actor가 있으면 자기 `componentOverlapEnded` → 상대 `componentOverlapEnded` → 마지막 Actor 쌍 겹침이었으면 자기 Actor `OnEndOverlap`·`actorOverlapEnded` → 상대 Actor `OnEndOverlap`·`actorOverlapEnded`(UE는 끝만 Actor마다 hook과 이벤트를 붙여 부른다). PH4b 구현은 Actor 쌍이 아니면 일찍 돌아갔다 — 컴포넌트 이벤트를 그 앞에 둔다.
+- 파괴 대기(`ComponentState::PendingDestroy`·`ActorState::PendingDestroy`)는 UE의 `MarkAsGarbage` 뒤에 해당해 알림을 받지 않는다(UE `IsPrimCompValidAndAlive`·`IsActorValidToNotify`는 `IsValid`). 예외: 자기 `OnDestroy`가 겹침을 모두 끝내는 동안은 자기와 자기 Actor도 끝 hook·이벤트를 받는다. UE는 컴포넌트 `OnComponentDestroyed`(`ActorComponent.cpp:2201`)와 `UWorld::DestroyActor`의 `ClearComponentOverlaps`(`LevelActor.cpp:981`)가 `MarkAsGarbage`(`:2204`·`:1055`)보다 먼저라 파괴되는 쪽도 끝 알림을 받는다. 이때는 Registry 파괴 요청 전이라 `Event`가 발행자를 붙잡는다. `Event`는 파괴 대기를 스스로 거르지 않으므로 상태는 발행하는 쪽이 본다. PH4b의 "파괴 대기 Actor에는 끝 알림 없음"도 이 규칙으로 바꿨다. 알림 시작 때 본 상태 기준이다(끝의 Actor hook과 이벤트 사이에는 UE처럼 다시 보지 않는다).
+
+**sweep 결과(`fromSweep`·`sweepResult`).** UE `FOverlapInfo`처럼 대기 겹침이 sweep hit를 함께 쥔다: `MoveComponent`의 대기 목록을 (컴포넌트, hit) 쌍으로 바꾸고 `BeginComponentOverlap(other, fromSweep, sweepResult)`다. 끝 위치 갱신(`RefreshOverlaps`)이 찾은 겹침은 `fromSweep` 거짓, `sweepResult`는 상대 컴포넌트·Actor만 채운 hit다(UE `FOverlapInfo(Component)`). 상대 쪽에는 sweep이면 뒤집은 hit(법선 부호만 — UE `GetReversedHit`), 아니면 같은 hit다(UE가 `OtherOverlap.OverlapInfo`를 그대로 넘긴다 — 그 hit의 컴포넌트는 받는 쪽 자신이다).
+
+**메타 컴파일러 수정.** 생성 소스는 클래스 base·이벤트 인자 대상의 생성 헤더만 include했다. 물려받은 이벤트의 연산표(`MakeEventOps<&Owner::field>`)는 선언한 클래스의 `NativeTypeKey`(`ResolveForWrite<Owner>`)를 쓰므로, 이벤트를 선언한 조상이 바로 위 base가 아니면(`PointLight` ← `Light` ← `Actor`) 컴파일이 실패했다(EV2b 시험은 같은 헤더의 파생만 본다). 이벤트 필드의 선언 클래스 헤더도 include한다(`CppEmitter` — 이벤트 리플렉션 담당에 알린다).
+
+**미룬 것.** 깨움·잠듦(`OnComponentWake`·`OnComponentSleep` — `generateWakeEvents`)과 `OnComponentPhysicsStateChanged`는 body 깨움·잠듦 감지와 함께 PH5에서 한다(3.1절 PhysicsResults (3)).
+
+**시험**(`PhysicsEventFieldTests.cpp`):
+- sweep 막는 hit: 순서(자기 `OnHit` → `actorHit` → `componentHit` → 상대 셋), 인자, 상대 쪽 뒤집은 법선, 충격량 0.
+- 시뮬레이션 hit: `componentHit`·`actorHit` 인자와 충격량.
+- overlap 시작·끝: 컴포넌트 이벤트(같은 Actor 컴포넌트끼리도 난다 — Actor 이벤트는 없다), sweep이면 `fromSweep` 참·상대는 뒤집은 hit, 끝 위치 갱신은 거짓, Actor 이벤트는 쌍마다 한 번, 끝의 Actor hook·이벤트 순서.
+- World가 Playing이 아니면(EndPlay) overlap 이벤트가 없다. 컴포넌트·Actor 파괴는 파괴되는 쪽과 상대가 모두 끝 이벤트를 받는다. OnHit hook이 자기 Actor를 파괴하면 이어지는 hit 이벤트가 없다. 같은 Actor의 두 컴포넌트가 한 trigger와 겹치면 Actor 이벤트는 한 번이다.
+- `HitResult` 리플렉션: 생성 schema가 값 칸만 싣는다. 등록된 `componentHit` schema의 인자 종류(약한 참조 셋·struct).
+- 메타 컴파일러 회귀: `ReflectionTestFixtures`의 세 헤더 사슬(`EventPublisherChild` ← `EventRelay` ← `EventRelayLeaf`)이 컴파일되고 상속 이벤트 연산을 싣는다(`EventFieldGeneratedTests`).
+
+**한계.** 리플렉션 바인딩(`TryBind` — 리플렉션 함수 대상)으로 이 이벤트를 받는 시험은 없다(대상 함수를 가진 엔진 클래스가 없다 — Sparks 노출 EV4·EI 때 Sparks 함수로 본다). 바인딩 frame의 `HitResult` 복사는 일반 `ValueCopy`(plain copy)다.
+
+**PH4e 리뷰 반영(2026-11-27).** 치명 0, 중요 4, 경미 6. hook이 자기를 파괴한 뒤 `actorHit`가 나던 것(UE 재검사), 파괴되는 쪽의 끝 알림을 UE와 반대로 막던 것(PH4b Actor hook 포함 — UE를 따른다), 이벤트 인자 `ObjectHandle` → `WeakObjectRef`(Sparks 노출), 시험 보강(위 목록, sweep 법선 0이 아닌지)을 고쳤다. 메타 컴파일러 회귀 fixture, 주석 예(`PointLight ← Light ← Actor`), `NotifyActorOverlap`의 bool 세 인자를 hook·이벤트 함수와 `OverlapEdge`로 나눔, 빈 줄을 고쳤다.

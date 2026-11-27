@@ -1036,7 +1036,9 @@ TEST(EditorPackageSet_OpenRebuildCalls) {
 
 // 열 때 원본 재구성 실패(A5j2c): 요청한 패키지·의존 패키지 어느 hook이 실패해도 열기가 실패하고
 // 이번에 연 패키지를 모두 닫는다(이미 열려 있던 패키지는 남는다). failure는 hook의 진단(코드·
-// detail·asset)이고, hook이 진단 없이 실패하면 None과 그 오류(asset = 요청한 id)다. 다시 열면 된다.
+// detail·asset)이고, hook이 진단 없이 실패하면 None과 그 오류(asset = 요청한 id)다. 이번 호출이
+// 붙인 경고(닫은 패키지의 SourceRebuildWarning 등)는 되돌리고 앞서 있던 경고는 둔다. 다시 열면
+// 된다.
 TEST(EditorPackageSet_OpenRebuildFailure) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -1070,8 +1072,23 @@ TEST(EditorPackageSet_OpenRebuildFailure) {
     CHECK(set.Count() == 3 && set.Find(FixedId(VillainId)) == nullptr &&
           set.Find(FixedId(HeroId)) != nullptr);
 
+    // 실패하면 이번 호출의 경고를 되돌린다(앞서 있던 경고는 남는다 — Hero의 경고는 실패 전에
+    // 붙었다).
+    REQUIRE(set.Close(FixedId(HeroId)));
+    REQUIRE(set.Close(FixedId(DerivedId)));
+    REQUIRE(set.Close(FixedId(BaseId)));
+    openRebuild.warnAt = FixedId(HeroId);
+    Array<EditorWarning> warnings(env.allocator);
+    EditorWarning earlier;
+    earlier.kind = EditorWarningKind::UnresolvedImport;
+    REQUIRE(warnings.TryPushBack(earlier));
+    CHECK(set.Open(FixedId(VillainId), &warnings).Error() == ErrorCode::Unsupported);
+    CHECK(warnings.Size() == 1 && warnings[0].kind == EditorWarningKind::UnresolvedImport);
+    CHECK(set.Count() == 0);
+
     // 다시 열면 된다.
     openRebuild.plainFailAt = AssetId{};
+    openRebuild.warnAt = AssetId{};
     CHECK(set.Open(FixedId(VillainId)) && set.Count() == 4);
 }
 

@@ -8,6 +8,7 @@
 #include <Core/Math/MathUtility.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
+#include <World/Physics/HitResult.generated.h>
 #include <World/Primitives/PrimitiveComponent.generated.h>
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/PhysicsScene.h>
@@ -208,20 +209,102 @@ Result<void> SetHandleInList(Array<ObjectHandle>& list, ObjectHandle handle,
     return list.TryPushBack(handle);
 }
 
-// actor에 overlap 시작·끝을 알린다. 파괴 대기 Actor에는 부르지 않는다(UE IsActorValidToNotify).
-void NotifyActorOverlap(World& world, ObjectHandle actor, ObjectHandle other, bool begin) noexcept {
+// overlap 알림의 시작·끝이다.
+enum class OverlapEdge : uint8 {
+    Begin,
+    End
+};
+
+WeakObjectRef<Actor> ActorRef(ObjectHandle actor) noexcept {
+    return WeakObjectRef<Actor>(actor);
+}
+
+WeakObjectRef<PrimitiveComponent> PrimitiveRef(ObjectHandle component) noexcept {
+    return WeakObjectRef<PrimitiveComponent>(component);
+}
+
+// 알림을 받을 수 있는 Actor인지다(UE IsActorValidToNotify — IsValid). Rocks의 파괴 대기는 UE의
+// MarkAsGarbage 뒤에 해당한다. 자기 파괴 정리 중(destroying)이면 파괴 대기여도 받는다(UE는 정리가
+// MarkAsGarbage보다 먼저다).
+bool CanNotifyActor(World& world, ObjectHandle actor, bool destroying) noexcept {
     auto state = world.GetActorState(actor);
-    if (!state || state.Value() == ActorState::PendingDestroy) {
+    return state && (destroying || state.Value() != ActorState::PendingDestroy);
+}
+
+bool CanNotifyComponent(World& world, ObjectHandle component, bool destroying) noexcept {
+    auto state = world.GetComponentState(component);
+    return state && (destroying || state.Value() != ComponentState::PendingDestroy);
+}
+
+// actor의 overlap 가상 hook이다(UE NotifyActorBeginOverlap·NotifyActorEndOverlap).
+void CallActorOverlapHook(World& world, ObjectHandle actor, ObjectHandle other, OverlapEdge edge,
+                          bool destroying) noexcept {
+    if (!CanNotifyActor(world, actor, destroying)) {
         return;
     }
 
-    (void)world.With<Actor>(actor, [other, begin](Actor& target) noexcept {
-        if (begin) {
+    (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
+        if (edge == OverlapEdge::Begin) {
             target.OnBeginOverlap(other);
         } else {
             target.OnEndOverlap(other);
         }
     });
+}
+
+// actor의 overlap 이벤트다(UE OnActorBeginOverlap·OnActorEndOverlap).
+void BroadcastActorOverlap(World& world, ObjectHandle actor, ObjectHandle other, OverlapEdge edge,
+                           bool destroying) noexcept {
+    if (!CanNotifyActor(world, actor, destroying)) {
+        return;
+    }
+
+    (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
+        const EventContext context{world.Objects(), world.Access(), actor};
+        if (edge == OverlapEdge::Begin) {
+            target.actorOverlapBegan.Broadcast(context, ActorRef(actor), ActorRef(other));
+        } else {
+            target.actorOverlapEnded.Broadcast(context, ActorRef(actor), ActorRef(other));
+        }
+    });
+}
+
+// hit 한쪽을 알린다(UE AActor::InternalDispatchBlockingHit — Actor.cpp:3525-3551,
+// DispatchPhysicsCollisionHit — 7.1.14절): Actor가 알림을 받을 수 있으면 OnHit, 그 뒤에도 받을 수
+// 있으면 actorHit, 컴포넌트가 아직 살아 있으면 componentHit다(hook이 자기를 파괴하면 이어지는
+// 이벤트는 나지 않는다).
+void NotifyHitSide(World& world, ObjectHandle actor, ObjectHandle myComponent,
+                   ObjectHandle otherActor, ObjectHandle otherComponent, bool selfMoved,
+                   const Vec3d& normalImpulse, const HitResult& hit) noexcept {
+    if (CanNotifyActor(world, actor, false)) {
+        (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
+            target.OnHit(myComponent, otherActor, otherComponent, selfMoved, normalImpulse, hit);
+        });
+    }
+
+    if (CanNotifyActor(world, actor, false)) {
+        (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
+            target.actorHit.Broadcast({world.Objects(), world.Access(), actor}, ActorRef(actor),
+                                      ActorRef(otherActor), normalImpulse, hit);
+        });
+    }
+
+    if (CanNotifyComponent(world, myComponent, false)) {
+        (void)world.With<PrimitiveComponent>(
+            myComponent, [&](PrimitiveComponent& component) noexcept {
+                component.componentHit.Broadcast({world.Objects(), world.Access(), myComponent},
+                                                 PrimitiveRef(myComponent), ActorRef(otherActor),
+                                                 PrimitiveRef(otherComponent), normalImpulse, hit);
+            });
+    }
+}
+
+// sweep이 아닌 겹침의 hit다(UE FOverlapInfo(Component) — 컴포넌트·Actor만 채운다).
+HitResult OverlapInfoHit(ObjectHandle component, ObjectHandle actor) noexcept {
+    HitResult hit;
+    hit.component = component;
+    hit.actor = actor;
+    return hit;
 }
 
 bool KnownCollisionEnabled(CollisionEnabled value) noexcept {
@@ -615,7 +698,7 @@ Result<bool> PrimitiveComponent::MoveComponent(const Vec3d& delta, const Quatd& 
     Vec3d newLocation = traceEnd;
     // sweep이 지나며 만난 겹침이다(UE PendingOverlaps — 7.1.11절). 할당 실패로 빠진 겹침은 끝 위치
     // 갱신이 다시 찾는다(지나치기만 한 겹침의 시작·끝은 잃는다).
-    Array<ObjectHandle> pendingOverlaps(moveIgnoreActors_.GetAllocator());
+    Array<PendingOverlap> pendingOverlaps(moveIgnoreActors_.GetAllocator());
     if (sweep) {
         newLocation = traceStart;
         auto resolved = TryResolveCollision();
@@ -672,8 +755,13 @@ Result<bool> PrimitiveComponent::MoveComponent(const Vec3d& delta, const Quatd& 
                         firstNonInitialOverlap = pendingOverlaps.Size();
                     }
 
-                    if (!pendingOverlaps.Contains(hit.component)) {
-                        (void)pendingOverlaps.TryPushBack(hit.component);
+                    bool known = false;
+                    for (const PendingOverlap& pending : pendingOverlaps) {
+                        known = known || pending.component == hit.component;
+                    }
+
+                    if (!known) {
+                        (void)pendingOverlaps.TryPushBack(PendingOverlap{hit.component, true, hit});
                     }
                 }
             }
@@ -745,7 +833,7 @@ void PrimitiveComponent::UpdateOverlaps() noexcept {
     UpdateOverlapsWith({});
 }
 
-void PrimitiveComponent::UpdateOverlapsWith(Span<const ObjectHandle> pending) noexcept {
+void PrimitiveComponent::UpdateOverlapsWith(Span<const PendingOverlap> pending) noexcept {
     if (!HasWorld()) {
         return;
     }
@@ -761,8 +849,8 @@ void PrimitiveComponent::UpdateOverlapsWith(Span<const ObjectHandle> pending) no
     const bool queryEnabled =
         resolved && CollisionEnabledHasQuery(resolved.Value().collisionEnabled);
     if (generateOverlapEvents_ && queryEnabled && IsRegistered()) {
-        for (const ObjectHandle other : pending) {
-            BeginComponentOverlap(other);
+        for (const PendingOverlap& overlap : pending) {
+            BeginComponentOverlap(overlap);
         }
 
         // 대기 겹침 알림이 자기를 파괴하거나 표지를 껐을 수 있다(:4517).
@@ -801,15 +889,25 @@ void PrimitiveComponent::RefreshOverlaps(World& world) noexcept {
         return;
     }
 
-    Array<ObjectHandle> current(allocator);
+    Array<OverlapResult> current(allocator);
     if (!current.TryReserve(results.Size())) {
         return;
     }
 
+    auto inCurrent = [&current](ObjectHandle component) noexcept {
+        for (const OverlapResult& entry : current) {
+            if (entry.component == component) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
     for (const OverlapResult& result : results) {
         if (IsOverlapCandidate(world, result.component, result.actor) &&
-            !current.Contains(result.component)) {
-            (void)current.TryPushBack(result.component);
+            !inCurrent(result.component)) {
+            (void)current.TryPushBack(result);
         }
     }
 
@@ -820,7 +918,7 @@ void PrimitiveComponent::RefreshOverlaps(World& world) noexcept {
     }
 
     for (const ObjectHandle other : previous) {
-        if (current.Contains(other)) {
+        if (inCurrent(other)) {
             continue;
         }
 
@@ -840,8 +938,9 @@ void PrimitiveComponent::RefreshOverlaps(World& world) noexcept {
         EndComponentOverlap(other);
     }
 
-    for (const ObjectHandle other : current) {
-        BeginComponentOverlap(other);
+    for (const OverlapResult& entry : current) {
+        BeginComponentOverlap(
+            PendingOverlap{entry.component, false, OverlapInfoHit(entry.component, entry.actor)});
     }
 }
 
@@ -881,8 +980,9 @@ bool PrimitiveComponent::CanGenerateOverlapWith(const PrimitiveComponent& other)
     return weaker == CollisionResponse::Overlap;
 }
 
-void PrimitiveComponent::BeginComponentOverlap(ObjectHandle other) noexcept {
+void PrimitiveComponent::BeginComponentOverlap(const PendingOverlap& overlap) noexcept {
     // UE BeginComponentOverlap(:4100-4172).
+    const ObjectHandle other = overlap.component;
     if (!HasWorld() || other.IsNull() || other == Handle() ||
         GetState() == ComponentState::PendingDestroy || IsOverlappingComponent(other)) {
         return;
@@ -924,10 +1024,36 @@ void PrimitiveComponent::BeginComponentOverlap(ObjectHandle other) noexcept {
         return;
     }
 
-    // 컴포넌트 이벤트는 PH4e다. Actor 알림은 World가 Playing일 때만이다(자기 → 상대).
-    if (newActorPair && world.State() == WorldState::Playing) {
-        NotifyActorOverlap(world, owner, otherActor, true);
-        NotifyActorOverlap(world, otherActor, owner, true);
+    // 알림은 World가 Playing일 때만이다(UE HasBegunPlay — :4131). 컴포넌트 이벤트(자기 → 상대) →
+    // 새 Actor 쌍이면 Actor hook(자기 → 상대) → Actor 이벤트(자기 → 상대)다(:4133-4166).
+    if (world.State() != WorldState::Playing) {
+        return;
+    }
+
+    componentOverlapBegan.Broadcast({world.Objects(), world.Access(), self}, PrimitiveRef(self),
+                                    ActorRef(otherActor), PrimitiveRef(other), overlap.fromSweep,
+                                    overlap.hit);
+    // 상대에게는 sweep이면 뒤집은 hit(이 쪽이 움직였다), 아니면 같은 hit다(UE).
+    HitResult otherHit = overlap.hit;
+    if (overlap.fromSweep) {
+        otherHit.normal = overlap.hit.normal * -1.0;
+        otherHit.impactNormal = overlap.hit.impactNormal * -1.0;
+    }
+
+    // 상대가 그 사이 파괴 대기가 됐으면 내지 않는다(UE IsValid(OtherComp)).
+    if (CanNotifyComponent(world, other, false)) {
+        (void)world.With<PrimitiveComponent>(other, [&](PrimitiveComponent& target) noexcept {
+            target.componentOverlapBegan.Broadcast({world.Objects(), world.Access(), other},
+                                                   PrimitiveRef(other), ActorRef(owner),
+                                                   PrimitiveRef(self), overlap.fromSweep, otherHit);
+        });
+    }
+
+    if (newActorPair) {
+        CallActorOverlapHook(world, owner, otherActor, OverlapEdge::Begin, false);
+        CallActorOverlapHook(world, otherActor, owner, OverlapEdge::Begin, false);
+        BroadcastActorOverlap(world, owner, otherActor, OverlapEdge::Begin, false);
+        BroadcastActorOverlap(world, otherActor, owner, OverlapEdge::Begin, false);
     }
 }
 
@@ -946,17 +1072,38 @@ void PrimitiveComponent::EndComponentOverlap(ObjectHandle other) noexcept {
         });
     const bool recorded = IsOverlappingComponent(other);
     (void)SetHandleInList(overlappingComponents_, other, false);
-    if (!recorded || !otherActor || world.State() != WorldState::Playing) {
+    if (!recorded || !otherActor || otherActor.Value().IsNull() ||
+        world.State() != WorldState::Playing) {
         return;
     }
 
+    // 컴포넌트 이벤트(자기 → 상대) 뒤, 마지막 Actor 쌍 겹침이었으면 Actor마다 hook → 이벤트다(UE
+    // :4206-4228). 파괴 대기 쪽은 받지 않는다(UE IsPrimCompValidAndAlive) — 단 자기 OnDestroy의
+    // 모두 끝내기는 자기와 자기 Actor도 받는다(UE는 MarkAsGarbage 전에 끝낸다).
     const ObjectHandle owner = GetOwner();
-    if (owner == otherActor.Value() || IsOverlappingActor(world, owner, otherActor.Value())) {
+    const ObjectHandle otherOwner = otherActor.Value();
+    const bool destroying = clearingForDestroy_;
+    if (CanNotifyComponent(world, self, destroying)) {
+        componentOverlapEnded.Broadcast({world.Objects(), world.Access(), self}, PrimitiveRef(self),
+                                        ActorRef(otherOwner), PrimitiveRef(other));
+    }
+
+    if (CanNotifyComponent(world, other, false)) {
+        (void)world.With<PrimitiveComponent>(other, [&](PrimitiveComponent& target) noexcept {
+            target.componentOverlapEnded.Broadcast({world.Objects(), world.Access(), other},
+                                                   PrimitiveRef(other), ActorRef(owner),
+                                                   PrimitiveRef(self));
+        });
+    }
+
+    if (owner == otherOwner || IsOverlappingActor(world, owner, otherOwner)) {
         return;
     }
 
-    NotifyActorOverlap(world, owner, otherActor.Value(), false);
-    NotifyActorOverlap(world, otherActor.Value(), owner, false);
+    CallActorOverlapHook(world, owner, otherOwner, OverlapEdge::End, destroying);
+    BroadcastActorOverlap(world, owner, otherOwner, OverlapEdge::End, destroying);
+    CallActorOverlapHook(world, otherOwner, owner, OverlapEdge::End, false);
+    BroadcastActorOverlap(world, otherOwner, owner, OverlapEdge::End, false);
 }
 
 void PrimitiveComponent::ClearComponentOverlaps() noexcept {
@@ -1011,7 +1158,9 @@ void PrimitiveComponent::OnDestroy(EndPlayReason reason) noexcept {
     SceneComponent::OnDestroy(reason);
     // UE OnComponentDestroyed(:2026-2044): 다시 겹치지 않게 표지를 끄고 모두 끝낸다(알림 있음).
     generateOverlapEvents_ = false;
+    clearingForDestroy_ = true;
     ClearComponentOverlaps();
+    clearingForDestroy_ = false;
 }
 
 void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
@@ -1023,21 +1172,8 @@ void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
     World& world = GetWorld();
     const ObjectHandle self = Handle();
     const ObjectHandle owner = GetOwner();
-    auto notify = [&world](ObjectHandle actor, ObjectHandle myComponent, ObjectHandle otherActor,
-                           ObjectHandle otherComponent, bool selfMoved,
-                           const HitResult& value) noexcept {
-        // 파괴 대기 Actor에는 부르지 않는다(UE IsActorValidToNotify).
-        auto state = world.GetActorState(actor);
-        if (!state || state.Value() == ActorState::PendingDestroy) {
-            return;
-        }
-
-        (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
-            target.OnHit(myComponent, otherActor, otherComponent, selfMoved, Vec3d::Zero(), value);
-        });
-    };
-
-    notify(owner, self, hit.actor, hit.component, true, hit);
+    // sweep hit의 충격량은 0이다.
+    NotifyHitSide(world, owner, self, hit.actor, hit.component, true, Vec3d::Zero(), hit);
     // 발행 중 상대 컴포넌트가 파괴될 수 있다(UE IsValid(BlockingHitComponent)).
     auto otherState = world.GetComponentState(hit.component);
     if (!otherState || otherState.Value() == ComponentState::PendingDestroy) {
@@ -1048,7 +1184,7 @@ void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
     HitResult reversed = hit;
     reversed.normal = hit.normal * -1.0;
     reversed.impactNormal = hit.impactNormal * -1.0;
-    notify(hit.actor, hit.component, owner, self, false, reversed);
+    NotifyHitSide(world, hit.actor, hit.component, owner, self, false, Vec3d::Zero(), reversed);
 }
 
 void PrimitiveComponent::DispatchPhysicsHit(World& world, const PhysicsContactHit& hit) noexcept {
@@ -1064,10 +1200,8 @@ void PrimitiveComponent::DispatchPhysicsHit(World& world, const PhysicsContactHi
         return;
     }
 
-    (void)world.With<Actor>(hit.myActor, [&](Actor& target) noexcept {
-        target.OnHit(hit.myComponent, hit.otherActor, hit.otherComponent, true, hit.normalImpulse,
-                     hit.hit);
-    });
+    NotifyHitSide(world, hit.myActor, hit.myComponent, hit.otherActor, hit.otherComponent, true,
+                  hit.normalImpulse, hit.hit);
 }
 
 Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,

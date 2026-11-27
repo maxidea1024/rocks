@@ -130,6 +130,11 @@ internal static partial class SparksBinding
                 CheckFunction(schema, type, function, names);
             }
 
+            foreach (FieldModel field in type.OwnFields.Where(IsScriptEvent))
+            {
+                CheckEvent(schema, type, field, names);
+            }
+
             if (type.ScriptType)
             {
                 CheckMemberNames(schema, type);
@@ -290,8 +295,8 @@ internal static partial class SparksBinding
         _ = Notation(schema, field, symbol, topLevel: true);
     }
 
-    // 노출 타입의 보이는 사슬(자기와 노출된 기반 — 끊긴 곳에서 멈춘다)의 노출 필드·함수 이름은 한 이름 공간에서 겹치지 않는다(B5·B13 —
-    // SL 3.1절).
+    // 노출 타입의 보이는 사슬(자기와 노출된 기반 — 끊긴 곳에서 멈춘다)의 노출 필드·이벤트·함수 이름은 한 이름 공간에서 겹치지 않는다
+    // (B5·B13·B22 — SL 3.1절·10.2절).
     private static void CheckMemberNames(SchemaModel schema, ClassModel type)
     {
         // 자기부터 기반 쪽으로의 순서를 지킨다(함수 겹침은 기반부터 본다).
@@ -309,7 +314,7 @@ internal static partial class SparksBinding
         }
 
         Dictionary<string, FieldModel> seen = new(StringComparer.Ordinal);
-        foreach (FieldModel field in type.Fields.Where(field => field.Spec.ScriptVisible && chain.Contains(field.Owner)))
+        foreach (FieldModel field in type.Fields.Where(field => (field.Spec.ScriptVisible || IsScriptEvent(field)) && chain.Contains(field.Owner)))
         {
             string? name = FieldName(field);
             if (name is null)
@@ -320,8 +325,8 @@ internal static partial class SparksBinding
             if (!seen.TryAdd(name, field))
             {
                 FieldModel other = seen[name];
-                throw new MetadataException($"{type.Name}: Sparks field name '{name}' is used by {other.Owner}::{other.Name} and {field.Owner}::{field.Name}", "RMC2605",
-                    "Give one of the fields a different Sparks name with ScriptName = \"...\".").At(field.Owner == type.Name ? field.Site : type.Site);
+                throw new MetadataException($"{type.Name}: Sparks member name '{name}' is used by {Member(other)} and {Member(field)}", "RMC2605",
+                    "Fields and events share one Sparks name space; give one of them a different Sparks name with ScriptName = \"...\".").At(field.Owner == type.Name ? field.Site : type.Site);
             }
         }
 
@@ -337,12 +342,12 @@ internal static partial class SparksBinding
                     continue;
                 }
 
-                string? clash = seen.TryGetValue(name, out FieldModel? field) ? $"the field {field.Owner}::{field.Name}"
+                string? clash = seen.TryGetValue(name, out FieldModel? field) ? Member(field)
                     : functions.TryGetValue(name, out FunctionModel? other) ? $"the function {other.Owner}::{other.Name}" : null;
                 if (clash is not null)
                 {
                     throw new MetadataException($"{type.Name}: Sparks member name '{name}' of {function.Owner}::{function.Name} is also used by {clash}", "RMC2605",
-                        "Fields and functions share one Sparks name space; rename one with ScriptName = \"...\".").At(function.Owner == type.Name ? function.Site : type.Site);
+                        "Fields, events and functions share one Sparks name space; rename one with ScriptName = \"...\".").At(function.Owner == type.Name ? function.Site : type.Site);
                 }
 
                 functions.Add(name, function);
@@ -362,6 +367,9 @@ internal static partial class SparksBinding
     }
 
     private const string SetterPrefix = "Set";
+
+    // 진단 문구의 필드·이벤트 표기다.
+    private static string Member(FieldModel field) => $"the {(field.IsEvent ? "event" : "field")} {field.Owner}::{field.Name}";
 
     // 타입의 Sparks 이름이다(실효 타입 도구 이름 — B5).
     private static string TypeName(ClassModel type) => type.EffectiveToolName;
@@ -589,6 +597,7 @@ internal static partial class SparksBinding
             }
 
             WriteFunctions(json, schema, type);
+            WriteEvents(json, schema, type);
         }
 
         json.WriteEndObject();

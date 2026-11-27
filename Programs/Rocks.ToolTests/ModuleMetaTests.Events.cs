@@ -97,5 +97,76 @@ internal static partial class ModuleMetaTests
             await Reject(layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false),
                 (layout.Source("Upper/Private/Upper/Secret.h"), "Upper/Secret.h", true)]), "RMC2006", "private struct");
         });
+
+        // Sparks 노출 이벤트(Docs/Design/SparksBinding.ko.md B25): descriptor schema 8의 ScriptAssignable flag·scriptName이 import 기반의 노출 이벤트
+        // 이름을 전하고, 그 이름과 겹치는 파생 노출 멤버는 RMC2605다. reader는 flag와 이름의 짝을 본다.
+        suite.Add("Meta.SparksEventsAcrossModules", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h",
+                "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/ObjectRefs.h>\n#include <Object/Object.h>\n#include <Object/Event.h>\n" +
+                "namespace probe {\nROCKS_CLASS(ScriptExtensible)\nclass ROCKS_LOWER_API Base : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Base(rocks::Allocator& allocator) noexcept : changed(allocator) {}\n" +
+                "ROCKS_PROPERTY(Params = \"amount\", ScriptAssignable, ScriptName = \"Fired\") rocks::Event<rocks::int32> changed;\n};\n}\n");
+            layout.Manifest("Lower", ["probe::Base"], ["probe::Base::changed"], []);
+            ProcessResult lower = await layout.RunModuleAsync("Lower", "Lower/Parent.h", []);
+            Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
+            string original = File.ReadAllText(layout.Descriptor("Lower"));
+            using (JsonDocument descriptor = JsonDocument.Parse(original))
+            {
+                JsonElement fired = Type(descriptor, "probe::Base").GetProperty("fields").EnumerateArray()
+                    .Single(field => field.GetProperty("name").GetString() == "changed");
+                Verify.Equal("Fired", fired.GetProperty("scriptName").GetString(), "descriptor carries the final Sparks name");
+                Verify.That(fired.GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "ScriptAssignable"), "ScriptAssignable flag");
+            }
+
+            // init은 파생 멤버(이벤트)의 초기화 목록 뒷부분이다.
+            string Derived(string members, string init = "") =>
+                "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/ObjectRefs.h>\n#include <Lower/Parent.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nclass Derived : public Base {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Derived(rocks::Allocator& allocator) noexcept : Base(allocator)" + init + " {}\n" + members + "\n};\n}\n";
+
+            // 다른 이름의 노출 필드는 받는다. 파생 descriptor에 다시 실린 상속 이벤트도 노출 flag·Sparks 이름을 지닌다(3단 사슬).
+            layout.Write("Upper/Public/Upper/Value.h", Derived("ROCKS_PROPERTY(ScriptReadOnly) rocks::int32 extra = 0;"));
+            layout.Manifest("Upper", ["probe::Derived"], ["probe::Derived::extra", "probe::Derived::fired", "probe::Derived::boom"], ["probe::Derived::Fired"]);
+            ProcessResult upper = await layout.RunModuleAsync("Upper", "Upper/Value.h", ["Lower"]);
+            Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
+            using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllText(layout.Descriptor("Upper"))))
+            {
+                JsonElement inherited = Type(descriptor, "probe::Derived").GetProperty("fields").EnumerateArray()
+                    .Single(field => field.GetProperty("name").GetString() == "changed");
+                Verify.Equal("probe::Base", inherited.GetProperty("owner").GetString(), "inherited event owner");
+                Verify.Equal("Fired", inherited.GetProperty("scriptName").GetString(), "inherited event keeps the Sparks name");
+                Verify.That(inherited.GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "ScriptAssignable"), "inherited ScriptAssignable flag");
+            }
+
+            // import 기반의 노출 이벤트 이름과 겹치는 노출 필드·함수·이벤트(RMC2605).
+            foreach ((string member, string init) in new[] { ("ROCKS_PROPERTY(ScriptReadOnly) rocks::int32 fired = 0;", ""),
+                ("ROCKS_FUNCTION(ScriptCallable) void Fired() noexcept;", ""),
+                ("ROCKS_PROPERTY(ScriptAssignable, ScriptName = \"Fired\") rocks::Event<> boom;", ", boom(allocator)") })
+            {
+                layout.Write("Upper/Public/Upper/Value.h", Derived(member, init));
+                await Reject(layout.RunModuleAsync("Upper", "Upper/Value.h", ["Lower"]), "RMC2605", "Fired");
+            }
+
+            // descriptor reader: 노출 flag와 scriptName은 함께 있고, 이름은 PascalCase이며 Changed가 아니고, 타입은 노출 타입이다.
+            foreach ((string what, string from, string to) in new[]
+            {
+                ("name without flag", "\"ScriptAssignable\"", "\"SaveGame\""),
+                ("flag without name", "\"scriptName\": \"Fired\"", "\"scriptName\": \"\""),
+                ("bad name", "\"scriptName\": \"Fired\"", "\"scriptName\": \"fired\""),
+                ("changed name", "\"scriptName\": \"Fired\"", "\"scriptName\": \"Changed\""),
+                ("hidden type", "\"ScriptType\",", "")
+            })
+            {
+                Verify.That(original.Contains(from, StringComparison.Ordinal), "descriptor fixture changed: " + what);
+                string mutated = layout.Generated("Mutated", what.Replace(' ', '_') + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, original.Replace(from, to, StringComparison.Ordinal));
+                layout.Write("Upper/Public/Upper/Value.h", Derived("ROCKS_PROPERTY(ScriptReadOnly) rocks::int32 extra = 0;"));
+                await Reject(layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)], imports: [mutated]),
+                    "RMC1000", "invalid descriptor");
+            }
+        });
     }
 }
