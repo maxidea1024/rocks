@@ -220,6 +220,11 @@ TEST(EventField_RejectsBadSchemas) {
             {"missing bindings",
              [](CarrierTables& t, RuntimeTypeOps&) noexcept { t.events[1].bindings = nullptr; },
              ErrorCode::InvalidArgument},
+            {"missing keepUnresolved",
+             [](CarrierTables& t, RuntimeTypeOps&) noexcept {
+                 t.events[2].keepUnresolved = nullptr;
+             },
+             ErrorCode::InvalidArgument},
             {"missing unbindFunction",
              [](CarrierTables& t, RuntimeTypeOps&) noexcept {
                  t.events[0].unbindFunction = nullptr;

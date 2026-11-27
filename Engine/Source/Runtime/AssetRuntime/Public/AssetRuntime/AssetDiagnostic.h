@@ -40,6 +40,10 @@ enum class AssetDiagnosticCode : uint16 {
     CorruptEntry,
     IncompatibleCook,
     NeverCookReferenced,
+    // 쿠킹 쓰기가 이벤트 바인딩을 쓸 수 없다(Docs/Design/EventReflection.ko.md ED24 — 미해결
+    // 레코드나 EditorOnly 함수를 가리키는 바인딩, section = Objects, detail = 이유 1 EditorOnly
+    // 함수·2 미해결)
+    EventBindingNotCookable,
     // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
     // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
     ContentNotTrusted,
