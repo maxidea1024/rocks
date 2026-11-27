@@ -35,10 +35,6 @@ using namespace rocks::shader_manager_test;
 constexpr char TestShaderFolder[] = "Programs/Sandbox/EngineShaderTests";
 constexpr char TestShaderRoot[] = "/Plugin/EngineShaderTests";
 
-// 형식 정의 전부다(Engine/Config/ShaderFormats).
-constexpr StringView Formats[] = {"D3D12_SM6", "D3D11_SM5",      "VULKAN_SM5", "VULKAN_ANDROID",
-                                  "GLES31_PC", "GLES31_ANDROID", "METAL_SM5",  "METAL_IOS"};
-
 struct TestEntry {
     const char* path;
     const char* entry;
@@ -176,7 +172,7 @@ TEST(EngineShaders_CompileMatrix) {
 
     // 형식 snapshot이다(형식마다 하나 — job이 가리킨다).
     Array<UniquePtr<ShaderFormatSnapshot>> snapshots(TestAllocator());
-    for (const StringView id : Formats) {
+    for (const StringView id : ShaderFormatIds) {
         auto snapshot = UniquePtr<ShaderFormatSnapshot>::TryMake(TestAllocator(), TestAllocator());
         REQUIRE(snapshot);
         REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, id, *snapshot.Value()));
@@ -264,7 +260,7 @@ TEST(EngineShaders_CompileMatrix) {
         const usize begin = formatBegins[format];
         const usize end = formatBegins[format + 1];
         const usize perFormat = end - begin;
-        const StringView id = Formats[format];
+        const StringView id = ShaderFormatIds[format];
         if (snapshots[format]->definition.stages == 0) {
             // 자리표시 형식(단계 없음 — 후속 플랫폼)이다. job은 InvalidJob으로 끝난다.
             printf(

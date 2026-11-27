@@ -63,9 +63,6 @@ namespace rocks::shader {
 // 워커 묶음 상한(측정 S8 — 워커 열기 비용을 묶음으로 나눠 갚는다)이다.
 inline constexpr uint32 DefaultShaderBatchJobs = 32;
 inline constexpr usize DefaultShaderBatchSourceBytes = usize{4} * 1024 * 1024;
-// 머티리얼 생성 원문 연결 경로다(Docs/Design/MaterialSystem 7.2·7.8절, MSR3 — job의 materialSource
-// 텍스트로 잇는다).
-inline constexpr char MaterialGeneratedIncludePath[] = "/Engine/Generated/Material.rsh";
 // 기본 워커 수 상한이다(min(논리 코어 - 1, 이 값)).
 inline constexpr uint32 MaxDefaultShaderWorkers = 8;
 // 작업 디렉터리 이름(<root>/Intermediate/ShaderWorkers)이다.
@@ -164,9 +161,9 @@ struct ShaderCompileJob {
     // include 폐포에 들어가 키 5행이 정점 입력 타입마다 다르다).
     StringView vertexInputSource{};
     // 머티리얼 pass job의 생성 원문 텍스트다(Docs/Design/MaterialSystem 7.2·7.8절, MSR3). 비지
-    // 않으면 전처리가 MaterialGeneratedIncludePath include를 이 텍스트로 잇는다(include 폐포에
-    // 들어가 키가 머티리얼마다 다르다). 비면 잇지 않는다(머티리얼 없는 셰이더가 그 경로를
-    // include하면 전처리 오류다). 컴파일이 끝날 때까지 살아 있어야 한다.
+    // 않으면 전처리가 MaterialGeneratedIncludePath(ShaderCore ShaderType.h) include를 이 텍스트로
+    // 잇는다(include 폐포에 들어가 키가 머티리얼마다 다르다). 비면 잇지 않는다(머티리얼 없는
+    // 셰이더가 그 경로를 include하면 전처리 오류다). 컴파일이 끝날 때까지 살아 있어야 한다.
     StringView materialSource{};
     // 시험 hook(config.testHooks일 때만 — Compile 밖 값이면 그 job은 hook으로 워커에 간다).
     ShaderWorkerJobKind testHook = ShaderWorkerJobKind::Compile;

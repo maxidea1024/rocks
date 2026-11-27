@@ -38,6 +38,11 @@ inline constexpr usize ManagerPathBytes = 4096;
 inline constexpr char DeadPidName[] = "4294967294";
 // 시험 레지스트리 문맥 id다("SHMT").
 inline constexpr uint32 TestContextId = 0x53484d54;
+// 형식 정의 전부다(Engine/Config/ShaderFormats — 엔진 셰이더 컴파일 행렬과 머티리얼 컴파일 모음
+// MaterialShaderCompileTests가 함께 쓴다).
+inline constexpr StringView ShaderFormatIds[] = {"D3D12_SM6",      "D3D11_SM5", "VULKAN_SM5",
+                                                 "VULKAN_ANDROID", "GLES31_PC", "GLES31_ANDROID",
+                                                 "METAL_SM5",      "METAL_IOS"};
 
 inline constexpr char TestSource[] =
     "RWStructuredBuffer<uint> Output;\n"

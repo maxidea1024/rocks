@@ -5,16 +5,10 @@
 // 노드가 읽는 템플릿 필드다. 이름은 19.5절 규칙으로 바꿨고(Get 접두·WS 접미 제거, 상표 이름, DF →
 // Double) UE 이름은 unrealName에 둔다. HLSL 정의는 두지 않는다(MS2b MaterialCommon.rsh의 일).
 // 공급하지 않을 때의 값은 UE 템플릿과 같이 0이고 파티클 색만 1이다(결정 MD15 —
-// SH/Private/MaterialTemplate.ush:665–670, 761). 예외: 노드가 역수를 내는 시야각 둘은 UE 기본
-// 카메라 시야각 90°다(0이면 1 / 0이 상수로 접혀 FXC 경고 — MD15 예외, 7.8절).
+// SH/Private/MaterialTemplate.ush:665–670, 761).
 namespace rocks::material {
 
 namespace {
-
-// 공급하지 않은 시야각(가로·세로 rad)이다(UE 기본 카메라 FOV 90° = π/2).
-constexpr float UnsuppliedFieldOfView = 1.57079637f;
-constexpr MaterialContextDefault UnsuppliedFieldOfViewDefault{
-    {UnsuppliedFieldOfView, UnsuppliedFieldOfView, 0.0f, 0.0f}};
 
 constexpr MaterialContextValue
 ContextValue(StringView name, StringView unrealName, MaterialPinType type,
@@ -43,6 +37,12 @@ ContextValue(StringView name, StringView unrealName, MaterialPinType type,
 constexpr MaterialContextValue WithDefaultArgument(MaterialContextValue value,
                                                    int8 argument) noexcept {
     value.defaultArgument = argument;
+    return value;
+}
+
+// pass가 늘 채우는 고정 칸이다(alwaysSupplied — 7.3절).
+constexpr MaterialContextValue AlwaysSupplied(MaterialContextValue value) noexcept {
+    value.alwaysSupplied = true;
     return value;
 }
 
@@ -629,10 +629,11 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
     // UE 템플릿 필드 Parameters.SvPosition(TemporalSobol — Docs/Design/MaterialSystem 6.13절
-    // MS2f2).
-    ContextValue("SvPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
-                 MaterialContextFeature::View, AllMaterialDomains, MaterialPixelStage,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
+    // MS2f2). 픽셀 입력이라 pass가 늘 채운다(7.3절 고정 칸).
+    AlwaysSupplied(
+        ContextValue("SvPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
+                     MaterialContextFeature::View, AllMaterialDomains, MaterialPixelStage,
+                     MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false)),
     // UE View.StateFrameIndexMod8(TemporalSobol — 6.13절 MS2f2).
     ContextValue("StateFrameIndexMod8", "", MaterialPinType::UInt1, MaterialContextValueForm::Field,
                  0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
@@ -700,8 +701,7 @@ constexpr MaterialContextValue ContextValues[] = {
     // UE View.<PREV>FieldOfViewWideAngles(ViewProperty FieldOfView).
     ContextValue("ViewFieldOfView", "", MaterialPinType::Float2, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
-                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero,
-                 UnsuppliedFieldOfViewDefault, true),
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, true),
     // UE Get<PREV>TanHalfFieldOfView().
     ContextValue("ViewTanHalfFieldOfView", "", MaterialPinType::Float2,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
@@ -772,7 +772,7 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("FirstPersonFieldOfView", "", MaterialPinType::Float2,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::View,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
-                 MaterialDerivative::Zero, UnsuppliedFieldOfViewDefault, true),
+                 MaterialDerivative::Zero, {}, true),
     // UE View.<PREV>FirstPersonTanAndInvTanHalfFOV.xy.
     ContextValue("FirstPersonTanHalfFieldOfView", "", MaterialPinType::Float2,
                  MaterialContextValueForm::Field, 0, MaterialContextFeature::View,

@@ -1,6 +1,8 @@
 #include <Core/Text/StringBuilder.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
 #include <MaterialCompiler/MaterialConstants.h>
+#include <MaterialSchema/Nodes/Custom/CustomHlslProperties.generated.h>
+#include <MaterialSchema/Nodes/Custom/CustomHlslProperties.h>
 #include <MaterialSchema/Nodes/Parameters/StaticSwitchParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Parameters/StaticSwitchParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/AntialiasedTextureMaskProperties.generated.h>
@@ -328,6 +330,105 @@ TEST(MaterialTexture_SharedSampler) {
     REQUIRE(Generate(fixture, out, source));
     CHECK(!HasText(source.text.View(), "SamplerState MaterialTexture0Sampler"));
     CHECK(HasText(source.text.View(), "(MaterialTexture0, SharedWrapSampler, "));
+}
+
+// 6.10절 텍스처 표: 한 텍스처를 자기·공유 Wrap 샘플러로 샘플링하면 slot이 (출처, id, 샘플러
+// 출처)마다 하나씩 둘이고(셰이더 시스템 7.2절 9항 — slot마다 출처 하나), 자기 출처 slot만 샘플러를
+// 선언한다. 샘플하지 않는 값(TextureProperty 크기)은 같은 텍스처의 샘플 slot을 쓴다.
+TEST(MaterialTexture_SamplerSourceSplitsSlots) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    TextureObjectProperties object;
+    object.texture.assetId = AssetId{BrickId};
+    const Guid texture = fixture.Add("Material.TextureObject", env.Save(object));
+    TextureSampleProperties own(env.allocator);
+    const Guid ownSample = fixture.Add("Material.TextureSample", env.Save(own));
+    fixture.Connect(texture, "Result", ownSample, "TextureObject");
+    TextureSampleProperties shared(env.allocator);
+    shared.samplerSource = SamplerSourceMode::WrapWorldGroupSettings;
+    const Guid sharedSample = fixture.Add("Material.TextureSample", env.Save(shared));
+    fixture.Connect(texture, "Result", sharedSample, "TextureObject");
+    TexturePropertyProperties property;
+    property.property = ExposedTextureProperty::TextureSize;
+    const Guid size = fixture.Add("Material.TextureProperty", env.Save(property));
+    fixture.Connect(texture, "Result", size, "TextureObject");
+    const Guid sum = fixture.Add("Material.Add");
+    fixture.Connect(ownSample, "R", sum, "A");
+    fixture.Connect(sharedSample, "R", sum, "B");
+    fixture.Connect(sum, "Result", OutputNodeId, "AmbientOcclusion");
+    const Guid mask = fixture.Add("Material.ComponentMask", [&]() noexcept {
+        ComponentMaskProperties red;
+        red.r = true;
+        return env.Save(red);
+    }());
+    fixture.Connect(size, "Result", mask, "Input");
+    fixture.Connect(mask, "Result", OutputNodeId, "PixelDepthOffset");
+    MaterialTranslation out(env.allocator);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(Generate(fixture, out, source));
+    const Span<const IrTexture> slots = out.module.Textures();
+    REQUIRE(slots.Size() == 2);
+    CHECK(slots[0].id == BrickId);
+    CHECK(slots[1].id == BrickId);
+    CHECK(slots[0].sampler == IrTextureSampler::Own);
+    CHECK(slots[1].sampler == IrTextureSampler::SharedWrap);
+    CHECK(HasText(source.text.View(), "SamplerState MaterialTexture0Sampler"));
+    CHECK(!HasText(source.text.View(), "SamplerState MaterialTexture1Sampler"));
+    CHECK(HasText(source.text.View(), "(MaterialTexture0, MaterialTexture0Sampler, "));
+    CHECK(HasText(source.text.View(), "(MaterialTexture1, SharedWrapSampler, "));
+    // 크기 값의 Texture는 샘플 slot(가장 작은 출처 — 자기) 번호다.
+    for (const IrValue& value : out.module.Values()) {
+        if (value.op == IrOp::TextureSize) {
+            CHECK(out.module.Values()[value.operands[0]].immediate[3] == 0);
+        }
+    }
+
+    // Custom 텍스처 인자(자기 샘플러)와 공유 Wrap 샘플은 slot 둘이다.
+    GraphFixture custom(env);
+    const Guid customTexture = custom.Add("Material.TextureObject", env.Save(object));
+    CustomHlslProperties code(env.allocator);
+    (void)code.code.TryAssign("return T.SampleLevel(TSampler, float2(0.5, 0.5), 0.0).r;");
+    code.outputType = CustomOutputType::Float1;
+    CustomInput argument;
+    argument.inputName = env.Intern("T");
+    (void)code.inputs.TryPushBack(argument);
+    const Guid call = custom.Add("Material.CustomHlsl", env.Save(code));
+    custom.Connect(customTexture, "Result", call, "T");
+    const Guid wrapped = custom.Add("Material.TextureSample", env.Save(shared));
+    custom.Connect(customTexture, "Result", wrapped, "TextureObject");
+    const Guid both = custom.Add("Material.Add");
+    custom.Connect(call, "Result", both, "A");
+    custom.Connect(wrapped, "R", both, "B");
+    custom.Connect(both, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation customOut(env.allocator);
+    MaterialGeneratedSource customSource(env.allocator);
+    REQUIRE(Generate(custom, customOut, customSource));
+    const Span<const IrTexture> customSlots = customOut.module.Textures();
+    REQUIRE(customSlots.Size() == 2);
+    CHECK(customSlots[0].sampler == IrTextureSampler::Own);
+    CHECK(customSlots[1].sampler == IrTextureSampler::SharedWrap);
+    CHECK(HasText(customSource.text.View(), "SamplerState MaterialTexture0Sampler"));
+    CHECK(HasText(customSource.text.View(), ", MaterialTexture0, MaterialTexture0Sampler"));
+
+    // 샘플하지 않는 값만 있으면 출처 없는 slot 하나이고 샘플러를 선언하지 않는다.
+    GraphFixture sizeOnly(env);
+    const Guid lonelyTexture = sizeOnly.Add("Material.TextureObject", env.Save(object));
+    const Guid lonelySize = sizeOnly.Add("Material.TextureProperty", env.Save(property));
+    sizeOnly.Connect(lonelyTexture, "Result", lonelySize, "TextureObject");
+    const Guid lonelyMask = sizeOnly.Add("Material.ComponentMask", [&]() noexcept {
+        ComponentMaskProperties red;
+        red.r = true;
+        return env.Save(red);
+    }());
+    sizeOnly.Connect(lonelySize, "Result", lonelyMask, "Input");
+    sizeOnly.Connect(lonelyMask, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation sizeOut(env.allocator);
+    MaterialGeneratedSource sizeSource(env.allocator);
+    REQUIRE(Generate(sizeOnly, sizeOut, sizeSource));
+    REQUIRE(sizeOut.module.Textures().Size() == 1);
+    CHECK(sizeOut.module.Textures()[0].sampler == IrTextureSampler::None);
+    CHECK(!HasText(sizeSource.text.View(), "SamplerState"));
 }
 
 // V9: 자기 샘플러 slot이 maxSamplers를 넘으면 넘긴 노드에 V9다(같은 slot은 한 번 센다).

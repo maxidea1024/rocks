@@ -16,7 +16,7 @@ public sealed class MaterialCompiler : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // MaterialSchema for the graph schema, node definitions and value types; Core for containers, text and SHA-256;
-    // Curves and CurveAssets for the ColorRamp curve snapshot and its evaluation (the same function as the runtime asset).
+    // Curves and CurveAssets for the ColorRamp curve snapshot and its deterministic evaluation (the cooked constant).
     protected override string[] PublicDependencies => ["Core", "Curves", "CurveAssets", "MaterialSchema", "Texture"];
 
     // DeterministicMath gives constant folding the same bytes on every host (floor, truncation and rounding — section 6.5).

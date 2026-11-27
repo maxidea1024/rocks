@@ -49,7 +49,7 @@ MS2b는 네 묶음으로 나눈다. 묶음마다 시험을 함께 넣고, 리뷰
 - **만들기.** MaterialCompiler 공개 함수 `WriteMaterialContextSource(allocator, out)`가 표로 텍스트를 만든다. 저장소의 파일은 그 출력이고, 시험이 byte로 견준다(어긋나면 실제 텍스트를 실패에 남긴다 — 골든 원문과 같은 방식, 7.7절). 표를 고치면 파일을 함께 고친다. 파일 안 주석은 생성 원문 규칙대로 영어다.
 - **공급 표지.** pass 원문은 include 전에 공급하는 기능마다 `#define MATERIAL_SUPPLY_<F> 1`을 둔다(pass 셰이더 타입과 정점 입력 타입의 공급 합집합 — 19.3.1절, 16절 MRD13·MRB9). 정의하지 않은 기능은 공급하지 않은 것이다.
 - **칸.** 필드형 값마다 칸 하나다. 이름은 Rocks 이름의 lowerCamel(`Time` → `time`), 이전 변형은 `previous<이름>`이다. 표 `stages`대로 정점 단계 값은 `MaterialVertexInputs`, 픽셀 단계 값은 `MaterialInputs`에 둔다(둘 다면 둘 다). 칸은 공급 여부와 무관하게 늘 있다(구조체 layout이 머티리얼마다 바뀌지 않는다. 쓰지 않는 칸은 하위 컴파일러가 지운다). Double 칸은 LWC 표현 타입이다(MS2b2).
-- **접근자.** 값마다 매크로 `MaterialContext<이름>`을 둔다. `MATERIAL_SUPPLY_<F>`이면 필드형은 칸(`((c).time)`), 함수형은 pass 원문이 정의하는 `MaterialPass<이름>(c, …)` 호출이다. 아니면 표의 기본값 리터럴이다(UE 템플릿의 0, 파티클 색 1, 시야각 둘은 90° — 결정 MD15). 그래서 생성 원문은 어떤 pass에서도 컴파일된다.
+- **접근자.** 값마다 매크로 `MaterialContext<이름>`을 둔다. `MATERIAL_SUPPLY_<F>`이면 필드형은 칸(`((c).time)`), 함수형은 pass 원문이 정의하는 `MaterialPass<이름>(c, …)` 호출이다. 예외는 pass가 늘 채우는 고정 칸 SvPosition(표의 고정 칸 표지 — 7.3절)으로, 공급 표지와 상관없이 칸을 읽는다. 아니면 표의 기본값 리터럴이다(UE 템플릿의 0, 파티클 색 1 — 결정 MD15). 그래서 생성 원문은 어떤 pass에서도 컴파일된다.
 - **채울 기능.** 생성 파일 include 뒤에 `MATERIAL_CONTEXT_<F>` = `MATERIAL_SUPPLY_<F>` ∧ (어느 진입점이든 `MATERIAL_<E>_USES_<F>`)를 정의한다. pass가 칸을 채울지·보간할지 묻는 데 쓴다(pass가 부르는 진입점만으로 더 좁힐 수 있다 — 19.3.1절).
 - MS2b1은 표의 기존 값만 담는다. MS2b4가 표에 값을 더하면 같은 파일이 다시 만들어진다.
 

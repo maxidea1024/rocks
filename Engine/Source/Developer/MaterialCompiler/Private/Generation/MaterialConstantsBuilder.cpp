@@ -81,29 +81,11 @@ Result<void> BuildMaterialConstants(const IrModule& module, MaterialConstants& o
         return sized;
     }
 
-    // Pow 밑의 Abs는 셰이더에 남긴다(6.8절 Power 행 — 프로그램이 abs를 계산하면 셰이더에는 상수
-    // 버퍼 값을 바로 pow해 FXC가 음수 밑 경고 X3571을 낸다, 7.8절).
-    Array<bool> powBase(scratch);
-    if (auto sized = powBase.TryResize(values.Size()); !sized) {
-        return sized;
-    }
-
-    for (bool& item : powBase) {
-        item = false;
-    }
-
-    for (const IrValue& value : values) {
-        if (value.op == IrOp::Pow && value.operandCount > 0 && value.operands[0] < values.Size() &&
-            values[value.operands[0]].op == IrOp::Abs) {
-            powBase[value.operands[0]] = true;
-        }
-    }
-
     for (usize index = 0; index < values.Size(); ++index) {
         const IrValue& value = values[index];
         output[index] = false;
         bool can =
-            !powBase[index] && value.op != IrOp::Constant &&
+            value.op != IrOp::Constant &&
             static_cast<uint8>(value.frequency) <= static_cast<uint8>(IrFrequency::Uniform) &&
             IsMaterialConstantProgramOp(value.op) && !value.type.IsMatrix() &&
             (value.type.scalar == IrScalar::Float || value.type.scalar == IrScalar::Double);

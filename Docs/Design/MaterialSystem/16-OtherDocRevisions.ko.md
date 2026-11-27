@@ -23,6 +23,7 @@
 | MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: 예약 이름 `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나, SH2와 함께 구현 |
 | MSR14 | 13절(`ShaderParameterLayout`) | (개정 10) 이름을 소유하는 동적 layout builder, 텍스처·샘플러 자원 slot 표(7.4절 서명의 자원 순번), 머티리얼별 layout을 job 키 8행·라이브러리 항목 레이아웃 서명에 넣는 경로. 지금 형식은 cbuffer 멤버·정적 수명뿐이다 |
 | MSR15 | 12.2절(셰이더 타입·거르기) | (개정 10) 셰이더 타입의 문맥 공급 기능 선언과 `MaterialShaderTraits`를 받는 거르기 서명(MSR5의 실제 서명). 지금 `ShaderType.h:87–89`에는 traits가 없다 |
+| MSR16 | 7.2절 9항(공유 샘플러 선언) | 공유 샘플러 헤더 경로를 `/Engine/Private/Common/SharedSamplers.rsh`로(7.8절 — `/Engine/Shared`는 C++·HLSL 공용 `.h`만 받는다). 렌더 세션이 정본으로 받아 고치기로 함(2026-11-28) |
 
 **렌더 기반(RenderBase/README.ko.md)**
 

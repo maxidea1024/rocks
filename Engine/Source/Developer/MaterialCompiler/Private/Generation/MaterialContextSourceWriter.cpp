@@ -25,8 +25,9 @@ constexpr StringView ContextHeader =
     "#define MATERIAL_MAX_TEXCOORDS 8\n"
     "#define MATERIAL_MAX_INTERPOLANT_VECTORS 16\n";
 
-// 원문 타입 이름이다. 원문 타입이 없는 핀 타입은 빈 문자열이다.
-StringView ContextTypeName(MaterialPinType type) noexcept {
+} // namespace
+
+StringView MaterialContextTypeName(MaterialPinType type) noexcept {
     switch (type) {
     case MaterialPinType::Float1:
         return "float";
@@ -58,6 +59,8 @@ StringView ContextTypeName(MaterialPinType type) noexcept {
         return {};
     }
 }
+
+namespace {
 
 // Float 벡터 성분 수다(아니면 0).
 uint32 FloatComponents(MaterialPinType type) noexcept {
@@ -98,7 +101,7 @@ Result<void> AppendDefault(StringBuilder<>& out, const MaterialContextValue& val
     }
 
     if (components > 1) {
-        out << ContextTypeName(value.type) << "(";
+        out << MaterialContextTypeName(value.type) << "(";
         for (uint32 index = 0; index < components; ++index) {
             if (index > 0) {
                 out << ", ";
@@ -121,7 +124,7 @@ Result<void> AppendDefault(StringBuilder<>& out, const MaterialContextValue& val
     }
 
     // 행렬·Double·정수는 0이다(UE 템플릿 기본값).
-    out << "((" << ContextTypeName(value.type) << ")0)";
+    out << "((" << MaterialContextTypeName(value.type) << ")0)";
     return out.Status();
 }
 
@@ -177,7 +180,7 @@ Result<void> AppendStruct(StringBuilder<>& out, StringView name, MaterialStageMa
             continue;
         }
 
-        const StringView type = ContextTypeName(value.type);
+        const StringView type = MaterialContextTypeName(value.type);
         if (type.IsEmpty()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -224,7 +227,7 @@ Result<void> WriteMaterialContextSource(Allocator& allocator, String& out) noexc
         const MaterialContextFeature item = static_cast<MaterialContextFeature>(feature);
         bool any = false;
         for (const MaterialContextValue& value : table) {
-            any = any || (value.feature == item && !ContextTypeName(value.type).IsEmpty());
+            any = any || (value.feature == item && !MaterialContextTypeName(value.type).IsEmpty());
         }
 
         if (!any) {
@@ -239,12 +242,14 @@ Result<void> WriteMaterialContextSource(Allocator& allocator, String& out) noexc
 
             for (const MaterialContextValue& value : table) {
                 // 자원 타입 값(텍스처 서술자 등)은 원문 타입이 생기는 MS2c가 더한다.
-                if (value.feature != item || ContextTypeName(value.type).IsEmpty()) {
+                if (value.feature != item || MaterialContextTypeName(value.type).IsEmpty()) {
                     continue;
                 }
 
                 for (uint32 variant = 0; variant < (value.hasPrevious ? 2u : 1u); ++variant) {
-                    if (auto accessor = AppendAccessor(text, value, variant == 1, supplied == 2);
+                    // 고정 칸은 공급 표지와 상관없이 칸을 읽는다(7.3절).
+                    if (auto accessor = AppendAccessor(text, value, variant == 1,
+                                                       supplied == 2 || value.alwaysSupplied);
                         !accessor) {
                         return accessor;
                     }

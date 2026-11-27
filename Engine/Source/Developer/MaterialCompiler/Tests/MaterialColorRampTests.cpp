@@ -3,6 +3,7 @@
 #include <MaterialCompiler/MaterialSourceProvider.h>
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.generated.h>
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
@@ -10,8 +11,9 @@
 #include "MaterialIrEvaluator.h"
 
 // MS2f4 시험이다(Docs/Design/MaterialSystem 6.13절 MS2f4): Input이 없으면 CurveAssets
-// EvaluateAdjustedColorCurve와 비트까지 같은 상수, 연결되면 UE 키 구간 합(키 0·1·2개와 float4
-// 묶음·나머지 — 조정을 쓰지 않는다), 커브가 없으면 UE 문구, 번역 의존 ColorCurve 기록을 본다.
+// EvaluateAdjustedColorCurveDeterministic(기준 부동소수점 환경)과 비트까지 같은 상수, 연결되면 UE
+// 키 구간 합(키 0·1·2개와 float4 묶음·나머지 — 조정을 쓰지 않는다), 커브가 없으면 UE 문구, 번역
+// 의존 ColorCurve 기록을 본다.
 using namespace rocks;
 using namespace rocks::material;
 namespace material_color_ramp_tests_file {
@@ -155,10 +157,32 @@ bool HasMessage(const MaterialTranslation& out, StringView message) noexcept {
     return false;
 }
 
+// 쿠킹 경로와 같은 결정적 평가다(기준 부동소수점 환경 안 — CurveAssets CAD12).
+LinearColor EvaluateDeterministic(const RampCurves& curves,
+                                  const ColorCurveAdjustments& adjustments, float time) noexcept {
+    struct Evaluation {
+        const RampCurves* curves;
+        const ColorCurveAdjustments* adjustments;
+        float time;
+        LinearColor color;
+    };
+
+    Evaluation evaluation{&curves, &adjustments, time, LinearColor()};
+    platform::RunWithDeterministicFloatingPoint(
+        [](void* job) noexcept {
+            Evaluation& run = *static_cast<Evaluation*>(job);
+            run.color = EvaluateAdjustedColorCurveDeterministic(run.curves->r, run.curves->g,
+                                                                run.curves->b, run.curves->a,
+                                                                *run.adjustments, run.time, false);
+        },
+        &evaluation);
+    return evaluation.color;
+}
+
 } // namespace
 
-// Input이 없으면 핀 기본값(UE ConstInput 0.5)에서 조정 포함 커브 평가식의 상수다(CurveAssets와
-// 비트까지 같다). 번역 의존에 커브가 남는다.
+// Input이 없으면 핀 기본값(UE ConstInput 0.5)에서 조정 포함 결정적 커브 평가식의 상수다(CurveAssets
+// 결정적 판과 비트까지 같다). 번역 의존에 커브가 남는다.
 TEST(MaterialColorRamp_ConstantInputUsesCurveEvaluation) {
     TranslatorEnv env;
     REQUIRE(env.ready);
@@ -177,8 +201,7 @@ TEST(MaterialColorRamp_ConstantInputUsesCurveEvaluation) {
     adjustments.minAlpha = 0.25f;
     const MaterialColorCurveSnapshot snapshot = curves.Snapshot(adjustments);
     const RampSources sources(snapshot);
-    const LinearColor expected = EvaluateAdjustedColorCurve(curves.r, curves.g, curves.b, curves.a,
-                                                            adjustments, 0.5f, false);
+    const LinearColor expected = EvaluateDeterministic(curves, adjustments, 0.5f);
 
     GraphFixture fixture(env);
     const Guid ramp = AddRamp(fixture, RampCurveId);
@@ -201,10 +224,33 @@ TEST(MaterialColorRamp_ConstantInputUsesCurveEvaluation) {
     MaterialTranslation valuedOut(env.allocator);
     float valuedColor[MaxIrComponents] = {};
     REQUIRE(EvaluateRamp(valued, valuedRamp, &sources, valuedOut, valuedColor));
-    const LinearColor at = EvaluateAdjustedColorCurve(curves.r, curves.g, curves.b, curves.a,
-                                                      adjustments, 0.7f, false);
+    const LinearColor at = EvaluateDeterministic(curves, adjustments, 0.7f);
     CHECK(BitsOf(valuedColor[0]) == BitsOf(at.r));
     CHECK(BitsOf(valuedColor[3]) == BitsOf(at.a));
+
+    // 호출자 부동소수점 환경이 달라도(실시간 오디오 환경 — FTZ) 상수 byte가 같다(결정성 — 번역이
+    // 기준 환경에서 평가한다).
+    struct ShiftedRun {
+        TranslatorEnv* env;
+        const RampSources* sources;
+        float color[MaxIrComponents];
+        bool evaluated;
+    };
+
+    ShiftedRun shifted{&env, &sources, {}, false};
+    platform::RunWithRealtimeAudioFloatingPoint(
+        [](void* job) noexcept {
+            ShiftedRun& run = *static_cast<ShiftedRun*>(job);
+            GraphFixture graph(*run.env);
+            const Guid node = AddRamp(graph, RampCurveId);
+            MaterialTranslation out(run.env->allocator);
+            run.evaluated = EvaluateRamp(graph, node, run.sources, out, run.color);
+        },
+        &shifted);
+    REQUIRE(shifted.evaluated);
+    for (usize component = 0; component < 4; ++component) {
+        CHECK(BitsOf(shifted.color[component]) == BitsOf(color[component]));
+    }
 }
 
 // Input이 연결되면 UE 키 구간 합이다(접히지 않는 입력 sin(c)): 키 0개 0(알파도 — 상수 경로의 1과

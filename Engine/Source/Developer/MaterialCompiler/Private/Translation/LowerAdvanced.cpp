@@ -1,5 +1,6 @@
 #include <Core/Text/String.h>
 #include <CurveAssets/ColorCurveEvaluate.h>
+#include <Platform/FloatingPointEnvironment.h>
 
 #include "CoordinateValues.h"
 #include "LoweringContext.h"
@@ -847,8 +848,8 @@ IrValueId ColorRampChannel(SurfaceMath& m, const TangentCurve& curve, IrValueId 
 // ColorRamp다(UE ME:4899–5014). 커브가 없으면 "Missing ColorCurve", 참조는 있는데 공급에 없으면
 // "Color curve asset is not available"다. Input이 연결되지 않으면 핀
 // 값(UE ConstInput 0.5)에서 커브 평가식(조정 포함 — UE GetLinearColorValue, CurveAssets
-// EvaluateAdjustedColorCurve와 같은 함수)을 번역 때 계산한 상수이고, 연결되면 채널마다 키 구간 합을
-// 셰이더에서 계산한다(조정을 쓰지 않는다 — UE와 같다).
+// 결정적 판 EvaluateAdjustedColorCurveDeterministic)을 번역 때 계산한 상수이고, 연결되면 채널마다
+// 키 구간 합을 셰이더에서 계산한다(조정을 쓰지 않는다 — UE와 같다).
 Result<void> LowerColorRamp(LoweringContext& context) noexcept {
     Guid asset;
     if (auto read = context.ReadAssetReference("colorCurve", asset); !read || !read.Value()) {
@@ -899,9 +900,24 @@ Result<void> LowerColorRamp(LoweringContext& context) noexcept {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        const LinearColor color =
-            EvaluateAdjustedColorCurve(*snapshot->r, *snapshot->g, *snapshot->b, *snapshot->a,
-                                       snapshot->adjustments, time, false);
+        // 쿠킹 byte라 결정적 판을 기준 부동소수점 환경에서 부른다(6.13절 MS2f4 — CurveAssets
+        // CAD12).
+        struct RampEvaluation {
+            const MaterialColorCurveSnapshot* snapshot;
+            float time;
+            LinearColor color;
+        };
+
+        RampEvaluation evaluation{snapshot, time, LinearColor()};
+        platform::RunWithDeterministicFloatingPoint(
+            [](void* job) noexcept {
+                RampEvaluation& run = *static_cast<RampEvaluation*>(job);
+                run.color = EvaluateAdjustedColorCurveDeterministic(
+                    *run.snapshot->r, *run.snapshot->g, *run.snapshot->b, *run.snapshot->a,
+                    run.snapshot->adjustments, run.time, false);
+            },
+            &evaluation);
+        const LinearColor color = evaluation.color;
         const float components[] = {color.r, color.g, color.b, color.a};
         // 비유한 값은 커브 데이터 탓이라 노드 위치에 V11을 진단한다.
         auto value = context.FloatConstant(components, StringView());
