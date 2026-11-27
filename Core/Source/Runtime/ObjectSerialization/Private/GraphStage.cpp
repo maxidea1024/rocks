@@ -336,8 +336,9 @@ Result<usize> ObjectGraphStage::BindEvents() noexcept {
     }
 
     eventsBound_ = true;
-    const usize bound = graph_detail::BindPendingEvents(
-        registry_, access_, nodes_.View(), data_->pendingEvents.View(), options_.hooks);
+    const usize bound = graph_detail::BindPendingEvents(registry_, access_, nodes_.View(),
+                                                        data_->pendingEvents.View(), options_.hooks,
+                                                        options_.keepUnresolvedEventBindings);
     data_->pendingEvents.Clear();
     return Result<usize>::Success(bound);
 }

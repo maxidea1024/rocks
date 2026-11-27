@@ -1,38 +1,69 @@
 #pragma once
 
-#include <AssetRuntime/Package.h>
-#include <Object/ModuleRegistration.h>
+#include <Base/Compiler.h>
+#include <Core/Containers/Array.h>
+#include <Core/Memory/Allocator.h>
+#include <Material/MaterialBase.h>
+#include <Material/MaterialPreviewSettings.h>
+#include <Material/ParameterCollection.h>
+#include <MaterialSchema/MaterialAssetReference.h>
+#include <MaterialSchema/MaterialTraitsDesc.h>
+#include <MaterialSchema/VertexInputUsage.h>
+#include <NodeGraph/GraphDocument.h>
+#include <Object/ObjectRefs.h>
 
-// 머티리얼 에셋 클래스다(Docs/Design/MaterialSystem.ko.md 2절·4.2절, 단계 MS3a). 지금은 골격만
-// 있다: 메시 머티리얼 슬롯(ObjectRef<MaterialBase> — MeshAnimationAssets 4.3절)이 참조할 타입이
-// 머티리얼 schema·컴파일러보다 먼저 필요해서다(사용자 결정 2026-11-23). 그래프·기본 속성·사용
-// 플래그 같은 4.2절 필드와 MaterialInstance·MaterialFunction·ParameterCollection은 MS3·MS6이
-// 더한다.
+// 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 4.2·4.6·19.9절, UE UMaterial).
 namespace rocks {
 
-// 그리기에 쓸 수 있는 머티리얼 에셋의 공통 기반이다(추상, UE UMaterialInterface). 메시 슬롯은 이
-// 타입을 Hard로 참조한다(비면 엔진 기본 머티리얼).
+// 그래프(EditorOnly)와 기본 속성·사용 대상·물리 재질 필드를 가진다. 쿠킹 데이터(번역 결과)는 MS3이
+// 더한다.
 //
-// 사용 예(슬롯 필드):
-//   ROCKS_PROPERTY() ObjectRef<MaterialBase> material;
-//
-// 스레드: 에셋 객체 Registry의 소유 스레드 전용이다.
-ROCKS_CLASS(Abstract)
-class MaterialBase : public Asset {
-    ROCKS_GENERATED_BODY()
-};
-
-// 그래프를 가진 머티리얼 에셋이다(UE UMaterial). 그래프·기본 속성은 MS3에서 더한다.
+// 사용 예:
+//   auto material = package.NewAsset<Material>(...);
+//   material->traits.blendMode = BlendMode::Masked;
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드 전용이다.
 ROCKS_CLASS()
-class Material final : public MaterialBase {
+class ROCKS_MATERIAL_API Material final : public MaterialBase {
     ROCKS_GENERATED_BODY()
-};
 
-// Material 리플렉션 타입(MaterialBase·Material)을 등록한다(생성 집계 함수
-// generated::Material::RegisterModuleTypes를 부른다 — 의존 모듈 타입도 함께). 도구·시험은 직접,
-// 엔진은 머티리얼 에셋 모듈이 부른다. 오류: 등록 오류(이미 등록·할당 실패 등).
-ROCKS_MATERIAL_API Result<void> RegisterMaterialTypes(ModuleRegistration& registration) noexcept;
+public:
+    explicit Material(Allocator& allocator) noexcept
+        : MaterialBase(allocator),
+#if ROCKS_WITH_EDITOR_DATA
+          graph(allocator), layout(allocator),
+#endif
+          usage(allocator), parameterCollections(allocator),
+          renderTracePhysicalMaterials(allocator) {
+    }
+
+    // ---- 에디터 데이터 ----
+#if ROCKS_WITH_EDITOR_DATA
+    // 머티리얼 그래프다(도메인 "Material", 5절). 쿠킹 데이터에는 번역 결과만 간다.
+    ROCKS_PROPERTY(EditorOnly) nodegraph::GraphDocument graph;
+    // 그래프 배치(노드 위치·주석 상자)다. semantic hash 밖이다(5.5절).
+    ROCKS_PROPERTY(EditorOnly) nodegraph::GraphDocumentLayout layout;
+    ROCKS_PROPERTY(EditorOnly) MaterialPreviewSettings preview;
+#endif
+
+    // 기본 속성(19.9절)이다.
+    ROCKS_PROPERTY() material::MaterialTraitsDesc traits;
+    // 사용 대상 선언이다(8.4·19.10절).
+    ROCKS_PROPERTY() material::VertexInputUsage usage;
+    // 그래프의 컬렉션 노드가 쓰는 파라미터 컬렉션(Hard — 실행 때 layout·기본값을 함께
+    // 로드, 4.4·4.6.1절) 이다. 번역이 그래프에서 채운다.
+    ROCKS_PROPERTY() ObjectRefArray<ParameterCollection> parameterCollections;
+    // TODO(MPQ-PhysicalMaterial): 물리 재질 에셋이 생기면 Hard 참조로 바꾸지 않고 대상 클래스를
+    // 검사한다 (UE PhysMaterial·PhysMaterialMask·RenderTracePhysicalMaterialOutputs).
+    ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterial;
+    ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterialMask;
+    ROCKS_PROPERTY() Array<material::MaterialAssetReference> renderTracePhysicalMaterials;
+    // UE PhysicalMaterialMap[8](물리 재질 마스크 색 칸마다)이다.
+    ROCKS_PROPERTY()
+    material::MaterialAssetReference physicalMaterialMap[MaterialPhysicalMaterialMapSize];
+    // TODO(MPQ-VirtualizedGeometry): 가상화 geometry 경로용 대체 머티리얼(UE
+    // NaniteOverrideMaterial).
+    ROCKS_PROPERTY() material::MaterialAssetReference virtualizedGeometryOverride;
+};
 
 } // namespace rocks

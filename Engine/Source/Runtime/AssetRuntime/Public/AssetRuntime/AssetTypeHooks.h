@@ -78,7 +78,11 @@ enum class AssetSourceRebuildCause : uint8 {
     New,
     // 원소 재임포트 전파 — assignedFields는 비고, 묶음 필드가 ChangedSource를 가리킬 때만 지금 값
     // 그대로 다시 복사한다(Volume 타일을 다시 정하지 않는다 — UE UReimportTextureFactory).
-    Propagate
+    Propagate,
+    // 에디터 패키지 열기(12.14절 A5j2c — UE PostLoad) — assignedFields는 비고 ChangedSource는
+    // null이다. 다른 에셋에서 원본을 굽는 타입이 낡은 저장 원본을 다시 굽는다(지금 원본과 같으면
+    // 쓰지 않는다 — 낡지 않은 패키지가 dirty가 되지 않게).
+    Open
 };
 
 // 원본 재구성 hook이 서비스에 닿는 길이다(Docs/Design/AssetSystem 12.14절 A5j2 — EditorPackageSet이
@@ -150,7 +154,8 @@ using AssetSettingsNormalizeHook = Result<void> (*)(const AssetTypeHookContext& 
                                                     Span<const StringView> assignedFields) noexcept;
 // 원본 재구성 hook이다(12.14절 A5j2 — UE UpdateSourceFromSourceTextures 대응). 다른 에셋을 원본으로
 // 묶는 필드(assignedFields에 있을 때만)에서 context.object의 원본을 다시 만든다. 서비스가 정규화
-// hook 앞에서 부른다(asset-set·asset-new·원소 재임포트 전파). 두 번 불러도 결과가 같아야 한다.
+// hook 앞에서 부른다(asset-set·asset-new·원소 재임포트 전파). EditorPackageSet::Open도 새로 연
+// 패키지마다 부른다(까닭 Open — A5j2c). 두 번 불러도 결과가 같아야 한다.
 // 오류: sink.Fail의 오류(진단), 객체 접근 오류, 할당 실패.
 using AssetSourceRebuildHook = Result<void> (*)(const AssetTypeHookContext& context,
                                                 Span<const StringView> assignedFields,

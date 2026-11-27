@@ -28,7 +28,7 @@ UE는 `UInputModifier`·`UInputTrigger` 파생 객체(Instanced)다. Rocks는 **
 | `Negate` | x·y·z 참 | 켠 축 × −1 (cpp:129-132) |
 | `Swizzle` | `YXZ` | YXZ: x↔y<br>ZYX: x↔z<br>XZY: y↔z<br>YZX: (y, z, x)<br>ZXY: (z, x, y) (cpp:473-495) |
 | `ResponseCurveExponential` | (1, 1, 1) | 타입의 축마다 sign(a) · \|a\|^e (cpp:350-366) |
-| `ResponseCurveUser` | 축마다 커브 | curve(a). 커브는 Curves 모듈 `TangentCurve`(UE `UCurveFloat` = FRichCurve)다. 커브가 없으면 그 축은 0이다 (cpp:368-385) |
+| `ResponseCurveUser` | 축마다 커브 | curve(a). 커브는 Curves 모듈 `TangentCurve`(UE `UCurveFloat` = FRichCurve)다. 커브가 없으면 그 축은 0이다 (cpp:368-385). 축마다 커브 에셋 slot(`responseXAsset`·`responseYAsset`·`responseZAsset`)도 고를 수 있다 — 소유 에셋의 `curveAssets` 번호이고 모으기가 인라인으로 평탄화한다(2.9절 IA9, UE는 `TObjectPtr<UCurveFloat>`만) |
 | `FovScaling` | scale 1, type `Standard` | scale · tan(fov/2) / tan(40°)(기준 FOV 80 — cpp:405-419). 평가 문맥(`ModifierContext`)에 플레이어 여부와 카메라 FOV가 있다. 플레이어가 없으면 그대로, 카메라가 없으면(fov 0) scale만 곱한다(UE cpp:393-400). `UE4BackCompat`은 레거시라 넣지 않는다 |
 | `ToWorldSpace` | — | 2D (y, x), 3D (z, x, y) (cpp:435-454) |
 | `Smooth` | 표본 시간 0.0083 s | UE 마우스 평활 식(cpp:270-333). dt ≥ 0.25 s면 초기화한다 |

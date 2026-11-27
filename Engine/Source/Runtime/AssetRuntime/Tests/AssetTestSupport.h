@@ -264,7 +264,8 @@ inline Array<uint8> ResaveAsRead(Allocator& allocator, ObjectRegistry& registry,
     return Write(allocator, registry, package, options);
 }
 
-// bytes 패키지들을 registry에 한 트랜잭션으로 로드한다. roots·handles는 packages 수만큼이다.
+// bytes 패키지들을 registry에 한 트랜잭션으로 로드하고 Commit 뒤 이벤트 바인딩을 만든다.
+// roots·handles는 packages 수만큼이다.
 inline Result<void> LoadAll(AssetEnv& env, ObjectRegistry& registry, Span<Array<uint8>> files,
                             PackageKind kind, PackageImportResolver* resolver,
                             Span<RootRef<Object>> roots, Span<ObjectHandle> handles,
@@ -294,7 +295,18 @@ inline Result<void> LoadAll(AssetEnv& env, ObjectRegistry& registry, Span<Array<
         return made;
     }
 
-    return transaction.Commit(handles, roots);
+    if (auto committed = transaction.Commit(handles, roots); !committed) {
+        return committed;
+    }
+
+    // 게시 경로처럼 패키지마다 이벤트 바인딩을 다시 만든다(EventReflection ED21).
+    for (usize index = 0; index < files.Size(); ++index) {
+        if (auto bound = pointers[index]->BindEvents(); !bound) {
+            return Result<void>::Failure(bound.Error());
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 // 섹션 표에서 kind 항목의 위치(헤더 기준 offset)와 크기를 찾는다.

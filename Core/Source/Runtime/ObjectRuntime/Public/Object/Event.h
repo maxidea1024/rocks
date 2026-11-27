@@ -144,7 +144,52 @@ public:
             record->handle = added.Value();
         }
 
+        // 같은 쌍의 미해결 레코드는 이제 풀렸다(함수를 고친 뒤 다시 바인딩 — ED24).
+        state.EraseUnresolved([&](const Unresolved& kept) noexcept {
+            return kept.target == target && kept.functionId == functionId;
+        });
         return added;
+    }
+
+    // 풀리지 않은 바인딩(함수 없음·서명 다름)을 미해결 레코드로 보존한다(EventReflection ED24 —
+    // 에디터 로드). 호출되지 않고 저장 때 그대로 쓴다. 바인딩과 같은 번호 순서에 들어가 나열·저장
+    // 순서가 보존된다. null 대상·0 FunctionId는 InvalidArgument, 같은 쌍의 살아 있는 바인딩이나
+    // 미해결 레코드가 있으면 AlreadyExists, 할당 실패는 그 오류다.
+    Result<void> TryKeepUnresolved(ObjectHandle target, Guid functionId) noexcept {
+        if (target.IsNull() || functionId == Guid{}) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto ensured = EnsureState(); !ensured) {
+            return ensured;
+        }
+
+        for (const Record& record : state_->records) {
+            if (!record.dead && record.binding.Target() == target &&
+                record.binding.FunctionId() == functionId) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+
+        for (const Unresolved& kept : state_->unresolved) {
+            if (kept.target == target && kept.functionId == functionId) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+
+        if (auto pushed =
+                state_->unresolved.TryPushBack(Unresolved{state_->nextId, target, functionId});
+            !pushed) {
+            return pushed;
+        }
+
+        ++state_->nextId;
+        return Result<void>::Success();
+    }
+
+    // 미해결 레코드 수다.
+    usize UnresolvedCount() const noexcept {
+        return state_ == nullptr ? 0 : state_->unresolved.Size();
     }
 
     // native 구독·리플렉션 바인딩 하나를 지운다. 없으면 false다. 리플렉션 바인딩은 레코드를 먼저
@@ -176,20 +221,25 @@ public:
                    [&](const Record& record) noexcept { return record.handle == handle; }) != 0;
     }
 
-    // target의 리플렉션 함수 functionId 바인딩을 지운다(UE Remove(Object, FunctionName)). 없으면
-    // false다.
+    // target의 리플렉션 함수 functionId 바인딩(과 같은 쌍의 미해결 레코드)을 지운다(UE
+    // Remove(Object, FunctionName)). 둘 다 없으면 false다.
     bool Unbind(ObjectHandle target, Guid functionId) noexcept {
         if (state_ == nullptr) {
             return false;
         }
 
+        const usize kept = state_->EraseUnresolved([&](const Unresolved& entry) noexcept {
+            return entry.target == target && entry.functionId == functionId;
+        });
         return RemoveMatching([&](const Record& record) noexcept {
                    return record.binding.Target() == target &&
                           record.binding.FunctionId() == functionId;
-               }) != 0;
+               }) + kept !=
+               0;
     }
 
-    // target을 대상으로 하는 리플렉션 바인딩을 모두 지우고 그 수를 돌려준다(UE RemoveAll(Object)).
+    // target을 대상으로 하는 리플렉션 바인딩과 미해결 레코드를 모두 지우고 그 수(합)를 돌려준다(UE
+    // RemoveAll(Object)).
     usize UnbindAll(ObjectHandle target) noexcept {
         if (state_ == nullptr) {
             return 0;
@@ -198,7 +248,9 @@ public:
         const usize removed = RemoveMatching(
             [&](const Record& record) noexcept { return record.binding.Target() == target; });
         state_->liveAtLastCompact = state_->LiveRecords();
-        return removed;
+        return removed + state_->EraseUnresolved([&](const Unresolved& entry) noexcept {
+            return entry.target == target;
+        });
     }
 
     // 모든 구독·바인딩을 지운다(발행자 논리 파괴 — ED8).
@@ -214,45 +266,72 @@ public:
 
         state_->delegate.Clear();
         state_->liveAtLastCompact = 0;
+        state_->unresolved.Clear();
     }
 
-    // 대상이 사라졌거나(StaleHandle) 살아 있지 않은(파괴 요청·도달 불가·은퇴) 리플렉션 바인딩을
-    // 지우고 그 수를 돌려준다(ED7). 생존 조회의 다른 오류(다른 문맥 등)는 지우지 않는다.
+    // 대상이 사라졌거나(StaleHandle) 살아 있지 않은(파괴 요청·도달 불가·은퇴) 리플렉션 바인딩과
+    // 미해결 레코드를 지우고 그 수(합)를 돌려준다(ED7·ED24). 생존 조회의 다른 오류(다른 문맥 등)는
+    // 지우지 않는다.
     usize Compact(ObjectRegistry& registry, const ObjectAccessContext& access) noexcept {
         if (state_ == nullptr) {
             return 0;
         }
 
-        const usize removed = RemoveMatching([&](const Record& record) noexcept {
-            auto lifecycle = registry.InspectLifecycle(access, record.binding.Target());
+        auto gone = [&](ObjectHandle target) noexcept {
+            auto lifecycle = registry.InspectLifecycle(access, target);
             return lifecycle ? lifecycle.Value() != ObjectLifecycle::Alive
                              : lifecycle.Error() == ErrorCode::StaleHandle;
-        });
+        };
+        const usize removed = RemoveMatching(
+            [&](const Record& record) noexcept { return gone(record.binding.Target()); });
         state_->liveAtLastCompact = state_->LiveRecords();
-        return removed;
+        return removed + state_->EraseUnresolved(
+                             [&](const Unresolved& entry) noexcept { return gone(entry.target); });
     }
 
-    // 살아 있는 리플렉션 바인딩을 등록 순서로 visit(target, functionId)한다(native 구독은 빼고,
-    // 죽음 표시는 건너뛴다 — EventReflection ED20 저장·EV5 목록). visit은 Result<void>를 돌려주고
-    // 실패하면 그 오류로 멈춘다. visit 안에서 이 이벤트를 바꾸지 않는다.
+    // 살아 있는 리플렉션 바인딩(resolved 참)과 미해결 레코드(거짓)를 등록 번호 순서로
+    // visit(target, functionId, resolved)한다(native 구독은 빼고, 죽음 표시는 건너뛴다 —
+    // EventReflection ED20 저장·ED24·EV5 목록 — 로드가 기록 순서로 번호를 주므로 "로드 → 다시
+    // 저장"이 순서를 지킨다). visit은 Result<void>를 돌려주고 실패하면 그 오류로
+    // 멈춘다. visit 안에서 이 이벤트를 바꾸지 않는다.
     //
     // 사용 예:
-    //   auto visited = died.ForEachBinding([&](ObjectHandle target, Guid function) noexcept {
-    //       return list.TryPushBack({target, function});
-    //   });
+    //   auto visited = died.ForEachBinding(
+    //       [&](ObjectHandle target, Guid function, bool resolved) noexcept {
+    //           return list.TryPushBack({target, function, resolved});
+    //       });
     template <class Visit>
     Result<void> ForEachBinding(Visit&& visit) const noexcept {
         if (state_ == nullptr) {
             return Result<void>::Success();
         }
 
-        for (const Record& record : state_->records) {
-            if (record.dead) {
+        // 두 목록 모두 번호 오름차순이다 — 병합한다.
+        const Array<Record>& records = state_->records;
+        const Array<Unresolved>& unresolved = state_->unresolved;
+        usize next = 0;
+        usize nextUnresolved = 0;
+        while (next < records.Size() || nextUnresolved < unresolved.Size()) {
+            const bool takeRecord =
+                nextUnresolved == unresolved.Size() ||
+                (next < records.Size() && records[next].id < unresolved[nextUnresolved].id);
+            if (takeRecord) {
+                const Record& record = records[next++];
+                if (record.dead) {
+                    continue;
+                }
+
+                if (auto visited =
+                        visit(record.binding.Target(), record.binding.FunctionId(), true);
+                    !visited) {
+                    return visited;
+                }
+
                 continue;
             }
 
-            if (auto visited = visit(record.binding.Target(), record.binding.FunctionId());
-                !visited) {
+            const Unresolved& kept = unresolved[nextUnresolved++];
+            if (auto visited = visit(kept.target, kept.functionId, false); !visited) {
                 return visited;
             }
         }
@@ -332,13 +411,40 @@ private:
         Scope* outer;
     };
 
+    // 풀리지 않은 바인딩 하나다(ED24 — 대상 handle과 FunctionId만, 호출되지 않는다). id는 바인딩
+    // 레코드와 같은 번호 공간이다(나열 순서).
+    struct Unresolved {
+        uint64 id;
+        ObjectHandle target;
+        Guid functionId;
+    };
+
     struct State {
-        explicit State(Allocator& allocator) noexcept : records(allocator), delegate(allocator) {
+        explicit State(Allocator& allocator) noexcept
+            : records(allocator), unresolved(allocator), delegate(allocator) {
+        }
+
+        // matches가 참인 미해결 레코드를 지우고(순서 보존) 그 수를 돌려준다.
+        template <class Matches>
+        usize EraseUnresolved(Matches&& matches) noexcept {
+            usize kept = 0;
+            const usize count = unresolved.Size();
+            for (usize index = 0; index < count; ++index) {
+                if (!matches(unresolved[index])) {
+                    unresolved[kept++] = unresolved[index];
+                }
+            }
+
+            // 줄이기는 실패하지 않는다.
+            (void)unresolved.TryResize(kept);
+            return count - kept;
         }
 
         // 바인딩 id 순이다. delegate보다 먼저 선언해 나중에 소멸한다(delegate 항목의 소멸이
         // 레코드를 지운다).
         Array<Record> records;
+        // 미해결 레코드다(id 순 — delegate 항목이 없다).
+        Array<Unresolved> unresolved;
         MulticastDelegate<void(Args...)> delegate;
         uint64 nextId = 1;
         usize liveAtLastCompact = 0;

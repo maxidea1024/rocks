@@ -41,6 +41,10 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 | `MissingUnrealDependency` | 경고 | 9.3절 |
 | `UntranslatedMaterialNode` / `MaterialBakedFallback` | 경고 | 8.5절 |
 | `ParameterDefaultConflict` / `ParameterResolveMismatch` | 경고 | 8.5절 |
+| `ParameterIdCollision` / `ParameterKindConflict` | 경고 | 8.7절 2·8번(설계) |
+| `InactiveMaterialPin` | 정보 | 8.8절 1·2번 — UE가 읽지 않는 출력 핀의 연결(설계) |
+| `SubstrateLimitExceeded` | 경고 | 8.8절 5번 — UE가 컴파일하지 못하는 Substrate 트리(설계) |
+| `MaterialResultChanged` | 경고 | 8.9절 7번 — 재임포트로 결과 1·2·3번이 바뀜(설계) |
 
 메시·애니메이션 데이터 검증 진단은 MeshAnimationAssets 11절, 텍스처는 AssetSystem 4.6절 코드를 그대로 쓴다.
 

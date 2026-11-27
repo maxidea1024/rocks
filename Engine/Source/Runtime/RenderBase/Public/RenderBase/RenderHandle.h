@@ -4,7 +4,7 @@
 #include <Core/Containers/SlotArray.h>
 #include <Graphics/DeviceTypes.h>
 #include <Platform/Sync.h>
-#include <RenderBase/RenderTransfer.h>
+#include <Meta/LaneTransfer.h>
 
 namespace rocks::graphics {
 class Device;
@@ -219,4 +219,4 @@ ReleaseRetiredResource(graphics::Device& device, RenderHandle handle,
 
 } // namespace rocks::render
 
-ROCKS_RENDER_TRANSFERABLE(rocks::render::RenderHandle);
+ROCKS_LANE_TRANSFERABLE(rocks::render::RenderHandle);

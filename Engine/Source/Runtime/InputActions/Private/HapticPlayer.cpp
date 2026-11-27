@@ -90,6 +90,14 @@ Result<void> HapticPlayer::PlayHapticEffect(const HapticEffect& effect,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 평탄화되지 않은 커브 slot(에셋을 가리키는 번호)은 재생할 수 없다(2.9절 IA9 —
+    // CopyHapticEffect가 비운다).
+    for (const HapticChannel& channel : effect.channels) {
+        if (channel.curveAsset != NoCurveAssetSlot) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     // 사본을 다 만든 뒤 바꾼다(실패면 그대로).
     ActiveHapticEffect active(*allocator_);
     if (auto copied = active.effect.TryCopyFrom(effect); !copied) {

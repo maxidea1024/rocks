@@ -1,5 +1,6 @@
 #include <Base/NumericLimits.h>
 #include <Collision/BodySettings.generated.h>
+#include <Collision/CollisionShape.h>
 #include <Collision/CollisionSettings.generated.h>
 #include <Collision/CollisionTypes.generated.h>
 #include <Core/Diagnostics/Log.h>
@@ -484,6 +485,24 @@ void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
 
     // 다시 만들지 않고 바꾼다(UE UpdateInstanceSimulatePhysics — 켜면 startAwake일 때 깨운다).
     scene->SetBodyMotion(bodyHandle_, motion, bodySettings_.startAwake);
+}
+
+bool PrimitiveComponent::ComputePenetration(MtdResult& out, const CollisionShape& shape,
+                                            const Vec3d& position,
+                                            const Quatd& rotation) const noexcept {
+    // UE: body가 없으면 거짓이다.
+    if (bodyHandle_.IsNull() || !HasWorld()) {
+        return false;
+    }
+
+    const PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    return scene != nullptr &&
+           scene->ComputePenetration(bodyHandle_, shape, position, rotation, out);
+}
+
+CollisionShape PrimitiveComponent::GetCollisionShape(double inflation) const noexcept {
+    // UE: 형상 클래스가 덮어쓰는 큰 bounds 상자다.
+    return CollisionShape::Box(Bounds().boxExtent).Inflate(inflation);
 }
 
 void PrimitiveComponent::SetNotifyRigidBodyCollision(bool notify) noexcept {

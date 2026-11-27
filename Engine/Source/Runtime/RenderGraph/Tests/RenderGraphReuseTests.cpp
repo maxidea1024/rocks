@@ -408,7 +408,7 @@ void RenderHistoryFrame(RenderFrameContext& context, HistoryPacket& packet) noex
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(HistoryPacket);
+ROCKS_LANE_TRANSFERABLE(HistoryPacket);
 
 // 결정 R15를 렌더 lane Retire로: lane.Retire(history)가 장치 해제 대신 풀 반납이 되고, fence 통지
 // 뒤 handle이 표에서 빠진다. 프레임마다 history를 바꿔도 장치 생성은 두 번뿐이다.

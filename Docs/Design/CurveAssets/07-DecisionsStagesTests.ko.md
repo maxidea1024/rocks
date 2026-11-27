@@ -12,7 +12,7 @@
 | CAD2 | 모듈 | Runtime `CurveAssets`(Curves·AssetRuntime)와 Runtime `CurveAtlas`(+Texture), Developer `CurveAssetTools`·`CurveAtlasTools`, Core `CsvReader` | 커브 소비자가 텍스처 모듈을 끌어오지 않는다. CSV 읽기는 범용이라 Core에 둔다 |
 | CAD3 | 표 저장 | 모드 하나와 맵 둘(`OrderedMap<Name, PlainCurve>`·`OrderedMap<Name, TangentCurve>`)을 두고, 모드가 쓸 맵을 정한다. 쓰지 않는 맵은 무시하고 쿠킹이 비운다 | CurveData 14절 D2. 행 다형 저장보다 싸고 UE 모드 규칙을 그대로 따른다. 로드 뒤 불변식 판정 기반이 없고, 사람이 편집한 데이터로 에셋이 열리지 않으면 안 된다 |
 | CAD4 | 색 커브 기본 키 | 생성자에 키를 넣지 않고, 편집기의 새로 만들기가 검정→흰색 키를 넣는다 | UE 편집기 생성자 키는 빌드 종류마다 클래스 기본값을 다르게 만든다(차이 저장 함정) |
-| CAD5 | atlas 굽기 | 쿠킹 처리기가 Build 의존으로 굽는다. 원본 bulk는 저장하지 않는다 | 구독 없는 명령행 편집에서도 atlas가 낡지 않는다 |
+| CAD5 | atlas 굽기 | UE처럼 atlas가 자기 `TextureSource`(RGBA16F)에 구워 저장한다. 원본 재구성 hook이 Edit·New·Open(UE PostLoad 대응 — 쿠커도 연다)에서 굽고 지금 원본과 다를 때만 바꾼다. `curves`는 Build 의존이다. 쿠커에게는 보통 `Texture2D`다 | UE `UpdateTextures`·`PostLoad`와 같다(애매하면 UE — 렌더·에셋 세션 권고 2026-11-27). 옛 안(쿠킹 때 메모리로 굽기)은 Texture 쿠킹에 메모리 원본 경로가 따로 필요했다 |
 | CAD6 | 임포터 기본 확장자 | 없음. `--importer=`로 고른다 | `csv`·`json`은 여러 종류가 쓴다. UE도 대화상자로 묻는다 |
 | CAD7 | 원천 참조 | 원천은 `ObjectRef`(Hard) 참조 struct다. 소유 객체의 필드나 `StructRefArray` 원소에만 둔다. World는 `SoftObjectRef` + lease다. 값 struct에는 평탄 값을 둔다 | AssetSystem 6.2·6.3절, `ObjectRef` 복사 금지(`ObjectRefs.h:175-206`). UE `TObjectPtr`(하드)와 같은 로드·쿠킹 의미다 |
 | CAD8 | 풀리지 않는 참조 | 오류로 돌려준다. 인라인으로 대신하지 않는다 | 조용히 다른 커브로 평가하면 데이터 문제가 숨는다 |
@@ -45,6 +45,7 @@
 19. ★ 올바르지 않은 UTF-8·UTF-16(짝 없는 surrogate·홀수 byte)은 `CorruptData`로 거부한다. UE `BufferToString`은 대체 문자로 바꾸거나 그대로 통과시킨다(`FileHelper.cpp:147-195`).
 20. ◇ 숫자 칸은 double을 거쳐 float로 바꾼다(UE Windows `Atof` = `(float)_tstof`와 같다). UE Linux·Mac `wcstof`(float로 바로)와는 드물게 1 ulp 다를 수 있다.
 21. ★ 쿠킹 중복 키 제거에서 비교 차가 NaN인 키는 남긴다(UE는 지운다 — CurveData 15절과 같은 수정).
+22. ◇ 색 커브 atlas: (a) 열 때 굽기는 지금 원본과 다를 때만 원본을 바꾸고 dirty로 둔다. UE `PostLoad`는 늘 다시 그린다(`CurveLinearColorAtlas.cpp:221-226`). (b) 커브를 바꿔도 즉시 다시 굽지 않는다. UE는 편집기 구독(`OnCurveUpdated`)이 바로 굽는다. Rocks는 다음 열기(쿠킹 포함)가 굽고, 쿠킹 키는 Build 의존이 지킨다. (c) 너비·높이가 16384를 넘으면 `InvalidSetting`이다. UE는 그대로 굽고 텍스처 빌드가 줄인다. (d) `disableAdjustments`가 켜진 동안 조정 필드 대입은 정규화가 항등값으로 되돌린다. UE는 편집기가 막고(`CanEditChange`), 대입되면 그 필드를 0으로 둔다(`PostEditChangeProperty` `:112-152` — 밝기 0은 항등이 아니다). 끌 때 캐시 복원도 없다(4.4절).
 
 ### 7.3 단계
 
@@ -54,8 +55,8 @@
 | CA2 | `CurveTableAsset`·`CurveTableRowRef` | 3.2·3.3절 시험 |
 | CA3 | Core `CsvReader`, Developer `CurveAssetTools` 임포터 다섯, 진단 코드 `CurveImportRowSkipped`·`CurveTableUnusedRows`(에셋 세션 합의) | 5.1·5.2절 시험(UE 동작 대조표) |
 | CA4 | `CurveTableCookProcessor` | 쿠킹 결과 키·접선, 에디터 객체 불변, 쓰지 않는 맵 비우기 |
-| CA5 | InputActions 연결(6.1절 — 착수 때 방식 확정) | 입력 시험 갱신, slot 평탄화 시험 |
-| CA6 | `ColorCurveAtlas`, 굽기, 쿠킹 처리기(4.3절 변경 목록 — 렌더·에셋 세션 합의) | 굽기 UE 대조, 쿠킹 텍스처 결과 |
+| CA5 | InputActions 연결(6.1절 — 소유 에셋 `curveAssets` + slot 번호, InputActions 2.9절 IA9) | 입력 시험 갱신, slot 평탄화(액션·바인딩·프로필·채널)·검증 거부·오류(범위 밖·null·풀리지 않음)·출력 그대로 시험 |
+| CA6 | AssetRuntime·AssetDatabase 원본 재구성 까닭 `Open`(AssetSystem 12.14절 A5j2c), Texture 변경 둘, Runtime `CurveAtlas`·Developer `CurveAtlasTools`(굽기·hook 셋) | Open 재구성 시험(같으면 dirty 아님·다르면 dirty·실패 되돌림·이미 열린 패키지 미호출), 굽기 UE 대조, 쿠킹 텍스처 결과 |
 
 - 단계마다 리뷰어를 하나 두고, 바뀐 시험과 format·policy를 돌린다.
 - CA1이 push되면 6.2절의 세션들에 알린다.
@@ -121,12 +122,15 @@
   - 같은 입력을 두 번 쿠킹하면 같은 byte
   - 처리기 정체성(쿠킹 키에 드는 것은 쿠커 A4c 시험이 본다)
 - **`ColorCurveAtlas_`**(CA6)
-  - 굽기 표본 시간(역수 곱, width 0·1 → 2)
-  - null 커브 흰색
-  - `disableAdjustments`(커브 원값, 텍스처 조정 항등)
-  - float16 반올림
-  - 커브 변경 → 너겟 키 변경
-  - 처리기가 없는 쿠커에서 실패 진단
+  - 굽기 표본 시간(역수 곱, width 0·1 → 2), 높이 max(커브 수, 1)
+  - null 커브 흰색, 커브 없음 → 1행 흰색
+  - `disableAdjustments`(커브 원값), 정규화(width 올림, 조정 항등값·크로마 키 끔)
+  - float16 반올림(UE 규칙), byte 배치(행 우선·little-endian)
+  - 크기 상한 `InvalidSetting`
+  - hook: Edit·New·Open이 굽고, 같으면 바꾸지 않음(MarkRebuilt 없음), Propagate는 아무것도 하지 않음
+  - Build 의존: 커브 패키지들(null·자기 패키지 제외), 커브 변경 → 쿠킹 키 변경
+  - 쿠킹: 낡은 저장 원본 + 바뀐 커브 → 쿠커가 열 때 다시 구운 원본으로 빌드, 에디터 패키지 파일은 그대로(저장하지 않음)
+  - Texture 쿠킹 처리기가 파생 타입(atlas)을 받음
 
 ### 7.5 확인하지 못한 것
 

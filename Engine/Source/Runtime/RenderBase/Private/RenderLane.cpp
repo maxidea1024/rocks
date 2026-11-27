@@ -48,7 +48,7 @@ struct ContentUpdate {
 
 } // namespace rocks::render
 
-ROCKS_RENDER_TRANSFERABLE(rocks::render::ContentUpdate);
+ROCKS_LANE_TRANSFERABLE(rocks::render::ContentUpdate);
 
 namespace rocks::render {
 

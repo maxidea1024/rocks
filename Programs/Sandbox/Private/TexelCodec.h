@@ -2,19 +2,16 @@
 
 #include <Core/Containers/Span.h>
 #include <GraphicsTypes/PixelFormat.h>
+#include <Texture/TextureBlockDecode.h>
 
 // texel 부호화·해석이다(Sandbox 텍스처 시험 — Docs/Design/RenderBase 18.5절 7항). 메모리 플랫폼
 // 데이터 장면이 texel을 쓰고, CPU 기준이 GPU가 읽을 값을 계산한다.
 // - 비압축 texel 하나(EncodeTexel·DecodeTexel): 성분이 모두 같은 크기인 색 형식(8·16·32 bit,
 //   unorm·uint·int·float, RGBA·BGRA 순서 — BGRA8은 byte B, G, R, A, sRGB)만 다룬다(packed·깊이는
 //   false).
-// - 블록 압축 이미지(EncodeBlockImage·DecodeImageTexel, 개정 63 — TC2): BC1·BC3(sRGB 짝 포함)·BC4·
-//   BC5다. 해석은 D3D 블록 압축 명세 식(565 비트 복제 확장 뒤 끝점 보간, 반올림 없는 float — 장치
-//   디코더 반올림의 가운데 값)이고 에셋 빌드 인코더와 독립인 CPU 기준이다. 부호화는 메모리 장면용
-//   단순 인코더다(끝점 = 가장 먼 두 texel, 가장 가까운 index — 품질이 아니라 유효한 블록이 목적이고
-//   기준은 그 byte를 해석한다). 에셋 빌드의 TextureTools 인코더·기준 디코더는 쓰지 못한다:
-//   TextureTools는 에디터 데이터(ROCKS_WITH_EDITOR_DATA)가 있는 타깃에서만 빌드되고 Sandbox(Game
-//   타깃)에는 없다(Docs/Design/RenderBase 18.5절 7항 "TC2 뒤 쿠킹 형식").
+// - 블록 압축 이미지 texel(DecodeImageTexel): BC1·BC3(sRGB 짝 포함)·BC4·BC5·BC6HUfloat·BC7(sRGB 짝
+//   포함)을 공용 디코더(Texture TextureBlockDecode.h — AssetSystem 12.17.7)로 푼다. 메모리 장면용
+//   블록 부호화는 BlockEncode.h다.
 //
 // 사용 예:
 //   const float red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
@@ -37,23 +34,13 @@ bool EncodeTexel(graphics::PixelFormat format, const float (&value)[4], uint8* o
 // 선형으로 풀고 정수는 정수 값 그대로).
 bool DecodeTexel(graphics::PixelFormat format, const uint8* in, float (&out)[4]) noexcept;
 
-// 다루는 블록 압축 형식인가.
-bool IsBlockCodecFormat(graphics::PixelFormat format) noexcept;
-
-// 블록 형식의 부호화 입력 형식이다(RGBA8Unorm, sRGB 짝은 RGBA8UnormSrgb — 입력 byte에 감마가 들어
-// 있다). 블록 형식이 아니면 format 그대로다.
-graphics::PixelFormat BlockStagingFormat(graphics::PixelFormat format) noexcept;
-
-// rgba(BlockStagingFormat 형식 texel — plane 다음 행 다음 열, planes 장)를 블록으로 out에 쓴다.
-// out은 PixelFormatImageBytes(format, width, height) × planes byte다. 블록보다 작은 mip도 블록
-// 하나다 (블록 밖 자리는 가장자리 texel을 복제해 채운다 — 장치는 읽지 않는다). 다루지 않는
-// 형식·크기 불일치면 false다.
-bool EncodeBlockImage(graphics::PixelFormat format, Span<const uint8> rgba, uint32 width,
-                      uint32 height, uint32 planes, Span<uint8> out) noexcept;
+// 블록 압축 형식의 공용 디코더 형식이다(BC1·BC3·BC7은 sRGB 짝도 같다). 다루지 않으면 false다.
+bool TextureBlockFormatOf(graphics::PixelFormat format, TextureBlockFormat& out) noexcept;
 
 // planes 장 이어진 이미지(6.5절 배치 — slice·z 다음 행 다음 열, 블록 형식은 블록 행)의 (plane, x,
-// y) texel을 셰이더가 읽는 값으로 해석한다. 비압축은 DecodeTexel과 같고, 블록 형식은 그 블록을 풀어
-// texel을 고른다(BC1·BC3 RGBA, BC4 (r, 0, 0, 1), BC5 (r, g, 0, 1), sRGB 짝은 색 성분을 선형으로).
+// y) texel을 셰이더가 읽는 값으로 해석한다. 비압축은 DecodeTexel과 같고, 블록 형식은 그 블록을
+// 공용 디코더로 풀어 texel을 고른다(BC1·BC3·BC7 RGBA, BC4 (r, 0, 0, 1), BC5 (r, g, 0, 1), BC6H
+// half RGB와 알파 1, sRGB 짝은 색 성분을 선형으로).
 // 범위 밖·byte 부족·다루지 않는 형식이면 false다.
 bool DecodeImageTexel(graphics::PixelFormat format, Span<const uint8> bytes, uint32 width,
                       uint32 height, uint32 plane, uint32 x, uint32 y, float (&out)[4]) noexcept;

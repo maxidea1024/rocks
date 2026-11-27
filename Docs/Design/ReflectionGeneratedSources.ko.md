@@ -221,6 +221,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 Unre
 - 모듈 진입점: 모듈 로더는 코드가 있는 모듈에 진입점(`ROCKS_IMPLEMENT_MODULE`)을 요구한다(`Programs/Rocks.Build/ModuleTables.cs`의 `hasCode`). 리플렉션 생성 소스는 이 판정에 넣지 않는다. 그래서 소스 없던 리플렉션 모듈은 라이브러리가 되어도 지금처럼 진입점 면제다. 이 모듈들을 진입점 모듈로 바꾸는 일은 ML2가 정한다. → ML2(2026-11-20)가 바꿨다: 진입점 판정이 리플렉션 생성 소스를 세고, 손으로 쓴 소스가 없는 메타데이터 모듈은 빌드 생성 진입점 TU를 받으며, 설치 SDK 표지 `ReflectionOnlyLibrary`는 없어졌다(SDK manifest 8 — [모듈 로더](ModuleLoader/03-Design/03.10-ML2Wiring.ko.md) 3.10절 "GS1 위 세부").
 - 도구 빌드 ID: 생성 소스는 다른 소스와 같이 action 입력이다. 생성 내용에 호스트 경로를 넣지 않는 지금 규칙이 생성 소스에도 적용된다.
 - `compile_commands.json`에 생성 소스 항목이 들어간다. 정책 감사는 생성 헤더와 같은 규칙으로 생성 소스를 건너뛴다.
+- **MetaCompiler 인자는 응답 파일로 넘긴다**(개정 6, 2026-11-26). 헤더마다 `--input`·`--include` 쌍이 붙어, 헤더가 200개 가까운 모듈(MaterialSchema 노드 속성 — MaterialSystem 19.13절)은 Windows 명령줄 상한(32,767자)을 넘는다. `MetadataRunner`가 인자를 stage의 `<모듈>.metacompiler.rsp`(한 줄에 인자 하나, UTF-8 — 모듈 출력 루트 밖이라 `--check`의 남는 파일 검사와 게시에 섞이지 않는다)에 쓰고 `dotnet <MetaCompiler> @<경로>`로 부른다. MetaCompiler는 인자가 `@<경로>` 하나면 그 줄들을 인자로 쓴다. 경로·인자에 줄바꿈이 없으므로 따옴표 규칙이 필요 없다. 버린 대안은 모듈을 쪼개는 것(구조를 도구 한계에 맞추는 우회)과 길이가 넘을 때만 파일을 쓰는 것(경로가 둘이 되어 한쪽이 덜 시험된다)이다.
 - 설치 SDK는 생성 헤더만 싣는다. `Source/`는 public include 루트 밖이라 실리지 않고, 생성 소스의 object는 `ModuleOutputs`의 라이브러리로 실린다(`Programs/Rocks.Build.Cli/InstalledSdk.cs:102–116`). `ImportedMetadata`(descriptor·identity 명세)는 그대로다. 소스가 없던 리플렉션 모듈이 SDK에 들어가면 이제 라이브러리도 함께 실린다.
 
 ## 7. 검증 컴파일
@@ -264,7 +265,7 @@ GS2(타입별 본문 분리)는 소비 코드를 고치지 않는다.
 | `detail::ValueValidate<S>` 일반형(같은 파일) | 검증 hook을 건너뛴다 | **조용히 갈림** |
 | `ReflectedStructField<S>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 되어 필드 형질이 struct가 아닌 길로 간다 | **조용히 갈림** |
 | `GeneratedFieldVisitor`·`GeneratedLogFields`(같은 파일) | 로그 구조 특수화가 빠진다 | **조용히 갈림** |
-| `render::CheckRenderTransfer<T>`(`RenderBase/RenderTransfer.h`) | 스키마 검사를 건너뛴다 | **조용히 갈림** |
+| `CheckLaneTransfer<T>`(`Meta/LaneTransfer.h`, RenderBase 5.2절 개정 66에서 옮김) | 스키마 검사를 건너뛴다 | **조용히 갈림** |
 | `NativeTypeKey<T>`(`Object/Object.h`) | 리플렉션 클래스의 키는 생성 `.cpp`의 `GeneratedType<T>::NativeKey()`다([빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절 BS8b) — `ReflectedDeclarationV`와 Object 파생으로 고르고 생성 헤더가 없으면 `static_assert`(struct·enum도 생성 키(BS8d4 — [빌드 타깃](BuildTargets/03-Design/03.08-LinkType.ko.md) 3.8절)) | 컴파일 오류(BS8b) |
 | `ReflectedEnumField<E>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 된다 | 표지 없음(아래 한계) |
 
@@ -413,3 +414,4 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | 4 | 2026-11-21 | 8.1절을 더했다(GSD15·GSD16): 생성 헤더가 보이지 않는 번역 단위에서 템플릿이 오류 없이 다른 길로 가는 지점을 조사하고, `ROCKS_GENERATED_BODY()`의 표지와 탐지 관문으로 컴파일 오류가 되게 했다. 표지를 위해 저장소의 리플렉션 클래스·struct에 `ROCKS_GENERATED_BODY()`를 넣었다(동작은 그대로다) |
 | 4(리뷰 반영) | 2026-11-21 | 8.1절 보강: 판정을 cv 한정자를 뗀 타입으로 하고 한정자 붙은 타입·불완전 타입은 관문이 거부, 파서가 두 표지를 함께 요구, 로그 인자에도 생성 헤더가 필요함, 유니티 묶음에서 놓치는 경우와 그것을 잡는 검증 변형, 리플렉션 헤더의 inline 코드 한계, 매크로 이름이 박힌 곳 목록. 관문마다 따로 실패를 확인하는 시험을 더했다 |
 | 5 | 2026-11-21 | 보류하던 GSD5·GSD13을 재검토해 둘 다 하지 않기로 했다(12절). Foundation Debug 검증 빌드의 `--timing` 집계로, 리플렉션 생성 소스 묶음은 컴파일 CPU 시간의 14.3%지만 그 86%가 시험 fixture 모듈이고 엔진 모듈은 1.9%다. codec 헤더 사슬에서 줄일 수 있는 몫은 2.8% 이하다. 다시 볼 조건을 12절에 적었다 |
+| 6 | 2026-11-26 | 6.3절: MetaCompiler 인자를 응답 파일(stage의 `<모듈>.metacompiler.rsp`, `@<경로>`)로 넘긴다. 헤더가 많은 모듈이 Windows 명령줄 상한을 넘었다(MaterialSchema MS1b) |

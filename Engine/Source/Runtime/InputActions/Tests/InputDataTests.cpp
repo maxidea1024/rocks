@@ -1,5 +1,6 @@
 #include <Base/InitializerList.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <CurveAssets/FloatCurveAsset.generated.h>
 #include <InputActions/InputAction.generated.h>
 #include <InputActions/InputAction.h>
 #include <InputActions/InputActionsModule.h>
@@ -586,6 +587,116 @@ TEST(InputData_CollectContext) {
     }
 
     CHECK(types.Shutdown());
+}
+
+// 2.9절 IA9: slot 번호가 curveAssets 범위 밖이거나 원소가 null이면 모으기가 InvalidArgument이고
+// bundle은 그대로다. slot이 없으면 인라인 커브 그대로다.
+TEST(InputData_CollectCurveSlotErrors) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration registration(types, allocator);
+    REQUIRE(RegisterInputActionsTypes(registration));
+    ObjectRegistry objects(allocator, types, {TestIdHigh, 9});
+    const auto access = objects.OwnerAccess();
+    auto action = objects.NewObject<InputAction>(access, TypeIdOf<InputAction>());
+    auto context = objects.NewObject<InputContext>(access, TypeIdOf<InputContext>());
+    REQUIRE(action && context);
+    const ObjectHandle actionHandle = action.Value().Handle();
+    const ObjectHandle contextHandle = context.Value().Handle();
+    {
+        auto writable = objects.ResolveForWrite<InputAction>(access, actionHandle);
+        REQUIRE(writable);
+        InputAction& value = *writable.Value().Get().Value();
+        value.id = Id(JumpId);
+        InputModifier modifier(allocator);
+        modifier.kind = InputModifierKind::ResponseCurveUser;
+        REQUIRE(modifier.responseX.TryAddKey(0.0f, 4.0f));
+        REQUIRE(value.settings.modifiers.TryPushBack(Move(modifier)));
+    }
+
+    {
+        auto writable = objects.ResolveForWrite<InputContext>(access, contextHandle);
+        REQUIRE(writable);
+        InputContext& value = *writable.Value().Get().Value();
+        value.id = Id(ContextId);
+        REQUIRE(objects.AddReference(access, contextHandle, value.actions, actionHandle));
+    }
+
+    // slot 없음: 인라인 그대로.
+    InputContextBundle bundle(allocator);
+    REQUIRE(CollectInputContext(objects, access, contextHandle, bundle));
+    CHECK(bundle.actions[0].settings.modifiers[0].responseX.Evaluate(0.0f) == 4.0f);
+
+    // 범위 밖 slot: InvalidArgument, bundle 그대로.
+    {
+        auto writable = objects.ResolveForWrite<InputAction>(access, actionHandle);
+        REQUIRE(writable);
+        writable.Value().Get().Value()->settings.modifiers[0].responseXAsset = 0;
+    }
+
+    CHECK(CollectInputContext(objects, access, contextHandle, bundle).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(bundle.actions.Size() == 1 &&
+          bundle.actions[0].settings.modifiers[0].responseXAsset == NoCurveAssetSlot);
+
+    // null 원소: InvalidArgument.
+    {
+        auto writable = objects.ResolveForWrite<InputAction>(access, actionHandle);
+        REQUIRE(writable);
+        REQUIRE(objects.AddReference(access, actionHandle,
+                                     writable.Value().Get().Value()->curveAssets, ObjectHandle{}));
+    }
+
+    CHECK(CollectInputContext(objects, access, contextHandle, bundle).Error() ==
+          ErrorCode::InvalidArgument);
+
+    // 원소 0을 커브 에셋으로 바꾸면 에셋 커브가 인라인을 이긴다.
+    auto curve = objects.NewObject<FloatCurveAsset>(access, TypeIdOf<FloatCurveAsset>());
+    REQUIRE(curve);
+    const ObjectHandle curveHandle = curve.Value().Handle();
+    {
+        auto writable = objects.ResolveForWrite<FloatCurveAsset>(access, curveHandle);
+        REQUIRE(writable);
+        REQUIRE(writable.Value().Get().Value()->curve.TryAddKey(0.0f, 9.0f));
+    }
+
+    {
+        auto writable = objects.ResolveForWrite<InputAction>(access, actionHandle);
+        REQUIRE(writable);
+        InputAction& value = *writable.Value().Get().Value();
+        REQUIRE(objects.SetReferenceAt(access, actionHandle, value.curveAssets, 0, curveHandle));
+    }
+
+    InputContextBundle resolved(allocator);
+    REQUIRE(CollectInputContext(objects, access, contextHandle, resolved));
+    CHECK(resolved.actions[0].settings.modifiers[0].responseX.Evaluate(0.0f) == 9.0f);
+    CHECK(resolved.actions[0].settings.modifiers[0].responseXAsset == NoCurveAssetSlot);
+
+    // 풀리지 않는 커브 에셋(파괴 요청): Destroyed, bundle 그대로.
+    REQUIRE(objects.RequestDestroy(access, curveHandle));
+    CHECK(CollectInputContext(objects, access, contextHandle, resolved).Error() ==
+          ErrorCode::Destroyed);
+    CHECK(resolved.actions[0].settings.modifiers[0].responseX.Evaluate(0.0f) == 9.0f);
+}
+
+// 2.9절: 평탄화되지 않은 응답 커브 slot은 액션 설정 검증·원소 검증(Inject 경로)이
+// UnresolvedCurveAsset으로 거부한다.
+TEST(InputData_UnresolvedCurveSlotRejected) {
+    SystemAllocator allocator;
+    InputActionSettings settings(allocator);
+    InputModifier modifier(allocator);
+    modifier.kind = InputModifierKind::ResponseCurveUser;
+    modifier.responseYAsset = 0;
+    REQUIRE(settings.modifiers.TryPushBack(Move(modifier)));
+    InputDataDiagnostic diagnostic;
+    CHECK(ValidateInputActionSettings(settings, &diagnostic).Error() == ErrorCode::InvalidArgument);
+    CHECK(diagnostic.issue == InputDataIssue::UnresolvedCurveAsset);
+    InputDataDiagnostic elements;
+    CHECK(ValidateInputElements(Span<const InputTrigger>(), settings.modifiers.View(), &elements)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(elements.issue == InputDataIssue::UnresolvedCurveAsset);
+    settings.modifiers[0].responseYAsset = NoCurveAssetSlot;
+    CHECK(ValidateInputActionSettings(settings));
 }
 
 } // namespace input_data_tests_file

@@ -119,10 +119,14 @@ enum class EditorWarningKind : uint8 {
     // 원본 재구성: 원본 묶음 hook의 경고다(진단 = 그 코드 — SourceCleared, asset = 그 에셋,
     // detail — Docs/Design/AssetSystem 12.14절 A5j2).
     SourceRebuildWarning,
-    // 열기: 이벤트 바인딩을 다시 만들지 못해 버렸다(진단 asset = 패키지, detail = 버린 수 — 함수
-    // 없음·서명 다름, Docs/Design/EventReflection.ko.md ED22). EV3a2 전에는 다시 저장하면 그
+    // 열기: 이벤트 바인딩을 다시 만들지 못해 버렸다(진단 asset = 패키지, detail = 버린 수 — 대상이
+    // 그 사이 사라짐·보존 실패 등, Docs/Design/EventReflection.ko.md ED22). 다시 저장하면 그
     // 바인딩이 사라진다.
-    DroppedEventBindings
+    DroppedEventBindings,
+    // 열기: 풀리지 않은 이벤트 바인딩(함수 없음·서명 다름)을 미해결 레코드로 보존했다(진단 asset =
+    // 패키지, detail = 보존한 수 — ED24). 다시 저장하면 그대로 쓰이지만 호출되지 않고, 함수를
+    // 고치거나 바인딩을 지우기 전에는 쿠킹이 거부한다.
+    UnresolvedEventBindings
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -294,13 +298,19 @@ public:
     // 읽은 파일의 Dependencies로 넓혀 한 트랜잭션으로 열고, 이미 열린 패키지는 그대로 잇는다.
     // warnings가 있으면 경고를 붙인다(빼낸 의존 패키지·null로 이은 import, 위 종류).
     //
+    // 게시한 뒤 이번에 새로 연 패키지마다(id 순, 읽기 전용·미해결 import 패키지 제외) 대표 에셋의
+    // 원본 재구성 hook을 까닭 Open으로 부른다(Docs/Design/AssetSystem 12.14절 A5j2c — UE PostLoad).
+    // hook이 원본을 다시 썼으면 그 패키지를 dirty로 표시하고(저장하지 않는다), 경고는
+    // SourceRebuildWarning으로 붙는다.
+    //
     // 오류(failure 진단): Initialize 전 InvalidArgument, 색인에 없음 NotFound(진단 None), 같은 id
     // 파일 둘 DuplicateAssetId / AlreadyExists, 파일 열기 실패(없음 MissingFile / NotFound, 그 밖의
     // IO 진단 None과 그 오류), 패키지 판정(Prepare)의 진단, 헤더 id가 요청과 다름(색인 뒤 파일이
     // 바뀜) ExternalModification / StaleHandle, ImportRecord 형식 위반 CorruptPackage /
     // InvalidArgument(칸 ImportRecord), ImportOwner 대조 위반 CorruptPackage / InvalidArgument(칸
     // Dependencies), 묶음 인스턴스의 오류(InstantiatePackages — 트랜잭션 전체 실패, 아무것도 열리지
-    // 않는다), 할당 실패(진단 None). 의존 패키지의 같은 실패는 경고다.
+    // 않는다), 열 때 원본 재구성 hook의 오류(hook 진단 — 이번에 연 패키지를 모두 닫는다), 할당
+    // 실패(진단 None). 의존 패키지의 같은 실패는 경고다.
     Result<ObjectHandle> Open(AssetId id, Array<EditorWarning>* warnings = nullptr,
                               AssetDiagnostic* failure = nullptr) noexcept;
     // 논리 경로로 연다(색인 FindByPath — 같은 경로 키 둘은 DuplicatePath / AlreadyExists, 없음은
@@ -522,6 +532,11 @@ private:
     Result<void> OpenCachePath(const EditorPackageInfo& info, String& out) const noexcept;
     // 열린 패키지 at을 Discard하고 캐시 핸들(cachePath — 비면 없음)을 닫고 표에서 뺀다.
     Result<void> DiscardOpen(usize at, StringView cachePath) noexcept;
+    // before(id 순)에 없는 열린 패키지마다 원본 재구성 hook을 까닭 Open으로 부른다(A5j2c — Open의
+    // 설명). 오류: hook·RebuildSource의 오류(진단은 failure — hook이 진단을 남기지 않았으면 None과
+    // 그 오류), MarkDirty의 오류. 실패해도 닫지 않는다(부른 쪽이 CloseOpened로 닫는다).
+    Result<void> RebuildOpened(Span<const AssetId> before, Array<EditorWarning>* warnings,
+                               AssetDiagnostic* failure) noexcept;
     // 저장의 판정(교체 전 — 실패하면 아무것도 쓰지 않는다)과 쓰기·교체·뒷정리다.
     struct SavePlan;
     // 복제 쓰기다(사본 id와 다시 쓴 ImportRecord byte).

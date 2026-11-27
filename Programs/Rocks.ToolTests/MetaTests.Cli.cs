@@ -69,9 +69,9 @@ internal static partial class MetaTests
                 ("ReflectedStructField", "#include <Object/GeneratedFieldAccess.h>\n" +
                     "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<probe::Leaf>::Supported; }\n"),
                 ("HasLogStructure", "#include <Core/Diagnostics/LogStructure.h>\n#include <Object/GeneratedFieldAccess.h>\nbool Logs() noexcept { return rocks::HasLogStructure<probe::Leaf>; }\n"),
-                ("CheckRenderTransfer", "#include <Engine/Source/Runtime/RenderBase/Public/RenderBase/RenderTransfer.h>\n" +
-                    "ROCKS_RENDER_TRANSFERABLE(probe::Leaf);\n" +
-                    "rocks::Result<void> Check() noexcept { return rocks::render::CheckRenderTransfer<probe::Leaf>(); }\n")
+                ("CheckLaneTransfer", "#include <Meta/LaneTransfer.h>\n" +
+                    "ROCKS_LANE_TRANSFERABLE(probe::Leaf);\n" +
+                    "rocks::Result<void> Check() noexcept { return rocks::CheckLaneTransfer<probe::Leaf>(); }\n")
             ];
             const string reflected = "#include <Probe.h>\n";
             const string generated = "#include <Probe.generated.h>\n";

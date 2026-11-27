@@ -81,7 +81,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 - 등록 때 같은 해시에 다른 이름이 있으면 등록이 실패한다(충돌을 조용히 넘기지 않는다, 오류 문구는 영어). 같은 이름을 두 번 등록해도 실패다.
 - 해시는 실행 중 조회용일 뿐이다. 저장·쿠킹 형식(셰이더 라이브러리 항목, job 키)은 셰이더 시스템 12.2절대로 이름 문자열 정렬과 SHA-256을 쓴다. 그래서 해시 함수를 바꿔도 쿠킹 결과는 바뀌지 않는다.
 - 이유: `Name`은 pool 세션 domain과 lease를 가진 실행 중 토큰이다(`Core/Text/Name.h`, `NamePool.h`). 정적 등록과 여러 스레드 조회에 pool 수명 관리가 끼어든다. 렌더 이름은 코드가 정하는 닫힌 집합이라 pool이 필요 없다. UE도 셰이더 타입 표를 `FName`이 아니라 64 bit 해시 `FHashedName`으로 찾는다(`Runtime/RenderCore/Public/Shader.h:1277` `GetNameToTypeMap`, 해시는 대문자 이름의 CityHash64 `Runtime/Core/Private/Serialization/MemoryImage.cpp:1210–1252`).
-- 머티리얼 파라미터 이름처럼 콘텐츠가 정하는 이름은 이 결정의 범위가 아니다([머티리얼 시스템](../MaterialSystem.ko.md)이 정한다).
+- 머티리얼 파라미터 이름처럼 콘텐츠가 정하는 이름은 이 결정의 범위가 아니다([머티리얼 시스템](../MaterialSystem/README.ko.md)이 정한다).
 
 ### 4.4 Graphics 확장(GX)
 
