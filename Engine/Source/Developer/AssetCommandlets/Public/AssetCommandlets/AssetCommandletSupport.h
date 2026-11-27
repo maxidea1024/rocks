@@ -157,8 +157,10 @@ private:
 // Docs/Design/AssetSystem 12.8절). 시험은 AssetCommandContext::typeModule로 모듈 하나를 준다.
 // AudioAssets는 사운드 에셋(Docs/Design/AudioSystem 3.36.1절 — World 없이 등록되도록
 // EngineAudio에서 뗐다). 이 목록을 쓰는 호스트(기본 typeModule)는 목록의 모든 모듈을 링크해야
-// 한다(없으면 Start가 실패한다).
-inline constexpr StringView AssetTypeModules[] = {"Animation", "Mesh", "Texture", "AudioAssets"};
+// 한다(없으면 Start가 실패한다). CurveAssets는 커브 에셋이다(Docs/Design/CurveAssets 5.1절 — 커브
+// 임포터 등록이 출력 타입을 찾으므로, 빠지면 asset-import가 임포터 등록 NotFound로 실패한다).
+inline constexpr StringView AssetTypeModules[] = {"Animation", "Mesh", "Texture", "AudioAssets",
+                                                  "CurveAssets"};
 
 // 대입 진단 줄의 진단 이름이다(AS 13절 `<command>: <진단>: <경로>: <설명>`). 숨김 열거자 입력
 // (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다
