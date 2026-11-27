@@ -4,25 +4,38 @@
 #include <ReflectionText/TextAssignments.h>
 #include <ReflectionText/TextDiagnostics.h>
 #include <ReflectionText/TextValue.h>
-#include <UnrealExchange/ExchangeTextureKind.h>
+#include <UnrealExchange/ExchangeServiceKind.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
+#include <UnrealExchange/UnrealStaticMeshImporter.h>
 #include <UnrealExchange/UnrealTextureImporter.h>
-#include <UnrealExchange/UnrealTextureImporterSet.h>
 
-// 교환 텍스처의 종류별 임포터다(Docs/Design/UnrealExchange 10.6절 1–3번).
+// 교환 에셋의 종류별 임포터다(Docs/Design/UnrealExchange 10.6절 1–3번, 5.5절 11번).
 
 namespace rocks {
 
-namespace exchange_texture_kind {
+namespace exchange_service_kind {
 
 // 옵션 필드 이름이다(UnrealExchangeImportOptions — 10.6절 3번).
 constexpr StringView ObjectPathOption = "objectPath";
 constexpr StringView FormerPathsOption = "formerPaths";
 constexpr StringView ReferencesOption = "references";
+constexpr StringView MeshNormalsOption = "meshNormals";
 constexpr char EscapeCharacter = '\\';
 constexpr char ListSeparator = ',';
 constexpr char MapSeparator = ':';
-constexpr usize OptionCount = 3;
+// 대입 수다(공통 셋 + 메시의 meshNormals).
+constexpr usize CommonOptionCount = 3;
+constexpr usize MaxOptionCount = CommonOptionCount + 1;
+
+// meshNormals 대입 값(ExchangeMeshNormals 도구 이름 — 5.5절 11번)이다.
+StringView MeshNormalsText(ExchangeMeshNormals normals) noexcept {
+    return normals == ExchangeMeshNormals::Rocks ? StringView("Rocks") : StringView("Unreal");
+}
+
+// 메시 원본 모드(5.3절)를 받는 클래스다.
+bool UsesMeshNormals(ExchangeClass type) noexcept {
+    return type == ExchangeClass::StaticMesh;
+}
 
 // 목록 원소 하나를 escape해 붙인다(ReflectionText 목록 escape 표 — `,`·`;`, map 키는 `:`도). escape
 // 글자 사이 구간을 통째로 붙인다(UTF-8 다중 byte 글자를 쪼개지 않는다 — escape 글자는 ASCII다).
@@ -131,13 +144,21 @@ Result<void> ReportFailure(const ExchangeKindRequest& request, const AssetDiagno
     return request.diagnostics->TryAdd(input);
 }
 
-} // namespace exchange_texture_kind
+} // namespace exchange_service_kind
 
-Result<AssetId> ExchangeTextureKind::Import(const ExchangeKindRequest& request) noexcept {
-    using namespace exchange_texture_kind;
+StringView ExchangeServiceImporterName(ExchangeClass type) noexcept {
+    if (type == ExchangeClass::StaticMesh) {
+        return UnrealStaticMeshImporterName;
+    }
+
+    return UnrealTextureImporterName(type);
+}
+
+Result<AssetId> ExchangeServiceKind::Import(const ExchangeKindRequest& request) noexcept {
+    using namespace exchange_service_kind;
     using Out = Result<AssetId>;
     const ExchangeAsset& asset = request.bundle->Assets()[request.asset];
-    const StringView importer = UnrealTextureImporterName(asset.exchangeClass);
+    const StringView importer = ExchangeServiceImporterName(asset.exchangeClass);
     if (importer.IsEmpty()) {
         return Out::Failure(ErrorCode::InvalidArgument);
     }
@@ -178,7 +199,19 @@ Result<AssetId> ExchangeTextureKind::Import(const ExchangeKindRequest& request) 
     }
 
     (void)sources.TryPushBack(AssetImportSourceInput{UnrealExchangeAssetRole, documentPath.View()});
-    for (const ExchangeBlobRef& blob : asset.blobs) {
+    for (usize index = 0; index < asset.blobs.Size(); ++index) {
+        // 원본 역할은 digest마다 하나다(blob 파일 이름이 digest다). 같은 byte를 다른 배치로
+        // 가리키는 참조(정육면체의 둘레 목록과 삼각형 코너 — 5.5절 10번)는 한 원본을 같이 쓴다.
+        const ExchangeBlobRef& blob = asset.blobs[index];
+        bool repeated = false;
+        for (usize earlier = 0; earlier < index && !repeated; ++earlier) {
+            repeated = asset.blobs[earlier].digest == blob.digest;
+        }
+
+        if (repeated) {
+            continue;
+        }
+
         char hex[Sha256Digest::HexBytes + 1];
         blob.digest.ToHex(hex);
         String role(allocator);
@@ -213,16 +246,20 @@ Result<AssetId> ExchangeTextureKind::Import(const ExchangeKindRequest& request) 
         return fail(built.Error());
     }
 
-    const reflection_text::TextAssignment assignments[OptionCount] = {
+    const ExchangeMeshNormals normals =
+        request.options != nullptr ? request.options->meshNormals : ExchangeMeshNormals::Unreal;
+    const reflection_text::TextAssignment assignments[MaxOptionCount] = {
         {reflection_text::AssignmentKind::Set, ObjectPathOption, asset.objectPath, 0},
         {reflection_text::AssignmentKind::Set, FormerPathsOption, texts.formerPaths.View(), 1},
         {reflection_text::AssignmentKind::Set, ReferencesOption, texts.references.View(), 2},
+        {reflection_text::AssignmentKind::Set, MeshNormalsOption, MeshNormalsText(normals), 3},
     };
 
     reflection_text::TextDiagnostics diagnostics(allocator);
     AssetImportResult result(allocator);
     AssetDiagnostic failure;
-    const Span<const reflection_text::TextAssignment> options(assignments);
+    const Span<const reflection_text::TextAssignment> options(
+        assignments, UsesMeshNormals(asset.exchangeClass) ? MaxOptionCount : CommonOptionCount);
     auto imported =
         request.existing.IsNull()
             ? request.service->Import(*request.lock, request.path, sources.View(), importer,
@@ -244,14 +281,14 @@ Result<AssetId> ExchangeTextureKind::Import(const ExchangeKindRequest& request) 
     return Out::Success(result.id);
 }
 
-Result<void> RegisterExchangeTextureKinds(void* state, ExchangeKindTable& table) noexcept {
-    using namespace exchange_texture_kind;
+Result<void> RegisterExchangeServiceKinds(void* state, ExchangeKindTable& table) noexcept {
+    using namespace exchange_service_kind;
     if (state == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto& kind = *static_cast<ExchangeTextureKind*>(state);
-    for (const ExchangeClass type : UnrealTextureClasses) {
+    auto& kind = *static_cast<ExchangeServiceKind*>(state);
+    for (const ExchangeClass type : ExchangeServiceClasses) {
         if (auto registered = table.Register(type, kind); !registered) {
             return registered;
         }

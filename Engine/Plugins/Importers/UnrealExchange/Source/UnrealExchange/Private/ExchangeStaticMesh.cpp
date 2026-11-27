@@ -203,14 +203,12 @@ struct ExchangeStaticMeshBuilder {
                                                      &value, allocator),
             codec, diagnostics);
         if (!prepared) {
+            // 진단이 없는 실패(타입 표·문맥·한도·할당)는 덤프 내용이 아니라 코드 없이 그대로다.
             const bool content =
                 prepared.Error() == ErrorCode::InvalidArgument && diagnostics.Count() != 0;
-            if (!content && prepared.Error() == ErrorCode::InvalidArgument) {
-                return Result<void>::Failure(prepared.Error());
-            }
-
-            return Fail(AssetDiagnosticCode::InvalidSource,
-                        content ? ErrorCode::CorruptData : prepared.Error(), detail);
+            return content
+                       ? Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, detail)
+                       : Result<void>::Failure(prepared.Error());
         }
 
         auto published = prepared.Value().Publish();
@@ -265,13 +263,17 @@ struct ExchangeStaticMeshBuilder {
         settings.rows = ExchangeStaticMeshSettingRows();
         settings.output = ExchangeClass::StaticMesh;
         settings.references = input.references;
+        // 번역의 CorruptData만 덤프 내용(값이 행 종류와 맞지 않음)이다. 그 밖(행 표의 결함
+        // InvalidArgument, writer 한도·할당)은 코드 없이 그대로다.
         if (auto translated = TranslateExchangeSettings(settings, writer, mesh.warnings_);
             !translated) {
-            return Fail(AssetDiagnosticCode::InvalidSource, translated.Error(), 0);
+            return translated.Error() == ErrorCode::CorruptData
+                       ? Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, 0)
+                       : Result<void>::Failure(translated.Error());
         }
 
         if (auto finished = writer.Finish(); !finished) {
-            return Fail(AssetDiagnosticCode::InvalidSource, finished.Error(), 0);
+            return Result<void>::Failure(finished.Error());
         }
 
         const JsonError parsed = mesh.translated_.Parse(text.View());
@@ -523,6 +525,8 @@ struct ExchangeStaticMeshBuilder {
                 !OptBool(Member(properties, "SocketCreatedAtImport"), socket.createdAtImport)) {
                 return Corrupt(Detail);
             }
+
+            socket.name = WithoutNone(socket.name);
 
             if (auto pushed = mesh.sockets_.TryPushBack(socket); !pushed) {
                 return pushed;
@@ -905,11 +909,12 @@ Result<void> ExchangeStaticMesh::Build(const ExchangeStaticMeshInput& input,
     failure = ExchangeMeshFailure{};
     if (input.asset == nullptr || input.registry == nullptr || input.registry->Names() == nullptr ||
         input.asset->exchangeClass != ExchangeClass::StaticMesh ||
-        input.blobs.Size() != input.asset->blobs.Size() || !lods_.IsEmpty() ||
-        !warnings_.IsEmpty()) {
+        input.blobs.Size() != input.asset->blobs.Size() || started_) {
         failure.code = AssetDiagnosticCode::InvalidSource;
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
+    started_ = true;
 
     ExchangeStaticMeshBuilder builder{*this, input, failure, *allocator_, *input.registry->Names()};
     if (auto done = builder.Translate(); !done) {

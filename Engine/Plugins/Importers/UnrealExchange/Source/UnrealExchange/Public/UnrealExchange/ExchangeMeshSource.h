@@ -38,18 +38,19 @@ struct ExchangeMeshFailure {
 // record(MeshSource 기록 객체)로 out을 만든다(5.5절 1번):
 // - MeshSourceData 요소 수는 counts, 위상 bulk는 위상 blob 일곱을 MeshAnimationAssets 9.1절 순서로
 //   이어 붙인 것, 속성 레코드는 기록 순서이고 값 bulk는 blob byte 그대로다(배치가 같다 — 3.4.1절).
+// - 기록의 속성은 원문 이름으로 9.2절 순서(요소, 이름 byte)의 엄격 증가여야 한다.
 // - 속성 이름과 Name 값을 NFC로 바꾼다(MeshSource는 NFC만 받는다). 이름이 바뀌어 9.2절 순서가
 //   달라지면 다시 정렬한다. normalized는 바뀐 이름(속성 이름 + Name 값) 수다(0이 아니면 호출자가
 //   경고 UnrealNameNormalized를 낸다).
 // - bulk는 메모리 bulk 원본(MemoryBulkSource)으로 주고 MeshSource::Load(data, bulk, names)를
-// 부른다.
-//   그래서 배치 판정과 ValidateMeshSource(본 수 모름)가 패키지 로드와 같다.
+//   부른다. 그래서 배치 판정과 ValidateMeshSource(본 수 모름)가 패키지 로드와 같다.
 //
 // 인자: blobs는 asset.blobs와 같은 순서·수의 byte다(VerifyExchangeBlob을 통과한 것 — 이 함수는
 // 다시 검사하지 않는다). names는 출력이 쓸 Registry의 Name pool이다.
 //
 // 오류: blobs 수가 다름 InvalidArgument(InvalidSource), 기록 형식(객체·키·counts·위상 blob 수 7과
-// 배치·요소·값 타입 이름·채널·blob 참조가 asset.blobs에 없음·배치와 값 타입 불일치·Name 값 배치)
+// 배치·원소 수·요소·값 타입 이름·채널·blob 참조가 asset.blobs에 없음·배치와 값 타입 불일치·속성
+// 순서·Name 값 배치)
 // CorruptData(CorruptBundle), 잘못된 UTF-8 이름 CorruptData(CorruptBundle), MeshSource::Load
 // 실패는 그 오류와 진단, 이름 pool·할당 오류는 그 오류(진단 None). 실패하면 out은 그대로다.
 ROCKS_UNREALEXCHANGE_API Result<void> LoadExchangeMeshSource(const ExchangeAsset& asset,

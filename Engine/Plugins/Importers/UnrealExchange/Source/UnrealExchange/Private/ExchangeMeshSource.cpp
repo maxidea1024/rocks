@@ -201,7 +201,9 @@ struct PendingAttribute {
     explicit PendingAttribute(Allocator& allocator) noexcept : name(allocator) {
     }
 
+    // 정규화한 이름과 기록 원문의 이름(기록 순서 검사 — 문서를 가리킨다)이다.
     String name;
+    StringView original;
     MeshAttributeRecord record;
 };
 
@@ -254,11 +256,22 @@ Result<void> ReadTopology(const ExchangeAsset& asset, Span<const Span<const uint
         return Corrupt(failure);
     }
 
+    // 배열마다의 원소 수다(9.1절 — 코너·변·다각형 + 1·둘레 길이 합·다각형·삼각형·삼각형). 둘레
+    // 길이 합은 counts로 정해지지 않아(코너 공유) Load의 길이 판정에 맡긴다.
+    const uint64 expected[TopologyArrays] = {data.cornerCount,
+                                             data.edgeCount,
+                                             static_cast<uint64>(data.polygonCount) + 1,
+                                             NumericLimits<uint64>::Max(),
+                                             data.polygonCount,
+                                             data.triangleCount,
+                                             data.triangleCount};
     Array<uint8> joined(allocator);
     for (usize index = 0; index < TopologyArrays; ++index) {
         const usize blob = FindBlob(asset, topology.At(index));
         if (blob == asset.blobs.Size() || asset.blobs[blob].layout != ExchangeBlobLayout::U32 ||
-            asset.blobs[blob].components != TopologyComponents[index]) {
+            asset.blobs[blob].components != TopologyComponents[index] ||
+            (expected[index] != NumericLimits<uint64>::Max() &&
+             asset.blobs[blob].count != expected[index])) {
             return Corrupt(failure);
         }
 
@@ -322,6 +335,7 @@ Result<void> ReadAttribute(const ExchangeAsset& asset, Span<const Span<const uin
                                                       : Result<void>::Failure(made.Error());
     }
 
+    out.original = name;
     if (auto assigned = out.name.TryAssign(text.View()); !assigned) {
         return assigned;
     }
@@ -388,11 +402,17 @@ Result<void> LoadExchangeMeshSource(const ExchangeAsset& asset, Span<const Span<
             !read) {
             return read;
         }
+
+        // 기록은 원문 이름으로 9.2절 순서의 엄격 증가다(writer가 정렬해 쓴다 — 아니면 형식 위반).
+        if (index != 0 && !Less(pending[index - 1].record.element, pending[index - 1].original,
+                                pending[index].record.element, pending[index].original)) {
+            return Corrupt(failure);
+        }
     }
 
-    // 정규화가 이름을 바꾸면 9.2절 순서가 달라질 수 있다(삽입 정렬 — 기록 순서가 이미 정렬이라
-    // 바뀐 것이 없으면 비교만 한다). 같은 이름 둘은 Load가 순서 위반으로 거부한다.
-    for (usize index = 1; index < pending.Size(); ++index) {
+    // 정규화가 이름을 바꾸면 9.2절 순서가 달라질 수 있다(바꾼 것이 있을 때만 삽입 정렬). 정규화 뒤
+    // 같은 이름 둘은 Load가 순서 위반으로 거부한다.
+    for (usize index = 1; normalized != 0 && index < pending.Size(); ++index) {
         for (usize at = index; at > 0; --at) {
             PendingAttribute& left = pending[at - 1];
             PendingAttribute& right = pending[at];

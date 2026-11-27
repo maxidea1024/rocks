@@ -10,6 +10,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::UnrealExchangeImportOptions::meshNormals",
+      "id": "e6893d3b5a574cf48cb431ebc54d3b20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::UnrealExchangeImportOptions::objectPath",
       "id": "d5981cf64616476ab8ddde09e43365e3",
       "aliases": [],

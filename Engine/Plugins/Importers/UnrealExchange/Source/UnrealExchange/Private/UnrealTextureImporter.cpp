@@ -1,3 +1,5 @@
+#include "ExchangeImporterCommon.h"
+
 #include <Core/Text/StringBuilder.h>
 #include <ReflectionText/TextJson.h>
 #include <Texture/Texture.generated.h>
@@ -16,6 +18,7 @@ namespace rocks {
 
 namespace unreal_texture_import {
 
+using exchange_detail::FailImport;
 using reflection_text::TextReferenceKind;
 
 // 임포터 정보 하나다(4.6절 1번 표).
@@ -115,77 +118,6 @@ private:
     const OrderedMap<String, AssetId>& references_;
 };
 
-// 오류가 할당 실패면 그대로, 아니면 진단 code로 실패한다.
-Result<void> Fail(AssetImportContext& context, AssetDiagnosticCode code, ErrorCode error,
-                  uint64 detail = 0) noexcept {
-    if (error == ErrorCode::OutOfMemory) {
-        return Result<void>::Failure(error);
-    }
-
-    return context.Fail(code, error, detail);
-}
-
-bool HasBlobRolePrefix(StringView role) noexcept {
-    return role.StartsWith(UnrealExchangeBlobRolePrefix, StringComparison::CaseSensitive);
-}
-
-// 문서 blob 참조마다 역할 `blob:<hex>` 원본 byte를 찾고 검사한다(10.6절 6번 4·5).
-Result<void> CollectBlobs(AssetImportContext& context, const ExchangeAsset& asset,
-                          Array<Span<const uint8>>& out) noexcept {
-    const Span<const AssetImportSource> sources = context.Sources();
-    Allocator& allocator = out.GetAllocator();
-    Array<uint8> used(allocator);
-    if (auto resized = used.TryResize(sources.Size()); !resized) {
-        return resized;
-    }
-
-    if (auto resized = out.TryResize(asset.blobs.Size()); !resized) {
-        return resized;
-    }
-
-    for (usize index = 0; index < asset.blobs.Size(); ++index) {
-        char hex[Sha256Digest::HexBytes + 1];
-        asset.blobs[index].digest.ToHex(hex);
-        StringBuilder<UnrealExchangeBlobRolePrefix.ByteCount() + Sha256Digest::HexBytes + 1> role(
-            allocator);
-        if (auto built = role.TryAppend(UnrealExchangeBlobRolePrefix); !built) {
-            return built;
-        }
-
-        if (auto built = role.TryAppend(StringView(hex, Sha256Digest::HexBytes)); !built) {
-            return built;
-        }
-
-        bool found = false;
-        for (usize source = 0; source < sources.Size() && !found; ++source) {
-            if (sources[source].role == role.View()) {
-                out[index] = sources[source].bytes;
-                used[source] = 1;
-                found = true;
-            }
-        }
-
-        if (!found) {
-            return context.Fail(AssetDiagnosticCode::MissingSource, ErrorCode::NotFound, index);
-        }
-    }
-
-    for (usize source = 0; source < sources.Size(); ++source) {
-        if (used[source] == 0 && HasBlobRolePrefix(sources[source].role)) {
-            return context.Fail(AssetDiagnosticCode::InvalidImportOption,
-                                ErrorCode::InvalidArgument, source);
-        }
-    }
-
-    for (usize index = 0; index < asset.blobs.Size(); ++index) {
-        if (auto verified = VerifyExchangeBlob(asset.blobs[index], out[index]); !verified) {
-            return context.Fail(AssetDiagnosticCode::CorruptBundle, verified.Error(), index);
-        }
-    }
-
-    return Result<void>::Success();
-}
-
 // 설정을 번역해 출력에 ImportJson·게시하고 경고를 남긴다(10.6절 8번, 4.6절 3번).
 Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& asset,
                            const UnrealExchangeImportOptions& options, ObjectHandle output,
@@ -199,11 +131,11 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
     input.output = asset.exchangeClass;
     input.references = &options.references;
     if (auto translated = TranslateExchangeSettings(input, writer, warnings); !translated) {
-        return Fail(context, AssetDiagnosticCode::InvalidSource, translated.Error());
+        return FailImport(context, AssetDiagnosticCode::InvalidSource, translated.Error());
     }
 
     if (auto finished = writer.Finish(); !finished) {
-        return Fail(context, AssetDiagnosticCode::InvalidSource, finished.Error());
+        return FailImport(context, AssetDiagnosticCode::InvalidSource, finished.Error());
     }
 
     JsonDocument document(allocator);
@@ -229,8 +161,8 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
         // 없는 InvalidArgument는 호출 오류라 그대로다.
         const bool content =
             prepared.Error() == ErrorCode::InvalidArgument && diagnostics.Count() != 0;
-        return Fail(context, AssetDiagnosticCode::InvalidSource,
-                    content ? ErrorCode::CorruptData : prepared.Error());
+        return FailImport(context, AssetDiagnosticCode::InvalidSource,
+                          content ? ErrorCode::CorruptData : prepared.Error());
     }
 
     if (auto published = prepared.Value().Publish(); !published) {
@@ -297,39 +229,6 @@ Result<void> WriteSource(AssetImportContext& context, ObjectHandle output,
     return Result<void>::Success();
 }
 
-// 태그를 단다(10.6절 7번): ObjectPath, FormerPaths = 옵션 ∪ 옛 FormerPaths ∪ 옛 ObjectPath(다르면).
-Result<void> AddTags(AssetImportContext& context,
-                     const UnrealExchangeImportOptions& options) noexcept {
-    const StringView objectPath = options.objectPath.View();
-    if (auto added = context.AddTag(UnrealExchangeObjectPathTag, objectPath); !added) {
-        return added;
-    }
-
-    for (const String& former : options.formerPaths) {
-        if (former.View() == objectPath) {
-            continue;
-        }
-
-        if (auto added = context.AddTag(UnrealExchangeFormerPathsTag, former.View()); !added) {
-            return added;
-        }
-    }
-
-    for (const ImportTag& tag : context.PreviousTags()) {
-        // 지금 objectPath는 옛 경로가 아니다(이름을 되돌린 경우 — 10.6절 7번).
-        const bool kept = tag.key.View() == UnrealExchangeFormerPathsTag ||
-                          tag.key.View() == UnrealExchangeObjectPathTag;
-        if (kept && tag.value.View() != objectPath) {
-            if (auto added = context.AddTag(UnrealExchangeFormerPathsTag, tag.value.View());
-                !added) {
-                return added;
-            }
-        }
-    }
-
-    return Result<void>::Success();
-}
-
 } // namespace unreal_texture_import
 
 StringView UnrealTextureImporterName(ExchangeClass type) noexcept {
@@ -358,42 +257,16 @@ Result<void> UnrealTextureImporter::Import(AssetImportContext& context) noexcept
     using namespace unreal_texture_import;
     Allocator& allocator = context.Registry().ObjectAllocator();
 
-    // 1. 문서(고정 역할 asset — 문맥이 정확히 하나를 준다).
-    const AssetImportSource* document = nullptr;
-    for (const AssetImportSource& source : context.Sources()) {
-        document = source.role == UnrealExchangeAssetRole ? &source : document;
-    }
-
-    if (document == nullptr) {
-        return context.Fail(AssetDiagnosticCode::MissingSource, ErrorCode::NotFound);
-    }
-
+    // 1–3. 문서·클래스·옵션 objectPath.
     ExchangeAsset asset(allocator);
-    ExchangeDiagnostics diagnostics(allocator);
-    if (auto read = ReadExchangeAssetDocument(document->bytes, allocator, asset, diagnostics);
-        !read) {
-        // 마지막 error 진단의 코드다(플러그인 error 진단은 InvalidSource — 없으면 CorruptBundle).
-        AssetDiagnosticCode code = AssetDiagnosticCode::CorruptBundle;
-        for (const ExchangeDiagnostic& item : diagnostics.Items()) {
-            code = item.severity == ExchangeSeverity::Error ? item.code : code;
-        }
-
-        return Fail(context, code, read.Error());
-    }
-
-    // 2·3. 클래스와 옵션 objectPath.
-    if (asset.exchangeClass != type_) {
-        return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
-    }
-
-    const auto* options = static_cast<const UnrealExchangeImportOptions*>(context.Options());
-    if (options == nullptr || options->objectPath.View() != asset.objectPath) {
-        return context.Fail(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument);
+    const UnrealExchangeImportOptions* options = nullptr;
+    if (auto read = exchange_detail::ReadImportDocument(context, type_, asset, options); !read) {
+        return read;
     }
 
     // 4·5. blob 원본.
     Array<Span<const uint8>> blobs(allocator);
-    if (auto collected = CollectBlobs(context, asset, blobs); !collected) {
+    if (auto collected = exchange_detail::CollectImportBlobs(context, asset, blobs); !collected) {
         return collected;
     }
 
@@ -419,7 +292,7 @@ Result<void> UnrealTextureImporter::Import(AssetImportContext& context) noexcept
         return written;
     }
 
-    return AddTags(context, *options);
+    return exchange_detail::AddExchangeTags(context, *options);
 }
 
 } // namespace rocks

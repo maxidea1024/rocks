@@ -647,6 +647,16 @@ TEST(UnrealExchange_StaticMeshRecordRejects) {
             colorChannels.TryAppendFormat("data.lods.0.prepared.attributes.{}.channels", color));
         REQUIRE(colorBlob.TryAppendFormat("data.lods.0.prepared.attributes.{}.data.blob", color));
         REQUIRE(positionType.TryAppendFormat("data.lods.0.prepared.attributes.{}.type", position));
+        const usize hard = AttributeIndex(prepared, "IsHard");
+        const usize tangent = AttributeIndex(prepared, "Tangent");
+        const usize uv = AttributeIndex(prepared, "TexCoord");
+        REQUIRE(hard < prepared.Find("attributes").Size() && tangent + 1 == uv);
+        StringBuilder<128> edgeType(allocator);
+        StringBuilder<128> tangentName(allocator);
+        StringBuilder<128> uvName(allocator);
+        REQUIRE(edgeType.TryAppendFormat("data.lods.0.prepared.attributes.{}.type", hard));
+        REQUIRE(tangentName.TryAppendFormat("data.lods.0.prepared.attributes.{}.name", tangent));
+        REQUIRE(uvName.TryAppendFormat("data.lods.0.prepared.attributes.{}.name", uv));
 
         struct Case {
             JsonEdit edit;
@@ -673,8 +683,15 @@ TEST(UnrealExchange_StaticMeshRecordRejects) {
             {{colorBlob.View(), R"("00")"}, AssetDiagnosticCode::CorruptBundle},
             // 배치와 값 타입이 맞지 않는다(Vec3 위치를 Vec2로).
             {{positionType.View(), R"("Vec2")"}, AssetDiagnosticCode::CorruptBundle},
-            // 같은 요소 안 이름이 같으면 Load가 순서 위반(CorruptPackage → CorruptBundle)으로 본다.
+            // 기록 순서 위반(같은 요소 안 같은 이름 — 원문 이름으로 엄격 증가가 아님)이다.
             {{colorName.View(), R"("BinormalSign")"}, AssetDiagnosticCode::CorruptBundle},
+            // counts와 blob 원소 수가 다르다(위상 코너 배열·정점 위치·다각형 묶음 슬롯 이름).
+            {{"data.lods.0.prepared.counts.corners", "6"}, AssetDiagnosticCode::CorruptBundle},
+            {{"data.lods.0.prepared.counts.vertices", "5"}, AssetDiagnosticCode::CorruptBundle},
+            {{"data.lods.0.prepared.counts.polygonGroups", "2"},
+             AssetDiagnosticCode::CorruptBundle},
+            // 값 타입과 배치가 다르다(u8 Bool 변을 Name으로).
+            {{edgeType.View(), R"("Name")"}, AssetDiagnosticCode::CorruptBundle},
         };
 
         for (const Case& item : cases) {
@@ -689,12 +706,15 @@ TEST(UnrealExchange_StaticMeshRecordRejects) {
             }
         }
 
-        // Load가 거부한 경우는 그 세부가 남는다.
+        // 정규화 뒤 같은 이름 둘(NFD "e + U+0301"과 NFC "é" — 원문 순서는 맞다)은 Load가 순서
+        // 위반으로 거부하고 그 세부가 남는다.
         {
-            const JsonEdit duplicate[] = {{colorName.View(), R"("BinormalSign")"}};
+            const JsonEdit collide[] = {{tangentName.View(), "\"e\\u0301\""},
+                                        {uvName.View(), "\"\\u00e9\""}};
             Attempt attempt(allocator);
-            Run(env, allocator, base, blobs, duplicate, attempt);
-            CHECK(attempt.failure.code == AssetDiagnosticCode::CorruptBundle &&
+            Run(env, allocator, base, blobs, collide, attempt);
+            CHECK(attempt.error == ErrorCode::CorruptData &&
+                  attempt.failure.code == AssetDiagnosticCode::CorruptBundle &&
                   attempt.failure.mesh.code == AssetDiagnosticCode::CorruptPackage);
         }
 
@@ -730,6 +750,14 @@ TEST(UnrealExchange_StaticMeshRecordRejects) {
         REQUIRE(converted.Build(Input(env, base, blobs), failure));
         CHECK(converted.Build(Input(env, base, blobs), failure).Error() ==
               ErrorCode::InvalidArgument);
+        // 실패한 Build 뒤에도 다시 부를 수 없다.
+        Attempt broken(allocator);
+        const JsonEdit noRecord[] = {{"data.lods.0.prepared", "null"}};
+        Run(env, allocator, base, blobs, noRecord, broken);
+        REQUIRE(broken.error == ErrorCode::CorruptData);
+        CHECK(broken.mesh.Build(Input(env, base, blobs), failure).Error() ==
+                  ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::InvalidSource);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -773,7 +801,8 @@ TEST(UnrealExchange_StaticMeshNameNormalization) {
         CHECK(mesh->FindAttribute(MeshElement::Corner, "e\xCC\x81") == MeshNoAttribute);
         CHECK(CountWarnings(attempt.mesh, AssetDiagnosticCode::UnrealNameNormalized, 1) == 1);
 
-        // Name 값(다각형 묶음 슬롯 이름)도 NFC로 바꾼다: 원본 이름 둘 + 값 하나.
+        // Name 값(다각형 묶음 슬롯 이름)도 NFC로 바꾼다: 바뀐 것은 속성 이름 하나(Tangent) + 값
+        // 하나.
         const uint8 name[] = {6, 0, 0, 0, 'C', 'a', 'f', 'e', 0xCC, 0x81};
         ExchangeMeshFailure failure;
         {
@@ -860,7 +889,8 @@ TEST(UnrealExchange_StaticMeshSettings) {
              R"({"Default": 0.5, "PerPlatform": [{"key": "Mobile", "value": 0.25}]})"},
             {"settings.bUnknownThing", "1"},
             {"settings.NeverStream", "true"},
-            {"settings.MinLOD", R"({"Default": 2, "PerPlatform": []})"},
+            {"settings.MinLOD",
+             R"({"Default": 2, "PerPlatform": [{"key": "Mobile", "value": 1}]})"},
             {"settings.NumStreamedLODs", R"({"Default": 3, "PerPlatform": []})"},
             {"settings.LODGroup", R"("SmallProp")"},
             {"settings.LightMapResolution", "128"},
@@ -869,6 +899,13 @@ TEST(UnrealExchange_StaticMeshSettings) {
             {"settings.LODForCollision", "0"},
             {"settings.NaniteSettings.bEnabled", "true"},
             {"settings.NaniteSettings.KeepPercentTriangles", "0.5"},
+            {"settings.NaniteSettings.bVoxelNDF", "false"},
+            {"settings.NaniteSettings.ShapePreservation", R"("Voxelize")"},
+            {"settings.NaniteSettings.GenerateFallback", R"("Enabled")"},
+            {"settings.NaniteSettings.FallbackTarget", R"("RelativeError")"},
+            {"settings.NaniteSettings.NormalPrecision", "5"},
+            {"settings.NaniteSettings.TargetMinimumResidencyInKB", "64"},
+            {"settings.NaniteSettings.DisplacementUVChannel", "2"},
             {"settings.NaniteSettings.NaniteAssemblyData", R"({"Parts": [1], "Nodes": []})"},
             {"settings.ComplexCollisionMesh", R"({"objectPath": "/Game/M/SM_Complex.SM_Complex"})"},
         };
@@ -888,10 +925,20 @@ TEST(UnrealExchange_StaticMeshSettings) {
               spec.lightMapResolution == 128 && Near(spec.positiveBoundsExtension.z, 3.0) &&
               !spec.autoComputeLodScreenSize && spec.virtualGeometry.enabled &&
               Near(spec.virtualGeometry.keepPercentTriangles, 0.5));
+        const VirtualGeometrySettings& nanite = spec.virtualGeometry;
+        CHECK(!nanite.voxelNdf &&
+              nanite.shapePreservation == VirtualGeometryShapePreservation::Voxelize &&
+              nanite.generateFallback == VirtualGeometryFallbackMode::Enabled &&
+              nanite.fallbackTarget == VirtualGeometryFallbackTarget::RelativeError &&
+              nanite.normalPrecision == 5 && nanite.targetMinimumResidencyInKb == 64 &&
+              nanite.displacementUvChannel == 2);
         CHECK(spec.distanceFieldReplacementMesh == fieldId &&
               spec.complexCollisionMesh == complexId);
-        // 경고: PerPlatform 화면 크기(SourceModels 행), 모르는 키, NeverStream, Nanite 조립 데이터.
-        CHECK(attempt.mesh.Warnings().Size() == 4);
+        // 경고: PerPlatform 화면 크기(SourceModels 행)·최소 LOD, 모르는 키, NeverStream, Nanite
+        // 조립 데이터.
+        CHECK(attempt.mesh.Warnings().Size() == 5);
+        CHECK(CountWarnings(attempt.mesh, AssetDiagnosticCode::UnsupportedSetting, RowOf("MinLOD"),
+                            "MinLOD") == 1);
         CHECK(CountWarnings(attempt.mesh, AssetDiagnosticCode::UnsupportedSetting,
                             RowOf("SourceModels"), "ScreenSize") == 1);
         CHECK(CountWarnings(attempt.mesh, AssetDiagnosticCode::UnsupportedSetting,
@@ -974,6 +1021,11 @@ TEST(UnrealExchange_StaticMeshSettings) {
             {"settings.SourceModels.0.BuildSettings.DistanceFieldReplacementMesh", "1"}};
         CHECK(Rejects(env, allocator, cube, blobs, fieldBad, AssetDiagnosticCode::CorruptBundle,
                       ErrorCode::CorruptData, 0));
+        const JsonEdit fieldExtra[] = {
+            {"settings.SourceModels.0.BuildSettings.DistanceFieldReplacementMesh",
+             R"({"objectPath": "/Game/M/SM_Field.SM_Field", "extra": 1})"}};
+        CHECK(Rejects(env, allocator, cube, blobs, fieldExtra, AssetDiagnosticCode::CorruptBundle,
+                      ErrorCode::CorruptData, 0));
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -1008,7 +1060,8 @@ TEST(UnrealExchange_StaticMeshSlotsSectionsSockets) {
         constexpr StringView Sections =
             R"({"Map": [{"key": 65537, "value": {"MaterialIndex": 1, "bEnableCollision": false}},)"
             R"( {"key": 1, "value": {"MaterialIndex": 1, "bCastShadow": false}},)"
-            R"( {"key": 0, "value": {"MaterialIndex": 0, "bForceOpaque": true}}]})";
+            R"( {"key": 0, "value": {"MaterialIndex": 0, "bForceOpaque": true,)"
+            R"( "bVisibleInRayTracing": false, "bAffectDistanceFieldLighting": false}}]})";
         constexpr StringView Sockets =
             R"([{"subobject": "StaticMeshSocket_0", "class": "/Script/Engine.StaticMeshSocket",)"
             R"( "properties": {"SocketName": "Grip", "RelativeLocation": {"X": 1, "Y": 2, "Z": 3},)"
@@ -1016,7 +1069,9 @@ TEST(UnrealExchange_StaticMeshSlotsSectionsSockets) {
             R"( "RelativeScale": {"X": 1, "Y": 1, "Z": 2}, "Tag": "hand",)"
             R"( "bSocketCreatedAtImport": true, "PreviewStaticMesh": null, "Extra": 1}},)"
             R"( {"subobject": "StaticMeshSocket_1", "class": "/Script/Engine.StaticMeshSocket",)"
-            R"( "properties": {"SocketName": "Top"}}])";
+            R"( "properties": {"SocketName": "Top"}},)"
+            R"( {"subobject": "StaticMeshSocket_2", "class": "/Script/Engine.StaticMeshSocket",)"
+            R"( "properties": {"SocketName": "None"}}])";
         const JsonEdit edits[] = {{"settings.StaticMaterials", Slots},
                                   {"settings.SectionInfoMap", Sections},
                                   {"settings.Sockets", Sockets}};
@@ -1033,12 +1088,15 @@ TEST(UnrealExchange_StaticMeshSlotsSectionsSockets) {
               spec.slots[1].material == AssetId{} && spec.slots[1].overlayMaterial == materialId);
         REQUIRE(spec.sectionInfo.Size() == 3);
         CHECK(spec.sectionInfo[0].lod == 0 && spec.sectionInfo[0].section == 0 &&
-              spec.sectionInfo[0].info.forceOpaque);
+              spec.sectionInfo[0].info.forceOpaque &&
+              !spec.sectionInfo[0].info.visibleInRayTracing &&
+              !spec.sectionInfo[0].info.affectDistanceFieldLighting);
         CHECK(spec.sectionInfo[1].lod == 0 && spec.sectionInfo[1].section == 1 &&
               !spec.sectionInfo[1].info.castShadow && spec.sectionInfo[1].info.materialIndex == 1);
         CHECK(spec.sectionInfo[2].lod == 1 && spec.sectionInfo[2].section == 1 &&
               !spec.sectionInfo[2].info.enableCollision);
-        REQUIRE(spec.sockets.Size() == 2);
+        REQUIRE(spec.sockets.Size() == 3);
+        CHECK(spec.sockets[2].name.IsEmpty());
         const StaticMeshImportSocket& grip = spec.sockets[0];
         CHECK(grip.name == "Grip" && Near(grip.relativeLocation.y, 2.0) &&
               Near(grip.relativeRotation.pitch, 10.0) && Near(grip.relativeRotation.roll, 30.0) &&
@@ -1117,12 +1175,13 @@ TEST(UnrealExchange_StaticMeshCollision) {
             R"( "SphylElems": [{"Radius": 3, "Length": 10, "CollisionEnabled": "NoCollision"}],)"
             R"( "TaperedCapsuleElems": [{"Radius0": 1, "Radius1": 2, "Length": 3, "Width": 1,)"
             R"( "bOneSidedCollision": false}, {"Radius0": 1, "Radius1": 1, "Length": 1,)"
+            R"( "bOneSidedCollision": true}, {"Radius0": 1, "Radius1": 1, "Length": 1, "Width": 2,)"
             R"( "bOneSidedCollision": true}],)"
             R"( "ConvexElems": [{"VertexData": [{"X": 0, "Y": 0, "Z": 0}, {"X": 1, "Y": 0, "Z": 0},)"
             R"( {"X": 0, "Y": 1, "Z": 0}, {"X": 0, "Y": 0, "Z": 1}], "IndexData": [0, 1, 2, 0, 3, 1],)"
             R"( "ElemBox": {}, "Transform": {"Rotation": {"X": 0, "Y": 0, "Z": 0, "W": 1},)"
             R"( "Translation": {"X": 7, "Y": 8, "Z": 9}, "Scale3D": {"X": 1, "Y": 2, "Z": 1}}}],)"
-            R"( "LevelSetElems": [{}], "SkinnedLevelSetElems": [], "MLLevelSetElems": [],)"
+            R"( "LevelSetElems": [{}, {}], "SkinnedLevelSetElems": [], "MLLevelSetElems": [],)"
             R"( "SkinnedTriangleMeshElems": [{}]})";
         const JsonEdit edits[] = {
             {"data.collision.AggGeom", Geometry},
@@ -1135,7 +1194,7 @@ TEST(UnrealExchange_StaticMeshCollision) {
         REQUIRE(spec.collision != nullptr);
         const SimpleCollision& collision = *spec.collision;
         REQUIRE(collision.spheres.Size() == 1 && collision.boxes.Size() == 1 &&
-                collision.capsules.Size() == 1 && collision.taperedCapsules.Size() == 2 &&
+                collision.capsules.Size() == 1 && collision.taperedCapsules.Size() == 3 &&
                 collision.convexes.Size() == 1 && collision.cylinders.IsEmpty());
         const CollisionSphere& sphere = collision.spheres[0];
         CHECK(Near(sphere.center.x, 1.0) && Near(sphere.radius, 5.0) && !sphere.contributeToMass &&
@@ -1152,7 +1211,8 @@ TEST(UnrealExchange_StaticMeshCollision) {
               Near(collision.convexes[0].transform.scale.y, 2.0) &&
               Near(collision.convexes[0].transform.rotation.w, 1.0));
         CHECK(spec.complexity == CollisionComplexity::ComplexAsSimple && spec.doubleSidedGeometry);
-        // 경고: level set·skinned triangle mesh(버림), 테이퍼드 캡슐 Width·한쪽 충돌(값을 버림).
+        // 경고: level set·skinned triangle mesh(버림), 테이퍼드 캡슐 Width·한쪽 충돌(값을 버림) —
+        // 여러 개여도 종류마다 하나다.
         CHECK(CountWarnings(attempt.mesh, AssetDiagnosticCode::UnsupportedCollisionShape,
                             static_cast<uint64>(UnsupportedCollisionFeature::LevelSet)) == 1);
         CHECK(CountWarnings(

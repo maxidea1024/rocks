@@ -58,7 +58,7 @@ public:
     // input으로 명세를 만든다(5.5절): 설정 번역(ExchangeStaticMeshSettings.h 표) → LOD마다 모드에
     // 맞는 기록 적재(LoadExchangeMeshSource)와 빌드·축소·화면 크기 → 슬롯·섹션 정보·소켓 → 충돌 →
     // 에셋 설정. replaceSettingsOnReimport는 참이다(원본 쪽이 설정의 정본 — MeshAnimationAssets
-    // 5.5.3절). 한 객체에 한 번만 부른다.
+    // 5.5.3절). 한 객체에 한 번만 부른다(실패한 뒤에도 — 두 번째 호출은 InvalidArgument).
     //
     // 경고(Warnings — 순서대로 context.Warn에 넘긴다): 설정 번역의 UnsupportedSetting(detail = 표
     // 행 번호, 모르는 키 ExchangeUnknownSettingDetail), LOD 0이 아닌 거리장 대체 메시(detail =
@@ -71,9 +71,9 @@ public:
     // 0, 원본이 있다는 LOD의 기록·preparedBuild 없음, 값 종류, 섹션 키 중복, 공유 소켓, 충돌 형상
     // 형식·CollisionEnabled·CollisionTraceFlag 이름) CorruptBundle / CorruptData(LOD 문제는 detail
     // = LOD, 충돌 형상은 그 종류 배열의 번호(BodySetup 자체는 0), 그 밖은 표 행 번호), 기록 적재
-    // 실패는 LoadExchangeMeshSource의 코드(detail = LOD), 설정 번역 실패와 ImportJson 거부
-    // InvalidSource / CorruptData, 타입 표·이름 pool·할당 오류는 그 오류(코드 None). 실패하면
-    // 결과를 버린다.
+    // 실패는 LoadExchangeMeshSource의 코드(detail = LOD), 설정 번역의 값 종류 위반과 ImportJson
+    // 진단 거부 InvalidSource / CorruptData(detail = LOD 또는 행), 행 표 결함·진단 없는 ImportJson
+    // 실패· 타입 표·이름 pool·writer·할당 오류는 그 오류(코드 None). 실패하면 결과를 버린다.
     Result<void> Build(const ExchangeStaticMeshInput& input, ExchangeMeshFailure& failure) noexcept;
 
     const StaticMeshImportSpec& Spec() const noexcept {
@@ -97,6 +97,8 @@ private:
     friend struct ExchangeStaticMeshBuilder;
 
     Allocator* allocator_;
+    // Build를 시작했다(결과가 실패여도 다시 부를 수 없다).
+    bool started_ = false;
     JsonDocument translated_;
     Array<MeshSource> meshes_;
     Array<LodMeshes> lodMeshes_;

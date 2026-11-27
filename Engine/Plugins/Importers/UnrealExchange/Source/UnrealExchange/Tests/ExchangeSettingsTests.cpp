@@ -77,26 +77,6 @@ Result<void> Translate(
     return writer.Finish();
 }
 
-bool ReadRepositoryFile(Allocator& allocator, StringView relative, Array<char>& out) noexcept {
-    constexpr usize PathCapacity = 4096;
-    char engine[PathCapacity];
-    auto found = FindEngineDirectory(Span<char>(engine, PathCapacity));
-    StringBuilder<512> path(allocator);
-    if (!found || !path.TryAppend(StringView(engine, found.Value())) || !path.TryAppend(relative)) {
-        return false;
-    }
-
-    platform::File file;
-    uint64 size = 0;
-    if (!file.Open(platform::PhysicalFileSystem(), path.CString(), path.ByteCount(),
-                   platform::FileOpenMode::ReadExisting) ||
-        !file.Size(size) || !out.TryResize(static_cast<usize>(size))) {
-        return false;
-    }
-
-    return static_cast<bool>(file.ReadExact(out.Data(), out.Size()).status);
-}
-
 TypeId TextureTypeOf(ExchangeClass type) noexcept {
     switch (type) {
     case ExchangeClass::Texture2D:

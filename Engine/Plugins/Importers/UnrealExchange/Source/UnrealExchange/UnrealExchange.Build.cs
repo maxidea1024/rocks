@@ -6,7 +6,8 @@ using Rocks.Build.Rules;
 // Stage UX1a adds the bundle reader, path mapping and import order (section 10.4); stage UX1c adds the import plan, the existing asset
 // lookup, the kind importer table and the asset-import-unreal command (section 10.5). Stage UX2b adds the common kind import frame
 // (section 10.6: the reflected import options struct, asset document re-reading, settings translation) and the texture import (section
-// 4.6). Plugin modules may depend on engine modules, never the reverse (Docs/Design/BuildTargets BD39). Generated headers are
+// 4.6). Stage UX3b adds the static mesh record loading, the conversion to the static mesh import spec and the unreal_static_mesh
+// importer (section 5.5). Plugin modules may depend on engine modules, never the reverse (Docs/Design/BuildTargets BD39). Generated headers are
 // <UnrealExchange/<Header>.generated.h>, module registration is rocks::generated::UnrealExchange::RegisterModuleTypes (called by
 // RegisterUnrealExchangeTypes), and the identity spec is UnrealExchange.rocksids.json.
 public sealed class UnrealExchange : PluginModuleRules
