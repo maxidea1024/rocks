@@ -28,11 +28,12 @@ public static class MetadataRunner
     /// roots는 native 빌드와 같은 root 모듈 집합이다(게임 빌드는 켠 플러그인 모듈을 더한다). null이면 타깃 모듈이다.
     /// 반환값은 0(성공 또는 메타데이터 모듈 없음) 또는 1(진단을 출력함)이다. jobs는 MetaCompiler 한 실행이 함께 돌리는 검증 컴파일
     /// 수다(빌드의 --jobs, null이면 MetaCompiler 기본값). verifySources는 게시 전에 생성 소스도 컴파일하게 한다
-    /// (명령 옵션 --verify-metadata-sources on).
+    /// (명령 옵션 --verify-metadata-sources on). session이 있으면 모듈마다 시간·자원을 보고에 남기고, 모드가 shadow면 메타 action 판정과 기록을
+    /// 한다(Docs/Design/BuildReuse 2장 — shadow는 늘 생성한다).
     /// </summary>
     public static async Task<int> GenerateAsync(BuildContext context, NativeToolchain toolchain, MetadataPlan plan,
         TargetRules target, string compilerTool, CancellationToken cancellationToken, IReadOnlyList<string>? roots = null,
-        int? jobs = null, bool verifySources = false)
+        int? jobs = null, bool verifySources = false, MetadataSession? session = null)
     {
         // ActionGraph와 같이 모듈 이름은 대소문자를 무시해 비교한다.
         var byName = plan.Modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
@@ -105,6 +106,24 @@ public static class MetadataRunner
             rootMap[Path.GetFullPath(run.GeneratedPrivate)] = Path.Combine(StageRoot(run.Name), "Private");
         }
 
+        // 이번 실행에서 다시 만드는 출력의 (게시 경로, stage 경로) 쌍이다(Docs/Design/BuildReuse 2.4·2.5절). 모듈을 하나 돌 때마다 늘어나
+        // 다음 모듈의 판정이 앞 모듈의 stage와 대조하게 한다.
+        var stagePairs = new List<(string Published, string Staged)>();
+        IEnumerable<(string Published, string Staged)> PairsOf(MetadataModule run) =>
+        [
+            (Path.GetFullPath(run.GeneratedPublic), Path.Combine(StageRoot(run.Name), "Public")),
+            (Path.GetFullPath(run.GeneratedPrivate), Path.Combine(StageRoot(run.Name), "Private")),
+            (Path.GetFullPath(run.GeneratedSource), Path.Combine(StageRoot(run.Name), MetadataModule.SourceDirectoryName)),
+            (Path.GetFullPath(run.Descriptor), StageDescriptor(run.Name)),
+            (Path.GetFullPath(run.BindingSchema), StageBindingSchema(run.Name)),
+            (Path.GetFullPath(run.Inventory), Inventory(run.Name))
+        ];
+        // 게시 뒤 기록을 끝낼 모듈이다(의존 기록·key·형식 수 — 출력은 게시본으로 잰다).
+        var recorded = new List<(MetadataModule Run, IReadOnlyList<StepKeyPart> Parts, MetadataActions.Dependencies Dependencies, int? Types)>();
+        var reports = new Dictionary<string, System.Text.Json.Nodes.JsonObject>(StringComparer.Ordinal);
+        string? toolId = session?.Records == true ? session.ToolId(compilerTool) : null;
+        // 이번 메타 단계가 리플렉션 뒤에 쓰는 출력 루트다(셰이더 파라미터). 리플렉션 판정은 그 아래를 입력 메모로 보지 않는다.
+        string[] producedLater = [.. plan.ShaderParameters.Select(module => Path.GetFullPath(module.OutputRoot))];
         var manifests = new List<(string Path, byte[] Snapshot)>();
         bool cleanupSafe = true;
         bool commandFailed = false;
@@ -164,9 +183,11 @@ public static class MetadataRunner
                 // 모듈 정의는 native compile과 같은 정의 헤더로 넘긴다(Docs/Design/UnityBuildPch.ko.md 8.2절 — AST와 compile의 정의가
                 // 갈라지지 않는다). 헤더는 여기서 쓰고, 빌드가 같은 내용을 다시 계산해 그대로 둔다.
                 string[] defines = ModuleDefinitions.Of(owner, dependencies, entryModules.Contains(owner.Name), target.LinkType, toolchain.Platform);
+                string? definitionsPath = null;
                 if (defines.Length != 0)
                 {
                     string definitions = ModuleDefinitions.PathOf(context.OutputDirectory, owner.Name);
+                    definitionsPath = definitions;
                     AtomicFile.WriteIfChanged(definitions, new System.Text.UTF8Encoding(false).GetBytes(ModuleDefinitions.Content(defines)));
                     arguments.AddRange(["--definitions-header", definitions]);
                 }
@@ -188,16 +209,45 @@ public static class MetadataRunner
 
                 // 리플렉션 클래스·struct의 표지(ROCKS_GENERATED_BODY)를 요구한다(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절).
                 arguments.Add("--require-generated-body");
+                // clang-format은 빌드가 한 번 푼 실행 파일을 넘긴다(Docs/Design/BuildReuse 2.3절). 계측·의존 기록은 stage 바로 아래에 받는다.
+                string phaseReport = Path.Combine(stage, run.Name + ".phase.json");
+                string dependencyRecord = Path.Combine(stage, run.Name + ".meta.deps.json");
+                if (session is not null)
+                {
+                    arguments.AddRange(["--clang-format", session.ClangFormat, "--phase-report", phaseReport]);
+                    if (session.Records)
+                    {
+                        arguments.AddRange(["--dependency-record", dependencyRecord]);
+                    }
+                }
+
+                // 판정(shadow — 늘 생성한다): 지난 기록이 지금도 맞는가. 앞서 다시 만든 모듈의 게시 경로는 그 stage와 대조한다(2.5절).
+                string actionId = "meta:" + run.Name;
+                StepJudgement? judgement = null;
+                IReadOnlyList<StepKeyPart> keyParts = [];
+                if (session?.Store is StepRecordStore store)
+                {
+                    keyParts = ReflectionKey(session, run, arguments.Skip(1).ToList(), stage, toolId!, definitionsPath, producedLater);
+                    judgement = store.Judge(actionId, keyParts, session.Memo, MetadataActions.Redirect(stagePairs, producedLater));
+                }
 
                 // 인자는 응답 파일로 넘긴다: 헤더가 많은 모듈은 --input·--include 쌍만으로 Windows 명령줄 상한(32,767자)을 넘는다
                 // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 파일은 한 줄에 인자 하나이고 모듈 출력 루트 밖(stage 바로
                 // 아래)에 둔다 — 출력 루트 안이면 --check의 남는 파일 검사와 게시 대상에 섞인다.
                 string responseFile = Path.Combine(stage, run.Name + ".metacompiler.rsp");
                 File.WriteAllText(responseFile, string.Join('\n', arguments.Skip(1)) + "\n", new System.Text.UTF8Encoding(false));
+                long moduleStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var generated = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, "@" + responseFile], context.RootDirectory,
-                    toolchain.Environment, Timeout: MetaCompilerModuleTimeout), cancellationToken);
+                    toolchain.Environment, Timeout: MetaCompilerModuleTimeout, MeasureUsage: session is not null), cancellationToken);
+                TimeSpan moduleElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(moduleStart);
                 Console.Write(generated.StdOut);
                 Console.Error.Write(generated.StdErr);
+                if (session is not null)
+                {
+                    reports[run.Name] = ModuleReport(run.Name, "reflection", moduleElapsed, generated.Usage, MetadataActions.ReadPhaseReport(phaseReport),
+                        MetadataActions.TypeCount(generated.StdOut, run.Name), judgement);
+                }
+
                 if (generated.ExitCode != 0)
                 {
                     commandFailed = true;
@@ -221,13 +271,42 @@ public static class MetadataRunner
                     throw new InvalidOperationException($"Module '{run.Name}': Rocks.MetaCompiler did not produce the Sparks binding schema. " +
                         "Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
                 }
+
+                stagePairs.AddRange(PairsOf(run));
+                if (session is not null && session.Records)
+                {
+                    int? types = MetadataActions.TypeCount(generated.StdOut, run.Name);
+                    MetadataActions.Dependencies read = MetadataActions.ReadDependencies(session, dependencyRecord, stage, stagePairs, producedLater);
+                    if (read.Problem is not null)
+                    {
+                        Console.WriteLine($"  Rocks metadata: module {run.Name}: not recorded ({read.Problem}).");
+                    }
+                    else
+                    {
+                        recorded.Add((run, keyParts, read, types));
+                    }
+
+                    if (judgement is { Hit: true } && session.Store!.Get(actionId) is StepRecord previous &&
+                        MetadataActions.CompareOutputs(previous, StagedOutputs(run, StageRoot(run.Name), StageDescriptor(run.Name),
+                            StageBindingSchema(run.Name), Inventory(run.Name))) is string difference)
+                    {
+                        Console.WriteLine($"  Rocks metadata: module {run.Name}: shadow would-hit but output differs: {difference}");
+                        session.NoteShadowMismatch();
+                    }
+                }
             }
 
             // 명세별 inventory 검증, 그 뒤 명세 사이 ID 중복 검증(SDK 동봉 명세 포함).
             foreach (MetadataModule run in runs)
             {
+                long idsStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 int verified = await RunIdsAsync(context, toolchain, compilerTool,
                     ["ids", "verify", "--manifest", run.Manifest, "--inventory", Inventory(run.Name)], cancellationToken);
+                if (reports.TryGetValue(run.Name, out System.Text.Json.Nodes.JsonObject? entry))
+                {
+                    entry["idsMilliseconds"] = (long)System.Diagnostics.Stopwatch.GetElapsedTime(idsStart).TotalMilliseconds;
+                }
+
                 if (verified != 0)
                 {
                     commandFailed = true;
@@ -243,7 +322,29 @@ public static class MetadataRunner
                 set.AddRange(["--manifest", manifest]);
             }
 
+            // 명세 집합 검사의 판정(shadow — 늘 돈다): key는 도구 ID와 모든 명세의 내용이다.
+            IReadOnlyList<StepKeyPart> setParts = [];
+            StepJudgement? setJudgement = null;
+            if (session?.Store is StepRecordStore setStore)
+            {
+                setParts = [new("format", MetadataSession.KeyFormat), new("tool", toolId!),
+                    new("manifests", MetadataActions.ContentsDigest(session, set.Where((_, index) => index > 1 && set[index - 1] == "--manifest"), null))];
+                setJudgement = setStore.Judge("meta-ids-set", setParts, session.Memo);
+            }
+
+            long setStart = System.Diagnostics.Stopwatch.GetTimestamp();
             int unique = await RunIdsAsync(context, toolchain, compilerTool, set, cancellationToken);
+            if (session is not null)
+            {
+                session.Report(new()
+                {
+                    ["action"] = "meta-ids-set",
+                    ["kind"] = "ids-set",
+                    ["milliseconds"] = (long)System.Diagnostics.Stopwatch.GetElapsedTime(setStart).TotalMilliseconds,
+                    ["decision"] = Decision(setJudgement)
+                });
+            }
+
             if (unique != 0)
             {
                 commandFailed = true;
@@ -251,8 +352,37 @@ public static class MetadataRunner
             }
 
             // 백업은 생성 include 디렉터리 밖에 둔다(복구에 실패해 남은 백업이 다음 게시의 잉여 파일로 지워지지 않게).
-            MetadataOutputTransaction.Publish(PublishItems(runs, StageRoot, StageDescriptor, StageBindingSchema), manifests, cancellationToken,
+            long publishStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            MetadataOutputTransaction.Publish(PublishItems(runs, StageRoot, StageDescriptor, StageBindingSchema, Inventory), manifests, cancellationToken,
                 backupDirectory: Path.Combine(context.OutputDirectory, ".metadata-backup", tag));
+            if (session is not null)
+            {
+                foreach (MetadataModule run in runs)
+                {
+                    session.Report(reports[run.Name]);
+                }
+
+                session.Report(new()
+                {
+                    ["action"] = "meta-publish",
+                    ["kind"] = "publish",
+                    ["milliseconds"] = (long)System.Diagnostics.Stopwatch.GetElapsedTime(publishStart).TotalMilliseconds
+                });
+                // 기록은 게시본으로 끝낸다: 출력의 (크기, 시각, 파일 ID)는 게시한 파일의 것이다(2.5절 출력 검증).
+                foreach ((MetadataModule run, IReadOnlyList<StepKeyPart> parts, MetadataActions.Dependencies dependencies, int? types) in recorded)
+                {
+                    string[] directories = [run.GeneratedPublic, run.GeneratedPrivate, run.GeneratedSource];
+                    session.Pend("meta:" + run.Name, new StepRecord(StepRecordStore.KeyOf(parts), parts,
+                        MetadataActions.MeasureOutputs([run.Descriptor, run.BindingSchema, run.Inventory], directories),
+                        [.. directories.Select(Path.GetFullPath)], dependencies.Files, dependencies.Enumerations, dependencies.Probes, types));
+                }
+
+                if (session.Records)
+                {
+                    session.Pend("meta-ids-set", new StepRecord(StepRecordStore.KeyOf(setParts), setParts, new Dictionary<string, StepOutput>(), [], [], [], []));
+                }
+            }
+
             return 0;
         }
         catch (Exception error)
@@ -282,11 +412,86 @@ public static class MetadataRunner
         }
     }
 
+    // 메타 action key(Docs/Design/BuildReuse 2.3절)다. arguments는 응답 파일의 인자(도구 경로 제외)다.
+    // produced는 이번 메타 단계가 나중에 쓰는 출력 루트다 — 그 이름 목록은 단계 안에서 바뀌므로 key에 넣지 않는다(그 아래 연 파일은 의존 기록이
+    // 직접 해시한다).
+    private static IReadOnlyList<StepKeyPart> ReflectionKey(MetadataSession session, MetadataModule run, IReadOnlyList<string> arguments, string stage,
+        string toolId, string? definitions, IReadOnlyList<string> produced)
+    {
+        var listings = new List<string>();
+        for (int index = 0; index + 1 < arguments.Count; ++index)
+        {
+            if (arguments[index] == "--include-dir" && !DirectoryPath.IsAtOrUnder(arguments[index + 1], stage) && Directory.Exists(arguments[index + 1]) &&
+                !produced.Any(root => DirectoryPath.IsAtOrUnder(arguments[index + 1], root)))
+            {
+                listings.Add(arguments[index + 1]);
+                listings.Add(session.Memo.Listing(arguments[index + 1], session.Root, session.OutputDirectory));
+            }
+        }
+
+        IEnumerable<string> imports = arguments.Where((_, index) => index > 0 && arguments[index - 1] == "--import");
+        return
+        [
+            new("format", MetadataSession.KeyFormat),
+            new("tool", toolId),
+            new("toolchain", session.ToolchainKey),
+            new("clang-format", session.ClangFormatDigest),
+            new("arguments", MetadataActions.ArgumentsDigest(arguments, stage)),
+            new("outputs", ToolchainIdentity.Digest([run.GeneratedPublic, run.GeneratedPrivate, run.GeneratedSource, run.Descriptor, run.BindingSchema,
+                run.Inventory])),
+            new("inputs", MetadataActions.ContentsDigest(session, run.Headers.Select(header => header.Path), null)),
+            new("definitions", definitions is null ? "none" : MetadataActions.ContentsDigest(session, [definitions], null)),
+            new("manifest", MetadataActions.ContentsDigest(session, [run.Manifest], null)),
+            new("imports", MetadataActions.ContentsDigest(session, imports, stage)),
+            new("listings", ToolchainIdentity.Digest(listings))
+        ];
+    }
+
+    // 모듈 하나의 보고 항목이다(Docs/Design/BuildReuse 2.8절).
+    private static System.Text.Json.Nodes.JsonObject ModuleReport(string module, string kind, TimeSpan elapsed, ProcessUsage? usage,
+        System.Text.Json.Nodes.JsonNode? phases, int? count, StepJudgement? judgement) => new()
+        {
+            ["action"] = (kind == "reflection" ? "meta:" : "shader-parameters:") + module,
+            ["kind"] = kind,
+            ["milliseconds"] = (long)elapsed.TotalMilliseconds,
+            ["cpuMilliseconds"] = usage is null ? null : (long)usage.CpuTime.TotalMilliseconds,
+            ["peakWorkingSetBytes"] = usage?.PeakWorkingSetBytes,
+            ["count"] = count,
+            ["metaCompiler"] = phases,
+            ["decision"] = Decision(judgement)
+        };
+
+    internal static System.Text.Json.Nodes.JsonObject? Decision(StepJudgement? judgement) => judgement is null ? null : new()
+    {
+        ["wouldHit"] = judgement.Hit,
+        ["reason"] = judgement.Hit ? null : judgement.Reason
+    };
+
+    // 모듈의 이번 생성물이다(게시 경로 → stage 파일). shadow 대조에 쓴다.
+    private static Dictionary<string, string> StagedOutputs(MetadataModule run, string stageRoot, string descriptor, string bindingSchema, string inventory)
+    {
+        var staged = new Dictionary<string, string>(PathComparer);
+        foreach ((string folder, string published) in new[] { ("Public", run.GeneratedPublic), ("Private", run.GeneratedPrivate),
+                     (MetadataModule.SourceDirectoryName, run.GeneratedSource) })
+        {
+            string source = Path.Combine(stageRoot, folder);
+            foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+            {
+                staged[Path.GetFullPath(Path.Combine(published, Path.GetRelativePath(source, file)))] = file;
+            }
+        }
+
+        staged[Path.GetFullPath(run.Descriptor)] = descriptor;
+        staged[Path.GetFullPath(run.BindingSchema)] = bindingSchema;
+        staged[Path.GetFullPath(run.Inventory)] = inventory;
+        return staged;
+    }
+
     // stage의 생성물을 게시 위치로, 게시 위치에만 있는 잉여 생성 파일은 삭제 항목으로 만든다. 대소문자만 다른 경로는
     // 그 볼륨이 대소문자를 무시할 때만 삭제하지 않는다 — 같은 파일이라 쓰기 항목이 이미 덮어쓴다(macOS 기본·Windows).
     // 대소문자를 구분하는 볼륨에서는 다른 파일이므로 지운다.
     private static List<(string? Staged, string Final)> PublishItems(IReadOnlyList<MetadataModule> runs,
-        Func<string, string> stageRoot, Func<string, string> stageDescriptor, Func<string, string> stageBindingSchema)
+        Func<string, string> stageRoot, Func<string, string> stageDescriptor, Func<string, string> stageBindingSchema, Func<string, string> stageInventory)
     {
         var items = new List<(string? Staged, string Final)>();
         foreach (MetadataModule run in runs)
@@ -321,6 +526,8 @@ public static class MetadataRunner
 
             items.Add((stageDescriptor(run.Name), run.Descriptor));
             items.Add((stageBindingSchema(run.Name), run.BindingSchema));
+            // identity inventory도 게시한다(Docs/Design/BuildReuse 2.2절 — 메타 action의 출력이고 ids verify 판정의 입력이다).
+            items.Add((stageInventory(run.Name), run.Inventory));
         }
 
         return items;

@@ -42,10 +42,15 @@ internal sealed class BuildInputs
 
     private readonly string[] coveredDirectories;
 
+    // 빌드 호출의 입력 메모다(메타 단계와 함께 쓴다 — Docs/Design/BuildReuse 2.6절). null이면 쓰지 않는다.
+    private readonly InputMemo? memo;
+
     /// <param name="plan">이 빌드의 계획이다. null이면(action 하나만 실행하는 시험) 산출물·header 디렉터리 정보 없이 동작한다.</param>
     /// <param name="seed">BuildInfo Prepare와 첫 InputSnapshot이 읽은 digest다. 같은 파일을 다시 읽지 않는다.</param>
-    public BuildInputs(string root, string outputRoot, NativeToolchain? toolchain, NativePlan? plan = null, FileDigests? seed = null)
+    public BuildInputs(string root, string outputRoot, NativeToolchain? toolchain, NativePlan? plan = null, FileDigests? seed = null,
+        InputMemo? memo = null)
     {
+        this.memo = memo;
         this.root = Path.GetFullPath(root);
         this.outputRoot = Path.GetFullPath(outputRoot);
         ownedRoots = toolchain is null ? [] : OwnedRoots(toolchain);
@@ -77,7 +82,8 @@ internal sealed class BuildInputs
             return producedHashes.TryGetValue(full, out string? recorded) ? recorded : Fingerprints.FileHash(full);
         }
 
-        return contents.GetOrAdd(full, key => new Lazy<string>(() => Fingerprints.FileHash(key))).Value;
+        return contents.GetOrAdd(full, key => new Lazy<string>(() =>
+            memo is not null && memo.TryCurrent(key, out string remembered) ? remembered : Fingerprints.FileHash(key))).Value;
     }
 
     /// <summary>이 plan의 action 출력인가.</summary>
@@ -162,7 +168,7 @@ internal sealed class BuildInputs
         return changed;
     }
 
-    private static string[] OwnedRoots(NativeToolchain toolchain)
+    internal static string[] OwnedRoots(NativeToolchain toolchain)
     {
         var roots = new List<string>(toolchain.OwnedRoots.Values);
         roots.AddRange(toolchain.FingerprintPaths);

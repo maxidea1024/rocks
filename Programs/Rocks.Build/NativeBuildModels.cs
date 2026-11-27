@@ -642,6 +642,10 @@ public sealed record NativeBuildRequest
 
     public string ContextFingerprint { get; init; } = "";
 
+    // 빌드 호출의 입력 메모다(Docs/Design/BuildReuse 2.6절 — 메타 단계와 함께 쓴다). 있으면 action key와 의존 기록 검증이 같은 파일을 이
+    // 메모에서 먼저 찾는다((크기, 시각, 파일 ID)가 메모할 때와 같을 때만 — 다르면 다시 읽는다). null이면 엔진이 혼자 읽는다.
+    public InputMemo? InputMemo { get; init; }
+
     public int MaxParallelism { get; init; } = 1;
 
     // 설치 SDK 게임 빌드의 SDK 루트다(그 밖에는 null). 도구 빌드 ID의 경로 키 `sdk:`의 기준이다.

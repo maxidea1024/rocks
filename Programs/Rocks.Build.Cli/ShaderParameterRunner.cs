@@ -13,10 +13,11 @@ public static class ShaderParameterRunner
 {
     /// <summary>
     /// plan의 셰이더 파라미터 모듈마다 생성한다. 반환값은 0(성공 또는 모듈 없음) 또는 MetaCompiler 종료 코드(진단을 출력함)다. gameProject가 참이면
-    /// 플러그인이 아닌 모듈의 가상 루트가 /Project다(아니면 /Engine). 플러그인 모듈은 /Plugin/&lt;이름&gt;이다.
+    /// 플러그인이 아닌 모듈의 가상 루트가 /Project다(아니면 /Engine). 플러그인 모듈은 /Plugin/&lt;이름&gt;이다. session이 있으면 모듈마다 시간·자원을
+    /// 보고에 남기고, 모드가 shadow면 <c>shader-parameters:&lt;모듈&gt;</c> 판정과 기록을 한다(Docs/Design/BuildReuse 2.7절 — 늘 생성한다).
     /// </summary>
     public static async Task<int> GenerateAsync(BuildContext context, NativeToolchain toolchain, MetadataPlan plan, TargetRules target, string compilerTool,
-        CancellationToken cancellationToken, bool gameProject = false)
+        CancellationToken cancellationToken, bool gameProject = false, MetadataSession? session = null)
     {
         if (plan.ShaderParameters.Count == 0)
         {
@@ -25,6 +26,7 @@ public static class ShaderParameterRunner
 
         var byName = plan.Modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
         HashSet<string> entryModules = ModuleDefinitions.EntryModules(plan.Modules);
+        string? toolId = session?.Records == true ? session.ToolId(compilerTool) : null;
         foreach (ShaderParameterModule run in plan.ShaderParameters)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -50,9 +52,11 @@ public static class ShaderParameterRunner
             List<NativeModuleInput> dependencies = ModuleVisibility.Of(owner, byName, (name, from) =>
                 throw new ArgumentException($"Module '{from}' depends on unknown module '{name}'."));
             string[] defines = ModuleDefinitions.Of(owner, dependencies, entryModules.Contains(owner.Name), target.LinkType, toolchain.Platform);
+            string? definitionsPath = null;
             if (defines.Length != 0)
             {
                 string definitions = ModuleDefinitions.PathOf(context.OutputDirectory, owner.Name);
+                definitionsPath = definitions;
                 AtomicFile.WriteIfChanged(definitions, new System.Text.UTF8Encoding(false).GetBytes(ModuleDefinitions.Content(defines)));
                 arguments.AddRange(["--definitions-header", definitions]);
             }
@@ -62,13 +66,83 @@ public static class ShaderParameterRunner
                 arguments.AddRange(["--include-dir", directory]);
             }
 
+            // 계측·의존 기록은 <out>/Metadata 아래에 받는다(Docs/Design/BuildReuse 2.4·2.8절).
+            string actionId = "shader-parameters:" + run.Name;
+            string phaseReport = Path.Combine(context.OutputDirectory, "Metadata", run.Name + ".shader-parameters.phase.json");
+            string dependencyRecord = Path.Combine(context.OutputDirectory, "Metadata", run.Name + ".shader-parameters.deps.json");
+            StepJudgement? judgement = null;
+            IReadOnlyList<StepKeyPart> keyParts = [];
+            if (session is not null)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(phaseReport)!);
+                arguments.AddRange(["--phase-report", phaseReport]);
+                if (session.Store is StepRecordStore store)
+                {
+                    arguments.AddRange(["--dependency-record", dependencyRecord]);
+                    keyParts =
+                    [
+                        new("format", MetadataSession.KeyFormat),
+                        new("tool", toolId!),
+                        new("toolchain", session.ToolchainKey),
+                        new("arguments", MetadataActions.ArgumentsDigest(arguments.Skip(1).ToList(), null)),
+                        new("outputs", ToolchainIdentity.Digest([run.OutputRoot])),
+                        new("inputs", MetadataActions.ContentsDigest(session, run.Headers.Select(header => header.Path), null)),
+                        new("definitions", definitionsPath is null ? "none" : MetadataActions.ContentsDigest(session, [definitionsPath], null))
+                    ];
+                    judgement = store.Judge(actionId, keyParts, session.Memo);
+                }
+            }
+
+            // shadow 대조용으로 지난 출력 기록을 생성 전에 잡아 둔다(MetaCompiler가 출력 루트에 직접 쓴다).
+            StepRecord? previous = judgement is { Hit: true } ? session!.Store!.Get(actionId) : null;
+            long moduleStart = System.Diagnostics.Stopwatch.GetTimestamp();
             ProcessResult generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory, toolchain.Environment,
-                Timeout: TimeSpan.FromMinutes(3)), cancellationToken);
+                Timeout: TimeSpan.FromMinutes(3), MeasureUsage: session is not null), cancellationToken);
+            TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(moduleStart);
             Console.Write(generated.StdOut);
             Console.Error.Write(generated.StdErr);
+            if (session is not null)
+            {
+                session.Report(new()
+                {
+                    ["action"] = actionId,
+                    ["kind"] = "shader-parameters",
+                    ["milliseconds"] = (long)elapsed.TotalMilliseconds,
+                    ["cpuMilliseconds"] = generated.Usage is null ? null : (long)generated.Usage.CpuTime.TotalMilliseconds,
+                    ["peakWorkingSetBytes"] = generated.Usage?.PeakWorkingSetBytes,
+                    ["metaCompiler"] = MetadataActions.ReadPhaseReport(phaseReport),
+                    ["decision"] = MetadataRunner.Decision(judgement)
+                });
+            }
+
             if (generated.ExitCode != 0)
             {
                 return generated.ExitCode;
+            }
+
+            if (session is not null && session.Records)
+            {
+                Dictionary<string, StepOutput> outputs = MetadataActions.MeasureOutputs([], [run.OutputRoot]);
+                if (previous is not null)
+                {
+                    var produced = outputs.ToDictionary(pair => pair.Key, pair => pair.Key, outputs.Comparer);
+                    if (MetadataActions.CompareOutputs(previous, produced) is string difference)
+                    {
+                        Console.WriteLine($"  Rocks shader parameters: module {run.Name}: shadow would-hit but output differs: {difference}");
+                        session.NoteShadowMismatch();
+                    }
+                }
+
+                MetadataActions.Dependencies read = MetadataActions.ReadDependencies(session, dependencyRecord, null, [], []);
+                if (read.Problem is not null)
+                {
+                    Console.WriteLine($"  Rocks shader parameters: module {run.Name}: not recorded ({read.Problem}).");
+                }
+                else
+                {
+                    session.Pend(actionId, new StepRecord(StepRecordStore.KeyOf(keyParts), keyParts, outputs, [Path.GetFullPath(run.OutputRoot)],
+                        read.Files, read.Enumerations, read.Probes));
+                }
             }
         }
 

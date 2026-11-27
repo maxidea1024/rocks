@@ -115,6 +115,9 @@ try
                 await DependencyTests.RunAsync(request, root, Pass);
                 DependencyScopeTests.Run(request, root, Pass);
                 break;
+            case "step-records":
+                StepRecordTests.Run(root, Pass);
+                break;
             case "unity":
                 await UnityTests.RunAsync(request, root, Pass);
                 break;
@@ -176,7 +179,7 @@ try
                 break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, ispc, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
+                    $"Unknown test group '{group}'. Groups: dependency, step-records, unity, pch, dynamic, module-table, modular, buildinfo, ispc, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -390,6 +393,7 @@ try
     // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
     await DependencyTests.RunAsync(request, root, Pass);
     DependencyScopeTests.Run(request, root, Pass);
+    StepRecordTests.Run(root, Pass);
     await ModularLinkTests.RunAsync(request, root, Pass);
     await ModularManifestTests.RunAsync(request, root, Pass);
     await IncludeOwnershipTests.RunAsync(request, root, Pass);
