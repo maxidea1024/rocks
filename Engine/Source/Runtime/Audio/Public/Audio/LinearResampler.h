@@ -54,6 +54,11 @@ public:
     // 믹서가 clip 끝 판정에 쓴다(Docs/Design/AudioSystem 3.22.5절).
     uint32 OutputFramesBefore(int64 inputFrame) const noexcept;
 
+    // inputFrames frame의 입력으로 낼 수 있는 출력 frame 수다(InputFramesNeeded(n) ≤ inputFrames인
+    // 가장 큰 n, maxOutputFrames·MaxBlockFrames 이하). 스트림 원본이 굶을 때 가진 만큼
+    // 낸다(Docs/Design/ AudioSystem 3.40.1절).
+    uint32 OutputFramesFor(uint32 inputFrames, uint32 maxOutputFrames) const noexcept;
+
     // output.frameCount frame을 만들고 소비한 입력 frame 수를 돌려준다.
     // - input·output의 채널 수는 ChannelCount()와 같아야 하고, output.frameCount ≤ MaxBlockFrames,
     //   input.frameCount ≥ InputFramesNeeded(output.frameCount)여야 한다. 아니면

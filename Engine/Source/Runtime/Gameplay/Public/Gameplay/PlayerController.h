@@ -178,7 +178,51 @@ public:
     // OnTick 평가 전에 놓는다). 게임 스레드 전용이다.
     bool HasInputContext(AssetId asset) const noexcept;
 
+    // ---- 입력 스택(Docs/Design/InputActions 5.5절) ----
+
+    // component(InputComponent)를 입력 스택에 넣는다(UE PushInputComponent). 이미 있으면 빼고 다시
+    // 넣는다. 뒤에서부터 priority가 같거나 작은 첫 항목 바로 뒤 자리다. 스택은 매 틱 priority로
+    // 다시 정렬해 전달한다.
+    //
+    // 오류: InputComponent가 아니면 TypeMismatch, 없는 handle StaleHandle, 파괴 대기 Destroyed,
+    // 할당 실패 OutOfMemory(스택 그대로). 게임 스레드 전용이다.
+    Result<void> PushInputComponent(ObjectHandle component) noexcept;
+
+    // component를 스택에서 빼고 그 값 바인딩을 0으로 한다(UE PopInputComponent — 값 0은 Rocks가
+    // 더한 것, 5.5절). 빠진 층은 같은 틱 남은 전달도 받지 않는다. 없었으면 거짓이다.
+    bool PopInputComponent(ObjectHandle component) noexcept;
+
+    bool IsInputComponentInStack(ObjectHandle component) const noexcept;
+
+    // actor의 입력을 켠다(UE AActor::EnableInput — World는 Gameplay 아래라 여기 둔다). actor의 첫
+    // 살아 있는 InputComponent를 쓰고 없으면 만들어 Push하고 그 handle을 돌려준다. 이
+    // PlayerController가 조종하는 Pawn이면 Push하지 않고 그 Pawn의 입력을 켠다(UE
+    // APawn::EnableInput — 돌려주는 handle은 Pawn의 플레이어 입력 컴포넌트, 없으면 null). actor가
+    // 이 PlayerController 자신이면 PlayerController 층을 켠다(UE APlayerController::EnableInput —
+    // null handle).
+    //
+    // 사용 예:
+    //   auto component = controller.EnableInput(door);
+    //
+    // 오류: 이 World의 Actor가 아니면 StaleHandle, 파괴 대기 Destroyed, 다른 Controller가
+    // 조종하거나 Controller가 없는 Pawn은 InvalidArgument, 컴포넌트 추가·Push 오류는 그대로다.
+    Result<ObjectHandle> EnableInput(ObjectHandle actor) noexcept;
+
+    // actor의 입력을 끈다(UE AActor::DisableInput). 조종하는 Pawn이면 그 Pawn의 입력을 끄고, 이
+    // PlayerController 자신이면 PlayerController 층을 끈다. 아니면 그 Actor 소유의 InputComponent를
+    // 모두 이 스택에서 뺀다. 오류는 EnableInput과 같다(컴포넌트 오류 없음).
+    Result<void> DisableInput(ObjectHandle actor) noexcept;
+
+    // PlayerController 층(ActionBindings)이 켜져 있는지다(UE bInputEnabled — 기본 참).
+    bool IsInputEnabled() const noexcept {
+        return inputEnabled_;
+    }
+
+    // 입력 스택에서 PlayerController 층의 priority다(UE PC_InputComponent0의 기본 Priority).
+    static constexpr int32 ControllerLayerPriority = 0;
+
     // 이 플레이어의 액션 바인딩이다(UE UEnhancedInputComponent — 5.1절). OnTick이 평가 뒤 전달한다.
+    // 입력 스택의 PlayerController 층이다(ControllerLayerPriority, 막지 않음 — 5.5절).
     input::InputActionBindings& ActionBindings() noexcept {
         return actionBindings_;
     }
@@ -294,6 +338,45 @@ private:
     // 쥔 컨텍스트를 모두 평가기에서 빼고 lease를 놓는다(OnFrameworkEndPlay).
     void ReleaseInputAssets() noexcept;
 
+    // 입력 스택 층이 어디서 왔는지다(같은 틱 재검사 기준 — 5.5절).
+    enum class InputLayerSource : uint8 {
+        // 조종하는 Pawn의 InputComponent.
+        Pawn,
+        // PlayerController 층(ActionBindings — component는 null).
+        Controller,
+        // PushInputComponent로 넣은 것.
+        Stack
+    };
+
+    // 입력 스택 층 하나다.
+    struct InputLayer {
+        ObjectHandle component;
+        int32 priority = 0;
+        InputLayerSource source = InputLayerSource::Controller;
+    };
+
+    // 이번 틱의 스택을 쌓아 위층부터 전달한다(5.5절).
+    void DispatchInputStack() noexcept;
+    // 스택 쌓기: Pawn → PlayerController 층 → Push한 것, priority 안정 정렬. 할당 실패로 층을
+    // 빠뜨렸으면 거짓이다(들어간 층은 그대로 쓴다).
+    bool BuildInputLayers() noexcept;
+    // 조종하는 Pawn의 InputComponent들을 inputLayers_ 뒤에 붙인다(플레이어 입력 컴포넌트 먼저 —
+    // UE :2683-2693, Push 스택에 든 것·파괴 대기는 뺀다). 할당 실패면 거짓이다.
+    bool AppendPawnInputComponents(ObjectHandle pawn) noexcept;
+    // actor의 components를 actorComponents_에 옮긴다(World With 밖에서 돌기 위해). 할당 실패면
+    // 거짓이다.
+    bool CopyActorComponents(ObjectHandle actor) noexcept;
+    // 그 층을 이번 틱 지금 전달해도 되는지다(앞 층의 콜백이 Pop·파괴·UnPossess·입력 끄기를 했을 수
+    // 있다 — UE EvaluateInputDelegates의 IsValid 대응).
+    bool IsInputLayerLive(const InputLayer& layer) noexcept;
+    // actor의 첫 살아 있는 InputComponent다(없으면 null, 할당 실패 OutOfMemory).
+    Result<ObjectHandle> FindLiveInputComponent(ObjectHandle actor) noexcept;
+    // Possess한 Pawn에 플레이어 입력 컴포넌트를 만들고 hook을 부른다.
+    void SetupPawnInput(ObjectHandle pawn) noexcept;
+    // actor가 이 PlayerController가 조종하는 Pawn인지(참) 본다. Pawn이 아니면 거짓, 다른
+    // Controller가 조종하거나 Controller가 없는 Pawn은 InvalidArgument다.
+    Result<bool> IsOwnPawn(ObjectHandle actor) noexcept;
+
     void SetGestureRecognition(bool enabled) noexcept {
         if (enabled != gestureRecognizerEnabled_) {
             gestureRecognizerEnabled_ = enabled;
@@ -324,6 +407,16 @@ private:
     ROCKS_NATIVE() ObjectHandle localPlayer_;
     ROCKS_NATIVE() ObjectHandle cameraDirector_;
     ROCKS_NATIVE() Array<AppliedInputAsset> inputAssets_;
+    // Push한 InputComponent(넣은 자리 순 — UE CurrentInputStack).
+    ROCKS_NATIVE() Array<ObjectHandle> inputStack_;
+    // 전달 작업 배열이다(이번 틱 층·층 사이 소비·Actor 컴포넌트 목록 — 용량을 다시 쓴다).
+    ROCKS_NATIVE() Array<InputLayer> inputLayers_;
+    ROCKS_NATIVE() Array<Guid> stackConsumed_;
+    ROCKS_NATIVE() Array<ObjectHandle> actorComponents_;
+    // PlayerController 층이 켜져 있다(UE bInputEnabled).
+    ROCKS_NATIVE() bool inputEnabled_ = true;
+    // 스택 쌓기가 할당 실패로 층을 빠뜨리고 있다(오류를 실패가 이어지는 동안 한 번만 남긴다).
+    ROCKS_NATIVE() bool inputStackFailing_ = false;
     // OnFrameworkEndPlay가 lease를 놓은 뒤다(새 에셋 컨텍스트를 받지 않는다).
     ROCKS_NATIVE() bool inputAssetsClosed_ = false;
 };

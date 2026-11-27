@@ -258,6 +258,18 @@ public:
         (void)hit;
     }
 
+    // Actor 단위 overlap 시작·끝 hook이다(UE NotifyActorBeginOverlap·NotifyActorEndOverlap —
+    // Docs/Design/PhysicsModule 5.3절·7.1.11절). 이 Actor의 컴포넌트 중 하나가 otherActor의
+    // 컴포넌트와 처음 겹칠 때 시작, 마지막 겹침이 끝날 때 끝이다(같은 Actor 컴포넌트끼리는 부르지
+    // 않는다). World가 Playing일 때만 부르고 파괴 대기 Actor에는 부르지 않는다.
+    virtual void OnBeginOverlap(ObjectHandle otherActor) noexcept {
+        (void)otherActor;
+    }
+
+    virtual void OnEndOverlap(ObjectHandle otherActor) noexcept {
+        (void)otherActor;
+    }
+
     // 정리 hook이다. 다른 Actor 파괴·Spawn 요청은 허용한다(같은 프레임 정리 단계에서 처리된다).
     // reason은 정리 이유다(17.2절). OnStart를 받지 못했어도 OnAwake가 성공했으면 받는다.
     virtual void OnDestroy(EndPlayReason) noexcept {

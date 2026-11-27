@@ -1560,6 +1560,62 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::changed",
+      "id": "6c3494fdcc3c442a92e48f5e8f0e3440",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::count",
+      "id": "bc3150976d14489d97305f31dab98fcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::edited",
+      "id": "40d6877bca004f96845ab49c1ebd57db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::label",
+      "id": "8bb2212c551144aca6f607ef8c2e5ac6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::named",
+      "id": "985ef3246e11423f8bb7c3feae961ff0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::pinged",
+      "id": "a84ecf8af4c54bd7b9634727c459900b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::placed",
+      "id": "b5a80183a1cb4a46a319433d631e988b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisherChild::extra",
+      "id": "8fdbdc809b8a47a9ac67bcae731eca7c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::FixedLink::target",
       "id": "9d1be7fc93544f298cff09d2b42e230c",
       "aliases": [],
@@ -4770,6 +4826,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::EnumFields",
       "id": "f84efdb19e974c0aa334ba161c400144",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventPublisher",
+      "id": "4f04477320eb4280a73ba9445b927ace",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventPublisherChild",
+      "id": "dc6791d9efa24bdbb9a35f759d6e9377",
       "aliases": [],
       "retired": false
     },

@@ -84,6 +84,7 @@ AudioEngineSubsystem::~AudioEngineSubsystem() {
 
 Result<void> AudioEngineSubsystem::Initialize(Engine& engine) noexcept {
     options_ = AudioEngineHostOptions{};
+    hasSettings_ = engine.Settings() != nullptr;
     decoders_ = audio::AudioDecoderTable{};
     if (auto builtIn = audio::RegisterBuiltInAudioDecoders(decoders_); !builtIn) {
         return builtIn;
@@ -182,6 +183,38 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
     mixerConfig.blockFrames = blockFrames;
     mixerConfig.maxVoices = maxVoices * MixerVoiceHeadroomFactor;
 
+    // 스트림 디코드 서비스(3.40.2절): 제어가 Inline이면 서비스도 Inline이다(제어 묶음이 펌프한다).
+    int32 ringSetting = int32{audio::StreamRingMinFrames};
+    int32 streamsSetting = 0;
+    if (engine.Settings() != nullptr) {
+        ringSetting = StreamRingFramesVar.Get();
+        streamsSetting = StreamMaxStreamsVar.Get();
+    }
+
+    audio::AudioStreamServiceConfig streamConfig;
+    streamConfig.ringFrames = static_cast<uint32>(ringSetting);
+    const uint32 defaultStreams = maxVoices * MixerVoiceHeadroomFactor;
+    const uint32 cappedStreams =
+        defaultStreams < audio::MaxStreamSlots ? defaultStreams : audio::MaxStreamSlots;
+    streamConfig.maxStreams =
+        streamsSetting > 0 ? static_cast<uint32>(streamsSetting) : cappedStreams;
+    if (options_.streamSlots != 0) {
+        streamConfig.maxStreams = options_.streamSlots;
+    }
+
+    streamConfig.mode = options_.controlMode == AudioControlMode::Inline
+                            ? audio::AudioStreamServiceMode::Inline
+                            : audio::AudioStreamServiceMode::Thread;
+    auto streams = audio::AudioStreamService::TryCreate(allocator_, streamConfig);
+    if (!streams) {
+        Log::Error(LogEngineAudio, "Audio stream service creation failed ({Error})",
+                   ErrorCodeName(streams.Error()));
+        return Result<void>::Failure(streams.Error());
+    }
+
+    streams_ = Move(streams.Value());
+    mixerConfig.streamRefillSignal = &streams_->WakeSignal();
+
     UniquePtr<audio::AudioOutputBackend> backend;
     if (options_.useBackend && engine.Modules() != nullptr) {
         const auto* registry =
@@ -218,6 +251,12 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
     }
 
     device_ = Move(opened.Value());
+    if (auto started = streams_->Start(); !started) {
+        Log::Error(LogEngineAudio, "Audio decode thread start failed ({Error})",
+                   ErrorCodeName(started.Error()));
+        return started;
+    }
+
     const audio::AudioOutputDeviceInfo& info = device_->Info();
     Log::Info(LogEngineAudio,
               "Audio device: {Backend}, {Rate} Hz, callback {Callback} frames, block {Block} "
@@ -231,7 +270,8 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
             ErrorCodeName(info.backendError), info.backendNativeError);
     }
 
-    auto context = UniquePtr<AudioDeviceContext>::TryMake(allocator_, allocator_, *device_);
+    auto context = UniquePtr<AudioDeviceContext>::TryMake(allocator_, allocator_, *device_,
+                                                          streams_.Get(), &decoders_);
     if (!context) {
         return Result<void>::Failure(context.Error());
     }
@@ -716,7 +756,7 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
     if (playable == nullptr ||
         !engine_audio_detail::IsFiniteInRange(options.volume, 0.0f, audio::MaxVoiceGain) ||
         !engine_audio_detail::IsFiniteInRange(options.pitch, audio::MinPitch, audio::MaxPitch) ||
-        options.startFrame >= playable->pcm->FrameCount()) {
+        options.startFrame >= playable->FrameCount()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -971,6 +1011,12 @@ void AudioEngineSubsystem::Drain() noexcept {
         device_->Close();
     }
 
+    // 종료 순서(3.40.2절): 믹서 drain·장치 Close 뒤 디코드 스레드를 멈추고(활성 작업은 반납) 참조를
+    // 놓는다.
+    if (streams_ != nullptr) {
+        streams_->Shutdown();
+    }
+
     if (context_ != nullptr) {
         context_->Abandon();
     }
@@ -983,6 +1029,16 @@ void AudioEngineSubsystem::Drain() noexcept {
 
     ignored_.Clear();
     delivering_.Clear();
+}
+
+SoundCookedLoadOptions AudioEngineSubsystem::CookedLoadOptions() const noexcept {
+    SoundCookedLoadOptions options;
+    if (hasSettings_) {
+        options.defaultLoading =
+            static_cast<SoundLoadingBehavior>(engine_audio_detail::StreamDefaultLoadingVar.Get());
+    }
+
+    return options;
 }
 
 bool IsOutputTailPlayed(const audio::AudioOutputRingCounters& counters,

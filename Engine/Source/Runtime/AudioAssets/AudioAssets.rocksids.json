@@ -122,6 +122,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundClip::loadingBehavior",
+      "id": "58ea0abf7bea40d897959f62c76416b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClip::loopBegin",
       "id": "67dbb88c928a4b799cc16666628f46ca",
       "aliases": [],
@@ -341,6 +348,13 @@
       "kind": "type",
       "name": "rocks::SoundImportChannelHandling",
       "id": "36a8238a804944f59f2c445e1fcb404c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundLoadingBehavior",
+      "id": "3e8b9d441573451ab50365c7cb53237d",
       "aliases": [],
       "retired": false
     },

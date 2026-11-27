@@ -502,6 +502,24 @@
         "generated": false,
         "baked": null
       }
+    ],
+    "materials": [
+      {
+        "MaterialInterface": null,
+        "MaterialSlotName": "MaterialSlot",
+        "ImportedMaterialSlotName": "MaterialSlot",
+        "UVChannelData": {
+          "bInitialized": true,
+          "bOverrideDensities": false,
+          "LocalUVDensities": [
+            25.1968498,
+            0,
+            0,
+            0
+          ]
+        },
+        "OverlayMaterialInterface": null
+      }
     ]
   }
 }

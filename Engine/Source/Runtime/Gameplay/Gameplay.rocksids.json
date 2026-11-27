@@ -9,6 +9,20 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::InputComponent::blockInput_",
+      "id": "94ec56b05d524f3aaba10d9fbdc44868",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::InputComponent::priority_",
+      "id": "8101861f1e384674ad9ec044edf610c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::AiController",
       "id": "48eb910cb4634ae38dc763bcb036262d",
@@ -47,6 +61,13 @@
       "kind": "type",
       "name": "rocks::GameState",
       "id": "2f6dc8c1af634743b681726194b56d09",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::InputComponent",
+      "id": "e3ec5a5ef6414f6d9f0842ee2eb6d5bd",
       "aliases": [],
       "retired": false
     },

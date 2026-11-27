@@ -1027,6 +1027,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnsupportedSourceLayout";
     case AssetDiagnosticCode::GammaMismatch:
         return "GammaMismatch";
+    case AssetDiagnosticCode::UnrealNameNormalized:
+        return "UnrealNameNormalized";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
     case AssetDiagnosticCode::AliasResolved:
@@ -1081,6 +1083,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "SourceCleared";
     case AssetDiagnosticCode::IgnoredSourceChunks:
         return "IgnoredSourceChunks";
+    case AssetDiagnosticCode::EncoderUnavailable:
+        return "EncoderUnavailable";
+    case AssetDiagnosticCode::PlatformFormatFallback:
+        return "PlatformFormatFallback";
     }
 
     return "Unknown";
@@ -1097,6 +1103,8 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::NuggetConflict:
     case AssetDiagnosticCode::SourceCleared:
     case AssetDiagnosticCode::IgnoredSourceChunks:
+    case AssetDiagnosticCode::EncoderUnavailable:
+    case AssetDiagnosticCode::PlatformFormatFallback:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:
@@ -1114,6 +1122,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnrealPathRenamed:
     case AssetDiagnosticCode::MissingUnrealDependency:
     case AssetDiagnosticCode::GammaMismatch:
+    case AssetDiagnosticCode::UnrealNameNormalized:
     case AssetDiagnosticCode::AliasResolved:
     case AssetDiagnosticCode::AliasInUse:
     case AssetDiagnosticCode::AliasSearchTruncated:

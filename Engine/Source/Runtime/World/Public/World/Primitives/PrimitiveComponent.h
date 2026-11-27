@@ -42,7 +42,8 @@ public:
 
     explicit PrimitiveComponent(Allocator& allocator) noexcept
         : SceneComponent(allocator), collisionProfileName_(allocator), bodySettings_(allocator),
-          moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator) {
+          moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator),
+          overlappingComponents_(allocator) {
     }
 
     // --- 거리 ---
@@ -458,6 +459,34 @@ public:
         return moveIgnoreComponents_.View();
     }
 
+    // --- overlap(Docs/Design/PhysicsModule 5.3절·7.1.11절) ---
+
+    // 지금 겹친 컴포넌트다(UE GetOverlappingComponents — 실행 상태, 저장하지 않는다). 겹침은
+    // 대칭이다(상대 장부에도 이 컴포넌트가 있다). 순서는 정하지 않는다(끝낸 칸은 마지막 칸으로
+    // 메운다 — UE RemoveAtSwap). 이 컴포넌트의 Borrow 범위에서만 쓴다.
+    //
+    // 사용 예:
+    //   auto inside = world.With<BoxComponent>(trigger, [&](BoxComponent& box) noexcept {
+    //       return box.IsOverlappingComponent(playerCapsule);
+    //   });
+    Span<const ObjectHandle> OverlappingComponents() const noexcept {
+        return overlappingComponents_.View();
+    }
+
+    bool IsOverlappingComponent(ObjectHandle component) const noexcept {
+        return overlappingComponents_.Contains(component);
+    }
+
+    // actor의 Primitive 컴포넌트 중 other의 컴포넌트와 겹친 것이 있는지다(UE
+    // AActor::IsOverlappingActor). 어느 쪽이든 없는 Actor면 거짓이다.
+    static bool IsOverlappingActor(World& world, ObjectHandle actor, ObjectHandle other) noexcept;
+
+    // 자기 장부를 지금 자리의 overlap 질의로 갱신한 뒤 자식으로 내려간다(UE UpdateOverlapsImpl —
+    // 7.1.11절). generateOverlapEvents가 거짓이거나 질의 충돌이 꺼져 있으면 겹침을 모두 끝낸다.
+    // transform setter·MoveComponent·충돌 설정 변경·Actor 시작이 부르므로 직접 부를 일은 드물다.
+    // 할당 실패면 장부를 그대로 둔다(다음 갱신 때 다시 계산한다).
+    void UpdateOverlaps() noexcept override;
+
     // 물리 결과를 컴포넌트에 쓴다(Docs/Design/PhysicsModule 3.4절 — Physics의 PhysicsResults만
     // 부른다). 월드 위치(cm)·회전으로 옮기되 자기 body로 되돌려 보내지 않는다(UE
     // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
@@ -581,14 +610,33 @@ protected:
     // UPrimitiveComponent::BeginPlay — PhysicsModule 2.3.1절). 파생이 재정의하면 이것을 부른다.
     void OnStart() noexcept override;
 
+    // 파괴될 때 generateOverlapEvents를 끄고 겹침을 모두 끝낸다(알림 있음 — UE
+    // OnComponentDestroyed, 7.1.11절). 파생이 재정의하면 이것을 부른다.
+    void OnDestroy(EndPlayReason reason) noexcept override;
+
     // 형상 값이 바뀐 뒤 파생 setter가 부른다(UE UpdateBodyScale(scale, true) — 7.1.5절). body가
     // 있으면 BuildBodyGeometry의 새 값으로 형상을 바꾼다. 실패하면 이전 형상을 두고 Warning
-    // BodyShapeUpdateFailed다.
+    // BodyShapeUpdateFailed다. 그다음 overlap을 갱신한다(UE 형상 setter의 bUpdateOverlaps —
+    // 7.1.11절).
     void UpdateBodyGeometry() noexcept;
 
 private:
     // 막는 hit를 자기 Actor와 상대 Actor에 발행한다(UE DispatchBlockingHit — 7.1.10절).
     void DispatchBlockingHit(const HitResult& hit) noexcept;
+
+    // overlap 장부(7.1.11절 — UE UpdateOverlapsImpl·BeginComponentOverlap·EndComponentOverlap·
+    // ClearComponentOverlaps). pending은 이동 sweep이 지나며 만난 겹침(시작할 후보)이다.
+    void UpdateOverlapsWith(Span<const ObjectHandle> pending) noexcept;
+    void RefreshOverlaps(World& world) noexcept;
+    void BeginComponentOverlap(ObjectHandle other) noexcept;
+    void EndComponentOverlap(ObjectHandle other) noexcept;
+    void ClearComponentOverlaps() noexcept;
+    // 두 컴포넌트가 겹침을 만들 수 있는지다(UE CanComponentsGenerateOverlap).
+    bool CanGenerateOverlapWith(const PrimitiveComponent& other) const noexcept;
+    // 질의·sweep 결과를 장부 후보로 삼을지다(UE ShouldIgnoreOverlapResult의 반대 — 자기 아님, 상대
+    // generateOverlapEvents, 상대 Actor가 있고 Constructed가 아님).
+    bool IsOverlapCandidate(World& world, ObjectHandle component,
+                            ObjectHandle actor) const noexcept;
 
     // body에 넘기는 월드 transform(위치·회전·scale 따로 — 행렬 분해 없음)이다.
     Transform BodyWorldTransform() const noexcept;
@@ -611,6 +659,8 @@ private:
     // 이동 sweep 무시 목록이다(UE MoveIgnoreActors·MoveIgnoreComponents — Transient).
     ROCKS_NATIVE() Array<ObjectHandle> moveIgnoreActors_;
     ROCKS_NATIVE() Array<ObjectHandle> moveIgnoreComponents_;
+    // 겹친 컴포넌트다(UE OverlappingComponents — Transient, 대칭).
+    ROCKS_NATIVE() Array<ObjectHandle> overlappingComponents_;
 };
 
 } // namespace rocks

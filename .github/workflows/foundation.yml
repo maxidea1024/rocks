@@ -41,6 +41,9 @@ jobs:
           global-json-file: global.json
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
+      # Pinned ISPC (Docs/Design/BuildTargets section 3.12, BD45): Rocks.Build.Tests compiles ISPC sources and the texture compressor needs it.
+      - name: Install pinned ISPC
+        run: ./Build/InstallIspc.ps1
       # The images default ANDROID_NDK_HOME to an NDK whose clang is below the Android minimum of Build/Toolchain.json; Rocks.Build.Tests
       # cross-builds with the NDK, so select the pinned one (android.ndk.version).
       - name: Select pinned Android NDK
@@ -51,7 +54,7 @@ jobs:
         run: ./Build/InstallLlvm.ps1
       # Setup wizard (Docs/Design/SetupWizard.ko.md): unit checks under both Windows shells (Setup.bat falls back to Windows PowerShell 5.1),
       # then the real check. The check reads the environment a new terminal gets, so Windows first writes the pinned LLVM (first on this job's
-      # PATH) to the front of the system PATH and ROCKS_CLANG_FORMAT to the user environment; the runner is discarded after the job. The image
+      # PATH) to the front of the system PATH and ROCKS_CLANG_FORMAT and ROCKS_ISPC to the user environment; the runner is discarded after the job. The image
       # has no Windows SDK 10.0.22621, so the FXC SDK item (shader tests only) is skipped.
       - name: Setup wizard self test and check
         run: |
@@ -63,6 +66,7 @@ jobs:
             $bin = Split-Path -Parent (Get-Command clang-cl).Source
             [Environment]::SetEnvironmentVariable('Path', "$bin;" + [Environment]::GetEnvironmentVariable('Path', 'Machine'), 'Machine')
             [Environment]::SetEnvironmentVariable('ROCKS_CLANG_FORMAT', $env:ROCKS_CLANG_FORMAT, 'User')
+            [Environment]::SetEnvironmentVariable('ROCKS_ISPC', $env:ROCKS_ISPC, 'User')
             git config --global core.longpaths true
             ./Build/Setup.ps1 -Check -Skip 'FXC SDK'
             exit $LASTEXITCODE

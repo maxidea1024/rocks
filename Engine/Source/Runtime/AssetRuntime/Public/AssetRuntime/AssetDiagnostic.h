@@ -74,7 +74,9 @@ enum class AssetDiagnosticCode : uint16 {
     // CorruptBundle·UnsupportedBundleVersion·UnrealPathTooLong·UnrealPathCollision, 경고
     // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed. 종류별
     // 임포트(10.6절·4.6절 — UX2b): 오류 UnsupportedSourceLayout(다층·UDIM·위도경도 큐브 원본), 경고
-    // GammaMismatch(원본 층 감마와 SRGB·bUseLegacyGamma 설정이 다름 — 설정을 따른다).
+    // GammaMismatch(원본 층 감마와 SRGB·bUseLegacyGamma 설정이 다름 — 설정을 따른다). 메시
+    // 임포트(5.5절 — UX3b): 경고 UnrealNameNormalized(메시 원본 속성 이름·Name 값을 NFC로 바꿨다 —
+    // detail = 바뀐 수).
     CorruptBundle,
     UnsupportedBundleVersion,
     UnknownField,
@@ -85,6 +87,7 @@ enum class AssetDiagnosticCode : uint16 {
     MissingUnrealDependency,
     UnsupportedSourceLayout,
     GammaMismatch,
+    UnrealNameNormalized,
     // 감시 갱신(AssetSystem 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
     // 다시 나타나면 전체 검색).
     RootLost,
@@ -147,7 +150,13 @@ enum class AssetDiagnosticCode : uint16 {
     SourceCleared,
     // 사운드 원본(AudioSystem 3.36.2절 — AU4): 모르는 chunk를 건너뛰었다(IgnoredSourceChunks —
     // 경고, detail = 건너뛴 chunk 수).
-    IgnoredSourceChunks
+    IgnoredSourceChunks,
+    // 텍스처 압축 형식(AssetSystem 12.17절 TD11·TD12 — TC2): 고른 압축 형식의 인코더가 아직 없어
+    // 대체했다(EncoderUnavailable — 경고, detail = 원래 PixelFormat 번호), 프로필 backend가 고른
+    // 형식을 샘플링 보장하지 않아 대체했다(PlatformFormatFallback — 경고, detail = 바꾸기 전
+    // PixelFormat 번호).
+    EncoderUnavailable,
+    PlatformFormatFallback
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

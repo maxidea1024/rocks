@@ -53,7 +53,9 @@ json_verified_line() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\[[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
 }
 
-# "url hash" of a one-line download entry: "<key>": { "url": "...", "<hash field>": "..." }.
+# "url hash" of a one-line download entry: "<key>": { "url": "...", "<hash field>": "..." }. The first entry with the key wins: clangFormat
+# and ispc share platform keys (macos-Arm64, ...), so clangFormat must stay above ispc in Build/Toolchain.json (the self test checks that
+# those keys still give clang-format wheels).
 json_download() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*{[[:space:]]*\"url\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\"[[:space:]]*,[[:space:]]*\"$3\"[[:space:]]*:[[:space:]]*\"\([0-9a-f]*\)\".*/\1 \2/p" "$1" | head -n 1
 }
@@ -148,6 +150,7 @@ if [ "$self_test" -eq 1 ]; then
     expect 'json: pinned .NET SDK equals global.json' '[ "$(json_version_after "$table" dotnet)" = "$(json_version_after "$root/global.json" sdk)" ]'
     expect 'json: clang-format version' 'printf "%s" "$(json_version_after "$table" clangFormat)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
     expect 'json: NDK version' 'printf "%s" "$(json_version_after "$table" ndk)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
+    expect 'json: ISPC version' 'printf "%s" "$(json_version_after "$table" ispc)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
     expect 'json: Apple clang minimum' 'printf "%s" "$(json_integer "$table" appleClang)" | grep -Eq "^[0-9]+$"'
     expect 'json: verified macOS line' 'json_verified_line "$table" MacOS | grep -q "^Apple clang version "'
     for key in macos-Arm64 macos-X64 linux-X64; do
@@ -219,6 +222,7 @@ table="$here/Toolchain.json"
 required_sdk=$(json_version_after "$root/global.json" sdk)
 format_version=$(json_version_after "$table" clangFormat)
 ndk_version=$(json_version_after "$table" ndk)
+ispc_version=$(json_version_after "$table" ispc)
 apple_minimum=$(json_integer "$table" appleClang)
 verified_line=$(json_verified_line "$table" MacOS)
 
@@ -345,6 +349,26 @@ install_format() {
     block_set "$startup" ROCKS_CLANG_FORMAT "export ROCKS_CLANG_FORMAT=\"$directory/clang-format\"" >/dev/null
 }
 
+# ISPC compiles the ISPC sources of the texture compressor (Docs/Design/BuildTargets section 3.12, BD45); builds find it through ROCKS_ISPC.
+check_ispc() {
+    action=install_ispc; hint=''
+    configured=$(setting ROCKS_ISPC)
+    if [ -z "$configured" ]; then status=MISSING; detail="ROCKS_ISPC is not set (needs ISPC $ispc_version)"; return; fi
+    if [ ! -x "$configured" ]; then status=MISSING; detail="ROCKS_ISPC points to a missing file: $configured"; return; fi
+    line=$("$configured" --version 2>/dev/null | head -n 1)
+    case "$line" in
+        *"(Intel(r) ISPC), $ispc_version"|*"(Intel(r) ISPC), $ispc_version "*) status=OK; detail="$ispc_version at $configured" ;;
+        *) status=MISSING; detail="ROCKS_ISPC is '$line', needs $ispc_version" ;;
+    esac
+}
+
+# Build/InstallIspc.ps1 checks the pinned archive (Build/Toolchain.json ispc.packages) and extracts only the executable.
+install_ispc() {
+    command -v pwsh >/dev/null 2>&1 || { echo 'Next: install PowerShell 7 first (the step above), then run ./Setup.sh again.'; return 1; }
+    pwsh -NoProfile -File "$here/InstallIspc.ps1" -ToolchainRoot "$toolchain_root" >/dev/null || { echo "Build/InstallIspc.ps1 failed. Next: read its message above; for download errors $network_hint."; return 1; }
+    block_set "$startup" ROCKS_ISPC "export ROCKS_ISPC=\"$toolchain_root/ispc-$ispc_version/ispc\"" >/dev/null
+}
+
 android_sdk() {
     sdk=$(setting ANDROID_HOME)
     [ -n "$sdk" ] || sdk=$(setting ANDROID_SDK_ROOT)
@@ -382,7 +406,7 @@ if [ "$host" = Linux ]; then
     echo 'Linux is not a C++ build host yet (planned: Docs/Design/BuildTargets section 3.7). Setup prepares the C# tools and the'
     echo 'policy and format checks (Docs/Guides/BuildEnvironment.ko.md section 5).'
 else
-    steps='xcode git dotnet pwsh format'
+    steps='xcode git dotnet pwsh format ispc'
     [ "$android" -eq 1 ] && steps="$steps android"
     echo "Rocks setup for macOS ($root)"
 fi
@@ -391,7 +415,7 @@ count=$(echo $steps | wc -w | tr -d ' ')
 name_of() {
     case "$1" in
         xcode) echo 'Xcode tools' ;; git) echo 'Git' ;; dotnet) echo '.NET SDK' ;; pwsh) echo 'PowerShell 7' ;;
-        format) echo 'clang-format' ;; android) echo 'Android NDK' ;;
+        format) echo 'clang-format' ;; ispc) echo 'ISPC' ;; android) echo 'Android NDK' ;;
     esac
 }
 

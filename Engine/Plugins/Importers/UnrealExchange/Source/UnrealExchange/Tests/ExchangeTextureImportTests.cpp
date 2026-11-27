@@ -7,8 +7,8 @@
 #include <TestSupport/Test.h>
 #include <UnrealExchange/ExchangeCommand.h>
 #include <UnrealExchange/ExchangePaths.h>
-#include <UnrealExchange/ExchangeTextureKind.h>
-#include <UnrealExchange/UnrealTextureImporterSet.h>
+#include <UnrealExchange/ExchangeServiceKind.h>
+#include <UnrealExchange/UnrealExchangeImporterSet.h>
 
 // 교환 텍스처 임포트 시험이다(Docs/Design/UnrealExchange 4.6절 7번, 10.6절): 디스크 프로젝트에 합성
 // 묶음을 쓰고 명령 함수를 이 프로세스에서 부른다. asset-import-unreal의 새 임포트(원본·설정·참조·
@@ -43,10 +43,9 @@ struct Tool {
     explicit Tool(Allocator& allocator) noexcept : captured(allocator) {
         assets.allocator = &allocator;
         assets.modules = &test::ProcessModules();
-        assets.typeModule = "Texture";
-        assets.importers = {&RegisterUnrealTextureImporters, &importers};
+        assets.importers = {&RegisterUnrealExchangeImporters, &importers};
         unreal.assets = &assets;
-        unreal.kinds = {&RegisterExchangeTextureKinds, &kind};
+        unreal.kinds = {&RegisterExchangeServiceKinds, &kind};
     }
 
     int32 Call(Result<int32> (*command)(void*, Span<const StringView>, CommandletOutput&),
@@ -82,8 +81,8 @@ struct Tool {
         return StringView(captured.error.View()).Contains(text, StringComparison::CaseSensitive);
     }
 
-    UnrealTextureImporterSet importers;
-    ExchangeTextureKind kind;
+    UnrealExchangeImporterSet importers;
+    ExchangeServiceKind kind;
     commandlet_host::AssetCommandContext assets;
     UnrealExchangeCommandContext unreal;
     Captured captured;

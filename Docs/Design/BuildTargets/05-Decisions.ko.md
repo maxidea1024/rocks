@@ -46,3 +46,9 @@
 | BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
 | BD43 | 쿠커(Commandlet)의 모듈 집합은 쿠킹 대상 출시 타깃(Game·Client, Release)의 모듈 집합과 같아야 한다: 엔진 몫은 Commandlet이 엔진 저장소 출시 타깃(지금 Sandbox) 폐포의 Runtime·ClientOnly 엔진 모듈을 링크(정책 `cooker-module-set`), 프로젝트·플러그인 몫은 ML5b 뒤 모듈 로더로 적재, 쿠커가 이름으로 대조(3.10절, 렌더 세션 요청 — 셰이더 시스템 SSD3). 버린 안: 대상 타깃마다 쿠커 링크, 모듈 없이 셰이더 타입 manifest로 쿠킹 | 권장안 |
 | BD44 | 타깃 속성 `PrerequisiteTargets`(`PrerequisiteTarget` — 이름과 조건 칸 `Platforms`·`Configurations`): `build`·`test`가 주 타깃 메타 생성 전에 선행 타깃을 자기 규칙으로 같은 구성·도구 체인·빌드 방식에서 따로 빌드한다(깊이 우선 후위, 중복 한 번, 출력은 자기 기본 출력·`--output`이면 형제). 선행 타깃은 Program이고, 주 타깃이 Developer 모듈을 빼는 구성(출시 타깃 Release)에서는 건너뛰며 그 구성을 명시하면 오류다. 없는 이름·자기 자신·중복·순환·선행 타깃을 가진 동반 타깃은 규칙 로드 오류다(3.11절, UE `PreBuildTargets`). 버린 안: Game 타깃 동반 허용(매크로 조합·빌드 정보 TU 공유가 남음), Game 매크로 워커 타깃 추가, `TestPrograms` 재사용, `Rocks.proj`에서 두 번 부르기 | 권장안 |
+| BD45 | ISPC 도구 고정(3.12절): `Build/Toolchain.json` `ispc`(버전·호스트별 url·sha256), `InstallIspc.ps1`, `ROCKS_ISPC` → 기본 위치, 버전 대조 실패는 빌드 오류, ISPC 원본이 대상에 있을 때만 요구 |
+| BD46 | ISPC 원본 선언(3.12절): `NativeModuleInput.IspcSources`·manifest `ispcUnits`(명시 목록만), Android 대상은 Unsupported |
+| BD47 | action `Ispc`(3.12절): 원본마다 object·`_ispc.h`·`.deps`, 아키텍처당 타깃 하나(X64 `sse4-i32x4`, Arm64 `neon-i32x4`), `--opt=disable-fma`, fast-math·다중 타깃 금지(모듈 인자로 못 바꿈) |
+| BD48 | ISPC 생성 헤더(3.12절): `<out>/Ispc/<모듈>/`(계획 때 만듦, Private include, 입력 스냅샷·목록 제외), 같은 모듈 C++ compile이 의존하고 DeclaredInputs로 받음 |
+| BD49 | ISPC 증분 key(3.12절): Identity에 버전·실행 파일 sha256(찾을 때 한 번)·타깃·인자, `.isph`는 depfile(`-MMM`)·헤더 확장자 목록 |
+| BD50 | ISPC 빌드 ID·인코더 신원(3.12절): 도구 빌드 ID가 Ispc action을 원본 키로 셈, `ToolchainFingerprint`는 그대로(실행 파일 간 대조 계약), ISPC 신원은 생성 정의 `ROCKS_ISPC_IDENTITY`로 인코더 너겟 키에 |
