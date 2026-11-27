@@ -3,11 +3,11 @@ using Rocks.Build.Rules;
 
 // Curve asset layer (Docs/Design/CurveAssets, CR10): the curve asset classes over the Curves value types (FloatCurveAsset,
 // VectorCurveAsset, ColorCurveAsset with the UE color adjustments, their abstract base CurveAsset), the inline-or-asset curve
-// sources (FloatCurveSource, VectorCurveSource, ColorCurveSource), their flat value forms (VectorCurveValue, ColorCurveValue) and
-// later the curve table. Mirrors UE 5.8 UCurveBase, UCurveFloat, UCurveVector, UCurveLinearColor and FRuntimeFloatCurve with
-// Rocks names. Generated headers are <CurveAssets/<Header>.generated.h>, module registration is
-// rocks::generated::CurveAssets::RegisterModuleTypes (called by RegisterCurveAssetsTypes), and the identity spec is
-// CurveAssets.rocksids.json.
+// sources (FloatCurveSource, VectorCurveSource, ColorCurveSource), their flat value forms (VectorCurveValue, ColorCurveValue), the
+// curve table (CurveTableAsset) and its row reference (CurveTableRowRef). Mirrors UE 5.8 UCurveBase, UCurveFloat, UCurveVector,
+// UCurveLinearColor, UCurveTable, FRuntimeFloatCurve and FCurveTableRowHandle with Rocks names. Generated headers are
+// <CurveAssets/<Header>.generated.h>, module registration is rocks::generated::CurveAssets::RegisterModuleTypes (called by
+// RegisterCurveAssetsTypes), and the identity spec is CurveAssets.rocksids.json.
 public sealed class CurveAssets : EngineModuleRules
 {
     protected override string ModuleName => "CurveAssets";

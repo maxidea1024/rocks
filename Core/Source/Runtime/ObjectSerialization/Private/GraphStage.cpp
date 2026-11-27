@@ -169,8 +169,8 @@ Result<void> ObjectGraphStage::ApplyFields(ConstructionContext& transaction,
     phase_ = Phase::Running;
     auto applied = CheckImports(allocator_, transaction, *data_, imports);
     if (applied) {
-        applied =
-            ApplyNodeFields(allocator_, transaction, data_->envelope.nodes, options_, imports);
+        applied = ApplyNodeFields(allocator_, transaction, data_->envelope.nodes, options_, imports,
+                                  data_->pendingEvents);
     }
 
     if (!applied) {
@@ -305,7 +305,41 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
     }
 
     // 노드 1이 트랜잭션의 첫 객체라 Commit()의 root다. 실패하면 소멸자가 rollback한다.
-    return transaction.Commit();
+    auto committed = transaction.Commit();
+    if (!committed) {
+        return committed;
+    }
+
+    // 게시한 객체에 이벤트 바인딩을 다시 만든다(Docs/Design/EventReflection.ko.md ED21 — 되돌릴 수
+    // 없으므로 실패는 진단만 낸다).
+    (void)stage.BindEvents();
+    return committed;
+}
+
+Result<usize> ObjectGraphStage::BindEvents() noexcept {
+    if (auto callable = CheckCall(Phase::Checked); !callable) {
+        return Result<usize>::Failure(callable.Error());
+    }
+
+    if (eventsBound_) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 객체가 게시되기 전이면(Commit 전) 바인딩을 만들 수 없다 — 순서 오류다.
+    if (!nodes_.IsEmpty()) {
+        auto lifecycle = registry_.InspectLifecycle(access_, nodes_[0]);
+        if (!lifecycle) {
+            return Result<usize>::Failure(lifecycle.Error() == ErrorCode::StaleHandle
+                                              ? ErrorCode::InvalidArgument
+                                              : lifecycle.Error());
+        }
+    }
+
+    eventsBound_ = true;
+    const usize bound = graph_detail::BindPendingEvents(
+        registry_, access_, nodes_.View(), data_->pendingEvents.View(), options_.hooks);
+    data_->pendingEvents.Clear();
+    return Result<usize>::Success(bound);
 }
 
 } // namespace rocks

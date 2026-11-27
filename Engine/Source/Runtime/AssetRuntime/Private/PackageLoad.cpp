@@ -141,6 +141,9 @@ Result<void> PackageLoadHooks::Report(const FieldDiagnostic& diagnostic) noexcep
         ++missingRequired;
         // 쿠킹 패키지는 writer가 Required null을 거부하므로 누락은 손상이다.
         return cooked_ ? Result<void>::Failure(ErrorCode::CorruptData) : Result<void>::Success();
+    case FieldDiagnosticKind::EventBindingDropped:
+        ++droppedEventBindings;
+        return Result<void>::Success();
     default:
         return Result<void>::Success();
     }

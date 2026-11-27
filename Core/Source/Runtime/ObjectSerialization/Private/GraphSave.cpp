@@ -1,5 +1,7 @@
 #include "GraphSaveInternal.h"
 
+#include "GraphEvents.h"
+
 #include <Object/OverrideSet.h>
 #include <ObjectSerialization/ClassDefaults.h>
 
@@ -423,8 +425,12 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
     const auto& schema = sink.Lease().Schema();
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
-        // 이벤트 필드는 값으로 저장하지 않는다(Docs/Design/EventReflection.ko.md 3.1절 — EV3a).
-        if (IsEventField(field)) {
+        // 이벤트 필드는 값이 아니라 바인딩 기록으로 쓴다(Docs/Design/EventReflection.ko.md
+        // ED19·ED20). 클래스 기본값 레코드(Registry 없음 — 원본 인스턴스)와 Required 검사는
+        // 이벤트를 보지 않는다.
+        const bool event = IsEventField(field);
+        if (event &&
+            (registry == nullptr || context.IsRequiredCheck() || !context.WritesEventBindings())) {
             continue;
         }
 
@@ -438,9 +444,20 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
             continue;
         }
 
-        auto accessor = FindOps(type, field.id, budget);
-        if (!accessor) {
-            return Result<void>::Failure(accessor.Error());
+        const RuntimeFieldOps* fieldOps = nullptr;
+        const RuntimeEventOps* eventOps = nullptr;
+        if (event) {
+            eventOps = type.EventOps(fieldIndex);
+            if (eventOps == nullptr) {
+                return Result<void>::Failure(ErrorCode::Unsupported);
+            }
+        } else {
+            auto accessor = FindOps(type, field.id, budget);
+            if (!accessor) {
+                return Result<void>::Failure(accessor.Error());
+            }
+
+            fieldOps = accessor.Value();
         }
 
         auto spent = budget.Spend(1);
@@ -453,16 +470,24 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
         ArchiveWriter encoded(allocator, fieldLimits);
         const usize referenceMark = context.ReferenceMark();
         sink.BeginField(encoded);
-        auto wire =
-            accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
+        bool written = true;
+        auto wire = event ? EncodeEventBindings(*eventOps, *registry, access, handle, encoded,
+                                                context, allocator, written)
+                          : fieldOps->encode(*fieldOps, registry, access, handle, encoded, context);
         sink.EndField();
         if (!wire) {
             return Result<void>::Failure(wire.Error());
         }
 
+        // 바인딩이 없는 이벤트 필드는 쓰지 않는다(ED19).
+        if (!written) {
+            continue;
+        }
+
         // codec이 스키마 필드의 wire(배열은 원소에 따라 ValueArray·RecordList)를 썼는지 다시
-        // 확인한다.
-        auto expected = detail::FieldWireType(field, context.ReferenceWireType());
+        // 확인한다(이벤트 필드는 바인딩 기록 RecordList).
+        auto expected = event ? Result<uint32>::Success(static_cast<uint32>(WireType::RecordList))
+                              : detail::FieldWireType(field, context.ReferenceWireType());
         if (!expected || expected.Value() != wire.Value()) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }

@@ -6,6 +6,8 @@
 #include <ReflectionText/TextValue.h>
 #include <UnrealExchange/ExchangeServiceKind.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
+#include <UnrealExchange/UnrealSkeletalMeshImporter.h>
+#include <UnrealExchange/UnrealSkeletonImporter.h>
 #include <UnrealExchange/UnrealStaticMeshImporter.h>
 #include <UnrealExchange/UnrealTextureImporter.h>
 
@@ -152,8 +154,15 @@ Result<void> ReportFailure(const ExchangeKindRequest& request, const AssetDiagno
 } // namespace exchange_service_kind
 
 StringView ExchangeServiceImporterName(ExchangeClass type) noexcept {
-    if (type == ExchangeClass::StaticMesh) {
+    switch (type) {
+    case ExchangeClass::StaticMesh:
         return UnrealStaticMeshImporterName;
+    case ExchangeClass::Skeleton:
+        return UnrealSkeletonImporterName;
+    case ExchangeClass::SkeletalMesh:
+        return UnrealSkeletalMeshImporterName;
+    default:
+        break;
     }
 
     return UnrealTextureImporterName(type);
