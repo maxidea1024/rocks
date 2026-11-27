@@ -12,12 +12,12 @@
 | PH1 | `Physics` 모듈 골격: 수명 객체(할당·로그·assert hook, `VerifyJoltVersionID`, `Factory`·`RegisterTypes`), `TaskJobSystem`, `PhysicsSettings`, `PhysicsWorldSubsystem`·`JoltPhysicsScene`(빈 장면), World 접점(2.2절), PhysicsSimulate 자리 연결(7.4절), Jolt `JPH_OBJECT_LAYER_BITS` 32(6.1절 — JL1 manifest·어댑터 경계 10.2절 갱신) | 7.4절 ER 개정 | 장면 생성·파괴·빈 step, job 풀 포화·종료 중 job(PC06), FP 상태, 할당 잔여 0, Editor·Preview World는 step 없음 |
 | PH2 | (하위 단계 PH2a–PH2d — 7.1.2절) 어댑터 변환 함수(어댑터 경계 7절)와 PA 시험(7.1.2절 배정), Box·Sphere·Capsule·Cylinder body, 운동 종류, step, 결과 반영(3.4절 — 스텝별 활성·잠든 body 합), Kinematic 이동·teleport·목표 없는 스텝 정지(3.3절), 재생성 표(2.3.1절 — simulate 켤 때 떼기) | PH1, CM3 형상 컴포넌트(CR16 데이터) | 7.1.2절 PH2 배정 PA, 수명 시험, 결정성(같은 binary 상태 hash — PC03), 한 프레임 여러 스텝의 Kinematic 정지·프레임 안에서 잠든 body 반영 |
 | PH3 | (하위 단계 PH3a–PH3c — 7.1.6절) 질의(4장)와 필터 사상(6.1–6.3절 — CD3), `HitResult`·`OverlapResult` | PH2 | 4.4–4.5절 규칙 표 시험(채널·ObjectTypes·profile, 무시 목록, mobility, 시작 겹침, 정렬·자르기), PC02 |
-| PH4 | `MoveComponent` sweep·침투 해소(5.1–5.2절), overlap(5.3절), hit(5.4절, sweep·시뮬레이션), probe(6.4절) | PH3, CR7(구독형 이벤트 — 없으면 가상 hook만) | UE 순서 시험(발행 순서·대칭 장부·재진입), pullback 수치 |
+| PH4 | (하위 단계 PH4a–PH4e — 7.1.10절) `MoveComponent` sweep·침투 해소(5.1–5.2절), overlap(5.3절), hit(5.4절, sweep·시뮬레이션), probe(6.4절) | PH3, CR7(구독형 이벤트 — 없으면 가상 hook만) | UE 순서 시험(발행 순서·대칭 장부·재진입), pullback 수치 |
 | PH5 | 힘·속도·질량·잠듦 API(2.6–2.7절), DOF·CCD·body 값 사상(6.5절), 기본 물리 재질·결합 방식(6.6절) | PH2 | PA04·PA05와 API 왕복, 잠듦 이벤트 |
 | PH6 | weld(2.8절), 메시 단순 충돌·complex-as-simple(StaticMesh — D2b 뒤), 쿠킹 형상 너겟(계획 16.4절 cook — PC05) | PH2, StaticMesh 에셋(MA2b), 에셋 쿠킹 | weld 질량·질의 결과 컴포넌트, PC05 |
 | (후속) | 캐릭터 이동(CM13), constraint 등(CM14), 지형 heightfield(CM18), ragdoll(CM7), 큰 월드 PhysicsRegion(계획 16.5절 — PC07), 플랫폼 결정성(PC04·PC08) | | |
 
-PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1–PH3)](07a-StageDetailsPH1-PH3.ko.md)에 있다.
+PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1–PH3)](07a-StageDetailsPH1-PH3.ko.md), PH4(7.1.10절 이후)는 [PH4](07b-StageDetailsPH4.ko.md)에 있다.
 
 ## 7.2 시험 원칙
 
@@ -68,6 +68,7 @@ PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1
 
 ## 7.6 개정 이력
 
+- 개정 15(2026-11-27): PH3c2 완료(eeac7c45 — PH3 끝), 구현 세부를 07a·07b로 나눔, PH4 하위 단계와 PH4a 구현 세부(7.1.10절), 5.1절 pullback 거리 정정.
 - 개정 14(2026-11-27): PH3c1 완료(70cc3bcb), PH3c2 구현 세부(7.1.9절).
 - 개정 13(2026-11-26): PH3b 완료(eff5569c), PH3c 하위 단계와 PH3c1 구현 세부(7.1.8절).
 - 개정 12(2026-11-26): PH3a 완료(79b8779b), PH3b 구현 세부(7.1.7절).
