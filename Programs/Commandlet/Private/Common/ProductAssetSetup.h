@@ -5,6 +5,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AudioTools/SoundClipCook.h>
 #include <Core/Containers/Array.h>
+#include <CurveAssetTools/CurveTableCook.h>
 #include <MeshTools/SkeletalMeshCook.h>
 #include <MeshTools/StaticMeshCook.h>
 #include <TextureTools/TextureCook.h>
@@ -26,9 +27,10 @@ struct ProductCookProcessors {
     SkeletalMeshCookProcessor skeletalMesh;
     AnimationClipCookProcessor animationClip;
     SoundClipCookProcessor soundClip;
+    CurveTableCookProcessor curveTable;
 };
 
-// state(ProductCookProcessors*)의 처리기 다섯을 table에 차례로 등록한다. 오류: null state
+// state(ProductCookProcessors*)의 처리기 여섯을 table에 차례로 등록한다. 오류: null state
 // InvalidArgument, 처음 실패한 등록의 오류.
 Result<void> RegisterProductCookProcessors(void* state, CookProcessorTable& table) noexcept;
 

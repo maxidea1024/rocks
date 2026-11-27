@@ -44,6 +44,7 @@
 18. ◇ JSON 숫자 `Name`은 원문 토큰으로 행 이름을 만든다. UE는 `SanitizeFloat(Value, 0)` 서식이라 `1e2`처럼 표기가 다른 숫자는 이름이 다를 수 있다.
 19. ★ 올바르지 않은 UTF-8·UTF-16(짝 없는 surrogate·홀수 byte)은 `CorruptData`로 거부한다. UE `BufferToString`은 대체 문자로 바꾸거나 그대로 통과시킨다(`FileHelper.cpp:147-195`).
 20. ◇ 숫자 칸은 double을 거쳐 float로 바꾼다(UE Windows `Atof` = `(float)_tstof`와 같다). UE Linux·Mac `wcstof`(float로 바로)와는 드물게 1 ulp 다를 수 있다.
+21. ★ 쿠킹 중복 키 제거에서 비교 차가 NaN인 키는 남긴다(UE는 지운다 — CurveData 15절과 같은 수정).
 
 ### 7.3 단계
 
@@ -113,11 +114,12 @@
   - 등록 묶음의 부분 실패 되돌림, 임포트 할당 실패
   - 결정성(같은 원본 → 같은 byte)
 - **`CurveTableCook_`**
-  - 중복 키 제거 결과(Plain·Tangent)
-  - Tangent의 키 3개 이상이면 접선 재계산, 미만이면 그대로
-  - 에디터 객체 불변
-  - 쓰지 않는 맵 비우기와 경고
-  - 처리기 버전이 너겟 키에 드는지
+  - 중복 키 제거 결과(Plain·Tangent), 정확히 키 3개인 경계
+  - Tangent의 키 3개 이상이면 접선 재계산(지운 키 옆 Cubic Auto 키의 접선이 바뀐다), 미만이면 그대로
+  - 에디터 객체 불변(성공, 쓰기 실패, 경고 push 할당 실패)
+  - 쓰지 않는 맵 비우기와 경고(Plain·Tangent·Empty 모드)
+  - 같은 입력을 두 번 쿠킹하면 같은 byte
+  - 처리기 정체성(쿠킹 키에 드는 것은 쿠커 A4c 시험이 본다)
 - **`ColorCurveAtlas_`**(CA6)
   - 굽기 표본 시간(역수 곱, width 0·1 → 2)
   - null 커브 흰색

@@ -120,6 +120,8 @@ public abstract class TestsModule : ModuleRules
         ["Curves"] = ["CoreTypeBindings", "CurvesTestFixtures", "ObjectSerialization", "ReflectionText"],
         // The curve source tests hold the sources in a reflected fixture asset (CurveAssetsTestFixtures — reference structs live only in owners).
         ["CurveAssets"] = ["CurveAssetsTestFixtures"],
+        // The curve table cook tests write and load packages with the asset test support (AssetTestSupport.h uses the fixture types).
+        ["CurveAssetTools"] = ["AssetTestFixtures"],
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
         // Gameplay diagnostics tests drive the console commands through the Config test fixture context; the input asset tests
         // (InputActions IA6b) cook input context packages with the asset test scene support.
