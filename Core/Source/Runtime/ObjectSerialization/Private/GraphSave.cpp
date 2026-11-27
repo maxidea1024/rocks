@@ -423,6 +423,11 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
     const auto& schema = sink.Lease().Schema();
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
+        // 이벤트 필드는 값으로 저장하지 않는다(Docs/Design/EventReflection.ko.md 3.1절 — EV3a).
+        if (IsEventField(field)) {
+            continue;
+        }
+
         // 최상위 필드의 declaringType은 객체 타입이다(상속 필드도 펼친 스키마로 다룬다).
         const TypeLease& type = sink.Lease();
         FieldScope scope(context, field, schema.id, type.FieldEnum(fieldIndex),

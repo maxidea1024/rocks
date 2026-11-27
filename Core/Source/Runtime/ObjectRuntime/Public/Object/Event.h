@@ -169,6 +169,30 @@ public:
         return state_->delegate.Remove(handle);
     }
 
+    // 리플렉션 바인딩 handle 하나를 지운다(native 구독 handle이면 지우지 않고 false — 연산표 경로가
+    // 다른 이벤트의 handle로 C++ 구독을 지우지 않게 한다, EventReflection ED16).
+    bool Unbind(DelegateHandle handle) noexcept {
+        if (state_ == nullptr || !handle.IsValid()) {
+            return false;
+        }
+
+        return RemoveMatching(
+                   [&](const Record& record) noexcept { return record.handle == handle; }) != 0;
+    }
+
+    // target의 리플렉션 함수 functionId 바인딩을 지운다(UE Remove(Object, FunctionName)). 없으면
+    // false다.
+    bool Unbind(ObjectHandle target, Guid functionId) noexcept {
+        if (state_ == nullptr) {
+            return false;
+        }
+
+        return RemoveMatching([&](const Record& record) noexcept {
+                   return record.binding.Target() == target &&
+                          record.binding.FunctionId() == functionId;
+               }) != 0;
+    }
+
     // target을 대상으로 하는 리플렉션 바인딩을 모두 지우고 그 수를 돌려준다(UE RemoveAll(Object)).
     usize UnbindAll(ObjectHandle target) noexcept {
         if (state_ == nullptr) {
