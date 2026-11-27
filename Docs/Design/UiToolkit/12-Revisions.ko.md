@@ -1,5 +1,7 @@
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
+**초안 2.15(2026.11.27):** UW9 상세 설계 21장을 더했다. 다섯 이름을 UD12대로 바꾸고, 편집 텍스트 Element를 UiFramework로 옮긴다(글자 상태는 Element가 든다, `TextShaper`). 화면 입력 설정은 `ScreenInputHost`로 적용하고(UE `ApplyUIInputConfig`), 플랫폼 창에 커서 보이기·마우스 잠금을 더한다. Element·Widget 소멸자에서는 사용자 코드를 부르지 않는다 — 명시 해제 경로에서 부르고, 그 밖에는 해체 대기열로 미룬다(UE `SObjectWidget` 소멸자와 다른 개선). UV7 음성 시험도 정했다. UW8h2 세 스타일 집합 값(20.11절)과 UW8f·g 리뷰 반영(20.9·20.10절)도 이 판에 들어갔다.
+
 **초안 2.14(2026.11.27):** UW8b 구현 전에 20.4절을 "그리기 중 등록"에서 "그리기 순서 걷기"로 바꿨다. cache root가 그리기를 부분 재사용해 그리기 중 등록은 캐시된 하위 트리를 빠뜨리고, Rocks의 layer가 그리기 순서를 따라 줄지 않아 걷는 순서가 UE (layer, 순번)과 같기 때문이다. UW8a 구현 결정(묶음은 Application마다, `PrepareLayout`의 프레임 시작, World 시각 접근자 후속)도 20.2·20.3절에 적었다.
 
 **초안 2.13(2026.11.27):** 20장 설계 리뷰 20건을 반영했다: host 서비스 묶음, 시계(실제 시각·delta만 자름·수동 시계·그리기 밖 읽기·World 시간), hit 순서 키(layer, 순번)·RetainerBox 조각·CachePanel 등록 위치, 활성 검사 분리, `OnNavigation`과 메뉴·목록 이관, 게임패드·`ScreenInputRouter`·초기 초점(UW8e2), UE 탐색 세부(첫 줄 반환·허용오차·조상 비활성·scope), 단일 자식 slot으로 정정, `ElementCast` static_assert·policy 판정, 스타일 조회 시점·revision, 단계 의존과 분할(e1·e2·h1·h2).
