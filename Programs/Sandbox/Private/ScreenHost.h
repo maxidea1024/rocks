@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ScreenOverlay.h"
 #include "ScreenRenderer.h"
 
 #include <Base/NumericLimits.h>
@@ -12,6 +13,7 @@
 #include <Input/InputState.h>
 #include <PlatformWindow/Window.h>
 #include <RenderBase/RenderLane.h>
+#include <UiRender/LaneUiRenderer.h>
 #include <WorldIntegration/Textures/PlatformTextureSource.h>
 #include <WorldIntegration/Textures/TextureRenderCache.h>
 
@@ -21,14 +23,17 @@ class GameInstanceClient;
 
 } // namespace rocks
 
-// Sandbox 엔진 창 렌더 경로의 게임 lane 쪽이다(Docs/Design/RenderBase 18.5절 1·2항 — SM1·SM2).
-// 장치와 렌더 lane을 묶고, 엔진 프레임 끝에 첫 LocalPlayer의 카메라와 Sandbox 장면으로 프레임
-// packet을 만들어 넘긴다. 엔진 종료 hook 다섯을 lane 종료 단계에 잇는다(5.5절).
+// Sandbox 엔진 창 렌더 경로의 게임 lane 쪽이다(Docs/Design/RenderBase 18.5절 1·2·9항 —
+// SM1·SM2·UT5). 장치와 렌더 lane을 묶고, 엔진 프레임 끝에 첫 LocalPlayer의 카메라와 Sandbox
+// 장면으로 프레임 packet을 만들어 넘긴다. 창 스왑체인은 UI 창 표면이다(LaneUiRenderer로 만들고
+// 크기를 바꾼다). 상태 패널(ScreenOverlay)을 켜면 그 UI 프레임을 같은 packet에 담는다. 엔진 종료
+// hook 다섯을 lane 종료 단계에 잇는다(5.5절).
 //
 // 사용 예(창 모드 엔진 호스트):
 //   auto device = screen::CreateScreenDevice(allocator, screen::ScreenBackend::D3D12, false);
 //   screen::ScreenHost host(allocator, *device.Value(), shaders::Host());
-//   if (host.Start(window, render::RenderLaneMode::Thread)) { ... }
+//   host.EnableOverlay();
+//   if (host.Start(window, render::RenderLaneMode::Thread, pump)) { ... }
 //   // EngineLoopHooks: EndFrame → host.SubmitFrame(client), BeginShutdown → host.BlockFrames() ...
 //   // 엔진 Shutdown 뒤 host 파괴 → 장치 파괴 → 창 파괴
 namespace sandbox::screen {
@@ -152,9 +157,16 @@ public:
     ScreenHost(const ScreenHost&) = delete;
     ScreenHost& operator=(const ScreenHost&) = delete;
 
-    // 렌더 lane을 시작한다(창 표면으로 스왑체인을 만든다). 첫 프레임 slot 확보가 시작 결과를
-    // 기다린다. pump는 slot 대기 중 창 메시지를 펌프하는 hook이다(5.3절 — 창 스레드가 게임 lane).
-    // 실패: lane 시작 오류(RenderLane::Start).
+    // 상태 패널을 켠다(Start 전에 부른다 — 18.5절 9항). 켜면 Start가 패널을 만들고 프레임마다 UI
+    // 프레임을 packet에 담는다. F1(HandleInspectorInput)이 보이기를 바꾼다.
+    void EnableOverlay() noexcept {
+        overlayEnabled_ = true;
+    }
+
+    // 렌더 lane을 시작하고 창 표면(스왑체인)을 만든다. 창 표면 생성은 lane 시작(엔진 셰이더
+    // 준비)까지 기다린다(펌프하며). pump는 대기 중 창 메시지를 펌프하는 hook이다(5.3절 — 창
+    // 스레드가 게임 lane). 실패: lane 시작 오류(RenderLane::Start), 창 표면 생성 오류(lane 시작
+    // 실패면 그 오류), 상태 패널 생성 오류. 실패해도 lane을 시작했으면 소멸자가 닫는다.
     Result<void> Start(platform::Window& window, render::RenderLaneMode mode,
                        render::RenderLanePump pump) noexcept;
 
@@ -171,8 +183,10 @@ public:
     void ReleaseSurface() noexcept;
     void RecreateSurface(platform::Window& window) noexcept;
 
-    // 다음 SubmitFrame부터 tone map 결과를 capture 텍스처에도 그린다(self-test). 크기는 창 크기다.
-    Result<void> RequestCapture(uint32 width, uint32 height) noexcept;
+    // 다음 SubmitFrame부터 마지막 pass 뒤 스왑체인 내용(UI 포함)을 capture 텍스처에 복사한다
+    // (self-test). 크기는 지금 창 크기다(복사는 같은 크기여야 한다 — 창 크기가 바뀌면 복사를
+    // 건너뛴다). 실패: lane 시작 전 NotReady, handle 예약·게시 실패.
+    Result<void> RequestCapture() noexcept;
 
     // 엔진 절차 텍스처 표시를 고른다(18.5절 6항 — None은 장면). 층·mip은 그 텍스처 범위로
     // 자른다. 장치가 못 만든 텍스처(cube 배열 능력 없음)면 장면이다.
@@ -236,7 +250,7 @@ public:
     }
 
     // 호스트 입력으로 표시를 바꾼다(숫자 0 장면, 1–6 엔진 절차 텍스처, `,`·`.`·패드 D-pad 좌우
-    // 목록 이전·다음, `[`·`]`·패드 어깨 버튼 층, `-`·`=` mip).
+    // 목록 이전·다음, `[`·`]`·패드 어깨 버튼 층, `-`·`=` mip, F1 상태 패널 켜고 끄기).
     void HandleInspectorInput(const input::InputState& input) noexcept;
 
     // 노출 배율이다(tone map, 기본 1).
@@ -272,10 +286,18 @@ private:
     graphics::Device& device_;
     ScreenRenderer renderer_;
     render::RenderLane lane_;
+    // 게임 lane UI 렌더러다(창 표면·상태 패널 프레임 — lane보다 먼저 부서진다).
+    ui::LaneUiRenderer ui_;
+    ui::UiWindowSurfaceId surface_;
+    UniquePtr<ScreenOverlay> overlay_;
     platform::Window* window_ = nullptr;
     render::TonemapConstants tonemap_;
     // 엔진 절차 텍스처를 만들어 목록 앞에 둔다(Start).
     void AddEngineTextures() noexcept;
+    // 창 크기로 창 표면을 만들어 surface_와 크기를 정한다.
+    Result<void> CreateWindowSurface(platform::Window& window) noexcept;
+    // 상태 패널 UI 프레임을 그 프레임 arena에 만든다.
+    Result<ui::UiFramePacket> RecordOverlay(FrameArena& arena) noexcept;
     Result<uint32> AppendEntry(StringView name, const InspectorTexture& texture,
                                InspectorEntryState state) noexcept;
 
@@ -298,6 +320,10 @@ private:
     bool surfaceLost_ = false;
     bool pendingRetired_ = false;
     bool inspectorsRetired_ = false;
+    bool overlayEnabled_ = false;
+    bool overlayVisible_ = true;
+    // 상태 패널을 빼고 보낸 프레임의 Warning을 이미 남겼다.
+    bool overlayWarned_ = false;
 };
 
 } // namespace sandbox::screen
