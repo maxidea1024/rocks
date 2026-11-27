@@ -13,6 +13,7 @@
 #include <MaterialCompiler/MaterialTranslationInput.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 
+#include "AttributeEntry.h"
 #include "CustomOutputKind.h"
 #include "LoweringTable.h"
 #include "SurfaceRecord.h"
@@ -151,6 +152,14 @@ public:
 
     // 표면 기록 하나를 더하고 그 표면 값(IR SurfaceRef)을 돌려준다(6.11절 MS2d1).
     Result<IrValueId> AddSurface(const SurfaceRecord& record) noexcept;
+    // 속성 기록 하나를 더하고 그 속성 집합 값(IR AttributesRef)을 돌려준다(6.12절 MS2e1). 같은
+    // Guid가 둘이면 뒤의 것이 이긴다.
+    Result<IrValueId> AddAttributes(Span<const AttributeEntry> entries) noexcept;
+    // 속성 집합 값의 칸을 out에 복사한다(아니면 false).
+    Result<bool> CopyAttributes(IrValueId value, Array<AttributeEntry>& out) const noexcept;
+    // 속성 정의다(내장 → 등록 표 순, 없으면 nullptr).
+    const MaterialAttributeDefinition* FindAttribute(Guid id) const noexcept;
+    const MaterialAttributeDefinition* FindAttributeByName(StringView name) const noexcept;
     // 표면 값의 기록이다. 표면 값이 아니면 nullptr이다.
     const SurfaceRecord* FindSurface(IrValueId value) const noexcept;
 
@@ -207,6 +216,9 @@ private:
     Result<void> ContextRoots(Array<Name>& roots) const noexcept;
     // V4(단계 — 미분·문맥 값 단계 집합)·V6(문맥 값 영역) 검사다(6.9절).
     Result<void> CheckContextValues() noexcept;
+    // 출력 노드 Attributes 핀의 칸이다(연결이 없으면 비어 있다 — 6.12절 MS2e1).
+    Result<void> AttributesFromOutput(LoweringContext& context,
+                                      Array<AttributeEntry>& entries) noexcept;
     // CustomizedUv 출력 핀의 정점 결과다(픽셀 문맥 뒤 — 6.9절 MS2b4a).
     Result<void> TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept;
     // 보간 성분 수 V9 검사다(모듈을 만든 뒤).
@@ -218,6 +230,8 @@ private:
     // 노드 하나의 custom 출력 결과다(빈도의 문맥마다 그 입력을 번역한다).
     Result<void> TranslateCustomOutput(const nodegraph::GraphNode& node,
                                        const CustomOutputKind& kind) noexcept;
+    // 출력 노드 속성 집합의 custom 속성 칸이 주는 출력이다(6.12절 MS2e1).
+    Result<void> AttributeCustomOutputs(Span<const bool> present) noexcept;
     // 노드가 없는 종류에 뿌리 표면이 주는 출력이다.
     Result<void> SurfaceCustomOutputs(Span<const bool> present) noexcept;
     // 노드 속성이 정하는 정의를 모은다(VolumetricAdvanced·EmptySpaceSkipping).
@@ -318,6 +332,17 @@ private:
     Array<DeferredError> deferred_;
     // 표면 기록이다(SurfaceRef 즉시값 [0]이 번호 — 6.11절 MS2d1).
     Array<SurfaceRecord> surfaces_;
+    // 속성 기록이다(AttributesRef 즉시값 [0]이 번호 — 칸은 attributeEntries_[first, first + count),
+    // 6.12절 MS2e1).
+    struct AttributeRange {
+        uint32 first = 0;
+        uint32 count = 0;
+    };
+
+    Array<AttributeEntry> attributeEntries_;
+    Array<AttributeRange> attributeRanges_;
+    // 출력 노드 속성 집합의 픽셀 칸이다(useMaterialAttributes — 표면·custom 출력이 읽는다).
+    Array<AttributeEntry> attributeOutputs_;
     // 내보낸 shading model 집합 비트다(Renderer 14.2절 번호).
     uint32 shadingModels_ = 0;
     // 내보낸 뿌리 표면이다(추가 칸 — 표면이 주는 custom 출력, 6.11절 MS2d3).

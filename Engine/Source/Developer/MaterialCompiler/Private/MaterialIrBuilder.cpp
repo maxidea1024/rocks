@@ -437,6 +437,7 @@ bool IrBuilder::IsConstantEqualTo(IrValueId id, int32 value) const noexcept {
         switch (constant.type.scalar) {
         case IrScalar::Texture:
         case IrScalar::Surface:
+        case IrScalar::Attributes:
             // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
             break;
         case IrScalar::Float:
@@ -669,6 +670,7 @@ Result<IrValueId> IrBuilder::Fold(const IrValue& value) noexcept {
             switch (value.type.scalar) {
             case IrScalar::Texture:
             case IrScalar::Surface:
+            case IrScalar::Attributes:
                 // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
                 return none();
             case IrScalar::Float:
@@ -1292,6 +1294,14 @@ Result<IrValueId> IrBuilder::SurfaceRef(uint32 record) noexcept {
     IrValue value;
     value.type = IrSurfaceType();
     value.op = IrOp::SurfaceRef;
+    value.immediate[0] = record;
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::AttributesRef(uint32 record) noexcept {
+    IrValue value;
+    value.type = IrAttributesType();
+    value.op = IrOp::AttributesRef;
     value.immediate[0] = record;
     return Intern(value);
 }

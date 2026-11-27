@@ -4,6 +4,7 @@
 #include <MaterialSchema/Nodes/Surface/SurfaceNodeEnums.h>
 
 #include "LoweringContext.h"
+#include "ClassicSurface.h"
 #include "LoweringTable.h"
 #include "SurfaceShadingModels.h"
 #include "Translator.h"
@@ -241,34 +242,169 @@ Result<void> LowerShadingModel(LoweringContext& context) noexcept {
     return context.Output("Result", value.Value());
 }
 
-// UE SubstrateShadingModels(MES:183–796) — 고전 입력이 그대로 지나가는 preset이다(10.3절).
-Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
-    auto profiled =
-        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
-    if (!profiled || profiled.Value()) {
-        return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
+// 고전 입력의 원천이다(6.12절 MS2e1 — 핀 연결 또는 속성 칸). attributes면 entries의 칸이 입력이고
+// 없는 칸은 연결 없음과 같다. waterPins면 물 계수를 노드 핀에서 읽고, 아니면 기본값이다.
+struct ClassicSource {
+    LoweringContext* context = nullptr;
+    Span<const AttributeEntry> entries;
+    bool attributes = false;
+    bool waterPins = true;
+};
+
+// 고전 입력 키 → 속성 이름이다(UE SubstrateConvertMaterialAttributes::CompileCommon —
+// MaterialExpressionSubstrate.cpp:3957–4156, custom 속성 4개 포함).
+struct ClassicAttributeName {
+    StringView key;
+    StringView attribute;
+};
+
+constexpr ClassicAttributeName ClassicAttributeNames[] = {
+    {"BaseColor", "BaseColor"},
+    {"Metallic", "Metallic"},
+    {"Specular", "Specular"},
+    {"Roughness", "Roughness"},
+    {"Anisotropy", "Anisotropy"},
+    {"EmissiveColor", "EmissiveColor"},
+    {"SubSurfaceColor", "SubsurfaceColor"},
+    {"ClearCoat", "CustomData0"},
+    {"ClearCoatRoughness", "CustomData1"},
+    {"Opacity", "Opacity"},
+    {"Normal", "Normal"},
+    {"Tangent", "Tangent"},
+    {"ShadingModel", "ShadingModel"},
+    {"TransmittanceColor", "TransmittanceColor"},
+    {"ThinTranslucentSurfaceCoverage", "ThinTranslucentSurfaceCoverage"},
+    {"ClearCoatNormal", "ClearCoatBottomNormal"},
+    {"CustomTangent", "CustomEyeTangent"},
+};
+
+// key 입력이 있는가(핀 연결 또는 칸)와 그 값이다(없으면 present 거짓, 값 NoIrValue — 위쪽 오류도
+// NoIrValue이고 present 참).
+Result<IrValueId> ClassicRead(ClassicSource& source, StringView key, bool& present) noexcept {
+    LoweringContext& context = *source.context;
+    present = false;
+    if (!source.attributes) {
+        auto connected = context.IsConnected(key);
+        if (!connected) {
+            return Result<IrValueId>::Failure(connected.Error());
+        }
+
+        if (!connected.Value()) {
+            return Result<IrValueId>::Success(NoIrValue);
+        }
+
+        present = true;
+        return context.Input(key);
     }
 
-    SurfaceRecord record;
+    for (const ClassicAttributeName& item : ClassicAttributeNames) {
+        if (item.key != key) {
+            continue;
+        }
+
+        const MaterialAttributeDefinition* definition = context.FindAttributeByName(item.attribute);
+        if (definition == nullptr) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (const AttributeEntry& entry : source.entries) {
+            if (entry.id == definition->id) {
+                present = true;
+                return Result<IrValueId>::Success(entry.value);
+            }
+        }
+    }
+
+    return Result<IrValueId>::Success(NoIrValue);
+}
+
+// 있으면 Float width로 맞춘 값, 없으면 fallback 상수다(UE CompileWithDefaultFloatN).
+Result<IrValueId> ClassicFloat(ClassicSource& source, StringView key, uint8 width,
+                               float fallback) noexcept {
+    LoweringContext& context = *source.context;
+    bool present = false;
+    auto value = ClassicRead(source, key, present);
+    if (!value) {
+        return value;
+    }
+
+    if (present) {
+        if (value.Value() == NoIrValue) {
+            return value;
+        }
+
+        return context.CoerceToWidth(value.Value(), width, key);
+    }
+
+    float values[MaxIrComponents] = {fallback, fallback, fallback, fallback};
+    return context.FloatConstant(Span<const float>(values, width), key);
+}
+
+// 노멀·tangent 입력이다(BasisOr와 같다 — 있으면 tangent 공간이면 world로 바꿔 정규화, 없으면 정점
+// 기저). allowed가 거짓이면 없음으로 본다(속성 Tangent는 Anisotropy 칸이 있을 때만 — UE
+// :3993–4003).
+Result<IrValueId> ClassicBasis(ClassicSource& source, StringView key, StringView vertex,
+                               bool allowed) noexcept {
+    LoweringContext& context = *source.context;
+    bool present = false;
+    auto value = ClassicRead(source, key, present);
+    if (!value) {
+        return value;
+    }
+
+    if (!present || !allowed) {
+        return context.ContextValue(vertex);
+    }
+
+    if (value.Value() == NoIrValue) {
+        return value;
+    }
+
+    auto vector = context.CoerceToWidth(value.Value(), 3, key);
+    if (!vector || vector.Value() == NoIrValue) {
+        return vector;
+    }
+
+    IrValueId world = vector.Value();
+    if (context.Traits().tangentSpaceNormal) {
+        const IrValueId arguments[] = {world};
+        auto transformed = context.ContextValue("TransformTangentVectorToWorld", arguments);
+        if (!transformed) {
+            return transformed;
+        }
+
+        world = transformed.Value();
+    }
+
+    return context.Unary(IrOp::Normalize, world, NumberRule::FloatOnly);
+}
+
+// 고전 preset 기록을 만든다(SurfaceFromShadingModel·SurfaceFromAttributes·출력 노드 속성 집합 변환
+// — 6.11절 MS2d1, 6.12절 MS2e1). overrideField가 비어 있으면 shading model 기본은 DefaultLit다.
+// 위쪽 오류면 false다.
+Result<bool> BuildClassicRecord(ClassicSource& source, StringView overrideField,
+                                SurfaceRecord& record) noexcept {
+    LoweringContext& context = *source.context;
+    record = SurfaceRecord();
     record.kind = SurfaceKind::Classic;
-    auto connected = context.IsConnected("ShadingModel");
-    if (!connected) {
-        return Result<void>::Failure(connected.Error());
+    bool present = false;
+    auto modelInput = ClassicRead(source, "ShadingModel", present);
+    if (!modelInput) {
+        return Result<bool>::Failure(modelInput.Error());
     }
 
     bool foliage = false;
-    if (connected.Value()) {
-        auto model = context.Input("ShadingModel");
-        if (!model || model.Value() == NoIrValue) {
-            return model ? Result<void>::Success() : Result<void>::Failure(model.Error());
+    if (present) {
+        if (modelInput.Value() == NoIrValue) {
+            return Result<bool>::Success(false);
         }
 
-        record.Field(SurfaceField::ShadingModel) = model.Value();
+        record.Field(SurfaceField::ShadingModel) = modelInput.Value();
         // 픽셀마다 고르는 shading model은 slab 최악 경우이고(UE MES:632–773), 닿는 후보의 전용
         // BSDF(Hair·Eye·SingleLayerWater)는 연산 아래에서 막는다(6.11절 MS2d2).
-        auto reached = ReachableShadingModels(context.Builder(), model.Value());
+        auto reached = ReachableShadingModels(context.Builder(), modelInput.Value());
         if (!reached) {
-            return Result<void>::Failure(reached.Error());
+            return Result<bool>::Failure(reached.Error());
         }
 
         record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
@@ -283,10 +419,17 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
             }
         }
     } else {
-        bool read = false;
-        auto model = ShadingModelConstant(context, "shadingModelOverride", read);
+        Result<IrValueId> model = Result<IrValueId>::Success(NoIrValue);
+        if (!overrideField.IsEmpty()) {
+            bool read = false;
+            model = ShadingModelConstant(context, overrideField, read);
+        } else {
+            const uint32 number = static_cast<uint32>(rocks::ShadingModel::DefaultLit);
+            model = context.Builder().UIntConstant(Span<const uint32>(&number, 1));
+        }
+
         if (!model || model.Value() == NoIrValue) {
-            return model ? Result<void>::Success() : Result<void>::Failure(model.Error());
+            return model ? Result<bool>::Success(false) : Result<bool>::Failure(model.Error());
         }
 
         record.Field(SurfaceField::ShadingModel) = model.Value();
@@ -323,67 +466,79 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
         {SurfaceField::Opacity, "Opacity", 1, 1.0f},
     };
     for (const Input& input : inputs) {
-        auto value = FloatOr(context, input.key, input.width, input.fallback);
+        auto value = ClassicFloat(source, input.key, input.width, input.fallback);
         if (!value || value.Value() == NoIrValue) {
-            return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
+            return value ? Result<bool>::Success(false) : Result<bool>::Failure(value.Error());
         }
 
         record.Field(input.field) = value.Value();
     }
 
-    auto normal = BasisOr(context, "Normal", "VertexNormal");
-    auto tangent = BasisOr(context, "Tangent", "VertexTangent");
+    // 속성 집합의 Tangent는 Anisotropy 칸이 있을 때만 읽는다(UE :3993–4003).
+    bool anisotropic = true;
+    if (source.attributes) {
+        bool hasAnisotropy = false;
+        auto anisotropy = ClassicRead(source, "Anisotropy", hasAnisotropy);
+        if (!anisotropy) {
+            return Result<bool>::Failure(anisotropy.Error());
+        }
+
+        anisotropic = hasAnisotropy;
+    }
+
+    auto normal = ClassicBasis(source, "Normal", "VertexNormal", true);
+    auto tangent = ClassicBasis(source, "Tangent", "VertexTangent", anisotropic);
     if (!normal || !tangent) {
-        return Result<void>::Failure(!normal ? normal.Error() : tangent.Error());
+        return Result<bool>::Failure(!normal ? normal.Error() : tangent.Error());
     }
 
     if (normal.Value() == NoIrValue || tangent.Value() == NoIrValue) {
-        return Result<void>::Success();
+        return Result<bool>::Success(false);
     }
 
     record.Field(SurfaceField::Normal) = normal.Value();
     record.Field(SurfaceField::Tangent) = tangent.Value();
     // 얇은 투과·clear coat 아래 노멀이다(UE CompileCommon 기본 0.5·1 — 연산 아래 slab 변환과 MS2d3
     // 출력이 쓴다).
-    auto transmittance = FloatOr(context, "TransmittanceColor", 3, 0.5f);
-    auto thinCoverage = FloatOr(context, "ThinTranslucentSurfaceCoverage", 1, 1.0f);
+    auto transmittance = ClassicFloat(source, "TransmittanceColor", 3, 0.5f);
+    auto thinCoverage = ClassicFloat(source, "ThinTranslucentSurfaceCoverage", 1, 1.0f);
     if (!transmittance || !thinCoverage) {
-        return Result<void>::Failure(!transmittance ? transmittance.Error() : thinCoverage.Error());
+        return Result<bool>::Failure(!transmittance ? transmittance.Error() : thinCoverage.Error());
     }
 
     if (transmittance.Value() == NoIrValue || thinCoverage.Value() == NoIrValue) {
-        return Result<void>::Success();
+        return Result<bool>::Success(false);
     }
 
     record.thinTransmittance = transmittance.Value();
     record.thinCoverage = thinCoverage.Value();
-    // clear coat 아래 노멀·custom tangent는 연결된 때만 입력 원값이다(MS2d3 출력 — UE 고전 경로).
+    // clear coat 아래 노멀·custom tangent는 있을 때만 입력 원값이다(MS2d3 출력 — UE 고전 경로).
     const StringView basisKeys[] = {"ClearCoatNormal", "CustomTangent"};
     IrValueId* basisOut[] = {&record.secondNormal, &record.customTangent};
     for (usize index = 0; index < 2; ++index) {
-        auto connected = context.IsConnected(basisKeys[index]);
-        if (!connected) {
-            return Result<void>::Failure(connected.Error());
+        bool has = false;
+        auto input = ClassicRead(source, basisKeys[index], has);
+        if (!input) {
+            return Result<bool>::Failure(input.Error());
         }
 
-        if (!connected.Value()) {
+        if (!has) {
             continue;
         }
 
-        auto input = context.Input(basisKeys[index]);
-        if (!input || input.Value() == NoIrValue) {
-            return input ? Result<void>::Success() : Result<void>::Failure(input.Error());
+        if (input.Value() == NoIrValue) {
+            return Result<bool>::Success(false);
         }
 
         auto vector = context.CoerceToWidth(input.Value(), 3, basisKeys[index]);
         if (!vector || vector.Value() == NoIrValue) {
-            return vector ? Result<void>::Success() : Result<void>::Failure(vector.Error());
+            return vector ? Result<bool>::Success(false) : Result<bool>::Failure(vector.Error());
         }
 
         *basisOut[index] = vector.Value();
     }
 
-    // 물 계수(UE CompileCommon 기본 0·0·0·1)다.
+    // 물 계수(UE CompileCommon 기본 0·0·0·1)다. 속성 집합 변환도 노드 핀에서 받는다.
     struct WaterInput {
         StringView key;
         uint8 width;
@@ -395,13 +550,88 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
                                  {"WaterPhaseG", 1, 0.0f},
                                  {"ColorScaleBehindWater", 3, 1.0f}};
     for (usize index = 0; index < 4; ++index) {
-        auto value =
-            FloatOr(context, waters[index].key, waters[index].width, waters[index].fallback);
+        Result<IrValueId> value = Result<IrValueId>::Success(NoIrValue);
+        if (source.waterPins) {
+            value =
+                FloatOr(context, waters[index].key, waters[index].width, waters[index].fallback);
+        } else {
+            float values[MaxIrComponents] = {waters[index].fallback, waters[index].fallback,
+                                             waters[index].fallback, waters[index].fallback};
+            value =
+                context.FloatConstant(Span<const float>(values, waters[index].width), StringView());
+        }
+
+        if (!value || value.Value() == NoIrValue) {
+            return value ? Result<bool>::Success(false) : Result<bool>::Failure(value.Error());
+        }
+
+        record.water[index] = value.Value();
+    }
+
+    return Result<bool>::Success(true);
+}
+
+// UE SubstrateShadingModels(MES:183–796) — 고전 입력이 그대로 지나가는 preset이다(10.3절).
+Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
+    auto profiled =
+        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
+    if (!profiled || profiled.Value()) {
+        return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
+    }
+
+    ClassicSource source;
+    source.context = &context;
+    SurfaceRecord record;
+    auto built = BuildClassicRecord(source, "shadingModelOverride", record);
+    if (!built || !built.Value()) {
+        return built ? Result<void>::Success() : Result<void>::Failure(built.Error());
+    }
+
+    return EmitSurface(context, record);
+}
+
+// UE SubstrateConvertMaterialAttributes(MaterialExpressionSubstrate.cpp:3923–4470) — 속성 칸이 고전
+// 입력이다(6.12절 MS2e1). 속성 입력이 없으면 모든 칸이 기본이다(UE CompileDefaultSlab).
+Result<void> LowerSurfaceFromAttributes(LoweringContext& context) noexcept {
+    auto profiled =
+        ProfilePending(context, "subsurfaceProfile", MaterialPrerequisite::SubsurfaceProfile);
+    if (!profiled || profiled.Value()) {
+        return profiled ? Result<void>::Success() : Result<void>::Failure(profiled.Error());
+    }
+
+    SystemAllocator scratch;
+    Array<AttributeEntry> entries(scratch);
+    auto connected = context.IsConnected("MaterialAttributes");
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    if (connected.Value()) {
+        auto value = context.Input("MaterialAttributes");
         if (!value || value.Value() == NoIrValue) {
             return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
         }
 
-        record.water[index] = value.Value();
+        auto copied = context.CopyAttributes(value.Value(), entries);
+        if (!copied) {
+            return Result<void>::Failure(copied.Error());
+        }
+
+        if (!copied.Value()) {
+            return context.Error(
+                MaterialDiagnosticCode::TypeMismatch, "MaterialAttributes",
+                "Cannot connect a non MaterialAttributes node to a MaterialAttributes pin.");
+        }
+    }
+
+    ClassicSource source;
+    source.context = &context;
+    source.entries = entries.View();
+    source.attributes = true;
+    SurfaceRecord record;
+    auto built = BuildClassicRecord(source, "shadingModelOverride", record);
+    if (!built || !built.Value()) {
+        return built ? Result<void>::Success() : Result<void>::Failure(built.Error());
     }
 
     return EmitSurface(context, record);
@@ -1036,6 +1266,7 @@ Result<void> LowerSurfaceSingleLayerWater(LoweringContext& context) noexcept {
 constexpr LoweringEntry SurfaceEntries[] = {
     {"Material.ShadingModel", &LowerShadingModel},
     {"Material.SurfaceFromShadingModel", &LowerSurfaceFromShadingModel},
+    {"Material.SurfaceFromAttributes", &LowerSurfaceFromAttributes},
     {"Material.SurfaceUnlit", &LowerSurfaceUnlit},
     {"Material.SurfaceLightFunction", &LowerSurfaceLightFunction},
     {"Material.SurfacePostProcess", &LowerSurfacePostProcess},
@@ -1050,6 +1281,25 @@ constexpr LoweringEntry SurfaceEntries[] = {
 };
 
 } // namespace
+
+Result<IrValueId> ClassicSurfaceFromAttributes(LoweringContext& context,
+                                               Span<const AttributeEntry> entries) noexcept {
+    // 출력 노드 속성 집합의 표면 변환이다(UE 숨은 변환 — HT:1545–1560, shading model 기본
+    // DefaultLit, 물 계수 기본값 — 6.12절 MS2e1).
+    ClassicSource source;
+    source.context = &context;
+    source.entries = entries;
+    source.attributes = true;
+    source.waterPins = false;
+    SurfaceRecord record;
+    auto built = BuildClassicRecord(source, StringView(), record);
+    if (!built || !built.Value()) {
+        return built ? Result<IrValueId>::Success(NoIrValue)
+                     : Result<IrValueId>::Failure(built.Error());
+    }
+
+    return context.MakeSurface(record);
+}
 
 Span<const LoweringEntry> SurfaceLowerings() noexcept {
     return SurfaceEntries;

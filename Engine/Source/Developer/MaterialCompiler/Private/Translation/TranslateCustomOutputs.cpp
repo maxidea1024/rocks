@@ -329,6 +329,109 @@ Result<void> Translator::CustomOutputDefines(const nodegraph::GraphNode& node,
     return Result<void>::Success();
 }
 
+Result<void> Translator::AttributeCustomOutputs(Span<const bool> present) noexcept {
+    // 출력 노드 속성 집합의 custom 속성 칸은 custom 출력이다(UE
+    // CompileMaterialAttributesCustomOutputs — 같은 종류의 노드가 있으면 노드가 이긴다, 6.12절
+    // MS2e1). 정점 빈도 칸은 정점·이전 정점 문맥의 기록에서 읽는다.
+    if (!input_.traits.useMaterialAttributes || outputNode_ == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const MaterialNodeDefinition* definition = input_.catalog.Find(outputNode_->type);
+    if (definition == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const Span<const CustomOutputKind> kinds = CustomOutputKinds();
+    SystemAllocator scratch;
+    Array<AttributeEntry> entries(scratch);
+    const EvaluationContext contexts[] = {EvaluationContext::Pixel, EvaluationContext::Vertex,
+                                          EvaluationContext::VertexPrevious};
+    for (EvaluationContext evaluation : contexts) {
+        context_ = evaluation;
+        LoweringContext context(*this, *outputNode_, *definition);
+        if (auto read = AttributesFromOutput(context, entries); !read) {
+            return read;
+        }
+
+        for (const AttributeEntry& entry : entries) {
+            const MaterialAttributeDefinition* attribute = FindAttribute(entry.id);
+            if (attribute == nullptr || attribute->customOutput.IsEmpty() ||
+                entry.value == NoIrValue) {
+                continue;
+            }
+
+            const bool vertex = attribute->frequency == MaterialVertexStage;
+            if (vertex != (evaluation != EvaluationContext::Pixel)) {
+                continue;
+            }
+
+            usize kind = kinds.Size();
+            for (usize index = 0; index < kinds.Size(); ++index) {
+                if (kinds[index].name == attribute->customOutput) {
+                    kind = index;
+                }
+            }
+
+            if (kind == kinds.Size()) {
+                // TODO(MPQ-VirtualTexture): 머티리얼 캐시 custom 출력이 생기면 그 칸을 낸다.
+                if (evaluation == EvaluationContext::Pixel) {
+                    String message(scratch);
+                    const StringView parts[] = {
+                        "Node is not translated until prerequisite ",
+                        MaterialPrerequisiteId(MaterialPrerequisite::VirtualTexture), " exists"};
+                    for (StringView part : parts) {
+                        if (auto appended = message.TryAppend(part); !appended) {
+                            return appended;
+                        }
+                    }
+
+                    if (auto reported = Report(nodegraph::GraphDiagnosticSeverity::Error,
+                                               MaterialDiagnosticCode::PrerequisiteMissing,
+                                               outputNode_->id, Name(), message.View());
+                        !reported) {
+                        return reported;
+                    }
+                }
+
+                continue;
+            }
+
+            if (present[kind] || attribute->customOutputIndex >= kinds[kind].inputs.Size()) {
+                continue;
+            }
+
+            const CustomOutputInput& slot = kinds[kind].inputs[attribute->customOutputIndex];
+            IrValueId value = entry.value;
+            const uint8 width = builder_.Value(value).type.components;
+            if (width < CustomOutputWidth) {
+                const float zeros[] = {0.0f, 0.0f, 0.0f};
+                auto padding =
+                    builder_.FloatConstant(Span<const float>(zeros, CustomOutputWidth - width));
+                if (!padding) {
+                    return Result<void>::Failure(padding.Error());
+                }
+
+                auto padded = builder_.Append(value, padding.Value());
+                if (!padded) {
+                    return Result<void>::Failure(padded.Error());
+                }
+
+                value = padded.Value();
+            }
+
+            if (auto added = results_.TryPushBack(
+                    IrResult{CustomOutputEntry(kinds[kind], evaluation), slot.slot, value});
+                !added) {
+                return added;
+            }
+        }
+    }
+
+    context_ = EvaluationContext::Pixel;
+    return Result<void>::Success();
+}
+
 Result<void> Translator::SurfaceCustomOutputs(Span<const bool> present) noexcept {
     const Span<const CustomOutputKind> kinds = CustomOutputKinds();
     const SurfaceRecord& surface = exportedSurface_;
@@ -379,6 +482,17 @@ Result<void> Translator::SurfaceCustomOutputs(Span<const bool> present) noexcept
                 }
 
                 value = padded.Value();
+            }
+
+            // 속성 집합이 이미 준 번호는 그대로 둔다(속성 칸이 표면보다 앞선다).
+            bool given = false;
+            for (const IrResult& result : results_) {
+                given = given || (result.entry == IrEntry::CustomOutput &&
+                                  result.slot == kind.inputs[item].slot);
+            }
+
+            if (given) {
+                continue;
             }
 
             if (auto added = results_.TryPushBack(
@@ -480,6 +594,10 @@ Result<void> Translator::TranslateCustomOutputs() noexcept {
         if (auto defined = CustomOutputDefines(node, kinds[kind]); !defined) {
             return defined;
         }
+    }
+
+    if (auto attributes = AttributeCustomOutputs(present.View()); !attributes) {
+        return attributes;
     }
 
     return SurfaceCustomOutputs(present.View());

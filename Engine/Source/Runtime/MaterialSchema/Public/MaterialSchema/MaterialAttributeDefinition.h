@@ -24,6 +24,11 @@ struct MaterialAttributeDefinition {
     MaterialStageMask frequency = MaterialPixelStage;
     // 팔레트·Break 노드에 보이지 않는다(UE bHideAttribute — 조명 굽기 유도 값 등).
     bool hidden = false;
+    // custom 속성이면 그 값을 내는 custom 출력 이름(Docs/Design/MaterialSystem 6.11절 MS2d3 표 —
+    // 예: "TangentOutput")과 출력 번호다(UE FMaterialCustomOutputAttributeDefintion FunctionName·
+    // OutputIndex, 6.12절 MS2e1). 비어 있으면 표면·진입점 칸이다.
+    StringView customOutput;
+    uint8 customOutputIndex = 0;
 };
 
 } // namespace rocks::material

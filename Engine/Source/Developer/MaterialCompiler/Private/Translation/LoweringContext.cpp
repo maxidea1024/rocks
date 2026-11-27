@@ -10,6 +10,8 @@
 #include <MaterialSchema/MaterialPinValue.generated.h>
 #include <MaterialSchema/MaterialPinValue.h>
 #include <Platform/Memory.h>
+#include <MaterialSchema/MaterialAttributeTable.h>
+#include <RenderData/MaterialEnums.h>
 
 #include "Translator.h"
 
@@ -17,6 +19,9 @@
 namespace rocks::material::detail {
 
 namespace {
+
+// 설정되지 않은 Displacement 칸의 값이다(UE CompileDefaultValue −1 — "연결 없음" 표지, 6.12절).
+constexpr float LoweringDisplacementUnset = -1.0f;
 
 // 즉시값 bit에서 float다(IR 상수 성분 — 6.8절 "값").
 float LoweringFloatBits(uint64 bits) noexcept {
@@ -112,6 +117,7 @@ StringView LoweringTypeName(IrType type) noexcept {
     switch (type.scalar) {
     case IrScalar::Texture:
     case IrScalar::Surface:
+    case IrScalar::Attributes:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float:
@@ -176,6 +182,144 @@ Result<IrValueId> LoweringContext::CoerceToWidth(IrValueId value, uint8 width,
     }
 
     return Coerce(value, types[width - 1], pin);
+}
+
+Result<IrValueId> LoweringContext::MakeAttributes(Span<const AttributeEntry> entries) noexcept {
+    return translator_.AddAttributes(entries);
+}
+
+Result<bool> LoweringContext::CopyAttributes(IrValueId value,
+                                             Array<AttributeEntry>& out) const noexcept {
+    return translator_.CopyAttributes(value, out);
+}
+
+const MaterialAttributeDefinition* LoweringContext::FindAttribute(Guid id) const noexcept {
+    return translator_.FindAttribute(id);
+}
+
+const MaterialAttributeDefinition*
+LoweringContext::FindAttributeByName(StringView name) const noexcept {
+    return translator_.FindAttributeByName(name);
+}
+
+Result<const MaterialAttributeDefinition*> LoweringContext::FindAttributeByKey(Name key) noexcept {
+    for (const MaterialAttributeDefinition& definition : BuiltinMaterialAttributes()) {
+        auto name = translator_.Names().TryIntern(definition.name);
+        if (!name) {
+            return Result<const MaterialAttributeDefinition*>::Failure(name.Error());
+        }
+
+        if (name.Value() == key) {
+            return Result<const MaterialAttributeDefinition*>::Success(&definition);
+        }
+    }
+
+    return Result<const MaterialAttributeDefinition*>::Success(nullptr);
+}
+
+Result<IrValueId>
+LoweringContext::AttributeDefault(const MaterialAttributeDefinition& definition) noexcept {
+    // UE FMaterialAttributeDefinitionMap::CompileDefaultValue(MaterialAttributeDefinitionMap.cpp:
+    // 46–109).
+    const StringView name = definition.name;
+    if (definition.type == MaterialPinType::Surface) {
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (name == StringView("Normal") || name == StringView("Tangent")) {
+        if (!Traits().tangentSpaceNormal) {
+            return ContextValue(name == StringView("Normal") ? StringView("VertexNormal")
+                                                             : StringView("VertexTangent"));
+        }
+    }
+
+    if (definition.type == MaterialPinType::ShadingModel) {
+        // Rocks 머티리얼 속성에는 shading model이 없으므로 DefaultLit다(UE 첫 shading model).
+        const uint32 number = static_cast<uint32>(rocks::ShadingModel::DefaultLit);
+        return Builder().UIntConstant(Span<const uint32>(&number, 1));
+    }
+
+    if (name == StringView("Displacement")) {
+        // UE는 −1로 "연결 없음"을 표시한다(:88–92).
+        return FloatScalar(LoweringDisplacementUnset);
+    }
+
+    constexpr StringView CustomizedPrefix = "CustomizedUV";
+    if (name.ByteCount() == CustomizedPrefix.ByteCount() + 1 &&
+        StringView(name.Data(), CustomizedPrefix.ByteCount()) == CustomizedPrefix) {
+        const uint32 index = static_cast<uint32>(name.Data()[CustomizedPrefix.ByteCount()] - '0');
+        auto slot = Builder().UIntConstant(Span<const uint32>(&index, 1));
+        if (!slot) {
+            return slot;
+        }
+
+        const IrValueId arguments[] = {slot.Value()};
+        return ContextValue("TexCoord", arguments);
+    }
+
+    IrType type;
+    if (!LoweringPinIrType(definition.type, type)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    float values[MaxIrComponents] = {};
+    for (uint8 index = 0; index < type.components && index < MaxIrComponents; ++index) {
+        values[index] = index < definition.defaultValue.componentCount
+                            ? definition.defaultValue.values[index]
+                            : 0.0f;
+    }
+
+    return FloatConstant(Span<const float>(values, type.components), StringView());
+}
+
+Result<IrValueId>
+LoweringContext::AttributeValue(Span<const AttributeEntry> entries,
+                                const MaterialAttributeDefinition& definition) noexcept {
+    for (const AttributeEntry& entry : entries) {
+        if (entry.id == definition.id) {
+            return Result<IrValueId>::Success(entry.value);
+        }
+    }
+
+    return AttributeDefault(definition);
+}
+
+Result<IrValueId> LoweringContext::FitAttribute(IrValueId value,
+                                                const MaterialAttributeDefinition& definition,
+                                                StringView pin) noexcept {
+    if (value == NoIrValue) {
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    const IrType type = TypeOf(value);
+    if (definition.type == MaterialPinType::Surface || type.IsSurface()) {
+        if (definition.type == MaterialPinType::Surface && type.IsSurface()) {
+            return Result<IrValueId>::Success(value);
+        }
+
+        if (auto reported = TypeError("Surface value does not fit this attribute", type, type);
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (definition.type == MaterialPinType::ShadingModel) {
+        if (type == IrUInt(1)) {
+            return Result<IrValueId>::Success(value);
+        }
+
+        if (auto reported =
+                TypeError("Shading model attribute needs a shading model value", type, IrUInt(1));
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    return Coerce(value, definition.type, pin);
 }
 
 bool LoweringContext::InVirtualTextureScope() const noexcept {
@@ -953,6 +1097,7 @@ Result<IrValueId> LoweringFilled(IrBuilder& builder, IrType type, int32 value) n
     switch (type.scalar) {
     case IrScalar::Texture:
     case IrScalar::Surface:
+    case IrScalar::Attributes:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float: {
@@ -1376,10 +1521,83 @@ Result<IrValueId> LoweringContext::Ternary(IrOp op, IrValueId first, IrValueId s
     return LoweringBuilt(*this, Builder().Ternary(op, cast[0], cast[1], cast[2]));
 }
 
+Result<IrValueId> LoweringContext::SelectAttributes(IrValueId condition, IrValueId whenTrue,
+                                                    IrValueId whenFalse, bool branch) noexcept {
+    // 속성 집합 둘의 실행 중 선택은 칸마다다(UE 고전은 속성마다 compile — 6.12절 MS2e1). 한쪽에만
+    // 있는 칸은 다른 쪽이 기본값이다.
+    if (TypeOf(condition) != IrBool(1)) {
+        if (auto reported =
+                TypeError("Selection of material attributes needs a bool scalar condition",
+                          TypeOf(condition), IrBool(1));
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    SystemAllocator scratch;
+    Array<AttributeEntry> first(scratch);
+    Array<AttributeEntry> second(scratch);
+    auto a = CopyAttributes(whenTrue, first);
+    auto b = CopyAttributes(whenFalse, second);
+    if (!a || !b) {
+        return Result<IrValueId>::Failure(!a ? a.Error() : b.Error());
+    }
+
+    Array<AttributeEntry> merged(scratch);
+    const Array<AttributeEntry>* sides[] = {&first, &second};
+    for (const Array<AttributeEntry>* side : sides) {
+        for (const AttributeEntry& entry : *side) {
+            bool seen = false;
+            for (const AttributeEntry& item : merged) {
+                seen = seen || item.id == entry.id;
+            }
+
+            if (seen) {
+                continue;
+            }
+
+            const MaterialAttributeDefinition* definition = FindAttribute(entry.id);
+            if (definition == nullptr) {
+                return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto x = AttributeValue(first.View(), *definition);
+            auto y = AttributeValue(second.View(), *definition);
+            if (!x || !y) {
+                return Result<IrValueId>::Failure(!x ? x.Error() : y.Error());
+            }
+
+            IrValueId chosen = NoIrValue;
+            if (x.Value() != NoIrValue && y.Value() != NoIrValue &&
+                !TypeOf(x.Value()).IsSurface()) {
+                auto selected = branch ? Branch(condition, x.Value(), y.Value())
+                                       : Select(condition, x.Value(), y.Value());
+                if (!selected) {
+                    return selected;
+                }
+
+                chosen = selected.Value();
+            }
+
+            if (auto added = merged.TryPushBack(AttributeEntry{entry.id, chosen}); !added) {
+                return Result<IrValueId>::Failure(added.Error());
+            }
+        }
+    }
+
+    return MakeAttributes(merged.View());
+}
+
 Result<IrValueId> LoweringContext::Select(IrValueId condition, IrValueId whenTrue,
                                           IrValueId whenFalse) noexcept {
     if (condition == NoIrValue || whenTrue == NoIrValue || whenFalse == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (TypeOf(whenTrue).IsAttributes() && TypeOf(whenFalse).IsAttributes()) {
+        return SelectAttributes(condition, whenTrue, whenFalse, false);
     }
 
     const IrValueId branches[] = {whenTrue, whenFalse};
@@ -1424,6 +1642,10 @@ Result<IrValueId> LoweringContext::Branch(IrValueId condition, IrValueId whenTru
                                           IrValueId whenFalse) noexcept {
     if (condition == NoIrValue || whenTrue == NoIrValue || whenFalse == NoIrValue) {
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (TypeOf(whenTrue).IsAttributes() && TypeOf(whenFalse).IsAttributes()) {
+        return SelectAttributes(condition, whenTrue, whenFalse, true);
     }
 
     const IrType conditionType = TypeOf(condition);

@@ -7,6 +7,7 @@
 #include <MaterialCompiler/MaterialStaticParameterValue.h>
 #include <MaterialCompiler/MaterialTextureFacts.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
+#include <MaterialSchema/MaterialAttributeTable.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <NodeGraph/GraphDocument.h>
@@ -38,6 +39,8 @@ struct MaterialTranslationInput {
     Span<const MaterialCollectionLayout> collections{};
     // 머티리얼이 참조하는 텍스처 에셋 사실이다(6.10절 MS2c3 — 없는 asset 참조는 해석 오류).
     Span<const MaterialTextureFacts> textures{};
+    // 등록된 custom 속성 표다(6.12절 MS2e1 — 없으면 내장 표만). 번역 동안 살아 있어야 한다.
+    const MaterialAttributeTable* attributes = nullptr;
 };
 
 } // namespace rocks::material

@@ -12,12 +12,14 @@
 #include <MaterialCompiler/MaterialTextureFacts.h>
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
+#include <MaterialSchema/MaterialAttributeDefinition.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <MaterialSchema/NodePropertyReader.h>
 #include <NodeGraph/GraphDiagnostic.h>
 #include <NodeGraph/NodeTypeDescriptor.h>
 
+#include "AttributeEntry.h"
 #include "SurfaceRecord.h"
 
 // lowering 함수 하나가 보는 노드 문맥이다(Docs/Design/MaterialSystem 6.8절). 입력 값 요청(연결 →
@@ -96,6 +98,25 @@ public:
     Result<IrValueId> MakeSurface(SurfaceRecord record) noexcept;
     // 표면 값의 기록이다(아니면 nullptr).
     const SurfaceRecord* SurfaceOf(IrValueId value) const noexcept;
+
+    // 속성 집합 값을 만든다(6.12절 MS2e1 — entries는 설정된 칸, 번역기 기록 밖의 배열이어야 한다).
+    Result<IrValueId> MakeAttributes(Span<const AttributeEntry> entries) noexcept;
+    // 속성 집합 값의 칸을 out에 복사한다(속성 집합 값이 아니면 false).
+    Result<bool> CopyAttributes(IrValueId value, Array<AttributeEntry>& out) const noexcept;
+    // 속성 정의다(내장 → 등록 표, 없으면 nullptr).
+    const MaterialAttributeDefinition* FindAttribute(Guid id) const noexcept;
+    const MaterialAttributeDefinition* FindAttributeByName(StringView name) const noexcept;
+    // 키가 key인 내장 속성이다(Aggregate 동적 핀 — 키 = 속성 이름, 없으면 nullptr).
+    Result<const MaterialAttributeDefinition*> FindAttributeByKey(Name key) noexcept;
+    // 설정되지 않은 칸의 기본값이다(UE CompileDefaultValue — 6.12절 MS2e1 기본값 규칙).
+    // FrontMaterial은 NoIrValue(표면 변환이 정한다).
+    Result<IrValueId> AttributeDefault(const MaterialAttributeDefinition& definition) noexcept;
+    // 칸 값(없으면 기본값)이다.
+    Result<IrValueId> AttributeValue(Span<const AttributeEntry> entries,
+                                     const MaterialAttributeDefinition& definition) noexcept;
+    // 칸에 넣을 값을 속성 형으로 맞춘다(5.3절 Coerce — UE ValidCast). 표면 칸은 표면 값만 받는다.
+    Result<IrValueId> FitAttribute(IrValueId value, const MaterialAttributeDefinition& definition,
+                                   StringView pin) noexcept;
 
     // value가 결과에 닿을 때만 이 노드 위치에 낼 오류다(지연 진단 — UE처럼 쓰이는 출력의 검사만
     // 남긴다, 6.10절 MS2c4). message는 문자열 상수여야 한다(번역 끝까지 산다).
@@ -243,6 +264,9 @@ private:
     Result<void> Diagnose(nodegraph::GraphDiagnosticSeverity severity, MaterialDiagnosticCode code,
                           StringView pin, StringView message) noexcept;
     Result<void> TypeError(StringView message, IrType left, IrType right) noexcept;
+    // 속성 집합 둘의 칸별 선택이다(Select·Branch — 6.12절 MS2e1).
+    Result<IrValueId> SelectAttributes(IrValueId condition, IrValueId whenTrue, IrValueId whenFalse,
+                                       bool branch) noexcept;
     // 텍스처 값이면 V1을 진단하고 rejected를 참으로 한다(돌려주는 값은 NoIrValue). 아니면 value다.
     Result<IrValueId> RejectTexture(IrValueId value, bool& rejected) noexcept;
 

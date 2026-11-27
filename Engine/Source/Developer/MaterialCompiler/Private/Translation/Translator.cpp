@@ -3,6 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
 #include <MaterialSchema/MaterialContextValue.h>
 #include <MaterialSchema/MaterialGraphTypes.h>
 #include <MaterialSchema/MaterialPrerequisite.h>
@@ -35,9 +36,10 @@ constexpr OutputSlot OutputSlots[] = {
     {"PixelDepthOffset", IrEntry::PixelDepthOffset, MaterialPinType::Float1},
 };
 
-// 아직 번역하지 않는 출력 핀이다(연결이 있으면 NotYetLowered — Attributes는 MS2e, Displacement는
-// MS2d 뒤 단계). Surface는 TranslateSurface가 번역한다(6.11절 MS2d1).
-constexpr StringView PendingOutputPins[] = {"Attributes", "Displacement"};
+// 아직 번역하지 않는 출력 핀이다(연결이 있으면 NotYetLowered — Displacement는 MS2d 뒤 단계).
+// Surface는 TranslateSurface가, Attributes는 useMaterialAttributes일 때 진입점마다 번역한다(6.11절
+// MS2d1, 6.12절 MS2e1).
+constexpr StringView PendingOutputPins[] = {"Displacement"};
 
 // CustomizedUv 출력 핀 키이자 Vertex 결과 slot이다(UE MP_CustomizedUVs0–7).
 constexpr StringView CustomizedUvPins[] = {"CustomizedUv0", "CustomizedUv1", "CustomizedUv2",
@@ -136,7 +138,8 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
       statesPixel_(allocator), outputsVirtualTexture_(allocator), statesVirtualTexture_(allocator),
       lowerings_(allocator), lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator),
       cutInputs_(allocator), results_(allocator), collections_(allocator), samplers_(allocator),
-      deferred_(allocator), surfaces_(allocator), defines_(allocator) {
+      deferred_(allocator), surfaces_(allocator), attributeEntries_(allocator),
+      attributeRanges_(allocator), attributeOutputs_(allocator), defines_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -412,7 +415,8 @@ Result<void> Translator::BuildIndex() noexcept {
         SupplyLowerings(),        ParameterLowerings(),
         TextureLowerings(),       SceneLowerings(),
         SurfaceLowerings(),       SurfaceOperatorLowerings(),
-        SurfaceHelperLowerings(), OutputInputLowerings()};
+        SurfaceHelperLowerings(), OutputInputLowerings(),
+        AttributeLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -966,7 +970,91 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
         }
     }
 
+    // 속성 집합 출력이면 진입점 칸을 기록에서 읽는다(6.12절 MS2e1). 개별 핀 연결은 V5다. 아니면
+    // Attributes 핀 연결이 V5다.
+    const bool attributes = input_.traits.useMaterialAttributes;
+    SystemAllocator scratch;
+    Array<AttributeEntry> entries(scratch);
+    if (attributes) {
+        auto record = AttributesFromOutput(context, entries);
+        if (!record) {
+            return record;
+        }
+    } else if (context_ == EvaluationContext::Pixel) {
+        auto connected = context.IsConnected("Attributes");
+        if (!connected) {
+            return Result<void>::Failure(connected.Error());
+        }
+
+        if (connected.Value()) {
+            if (auto reported = context.Warning(
+                    MaterialDiagnosticCode::InactiveOutput, "Attributes",
+                    "Attributes pin is used only when the material uses material attributes; it "
+                    "is ignored");
+                !reported) {
+                return reported;
+            }
+        }
+    }
+
+    if (attributes && context_ == EvaluationContext::Pixel) {
+        const StringView ignored[] = {
+            "Surface",    "Opacity",          "OpacityMask",      "AmbientOcclusion",
+            "Refraction", "SurfaceThickness", "PixelDepthOffset", "WorldPositionOffset"};
+        for (StringView pin : ignored) {
+            auto connected = context.IsConnected(pin);
+            if (!connected) {
+                return Result<void>::Failure(connected.Error());
+            }
+
+            if (connected.Value()) {
+                if (auto reported = context.Warning(
+                        MaterialDiagnosticCode::InactiveOutput, pin,
+                        "Output pin is not used when the material uses material attributes; it is "
+                        "ignored");
+                    !reported) {
+                    return reported;
+                }
+            }
+        }
+    }
+
     for (const OutputSlot& slot : OutputSlots) {
+        if (attributes) {
+            if (!SlotInContext(slot.entry, context_) || !IsOutputActive(slot.pin, input_.traits)) {
+                continue;
+            }
+
+            const MaterialAttributeDefinition* definition = FindAttributeByName(slot.pin);
+            if (definition == nullptr) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto value = context.AttributeValue(entries.View(), *definition);
+            if (!value) {
+                return Result<void>::Failure(value.Error());
+            }
+
+            auto coerced = context.Coerce(value.Value(), slot.type, slot.pin);
+            if (!coerced) {
+                return Result<void>::Failure(coerced.Error());
+            }
+
+            if (coerced.Value() == NoIrValue) {
+                continue;
+            }
+
+            const IrEntry entry = context_ == EvaluationContext::VertexPrevious
+                                      ? IrEntry::VertexPrevious
+                                      : slot.entry;
+            if (auto added = results_.TryPushBack(IrResult{entry, slot.pin, coerced.Value()});
+                !added) {
+                return added;
+            }
+
+            continue;
+        }
+
         auto connected = context.IsConnected(slot.pin);
         if (!connected) {
             return Result<void>::Failure(connected.Error());
@@ -1011,6 +1099,15 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
     }
 
     if (context_ == EvaluationContext::Pixel) {
+        if (attributes) {
+            attributeOutputs_.Clear();
+            for (const AttributeEntry& entry : entries) {
+                if (auto copied = attributeOutputs_.TryPushBack(entry); !copied) {
+                    return copied;
+                }
+            }
+        }
+
         if (auto surface = TranslateSurface(context); !surface) {
             return surface;
         }
@@ -1025,6 +1122,18 @@ Result<void> Translator::TranslateOutputs(const nodegraph::GraphNode& output) no
 
 Result<void> Translator::ContextRoots(Array<Name>& roots) const noexcept {
     roots.Clear();
+    // 속성 집합 출력은 모든 문맥의 뿌리다(6.12절 MS2e1 — 칸마다 그 진입점 문맥에서 읽는다).
+    if (input_.traits.useMaterialAttributes) {
+        auto attributes = input_.names.TryFind("Attributes");
+        if (attributes) {
+            return roots.TryPushBack(attributes.Value());
+        }
+
+        return attributes.Error() == ErrorCode::NotFound
+                   ? Result<void>::Success()
+                   : Result<void>::Failure(attributes.Error());
+    }
+
     // Surface 핀(픽셀 문맥)은 표면 트리의 뿌리다(6.11절 MS2d1).
     if (context_ == EvaluationContext::Pixel) {
         auto surface = input_.names.TryFind("Surface");
@@ -1259,6 +1368,34 @@ Result<IrValueId> Translator::LowerInContext(EvaluationContext context,
     return value;
 }
 
+Result<void> Translator::AttributesFromOutput(LoweringContext& context,
+                                              Array<AttributeEntry>& entries) noexcept {
+    entries.Clear();
+    auto connected = context.IsConnected("Attributes");
+    if (!connected || !connected.Value()) {
+        return connected ? Result<void>::Success() : Result<void>::Failure(connected.Error());
+    }
+
+    auto value = context.Input("Attributes");
+    if (!value || value.Value() == NoIrValue) {
+        return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
+    }
+
+    auto copied = CopyAttributes(value.Value(), entries);
+    if (!copied) {
+        return Result<void>::Failure(copied.Error());
+    }
+
+    if (!copied.Value()) {
+        // UE MaterialIRModuleBuilder.cpp:712–716(속성 집합이 아닌 값).
+        return context.Error(MaterialDiagnosticCode::TypeMismatch, "Attributes",
+                             "Cannot connect a non MaterialAttributes node to a MaterialAttributes "
+                             "pin.");
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> Translator::TranslateCustomizedUvs(const nodegraph::GraphNode& output) noexcept {
     // UE: 픽셀이 쓰는 UV 채널 수만큼 정점 단계로 컴파일하고, i < NumCustomizedUVs이고 연결이 있으면
     // 그 값, 아니면 정점 TexCoord(i) 그대로(HLSLMaterialTranslator.cpp:1684–1697,
@@ -1293,7 +1430,36 @@ Result<void> Translator::TranslateCustomizedUvs(const nodegraph::GraphNode& outp
         }
 
         IrValueId value = NoIrValue;
-        if (connected.Value() && index < limit) {
+        if (input_.traits.useMaterialAttributes && index < limit) {
+            // 속성 집합의 CustomizedUV 칸(없으면 TexCoord — UE CompileDefaultValue)이다.
+            Array<AttributeEntry> entries(allocator_);
+            if (auto read = AttributesFromOutput(context, entries); !read) {
+                return read;
+            }
+
+            StringBuilder<> name(allocator_);
+            name << "CustomizedUV" << index;
+            if (auto status = name.Status(); !status) {
+                return status;
+            }
+
+            const MaterialAttributeDefinition* definition = FindAttributeByName(name.View());
+            if (definition == nullptr) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            auto attribute = context.AttributeValue(entries.View(), *definition);
+            if (!attribute) {
+                return Result<void>::Failure(attribute.Error());
+            }
+
+            auto coerced = context.Coerce(attribute.Value(), MaterialPinType::Float2, pin);
+            if (!coerced) {
+                return Result<void>::Failure(coerced.Error());
+            }
+
+            value = coerced.Value();
+        } else if (connected.Value() && index < limit) {
             auto custom = context.Input(pin);
             if (!custom) {
                 return Result<void>::Failure(custom.Error());

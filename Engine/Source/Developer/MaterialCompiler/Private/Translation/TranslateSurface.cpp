@@ -1,6 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <MaterialSchema/MaterialContextValue.h>
 
+#include "ClassicSurface.h"
 #include "CustomOutputTable.h"
 #include "LoweringContext.h"
 #include "SurfaceExporter.h"
@@ -99,7 +100,28 @@ Result<void> Translator::TranslateSurface(LoweringContext& context) noexcept {
 
     SurfaceRecord exported;
     IrValueId surface = NoIrValue;
-    if (connected.Value()) {
+    if (input_.traits.useMaterialAttributes) {
+        // FrontMaterial 칸이 있으면 그 표면, 없으면 고전 변환이다(6.12절 MS2e1 — UE 숨은 변환).
+        const MaterialAttributeDefinition* front = FindAttributeByName("FrontMaterial");
+        for (const AttributeEntry& entry : attributeOutputs_) {
+            if (front != nullptr && entry.id == front->id) {
+                surface = entry.value;
+            }
+        }
+
+        if (surface == NoIrValue) {
+            auto converted = ClassicSurfaceFromAttributes(context, attributeOutputs_.View());
+            if (!converted) {
+                return Result<void>::Failure(converted.Error());
+            }
+
+            if (converted.Value() == NoIrValue) {
+                return Result<void>::Success();
+            }
+
+            surface = converted.Value();
+        }
+    } else if (connected.Value()) {
         auto input = context.Input("Surface");
         if (!input) {
             return Result<void>::Failure(input.Error());

@@ -141,11 +141,14 @@ enum class IrOp : uint8 {
     TextureSize = 90,
     // 표면 값이다(6.11절 MS2d1). 즉시값 [0]은 번역기 표면 기록 번호다. 모듈에는 남지 않는다(출력
     // 노드가 접어 내보낸다).
-    SurfaceRef = 91
+    SurfaceRef = 91,
+    // 속성 집합 값이다(6.12절 MS2e1). 즉시값 [0]은 번역기 속성 기록 번호다. 모듈에는 남지 않는다
+    // (쓰는 곳이 칸을 읽는다).
+    AttributesRef = 92
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 92;
+inline constexpr uint32 IrOpCount = 93;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

@@ -1,8 +1,9 @@
 #include <MaterialSchema/MaterialAttributeTable.h>
 
 // 내장 머티리얼 속성 표다(Docs/Design/MaterialSystem 19.12절). Guid·타입·기본값·빈도는 UE
-// RE/Private/Materials/MaterialAttributeDefinitionMap.cpp:395–434와 같다(UE FGuid(A, B, C, D)는
-// Guid{A:B, C:D}). 이 파일은 그 표를 옮긴 것이므로 값을 바꾸지 않는다.
+// RE/Private/Materials/MaterialAttributeDefinitionMap.cpp:395–434와 같고, 끝의 9개는 UE 기본 custom
+// 속성(:444–452 — 6.12절 MS2e1)이다(UE FGuid(A, B, C, D)는 Guid{A:B, C:D}). 이 파일은 그 표를 옮긴
+// 것이므로 값을 바꾸지 않는다.
 namespace rocks::material {
 
 namespace {
@@ -18,6 +19,16 @@ constexpr MaterialAttributeDefinition Attribute(Guid id, StringView name, Materi
     definition.defaultValue = value;
     definition.frequency = frequency;
     definition.hidden = hidden;
+    return definition;
+}
+
+// UE 기본 custom 속성이다(MaterialAttributeDefinitionMap.cpp:444–452 — custom 출력 함수의 값).
+constexpr MaterialAttributeDefinition
+CustomAttribute(Guid id, StringView name, MaterialPinType type, MaterialPinDefault value,
+                MaterialStageMask frequency, StringView output, uint8 index) noexcept {
+    MaterialAttributeDefinition definition = Attribute(id, name, type, value, frequency);
+    definition.customOutput = output;
+    definition.customOutputIndex = index;
     return definition;
 }
 
@@ -134,6 +145,43 @@ constexpr MaterialAttributeDefinition BuiltinAttributes[] = {
     Attribute(Guid{0xE89CBD8462EA48BEull, 0x80F885212B0C403Cull}, "SpecularColor",
               MaterialPinType::Float3, MaterialPinDefault::Vector3(0.0f, 0.0f, 0.0f),
               MaterialPixelStage, true),
+    // UE 444행(GetBentNormal).
+    CustomAttribute(Guid{0xfbd7b46eb1234824ull, 0xbde76b23609f984cull}, "BentNormal",
+                    MaterialPinType::Float3, MaterialPinDefault::Vector3(0.0f, 0.0f, 1.0f),
+                    MaterialPixelStage, "BentNormal", 0),
+    // UE 445행(ClearCoatBottomNormal).
+    CustomAttribute(Guid{0xAA3D5C0416294716ull, 0xBBDEC8696A27DD72ull}, "ClearCoatBottomNormal",
+                    MaterialPinType::Float3, MaterialPinDefault::Vector3(0.0f, 0.0f, 1.0f),
+                    MaterialPixelStage, "ClearCoatBottomNormal", 0),
+    // UE 446행(GetTangentOutput).
+    CustomAttribute(Guid{0x8EAB2CB273634A24ull, 0x8CD14F473F9C8E55ull}, "CustomEyeTangent",
+                    MaterialPinType::Float3, MaterialPinDefault::Vector3(0.0f, 0.0f, 0.0f),
+                    MaterialPixelStage, "TangentOutput", 0),
+    // UE 447행(GetThinTranslucentMaterialOutput 0).
+    CustomAttribute(Guid{0xF2D8C70E42ECA0D1ull, 0x4652D0ADB785A065ull}, "TransmittanceColor",
+                    MaterialPinType::Float3, MaterialPinDefault::Vector3(0.5f, 0.5f, 0.5f),
+                    MaterialPixelStage, "ThinTranslucentMaterialOutput", 0),
+    // UE 448행(GetThinTranslucentMaterialOutput 1).
+    CustomAttribute(Guid{0xAAA1D0E0E312458Eull, 0xF3556BADA01277CDull},
+                    "ThinTranslucentSurfaceCoverage", MaterialPinType::Float1,
+                    MaterialPinDefault::Scalar(1.0f), MaterialPixelStage,
+                    "ThinTranslucentMaterialOutput", 1),
+    // UE 449행(GetFirstPersonOutput — 정점, 이전 프레임).
+    CustomAttribute(Guid{0xDB380E51BDED47B6ull, 0xB185A8BE8EACBFA4ull},
+                    "FirstPersonInterpolationAlpha", MaterialPinType::Float1,
+                    MaterialPinDefault::Scalar(1.0f), MaterialVertexStage, "FirstPersonOutput", 0),
+    // UE 450행(MaterialCache — 출력 노드는 TODO MPQ-VirtualTexture).
+    CustomAttribute(Guid{0x6B1237CA1B8C43C2ull, 0xA9C8A020430F1258ull}, "MaterialCache",
+                    MaterialPinType::Float4, MaterialPinDefault::Vector4(0.0f, 0.0f, 0.0f, 0.0f),
+                    MaterialPixelStage, "MaterialCache", 0),
+    // UE 451행(GetTemporalResponsivenessOutput).
+    CustomAttribute(Guid{0xB58CD3FB8CB4411Dull, 0x83C4C11EF89953ADull}, "TemporalResponsiveness",
+                    MaterialPinType::Float1, MaterialPinDefault::Scalar(0.0f), MaterialPixelStage,
+                    "TemporalResponsivenessOutput", 0),
+    // UE 452행(GetMotionVectorWorldOffsetOutput).
+    CustomAttribute(Guid{0x48A2CEAB8E63473Full, 0x821345BC6FA907F7ull}, "MotionVectorWorldOffset",
+                    MaterialPinType::Float3, MaterialPinDefault::Vector3(0.0f, 0.0f, 0.0f),
+                    MaterialPixelStage, "MotionVectorWorldOffsetOutput", 0),
 };
 
 } // namespace

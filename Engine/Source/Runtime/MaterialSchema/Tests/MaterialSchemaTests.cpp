@@ -827,9 +827,9 @@ TEST(MaterialSchema_AttributeTable) {
     CHECK(table.Register(Span<const MaterialAttributeDefinition>(roughness, 1), ModuleLease())
               .Error() == ErrorCode::AlreadyExists);
     static constexpr MaterialAttributeDefinition invalid[] = {
-        {Guid{}, "Zero", MaterialPinType::Float1, {}, MaterialPixelStage, false},
-        {Guid{7, 7}, "", MaterialPinType::Float1, {}, MaterialPixelStage, false},
-        {Guid{7, 8}, "Both", MaterialPinType::Float1, {}, AllMaterialStages, false},
+        {Guid{}, "Zero", MaterialPinType::Float1, {}, MaterialPixelStage, false, {}, 0},
+        {Guid{7, 7}, "", MaterialPinType::Float1, {}, MaterialPixelStage, false, {}, 0},
+        {Guid{7, 8}, "Both", MaterialPinType::Float1, {}, AllMaterialStages, false, {}, 0},
     };
     for (const MaterialAttributeDefinition& definition : invalid) {
         CHECK(table.Register(Span<const MaterialAttributeDefinition>(&definition, 1), ModuleLease())
@@ -839,8 +839,14 @@ TEST(MaterialSchema_AttributeTable) {
     // custom 속성을 더하고 해제한다.
     CountedLease customLease;
     static constexpr MaterialAttributeDefinition custom[] = {
-        {Guid{0x435553544f4d0001ull, 1}, "Wetness", MaterialPinType::Float1,
-         MaterialPinDefault::Scalar(0.0f), MaterialPixelStage, false},
+        {Guid{0x435553544f4d0001ull, 1},
+         "Wetness",
+         MaterialPinType::Float1,
+         MaterialPinDefault::Scalar(0.0f),
+         MaterialPixelStage,
+         false,
+         {},
+         0},
     };
     auto customGroup = table.Register(custom, customLease.Acquire());
     REQUIRE(customGroup);

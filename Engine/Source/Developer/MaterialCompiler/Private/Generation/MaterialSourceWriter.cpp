@@ -398,6 +398,7 @@ Result<void> SourceWriter::TypeName(IrType type) noexcept {
     switch (type.scalar) {
     case IrScalar::Texture:
     case IrScalar::Surface:
+    case IrScalar::Attributes:
         // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
         break;
     case IrScalar::Float:
@@ -474,6 +475,7 @@ Result<void> SourceWriter::Literal(const IrValue& value) noexcept {
         switch (value.type.scalar) {
         case IrScalar::Texture:
         case IrScalar::Surface:
+        case IrScalar::Attributes:
             // 텍스처는 수 값이 아니다(6.10절 MS2c3 — 이 경로에 오지 않는다).
             break;
         case IrScalar::Float:
