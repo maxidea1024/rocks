@@ -27,6 +27,7 @@
 - **D19 InterpCurve 미러·값 범위** — 이 Curve 단계에 넣는다. 미러 대상은 UE USTRUCT가 있는 다섯 형식이다. private `points_`·`looped_`·`loopKeyOffset_`는 Core 타입의 `GeneratedType` friend 선언과 MetaCompiler의 Binds private 멤버 접근 보강으로 노출한다(접근자 미러가 아니다). 도구 이름은 `Name=`으로 둔다. 미러에 `Validate`를 둔다. `TryCalcBounds`는 UE `FindBounds` 식을 옮기고 루프 닫는 구간만 고친다. CV9.
 - **D20 FrameRate·FrameTime** — Core `Time`에 최소 타입 `FrameRate`(분자·분모 int32)·`FrameNumber`(int32)·`FrameTime`(프레임 + subframe float)을 두고 UE `AsFrameTime`·`AsSeconds` 식을 옮긴다. `RemoveRedundantKeys` 표본판이 `Optional<FrameRate>`로 쓴다. 제거 뒤 `AutoSetTangents`를 부르지 않는 D10의 결과 차이는 7.2절에 적었다. CV2.
 - **D21 압축 정합** — 평가 진입에서 O(1) 크기 대조(enum 범위, keyCount ≥ 2, `packed.Size() == ExpectedPackedSize(…)`)를 하고, 불일치면 `Evaluate`는 quiet NaN, `TryEvaluate`는 InvalidArgument다. 검증 hook은 같은 정합과 byte 값·시간 정렬까지 보고 decode·대입에서 거부한다.
+- **D22 쿠킹용 결정적 평가**(2026-11-27, 사용자 결정) — 런타임 `Evaluate`는 D17(UE 비트) 그대로, 쿠킹 byte에 들어가는 평가만 `EvaluateDeterministic`(수학 정책 `CurveMathDeterministic` — DeterministicMath Atan·Acos·Cos·Pow)을 쓴다(5.9절). 대안: 전부 결정적(UE 비트 대조를 잃음), 그대로 둠(쿠킹 byte가 호스트마다 다름).
 
 ## 19. 확인하지 못한 것
 
@@ -40,6 +41,7 @@
 
 ## 20. 변경 이력
 
+- **개정 14(2026-11-27, D22)**: 5.9절 쿠킹용 결정적 평가(수학 정책 인자, `TangentCurve::EvaluateDeterministic`), 17절 CV11, 문서를 장별 폴더로 나눔(08f5d4964).
 - **개정 1 초안(2026-11-18, 36027f9)**: 값 타입·평가·편집·핸들·압축 설계, 결정 D1–D15, 단계 CV1–CV7.
 - **개정 13(2026-11-18, CV10 묶음 끝 리뷰 반영)**: 빈 루프 커브를 받는 미러 hook(12.1절·I4), enum Binds 열거자 1:1 AST 대조 RMC2401(I2), 닫는 구간 길이 = offset(12.2절·I5), 설정 배열 연산 정규화는 hook 없이(I7), UE 범위 함수 형식 명시(I6), 15절 32 반례 탐색 결과, 진행 표 CV10 완료.
 - **개정 12(2026-11-18, CV10)**: 17절 진행 표에 상태 칸(CV1–CV10 완료·커밋), 17.9절(다른 문서 반영 목록·남은 일·두지 않은 UE 기능·UE 결함 기록·한계). 다른 문서: 에셋 시스템 Curve 행, Core 상세 G09, InterpCurve 구현 문서, 리플렉션 보강 23–25절, 리플렉션·빌드 보강 4.5절.

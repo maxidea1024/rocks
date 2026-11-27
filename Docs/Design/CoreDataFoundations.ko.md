@@ -1,6 +1,6 @@
 # Core 데이터 기반 보강(A0-C) 설계
 
-기준일: 2026-11-12, 초안 3(교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Encoding/Sha256.h`).
+기준일: 2026-11-27, 초안 4(2.2절 `Cos`·`Atan` 추가 — 커브 쿠킹 평가 CurveData D22). 초안 3(2026-11-12, 교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Encoding/Sha256.h`).
 
 원칙: 표준 라이브러리 없이 Core에 구현한다. 외부 데이터(UCD·시험 데이터)는 고정 버전 원본을 저장소에 두고 생성기로 표를 만든다(라이선스 고지 포함). 결과가 호스트·CRT·locale에 따라 달라질 수 있는 연산은 쓰지 않는다.
 
@@ -92,6 +92,9 @@ double Floor(double x) noexcept;  double Trunc(double x) noexcept;  double Round
 double Exp2(double x) noexcept;   double Log2(double x) noexcept;
 double Pow(double base, double exponent) noexcept;   // base ≥ 0만(음수·−Inf는 고정 NaN). Pow(x, ±0) = Pow(1, y) = 1(NaN 입력 포함), Pow(±0, y<0) = +Inf, Pow(+Inf, y>0) = +Inf
 double SinPi(double x) noexcept;  double CosPi(double x) noexcept;   // sin(πx)·cos(πx)
+double Cos(double x) noexcept;    // 라디안(2026-11-27 — 커브 쿠킹 평가 CurveData D22)
+double Atan(double x) noexcept;   // 라디안, [−π/2, π/2](같은 날 — 같은 이유)
+double Acos(double x) noexcept;   // 라디안, [0, π](MikkTSpace·가중 법선 — MeshAnimationAssets MA-D5)
 double Sinc(double x) noexcept;   double Lanczos(double x, int lobes) noexcept;   // SinPi로 정의
 double SrgbToLinear(double encoded) noexcept;   double LinearToSrgb(double linear) noexcept;   // IEC 61966-2-1 구간 함수
 double Gamma22ToLinear(double encoded) noexcept;                                             // x^(11/5)(bUseLegacyGamma, 정확한 2.2)
@@ -101,13 +104,14 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 - 구현:
   - `SinPi`·`CosPi`: x − RoundHalfEven(2x)/2는 오차 없이 계산되므로 [−¼, ¼]로 정확히 줄인 뒤 21·22차 Taylor(cos(πx)는 4분면 번호를 하나 옮겨 sin으로). 0의 부호는 IEEE 754-2019 권고(sinPi(±n) = ±0, cosPi(n + ½) = +0). Lanczos·Sinc는 이것을 쓴다(π·x를 먼저 곱하면 정수 근처 0점에서 정확도를 잃는다). Lanczos는 |x| ≥ L/2에서 창 함수 분자를 sin(π(L − |x|)/L)로 계산한다(L − |x|는 Sterbenz로 정확 — 지지 경계 근처의 상대 오차 증폭을 없앤다).
-  - 일반 `Sin`·`Cos`는 쓰는 곳(텍스처 파이프라인은 SinPi만 쓴다)이 생길 때 3단 Cody-Waite π/2 축소(fdlibm 방식)로 추가한다.
+  - 일반 `Cos`(2026-11-27 — 첫 사용처는 커브 쿠킹 평가의 Cardano 세 실근, CurveData D22): 3단 Cody-Waite π/2 축소(fdlibm 방식 — π/2를 33비트씩 세 조각 상수로, 비트 패턴 고정)로 r = x − n·π/2를 double-double(r, rLow)로 얻고, n mod 4에 따라 sin·cos 핵(|r| ≤ π/4, 21·22차 Taylor — SinPi·CosPi와 같은 계수 생성 방식, rLow는 1차 보정 cos(r + e) ≈ cos r − e·sin r)을 고른다. |x| ≤ 2^20·π/2에서 축소가 정확하다(n < 2^20 — 조각 곱이 오차 없다). 그보다 크면 같은 식으로 결정적인 값을 내지만 정확도 상한은 보장하지 않는다(쓰는 곳 없음 — 생기면 Payne-Hanek). ±Inf·NaN은 고정 NaN. 일반 `Sin`은 쓰는 곳이 생길 때 같은 핵으로 더한다.
+  - `Atan`(같은 날 — 커브 쿠킹 평가의 가중 접선 각도, UE `atanf`): 부호를 떼고 |x| > 1이면 π/2 − atan(1/|x|)(1/|x|는 double-double 나눗셈). [0, 1]을 k/8(k = 0–8)에 가장 가까운 점으로 나눠 atan(x) = atan(k/8) + atan(r), r = (x − k/8)/(1 + x·k/8)을 double-double로 계산하고(|r| ≤ 1/16 남짓) atan(r)는 홀수 Taylor 17차까지를 double-double로 더한다. atan(k/8)·π/2는 생성 표의 double-double 상수(`AtanTables.generated.h` — `math-tables` 생성기의 400비트 고정소수점). ±Inf → ±π/2(가장 가까운 double), ±0 → ±0, NaN → 고정 NaN.
   - 정밀도가 필요한 곳은 오차 없는 변환(Knuth TwoSum, Dekker 분할 곱 — FMA 없이 기본 연산만)으로 두 double의 합(double-double)을 쓴다.
   - `Log2`: 지수와 m ∈ (√½, √2]로 나누고 f = m − 1(정확), s = f/(2 + f)를 double-double로 나눈 뒤 ln m = 2s + (2/3)s³ + 2s·s⁴·(1/5 + s²/7 + …)의 앞 두 항을 double-double로, 나머지를 double로 계산한다(상대 오차 약 2^−66). 1/ln2도 double-double 상수.
   - `Exp2`(double-double 지수 t): n = RoundHalfEven(t.hi), r = t − n(정확), a = r·ln2(double-double), e^a = 1 + a + a²·Q(a)(Q는 18차 Taylor)에서 큰 항을 정확히 더하고 작은 항을 모아 한 번 반올림한 뒤 2^n을 곱한다(정규 결과는 정확, 비정규 결과는 한 번 더 반올림).
   - `Pow` = Exp2(y · Log2 x)를 지수까지 double-double로 계산한다(|y·log2 x|가 1100을 넘으면 +Inf·0이 확실). sRGB 함수는 상수 0.055·1.055와 밑 (x + 0.055)/1.055를 double-double로, 지수는 정확한 12/5·5/12로 계산하고, LinearToSrgb는 거듭제곱을 double-double로 남겨 1.055·p − 0.055의 상쇄가 오차를 키우지 않게 한다. Gamma22는 정확한 11/5 지수.
   - 계수는 1/n!·1/(2k+1)을 컴파일 시점 IEEE 나눗셈으로 만든 상수다(clang의 상수 접기는 대상과 무관하다). ln2·1/ln2·0.055·1.055(각 hi·lo)·π·√2는 비트 패턴으로 고정한다. 정확도와 무관하게 **결과 비트의 결정성**이 계약이다.
-  - 정확도(가장 가까운 double까지의 비트 거리, 2.3의 생성 기준값 표로 시험): 상한 Exp2·Log2 1, Pow·SinPi·CosPi·sRGB·Gamma22 2(비정규 결과는 1 더). 측정 최대: Log2 0, 나머지 모두 1(Acos 1)(교차검증에서 찾은 최악 입력 — 예: Pow(0.77…, 2701.28…) 이전 9 ulp — 포함).
+  - 정확도(가장 가까운 double까지의 비트 거리, 2.3의 생성 기준값 표로 시험): 상한 Exp2·Log2 1, Pow·SinPi·CosPi·sRGB·Gamma22 2(비정규 결과는 1 더), Cos(|x| ≤ 2^20·π/2)·Atan 2. 측정 최대: Log2 0, 나머지 모두 1(Acos 1)(교차검증에서 찾은 최악 입력 — 예: Pow(0.77…, 2701.28…) 이전 9 ulp — 포함).
 - 표 생성(`Rocks.ToolTests math-tables --root . [--write]`, 정책 검사로 갱신 여부 확인): x^2.4·x^(1/2.4)·x^2.2는 유리수가 아니므로 반올림 경계 판정을 정수 비교로 한다. 지수 12/5이면 후보 값 m에 대해 m^5와 q^12를 BigInteger 분수로 정확히 비교한다(2.2 = 11/5, 1/2.4 = 5/12도 같은 방식).
   - `SrgbByteToLinear` 표: decode(k/255)를 정확히 반올림한 float.
   - `LinearToSrgbByte` 경계: t_k = decode((k + 0.5)/255)(부호화 공간의 중간점 — AssetSystem 12.2절의 round-half-up 양자화와 같다)이고, 표에는 t_k 이상인 가장 작은 float를 저장한다(가장 가까운 float가 아니다). 그래서 8비트 경로는 정확한 반올림이고, 16비트·float 경로(`LinearToSrgb`)는 근사 Pow를 쓰는 다른 의미다(문서화).
@@ -117,6 +121,7 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 - 기준값: 범위 경계·특수값·정확한 경우(비정규 포함 2^n의 Exp2·Log2, 정수·반정수의 SinPi·CosPi와 0의 부호, Pow 특수값, Lanczos 비트 대칭 등)는 개별 시험으로, 나머지는 아래 digest로 고정한다. 같은 foundation 시험이 Windows x64·macOS arm64(CI)·Android arm64(arm64 기기 — x64 에뮬레이터는 해당 없음)에서 돌므로 호스트 사이 비트 비교가 된다. Windows는 Debug와 Release(ThinLTO)의 digest가 같음을 확인했다. float 입력 함수(`LinearToSrgbByte`)는 float 비교만 하고 반올림이 없어(경계 표의 이분 탐색) 구성상 호스트와 무관하다(교차검증에서 2^32 전수를 기본 환경과 FTZ+DAZ+RZ 환경에서 비교해 차이 0).
 - 정확도: `Rocks.ToolTests math-tables`가 BigInteger 400비트 고정소수점으로 계산한 기준값 표(`Tests/DeterministicMathReference.generated.h` — 함수별 고정 시드 xorshift 표본 150–230개와 교차검증의 최악 입력, 정책 검사로 갱신 여부 확인)와 비교해 2.2의 상한을 검사한다. 생성기 값은 Python decimal 독립 계산과 대조했다.
+- Cos·Atan(2026-11-27): 기준값 표 `CosReference`·`AtanReference`(Cos는 0·축소 경계 n·π/4 근처·큰 n·작은 |x|, Atan은 ±1·k/8 경계·1/x 분기·0 근처·큰 |x|·비정규 입력)와 특수값 개별 시험. 기존 `DeterministicMath_GoldenDigest`는 바꾸지 않는다(기존 함수의 비트가 그대로임을 보인다). 두 함수는 별도 digest `DeterministicMath_TrigGoldenDigest`(같은 LCG 방식)로 고정하고 `Version`은 1 그대로다(기존 결과 비트가 바뀌지 않는다 — 새 함수의 결과가 바뀌면 그때 올린다).
 - 버전 강제: 모든 함수와 분기(비정규 결과·입력, |x| ≥ 2^52의 SinPi·CosPi, 여러 lobes, 범위 밖 sRGB, Gamma22·Sinc, byte 표 256칸, LinearToSrgbByte)를 덮는 고정 시드 LCG 표본 4096개의 출력 비트 FNV-1a digest와 비정규 결과 digest를 `Version`과 함께 시험에 고정한다(`DeterministicMath_GoldenDigest`). 결과가 바뀌었는데 Version을 올리지 않으면 실패한다.
 - 소스 정책(`deterministic-math-sources`, `Policy.DeterministicMathSources`): Private은 생성 표·자기 공개 헤더·`Platform/Memory.h`·`Base/Types.h`만 include한다(PlatformMath·CRT 수학 헤더는 header inline 근사 명령을 끌어와 외부 심볼에 보이지 않는다). 공개 헤더는 `Base/Types.h`만 include하고 함수 본문을 두지 않는다. long double을 쓰지 않는다.
 - 오브젝트 검사(`DeterministicMathObjectCheck`, 도구 시험 `Native.DeterministicMathObjects`, Android 교차 빌드에서는 host 전용 `objects` 명령): 이번 구성의 compile DB에서 `DeterministicMath/Private` 번역 단위 오브젝트를 찾는다. Release ThinLTO bitcode는 compiler 옆 clang으로 `-O2 -x ir` 기계어를 만든 뒤 검사한다(backend가 libcall·명령을 고르기 전이라 bitcode로는 볼 수 없다). 도구는 compiler 옆 → PATH → (macOS) Xcode `nm`·`objdump` 순으로 찾는다.

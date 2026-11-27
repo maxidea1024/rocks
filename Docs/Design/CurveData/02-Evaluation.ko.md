@@ -152,6 +152,19 @@ Cbrt(x) = x > 0 ? pow(x, 1.0/3.0) : x < 0 ? -pow(-x, 1.0/3.0) : 0
 - `NameStepCurve::Evaluate`: UE `FNameCurve`에는 평가 함수도 기본값 칸도 없다. Rocks는 기본값 칸을 두고 String과 같은 규칙으로 평가한다(D9).
 - UE는 "time 이하인 마지막 키"를 선형 탐색으로 찾는다. 결과가 같으므로 Rocks는 이진 탐색이다.
 
+### 5.9 쿠킹용 결정적 평가 — D22(2026-11-27, 사용자 결정)
+
+쿠킹 byte(쿠킹 패키지·너겟·에디터가 저장하는 구운 원본)에 들어가는 커브 값은 호스트와 무관해야 한다(CoreDataFoundations 2.1절). 런타임 평가(`Evaluate`)는 D17 그대로 UE와 같은 비트(Windows x64)이고, 쿠킹 경로만 결정적 평가를 쓴다(사용자 결정 2026-11-27 — 텍스처 빌드가 이미 결정적 수학을 쓰는 것과 같은 정책).
+
+- 가중 경로의 C 런타임 호출 다섯을 수학 정책 인자로 바꾼다: `math::CurveMathPlatform`(기본 — 지금 함수 그대로)과 `math::CurveMathDeterministic`(Curves 모듈 — DeterministicMath). 정책은 `float Atan(float)`, `double Acos(double)`, `double Cos(double)`, `double CubeRoot(double)` 네 함수다.
+  - 결정적 정책: Atan은 `(float)deterministic::Atan(double)`, Acos·Cos는 `deterministic::Acos`·`Cos`, 세제곱근은 부호를 떼고 `deterministic::Pow(|x|, 1.0 / 3.0)`(UE와 같은 지수 상수, 0은 0)이다.
+  - √는 IEEE 기본 연산이라 두 정책이 같다(정책에 넣지 않는다). `CurveSinCos`는 이미 다항식이다. Floor·fmod는 수학적으로 정확한 결과가 하나뿐이라 호스트와 무관하다(NaN 비트만 다를 수 있다 — 아래).
+  - `SolveCurveCubic`·`WeightedCurveControls`·`WeightedCurveSegment`·`EvalCurveSegment`와 커브 평가 진입이 정책 템플릿 인자(기본 `CurveMathPlatform`)를 받는다. 기본 경로의 코드·비트는 바뀌지 않는다.
+- 공개 API: `TangentCurve::EvaluateDeterministic(float time, float defaultValue = 0) const` — `Evaluate`와 같은 의미(외삽·순환·빈 커브·특수 입력 5.1–5.6절)이고 수학 정책만 결정적이다. 결과가 NaN이면 고정 quiet NaN(0x7FC00000)을 낸다(CPU마다 다른 NaN 비트를 쿠킹에 넣지 않는다).
+  - `PlainCurve`·계단 커브·`PackedTangentCurve`(Linear·Constant 구간)는 기본 연산뿐이라 따로 두지 않는다. `PackedTangentCurve`의 가중 구간은 쓰는 곳이 생길 때 같은 정책으로 넓힌다.
+- 정확도: 결정적 정책의 결과는 `Evaluate`와 비트가 다를 수 있다(가중 구간에서 Atan·Acos·Cos·Pow 각 2 ulp 이내의 차가 Cardano 근을 거쳐 퍼진다). 시험은 비가중 구간에서 두 평가가 비트까지 같고, 가중 구간에서 상대 오차 안임을 본다. UE와의 비트 대조는 `Evaluate`의 몫이다.
+- 쓰는 곳: 색 커브 atlas 굽기(CurveAssets 4.3절), 머티리얼 ColorRamp 상수(MaterialSystem 6.13절 MS2f4). 둘 다 CurveAssets의 결정적 색 평가(`ColorCurveAsset::EvaluateDeterministic` — 조정의 pow도 결정적, CurveAssets 2.4절)를 거친다.
+
 ## 6. 접선 자동 계산 — `TangentCurve::AutoSetTangents(float tension = 0)`(RC 680–755)
 
 키마다 다음을 한다(가중치는 건드리지 않는다).
