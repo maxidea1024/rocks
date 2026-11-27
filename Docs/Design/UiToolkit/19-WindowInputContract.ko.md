@@ -70,8 +70,9 @@
 - `platform::WaitForMessages(uint32 ms)`.
   - 어느 창의 대기 큐가 비어 있지 않으면 바로 돌아온다.
   - 아니면 OS 메시지·깨움·제한 시간 중 먼저 온 것까지 기다린다. Win64는 `MsgWaitForMultipleObjectsEx(QS_ALLINPUT, MWMO_INPUTAVAILABLE)`, Android·Mac은 OS 스레드가 신호하는 condition variable이다(Android는 surface 소실 같은 UI 스레드 콜백에서도 신호한다).
+- `platform::HasPendingWindowEvents()`: 대기가 바로 돌아오는 조건(가져가지 않은 창 이벤트)이다. 시험은 대기 시간을 재지 않고 이 조건을 단언한다.
 - `platform::WakeMessageWait()`: 다른 스레드에서 대기를 푼다(비동기 작업 완료). Win64는 `PostThreadMessage`, 나머지는 condition variable notify다.
-- 대기 시간은 호스트가 모든 `Application`의 다음 타이머 마감으로 정한다(`Application::NextTimerDeadline` — caret 깜빡임·툴팁·하위 메뉴 0.5초 지연). 지금의 고정 50 ms를 대신한다.
+- 대기 시간은 호스트가 모든 `Application`의 다음 타이머 마감으로 정한다(`Application::SecondsUntilNextTimer` — caret 깜빡임·툴팁·하위 메뉴 0.5초 지연). 지금의 고정 50 ms를 대신한다.
 - 창이 `TakeEvents`하지 않으면 그 큐가 차서 대기가 늘 바로 돌아온다. 호스트는 매 루프 모든 창을 `TakeEvents`해야 한다(계약).
 - `Window::PumpEvents`는 창 하나짜리 호스트 편의 함수(`PumpMessages` + `TakeEvents`)로 남긴다. `Window::WaitForEvents`는 지운다.
 - UE는 대기 API 없이 엔진 루프가 펌프하고 쉰다(LaunchEngineLoop.cpp 5784–5797행). Rocks는 에디터식 UI 앱이 입력이 없을 때 CPU를 쓰지 않게 대기를 둔다.
@@ -132,7 +133,7 @@
 
 | 단계 | 범위 | 완료 판정 |
 |---|---|---|
-| UW7e | 스레드 계약(문서, Release 밖 단언)<br>창 모드(`SetWindowMode`·`GetWindowMode`, 두 번 누르기 표지, 제목 줄 위젯의 전체 화면 해제, `ToggleFullscreen`·`FullscreenCaption`·backend 전환 제거)<br>펌프 수준 대기(`PumpMessages`·`TakeEvents`·`WaitForMessages`·`WakeMessageWait`, `Application::NextTimerDeadline`, 창 단위 `WaitForEvents` 제거 — 50 ms 결함 수정)<br>UiDemo 루프 이관 | PlatformWindow 시험: 다른 창의 미룬 이벤트가 있으면 대기가 바로 돌아온다, `WakeMessageWait`·보낸 메시지로 대기가 풀린다, 모드 왕복(실제 모드)<br>UiFramework 시험: 타이머 마감<br>self-test |
+| UW7e | 스레드 계약(문서, Release 밖 단언)<br>창 모드(`SetWindowMode`·`GetWindowMode`, 두 번 누르기 표지, 제목 줄 위젯의 전체 화면 해제, `ToggleFullscreen`·`FullscreenCaption`·backend 전환 제거)<br>펌프 수준 대기(`PumpMessages`·`TakeEvents`·`WaitForMessages`·`WakeMessageWait`, `Application::SecondsUntilNextTimer`, 창 단위 `WaitForEvents` 제거 — 50 ms 결함 수정)<br>UiDemo 루프 이관 | PlatformWindow 시험: 다른 창의 미룬 이벤트가 있으면 대기가 바로 돌아온다, `WakeMessageWait`·보낸 메시지로 대기가 풀린다, 모드 왕복(실제 모드)<br>UiFramework 시험: 타이머 마감<br>self-test |
 | UW7f | 영역 지도 게시(`WindowRegionMap`·`PublishRegionMap`·`BuildWindowRegionMap`, hit grid 항목 순회, `popupOpen`)<br>`RegionHitTest` delegate 제거 | 지도와 `QueryWindowRegion`의 점 격자 동치(메뉴 열림·최대화·툴팁·넘침·Reset 뒤)<br>판정 순서(가장자리가 Caption보다 먼저 — 기존 CustomFrameHitZones 이관)<br>Win64 판정 시험 |
 | UW7g | DPI(프로세스 PMv2, `DpiScale`·`ConsumeDpiChange`, `AdjustWindowRectExForDpi`·숨긴 생성, `WM_DPICHANGED` 배율 먼저, 호스트 루트 변환 배율, 글꼴·SVG 배율, snapshot·self-test 배율 1) | 가짜 배율 2에서 배치·hit·영역 지도·작업 영역 시험<br>`WM_DPICHANGED`를 숨긴 창에 보내 배율이 먼저 바뀌는지<br>실제 모니터는 사람 확인 |
 | UW7h | 텍스트 입력 문맥(UiFramework `TextInputContext`·변경 통지, PlatformWindow `TextInputSystem`·`TextInputClient`, Win64 IMM 기록·표지 이벤트·`WM_IME_CHAR` 삼키기, 후보창 `CFS_EXCLUDE`)<br>`EditableTextElement`가 context 구현(미리보기 층, 확정 1회)<br>조합 이벤트·`InputEvent::composition`·`ui::Platform` 조합 함수·`InlineComposition.h` 제거<br>이관 대상: InputEvent.h, InputState.cpp, Application.cpp, InputAdapter.cpp, EditableTextElement.cpp, EditableTextWidgetTests.cpp(가짜 system), GameHud.cpp, Win64·Android·Unsupported 구현 | context 시험: UTF-16 위치 변환·조합 범위·선택·확정 1회<br>IMM 기록 시험: 확정 + Left 순서, 연속 확정 두 개, context 해제 뒤 기록 버림, 넘침<br>`InputEvent` trivially copyable<br>한국어 IME 사람 확인 |

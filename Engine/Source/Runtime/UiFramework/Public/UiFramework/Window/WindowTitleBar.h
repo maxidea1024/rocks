@@ -34,6 +34,9 @@ public:
         Delegate<void()> onMinimize{};
         Delegate<void()> onToggleMaximize{};
         Delegate<void()> onClose{};
+        // 전체 화면에서 제목 줄을 두 번 누르면 부른다(UE SWindowTitleBarArea
+        // RequestToggleFullscreen — 호출자가 창 모드로 돌린다). 비우면 두 번 누르기를 무시한다.
+        Delegate<void()> onToggleFullscreen{};
     };
 
     explicit WindowTitleBar(Allocator& allocator,
@@ -43,7 +46,8 @@ public:
     // 창이 최대화되어 있으면 최대화 버튼을 복원 모양으로 바꾼다.
     void SetMaximized(bool maximized) noexcept;
     // 전체 화면이면 최대화 버튼을 "전체 화면 나가기"로 바꾼다(누르면 onToggleMaximize — 호출자가
-    // 전체 화면을 끈다).
+    // 전체 화면을 끈다). 전체 화면에서 막대는 Client로 답하고(끌어 옮기지 않음) 두 번 누르기를
+    // onToggleFullscreen으로 받는다(Docs/Design/UiToolkit 19.2절).
     void SetFullscreen(bool fullscreen) noexcept;
     // 비활성 창은 제목과 앱 아이콘을 흐리게 그린다(InactiveWindowTitleOpacity).
     void SetActive(bool active) noexcept;
@@ -58,6 +62,7 @@ public:
     const SharedPtr<WindowControlButton>& ControlButton(WindowButtonRole role) const noexcept;
 
     input::WindowRegion GetWindowRegion() const noexcept override;
+    PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     Vec2 ComputeDesiredSize(float) const noexcept override;
     Result<void> Arrange(const Geometry& geometry) noexcept override;
 
@@ -71,7 +76,9 @@ private:
     SharedPtr<TextLabel> title_;
     SharedPtr<WindowControlButton> buttons_[3];
     Delegate<Result<SharedPtr<TextLabel>>(StringView, const FontStyle&)> makeLabel_;
+    Delegate<void()> toggleFullscreen_;
     bool active_ = true;
+    bool fullscreen_ = false;
 };
 
 } // namespace rocks::ui

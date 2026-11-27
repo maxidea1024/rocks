@@ -34,6 +34,20 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator&) noexcept {
 void PumpSentMessages() noexcept {
 }
 
+// 창 backend가 없으면 펌프·대기할 것이 없다.
+void PumpMessages() noexcept {
+}
+
+void WaitForMessages(uint32) noexcept {
+}
+
+bool HasPendingWindowEvents() noexcept {
+    return false;
+}
+
+void WakeMessageWait() noexcept {
+}
+
 DesktopSessionState QueryDesktopSessionState() noexcept {
     return DesktopSessionState::Unknown;
 }

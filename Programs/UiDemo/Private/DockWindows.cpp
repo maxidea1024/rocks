@@ -33,6 +33,9 @@ Result<IntVec2> PreviewSize(Vec2 size) noexcept {
 constexpr LinearColor PreviewClear{0.025f, 0.03f, 0.04f, 1};
 // 끌기 미리보기 창의 불투명도(0–255)다.
 constexpr uint8 PreviewAlpha = 170;
+// 기다릴 마감이 없을 때 쉬는 상한(ms)과 초 → ms 배율이다.
+constexpr uint32 MaxIdleWaitMilliseconds = 1000;
+constexpr double MillisecondsPerSecond = 1000.0;
 
 } // namespace
 
@@ -165,14 +168,17 @@ Result<void> DockWindows::AttachChrome(Surface& host, StringView title, bool mai
              }),
          .onMinimize = Delegate<void()>::CreateLambda([window]() noexcept { window->Minimize(); }),
          .onToggleMaximize = Delegate<void()>::CreateLambda([window]() noexcept {
-             if (window->IsFullscreen()) {
-                 window->ToggleFullscreen();
+             if (window->GetWindowMode() != platform::WindowMode::Windowed) {
+                 (void)window->SetWindowMode(platform::WindowMode::Windowed);
              } else {
                  window->ToggleMaximize();
              }
          }),
-         .onClose =
-             Delegate<void()>::CreateLambda([window]() noexcept { window->RequestClose(); })});
+         .onClose = Delegate<void()>::CreateLambda([window]() noexcept { window->RequestClose(); }),
+         // 전체 화면 제목 줄 두 번 누르기는 창 모드로 돌린다(UE RequestToggleFullscreen — 19.2절).
+         .onToggleFullscreen = Delegate<void()>::CreateLambda([window]() noexcept {
+             (void)window->SetWindowMode(platform::WindowMode::Windowed);
+         })});
     if (built) {
         built = chrome.Value()->Construct({.titleBar = bar.Value(), .content = host.area});
     }
@@ -231,9 +237,9 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
                 return;
             }
 
-            // 루프의 공용 버퍼는 이 콜백 바깥(PumpEvents를 부른 Update)이 쓰는 중이라 지역 버퍼로
-            // 그 창만 그린다. 그 프레임의 present까지 기다린다(OS 크기 변경 루프가 다음 메시지로
-            // 가기 전 — Docs/Design/UiToolkit 18.5절).
+            // 루프의 공용 버퍼는 이 콜백 바깥(PumpMessages를 부른 Run 루프)이 쓰는 중이라 지역
+            // 버퍼로 그 창만 그린다. 그 프레임의 present까지 기다린다(OS 크기 변경 루프가 다음
+            // 메시지로 가기 전 — Docs/Design/UiToolkit 18.5절).
             UiDrawBuffer buffer(allocator_);
             auto rendered = Render(*source, false, buffer);
             Result<void> drawn = Result<void>::Success();
@@ -466,7 +472,8 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
 }
 
 Result<bool> DockWindows::Update(Surface& host, UiDrawBuffer& buffer) noexcept {
-    host.window->PumpEvents(host.queue);
+    // OS 메시지는 루프 앞 PumpMessages가 창마다 나눴다. 이 창의 몫만 가져온다(19.2절).
+    host.window->TakeEvents(host.queue);
     auto sized = host.consumed.TryResize(host.queue.Events().Size());
     if (!sized) {
         return Result<bool>::Failure(sized.Error());
@@ -529,7 +536,7 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
     // 최대화하면 테두리·여백을 빼고 최대화 버튼을 복원 모양으로 바꾼다.
     if (host.chrome) {
         host.chrome->SetMaximized(host.window->IsMaximized());
-        host.chrome->SetFullscreen(host.window->IsFullscreen());
+        host.chrome->SetFullscreen(host.window->GetWindowMode() != platform::WindowMode::Windowed);
         host.chrome->SetActive(host.window->IsActive());
     }
 
@@ -597,6 +604,19 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
     return Result<bool>::Success(true);
 }
 
+uint32 DockWindows::IdleWaitMilliseconds() const noexcept {
+    double wait = NoTimerDeadline;
+    for (const auto& surface : windows_) {
+        wait = math::Min(wait, surface->app.SecondsUntilNextTimer());
+    }
+
+    // 마감이 없으면 상한까지만 기다린다(창 밖 상태 변화를 늦게나마 본다). 올림해서 마감 전에 깨지
+    // 않게 한다.
+    const double milliseconds = math::Ceil(wait * MillisecondsPerSecond);
+    return milliseconds >= MaxIdleWaitMilliseconds ? MaxIdleWaitMilliseconds
+                                                   : static_cast<uint32>(milliseconds);
+}
+
 Result<void> DockWindows::ReturnTabs(Surface& surface) noexcept {
     while (surface.area->RegisteredCount()) {
         const auto info = surface.area->TabInfo(0);
@@ -631,6 +651,8 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
     while (!primary.window->IsCloseRequested()) {
         bool painted = false;
         closed.Clear();
+        // 이 스레드의 OS 메시지를 한 번에 처리해 창마다 나눈다(Docs/Design/UiToolkit 19.2절).
+        platform::PumpMessages();
         // 입력 콜백이 새 창을 열 수 있다. 슬롯 배열의 반복자·원소 참조를 콜백 너머로 보관하지
         // 않는다.
         const usize count = windows_.SlotCount();
@@ -675,7 +697,9 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
         }
 
         if (!painted && !primary.window->IsCloseRequested()) {
-            primary.window->WaitForEvents(50);
+            // 다음 타이머·툴팁 마감까지 기다린다(입력·깨움이 먼저 오면 바로 돈다). 다른 창 대기
+            // 큐에 남은 이벤트가 있으면 바로 돌아온다.
+            platform::WaitForMessages(IdleWaitMilliseconds());
         }
     }
 

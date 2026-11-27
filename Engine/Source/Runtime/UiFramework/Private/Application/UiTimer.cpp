@@ -36,6 +36,30 @@ Result<SharedPtr<UiTimer>> Application::StartFrameTimer(const SharedPtr<Element>
     return stored ? Move(timer) : Result<SharedPtr<UiTimer>>::Failure(stored.Error());
 }
 
+double Application::SecondsUntilNextTimer() const noexcept {
+    double wait = SecondsUntilNextToolTip();
+    if (timers_.IsEmpty()) {
+        return wait;
+    }
+
+    const double now = TimerTime();
+    for (const auto& weak : timers_) {
+        auto timer = weak.Lock();
+        if (!timer) {
+            continue;
+        }
+
+        // 프레임 타이머는 매 프레임 돈다(애니메이션).
+        if (timer->frame_.IsBound()) {
+            return 0;
+        }
+
+        wait = math::Min(wait, math::Max(0.0, timer->due_ - now));
+    }
+
+    return wait;
+}
+
 void Application::AdvanceTimers() noexcept {
     if (runningTimers_ || timers_.IsEmpty() || !root_) {
         return;

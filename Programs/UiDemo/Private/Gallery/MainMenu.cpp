@@ -125,10 +125,14 @@ Result<SharedPtr<MenuBar>> BuildMainMenu(GalleryContext& context, Application& a
                 Delegate<void()>::CreateLambda([&window]() noexcept { window.RequestClose(); });
             break;
         case MenuCommand::Fullscreen:
-            action.execute =
-                Delegate<void()>::CreateLambda([&window]() noexcept { window.ToggleFullscreen(); });
-            action.isChecked = Delegate<bool()>::CreateLambda(
-                [&window]() noexcept { return window.IsFullscreen(); });
+            action.execute = Delegate<void()>::CreateLambda([&window]() noexcept {
+                const bool windowed = window.GetWindowMode() == platform::WindowMode::Windowed;
+                (void)window.SetWindowMode(windowed ? platform::WindowMode::WindowedFullscreen
+                                                    : platform::WindowMode::Windowed);
+            });
+            action.isChecked = Delegate<bool()>::CreateLambda([&window]() noexcept {
+                return window.GetWindowMode() != platform::WindowMode::Windowed;
+            });
             break;
         case MenuCommand::Documentation:
             // 비활성 항목 견본이다(문서가 없는 오프라인 데모).

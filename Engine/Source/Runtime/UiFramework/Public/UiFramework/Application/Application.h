@@ -73,6 +73,15 @@ public:
 
     // 지연과 등장은 초 단위다. 주입한 시계는 시험이나 일시 정지 가능한 호스트에 사용한다.
     void SetToolTipClock(double (*clock)() noexcept) noexcept;
+    // 다음 타이머·툴팁 마감까지 남은 초다. 호스트가 펌프 대기 시간을 정한다(Docs/Design/UiToolkit
+    // 19.2절 — caret 깜빡임·툴팁 지연·하위 메뉴 지연). 프레임 타이머나 진행 중인 툴팁 페이드가
+    // 있으면 0, 기다릴 것이 없으면 NoTimerDeadline이다. 이미 지난 마감도 0이다.
+    //
+    // 사용 예(호스트 루프):
+    //   const double wait = app.SecondsUntilNextTimer();
+    //   platform::WaitForMessages(ToMilliseconds(wait));   // 입력·깨움·마감 중 먼저 온 것까지
+    double SecondsUntilNextTimer() const noexcept;
+
     // 타이머(StartTimer·StartFrameTimer) 시계(초)다. 시험이 지연을 결정적으로 진행할 때 주입한다.
     // 비우면 단조 시계다. 바꾸기 전에 건 타이머는 옛 시계 기준 예정 시각을 그대로 쓴다.
     void SetTimerClock(double (*clock)() noexcept) noexcept;
@@ -226,6 +235,8 @@ private:
     Array<WeakPtr<UiTimer>> timers_;
     bool runningTimers_ = false;
     void AdvanceTimers() noexcept;
+    // 다음 툴팁 마감(열기 지연·떠남 지연)까지 남은 초다. 페이드 중이면 0이다.
+    double SecondsUntilNextToolTip() const noexcept;
     struct Hover {
         uint32 user;
         Array<WeakPtr<Element>> path;

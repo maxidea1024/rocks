@@ -80,6 +80,8 @@ struct PointerEvent {
     PointerSource source = PointerSource::Mouse;
     input::MouseButton button = input::MouseButton::Left;
     float wheel = 0;
+    // 누름의 연속 횟수다(두 번 누르기면 2). Down에만 뜻이 있다.
+    uint8 clickCount = 1;
 };
 
 // 이벤트 소비와 포인터 capture 변경 요청이다.

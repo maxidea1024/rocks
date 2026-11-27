@@ -144,7 +144,9 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         const PointerEventType type = event.type == input::InputEventType::MouseDown
                                           ? PointerEventType::Down
                                           : PointerEventType::Up;
-        return pointer({type, position_, 0, 0, PointerSource::Mouse, event.mouseButton});
+        PointerEvent press{type, position_, 0, 0, PointerSource::Mouse, event.mouseButton};
+        press.clickCount = event.clickCount;
+        return pointer(press);
     }
 
     return Result<bool>::Success(false);

@@ -15,11 +15,18 @@ bool Window::IsMaximized() const noexcept {
     return false;
 }
 
-void Window::ToggleFullscreen() noexcept {
+void Window::PumpEvents(input::InputQueue& queue) noexcept {
+    PumpMessages();
+    TakeEvents(queue);
 }
 
-bool Window::IsFullscreen() const noexcept {
-    return false;
+Result<void> Window::SetWindowMode(WindowMode mode) noexcept {
+    return mode == WindowMode::Windowed ? Result<void>::Success()
+                                        : Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+WindowMode Window::GetWindowMode() const noexcept {
+    return WindowMode::Windowed;
 }
 
 bool Window::IsResizable() const noexcept {
@@ -40,9 +47,6 @@ WindowFrame Window::Frame() const noexcept {
 
 bool Window::ConsumeRepaint() noexcept {
     return true;
-}
-
-void Window::WaitForEvents(uint32) noexcept {
 }
 
 void Window::SetLiveResizeHandler(LiveResizeHandler&&) noexcept {

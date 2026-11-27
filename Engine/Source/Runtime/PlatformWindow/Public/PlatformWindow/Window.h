@@ -96,24 +96,42 @@ struct NativeWindowHandle {
     void* instance = nullptr;
 };
 
-// OS 창 하나다. 이벤트 펌프가 창 이벤트(닫기·크기·포커스)를 상태로 기록하고, 키보드·마우스 입력은
-// input::InputEvent로 바꿔 큐에 넣는다.
+// 창 모드다(UE EWindowMode — GenericWindow.h 14–27행). Windows의 Fullscreen은 지금
+// WindowedFullscreen과 같다(독점 전체 화면은 렌더러 스왑 체인 몫 — Docs/Design/UiToolkit 19.2절).
+// 최대화·복원은 창 모드가 아니라 OS 창 상태다(IsMaximized·ToggleMaximize).
+enum class WindowMode : uint8 {
+    Windowed,
+    // 테두리 없이 모니터를 덮는 창이다.
+    WindowedFullscreen,
+    Fullscreen
+};
+
+// OS 창 하나다. 메시지 펌프가 창 이벤트(닫기·크기·포커스)를 상태로 기록하고, 키보드·마우스 입력은
+// input::InputEvent로 바꿔 창마다 대기 큐에 넣는다. 호스트는 TakeEvents로 가져간다.
 //
-// 사용 예:
+// 사용 예(창 하나):
 //   auto window = platform::Window::Create(allocator, {.title = "Sandbox"});
 //   if (!window) { ... }                          // Unsupported(창 backend 없는 플랫폼)·OS 오류
 //   input::InputQueue queue(allocator);
 //   queue.TryInitialize(256);
 //   while (!window.Value()->IsCloseRequested()) {
-//       window.Value()->PumpEvents(queue);        // 메시지 펌프 + 입력 이벤트 수집
+//       window.Value()->PumpEvents(queue);        // PumpMessages + TakeEvents
 //       uint32 width = 0, height = 0;
 //       if (window.Value()->ConsumeResize(width, height)) { swapChain.Resize(width, height); }
 //       inputState.BeginFrame(queue.Events());
 //       queue.Clear();
 //   }
 //
-// 계약:
-// - 생성한 스레드(메시지를 받는 스레드)에서만 사용한다. Windows의 메시지 큐는 스레드에 묶인다.
+// 사용 예(창 여럿 — 입력 구동 호스트):
+//   platform::PumpMessages();                     // 스레드의 OS 메시지를 창마다 나눈다
+//   for (auto& host : windows) { host.window->TakeEvents(host.queue); ... }
+//   if (!painted) { platform::WaitForMessages(timeoutMs); }   // 남은 이벤트가 있으면 바로 돈다
+//
+// 계약(Docs/Design/UiToolkit 19.2절 스레드 계약):
+// - 창 객체를 소유한 게임 lane(창을 만든 스레드)에서만 부른다. Windows의 메시지 큐는 스레드에
+//   묶인다. Release 밖 구성에서 단언한다. 예외는 live resize 콜백(같은 스레드, OS modal 루프 안
+//   동기 호출)뿐이고, 그 콜백·렌더 lane 대기 펌프 안에서는 PumpMessages·WaitForMessages를 부르지
+//   않는다.
 // - 닫기 버튼은 창을 파괴하지 않고 IsCloseRequested만 세운다. 실제 파괴는 Window 소멸이다.
 // - 포커스를 잃으면 FocusLost 이벤트를 넣는다(InputState가 눌린 키를 모두 놓는다).
 // - 키는 스캔코드(물리 위치) 기준 input::Key이고, 입력 문자는 Text 이벤트(UTF-32)로 따로 온다.
@@ -131,9 +149,14 @@ public:
 
     virtual ~Window() = default;
 
-    // 이 스레드의 OS 메시지를 처리하고 이 창의 입력 이벤트를 queue에 넣는다. 큐가 가득 차면
-    // 이벤트를 버린다(InputQueue::DroppedCount).
-    virtual void PumpEvents(input::InputQueue& queue) noexcept = 0;
+    // 이 창의 대기 큐에 쌓인 입력 이벤트를 queue로 옮긴다(OS를 부르지 않는다 — PumpMessages가
+    // 채운다). 큐가 가득 차면 버리고 버린 수를 DroppedCount로 넘긴다. 터치 프레임 경계도 여기다.
+    // 호스트는 매 루프 모든 창을 TakeEvents한다(남은 대기 이벤트가 있으면 WaitForMessages가 바로
+    // 돌아온다).
+    virtual void TakeEvents(input::InputQueue& queue) noexcept = 0;
+
+    // 창 하나짜리 호스트의 편의 함수다: PumpMessages 뒤 TakeEvents.
+    void PumpEvents(input::InputQueue& queue) noexcept;
 
     virtual bool IsCloseRequested() const noexcept = 0;
     virtual void ClearCloseRequest() noexcept = 0;
@@ -152,9 +175,9 @@ public:
     // 클라이언트 좌표를 UI의 영역으로 바꾼다. 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
     virtual void SetRegionHitTest(RegionHitTest&& hitTest) noexcept;
     // 창 테두리를 끄는 동안(Windows 크기·이동 modal 루프 — 그동안 호스트 프레임 루프가 멈춘다)
-    // 크기가 바뀌면 PumpEvents 안에서 동기로 부른다(UE FSlateApplication::OnSizeChanged가 그
+    // 크기가 바뀌면 PumpMessages 안에서 동기로 부른다(UE FSlateApplication::OnSizeChanged가 그
     // 자리에서 그리는 것과 같다, Docs/Design/UiToolkit 9.1절 UW7a). 호스트는 ConsumeResize로 새
-    // 크기를 받아 스왑 체인을 바꾸고 한 프레임을 그린다. 콜백 안에서 PumpEvents를 다시 부르지
+    // 크기를 받아 스왑 체인을 바꾸고 한 프레임을 그린다. 콜백 안에서 PumpMessages를 다시 부르지
     // 않는다. 창은 콜백을 겹쳐 부르지 않는다. 최소화와 modal 루프 밖의 크기 변경은 부르지
     // 않는다(다음 프레임에 처리). 크기 조절 중에도 프레임 루프가 도는 플랫폼은 부르지 않는다.
     // 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
@@ -166,8 +189,6 @@ public:
     using LiveResizeHandler = Delegate<void()>;
     virtual void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept;
     virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
-    // 입력 구동 호스트가 다른 창을 포함한 스레드 메시지 또는 제한 시간까지 대기한다.
-    virtual void WaitForEvents(uint32 milliseconds) noexcept;
 
     virtual bool HasFocus() const noexcept = 0;
 
@@ -193,14 +214,17 @@ public:
     virtual void ToggleMaximize() noexcept;
     virtual void RequestClose() noexcept;
     virtual bool IsMaximized() const noexcept;
-    // 테두리 없는 전체 화면(창이 모니터를 덮는다 — UE WindowedFullscreen)을 켜고 끈다. 메뉴의
-    // "Enable Fullscreen"(Shift+F11 — UE MainFrame ToggleFullscreen)이 부른다.
-    virtual void ToggleFullscreen() noexcept;
-    virtual bool IsFullscreen() const noexcept;
+    // 창 모드를 바꾼다(UE SWindow::SetWindowMode). 메뉴 "Enable Fullscreen"(Shift+F11 — UE
+    // MainFrame ToggleFullscreen)과 전체 화면 제목 줄 두 번 누르기가 부른다. backend는 스스로
+    // 모드를 바꾸지 않는다. 같은 모드면 아무것도 하지 않는다. 지원하지 않는 모드는 Unsupported다(창
+    // backend가 없는 플랫폼은 Windowed 외 전부).
+    virtual Result<void> SetWindowMode(WindowMode mode) noexcept;
+    // 실제 창 모드다(UE GetWindowMode — Windows에서 Fullscreen을 요청하면 WindowedFullscreen이다).
+    virtual WindowMode GetWindowMode() const noexcept;
     // 크기를 바꿀 수 있는 창인지다(WindowDesc::resizable). 아니면 최대화도 할 수 없다.
     virtual bool IsResizable() const noexcept;
-    // client 좌표 한 점의 판정 영역이다. 직접 그린 창이면 크기 조절 가장자리 → UI 영역 순으로
-    // 정하고, OS 테두리 창은 UI 영역만 본다(Caption 또는 Client). 시험과 진단에도 쓴다.
+    // client 좌표 한 점의 판정 영역이다. 직접 그린 창이면 팝업 → 크기 조절 가장자리 → UI 영역
+    // 순으로 정하고, OS 테두리 창은 UI 영역만 본다(Caption 또는 Client). 시험과 진단에도 쓴다.
     virtual WindowZone HitZone(IntVec2 clientPoint) const noexcept;
     // 활성 창(제목 막대를 활성 색으로 그린다)인지다. 기본은 HasFocus와 같다.
     virtual bool IsActive() const noexcept;
@@ -314,5 +338,24 @@ ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept
 // 한다 (Docs/Design/UiToolkit 18.5절). Windows는 PeekMessage(PM_NOREMOVE | PM_QS_SENDMESSAGE)이고,
 // 보낸 메시지가 없는 플랫폼은 아무것도 하지 않는다. 창을 만든 스레드에서 부른다.
 ROCKS_PLATFORMWINDOW_API void PumpSentMessages() noexcept;
+
+// 이 스레드의 OS 메시지를 모두 처리해 창마다 대기 큐로 나눈다(Docs/Design/UiToolkit 19.2절 펌프
+// 수준 대기). 창을 만든 게임 lane에서 부른다. 닫기 요청(WM_QUIT)은 모든 창에 IsCloseRequested를
+// 세운다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+ROCKS_PLATFORMWINDOW_API void PumpMessages() noexcept;
+
+// 어느 창의 대기 큐에 이벤트가 남았으면 바로 돌아오고, 아니면 OS 메시지·WakeMessageWait·제한
+// 시간(ms) 중 먼저 온 것까지 기다린다. 게임 lane에서 부른다. 창 backend가 없는 플랫폼은 바로
+// 돌아온다.
+ROCKS_PLATFORMWINDOW_API void WaitForMessages(uint32 milliseconds) noexcept;
+
+// 어느 창의 대기 큐에 아직 가져가지 않은 이벤트가 있는지다(WaitForMessages가 바로 돌아오는 조건 —
+// Android는 지난 대기 뒤 신호가 있었는지). 게임 lane에서 부른다.
+ROCKS_PLATFORMWINDOW_API bool HasPendingWindowEvents() noexcept;
+
+// 다른 스레드에서 WaitForMessages를 깨운다(비동기 작업 완료 — 다음 루프가 결과를 본다). 어느
+// 스레드에서나 부를 수 있다. 기다리는 스레드가 없으면 다음 대기가 바로 돌아온다(Windows는 펌프
+// 스레드에 빈 메시지를 게시한다).
+ROCKS_PLATFORMWINDOW_API void WakeMessageWait() noexcept;
 
 } // namespace rocks::platform

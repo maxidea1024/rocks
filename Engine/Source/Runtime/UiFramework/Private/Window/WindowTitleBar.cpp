@@ -6,6 +6,9 @@ namespace rocks::ui {
 
 namespace {
 
+// 두 번 누르기의 누름 횟수다.
+constexpr uint8 TitleBarDoubleClickCount = 2;
+
 constexpr usize ButtonCount = 3;
 // 창 버튼 툴팁 글자다(UE SWindowTitleBar.cpp 636–653행).
 constexpr StringView MinimizeToolTip = "Minimize";
@@ -46,6 +49,7 @@ Result<void> WindowTitleBar::Construct(Args&& args) noexcept {
     }
 
     makeLabel_ = Move(args.makeLabel);
+    toggleFullscreen_ = Move(args.onToggleFullscreen);
     if (args.title) {
         auto titled = SetTitle(Move(args.title));
         if (!titled) {
@@ -152,6 +156,7 @@ float WindowTitleBar::DesiredHeight(const WindowStyle& style, float titleHeight)
 }
 
 void WindowTitleBar::SetFullscreen(bool fullscreen) noexcept {
+    fullscreen_ = fullscreen;
     if (const auto& button = ControlButton(WindowButtonRole::Maximize)) {
         button->SetFullscreen(fullscreen);
     }
@@ -169,7 +174,21 @@ WindowTitleBar::ControlButton(WindowButtonRole role) const noexcept {
 }
 
 input::WindowRegion WindowTitleBar::GetWindowRegion() const noexcept {
-    return input::WindowRegion::Caption;
+    // 전체 화면에서는 끌어 옮기지 않도록 Client로 답한다(UE SWindowTitleBarArea
+    // GetWindowZoneOverride).
+    return fullscreen_ ? input::WindowRegion::Client : input::WindowRegion::Caption;
+}
+
+PointerReply WindowTitleBar::OnPointerEvent(const PointerEvent& event) noexcept {
+    // 창 모드의 두 번 누르기는 OS가 제목 줄로 처리한다(최대화). 전체 화면에서만 여기서 받는다.
+    if (event.type == PointerEventType::Down && event.button == input::MouseButton::Left &&
+        event.clickCount >= TitleBarDoubleClickCount && fullscreen_ &&
+        toggleFullscreen_.IsBound()) {
+        toggleFullscreen_.Execute();
+        return {.handled = true};
+    }
+
+    return Element::OnPointerEvent(event);
 }
 
 Vec2 WindowTitleBar::ComputeDesiredSize(float) const noexcept {

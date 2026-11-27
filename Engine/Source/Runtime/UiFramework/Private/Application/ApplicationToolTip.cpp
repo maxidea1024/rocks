@@ -377,6 +377,26 @@ Result<void> Application::AttachToolTip(const PopupRequest& popup) noexcept {
     return Result<void>::Success();
 }
 
+double Application::SecondsUntilNextToolTip() const noexcept {
+    double wait = NoTimerDeadline;
+    const double now = ToolTipTime();
+    for (const ToolTipState& state : toolTips_) {
+        if (!state.attempted) {
+            wait = math::Min(wait, math::Max(0.0, state.due - now));
+        }
+
+        if (state.layer && toolTipFade_ > 0 && now - state.opened < toolTipFade_) {
+            return 0;
+        }
+
+        if (state.leaveDue != 0) {
+            wait = math::Min(wait, math::Max(0.0, state.leaveDue - now));
+        }
+    }
+
+    return wait;
+}
+
 void Application::AdvanceToolTips() noexcept {
     const double now = ToolTipTime();
     for (usize i = 0; i < toolTips_.Size();) {

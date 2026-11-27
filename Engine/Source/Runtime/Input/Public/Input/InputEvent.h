@@ -72,6 +72,8 @@ struct InputEvent {
     float force = 1.0f;
     bool hasForce = false;
     bool cancelled = false;
+    // 마우스 누름의 연속 횟수다(OS 두 번 누르기 메시지면 2 — UE OnMouseDoubleClick).
+    uint8 clickCount = 1;
 
     static InputEvent KeyDown(Key value, bool isRepeat = false) noexcept {
         InputEvent event;
@@ -120,11 +122,13 @@ struct InputEvent {
         return event;
     }
 
-    static InputEvent MouseDown(MouseButton button, float positionX, float positionY) noexcept {
+    static InputEvent MouseDown(MouseButton button, float positionX, float positionY,
+                                uint8 clicks = 1) noexcept {
         InputEvent event = MouseDown(button);
         event.x = positionX;
         event.y = positionY;
         event.hasPointerPosition = true;
+        event.clickCount = clicks;
         return event;
     }
 

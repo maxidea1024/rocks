@@ -1,4 +1,5 @@
 #include "Win64InlineComposition.h"
+#include <Core/Assert.h>
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
 #include <Platform/Win64/WideString.h>
@@ -262,25 +263,71 @@ bool ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
         text.Data(), text.ByteCount(), buffer, MaxTitleCharacters, windows::TextFit::Truncate));
 }
 
+class Win64Window;
+
+// 이 스레드가 만든 창 목록이다(펌프 수준 대기가 창 대기 큐를 본다 — Docs/Design/UiToolkit 19.2절).
+// 창은 만든 스레드에서만 쓰므로 스레드마다 따로 둔다.
+thread_local Win64Window* threadWindows = nullptr;
+// 마지막으로 메시지를 펌프한 스레드 ID다(WakeMessageWait가 빈 메시지를 게시한다). 0이면 없다.
+volatile LONG pumpThread = 0;
+// 창 대기 큐 용량이다(한 펌프 동안 다른 창 메시지를 처리하는 사이 쌓이는 입력).
+constexpr usize WindowPendingEvents = 256;
+// OS 두 번 누르기 메시지의 누름 횟수다.
+constexpr uint8 DoubleClickCount = 2;
+
 class Win64Window final : public Window {
 public:
     explicit Win64Window(Allocator& allocator) noexcept
-        : allocator_(allocator), deferred_(allocator) {
+        : allocator_(allocator), pending_(allocator) {
     }
 
     ~Win64Window() override {
+        Unlink();
         if (window_ != nullptr) {
             SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
             DestroyWindow(window_);
         }
     }
 
+    // 이 스레드의 OS 메시지를 모두 디스패치한다. 창 프로시저가 입력을 그 창의 대기 큐에 넣는다.
+    static void PumpThreadMessages() noexcept {
+        (void)InterlockedExchange(&pumpThread, static_cast<LONG>(GetCurrentThreadId()));
+        MSG message;
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            // 스레드 닫기 요청은 이 스레드의 모든 창에 알린다.
+            if (message.message == WM_QUIT) {
+                for (Win64Window* window = threadWindows; window; window = window->next_) {
+                    window->closeRequested_ = true;
+                }
+
+                continue;
+            }
+
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+
+    // 이 스레드의 창 중 대기 큐에 이벤트가 남은 창이 있는지다.
+    static bool AnyPendingEvents() noexcept {
+        for (Win64Window* window = threadWindows; window; window = window->next_) {
+            if (!window->pending_.Events().IsEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     Result<void> Create(const WindowDesc& desc) noexcept {
-        // 다른 창이 메시지를 펌프하거나 동기 Win32 호출이 재진입했을 때 입력을 보관한다.
-        auto initialized = deferred_.TryInitialize(256);
+        // 메시지 펌프가 디스패치한 이 창의 입력을 호스트가 TakeEvents로 가져갈 때까지 보관한다.
+        auto initialized = pending_.TryInitialize(WindowPendingEvents);
         if (!initialized) {
             return initialized;
         }
+
+        // 창 목록에 먼저 넣는다(생성 중 메시지도 이 창 대기 큐로 간다). 소멸자가 뺀다.
+        Link();
 
         // 제목은 OS 호출 전에 바꿔 둔다. 잘못된 UTF-8은 입력 오류다(Window::Create가 먼저 거른다).
         wchar_t title[MaxTitleCharacters];
@@ -354,22 +401,10 @@ public:
     const char* failedCall = nullptr;
     DWORD failedError = 0;
 
-    void PumpEvents(input::InputQueue& queue) noexcept override {
-        deferred_.DrainTo(queue);
-        queue_ = &queue;
-        MSG message;
-        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-            if (message.message == WM_QUIT) {
-                closeRequested_ = true;
-                continue;
-            }
-
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-
-        queue_ = nullptr;
-        // 프레임 경계: 이번 펌프에서 끝난 손가락 번호를 돌려받는다(TouchIndexAllocator).
+    void TakeEvents(input::InputQueue& queue) noexcept override {
+        AssertOwnerThread();
+        pending_.DrainTo(queue);
+        // 프레임 경계: 이번에 넘긴 이벤트에서 끝난 손가락 번호를 돌려받는다(TouchIndexAllocator).
         touches_.EndFrame();
     }
 
@@ -404,11 +439,6 @@ public:
         const bool requested = repaint_;
         repaint_ = false;
         return requested;
-    }
-
-    void WaitForEvents(uint32 milliseconds) noexcept override {
-        (void)MsgWaitForMultipleObjectsEx(0, nullptr, milliseconds, QS_ALLINPUT,
-                                          MWMO_INPUTAVAILABLE);
     }
 
     void SetRegionHitTest(RegionHitTest&& callback) noexcept override {
@@ -514,7 +544,7 @@ public:
         }
 
         // 전체 화면 창은 작업 표시줄을 덮으므로 모니터 전체가 팝업 영역이다.
-        RECT area = IsFullscreen() ? info.rcMonitor : info.rcWork;
+        RECT area = fullscreenStyle_ != 0 ? info.rcMonitor : info.rcWork;
         POINT corners[2] = {{area.left, area.top}, {area.right, area.bottom}};
         // 창이 화면 원점에 있으면 정상 결과도 0이므로 오류 코드로 구분한다.
         ::SetLastError(0);
@@ -556,12 +586,19 @@ public:
         return resizable_;
     }
 
-    void ToggleFullscreen() noexcept override {
-        ToggleBorderlessFullscreen();
+    Result<void> SetWindowMode(WindowMode mode) noexcept override {
+        AssertOwnerThread();
+        // 독점 전체 화면은 렌더러 스왑 체인 몫이라 Fullscreen도 테두리 없는 전체 화면이다(19.2절).
+        const bool fullscreen = mode != WindowMode::Windowed;
+        if (fullscreen != (fullscreenStyle_ != 0)) {
+            ToggleBorderlessFullscreen();
+        }
+
+        return Result<void>::Success();
     }
 
-    bool IsFullscreen() const noexcept override {
-        return fullscreenStyle_ != 0;
+    WindowMode GetWindowMode() const noexcept override {
+        return fullscreenStyle_ != 0 ? WindowMode::WindowedFullscreen : WindowMode::Windowed;
     }
 
     // 최대화된 client 사각형에서 자동 숨김 작업 표시줄이 붙은 가장자리를 1 px 남긴다. 창이 화면을
@@ -651,11 +688,31 @@ private:
     }
 
     void Push(const input::InputEvent& event) noexcept {
-        if (queue_ != nullptr) {
-            queue_->Push(event);
-        } else {
-            deferred_.Push(event);
+        pending_.Push(event);
+    }
+
+    // 창 객체는 만든 스레드(게임 lane)에서만 쓴다(Docs/Design/UiToolkit 19.2절 스레드 계약).
+    void AssertOwnerThread() const noexcept {
+#if !ROCKS_BUILD_RELEASE
+        ROCKS_ASSERT(ownerThread_ == CurrentThreadId());
+#endif
+    }
+
+    void Link() noexcept {
+        ownerThread_ = CurrentThreadId();
+        next_ = threadWindows;
+        threadWindows = this;
+    }
+
+    void Unlink() noexcept {
+        for (Win64Window** link = &threadWindows; *link; link = &(*link)->next_) {
+            if (*link == this) {
+                *link = next_;
+                break;
+            }
         }
+
+        next_ = nullptr;
     }
 
     void PushText(wchar_t unit) noexcept {
@@ -682,7 +739,8 @@ private:
         }
     }
 
-    void MouseButton(input::MouseButton button, bool down, LPARAM position) noexcept {
+    void MouseButton(input::MouseButton button, bool down, LPARAM position,
+                     uint8 clicks = 1) noexcept {
         const float x = static_cast<float>(static_cast<int16>(LOWORD(position)));
         const float y = static_cast<float>(static_cast<int16>(HIWORD(position)));
         // 버튼을 누른 채 창 밖으로 나가도 놓기 이벤트를 받도록 캡처한다.
@@ -693,7 +751,7 @@ private:
             }
 
             capturedButtons_ |= bit;
-            Push(input::InputEvent::MouseDown(button, x, y));
+            Push(input::InputEvent::MouseDown(button, x, y, clicks));
         } else {
             capturedButtons_ &= ~bit;
             if (!capturedButtons_ && GetCapture() == window_) {
@@ -812,7 +870,6 @@ private:
 
         switch (region) {
         case input::WindowRegion::Caption:
-        case input::WindowRegion::FullscreenCaption:
             return WindowZone::Caption;
         case input::WindowRegion::MinimizeButton:
             return WindowZone::MinimizeButton;
@@ -967,7 +1024,7 @@ private:
             // 이어진다).
             PushNonClientPressed();
             // 전체 화면 창은 제목을 끌어도 움직이지 않는다(모니터를 덮은 채로 — VS Code·Edge F11).
-            // 더블클릭(WM_NCLBUTTONDBLCLK)은 따로 와서 전체 화면 끄기를 그대로 한다.
+            // 전체 화면에서 UI 제목 줄은 Client로 답하고 두 번 누르기를 위젯이 받는다(19.2절).
             if (fullscreenStyle_ && wParam == HTCAPTION) {
                 return 0;
             }
@@ -989,8 +1046,7 @@ private:
             const auto frame = DefWindowProcW(window_, message, wParam, lParam);
             const input::WindowRegion region =
                 frame == HTCLIENT ? ClientRegion(lParam) : input::WindowRegion::Client;
-            if (region == input::WindowRegion::Caption ||
-                region == input::WindowRegion::FullscreenCaption) {
+            if (region == input::WindowRegion::Caption) {
                 return HTCAPTION;
             }
 
@@ -1003,11 +1059,6 @@ private:
                 return 0;
             }
 
-            if (wParam == HTCAPTION &&
-                ClientRegion(lParam) == input::WindowRegion::FullscreenCaption) {
-                ToggleBorderlessFullscreen();
-                return 0;
-            }
             break;
         case WM_SETCURSOR:
             if (reinterpret_cast<HWND>(wParam) == window_ && LOWORD(lParam) == HTCLIENT &&
@@ -1115,7 +1166,7 @@ private:
             break;
         case WM_IME_COMPOSITION:
             if (IsInlineCompositionWindow(window_) &&
-                RouteInlineComposition(window_, lParam, allocator_, queue_ ? *queue_ : deferred_)) {
+                RouteInlineComposition(window_, lParam, allocator_, pending_)) {
                 return 0;
             }
             break;
@@ -1150,7 +1201,8 @@ private:
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
-            MouseButton(input::MouseButton::Left, message != WM_LBUTTONUP, lParam);
+            MouseButton(input::MouseButton::Left, message != WM_LBUTTONUP, lParam,
+                        message == WM_LBUTTONDBLCLK ? DoubleClickCount : 1);
             return 0;
         case WM_RBUTTONDBLCLK:
         case WM_RBUTTONDOWN:
@@ -1297,8 +1349,10 @@ private:
     bool active_ = false;
     input::MouseCursor cursorShape_ = input::MouseCursor::Arrow;
     HINSTANCE instance_ = nullptr;
-    input::InputQueue* queue_ = nullptr;
-    input::InputQueue deferred_;
+    input::InputQueue pending_;
+    // 이 스레드의 창 목록 다음 창과 만든 스레드다.
+    Win64Window* next_ = nullptr;
+    uint64 ownerThread_ = 0;
     // 터치·펜 포인터의 손가락 번호 배정이다(창 스레드만 만진다).
     input::TouchIndexAllocator touches_;
     uint32 width_ = 0;
@@ -1559,6 +1613,32 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
 
     return Result<UniquePtr<GamepadBackend>>::Success(
         UniquePtr<GamepadBackend>(Move(created.Value())));
+}
+
+void PumpMessages() noexcept {
+    Win64Window::PumpThreadMessages();
+}
+
+void WaitForMessages(uint32 milliseconds) noexcept {
+    // 다른 창 메시지를 처리하는 사이 쌓인 대기 이벤트가 있으면 기다리지 않는다(19.1절 결함 — OS
+    // 큐는 비어 있어도 그 이벤트가 아직 호스트로 가지 않았다).
+    if (Win64Window::AnyPendingEvents()) {
+        return;
+    }
+
+    (void)MsgWaitForMultipleObjectsEx(0, nullptr, milliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+}
+
+bool HasPendingWindowEvents() noexcept {
+    return Win64Window::AnyPendingEvents();
+}
+
+void WakeMessageWait() noexcept {
+    const LONG thread = InterlockedCompareExchange(&pumpThread, 0, 0);
+    if (thread != 0) {
+        // 빈 메시지 하나로 대기를 푼다(다음 PumpMessages가 버린다).
+        (void)PostThreadMessageW(static_cast<DWORD>(thread), WM_NULL, 0, 0);
+    }
 }
 
 void PumpSentMessages() noexcept {

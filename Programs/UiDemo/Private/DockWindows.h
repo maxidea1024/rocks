@@ -68,6 +68,8 @@ private:
     Result<void> DrawFrame(UiDrawBuffer& buffer) noexcept;
     Result<void> UpdateDragImage(Surface& surface) noexcept;
     Result<void> ReturnTabs(Surface& surface) noexcept;
+    // 모든 창의 다음 타이머 마감까지 기다릴 시간(ms)이다(상한 있음).
+    uint32 IdleWaitMilliseconds() const noexcept;
     SharedPtr<DockManager> FindArea(Surface& source, Vec2 point, Vec2& clientPoint) noexcept;
     Result<void> FloatTab(Surface& source, StringView id, Vec2 point) noexcept;
     Allocator& allocator_;
