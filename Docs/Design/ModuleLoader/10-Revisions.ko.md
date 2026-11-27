@@ -2,6 +2,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 13 | 2026-11-27 | 모듈 시작 관찰자(3.16절): `ModuleStartObserver`·`SetStartObserver`. [시작 화면](../SplashScreen/README.ko.md) SP2가 `StartPhase` 진행을 보이려는 것이다. 로더는 부트 묶음이라 Progress에 의존하지 않고, Engine의 `ModuleStartProgress`가 구간을 연다. 버린 대안 둘 |
 | 12 | 2026-11-26 | [시작 화면](../SplashScreen/README.ko.md) 설계(SPD11)에 맞춰 `PostSplashScreen` 계열 단계를 두지 않는 근거를 3.3절·9.1절에 고쳐 적었다(단계 추가 없음) |
 | 11 | 2026-11-23 | ML5를 ML5a(엔진 플러그인 Modular)와 ML5b(Rocks Studio 적재)로 나눴다. ML5a 세부(3.15절): 플러그인 binaries 폴더 `<출력>/Plugins/<상대 경로>/Binaries/<Platform>/`(MD23), Modular 호스트는 켠 플러그인 모듈을 링크하지 않음, 플러그인 manifest, 실행 파일 manifest의 `plugins`·행 `order`(schema 4 — Monolithic 표 순서), manifest 사이 `buildId`·엔진 버전·툴체인 지문 대조, 로더 두 단계(해석 → 합치기), Windows는 manifest 순서로 import를 풀고(행 없는 공유 라이브러리는 부트 폐포 안이어야 함) macOS·Linux는 rpath, `EngineModular`가 플러그인 시험을 담음. 설계 리뷰(리뷰어 1명) 반영: 호스트 링크·순서 번호·로더 저장소·경로 모양·report 이름·`bin` 고정 경로·문서 불일치 |
 | 10 | 2026-11-22 | ML4b 구현 세부(3.14절): Modular 실행 파일은 빌드 생성 진입 스텁(Launch만 import), 실행 파일 모듈은 호스트 공유 라이브러리(MD21), 앱 기술 export(`RocksApplicationDescription`·창 변형), Launch Modular 진입(`RocksLaunchModularApplication` — 시동 할당자로 manifest 로더를 먼저 만듦), manifest 행 키 `executable`→`host`(schema 3, `executableEntry` 인자 제거, 호스트 행도 OS 적재), `FindHostSymbol`, `GeneratedModuleTable()`은 Monolithic에만, `HostSettingsOptions::modules` 필수, 시험 등록 머리, 입력 검사(Launch 거부 해제·Launch 없는 Modular 실행 파일 거부) |

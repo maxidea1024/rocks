@@ -124,7 +124,7 @@ public abstract class TestsModule : ModuleRules
         ["Gameplay"] = ["AssetTestFixtures", "ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
         // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars).
-        ["EngineAudio"] = ["ConfigTestFixtures"],
+        ["EngineAudio"] = ["ConfigTestFixtures", "AudioTools", "AudioOpus"],
         ["ImageCodec"] = ["Compression"],
         // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support; the function binding tests
         // (IA7) bind to the reflected handlers of InputActionsTestFixtures.

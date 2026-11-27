@@ -170,4 +170,9 @@ private:
 ROCKS_AUDIO_API Result<void> VerifyAudioChunk(const AudioChunkEntry& chunk,
                                               Span<const uint8> payload) noexcept;
 
+// 모든 청크의 크기·SHA-256을 확인한다(스트림 재생 로드 때 한 번 —
+// Docs/Design/AudioSystem 3.40.2절). view에 payload가 다 없으면 InvalidArgument(호출자가 일부만
+// 넘긴 보기), 청크 손상은 CorruptData다.
+ROCKS_AUDIO_API Result<void> VerifyAllAudioChunks(const AudioPlatformDataView& view) noexcept;
+
 } // namespace rocks::audio

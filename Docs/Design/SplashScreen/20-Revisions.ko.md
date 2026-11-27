@@ -10,3 +10,4 @@
 - 개정 4(2026-11-26): 최소 표시 시간(사용자 요구 "작업이 빨리 끝나도 2초는 보이게, 설정할 수 있게"): `ui.splash.min_seconds`(기본 2초), `CanHide()`, 넘기기 조건(9.7절·SPD15), 버린 대안에서 뺌(17절), 시험 8a.
 - 개정 5(2026-11-27): SP1b 설계 — 배치 덮어쓰기·Custom 칸·막대 덮어쓰기를 코드 API로(6.5절·SPD16, 설정 키 없음), 줄바꿈은 후속, 창 연기 시험은 `Sandbox --splash-self-test`(시험 10, 누수 검사는 후속).
 - 개정 6(2026-11-27): 기본·템플릿 스플래시 그림을 사용자가 준 흑요석 배경(생성형 AI, `Obsidian.png`)으로 바꿨다. Studio와 게임 기본은 같은 그림(왼쪽 스택 로고, 사용자 의견으로 왼쪽으로 50 px 옮김), 템플릿은 띠 오른쪽 위 심볼. 생성기를 원본 합성 방식으로 줄이고 `template_art.py`를 지웠다(12절).
+- 개정 7(2026-11-27): SP2 구현. 들어갈 단계를 `StartupProgressDesc::steps`로 미리 밝힘(8.1절), 원천 비율은 자기 진행 `selfFraction`의 최댓값(7.2절), 퍼센트·99%는 모델 몫, `StartupProgress`는 이동 가능한 값(11절), `StartPhase` 구간은 로더 시작 관찰자 + Engine `ModuleStartProgress`(8.1절·ModuleLoader 3.16절), Sandbox 측정(8.3절).

@@ -4,6 +4,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
 #include <AudioAssets/SoundPcm.h>
+#include <AudioAssets/SoundStreamData.h>
 #include <Object/AssetId.h>
 
 // 재생 요청이 넘기는 사운드 스냅숏이다(Docs/Design/AudioSystem 3.35.3절). 재생은 시작 때의
@@ -32,8 +33,11 @@ struct SoundAttenuation {
     float nonSpatializedRadiusEnd = 0.0f;
 };
 
+// pcm(통째 PCM)과 stream(실시간 디코드할 압축 데이터 — 3.40.3절) 중 하나만 쓴다. 채널·rate·frame
+// 수는 있는 쪽에서 읽는다(ChannelCount 등 — 스트림 재생에서 pcm을 역참조하지 않게).
 struct SoundPlayable {
     SharedPtr<const SoundPcm> pcm;
+    SharedPtr<const SoundStreamData> stream;
     bool looping = false;
     // loop 구간이다(frame). 둘 다 0이면 clip 전체다.
     uint32 loopBegin = 0;
@@ -46,6 +50,18 @@ struct SoundPlayable {
     // 진단용 원본 에셋과 revision이다(메모리 생성이면 빈 값).
     AssetId asset;
     uint64 revision = 0;
+
+    uint32 ChannelCount() const noexcept {
+        return pcm ? pcm->ChannelCount() : (stream ? stream->ChannelCount() : 0);
+    }
+
+    uint32 SampleRate() const noexcept {
+        return pcm ? pcm->SampleRate() : (stream ? stream->SampleRate() : 0);
+    }
+
+    uint32 FrameCount() const noexcept {
+        return pcm ? pcm->FrameCount() : (stream ? static_cast<uint32>(stream->FrameCount()) : 0u);
+    }
 };
 
 class ROCKS_AUDIOASSETS_API SoundSourceRef {

@@ -773,6 +773,10 @@ ModuleLoadReport ModuleLoader::StartPhase(LoadingPhase phase) noexcept {
     }
 
     ++loadDepth_;
+    if (startObserver_.phaseBegin != nullptr) {
+        startObserver_.phaseBegin(startObserver_.context, CountPhaseStarts(phase));
+    }
+
     bool started = true;
     while (started && PhaseOrder(nextPhase_) <= PhaseOrder(phase)) {
         started = RunPhase(nextPhase_, report);
@@ -784,8 +788,27 @@ ModuleLoadReport ModuleLoader::StartPhase(LoadingPhase phase) noexcept {
         }
     }
 
+    if (startObserver_.phaseEnd != nullptr) {
+        startObserver_.phaseEnd(startObserver_.context);
+    }
+
     --loadDepth_;
     return report;
+}
+
+usize ModuleLoader::CountPhaseStarts(LoadingPhase phase) const noexcept {
+    usize count = 0;
+    for (usize index = 0; index < records_.Size(); ++index) {
+        const ModuleTableRow& row = *records_[index].row;
+        if (!row.onRequest && row.phase != LoadingPhase::None &&
+            PhaseOrder(row.phase) >= PhaseOrder(nextPhase_) &&
+            PhaseOrder(row.phase) <= PhaseOrder(phase) &&
+            records_[index].state != ModuleState::Started) {
+            ++count;
+        }
+    }
+
+    return count;
 }
 
 bool ModuleLoader::RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexcept {
@@ -795,6 +818,11 @@ bool ModuleLoader::RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexce
         const ModuleTableRow& row = *records_[index].row;
         if (row.phase != phase || row.onRequest) {
             continue;
+        }
+
+        if (startObserver_.moduleStarting != nullptr &&
+            records_[index].state != ModuleState::Started) {
+            startObserver_.moduleStarting(startObserver_.context, row.name);
         }
 
         if (!StartRecord(index, report)) {
