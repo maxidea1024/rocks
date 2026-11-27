@@ -14,7 +14,7 @@
 - RenderBase·RenderGraph 사실:
   - `RenderLane`이 프레임 packet(`SubmitFrame` + 캡처 없는 함수)·자원(`ReserveHandle`·`PostResource`·`UpdateTexture`·`Retire`)·표면 작업(`PostSurface`·`PostSurfaceAndWait`)·`RequestReadback`·`TakeReadback`을 준다. 처리기(`RenderLaneProcessor`)에는 시작·정지 hook만 있고, lane 작업 함수는 `RenderLaneContext`만 받는다. `RenderHandle` 종류에 스왑 체인은 없다.
   - lane 대기(`BeginFrame`의 slot 대기, `WaitMarker`)는 기다리는 동안 설정한 펌프 hook을 부른다.
-  - RenderGraph는 raster pass마다 장치 기록 하나(BeginPass·BeginFrame … EndFrame)를 연다. 스왑 체인 대상(`SwapChainTarget`)은 언제나 clear로 시작한다. 그 기록 끝 `EndFrame`이 present까지 한다. Graphics에 따로 부를 Present는 없다. 그래서 같은 스왑 체인에 raster pass 둘을 두면 각자 백버퍼를 잡고 각자 present한다.
+  - RenderGraph는 raster pass마다 장치 기록 하나(BeginPass·BeginFrame … EndFrame)를 연다. 스왑 체인 대상(`SwapChainTarget`)은 언제나 clear로 시작한다. 그 기록 끝 `EndFrame`이 present까지 한다. Graphics에 따로 부를 Present는 없다. 그래서 같은 스왑 체인에 raster pass 둘을 두면 각자 백버퍼를 잡고 각자 present한다(UW6 당시 — 지금은 같은 스왑 체인의 pass들이 백버퍼 하나를 함께 쓰고 그래프가 마지막 pass 뒤에 한 번 present한다, 4e0cf5cf3·RenderBase 8절, 18.6절 1항).
   - 그래프 `Execute`는 첫 실패에서 남은 pass를 실행하지 않는다. 그래프는 pass를 재배치하지 않는다(선언 순서 = 실행 순서). 한 pass 안에서 같은 subresource를 서로 다르게 접근하면 거부한다. 병렬 기록(RG3)의 기록 함수는 장치 생성을 부를 수 없다.
   - `GraphPassContext::Commands()`가 명령 문맥을 주므로 pass 안에서 `CopyPassTarget`(배경 흐림 캡처)을 그대로 쓸 수 있다. 대상은 pass 대상과 크기·형식이 같아야 한다.
 - Sandbox 프레임(`ScreenRenderer`, 렌더 세션 소유)에는 UI pass를 끼울 자리가 없다.
@@ -32,7 +32,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
                                                     ▼
                          그리기 대상마다 RenderGraph 하나:
                          표면·장면 pass(한 목록, 안쪽부터) → 대상 pass
-                         Execute — 창 pass의 EndFrame이 그 창을 present
+                         Execute — 그래프가 창 스왑 체인의 마지막 pass 뒤에 present
 ```
 
 **그래프 단위.** 그리기 대상(창 또는 오프스크린 렌더 타깃)마다 그래프 하나를 만들어 실행한다. 한 창의 실패(표면 import 실패, present 실패)는 그 창만 멈춘다. UE는 그래프 하나에 스왑 체인을 여럿 두지만(SlateRHIRenderer.cpp 1485행, 8개까지), Rocks 그래프는 스왑 체인 pass마다 따로 present하므로 묶어도 얻는 것이 없다.
@@ -49,7 +49,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 | `UiDrawBuffer` | `FSlateDrawBuffer` | 한 번 그리기의 대상 목록이다. 대상마다 `UiDrawTarget`(창 표면 id 또는 렌더 타깃 id, 크기, clear 색, `DrawBatch` 참조, 그 대상의 표면·장면 pass 목록)을 담는다. 다시 그릴 대상만 넣는다. 최소화·크기 0 창은 넣지 않는다. 모든 창이 그대로면 `DrawWindows`를 부르지 않는다. `DrawWindows`가 내용을 프레임 arena로 복사하고 돌아온 뒤에는 버퍼를 다시 써도 되므로 버퍼는 하나다. UE가 3개를 돌리는 이유(render thread가 버퍼를 직접 읽고 나중에 놓는다 — SlateRHIRenderer.cpp 685–718행)가 없고, 흐름 조절은 `BeginFrame` slot이 한다 |
 | `SurfaceRecorder` | `SRetainerWidget`의 `FWidgetRenderer` 갱신(창보다 먼저 같은 RDG에 기록, SlateRHIRenderer.cpp 1478–1483·2124–2131행)·`SViewport` 그리기 | 지금 `WidgetSurfaceHost`의 Element 순회·갱신 판정(Discover·Update)을 그래픽 없이 옮긴 것이다. 대상을 그리기 전에 트리의 보관 표면·post buffer·viewport를 자식 먼저 찾아, 종류 태그가 붙은 pass 한 목록(`UiSurfacePass`: 보관 내용 `DrawBatch` 또는 장면 packet, 대상 렌더 타깃 id, 크기, clear)을 안쪽부터 쌓는다. RetainedPanel 안의 viewport는 장면 pass가 보관 pass보다 앞에 온다. 보관 표면·viewport·post buffer의 렌더 타깃은 이 객체가 `UiRenderer::CreateRenderTarget`·`ResizeRenderTarget`으로 게임 lane에서 만들고, post buffer는 채널별 id를 위젯에 준다(`SetPostBuffer`). 창에서 떨어진 표면의 타깃은 다음 기록이나 소멸 때 돌려준다 |
 | `ViewportSource` | `ISlateViewport` | `WidgetSurfaceScene`을 대체한다. `Advance(frame)`(게임 lane, World tick), `Background()`, `Extract(UiSceneExtract&, ViewportTarget)`. 그래픽 타입이 없다. 장면을 다른 처리기가 그린 렌더 타깃을 그대로 쓰는 경로(Sandbox)는 지금 viewport Element의 외부 장면 텍스처(`scene` 속성)로 대신한다. source가 그 id를 직접 돌려주는 형태는 게임 UI를 Sandbox에 붙일 때(UT5) 정한다 |
-| `UiSceneExtract` | `FSceneViewport::Draw`가 넣는 render command | 장면 source가 이번 프레임의 장면 pass를 게시하는 통로다. 형태는 `template <class T> Result<void> Post(T&& packet, UiScenePassFunction<T> record)`. `UiScenePassFunction<T>`는 `void (*)(UiScenePassContext&, T&) noexcept`(캡처 없는 함수 — `RenderLane`과 같은 이유)다. `UiScenePassContext`는 UiCore에서 불완전 타입이고 UiRender가 정의한다(그래프·대상 그래프 텍스처·크기·장치). 기록 함수를 정의하는 앱 TU만 UiRender를 포함한다. `T`는 UiCore 수준 전달 조건(`UiSceneTransferable`: 참조·포인터 아님, nothrow 이동·소멸)을 만족해야 한다. RenderBase `RenderTransferable`의 등록·스키마 검사는 UiCore가 RenderBase를 몰라 걸 수 없다(한계 — 18.8절) |
+| `UiSceneExtract` | `FSceneViewport::Draw`가 넣는 render command | 장면 source가 이번 프레임의 장면 pass를 게시하는 통로다. 형태는 `template <LaneTransferable T> Result<void> Post(T&& packet, UiScenePassFunction<T> record)`(packet은 성공·실패와 상관없이 이 호출 안에서 소비된다). `UiScenePassFunction<T>`는 `void (*)(UiScenePassContext&, T&) noexcept`(캡처 없는 함수 — `RenderLane`과 같은 이유)다. `UiScenePassContext`는 UiCore에서 불완전 타입이고 UiRender가 정의한다(그래프·대상 그래프 텍스처·크기·장치). 기록 함수를 정의하는 앱 TU만 UiRender를 포함한다. `T`는 렌더 lane packet과 같은 전달 조건이다(`ROCKS_LANE_TRANSFERABLE` 등록 — `LaneTransferable`, Development 스키마 검사 `CheckLaneTransfer`, `Meta/LaneTransfer.h` — RenderBase 5.2절). |
 | `NullUiRenderer` | `FSlateNullRenderer` | headless 실행·CPU 시험용이다. id를 발급하고 기록만 센다(그리지 않는다) |
 
 - `ViewportWorld::Renderer`는 `Delegate<Result<void>(World&, const ViewportCameraView&, UiSceneExtract&)>`가 된다. 게임 lane에서 World를 읽어 packet을 만들고 장면 pass를 게시한다. 장치 기록은 게시한 함수가 Render lane에서 한다. 지금 `WidgetSurfaceHost::ScenePainter`(Element를 받아 장치로 그리는 painter)는 없앤다. 그 쓰임(UiDemo viewport 시험)은 `ViewportSource` 구현으로 바꾼다.
@@ -72,9 +72,9 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 
 **`UiLaneRenderer`(Render lane).** 렌더 lane 처리기가 소유한다.
 - UI pipeline(`ShaderSet`·`PipelineCache` — UW1a 셰이더), 배경 텍스처 cache, 스왑 체인 표를 가진다.
-- `AddPasses(RenderGraph&, UiFramePacket&, target)`: 대상의 표면·장면 pass를 목록 순서대로 기록하고 마지막에 대상 pass를 기록한다.
+- `AddPasses(RenderGraph&, RenderLaneContext&, UiFrameTarget&, GraphLoadAction windowLoad = Clear)`: 대상의 표면·장면 pass를 목록 순서대로 기록하고 마지막에 대상 pass를 기록한다.
   - 표면 대상은 `ImportTexture`다. 장면 pass는 기록 함수를 부르고, 깊이는 장면 함수가 그래프에서 만든다.
-  - 창 대상은 `SwapChainTarget`(clear 색은 창 바탕)이다. 그 pass의 EndFrame이 present한다. 스왑 체인 크기가 대상 크기와 다르면(게임 lane의 크기 변경 작업이 실패했거나 아직 반영 전) 기록 전에 lane에서 맞춘다. 그래도 실패하면 그 대상만 실패한다.
+  - 창 대상은 `SwapChainTarget(swapChain, windowLoad, clear)`다. UI만 그리면 Clear(clear 색은 창 바탕), 같은 그래프의 앞 pass(장면)가 그린 백버퍼 위면 Load다. present는 그래프가 그 스왑 체인의 마지막 pass 뒤에 한 번 낸다(Deferred는 그 pass 기록 끝, Immediate는 따로 낸 present 기록 — RenderBase 8절). 스왑 체인 크기가 대상 크기와 다르면(게임 lane의 크기 변경 작업이 실패했거나 아직 반영 전) Clear일 때만 기록 전에 lane에서 맞춘다. Load면 앞 pass가 이미 옛 크기로 그렸으므로 `InvalidArgument`로 거부한다(호출자가 장면 pass 전에 맞춘다). 그래도 실패하면 그 대상만 실패한다. 시험: UiDemo self-test(`VerifyWindowPresents`)가 숨은 창의 실제 스왑 체인(D3D11 WARP)으로 UI만 그린 그래프의 present 1회(`GraphStats::presents`·`Device::PresentCount`), 첫 pass Load 거부(present 없음), Load인데 크기가 다르면 `InvalidArgument`를 본다.
   - 명령이 텍스처 id를 가졌는데 handle이 없거나(모르는·해제된 id) 아직 Ready가 아니면 그 명령을 건너뛴다. 단색으로 그리지 않는다.
   - pass 안의 명령 순회는 지금 `DrawBatchRenderer::Draw`(clip·둥근 상자·`CopyPassTarget` 흐림)를 그대로 쓴다.
 - pass 안 캡처의 세 규칙:
@@ -84,7 +84,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 - 정점·index: 1차는 대상마다 `graph` 버퍼 생성 + 업로드로 매 프레임 전체를 올린다. 지금의 바뀐 범위 갱신(대상별 지속 버퍼 + 바뀐 범위만 arena 복사)은 후속이다(UR3 예산 측정 때 판단).
 - 다른 처리기(Sandbox `ScreenRenderer`)도 같은 함수로 UI pass를 더한다.
 
-**`UiFramePacket`.** RenderTransferable 등록 타입이다. 프레임 함수는 그리기 직후 `ReleaseScenes`로 장면 packet을 부순다. RenderLane `SubmitFrame`은 프레임 함수 값을 `FinishFrame`(slot 반환) 뒤에 부수므로, 소멸자까지 미루면 Thread 모드에서 게임 lane이 다시 쓰는 프레임 arena를 읽게 된다(리뷰 2026-11-27). 값의 소멸을 `FinishFrame` 앞으로 옮기는 근본 수정은 렌더 세션에 요청한다(18.6절).
+**`UiFramePacket`.** `ROCKS_LANE_TRANSFERABLE` 등록 타입이다(`Meta/LaneTransfer.h`). 장면 packet은 packet 소멸자가 부순다: RenderLane `SubmitFrame`이 프레임 함수 값을 slot 반환(`FinishFrame`) 전에 부수므로(RenderBase 5.3절 "프레임 packet 수명", 829719a3e) 그때까지 프레임 arena가 유효하다. 동기화 전에는 값을 slot 반환 뒤에 부숴 프레임 함수가 그리기 직후 `ReleaseScenes`를 부르는 우회를 두었고, 렌더 수정이 들어와 지웠다(`ReleaseScenes`는 소멸·이동 대입이 쓰는 private이다).
 - 배열은 프레임 arena Span이라 게임 쪽 주소를 들지 않는다.
 - 장면 packet은 arena 원시 할당에 놓인 형식 지운 항목(기록 함수·부수기 함수)이다. `FrameArena::TryNew`(다음 `BeginFrame`의 Reset에서 게임 lane이 부순다)는 쓰지 않는다. `UiFramePacket` 소멸자가 부수기 함수를 한 번만 부른다. 이동하고 나면 원본은 비어 있다. `SubmitFrame`이 실패하면 packet이 게임 lane에서 소멸되며 같은 규칙으로 부서진다.
 
@@ -118,7 +118,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 - **lane 모드.** 실행 기본은 `RenderLaneMode::Thread`다(`--self-test`·`--snapshot` 포함). `--lane=inline`은 같은 경로를 Inline 모드로 돌린다. Thread 모드도 명시 대기(표지·읽기)로 결정적으로 단언할 수 있고, 실제 실행 경로의 회귀를 비우지 않으려는 것이다. 두 모드의 snapshot을 18.5절 기준 캡처와 byte 비교한다.
 - **처리기.** `UiDemoLaneProcessor`(Render lane):
   - `OnLaneStart`에서 엔진 셰이더 집합·`UiLaneRenderer`를 연다.
-  - 프레임 함수가 packet의 대상마다 그래프를 만들어 `AddPasses` → `Execute`한다. present는 창 pass 안에서 끝난다. 한 대상의 실패는 기록하고 다음 대상으로 간다.
+  - 프레임 함수가 packet의 대상마다 그래프를 만들어 `AddPasses` → `Execute`한다. present는 그래프가 창 스왑 체인의 마지막 pass 뒤에 한 번 낸다. 한 대상의 실패는 기록하고 다음 대상으로 간다.
 - **크기 조절 중 그리기(UW7a).** live-resize 콜백이 그 창을 그린 뒤 `Flush`로 그 프레임의 처리를 기다린다. 그래야 OS 크기 변경 루프가 다음 메시지로 가기 전에 새 크기의 그림이 present되어 있다.
 - **창 묶음 제출.** 창 루프는 다시 그릴 창을 모두 draw buffer 하나에 담아 루프마다 한 번 `DrawWindows`한다(바뀐 창이 없으면 제출하지 않는다). 크기 조절 중 그리기와 끌기 미리보기는 각자 지역 버퍼를 쓴다(루프의 버퍼가 쓰이는 중에 불린다). 닫는 창의 제거는 제출 뒤로 미룬다(버퍼가 그 창의 batch를 가리킨다).
 - **lane 대기 중 펌프.** 모든 lane 대기(`BeginFrame`의 slot 대기, `Flush`, 창 표면 생성·파괴 대기) 동안 펌프 hook은 보낸 메시지만 처리한다(`platform::PumpSentMessages` — Win64 `PeekMessage(PM_NOREMOVE | PM_QS_SENDMESSAGE)`).
@@ -137,12 +137,12 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 
 ### 18.6 Sandbox·게임 UI(렌더 세션 협의)
 
-Sandbox `ScreenRenderer`는 렌더 세션(rocks-2e — 전 이름 rocks-6a·rocks-20) 소유다. 게임 UI(UiScreens)를 Sandbox에 붙일 때는 `ScreenRenderer`가 장면 pass 뒤에 `UiLaneRenderer::AddPasses`를 부르게 한다. 지금 그래프는 스왑 체인 pass마다 백버퍼를 잡고 present하므로, 그대로는 장면 위에 UI를 그릴 수 없다. 렌더 세션에 다음을 요청한다.
+Sandbox `ScreenRenderer`는 렌더 세션(지금 rocks-80 — 전 이름 rocks-6a·rocks-20·rocks-2e) 소유다. 게임 UI(UiScreens)를 Sandbox에 붙일 때는 `ScreenRenderer`가 장면 pass 뒤에 `UiLaneRenderer::AddPasses`를 부르게 한다. UW6 당시 그래프는 스왑 체인 pass마다 백버퍼를 잡고 present해서 장면 위에 UI를 그릴 수 없었다. 렌더 세션에 다음을 요청했고, 처리 상태를 각 항에 적는다.
 
-1. 한 그래프에서 같은 스왑 체인을 대상으로 하는 raster pass 여럿이 백버퍼 하나를 공유하고, 마지막 pass에서만 present한다(뒤 pass는 load).
-2. `ScreenPacket`에 UI packet 자리를 둔다.
-3. `RenderLane::SubmitFrame`이 프레임 함수 값을 `FinishFrame` 전에 부순다(지금은 slot 반환 뒤 — 값이 프레임 arena를 가리키면 Thread 모드에서 경쟁이다). 같이 `SubmitFrame` 주석의 "packet은 실패해도 소비된다"를 이른 실패 반환에 맞게 고친다.
-4. (선택) `RenderTransferable`의 등록 표지를 Core로 옮긴다. UiCore의 장면 packet도 같은 검사를 받게 하려는 것이다(18.3절).
+1. 한 그래프에서 같은 스왑 체인을 대상으로 하는 raster pass 여럿이 백버퍼 하나를 공유하고, 마지막 pass에서만 present한다(뒤 pass는 load). — 반영됨(4e0cf5cf3, RenderBase 개정 64): `GraphPassAccesses::SwapChainTarget(swapChain, load, clear)`. UI는 `AddPasses(graph, context, target, windowLoad)`로 받는다(기본 Clear — 장면 뒤면 Load).
+2. `ScreenPacket`에 UI packet 자리를 둔다. — UT5에서 렌더 세션이 한다(UI 병합 뒤 알림).
+3. `RenderLane::SubmitFrame`이 프레임 함수 값을 `FinishFrame` 전에 부순다. — 반영됨(829719a3e, RenderBase 5.3절 개정 60). UI의 `ReleaseScenes` 우회를 지웠다.
+4. lane 전달 등록 표지를 RenderBase 아래로 옮긴다. — 반영됨(9e1a92adc, RenderBase 5.2절 개정 66): `Meta/LaneTransfer.h`의 `ROCKS_LANE_TRANSFERABLE`·`LaneTransferable`·`CheckLaneTransfer`. `UiSceneExtract::Post<T>`가 같은 개념과 Development 스키마 검사를 건다(UiCore가 MetaSchema에 공개 의존).
 
 UW6 구현 범위는 UiDemo까지다. Sandbox 연결은 게임 UI 단계(UT5)에서 한다. 요청은 UW6b 병합 때 보낸다.
 
@@ -158,7 +158,7 @@ UW6 구현 범위는 UiDemo까지다. Sandbox 연결은 게임 UI 단계(UT5)에
 - **수명.** 표면 파괴 뒤 그 창 표면 id로 게시된 그리기가 없다. 크기 변경 전에 제출한 프레임은 옛 handle을 쓰고, 옛 handle은 그 프레임 완료 뒤 회수된다(`retiresCompleted`).
 - **순서.** RetainedPanel 안 viewport: 장면 pass가 보관 pass보다 먼저 기록된다(기록 순서 단언).
 - **headless.** `NullUiRenderer`로 Application 프레임을 돌린다. id 발급·반환 짝(누수 0)을 단언한다.
-- **표면 기록.** 중첩 보관 표면(안쪽만 캡처하면 대상은 그대로지만 pass가 쌓인다), 보관 표면이 캡처하지 않는 프레임의 안쪽 장면은 진행만 하고 pass가 없다, 모르는 pass 대상 건너뛰기, 오프스크린 대상 크기 검사, 해제된 텍스처 id(빈 handle과 남은 resource), 장면 정리(`ReleaseScenes` 1회).
+- **표면 기록.** 중첩 보관 표면(안쪽만 캡처하면 대상은 그대로지만 pass가 쌓인다), 보관 표면이 캡처하지 않는 프레임의 안쪽 장면은 진행만 하고 pass가 없다, 모르는 pass 대상 건너뛰기, 오프스크린 대상 크기 검사, 해제된 텍스처 id(빈 handle과 남은 resource), 장면 정리(packet 소멸자 1회 — 이동 대입은 받는 쪽 장면을 먼저 부순다).
 - **경계 검사.** 18.2절 policy 규칙의 양성·음성 fixture. 공개 헤더의 그래픽 이름·앞 선언·include와 UI Element·Widget 층 모듈의 그래픽 모듈 의존을 막는다.
 - **회귀.** 18.5절 기준 캡처와 byte 비교(두 lane 모드).
 
@@ -171,7 +171,6 @@ UW6 구현 범위는 UiDemo까지다. Sandbox 연결은 게임 UI 단계(UT5)에
 - **창 pass를 흐림 지점마다 나누기**: 버린다. 장치 `CopyPassTarget`이 pass 안 캡처를 계약으로 주고, 그래프 pass 안에서 그대로 쓸 수 있다.
 - **draw buffer 3개 순환(UE 그대로)**: 버린다. 복사한 뒤 바로 재사용할 수 있다(18.3절).
 - **한계.**
-  - 장면 packet은 UiCore 수준 조건(`UiSceneTransferable`)만 검사한다. 게임 주소를 담은 구조체(World 포인터 필드)는 컴파일 검사를 통과한다. RenderTransfer 표지가 Core로 오면 같은 검사로 바꾼다.
-  - 스왑 체인 백버퍼 공유가 생기기 전에는 장면 위 UI 합성을 Sandbox에서 할 수 없다(18.6절).
+  - 장면 packet은 렌더 lane packet과 같은 검사(`LaneTransferable` + `CheckLaneTransfer`)를 받는다. 리플렉션하지 않은 struct 안의 게임 주소(raw 포인터 필드)는 렌더 lane packet과 마찬가지로 잡지 못한다(RenderBase 5.2절의 같은 한계).
   - 정점은 매 프레임 전체 업로드다(바뀐 범위 갱신은 후속).
   - 텍스처 영역 갱신은 UW2와 같이 전체 갱신이다(GX8 대기).

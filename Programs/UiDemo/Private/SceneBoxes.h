@@ -19,3 +19,5 @@ Result<void> PostSceneBoxes(UiSceneExtract& extract, Allocator& allocator,
                             const PaintList& list) noexcept;
 
 } // namespace rocks::ui
+
+ROCKS_LANE_TRANSFERABLE(rocks::ui::SceneBoxes);

@@ -146,6 +146,11 @@ int Run(launch::ApplicationContext& context) noexcept {
             return reloadChecked;
         }
 
+        if (const int presentChecked = VerifyWindowPresents(allocator, renderer, lane);
+            presentChecked != 0) {
+            return presentChecked;
+        }
+
         const int checked = VerifyWidgetSurfaces(allocator, renderer, lane);
         if (checked != 0 || surfaceTest) {
             return checked;

@@ -6,5 +6,5 @@ public sealed class UiCore : EngineModuleRules
 {
     protected override string ModuleName => "UiCore";
 
-    protected override string[] PublicDependencies => ["Core", "Input"];
+    protected override string[] PublicDependencies => ["Core", "Input", "MetaSchema"];
 }

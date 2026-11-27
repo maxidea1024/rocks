@@ -15,7 +15,7 @@ struct ShaderReloadCheck {
 
 } // namespace rocks::ui::detail
 
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::ShaderReloadCheck);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::ShaderReloadCheck);
 
 namespace rocks::ui {
 

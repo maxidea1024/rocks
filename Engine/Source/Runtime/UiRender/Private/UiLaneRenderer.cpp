@@ -718,8 +718,8 @@ Result<void> UiLaneRenderer::AddBatchPass(render::RenderGraph& graph,
 }
 
 Result<void> UiLaneRenderer::AddPasses(render::RenderGraph& graph,
-                                       render::RenderLaneContext& context,
-                                       UiFrameTarget& target) noexcept {
+                                       render::RenderLaneContext& context, UiFrameTarget& target,
+                                       render::GraphLoadAction windowLoad) noexcept {
     ++graphGeneration_;
     if (!IsOpen()) {
         return Result<void>::Failure(ErrorCode::NotReady);
@@ -807,7 +807,13 @@ Result<void> UiLaneRenderer::AddPasses(render::RenderGraph& graph,
 
         // 게임 lane의 크기 변경 작업이 실패했거나 아직 반영되지 않았으면 여기서 맞춘다(viewport·
         // CopyPassTarget이 스왑 체인 크기와 같아야 한다). 그래도 실패하면 이 대상만 실패한다.
+        // Load(앞 pass가 그린 백버퍼에 이어 그림)면 앞 pass가 이미 옛 크기로 그렸으므로 여기서
+        // 바꾸지 않고 거부한다 — 호출자가 장면 pass를 선언하기 전에 크기를 맞춘다.
         if (window->width != target.width || window->height != target.height) {
+            if (windowLoad == render::GraphLoadAction::Load) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
             if (auto resized = ResizeWindowSurface(target.window, target.width, target.height,
                                                    context.Device());
                 !resized) {
@@ -815,7 +821,7 @@ Result<void> UiLaneRenderer::AddPasses(render::RenderGraph& graph,
             }
         }
 
-        accesses.SwapChainTarget(window->swapChain, ToClear(target.clear));
+        accesses.SwapChainTarget(window->swapChain, windowLoad, ToClear(target.clear));
     } else {
         auto made = graph.ImportTexture(target.renderTarget, "UiOffscreen");
         if (!made) {

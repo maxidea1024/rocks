@@ -27,9 +27,9 @@ namespace rocks::ui {
 // UE FSlateRHIRenderer의 render thread 부분). 렌더 lane 처리기가 소유하고, 장치는 그 lane에서만
 // 만진다. 게임 lane 쪽 짝은 LaneUiRenderer다.
 //
-// - 그리기 대상마다 그래프 하나를 만들어 실행한다(Render). 창 pass의 EndFrame이 그 창을
-// present하고,
-//   한 대상의 실패는 다른 대상을 막지 않는다.
+// - 그리기 대상마다 그래프 하나를 만들어 실행한다(Render). 그래프가 그 창 스왑 체인의 마지막 pass
+//   뒤에 한 번 present하고(RenderBase 8절 "스왑체인 공유 설계"), 한 대상의 실패는 다른 대상을 막지
+//   않는다.
 // - 대상 하나 안의 순서: 표면·장면 pass(packet 순서 — 안쪽부터) → 대상 pass.
 // - 다른 처리기(Sandbox ScreenRenderer 등)는 AddPasses로 자기 그래프에 UI pass를 더한다.
 //
@@ -83,10 +83,21 @@ public:
     // packet의 대상마다 그래프 하나를 만들어 실행한다(기본 프레임 함수).
     void Render(render::RenderFrameContext& context, UiFramePacket& packet) noexcept;
 
-    // target의 표면·장면 pass와 대상 pass를 graph에 더한다. 창 대상은 스왑 체인 pass(그 EndFrame이
-    // present)다. 실패: 모르는 창 표면 NotFound, 그래프 선언 오류는 그 오류.
-    Result<void> AddPasses(render::RenderGraph& graph, render::RenderLaneContext& context,
-                           UiFrameTarget& target) noexcept;
+    // target의 표면·장면 pass와 대상 pass를 graph에 더한다. 창 대상은 스왑 체인 pass다(같은 스왑
+    // 체인의 pass들은 백버퍼 하나를 함께 쓰고, 그래프가 마지막 pass 뒤에 한 번 present한다 —
+    // RenderBase 8절 "스왑체인 공유 설계"). windowLoad는 창 pass의 시작 동작이다: UI만 그리면
+    // Clear(target.clear 색), 같은 그래프의 앞 pass(장면 tone map 등)가 그린 백버퍼 위에 UI를
+    // 그리면 Load다. 그 스왑 체인의 첫 pass가 Load면 그래프가 거부한다. Load면 창 표면 크기가
+    // target과 같아야 한다(앞 pass가 이미 그 백버퍼에 그렸으므로 여기서 크기를 바꾸지 않는다 —
+    // 호출자가 장면 pass 전에 ResizeWindowSurface로 맞춘다). 실패: 모르는 창 표면 NotFound,
+    // Load인데 크기가 다름 InvalidArgument, 그래프 선언 오류는 그 오류.
+    //
+    // 사용 예(장면 뒤 같은 창에 UI — Sandbox ScreenRenderer, UT5):
+    //   ...장면 pass들이 SwapChainTarget(swapChain, GraphLoadAction::Clear, background)로 그린다...
+    //   ui.AddPasses(graph, context, target, render::GraphLoadAction::Load);
+    Result<void>
+    AddPasses(render::RenderGraph& graph, render::RenderLaneContext& context, UiFrameTarget& target,
+              render::GraphLoadAction windowLoad = render::GraphLoadAction::Clear) noexcept;
 
     // UI 묶음(텍스처 없는 명령 — 단색·둥근 상자)을 장면 대상에 이어 그리는 pass를 더한다(장면 기록
     // 함수가 표식·배경을 UI 셰이더로 그릴 때). 첫 pass면 장면 clear 색으로 지운다.

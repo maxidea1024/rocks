@@ -83,6 +83,12 @@ Result<void> BuildBoxes(DrawBatch& batch, Allocator& allocator, UiTextureId text
 
 } // namespace
 
+} // namespace rocks::ui
+
+ROCKS_LANE_TRANSFERABLE(rocks::ui::LaneScene);
+
+namespace rocks::ui {
+
 TEST(UiRender_LaneRendererCopiesDrawBufferIndependently) {
     LaneBench bench;
     REQUIRE(bench.Start());
@@ -162,19 +168,24 @@ TEST(UiRender_LaneRendererMovesScenePacketsOnce) {
             // 버퍼의 packet은 arena로 옮겨져 비었다(이동 원본은 세지 않는다).
             CHECK(buffer.Packets()[0].IsEmpty() && buffer.Packets()[1].IsEmpty());
             CHECK(laneScenesDestroyed == 0);
-            // 프레임 함수가 그리기 직후 부르는 정리다: 장면을 부수고 packet을 비운다(slot이
-            // 반환되기 전 — RenderLane은 프레임 값을 slot 반환 뒤에 부순다, 18.4절). 두 번 불러도
-            // 된다.
-            moved.ReleaseScenes();
-            CHECK(laneScenesDestroyed == 2);
-            CHECK(moved.Targets().IsEmpty());
-            moved.ReleaseScenes();
+            // 이동 대입은 받는 쪽의 장면을 먼저 부순다: 장면 하나를 가진 다른 packet에 옮겨 담으면
+            // 그 장면(5)이 한 번 부서지고, 옮긴 원본은 빈다.
+            UiDrawBuffer second(bench.allocator);
+            auto secondExtract = second.AddScenePass(scene.Value(), 8, 8, {0, 0, 1, 1});
+            REQUIRE(secondExtract);
+            REQUIRE(secondExtract.Value().Post(LaneScene{5}, &RecordLaneScene));
+            REQUIRE(second.AddOffscreen(target.Value(), 8, 8, {0, 0, 0, 1}, batch));
+            auto other = renderer.RecordWindows(arena, second);
+            REQUIRE(other);
+            other.Value() = Move(moved);
+            CHECK(moved.Targets().IsEmpty() && laneScenesDestroyed == 1);
         }
 
-        // 이미 정리한 packet의 소멸자는 아무것도 부수지 않는다(arena Reset은 저장소만 회수한다).
-        CHECK(laneScenesDestroyed == 2);
+        // packet 소멸자가 남은 장면(3·4)을 한 번씩 부순다 — RenderLane이 프레임 값을 slot 반환 전에
+        // 부수므로 arena가 아직 유효하다(RenderBase 5.3절). arena Reset은 저장소만 회수한다.
+        CHECK(laneScenesDestroyed == 3);
         (void)arena.Reset();
-        CHECK(laneScenesDestroyed == 2);
+        CHECK(laneScenesDestroyed == 3);
         renderer.ReleaseTexture(scene.Value());
         renderer.ReleaseTexture(target.Value());
     }

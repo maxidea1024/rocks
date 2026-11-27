@@ -1,6 +1,6 @@
 #pragma once
 
-#include <RenderBase/RenderTransfer.h>
+#include <Meta/LaneTransfer.h>
 #include <UiRender/UiFrameTypes.h>
 
 namespace rocks::ui {
@@ -33,16 +33,16 @@ public:
         return targets_;
     }
 
-    // 장면 packet을 부수고 비운다. 프레임 함수가 그리기 직후 Render lane에서 부른다: RenderLane은
-    // 프레임 함수 값(이 packet)을 slot 반환 뒤에 부수므로, 그때까지 미루면 게임 lane이 다시 쓰는
-    // 프레임 arena를 읽게 된다(Docs/Design/UiToolkit 18.4절). 두 번 불러도 된다.
+private:
+    // 장면 packet을 부수고 비운다(소멸·이동 대입). RenderLane은 프레임 함수 값(이 packet)을 slot
+    // 반환 전에 부수므로 그때까지 프레임 arena가 유효하다(Docs/Design/RenderBase 5.3절). 두 번
+    // 불러도 된다.
     void ReleaseScenes() noexcept;
 
-private:
     UiLaneRenderer* renderer_ = nullptr;
     Span<UiFrameTarget> targets_;
 };
 
 } // namespace rocks::ui
 
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::UiFramePacket);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::UiFramePacket);

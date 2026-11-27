@@ -4,16 +4,10 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Core/Result.h>
+#include <Meta/LaneTransfer.h>
 #include <UiCore/Rendering/UiSceneRecord.h>
 
 namespace rocks::ui {
-
-// 장면 packet이 Render lane으로 넘어갈 수 있는 조건이다. 참조·포인터가 아니고 예외 없이 이동·
-// 소멸해야 한다. RenderBase RenderTransferable의 등록·스키마 검사는 UiCore가 RenderBase를 몰라 걸
-// 수 없다(18.8절 한계) — 게임 주소를 담은 필드(World 포인터 등)를 넣지 않는 것은 작성자 책임이다.
-template <class T>
-concept UiSceneTransferable = !IsReferenceV<T> && !IsPointerV<T> &&
-                              IsNothrowMoveConstructibleV<T> && IsNothrowDestructibleV<T>;
 
 // 장면 pass 기록 함수다. 캡처가 없는 함수만 받는다(게임 lane 주소를 캡처로 넘기지 못하게 한다).
 template <class T>
@@ -24,6 +18,7 @@ using UiScenePassFunction = void (*)(UiScenePassContext& context, T& packet) noe
 //
 // 사용 예(ViewportSource::Extract 안 — UiSceneExtract::Post가 이것을 만든다):
 //   struct ScenePacket { Mat4 viewProjection; uint32 meshCount; };
+//   ROCKS_LANE_TRANSFERABLE(ScenePacket);   // 전역 이름공간에서, 첫 사용 전에 등록
 //   extract.Post(ScenePacket{view, count}, &RecordScene);
 class ROCKS_UICORE_API UiScenePacket {
 public:
@@ -35,12 +30,20 @@ public:
     UiScenePacket(const UiScenePacket&) = delete;
     UiScenePacket& operator=(const UiScenePacket&) = delete;
 
-    // value를 allocator 메모리로 옮겨 담는다. 할당 실패는 그 오류다.
-    template <UiSceneTransferable T>
+    // value를 allocator 메모리로 옮겨 담는다. T는 렌더 lane packet과 같은 전달 조건이다
+    // (LaneTransferable — ROCKS_LANE_TRANSFERABLE 등록, 참조·포인터 아님, 예외 없는 이동·소멸)이고,
+    // 리플렉션 struct면 객체 참조·약한 참조·이벤트 필드가 없어야 한다(Development 검사
+    // CheckLaneTransfer — Docs/Design/RenderBase 5.2절). 실패: 기록 함수 없음·스키마 검사 실패
+    // InvalidArgument, 할당 실패는 그 오류(실패하면 value는 옮기지 않는다).
+    template <LaneTransferable T>
     static Result<UiScenePacket> TryMake(Allocator& allocator, T&& value,
                                          UiScenePassFunction<T> record) noexcept {
         if (!record) {
             return Result<UiScenePacket>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto checked = CheckLaneTransfer<T>(); !checked) {
+            return Result<UiScenePacket>::Failure(checked.Error());
         }
 
         auto memory = allocator.Allocate(sizeof(T), alignof(T));

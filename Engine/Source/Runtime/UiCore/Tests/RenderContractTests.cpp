@@ -39,6 +39,13 @@ struct ScenePacket {
     }
 };
 
+} // namespace
+
+// 장면 packet은 렌더 lane packet과 같은 등록이 필요하다(UiSceneExtract::Post — RenderBase 5.2절).
+ROCKS_LANE_TRANSFERABLE(ScenePacket);
+
+namespace {
+
 void RecordScene(UiScenePassContext&, ScenePacket& packet) noexcept {
     scenePacketsRecorded += static_cast<int>(packet.value);
 }

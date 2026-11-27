@@ -27,7 +27,7 @@ struct WorldPlaneCheck {
 
 } // namespace rocks::ui::detail
 
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::WorldPlaneCheck);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::WorldPlaneCheck);
 
 namespace rocks::ui {
 

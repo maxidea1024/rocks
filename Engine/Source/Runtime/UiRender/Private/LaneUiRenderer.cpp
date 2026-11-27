@@ -38,11 +38,11 @@ struct UiCaptureTask {
 
 } // namespace rocks::ui::detail
 
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::UiSurfaceCreateTask);
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::UiSurfaceResizeTask);
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::UiSurfaceDestroyTask);
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::UiTextureCreateTask);
-ROCKS_RENDER_TRANSFERABLE(rocks::ui::detail::UiCaptureTask);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::UiSurfaceCreateTask);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::UiSurfaceResizeTask);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::UiSurfaceDestroyTask);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::UiTextureCreateTask);
+ROCKS_LANE_TRANSFERABLE(rocks::ui::detail::UiCaptureTask);
 
 namespace rocks::ui {
 
@@ -114,8 +114,8 @@ void RenderUiFrame(render::RenderFrameContext& context, UiFramePacket& packet) n
         packet.Renderer()->Render(context, packet);
     }
 
-    // slot이 반환되기 전(이 함수 안)에 arena 안의 장면 packet을 부순다(ReleaseScenes 주석).
-    packet.ReleaseScenes();
+    // 장면 packet은 packet 소멸자가 부순다 — RenderLane이 프레임 값을 slot 반환 전에 부수므로
+    // 그때까지 프레임 arena가 유효하다(Docs/Design/RenderBase 5.3절 "프레임 packet 수명").
 }
 
 template <class T>
