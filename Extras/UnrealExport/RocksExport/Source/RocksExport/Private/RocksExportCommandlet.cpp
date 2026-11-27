@@ -54,9 +54,10 @@ int32 URocksExportCommandlet::Main(const FString& Params)
 	const FString* BakeSize = Values.Find(TEXT("BakeSize"));
 	if (Switches.Contains(TEXT("BakeMaterials")))
 	{
-		Options.BakeSize = RocksExport::DefaultBakeSize;
-		if (BakeSize != nullptr && (!BakeSize->IsNumeric() || BakeSize->Contains(TEXT(".")) || !LexTryParseString(Options.BakeSize, **BakeSize)
-			|| Options.BakeSize < RocksExport::MinBakeSize || Options.BakeSize > RocksExport::MaxBakeSize))
+		// int64로 읽어 범위를 본다(int32 Atoi는 플랫폼에 따라 넘침을 자른다).
+		int64 Size = RocksExport::DefaultBakeSize;
+		if (BakeSize != nullptr && (!BakeSize->IsNumeric() || BakeSize->Contains(TEXT(".")) || !LexTryParseString(Size, **BakeSize)
+			|| Size < RocksExport::MinBakeSize || Size > RocksExport::MaxBakeSize))
 		{
 			UE_LOG(LogRocksExport, Error, TEXT("-BakeSize must be an integer from %d to %d"), RocksExport::MinBakeSize, RocksExport::MaxBakeSize);
 			return 1;
@@ -67,12 +68,15 @@ int32 URocksExportCommandlet::Main(const FString& Params)
 			UE_LOG(LogRocksExport, Error, TEXT("-BakeMaterials needs rendering: pass -AllowCommandletRendering and do not pass -nullrhi"));
 			return 1;
 		}
+
+		Options.BakeSize = int32(Size);
 	}
 	else if (BakeSize != nullptr || Values.Contains(TEXT("BakeMaterials")))
 	{
 		UE_LOG(LogRocksExport, Error, TEXT("-BakeSize needs -BakeMaterials (and -BakeMaterials takes no value)"));
 		return 1;
 	}
+
 	if (const FString* Out = Values.Find(TEXT("Out")))
 	{
 		Options.OutputDirectory = *Out;

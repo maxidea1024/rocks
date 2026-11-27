@@ -323,6 +323,19 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		return false;
 	}
 
+	// 굽기 인자는 공개 API에서도 본다(8.9절 1번 — 에디터 메뉴·다른 호출자가 nullrhi에서 굽기를 부르지 않게).
+	if (Options.BakeSize != 0 && (Options.BakeSize < RocksExport::MinBakeSize || Options.BakeSize > RocksExport::MaxBakeSize))
+	{
+		OutResult.Error = FString::Printf(TEXT("bake size %d is outside %d-%d"), Options.BakeSize, RocksExport::MinBakeSize, RocksExport::MaxBakeSize);
+		return false;
+	}
+
+	if (Options.BakeSize != 0 && !FRocksMaterialBaker::CanBake())
+	{
+		OutResult.Error = TEXT("material baking needs rendering (-AllowCommandletRendering, no -nullrhi)");
+		return false;
+	}
+
 	if (Options.Selections.IsEmpty() && Options.SelectedAssets.IsEmpty())
 	{
 		OutResult.Error = TEXT("no assets selected");
@@ -363,6 +376,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 	}
 
 	TArray<FRocksExportAsset> Assets = Closure.GetAssets();
+	bool bBaked = false;
 	for (FRocksExportAsset& Asset : Assets)
 	{
 		FRocksAssetBody Body;
@@ -370,6 +384,8 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		{
 			return false;
 		}
+
+		bBaked = bBaked || Body.bBaked;
 
 		if (!Bundle.WriteAssetFile(Asset.PackageName.ToString(), MakeAssetJson(Asset, Body), OutResult.Error))
 		{
@@ -391,7 +407,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		}
 	}
 
-	const TArray<uint8> BundleJson = MakeBundleJson(Assets, Closure.GetRedirects(), RocksExporterPrivate::UtcNow(), Options.BakeSize > 0);
+	const TArray<uint8> BundleJson = MakeBundleJson(Assets, Closure.GetRedirects(), RocksExporterPrivate::UtcNow(), bBaked);
 	if (!Bundle.Commit(BundleJson, OutResult.Error))
 	{
 		return false;

@@ -131,6 +131,9 @@ constexpr int64 BakeSizeMin = 1;
 constexpr int64 BakeSizeMax = 8192;
 constexpr StringView BakedColorFormat = "BGRA8";
 constexpr StringView BakedHdrFormat = "RGBA16F";
+constexpr StringView BakedCompression = "None";
+constexpr StringView BakedLinearGamma = "Linear";
+constexpr StringView BakedSrgbGamma = "sRGB";
 // 굽기 golden 묶음(Tests/Bundles/GoldenBaked.rxbundle — 8.9절 9번, -BakeSize=16)의 기대 값이다:
 // 에셋 3개 (M_Golden·MI_Golden 굽기, LightFunction 엔진 머티리얼은 BakeSkipped), 상수 속성은 1×1.
 // BaseColor는 UE 상수 (0.5, 0.4, 0.3)의 sRGB 8비트 B·G·R(149, 170, 188), Roughness는 선형 8비트(0.6
@@ -148,6 +151,8 @@ constexpr usize BakedBaseColorIndex = 0;
 constexpr usize BakedRoughnessIndex = 3;
 // 1×1 BGRA8 속성 blob 하나의 byte 수다.
 constexpr usize BakedTexelBytes = 4;
+// 에셋 JSON의 굽기 기록 키다(data의 마지막 키 — 플러그인이 data 끝에 쓴다).
+constexpr StringView BakedRecordKey = "\"baked\": {";
 // UE FRichCurve 열거 값 이름(Rocks Curves 열거 순서)이다. RCTM_SmartAuto는 Auto로 본다.
 constexpr StringView CurveInterpNames[] = {"RCIM_Linear", "RCIM_Constant", "RCIM_Cubic"};
 constexpr StringView CurveTangentNames[] = {"RCTM_Auto", "RCTM_User", "RCTM_Break",
@@ -1073,9 +1078,10 @@ void CheckInstance(const ExchangeAsset& asset, MaterialCheck& check) noexcept {
     }
 }
 
-// 굽기 기록 data.baked(8.9절 2번 — UX6a)를 확인한다: 없거나 null(굽기 실패)이거나, bakeSize
-// 범위·속성 9개 순서· linear·원본 형식(EmissiveColor RGBA16F, 나머지 BGRA8)·층·블록·mip 각
-// 1개·EmissiveColor 크기 = bakeSize다.
+// 굽기 기록 data.baked(8.9절 2번 — UX6a)를 확인한다: 없거나 null(굽기 실패 — warning
+// BakeFailed)이거나, bakeSize 범위·속성 9개 순서·linear, 원본마다 형식(EmissiveColor RGBA16F,
+// 나머지 BGRA8)·compression None·층·블록·mip 각 1개·층 gammaSpace와 linear의 일치·mip 크기 = 블록
+// 크기·blob texel 수 = 가로 × 세로, EmissiveColor 크기 = bakeSize, 8비트 속성 크기 1–bakeSize다.
 void CheckBaked(JsonValue baked, MaterialCheck& check) noexcept {
     if (!baked.IsValid() || baked.IsNull()) {
         return;
@@ -1093,21 +1099,37 @@ void CheckBaked(JsonValue baked, MaterialCheck& check) noexcept {
         const JsonValue entry = properties.At(index);
         const JsonValue source = entry.Find("source");
         const bool emissive = BakedPropertyNames[index] == BakedEmissiveProperty;
+        const JsonValue linear = entry.Find("linear");
         if (!entry.Find("property").IsString() ||
-            entry.Find("property").GetString() != BakedPropertyNames[index] ||
-            !entry.Find("linear").IsBool() || !source.IsObject() ||
-            !source.Find("format").IsString() ||
+            entry.Find("property").GetString() != BakedPropertyNames[index] || !linear.IsBool() ||
+            !source.IsObject() || !source.Find("format").IsString() ||
             source.Find("format").GetString() != (emissive ? BakedHdrFormat : BakedColorFormat) ||
+            !source.Find("compression").IsString() ||
+            source.Find("compression").GetString() != BakedCompression ||
+            CountOf(source, "numLayers") != 1 || CountOf(source, "numBlocks") != 1 ||
             !source.Find("layers").IsArray() || source.Find("layers").Size() != 1 ||
             !source.Find("blocks").IsArray() || source.Find("blocks").Size() != 1) {
             check.Fail("baked property shape");
             continue;
         }
 
+        const JsonValue gamma = source.Find("layers").At(0).Find("gammaSpace");
+        if (!gamma.IsString() ||
+            gamma.GetString() != (linear.GetBool() ? BakedLinearGamma : BakedSrgbGamma)) {
+            check.Fail("baked gamma differs from linear");
+        }
+
         const JsonValue block = source.Find("blocks").At(0);
-        if (!block.Find("mips").IsArray() || block.Find("mips").Size() != 1 ||
-            (emissive && (static_cast<int64>(CountOf(block, "sizeX")) != size.Value() ||
-                          static_cast<int64>(CountOf(block, "sizeY")) != size.Value()))) {
+        const JsonValue mips = block.Find("mips");
+        const int64 width = CountOf(block, "sizeX");
+        const int64 height = CountOf(block, "sizeY");
+        if (!mips.IsArray() || mips.Size() != 1 || width < BakeSizeMin || height < BakeSizeMin ||
+            width > size.Value() || height > size.Value() ||
+            (emissive && (width != size.Value() || height != size.Value())) ||
+            CountOf(mips.At(0), "sizeX") != width || CountOf(mips.At(0), "sizeY") != height ||
+            !mips.At(0).Find("pixels").IsArray() || mips.At(0).Find("pixels").Size() != 1 ||
+            static_cast<int64>(CountOf(mips.At(0).Find("pixels").At(0), "count")) !=
+                width * height) {
             check.Fail("baked block shape");
         }
     }
@@ -1324,6 +1346,8 @@ TEST(UnrealExchange_GoldenBundle) {
     CHECK(totals.skeletalRecords == GoldenSkeletalRecords);
     CHECK(totals.materialRecords == GoldenMaterialRecords);
     CHECK(totals.referenceAssets == GoldenAssets - 1);
+    // 굽지 않은 내보내기에는 environment가 없다(3.4절 — 굽기를 했을 때만).
+    CHECK(!bundle.environment.IsValid());
 
     const uint32 degenerate = FindAsset(bundle, GoldenDegeneratePath);
     REQUIRE(degenerate != ExchangeNoIndex);
@@ -1480,7 +1504,9 @@ TEST(UnrealExchange_GoldenBakedBundle) {
     for (usize at = 0; at < sizeof(baked) / sizeof(baked[0]); ++at) {
         const JsonValue record = bundle.Assets()[baked[at]].data.Find("baked");
         REQUIRE(record.IsObject());
-        CHECK(record.Find("bakeSize").TryGetInt64().Value() == GoldenBakeSize);
+        const auto bakeSize = record.Find("bakeSize").TryGetInt64();
+        REQUIRE(bakeSize);
+        CHECK(bakeSize.Value() == GoldenBakeSize);
 
         Array<uint8> color(allocator);
         REQUIRE(LoadBakedBytes(bundle, baked[at], BakedBaseColorIndex, color, diagnostics));
@@ -1497,6 +1523,52 @@ TEST(UnrealExchange_GoldenBakedBundle) {
 
     CHECK(!bundle.Assets()[light].data.Find("baked").IsValid());
     CHECK(HasExporterDiagnostic(bundle.Assets()[light], "BakeSkipped"));
+}
+
+// 굽기 실패(warning BakeFailed + baked null — 8.9절 1번)는 에셋을 거부하지 않는다: GoldenBaked의
+// M_Golden을 그렇게 바꾼 사본에서 M_Golden과 그 인스턴스가 모두 Ready이고 baked가 null이다. 같은
+// 진단이 error면 리더가 에셋을 거부한다(10.4절 20번 — 그래서 warning이다).
+TEST(UnrealExchange_BakeFailedKeepsAsset) {
+    SystemAllocator allocator;
+    StringBuilder<512> source(allocator);
+    REQUIRE(FixtureSourcePath("GoldenBaked.rxbundle", source));
+    constexpr StringView severities[] = {"warning", "error"};
+    for (usize at = 0; at < sizeof(severities) / sizeof(severities[0]); ++at) {
+        MemoryFiles files(allocator);
+        REQUIRE(CopyTree(allocator, source.View(), "GoldenBaked.rxbundle", files));
+        StringBuilder<256> path(allocator);
+        REQUIRE(BundlePath("GoldenBaked.rxbundle", "assets/Game/RxGolden/M_Golden.json", path));
+        Array<uint8>* bytes = files.Find(path.View());
+        REQUIRE(bytes != nullptr);
+        const StringView text(reinterpret_cast<const char*>(bytes->Data()), bytes->Size());
+        const usize cut = text.Find(BakedRecordKey, StringComparison::CaseSensitive,
+                                    StringSearchDirection::FromEnd);
+        REQUIRE(cut != StringView::NotFound);
+        StringBuilder<4096> edited(allocator);
+        REQUIRE(edited.TryAppend(StringView(text.Data(), cut)));
+        REQUIRE(edited.TryAppend("\"baked\": null\n  }\n}\n"));
+        REQUIRE(files.PutText(path.View(), edited.View()));
+        StringBuilder<256> diagnostic(allocator);
+        REQUIRE(
+            diagnostic.TryAppend("\"diagnostics\": [{\"code\": \"BakeFailed\", \"severity\": \""));
+        REQUIRE(diagnostic.TryAppend(severities[at]));
+        REQUIRE(diagnostic.TryAppend("\", \"message\": \"m\"}]"));
+        REQUIRE(files.ReplaceOnce(path.View(), "\"diagnostics\": []", diagnostic.View()));
+
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadExchangeBundle(files, "GoldenBaked.rxbundle", {}, bundle, diagnostics));
+        const uint32 material = FindAsset(bundle, GoldenBakedMaterialPath);
+        REQUIRE(material != ExchangeNoIndex);
+        const bool warning = at == 0;
+        CHECK((bundle.Assets()[material].state == ExchangeAssetState::Ready) == warning);
+        if (warning) {
+            CHECK(bundle.Assets()[material].data.Find("baked").IsNull());
+            MaterialCheck check;
+            CheckBaked(bundle.Assets()[material].data.Find("baked"), check);
+            CHECK(check.issue == nullptr);
+        }
+    }
 }
 
 } // namespace exchange_external_bundle_tests_file

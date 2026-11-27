@@ -779,7 +779,7 @@
                     "numSlices": 1,
                     "pixels": [
                       {
-                        "blob": "e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad",
+                        "blob": "200e874ea65e735b120e1790d4bef086f31872d375ee882e4e74341c6d4af7c7",
                         "bytes": 2048,
                         "layout": "f16",
                         "components": 4,
