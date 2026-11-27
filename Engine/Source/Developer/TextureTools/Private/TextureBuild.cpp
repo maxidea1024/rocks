@@ -5,15 +5,17 @@
 #include "TextureBuildInternal.h"
 #include "TextureImportInternal.h"
 
+#include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureBuild.h>
+#include <TextureTools/TextureFormatSelect.h>
 #include <TextureTools/TextureImport.h>
 
 #include <math.h>
 
-// 텍스처 빌드 구현이다(Docs/Design/AssetSystem 12.13절 — 규칙 12.5절·12.2절 1–5번·12.4.3절, UE 5.8
-// TextureCompressorModule.cpp와 같은 순서). 작업 픽셀은 float32 RGBA다. mip 평균·테두리는 UE와 같은
-// float 식, 재표본은 double 누적 후 float 저장이다. 곱과 합은 따로 써서 FMA로 합쳐지지 않게 한다.
-// 초월 함수는 DeterministicMath만 쓴다.
+// 텍스처 빌드 구현이다(Docs/Design/AssetSystem 12.13절 — 규칙 12.5절·12.2절 1–5번, 출력 형식은
+// 12.17.5절, UE 5.8 TextureCompressorModule.cpp와 같은 순서). 작업 픽셀은 float32 RGBA다. mip
+// 평균·테두리는 UE와 같은 float 식, 재표본은 double 누적 후 float 저장이다. 곱과 합은 따로 써서
+// FMA로 합쳐지지 않게 한다. 초월 함수는 DeterministicMath만 쓴다.
 namespace rocks {
 
 using graphics::PixelFormat;
@@ -40,25 +42,6 @@ enum class SourceClass : uint8 {
     Unorm8,
     Unorm16,
     Float,
-};
-
-// 출력 형식이다(채널 수·texel 형식).
-enum class OutputKind : uint8 {
-    Unorm8,
-    Unorm16,
-    Half,
-    Single,
-};
-
-struct OutputFormat {
-    OutputKind kind = OutputKind::Unorm8;
-    uint32 channels = 4;
-    TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
-                                 TextureSwizzle::A};
-    // HDR_Compressed는 데이터 알파 1이다.
-    bool opaqueAlpha = false;
-    // norm16 대체(Unorm16 → 16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0을 적용한다(12.14절).
-    bool clampUnit = false;
 };
 
 SourceClass ClassOf(TextureSourceFormat format) noexcept {
@@ -92,152 +75,6 @@ uint32 ChannelsOf(TextureSourceFormat format) noexcept {
     }
 }
 
-// 원본 정밀도를 지키는 출력 종류다(8비트 → 8비트, 16비트 → 16비트, float → 16F — 12.4.3절).
-OutputKind KindFor(SourceClass source) noexcept {
-    switch (source) {
-    case SourceClass::Unorm8:
-        return OutputKind::Unorm8;
-    case SourceClass::Unorm16:
-        return OutputKind::Unorm16;
-    case SourceClass::Float:
-        return OutputKind::Half;
-    }
-
-    return OutputKind::Unorm8;
-}
-
-void SetSwizzle(OutputFormat& out, TextureSwizzle r, TextureSwizzle g, TextureSwizzle b,
-                TextureSwizzle a) noexcept {
-    out.swizzle[0] = r;
-    out.swizzle[1] = g;
-    out.swizzle[2] = b;
-    out.swizzle[3] = a;
-}
-
-// 12.4.3절 표다.
-OutputFormat OutputForTable(TextureCompressionSettings compression,
-                            TextureSourceFormat format) noexcept {
-    OutputFormat out;
-    const SourceClass source = ClassOf(format);
-    // 단일 채널 출력의 swizzle은 UE sampler type 계약이다(12.16.4 — 셰이더가 복제한다): Grayscale·
-    // Alpha·DistanceFieldFont는 .rrrr(UE ProcessMaterialGreyscale·AlphaTextureLookup), 그 밖은
-    // Color sampler라 복제가 없다(r001).
-    const auto single = [&out](OutputKind kind, bool replicate) noexcept {
-        out.kind = kind;
-        out.channels = 1;
-        if (replicate) {
-            SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::R, TextureSwizzle::R,
-                       TextureSwizzle::R);
-        } else {
-            SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::Zero, TextureSwizzle::Zero,
-                       TextureSwizzle::One);
-        }
-    };
-    switch (compression) {
-    case TextureCompressionSettings::Default: {
-        out.kind = KindFor(source);
-        out.channels = ChannelsOf(format);
-        if (out.channels == 1) {
-            SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::R, TextureSwizzle::R,
-                       TextureSwizzle::One);
-        } else if (out.channels == 2) {
-            SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::R, TextureSwizzle::R,
-                       TextureSwizzle::G);
-        }
-
-        break;
-    }
-    case TextureCompressionSettings::Normalmap:
-    case TextureCompressionSettings::Masks:
-    case TextureCompressionSettings::VectorDisplacementmap:
-        out.kind = KindFor(source);
-        break;
-    case TextureCompressionSettings::Grayscale:
-        single(KindFor(source), true);
-        break;
-    case TextureCompressionSettings::Displacementmap:
-        single(KindFor(source), false);
-        break;
-    case TextureCompressionSettings::Alpha:
-        single(KindFor(source), true);
-        break;
-    case TextureCompressionSettings::HDR:
-        out.kind = OutputKind::Half;
-        break;
-    case TextureCompressionSettings::HDR_Compressed:
-        out.kind = OutputKind::Half;
-        out.opaqueAlpha = true;
-        break;
-    case TextureCompressionSettings::DistanceFieldFont:
-        single(OutputKind::Unorm8, true);
-        break;
-    case TextureCompressionSettings::HalfFloat:
-        single(OutputKind::Half, false);
-        break;
-    case TextureCompressionSettings::SingleFloat:
-        single(OutputKind::Single, false);
-        break;
-    case TextureCompressionSettings::HDR_F32:
-        out.kind = OutputKind::Single;
-        break;
-    default:
-        // EditorIcon·BC7(그리고 숨김 값 — 앞에서 거부한다).
-        out.kind = OutputKind::Unorm8;
-        break;
-    }
-
-    return out;
-}
-
-// 12.4.3절 표 + 프로파일 norm16 대체(Unorm16 → 같은 채널 수의 16F — 12.14절)다.
-OutputFormat OutputFor(const TextureBuildSettings& settings) noexcept {
-    OutputFormat format = OutputForTable(settings.compression, settings.format);
-    if (format.kind == OutputKind::Unorm16 && !settings.norm16Supported) {
-        format.kind = OutputKind::Half;
-        format.clampUnit = true;
-    }
-
-    return format;
-}
-
-// 출력이 sRGB 부호화인지다(12.2절 3·4번 — 8비트 출력, 무시 종류·float → float 아님).
-bool OutputSrgb(const TextureBuildSettings& settings, const OutputFormat& format) noexcept {
-    const bool floatSource = ClassOf(settings.format) == SourceClass::Float;
-    const bool floatOutput = format.kind == OutputKind::Half || format.kind == OutputKind::Single;
-    const bool ignored =
-        TextureCompressionIgnoresSrgb(settings.compression) || (floatSource && floatOutput);
-    return settings.srgb && !ignored && format.kind == OutputKind::Unorm8;
-}
-
-graphics::PixelFormat PixelFormatOf(OutputKind kind, uint32 channels, bool srgb) noexcept {
-    switch (kind) {
-    case OutputKind::Unorm8:
-        return channels == 1   ? graphics::PixelFormat::R8Unorm
-               : channels == 2 ? graphics::PixelFormat::RG8Unorm
-               : srgb          ? graphics::PixelFormat::RGBA8UnormSrgb
-                               : graphics::PixelFormat::RGBA8Unorm;
-    case OutputKind::Unorm16:
-        return channels == 1   ? graphics::PixelFormat::R16Unorm
-               : channels == 2 ? graphics::PixelFormat::RG16Unorm
-                               : graphics::PixelFormat::RGBA16Unorm;
-    case OutputKind::Half:
-        return channels == 1   ? graphics::PixelFormat::R16Float
-               : channels == 2 ? graphics::PixelFormat::RG16Float
-                               : graphics::PixelFormat::RGBA16Float;
-    case OutputKind::Single:
-        return channels == 1 ? graphics::PixelFormat::R32Float : graphics::PixelFormat::RGBA32Float;
-    }
-
-    return graphics::PixelFormat::Unknown;
-}
-
-usize OutputTexelBytes(OutputKind kind, uint32 channels) noexcept {
-    const usize channel = kind == OutputKind::Unorm8                                ? 1
-                          : kind == OutputKind::Unorm16 || kind == OutputKind::Half ? 2
-                                                                                    : 4;
-    return channel * channels;
-}
-
 Result<void> Fail(TextureBuildResult& out, AssetDiagnosticCode code, ErrorCode error,
                   uint64 detail) noexcept {
     out.failure.code = code;
@@ -246,14 +83,14 @@ Result<void> Fail(TextureBuildResult& out, AssetDiagnosticCode code, ErrorCode e
     return Result<void>::Failure(error);
 }
 
-Result<void> Warn(TextureBuildResult& out, AssetDiagnosticCode code) noexcept {
+Result<void> Warn(TextureBuildResult& out, const TextureBuildWarning& added) noexcept {
     for (const TextureBuildWarning& warning : out.warnings) {
-        if (warning.code == code) {
+        if (warning.code == added.code) {
             return Result<void>::Success();
         }
     }
 
-    if (auto pushed = out.warnings.TryPushBack(TextureBuildWarning{code, 0}); !pushed) {
+    if (auto pushed = out.warnings.TryPushBack(added); !pushed) {
         return Fail(out, AssetDiagnosticCode::None, pushed.Error(), 0);
     }
 
@@ -837,34 +674,6 @@ float QuantizeSingle(float value) noexcept {
     return value > maximum ? maximum : (value < -maximum ? -maximum : value);
 }
 
-float SwizzleValue(const float* texel, TextureSwizzle swizzle,
-                   const OutputFormat& format) noexcept {
-    // 출력 채널 c의 값: R 출력 r, RG 출력 (r, a), RGBA 출력 (r, g, b, a).
-    const auto channel = [&](usize index) noexcept {
-        if (format.channels == 2) {
-            return index == 0 ? texel[Red] : texel[Alpha];
-        }
-
-        return texel[index];
-    };
-    switch (swizzle) {
-    case TextureSwizzle::R:
-        return channel(0);
-    case TextureSwizzle::G:
-        return channel(1);
-    case TextureSwizzle::B:
-        return channel(2);
-    case TextureSwizzle::A:
-        return channel(3);
-    case TextureSwizzle::Zero:
-        return 0.0f;
-    case TextureSwizzle::One:
-        return 1.0f;
-    }
-
-    return 0.0f;
-}
-
 void StoreLe16(uint8* data, uint16 value) noexcept {
     data[0] = static_cast<uint8>(value);
     data[1] = static_cast<uint8>(value >> 8);
@@ -877,12 +686,78 @@ void StoreLe32(uint8* data, uint32 value) noexcept {
     data[3] = static_cast<uint8>(value >> 24);
 }
 
-// level을 출력 형식으로 부호화한다(expandSrgb면 R8·RG8을 swizzle을 적용한 RGBA8 sRGB로 넓힌다).
-Result<void> Encode(const Level& level, const OutputFormat& format, bool srgb, bool expandSrgb,
-                    Array<uint8>& out) noexcept {
-    const uint32 channels = expandSrgb ? 4 : format.channels;
-    const usize texelBytes = OutputTexelBytes(format.kind, channels);
+// 8비트 색 채널 하나다(sRGB 형식이면 sRGB 부호화 — 알파는 늘 선형).
+uint8 EncodeUnorm8(float value, bool srgb) noexcept {
+    return srgb ? texture_import::LinearToSrgb8(value) : QuantizeUnorm8(value);
+}
+
+TextureBlockFormat BlockFormatOf(TextureFormatEncoding encoding) noexcept {
+    switch (encoding) {
+    case TextureFormatEncoding::Bc3:
+        return TextureBlockFormat::Bc3;
+    case TextureFormatEncoding::Bc4:
+        return TextureBlockFormat::Bc4;
+    case TextureFormatEncoding::Bc5:
+        return TextureBlockFormat::Bc5;
+    default:
+        return TextureBlockFormat::Bc1;
+    }
+}
+
+// 출력 부호화 선택이다(12.17.5 3).
+struct EncodeOptions {
+    // HDR_Compressed의 RGBA16F 출력은 알파 1이다(UE BC6H는 알파가 없다).
+    bool opaqueAlpha = false;
+    // norm16 대체(G16 → R16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0이다(12.14절).
+    bool clampUnit = false;
+};
+
+// level을 choice 형식으로 부호화한다(slice·깊이 평면을 차례로, 행 사이 패딩 없음). BC는 RGBA8(같은
+// sRGB 부호화)을 만들어 EncodeTextureBlocks로 압축한다.
+Result<void> Encode(Allocator& allocator, const Level& level, const TextureFormatChoice& choice,
+                    const EncodeOptions& options, Array<uint8>& out) noexcept {
     const usize texels = level.texels.Size() / Channels;
+    const bool srgb = choice.srgb;
+    if (choice.encoding != TextureFormatEncoding::Uncompressed) {
+        Array<uint8> rgba(allocator);
+        if (auto sized = rgba.TryResize(texels * TextureBlockTexelBytes); !sized) {
+            return sized;
+        }
+
+        for (usize index = 0; index < texels; ++index) {
+            const float* texel = level.texels.Data() + index * Channels;
+            uint8* target = rgba.Data() + index * TextureBlockTexelBytes;
+            target[0] = EncodeUnorm8(texel[Red], srgb);
+            target[1] = EncodeUnorm8(texel[Green], srgb);
+            target[2] = EncodeUnorm8(texel[Blue], srgb);
+            target[3] = QuantizeUnorm8(texel[Alpha]);
+        }
+
+        const TextureBlockFormat block = BlockFormatOf(choice.encoding);
+        const uint32 planes = level.layers * level.depth;
+        auto bytes = TextureBlockOutputBytes(block, level.width, level.height, planes);
+        if (!bytes) {
+            return Result<void>::Failure(bytes.Error());
+        }
+
+        if (auto sized = out.TryResize(static_cast<usize>(bytes.Value())); !sized) {
+            return sized;
+        }
+
+        TextureBlockImage image;
+        image.rgba = rgba.View();
+        image.sizeX = level.width;
+        image.sizeY = level.height;
+        image.numSlices = planes;
+        return EncodeTextureBlocks(block, image, out.View());
+    }
+
+    const graphics::PixelFormat format = choice.pixelFormat;
+    const usize texelBytes = graphics::GetPixelFormatInfo(format).blockBytes;
+    if (texelBytes == 0) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     if (auto sized = out.TryResize(texels * texelBytes); !sized) {
         return sized;
     }
@@ -890,44 +765,81 @@ Result<void> Encode(const Level& level, const OutputFormat& format, bool srgb, b
     for (usize index = 0; index < texels; ++index) {
         const float* texel = level.texels.Data() + index * Channels;
         uint8* target = out.Data() + index * texelBytes;
-        for (uint32 c = 0; c < channels; ++c) {
-            float value = 0.0f;
-            if (expandSrgb) {
-                value = SwizzleValue(texel, format.swizzle[c], format);
-            } else if (channels == 1) {
-                value = texel[Red];
-            } else if (channels == 2) {
-                value = c == 0 ? texel[Red] : texel[Alpha];
-            } else {
-                value = texel[c];
+        const float alpha = options.opaqueAlpha ? 1.0f : texel[Alpha];
+        switch (format) {
+        case graphics::PixelFormat::R8Unorm:
+            target[0] = QuantizeUnorm8(texel[Red]);
+            break;
+        case graphics::PixelFormat::R16Unorm:
+            StoreLe16(target, QuantizeUnorm16(texel[Red]));
+            break;
+        case graphics::PixelFormat::R16Float:
+            StoreLe16(target,
+                      QuantizeHalf(options.clampUnit ? Clamp01NansTo0(texel[Red]) : texel[Red]));
+            break;
+        case graphics::PixelFormat::R32Float:
+            StoreLe32(target, platform::BitCast<uint32>(QuantizeSingle(texel[Red])));
+            break;
+        case graphics::PixelFormat::BGRA8Unorm:
+        case graphics::PixelFormat::BGRA8UnormSrgb:
+            target[0] = EncodeUnorm8(texel[Blue], srgb);
+            target[1] = EncodeUnorm8(texel[Green], srgb);
+            target[2] = EncodeUnorm8(texel[Red], srgb);
+            target[3] = QuantizeUnorm8(alpha);
+            break;
+        case graphics::PixelFormat::RGBA8Unorm:
+        case graphics::PixelFormat::RGBA8UnormSrgb:
+            target[0] = EncodeUnorm8(texel[Red], srgb);
+            target[1] = EncodeUnorm8(texel[Green], srgb);
+            target[2] = EncodeUnorm8(texel[Blue], srgb);
+            target[3] = QuantizeUnorm8(alpha);
+            break;
+        case graphics::PixelFormat::RGBA16Float:
+            for (uint32 c = 0; c < Channels; ++c) {
+                StoreLe16(target + c * 2, QuantizeHalf(c == Alpha ? alpha : texel[c]));
             }
 
-            // 알파 칸(RG의 둘째·RGBA의 넷째)은 늘 선형이다.
-            const bool alpha = channels > 1 && c == channels - 1;
-            if (format.opaqueAlpha && channels == 4 && c == Alpha) {
-                value = 1.0f;
+            break;
+        case graphics::PixelFormat::RGBA32Float:
+            for (uint32 c = 0; c < Channels; ++c) {
+                StoreLe32(target + c * 4,
+                          platform::BitCast<uint32>(QuantizeSingle(c == Alpha ? alpha : texel[c])));
             }
 
-            switch (format.kind) {
-            case OutputKind::Unorm8:
-                target[c] =
-                    srgb && !alpha ? texture_import::LinearToSrgb8(value) : QuantizeUnorm8(value);
-                break;
-            case OutputKind::Unorm16:
-                StoreLe16(target + c * 2, QuantizeUnorm16(value));
-                break;
-            case OutputKind::Half:
-                StoreLe16(target + c * 2,
-                          QuantizeHalf(format.clampUnit ? Clamp01NansTo0(value) : value));
-                break;
-            case OutputKind::Single:
-                StoreLe32(target + c * 4, platform::BitCast<uint32>(QuantizeSingle(value)));
-                break;
-            }
+            break;
+        default:
+            return Result<void>::Failure(ErrorCode::Unsupported);
         }
     }
 
     return Result<void>::Success();
+}
+
+// 채널 복제(12.17절 TD6 — UE ReplicateRedChannel·ReplicateAlphaChannel, 선형 float).
+void Replicate(Level& level, TextureChannelReplicate replicate) noexcept {
+    if (replicate == TextureChannelReplicate::None) {
+        return;
+    }
+
+    const usize source = replicate == TextureChannelReplicate::Red ? Red : Alpha;
+    for (usize index = 0; index < level.texels.Size(); index += Channels) {
+        const float value = level.texels[index + source];
+        for (usize c = 0; c < Channels; ++c) {
+            level.texels[index + c] = value;
+        }
+    }
+}
+
+// 알파 판정(UE DetectAlphaChannel의 8비트 문턱 — 최소 알파 ≤ 254.5 / 255면 투명)이다.
+bool HasTransparentAlpha(const Level& level) noexcept {
+    constexpr float Threshold = 254.5f / 255.0f;
+    for (usize index = Alpha; index < level.texels.Size(); index += Channels) {
+        if (level.texels[index] <= Threshold) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // ---- 7. 쿠킹 편향(12.5절 7번 — UE CalculateLODBias) ----
@@ -987,6 +899,138 @@ bool IsHidden(TextureCompressionSettings compression) noexcept {
     return value == HiddenCompressionLq || value == HiddenCompressionReflection;
 }
 
+// 크기 계획이다(BuildTexture와 TextureBuildTopMipSize가 같은 식을 쓴다): PowerOfTwoMode 대상, 최대
+// 크기를 맞춘 mip 0, 사슬 길이, 버릴 상위 mip, 쿠킹 상위 mip.
+struct SizePlan {
+    uint32 targetX = 0;
+    uint32 targetY = 0;
+    uint32 targetZ = 1;
+    bool pad = false;
+    uint32 fitX = 0;
+    uint32 fitY = 0;
+    uint32 fitZ = 1;
+    uint32 chain = 1;
+    uint32 dropped = 0;
+    uint32 topX = 0;
+    uint32 topY = 0;
+};
+
+SizePlan PlanSizes(const TextureBuildSettings& settings) noexcept {
+    SizePlan plan;
+    const bool volume = settings.dimension == TextureDimension::Volume;
+    const TexturePowerOfTwoSetting mode = settings.powerOfTwoMode;
+    const uint32 depth = volume ? settings.numSlices : 1;
+    plan.targetX = settings.sizeX;
+    plan.targetY = settings.sizeY;
+    plan.targetZ = depth;
+    plan.pad = mode == TexturePowerOfTwoSetting::PadToPowerOfTwo ||
+               mode == TexturePowerOfTwoSetting::PadToSquarePowerOfTwo;
+    const bool square = mode == TexturePowerOfTwoSetting::PadToSquarePowerOfTwo ||
+                        mode == TexturePowerOfTwoSetting::StretchToSquarePowerOfTwo;
+    if (plan.pad || mode == TexturePowerOfTwoSetting::StretchToPowerOfTwo ||
+        mode == TexturePowerOfTwoSetting::StretchToSquarePowerOfTwo) {
+        plan.targetX = RoundUpPowerOfTwo32(settings.sizeX);
+        plan.targetY = RoundUpPowerOfTwo32(settings.sizeY);
+        plan.targetZ = volume ? RoundUpPowerOfTwo32(depth) : depth;
+        if (square) {
+            uint32 larger = plan.targetX > plan.targetY ? plan.targetX : plan.targetY;
+            larger = volume && plan.targetZ > larger ? plan.targetZ : larger;
+            plan.targetX = larger;
+            plan.targetY = larger;
+            plan.targetZ = volume ? larger : depth;
+        }
+
+        // Stretch·Resize는 Volume Z를 바꾸지 않는다(12.5절 3번 — UE와 다름).
+        if (!plan.pad) {
+            plan.targetZ = depth;
+        }
+    } else if (mode == TexturePowerOfTwoSetting::ResizeToSpecificResolution) {
+        plan.targetX = settings.resizeX != 0 ? settings.resizeX : settings.sizeX;
+        plan.targetY = settings.resizeY != 0 ? settings.resizeY : settings.sizeY;
+    }
+
+    // 4. 최대 크기(UE MaxTextureResolution — X·Y만 본다, 2×2 단계 경로는 Volume Z도 반으로).
+    uint64 maximum = MaxDimension2D;
+    if (settings.maxTextureSize > 0 && static_cast<uint64>(settings.maxTextureSize) < maximum) {
+        maximum = static_cast<uint64>(settings.maxTextureSize);
+    }
+
+    plan.fitX = plan.targetX;
+    plan.fitY = plan.targetY;
+    plan.fitZ = plan.targetZ;
+    const bool stepPath = volume || settings.preserveBorder;
+    while (plan.fitX > maximum || plan.fitY > maximum) {
+        plan.fitX = Half(plan.fitX);
+        plan.fitY = Half(plan.fitY);
+        plan.fitZ = stepPath && volume ? Half(plan.fitZ) : plan.fitZ;
+    }
+
+    uint32 longest = plan.fitX > plan.fitY ? plan.fitX : plan.fitY;
+    longest = volume && plan.fitZ > longest ? plan.fitZ : longest;
+    plan.chain =
+        settings.mipGenSettings == TextureMipGenSettings::NoMipmaps ? 1 : FloorLog2(longest) + 1;
+    plan.dropped = CookDroppedMips(settings, plan.fitX, plan.fitY, plan.chain);
+    plan.topX = plan.fitX;
+    plan.topY = plan.fitY;
+    for (uint32 mip = 0; mip < plan.dropped; ++mip) {
+        plan.topX = Half(plan.topX);
+        plan.topY = Half(plan.topY);
+    }
+
+    return plan;
+}
+
+// settings에서 형식 선택 입력을 만든다(12.17.5 3).
+TextureFormatRequest FormatRequest(const TextureBuildSettings& settings,
+                                   const SizePlan& plan) noexcept {
+    TextureFormatRequest request;
+    request.compression = settings.compression;
+    request.srgb = settings.srgb;
+    request.sourceFormat = settings.format;
+    request.dimension = settings.dimension;
+    request.lodGroup = settings.lodGroup;
+    request.compressionNone = settings.compressionNone;
+    request.compressionNoAlpha = settings.compressionNoAlpha;
+    request.compressionForceAlpha = settings.compressionForceAlpha;
+    request.pointFilter = settings.samplerPointFilter;
+    request.topSizeX = plan.topX;
+    request.topSizeY = plan.topY;
+    return request;
+}
+
+TextureFormatTarget FormatTarget(const TextureBuildSettings& settings) noexcept {
+    TextureFormatTarget target;
+    target.platform = static_cast<graphics::GraphicsPlatform>(settings.cookPlatform);
+    target.backends = settings.cookBackends;
+    target.norm16Supported = settings.norm16Supported;
+    return target;
+}
+
+bool ValidSize(const TextureBuildSettings& settings) noexcept {
+    return settings.format != TextureSourceFormat::Invalid && settings.sizeX != 0 &&
+           settings.sizeY != 0 && settings.numSlices != 0;
+}
+
+Result<void> ChooseFormat(const TextureBuildSettings& settings, bool alphaTransparent,
+                          TextureFormatChoice& choice) noexcept {
+    if (!ValidSize(settings) || IsHidden(settings.compression)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const SizePlan plan = PlanSizes(settings);
+    return SelectTextureFormat(FormatRequest(settings, plan), FormatTarget(settings),
+                               alphaTransparent, choice);
+}
+
+EncodeOptions EncodeOptionsFor(const TextureBuildSettings& settings,
+                               const TextureFormatChoice& choice) noexcept {
+    EncodeOptions options;
+    options.opaqueAlpha = settings.compression == TextureCompressionSettings::HDR_Compressed;
+    options.clampUnit = choice.pixelFormat == graphics::PixelFormat::R16Float &&
+                        settings.format == TextureSourceFormat::G16 && !settings.norm16Supported;
+    return options;
+}
+
 // 작업 픽셀 byte 수가 상한 안인지다(넘침 검사 포함).
 bool WithinWorkingBytes(uint64 x, uint64 y, uint64 z, uint64 layers) noexcept {
     const uint64 limit = TextureBuildMaxWorkingBytes / (Channels * sizeof(float));
@@ -1010,14 +1054,12 @@ bool WithinWorkingBytes(uint64 x, uint64 y, uint64 z, uint64 layers) noexcept {
 } // namespace
 
 bool TextureCompressionIgnoresSrgb(TextureCompressionSettings compression) noexcept {
+    // UE bPreventSRGB(Texture.cpp 772–777): Alpha·Normalmap·Masks와 HDR류(UE IsHDR)다.
     switch (compression) {
     case TextureCompressionSettings::Normalmap:
     case TextureCompressionSettings::Masks:
-    case TextureCompressionSettings::Displacementmap:
-    case TextureCompressionSettings::VectorDisplacementmap:
-    case TextureCompressionSettings::HDR:
     case TextureCompressionSettings::Alpha:
-    case TextureCompressionSettings::DistanceFieldFont:
+    case TextureCompressionSettings::HDR:
     case TextureCompressionSettings::HDR_Compressed:
     case TextureCompressionSettings::HalfFloat:
     case TextureCompressionSettings::SingleFloat:
@@ -1028,15 +1070,13 @@ bool TextureCompressionIgnoresSrgb(TextureCompressionSettings compression) noexc
     }
 }
 
-usize TextureBuildWarnings(const TextureBuildSettings& settings,
-                           AssetDiagnosticCode (&out)[TextureBuildMaxWarnings]) noexcept {
+usize TextureBuildWarnings(const TextureBuildSettings& settings, bool alphaTransparent,
+                           TextureBuildWarning (&out)[TextureBuildMaxWarnings]) noexcept {
     usize count = 0;
-    const OutputFormat format = OutputFor(settings);
-    const bool floatSource = ClassOf(settings.format) == SourceClass::Float;
-    const bool floatOutput = format.kind == OutputKind::Half || format.kind == OutputKind::Single;
-    if (settings.srgb &&
-        (TextureCompressionIgnoresSrgb(settings.compression) || (floatSource && floatOutput))) {
-        out[count++] = AssetDiagnosticCode::SrgbIgnored;
+    TextureFormatChoice choice;
+    const bool chosen = static_cast<bool>(ChooseFormat(settings, alphaTransparent, choice));
+    if (chosen && choice.srgbIgnored) {
+        out[count++] = TextureBuildWarning{AssetDiagnosticCode::SrgbIgnored, 0};
     }
 
     // PreserveBorder Wrap(쓰는 축 — Volume은 Z도, mip이 없으면 테두리를 다시 쓰지 않는다).
@@ -1044,24 +1084,44 @@ usize TextureBuildWarnings(const TextureBuildSettings& settings,
     if (settings.preserveBorder && settings.mipGenSettings != TextureMipGenSettings::NoMipmaps &&
         (settings.addressX == TextureAddress::Wrap || settings.addressY == TextureAddress::Wrap ||
          (volume && settings.addressZ == TextureAddress::Wrap))) {
-        out[count++] = AssetDiagnosticCode::PreserveBorderWithWrap;
+        out[count++] = TextureBuildWarning{AssetDiagnosticCode::PreserveBorderWithWrap, 0};
+    }
+
+    for (usize index = 0; chosen && index < choice.warningCount; ++index) {
+        out[count++] =
+            TextureBuildWarning{choice.warnings[index].code, choice.warnings[index].detail};
     }
 
     return count;
 }
 
-TextureBuildOutputInfo TextureBuildOutput(const TextureBuildSettings& settings) noexcept {
-    const OutputFormat format = OutputFor(settings);
-    const bool srgb = OutputSrgb(settings, format);
-    const bool expand = srgb && format.channels < 4;
+TextureBuildOutputInfo TextureBuildOutput(const TextureBuildSettings& settings,
+                                          bool alphaTransparent) noexcept {
     TextureBuildOutputInfo info;
-    info.pixelFormat = PixelFormatOf(format.kind, expand ? 4 : format.channels, srgb);
-    info.srgb = srgb;
+    TextureFormatChoice choice;
+    if (!ChooseFormat(settings, alphaTransparent, choice)) {
+        return info;
+    }
+
+    info.pixelFormat = choice.pixelFormat;
+    info.srgb = choice.srgb;
     for (usize index = 0; index < 4; ++index) {
-        info.swizzle[index] = expand ? static_cast<TextureSwizzle>(index) : format.swizzle[index];
+        info.swizzle[index] = choice.swizzle[index];
     }
 
     return info;
+}
+
+Result<void> TextureBuildTopMipSize(const TextureBuildSettings& settings, uint32& sizeX,
+                                    uint32& sizeY) noexcept {
+    if (!ValidSize(settings)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const SizePlan plan = PlanSizes(settings);
+    sizeX = plan.topX;
+    sizeY = plan.topY;
+    return Result<void>::Success();
 }
 
 Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimension dimension,
@@ -1152,6 +1212,10 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     out.maxTextureSize = texture.maxTextureSize;
     out.minLodSize = group.minLodSize;
     out.maxLodSize = group.maxLodSize;
+    out.compressionNone = texture.compressionNone != 0;
+    out.compressionNoAlpha = texture.compressionNoAlpha != 0;
+    out.compressionForceAlpha = texture.compressionForceAlpha != 0;
+    out.lodGroup = texture.lodGroup;
     // 주소(12.4.2절): texture는 dimension의 클래스다(호출자 계약 — 쿠킹이 타입으로 정한다).
     switch (dimension) {
     case TextureDimension::Texture2D: {
@@ -1235,41 +1299,16 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     }
 
     // PowerOfTwoMode 대상 크기(UE GetPowerOfTwoTargetTextureSize — 작업 byte를 먼저 판정한다).
-    const TexturePowerOfTwoSetting mode = settings.powerOfTwoMode;
     const uint32 depth = volume ? settings.numSlices : 1;
     const uint32 layers = volume ? 1 : settings.numSlices;
-    uint32 targetX = settings.sizeX;
-    uint32 targetY = settings.sizeY;
-    uint32 targetZ = depth;
-    const bool pad = mode == TexturePowerOfTwoSetting::PadToPowerOfTwo ||
-                     mode == TexturePowerOfTwoSetting::PadToSquarePowerOfTwo;
-    const bool square = mode == TexturePowerOfTwoSetting::PadToSquarePowerOfTwo ||
-                        mode == TexturePowerOfTwoSetting::StretchToSquarePowerOfTwo;
-    if (pad || mode == TexturePowerOfTwoSetting::StretchToPowerOfTwo ||
-        mode == TexturePowerOfTwoSetting::StretchToSquarePowerOfTwo) {
-        targetX = RoundUpPowerOfTwo32(settings.sizeX);
-        targetY = RoundUpPowerOfTwo32(settings.sizeY);
-        targetZ = volume ? RoundUpPowerOfTwo32(depth) : depth;
-        if (square) {
-            uint32 larger = targetX > targetY ? targetX : targetY;
-            larger = volume && targetZ > larger ? targetZ : larger;
-            targetX = larger;
-            targetY = larger;
-            targetZ = volume ? larger : depth;
-        }
-
-        // Stretch·Resize는 Volume Z를 바꾸지 않는다(12.5절 3번 — UE와 다름).
-        if (!pad) {
-            targetZ = depth;
-        }
-    } else if (mode == TexturePowerOfTwoSetting::ResizeToSpecificResolution) {
-        targetX = settings.resizeX != 0 ? settings.resizeX : settings.sizeX;
-        targetY = settings.resizeY != 0 ? settings.resizeY : settings.sizeY;
-    }
-
+    const SizePlan plan = PlanSizes(settings);
+    const uint32 targetX = plan.targetX;
+    const uint32 targetY = plan.targetY;
+    const uint32 targetZ = plan.targetZ;
+    const bool pad = plan.pad;
     if (cube && targetX != targetY) {
         return Fail(out, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
-                    static_cast<uint64>(mode));
+                    static_cast<uint64>(settings.powerOfTwoMode));
     }
 
     const uint32 widestX = targetX > settings.sizeX ? targetX : settings.sizeX;
@@ -1280,14 +1319,13 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
                     sourcePixels.Size());
     }
 
-    const OutputFormat format = OutputFor(settings);
-    const bool srgb = OutputSrgb(settings, format);
-    AssetDiagnosticCode warnings[TextureBuildMaxWarnings];
-    const usize warningCount = TextureBuildWarnings(settings, warnings);
-    for (usize index = 0; index < warningCount; ++index) {
-        if (auto warned = Warn(out, warnings[index]); !warned) {
-            return warned;
-        }
+    // 형식 선택 입력이 맞는지 먼저 본다(대상 backend의 보장 대체가 없으면 InvalidSetting — TD12).
+    const TextureFormatRequest request = FormatRequest(settings, plan);
+    const TextureFormatTarget target = FormatTarget(settings);
+    TextureFormatChoice choice;
+    if (!SelectTextureFormat(request, target, false, choice)) {
+        return Fail(out, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
+                    settings.cookBackends);
     }
 
     // 1. 선형화.
@@ -1366,6 +1404,11 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     longest = volume && level.depth > longest ? level.depth : longest;
     const uint32 chain = noMips ? 1 : FloorLog2(longest) + 1;
     const uint32 dropped = CookDroppedMips(settings, level.width, level.height, chain);
+    // 크기 계획과 실제 사슬이 같아야 한다(상위 mip 크기 규칙이 이 값으로 형식을 골랐다).
+    if (chain != plan.chain || dropped != plan.dropped || level.width != plan.fitX ||
+        level.height != plan.fitY) {
+        return Fail(out, AssetDiagnosticCode::None, ErrorCode::InvalidArgument, 0);
+    }
     if (auto reserved = out.mips.TryReserve(chain - dropped); !reserved) {
         return Fail(out, AssetDiagnosticCode::None, reserved.Error(), 0);
     }
@@ -1396,28 +1439,51 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
         }
     }
 
+    // 6b. 채널 복제(UE — NormalizeNormals 뒤 모든 mip, 12.17절 TD6).
+    for (Level& mip : mips) {
+        Replicate(mip, choice.replicate);
+    }
+
+    // 6c. 알파 판정(AutoDXT일 때만 — 사슬의 mip 0, 쿠킹 편향으로 버리기 전, 12.17.5 3).
+    bool alphaTransparent = false;
+    if (TextureFormatDependsOnAlpha(request, target)) {
+        alphaTransparent = HasTransparentAlpha(mips[0]);
+        if (!SelectTextureFormat(request, target, alphaTransparent, choice)) {
+            return Fail(out, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
+                        settings.cookBackends);
+        }
+    }
+
+    TextureBuildWarning warnings[TextureBuildMaxWarnings];
+    const usize warningCount = TextureBuildWarnings(settings, alphaTransparent, warnings);
+    for (usize index = 0; index < warningCount; ++index) {
+        if (auto warned = Warn(out, warnings[index]); !warned) {
+            return warned;
+        }
+    }
+
     // 7·8. 쿠킹 편향과 출력.
-    const bool expand = srgb && format.channels < 4;
+    const EncodeOptions options = EncodeOptionsFor(settings, choice);
     for (uint32 mip = dropped; mip < chain; ++mip) {
         const Level& current = mips[mip];
         TextureBuiltMip built(allocator);
         built.sizeX = current.width;
         built.sizeY = current.height;
         built.sizeZ = volume ? current.depth : 1;
-        if (auto encoded = Encode(current, format, srgb, expand, built.bytes); !encoded) {
+        if (auto encoded = Encode(allocator, current, choice, options, built.bytes); !encoded) {
             return Fail(out, AssetDiagnosticCode::None, encoded.Error(), 0);
         }
 
         (void)out.mips.TryPushBack(rocks::Move(built));
     }
 
-    const TextureBuildOutputInfo info = TextureBuildOutput(settings);
-    out.pixelFormat = info.pixelFormat;
-    out.srgb = info.srgb;
+    out.pixelFormat = choice.pixelFormat;
+    out.srgb = choice.srgb;
     for (usize index = 0; index < 4; ++index) {
-        out.swizzle[index] = info.swizzle[index];
+        out.swizzle[index] = choice.swizzle[index];
     }
 
+    out.alphaTransparent = alphaTransparent;
     out.numSlices = volume ? 1 : settings.numSlices;
     return Result<void>::Success();
 }

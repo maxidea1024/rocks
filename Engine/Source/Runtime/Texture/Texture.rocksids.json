@@ -479,6 +479,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::TextureBuildSettings::compressionForceAlpha",
+      "id": "5491a7de3fc843e593a07e11888f103b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::compressionNoAlpha",
+      "id": "e80091ca1d16446889932d8750d261f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::compressionNone",
+      "id": "c7d9c60a32284bdda329330f4d5367af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::cookBackends",
+      "id": "52d04c667a1d4d319280ba5932903772",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::cookPlatform",
+      "id": "149392382b6849aea2aed2df46fa46c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::TextureBuildSettings::dimension",
       "id": "128d88256c05474fb493ff9aedebbcac",
       "aliases": [],
@@ -509,6 +544,13 @@
       "kind": "field",
       "name": "rocks::TextureBuildSettings::lodBias",
       "id": "dd22f63b27ed4aec9b0d4d2bc3105c3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::lodGroup",
+      "id": "874e826950b64a7e83ca3eb7196b5fa1",
       "aliases": [],
       "retired": false
     },
@@ -600,6 +642,13 @@
       "kind": "field",
       "name": "rocks::TextureBuildSettings::resizeY",
       "id": "296e8c84078e4844a1c1f40f077cf5f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::samplerPointFilter",
+      "id": "2adc375d2df045e0b4f3839e9ff68f45",
       "aliases": [],
       "retired": false
     },
