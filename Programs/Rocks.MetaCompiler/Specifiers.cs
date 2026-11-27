@@ -99,6 +99,10 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public string ScriptName { get; init; } = "";
 
+    // 이벤트 필드 인자 이름 목록 Params="a,b"(Docs/Design/EventReflection.ko.md ED14·ED18 — Event<…> 필드 전용, 쓰지 않았으면 null)다.
+    // 이름 규칙과 수는 SchemaValidator(RMC2803)가 본다.
+    public string? Params { get; init; }
+
     public bool ScriptVisible => ScriptReadOnly || ScriptWritable;
 
     public bool HasSettings => UserConfig || ConsoleName.Length != 0 || RestartRequired || StartupOnly || RenderRead || DevelopmentOnly;
@@ -268,7 +272,7 @@ internal static class Specifiers
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
                 "ScriptReadOnly" or "ScriptWritable";
-            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName";
+            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
                 (number && value?.Number is null))
@@ -355,7 +359,8 @@ internal static class Specifiers
             DevelopmentOnly = values.ContainsKey("DevelopmentOnly"),
             ScriptReadOnly = scriptReadOnly,
             ScriptWritable = scriptWritable,
-            ScriptName = scriptName
+            ScriptName = scriptName,
+            Params = values.GetValueOrDefault("Params")?.Text
         };
     }
 
