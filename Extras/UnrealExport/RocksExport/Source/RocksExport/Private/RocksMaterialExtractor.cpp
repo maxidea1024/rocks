@@ -13,6 +13,7 @@
 #include "RocksAssetBody.h"
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
+#include "RocksMaterialBaker.h"
 #include "RocksPropertyDumper.h"
 #include "SparseVolumeTexture/SparseVolumeTexture.h"
 #include "VT/RuntimeVirtualTexture.h"
@@ -470,7 +471,7 @@ bool FRocksMaterialExtractor::IsMaterialClass(const FString& ExchangeClass)
 	return false;
 }
 
-void FRocksMaterialExtractor::Extract(UObject& Asset, FRocksAssetBody& OutBody)
+bool FRocksMaterialExtractor::Extract(UObject& Asset, int32 BakeSize, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
 {
 	using namespace RocksMaterialExtractorPrivate;
 
@@ -513,7 +514,14 @@ void FRocksMaterialExtractor::Extract(UObject& Asset, FRocksAssetBody& OutBody)
 		WriteResolved(*Instance, Dumper, Data);
 	}
 
+	UMaterialInterface* Bakeable = Material != nullptr ? static_cast<UMaterialInterface*>(Material) : Cast<UMaterialInstanceConstant>(&Asset);
+	if (BakeSize > 0 && Bakeable != nullptr && !FRocksMaterialBaker::WriteBaked(*Bakeable, BakeSize, Bundle, Data, OutBody, OutError))
+	{
+		return false;
+	}
+
 	Data.EndObject();
 	OutBody.Data = Data.FinishFragment();
 	OutBody.References = Dumper.GetReferences();
+	return true;
 }

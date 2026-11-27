@@ -1,0 +1,930 @@
+{
+  "objectPath": "/Game/RxGolden/M_Golden.M_Golden",
+  "class": "Material",
+  "ueClass": "/Script/Engine.Material",
+  "dependencies": [],
+  "diagnostics": [],
+  "settings": {
+    "PhysMaterial": null,
+    "PhysMaterialMask": null,
+    "PhysicalMaterialMap": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "RenderTracePhysicalMaterialOutputs": [],
+    "MaterialDomain": "MD_Surface",
+    "BlendMode": "BLEND_Opaque",
+    "DecalBlendMode": "DBM_Translucent",
+    "MaterialDecalResponse": "MDR_ColorNormalRoughness",
+    "NaniteOverrideMaterial": {
+      "bEnableOverride": true,
+      "OverrideMaterialEditor": null,
+      "OverrideMaterial": null,
+      "OverrideMaterialRef": null
+    },
+    "DisplacementScaling": {
+      "Magnitude": 4,
+      "Center": 0.5
+    },
+    "DisplacementFadeRange": {
+      "StartSizePixels": 4,
+      "EndSizePixels": 1
+    },
+    "ShadingModel": "MSM_DefaultLit",
+    "bCastDynamicShadowAsMasked": false,
+    "ShadingModels": {
+      "ShadingModelField": 2
+    },
+    "OpacityMaskClipValue": 0.333299994,
+    "bEnableResponsiveAA": false,
+    "bScreenSpaceReflections": false,
+    "bContactShadows": false,
+    "TwoSided": false,
+    "bIsThinSurface": false,
+    "DitheredLODTransition": false,
+    "DitherOpacityMask": false,
+    "bAllowNegativeEmissiveColor": false,
+    "bHasPixelAnimation": false,
+    "bEnableTessellation": false,
+    "bEnableDisplacementFade": false,
+    "TranslucencyPass": "MTP_AfterDOF",
+    "TranslucencyLightingMode": "TLM_VolumetricNonDirectional",
+    "bEnableMobileSeparateTranslucency": false,
+    "NumCustomizedUVs": 0,
+    "TranslucencyDirectionalLightingIntensity": 1,
+    "TranslucentShadowDensityScale": 0.5,
+    "TranslucentSelfShadowDensityScale": 2,
+    "TranslucentSelfShadowSecondDensityScale": 10,
+    "TranslucentSelfShadowSecondOpacity": 0,
+    "TranslucentBackscatteringExponent": 30,
+    "TranslucentMultipleScatteringExtinction": {
+      "R": 1,
+      "G": 0.833000004,
+      "B": 0.588,
+      "A": 1
+    },
+    "TranslucentShadowStartOffset": 100,
+    "bDisableDepthTest": false,
+    "bWriteOnlyAlpha": false,
+    "bGenerateSphericalParticleNormals": false,
+    "bTangentSpaceNormal": true,
+    "bUseEmissiveForDynamicAreaLighting": false,
+    "bUsedAsSpecialEngineMaterial": false,
+    "bSubstrateRoughnessTracking": true,
+    "bUsedWithSkeletalMesh": false,
+    "bUsedWithMeshDeformer": false,
+    "bUsedWithEditorCompositing": false,
+    "bUsedWithParticleSprites": false,
+    "bUsedWithBeamTrails": false,
+    "bUsedWithMeshParticles": false,
+    "bUsedWithNiagaraSprites": false,
+    "bUsedWithNiagaraRibbons": false,
+    "bUsedWithNiagaraMeshParticles": false,
+    "bUsedWithGeometryCache": false,
+    "bUsedWithStaticLighting": false,
+    "bUsedWithMorphTargets": false,
+    "bUsedWithSplineMeshes": false,
+    "bUsedWithInstancedStaticMeshes": false,
+    "bUsedWithGeometryCollections": false,
+    "bUsesDistortion": false,
+    "bUsedWithClothing": false,
+    "bUsedWithWater": false,
+    "bUsedWithHairStrands": false,
+    "bUsedWithLidarPointCloud": false,
+    "bUsedWithVirtualHeightfieldMesh": false,
+    "bUsedWithNanite": false,
+    "bUsedWithVoxels": false,
+    "bUsedWithCurves": false,
+    "bUsedWithVolumetricCloud": false,
+    "bUsedWithHeterogeneousVolumes": false,
+    "bUsedWithInstancedSkinnedMesh": false,
+    "bUsedWithStaticMesh": true,
+    "bForceCompatibleWithLightFunctionAtlas": false,
+    "bAutomaticallySetUsageInEditor": true,
+    "bFullyRough": false,
+    "FloatPrecisionMode": "MFPM_Default",
+    "bUseLightmapDirectionality": true,
+    "bUseAlphaToCoverage": false,
+    "bForwardRenderUsePreintegratedGFForSimpleIBL": false,
+    "bUseHQForwardReflections": false,
+    "bForwardBlendsSkyLightCubemaps": false,
+    "bUsePlanarForwardReflections": false,
+    "bNormalCurvatureToRoughness": false,
+    "AllowTranslucentCustomDepthWrites": false,
+    "bAllowFrontLayerTranslucency": true,
+    "bCompatibleWithLumenCardSharing": false,
+    "Wireframe": false,
+    "bAllowTranslucentLocalLightShadow": false,
+    "TranslucentLocalLightShadowQuality": 0,
+    "TranslucentDirectionalLightShadowQuality": 0,
+    "ShadingRate": "MSR_1x1",
+    "bAllowVariableRateShading": true,
+    "EditorX": 0,
+    "EditorY": 0,
+    "EditorPitch": 0,
+    "EditorYaw": 0,
+    "bCanMaskedBeAssumedOpaque": false,
+    "bUseMaterialAttributes": false,
+    "bEnableExecWire": false,
+    "bEnableNewHLSLGenerator": false,
+    "bCastRayTracedShadows": true,
+    "bUseTranslucencyVertexFog": true,
+    "bApplyCloudFogging": false,
+    "bIsSky": false,
+    "bComputeFogPerPixel": false,
+    "bOutputTranslucentVelocity": false,
+    "bIsTranslucencyVelocityFromDepth": false,
+    "bRelaxRuntimeVirtualTextureRestrictions": false,
+    "BlendableLocation": "BL_SceneColorAfterTonemapping",
+    "BlendableOutputAlpha": false,
+    "UserSceneTexture": "None",
+    "UserTextureDivisor": {
+      "X": 0,
+      "Y": 0
+    },
+    "ResolutionRelativeToInput": "None",
+    "bDisablePreExposureScale": false,
+    "bUsedWithNeuralNetworks": false,
+    "bEnableStencilTest": false,
+    "StencilCompare": "MSC_Less",
+    "StencilRefValue": 0,
+    "NeuralProfileId": -1,
+    "RefractionMethod": "RM_None",
+    "RefractionCoverageMode": "RCM_CoverageAccountedFor",
+    "PixelDepthOffsetMode": "PDOM_AlongCameraVector",
+    "BlendablePriority": 0,
+    "bIsBlendable": true,
+    "PreshaderGap": 0,
+    "RefractionDepthBias": 0,
+    "MaxWorldPositionOffsetDisplacement": 0,
+    "bAlwaysEvaluateWorldPositionOffset": false,
+    "StateId": {
+      "A": 1753861567,
+      "B": 1092030689,
+      "C": 184327300,
+      "D": -190111740
+    },
+    "ReferencedTextureGuids": [],
+    "EditorOnlyData": {
+      "subobject": "M_GoldenEditorOnlyData",
+      "class": "/Script/Engine.MaterialEditorOnlyData",
+      "properties": {
+        "ParameterGroupData": [],
+        "SubstrateConversionVersion": -1,
+        "SubstrateVersion": -1,
+        "bIsSubsutrateAutoConvertedAndNotSaved": false
+      }
+    },
+    "SubsurfaceProfile": null,
+    "SubsurfaceProfiles": [],
+    "SpecularProfiles": [],
+    "ToonProfiles": [],
+    "NeuralProfile": null,
+    "LightmassSettings": {
+      "EmissiveBoost": 1,
+      "DiffuseBoost": 1,
+      "ExportResolutionScale": 1,
+      "bCastShadowAsMasked": false,
+      "bOverrideCastShadowAsMasked": false,
+      "bOverrideEmissiveBoost": false,
+      "bOverrideDiffuseBoost": false,
+      "bOverrideExportResolutionScale": false
+    },
+    "TextureStreamingDataVersion": 0,
+    "TextureStreamingData": [],
+    "ReferencedDefaultTextures": [],
+    "AssetUserData": [],
+    "bIncludedInBaseGame": false,
+    "PreviewMesh": null,
+    "ThumbnailInfo": null,
+    "LayerParameterExpansion": [],
+    "ParameterOverviewExpansion": [],
+    "AssetImportData": null,
+    "LightingGuid": {
+      "A": -1726791909,
+      "B": 1180263430,
+      "C": 1553571987,
+      "D": -1284347958
+    }
+  },
+  "data": {
+    "nodes": [
+      {
+        "guid": "206162b0-4e51-1bd1-2ca8-36941a99d8ee",
+        "name": "MaterialExpressionConstant3Vector_0",
+        "class": "MaterialExpressionConstant3Vector",
+        "position": [
+          -300,
+          0
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              0,
+              1,
+              0
+            ]
+          }
+        ],
+        "properties": {
+          "Constant": {
+            "R": 0.5,
+            "G": 0.400000006,
+            "B": 0.300000012,
+            "A": 1
+          },
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": false,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Constants",
+            "Vectors"
+          ]
+        }
+      },
+      {
+        "guid": "a6197713-4ec3-8b2d-c8b2-968b183b8d27",
+        "name": "MaterialExpressionScalarParameter_0",
+        "class": "MaterialExpressionScalarParameter",
+        "position": [
+          -300,
+          200
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "mask": null
+          }
+        ],
+        "properties": {
+          "DefaultValue": 0.600000024,
+          "ControlType": "Numeric",
+          "SliderMin": 0,
+          "SliderMax": 0,
+          "Enumeration": null,
+          "EnumerationIndex": 0,
+          "bUseCustomPrimitiveData": false,
+          "PrimitiveDataIndex": 0,
+          "ParameterName": "Roughness",
+          "ExpressionGUID": {
+            "A": 771328588,
+            "B": 1203031128,
+            "C": -685321836,
+            "D": 613332944
+          },
+          "Group": "None",
+          "SortPriority": 32,
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": true,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": true,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Parameters"
+          ]
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "BaseColor",
+        "from": {
+          "node": "MaterialExpressionConstant3Vector_0",
+          "output": 0
+        },
+        "mask": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "constant": null
+      },
+      {
+        "name": "Metallic",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Specular",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Roughness",
+        "from": {
+          "node": "MaterialExpressionScalarParameter_0",
+          "output": 0
+        },
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Anisotropy",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Normal",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Tangent",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "EmissiveColor",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Opacity",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "OpacityMask",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "WorldPositionOffset",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Displacement",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "SubsurfaceColor",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ClearCoat",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ClearCoatRoughness",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "AmbientOcclusion",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Refraction",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[0]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[1]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[2]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[3]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[4]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[5]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[6]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[7]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "PixelDepthOffset",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ShadingModelFromMaterialExpression",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "SurfaceThickness",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "FrontMaterial",
+        "from": null,
+        "mask": null,
+        "constant": null
+      }
+    ],
+    "baked": {
+      "bakeSize": 16,
+      "properties": [
+        {
+          "property": "BaseColor",
+          "linear": false,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "sRGB"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "9d60e9d5e5c0ef2538b999c9aa79ed5b049aec8b402aa54955195190506c697f",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Normal",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "105680983eeda347bf443652e3534b3b9438fdbafcd548fbf2f09bd908268572",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Metallic",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "e3820096cb82366b860b8a4e668453a7aaaf423af03bdf289fa308ea03a79332",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Roughness",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "c0460e11946bcb44f0f7fac76aa92fa6a2e6c38c99cab6ae2f1a5a01eb6be001",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Specular",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "35c55b39e12bb820cea37dc9184b88488974b5e08c4f1c8a3817025c8cc05d33",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "EmissiveColor",
+          "linear": true,
+          "source": {
+            "format": "RGBA16F",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "RGBA16F",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 16,
+                "sizeY": 16,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 16,
+                    "sizeY": 16,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad",
+                        "bytes": 2048,
+                        "layout": "f16",
+                        "components": 4,
+                        "count": 256
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Opacity",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "OpacityMask",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "AmbientOcclusion",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

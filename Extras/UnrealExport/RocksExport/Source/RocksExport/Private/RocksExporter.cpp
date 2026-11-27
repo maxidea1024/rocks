@@ -16,6 +16,7 @@
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
 #include "RocksAnimSequenceExtractor.h"
+#include "RocksMaterialBaker.h"
 #include "RocksMaterialExtractor.h"
 #include "RocksSkeletalMeshExtractor.h"
 #include "RocksSkeletonExtractor.h"
@@ -111,8 +112,8 @@ namespace RocksExporterPrivate
 
 	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시, UX7a 스켈레톤·스킨 메시, UX8a 애니메이션, UX4a 머티리얼 계열). 로드 실패는 에셋 수준
 	// error 진단이다. blob 쓰기 실패만 false다.
-	static bool ExtractBody(FRocksExportAsset& Asset, const TArray<FRocksExportRedirect>& Redirects, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody,
-		FString& OutError)
+	static bool ExtractBody(FRocksExportAsset& Asset, const TArray<FRocksExportRedirect>& Redirects, int32 BakeSize, FRocksBundleWriter& Bundle,
+		FRocksAssetBody& OutBody, FString& OutError)
 	{
 		const bool bTexture = FRocksTextureExtractor::IsTextureClass(Asset.ClassName);
 		const bool bKnown = bTexture || Asset.ClassName == TEXT("StaticMesh") || Asset.ClassName == TEXT("Skeleton") || Asset.ClassName == TEXT("SkeletalMesh")
@@ -146,7 +147,7 @@ namespace RocksExporterPrivate
 		}
 		else if (Object != nullptr && FRocksMaterialExtractor::IsMaterialClass(Asset.ClassName))
 		{
-			FRocksMaterialExtractor::Extract(*Object, OutBody);
+			bExtracted = FRocksMaterialExtractor::Extract(*Object, BakeSize, Bundle, OutBody, OutError);
 		}
 		else
 		{
@@ -172,7 +173,8 @@ namespace RocksExporterPrivate
 	}
 }
 
-TArray<uint8> FRocksExporter::MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc)
+TArray<uint8> FRocksExporter::MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc,
+	bool bBaked)
 {
 	using namespace RocksExporterPrivate;
 
@@ -203,6 +205,12 @@ TArray<uint8> FRocksExporter::MakeBundleJson(const TArray<FRocksExportAsset>& As
 	Writer.EndObject();
 
 	// environment는 굽기(UX6)를 했을 때만 쓴다(3.4절).
+	if (bBaked)
+	{
+		Writer.Key(TEXT("environment"));
+		FRocksMaterialBaker::WriteEnvironment(Writer);
+	}
+
 	if (!CreatedUtc.IsEmpty())
 	{
 		Writer.Key(TEXT("createdUtc"));
@@ -358,7 +366,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 	for (FRocksExportAsset& Asset : Assets)
 	{
 		FRocksAssetBody Body;
-		if (!RocksExporterPrivate::ExtractBody(Asset, Closure.GetRedirects(), Bundle, Body, OutResult.Error))
+		if (!RocksExporterPrivate::ExtractBody(Asset, Closure.GetRedirects(), Options.BakeSize, Bundle, Body, OutResult.Error))
 		{
 			return false;
 		}
@@ -383,7 +391,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 		}
 	}
 
-	const TArray<uint8> BundleJson = MakeBundleJson(Assets, Closure.GetRedirects(), RocksExporterPrivate::UtcNow());
+	const TArray<uint8> BundleJson = MakeBundleJson(Assets, Closure.GetRedirects(), RocksExporterPrivate::UtcNow(), Options.BakeSize > 0);
 	if (!Bundle.Commit(BundleJson, OutResult.Error))
 	{
 		return false;

@@ -46,3 +46,12 @@ UnrealEditor-Cmd.exe <프로젝트>.uproject -run=RocksExport -Assets=/Engine/Ba
 Rocks 저장소의 시험용 golden 묶음(`Engine/Plugins/Importers/UnrealExchange/Tests/Bundles/Golden.rxbundle`)은 이 플러그인으로
 만든다. 원본 콘텐츠를 만드는 스크립트는 `Scripts/Golden/`(`make_column_gltf.py`, `make_golden_content.py`)에 있고, 차례와
 내보내기 명령은 설계 12.3절이다. 플러그인 출력 형식을 바꾸면 golden도 다시 만든다.
+
+Substrate golden(`GoldenSubstrate.rxbundle`)은 `r.Substrate=True` 프로젝트에서 `make_golden_content.py substrate` 단계로
+만들고 `-nullrhi`로 내보낸다. 굽기 golden(`GoldenBaked.rxbundle`)은 `-AllowCommandletRendering -BakeMaterials`로
+렌더링되는 실행에서 내보낸다. 둘 다 설계 12.3절에 명령이 있다.
+
+## 굽기
+
+`-BakeMaterials [-BakeSize=<n>]`(기본 1024, 1–8192)를 주면 Surface 영역 머티리얼·인스턴스의 속성 9개를 구워
+`data.baked`에 넣는다(설계 8.9절). 렌더링이 필요하므로 `-AllowCommandletRendering`을 주고 `-nullrhi`를 빼야 한다.
