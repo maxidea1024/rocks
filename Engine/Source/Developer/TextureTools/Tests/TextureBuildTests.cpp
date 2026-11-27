@@ -8,6 +8,7 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Task/WorkerScheduler.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <GraphicsTypes/GraphicsBackend.h>
@@ -868,6 +869,79 @@ TEST(TextureBuild_AndroidAstcEacEncoding) {
     REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(clamped, sizeof(clamped)),
                      options, want));
     CHECK(same(built, want));
+}
+
+// 병렬 실행(12.17.9 4·5): TextureBuildExecution의 scheduler가 있어도 모든 mip byte가 직렬과
+// 같다(Android ASTC 배열 mip 사슬, Windows BC1 볼륨). scheduler가 있는데 scratch가 없으면 일을 하기
+// 전에 InvalidArgument다.
+TEST(TextureBuild_ParallelExecution) {
+    SystemAllocator allocator;
+    WorkerScheduler workers(allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 4;
+    REQUIRE(workers.Start(config));
+    constexpr uint32 Size = 32;
+    constexpr uint32 Layers = 3;
+    uint8 pixels[Size * Size * 4 * Layers];
+    for (uint32 index = 0; index < Size * Size * Layers; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = static_cast<uint8>(index % 5 == 0 ? 90 : 255);
+    }
+
+    const auto same = [](const Built& a, const Built& b) noexcept {
+        if (a.result.mips.Size() != b.result.mips.Size() ||
+            a.result.pixelFormat != b.result.pixelFormat) {
+            return false;
+        }
+
+        for (usize mip = 0; mip < a.result.mips.Size(); ++mip) {
+            const Array<uint8>& left = a.result.mips[mip].bytes;
+            const Array<uint8>& right = b.result.mips[mip].bytes;
+            if (left.Size() != right.Size() ||
+                memcmp(left.Data(), right.Data(), left.Size()) != 0) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+    TextureBuildSettings array = Gray(Size, Size, Layers);
+    array.dimension = TextureDimension::Texture2DArray;
+    array.format = TextureSourceFormat::RGBA8;
+    array.compression = TextureCompressionSettings::Default;
+    array.srgb = true;
+    array.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    array.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+    TextureBuildSettings volume = array;
+    volume.dimension = TextureDimension::Volume;
+    volume.numSlices = 4;
+    volume.sizeY = Size * Layers / 4;
+    volume.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Windows);
+    for (const TextureBuildSettings* settings : {&array, &volume}) {
+        const usize bytes = usize{settings->sizeX} * settings->sizeY * settings->numSlices * 4;
+        Built serial(allocator);
+        REQUIRE(Build(allocator, *settings, Span<const uint8>(pixels, bytes), serial));
+        TextureBuildExecution execution;
+        execution.scheduler = &workers;
+        execution.scratch = &allocator;
+        Built parallel(allocator);
+        parallel.ok = static_cast<bool>(BuildTexture(
+            allocator, *settings, Span<const uint8>(pixels, bytes), parallel.result, execution));
+        REQUIRE(parallel.ok);
+        CHECK(serial.result.mips.Size() > 1);
+        CHECK(same(serial, parallel));
+    }
+
+    TextureBuildExecution noScratch;
+    noScratch.scheduler = &workers;
+    Built rejected(allocator);
+    auto failed =
+        BuildTexture(allocator, array, Span<const uint8>(pixels, usize{Size} * Size * Layers * 4),
+                     rejected.result, noScratch);
+    CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(workers.Shutdown());
 }
 
 // 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 8×8은 BC6H(알파
