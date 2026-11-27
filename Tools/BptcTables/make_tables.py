@@ -1,6 +1,6 @@
 """BC6H·BC7 기준 디코더 표(TextureBlockBptcTables.h)를 DirectXTex BC6HBC7.cpp에서 뽑는다.
 
-사용(생성 뒤 저장소 clang-format으로 서식을 맞춘다 — clang-format -i <출력>): python Tools/BptcTables/make_tables.py <UE 클론>/Engine/Source/ThirdParty/Intel/ISPCTexComp/ISPCTextureCompressor-14d998c/"ISPC Texture Compressor"/DirectXTex/DirectXTex/BC6HBC7.cpp Engine/Source/Developer/TextureTools/Private/TextureBlockBptcTables.h
+사용(생성 뒤 저장소 clang-format으로 서식을 맞춘다 — clang-format -i <출력>): python Tools/BptcTables/make_tables.py <UE 클론>/Engine/Source/ThirdParty/Intel/ISPCTexComp/ISPCTextureCompressor-14d998c/"ISPC Texture Compressor"/DirectXTex/DirectXTex/BC6HBC7.cpp Engine/Source/Runtime/Texture/Private/TextureBlockBptcTables.h
 """
 import re
 import sys
