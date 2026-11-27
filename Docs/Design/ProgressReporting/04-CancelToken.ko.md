@@ -4,6 +4,8 @@
 
 ## 4. 취소 표지(`CancelToken`)를 Core로
 
+**구현(PG1, 2026-11-27).** `Core/Public/Core/CancelToken.h`·`Core/Private/Misc/CancelToken.cpp`(git 이동으로 이력 유지). 연결 취소는 상태에 부모 포인터와 사슬 깊이를 두고, 조회는 자기·부모 사슬의 원자 표시를 차례로 읽는다. 상태 해제는 마지막 참조를 놓은 상태에서 부모로 이어 가며 재귀 없이 한다. 시험은 `Core/Tests/CancelTokenTests.cpp`(14장 1·2).
+
 `CancelToken`·`CancelSource`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/CancelToken.h`)를 `Core/Public/Core/CancelToken.h`로 옮기고 export 매크로를 `ROCKS_CORE_API`로 바꾼다. 기존 계약(아무 스레드에서 Cancel·조회, 공유 상태는 원자 계수, `Create(allocator)`)은 그대로다. 하위호환 별칭 없이 호출처를 모두 바꾸고, 참조하는 문서(AssetSystem 11.1절, CoreObjectInputDetailedPlan.ko.md, EngineImplementationPlan.ko.md의 `CancelToken` 언급)도 갱신한다. 범용 기능을 한 곳에만 두는 규칙을 따른다.
 
 더할 것:
