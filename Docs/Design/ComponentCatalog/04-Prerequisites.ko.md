@@ -46,7 +46,7 @@
 | ID | 요구 | 상태 | 확인 근거 | 정본 |
 |---|---|---|---|---|
 | CR16 | 물리 모듈(Jolt): body(UE `FBodyInstance` 대응), 충돌 채널·응답·프로필, overlap·hit 이벤트, sweep 이동(UE `MoveComponent`), scene query, simulate physics, ragdoll용 physics asset | 설계·데이터 있음(2026-11-25) | Jolt 5.7.0 반입(JL1), 충돌 데이터 `Collision` 모듈(CD1)·`PrimitiveComponent` 연결(CD2) 구현. Physics 모듈은 상세 설계만([물리 모듈](../PhysicsModule/README.ko.md) PH0 — 구현은 M4 PH1–PH6). 어댑터 경계는 Jolt 사실 확인 완료(개정 3) | EIP 16절, PhysicsJoltAdapter, CollisionData, PhysicsModule, CylinderShape CY2 |
-| CR17 | 영역 형상 `VolumeShape`(상자·구·캡슐·볼록체)와 물리 없는 내부 판정 — brush volume 대체(CD1). 후처리 볼륨·리버브 존·트리거 아닌 영역이 같은 형상과 판정을 쓴다 | 오디오 문서에만 있음 | AU 3.15.2절 "영역 형상(상자·구·볼록체)… 물리 엔진은 쓰지 않는다" | 추가 요구(공용화) |
+| CR17 | 영역 형상 `VolumeShape`(상자·구·캡슐·볼록체)와 물리 없는 내부 판정 — brush volume 대체(CD1). 후처리 볼륨·리버브 존·트리거 아닌 영역이 같은 형상과 판정을 쓴다 | 구현(041c356de — Core `VolumeShape`·`ConvexHull`, Shape 컴포넌트 월드 형상, 후처리 볼륨 모으기·혼합). 남은 것: 볼록체 출처(메시 단순 충돌)를 컴포넌트에 잇기 — 메시 컴포넌트 뒤, 리버브 존 연결은 오디오 AU3 | `Core/Math/VolumeShape.h`, `World/PostProcess/PostProcessVolumeBlending.h` | [ER 28장](../EngineRuntime/28-VolumeShape.ko.md), AU 3.15.2절 |
 
 ### 4.5 애니메이션·오디오·입력·큰 월드
 
