@@ -67,6 +67,7 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     request.optimization = job.options.optimization;
     request.dxPositionW = format.compiler.dxPositionW;
     request.reflect = true;
+    request.warningsAsErrors = job.options.warningsAsErrors;
     Allocator& allocator = result.values.GetAllocator();
     ShaderParameterLayoutSet layouts(allocator);
     if (!DecodeShaderJobLayouts(job, layouts, result)) {
@@ -87,6 +88,15 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         FailShaderJob(result, VulkanJobStatus(compiled), diagnostics.View());
         return;
     }
+
+    // DXC 경고는 결과 값 뒤에 진단으로 둔다(16.4절 SSD79).
+    String warnings(allocator);
+    if (!warnings.TryAppend(diagnostics.View())) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    diagnostics.Clear();
 
     // byte → word(SPIR-V는 4 byte 단위다 — DXC 출력은 늘 4의 배수다).
     Array<uint32> raw(allocator);
@@ -172,6 +182,8 @@ void VulkanShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::SpirvModule, StringView(),
                                  debugModule.View());
     }
+
+    AddShaderJobWarnings(result, "DXC", warnings.View());
 }
 
 } // namespace rocks::shader

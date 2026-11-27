@@ -127,4 +127,21 @@ void AddShaderJobDebugSymbols(ShaderWorkerJobResult& result, ShaderDebugSymbolKi
     value.Value()->bytes = Move(bytes);
 }
 
+void AddShaderJobWarnings(ShaderWorkerJobResult& result, StringView stage,
+                          StringView warnings) noexcept {
+    if (result.status != ShaderWorkerJobStatus::Success || warnings.IsEmpty()) {
+        return;
+    }
+
+    const bool appended = result.diagnostics.TryAppend(stage) &&
+                          result.diagnostics.TryAppend(": ") &&
+                          result.diagnostics.TryAppend(warnings) &&
+                          (warnings.EndsWith("\n", StringComparison::CaseSensitive) ||
+                           result.diagnostics.TryAppend("\n"));
+    if (!appended) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      "out of memory while keeping shader warnings");
+    }
+}
+
 } // namespace rocks::shader

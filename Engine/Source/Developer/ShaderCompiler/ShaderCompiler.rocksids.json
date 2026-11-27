@@ -30,6 +30,13 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::shader::ShaderCompileOptions::warningsAsErrors",
+      "id": "1fc4f50b522144749e04c46d44a18441",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::shader::ShaderCompileOptions",
       "id": "351a68b6894f4af7b4880b809e862092",

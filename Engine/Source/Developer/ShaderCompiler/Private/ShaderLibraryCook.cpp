@@ -1,6 +1,7 @@
 #include <ShaderCompiler/ShaderLibraryCook.h>
 
 #include <Core/Algorithms.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/FileError.h>
 #include <Core/FileRead.h>
 #include <Platform/Process.h>
@@ -16,6 +17,7 @@ namespace rocks::shader {
 
 namespace library_cook_detail {
 
+constexpr LogCategory LogShaderLibraryBuild{"ShaderCompiler"};
 // 정의 값 문자열 byte 수(NUL 포함 — int32 최솟값 "-2147483648"보다 넉넉하다)다.
 constexpr usize DefineValueBytes = 16;
 // 파일 이름에 넣는 파일 SHA-256 hex 자리 수다.
@@ -559,6 +561,22 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         }
 
         WriteSymbolFiles(desc, files, allocator, snapshot->definition.Id(), results, line);
+
+        // 성공 job의 진단(경고를 오류로 다루지 않는 job의 경고, D3D11 대체 경로 성공의 1차 FXC
+        // 진단, 너겟 캐시 메모 — ShaderSystem 16.4절 SSD79·SSD80·SSD84)을 버리지 않고 남긴다.
+        for (usize index = 0; index < results.Size(); ++index) {
+            const ShaderCompileJobResult& result = results[index];
+            if (result.status != ShaderCompileStatus::Success || result.diagnostics.IsEmpty()) {
+                continue;
+            }
+
+            Log::Warning(LogShaderLibraryBuild,
+                         "Shader {Type} (vertex input {VertexInput}, permutation {Permutation}) "
+                         "for {Format} compiled with diagnostics:\n{Diagnostics}",
+                         plans[index].type->name, static_cast<uint64>(plans[index].vertexInputType),
+                         static_cast<uint64>(plans[index].permutationId), snapshot->definition.Id(),
+                         result.diagnostics.View());
+        }
 
         // 실패를 모은다.
         for (usize index = 0; index < results.Size(); ++index) {

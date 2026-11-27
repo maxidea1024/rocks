@@ -63,7 +63,7 @@ constexpr char FixtureVulkan[] =
 
 // 리터럴 키 golden(공통 머리의 결정적 수학 버전 = GoldenMathVersion, 툴체인 지문 = 0x5a×32)이다.
 // 기록 순서·태그·번호 표를 바꾸면 이 값이 바뀐다(그때는 ShaderJobProcessor 버전 Guid도 바꾼다).
-constexpr char GoldenKey[] = "157eb30410c3d54cb4a8b2905ef36acf587c0dee76e17702cfdb0fdbf544133e";
+constexpr char GoldenKey[] = "fa371bc629da03e2830307a570ed80bf11b2e394b4dc77932128fd4f7ffde178";
 constexpr uint32 GoldenMathVersion = 7;
 constexpr uint8 GoldenToolchainByte = 0x5a;
 
@@ -254,6 +254,9 @@ TEST(ShaderJobKey_EveryInputChangesTheKey) {
     // 디버그 심볼(ShaderSystem 16.3절 SSD73 — 켜면 모든 키가 달라진다).
     CHECK(changes([](KeyCase& c) noexcept { c.options.debugSymbols = true; },
                   [](KeyCase& c) noexcept { c.options.debugSymbols = false; }));
+    // 경고 오류(16.4절 SSD79 — 같은 원문이라도 머티리얼 job(false)과 엔진 job(true)의 키가 다르다).
+    CHECK(changes([](KeyCase& c) noexcept { c.options.warningsAsErrors = false; },
+                  [](KeyCase& c) noexcept { c.options.warningsAsErrors = true; }));
     // 형식 정의(byte SHA, id).
     CHECK(changes([](KeyCase& c) noexcept { c.format.sha256 = Digest(0x01); },
                   [](KeyCase& c) noexcept {
@@ -331,7 +334,7 @@ TEST(ShaderJobKey_SameInputsGiveTheSameKey) {
     KeyCase spelled;
     REQUIRE(defaults.Ready() && spelled.Ready());
     const StringView all[] = {"hlsl2021=true", "optimization=O3", "debugSymbols=false",
-                              "matrixLayout=Row"};
+                              "matrixLayout=Row", "warningsAsErrors=true"};
     REQUIRE(ParseShaderCompileOptions(all, spelled.options));
     CHECK(defaults.Key() == spelled.Key());
 }
@@ -418,8 +421,8 @@ TEST(ShaderJobKey_TraceGolden) {
         // 3–5행.
         "string\nVULKAN_SM5\ndigest %s\nu32 2\nstring\nPSMain\nu32 0\ndigest %s\n"
         // 6행: 옵션 리플렉션 기록(필드 이름 포함 — 순서는 리플렉션 순회 순서)과 레이아웃 없음.
-        "struct\nfield\nmatrixLayout\ni64 0\nfield\nhlsl2021\nbool true\nfield\ndebugSymbols\nbool "
-        "false\nfield\noptimization\ni64 3\nend\nnone\n",
+        "struct\nfield\nwarningsAsErrors\nbool true\nfield\nmatrixLayout\ni64 0\nfield\nhlsl2021\n"
+        "bool true\nfield\ndebugSymbols\nbool false\nfield\noptimization\ni64 3\nend\nnone\n",
         NuggetKeyFormatVersion, engine, project, processor, version, deterministic::Version,
         toolchain, formatSha, preprocessed);
     REQUIRE(written > 0 && static_cast<usize>(written) < sizeof(expected));
