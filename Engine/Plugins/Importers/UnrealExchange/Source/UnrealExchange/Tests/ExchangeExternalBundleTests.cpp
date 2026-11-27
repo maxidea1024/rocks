@@ -91,6 +91,63 @@ constexpr StringView GoldenSubstrateLayeredPath =
 constexpr StringView GoldenSubstrateAttributesPath =
     "/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.M_GoldenSubstrateAttributes";
 constexpr StringView GoldenSubstrateLegacyPath = "/Game/RxGoldenSubstrate/M_Golden.M_Golden";
+// 머티리얼 출력 핀·노드 class 이름이다(8.6절 3번 — UE 이름 그대로).
+constexpr StringView FrontMaterialPin = "FrontMaterial";
+constexpr StringView BaseColorPin = "BaseColor";
+constexpr StringView MaterialAttributesPin = "MaterialAttributes";
+constexpr StringView SlabClass = "MaterialExpressionSubstrateSlabBSDF";
+constexpr StringView VerticalLayeringClass = "MaterialExpressionSubstrateVerticalLayering";
+constexpr StringView Constant3VectorClass = "MaterialExpressionConstant3Vector";
+// golden 개별 핀 머티리얼의 Slab 수다(둘을 VerticalLayering으로 쌓는다).
+constexpr usize GoldenSubstrateSlabs = 2;
+// UE 5.8 Slab 입력 이름이다(MaterialExpressionSubstrate.cpp:1098-1173, glint를 지원하지 않는
+// 내보내기 환경 — 16·17번 ` (Disabled)` 접미, 8.8절 4번 핀 별칭의 근거).
+constexpr StringView SlabInputNames[] = {"Diffuse Albedo",
+                                         "F0",
+                                         "F90",
+                                         "Roughness",
+                                         "Anisotropy",
+                                         "Normal",
+                                         "Tangent",
+                                         "SSS MFP",
+                                         "SSS MFP Scale",
+                                         "SSS Phase Anisotropy",
+                                         "Emissive Color",
+                                         "Second Roughness",
+                                         "Second Roughness Weight",
+                                         "Fuzz Roughness",
+                                         "Fuzz Amount",
+                                         "Fuzz Color",
+                                         "Glint Density (Disabled)",
+                                         "Glint UVs (Disabled)"};
+// 굽기 기록(8.9절 2번)의 속성 순서·한 변 범위·형식이다.
+constexpr StringView BakedPropertyNames[] = {"BaseColor", "Normal",      "Metallic",
+                                             "Roughness", "Specular",    "EmissiveColor",
+                                             "Opacity",   "OpacityMask", "AmbientOcclusion"};
+constexpr usize SlabInputCount = sizeof(SlabInputNames) / sizeof(SlabInputNames[0]);
+constexpr usize BakedPropertyCount = sizeof(BakedPropertyNames) / sizeof(BakedPropertyNames[0]);
+constexpr StringView BakedEmissiveProperty = "EmissiveColor";
+constexpr int64 BakeSizeMin = 1;
+constexpr int64 BakeSizeMax = 8192;
+constexpr StringView BakedColorFormat = "BGRA8";
+constexpr StringView BakedHdrFormat = "RGBA16F";
+// 굽기 golden 묶음(Tests/Bundles/GoldenBaked.rxbundle — 8.9절 9번, -BakeSize=16)의 기대 값이다:
+// 에셋 3개 (M_Golden·MI_Golden 굽기, LightFunction 엔진 머티리얼은 BakeSkipped), 상수 속성은 1×1.
+// BaseColor는 UE 상수 (0.5, 0.4, 0.3)의 sRGB 8비트 B·G·R(149, 170, 188), Roughness는 선형 8비트(0.6
+// → 153, 인스턴스 override 0.25 → 64)다.
+constexpr usize GoldenBakedAssets = 3;
+constexpr int64 GoldenBakeSize = 16;
+constexpr StringView GoldenBakedMaterialPath = "/Game/RxGolden/M_Golden.M_Golden";
+constexpr StringView GoldenBakedInstancePath = "/Game/RxGolden/MI_Golden.MI_Golden";
+constexpr StringView GoldenBakedLightFunctionPath =
+    "/Engine/EngineMaterials/DefaultLightFunctionMaterial.DefaultLightFunctionMaterial";
+constexpr uint8 GoldenBakedBaseColor[] = {149, 170, 188, 255};
+constexpr uint8 GoldenBakedMaterialRoughness = 153;
+constexpr uint8 GoldenBakedInstanceRoughness = 64;
+constexpr usize BakedBaseColorIndex = 0;
+constexpr usize BakedRoughnessIndex = 3;
+// 1×1 BGRA8 속성 blob 하나의 byte 수다.
+constexpr usize BakedTexelBytes = 4;
 // UE FRichCurve 열거 값 이름(Rocks Curves 열거 순서)이다. RCTM_SmartAuto는 Auto로 본다.
 constexpr StringView CurveInterpNames[] = {"RCIM_Linear", "RCIM_Constant", "RCIM_Cubic"};
 constexpr StringView CurveTangentNames[] = {"RCTM_Auto", "RCTM_User", "RCTM_Break",
@@ -1016,7 +1073,47 @@ void CheckInstance(const ExchangeAsset& asset, MaterialCheck& check) noexcept {
     }
 }
 
-// 머티리얼 계열 Ready 기록을 확인한다(8.6절 — UX4a). 확인한 기록 수다.
+// 굽기 기록 data.baked(8.9절 2번 — UX6a)를 확인한다: 없거나 null(굽기 실패)이거나, bakeSize
+// 범위·속성 9개 순서· linear·원본 형식(EmissiveColor RGBA16F, 나머지 BGRA8)·층·블록·mip 각
+// 1개·EmissiveColor 크기 = bakeSize다.
+void CheckBaked(JsonValue baked, MaterialCheck& check) noexcept {
+    if (!baked.IsValid() || baked.IsNull()) {
+        return;
+    }
+
+    const auto size = baked.Find("bakeSize").TryGetInt64();
+    const JsonValue properties = baked.Find("properties");
+    if (!baked.IsObject() || !size || size.Value() < BakeSizeMin || size.Value() > BakeSizeMax ||
+        !properties.IsArray() || properties.Size() != BakedPropertyCount) {
+        check.Fail("baked shape");
+        return;
+    }
+
+    for (usize index = 0; index < properties.Size(); ++index) {
+        const JsonValue entry = properties.At(index);
+        const JsonValue source = entry.Find("source");
+        const bool emissive = BakedPropertyNames[index] == BakedEmissiveProperty;
+        if (!entry.Find("property").IsString() ||
+            entry.Find("property").GetString() != BakedPropertyNames[index] ||
+            !entry.Find("linear").IsBool() || !source.IsObject() ||
+            !source.Find("format").IsString() ||
+            source.Find("format").GetString() != (emissive ? BakedHdrFormat : BakedColorFormat) ||
+            !source.Find("layers").IsArray() || source.Find("layers").Size() != 1 ||
+            !source.Find("blocks").IsArray() || source.Find("blocks").Size() != 1) {
+            check.Fail("baked property shape");
+            continue;
+        }
+
+        const JsonValue block = source.Find("blocks").At(0);
+        if (!block.Find("mips").IsArray() || block.Find("mips").Size() != 1 ||
+            (emissive && (static_cast<int64>(CountOf(block, "sizeX")) != size.Value() ||
+                          static_cast<int64>(CountOf(block, "sizeY")) != size.Value()))) {
+            check.Fail("baked block shape");
+        }
+    }
+}
+
+// 머티리얼 계열 Ready 기록을 확인한다(8.6절 — UX4a, 굽기 기록 — UX6a). 확인한 기록 수다.
 usize CheckMaterials(const ExchangeBundle& bundle) noexcept {
     usize checked = 0;
     for (usize index = 0; index < bundle.Assets().Size(); ++index) {
@@ -1042,6 +1139,10 @@ usize CheckMaterials(const ExchangeBundle& bundle) noexcept {
 
         if (type == ExchangeClass::MaterialInstanceConstant) {
             CheckInstance(asset, check);
+        }
+
+        if (type == ExchangeClass::Material || type == ExchangeClass::MaterialInstanceConstant) {
+            CheckBaked(asset.data.Find("baked"), check);
         }
 
         printf("  material [%zu] %s %.*s: %zu nodes, %zu links %s\n", index,
@@ -1298,26 +1399,104 @@ TEST(UnrealExchange_GoldenSubstrateBundle) {
     REQUIRE(legacy != ExchangeNoIndex);
 
     const ExchangeAsset& layeredAsset = bundle.Assets()[layered];
-    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, "FrontMaterial")) ==
-          "MaterialExpressionSubstrateVerticalLayering");
-    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, "BaseColor")) ==
-          "MaterialExpressionConstant3Vector");
-    CHECK(!FindOutputPin(layeredAsset, "MaterialAttributes").IsValid());
+    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, FrontMaterialPin)) ==
+          VerticalLayeringClass);
+    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, BaseColorPin)) ==
+          Constant3VectorClass);
+    CHECK(!FindOutputPin(layeredAsset, MaterialAttributesPin).IsValid());
+
+    // Slab 노드: 입력 이름 표 그대로이고 Diffuse Albedo가 상수 노드에 이어진다.
+    const JsonValue nodes = layeredAsset.data.Find("nodes");
+    usize slabs = 0;
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const JsonValue node = nodes.At(index);
+        if (node.Find("class").GetString() != SlabClass) {
+            continue;
+        }
+
+        ++slabs;
+        const JsonValue inputs = node.Find("inputs");
+        REQUIRE(inputs.Size() == SlabInputCount);
+        for (usize slot = 0; slot < inputs.Size(); ++slot) {
+            CHECK(inputs.At(slot).Find("name").GetString() == SlabInputNames[slot]);
+        }
+
+        CHECK(LinkedNodeClass(layeredAsset, inputs.At(0)) == Constant3VectorClass);
+    }
+
+    CHECK(slabs == GoldenSubstrateSlabs);
 
     const ExchangeAsset& attributesAsset = bundle.Assets()[attributes];
     const JsonValue attributesPins = attributesAsset.data.Find("outputs");
     REQUIRE(attributesPins.Size() == 2);
-    CHECK(attributesPins.At(0).Find("name").GetString() == "MaterialAttributes");
-    CHECK(attributesPins.At(1).Find("name").GetString() == "FrontMaterial");
-    CHECK(LinkedNodeClass(attributesAsset, attributesPins.At(1)) ==
-          "MaterialExpressionSubstrateSlabBSDF");
+    CHECK(attributesPins.At(0).Find("name").GetString() == MaterialAttributesPin);
+    CHECK(attributesPins.At(1).Find("name").GetString() == FrontMaterialPin);
+    CHECK(LinkedNodeClass(attributesAsset, attributesPins.At(1)) == SlabClass);
 
     const ExchangeAsset& legacyAsset = bundle.Assets()[legacy];
-    const JsonValue legacyFront = FindOutputPin(legacyAsset, "FrontMaterial");
+    const JsonValue legacyFront = FindOutputPin(legacyAsset, FrontMaterialPin);
     REQUIRE(legacyFront.IsValid());
     CHECK(!legacyFront.Find("from").IsObject());
-    CHECK(LinkedNodeClass(legacyAsset, FindOutputPin(legacyAsset, "BaseColor")) ==
-          "MaterialExpressionConstant3Vector");
+    CHECK(LinkedNodeClass(legacyAsset, FindOutputPin(legacyAsset, BaseColorPin)) ==
+          Constant3VectorClass);
+}
+
+// baked 속성 index의 첫 mip blob bytes다.
+bool LoadBakedBytes(const ExchangeBundle& bundle, uint32 asset, usize index, Array<uint8>& out,
+                    ExchangeDiagnostics& diagnostics) noexcept {
+    const JsonValue source =
+        bundle.Assets()[asset].data.Find("baked").Find("properties").At(index).Find("source");
+    const JsonValue pixels = source.Find("blocks").At(0).Find("mips").At(0).Find("pixels").At(0);
+    return LoadBlobBytes(bundle, asset, pixels, out, diagnostics);
+}
+
+// 렌더링 실행으로 내보낸 굽기 golden 묶음(UX6a — 8.9절 9번)을 늘 읽어 외부 묶음 판정(굽기 구조
+// 포함)을 돌리고, environment, 두 머티리얼의 BaseColor·Roughness 굽기 값(인스턴스 override 반영),
+// 굽지 않는 영역의 BakeSkipped를 확인한다.
+TEST(UnrealExchange_GoldenBakedBundle) {
+    SystemAllocator allocator;
+    StringBuilder<512> directory(allocator);
+    REQUIRE(FixtureSourcePath("GoldenBaked.rxbundle", directory));
+    ExchangeBundle bundle(allocator);
+    const BundleTotals totals = CheckBundle(directory.View(), allocator, bundle);
+    CHECK(totals.assets == GoldenBakedAssets);
+    CHECK(totals.materialRecords == GoldenBakedAssets);
+    REQUIRE(bundle.environment.IsObject());
+    CHECK(bundle.environment.Find("rhi").IsString());
+    CHECK(!bundle.environment.Find("rhi").GetString().IsEmpty());
+    CHECK(bundle.environment.Find("gpu").IsString());
+    CHECK(bundle.environment.Find("driver").IsString());
+
+    const uint32 material = FindAsset(bundle, GoldenBakedMaterialPath);
+    const uint32 instance = FindAsset(bundle, GoldenBakedInstancePath);
+    const uint32 light = FindAsset(bundle, GoldenBakedLightFunctionPath);
+    REQUIRE(material != ExchangeNoIndex);
+    REQUIRE(instance != ExchangeNoIndex);
+    REQUIRE(light != ExchangeNoIndex);
+
+    const uint32 baked[] = {material, instance};
+    const uint8 roughness[] = {GoldenBakedMaterialRoughness, GoldenBakedInstanceRoughness};
+    ExchangeDiagnostics diagnostics(allocator);
+    for (usize at = 0; at < sizeof(baked) / sizeof(baked[0]); ++at) {
+        const JsonValue record = bundle.Assets()[baked[at]].data.Find("baked");
+        REQUIRE(record.IsObject());
+        CHECK(record.Find("bakeSize").TryGetInt64().Value() == GoldenBakeSize);
+
+        Array<uint8> color(allocator);
+        REQUIRE(LoadBakedBytes(bundle, baked[at], BakedBaseColorIndex, color, diagnostics));
+        REQUIRE(color.Size() == BakedTexelBytes);
+        for (usize channel = 0; channel < color.Size(); ++channel) {
+            CHECK(color[channel] == GoldenBakedBaseColor[channel]);
+        }
+
+        Array<uint8> rough(allocator);
+        REQUIRE(LoadBakedBytes(bundle, baked[at], BakedRoughnessIndex, rough, diagnostics));
+        REQUIRE(rough.Size() == BakedTexelBytes);
+        CHECK(rough[0] == roughness[at]);
+    }
+
+    CHECK(!bundle.Assets()[light].data.Find("baked").IsValid());
+    CHECK(HasExporterDiagnostic(bundle.Assets()[light], "BakeSkipped"));
 }
 
 } // namespace exchange_external_bundle_tests_file
