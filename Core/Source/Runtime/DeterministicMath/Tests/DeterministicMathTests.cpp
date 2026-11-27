@@ -242,10 +242,14 @@ TEST(DeterministicMath_CosAtanSpecialValuesAndDigest) {
     CHECK(Bits(Atan(0.0)) == Bits(0.0) && Bits(Atan(-0.0)) == (Bits(0.0) | SignBit));
     CHECK(Bits(Atan(infinity)) == HalfPiBits && Bits(Atan(-infinity)) == (HalfPiBits | SignBit));
     CHECK(Bits(Atan(payload)) == CanonicalNaN);
+    // 큰 |x|(≥ 2^53)는 ±π/2다(1/x 나눗셈이 넘치지 않는다 — DBL_MAX 포함).
+    const double largest = 1.7976931348623157e308;
+    CHECK(Bits(Atan(largest)) == HalfPiBits && Bits(Atan(-largest)) == (HalfPiBits | SignBit));
+    CHECK(Bits(Atan(9007199254740992.0)) == HalfPiBits && Bits(Atan(1e305)) == HalfPiBits);
     // 비정규 입력은 그대로다(atan(x)가 x로 반올림된다).
     CHECK(Bits(Atan(BitCast<double>(uint64{1}))) == 1);
-    // 큰 |x|(n ≥ 2^20): CosPi(|x|/π) — 결정적인 [−1, 1] 값(정확도는 보장하지 않는다).
-    const double bigs[] = {1647099.5, 1e7, 1e300, 1.7976931348623157e308};
+    // 큰 |x|(n > 2^20): CosPi(|x|/π) — 결정적인 [−1, 1] 값(정확도는 보장하지 않는다).
+    const double bigs[] = {1647101.0, 1e7, 1e300, 1.7976931348623157e308};
     for (double big : bigs) {
         CHECK(Bits(Cos(big)) == Bits(CosPi(big / 3.141592653589793)));
         CHECK(Cos(big) >= -1.0 && Cos(big) <= 1.0);
