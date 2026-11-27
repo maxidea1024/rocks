@@ -59,6 +59,30 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
         }
     }
 
+    // 동시 발음 항목: 수 ≤ MaxConcurrencyGroups, 키가 있고, 설정이 범위 안이다(3.41.2절).
+    if (playable.concurrencyCount > MaxConcurrencyGroups) {
+        return Created::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (uint32 index = 0; index < playable.concurrencyCount; ++index) {
+        const SoundConcurrencyEntry& entry = playable.concurrency[index];
+        if (entry.key == 0) {
+            return Created::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto valid = ValidateSoundConcurrencySettings(entry.settings); !valid) {
+            return Created::Failure(valid.Error());
+        }
+
+        // 같은 그룹은 한 번만(UE ConcurrencySet은 집합 — 같은 키가 둘이면 자리를 둘 차지한다).
+        for (uint32 earlier = 0; earlier < index; ++earlier) {
+            if (playable.concurrency[earlier].key == entry.key &&
+                playable.concurrency[earlier].isOverride == entry.isOverride) {
+                return Created::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
     auto made = SharedPtr<SoundPlayable>::TryMake(allocator, playable);
     if (!made) {
         return Created::Failure(made.Error());

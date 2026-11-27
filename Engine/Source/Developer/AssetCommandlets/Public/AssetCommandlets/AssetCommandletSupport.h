@@ -88,7 +88,7 @@ struct AssetTypeHookSetup {
 // asset-cook의 쿠킹 처리기 등록이다(Docs/Design/AssetSystem 12.14절 — 표를 만든 뒤 부른다):
 // table(기본 처리기를 fallback으로 둔 세션 표)에 처리기를 등록한다. 처리기는 state가 소유하고 명령
 // 동안 산다. 실패하면 그 오류로 명령이 실패한다. 없으면 기본 처리기만 쓴다. 제품은 텍스처·정적
-// 메시·스킨 메시·애니메이션 클립 처리기 묶음 RegisterProductCookProcessors를
+// 메시·스킨 메시·애니메이션 클립·사운드 클립·커브 표 처리기 묶음 RegisterProductCookProcessors를
 // 건다(Programs/Commandlet ProductAssetSetup — MeshAnimationAssets 13.1절).
 struct AssetCookProcessorSetup {
     Result<void> (*registerProcessors)(void* state, CookProcessorTable& table) noexcept = nullptr;

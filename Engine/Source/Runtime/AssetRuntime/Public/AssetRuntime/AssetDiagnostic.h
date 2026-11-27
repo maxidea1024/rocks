@@ -160,7 +160,7 @@ enum class AssetDiagnosticCode : uint16 {
     // 커브 에셋(Docs/Design/CurveAssets 5.1·5.3절 — CA3·CA4): 임포트가 원본의 행·항목 하나 또는
     // 행의 칸 일부를 건너뛰었다(CurveImportRowSkipped — 경고, detail = CSV 물리 줄 번호 또는 JSON
     // 배열 원소 번호, 1부터), 쿠킹이 커브 표의 모드가 쓰지 않는 맵을 비웠다(CurveTableUnusedRows —
-    // 경고, detail = 버린 행 수).
+    // 경고, 쿠킹 진단 setting = 버린 행 수).
     CurveImportRowSkipped,
     CurveTableUnusedRows
 };

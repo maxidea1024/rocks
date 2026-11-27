@@ -42,8 +42,8 @@ public:
     HapticPlayer& operator=(const HapticPlayer&) = delete;
 
     // effect의 사본을 재생한다. params.tag가 비어 있지 않으면 같은 tag로 재생 중인 효과를 먼저
-    // 지운다(사본을 다 만든 뒤 — 실패면 그대로). 오류: 무효 effect(id 0)는 InvalidArgument, 할당
-    // 실패는 OutOfMemory(모두 그대로).
+    // 지운다(사본을 다 만든 뒤 — 실패면 그대로). 오류: 무효 effect(id 0)·평탄화되지 않은 채널 커브
+    // slot은 InvalidArgument, 할당 실패는 OutOfMemory(모두 그대로).
     Result<void> PlayHapticEffect(const HapticEffect& effect, const HapticParams& params) noexcept;
 
     // lease의 HapticEffectAsset을 재생한다(UE ClientPlayForceFeedback(UForceFeedbackEffect*) —

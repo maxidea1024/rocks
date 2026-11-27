@@ -4,6 +4,8 @@
 #include <Base/Types.h>
 #include <Core/Function.h>
 #include <Core/Optional.h>
+#include <AudioAssets/SoundConcurrencyEntry.h>
+#include <AudioAssets/SoundPlaybackSettings.h>
 
 // 재생 handle·상태·결과·옵션이다(Docs/Design/AudioSystem 3.4·3.35.4절).
 namespace rocks {
@@ -91,7 +93,7 @@ struct PlaybackEvent {
 
 using PlaybackEventCallback = Function<void(const PlaybackEvent&)>;
 
-// 재생 옵션이다(AU3, 우선순위 AU7a). 시작 시각 지정·동시 발음 재정의는 AU7b·AU10.
+// 재생 옵션이다(AU3, 우선순위 AU7a, 동시 발음 AU7b). 시작 시각 지정은 AU10.
 struct PlayOptions {
     // 사운드 값에 곱하는 배수다. volume [0, MaxVoiceGain], pitch [MinPitch, MaxPitch](곱한 결과도
     // 같은 범위로 자른다).
@@ -108,6 +110,16 @@ struct PlayOptions {
     // 켜면 one-shot도 voice 상한·무음 컬링으로 voice를 잃을 때 끝나지 않고 voice 없이 남아 다시
     // 경쟁한다(UE bShouldRemainActiveIfDropped — 3.41.1절). loop는 언제나 그렇다.
     bool remainActiveIfDropped = false;
+    // 동시 발음 소유자다(UE owner actor — limitToOwner 그룹이 소유자마다 따로 센다, 0이면 없음).
+    // AudioComponent는 소유 Actor의 키(AudioObjectKey)를 넣는다.
+    uint64 owner = 0;
+    // 켜면 사운드의 동시 발음 그룹 대신 concurrency 앞 concurrencyCount개를 쓴다(UE PlaySound의
+    // ConcurrencySettings·UAudioComponent::ConcurrencySet — 3.41.2절). 항목은
+    // ConcurrencyGroup::MakeEntry로 만든다. 키 0·범위 밖 설정은 InvalidArgument, 수 초과는
+    // CapacityExceeded다.
+    bool overrideConcurrency = false;
+    uint32 concurrencyCount = 0;
+    SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
     // 결과 콜백이다(게임 스레드의 OnFrameBegin — 비어도 된다). 잡은 대상의 수명은 호출자 책임이다.
     // 엔진 종료 뒤에는 부르지 않는다.
     PlaybackEventCallback onEvent;

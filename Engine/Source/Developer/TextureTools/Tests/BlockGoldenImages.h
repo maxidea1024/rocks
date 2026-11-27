@@ -84,6 +84,13 @@ inline constexpr Case Cases[] = {
     {"rare-one-channel-one", OneChannelOne, 256, 256, 54, true},
 };
 
+// BC6H·BC7 해시 golden·품질 측정이 쓰는 그림(32 × 32·128 × 128 — 4의 배수, 해시만인 큰 그림
+// 제외)인지다 (Docs/Design/AssetSystem 12.17.6 9·10 — 시험 TextureBlockBptc_OutputHashGolden,
+// Tools/IspcDeterminism, Programs/TextureCodecCompare가 같은 집합을 쓴다).
+inline bool IsMeasured(const Case& one) noexcept {
+    return !one.hashOnly && one.sizeX >= 32;
+}
+
 // xorshift32다(seed 0은 1로 바꾼다).
 struct Random {
     unsigned state;

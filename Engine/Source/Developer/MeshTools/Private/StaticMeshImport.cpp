@@ -3,6 +3,7 @@
 #include <AssetRuntime/MemoryBulkSource.h>
 #include <Core/Text/NamePool.h>
 #include <Material/Material.generated.h>
+#include <Material/MaterialBase.generated.h>
 #include <Mesh/StaticMesh/StaticMesh.generated.h>
 #include <MeshSource/MeshSourceValidation.h>
 #include <Object/ObjectRegistry.h>

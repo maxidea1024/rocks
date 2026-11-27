@@ -2,6 +2,657 @@
   "schema": 1,
   "entries": [
     {
+      "kind": "field",
+      "name": "rocks::Material::graph",
+      "id": "bef563bb0aa94625b115e3b97c02b10a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::layout",
+      "id": "7c27e946ab1c40c59aaa6fe216fde04d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::parameterCollections",
+      "id": "dcb576edc51341bbb7a7153b1eb32907",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::physicalMaterial",
+      "id": "35f9cb582d4649a99c3d52a76fb84256",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::physicalMaterialMap",
+      "id": "e06112b52be2423cb19163f67e18bcd0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::physicalMaterialMask",
+      "id": "cf8a72154f03461caea54c4fcb135b82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::preview",
+      "id": "a7287726f9a1432aad0ba976c48b3212",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::renderTracePhysicalMaterials",
+      "id": "bd43a1c050ef4b0f973147ea6698fa55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::traits",
+      "id": "03220f2c17ea4cb5b95a66824511abc0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::usage",
+      "id": "c14eabec08da4c51b5c350812ca289d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::virtualizedGeometryOverride",
+      "id": "3874fb3f4c544c08aa3551db99e2bf12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::lightBakeSettings",
+      "id": "743b726761e94a6cadd9b14a176405e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::neuralProfile",
+      "id": "d8b9ade1821b46fc8f0b6a778207bc10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::specularProfiles",
+      "id": "70fd81dbf63b4548aa7ffe7985bbf293",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::subsurfaceProfiles",
+      "id": "642bb0a860f74199a5338a564c426125",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::textureSamplingScales",
+      "id": "cdc313b42fa443b89fda7912842d2e0f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialBase::toonProfiles",
+      "id": "3f35517279014ecdb131e359615c1c7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::description",
+      "id": "bd98f7e7c1bc45f586f534493523609a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::exposeToLibrary",
+      "id": "35cf573194b743ba82090e27cba4e077",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::graph",
+      "id": "b5edc30b96fb421ea2eb4d65d260ec42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::layout",
+      "id": "5be9e74f76e048b5b39375a7737598b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::libraryCategories",
+      "id": "778a8d85017e46008615b37884da9398",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::usage",
+      "id": "192fbb2d4614405b95cb446c81194cc8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunction::userExposedCaption",
+      "id": "0cdde2e158d949d8a8ac37dd4f2539cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::collectionOverrides",
+      "id": "0ad6661a84204085a13e9c6e5c088663",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::doubleVectorOverrides",
+      "id": "0ce529e3e2004ad0aa656bfef26b1620",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::fontOverrides",
+      "id": "4ad319e705664e56839ef2167e8c858a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::parent",
+      "id": "28d7c74056144c56b5bece374a3dfd0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::scalarOverrides",
+      "id": "91361620349b4dd1821e1cf9e9aecb65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::sparseVolumeTextureOverrides",
+      "id": "857ac2a4f11541d2999c74259f1ce1cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::staticComponentMaskOverrides",
+      "id": "6d7221e7c63e46b583bf4b1d06a02438",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::staticEnumOverrides",
+      "id": "76001bca4b21455ea9bf3b3d46696fbc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::staticSwitchOverrides",
+      "id": "4e3b5075f75b4bcbb8cbef2afaba35dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::textureCollectionOverrides",
+      "id": "9ab3790c25b04903843edbbc58265955",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::textureOverrides",
+      "id": "e3bf26f0ae124e0daf29b0a9d90afa04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::vectorOverrides",
+      "id": "f6870b14ea7a4656bdcf3d0040a18003",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialFunctionInstance::virtualTextureOverrides",
+      "id": "9cac585e6b704db3951da9947814ec5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::collectionOverrides",
+      "id": "45154d95dcf94ef8936ba01fc25e52f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::doubleVectorOverrides",
+      "id": "8be640f16eb2419e9abb237d8fe7021a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::dynamicBoolOverrides",
+      "id": "f4c5c71491b64ffea4098126ed731bca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::fontOverrides",
+      "id": "32f363554bf741ff87e89b8066a95e65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::layerStack",
+      "id": "217c5eb9ea0f4d8f8cd2660e916f948f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::lightBakeOverrides",
+      "id": "7a17250404884287addb3d7c23524a28",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::overridesLayerStack",
+      "id": "4783056a85404d58b1d154f25d455ab5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::parent",
+      "id": "d349231820a549b1a089a6a9b6f9c08a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::physicalMaterialMap",
+      "id": "d42e1def961b4d19ab34c73f3326b416",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::physicalMaterialMask",
+      "id": "4124a2531e7b4237abcc9b3b3245e2a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::physicalMaterialOverride",
+      "id": "c929966bce8348cd9b0a1423cae73999",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::scalarOverrides",
+      "id": "81f24e3b582a43899e519d76c63534b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::sparseVolumeTextureOverrides",
+      "id": "4dc72ef987c749938fe0c55a96084bc1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::specularProfileOverride",
+      "id": "c613f85012d24de0a7c7df0ddc3f2122",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::staticComponentMaskOverrides",
+      "id": "c58650e9825b4ba78c3fb8c2faf11fb0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::staticEnumOverrides",
+      "id": "30818cdbce5c4ee09494858fb0ed36d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::staticSwitchOverrides",
+      "id": "de47874c654c4eb3b82e81f50389e9ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::subsurfaceProfileOverride",
+      "id": "955b71cc59ea463c8f00e6d81760d09b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::textureCollectionOverrides",
+      "id": "25a2ff30d00c4531b1c7f48bdf918bce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::textureOverrides",
+      "id": "a9dd4d25766d4fd3bfbea807ef86c49e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::toonProfileOverride",
+      "id": "1ca540d5222047dfbe50693259c75225",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::traitOverrides",
+      "id": "cc93f697590640b99b7908c23e551af9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::userSceneTextureOverrides",
+      "id": "54a7636a1952467aa48a26e7ace58a9b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::vectorOverrides",
+      "id": "d42684bb776e400080f5c462d3983850",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::virtualTextureOverrides",
+      "id": "3b5a1583bc6a411ba3d1a9273ac5178d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialInstance::virtualizedGeometryOverride",
+      "id": "cc829bb9e81b43f3b8f105e2f3d1d178",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::blend",
+      "id": "87bb057bc0944a31bfba9bcce6172fd7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::displayName",
+      "id": "afff7157bdce4eedb07ee5a5a16dff6a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::layer",
+      "id": "e5c8e81bbfee40b4999321d45bf09d56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::layerId",
+      "id": "3a9e831ad56e413b84f8f0da7f664c65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::linkState",
+      "id": "d21f700da54b4f48b935484c2f51b470",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::restrictToBlendRelatives",
+      "id": "9df23e7da922451f96816600aa5e604f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::restrictToLayerRelatives",
+      "id": "55ad0167a3ed41b29223054d667af6a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerEntry::visible",
+      "id": "a80d9ee938c04baa9d968538ee05c11a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerStack::deletedParentLayerIds",
+      "id": "a43794b37dba4500bbf1d99195f9af96",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLayerStack::layers",
+      "id": "f620ab68121e425582439b5a3c9d2ff4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeOverrides::castShadowAsMasked",
+      "id": "64c3f12df65748f89548073b970ccf0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeOverrides::diffuseBoost",
+      "id": "d74606bf8316482287eca60d13bb77bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeOverrides::emissiveBoost",
+      "id": "f9162753c6b34b65a29b304f8d98772c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeOverrides::exportResolutionScale",
+      "id": "b51960e6dc914ebd9e47253f2d63eec6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeSettings::castShadowAsMasked",
+      "id": "d119f0e9d2264294abd45d2dd03d710b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeSettings::diffuseBoost",
+      "id": "1d9c9de8c264477486824f9174cbe51a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeSettings::emissiveBoost",
+      "id": "0b9e84e3eb154f5f81a463b3e8084a05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialLightBakeSettings::exportResolutionScale",
+      "id": "0a9fd328d74640038a1bb6542a4310d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialPreviewSettings::cameraPitch",
+      "id": "640d3195acbf44069cd1d392fdd40fb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialPreviewSettings::cameraYaw",
+      "id": "40e8b27460a64b8aa87e4d3f725a87ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MaterialPreviewSettings::mesh",
+      "id": "e9bdfd38faba444e9b52744d34add545",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ParameterCollection::base",
+      "id": "3aa0b8ef500d4ad38e26b9eb0c2b4636",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ParameterCollection::scalarBaseOverrides",
+      "id": "15d61b16a4d14fcab8c59c2e54685733",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ParameterCollection::scalars",
+      "id": "f96aeb586aa047e0ab05cfe98d62647e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ParameterCollection::vectorBaseOverrides",
+      "id": "85f415197e4445c0ba6fb7fc1b2f994b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ParameterCollection::vectors",
+      "id": "c451a22870754b8eb0d98ebb4b53b00a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureParameterOverride::key",
+      "id": "0ce18d8a2159477cb290ecc29c88a50f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureParameterOverride::value",
+      "id": "4f37c5c63a324a6baa38b4559fd5725c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::UserSceneTextureOverride::key",
+      "id": "be830e0a0391419faa8a79cee83123e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::UserSceneTextureOverride::value",
+      "id": "5d7a7ff0127d41c1aff1f3bdaaf71bb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::Material",
       "id": "76129e92dc294ea294ab42577cd231a8",
@@ -12,6 +663,97 @@
       "kind": "type",
       "name": "rocks::MaterialBase",
       "id": "79ca53b7c7ba4e7e9a73dc14b4bd39bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialFunction",
+      "id": "10c70569d7064efebdf2f5a93e421a8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialFunctionBase",
+      "id": "4add63b80db446bfb1313a729f7539b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialFunctionInstance",
+      "id": "c1e6c83d7e3149a99d19dd271501271a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialInstance",
+      "id": "b3f26250f26041f08923efe92a839fb0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialLayerEntry",
+      "id": "7b00d1ede30440e999f6ed3b3b5a70ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialLayerLinkState",
+      "id": "fe7b0e0733df4c3dbcf780ad3ccf43b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialLayerStack",
+      "id": "8a011e6dd7e14b18a2d6946dcd66872e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialLightBakeOverrides",
+      "id": "bbec69e223624fb38ce5756d74315754",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialLightBakeSettings",
+      "id": "e63c3515aa214bd38e77ba4ef7e6cede",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialPreviewSettings",
+      "id": "cb36608bd94a4ecab2f4a5d8d4a1d9fc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ParameterCollection",
+      "id": "f2044d950d68439386fb082d74660057",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TextureParameterOverride",
+      "id": "e765e60ca87244d38dde10d9ad1f759f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::UserSceneTextureOverride",
+      "id": "218c271c48174f24a52d7a3f3bf18919",
       "aliases": [],
       "retired": false
     }

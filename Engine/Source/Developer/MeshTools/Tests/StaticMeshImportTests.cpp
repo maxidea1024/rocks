@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <Material/Material.generated.h>
+#include <Material/MaterialBase.generated.h>
 #include <Mesh/StaticMesh/StaticMesh.generated.h>
 #include <MeshTools/StaticMeshImport.h>
 #include <Object/ModuleRegistration.h>

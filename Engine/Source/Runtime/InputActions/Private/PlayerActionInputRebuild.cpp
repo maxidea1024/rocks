@@ -136,7 +136,9 @@ bool RebuildSameModifier(const InputModifier& a, const InputModifier& b) noexcep
            a.fovScale == b.fovScale && a.smoothMethod == b.smoothMethod &&
            a.smoothSpeed == b.smoothSpeed && a.easingExponent == b.easingExponent &&
            RebuildSameCurve(a.responseX, b.responseX) &&
-           RebuildSameCurve(a.responseY, b.responseY) && RebuildSameCurve(a.responseZ, b.responseZ);
+           RebuildSameCurve(a.responseY, b.responseY) &&
+           RebuildSameCurve(a.responseZ, b.responseZ) && a.responseXAsset == b.responseXAsset &&
+           a.responseYAsset == b.responseYAsset && a.responseZAsset == b.responseZAsset;
 }
 
 // 평가에 쓰는 설정이 같은지다(설명·표시 이름은 보지 않는다 — 충돌 진단용).

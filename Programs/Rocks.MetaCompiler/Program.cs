@@ -22,7 +22,7 @@ internal static class Program
                 return await ShaderParameterGenerator.RunAsync(arguments[1..]);
             }
 
-            CompilerOptions options = CompilerOptions.Parse(arguments);
+            CompilerOptions options = CompilerOptions.Parse(ExpandResponseFile(arguments));
             input = options.Inputs[0].Path;
             await CompilerDriver.RunAsync(options);
             return 0;
@@ -40,5 +40,19 @@ internal static class Program
         }
 
         return 1;
+    }
+
+    // 인자가 "@<경로>" 하나면 그 파일의 줄(한 줄에 인자 하나, UTF-8, 빈 줄 무시)을 인자로 쓴다. 빌드 도구가 헤더가 많은
+    // 모듈의 인자를 이렇게 넘긴다(Windows 명령줄 상한 — Docs/Design/ReflectionGeneratedSources.ko.md 6.3절).
+    private static string[] ExpandResponseFile(string[] arguments)
+    {
+        if (arguments.Length != 1 || !arguments[0].StartsWith('@'))
+        {
+            return arguments;
+        }
+
+        return File.ReadAllLines(arguments[0][1..], new UTF8Encoding(false))
+            .Where(line => line.Length != 0)
+            .ToArray();
     }
 }

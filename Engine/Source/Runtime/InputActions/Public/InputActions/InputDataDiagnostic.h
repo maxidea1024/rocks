@@ -31,7 +31,9 @@ enum class InputDataIssue : uint8 {
     // 프로필 override 이름이 비었다.
     ProfileNameMissing,
     // 프로필 override 이름이 앞의 것과 같다(profile = 뒤의 것).
-    DuplicateProfile
+    DuplicateProfile,
+    // 모디파이어의 응답 커브 slot이 평탄화되지 않았다(평가기는 slot 없는 값만 받는다 — 2.9절 IA9).
+    UnresolvedCurveAsset
 };
 
 // 위치 칸의 "없음"이다.

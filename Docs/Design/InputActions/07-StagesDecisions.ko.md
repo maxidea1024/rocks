@@ -21,6 +21,7 @@
 | IA6c | 편집기(입력 에셋 편집 화면·키 선택·액션 고르기가 실효 id를 적음·복제 때 `id` 0으로 되돌림 — 2.8절) | Studio 단계 |
 | IA7 | 함수 바인딩(`BindFunction` — 5.1절, 재사용 값 `FunctionBinding` — [이벤트 리플렉션](../EventReflection.ko.md) EV1a), `ActionEventData`·`InputValue` 리플렉션 struct, `ActionEvent` Flags enum | 함수 호출과 받은 데이터(이벤트 마스크 적용), 콜백과 섞인 실행 순서·`consumes`, 바인딩 거부(없음·static·반환·서명·None 마스크·null·회수된 대상), 대상 사라짐(StaleHandle) 뒤 바인딩 정리·파괴 대기 건너뛰기(경고 없음), 호출 실패에도 consumes, 다른 스레드 전달의 Warning 한 번, Remove·Clear |
 | IA8 | `InputComponent`(priority·blockInput·바인딩)와 PlayerController 입력 스택(쌓기·정렬·위층부터 전달·층 사이 소비·막기·Push/Pop·EnableInput/DisableInput), Pawn 플레이어 입력 컴포넌트·`OnSetupPlayerInput` — 5.5절(CR26·CM4 입력 부분, 2026-11-27 당김) | 쌓는 순서·priority 정렬(같으면 쌓인 순)·위층부터 실행, 층 사이 consumes, blockInput 아래층 미전달·값 0, Push 자리·같은 priority 순서·중복 제거·Pop 값 0·사라진 항목 정리, 전달 중 Pop·파괴·UnPossess·Push(재진입), EnableInput 생성·재사용·조종 Pawn은 켜기·자기 층 끄기·다른 Controller Pawn 거부, Pawn 층 순서·Push한 Pawn 컴포넌트 한 번, Possess 때 hook·UnPossess 때 파괴·다시 Possess, Pawn 입력 끄기 |
+| IA9 | 커브 에셋 slot(2.9절 — 응답 커브 모디파이어·진동 채널, CurveAssets CA5) | 액션·바인딩(기본·프로필)·채널 slot의 평탄화(인라인 대체·slot 비움), 범위 밖·null 원소·풀리지 않는 참조의 오류와 출력 그대로, 평탄화되지 않은 slot 검증 거부, 코드로 만든 값(slot 없음) 그대로, 쿠킹 로드 뒤 모으기(Hard 참조 함께 로드) |
 
 단계마다 구현 → 바뀐 시험 → 리뷰어 1명 → 커밋·push다.
 
@@ -43,6 +44,7 @@
 | IAD14 | 에셋 컨텍스트 보유 | PlayerController가 lease를 쥐고, 한 컨텍스트 id는 한 원천(평가기 칸 세대로 확인), 다시 모으기는 `UpdateContext`(5.4절) | World 객체는 에셋을 lease로 쥔다(AssetSystem 6.3절). 평가기는 사본만 가진다(IAD10). 버린 대안: 평가기가 lease를 쥠(InputActions 평가기가 AssetManager에 묶이고 시험이 에셋을 요구한다) |
 | IAD15 | 함수 바인딩 | `FunctionBinding`을 쥐고 `ActionEventData` 하나를 넘긴다, 사라진 대상은 바인딩을 지운다(그 뒤로 소비도 멈춘다) | 이벤트 마스크까지 콜백과 같은 정보(UE는 값·시간·액션 넷), 목록이 자라지 않고 사라진 객체가 입력을 막지 않게(UE는 남겨 계속 소비) |
 | IAD16 | 입력 스택 | `InputComponent`가 바인딩 층, PlayerController가 매 틱 UE 순서로 쌓고 priority 정렬, Actor 입력 켜기는 PlayerController API | UE BuildInputStack·ProcessInputStack. World는 Gameplay 아래라 Actor에 입력 API·필드를 두지 않는다. 레벨 스크립트 고정 자리는 Sparks 연결 뒤 |
+| IAD17 | 커브 에셋 | 소유 에셋의 `curveAssets` 참조 목록 + 값 struct의 slot 번호, 사본을 만들 때 평탄화 | 값 struct에 참조를 둘 수 없다(2.7절). UE 하드 참조와 같은 로드·쿠킹 의미, 평가 경로는 Registry 없이 그대로 |
 | IAD9 | slot | 이름마다 slot 한 열(장치 칸 없음) | UE 기본 구현이 장치 ID를 Invalid로 돌려줘 실제로 한 열이다 |
 
 ### 7.3 UE와 다른 점
@@ -64,6 +66,8 @@
 | 입력 컴포넌트 클래스 | `UInputComponent`(옛 입력) + `UEnhancedInputComponent` | `InputComponent` 하나 | 옛 입력이 없다 |
 | Actor 입력 켜기 | `AActor::EnableInput(PC)`, Actor의 `bBlockInput`·`InputPriority` | `PlayerController::EnableInput(actor)`, 컴포넌트 필드 | IAD16 |
 | 레벨 스크립트 입력 | 스택에 고정 자리 | `EnableInput`으로 넣는다 | IAD16 |
+| 응답 커브 모디파이어의 커브 | `TObjectPtr<UCurveFloat>`(에셋만) | 인라인 `TangentCurve` + 에셋 slot | IAD17 — 코드로 만든 모디파이어도 커브를 갖는다 |
+| 빠진·풀리지 않는 커브 에셋 | 응답 커브는 그 축만 0, 진동은 인라인으로 대신(`FRuntimeFloatCurve::GetRichCurveConst`) | 그 모으기·사본 전체가 실패(InvalidArgument·Resolve 오류) | CurveAssets CAD8 — 데이터 문제를 숨기지 않는다. null 원소는 Required라 저장·쿠킹이 먼저 막는다 |
 | Pop·입력 끔의 값 바인딩 | Enhanced 값은 마지막 값을 쥔다(`ClearBindingValues`는 옛 축만) | 0으로 한다 | 빠진 층이 누른 값을 영구히 쥐지 않게(5.5절) |
 | Push한 Pawn 플레이어 입력 컴포넌트 | Pawn 층에도 다시 넣어 두 번 처리 | Pawn 층에서 뺀다(한 번) | 한 프레임 두 번 실행은 버그 원천 |
 | `DisableInput(actor)` 범위 | Actor의 `InputComponent` 하나 | 그 Actor 소유 스택 항목 모두 | Actor에 입력 컴포넌트 필드가 없다(IAD16) |

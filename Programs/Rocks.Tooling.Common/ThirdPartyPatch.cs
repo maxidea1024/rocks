@@ -13,7 +13,9 @@ namespace Rocks.Tooling.Common;
 /// <c>' '</c>·<c>'-'</c>·<c>'+'</c> 줄과 <c>\ No newline at end of file</c> 표시.</item>
 /// <item>경로는 원본 디렉터리 기준이며 a/·b/ 접두를 뗀 값이 같아야 한다(이름 바꾸기·삭제·binary patch는 거부).</item>
 /// <item>거꾸로 적용은 정확해야 한다: hunk 위치·문맥이 한 줄이라도 다르면 <see cref="FormatException"/>이다(fuzz 없음).</item>
-/// <item>줄 끝은 LF만 다룬다. CR이 섞인 원본은 patch 대상으로 쓰지 않는다(검사가 거부한다).</item>
+/// <item>patch 텍스트의 줄 끝은 LF만이다. 원본 파일은 LF이거나 모든 줄이 CRLF다(upstream이 CRLF로 배포한 원본 —
+/// ISPC Texture Compressor). CRLF 파일은 줄 끝 CR을 떼고 patch와 대조하고, 복원한 원본도 CRLF로 낸다. 줄 끝이
+/// 섞였거나 줄 중간에 CR이 있으면 거부한다.</item>
 /// </list>
 /// </summary>
 public static class ThirdPartyPatch
@@ -120,9 +122,22 @@ public static class ThirdPartyPatch
     public static byte[]? Reverse(FilePatch patch, byte[] current)
     {
         string text = new UTF8Encoding(false, true).GetString(current);
-        if (text.Contains('\r'))
+        // CRLF 파일: 모든 줄바꿈이 CRLF이고 다른 CR이 없어야 한다. CR을 뗀 텍스트로 대조하고 복원은 CRLF로 낸다.
+        bool crlf = text.Contains('\r');
+        if (crlf && patch.Added)
         {
-            throw new FormatException($"{patch.Path}: CR line endings are not supported in patched files");
+            throw new FormatException($"{patch.Path}: an added file must match the LF patch byte for byte (CR found)");
+        }
+
+        if (crlf)
+        {
+            string stripped = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+            if (stripped.Contains('\r') || stripped.Count(value => value == '\n') != text.Split("\r\n").Length - 1)
+            {
+                throw new FormatException($"{patch.Path}: mixed or stray CR line endings are not supported in patched files");
+            }
+
+            text = stripped;
         }
 
         bool currentFinalNewline = text.EndsWith('\n');
@@ -177,7 +192,8 @@ public static class ThirdPartyPatch
         }
 
         bool originalFinalNewline = hunkReachesEnd ? !originalMissingFinalNewline : currentFinalNewline;
-        string restored = string.Join('\n', original) + (original.Count > 0 && originalFinalNewline ? "\n" : "");
+        string newline = crlf ? "\r\n" : "\n";
+        string restored = string.Join(newline, original) + (original.Count > 0 && originalFinalNewline ? newline : "");
         return Encoding.UTF8.GetBytes(restored);
     }
 

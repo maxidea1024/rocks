@@ -4,7 +4,7 @@
 
 | 도메인 | 문서·단계 | 적용 |
 |---|---|---|
-| 머티리얼 | [머티리얼 시스템](../MaterialSystem.ko.md) MS1·14절, 계획 14.5–14.9절 | `MaterialGraph`는 `GraphDocument`(domain `Material`)다. 5.2절 노드·핀·간선 정의는 이 문서 6절과 같다. `MaterialNodeDescriptor`는 `NodeTypeDescriptor` + 머티리얼 확장이다(단계·capability, lowering은 MaterialCompiler 쪽 등록). 대응: E1 → 7절 메뉴, E2 → 8절, E3 → `CanConnect`, E4 → GD19, E13 → GD14·10절. 출력 노드는 `CreateDefaultNodes` + 문서당 하나 capability. 파라미터 기본값 제외는 `NormalizeSemanticNode` |
+| 머티리얼 | [머티리얼 시스템](../MaterialSystem/README.ko.md) MS1·14절, 계획 14.5–14.9절 | `MaterialGraph`는 `GraphDocument`(domain `Material`)다. 5.2절 노드·핀·간선 정의는 이 문서 6절과 같다. `MaterialNodeDescriptor`는 `NodeTypeDescriptor` + 머티리얼 확장이다(단계·capability, lowering은 MaterialCompiler 쪽 등록). 대응: E1 → 7절 메뉴, E2 → 8절, E3 → `CanConnect`, E4 → GD19, E13 → GD14·10절. 출력 노드는 `CreateDefaultNodes` + 문서당 하나 capability. 파라미터 기본값 제외는 `NormalizeSemanticNode` |
 | 오디오 | [오디오 시스템](../AudioSystem/06-Phases.ko.md) AU10·M7 `SoundGraph` | `SoundGraph`(MetaSounds형): 데이터 핀 + 실행 trigger 핀(`Flow`). 랜덤·레이어·switch·지연·loop도 이 그래프의 노드다(오디오 AD29 — Sound Cue 대응 없음). 입력 여럿을 받는 노드는 동적 입력 핀으로 둔다(GD4). 블록 크기·실시간 안전성 검증은 도메인 몫. 런타임 그래프 생성이 필요하면 NG8 |
 | 애니메이션 | 계획 15절(1522행) blend tree·state machine·graph compiler | blend tree는 데이터 그래프. state machine은 `Structural` 핀(전이)과 하위 그래프(상태마다). cook 때 cycle·타입·누락 핀 검증 → task plan |
 | VFX | 계획 21절 | 모듈 스택·데이터 그래프. 컴파일은 도메인 |

@@ -33,6 +33,7 @@ extern cvar::BootCVar<int32> MaxVoicesVar;
 extern cvar::BootCVar<int32> StreamRingFramesVar;
 extern cvar::BootCVar<int32> StreamMaxStreamsVar;
 extern cvar::CVar<int32> StreamDefaultLoadingVar;
+extern cvar::CVar<float> ConcurrencyMinDistanceDeltaVar;
 
 } // namespace engine_audio_detail
 
