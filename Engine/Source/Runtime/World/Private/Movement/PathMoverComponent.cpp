@@ -19,7 +19,8 @@ Result<void> InvalidPathValue() noexcept {
 } // namespace
 
 PathMoverComponent::PathMoverComponent(Allocator& allocator) noexcept
-    : MovementComponent(allocator), controlPoints_(allocator), segments_(allocator) {
+    : MovementComponent(allocator), pathReversed(allocator), pathStopped(allocator),
+      pathReset(allocator), controlPoints_(allocator), segments_(allocator) {
 }
 
 Result<void> PathMoverComponent::AddControlPoint(const Vec3d& position,
@@ -95,10 +96,34 @@ void PathMoverComponent::RestartMovement(float initialDirection) noexcept {
     stopped_ = false;
 }
 
+void PathMoverComponent::NotifyPathReverse(float time) noexcept {
+    OnPathReverse(time);
+    if (HasWorld()) {
+        World& world = GetWorld();
+        pathReversed.Broadcast({world.Objects(), world.Access(), Handle()}, HitResult{}, time);
+    }
+}
+
+void PathMoverComponent::NotifyPathStop(float time) noexcept {
+    OnPathStop(time);
+    if (HasWorld()) {
+        World& world = GetWorld();
+        pathStopped.Broadcast({world.Objects(), world.Access(), Handle()}, HitResult{}, time);
+    }
+}
+
+void PathMoverComponent::NotifyPathReset(float time) noexcept {
+    OnPathReset(time);
+    if (HasWorld()) {
+        World& world = GetWorld();
+        pathReset.Broadcast({world.Objects(), world.Access(), Handle()}, HitResult{}, time);
+    }
+}
+
 void PathMoverComponent::StopMovementImmediately() noexcept {
     // UE StopMovementImmediately(:36): 정지 + 정지 hook, 그다음 velocity 0.
     stopped_ = true;
-    OnPathStop(currentTime_);
+    NotifyPathStop(currentTime_);
     MovementComponent::StopMovementImmediately();
 }
 
@@ -226,13 +251,13 @@ float PathMoverComponent::CalculateNewTime(float timeNow, float delta, bool& sto
         if (behaviour_ == PathMoverBehaviour::OneShot) {
             newTime = 1.0f;
             stopped = true;
-            OnPathStop(newTime);
+            NotifyPathStop(newTime);
         } else if (behaviour_ == PathMoverBehaviour::LoopReset) {
             newTime = 0.0f;
-            OnPathReset(newTime);
+            NotifyPathReset(newTime);
         } else {
             newTime = 1.0f;
-            OnPathReverse(newTime);
+            NotifyPathReverse(newTime);
             currentDirection_ = -currentDirection_;
         }
     } else if (newTime < 0.0f) {
@@ -240,10 +265,10 @@ float PathMoverComponent::CalculateNewTime(float timeNow, float delta, bool& sto
         if (behaviour_ == PathMoverBehaviour::OneShotReverse) {
             newTime = 0.0f;
             stopped = true;
-            OnPathStop(newTime);
+            NotifyPathStop(newTime);
         } else if (behaviour_ == PathMoverBehaviour::PingPong) {
             newTime = 0.0f;
-            OnPathReverse(newTime);
+            NotifyPathReverse(newTime);
             currentDirection_ = -currentDirection_;
         }
     }
