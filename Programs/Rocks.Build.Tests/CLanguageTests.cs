@@ -84,10 +84,14 @@ internal static class CLanguageTests
             string logMinimum = (windows ? "/D" : "-D") + "ROCKS_LOG_COMPILED_MINIMUM=" + (configuration == NativeConfiguration.Release ? "2" : "0");
             // 타깃 매크로 넷(Docs/Design/BuildTargets 3.2절 BS2a — 요청 기본은 Program 조합)은 로그 하한 바로 뒤다.
             string[] targetMacros = [.. request.Target.Defines.Select(define => (windows ? "/D" : "-D") + define)];
-            string[] expected = [.. toolchain.CompileArguments, .. profile, logMinimum, .. targetMacros, prefixMap, .. tail];
+            // Rocks 모듈의 C++ 번역 단위는 프로필 뒤·ThinLTO 앞에 thread safety analysis 경고를 받는다(Docs/Design/Synchronization 13.1절).
+            string[] module = configuration == NativeConfiguration.Release
+                ? [.. profile[..^1], "-Wthread-safety", profile[^1]]
+                : [.. profile, "-Wthread-safety"];
+            string[] expected = [.. toolchain.CompileArguments, .. module, logMinimum, .. targetMacros, prefixMap, .. tail];
             Check(action.Arguments.SequenceEqual(expected),
                 $"{configuration} C++ compile action changed:\n{string.Join(' ', action.Arguments)}\nexpected:\n{string.Join(' ', expected)}");
-            string[] logical = [.. toolchain.CompileArguments, .. profile, logMinimum, .. targetMacros, prefixMap, .. logicalTail];
+            string[] logical = [.. toolchain.CompileArguments, .. module, logMinimum, .. targetMacros, prefixMap, .. logicalTail];
             LogicalCompile logicalCompile = plan.LogicalCompiles.Single(candidate => candidate.Module == "Engine");
             Check(logicalCompile.Arguments.SequenceEqual(logical) && logicalCompile.Source == engineSource && logicalCompile.Action == action.Id &&
                 logicalCompile.Object == action.Outputs[0],
