@@ -1,5 +1,6 @@
 #pragma once
 
+#include <UiCore/Rendering/UiRenderer.h>
 #include <UiWidget/UserWidget.h>
 #include <UiWidget/Widget.h>
 
@@ -11,7 +12,7 @@ struct GameHud {
     ObjectHandle progress;
 };
 
-int RunGameHudSelfTest(Allocator& allocator) noexcept;
+int RunGameHudSelfTest(Allocator& allocator, UiRenderer& renderer) noexcept;
 
 Result<GameHud> CreateGameHud(ObjectRegistry& objects) noexcept;
 

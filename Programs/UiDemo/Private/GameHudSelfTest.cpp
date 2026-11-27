@@ -1,11 +1,9 @@
-#include "DemoShaders.h"
+#include "DemoCapture.h"
 #include "GameHud.h"
 
 #include <Core/Diagnostics/Log.h>
-#include <D3D11Graphics/D3D11Device.h>
+#include <Core/ScopeExit.h>
 #include <UiFramework/Application/Application.h>
-#include <UiRender/DrawBatchBuffers.h>
-#include <UiRender/DrawBatchRenderer.h>
 
 #include <UiWidget/ProgressBarWidget.generated.h>
 
@@ -17,7 +15,7 @@ inline constexpr LogCategory LogHudSelfTest{"UiDemo.HudSelfTest"};
 
 } // namespace
 
-int RunGameHudSelfTest(Allocator& allocator) noexcept {
+int RunGameHudSelfTest(Allocator& allocator, UiRenderer& renderer) noexcept {
     TypeRegistry types(allocator);
     ModuleRegistration modules(types, allocator);
     if (!RegisterWidgetTypes(modules)) {
@@ -33,30 +31,17 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
 
     Application app(allocator);
     app.SetRoot(hud.Value().root);
-    auto created = graphics::CreateD3D11Device(allocator, {.preferSoftware = true});
-    if (!created) {
-        return 3;
-    }
-
-    auto& device = *created.Value();
-    DemoShaderSet shaders(allocator, device);
-    if (!shaders.IsReady()) {
-        return 3;
-    }
-
-    graphics::TextureDesc desc;
-    desc.width = 64;
-    desc.height = 16;
-    desc.format = graphics::PixelFormat::RGBA8Unorm;
-    desc.usage = graphics::TextureUsage::RenderTarget;
-    auto target = device.CreateTexture(desc, {});
-    auto pipeline = DrawBatchRenderer::CreateSolidPipeline(device, ActiveShaders(), desc.format);
-    if (!target || !pipeline) {
+    auto target = renderer.CreateRenderTarget(64, 16, UiTextureSampling::Image);
+    if (!target) {
         return 4;
     }
 
+    ROCKS_ON_SCOPE_EXIT {
+        renderer.ReleaseTexture(target.Value());
+    };
     DrawBatch batch(allocator);
-    DrawBatchBuffers buffers(device, ActiveShaders(), batch);
+    UiDrawBuffer buffer(allocator);
+    Array<uint8> captured(allocator);
     auto bar =
         objects.ResolveForWrite<ProgressBarWidget>(objects.OwnerAccess(), hud.Value().progress);
     if (!bar) {
@@ -64,9 +49,8 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
     }
 
     const auto viewport = Geometry::Root({64, 16}, {});
-    uint8 pixels[64 * 16 * 4]{};
     // 가운데 픽셀은 처음에는 바탕(UE "ProgressBar" Foldout — 회색), 다음에는 채움(PrimaryHover —
-    // 파랑)이다. 두 번째 제출은 기존 버퍼를 부분 갱신한다.
+    // 파랑)이다. 두 번째 batch는 정점만 부분 갱신한다.
     uint8 background[4]{};
     constexpr float fractions[] = {0.25f, 0.75f};
     for (const float fraction : fractions) {
@@ -75,23 +59,18 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
         }
 
         auto cache = app.UpdatePaintCache(viewport, 1);
-        if (!cache || !batch.Update(*cache.Value()) || !buffers.Upload()) {
+        if (!cache || !batch.Update(*cache.Value())) {
             return 7;
         }
 
-        auto frame = device.BeginOffscreen(target.Value(), {0, 0, 0, 1});
-        if (!frame) {
-            return 8;
-        }
-
-        auto drawn =
-            DrawBatchRenderer::Draw(*frame.Value(), pipeline.Value(), buffers, viewport.size);
-        if (!device.EndFrame() || !drawn || !device.ReadPixels(target.Value(), pixels)) {
+        if (!DrawAndCapture(renderer, buffer, target.Value(), 64, 16, {0, 0, 0, 1}, batch,
+                            captured) ||
+            captured.Size() != 64 * 16 * 4) {
             return 9;
         }
 
         const usize center = (8 * 64 + 32) * 4;
-        const uint8* pixel = pixels + center;
+        const uint8* pixel = captured.Data() + center;
         const auto mismatch = [&]() noexcept {
             Log::Error(LogHudSelfTest, "Progress {Fraction} center pixel mismatch: {R} {G} {B} {A}",
                        fraction, pixel[0], pixel[1], pixel[2], pixel[3]);
@@ -122,8 +101,6 @@ int RunGameHudSelfTest(Allocator& allocator) noexcept {
         }
     }
 
-    device.Retire(pipeline.Value());
-    device.Retire(target.Value());
     return 0;
 }
 

@@ -1561,6 +1561,13 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
         UniquePtr<GamepadBackend>(Move(created.Value())));
 }
 
+void PumpSentMessages() noexcept {
+    // PM_QS_SENDMESSAGE로 보낸 메시지만 디스패치한다(PeekMessage가 대기 중인 보낸 메시지를 먼저
+    // 처리한다). PM_NOREMOVE라 게시 메시지는 큐에 남는다.
+    MSG message;
+    (void)PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+}
+
 DesktopSessionState QueryDesktopSessionState() noexcept {
     LPWSTR buffer = nullptr;
     DWORD bytes = 0;

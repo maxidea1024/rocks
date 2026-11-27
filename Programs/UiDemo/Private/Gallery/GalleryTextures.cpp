@@ -23,23 +23,15 @@ struct Rgba {
 
 } // namespace
 
-GalleryTextures::GalleryTextures(graphics::Device& device, SlotArray<BrushTexture>& textures,
-                                 graphics::PipelineHandle imagePipeline) noexcept
-    : device_(device), textures_(textures), imagePipeline_(imagePipeline) {
+GalleryTextures::GalleryTextures(UiRenderer& renderer) noexcept : renderer_(renderer) {
 }
 
 GalleryTextures::~GalleryTextures() noexcept {
     const SlotHandle handles[] = {checker_, frame_, gradient_};
     for (SlotHandle handle : handles) {
-        if (handle.IsNull()) {
-            continue;
+        if (!handle.IsNull()) {
+            renderer_.ReleaseTexture(handle);
         }
-
-        if (const BrushTexture* texture = textures_.Find(handle)) {
-            device_.Retire(texture->texture);
-        }
-
-        (void)textures_.TryRemove(handle);
     }
 }
 
@@ -63,21 +55,10 @@ Result<SlotHandle> GalleryTextures::Add(Allocator& allocator, uint32 width, uint
         }
     }
 
-    graphics::TextureDesc desc;
+    UiTextureDesc desc;
     desc.width = width;
     desc.height = height;
-    auto texture = device_.CreateTexture(desc, pixels.View());
-    if (!texture) {
-        return Result<SlotHandle>::Failure(texture.Error());
-    }
-
-    auto slot = textures_.TryAdd({texture.Value(), imagePipeline_});
-    if (!slot) {
-        device_.Retire(texture.Value());
-        return Result<SlotHandle>::Failure(slot.Error());
-    }
-
-    return slot;
+    return renderer_.CreateTexture(desc, pixels.View());
 }
 
 Result<void> GalleryTextures::Create(Allocator& allocator) noexcept {

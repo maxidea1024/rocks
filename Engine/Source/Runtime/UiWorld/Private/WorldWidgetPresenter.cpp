@@ -2,57 +2,43 @@
 
 namespace rocks::ui {
 
-WorldWidgetPresenter::WorldWidgetPresenter(Allocator& allocator, graphics::Device& device,
-                                           render::ShaderSet& shaders,
-                                           SlotArray<BrushTexture>& textures,
-                                           graphics::PixelFormat format) noexcept
-    : device_(device), shaders_(shaders), textures_(textures), format_(format),
-      children_(allocator, device, shaders, textures, format), batch_(allocator),
-      buffers_(device, shaders, batch_, format), surface_(device, textures) {
+namespace {
+
+// 보관 표면은 투명 바탕에 그린다(합성 셰이더가 미리 곱한 알파로 읽는다).
+constexpr LinearColor WorldWidgetClear{0, 0, 0, 0};
+
+} // namespace
+
+WorldWidgetPresenter::WorldWidgetPresenter(Allocator& allocator, UiRenderer& renderer) noexcept
+    : renderer_(renderer), children_(allocator, renderer), batch_(allocator) {
 }
 
 WorldWidgetPresenter::~WorldWidgetPresenter() noexcept {
-    if (!solid_.IsNull()) {
-        device_.Retire(solid_);
-    }
-
-    if (!composite_.IsNull()) {
-        device_.Retire(composite_);
+    if (!surface_.IsNull()) {
+        renderer_.ReleaseTexture(surface_);
     }
 }
 
-SlotHandle WorldWidgetPresenter::Resource() const noexcept {
-    return surface_.Resource();
+UiTextureId WorldWidgetPresenter::Resource() const noexcept {
+    return surface_;
 }
 
-Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint64 frame) noexcept {
+Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint64 frame,
+                                           UiDrawBuffer& buffer) noexcept {
     auto arranged = component.PrepareWindow();
     if (!arranged) {
         return Result<bool>::Failure(arranged.Error());
     }
 
-    if (solid_.IsNull()) {
-        auto made = DrawBatchRenderer::CreateSolidPipeline(device_, shaders_, format_);
-        if (!made) {
-            return Result<bool>::Failure(made.Error());
-        }
-
-        solid_ = made.Value();
-    }
-
-    if (composite_.IsNull()) {
-        auto made = DrawBatchRenderer::CreateRetainedPipeline(device_, shaders_, format_);
-        if (!made) {
-            return Result<bool>::Failure(made.Error());
-        }
-
-        composite_ = made.Value();
-    }
-
     const auto root = component.WindowRoot();
     const Vec2 size = component.DrawSize();
     const uint32 width = static_cast<uint32>(size.x), height = static_cast<uint32>(size.y);
-    auto prepared = children_.Prepare(root, frame, width, height, solid_);
+    if (!root || width == 0 || height == 0) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize pendingBefore = buffer.PendingPassCount();
+    auto prepared = children_.Record(root, frame, width, height, buffer);
     if (!prepared) {
         return Result<bool>::Failure(prepared.Error());
     }
@@ -63,21 +49,31 @@ Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint
     }
 
     if (root_.Lock().Get() == root.Get() && size_ == size &&
-        revision_ == cache.Value()->Revision() && !prepared.Value()) {
+        revision_ == cache.Value()->Revision() && !prepared.Value() &&
+        buffer.PendingPassCount() == pendingBefore) {
         return Result<bool>::Success(false);
     }
 
-    auto status = batch_.Update(*cache.Value());
-    if (status) {
-        status = buffers_.Upload();
+    if (auto updated = batch_.Update(*cache.Value()); !updated) {
+        return Result<bool>::Failure(updated.Error());
     }
 
-    if (status) {
-        status = surface_.Render(buffers_, width, height, format_, solid_, composite_);
+    if (surface_.IsNull()) {
+        auto made = renderer_.CreateRenderTarget(width, height, UiTextureSampling::Premultiplied);
+        if (!made) {
+            return Result<bool>::Failure(made.Error());
+        }
+
+        surface_ = made.Value();
+    } else if (size_ != size) {
+        if (auto resized = renderer_.ResizeRenderTarget(surface_, width, height); !resized) {
+            return Result<bool>::Failure(resized.Error());
+        }
     }
 
-    if (!status) {
-        return Result<bool>::Failure(status.Error());
+    if (auto added = buffer.AddRetainedPass(surface_, width, height, WorldWidgetClear, batch_);
+        !added) {
+        return Result<bool>::Failure(added.Error());
     }
 
     root_ = root;
@@ -87,34 +83,17 @@ Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint
 }
 
 Result<WorldWidgetClipPlane>
-WorldWidgetPresenter::Submit(graphics::CommandContext& commands, WorldWidgetPlane& plane,
-                             const WorldWidgetComponent& component, const Mat4d& viewProjection,
-                             const WorldWidgetClipPlane* previous) noexcept {
+WorldWidgetPresenter::Project(const WorldWidgetComponent& component,
+                              const Mat4d& viewProjection) const noexcept {
     const auto root = component.WindowRoot();
-    if (!component.IsEnabled() || component.IsScreenSpace() || !root ||
+    if (!component.IsEnabled() || component.IsScreenSpace() || !root || surface_.IsNull() ||
         root_.Lock().Get() != root.Get() || size_ != component.DrawSize()) {
         return Result<WorldWidgetClipPlane>::Failure(ErrorCode::NotReady);
     }
 
-    const auto* texture = textures_.Find(Resource());
-    if (!texture) {
-        return Result<WorldWidgetClipPlane>::Failure(ErrorCode::StaleHandle);
-    }
-
     Vec3d tl, tr, bl;
     component.PlaneCorners(tl, tr, bl);
-    auto current = WorldWidgetClipPlane::Project(tl, tr, bl, viewProjection);
-    if (!current) {
-        return current;
-    }
-
-    auto drawn = plane.Draw(commands, texture->texture, current.Value(),
-                            previous ? *previous : current.Value());
-    if (!drawn) {
-        return Result<WorldWidgetClipPlane>::Failure(drawn.Error());
-    }
-
-    return current;
+    return WorldWidgetClipPlane::Project(tl, tr, bl, viewProjection);
 }
 
 } // namespace rocks::ui

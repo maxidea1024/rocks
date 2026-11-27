@@ -1,3 +1,4 @@
+#include <UiCore/Rendering/ViewportSource.h>
 #include <UiFramework/Effects/Viewport.h>
 #include <UiCore/PaintList.h>
 
@@ -44,14 +45,14 @@ Viewport::Viewport(Allocator& allocator) noexcept
     : SizeBox(allocator), scene_(*this, {}), background_(*this, {0, 0, 0, 1}) {
 }
 
-void Viewport::SetSceneSource(SharedPtr<WidgetSurfaceScene> scene) noexcept {
+void Viewport::SetSceneSource(SharedPtr<ViewportSource> scene) noexcept {
     if (source_ != scene) {
         source_ = Move(scene);
         InvalidatePaintPlan();
     }
 }
 
-SharedPtr<WidgetSurfaceScene> Viewport::SceneSource() const noexcept {
+SharedPtr<ViewportSource> Viewport::GetViewportSource() const noexcept {
     return source_;
 }
 

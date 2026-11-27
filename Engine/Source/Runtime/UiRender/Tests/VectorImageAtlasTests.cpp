@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <TextLayout/FontAtlas.h>
+#include <UiCore/Rendering/NullUiRenderer.h>
 #include <UiRender/VectorImageAtlas.h>
 
 // 벡터 이미지 atlas 시험이다(Docs/Design/UiToolkit 17.2·17.5절). nanosvg 래스터 결과의 화소, 같은
@@ -39,15 +40,14 @@ uint8 AlphaAt(const VectorImageAtlas& atlas, const ResolvedVectorImage& image, u
 
 struct AtlasBench {
     SystemAllocator allocator;
-    render::testing::RecordingDevice device{allocator};
-    SlotArray<BrushTexture> textures{allocator};
+    NullUiRenderer renderer{allocator};
 };
 
 } // namespace
 
 TEST(UiRender_VectorImageAtlasRasterizesAndReuses) {
     AtlasBench bench;
-    VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+    VectorImageAtlas atlas(bench.allocator, bench.renderer);
     auto full = atlas.Register("Test/Full", Bytes(FullSquare));
     auto half = atlas.Register("Test/Half", Bytes(LeftHalf));
     REQUIRE(full && half);
@@ -79,7 +79,7 @@ TEST(UiRender_VectorImageAtlasRasterizesAndReuses) {
 
 TEST(UiRender_VectorImageAtlasRejectsBadInput) {
     AtlasBench bench;
-    VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+    VectorImageAtlas atlas(bench.allocator, bench.renderer);
     REQUIRE(atlas.Register("Test/Full", Bytes(FullSquare)));
     CHECK(atlas.Register("Test/Full", Bytes(FullSquare)).Error() == ErrorCode::AlreadyExists);
     CHECK(atlas.Register("", Bytes(FullSquare)).Error() == ErrorCode::InvalidArgument);
@@ -94,31 +94,28 @@ TEST(UiRender_VectorImageAtlasRejectsBadInput) {
     CHECK(atlas.ImageCount() == 1);
 }
 
-TEST(UiRender_VectorImageAtlasSyncsAndFlushes) {
+TEST(UiRender_VectorImageAtlasUploadsAndFlushes) {
     AtlasBench bench;
-    VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+    VectorImageAtlas atlas(bench.allocator, bench.renderer);
     auto full = atlas.Register("Test/Full", Bytes(FullSquare));
     REQUIRE(full);
     auto first = atlas.Resolve(full.Value(), 16, 16);
     REQUIRE(first);
-    // 자리는 바로 받고, 텍스처는 Sync가 채운다.
-    const BrushTexture* entry = bench.textures.Find(first.Value().resource);
-    REQUIRE(entry != nullptr);
-    CHECK(entry->texture.IsNull());
-    CHECK(!atlas.Sync({}));
-    const graphics::PipelineHandle pipeline{SlotHandle{1, 1}};
-    REQUIRE(atlas.Sync(pipeline));
-    entry = bench.textures.Find(first.Value().resource);
-    CHECK(entry != nullptr && !entry->texture.IsNull() && entry->pipeline == pipeline);
-    // 이미 텍스처가 있는 페이지에 새 래스터가 들면 Sync가 페이지를 다시 올린다(UpdateTexture).
-    usize updates = 0;
+    // 텍스처 id는 바로 받고(갱신 텍스처, Image sampling), 화소는 Upload가 올린다.
+    auto desc = bench.renderer.DescribeTexture(first.Value().resource);
+    REQUIRE(desc);
+    CHECK(desc.Value().usage == UiTextureUsage::Dynamic);
+    CHECK(desc.Value().sampling == UiTextureSampling::Image);
+    CHECK(desc.Value().width == VectorAtlasPageSize);
+    CHECK(bench.renderer.Statistics().textureUpdates == 0);
+    REQUIRE(atlas.Upload());
+    CHECK(bench.renderer.Statistics().textureUpdates == 1);
+    // 바뀌지 않은 페이지는 다시 올리지 않고, 새 래스터가 들면 그 페이지를 다시 올린다.
+    REQUIRE(atlas.Upload());
+    CHECK(bench.renderer.Statistics().textureUpdates == 1);
     REQUIRE(atlas.Resolve(full.Value(), 24, 24));
-    REQUIRE(atlas.Sync(pipeline));
-    for (const auto& call : bench.device.Calls()) {
-        updates += call.op == render::testing::RecordingDevice::Op::UpdateTexture ? 1 : 0;
-    }
-
-    CHECK(updates == 1 && atlas.PageCount() == 1);
+    REQUIRE(atlas.Upload());
+    CHECK(bench.renderer.Statistics().textureUpdates == 2 && atlas.PageCount() == 1);
     // 페이지에 들지 않는 그림은 여백 없이 정확한 크기의 단독 텍스처이고 uv는 0..1이다(UE 비atlas
     // 텍스처). 단독 텍스처가 MaxVectorStandaloneImages를 넘으면 AdvanceFrame이 모두 놓고 revision을
     // 올린다(atlas 페이지와 따로 센다).
@@ -130,17 +127,19 @@ TEST(UiRender_VectorImageAtlasSyncsAndFlushes) {
     uint32 height = 0;
     (void)atlas.PagePixels(1, width, height);
     CHECK(width == VectorAtlasPageSize && height == 4);
-    REQUIRE(atlas.Sync(pipeline));
+    REQUIRE(atlas.Upload());
     CHECK(!atlas.AdvanceFrame());
     for (uint32 i = 0; i < MaxVectorStandaloneImages; ++i) {
         REQUIRE(atlas.Resolve(full.Value(), VectorAtlasPageSize + 1 + i, 4));
     }
 
     CHECK(atlas.PageCount() == MaxVectorStandaloneImages + 2);
-    REQUIRE(atlas.Sync(pipeline));
+    REQUIRE(atlas.Upload());
     CHECK(atlas.AdvanceFrame());
     CHECK(atlas.PageCount() == 0 && atlas.Revision() == revision + 1);
-    CHECK(bench.textures.Find(first.Value().resource) == nullptr);
+    // 비우면 페이지 텍스처를 모두 돌려준다.
+    CHECK(!bench.renderer.DescribeTexture(first.Value().resource));
+    CHECK(bench.renderer.LiveTextures() == 0);
     CHECK(!atlas.AdvanceFrame());
     // 비운 뒤에도 다시 래스터화한다.
     REQUIRE(atlas.Resolve(full.Value(), 16, 16));
@@ -151,7 +150,7 @@ TEST(UiRender_VectorImageAtlasRejectsDamagedSvgWithoutLeaks) {
     const usize before = LibraryHeapLiveBlocks();
     {
         AtlasBench bench;
-        VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+        VectorImageAtlas atlas(bench.allocator, bench.renderer);
         // 거대한 수(유한하지 않은 크기)와 크기 0인 그림은 InvalidArgument이고 등록되지 않는다.
         const StringView rejected[] = {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1e40\" height=\"1e40\"></svg>",
@@ -180,7 +179,7 @@ TEST(UiRender_VectorImageAtlasRejectsDamagedSvgWithoutLeaks) {
 
 TEST(UiRender_VectorImageAtlasKeepsGradientAspect) {
     AtlasBench bench;
-    VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+    VectorImageAtlas atlas(bench.allocator, bench.renderer);
     // 그라데이션이 있는 그림은 비균등 배율에서 늘이지 않고 작은 배율로 가운데에 둔다(17.6절).
     constexpr StringView Gradient =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
@@ -199,7 +198,7 @@ TEST(UiRender_VectorImageAtlasAllocatesThroughLibraryHeap) {
     const usize before = LibraryHeapLiveBlocks();
     {
         AtlasBench bench;
-        VectorImageAtlas atlas(bench.allocator, bench.device, bench.textures);
+        VectorImageAtlas atlas(bench.allocator, bench.renderer);
         auto full = atlas.Register("Test/Full", Bytes(FullSquare));
         REQUIRE(full);
         // 파싱한 그림(shape·path·점)은 nanosvg가 malloc으로 잡으며 glue가 Rocks 힙으로 돌린다.

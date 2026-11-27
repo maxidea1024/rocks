@@ -17,16 +17,14 @@
 // 그것을 쓴다.
 //
 // 사용 예:
-//   DemoText text(allocator, device, textures, maskPipeline, imagePipeline);
+//   DemoText text(allocator, renderer);
 //   if (!text.Initialize()) { ... }
 //   text.SetText(*label, "레이블 Label", 18);
 namespace rocks::ui {
 
 class DemoText {
 public:
-    DemoText(Allocator& allocator, graphics::Device& device, SlotArray<BrushTexture>& textures,
-             graphics::PipelineHandle maskPipeline,
-             graphics::PipelineHandle imagePipeline) noexcept;
+    DemoText(Allocator& allocator, UiRenderer& renderer) noexcept;
     ~DemoText() noexcept;
 
     DemoText(const DemoText&) = delete;
@@ -52,8 +50,6 @@ private:
 
     Allocator& allocator_;
     GlyphCacheTextures textures_;
-    graphics::PipelineHandle maskPipeline_;
-    graphics::PipelineHandle imagePipeline_;
     Array<uint8> icuData_;
     UniquePtr<text::TextBackend> backend_;
     UniquePtr<text::ResolvedCompositeFont> font_;

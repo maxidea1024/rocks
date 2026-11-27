@@ -1,8 +1,9 @@
 #include <UiCore/WidgetSurface.h>
+#include <UiCore/Rendering/ViewportSource.h>
 
 namespace rocks::ui {
 
-SharedPtr<WidgetSurfaceScene> WidgetSurface::SceneSource() const noexcept {
+SharedPtr<ViewportSource> WidgetSurface::GetViewportSource() const noexcept {
     return {};
 }
 

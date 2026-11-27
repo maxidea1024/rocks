@@ -308,4 +308,11 @@ enum class DesktopSessionState : uint8 {
 //   }
 ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept;
 
+// 이 스레드로 다른 스레드가 보낸(SendMessage) 메시지만 처리한다. 입력 같은 게시 메시지는 큐에 남아
+// 다음 PumpEvents가 처리하므로 창 콜백이 다시 불리지 않는다. 렌더 lane을 기다리는 동안의 펌프로
+// 쓴다 — 렌더 lane의 스왑 체인 크기 변경·present가 창 스레드로 보낸 메시지를 기다리다 교착하지 않게
+// 한다 (Docs/Design/UiToolkit 18.5절). Windows는 PeekMessage(PM_NOREMOVE | PM_QS_SENDMESSAGE)이고,
+// 보낸 메시지가 없는 플랫폼은 아무것도 하지 않는다. 창을 만든 스레드에서 부른다.
+ROCKS_PLATFORMWINDOW_API void PumpSentMessages() noexcept;
+
 } // namespace rocks::platform

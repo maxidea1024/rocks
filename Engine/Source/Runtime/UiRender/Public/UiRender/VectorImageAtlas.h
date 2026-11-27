@@ -3,8 +3,8 @@
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
+#include <UiCore/Rendering/UiRenderer.h>
 #include <UiCore/VectorImageResolver.h>
-#include <UiRender/DrawBatchRenderer.h>
 
 namespace rocks::platform {
 
@@ -14,24 +14,21 @@ class FileSystem;
 
 // 벡터 이미지(SVG) atlas다(Docs/Design/UiToolkit 17.2절 — UE FSlateVectorGraphicsCache +
 // FSlateSVGRasterizer). SVG를 등록해 파싱해 두고, 그리기 목록 기록 때 (키, 화소 크기)마다 한 번
-// nanosvg로 래스터화해 1024×1024 RGBA atlas 페이지에 넣는다. 페이지는 brush 등록부에 자리를 먼저
-// 받고, 텍스처 생성·업로드는 Sync가 한다.
+// nanosvg로 래스터화해 1024×1024 RGBA atlas 페이지에 넣는다. 페이지는 렌더러 텍스처 id를 먼저
+// 받고(갱신 텍스처), 화소 업로드는 Upload가 한다.
 //
-// 프레임 순서(렌더 소유 스레드가 아니면 호출자가 직렬화한다 — 글리프 cache와 같다):
+// 프레임 순서(게임 lane — 글리프 cache와 같다, Docs/Design/UiToolkit 18.4절):
 //   atlas.Register(...) 또는 RegisterDirectory(...)   // 시작 때
 //   application.SetVectorImageResolver(&atlas);
-//   ... app.UpdatePaintCache(...)  — 벡터 brush가 Resolve를 부른다
-//   atlas.Sync(imagePipeline);                         // Draw 전(그 Draw의 기록 뒤 — 보관
-//   표면·끌기
-//                                                      // 미리보기처럼 따로 그리는 경로도 각자
-//                                                      부른다)
-//   DrawBatchRenderer::Draw(...);
+//   ... app.UpdatePaintCache(...), recorder.Record(...) — 벡터 brush가 Resolve를 부른다
+//   atlas.Upload();                                    // 그 프레임의 모든 기록 뒤, DrawWindows 전
+//   renderer.DrawWindows(buffer);
 //   atlas.AdvanceFrame();                              // 한도를 넘었으면 비우고 Revision을 올린다
 //
 // 화소는 nanosvg 결과 그대로인 straight alpha sRGB RGBA(투명 화소에 이웃 색을 번지게 한 것)이고
-// 텍스처 형식은 RGBA8UnormSrgb, 파이프라인은 image(straight alpha 섞기)다.
+// 텍스처 형식은 Rgba8Srgb, sampling은 Image(straight alpha 섞기)다.
 //
-// 수명: 장치·등록부·파이프라인이 이 객체보다 오래 살아야 한다.
+// 수명: renderer가 이 객체보다 오래 살아야 한다.
 namespace rocks::ui {
 
 // atlas 페이지 한 변(화소)이다(UE FSlateVectorGraphicsCache AtlasSize).
@@ -50,8 +47,7 @@ inline constexpr uint64 MaxVectorImageFileBytes = 1u << 20;
 
 class ROCKS_UIRENDER_API VectorImageAtlas final : public VectorImageResolver {
 public:
-    VectorImageAtlas(Allocator& allocator, graphics::Device& device,
-                     SlotArray<BrushTexture>& textures) noexcept;
+    VectorImageAtlas(Allocator& allocator, UiRenderer& renderer) noexcept;
     ~VectorImageAtlas() noexcept override;
 
     VectorImageAtlas(const VectorImageAtlas&) = delete;
@@ -79,11 +75,10 @@ public:
                                         uint32 height) noexcept override;
     uint64 Revision() const noexcept override;
 
-    // 새 페이지의 텍스처를 만들고 바뀐 페이지를 올린다. 파이프라인이 비었으면 InvalidArgument,
-    // 생성·업로드 실패는 그 오류다.
-    Result<void> Sync(graphics::PipelineHandle imagePipeline) noexcept;
+    // 바뀐 페이지의 화소를 올린다. 업로드 실패는 그 오류다.
+    Result<void> Upload() noexcept;
 
-    // 프레임을 마친다(그 프레임의 모든 Draw 뒤). atlas 페이지가 MaxVectorAtlasPages를, 단독
+    // 프레임을 마친다(그 프레임의 DrawWindows 뒤). atlas 페이지가 MaxVectorAtlasPages를, 단독
     // 텍스처가 MaxVectorStandaloneImages를 넘었으면 모두 놓고 Revision을 올린다(다음 프레임의
     // 그리기 목록이 다시 만들어진다). 비웠으면 true다.
     bool AdvanceFrame() noexcept;
@@ -99,8 +94,7 @@ private:
 
     void ReleasePages() noexcept;
 
-    graphics::Device& device_;
-    SlotArray<BrushTexture>& textures_;
+    UiRenderer& renderer_;
     UniquePtr<State> state_;
 };
 

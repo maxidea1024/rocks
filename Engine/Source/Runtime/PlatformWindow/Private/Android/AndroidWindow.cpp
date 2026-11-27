@@ -1504,6 +1504,10 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
         UniquePtr<GamepadBackend>(Move(created.Value())));
 }
 
+// Android에는 다른 스레드가 보낸 창 메시지가 없다(입력은 looper가 PumpEvents에서 받는다).
+void PumpSentMessages() noexcept {
+}
+
 DesktopSessionState QueryDesktopSessionState() noexcept {
     return DesktopSessionState::Unknown;
 }

@@ -43,7 +43,7 @@ TEST(UiWidget_ViewportsOwnIndependentWorldsAndRetainCameraAcrossRebuilds) {
     CHECK(!view.SetCamera({}, Quat::Identity(), 180));
     auto built = view.TakeElement(objects);
     REQUIRE(built);
-    auto source = static_cast<Viewport&>(*built.Value()).SceneSource();
+    auto source = static_cast<Viewport&>(*built.Value()).GetViewportSource();
     REQUIRE(source);
     auto* preview = static_cast<ViewportWorld*>(source.Get());
     auto camera = preview->Camera(120, 60);
@@ -58,7 +58,7 @@ TEST(UiWidget_ViewportsOwnIndependentWorldsAndRetainCameraAcrossRebuilds) {
     view.ReleaseElements();
     auto rebuilt = view.TakeElement(objects);
     REQUIRE(rebuilt);
-    CHECK(static_cast<Viewport&>(*rebuilt.Value()).SceneSource() == source);
+    CHECK(static_cast<Viewport&>(*rebuilt.Value()).GetViewportSource() == source);
 }
 
 } // namespace rocks::ui

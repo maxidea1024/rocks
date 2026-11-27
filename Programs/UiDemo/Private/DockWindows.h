@@ -4,14 +4,14 @@
 #include <UiFramework/Docking/DockManager.h>
 #include <UiFramework/Application/InputAdapter.h>
 #include <UiFramework/Window/WindowChrome.h>
+#include <UiCore/DrawBatch.h>
+#include <UiCore/Rendering/SurfaceRecorder.h>
 #include <UiRender/VectorImageAtlas.h>
-#include <UiRender/WidgetSurfaceHost.h>
-#include <UiRender/DrawBatchRenderer.h>
-#include <UiRender/DrawBatchBuffers.h>
 
 namespace rocks::ui {
 
-// 창마다 입력·배치·스왑 체인을 소유한다. 글꼴과 브러시 등 장치 자원은 창 사이에서 공유한다.
+// 창마다 입력·배치·창 표면을 소유한다. 글꼴과 브러시 등 렌더러 자원은 창 사이에서 공유한다.
+// 그리기는 UiRenderer(RenderLane 위 LaneUiRenderer)로 넘긴다(Docs/Design/UiToolkit 18.5절).
 class DockWindows {
 public:
     // 글자 레이블을 font로 shaping해 만든다(직접 그린 창 테두리의 제목과 창 버튼 툴팁).
@@ -19,12 +19,10 @@ public:
     // 주 창 제목 막대 왼쪽에 둘 주 메뉴를 만든다(그 창의 Application과 창 — UiToolkit 9.1절 UW7c).
     using MainMenuFactory = Delegate<Result<SharedPtr<Element>>(Application&, platform::Window&)>;
 
-    // icons는 SVG brush를 래스터화할 atlas이고 imagePipeline으로 페이지를
-    // 올린다(Docs/Design/UiToolkit 17.2절). 창들보다 오래 살아야 한다.
-    DockWindows(Allocator& allocator, graphics::Device& device, graphics::PipelineHandle pipeline,
-                SlotArray<BrushTexture>& textures, const SharedPtr<CommandList>& commands,
-                VectorImageAtlas& icons, graphics::PipelineHandle imagePipeline,
-                TitleFactory&& makeTitle) noexcept;
+    // icons는 SVG brush를 래스터화할 atlas다(Docs/Design/UiToolkit 17.2절). renderer와 icons는
+    // 창들보다 오래 살아야 한다.
+    DockWindows(Allocator& allocator, UiRenderer& renderer, const SharedPtr<CommandList>& commands,
+                VectorImageAtlas& icons, TitleFactory&& makeTitle) noexcept;
     // title은 직접 그린 창 테두리(WindowFrame::Custom)의 제목이다.
     // makeMenu는 주 창의 주 메뉴다(비우면 메뉴 없이).
     Result<void> Run(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
@@ -32,10 +30,10 @@ public:
 
 private:
     struct Surface {
-        Surface(Allocator& allocator, graphics::Device& device, UniquePtr<platform::Window> window,
-                const SharedPtr<DockManager>& area, SlotArray<BrushTexture>& textures) noexcept;
+        Surface(Allocator& allocator, UiRenderer& renderer, UniquePtr<platform::Window> window,
+                const SharedPtr<DockManager>& area) noexcept;
         ~Surface() noexcept;
-        graphics::Device& device;
+        UiRenderer& renderer;
         UniquePtr<platform::Window> window;
         SharedPtr<DockManager> area;
         // 직접 그린 창 테두리다(창이 WindowFrame::Custom일 때만 — 루트가 된다).
@@ -45,10 +43,9 @@ private:
         input::InputQueue queue;
         Array<uint8> consumed;
         DrawBatch batch;
-        DrawBatchBuffers buffers;
-        WidgetSurfaceHost surfaces;
+        SurfaceRecorder surfaces;
         uint64 frameNumber = 0;
-        graphics::SwapChainHandle chain{};
+        UiWindowSurfaceId surface{};
         UniquePtr<platform::DragImage> dragImage;
         uint64 previewGesture = 0;
         IntVec2 previewPosition{};
@@ -63,20 +60,20 @@ private:
     // OS 테두리 주 창의 내용 위 줄에 주 메뉴를 둔다.
     Result<void> AttachMenuRow(Surface& host) noexcept;
     Result<void> AttachChrome(Surface& surface, StringView title, bool main) noexcept;
-    Result<bool> Update(Surface& surface) noexcept;
-    // 펌프 없이 크기 반영·배치·그리기·present를 한다. 크기 조절 콜백(UiToolkit 9.1절 UW7a)도 쓴다.
-    Result<bool> Render(Surface& surface, bool refreshCursor) noexcept;
+    Result<bool> Update(Surface& surface, UiDrawBuffer& buffer) noexcept;
+    // 펌프 없이 크기 반영·배치·표면 기록을 하고, 다시 그려야 하면 창 대상을 buffer에 쌓는다(true).
+    // 크기 조절 콜백(UiToolkit 9.1절 UW7a)도 쓴다.
+    Result<bool> Render(Surface& surface, bool refreshCursor, UiDrawBuffer& buffer) noexcept;
+    // buffer에 쌓인 대상을 한 번에 제출하고 비운다(atlas 업로드는 그 앞, 프레임 진행은 그 뒤).
+    Result<void> DrawFrame(UiDrawBuffer& buffer) noexcept;
     Result<void> UpdateDragImage(Surface& surface) noexcept;
     Result<void> ReturnTabs(Surface& surface) noexcept;
     SharedPtr<DockManager> FindArea(Surface& source, Vec2 point, Vec2& clientPoint) noexcept;
     Result<void> FloatTab(Surface& source, StringView id, Vec2 point) noexcept;
     Allocator& allocator_;
-    graphics::Device& device_;
-    graphics::PipelineHandle pipeline_;
-    SlotArray<BrushTexture>& textures_;
+    UiRenderer& renderer_;
     SharedPtr<CommandList> commands_;
     VectorImageAtlas& icons_;
-    graphics::PipelineHandle imagePipeline_;
     TitleFactory makeTitle_;
     MainMenuFactory makeMenu_;
     SlotArray<UniquePtr<Surface>> windows_;

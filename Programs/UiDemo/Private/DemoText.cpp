@@ -94,11 +94,8 @@ usize ClusterOf(Span<const usize> ends, usize offset) noexcept {
 
 } // namespace
 
-DemoText::DemoText(Allocator& allocator, graphics::Device& device,
-                   SlotArray<BrushTexture>& textures, graphics::PipelineHandle maskPipeline,
-                   graphics::PipelineHandle imagePipeline) noexcept
-    : allocator_(allocator), textures_(allocator, device, textures), maskPipeline_(maskPipeline),
-      imagePipeline_(imagePipeline), icuData_(allocator) {
+DemoText::DemoText(Allocator& allocator, UiRenderer& renderer) noexcept
+    : allocator_(allocator), textures_(allocator, renderer), icuData_(allocator) {
 }
 
 DemoText::~DemoText() noexcept {
@@ -358,7 +355,7 @@ Result<void> DemoText::Shape(TextLabel& label, StringView value, float size, Str
     }
 
     // 새 글리프가 든 cache 텍스처를 GPU에 맞춘 뒤 브러시 handle을 채운다.
-    if (auto synced = textures_.Sync(*cache_, maskPipeline_, imagePipeline_); !synced) {
+    if (auto synced = textures_.Upload(*cache_); !synced) {
         return synced;
     }
 

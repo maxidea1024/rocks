@@ -1,7 +1,13 @@
 #pragma once
 
+#include <Core/Memory/SharedPtr.h>
 #include <UiCore/PaintList.h>
-#include <UiCore/WidgetSurfaceScene.h>
+
+namespace rocks::ui {
+
+class ViewportSource;
+
+} // namespace rocks::ui
 
 namespace rocks::ui {
 
@@ -22,9 +28,9 @@ public:
     virtual SlotHandle ManagedSurface() const noexcept = 0;
     virtual void SetManagedSurface(SlotHandle texture) noexcept = 0;
 
-    // 하위 트리 표면은 주기에 따라 갱신한다. 장면 표면은 렌더 호스트의 장면 콜백에서 채운다.
-    // 자체 장면이 있으면 호스트가 할당한 대상에 카메라 시점을 그린다.
-    virtual SharedPtr<WidgetSurfaceScene> SceneSource() const noexcept;
+    // 장면 표면(viewport)에 장면을 대는 source다(Docs/Design/UiToolkit 18.3절). 없으면 외부 장면
+    // 텍스처를 쓰거나 그리지 않는다.
+    virtual SharedPtr<ViewportSource> GetViewportSource() const noexcept;
     // 같은 패스의 같은 채널은 한 표면을 공유한다. 비트 i는 i번 후처리 버퍼의 요청이다.
     virtual uint32 RequestedPostBuffers() const noexcept;
     virtual SlotHandle GetPostBuffer(uint32 channel) const noexcept;

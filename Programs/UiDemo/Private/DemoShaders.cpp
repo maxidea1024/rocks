@@ -21,8 +21,6 @@ render::EngineShaderHost& Host() noexcept {
     return host;
 }
 
-render::ShaderSet* active = nullptr;
-
 } // namespace
 
 DemoShaderHost::DemoShaderHost(ModuleLoader& modules) noexcept : modules_(modules) {
@@ -57,29 +55,13 @@ DemoShaderHost::~DemoShaderHost() noexcept {
     }
 }
 
-DemoShaderSet::DemoShaderSet(Allocator& allocator, graphics::Device& device) noexcept
-    : device_(device), resources_(allocator), previous_(active) {
-    if (resources_.Open(device, Host()) && resources_.Shaders() != nullptr) {
-        active = resources_.Shaders();
-        ready_ = true;
-    }
-}
-
-DemoShaderSet::~DemoShaderSet() noexcept {
-    if (ready_) {
-        active = previous_;
+Result<void> OpenDemoShaders(render::EngineRenderResources& resources,
+                             graphics::Device& device) noexcept {
+    if (!resources.Open(device, Host()) || resources.Shaders() == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    resources_.Retire(device_);
-}
-
-StringView DemoShaderSet::Problem() const noexcept {
-    return resources_.Problem();
-}
-
-render::ShaderSet& ActiveShaders() noexcept {
-    ROCKS_ASSERT(active != nullptr);
-    return *active;
+    return Result<void>::Success();
 }
 
 } // namespace rocks::ui

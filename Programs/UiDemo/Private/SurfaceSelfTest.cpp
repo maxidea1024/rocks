@@ -1,19 +1,57 @@
-#include "DemoShaders.h"
+#include "DemoCapture.h"
+#include "SceneBoxes.h"
 #include "SurfaceSelfTest.h"
+
 #include <Core/ScopeExit.h>
+#include <UiCore/Rendering/SurfaceRecorder.h>
+#include <UiCore/Rendering/ViewportSource.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Effects/BackgroundBlur.h>
-#include <UiFramework/Layout/Overlay.h>
 #include <UiFramework/Effects/PostBufferUpdate.h>
 #include <UiFramework/Effects/RetainerBox.h>
 #include <UiFramework/Effects/Viewport.h>
-#include <UiRender/DrawBatchBuffers.h>
-#include <UiRender/WidgetSurfaceHost.h>
+#include <UiFramework/Layout/Overlay.h>
 
 namespace rocks::ui {
 
-int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
-                         graphics::PipelineHandle solid) noexcept {
+namespace {
+
+// 캡처 대상의 바탕색이다(이전 직접 읽기 경로와 같은 색).
+constexpr LinearColor CaptureClear{0.025f, 0.03f, 0.04f, 1};
+
+// 왼쪽 8×8에 초록 상자를 그리고 나머지는 바탕(첫 프레임 빨강, 그 뒤 파랑)인 장면이다.
+class SplitScene final : public ViewportSource {
+public:
+    explicit SplitScene(Allocator& allocator) noexcept : allocator_(allocator) {
+    }
+
+    Result<void> Advance(uint64) noexcept override {
+        return Result<void>::Success();
+    }
+
+    LinearColor Background() const noexcept override {
+        return blue ? LinearColor{0, 0, 1, 1} : LinearColor{1, 0, 0, 1};
+    }
+
+    Result<void> Extract(UiSceneExtract& extract, const ViewportTarget&) noexcept override {
+        PaintList list(allocator_);
+        if (auto added = list.TryAddBox({Geometry::Root({8, 8}, {}), {0, 1, 0, 1}, 0}); !added) {
+            return added;
+        }
+
+        return PostSceneBoxes(extract, allocator_, list);
+    }
+
+    bool blue = false;
+
+private:
+    Allocator& allocator_;
+};
+
+} // namespace
+
+int VerifyWidgetSurfaces(Allocator& allocator, LaneUiRenderer& renderer,
+                         render::RenderLane& lane) noexcept {
     constexpr uint32 width = 16;
     constexpr uint32 height = 8;
     const auto bounds = Geometry::Root({width, height}, {});
@@ -22,7 +60,8 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
     auto viewport = SharedPtr<Viewport>::TryMake(allocator, allocator);
     auto blur = SharedPtr<BackgroundBlur>::TryMake(allocator, allocator);
     auto capture = SharedPtr<PostBufferUpdate>::TryMake(allocator, allocator);
-    if (!root || !retainer || !viewport || !blur || !capture ||
+    auto scene = SharedPtr<SplitScene>::TryMake(allocator, allocator);
+    if (!root || !retainer || !viewport || !blur || !capture || !scene ||
         !root.Value()->TryAddChild(retainer.Value()) ||
         !retainer.Value()->TryAddChild(viewport.Value()) ||
         !root.Value()->TryAddChild(blur.Value()) || !root.Value()->TryAddChild(capture.Value()) ||
@@ -30,65 +69,45 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         return 61;
     }
 
+    viewport.Value()->SetSceneSource(scene.Value());
     Application app(allocator);
     app.SetRoot(root.Value());
     if (!app.PrepareLayout(bounds, 1)) {
         return 62;
     }
 
-    SlotArray<BrushTexture> textures(allocator);
-    WidgetSurfaceHost host(allocator, device, ActiveShaders(), textures);
-    bool blue = false;
-    host.SetScenePainter(WidgetSurfaceHost::ScenePainter::CreateLambda(
-        [&](Element&, graphics::Device& gpu, graphics::TextureHandle target, uint32,
-            uint32) noexcept -> Result<void> {
-            PaintList list(allocator);
-            auto added = list.TryAddBox({Geometry::Root({8, 8}, {}), {0, 1, 0, 1}, 0});
-            DrawBatch batch(allocator);
-            if (!added) {
-                return added;
-            }
-
-            auto built = batch.Build(list);
-            if (!built) {
-                return built;
-            }
-
-            auto frame = gpu.BeginOffscreen(target, blue ? graphics::ClearColor{0, 0, 1, 1}
-                                                         : graphics::ClearColor{1, 0, 0, 1});
-            if (!frame) {
-                return Result<void>::Failure(frame.Error());
-            }
-
-            auto drawn = DrawBatchRenderer::Draw(gpu, ActiveShaders(), *frame.Value(), solid, batch,
-                                                 {width, height});
-            auto ended = gpu.EndFrame();
-            if (!drawn) {
-                return drawn;
-            }
-
-            return ended ? Result<void>::Success() : Result<void>::Failure(ended.Error());
-        }));
-    Array<uint8> pixels(allocator);
-    Array<uint8> copy(allocator);
-    if (!copy.TryResize(width * height * 4)) {
+    auto screen = renderer.CreateRenderTarget(width, height, UiTextureSampling::Image);
+    if (!screen) {
         return 63;
     }
 
-    for (uint32 frame = 0; frame < 3; ++frame) {
-        blue = frame > 0;
-        auto prepared = host.Prepare(root.Value(), frame, width, height, solid);
+    ROCKS_ON_SCOPE_EXIT {
+        renderer.ReleaseTexture(screen.Value());
+    };
+    SurfaceRecorder recorder(allocator, renderer);
+    UiDrawBuffer buffer(allocator);
+    DrawBatch batch(allocator);
+    Array<uint8> pixels(allocator);
+    Array<uint8> copy(allocator);
+    // 표면 pass를 쌓고 창 내용을 캡처 대상에 그려 읽는다(Docs/Design/UiToolkit 18.5절).
+    auto render = [&](uint64 frame) noexcept -> bool {
+        auto recorded = recorder.Record(root.Value(), frame, width, height, buffer);
         auto cached = app.UpdateArrangedPaintCache();
-        DrawBatch batch(allocator);
-        DrawBatchBuffers buffers(device, ActiveShaders(), batch);
-        if (!prepared || !cached || !batch.Update(*cached.Value()) || !buffers.Upload() ||
-            !DrawBatchRenderer::ReadPixels(device, solid, buffers, textures, width, height,
-                                           pixels)) {
+        return recorded && cached && batch.Update(*cached.Value()) &&
+               DrawAndCapture(renderer, buffer, screen.Value(), width, height, CaptureClear, batch,
+                              pixels);
+    };
+    const auto read = [&](UiTextureId texture) noexcept {
+        return !texture.IsNull() && CaptureTarget(renderer, texture, copy).IsOk();
+    };
+    for (uint32 frame = 0; frame < 3; ++frame) {
+        scene.Value()->blue = frame > 0;
+        if (!render(frame)) {
             return 64;
         }
 
-        const auto* target = textures.Find(capture.Value()->ManagedSurface());
-        if (!target || !device.ReadPixels(target->texture, copy.View())) {
+        // 그리기 순서 끝의 화면 복사(PostBufferUpdate)는 창 결과와 같다.
+        if (!read(capture.Value()->ManagedSurface())) {
             return 65;
         }
 
@@ -111,17 +130,8 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         }
     }
 
-    auto render = [&](uint32 frame) noexcept -> bool {
-        auto prepared = host.Prepare(root.Value(), frame, width, height, solid);
-        auto cached = app.UpdateArrangedPaintCache();
-        DrawBatch batch(allocator);
-        DrawBatchBuffers buffers(device, ActiveShaders(), batch);
-        return prepared && cached && batch.Update(*cached.Value()) && buffers.Upload() &&
-               DrawBatchRenderer::ReadPixels(device, solid, buffers, textures, width, height,
-                                             pixels);
-    };
     // 경계(4행 7열) 픽셀의 R 위치다. 흐림은 오른쪽의 파랑을 섞으므로 흐림 검사는 파랑 채널(+2)을
-    // 본다 (효과 재질이 없어 채널을 바꾸지 않는다 — 효과 재질은 머티리얼 셰이더가 생기면 다시
+    // 본다(효과 재질이 없어 채널을 바꾸지 않는다 — 효과 재질은 머티리얼 셰이더가 생기면 다시
     // 검사한다, UiToolkit 9.1절 UW1a).
     const uint32 edge = (4 * width + 7) * 4;
     constexpr uint32 blueChannel = 2;
@@ -166,34 +176,21 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         return 76;
     }
 
-    graphics::TextureDesc desc;
-    desc.width = width;
-    desc.height = height;
-    desc.usage = graphics::TextureUsage::RenderTarget;
-    auto processed = device.CreateTexture(desc, {});
+    auto processed = renderer.CreateRenderTarget(width, height, UiTextureSampling::Image);
     if (!processed) {
         return 77;
     }
 
     ROCKS_ON_SCOPE_EXIT {
-        device.Retire(processed.Value());
+        renderer.ReleaseTexture(processed.Value());
     };
-    auto slot = textures.TryAdd({processed.Value(), {}});
-    if (!slot) {
-        return 78;
-    }
-
-    ROCKS_ON_SCOPE_EXIT {
-        (void)textures.TryRemove(slot.Value());
-    };
-    const PostBufferUpdateInfo targets[] = {{slot.Value(), 4}, {{}, 0}};
+    const PostBufferUpdateInfo targets[] = {{processed.Value(), 4}, {{}, 0}};
     if (!capture.Value()->SetUpdates(targets) || !render(9) || pixels[edgeBlue] > 5 ||
-        !device.ReadPixels(processed.Value(), copy.View()) || copy[edgeBlue] < 10) {
+        !read(processed.Value()) || copy[edgeBlue] < 10) {
         return 79;
     }
 
-    auto* plain = textures.Find(capture.Value()->ManagedSurface());
-    if (!plain || !device.ReadPixels(plain->texture, copy.View())) {
+    if (!read(capture.Value()->ManagedSurface())) {
         return 80;
     }
 
@@ -209,17 +206,14 @@ int VerifyWidgetSurfaces(Allocator& allocator, graphics::Device& device,
         return 82;
     }
 
-    auto* filteredChannel = textures.Find(host.GetPostBuffer(1));
-    auto* plainChannel = textures.Find(host.GetPostBuffer(2));
-    if (!filteredChannel || !plainChannel ||
-        host.GetPostBuffer(1) != capture.Value()->GetPostBuffer(1) ||
-        !device.ReadPixels(filteredChannel->texture, copy.View()) || copy[edgeBlue] < 10 ||
-        !device.ReadPixels(plainChannel->texture, copy.View()) || copy[edgeBlue] > 5) {
+    if (recorder.GetPostBuffer(1) != capture.Value()->GetPostBuffer(1) ||
+        !read(recorder.GetPostBuffer(1)) || copy[edgeBlue] < 10 ||
+        !read(recorder.GetPostBuffer(2)) || copy[edgeBlue] > 5) {
         return 83;
     }
 
-    const int viewportCheck = VerifyViewportWorld(allocator, device, solid);
-    return viewportCheck ? viewportCheck : VerifyWorldWidgetPlane(allocator, device);
+    const int viewportCheck = VerifyViewportWorld(allocator, renderer);
+    return viewportCheck ? viewportCheck : VerifyWorldWidgetPlane(allocator, renderer, lane);
 }
 
 } // namespace rocks::ui

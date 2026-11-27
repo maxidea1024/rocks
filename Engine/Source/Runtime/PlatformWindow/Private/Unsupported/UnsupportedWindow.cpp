@@ -31,6 +31,9 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator&) noexcept {
     return Result<UniquePtr<GamepadBackend>>::Failure(ErrorCode::Unsupported);
 }
 
+void PumpSentMessages() noexcept {
+}
+
 DesktopSessionState QueryDesktopSessionState() noexcept {
     return DesktopSessionState::Unknown;
 }

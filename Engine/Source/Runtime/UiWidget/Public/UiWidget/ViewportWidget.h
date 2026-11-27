@@ -17,8 +17,8 @@ public:
     Result<SharedPtr<ViewportWorld>> AcquireViewportWorld(ObjectRegistry& objects) noexcept;
     Result<World*> GetViewportWorld(ObjectRegistry& objects) noexcept;
     Result<ObjectHandle> Spawn(ObjectRegistry& objects, TypeId actorType) noexcept;
-    Result<void> SetSceneRenderer(ObjectRegistry& objects, ViewportWorld::Renderer renderer,
-                                  bool depth = false) noexcept;
+    Result<void> SetSceneRenderer(ObjectRegistry& objects,
+                                  ViewportWorld::Renderer renderer) noexcept;
     Result<void> SetCamera(Vec3 location, Quat rotation, float fieldOfView) noexcept;
     Vec3 ViewLocation() const noexcept;
     Quat ViewRotation() const noexcept;

@@ -1,40 +1,45 @@
 #include <UiRender/GlyphCacheTextures.h>
 
-// 글리프 cache 텍스처의 GPU 쪽이다(Docs/Design/UiToolkit 9.1절 UW2).
+// 글리프 cache 텍스처의 렌더러 쪽이다(Docs/Design/UiToolkit 9.1절 UW2·18.4절).
 namespace rocks::ui {
 
 namespace {
 
-graphics::PixelFormat FormatOf(text::FontAtlasContent content) noexcept {
-    switch (content) {
+UiTextureDesc DescOf(const text::FontTextureInfo& texture) noexcept {
+    UiTextureDesc desc;
+    desc.width = texture.width;
+    desc.height = texture.height;
+    desc.usage = UiTextureUsage::Dynamic;
+    switch (texture.content) {
     case text::FontAtlasContent::Color:
-        return graphics::PixelFormat::BGRA8UnormSrgb;
+        desc.format = UiTextureFormat::Bgra8Srgb;
+        desc.sampling = UiTextureSampling::Image;
+        break;
     case text::FontAtlasContent::DistanceField:
-        return graphics::PixelFormat::RGBA8Unorm;
+        desc.format = UiTextureFormat::Rgba8;
+        desc.sampling = UiTextureSampling::Image;
+        break;
     case text::FontAtlasContent::Alpha:
     default:
-        return graphics::PixelFormat::R8Unorm;
+        desc.format = UiTextureFormat::R8;
+        desc.sampling = UiTextureSampling::Mask;
+        break;
     }
+
+    return desc;
 }
 
 } // namespace
 
-GlyphCacheTextures::GlyphCacheTextures(Allocator& allocator, graphics::Device& device,
-                                       SlotArray<BrushTexture>& textures) noexcept
-    : device_(device), textures_(textures), entries_(allocator) {
+GlyphCacheTextures::GlyphCacheTextures(Allocator& allocator, UiRenderer& renderer) noexcept
+    : renderer_(renderer), textures_(allocator) {
 }
 
 GlyphCacheTextures::~GlyphCacheTextures() noexcept {
     Reset();
 }
 
-Result<void> GlyphCacheTextures::Sync(text::GlyphCache& cache,
-                                      graphics::PipelineHandle maskPipeline,
-                                      graphics::PipelineHandle imagePipeline) noexcept {
-    if (maskPipeline.IsNull() || imagePipeline.IsNull()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
+Result<void> GlyphCacheTextures::Upload(text::GlyphCache& cache) noexcept {
     const uint32 count = cache.TextureCount();
     for (uint32 index = 0; index < count; ++index) {
         auto info = cache.Texture(index);
@@ -45,10 +50,9 @@ Result<void> GlyphCacheTextures::Sync(text::GlyphCache& cache,
         const text::FontTextureInfo& texture = info.Value();
         text::AtlasRect dirty;
         const bool changed = cache.TakeDirtyRegion(index, dirty);
-        if (index < entries_.Size()) {
+        if (index < textures_.Size()) {
             if (changed) {
-                if (auto updated =
-                        device_.UpdateTexture(entries_[index].texture, 0, texture.pixels);
+                if (auto updated = renderer_.UpdateTexture(textures_[index], texture.pixels);
                     !updated) {
                     return updated;
                 }
@@ -58,27 +62,13 @@ Result<void> GlyphCacheTextures::Sync(text::GlyphCache& cache,
         }
 
         // 새 텍스처는 cache의 현재 화소를 초기 내용으로 만든다(바뀐 사각형 기록은 위에서 비웠다).
-        graphics::TextureDesc desc;
-        desc.width = texture.width;
-        desc.height = texture.height;
-        desc.format = FormatOf(texture.content);
-        desc.usage = graphics::TextureUsage::Sampled;
-        auto created = device_.CreateTexture(desc, texture.pixels);
+        auto created = renderer_.CreateTexture(DescOf(texture), texture.pixels);
         if (!created) {
             return Result<void>::Failure(created.Error());
         }
 
-        const graphics::PipelineHandle pipeline =
-            texture.content == text::FontAtlasContent::Alpha ? maskPipeline : imagePipeline;
-        auto slot = textures_.TryAdd({created.Value(), pipeline});
-        if (!slot) {
-            device_.Retire(created.Value());
-            return Result<void>::Failure(slot.Error());
-        }
-
-        if (auto added = entries_.TryPushBack({created.Value(), slot.Value()}); !added) {
-            (void)textures_.TryRemove(slot.Value());
-            device_.Retire(created.Value());
+        if (auto added = textures_.TryPushBack(created.Value()); !added) {
+            renderer_.ReleaseTexture(created.Value());
             return added;
         }
     }
@@ -87,16 +77,15 @@ Result<void> GlyphCacheTextures::Sync(text::GlyphCache& cache,
 }
 
 void GlyphCacheTextures::Reset() noexcept {
-    for (const Entry& entry : entries_) {
-        (void)textures_.TryRemove(entry.slot);
-        device_.Retire(entry.texture);
+    for (UiTextureId texture : textures_) {
+        renderer_.ReleaseTexture(texture);
     }
 
-    entries_.Clear();
+    textures_.Clear();
 }
 
-SlotHandle GlyphCacheTextures::Resource(uint32 textureIndex) const noexcept {
-    return textureIndex < entries_.Size() ? entries_[textureIndex].slot : SlotHandle{};
+UiTextureId GlyphCacheTextures::Resource(uint32 textureIndex) const noexcept {
+    return textureIndex < textures_.Size() ? textures_[textureIndex] : UiTextureId{};
 }
 
 } // namespace rocks::ui

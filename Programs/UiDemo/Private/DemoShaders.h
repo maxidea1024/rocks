@@ -16,8 +16,7 @@
 //
 // 사용 예:
 //   DemoShaderHost host(context.Modules());       // 프로세스 앞부분에서 한 번
-//   DemoShaderSet shaders(allocator, device);      // 이 수명 동안 ActiveShaders()가 이 집합이다
-//   auto solid = DrawBatchRenderer::CreateSolidPipeline(device, ActiveShaders(), format);
+//   OpenDemoShaders(resources, device);            // 렌더 lane에서 장치마다
 namespace rocks::ui {
 
 class DemoShaderHost {
@@ -40,30 +39,10 @@ private:
     bool frozen_ = false;
 };
 
-class DemoShaderSet {
-public:
-    DemoShaderSet(Allocator& allocator, graphics::Device& device) noexcept;
-    ~DemoShaderSet() noexcept;
-
-    DemoShaderSet(const DemoShaderSet&) = delete;
-    DemoShaderSet& operator=(const DemoShaderSet&) = delete;
-
-    bool IsReady() const noexcept {
-        return ready_;
-    }
-
-    // 열지 못한 이유다(EngineRenderResources 진단).
-    StringView Problem() const noexcept;
-
-private:
-    graphics::Device& device_;
-    render::EngineRenderResources resources_;
-    render::ShaderSet* previous_ = nullptr;
-    bool ready_ = false;
-};
-
-// 지금 열린 데모 셰이더 집합이다(가장 안쪽 DemoShaderSet). 데모는 집합을 연 뒤에만 그린다 — 열린
-// 집합 없이 부르면 호출 계약 위반(assert)이다.
-render::ShaderSet& ActiveShaders() noexcept;
+// 장치의 엔진 셰이더 집합(UI 셰이더 포함)을 resources로 연다. 렌더 lane 처리기가 OnLaneStart에서
+// 부른다(장치 소유 스레드). 실패: 호스트가 Freeze 전이거나 집합을 열지 못하면 NotReady(원인은
+// resources.Problem()).
+Result<void> OpenDemoShaders(render::EngineRenderResources& resources,
+                             graphics::Device& device) noexcept;
 
 } // namespace rocks::ui

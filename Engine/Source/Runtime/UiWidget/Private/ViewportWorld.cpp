@@ -57,13 +57,8 @@ World* ViewportWorld::GetWorld() const noexcept {
     return world_.Get();
 }
 
-void ViewportWorld::SetRenderer(Renderer renderer, bool depth) noexcept {
-    depth_ = depth;
+void ViewportWorld::SetRenderer(Renderer renderer) noexcept {
     render_ = Move(renderer);
-}
-
-bool ViewportWorld::UsesDepth() const noexcept {
-    return render_.IsBound() && depth_;
 }
 
 Result<void> ViewportWorld::SetCamera(Vec3 location, Quat rotation, float fieldOfView) noexcept {
@@ -140,8 +135,8 @@ LinearColor ViewportWorld::Background() const noexcept {
     return background_;
 }
 
-Result<void> ViewportWorld::Draw(graphics::Device& device, graphics::CommandContext& commands,
-                                 uint32 width, uint32 height) noexcept {
+Result<void> ViewportWorld::Extract(UiSceneExtract& extract,
+                                    const ViewportTarget& target) noexcept {
     if (!world_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -150,12 +145,12 @@ Result<void> ViewportWorld::Draw(graphics::Device& device, graphics::CommandCont
         return Result<void>::Success();
     }
 
-    auto camera = Camera(width, height);
+    auto camera = Camera(target.width, target.height);
     if (!camera) {
         return Result<void>::Failure(camera.Error());
     }
 
-    return render_.Execute(*world_, camera.Value(), device, commands);
+    return render_.Execute(*world_, camera.Value(), extract);
 }
 
 } // namespace rocks::ui

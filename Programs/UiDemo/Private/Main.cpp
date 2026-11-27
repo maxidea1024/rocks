@@ -1,3 +1,4 @@
+#include "DemoLane.h"
 #include "DemoLog.h"
 #include "DemoFiles.h"
 #include "DemoShaders.h"
@@ -16,6 +17,7 @@
 #include <Core/ScopeExit.h>
 #include <D3D11Graphics/D3D11Device.h>
 #include <Launch/EntryPoint.h>
+#include <UiRender/LaneUiRenderer.h>
 #include <UiRender/VectorImageAtlas.h>
 
 namespace {
@@ -37,6 +39,8 @@ constexpr usize LayoutFileLimit = 1024 * 1024;
 constexpr StringView TabArgument = "--tab=";
 // 화면 캡처 높이다(긴 탭의 아래쪽까지 보려고 — 기본 GalleryHeight).
 constexpr StringView SnapshotHeightArgument = "--snapshot-height=";
+// 렌더 lane 작업을 게임 스레드에서 돌린다(RenderLaneMode::Inline — Thread 모드 결과와 비교용).
+constexpr StringView InlineLaneArgument = "--lane=inline";
 constexpr uint32 MaxSnapshotHeight = 8192;
 
 int Run(launch::ApplicationContext& context) noexcept {
@@ -45,6 +49,7 @@ int Run(launch::ApplicationContext& context) noexcept {
     uint32 snapshotHeight = GalleryHeight;
     bool selfTest = false;
     bool surfaceTest = false;
+    bool inlineLane = false;
     StringView startTab;
     for (StringView argument : context.Arguments()) {
         if (argument == "--surface-test") {
@@ -63,6 +68,10 @@ int Run(launch::ApplicationContext& context) noexcept {
 
         if (argument == "--snapshot") {
             snapshot = true;
+        }
+
+        if (argument == InlineLaneArgument) {
+            inlineLane = true;
         }
 
         if (argument.StartsWith(SnapshotHeightArgument)) {
@@ -84,73 +93,60 @@ int Run(launch::ApplicationContext& context) noexcept {
         return 2;
     }
 
-    if (selfTest) {
-        const int checked = RunGameHudSelfTest(allocator);
-        if (checked != 0) {
-            return checked;
-        }
-    }
-
     auto created = graphics::CreateD3D11Device(
         allocator, {.preferSoftware = snapshot || selfTest || surfaceTest});
     if (!created) {
         return 1;
     }
 
-    auto& device = *created.Value();
-    // 장치의 UI 셰이더 집합이다(UiToolkit 9.1절 UW1a).
-    DemoShaderSet shaders(allocator, device);
-    if (!shaders.IsReady()) {
+    // 장치는 렌더 lane이 소유하고 UI는 LaneUiRenderer로만 그린다(Docs/Design/UiToolkit 18.5절).
+    // --lane=inline은 lane 작업을 이 스레드에서 돌린다(Thread 모드와 같은 결과인지 비교할 때).
+    DemoLaneProcessor processor(allocator);
+    render::RenderLane lane(allocator, *created.Value());
+    render::RenderLaneConfig laneConfig;
+    laneConfig.mode = inlineLane ? render::RenderLaneMode::Inline : render::RenderLaneMode::Thread;
+    laneConfig.processor = &processor;
+    laneConfig.pump = DemoLaneProcessor::Pump();
+    if (auto started = lane.Start(laneConfig); !started) {
+        Log::Error(LogUiDemo, "The render lane could not start: {Error}",
+                   ErrorCodeName(started.Error()));
         return 2;
     }
 
-    constexpr auto format = graphics::PixelFormat::RGBA8UnormSrgb;
-    auto solid = DrawBatchRenderer::CreateSolidPipeline(device, ActiveShaders(), format);
-    if (!solid) {
-        return 2;
-    }
-
+    // 렌더러 자원을 쓰는 객체(아래에서 만든다)가 모두 부서진 뒤, 장치보다 먼저 lane을 닫는다.
     ROCKS_ON_SCOPE_EXIT {
-        device.Retire(solid.Value());
+        if (auto shut = lane.Shutdown(); !shut) {
+            Log::Error(LogUiDemo, "The render lane did not shut down cleanly: {Error}",
+                       ErrorCodeName(shut.Error()));
+        }
     };
+    LaneUiRenderer renderer(allocator, lane, processor.Ui());
+    if (selfTest) {
+        if (const int checked = RunGameHudSelfTest(allocator, renderer); checked != 0) {
+            return checked;
+        }
+    }
+
     if (surfaceTest || selfTest) {
-        const int checked = VerifyWidgetSurfaces(allocator, device, solid.Value());
+        const int checked = VerifyWidgetSurfaces(allocator, renderer, lane);
         if (checked != 0 || surfaceTest) {
             return checked;
         }
     }
 
-    auto image = DrawBatchRenderer::CreateImagePipeline(device, ActiveShaders(), format);
-    if (!image) {
-        return 2;
-    }
-
-    ROCKS_ON_SCOPE_EXIT {
-        device.Retire(image.Value());
-    };
-    auto mask = DrawBatchRenderer::CreateMaskPipeline(device, ActiveShaders(), format);
-    if (!mask) {
-        return 2;
-    }
-
-    ROCKS_ON_SCOPE_EXIT {
-        device.Retire(mask.Value());
-    };
-
-    SlotArray<BrushTexture> textures(allocator);
-    DemoText font(allocator, device, textures, mask.Value(), image.Value());
+    DemoText font(allocator, renderer);
     if (!font.Initialize()) {
         return 4;
     }
 
     // 이미지·9분할·장면 견본용 절차 생성 텍스처다(UiToolkit 16.10절).
-    gallery::GalleryTextures sampleTextures(device, textures, image.Value());
+    gallery::GalleryTextures sampleTextures(renderer);
     if (!sampleTextures.Create(allocator)) {
         return 3;
     }
 
     // SVG 아이콘 atlas다(Docs/Design/UiToolkit 17장). 엔진 아이콘 폴더를 모두 등록한다.
-    VectorImageAtlas icons(allocator, device, textures);
+    VectorImageAtlas icons(allocator, renderer);
     if (auto registered = RegisterEngineIcons(icons); !registered) {
         Log::Error(LogUiDemo, "Engine icons could not be registered ({Error})", registered.Error());
         return 11;
@@ -172,8 +168,8 @@ int Run(launch::ApplicationContext& context) noexcept {
             gallery::GalleryWindow::WidgetsTab,  gallery::GalleryWindow::LayoutTab,
             gallery::GalleryWindow::BehaviorTab, gallery::GalleryWindow::EffectsTab,
             gallery::GalleryWindow::IconsTab};
-        return gallery::CaptureGallery(allocator, device, solid.Value(), textures, area.Value(),
-                                       icons, image.Value(), tabs, GalleryWidth, snapshotHeight)
+        return gallery::CaptureGallery(allocator, renderer, area.Value(), icons, tabs, GalleryWidth,
+                                       snapshotHeight)
                    ? 0
                    : 7;
     }
@@ -212,7 +208,7 @@ int Run(launch::ApplicationContext& context) noexcept {
 
     {
         DockWindows windows(
-            allocator, device, solid.Value(), textures, gallery.Commands(), icons, image.Value(),
+            allocator, renderer, gallery.Commands(), icons,
             DockWindows::TitleFactory::CreateLambda(
                 [&allocator, &font](StringView title, const FontStyle& style) noexcept
                     -> Result<SharedPtr<TextLabel>> {

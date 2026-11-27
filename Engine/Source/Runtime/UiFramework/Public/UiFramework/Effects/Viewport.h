@@ -28,15 +28,17 @@ public:
 
     explicit Viewport(Allocator& allocator) noexcept;
 
-    void SetSceneSource(SharedPtr<WidgetSurfaceScene> scene) noexcept;
-    SharedPtr<WidgetSurfaceScene> SceneSource() const noexcept override;
+    // 장면 source다(Docs/Design/UiToolkit 3.11·18.3절). 표면 기록기가 viewport 크기의 렌더 타깃을
+    // 만들고 source가 게시한 장면 pass로 채운다. 비우면 외부 장면 텍스처(scene)를 쓴다.
+    void SetSceneSource(SharedPtr<ViewportSource> scene) noexcept;
+    SharedPtr<ViewportSource> GetViewportSource() const noexcept override;
     void SetSceneTexture(SlotHandle texture) noexcept;
     Result<void> SetBackground(LinearColor color) noexcept;
 
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
 
 private:
-    SharedPtr<WidgetSurfaceScene> source_;
+    SharedPtr<ViewportSource> source_;
     SlotHandle managed_{};
     ElementAttribute<SlotHandle, InvalidateReason::Paint> scene_;
     ElementAttribute<LinearColor, InvalidateReason::Paint> background_;

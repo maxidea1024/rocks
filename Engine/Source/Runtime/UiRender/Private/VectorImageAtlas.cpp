@@ -87,8 +87,7 @@ struct VectorImageAtlas::State {
         Array<uint8> single;
         uint32 width = 0;
         uint32 height = 0;
-        SlotHandle slot{};
-        graphics::TextureHandle texture{};
+        UiTextureId slot{};
         bool dirty = true;
 
         bool IsStandalone() const noexcept {
@@ -120,9 +119,8 @@ struct VectorImageAtlas::State {
     uint64 rasterCount = 0;
 };
 
-VectorImageAtlas::VectorImageAtlas(Allocator& allocator, graphics::Device& device,
-                                   SlotArray<BrushTexture>& textures) noexcept
-    : device_(device), textures_(textures) {
+VectorImageAtlas::VectorImageAtlas(Allocator& allocator, UiRenderer& renderer) noexcept
+    : renderer_(renderer) {
     auto state = UniquePtr<State>::TryMake(allocator, allocator);
     if (state) {
         state_ = Move(state.Value());
@@ -405,16 +403,22 @@ Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32
 
     ++state.rasterCount;
 
-    // 자리는 지금 받고 텍스처는 Sync가 채운다(17.2절 프레임 순서).
+    // 텍스처 id는 지금 받고 화소는 Upload가 올린다(17.2절 프레임 순서).
     const auto addPage = [&](State::Page&& entry) noexcept -> Result<usize> {
-        auto registered = textures_.TryAdd({});
+        UiTextureDesc desc;
+        desc.width = entry.width;
+        desc.height = entry.height;
+        desc.format = UiTextureFormat::Rgba8Srgb;
+        desc.usage = UiTextureUsage::Dynamic;
+        desc.sampling = UiTextureSampling::Image;
+        auto registered = renderer_.CreateTexture(desc, {});
         if (!registered) {
             return Result<usize>::Failure(registered.Error());
         }
 
         entry.slot = registered.Value();
         if (auto pushed = state.pages.TryPushBack(Move(entry)); !pushed) {
-            (void)textures_.TryRemove(registered.Value());
+            renderer_.ReleaseTexture(registered.Value());
             return Result<usize>::Failure(pushed.Error());
         }
 
@@ -424,7 +428,7 @@ Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32
     const uint32 padded = 2 * text::FontAtlasPadding;
     if (width + padded > VectorAtlasPageSize || height + padded > VectorAtlasPageSize) {
         // 페이지에 들지 않는 그림은 정확한 크기의 단독 텍스처다(UE CreateNonAtlasedTexture).
-        State::Page entry{{}, Move(pixels), width, height, {}, {}, true};
+        State::Page entry{{}, Move(pixels), width, height, {}, true};
         auto added = addPage(Move(entry));
         if (!added) {
             return Result<ResolvedVectorImage>::Failure(added.Error());
@@ -471,7 +475,6 @@ Result<ResolvedVectorImage> VectorImageAtlas::Resolve(VectorImageKey key, uint32
                               VectorAtlasPageSize,
                               VectorAtlasPageSize,
                               {},
-                              {},
                               true};
             auto added = addPage(Move(entry));
             if (!added) {
@@ -503,11 +506,7 @@ uint64 VectorImageAtlas::Revision() const noexcept {
     return state_ ? state_->revision : 0;
 }
 
-Result<void> VectorImageAtlas::Sync(graphics::PipelineHandle imagePipeline) noexcept {
-    if (imagePipeline.IsNull()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
+Result<void> VectorImageAtlas::Upload() noexcept {
     if (!state_) {
         return Result<void>::Success();
     }
@@ -522,33 +521,10 @@ Result<void> VectorImageAtlas::Sync(graphics::PipelineHandle imagePipeline) noex
             (void)page.atlas->TakeDirtyRegion(region);
         }
 
-        if (!page.texture.IsNull()) {
-            if (auto updated = device_.UpdateTexture(page.texture, 0, page.Pixels()); !updated) {
-                return updated;
-            }
-
-            page.dirty = false;
-            continue;
+        if (auto updated = renderer_.UpdateTexture(page.slot, page.Pixels()); !updated) {
+            return updated;
         }
 
-        graphics::TextureDesc desc;
-        desc.width = page.width;
-        desc.height = page.height;
-        desc.format = graphics::PixelFormat::RGBA8UnormSrgb;
-        desc.usage = graphics::TextureUsage::Sampled;
-        auto created = device_.CreateTexture(desc, page.Pixels());
-        if (!created) {
-            return Result<void>::Failure(created.Error());
-        }
-
-        BrushTexture* entry = textures_.Find(page.slot);
-        if (entry == nullptr) {
-            device_.Retire(created.Value());
-            return Result<void>::Failure(ErrorCode::StaleHandle);
-        }
-
-        *entry = {created.Value(), imagePipeline};
-        page.texture = created.Value();
         page.dirty = false;
     }
 
@@ -604,10 +580,7 @@ void VectorImageAtlas::ReleasePages() noexcept {
     }
 
     for (State::Page& page : state_->pages) {
-        (void)textures_.TryRemove(page.slot);
-        if (!page.texture.IsNull()) {
-            device_.Retire(page.texture);
-        }
+        renderer_.ReleaseTexture(page.slot);
     }
 
     state_->pages.Clear();

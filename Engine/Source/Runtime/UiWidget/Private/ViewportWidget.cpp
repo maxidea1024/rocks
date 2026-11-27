@@ -71,14 +71,14 @@ Result<ObjectHandle> ViewportWidget::Spawn(ObjectRegistry&, TypeId actorType) no
     return lease->GetWorld()->SpawnActor(actorType);
 }
 
-Result<void> ViewportWidget::SetSceneRenderer(ObjectRegistry&, ViewportWorld::Renderer renderer,
-                                              bool depth) noexcept {
+Result<void> ViewportWidget::SetSceneRenderer(ObjectRegistry&,
+                                              ViewportWorld::Renderer renderer) noexcept {
     auto lease = world_.Lock();
     if (!lease) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    lease->SetRenderer(Move(renderer), depth);
+    lease->SetRenderer(Move(renderer));
     return Result<void>::Success();
 }
 

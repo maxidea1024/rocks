@@ -1,22 +1,20 @@
 #pragma once
 
-#include <Core/Containers/SlotArray.h>
-#include <UiRender/DrawBatchRenderer.h>
+#include <UiCore/Rendering/UiRenderer.h>
 
 // 갤러리 견본용 절차 생성 텍스처다(Docs/Design/UiToolkit 16.10절). 이미지·9분할 Box·Border brush,
 // 진행 막대 Mask, Viewport 장면처럼 텍스처가 있어야 보이는 견본에 쓴다. 에셋 파일 없이 시작할 때
-// 만들고 BrushTexture 표에 등록하며, 소멸할 때 장치에 반납한다.
+// 렌더러 텍스처로 만들고, 소멸할 때 돌려준다.
 //
 // 사용 예:
-//   GalleryTextures textures(device, brushTextures, imagePipeline);
+//   GalleryTextures textures(renderer);
 //   if (!textures.Create(allocator)) { ... }
 //   brush.resource = textures.Checker();
 namespace rocks::ui::gallery {
 
 class GalleryTextures {
 public:
-    GalleryTextures(graphics::Device& device, SlotArray<BrushTexture>& textures,
-                    graphics::PipelineHandle imagePipeline) noexcept;
+    explicit GalleryTextures(UiRenderer& renderer) noexcept;
     ~GalleryTextures() noexcept;
 
     GalleryTextures(const GalleryTextures&) = delete;
@@ -38,9 +36,7 @@ private:
     Result<SlotHandle> Add(Allocator& allocator, uint32 width, uint32 height,
                            Pixel&& pixel) noexcept;
 
-    graphics::Device& device_;
-    SlotArray<BrushTexture>& textures_;
-    graphics::PipelineHandle imagePipeline_;
+    UiRenderer& renderer_;
     SlotHandle checker_{};
     SlotHandle frame_{};
     SlotHandle gradient_{};

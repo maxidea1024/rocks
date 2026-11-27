@@ -4,7 +4,7 @@
 #include <Core/Math/Matrix4.h>
 #include <Core/Math/Quaternion.h>
 #include <Core/Memory/UniquePtr.h>
-#include <UiCore/WidgetSurfaceScene.h>
+#include <UiCore/Rendering/ViewportSource.h>
 #include <World/World.h>
 
 namespace rocks::ui {
@@ -22,24 +22,22 @@ struct ViewportCameraView {
 
 // 인게임 뷰포트 하나가 독립 레지스트리, 레벨, 액터 수명 주기를 소유한다.
 // 마지막 참조를 반환하기 전에 이 월드에서 빌린 Borrow와 RootRef를 반환해야 한다.
-class ROCKS_UIWIDGET_API ViewportWorld final : public WidgetSurfaceScene {
+class ROCKS_UIWIDGET_API ViewportWorld final : public ViewportSource {
 public:
-    // 준비가 끝난 렌더 타깃에 그리기 명령만 기록한다. 패스 시작과 제출은 표면 호스트가 담당한다.
-    using Renderer = Delegate<Result<void>(World&, const ViewportCameraView&, graphics::Device&,
-                                           graphics::CommandContext&)>;
+    // 게임 lane에서 World를 읽어 이번 프레임의 장면 pass packet을 게시한다(Docs/Design/UiToolkit
+    // 18.3절). 장치 기록은 게시한 함수가 Render lane에서 한다.
+    using Renderer = Delegate<Result<void>(World&, const ViewportCameraView&, UiSceneExtract&)>;
 
     ViewportWorld(Allocator& allocator, TypeRegistry& types) noexcept;
     Result<void> Initialize() noexcept;
     World* GetWorld() const noexcept;
-    void SetRenderer(Renderer renderer, bool depth = false) noexcept;
-    bool UsesDepth() const noexcept override;
+    void SetRenderer(Renderer renderer) noexcept;
     Result<void> SetCamera(Vec3 location, Quat rotation, float fieldOfView) noexcept;
     Result<ViewportCameraView> Camera(uint32 width, uint32 height) const noexcept;
     void SetBackground(LinearColor color) noexcept;
     LinearColor Background() const noexcept override;
     Result<void> Advance(uint64 frame) noexcept override;
-    Result<void> Draw(graphics::Device& device, graphics::CommandContext& commands, uint32 width,
-                      uint32 height) noexcept override;
+    Result<void> Extract(UiSceneExtract& extract, const ViewportTarget& target) noexcept override;
 
 private:
     Allocator& allocator_;
@@ -47,7 +45,6 @@ private:
     ModuleRegistration registration_;
     UniquePtr<World> world_;
     Renderer render_;
-    bool depth_ = false;
     Vec3 location_{};
     Quat rotation_{};
     float fieldOfView_ = 90;

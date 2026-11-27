@@ -1,10 +1,10 @@
 #include "DemoLog.h"
-#include "DemoShaders.h"
 #include "DockWindows.h"
 
 #include <UiFramework/Layout/VerticalStack.h>
 
 #include <Core/Diagnostics/Log.h>
+#include <Core/ScopeExit.h>
 
 namespace rocks::ui {
 
@@ -29,16 +29,18 @@ Result<IntVec2> PreviewSize(Vec2 size) noexcept {
     return Result<IntVec2>::Success(pixels);
 }
 
+// 끌기 미리보기를 그리는 오프스크린 바탕색이다(이전 직접 읽기 경로와 같은 색).
+constexpr LinearColor PreviewClear{0.025f, 0.03f, 0.04f, 1};
+// 끌기 미리보기 창의 불투명도(0–255)다.
+constexpr uint8 PreviewAlpha = 170;
+
 } // namespace
 
-DockWindows::Surface::Surface(Allocator& allocator, graphics::Device& graphicsDevice,
+DockWindows::Surface::Surface(Allocator& allocator, UiRenderer& uiRenderer,
                               UniquePtr<platform::Window> native,
-                              const SharedPtr<DockManager>& manager,
-                              SlotArray<BrushTexture>& textures) noexcept
-    : device(graphicsDevice), window(Move(native)), area(manager), app(allocator), adapter(app),
-      queue(allocator), consumed(allocator), batch(allocator),
-      buffers(device, ActiveShaders(), batch),
-      surfaces(allocator, device, ActiveShaders(), textures) {
+                              const SharedPtr<DockManager>& manager) noexcept
+    : renderer(uiRenderer), window(Move(native)), area(manager), app(allocator), adapter(app),
+      queue(allocator), consumed(allocator), batch(allocator), surfaces(allocator, uiRenderer) {
     app.SetRoot(area);
     // 팝업(메뉴·툴팁·콤보)은 그 앵커가 놓인 모니터의 작업 영역 안에만 놓인다(UW7d). UI 좌표는
     // client 픽셀과 같다. 등록에 실패하면 팝업이 창 경계만 지킨다.
@@ -73,17 +75,17 @@ DockWindows::Surface::~Surface() noexcept {
     window->SetRegionHitTest({});
     area->SetOnExternalDrop({});
     area->SetWindowHitTest({});
-    if (!chain.IsNull()) {
-        device.Retire(chain);
+    // 창 표면 파괴는 그 창의 프레임이 모두 처리될 때까지 기다린다. 그 뒤 native 창이 부서진다
+    // (window 멤버는 이 본문 뒤에 파괴된다 — Docs/Design/UiToolkit 18.4절).
+    if (!surface.IsNull()) {
+        (void)renderer.DestroyWindowSurface(surface);
     }
 }
 
-DockWindows::DockWindows(Allocator& allocator, graphics::Device& device,
-                         graphics::PipelineHandle pipeline, SlotArray<BrushTexture>& textures,
+DockWindows::DockWindows(Allocator& allocator, UiRenderer& renderer,
                          const SharedPtr<CommandList>& commands, VectorImageAtlas& icons,
-                         graphics::PipelineHandle imagePipeline, TitleFactory&& makeTitle) noexcept
-    : allocator_(allocator), device_(device), pipeline_(pipeline), textures_(textures),
-      commands_(commands), icons_(icons), imagePipeline_(imagePipeline),
+                         TitleFactory&& makeTitle) noexcept
+    : allocator_(allocator), renderer_(renderer), commands_(commands), icons_(icons),
       makeTitle_(Move(makeTitle)), windows_(allocator) {
 }
 
@@ -187,7 +189,7 @@ Result<void> DockWindows::AttachChrome(Surface& host, StringView title, bool mai
 Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
                                     const SharedPtr<DockManager>& area, StringView title) noexcept {
     auto surface =
-        UniquePtr<Surface>::TryMake(allocator_, allocator_, device_, Move(window), area, textures_);
+        UniquePtr<Surface>::TryMake(allocator_, allocator_, renderer_, Move(window), area);
     if (!surface) {
         return Result<SlotHandle>::Failure(surface.Error());
     }
@@ -198,7 +200,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     host.app.SetVectorImageResolver(&icons_);
-    host.surfaces.SetVectorImages(&icons_, imagePipeline_);
+    host.surfaces.SetVectorImages(&icons_);
     auto initialized = host.app.SetCommands({}, commands_);
     if (initialized) {
         initialized = host.queue.TryInitialize(1024);
@@ -208,18 +210,20 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
         return Result<SlotHandle>::Failure(initialized.Error());
     }
 
+    // 창 표면 생성은 lane 작업이 끝날 때까지 기다리므로 실패를 바로 안다(탭 띄우기가 패널을
+    // 원래 창에 남긴다 — 18.4절).
     auto native = host.window->NativeHandle();
-    graphics::SwapChainDesc desc;
-    desc.surface.window = native.window;
-    desc.surface.instance = native.instance;
+    UiWindowSurfaceDesc desc;
+    desc.nativeWindow = native.window;
+    desc.nativeInstance = native.instance;
     desc.width = 1u > host.window->Width() ? 1u : host.window->Width();
     desc.height = 1u > host.window->Height() ? 1u : host.window->Height();
-    auto created = device_.CreateSwapChain(desc);
+    auto created = renderer_.CreateWindowSurface(desc);
     if (!created) {
         return Result<SlotHandle>::Failure(created.Error());
     }
 
-    host.chain = created.Value();
+    host.surface = created.Value();
     // 창 테두리를 끄는 동안 호스트 루프가 멈추므로 창이 이 콜백으로 그 창만 다시 그리게 한다.
     host.window->SetLiveResizeHandler(
         platform::Window::LiveResizeHandler::CreateLambda([this, source = &host]() noexcept {
@@ -227,9 +231,24 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
                 return;
             }
 
-            auto rendered = Render(*source, false);
+            // 루프의 공용 버퍼는 이 콜백 바깥(PumpEvents를 부른 Update)이 쓰는 중이라 지역 버퍼로
+            // 그 창만 그린다. 그 프레임의 present까지 기다린다(OS 크기 변경 루프가 다음 메시지로
+            // 가기 전 — Docs/Design/UiToolkit 18.5절).
+            UiDrawBuffer buffer(allocator_);
+            auto rendered = Render(*source, false, buffer);
+            Result<void> drawn = Result<void>::Success();
+            if (rendered) {
+                drawn = DrawFrame(buffer);
+            }
+
+            if (rendered && rendered.Value() && drawn) {
+                drawn = renderer_.Flush();
+            }
+
             if (!rendered) {
                 source->liveResizeError = rendered.Error();
+            } else if (!drawn) {
+                source->liveResizeError = drawn.Error();
             }
         }));
     auto slot = windows_.TryAdd(Move(surface.Value()));
@@ -392,28 +411,51 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
         return result;
     }
 
-    DrawBatchBuffers buffers(device_, ActiveShaders(), batch);
-    result = buffers.Upload();
+    // 미리보기는 오프스크린 렌더 타깃에 그려 읽는다(창 pass는 스왑 체인이라 다시 읽을 수 없다 —
+    // 18.8절). 처음 창 밖으로 나온 한 번만 그리므로 그 자리에서 읽기를 기다린다.
+    const uint32 width = static_cast<uint32>(size.Value().x);
+    const uint32 height = static_cast<uint32>(size.Value().y);
+    auto target = renderer_.CreateRenderTarget(width, height, UiTextureSampling::Image);
+    if (!target) {
+        return Result<void>::Failure(target.Error());
+    }
+
+    ROCKS_ON_SCOPE_EXIT {
+        renderer_.ReleaseTexture(target.Value());
+    };
+    // 창 그리기가 쓰는 공용 버퍼와 섞이지 않게 지역 버퍼로 미리보기만 그린다.
+    UiDrawBuffer buffer(allocator_);
+    result = buffer.AddOffscreen(target.Value(), width, height, PreviewClear, batch);
+    // 미리보기가 받은 SVG 자리의 페이지를 그리기 전에 올린다(17.2절 프레임 순서).
+    if (result) {
+        result = icons_.Upload();
+    }
+
+    if (result) {
+        result = renderer_.DrawWindows(buffer);
+    }
+
     if (!result) {
         return result;
     }
 
-    // 미리보기가 받은 SVG 자리의 페이지를 읽기 전에 올린다(17.2절 프레임 순서).
-    result = icons_.Sync(imagePipeline_);
-    if (!result) {
-        return result;
+    auto capture = renderer_.RequestCapture(target.Value());
+    if (!capture) {
+        return Result<void>::Failure(capture.Error());
     }
 
     Array<uint8> pixels(allocator_);
-    result = DrawBatchRenderer::ReadPixels(device_, pipeline_, buffers, textures_,
-                                           static_cast<uint32>(size.Value().x),
-                                           static_cast<uint32>(size.Value().y), pixels);
+    result = renderer_.WaitCapture(capture.Value());
+    if (result) {
+        result = renderer_.TakeCapture(capture.Value(), pixels);
+    }
+
     if (!result) {
         return result;
     }
 
     auto image = platform::DragImage::Create(allocator_, *host.window, position.Value(),
-                                             size.Value(), pixels.View(), 170);
+                                             size.Value(), pixels.View(), PreviewAlpha);
     if (!image) {
         return Result<void>::Failure(image.Error());
     }
@@ -423,7 +465,7 @@ Result<void> DockWindows::UpdateDragImage(Surface& host) noexcept {
     return Result<void>::Success();
 }
 
-Result<bool> DockWindows::Update(Surface& host) noexcept {
+Result<bool> DockWindows::Update(Surface& host, UiDrawBuffer& buffer) noexcept {
     host.window->PumpEvents(host.queue);
     auto sized = host.consumed.TryResize(host.queue.Events().Size());
     if (!sized) {
@@ -443,14 +485,31 @@ Result<bool> DockWindows::Update(Surface& host) noexcept {
         return Result<bool>::Failure(host.liveResizeError);
     }
 
-    return Render(host, hadInput || !routed);
+    return Render(host, hadInput || !routed, buffer);
 }
 
-Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
+Result<void> DockWindows::DrawFrame(UiDrawBuffer& buffer) noexcept {
+    if (buffer.Targets().IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    // 그리기 목록이 받은 SVG 자리의 페이지를 그리기 전에 올린다(17.2절).
+    auto drawn = icons_.Upload();
+    if (drawn) {
+        drawn = renderer_.DrawWindows(buffer);
+    }
+
+    buffer.Clear();
+    // 한도를 넘었으면 atlas를 비운다. revision이 올라 다음 그리기가 목록을 다시 만든다.
+    (void)icons_.AdvanceFrame();
+    return drawn;
+}
+
+Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer& buffer) noexcept {
     uint32 width = 0, height = 0;
     bool repaint = host.window->ConsumeRepaint();
     if (host.window->ConsumeResize(width, height) && width && height) {
-        auto resized = device_.ResizeSwapChain(host.chain, width, height);
+        auto resized = renderer_.ResizeWindowSurface(host.surface, width, height);
         if (!resized) {
             return Result<bool>::Failure(resized.Error());
         }
@@ -479,20 +538,31 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
         return Result<bool>::Failure(arranged.Error());
     }
 
-    auto prepared = host.surfaces.Prepare(host.area, host.frameNumber++, host.window->Width(),
-                                          host.window->Height(), pipeline_);
+    auto prepared = host.surfaces.Record(host.area, host.frameNumber++, host.window->Width(),
+                                         host.window->Height(), buffer);
     if (!prepared) {
+        buffer.DiscardPending();
         return Result<bool>::Failure(prepared.Error());
     }
 
-    repaint |= prepared.Value();
+    // 쌓인 표면 pass가 있으면(바깥 보관 표면 안쪽만 바뀐 경우 포함) 창과 함께 제출한다. 버리면 표면
+    // 기록기는 그렸다고 알지만 타깃은 비어 있게 된다.
+    repaint |= prepared.Value() || buffer.PendingPassCount() > 0;
     auto cache = host.app.UpdateArrangedPaintCache();
     if (!cache) {
+        buffer.DiscardPending();
         return Result<bool>::Failure(cache.Error());
     }
 
-    // 미리보기 표시에 실패해도 원래 탭과 드롭 처리는 유지한다.
-    (void)UpdateDragImage(host);
+    // 미리보기 표시에 실패해도 원래 탭과 드롭 처리는 유지한다. 같은 끌기 동안 다시 시도하도록
+    // 제스처 기록을 되돌린다.
+    if (auto previewed = UpdateDragImage(host); !previewed) {
+        host.dragImage.Reset();
+        host.previewGesture = 0;
+        Log::Warning(LogUiDemo, "The floating tab preview could not be drawn: {Error}",
+                     ErrorCodeName(previewed.Error()));
+    }
+
     const bool changed = !host.presented || cache.Value()->Revision() != host.batchRevision;
     if (refreshCursor || changed) {
         host.window->SetMouseCursor(host.adapter.MouseCursor());
@@ -501,6 +571,7 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
     if (changed) {
         auto batched = host.batch.Update(*cache.Value());
         if (!batched) {
+            buffer.DiscardPending();
             return Result<bool>::Failure(batched.Error());
         }
 
@@ -512,34 +583,17 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor) noexcept {
         return Result<bool>::Success(false);
     }
 
-    auto uploaded = host.buffers.Upload();
-    if (!uploaded) {
-        return Result<bool>::Failure(uploaded.Error());
-    }
-
-    // 그리기 목록이 받은 SVG 자리의 페이지를 올린다(그리기 전 — 17.2절).
-    if (auto synced = icons_.Sync(imagePipeline_); !synced) {
-        return Result<bool>::Failure(synced.Error());
-    }
-
-    // 창 바탕은 테마 Background다(내용이 덮지 않는 틈에 보인다).
+    // 창 바탕은 테마 Background다(내용이 덮지 않는 틈에 보인다). 대상은 버퍼에 쌓고 제출은 루프 끝
+    // DrawFrame이 모든 창을 한 번에 한다(Docs/Design/UiToolkit 18.3절).
     const LinearColor background = host.app.Theme().Get(ThemeSlot::Background);
-    auto frame =
-        device_.BeginFrame(host.chain, {background.r, background.g, background.b, background.a});
-    if (!frame) {
-        return Result<bool>::Failure(frame.Error());
-    }
-
-    auto drawn =
-        DrawBatchRenderer::Draw(*frame.Value(), pipeline_, host.buffers, viewport, &textures_);
-    auto presented = device_.EndFrame();
-    if (!drawn || !presented) {
-        return Result<bool>::Failure(!drawn ? drawn.Error() : presented.Error());
+    auto added = buffer.AddWindow(host.surface, host.window->Width(), host.window->Height(),
+                                  background, host.batch);
+    if (!added) {
+        buffer.DiscardPending();
+        return Result<bool>::Failure(added.Error());
     }
 
     host.presented = true;
-    // 한도를 넘었으면 atlas를 비운다. revision이 올라 다음 그리기가 목록을 다시 만든다.
-    (void)icons_.AdvanceFrame();
     return Result<bool>::Success(true);
 }
 
@@ -570,8 +624,13 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
 
     primary_ = main.Value();
     Surface& primary = *windows_[primary_];
+    // 루프 한 번에 다시 그릴 창을 모두 담아 한 번 제출하는 버퍼다(바뀐 창이 없으면 제출하지
+    // 않는다).
+    UiDrawBuffer frame(allocator_);
+    Array<SlotHandle> closed(allocator_);
     while (!primary.window->IsCloseRequested()) {
         bool painted = false;
+        closed.Clear();
         // 입력 콜백이 새 창을 열 수 있다. 슬롯 배열의 반복자·원소 참조를 콜백 너머로 보관하지
         // 않는다.
         const usize count = windows_.SlotCount();
@@ -582,7 +641,7 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
             }
 
             Surface& surface = *windows_[handle];
-            auto updated = Update(surface);
+            auto updated = Update(surface, frame);
             if (!updated) {
                 return Result<void>::Failure(updated.Error());
             }
@@ -600,8 +659,19 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
                     continue;
                 }
 
-                (void)windows_.TryRemove(handle);
+                // 버퍼가 이 창의 batch를 가리킬 수 있으므로 제출 뒤에 지운다.
+                if (auto marked = closed.TryPushBack(handle); !marked) {
+                    return marked;
+                }
             }
+        }
+
+        if (auto drawn = DrawFrame(frame); !drawn) {
+            return drawn;
+        }
+
+        for (const SlotHandle handle : closed) {
+            (void)windows_.TryRemove(handle);
         }
 
         if (!painted && !primary.window->IsCloseRequested()) {
