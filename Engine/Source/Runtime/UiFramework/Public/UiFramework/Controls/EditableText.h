@@ -155,7 +155,31 @@ private:
     void NotifyChanged(StringView text) noexcept;
     void Commit(TextCommitReason reason) noexcept;
     usize Adjacent(bool forward) const noexcept;
+    // pos에서 클러스터 하나 옮긴 위치다.
+    usize AdjacentFrom(usize pos, bool forward) const noexcept;
+    // Ctrl+방향키가 멈출 위치다(UE ScanForWordBoundary — 한 글자 옮긴 뒤 줄 처음·끝·문서
+    // 처음·끝이나 단어 시작까지). 비밀번호는 줄 처음·끝이다(단어 경계를 드러내지 않는다).
+    usize WordStop(bool forward) const noexcept;
     usize PointerOffset(Vec2 point) const noexcept;
+
+    // 포인터 선택 단위다(22.4절 — 한 번 누름은 클러스터, 두 번은 단어, 세 번은 줄).
+    enum class SelectionUnit : uint8 {
+        Cluster,
+        Word,
+        Line
+    };
+
+    // offset을 담는 단위 구간을 [begin, end)로 구한다(단어는 UE FTextLayout::GetWordAt 규칙 —
+    // offset 뒤 경계에서 거꾸로 가며 공백이 아닌 글자가 있는 첫 구간, 비밀번호는 전체). 구할 수
+    // 없으면 거짓이다.
+    bool UnitAt(usize offset, SelectionUnit unit, usize& begin, usize& end) const noexcept;
+    // 미리 구한 단어 경계(breaks — FindWordBoundaries 모양)로 offset의 단어를 구한다(UE GetWordAt).
+    bool WordAt(Span<const usize> breaks, usize offset, usize& begin, usize& end) const noexcept;
+    // 단위 선택을 [begin, end) 쪽으로 넓힌다(끌기 — 처음 고른 단위는 늘 포함한다).
+    void ExtendUnitSelection(usize begin, usize end) noexcept;
+    // 마지막 상호작용 시각을 지금 프레임 시각으로 둔다(caret 깜박임 — 22.5절).
+    void MarkInteraction() noexcept;
+    bool IsCaretVisible() const noexcept;
 
     Allocator& allocator_;
     Array<Snapshot> undo_;
@@ -202,6 +226,12 @@ private:
     bool focused_ = false;
     bool dragging_ = false;
     KeyChord chord_;
+    // 지금 포인터 끌기의 선택 단위와 처음 고른 단위 구간이다.
+    SelectionUnit dragUnit_ = SelectionUnit::Cluster;
+    usize unitBegin_ = 0;
+    usize unitEnd_ = 0;
+    // 마지막 상호작용(타자·caret 이동·포인터 누름·초점) 프레임 시각(초)이다.
+    double lastInteraction_ = 0;
 };
 
 } // namespace rocks::ui

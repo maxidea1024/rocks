@@ -44,7 +44,11 @@
 
 ### 22.4 선택
 
-- **더블클릭 단어 선택**: `clickCount == 2`면 누른 곳의 단어(지금의 단어 경계 — Ctrl+방향키와 같은 규칙)를 고른다. 끌면 단어 단위로 넓힌다(UE `FSlateEditableTextLayout::HandleDoubleClick`·`SelectWordAt`과 끌기 확장).
+- **더블클릭 단어 선택**: `clickCount == 2`면 누른 곳의 단어를 고르고 caret을 끝에 둔다(UE `FSlateEditableTextLayout::HandleDoubleClick`·`SelectWordAt`, SlateEditableTextLayout.cpp 1909–1931행).
+  - 단어는 UE `FTextLayout::GetWordAt`(TextLayout.cpp 2524–2569행) 규칙이다: 누른 위치 뒤 경계(끝이면 끝)부터 거꾸로 가며 공백이 아닌 글자가 있는 첫 구간이다. 단어 뒤 공백을 눌러도 앞 단어가 되고, 공백은 넣지 않는다.
+  - 경계는 `TextShaper::FindWordBoundaries`가 준다. 글꼴 백엔드가 있는 호스트는 ICU 단어 경계(`text::TextBackend::FindBoundaries(Word)` — UE `FTextBreakIterator`)로 재정의한다. 기본 구현은 문자 부류(공백·문장부호·그 밖)가 바뀌는 곳과 문장부호 하나하나에서 나눈다(편집기가 백엔드 없이도 동작하게 — 시험·도구용).
+  - 끌면 단어 단위로 넓힌다(처음 고른 단어는 늘 포함). UE는 더블클릭 뒤 끌기를 단어로 넓히지 않는다 — 편집기 관례를 따른 개선이다.
+- **단어 이동·삭제**: 같은 경계로 Ctrl(macOS Cmd)+←·→는 단어 단위로 옮긴다(Shift면 선택). 한 글자 옮긴 뒤 줄 처음·끝이나 단어 시작(`GetWordAt`의 시작)에 닿을 때까지 간다(UE `ScanForWordBoundary`·`IsAtWordStart`, SlateEditableTextLayout.cpp 3139–3191행). 선택이 없으면 Ctrl+Backspace는 앞 단어 멈춤까지, Ctrl+Delete는 뒤 단어 멈춤까지 지운다(1176–1255행). 비밀번호는 단어 대신 줄 처음·끝이다.
 - **세 번 클릭 줄 선택**: `clickCount >= 3`이면 그 논리 줄(줄바꿈 사이, 한 줄 편집은 전체)을 고른다. UE에는 없다 — Windows·macOS 편집기 관례를 따른 개선이다.
 - 비밀번호면 단어 경계가 없으므로 더블클릭도 전체를 고른다(가린 글자의 단어 길이를 드러내지 않는다 — UE도 비밀번호는 단어 이동이 전체 이동이다).
 

@@ -308,4 +308,198 @@ TEST(UiFramework_EditableTextBoxShowsErrorMarker) {
     CHECK(bare.Value()->SetError(error.Value()).Error() == ErrorCode::NotReady);
 }
 
+namespace {
+
+// 편집기를 앱에 붙여 배치한다(포인터 위치를 글자 위치로 바꾸려면 레이블 배치가 있어야 한다).
+struct PointerBench {
+    explicit PointerBench(Allocator& allocator) noexcept : bench(allocator), app(allocator) {
+    }
+
+    bool Start(Allocator& allocator, StringView text, bool multiline, bool password) noexcept {
+        auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
+        if (!shaper) {
+            return false;
+        }
+
+        auto made = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper.Value(),
+                                                     Platform{}, multiline);
+        if (!made || !made.Value()->SetPassword(password) ||
+            !made.Value()->Initialize(text, EditFontSize)) {
+            return false;
+        }
+
+        bench.editor = made.Value();
+        app.SetRoot(bench.editor);
+        return app.PrepareLayout(Geometry::Root({400, 120}, {}), 1).IsOk() &&
+               app.SetFocus(EditUser, bench.editor).IsOk();
+    }
+
+    // index번째 code point(고정 폭 8 px) 안 inside px를 줄 line에서 누른다(기본은 가운데 — 가운데는
+    // 다음 위치로 잡힌다, 왼쪽 가장자리는 그 글자 앞 위치다).
+    void Click(usize index, uint8 clicks, float line = 0, float inside = 4) noexcept {
+        PointerEvent down{
+            .type = PointerEventType::Down,
+            .position = {static_cast<float>(index) * 8 + inside, line * EditFontSize + 2},
+            .clickCount = clicks};
+        (void)bench.editor->OnPointerEvent(down);
+    }
+
+    void Drag(usize index, PointerEventType type = PointerEventType::Move) noexcept {
+        PointerEvent move{.type = type, .position = {static_cast<float>(index) * 8 + 4, 2}};
+        (void)bench.editor->OnPointerEvent(move);
+    }
+
+    EditBench bench;
+    Application app;
+};
+
+} // namespace
+
+TEST(UiFramework_TextShaperDefaultWordBoundariesSplitByClass) {
+    SystemAllocator allocator;
+    FixedAdvanceShaper shaper(allocator);
+    Array<usize> breaks(allocator);
+    // 부류(글자·공백·문장부호)가 바뀌는 곳과 문장부호 하나하나에서 나눈다. 0은 빼고 끝은 넣는다.
+    REQUIRE(shaper.FindWordBoundaries("ab, c..", breaks));
+    const usize expected[] = {2, 3, 4, 5, 6, 7};
+    REQUIRE(breaks.Size() == 6);
+    for (usize i = 0; i < 6; ++i) {
+        CHECK(breaks[i] == expected[i]);
+    }
+
+    // 한글은 한 부류다("한글"은 6 byte).
+    REQUIRE(shaper.FindWordBoundaries("한글 a", breaks));
+    REQUIRE(breaks.Size() == 3);
+    CHECK(breaks[0] == 6 && breaks[1] == 7 && breaks[2] == 8);
+    REQUIRE(shaper.FindWordBoundaries("", breaks));
+    CHECK(breaks.IsEmpty());
+    const char bad[] = {static_cast<char>(0xC3)};
+    CHECK(!shaper.FindWordBoundaries(StringView(bad, 1), breaks));
+}
+
+TEST(UiFramework_EditableTextDoubleClickSelectsWordAndDragExtendsByWord) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    REQUIRE(pointer.Start(allocator, "hello world foo", false, false));
+    auto& editor = *pointer.bench.editor;
+    // 두 번 누르면 그 단어다(UE SelectWordAt — caret은 끝).
+    pointer.Click(7, 2);
+    CHECK(editor.SelectedText() == "world");
+    // 끌면 단어 단위로 넓힌다: 뒤로는 처음 단어의 시작부터, 앞으로는 처음 단어의 끝부터.
+    pointer.Drag(13);
+    CHECK(editor.SelectedText() == "world foo");
+    pointer.Drag(1);
+    CHECK(editor.SelectedText() == "hello world");
+    pointer.Drag(1, PointerEventType::Up);
+    // 단어 바로 뒤(공백의 왼쪽)를 두 번 누르면 앞 단어다(UE GetWordAt — 공백만인 구간은 건너뛴다).
+    pointer.Click(5, 2, 0, 1);
+    CHECK(editor.SelectedText() == "hello");
+    pointer.Drag(5, PointerEventType::Up);
+    // 한 번 누름은 클러스터 단위로 돌아간다.
+    pointer.Click(3, 1);
+    CHECK(editor.SelectedText().IsEmpty());
+    pointer.Drag(3, PointerEventType::Up);
+}
+
+TEST(UiFramework_EditableTextTripleClickSelectsLineAndPasswordSelectsAll) {
+    SystemAllocator allocator;
+    // 여러 줄: 세 번 누르면 그 논리 줄(줄바꿈 제외)이다.
+    PointerBench lines(allocator);
+    REQUIRE(lines.Start(allocator, "ab\ncd ef\ngh", true, false));
+    lines.Click(1, 3, 1);
+    CHECK(lines.bench.editor->SelectedText() == "cd ef");
+    lines.Drag(1, PointerEventType::Up);
+    // 한 줄: 세 번 누르면 전체다.
+    PointerBench single(allocator);
+    REQUIRE(single.Start(allocator, "one two", false, false));
+    single.Click(1, 3);
+    CHECK(single.bench.editor->SelectedText() == "one two");
+    single.Drag(1, PointerEventType::Up);
+    // 비밀번호: 두 번 눌러도 전체를 고른다(단어 길이를 드러내지 않는다 — 22.4절). 선택 글자는 비어
+    // 보이므로(복사 막기) 입력 문맥의 선택 범위(UTF-16)로 본다.
+    PointerBench secret(allocator);
+    REQUIRE(secret.Start(allocator, "pass word", false, true));
+    secret.Click(1, 2);
+    secret.Drag(1, PointerEventType::Up);
+    CHECK(secret.bench.editor->SelectedText().IsEmpty());
+    uint32 begin = 0;
+    uint32 length = 0;
+    secret.bench.editor->GetSelection(begin, length);
+    CHECK(begin == 0 && length == 9);
+}
+
+TEST(UiFramework_EditableTextCaretBlinksLikeUe) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    REQUIRE(pointer.Start(allocator, "abc", false, false));
+    auto& editor = *pointer.bench.editor;
+    auto& app = pointer.app;
+    // 초점 동안 volatile이다(매 프레임 다시 기록 — 22.5절).
+    CHECK(editor.IsVolatile());
+    const auto caretVisible = [&]() noexcept {
+        PaintList list(allocator);
+        (void)editor.OnPaintOverlay(list, 0);
+        return list.Boxes().Size() == 1;
+    };
+    // 상호작용 시각 10초 — 0.1초 동안은 늘 보인다.
+    app.BeginFrame(FrameTime{10.0, 0});
+    editor.MoveCaret(1, false);
+    CHECK(caretVisible());
+    app.BeginFrame(FrameTime{10.05, 0.05});
+    CHECK(caretVisible());
+    // 0.3초: 0.5 + 0.5·sin(π/2 + 0.6π) ≈ 0.35 → 꺼짐. 0.8초: ≈ 0.65 → 켜짐(UE 사각파).
+    app.BeginFrame(FrameTime{10.3, 0.25});
+    CHECK(!caretVisible());
+    app.BeginFrame(FrameTime{10.8, 0.5});
+    CHECK(caretVisible());
+    // 타자·이동은 깜박임을 처음부터 센다.
+    app.BeginFrame(FrameTime{11.3, 0.5});
+    CHECK(!caretVisible());
+    editor.MoveCaret(2, false);
+    CHECK(caretVisible());
+    // 초점을 잃으면 volatile을 끄고 caret도 없다.
+    REQUIRE(app.SetFocus(EditUser, {}));
+    CHECK(!editor.IsVolatile() && !caretVisible());
+}
+
+TEST(UiFramework_EditableTextControlArrowsMoveAndDeleteByWord) {
+    SystemAllocator allocator;
+    EditBench bench(allocator);
+    REQUIRE(MakeEditor(allocator, bench));
+    auto& editor = *bench.editor;
+    REQUIRE(editor.Initialize("one two, three", EditFontSize));
+    editor.OnFocusReceived(EditUser);
+    editor.MoveCaret(0, false);
+    const KeyChord control{.control = true};
+    const KeyChord select{.shift = true, .control = true};
+    // Ctrl+→는 다음 단어 시작(문장부호도 단어다)이나 줄 끝에서 멈춘다(UE ScanForWordBoundary).
+    Press(editor, input::Key::Right, control);
+    Press(editor, input::Key::Right, select);
+    CHECK(editor.SelectedText() == "two");
+    Press(editor, input::Key::Right, select);
+    CHECK(editor.SelectedText() == "two, ");
+    Press(editor, input::Key::Right, select);
+    CHECK(editor.SelectedText() == "two, three");
+    // Ctrl+←는 앞 단어 시작으로 간다.
+    Press(editor, input::Key::Left, control);
+    Press(editor, input::Key::Right, select);
+    CHECK(editor.SelectedText() == "three");
+    // Ctrl+Backspace는 앞 단어를, Ctrl+Delete는 뒤 단어를 지운다(사용자 편집 — 통지).
+    Press(editor, input::Key::End);
+    Press(editor, input::Key::Backspace, control);
+    CHECK(editor.GetText() == "one two, ");
+    editor.MoveCaret(0, false);
+    Press(editor, input::Key::Delete, control);
+    CHECK(editor.GetText() == "two, ");
+    CHECK(bench.changes.Size() == 2);
+    // 비밀번호는 줄 처음·끝으로 간다(단어 경계를 드러내지 않는다).
+    REQUIRE(editor.SetPassword(true));
+    editor.MoveCaret(0, false);
+    Press(editor, input::Key::Right, select);
+    uint32 begin = 0;
+    uint32 length = 0;
+    editor.GetSelection(begin, length);
+    CHECK(begin == 0 && length == 5);
+}
+
 } // namespace rocks::ui

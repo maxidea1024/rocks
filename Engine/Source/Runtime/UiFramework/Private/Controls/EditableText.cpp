@@ -21,6 +21,13 @@ constexpr float MinCaretWidth = 1.0f;
 constexpr float MaxCaretWidth = 2.0f;
 // 조합 밑줄 두께(px)다.
 constexpr float CompositionUnderlineThickness = 1.0f;
+// caret 깜박임(UE EditableTextDefs — TextEditHelper.h 20–24행): 상호작용 뒤 이 시간(초)은 늘
+// 보이고, 그 뒤는 초당 이 횟수로 켜짐·꺼짐을 되풀이한다(SlateEditableTextTypes.cpp 127–130행).
+constexpr double CaretBlinkPauseTime = 0.1;
+constexpr double BlinksPerSecond = 1.0;
+// 포인터 누름 횟수다(두 번 = 단어, 세 번 이상 = 줄).
+constexpr uint8 WordClickCount = 2;
+constexpr uint8 LineClickCount = 3;
 // 글자로 넣지 않는 제어 문자: U+0000–U+001F와 DEL(U+007F)이다.
 constexpr uint32 FirstPrintableCodePoint = 0x20;
 constexpr uint32 DeleteCodePoint = 0x7F;
@@ -483,6 +490,9 @@ bool EditableText::SupportsKeyboardFocus() const noexcept {
 void EditableText::OnFocusReceived(uint32 user) noexcept {
     focused_ = true;
     focusUser_ = user;
+    // 초점 동안 caret이 깜박이므로 매 프레임 다시 기록한다(22.5절 — volatile은 이 요소만 무효화).
+    SetVolatile(true);
+    MarkInteraction();
     RememberFocusText();
     if (selectAllOnFocus_) {
         keepPointerSelection_ = dragging_;
@@ -505,6 +515,8 @@ void EditableText::OnFocusLost(uint32 user) noexcept {
     }
 
     focused_ = false;
+    SetVolatile(false);
+    dragUnit_ = SelectionUnit::Cluster;
     canRevert_ = false;
     focusText_.Clear();
     keepPointerSelection_ = false;
@@ -525,6 +537,9 @@ void EditableText::MoveCaret(usize pos, bool extend) noexcept {
     if (!label_) {
         return;
     }
+
+    // caret을 옮기는 일(타자·이동·포인터·선택)은 상호작용이다 — 깜박임을 처음부터 센다(22.5절).
+    MarkInteraction();
 
     // 새로 삽입한 코드 포인트가 다음 문자와 한 클러스터로 결합하는 경우 그 끝에 둔다.
     if (pos != 0 && pos < label_->GetText().ByteCount()) {
@@ -548,13 +563,17 @@ void EditableText::MoveCaret(usize pos, bool extend) noexcept {
 }
 
 usize EditableText::Adjacent(bool forward) const noexcept {
+    return AdjacentFrom(caret_, forward);
+}
+
+usize EditableText::AdjacentFrom(usize pos, bool forward) const noexcept {
     usize previous = 0;
     for (const auto& cluster : label_->ShapedClusters()) {
-        if (forward && cluster.byteEnd > caret_) {
+        if (forward && cluster.byteEnd > pos) {
             return cluster.byteEnd;
         }
 
-        if (!forward && cluster.byteEnd >= caret_) {
+        if (!forward && cluster.byteEnd >= pos) {
             return previous;
         }
 
@@ -562,6 +581,48 @@ usize EditableText::Adjacent(bool forward) const noexcept {
     }
 
     return previous;
+}
+
+usize EditableText::WordStop(bool forward) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    const auto lineStart = [&](usize pos) noexcept {
+        return pos == 0 || text.Data()[pos - 1] == '\n';
+    };
+    const auto lineEnd = [&](usize pos) noexcept {
+        return pos >= length || text.Data()[pos] == '\n';
+    };
+    if (password_) {
+        // UE: 비밀번호면 단어 경계 대신 줄 처음·끝(SlateEditableTextLayout.cpp 1176–1180행).
+        usize pos = caret_;
+        while (forward ? !lineEnd(pos) : !lineStart(pos)) {
+            pos = forward ? pos + 1 : pos - 1;
+        }
+
+        return pos;
+    }
+
+    Array<usize> breaks(allocator_);
+    const bool words = shaper_ && shaper_->FindWordBoundaries(text, breaks) && !breaks.IsEmpty();
+    usize pos = AdjacentFrom(caret_, forward);
+    for (;;) {
+        if (lineStart(pos) || lineEnd(pos)) {
+            return pos;
+        }
+
+        usize begin = 0;
+        usize end = 0;
+        if (!words || (WordAt(breaks.View(), pos, begin, end) && begin == pos)) {
+            return pos;
+        }
+
+        const usize next = AdjacentFrom(pos, forward);
+        if (next == pos) {
+            return pos;
+        }
+
+        pos = next;
+    }
 }
 
 void EditableText::Replace(usize begin, usize end, StringView insertion) noexcept {
@@ -944,7 +1005,14 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
     case Key::Left:
     case Key::Right: {
         const bool forward = event.key == Key::Right;
-        MoveCaret(!extend && begin != end ? (forward ? end : begin) : Adjacent(forward), extend);
+        // Ctrl(macOS Cmd)이면 단어 단위다(UE ECursorMoveGranularity::Word — 1067·1087행).
+        if (command) {
+            MoveCaret(WordStop(forward), extend);
+        } else {
+            MoveCaret(!extend && begin != end ? (forward ? end : begin) : Adjacent(forward),
+                      extend);
+        }
+
         break;
     }
     case Key::Home:
@@ -972,10 +1040,11 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
         break;
     }
     case Key::Backspace:
-        Replace(begin == end ? Adjacent(false) : begin, end, {});
+        // 선택이 없으면 Ctrl은 앞 단어까지, 아니면 앞 클러스터를 지운다(UE 1240–1255행).
+        Replace(begin == end ? (command ? WordStop(false) : Adjacent(false)) : begin, end, {});
         break;
     case Key::Delete:
-        Replace(begin, begin == end ? Adjacent(true) : end, {});
+        Replace(begin, begin == end ? (command ? WordStop(true) : Adjacent(true)) : end, {});
         break;
     case Key::Escape:
         return KeyReply::FromHandled(RevertToFocusText());
@@ -1014,7 +1083,22 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
         (event.source != PointerSource::Mouse || event.button == input::MouseButton::Left)) {
         pointerAnchor_ = PointerOffset(event.position);
         keepPointerSelection_ = false;
-        MoveCaret(pointerAnchor_, false);
+        dragUnit_ = event.clickCount >= LineClickCount   ? SelectionUnit::Line
+                    : event.clickCount == WordClickCount ? SelectionUnit::Word
+                                                         : SelectionUnit::Cluster;
+        usize begin = pointerAnchor_;
+        usize end = pointerAnchor_;
+        if (dragUnit_ != SelectionUnit::Cluster && UnitAt(pointerAnchor_, dragUnit_, begin, end)) {
+            // 단어·줄을 고른다(UE SelectWordAt — 끝에 caret). 끌면 그 단위로 넓힌다.
+            unitBegin_ = begin;
+            unitEnd_ = end;
+            MoveCaret(begin, false);
+            MoveCaret(end, true);
+        } else {
+            dragUnit_ = SelectionUnit::Cluster;
+            MoveCaret(pointerAnchor_, false);
+        }
+
         dragging_ = true;
         dragSource_ = event.source;
         dragPointer_ = event.pointerId;
@@ -1024,7 +1108,14 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
 
     if (dragging_ && dragSource_ == event.source && dragPointer_ == event.pointerId &&
         dragUser_ == event.userId) {
-        if (event.type == PointerEventType::Move || event.type == PointerEventType::Up) {
+        if ((event.type == PointerEventType::Move || event.type == PointerEventType::Up) &&
+            dragUnit_ != SelectionUnit::Cluster) {
+            usize begin = 0;
+            usize end = 0;
+            if (UnitAt(PointerOffset(event.position), dragUnit_, begin, end)) {
+                ExtendUnitSelection(begin, end);
+            }
+        } else if (event.type == PointerEventType::Move || event.type == PointerEventType::Up) {
             const usize offset = PointerOffset(event.position);
             if (!keepPointerSelection_ || offset != pointerAnchor_) {
                 if (keepPointerSelection_) {
@@ -1038,6 +1129,7 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
 
         if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
             dragging_ = false;
+            dragUnit_ = SelectionUnit::Cluster;
             return {.handled = true, .releaseCapture = true};
         }
 
@@ -1045,6 +1137,120 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
     }
 
     return {};
+}
+
+bool EditableText::UnitAt(usize offset, SelectionUnit unit, usize& begin,
+                          usize& end) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    if (unit == SelectionUnit::Cluster || offset > length) {
+        return false;
+    }
+
+    // 비밀번호는 가린 글자의 단어 길이를 드러내지 않도록 단어도 전체다(22.4절).
+    if (unit == SelectionUnit::Line || password_) {
+        if (password_ || !multiline_) {
+            begin = 0;
+            end = length;
+            return true;
+        }
+
+        // 논리 줄(줄바꿈 사이)이다. 줄바꿈 자체는 넣지 않는다.
+        begin = offset;
+        while (begin > 0 && text.Data()[begin - 1] != '\n') {
+            --begin;
+        }
+
+        end = offset;
+        while (end < length && text.Data()[end] != '\n') {
+            ++end;
+        }
+
+        return true;
+    }
+
+    Array<usize> breaks(allocator_);
+    if (!shaper_ || !shaper_->FindWordBoundaries(text, breaks) || breaks.IsEmpty()) {
+        return false;
+    }
+
+    return WordAt(breaks.View(), offset, begin, end);
+}
+
+bool EditableText::WordAt(Span<const usize> breaks, usize offset, usize& begin,
+                          usize& end) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    if (breaks.IsEmpty() || offset > length) {
+        return false;
+    }
+
+    // UE FTextLayout::GetWordAt(TextLayout.cpp 2524–2569행): offset 뒤 경계(끝이면 끝)부터 거꾸로
+    // 가며 공백이 아닌 글자가 있는 첫 구간을 고른다 — 단어 뒤 공백을 눌러도 앞 단어다.
+    usize index = 0;
+    while (index < breaks.Size() && breaks[index] <= offset && offset < length) {
+        ++index;
+    }
+
+    if (index >= breaks.Size()) {
+        index = breaks.Size() - 1;
+    }
+
+    for (;;) {
+        const usize segmentEnd = breaks[index];
+        const usize segmentBegin = index == 0 ? 0 : breaks[index - 1];
+        bool letter = false;
+        for (usize i = segmentBegin; i < segmentEnd; ++i) {
+            const char c = text.Data()[i];
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                letter = true;
+                break;
+            }
+        }
+
+        if (letter) {
+            begin = segmentBegin;
+            end = segmentEnd;
+            return true;
+        }
+
+        if (index == 0) {
+            return false;
+        }
+
+        --index;
+    }
+}
+
+void EditableText::ExtendUnitSelection(usize begin, usize end) noexcept {
+    // 처음 고른 단위보다 앞이면 처음 단위의 끝에서 앞으로, 아니면 처음 단위의 시작에서 뒤로 넓힌다.
+    if (begin < unitBegin_) {
+        MoveCaret(unitEnd_, false);
+        MoveCaret(begin, true);
+    } else {
+        MoveCaret(unitBegin_, false);
+        MoveCaret(end > unitEnd_ ? end : unitEnd_, true);
+    }
+}
+
+void EditableText::MarkInteraction() noexcept {
+    lastInteraction_ = FindFrameTime().current;
+    InvalidatePaint();
+}
+
+bool EditableText::IsCaretVisible() const noexcept {
+    // UE: 상호작용 뒤 CaretBlinkPauseTime은 늘 보이고, 그 뒤는 RoundToFloat(MakePulsatingValue(t,
+    // BlinksPerSecond))가 1일 때만 보인다 — 0.5 + 0.5·sin(π/2 + 2π·t·BlinksPerSecond)를 반올림한
+    // 켜짐·꺼짐 사각파다.
+    const double elapsed = FindFrameTime().current - lastInteraction_;
+    if (!(elapsed >= 0) || elapsed < CaretBlinkPauseTime) {
+        return true;
+    }
+
+    const double phase =
+        math::Pi<double> * 0.5 + 2.0 * math::Pi<double> * elapsed * BlinksPerSecond;
+    const double pulse = 0.5 + 0.5 * math::Sin(phase);
+    return math::Floor(pulse + 0.5) >= 1.0;
 }
 
 void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
@@ -1090,7 +1296,7 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
 }
 
 Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
-    if (!focused_) {
+    if (!focused_ || !IsCaretVisible()) {
         return Result<void>::Success();
     }
 
