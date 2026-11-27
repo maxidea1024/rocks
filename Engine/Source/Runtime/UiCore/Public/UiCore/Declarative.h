@@ -40,7 +40,7 @@ struct ElementArgs {
 };
 
 // 슬롯 목록에 복사해도 자식의 수명과 최초 생성 오류가 함께 보존된다.
-struct ElementChild {
+struct ROCKS_UICORE_API ElementChild {
     ElementChild() noexcept = default;
     template <typename T>
     ElementChild(const SharedPtr<T>& child) noexcept : element(child) {
