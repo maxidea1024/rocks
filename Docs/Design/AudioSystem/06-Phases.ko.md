@@ -16,7 +16,7 @@
 | PR9 | 앱 수명 이벤트(활성·비활성·백그라운드·오디오 포커스) | 데스크톱 창 포커스는 구현(PlatformWindow), 앱 수준 이벤트는 설계(PlatformLayer "앱 수명 이벤트" 절) | Windows·macOS 활성 이벤트는 AU3과, Android는 AU9와 함께 구현 | AU9 |
 | PR10 | 에셋 A2f 임포트 프레임워크 | A2f1a 구현, A2f1b·A2f2 설계(7.1절 18) | 계획 순서대로 | AU4 |
 | PR11 | 에셋 A3 AssetNugget·A4 AssetCooker | 설계 | 계획 순서대로 | AU5, AU6 |
-| PR12 | 오디오 재생 준비 티켓·sidecar 범위 읽기 | 없음(`ReadyMask`는 Cpu·Render) | AssetSystem 개정 | AU6 |
+| PR12 | sidecar 범위 읽기(AssetSystem 20절 — 형식 PR12a·쿠킹 PR12b·런타임 손잡이 PR12c, 설계 7c0dfb41d). 준비 티켓은 오디오(AU6b) 몫이다(에셋은 읽기 요청 하나의 상태만 준다 — 개정 44) | 없음(`ReadyMask`는 Cpu·Render) | AssetSystem 개정 | AU6b |
 | PR13 | CVar(구현)·기기 품질 프로필(Config CF4) | 일부 | CF4 | AU9 |
 | PR14 | Trace | 구현(TR1–TR5) | 오디오 채널만 추가 | — |
 | PR15 | Tryout | 설계(계획 §22.6) | AU3은 정리 계약만, 실제 시험은 Tryout 구현 뒤 | AU9 |
