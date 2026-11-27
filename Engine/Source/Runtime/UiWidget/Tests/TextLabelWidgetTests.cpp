@@ -8,7 +8,7 @@ namespace rocks::ui {
 namespace {
 
 // 실제 글꼴 서비스 대신 클러스터 하나의 폭을 고정해 재구성과 실패 처리를 검사한다.
-class TestTextShaper final : public WidgetTextShaper {
+class TestTextShaper final : public TextShaper {
 public:
     Result<void> Shape(TextLabel& label, const Text& value, float size) noexcept override {
         TextPersistentView view;

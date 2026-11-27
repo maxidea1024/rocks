@@ -1,7 +1,7 @@
 #pragma once
 
 #include <UiWidget/TextLayoutWidget.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 
 namespace rocks::ui {
 
@@ -33,7 +33,7 @@ private:
     ROCKS_PROPERTY(Name = "tint") LinearColor tint_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "ellipsis") bool ellipsis_ = false;
     ROCKS_NATIVE() Allocator& allocator_;
-    ROCKS_NATIVE() SharedPtr<WidgetTextShaper> shaper_;
+    ROCKS_NATIVE() SharedPtr<TextShaper> shaper_;
 };
 
 } // namespace rocks::ui

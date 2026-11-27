@@ -502,7 +502,7 @@ private:
 //
 // 사용 예:
 //   if (auto* button = ElementCast<Button>(element)) { button->SetEnabled(false); }
-//   auto& editor = StaticElementCast<EditableTextElement>(*live);
+//   auto& editor = StaticElementCast<EditableText>(*live);
 namespace detail {
 
 inline bool SameElementTypeName(const char* x, const char* y) noexcept {

@@ -1,6 +1,7 @@
 #include <Core/ScopeExit.h>
 #include <UiWidget/ComboBoxWidgetBase.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
+#include <UiWidget/WidgetFontSize.h>
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
@@ -90,7 +91,7 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::MakeOption(ObjectRegistry& object
     }
 
     auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
-    if (!tree || !tree.Value().Get().Value()->TextShaper()) {
+    if (!tree || !tree.Value().Get().Value()->GetTextShaper()) {
         return Result<SharedPtr<Element>>::Failure(tree ? ErrorCode::NotReady : tree.Error());
     }
 
@@ -111,8 +112,8 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::MakeOption(ObjectRegistry& object
         return Result<SharedPtr<Element>>::Failure(label.Error());
     }
 
-    auto shaped = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(),
-                                                                  DefaultWidgetFontSize);
+    auto shaped = tree.Value().Get().Value()->GetTextShaper()->Shape(*label.Value(), text.Value(),
+                                                                     DefaultWidgetFontSize);
     return shaped ? Result<SharedPtr<Element>>::Success(Move(label.Value()))
                   : Result<SharedPtr<Element>>::Failure(shaped.Error());
 }

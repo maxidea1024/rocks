@@ -56,7 +56,7 @@ Result<SharedPtr<Element>> TextLabelWidget::BuildElement(ObjectRegistry& objects
         return Result<SharedPtr<Element>>::Failure(tree.Error());
     }
 
-    shaper_ = tree.Value().Get().Value()->TextShaper();
+    shaper_ = tree.Value().Get().Value()->GetTextShaper();
     auto shaped = Shape(*label.Value(), text_, fontSize_);
     if (!shaped) {
         shaper_.Reset();

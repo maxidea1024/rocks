@@ -1,14 +1,23 @@
-#include "EditableTextElement.h"
+#include <UiFramework/Controls/EditableText.h>
 #include <UiWidget/EditableTextWidget.h>
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
 
+namespace {
+
+EditableText* LiveEditor(const Widget& widget) noexcept {
+    auto live = widget.CachedElement();
+    return live ? &StaticElementCast<EditableText>(*live) : nullptr;
+}
+
+} // namespace
+
 EditableTextWidget::EditableTextWidget(Allocator& allocator) noexcept : text_(allocator) {
 }
 
 TextLabel& EditableTextWidget::ResolveTextLabel(Element& element) const noexcept {
-    return StaticElementCast<EditableTextElement>(element).Label();
+    return StaticElementCast<EditableText>(element).Label();
 }
 
 bool EditableTextWidget::IsMultiline() const noexcept {
@@ -28,19 +37,12 @@ bool EditableTextWidget::IsReadOnly() const noexcept {
 }
 
 void EditableTextWidget::SetReadOnly(bool readOnly) noexcept {
-    if (readOnly) {
-        if (auto live = CachedElement()) {
-            StaticElementCast<EditableTextElement>(*live).CancelComposition(*this);
-        }
+    if (auto* editor = LiveEditor(*this)) {
+        editor->SetReadOnly(readOnly);
     }
 
     if (readOnly_ != readOnly) {
         readOnly_ = readOnly;
-        if (auto live = CachedElement()) {
-            // IME 허용이 바뀌었다(읽기 전용은 IME를 끈다 — 19.2절).
-            StaticElementCast<EditableTextElement>(*live).RefreshTextInput();
-        }
-
         NotifyPropertyChanged("readOnly");
     }
 }
@@ -60,34 +62,30 @@ Result<void> EditableTextWidget::SetText(StringView text) noexcept {
         return assigned;
     }
 
-    auto result = ExchangeText(copy);
-    if (result) {
-        if (auto live = CachedElement()) {
-            StaticElementCast<EditableTextElement>(*live).ClearHistory();
+    if (auto* editor = LiveEditor(*this)) {
+        auto applied = editor->SetText(text);
+        if (!applied) {
+            return applied;
         }
     }
 
-    return result;
+    text_.Swap(copy);
+    NotifyPropertyChanged("text");
+    return Result<void>::Success();
 }
 
-Result<void> EditableTextWidget::ExchangeText(String& copy) noexcept {
-    if (auto live = CachedElement()) {
-        auto& editor = StaticElementCast<EditableTextElement>(*live);
-        auto shaped = editor.Shape(copy.View(), fontSize_, password_);
-        if (!shaped) {
-            return shaped;
+void EditableTextWidget::OnEditedText(StringView text) noexcept {
+    // Element가 바꾼 글자를 속성에 반영한다. 할당 실패면 속성이 Element보다 뒤처지므로 통지하지
+    // 않는다(다음 편집에서 다시 맞춘다).
+    if (text != text_.View()) {
+        if (!text_.TryAssign(text)) {
+            return;
         }
 
-        editor.MoveCaret(copy.ByteCount(), false);
-    }
-
-    const bool changed = text_.View() != copy.View();
-    text_.Swap(copy);
-    if (changed) {
         NotifyPropertyChanged("text");
     }
 
-    return Result<void>::Success();
+    changed_.ExecuteIfBound(text);
 }
 
 bool EditableTextWidget::IsPassword() const noexcept {
@@ -95,27 +93,19 @@ bool EditableTextWidget::IsPassword() const noexcept {
 }
 
 Result<void> EditableTextWidget::SetPassword(bool password) noexcept {
-    if (password != password_) {
-        if (auto live = CachedElement()) {
-            auto& editor = StaticElementCast<EditableTextElement>(*live);
-            auto shaped = editor.Shape(text_.View(), fontSize_, password);
-            if (!shaped) {
-                return shaped;
-            }
-
-            editor.MoveCaret(text_.ByteCount(), false);
-            editor.ClearHistory();
-        }
-
-        password_ = password;
-        if (auto live = CachedElement()) {
-            // 비밀번호 입력란은 IME를 끈다(19.2절).
-            StaticElementCast<EditableTextElement>(*live).RefreshTextInput();
-        }
-
-        NotifyPropertyChanged("password");
+    if (password == password_) {
+        return Result<void>::Success();
     }
 
+    if (auto* editor = LiveEditor(*this)) {
+        auto applied = editor->SetPassword(password);
+        if (!applied) {
+            return applied;
+        }
+    }
+
+    password_ = password;
+    NotifyPropertyChanged("password");
     return Result<void>::Success();
 }
 
@@ -125,10 +115,10 @@ Result<void> EditableTextWidget::SetFontSize(float size) noexcept {
     }
 
     if (fontSize_ != size) {
-        if (auto live = CachedElement()) {
-            auto shaped = StaticElementCast<EditableTextElement>(*live).ResizeText(*this, size);
-            if (!shaped) {
-                return shaped;
+        if (auto* editor = LiveEditor(*this)) {
+            auto applied = editor->SetFontSize(size);
+            if (!applied) {
+                return applied;
             }
         }
 
@@ -155,9 +145,8 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
         copy.Value() = {};
     }
 
-    if (auto live = CachedElement()) {
-        auto ready = StaticElementCast<EditableTextElement>(*live).SetCaption(copy.Value(),
-                                                                              fontSize_, error);
+    if (auto* editor = LiveEditor(*this)) {
+        auto ready = error ? editor->SetError(copy.Value()) : editor->SetHintText(copy.Value());
         if (!ready) {
             return ready;
         }
@@ -185,6 +174,10 @@ bool EditableTextWidget::HasError() const noexcept {
 }
 
 void EditableTextWidget::SetSelectAllTextWhenFocused(bool value) noexcept {
+    if (auto* editor = LiveEditor(*this)) {
+        editor->SetSelectAllTextWhenFocused(value);
+    }
+
     if (selectAllOnFocus_ != value) {
         selectAllOnFocus_ = value;
         NotifyPropertyChanged("selectAllOnFocus");
@@ -192,6 +185,10 @@ void EditableTextWidget::SetSelectAllTextWhenFocused(bool value) noexcept {
 }
 
 void EditableTextWidget::SetSelectAllTextOnCommit(bool value) noexcept {
+    if (auto* editor = LiveEditor(*this)) {
+        editor->SetSelectAllTextOnCommit(value);
+    }
+
     if (selectAllOnCommit_ != value) {
         selectAllOnCommit_ = value;
         NotifyPropertyChanged("selectAllOnCommit");
@@ -199,27 +196,25 @@ void EditableTextWidget::SetSelectAllTextOnCommit(bool value) noexcept {
 }
 
 void EditableTextWidget::SetRevertTextOnEscape(bool value) noexcept {
+    if (auto* editor = LiveEditor(*this)) {
+        editor->SetRevertTextOnEscape(value);
+    }
+
     if (revertOnEscape_ != value) {
         revertOnEscape_ = value;
-        if (auto live = CachedElement()) {
-            StaticElementCast<EditableTextElement>(*live).RememberFocusText(*this);
-        }
-
         NotifyPropertyChanged("revertOnEscape");
     }
 }
 
 void EditableTextWidget::SelectAllText() noexcept {
-    if (auto live = CachedElement()) {
-        StaticElementCast<EditableTextElement>(*live).SelectAll();
+    if (auto* editor = LiveEditor(*this)) {
+        editor->SelectAllText();
     }
 }
 
 StringView EditableTextWidget::SelectedText() const noexcept {
-    auto live = CachedElement();
-    return live && !IsPassword()
-               ? StaticElementCast<EditableTextElement>(*live).Selection(GetText())
-               : StringView{};
+    const auto* editor = LiveEditor(*this);
+    return editor ? editor->SelectedText() : StringView{};
 }
 
 void EditableTextWidget::SetOnChanged(Delegate<void(StringView)>&& callback) noexcept {
@@ -229,18 +224,6 @@ void EditableTextWidget::SetOnChanged(Delegate<void(StringView)>&& callback) noe
 void EditableTextWidget::SetOnCommitted(
     Delegate<void(StringView, TextCommitReason)>&& callback) noexcept {
     committed_ = Move(callback);
-}
-
-void EditableTextWidget::Commit(TextCommitReason reason) noexcept {
-    if (!committed_.IsBound()) {
-        return;
-    }
-
-    // 수신자가 SetText를 호출해도 전달한 문자열을 계속 읽을 수 있게 보존한다.
-    auto snapshot = text_.TryClone(text_.GetAllocator());
-    if (snapshot) {
-        committed_.ExecuteIfBound(snapshot.Value().View(), reason);
-    }
 }
 
 Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -255,33 +238,66 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
         return Result<SharedPtr<Element>>::Failure(tree.Error());
     }
 
+    if (errorText_.IsValid() && !HasBox()) {
+        return Result<SharedPtr<Element>>::Failure(ErrorCode::InvalidArgument);
+    }
+
     auto& allocator = objects.ObjectAllocator();
-    auto made = SharedPtr<EditableTextElement>::TryMake(
-        allocator, allocator, objects, Handle(), tree.Value().Get().Value()->TextShaper(),
+    auto made = SharedPtr<EditableText>::TryMake(
+        allocator, allocator, tree.Value().Get().Value()->GetTextShaper(),
         tree.Value().Get().Value()->GetPlatform(), IsMultiline(), HasBox());
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
 
-    auto init = made.Value()->Initialize(text_.View(), fontSize_, password_);
-    if (!init) {
-        return Result<SharedPtr<Element>>::Failure(init.Error());
+    auto& editor = *made.Value();
+    editor.SetReadOnly(readOnly_);
+    editor.SetSelectAllTextWhenFocused(selectAllOnFocus_);
+    editor.SetSelectAllTextOnCommit(selectAllOnCommit_);
+    editor.SetRevertTextOnEscape(revertOnEscape_);
+    auto ready = editor.SetPassword(password_);
+    if (ready) {
+        ready = editor.SetFontSize(fontSize_);
     }
 
-    auto layout = ApplyTextLayout(made.Value()->Label());
-    if (layout && hintText_.IsValid()) {
-        layout = made.Value()->SetCaption(hintText_, fontSize_, false);
+    if (ready && hintText_.IsValid()) {
+        ready = editor.SetHintText(hintText_);
     }
 
-    if (layout && errorText_.IsValid()) {
-        layout = HasBox() ? made.Value()->SetCaption(errorText_, fontSize_, true)
-                          : Result<void>::Failure(ErrorCode::InvalidArgument);
+    if (ready && errorText_.IsValid()) {
+        ready = editor.SetError(errorText_);
     }
 
-    if (!layout) {
-        return Result<SharedPtr<Element>>::Failure(layout.Error());
+    if (ready) {
+        ready = editor.Initialize(text_.View(), fontSize_);
     }
 
+    if (ready) {
+        ready = ApplyTextLayout(editor.Label());
+    }
+
+    if (!ready) {
+        return Result<SharedPtr<Element>>::Failure(ready.Error());
+    }
+
+    // 해제된 Element가 뒤늦게 보낸 사건은 재구성된 Widget에 전달하지 않는다(BindLiveWidgetEvent와
+    // 같은 확인).
+    const auto owner = Handle();
+    const Element* native = made.Value().Get();
+    editor.SetOnTextChanged(Delegate<void(StringView)>::CreateLambda(
+        [&objects, owner, native](StringView text) noexcept {
+            auto widget = objects.ResolveForWrite<EditableTextWidget>(objects.OwnerAccess(), owner);
+            if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
+                widget.Value().Get().Value()->OnEditedText(text);
+            }
+        }));
+    editor.SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
+        [&objects, owner, native](StringView text, TextCommitReason reason) noexcept {
+            auto widget = objects.ResolveForWrite<EditableTextWidget>(objects.OwnerAccess(), owner);
+            if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
+                widget.Value().Get().Value()->committed_.ExecuteIfBound(text, reason);
+            }
+        }));
     return Result<SharedPtr<Element>>::Success(Move(made.Value()));
 }
 

@@ -1,9 +1,9 @@
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 
 namespace rocks::ui {
 
-Result<SharedPtr<TextLabel>> WidgetTextShaper::ShapeEllipsis(Allocator& allocator,
-                                                             float fontSize) noexcept {
+Result<SharedPtr<TextLabel>> TextShaper::ShapeEllipsis(Allocator& allocator,
+                                                       float fontSize) noexcept {
     auto marker = SharedPtr<TextLabel>::TryMake(allocator, allocator);
     if (!marker) {
         return marker;

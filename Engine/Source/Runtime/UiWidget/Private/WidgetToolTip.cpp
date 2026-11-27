@@ -3,7 +3,7 @@
 #include <UiFramework/Popups/ToolTip.h>
 #include <UiWidget/Widget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 #include <UiFramework/Layout/Frame.h>
 
 namespace rocks::ui {
@@ -94,8 +94,7 @@ Result<void> Widget::ApplyToolTip(ObjectRegistry& objects, Element& owner, const
     auto& allocator = objects.ObjectAllocator();
     return owner.SetToolTipFactory(
         Element::ToolTipFactory::CreateLambda(
-            [shaper =
-                 tree ? tree.Value().Get().Value()->TextShaper() : SharedPtr<WidgetTextShaper>{},
+            [shaper = tree ? tree.Value().Get().Value()->GetTextShaper() : SharedPtr<TextShaper>{},
              body = Move(shared.Value()), &allocator]() noexcept -> Result<SharedPtr<Element>> {
                 if (!shaper) {
                     return Result<SharedPtr<Element>>::Failure(ErrorCode::NotReady);

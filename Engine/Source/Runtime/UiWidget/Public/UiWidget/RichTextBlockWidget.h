@@ -3,7 +3,7 @@
 #include <UiWidget/RichTextDecorator.h>
 #include <UiWidget/RichTextStyle.h>
 #include <UiWidget/TextLayoutWidget.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 
 namespace rocks::ui {
 
@@ -45,7 +45,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "ellipsis") bool ellipsis_ = false;
     ROCKS_NATIVE() Allocator& allocator_;
     ROCKS_NATIVE() SharedPtr<RichTextDecorator> decorator_;
-    ROCKS_NATIVE() SharedPtr<WidgetTextShaper> shaper_;
+    ROCKS_NATIVE() SharedPtr<TextShaper> shaper_;
 };
 
 } // namespace rocks::ui

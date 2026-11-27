@@ -33,11 +33,11 @@ Result<RootRef<Widget>> WidgetTree::ConstructWidget(ObjectRegistry& objects, Typ
     return objects.TryPin<Widget>(access, handle.Value());
 }
 
-void WidgetTree::SetTextShaper(const SharedPtr<WidgetTextShaper>& shaper) noexcept {
+void WidgetTree::SetTextShaper(const SharedPtr<TextShaper>& shaper) noexcept {
     textShaper_ = shaper;
 }
 
-const SharedPtr<WidgetTextShaper>& WidgetTree::TextShaper() const noexcept {
+const SharedPtr<TextShaper>& WidgetTree::GetTextShaper() const noexcept {
     return textShaper_;
 }
 

@@ -38,7 +38,7 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 | UE 클래스 (파일) | 에디터 용도 | Rocks |
 |---|---|---|
 | `STextBlock` (`S/Widgets/Text/STextBlock.h`) | 모든 레이블 | **부분** `TextLabel` (`UF/Text/TextLabel.h`). 줄바꿈, 정렬, 말줄임, 밑줄·취소선, hit test, caret 좌표는 있다. 받는 것은 **이미 shaping한 결과**이고, `FontInfo`와 크기만 받아 최종 배율로 스스로 shaping하는 기능은 아직 없다(스펙 3.12절, UW4에서 할 예정). 검색어 강조(`HighlightText`)도 없다 |
-| `SEditableText`·`SEditableTextBox` (`S/Widgets/Input/SEditableTextBox.h`) | 이름 입력, 검색, 디테일 문자열 값 | **부분**. 구현(`EditableTextElement`: IME 조합, 클립보드, undo·redo 64단계, 비밀번호, 힌트, 오류 표시)은 있다. 다만 `UW/Private/EditableTextElement.h`에 있고 생성자가 `ObjectRegistry`·`ObjectHandle`을 받아 Widget 층에 묶여 있다. **에디터(Element 층)에서는 쓸 수 없다.** UiFramework로 옮기는 일은 UW9 범위다 |
+| `SEditableText`·`SEditableTextBox` (`S/Widgets/Input/SEditableTextBox.h`) | 이름 입력, 검색, 디테일 문자열 값 | **부분**. UiFramework `EditableText`(UW9b — IME 조합, 클립보드, undo·redo 64단계, 비밀번호, 힌트, 오류 표시)가 글자 상태를 들고 Element 층에서 쓸 수 있다. 스타일·`EditableTextBox`·단어 선택·caret 깜박임은 UW4f2(21.2절) |
 | `SMultiLineEditableText(Box)` | 설명, 여러 줄 문자열 | **부분**. 같은 Element의 multiline 모드이고, 같은 제약이 있다 |
 | `SInlineEditableTextBlock` (`S/Widgets/Text/SInlineEditableTextBlock.h`) | 이름 바꾸기(F2): Outliner, Content Browser, 변수 목록 | **없음** |
 | `SRichTextBlock` + `RichTextLayoutMarshaller` (`S/Widgets/Text/`, `S/Framework/Text/`) | 도움말, 경고 상자, 알림 본문 | **부분** `RichTextBlockWidget` (`UW/Public/UiWidget/RichTextBlockWidget.h`)이 Widget 층에만 있다. Element 층의 `RichTextLabel`(스펙 3.12절)은 없다 |

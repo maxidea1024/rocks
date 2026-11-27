@@ -5,14 +5,14 @@
 #include <UiWidget/BorderWidget.generated.h>
 #include <UiWidget/TextLabelWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 
 namespace rocks::ui {
 
 namespace {
 
 // 글자마다 폭 8의 클러스터를 만드는 셰이퍼다(툴팁 글자 시험용).
-class TipTextShaper final : public WidgetTextShaper {
+class TipTextShaper final : public TextShaper {
 public:
     Result<void> Shape(TextLabel& label, const Text& value, float size) noexcept override {
         TextPersistentView view;

@@ -124,7 +124,7 @@ UI 코드 일부가 9절 순서(UT0·CB2 선행)보다 먼저, 글꼴 시스템�
 
 **UW5 규칙 점검(2026-11-26).** UI 모듈 전체(UiCore·UiFramework·UiRender·UiWidget·UiScreens·UiWorld·UiDemo 소스 590개): clang-format 위반 0, 빈 줄 규칙 위반 0, Build.cs 영어, policy 통과. 이름 없는 수치 약 110곳을 이름 있는 상수로 바꿨다 — 여러 파일이 같이 쓰는 값은 공개 헤더(UiCore `TimeUnits.h`의 SecondsPerNanosecond, `InputMetrics.h`의 PointerDragThreshold·WheelScrollStep·WheelScrollRows, `Element.h` NoCursorOverride, `NavigationRule.h` NavigationDirectionCount, UiFramework `MaxDockTreeDepth`·`MaxActivityIndicatorPieces`·`AutoBlurKernelSize`·`MaxBlurKernelSize`·`MaxSpinBoxFractionalDigits`, UiWidget `DefaultWidgetFontSize`, UiScreens `AllScreenInputDevices`), 나머지는 파일 안 상수(유니티 빌드라 모듈 안에서 이름이 겹치지 않게). 읽기 손상 오류는 Core 규칙(AssetSystem 19장 — 읽은 byte 손상 CorruptData, 지원하지 않는 형식·버전 Unsupported)에 맞춰 도킹 배치 읽기(`RestoreLayout`·`RestoreLegacyLayout`)와 단축키 바인딩 `BindingManager::Load`를 바꿨다.
 
-병합 우선(사용자 결정 2026-11-26): 지금 묶음(UW7c·UW7d 2차 리뷰 반영 R16, UW4o)을 끝낸 뒤 engine-runtime 동기화(그사이 들어온 API 변경 반영) → UW5 → UW6 → UW7 계약 → UW8 → UW9 → 리뷰어 판정 → engine-runtime 병합·push를 먼저 하고, 아래 UW4 순서의 나머지(UW4f2 이후)는 병합 뒤에 잇는다(UW4f2는 UW9의 편집 텍스트 이동과 같은 일이라 UW9에서 한다).
+병합 우선(사용자 결정 2026-11-26): 지금 묶음(UW7c·UW7d 2차 리뷰 반영 R16, UW4o)을 끝낸 뒤 engine-runtime 동기화(그사이 들어온 API 변경 반영) → UW5 → UW6 → UW7 계약 → UW8 → UW9 → 리뷰어 판정 → engine-runtime 병합·push를 먼저 하고, 아래 UW4 순서의 나머지(UW4f2 이후)는 병합 뒤에 잇는다(UW4f2 중 상태 소유 이동과 셰이퍼 경계는 UW9b에서 한다 — 나머지는 병합 뒤 UW4f2, 21.2절).
 
 순서: UW4a3 → UW4t → UW7b → UW7c 주 메뉴 → UW7d 팝업 허용 영역 → UW4o → UW4f2 → UW4f3 → UW4b 2차(UW4n 숫자 입력·UW4v 스크롤 막대 포함 — 편집 텍스트가 필요해 UW4f 바로 뒤) → UW4p 색 선택 → UW4r → UW4m → UW4g → UW4h 설계·구현 → UW4c.
 

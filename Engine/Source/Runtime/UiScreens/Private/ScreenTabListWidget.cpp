@@ -5,7 +5,8 @@
 #include <UiWidget/WidgetSwitcherWidget.generated.h>
 #include <UiWidget/WidgetSlot.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
+#include <UiWidget/WidgetFontSize.h>
 #include <UiFramework/Layout/HorizontalStack.h>
 #include <UiFramework/Layout/SizeBox.h>
 
@@ -388,7 +389,7 @@ Result<SharedPtr<Button>> ScreenTabListWidget::MakeButton(ObjectRegistry& object
     }
 
     auto tree = objects.Resolve<WidgetTree>(objects.OwnerAccess(), outer.Value());
-    if (!tree || !tree.Value().Get().Value()->TextShaper()) {
+    if (!tree || !tree.Value().Get().Value()->GetTextShaper()) {
         return Result<SharedPtr<Button>>::Failure(ErrorCode::NotReady);
     }
 
@@ -401,8 +402,8 @@ Result<SharedPtr<Button>> ScreenTabListWidget::MakeButton(ObjectRegistry& object
                                                            : button.Error());
     }
 
-    auto result = tree.Value().Get().Value()->TextShaper()->Shape(*label.Value(), text.Value(),
-                                                                  DefaultWidgetFontSize);
+    auto result = tree.Value().Get().Value()->GetTextShaper()->Shape(*label.Value(), text.Value(),
+                                                                     DefaultWidgetFontSize);
     if (result) {
         result = button.Value()->SetPadding(TabButtonPadding);
     }

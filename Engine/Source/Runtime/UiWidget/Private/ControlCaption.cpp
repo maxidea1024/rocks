@@ -1,7 +1,8 @@
 #include "ControlCaption.h"
 
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
+#include <UiWidget/WidgetFontSize.h>
 
 namespace rocks::ui {
 
@@ -20,7 +21,7 @@ AttachControlCaption(ObjectRegistry& objects, ObjectHandle owner, Element& contr
         return Result<Caption>::Failure(tree.Error());
     }
 
-    auto shaper = tree.Value().Get().Value()->TextShaper();
+    auto shaper = tree.Value().Get().Value()->GetTextShaper();
     if (!shaper) {
         return Result<Caption>::Failure(ErrorCode::NotReady);
     }

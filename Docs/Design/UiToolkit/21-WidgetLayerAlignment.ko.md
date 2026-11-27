@@ -33,14 +33,19 @@ UD12 (2)는 UE 고유 합성어를 서술형 이름으로 바꾸라고 한다. (
   - 생성자가 `ObjectRegistry`·`ObjectHandle`을 받는다. 글자 상태는 `EditableTextWidget`(Object)에 있고, 편집할 때마다 등록부에서 Widget을 다시 찾아 바꾼다.
   - 그래서 에디터(Element 층)에서는 쓸 수 없다(15장 1절).
 - **바꿈(UE `SEditableText`·`SMultiLineEditableText` ↔ `UEditableText`).**
-  - UiFramework `Controls/EditableText`가 글자·선택·조합·이력을 스스로 든다. `Args`는 글자, 힌트, 글꼴 크기, 비밀번호, 읽기 전용, 여러 줄, 상자 모양, 최대 길이다.
+  - UiFramework `Controls/EditableText`가 글자·선택·조합·이력을 스스로 든다. 생성자는 셰이퍼, 클립보드(`Platform`), 여러 줄, 상자 모양을 받는다. `Initialize(글자, 글꼴 크기)`가 레이블을 만든다. 힌트·오류·비밀번호·읽기 전용·초점 때 전체 선택·확정 때 전체 선택·Esc 되돌리기는 setter다(그 전에 정해도 된다). 최대 길이는 UE에 없는 기능이라 두지 않는다.
   - 사건은 delegate다:
-    - `onTextChanged(StringView)` — UE `OnTextChanged`. 조합 중에는 부르지 않는다.
-    - `onTextCommitted(StringView, TextCommitMethod)` — UE `OnTextCommitted`, `ETextCommit` Default·OnEnter·OnUserMovedFocus·OnCleared.
-    - `onFocusReceived`·`onFocusLost`.
+    - `onTextChanged(StringView)` — UE `OnTextChanged`. 사용자 편집만 부르고, 조합 중에는 부르지 않는다.
+    - `onTextCommitted(StringView, TextCommitReason)` — UE `OnTextCommitted`. 사유는 지금의 Enter·FocusLost 둘이다(UE `ETextCommit` OnEnter·OnUserMovedFocus). Default·OnCleared는 부르는 곳이 생길 때 더한다.
   - 글자 셰이핑은 UiFramework `TextShaper` 인터페이스로 받는다. 지금의 `WidgetTextShaper`가 이 이름으로 내려온다. 셰이핑이 화면 언어·글꼴·아틀라스에 묶이는 것은 Widget 층의 일이 아니라 호스트의 일이기 때문이다. 이름의 `Widget` 접두도 뺀다.
   - Widget 층 `EditableTextWidget`·`MultiLineEditableTextWidget`·`…BoxWidget`은 UE `UEditableText`처럼 Element를 만들고 속성을 내린다. Element 사건을 받아 자기 속성(`text`)을 바꾸고 통지한다. `BindLiveWidgetEvent`로 수명을 확인하는 방식은 지금의 다른 Widget과 같다.
 - **동작 불변.** 이동 뒤에도 19.2절 IME 계약, undo 묶음, 비밀번호 마스킹, 오류 캡션이 같아야 한다. 지금의 `EditableTextWidgetTests` 전부가 그대로 통과해야 한다. Element 층 시험(Widget 없이 같은 장면)을 더한다.
+- **UW4f2와의 관계.** 9.1절은 UW4f2(편집 텍스트 공개)를 UW9에서 하기로 했다. UW9b는 그중 병합 조건인 두 가지를 한다: 상태 소유를 Element로 옮기기, 셰이퍼 경계. 나머지는 병합 뒤 UW4f2에 남긴다.
+  - `EditableTextStyle`·`EditableTextBoxStyle`
+  - `EditableTextBox` Element와 오류 표지 팝업
+  - 단어·줄 선택, undo 99단계, 힌트 불투명도, caret 깜박임
+  - 여러 줄 세로 스크롤 막대
+  - `TextShaper`는 지금의 `Shape(TextLabel&, const Text&, float)`를 그대로 내린다. UW4f2의 `FontStyle` 서명은 UW4 글꼴 자동 셰이핑과 함께 바꾼다.
 - **버린 대안.** Element가 Widget 모델 인터페이스(`EditableTextModel`)를 받는 방식이 있다. 이렇게 하면 두 층의 상태가 하나로 남지만, 에디터가 그 인터페이스를 구현해야 하고 UE 구조(Element가 글자를 든다)와 다르다.
 
 ### 21.3 화면 입력 설정 적용(UE CommonUI `FUIInputConfig`)

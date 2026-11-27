@@ -1,6 +1,7 @@
 #include <UiWidget/Widget.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
+#include <UiWidget/WidgetFontSize.h>
 
 namespace rocks::ui {
 
@@ -16,10 +17,10 @@ Result<void> ReadDescription(ObjectRegistry& objects, ObjectHandle owner, const 
     }
 
     auto tree = objects.Resolve<WidgetTree>(objects.OwnerAccess(), owner);
-    if (tree && tree.Value().Get().Value()->TextShaper()) {
+    if (tree && tree.Value().Get().Value()->GetTextShaper()) {
         TextLabel label(objects.ObjectAllocator());
         auto shaped =
-            tree.Value().Get().Value()->TextShaper()->Shape(label, value, DefaultWidgetFontSize);
+            tree.Value().Get().Value()->GetTextShaper()->Shape(label, value, DefaultWidgetFontSize);
         if (!shaped) {
             return shaped;
         }

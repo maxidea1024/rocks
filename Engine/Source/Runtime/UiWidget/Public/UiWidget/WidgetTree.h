@@ -6,7 +6,7 @@
 
 namespace rocks::ui {
 
-class WidgetTextShaper;
+class TextShaper;
 
 // 화면 한 개에 속한 위젯을 생성하고 루트와 안정 ID 색인을 관리한다.
 ROCKS_CLASS()
@@ -20,8 +20,8 @@ public:
     Result<void> SetRoot(ObjectRegistry& objects, ObjectHandle widget) noexcept;
     // 이 트리에서 새로 만드는 텍스트 위젯이 사용할 서비스다. 게임이나 에디터 화면별로
     // 서로 다른 로캘과 글리프 아틀라스를 연결할 수 있다. 이미 구성한 레이블은 기존 서비스를 쓴다.
-    void SetTextShaper(const SharedPtr<WidgetTextShaper>& shaper) noexcept;
-    const SharedPtr<WidgetTextShaper>& TextShaper() const noexcept;
+    void SetTextShaper(const SharedPtr<TextShaper>& shaper) noexcept;
+    const SharedPtr<TextShaper>& GetTextShaper() const noexcept;
     // 네이티브 요소를 만들기 전에 창 호스트의 OS 서비스를 지정한다.
     void SetPlatform(Platform platform) noexcept;
     Platform GetPlatform() const noexcept;
@@ -45,7 +45,7 @@ public:
 private:
     ROCKS_NATIVE() Platform platform_;
     ROCKS_NATIVE() WeakPtr<Element> host_;
-    ROCKS_NATIVE() SharedPtr<WidgetTextShaper> textShaper_;
+    ROCKS_NATIVE() SharedPtr<TextShaper> textShaper_;
     ROCKS_PROPERTY(ReadOnly, Name = "rootWidget") ObjectRef<Widget> root_;
 };
 

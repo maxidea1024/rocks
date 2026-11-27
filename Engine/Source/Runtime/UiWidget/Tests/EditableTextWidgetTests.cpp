@@ -5,14 +5,14 @@
 #include <UiWidget/EditableTextWidget.generated.h>
 #include <UiWidget/MultiLineEditableTextBoxWidget.generated.h>
 #include <UiWidget/MultiLineEditableTextWidget.generated.h>
-#include <UiWidget/WidgetTextShaper.h>
+#include <UiFramework/Text/TextShaper.h>
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
 
 namespace {
 
-class InputTestShaper final : public WidgetTextShaper {
+class InputTestShaper final : public TextShaper {
 public:
     explicit InputTestShaper(Allocator& allocator) noexcept : allocator_(allocator) {
     }

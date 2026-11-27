@@ -3,17 +3,14 @@
 #include <Core/Delegate.h>
 #include <Core/Text/String.h>
 #include <Localization/Text.h>
+#include <UiFramework/Controls/TextCommitReason.h>
 #include <UiWidget/TextLayoutWidget.h>
 
 namespace rocks::ui {
 
-class EditableTextElement;
-enum class TextCommitReason : uint8 {
-    Enter,
-    FocusLost
-};
-
-// 한 줄의 UTF-8 원문을 편집한다. 표시 문자열은 소유 WidgetTree의 셰이퍼를 사용한다.
+// 한 줄의 UTF-8 원문을 편집한다(UE UEditableText — Element는 UiFramework EditableText, UiToolkit
+// 21.2절). 표시 문자열은 소유 WidgetTree의 셰이퍼를 사용한다. 속성은 Element가 없을 때도 값을
+// 들고, Element가 있으면 그쪽으로 내린다. 사용자 편집은 Element 사건으로 받아 text 속성에 반영한다.
 // SetText는 프로그램에 의한 교체이며, 사용자 입력으로 바뀔 때만 OnChanged를 보낸다.
 // Enter로 입력을 확정하거나 포커스를 잃으면 OnCommitted가 현재 원문과 확정 사유를 전달한다.
 // 콜백의 StringView는 호출 동안만 빌린다. 보관하려면 소유 문자열에 복사한다.
@@ -52,10 +49,8 @@ protected:
     Result<SharedPtr<Element>> BuildElement(ObjectRegistry& objects) noexcept override;
 
 private:
-    friend class EditableTextElement;
-    void Commit(TextCommitReason reason) noexcept;
-    Result<void> ExchangeText(String& next) noexcept;
-
+    // Element의 사용자 편집을 받는다(text 속성 갱신·통지 뒤 onChanged).
+    void OnEditedText(StringView text) noexcept;
     Result<void> SetCaption(const Text& value, bool error) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "hintText") Text hintText_;
     ROCKS_PROPERTY(ReadOnly, Name = "errorText") Text errorText_;

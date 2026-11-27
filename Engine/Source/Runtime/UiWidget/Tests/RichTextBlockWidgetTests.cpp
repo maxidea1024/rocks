@@ -9,7 +9,7 @@ namespace rocks::ui {
 namespace {
 
 // 테스트 셰이퍼는 ASCII와 인라인 객체만 처리한다. 실제 GPU 없이도 아틀라스 선택과 색을 검증한다.
-class RunShaper final : public WidgetTextShaper {
+class RunShaper final : public TextShaper {
 public:
     Result<void> Shape(TextLabel& label, const Text& text, float size) noexcept override {
         TextPersistentView view;

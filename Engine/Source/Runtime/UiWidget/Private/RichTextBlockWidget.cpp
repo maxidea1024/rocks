@@ -182,7 +182,7 @@ Result<SharedPtr<Element>> RichTextBlockWidget::BuildElement(ObjectRegistry& obj
         return Result<SharedPtr<Element>>::Failure(width.Error());
     }
 
-    shaper_ = tree.Value().Get().Value()->TextShaper();
+    shaper_ = tree.Value().Get().Value()->GetTextShaper();
     auto shaped = Shape(*label.Value(), text_, fontSize_, styles_.View(), decorator_.Get());
     if (!shaped) {
         shaper_.Reset();

@@ -1,8 +1,6 @@
-#include "EditableTextElement.h"
+#include <UiFramework/Controls/EditableText.h>
 
-#include <Core/Text/StringBuilder.h>
 #include <UiCore/TextInputPositions.h>
-#include <UiWidget/EditableTextWidget.generated.h>
 
 namespace rocks::ui {
 
@@ -21,16 +19,16 @@ constexpr uint32 DeleteCodePoint = 0x7F;
 
 } // namespace
 
-EditableTextElement::EditableTextElement(Allocator& allocator, ObjectRegistry& registry,
-                                         ObjectHandle owner, SharedPtr<WidgetTextShaper> shaper,
-                                         Platform platform, bool multiline, bool boxed) noexcept
-    : Element(allocator), undo_(allocator), redo_(allocator), registry_(registry), owner_(owner),
-      shaper_(Move(shaper)), focusText_(allocator), platform_(platform),
-      padding_(boxed ? BoxedTextPadding : 0.0f), preview_(allocator), multiline_(multiline) {
+EditableText::EditableText(Allocator& allocator, SharedPtr<TextShaper> shaper, Platform platform,
+                           bool multiline, bool boxed) noexcept
+    : Element(allocator), allocator_(allocator), undo_(allocator), redo_(allocator),
+      shaper_(Move(shaper)), text_(allocator), focusText_(allocator), platform_(platform),
+      padding_(boxed ? BoxedTextPadding : 0.0f), preview_(allocator), multiline_(multiline),
+      boxed_(boxed) {
     SetClipToBounds(true);
 }
 
-EditableTextElement::~EditableTextElement() noexcept {
+EditableText::~EditableText() noexcept {
     // 서비스가 남은 기록을 이 문맥에 적용하지 않게 조합을 먼저 버린 뒤 끈다(19.2절).
     if (auto service = Move(textInput_)) {
         composing_ = false;
@@ -39,8 +37,17 @@ EditableTextElement::~EditableTextElement() noexcept {
     }
 }
 
-Result<void> EditableTextElement::Initialize(StringView text, float size, bool password) noexcept {
-    auto& allocator = registry_.ObjectAllocator();
+Result<void> EditableText::Initialize(StringView text, float size) noexcept {
+    if (label_) {
+        return Result<void>::Failure(ErrorCode::AlreadyExists);
+    }
+
+    if (!math::IsFinite(size) || size <= 0 ||
+        (!multiline_ && (text.Contains("\n") || text.Contains("\r")))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto& allocator = allocator_;
     auto child = SharedPtr<TextLabel>::TryMake(allocator, allocator);
     if (!child) {
         return Result<void>::Failure(child.Error());
@@ -52,21 +59,179 @@ Result<void> EditableTextElement::Initialize(StringView text, float size, bool p
         return added;
     }
 
-    auto shaped = Shape(text, size, password);
+    auto shaped = Shape(text, size, password_);
+    if (shaped) {
+        shaped = text_.TryAssign(text);
+    }
+
     if (shaped) {
         MoveCaret(text.ByteCount(), false);
+    }
+
+    // Initialize 전에 정한 캡션을 만든다.
+    const auto publish = [this](const Text& value, bool error) noexcept -> Result<void> {
+        if (!value.IsValid()) {
+            return Result<void>::Success();
+        }
+
+        auto caption = AddCaption(value, fontSize_, error);
+        if (!caption) {
+            return Result<void>::Failure(caption.Error());
+        }
+
+        PublishCaption(Move(caption.Value()), error);
+        return Result<void>::Success();
+    };
+    if (shaped) {
+        shaped = publish(hintText_, false);
+    }
+
+    if (shaped) {
+        shaped = publish(errorText_, true);
     }
 
     return shaped;
 }
 
-Result<void> EditableTextElement::Shape(StringView text, float size, bool password) noexcept {
+Result<void> EditableText::SetText(StringView text) noexcept {
+    if (!multiline_ && (text.Contains("\n") || text.Contains("\r"))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (text == text_.View()) {
+        return Result<void>::Success();
+    }
+
+    String copy(allocator_);
+    auto assigned = copy.TryAssign(text);
+    if (assigned) {
+        assigned = ExchangeText(copy);
+    }
+
+    if (assigned) {
+        ClearHistory();
+    }
+
+    return assigned;
+}
+
+StringView EditableText::GetText() const noexcept {
+    return text_.View();
+}
+
+Result<void> EditableText::ExchangeText(String& next) noexcept {
+    if (label_) {
+        auto shaped = Shape(next.View(), fontSize_, password_);
+        if (!shaped) {
+            return shaped;
+        }
+    }
+
+    text_.Swap(next);
+    if (label_) {
+        MoveCaret(text_.ByteCount(), false);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> EditableText::SetPassword(bool password) noexcept {
+    if (password == password_) {
+        return Result<void>::Success();
+    }
+
+    if (label_) {
+        auto shaped = Shape(text_.View(), fontSize_, password);
+        if (!shaped) {
+            return shaped;
+        }
+
+        MoveCaret(text_.ByteCount(), false);
+        ClearHistory();
+    }
+
+    password_ = password;
+    // 비밀번호 입력란은 IME를 끈다(19.2절).
+    if (textInput_) {
+        textInput_->Activate(*this);
+    }
+
+    return Result<void>::Success();
+}
+
+bool EditableText::IsPassword() const noexcept {
+    return password_;
+}
+
+void EditableText::SetReadOnly(bool readOnly) noexcept {
+    if (readOnly) {
+        CancelComposition();
+    }
+
+    if (readOnly_ != readOnly) {
+        readOnly_ = readOnly;
+        // IME 허용이 바뀌었다(읽기 전용은 IME를 끈다 — 19.2절).
+        if (textInput_) {
+            textInput_->Activate(*this);
+        }
+    }
+}
+
+void EditableText::SetSelectAllTextWhenFocused(bool enabled) noexcept {
+    selectAllOnFocus_ = enabled;
+}
+
+void EditableText::SetSelectAllTextOnCommit(bool enabled) noexcept {
+    selectAllOnCommit_ = enabled;
+}
+
+void EditableText::SetRevertTextOnEscape(bool enabled) noexcept {
+    if (revertOnEscape_ != enabled) {
+        revertOnEscape_ = enabled;
+        RememberFocusText();
+    }
+}
+
+bool EditableText::IsMultiline() const noexcept {
+    return multiline_;
+}
+
+bool EditableText::IsBoxed() const noexcept {
+    return boxed_;
+}
+
+void EditableText::SetOnTextChanged(Delegate<void(StringView)>&& callback) noexcept {
+    changed_ = Move(callback);
+}
+
+void EditableText::SetOnTextCommitted(
+    Delegate<void(StringView, TextCommitReason)>&& callback) noexcept {
+    committed_ = Move(callback);
+}
+
+void EditableText::NotifyChanged(StringView text) noexcept {
+    changed_.ExecuteIfBound(text);
+}
+
+void EditableText::Commit(TextCommitReason reason) noexcept {
+    if (!committed_.IsBound()) {
+        return;
+    }
+
+    // 수신자가 SetText를 불러도 전달한 문자열을 계속 읽을 수 있게 보존한다.
+    auto snapshot = text_.TryClone(allocator_);
+    if (snapshot) {
+        committed_.ExecuteIfBound(snapshot.Value().View(), reason);
+    }
+}
+
+Result<void> EditableText::Shape(StringView text, float size, bool password) noexcept {
     // 확정 글자로 셰이핑한다. 조합 중이면 앱이 글자를 바꾼 것이다(바인딩·되돌리기 — 19.2절).
     AbandonComposition();
     return ShapeText(text, size, password);
 }
 
-void EditableTextElement::AbandonComposition() noexcept {
+void EditableText::AbandonComposition() noexcept {
     if (!composing_) {
         return;
     }
@@ -80,7 +245,7 @@ void EditableTextElement::AbandonComposition() noexcept {
     }
 }
 
-Result<void> EditableTextElement::ShapeText(StringView text, float size, bool password) noexcept {
+Result<void> EditableText::ShapeText(StringView text, float size, bool password) noexcept {
     if (!text.IsEmpty() && !shaper_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -96,7 +261,7 @@ Result<void> EditableTextElement::ShapeText(StringView text, float size, bool pa
             return masked;
         }
     } else {
-        auto value = Text::Invariant(registry_.ObjectAllocator(), text);
+        auto value = Text::Invariant(allocator_, text);
         if (!value) {
             return Result<void>::Failure(value.Error());
         }
@@ -122,10 +287,10 @@ Result<void> EditableTextElement::ShapeText(StringView text, float size, bool pa
     return Result<void>::Success();
 }
 
-Result<void> EditableTextElement::ShapePassword(StringView text, float size) noexcept {
+Result<void> EditableText::ShapePassword(StringView text, float size) noexcept {
     // 실제 비밀번호를 셰이퍼에 전달하지 않는다. 가림 글리프 하나를 셰이핑하고
     // 원문 UTF-8 경계에 대응시켜 마우스 선택과 삭제가 같은 위치를 사용하게 한다.
-    auto& allocator = registry_.ObjectAllocator();
+    auto& allocator = allocator_;
     TextLabel bullet(allocator);
     auto value = Text::Invariant(allocator, "•");
     if (!value) {
@@ -175,11 +340,11 @@ Result<void> EditableTextElement::ShapePassword(StringView text, float size) noe
     return label_->SetShapedText(text, clusters.View(), glyphs.View(), bullet.LineHeight(), false);
 }
 
-TextLabel& EditableTextElement::Label() const noexcept {
+TextLabel& EditableText::Label() const noexcept {
     return *label_;
 }
 
-Vec2 EditableTextElement::ComputeDesiredSize(float) const noexcept {
+Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
     Vec2 text = label_->GetDesiredSize();
     if (hint_ && label_->GetText().IsEmpty()) {
         text.x = math::Max(text.x, hint_->GetDesiredSize().x);
@@ -191,7 +356,7 @@ Vec2 EditableTextElement::ComputeDesiredSize(float) const noexcept {
             math::Max(fontSize_, text.y) + padding_ * 2 + (error_ ? error.y + 2 : 0)};
 }
 
-Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
+Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
     const float width = math::Max(1.0f, geometry.size.x - padding_ * 2);
     const float height = math::Max(1.0f, geometry.size.y - padding_ * 2);
     float errorHeight = 0;
@@ -248,25 +413,21 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
     return arranged;
 }
 
-const StyleBrush* EditableTextElement::FocusOutlineBrush() const noexcept {
+const StyleBrush* EditableText::FocusOutlineBrush() const noexcept {
     return nullptr;
 }
 
-bool EditableTextElement::SupportsKeyboardFocus() const noexcept {
+bool EditableText::SupportsKeyboardFocus() const noexcept {
     return true;
 }
 
-void EditableTextElement::OnFocusReceived(uint32 user) noexcept {
+void EditableText::OnFocusReceived(uint32 user) noexcept {
     focused_ = true;
     focusUser_ = user;
-    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    if (model) {
-        auto* owner = model.Value().Get().Value();
-        RememberFocusText(*owner);
-        if (owner->selectAllOnFocus_) {
-            keepPointerSelection_ = dragging_;
-            SelectAll();
-        }
+    RememberFocusText();
+    if (selectAllOnFocus_) {
+        keepPointerSelection_ = dragging_;
+        SelectAllText();
     }
 
     textInput_ = FindTextInputService();
@@ -278,7 +439,7 @@ void EditableTextElement::OnFocusReceived(uint32 user) noexcept {
     InvalidatePaint();
 }
 
-void EditableTextElement::OnFocusLost(uint32 user) noexcept {
+void EditableText::OnFocusLost(uint32 user) noexcept {
     if (!focused_ || user != focusUser_) {
         return;
     }
@@ -296,22 +457,10 @@ void EditableTextElement::OnFocusLost(uint32 user) noexcept {
     }
 
     EndComposition();
-    auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    if (model) {
-        auto* widget = model.Value().Get().Value();
-        if (widget->CachedElement().Get() == this) {
-            widget->Commit(TextCommitReason::FocusLost);
-        }
-    }
+    Commit(TextCommitReason::FocusLost);
 }
 
-void EditableTextElement::RefreshTextInput() noexcept {
-    if (textInput_) {
-        textInput_->Activate(*this);
-    }
-}
-
-void EditableTextElement::MoveCaret(usize pos, bool extend) noexcept {
+void EditableText::MoveCaret(usize pos, bool extend) noexcept {
     // 새로 삽입한 코드 포인트가 다음 문자와 한 클러스터로 결합하는 경우 그 끝에 둔다.
     if (pos != 0 && pos < label_->GetText().ByteCount()) {
         for (const auto& cluster : label_->ShapedClusters()) {
@@ -333,7 +482,7 @@ void EditableTextElement::MoveCaret(usize pos, bool extend) noexcept {
     }
 }
 
-usize EditableTextElement::Adjacent(bool forward) const noexcept {
+usize EditableText::Adjacent(bool forward) const noexcept {
     usize previous = 0;
     for (const auto& cluster : label_->ShapedClusters()) {
         if (forward && cluster.byteEnd > caret_) {
@@ -350,20 +499,19 @@ usize EditableTextElement::Adjacent(bool forward) const noexcept {
     return previous;
 }
 
-void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize end,
-                                  StringView insertion) noexcept {
-    if (owner.IsReadOnly() || (begin == end && insertion.IsEmpty())) {
+void EditableText::Replace(usize begin, usize end, StringView insertion) noexcept {
+    if (readOnly_ || (begin == end && insertion.IsEmpty())) {
         return;
     }
 
-    const StringView before = owner.GetText();
+    const StringView before = text_.View();
     auto left = before.TryLeftBytes(begin);
     auto right = before.TryMidBytes(end);
     if (!left || !right) {
         return;
     }
 
-    StringBuilder<> result(registry_.ObjectAllocator());
+    StringBuilder<> result(allocator_);
     if (!result.TryAppend(left.Value()) || !result.TryAppend(insertion)) {
         return;
     }
@@ -373,20 +521,20 @@ void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize 
         return;
     }
 
-    auto& allocator = registry_.ObjectAllocator();
+    auto& allocator = allocator_;
     String next(allocator);
     if (!next.TryAssign(result.View()) ||
-        (!owner.IsPassword() && !undo_.TryEnsureCapacity(undo_.Size() + 1))) {
+        (!password_ && !undo_.TryEnsureCapacity(undo_.Size() + 1))) {
         return;
     }
 
     const usize previousAnchor = anchor_;
     const usize previousCaret = caret_;
-    if (!owner.ExchangeText(next)) {
+    if (!ExchangeText(next)) {
         return;
     }
 
-    if (!owner.IsPassword()) {
+    if (!password_) {
         if (undo_.Size() == MaxUndoSteps) {
             (void)undo_.TryRemoveAt(0);
         }
@@ -397,18 +545,17 @@ void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize 
 
     MoveCaret(pos, false);
     // 문자열은 콜백에서 다시 편집될 수 있다. 이 호출이 소유한 스냅샷을 전달한다.
-    owner.changed_.ExecuteIfBound(result.View());
+    NotifyChanged(result.View());
 }
 
-void EditableTextElement::CancelComposition(EditableTextWidget& owner) noexcept {
+void EditableText::CancelComposition() noexcept {
     if (composing_) {
         AbandonComposition();
-        (void)ShapeText(owner.GetText(), fontSize_, owner.IsPassword());
+        (void)ShapeText(text_.View(), fontSize_, password_);
     }
 }
 
-Result<void> EditableTextElement::AppendInsertion(StringView text,
-                                                  StringBuilder<>& out) const noexcept {
+Result<void> EditableText::AppendInsertion(StringView text, StringBuilder<>& out) const noexcept {
     // 클립보드·IME의 CRLF·CR을 내부 LF로 맞춘다. 한 줄 입력에서는 줄 경계가 공백이 된다.
     auto points = text.TryCodePoints();
     if (!points) {
@@ -436,42 +583,34 @@ Result<void> EditableTextElement::AppendInsertion(StringView text,
     return Result<void>::Success();
 }
 
-void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize end,
-                                StringView text) noexcept {
-    StringBuilder<> clean(registry_.ObjectAllocator());
+void EditableText::Paste(usize begin, usize end, StringView text) noexcept {
+    StringBuilder<> clean(allocator_);
     if (!text.IsEmpty() && AppendInsertion(text, clean)) {
-        Replace(owner, begin, end, clean.View());
+        Replace(begin, end, clean.View());
     }
 }
 
-usize EditableTextElement::ByteOffset(uint32 index) const noexcept {
+usize EditableText::ByteOffset(uint32 index) const noexcept {
     return text_input::ToByteOffset(label_->GetText(), index);
 }
 
-bool EditableTextElement::IsReadOnly() const noexcept {
-    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    return !model || model.Value().Get().Value()->IsReadOnly();
+bool EditableText::IsReadOnly() const noexcept {
+    return readOnly_;
 }
 
-bool EditableTextElement::AllowsInputMethod() const noexcept {
-    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    if (!model) {
-        return false;
-    }
-
-    const auto* owner = model.Value().Get().Value();
-    return !owner->IsReadOnly() && !owner->IsPassword();
+bool EditableText::AllowsInputMethod() const noexcept {
+    return !readOnly_ && !password_;
 }
 
-bool EditableTextElement::IsComposing() const noexcept {
+bool EditableText::IsComposing() const noexcept {
     return composing_;
 }
 
-uint32 EditableTextElement::GetTextLength() const noexcept {
+uint32 EditableText::GetTextLength() const noexcept {
     return text_input::Utf16Length(label_->GetText());
 }
 
-void EditableTextElement::GetSelection(uint32& begin, uint32& length) const noexcept {
+void EditableText::GetSelection(uint32& begin, uint32& length) const noexcept {
     const StringView text = label_->GetText();
     const uint32 first = text_input::ToUtf16Index(text, anchor_ < caret_ ? anchor_ : caret_);
     const uint32 last = text_input::ToUtf16Index(text, anchor_ < caret_ ? caret_ : anchor_);
@@ -479,52 +618,46 @@ void EditableTextElement::GetSelection(uint32& begin, uint32& length) const noex
     length = last - first;
 }
 
-void EditableTextElement::SetSelection(uint32 begin, uint32 length) noexcept {
+void EditableText::SetSelection(uint32 begin, uint32 length) noexcept {
     const usize first = ByteOffset(begin);
     const usize last = ByteOffset(begin + length);
     MoveCaret(first, false);
     MoveCaret(last, true);
 }
 
-Result<void> EditableTextElement::GetText(uint32 begin, uint32 length,
-                                          Array<char16_t>& out) const noexcept {
+Result<void> EditableText::GetText(uint32 begin, uint32 length,
+                                   Array<char16_t>& out) const noexcept {
     const StringView text = label_->GetText();
     const usize first = ByteOffset(begin);
     const usize last = ByteOffset(begin + length);
     return text_input::AppendUtf16(text.SliceBytes(first, last - first), out);
 }
 
-void EditableTextElement::SetText(uint32 begin, uint32 length, Span<const char16_t> text) noexcept {
+void EditableText::SetText(uint32 begin, uint32 length, Span<const char16_t> text) noexcept {
     const usize first = ByteOffset(begin);
     const usize last = ByteOffset(begin + length);
-    StringBuilder<> utf8(registry_.ObjectAllocator());
-    StringBuilder<> insertion(registry_.ObjectAllocator());
+    StringBuilder<> utf8(allocator_);
+    StringBuilder<> insertion(allocator_);
     if (!text_input::AppendUtf8(text, utf8) || !AppendInsertion(utf8.View(), insertion)) {
         return;
     }
 
     if (!composing_) {
         // 조합 밖의 바꾸기(TSF 재변환 등)는 편집 하나다.
-        auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-        if (model && model.Value().Get().Value()->CachedElement().Get() == this) {
-            Replace(*model.Value().Get().Value(), first, last, insertion.View());
-        }
-
+        Replace(first, last, insertion.View());
         return;
     }
 
     // 미리보기 층만 바꾼다(위젯 글자·이력·변경 알림 없음 — 19.2절).
     const StringView current = preview_.View();
-    StringBuilder<> next(registry_.ObjectAllocator());
+    StringBuilder<> next(allocator_);
     if (!next.TryAppend(current.SliceBytes(0, first)) || !next.TryAppend(insertion.View()) ||
         !next.TryAppend(current.SliceBytes(last, current.ByteCount() - last)) ||
         !preview_.TryAssign(next.View())) {
         return;
     }
 
-    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    const bool password = model && model.Value().Get().Value()->IsPassword();
-    if (ShapeText(preview_.View(), fontSize_, password)) {
+    if (ShapeText(preview_.View(), fontSize_, password_)) {
         const usize end = preview_.ByteCount();
         anchor_ = SmallerOffset(anchor_, end);
         caret_ = SmallerOffset(caret_, end);
@@ -532,7 +665,7 @@ void EditableTextElement::SetText(uint32 begin, uint32 length, Span<const char16
     }
 }
 
-Optional<uint32> EditableTextElement::GetCharacterIndexFromPoint(Vec2 window) const noexcept {
+Optional<uint32> EditableText::GetCharacterIndexFromPoint(Vec2 window) const noexcept {
     AffineTransform2D inverse;
     if (!label_->GetGeometry().render.TryInverse(inverse)) {
         return {};
@@ -541,8 +674,7 @@ Optional<uint32> EditableTextElement::GetCharacterIndexFromPoint(Vec2 window) co
     return text_input::ToUtf16Index(label_->GetText(), label_->HitText(inverse.Apply(window)));
 }
 
-bool EditableTextElement::GetTextBounds(uint32 begin, uint32 length,
-                                        Box2<float>& window) const noexcept {
+bool EditableText::GetTextBounds(uint32 begin, uint32 length, Box2<float>& window) const noexcept {
     const auto first = label_->CaretPosition(ByteOffset(begin), false);
     const auto last = label_->CaretPosition(ByteOffset(begin + length), false);
     if (!first || !last) {
@@ -562,7 +694,7 @@ bool EditableTextElement::GetTextBounds(uint32 begin, uint32 length,
     return true;
 }
 
-bool EditableTextElement::GetScreenBounds(Box2<float>& window) const noexcept {
+bool EditableText::GetScreenBounds(Box2<float>& window) const noexcept {
     const auto& geometry = GetGeometry();
     const Vec2 a = geometry.render.Apply({0, 0});
     const Vec2 b = geometry.render.Apply(geometry.size);
@@ -571,7 +703,7 @@ bool EditableTextElement::GetScreenBounds(Box2<float>& window) const noexcept {
     return true;
 }
 
-void EditableTextElement::BeginComposition() noexcept {
+void EditableText::BeginComposition() noexcept {
     if (composing_ || !preview_.TryAssign(label_->GetText())) {
         return;
     }
@@ -582,50 +714,43 @@ void EditableTextElement::BeginComposition() noexcept {
     compositionBegin_ = compositionEnd_ = anchor_ < caret_ ? anchor_ : caret_;
 }
 
-void EditableTextElement::UpdateCompositionRange(uint32 begin, uint32 length) noexcept {
+void EditableText::UpdateCompositionRange(uint32 begin, uint32 length) noexcept {
     compositionBegin_ = ByteOffset(begin);
     compositionEnd_ = ByteOffset(begin + length);
     InvalidatePaint();
 }
 
-void EditableTextElement::EndComposition() noexcept {
+void EditableText::EndComposition() noexcept {
     if (!composing_) {
         return;
     }
 
-    // 미리보기를 한 번 확정한다: 위젯 글자 교체, 편집 이력 하나(조합 전 선택), 변경 알림 한 번.
+    // 미리보기를 한 번 확정한다: 글자 교체, 편집 이력 하나(조합 전 선택), 변경 알림 한 번.
     composing_ = false;
     const usize anchor = anchor_;
     const usize caret = caret_;
-    auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    auto* owner = model ? model.Value().Get().Value() : nullptr;
-    if (!owner || owner->CachedElement().Get() != this || owner->IsReadOnly() ||
-        preview_.View() == owner->GetText()) {
-        if (owner) {
-            (void)ShapeText(owner->GetText(), fontSize_, owner->IsPassword());
-            const usize end = owner->GetText().ByteCount();
-            MoveCaret(SmallerOffset(anchor, end), false);
-            MoveCaret(SmallerOffset(caret, end), true);
-        }
-
+    if (readOnly_ || preview_.View() == text_.View()) {
+        (void)ShapeText(text_.View(), fontSize_, password_);
+        const usize end = text_.ByteCount();
+        MoveCaret(SmallerOffset(anchor, end), false);
+        MoveCaret(SmallerOffset(caret, end), true);
         preview_.Clear();
         return;
     }
 
-    auto& allocator = registry_.ObjectAllocator();
+    auto& allocator = allocator_;
     String next(allocator);
     auto snapshot = preview_.TryClone(allocator);
     if (!snapshot || !next.TryAssign(preview_.View()) ||
-        (!owner->IsPassword() && !undo_.TryEnsureCapacity(undo_.Size() + 1)) ||
-        !owner->ExchangeText(next)) {
+        (!password_ && !undo_.TryEnsureCapacity(undo_.Size() + 1)) || !ExchangeText(next)) {
         // 확정하지 못했다(메모리 부족) — 조합 전 글자로 돌린다.
-        (void)ShapeText(owner->GetText(), fontSize_, owner->IsPassword());
-        MoveCaret(SmallerOffset(preCompositionCaret_, owner->GetText().ByteCount()), false);
+        (void)ShapeText(text_.View(), fontSize_, password_);
+        MoveCaret(SmallerOffset(preCompositionCaret_, text_.ByteCount()), false);
         preview_.Clear();
         return;
     }
 
-    if (!owner->IsPassword()) {
+    if (!password_) {
         if (undo_.Size() == MaxUndoSteps) {
             (void)undo_.TryRemoveAt(0);
         }
@@ -638,27 +763,26 @@ void EditableTextElement::EndComposition() noexcept {
     preview_.Clear();
     MoveCaret(anchor, false);
     MoveCaret(caret, true);
-    owner->changed_.ExecuteIfBound(snapshot.Value().View());
+    NotifyChanged(snapshot.Value().View());
 }
 
-void EditableTextElement::ClearHistory() noexcept {
+void EditableText::ClearHistory() noexcept {
     undo_.Reset();
     redo_.Reset();
 }
 
-void EditableTextElement::RestoreHistory(EditableTextWidget& owner, bool redo) noexcept {
+void EditableText::RestoreHistory(bool redo) noexcept {
     auto& from = redo ? redo_ : undo_;
     auto& to = redo ? undo_ : redo_;
-    if (owner.IsReadOnly() || owner.IsPassword() || from.IsEmpty() ||
-        !to.TryEnsureCapacity(to.Size() + 1)) {
+    if (readOnly_ || password_ || from.IsEmpty() || !to.TryEnsureCapacity(to.Size() + 1)) {
         return;
     }
 
     const usize previousAnchor = anchor_;
     const usize previousCaret = caret_;
     auto& state = from[from.Size() - 1];
-    auto snapshot = state.text.TryClone(registry_.ObjectAllocator());
-    if (!snapshot || !owner.ExchangeText(state.text)) {
+    auto snapshot = state.text.TryClone(allocator_);
+    if (!snapshot || !ExchangeText(state.text)) {
         return;
     }
 
@@ -666,11 +790,11 @@ void EditableTextElement::RestoreHistory(EditableTextWidget& owner, bool redo) n
     MoveCaret(state.caret, true);
     (void)to.TryPushBack({Move(state.text), previousAnchor, previousCaret});
     (void)from.TryPopBack();
-    owner.changed_.ExecuteIfBound(snapshot.Value().View());
+    NotifyChanged(snapshot.Value().View());
 }
 
-bool EditableTextElement::OnPreviewKeyChord(uint32 user, const input::InputEvent&,
-                                            KeyChord chord) noexcept {
+bool EditableText::OnPreviewKeyChord(uint32 user, const input::InputEvent&,
+                                     KeyChord chord) noexcept {
     if (focused_ && focusUser_ == user) {
         chord_ = chord;
     }
@@ -678,20 +802,10 @@ bool EditableTextElement::OnPreviewKeyChord(uint32 user, const input::InputEvent
     return false;
 }
 
-KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
+KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
     const uint32 user = key.user;
     const input::InputEvent& event = key.input;
     if (!focused_ || focusUser_ != user) {
-        return Element::OnKeyEvent(key);
-    }
-
-    auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
-    if (!model) {
-        return Element::OnKeyEvent(key);
-    }
-
-    auto* owner = model.Value().Get().Value();
-    if (owner->CachedElement().Get() != this) {
         return Element::OnKeyEvent(key);
     }
 
@@ -705,9 +819,9 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
     if (event.type == input::InputEventType::Text) {
         // 플랫폼은 Enter·Backspace의 제어 문자도 보낼 수 있다. 편집 명령은 KeyDown에서만 처리한다.
         if (event.codePoint >= FirstPrintableCodePoint && event.codePoint != DeleteCodePoint) {
-            StringBuilder<> value(registry_.ObjectAllocator());
+            StringBuilder<> value(allocator_);
             if (value.TryAppendCodePoint(event.codePoint)) {
-                Replace(*owner, begin, end, value.View());
+                Replace(begin, end, value.View());
             }
         }
 
@@ -730,18 +844,17 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
         }
 
         if (event.key == Key::V) {
-            if (!owner->IsReadOnly()) {
-                String clipboard(registry_.ObjectAllocator());
+            if (!readOnly_) {
+                String clipboard(allocator_);
                 if (platform_.readClipboardText && platform_.readClipboardText(clipboard)) {
-                    Paste(*owner, begin, end, clipboard.View());
+                    Paste(begin, end, clipboard.View());
                 }
             }
-        } else if (!owner->IsPassword() && begin != end &&
-                   (event.key == Key::C || !owner->IsReadOnly())) {
-            const auto selection = owner->GetText().SliceBytes(begin, end - begin);
+        } else if (!password_ && begin != end && (event.key == Key::C || !readOnly_)) {
+            const auto selection = text_.View().SliceBytes(begin, end - begin);
             if (platform_.writeClipboardText && platform_.writeClipboardText(selection) &&
                 event.key == Key::X) {
-                Replace(*owner, begin, end, {});
+                Replace(begin, end, {});
             }
         }
         break;
@@ -752,7 +865,7 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
             return Element::OnKeyEvent(key);
         }
 
-        RestoreHistory(*owner, event.key == Key::Y || extend);
+        RestoreHistory(event.key == Key::Y || extend);
         break;
     case Key::A:
         if (!command) {
@@ -760,7 +873,7 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
         }
 
         anchor_ = 0;
-        MoveCaret(owner->GetText().ByteCount(), true);
+        MoveCaret(text_.ByteCount(), true);
         InvalidatePaint();
         break;
     case Key::Left:
@@ -794,24 +907,24 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
         break;
     }
     case Key::Backspace:
-        Replace(*owner, begin == end ? Adjacent(false) : begin, end, {});
+        Replace(begin == end ? Adjacent(false) : begin, end, {});
         break;
     case Key::Delete:
-        Replace(*owner, begin, begin == end ? Adjacent(true) : end, {});
+        Replace(begin, begin == end ? Adjacent(true) : end, {});
         break;
     case Key::Escape:
-        return KeyReply::FromHandled(RevertToFocusText(*owner));
+        return KeyReply::FromHandled(RevertToFocusText());
     case Key::Enter:
     case Key::NumpadEnter:
         if (multiline_) {
-            Replace(*owner, begin, end, "\n");
+            Replace(begin, end, "\n");
         } else if (!event.repeat) {
-            RememberFocusText(*owner);
-            if (owner->selectAllOnCommit_) {
-                SelectAll();
+            RememberFocusText();
+            if (selectAllOnCommit_) {
+                SelectAllText();
             }
 
-            owner->Commit(TextCommitReason::Enter);
+            Commit(TextCommitReason::Enter);
         }
         break;
     default:
@@ -821,13 +934,13 @@ KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
     return KeyReply::Handled();
 }
 
-usize EditableTextElement::PointerOffset(Vec2 point) const noexcept {
+usize EditableText::PointerOffset(Vec2 point) const noexcept {
     AffineTransform2D inverse;
     return label_->GetGeometry().render.TryInverse(inverse) ? label_->HitText(inverse.Apply(point))
                                                             : caret_;
 }
 
-PointerReply EditableTextElement::OnPointerEvent(const PointerEvent& event) noexcept {
+PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
     if (composing_) {
         return {.handled = true};
     }
@@ -869,14 +982,14 @@ PointerReply EditableTextElement::OnPointerEvent(const PointerEvent& event) noex
     return {};
 }
 
-void EditableTextElement::OnPointerCaptureLost(PointerSource source, uint32 user,
-                                               uint32 pointer) noexcept {
+void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
+                                        uint32 pointer) noexcept {
     if (source == dragSource_ && user == dragUser_ && pointer == dragPointer_) {
         dragging_ = false;
     }
 }
 
-Result<void> EditableTextElement::OnPaint(PaintList& list, int32 layer) const noexcept {
+Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (padding_ > 0) {
         auto painted = list.TryAddBox({GetGeometry(), {0.06f, 0.07f, 0.09f, 1}, layer});
         if (!painted) {
@@ -912,7 +1025,7 @@ Result<void> EditableTextElement::OnPaint(PaintList& list, int32 layer) const no
     return Result<void>::Success();
 }
 
-Result<void> EditableTextElement::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
+Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
     if (!focused_) {
         return Result<void>::Success();
     }
