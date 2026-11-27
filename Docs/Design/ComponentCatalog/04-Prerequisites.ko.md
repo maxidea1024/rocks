@@ -16,7 +16,7 @@
 | CR4 | Component 시작 준비 hook(`IsReadyToStart`) — 메시·텍스처 로드 대기 | 구현(ER S9b — 17.4절) | SE-W2 | ER 7.2절, SE-W2 |
 | CR5 | EditorOnly 컴포넌트와 쿠킹 제외, 태그(`TagSet`) | 일부(런타임 EditorOnly — CM0, Name 태그 — ER 31장) | 런타임 EditorOnly 규칙은 CM0(ER 23.2절), Name 배열 태그(UE `Tags`·`ComponentTags`)는 ER 31장이다. 계층 태그 사전과 쿠킹 쪽이 남는다. 처음 조사: `World/Component.h`에 없었다. A0-B `EditorOnly` 지정자는 필드 단위다. 객체 단위 EditorOnly는 패키지 Exports 플래그로 예약만 됐고 클래스 지정자가 없으며 reader는 그 비트를 `CorruptPackage`로 거부한다(AssetSystem 243행 — 켜려면 schemaVersion을 올린다). 태그 사전은 계획만 있다 | EIP 20.1절(태그), AssetSystem 패키지 형식 개정, MetaCompiler 클래스 지정자 |
 | CR6 | 컴포넌트 타입 규칙(Actor당 하나·필수 동반·상호 배타)을 타입 메타로 | 구현(CM0a — `Component::TypeRules`, ER 23.2절) | — | EIP 20.2절 |
-| CR7 | 이벤트 slot 표(overlap·hit·타임라인·재생 끝 등 컴포넌트 이벤트를 구독이 있을 때만 저장) | 없음 | SE-W8 | SE-W8, EIP 20.2절 |
+| CR7 | 이벤트 slot 표(overlap·hit·타임라인·재생 끝 등 컴포넌트 이벤트를 구독이 있을 때만 저장) | 해소(2026-11-28) — 컴포넌트 이벤트는 리플렉션 `Event` 필드다(16 byte, 상태는 구독이 생길 때 할당 — EventReflection ED13). 물리 PH4e가 hit·overlap을 그렇게 넣었다(`Actor::actorHit` 등). 이벤트 필드가 없는 이벤트(Sparks 확장 이벤트·native `Changed`·World 이벤트)의 slot 표는 SE-W8(Sparks EI3) 몫으로 남는다 | `World/Actor.h`·`PrimitiveComponent.h`의 `Event` 필드 | EventReflection ED13, SE-W8 |
 | CR8 | World 필드 편집 setter·통지(CU5) — 속성을 바꾸면 CR1의 "다시 보내기" 표시 | 없음 | ER 14절 "World 필드는 ReadOnly" | ReflectionExtensions CU5 |
 | CR8a | Tick 단계 UE 대응: Rocks 단계(PrePhysics·Physics·PostPhysics·LateUpdate·PreRender)와 UE `ETickingGroup`(`EE/EngineBaseTypes.h:86–104`) 대응, 물리 결과 반영·skeletal mesh 물리 마무리 지점 | 결정(CD11) — 구현은 물리·애니메이션 컴포넌트와 함께 | ER 8절 대응표 | ER 8절 |
 
@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | CR9 | 에셋 런타임 A1–A5: 패키지·로더·`AssetLease`(WorldOnly 클래스 멤버 허용 — A0-B), 클래스 기본값 레코드(A5). 컴포넌트가 메시·머티리얼·사운드를 필드로 잡는 전제 | A1–A3 완료, A4 진행(A4c2까지) | 메모리·AssetSystem 1절 | [에셋 시스템](../AssetSystem/README.ko.md) |
 | CR9a | Prefab PF1(클래스 원형·default subobject) — 컴포넌트를 클래스 원형으로 선언하고 `ChildActorComponent`가 템플릿 Actor를 갖는 전제 | 설계만 | PF 5.2절 | PF |
-| CR10 | 커브 에셋(Curve 에셋 층 — 타임라인·햅틱 효과·감쇠 커브) | 값 타입 층 완료(CV1–CV10), 에셋 층 설계 완료(2026-11-27 — CA1–CA6) | — | CurveData, [커브 에셋](../CurveAssets/README.ko.md) |
+| CR10 | 커브 에셋(Curve 에셋 층 — 타임라인·햅틱 효과·감쇠 커브) | 구현(값 타입 층 CV1–CV11, 에셋 층 CA1–CA7 — 2026-11-28) | `Engine/Source/Runtime/CurveAssets`·`CurveAtlas` | CurveData, [커브 에셋](../CurveAssets/README.ko.md) |
 
 ### 4.3 렌더
 
@@ -68,9 +68,9 @@
 | CM1a 정적 메시 | CM0, CR9, CR12, CR13(RS0), CR14, CR14a |
 | CM1b 광원 | CM1a, CR13(RS1·RS3) |
 | CM2 시각화 | CM1a, CR5, CR12, CR23(RN RS13) |
-| CM3 충돌 형상 | CM0, CR16, CR17, CR7. `DrawSphereComponent`만 CM2(CR23)도 |
+| CM3 충돌 형상 | CM0, CR16, CR17(CR7은 해소 — 이벤트 필드). `DrawSphereComponent`만 CM2(CR23)도 |
 | CM4 오디오·햅틱·입력 | CM0, CR10, CR11, CR20, CR21, CR26 |
-| CM5 게임플레이 도구 | CM0, CR9a, CR10, CR7, CR18·CM1a·CR14(`TextRenderComponent`). `PathMoverComponent`는 CM12(8.6절) |
+| CM5 게임플레이 도구 | CM0, CR9a(`ChildActorComponent`), CR10(`TimelineComponent` — CR7은 해소, 이벤트 필드), CR18·CM1a·CR14(`TextRenderComponent`). `PathMoverComponent`는 CM12(8.6절) |
 | CM6 인스턴싱·스플라인 메시 | CM1a, CM5(스플라인), RN RS4 |
 | CM7 skinned 계열 | CM1a, CR19, RN RS12, CR16(`SkeletalMeshComponent`의 ragdoll·physics asset — 없으면 그 기능만 후속) |
 | CM8 대기·후처리·decal·rect | CM1b, RN RS5·RS6·RS7·RS9, CR17 |
