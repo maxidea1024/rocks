@@ -5,6 +5,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Localization/Text.h>
 #include <UiCore/Element.h>
+#include <UiCore/Styles/CoreStyles.h>
 #include <UiCore/TextInputContext.h>
 #include <UiCore/TextInputService.h>
 #include <UiFramework/Application/Platform.h>
@@ -25,9 +26,12 @@ namespace rocks::ui {
 // Deactivate한다. 조합 중의 글자는 미리보기 층(preview_)에만 있고 글자·편집 이력·변경 알림은
 // EndComposition에서 한 번 바뀐다. 조합 중 선택(anchor_·caret_)은 미리보기 안 위치다.
 //
+// 바탕이 없는 편집기다. 상자 모양(바탕·여백·오류 표지)은 EditableTextBox가 이것을 담아 그린다
+// (Docs/Design/UiToolkit 22.2절 — UE SEditableText ↔ SEditableTextBox).
+//
 // 사용 예:
 //   auto name = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper, platform,
-//                                                /*multiline*/ false, /*boxed*/ true);
+//                                                /*multiline*/ false);
 //   (void)name.Value()->Initialize("Untitled", 13);
 //   name.Value()->SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
 //       [](StringView text, TextCommitReason) noexcept { Rename(text); }));
@@ -35,10 +39,9 @@ class ROCKS_UIFRAMEWORK_API EditableText final : public Element, public TextInpu
     ROCKS_UI_ELEMENT(EditableText, Element)
 
 public:
-    // shaper가 없으면 빈 글자만 받는다(글자를 넣으면 NotReady). boxed는 안쪽 여백·바탕과 오류
-    // 캡션이 있는 상자 모양이다(UE SEditableTextBox).
+    // shaper가 없으면 빈 글자만 받는다(글자를 넣으면 NotReady).
     EditableText(Allocator& allocator, SharedPtr<TextShaper> shaper, Platform platform,
-                 bool multiline, bool boxed) noexcept;
+                 bool multiline) noexcept;
     ~EditableText() noexcept override;
 
     // 글자 레이블 자식을 만들고 처음 글자로 셰이핑한다. 한 번만 부른다.
@@ -50,10 +53,6 @@ public:
     // 본문이 비었을 때만 보이는 안내문이다. 복사·선택·IME 입력에는 포함되지 않는다.
     Result<void> SetHintText(const Text& hint) noexcept;
     const Text& HintText() const noexcept;
-    // 상자 모양 편집기의 입력 영역 아래에 오류를 표시한다. 빈 Text로 지운다. 상자 모양이
-    // 아니면 Unsupported다.
-    Result<void> SetError(const Text& message) noexcept;
-    bool HasError() const noexcept;
     Result<void> SetFontSize(float size) noexcept;
     float FontSize() const noexcept;
     // 비밀번호는 화면에 가림 문자로 표시하고 복사·잘라내기·편집 이력·IME를 막는다.
@@ -69,7 +68,19 @@ public:
     // 비밀번호면 비어 있다.
     StringView SelectedText() const noexcept;
     bool IsMultiline() const noexcept;
-    bool IsBoxed() const noexcept;
+    // 지금 초점을 가진 사용자가 있는지다(상자 바탕 선택용).
+    bool IsFocused() const noexcept;
+    // 글자 영역 둘레의 내용 여백(왼쪽, 위, 오른쪽, 아래)이다. 여백도 이 Element의 영역이라 누르면
+    // 편집기가 초점을 받는다 — EditableTextBox가 상자 여백을 여기로 넘긴다(22.2절). 음수·NaN은
+    // InvalidArgument다.
+    Result<void> SetContentPadding(Vec4 padding) noexcept;
+    Vec4 ContentPadding() const noexcept;
+    // 스타일을 바꾼다(UE FEditableTextStyle). 부르지 않으면 활성 앱 스타일의 "NormalEditableText"
+    // (없으면 DefaultEditableTextStyle)다(20.11절). 불투명도가 0–1 밖이면 InvalidArgument다.
+    Result<void> SetStyle(const EditableTextStyle& style) noexcept;
+    const EditableTextStyle& GetStyle() const noexcept;
+    // 초점·읽기 전용이 바뀌면 부른다(상자가 바탕·전경을 다시 고른다).
+    void SetOnStateChanged(Delegate<void()>&& callback) noexcept;
     void SetOnTextChanged(Delegate<void(StringView)>&& callback) noexcept;
     void SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>&& callback) noexcept;
 
@@ -94,6 +105,7 @@ public:
     void OnPointerCaptureLost(PointerSource source, uint32 user, uint32 pointer) noexcept override;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
     Result<void> OnPaintOverlay(PaintList& list, int32 layer) const noexcept override;
+    void ApplyStyles(const UiHostServices& host) noexcept override;
 
     // TextInputContext(UTF-16 위치 — 미리보기 중이면 미리보기 글자 기준이다).
     bool IsReadOnly() const noexcept override;
@@ -118,9 +130,10 @@ private:
         usize caret;
     };
 
-    Result<SharedPtr<TextLabel>> AddCaption(const Text& text, float size, bool error) noexcept;
-    void PublishCaption(SharedPtr<TextLabel> caption, bool error) noexcept;
-    Result<void> SetCaption(const Text& value, bool error) noexcept;
+    Result<SharedPtr<TextLabel>> AddHint(const Text& text, float size) noexcept;
+    void PublishHint(SharedPtr<TextLabel> hint) noexcept;
+    Result<void> ApplyStyle(const EditableTextStyle& style) noexcept;
+    void NotifyStateChanged() noexcept;
     // 확정 글자로 셰이핑한다(조합 중이면 버린다).
     Result<void> Shape(StringView text, float size, bool password) noexcept;
     Result<void> ShapePassword(StringView text, float size) noexcept;
@@ -150,20 +163,21 @@ private:
     SharedPtr<TextShaper> shaper_;
     SharedPtr<TextLabel> label_;
     SharedPtr<TextLabel> hint_;
-    SharedPtr<TextLabel> error_;
     String text_;
     Text hintText_;
-    Text errorText_;
     String focusText_;
     Delegate<void(StringView)> changed_;
     Delegate<void(StringView, TextCommitReason)> committed_;
+    Delegate<void()> stateChanged_;
+    EditableTextStyle style_ = DefaultEditableTextStyle();
+    bool styleExplicit_ = false;
     bool canRevert_ = false;
     bool keepPointerSelection_ = false;
     usize pointerAnchor_ = 0;
     Platform platform_;
     Vec2 scroll_{};
     float fontSize_ = 16;
-    float padding_ = 0;
+    Vec4 padding_{};
     bool composing_ = false;
     // 조합 중 보이는 글자 전체, 그 안의 조합 범위(byte), 조합 전 선택이다.
     String preview_;
@@ -180,7 +194,6 @@ private:
     uint32 dragUser_ = 0;
     PointerSource dragSource_ = PointerSource::Mouse;
     bool multiline_;
-    bool boxed_;
     bool password_ = false;
     bool readOnly_ = false;
     bool selectAllOnFocus_ = false;

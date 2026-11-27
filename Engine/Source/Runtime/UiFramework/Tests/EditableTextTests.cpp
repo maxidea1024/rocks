@@ -1,10 +1,13 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
-#include <UiFramework/Controls/EditableText.h>
+#include <UiCore/PaintList.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Controls/EditableTextBox.h>
 
 // Element 층 편집 텍스트 시험이다(Docs/Design/UiToolkit 21.2절 — UE SEditableText). Widget·객체
 // 등록부 없이 Element가 글자·이력·사건을 스스로 드는지 본다: 사용자 편집만 onTextChanged, 프로그램
-// 교체는 통지·이력 없음, Enter·초점 잃음 확정, 비밀번호 선택 막기, Initialize 전에 정한 힌트.
+// 교체는 통지·이력 없음, Enter·초점 잃음 확정, 비밀번호 선택 막기, Initialize 전에 정한 힌트,
+// 이력 99단계·힌트 불투명도·caret 폭(22.5절), 상자의 상태별 바탕·전경·여백·오류 표지(22.2·22.6절).
 
 namespace rocks::ui {
 
@@ -63,14 +66,14 @@ struct EditBench {
     Array<TextCommitReason> commits;
 };
 
-bool MakeEditor(Allocator& allocator, EditBench& bench, bool boxed = false) noexcept {
+bool MakeEditor(Allocator& allocator, EditBench& bench) noexcept {
     auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
     if (!shaper) {
         return false;
     }
 
-    auto made = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper.Value(), Platform{},
-                                                 false, boxed);
+    auto made =
+        SharedPtr<EditableText>::TryMake(allocator, allocator, shaper.Value(), Platform{}, false);
     if (!made) {
         return false;
     }
@@ -158,22 +161,20 @@ TEST(UiFramework_EditableTextCommitsOnEnterAndFocusLoss) {
     CHECK(bench.commits.Size() == 2);
 }
 
-TEST(UiFramework_EditableTextPasswordAndCaptionsBeforeInitialize) {
+TEST(UiFramework_EditableTextPasswordAndHintBeforeInitialize) {
     SystemAllocator allocator;
     EditBench bench(allocator);
-    REQUIRE(MakeEditor(allocator, bench, true));
+    REQUIRE(MakeEditor(allocator, bench));
     auto& editor = *bench.editor;
     auto hint = Text::Invariant(allocator, "Name");
-    auto error = Text::Invariant(allocator, "Required");
-    REQUIRE(hint && error);
+    REQUIRE(hint);
     // Initialize 전에 정한 값도 쓰인다.
     REQUIRE(editor.SetHintText(hint.Value()));
-    REQUIRE(editor.SetError(error.Value()));
     REQUIRE(editor.SetPassword(true));
     REQUIRE(editor.Initialize("secret", EditFontSize));
-    CHECK(editor.HasError());
-    // 레이블 + 힌트 + 오류 캡션이다.
-    CHECK(editor.ChildCount() == 3);
+    // 레이블 + 힌트다. 힌트는 전경 × 0.35다(UE HintTextOpacity — 22.5절).
+    REQUIRE(editor.ChildCount() == 2);
+    CHECK(editor.ChildAt(1)->GetRenderOpacity() == 0.35f);
     editor.SelectAllText();
     CHECK(editor.SelectedText().IsEmpty());
     CHECK(!editor.AllowsInputMethod());
@@ -183,13 +184,128 @@ TEST(UiFramework_EditableTextPasswordAndCaptionsBeforeInitialize) {
     // 빈 불변 글자는 지우기와 같다.
     auto empty = Text::Invariant(allocator, "");
     REQUIRE(empty);
-    REQUIRE(editor.SetError(empty.Value()));
-    CHECK(!editor.HasError());
-    CHECK(editor.ChildCount() == 2);
-    // 상자 모양이 아니면 오류 캡션은 Unsupported다.
-    EditBench plain(allocator);
-    REQUIRE(MakeEditor(allocator, plain));
-    CHECK(plain.editor->SetError(error.Value()).Error() == ErrorCode::Unsupported);
+    REQUIRE(editor.SetHintText(empty.Value()));
+    CHECK(editor.ChildCount() == 1);
+    // 스타일 불투명도는 0–1이다.
+    EditableTextStyle style = DefaultEditableTextStyle();
+    style.hintOpacity = 1.5f;
+    CHECK(editor.SetStyle(style).Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(UiFramework_EditableTextKeepsNinetyNineUndoSteps) {
+    SystemAllocator allocator;
+    EditBench bench(allocator);
+    REQUIRE(MakeEditor(allocator, bench));
+    auto& editor = *bench.editor;
+    REQUIRE(editor.Initialize("", EditFontSize));
+    editor.OnFocusReceived(EditUser);
+    // 편집마다 이력 한 단계다. 100번 넣으면 가장 오래된 단계가 빠진다(UE MaxUndoLevels 99).
+    constexpr uint32 Edits = 100;
+    for (uint32 i = 0; i < Edits; ++i) {
+        Type(editor, 'a');
+    }
+
+    for (uint32 i = 0; i < Edits + 10; ++i) {
+        Press(editor, input::Key::Z, {.control = true});
+    }
+
+    CHECK(editor.GetText() == "a");
+}
+
+TEST(UiFramework_EditableTextBoxPicksStateBackgroundAndForeground) {
+    SystemAllocator allocator;
+    auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
+    REQUIRE(shaper);
+    auto made = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(),
+                                                    Platform{}, false);
+    REQUIRE(made);
+    auto& box = *made.Value();
+    CHECK(!box.IsInitialized());
+    REQUIRE(box.Initialize("abc", EditFontSize));
+    CHECK(box.Initialize("x", EditFontSize).Error() == ErrorCode::AlreadyExists);
+    auto& editor = box.Editor();
+    // 상자 여백은 편집기의 내용 여백이다(편집기가 상자 안쪽 전체를 덮는다 — 22.2절).
+    const EditableTextBoxStyle& style = DefaultEditableTextBoxStyle();
+    CHECK(editor.ContentPadding() == style.padding);
+    CHECK(editor.GetStyle() == style.text);
+    REQUIRE(box.ChildCount() == 1 && box.ChildAt(0) == &editor);
+    const Vec2 desired = box.GetDesiredSize();
+    CHECK(desired == editor.GetDesiredSize());
+    REQUIRE(box.Arrange(Geometry::Root({120, 30}, {})));
+    CHECK(editor.GetGeometry().size == Vec2(120, 30));
+    // 바탕: 보통 → 올림 → 초점 → 읽기 전용(UE GetBorderImage 순서).
+    const ThemeColors& theme = DefaultThemeColors();
+    const auto background = [&]() noexcept {
+        PaintList list(allocator);
+        (void)box.OnPaint(list, 0);
+        return list.Boxes().IsEmpty() ? LinearColor{} : list.Boxes()[0].color;
+    };
+    const auto fill = [&](const StyleBrush& brush) noexcept {
+        return brush.Resolve(theme, {}).tint;
+    };
+    CHECK(background() == fill(style.normal));
+    box.OnMouseEnter(EditUser);
+    CHECK(background() == fill(style.hovered));
+    editor.OnFocusReceived(EditUser);
+    CHECK(background() == fill(style.focused));
+    // 초점이면 전경은 흰색이다(UE focused fg White), 아니면 물려받는다.
+    const LinearColor inherited{0.5f, 0.5f, 0.5f, 1};
+    CHECK(box.CurrentForeground().Resolve(theme, {inherited, inherited}) ==
+          style.focusedForeground.Resolve(theme, {inherited, inherited}));
+    editor.SetReadOnly(true);
+    CHECK(background() == fill(style.readOnly));
+    CHECK(box.CurrentForeground().Resolve(theme, {inherited, inherited}) == inherited);
+    editor.SetReadOnly(false);
+    editor.OnFocusLost(EditUser);
+    box.OnMouseLeave(EditUser);
+    CHECK(background() == fill(style.normal));
+    CHECK(box.CurrentForeground().Resolve(theme, {inherited, inherited}) == inherited);
+    // 상자에 준 초점은 안쪽 편집기가 받는다(FocusDelegate — 상자는 Tab 정지가 아니다).
+    Application app(allocator);
+    app.SetRoot(made.Value());
+    CHECK(!box.SupportsKeyboardFocus());
+    REQUIRE(app.SetFocus(EditUser, made.Value()));
+    CHECK(app.GetFocus(EditUser).Get() == &editor && editor.IsFocused());
+    app.Shutdown();
+}
+
+TEST(UiFramework_EditableTextBoxShowsErrorMarker) {
+    SystemAllocator allocator;
+    auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
+    REQUIRE(shaper);
+    auto made = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(),
+                                                    Platform{}, false);
+    REQUIRE(made);
+    auto& box = *made.Value();
+    auto error = Text::Invariant(allocator, "Required");
+    REQUIRE(error);
+    // Initialize 전에 정한 오류도 쓰인다.
+    REQUIRE(box.SetError(error.Value()));
+    CHECK(box.HasError());
+    REQUIRE(box.Initialize("abc", EditFontSize));
+    REQUIRE(box.ChildCount() == 2);
+    const Element& marker = *box.ChildAt(1);
+    CHECK(StaticElementCast<TextLabel>(&marker)->GetText() == "!");
+    // 표지는 오른쪽 여백 안의 정사각이고 편집 칸이 그만큼 줄어든다(22.6절).
+    REQUIRE(box.Prepass(1));
+    REQUIRE(box.Arrange(Geometry::Root({120, 30}, {})));
+    const float extent = marker.GetGeometry().size.x;
+    CHECK(extent > 0 && marker.GetGeometry().size.y == extent);
+    const float padding = DefaultEditableTextBoxStyle().padding.z;
+    CHECK(box.Editor().GetGeometry().size.x == 120 - extent - padding);
+    CHECK(marker.GetGeometry().layout.tx == 120 - padding - extent);
+    // 빈 불변 글자는 지우기와 같다.
+    auto empty = Text::Invariant(allocator, "");
+    REQUIRE(empty && box.SetError(empty.Value()));
+    CHECK(!box.HasError() && box.ChildCount() == 1);
+    REQUIRE(box.Prepass(1));
+    REQUIRE(box.Arrange(Geometry::Root({120, 30}, {})));
+    CHECK(box.Editor().GetGeometry().size.x == 120);
+    // shaper가 없으면 표지를 만들지 못한다.
+    auto bare = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, SharedPtr<TextShaper>{},
+                                                    Platform{}, false);
+    REQUIRE(bare && bare.Value()->Initialize("", EditFontSize));
+    CHECK(bare.Value()->SetError(error.Value()).Error() == ErrorCode::NotReady);
 }
 
 } // namespace rocks::ui

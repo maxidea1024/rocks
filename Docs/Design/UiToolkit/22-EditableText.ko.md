@@ -18,7 +18,9 @@
   - 상태(보통·hover·초점·읽기 전용)마다 바탕 brush·전경색을 고르고 여백을 둔다(`EditableTextBoxStyle`).
   - 오류 표지와 오류 팝업을 든다(22.6절).
   - 여러 줄이면 세로 `ScrollBar`를 오른쪽에 둔다(22.7절).
-  - 초점은 안쪽 `EditableText`가 받는다. 상자를 누르면 안쪽에 초점을 준다(UE `SEditableTextBox::OnFocusReceived`가 `EditableText`에 넘김). 초점 외곽선은 그리지 않는다 — 초점은 상자 테두리 색으로 보인다(UE `SEditableText::GetFocusBrush` = null과 같은 이유).
+  - 초점은 안쪽 `EditableText`가 받는다. 상자 여백은 편집기의 내용 여백(`SetContentPadding`)으로 넘겨 편집기가 상자 안쪽 전체를 덮는다 — 여백을 눌러도 편집기가 맞아 초점을 받고, Tab 정지도 하나다. UE는 상자가 초점을 받아 안쪽으로 넘긴다(`SEditableTextBox::OnFocusReceived`, SEditableTextBox.cpp 309–317행). 코드가 상자에 초점을 주는 경우(화면의 초점 대상, `SetFocus(상자)`)는 `Element::FocusDelegate`(상자 → 편집기)로 넘긴다 — `Application::SetFocus`가 초점을 받지 못하는 요소의 위임을 하위 트리 안에서 따라간다. 상자는 `SupportsKeyboardFocus`가 거짓이라 Tab 정지가 아니다(UE처럼 상자가 초점을 받게 하면 상자와 편집기가 두 정지가 된다 — 버린 대안). 초점 외곽선은 그리지 않는다 — 초점은 상자 테두리 색으로 보인다(UE `SEditableText::GetFocusBrush` = null과 같은 이유).
+  - 편집기는 초점·읽기 전용이 바뀌면 `SetOnStateChanged` 콜백으로 상자에 알린다 — 상자가 바탕·전경을 다시 고른다. 상자 소멸자가 이 콜백을 끊는다(편집기가 밖에 붙잡혀 상자보다 오래 살 수 있다).
+  - 상태별 전경은 `CurrentForeground()`로 읽을 수 있다(그리기의 `PaintForegroundColor`가 같은 값을 쓴다).
   - 상자는 hover를 자기 것으로 본다(바탕 brush 선택). 상자가 비활성이면 안쪽도 비활성이다.
   - 사용자는 상자의 `Text()`(안쪽 `EditableText&`)로 편집 API를 쓴다. 상자가 같은 setter를 따로 두지 않는다(두 층의 API가 갈라지지 않게 — UE는 `SEditableTextBox`가 대부분을 다시 노출하지만 Rocks는 하나로 둔다).
 - **버린 대안**: `boxed` 인자를 유지한다. 상자 기능(hover 바탕·오류 팝업·스크롤 막대)이 편집 로직에 더 섞이고 UE 구조와 다르다.

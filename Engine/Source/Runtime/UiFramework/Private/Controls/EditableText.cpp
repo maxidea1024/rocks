@@ -12,9 +12,15 @@ usize SmallerOffset(usize a, usize b) noexcept {
     return a < b ? a : b;
 }
 
-// 상자형 편집 칸의 안쪽 여백, 되돌리기 기록 상한이다.
-constexpr float BoxedTextPadding = 4.0f;
-constexpr usize MaxUndoSteps = 64;
+// 되돌리기 기록 상한이다(UE EditableTextDefs::MaxUndoLevels — TextEditHelper.h 15행).
+constexpr usize MaxUndoSteps = 99;
+// caret 폭은 줄 높이의 이 비율을 [최소, 최대] px로 자른 값이다(UE CaretWidthPercent·
+// FTextEditHelper::CalculateCaretWidth — TextEditHelper.cpp 15–19행).
+constexpr float CaretWidthPercent = 0.08f;
+constexpr float MinCaretWidth = 1.0f;
+constexpr float MaxCaretWidth = 2.0f;
+// 조합 밑줄 두께(px)다.
+constexpr float CompositionUnderlineThickness = 1.0f;
 // 글자로 넣지 않는 제어 문자: U+0000–U+001F와 DEL(U+007F)이다.
 constexpr uint32 FirstPrintableCodePoint = 0x20;
 constexpr uint32 DeleteCodePoint = 0x7F;
@@ -22,11 +28,10 @@ constexpr uint32 DeleteCodePoint = 0x7F;
 } // namespace
 
 EditableText::EditableText(Allocator& allocator, SharedPtr<TextShaper> shaper, Platform platform,
-                           bool multiline, bool boxed) noexcept
+                           bool multiline) noexcept
     : Element(allocator), allocator_(allocator), undo_(allocator), redo_(allocator),
       shaper_(Move(shaper)), text_(allocator), focusText_(allocator), platform_(platform),
-      padding_(boxed ? BoxedTextPadding : 0.0f), preview_(allocator), multiline_(multiline),
-      boxed_(boxed) {
+      preview_(allocator), multiline_(multiline) {
     SetClipToBounds(true);
 }
 
@@ -70,26 +75,14 @@ Result<void> EditableText::Initialize(StringView text, float size) noexcept {
         MoveCaret(text.ByteCount(), false);
     }
 
-    // Initialize 전에 정한 캡션을 만든다.
-    const auto publish = [this](const Text& value, bool error) noexcept -> Result<void> {
-        if (!value.IsValid()) {
-            return Result<void>::Success();
+    // Initialize 전에 정한 힌트를 만든다.
+    if (shaped && hintText_.IsValid()) {
+        auto hint = AddHint(hintText_, fontSize_);
+        if (!hint) {
+            return Result<void>::Failure(hint.Error());
         }
 
-        auto caption = AddCaption(value, fontSize_, error);
-        if (!caption) {
-            return Result<void>::Failure(caption.Error());
-        }
-
-        PublishCaption(Move(caption.Value()), error);
-        return Result<void>::Success();
-    };
-    if (shaped) {
-        shaped = publish(hintText_, false);
-    }
-
-    if (shaped) {
-        shaped = publish(errorText_, true);
+        PublishHint(Move(hint.Value()));
     }
 
     return shaped;
@@ -176,6 +169,8 @@ void EditableText::SetReadOnly(bool readOnly) noexcept {
         if (textInput_) {
             textInput_->Activate(*this);
         }
+
+        NotifyStateChanged();
     }
 }
 
@@ -198,8 +193,71 @@ bool EditableText::IsMultiline() const noexcept {
     return multiline_;
 }
 
-bool EditableText::IsBoxed() const noexcept {
-    return boxed_;
+bool EditableText::IsFocused() const noexcept {
+    return focused_;
+}
+
+Result<void> EditableText::SetContentPadding(Vec4 padding) noexcept {
+    if (!padding.IsFinite() || padding.x < 0 || padding.y < 0 || padding.z < 0 || padding.w < 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (padding_ != padding) {
+        padding_ = padding;
+        InvalidateLayout();
+    }
+
+    return Result<void>::Success();
+}
+
+Vec4 EditableText::ContentPadding() const noexcept {
+    return padding_;
+}
+
+Result<void> EditableText::SetStyle(const EditableTextStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+const EditableTextStyle& EditableText::GetStyle() const noexcept {
+    return style_;
+}
+
+void EditableText::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다(20.11절).
+        const EditableTextStyle* style = host.FindStyle<EditableTextStyle>("NormalEditableText");
+        (void)ApplyStyle(style ? *style : DefaultEditableTextStyle());
+    }
+}
+
+Result<void> EditableText::ApplyStyle(const EditableTextStyle& style) noexcept {
+    if (!math::IsFinite(style.hintOpacity) || style.hintOpacity < 0 || style.hintOpacity > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (style_ != style) {
+        style_ = style;
+        if (hint_) {
+            (void)hint_->SetRenderOpacity(style_.hintOpacity);
+        }
+
+        InvalidatePaint();
+    }
+
+    return Result<void>::Success();
+}
+
+void EditableText::SetOnStateChanged(Delegate<void()>&& callback) noexcept {
+    stateChanged_ = Move(callback);
+}
+
+void EditableText::NotifyStateChanged() noexcept {
+    stateChanged_.ExecuteIfBound();
 }
 
 void EditableText::SetOnTextChanged(Delegate<void(StringView)>&& callback) noexcept {
@@ -348,9 +406,10 @@ TextLabel& EditableText::Label() const noexcept {
 }
 
 Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
+    const Vec2 inset{padding_.x + padding_.z, padding_.y + padding_.w};
     // Initialize 전에는 빈 편집기다.
     if (!label_) {
-        return {padding_ * 2, fontSize_ + padding_ * 2};
+        return {inset.x, fontSize_ + inset.y};
     }
 
     Vec2 text = label_->GetDesiredSize();
@@ -359,9 +418,11 @@ Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
         text.y = math::Max(text.y, hint_->GetDesiredSize().y);
     }
 
-    const Vec2 error = error_ ? error_->GetDesiredSize() : Vec2{};
-    return {math::Max(text.x + 1, error.x) + padding_ * 2,
-            math::Max(fontSize_, text.y) + padding_ * 2 + (error_ ? error.y + 2 : 0)};
+    // caret 폭만큼 오른쪽을 더 둔다(UE가 caret 폭을 여백에 더한다 — SlateEditableTextLayout.cpp
+    // 3717–3718행).
+    const float caret =
+        math::Clamp(CaretWidthPercent * math::Max(fontSize_, text.y), MinCaretWidth, MaxCaretWidth);
+    return {text.x + caret + inset.x, math::Max(fontSize_, text.y) + inset.y};
 }
 
 Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
@@ -370,30 +431,15 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
         return Result<void>::Success();
     }
 
-    const float width = math::Max(1.0f, geometry.size.x - padding_ * 2);
-    const float height = math::Max(1.0f, geometry.size.y - padding_ * 2);
-    float errorHeight = 0;
+    const float width = math::Max(1.0f, geometry.size.x - padding_.x - padding_.z);
+    const float height = math::Max(1.0f, geometry.size.y - padding_.y - padding_.w);
     SetGeometry(geometry);
-    if (error_) {
-        auto wrappedError = error_->ArrangeForWidth(width);
-        if (!wrappedError) {
-            return wrappedError;
-        }
-
-        errorHeight = math::Min(error_->ComputeDesiredSize(1).y, height);
-        auto placed = error_->ArrangeIfNeeded(GetGeometry().MakeChild(
-            {width, errorHeight}, {1, 0, 0, 1, padding_, padding_ + height - errorHeight}, {}, {}));
-        if (!placed) {
-            return placed;
-        }
-    }
-
-    const Vec2 area{width, math::Max(1.0f, height - (error_ ? errorHeight + 2 : 0))};
+    const Vec2 area{width, height};
     if (hint_ && label_->GetText().IsEmpty()) {
         auto placed = label_->CopyParagraphTo(*hint_);
         if (placed) {
             placed = hint_->ArrangeIfNeeded(
-                GetGeometry().MakeChild(area, {1, 0, 0, 1, padding_, padding_}, {}, {}));
+                GetGeometry().MakeChild(area, {1, 0, 0, 1, padding_.x, padding_.y}, {}, {}));
         }
 
         if (!placed) {
@@ -416,7 +462,7 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
                         pos.Value().y));
     }
 
-    const AffineTransform2D offset{1, 0, 0, 1, padding_ - scroll_.x, padding_ - scroll_.y};
+    const AffineTransform2D offset{1, 0, 0, 1, padding_.x - scroll_.x, padding_.y - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
     if (arranged && textInput_) {
         // 글자 위치가 정해졌다 — 후보 창을 caret으로 옮긴다.
@@ -450,6 +496,7 @@ void EditableText::OnFocusReceived(uint32 user) noexcept {
 
     chord_ = {};
     InvalidatePaint();
+    NotifyStateChanged();
 }
 
 void EditableText::OnFocusLost(uint32 user) noexcept {
@@ -464,6 +511,7 @@ void EditableText::OnFocusLost(uint32 user) noexcept {
     chord_ = {};
     dragging_ = false;
     InvalidatePaint();
+    NotifyStateChanged();
     // 서비스가 만들던 글자를 확정해 넣은 뒤 끈다(19.2절). Commit(FocusLost)이 그 글자를 본다.
     if (auto service = Move(textInput_)) {
         service->Deactivate(*this);
@@ -1007,13 +1055,6 @@ void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
 }
 
 Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept {
-    if (padding_ > 0) {
-        auto painted = list.TryAddBox({GetGeometry(), {0.06f, 0.07f, 0.09f, 1}, layer});
-        if (!painted) {
-            return painted;
-        }
-    }
-
     if (!focused_ || (!composing_ && caret_ == anchor_)) {
         return Result<void>::Success();
     }
@@ -1021,17 +1062,23 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
     // 조합 중에는 조합 범위에 밑줄, 아니면 선택 영역을 칠한다.
     const usize begin = composing_ ? compositionBegin_ : (caret_ < anchor_ ? caret_ : anchor_);
     const usize end = composing_ ? compositionEnd_ : (anchor_ > caret_ ? anchor_ : caret_);
+    // 선택 바탕은 스타일 selection(UE SelectionBackgroundColor), 조합 밑줄은 스타일
+    // composition이다.
+    const LinearColor color = (composing_ ? style_.composition : style_.selection)
+                                  .Resolve(list.Theme(), list.ColorContext());
     const auto& layout = label_->Layout();
     for (const auto& line : layout.Lines()) {
         for (usize i = 0; i < line.visualCount; ++i) {
             const auto& visual = layout.VisualClusters()[line.firstVisual + i];
             const auto cluster = label_->ShapedClusters()[visual.logicalIndex];
             if (begin < cluster.byteEnd && cluster.byteEnd <= end && visual.advance > 0) {
+                const float thickness = CompositionUnderlineThickness;
                 const auto box = label_->GetGeometry().MakeChild(
-                    {visual.advance, composing_ ? 1.0f : line.height},
-                    {1, 0, 0, 1, visual.x, composing_ ? line.y + label_->LineHeight() - 1 : line.y},
+                    {visual.advance, composing_ ? thickness : line.height},
+                    {1, 0, 0, 1, visual.x,
+                     composing_ ? line.y + label_->LineHeight() - thickness : line.y},
                     {}, {});
-                auto added = list.TryAddBox({box, {0.12f, 0.32f, 0.7f, 0.7f}, layer});
+                auto added = list.TryAddBox({box, color, layer});
                 if (!added) {
                     return added;
                 }
@@ -1049,9 +1096,11 @@ Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const no
 
     const auto pos = label_->CaretPosition(caret_, false);
     const auto point = pos ? pos.Value() : Vec2{};
-    const auto caret = label_->GetGeometry().MakeChild({1, label_->LineHeight()},
-                                                       {1, 0, 0, 1, point.x, point.y}, {}, {});
-    return list.TryAddBox({caret, {1, 1, 1, 1}, layer});
+    const float height = label_->LineHeight();
+    const float width = math::Clamp(CaretWidthPercent * height, MinCaretWidth, MaxCaretWidth);
+    const auto caret =
+        label_->GetGeometry().MakeChild({width, height}, {1, 0, 0, 1, point.x, point.y}, {}, {});
+    return list.TryAddBox({caret, style_.caret.Resolve(list.Theme(), list.ColorContext()), layer});
 }
 
 } // namespace rocks::ui

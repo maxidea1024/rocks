@@ -8,6 +8,8 @@ namespace rocks::ui {
 namespace {
 
 constexpr LogCategory LogUiApplication{"UiFramework"};
+// 초점 위임(Element::FocusDelegate)을 따라가는 최대 횟수다(상자 안 상자 같은 중첩 — 순환 방어).
+constexpr uint32 MaxFocusDelegateDepth = 8;
 
 bool IsModifierKey(input::Key key) noexcept {
     return key == input::Key::LeftShift || key == input::Key::RightShift ||
@@ -733,10 +735,23 @@ Result<void> Application::SetFocus(uint32 userId, Element& target, FocusCause ca
     return owned ? SetFocus(userId, owned, cause) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& target,
+Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& requested,
                                    FocusCause cause) noexcept {
     if (focusChanging_ || cancelling_) {
         return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // 초점을 직접 받지 않는 요소는 위임한 자손이 받는다(Element::FocusDelegate — 22.2절). 위임은
+    // 자기 하위 트리 안이어야 하고 MaxFocusDelegateDepth번까지 따라간다.
+    SharedPtr<Element> target = requested;
+    for (uint32 depth = 0;
+         target && !target->SupportsKeyboardFocus() && depth < MaxFocusDelegateDepth; ++depth) {
+        SharedPtr<Element> next = target->FocusDelegate();
+        if (!next || next.Get() == target.Get() || !next->IsWithin(*target)) {
+            break;
+        }
+
+        target = Move(next);
     }
 
     // 키보드 툴팁 예약이 프레임 시각을 본다 — 암묵 시작 호스트면 프레임을 연다(20.3절).
