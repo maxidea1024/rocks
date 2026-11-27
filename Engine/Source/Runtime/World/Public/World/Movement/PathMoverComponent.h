@@ -2,7 +2,9 @@
 
 #include <Core/Containers/Array.h>
 #include <Meta/Annotations.h>
+#include <Object/Event.h>
 #include <World/Movement/MovementComponent.h>
+#include <World/Physics/HitResult.h>
 #include <World/Movement/RotatingMovementComponent.h>
 
 namespace rocks {
@@ -148,8 +150,15 @@ public:
     // 처음부터 다시 간다(UE RestartMovement — direction 1이 정방향).
     void RestartMovement(float initialDirection = 1.0f) noexcept;
 
-    // 멈추고 OnPathStop(지금 시간)을 부른다(UE StopMovementImmediately).
+    // 멈추고 OnPathStop(지금 시간)·pathStopped를 낸다(UE StopMovementImmediately).
     void StopMovementImmediately() noexcept override;
+
+    // UE delegate다(26.1절 — OnInterpToReverse·OnInterpToStop·OnResetDelegate). 같은 자리의 hook
+    // 바로 뒤에 발행한다. 충돌 없는 이동이라 impactResult는 빈 HitResult, time은 경로 시간 [0,
+    // 1]이다.
+    ROCKS_PROPERTY(Params = "impactResult,time") Event<const HitResult&, float> pathReversed;
+    ROCKS_PROPERTY(Params = "impactResult,time") Event<const HitResult&, float> pathStopped;
+    ROCKS_PROPERTY(Params = "impactResult,time") Event<const HitResult&, float> pathReset;
 
     // 시간 t의 위치까지의 이동량이다(UE ComputeMoveDelta — 점은 지금 월드 회전으로 돌린다).
     Vec3d ComputeMoveDelta(float time) const noexcept;
@@ -172,6 +181,11 @@ protected:
     }
 
 private:
+    // hook을 부르고 같은 이벤트를 낸다(World 장부 밖이면 이벤트 없음).
+    void NotifyPathReverse(float time) noexcept;
+    void NotifyPathStop(float time) noexcept;
+    void NotifyPathReset(float time) noexcept;
+
     // 점별 캐시다(UE FInterpControlPoint의 StartTime·DistanceToNext·Percentage).
     struct Segment {
         float startTime = 0.0f;

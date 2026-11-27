@@ -3,6 +3,7 @@
 
 #include "LoweringContext.h"
 #include "LoweringTable.h"
+#include "ParameterValues.h"
 #include "Translator.h"
 
 // 파라미터 노드 lowering이다(Docs/Design/MaterialSystem 6.10절 MS2c2). 수 파라미터는 IR
@@ -71,6 +72,8 @@ Result<void> NamedParameterError(LoweringContext& context, StringView prefix,
 
     return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), message.View());
 }
+
+} // namespace
 
 // 수 파라미터 읽기 값이다(parameterId·기본값 — 6.10절).
 Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kind,
@@ -165,10 +168,12 @@ Result<IrValueId> CustomPrimitiveData(LoweringContext& context, StringView name,
     return context.ContextValue(name, arguments);
 }
 
+namespace {
+
 // UE ScalarParameter(MaterialExpressions.cpp:8425–8440).
 Result<void> LowerScalarParameter(LoweringContext& context) noexcept {
     bool usesData = false;
-    auto data = CustomPrimitiveData(context, "CustomPrimitiveData1", usesData);
+    auto data = CustomPrimitiveData(context, CustomPrimitiveDataScalar, usesData);
     if (!data || usesData) {
         return data ? context.Output("Result", data.Value()) : Result<void>::Failure(data.Error());
     }

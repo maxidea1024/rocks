@@ -1004,6 +1004,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PathMoverComponent::pathReset",
+      "id": "b23c5fd76aca438094d9e1e9bad632a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pathReversed",
+      "id": "1cb75461e5a446dd9d702390945d12d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pathStopped",
+      "id": "8ad82ec24b9641e49f442de56110d9b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PathMoverComponent::pauseOnImpact_",
       "id": "399d48dedc4f4ffca31e4a61b8649dc9",
       "aliases": [],
@@ -2126,6 +2147,13 @@
       "kind": "field",
       "name": "rocks::ProjectileMovementComponent::projectileGravityScale_",
       "id": "dd1fdf68827e49b4bd8b46ac2e980c30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::projectileStopped",
+      "id": "bafa48dc25cc45baa41ec9142dbd5d41",
       "aliases": [],
       "retired": false
     },

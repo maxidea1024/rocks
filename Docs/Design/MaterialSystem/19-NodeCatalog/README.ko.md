@@ -166,7 +166,6 @@ UE는 형식·플랫폼에 따라 갈리는 스위치를 플랫폼별 번역 때
 | `MPQ-VirtualTexture` | 가상 텍스처 page table 바인딩(RVT·메시 페인트·머티리얼 캐시 공용) | `RuntimeVirtualTextureSample`·`…SampleParameter`, `MeshPaintTextureObject`, `MaterialCacheOutput`, 속성 `relaxVirtualTextureRestrictions` | 가상 텍스처 단계(TextureStreaming 후속) |
 | `MPQ-ExternalTexture` | 외부(영상) 텍스처 자원 종류 | 핀 타입 `TextureExternal`(UE `MCT_TextureExternal`) | 미디어 단계 |
 | `MPQ-Font` | 미리 구운 Font 에셋·페이지 텍스처 | `FontSample`·`FontSampleParameter` | [글꼴](../../Font/07-Consumers.ko.md) FT7 |
-| `MPQ-CurveAsset` | 커브 atlas 에셋(커브 묶음을 굽는 텍스처) | `CurveAtlasRowParameter` | CurveData 에셋 층 |
 | `MPQ-MaterialAggregate` | aggregate 에셋(UE `UMaterialAggregate`, `RE/Public/Materials/MaterialAggregate.h:83`)과 IR aggregate 타입 | `Aggregate` 속성(UserDefined) | MS2e 뒤 |
 | `MPQ-SubsurfaceProfile` | subsurface profile 에셋(UE `RE/Classes/Engine/SubsurfaceProfile.h:177`) | `SurfaceSlab`·`SurfaceEye`·`SurfaceFromShadingModel`·`SurfaceFromAttributes` 속성 | Renderer SSS 단계(RS9) |
 | `MPQ-SpecularProfile` | specular profile 에셋(`SpecularProfile.h:73`) | `SurfaceSlab` 속성 | Renderer 단계 |

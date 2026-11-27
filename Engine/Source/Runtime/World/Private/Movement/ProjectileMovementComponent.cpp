@@ -17,7 +17,7 @@
 namespace rocks {
 
 ProjectileMovementComponent::ProjectileMovementComponent(Allocator& allocator) noexcept
-    : MovementComponent(allocator) {
+    : MovementComponent(allocator), projectileStopped(allocator) {
     // UE 생성자(ProjectileMovementComponent.cpp:18): Velocity = (1, 0, 0).
     velocity_ = Vec3d(1.0, 0.0, 0.0);
 }
@@ -180,6 +180,11 @@ void ProjectileMovementComponent::StopSimulating() noexcept {
     UpdateComponentVelocity();
     (void)SetUpdatedComponent({});
     OnProjectileStop();
+    // UE OnProjectileStop.Broadcast(HitResult) — 충돌 없는 이동이라 빈 결과다.
+    if (HasWorld()) {
+        World& world = GetWorld();
+        projectileStopped.Broadcast({world.Objects(), world.Access(), Handle()}, HitResult{});
+    }
 }
 
 Result<void> ProjectileMovementComponent::OnAwake() noexcept {

@@ -1965,12 +1965,12 @@
     {
       "unrealClass": "UMaterialExpressionCurveAtlasRowParameter",
       "node": "Material.CurveAtlasRowParameter",
-      "status": "PrerequisiteMissing",
+      "status": "Implemented",
       "stage": "MS2c",
       "category": "Parameters",
       "supply": "",
       "source": "",
-      "prerequisite": "MPQ-CurveAsset",
+      "prerequisite": "",
       "propertyPrerequisites": []
     },
     {
