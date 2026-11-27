@@ -187,6 +187,10 @@
   - tab 순서와 bubble 중 navigation 변환(20.7절)을 본다.
   - `OnNavigation` 경계와 기하 navigation(20.9절)을 본다.
   - 규칙 6종, 사용자 2명, 비활성·접힘 Element 포함 장면을 본다.
+- **구현(UW8i) — 남은 항목.** 시험은 `BehaviorParityTests`(UV2 같은 값·보이기·크기 불변·cache root·volatile·기본 경로, UV3 tunnel·bubble·보이기 5종, UV4 Explicit·Custom·사용자 둘·tab 순서)와 단계별 시험(`FrameClockTests`·`HitOrderTests`·`DisabledHitTests`·`VisibilityBindingTests`·`KeyNavigationTests`·`NavigationSearchTests`·`StyleRegistryTests`)이다. 다음은 이 단계에서 시험하지 못했다.
+  - 전처리기 구간과 IME 조합 중 게임 전처리기: Rocks에 아직 `InputPreprocessor`가 없다(3.8절 — 게임 입력은 지금 `ScreenInputRouter`가 나눈다). 전처리기를 만들 때 시험을 더한다.
+  - RenderTransform 변경: 지금은 자기 배치만 다시 한다(부모 재측정 없음). UE 무효화 사유 정규화(`EInvalidateWidgetReason`)와 대조해 부모 Layout이 맞는지 정한 뒤 시험한다.
+  - modal 창: 기능이 생길 때 더한다.
 - **UE 실행 기준값(UD6).** UE 5.8로 빌드한 덤프 프로그램 결과는 UE 빌드 환경이 필요해 이 단계에서 만들지 않는다. 소스 근거 기준값만 둔다. 덤프는 UT1 판정 때 한다(10장 위험 목록에 남긴다).
 
 ### 20.13 단계
