@@ -63,6 +63,23 @@ public:
     // 한 번의 RunDeferredTeardown이 도는 바퀴(통지 안에서 다시 넣은 통지) 상한이다.
     static constexpr usize MaxTeardownRounds = 64;
 
+    // 프레임 시작에 할 일이다(Docs/Design/UiToolkit 22.6절). 트리 순회(붙는 통지·측정·배치) 안에서
+    // 다른 가지를 바꾸면 순회가 깨지는 일(예: 상자가 트리에 붙을 때 여는 오류 팝업 — 루트 Overlay
+    // 자식 목록을 바꾼다)을 순회 밖으로 미룬다. Application이 프레임 시작(해체 대기열 다음)에 넣은
+    // 순서대로 돌린다. 도는 중 넣은 항목은 다음 프레임에 돈다. Shutdown·소멸에서는 돌리지 않고
+    // 버린다(닫는 앱에서 팝업을 열지 않는다). 항목은 대상을 약하게 잡는다(그 사이 버려진 대상이면
+    // 아무 일도 하지 않게). 실패: 빈 delegate InvalidArgument, 할당 실패 OutOfMemory.
+    //
+    // 사용 예(붙는 통지에서):
+    //   (void)host->DeferFrameAction(Delegate<void()>::CreateLambda(
+    //       [weak = WeakPtr<Element>(self)]() noexcept { if (auto e = weak.Lock()) { ... } }));
+    Result<void> DeferFrameAction(Delegate<void()>&& action) noexcept;
+    // 대기열을 지금 돌린다. 다시 들어오면 0이다. 돈 항목 수다.
+    usize RunFrameActions() noexcept;
+    usize PendingFrameActionCount() const noexcept;
+    // 돌리지 않고 버린다. 버린 수다.
+    usize DiscardFrameActions() noexcept;
+
     // 스타일이 바뀐 횟수다(등록부·집합 값·활성 집합). 0이 아니고 늘어나기만 한다(처음 측정에서 한
     // 번 적용하게, 등록부를 바꿔도 줄지 않게).
     uint64 StyleRevision() const noexcept;
@@ -74,7 +91,9 @@ private:
     SharedPtr<StyleRegistry> registry_;
     String appStyle_;
     Array<Delegate<void()>> teardown_;
+    Array<Delegate<void()>> frameActions_;
     bool runningTeardown_ = false;
+    bool runningFrameActions_ = false;
     uint64 styleChanges_ = 1;
 };
 

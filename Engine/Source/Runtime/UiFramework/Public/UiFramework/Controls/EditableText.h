@@ -75,6 +75,21 @@ public:
     // InvalidArgument다.
     Result<void> SetContentPadding(Vec4 padding) noexcept;
     Vec4 ContentPadding() const noexcept;
+
+    // 세로 스크롤(px)이다(Docs/Design/UiToolkit 22.7절). 값은 마지막 배치 기준이다(배치 전에는 0).
+    // caret 따라가기는 caret이 움직이거나 글자가 바뀔 때만 다음 배치에서 한 번 한다 — 막대·휠로
+    // 옮긴 스크롤은 다음 배치에도 남는다(UE PositionToScrollIntoView).
+    float ScrollOffset() const noexcept;
+    // 줄 배치 높이(px)다.
+    float ContentHeight() const noexcept;
+    // 글자가 보이는 높이(배치 높이 - 위·아래 내용 여백)다.
+    float ViewHeight() const noexcept;
+    // 세로 스크롤을 옮긴다. [0, max(0, ContentHeight - ViewHeight)]로 자르고 비유한 값은 무시한다.
+    // 예: 스크롤 막대 onScrolled(fraction) -> SetScrollOffset(fraction * ContentHeight()).
+    void SetScrollOffset(float offset) noexcept;
+    // 편집기 배치 폭이 width(내용 여백 포함)일 때의 줄 배치 높이다. 줄 배치를 그 폭으로 바꾸므로
+    // 실제로 놓을 폭으로만 부른다(상자가 스크롤 막대를 정할 때 — 22.7절). 배치 전이면 0이다.
+    float MeasureContentHeight(float width) noexcept;
     // 스타일을 바꾼다(UE FEditableTextStyle). 부르지 않으면 활성 앱 스타일의 "NormalEditableText"
     // (없으면 DefaultEditableTextStyle)다(20.11절). 불투명도가 0–1 밖이면 InvalidArgument다.
     Result<void> SetStyle(const EditableTextStyle& style) noexcept;
@@ -180,6 +195,12 @@ private:
     // 마지막 상호작용 시각을 지금 프레임 시각으로 둔다(caret 깜박임 — 22.5절).
     void MarkInteraction() noexcept;
     bool IsCaretVisible() const noexcept;
+    // caret 폭(px)이다(UE CalculateCaretWidth — 줄 높이 기준).
+    float CaretWidth() const noexcept;
+    // 다음 배치에서 caret을 보이게 스크롤한다(22.7절).
+    void RequestCaretInView() noexcept;
+    // 스크롤을 [0, 내용 - 보이는 크기]로 자른다.
+    void ClampScroll() noexcept;
 
     Allocator& allocator_;
     Array<Snapshot> undo_;
@@ -200,6 +221,10 @@ private:
     usize pointerAnchor_ = 0;
     Platform platform_;
     Vec2 scroll_{};
+    // 마지막 배치의 내용 크기(가로는 caret 폭 포함)와 보이는 크기다.
+    Vec2 contentSize_{};
+    Vec2 viewSize_{};
+    bool followCaret_ = true;
     float fontSize_ = 16;
     Vec4 padding_{};
     bool composing_ = false;

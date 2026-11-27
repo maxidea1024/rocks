@@ -1,13 +1,20 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/PaintList.h>
+#include <UiCore/InputMetrics.h>
+#include <UiCore/UiHostServices.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Controls/EditableTextBox.h>
+#include <UiFramework/Layout/AnchorCanvas.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Popups/MenuAnchor.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
 
 // Element 층 편집 텍스트 시험이다(Docs/Design/UiToolkit 21.2절 — UE SEditableText). Widget·객체
 // 등록부 없이 Element가 글자·이력·사건을 스스로 드는지 본다: 사용자 편집만 onTextChanged, 프로그램
 // 교체는 통지·이력 없음, Enter·초점 잃음 확정, 비밀번호 선택 막기, Initialize 전에 정한 힌트,
-// 이력 99단계·힌트 불투명도·caret 폭(22.5절), 상자의 상태별 바탕·전경·여백·오류 표지(22.2·22.6절).
+// 이력 99단계·힌트 불투명도·caret 폭(22.5절), 상자의 상태별 바탕·전경·여백·오류 표지와
+// 팝업(22.2·22.6절), 스크롤 유지·휠·여러 줄 상자의 스크롤 막대(22.7절).
 
 namespace rocks::ui {
 
@@ -284,8 +291,13 @@ TEST(UiFramework_EditableTextBoxShowsErrorMarker) {
     CHECK(box.HasError());
     REQUIRE(box.Initialize("abc", EditFontSize));
     REQUIRE(box.ChildCount() == 2);
-    const Element& marker = *box.ChildAt(1);
-    CHECK(StaticElementCast<TextLabel>(&marker)->GetText() == "!");
+    // 표지는 "!"를 담은 MenuAnchor다(UE SPopupErrorText — 초점을 받지 않는 콤보 버튼).
+    REQUIRE(box.ErrorMarker() != nullptr && box.ChildAt(1) == box.ErrorMarker());
+    const MenuAnchor& marker = *box.ErrorMarker();
+    CHECK(StaticElementCast<TextLabel>(marker.ChildAt(0))->GetText() == "!");
+    CHECK(!marker.SupportsKeyboardFocus());
+    CHECK(marker.GetStyle().normal == DefaultEditableTextBoxStyle().errorMarker);
+    CHECK(marker.GetStyle().hovered == DefaultEditableTextBoxStyle().errorMarker);
     // 표지는 오른쪽 여백 안의 정사각이고 편집 칸이 그만큼 줄어든다(22.6절).
     REQUIRE(box.Prepass(1));
     REQUIRE(box.Arrange(Geometry::Root({120, 30}, {})));
@@ -297,7 +309,7 @@ TEST(UiFramework_EditableTextBoxShowsErrorMarker) {
     // 빈 불변 글자는 지우기와 같다.
     auto empty = Text::Invariant(allocator, "");
     REQUIRE(empty && box.SetError(empty.Value()));
-    CHECK(!box.HasError() && box.ChildCount() == 1);
+    CHECK(!box.HasError() && box.ChildCount() == 1 && box.ErrorMarker() == nullptr);
     REQUIRE(box.Prepass(1));
     REQUIRE(box.Arrange(Geometry::Root({120, 30}, {})));
     CHECK(box.Editor().GetGeometry().size.x == 120);
@@ -500,6 +512,336 @@ TEST(UiFramework_EditableTextControlArrowsMoveAndDeleteByWord) {
     uint32 length = 0;
     editor.GetSelection(begin, length);
     CHECK(begin == 0 && length == 5);
+}
+
+namespace {
+
+// 루트 Overlay 안 캔버스에 상자 하나를 놓는다(오류 팝업이 루트 Overlay 팝업 층에 붙는다).
+struct BoxBench {
+    explicit BoxBench(Allocator& allocator) noexcept : app(allocator) {
+    }
+
+    bool Make(Allocator& allocator, bool multiline) noexcept {
+        auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
+        auto overlay = SharedPtr<Overlay>::TryMake(allocator, allocator);
+        auto made = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+        if (!shaper || !overlay || !made) {
+            return false;
+        }
+
+        auto made2 = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(),
+                                                         Platform{}, multiline);
+        if (!made2) {
+            return false;
+        }
+
+        root = overlay.Value();
+        canvas = made.Value();
+        box = made2.Value();
+        return root->TryAddChild(canvas).IsOk();
+    }
+
+    bool Place() noexcept {
+        return canvas->TryAddSlot(box, {.offset = {10, 10, 120, 30}, .alignment = {}}).IsOk();
+    }
+
+    bool Layout() noexcept {
+        return app.UpdatePaintCache(Geometry::Root({200, 120}, {}), 1).IsOk();
+    }
+
+    void Click(const Element& target) noexcept {
+        const Geometry& geometry = target.GetGeometry();
+        const Vec2 center = geometry.render.Apply(geometry.size * 0.5f);
+        (void)app.RoutePointer({PointerEventType::Down, center, 0});
+        (void)app.RoutePointer({PointerEventType::Up, center, 0});
+    }
+
+    SharedPtr<Overlay> root;
+    SharedPtr<AnchorCanvas> canvas;
+    SharedPtr<EditableTextBox> box;
+    Application app;
+};
+
+// 팝업 내용(오류 팝업 → 글자 레이블)의 글자다.
+StringView PopupText(const MenuAnchor& marker) noexcept {
+    const Element* popup = marker.MenuContent();
+    const Element* label = popup && popup->ChildCount() > 0 ? popup->ChildAt(0) : nullptr;
+    return label ? StaticElementCast<TextLabel>(label)->GetText() : StringView{};
+}
+
+// "0\n1\n…" 꼴의 count줄 글자다.
+String Lines(Allocator& allocator, usize count) noexcept {
+    String text(allocator);
+    for (usize i = 0; i < count; ++i) {
+        const char line[] = {static_cast<char>('0' + i % 10), '\n', '\0'};
+        (void)text.TryAppend(i + 1 < count ? StringView(line) : StringView(line, 1));
+    }
+
+    return text;
+}
+
+} // namespace
+
+TEST(UiFramework_HostFrameActionsRunOncePerFrameInOrder) {
+    SystemAllocator allocator;
+    UiHostServices host(allocator);
+    CHECK(host.DeferFrameAction({}).Error() == ErrorCode::InvalidArgument);
+    Array<int32> order(allocator);
+    usize reentered = 1;
+    REQUIRE(host.DeferFrameAction(Delegate<void()>::CreateLambda([&]() noexcept {
+        (void)order.TryPushBack(1);
+        // 도는 중 다시 부르면 0이다. 도는 중 넣은 항목은 다음 차례다(22.6절).
+        reentered = host.RunFrameActions();
+        (void)host.DeferFrameAction(
+            Delegate<void()>::CreateLambda([&]() noexcept { (void)order.TryPushBack(3); }));
+    })));
+    REQUIRE(host.DeferFrameAction(
+        Delegate<void()>::CreateLambda([&]() noexcept { (void)order.TryPushBack(2); })));
+    CHECK(host.PendingFrameActionCount() == 2);
+    CHECK(host.RunFrameActions() == 2);
+    CHECK(reentered == 0);
+    REQUIRE(order.Size() == 2);
+    CHECK(order[0] == 1 && order[1] == 2);
+    CHECK(host.PendingFrameActionCount() == 1);
+    CHECK(host.DiscardFrameActions() == 1);
+    CHECK(host.RunFrameActions() == 0 && order.Size() == 2);
+}
+
+TEST(UiFramework_EditableTextBoxErrorPopupFollowsSetErrorWithoutStealingFocus) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false) && bench.Place());
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    REQUIRE(bench.app.SetFocus(EditUser, bench.box));
+    EditableText& editor = bench.box->Editor();
+    auto required = Text::Invariant(allocator, "Required");
+    auto tooLong = Text::Invariant(allocator, "Too long");
+    REQUIRE(required && tooLong);
+    // SetError가 팝업을 바로 연다(UE SetIsOpen(HasError, false)) — 초점은 편집기에 남는다.
+    REQUIRE(bench.box->SetError(required.Value()));
+    MenuAnchor* marker = bench.box->ErrorMarker();
+    REQUIRE(marker != nullptr && marker->IsOpen());
+    CHECK(bench.app.GetFocus(EditUser).Get() == &editor);
+    CHECK(bench.root->ChildCount() == 2);
+    CHECK(PopupText(*marker) == "Required");
+    REQUIRE(bench.Layout());
+    // 표지 왼쪽에 맞춰 상자 아래 끝에 붙는다(UE BelowAnchor는 표지 바로 아래 — 22.6절).
+    REQUIRE(marker->MenuPosition());
+    const Geometry& markerArea = marker->GetGeometry();
+    CHECK(marker->MenuPosition().Value() == Vec2(markerArea.render.Apply({}).x, 40));
+    // 팝업 바탕은 오류 표지 brush, 여백은 (3, 0, 3, 0)이다(UE SErrorText).
+    const Element* popup = marker->MenuContent();
+    REQUIRE(popup != nullptr && popup->ChildCount() == 1);
+    CHECK(popup->ChildAt(0)->GetGeometry().render.Apply({}) -
+              popup->GetGeometry().render.Apply({}) ==
+          Vec2(3, 0));
+    // 열린 채 다시 부르면 새 문구다.
+    REQUIRE(bench.box->SetError(tooLong.Value()));
+    CHECK(marker->IsOpen() && PopupText(*marker) == "Too long");
+    CHECK(bench.app.GetFocus(EditUser).Get() == &editor);
+    // 팝업 층은 바깥 누름을 받지 않는다 — 편집기를 누르면 편집기가 받고 팝업은 열린 채다.
+    REQUIRE(bench.Layout());
+    bench.Click(editor);
+    CHECK(marker->IsOpen() && bench.app.GetFocus(EditUser).Get() == &editor);
+    // 표지를 누르면 닫히고 다시 누르면 열린다(초점을 옮기지 않는 Open).
+    REQUIRE(bench.Layout());
+    bench.Click(*marker);
+    CHECK(!marker->IsOpen());
+    REQUIRE(bench.Layout());
+    bench.Click(*marker);
+    CHECK(marker->IsOpen() && PopupText(*marker) == "Too long");
+    // 지우면 닫히고 표지도 없어진다.
+    REQUIRE(bench.box->SetError({}));
+    CHECK(bench.box->ErrorMarker() == nullptr && bench.root->ChildCount() == 1);
+    bench.app.Shutdown();
+}
+
+TEST(UiFramework_EditableTextBoxOpensErrorPopupAtFrameStartAfterAttach) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false));
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required);
+    // 붙기 전 오류: 표지는 있지만 팝업 호스트가 없어 열리지 않는다.
+    REQUIRE(bench.box->SetError(required.Value()));
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    MenuAnchor* marker = bench.box->ErrorMarker();
+    REQUIRE(marker != nullptr && !marker->IsOpen());
+    REQUIRE(bench.Place());
+    // 붙는 통지 안에서는 열지 않고(트리 순회 중) 프레임 시작에 연다(UE는 버린다 — 22.6절).
+    bench.app.SetRoot(bench.root);
+    CHECK(!marker->IsOpen() && bench.root->ChildCount() == 1);
+    const UiHostServices* host = bench.box->FindUiHostServices();
+    REQUIRE(host != nullptr);
+    CHECK(host->PendingFrameActionCount() == 1);
+    bench.app.BeginFrame(FrameTime{1, 0});
+    CHECK(marker->IsOpen() && PopupText(*marker) == "Required");
+    CHECK(host->PendingFrameActionCount() == 0);
+    // 떼면 닫히고 다시 붙이면 다음 프레임에 다시 연다.
+    REQUIRE(bench.canvas->RemoveChild(*bench.box));
+    CHECK(!marker->IsOpen());
+    REQUIRE(bench.Place());
+    CHECK(!marker->IsOpen() && host->PendingFrameActionCount() == 1);
+    bench.app.BeginFrame(FrameTime{2, 0});
+    CHECK(marker->IsOpen());
+    // 대기 중 버려진 상자는 아무 일도 하지 않는다.
+    REQUIRE(bench.canvas->RemoveChild(*bench.box));
+    REQUIRE(bench.Place());
+    CHECK(host->PendingFrameActionCount() == 1);
+    REQUIRE(bench.canvas->RemoveChild(*bench.box));
+    bench.box = {};
+    bench.app.BeginFrame(FrameTime{3, 0});
+    CHECK(host->PendingFrameActionCount() == 0 && bench.root->ChildCount() == 1);
+    // Shutdown은 남은 프레임 동작을 돌리지 않고 버린다.
+    auto again = SharedPtr<EditableTextBox>::TryMake(
+        allocator, allocator, SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator).Value(),
+        Platform{}, false);
+    REQUIRE(again && again.Value()->Initialize("x", EditFontSize));
+    REQUIRE(again.Value()->SetError(required.Value()));
+    bench.box = again.Value();
+    REQUIRE(bench.Place());
+    CHECK(host->PendingFrameActionCount() == 1);
+    bench.app.Shutdown();
+    CHECK(host->PendingFrameActionCount() == 0 && !bench.box->ErrorMarker()->IsOpen());
+}
+
+TEST(UiFramework_EditableTextKeepsScrollUntilTheCaretMoves) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    const String text = Lines(allocator, 20);
+    REQUIRE(pointer.Start(allocator, text.View(), true, false));
+    EditableText& editor = *pointer.bench.editor;
+    Application& app = pointer.app;
+    const Geometry area = Geometry::Root({100, 40}, {});
+    REQUIRE(app.PrepareLayout(area, 1));
+    const float line = editor.Label().LineHeight();
+    REQUIRE(line > 0);
+    CHECK(editor.ContentHeight() >= 19 * line);
+    CHECK(editor.ViewHeight() == 40);
+    const float maxScroll = editor.ContentHeight() - 40;
+    REQUIRE(maxScroll > WheelScrollStep);
+    // 막대·코드로 옮긴 스크롤은 다음 배치에도 남는다(caret을 끌어오지 않는다 — 22.7절).
+    editor.MoveCaret(0, false);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.ScrollOffset() == 0);
+    editor.SetScrollOffset(50);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.ScrollOffset() == 50);
+    CHECK(editor.Label().GetGeometry().layout.ty == -50);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.ScrollOffset() == 50);
+    // clamp와 비유한 값.
+    editor.SetScrollOffset(10000);
+    CHECK(editor.ScrollOffset() == maxScroll);
+    editor.SetScrollOffset(-5);
+    CHECK(editor.ScrollOffset() == 0);
+    editor.SetScrollOffset(platform::PlatformMath::QuietNaN<float>());
+    CHECK(editor.ScrollOffset() == 0);
+    // caret이 움직이면 caret 줄을 보이게 한다.
+    editor.SetScrollOffset(maxScroll);
+    REQUIRE(app.PrepareLayout(area, 1));
+    Press(editor, input::Key::Right);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.ScrollOffset() == 0);
+    // 휠: 한 칸에 WheelScrollStep, 끝에서는 처리하지 않는다(바깥 스크롤로).
+    PointerEvent wheel{.type = PointerEventType::Wheel, .position = {10, 10}, .wheel = -1};
+    CHECK(editor.OnPointerEvent(wheel).handled);
+    CHECK(editor.ScrollOffset() == math::Min(maxScroll, WheelScrollStep));
+    for (int32 i = 0; i < 20; ++i) {
+        (void)editor.OnPointerEvent(wheel);
+    }
+
+    CHECK(editor.ScrollOffset() == maxScroll);
+    CHECK(!editor.OnPointerEvent(wheel).handled);
+    wheel.wheel = 1;
+    CHECK(editor.OnPointerEvent(wheel).handled);
+    // 한 줄 편집기는 휠을 받지 않는다.
+    EditBench single(allocator);
+    REQUIRE(MakeEditor(allocator, single) && single.editor->Initialize("abc", EditFontSize));
+    CHECK(!single.editor->OnPointerEvent(wheel).handled);
+}
+
+TEST(UiFramework_EditableTextBoxShowsScrollBarOnlyWhenOverflowing) {
+    SystemAllocator allocator;
+    auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
+    REQUIRE(shaper);
+    auto made =
+        SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(), Platform{}, true);
+    REQUIRE(made);
+    EditableTextBox& box = *made.Value();
+    REQUIRE(box.Initialize("a", EditFontSize));
+    Application app(allocator);
+    app.SetRoot(made.Value());
+    const Geometry area = Geometry::Root({200, 100}, {});
+    REQUIRE(app.PrepareLayout(area, 1));
+    EditableText& editor = box.Editor();
+    ScrollBar* bar = box.VerticalScrollBar();
+    REQUIRE(bar != nullptr);
+    // 넘치지 않으면 숨고 편집 칸은 상자 폭 그대로다.
+    CHECK(bar->GetVisibility() == Visibility::Collapsed);
+    CHECK(editor.GetGeometry().size.x == 200);
+    // 넘치면 보이고 편집 칸 | 막대 순서로 놓인다(막대 세로는 위·아래 여백 안).
+    const String text = Lines(allocator, 20);
+    REQUIRE(editor.SetText(text.View()));
+    REQUIRE(app.PrepareLayout(area, 1));
+    const Vec4 padding = box.GetStyle().padding;
+    const float thickness = bar->GetStyle().thickness;
+    CHECK(bar->GetVisibility() == Visibility::Visible);
+    CHECK(editor.GetGeometry().size.x == 200 - thickness - padding.z);
+    CHECK(bar->GetGeometry().layout.tx == 200 - thickness - padding.z);
+    CHECK(bar->GetGeometry().layout.ty == padding.y);
+    CHECK(bar->GetGeometry().size == Vec2(thickness, 100 - padding.y - padding.w));
+    // 막대는 편집기 스크롤을 보인다(SetText 뒤 caret이 끝이라 맨 아래).
+    const float content = editor.ContentHeight();
+    const float view = editor.ViewHeight();
+    REQUIRE(content > view);
+    CHECK(bar->ThumbSize() == view / content);
+    CHECK(editor.ScrollOffset() == content - view);
+    CHECK(bar->Offset() == (content - view) / content);
+    // 막대를 맨 위로 끌면 편집기가 맨 위로 스크롤하고, 다음 배치에도 남는다.
+    const Geometry& track = bar->GetGeometry();
+    // 손잡이는 맨 아래에 있다 — 트랙 끝을 눌러 손잡이를 잡는다.
+    const Vec2 grip = track.render.Apply({thickness * 0.5f, track.size.y - 1});
+    PointerEvent down{.type = PointerEventType::Down, .position = grip};
+    REQUIRE(bar->OnPointerEvent(down).handled);
+    PointerEvent move{.type = PointerEventType::Move,
+                      .position = track.render.Apply({thickness * 0.5f, -200})};
+    REQUIRE(bar->OnPointerEvent(move).handled);
+    PointerEvent up{.type = PointerEventType::Up, .position = move.position};
+    (void)bar->OnPointerEvent(up);
+    CHECK(editor.ScrollOffset() == 0);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.ScrollOffset() == 0 && bar->Offset() == 0);
+    // 편집기 휠도 막대를 맞춘다.
+    PointerEvent wheel{.type = PointerEventType::Wheel, .position = {10, 10}, .wheel = -1};
+    REQUIRE(editor.OnPointerEvent(wheel).handled);
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(bar->Offset() == editor.ScrollOffset() / content);
+    // 오류 표지와 함께면 편집 칸 | 막대 | 표지 순서다.
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required && box.SetError(required.Value()));
+    REQUIRE(app.PrepareLayout(area, 1));
+    const MenuAnchor* marker = box.ErrorMarker();
+    REQUIRE(marker != nullptr);
+    const float extent = marker->GetGeometry().size.x;
+    CHECK(extent > 0);
+    CHECK(editor.GetGeometry().size.x == 200 - extent - thickness - padding.z);
+    CHECK(bar->GetGeometry().layout.tx == editor.GetGeometry().size.x);
+    CHECK(marker->GetGeometry().layout.tx == 200 - padding.z - extent);
+    // 다시 짧아지면 숨고 편집 칸이 넓어진다.
+    REQUIRE(box.SetError({}));
+    REQUIRE(editor.SetText("a"));
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(bar->GetVisibility() == Visibility::Collapsed);
+    CHECK(editor.GetGeometry().size.x == 200);
+    // 한 줄 상자에는 막대가 없다.
+    auto single = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(),
+                                                      Platform{}, false);
+    REQUIRE(single && single.Value()->Initialize("a", EditFontSize));
+    CHECK(single.Value()->VerticalScrollBar() == nullptr);
+    app.Shutdown();
 }
 
 } // namespace rocks::ui

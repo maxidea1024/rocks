@@ -86,6 +86,7 @@ Application::~Application() noexcept {
     }
 
     if (host_) {
+        (void)host_->DiscardFrameActions();
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
         host_->SetPopupWorkArea({});
         host_->SetTextInputService({});
@@ -192,6 +193,8 @@ void Application::StartFrame(const FrameTime& time, bool external) noexcept {
         host_->SetFrameTime(frameTime_);
         // 앞 프레임에 버려진 요소의 해체 통지다(소멸자 밖의 안전한 자리 — 21.4절).
         (void)host_->RunDeferredTeardown();
+        // 트리 순회 안에서 미룬 일이다(22.6절 — 붙을 때 여는 오류 팝업). 측정·배치 전이다.
+        (void)host_->RunFrameActions();
     }
 }
 
@@ -212,6 +215,10 @@ usize Application::PendingTeardownCount() const noexcept {
 void Application::Shutdown() noexcept {
     SetRoot({});
     (void)RunDeferredTeardown();
+    if (host_) {
+        // 닫는 앱에서는 프레임 동작(팝업 열기 등)을 하지 않는다(22.6절).
+        (void)host_->DiscardFrameActions();
+    }
 }
 
 void Application::EnsureFrame() noexcept {

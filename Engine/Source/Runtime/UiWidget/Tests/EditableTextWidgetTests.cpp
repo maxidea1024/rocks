@@ -1,6 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiFramework/Controls/EditableTextBox.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Application/InputAdapter.h>
 #include <UiWidget/EditableTextBoxWidget.generated.h>
 #include <UiWidget/EditableTextWidget.generated.h>
@@ -458,7 +459,8 @@ TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {
     REQUIRE(editorRef && editorRef.Get() == &boxElement.Editor());
     REQUIRE(editorRef->ChildCount() == 2);
     CHECK(StaticElementCast<TextLabel>(editorRef->ChildAt(1))->GetText() == "Hint");
-    CHECK(StaticElementCast<TextLabel>(live->ChildAt(1))->GetText() == "!");
+    REQUIRE(boxElement.ErrorMarker() != nullptr && live->ChildAt(1) == boxElement.ErrorMarker());
+    CHECK(StaticElementCast<TextLabel>(boxElement.ErrorMarker()->ChildAt(0))->GetText() == "!");
     CHECK(live->GetDesiredSize().x >= 68);
     REQUIRE(box->SetText("Before"));
     CHECK(editorRef->ChildAt(1)->GetVisibility() == Visibility::Collapsed);

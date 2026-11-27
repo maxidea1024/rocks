@@ -67,7 +67,7 @@
 
 - 오류가 있으면 상자 오른쪽 안쪽에 "!" 표지(정사각, `errorMarker` 바탕, 흰 "!")를 둔다. 편집 칸은 그만큼 줄어든다.
 - 표지는 `MenuAnchor`다(UE `SPopupErrorText`가 `SComboButton`). 버튼 스타일은 모든 상태가 `errorMarker`이고 여백 0이다. 초점을 받지 않는다(`SetFocusable(false)` — UE `IsFocusable(false)`, Tab 정지가 아니다). 누르면 팝업을 여닫는다(`MenuAnchor::OnActivated` — 초점을 옮기지 않는 `Open`).
-- 오류 문구는 상자 아래(`MenuPlacement::Below` — UE `MenuPlacement_BelowAnchor`)에 붙는 팝업으로 띄운다.
+- 오류 문구는 표지 아래(`MenuPlacement::Below` — UE `MenuPlacement_BelowAnchor`, 기준은 표지) 팝업으로 띄운다. UE는 표지 바로 아래라 상자 아래쪽(표지 아래 여백)을 덮는다. Rocks는 팝업을 상자 아래 끝까지 내린다(`SetMenuOffset` — 입력 글자를 가리지 않는다, 바뀔 때만 다시 정한다).
   - 팝업 내용은 상자 전용 Element(`EditableTextErrorPopup`, Private)다: `errorMarker` 바탕 위 `errorText` 글자, 여백 (3, 0, 3, 0)(UE `SErrorText`의 `FMargin(3, 0)`). 바탕은 그릴 때 테마로 푼다(테마가 바뀌어도 따라간다 — `Frame`은 푼 `Brush`만 받으므로 쓰지 않는다).
   - 팝업 층은 바깥 누름을 받지 않는다(`SetCatchOutsidePresses(false)`) — 오류 팝업이 다른 입력을 막지 않는다.
   - 초점을 뺏지 않는다(UE `SetIsOpen(bHasError, false)` — 둘째 인자 `bFocusMenu = false`).

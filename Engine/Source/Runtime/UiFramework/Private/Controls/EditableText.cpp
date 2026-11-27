@@ -2,6 +2,7 @@
 
 #include <Core/Assert.h>
 
+#include <UiCore/InputMetrics.h>
 #include <UiCore/TextInputPositions.h>
 
 namespace rocks::ui {
@@ -349,6 +350,8 @@ Result<void> EditableText::ShapeText(StringView text, float size, bool password)
     }
 
     fontSize_ = size;
+    // 글자가 바뀌었다 — 다음 배치에서 caret을 보이게 한다(UE는 편집마다 PositionToScrollIntoView).
+    followCaret_ = true;
     InvalidateLayout();
     InvalidatePaint();
     return Result<void>::Success();
@@ -427,9 +430,58 @@ Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
 
     // caret 폭만큼 오른쪽을 더 둔다(UE가 caret 폭을 여백에 더한다 — SlateEditableTextLayout.cpp
     // 3717–3718행).
-    const float caret =
-        math::Clamp(CaretWidthPercent * math::Max(fontSize_, text.y), MinCaretWidth, MaxCaretWidth);
-    return {text.x + caret + inset.x, math::Max(fontSize_, text.y) + inset.y};
+    return {text.x + CaretWidth() + inset.x, math::Max(fontSize_, text.y) + inset.y};
+}
+
+float EditableText::CaretWidth() const noexcept {
+    // 줄 높이 기준이다(여러 줄의 전체 높이가 아니다 — UE는 글꼴 최대 글자 높이).
+    const float line = label_ && label_->LineHeight() > 0 ? label_->LineHeight() : fontSize_;
+    return math::Clamp(CaretWidthPercent * line, MinCaretWidth, MaxCaretWidth);
+}
+
+void EditableText::RequestCaretInView() noexcept {
+    followCaret_ = true;
+    InvalidateArrangement();
+}
+
+void EditableText::ClampScroll() noexcept {
+    scroll_.x = math::Clamp(scroll_.x, 0.0f, math::Max(0.0f, contentSize_.x - viewSize_.x));
+    scroll_.y = math::Clamp(scroll_.y, 0.0f, math::Max(0.0f, contentSize_.y - viewSize_.y));
+}
+
+float EditableText::MeasureContentHeight(float width) noexcept {
+    if (!label_) {
+        return 0.0f;
+    }
+
+    // Arrange와 같은 글자 폭으로 줄을 나눈다.
+    (void)label_->MeasureForWidth(math::Max(1.0f, width - padding_.x - padding_.z));
+    return label_->Layout().DesiredSize().y;
+}
+
+float EditableText::ScrollOffset() const noexcept {
+    return scroll_.y;
+}
+
+float EditableText::ContentHeight() const noexcept {
+    return contentSize_.y;
+}
+
+float EditableText::ViewHeight() const noexcept {
+    return viewSize_.y;
+}
+
+void EditableText::SetScrollOffset(float offset) noexcept {
+    if (!math::IsFinite(offset)) {
+        return;
+    }
+
+    const float clamped = math::Clamp(offset, 0.0f, math::Max(0.0f, contentSize_.y - viewSize_.y));
+    if (clamped != scroll_.y) {
+        scroll_.y = clamped;
+        // 글자 위치만 바뀐다 — 다시 배치한다(배치 무효화가 상자까지 올라가 막대도 맞춘다).
+        InvalidateArrangement();
+    }
 }
 
 Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
@@ -459,15 +511,33 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
         return wrapped;
     }
 
-    const auto pos = label_->CaretPosition(caret_, false);
-    if (pos) {
-        scroll_.x =
-            math::Max(0.0f, math::Clamp(scroll_.x, pos.Value().x + 1 - area.x, pos.Value().x));
-        scroll_.y = math::Max(
-            0.0f,
-            math::Clamp(scroll_.y, pos.Value().y + math::Min(area.y, label_->LineHeight()) - area.y,
-                        pos.Value().y));
+    const Vec2 laid = label_->Layout().DesiredSize();
+    const float caretWidth = CaretWidth();
+    contentSize_ = {laid.x + caretWidth, laid.y};
+    viewSize_ = area;
+    if (followCaret_) {
+        // UE PositionToScrollIntoView(SlateEditableTextLayout.cpp 3596–3631행): 가로는 caret
+        // 사각형, 세로는 caret 줄 전체를 보이게 한다. 줄이 보이는 높이보다 크면 줄 위를 맞춘다.
+        followCaret_ = false;
+        const auto pos = label_->CaretPosition(caret_, false);
+        if (pos) {
+            const Vec2 at = pos.Value();
+            const float line = math::Min(area.y, label_->LineHeight());
+            if (at.x < scroll_.x) {
+                scroll_.x = at.x;
+            } else if (at.x + caretWidth > scroll_.x + area.x) {
+                scroll_.x = at.x + caretWidth - area.x;
+            }
+
+            if (at.y < scroll_.y) {
+                scroll_.y = at.y;
+            } else if (at.y + line > scroll_.y + area.y) {
+                scroll_.y = at.y + line - area.y;
+            }
+        }
     }
+
+    ClampScroll();
 
     const AffineTransform2D offset{1, 0, 0, 1, padding_.x - scroll_.x, padding_.y - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
@@ -540,6 +610,8 @@ void EditableText::MoveCaret(usize pos, bool extend) noexcept {
 
     // caret을 옮기는 일(타자·이동·포인터·선택)은 상호작용이다 — 깜박임을 처음부터 센다(22.5절).
     MarkInteraction();
+    // 다음 배치에서 caret을 보이게 한다(22.7절 — 같은 자리여도 UE처럼 다시 본다).
+    RequestCaretInView();
 
     // 새로 삽입한 코드 포인트가 다음 문자와 한 클러스터로 결합하는 경우 그 끝에 둔다.
     if (pos != 0 && pos < label_->GetText().ByteCount()) {
@@ -1075,6 +1147,18 @@ usize EditableText::PointerOffset(Vec2 point) const noexcept {
 }
 
 PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
+    if (event.type == PointerEventType::Wheel) {
+        // 여러 줄이 넘칠 때만 세로로 옮긴다. 끝이라 못 옮기면 바깥 스크롤로 넘긴다(UE
+        // SMultiLineEditableText::OnMouseWheel 862–884행). 조합 중에도 스크롤은 된다.
+        if (!multiline_ || !math::IsFinite(event.wheel) || !label_) {
+            return {};
+        }
+
+        const float before = scroll_.y;
+        SetScrollOffset(scroll_.y - event.wheel * WheelScrollStep);
+        return {.handled = scroll_.y != before};
+    }
+
     if (composing_) {
         return {.handled = true};
     }
@@ -1303,7 +1387,7 @@ Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const no
     const auto pos = label_->CaretPosition(caret_, false);
     const auto point = pos ? pos.Value() : Vec2{};
     const float height = label_->LineHeight();
-    const float width = math::Clamp(CaretWidthPercent * height, MinCaretWidth, MaxCaretWidth);
+    const float width = CaretWidth();
     const auto caret =
         label_->GetGeometry().MakeChild({width, height}, {1, 0, 0, 1, point.x, point.y}, {}, {});
     return list.TryAddBox({caret, style_.caret.Resolve(list.Theme(), list.ColorContext()), layer});
