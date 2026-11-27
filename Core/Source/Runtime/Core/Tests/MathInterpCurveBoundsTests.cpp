@@ -6,7 +6,8 @@
 #include <TestSupport/Test.h>
 
 // InterpCurve::TryCalcBounds를 UE 5.8 식을 그대로 옮긴 참조(ue58bounds)와 비트 단위로 대조한다
-// (Docs/Design/CurveData.ko.md 12.2절 — CV9). 참조 함수 ↔ UE 5.8.4 원본(리뷰어 줄 단위 대조용):
+// (Docs/Design/CurveData/README.ko.md 12.2절 — CV9). 참조 함수 ↔ UE 5.8.4 원본(리뷰어 줄 단위
+// 대조용):
 //   ue58bounds::FindBounds    ↔ Core/Private/Math/UnrealMath.cpp 1512–1573
 //   ue58bounds::IntervalBounds ↔ UnrealMath.cpp 1575–1662(Curve*FindIntervalBounds —
 //                                성분마다 FindBounds 뒤 FMath::Min·Max)

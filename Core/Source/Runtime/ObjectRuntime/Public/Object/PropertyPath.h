@@ -73,7 +73,7 @@ namespace rocks {
 //   InstancedEmpty    — 비어 있는 InstancedStruct의 멤버로 들어가는 단계(NotFound — 리플렉션 B9j,
 //                       먼저 PathSetInstancedType으로 값을 만든다)
 //   StructValidation  — 바꾼 값을 담은 struct의 검증 hook(RuntimeStructOps::validate)이 거부했다
-//                       (InvalidArgument — Docs/Design/CurveData.ko.md 9.1절, 값은 그대로)
+//                       (InvalidArgument — Docs/Design/CurveData/README.ko.md 9.1절, 값은 그대로)
 //   InsideValidatedStruct — PathPrepareAttach의 자리가 검증 hook 있는 struct 안이다(Unsupported —
 //   그
 //                       struct를 감싼 자리로 분리·게시해야 검증할 수 있다)
@@ -108,7 +108,7 @@ enum class PropertyPathError : uint8 {
     NotInstanced,
     // 비어 있는 InstancedStruct의 멤버로 들어간다(리플렉션 B9j).
     InstancedEmpty,
-    // struct 검증 hook이 바뀐 값을 거부했다(Docs/Design/CurveData.ko.md 9.1절).
+    // struct 검증 hook이 바뀐 값을 거부했다(Docs/Design/CurveData/README.ko.md 9.1절).
     StructValidation,
     // 상자를 게시할 자리가 검증 hook 있는 struct 안이다(같은 절).
     InsideValidatedStruct

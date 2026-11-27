@@ -16,10 +16,10 @@
 #include <ReflectionText/TextJson.h>
 #include <TestSupport/Test.h>
 
-// PackedTangentCurve의 리플렉션 시험이다(Docs/Design/CurveData.ko.md 11.4절·16절 — CV8, fixture
-// CurvesTestFixtures/CurveFixture.h의 PackedCurveHolder): 필드·Array 원소·Optional 자리의 그래프
-// 왕복과 다시 저장 byte 같음, packed가 Bytes wire(D18 — JSON은 Base64 문자열 하나), 검증 hook
-// (D21 — 칸 정합·키 시간)이 graph decode·JSON import·경로 쓰기에서 어기는 값을 거부하고 값이
+// PackedTangentCurve의 리플렉션 시험이다(Docs/Design/CurveData/README.ko.md 11.4절·16절 — CV8,
+// fixture CurvesTestFixtures/CurveFixture.h의 PackedCurveHolder): 필드·Array 원소·Optional 자리의
+// 그래프 왕복과 다시 저장 byte 같음, packed가 Bytes wire(D18 — JSON은 Base64 문자열 하나), 검증
+// hook (D21 — 칸 정합·키 시간)이 graph decode·JSON import·경로 쓰기에서 어기는 값을 거부하고 값이
 // 그대로인지.
 using namespace rocks;
 namespace packed_tangent_curve_reflection_tests_file {

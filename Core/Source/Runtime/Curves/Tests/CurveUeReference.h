@@ -8,9 +8,9 @@
 #include <Curves/TangentCurve.h>
 
 // UE 5.8 FRichCurve·FSimpleCurve의 평가·자동 접선·편집·중복 제거를 그대로 옮긴 시험 참조다
-// (Docs/Design/CurveData.ko.md 16절 — CurveGoldenTests.cpp가 Curves 구현과 비트 대조한다). 두 키
-// 사이 식·순환·SinCos 등 수학 층 참조는 Core KeyCurveUeReference.h(ue58curve)를 그대로 쓴다. UE의
-// TArray는 Array, 키 핸들 표는 빼고 옮겼다(평가·키 배열에 영향이 없다). 설계 15절의 수정은
+// (Docs/Design/CurveData/README.ko.md 16절 — CurveGoldenTests.cpp가 Curves 구현과 비트 대조한다).
+// 두 키 사이 식·순환·SinCos 등 수학 층 참조는 Core KeyCurveUeReference.h(ue58curve)를 그대로 쓴다.
+// UE의 TArray는 Array, 키 핸들 표는 빼고 옮겼다(평가·키 배열에 영향이 없다). 설계 15절의 수정은
 // CurveOptions로 하나씩 켜고 끈다(기본 = 모두 켬 = Rocks 의미).
 //
 // 참조 함수 ↔ UE 5.8.4 원본(Engine/Source/Runtime/Engine/Private/Curves, 리뷰어 줄 단위 대조용):

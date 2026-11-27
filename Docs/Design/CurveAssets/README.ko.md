@@ -1,6 +1,6 @@
 # 커브 에셋(CR10)
 
-개정 3(2026-11-27). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR10의 설계다. 커브 값 타입 층([CurveData](../CurveData.ko.md) — `TangentCurve`·`PlainCurve`, CV1–CV10 완료) 위에 UE 5.8의 커브 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve` 계열·`FCurveTableRowHandle`·`UCurveLinearColorAtlas`)을 들인다. CurveData 14절이 정한 경계를 따른다.
+개정 3(2026-11-27). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR10의 설계다. 커브 값 타입 층([CurveData](../CurveData/README.ko.md) — `TangentCurve`·`PlainCurve`, CV1–CV10 완료) 위에 UE 5.8의 커브 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve` 계열·`FCurveTableRowHandle`·`UCurveLinearColorAtlas`)을 들인다. CurveData 14절이 정한 경계를 따른다.
 
 UE 경로 약어: `RE/` = `Engine/Source/Runtime/Engine/`, `UEd/` = `Engine/Source/Editor/UnrealEd/`(UE 5.8.4 — 로컬 클론 `C:\github\UnrealEngine`).
 

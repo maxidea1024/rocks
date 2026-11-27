@@ -686,9 +686,10 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         (void)state.elements.TryRemoveAt(kept, state.elements.Size() - kept);
     }
 
-    // 0. struct 검증 hook(Docs/Design/CurveData.ko.md 9.1절 — 게시 전 1회): 추가 StructRefArray
-    // 원소는 여기서, 값 단위 상자는 아래 PathPrepareAttach가 상자 값 트리를 검증한다. 거부는 진단
-    // InvalidStructValue(단위 경로)와 InvalidArgument이고 아무것도 게시하지 않는다.
+    // 0. struct 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절 — 게시 전 1회): 추가
+    // StructRefArray 원소는 여기서, 값 단위 상자는 아래 PathPrepareAttach가 상자 값 트리를
+    // 검증한다. 거부는 진단 InvalidStructValue(단위 경로)와 InvalidArgument이고 아무것도 게시하지
+    // 않는다.
     const auto rejectStruct = [&state](PropertyPath path, StringView message) noexcept {
         String text(state.allocator);
         if (auto formatted = detail::FormatAssignmentPath(state, path, text); !formatted) {
@@ -731,8 +732,8 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     };
     // struct 값 대상(설정·콘솔 — AssignmentTarget::Value)의 루트 struct에 hook이 있으면 단위를
     // 루트의 깊은 사본에 놓고 사본 트리를 검증한 뒤 루트와 통째로
-    // 맞바꾼다(Docs/Design/CurveData.ko.md 17.2절 — 루트 자신의 hook은 상자 검증이 볼 수 없다).
-    // 사본은 대상 값의 allocator로 만든다.
+    // 맞바꾼다(Docs/Design/CurveData/README.ko.md 17.2절 — 루트 자신의 hook은 상자 검증이 볼 수
+    // 없다). 사본은 대상 값의 allocator로 만든다.
     struct RootCopy {
         const RuntimeStructOps* ops = nullptr;
         Allocator* allocator = nullptr;

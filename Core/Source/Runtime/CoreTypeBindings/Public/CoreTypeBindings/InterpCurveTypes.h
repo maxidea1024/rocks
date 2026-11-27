@@ -5,7 +5,7 @@
 #include <CoreTypeBindings/CoreValueTypes.h>
 #include <Meta/Annotations.h>
 
-// Core InterpCurve의 리플렉션 미러 선언이다(Docs/Design/CurveData.ko.md 12.1절, D19 — UE 5.8
+// Core InterpCurve의 리플렉션 미러 선언이다(Docs/Design/CurveData/README.ko.md 12.1절, D19 — UE 5.8
 // NoExportTypes.h의 FInterpCurve*·FInterpCurvePoint* USTRUCT 대응). 대상은 UE에 USTRUCT가 있는 다섯
 // 형식과 같은 정밀도다(UE 5의 FVector2D·FVector·FQuat는 double — UE MathFwd.h 47–50):
 //   InterpCurve<float>       ↔ FInterpCurveFloat
@@ -22,7 +22,7 @@
 // - 커브 미러는 private 멤버(points_·looped_·loopKeyOffset_)를 C++ 이름으로 나열한다. 생성 코드는
 //   InterpCurve가 선언한 GeneratedType friend로 닿는다(접근자 미러가 아니다). 도구·JSON 이름은
 //   Name= "points"·"looped"·"loopKeyOffset"이다.
-// - 커브 미러의 Validate(검증 hook — Docs/Design/CurveData.ko.md 9.1절)가 InterpCurve
+// - 커브 미러의 Validate(검증 hook — Docs/Design/CurveData/README.ko.md 9.1절)가 InterpCurve
 //   불변식을 지킨다: 키 입력값이 유한하고 비내림차순, 루프 offset이 유한, 루프가 켜져 있으면
 //   offset이 양수다(키 없는 루프 커브도 받는다 — Reset이 남기는 값). graph decode·JSON import·대입
 //   묶음·경로 쓰기가 어기는 값을 게시하지 않는다(InvalidArgument).

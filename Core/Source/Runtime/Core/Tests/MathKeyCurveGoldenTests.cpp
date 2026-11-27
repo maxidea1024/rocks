@@ -5,8 +5,8 @@
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
-// KeyCurveMath(Docs/Design/CurveData.ko.md 5·6절)를 UE 5.8 식을 그대로 옮긴 참조 구현과 비트 단위로
-// 대조한다. 참조는 UE 원본을 줄 단위로 옮긴 것이고(형식·암묵 변환·연산 순서를 UE 소스 그대로
+// KeyCurveMath(Docs/Design/CurveData/README.ko.md 5·6절)를 UE 5.8 식을 그대로 옮긴 참조 구현과 비트
+// 단위로 대조한다. 참조는 UE 원본을 줄 단위로 옮긴 것이고(형식·암묵 변환·연산 순서를 UE 소스 그대로
 // 적었다) 설계 문서 15절의 수정을 Options로 하나씩 켜고 끈다.
 // - 수정을 모두 켠 참조 = Rocks 의미: 모든 입력에서 비트가 같아야 한다.
 // - 수정을 끈 참조 = UE 그대로: 문서화한 경우(비율 0·1, 끝의 차 넘침, 근 2개, |주기 몫| ≥ 2^30,

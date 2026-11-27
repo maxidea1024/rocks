@@ -6,10 +6,10 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 계단 커브의 독립 고정 벡터·편집 시험이다(Docs/Design/CurveData.ko.md 5.8·7절 — CV6): 평가 규칙(키
-// 없음·첫 키 이전·같은 시간 키·마지막 키 이후·NaN), useDefaultBeforeFirstKey, String·Name의 첫 키
-// 이전 기본값과 빈 문자열 기본값, Name 대소문자 같음, FindKeyAtOrBefore, 편집 연산의 거부와 할당
-// 실패 뒤 불변, 중복 키 제거(남은 키를 기본값으로 바꾸지 않는다).
+// 계단 커브의 독립 고정 벡터·편집 시험이다(Docs/Design/CurveData/README.ko.md 5.8·7절 — CV6): 평가
+// 규칙(키 없음·첫 키 이전·같은 시간 키·마지막 키 이후·NaN), useDefaultBeforeFirstKey, String·Name의
+// 첫 키 이전 기본값과 빈 문자열 기본값, Name 대소문자 같음, FindKeyAtOrBefore, 편집 연산의 거부와
+// 할당 실패 뒤 불변, 중복 키 제거(남은 키를 기본값으로 바꾸지 않는다).
 using namespace rocks;
 namespace step_curve_tests_file {
 
