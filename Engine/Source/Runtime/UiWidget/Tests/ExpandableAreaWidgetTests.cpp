@@ -33,14 +33,21 @@ TEST(UiWidget_ExpandableAreaKeepsRolesAndOverridesAcrossRebuild) {
     REQUIRE(!area->AddBody(objects, header.Value().Handle()));
     REQUIRE(area->AddChild(objects, header.Value().Handle()));
     uint32 toggles = 0;
-    area->SetOnExpansionChanged(
-        Delegate<void(bool)>::CreateLambda([&toggles](bool) noexcept { ++toggles; }));
+    REQUIRE(area->OnExpansionChanged().TryAddLambda([&toggles](bool) noexcept { ++toggles; }));
     auto native = area->TakeElement(objects);
     REQUIRE(native && native.Value()->ChildCount() == 2);
     CHECK(native.Value()->ChildAt(1)->GetVisibility() == Visibility::Collapsed);
     area->SetExpanded(true);
     area->SetExpanded(true);
-    CHECK(toggles == 1 && native.Value()->ChildAt(1)->GetVisibility() != Visibility::Collapsed);
+    // 프로그램 변경은 사건을 보내지 않는다(UE UExpandableArea::SetIsExpanded — UiToolkit 21.5a절).
+    CHECK(toggles == 0 && native.Value()->ChildAt(1)->GetVisibility() != Visibility::Collapsed);
+    // 사용자가 머리를 누르면 한 번 보낸다(UE SExpandableArea OnAreaExpansionChanged).
+    Element& head = *native.Value()->ChildAt(0);
+    CHECK(head.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
+    CHECK(head.SendKey(0, input::InputEvent::KeyUp(input::Key::Enter)).IsHandled());
+    CHECK(toggles == 1 && !area->IsExpanded());
+    CHECK(native.Value()->ChildAt(1)->GetVisibility() == Visibility::Collapsed);
+    area->SetExpanded(true);
     REQUIRE(area->RemoveChild(objects, header.Value().Handle()));
     CHECK(native.Value()->ChildAt(0)->ChildCount() == 0);
     CHECK(native.Value()->ChildAt(1)->ChildCount() == 1);

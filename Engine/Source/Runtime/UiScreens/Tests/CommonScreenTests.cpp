@@ -133,8 +133,8 @@ TEST(UiScreens_NamedTabChangesSwitcherPageAndSkipsDisabledTab) {
     REQUIRE(app.RoutePointer({PointerEventType::Up, {45, 10}, 0}));
     CHECK(pages->ActiveIndex() == 1 && bar->SelectedTab(objects) == b.Value());
     uint32 selectedEvents = 0;
-    bar->SetOnTabSelected(
-        Delegate<void(Name)>::CreateLambda([&selectedEvents](Name) noexcept { ++selectedEvents; }));
+    REQUIRE(
+        bar->OnTabSelected().TryAddLambda([&selectedEvents](Name) noexcept { ++selectedEvents; }));
     REQUIRE(pages->SetActiveIndex(0));
     REQUIRE(pages->SetActiveIndex(1));
     CHECK(selectedEvents == 2 && bar->SelectedTab(objects) == b.Value());

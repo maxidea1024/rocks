@@ -26,7 +26,7 @@ constexpr LinearColor InactiveTabColor{0.16f, 0.16f, 0.16f, 1};
 } // namespace
 
 ScreenTabListWidget::ScreenTabListWidget(Allocator& allocator) noexcept
-    : tabIds_(allocator), contents_(allocator), flags_(allocator) {
+    : tabIds_(allocator), contents_(allocator), flags_(allocator), selected_(allocator) {
 }
 
 Span<const Name> ScreenTabListWidget::Tabs() const noexcept {
@@ -279,7 +279,7 @@ Result<void> ScreenTabListWidget::SelectTab(ObjectRegistry& objects, Name id) no
         }
 
         if (changed && !activeChanged_.IsValid()) {
-            selected_.ExecuteIfBound(id);
+            selected_.Broadcast({objects, objects.OwnerAccess(), Handle()}, id);
         }
     }
 
@@ -339,8 +339,8 @@ Result<void> ScreenTabListWidget::SetTabVisible(Name id, bool visible) noexcept 
     return SetFlag(id, 2, visible);
 }
 
-void ScreenTabListWidget::SetOnTabSelected(Delegate<void(Name)>&& callback) noexcept {
-    selected_ = Move(callback);
+Event<Name>& ScreenTabListWidget::OnTabSelected() noexcept {
+    return selected_;
 }
 
 Result<void> ScreenTabListWidget::SetButtonFactory(ObjectRegistry& objects,
@@ -515,7 +515,8 @@ Result<void> ScreenTabListWidget::Subscribe(ObjectRegistry& objects,
                     tabs->UpdateButtons(objects, *live);
                 }
 
-                tabs->selected_.ExecuteIfBound(tabs->SelectedTab(objects));
+                tabs->selected_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                          tabs->SelectedTab(objects));
             }
         });
     if (!handle) {

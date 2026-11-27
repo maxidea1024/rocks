@@ -11,6 +11,8 @@ ROCKS_CLASS(Abstract)
 class ROCKS_UIWIDGET_API ListViewBaseWidget : public Widget {
     ROCKS_GENERATED_BODY()
 public:
+    // 이벤트 필드가 allocator를 받는다(EventReflection ED14).
+    explicit ListViewBaseWidget(Allocator& allocator) noexcept;
     // 화면 트리에서 분리하고 ReleaseElements를 호출한 뒤 소스를 교체할 수 있다.
     Result<void> SetSource(Application& app, const SharedRef<TableRowSource>& source) noexcept;
     void Refresh() noexcept;
@@ -32,9 +34,11 @@ public:
     Result<void> NavigateToItem(uint64 key, uint32 user = 0) noexcept;
     void CancelScrollIntoView() noexcept;
     void SetScrollIntoViewAlignment(ScrollIntoViewAlignment alignment) noexcept;
-    void SetOnItemClicked(Delegate<void(uint64)>&& callback) noexcept;
-    void SetOnSelectionChanged(Delegate<void()>&& callback) noexcept;
-    void SetOnItemScrolledIntoView(Delegate<void(uint64)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<uint64>& OnItemClicked() noexcept;
+    Event<>& OnSelectionChanged() noexcept;
+    Event<uint64>& OnItemScrolledIntoView() noexcept;
     void ReleaseElements() noexcept override;
     void ClearSelection() noexcept;
     Optional<uint64> SelectedKey() const noexcept;
@@ -57,9 +61,10 @@ private:
     uint8 selectionMode_ = static_cast<uint8>(ListSelectionMode::Single);
     ROCKS_PROPERTY(ReadOnly, Name = "scrollAlignment")
     uint8 scrollAlignment_ = static_cast<uint8>(ScrollIntoViewAlignment::Nearest);
-    ROCKS_NATIVE() Delegate<void(uint64)> itemClicked_;
-    ROCKS_NATIVE() Delegate<void()> selectionChanged_;
-    ROCKS_NATIVE() Delegate<void(uint64)> itemScrolled_;
+    ROCKS_PROPERTY(Transient, Name = "itemClicked", Params = "key") Event<uint64> itemClicked_;
+    ROCKS_PROPERTY(Transient, Name = "selectionChanged") Event<> selectionChanged_;
+    ROCKS_PROPERTY(Transient, Name = "itemScrolledIntoView", Params = "key")
+    Event<uint64> itemScrolled_;
     ROCKS_NATIVE() Application* app_ = nullptr;
     ROCKS_NATIVE() SharedPtr<TableRowSource> source_;
 };

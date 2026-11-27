@@ -6,6 +6,10 @@
 
 namespace rocks::ui {
 
+SpinBoxWidget::SpinBoxWidget(Allocator& allocator) noexcept
+    : committed_(allocator), beginDrag_(allocator), endDrag_(allocator), changed_(allocator) {
+}
+
 Result<void> SpinBoxWidget::SetLimits(float minimum, float maximum, float step) noexcept {
     if (!math::IsFinite(minimum) || !math::IsFinite(maximum) || !math::IsFinite(step) ||
         minimum > maximum || step <= 0) {
@@ -79,24 +83,24 @@ void SpinBoxWidget::SetSnapToStep(bool enabled) noexcept {
     }
 }
 
-void SpinBoxWidget::SetOnCommitted(Delegate<void(float, SpinCommitReason)>&& callback) noexcept {
-    committed_ = Move(callback);
+Event<float, SpinCommitReason>& SpinBoxWidget::OnCommitted() noexcept {
+    return committed_;
 }
 
-void SpinBoxWidget::SetOnDragBegin(Delegate<void()>&& callback) noexcept {
-    beginDrag_ = Move(callback);
+Event<>& SpinBoxWidget::OnDragBegin() noexcept {
+    return beginDrag_;
 }
 
-void SpinBoxWidget::SetOnDragEnd(Delegate<void(float)>&& callback) noexcept {
-    endDrag_ = Move(callback);
+Event<float>& SpinBoxWidget::OnDragEnd() noexcept {
+    return endDrag_;
 }
 
 float SpinBoxWidget::Value() const noexcept {
     return value_;
 }
 
-void SpinBoxWidget::SetOnChanged(Delegate<void(float)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<float>& SpinBoxWidget::OnChanged() noexcept {
+    return changed_;
 }
 
 Result<SharedPtr<Element>> SpinBoxWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -146,7 +150,7 @@ Result<SharedPtr<Element>> SpinBoxWidget::BuildElement(ObjectRegistry& objects) 
                 if (current->CachedElement().Get() == native) {
                     current->value_ = value;
                     current->NotifyPropertyChanged("value");
-                    current->changed_.ExecuteIfBound(value);
+                    current->changed_.Broadcast({objects, objects.OwnerAccess(), owner}, value);
                 }
             }
         }));

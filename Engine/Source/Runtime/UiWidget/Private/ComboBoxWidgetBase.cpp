@@ -6,6 +6,10 @@
 
 namespace rocks::ui {
 
+ComboBoxWidgetBase::ComboBoxWidgetBase(Allocator& allocator) noexcept
+    : opening_(allocator), selectionChanged_(allocator) {
+}
+
 ComboBoxWidgetBase::~ComboBoxWidgetBase() noexcept {
     if (auto live = CachedElement()) {
         StaticElementCast<ComboBox>(*live).DisconnectModel();
@@ -35,9 +39,8 @@ void ComboBoxWidgetBase::OptionsChanged(int32 selection) noexcept {
         StaticElementCast<ComboBox>(*live).UpdateOptions(OptionCount(), selection);
     }
 
-    if (cleared) {
-        selectionChanged_.ExecuteIfBound(-1);
-    }
+    // 선택을 지운 것은 프로그램 변경이다 — 사건은 Element 선택 경로에서만 보낸다(UE, 21.5a절).
+    (void)cleared;
 }
 
 Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
@@ -53,16 +56,15 @@ Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
         return StaticElementCast<ComboBox>(*live).Select(index);
     }
 
-    if (selectedIndex_ != index) {
-        selectedIndex_ = index;
-        selectionChanged_.ExecuteIfBound(index);
-    }
+    // Element가 없을 때의 선택은 값만 바꾼다(UE UComboBoxString::SetSelectedIndex — 사건
+    // 없음, 21.5a절).
+    selectedIndex_ = index;
 
     return Result<void>::Success();
 }
 
-void ComboBoxWidgetBase::SetOnSelectionChanged(Delegate<void(int32)>&& callback) noexcept {
-    selectionChanged_ = Move(callback);
+Event<int32>& ComboBoxWidgetBase::OnSelectionChanged() noexcept {
+    return selectionChanged_;
 }
 
 void ComboBoxWidgetBase::SetOptionFactory(ComboBox::MakeOption&& factory) noexcept {
@@ -134,7 +136,8 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::BuildElement(ObjectRegistry& obje
         Delegate<void()>::CreateLambda([&objects, owner = Handle()]() noexcept {
             auto widget = objects.ResolveForWrite<ComboBoxWidgetBase>(objects.OwnerAccess(), owner);
             if (widget) {
-                widget.Value().Get().Value()->opening_.ExecuteIfBound();
+                widget.Value().Get().Value()->opening_.Broadcast(
+                    {objects, objects.OwnerAccess(), owner});
             }
         }));
     combo.Value()->SetOptionFactory(ComboBox::MakeOption::CreateLambda(
@@ -150,7 +153,8 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::BuildElement(ObjectRegistry& obje
                 auto* value = widget.Value().Get().Value();
                 if (value->CachedElement().Get() == native) {
                     value->selectedIndex_ = index;
-                    value->selectionChanged_.ExecuteIfBound(index);
+                    value->selectionChanged_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                                       index);
                 }
             }
         }));
@@ -181,8 +185,8 @@ void ComboBoxWidgetBase::Close() noexcept {
     }
 }
 
-void ComboBoxWidgetBase::SetOnOpening(Delegate<void()>&& callback) noexcept {
-    opening_ = Move(callback);
+Event<>& ComboBoxWidgetBase::OnOpening() noexcept {
+    return opening_;
 }
 
 Result<void> ComboBoxWidgetBase::SetMaxListHeight(float height) noexcept {

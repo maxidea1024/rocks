@@ -40,7 +40,9 @@ public:
     void SetScrollPadding(bool before, bool after) noexcept;
     void SetTouchScrolling(bool enabled) noexcept;
     void SetRightDragScrolling(bool enabled) noexcept;
-    void SetOnUserScrolled(Delegate<void(float)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<float>& OnUserScrolled() noexcept;
 
 protected:
     Result<void> AttachChild(ObjectRegistry& objects, ObjectHandle slot, Element& panel,
@@ -67,7 +69,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "alwaysShowTrack") bool alwaysShowTrack_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "backPadScrolling") bool padBefore_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "frontPadScrolling") bool padAfter_ = false;
-    ROCKS_NATIVE() Delegate<void(float)> scrolled_;
+    ROCKS_PROPERTY(Transient, Name = "userScrolled", Params = "offset") Event<float> scrolled_;
     ROCKS_NATIVE() bool endRequested_ = false;
     ROCKS_PROPERTY(Name = "initialOffset") float initialOffset_ = 0;
 };

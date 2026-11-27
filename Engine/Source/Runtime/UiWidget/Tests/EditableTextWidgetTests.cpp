@@ -150,10 +150,10 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         auto live = widget->TakeElement(objects);
         REQUIRE(live);
         uint32 changes = 0, enters = 0;
-        widget->SetOnChanged(Delegate<void(StringView)>::CreateLambda(
-            [&changes](StringView) noexcept { ++changes; }));
-        widget->SetOnCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
-            [&enters](StringView, TextCommitReason why) noexcept {
+        REQUIRE(
+            widget->OnChanged().TryAddLambda([&changes](const String&) noexcept { ++changes; }));
+        REQUIRE(widget->OnCommitted().TryAddLambda(
+            [&enters](const String&, TextCommitReason why) noexcept {
                 if (why == TextCommitReason::Enter) {
                     ++enters;
                 }
@@ -307,8 +307,8 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         widget->ReleaseElements();
         REQUIRE(widget->TakeElement(objects));
         CHECK(widget->GetText() == "🙂");
-        widget->SetOnChanged({});
-        widget->SetOnCommitted({});
+        widget->OnChanged().Clear();
+        widget->OnCommitted().Clear();
     }
 }
 
@@ -338,11 +338,11 @@ TEST(UiWidget_EditableTextInputContextFollowsPlatformOrder) {
     REQUIRE(widget->SetText("a"));
     uint32 focusLostCommits = 0;
     String committedText(allocator);
-    widget->SetOnCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
-        [&](StringView text, TextCommitReason why) noexcept {
+    REQUIRE(
+        widget->OnCommitted().TryAddLambda([&](const String& text, TextCommitReason why) noexcept {
             if (why == TextCommitReason::FocusLost) {
                 ++focusLostCommits;
-                (void)committedText.TryAssign(text);
+                (void)committedText.TryAssign(text.View());
             }
         }));
     auto live = widget->TakeElement(objects);
@@ -409,7 +409,7 @@ TEST(UiWidget_EditableTextInputContextFollowsPlatformOrder) {
     CHECK(service.Value()->deactivations == deactivations + 1);
     CHECK(!service.Value()->active);
     CHECK(widget->GetText() == "a가가");
-    widget->SetOnCommitted({});
+    widget->OnCommitted().Clear();
 }
 
 TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {

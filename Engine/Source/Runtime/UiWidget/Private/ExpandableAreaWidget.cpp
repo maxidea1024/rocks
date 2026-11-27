@@ -13,7 +13,8 @@ constexpr Vec4 ExpanderHeaderPadding{4, 4, 4, 4};
 
 } // namespace
 
-ExpandableAreaWidget::ExpandableAreaWidget(Allocator& allocator) noexcept : PanelWidget(allocator) {
+ExpandableAreaWidget::ExpandableAreaWidget(Allocator& allocator) noexcept
+    : PanelWidget(allocator), changed_(allocator) {
 }
 
 usize ExpandableAreaWidget::MaxChildren() const noexcept {
@@ -106,6 +107,9 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::BuildElement(ObjectRegistry& ob
             auto* area = widget.Value().Get().Value();
             if (area->CachedElement().Get() == panel) {
                 area->SetExpanded(!area->IsExpanded());
+                // 사용자가 머리를 눌렀다(UE SExpandableArea OnAreaExpansionChanged).
+                area->changed_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                         area->IsExpanded());
             }
         }
     }));
@@ -139,12 +143,12 @@ void ExpandableAreaWidget::SetExpanded(bool expanded) noexcept {
         ApplyProperties(*live);
     }
 
+    // 프로그램 변경은 필드 통지만 한다(UE UExpandableArea::SetIsExpanded — 21.5a절).
     NotifyPropertyChanged("expanded");
-    changed_.ExecuteIfBound(expanded);
 }
 
-void ExpandableAreaWidget::SetOnExpansionChanged(Delegate<void(bool)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<bool>& ExpandableAreaWidget::OnExpansionChanged() noexcept {
+    return changed_;
 }
 
 } // namespace rocks::ui

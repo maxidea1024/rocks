@@ -106,7 +106,7 @@ WidgetFieldBindings::Setter WidgetSetter(Return (Owner::*method)(Value) noexcept
 
 // 네이티브 위젯 이벤트를 Object의 C++ 멤버 함수에 연결한다. 매 호출 시 handle의
 // 세대와 타입을 검사한다. 대상이 먼저 파괴되면 호출을 건너뛴다. 저장소 수명 안에서 사용한다.
-// ex) toggle.SetOnChanged(WidgetMethod(objects, label.Handle(), &Widget::SetEnabled))
+// ex) (void)toggle.OnChanged().TryAdd(WidgetMethod(objects, label.Handle(), &Widget::SetEnabled))
 template <class Owner, class... Args>
 Delegate<void(Args...)> WidgetMethod(ObjectRegistry& objects, ObjectHandle target,
                                      void (Owner::*method)(Args...) noexcept) noexcept {

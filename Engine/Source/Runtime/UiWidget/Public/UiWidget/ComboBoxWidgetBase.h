@@ -12,18 +12,22 @@ ROCKS_CLASS(Abstract)
 class ROCKS_UIWIDGET_API ComboBoxWidgetBase : public Widget {
     ROCKS_GENERATED_BODY()
 public:
+    // 이벤트 필드가 allocator를 받는다(EventReflection ED14).
+    explicit ComboBoxWidgetBase(Allocator& allocator) noexcept;
     ~ComboBoxWidgetBase() noexcept;
     int32 SelectedIndex() const noexcept;
     virtual usize OptionCount() const noexcept = 0;
     Result<void> SetSelectedIndex(int32 index) noexcept;
-    void SetOnSelectionChanged(Delegate<void(int32)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<int32>& OnSelectionChanged() noexcept;
     void SetOptionFactory(ComboBox::MakeOption&& factory) noexcept;
     Result<void> ClearSelection() noexcept;
     Result<void> RefreshOptions() noexcept;
     Result<void> Open() noexcept;
     void Close() noexcept;
     Result<void> SetMaxListHeight(float height) noexcept;
-    void SetOnOpening(Delegate<void()>&& callback) noexcept;
+    Event<>& OnOpening() noexcept;
     bool IsOpen() const noexcept;
     void ReleaseElements() noexcept override;
 
@@ -40,9 +44,10 @@ private:
                                           bool display) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "selectedIndex") int32 selectedIndex_ = -1;
     ROCKS_PROPERTY(ReadOnly, Name = "maxListHeight") float maxListHeight_ = 450;
-    ROCKS_NATIVE() Delegate<void()> opening_;
+    ROCKS_PROPERTY(Transient, Name = "opening") Event<> opening_;
     ROCKS_NATIVE() ComboBox::MakeOption factory_;
-    ROCKS_NATIVE() Delegate<void(int32)> selectionChanged_;
+    ROCKS_PROPERTY(Transient, Name = "selectionChanged", Params = "index")
+    Event<int32> selectionChanged_;
     ROCKS_NATIVE() bool generating_ = false;
 };
 

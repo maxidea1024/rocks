@@ -1,5 +1,6 @@
 #pragma once
 
+#include <UiWidget/UiTypeBindings.h>
 #include <Core/Delegate.h>
 #include <UiFramework/Controls/SpinBox.h>
 #include <UiWidget/Widget.h>
@@ -12,17 +13,21 @@ ROCKS_CLASS()
 class ROCKS_UIWIDGET_API SpinBoxWidget final : public Widget {
     ROCKS_GENERATED_BODY()
 public:
+    // 이벤트 필드가 allocator를 받는다(EventReflection ED14).
+    explicit SpinBoxWidget(Allocator& allocator) noexcept;
     Result<void> SetLimits(float minimum, float maximum, float step) noexcept;
     Result<void> SetValue(float value) noexcept;
     // 소수부 표시만 바꾸며, 사용자 입력의 반올림은 별도 단계 설정을 따른다.
     Result<void> SetFractionalDigits(int32 minimum, int32 maximum) noexcept;
     void SetSliderEnabled(bool enabled) noexcept;
     void SetSnapToStep(bool enabled) noexcept;
-    void SetOnCommitted(Delegate<void(float, SpinCommitReason)>&& callback) noexcept;
-    void SetOnDragBegin(Delegate<void()>&& callback) noexcept;
-    void SetOnDragEnd(Delegate<void(float)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<float, SpinCommitReason>& OnCommitted() noexcept;
+    Event<>& OnDragBegin() noexcept;
+    Event<float>& OnDragEnd() noexcept;
     float Value() const noexcept;
-    void SetOnChanged(Delegate<void(float)>&& callback) noexcept;
+    Event<float>& OnChanged() noexcept;
 
 protected:
     Result<SharedPtr<Element>> BuildElement(ObjectRegistry& objects) noexcept override;
@@ -36,10 +41,11 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "snapToStep") bool snapToStep_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "minFractionDigits") int32 minFractionDigits_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "maxFractionDigits") int32 maxFractionDigits_ = -1;
-    ROCKS_NATIVE() Delegate<void(float, SpinCommitReason)> committed_;
-    ROCKS_NATIVE() Delegate<void()> beginDrag_;
-    ROCKS_NATIVE() Delegate<void(float)> endDrag_;
-    ROCKS_NATIVE() Delegate<void(float)> changed_;
+    ROCKS_PROPERTY(Transient, Name = "committed", Params = "value,reason")
+    Event<float, SpinCommitReason> committed_;
+    ROCKS_PROPERTY(Transient, Name = "dragBegin") Event<> beginDrag_;
+    ROCKS_PROPERTY(Transient, Name = "dragEnd", Params = "value") Event<float> endDrag_;
+    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui

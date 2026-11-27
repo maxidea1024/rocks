@@ -94,6 +94,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ScreenTabListWidget::selected_",
+      "id": "25494c40368d45dc8b096d99a0d4ed40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ScreenTabListWidget::switcher_",
       "id": "63ac20df736f4837948e71c895ab0eea",
       "aliases": [],

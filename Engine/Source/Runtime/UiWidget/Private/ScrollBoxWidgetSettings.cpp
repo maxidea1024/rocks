@@ -17,7 +17,7 @@ Result<SharedPtr<Element>> ScrollBoxWidget::BuildElement(ObjectRegistry& objects
                 auto* widget = ref.Value().Get().Value();
                 if (widget->CachedElement().Get() == scroll) {
                     widget->initialOffset_ = offset;
-                    widget->scrolled_.ExecuteIfBound(offset);
+                    widget->scrolled_.Broadcast({objects, objects.OwnerAccess(), id}, offset);
                 }
             }
         }));
@@ -201,7 +201,7 @@ void ScrollBoxWidget::SetRightDragScrolling(bool enabled) noexcept {
     }
 }
 
-void ScrollBoxWidget::SetOnUserScrolled(Delegate<void(float)>&& callback) noexcept {
-    scrolled_ = Move(callback);
+Event<float>& ScrollBoxWidget::OnUserScrolled() noexcept {
+    return scrolled_;
 }
 } // namespace rocks::ui

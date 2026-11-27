@@ -55,8 +55,8 @@ TEST(UiWidget_ButtonEventsAndBorderImageStyleSurviveRebuilds) {
     CHECK(!button.SetStyle(bad));
     CHECK(button.GetStyle() == PrimaryButtonStyle());
     uint32 presses = 0, releases = 0;
-    button.SetOnPressed(Delegate<void()>::CreateLambda([&]() noexcept { ++presses; }));
-    button.SetOnReleased(Delegate<void()>::CreateLambda([&]() noexcept { ++releases; }));
+    REQUIRE(button.OnPressed().TryAddLambda([&]() noexcept { ++presses; }));
+    REQUIRE(button.OnReleased().TryAddLambda([&]() noexcept { ++releases; }));
     auto original = button.TakeElement(objects);
     REQUIRE(original);
     REQUIRE(original.Value()->Arrange(Geometry::Root({50, 30}, {})));

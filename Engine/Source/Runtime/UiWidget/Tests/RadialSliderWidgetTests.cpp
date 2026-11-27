@@ -31,8 +31,7 @@ TEST(UiWidget_RadialSliderUsesAnglesCaptureAndRebuildsSavedValues) {
     dial->SetHandVisibility(true, true);
     REQUIRE(dial->SetColors({0.2f, 0.2f, 0.2f, 1}, {0, 1, 0, 1}, {1, 0, 0, 1}));
     uint32 changes = 0;
-    dial->SetOnChanged(
-        Delegate<void(float)>::CreateLambda([&changes](float) noexcept { ++changes; }));
+    REQUIRE(dial->OnChanged().TryAddLambda([&changes](float) noexcept { ++changes; }));
     REQUIRE(dial->SetValue(14));
     auto built = dial->TakeElement(objects);
     REQUIRE(built);

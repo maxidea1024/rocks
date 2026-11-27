@@ -3,6 +3,9 @@
 
 namespace rocks::ui {
 
+RadialSliderWidget::RadialSliderWidget(Allocator& allocator) noexcept : changed_(allocator) {
+}
+
 Result<void> RadialSliderWidget::SetLimits(float minimum, float maximum, float step) noexcept {
     if (!math::IsFinite(minimum) || !math::IsFinite(maximum) || minimum >= maximum ||
         !math::IsFinite(maximum - minimum) || !math::IsFinite(step) || step <= 0) {
@@ -97,8 +100,8 @@ Result<void> RadialSliderWidget::SetColors(LinearColor track, LinearColor progre
     return Result<void>::Success();
 }
 
-void RadialSliderWidget::SetOnChanged(Delegate<void(float)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<float>& RadialSliderWidget::OnChanged() noexcept {
+    return changed_;
 }
 
 Result<SharedPtr<Element>> RadialSliderWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -130,7 +133,8 @@ Result<SharedPtr<Element>> RadialSliderWidget::BuildElement(ObjectRegistry& obje
                      auto* current = widget.Value().Get().Value();
                      if (current->CachedElement().Get() == native) {
                          current->value_ = amount;
-                         current->changed_.ExecuteIfBound(amount);
+                         current->changed_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                                     amount);
                      }
                  }
              })});

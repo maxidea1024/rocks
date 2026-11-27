@@ -6,7 +6,7 @@
 namespace rocks::ui {
 
 InputKeySelectorWidget::InputKeySelectorWidget(Allocator& allocator) noexcept
-    : keyName_(allocator) {
+    : keyName_(allocator), selected_(allocator) {
 }
 
 Result<void> InputKeySelectorWidget::StoreChord(KeyChord chord) noexcept {
@@ -66,8 +66,8 @@ void InputKeySelectorWidget::SetAllowGamepad(bool enabled) noexcept {
     }
 }
 
-void InputKeySelectorWidget::SetOnSelected(Delegate<void(KeyChord)>&& callback) noexcept {
-    selected_ = Move(callback);
+Event<const InputChordValue&>& InputKeySelectorWidget::OnSelected() noexcept {
+    return selected_;
 }
 
 Result<SharedPtr<Element>> InputKeySelectorWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -107,7 +107,16 @@ Result<SharedPtr<Element>> InputKeySelectorWidget::BuildElement(ObjectRegistry& 
                 auto* current = widget.Value().Get().Value();
                 if (current->CachedElement().Get() == native) {
                     if (current->StoreChord(chord)) {
-                        current->selected_.ExecuteIfBound(chord);
+                        // 이벤트 인자는 리플렉션 struct다(UE FInputChord — 21.5a절).
+                        InputChordValue value(objects.ObjectAllocator());
+                        if (value.keyName.TryAssign(chord.InputName())) {
+                            value.shift = chord.shift;
+                            value.control = chord.control;
+                            value.alt = chord.alt;
+                            value.super = chord.super;
+                            current->selected_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                                         value);
+                        }
                     } else {
                         (void)native->SetSelectedKey(current->SelectedKey());
                     }

@@ -4,6 +4,9 @@
 
 namespace rocks::ui {
 
+ScrollBarWidget::ScrollBarWidget(Allocator& allocator) noexcept : scrolled_(allocator) {
+}
+
 Result<void> ScrollBarWidget::SetState(float offset, float thumbSize) noexcept {
     if (!math::IsFinite(offset) || !math::IsFinite(thumbSize) || thumbSize < 0 || thumbSize > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -33,8 +36,8 @@ void ScrollBarWidget::SetHorizontal(bool horizontal) noexcept {
     }
 }
 
-void ScrollBarWidget::SetOnScrolled(Delegate<void(float)>&& callback) noexcept {
-    scrolled_ = Move(callback);
+Event<float>& ScrollBarWidget::OnScrolled() noexcept {
+    return scrolled_;
 }
 
 Result<SharedPtr<Element>> ScrollBarWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -58,7 +61,7 @@ Result<SharedPtr<Element>> ScrollBarWidget::BuildElement(ObjectRegistry& objects
                 auto* current = widget.Value().Get().Value();
                 if (current->CachedElement().Get() == native) {
                     current->offset_ = value;
-                    current->scrolled_.ExecuteIfBound(value);
+                    current->scrolled_.Broadcast({objects, objects.OwnerAccess(), owner}, value);
                 }
             }
         }));

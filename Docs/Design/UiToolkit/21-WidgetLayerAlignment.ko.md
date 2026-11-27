@@ -136,7 +136,14 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
     - `StringView`는 `const String&`이다(발행 때 한 번 복사).
   - 바인딩은 모두 `Transient`다. 에셋 바인딩은 EV3b 템플릿 바인딩 표가 맡고, 실행 중 바인딩을 Widget 에셋 바이트에 넣지 않는다.
   - 사건이 아닌 `DelegateHandle` 3개(구독 handle)는 그대로 `ROCKS_NATIVE`다.
+  - 발행은 Element 사건을 받은 자리에서만 한다(그 자리에 등록부·handle이 있다). 프로그램 setter는 사용자 사건을 보내지 않고 필드 통지만 한다. UE와 같다: `UExpandableArea::SetIsExpanded`는 `BroadcastFieldValueChanged`만 부르고(ExpandableArea.cpp 51–62), `UComboBoxString::SetSelectedIndex`는 Slate 위젯이 있을 때 그 선택 사건으로만 보낸다(ComboBoxString.cpp 226–239). 그래서 지금의 `ExpandableAreaWidget::SetExpanded`·`ComboBoxWidgetBase::SetSelectedIndex`(Element 없음)·`OptionsChanged`(선택 지움)의 직접 발행은 없앤다.
 - **시점.** `Event`는 engine-runtime에 있고(EV1b e12c17c5·EV2b 5778c89c) 이 브랜치에는 아직 없다. 최종 동기화 바로 뒤, 병합 전에 한다. 손으로 쓴 속성 표·descriptor 시험의 이벤트 필드 건너뛰기(EV2a `IsEventField`)를 같은 단계에서 점검한다.
+- **구현(UW9f).**
+  - 30개 필드를 `ROCKS_PROPERTY(Transient, Name = …, Params = …) Event<…>`로 바꿨다. 공개 접근자는 `OnX()`다. 생성자가 없던 6개(`ComboBoxWidgetBase`·`ListViewBaseWidget`·`RadialSlider`·`ScrollBar`·`Slider`·`SpinBox`)에 `T(Allocator&)`를 더했고, 파생(ComboBox String·Key, ListView)은 기반에 allocator를 넘긴다.
+  - 발행은 `BindLiveWidgetEvent`의 `Event` 판과 Element 사건 lambda의 `Broadcast({objects, access, owner}, …)`다.
+  - 편집 텍스트는 발행마다 `String` 사본을 넘긴다. 키 선택기는 `InputChordValue`로 바꿔 넘긴다.
+  - 프로그램 setter의 발행을 없앴다(ComboBox 선택·지움, ExpandableArea 펼침). ExpandableArea는 머리 버튼을 누를 때 보낸다.
+  - ID 명세에 이벤트 필드 31개, `InputChordValue`(필드 5개), 미러 enum 셋을 등록했다.
 - **시험.** 구독 둘이 모두 불림, 대상 파괴 뒤 자동 해제, 재구성된 Element의 늦은 사건 버림. 바인딩 저장(EV3a1 — `Transient`가 아니면)은 그래프 저장 시험 하나로 본다.
 
 ### 21.6 단계

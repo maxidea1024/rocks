@@ -7,7 +7,7 @@
 
 namespace rocks::ui {
 
-// 한 자식을 클릭 가능한 영역으로 감싼다. 마우스와 키보드 활성화를 SetOnClicked에 연결한다.
+// 한 자식을 클릭 가능한 영역으로 감싼다. 마우스와 키보드 활성화가 OnClicked 이벤트를 보낸다.
 // 모양은 ButtonStyle(UE UButton::WidgetStyle — 기본은 게임 위젯 스타일 "Button", UE
 // DefaultStyleCache·UMGCoreStyle, Docs/Design/UiToolkit 20.11절)이 정하고,
 // backgroundColor는 brush 색에 곱한다(UE BackgroundColor). 스타일의 리플렉션 직렬화는
@@ -31,11 +31,13 @@ public:
     LinearColor GetBackgroundColor() const noexcept;
     // 스타일 여백에 더하는 내용 여백이다(UE UButtonSlot::Padding → SButton ContentPadding).
     Result<void> SetPadding(Vec4 padding) noexcept;
-    void SetOnPressed(Delegate<void()>&& callback) noexcept;
-    void SetOnReleased(Delegate<void()>&& callback) noexcept;
-    void SetOnHovered(Delegate<void()>&& callback) noexcept;
-    void SetOnUnhovered(Delegate<void()>&& callback) noexcept;
-    void SetOnClicked(Delegate<void()>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<>& OnPressed() noexcept;
+    Event<>& OnReleased() noexcept;
+    Event<>& OnHovered() noexcept;
+    Event<>& OnUnhovered() noexcept;
+    Event<>& OnClicked() noexcept;
 
 protected:
     void ApplyProperties(Element& element) noexcept override;
@@ -51,11 +53,11 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "backgroundColor") LinearColor backgroundColor_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "padding") Vec4 padding_ {};
     ROCKS_NATIVE() ButtonStyle style_ = GameButtonStyle();
-    ROCKS_NATIVE() Delegate<void()> clicked_;
-    ROCKS_NATIVE() Delegate<void()> pressed_;
-    ROCKS_NATIVE() Delegate<void()> released_;
-    ROCKS_NATIVE() Delegate<void()> hovered_;
-    ROCKS_NATIVE() Delegate<void()> unhovered_;
+    ROCKS_PROPERTY(Transient, Name = "clicked") Event<> clicked_;
+    ROCKS_PROPERTY(Transient, Name = "pressed") Event<> pressed_;
+    ROCKS_PROPERTY(Transient, Name = "released") Event<> released_;
+    ROCKS_PROPERTY(Transient, Name = "hovered") Event<> hovered_;
+    ROCKS_PROPERTY(Transient, Name = "unhovered") Event<> unhovered_;
 };
 
 } // namespace rocks::ui

@@ -17,7 +17,9 @@ public:
     Result<ObjectHandle> AddChild(ObjectRegistry& objects, ObjectHandle child) noexcept override;
     bool IsExpanded() const noexcept;
     void SetExpanded(bool expanded) noexcept;
-    void SetOnExpansionChanged(Delegate<void(bool)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<bool>& OnExpansionChanged() noexcept;
 
 protected:
     usize MaxChildren() const noexcept override;
@@ -32,7 +34,7 @@ private:
     Result<ObjectHandle> AddSection(ObjectRegistry& objects, ObjectHandle child,
                                     bool header) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "expanded") bool expanded_ = false;
-    ROCKS_NATIVE() Delegate<void(bool)> changed_;
+    ROCKS_PROPERTY(Transient, Name = "expansionChanged", Params = "expanded") Event<bool> changed_;
 };
 
 } // namespace rocks::ui

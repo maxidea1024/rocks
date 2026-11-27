@@ -8,7 +8,9 @@ TypeId ButtonWidget::SlotType() const noexcept {
     return GeneratedType<ButtonWidgetSlot>::Id();
 }
 
-ButtonWidget::ButtonWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
+ButtonWidget::ButtonWidget(Allocator& allocator) noexcept
+    : ContentWidget(allocator), clicked_(allocator), pressed_(allocator), released_(allocator),
+      hovered_(allocator), unhovered_(allocator) {
 }
 
 void ButtonWidget::SetFocusable(bool enabled) noexcept {
@@ -107,24 +109,24 @@ void ButtonWidget::ApplyProperties(Element& element) noexcept {
                                  static_cast<ButtonPressMethod>(pressMethod_));
 }
 
-void ButtonWidget::SetOnPressed(Delegate<void()>&& callback) noexcept {
-    pressed_ = Move(callback);
+Event<>& ButtonWidget::OnPressed() noexcept {
+    return pressed_;
 }
 
-void ButtonWidget::SetOnReleased(Delegate<void()>&& callback) noexcept {
-    released_ = Move(callback);
+Event<>& ButtonWidget::OnReleased() noexcept {
+    return released_;
 }
 
-void ButtonWidget::SetOnHovered(Delegate<void()>&& callback) noexcept {
-    hovered_ = Move(callback);
+Event<>& ButtonWidget::OnHovered() noexcept {
+    return hovered_;
 }
 
-void ButtonWidget::SetOnUnhovered(Delegate<void()>&& callback) noexcept {
-    unhovered_ = Move(callback);
+Event<>& ButtonWidget::OnUnhovered() noexcept {
+    return unhovered_;
 }
 
-void ButtonWidget::SetOnClicked(Delegate<void()>&& callback) noexcept {
-    clicked_ = Move(callback);
+Event<>& ButtonWidget::OnClicked() noexcept {
+    return clicked_;
 }
 
 Result<SharedPtr<Element>> ButtonWidget::CreatePanel(Allocator& allocator) noexcept {
@@ -143,14 +145,14 @@ Result<SharedPtr<Element>> ButtonWidget::BuildElement(ObjectRegistry& objects) n
     }
 
     auto* button = StaticElementCast<Button>(element.Value().Get());
-    auto bind = [&](Delegate<void()> ButtonWidget::* event) noexcept {
+    auto bind = [&](Event<> ButtonWidget::* event) noexcept {
         return Delegate<void()>::CreateLambda(
             [&objects, owner = Handle(), button, event]() noexcept {
                 auto widget = objects.ResolveForWrite<ButtonWidget>(objects.OwnerAccess(), owner);
                 if (widget) {
                     auto* current = widget.Value().Get().Value();
                     if (current->CachedElement().Get() == button) {
-                        (current->*event).ExecuteIfBound();
+                        (current->*event).Broadcast({objects, objects.OwnerAccess(), owner});
                     }
                 }
             });

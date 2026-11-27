@@ -148,6 +148,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ButtonWidget::clicked_",
+      "id": "ede89d617bc34d04bf747c99104ab3f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ButtonWidget::focusable_",
       "id": "574c0ea1e791427da7158e8b73b4999b",
       "aliases": [],
@@ -159,6 +166,13 @@
       "id": "6b6c0e6f3b11466b9b2eb13f6d90ecea",
       "aliases": [],
       "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::hovered_",
+      "id": "30f3341c4a814b70b76b723b2761643f",
+      "aliases": [],
+      "retired": false
     },
     {
       "kind": "field",
@@ -190,8 +204,29 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ButtonWidget::pressed_",
+      "id": "e5ce701be76243f79988117297cfbe25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::released_",
+      "id": "036d886b53744d93bb26e9583a324e04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ButtonWidget::touchMethod_",
       "id": "89c84e61f8dc43c38c7eb4c317194762",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::unhovered_",
+      "id": "9e4152f8e404401fa8bab74107d721e3",
       "aliases": [],
       "retired": false
     },
@@ -232,6 +267,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::changed_",
+      "id": "bc41610fe67e4a488b967b1d8befa034",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::CheckBoxWidget::checked_",
       "id": "56190aae4d154c69ae5a145e5685ab7e",
       "aliases": [],
@@ -241,6 +283,13 @@
       "kind": "field",
       "name": "rocks::ui::CheckBoxWidget::indeterminate_",
       "id": "ddd84b71b5d54276b543a890701681a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::stateChanged_",
+      "id": "831125161a054c62b56de6aed626e439",
       "aliases": [],
       "retired": false
     },
@@ -316,8 +365,22 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::opening_",
+      "id": "f7e210eb727e4d6b929ed6132758b4b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ComboBoxWidgetBase::selectedIndex_",
       "id": "10bb88f212db41b5bf3f31f0c7578649",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::selectionChanged_",
+      "id": "a4a9290cbf3e4dc5878b7121d068d0a1",
       "aliases": [],
       "retired": false
     },
@@ -353,6 +416,20 @@
       "kind": "field",
       "name": "rocks::ui::DynamicEntryBoxWidget::inactive_",
       "id": "d622563dd3c549079975b9e0598c4fab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::changed_",
+      "id": "8c1087d98cb645779916415b383aa89f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::committed_",
+      "id": "92343bff2e4444e4ae130b7fbaab282c",
       "aliases": [],
       "retired": false
     },
@@ -423,6 +500,13 @@
       "kind": "field",
       "name": "rocks::ui::ExpandableAreaSlot::header_",
       "id": "ac0da5e3da404e2aa5b14cf9715f86b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ExpandableAreaWidget::changed_",
+      "id": "71761726ca164308b7c7c813711baeb7",
       "aliases": [],
       "retired": false
     },
@@ -526,6 +610,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::InputChordValue::alt",
+      "id": "4a58c815532d4f7da64e2c1d87e441cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::control",
+      "id": "77755b2ffb0745aa863782662a88d86f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::keyName",
+      "id": "f078d725b16740b9bd460cd70b609398",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::shift",
+      "id": "5dc33b49aa774c3cbc11bc69e51f3b45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::super",
+      "id": "f2eb80f0df3d4c6fbfb5b29eaae45018",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::InputKeySelectorWidget::allowGamepad_",
       "id": "011f5e1ce71447128fb5ad2981e09bcb",
       "aliases": [],
@@ -561,6 +680,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::selected_",
+      "id": "a9419b7f7d9546cc87d87f770af3d598",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::InputKeySelectorWidget::shift_",
       "id": "530264b2f7524c738261cc42350134c1",
       "aliases": [],
@@ -570,6 +696,20 @@
       "kind": "field",
       "name": "rocks::ui::InputKeySelectorWidget::super_",
       "id": "7a6dcc2b1e764010942d66c20b48827f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::itemClicked_",
+      "id": "5168a715b6624a8eb5fea5dea57c0618",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::itemScrolled_",
+      "id": "6dc82d0fff4548a3b28d80a0387d96e5",
       "aliases": [],
       "retired": false
     },
@@ -591,6 +731,13 @@
       "kind": "field",
       "name": "rocks::ui::ListViewBaseWidget::selectOnNavigation_",
       "id": "865b674162464738a88da29ffa8f3e5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::selectionChanged_",
+      "id": "369e159549b24988974588e119868772",
       "aliases": [],
       "retired": false
     },
@@ -626,6 +773,13 @@
       "kind": "field",
       "name": "rocks::ui::MenuAnchorWidget::fitInWindow_",
       "id": "a058101523f947ffbc29a3db4499d036",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::MenuAnchorWidget::openChanged_",
+      "id": "3435edb752d74aaab09c26402b0bc3f9",
       "aliases": [],
       "retired": false
     },
@@ -797,6 +951,13 @@
       "kind": "field",
       "name": "rocks::ui::RadialSliderWidget::angularOffset_",
       "id": "4e47d46aca134f1f8724bae3797fbc14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::changed_",
+      "id": "f653b4abe40b461faae40b7e966b587b",
       "aliases": [],
       "retired": false
     },
@@ -1062,6 +1223,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ScrollBarWidget::scrolled_",
+      "id": "21d02326be354edd821f685ddb3aeb8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ScrollBarWidget::thumbSize_",
       "id": "64fb8a992d754f229c47a697f3b1d61b",
       "aliases": [],
@@ -1120,6 +1288,13 @@
       "kind": "field",
       "name": "rocks::ui::ScrollBoxWidget::rightDrag_",
       "id": "0ed5081a968847f088fab82cc775bc26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::scrolled_",
+      "id": "05fdc6cb02cf4eb0a931a2dc2fc8fdf2",
       "aliases": [],
       "retired": false
     },
@@ -1216,6 +1391,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::SliderWidget::captureBegin_",
+      "id": "e69c8d215fa34cd48064eb1c6b30c853",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::captureEnd_",
+      "id": "c25143335a2443aa97d8f6f2423b0e6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::changed_",
+      "id": "d5cf8c2ec4714fdd9b9c0d461efa28ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::controllerBegin_",
+      "id": "69bc65558cba45b687f392c454f6f030",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::controllerEnd_",
+      "id": "30ae0e576a22480a9611d6f473428b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::SliderWidget::handleTint_",
       "id": "1c8ea124e3a140bfbe95ac2dedb4e278",
       "aliases": [],
@@ -1288,6 +1498,34 @@
       "kind": "field",
       "name": "rocks::ui::SpacerWidget::size_",
       "id": "62d4c73b03344ce7a347e12932bff5ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::beginDrag_",
+      "id": "f9d63fb802c14d1dac99a59df9f38937",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::changed_",
+      "id": "d8e9346094ce4da3833b01ed86671c34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::committed_",
+      "id": "7c38a73db672477ab5681d2b1a8ba49a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::endDrag_",
+      "id": "850eb06c3865444fa477e20868470e02",
       "aliases": [],
       "retired": false
     },
@@ -2343,6 +2581,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ui::InputChordValue",
+      "id": "5bfa7c16aacc4960aedf03140f0ffe01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::ui::InputKeySelectorWidget",
       "id": "18336d1e6f4840fbbd52c23dee11d587",
       "aliases": [],
@@ -2797,6 +3042,27 @@
       "aliases": [
         "rocks::ui::WrapBoxWidgetSlot"
       ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui_type_bindings::CheckStateBinding",
+      "id": "08e3cfa686204d42acae489117c570fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui_type_bindings::SpinCommitReasonBinding",
+      "id": "94ff9502c4bb49b2b71de6ccb8dcad19",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui_type_bindings::TextCommitReasonBinding",
+      "id": "95a21653c19440f380efa65bfeb18b0e",
+      "aliases": [],
       "retired": false
     }
   ]

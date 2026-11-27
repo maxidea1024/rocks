@@ -5,11 +5,13 @@
 
 namespace rocks::ui {
 
-// 0~1 범위의 값을 조절한다. SetOnChanged는 사용자 입력으로 바뀐 값을 전달한다.
+// 0~1 범위의 값을 조절한다. OnChanged 이벤트는 사용자 입력으로 바뀐 값을 전달한다.
 ROCKS_CLASS()
 class ROCKS_UIWIDGET_API SliderWidget final : public Widget {
     ROCKS_GENERATED_BODY()
 public:
+    // 이벤트 필드가 allocator를 받는다(EventReflection ED14).
+    explicit SliderWidget(Allocator& allocator) noexcept;
     Result<void> SetValue(float value) noexcept;
     Result<void> SetRange(float minimum, float maximum) noexcept;
     Result<void> SetStep(float step) noexcept;
@@ -20,12 +22,14 @@ public:
     void SetIndentHandle(bool indent) noexcept;
     Result<void> SetTints(LinearColor bar, LinearColor handle) noexcept;
     void SetRequiresControllerLock(bool required) noexcept;
-    void SetOnControllerCaptureBegin(Delegate<void()>&& callback) noexcept;
-    void SetOnControllerCaptureEnd(Delegate<void()>&& callback) noexcept;
-    void SetOnCaptureBegin(Delegate<void()>&& callback) noexcept;
-    void SetOnCaptureEnd(Delegate<void()>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<>& OnControllerCaptureBegin() noexcept;
+    Event<>& OnControllerCaptureEnd() noexcept;
+    Event<>& OnCaptureBegin() noexcept;
+    Event<>& OnCaptureEnd() noexcept;
     float Value() const noexcept;
-    void SetOnChanged(Delegate<void(float)>&& callback) noexcept;
+    Event<float>& OnChanged() noexcept;
 
 protected:
     Result<SharedPtr<Element>> BuildElement(ObjectRegistry& objects) noexcept override;
@@ -43,11 +47,11 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "barTint") LinearColor barTint_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "handleTint") LinearColor handleTint_ { 1, 1, 1, 1 };
     ROCKS_PROPERTY(ReadOnly, Name = "requiresControllerLock") bool requiresControllerLock_ = true;
-    ROCKS_NATIVE() Delegate<void()> controllerBegin_;
-    ROCKS_NATIVE() Delegate<void()> controllerEnd_;
-    ROCKS_NATIVE() Delegate<void()> captureBegin_;
-    ROCKS_NATIVE() Delegate<void()> captureEnd_;
-    ROCKS_NATIVE() Delegate<void(float)> changed_;
+    ROCKS_PROPERTY(Transient, Name = "controllerCaptureBegin") Event<> controllerBegin_;
+    ROCKS_PROPERTY(Transient, Name = "controllerCaptureEnd") Event<> controllerEnd_;
+    ROCKS_PROPERTY(Transient, Name = "captureBegin") Event<> captureBegin_;
+    ROCKS_PROPERTY(Transient, Name = "captureEnd") Event<> captureEnd_;
+    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui

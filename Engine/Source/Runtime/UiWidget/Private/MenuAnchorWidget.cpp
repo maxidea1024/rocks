@@ -9,7 +9,8 @@ MenuAnchorWidget::~MenuAnchorWidget() noexcept {
     }
 }
 
-MenuAnchorWidget::MenuAnchorWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
+MenuAnchorWidget::MenuAnchorWidget(Allocator& allocator) noexcept
+    : ContentWidget(allocator), openChanged_(allocator) {
 }
 
 void MenuAnchorWidget::SetMenuFactory(MenuAnchor::MenuFactory&& factory) noexcept {
@@ -31,7 +32,8 @@ Result<SharedPtr<Element>> MenuAnchorWidget::BuildElement(ObjectRegistry& object
                 auto value =
                     objects.ResolveForWrite<MenuAnchorWidget>(objects.OwnerAccess(), owner);
                 if (value) {
-                    value.Value().Get().Value()->openChanged_.ExecuteIfBound(open);
+                    value.Value().Get().Value()->openChanged_.Broadcast(
+                        {objects, objects.OwnerAccess(), owner}, open);
                 }
             }));
         menu.SetMenuFactory(MenuAnchor::MenuFactory::CreateLambda([&objects, owner = Handle(),
@@ -93,8 +95,8 @@ Optional<Vec2> MenuAnchorWidget::MenuPosition() const noexcept {
     return live ? StaticElementCast<MenuAnchor>(*live).MenuPosition() : Optional<Vec2>{};
 }
 
-void MenuAnchorWidget::SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept {
-    openChanged_ = Move(callback);
+Event<bool>& MenuAnchorWidget::OnOpenChanged() noexcept {
+    return openChanged_;
 }
 
 void MenuAnchorWidget::Close() noexcept {

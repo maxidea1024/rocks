@@ -4,6 +4,7 @@
 #include <Core/Text/String.h>
 #include <Localization/Text.h>
 #include <UiFramework/Controls/TextCommitReason.h>
+#include <UiWidget/UiTypeBindings.h>
 #include <UiWidget/TextLayoutWidget.h>
 
 namespace rocks::ui {
@@ -39,8 +40,10 @@ public:
     Result<void> SetPassword(bool password) noexcept;
     bool IsPassword() const noexcept;
     Result<void> SetFontSize(float size) noexcept;
-    void SetOnChanged(Delegate<void(StringView)>&& callback) noexcept;
-    void SetOnCommitted(Delegate<void(StringView, TextCommitReason)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 글자는 발행마다 만든 사본이다.
+    Event<const String&>& OnChanged() noexcept;
+    Event<const String&, TextCommitReason>& OnCommitted() noexcept;
 
 protected:
     TextLabel& ResolveTextLabel(Element& element) const noexcept override;
@@ -49,8 +52,11 @@ protected:
     Result<SharedPtr<Element>> BuildElement(ObjectRegistry& objects) noexcept override;
 
 private:
-    // Element의 사용자 편집을 받는다(text 속성 갱신·통지 뒤 onChanged).
-    void OnEditedText(StringView text) noexcept;
+    // Element의 사용자 편집을 받는다(text 속성 갱신·통지 뒤 changed 발행).
+    void OnEditedText(ObjectRegistry& objects, StringView text) noexcept;
+    // Element의 확정을 받아 committed를 발행한다.
+    void OnCommittedText(ObjectRegistry& objects, StringView text,
+                         TextCommitReason reason) noexcept;
     Result<void> SetCaption(const Text& value, bool error) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "hintText") Text hintText_;
     ROCKS_PROPERTY(ReadOnly, Name = "errorText") Text errorText_;
@@ -61,8 +67,9 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "fontSize") float fontSize_ = 16;
     ROCKS_PROPERTY(Name = "readOnly") bool readOnly_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "password") bool password_ = false;
-    ROCKS_NATIVE() Delegate<void(StringView)> changed_;
-    ROCKS_NATIVE() Delegate<void(StringView, TextCommitReason)> committed_;
+    ROCKS_PROPERTY(Transient, Name = "changed", Params = "text") Event<const String&> changed_;
+    ROCKS_PROPERTY(Transient, Name = "committed", Params = "text,reason")
+    Event<const String&, TextCommitReason> committed_;
 };
 
 } // namespace rocks::ui

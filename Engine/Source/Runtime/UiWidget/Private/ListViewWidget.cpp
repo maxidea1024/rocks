@@ -5,7 +5,8 @@
 
 namespace rocks::ui {
 
-ListViewWidget::ListViewWidget(Allocator& allocator) noexcept : items_(allocator) {
+ListViewWidget::ListViewWidget(Allocator& allocator) noexcept
+    : ListViewBaseWidget(allocator), items_(allocator) {
 }
 
 Result<void> ListViewWidget::UseObjectItems(ObjectRegistry& objects, Application& app,

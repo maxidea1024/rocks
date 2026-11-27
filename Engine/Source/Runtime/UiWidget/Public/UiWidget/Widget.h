@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/Event.h>
 #include <Meta/Annotations.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>

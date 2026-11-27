@@ -5,6 +5,11 @@
 
 namespace rocks::ui {
 
+SliderWidget::SliderWidget(Allocator& allocator) noexcept
+    : controllerBegin_(allocator), controllerEnd_(allocator), captureBegin_(allocator),
+      captureEnd_(allocator), changed_(allocator) {
+}
+
 Result<void> SliderWidget::SetRange(float minimum, float maximum) noexcept {
     if (!math::IsFinite(minimum) || !math::IsFinite(maximum) ||
         !math::IsFinite(maximum - minimum) || minimum >= maximum) {
@@ -89,28 +94,28 @@ void SliderWidget::SetRequiresControllerLock(bool required) noexcept {
     }
 }
 
-void SliderWidget::SetOnControllerCaptureBegin(Delegate<void()>&& callback) noexcept {
-    controllerBegin_ = Move(callback);
+Event<>& SliderWidget::OnControllerCaptureBegin() noexcept {
+    return controllerBegin_;
 }
 
-void SliderWidget::SetOnControllerCaptureEnd(Delegate<void()>&& callback) noexcept {
-    controllerEnd_ = Move(callback);
+Event<>& SliderWidget::OnControllerCaptureEnd() noexcept {
+    return controllerEnd_;
 }
 
-void SliderWidget::SetOnCaptureBegin(Delegate<void()>&& callback) noexcept {
-    captureBegin_ = Move(callback);
+Event<>& SliderWidget::OnCaptureBegin() noexcept {
+    return captureBegin_;
 }
 
-void SliderWidget::SetOnCaptureEnd(Delegate<void()>&& callback) noexcept {
-    captureEnd_ = Move(callback);
+Event<>& SliderWidget::OnCaptureEnd() noexcept {
+    return captureEnd_;
 }
 
 float SliderWidget::Value() const noexcept {
     return value_;
 }
 
-void SliderWidget::SetOnChanged(Delegate<void(float)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<float>& SliderWidget::OnChanged() noexcept {
+    return changed_;
 }
 
 Result<void> SliderWidget::SetValue(float value) noexcept {
@@ -187,7 +192,7 @@ Result<SharedPtr<Element>> SliderWidget::BuildElement(ObjectRegistry& objects) n
 
             value->value_ = amount;
             value->NotifyPropertyChanged("value");
-            value->changed_.ExecuteIfBound(amount);
+            value->changed_.Broadcast({objects, objects.OwnerAccess(), owner}, amount);
         }));
     return Result<SharedPtr<Element>>::Success(Move(slider.Value()));
 }

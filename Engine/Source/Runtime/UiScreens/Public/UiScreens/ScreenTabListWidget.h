@@ -23,7 +23,9 @@ public:
     Result<void> SetButtonFactory(ObjectRegistry& objects, ButtonFactory&& factory) noexcept;
     Name SelectedTab(ObjectRegistry& objects) const noexcept;
     Span<const Name> Tabs() const noexcept;
-    void SetOnTabSelected(Delegate<void(Name)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<Name>& OnTabSelected() noexcept;
     void ReleaseElements() noexcept override;
 
 protected:
@@ -46,7 +48,7 @@ private:
     ROCKS_NATIVE() DelegateHandle activeChanged_ {};
     ROCKS_NATIVE() bool changing_ = false;
     ROCKS_NATIVE() ButtonFactory factory_;
-    ROCKS_NATIVE() Delegate<void(Name)> selected_;
+    ROCKS_PROPERTY(Transient, Name = "tabSelected", Params = "tab") Event<Name> selected_;
     ROCKS_NATIVE() ObjectRegistry* registry_ = nullptr;
 };
 } // namespace rocks::ui

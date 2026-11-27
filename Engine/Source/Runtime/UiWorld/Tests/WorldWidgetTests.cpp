@@ -53,8 +53,8 @@ TEST(UiWorld_WidgetRayUsesPivotPlayerCaptureAndProjectedPlayerLayer) {
         auto button = objects.ResolveForWrite<ButtonWidget>(access, child.Value().Handle());
         REQUIRE(button);
         uint32 clicked = 0;
-        button.Value().Get().Value()->SetOnClicked(
-            Delegate<void()>::CreateLambda([&]() noexcept { ++clicked; }));
+        REQUIRE(
+            button.Value().Get().Value()->OnClicked().TryAddLambda([&]() noexcept { ++clicked; }));
         REQUIRE(widget.SetWidget(owner.Value().Handle()));
         const ObjectHandle hits[] = {added.Value()};
         WorldWidgetInteraction pointer(2, 7), other(3, 7);

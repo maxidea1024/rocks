@@ -20,7 +20,9 @@ public:
     void SetPlacement(MenuPlacement placement) noexcept;
     void SetFitInWindow(bool fit) noexcept;
     Optional<Vec2> MenuPosition() const noexcept;
-    void SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<bool>& OnOpenChanged() noexcept;
     void Close() noexcept;
     bool IsOpen() const noexcept;
     void ReleaseElements() noexcept override;
@@ -32,7 +34,7 @@ protected:
 private:
     ROCKS_PROPERTY(ReadOnly, Name = "placement") uint8 placement_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "fitInWindow") bool fitInWindow_ = true;
-    ROCKS_NATIVE() Delegate<void(bool)> openChanged_;
+    ROCKS_PROPERTY(Transient, Name = "openChanged", Params = "open") Event<bool> openChanged_;
     ROCKS_NATIVE() MenuAnchor::MenuFactory factory_;
 };
 

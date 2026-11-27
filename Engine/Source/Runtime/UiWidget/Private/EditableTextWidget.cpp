@@ -13,7 +13,8 @@ EditableText* LiveEditor(const Widget& widget) noexcept {
 
 } // namespace
 
-EditableTextWidget::EditableTextWidget(Allocator& allocator) noexcept : text_(allocator) {
+EditableTextWidget::EditableTextWidget(Allocator& allocator) noexcept
+    : text_(allocator), changed_(allocator), committed_(allocator) {
 }
 
 TextLabel& EditableTextWidget::ResolveTextLabel(Element& element) const noexcept {
@@ -74,7 +75,7 @@ Result<void> EditableTextWidget::SetText(StringView text) noexcept {
     return Result<void>::Success();
 }
 
-void EditableTextWidget::OnEditedText(StringView text) noexcept {
+void EditableTextWidget::OnEditedText(ObjectRegistry& objects, StringView text) noexcept {
     // Element가 바꾼 글자를 속성에 반영한다. 할당 실패면 속성이 Element보다 뒤처지므로 통지하지
     // 않는다(다음 편집에서 다시 맞춘다).
     if (text != text_.View()) {
@@ -85,7 +86,19 @@ void EditableTextWidget::OnEditedText(StringView text) noexcept {
         NotifyPropertyChanged("text");
     }
 
-    changed_.ExecuteIfBound(text);
+    // 구독자가 SetText를 불러도 받은 글자가 유효하게 사본을 넘긴다.
+    String snapshot(objects.ObjectAllocator());
+    if (snapshot.TryAssign(text)) {
+        changed_.Broadcast({objects, objects.OwnerAccess(), Handle()}, snapshot);
+    }
+}
+
+void EditableTextWidget::OnCommittedText(ObjectRegistry& objects, StringView text,
+                                         TextCommitReason reason) noexcept {
+    String snapshot(objects.ObjectAllocator());
+    if (snapshot.TryAssign(text)) {
+        committed_.Broadcast({objects, objects.OwnerAccess(), Handle()}, snapshot, reason);
+    }
 }
 
 bool EditableTextWidget::IsPassword() const noexcept {
@@ -217,13 +230,12 @@ StringView EditableTextWidget::SelectedText() const noexcept {
     return editor ? editor->SelectedText() : StringView{};
 }
 
-void EditableTextWidget::SetOnChanged(Delegate<void(StringView)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<const String&>& EditableTextWidget::OnChanged() noexcept {
+    return changed_;
 }
 
-void EditableTextWidget::SetOnCommitted(
-    Delegate<void(StringView, TextCommitReason)>&& callback) noexcept {
-    committed_ = Move(callback);
+Event<const String&, TextCommitReason>& EditableTextWidget::OnCommitted() noexcept {
+    return committed_;
 }
 
 Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -288,14 +300,14 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
         [&objects, owner, native](StringView text) noexcept {
             auto widget = objects.ResolveForWrite<EditableTextWidget>(objects.OwnerAccess(), owner);
             if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
-                widget.Value().Get().Value()->OnEditedText(text);
+                widget.Value().Get().Value()->OnEditedText(objects, text);
             }
         }));
     editor.SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
         [&objects, owner, native](StringView text, TextCommitReason reason) noexcept {
             auto widget = objects.ResolveForWrite<EditableTextWidget>(objects.OwnerAccess(), owner);
             if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
-                widget.Value().Get().Value()->committed_.ExecuteIfBound(text, reason);
+                widget.Value().Get().Value()->OnCommittedText(objects, text, reason);
             }
         }));
     return Result<SharedPtr<Element>>::Success(Move(made.Value()));

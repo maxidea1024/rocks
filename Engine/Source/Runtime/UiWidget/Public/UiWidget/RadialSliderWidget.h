@@ -13,6 +13,8 @@ ROCKS_CLASS()
 class ROCKS_UIWIDGET_API RadialSliderWidget final : public Widget {
     ROCKS_GENERATED_BODY()
 public:
+    // 이벤트 필드가 allocator를 받는다(EventReflection ED14).
+    explicit RadialSliderWidget(Allocator& allocator) noexcept;
     Result<void> SetLimits(float minimum, float maximum, float step) noexcept;
     Result<void> SetValue(float value) noexcept;
     float Value() const noexcept;
@@ -21,7 +23,9 @@ public:
     void SetSnapToStep(bool enabled) noexcept;
     void SetHandVisibility(bool showHandle, bool showHand) noexcept;
     Result<void> SetColors(LinearColor track, LinearColor progress, LinearColor handle) noexcept;
-    void SetOnChanged(Delegate<void(float)>&& callback) noexcept;
+    // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
+    // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
+    Event<float>& OnChanged() noexcept;
 
 protected:
     Result<SharedPtr<Element>> BuildElement(ObjectRegistry& objects) noexcept override;
@@ -43,7 +47,7 @@ private:
     LinearColor progressColor_ = DefaultThemeColors().Get(ThemeSlot::Primary);
     ROCKS_PROPERTY(ReadOnly, Name = "handleColor")
     LinearColor handleColor_ = DefaultThemeColors().Get(ThemeSlot::Foreground);
-    ROCKS_NATIVE() Delegate<void(float)> changed_;
+    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui

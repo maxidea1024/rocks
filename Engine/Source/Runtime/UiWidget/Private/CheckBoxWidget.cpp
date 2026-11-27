@@ -4,7 +4,8 @@
 
 namespace rocks::ui {
 
-CheckBoxWidget::CheckBoxWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
+CheckBoxWidget::CheckBoxWidget(Allocator& allocator) noexcept
+    : ContentWidget(allocator), stateChanged_(allocator), changed_(allocator) {
 }
 
 Result<SharedPtr<Element>> CheckBoxWidget::CreatePanel(Allocator& allocator) noexcept {
@@ -15,8 +16,8 @@ bool CheckBoxWidget::IsChecked() const noexcept {
     return GetState() == CheckState::Checked;
 }
 
-void CheckBoxWidget::SetOnChanged(Delegate<void(bool)>&& callback) noexcept {
-    changed_ = Move(callback);
+Event<bool>& CheckBoxWidget::OnChanged() noexcept {
+    return changed_;
 }
 
 void CheckBoxWidget::SetChecked(bool checked) noexcept {
@@ -29,8 +30,8 @@ CheckState CheckBoxWidget::GetState() const noexcept {
                           : CheckState::Unchecked;
 }
 
-void CheckBoxWidget::SetOnStateChanged(Delegate<void(CheckState)>&& callback) noexcept {
-    stateChanged_ = Move(callback);
+Event<CheckState>& CheckBoxWidget::OnStateChanged() noexcept {
+    return stateChanged_;
 }
 
 Result<void> CheckBoxWidget::SetState(CheckState state) noexcept {
@@ -82,8 +83,9 @@ Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects)
                     value->NotifyPropertyChanged("checked");
                 }
 
-                value->changed_.ExecuteIfBound(state == CheckState::Checked);
-                value->stateChanged_.ExecuteIfBound(state);
+                value->changed_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                          state == CheckState::Checked);
+                value->stateChanged_.Broadcast({objects, objects.OwnerAccess(), owner}, state);
             }));
     return box;
 }

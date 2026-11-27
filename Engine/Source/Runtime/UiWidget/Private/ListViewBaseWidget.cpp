@@ -2,6 +2,10 @@
 
 namespace rocks::ui {
 
+ListViewBaseWidget::ListViewBaseWidget(Allocator& allocator) noexcept
+    : itemClicked_(allocator), selectionChanged_(allocator), itemScrolled_(allocator) {
+}
+
 Result<void> ListViewBaseWidget::SetSource(Application& app,
                                            const SharedRef<TableRowSource>& source) noexcept {
     if (CachedElement()) {
@@ -26,14 +30,16 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
                 auto widget =
                     objects.ResolveForWrite<ListViewBaseWidget>(objects.OwnerAccess(), owner);
                 if (widget) {
-                    widget.Value().Get().Value()->itemClicked_.ExecuteIfBound(key);
+                    widget.Value().Get().Value()->itemClicked_.Broadcast(
+                        {objects, objects.OwnerAccess(), owner}, key);
                 }
             }));
         view.SetOnSelectionChanged(Delegate<void()>::CreateLambda([&objects,
                                                                    owner = Handle()]() noexcept {
             auto widget = objects.ResolveForWrite<ListViewBaseWidget>(objects.OwnerAccess(), owner);
             if (widget) {
-                widget.Value().Get().Value()->selectionChanged_.ExecuteIfBound();
+                widget.Value().Get().Value()->selectionChanged_.Broadcast(
+                    {objects, objects.OwnerAccess(), owner});
             }
         }));
         view.SetOnItemScrolledIntoView(
@@ -41,7 +47,8 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
                 auto widget =
                     objects.ResolveForWrite<ListViewBaseWidget>(objects.OwnerAccess(), owner);
                 if (widget) {
-                    widget.Value().Get().Value()->itemScrolled_.ExecuteIfBound(key);
+                    widget.Value().Get().Value()->itemScrolled_.Broadcast(
+                        {objects, objects.OwnerAccess(), owner}, key);
                 }
             }));
     }
@@ -130,16 +137,16 @@ Result<void> ListViewBaseWidget::SelectIndex(uint32 index) noexcept {
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
-void ListViewBaseWidget::SetOnItemClicked(Delegate<void(uint64)>&& callback) noexcept {
-    itemClicked_ = Move(callback);
+Event<uint64>& ListViewBaseWidget::OnItemClicked() noexcept {
+    return itemClicked_;
 }
 
-void ListViewBaseWidget::SetOnSelectionChanged(Delegate<void()>&& callback) noexcept {
-    selectionChanged_ = Move(callback);
+Event<>& ListViewBaseWidget::OnSelectionChanged() noexcept {
+    return selectionChanged_;
 }
 
-void ListViewBaseWidget::SetOnItemScrolledIntoView(Delegate<void(uint64)>&& callback) noexcept {
-    itemScrolled_ = Move(callback);
+Event<uint64>& ListViewBaseWidget::OnItemScrolledIntoView() noexcept {
+    return itemScrolled_;
 }
 
 void ListViewBaseWidget::SetSelectionMode(ListSelectionMode mode) noexcept {

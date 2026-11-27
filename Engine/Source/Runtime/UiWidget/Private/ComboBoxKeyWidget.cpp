@@ -4,7 +4,8 @@
 
 namespace rocks::ui {
 
-ComboBoxKeyWidget::ComboBoxKeyWidget(Allocator& allocator) noexcept : options_(allocator) {
+ComboBoxKeyWidget::ComboBoxKeyWidget(Allocator& allocator) noexcept
+    : ComboBoxWidgetBase(allocator), options_(allocator) {
 }
 
 usize ComboBoxKeyWidget::OptionCount() const noexcept {

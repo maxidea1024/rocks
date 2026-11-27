@@ -44,7 +44,8 @@ TypeId ScrollBoxWidget::SlotType() const noexcept {
     return GeneratedType<ScrollBoxWidgetSlot>::Id();
 }
 
-ScrollBoxWidget::ScrollBoxWidget(Allocator& allocator) noexcept : PanelWidget(allocator) {
+ScrollBoxWidget::ScrollBoxWidget(Allocator& allocator) noexcept
+    : PanelWidget(allocator), scrolled_(allocator) {
 }
 
 Element& ScrollBoxWidget::ChildHost(Element& panel) noexcept {
