@@ -80,7 +80,7 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | SSpacer | `SSpacer` | `SizeBox` | 있음 |
 | SSpinBox | `SSpinBox` | `SpinBox` | UW4b 스타일 |
 | SNumericEntryBox / No Spin | `SNumericEntryBox` | 없음 | UW4c |
-| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | Widget 층 `EditableTextWidget`·`EditableTextBoxWidget`·`MultiLineEditableText(Box)Widget`(Element는 UiFramework `EditableText` — UW9b) | UW4a2 Widget 호스트로 행(힌트·오류 caption·비밀번호·읽기 전용·Esc 되돌리기·IME·undo), Element 공개(모델 분리)와 UE 스타일은 UW4b |
+| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | UiFramework `EditableText`·`EditableTextBox`(여러 줄 포함 — Widget: `EditableTextWidget`·`EditableTextBoxWidget`·`MultiLineEditableText(Box)Widget`) | Widgets 탭 "Text Input" 행(UW4f2d — 22.9절): 힌트·값 레이블·읽기 전용·비밀번호·오류 팝업·여러 줄·스크롤 막대 |
 | SInlineEditableText | `SInlineEditableTextBlock` | 없음 | UW4c |
 | SSearchBox | `SSearchBox` | 없음 | UW4c |
 | Menu Bar / Toolbar / Toolbar 2 | `FMenuBarBuilder`·`FToolBarBuilder` | 없음 — Editor Parts 탭 16.7절 | UW4d1 |
@@ -107,7 +107,7 @@ UW4a는 "있음"과 "UW4b 스타일" 행을 모두 넣는다(아직 UE 룩이 �
 
 UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔다.
 
-선행(UW4a2): 지금 `ListView`·`TreeView`·`TileView`는 생성자에서 `Application&`를 받아 들고 있다(초점 이동, Shift·Ctrl 상태). 갤러리 탭처럼 창보다 먼저 만들어지거나 다른 창으로 옮겨지는 내용에서는 쓸 수 없고, 에디터에서도 같은 문제다(분리 창으로 옮긴 Outliner가 원래 창의 Application을 본다). UE는 어디서든 `FSlateApplication::Get()`으로 찾는다. Rocks는 전역 등록부를 두지 않으므로(4.1절), `Application::SetRoot`가 루트에 자기를 연결하고 요소가 부모를 따라 루트의 Application을 찾게 한다(`Element::FindApplication()`, 트리에 붙지 않았으면 없음). 같은 문제가 있는 API를 모두 이 방식으로 바꾼다: `ListView`·`TreeView`·`TileView` 생성자, `MenuAnchor::OpenFocused(Application&)`, `ListViewBaseWidget::SetSource(app, …)`, UiScreens `ScreenContainer` 생성자, `CarouselWidget::BeginAutoScrolling(app, …)`, `UserWidget::StartAnimation(…, app)`. Lists 탭과 Game UI 탭은 이 수정과 함께 넣는다(UW4a2).
+선행(UW4a2): 지금 `ListView`·`TreeView`·`TileView`는 생성자에서 `Application&`를 받아 들고 있다(초점 이동, Shift·Ctrl 상태). 갤러리 탭처럼 창보다 먼저 만들어지거나 다른 창으로 옮겨지는 내용에서는 쓸 수 없고, 에디터에서도 같은 문제다(분리 창으로 옮긴 Outliner가 원래 창의 Application을 본다). UE는 어디서든 `FSlateApplication::Get()`으로 찾는다. Rocks는 전역 등록부를 두지 않으므로(4.1절), `Application::SetRoot`가 루트에 자기를 연결하고 요소가 부모를 따라 루트의 Application을 찾게 한다(`Element::FindApplication()`, 트리에 붙지 않았으면 없음). 같은 문제가 있는 API를 모두 이 방식으로 바꾼다: `ListView`·`TreeView`·`TileView` 생성자, `MenuAnchor::OpenFocused(Application&)`, `ListViewBaseWidget::SetSource(app, …)`, UiScreens `ScreenContainer` 생성자, `CarouselWidget::BeginAutoScrolling(app, …)`, `UserWidget::StartAnimation(…, app)`. Lists 탭과 Game UI 탭은 이 수정과 함께 넣는다(UW4a2). 찾는 기반은 UW4f2e가 먼저 둔다 — UiCore Element는 Application 형식을 모르므로 UiFramework 정적 함수 `Application::Find(const Element&)`이고, `UiHostServices` 소유자 표지로 찾는다(22.7a절).
 
 - 행 상태: 보통·올림·선택·비활성 창의 선택·부모 선택(Colors 탭 SELECT·SELECT HOVER·SELECT INACTIVE·SELECT PARENT slot), 선택 방식(없음·하나·하나 토글·여럿), 키보드 이동.
 - 트리: 펼침 화살표와 들여쓰기 선(UE `SExpanderArrow` — UW4c), 모두 펼치기·접기.

@@ -67,20 +67,20 @@ UE 5.8 `Templates`의 C++ 템플릿(헤더 119개, `.cpp` 119개)과 대조해 C
 - **`EditScope`는 값 하나다**(`"Archetype"`·`"Instance"`). 배타적인 두 지정자를 두지 않아 함께 쓰는 경우가 생기지 않고, `EditorOnly`·`WorldOnly`·`DevelopmentOnly` 같은 "존재 범위"의 `…Only` 이름과 헷갈리지 않는다.
 - **`DisplayOnly`와 `ReadOnly`는 다르다.** `DisplayOnly`는 Inspector 표시 전용(UE `CPF_EditConst`)이고 코드·스크립트·바인딩·애니메이션 트랙의 쓰기를 막지 않는다. `ReadOnly`는 경로·리플렉션 쓰기를 거부하는 실행 의미다([리플렉션 기반](../ReflectionFoundations.ko.md) 954행, staged 쓰기만 허용). Inspector 규칙: `Edit`이고 `ReadOnly`인 필드는 생성 setter(5.3절 `Apply`, UD7)가 있으면 setter를 거쳐 편집하고(예: 장부를 거쳐야 하는 `relativeTransform`), 없으면 표시 전용으로 보인다.
 - **`EditScope`를 붙일 수 있는 곳:** 원형과 인스턴스가 나뉘는 타입, 곧 `WorldOnly` 클래스(Actor·Component — prefab 노드)와 UI Widget 클래스(UiWidget이 기반 클래스를 등록)의 필드, 그리고 struct 멤버다. 그 밖의 클래스(자산 전용 등)의 필드에 붙이면 메타 컴파일러 오류다. struct 멤버의 `EditScope`는 그 struct가 자산 객체 안에서 쓰일 때는 문맥이 없으므로 무시한다(두 위치 모두 편집할 수 있다).
-- **중첩 전파:** 실효 위치는 객체에서 그 필드까지 경로에 있는 `EditScope`의 교집합이다(UE도 중첩 노드마다 자기 플래그로 다시 판정한다 — `Editor/PropertyEditor/Private/PropertyEditorHelpers.cpp:407-423`). 정적으로 알 수 있는 모순 조합(바깥 `"Archetype"` 필드의 struct 형식 안에 `"Instance"` 멤버, 그 반대)은 메타 컴파일러 오류다. Atomic struct 멤버에는 `EditScope`를 붙일 수 없다(통째 단위라 멤버만 따로 막을 수 없다). 통째 단위 override(Array·StaticArray·Optional·InstancedStruct — [Prefab](../Prefab.ko.md) 3.5절)의 데이터 검사는 바깥 필드의 실효 위치로만 판정하고, 원소 struct 멤버의 `EditScope`는 Inspector 표시에만 쓴다.
+- **중첩 전파:** 실효 위치는 객체에서 그 필드까지 경로에 있는 `EditScope`의 교집합이다(UE도 중첩 노드마다 자기 플래그로 다시 판정한다 — `Editor/PropertyEditor/Private/PropertyEditorHelpers.cpp:407-423`). 정적으로 알 수 있는 모순 조합(바깥 `"Archetype"` 필드의 struct 형식 안에 `"Instance"` 멤버, 그 반대)은 메타 컴파일러 오류다. Atomic struct 멤버에는 `EditScope`를 붙일 수 없다(통째 단위라 멤버만 따로 막을 수 없다). 통째 단위 override(Array·StaticArray·Optional·InstancedStruct — [Prefab](../Prefab/README.ko.md) 3.5절)의 데이터 검사는 바깥 필드의 실효 위치로만 판정하고, 원소 struct 멤버의 `EditScope`는 Inspector 표시에만 쓴다.
 
 **편집 문맥.** UE는 Details 뷰 설정과 객체의 `IsTemplate()`을 함께 쓴다. 레벨 편집기 Actor Details는 기본값 전용을 숨기고(`Editor/LevelEditor/Private/SActorDetails.cpp:455` `DefaultsOnlyVisibility = Hide`), Blueprint 편집기는 선택 객체가 모두 템플릿(클래스 기본값·SCS 컴포넌트 템플릿)이면 인스턴스 전용을 숨긴다(`Editor/Kismet/Private/SKismetInspector.cpp:845-922`). UMG Designer는 트리의 자식 Widget을 인스턴스로, 편집 중인 루트 UserWidget을 원형으로 다룬다(`Editor/UMGEditor/Private/Details/SWidgetDetailsView.cpp:386-401`). 그 밖의 자산 편집기는 기본값 `Show`(`Editor/PropertyEditor/Public/DetailsViewArgs.h:158`)로 둘 다 보여 주고, `Automatic` 모드는 클래스 기본값 객체일 때만 기본값 전용을 보인다(같은 파일 20–27행). Rocks는 **값이 저장되는 곳으로 문맥을 정한다.**
 
 | 문맥 | 대상(저장 위치) | `"Archetype"` | `"Instance"` |
 |---|---|---|---|
-| 원형 | `PrefabAsset`에 저장되는 모든 것: prefab·variant 편집 World의 노드, variant `overrides`, 바깥 prefab이 중첩 노드에 둔 override([Prefab](../Prefab.ko.md) 3.6·3.8절). WidgetAsset Designer의 루트 UserWidget | 편집 | 숨김 |
+| 원형 | `PrefabAsset`에 저장되는 모든 것: prefab·variant 편집 World의 노드, variant `overrides`, 바깥 prefab이 중첩 노드에 둔 override([Prefab](../Prefab/README.ko.md) 3.6·3.8절). WidgetAsset Designer의 루트 UserWidget | 편집 | 숨김 |
 | 배치 인스턴스 | 레벨에 저장되는 것: `PrefabPlacement.overrides`, 레벨에 직접 배치한 객체의 Record. WidgetAsset Designer 트리의 자식 Widget·중첩 UserWidget(그 WidgetAsset 안의 배치 값) | 숨김 | 편집 |
-| 클래스 기본값 보기 | 클래스 레코드·subobject 기본값 레코드 | 표시 전용. 이 값은 C++ 생성자·Sparks 필드 초기값에서만 나오고 Inspector 편집 경로가 없다([Prefab](../Prefab.ko.md) 3.1·3.2절, RCM 76행) | 숨김 |
+| 클래스 기본값 보기 | 클래스 레코드·subobject 기본값 레코드 | 표시 전용. 이 값은 C++ 생성자·Sparks 필드 초기값에서만 나오고 Inspector 편집 경로가 없다([Prefab](../Prefab/README.ko.md) 3.1·3.2절, RCM 76행) | 숨김 |
 
 독립 자산 객체는 위 문맥에 속하지 않는다. 그 클래스 필드에는 `EditScope`를 붙일 수 없고, 그 안에 쓰인 struct 멤버의 `EditScope`는 무시한다.
 
 **강제 위치.** UE는 Inspector 말고도 편집기 쓰기 경로에서 막는다. 편집기 스크립팅 `SetEditorProperty`는 `CanSetPropertyValue`로 `CannotEditInstance`·`CannotEditTemplate`를 거부하고(`Runtime/CoreUObject/Private/UObject/PropertyAccessUtil.cpp:723-751`, `Runtime/Engine/Private/KismetSystemLibrary.cpp:3507`), SpawnActorFromClass 노드의 기반은 `DisableEditOnInstance` 필드를 spawn 핀으로 내지 않으며(`Editor/BlueprintGraph/Private/K2Node_ConstructObjectFromClass.cpp:134-139`), UHT는 `ExposeOnSpawn`과 함께 쓰면 경고한다(`EpicGames.UHT/Types/UhtProperty.cs:2411-2416`). Rocks는 세 곳에서 막는다.
-1. **편집기 쓰기 경로:** Inspector `FieldHandle`과 편집기 Transaction은 문맥을 받고, 문맥 밖 필드 쓰기를 `PrefabOverridePathInvalid`(InvalidArgument)로 거부한다. [Prefab](../Prefab.ko.md) 3.11절 이 진단의 원인에 "편집 위치 위반"을 더한다. 편집기 스크립트(Sparks `@editorButton` 등)도 이 경로를 쓴다.
+1. **편집기 쓰기 경로:** Inspector `FieldHandle`과 편집기 Transaction은 문맥을 받고, 문맥 밖 필드 쓰기를 `PrefabOverridePathInvalid`(InvalidArgument)로 거부한다. [Prefab](../Prefab/README.ko.md) 3.11절 이 진단의 원인에 "편집 위치 위반"을 더한다. 편집기 스크립트(Sparks `@editorButton` 등)도 이 경로를 쓴다.
 2. **저장 검증(방어선):** 외부 편집·병합·스키마 변경으로 들어온 위반을 잡는다. 원형 문맥 저장물에 `"Instance"` 필드가 클래스 레코드와 다른 값으로 있거나, 배치 인스턴스 문맥 저장물에 `"Archetype"` 필드가 원형과 다른 값으로 있으면 진단 `PrefabEditScopeViolation`이다. 처리는 Prefab 3.7절 충돌과 같다(편집기: 진단만 하고 값은 적용, cooked: InvalidArgument). 이미 override가 있는 필드가 나중에 `EditScope`를 얻은 경우도 같은 규칙이라 값을 잃지 않고 편집기에서 지우거나 원형으로 옮기게 한다.
 3. **spawn 인자:** `"Archetype"` 필드는 spawn 인자(Sparks 생성 인자, Prefab 3.1절 적용 순서의 마지막 층)로 쓸 수 없다. Sparks 컴파일러와 C++ spawn 인자 검증이 오류로 낸다.
 
@@ -136,7 +136,7 @@ Sparks는 엔진 기반 타입의 재정의 가능 함수를 `override fn`으로
   - `ScriptExtensible` 클래스는 `final`일 수 없다(메타 컴파일러 오류).
 - **dispatch — 스크립트 파생 대리 클래스:** 메타 컴파일러는 `ScriptOverridable` 함수가 있는(상속받은 것 포함) `ScriptExtensible` 클래스 X마다 생성 C++ 클래스 `ScriptProxy<X>`를 만든다.
   - 대리 클래스는 X를 상속하고 `using X::X`로 생성자를 그대로 받는다. 각 `ScriptOverridable` 함수를 재정의해, 인스턴스의 Sparks 타입에 `override fn`이 있으면 VM을 부르고 없으면 `X::`의 구현을 부른다.
-  - **대리 클래스는 등록하지 않는 구현 세부다.** TypeId·필드·생성 메타데이터가 없고, 필드를 더하지 않으며, `sizeof`·정렬이 X와 같다(생성 `static_assert`). 그래서 native 파생 클래스의 저장 금지 규칙(`completeFieldLayout=false` — `Core/Source/Runtime/ObjectRuntime/Public/Object/NativeClass.h:22-24`, [Prefab](../Prefab.ko.md) 3.11절 `PrefabUnsaveableNode`)과 무관하다.
+  - **대리 클래스는 등록하지 않는 구현 세부다.** TypeId·필드·생성 메타데이터가 없고, 필드를 더하지 않으며, `sizeof`·정렬이 X와 같다(생성 `static_assert`). 그래서 native 파생 클래스의 저장 금지 규칙(`completeFieldLayout=false` — `Core/Source/Runtime/ObjectRuntime/Public/Object/NativeClass.h:22-24`, [Prefab](../Prefab/README.ko.md) 3.11절 `PrefabUnsaveableNode`)과 무관하다.
   - 인스턴스의 TypeId는 Sparks 타입이다(Sparks 12절 두 번째 발급자). 저장·로드는 Sparks 타입 규칙을 따른다.
   - 레지스트리가 Sparks 타입의 인스턴스를 만들 때는 X의 생성 함수 대신 대리의 생성 함수를 쓴다. 할당 크기는 X와 같다. 생성자 인자(Allocator 등)와 생성 문맥(`ConstructionContext`)은 X와 같다.
   - 클래스 기본값 레코드는 지금처럼 X의 생성자로 만든다. 대리는 vtable만 다르므로 레코드가 같다.

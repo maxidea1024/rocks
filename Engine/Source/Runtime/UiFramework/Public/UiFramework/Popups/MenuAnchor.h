@@ -61,6 +61,9 @@ public:
     // 전체를 덮으면 부모 메뉴나 막대의 hover·누름을 가로챈다. 끄면 층은 메뉴 영역만 받고, 바깥
     // 누름은 루트 메뉴 층이나 Application 누름 관찰자(메뉴 막대)가 처리한다.
     void SetCatchOutsidePresses(bool catchOutside) noexcept;
+    // anchor가 숨어도(고르지 않은 탭 등) 닫지 않고 층만 접는다(기본 끔 — 숨으면 닫는다). 초점을
+    // 받지 않는 팝업(편집 상자 오류 팝업)만 켠다(Docs/Design/UiToolkit 22.6절).
+    void SetKeepOpenWhileHidden(bool keep) noexcept;
     void SetFitInWindow(bool fit) noexcept;
     Optional<Vec2> MenuPosition() const noexcept;
     // 열린 메뉴 내용(factory가 만든 요소)이다. 닫혀 있으면 null이다.
@@ -89,6 +92,7 @@ private:
     MenuPlacement placement_ = MenuPlacement::Below;
     bool fit_ = true;
     bool catchOutside_ = true;
+    bool keepWhileHidden_ = false;
     Vec2 menuOffset_{};
     WeakPtr<Application*> app_;
     WeakPtr<Element> restoreFocus_;

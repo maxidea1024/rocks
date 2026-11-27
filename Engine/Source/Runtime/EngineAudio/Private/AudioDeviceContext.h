@@ -364,6 +364,16 @@ private:
         // 그대로 다시 쓴다 — UE AVL 339–352)이다.
         uint64 virtualCheckFrame = 0;
         uint64 virtualInterval = 0;
+        // 장면 일시정지(3.44.2·3.44.3절): 일시정지됐는지와 걸린 mix frame이다. 일시정지 동안 record
+        // 시계 항목(사용자·resume·차폐 ramp, focus·차폐 검사 frame, 재생 시간, voice 없는 커서)은
+        // pauseStartMixFrame에서 멈추고, 풀 때 멈춘 길이만큼 민다(그래서 필드는 모두 mix frame
+        // 도메인이다).
+        bool paused = false;
+        uint64 pauseStartMixFrame = 0;
+        // 지금 voice에 paused를 낸 적이 있다(커서가 믹서의 읽지 않은 누적을 본다)와 커서가
+        // 마지막으로 반영한 그 누적이다(3.44.6절).
+        bool voicePaused = false;
+        uint64 cursorUnread = 0;
     };
 
     struct ClipEntry {
@@ -391,6 +401,9 @@ private:
         // 이번 묶음에 리스너가 forceUpdateDistance보다 많이 움직였다(가상 재생을 바로 검사
         // — 3.41.3절).
         bool listenerJumped = false;
+        // scene 일시정지와 이번 묶음에 바뀌었는지다(3.44.1절).
+        bool paused = false;
+        bool pauseChanged = false;
     };
 
     struct ControlEmitter {
@@ -420,7 +433,9 @@ private:
         bool fading = false;
         DecibelRamp fader;
         uint64 fadeEnd = 0;
+        // 떼어 낼 때의 파라미터(steal fade 게시·일시정지 전환 게시 — 3.44.2절)와 UI 재생이었는지다.
         audio::AudioVoiceParams params;
+        bool uiSound = false;
     };
 
     // voice 배정 후보다.
@@ -456,6 +471,20 @@ private:
     void ApplyRemoveScene(const ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplyRemoveEmitter(const ControlCommand& command, ControlBatch& batch) noexcept;
     void ApplySnapshots(const ControlBatch& batch) noexcept;
+    // 장면 일시정지(AudioPause.cpp — 3.44절): scene 전환을 재생·분리 voice에 반영한다.
+    void UpdatePause(ControlBatch& batch, uint64 now) noexcept;
+    void PauseRecord(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
+    static void ResumeRecord(Record& record, uint64 now) noexcept;
+    // record 시계의 지금이다(일시정지 중이면 걸린 frame).
+    static uint64 RecordNow(const Record& record, uint64 now) noexcept {
+        return record.paused ? record.pauseStartMixFrame : now;
+    }
+
+    // 논리 커서를 진행한다. voiced면 voice가 읽은 frame만(mix 시계 − 읽지 않은 누적 — 3.44.6절),
+    // 아니면 record 시계로 진행한다.
+    void AdvanceCursor(Record& record, uint64 now, bool voiced) noexcept;
+    // voice의 now 시점 읽지 않은 누적 frame이다(게시값이 없으면 0).
+    uint64 VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now) const noexcept;
     // 공간 갱신(3.42.8절 — UE 순서: 우선순위 감쇠 → focus → 거리 감쇠 → 공기 흡수). accepting이면
     // UE 수락 때 규칙(focus 계수는 spatialize·focus일 때만, H = 1 — 3.42.5절)이다.
     void UpdateSpatial(Record& record, uint64 now, bool accepting) noexcept;

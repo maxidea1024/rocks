@@ -5,6 +5,7 @@
 #include <Platform/Path.h>
 #include <Platform/Process.h>
 #include <ShaderToolLoader/MetalToolchain.h>
+#include <ShaderToolLoader/ShaderToolCalls.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <TestSupport/DynamicLibraryFixture.h>
 #include <TestSupport/ProcessProbe.h>
@@ -631,6 +632,24 @@ TEST(ShaderToolLoader_IgnoresWorkingDirectoryAndPath) {
     REQUIRE(store.Child(relative, besideA, sizeof(besideA)));
     REQUIRE(WriteFixture(besideA, nullptr));
     CHECK(RunOpenProbe(store.path, key, nameA, digestA, sizeA, elsewhere.path, nullptr) == 0);
+}
+
+// FXC 오류 문구의 원문 진단 판정(ShaderSystem 16.4절 SSD80): 실패 HRESULT와 이 판정이 참이면
+// CompileError(대체 경로), 거짓이면 ToolError다.
+TEST(ShaderToolLoader_ClassifiesFxcSourceDiagnostics) {
+    // 위치 있는 원문 오류, 경고 오류, 위치 없는 엔트리 오류, FXC 내부 오류 문구.
+    CHECK(FxcHasSourceDiagnostic("(3,5-12): error X3004: undeclared identifier 'value'\n"));
+    CHECK(FxcHasSourceDiagnostic("(7,9): warning X4000: use of potentially uninitialized "
+                                 "variable\nerror X3129: warning treated as error\n"));
+    CHECK(FxcHasSourceDiagnostic("error X3501: 'main': entrypoint not found\n"));
+    CHECK(FxcHasSourceDiagnostic("(1,1): internal error: compilation aborted unexpectedly\n"));
+    CHECK(FxcHasSourceDiagnostic("Internal Compiler Error: Invalid Bytecode\n"));
+    // 경고만 있거나 비었거나 HRESULT 문구뿐이면 원문 진단이 아니다. 대소문자를 가린다.
+    CHECK(!FxcHasSourceDiagnostic(""));
+    CHECK(
+        !FxcHasSourceDiagnostic("(2,1): warning X3571: pow(f, e) will not work for negative f\n"));
+    CHECK(!FxcHasSourceDiagnostic("FXC failed with HRESULT 0x8007000e"));
+    CHECK(!FxcHasSourceDiagnostic("ERROR x3004: shouting\n"));
 }
 
 // metal -v 버전 줄 읽기(SH1e E7): 버전 줄과 Target 줄만, 설치 경로 줄은 뺀다.

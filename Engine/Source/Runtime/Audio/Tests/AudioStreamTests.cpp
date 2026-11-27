@@ -627,4 +627,54 @@ TEST(Audio_Stream_RefillSignal) {
     CHECK(refill.Wait(0) == platform::WaitResult::TimedOut);
 }
 
+// 일시정지(3.44.5절): Paused 동안 링을 소비하지 않고 굶음을 세지 않는다(링이 비어도). 일시정지로
+// 시작을 미룬 스트림 voice는 시작 대기 frame도 세지 않고, 풀리면 시작 대기로 돌아간다.
+TEST(Audio_Stream_PauseHoldsRingAndCounters) {
+    SystemAllocator allocator;
+    const Array<float> source = Signal(allocator, 20000);
+    OfflineAudioRender rig = MakeRig(allocator);
+    UniquePtr<AudioStreamRing> ring = MakeRing(allocator);
+    Feeder feeder;
+    feeder.source = &source;
+    const AudioClipId clip = RegisterStream(rig.Mixer(), *ring, 20000);
+    const AudioVoiceHandle voice = PlayAt(rig, clip, 0);
+    (void)feeder.Feed(*ring, StreamStartFrames);
+    Array<float> out(allocator);
+    RenderBlock(rig, out);
+    AudioVoiceParams paused;
+    paused.paused = true;
+    REQUIRE(rig.Mixer().PublishParams(voice, paused));
+    RenderBlock(rig, out);
+    const uint32 readable = ring->ReadableFrames();
+    for (uint32 block = 0; block < 20; ++block) {
+        RenderBlock(rig, out);
+    }
+
+    CHECK(ring->ReadableFrames() == readable);
+    CHECK(rig.Mixer().Counters().streamStarvedFrames == 0);
+    CHECK(rig.Mixer().Counters().pausedVoices == 1);
+    bool silent = true;
+    for (usize index = 2 * Block; index < out.Size(); ++index) {
+        silent = silent && out[index] == 0.0f;
+    }
+
+    CHECK(silent);
+
+    // 시작을 미룬 스트림 voice: 링이 비어 있어도 대기 frame을 세지 않는다.
+    UniquePtr<AudioStreamRing> waitRing = MakeRing(allocator);
+    const AudioClipId waitClip = RegisterStream(rig.Mixer(), *waitRing, 20000);
+    const AudioVoiceHandle waiting = PlayAt(rig, waitClip, rig.Mixer().MixFrame());
+    REQUIRE(rig.Mixer().PublishParams(waiting, paused));
+    const uint64 delay = rig.Mixer().Counters().streamStartDelayFrames;
+    RenderBlock(rig, out);
+    RenderBlock(rig, out);
+    CHECK(rig.Mixer().Counters().streamStartDelayFrames == delay);
+    CHECK(StatusOf(rig.Mixer(), waiting).state == AudioVoiceState::Prepared);
+    AudioVoiceParams running;
+    REQUIRE(rig.Mixer().PublishParams(waiting, running));
+    RenderBlock(rig, out);
+    CHECK(rig.Mixer().Counters().streamStartDelayFrames == delay + Block);
+    CHECK(StatusOf(rig.Mixer(), waiting).state == AudioVoiceState::Prepared);
+}
+
 } // namespace audio_stream_tests_file

@@ -2,7 +2,9 @@
 
 #include <Core/Assert.h>
 
+#include <UiCore/InputMetrics.h>
 #include <UiCore/TextInputPositions.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 
 namespace rocks::ui {
 
@@ -12,9 +14,25 @@ usize SmallerOffset(usize a, usize b) noexcept {
     return a < b ? a : b;
 }
 
-// 상자형 편집 칸의 안쪽 여백, 되돌리기 기록 상한이다.
-constexpr float BoxedTextPadding = 4.0f;
-constexpr usize MaxUndoSteps = 64;
+// 되돌리기 기록 상한이다(UE EditableTextDefs::MaxUndoLevels — TextEditHelper.h 15행).
+constexpr usize MaxUndoSteps = 99;
+// caret 폭은 줄 높이의 이 비율을 [최소, 최대] px로 자른 값이다(UE CaretWidthPercent·
+// FTextEditHelper::CalculateCaretWidth — TextEditHelper.cpp 15–19행).
+constexpr float CaretWidthPercent = 0.08f;
+constexpr float MinCaretWidth = 1.0f;
+constexpr float MaxCaretWidth = 2.0f;
+// 조합 밑줄 두께(px)와 점선 무늬(칠·빔 길이, px)다(UE CompositionBackground "Old/HyperlinkDotted"
+// — 22.12절).
+constexpr float CompositionUnderlineThickness = 1.0f;
+constexpr float CompositionDashLength = 1.0f;
+constexpr float CompositionGapLength = 1.0f;
+// caret 깜박임(UE EditableTextDefs — TextEditHelper.h 20–24행): 상호작용 뒤 이 시간(초)은 늘
+// 보이고, 그 뒤는 초당 이 횟수로 켜짐·꺼짐을 되풀이한다(SlateEditableTextTypes.cpp 127–130행).
+constexpr double CaretBlinkPauseTime = 0.1;
+constexpr double BlinksPerSecond = 1.0;
+// 포인터 누름 횟수다(두 번 = 단어, 세 번 이상 = 줄).
+constexpr uint8 WordClickCount = 2;
+constexpr uint8 LineClickCount = 3;
 // 글자로 넣지 않는 제어 문자: U+0000–U+001F와 DEL(U+007F)이다.
 constexpr uint32 FirstPrintableCodePoint = 0x20;
 constexpr uint32 DeleteCodePoint = 0x7F;
@@ -22,15 +40,19 @@ constexpr uint32 DeleteCodePoint = 0x7F;
 } // namespace
 
 EditableText::EditableText(Allocator& allocator, SharedPtr<TextShaper> shaper, Platform platform,
-                           bool multiline, bool boxed) noexcept
+                           bool multiline) noexcept
     : Element(allocator), allocator_(allocator), undo_(allocator), redo_(allocator),
       shaper_(Move(shaper)), text_(allocator), focusText_(allocator), platform_(platform),
-      padding_(boxed ? BoxedTextPadding : 0.0f), preview_(allocator), multiline_(multiline),
-      boxed_(boxed) {
+      preview_(allocator), multiline_(multiline) {
     SetClipToBounds(true);
 }
 
 EditableText::~EditableText() noexcept {
+    // 열린 문맥 메뉴를 닫고 메뉴 생성기·통지가 사라진 편집기를 부르지 않게 한다(엔진 정리).
+    if (contextAnchor_) {
+        contextAnchor_->DisconnectMenu();
+    }
+
     // 서비스가 남은 기록을 이 문맥에 적용하지 않게 조합을 먼저 버린 뒤 끈다(19.2절).
     if (auto service = Move(textInput_)) {
         composing_ = false;
@@ -70,26 +92,14 @@ Result<void> EditableText::Initialize(StringView text, float size) noexcept {
         MoveCaret(text.ByteCount(), false);
     }
 
-    // Initialize 전에 정한 캡션을 만든다.
-    const auto publish = [this](const Text& value, bool error) noexcept -> Result<void> {
-        if (!value.IsValid()) {
-            return Result<void>::Success();
+    // Initialize 전에 정한 힌트를 만든다.
+    if (shaped && hintText_.IsValid()) {
+        auto hint = AddHint(hintText_, fontSize_);
+        if (!hint) {
+            return Result<void>::Failure(hint.Error());
         }
 
-        auto caption = AddCaption(value, fontSize_, error);
-        if (!caption) {
-            return Result<void>::Failure(caption.Error());
-        }
-
-        PublishCaption(Move(caption.Value()), error);
-        return Result<void>::Success();
-    };
-    if (shaped) {
-        shaped = publish(hintText_, false);
-    }
-
-    if (shaped) {
-        shaped = publish(errorText_, true);
+        PublishHint(Move(hint.Value()));
     }
 
     return shaped;
@@ -176,6 +186,8 @@ void EditableText::SetReadOnly(bool readOnly) noexcept {
         if (textInput_) {
             textInput_->Activate(*this);
         }
+
+        NotifyStateChanged();
     }
 }
 
@@ -198,8 +210,71 @@ bool EditableText::IsMultiline() const noexcept {
     return multiline_;
 }
 
-bool EditableText::IsBoxed() const noexcept {
-    return boxed_;
+bool EditableText::IsFocused() const noexcept {
+    return focused_;
+}
+
+Result<void> EditableText::SetContentPadding(Vec4 padding) noexcept {
+    if (!padding.IsFinite() || padding.x < 0 || padding.y < 0 || padding.z < 0 || padding.w < 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (padding_ != padding) {
+        padding_ = padding;
+        InvalidateLayout();
+    }
+
+    return Result<void>::Success();
+}
+
+Vec4 EditableText::ContentPadding() const noexcept {
+    return padding_;
+}
+
+Result<void> EditableText::SetStyle(const EditableTextStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+const EditableTextStyle& EditableText::GetStyle() const noexcept {
+    return style_;
+}
+
+void EditableText::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        // 활성 집합에 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다(20.11절).
+        const EditableTextStyle* style = host.FindStyle<EditableTextStyle>("NormalEditableText");
+        (void)ApplyStyle(style ? *style : DefaultEditableTextStyle());
+    }
+}
+
+Result<void> EditableText::ApplyStyle(const EditableTextStyle& style) noexcept {
+    if (!math::IsFinite(style.hintOpacity) || style.hintOpacity < 0 || style.hintOpacity > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (style_ != style) {
+        style_ = style;
+        if (hint_) {
+            (void)hint_->SetRenderOpacity(style_.hintOpacity);
+        }
+
+        InvalidatePaint();
+    }
+
+    return Result<void>::Success();
+}
+
+void EditableText::SetOnStateChanged(Delegate<void()>&& callback) noexcept {
+    stateChanged_ = Move(callback);
+}
+
+void EditableText::NotifyStateChanged() noexcept {
+    stateChanged_.ExecuteIfBound();
 }
 
 void EditableText::SetOnTextChanged(Delegate<void(StringView)>&& callback) noexcept {
@@ -284,6 +359,8 @@ Result<void> EditableText::ShapeText(StringView text, float size, bool password)
     }
 
     fontSize_ = size;
+    // 글자가 바뀌었다 — 다음 배치에서 caret을 보이게 한다(UE는 편집마다 PositionToScrollIntoView).
+    followCaret_ = true;
     InvalidateLayout();
     InvalidatePaint();
     return Result<void>::Success();
@@ -348,9 +425,10 @@ TextLabel& EditableText::Label() const noexcept {
 }
 
 Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
+    const Vec2 inset{padding_.x + padding_.z, padding_.y + padding_.w};
     // Initialize 전에는 빈 편집기다.
     if (!label_) {
-        return {padding_ * 2, fontSize_ + padding_ * 2};
+        return {inset.x, fontSize_ + inset.y};
     }
 
     Vec2 text = label_->GetDesiredSize();
@@ -359,9 +437,60 @@ Vec2 EditableText::ComputeDesiredSize(float) const noexcept {
         text.y = math::Max(text.y, hint_->GetDesiredSize().y);
     }
 
-    const Vec2 error = error_ ? error_->GetDesiredSize() : Vec2{};
-    return {math::Max(text.x + 1, error.x) + padding_ * 2,
-            math::Max(fontSize_, text.y) + padding_ * 2 + (error_ ? error.y + 2 : 0)};
+    // caret 폭만큼 오른쪽을 더 둔다(UE가 caret 폭을 여백에 더한다 — SlateEditableTextLayout.cpp
+    // 3717–3718행).
+    return {text.x + CaretWidth() + inset.x, math::Max(fontSize_, text.y) + inset.y};
+}
+
+float EditableText::CaretWidth() const noexcept {
+    // 줄 높이 기준이다(여러 줄의 전체 높이가 아니다 — UE는 글꼴 최대 글자 높이).
+    const float line = label_ && label_->LineHeight() > 0 ? label_->LineHeight() : fontSize_;
+    return math::Clamp(CaretWidthPercent * line, MinCaretWidth, MaxCaretWidth);
+}
+
+void EditableText::RequestCaretInView() noexcept {
+    followCaret_ = true;
+    InvalidateArrangement();
+}
+
+void EditableText::ClampScroll() noexcept {
+    scroll_.x = math::Clamp(scroll_.x, 0.0f, math::Max(0.0f, contentSize_.x - viewSize_.x));
+    scroll_.y = math::Clamp(scroll_.y, 0.0f, math::Max(0.0f, contentSize_.y - viewSize_.y));
+}
+
+float EditableText::MeasureContentHeight(float width) noexcept {
+    if (!label_) {
+        return 0.0f;
+    }
+
+    // Arrange와 같은 글자 폭으로 줄을 나눈다.
+    (void)label_->MeasureForWidth(math::Max(1.0f, width - padding_.x - padding_.z));
+    return label_->Layout().DesiredSize().y;
+}
+
+float EditableText::ScrollOffset() const noexcept {
+    return scroll_.y;
+}
+
+float EditableText::ContentHeight() const noexcept {
+    return contentSize_.y;
+}
+
+float EditableText::ViewHeight() const noexcept {
+    return viewSize_.y;
+}
+
+void EditableText::SetScrollOffset(float offset) noexcept {
+    if (!math::IsFinite(offset)) {
+        return;
+    }
+
+    const float clamped = math::Clamp(offset, 0.0f, math::Max(0.0f, contentSize_.y - viewSize_.y));
+    if (clamped != scroll_.y) {
+        scroll_.y = clamped;
+        // 글자 위치만 바뀐다 — 다시 배치한다(배치 무효화가 상자까지 올라가 막대도 맞춘다).
+        InvalidateArrangement();
+    }
 }
 
 Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
@@ -370,30 +499,15 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
         return Result<void>::Success();
     }
 
-    const float width = math::Max(1.0f, geometry.size.x - padding_ * 2);
-    const float height = math::Max(1.0f, geometry.size.y - padding_ * 2);
-    float errorHeight = 0;
+    const float width = math::Max(1.0f, geometry.size.x - padding_.x - padding_.z);
+    const float height = math::Max(1.0f, geometry.size.y - padding_.y - padding_.w);
     SetGeometry(geometry);
-    if (error_) {
-        auto wrappedError = error_->ArrangeForWidth(width);
-        if (!wrappedError) {
-            return wrappedError;
-        }
-
-        errorHeight = math::Min(error_->ComputeDesiredSize(1).y, height);
-        auto placed = error_->ArrangeIfNeeded(GetGeometry().MakeChild(
-            {width, errorHeight}, {1, 0, 0, 1, padding_, padding_ + height - errorHeight}, {}, {}));
-        if (!placed) {
-            return placed;
-        }
-    }
-
-    const Vec2 area{width, math::Max(1.0f, height - (error_ ? errorHeight + 2 : 0))};
+    const Vec2 area{width, height};
     if (hint_ && label_->GetText().IsEmpty()) {
         auto placed = label_->CopyParagraphTo(*hint_);
         if (placed) {
             placed = hint_->ArrangeIfNeeded(
-                GetGeometry().MakeChild(area, {1, 0, 0, 1, padding_, padding_}, {}, {}));
+                GetGeometry().MakeChild(area, {1, 0, 0, 1, padding_.x, padding_.y}, {}, {}));
         }
 
         if (!placed) {
@@ -406,18 +520,42 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
         return wrapped;
     }
 
-    const auto pos = label_->CaretPosition(caret_, false);
-    if (pos) {
-        scroll_.x =
-            math::Max(0.0f, math::Clamp(scroll_.x, pos.Value().x + 1 - area.x, pos.Value().x));
-        scroll_.y = math::Max(
-            0.0f,
-            math::Clamp(scroll_.y, pos.Value().y + math::Min(area.y, label_->LineHeight()) - area.y,
-                        pos.Value().y));
+    const Vec2 laid = label_->Layout().DesiredSize();
+    const float caretWidth = CaretWidth();
+    contentSize_ = {laid.x + caretWidth, laid.y};
+    viewSize_ = area;
+    if (followCaret_) {
+        // UE PositionToScrollIntoView(SlateEditableTextLayout.cpp 3596–3631행): 가로는 caret
+        // 사각형, 세로는 caret 줄 전체를 보이게 한다. 줄이 보이는 높이보다 크면 줄 위를 맞춘다.
+        followCaret_ = false;
+        const auto pos = label_->CaretPosition(caret_, false);
+        if (pos) {
+            const Vec2 at = pos.Value();
+            const float line = math::Min(area.y, label_->LineHeight());
+            if (at.x < scroll_.x) {
+                scroll_.x = at.x;
+            } else if (at.x + caretWidth > scroll_.x + area.x) {
+                scroll_.x = at.x + caretWidth - area.x;
+            }
+
+            if (at.y < scroll_.y) {
+                scroll_.y = at.y;
+            } else if (at.y + line > scroll_.y + area.y) {
+                scroll_.y = at.y + line - area.y;
+            }
+        }
     }
 
-    const AffineTransform2D offset{1, 0, 0, 1, padding_ - scroll_.x, padding_ - scroll_.y};
+    ClampScroll();
+
+    const AffineTransform2D offset{1, 0, 0, 1, padding_.x - scroll_.x, padding_.y - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
+    if (arranged && contextAnchor_ && contextAnchor_->Parent() == this) {
+        // 메뉴 왼쪽 위가 연 자리다(UE PushMenu 커서 자리 — 22.7a절).
+        arranged = contextAnchor_->ArrangeIfNeeded(
+            GetGeometry().MakeChild({}, {1, 0, 0, 1, contextPoint_.x, contextPoint_.y}, {}, {}));
+    }
+
     if (arranged && textInput_) {
         // 글자 위치가 정해졌다 — 후보 창을 caret으로 옮긴다.
         textInput_->NotifyLayoutChanged(*this);
@@ -435,12 +573,23 @@ bool EditableText::SupportsKeyboardFocus() const noexcept {
 }
 
 void EditableText::OnFocusReceived(uint32 user) noexcept {
+    // 문맥 메뉴에서 돌아오는 초점이다 — 초점을 잃은 적이 없는 것처럼 둔다(UE HandleFocusReceived
+    // ActiveContextMenu 검사, 22.7a절).
+    if (contextMenuOpen_ && focused_) {
+        return;
+    }
+
     focused_ = true;
     focusUser_ = user;
+    // 초점 동안 caret이 깜박이므로 매 프레임 다시 기록한다(22.5절 — volatile은 이 요소만 무효화).
+    SetVolatile(true);
+    MarkInteraction();
     RememberFocusText();
     if (selectAllOnFocus_) {
         keepPointerSelection_ = dragging_;
         SelectAllText();
+        // 초점 받음의 전체 선택은 스크롤하지 않는다(UE HandleFocusReceived 912–917행 — 22.7a절).
+        followCaret_ = false;
     }
 
     textInput_ = FindTextInputService();
@@ -450,20 +599,46 @@ void EditableText::OnFocusReceived(uint32 user) noexcept {
 
     chord_ = {};
     InvalidatePaint();
+    NotifyStateChanged();
 }
 
 void EditableText::OnFocusLost(uint32 user) noexcept {
+    // 초점이 문맥 메뉴로 갔다 — 확정·선택 해제·IME 끄기를 하지 않는다(UE HandleFocusLost
+    // 934–937행). 메뉴가 닫힐 때 초점이 돌아오지 않았으면 그때 처리한다(OnContextMenuOpenChanged).
+    if (contextMenuOpen_) {
+        return;
+    }
+
+    HandleFocusLost(user);
+}
+
+void EditableText::CommitCompositionForPointer() noexcept {
+    // 서비스를 쥐고 Deactivate·Activate한다 — Deactivate가 OS 조합을 완료하고(CPS_COMPLETE) 확정을
+    // 적용한다(19.2절). 한국어에서 취소하면 쓰던 음절이 사라지므로 확정이다.
+    if (const SharedPtr<TextInputService> service = textInput_) {
+        service->Deactivate(*this);
+        service->Activate(*this);
+    }
+
+    // 서비스가 확정하지 못했으면 미리보기를 그대로 확정한다(19.2절 Deactivate 규칙).
+    EndComposition();
+}
+
+void EditableText::HandleFocusLost(uint32 user) noexcept {
     if (!focused_ || user != focusUser_) {
         return;
     }
 
     focused_ = false;
+    SetVolatile(false);
+    dragUnit_ = SelectionUnit::Cluster;
     canRevert_ = false;
     focusText_.Clear();
     keepPointerSelection_ = false;
     chord_ = {};
     dragging_ = false;
     InvalidatePaint();
+    NotifyStateChanged();
     // 서비스가 만들던 글자를 확정해 넣은 뒤 끈다(19.2절). Commit(FocusLost)이 그 글자를 본다.
     if (auto service = Move(textInput_)) {
         service->Deactivate(*this);
@@ -477,6 +652,11 @@ void EditableText::MoveCaret(usize pos, bool extend) noexcept {
     if (!label_) {
         return;
     }
+
+    // caret을 옮기는 일(타자·이동·포인터·선택)은 상호작용이다 — 깜박임을 처음부터 센다(22.5절).
+    MarkInteraction();
+    // 다음 배치에서 caret을 보이게 한다(22.7절 — 같은 자리여도 UE처럼 다시 본다).
+    RequestCaretInView();
 
     // 새로 삽입한 코드 포인트가 다음 문자와 한 클러스터로 결합하는 경우 그 끝에 둔다.
     if (pos != 0 && pos < label_->GetText().ByteCount()) {
@@ -500,13 +680,17 @@ void EditableText::MoveCaret(usize pos, bool extend) noexcept {
 }
 
 usize EditableText::Adjacent(bool forward) const noexcept {
+    return AdjacentFrom(caret_, forward);
+}
+
+usize EditableText::AdjacentFrom(usize pos, bool forward) const noexcept {
     usize previous = 0;
     for (const auto& cluster : label_->ShapedClusters()) {
-        if (forward && cluster.byteEnd > caret_) {
+        if (forward && cluster.byteEnd > pos) {
             return cluster.byteEnd;
         }
 
-        if (!forward && cluster.byteEnd >= caret_) {
+        if (!forward && cluster.byteEnd >= pos) {
             return previous;
         }
 
@@ -514,6 +698,48 @@ usize EditableText::Adjacent(bool forward) const noexcept {
     }
 
     return previous;
+}
+
+usize EditableText::WordStop(bool forward) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    const auto lineStart = [&](usize pos) noexcept {
+        return pos == 0 || text.Data()[pos - 1] == '\n';
+    };
+    const auto lineEnd = [&](usize pos) noexcept {
+        return pos >= length || text.Data()[pos] == '\n';
+    };
+    if (password_) {
+        // UE: 비밀번호면 단어 경계 대신 줄 처음·끝(SlateEditableTextLayout.cpp 1176–1180행).
+        usize pos = caret_;
+        while (forward ? !lineEnd(pos) : !lineStart(pos)) {
+            pos = forward ? pos + 1 : pos - 1;
+        }
+
+        return pos;
+    }
+
+    Array<usize> breaks(allocator_);
+    const bool words = shaper_ && shaper_->FindWordBoundaries(text, breaks) && !breaks.IsEmpty();
+    usize pos = AdjacentFrom(caret_, forward);
+    for (;;) {
+        if (lineStart(pos) || lineEnd(pos)) {
+            return pos;
+        }
+
+        usize begin = 0;
+        usize end = 0;
+        if (!words || (WordAt(breaks.View(), pos, begin, end) && begin == pos)) {
+            return pos;
+        }
+
+        const usize next = AdjacentFrom(pos, forward);
+        if (next == pos) {
+            return pos;
+        }
+
+        pos = next;
+    }
 }
 
 void EditableText::Replace(usize begin, usize end, StringView insertion) noexcept {
@@ -624,10 +850,16 @@ bool EditableText::IsComposing() const noexcept {
 }
 
 uint32 EditableText::GetTextLength() const noexcept {
-    return text_input::Utf16Length(label_->GetText());
+    return label_ ? text_input::Utf16Length(label_->GetText()) : 0;
 }
 
 void EditableText::GetSelection(uint32& begin, uint32& length) const noexcept {
+    if (!label_) {
+        begin = 0;
+        length = 0;
+        return;
+    }
+
     const StringView text = label_->GetText();
     const uint32 first = text_input::ToUtf16Index(text, anchor_ < caret_ ? anchor_ : caret_);
     const uint32 last = text_input::ToUtf16Index(text, anchor_ < caret_ ? caret_ : anchor_);
@@ -644,6 +876,16 @@ void EditableText::SetSelection(uint32 begin, uint32 length) noexcept {
 
 Result<void> EditableText::GetText(uint32 begin, uint32 length,
                                    Array<char16_t>& out) const noexcept {
+    // 범위 밖은 InvalidArgument다(TextInputContext 계약 — TSF 거울이 길이를 믿고 읽는다).
+    const uint64 end = static_cast<uint64>(begin) + length;
+    if (end > GetTextLength()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!label_) {
+        return Result<void>::Success();
+    }
+
     const StringView text = label_->GetText();
     const usize first = ByteOffset(begin);
     const usize last = ByteOffset(begin + length);
@@ -861,21 +1103,28 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
         }
 
         if (event.key == Key::V) {
-            if (!readOnly_) {
-                String clipboard(allocator_);
-                if (platform_.readClipboardText && platform_.readClipboardText(clipboard)) {
-                    Paste(begin, end, clipboard.View());
-                }
-            }
-        } else if (!password_ && begin != end && (event.key == Key::C || !readOnly_)) {
-            const auto selection = text_.View().SliceBytes(begin, end - begin);
-            if (platform_.writeClipboardText && platform_.writeClipboardText(selection) &&
-                event.key == Key::X) {
-                Replace(begin, end, {});
-            }
+            PasteClipboard();
+        } else {
+            CopySelection(event.key == Key::X);
         }
+
         break;
     }
+    case Key::F10:
+        // Shift+F10은 caret 자리에 문맥 메뉴를 연다(Windows 관례 — 22.7a절).
+        if (!chord_.shift || command || chord_.alt) {
+            return Element::OnKeyEvent(key);
+        }
+
+        if (label_) {
+            const auto at = label_->CaretPosition(caret_, false);
+            const Vec2 point = at ? at.Value() : Vec2{};
+            (void)OpenContextMenu({padding_.x - scroll_.x + point.x,
+                                   padding_.y - scroll_.y + point.y + label_->LineHeight()},
+                                  FocusCause::Navigation);
+        }
+
+        break;
     case Key::Z:
     case Key::Y:
         if (!command) {
@@ -889,14 +1138,19 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
             return Element::OnKeyEvent(key);
         }
 
-        anchor_ = 0;
-        MoveCaret(text_.ByteCount(), true);
-        InvalidatePaint();
+        SelectAllText();
         break;
     case Key::Left:
     case Key::Right: {
         const bool forward = event.key == Key::Right;
-        MoveCaret(!extend && begin != end ? (forward ? end : begin) : Adjacent(forward), extend);
+        // Ctrl(macOS Cmd)이면 단어 단위다(UE ECursorMoveGranularity::Word — 1067·1087행).
+        if (command) {
+            MoveCaret(WordStop(forward), extend);
+        } else {
+            MoveCaret(!extend && begin != end ? (forward ? end : begin) : Adjacent(forward),
+                      extend);
+        }
+
         break;
     }
     case Key::Home:
@@ -924,10 +1178,11 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
         break;
     }
     case Key::Backspace:
-        Replace(begin == end ? Adjacent(false) : begin, end, {});
+        // 선택이 없으면 Ctrl은 앞 단어까지, 아니면 앞 클러스터를 지운다(UE 1240–1255행).
+        Replace(begin == end ? (command ? WordStop(false) : Adjacent(false)) : begin, end, {});
         break;
     case Key::Delete:
-        Replace(begin, begin == end ? Adjacent(true) : end, {});
+        Replace(begin, begin == end ? (command ? WordStop(true) : Adjacent(true)) : end, {});
         break;
     case Key::Escape:
         return KeyReply::FromHandled(RevertToFocusText());
@@ -958,6 +1213,29 @@ usize EditableText::PointerOffset(Vec2 point) const noexcept {
 }
 
 PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
+    // 조합 중 누름은 조합을 확정한 뒤 평소대로 처리한다(UE MoveCursor 2386–2395행 — 22.12절).
+    if (composing_ && event.type == PointerEventType::Down) {
+        CommitCompositionForPointer();
+    }
+
+    if ((event.source == PointerSource::Mouse && event.button == input::MouseButton::Right &&
+         event.type != PointerEventType::Wheel) ||
+        (rightPressed_ && event.pointerId == rightPointer_ && event.userId == rightUser_)) {
+        return OnRightPointer(event);
+    }
+
+    if (event.type == PointerEventType::Wheel) {
+        // 여러 줄이 넘칠 때만 세로로 옮긴다. 끝이라 못 옮기면 바깥 스크롤로 넘긴다(UE
+        // SMultiLineEditableText::OnMouseWheel 862–884행). 조합 중에도 스크롤은 된다.
+        if (!multiline_ || !math::IsFinite(event.wheel) || !label_) {
+            return {};
+        }
+
+        const float before = scroll_.y;
+        SetScrollOffset(scroll_.y - event.wheel * WheelScrollStep);
+        return {.handled = scroll_.y != before};
+    }
+
     if (composing_) {
         return {.handled = true};
     }
@@ -966,7 +1244,22 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
         (event.source != PointerSource::Mouse || event.button == input::MouseButton::Left)) {
         pointerAnchor_ = PointerOffset(event.position);
         keepPointerSelection_ = false;
-        MoveCaret(pointerAnchor_, false);
+        dragUnit_ = event.clickCount >= LineClickCount   ? SelectionUnit::Line
+                    : event.clickCount == WordClickCount ? SelectionUnit::Word
+                                                         : SelectionUnit::Cluster;
+        usize begin = pointerAnchor_;
+        usize end = pointerAnchor_;
+        if (dragUnit_ != SelectionUnit::Cluster && UnitAt(pointerAnchor_, dragUnit_, begin, end)) {
+            // 단어·줄을 고른다(UE SelectWordAt — 끝에 caret). 끌면 그 단위로 넓힌다.
+            unitBegin_ = begin;
+            unitEnd_ = end;
+            MoveCaret(begin, false);
+            MoveCaret(end, true);
+        } else {
+            dragUnit_ = SelectionUnit::Cluster;
+            MoveCaret(pointerAnchor_, false);
+        }
+
         dragging_ = true;
         dragSource_ = event.source;
         dragPointer_ = event.pointerId;
@@ -976,7 +1269,14 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
 
     if (dragging_ && dragSource_ == event.source && dragPointer_ == event.pointerId &&
         dragUser_ == event.userId) {
-        if (event.type == PointerEventType::Move || event.type == PointerEventType::Up) {
+        if ((event.type == PointerEventType::Move || event.type == PointerEventType::Up) &&
+            dragUnit_ != SelectionUnit::Cluster) {
+            usize begin = 0;
+            usize end = 0;
+            if (UnitAt(PointerOffset(event.position), dragUnit_, begin, end)) {
+                ExtendUnitSelection(begin, end);
+            }
+        } else if (event.type == PointerEventType::Move || event.type == PointerEventType::Up) {
             const usize offset = PointerOffset(event.position);
             if (!keepPointerSelection_ || offset != pointerAnchor_) {
                 if (keepPointerSelection_) {
@@ -990,6 +1290,7 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
 
         if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
             dragging_ = false;
+            dragUnit_ = SelectionUnit::Cluster;
             return {.handled = true, .releaseCapture = true};
         }
 
@@ -999,21 +1300,141 @@ PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
     return {};
 }
 
+bool EditableText::UnitAt(usize offset, SelectionUnit unit, usize& begin,
+                          usize& end) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    if (unit == SelectionUnit::Cluster || offset > length) {
+        return false;
+    }
+
+    // 비밀번호는 가린 글자의 단어 길이를 드러내지 않도록 단어도 전체다(22.4절).
+    if (unit == SelectionUnit::Line || password_) {
+        if (password_ || !multiline_) {
+            begin = 0;
+            end = length;
+            return true;
+        }
+
+        // 논리 줄(줄바꿈 사이)이다. 줄바꿈 자체는 넣지 않는다.
+        begin = offset;
+        while (begin > 0 && text.Data()[begin - 1] != '\n') {
+            --begin;
+        }
+
+        end = offset;
+        while (end < length && text.Data()[end] != '\n') {
+            ++end;
+        }
+
+        return true;
+    }
+
+    Array<usize> breaks(allocator_);
+    if (!shaper_ || !shaper_->FindWordBoundaries(text, breaks) || breaks.IsEmpty()) {
+        return false;
+    }
+
+    return WordAt(breaks.View(), offset, begin, end);
+}
+
+bool EditableText::WordAt(Span<const usize> breaks, usize offset, usize& begin,
+                          usize& end) const noexcept {
+    const StringView text = text_.View();
+    const usize length = text.ByteCount();
+    if (breaks.IsEmpty() || offset > length) {
+        return false;
+    }
+
+    // UE FTextLayout::GetWordAt(TextLayout.cpp 2524–2569행): offset 뒤 경계(끝이면 끝)부터 거꾸로
+    // 가며 공백이 아닌 글자가 있는 첫 구간을 고른다 — 단어 뒤 공백을 눌러도 앞 단어다.
+    // 끝(글자 오른쪽 빈 곳)이면 마지막 구간에서 거꾸로 찾는다(UE "끝이면 끝" — 리뷰 2026-11-28).
+    usize index = 0;
+    if (offset >= length) {
+        index = breaks.Size() - 1;
+    } else {
+        while (index < breaks.Size() && breaks[index] <= offset) {
+            ++index;
+        }
+    }
+
+    if (index >= breaks.Size()) {
+        index = breaks.Size() - 1;
+    }
+
+    for (;;) {
+        const usize segmentEnd = breaks[index];
+        const usize segmentBegin = index == 0 ? 0 : breaks[index - 1];
+        bool letter = false;
+        for (usize i = segmentBegin; i < segmentEnd; ++i) {
+            const char c = text.Data()[i];
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                letter = true;
+                break;
+            }
+        }
+
+        if (letter) {
+            begin = segmentBegin;
+            end = segmentEnd;
+            return true;
+        }
+
+        if (index == 0) {
+            return false;
+        }
+
+        --index;
+    }
+}
+
+void EditableText::ExtendUnitSelection(usize begin, usize end) noexcept {
+    // 처음 고른 단위보다 앞이면 처음 단위의 끝에서 앞으로, 아니면 처음 단위의 시작에서 뒤로 넓힌다.
+    if (begin < unitBegin_) {
+        MoveCaret(unitEnd_, false);
+        MoveCaret(begin, true);
+    } else {
+        MoveCaret(unitBegin_, false);
+        MoveCaret(end > unitEnd_ ? end : unitEnd_, true);
+    }
+}
+
+void EditableText::MarkInteraction() noexcept {
+    lastInteraction_ = FindFrameTime().current;
+    InvalidatePaint();
+}
+
+bool EditableText::IsCaretVisible() const noexcept {
+    // UE: 상호작용 뒤 CaretBlinkPauseTime은 늘 보이고, 그 뒤는 RoundToFloat(MakePulsatingValue(t,
+    // BlinksPerSecond))가 1일 때만 보인다 — 0.5 + 0.5·sin(π/2 + 2π·t·BlinksPerSecond)를 반올림한
+    // 켜짐·꺼짐 사각파다.
+    const double elapsed = FindFrameTime().current - lastInteraction_;
+    if (!(elapsed >= 0) || elapsed < CaretBlinkPauseTime) {
+        return true;
+    }
+
+    const double phase =
+        math::Pi<double> * 0.5 + 2.0 * math::Pi<double> * elapsed * BlinksPerSecond;
+    const double pulse = 0.5 + 0.5 * math::Sin(phase);
+    return math::Floor(pulse + 0.5) >= 1.0;
+}
+
 void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
                                         uint32 pointer) noexcept {
     if (source == dragSource_ && user == dragUser_ && pointer == dragPointer_) {
         dragging_ = false;
     }
+
+    // 오른쪽 누름을 잃으면 메뉴를 열지 않는다(놓기가 오지 않는다).
+    if (rightPressed_ && source == PointerSource::Mouse && user == rightUser_ &&
+        pointer == rightPointer_) {
+        rightPressed_ = false;
+        rightScrolling_ = false;
+        rightTravel_ = 0;
+    }
 }
 
 Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept {
-    if (padding_ > 0) {
-        auto painted = list.TryAddBox({GetGeometry(), {0.06f, 0.07f, 0.09f, 1}, layer});
-        if (!painted) {
-            return painted;
-        }
-    }
-
     if (!focused_ || (!composing_ && caret_ == anchor_)) {
         return Result<void>::Success();
     }
@@ -1021,17 +1442,46 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
     // 조합 중에는 조합 범위에 밑줄, 아니면 선택 영역을 칠한다.
     const usize begin = composing_ ? compositionBegin_ : (caret_ < anchor_ ? caret_ : anchor_);
     const usize end = composing_ ? compositionEnd_ : (anchor_ > caret_ ? anchor_ : caret_);
+    // 선택 바탕은 스타일 selection(UE SelectionBackgroundColor), 조합 밑줄은 스타일
+    // composition이다.
+    const LinearColor color = (composing_ ? style_.composition : style_.selection)
+                                  .Resolve(list.Theme(), list.ColorContext());
     const auto& layout = label_->Layout();
     for (const auto& line : layout.Lines()) {
         for (usize i = 0; i < line.visualCount; ++i) {
             const auto& visual = layout.VisualClusters()[line.firstVisual + i];
             const auto cluster = label_->ShapedClusters()[visual.logicalIndex];
-            if (begin < cluster.byteEnd && cluster.byteEnd <= end && visual.advance > 0) {
+            if (begin >= cluster.byteEnd || cluster.byteEnd > end || visual.advance <= 0) {
+                continue;
+            }
+
+            if (!composing_) {
                 const auto box = label_->GetGeometry().MakeChild(
-                    {visual.advance, composing_ ? 1.0f : line.height},
-                    {1, 0, 0, 1, visual.x, composing_ ? line.y + label_->LineHeight() - 1 : line.y},
-                    {}, {});
-                auto added = list.TryAddBox({box, {0.12f, 0.32f, 0.7f, 0.7f}, layer});
+                    {visual.advance, line.height}, {1, 0, 0, 1, visual.x, line.y}, {}, {});
+                auto added = list.TryAddBox({box, color, layer});
+                if (!added) {
+                    return added;
+                }
+
+                continue;
+            }
+
+            // 조합 점선이다. 무늬 위상은 줄 왼쪽 끝 기준이라 클러스터 경계에서 끊기지 않는다.
+            const float thickness = CompositionUnderlineThickness;
+            const float y = line.y + label_->LineHeight() - thickness;
+            const float period = CompositionDashLength + CompositionGapLength;
+            const float right = visual.x + visual.advance;
+            for (float start = math::Floor(visual.x / period) * period; start < right;
+                 start += period) {
+                const float left = math::Max(start, visual.x);
+                const float stop = math::Min(start + CompositionDashLength, right);
+                if (stop <= left) {
+                    continue;
+                }
+
+                const auto dash = label_->GetGeometry().MakeChild({stop - left, thickness},
+                                                                  {1, 0, 0, 1, left, y}, {}, {});
+                auto added = list.TryAddBox({dash, color, layer});
                 if (!added) {
                     return added;
                 }
@@ -1043,15 +1493,18 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
 }
 
 Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
-    if (!focused_) {
+    // 문맥 메뉴가 열린 동안은 caret을 그리지 않는다(초점이 메뉴에 있다 — 22.7a절).
+    if (!focused_ || contextMenuOpen_ || !IsCaretVisible()) {
         return Result<void>::Success();
     }
 
     const auto pos = label_->CaretPosition(caret_, false);
     const auto point = pos ? pos.Value() : Vec2{};
-    const auto caret = label_->GetGeometry().MakeChild({1, label_->LineHeight()},
-                                                       {1, 0, 0, 1, point.x, point.y}, {}, {});
-    return list.TryAddBox({caret, {1, 1, 1, 1}, layer});
+    const float height = label_->LineHeight();
+    const float width = CaretWidth();
+    const auto caret =
+        label_->GetGeometry().MakeChild({width, height}, {1, 0, 0, 1, point.x, point.y}, {}, {});
+    return list.TryAddBox({caret, style_.caret.Resolve(list.Theme(), list.ColorContext()), layer});
 }
 
 } // namespace rocks::ui

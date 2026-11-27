@@ -52,10 +52,22 @@ enum SeqlockWord : uint32 {
     SeqlockWordCount
 };
 
-// pan mode word의 omni 배치 bit 위치·mask다(한 word에 pan mode와 omni 배치를 함께 담는다).
+// pan mode word의 omni 배치 bit 위치·mask와 일시정지 bit 위치다(한 word에 pan mode·omni 배치·
+// paused를 함께 담는다 — 3.44.5절).
 constexpr uint32 OmniModeShift = 8;
 constexpr uint32 PanModeMask = 0xFFu;
 constexpr uint32 OmniModeMask = 0xFFu;
+constexpr uint32 PausedShift = 16;
+
+// 읽지 않은 frame seqlock을 제어 쪽이 다시 읽는 횟수 상한이다(쓰는 쪽은 AudioRT라 짧다 — 넘으면
+// 이번 조회는 게시값 없음으로 둔다).
+constexpr uint32 MaxUnreadReadAttempts = 4;
+
+// 지금 pause gain에서 target까지의 fade 길이다(전체 0→1이 PauseFadeFrames — 3.44.5절).
+uint32 PauseRampFrames(float current, float target) noexcept {
+    const float distance = math::Abs(target - current);
+    return static_cast<uint32>(math::Ceil(distance * static_cast<float>(PauseFadeFrames)));
+}
 
 // seqlock version의 홀수 bit(쓰는 중)다.
 constexpr uint32 SeqlockWritingBit = 1;
@@ -482,18 +494,20 @@ Result<void> AudioMixer::PublishParams(AudioVoiceHandle voice,
     const uint32 version = AtomicLoad<MemoryOrder::Relaxed>(&shared.version);
     AtomicStore<MemoryOrder::Relaxed>(&shared.version, version + 1);
     AtomicThreadFence<MemoryOrder::Release>();
-    const uint32 words[SeqlockWords] = {voice.generation,
-                                        static_cast<uint32>(sequence & LowWordMask),
-                                        static_cast<uint32>(sequence >> HighWordShift),
-                                        FloatBits(params.gain),
-                                        FloatBits(params.pitch),
-                                        static_cast<uint32>(params.panMode) |
-                                            (static_cast<uint32>(params.omniMode) << OmniModeShift),
-                                        FloatBits(params.azimuthDegrees),
-                                        FloatBits(params.rightAzimuthDegrees),
-                                        FloatBits(params.nonSpatializedAmount),
-                                        FloatBits(params.lowPassCutoffHz),
-                                        FloatBits(params.highPassCutoffHz)};
+    const uint32 words[SeqlockWords] = {
+        voice.generation,
+        static_cast<uint32>(sequence & LowWordMask),
+        static_cast<uint32>(sequence >> HighWordShift),
+        FloatBits(params.gain),
+        FloatBits(params.pitch),
+        static_cast<uint32>(params.panMode) |
+            (static_cast<uint32>(params.omniMode) << OmniModeShift) |
+            (params.paused ? 1u << PausedShift : 0u),
+        FloatBits(params.azimuthDegrees),
+        FloatBits(params.rightAzimuthDegrees),
+        FloatBits(params.nonSpatializedAmount),
+        FloatBits(params.lowPassCutoffHz),
+        FloatBits(params.highPassCutoffHz)};
     for (uint32 word = 0; word < SeqlockWords; ++word) {
         AtomicStore<MemoryOrder::Relaxed>(&shared.contents[word], words[word]);
     }
@@ -599,7 +613,37 @@ Result<AudioVoiceStatus> AudioMixer::QueryVoice(AudioVoiceHandle voice) const no
         status.state = started ? AudioVoiceState::Playing : AudioVoiceState::Prepared;
     }
 
+    ReadUnread(voice.index, voice.generation, status);
     return Result<AudioVoiceStatus>::Success(status);
+}
+
+void AudioMixer::ReadUnread(uint32 index, uint32 generation,
+                            AudioVoiceStatus& status) const noexcept {
+    // seqlock 읽기(3.44.5절): version(acquire) → 내용(relaxed) → acquire fence → version 재확인.
+    const SharedVoice& shared = sharedVoices_[index];
+    for (uint32 attempt = 0; attempt < MaxUnreadReadAttempts; ++attempt) {
+        const uint32 before = AtomicLoad<MemoryOrder::Acquire>(&shared.unreadVersion);
+        if ((before & SeqlockWritingBit) != 0) {
+            continue;
+        }
+
+        const uint32 owner = AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadGeneration);
+        const uint32 paused = AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadPaused);
+        const uint64 frames = AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadFrames);
+        const uint64 asOf = AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadAsOfFrame);
+        AtomicThreadFence<MemoryOrder::Acquire>();
+        if (AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadVersion) != before) {
+            continue;
+        }
+
+        if (before != 0 && owner == generation) {
+            status.unreadFrames = frames;
+            status.unreadAsOfFrame = asOf;
+            status.pausedAtAsOf = paused != 0;
+        }
+
+        return;
+    }
 }
 
 uint32 AudioMixer::CollectFinished(Span<AudioVoiceTerminal> out) noexcept {
@@ -647,6 +691,7 @@ AudioMixerCounters AudioMixer::CountersSnapshot() const noexcept {
     counters.skippedSeqlockReads = words[next++];
     counters.streamStarvedFrames = words[next++];
     counters.streamStartDelayFrames = words[next++];
+    counters.pausedVoices = words[next++];
     return counters;
 }
 
@@ -660,6 +705,11 @@ void AudioMixer::AdoptLifetime(VoiceSlot& slot, uint32 generation) noexcept {
     slot.lastAppliedSequence = 0;
     slot.stopReason = AudioVoiceEndReason::Stopped;
     slot.awaitingStream = false;
+    slot.startDeferred = false;
+    slot.pauseState = PauseState::Running;
+    slot.pauseGain.Reset(1.0f);
+    slot.unreadFrames = 0;
+    slot.unreadDirty = false;
 }
 
 void AudioMixer::Finish(uint32 index, VoiceSlot& slot, AudioVoiceEndReason reason,
@@ -682,8 +732,9 @@ void AudioMixer::ApplyStop(uint32 index, VoiceSlot& slot, uint32 fadeFrames, uin
         Finish(index, slot, reason, frame);
         return;
     case AudioVoiceState::Playing:
-        // 시작 수위를 기다리는 스트림 voice는 낸 소리가 없으므로 바로 끝낸다(3.40.1절).
-        if (fadeFrames == 0 || slot.awaitingStream) {
+        // 시작 수위를 기다리는 스트림 voice와 일시정지로 시작을 미룬 voice는 낸 소리가 없으므로
+        // 바로 끝낸다(3.40.1·3.44.5절).
+        if (fadeFrames == 0 || slot.awaitingStream || slot.startDeferred) {
             Finish(index, slot, reason, frame);
         } else {
             slot.state = AudioVoiceState::Stopping;
@@ -811,6 +862,7 @@ bool AudioMixer::ReadSeqlock(uint32 index, uint32& generation, uint64& sequence,
     params.nonSpatializedAmount = BitsFloat(words[SeqlockNonSpatialized]);
     params.lowPassCutoffHz = BitsFloat(words[SeqlockLowPass]);
     params.highPassCutoffHz = BitsFloat(words[SeqlockHighPass]);
+    params.paused = ((words[SeqlockPanMode] >> PausedShift) & 1u) != 0;
     return true;
 }
 
@@ -969,18 +1021,67 @@ void AudioMixer::StartVoice(uint32 index, VoiceSlot& slot, const AudioRtCommand&
     slot.lowPass = lowPass.Value();
     slot.highPass = highPass.Value();
     slot.fade.Reset(1.0f);
+    slot.pauseGain.Reset(1.0f);
+    slot.pauseState = PauseState::Running;
     slot.sourceCursor = command.startFrame;
     ApplyParams(slot, initial, 0, true);
     slot.hasPendingParams = false;
     slot.state = AudioVoiceState::Playing;
+    // PreparePlay 뒤 Play 적용 전에 낸 출판도 바로 반영한다(3.23.2절).
+    ApplySeqlock(index, slot, true);
+    // 일시정지된 Play는 시작을 미룬다(3.44.5절). 풀린 구간에서 RenderVoice가 시작한다.
+    slot.startDeferred = slot.params.paused;
+    if (!slot.startDeferred) {
+        BeginPlayback(index, slot, frame);
+    }
+}
+
+void AudioMixer::BeginPlayback(uint32 index, VoiceSlot& slot, uint64 frame) noexcept {
     // 스트림 원본은 시작 수위를 채운 블록에서 시작 시각을 출판한다(3.40.1절).
     slot.awaitingStream = clips_[slot.clipIndex].stream != nullptr;
     if (!slot.awaitingStream) {
         PublishStart(index, slot, frame);
     }
+}
 
-    // PreparePlay 뒤 Play 적용 전에 낸 출판도 바로 반영한다(3.23.2절).
-    ApplySeqlock(index, slot, true);
+void AudioMixer::UpdatePauseState(VoiceSlot& slot) noexcept {
+    const bool wanted = slot.params.paused;
+    switch (slot.pauseState) {
+    case PauseState::Running:
+    case PauseState::ResumingIn:
+        if (wanted) {
+            slot.pauseState = PauseState::PausingOut;
+            slot.pauseGain.SetTarget(0.0f, PauseRampFrames(slot.pauseGain.Current(), 0.0f));
+            slot.unreadDirty = true;
+        }
+
+        break;
+    case PauseState::PausingOut:
+    case PauseState::Paused:
+        // 정지가 걸린 Paused voice는 다시 읽지 않는다(꼬리 없이 fade만 마친다 — 3.44.5절).
+        if (!wanted &&
+            !(slot.pauseState == PauseState::Paused && slot.state == AudioVoiceState::Stopping)) {
+            slot.pauseState = PauseState::ResumingIn;
+            slot.pauseGain.SetTarget(1.0f, PauseRampFrames(slot.pauseGain.Current(), 1.0f));
+            slot.unreadDirty = true;
+        }
+
+        break;
+    }
+}
+
+void AudioMixer::PublishUnread(uint32 index, const VoiceSlot& slot, uint64 asOfFrame) noexcept {
+    // seqlock 쓰기: version을 홀수로 → release fence → 내용 → version을 짝수로(release).
+    SharedVoice& shared = sharedVoices_[index];
+    const uint32 version = AtomicLoad<MemoryOrder::Relaxed>(&shared.unreadVersion);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.unreadVersion, version + 1);
+    AtomicThreadFence<MemoryOrder::Release>();
+    AtomicStore<MemoryOrder::Relaxed>(&shared.unreadGeneration, slot.generation);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.unreadPaused,
+                                      slot.pauseState == PauseState::Paused ? 1u : 0u);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.unreadFrames, slot.unreadFrames);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.unreadAsOfFrame, asOfFrame);
+    AtomicStore<MemoryOrder::Release>(&shared.unreadVersion, version + 2);
 }
 
 void AudioMixer::PublishStart(uint32 index, VoiceSlot& slot, uint64 frame) noexcept {
@@ -1305,9 +1406,25 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
     const uint32 sourceChannels = desc.channelCount;
     const uint32 outputs = OutputChannelCount();
     const uint64 segmentStartFrame = mixFrame_ + offset;
+    // 일시정지로 미룬 시작(3.44.5절): 풀린 구간에서 최신 파라미터를 ramp 없이 맞추고 시작한다.
+    if (slot.startDeferred) {
+        if (slot.params.paused) {
+            return;
+        }
+
+        slot.startDeferred = false;
+        ApplyParams(slot, slot.params, 0, true);
+        BeginPlayback(index, slot, segmentStartFrame);
+    }
+
     // 시작 대기(3.40.1절 — UE IsPreparedToInit): 수위를 채우거나 끝 상태가 될 때까지 소리도 cursor
-    // 진행도 없다. 채운 구간에서 시작 시각을 출판한다.
+    // 진행도 없다. 채운 구간에서 시작 시각을 출판한다. 일시정지 중에는 시작하지 않고 대기 frame도
+    // 세지 않는다.
     if (slot.awaitingStream) {
+        if (slot.params.paused) {
+            return;
+        }
+
         if (!StreamReadyToStart(slot)) {
             counters_.streamStartDelayFrames += frames;
             return;
@@ -1317,8 +1434,29 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
         PublishStart(index, slot, segmentStartFrame);
     }
 
+    UpdatePauseState(slot);
     uint32 produced = 0;
     while (produced < frames) {
+        if (slot.pauseState == PauseState::Paused) {
+            // 원본을 읽지 않는다: 리샘플러·커서·스트림·필터·gain ramp가 멈춘다. 정지 fade만 진행해
+            // 소리 없이 끝낸다(3.44.5절).
+            const uint32 rest = frames - produced;
+            if (slot.state == AudioVoiceState::Stopping) {
+                const uint32 fadeRemaining = slot.fade.RemainingFrames();
+                if (fadeRemaining <= rest) {
+                    Finish(index, slot, slot.stopReason,
+                           segmentStartFrame + produced + fadeRemaining);
+                    return;
+                }
+
+                slot.fade.Advance(rest);
+            }
+
+            slot.unreadFrames += rest;
+            produced = frames;
+            break;
+        }
+
         uint32 chunk = frames - produced;
         // 요구 입력이 scratch를 넘으면 출력을 줄인다(pitch·rate 비율이 크면).
         uint32 needed = slot.resampler.InputFramesNeeded(chunk).Value();
@@ -1349,6 +1487,14 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
             }
         }
 
+        // pause fade가 끝나는 frame에서 자른다(같은 frame의 자연 끝·정지 fade 끝이 이긴다).
+        const bool pauseRamping =
+            slot.pauseState == PauseState::PausingOut || slot.pauseState == PauseState::ResumingIn;
+        if (pauseRamping && slot.pauseGain.RemainingFrames() < chunk) {
+            chunk = slot.pauseGain.RemainingFrames();
+            ending = AudioVoiceEndReason::None;
+        }
+
         if (chunk > 0) {
             // 스트림 원본은 링에 있는 만큼만 낸다(3.40.1절 굶음). 수와 상태는 한 스냅숏에서 읽는다
             // (끝 판정이 그 사이의 마지막 Write·MarkEnded를 "모자람"으로 보지 않게).
@@ -1370,6 +1516,9 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                 slot.highPass.Process(voice);
                 slot.gain.Apply(voice);
                 slot.fade.Apply(voice);
+                if (pauseRamping) {
+                    slot.pauseGain.Apply(voice);
+                }
                 for (uint32 source = 0; source < sourceChannels; ++source) {
                     for (uint32 output = 0; output < outputs; ++output) {
                         slot.channelGains[source][output].MixAdd(
@@ -1389,6 +1538,10 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                     slot.fade.Advance(silent);
                 }
 
+                if (pauseRamping) {
+                    slot.pauseGain.Advance(silent);
+                }
+
                 if (ending == AudioVoiceEndReason::NaturalEnd) {
                     ending = AudioVoiceEndReason::None;
                 }
@@ -1406,6 +1559,18 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
             Finish(index, slot, ending, segmentStartFrame + produced);
             return;
         }
+
+        if (pauseRamping && slot.pauseGain.RemainingFrames() == 0) {
+            slot.pauseState = slot.pauseState == PauseState::PausingOut ? PauseState::Paused
+                                                                        : PauseState::Running;
+            slot.unreadDirty = true;
+        }
+    }
+
+    // 읽지 않은 누적은 바뀌었거나 일시정지 중일 때만 게시한다(Running이면 값이 그대로다).
+    if (slot.pauseState != PauseState::Running || slot.unreadDirty) {
+        PublishUnread(index, slot, segmentStartFrame + frames);
+        slot.unreadDirty = false;
     }
 }
 
@@ -1459,6 +1624,18 @@ void AudioMixer::PublishBlockEnd() noexcept {
     words[next++] = counters_.skippedSeqlockReads;
     words[next++] = counters_.streamStarvedFrames;
     words[next++] = counters_.streamStartDelayFrames;
+    // 일시정지 voice 수는 블록 끝의 현재값이다(3.44.5절).
+    uint64 paused = 0;
+    for (const VoiceSlot& slot : voices_) {
+        if ((slot.state == AudioVoiceState::Playing || slot.state == AudioVoiceState::Stopping) &&
+            (slot.pauseState == PauseState::Paused || slot.startDeferred ||
+             (slot.awaitingStream && slot.params.paused))) {
+            ++paused;
+        }
+    }
+
+    counters_.pausedVoices = paused;
+    words[next++] = counters_.pausedVoices;
     for (uint32 word = 0; word < CounterSnapshotWords; ++word) {
         AtomicStore<MemoryOrder::Relaxed>(&counterSnapshot_[word], words[word]);
     }

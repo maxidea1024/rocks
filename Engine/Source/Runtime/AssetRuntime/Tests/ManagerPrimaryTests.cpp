@@ -232,12 +232,19 @@ TEST(AssetManager_PrimaryTicketCancelAndRevoke) {
 }
 
 // 용량 추정(계획 §24.2 audit): 대표와 지정 bundle 구성원의 Hard 전이 폐포에 대한 매니페스트 byte
-// 합이고 로드하지 않는다.
+// 합이고 로드하지 않는다. sidecar(스트리밍 bulk)는 bulkRawBytes가 아니라 sidecarBytes로 따로
+// 센다(AS 20.1 7 — 1·3에 매니페스트 sidecar 칸을 준다).
 TEST(AssetManager_EstimatePrimaryAsset) {
     AssetEnv env;
     REQUIRE(env.Ready());
     ManagerRig rig(env);
     REQUIRE(CookPrimaryScene(rig));
+    constexpr uint64 OneSidecar = 7000;
+    constexpr uint64 ThreeSidecar = 500;
+    rig.scene.EntryOf(1).sidecarBytes = OneSidecar;
+    rig.scene.EntryOf(1).sidecarSha256 = ManifestDigestOf(0x71);
+    rig.scene.EntryOf(3).sidecarBytes = ThreeSidecar;
+    rig.scene.EntryOf(3).sidecarSha256 = ManifestDigestOf(0x73);
     REQUIRE(rig.Start());
     const CookedManifestEntry& one = rig.scene.EntryOf(1);
     const CookedManifestEntry& two = rig.scene.EntryOf(2);
@@ -246,12 +253,14 @@ TEST(AssetManager_EstimatePrimaryAsset) {
     REQUIRE(bare);
     CHECK(bare.Value().packages == 2 &&
           bare.Value().packageBytes == one.packageBytes + three.packageBytes &&
-          bare.Value().bulkRawBytes == one.bulkRawBytes + three.bulkRawBytes);
+          bare.Value().bulkRawBytes == one.bulkRawBytes + three.bulkRawBytes &&
+          bare.Value().sidecarBytes == OneSidecar + ThreeSidecar);
     const StringView names[] = {"Visual", "Gameplay"};
     auto all = rig.manager->EstimatePrimaryAsset(FixedId(1), names);
     REQUIRE(all);
     CHECK(all.Value().packages == 3 &&
-          all.Value().packageBytes == one.packageBytes + two.packageBytes + three.packageBytes);
+          all.Value().packageBytes == one.packageBytes + two.packageBytes + three.packageBytes &&
+          all.Value().sidecarBytes == OneSidecar + ThreeSidecar);
     CHECK(rig.manager->EstimatePrimaryAsset(FixedId(3), {}).Error() == ErrorCode::InvalidArgument);
     CHECK(!rig.IsLoaded(1));
 }

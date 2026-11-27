@@ -64,4 +64,9 @@
 | 빼앗겨 가상이 된 loop의 fade 중 voice | 원래 ActiveSound가 fade 중에도 공간 갱신 | 떼어 낼 때의 파라미터에 고정, scene 해제 때 짧게 끊음(3.41.3절) | 분리 voice는 기록이 없다. fade는 길어야 `voiceStealReleaseTime` |
 | 살아 있는 재생 수 | 제한 없음(ActiveSound 배열) | `MaxPlaybacks` 1024(voice 없는·가상 포함), 그룹 8개·활성 그룹 1024 | 고정 용량 표(3.35.4절) |
 | 정지 fade 중 voice의 경쟁 | stopping이면 `v × P − 101`로 정렬에 남음 | 정지·steal fade 중인 재생은 경쟁하지 않고 voice를 끝까지 쥠, 상한 수에 세지 않음(3.41.1절) | 별도 stopping 풀(UE `NumStoppingSources`)과 같은 자리를 믹서 여유 voice가 받음 |
+| 장면 일시정지의 범위 | 장치 전체 + `IsGameOnly`(`AudioDevice.cpp:4113–4157`) | scene마다, 엔진 scene은 멈추지 않음(3.44.1절) | World마다 pause가 따로다 |
+| pause 중 UI 소리의 재생 시간 | 게임이 멈추면 UI 소리의 `PlaybackTime`도 멈춤(`AudioDevice.cpp:4311–4329`), fader 동결은 컴포넌트 `bIsUISound`만 봄 | 실효 UI 값(옵션 OR 분류) 하나로 voice·시계를 함께 판정, UI는 모두 흐름(3.44.2절) | 한 판정이 두 갈래로 갈리지 않게 |
+| pause 중 정지·steal fade | steal fader·FadeOut은 멈춤(delta 0), Stop은 pause를 풀고 512 frame 꼬리(`AudioMixerSource.cpp:1182–1189`) | fade는 mix 시계로 진행해 무음으로 끝남, 꼬리 없음(3.44.3·3.44.5절) | pause 중 소리가 새지 않고 자원이 제때 풀린다 |
+| pause·해제 | fade 없이 source를 건너뜀(`AudioMixerSourceManager.cpp:2059–2071`) | `PauseFadeFrames` 64 frame fade(3.44.5절) | 클릭 방지 |
+| pause 중 가상 loop의 재생 시간 | device delta로 진행(`AudioVirtualLoop.cpp:302–337`) | 멈춤(3.44.3절) | voice 있는 재생과 같은 시계, 풀린 뒤 이어 듣는다 |
 | 스트림 디코드 지연 | 렌더 스레드가 디코드 작업 완료를 기다림(`AudioMixerSourceBuffer.cpp:550` `EnsureCompletion`) — 늦으면 렌더가 멈춤 | AudioRT는 기다리지 않음 — 링이 모자라면 그 voice만 무음(굶음)이고 이어 재생(3.40.1절) | AudioRT 무대기 계약(3.2절), 한 스트림의 지연이 전체 출력을 멈추지 않게 |

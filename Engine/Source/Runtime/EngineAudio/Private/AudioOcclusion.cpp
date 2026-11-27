@@ -54,9 +54,11 @@ void AudioDeviceContext::UpdateOcclusion(ControlBatch& batch, uint64 now) noexce
         // 재생 재정의(UE 컴포넌트 OcclusionCheckInterval — 3.43.1절)가 있으면 그것을 쓴다.
         const float intervalSeconds = record.hasOcclusionInterval ? record.occlusionInterval
                                                                   : occlusion_.checkIntervalSeconds;
+        // 검사 간격은 record 시계다(일시정지 중 멈춤 — 3.44.3절).
+        const uint64 at = RecordNow(record, now);
         if (!due && intervalSeconds >= 0.0f) {
             const uint64 interval = SecondsToMixFrames(static_cast<double>(intervalSeconds));
-            due = now - record.occlusionCheckFrame > interval;
+            due = at - record.occlusionCheckFrame > interval;
         }
 
         if (!due) {
@@ -79,7 +81,7 @@ void AudioDeviceContext::UpdateOcclusion(ControlBatch& batch, uint64 now) noexce
         request.owner = record.owner;
         (void)batch.occlusionRequests.TryPushBack(request);
         record.occlusionPending = true;
-        record.occlusionCheckFrame = now;
+        record.occlusionCheckFrame = at;
         ++stats_.occlusionRequests;
     }
 
@@ -117,13 +119,15 @@ void AudioDeviceContext::ApplyOcclusionResult(Record& record, bool occluded, uin
         volumeTarget = 1.0f;
     }
 
-    // UE FDynamicParameter::Set은 목표나 길이가 바뀔 때만 다시 시작한다.
+    // UE FDynamicParameter::Set은 목표나 길이가 바뀔 때만 다시 시작한다. 보간은 record 시계다
+    // (일시정지 중 도착한 응답은 멈춘 시각에서 건다 — 3.44.3절).
+    const uint64 at = RecordNow(record, now);
     if (filterTarget != record.occlusionFilter.target || frames == 0) {
-        record.occlusionFilter.StartFrom(record.occlusionFilter.At(now), filterTarget, now, frames);
+        record.occlusionFilter.StartFrom(record.occlusionFilter.At(at), filterTarget, at, frames);
     }
 
     if (volumeTarget != record.occlusionVolume.target || frames == 0) {
-        record.occlusionVolume.StartFrom(record.occlusionVolume.At(now), volumeTarget, now, frames);
+        record.occlusionVolume.StartFrom(record.occlusionVolume.At(at), volumeTarget, at, frames);
     }
 
     record.occlusionChecked = true;

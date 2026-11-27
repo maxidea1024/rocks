@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Collision/BodySettings.h>
 #include <Collision/CollisionShape.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
@@ -8,6 +9,7 @@
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/BodyForce.h>
 #include <World/Physics/BodyKinematics.h>
+#include <World/Physics/BodySettingsChange.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MtdResult.h>
 #include <World/Physics/OverlapMode.h>
@@ -122,6 +124,20 @@ public:
                                        bool addToCurrent) noexcept = 0;
     virtual void SetBodyAngularVelocity(PhysicsBodyHandle body, const Vec3d& velocityRadians,
                                         bool addToCurrent) noexcept = 0;
+
+    // 실행 중 바뀐 body 값 묶음 change를 settings에서 다시 넣는다(PhysicsModule 7.1.18절 — UE
+    // FBodyInstance의 값 setter). 값 검사는 부르는 쪽 몫이다(컴포넌트 setter가 거른다). Static
+    // body는 운동 값이 없어 질량 입력만 칸에 둔다. 없는 handle·옛 세대는 무시한다.
+    //
+    // 사용 예:
+    //   settings.enableGravity = false;
+    //   scene.UpdateBodySettings(body, settings, BodySettingsChange::Gravity);
+    virtual void UpdateBodySettings(PhysicsBodyHandle body, const BodySettings& settings,
+                                    BodySettingsChange change) noexcept = 0;
+
+    // 물리 설정의 기본 각속도 상한(도/s)이다(PhysicsSettings::maxAngularVelocity — body가
+    // overrideMaxAngularVelocity가 아니면 쓰는 값).
+    virtual double DefaultMaxAngularVelocityDegrees() const noexcept = 0;
 
     // start → end line trace다(4.4·4.5절, 7.1.7절). 끝점은 유한하고 길이가 0이 아니어야
     // 한다(World가 거른다). filter.kind는 Channel·ObjectTypes다(Profile은 World가 풀어 넘긴다).
