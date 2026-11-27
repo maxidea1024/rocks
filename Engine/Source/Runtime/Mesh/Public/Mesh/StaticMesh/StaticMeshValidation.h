@@ -31,7 +31,7 @@ inline constexpr uint32 MeshMaxTexCoordStreams = (MeshMaxTexCoords + 1) / 2;
 //       stream
 //   }
 //
-// 오류: 위반은 failure->code CorruptPackage, ErrorCode InvalidArgument와 issue(Render*), index =
+// 오류: 위반은 failure->code CorruptPackage, ErrorCode CorruptData와 issue(Render*), index =
 // LOD 번호(bounds·LOD 수는 MeshNoIndex), count = 섹션 또는 UV stream 번호(그 밖 0)다. 스레드:
 // 읽기만 한다.
 ROCKS_MESH_API Result<void>
@@ -46,7 +46,7 @@ ValidateStaticMeshRenderData(const StaticMeshRenderData& renderData,
 //   if (bytes && !ValidateStaticMeshIndices(lod, lodIndex, bytes.Value(), &failure)) { ... }
 //
 // 오류: 크기 불일치 RenderStreamRange, 범위 밖 index RenderIndexValue(count = index 위치) — 모두
-// CorruptPackage·InvalidArgument, index = lodIndex.
+// CorruptPackage·CorruptData, index = lodIndex.
 ROCKS_MESH_API Result<void> ValidateStaticMeshIndices(const StaticMeshRenderLod& lod,
                                                       uint32 lodIndex, Span<const uint8> data,
                                                       MeshDiagnostic* failure = nullptr) noexcept;

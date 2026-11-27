@@ -27,7 +27,7 @@ namespace rocks {
 //       Report(MeshIssueName(failure.issue), failure.index);
 //   }
 //
-// 오류: 위반은 failure->code CorruptPackage, ErrorCode InvalidArgument와 issue(Render*), index =
+// 오류: 위반은 failure->code CorruptPackage, ErrorCode CorruptData와 issue(Render*), index =
 // LOD (bounds·LOD 수는 MeshNoIndex), count = 섹션·UV stream·위치·target·프로필 번호다. 스레드:
 // 읽기만 한다.
 ROCKS_MESH_API Result<void>
@@ -42,7 +42,7 @@ ValidateSkeletalMeshRenderData(const SkeletalMeshRenderData& renderData, usize b
 //
 // 오류: 크기 불일치 RenderStreamRange, 위 규칙 위반 RenderIndexValue·RenderBoneIndexValue·
 // RenderSkinWeightSum·RenderMorphVertex(count = 위치, attribute = 프로필·morph target 번호 — 기본
-// 영향은 MeshNoAttribute) — 모두 CorruptPackage·InvalidArgument, index = lodIndex.
+// 영향은 MeshNoAttribute) — 모두 CorruptPackage·CorruptData, index = lodIndex.
 ROCKS_MESH_API Result<void>
 ValidateSkinnedRenderLodBulk(const SkinnedRenderLod& lod, uint32 lodIndex, Span<const uint8> data,
                              MeshDiagnostic* failure = nullptr) noexcept;

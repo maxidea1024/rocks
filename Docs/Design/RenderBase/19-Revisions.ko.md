@@ -71,6 +71,9 @@
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 60(2026-11-27): 5.3절 "프레임 packet 수명" — `SubmitFrame`이 모든 반환 경로에서 packet을 소비하고, lane 작업이 slot 반환(`FinishFrame`) 전에 packet을 파괴한다(Thread 모드 arena Reset 경쟁 수정).
+- 개정 59(2026-11-27): SH4 연결 설계(셰이더 시스템 개정 60) — 9.8절 "SH4 연결"(`ShaderProvider` revision·reload 통지, `EngineRenderResources`의 `ShaderSetSlot`과 `ApplyShaderUpdates`, `BuiltinResources::AdoptShaders`), 18.4절 SM12 행.
+- 개정 58(2026-11-27): 6.6절 손상 데이터 오류 — 렌더 소유 읽기 경로(쿠킹 텍스처 판정·묶기, 쿠킹 셰이더 라이브러리 사본·형식 선택, `ShaderSet` 손상 문제, `EngineRenderResources::Open` 전달)를 AssetSystem 19장 규칙대로 `CorruptData`로 옮겼다. 6.5절 `CorruptEntry` 오류 값 정정.
 - 개정 57(2026-11-26): SH3c 반영(셰이더 시스템 개정 58) — 8절 RG1 "파라미터 구조체 수집기" 메모·남은 것에서 뺌, 9.13절 7항, 18.4절 SM11 행(SH3 끝).
 - 개정 56(2026-11-26): SH3b 반영(셰이더 시스템 개정 56·57) — 9.9절 SX8 행(자원 항목 identity·멤버 오프셋은 바인딩 layout v5), 9.13절 7항(생성 표 자원 지도·`ParameterBatch::SetParameters`는 SH3b, 렌더 그래프 파라미터 구조체는 SH3c), 18.4절 SM11 행.
 - 개정 55(2026-11-26): SM8 구현 메모(18.5절 8항 "구현(개정 55)", 18.4절 SM8 행 순서 8 완료). WorldIntegration `Textures/PlatformTextureSource.h`·`TextureRenderInfo.h`·`TextureRenderCache.h`, Sandbox `CookedTextureLibrary`가 캐시를 가진다, `ScreenHost::AddCachedTexture`·`AttachTextureCache`, 기록 장치 형식 능력·생성 오류 주입. 설계와 다르게 정한 것 둘: 캐시 소유자는 `CookedTextureLibrary`, 항목·통지 대조는 해시 표. 시험: EngineTests 10개, Sandbox `--texture-self-test`·`--self-test` 여덟 장치 0 failures.

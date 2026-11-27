@@ -1,6 +1,6 @@
 ## 5. 임포트·재임포트·쿠킹
 
-임포트 체계(ImportRecord·재임포트·임포트 상태)는 [에셋 시스템](../AssetSystem/README.ko.md) A2f를, 진행 보고는 [진행 보고](../ProgressReporting.ko.md)를 그대로 쓴다. 글꼴 몫은 아래뿐이다. 검사·래스터는 호스트가 등록한 TextLayout backend로 한다(3장 — 도구 프로그램이 `TextLayoutBackend`를 링크한다).
+임포트 체계(ImportRecord·재임포트·임포트 상태)는 [에셋 시스템](../AssetSystem/README.ko.md) A2f를, 진행 보고는 [진행 보고](../ProgressReporting/README.ko.md)를 그대로 쓴다. 글꼴 몫은 아래뿐이다. 검사·래스터는 호스트가 등록한 TextLayout backend로 한다(3장 — 도구 프로그램이 `TextLayoutBackend`를 링크한다).
 
 ### 5.1 글꼴 파일 임포터(`FontFaceImporter`)
 

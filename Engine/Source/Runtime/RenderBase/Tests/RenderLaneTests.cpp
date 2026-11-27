@@ -887,3 +887,119 @@ TEST(RenderLane_UnsupportedTimestampsArePublishedAsNone) {
     CHECK(frames[0].error == ErrorCode::None);
     CHECK(lane.Shutdown());
 }
+
+namespace {
+
+// packet 수명 시험 기록이다(Docs/Design/RenderBase 5.3절 "프레임 packet 수명"). lane 작업 안의
+// 소멸자가 쓰고 Drain·Shutdown 뒤 시험이 읽는다.
+struct PacketLifetimeLog {
+    RenderLane* lane = nullptr;
+    // 살아 있는 packet(옮겨 간 원본 제외)의 소멸 수다.
+    uint32 destroyed = 0;
+    // 마지막 소멸 때 lane 처리 완료 프레임 수(slot 반환 전이면 그 프레임은 아직 세지 않았다)다.
+    uint64 processedAtDestroy = 0;
+    // render 함수가 본 lane 처리 완료 프레임 수다.
+    uint64 processedAtRender = 0;
+};
+
+PacketLifetimeLog packetLog;
+
+// 소멸자가 표지를 남기는 프레임 packet이다. 옮기면 원본은 표지를 남기지 않는다.
+struct LifetimePacket {
+    LifetimePacket() noexcept = default;
+
+    LifetimePacket(LifetimePacket&& other) noexcept : live(other.live) {
+        other.live = false;
+    }
+
+    LifetimePacket& operator=(LifetimePacket&&) = delete;
+    LifetimePacket(const LifetimePacket&) = delete;
+    LifetimePacket& operator=(const LifetimePacket&) = delete;
+
+    ~LifetimePacket() noexcept {
+        if (!live) {
+            return;
+        }
+
+        ++packetLog.destroyed;
+        packetLog.processedAtDestroy =
+            packetLog.lane != nullptr ? packetLog.lane->Stats().framesProcessed : 0;
+    }
+
+    bool live = true;
+};
+
+} // namespace
+
+ROCKS_RENDER_TRANSFERABLE(LifetimePacket);
+
+namespace {
+
+void RenderLifetime(RenderFrameContext& context, LifetimePacket& packet) noexcept {
+    (void)context;
+    (void)packet;
+    packetLog.processedAtRender = packetLog.lane->Stats().framesProcessed;
+}
+
+} // namespace
+
+// 프레임 packet은 slot을 돌려주기 전(lane 처리 완료 표지 전)에 부서지고, 이른 실패 경로에서도
+// SubmitFrame이 돌아오기 전에 소비된다(5.3절 "프레임 packet 수명"). 순서는 Drain gate 뒤의 기록으로
+// 본다(시간에 기대지 않는다).
+TEST(RenderLane_FramePacketDiesBeforeTheSlotIsReturned) {
+    SystemAllocator allocator;
+    const RenderLaneMode modes[] = {RenderLaneMode::Inline, RenderLaneMode::Thread};
+    for (const RenderLaneMode mode : modes) {
+        RecordingDevice device(allocator);
+        TestProcessor processor;
+        RenderLane lane(allocator, device);
+        REQUIRE(lane.Start(MakeConfig(mode, processor)));
+        packetLog = {};
+        packetLog.lane = &lane;
+        for (uint32 frame = 0; frame < 3; ++frame) {
+            auto ticket = lane.BeginFrame();
+            REQUIRE(ticket);
+            const uint64 before = lane.Stats().framesProcessed;
+            LifetimePacket packet;
+            REQUIRE(lane.SubmitFrame(Move(ticket.Value()), Move(packet), &RenderLifetime));
+            REQUIRE(lane.Drain(RenderDrainReason::Test));
+            CHECK(packetLog.destroyed == frame + 1);
+            // render와 소멸 모두 이 프레임의 처리 완료 표지 앞이다.
+            CHECK(packetLog.processedAtRender == before && packetLog.processedAtDestroy == before);
+            CHECK(lane.Stats().framesProcessed == before + 1);
+        }
+
+        // 이른 실패: 빈 함수·잘못된 ticket·차단된 프레임 모두 packet을 소비한다.
+        const uint32 consumed = packetLog.destroyed;
+        {
+            auto ticket = lane.BeginFrame();
+            REQUIRE(ticket);
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(ticket.Value()), Move(packet),
+                                   RenderFrameFunction<LifetimePacket>{})
+                      .Error() == ErrorCode::InvalidArgument);
+            CHECK(packetLog.destroyed == consumed + 1 && !packet.live);
+            lane.AbandonFrame(Move(ticket.Value()));
+        }
+
+        {
+            FrameTicket empty;
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(empty), Move(packet), &RenderLifetime).Error() ==
+                  ErrorCode::InvalidArgument);
+            CHECK(packetLog.destroyed == consumed + 2);
+        }
+
+        lane.BlockFrames();
+        {
+            FrameTicket empty;
+            LifetimePacket packet;
+            CHECK(lane.SubmitFrame(Move(empty), Move(packet), &RenderLifetime).Error() ==
+                  ErrorCode::ShuttingDown);
+            CHECK(packetLog.destroyed == consumed + 3);
+        }
+
+        REQUIRE(lane.Shutdown());
+        packetLog.lane = nullptr;
+    }
+}

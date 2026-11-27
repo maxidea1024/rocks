@@ -100,4 +100,31 @@ void SucceedShaderJob(ShaderWorkerJobResult& result, Array<uint8>& code,
     value.Value()->bytes = Move(glesHeader);
 }
 
+void AddShaderJobDebugSymbols(ShaderWorkerJobResult& result, ShaderDebugSymbolKind kind,
+                              StringView name, Span<const uint8> contents) noexcept {
+    if (result.status != ShaderWorkerJobStatus::Success) {
+        return;
+    }
+
+    constexpr uint32 DebugSymbolsValue = 3;
+    Array<uint8> bytes(result.values.GetAllocator());
+    if (auto encoded = EncodeShaderDebugSymbols(kind, name, contents, bytes); !encoded) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                      encoded.Error() == ErrorCode::OutOfMemory
+                          ? StringView("out of memory")
+                          : StringView("the shader debug symbol file name is invalid"),
+                      name);
+        return;
+    }
+
+    auto value = result.values.TryEmplaceBack(result.values.GetAllocator());
+    if (!value) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    value.Value()->id = DebugSymbolsValue;
+    value.Value()->bytes = Move(bytes);
+}
+
 } // namespace rocks::shader

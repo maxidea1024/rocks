@@ -87,7 +87,7 @@
   - 머리: magic `RSHL`, 형식 버전 1, 라이브러리 이름(`Engine`·`Project`), 형식 id, 형식 정의 SHA-256, 형식 사실(SSD5), 셰이더 타입 집합 SHA-256(SSD3), 항목 수·코드 수, 섹션 오프셋·크기, **파일 SHA-256**. 파일 SHA-256은 이 칸을 0으로 둔 머리와 그 뒤 전체를 덮는다.
   - 항목 표(키 오름차순, 고정 stride): 묶음 id(u64 — 엔진 셰이더 0, 머티리얼은 셰이더 집합 id, SX5·MSR2), 셰이더 타입 `nameHash`(u64), 정점 입력 타입 id(u64, 없음 0), 퍼뮤테이션 ID(u32), 단계(u8), 개발 전용 표시(u8), 런타임 확인 기능 비트(u32, 개정 17), 레이아웃 서명(SHA-256, 없으면 0 — SX6), 코드 색인(u32).
   - 코드 표(코드 SHA-256 오름차순, 고정 stride, 같은 코드는 한 번): 코드 SHA-256(아래 코드 부분 byte의 SHA), 오프셋, 크기.
-  - 코드 부분: 코드마다 셰이더 Record 값(10절 값 표)을 (값 id, 크기, byte)로 잇는다. 값 0 Code·1 BindingLayout·2 GlesCopyTable만 넣고 3 DebugSymbols는 넣지 않는다(SH4가 별도 파일로).
+  - 코드 부분: 코드마다 셰이더 Record 값(10절 값 표)을 (값 id, 크기, byte)로 잇는다. 값 0 Code·1 BindingLayout·2 GlesCopyTable만 넣고 3 DebugSymbols는 넣지 않는다(SH4가 별도 파일로 — 16.3절 SSD74).
   - **이름 표(개정 35 — RenderBase CP7 정합).** 타입 이름 문자열이 정체성이고 해시는 실행 중 조회용이다(CP7). 그래서 이름 표는 필수다: 항목에 나오는 모든 `nameHash`마다 (nameHash, 이름 byte 수, 이름 byte) 한 줄이 해시 오름차순으로 있다. 항목 표의 `nameHash`는 조회용이다. 읽을 때 이름 표의 이름에서 `ShaderTypeNameHash`를 다시 계산해 저장된 해시와 다르거나, 항목의 해시가 이름 표에 없거나, 이름이 셰이더 타입 이름 규칙(식별자, 64 byte 이하)을 어기면 `CorruptPackage`다. 해시 함수를 바꾸면 라이브러리 byte가 바뀌지만 이름으로 다시 계산하므로 틀린 항목을 조용히 쓰지 않는다.
   - UE `FSerializedShaderArchive`(셰이더 맵 hash 표·셰이더 hash 표·항목 표, `Runtime/RenderCore/Public/ShaderCodeArchive.h:206–230`)에 해당한다. 셰이더 맵 hash 대신 묶음 id 열로 묶는다.
   - 읽기 검사: 길이·magic, 형식 버전(1이 아니면 `UnsupportedVersion`), 파일 SHA·표 정렬·stride·범위·코드 색인 범위·중복 키·0이 아닌 빈 byte는 손상 `CorruptPackage`다(AssetSystem 쿠킹 패키지 판정 `CheckCookedPackageFile`과 같은 코드 — 12.3.1절 SSD14).

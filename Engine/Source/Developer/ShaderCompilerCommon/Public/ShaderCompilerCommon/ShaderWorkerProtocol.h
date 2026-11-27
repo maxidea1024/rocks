@@ -239,7 +239,7 @@ ROCKS_SHADERCOMPILERCOMMON_API Result<void>
 MakeShaderWorkerHeader(Span<const ShaderFormatDefinition* const> formats,
                        ShaderWorkerHeader& out) noexcept;
 
-// 파일 앞(magic·버전)을 읽는다. 짧거나 magic이 다르면 InvalidArgument, 그 밖은 버전 값이다.
+// 파일 앞(magic·버전)을 읽는다. 짧거나 magic이 다르면 CorruptData, 그 밖은 버전 값이다.
 ROCKS_SHADERCOMPILERCOMMON_API Result<uint32>
 ReadShaderWorkerMessageVersion(Span<const uint8> file,
                                const uint8 (&magic)[ShaderWorkerMagicBytes]) noexcept;
@@ -252,8 +252,8 @@ ROCKS_SHADERCOMPILERCOMMON_API Result<void>
 EncodeShaderWorkerResponse(const ShaderWorkerResponse& response, Array<uint8>& out) noexcept;
 
 // 파일 byte를 읽는다(out은 먼저 비운다). magic이 다르거나 잘렸거나 Record·값이 손상되면
-// InvalidArgument, 메시지 버전이 다르면 Unsupported, 할당 실패 OutOfMemory다. 실패하면 out은
-// 정해지지 않은 상태다.
+// CorruptData, 목록 항목 수·크기 한도 초과 CapacityExceeded, 메시지 버전이 다르면 Unsupported,
+// 할당 실패 OutOfMemory다(ShaderSystem 11.2절). 실패하면 out은 정해지지 않은 상태다.
 ROCKS_SHADERCOMPILERCOMMON_API Result<void>
 DecodeShaderWorkerRequest(Span<const uint8> file, ShaderWorkerRequest& out) noexcept;
 ROCKS_SHADERCOMPILERCOMMON_API Result<void>

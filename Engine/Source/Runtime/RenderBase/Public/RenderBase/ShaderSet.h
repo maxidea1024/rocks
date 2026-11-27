@@ -130,8 +130,9 @@ public:
     ShaderSet& operator=(const ShaderSet&) = delete;
 
     // 쿠킹 라이브러리를 연다(byte의 소유를 넘겨받는다). 검사를 통과하면 Ready다. 실패: 이미 열었음
-    // Busy, desc 입력 오류 InvalidArgument, 검사 실패 DependencyFailed(Problem·ProblemDetail),
-    // 할당 실패 OutOfMemory. 실패하면 상태는 Failed다.
+    // Busy, desc 입력 오류 InvalidArgument, 라이브러리·항목 byte 손상 CorruptData(Problem
+    // CorruptLibrary·CorruptEntry — Docs/Design/RenderBase 6.6절), 그 밖의 검사 실패
+    // DependencyFailed(Problem·ProblemDetail), 할당 실패 OutOfMemory. 실패하면 상태는 Failed다.
     Result<void> OpenCooked(Array<uint8>&& library) noexcept;
 
     // 공급자로 연다. provider가 null이면 UnsupportedCapability(Problem NoProvider)다. 요청을 넘기면

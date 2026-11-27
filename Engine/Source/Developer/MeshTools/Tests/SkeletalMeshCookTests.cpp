@@ -820,20 +820,20 @@ TEST(SkeletalMeshCook_NuggetHeader) {
         SkeletalMeshRenderData out(allocator);
         Array<MeshCookWarning> outWarnings(allocator);
         return ReadSkeletalMeshNuggetHeader(broken.View(), other, out, outWarnings).Error() ==
-               ErrorCode::InvalidArgument;
+               ErrorCode::CorruptData;
     };
     CHECK(rejects([](Array<uint8>& b) noexcept { b[0] = 9; }));
     CHECK(rejects([](Array<uint8>& b) noexcept { b[4] = 9; }));
     CHECK(rejects([](Array<uint8>& b) noexcept { (void)b.TryPushBack(0); }));
     CHECK(rejects([](Array<uint8>& b) noexcept { (void)b.TryPopBack(); }));
-    // 모든 길이로 자르면 실패하고, byte마다 0xFF로 덮어도 성공 또는 InvalidArgument다(넘겨 읽기
+    // 모든 길이로 자르면 실패하고, byte마다 0xFF로 덮어도 성공 또는 CorruptData다(넘겨 읽기
     // 없음).
     for (usize size = 0; size < header.Size(); ++size) {
         SkeletalMeshRenderData out(allocator);
         Array<MeshCookWarning> outWarnings(allocator);
         CHECK(ReadSkeletalMeshNuggetHeader(Span<const uint8>(header.Data(), size), other, out,
                                            outWarnings)
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     for (usize at = 0; at < header.Size(); ++at) {
@@ -844,7 +844,7 @@ TEST(SkeletalMeshCook_NuggetHeader) {
         Array<MeshCookWarning> outWarnings(allocator);
         const Result<void> read =
             ReadSkeletalMeshNuggetHeader(broken.View(), other, out, outWarnings);
-        CHECK(read.IsOk() || read.Error() == ErrorCode::InvalidArgument);
+        CHECK(read.IsOk() || read.Error() == ErrorCode::CorruptData);
     }
 
     // morph 이름 byte 수(끝에서 이름 5 + 수 4 + stream 20 + 앞 4)를 크게 한다.

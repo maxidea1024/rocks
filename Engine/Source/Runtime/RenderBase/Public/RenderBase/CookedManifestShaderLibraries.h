@@ -33,7 +33,7 @@ class ROCKS_RENDERBASE_API CookedManifestShaderLibraries final : public CookedSh
 public:
     // manifest의 셰이더 칸을 복사해 만든다. files와 allocator는 이 객체보다 오래 산다. cookedRoot는
     // 복사한다. 오류: cookedRoot가 비었음 InvalidArgument, 모르는 backend 이름(매니페스트 어휘 밖 —
-    // 검증을 통과한 매니페스트에는 없다) InvalidArgument, 할당 실패.
+    // 검증을 통과한 매니페스트에는 없다) CorruptData, 할당 실패.
     static Result<UniquePtr<CookedManifestShaderLibraries>>
     TryCreate(Allocator& allocator, platform::FileSystem& files, const CookedManifest& manifest,
               StringView cookedRoot) noexcept;
@@ -45,7 +45,7 @@ public:
     Span<const graphics::Backend> Backends() const noexcept override;
     Span<const StringView> Formats(graphics::Backend backend) const noexcept override;
 
-    // 오류: 항목 없음 NotFound, 파일 없음·크기·SHA-256 불일치 InvalidArgument(Problem에
+    // 오류: 항목 없음 NotFound, 파일 없음·크기·SHA-256 불일치 CorruptData(Problem에
     // "CorruptPackage" 과 칸 ArtifactBytes·ArtifactSha256), 경로·읽기 오류는 그 오류, 할당 실패.
     Result<void> ReadLibrary(StringView formatId, shader::ShaderLibraryKind library,
                              Array<uint8>& out) noexcept override;

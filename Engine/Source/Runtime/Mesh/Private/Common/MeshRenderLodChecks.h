@@ -54,13 +54,14 @@ inline Result<void> Corrupt(MeshDiagnostic* failure, MeshIssue issue, uint32 lod
     if (failure != nullptr) {
         *failure = MeshDiagnostic{};
         failure->code = AssetDiagnosticCode::CorruptPackage;
-        failure->error = ErrorCode::InvalidArgument;
+        failure->error = ErrorCode::CorruptData;
         failure->issue = issue;
         failure->index = lod;
         failure->count = count;
     }
 
-    return Result<void>::Failure(ErrorCode::InvalidArgument);
+    // 쿠킹 데이터는 쿠커가 만든 것이라 위반은 손상이다(AssetSystem 19장 — CorruptData).
+    return Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 inline bool IsTexCoordFormat(VertexFormat format) noexcept {

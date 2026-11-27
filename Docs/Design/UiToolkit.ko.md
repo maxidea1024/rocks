@@ -522,7 +522,7 @@ UE 5.8 `Templates`의 C++ 템플릿(헤더 119개, `.cpp` 119개)과 대조해 C
 - **저장 위치:** 이 절의 편집 값은 **편집 메타데이터 블록**에 둔다. `FieldSchema`·`TypeSchema`는 블록 포인터 하나를 가지며, `ROCKS_WITH_EDITOR_DATA=0` 빌드([빌드 타깃](BuildTargets/README.ko.md) 3.2·3.4절)에서는 생성 코드가 블록을 만들지 않아 null이다. UE `WITH_METADATA`(= `WITH_EDITORONLY_DATA`, `Runtime/Core/Public/Misc/CoreMiscDefines.h:31`)와 같은 타깃 축이며, CU1 표의 "Shipping 스키마에서 제외"도 이 뜻으로 읽는다.
 - **실행 스키마에 남는 것:** 기존 `FieldSchema`의 `displayName`은 게임 빌드의 콘솔 설정 도움말이 쓰므로(`Core/Source/Runtime/Config/Private/ConsoleSettings.cpp:665-667`) 실행 스키마로 남긴다. `category`는 실행 중 소비처가 없으므로 편집 메타데이터 블록으로 옮긴다.
 - **값 문자열:** 이 절에서 새로 받는 표시 문자열(`Help`, 타입·함수 `DisplayName`·`Category`)은 NUL·제어 문자 없는 유효 UTF-8이고 이름 붙은 길이 한도를 따른다(각 항). 기존 필드 `DisplayName`·`Category`는 지금 중간 NUL을 허용하고 한도가 없다([ReflectionMetadata](../Implementation/ReflectionMetadata.ko.md) 182행). CU1 구현 때 같은 규칙으로 좁힌다(하위 호환은 두지 않는다).
-- **언어:** 엔진 저장소(Core·Engine·엔진 플러그인)의 `Help`·`DisplayName`·`Category`는 영어다. 실행 중 사용자에게 보이는 문구이기 때문이며 [AppInfo·CommandLine](AppInfoCommandLine.ko.md) D18(도움말은 영어)과 같다. 정책 검사로 막는다. 게임 프로젝트와 시험 fixture(모듈 `Tests/`·시험 전용 fixture 모듈)는 제한하지 않는다. 지금 이스케이프 시험용 fixture(`ReflectionTestFixtures/ReflectionFixture.h` 60·79·82행)의 NUL·제어 문자 값은 새 문자열 규칙에 맞게 바꾸고(이스케이프 시험은 따옴표·역슬래시·비ASCII로), 문자 규칙 위반은 음성 시험으로 옮긴다.
+- **언어:** 엔진 저장소(Core·Engine·엔진 플러그인)의 `Help`·`DisplayName`·`Category`는 영어다. 실행 중 사용자에게 보이는 문구이기 때문이며 [AppInfo·CommandLine](AppInfoCommandLine/README.ko.md) D18(도움말은 영어)과 같다. 정책 검사로 막는다. 게임 프로젝트와 시험 fixture(모듈 `Tests/`·시험 전용 fixture 모듈)는 제한하지 않는다. 지금 이스케이프 시험용 fixture(`ReflectionTestFixtures/ReflectionFixture.h` 60·79·82행)의 NUL·제어 문자 값은 새 문자열 규칙에 맞게 바꾸고(이스케이프 시험은 따옴표·역슬래시·비ASCII로), 문자 규칙 위반은 음성 시험으로 옮긴다.
 - **지역화:** 원문 문자열을 Localization 수집 대상으로 두고, 키는 (TypeId, FieldId·FunctionId·enum 값, 항목 종류)로 만든다. UE는 `UObjectDisplayNames`·`UObjectToolTips` 네임스페이스에 전체 경로 키를 쓴다(`Runtime/CoreUObject/Private/UObject/Class.cpp:303-316, 346-359`). Rocks는 경로 대신 안정 ID를 쓴다. 수집·번역 도구는 Localization 단계 일이다.
 
 **(a) Inspector 노출과 편집 위치(UD13).**
@@ -564,7 +564,7 @@ UE 5.8 `Templates`의 C++ 템플릿(헤더 119개, `.cpp` 119개)과 대조해 C
 
 Sparks `@edit` 필드의 대응 표기(`@edit(Scope: Archetype)` 등)는 [Sparks 언어 설계](SparksLanguage/README.ko.md)가 정한다.
 
-**(b) 도움말(UD14).** 설명은 `Help = "…"`로 PROPERTY·CLASS·STRUCT·ENUM·ENUMERATOR·FUNCTION(CU2, 인자 포함)에 둔다. 명령줄 바인더의 `ROCKS_PROPERTY(Help=…)`([AppInfo·CommandLine](AppInfoCommandLine.ko.md) 723행), 계획된 `ROCKS_FUNCTION(…, Help=…)`([CVar](CVarSystem.ko.md) 14.3절), CVar `.Help()`와 같은 키로 하나로 통일한다. Inspector tooltip, Designer palette, 자산·클래스 선택 목록, Sparks 언어 서버 hover(native API 설명)가 쓴다.
+**(b) 도움말(UD14).** 설명은 `Help = "…"`로 PROPERTY·CLASS·STRUCT·ENUM·ENUMERATOR·FUNCTION(CU2, 인자 포함)에 둔다. 명령줄 바인더의 `ROCKS_PROPERTY(Help=…)`([AppInfo·CommandLine](AppInfoCommandLine/README.ko.md) 13.2절), 계획된 `ROCKS_FUNCTION(…, Help=…)`([CVar](CVarSystem.ko.md) 14.3절), CVar `.Help()`와 같은 키로 하나로 통일한다. Inspector tooltip, Designer palette, 자산·클래스 선택 목록, Sparks 언어 서버 hover(native API 설명)가 쓴다.
 - 길이 한도는 `MaxHelpBytes`(1024 — CVar `MaxVarHelpBytes`와 같은 값)다.
 - `Help`가 없으면 tooltip은 표시 이름을 쓴다(UE도 같다 — `Runtime/CoreUObject/Private/UObject/Class.cpp:323-363`). 선택 목록처럼 짧은 설명이 필요한 곳은 `Help`의 첫 줄(첫 줄바꿈 앞)을 쓴다. UE `ShortToolTip` 같은 별도 키는 두지 않는다.
 - 설정 struct 필드([설정 시스템](ConfigSystem.ko.md) 7절)와 명령줄 바인더의 `Help`, 치트 함수(`ROCKS_FUNCTION(Cheat, …)` — [함수 리플렉션](FunctionReflection.ko.md) FD12)의 `Help`는 게임 빌드의 콘솔·명령줄 도움말이 쓰므로 실행 스키마에도 남는다. 그 밖의 `Help`는 편집 메타데이터 블록에만 있다.

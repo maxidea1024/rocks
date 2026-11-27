@@ -42,7 +42,7 @@ WriteSkeletalMeshNuggetHeader(const SkeletalMeshRenderData& renderData,
 //       /* 미적중으로 다룬다 */
 //   }
 //
-// 오류: 크기·버전·수 상한·열거 값·이름이 맞지 않음 InvalidArgument(적중을 미적중으로 다룬다), 할당
+// 오류: 크기·버전·수 상한·열거 값·이름이 맞지 않음 CorruptData(적중을 미적중으로 다룬다), 할당
 // 실패 OutOfMemory. 실패하면 out·warnings는 앞부분만 채워져 있을 수 있다(버린다). 실패해도 그 전에
 // intern한 이름은 pool에 남는다.
 ROCKS_MESHTOOLS_API Result<void>

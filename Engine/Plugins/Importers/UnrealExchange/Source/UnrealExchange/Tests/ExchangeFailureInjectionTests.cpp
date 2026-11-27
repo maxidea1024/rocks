@@ -272,9 +272,9 @@ TEST(UnrealExchange_DirectoryPathForms) {
         ExchangeBundle bundle(allocator);
         ExchangeDiagnostics diagnostics(allocator);
         CHECK(ReadExchangeBundle(files, "", {}, bundle, diagnostics).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(ReadExchangeBundle(files, "X\\", {}, bundle, diagnostics).Error() ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
         CHECK(CountIssues(diagnostics, AssetDiagnosticCode::CorruptBundle,
                           ExchangeIssue::WrongType) == 2);
     }

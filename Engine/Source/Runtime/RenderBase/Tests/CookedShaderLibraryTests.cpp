@@ -232,7 +232,7 @@ TEST(RenderBase_CookedManifestShaderLibrariesReadsAndChecks) {
     REQUIRE(Corrupt(root, d3d12Artifact, Move(d3d12)));
     const Result<void> corrupt =
         source.ReadLibrary("D3D12_SM6", shader::ShaderLibraryKind::Engine, read);
-    CHECK(!corrupt && corrupt.Error() == ErrorCode::InvalidArgument);
+    CHECK(!corrupt && corrupt.Error() == ErrorCode::CorruptData);
     CHECK(source.Problem().Contains(StringView("CorruptPackage (ArtifactSha256)")) &&
           read.IsEmpty());
 
@@ -242,13 +242,13 @@ TEST(RenderBase_CookedManifestShaderLibrariesReadsAndChecks) {
     REQUIRE(longer.TryPushBack(0));
     REQUIRE(root.Write(manifest.artifacts[1], longer.View()));
     CHECK(source.ReadLibrary("VULKAN_SM5", shader::ShaderLibraryKind::Engine, read).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(source.Problem().Contains(StringView("CorruptPackage (ArtifactBytes)")));
 
     // 크기 불일치(작음)도 ArtifactBytes다.
     REQUIRE(root.Write(manifest.artifacts[1], Span<const uint8>(vulkan.Data(), vulkan.Size() - 1)));
     CHECK(source.ReadLibrary("VULKAN_SM5", shader::ShaderLibraryKind::Engine, read).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(source.Problem().Contains(StringView("CorruptPackage (ArtifactBytes)")));
 
     // 항목은 있는데 파일이 없으면 손상이다(공급자로 넘기지 않는다 — NotFound가 아니다).
@@ -256,7 +256,7 @@ TEST(RenderBase_CookedManifestShaderLibrariesReadsAndChecks) {
     REQUIRE(root.ArtifactPath(manifest.artifacts[1], path));
     REQUIRE(platform::PhysicalFileSystem().Delete(path, strlen(path)));
     CHECK(source.ReadLibrary("VULKAN_SM5", shader::ShaderLibraryKind::Engine, read).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(source.Problem().Contains(StringView("missing")));
 }
 
@@ -379,7 +379,7 @@ TEST(RenderBase_EngineRenderResourcesOpenCookedManifest) {
     REQUIRE(Corrupt(root, manifest.artifacts[0], Move(library)));
     {
         EngineRenderResources resources(Allocator_());
-        CHECK(resources.Open(device, host).Error() == ErrorCode::InvalidArgument);
+        CHECK(resources.Open(device, host).Error() == ErrorCode::CorruptData);
         CHECK(resources.Problem().Contains(StringView("CorruptPackage (ArtifactSha256)")));
         CHECK(!resources.IsReady());
     }

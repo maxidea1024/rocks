@@ -86,7 +86,8 @@ ROCKS_SHADERCOMPILER_API Result<void> MoveShaderValuesToNugget(ShaderJobValues& 
                                                                Array<NuggetValue>& out) noexcept;
 
 // 적중한 Record의 값 목록을 values로 옮긴다(byte를 옮긴다). values는 먼저 비운다. 오류(모두 손상 —
-// 다시 컴파일한다): 값 0(Code)이 없으면 NotFound, 모르는 번호·중복·오름차순 아님은 InvalidArgument.
+// 다시 컴파일한다): 값 0(Code)이 없으면 NotFound, 모르는 번호·중복·오름차순 아님은 CorruptData(읽은
+// 레코드 손상 — ShaderSystem 11.2절).
 ROCKS_SHADERCOMPILER_API Result<void> MoveShaderValuesFromNugget(Array<NuggetValue>& record,
                                                                  ShaderJobValues& values) noexcept;
 
