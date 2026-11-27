@@ -23,8 +23,12 @@ Result<void> MemoryPlatformTexture::Build(const MemoryTextureSpec& spec, MemoryT
     data_.mips.Clear();
     bulks_.Clear();
     const graphics::PixelFormatInfo& info = graphics::GetPixelFormatInfo(spec.format);
-    if (!IsTexelCodecFormat(spec.format) || spec.width == 0 || spec.height == 0 ||
-        spec.depth == 0 || spec.slices == 0 || spec.mips == 0 || info.blockBytes > MaxTexelBytes) {
+    const bool block = IsBlockCodecFormat(spec.format);
+    // 블록 형식은 부호화 입력(RGBA8)으로 texel을 쓴 뒤 mip마다 블록으로 압축한다.
+    const graphics::PixelFormat texelFormat = BlockStagingFormat(spec.format);
+    const usize texelBytes = graphics::GetPixelFormatInfo(texelFormat).blockBytes;
+    if ((!IsTexelCodecFormat(spec.format) && !block) || spec.width == 0 || spec.height == 0 ||
+        spec.depth == 0 || spec.slices == 0 || spec.mips == 0 || texelBytes > MaxTexelBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -40,7 +44,6 @@ Result<void> MemoryPlatformTexture::Build(const MemoryTextureSpec& spec, MemoryT
         const uint32 height = graphics::MipExtent(spec.height, level);
         const uint32 depth = volume ? graphics::MipExtent(spec.depth, level) : 1u;
         Array<uint8> bytes(allocator_);
-        const usize texelBytes = info.blockBytes;
         const usize count = static_cast<usize>(width) * height * depth * spec.slices;
         if (auto sized = bytes.TryResize(count * texelBytes); !sized) {
             return sized;
@@ -54,11 +57,28 @@ Result<void> MemoryPlatformTexture::Build(const MemoryTextureSpec& spec, MemoryT
                     for (uint32 x = 0; x < width; ++x) {
                         float value[4] = {0.0f, 0.0f, 0.0f, 1.0f};
                         fill(context, level, slice, x, y, z, value);
-                        (void)EncodeTexel(spec.format, value, bytes.Data() + offset);
+                        (void)EncodeTexel(texelFormat, value, bytes.Data() + offset);
                         offset += texelBytes;
                     }
                 }
             }
+        }
+
+        if (block) {
+            const uint32 planes = depth * spec.slices;
+            Array<uint8> blocks(allocator_);
+            const uint64 blockBytes =
+                graphics::PixelFormatImageBytes(spec.format, width, height) * planes;
+            if (auto sized = blocks.TryResize(static_cast<usize>(blockBytes)); !sized) {
+                return sized;
+            }
+
+            if (!EncodeBlockImage(spec.format, bytes.View(), width, height, planes,
+                                  blocks.View())) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            bytes = Move(blocks);
         }
 
         TextureMipData mip;

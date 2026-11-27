@@ -114,15 +114,10 @@ void AppendInspectorChecks(const screen::InspectorTexture& texture, uint32 layer
         return;
     }
 
-    const usize texelBytes = graphics::GetPixelFormatInfo(format).blockBytes;
+    // plane은 slice 다음 z다(6.5절 배치 — 블록 형식은 plane마다 블록 행).
     auto texelAt = [&](uint32 slice, uint32 x, uint32 y, uint32 z,
                        float (&value)[4]) noexcept -> bool {
-        const usize index = ((static_cast<usize>(slice) * depth + z) * height + y) * width + x;
-        if ((index + 1) * texelBytes > bytes.Size()) {
-            return false;
-        }
-
-        return DecodeTexel(format, bytes.Data() + index * texelBytes, value);
+        return DecodeImageTexel(format, bytes, width, height, slice * depth + z, x, y, value);
     };
     if (cube) {
         const uint32 cellWidth = SceneCaptureWidth / CrossColumns;
