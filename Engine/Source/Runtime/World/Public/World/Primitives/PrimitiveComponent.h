@@ -10,12 +10,16 @@
 #include <World/Physics/BodyMotion.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
+#include <World/Physics/MtdResult.h>
 #include <World/Physics/PhysicsBodyHandle.h>
 #include <World/Physics/PhysicsContactHit.h>
 #include <World/SceneComponent.h>
 #include <World/Primitives/PrimitiveTypes.h>
 
 namespace rocks {
+
+// 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
+struct CollisionShape;
 
 // 그리거나 충돌하는 Component의 기반이다(UE UPrimitiveComponent —
 // Docs/Design/EngineRuntime 24.3절). 데이터만 있다: 렌더 proxy(RS1)·충돌(CR16) 연결 전에는 아무것도
@@ -446,6 +450,22 @@ public:
     //   if (hit.IsValidBlockingHit()) { ... }   // 벽에 닿았다
     Result<bool> MoveComponent(const Vec3d& delta, const Quatd& rotation, bool sweep,
                                HitResult* outHit, const MoveOptions& options) noexcept;
+
+    // 주어진 형상을 rotation으로 position에 놓았을 때 이 컴포넌트의 body와 겹치면 참이고 out에
+    // 형상을 밀어낼 단위 방향과 거리(cm)를 쓴다(UE ComputePenetration — Docs/Design/PhysicsModule
+    // 5.2절·7.1.13절). body·물리 장면이 없거나 겹치지 않으면 거짓이다(out은 그대로).
+    //
+    // 사용 예:
+    //   MtdResult mtd;
+    //   if (wall.ComputePenetration(mtd, CollisionShape::Sphere(20.0), at, Quatd())) {
+    //       at += mtd.direction * mtd.distance;   // 벽 밖으로
+    //   }
+    bool ComputePenetration(MtdResult& out, const CollisionShape& shape, const Vec3d& position,
+                            const Quatd& rotation) const noexcept;
+
+    // 이 컴포넌트의 충돌 형상을 inflation(cm)만큼 부풀린 질의 형상이다(UE GetCollisionShape —
+    // 7.1.13절). 기본은 월드 bounds 상자이고 구·상자·캡슐은 자기 크기(scale 반영)다.
+    virtual CollisionShape GetCollisionShape(double inflation) const noexcept;
 
     // 이동 sweep에서 무시할 Actor·컴포넌트다(UE IgnoreActorWhenMoving·IgnoreComponentWhenMoving —
     // 실행 상태, 저장하지 않는다). ignore가 참이면 더하고(이미 있으면 그대로) 거짓이면 뺀다. 오류:

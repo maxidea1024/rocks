@@ -29,7 +29,7 @@
 이동 컴포넌트(D4·CM12)가 쓰는 도우미다(UE `UMovementComponent::SafeMoveUpdatedComponent`·`ResolvePenetration` — `E/Private/Components/MovementComponent.cpp:558–699`).
 
 - `PrimitiveComponent::ComputePenetration(MtdResult&, shape, position, rotation)`: 이 컴포넌트와 주어진 형상의 최소 이동 방향·거리(UE `PrimitiveComponent.h:3177`). Jolt `CollideShape`의 `mPenetrationAxis`·`mPenetrationDepth`(J11)로 구한다.
-- `SafeMove`: sweep 이동이 시작 겹침이면 `ResolvePenetration` 뒤 원래 이동을 다시 시도한다. 조정량 = `normal · (depth 또는 0.125) + PenetrationPullbackDistance 0.125 cm`. 0.1 cm 부풀린 겹침 시험이 비면 teleport, 막히면 sweep, 그다음 MTD 합산, 그다음 이동량을 더한 시도 순이다(UE와 같은 순서·같은 상수 — 이름 있는 상수).
+- `SafeMove`(`MovementComponent::SafeMoveUpdatedComponent` — 7.1.13절): sweep 이동이 시작 겹침이면 `ResolvePenetration` 뒤 원래 이동을 다시 시도한다. 조정량 = `normal × ((depth 또는 0.125) + PenetrationPullbackDistance 0.125 cm)`. 0.1 cm 부풀린 겹침 시험이 비면 teleport, 막히면 sweep, 그다음 MTD 합산, 그다음 이동량을 더한 시도 순이다(UE와 같은 순서·같은 상수 — 이름 있는 상수).
 - D4의 이동 컴포넌트는 지금 sweep 없이 동작한다(엔진 런타임 26장). CM12 때 이 도우미로 바꾼다.
 
 ## 5.3 overlap

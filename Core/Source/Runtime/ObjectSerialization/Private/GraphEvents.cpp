@@ -2,6 +2,7 @@
 
 #include <Core/Delegate.h>
 #include <Object/ArrayFieldCodec.h>
+#include <Object/FunctionCall.h>
 #include <Object/ObjectRegistry.h>
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
@@ -21,11 +22,50 @@ ReferenceExpectation AnyObject() noexcept {
 struct EventBindingEntry {
     ObjectHandle target;
     Guid functionId;
+    bool resolved;
 };
 
-Result<void> CollectEventBinding(void* user, ObjectHandle target, Guid functionId) noexcept {
+Result<void> CollectEventBinding(void* user, ObjectHandle target, Guid functionId,
+                                 bool resolved) noexcept {
     return static_cast<Array<EventBindingEntry>*>(user)->TryPushBack(
-        EventBindingEntry{target, functionId});
+        EventBindingEntry{target, functionId, resolved});
+}
+
+// 쿠킹 저장이 쓸 수 없는 바인딩인지다(ED24): 살아 있는 대상의 미해결 레코드 또는 EditorOnly 함수.
+// 쓸 수 없으면 이유(EventBindingNotCookable*), 쓸 수 있으면 0이다. 살아 있지 않은 대상(사라짐·파괴
+// 요청 등)은 null 항목이 되어 로드가 버리므로 0이다. 생존·타입 조회의 다른 오류(다른 문맥·Busy
+// 등)는 그 오류다.
+Result<int64> NotCookableReason(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                const EventBindingEntry& binding) noexcept {
+    auto lifecycle = registry.InspectLifecycle(access, binding.target);
+    if (!lifecycle) {
+        return lifecycle.Error() == ErrorCode::StaleHandle
+                   ? Result<int64>::Success(0)
+                   : Result<int64>::Failure(lifecycle.Error());
+    }
+
+    if (lifecycle.Value() != ObjectLifecycle::Alive) {
+        return Result<int64>::Success(0);
+    }
+
+    if (!binding.resolved) {
+        return Result<int64>::Success(EventBindingNotCookableUnresolved);
+    }
+
+    auto type = registry.AcquireType(access, binding.target);
+    if (!type) {
+        return Result<int64>::Failure(type.Error());
+    }
+
+    // 타입에 없는 함수(저장 뒤 사라짐)는 로드가 버릴 항목이라 쿠킹을 막지 않는다.
+    auto function = registry.Types().FindFunction(type.Value().Id(), binding.functionId);
+    if (!function) {
+        return Result<int64>::Success(0);
+    }
+
+    const bool editorOnly =
+        (function.Value().Schema().flags & static_cast<uint32>(FunctionFlags::EditorOnly)) != 0;
+    return Result<int64>::Success(editorOnly ? EventBindingNotCookableEditorOnly : 0);
 }
 
 int64 DropReason(ErrorCode error) noexcept {
@@ -57,6 +97,28 @@ Result<uint32> EncodeEventBindings(const RuntimeEventOps& ops, ObjectRegistry& r
 
     if (bindings.Size() == 0) {
         return Result<uint32>::Success(static_cast<uint32>(WireType::RecordList));
+    }
+
+    // 쿠킹(EditorOnly 제외)은 쿠킹 데이터에 없는 함수·미해결 레코드를 가리키는 바인딩을 거부한다.
+    if ((context.Policy().excludedFlags & static_cast<uint32>(FieldFlags::EditorOnly)) != 0) {
+        for (const EventBindingEntry& binding : bindings) {
+            auto judged = NotCookableReason(registry, access, binding);
+            if (!judged) {
+                return Result<uint32>::Failure(judged.Error());
+            }
+
+            const int64 reason = judged.Value();
+            if (reason != 0) {
+                // hook 실패(중단 요청)는 그 오류로, 아니면 InvalidArgument로 실패한다.
+                if (auto reported = context.Report(FieldDiagnosticKind::EventBindingNotCookable,
+                                                   reason, binding.functionId);
+                    !reported) {
+                    return Result<uint32>::Failure(reported.Error());
+                }
+
+                return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
     }
 
     if (auto counted = context.AddElements(bindings.Size()); !counted) {
@@ -240,7 +302,7 @@ Result<void> DecodeEventBindings(const FieldView& field, FieldDecodeContext& con
 
 usize BindPendingEvents(ObjectRegistry& registry, const ObjectAccessContext& access,
                         Span<const ObjectHandle> nodes, Span<const PendingEventBinding> pending,
-                        FieldCodecHooks* hooks) noexcept {
+                        FieldCodecHooks* hooks, bool keepUnresolved) noexcept {
     usize bound = 0;
     for (const PendingEventBinding& binding : pending) {
         if (binding.node >= nodes.Size() || binding.ops == nullptr) {
@@ -261,20 +323,39 @@ usize BindPendingEvents(ObjectRegistry& registry, const ObjectAccessContext& acc
         }
 
         // 같은 바인딩이 이미 있으면 정상 병합이다(ED22).
-        if (made.Error() == ErrorCode::AlreadyExists || hooks == nullptr) {
+        if (made.Error() == ErrorCode::AlreadyExists) {
+            continue;
+        }
+
+        // 에디터 로드는 풀리지 않은 바인딩을 미해결 레코드로 보존하고 EventBindingUnresolved로
+        // 알린다(ED24 — 같은 쌍이 이미 보존됐으면 병합). 보존이 실패하면 버림(그 밖)이다.
+        FieldDiagnosticKind kind = FieldDiagnosticKind::EventBindingDropped;
+        int64 reason = DropReason(made.Error());
+        if (keepUnresolved &&
+            (made.Error() == ErrorCode::NotFound || made.Error() == ErrorCode::TypeMismatch)) {
+            auto kept = binding.ops->keepUnresolved(registry, access, publisher, binding.target,
+                                                    binding.functionId);
+            if (kept || kept.Error() == ErrorCode::AlreadyExists) {
+                kind = FieldDiagnosticKind::EventBindingUnresolved;
+            } else {
+                reason = EventBindingDroppedOther;
+            }
+        }
+
+        if (hooks == nullptr) {
             continue;
         }
 
         // 경로는 이벤트 필드 한 단계다(다른 노드 진단처럼 객체 타입·경로를 채운다).
         const PathStep step{binding.ops->fieldId};
         FieldDiagnostic diagnostic;
-        diagnostic.kind = FieldDiagnosticKind::EventBindingDropped;
+        diagnostic.kind = kind;
         diagnostic.objectType = binding.publisherType;
         diagnostic.objectIndex = binding.node;
         diagnostic.path = Span<const PathStep>(&step, 1);
         diagnostic.field = binding.ops->fieldId;
         diagnostic.valueType = binding.functionId;
-        diagnostic.value = DropReason(made.Error());
+        diagnostic.value = reason;
         (void)hooks->Report(diagnostic);
     }
 

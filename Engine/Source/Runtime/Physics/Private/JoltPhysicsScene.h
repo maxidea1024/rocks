@@ -77,6 +77,9 @@ public:
     Result<void> SetBodyGeometry(PhysicsBodyHandle body,
                                  const BodyGeometry& geometry) noexcept override;
     void SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept override;
+    bool ComputePenetration(PhysicsBodyHandle body, const CollisionShape& shape,
+                            const Vec3d& position, const Quatd& rotation,
+                            MtdResult& out) const noexcept override;
     Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept override;
     Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                            const QueryParams& params, TraceMode mode, HitResult* first,

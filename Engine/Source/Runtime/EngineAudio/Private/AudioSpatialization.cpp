@@ -69,21 +69,21 @@ SpatialParams ComputeSpatialParams(const SoundAttenuation& attenuation, uint32 c
     return params;
 }
 
-float MaxAudibleDistance(const SoundAttenuation& attenuation) noexcept {
+float MaxAudibleDistance(const SoundAttenuation& attenuation, float maxWorldDistance) noexcept {
     const audio::DistanceAttenuationSettings& distance = attenuation.distance;
     if (!(distance.distanceScale > 0.0f)) {
-        return MaxAudioWorldDistance;
+        return maxWorldDistance;
     }
 
     float falloff = math::Max(distance.falloffDistance, audio::MinFalloffDistance);
-    if (falloff > MaxAudioWorldDistance) {
-        return MaxAudioWorldDistance;
+    if (falloff > maxWorldDistance) {
+        return maxWorldDistance;
     }
 
     if (distance.model == audio::DistanceAttenuationModel::NaturalSound) {
         switch (distance.naturalSoundFalloffMode) {
         case audio::NaturalSoundFalloffMode::Hold:
-            return MaxAudioWorldDistance;
+            return maxWorldDistance;
         case audio::NaturalSoundFalloffMode::Continues:
             falloff = falloff * AudibleAttenuationFloorDb /
                       math::Min(distance.naturalSoundAttenuationDb, MaxNaturalSoundAttenuationDb);
@@ -94,17 +94,17 @@ float MaxAudibleDistance(const SoundAttenuation& attenuation) noexcept {
     }
 
     const float maxDimension = falloff / distance.distanceScale + attenuation.innerRadius;
-    return math::Clamp(maxDimension, 0.0f, MaxAudioWorldDistance);
+    return math::Clamp(maxDimension, 0.0f, maxWorldDistance);
 }
 
 bool IsWithinAudibleRange(const SoundAttenuation& attenuation, const Vec3d& listenerPosition,
-                          const Vec3d& sourcePosition) noexcept {
+                          const Vec3d& sourcePosition, float maxWorldDistance) noexcept {
     if (!attenuation.attenuate) {
         return true;
     }
 
-    const float maxDistance = MaxAudibleDistance(attenuation);
-    if (maxDistance >= MaxAudioWorldDistance) {
+    const float maxDistance = MaxAudibleDistance(attenuation, maxWorldDistance);
+    if (maxDistance >= maxWorldDistance) {
         return true;
     }
 
