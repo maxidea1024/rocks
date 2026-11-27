@@ -10,15 +10,18 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialExpressionSubstrate.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "MeshDescription.h"
 #include "SkeletalMeshAttributes.h"
 #include "StaticMeshAttributes.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "RocksBundleWriter.h"
+#include "RocksExportCommon.h"
 #include "RocksExportClosure.h"
 #include "RocksExportSelfTestTypes.h"
 #include "RocksExporter.h"
@@ -1155,6 +1158,138 @@ void RocksExportSelfTest::RunMaterialExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunSubstrateExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	// Substrate가 꺼진 프로젝트에서는 돌지 않음을 분명히 남긴다(통과로 세지 않는다 — 8.8절 6번).
+	const IConsoleVariable* Substrate = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Substrate"));
+	if (Substrate == nullptr || Substrate->GetInt() == 0)
+	{
+		UE_LOG(LogRocksExport, Display, TEXT("SubstrateExtraction: not run: Substrate disabled"));
+		return;
+	}
+
+	static const TCHAR* const SubstratePath = TEXT("/Game/RxGoldenSubstrate/M_GoldenSubstrate.M_GoldenSubstrate");
+	static const TCHAR* const AttributesPath = TEXT("/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.M_GoldenSubstrateAttributes");
+	static const TCHAR* const LegacyPath = TEXT("/Game/RxGoldenSubstrate/M_Golden.M_Golden");
+	static const TCHAR* const FrontMaterialPin = TEXT("FrontMaterial");
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UMaterial* Layered = LoadObject<UMaterial>(nullptr, SubstratePath);
+	UMaterial* Attributes = LoadObject<UMaterial>(nullptr, AttributesPath);
+	UMaterial* Legacy = LoadObject<UMaterial>(nullptr, LegacyPath);
+	const bool bLoaded = Layered != nullptr && Attributes != nullptr && Legacy != nullptr && Layered->GetEditorOnlyData() != nullptr
+		&& Attributes->GetEditorOnlyData() != nullptr && Legacy->GetEditorOnlyData() != nullptr;
+	Expect(Errors, bLoaded, TEXT("Substrate golden content missing (run make_golden_content.py substrate)"));
+	if (!bLoaded)
+	{
+		return;
+	}
+
+	// 5.8에는 숨은 그래프 재작성이 없다: FrontMaterial 없는 머티리얼은 로드 뒤에도 비어 있다(8.3절의 근거).
+	Expect(Errors, !Legacy->GetEditorOnlyData()->FrontMaterial.IsConnected(), TEXT("loading rewrote the legacy material into a Substrate graph"));
+	const UMaterialExpression* Front = Layered->GetEditorOnlyData()->FrontMaterial.Expression;
+	const UMaterialExpression* AttributesFront = Attributes->GetEditorOnlyData()->FrontMaterial.Expression;
+	Expect(Errors, Front != nullptr && Front->IsA<UMaterialExpressionSubstrateVerticalLayering>() && AttributesFront != nullptr && Attributes->bUseMaterialAttributes,
+		TEXT("Substrate golden content has an unexpected FrontMaterial graph"));
+	if (Front == nullptr || AttributesFront == nullptr)
+	{
+		return;
+	}
+
+	const FString Root = SelfTestDirectory() / TEXT("Substrate");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Substrate.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {SubstratePath, AttributesPath, LegacyPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("Substrate export: %s"), *Result.Error));
+
+	TArray<uint8> BundleJson;
+	const TSharedPtr<FJsonObject> BundleObject = LoadBytes(Output / TEXT("bundle.json"), BundleJson) ? ParseJson(BundleJson) : nullptr;
+	Expect(Errors, BundleObject.IsValid() && BundleObject->GetObjectField(TEXT("projectSettings"))->GetBoolField(TEXT("substrate")),
+		TEXT("bundle.json does not record projectSettings.substrate = true"));
+
+	const auto Load = [&Output](const TCHAR* Path, TArray<uint8>& Json)
+	{
+		return LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	};
+
+	// 출력 핀 이름 목록과 FrontMaterial 연결 대상이다(없으면 빈 문자열).
+	const auto Pins = [](const TSharedPtr<FJsonObject>& Asset, TArray<FString>& Names, FString& FrontNode)
+	{
+		for (const TSharedPtr<FJsonValue>& Pin : Asset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("outputs")))
+		{
+			const TSharedPtr<FJsonObject> Item = Pin->AsObject();
+			Names.Add(Item->GetStringField(TEXT("name")));
+			const TSharedPtr<FJsonObject>* From = nullptr;
+			if (Names.Last() == FrontMaterialPin && Item->TryGetObjectField(TEXT("from"), From))
+			{
+				FrontNode = (*From)->GetStringField(TEXT("node"));
+			}
+		}
+	};
+
+	TArray<uint8> LayeredJson;
+	TArray<uint8> AttributesJson;
+	TArray<uint8> LegacyJson;
+	const TSharedPtr<FJsonObject> LayeredAsset = Load(SubstratePath, LayeredJson);
+	const TSharedPtr<FJsonObject> AttributesAsset = Load(AttributesPath, AttributesJson);
+	const TSharedPtr<FJsonObject> LegacyAsset = Load(LegacyPath, LegacyJson);
+	Expect(Errors, LayeredAsset.IsValid() && AttributesAsset.IsValid() && LegacyAsset.IsValid(), TEXT("Substrate material JSON missing"));
+	if (!LayeredAsset.IsValid() || !AttributesAsset.IsValid() || !LegacyAsset.IsValid())
+	{
+		return;
+	}
+
+	// 개별 핀 머티리얼: FrontMaterial이 VerticalLayering 노드에 이어지고, 읽지 않는 BaseColor 연결도 덤프된다.
+	TArray<FString> LayeredPins;
+	FString LayeredFront;
+	Pins(LayeredAsset, LayeredPins, LayeredFront);
+	Expect(Errors, LayeredFront == Front->GetName() && LayeredPins.Contains(TEXT("BaseColor")) && !LayeredPins.Contains(TEXT("MaterialAttributes")),
+		TEXT("Substrate material output pins differ from the UE material"));
+
+	// 속성 집합 머티리얼: MaterialAttributes 다음 FrontMaterial 두 핀이다(8.8절 2번).
+	TArray<FString> AttributesPins;
+	FString AttributesFrontNode;
+	Pins(AttributesAsset, AttributesPins, AttributesFrontNode);
+	const TArray<FString> ExpectedAttributesPins = {TEXT("MaterialAttributes"), FrontMaterialPin};
+	Expect(Errors, AttributesPins == ExpectedAttributesPins && AttributesFrontNode == AttributesFront->GetName(),
+		FString::Printf(TEXT("attributes material pins are [%s], expected [MaterialAttributes, FrontMaterial] with the slab"), *FString::Join(AttributesPins, TEXT(", "))));
+
+	// 옛 핀 머티리얼: FrontMaterial 핀은 쓰지만 연결이 없다.
+	TArray<FString> LegacyPins;
+	FString LegacyFront;
+	Pins(LegacyAsset, LegacyPins, LegacyFront);
+	Expect(Errors, LegacyPins.Contains(FrontMaterialPin) && LegacyFront.IsEmpty(), TEXT("legacy material FrontMaterial pin"));
+
+	// Slab 노드의 입력 이름·수가 UE GetInputName과 같다(Rocks 핀 별칭의 근거 — 8.8절 4번).
+	int32 Slabs = 0;
+	bool bSlabs = true;
+	for (const TSharedPtr<FJsonValue>& Value : LayeredAsset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("nodes")))
+	{
+		const TSharedPtr<FJsonObject> Node = Value->AsObject();
+		UMaterialExpression* Expression = FindObject<UMaterialExpression>(Layered, *Node->GetStringField(TEXT("name")));
+		if (Expression == nullptr || !Expression->IsA<UMaterialExpressionSubstrateSlabBSDF>())
+		{
+			continue;
+		}
+
+		++Slabs;
+		const TArray<TSharedPtr<FJsonValue>>& Inputs = Node->GetArrayField(TEXT("inputs"));
+		bSlabs = bSlabs && Inputs.Num() == Expression->CountInputs();
+		for (int32 Slot = 0; bSlabs && Slot < Inputs.Num(); ++Slot)
+		{
+			bSlabs = Inputs[Slot]->AsObject()->GetStringField(TEXT("name")) == Expression->GetInputName(Slot).ToString();
+		}
+	}
+
+	Expect(Errors, bSlabs && Slabs == 2, FString::Printf(TEXT("Substrate slab inputs differ from GetInputName (%d slabs)"), Slabs));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 void RocksExportSelfTest::RunMeshWriterEdgeCases(TArray<FString>& Errors)
 {
 	using namespace RocksExportSelfTestPrivate;
@@ -1323,6 +1458,7 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunSkeletalExtraction(Errors);
 	RunAnimationExtraction(Errors);
 	RunMaterialExtraction(Errors);
+	RunSubstrateExtraction(Errors);
 	RunMeshWriterEdgeCases(Errors);
 	return Errors.IsEmpty();
 }

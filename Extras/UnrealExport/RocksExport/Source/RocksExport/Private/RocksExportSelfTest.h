@@ -46,6 +46,12 @@ namespace RocksExportSelfTest
 	// 같은지 본다.
 	void RunMaterialExtraction(TArray<FString>& Errors);
 
+	// Substrate 추출(8.8절 6번): Substrate 프로젝트(r.Substrate=True)의 golden 콘텐츠를 내보내 projectSettings.substrate,
+	// FrontMaterial 연결 대상, 속성 집합 머티리얼의 MaterialAttributes·FrontMaterial 두 핀, Slab 입력 이름(GetInputName),
+	// FrontMaterial 없는 머티리얼이 로드 뒤에도 비었음(숨은 그래프 재작성 없음)을 본다. Substrate가 꺼졌으면 돌지 않고
+	// "not run"을 로그에 남긴다.
+	void RunSubstrateExtraction(TArray<FString>& Errors);
+
 	// 메시 기록 writer의 경계 사례(5.4절 9·11번, 6.3절 11번): 퇴화 다각형(자기 변을 빼고 변 속성을 같이 옮김, 둘레
 	// 복원), 정점 영향 12개 초과(상위 12개·재정규화·TooManyInfluences), 정점 0개 메시, 다채널 Name 속성.
 	void RunMeshWriterEdgeCases(TArray<FString>& Errors);
