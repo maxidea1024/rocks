@@ -19,3 +19,4 @@
 - [저장·전파·중첩·실행 비용·Transform·오류·스레드](04-StoragePropagationRuntime.ko.md) — 3.6–3.13절
 - [결정·선행 조건·단계·시험](05-DecisionsStages.ko.md) — 4–5절
 - [UE 대응표·다른 문서와 맞출 점·미확인·개정 기록](06-MappingAlignmentRevisions.ko.md) — 6–9절
+- [PF1 클래스 원형 구현 명세](07-Pf1ClassSubobjects.ko.md) — 10절
