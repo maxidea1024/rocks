@@ -6,6 +6,7 @@
 #include <RenderBase/BuiltinResources.h>
 #include <RenderBase/EngineShaderTypes.h>
 #include <RenderBase/FullscreenPass.h>
+#include <RenderBase/NoiseTextures.h>
 #include <RenderBase/PipelineCache.h>
 #include <RenderBase/PipelineStatePresets.h>
 #include <RenderBase/RenderHandle.h>
@@ -301,6 +302,13 @@ void CheckPackValues(Device& device, const render::BuiltinResources& pack,
     Check(TextureHolds(device, pack.Texture(BuiltinTexture::FarDepth2D), zero32, 1, scratch,
                        "far depth"),
           "the builtin depth texture is 0 (the reversed-Z far plane)");
+    // noise 시스템 텍스처(11.5절): GPU가 가진 byte가 CPU 표(UE 5.8과 같은 데이터)와 같다.
+    Check(TextureHolds(device, pack.Texture(BuiltinTexture::PerlinGradient2D),
+                       render::PerlinGradient2DTexels(), 1, scratch, "noise gradient 2D"),
+          "the builtin noise gradient 2D texture matches the CPU table byte for byte");
+    Check(TextureHolds(device, pack.Texture(BuiltinTexture::PerlinGradient3D),
+                       render::PerlinGradient3DTexels(), 1, scratch, "noise gradient 3D"),
+          "the builtin noise gradient 3D texture matches the CPU table byte for byte");
     const float zero[4] = {0, 0, 0, 0};
     const float one[4] = {1, 1, 1, 1};
     const uint32 zeroUint[1] = {0};

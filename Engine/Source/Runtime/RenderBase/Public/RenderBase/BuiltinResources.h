@@ -16,8 +16,9 @@
 // 초기화와 준비 gate 없는 경로에 기대지 않는다).
 //
 // 1차 내용(11.4절 5항): 1×1 텍스처(2D white·black·transparent·flat normal, 차원별 대체 2D 배열·3D·
-// cube·cube array·uint 2D·깊이), typed 버퍼(0·1·uint 0·identity affine), 기본 메시 cube·plane(엔진
-// 기본 정점 입력 타입 BuiltinVertexInput), fallback 셰이더(엔진 셰이더 집합의 BuiltinMeshVertex·
+// cube·cube array·uint 2D·깊이), noise 시스템 텍스처(11.5절 — 2D 128×128·3D 16³ gradient 표), typed
+// 버퍼(0·1·uint 0·identity affine), 기본 메시 cube·plane(엔진 기본 정점 입력 타입
+// BuiltinVertexInput), fallback 셰이더(엔진 셰이더 집합의 BuiltinMeshVertex·
 // BuiltinMeshPixel·FullscreenTriangleVertex·CopyTexturePixel).
 //
 // 사용 예(렌더 lane 처리기):
@@ -36,7 +37,7 @@
 // Mesh·FallbackTexture·ResolveTexture)는 어느 스레드에서나 부를 수 있다(대체 계수는 원자).
 namespace rocks::render {
 
-// 팩 텍스처다(1×1, 선형, 샘플러 point·wrap).
+// 팩 텍스처다(선형. noise 표 둘 밖은 1×1·샘플러 point·wrap).
 enum class BuiltinTexture : uint8 {
     // RGBA8Unorm (1,1,1,1)
     White2D,
@@ -57,10 +58,16 @@ enum class BuiltinTexture : uint8 {
     // R32Uint 0
     ZeroUint2D,
     // D32Float 0(reversed-Z 원평면) — 깊이 SRV 대체
-    FarDepth2D
+    FarDepth2D,
+    // 128×128 RGBA8Unorm, 샘플러 point·wrap — 머티리얼 Noise LUT의 2D gradient 표(11.5절,
+    // RenderBase/NoiseTextures.h PerlinGradient2DTexels와 byte 단위로 같다)
+    PerlinGradient2D,
+    // 16×16×16 RGBA8Unorm, 샘플러 bilinear·wrap — 3D gradient·내적 표(11.5절,
+    // PerlinGradient3DTexels)
+    PerlinGradient3D
 };
 
-inline constexpr uint32 BuiltinTextureCount = 10;
+inline constexpr uint32 BuiltinTextureCount = 12;
 
 // 팩 버퍼다(typed SRV view 함께).
 enum class BuiltinBuffer : uint8 {
