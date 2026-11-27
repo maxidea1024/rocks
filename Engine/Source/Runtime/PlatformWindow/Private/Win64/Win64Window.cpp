@@ -41,6 +41,8 @@ constexpr WPARAM SysCommandMask = 0xFFF0;
 constexpr LPARAM SystemMenuKey = ' ';
 constexpr usize MaxTitleCharacters = 256;
 inline constexpr LogCategory LogWin64Window{"Platform.Window"};
+// GCS_CURSORPOS 값에서 커서는 아래 16 bit다(UE WindowsTextInputMethodSystem.cpp 1131행).
+constexpr uint32 CompositionCursorMask = 0xFFFF;
 
 // 스캔코드 set 1(make code) → Key. 확장 키(E0 접두)는 ExtendedKey가 처리한다.
 Key BaseKey(uint32 scanCode) noexcept {
@@ -440,6 +442,10 @@ public:
     void TakeEvents(input::InputQueue& queue) noexcept override {
         AssertOwnerThread();
         pending_.DrainTo(queue);
+        if (hasMissedMarker_ && queue.Push(input::InputEvent::TextInputMethod(missedMarker_))) {
+            hasMissedMarker_ = false;
+        }
+
         // 프레임 경계: 이번에 넘긴 이벤트에서 끝난 손가락 번호를 돌려받는다(TouchIndexAllocator).
         touches_.EndFrame();
     }
@@ -568,11 +574,13 @@ public:
             DeactivateTextInput(*current);
         }
 
-        if (current != &client) {
+        if (textInput_.Active() != &client) {
+            inputMethodOverflowed_ = false;
             textInput_.Activate(client);
         }
 
         AssociateInputMethod(client.AllowsInputMethod());
+        RefreshInputMethodContext();
         PositionInputMethodWindows();
     }
 
@@ -585,8 +593,13 @@ public:
         // 만들던 글자를 넣는다(초점을 옮기면 조합이 확정되는 Windows 관례). IMM이 확정을 이 호출
         // 안에서 WM_IME_COMPOSITION으로 보내면 기록되고, Deactivate가 남은 기록을 먼저 처리한다.
         NotifyInputMethod(CPS_COMPLETE);
+        // 확정을 늦게 보내는 IME(TSF·CUAS 계열)는 아직 조합 문자열이 남아 있다. 미리보기를 그대로
+        // 확정하고, 늦은 확정은 배출 상태에서 삼킨다(19.2절 — 새 초점에 두 번 들어가지 않게).
+        inputMethodDraining_ = HasInputMethodComposition();
+        inputMethodOverflowed_ = false;
         (void)textInput_.Deactivate(client);
         AssociateInputMethod(true);
+        RefreshInputMethodContext();
     }
 
     void CancelTextComposition(TextInputClient& client) noexcept override {
@@ -803,6 +816,31 @@ private:
         pending_.Push(event);
     }
 
+    bool HasInputMethodComposition() noexcept {
+        HIMC context = ImmGetContext(window_);
+        if (!context) {
+            return false;
+        }
+
+        const LONG bytes = ImmGetCompositionStringW(context, GCS_COMPSTR, nullptr, 0);
+        ImmReleaseContext(window_, context);
+        return bytes > 0;
+    }
+
+    // 기본 조합 창 표시(ISC_SHOWUICOMPOSITIONWINDOW)는 WM_IME_SETCONTEXT 때 정해진다. 문맥 수락이
+    // 바뀌면 초점이 있을 때 다시 받는다(19.2절 — 문맥 밖 게임 문자 입력은 OS 조합 창을 쓴다).
+    void RefreshInputMethodContext() noexcept {
+        const bool accepts = textInput_.AcceptsInputMethod();
+        if (accepts == inputMethodAccepted_) {
+            return;
+        }
+
+        inputMethodAccepted_ = accepts;
+        if (GetFocus() == window_) {
+            (void)SendMessageW(window_, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
+        }
+    }
+
     // 활성 문맥이 IME를 허용하면 창 IME 문맥을 잇고, 아니면 뗀다(비밀번호 — UE와 같다). 떼면 IME가
     // 켜지지 않아 확정 문자가 WM_CHAR로만 온다.
     void AssociateInputMethod(bool allow) noexcept {
@@ -851,9 +889,11 @@ private:
         ROCKS_ON_SCOPE_EXIT {
             ImmReleaseContext(window_, context);
         };
+        // 조합 창은 caret 아래다(UE UpdateIMMWindowPositions — ISC 플래그를 무시하는 IME도 글자를
+        // 가리지 않는다).
         COMPOSITIONFORM composition{};
         composition.dwStyle = CFS_POINT;
-        composition.ptCurrentPos = {left, top};
+        composition.ptCurrentPos = {left, bottom};
         (void)ImmSetCompositionWindow(context, &composition);
         CANDIDATEFORM candidates{};
         candidates.dwIndex = 0;
@@ -867,49 +907,88 @@ private:
     // 처리 시점에 읽으면 한 펌프 안의 연속 확정 중 앞의 것을 GCS_RESULTSTR이 덮는다). 한 메시지가
     // 앞 조합을 확정하고 새 조합을 시작할 수 있어 확정을 먼저 기록한다.
     void RecordInputMethod(LPARAM flags) noexcept {
+        // 취소다: lParam 0(UE CancelIMMComposition — WindowsTextInputMethodSystem.cpp 1052–1055행).
+        if (flags == 0) {
+            MarkInputMethod(textInput_.Record(TextInputRecordKind::End, {}, 0));
+            return;
+        }
+
         HIMC context = ImmGetContext(window_);
         if (!context) {
+            CancelUnreadInputMethod();
             return;
         }
 
         ROCKS_ON_SCOPE_EXIT {
             ImmReleaseContext(window_, context);
         };
-        if ((flags & GCS_RESULTSTR) != 0) {
-            RecordInputMethodString(context, GCS_RESULTSTR, TextInputRecordKind::Commit, 0);
+        if ((flags & GCS_RESULTSTR) != 0 &&
+            !RecordInputMethodString(context, GCS_RESULTSTR, TextInputRecordKind::Commit, flags)) {
+            return;
         }
 
         if ((flags & (GCS_COMPSTR | GCS_CURSORPOS)) != 0) {
-            const LONG cursor = ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0);
-            RecordInputMethodString(context, GCS_COMPSTR, TextInputRecordKind::Composition,
-                                    cursor > 0 ? static_cast<uint32>(cursor) : 0);
-        } else if (flags == 0) {
-            // 조합 문자열이 비었다(일본어 IME Esc 등).
-            MarkInputMethod(textInput_.Record(TextInputRecordKind::Composition, {}, 0));
+            (void)RecordInputMethodString(context, GCS_COMPSTR, TextInputRecordKind::Composition,
+                                          flags);
         }
     }
 
-    void RecordInputMethodString(HIMC context, DWORD kind, TextInputRecordKind record,
-                                 uint32 cursor) noexcept {
+    // 문자열 하나를 읽어 기록한다. 읽지 못했으면(삼킨 메시지라 기본 처리로 넘길 수 없다) 조합을
+    // 취소하고 false다.
+    bool RecordInputMethodString(HIMC context, DWORD kind, TextInputRecordKind record,
+                                 LPARAM flags) noexcept {
         const LONG bytes = ImmGetCompositionStringW(context, kind, nullptr, 0);
         if (bytes < 0 || bytes % sizeof(wchar_t) != 0) {
-            return;
+            CancelUnreadInputMethod();
+            return false;
         }
 
         const usize units = static_cast<usize>(bytes) / sizeof(wchar_t);
         if (units > MaxTextInputCodeUnits) {
             MarkInputMethod(textInput_.RecordOverflow());
-            return;
+            return false;
         }
 
         if (units != 0 && ImmGetCompositionStringW(context, kind, inputMethodText_,
                                                    static_cast<DWORD>(bytes)) != bytes) {
-            return;
+            CancelUnreadInputMethod();
+            return false;
+        }
+
+        if (record == TextInputRecordKind::Composition && units == 0 &&
+            (flags & GCS_RESULTSTR) == 0) {
+            // 확정 없이 조합 문자열이 비었다 — 취소다(Esc에 '끝'을 보내지 않는 IME가 있다 — UE
+            // 1094–1097행).
+            MarkInputMethod(textInput_.Record(TextInputRecordKind::End, {}, 0));
+            return true;
+        }
+
+        // 커서는 플래그가 있을 때만 읽는다(UE 1127–1131행). 기본은 조합 끝이다.
+        uint32 cursor = static_cast<uint32>(units);
+        if (record == TextInputRecordKind::Composition && (flags & GCS_CURSORPOS) != 0 &&
+            (flags & CS_NOMOVECARET) == 0) {
+            const LONG position = ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0);
+            if (position >= 0) {
+                const uint32 low = static_cast<uint32>(position) & CompositionCursorMask;
+                cursor = low < cursor ? low : cursor;
+            }
         }
 
         static_assert(sizeof(wchar_t) == sizeof(char16_t), "IMM strings are UTF-16");
-        MarkInputMethod(textInput_.Record(
-            record, {reinterpret_cast<const char16_t*>(inputMethodText_), units}, cursor));
+        MarkInputMethod(
+            textInput_.Record(record, {reinterpret_cast<const char16_t*>(inputMethodText_), units},
+                              record == TextInputRecordKind::Commit ? 0 : cursor));
+        return true;
+    }
+
+    void CancelUnreadInputMethod() noexcept {
+        const auto result = textInput_.RecordOverflow();
+        if (result.serial) {
+            inputMethodOverflowed_ = true;
+            Log::Warning(LogWin64Window,
+                         "IME string could not be read; the composition was cancelled");
+            PushInputMethodMarker(*result.serial);
+        }
     }
 
     void MarkInputMethod(const TextInputRecordResult& result) noexcept {
@@ -920,7 +999,16 @@ private:
         }
 
         if (result.serial) {
-            Push(input::InputEvent::TextInputMethod(*result.serial));
+            PushInputMethodMarker(*result.serial);
+        }
+    }
+
+    // 대기 큐가 차서 표지를 넣지 못하면 번호를 기억했다가 다음 TakeEvents에서 넣는다(19.2절 —
+    // 뒤 번호 하나가 앞 기록을 모두 처리한다).
+    void PushInputMethodMarker(uint32 serial) noexcept {
+        if (!pending_.Push(input::InputEvent::TextInputMethod(serial))) {
+            missedMarker_ = serial;
+            hasMissedMarker_ = true;
         }
     }
 
@@ -1430,24 +1518,35 @@ private:
             }
             break;
         case WM_IME_STARTCOMPOSITION:
+            // 새 조합이 시작되면 앞 문맥의 늦은 확정 배출은 끝났다.
+            inputMethodDraining_ = false;
             if (textInput_.AcceptsInputMethod()) {
                 return 0;
             }
             break;
         case WM_IME_COMPOSITION:
+            if (inputMethodDraining_) {
+                return 0;
+            }
+
             if (textInput_.AcceptsInputMethod()) {
                 RecordInputMethod(lParam);
                 return 0;
             }
             break;
         case WM_IME_ENDCOMPOSITION:
+            if (inputMethodDraining_) {
+                inputMethodDraining_ = false;
+                return 0;
+            }
+
             if (textInput_.AcceptsInputMethod()) {
                 MarkInputMethod(textInput_.Record(TextInputRecordKind::End, {}, 0));
                 return 0;
             }
             break;
         case WM_IME_CHAR:
-            if (textInput_.AcceptsInputMethod()) {
+            if (inputMethodDraining_ || textInput_.AcceptsInputMethod()) {
                 return 0;
             }
             break;
@@ -1635,6 +1734,13 @@ private:
     wchar_t inputMethodText_[MaxTextInputCodeUnits]{};
     bool inputMethodDetached_ = false;
     bool inputMethodOverflowed_ = false;
+    // 마지막 WM_IME_SETCONTEXT 판정이 본 문맥 수락이다.
+    bool inputMethodAccepted_ = false;
+    // 끈 문맥의 늦은 확정을 삼키는 중이다(19.2절).
+    bool inputMethodDraining_ = false;
+    // 대기 큐가 차서 넣지 못한 표지 번호다.
+    uint32 missedMarker_ = 0;
+    bool hasMissedMarker_ = false;
     // 이 스레드의 창 목록 다음 창과 만든 스레드다.
     Win64Window* next_ = nullptr;
     uint64 ownerThread_ = 0;

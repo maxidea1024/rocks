@@ -207,17 +207,20 @@ public:
 
     // 텍스트 입력 문맥이다(Docs/Design/UiToolkit 19.2절). 창마다 활성 문맥은 하나이고, 모두 창 소유
     // 스레드(게임 lane)에서 부른다. client는 Deactivate 전까지 살아 있어야 한다.
-    //   - Activate: 활성 문맥을 바꾼다(앞 문맥은 Deactivate한다). 문맥이 IME를 허용하지 않으면
-    //   IME를
-    //     끈다(확정 문자는 Text 이벤트로 온다).
-    //   - Deactivate: OS 조합을 완료시키고 그 확정까지 처리한 뒤 끈다. client가 활성이 아니면
-    //   무시한다.
-    //   - CancelTextComposition: 앱이 조합 중에 글자를 바꿨다. 문맥은 미리보기를 이미 버렸다. 창은
-    //   OS
-    //     조합을 취소하고 남은 기록을 버린다.
-    //   - NotifyTextInputLayoutChanged: 글자 위치가 바뀌었다(후보 창을 옮긴다).
-    //   - ProcessTextInput: 입력 큐의 TextInputMethod 표지 자리에서 부른다. 그 번호 이하의 기록을
-    //     순서대로 문맥에 적용한다.
+    //
+    // ActivateTextInput은 활성 문맥을 바꾼다(앞 문맥은 Deactivate한다). 문맥이 IME를 허용하지
+    // 않으면 IME를 끈다(확정 문자는 Text 이벤트로 온다).
+    //
+    // DeactivateTextInput은 OS 조합을 완료시키고 그 확정까지 처리한 뒤 끈다. client가 활성이
+    // 아니면 무시한다.
+    //
+    // CancelTextComposition은 앱이 조합 중에 글자를 바꿨다는 알림이다. 문맥은 미리보기를 이미
+    // 버렸고, 창은 OS 조합을 취소하고 남은 기록을 버린다.
+    //
+    // NotifyTextInputLayoutChanged는 글자 위치가 바뀌었다는 알림이다(후보 창을 옮긴다).
+    //
+    // ProcessTextInput은 입력 큐의 TextInputMethod 표지 자리에서 부른다. 그 번호 이하의 기록을
+    // 순서대로 문맥에 적용한다.
     // 기본 구현은 아무것도 하지 않는다(IME 없는 backend — 확정 문자는 Text 이벤트로 온다).
     //
     // 사용 예(창 호스트의 서비스 어댑터):

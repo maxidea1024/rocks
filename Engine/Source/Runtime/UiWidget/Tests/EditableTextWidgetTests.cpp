@@ -67,6 +67,11 @@ public:
     }
 
     void Deactivate(TextInputContext& context) noexcept override {
+        // 플랫폼처럼 만들던 글자를 확정한 뒤 끈다(19.2절).
+        if (active == &context && completeOnDeactivate && context.IsComposing()) {
+            context.EndComposition();
+        }
+
         if (active == &context) {
             active = nullptr;
         }
@@ -82,10 +87,21 @@ public:
         ++layouts;
     }
 
+    // 표지 자리에서 플랫폼 기록처럼 확정 하나를 문맥에 적용한다(commit이 있으면).
     void Process(uint32 record) noexcept override {
         processed = record;
+        if (active && !commit.IsEmpty()) {
+            uint32 begin = 0, length = 0;
+            active->GetSelection(begin, length);
+            active->BeginComposition();
+            active->SetText(begin, length, commit);
+            active->SetSelection(begin + static_cast<uint32>(commit.Size()), 0);
+            active->EndComposition();
+        }
     }
 
+    Span<const char16_t> commit;
+    bool completeOnDeactivate = false;
     TextInputContext* active = nullptr;
     uint32 activations = 0;
     uint32 deactivations = 0;
@@ -294,6 +310,103 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         widget->SetOnChanged({});
         widget->SetOnCommitted({});
     }
+}
+
+// 문맥을 플랫폼처럼 부르는 경로다(19.2절): 표지 뒤의 키는 확정 뒤에 움직이고, 초점을 잃으면 만들던
+// 글자가 확정되어 Commit(FocusLost)이 보며, 조합 중 소멸은 확정 없이 서비스에서 빠진다.
+TEST(UiWidget_EditableTextInputContextFollowsPlatformOrder) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration registration(types, allocator);
+    REQUIRE(RegisterWidgetTypes(registration));
+    ObjectRegistry objects(allocator, types, {0x554957, 1515});
+    const auto access = objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    auto treeRef = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());
+    REQUIRE(treeRef);
+    auto tree = objects.ResolveForWrite<WidgetTree>(access, treeRef.Value().Handle());
+    REQUIRE(tree);
+    auto shaper = SharedPtr<InputTestShaper>::TryMake(allocator, allocator);
+    REQUIRE(shaper);
+    auto& owner = *tree.Value().Get().Value();
+    owner.SetTextShaper(shaper.Value());
+    auto created = owner.ConstructWidget(objects, GeneratedType<EditableTextWidget>::Id(), "ime");
+    REQUIRE(created);
+    auto borrowed = objects.ResolveForWrite<EditableTextWidget>(access, created.Value().Handle());
+    REQUIRE(borrowed);
+    auto* widget = borrowed.Value().Get().Value();
+    REQUIRE(widget->SetText("a"));
+    uint32 focusLostCommits = 0;
+    String committedText(allocator);
+    widget->SetOnCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
+        [&](StringView text, TextCommitReason why) noexcept {
+            if (why == TextCommitReason::FocusLost) {
+                ++focusLostCommits;
+                (void)committedText.TryAssign(text);
+            }
+        }));
+    auto live = widget->TakeElement(objects);
+    REQUIRE(live);
+    auto service = SharedPtr<FakeTextInput>::TryMake(allocator);
+    REQUIRE(service);
+    Application app(allocator);
+    app.SetRoot(live.Value());
+    REQUIRE(app.SetTextInputService(service.Value()));
+    REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 50}, {}), 1));
+    REQUIRE(app.SetFocus(0, live.Value()));
+    TextInputContext* context = service.Value()->active;
+    REQUIRE(context);
+    InputAdapter inputAdapter(app);
+    using input::InputEvent;
+    using input::Key;
+
+    // [확정 "가" 표지, KeyDown(Left)]: 확정이 먼저 들어가고 Left는 그 앞으로 간다.
+    const char16_t ga[] = {0xAC00};
+    service.Value()->commit = ga;
+    const InputEvent batch[] = {InputEvent::TextInputMethod(1), InputEvent::KeyDown(Key::Left)};
+    uint8 consumed[2] = {};
+    REQUIRE(inputAdapter.RouteBatch(batch, consumed, 0));
+    CHECK(widget->GetText() == "a가");
+    uint32 begin = 0, length = 0;
+    context->GetSelection(begin, length);
+    CHECK(begin == 1);
+    CHECK(length == 0);
+    service.Value()->commit = {};
+
+    // 초점을 잃으면 만들던 글자를 확정하고, Commit(FocusLost)이 그 글자를 본다.
+    service.Value()->completeOnDeactivate = true;
+    context->BeginComposition();
+    context->SetText(1, 0, ga);
+    context->UpdateCompositionRange(1, 1);
+    CHECK(widget->GetText() == "a가");
+    REQUIRE(app.SetFocus(0, SharedPtr<Element>{}));
+    CHECK(!service.Value()->active);
+    CHECK(widget->GetText() == "a가가");
+    CHECK(focusLostCommits == 1);
+    CHECK(committedText.View() == "a가가");
+
+    // 조합 중 소멸: 초점 잃음 없이 부서지면 미리보기를 확정하지 않고, 조합 취소 → 끄기 순으로
+    // 서비스에서 빠진다.
+    app.SetRoot({});
+    widget->ReleaseElements();
+    live.Value().Reset();
+    auto orphan = widget->TakeElement(objects);
+    REQUIRE(orphan);
+    REQUIRE(orphan.Value()->SetTextInputService(service.Value()));
+    orphan.Value()->OnFocusReceived(0);
+    context = service.Value()->active;
+    REQUIRE(context);
+    context->BeginComposition();
+    context->SetText(0, 0, ga);
+    const uint32 cancels = service.Value()->cancels;
+    const uint32 deactivations = service.Value()->deactivations;
+    widget->ReleaseElements();
+    orphan.Value().Reset();
+    CHECK(service.Value()->cancels == cancels + 1);
+    CHECK(service.Value()->deactivations == deactivations + 1);
+    CHECK(!service.Value()->active);
+    CHECK(widget->GetText() == "a가가");
+    widget->SetOnCommitted({});
 }
 
 TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {

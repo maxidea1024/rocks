@@ -163,6 +163,14 @@ Result<void> InputAdapter::RouteBatch(Span<const input::InputEvent> events, Span
     }
 
     if (droppedCount != droppedCount_) {
+        // 배치를 버려도 IME 기록은 처리한다 — 가장 큰 표지 하나가 앞 기록을 모두 처리한다(19.2절).
+        for (usize i = events.Size(); i > 0; --i) {
+            if (events[i - 1].type == input::InputEventType::TextInputMethod) {
+                (void)application_.ProcessTextInput(events[i - 1].textInputRecord);
+                break;
+            }
+        }
+
         droppedCount_ = droppedCount;
         for (auto& buttons : gamepadButtons_) {
             buttons = 0;

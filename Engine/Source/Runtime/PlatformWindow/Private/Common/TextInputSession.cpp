@@ -165,6 +165,11 @@ void TextInputSession::Apply(const Entry& entry) noexcept {
     const Span<const char16_t> text(text_ + entry.offset, entry.length);
     switch (entry.kind) {
     case TextInputRecordKind::Composition:
+        if (!composing_ && entry.length == 0) {
+            // 조합 밖의 빈 조합은 아무 일도 아니다(선택 영역을 조합으로 잡아 지우지 않는다).
+            break;
+        }
+
         BeginIfNeeded();
         client.SetText(compositionBegin_, compositionLength_, text);
         compositionLength_ = entry.length;

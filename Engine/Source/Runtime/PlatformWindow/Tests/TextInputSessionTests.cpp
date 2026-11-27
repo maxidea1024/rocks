@@ -188,6 +188,14 @@ TEST(PlatformWindow_TextInputSessionReplacesSelectionAndCancelsOnEnd) {
     const uint32 edits = client.edits;
     CHECK(session.Process(RecordOrZero(session, TextInputRecordKind::End, u"")));
     CHECK(client.edits == edits);
+
+    // 조합 밖의 빈 조합도 아무 일이 아니다 — 선택 영역을 조합으로 잡아 지우지 않는다.
+    client.SetSelection(0, 2);
+    const uint32 begins = client.begins;
+    CHECK(session.Process(RecordOrZero(session, TextInputRecordKind::Composition, u"")));
+    CHECK(client.TextIs(u"ad"));
+    CHECK(client.begins == begins);
+    CHECK(!session.IsComposing());
 }
 
 // 끄면 남은 기록을 먼저 처리하고, 그래도 조합 중이면 그대로 확정한다. 옛 표지는 새 문맥의 기록을

@@ -123,6 +123,13 @@
     - `InputAdapter`가 그 위치에서 `TextInputService::Process(기록)`을 불러 키·문자 이벤트와 순서를 지킨다. 예: [확정 "한", KeyDown(Left)]에서 확정이 먼저 들어간다. UE는 `WM_CHAR`·키·IME를 한 미룬 큐에 순서대로 넣는다(WindowsApplication.cpp 2310–2330행).
     - `WM_IME_COMPOSITION`을 `DefWindowProc`에 넘기지 않거나 `WM_IME_CHAR`를 삼킨다(UE WindowsTextInputMethodSystem.cpp 1157–1161행). 그래야 확정 문자열이 `WM_CHAR`로 두 번 오지 않는다.
   - 활성 context가 없으면 `DefWindowProc` → `WM_IME_CHAR` → `WM_CHAR`로 `Text` 이벤트가 온다. 게임 문자 입력·`InputState`가 IME 글자를 계속 받는다.
+  - **취소 판정(UE `CancelIMMComposition`, WindowsTextInputMethodSystem.cpp 1052–1055·1094–1097행).** `lParam == 0`과 확정 없이 빈 조합 문자열은 '끝' 기록이다. Esc에 문자열만 비우고 `WM_IME_ENDCOMPOSITION`을 보내지 않는 IME가 있어서다. 기록 세션은 조합 중이 아닐 때 온 빈 조합을 무시한다(선택 영역을 지우지 않는다).
+  - **커서.** `GCS_CURSORPOS`가 있고 `CS_NOMOVECARET`가 없을 때만 커서를 읽고 아래 16 bit를 쓴다(UE 1127–1131행). 그 밖에는 조합 끝이다.
+  - **읽기 실패.** 조합 메시지를 삼킨 뒤 문자열을 읽지 못하면 넘침과 같이 처리한다(조합 취소·경고 로그). DefWindowProc로 넘기면 `WM_IME_CHAR` 삼키기와 엇갈려 글자가 사라지기 때문이다.
+  - **SETCONTEXT 다시 받기.** `ISC_SHOWUICOMPOSITIONWINDOW`는 `WM_IME_SETCONTEXT` 때 정해진다. 문맥 수락이 바뀌면(Activate·Deactivate·IME 허용 변경) 창에 초점이 있을 때 `WM_IME_SETCONTEXT`를 다시 보내 기본 조합 창 표시를 맞춘다. UE는 문맥이 없으면 IME를 떼서 이 문제가 없지만, Rocks는 문맥이 없을 때도 게임 문자 입력에 IME를 쓴다.
+  - **늦은 확정 배출.** `CPS_COMPLETE` 뒤에도 조합 문자열이 남아 있으면(TSF·CUAS 계열이 확정을 늦게 보냄) 미리보기를 그대로 확정하고 배출 상태로 둔다. 배출 중에는 조합 메시지와 `WM_IME_CHAR`를 삼킨다. `WM_IME_ENDCOMPOSITION` 또는 다음 `WM_IME_STARTCOMPOSITION`이 배출을 끝낸다. 늦은 확정이 새 초점이나 게임에 한 번 더 들어가지 않게 하려는 것이다.
+  - **표지 잃음.** 창 대기 큐가 차서 표지를 넣지 못하면 가장 큰 번호를 기억했다가 다음 `TakeEvents`에서 넘겨받는 큐 끝에 넣는다. 입력 adapter는 넘친 배치를 버릴 때도 그 배치의 가장 큰 표지 번호로 `ProcessTextInput`을 부른다. 마지막 확정이 다음 IME 메시지까지 안 보이는 일이 없게 한다.
+  - 조합 창(`CFS_POINT`)은 caret 아래, 후보 창(`CFS_EXCLUDE`)은 caret 사각형을 피해 둔다(UE 413–432행).
   - 후보창 위치는 context의 `GetTextBounds`로 당겨 오고(pull), `CFS_EXCLUDE`로 줄을 가리지 않게 한다(UE).
 - **기록 버퍼.** 기록 형식은 (일련번호, 종류 조합·확정·끝, 문자열 offset·길이, 커서)이고, 문자열은 UTF-16 그대로다.
   - 용량은 기록 64개·문자 4096 code unit이고 창 객체 안 고정 배열이다(OS 콜백 안 할당 없음). 처리가 끝나 비면 처음부터 다시 쓴다.
