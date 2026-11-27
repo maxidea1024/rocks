@@ -237,7 +237,7 @@ public:
 
     // staged 쓰기 접근(GetForWrite·참조·컨테이너 쓰기 판정)의 누계다. 값이 같으면 그 사이 이
     // 트랜잭션의 staged 객체에 쓰기가 없었다(경로 쓰기의 검증 상자 경로가 분리와 게시 사이 재진입
-    // 변경을 잡는다 — Docs/Design/CurveData.ko.md 17.2절).
+    // 변경을 잡는다 — Docs/Design/CurveData/README.ko.md 17.2절).
     uint64 WriteCount() const noexcept {
         return writes_;
     }

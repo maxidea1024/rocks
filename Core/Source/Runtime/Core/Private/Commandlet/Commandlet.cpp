@@ -156,7 +156,8 @@ Result<int32> CommandletRegistry::Run(Span<const StringView> args,
         auto result = entry.execute(entry.context, commandArgs, output);
         if (!result)
             return result;
-        if (result.Value() < 0 || result.Value() > 125) {
+        if ((result.Value() < 0 || result.Value() > MaxCommandletExitCode) &&
+            result.Value() != CommandletCancelledExitCode) {
             return Result<int32>::Failure(ErrorCode::InvalidArgument);
         }
         return result;

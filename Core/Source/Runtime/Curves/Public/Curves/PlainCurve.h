@@ -11,7 +11,7 @@
 namespace rocks {
 
 // 접선 없이 커브 전체에 보간 방식 하나(Linear·Constant)를 쓰는 스칼라 커브다(UE 5.8 FSimpleCurve —
-// Docs/Design/CurveData.ko.md 4·5.7·7절). 시간 오름차순 PlainCurveKey 배열과 공통 칸
+// Docs/Design/CurveData/README.ko.md 4·5.7·7절). 시간 오름차순 PlainCurveKey 배열과 공통 칸
 // (ScalarCurveBase), 보간 방식 interp로 이뤄진다. 키당 8 byte라 TangentCurve보다 작고 평가가 싸다.
 //
 // 불변식·검증 hook·편집 연산의 실패 규약·복사·스레드 규칙은 TangentCurve와 같다(TangentCurve.h).

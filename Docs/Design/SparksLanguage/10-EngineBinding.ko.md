@@ -21,7 +21,7 @@ public:
     ROCKS_PROPERTY(ReadOnly, ScriptReadOnly, Replicated)  // Replicated: 네트워크 단계에서 신설
     rocks::int32 current_ = 100;
 
-    ROCKS_PROPERTY(Params = "killer")     // CU3: 이벤트 필드 → FieldKind::Event(EventReflection ED8 — 안쪽이 Core MulticastDelegate)
+    ROCKS_PROPERTY(Params = "killer", ScriptAssignable)  // CU3: 이벤트 필드 → FieldKind::Event(EventReflection ED8), Sparks 노출(SparksBinding B20)
     rocks::Event<rocks::WeakObjectRef<rocks::Actor>> Died;
 
     ROCKS_FUNCTION(Lane = Game, Effects = WriteWorld)   // CU2
@@ -35,10 +35,12 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 |---|---|---|
 | `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_GENERATED_BODY`, `SaveGame`·`ReadOnly`·`Name =` | 있음 | — |
 | `ScriptType`·`NotScriptType`, `ScriptExtensible`·`NotScriptExtensible`, `ScriptReadOnly`·`ScriptWritable`, `ScriptName` | 있음(EI1a — SparksBinding 2절 B1·6절) | — |
-| `Edit`(편집 메타), `Params` | 없음 | UiToolkit CU1·CU3 |
-| `ROCKS_FUNCTION`과 `Lane`·`Effects` 등 | 없음 | CU2(CVar 문서의 `Cheat`·`Authority`·`Help`와 지정자 이름 공간을 함께 정한다) |
+| `Params`, `FieldKind::Event` | 있음(EventReflection EV2) | — |
+| `ScriptAssignable` | EI1c(SparksBinding 9절) | — |
+| `Edit`(편집 메타) | 없음 | UiToolkit CU1 |
+| `ROCKS_FUNCTION`, `ScriptCallable`·`ScriptEffects` | 있음(FR1·EI1b — SparksBinding 7절) | — |
+| `Lane` 등 실행 계약 지정자 | 없음(`ScriptCallable`이 Game lane을 약속 — B12) | 실행 host(EI2) |
 | `Replicated` | 없음 | 네트워크 단계(RX 0절 범위 밖) |
-| `FieldKind::Event` | 없음 | CU3 |
 
 **Sparks 필드와 엔진 필드 플래그.** Sparks 클래스의 필드는 C++ 필드가 아니라 스크립트 instance 저장소에 놓이며, 런타임에 등록하는 schema(동적 schema — 연동 요구 SE-O3)로 리플렉션·저장·override·Changed에 참여한다. attribute는 다음 플래그에 대응한다.
 
@@ -63,7 +65,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 함수 | FunctionId, 시그니처와 nullability, 초당 값 인자, lane, `ThreadSafe`, `Deterministic`, 부수 효과, 최대 작업량, 취소 가능 여부, `MaySafepoint`, 권한, 편집기·출시 가용성, 오류 타입, `NoFatalOnInput`(입력 오류로 Fatal하지 않음 — 선언이 없으면 노출 불가, §8.4), PendingDestroy 대상에서의 동작(읽기 허용·쓰기는 효과 없음 또는 `ContractViolation`). 노출 지정자 `ScriptCallable`이 `NoFatalOnInput`·Game lane을 함께 약속하고, PendingDestroy 대상에서는 실행 host가 `Const` 함수만 부르고 그 밖은 효과 없이 건너뛴다(EI1b — SparksBinding B12) |
 | 자원 정책 | 반환하는 것의 종류: 유지 자원(로드 요청 `LoadRequest<T>` 포함) / 일회성 효과 / 값. 기다리는 API는 고립 완료 해제 경로를 선언. 선언이 없으면 노출 불가 |
 | 파괴 지연 | 엔진 객체를 파괴하는 함수는 스크립트 단계 끝 deferred command로 처리함을 선언(SD3) |
-| 이벤트 | `FieldKind::Event`, FieldId, 인자 이름(`Params`)·형식, 발행 lane, 발행 측(서버·소유 클라이언트·모든 기기), 스크립트 단계 안 `Broadcast`의 큐 기록, VM 연결 thunk |
+| 이벤트 | `FieldKind::Event`, FieldId, 인자 이름(`Params`)·형식, 발행 lane, 발행 측(서버·소유 클라이언트·모든 기기), VM 연결 thunk(스크립트 단계 안 native 발행의 전달은 schema가 아니라 §5.4 규칙 — SD78) |
 
 #### binding schema 파일 형식(LC2a 확정, SD61)
 
@@ -117,7 +119,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 
 ### 10.3 이름·노출과 API 규칙
 
-- 타입 이름은 타입 도구 이름(`Name =` 지정값, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`)이고, 함수 이름은 함수 도구 이름(`ROCKS_FUNCTION(Name = …)`, 없으면 C++ 이름 — EI1b, 런타임 조회와 같은 이름), 이벤트 이름은 C++ 이름 그대로다. 리플렉션 필드(이벤트 필드 포함)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
+- 타입 이름은 타입 도구 이름(`Name =` 지정값, 없으면 한정하지 않은 C++ 이름 — `rocks::Actor` → `Actor`)이고, 함수 이름은 함수 도구 이름(`ROCKS_FUNCTION(Name = …)`, 없으면 C++ 이름 — EI1b, 런타임 조회와 같은 이름)다. 리플렉션 필드(이벤트 필드 포함 — 이벤트는 `ScriptAssignable`, SparksBinding B22)는 도구 이름(`Name =` 지정값, 없으면 C++ 이름에서 끝의 `_`를 뗀 것)의 첫 글자를 대문자로 바꿔 노출하며(SD2), 그 밖의 `_`를 포함한 이름은 `ScriptName`으로 지정해야 한다. `ScriptName`은 도구 이름 위에 덮는 스크립트 전용 이름이다.
 - `Result`를 돌려주는 C++ 함수 `TryX`는 Sparks에서 자동으로 `X`로 노출한다(SD44). 변환한 이름이 다른 멤버와 겹치면 메타 컴파일 오류이며 `ScriptName`을 요구한다. 엔진 수명 hook 이름과 겹치는 C++ 함수(`Actor::Destroy` 등)는 `ScriptName`(예: `RequestDestroy`)으로 노출한다.
 - 메타 컴파일러는 타입별로 기반 체인을 포함한 최종 Sparks 이름을 계산한다. 이름이 중복되거나 예약 이름(부록 A)·hook 이름(컴파일러 `HookForMemberName`과 같은 집합 — hook, `On` + hook, Unity 별칭)과 같으면 메타 컴파일 오류이며 `ScriptName`을 요구한다(메타 컴파일러가 읽는 이름 표는 컴파일러 목록과 시험으로 대조한다 — SparksBinding B6). 스크립트에 노출하는 함수의 C++ 오버로드도 서로 다른 `ScriptName`이 없으면 메타 컴파일 오류다.
 - C++ 수명 가상 함수(`On*`·`OnRegister`·`OnUnregister`)는 노출하지 않는다. 쓰기 가능한 속성이 있으면 같은 값을 쓰는 `SetX` 함수는 노출하지 않는다.

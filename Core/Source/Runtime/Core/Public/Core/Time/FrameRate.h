@@ -7,9 +7,9 @@
 #include <Platform/Fatal.h>
 
 // 프레임 단위 시간이다(UE 5.8 Core/Public/Misc/FrameRate.h·FrameNumber.h·FrameTime.h의 최소 대응 —
-// 설계 Docs/Design/CurveData.ko.md D20). 초 단위 실수 시간을 정해진 프레임 속도의 프레임 번호와
-// 프레임 안 비율(subframe)로 나타낸다. 커브 중복 키 제거의 표본 시간이 쓰고, 시퀀서·애니메이션
-// 시간도 같은 형식을 쓴다.
+// 설계 Docs/Design/CurveData/README.ko.md D20). 초 단위 실수 시간을 정해진 프레임 속도의 프레임
+// 번호와 프레임 안 비율(subframe)로 나타낸다. 커브 중복 키 제거의 표본 시간이 쓰고,
+// 시퀀서·애니메이션 시간도 같은 형식을 쓴다.
 //
 // 사용 예:
 //   const FrameRate rate = FrameRate::TryCreate(30, 1).Value();     // 30 fps

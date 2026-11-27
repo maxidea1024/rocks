@@ -4,6 +4,7 @@
 #include "RocksExportCommon.h"
 #include "RocksExportSelfTest.h"
 #include "RocksExporter.h"
+#include "RocksMaterialBaker.h"
 
 URocksExportCommandlet::URocksExportCommandlet()
 {
@@ -30,14 +31,14 @@ int32 URocksExportCommandlet::Main(const FString& Params)
 			UE_LOG(LogRocksExport, Error, TEXT("Self test: %s"), *Error);
 		}
 
-		UE_LOG(LogRocksExport, Display, TEXT("Self test %s (%d failures)"), bPassed ? TEXT("passed") : TEXT("failed"), Errors.Num());
-		return bPassed ? 0 : 1;
-	}
+		const TArray<FString> NotRun = RocksExportSelfTest::TakeNotRun();
+		for (const FString& Reason : NotRun)
+		{
+			UE_LOG(LogRocksExport, Warning, TEXT("Self test: %s"), *Reason);
+		}
 
-	if (Values.Contains(TEXT("BakeMaterials")) || Switches.Contains(TEXT("BakeMaterials")) || Values.Contains(TEXT("BakeSize")))
-	{
-		UE_LOG(LogRocksExport, Error, TEXT("-BakeMaterials and -BakeSize are not available before stage UX6"));
-		return 1;
+		UE_LOG(LogRocksExport, Display, TEXT("Self test %s (%d failures, %d not run)"), bPassed ? TEXT("passed") : TEXT("failed"), Errors.Num(), NotRun.Num());
+		return bPassed ? 0 : 1;
 	}
 
 	if (Switches.Contains(TEXT("Closure")) && Switches.Contains(TEXT("NoClosure")))
@@ -48,6 +49,34 @@ int32 URocksExportCommandlet::Main(const FString& Params)
 
 	FRocksExportOptions Options;
 	Options.bClosure = !Switches.Contains(TEXT("NoClosure"));
+
+	// 굽기(8.9절 1번): -BakeMaterials[ -BakeSize=<n>]. 렌더링이 되는 프로세스여야 한다(내보내기 전에 거부한다).
+	const FString* BakeSize = Values.Find(TEXT("BakeSize"));
+	if (Switches.Contains(TEXT("BakeMaterials")))
+	{
+		// int64로 읽어 범위를 본다(int32 Atoi는 플랫폼에 따라 넘침을 자른다).
+		int64 Size = RocksExport::DefaultBakeSize;
+		if (BakeSize != nullptr && (!BakeSize->IsNumeric() || BakeSize->Contains(TEXT(".")) || !LexTryParseString(Size, **BakeSize)
+			|| Size < RocksExport::MinBakeSize || Size > RocksExport::MaxBakeSize))
+		{
+			UE_LOG(LogRocksExport, Error, TEXT("-BakeSize must be an integer from %d to %d"), RocksExport::MinBakeSize, RocksExport::MaxBakeSize);
+			return 1;
+		}
+
+		if (!FRocksMaterialBaker::CanBake())
+		{
+			UE_LOG(LogRocksExport, Error, TEXT("-BakeMaterials needs rendering: pass -AllowCommandletRendering and do not pass -nullrhi"));
+			return 1;
+		}
+
+		Options.BakeSize = int32(Size);
+	}
+	else if (BakeSize != nullptr || Values.Contains(TEXT("BakeMaterials")))
+	{
+		UE_LOG(LogRocksExport, Error, TEXT("-BakeSize needs -BakeMaterials (and -BakeMaterials takes no value)"));
+		return 1;
+	}
+
 	if (const FString* Out = Values.Find(TEXT("Out")))
 	{
 		Options.OutputDirectory = *Out;
@@ -61,7 +90,7 @@ int32 URocksExportCommandlet::Main(const FString& Params)
 
 	if (Options.Selections.IsEmpty() || Options.OutputDirectory.IsEmpty())
 	{
-		UE_LOG(LogRocksExport, Error, TEXT("Usage: -run=RocksExport -Assets=<path>[,<path>...] -Out=<bundle directory> [-Closure|-NoClosure] | -SelfTest"));
+		UE_LOG(LogRocksExport, Error, TEXT("Usage: -run=RocksExport -Assets=<path>[,<path>...] -Out=<bundle directory> [-Closure|-NoClosure] [-BakeMaterials [-BakeSize=<n>]] | -SelfTest"));
 		return 1;
 	}
 

@@ -9,10 +9,10 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 커브 키 핸들 표 시험이다(Docs/Design/CurveData.ko.md 8절, D3 — CV7): 다섯 커브 형식에서 무작위
-// 편집 순서(더하기·UpdateOrAdd·지우기·시간 옮기기·값 바꾸기·선택 키 이동·필드 편집)마다 모든 핸들이
-// 같은 키를 가리키는지(키 값에 고유 번호를 두어 본다), 표를 거치지 않은 수정의 감지(StaleHandle)와
-// TryRebuild, 발급 카운터 Overflow, 할당 실패 원자성(주입 단언), 복사·이동.
+// 커브 키 핸들 표 시험이다(Docs/Design/CurveData/README.ko.md 8절, D3 — CV7): 다섯 커브 형식에서
+// 무작위 편집 순서(더하기·UpdateOrAdd·지우기·시간 옮기기·값 바꾸기·선택 키 이동·필드 편집)마다 모든
+// 핸들이 같은 키를 가리키는지(키 값에 고유 번호를 두어 본다), 표를 거치지 않은 수정의
+// 감지(StaleHandle)와 TryRebuild, 발급 카운터 Overflow, 할당 실패 원자성(주입 단언), 복사·이동.
 using namespace rocks;
 namespace curve_key_handle_table_tests_file {
 

@@ -59,7 +59,6 @@ constexpr ContractField ContractFields[] = {
     {"compressionYCoCg", nullptr, ContractCondition::Always},
     {"layerFormatSettings", nullptr, ContractCondition::Always},
     {"lossyCompressionAmount", nullptr, ContractCondition::Always},
-    {"compressionQuality", nullptr, ContractCondition::Always},
     {"oodlePreserveExtremes", nullptr, ContractCondition::Always},
     {"numCinematicMipLevels", nullptr, ContractCondition::Always},
     {"virtualTextureStreaming", nullptr, ContractCondition::Always},

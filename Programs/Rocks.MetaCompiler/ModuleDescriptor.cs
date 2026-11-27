@@ -18,7 +18,8 @@ internal static class ModuleDescriptor
     // 6: 함수 flag ScriptCallable과 함수 scriptName(노출 함수의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B15).
     // 7: 이벤트 필드(fieldKind "Event" — 키 EventFieldKeys, 인자 params — Docs/Design/EventReflection.ko.md ED18). 파생 모듈이 상속 이벤트를
     // schema·연산표에 다시 싣는다.
-    private const int DescriptorSchema = 7;
+    // 8: 이벤트 필드 flag ScriptAssignable과 이벤트 필드 scriptName(노출 이벤트의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B25).
+    private const int DescriptorSchema = 8;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -43,8 +44,10 @@ internal static class ModuleDescriptor
             "scriptName"];
 
     // 이벤트 필드 항목이다(값 형식 칸 대신 인자 params — 칸마다 함수 매개변수 칸과 flags(ObjectHandle)). flags는 Transient →
-    // EditorOnly → DuplicateTransient → NonTryoutDuplicateTransient → SaveGame 순서다.
-    private static readonly string[] EventFieldKeys = ["owner", "name", "id", "fieldKind", "flags", "toolName", "category", "displayName", "params"];
+    // EditorOnly → DuplicateTransient → NonTryoutDuplicateTransient → SaveGame → ScriptAssignable 순서다. scriptName은 노출 이벤트의 최종
+    // Sparks 이름(노출하지 않으면 "")이다.
+    private static readonly string[] EventFieldKeys =
+        ["owner", "name", "id", "fieldKind", "flags", "toolName", "category", "displayName", "params", "scriptName"];
 
     private static readonly string[] EventParameterKeys = ["name", "value", "element", "key", "flags", "maxElements"];
 
@@ -275,7 +278,7 @@ internal static class ModuleDescriptor
         json.WriteStartArray("flags");
         foreach ((bool set, string flag) in new[] { (field.Spec.Transient, "Transient"), (field.Spec.EditorOnly, "EditorOnly"),
             (field.Spec.DuplicateTransient, "DuplicateTransient"), (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"),
-            (field.Spec.SaveGame, "SaveGame") })
+            (field.Spec.SaveGame, "SaveGame"), (field.Spec.ScriptAssignable, "ScriptAssignable") })
         {
             if (set)
             {
@@ -305,6 +308,7 @@ internal static class ModuleDescriptor
         }
 
         json.WriteEndArray();
+        json.WriteString("scriptName", SparksBinding.ScriptEventName(field));
         json.WriteEndObject();
     }
 
@@ -643,7 +647,7 @@ internal static class ModuleDescriptor
                         throw Invalid($"event field in struct {name}");
                     }
 
-                    fields.Add(ReadEventField(field, descriptorPath, Invalid));
+                    fields.Add(ReadEventField(field, name, model.ScriptType, descriptorPath, Invalid));
                     continue;
                 }
 
@@ -1073,7 +1077,8 @@ internal static class ModuleDescriptor
 
     // 이벤트 필드 항목이다(EventFieldKeys — 원본 선언의 ED14 규칙: flag, lowerCamel 인자 이름, 인자 칸은 함수 매개변수 칸 규칙). ObjectHandle
     // 인자는 칸 철자를 rocks::ObjectHandle로 되살린다(생성 schema의 ParameterFlags::ObjectHandle).
-    private static FieldModel ReadEventField(JsonElement field, string descriptorPath, Func<string, MetadataException> invalid)
+    private static FieldModel ReadEventField(JsonElement field, string typeName, bool scriptType, string descriptorPath,
+        Func<string, MetadataException> invalid)
     {
         string Name(JsonElement element, Regex pattern, string what)
         {
@@ -1086,10 +1091,23 @@ internal static class ModuleDescriptor
         string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
         string owner = Name(field.GetProperty("owner"), QualifiedName, "field owner");
         string[] flags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-        if (flags.Any(flag => flag is not ("Transient" or "EditorOnly" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or "SaveGame")) ||
-            flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
+        if (flags.Any(flag => flag is not ("Transient" or "EditorOnly" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or "SaveGame" or
+                "ScriptAssignable")) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
         {
             throw invalid($"unknown or duplicate event field flag in {owner}::{fieldName}");
+        }
+
+        // 노출 이벤트는 최종 Sparks 이름(PascalCase, Changed 아님)이 있고, 그 밖은 빈 글자다. EditorOnly 이벤트와 노출하지 않은 타입의 자기
+        // 이벤트는 노출되지 않는다(원본 RMC2604·RMC2606·RMC2607·RMC2608 — 생성기가 만들지 않는 조합).
+        JsonElement scriptNameValue = field.GetProperty("scriptName");
+        string scriptName = scriptNameValue.ValueKind == JsonValueKind.String
+            ? scriptNameValue.GetString() ?? ""
+            : throw invalid("scriptName of " + owner + "::" + fieldName);
+        bool assignable = flags.Contains("ScriptAssignable");
+        if (assignable != (scriptName.Length != 0) || (assignable && (!Specifiers.IsScriptName(scriptName) || scriptName == "Changed" ||
+                flags.Contains("EditorOnly") || (owner == typeName && !scriptType))))
+        {
+            throw invalid($"Sparks exposure of {owner}::{fieldName}");
         }
 
         FieldModel model = new()
@@ -1107,7 +1125,9 @@ internal static class ModuleDescriptor
                 DuplicateTransient = flags.Contains("DuplicateTransient"),
                 NonTryoutDuplicateTransient = flags.Contains("NonTryoutDuplicateTransient"),
                 SaveGame = flags.Contains("SaveGame"),
-                ToolName = toolName == fieldName ? "" : toolName
+                ToolName = toolName == fieldName ? "" : toolName,
+                ScriptAssignable = assignable,
+                ScriptName = scriptName
             },
             Kind = "Opaque",
             IsEvent = true

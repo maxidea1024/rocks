@@ -218,7 +218,7 @@ internal static partial class MetaTests
             BindingPreamble + "ROCKS_CLASS(ScriptType)\nstruct Thing : public rocks::Object {\nROCKS_PROPERTY(ScriptReadOnly) rocks::int32 score = 0;\n};\n" +
                 "ROCKS_CLASS()\nstruct Child : public Thing {\nROCKS_PROPERTY(ScriptReadOnly, ScriptName = \"Score\") rocks::int32 other = 0;\n};\n}\n",
             BindingThing("ROCKS_PROPERTY(ScriptReadOnly) rocks::int32 total = 0;\nROCKS_PROPERTY(ScriptReadOnly, ScriptName = \"Total\") rocks::int32 sum = 0;")],
-            "RMC2605", "Sparks field name");
+            "RMC2605", "Sparks member name");
         // RMC2606: 언어 소유 타입 이름(rocks::Asset의 Asset 포함)과 object 필드의 hook 계열 이름(hook·On + hook·Unity 이름)이다.
         AddRejectGroup(context, "Meta.SparksBindingRejectsLanguageNames", [
             BindingThing("ROCKS_PROPERTY(ScriptReadOnly) bool tick = false;"),

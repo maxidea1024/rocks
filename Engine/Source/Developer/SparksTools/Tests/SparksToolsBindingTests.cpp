@@ -145,34 +145,80 @@ TEST(SparksBinding_NamesMatchCompiler) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+namespace {
+
+// 빌드 출력 `Metadata/`의 modules schema를 temp의 `Schemas/`로 옮긴다(SparksBinding B9 — 시험
+// 실행 파일 `<출력>/bin/` 옆).
+bool CopySchemas(Allocator& allocator, TempFolder& temp, Span<const StringView> modules) noexcept {
+    char executable[PathCapacity];
+    usize bytes = 0;
+    if (!platform::GetExecutablePath(executable, PathCapacity, bytes)) {
+        return false;
+    }
+
+    const usize bin = ParentLength(StringView(executable, bytes));
+    const usize output = ParentLength(StringView(executable, bin));
+    auto metadata = Path::Combine(allocator, StringView(executable, output), "Metadata");
+    if (output == 0 || !metadata) {
+        return false;
+    }
+
+    for (const StringView module : modules) {
+        StringBuilder<128> name(allocator);
+        StringBuilder<128> target(allocator);
+        if (!name.TryAppendFormat("{}.sparkbind.json", module) ||
+            !target.TryAppendFormat("Schemas/{}", name.View())) {
+            return false;
+        }
+
+        auto source = Path::Combine(allocator, metadata.Value().View(), name.View());
+        Array<uint8> text(allocator);
+        if (!source || !ReadText(source.Value().View(), text) ||
+            !temp.Write(target.View(), TextOf(text))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 이벤트 fixture(ReflectionTestFixtures EventBeacon)를 쓰는 Sparks 원본 하나를 검사하고 종료 코드와
+// 출력(요약·진단)을 돌려준다.
+struct EventCheck {
+    int32 exit = 0;
+    String output;
+};
+
+EventCheck CheckWithEvents(Allocator& allocator, StringView source) noexcept {
+    EventCheck checked{ExitFailure, String(allocator)};
+    TempFolder temp(allocator);
+    constexpr StringView Modules[] = {"CoreTypeBindings", "World", "ReflectionTestFixtures"};
+    if (!CopySchemas(allocator, temp, Modules) ||
+        !temp.Write("Pkg/SparksPackage.json5", Manifest) ||
+        !temp.Write("Pkg/Watch.spark", source)) {
+        return checked;
+    }
+
+    const String schemas = temp.PathOf("Schemas");
+    const String package = temp.PathOf("Pkg");
+    BufferOutput result(allocator);
+    const StringView arguments[] = {"check", "--schema", schemas.View(), package.View()};
+    checked.exit = RunCommand(allocator, platform::PhysicalFileSystem(), arguments, result);
+    (void)checked.output.TryAssign(result.output.View());
+    return checked;
+}
+
+} // namespace
+
 // 빌드 출력 배치 `<출력>/bin/<실행 파일>` → `<출력>/Metadata/`에
 // 기댄다(Docs/Design/SparksBinding.ko.md B9 — 폴더가 없으면 건너뛰지 않고 실패한다).
 TEST(SparksBinding_EngineSchemasCompile) {
     SystemAllocator allocator;
     {
-        char executable[PathCapacity];
-        usize bytes = 0;
-        REQUIRE(platform::GetExecutablePath(executable, PathCapacity, bytes));
-        const usize bin = ParentLength(StringView(executable, bytes));
-        const usize output = ParentLength(StringView(executable, bin));
-        REQUIRE(output > 0);
-        auto metadata = Path::Combine(allocator, StringView(executable, output), "Metadata");
-        REQUIRE(metadata);
-
         // 읽을 모듈은 목록으로 정한다(도구·픽스처 모듈과 남은 옛 파일이 섞이지 않게).
         constexpr StringView Modules[] = {"CoreTypeBindings", "World", "Gameplay"};
         TempFolder temp(allocator);
-        for (const StringView module : Modules) {
-            StringBuilder<128> name(allocator);
-            REQUIRE(name.TryAppendFormat("{}.sparkbind.json", module));
-            auto source = Path::Combine(allocator, metadata.Value().View(), name.View());
-            REQUIRE(source);
-            Array<uint8> text(allocator);
-            REQUIRE(ReadText(source.Value().View(), text));
-            StringBuilder<128> target(allocator);
-            REQUIRE(target.TryAppendFormat("Schemas/{}", name.View()));
-            REQUIRE(temp.Write(target.View(), TextOf(text)));
-        }
+        REQUIRE(CopySchemas(allocator, temp, Modules));
 
         // 실제 엔진 타입·필드를 읽는다(필드 타입이 기대와 같아야 대입·비교가 진단 없이 통과한다).
         REQUIRE(temp.Write("Pkg/SparksPackage.json5", Manifest));
@@ -221,6 +267,51 @@ TEST(SparksBinding_EngineSchemasCompile) {
         // 원본 파일 하나가 모듈 하나다(Probe·Mover).
         CHECK(result.output.View() == "0 errors in 2 modules\n");
         CHECK(result.error.View().IsEmpty());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 노출 이벤트(Docs/Design/SparksBinding.ko.md EI1c B29): 생성된 fixture schema의 이벤트에 `on`
+// handler(인자 일부 — 앞 인자만, 전부, 인자 없음, 약한 참조 인자)와 `await`가 진단 없이 컴파일되고,
+// 인자 타입이 다른 handler는 S0810, 엔진 이벤트 `emit`은 S0811이다.
+TEST(SparksBinding_EngineEventsCompile) {
+    SystemAllocator allocator;
+    {
+        const EventCheck accepted = CheckWithEvents(
+            allocator, "class Watcher : Actor {\n"
+                       "    @edit var Source: EventBeacon?;\n"
+                       "    @edit var Spare: EventBeacon?;\n"
+                       "    var Total: int32 = 0;\n"
+                       "\n"
+                       "    on Source.Scored(amount: int32) { Total = Total + amount; }\n"
+                       "    on Source.Tagged(label: string) { _ = label; }\n"
+                       "    on Spare.Tagged(label: string, mood: BeaconMood) {\n"
+                       "        if (mood == BeaconMood.Alert) { Total = Total + 1; }\n"
+                       "        _ = label;\n"
+                       "    }\n"
+                       "    on Source.Pinged() { Total = Total + 1; }\n"
+                       "    on Source.Linked(other: EventBeacon?) { _ = other; }\n"
+                       "\n"
+                       "    async fn Wait(beacon: EventBeacon) { await beacon.Pinged; }\n"
+                       "}\n");
+        CHECK(accepted.exit == ExitSuccess);
+        CHECK(accepted.output.View() == "0 errors in 1 modules\n");
+
+        const EventCheck mismatched =
+            CheckWithEvents(allocator, "class Watcher : Actor {\n"
+                                       "    @edit var Source: EventBeacon?;\n"
+                                       "\n"
+                                       "    on Source.Scored(amount: string) { _ = amount; }\n"
+                                       "}\n");
+        CHECK(mismatched.exit == ExitFailure);
+        CHECK(mismatched.output.View().Contains("S0810", StringComparison::CaseSensitive));
+
+        const EventCheck emitted = CheckWithEvents(
+            allocator, "class Watcher : Actor {\n"
+                       "    fn Ring(beacon: EventBeacon) { emit beacon.Pinged(); }\n"
+                       "}\n");
+        CHECK(emitted.exit == ExitFailure);
+        CHECK(emitted.output.View().Contains("S0811", StringComparison::CaseSensitive));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

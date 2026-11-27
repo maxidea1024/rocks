@@ -28,6 +28,22 @@ internal static partial class MetaTests
             "template <class T> struct Keep { rocks::ObjectRef<rocks::Object> ref; T value{}; };\n" +
             "template <class A, class B> struct Pair { A first{}; B second{}; };\n" +
             "struct Tagged { union { rocks::Object* object; unsigned long long bits; }; };\n";
+        // 같은 서비스 타입에 대한 강한 소유와 약한 관찰을 실제 Core 스마트 포인터로 대조한다.
+        // 약참조를 다른 보관 구조체 안에 두어도 인접한 강한 참조는 계속 진단해야 한다.
+        suite.Add("Meta.NativeWeakPtrObservesServiceWithoutTracingItsRoot", async () =>
+        {
+            static string Source(string members) => Declaration(extra: "ROCKS_NATIVE() ServiceLinks links;")
+                .Replace("namespace probe {",
+                    "#include <Core/Memory/SharedPtr.h>\nnamespace probe {\n" +
+                    "struct Service { rocks::RootRef<rocks::Object> owner; };\n" +
+                    $"struct ServiceLinks {{ {members} }};\n", StringComparison.Ordinal);
+
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(Source("rocks::WeakPtr<Service> observed;"));
+            await probe.RejectAsync(Source("rocks::WeakPtr<Service> observed; rocks::SharedPtr<Service> owned;"),
+                "RMC2205", "strong object reference");
+        });
+
         AddRejectGroup(context, "Meta.NativeMembersCannotHoldStrongReferences", new[]
             {
                 "rocks::ObjectRef<Value> cache;",

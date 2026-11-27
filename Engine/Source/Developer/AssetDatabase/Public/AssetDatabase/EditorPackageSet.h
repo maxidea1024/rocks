@@ -309,8 +309,8 @@ public:
     // 바뀜) ExternalModification / StaleHandle, ImportRecord 형식 위반 CorruptPackage /
     // InvalidArgument(칸 ImportRecord), ImportOwner 대조 위반 CorruptPackage / InvalidArgument(칸
     // Dependencies), 묶음 인스턴스의 오류(InstantiatePackages — 트랜잭션 전체 실패, 아무것도 열리지
-    // 않는다), 열 때 원본 재구성 hook의 오류(hook 진단 — 이번에 연 패키지를 모두 닫는다), 할당
-    // 실패(진단 None). 의존 패키지의 같은 실패는 경고다.
+    // 않는다), 열 때 원본 재구성 hook의 오류(hook 진단 — 이번에 연 패키지를 모두 닫고 이번 호출의
+    // 경고를 되돌린다), 할당 실패(진단 None). 의존 패키지의 같은 실패는 경고다.
     Result<ObjectHandle> Open(AssetId id, Array<EditorWarning>* warnings = nullptr,
                               AssetDiagnostic* failure = nullptr) noexcept;
     // 논리 경로로 연다(색인 FindByPath — 같은 경로 키 둘은 DuplicatePath / AlreadyExists, 없음은

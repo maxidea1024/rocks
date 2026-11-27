@@ -1,0 +1,3076 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::ui::AlignedWidgetSlot::horizontal_",
+      "id": "fbdd70d213544cae86042df5997177ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AlignedWidgetSlot::padding_",
+      "id": "20794abc781a4eb6b8d03b2040023b14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AlignedWidgetSlot::vertical_",
+      "id": "6bc90dac6b14474a9bf05b4092b940c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::alignment_",
+      "id": "02d57695f0344716b7b67ea5a3c01f0e",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::alignment_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::anchorMax_",
+      "id": "c90b1c21cff143128b9c524544891d3c",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::anchorMax_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::anchorMin_",
+      "id": "10fbfe4ef4de4079a1fce0ab0016f4a1",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::anchorMin_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::autoSize_",
+      "id": "d54ed1156217467cb3e25798e4132e38",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::autoSize_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::offset_",
+      "id": "b7adf1ab21b64392935e9ea774fc4f0f",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::offset_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::zOrder_",
+      "id": "56c87af7c2dd421d83c2af9b401d52ed",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::zOrder_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::applyAlphaToBlur_",
+      "id": "f49d8c9698b84d0fb125d914965c30a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::blurRadius_",
+      "id": "33c9cb5cf6b84f908ea0ca0e0f41457b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::cornerRadius_",
+      "id": "7fc9e49930664e30a39173166e3d5f45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::fallbackTint_",
+      "id": "fd19f1d50e9a4581909e745b1832c13a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::lowQuality_",
+      "id": "7ae3219f7fce48d0be64ff6096363ed7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BackgroundBlurWidget::strength_",
+      "id": "4833737c7572435b97ccd89bd1cdcaf5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BorderWidget::padding_",
+      "id": "8a019aaab04840e4b25de6a99d332cee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::BorderWidget::tint_",
+      "id": "a8821c59d7ff4a67a2d74e2519720b84",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::backgroundColor_",
+      "id": "699090be137e429fa4d65b223c90929d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::clickMethod_",
+      "id": "93294cf99b5c42f78423e72784f6dfe1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::clicked_",
+      "id": "ede89d617bc34d04bf747c99104ab3f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::focusable_",
+      "id": "574c0ea1e791427da7158e8b73b4999b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::hoveredTint_",
+      "id": "6b6c0e6f3b11466b9b2eb13f6d90ecea",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::hovered_",
+      "id": "30f3341c4a814b70b76b723b2761643f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::normalTint_",
+      "id": "998112f37f8942a7812f1018b9269809",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::padding_",
+      "id": "d8cc702dd33d4039bdedec13de0ca3fd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::pressMethod_",
+      "id": "b408d3272dd44d26b93c39c876bd6a6a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::pressedTint_",
+      "id": "60cae66a596f4b2bb4563c0dfd909297",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::pressed_",
+      "id": "e5ce701be76243f79988117297cfbe25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::released_",
+      "id": "036d886b53744d93bb26e9583a324e04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::touchMethod_",
+      "id": "89c84e61f8dc43c38c7eb4c317194762",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ButtonWidget::unhovered_",
+      "id": "9e4152f8e404401fa8bab74107d721e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CarouselNavBarWidget::buttonPadding_",
+      "id": "25d1cdac209f4bf28a229fe41a511685",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CarouselNavBarWidget::linkedCarousel_",
+      "id": "e83e8a0f39f744c5a6539a41b9858bf7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CarouselWidget::activeIndex_",
+      "id": "2d123b42993e4ff6aa871589de3cac9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CarouselWidget::cacheChildren_",
+      "id": "a2d5adef60764c01a6d301ca29e31d7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CarouselWidget::moveSpeed_",
+      "id": "de3e2f804c18424db2c52d985a8e0b1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::changed_",
+      "id": "bc41610fe67e4a488b967b1d8befa034",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::checked_",
+      "id": "56190aae4d154c69ae5a145e5685ab7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::indeterminate_",
+      "id": "ddd84b71b5d54276b543a890701681a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CheckBoxWidget::stateChanged_",
+      "id": "831125161a054c62b56de6aed626e439",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::animating_",
+      "id": "f409e7a646014157ae5b0ea1fe2f1933",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::period_",
+      "id": "3b3ef8da6d85460791fc94c76dab748b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::pieceCount_",
+      "id": "6a973f7316d14b139185dd38847711cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::pieceSize_",
+      "id": "5afc8dfb6464426195e16cf7eecd7f30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::pieceTint_",
+      "id": "32ee4bcf688244fc96b0689de4960a12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::CircularThrobberWidget::radius_",
+      "id": "86e8d27b92ef4a65a1bda9cbf775da42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxKeyWidget::options_",
+      "id": "bcccb94b1ed74bc8ab73aed6ff31e4ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxStringWidget::options_",
+      "id": "93957805be07473fa127a50221266529",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidget::options_",
+      "id": "319a8872de9f4a93bd831c4fa8552629",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::maxListHeight_",
+      "id": "717a1422a0e742239a7806f8eebf0b12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::opening_",
+      "id": "f7e210eb727e4d6b929ed6132758b4b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::selectedIndex_",
+      "id": "10bb88f212db41b5bf3f31f0c7578649",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ComboBoxWidgetBase::selectionChanged_",
+      "id": "a4a9290cbf3e4dc5878b7121d068d0a1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::DynamicEntryBoxBaseWidget::boxType_",
+      "id": "e26ccafb114e44aab5f8a7c89d32d980",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::DynamicEntryBoxBaseWidget::entrySpacing_",
+      "id": "86bb9569358548e091113c0b34e0682d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::DynamicEntryBoxBaseWidget::radialSettings_",
+      "id": "21dde46359ad44599a815f851db2509f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::DynamicEntryBoxBaseWidget::spacingPattern_",
+      "id": "1236ba939832410db76b4a560156e88e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::DynamicEntryBoxWidget::inactive_",
+      "id": "d622563dd3c549079975b9e0598c4fab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::changed_",
+      "id": "8c1087d98cb645779916415b383aa89f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::committed_",
+      "id": "92343bff2e4444e4ae130b7fbaab282c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::errorText_",
+      "id": "632dba46abfe431684ea622800882418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::fontSize_",
+      "id": "501d7dae5f9548d79b1a0a19a1e9f0a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::hintText_",
+      "id": "23ca424f8d874955b1a5f585cd4d4ae7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::password_",
+      "id": "748bfffd365e4b27aa69724c1e1051ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::readOnly_",
+      "id": "6529110b165f4b81a2299debe4fe202e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::revertOnEscape_",
+      "id": "657325317d344ee2b486ebabb2bec9af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::selectAllOnCommit_",
+      "id": "b4261bd1dd584781a40bd34b7fcaff3d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::selectAllOnFocus_",
+      "id": "48c9d32f488b4e46970e77c26dab285b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::EditableTextWidget::text_",
+      "id": "aae7d4e5bd134d019d8f4db07283c694",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ExpandableAreaSlot::header_",
+      "id": "ac0da5e3da404e2aa5b14cf9715f86b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ExpandableAreaWidget::changed_",
+      "id": "71761726ca164308b7c7c813711baeb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ExpandableAreaWidget::expanded_",
+      "id": "b72df8c6c57a48acb9c69db2ef262320",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridPanelWidget::columnFill_",
+      "id": "bb0f12afe21e493a8c3ffe18a20a7c84",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridPanelWidget::rowFill_",
+      "id": "11436e8883d44321b7e33a43636f2964",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::columnSpan_",
+      "id": "0f55d3aaca3b4545bddbc802a51f0095",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::column_",
+      "id": "900e734a4d024a60822489d2f6ab0b2e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::horizontal_",
+      "id": "5d6965c465164092a84c51991d227721",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::layer_",
+      "id": "b551f8b944484112a15114b903ff5d35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::nudge_",
+      "id": "5379f6f40d394521aff3fec7b2dda089",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::padding_",
+      "id": "e3d9885dc2f047188f9e7324ba9fae70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::rowSpan_",
+      "id": "97f131c4f4b74ad283b3c3ec9dd02702",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::row_",
+      "id": "b551c1380a1b4cfc95785feede8bc54a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::GridWidgetSlot::vertical_",
+      "id": "02534a3a4641404daff3f2f2e75ac1c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ImageWidget::imageSize_",
+      "id": "7991631aa31c4d71877f01a4a5aa140f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ImageWidget::tint_",
+      "id": "721f527e62ed433fa4e261df6316e30b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::alt",
+      "id": "4a58c815532d4f7da64e2c1d87e441cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::control",
+      "id": "77755b2ffb0745aa863782662a88d86f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::keyName",
+      "id": "f078d725b16740b9bd460cd70b609398",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::shift",
+      "id": "5dc33b49aa774c3cbc11bc69e51f3b45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputChordValue::super",
+      "id": "f2eb80f0df3d4c6fbfb5b29eaae45018",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::allowGamepad_",
+      "id": "011f5e1ce71447128fb5ad2981e09bcb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::allowModifiers_",
+      "id": "df8c1a46be394c309bf0c93cfd914540",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::alt_",
+      "id": "3046f66cb1f64e1888e8a265a4349e37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::control_",
+      "id": "e33b847e827b4efda7b58998f6816f0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::keyName_",
+      "id": "75444bfdc37f4c1a93cbd41eb2e4523a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::selected_",
+      "id": "a9419b7f7d9546cc87d87f770af3d598",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::shift_",
+      "id": "530264b2f7524c738261cc42350134c1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::InputKeySelectorWidget::super_",
+      "id": "7a6dcc2b1e764010942d66c20b48827f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::itemClicked_",
+      "id": "5168a715b6624a8eb5fea5dea57c0618",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::itemScrolled_",
+      "id": "6dc82d0fff4548a3b28d80a0387d96e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::pointerScrolling_",
+      "id": "87a46f4c6858432da161d21b64eccbb5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::scrollAlignment_",
+      "id": "94b7a5c2e34f458097c9e21eabe10ec1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::selectOnNavigation_",
+      "id": "865b674162464738a88da29ffa8f3e5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::selectionChanged_",
+      "id": "369e159549b24988974588e119868772",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::selectionMode_",
+      "id": "ef2a088d0be74cfc89523204b7ef76de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewBaseWidget::wheelMultiplier_",
+      "id": "7cb984f94ddf4e11b6ea5c4c8301872f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewWidget::items_",
+      "id": "80d37d327ddd4ac88abc5287700062ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ListViewWidget::rowHeight_",
+      "id": "455d8046c2454219a54a20afecbde138",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::MenuAnchorWidget::fitInWindow_",
+      "id": "a058101523f947ffbc29a3db4499d036",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::MenuAnchorWidget::openChanged_",
+      "id": "3435edb752d74aaab09c26402b0bc3f9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::MenuAnchorWidget::placement_",
+      "id": "2fe902ac6f034942b2bc23f348404bfb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::effectMaterial_",
+      "id": "3bd4ab7f3c324f798bb9c674fff0abb3",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::effectMaterial_"
+      ],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::effectTint_",
+      "id": "984858b5f9c44330b381ea5a8bfdde3f",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::effectTint_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::phaseCount_",
+      "id": "90d63d13e9b94a1ab065f6eb44db06e4",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::phaseCount_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::phase_",
+      "id": "232318b0d95c4f219ebc7ee163def662",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::phase_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::textureParameter_",
+      "id": "318c51ce84fa4eac8cd9e15dfaf6c4fc",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::textureParameter_"
+      ],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::PanelWidget::slots_",
+      "id": "959b1a042b1f459c986fa1d422ce46a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::PostBufferEntry::blurStrength",
+      "id": "67f547da07bc415a907f4cfd16fc00f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::PostBufferEntry::channel",
+      "id": "dc729910fa4f4045ae7ec1500f927d29",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::PostBufferUpdateWidget::bufferUpdates_",
+      "id": "880beb0333ba4f7fb2aad27a63b57d66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::borderPadding_",
+      "id": "125b8b535f7b4c44b91481bb804cc53f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::direction_",
+      "id": "d8dbe71046f64590853679602fb21bf1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::fillColor_",
+      "id": "bf631327b11b405d9f30e202969d09de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::fillStyle_",
+      "id": "e639228a2df54a1a9193e624738132a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::marquee_",
+      "id": "09860ff9f0214069b99c386637631b21",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ProgressBarWidget::value_",
+      "id": "ebd6a9c40057475fb0415b8ee184ac1d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::angleBetweenItems",
+      "id": "3bc35e8e4b9e43f08def32b671d81fac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::clockwise",
+      "id": "bf3a7275a7c1429dba34f49fcb0e76db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::distributeEvenly",
+      "id": "215d61ab7a13473c82b13eefecd7af4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::margin",
+      "id": "8441335a26204c7e940e90c64c1d40da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::sectorAngle",
+      "id": "08419bf371524c78ad3a5f92f20a619d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialBoxSettings::startingAngle",
+      "id": "6c46bcdffedd4742bda6cb9d846896e2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::angularOffset_",
+      "id": "4e47d46aca134f1f8724bae3797fbc14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::changed_",
+      "id": "f653b4abe40b461faae40b7e966b587b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::endAngle_",
+      "id": "b7dd49ce6b42435ca56be45969816c55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::handleColor_",
+      "id": "0c41c4cd52134bacb131529031617d9d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::maximum_",
+      "id": "fe917a1725b743a685ef256016f999d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::minimum_",
+      "id": "854a3dac773446498f17834aff6242a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::progressColor_",
+      "id": "3bfd8a54592d43498426b8630cf8e1df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::showHand_",
+      "id": "32480cd2b2b741ee9bc1b3c8091e5fe4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::showHandle_",
+      "id": "d7f9ddcfcd03476aabcd6df0365e9cbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::snapToStep_",
+      "id": "0d1672caefca406cbd2d8a087a69dab2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::startAngle_",
+      "id": "6e12952311bb48168b228278b6ec5a5f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::step_",
+      "id": "0dda96f1449a45e8b6fe53f81ddbe4df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::trackColor_",
+      "id": "133052182cea45b0b86b3dda1c5b678b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RadialSliderWidget::value_",
+      "id": "5a0d8dc7746b4ce383cb2353d820403d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RetainerEffectMaterial::glsl_",
+      "id": "23de4c9484e34d668ff347834f0be952",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RetainerEffectMaterial::hlsl_",
+      "id": "8be168ea877948a98131b59d087917f5",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RetainerEffectMaterial::textureParameter_",
+      "id": "2dab216b9c434776b69970f5484d04ae",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextBlockWidget::ellipsis_",
+      "id": "c3c72c0f0d434840933c3279ff004ea9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextBlockWidget::fontSize_",
+      "id": "c01497679710415db4238b7ac3f19941",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextBlockWidget::styles_",
+      "id": "b26d51cd08b14d4295fd7a052cb2fb0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextBlockWidget::text_",
+      "id": "d0cf980aefc84755957427b052a5b2cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextBlockWidget::tint_",
+      "id": "8488c384db9a4f958ebc62d5fc4e65ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextStyle::name",
+      "id": "ac43928116ad4324b1798fbfc6b9901b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextStyle::strikeThrough",
+      "id": "d3a32e5608a34db0aaabe5e34dde6d6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextStyle::tint",
+      "id": "a1644133503e43d0814f7b4ae74506c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::RichTextStyle::underline",
+      "id": "e85e1fabc68f4c8790562b6a5a8810e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidget::bottom_",
+      "id": "4148882421c6479dadc1e334fd0ebb77",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidget::left_",
+      "id": "0271fffb1637483a819361b8ba3c2472",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidget::right_",
+      "id": "6f39d643a8f54b69b1cf467d06bfd783",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidget::top_",
+      "id": "956a88cf0864444d86a9663cac240f19",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidgetSlot::safeAreaScale_",
+      "id": "4a4085c9bc1b425eb2a8c6b02e482474",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SafeZoneWidgetSlot::titleSafe_",
+      "id": "78969d5ddf65410fb51c82006ecf057d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScaleLayerWidget::alignment_",
+      "id": "b14e1c31a7c54114a6d042bf33048f63",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::alignment_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScaleLayerWidget::fitDirection_",
+      "id": "2459ad6bc3954d09a38162413be5788e",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::fitDirection_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScaleLayerWidget::fitMode_",
+      "id": "6b74b62671654b7b9a7bc3ed8affa454",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::fitMode_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScaleLayerWidget::userScale_",
+      "id": "ed04d8933de34dada64df0b2af2b3268",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::userScale_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBarWidget::horizontal_",
+      "id": "0e5cc3aa84a34642b3b12e88e9ce2ebf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBarWidget::offset_",
+      "id": "93da4f2632804d0596a9d532b0a16bd2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBarWidget::scrolled_",
+      "id": "21d02326be354edd821f685ddb3aeb8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBarWidget::thumbSize_",
+      "id": "64fb8a992d754f229c47a697f3b1d61b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::alwaysShowTrack_",
+      "id": "6296a8cbe909479ca6e246be2d5a0af4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::alwaysShow_",
+      "id": "bb727f4feaa14032a3485c40e129ca98",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::barPadding_",
+      "id": "ff1fba34275f4236b370db076be1377c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::horizontal_",
+      "id": "b43a3ba4ecff45dfa3333ea4a8ee0012",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::initialOffset_",
+      "id": "201fcf8013f74976a5b8d964e001c209",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::padAfter_",
+      "id": "3bfccbc10605461dac444317052e4e41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::padBefore_",
+      "id": "feff9f01f37e4ec2b03f4ba3bb5aa538",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::rightDrag_",
+      "id": "0ed5081a968847f088fab82cc775bc26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::scrolled_",
+      "id": "05fdc6cb02cf4eb0a931a2dc2fc8fdf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::showBar_",
+      "id": "bcf9de911afe490b8dbaef89b3788480",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::thickness_",
+      "id": "98cbb7c356e840e0ab710bf178b1f07d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::touchScrolling_",
+      "id": "2d151391816543c58f4e2a3dbd48d88a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::wheelMultiplier_",
+      "id": "c481264bff444fbd81237b4f4c5493e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::wheelPolicy_",
+      "id": "34a68343b82c4766ac7cedb407343d1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidgetSlot::fillWeight_",
+      "id": "b64d3dfacb99428992bcad6d004b8483",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidgetSlot::sizeRule_",
+      "id": "78bb5c03447c4190b72ec7858d6ce3b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SizeBoxWidget::aspectRange_",
+      "id": "84083f5802e84fd9b40a2924e8ca975e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SizeBoxWidget::heightOverride_",
+      "id": "0f0034e323fb4f44ab8473bee7b2ba7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SizeBoxWidget::maximumSize_",
+      "id": "a37884568963409ca38fed90a6bb2533",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SizeBoxWidget::minimumSize_",
+      "id": "36aecb4b49204428a3b4ce970401e07b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SizeBoxWidget::widthOverride_",
+      "id": "009b47357c224fdea8c6f94fb75b9074",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::barTint_",
+      "id": "221e5d53b71b45c5acd0ab2bb834b824",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::captureBegin_",
+      "id": "e69c8d215fa34cd48064eb1c6b30c853",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::captureEnd_",
+      "id": "c25143335a2443aa97d8f6f2423b0e6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::changed_",
+      "id": "d5cf8c2ec4714fdd9b9c0d461efa28ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::controllerBegin_",
+      "id": "69bc65558cba45b687f392c454f6f030",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::controllerEnd_",
+      "id": "30ae0e576a22480a9611d6f473428b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::handleTint_",
+      "id": "1c8ea124e3a140bfbe95ac2dedb4e278",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::indentHandle_",
+      "id": "d9f5323a7f6c480bb2f70a4f91320391",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::locked_",
+      "id": "4aa810615efc4144a53f978c13c42321",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::maximum_",
+      "id": "b033e71ff3344c7d8bf00fbe3c9be7a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::minimum_",
+      "id": "14df09c6be3c44febc906d56362650d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::requiresControllerLock_",
+      "id": "538aec1ce598423ca25126938bd20881",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::snapToStep_",
+      "id": "b66c3b0dd7644058a3762feac3679eb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::step_",
+      "id": "63f675b1b5694b768da7e40fdacffd9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::value_",
+      "id": "a8c9df140ef74d52a259382b5755bbe3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SliderWidget::vertical_",
+      "id": "4922592222d141c9a1388b4ba1ddf6bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpacerWidget::size_",
+      "id": "62d4c73b03344ce7a347e12932bff5ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::beginDrag_",
+      "id": "f9d63fb802c14d1dac99a59df9f38937",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::changed_",
+      "id": "d8e9346094ce4da3833b01ed86671c34",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::committed_",
+      "id": "7c38a73db672477ab5681d2b1a8ba49a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::endDrag_",
+      "id": "850eb06c3865444fa477e20868470e02",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::maxFractionDigits_",
+      "id": "9d282364bda340658c31f2400dce0fc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::maximum_",
+      "id": "94062c1a8d5e4561aefbb81ee1725892",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::minFractionDigits_",
+      "id": "22680a3c24a343e2a1b12457bd552fbf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::minimum_",
+      "id": "9c945395019d4c888406afe2ea55310d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::sliderEnabled_",
+      "id": "d74315461c084b2fa74596f10394b8b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::snapToStep_",
+      "id": "1d6f3e8510834ebbb5cd9393c33d4cb6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::step_",
+      "id": "ddb72c2e8ff546ae8357f143fd066b94",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::SpinBoxWidget::value_",
+      "id": "b21790c1526641aaa719489d8163c916",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackBoxWidget::vertical_",
+      "id": "cc3de4d46fca4681a07bbd508b1c9814",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::alignment_",
+      "id": "2dafd6c62d7147309ae772cfbdd78978",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::mainAlignment_",
+      "id": "57770e675efe4b7ba3add75beadee4b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::maxSize_",
+      "id": "8f33b9d64a654afeabd40e066841174d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::minSize_",
+      "id": "9d42814d60054e69932616487d39aa22",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::padding_",
+      "id": "58efd6c98f374011bfc4420398b20efd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::rule_",
+      "id": "cd42f95563ee4f7eaecab4de6ce4802f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::shrinkWeight_",
+      "id": "8a8c70a406d84f0197f7a2a28a936bed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::StackWidgetSlot::weight_",
+      "id": "85c60b12df924006a0726450253c339b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLabelWidget::ellipsis_",
+      "id": "e74275a5a3e14a03b810f16c0d8c62e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLabelWidget::fontSize_",
+      "id": "f562a9d8d57a48c288f63b2e23c9ea58",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLabelWidget::text_",
+      "id": "60a0ebc6d3df41a687234c3926e8171f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLabelWidget::tint_",
+      "id": "fedf9a149dd14522a84fee0a0bcf6c17",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::applyLineHeightToBottomLine_",
+      "id": "22010363df9f4af7bdeae5e8fc137eb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::autoWrapText_",
+      "id": "5adec9ed58f748bfa918469ca7e7e550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::clipText_",
+      "id": "b43ae69522ac4d03875f2b97022c8cb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::justification_",
+      "id": "7267a379f24d47058cce8bf4945c19b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::lineHeightPercentage_",
+      "id": "da64b169b3d7434d9ad8deb3170d599d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::margin_",
+      "id": "9ea30528943e4f13bcc76b0e3775fb16",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::minDesiredWidth_",
+      "id": "e7930f1ce96740b6a2da13afc60c9679",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::shadowColor_",
+      "id": "348170c6d9814d289a3a9e8393791cf8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::shadowOffset_",
+      "id": "8b8c3f2a18ee4b35a9802dffc9f902f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::strikeThrough_",
+      "id": "51497d4c32f747d597fc393cd8471a41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::underline_",
+      "id": "32c68b31cb07498e83d109c1d9146ff9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::wrapPolicy_",
+      "id": "0ec2b84d123d4ff692361b84817e86f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TextLayoutWidget::wrapWidth_",
+      "id": "46f207ec579345c9a8ed1e2333dd562e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::animateHorizontally_",
+      "id": "f654409c57b24bc8bbae6764a2d68a93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::animateOpacity_",
+      "id": "4e5fddf660e14d06a7831cb36bf721ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::animateVertically_",
+      "id": "bdb38079820b4261975d21a7e2aee989",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::animating_",
+      "id": "5976f72cf9c2482a8c3851e6c7b993b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::pieceCount_",
+      "id": "6522afb446084f8dbe50841910ef95fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::pieceSize_",
+      "id": "a0fd5898ecbe45bb926e95fc95560026",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ThrobberWidget::pieceTint_",
+      "id": "323b4e0f34d7476e8fd263452f2e1e40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::TileViewWidget::tileWidth_",
+      "id": "b4998d0bd23c42e396d5951d5c97201a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridPanelWidget::cellPadding_",
+      "id": "6733b75aa01840faa9ebb73660a92638",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridPanelWidget::minimumCellSize_",
+      "id": "32ef1672f0a74244944c49cd21dae510",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridWidgetSlot::horizontal_",
+      "id": "248865f924ef4db3b5cb56a372c563bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridWidgetSlot::vertical_",
+      "id": "1ac7030caaad41b48b657f1dee15ad8f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridWidgetSlot::x_",
+      "id": "7bfa932da4134ce7ad8573e6aa3d187e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UniformGridWidgetSlot::y_",
+      "id": "48c4dda7713c4cd3b88905bbbaa83916",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UserWidget::animations_",
+      "id": "99948555c78a490293f932dd5ac4f6bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UserWidget::focusable_",
+      "id": "d52431800799410f9adff1ef2a46a1a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UserWidget::tree_",
+      "id": "bcabd60c178743d9abad1b18cb5fff86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::UserWidget::viewModel_",
+      "id": "7b5917ae11964ad5968ba87ccf41d4e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ViewportWidget::background_",
+      "id": "11179716aa8440ec8b595ffe892e3b0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ViewportWidget::fieldOfView_",
+      "id": "773486f683b64bcaac37ce839d095b68",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ViewportWidget::viewLocation_",
+      "id": "5178bd7a39a0448096e7bf91bf55c6a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ViewportWidget::viewRotation_",
+      "id": "c9b08c7f958b422b8c2dce7bb21ff7bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::accessibleBehavior_",
+      "id": "62446a852df34d8393240f5f7eeb8bf8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::accessibleSummaryBehavior_",
+      "id": "0a2db62fde4d47a8b598b81c3f387770",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::accessibleSummaryText_",
+      "id": "d77db5942d094dbfb9d16d7f7c92cc12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::accessibleText_",
+      "id": "ed9d64ade0554bb1ac22b61e173cf687",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::childrenAccessible_",
+      "id": "4e171479aa3c4c9f848833f904d5b20e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::clipToBounds_",
+      "id": "d519f60dc8c649fc9f1968b530a701a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::cursorOverride_",
+      "id": "040ff1c660eb4421a1ef1982a2803291",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::enabled_",
+      "id": "96d33a027aae475e978cc36554928bff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::forceVolatile_",
+      "id": "b13393704e344a32bae397b185cac006",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navDown_",
+      "id": "b1d5897409f54201b3e302b59ee55140",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navLeft_",
+      "id": "f75665cbc1b54e1e802565a84d13fa74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navNext_",
+      "id": "ef785f2354a94891a86b3b26c2124034",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navPrevious_",
+      "id": "6fe6131c18224aae99e27b1459aec2c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navRight_",
+      "id": "bc0fa6361ae04eaab2e5c2b2f63ce0b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::navUp_",
+      "id": "0b7f5e0aec024f4cb12cddf44fe3f9e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::renderOpacity_",
+      "id": "43e489e153084b3e816129dea2b978d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::renderPivot_",
+      "id": "60240ba2c04d429b93ee14cd62ecd3f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::slot_",
+      "id": "fa7bb01ef72740f3a2fc2b370d39ce31",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::stableId_",
+      "id": "abe70841cb6d4b929d96092ee39262c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::toolTipText_",
+      "id": "2389164af17b41018ad8b4a70755f584",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::toolTipWidget_",
+      "id": "8dd3a124e6af421fbc7ead1ff2815d42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::transform_",
+      "id": "ef3adec348294b4087b67fc169ca4932",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::Widget::visibility_",
+      "id": "575fa028ce774fde94cb84e1c1eea766",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimation::duration_",
+      "id": "306a2d76efdc4a29a0bc6b5282a42268",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimation::stableId_",
+      "id": "1e765600e4334f76be9d21619cd13982",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimation::tracks_",
+      "id": "544a942968f640fd9ff2cbd2212721f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimationTrack::channel",
+      "id": "2bec46daa30a44eeb87ae10268d69b43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimationTrack::curve",
+      "id": "8b4c413ccd264ee08e220212b7b2be72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAnimationTrack::target",
+      "id": "4c4de03178514541940e9512b5ef9e07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::animations_",
+      "id": "2924b8009032404683a3576a1800a189",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::bindings_",
+      "id": "8d6b78bdcf3143918bff891bac2f1d5e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::controller_",
+      "id": "85668306aada43d09bf5e2cc81547147",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::eventBindings_",
+      "id": "7a2f75ae5e2d49e58b264430eff06cae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::propertyBindings_",
+      "id": "bb8838e9efbd4d9fb2c9052abfa6dcb0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::tree_",
+      "id": "a7f0ed32509c47f2861e3ca1d95a8ca4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetAsset::viewModelType_",
+      "id": "fe18f46381f3445eba49237d9783d8dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetBinding::field",
+      "id": "7440a873883a474296ae3786e892043e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetBinding::optional",
+      "id": "166ccf6552164f5589dab3b0e2db6af9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetBinding::widget",
+      "id": "55006ea7f6ec48df868d74078408addb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetEventBinding::eventId",
+      "id": "741509c66a934cf29ba6120128d23bd9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetEventBinding::methodId",
+      "id": "c2ac71dbd80341ff97cc6bd6452ec72b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetEventBinding::signature",
+      "id": "006a207225f1421bbe2bb9f11463abff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetEventBinding::widget",
+      "id": "7c008a89710e42ada86039deac865836",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetNavigationRule::rule",
+      "id": "8f375f30a70048e5b809e0cb04983b0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetNavigationRule::target",
+      "id": "c1faa69af3774c9f8b33b1e0c8f2ce04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetPropertyBinding::once",
+      "id": "4224b49ec894401398eab0363dacaae0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetPropertyBinding::sourceField",
+      "id": "6215cbc6e0cd4b61bacc9f4db28a10f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetPropertyBinding::targetField",
+      "id": "f8ec2f21701647cea1f2eb84f4c14c7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetPropertyBinding::twoWay",
+      "id": "e709dd00444b4c6789a5a1ecf3e8cb36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetPropertyBinding::widget",
+      "id": "b44905f4a3c54eaea2ece0b67a137393",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetSlot::content_",
+      "id": "4423ee5fe85d4daba0604f5d6db6ecd7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetSwitcherWidget::activeIndex_",
+      "id": "bcfe2a3362bf430c9cee8acd014fc446",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetTransform::angle",
+      "id": "d4cf19b55cda4bb385212a7ecbccb267",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetTransform::scale",
+      "id": "6a5691a11fad48d48c073219ad9cc0e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetTransform::shear",
+      "id": "dc4486ebbdad4b0889140659bf03b1f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetTransform::translation",
+      "id": "5b89fefbc6e44a1db8f65b9ada55d2df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WidgetTree::root_",
+      "id": "88f58dbe5b704fa395ead2adf96188e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WindowTitleBarAreaWidget::fullscreen_",
+      "id": "f9c5fecfd74c4b0b948588cb4b58628b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WrapStackWidget::spacing_",
+      "id": "29e66806ad794f2aaff7b6dfe7b3e5b8",
+      "aliases": [
+        "rocks::ui::WrapBoxWidget::spacing_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WrapStackWidgetSlot::fillEmptySpace_",
+      "id": "ecea274926ae4e9499f651b29d42d6a5",
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::fillEmptySpace_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WrapStackWidgetSlot::fillLineWhenSizeLessThan_",
+      "id": "5f403393d9eb40b5bc64d9737b20d850",
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::fillLineWhenSizeLessThan_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WrapStackWidgetSlot::forceNewLine_",
+      "id": "ef8bf0e5aa3349d3991954becb476570",
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::forceNewLine_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::AlignedWidgetSlot",
+      "id": "97656e72a07e48dbabd7091bda24cc32",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::AnchorCanvasWidget",
+      "id": "25fd00fa0a1242ec91ff3d7f2ea7e187",
+      "aliases": [
+        "rocks::ui::CanvasPanelWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot",
+      "id": "0d03b2ab2749461080e70f070a1d2e50",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::BackgroundBlurWidget",
+      "id": "2c76c9daf439465082e77a1c1a2464e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::BackgroundBlurWidgetSlot",
+      "id": "20c036fa9587415fa1a3399059239379",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::BorderWidget",
+      "id": "5dc0b5410b36436fa01f60f749b0d2e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::BorderWidgetSlot",
+      "id": "79c26fea43d948a9ad0abca4de7dee03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ButtonWidget",
+      "id": "c3d304f8bedc46038e3bcefe1de50623",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ButtonWidgetSlot",
+      "id": "bba2c06974c54faf8c6f7785a3900738",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::CachePanelWidget",
+      "id": "acc5132561ac4fadb69079b63ecdfdf0",
+      "aliases": [
+        "rocks::ui::InvalidationBoxWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::CarouselNavBarWidget",
+      "id": "d533858857274ee2b89add36a91e2369",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::CarouselWidget",
+      "id": "3588a4485ac1492a8affe027d144f111",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::CheckBoxWidget",
+      "id": "8b358b5d523749d8bfadc645be2c732b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::CircularThrobberWidget",
+      "id": "99cb343e2e064b37890baf8042d0b315",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ComboBoxKeyWidget",
+      "id": "b28c9b7403f84dd1a4acf481b2d76069",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ComboBoxStringWidget",
+      "id": "6dcb397e0ae344eab80a575278768bd1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ComboBoxWidget",
+      "id": "21e5bb057d1e4c0a84bebb51bd844ccc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ComboBoxWidgetBase",
+      "id": "991073dc06eb46c5959b5f64f8df760d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ContentWidget",
+      "id": "c1765edd8a2d4fa9a6d0efe9ff719ba0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::DynamicEntryBoxBaseWidget",
+      "id": "58d68b87591d4fc196e5a7c0196eadc5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::DynamicEntryBoxWidget",
+      "id": "1b8be7d799004b85bc4cfb2d857c2912",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::EditableTextBoxWidget",
+      "id": "047ca0dac4e544d3b2a491680a3f9aac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::EditableTextWidget",
+      "id": "f97a2549a7a747e1a4a2f0548059afd8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ExpandableAreaSlot",
+      "id": "f6b473dd62c640ca9adf8fc77c15eadf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ExpandableAreaWidget",
+      "id": "6f45a2cc3d614a51944175460ae1919f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::GridPanelWidget",
+      "id": "99e16277c18945dea64f48999db102bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::GridWidgetSlot",
+      "id": "419c9bfe19f9450e8e4877c4c8c37365",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::HorizontalBoxWidget",
+      "id": "704cf3864ca94a90bcda7d2feddeef29",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::HorizontalBoxWidgetSlot",
+      "id": "a739da89b45f461cadd6256570bbd858",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ImageWidget",
+      "id": "5df2882c66b24276bee76193c597cf75",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::InputChordValue",
+      "id": "5bfa7c16aacc4960aedf03140f0ffe01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::InputKeySelectorWidget",
+      "id": "18336d1e6f4840fbbd52c23dee11d587",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ListViewBaseWidget",
+      "id": "0ed7a39377da432b9dc9a8ebc1d918ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ListViewWidget",
+      "id": "c6db6809870841b5b3763d967f901dea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::MenuAnchorWidget",
+      "id": "a337697ebe59476faddb59727e534afb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::MultiLineEditableTextBoxWidget",
+      "id": "a29aefe386ce4cf4b35ce227f92487d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::MultiLineEditableTextWidget",
+      "id": "3458de6d2c184539bfa1bcc28fb38629",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::NamedSlotWidget",
+      "id": "457b86c3034b4eea97409450791a04b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::NativeWidgetHost",
+      "id": "f48a417b0c724853b61a019cf3512e5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::OffscreenLayerWidget",
+      "id": "41f11535158b4448a9c2d7e8319a10bc",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::OverlayWidget",
+      "id": "2ca670189a63490b95880104f97c978c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::OverlayWidgetSlot",
+      "id": "1b96b363467e4d3eb1b1ff0d15d0d858",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::PanelWidget",
+      "id": "095207954ad44258b7136b2e0f3d4c3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::PostBufferEntry",
+      "id": "226e86c2ea7b46678a61abb5386f72e4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::PostBufferUpdateWidget",
+      "id": "7563617637314c2aacfa984c0ca4d3ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ProgressBarWidget",
+      "id": "aeb1e665cae64852be8f4b6e5f034bef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::RadialBoxSettings",
+      "id": "ff4c95dbe3ec4d0c9093188a7c236860",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::RadialSliderWidget",
+      "id": "6116c174944d499fb5913afb98c5ae6e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::RetainerEffectMaterial",
+      "id": "a0f7a2cb6d7b439295424f1e3f449bff",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::RichTextBlockWidget",
+      "id": "f8e444cd4d234a83845efab7b6452837",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::RichTextStyle",
+      "id": "14411874ecdd4de38f0f7dd8ada926db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SafeZoneWidget",
+      "id": "50d5832390a84a239a4cc6719d515553",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SafeZoneWidgetSlot",
+      "id": "1d2042ce9e89429b9d3eec56b5838849",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScaleLayerWidget",
+      "id": "c8d69b9021894b10bc1ffe831de5bbf1",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScaleLayerWidgetSlot",
+      "id": "5683c4f696ff418b8f99d1b0b5cd7487",
+      "aliases": [
+        "rocks::ui::ScaleBoxWidgetSlot"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScrollBarWidget",
+      "id": "4311f63c116748dc805094b87409983d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScrollBoxWidget",
+      "id": "6420a733846644df9c3b83d7290be051",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ScrollBoxWidgetSlot",
+      "id": "df8b6b2e94b74724ad9b3598d251930c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SizeBoxWidget",
+      "id": "586e33ff84f64850bed94a4ebb0dfde5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SizeBoxWidgetSlot",
+      "id": "d7037a483b5d4532b2db1cc73c897ab0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SliderWidget",
+      "id": "3ad3c5f7be214d1c899c85f7e11f5831",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SpacerWidget",
+      "id": "dd21461bd9294bdf85285379e650c307",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::SpinBoxWidget",
+      "id": "8cf4bf8c26eb40d19f212afe5cc94a07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::StackBoxWidget",
+      "id": "2864f446c5544c20a189ce1db2d70f35",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::StackBoxWidgetSlot",
+      "id": "5300846ceae14b4aa914c60496aa4798",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::StackPanelWidget",
+      "id": "faa997d011e140328e2261c18c76936e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::StackWidgetSlot",
+      "id": "bab184d2fae747a7a99bdd95390d6d68",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::TextLabelWidget",
+      "id": "fb28d75d4f494d028a2d8271becf31f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::TextLayoutWidget",
+      "id": "bff100dce91549c89d62cc0ed42925b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ThrobberWidget",
+      "id": "5f49a4781c264f2f80072fde64ec8a24",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::TileViewWidget",
+      "id": "ee31e558b14f48a1b1aa0a4a7938b0f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::TreeViewWidget",
+      "id": "746a32a02e1242fabb5d10429d2ec07a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::UniformGridPanelWidget",
+      "id": "24a68a20176e467a9bd57c9732caf6d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::UniformGridWidgetSlot",
+      "id": "365274e73f3948b79284a1bfa191fc50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::UserWidget",
+      "id": "c2a86cda3f0e450e870f0da3601ecb59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::VerticalBoxWidget",
+      "id": "ab51f9d23ef04da987a1f5d1a817262f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::VerticalBoxWidgetSlot",
+      "id": "d0b1677f74c449a89182d17a1f4c218d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::ViewportWidget",
+      "id": "d8928db6bbea44319a5f50a945698a33",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::Widget",
+      "id": "693ef47e9dd64ea3b3d16bd462243931",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetAnimation",
+      "id": "aa782c3a47ea42d19eb255cd82785de6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetAnimationTrack",
+      "id": "a93e78a642fe4c68880a17717665ec36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetAsset",
+      "id": "1ea5647fd6ab497ba2902528f6105f82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetBinding",
+      "id": "d7464e58b89b4c54a169f5c1d1f06392",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetCheckState",
+      "id": "08e3cfa686204d42acae489117c570fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetEventBinding",
+      "id": "fadc33175cd34296a63fc71ad596d67d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetNavigationRule",
+      "id": "b09495a635214bc389692b81d4133c6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetPropertyBinding",
+      "id": "7f5f6455b41f47e5ad853b9c05042e3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetSelectionCause",
+      "id": "b3e39375b3a1482886967e81c40c2208",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetSlot",
+      "id": "f1f289feffa848758fefe742c56f4ec5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetSpinCommitReason",
+      "id": "94ff9502c4bb49b2b71de6ccb8dcad19",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetSwitcherWidget",
+      "id": "28fb51b1207f49fd8631f8d4536ae315",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetSwitcherWidgetSlot",
+      "id": "22f7b25320514f55ab13c220898687c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetTextCommitReason",
+      "id": "95a21653c19440f380efa65bfeb18b0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetTransform",
+      "id": "61762e9e92c34038906fb466b902a8ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetTree",
+      "id": "3eda7d5189cb435b9972e901acdd912f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WindowTitleBarAreaWidget",
+      "id": "28543142d3b94373a99dd9f5a336c489",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WindowTitleBarAreaWidgetSlot",
+      "id": "16502d6431054b4fab609dedd653a522",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WrapStackWidget",
+      "id": "8d2a8b95177b45d49dbe87de0daf5326",
+      "aliases": [
+        "rocks::ui::WrapBoxWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WrapStackWidgetSlot",
+      "id": "7e02db887bac413c80e51142f64ef97c",
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot"
+      ],
+      "retired": false
+    }
+  ]
+}

@@ -166,6 +166,61 @@ public static class MathReference
 
         Emit(text, "AcosReference", acos.Select(x => (x, 0.0, Acos(x))));
 
+        // Cos(2026-11-27 — 커브 쿠킹 평가): 0·n·π/4와 n·π/2 근처(축소 경계·0에 가까운 결과), 작은
+        // |x|, 고른 표본, 정확한 축소 범위(|x| ≤ 2^20·π/2)의 큰 |x|.
+        var cos = new List<double>
+        {
+            0.0, 1e-9, -1e-9, 0.7853981633974483, -0.7853981633974483, 1.5707963267948966, -1.5707963267948966,
+            3.141592653589793, 4.71238898038469, 6.283185307179586, 2.356194490192345, 1647099.3291652855,
+            1647099.329165285 * 0.5
+        };
+        for (int n = 1; n <= 16; ++n)
+        {
+            cos.Add(n * 0.7853981633974483);
+        }
+
+        for (int i = 0; i < 120; ++i)
+        {
+            cos.Add(random.Uniform(-10, 10));
+        }
+
+        for (int i = 0; i < 40; ++i)
+        {
+            cos.Add(random.Uniform(-1647099.3291652855, 1647099.3291652855));
+        }
+
+        Emit(text, "CosReference", cos.Select(x => (x, 0.0, Cos(x))));
+
+        // Atan: ±1, k/8 경계와 그 이웃, 1/x 분기 경계(1 바로 위), 작은·큰 |x|, 고른 표본, 넓은 지수.
+        var atan = new List<double>
+        {
+            1.0, -1.0, 1e-9, -1e-9, 1e300, -1e300, 1 + Math.ScaleB(1, -52), 1 - Math.ScaleB(1, -53), 0.0625, 0.0625000000000001,
+            0.1875, 0.1874999999999999, 7.99999999, 8.00000001
+        };
+        for (int k = 1; k <= 8; ++k)
+        {
+            atan.Add(k / 8.0);
+            atan.Add(-k / 8.0);
+            atan.Add(8.0 / k);
+        }
+
+        for (int i = 0; i < 100; ++i)
+        {
+            atan.Add(random.Uniform(-1, 1));
+        }
+
+        for (int i = 0; i < 40; ++i)
+        {
+            atan.Add(random.Uniform(-100, 100));
+        }
+
+        for (int i = 0; i < 40; ++i)
+        {
+            atan.Add(random.WideDouble(-25, 60));
+        }
+
+        Emit(text, "AtanReference", atan.Select(x => (x, 0.0, Atan(x))));
+
         text.Append("// clang-format on\n\n} // namespace rocks::deterministic::reference\n");
         return text.ToString();
     }
@@ -470,6 +525,69 @@ public static class MathReference
         }
 
         return Round(angle, 0);
+    }
+
+    // cos(x): x를 정확한 고정소수점으로 두고 2π로 나눈 나머지를 [−π, π]로 옮긴 뒤 Taylor 급수.
+    private static double Cos(double x)
+    {
+        var (m, e) = Exact(Math.Abs(x));
+        if (!m.IsZero && -e > Precision - 100)
+        {
+            throw new InvalidOperationException("Cos reference input is too small");
+        }
+
+        BigInteger magnitude = m.IsZero ? 0 : e >= 0 ? (m << e) * One : (m * One) >> -e;
+        BigInteger twoPi = 2 * PiFixed;
+        BigInteger r = magnitude % twoPi;
+        if (r > PiFixed)
+        {
+            r -= twoPi;
+        }
+
+        var (_, cosine) = SinCosFixed(r);
+        bool negative = cosine.Sign < 0;
+        return Round(BigInteger.Abs(cosine), 0, negative);
+    }
+
+    // atan(x): |x| > 1이면 π/2 − atan(1/|x|). [0, 1]은 반각 공식 atan(t) = 2·atan(t/(1 + √(1 + t²)))을
+    // 세 번 쓴 뒤(|t| ≤ tan(π/32)) 급수.
+    private static double Atan(double x)
+    {
+        var (m, e) = Exact(Math.Abs(x));
+        if (m.IsZero)
+        {
+            return x;
+        }
+
+        if (-e > Precision - 100)
+        {
+            throw new InvalidOperationException("Atan reference input is too small");
+        }
+
+        BigInteger magnitude = e >= 0 ? (m << e) * One : (m * One) >> -e;
+        bool inverted = magnitude > One;
+        BigInteger t = inverted ? One * One / magnitude : magnitude;
+        for (int halving = 0; halving < 3; ++halving)
+        {
+            BigInteger root = IntegerSqrt(One * One + t * t);
+            t = t * One / (One + root);
+        }
+
+        BigInteger square = t * t >> Precision;
+        BigInteger sum = 0, power = t;
+        for (int k = 0; power != 0; ++k)
+        {
+            sum += (k % 2 == 0 ? power : -power) / (2 * k + 1);
+            power = power * square >> Precision;
+        }
+
+        BigInteger angle = 8 * sum;
+        if (inverted)
+        {
+            angle = PiFixed / 2 - angle;
+        }
+
+        return Round(angle, 0, x < 0);
     }
 
     // asin(s)(s 고정소수점 ∈ [0, √½]): sin(φ) = s를 Newton으로 푼다. 시작값은 double asin(53비트)이고

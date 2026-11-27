@@ -504,4 +504,36 @@ TEST(RenderBase_EngineShaderHostRejectsLateRegistration) {
 }
 #endif // ROCKS_MONOLITHIC
 
+// 준비 진행 받는 곳(9.12절 6항): 건 동안만 보고가 가고, 0 job은 넘기지 않으며, 뗀 뒤에는 오지
+// 않는다.
+struct PreparationTotals {
+    uint64 added = 0;
+    uint64 finished = 0;
+
+    static void Added(void* context, uint64 jobs) noexcept {
+        static_cast<PreparationTotals*>(context)->added += jobs;
+    }
+
+    static void Finished(void* context, uint64 jobs) noexcept {
+        static_cast<PreparationTotals*>(context)->finished += jobs;
+    }
+};
+
+TEST(RenderBase_EngineShaderHostReportsPreparationProgress) {
+    EngineShaderHost host(Allocator_());
+    PreparationTotals totals;
+    host.ReportPreparationAdded(3);
+    host.SetPreparationProgress({&PreparationTotals::Added, &PreparationTotals::Finished, &totals});
+    const EngineShaderHost& provider = host;
+    provider.ReportPreparationAdded(5);
+    provider.ReportPreparationAdded(0);
+    provider.ReportPreparationFinished(2);
+    provider.ReportPreparationFinished(3);
+    CHECK(totals.added == 5 && totals.finished == 5);
+    host.SetPreparationProgress({});
+    provider.ReportPreparationAdded(7);
+    provider.ReportPreparationFinished(7);
+    CHECK(totals.added == 5 && totals.finished == 5);
+}
+
 } // namespace engine_shader_host_tests_file

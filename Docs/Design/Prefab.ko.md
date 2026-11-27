@@ -325,7 +325,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | 새 원형이 순환·깊이 한도를 만든다 | 원형 저장 자체를 거부 | `PrefabCycle`·`PrefabDepthExceeded` |
 
 - cooked 빌드에는 충돌이 없어야 한다 — 쿡은 고아 override가 남은 레벨·prefab을 오류로 거부한다.
-- **Apply to source**(인스턴스 override를 원형에 올리기): 원형 편집 transaction으로 처리하고 영향 인스턴스 목록을 만든다(EIP 20.3절). 올린 항목은 인스턴스 집합에서 지운다. `EditScope = "Instance"` 필드의 override는 올리지 않고 인스턴스 집합에 남긴다(UE `SkipInstanceOnlyProperties` — [UI 툴킷](UiToolkit.ko.md) 7.3절 (a)). 같은 인스턴스를 연쇄로 다시 적용하지 않는다.
+- **Apply to source**(인스턴스 override를 원형에 올리기): 원형 편집 transaction으로 처리하고 영향 인스턴스 목록을 만든다(EIP 20.3절). 올린 항목은 인스턴스 집합에서 지운다. `EditScope = "Instance"` 필드의 override는 올리지 않고 인스턴스 집합에 남긴다(UE `SkipInstanceOnlyProperties` — [UI 툴킷](UiToolkit/README.ko.md) 7.3절 (a)). 같은 인스턴스를 연쇄로 다시 적용하지 않는다.
 - **클래스 기본값 변경**(코드 수정·Sparks reload): 원형 본문이 클래스 레코드 대비 차이이므로 원형이 override하지 않은 값은 새 클래스 기본값을 따른다. 타입 지문이 `resolvedRevision`에 들어 있으므로 편집기 배치 인스턴스는 다음 로드 때 전파를 거치고, 살아 있는 인스턴스는 RCM 71행 reload 규칙을 노드마다 적용하되 "기준"을 해석된 원형 값으로 본다.
 
 ### 3.8 중첩과 variant
@@ -401,7 +401,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | `PrefabUnsaveableNode` | Unsupported | Transient·Deprecated 클래스, native 파생, Runtime 출처 노드, LevelScript 파생 클래스(1.3절) |
 | `PrefabExternalReference` | InvalidArgument | 원형 밖 World 객체 참조 저장(3.5절) |
 | `PrefabOverrideOrphaned`·`PrefabOverrideTypeMismatch`·`PrefabOverrideNeedsReview`·`PrefabAddedNodeParentMissing` | 편집기: 진단만, cooked: InvalidArgument | 3.7절 충돌 |
-| `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상, 편집 위치 위반(편집기 쓰기 경로 — [UI 툴킷](UiToolkit.ko.md) 7.3절 (a)) |
+| `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상, 편집 위치 위반(편집기 쓰기 경로 — [UI 툴킷](UiToolkit/README.ko.md) 7.3절 (a)) |
 | `PrefabEditScopeViolation` | 편집기: 진단만(값은 적용), cooked: InvalidArgument | 저장물의 편집 위치 위반: 원형 저장물(`PrefabAsset`의 본문·variant `overrides`·중첩 노드 override)에 `EditScope = "Instance"` 필드가 클래스 레코드와 다른 값, 배치 저장물(`PrefabPlacement.overrides`·레벨 직접 배치 Record)에 `"Archetype"` 필드가 원형과 다른 값(UI 툴킷 7.3절 (a)) |
 | `PrefabRemoveNotAllowed` | InvalidArgument | 클래스 subobject·유일 루트 삭제 |
 | `PrefabTransformShear` | Unsupported | 3.10절 구움 경로 |
@@ -610,5 +610,5 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
   - 추가: 부착 부모 있는 spawn 합성, 장부 지연 생성.
   - UE 이름 짓기 근거는 리뷰가 든 `MakeUniqueObjectName`이 아니라 `FindFirstFreeName`(ActorConstruction.cpp:1126)으로 확인해 적었다.
 - 개정 3(2026-11-17): 사용자 결정 — D1–D21 모두 추천안으로 확정(4절 머리).
-- 개정 4(2026-11-19): [UI 툴킷](UiToolkit.ko.md) 7.3절 (a) 편집 위치(`EditScope`) 규칙 반영 — 3.7절 Apply to source와 3.13절 Make variant는 `"Instance"` 필드 override를 옮기지 않는다, 3.11절에 편집 위치 위반 원인과 `PrefabEditScopeViolation`을 더했다. 편집 문맥은 저장 위치로 정한다(`PrefabAsset` = 원형, `PrefabPlacement` = 배치 인스턴스).
+- 개정 4(2026-11-19): [UI 툴킷](UiToolkit/README.ko.md) 7.3절 (a) 편집 위치(`EditScope`) 규칙 반영 — 3.7절 Apply to source와 3.13절 Make variant는 `"Instance"` 필드 override를 옮기지 않는다, 3.11절에 편집 위치 위반 원인과 `PrefabEditScopeViolation`을 더했다. 편집 문맥은 저장 위치로 정한다(`PrefabAsset` = 원형, `PrefabPlacement` = 배치 인스턴스).
 - 개정 5(2026-11-20): [레벨 스크립트](LevelScript.ko.md) 확정에 맞춰 D22(레벨에 저장하는 참조가 펼친 노드를 가리킬 때 — LD17)를 더하고 3.6절에 배치 노드 참조 표, 3.11절에 `PrefabPlacementReferenceOrphaned`와 `PrefabUnsaveableNode`의 LevelScript 원인, 1.3절에 LevelScript 비범위(prefab·Level Instance 불가, Level Instance 도입 때 재검토), 7절 Level 행을 고쳤다.

@@ -29,4 +29,9 @@ namespace RocksExport
 	inline constexpr const TCHAR* SeverityError = TEXT("error");
 	inline constexpr const TCHAR* SeverityWarning = TEXT("warning");
 	inline constexpr const TCHAR* SeverityInfo = TEXT("info");
+
+	// 굽기 텍스처 한 변의 기본값과 범위다(8.4·8.9절 1번 -BakeSize — 기본 RocksDefaultBakeSize).
+	inline constexpr int32 DefaultBakeSize = 1024;
+	inline constexpr int32 MinBakeSize = 1;
+	inline constexpr int32 MaxBakeSize = 8192;
 }

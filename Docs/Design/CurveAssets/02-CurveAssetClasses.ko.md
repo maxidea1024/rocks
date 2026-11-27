@@ -126,6 +126,12 @@ Core `LinearColor::LinearRGBToHSV`·`HSVToLinearRGB`는 UE와 같지 않다. 그
   - 새 에셋에 검정→흰색 키를 넣는 일은 편집기(Studio)의 새로 만들기가 한다. 그러면 결과 에셋은 그 키를 값으로 가진다.
   - 명령행 `asset-new`는 빈 커브를 만든다.
 
+#### 2.4.5 쿠킹용 결정적 색 평가(CA7 — CurveData D22, CAD12)
+
+- `LinearColor EvaluateDeterministic(float time) const`·`EvaluateUnadjustedDeterministic(float time) const`: `Evaluate`·`EvaluateUnadjusted`와 같은 식이고 수학만 결정적이다. 채널은 `TangentCurve::EvaluateDeterministic`, 조정의 거듭제곱 둘(명도 지수·활기 — UE `FMath::Pow`)은 C `powf` 의미를 지키는 결정적 거듭제곱이다: 밑 ≥ 0은 `(float)deterministic::Pow`, 음수 밑은 지수가 정수면 |밑|의 거듭제곱에 홀수 지수의 부호, 아니면 NaN, ±0 밑과 음수·홀수 지수의 부호도 C와 같다. HSV의 `fmod`는 정확한 연산이라 그대로 둔다. 결과 성분의 NaN은 고정 quiet NaN이다.
+- 공용 식 `EvaluateAdjustedColorCurve`·`EvaluateUnadjustedColorCurve`가 수학 정책 템플릿 인자(기본 플랫폼)를 받는다. 런타임 `Evaluate`의 비트(UE 대조 — CA1 시험)는 바뀌지 않는다.
+- 쓰는 곳: atlas 굽기(4.3절), 머티리얼 ColorRamp 상수(MaterialSystem 6.13절 MS2f4 — 머티리얼 세션이 바꾼다).
+
 ### 2.5 값 struct(평탄 커브 — 3.1절 사본의 대상)
 
 참조 없는 값 struct다. 복사·배열 원소·Map 값·Optional 내부에 모두 쓸 수 있다.

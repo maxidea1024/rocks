@@ -1537,13 +1537,14 @@ TEST(World_NativeDerivedTypesInheritReflectedBase) {
     };
 
     const Expected expected[] = {
-        // 상속 필드 수다(Actor 5·Component 3·SceneComponent 12 — 태그 31.4절 포함).
+        // 상속 필드 수다(Actor 8·Component 3·SceneComponent 12 — 태그 31.4절·Actor 이벤트 셋
+        // PhysicsModule 7.1.14절 포함).
         {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 3},
-        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 5},
-        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 5},
-        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 5},
-        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 5},
-        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 5},
+        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 8},
+        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 8},
+        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 8},
+        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 8},
+        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 8},
         {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 12},
     };
     for (const Expected& entry : expected) {

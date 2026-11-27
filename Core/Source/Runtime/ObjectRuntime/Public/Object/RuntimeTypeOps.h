@@ -563,13 +563,13 @@ struct RuntimeStructOps {
     // 두 S 값의 내용을 무할당·무실패로 맞바꾼다(MakeRuntimeStructOps — S가 nothrow 이동 생성·대입을
     // 가지면 채운다, 아니면 null). 버퍼는 각자의 allocator와 함께 옮겨 간다.
     void (*swap)(void* first, void* second) noexcept = nullptr;
-    // struct 검증 hook이다(Docs/Design/CurveData.ko.md 9.1절 — `static Result<void> Validate(const
-    // S&) noexcept`를 선언한 struct만 채운다, MetaCompiler 감지). 리플렉션 경로(graph decode·대입
-    // 묶음·JSON import·경로 쓰기)가 바뀐 값을 게시하기 전에 S 값 하나를 검증한다. 계약: 할당하지
-    // 않고 전역 상태·Registry를 읽지 않는 순수 함수이고 아무 스레드에서나 불린다. 값을 고치지
-    // 않는다. 결과는 Success 또는 InvalidArgument다(생성 thunk가 다른 오류를 InvalidArgument로
-    // 바꾼다). 강한 참조를 담은 struct는 hook을 가질 수 없다(등록이 InvalidArgument로 거부한다 —
-    // hook struct는 언제나 통째로 복사해 검증할 수 있는 값이다).
+    // struct 검증 hook이다(Docs/Design/CurveData/README.ko.md 9.1절 — `static Result<void>
+    // Validate(const S&) noexcept`를 선언한 struct만 채운다, MetaCompiler 감지). 리플렉션
+    // 경로(graph decode·대입 묶음·JSON import·경로 쓰기)가 바뀐 값을 게시하기 전에 S 값 하나를
+    // 검증한다. 계약: 할당하지 않고 전역 상태·Registry를 읽지 않는 순수 함수이고 아무 스레드에서나
+    // 불린다. 값을 고치지 않는다. 결과는 Success 또는 InvalidArgument다(생성 thunk가 다른 오류를
+    // InvalidArgument로 바꾼다). 강한 참조를 담은 struct는 hook을 가질 수 없다(등록이
+    // InvalidArgument로 거부한다 — hook struct는 언제나 통째로 복사해 검증할 수 있는 값이다).
     Result<void> (*validate)(const void* value) noexcept = nullptr;
     // S 값 트리 전체의 검증이다: 멤버(base 하위 객체 먼저, 그다음 PROPERTY 멤버 순서 — Array·정적
     // 배열 원소·Optional 내부·Map 키와 값·InstancedStruct 내용 포함) 안의 hook 있는 struct를
@@ -607,7 +607,7 @@ struct RuntimeValueOps {
     // 무할당 교환이다. 교환할 수 없는 타입은 null이다.
     void (*swap)(void* first, void* second) noexcept = nullptr;
     // 값 트리 안의 hook 있는 struct를 안쪽부터 검증한다(RuntimeStructOps::validateTree와 같은 계약
-    // — Docs/Design/CurveData.ko.md 9.1절). 트리에 hook이 없는 타입은 null이다.
+    // — Docs/Design/CurveData/README.ko.md 9.1절). 트리에 hook이 없는 타입은 null이다.
     Result<void> (*validateTree)(const void* value) noexcept = nullptr;
 };
 

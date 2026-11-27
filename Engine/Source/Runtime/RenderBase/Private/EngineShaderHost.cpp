@@ -171,6 +171,25 @@ CookedShaderLibrarySource* EngineShaderHost::CookedLibraries() const noexcept {
     return cooked_;
 }
 
+void EngineShaderHost::SetPreparationProgress(const ShaderPreparationProgress& progress) noexcept {
+    platform::LockGuard lock(progressGate_);
+    preparation_ = progress;
+}
+
+void EngineShaderHost::ReportPreparationAdded(uint64 jobs) const noexcept {
+    platform::LockGuard lock(progressGate_);
+    if (preparation_.added != nullptr && jobs != 0) {
+        preparation_.added(preparation_.context, jobs);
+    }
+}
+
+void EngineShaderHost::ReportPreparationFinished(uint64 jobs) const noexcept {
+    platform::LockGuard lock(progressGate_);
+    if (preparation_.finished != nullptr && jobs != 0) {
+        preparation_.finished(preparation_.context, jobs);
+    }
+}
+
 StringView EngineShaderFormat(graphics::Backend backend) noexcept {
     switch (backend) {
     case graphics::Backend::D3D12:

@@ -10,7 +10,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.3 추가 요구:** Rocks 자체 명명, Windows/macOS 개발 환경, 5종 RHI, 머티리얼 에디터·템플릿·Tryout, 가변/고정 tick·time dilation, texture streaming·내장 리소스, lightmap/probe, 필수 로그·프로파일러·장애 하네스를 반영한다. 수학은 검증된 구현의 어댑터와 SIMD 활용으로 구성하고 자체 알고리즘 재작성은 제외한다. 안정성·정확성, 확장성, 성능 순으로 판단하며 Core/Object가 첫 작업이다. 상세 모듈·API·작업은 별첨 1.1에 연결한다.
 
-**1.4 UI 방향 전환:** 웹 에디터(WebView2·WKWebView·TypeScript/React)를 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. Core는 Unreal 체계를 유지한다. 21·22절과 웹 에디터를 전제로 한 문장을 개정하고, 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다. 33.9절에 개정 범위를 기록한다. 상세안은 1.2로 함께 개정한다. 툴킷 구조는 개정 1.9에서 UE 5.8 두 층 구조로 대체하였다.
+**1.4 UI 방향 전환:** 웹 에디터(WebView2·WKWebView·TypeScript/React)를 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. Core는 Unreal 체계를 유지한다. 21·22절과 웹 에디터를 전제로 한 문장을 개정하고, 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit/README.ko.md)에 둔다. 33.9절에 개정 범위를 기록한다. 상세안은 1.2로 함께 개정한다. 툴킷 구조는 개정 1.9에서 UE 5.8 두 층 구조로 대체하였다.
 
 **1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다. 광원 상호작용·그림자 caster 수집과 비충돌 게임플레이 질의의 배정은 개정 1.13에서 바꿨다(33.18절).
 
@@ -20,7 +20,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위(개정 1.12에서 UE와 같은 cm·도로 번복), 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
 
-**1.9 UI 구조 전환:** 개정 1.4의 Godot 4.x 수준 단일 층 툴킷을 폐기하고 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)로 전환한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8 기본값을 따른다. 이름은 Rocks 고유 이름을 쓰고 UE 이름은 대응표에만 적는다. Godot 오라클 시험 GO1–GO6을 UE 5.8 소스 근거 기준값 시험 UV1–UV9로 대체한다. 1.4·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2·30.1·30.2·31·32·33.2·33.9·34절을 개정하고 [UI 툴킷 설계](UiToolkit.ko.md)를 초안 2.0으로 다시 썼다. 개정 범위는 33.14절에 기록한다.
+**1.9 UI 구조 전환:** 개정 1.4의 Godot 4.x 수준 단일 층 툴킷을 폐기하고 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)로 전환한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8 기본값을 따른다. 이름은 Rocks 고유 이름을 쓰고 UE 이름은 대응표에만 적는다. Godot 오라클 시험 GO1–GO6을 UE 5.8 소스 근거 기준값 시험 UV1–UV9로 대체한다. 1.4·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2·30.1·30.2·31·32·33.2·33.9·34절을 개정하고 [UI 툴킷 설계](UiToolkit/README.ko.md)를 초안 2.0으로 다시 썼다. 개정 범위는 33.14절에 기록한다.
 
 **1.10 GC 대규모 처리 필수화:** 현재 `ObjectRegistry` GC는 객체 100만 개 규모에서 쓸 수 없다(2026-11-16 사용자 판단, 모델 측정 1M 표식 약 0.7초). 대규모 처리 보강을 선택 최적화가 아닌 **필수 작업**으로 정하고 6.6절과 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)를 추가한다. 착수 시점은 사용자가 정하며 고정 구현 순서는 바꾸지 않는다.
 
@@ -79,7 +79,7 @@ Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 
 
 **첫 번째 구현 작업은 Core다. Core는 공통 library와 ObjectRuntime을 포함하는 기반 시스템 범위로 정의하며 최우선 인력·검증 예산을 배정한다.** 렌더러·에디터·자체 언어·전문 빌드 최적화보다 먼저 이 계약을 완성한다. ObjectRuntime은 별도 모듈이지만 작업 우선순위상 Core Foundation에 포함한다.
 
-첫 작업의 최소 build/test bootstrap, CPU-only test runner, trace·compiler timing은 Core 검증에 필요한 도구로 함께 준비한다. 이 단계에서 UI 툴킷·에디터 viewport·GPU renderer·분산 빌드 engine·게임플레이 VM을 구현의 임계 경로로 편입하지 않는다. UI·에디터가 의존하는 리플렉션 확장은 계약만 이 단계에서 확정한다([UI 툴킷 설계](UiToolkit.ko.md) CU1–CU9). 최소 TypeInfo/visitor는 수동 등록으로 객체 테스트를 먼저 시작하고, 안정된 계약에 Clang 생성기를 연결한다.
+첫 작업의 최소 build/test bootstrap, CPU-only test runner, trace·compiler timing은 Core 검증에 필요한 도구로 함께 준비한다. 이 단계에서 UI 툴킷·에디터 viewport·GPU renderer·분산 빌드 engine·게임플레이 VM을 구현의 임계 경로로 편입하지 않는다. UI·에디터가 의존하는 리플렉션 확장은 계약만 이 단계에서 확정한다([UI 툴킷 설계](UiToolkit/README.ko.md) CU1–CU9). 최소 TypeInfo/visitor는 수동 등록으로 객체 테스트를 먼저 시작하고, 안정된 계약에 Clang 생성기를 연결한다.
 
 | Foundation 책임 묶음 | 최종 구현 결과 | 검증 책임 |
 |---|---|---|
@@ -189,7 +189,7 @@ C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 �
 
 Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·에셋 너겟·에셋 편집·Tryout·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
 
-공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Studio 화면은 게임 UI와 같은 UI 툴킷으로 구성하며 두 OS가 같은 widget·명령·transaction·selection·undo 스키마를 사용한다. OS별 차이는 PlatformWindow adapter(Windows는 Win32 창·TSF, macOS는 AppKit 창·NSTextInputClient)에 한정하고 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. 툴킷의 구조와 계약은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
+공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Studio 화면은 게임 UI와 같은 UI 툴킷으로 구성하며 두 OS가 같은 widget·명령·transaction·selection·undo 스키마를 사용한다. OS별 차이는 PlatformWindow adapter(Windows는 Win32 창·TSF, macOS는 AppKit 창·NSTextInputClient)에 한정하고 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. 툴킷의 구조와 계약은 [UI 툴킷 설계](UiToolkit/README.ko.md)를 따른다.
 
 3D viewport는 UI 트리 안의 viewport Element이며 해당 OS의 실제 graphics surface에 렌더링한 결과를 합성하여 표시한다. focus·IME·단축키·clipboard·drag/drop·gamepad·고해상도 배율·다중 monitor·window 재배치·Tryout input capture를 공통 acceptance로 검증한다. 외부 자동화·원격 도구와의 메시지는 versioned value/handle만 전달하고 raw pointer·native 객체 소유권을 전달하지 않는다. viewport close·Tryout 종료 시 session/generation을 검사하여 늦은 요청을 폐기한다. OS UI thread와 Render owner lane의 경계를 유지한다.
 
@@ -1862,7 +1862,7 @@ VFX는 System/Emitter/Module/Parameter로 구성하고 CPU 입자 baseline 이�
 
 VFX Graph는 typed module IR에서 CPU bytecode·GPU shader를 생성한다. parameter snapshot과 per-emitter state를 분리하고 async compute 결과의 queue dependency를 RenderGraph에 선언한다. particle motion vector·reactive mask·bounds를 제공하여 Deferred·Forward·temporal upscaling에서 ghosting·잘림을 검증한다. simulation budget, scalability LOD, warmup, pooling, preview scrubber를 포함한다.
 
-게임 UI와 에디터(Rocks Studio)는 같은 UI 툴킷을 사용한다. 구조는 UE 5.8과 같은 두 층이다. 비객체 Element 층이 레이아웃·무효화·그리기 목록·hit grid·입력 라우팅·focus·텍스트·스타일을 처리하고, Object Widget 층이 Element를 감싸 에셋·리플렉션·바인딩·Designer 편집을 제공한다. 에디터는 Element 층을, 게임 UI는 Widget 층을 사용한다. 한국어 IME·Unicode·fallback font·localization·DPI scale을 지원한다. 텍스트 library는 UE와 같은 구성(FreeType·HarfBuzz·ICU·msdfgen·nanosvg)으로 두고 adapter로 격리하며 engine API에 해당 타입을 노출하지 않는다. 최초 기본 스타일과 룩은 UE 5.8 기본값을 따른다. 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
+게임 UI와 에디터(Rocks Studio)는 같은 UI 툴킷을 사용한다. 구조는 UE 5.8과 같은 두 층이다. 비객체 Element 층이 레이아웃·무효화·그리기 목록·hit grid·입력 라우팅·focus·텍스트·스타일을 처리하고, Object Widget 층이 Element를 감싸 에셋·리플렉션·바인딩·Designer 편집을 제공한다. 에디터는 Element 층을, 게임 UI는 Widget 층을 사용한다. 한국어 IME·Unicode·fallback font·localization·DPI scale을 지원한다. 텍스트 library는 UE와 같은 구성(FreeType·HarfBuzz·ICU·msdfgen·nanosvg)으로 두고 adapter로 격리하며 engine API에 해당 타입을 노출하지 않는다. 최초 기본 스타일과 룩은 UE 5.8 기본값을 따른다. 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit/README.ko.md)를 따른다.
 
 UI render는 출력 해상도에서 업스케일 이후 실행한다. Widget Object·Element와 그리기 목록을 분리하고 atlas page는 GPU fence 후 회수한다. large list virtualization·dirty layout·draw invalidation을 계측한다. native HUD·world-space UI·editor overlay의 hit test 경로를 구분한다.
 
@@ -2077,7 +2077,7 @@ class DoorLogic : ScriptableComponent {
 
 ### 23.2 실행·참조·오류 규약
 
-**스크립트 단계와 이벤트.** Sparks 코드는 엔진의 정해진 지점(입력 batch, 물리 이벤트 batch, tick group, coroutine 재개)에서 실행되며 이 실행 묶음을 스크립트 단계라고 한다. 한 프레임의 순서는 8.2절의 데이터 전달 순서와 20.2절의 tick group을 따라 입력 batch → Tick(PrePhysics) → (FixedTick → 고정 물리) × n → 물리 이벤트 batch(PostPhysics) → 재개 → LateTick(LateUpdate)이다. `emit`과 필드 `Changed`는 큐에 등록되어 현재 실행 조각이 반환하거나 `await`에 도달한 뒤 같은 스크립트 단계 안에서 FIFO로 전달된다. 전달 순회는 한 항목에 그 시점 연결된 C++·Sparks handler를 연결 순서대로 모두 실행한 뒤 다음 항목으로 넘어가므로 handler의 재진입이 없다. 연쇄는 인과 깊이 16으로 제한한다. 활성 전환과 파괴는 이벤트 전달이 끝난 뒤 반영한다(5.2절). 이벤트 수신은 `on 경로.이벤트` 선언 한 형태이며 명시 구독 API는 없다. `Changed`는 실행 조각의 시작 값과 끝 값이 다를 때만 한 번 전달하며, 활성화 전에 적용된 값(초기값·spawn 시 저장 로드·late join)과 비활성 동안의 변경에는 발행하지 않으므로 현재 상태는 활성화마다 실행되는 Enable에서 반영한다. 실행 중인 instance에 저장을 적용할 때는 instance를 다시 생성한다.
+**스크립트 단계와 이벤트.** Sparks 코드는 엔진의 정해진 지점(입력 batch, 물리 이벤트 batch, tick group, coroutine 재개)에서 실행되며 이 실행 묶음을 스크립트 단계라고 한다. 한 프레임의 순서는 8.2절의 데이터 전달 순서와 20.2절의 tick group을 따라 입력 batch → Tick(PrePhysics) → (FixedTick → 고정 물리) × n → 물리 이벤트 batch(PostPhysics) → 재개 → LateTick(LateUpdate)이다. `emit`과 필드 `Changed`는 큐에 등록되어 현재 실행 조각이 반환하거나 `await`에 도달한 뒤 같은 스크립트 단계 안에서 FIFO로 전달된다. 전달 순회는 한 항목에 그 시점 연결된 handler(Sparks emit·Changed 항목은 C++·Sparks, native 이벤트 항목은 Sparks만 — native 발행의 C++ 구독자는 발행 때 바로 불린다, SL SD78)를 연결 순서대로 모두 실행한 뒤 다음 항목으로 넘어가므로 handler의 재진입이 없다. 연쇄는 인과 깊이 16으로 제한한다. 활성 전환과 파괴는 이벤트 전달이 끝난 뒤 반영한다(5.2절). 이벤트 수신은 `on 경로.이벤트` 선언 한 형태이며 명시 구독 API는 없다. `Changed`는 실행 조각의 시작 값과 끝 값이 다를 때만 한 번 전달하며, 활성화 전에 적용된 값(초기값·spawn 시 저장 로드·late join)과 비활성 동안의 변경에는 발행하지 않으므로 현재 상태는 활성화마다 실행되는 Enable에서 반영한다. 실행 중인 instance에 저장을 적용할 때는 instance를 다시 생성한다.
 
 **참조와 GC.** 스크립트 상태는 GC root가 되지 않는다. 엔진 객체 참조는 handle과 generation을 담은 약한 참조이고 파괴되면 null로 읽힌다. 값은 참조계수 copy-on-write 버퍼이며 closure가 없으므로 순환이 형성되지 않는다. 로드한 에셋 값은 AssetLease를 공유한다. 따라서 VM용 두 번째 tracing heap과 coroutine root가 없다. `await`를 지난 뒤 읽는 지역 이름(인자·지역 변수·binding·반복 변수)의 객체 타입은 `T?`가 되고, 재개 시 `this`의 generation을 확인해 사라졌으면 실행을 취소한다. native bridge는 handle을 검증한 뒤 같은 Game lane에서만 객체 필드를 수정하고 Borrow는 native call thunk 안에서만 유지한다.
 
@@ -2762,7 +2762,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | 하이엔드 post 전체 기능군 | 26 | M4–M9 catalog / B7·B9 |
 | 빌드·반복 개발 최적화 | 27 | Foundation 후 M3–M5 / I0–I6·B10 |
 | 헤드리스·server·offscreen | 28 | CoreTest부터 / B11 |
-| UI 툴킷·게임 UI runtime·UI Designer | 21–22, [UI 툴킷 설계](UiToolkit.ko.md) | M2 CU1–CU9, M3–M6 / B12·UV1–UV9 |
+| UI 툴킷·게임 UI runtime·UI Designer | 21–22, [UI 툴킷 설계](UiToolkit/README.ko.md) | M2 CU1–CU9, M3–M6 / B12·UV1–UV9 |
 | 테스트·프로파일링·위험 | 29–31 | 전 milestone / 재현 artifact |
 | 첫 작업 Core/Object | 1.1–1.2·4–7·32.1 | M0–M2 / CF01–CF12 |
 
@@ -2941,7 +2941,7 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 
 웹 에디터(WebView2·WKWebView·TypeScript/React)를 검토한 결과 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. 툴킷 2개·IME 경로 2개·별도 네이티브 Designer 미리보기·child window focus 문제가 함께 제거되는 대신 UI 툴킷이 에디터 일정의 임계 경로에 포함된다(R08). Core의 Unreal 체계와 Blueprint 제외·자체 언어 정책은 유지한다.
 
-Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 같은 장면의 Godot 실행 결과와 비교 시험한다(GO1–GO6). Godot의 속성 정의 방식(문자열 바인딩·hint 문자열·setter 안의 효과 호출·이름 비교 기반 표시 조건)은 따르지 않고 필드 지정자에서 생성한다. [S77](https://github.com/godotengine/godot/tree/4.5-stable/scene/gui) UI와 에디터가 의존하는 리플렉션 확장 CU1–CU8은 Foundation Gate 전에 계약을 확정한다. 세부와 결정 대기 항목 UD1–UD8은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다.
+Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 같은 장면의 Godot 실행 결과와 비교 시험한다(GO1–GO6). Godot의 속성 정의 방식(문자열 바인딩·hint 문자열·setter 안의 효과 호출·이름 비교 기반 표시 조건)은 따르지 않고 필드 지정자에서 생성한다. [S77](https://github.com/godotengine/godot/tree/4.5-stable/scene/gui) UI와 에디터가 의존하는 리플렉션 확장 CU1–CU8은 Foundation Gate 전에 계약을 확정한다. 세부와 결정 대기 항목 UD1–UD8은 [UI 툴킷 설계](UiToolkit/README.ko.md)에 둔다.
 
 개정 범위는 표지·1·1.1·1.2(CF01)·2.4·2.5(PL01·PL04)·3.1·3.2·7.2·9.3·14.6·14.8·14.9(MT08)·21·22·23.3·25.3·27.10·28.1·28.5·29.2(B12)·29.4·30·31(R08·R20)·32·33.2·34절이다. 3.1절 계층 그림은 원본이 저장소 밖에 있어 그림 자체는 개정하지 않았다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다. 이 절의 Godot 기준 구조와 GO1–GO6은 개정 1.9(33.14절)에서 대체되었다.
 
@@ -3025,7 +3025,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 
 | 지적 | 조치 |
 |---|---|
-| 스크립트 단계·전달 단위·연쇄 계수·tick이 정의되지 않아 Changed 횟수와 handler 순서가 구현마다 달라짐 | 스크립트 단계와 프레임 순서, 실행 조각 기준 Changed, 인과 깊이 16, 전달 순회에서 C++·Sparks handler를 연결 순서로 실행(23.2절) |
+| 스크립트 단계·전달 단위·연쇄 계수·tick이 정의되지 않아 Changed 횟수와 handler 순서가 구현마다 달라짐 | 스크립트 단계와 프레임 순서, 실행 조각 기준 Changed, 인과 깊이 16, 전달 순회에서 handler를 연결 순서로 실행(23.2절 — native 발행의 C++ 구독자는 발행 때, SL SD78) |
 | 스크립트가 호출하지 않은 C++ handler의 파괴 요청은 즉시 전이되어 "단계 끝까지 유효" 보장이 성립하지 않음 | 스크립트 단계가 열린 동안의 모든 Game lane 파괴 요청과 활성 전환을 지연(5.2절) |
 | "비활성화"가 Disable·Detach·격리를 함께 가리키고 Tryout Stop에서 Destroy hook이 실행되지 않음 | fault 이후 상태를 격리 하나로 정의, 종료 경로별 hook(SD20, 20.2절) |
 | 기다리는 handler가 이벤트를 조용히 버림 | 재진입 정책 `@skipWhileBusy`·`@restart` 표시 필수(SD11, 23.2절) |
@@ -3038,7 +3038,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 
 개정 1.4의 Godot 4.x 수준 단일 층 툴킷을 사용자 분석에 따라 벤치마킹 대상에서 제외하고, UE 5.8(로컬 클론 5.8.4-release)의 두 층 구조로 전환한다. 비객체 Element 층(UiCore·UiFramework·TextLayout)이 레이아웃·무효화·그리기 목록·hit grid·입력 라우팅·focus·텍스트·스타일을 처리하고, Object Widget 층(UiWidget·UiScreens)이 Element를 약하게 참조하여 에셋·리플렉션·바인딩·Designer 편집·화면 스택을 제공한다. 배치 속성은 slot 객체에 두며, 에디터는 Element 층을 직접 사용한다. 최초 기본 스타일과 룩은 UE 5.8 기본값을 따르고, UE 코드와 Epic 저작 자원(아이콘·이미지)은 포함하지 않는다. 이름은 Rocks 고유 이름을 쓰고 UE 이름은 대응표에만 적는다.
 
-Godot 오라클 시험 GO1–GO6을 UE 5.8 소스의 행 단위 근거를 단 기준값 시험 UV1–UV9로 대체하였다. Core 선행 계약 CU1–CU9의 ID와 UI 툴킷 설계 7절 번호는 유지하였으며, Element 층이 요구하는 Core 보강 CB1–CB4와 PlatformWindow 보강 PW1–PW8을 추가하였다. 세부와 결정 UD1–UD12(2026.11.16 모두 확정)는 [UI 툴킷 설계](UiToolkit.ko.md) 초안 2.0에 둔다.
+Godot 오라클 시험 GO1–GO6을 UE 5.8 소스의 행 단위 근거를 단 기준값 시험 UV1–UV9로 대체하였다. Core 선행 계약 CU1–CU9의 ID와 UI 툴킷 설계 7절 번호는 유지하였으며, Element 층이 요구하는 Core 보강 CB1–CB4와 PlatformWindow 보강 PW1–PW8을 추가하였다. 세부와 결정 UD1–UD12(2026.11.16 모두 확정)는 [UI 툴킷 설계](UiToolkit/README.ko.md) 초안 2.0에 둔다.
 
 개정 범위는 표지·1.4·1.9·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2(B12)·30.1·30.2·31(R08)·32·33.2·33.9·34절이다. S75–S77은 본문 인용을 철회하였다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
@@ -3115,7 +3115,7 @@ Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수�
 | 물리 | 엔진 Actor 물리 이벤트 `TriggerEntered` 등(20.2절), LevelScript의 물리 hook·Collider 금지(LD9·LD18) |
 | 편집기 | 열기·참조 추가·이벤트 추가 명령, 언어 서버 명령 채널, 템플릿(22.1·22.3절), 배치 Actor에 component 추가(20.2절)(LD14·LD15·LD20) |
 
-UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage/README.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage/README.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime/04-ObjectSystem.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit/README.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem/README.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 

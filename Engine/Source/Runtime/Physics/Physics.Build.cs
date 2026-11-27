@@ -17,5 +17,6 @@ public sealed class Physics : EngineModuleRules
     protected override string[] PublicDependencies => ["World", "Collision"];
 
     // Jolt: the solver. Task: the worker scheduler that runs the Jolt jobs.
-    protected override string[] PrivateDependencies => ["Jolt", "Task"];
+    // DeterministicMath: the mass power rule (UE RaiseMassToPower) without the host libm, so every platform builds the same body mass.
+    protected override string[] PrivateDependencies => ["Jolt", "Task", "DeterministicMath"];
 }

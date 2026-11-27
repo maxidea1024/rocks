@@ -583,6 +583,13 @@ internal static partial class SchemaValidator
                     return;
                 }
 
+                // ScriptAssignable은 이벤트 필드의 Sparks 노출이다(Docs/Design/SparksBinding.ko.md B20).
+                if (field.Spec.ScriptAssignable)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: ScriptAssignable applies only to an Event field", "RMC2603",
+                        "Use ScriptReadOnly or ScriptWritable to show a value field to Sparks; ScriptAssignable exposes rocks::Event<...> fields to 'on' handlers.").At(field.Site);
+                }
+
                 if (EventRules.Mentions(field.CanonicalSpelling ?? field.NativeSpelling))
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: an Event cannot be held in a container, Optional or static array ('{field.NativeSpelling}')",
@@ -643,13 +650,13 @@ internal static partial class SchemaValidator
                 PropertySpec spec = field.Spec;
                 string? rejected = spec.ReadOnly ? "ReadOnly" : spec.Required ? "Required" : spec.TextExportTransient ? "TextExportTransient"
                     : spec.TextMapMergeByKey ? "TextMapMergeByKey" : spec.MaxElements != 0 ? "MaxElements" : spec.AssetBundles.Length != 0 ? "AssetBundles"
-                    : spec.HasSettings ? "settings specifiers" : spec.ScriptVisible ? "ScriptReadOnly/ScriptWritable" : spec.ScriptName.Length != 0 ? "ScriptName"
+                    : spec.HasSettings ? "settings specifiers" : spec.ScriptVisible ? "ScriptReadOnly/ScriptWritable"
                     : null;
                 if (rejected is not null)
                 {
                     throw new MetadataException($"{symbol}: {rejected} cannot apply to an Event field", "RMC2805",
-                        "An Event field takes Params, Name, Category, DisplayName, Transient, SaveGame, DuplicateTransient, NonTryoutDuplicateTransient and " +
-                        "EditorOnly; script exposure of events comes with the Sparks event binding.").At(field.Site);
+                        "An Event field takes Params, Name, Category, DisplayName, Transient, SaveGame, DuplicateTransient, NonTryoutDuplicateTransient, " +
+                        "EditorOnly and, for Sparks, ScriptAssignable with ScriptName (SparksBinding B20).").At(field.Site);
                 }
 
                 if (arguments.Count > FunctionRules.MaxParameters)
@@ -1199,7 +1206,7 @@ internal static partial class SchemaValidator
                     "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
             }
 
-            // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
+            // 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
             // 복사해 검증한 뒤 게시한다. 그래서 hook struct는 참조 없는 값이어야 한다.
             if (model.HasValidate && (model.ContainsStrongReference || model.ContainsReferenceArray))
             {

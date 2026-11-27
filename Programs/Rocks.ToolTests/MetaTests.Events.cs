@@ -4,7 +4,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 // meta 시험 중 리플렉션 이벤트 필드(ROCKS_PROPERTY(Params = "…") rocks::Event<…> — Docs/Design/EventReflection.ko.md EV2b, ED14·ED18)
-// 시험이다: 받는 선언(인자 없음·값·const String&·struct·enum·ObjectHandle 인자, Transient·SaveGame·EditorOnly 블록)의 descriptor schema 7
+// 시험이다: 받는 선언(인자 없음·값·const String&·struct·enum·ObjectHandle 인자, Transient·SaveGame·EditorOnly 블록)의 descriptor schema 8
 // 항목·생성 schema·연산표와 두 조합 컴파일, 거부 사례마다 RMC2801–RMC2805 코드.
 internal static partial class MetaTests
 {
@@ -34,7 +34,7 @@ internal static partial class MetaTests
                 "changed(allocator), named(allocator), pinged(allocator), placed(allocator),\n" + EditorDataOpen + "edited(allocator),\n#endif\nsecret(allocator)"));
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor)))
             {
-                Verify.Equal(7, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 7");
+                Verify.Equal(8, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 8");
                 JsonElement[] fields = [.. DescriptorType(descriptor, "probe::Value").GetProperty("fields").EnumerateArray()];
                 JsonElement Field(string name) => fields.Single(field => field.GetProperty("name").GetString() == name);
                 Verify.Equal("Value", Field("count").GetProperty("fieldKind").GetString(), "value field kind");
@@ -79,6 +79,49 @@ internal static partial class MetaTests
                 ProcessResult compiled = await probe.CompileGeneratedAsync(editor: editor);
                 Verify.Equal(0, compiled.ExitCode, $"generated events compile with editor {editor}: " + compiled.StdOut + compiled.StdErr);
             }
+        });
+
+        // 손자 클래스가 물려받은 이벤트(다른 헤더의 조부모 선언)의 연산표는 조부모의 NativeTypeKey를 쓴다 — 생성 소스가 직접 base뿐
+        // 아니라 이벤트를 선언한 조상의 생성 헤더도 include해야 컴파일된다(UiWidget TileViewWidget → ListViewWidget → ListViewBaseWidget).
+        suite.Add("Meta.InheritedEventFromAGrandparentHeaderCompiles", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            probe.WriteHeader("Root.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Object/Event.h>\n" +
+                "namespace probe {\nROCKS_CLASS()\nclass Root : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Root(rocks::Allocator& allocator) noexcept : changed(allocator) {}\n" +
+                "ROCKS_PROPERTY(Params = \"amount\") rocks::Event<rocks::int32> changed;\n};\n}\n");
+            probe.WriteHeader("Middle.h", "#pragma once\n#include <Root.h>\nnamespace probe {\nROCKS_CLASS()\nclass Middle : public Root {\n" +
+                "ROCKS_GENERATED_BODY()\npublic:\nexplicit Middle(rocks::Allocator& allocator) noexcept : Root(allocator) {}\n};\n}\n");
+            await probe.GenerateAsync("#pragma once\n#include <Middle.h>\nnamespace probe {\nROCKS_CLASS()\nclass Leaf final : public Middle {\n" +
+                "ROCKS_GENERATED_BODY()\npublic:\nexplicit Leaf(rocks::Allocator& allocator) noexcept : Middle(allocator) {}\n};\n}\n",
+                extra: ["--input", probe.HeaderPath("Root.h"), "--include", "Root.h", "--input", probe.HeaderPath("Middle.h"), "--include", "Middle.h"]);
+            string generated = Compact(File.ReadAllText(probe.Source));
+            Verify.That(generated.Contains("detail::MakeEventOps<&::probe::Root::changed>(", StringComparison.Ordinal), "inherited event ops entry");
+            Verify.That(generated.Contains("#include<Root.generated.h>", StringComparison.Ordinal), "grandparent generated header");
+            ProcessResult compiled = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, compiled.ExitCode, "inherited grandparent event compiles: " + compiled.StdOut + compiled.StdErr);
+        });
+
+        // 다른 헤더의 enum을 이벤트 인자로 쓰면 클래스 생성 헤더가 그 enum 생성 헤더를 include한다(Broadcast를 부르는 구현 TU는 클래스
+        // 생성 헤더만 include한다). enum 생성 헤더가 보이지 않는 TU에서 배치를 계산하면 static_assert다(enum을 Opaque로 보는 inline
+        // 배치가 링크되는 ODR을 막는다 — UiWidget CheckBoxWidget::OnStateChanged 등록 실패에서 발견).
+        suite.Add("Meta.EventEnumArgumentNeedsItsGeneratedHeader", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            probe.WriteHeader("Tone.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Base/Types.h>\nnamespace probe {\n" +
+                "ROCKS_ENUM()\nenum class Tone : rocks::uint8 { Low, High };\n}\n");
+            await probe.GenerateAsync("#pragma once\n#include <Tone.h>\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "#include <Object/Event.h>\nnamespace probe {\nROCKS_CLASS()\nclass Value : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : changed(allocator) {}\n" +
+                "ROCKS_PROPERTY(Params = \"tone\") rocks::Event<Tone> changed;\n};\n}\n",
+                extra: ["--input", probe.HeaderPath("Tone.h"), "--include", "Tone.h"]);
+            Verify.Contains("#include <Tone.generated.h>", File.ReadAllText(probe.Output), "class generated header includes the event enum's");
+            const string layout = "\nauto rocksLayout = rocks::detail::FrameLayoutOf<probe::Tone>();\n";
+            ProcessResult withClassHeader = await probe.CompileSourceAsync("#include <Probe.generated.h>" + layout);
+            Verify.Equal(0, withClassHeader.ExitCode, "class generated header is enough: " + withClassHeader.StdOut + withClassHeader.StdErr);
+            ProcessResult without = await probe.CompileSourceAsync("#include <Probe.h>\n#include <Object/FunctionBinding.h>" + layout);
+            Verify.That(without.ExitCode != 0, "enum layout without its generated header compiled");
+            Verify.Contains("must be a reflected enum", without.StdOut + without.StdErr, "enum layout static_assert");
         });
 
         // ROCKS_NATIVE 이벤트(RMC2801 — 저장·Sparks·도구가 보지 못한다).
