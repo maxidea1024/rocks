@@ -1,0 +1,35 @@
+# 머티리얼 시스템(MaterialSystem) 설계
+
+## 6. IR — MS2f 구현 세부
+
+### 6.13 MS2f 구현 세부(고급·보조 노드)
+
+근거는 UE 5.8 고전 번역기다: `MaterialExpressions.cpp`(ME), `MaterialExpressionNoise.cpp`, `HLSLMaterialTranslator.cpp`(HT), 셰이더 `MaterialTemplate.ush`·`Common.ush`·`Random.ush`·`SobolRandom.ush`·`ColorSpace.ush`·`HairShadingCommon.ush`(SH). 결과 값은 고전 번역기를 따른다(6.8절).
+
+| 묶음 | 노드 | 선행 |
+|---|---|---|
+| MS2f1 | RotateAboutAxis·SphereMask·DeriveNormalZ·Fresnel·BumpOffset·Desaturation·HsvToRgb·RgbToHsv·BlackBody·SrgbToWorkingColorSpace·HairColor(ALU — IR 기본 연산으로 펼친다) | 없음 |
+| MS2f2 | Sobol·TemporalSobol(UE LUT `View.SobolSamplingTexture`는 XOR 상수표라 ALU로 같은 값을 낸다 — 표·함수는 MS2f2 설계에서 확정) | 없음 |
+| MS2f3 | Noise·VectorNoise(ALU 함수 — GradientALU·ValueALU·Voronoi·Cellnoise·Perlin 3D·Gradient·Curl. LUT 함수 — SimplexTex·GradientTex·GradientTex3D는 엔진 LUT 텍스처가 필요하다, 선행은 MS2f3 설계에서 확정) | 일부 |
+| MS2f4 | ColorRamp(커브 평가 — CurveAssets `ColorCurveAsset` 평가식과 비트까지 같게, engine-runtime 병합 뒤) | CurveAssets CA1 |
+| MS2f5 | CustomHlsl(7.5절 규칙 — V13 검사, 생성 함수 모양은 MS2f5 설계에서 UE 차이표와 함께 확정) | 없음 |
+
+묶음마다 시험을 붙이고, 리뷰는 MS2f 끝에 리뷰어 한 명이다.
+
+**공통 결정.**
+- **IR로 펼친다.** MS2f1 노드는 HLSL 보조 함수 호출이 아니라 IR 기본 연산(Dot·Cross·Sin·Cos·Logarithm·Exponential·Sqrt·Select 등)으로 펼친다(결정 MD2 — IR이 정본이고 CPU bake·ray profile도 소비한다). 상수 피연산자는 IR 접기 규칙대로다. UE가 C++에서 미리 계산하는 상수(예: `2π / Period`, SphereMask의 `1 / max(1 − p·0.01, 1e−5)`)는 같은 float 식으로 번역 때 계산한다.
+- **정밀도.** Rocks 생성 원문은 모든 단계에서 float다. UE는 픽셀 셰이더의 `MaterialFloat`가 half다(SH Common.ush:13–32 — `FORCE_MATERIAL_FLOAT_FULL_PRECISION`이 아니면). UE와 마지막 bit가 다를 수 있다(편차 — half 경로는 품질·형식 정책이 생기면 다시 본다).
+- **연결 여부로 식이 바뀌는 노드.** Rocks는 UE의 "입력 + 덮기 상수 속성"을 핀 기본값 하나로 합쳤다(19.13절). UE가 연결 여부로 식을 바꾸는 노드(SphereMask Hardness, Desaturation Fraction, ColorRamp)는 lowering이 연결을 먼저 본다(`IsConnected`). 연결되지 않으면 핀 사용자 값·정의 기본값이 UE 덮기 상수 자리다.
+
+**MS2f1 노드.**
+- **RotateAboutAxis**(ME:18479–18508, HT:11721–11742, SH MaterialTemplate.ush:2031–2075): 네 입력은 필수다(UE 문구 "Missing RotateAboutAxis input NormalizedRotationAxis"·"… RotationAngle"·"… PivotPoint"·"… Position", MissingInput). 각도 = RotationAngle × (2π / `period`)(상수 2π/period는 번역 때 float로 계산 — UE `2.0f * (float)UE_PI / Period`), 축은 Float3로 맞춘다(UE ForceCast — 넓으면 앞 성분, 스칼라는 복제), 각도는 Float1(첫 성분). 결과는 회전 후 위치가 아니라 **오프셋**(float3)이다: `C = Pivot + axis·dot(axis, Position − Pivot)`, `U = Position − C`, `V = cross(axis, U)`, `R = U·cos(a) + V·sin(a)`, 결과 `(C + R) − Position`. Pivot이나 Position이 Double(LWC)이면 둘 다 Double로 맞추고 `C`는 Double, `U = float(Position − C)`, 결과 `R − U`(UE LWC 오버로드 — 같은 식을 줄인 형태)다.
+- **SphereMask**(ME:18521–18594): A·B 필수("Missing input A"·"Missing input B"). 거리는 A·B가 둘 다 스칼라면 `abs(A − B)`, 아니면 `length(A − B)`(UE `CompileHelperLength`). 역반지름 = `1 / max(1e−5, Radius)`(Radius 핀 값 — 연결·기본 같은 식). 역경도: Hardness가 연결되면 비율로 `1 / max(1 − Hardness, 1e−5)`, 아니면 핀 값은 퍼센트라 번역 때 `1 / max(1 − p·0.01, 1e−5)`를 계산한 상수다(UE `HardnessPercent`). 결과 `saturate((1 − 거리·역반지름)·역경도)`.
+- **DeriveNormalZ**(ME:12690–12706): InXY 필수("Missing input normal xy vector whose z should be derived."). 입력을 Float2로 맞추되 UE ForceCast 규칙대로 스칼라는 그대로 둔다. z = `sqrt(saturate(1 − dot(xy, xy)))`. 결과는 벡터면 `float3(xy, z)`, 스칼라면 `float3(x, z, 0)`이다(UE `AppendVector(scalar, z)` 뒤 ForceCast Float3가 0을 붙인다).
+- **Fresnel**(ME:11936–11953): 필수 입력 없음. N = Normal 연결 값, 없으면 문맥 값 `PixelNormal`(픽셀 전용 — 정점 문맥이면 6.9절 V4). `x = 1 − max(0, dot(N, CameraVector))`(Dot 맞춤은 5.3절 — UE Dot은 큰 쪽을 작은 쪽 폭으로 자른다), 밑 `max(abs(x), 1e−4)`(UE `UE_KINDA_SMALL_NUMBER`), `Power(밑, ExponentIn)`은 Power 노드와 같은 규칙(UE `PositiveClampedPow` — LowerMath의 같은 경로), 결과 `pow·(1 − BaseReflectFractionIn) + BaseReflectFractionIn`.
+- **BumpOffset**(ME:5987–6007): Height 필수("Missing Height input"). `t = TransformWorldVectorToTangent(CameraVector).xy`(문맥 값 — UE `mul((float3x3)TangentToWorld, CameraVector)`), `hr = HeightRatioInput` 첫 성분, `h = Height` 첫 성분, 결과 `Coordinate + t·(hr·h + (−referencePlane·hr))`. Coordinate가 연결되지 않으면 `TexCoord(constCoordinate)`(6.9절 TexCoord 규칙).
+- **Desaturation**(ME:7939–7951): Input 필수("Missing Desaturation input"). `Color`는 Float3로 맞춘다(UE `ForceCast(…, Float3, ExactMatch|ReplicateValue)` — float4는 rgb, float2는 (x, y, 0), 스칼라는 복제). `Grey = dot(Color, luminanceFactors.rgb)`. Fraction이 연결되면 `lerp(Color, Grey, Fraction)`(float3), 아니면 `Grey`(스칼라 — UE도 출력 형이 연결 여부로 바뀐다).
+- **HsvToRgb·RgbToHsv**(ME:10909–10957, HT:10964–11036): Input 필수("Missing HSVToRGB input"·"Missing RGBToHSV input"). 입력이 정확히 Float3·Float4가 아니면 오류 없이 입력을 그대로 낸다(UE). HsvToRgb: `H = in.x`, `rgb = saturate(float3(abs(H·6 − 3) − 1, 2 − abs(H·6 − 2), 2 − abs(H·6 − 4)))`, 결과 `((rgb − 1)·in.y + 1)·in.z`(Float4면 알파 `in.w`를 붙인다 — 색상은 frac하지 않는다). RgbToHsv: `P = (g < b) ? float4(b, g, −1, 2/3) : float4(g, b, 0, −1/3)`, `Q = (r < P.x) ? float4(P.x, P.y, P.w, r) : float4(r, P.y, P.z, P.x)`, `chroma = Q.x − min(Q.w, Q.y)`, `hue = abs((Q.w − Q.y) / (6·chroma + 1e−10) + Q.z)`, `s = chroma / (Q.x + 1e−10)`, 결과 `(hue, s, Q.x[, a])`. 조건 선택은 IR Select(Bool 스칼라 조건)다.
+- **BlackBody**(ME:18990–19006, SH MaterialTemplate.ush:2112–2131): Temp는 첫 성분(Float1)이다. 식은 UE 함수 그대로(u·v 플랑크 궤적 근사 → x·y·z → X = x/y·Y, Z = z/y·Y, Y = 1 → `max(0, XYZ_2_LinearRGB(X, Y, Z))·pow(0.0004·Temp, 4)` — pow는 HLSL pow, Power 노드 규칙이 아니다). `XYZ_2_LinearRGB`는 작업 색공간 sRGB 행렬(SH ColorSpace.ush:40–45 — Rocks 작업 색공간은 sRGB/Rec.709 고정, 색공간 설정은 후속). UE는 Temp가 연결되지 않으면 오류 없이 값이 없어 출력 속성 기본값이 된다 — Rocks는 MissingInput "Missing BlackBody Temp input"으로 진단한다(값 없음을 조용히 기본값으로 바꾸는 경로가 없다, 편차).
+- **SrgbToWorkingColorSpace**(ME:10492–10520): Input 필수("Missing sRGBColorToWorkingColorSpace input"). 작업 색공간이 sRGB 고정이므로 입력을 그대로 낸다(UE sRGB 분기와 같다 — 색공간 설정이 생기면 행렬 열 dot·알파 보존 경로를 더한다).
+- **HairColor**(ME:21213–21234, SH HairShadingCommon.ush:58–97): 입력은 선택이고 연결이 없으면 UE Compile 상수 Melanin 0.5·Redness 0·DyeColor (1, 1, 1)이다(Rocks 핀에는 기본값이 없어 lowering이 넣는다). Melanin·Redness는 첫 성분, DyeColor는 Float3(스칼라 복제). 식: `m = saturate(Melanin)`, `r = saturate(Redness)`, `melanin = −log(max(1 − m, 1e−4))`, `A = melanin·(1 − r)·(0.506, 0.841, 1.653) + melanin·r·(0.343, 0.733, 1.924) + (log(saturate(Dye)) / D)²`, 결과 `exp(−sqrt(A)·D)`이고 `D = 5.969 − 0.215·B + 2.532·B² − 10.73·B³ + 5.574·B⁴ + 0.245·B⁵`(B = 0.3 — UE와 같은 float 식으로 번역 때 계산한다).
+- **시험(MS-T3 범위).** 노드마다 상수 입력의 결과 값(UE 식을 C++ float로 같은 순서로 계산한 기대값), 필수 입력 오류 문구, 연결 여부 분기(SphereMask Hardness·Desaturation Fraction·Fresnel Normal·BumpOffset Coordinate·HairColor 기본값), 형 규칙(DeriveNormalZ 스칼라, Hsv 통과, RotateAboutAxis Double)을 본다.
