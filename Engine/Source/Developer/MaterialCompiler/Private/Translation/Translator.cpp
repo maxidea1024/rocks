@@ -137,7 +137,8 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
                        MaterialTranslation& out) noexcept
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), expanded_(allocator),
       origins_(allocator), calls_(allocator), callOutputs_(allocator), functionInputs_(allocator),
-      snapshots_(allocator), nodes_(allocator), edges_(allocator), outputsVertex_(allocator),
+      snapshots_(allocator), syntheticOwners_(allocator), layers_(allocator),
+      layerDiagnostics_(allocator), nodes_(allocator), edges_(allocator), outputsVertex_(allocator),
       outputsPrevious_(allocator), outputsPixel_(allocator), statesVertex_(allocator),
       statesPrevious_(allocator), statesPixel_(allocator), outputsVirtualTexture_(allocator),
       statesVirtualTexture_(allocator), lowerings_(allocator), lazyNodes_(allocator),
@@ -329,7 +330,10 @@ Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
                                 MaterialDiagnosticCode code, Guid node, Name pin,
                                 StringView message) noexcept {
     if (!origins_.Contains(node)) {
-        return ReportAt(severity, code, node, pin, message);
+        // 레이어 합성 호출의 진단은 그 레이어 노드 위치다(6.12절 MS2e3).
+        const Guid* owner = syntheticOwners_.Find(node);
+        return owner == nullptr ? ReportAt(severity, code, node, pin, message)
+                                : ReportAt(severity, code, *owner, Name(), message);
     }
 
     // 펼친 사본의 진단은 주 그래프의 가장 바깥 호출 노드 위치에 내고 호출 경로와 노드 종류를 문구
@@ -344,6 +348,10 @@ Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
         }
 
         outer = origin->call;
+    }
+
+    if (const Guid* owner = syntheticOwners_.Find(outer)) {
+        outer = *owner;
     }
 
     String text(scratch);
@@ -787,6 +795,20 @@ Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out)
 
         if (const usize* source = ResolveSource(edge)) {
             if (auto added = out.TryPushBack(Dependency{*source, PinKey{edge.toNode, edge.toPin}});
+                !added) {
+                return added;
+            }
+        }
+    }
+
+    // 레이어 노드는 사슬 끝 합성 호출의 첫 출력에 기댄다(간선이 없는 의존 — 6.12절 MS2e3).
+    if (const LayerResult* layer = layers_.Find(consumer.id);
+        layer != nullptr && layer->valid && !layer->passThrough) {
+        nodegraph::GraphEdge edge;
+        edge.fromNode = layer->output.node;
+        edge.fromPin = layer->output.pin;
+        if (const usize* source = ResolveSource(edge)) {
+            if (auto added = out.TryPushBack(Dependency{*source, PinKey{consumer.id, Name()}});
                 !added) {
                 return added;
             }

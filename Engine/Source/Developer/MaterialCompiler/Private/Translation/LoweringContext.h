@@ -203,6 +203,9 @@ public:
     // 호출 노드 call의 입력 pin 값이다(FunctionInput 사본 — 연결된 입력이 값 없이 오면 이 노드도
     // 실패다).
     Result<IrValueId> CallerInput(Guid call, Name pin, bool& connected) noexcept;
+    // 이 레이어 노드의 결과다(6.12절 MS2e3). 활성 레이어가 없으면 passThrough가 참이고
+    // NoIrValue다. 오류는 진단한 뒤 NoIrValue다.
+    Result<IrValueId> LayerValue(bool& passThrough) noexcept;
 
     // 다른 노드(종류 expectedType)의 출력이다(NamedRerouteUsage의 선언 — 순환은 V2). 그 id의 노드가
     // 없거나 종류가 다르면 found가 거짓이다.

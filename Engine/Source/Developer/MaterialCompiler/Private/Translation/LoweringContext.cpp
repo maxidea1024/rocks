@@ -704,6 +704,10 @@ bool LoweringContext::FunctionInputBinding(Guid& call, Name& pin) const noexcept
     return translator_.FunctionInputBinding(node_.id, call, pin);
 }
 
+Result<IrValueId> LoweringContext::LayerValue(bool& passThrough) noexcept {
+    return translator_.LowerLayers(node_, passThrough);
+}
+
 Result<IrValueId> LoweringContext::CallerInput(Guid call, Name pin, bool& connected) noexcept {
     connected = false;
     const nodegraph::GraphNode* caller = translator_.FindNode(call);

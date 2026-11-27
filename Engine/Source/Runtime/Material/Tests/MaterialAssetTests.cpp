@@ -21,6 +21,10 @@
 #include <MaterialSchema/Nodes/Functions/FunctionCallProperties.h>
 #include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.h>
+#include <MaterialSchema/Nodes/MaterialAttributes/AttributeLayersProperties.generated.h>
+#include <MaterialSchema/Nodes/MaterialAttributes/AttributeLayersProperties.h>
+#include <MaterialSchema/Nodes/MaterialAttributes/LayerStackLayer.generated.h>
+#include <MaterialSchema/Nodes/MaterialAttributes/LayerStackLayer.h>
 #include <ObjectSerialization/StructRecord.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
@@ -691,8 +695,8 @@ bool AddGraphNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document,
            document.graphs[0].nodes.TryPushBack(Move(node)).IsOk();
 }
 
-// 그래프 안 FunctionCall·MaterialSample 참조는 Build 의존이다(6.12절 MS2e2 — 자기·null 참조는
-// 뺀다).
+// 그래프 안 FunctionCall·MaterialSample·레이어 노드 참조는 Build 의존이다(6.12절 MS2e2·MS2e3 —
+// 자기·null 참조는 뺀다).
 TEST(Material_GraphReferencesAreBuildDependencies) {
     asset_test::AssetEnv env;
     REQUIRE(env.Ready());
@@ -713,11 +717,18 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
         material::MaterialSampleProperties self;
         self.materialReference.assetId = asset_test::FixedId(0x6a0);
         material::FunctionCallProperties empty(source.ObjectAllocator());
+        material::AttributeLayersProperties layers(source.ObjectAllocator());
+        material::LayerStackLayer layer(source.ObjectAllocator());
+        layer.layerId = Guid{0x40, 1};
+        layer.layer.assetId = asset_test::FixedId(0x6a4);
+        layer.blend.assetId = asset_test::FixedId(0x6a5);
         value.graph.domain = source.Names()->TryIntern("Material").Value();
-        return AddGraphNode(env, value.graph, Guid{0x20, 1}, "Material.FunctionCall", call) &&
+        return layers.defaultLayers.layers.TryPushBack(Move(layer)).IsOk() &&
+               AddGraphNode(env, value.graph, Guid{0x20, 1}, "Material.FunctionCall", call) &&
                AddGraphNode(env, value.graph, Guid{0x20, 2}, "Material.MaterialSample", sample) &&
                AddGraphNode(env, value.graph, Guid{0x20, 3}, "Material.MaterialSample", self) &&
-               AddGraphNode(env, value.graph, Guid{0x20, 4}, "Material.FunctionCall", empty);
+               AddGraphNode(env, value.graph, Guid{0x20, 4}, "Material.FunctionCall", empty) &&
+               AddGraphNode(env, value.graph, Guid{0x20, 5}, "Material.AttributeLayers", layers);
     }));
     REQUIRE(asset_test::WithBorrow<MaterialFunction>(
         source, function, [&](MaterialFunction& value) noexcept {
@@ -733,9 +744,11 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
     AssetDependencySink materialSink(env.allocator);
     REQUIRE(table.CollectBuildDependencies(source, access, material, TypeOf<Material>(),
                                            asset_test::FixedId(0x6a0), materialSink));
-    REQUIRE(materialSink.Dependencies().Size() == 2);
+    REQUIRE(materialSink.Dependencies().Size() == 4);
     CHECK(materialSink.Dependencies()[0].asset == asset_test::FixedId(0x6a1));
     CHECK(materialSink.Dependencies()[1].asset == asset_test::FixedId(0x6a2));
+    CHECK(materialSink.Dependencies()[2].asset == asset_test::FixedId(0x6a4));
+    CHECK(materialSink.Dependencies()[3].asset == asset_test::FixedId(0x6a5));
     for (const PackageDependencyEntry& entry : materialSink.Dependencies()) {
         CHECK(entry.kind == PackageDependencyKind::Build);
     }

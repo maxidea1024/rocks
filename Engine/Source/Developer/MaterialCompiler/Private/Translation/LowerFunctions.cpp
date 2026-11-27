@@ -16,6 +16,9 @@ namespace {
 // FunctionInput의 Preview 입력·결과 출력 핀 키다(동적 핀 — 19.13.3절).
 constexpr StringView FunctionInputPreviewPin = "Preview";
 constexpr StringView FunctionInputResultPin = "Result";
+// 레이어 노드 입력·결과 핀 키다.
+constexpr StringView LayerInputPin = "Input";
+constexpr StringView LayerResultPin = "Result";
 // previewValue(Vec4) 칸 이름이다.
 constexpr StringView FunctionPreviewChannels[MaxIrComponents] = {"x", "y", "z", "w"};
 
@@ -258,9 +261,47 @@ Result<void> LowerFunctionInput(LoweringContext& context) noexcept {
     return context.Output(FunctionInputResultPin, fitted.Value());
 }
 
+// 레이어 노드다(UE UMaterialExpressionMaterialAttributeLayers::Compile — ME:7559–7600, LayerStack도
+// 같다). 활성 레이어가 없으면 Input(연결 없으면 빈 속성 집합 — UE CompileDefaultExpression)이다.
+Result<void> LowerLayers(LoweringContext& context) noexcept {
+    bool passThrough = false;
+    auto layered = context.LayerValue(passThrough);
+    if (!layered) {
+        return Result<void>::Failure(layered.Error());
+    }
+
+    if (!passThrough) {
+        return context.Output(LayerResultPin, layered.Value());
+    }
+
+    auto connected = context.IsConnected(LayerInputPin);
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    if (connected.Value()) {
+        auto input = context.Input(LayerInputPin);
+        if (!input) {
+            return Result<void>::Failure(input.Error());
+        }
+
+        return context.Output(LayerResultPin, input.Value());
+    }
+
+    auto empty = context.MakeAttributes({});
+    if (!empty) {
+        return Result<void>::Failure(empty.Error());
+    }
+
+    return context.Output(LayerResultPin, empty.Value());
+}
+
 // 미리보기 Preview 입력만 계획 밖이다(호출 연결이 있으면 번역하지 않는다 — UE LinkIntoCaller).
+// 레이어 노드의 입력은 합성 호출이 읽는다(LayerStack 동적 입력은 계획에 넣지 않는다).
 constexpr LoweringEntry FunctionEntries[] = {
     {"Material.FunctionInput", &LowerFunctionInput, true, {}},
+    {"Material.AttributeLayers", &LowerLayers},
+    {"Material.LayerStack", &LowerLayers, true, {}},
 };
 
 } // namespace

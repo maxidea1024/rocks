@@ -5,6 +5,7 @@
 #include <Core/Hash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Core/Text/String.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialIrModule.h>
@@ -15,6 +16,7 @@
 
 #include "AttributeEntry.h"
 #include "CustomOutputKind.h"
+#include "FunctionSignature.h"
 #include "LoweringTable.h"
 #include "SurfaceRecord.h"
 
@@ -64,6 +66,9 @@ inline constexpr usize MaxExpandedMaterialNodes = 65536;
 
 // 함수 호출 깊이 상한이다(주 그래프 호출이 1 — 넘으면 V9).
 inline constexpr uint32 MaxFunctionCallDepth = 64;
+
+// 레이어 노드 하나의 레이어 수 상한이다(6.12절 MS2e3 — UE에는 상한이 없다, 넘으면 V14).
+inline constexpr usize MaxMaterialLayers = 32;
 
 class Translator {
 public:
@@ -194,6 +199,11 @@ public:
     // MaterialSample로 펼친 사본(그 안의 함수 사본 포함)인가(custom 출력 제외 — 6.12절 MS2e2).
     bool IsSampledCopy(Guid node) const noexcept;
 
+    // 레이어 노드(AttributeLayers·LayerStack)의 결과다(6.12절 MS2e3). 검사 오류는 여기서 진단하고
+    // NoIrValue다. 활성 레이어가 없으면 passThrough가 참이고 NoIrValue다(lowering이 Input·빈 속성
+    // 집합을 낸다).
+    Result<IrValueId> LowerLayers(const nodegraph::GraphNode& node, bool& passThrough) noexcept;
+
 private:
     struct PinKey {
         Guid node;
@@ -231,6 +241,23 @@ private:
     Result<void> ExpandFunctions() noexcept;
     // index 노드(FunctionCall·MaterialSample) 하나를 펼친다(사본은 expanded_ 끝에 붙는다).
     Result<void> ExpandCall(usize index, bool sample) noexcept;
+    // callId 호출(노드 또는 합성 호출)로 asset 그래프를 펼친다. inputIds·outputIds는 호출 사본의
+    // 입출력 id(검사용 — 합성 호출은 비어 있다), signature가 있으면 함수 입출력을 채운다.
+    Result<void> ExpandAsset(Guid callId, Guid asset, bool sample, bool parentSampled,
+                             Span<const Guid> inputIds, Span<const Guid> outputIds,
+                             FunctionSignature* signature) noexcept;
+    // asset의 snapshot과 주 그래프다(없으면 nullptr). 처음이면 snapshots_·의존 목록에 넣는다.
+    Result<const MaterialGraphSnapshot*>
+    LoadSnapshot(Guid asset, bool sample, const nodegraph::Graph*& graph, uint32& index) noexcept;
+    // 함수 그래프의 입출력 목록이다(정렬 순 — 6.12절 MS2e3).
+    Result<void> ReadSignature(const nodegraph::Graph& source, FunctionSignature& out) noexcept;
+    // index 레이어 노드를 펼친다(합성 호출·간선 — 6.12절 MS2e3).
+    Result<void> ExpandLayers(usize index, bool stack) noexcept;
+    // 레이어 노드 owner의 합성 호출을 붙이고 펼친다(id = Hash(owner, layerId, role)).
+    Result<Guid> AddLayerCall(Guid owner, Guid layerId, uint32 role, Guid asset, bool parentSampled,
+                              FunctionSignature& signature) noexcept;
+    // 펼친 그래프에 간선 하나를 더한다.
+    Result<void> AddExpandedEdge(Guid fromNode, Name fromPin, Guid toNode, Name toPin) noexcept;
     // edge의 출발 노드다. 펼친 호출 노드면 그 출력 사본 입력의 출발 노드로 넘어간다(없으면
     // nullptr).
     const usize* ResolveSource(const nodegraph::GraphEdge& edge) const noexcept;
@@ -239,6 +266,9 @@ private:
                                       bool& connected) noexcept;
     // 호출 노드의 펼치기 오류를 진단한다.
     Result<void> ReportCallError(const nodegraph::GraphNode& node) noexcept;
+    // 함수 용도(Layer·LayerBlend) 규칙 오류를 진단한다(6.12절 MS2e3 — UE ValidateFunctionUsage
+    // 문구).
+    Result<void> ReportUsageError(const nodegraph::GraphNode& node) noexcept;
     // 진단을 그대로 남긴다(Report가 사본 위치를 바꾼 뒤).
     Result<void> ReportAt(nodegraph::GraphDiagnosticSeverity severity, MaterialDiagnosticCode code,
                           Guid node, Name pin, StringView message) noexcept;
@@ -343,7 +373,9 @@ private:
         // 호출 사본의 출력 id가 함수에 없다.
         UnsetOutput = 6,
         // 호출 노드 속성을 읽지 못한다.
-        Unreadable = 7
+        Unreadable = 7,
+        // 함수 용도(Layer·LayerBlend)의 입출력 규칙을 어긴다(6.12절 MS2e3 함수 용도 검사).
+        InvalidUsage = 8
     };
 
     struct CallInfo {
@@ -353,6 +385,21 @@ private:
         uint32 snapshot = 0;
         // UnsetInput·UnsetOutput의 목록 색인이다.
         uint32 index = 0;
+        // InvalidUsage의 MaterialAttributes 입력·출력 수다.
+        uint32 attributeInputs = 0;
+        uint32 attributeOutputs = 0;
+    };
+
+    // 레이어 노드 하나의 펼치기 결과다(6.12절 MS2e3).
+    struct LayerResult {
+        // 검사를 통과했는가(아니면 diagnostics 범위의 문구를 낸다).
+        bool valid = true;
+        // 활성 레이어가 없다(Input 또는 빈 속성 집합).
+        bool passThrough = false;
+        // 사슬 끝 합성 호출과 그 첫 출력 핀이다.
+        PinKey output;
+        uint32 firstDiagnostic = 0;
+        uint32 diagnosticCount = 0;
     };
 
     Allocator& allocator_;
@@ -370,6 +417,14 @@ private:
     HashMap<Guid, PinKey> functionInputs_;
     // 읽은 snapshot이다(처음 읽은 순).
     Array<const MaterialGraphSnapshot*> snapshots_;
+    // 레이어 합성 호출 → 그 레이어 노드다(진단 위치).
+    HashMap<Guid, Guid> syntheticOwners_;
+    HashMap<Guid, LayerResult> layers_;
+    // 레이어 검사 문구다(LayerResult 범위).
+    Array<String> layerDiagnostics_;
+    Name layerOutputType_;
+    Name attributeLayersType_;
+    Name layerStackType_;
     Name functionCallType_;
     Name functionInputType_;
     Name functionOutputType_;
