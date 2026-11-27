@@ -57,6 +57,10 @@ Result<void> HitGrid::Update(const SharedPtr<Element>& root) noexcept {
 
     next.root_ = WeakPtr<Element>(root);
     next.plan_ = root->planRevision_;
+    if (auto extent = root->GetGeometry().WindowBounds()) {
+        next.extent_ = extent.Value();
+    }
+
     *this = Move(next);
     return Result<void>::Success();
 }
@@ -259,6 +263,256 @@ SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope,
         if (Accepts(entry, point, scope, hit)) {
             // 맨 위 후보에서 멈춘다 — 자른 결과(부모)를 버리고 뒤 후보로 가지 않는다.
             return ignoreEnabled ? hit : CutAtDisabled(Move(hit), scope, owner);
+        }
+    }
+
+    return {};
+}
+
+namespace {
+
+// 방향 탐색의 비교 허용오차와 수직 축 줄임(UE FindNextFocusableWidgetDefault 598–640행)이다.
+constexpr float FocusCompareTolerance = 0.1f;
+constexpr float FocusSweepInset = 0.5f;
+// 조상이 비활성인 후보를 빼고 다시 찾는 횟수의 상한이다(트리 깊이를 넘는 반복을 막는다).
+constexpr usize MaxFocusSearchRestarts = 64;
+
+struct FocusAxis {
+    // 0이면 가로(좌·우), 1이면 세로(상·하)다.
+    int32 axis;
+    int32 increment;
+    bool forward;
+
+    float Source(const Box2<float>& rect) const noexcept {
+        if (axis == 0) {
+            return forward ? rect.max.x : rect.min.x;
+        }
+
+        return forward ? rect.max.y : rect.min.y;
+    }
+
+    float Dest(const Box2<float>& rect) const noexcept {
+        if (axis == 0) {
+            return forward ? rect.min.x : rect.max.x;
+        }
+
+        return forward ? rect.min.y : rect.max.y;
+    }
+
+    // a가 b보다 진행 방향 쪽(또는 같은)인지다(UE CompareFunc).
+    bool Compare(float a, float b) const noexcept {
+        return forward ? a + FocusCompareTolerance > b : a - FocusCompareTolerance < b;
+    }
+};
+
+bool ParentsEnabled(const Element& element) noexcept {
+    for (const Element* parent = element.Parent(); parent; parent = parent->Parent()) {
+        if (!parent->IsEnabled()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int32 ClampCell(float value, int32 count) noexcept {
+    int32 cell = 0;
+    if (!math::TryFloorToInt32(static_cast<double>(value) / CellSize, cell)) {
+        cell = value < 0 ? 0 : count - 1;
+    }
+
+    return cell < 0 ? 0 : (cell >= count ? count - 1 : cell);
+}
+
+} // namespace
+
+FocusSearchResult HitGrid::FindNextFocusable(const Element& start, FocusDirection direction,
+                                             NavigationRule rule, const Element& boundary,
+                                             const FocusCandidateFilter& filter) const noexcept {
+    if (!root_.Lock() || direction == FocusDirection::Next ||
+        direction == FocusDirection::Previous) {
+        return {};
+    }
+
+    auto startBounds = start.GetGeometry().WindowBounds();
+    auto ruleBounds = boundary.GetGeometry().WindowBounds();
+    if (!startBounds || !ruleBounds) {
+        return {};
+    }
+
+    const Box2<float> widget = startBounds.Value();
+    const Box2<float> ruleRect = ruleBounds.Value();
+    const bool horizontal = direction == FocusDirection::Left || direction == FocusDirection::Right;
+    const bool forward = direction == FocusDirection::Right || direction == FocusDirection::Down;
+    const FocusAxis axis{horizontal ? 0 : 1, forward ? 1 : -1, forward};
+    // 진행 축은 경계 끝까지 넓히고 수직 축은 0.5씩 줄인다(UE 598–640행).
+    Box2<float> swept = widget;
+    if (horizontal) {
+        swept.min.x = ruleRect.min.x;
+        swept.max.x = ruleRect.max.x;
+        swept.min.y += FocusSweepInset;
+        swept.max.y -= FocusSweepInset;
+    } else {
+        swept.min.y = ruleRect.min.y;
+        swept.max.y = ruleRect.max.y;
+        swept.min.x += FocusSweepInset;
+        swept.max.x -= FocusSweepInset;
+    }
+
+    // 셀 수는 창 영역으로 정한다(UE NumCells — 창 크기 / 128).
+    int32 numCells[2] = {1, 1};
+    for (int32 i = 0; i < 2; ++i) {
+        const float extent = i == 0 ? extent_.max.x : extent_.max.y;
+        int32 count = 1;
+        if (math::TryFloorToInt32(static_cast<double>(extent) / CellSize, count)) {
+            numCells[i] = count + 1;
+        }
+    }
+
+    const Vec2 center = widget.Center();
+    const int32 strideAxis = horizontal ? 1 : 0;
+    const int32 strideMin = ClampCell(horizontal ? swept.min.y : swept.min.x, numCells[strideAxis]);
+    const int32 strideMax = ClampCell(horizontal ? swept.max.y : swept.max.x, numCells[strideAxis]);
+    Array<const Element*> disabled(entries_.GetAllocator());
+    for (usize restart = 0; restart <= MaxFocusSearchRestarts; ++restart) {
+        int32 current[2] = {ClampCell(center.x, numCells[0]), ClampCell(center.y, numCells[1])};
+        const int32 startingIndex = current[axis.axis];
+        float sourceSide = axis.Source(widget);
+        bool wrapped = false;
+        bool retry = false;
+        while (current[axis.axis] >= 0 && current[axis.axis] < numCells[axis.axis]) {
+            const int32 processed = current[axis.axis];
+            current[axis.axis] += axis.increment;
+            SharedPtr<Element> best;
+            Box2<float> bestRect{};
+            const auto consider = [&](usize entryIndex) noexcept {
+                auto candidate = entries_[entryIndex].element.Lock();
+                if (!candidate || candidate.Get() == &start) {
+                    return;
+                }
+
+                auto bounds = candidate->GetGeometry().WindowBounds();
+                if (!bounds) {
+                    return;
+                }
+
+                const Box2<float> rect = bounds.Value();
+                if (!(axis.Compare(axis.Dest(rect), sourceSide) && swept.Overlaps(rect))) {
+                    return;
+                }
+
+                if (best) {
+                    const float bestDest = axis.Dest(bestRect);
+                    const float testDest = axis.Dest(rect);
+                    // 진행 축으로 더 멀면 지금 것을 지킨다.
+                    if (!axis.Compare(bestDest, testDest)) {
+                        return;
+                    }
+
+                    // 진행 축으로 같으면 중심이 더 가까운 쪽이다.
+                    if (axis.Compare(testDest, bestDest) &&
+                        (center - rect.Center()).LengthSquared() >=
+                            (center - bestRect.Center()).LengthSquared()) {
+                        return;
+                    }
+                }
+
+                // Escape가 아니면 경계의 자손이어야 한다(UE NotADescendant 454–460행).
+                if (rule != NavigationRule::Escape &&
+                    (candidate.Get() == &boundary || !candidate->IsWithin(boundary))) {
+                    return;
+                }
+
+                if (!candidate->IsEnabled() || !candidate->SupportsKeyboardFocus()) {
+                    return;
+                }
+
+                for (const Element* excluded : disabled) {
+                    if (excluded == candidate.Get()) {
+                        return;
+                    }
+                }
+
+                if (filter.IsBound() && !filter.Execute(*candidate)) {
+                    return;
+                }
+
+                bestRect = rect;
+                best = Move(candidate);
+            };
+
+            for (int32 stride = strideMin; stride <= strideMax; ++stride) {
+                const int32 x = horizontal ? processed : stride;
+                const int32 y = horizontal ? stride : processed;
+                const auto* head = cells_.Find(CellKey(x, y));
+                for (usize node = head ? *head : IndexNone; node != IndexNone;
+                     node = links_[node].previous) {
+                    consider(links_[node].entry);
+                }
+            }
+
+            // 셀에 넣지 않은 넓은 항목은 줄마다 본다(위에서부터).
+            for (usize i = broad_.Size(); i > 0; --i) {
+                consider(broad_[i - 1]);
+            }
+
+            if (best) {
+                // 경계 밖이면 규칙을 따른다(UE 495–523행).
+                if (axis.Compare(axis.Dest(bestRect), axis.Source(swept))) {
+                    if (rule == NavigationRule::Stop) {
+                        return {};
+                    }
+
+                    if (rule == NavigationRule::CustomBoundary) {
+                        return {FocusSearchOutcome::BeyondBoundary, {}};
+                    }
+
+                    if (rule == NavigationRule::Wrap) {
+                        // UE와 같이 반대쪽 변에서 다시 훑을 준비만 하고 이 후보를 돌려준다.
+                        sourceSide = axis.Dest(swept);
+                        wrapped = true;
+                    }
+                }
+
+                // 조상이 비활성이면 빼고 처음부터 다시 찾는다(UE IsParentsEnabled 528–533행).
+                if (!ParentsEnabled(*best)) {
+                    if (!disabled.TryPushBack(best.Get())) {
+                        return {};
+                    }
+
+                    retry = true;
+                    break;
+                }
+
+                return {FocusSearchOutcome::Found, Move(best)};
+            }
+
+            // 한 바퀴 돌아 시작 줄로 왔으면 멈춘다.
+            if (wrapped && startingIndex == processed) {
+                break;
+            }
+
+            // 경계 끝이다(UE 543–566행).
+            if (!(current[axis.axis] >= 0 && current[axis.axis] < numCells[axis.axis])) {
+                if (rule == NavigationRule::Wrap) {
+                    if (wrapped) {
+                        break;
+                    }
+
+                    sourceSide = axis.Dest(swept);
+                    Vec2 sample = center;
+                    (axis.axis == 0 ? sample.x : sample.y) = sourceSide;
+                    current[0] = ClampCell(sample.x, numCells[0]);
+                    current[1] = ClampCell(sample.y, numCells[1]);
+                    wrapped = true;
+                } else if (rule == NavigationRule::CustomBoundary) {
+                    return {FocusSearchOutcome::ReachedEdge, {}};
+                }
+            }
+        }
+
+        if (!retry) {
+            return {};
         }
     }
 

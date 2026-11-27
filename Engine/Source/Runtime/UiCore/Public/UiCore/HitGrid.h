@@ -2,6 +2,7 @@
 
 #include <Core/Containers/HashMap.h>
 #include <UiCore/Element.h>
+#include <UiCore/FocusSearch.h>
 
 namespace rocks::ui {
 
@@ -23,6 +24,21 @@ public:
     // 위에서부터 fromTop번째 후보와 그 클립된 창 영역(AABB)이다. 사라졌거나 지금 입력 경로가 아닌
     // 후보는 빈 포인터다.
     SharedPtr<Element> CandidateFromTop(usize fromTop, Box2<float>& area) const noexcept;
+
+    // start에서 direction(상하좌우)으로 다음 초점 대상을 찾는다(UE FindNextFocusableWidgetDefault ·
+    // FindFocusableWidget — HittestGrid.cpp 366–640행, Docs/Design/UiToolkit 20.9절).
+    //   - 진행 축으로 boundary 사각형 끝까지 쓸어 넓히고 수직 축을 0.5씩 줄인 사각형과 겹치는
+    //     후보만 본다. 셀을 진행 방향으로 한 줄씩 훑어 후보가 있는 첫 줄에서 고른다(진행 축 거리,
+    //     같으면 중심 거리 제곱 — 비교 허용오차 0.1).
+    //   - 후보: 초점 받을 수 있고 활성이며 filter를 통과한다. rule이 Escape가 아니면 boundary의
+    //     자손이어야 한다. 조상이 비활성이면 빼고 다시 찾는다.
+    //   - rule: Stop은 경계 밖 후보를 버리고, Wrap은 반대쪽 변에서 한 번 더 훑는다.
+    //   CustomBoundary는
+    //     BeyondBoundary·ReachedEdge로 호출자에게 넘긴다. Explicit·Custom은 호출자가 먼저 처리한다.
+    // grid가 없으면 None이다.
+    FocusSearchResult FindNextFocusable(const Element& start, FocusDirection direction,
+                                        NavigationRule rule, const Element& boundary,
+                                        const FocusCandidateFilter& filter) const noexcept;
 
 private:
     struct Entry {
@@ -50,6 +66,8 @@ private:
     Array<usize> broad_;
     Array<Candidate> candidates_;
     WeakPtr<Element> root_;
+    // 마지막으로 걸은 루트의 창 영역이다(방향 탐색의 셀 범위).
+    Box2<float> extent_{};
     uint64 plan_ = 0;
 };
 

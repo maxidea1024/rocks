@@ -99,7 +99,9 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
 
         return Result<bool>::Success(false);
     };
-    if (policy.rule == NavigationRule::Custom) {
+    // Explicit·Custom은 탐색 전에 정한다(UE CalculateDestinationWidget — SlateApplication.cpp
+    // 6498행 — 처리했다는 응답 NavigationBoundary::Handled도 여기서 끝난다).
+    if (policy.rule == NavigationRule::Custom || policy.rule == NavigationRule::Explicit) {
         return customOrExplicit();
     }
 
@@ -127,12 +129,39 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
             }
         }
 
-        if (policy.rule == NavigationRule::Explicit ||
-            policy.rule == NavigationRule::CustomBoundary) {
+        if (policy.rule == NavigationRule::CustomBoundary) {
             return customOrExplicit();
         }
 
         return shouldWrap ? move(first) : Result<bool>::Success(false);
+    }
+
+    // 방향은 hit grid를 훑는다(UE FindFocusableWidget — 20.9절). grid가 없으면(첫 프레임 전) 아래의
+    // 거리 비교로 물러난다.
+    if (hitGrid_.HasSnapshot()) {
+        const SharedPtr<Element> scopeRoot = root;
+        const FocusSearchResult found = hitGrid_.FindNextFocusable(
+            *focus, direction, shouldWrap ? NavigationRule::Wrap : policy.rule,
+            policy.rule == NavigationRule::Escape ? *root : *boundary,
+            FocusCandidateFilter::CreateLambda(
+                [this, scopeRoot](const Element& candidate) noexcept {
+                    // 팝업·modal 범위(scope) 안의 입력 경로만이다(Rocks 팝업은 같은 창 grid에
+                    // 있다).
+                    return candidate.IsWithin(*scopeRoot) &&
+                           candidate.IsInputPathActive(*scopeRoot, false) &&
+                           IsFocusablePath(&candidate);
+                }));
+        switch (found.outcome) {
+        case FocusSearchOutcome::Found:
+            return move(found.target);
+        case FocusSearchOutcome::BeyondBoundary:
+        case FocusSearchOutcome::ReachedEdge:
+            return customOrExplicit();
+        case FocusSearchOutcome::None:
+            break;
+        }
+
+        return Result<bool>::Success(false);
     }
 
     auto origin = focus->GetGeometry().WindowBounds();
@@ -196,7 +225,7 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
         return move(best);
     }
 
-    if (policy.rule == NavigationRule::Explicit || policy.rule == NavigationRule::CustomBoundary) {
+    if (policy.rule == NavigationRule::CustomBoundary) {
         return customOrExplicit();
     }
 
