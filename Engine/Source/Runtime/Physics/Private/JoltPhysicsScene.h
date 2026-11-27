@@ -83,6 +83,11 @@ public:
                             const Vec3d& position, const Quatd& rotation,
                             MtdResult& out) const noexcept override;
     Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept override;
+    void ApplyBodyForce(PhysicsBodyHandle body, const BodyForce& force) noexcept override;
+    void SetBodyLinearVelocity(PhysicsBodyHandle body, const Vec3d& velocity,
+                               bool addToCurrent) noexcept override;
+    void SetBodyAngularVelocity(PhysicsBodyHandle body, const Vec3d& velocityRadians,
+                                bool addToCurrent) noexcept override;
     Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                            const QueryParams& params, TraceMode mode, HitResult* first,
                            Array<HitResult>* all) const noexcept override;
@@ -101,6 +106,9 @@ public:
     Result<bool> OverlapBody(PhysicsBodyHandle body, const Vec3d& position, const Quatd& rotation,
                              const QueryFilter& filter, const QueryParams& params,
                              Array<OverlapResult>& all) const noexcept override;
+
+    // 프레임의 고정 스텝이 끝났다(PhysicsResults — 7.1.17절): 프레임 힘을 지운다.
+    void EndFrame() noexcept;
 
     // 한 step(seconds초, collision step 1)을 진행한다. 오류: seconds가 양의 유한값이 아님
     // (InvalidArgument), Jolt 용량 초과(CapacityExceeded — step은 진행했고 경고 로그를 남긴다).
@@ -176,6 +184,16 @@ private:
         // kinematicTargets_에 이미 있는지다(중복 방지 — hasTarget과 따로: teleport가 목표를 지워도
         // 목록에는 남는다).
         bool queuedTarget = false;
+        // 다음 step에 더할 충격량 몫(7.1.17절 — Jolt 단위 속도 변화)이다. queuedImpulse면
+        // pendingImpulses_에 있다(거짓이면 목록에 남은 칸이라도 건너뛴다).
+        bool queuedImpulse = false;
+        JPH::Vec3 pendingLinearVelocity = JPH::Vec3::sZero();
+        JPH::Vec3 pendingAngularVelocity = JPH::Vec3::sZero();
+        // 이번 프레임의 고정 스텝마다 줄 힘·토크다(7.1.17절 — EndFrame이 지운다).
+        // queuedFrameForce면 frameForces_에 있다.
+        bool queuedFrameForce = false;
+        JPH::Vec3 frameForce = JPH::Vec3::sZero();
+        JPH::Vec3 frameTorque = JPH::Vec3::sZero();
         // Kinematic 대기 목표(3.3절)다: hasTarget이면 다음 step 직전에
         // startPosition·startRotation으로 되돌린 뒤 targetPosition·targetRotation으로
         // MoveKinematic한다.
@@ -346,6 +364,20 @@ private:
     // step 직전 Kinematic 목표 적용과 목표 없는 Kinematic 정지(3.3절)다.
     void ApplyKinematicTargets(float seconds) noexcept;
 
+    // 충격량 몫(Jolt 속도 변화)을 칸에 쌓아 다음 step에 더하게 한다(7.1.17절). 대기 목록에 넣지
+    // 못하면 그 자리에서 더한다(할당 실패 한정). motion은 body 잠금 아래의 운동 속성이다.
+    void QueueImpulse(uint32 index, JPH::MotionProperties& motion, JPH::Vec3Arg linear,
+                      JPH::Vec3Arg angular) noexcept;
+    // 힘·토크(Jolt 단위)를 다음 step 한 번(Jolt 누적 힘) 또는 이번 프레임의 고정 스텝마다(프레임
+    // 힘) 준다(7.1.17절). body는 잠금 아래다.
+    void AddStepForce(uint32 index, JPH::Body& body, JPH::Vec3Arg force, JPH::Vec3Arg torque,
+                      bool everyFixedStep) noexcept;
+    // 칸의 대기 충격량 몫·프레임 힘을 버린다(body 삭제·Kinematic 전환).
+    static void DropPendingImpulse(BodySlot& slot) noexcept;
+    // step 직전 대기 충격량 몫을 Dynamic body 속도에 더하고 프레임 힘을 누적 힘에 넣는다(결정적 FP
+    // 환경 안 — 7.1.17절).
+    void ApplyPendingImpulses() noexcept;
+
     // step 직후 활성·잠든 Dynamic body를 결과 목록에 더한다(3.4절).
     void CollectMovedBodies() noexcept;
 
@@ -385,6 +417,9 @@ private:
     Array<PhysicsBodyHandle> pendingResults_;
     Array<uint32> kinematicTargets_;
     Array<uint32> kinematicMoving_;
+    // 대기 충격량 몫·프레임 힘이 있는 칸이다(7.1.17절).
+    Array<uint32> pendingImpulses_;
+    Array<uint32> frameForces_;
     // 재사용하는 임시 목록이다: step 직후 활성 body(Jolt 배열 — Jolt 할당 hook)·잠든 body user
     // data·꺼낸 결과.
     JPH::BodyIDVector activeBodies_;
