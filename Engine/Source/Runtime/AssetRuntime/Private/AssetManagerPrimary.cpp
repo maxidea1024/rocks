@@ -419,6 +419,7 @@ AssetManager::EstimatePrimaryAsset(AssetId asset, Span<const StringView> bundles
         };
         footprint.packageBytes = saturate(footprint.packageBytes, entry.packageBytes);
         footprint.bulkRawBytes = saturate(footprint.bulkRawBytes, entry.bulkRawBytes);
+        footprint.sidecarBytes = saturate(footprint.sidecarBytes, entry.sidecarBytes);
         for (const CookedManifestDependency& dependency : entry.dependencies) {
             if (dependency.kind == PackageDependencyKind::Hard) {
                 visit(dependency.asset);

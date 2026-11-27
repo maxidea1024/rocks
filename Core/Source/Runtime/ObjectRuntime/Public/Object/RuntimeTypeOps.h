@@ -283,25 +283,28 @@ ROCKS_OBJECTRUNTIME_API Result<void> ValidateClassReference(ObjectRegistry& regi
 
 } // namespace detail
 
-// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
-// 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
-// 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
-// enum 값 InvalidArgument, weak 참조는 강한 참조와 같은 대상 검사 — 이 Registry의 생존 객체·기대
-// 타입의 파생, ClassRef 값은 detail::ValidateClassReference — 등록된 클래스이고 스키마 Base의 파생,
-// 미등록 NotFound·그 밖 InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken —
-// 이 Registry의 pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은
-// 토큰 StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Optional 필드(내부가 단일 값 — 리플렉션
-// B9e)는 value.kind가 내부 종류이고 present = false면 unset으로 되돌린다(값 내용 검사 없음).
-// Optional이 아닌 필드에 present = false는 InvalidArgument다. aggregate 필드(FieldIsAggregate —
-// Struct·Array·Optional<값 struct>)는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상 타입·필드
-// 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조
-// 값의 비정규 null(IsNull인 non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는
-// reference를 ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
-// 않게, 7.1절). 이 연산 자체는 encode 고정을 쥐지 않는다: 생성 callback(WriteGeneratedField)은
-// String·Soft 새 값 할당부터 게시까지 스스로 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동
-// callback은 그렇지 않으므로 할당하는 수동 callback은 같은 규칙을 스스로 지킨다. callback 코드
-// 수명은 TypeLease가 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지
-// 않는다.
+// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 쓰기가 성공하면 Notify 필드의
+// 구독자에게 알린다(Docs/Design/ChangeNotification.ko.md CN-D10 — 강한 참조 필드는 callback이
+// 부르는 SetReference가 handle이 바뀐 때만 알린다). 구독자가 있으면 callback 전에 등록된 read로
+// 지금 값을 읽어(value의 allocator로) 같은 값이면 알리지 않는다(CN-D15 — Text는 늘 알린다). 통지의
+// 실패는 쓰기 결과를 바꾸지 않는다. 오류 순서는 context·수명, 타입·필드, 전달 값 종류(TypeMismatch
+// — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기 전용(Unsupported), 값 내용(정수 폭
+// Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은 enum 값 InvalidArgument, weak 참조는
+// 강한 참조와 같은 대상 검사 — 이 Registry의 생존 객체·기대 타입의 파생, ClassRef 값은
+// detail::ValidateClassReference — 등록된 클래스이고 스키마 Base의 파생, 미등록 NotFound·그 밖
+// InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken — 이 Registry의 pool이
+// 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은 토큰 StaleHandle, 표시
+// 문자열 규칙 InvalidArgument)이다. Optional 필드(내부가 단일 값 — 리플렉션 B9e)는 value.kind가
+// 내부 종류이고 present = false면 unset으로 되돌린다(값 내용 검사 없음). Optional이 아닌 필드에
+// present = false는 InvalidArgument다. aggregate 필드(FieldIsAggregate — Struct·Array·Optional<값
+// struct>)는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상 타입·필드 검사 뒤
+// Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의 비정규 null(IsNull인 non-zero handle)은
+// null로 정규화한다 — 검증은 null로 하고 callback에는 reference를 ObjectHandle{}로 바꾼 사본(할당
+// 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지 않게, 7.1절). 이 연산 자체는 encode 고정을
+// 쥐지 않는다: 생성 callback(WriteGeneratedField)은 String·Soft 새 값 할당부터 게시까지 스스로
+// 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동 callback은 그렇지 않으므로 할당하는 수동
+// callback은 같은 규칙을 스스로 지킨다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에
+// 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
 class ROCKS_OBJECTRUNTIME_API FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
@@ -411,6 +414,21 @@ struct RuntimeFieldOps {
     // TypeMismatch — valueNativeType과 같은 규칙). ClassRef 키의 Base·Soft 키의 기대 타입은
     // 레코드를 붙잡지 않으므로(값 자리와 같다) 싣지 않는다.
     const void* keyNativeType = nullptr;
+    // 멤버 저장소 thunk다(Docs/Design/ChangeNotification.ko.md CN-D10 — 생성 코드는
+    // detail::FieldStorage). object(이 타입 또는 파생 타입의 객체)에서 그 필드 멤버의 주소와 크기를
+    // 돌려준다. Registry 참조·컨테이너 API(SetReference·ObjectRefArray·ObjectRefMap·StructRefArray
+    // 변경)가 받은 멤버 주소로 통지할 최상위 필드를 찾을 때 쓴다(통지 구독자가 있는 owner만). 참조·
+    // 컨테이너를 담을 수 있는 Notify 필드(강한 참조와 aggregate — struct·배열·Map·Set·정적 배열·
+    // Optional<struct>)는 필수다(없으면 등록 InvalidArgument). 그 밖은 선택이다(생성 코드는
+    // bitfield가 아닌 Notify 필드마다 싣는다).
+    //
+    // 사용 예(수동 함수표):
+    //   ops.storage = [](const Object& object) noexcept -> Span<const uint8> {
+    //       const auto& owner = static_cast<const Mesh&>(object);
+    //       return Span<const uint8>(reinterpret_cast<const uint8*>(&owner.materials),
+    //                                sizeof(owner.materials));
+    //   };
+    Span<const uint8> (*storage)(const Object& object) noexcept = nullptr;
 };
 
 // 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며

@@ -45,7 +45,8 @@ Result<void> Overlay::AttachPopupLayer(const PopupRequest& popup) noexcept {
     }
 
     auto stored =
-        popups_.TryPushBack({WeakPtr<Element>(popup.anchor), popup.layer.Get(), popup.close});
+        popups_.TryPushBack({WeakPtr<Element>(popup.anchor), popup.layer.Get(), popup.close,
+                             popup.layer->GetVisibility(), popup.keepWhileHidden});
     if (!stored) {
         return stored;
     }
@@ -133,8 +134,34 @@ Vec2 Overlay::ComputeDesiredSize(float) const noexcept {
     return size;
 }
 
+void Overlay::SyncPopupVisibility() noexcept {
+    // 닫기가 다른 팝업(하위 메뉴)을 함께 닫을 수 있어 뒤에서부터 보고, 닫은 뒤 크기를 다시 읽는다.
+    usize index = popups_.Size();
+    while (index > 0) {
+        index = index <= popups_.Size() ? index - 1 : popups_.Size() - 1;
+        const OpenPopup popup = popups_[index];
+        // 키 경로(활성 자식 — 고르지 않은 탭은 빠진다)와 보이기만 본다. 비활성 anchor의 팝업은
+        // 그대로 보인다(비활성 상자의 오류도 보인다).
+        const SharedPtr<Element> anchor = popup.anchor.Lock();
+        const bool shown = anchor && anchor->IsInputPathActive(*this, false, false);
+        if (shown || popup.keepWhileHidden) {
+            popup.layer->SetVisibility(shown ? popup.shown : Visibility::Collapsed);
+            continue;
+        }
+
+        // 숨은 anchor의 보통 팝업(초점을 받는 메뉴)은 닫는다 — 접기만 하면 초점이 빈 층에 남는다
+        // (리뷰 2026-11-28, UE는 탭 누름으로 메뉴 stack을 닫는다).
+        (void)popups_.TryRemoveAt(index);
+        if (anchor) {
+            popup.close(*anchor);
+        }
+    }
+}
+
 Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
     SetGeometry(geometry);
+    // 배치는 트리 어디가 바뀌어도(탭 전환 포함) 루트까지 올라와 돈다 — 여기서 숨은 anchor를 본다.
+    SyncPopupVisibility();
     for (usize i = 0; i < ChildCount(); ++i) {
         Element* child = ChildAt(i);
         if (child->GetVisibility() == Visibility::Collapsed) {

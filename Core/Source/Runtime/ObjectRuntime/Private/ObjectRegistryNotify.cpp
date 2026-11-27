@@ -12,6 +12,10 @@
 // 소멸한다). 그 소멸자가 같은 객체의 다른 구독을 해제할 수 있으므로, 상태를 바꾸는 동안 active를
 // 올려 안쪽 정리가 목록을 옮기거나 상태를 반환하지 않게 하고, 지울 목록은 상태 갱신이 끝난 뒤
 // 지역 배열에서 파괴한다.
+//
+// 쓰기 경로의 통지(CN1b — CN-D10): Registry 참조·컨테이너 API가 성공한 뒤 받은 멤버 주소를 담은
+// Notify 필드를 찾아 알리고(NotifyMember — 구독자가 있는 owner만 storage thunk로 잰다), 통지 묶음
+// (NotifyGroup)이 열려 있으면 (객체, 번호)마다 한 번으로 모았다가 가장 바깥 묶음을 닫을 때 낸다.
 namespace rocks {
 
 using namespace registry_detail;
@@ -129,10 +133,19 @@ void ObjectRegistry::TidyNotifyState(uint32 slotIndex, NotifyState& state) noexc
 
     // 빈 목록을 지역 배열로 옮기고 그 번호의 bit를 내린다(순서 보존). 옮길 공간이 없으면 이번에는
     // 지우지 않는다(다음 정리가 한다 — 빈 목록은 통지에 해가 없다).
-    // 생존 판정은 다른 스레드에서 바뀔 수 있으므로(약한 대상) 세는 단계와 옮기는 단계 사이에 빈
-    // 목록이 늘 수 있다 — 목록 수만큼 예약한다.
+    // 빈 목록이 없으면 예약하지 않는다(통지마다 할당하지 않게 — CN-D12 bench). 생존 판정은 다른
+    // 스레드에서 바뀔 수 있으므로(약한 대상) 보는 단계와 옮기는 단계 사이에 빈 목록이 늘 수 있다 —
+    // 있으면 목록 수만큼 예약한다.
+    bool anyDead = false;
+    for (const NotifyState::List& list : state.lists) {
+        if (!list.delegate->IsBound()) {
+            anyDead = true;
+            break;
+        }
+    }
+
     Array<NotifyState::List> dead(allocator_);
-    if (!state.lists.IsEmpty() && dead.TryReserve(state.lists.Size())) {
+    if (anyDead && dead.TryReserve(state.lists.Size())) {
         usize kept = 0;
         for (usize index = 0; index < state.lists.Size(); ++index) {
             NotifyState::List& list = state.lists[index];
@@ -427,6 +440,12 @@ Result<void> ObjectRegistry::NotifyChecked(const ObjectAccessContext& access, Ob
         return Result<void>::Success();
     }
 
+    // 통지 묶음 안이면 모았다가 가장 바깥 묶음을 닫을 때 낸다(CN-D10). 모을 자리를 할당하지 못하면
+    // 바로 낸다(중복은 "바뀌었을 수 있음"에 맞다).
+    if (notifyGroupDepth_ != 0 && DeferNotify(object, slot.index, index)) {
+        return Result<void>::Success();
+    }
+
     // 통지 동안 Borrow로 붙잡아 회수되지 않게 한다(구독자의 Collect는 Busy — CN-D6). 살아 있지 않은
     // 객체(파괴 요청·Discard·도달 불가)는 부르지 않고 성공이다(CN-D11 — 쓰기의 결과가 구독 유무로
     // 갈리지 않게).
@@ -454,6 +473,159 @@ Result<void> ObjectRegistry::NotifyChecked(const ObjectAccessContext& access, Ob
     --notifyDepth_;
     TidyNotifyState(slot.index, state);
     return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::NotifyIfTarget(const ObjectAccessContext& access, ObjectHandle object,
+                                            Guid id) noexcept {
+    auto found = NotifySlot(access, object, false);
+    if (!found) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    Slot& slot = *found.Value();
+    if (!slot.notified) {
+        return Result<void>::Success();
+    }
+
+    const uint32 index = slot.type.NotifyIndex(id);
+    if (index == NotifyIndexNone) {
+        return Result<void>::Success();
+    }
+
+    return NotifyChecked(access, object, Guid{}, index);
+}
+
+bool ObjectRegistry::NotifyWatched(ObjectHandle object) const noexcept {
+    const Slot* slot = FindSlot(object);
+    return slot && slot->notified;
+}
+
+void ObjectRegistry::NotifyMember(const ObjectAccessContext& access, ObjectHandle owner,
+                                  const void* member) noexcept {
+    // 빠른 경로: 구독자가 없는 owner는 bit 하나로 끝난다(CN-D12). 호출한 API가 접근 검사를 마쳤다.
+    Slot* slot = FindSlot(owner);
+    if (!slot || !slot->notified) {
+        return;
+    }
+
+    // 살아 있지 않은 owner(제거·비우기는 DestroyRequested도 받는다)는 알리지 않는다(CN-D11).
+    auto borrow = Resolve<Object>(access, owner);
+    if (!borrow) {
+        return;
+    }
+
+    auto object = borrow.Value().Get();
+    if (!object) {
+        return;
+    }
+
+    const TypeLease& type = slot->type;
+    const auto fields = type.Schema().fields;
+    // 서로 다른 객체의 포인터를 관계 비교하지 않도록 주소 값으로 비교한다.
+    const uptr at = reinterpret_cast<uptr>(member);
+    for (usize index = 0; index < fields.Size(); ++index) {
+        if (!HasFlag(fields[index].flags, FieldFlags::Notify)) {
+            continue;
+        }
+
+        const RuntimeFieldOps* ops = type.FieldOps(index);
+        if (!ops || !ops->storage) {
+            continue;
+        }
+
+        const Span<const uint8> range = ops->storage(*object.Value());
+        const uptr begin = reinterpret_cast<uptr>(range.Data());
+        if (at >= begin && at - begin < range.Size()) {
+            // 쓰기는 이미 성공했다 — 통지의 실패(접근·종료는 호출한 API가 먼저 본다)는 쓰기 결과를
+            // 바꾸지 않는다.
+            (void)NotifyChecked(access, owner, Guid{}, type.NotifyIndex(fields[index].id));
+            return;
+        }
+    }
+}
+
+bool ObjectRegistry::DeferNotify(ObjectHandle object, uint32 slotIndex, uint32 index) noexcept {
+    // (슬롯, 번호) 색인으로 묶음이 커도 모으기가 상수 시간이다. 같은 슬롯을 다른 세대가 다시 쓰면
+    // (묶음 안의 회수·재사용) 색인을 새 handle로 바꾸고 따로 모은다.
+    const uint64 key = (static_cast<uint64>(slotIndex) << 32) | index;
+    auto found = notifyPendingIndex_.FindOrAdd(key, object);
+    if (!found) {
+        return false;
+    }
+
+    if (found.Value().outcome == InsertOutcome::AlreadyPresent) {
+        if (*found.Value().value == object) {
+            return true;
+        }
+
+        *found.Value().value = object;
+    }
+
+    // 목록에 넣지 못하면 색인을 비워 둔다(다음 같은 통지가 "이미 모음"으로 사라지지 않게).
+    ObjectHandle& indexed = *found.Value().value;
+    if (!notifyPending_.TryPushBack(PendingNotify{object, index})) {
+        indexed = ObjectHandle{};
+        return false;
+    }
+
+    return true;
+}
+
+Result<NotifyGroup> ObjectRegistry::BeginNotifyGroup(const ObjectAccessContext& access) noexcept {
+    if (auto valid = CheckAccess(access); !valid) {
+        return Result<NotifyGroup>::Failure(valid.Error());
+    }
+
+    if (closed_) {
+        return Result<NotifyGroup>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    if (notifyGroupDepth_ == NumericLimits<uint32>::Max()) {
+        return Result<NotifyGroup>::Failure(ErrorCode::Overflow);
+    }
+
+    ++notifyGroupDepth_;
+    return Result<NotifyGroup>::Success(NotifyGroup(this, access));
+}
+
+void ObjectRegistry::EndNotifyGroup(const ObjectAccessContext& access) noexcept {
+    if (!CheckAccess(access)) {
+        platform::Fatal("NotifyGroup was closed outside its registry owner thread or context");
+    }
+
+    if (--notifyGroupDepth_ != 0) {
+        return;
+    }
+
+    // 처리 표시·묶음 게시 구간 안에서는 통지가 Busy라 모은 통지가 사라진다 — 계약 위반이다(묶음은
+    // 그 구간 밖에서 열고 닫는다).
+    if (!notifyPending_.IsEmpty() && (processing_ || batchActive_)) {
+        platform::Fatal("NotifyGroup was closed inside registry processing or a batch publish");
+    }
+
+    notifyPendingIndex_.Clear();
+    // 부르는 동안 구독자가 새 묶음을 열고 닫을 수 있으므로 모은 목록을 지역으로 옮긴 뒤 낸다(그
+    // 뒤의 통지는 묶음 밖이라 바로 나간다). 끝나면 비운 버퍼를 돌려 다음 묶음이 다시 쓴다.
+    Array<PendingNotify> pending(Move(notifyPending_));
+    for (const PendingNotify& item : pending) {
+        // 모은 뒤 파괴 요청·회수된 객체는 부르지 않는다(Destroyed는 Success, 회수는 StaleHandle).
+        (void)NotifyChecked(access, item.object, Guid{}, item.index);
+    }
+
+    pending.Clear();
+    if (notifyPending_.IsEmpty() && notifyPending_.Capacity() < pending.Capacity()) {
+        notifyPending_ = Move(pending);
+    }
+}
+
+void NotifyGroup::End() noexcept {
+    if (!registry_) {
+        return;
+    }
+
+    ObjectRegistry* registry = registry_;
+    registry_ = nullptr;
+    registry->EndNotifyGroup(access_);
 }
 
 } // namespace rocks

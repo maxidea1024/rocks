@@ -3,11 +3,12 @@
 #include <Base/Guid.h>
 #include <Base/NumericLimits.h>
 #include <Core/Delegate.h>
+#include <Object/ObjectAccessContext.h>
 #include <Object/ObjectHandle.h>
 
 // 실행 중 필드 변경 통지의 공개 형식이다(Docs/Design/ChangeNotification.ko.md 3.1절 — CN1, UE
 // INotifyFieldValueChanged·FFieldId 대응). 구독·통지 API는 ObjectRegistry 멤버다(TrySubscribe·
-// TrySubscribeAll·Unsubscribe·UnsubscribeAll·Notify·NotifyIndex).
+// TrySubscribeAll·Unsubscribe·UnsubscribeAll·Notify·NotifyIndex·NotifyIfTarget·BeginNotifyGroup).
 //
 // 사용 예(UI 바인딩이 체력 필드를 구독한다):
 //   auto handle = registry.TrySubscribe(access, actor, NotifyTarget{healthId},
@@ -48,5 +49,56 @@ struct FieldNotifyHandle {
 // 구독자를 부르지 않고 버리며 ObjectStats::droppedNotifications에 센다. SL 5.4 연쇄 상한과 같은
 // 수다.
 inline constexpr uint32 MaxNotifyDepth = 16;
+
+class ObjectRegistry;
+
+// 통지 묶음이다(ObjectRegistry::BeginNotifyGroup — CN-D10). 열려 있는 동안의 통지를 (객체,
+// 대상)마다 한 번으로 모았다가 가장 바깥 묶음을 닫을 때 낸다. 이동 전용이고 End나 소멸이 닫는다. 연
+// Registry의 소유 스레드에서 닫고(다른 스레드에서 닫으면 Fatal) Registry보다 먼저 닫는다. 기본값은
+// 열려 있지 않다.
+class ROCKS_OBJECTRUNTIME_API NotifyGroup {
+public:
+    NotifyGroup() noexcept = default;
+
+    NotifyGroup(NotifyGroup&& other) noexcept : registry_(other.registry_), access_(other.access_) {
+        other.registry_ = nullptr;
+    }
+
+    NotifyGroup& operator=(NotifyGroup&& other) noexcept {
+        if (this != &other) {
+            End();
+            registry_ = other.registry_;
+            access_ = other.access_;
+            other.registry_ = nullptr;
+        }
+
+        return *this;
+    }
+
+    NotifyGroup(const NotifyGroup&) = delete;
+    NotifyGroup& operator=(const NotifyGroup&) = delete;
+
+    ~NotifyGroup() {
+        End();
+    }
+
+    bool IsActive() const noexcept {
+        return registry_ != nullptr;
+    }
+
+    // 묶음을 닫는다(가장 바깥 묶음이면 모은 통지를 모은 순서대로 낸다). 두 번째부터는 아무것도
+    // 하지 않는다.
+    void End() noexcept;
+
+private:
+    friend class ObjectRegistry;
+
+    NotifyGroup(ObjectRegistry* registry, ObjectAccessContext access) noexcept
+        : registry_(registry), access_(access) {
+    }
+
+    ObjectRegistry* registry_ = nullptr;
+    ObjectAccessContext access_{};
+};
 
 } // namespace rocks

@@ -255,7 +255,10 @@ private:
 
         uint64 bulkRawBytes = 0;
         for (const PackageBulkEntry& bulk : contents.Value().bulkEntries) {
-            bulkRawBytes += bulk.rawBytes;
+            // sidecar entry는 상주 raw 합에 들지 않는다(AssetSystem 20.1 4).
+            if ((bulk.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) == 0) {
+                bulkRawBytes += bulk.rawBytes;
+            }
         }
 
         // 만든 항목을 로더 대조로 확인한다(처리기가 다른 프로파일 값·대표 타입을 썼으면 게시 뒤

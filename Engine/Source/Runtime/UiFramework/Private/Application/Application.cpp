@@ -8,6 +8,10 @@ namespace rocks::ui {
 namespace {
 
 constexpr LogCategory LogUiApplication{"UiFramework"};
+// 호스트 묶음에 다는 Application 소유자 표지다(주소만 쓴다 — 22.7a절).
+constexpr char ApplicationOwnerKind = 0;
+// 초점 위임(Element::FocusDelegate)을 따라가는 최대 횟수다(상자 안 상자 같은 중첩 — 순환 방어).
+constexpr uint32 MaxFocusDelegateDepth = 8;
 
 bool IsModifierKey(input::Key key) noexcept {
     return key == input::Key::LeftShift || key == input::Key::RightShift ||
@@ -84,6 +88,9 @@ Application::~Application() noexcept {
     }
 
     if (host_) {
+        // 요소가 묶음을 붙잡아 이 Application보다 오래 살 수 있다 — 소유자를 뗀다.
+        host_->SetOwner(nullptr, nullptr);
+        (void)host_->DiscardFrameActions();
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
         host_->SetPopupWorkArea({});
         host_->SetTextInputService({});
@@ -111,6 +118,11 @@ const SharedPtr<Element>& Application::GetRoot() const noexcept {
     return root_;
 }
 
+Application* Application::Find(const Element& element) noexcept {
+    const UiHostServices* host = element.FindUiHostServices();
+    return host ? static_cast<Application*>(host->FindOwner(&ApplicationOwnerKind)) : nullptr;
+}
+
 UiHostServices* Application::EnsureHostServices() noexcept {
     if (!host_) {
         auto made = SharedPtr<UiHostServices>::TryMake(allocator_, allocator_);
@@ -119,6 +131,7 @@ UiHostServices* Application::EnsureHostServices() noexcept {
         }
 
         host_ = Move(made.Value());
+        host_->SetOwner(&ApplicationOwnerKind, this);
         host_->SetFrameTime(frameTime_);
         ApplyHostServices();
     }
@@ -190,6 +203,8 @@ void Application::StartFrame(const FrameTime& time, bool external) noexcept {
         host_->SetFrameTime(frameTime_);
         // 앞 프레임에 버려진 요소의 해체 통지다(소멸자 밖의 안전한 자리 — 21.4절).
         (void)host_->RunDeferredTeardown();
+        // 트리 순회 안에서 미룬 일이다(22.6절 — 붙을 때 여는 오류 팝업). 측정·배치 전이다.
+        (void)host_->RunFrameActions();
     }
 }
 
@@ -210,6 +225,10 @@ usize Application::PendingTeardownCount() const noexcept {
 void Application::Shutdown() noexcept {
     SetRoot({});
     (void)RunDeferredTeardown();
+    if (host_) {
+        // 닫는 앱에서는 프레임 동작(팝업 열기 등)을 하지 않는다(22.6절).
+        (void)host_->DiscardFrameActions();
+    }
 }
 
 void Application::EnsureFrame() noexcept {
@@ -733,10 +752,23 @@ Result<void> Application::SetFocus(uint32 userId, Element& target, FocusCause ca
     return owned ? SetFocus(userId, owned, cause) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& target,
+Result<void> Application::SetFocus(uint32 userId, const SharedPtr<Element>& requested,
                                    FocusCause cause) noexcept {
     if (focusChanging_ || cancelling_) {
         return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // 초점을 직접 받지 않는 요소는 위임한 자손이 받는다(Element::FocusDelegate — 22.2절). 위임은
+    // 자기 하위 트리 안이어야 하고 MaxFocusDelegateDepth번까지 따라간다.
+    SharedPtr<Element> target = requested;
+    for (uint32 depth = 0;
+         target && !target->SupportsKeyboardFocus() && depth < MaxFocusDelegateDepth; ++depth) {
+        SharedPtr<Element> next = target->FocusDelegate();
+        if (!next || next.Get() == target.Get() || !next->IsWithin(*target)) {
+            break;
+        }
+
+        target = Move(next);
     }
 
     // 키보드 툴팁 예약이 프레임 시각을 본다 — 암묵 시작 호스트면 프레임을 연다(20.3절).

@@ -244,7 +244,7 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
 #endif
 
         // 짧게 읽힘(11.6절 4): 완료 게시를 보류한 채 Begin(크기 확인·첫 조각 제출)까지 진행하고
-        // 파일을 1/4로 다시 쓴 뒤 재개하면, 남은 조각이 짧게 읽혀 InvalidArgument(진단 None)다.
+        // 파일을 1/4로 다시 쓴 뒤 재개하면, 남은 조각이 짧게 읽혀 CorruptData(진단 None)다.
         const StringView tenPath = rig.scene.PathOf(10);
         // 조각이 둘 이상이어야 남은 조각이 줄어든 파일을 읽는다(결정적).
         REQUIRE(rig.scene.EntryOf(10).packageBytes > half);
@@ -257,7 +257,7 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
         auto shortWait = rig.loader->WaitFor(shortRead, "LoaderIoTests.Short");
         REQUIRE(shortWait);
         CHECK(shortWait.Value().state == AssetLoadState::Failed &&
-              shortWait.Value().error == ErrorCode::InvalidArgument &&
+              shortWait.Value().error == ErrorCode::CorruptData &&
               shortWait.Value().diagnostic.code == AssetDiagnosticCode::None &&
               shortWait.Value().diagnostic.asset == FixedId(10));
         REQUIRE(rig.loader->Shutdown());

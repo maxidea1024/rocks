@@ -115,6 +115,14 @@ public:
     void SetSceneListener(AudioSceneId scene, const Vec3d& position,
                           const Quatd& rotation) noexcept;
 
+    // scene 일시정지다(3.44.1절 — UE SetGamePaused의 오디오 쪽). 실효값은 이 값 OR World 값(World의
+    // pause, 디버그 단일 스텝 frame은 아님)이다. 일시정지된 scene의 UI 아닌 재생(PlayOptions
+    // isUiSound·분류 UI 표지가 아닌 재생 — 정지 중 포함)은 소리와 시계(fade·ramp·재생 위치)가
+    // 멈추고, 풀면 멈춘 곳에서 이어진다. 다음 프레임 끝 묶음에 실린다. 예: 일시정지 메뉴를 열 때
+    // SetScenePaused(scene, true), 닫을 때 false. 오류: 죽은·무효 scene과 엔진 scene은
+    // InvalidArgument.
+    Result<void> SetScenePaused(AudioSceneId scene, bool paused) noexcept;
+
     // 부착 재생의 위치·회전 원천을 잡는다(회전은 상자·캡슐·원뿔 감쇠의 축 — 3.42.2절, UE component
     // 회전). 오류: 죽은·무효 scene, 비유한 위치, 0 quaternion은 InvalidArgument, 표
     // 가득(MaxAudioEmitters)은 CapacityExceeded.
@@ -246,6 +254,14 @@ private:
         Quatd listenerRotation = Quatd::Identity();
         bool listenerDirty = false;
         AudioOcclusionQuery* occlusionQuery = nullptr;
+        // 일시정지(3.44.1절): World 값·코드 값과 제어 쪽에 보낸 실효값이다.
+        bool worldPaused = false;
+        bool codePaused = false;
+        bool sentPaused = false;
+
+        bool Paused() const noexcept {
+            return worldPaused || codePaused;
+        }
     };
 
     struct GameEmitter {
@@ -273,6 +289,9 @@ private:
     Result<PlaybackHandle> Accept(const SoundSourceRef& sound, PlayOptions& options,
                                   AudioSceneId scene, const Placement& placement) noexcept;
     bool IsLiveScene(AudioSceneId scene) const noexcept;
+    // World 값(AudioWorldSubsystem이 프레임마다 넣는다 — 3.44.1절).
+    friend class AudioWorldSubsystem;
+    void SetSceneWorldPaused(AudioSceneId scene, bool paused) noexcept;
     // Play 수락 때의 첫 차폐 검사다(3.42.7절 — 공급자·위치가 있을 때만 checked).
     void FirstOcclusionCheck(const SoundSourceRef& sound, AudioSceneId scene,
                              const Placement& placement, uint64 owner,

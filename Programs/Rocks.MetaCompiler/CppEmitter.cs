@@ -629,6 +629,9 @@ internal static partial class CppEmitter
                 }
 
                 string member = $"&::{field.Owner}::{field.Name}";
+                // Notify 필드는 멤버 저장소 thunk를 끝 칸에 싣는다(readStaged·keyNativeType 뒤 — Docs/Design/ChangeNotification.ko.md
+                // CN-D10). Registry 참조·컨테이너 API가 받은 멤버 주소로 통지할 필드를 찾는다.
+                string storage = field.Spec.Notify ? $", detail::FieldStorage<{native}, {member}>" : "";
                 Body($"{{{GuidValue(field.Id)},");
                 if (field.IsMap || field.IsSet)
                 {
@@ -638,7 +641,8 @@ internal static partial class CppEmitter
                     Body("nullptr, {}, nullptr,");
                     string mapValueNative = ValueNativeType(schema, field);
                     string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
-                    EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Body);
+                    string mapTail = storage.Length == 0 ? keyNative : (keyNative.Length == 0 ? ", nullptr, nullptr" : keyNative) + storage;
+                    EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + mapTail, Body);
                     return;
                 }
 
@@ -650,7 +654,7 @@ internal static partial class CppEmitter
                     // 4.6·5.6·7.1절, ReflectionExtensions.ko.md 6절). 멤버·원소 단위 접근은 경로 thunk가 한다.
                     Body("nullptr, {}, nullptr,");
                     string valueNative = ValueNativeType(schema, field);
-                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field), Body);
+                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
                     return;
                 }
 
@@ -678,8 +682,11 @@ internal static partial class CppEmitter
                 // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
                 // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
                 string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
-                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Body);
+                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
             }
+
+            // readStaged·keyNativeType(생성 코드는 싣지 않는다) 뒤의 storage 칸이다.
+            static string StorageTail(string storage) => storage.Length == 0 ? "" : ", nullptr, nullptr" + storage;
         }
 
         if (baseId is not null)

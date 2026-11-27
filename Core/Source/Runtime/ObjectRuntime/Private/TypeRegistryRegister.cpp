@@ -86,6 +86,13 @@ bool IsAggregateField(const FieldSchema& field) noexcept {
     return FieldIsAggregate(field);
 }
 
+// Registry 참조·컨테이너 API가 쓸 수 있는 Notify 필드다(강한 참조와 aggregate — 함수표에 storage가
+// 있어야 한다, Docs/Design/ChangeNotification.ko.md CN-D10).
+bool NotifyNeedsStorage(const FieldSchema& field) noexcept {
+    return HasFlag(field.flags, FieldFlags::Notify) &&
+           (field.value.kind == ValueKind::ObjectReference || IsAggregateField(field));
+}
+
 // 클래스 함수표에서 필드 ID의 valueNativeType(key면 keyNativeType)을 찾는다(ResolveValueTypes의
 // thunkType).
 const void* ClassThunkType(const void* context, Guid fieldId, bool key) noexcept {
@@ -434,6 +441,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         // 쓴다(리플렉션 B9i3c0).
         if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
             (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 참조·컨테이너를 담을 수 있는 Notify 필드는 멤버 저장소 thunk가 있어야 한다(Registry 참조
+        // API가 받은 멤버 주소로 통지할 필드를 찾는다 — Docs/Design/ChangeNotification.ko.md
+        // CN-D10).
+        if (NotifyNeedsStorage(*matched) && !field.storage) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 

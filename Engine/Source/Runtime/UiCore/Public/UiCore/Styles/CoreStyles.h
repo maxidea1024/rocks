@@ -3,6 +3,7 @@
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
+#include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/MenuBarStyle.h>
 #include <UiCore/Styles/MenuStyle.h>
 #include <UiCore/Styles/ProgressBarStyle.h>
@@ -78,6 +79,20 @@ ROCKS_UICORE_API const ProgressBarStyle& DefaultProgressBarStyle() noexcept;
 // 기본 스크롤 막대 스타일이다(UE "Scrollbar" — 186–195행: 손잡이 RB(Hover, 4), 올림·끌기 RB(Hover2,
 // 4), 트랙 없음, 두께 8).
 ROCKS_UICORE_API const ScrollBarStyle& DefaultScrollBarStyle() noexcept;
+
+// 편집 글자 상자의 반경·여백이다(UE "NormalEditableTextBox" — StarshipCoreStyle.cpp 1364–1378행:
+// RB(…, InputFocusRadius 4, …), Padding (8, 3, 8, 4)).
+inline constexpr float EditableTextBoxCornerRadius = 4.0f;
+inline constexpr Vec4 EditableTextBoxPadding{8.0f, 3.0f, 8.0f, 4.0f};
+
+// 기본 편집 글자 스타일이다(UE "NormalEditableText" — 1346–1356행: 선택 바탕 Highlight, caret
+// White, 조합 밑줄은 전경 점선, 힌트 불투명도 0.35 — SlateEditableTextLayout.h 79행).
+ROCKS_UICORE_API const EditableTextStyle& DefaultEditableTextStyle() noexcept;
+
+// 기본 편집 글자 상자 스타일이다(UE "NormalEditableTextBox" — 14장 4.4절: 바탕 RB(Input, 4,
+// InputOutline, 1)·올림 RB(Input, 4, Hover, 1)·초점 RB(Input, 4, Primary, 1)·읽기 전용 RB(Header,
+// 4, InputOutline, 1), 전경 Foreground·초점 White·읽기 전용 물려받음, 오류 표지 RB(Error, 4)).
+ROCKS_UICORE_API const EditableTextBoxStyle& DefaultEditableTextBoxStyle() noexcept;
 
 // 툴팁 글꼴 크기(UE "ToolTip.Font" = Regular 9 — StarshipCoreStyle.cpp 510행)와 줄바꿈 폭(UE
 // Slate.ToolTipWrapWidth 기본 1000 — SToolTip.cpp 9–12행)이다.
