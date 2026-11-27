@@ -200,7 +200,7 @@ overlap은 질의 기반 장부다(5.3절 — 시뮬레이션 접촉이 아니�
 - Primitive가 아닌 갱신 대상의 sweep 없는 이동은 `TeleportMode`를 자식 body에 넘기지 않는다(teleport 범위가 PrimitiveComponent 안에만 있다 — UE `InternalSetWorldLocationAndRotation`은 넘긴다). `ResolvePenetration`은 이 경로를 쓰지 않는다.
 - 음수 scale 상자의 `GetCollisionShape`는 부호 있는 반폭을 부풀려 0으로 잘린다(UE `GetScaledBoxExtent` + `Inflate`와 같다). 비균일 scale 캡슐의 질의 반경(min)과 body 반경(max)도 UE처럼 다르다.
 - UE의 `SafeMoveUpdatedComponent`·`MoveUpdatedComponentImpl`·`OverlapTest`처럼 Rocks 판도 가상이다. `OverlapTest`는 무시 목록 버퍼를 재사용해 const가 아니다.
-- `CollisionShapeKind`가 Collision과 Mesh(`SimpleCollision.h` — 진단 형상 종류)에 같은 이름으로 따로 있다(기존 — 한 번역 단위에서 만나면 컴파일 오류). `PrimitiveComponent.h`는 `CollisionShape`를 앞 선언만 하고 구현 파일이 include한다. 근본 해결(Mesh 쪽 개명)은 Mesh 담당 세션에 알린다.
+- `CollisionShapeKind`가 Collision과 Mesh(`SimpleCollision.h` — 진단 형상 종류)에 같은 이름으로 따로 있어 한 번역 단위에서 만나면 컴파일 오류였다. Mesh 쪽이 `SimpleCollisionShapeKind`로 개명해 해결했다(rocks-cf 1ee15bfb6). `PrimitiveComponent.h`의 `CollisionShape` 앞 선언은 헤더를 가볍게 두려고 그대로 둔다.
 - `ResolvePenetration`의 "두 MTD 합산"·"조정량 + 원래 이동"·"원래 이동만" 분기는 시험 배치(쐐기 모서리)가 없어 시험하지 않았다(UE와 같은 순서 — 코드 대조만).
 
 **PH4d 리뷰 반영(2026-11-27).** 치명 0, 중요 1, 경미 9. 밀어낸 자리 겹침 시험이 질의를 마치지 못하면(대상을 빌리지 못함·충돌 해석 실패) "비었다"로 보고 teleport하던 것을 막힘으로 고쳤다(sweep으로 간다). 축 없는 MTD 방향(+Z), 가상 함수, 문서 식 괄호, 낡은 주석, include 순서를 고치고 한계를 적었다. 시험을 보강했다: 회전한 벽·회전한 캡슐 질의의 MTD, 장면 접점 오류 경로(옛 handle·0 회전·비유한 위치·Cylinder), 막힌 해소 뒤 재시도의 반환 값·hit, 이동 무시 Actor면 밀어낸 자리 겹침에서 빠짐, 평면 제약으로 조정량이 0이면 해소 안 함, 갱신 대상 없는 SafeMove.
