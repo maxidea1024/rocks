@@ -28,7 +28,7 @@
 | 소리 감쇠 커브(사용자 감쇠·공기 흡수·리버브 송신·우선순위) | `FRuntimeFloatCurve`(`RE/Classes/Engine/Attenuation.h:107`, `Sound/SoundAttenuation.h:222-413`) | 오디오(rocks-be). 감쇠 설정이 값 struct면 6.1절과 같은 제약이 있다 |
 | 후처리·노출 커브(노출 편향·지역 노출) | `TObjectPtr<UCurveFloat>`(`RE/Classes/Engine/Scene.h:595, 1959, 2054, 2061`) | 렌더(rocks-2e). 같은 제약이 있다 |
 | 머티리얼 `CurveAtlasRowParameter` | `UCurveLinearColorAtlas` + 커브 | 머티리얼(rocks-2b) — 4장 |
-| 타임라인 트랙(float·vector·color·event) | `TObjectPtr<UCurveFloat/UCurveVector/UCurveLinearColor>`(`RE/Classes/Components/TimelineComponent.h:81, 118, 156`) | 컴포넌트 CM5. World라 `SoftObjectRef` + lease를 쓴다(3.1절) |
+| 타임라인 트랙(float·vector·color·event) | `TObjectPtr<UCurveFloat/UCurveVector/UCurveLinearColor>`(`RE/Classes/Components/TimelineComponent.h:81, 118, 156`) | 컴포넌트 CM5 — [엔진 런타임](../EngineRuntime/32-TimelineComponent.ko.md) 32장(이 세션). 트랙은 인라인 값 + `SoftObjectRef` 에셋의 로드 사본(ERD71) |
 | 게임 수치(`FScalableFloat` 대응) | `FCurveTableRowHandle`(GameplayAbilities 플러그인) | 게임플레이 능력 플러그인을 들일 때 |
 | Niagara 커브 | 자체 `FRichCurve` + 편집기 전용 에셋 동기화 | VFX 단계 |
 
