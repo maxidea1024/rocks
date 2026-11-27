@@ -8,7 +8,7 @@
 namespace rocks {
 
 // 진입점이 한 번 캡처하는 프로세스 명령줄이다(UE FCommandLine 대응,
-// Docs/Design/AppInfoCommandLine.ko.md 12절의 부분 구현,
+// Docs/Design/AppInfoCommandLine 12절의 부분 구현,
 // Docs/Design/CrashHandlingAndLaunch.ko.md 7.3절). 캡처 뒤 불변이고 모든 스레드가 읽을 수 있다.
 // 공통 실행 계층(Launch RunApplication)이 진입점 인자로 캡처하므로 프로그램은 Get()만 쓴다. 파서가
 // 아니다: 인자를 나누거나 해석하지 않고 OS·CRT가 나눈 원문을 UTF-8로 보관한다.

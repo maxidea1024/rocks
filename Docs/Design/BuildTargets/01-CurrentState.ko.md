@@ -13,4 +13,4 @@
 | 프로젝트의 플러그인 참조 | `PluginReference(Name, Enabled)`(`Descriptors.cs:49`) | 타깃·플랫폼·구성 조건을 적을 자리가 없다 |
 | 링크 | 정적 라이브러리 + 실행 파일, DLL 없음. 모듈 API export 매크로·모듈 수명 객체·로더가 없다 | Editor 타깃은 UE와 같이 모듈식으로 링크한다(3.8절, BD17) |
 | 빌드 플랫폼 | `NativePlatform { Windows, MacOS, Android }`(`NativeBuildModels.cs:4`), `BuildContext.PlatformDirectory`는 셋 외에는 예외 | 전용 서버의 운영 플랫폼인 Linux x64를 빌드할 수 없다 |
-| 서버 실행 | 실행 옵션 `--headless`(창·그래픽 장치를 만들지 않음, [AppInfo·CommandLine](../AppInfoCommandLine.ko.md) 379·548행)만 있다 | 서버 실행 파일을 만들 타깃이 없다 |
+| 서버 실행 | 실행 옵션 `--headless`(창·그래픽 장치를 만들지 않음, [AppInfo·CommandLine](../AppInfoCommandLine/README.ko.md) 8.1·10.2절)만 있다 | 서버 실행 파일을 만들 타깃이 없다 |
