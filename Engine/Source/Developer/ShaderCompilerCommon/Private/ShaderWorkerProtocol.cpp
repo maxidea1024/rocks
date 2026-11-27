@@ -54,6 +54,7 @@ constexpr Guid JobMatrixField = FieldId(29);
 constexpr Guid JobLayoutField = FieldId(30);
 constexpr Guid JobHookField = FieldId(31);
 constexpr Guid JobFeaturesField = FieldId(32);
+constexpr Guid JobWarningsField = FieldId(33);
 // 응답.
 constexpr Guid ResultsField = FieldId(40);
 constexpr Guid ToolsField = FieldId(41);
@@ -388,6 +389,10 @@ Result<void> EncodeJob(Allocator& allocator, const ShaderWorkerJob& job,
     }
 
     if (step) {
+        step = fields.Bool(JobWarningsField, job.options.warningsAsErrors);
+    }
+
+    if (step) {
         step = fields.Bytes(JobLayoutField, job.layout.View());
     }
 
@@ -415,7 +420,8 @@ Result<void> DecodeJob(RecordReader& item, ShaderWorkerJob& job) noexcept {
     auto optimization = ReadU32(item, JobOptimizationField);
     auto debug = ReadBool(item, JobDebugField);
     auto matrix = ReadU32(item, JobMatrixField);
-    if (!kind || !stage || !features || !hlsl || !optimization || !debug || !matrix ||
+    auto warnings = ReadBool(item, JobWarningsField);
+    if (!kind || !stage || !features || !hlsl || !optimization || !debug || !matrix || !warnings ||
         kind.Value() > static_cast<uint32>(ShaderWorkerJobKind::Assert) ||
         optimization.Value() > 3 || matrix.Value() != 0) {
         return Failure(ErrorCode::CorruptData);
@@ -428,6 +434,7 @@ Result<void> DecodeJob(RecordReader& item, ShaderWorkerJob& job) noexcept {
     job.options.optimization = static_cast<uint8>(optimization.Value());
     job.options.debugSymbols = debug.Value();
     job.options.matrixLayout = static_cast<uint8>(matrix.Value());
+    job.options.warningsAsErrors = warnings.Value();
     Result<void> step = ReadDigest(item, JobKeyField, job.key);
     if (step) {
         step = ReadText(item, JobFormatField, job.formatId);

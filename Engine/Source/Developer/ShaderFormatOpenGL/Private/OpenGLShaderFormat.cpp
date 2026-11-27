@@ -112,6 +112,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     request.optimization = job.options.optimization;
     request.dxPositionW = format.compiler.dxPositionW;
     request.reflect = true;
+    request.warningsAsErrors = job.options.warningsAsErrors;
     ShaderParameterLayoutSet layouts(allocator);
     if (!DecodeShaderJobLayouts(job, layouts, result)) {
         return;
@@ -131,6 +132,15 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         FailShaderJob(result, OpenGLJobStatus(compiled), diagnostics.View());
         return;
     }
+
+    // DXC 경고는 결과 값 뒤에 진단으로 둔다(16.4절 SSD79).
+    String warnings(allocator);
+    if (!warnings.TryAppend(diagnostics.View())) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    diagnostics.Clear();
 
     const usize unsupported =
         FindUnsupportedImageFormat(spirv.View(), format.compiler.unsupportedImageFormats);
@@ -260,6 +270,7 @@ void OpenGLShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     }
 
     SucceedShaderJob(result, code, bound.bindingLayout, bound.gles.header);
+    AddShaderJobWarnings(result, "DXC", warnings.View());
 }
 
 } // namespace rocks::shader

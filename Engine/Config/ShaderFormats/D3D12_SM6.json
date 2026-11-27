@@ -3,7 +3,7 @@
   "id": "D3D12_SM6",
   "status": "supported",
   "backend": "D3D12",
-  "processor": { "module": "ShaderFormatD3D", "version": 6 },
+  "processor": { "module": "ShaderFormatD3D", "version": 7 },
   "bindingConvention": 1,
   "tools": ["DirectXShaderCompiler"],
   "language": { "hlsl2021": true },

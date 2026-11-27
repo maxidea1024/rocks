@@ -13,7 +13,8 @@
 // 구현 규칙:
 // - 결과는 result에 둔다: 성공이면 값(ValueId 오름차순, 값 0 Code는 늘 있다), 실패면 상태와 진단
 //   (영어, 도구 원문). 실패한 job은 값을 두지 않는다.
-// - 경고는 오류다(결정 7). 같은 입력은 같은 byte를 낸다(10절 결정성).
+// - 경고는 job 옵션 warningsAsErrors(기본 true — 결정 7, 16.4절 SSD79)대로 오류로 다루고, false면
+//   AddShaderJobWarnings로 결과 진단에 남긴다. 같은 입력은 같은 byte를 낸다(10절 결정성).
 // - 스레드: 한 워커가 한 job씩 부른다.
 namespace rocks::shader {
 
@@ -68,6 +69,17 @@ ROCKS_SHADERCOMPILERCOMMON_API void AddShaderJobDebugSymbols(ShaderWorkerJobResu
                                                              ShaderDebugSymbolKind kind,
                                                              StringView name,
                                                              Span<const uint8> contents) noexcept;
+
+// 성공한 result의 진단에 한 도구 단계의 경고를 더한다(ShaderSystem 16.4절 SSD79 — `<stage>:
+// <warnings>`, 줄 끝 개행). 결과 값 뒤에 부른다(SucceedShaderJob이 진단을 비운다). warnings가
+// 비었거나 result가 성공이 아니면 아무 일도 하지 않는다. 할당 실패는 경고를 조용히 버리지 않고
+// ToolError로 job을 실패시킨다.
+//
+// 사용 예:
+//   SucceedShaderJob(result, code, binding);
+//   AddShaderJobWarnings(result, "DXC", compiled.diagnostics.View());
+ROCKS_SHADERCOMPILERCOMMON_API void
+AddShaderJobWarnings(ShaderWorkerJobResult& result, StringView stage, StringView warnings) noexcept;
 
 class ShaderFormatBackend {
 public:

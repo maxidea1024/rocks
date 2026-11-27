@@ -6,7 +6,8 @@
 // VULKAN_SM5는 DXC → SPIR-V(target env는 형식 정의 compiler.spirvTargetEnv)이고 spirv-val로
 // 검증한다. 재배치·리플렉션 정규화는 16.1절 SSD29–SSD33이다.
 //
-// DXC 인자: -E 엔트리, -T <단계>_<셰이더 모델>, -HV 2021|2018, -O0–-O3, -Zpr, -WX, -spirv,
+// DXC 인자: -E 엔트리, -T <단계>_<셰이더 모델>, -HV 2021|2018, -O0–-O3, -Zpr, 옵션
+// warningsAsErrors면 -WX(16.4절 SSD79 — 아니면 경고를 결과 진단 `DXC: `로 남긴다), -spirv,
 // -fspv-target-env=vulkan1.1, (형식 정의 dxPositionW면) -fvk-use-dx-position-w. 결과 값 0(Code)은
 // SPIR-V word byte다.
 namespace rocks::shader {
