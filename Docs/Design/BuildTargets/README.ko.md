@@ -14,7 +14,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)다. UBT 경로는 `Engine/Source/Programs/UnrealBuildTool/` 기준이다(약어 `UBT/`). UE 이름은 대응표와 근거에만 적는다. 레거시·deprecated 경로(`[Obsolete]` `bBuildEditor`, `BuildSettingsVersion`, `IncludeOrderVersion`)는 따르지 않는다.
 
-상태: **설계 초안**(결정 BD1–BD44, BD17은 확정(사용자 결정 — UE 방식), BD18은 확정(요구), 나머지는 권장안). 구현 단계는 BS0–BS11(6절)이며 착수 시점은 사용자가 정한다. 초안 작성 뒤 서브에이전트 3개로 교차 검증하고, 반영본을 서브에이전트 1개로 다시 검증했다(10절). PCH·유니티 빌드는 [유니티 빌드·PCH 설계](../UnityBuildPch.ko.md)가 맡으며 이 문서의 범위가 아니다.
+상태: **설계 초안**(결정 BD1–BD50, BD17은 확정(사용자 결정 — UE 방식), BD18은 확정(요구), 나머지는 권장안). 구현 단계는 BS0–BS11(6절)이며 착수 시점은 사용자가 정한다. 초안 작성 뒤 서브에이전트 3개로 교차 검증하고, 반영본을 서브에이전트 1개로 다시 검증했다(10절). PCH·유니티 빌드는 [유니티 빌드·PCH 설계](../UnityBuildPch.ko.md)가 맡으며 이 문서의 범위가 아니다.
 
 ## 목차
 
