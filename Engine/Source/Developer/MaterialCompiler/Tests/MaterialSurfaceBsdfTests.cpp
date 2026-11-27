@@ -114,11 +114,8 @@ TEST(MaterialSurfaceBsdf_SlabMetalExport) {
     REQUIRE(out.succeeded);
     CHECK(Near(ConstantResult(out, "Metallic"), 0.5f));
     CHECK(Near(ConstantResult(out, "Specular"), 1.0f));
-    const IrResult* base = FindEntry(out, IrEntry::Surface, "BaseColor");
-    REQUIRE(base != nullptr);
-    const IrValue& lerp = ValueOf(out, ValueOf(out, base->value).operands[0]);
-    CHECK(lerp.op == IrOp::Lerp);
-    CHECK(Near(FloatOf(ValueOf(out, lerp.operands[2]), 0), 0.5f));
+    // baseColor = lerp(0.18, 0.24, 0.5)다(상수 lerp는 접는다).
+    CHECK(Near(ConstantResult(out, "BaseColor"), 0.18f + (0.24f - 0.18f) * 0.5f));
 }
 
 // 상수 fuzz는 Cloth 하나(customData0 = FuzzAmount, subsurfaceColor = FuzzColor), 값 fuzz는 픽셀마다
@@ -305,11 +302,7 @@ TEST(MaterialSurfaceBsdf_HazeBake) {
     REQUIRE(Translate(fixture, Traits(), out));
     REQUIRE(out.succeeded);
     CHECK(out.shadingModels == ModelBit(rocks::ShadingModel::DefaultLit));
-    const IrResult* roughness = FindEntry(out, IrEntry::Surface, "Roughness");
-    REQUIRE(roughness != nullptr);
-    const IrValue& baked = ValueOf(out, ValueOf(out, roughness->value).operands[0]);
-    CHECK(baked.op == IrOp::Lerp);
-    CHECK(Near(FloatOf(ValueOf(out, baked.operands[1]), 0), 0.6f));
+    CHECK(Near(ConstantResult(out, "Roughness"), 0.4f));
 }
 
 // Hair·Eye·SingleLayerWater 칸이다.

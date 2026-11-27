@@ -21,6 +21,13 @@ constexpr StringView CustomOutputNeuralInput = "NeuralInput";
 constexpr float CustomOutputTextureBatch = -1.0f;
 constexpr int64 CustomOutputTextureIndexType = 0;
 constexpr uint8 CustomOutputWidth = 4;
+// RVT 출력 입력
+// 순서(BaseColor·Specular·Roughness·Normal·WorldHeight·Opacity·Mask·Displacement·Mask4)의 UE
+// ERuntimeVirtualTextureAttributeType 비트다(Opacity는 비트가 없다 —
+// RuntimeVirtualTextureEnum.h:15–27).
+constexpr uint8 CustomOutputNoVirtualTextureBit = 0xFF;
+constexpr uint8 CustomOutputVirtualTextureBits[] = {0, 3, 2, 1, 6, CustomOutputNoVirtualTextureBit,
+                                                    4, 7, 5};
 
 // kind의 결과 진입점이다.
 IrEntry CustomOutputEntry(const CustomOutputKind& kind, EvaluationContext context) noexcept {
@@ -139,34 +146,49 @@ Result<void> Translator::TranslateCustomOutput(const nodegraph::GraphNode& node,
                 }
 
                 value = coordinates.Value();
-            } else if (connected.Value()) {
+            } else {
+                // 연결 → 핀 사용자 값 → 정의 기본값(Input), 그것도 없으면 표 기본값이다(UE Const*
+                // 속성 — 6.11절 MS2d3). 연결이 있는데 값이 없으면 위쪽 오류다.
                 auto read = context.Input(input.key);
                 if (!read) {
                     return Result<void>::Failure(read.Error());
                 }
 
-                if (read.Value() != NoIrValue) {
-                    auto coerced = context.CoerceToWidth(read.Value(), input.width, input.key);
+                IrValueId raw = read.Value();
+                if (raw == NoIrValue && !connected.Value() && input.hasDefault) {
+                    auto constant = context.FloatConstant(
+                        Span<const float>(input.fallback, input.width), input.key);
+                    if (!constant) {
+                        return Result<void>::Failure(constant.Error());
+                    }
+
+                    raw = constant.Value();
+                } else if (raw == NoIrValue && !connected.Value() && input.required) {
+                    // UE MaterialExpressions.cpp:20262–20344.
+                    if (auto reported = context.Error(MaterialDiagnosticCode::MissingInput,
+                                                      input.key, "Input missing");
+                        !reported) {
+                        return reported;
+                    }
+                }
+
+                if (raw != NoIrValue) {
+                    auto coerced = context.CoerceToWidth(raw, input.width, input.key);
                     if (!coerced) {
                         return Result<void>::Failure(coerced.Error());
                     }
 
                     value = coerced.Value();
                 }
-            } else if (input.hasDefault) {
-                auto constant = context.FloatConstant(
-                    Span<const float>(input.fallback, input.width), input.key);
-                if (!constant) {
-                    return Result<void>::Failure(constant.Error());
-                }
 
-                value = constant.Value();
-            } else if (input.required) {
-                // UE MaterialExpressions.cpp:20262–20344.
-                if (auto reported = context.Error(MaterialDiagnosticCode::MissingInput, input.key,
-                                                  "Input missing");
-                    !reported) {
-                    return reported;
+                // RVT 속성 마스크는 연결된 입력만이다(UE OutputAttributeMask —
+                // MaterialExpressions.cpp: 3054–3115).
+                if (connected.Value() && kind.name == CustomOutputVirtualTexture &&
+                    index < sizeof(CustomOutputVirtualTextureBits) /
+                                sizeof(CustomOutputVirtualTextureBits[0]) &&
+                    CustomOutputVirtualTextureBits[index] != CustomOutputNoVirtualTextureBit) {
+                    out_.virtualTextureOutputMask |=
+                        static_cast<uint8>(1u << CustomOutputVirtualTextureBits[index]);
                 }
             }
 
@@ -211,6 +233,11 @@ Result<void> Translator::TranslateCustomOutput(const nodegraph::GraphNode& node,
 
 Result<void> Translator::CustomOutputDefines(const nodegraph::GraphNode& node,
                                              const CustomOutputKind& kind) noexcept {
+    // 두 정의는 Volume 영역에서만 낸다(UE HT:14963).
+    if (input_.traits.domain != MaterialDomain::Volume) {
+        return Result<void>::Success();
+    }
+
     if (kind.name == StringView("VolumetricCloudEmptySpaceSkippingOutput")) {
         return defines_.TryPushBack(
             IrDefine{"MATERIAL_VOLUMETRIC_CLOUD_EMPTY_SPACE_SKIPPING_OUTPUT", 1});
@@ -268,8 +295,8 @@ Result<void> Translator::CustomOutputDefines(const nodegraph::GraphNode& node,
     }
 
     // 출력 노드 AO 연결 또는 표면 AO(VolumetricFogCloud)다.
-    bool occlusion = exportedSurface_.Field(SurfaceField::AmbientOcclusion) != NoIrValue &&
-                     exportedSurface_.kind == SurfaceKind::VolumetricFogCloud;
+    bool occlusion = exportedSurface_.kind == SurfaceKind::VolumetricFogCloud &&
+                     exportedSurface_.writesOcclusion;
     auto aoPin = input_.names.TryFind("AmbientOcclusion");
     if (aoPin && outputNode_ != nullptr) {
         for (const nodegraph::GraphEdge& edge : graph_->edges) {

@@ -187,7 +187,11 @@ Result<void> Translator::TranslateSurface(LoweringContext& context) noexcept {
             continue;
         }
 
-        if (SaturatedField(field)) {
+        // VolumetricFogCloud의 subsurfaceColor는 Extinction(1/m)이라 원값이다(UE 볼륨 경로
+        // GetMaterialSubsurfaceDataRaw — MT:4102).
+        const bool extinction = field == SurfaceField::SubsurfaceColor &&
+                                exported.kind == SurfaceKind::VolumetricFogCloud;
+        if (SaturatedField(field) && !extinction) {
             auto saturated = context.Unary(IrOp::Saturate, value, NumberRule::FloatOnly);
             if (!saturated) {
                 return Result<void>::Failure(saturated.Error());

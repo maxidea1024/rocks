@@ -272,6 +272,9 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
         }
 
         record.flow = SurfaceFlowBit(SurfaceFlow::Slab);
+        // 컴파일된 집합에 TwoSidedFoliage가 있으면 SubSurfaceColor 기본값은 0이다(UE MADM:50–55).
+        foliage = (reached.Value() &
+                   (1u << static_cast<uint32>(rocks::ShadingModel::TwoSidedFoliage))) != 0;
         const rocks::ShadingModel special[] = {rocks::ShadingModel::Hair, rocks::ShadingModel::Eye,
                                                rocks::ShadingModel::SingleLayerWater};
         for (rocks::ShadingModel candidate : special) {
@@ -543,6 +546,13 @@ Result<void> LowerSurfaceVolumetricFogCloud(LoweringContext& context) noexcept {
 
             record.Field(input.field) = value.Value();
         }
+
+        auto occlusion = context.IsConnected("AmbientOcclusion");
+        if (!occlusion) {
+            return Result<void>::Failure(occlusion.Error());
+        }
+
+        record.writesOcclusion = occlusion.Value();
     }
 
     return EmitSurface(context, record);
@@ -932,8 +942,9 @@ Result<void> LowerSurfaceEye(LoweringContext& context) noexcept {
         return cornea ? Result<void>::Success() : Result<void>::Failure(cornea.Error());
     }
 
-    auto plane = ReadBasis(context, "IrisPlaneNormal", "VertexNormal",
-                           record.Field(SurfaceField::Tangent), StringView(), unused);
+    // IrisPlaneNormal은 TangentOutput 출력이다(UE 고전 Eye GBuffer가 GetTangentOutput0을 읽는다 —
+    // ShadingModelsMaterial.ush:160–166, 연결된 때만 입력 원값).
+    auto plane = ReadSecondNormal(context, "IrisPlaneNormal", record.customTangent);
     if (!plane || !plane.Value()) {
         return plane ? Result<void>::Success() : Result<void>::Failure(plane.Error());
     }

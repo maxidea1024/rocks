@@ -147,22 +147,33 @@ Result<void> LowerMetalnessToDiffuseAlbedoF0(LoweringContext& context) noexcept 
 // Gloss")의 넓은 거칠기와 섞는 무게다.
 void HazeLobe(SurfaceMath& m, IrValueId roughness, IrValueId haziness, IrValueId& wide,
               IrValueId& weight) noexcept {
-    const IrValueId s2 = m.Saturate(m.Mul(m.Scalar(2.0f), roughness));
-    const IrValueId s4 = m.Saturate(m.Mul(m.Scalar(4.0f), roughness));
-    const IrValueId extent = m.Lerp(m.Scalar(27.0f), m.Scalar(3.0f), s4);
-    const IrValueId core = m.Lerp(m.Scalar(0.01f), m.Scalar(0.5f), s2);
+    // 거칠기가 낮을수록 haze 범위가 넓고 중심 하이라이트가 낮다(UE 상수 — S:1140–1150).
+    constexpr float ExtentLow = 27.0f;
+    constexpr float ExtentHigh = 3.0f;
+    constexpr float CoreLow = 0.01f;
+    constexpr float CoreHigh = 0.5f;
+    // S2 = saturate(2r), S4 = saturate(4r)의 배율이다.
+    constexpr float CoreRamp = 2.0f;
+    constexpr float ExtentRamp = 4.0f;
+    // 논문 식 Eq. 12–15의 2·4다.
+    constexpr float Two = 2.0f;
+    constexpr float Four = 4.0f;
+    const IrValueId s2 = m.Saturate(m.Mul(m.Scalar(CoreRamp), roughness));
+    const IrValueId s4 = m.Saturate(m.Mul(m.Scalar(ExtentRamp), roughness));
+    const IrValueId extent = m.Lerp(m.Scalar(ExtentLow), m.Scalar(ExtentHigh), s4);
+    const IrValueId core = m.Lerp(m.Scalar(CoreLow), m.Scalar(CoreHigh), s2);
     const IrValueId alphaN = m.Mul(roughness, roughness);
     const IrValueId alphaW = m.Mul(alphaN, m.Add(m.Scalar(1.0f), extent));
     wide = m.Sqrt(alphaW);
     const IrValueId onePlus = m.Add(m.Scalar(1.0f), extent);
     const IrValueId p = m.Div(m.Scalar(1.0f), m.Mul(onePlus, onePlus));
     const IrValueId b =
-        m.Mul(m.Scalar(2.0f), m.Add(m.Mul(core, m.OneMinus(alphaW)), m.Mul(alphaW, p)));
+        m.Mul(m.Scalar(Two), m.Add(m.Mul(core, m.OneMinus(alphaW)), m.Mul(alphaW, p)));
     const IrValueId d =
-        m.Sub(m.Mul(b, b), m.Mul(m.Mul(m.Scalar(4.0f), m.Sub(b, m.Scalar(1.0f))), core));
-    const IrValueId u = m.Div(m.Sub(b, m.Sqrt(d)), m.Sub(m.Mul(m.Scalar(2.0f), b), m.Scalar(2.0f)));
+        m.Sub(m.Mul(b, b), m.Mul(m.Mul(m.Scalar(Four), m.Sub(b, m.Scalar(1.0f))), core));
+    const IrValueId u = m.Div(m.Sub(b, m.Sqrt(d)), m.Sub(m.Mul(m.Scalar(Two), b), m.Scalar(Two)));
     const IrValueId u2 = m.Mul(u, u);
-    const IrValueId w2 = m.Mul(m.Scalar(2.0f), alphaW);
+    const IrValueId w2 = m.Mul(m.Scalar(Two), alphaW);
     const IrValueId uMinusU2 = m.Sub(u, u2);
     const IrValueId oneMinusU = m.OneMinus(u);
     const IrValueId kh = m.Div(m.Mul(m.Mul(uMinusU2, w2), haziness),
@@ -255,6 +266,14 @@ Result<void> LowerThinFilm(LoweringContext& context) noexcept {
 
             normal = world.Value();
         }
+
+        // UE TransformNormalFromRequestedBasisToWorld는 정규화한다(HT:11521–11531).
+        auto normalized = context.Unary(IrOp::Normalize, normal, NumberRule::FloatOnly);
+        if (!normalized) {
+            return Result<void>::Failure(normalized.Error());
+        }
+
+        normal = normalized.Value();
     } else {
         auto vertex = context.ContextValue("VertexNormal");
         if (!vertex) {
@@ -301,11 +320,15 @@ Result<void> LowerThinFilm(LoweringContext& context) noexcept {
                                    FilmSensitivity(m, m.Mul(factor, opd), m.Mul(factor, phi2))));
     }
 
-    // XYZ → RGB(ThinFilm_XYZ_TO_RGB 행 벡터 곱).
+    // XYZ → RGB(ThinFilm_XYZ_TO_RGB 행 벡터 곱 — 행마다 XYZ 한 성분의 RGB 기여다).
+    constexpr float XyzToRgbX[] = {2.3706743f, -0.5138850f, 0.0052982f};
+    constexpr float XyzToRgbY[] = {-0.9000405f, 1.4253036f, -0.0146949f};
+    constexpr float XyzToRgbZ[] = {-0.4706338f, 0.0885814f, 1.0093968f};
     const IrValueId rgb = m.Add(
-        m.Add(m.Mul(m.Component(intensity, 0), m.Vector3(2.3706743f, -0.5138850f, 0.0052982f)),
-              m.Mul(m.Component(intensity, 1), m.Vector3(-0.9000405f, 1.4253036f, -0.0146949f))),
-        m.Mul(m.Component(intensity, 2), m.Vector3(-0.4706338f, 0.0885814f, 1.0093968f)));
+        m.Add(
+            m.Mul(m.Component(intensity, 0), m.Vector3(XyzToRgbX[0], XyzToRgbX[1], XyzToRgbX[2])),
+            m.Mul(m.Component(intensity, 1), m.Vector3(XyzToRgbY[0], XyzToRgbY[1], XyzToRgbY[2]))),
+        m.Mul(m.Component(intensity, 2), m.Vector3(XyzToRgbZ[0], XyzToRgbZ[1], XyzToRgbZ[2])));
     const IrValueId film =
         m.Select(m.Greater(noV, m.Scalar(0.0f)), m.Saturate(rgb), m.Vector3(0.0f));
     // SubstrateGetThinFilmF0F90(S:3363–3388).

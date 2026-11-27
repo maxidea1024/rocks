@@ -35,6 +35,10 @@ struct MaterialTranslation {
     // 결과가 있는 custom 출력 이름이다(6.11절 MS2d3 표 순서 — 8.3절 MaterialShaderTraits 거르기).
     // 정적 원문이다.
     Array<StringView> customOutputs;
+    // RVT 출력 노드의 연결된 속성 비트다(UE RuntimeVirtualTextureOutputAttributeMask —
+    // ERuntimeVirtualTextureAttributeType 순서 BaseColor 0·Normal 1·Roughness 2·Specular 3·Mask 4·
+    // Mask4 5·WorldHeight 6·Displacement 7, 6.11절 MS2d3). 0이면 RVT 출력이 없다.
+    uint8 virtualTextureOutputMask = 0;
     bool succeeded = false;
 };
 

@@ -115,9 +115,8 @@ TEST(MaterialSurfaceOperator_HorizontalMix) {
     const IrResult* normal = OperatorEntry(out, IrEntry::Normal, "Normal");
     REQUIRE(normal != nullptr);
     CHECK(ValueOf(out, normal->value).op == IrOp::Normalize);
-    const IrResult* base = OperatorEntry(out, IrEntry::Surface, "BaseColor");
-    REQUIRE(base != nullptr);
-    CHECK(ValueOf(out, ValueOf(out, base->value).operands[0]).op == IrOp::Lerp);
+    // 상수 albedo는 w = 0.5로 접힌다(0.18과 0.8의 평균).
+    CHECK(OperatorNear(OperatorConstant(out, "BaseColor"), 0.49f));
 }
 
 // Horizontal의 표지는 OR다: fuzz slab과 섞으면 Cloth다.

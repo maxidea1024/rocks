@@ -7,8 +7,8 @@ namespace rocks::material::detail {
 
 namespace {
 
-// 세 성분 평균의 무게다(UE dot(v, 0.33.xxx) — S:3226는 0.33, 평균은 1/3).
-constexpr float SurfaceMathThird = 1.0f / 3.0f;
+// 세 성분 평균의 무게다(UE dot(v, 0.33.xxx) — S:3233, 1/3이 아니라 UE 값 그대로).
+constexpr float SurfaceMathThird = 0.33f;
 
 } // namespace
 
@@ -117,6 +117,14 @@ IrValueId SurfaceMath::Lerp(IrValueId from, IrValueId to, IrValueId alpha) noexc
     if (context_.ConstantFloat(alpha, weight) && (weight == 0.0f || weight == 1.0f) &&
         context_.TypeOf(from) == context_.TypeOf(to)) {
         return weight == 0.0f ? from : to;
+    }
+
+    // 셋 다 상수면 HLSL 정의 lerp(x, y, s) = x + s·(y − x)로 펼쳐 접는다(상수 표지·기본값 칸이
+    // 상수로 남는다).
+    const IrBuilder& builder = context_.Builder();
+    if (builder.Value(from).op == IrOp::Constant && builder.Value(to).op == IrOp::Constant &&
+        builder.Value(alpha).op == IrOp::Constant) {
+        return Add(from, Mul(alpha, Sub(to, from)));
     }
 
     return Check(context_.Ternary(IrOp::Lerp, from, to, alpha, NumberRule::FloatOnly));

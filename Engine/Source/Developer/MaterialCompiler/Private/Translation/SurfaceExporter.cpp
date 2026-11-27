@@ -72,10 +72,15 @@ bool ExportConstantEquals(const IrBuilder& builder, IrValueId id, float value) n
 constexpr float LegacyMinimumMfpCm = 1e-5f;
 constexpr float LegacyMeterToCentimeter = 100.0f;
 constexpr float LegacyProfilePhaseAnisotropy = 0.93f;
+// 고전 fuzz 거칠기 = 0.5 + 0.5·Roughness다(UE CreateLegacySlab — SLC:133).
+constexpr float LegacyFuzzRoughnessBias = 0.5f;
+constexpr float LegacyFuzzRoughnessScale = 0.5f;
 // TransmittanceToMeanFreePath의 하한(UE ParticipatingMediaCommon.ush:170–180)이다.
 constexpr float LegacyTransmittanceFloor = 1e-12f;
 // Vertical 접기의 상수다(UE S:3132–3297, ParticipatingMediaCommon.ush).
 constexpr float VerticalMaxDielectricF0 = 0.99f;
+// UE DielectricF0ToIor(f) = 2/(1 − sqrt(f)) − 1의 2다(SC:128–131).
+constexpr float VerticalIorScale = 2.0f;
 constexpr float VerticalMinimumExtinction = 1e-6f;
 constexpr float VerticalMinimumMfpMeter = 1e-12f;
 constexpr float VerticalMinimumNoV = 1e-4f;
@@ -94,23 +99,44 @@ IrValueId LegacyTransmittanceToMfp(SurfaceMath& m, IrValueId transmittance,
 // UE IsotropicMediumSlabPunctualDirectionalAlbedoALU(ParticipatingMediaCommon.ush:212–225)와
 // IsotropicMediumSlabDirectionalAlbedoFade(:197–209)다(baseColor는 위층 DiffuseAlbedo, mfp는 m).
 IrValueId VerticalTopAlbedo(SurfaceMath& m, IrValueId baseColor, IrValueId mfp) noexcept {
-    const IrValueId x = m.Max(m.Scalar(0.01f), mfp);
+    // 측정 맞춤 곡선(BaseColor 1과 0.1)의 계수다(ParticipatingMediaCommon.ush:212–225).
+    constexpr float MinimumMfp = 0.01f;
+    constexpr float OneNumerator = 0.0855674f;
+    constexpr float OneOffset = 0.237742f;
+    constexpr float OneShift = 0.0310849f;
+    constexpr float OneSlope = 1.95492f;
+    constexpr float OneBias = 2.07238f;
+    constexpr float TenthNumerator = 0.0167964f;
+    constexpr float TenthScale = 0.541037f;
+    constexpr float TenthBase = 1.17902f;
+    constexpr float TenthExponent = -4.33046f;
+    constexpr float TenthShift = -0.294969f;
+    constexpr float TenthBias = 0.797592f;
+    // 측정 범위 [0.1, 1]의 BaseColor로 두 곡선을 섞는다.
+    constexpr float MeasuredLow = 0.1f;
+    constexpr float MeasuredRange = 1.0f - 0.1f;
+    // UE IsotropicMediumSlabDirectionalAlbedoFade의 이름 있는 상수다(:197–209).
+    constexpr float BaseColorFadesOutBelowPercentage = 10.0f;
+    constexpr float FitLastMeasuredSampleMfp = 20.0f;
+    constexpr float AlbedoIsZeroForMfp = 1000.0f;
+    const IrValueId x = m.Max(m.Scalar(MinimumMfp), mfp);
     const IrValueId one =
-        m.Div(m.Scalar(0.0855674f),
-              m.Add(m.Scalar(0.237742f),
-                    m.Add(x, m.Div(m.Sub(m.Scalar(0.0310849f), x),
-                                   m.Add(m.Mul(m.Scalar(1.95492f), x), m.Scalar(2.07238f))))));
+        m.Div(m.Scalar(OneNumerator),
+              m.Add(m.Scalar(OneOffset),
+                    m.Add(x, m.Div(m.Sub(m.Scalar(OneShift), x),
+                                   m.Add(m.Mul(m.Scalar(OneSlope), x), m.Scalar(OneBias))))));
     const IrValueId tenth =
-        m.Div(m.Scalar(0.0167964f),
-              m.Add(m.Mul(m.Scalar(0.541037f),
-                          m.Mul(m.Pow(m.Vector3(1.17902f), m.Div(m.Scalar(-4.33046f), x)),
-                                m.Add(m.Scalar(-0.294969f), x))),
-                    m.Scalar(0.797592f)));
+        m.Div(m.Scalar(TenthNumerator),
+              m.Add(m.Mul(m.Scalar(TenthScale),
+                          m.Mul(m.Pow(m.Vector3(TenthBase), m.Div(m.Scalar(TenthExponent), x)),
+                                m.Add(m.Scalar(TenthShift), x))),
+                    m.Scalar(TenthBias)));
     const IrValueId evaluated =
-        m.Lerp(tenth, one, m.Div(m.Sub(baseColor, m.Scalar(0.1f)), m.Scalar(0.9f)));
-    const IrValueId fade =
-        m.Mul(m.Saturate(m.Mul(baseColor, m.Scalar(10.0f))),
-              m.Saturate(m.OneMinus(m.Div(m.Sub(x, m.Scalar(20.0f)), m.Scalar(980.0f)))));
+        m.Lerp(tenth, one, m.Div(m.Sub(baseColor, m.Scalar(MeasuredLow)), m.Scalar(MeasuredRange)));
+    const IrValueId fade = m.Mul(
+        m.Saturate(m.Mul(baseColor, m.Scalar(BaseColorFadesOutBelowPercentage))),
+        m.Saturate(m.OneMinus(m.Div(m.Sub(x, m.Scalar(FitLastMeasuredSampleMfp)),
+                                    m.Scalar(AlbedoIsZeroForMfp - FitLastMeasuredSampleMfp)))));
     return m.Mul(evaluated, fade);
 }
 
@@ -483,6 +509,8 @@ Result<void> SurfaceExporter::BuildSlab(const SurfaceSlab& in, SlabSubsurface ty
                                    m.Max(m.Scalar(ExportEpsilon), thickness))),
                   m.Scalar(0.0f));
         out[SlabValue::MeanFreePath] = rescaled;
+        // UE TmpMFP는 계산 공간으로 바꾼 뒤의 SSSMFP다(S:1748).
+        out[SlabValue::VolumeMeanFreePath] = rescaled;
         out[SlabValue::Thickness] =
             m.Select(mfpPlugged, m.Scalar(ExportSimpleVolumeThicknessCm), thickness);
     }
@@ -548,7 +576,11 @@ Result<void> SurfaceExporter::LegacyModelSlab(const SurfaceRecord& record, Shadi
     const IrValueId metallic = m.Saturate(record.Field(SurfaceField::Metallic));
     const IrValueId specular = record.Field(SurfaceField::Specular);
     const IrValueId roughness = record.Field(SurfaceField::Roughness);
-    const IrValueId opacity = m.Saturate(record.Field(SurfaceField::Opacity));
+    // AlphaComposite는 opacity를 1로 둔다(UE SUBSTRATE_USE_PREMULTALPHA_OVERRIDE — SLC:562,
+    // opacity는 Opacity 출력 핀이 맡는다).
+    const IrValueId opacity = context_.Traits().blendMode == BlendMode::AlphaComposite
+                                  ? m.Scalar(1.0f)
+                                  : m.Saturate(record.Field(SurfaceField::Opacity));
     const IrValueId subsurfaceColor = record.Field(SurfaceField::SubsurfaceColor);
     const IrValueId clearCoat = record.Field(SurfaceField::CustomData0);
     const IrValueId clearCoatRoughness = record.Field(SurfaceField::CustomData1);
@@ -571,7 +603,8 @@ Result<void> SurfaceExporter::LegacyModelSlab(const SurfaceRecord& record, Shadi
     in[SlabValue::Emissive] = record.Field(SurfaceField::Emissive);
     in[SlabValue::HazeRoughness] = m.Scalar(0.0f);
     in[SlabValue::HazeWeight] = m.Scalar(0.0f);
-    in[SlabValue::FuzzRoughness] = m.Add(m.Scalar(0.5f), m.Mul(m.Scalar(0.5f), roughness));
+    in[SlabValue::FuzzRoughness] = m.Add(m.Scalar(LegacyFuzzRoughnessBias),
+                                         m.Mul(m.Scalar(LegacyFuzzRoughnessScale), roughness));
     in[SlabValue::FuzzAmount] = m.Scalar(0.0f);
     in[SlabValue::FuzzColor] = m.Vector3(0.0f);
     in[SlabValue::SimpleClearCoat] = m.Bool(false);
@@ -585,7 +618,7 @@ Result<void> SurfaceExporter::LegacyModelSlab(const SurfaceRecord& record, Shadi
         in[SlabValue::DiffuseAlbedo] = m.Vector3(0.0f);
         in[SlabValue::F0] = m.Vector3(0.0f);
         in[SlabValue::Roughness] = m.Scalar(0.0f);
-        in[SlabValue::FuzzRoughness] = m.Scalar(0.5f);
+        in[SlabValue::FuzzRoughness] = m.Scalar(LegacyFuzzRoughnessBias);
         break;
     case ShadingModel::Subsurface:
         // 1 m slab 투과 색에서 MFP(SLC:300–340). 반투명이면 MFP 0·coverage = opacity다.
@@ -652,18 +685,17 @@ Result<void> SurfaceExporter::LegacyModelSlab(const SurfaceRecord& record, Shadi
         return built;
     }
 
+    // 고전 slab은 thin이 아니다(UE CreateLegacySlab bIsThinSurface false — SLC:85, 141).
+    out[SlabValue::IsThin] = m.Bool(false);
+
     out[SlabValue::Coverage] = coverage;
     return m.Status();
 }
 
 IrValueId SurfaceExporter::SlabNoV(const SurfaceSlab& slab) noexcept {
     if (camera_ == NoIrValue) {
-        auto camera = context_.ContextValue("CameraVector");
-        if (!camera) {
-            return NoIrValue;
-        }
-
-        camera_ = camera.Value();
+        // 실패는 math_의 첫 실패로 남긴다(Status가 돌려준다).
+        camera_ = math_.Track(context_.ContextValue("CameraVector"));
     }
 
     return math_.Saturate(math_.Dot(slab[SlabValue::Normal], camera_));
@@ -780,9 +812,8 @@ void SurfaceExporter::BlendAdd(SurfaceSlab& a, SurfaceSlab& b, SurfaceSlab& out)
                  m.Select(m.Equal(b[SlabValue::Subsurface], profile), b[SlabValue::RadiusScale],
                           m.Scalar(0.0f)));
     result[SlabValue::RadiusScale] = radius;
-    result[SlabValue::Subsurface] =
-        MergedSubsurface(m.MaxUInt(a[SlabValue::Subsurface], b[SlabValue::Subsurface]), radius,
-                         result[SlabValue::MeanFreePath]);
+    // Add에는 병합 뒤 정리 규칙이 없다(S:3076–3091 — Horizontal만).
+    result[SlabValue::Subsurface] = m.MaxUInt(a[SlabValue::Subsurface], b[SlabValue::Subsurface]);
     result[SlabValue::Coverage] = m.Saturate(m.Add(cB, cA));
     result[SlabValue::Normal] =
         m.Normalize(m.Lerp(b[SlabValue::Normal], a[SlabValue::Normal], mixA));
@@ -803,9 +834,10 @@ void SurfaceExporter::BlendVertical(SurfaceSlab& top, SurfaceSlab& base,
     const IrValueId originalBaseMfp = base[SlabValue::MeanFreePath];
     // 굴절 NoV(UE SubstrateComputeTransmittanceNoV — V를 IOR(F0.y)로 굴절, S:3132–3159).
     const IrValueId topF0 = m.Component(top[SlabValue::F0], 1);
-    const IrValueId ior = m.Sub(
-        m.Div(m.Scalar(2.0f), m.OneMinus(m.Sqrt(m.Min(topF0, m.Scalar(VerticalMaxDielectricF0))))),
-        m.Scalar(1.0f));
+    const IrValueId ior =
+        m.Sub(m.Div(m.Scalar(VerticalIorScale),
+                    m.OneMinus(m.Sqrt(m.Min(topF0, m.Scalar(VerticalMaxDielectricF0))))),
+              m.Scalar(1.0f));
     const IrValueId eta = m.Div(m.Scalar(1.0f), ior);
     const IrValueId refracted = m.Sqrt(
         m.Max(m.Scalar(0.0f),
@@ -939,44 +971,56 @@ Result<void> SurfaceExporter::ExportSlab(const SurfaceSlab& input, const Guid& o
     }
 
     const IrValueId noV = m.Saturate(m.Dot(vertexNormal.Value(), camera.Value()));
-    BakeF90(slab, noV);
-    // SimpleClearCoat가 아닌 haze는 거칠기에 굽는다(S:3728–3746).
+    // SimpleClearCoat가 아닌 haze를 먼저 거칠기에 굽고(S:3728–3746) 그 거칠기로 F90을 굽는다(순서
+    // SE:1105–1109 — F90 굽기의 거칠기 페이드가 haze를 굽은 거칠기를 본다).
     const IrValueId hazeIntoRoughness =
         m.And(slab[SlabValue::HasHaze], m.Not(slab[SlabValue::SimpleClearCoat]));
-    const IrValueId roughness =
+    slab[SlabValue::Roughness] =
         m.Select(hazeIntoRoughness,
                  m.Lerp(slab[SlabValue::Roughness], slab[SlabValue::HazeRoughness],
                         slab[SlabValue::HazeWeight]),
                  slab[SlabValue::Roughness]);
+    BakeF90(slab, noV);
+    const IrValueId roughness = slab[SlabValue::Roughness];
     const IrValueId f0 = slab[SlabValue::F0];
     const IrValueId f0Max = m.Max3(f0);
     const IrValueId metal =
         m.Saturate(m.Div(m.Sub(f0Max, m.Scalar(ExportDielectricF0)), m.Scalar(ExportMetalF0Range)));
     const IrValueId subsurface = slab[SlabValue::Subsurface];
-    // shading model 사슬(SE:1137–1300, S:4080–4110 — 위가 우선).
+    // shading model 사슬(SE:1137–1300, S:4080–4110 — 위가 우선). Profile은 RadiusScale이 문턱
+    // 이하면 사슬을 내려가지 않고 DefaultLit이다(SE:1218–1231).
     const IrValueId isProfile =
-        m.And(m.Equal(subsurface, m.UInt(ExportSubsurface(SlabSubsurface::Profile))),
-              m.Greater(slab[SlabValue::RadiusScale], m.Scalar(ExportProfileThreshold)));
+        m.Equal(subsurface, m.UInt(ExportSubsurface(SlabSubsurface::Profile)));
+    const IrValueId strongProfile =
+        m.And(isProfile, m.Greater(slab[SlabValue::RadiusScale], m.Scalar(ExportProfileThreshold)));
+    const IrValueId weakProfile = m.And(isProfile, m.Not(strongProfile));
     const IrValueId isWrap = m.Equal(subsurface, m.UInt(ExportSubsurface(SlabSubsurface::Wrap)));
     const IrValueId isFoliage =
         m.Equal(subsurface, m.UInt(ExportSubsurface(SlabSubsurface::TwoSidedWrap)));
     const IrValueId isCloth = slab[SlabValue::HasFuzz];
     const IrValueId isClearCoat = m.And(slab[SlabValue::HasHaze], slab[SlabValue::SimpleClearCoat]);
-    const IrValueId isThin = slab[SlabValue::IsThin];
-    const IrValueId chain[] = {isProfile, isWrap, isFoliage, isCloth, isClearCoat, isThin};
-    const uint32 models[] = {
-        ExportModel(ShadingModel::SubsurfaceProfile), ExportModel(ShadingModel::Subsurface),
-        ExportModel(ShadingModel::TwoSidedFoliage),   ExportModel(ShadingModel::Cloth),
-        ExportModel(ShadingModel::ClearCoat),         ExportModel(ShadingModel::ThinTranslucent)};
+    // 고전 ThinTranslucent는 반투명 전용이다(불투명이면 UE Blendable처럼 DefaultLit).
+    const IrValueId isThin =
+        ExportTranslucent(context_.Traits().blendMode) ? slab[SlabValue::IsThin] : m.Bool(false);
+    const IrValueId chain[] = {isWrap, isFoliage, isCloth, isClearCoat, isThin};
+    const uint32 models[] = {ExportModel(ShadingModel::Subsurface),
+                             ExportModel(ShadingModel::TwoSidedFoliage),
+                             ExportModel(ShadingModel::Cloth), ExportModel(ShadingModel::ClearCoat),
+                             ExportModel(ShadingModel::ThinTranslucent)};
     constexpr usize ChainLength = sizeof(models) / sizeof(models[0]);
     IrValueId model = m.UInt(ExportModel(ShadingModel::DefaultLit));
     for (usize index = ChainLength; index > 0; --index) {
         model = m.Select(chain[index - 1], m.UInt(models[index - 1]), model);
     }
 
+    model = m.Select(isProfile,
+                     m.Select(strongProfile, m.UInt(ExportModel(ShadingModel::SubsurfaceProfile)),
+                              m.UInt(ExportModel(ShadingModel::DefaultLit))),
+                     model);
     // 표로 나타낼 수 없는 조합은 우선순위로 하나를 고르고 경고한다(10.3절).
     usize constantTrue = 0;
-    for (IrValueId condition : chain) {
+    const IrValueId conditions[] = {isProfile, isWrap, isFoliage, isCloth, isClearCoat, isThin};
+    for (IrValueId condition : conditions) {
         bool value = false;
         if (m.ConstantBool(condition, value) && value) {
             ++constantTrue;
@@ -998,9 +1042,10 @@ Result<void> SurfaceExporter::ExportSlab(const SurfaceSlab& input, const Guid& o
     const IrValueId wrapModel = m.Or(isWrap, isFoliage);
     const IrValueId clothModel = m.And(m.Not(sssModel), isCloth);
     const IrValueId clearCoatModel = m.And(m.And(m.Not(sssModel), m.Not(isCloth)), isClearCoat);
-    // anisotropy는 DefaultLit·ClearCoat만 남는다(SE:1305–1309).
+    // anisotropy는 DefaultLit·ClearCoat만 남는다(SE:1305–1309 — 문턱 미만 Profile은 DefaultLit).
     const IrValueId keepsAnisotropy =
-        m.And(m.And(m.Not(sssModel), m.Not(isCloth)), m.Or(isClearCoat, m.Not(isThin)));
+        m.Or(weakProfile,
+             m.And(m.And(m.Not(sssModel), m.Not(isCloth)), m.Or(isClearCoat, m.Not(isThin))));
     const IrValueId anisotropy = m.Select(m.And(slab[SlabValue::HasAnisotropy], keepsAnisotropy),
                                           slab[SlabValue::Anisotropy], m.Scalar(0.0f));
     // SSS 투과 색(1 m slab — SE SubsurfaceColor 접근자).
@@ -1009,9 +1054,10 @@ Result<void> SurfaceExporter::ExportSlab(const SurfaceSlab& input, const Guid& o
                                                               m.Scalar(ExportCentimeterToMeter)))));
     const IrValueId subsurfaceColor = m.Select(
         wrapModel, transmitted, m.Select(clothModel, slab[SlabValue::FuzzColor], m.Vector3(1.0f)));
-    const IrValueId opacity =
-        m.Select(isProfile, slab[SlabValue::RadiusScale],
-                 m.Select(wrapModel, m.OneMinus(slab[SlabValue::PhaseAnisotropy]), m.Scalar(1.0f)));
+    // Wrap의 opacity는 1 − abs(위상 비등방)이다(SE:1251 → SubstrateSubsurface.ush:73).
+    const IrValueId opacity = m.Select(
+        strongProfile, slab[SlabValue::RadiusScale],
+        m.Select(wrapModel, m.OneMinus(m.Abs(slab[SlabValue::PhaseAnisotropy])), m.Scalar(1.0f)));
     const IrValueId customData0 = m.Select(
         clothModel, slab[SlabValue::FuzzAmount],
         m.Select(clearCoatModel, slab[SlabValue::HazeWeight], m.Scalar(ExportDefaultCustomData0)));

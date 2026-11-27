@@ -1516,6 +1516,8 @@ Result<void> Translator::Run() noexcept {
     out_.module.Clear();
     out_.diagnostics.items.Clear();
     out_.userSceneTextures.Clear();
+    out_.customOutputs.Clear();
+    out_.virtualTextureOutputMask = 0;
     out_.succeeded = false;
     out_.consultedTarget = NoMaterialTargetFields;
     auto domain = input_.names.TryFind(MaterialDomainName);

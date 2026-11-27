@@ -115,12 +115,12 @@ public:
         return *graph_;
     }
 
-    // 지금 번역 중인 평가 문맥이다.
     // RVT 출력 노드 입력을 번역하는 중인가(6.11절 MS2d3 RVT 범위 — 픽셀 문맥, 결과 캐시는 따로).
     bool VirtualTextureScope() const noexcept {
         return virtualTextureScope_;
     }
 
+    // 지금 번역 중인 평가 문맥이다.
     EvaluationContext Context() const noexcept {
         return context_;
     }

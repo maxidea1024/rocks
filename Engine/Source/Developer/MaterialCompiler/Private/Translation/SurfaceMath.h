@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Move.h>
 #include <Core/Result.h>
 #include <MaterialCompiler/MaterialIrOp.h>
 #include <MaterialCompiler/MaterialIrValue.h>
@@ -68,7 +69,7 @@ public:
     // 세 성분의 최대·최소다(UE max3·min3).
     IrValueId Max3(IrValueId value) noexcept;
     IrValueId Min3(IrValueId value) noexcept;
-    // 세 성분 평균이다(UE dot(v, 1/3)).
+    // 세 성분 평균이다(UE dot(v, 0.33) — 무게는 UE 값 그대로).
     IrValueId Average3(IrValueId value) noexcept;
     // x⁵다(UE Pow5).
     IrValueId Pow5(IrValueId value) noexcept;
@@ -94,6 +95,11 @@ public:
 
     // 값이 Bool 상수면 그 값이다.
     bool ConstantBool(IrValueId value, bool& out) const noexcept;
+
+    // 바깥에서 만든 값을 받는다(실패면 첫 실패로 기억하고 NoIrValue).
+    IrValueId Track(Result<IrValueId> value) noexcept {
+        return Check(Move(value));
+    }
 
 private:
     IrValueId Check(Result<IrValueId> value) noexcept;

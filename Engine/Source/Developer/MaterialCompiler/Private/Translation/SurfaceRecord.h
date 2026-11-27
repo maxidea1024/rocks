@@ -123,6 +123,9 @@ struct SurfaceRecord {
     // 물 계수(Scattering·Absorption·PhaseG·ColorScaleBehindWater — MS2d3
     // SingleLayerWaterMaterialOutput 출력)다.
     IrValueId water[4] = {NoIrValue, NoIrValue, NoIrValue, NoIrValue};
+    // VolumetricFogCloud의 AO 핀이 연결되었는가(UE bBSDFWritesAmbientOcclusion — MS2d3
+    // MATERIAL_VOLUMETRIC_ADVANCED_OVERRIDE_AMBIENT_OCCLUSION).
+    bool writesOcclusion = false;
     // 고전 preset의 얇은 투과 입력(TransmittanceColor·ThinTranslucentSurfaceCoverage — slab 변환과
     // MS2d3 ThinTranslucentMaterialOutput 출력)이다.
     IrValueId thinTransmittance = NoIrValue;
