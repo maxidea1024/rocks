@@ -14,6 +14,8 @@
 //   - 조합: 조합 범위를 새 문자열로 바꾸고, 범위와 caret(문자열 안 커서)을 알린다.
 //   - 확정: 조합 범위를 확정 문자열로 바꾸고 caret을 그 뒤에 둔 다음 EndComposition한다.
 //   - 끝: 확정 없이 끝났으면(취소) 조합 범위를 지우고 EndComposition한다.
+//   - TSF 기록(22.13절 — 거울 문서의 편집을 그대로 옮긴다): 조합 시작, 글자 바꿈(조합 중이면
+//     미리보기, 아니면 Begin·SetText·End 확정 하나), 조합 범위, 조합 확정, 선택.
 //
 // 번호는 다시 쓰지 않는다. Activate·Deactivate·Cancel이 남은 기록을 지우므로 큐에 남은 옛 표지는
 // 새 문맥의 기록을 처리하지 않는다.
@@ -45,6 +47,10 @@ public:
     // 그래도 없으면 넘침이다(남은 기록을 모두 버리고 '끝' 하나).
     TextInputRecordResult Record(TextInputRecordKind kind, Span<const char16_t> text,
                                  uint32 cursor) noexcept;
+    // TSF 기록이다(kind는 CompositionBegin·TextReplace·CompositionRange·CompositionCommit·
+    // Selection, 범위는 UTF-16). 글자는 TextReplace만 쓴다. 자리가 없으면 Record와 같다.
+    TextInputRecordResult RecordEdit(TextInputRecordKind kind, uint32 begin, uint32 length,
+                                     Span<const char16_t> text = {}) noexcept;
     // 문자열을 읽을 수 없을 만큼 길다(창 버퍼를 넘음) — Record의 넘침과 같다.
     TextInputRecordResult RecordOverflow() noexcept;
     // serial 이하의 남은 기록을 순서대로 적용한다. 적용한 것이 있으면 true다.
@@ -57,6 +63,9 @@ private:
         uint32 offset;
         uint32 length;
         uint32 cursor;
+        // TSF 기록의 범위다.
+        uint32 rangeBegin;
+        uint32 rangeLength;
     };
 
     bool Fits(usize length) const noexcept;

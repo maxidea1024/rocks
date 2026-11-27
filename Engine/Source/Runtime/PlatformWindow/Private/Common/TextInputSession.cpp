@@ -70,8 +70,9 @@ uint32 TextInputSession::Append(TextInputRecordKind kind, Span<const char16_t> t
         text_[textUsed_ + i] = text[i];
     }
 
-    entries_[count_++] = {serial, kind, static_cast<uint32>(textUsed_),
-                          static_cast<uint32>(text.Size()), cursor};
+    entries_[count_++] = {
+        serial, kind, static_cast<uint32>(textUsed_), static_cast<uint32>(text.Size()), cursor,
+        0,      0};
     textUsed_ += text.Size();
     return serial;
 }
@@ -120,6 +121,18 @@ TextInputRecordResult TextInputSession::Record(TextInputRecordKind kind, Span<co
     }
 
     return {Append(kind, text, cursor), false};
+}
+
+TextInputRecordResult TextInputSession::RecordEdit(TextInputRecordKind kind, uint32 begin,
+                                                   uint32 length,
+                                                   Span<const char16_t> text) noexcept {
+    auto result = Record(kind, text, 0);
+    if (result.serial && !result.overflowed) {
+        entries_[count_ - 1].rangeBegin = begin;
+        entries_[count_ - 1].rangeLength = length;
+    }
+
+    return result;
 }
 
 TextInputRecordResult TextInputSession::RecordOverflow() noexcept {
@@ -191,6 +204,32 @@ void TextInputSession::Apply(const Entry& entry) noexcept {
             composing_ = false;
             client.EndComposition();
         }
+        break;
+    case TextInputRecordKind::CompositionBegin:
+        BeginIfNeeded();
+        break;
+    case TextInputRecordKind::TextReplace:
+        if (composing_) {
+            client.SetText(entry.rangeBegin, entry.rangeLength, text);
+        } else {
+            // 조합 밖 편집은 확정 하나다(이력·변경 알림 한 번 — 자동 고침·이모지 패널).
+            client.BeginComposition();
+            client.SetText(entry.rangeBegin, entry.rangeLength, text);
+            client.EndComposition();
+        }
+        break;
+    case TextInputRecordKind::CompositionRange:
+        BeginIfNeeded();
+        client.UpdateCompositionRange(entry.rangeBegin, entry.rangeLength);
+        break;
+    case TextInputRecordKind::CompositionCommit:
+        if (composing_) {
+            composing_ = false;
+            client.EndComposition();
+        }
+        break;
+    case TextInputRecordKind::Selection:
+        client.SetSelection(entry.rangeBegin, entry.rangeLength);
         break;
     }
 }
