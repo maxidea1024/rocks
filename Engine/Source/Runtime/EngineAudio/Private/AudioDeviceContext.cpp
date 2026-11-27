@@ -103,6 +103,9 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     occlusion_ = batch.occlusion;
     userVolume_ = batch.userVolume;
     ApplySnapshots(batch);
+    // 일시정지 전환을 미룬 Play 재시도 앞에 반영한다(일시정지되는 Deferred는 보내지 않고 놓는다
+    // — 3.44.4절).
+    UpdatePause(batch, now);
     RetryDeferred();
     // 수거를 먼저 한다(3.41.4절 — 이번 묶음에 끝난 voice가 배정의 상한 수에 들어가지 않게).
     CollectStarted(batch);
@@ -275,6 +278,10 @@ AudioControlStats AudioDeviceContext::StatsWithoutStreams() const noexcept {
                 ++stats.activeVoices;
             }
         }
+
+        if (record.state != RecordState::Inactive && record.paused) {
+            ++stats.pausedPlaybacks;
+        }
     }
 
     stats.releasingVoices = static_cast<uint32>(releasing_.Size());
@@ -368,6 +375,11 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     record.optionUiSound = command.isUiSound;
     record.alwaysPlay = command.alwaysPlay || record.categoryValues.alwaysPlay;
     record.isUiSound = command.isUiSound || record.categoryValues.isUiSound;
+    // 일시정지된 scene의 UI 아닌 재생은 시계가 멈춘 채 연다(3.44.2절).
+    record.paused = scenes_[command.scene].paused && !record.isUiSound;
+    record.pauseStartMixFrame = now;
+    record.voicePaused = false;
+    record.cursorUnread = 0;
     record.playbackLowPass = command.lowPassFrequency;
     record.playbackHighPass = command.highPassFrequency;
     record.hasOcclusionInterval = command.hasOcclusionInterval;
@@ -492,13 +504,16 @@ void AudioDeviceContext::ApplySetParameter(const ControlCommand& command, uint64
     // 때문이다(3.35.6절).
     ValueRamp& ramp =
         command.parameter == PlaybackParameter::Volume ? record->volume : record->pitch;
-    ramp.StartFrom(ramp.At(now), command.value, now, command.rampFrames);
+    // 일시정지 중이면 멈춘 시각에서 걸고, 풀린 뒤 진행한다(3.44.3절).
+    const uint64 at = RecordNow(*record, now);
+    ramp.StartFrom(ramp.At(at), command.value, at, command.rampFrames);
     record->paramsDirty = true;
 }
 
 void AudioDeviceContext::ApplySnapshots(const ControlBatch& batch) noexcept {
     for (ControlScene& scene : scenes_) {
         scene.listenerJumped = false;
+        scene.pauseChanged = false;
     }
 
     const double force = static_cast<double>(virtual_.forceUpdateDistance);
@@ -509,6 +524,10 @@ void AudioDeviceContext::ApplySnapshots(const ControlBatch& batch) noexcept {
             // 451–456).
             scene.listenerJumped =
                 (update.position - scene.listenerPosition).LengthSquared() > force * force;
+            // 새 World가 받은 칸은 일시정지 아님에서 연다(3.44.1절).
+            const bool wasPaused = scene.epoch == update.epoch && scene.paused;
+            scene.pauseChanged = scene.pauseChanged || wasPaused != update.paused;
+            scene.paused = update.paused;
             scene.epoch = update.epoch;
             scene.listenerPosition = update.position;
             scene.listenerRotation = update.rotation;
@@ -629,9 +648,11 @@ void AudioDeviceContext::UpdateSpatial(Record& record, uint64 now, bool acceptin
             math::Clamp(record.focus.priority, 0.0f, MaxSoundPriority) * record.priority;
     } else if (attenuation.spatialize || attenuation.enableListenerFocus) {
         const float target = factorNow();
+        // focus 보간은 record 시계다(일시정지 중 멈춤 — 3.44.3절).
+        const uint64 at = RecordNow(record, now);
         if (attenuation.enableFocusInterpolation &&
             (record.focusInitialized || !focusInitializeOnFirstUpdate_)) {
-            const double seconds = static_cast<double>(now - record.focusMixFrame) /
+            const double seconds = static_cast<double>(at - record.focusMixFrame) /
                                    static_cast<double>(mixer_.Config().sampleRate);
             record.focusFactor = InterpolateFocusFactor(
                 record.focusFactor, target, static_cast<float>(seconds),
@@ -641,7 +662,7 @@ void AudioDeviceContext::UpdateSpatial(Record& record, uint64 now, bool acceptin
         }
 
         record.focusInitialized = true;
-        record.focusMixFrame = now;
+        record.focusMixFrame = at;
         record.focus = attenuation.enableListenerFocus
                            ? ComputeFocusScales(attenuation, focus_, record.focusFactor)
                            : FocusScales{};
@@ -696,9 +717,10 @@ void AudioDeviceContext::PublishParams(uint64 now) noexcept {
         }
 
         (void)mixer_.PublishParams(record.voice, ParamsFor(record, now));
-        // 공간 재생과 ramp 중 재생은 묶음마다 다시 낸다.
-        record.paramsDirty = record.spatialized || record.volume.IsRamping(now) ||
-                             record.pitch.IsRamping(now) || record.resume.IsRamping(now) ||
+        // 공간 재생과 ramp 중 재생은 묶음마다 다시 낸다(사용자·resume ramp는 record 시계).
+        const uint64 at = RecordNow(record, now);
+        record.paramsDirty = record.spatialized || record.volume.IsRamping(at) ||
+                             record.pitch.IsRamping(at) || record.resume.IsRamping(at) ||
                              ConcurrencyRamping(record, now);
     }
 }
@@ -716,11 +738,15 @@ void AudioDeviceContext::CollectStarted(ControlBatch& batch) noexcept {
             // 논리 커서는 실제 시작 frame에서 이 voice의 시작 위치로 다시 맞춘다(3.41.1절).
             record.cursor = static_cast<double>(record.voiceStartFrame);
             record.cursorMixFrame = startMixFrame;
+            record.cursorUnread = 0;
             record.cursorRunning = true;
-            // 복귀 fade-in은 실제 시작에서 시작한다(3.41.1절).
+            // 복귀 fade-in은 실제 시작에서 시작한다(3.41.1절). 일시정지 중이면 멈춘 시각에서 걸어
+            // 풀린 뒤 진행한다(3.44.3절).
             if (record.resumePending) {
                 record.resumePending = false;
-                record.resume.StartFrom(0.0f, 1.0f, startMixFrame, ResumeFadeFrames);
+                const uint64 at = RecordNow(record, mixer_.CompletedMixFrame());
+                record.resume.StartFrom(0.0f, 1.0f, startMixFrame < at ? startMixFrame : at,
+                                        ResumeFadeFrames);
                 record.paramsDirty = true;
             }
 
@@ -876,20 +902,23 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
                                                       uint64 frame) const noexcept {
     const SoundPlayable& playable = *record.sound.Get();
     audio::AudioVoiceParams params;
+    // 사용자·차폐·resume ramp와 pitch는 record 시계, steal fader는 mix 시계다(3.44.3절).
+    const uint64 at = RecordNow(record, frame);
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
     const float stereo =
         playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
     params.gain = ClampGain(
-        record.volume.At(frame) * playable.volume * stereo * record.categoryValues.volume *
-        record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(frame) *
-        record.resume.At(frame) * record.concurrencyScale * record.stealFader.At(frame));
+        record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
+        record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(at) *
+        record.resume.At(at) * record.concurrencyScale * record.stealFader.At(frame));
     // LPF는 공기 흡수·차폐·분류·재생 값의 최솟값, HPF는 최댓값이다(UE
     // FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
     params.lowPassCutoffHz =
-        math::Min(math::Min(record.spatial.lowPassHz, OcclusionFilterAt(record, frame)),
+        math::Min(math::Min(record.spatial.lowPassHz, OcclusionFilterAt(record, at)),
                   math::Min(record.categoryValues.lowPassFrequency, record.playbackLowPass));
     params.highPassCutoffHz = math::Max(record.spatial.highPassHz, record.playbackHighPass);
-    params.pitch = EffectivePitch(record, frame);
+    params.pitch = EffectivePitch(record, at);
+    params.paused = record.paused;
     params.panMode = audio::AudioPanMode::Direct;
     if (record.spatial.azimuthPan) {
         params.panMode = audio::AudioPanMode::Azimuth;

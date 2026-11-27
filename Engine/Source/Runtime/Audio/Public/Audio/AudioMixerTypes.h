@@ -40,6 +40,9 @@ inline constexpr float MaxPitch = 2.0f;
 inline constexpr uint32 DefaultStopFadeFrames = 512;
 inline constexpr uint32 DefaultParamRampFrames = 256;
 
+// 장면 일시정지의 fade 길이다(3.44.5절 — 0에서 1까지 전체 길이, 중간에서 바뀌면 남은 비율만큼).
+inline constexpr uint32 PauseFadeFrames = 64;
+
 // 다음 블록 시작에 실행하라는 mixFrame 표지다. 호출자가 RenderBlock 전에 블록 시작 frame으로
 // 바꾼다.
 inline constexpr uint64 ImmediateMixFrame = NumericLimits<uint64>::Max();
@@ -121,6 +124,10 @@ struct AudioVoiceParams {
     AudioOmniMode omniMode = AudioOmniMode::OmniDirectional;
     float lowPassCutoffHz = 20000.0f;
     float highPassCutoffHz = 0.0f;
+    // 장면 일시정지다(3.44.5절). 켜지면 PauseFadeFrames 동안 줄인 뒤 원본을 읽지 않고(출력 0),
+    // 꺼지면 같은 길이로 이어 낸다. 시작 전 voice는 시작을 미룬다. 정지 중 voice는 일시정지되면
+    // 소리 없이 정지 fade만 마친다.
+    bool paused = false;
 };
 
 enum class AudioRtCommandType : uint8 {
@@ -186,6 +193,11 @@ struct AudioVoiceStatus {
     // terminal을 게시한 블록의 끝 frame이다. CompletedMixFrame()이 이 값에 닿아야 voice를 놓을 수
     // 있다.
     uint64 releaseMixFrame = UnsetMixFrame;
+    // 일시정지로 원본을 읽지 않은 누적 mix frame과 그 값이 맞는 frame, 그 frame에 Paused였는지다
+    // (3.44.5절). 이 수명에서 게시한 적이 없으면 unreadAsOfFrame이 UnsetMixFrame이다(누적 0).
+    uint64 unreadFrames = 0;
+    uint64 unreadAsOfFrame = UnsetMixFrame;
+    bool pausedAtAsOf = false;
 };
 
 // CollectFinished가 돌려주는 terminal 기록이다.
@@ -212,6 +224,8 @@ struct AudioMixerCounters {
     // 수다(3.40.1절).
     uint64 streamStarvedFrames = 0;
     uint64 streamStartDelayFrames = 0;
+    // 지금 일시정지로 원본을 읽지 않는(Paused·시작 미룸) voice 수다(누적이 아닌 현재값 — 3.44.5절).
+    uint64 pausedVoices = 0;
 };
 
 // 마스터 limiter 기본 프리셋이다(3.22.7절): −1 dBFS, 지연 0, 즉시 어택, 100 ms 릴리스.
