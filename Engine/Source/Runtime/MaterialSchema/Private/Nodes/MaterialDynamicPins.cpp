@@ -6,6 +6,7 @@
 #include <Core/Text/String.h>
 #include <MaterialSchema/MaterialAssetReference.generated.h>
 #include <MaterialSchema/MaterialAttributeTable.h>
+#include <MaterialSchema/MaterialGuidPinKey.h>
 #include <MaterialSchema/Nodes/Custom/CustomHlslProperties.generated.h>
 #include <MaterialSchema/Nodes/Custom/CustomHlslProperties.h>
 #include <MaterialSchema/Nodes/Custom/CustomInput.generated.h>
@@ -48,19 +49,10 @@ using nodegraph::DynamicPinsInput;
 using nodegraph::PinDescriptor;
 using nodegraph::PinList;
 
-// 색인 키 버퍼 길이다("Output" + uint32 10진 10자리, 또는 "P_" + 32자 hex).
+// 색인 키 버퍼 길이다("Output" + uint32 10진 10자리).
 constexpr usize KeyBufferBytes = 40;
 // 색인 키의 진법이다.
 constexpr usize DecimalBase = 10;
-// Guid 하나의 16진 자릿수다.
-constexpr usize GuidHexDigits = 32;
-// 16진 한 자리의 bit 수와 mask다.
-constexpr int HexDigitBits = 4;
-constexpr uint64 HexDigitMask = 0xF;
-// byte 하나의 bit 수다.
-constexpr int BitsPerByte = 8;
-// Guid 반쪽(uint64)의 16진 자릿수다.
-constexpr int HalfHexDigits = static_cast<int>(sizeof(uint64)) * BitsPerByte / HexDigitBits;
 // 같은 이름의 입력이 있는 출력 키에 붙이는 접미사다(19.13.3절 키 충돌 규칙).
 constexpr StringView OutputKeySuffix = "Out";
 // 문자로 이름을 붙이는 Operator 입력 수다(A–Z, UE GetInputName).
@@ -107,24 +99,9 @@ Result<Name> IndexedKey(NamePool& names, StringView prefix, usize index) noexcep
     return names.TryIntern(IndexedText(buffer, prefix, index));
 }
 
-// prefix 뒤에 Guid 32자 hex(high, low 순 — 소문자)를 붙인 키다("P_…", NodeGraph GD2).
+// prefix 뒤에 Guid 32자 hex를 붙인 키다("P_…", NodeGraph GD2 — 공용 MaterialGuidPinKey).
 Result<Name> GuidKey(NamePool& names, StringView prefix, Guid id) noexcept {
-    constexpr char hex[] = "0123456789abcdef";
-    char buffer[KeyBufferBytes];
-    usize length = 0;
-    for (; length < prefix.ByteCount(); ++length) {
-        buffer[length] = prefix.Data()[length];
-    }
-
-    const uint64 halves[] = {id.high, id.low};
-    for (uint64 half : halves) {
-        for (int digit = HalfHexDigits - 1; digit >= 0; --digit) {
-            buffer[length++] = hex[(half >> (digit * HexDigitBits)) & HexDigitMask];
-        }
-    }
-
-    static_assert(sizeof("P_") - 1 + GuidHexDigits <= KeyBufferBytes, "key buffer too small");
-    return names.TryIntern(StringView(buffer, length));
+    return MaterialGuidPinKey(names, prefix, id);
 }
 
 // 동적 입력 핀이다(값 편집 숨김 — 연결이 없을 때의 값은 속성이 준다).

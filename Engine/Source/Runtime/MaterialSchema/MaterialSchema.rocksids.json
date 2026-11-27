@@ -122,6 +122,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::AntialiasedTextureMaskProperties::shared",
+      "id": "0a9640eeb88d487282f60289dfbb97e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::AntialiasedTextureMaskProperties::sortPriority",
       "id": "809b568480ab4508abc9b0e44c95e8d6",
       "aliases": [],
@@ -257,6 +264,13 @@
       "kind": "field",
       "name": "rocks::material::ChannelMaskParameterProperties::primitiveDataIndex",
       "id": "9f42bd99203548a2ae5bcf5f612b5292",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::ChannelMaskParameterProperties::shared",
+      "id": "7f485796ee294a3fbd30b1f942fd91c0",
       "aliases": [],
       "retired": false
     },
@@ -535,6 +549,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::CurveAtlasRowParameterProperties::shared",
+      "id": "1497faa65c3f439b9fdc7044752a1c5f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::CurveAtlasRowParameterProperties::sliderMax",
       "id": "e7f15d6ad5104d238e5e0379bbf54e82",
       "aliases": [],
@@ -780,6 +801,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::DoubleVectorParameterProperties::shared",
+      "id": "95ca939672fa46399c0e9b3c5e53d939",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::DoubleVectorParameterProperties::sortPriority",
       "id": "838dd20821ea4a17a7897403d64d913b",
       "aliases": [],
@@ -922,6 +950,13 @@
       "kind": "field",
       "name": "rocks::material::FontSampleParameterProperties::parameterName",
       "id": "22455883fd564c7786b1b36eb2b8b1bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::FontSampleParameterProperties::shared",
+      "id": "5a3f0b18316443bdb5e277e80a1c89d4",
       "aliases": [],
       "retired": false
     },
@@ -2656,6 +2691,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::shared",
+      "id": "d1f229b0e63545d8985f7ed003bc7129",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::RuntimeVirtualTextureSampleParameterProperties::singlePhysicalSpace",
       "id": "c22324d876a94faabc685f0151752859",
       "aliases": [],
@@ -2901,6 +2943,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::ScalarParameterProperties::shared",
+      "id": "ae9b39abc18d4828890615c877d4e446",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::ScalarParameterProperties::sliderMax",
       "id": "f35263e556b34f348c08e68f70a10ec5",
       "aliases": [],
@@ -3055,6 +3104,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::shared",
+      "id": "c1caef8ae93647df8cc6d9f1ef181150",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::SparseVolumeTextureObjectParameterProperties::sortPriority",
       "id": "208862eccadb43638320891d50743e2e",
       "aliases": [],
@@ -3113,6 +3169,13 @@
       "kind": "field",
       "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::samplerSource",
       "id": "30186b05c0064facb64a81f89766f7f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::SparseVolumeTextureSampleParameterProperties::shared",
+      "id": "31971870a5864e85abb47de6102ee6b8",
       "aliases": [],
       "retired": false
     },
@@ -3223,6 +3286,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::StaticBoolParameterProperties::shared",
+      "id": "d3591207922441ae8c2ef9aab36a4fa5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::StaticBoolParameterProperties::sortPriority",
       "id": "4999a98d2bb24d96a173f915bb006a3c",
       "aliases": [],
@@ -3321,6 +3391,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::StaticComponentMaskParameterProperties::shared",
+      "id": "7f97aee9e87047d3af105376e8c65f83",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::StaticComponentMaskParameterProperties::sortPriority",
       "id": "24bb4c420419407a92bee35821f046f6",
       "aliases": [],
@@ -3379,6 +3456,13 @@
       "kind": "field",
       "name": "rocks::material::StaticSwitchParameterProperties::parameterName",
       "id": "535df57f9d4544e7985438a987372cf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::StaticSwitchParameterProperties::shared",
+      "id": "03a4aafb335040ec8b773e06f9f5997d",
       "aliases": [],
       "retired": false
     },
@@ -3545,6 +3629,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::TextureCollectionParameterProperties::shared",
+      "id": "da06713945ec4d4685e3281f06ce1923",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::TextureCollectionParameterProperties::sortPriority",
       "id": "15a3ebed2c834a3dab10c50bbd00820d",
       "aliases": [],
@@ -3645,6 +3736,13 @@
       "kind": "field",
       "name": "rocks::material::TextureObjectParameterProperties::samplerType",
       "id": "125b0fe6db32452496b9162d687a48c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureObjectParameterProperties::shared",
+      "id": "8748a6dbbf4448b48e5c1e2cc201e9d0",
       "aliases": [],
       "retired": false
     },
@@ -3776,6 +3874,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DArrayProperties::shared",
+      "id": "556e4384e41c4fcbb7f1654ec50f0148",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::TextureSampleParameter2DArrayProperties::sortPriority",
       "id": "114210b5db8e4db2a92447720f52806c",
       "aliases": [],
@@ -3869,6 +3974,13 @@
       "kind": "field",
       "name": "rocks::material::TextureSampleParameter2DProperties::samplerType",
       "id": "07e3d07562f74524a64d37fe169e172a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameter2DProperties::shared",
+      "id": "e562efa3e61b4ce3a6cae2d30a31056d",
       "aliases": [],
       "retired": false
     },
@@ -3972,6 +4084,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeArrayProperties::shared",
+      "id": "4a402c727bc84292bfc0ca7b64abd6c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::TextureSampleParameterCubeArrayProperties::sortPriority",
       "id": "2dcb1a4b7c6040f481701a305c636649",
       "aliases": [],
@@ -4065,6 +4184,13 @@
       "kind": "field",
       "name": "rocks::material::TextureSampleParameterCubeProperties::samplerType",
       "id": "081fa5dbf4c9426d926fcc8e7cf8edf9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterCubeProperties::shared",
+      "id": "75a1e0c71f2c41d8b7b56d61e5448806",
       "aliases": [],
       "retired": false
     },
@@ -4175,6 +4301,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::TextureSampleParameterSubUvProperties::shared",
+      "id": "f9ba6643291540fd871173ea15ea2ff9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::TextureSampleParameterSubUvProperties::sortPriority",
       "id": "9510b3abf1a242c99bd999705d56b58d",
       "aliases": [],
@@ -4268,6 +4401,13 @@
       "kind": "field",
       "name": "rocks::material::TextureSampleParameterVolumeProperties::samplerType",
       "id": "8e31d58cf1cb4afea44662eadde94b28",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::TextureSampleParameterVolumeProperties::shared",
+      "id": "bda629769dbd4db1907e2f17fcc5c9b2",
       "aliases": [],
       "retired": false
     },
@@ -4562,6 +4702,13 @@
       "kind": "field",
       "name": "rocks::material::VectorParameterProperties::primitiveDataIndex",
       "id": "25a70619ff9a4b4ba8090afc1abd12d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::VectorParameterProperties::shared",
+      "id": "8cf81080ac634075ac77ade3f9ce0f25",
       "aliases": [],
       "retired": false
     },

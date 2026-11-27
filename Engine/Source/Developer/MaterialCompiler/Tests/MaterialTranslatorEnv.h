@@ -65,11 +65,19 @@ struct TranslatorEnv {
           namesReady(names.Initialize().IsOk()),
           objects(allocator, types, TranslatorRegistryContext, Options()),
           registry(allocator, names), catalog(allocator),
-          schema(MaterialGraphKind::Material, catalog, names, allocator) {
+          schema(MaterialGraphKind::Material, catalog, names, allocator),
+          functionSchema(MaterialGraphKind::Function, catalog, names, allocator) {
+        // 함수 그래프 전용 노드(FunctionInput·FunctionOutput — 6.12절 MS2e2)도 카탈로그에
+        // 넣는다(엔진은 두 도메인을 모두 등록한다).
         ready = namesReady && RegisterMaterialSchemaTypes(modules).IsOk() &&
-                registry.Initialize().IsOk() && schema.Ready() &&
+                registry.Initialize().IsOk() && schema.Ready() && functionSchema.Ready() &&
                 registry.RegisterSchema(schema, ModuleLease()).IsOk() &&
+                registry.RegisterSchema(functionSchema, ModuleLease()).IsOk() &&
                 catalog.RegisterGroups(registry, schema, BuiltinMaterialNodeGroups(), ModuleLease())
+                    .IsOk() &&
+                catalog
+                    .RegisterGroups(registry, functionSchema, BuiltinMaterialNodeGroups(),
+                                    ModuleLease())
                     .IsOk();
     }
 
@@ -110,6 +118,7 @@ struct TranslatorEnv {
     nodegraph::NodeTypeRegistry registry;
     MaterialNodeCatalog catalog;
     MaterialGraphSchema schema;
+    MaterialGraphSchema functionSchema;
     bool ready = false;
 };
 

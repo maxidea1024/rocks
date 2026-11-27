@@ -46,6 +46,9 @@ constexpr StringView CustomizedUvPins[] = {"CustomizedUv0", "CustomizedUv1", "Cu
                                            "CustomizedUv3", "CustomizedUv4", "CustomizedUv5",
                                            "CustomizedUv6", "CustomizedUv7"};
 
+// 노드 종류 이름의 머티리얼 접두다(진단의 "(Node <짧은 이름>)" — 6.12절 MS2e2).
+constexpr StringView MaterialNodeTypePrefix = "Material.";
+
 // 보간 벡터(float4) 상한이다(6.9절 MS2b4a — V9 보간 예산, TEXCOORDn n ≤ 15).
 constexpr uint32 MaxInterpolantVectors = 16;
 // 보간 벡터 하나의 성분 수다.
@@ -132,14 +135,16 @@ bool IsOutputActive(StringView pin, const MaterialTraitsDesc& traits) noexcept {
 
 Translator::Translator(Allocator& allocator, const MaterialTranslationInput& input,
                        MaterialTranslation& out) noexcept
-    : allocator_(allocator), input_(input), out_(out), builder_(allocator), nodes_(allocator),
-      edges_(allocator), outputsVertex_(allocator), outputsPrevious_(allocator),
-      outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
-      statesPixel_(allocator), outputsVirtualTexture_(allocator), statesVirtualTexture_(allocator),
-      lowerings_(allocator), lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator),
-      cutInputs_(allocator), results_(allocator), collections_(allocator), samplers_(allocator),
-      deferred_(allocator), surfaces_(allocator), attributeEntries_(allocator),
-      attributeRanges_(allocator), attributeOutputs_(allocator), defines_(allocator) {
+    : allocator_(allocator), input_(input), out_(out), builder_(allocator), expanded_(allocator),
+      origins_(allocator), calls_(allocator), callOutputs_(allocator), functionInputs_(allocator),
+      snapshots_(allocator), nodes_(allocator), edges_(allocator), outputsVertex_(allocator),
+      outputsPrevious_(allocator), outputsPixel_(allocator), statesVertex_(allocator),
+      statesPrevious_(allocator), statesPixel_(allocator), outputsVirtualTexture_(allocator),
+      statesVirtualTexture_(allocator), lowerings_(allocator), lazyNodes_(allocator),
+      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
+      collections_(allocator), samplers_(allocator), deferred_(allocator), surfaces_(allocator),
+      attributeEntries_(allocator), attributeRanges_(allocator), attributeOutputs_(allocator),
+      defines_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -323,6 +328,76 @@ LoweringFn Translator::FindLowering(Name type) const noexcept {
 Result<void> Translator::Report(nodegraph::GraphDiagnosticSeverity severity,
                                 MaterialDiagnosticCode code, Guid node, Name pin,
                                 StringView message) noexcept {
+    if (!origins_.Contains(node)) {
+        return ReportAt(severity, code, node, pin, message);
+    }
+
+    // 펼친 사본의 진단은 주 그래프의 가장 바깥 호출 노드 위치에 내고 호출 경로와 노드 종류를 문구
+    // 앞에 붙인다(6.12절 MS2e2 — UE HLSLMaterialTranslator.cpp:4392–4437).
+    SystemAllocator scratch;
+    Array<uint32> chain(scratch);
+    Guid outer = node;
+    for (const ExpandedOrigin* origin = origins_.Find(outer); origin != nullptr;
+         origin = origins_.Find(outer)) {
+        if (auto added = chain.TryPushBack(origin->snapshot); !added) {
+            return added;
+        }
+
+        outer = origin->call;
+    }
+
+    String text(scratch);
+    Result<void> built = text.TryAssign("(Function ");
+    for (usize at = chain.Size(); built && at > 0; --at) {
+        built = text.TryAppend(snapshots_[chain[at - 1]]->name);
+        if (built && at > 1) {
+            built = text.TryAppend("|");
+        }
+    }
+
+    if (built) {
+        built = text.TryAppend(") ");
+    }
+
+    const nodegraph::GraphNode* located = FindNode(node);
+    if (built && located != nullptr && !(located->type == functionCallType_) &&
+        !(located->type == functionInputType_) && !(located->type == functionOutputType_)) {
+        auto type = input_.names.Acquire(located->type);
+        if (!type) {
+            return Result<void>::Failure(type.Error());
+        }
+
+        // 종류 짧은 이름이다(UE 클래스 이름에서 "MaterialExpression"을 뗀 것 — Rocks는
+        // "Material.").
+        StringView shortName = type.Value().View();
+        if (shortName.StartsWith(MaterialNodeTypePrefix, StringComparison::CaseSensitive)) {
+            auto rest =
+                shortName.TryRightBytes(shortName.ByteCount() - MaterialNodeTypePrefix.ByteCount());
+            shortName = rest ? rest.Value() : shortName;
+        }
+
+        const StringView parts[] = {"(Node ", shortName, ") "};
+        for (StringView part : parts) {
+            if (built) {
+                built = text.TryAppend(part);
+            }
+        }
+    }
+
+    if (built) {
+        built = text.TryAppend(message);
+    }
+
+    if (!built) {
+        return built;
+    }
+
+    return ReportAt(severity, code, outer, Name(), text.View());
+}
+
+Result<void> Translator::ReportAt(nodegraph::GraphDiagnosticSeverity severity,
+                                  MaterialDiagnosticCode code, Guid node, Name pin,
+                                  StringView message) noexcept {
     if (severity == nodegraph::GraphDiagnosticSeverity::Error) {
         failed_ = true;
         ++errorCount_;
@@ -416,7 +491,7 @@ Result<void> Translator::BuildIndex() noexcept {
         TextureLowerings(),       SceneLowerings(),
         SurfaceLowerings(),       SurfaceOperatorLowerings(),
         SurfaceHelperLowerings(), OutputInputLowerings(),
-        AttributeLowerings()};
+        AttributeLowerings(),     FunctionLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -478,6 +553,13 @@ Result<IrValueId> Translator::LowerConnection(const nodegraph::GraphNode& consum
     if (source == nullptr) {
         // 끊긴 간선은 문서 검증(GI2)이 막는다. 연결이 없는 것처럼 다룬다.
         return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    if (source->enableState != nodegraph::NodeEnableState::Disabled &&
+        calls_.Contains(source->id)) {
+        // 펼친 호출 노드는 번역하지 않고 그 출력 사본의 입력으로 넘어간다(6.12절 MS2e2 — 쓰는
+        // 출력만 번역한다, UE도 출력마다 compile한다).
+        return LowerCallOutput(*source, edge.fromPin, connected);
     }
 
     if (source->enableState == nodegraph::NodeEnableState::Disabled) {
@@ -703,10 +785,22 @@ Result<void> Translator::CollectDependencies(usize node, Array<Dependency>& out)
             }
         }
 
-        if (const usize* source = nodes_.Find(edge.fromNode)) {
+        if (const usize* source = ResolveSource(edge)) {
             if (auto added = out.TryPushBack(Dependency{*source, PinKey{edge.toNode, edge.toPin}});
                 !added) {
                 return added;
+            }
+        }
+    }
+
+    // FunctionInput 사본은 호출 노드 입력을 읽는다(간선이 없는 의존 — 6.12절 MS2e2). 끊는 키는 그
+    // 호출 노드 입력이다(LowerConnection이 본다).
+    if (const PinKey* binding = functionInputs_.Find(consumer.id)) {
+        if (const usize* edgeIndex = edges_.Find(*binding)) {
+            if (const usize* source = ResolveSource(graph_->edges[*edgeIndex])) {
+                if (auto added = out.TryPushBack(Dependency{*source, *binding}); !added) {
+                    return added;
+                }
             }
         }
     }
@@ -765,7 +859,7 @@ Result<void> Translator::RootStarts(const nodegraph::GraphNode& output, Span<con
             continue;
         }
 
-        if (const usize* source = nodes_.Find(edge.fromNode)) {
+        if (const usize* source = ResolveSource(edge)) {
             if (auto added = starts.TryPushBack(*source); !added) {
                 return added;
             }
@@ -896,9 +990,12 @@ Result<void> Translator::PlanOrder(Span<const usize> starts, Array<usize>& order
 
 Result<void> Translator::CheckParameterNames() noexcept {
     // V8(6.8절): 파라미터 표지 노드의 parameterName이 대소문자 무시로 같고 종류가 다르면 오류다.
+    // scope별이다(6.12절 MS2e2): 주 그래프와 "공유" 파라미터는 전역 scope(Guid{}) 하나, 공유가 아닌
+    // 사본 파라미터는 그 호출 노드 scope다.
     struct Seen {
         StringView name;
         Name type;
+        Guid scope;
     };
 
     SystemAllocator scratch;
@@ -922,8 +1019,19 @@ Result<void> Translator::CheckParameterNames() noexcept {
             continue;
         }
 
+        Guid scope;
+        if (const ExpandedOrigin* origin = origins_.Find(node.id)) {
+            auto shared = reader.Value().ReadBool("shared", false);
+            if (!shared && shared.Error() == ErrorCode::OutOfMemory) {
+                return Result<void>::Failure(shared.Error());
+            }
+
+            scope = shared && shared.Value() ? Guid{} : origin->call;
+        }
+
         for (const Seen& earlier : seen) {
-            if (NameTextEquals(earlier.name, name.Value()) && !(earlier.type == node.type)) {
+            if (earlier.scope == scope && NameTextEquals(earlier.name, name.Value()) &&
+                !(earlier.type == node.type)) {
                 if (auto reported =
                         Report(nodegraph::GraphDiagnosticSeverity::Error,
                                MaterialDiagnosticCode::ParameterConflict, node.id, Name(),
@@ -936,7 +1044,7 @@ Result<void> Translator::CheckParameterNames() noexcept {
             }
         }
 
-        if (auto added = seen.TryPushBack(Seen{name.Value(), node.type}); !added) {
+        if (auto added = seen.TryPushBack(Seen{name.Value(), node.type, scope}); !added) {
             return added;
         }
     }
@@ -1684,6 +1792,7 @@ Result<void> Translator::Run() noexcept {
     out_.userSceneTextures.Clear();
     out_.customOutputs.Clear();
     out_.virtualTextureOutputMask = 0;
+    out_.dependencies.Clear();
     out_.succeeded = false;
     out_.consultedTarget = NoMaterialTargetFields;
     auto domain = input_.names.TryFind(MaterialDomainName);
@@ -1701,6 +1810,10 @@ Result<void> Translator::Run() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (auto expanded = ExpandFunctions(); !expanded) {
+        return expanded;
+    }
+
     if (auto indexed = BuildIndex(); !indexed) {
         return indexed;
     }
@@ -1708,8 +1821,9 @@ Result<void> Translator::Run() noexcept {
     auto outputType = input_.names.TryFind(MaterialOutputNodeTypeName);
     const nodegraph::GraphNode* output = nullptr;
     if (outputType) {
+        // MaterialSample 사본의 출력 노드는 이 머티리얼의 출력이 아니다(6.12절 MS2e2).
         for (const nodegraph::GraphNode& node : graph_->nodes) {
-            if (node.type == outputType.Value()) {
+            if (node.type == outputType.Value() && !origins_.Contains(node.id)) {
                 output = &node;
                 break;
             }

@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 30(초안) | 2026-11-27 | 6.12절 MS2e2 구현 세부: 호출 노드는 번역하지 않고 출력 사본 입력으로 넘어감(쓰지 않는 출력·호출은 번역·진단 안 함), FunctionInput 계획 의존·끊는 키, 사본 id hash byte 순서, 공용 `MaterialGuidPinKey`, 간선 상한 V9, 입력 형 맞춤(LWC 유지·불투명 형 문구), MaterialSample 문구, 진단 접두 짧은 이름 |
 | 29(초안) | 2026-11-27 | 6.12절 MS2e 구현 세부(새 파일 06-IR/FunctionsAttributes): 세 묶음(속성 집합·함수·레이어), 속성 집합 IR `AttributesRef`·설정 안 된 칸·쓰는 곳 기본값, UE 기본 custom 속성 9개, Make/Break/Get/Set/BlendAttributes·Blend·Aggregate 규칙, 칸별 실행 중 선택, `useMaterialAttributes` 경로, SurfaceFromAttributes 값 원천, provider snapshot·펼친 그래프(사본 id = 호출 경로 hash)·FunctionInput·오류 문구·재귀 V3·진단 접두, 파라미터 scope 정체·`shared` 표시, MaterialSample, 의존 목록, 레이어 펼치기·V14·LayerStack·용도 검사. 19.4.2절 컬렉션은 값 목록, SurfaceFromAttributes 단계 MS2e |
 | 28(초안) | 2026-11-27 | MS2d 리뷰 반영(6.11절): slab 내보내기는 haze → F90 순, VolumetricFogCloud Extinction은 saturate하지 않음, Eye IrisPlaneNormal은 TangentOutput 출력, Wrap opacity 1 − abs(위상), Profile 문턱 미만은 DefaultLit, IsThin은 반투명일 때만 ThinTranslucent, TmpMFP는 계산 공간 뒤, Add에는 SSS 정리 규칙 없음, 평균 무게 0.33, 고전 변환 thin 없음·AlphaComposite opacity 1, foliage 기본값은 집합 기준, ThinFilm 노멀 정규화, RVT 속성 마스크·중복 진단 거름, Volume 정의는 Volume 영역만·AO 연결 기준 |
 | 27(초안) | 2026-11-27 | 6.11절 MS2d3 구현 세부: custom 출력 표(14종 — 이름·출력 수·기본값·빈도), 정점 진입점 둘(9·10), 하나만 규칙, MaterialCache 늦은 진단, RVT 범위 캐시, 표면이 주는 출력(노드 우선), 존재·속성 정의(IrDefine), 생성 함수 이름, 순환 검사 뿌리, 신경망 입출력·문맥 값, 입력 노드 |

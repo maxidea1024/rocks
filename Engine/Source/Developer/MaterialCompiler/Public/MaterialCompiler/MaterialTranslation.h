@@ -6,6 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrModule.h>
 #include <MaterialCompiler/MaterialTargetField.h>
+#include <MaterialCompiler/MaterialTranslationDependency.h>
 #include <NodeGraph/GraphDiagnostic.h>
 
 // 머티리얼 그래프 번역의 결과다(Docs/Design/MaterialSystem 6.8절). 오류 진단이 하나라도 있으면
@@ -17,7 +18,7 @@ namespace rocks::material {
 struct MaterialTranslation {
     explicit MaterialTranslation(Allocator& allocator) noexcept
         : module(allocator), diagnostics(allocator), userSceneTextures(allocator),
-          customOutputs(allocator) {
+          customOutputs(allocator), dependencies(allocator) {
     }
 
     MaterialTranslation(const MaterialTranslation&) = delete;
@@ -39,6 +40,8 @@ struct MaterialTranslation {
     // ERuntimeVirtualTextureAttributeType 순서 BaseColor 0·Normal 1·Roughness 2·Specular 3·Mask 4·
     // Mask4 5·WorldHeight 6·Displacement 7, 6.11절 MS2d3). 0이면 RVT 출력이 없다.
     uint8 virtualTextureOutputMask = 0;
+    // 번역이 읽은 snapshot이다(6.12절 MS2e2 — 처음 읽은 순, 중복 없음).
+    Array<MaterialTranslationDependency> dependencies;
     bool succeeded = false;
 };
 

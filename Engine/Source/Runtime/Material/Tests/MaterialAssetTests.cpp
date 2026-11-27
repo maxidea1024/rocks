@@ -17,6 +17,11 @@
 #include <Material/MaterialPrerequisiteCheck.h>
 #include <Material/ParameterCollection.generated.h>
 #include <Material/ParameterCollection.h>
+#include <MaterialSchema/Nodes/Functions/FunctionCallProperties.generated.h>
+#include <MaterialSchema/Nodes/Functions/FunctionCallProperties.h>
+#include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.generated.h>
+#include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.h>
+#include <ObjectSerialization/StructRecord.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <Texture/Texture.h>
@@ -619,7 +624,11 @@ TEST(Material_FunctionReferencesAreEditorOnlyAndBuild) {
     Array<AssetTypeHookRegistration> registrations(env.allocator);
     REQUIRE(RegisterMaterialAssetHooks(table, registrations));
     CHECK(RegisterMaterialAssetHooks(table, registrations).Error() == ErrorCode::AlreadyExists);
+#if ROCKS_WITH_EDITOR_DATA
+    CHECK(registrations.Size() == 4);
+#else
     CHECK(registrations.Size() == 2);
+#endif
 
     AssetDependencySink instanceSink(env.allocator);
     REQUIRE(table.CollectBuildDependencies(source, access, instance, TypeOf<MaterialInstance>(),
@@ -646,6 +655,99 @@ TEST(Material_FunctionReferencesAreEditorOnlyAndBuild) {
 #endif
     registrations.Clear();
 }
+
+#if ROCKS_WITH_EDITOR_DATA
+// 그래프 노드 하나를 붙인다(속성은 리플렉션 Record).
+template <class Properties>
+bool AddGraphNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid id,
+                  StringView type, const Properties& properties) noexcept {
+    ObjectRegistry& source = *env.source;
+    auto lease = env.types.AcquireValueType(GeneratedType<Properties>::Id(), TypeKind::Struct);
+    if (!lease) {
+        return false;
+    }
+
+    auto saved =
+        SaveStructRecord(env.allocator, source, source.OwnerAccess(), lease.Value(), &properties);
+    auto name = source.Names()->TryIntern(type);
+    if (!saved || !name) {
+        return false;
+    }
+
+    if (document.graphs.IsEmpty()) {
+        nodegraph::Graph main(source.ObjectAllocator());
+        main.id = Guid{0x10, 1};
+        document.mainGraph = main.id;
+        if (!document.graphs.TryPushBack(Move(main))) {
+            return false;
+        }
+    }
+
+    nodegraph::GraphNode node(source.ObjectAllocator());
+    node.id = id;
+    node.type = name.Value();
+    node.typeSchemaVersion = 1;
+    return node.properties.bytes.TryAppend(saved.Value().View()).IsOk() &&
+           document.graphs[0].nodes.TryPushBack(Move(node)).IsOk();
+}
+
+// 그래프 안 FunctionCall·MaterialSample 참조는 Build 의존이다(6.12절 MS2e2 — 자기·null 참조는
+// 뺀다).
+TEST(Material_GraphReferencesAreBuildDependencies) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    RootRef<Package> materialPackage;
+    const ObjectHandle material = MakeAsset<Material>(env, 0x6a0, materialPackage);
+    RootRef<Package> functionPackage;
+    const ObjectHandle function = MakeAsset<MaterialFunction>(env, 0x6a1, functionPackage);
+    REQUIRE(!material.IsNull() && !function.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        material::FunctionCallProperties call(source.ObjectAllocator());
+        call.materialFunction.assetId = asset_test::FixedId(0x6a1);
+        material::MaterialSampleProperties sample;
+        sample.materialReference.assetId = asset_test::FixedId(0x6a2);
+        material::MaterialSampleProperties self;
+        self.materialReference.assetId = asset_test::FixedId(0x6a0);
+        material::FunctionCallProperties empty(source.ObjectAllocator());
+        value.graph.domain = source.Names()->TryIntern("Material").Value();
+        return AddGraphNode(env, value.graph, Guid{0x20, 1}, "Material.FunctionCall", call) &&
+               AddGraphNode(env, value.graph, Guid{0x20, 2}, "Material.MaterialSample", sample) &&
+               AddGraphNode(env, value.graph, Guid{0x20, 3}, "Material.MaterialSample", self) &&
+               AddGraphNode(env, value.graph, Guid{0x20, 4}, "Material.FunctionCall", empty);
+    }));
+    REQUIRE(asset_test::WithBorrow<MaterialFunction>(
+        source, function, [&](MaterialFunction& value) noexcept {
+            material::FunctionCallProperties call(source.ObjectAllocator());
+            call.materialFunction.assetId = asset_test::FixedId(0x6a3);
+            value.graph.domain = source.Names()->TryIntern("MaterialFunction").Value();
+            return AddGraphNode(env, value.graph, Guid{0x30, 1}, "Material.FunctionCall", call);
+        }));
+
+    AssetTypeHookTable table(env.allocator, env.types);
+    Array<AssetTypeHookRegistration> registrations(env.allocator);
+    REQUIRE(RegisterMaterialAssetHooks(table, registrations));
+    AssetDependencySink materialSink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, material, TypeOf<Material>(),
+                                           asset_test::FixedId(0x6a0), materialSink));
+    REQUIRE(materialSink.Dependencies().Size() == 2);
+    CHECK(materialSink.Dependencies()[0].asset == asset_test::FixedId(0x6a1));
+    CHECK(materialSink.Dependencies()[1].asset == asset_test::FixedId(0x6a2));
+    for (const PackageDependencyEntry& entry : materialSink.Dependencies()) {
+        CHECK(entry.kind == PackageDependencyKind::Build);
+    }
+
+    AssetDependencySink functionSink(env.allocator);
+    REQUIRE(table.CollectBuildDependencies(source, access, function, TypeOf<MaterialFunction>(),
+                                           asset_test::FixedId(0x6a1), functionSink));
+    REQUIRE(functionSink.Dependencies().Size() == 1);
+    CHECK(functionSink.Dependencies()[0].asset == asset_test::FixedId(0x6a3));
+    registrations.Clear();
+}
+#endif
 
 // 함수·컬렉션 왕복: EditorOnly 필드·쓰임·상속 칸이 남고 재저장 byte가 같다.
 TEST(Material_FunctionAndCollectionRoundTrip) {

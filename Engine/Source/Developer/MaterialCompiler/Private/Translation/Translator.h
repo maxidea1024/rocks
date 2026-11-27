@@ -58,6 +58,13 @@ inline constexpr usize MaxUserSceneTextures = 5;
 // 첫 UserSceneTexture의 scene texture id다(UE PPI_UserSceneTexture0 — MaterialSceneTextureId.h:80).
 inline constexpr uint32 MaterialUserSceneTextureFirstId = 32;
 
+// 함수·MaterialSample을 펼친 그래프의 노드 수 상한이다(6.12절 MS2e2 — 넘으면 V9). 간선은
+// nodegraph::MaxGraphEdges까지다.
+inline constexpr usize MaxExpandedMaterialNodes = 65536;
+
+// 함수 호출 깊이 상한이다(주 그래프 호출이 1 — 넘으면 V9).
+inline constexpr uint32 MaxFunctionCallDepth = 64;
+
 class Translator {
 public:
     Translator(Allocator& allocator, const MaterialTranslationInput& input,
@@ -175,6 +182,18 @@ public:
     // 종류 이름의 lowering 함수다. 없으면 nullptr이다.
     LoweringFn FindLowering(Name type) const noexcept;
 
+    // 펼친 FunctionInput 사본이 읽는 호출 노드 입력(call, pin = P_<입력 id>)이다(6.12절 MS2e2).
+    // 사본이 아니면 false다.
+    bool FunctionInputBinding(Guid node, Guid& call, Name& pin) const noexcept;
+
+    // 파라미터 노드의 IR 정체 Guid다(6.12절 MS2e2 파라미터 scope): 주 그래프 노드는 parameterId
+    // 그대로, 사본은 shared면 Hash(소유 에셋, parameterId), 아니면 Hash(소유 에셋, parameterId,
+    // 호출 노드)다.
+    Guid ParameterIdentity(Guid node, Guid parameterId, bool shared) const noexcept;
+
+    // MaterialSample로 펼친 사본(그 안의 함수 사본 포함)인가(custom 출력 제외 — 6.12절 MS2e2).
+    bool IsSampledCopy(Guid node) const noexcept;
+
 private:
     struct PinKey {
         Guid node;
@@ -207,6 +226,22 @@ private:
         PinKey input;
     };
 
+    // 함수 호출·MaterialSample을 펼친 그래프를 만든다(6.12절 MS2e2 — BuildIndex 전, 펼칠 노드가
+    // 없으면 주 그래프 그대로).
+    Result<void> ExpandFunctions() noexcept;
+    // index 노드(FunctionCall·MaterialSample) 하나를 펼친다(사본은 expanded_ 끝에 붙는다).
+    Result<void> ExpandCall(usize index, bool sample) noexcept;
+    // edge의 출발 노드다. 펼친 호출 노드면 그 출력 사본 입력의 출발 노드로 넘어간다(없으면
+    // nullptr).
+    const usize* ResolveSource(const nodegraph::GraphEdge& edge) const noexcept;
+    // 호출 노드 출력 pin의 값이다(함수 출력 사본 입력 — 호출 오류는 여기서 진단한다).
+    Result<IrValueId> LowerCallOutput(const nodegraph::GraphNode& node, Name pin,
+                                      bool& connected) noexcept;
+    // 호출 노드의 펼치기 오류를 진단한다.
+    Result<void> ReportCallError(const nodegraph::GraphNode& node) noexcept;
+    // 진단을 그대로 남긴다(Report가 사본 위치를 바꾼 뒤).
+    Result<void> ReportAt(nodegraph::GraphDiagnosticSeverity severity, MaterialDiagnosticCode code,
+                          Guid node, Name pin, StringView message) noexcept;
     Result<void> BuildIndex() noexcept;
     Result<void> CheckParameterNames() noexcept;
     // 지금 문맥의 진입점 결과를 출력 노드 핀에서 만든다(대기 핀·비활성 핀 진단은 문맥마다 같고
@@ -280,11 +315,65 @@ private:
     bool IsEagerInput(const nodegraph::GraphNode& consumer, Name pin) const noexcept;
     Result<void> LowerNodeOnce(const nodegraph::GraphNode& node) noexcept;
 
+    // 펼친 그래프 사본 노드의 출처다(6.12절 MS2e2).
+    struct ExpandedOrigin {
+        // 이 사본을 만든 호출 노드(FunctionCall·MaterialSample — 주 그래프 노드나 다른 사본)다.
+        Guid call;
+        // 원본 그래프의 노드 id다.
+        Guid original;
+        // 원본 snapshot 번호다(snapshots_).
+        uint32 snapshot = 0;
+        // MaterialSample로 펼친 사본(이나 그 안의 함수 사본)인가.
+        bool sampled = false;
+    };
+
+    // 호출 노드 펼치기 결과다.
+    enum class CallStatus : uint8 {
+        Expanded = 0,
+        // 함수(머티리얼) 참조가 비었다.
+        MissingAsset = 1,
+        // provider에 snapshot이 없다.
+        Unavailable = 2,
+        // 호출 경로에 같은 에셋이 다시 나온다(V3).
+        Recursive = 3,
+        // 펼친 그래프·호출 깊이 상한을 넘는다(V9).
+        TooLarge = 4,
+        // 호출 사본의 입력 id가 함수에 없다.
+        UnsetInput = 5,
+        // 호출 사본의 출력 id가 함수에 없다.
+        UnsetOutput = 6,
+        // 호출 노드 속성을 읽지 못한다.
+        Unreadable = 7
+    };
+
+    struct CallInfo {
+        CallStatus status = CallStatus::Expanded;
+        bool sample = false;
+        // 펼친(또는 Recursive가 가리키는) snapshot 번호다.
+        uint32 snapshot = 0;
+        // UnsetInput·UnsetOutput의 목록 색인이다.
+        uint32 index = 0;
+    };
+
     Allocator& allocator_;
     const MaterialTranslationInput& input_;
     MaterialTranslation& out_;
     IrBuilder builder_;
     const nodegraph::Graph* graph_ = nullptr;
+    // 함수·MaterialSample을 펼친 그래프다(펼칠 노드가 있을 때만 — graph_가 가리킨다).
+    nodegraph::Graph expanded_;
+    HashMap<Guid, ExpandedOrigin> origins_;
+    HashMap<Guid, CallInfo> calls_;
+    // (호출 노드, 출력 핀) → (출력 사본, 그 입력 핀 — FunctionOutput A·출력 노드 Surface)이다.
+    HashMap<PinKey, PinKey, PinKeyHash> callOutputs_;
+    // FunctionInput 사본 → (호출 노드, P_<입력 id>)이다.
+    HashMap<Guid, PinKey> functionInputs_;
+    // 읽은 snapshot이다(처음 읽은 순).
+    Array<const MaterialGraphSnapshot*> snapshots_;
+    Name functionCallType_;
+    Name functionInputType_;
+    Name functionOutputType_;
+    Name materialSampleType_;
     HashMap<Guid, usize> nodes_;
     HashMap<PinKey, usize, PinKeyHash> edges_;
     // 노드 결과·상태는 평가 문맥마다다(6.9절 — 문맥을 바꿔도 지우지 않는다, MS2b4a).

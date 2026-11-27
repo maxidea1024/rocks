@@ -110,7 +110,7 @@ Result<void> Translator::TranslateCustomOutput(const nodegraph::GraphNode& node,
                 continue;
             }
 
-            if (const usize* source = nodes_.Find(edge.fromNode)) {
+            if (const usize* source = ResolveSource(edge)) {
                 if (auto added = starts.TryPushBack(*source); !added) {
                     return added;
                 }
@@ -525,7 +525,9 @@ Result<void> Translator::TranslateCustomOutputs() noexcept {
 
     auto cacheType = input_.names.TryFind(CustomOutputCacheType);
     for (const nodegraph::GraphNode& node : graph_->nodes) {
-        if (node.enableState == nodegraph::NodeEnableState::Disabled) {
+        // MaterialSample 사본의 custom 출력은 이 머티리얼의 출력이 아니다(함수 사본 안의 것은
+        // UE처럼 출력이다 — 6.12절 MS2e2).
+        if (node.enableState == nodegraph::NodeEnableState::Disabled || IsSampledCopy(node.id)) {
             continue;
         }
 

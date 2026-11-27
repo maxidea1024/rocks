@@ -18,6 +18,9 @@ struct CurveAtlasRowParameterProperties {
 
     ROCKS_PROPERTY() Name parameterName;
     ROCKS_PROPERTY() Guid parameterId {};
+    // 함수 안에서 호출 위치마다가 아니라 전역 scope 하나다(Docs/Design/MaterialSystem 9.2절 MD5
+    // "공유" 표시 — 6.12절 MS2e2).
+    ROCKS_PROPERTY() bool shared = false;
     ROCKS_PROPERTY() Name group;
     ROCKS_PROPERTY() int32 sortPriority = 32;
     ROCKS_PROPERTY() float defaultValue {};

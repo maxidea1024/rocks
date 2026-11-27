@@ -158,6 +158,8 @@ public:
     Result<bool> ReadDouble(StringView field, double fallback, double& out) noexcept;
     Result<bool> ReadInteger(StringView field, int64 fallback, int64& out) noexcept;
     Result<bool> ReadBool(StringView field, bool fallback, bool& out) noexcept;
+    // field가 "parameterId"이고 노드 속성에 shared가 있으면(파라미터 노드) IR 정체 Guid로
+    // 바꾼다(6.12절 MS2e2 파라미터 scope — 주 그래프 노드는 그대로).
     Result<bool> ReadGuid(StringView field, Guid& out) noexcept;
     // LinearColor 칸(r·g·b·a)이다.
     Result<bool> ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept;
@@ -195,6 +197,12 @@ public:
     Result<void> Error(MaterialDiagnosticCode code, StringView pin, StringView message) noexcept;
     Result<void> Warning(MaterialDiagnosticCode code, StringView pin, StringView message) noexcept;
     Result<void> Info(MaterialDiagnosticCode code, StringView pin, StringView message) noexcept;
+
+    // 이 노드가 펼친 FunctionInput 사본이면 그 호출 노드 입력(call, pin)이다(6.12절 MS2e2).
+    bool FunctionInputBinding(Guid& call, Name& pin) const noexcept;
+    // 호출 노드 call의 입력 pin 값이다(FunctionInput 사본 — 연결된 입력이 값 없이 오면 이 노드도
+    // 실패다).
+    Result<IrValueId> CallerInput(Guid call, Name pin, bool& connected) noexcept;
 
     // 다른 노드(종류 expectedType)의 출력이다(NamedRerouteUsage의 선언 — 순환은 V2). 그 id의 노드가
     // 없거나 종류가 다르면 found가 거짓이다.

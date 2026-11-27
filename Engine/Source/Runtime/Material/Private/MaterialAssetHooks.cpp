@@ -1,10 +1,20 @@
 #include <Base/Compiler.h>
 #include <Core/Move.h>
 #include <AssetRuntime/Package.generated.h>
+#include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/NamePool.h>
+#include <Material/Material.generated.h>
+#include <Material/Material.h>
 #include <Material/MaterialAssetHooks.h>
+#include <Material/MaterialFunction.generated.h>
+#include <Material/MaterialFunction.h>
 #include <Material/MaterialFunctionInstance.h>
 #include <Material/MaterialFunctionInstance.generated.h>
 #include <Material/MaterialInstance.h>
+#include <MaterialSchema/MaterialAssetReference.generated.h>
+#include <MaterialSchema/NodePropertyReader.h>
+#include <MaterialSchema/Nodes/Functions/FunctionCallProperties.generated.h>
+#include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.generated.h>
 #include <Material/MaterialInstance.generated.h>
 
 // 머티리얼 에셋 타입 hook이다(Docs/Design/MaterialSystem 4.4·4.6.1절).
@@ -63,6 +73,92 @@ Result<void> AddAssetOf(const AssetTypeHookContext& context, ObjectHandle target
 
     return sink.Add(id);
 }
+
+#if ROCKS_WITH_EDITOR_DATA
+// 그래프 노드 하나가 참조하는 에셋 id다(field는 MaterialAssetReference 칸 — 읽지 못하면 null,
+// 번역이 진단한다). 오류: 할당 실패.
+Result<AssetId> NodeAssetReference(const nodegraph::GraphNode& node, const TypeSchema& schema,
+                                   StringView field) noexcept {
+    SystemAllocator scratch;
+    auto reader = material::NodePropertyReader::Open(scratch, node.properties.bytes.View(), schema);
+    auto reference = reader ? reader.Value().OpenStruct(
+                                  field, GeneratedType<material::MaterialAssetReference>::Schema())
+                            : Result<material::NodePropertyReader>::Failure(reader.Error());
+    auto id = reference ? reference.Value().ReadGuid("assetId", Guid{})
+                        : Result<Guid>::Failure(reference.Error());
+    if (!id) {
+        return id.Error() == ErrorCode::OutOfMemory ? Result<AssetId>::Failure(id.Error())
+                                                    : Result<AssetId>::Success(AssetId{});
+    }
+
+    return Result<AssetId>::Success(AssetId{id.Value()});
+}
+
+// 그래프 안 함수 호출·MaterialSample 참조를 Build 의존으로 더한다(Docs/Design/MaterialSystem 6.12절
+// MS2e2 — 번역이 펼치는 그래프다, 4.6.1절). 자기 참조는 건너뛴다(번역이 V3로 진단한다).
+// 레이어 노드(AttributeLayers·LayerStack)의 함수 참조는 MS2e3 묶음이 더한다.
+Result<void> AddGraphReferences(const AssetTypeHookContext& context,
+                                const nodegraph::GraphDocument& document,
+                                AssetDependencySink& sink) noexcept {
+    NamePool* names = context.registry.Names();
+    if (names == nullptr) {
+        return Result<void>::Success();
+    }
+
+    auto call = names->TryFind("Material.FunctionCall");
+    auto sample = names->TryFind("Material.MaterialSample");
+    for (const nodegraph::Graph& graph : document.graphs) {
+        for (const nodegraph::GraphNode& node : graph.nodes) {
+            Result<AssetId> asset = Result<AssetId>::Success(AssetId{});
+            if (call && node.type == call.Value()) {
+                asset = NodeAssetReference(
+                    node, GeneratedType<material::FunctionCallProperties>::Schema(),
+                    "materialFunction");
+            } else if (sample && node.type == sample.Value()) {
+                asset = NodeAssetReference(
+                    node, GeneratedType<material::MaterialSampleProperties>::Schema(),
+                    "materialReference");
+            } else {
+                continue;
+            }
+
+            if (!asset) {
+                return Result<void>::Failure(asset.Error());
+            }
+
+            if (asset.Value().IsNull() || asset.Value() == context.asset) {
+                continue;
+            }
+
+            if (auto added = sink.Add(asset.Value()); !added) {
+                return added;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+template <typename Asset>
+Result<void> GraphBuildDependencies(const AssetTypeHookContext& context,
+                                    AssetDependencySink& sink) noexcept {
+    if (auto base = context.CallBaseBuildDependencies(sink); !base) {
+        return base;
+    }
+
+    auto borrow = context.registry.Resolve<Asset>(context.access, context.object);
+    if (!borrow) {
+        return Result<void>::Failure(borrow.Error());
+    }
+
+    auto pointer = borrow.Value().Get();
+    if (!pointer) {
+        return Result<void>::Failure(pointer.Error());
+    }
+
+    return AddGraphReferences(context, pointer.Value()->graph, sink);
+}
+#endif
 
 Result<void> InstanceBuildDependencies(const AssetTypeHookContext& context,
                                        AssetDependencySink& sink) noexcept {
@@ -139,6 +235,10 @@ Result<void> RegisterMaterialAssetHooks(AssetTypeHookTable& table,
     const Entry entries[] = {
         {GeneratedType<MaterialInstance>::Id(), &InstanceBuildDependencies},
         {GeneratedType<MaterialFunctionInstance>::Id(), &FunctionInstanceBuildDependencies},
+#if ROCKS_WITH_EDITOR_DATA
+        {GeneratedType<Material>::Id(), &GraphBuildDependencies<Material>},
+        {GeneratedType<MaterialFunction>::Id(), &GraphBuildDependencies<MaterialFunction>},
+#endif
     };
 
     const usize first = out.Size();

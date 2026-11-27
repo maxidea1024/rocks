@@ -4,6 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/NamePool.h>
 #include <MaterialCompiler/MaterialCollectionLayout.h>
+#include <MaterialCompiler/MaterialSourceProvider.h>
 #include <MaterialCompiler/MaterialStaticParameterValue.h>
 #include <MaterialCompiler/MaterialTextureFacts.h>
 #include <MaterialCompiler/MaterialTranslationTarget.h>
@@ -41,6 +42,8 @@ struct MaterialTranslationInput {
     Span<const MaterialTextureFacts> textures{};
     // 등록된 custom 속성 표다(6.12절 MS2e1 — 없으면 내장 표만). 번역 동안 살아 있어야 한다.
     const MaterialAttributeTable* attributes = nullptr;
+    // 원본 공급이다(6.12절 MS2e2 — 함수 호출·MaterialSample). 없으면 그 노드는 에셋 없음 진단이다.
+    const MaterialSourceProvider* sources = nullptr;
 };
 
 } // namespace rocks::material

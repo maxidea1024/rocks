@@ -39,6 +39,14 @@
 - **사본 제외.** `MaterialSample`로 펼친 머티리얼 사본의 custom 출력 노드·출력 노드는 이 머티리얼의 출력이 아니다(펼친 함수 안의 custom 출력 노드는 UE처럼 출력이다 — `GatherCustomOutputExpressions`).
 - **의존 목록.** 번역 결과 `dependencies`는 번역이 읽은 snapshot(역할 Function·Material, AssetId)이다(12.2절 의존 입력 — 쿠커가 키를 붙인다).
 - **Build 의존 hook.** Material·MaterialFunction 그래프 안의 FunctionCall·MaterialSample·레이어 참조를 Build 의존으로 등록한다(4.6.1절).
+- **구현 세부(MS2e2 구현 때 정함).**
+  - 호출 노드·`FunctionOutput`·`MaterialSample`은 lowering하지 않는다. 간선이 호출 출력 `P_<id>`(MaterialSample `Front Material`)을 가리키면 계획·번역이 그 출력 사본 입력(`A`·출력 노드 `Surface`)의 출발로 넘어간다(비활성 노드 통과와 같은 방식). 그래서 쓰지 않는 출력과 쓰지 않는 호출 노드는 번역·진단하지 않는다(UE도 출력마다 compile한다). 호출 오류는 그 출력 값을 요청할 때 낸다.
+  - `FunctionInput` 사본의 계획 의존은 호출 노드 입력의 출발이고, 순환으로 끊는 키는 (호출 노드, `P_<입력 id>`)다. `Preview` 입력은 계획 밖(늦은 입력)이라 호출 쪽이 연결되면 번역하지 않는다(UE `LinkIntoCaller`).
+  - 사본 id·파라미터 정체의 hash 입력은 Guid마다 high·low를 각각 little endian 8 byte로 이어 쓴 것이고, 결과는 digest 앞 8 byte가 high, 다음 8 byte가 low(big endian)다. 함수 입출력의 호출 핀 키는 공용 `MaterialGuidPinKey`(MaterialSchema 공개 — 19.13.3절 규칙)다.
+  - 간선 수도 `nodegraph::MaxGraphEdges`(262144)를 넘으면 같은 V9다. 호출 노드 속성을 읽지 못하면 InvalidProperty "Node properties cannot be read"다.
+  - 입력 형 맞춤: 수 입력은 5.3절 `Coerce`(Double 값은 LWC를 지켜 Double 폭으로 — UE "Don't change the LWC status"), 텍스처·속성 집합·표면 입력은 같은 타입만 받고 아니면 TypeMismatch "Cannot cast from <형> to <형> for function input '<이름>'"이다(UE `ValidCast` 문구에 입력 이름을 더함).
+  - MaterialSample 문구(UE는 참조가 비거나 FrontMaterial이 없으면 값 없이 끝난다 — Rocks는 진단한다): 참조 없음 "Material Sample has no material reference", provider에 없음 "Material asset is not available", 출력 노드 Surface 연결 없음 "Referenced material has no Surface connection", 자기 참조는 UE 문구 "Material Sample cannot reference this material or one of it's child instances."(FunctionCycle). 함수 오류 코드: 참조 없음·에셋 없음·출력 연결 없음은 MissingInput, 입출력 색인은 InvalidProperty.
+  - 진단 접두의 노드 짧은 이름은 종류 이름에서 `Material.`을 뗀 것이다. 호출 노드 자체가 사본이면(중첩 호출의 오류) 노드 접두 없이 그 바깥 함수 경로만 붙는다(UE는 FunctionCall·FunctionInput·FunctionOutput에 노드 접두를 붙이지 않는다).
 
 **MS2e3 레이어.**
 - **AttributeLayers**(ME:7161–7630): 레이어 목록은 노드 `defaultLayers`다(인스턴스 레이어 스택 override는 MS7). 활성 레이어는 layer가 있고 visible인 것이다. 레이어 i는 scope (Layer, layerId), 그 혼합은 scope (LayerBlend, layerId)로 펼친다. 레이어 함수의 첫 입력(정렬 순)은 노드 `Input`이다(연결된 때). 혼합 함수 입력: BlendInputRelevance가 Bottom·Top이면 그것, General이면 정렬 순 0 = 아래(누적)·1 = 위(UE 고전 0/1과 LayerStack relevance를 합친 규칙). 혼합 함수가 없는 레이어는 그 위치에서 새 바닥이 된다(UE "opaque layer"). 결과는 마지막 혼합(없으면 마지막 레이어)의 첫 출력이다. 활성 레이어가 없으면 `Input`을 그대로 낸다.

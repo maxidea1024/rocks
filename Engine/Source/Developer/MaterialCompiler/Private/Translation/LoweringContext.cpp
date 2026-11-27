@@ -664,9 +664,59 @@ Result<bool> LoweringContext::ReadBool(StringView field, bool fallback, bool& ou
 }
 
 Result<bool> LoweringContext::ReadGuid(StringView field, Guid& out) noexcept {
-    return LoweringReadProperty(*this, Guid{}, out, [&](NodePropertyReader& reader) {
+    auto read = LoweringReadProperty(*this, Guid{}, out, [&](NodePropertyReader& reader) {
         return reader.ReadGuid(field, Guid{});
     });
+    if (!read || !read.Value() || field != StringView("parameterId")) {
+        return read;
+    }
+
+    // 파라미터 정체다(컬렉션 참조 노드는 shared가 없어 그대로 — 그 parameterId는 컬렉션 칸이다).
+    auto properties = Properties();
+    if (!properties) {
+        return Result<bool>::Failure(properties.Error());
+    }
+
+    auto shared = properties.Value()->ReadBool("shared", false);
+    if (!shared) {
+        if (shared.Error() == ErrorCode::NotFound) {
+            return read;
+        }
+
+        if (shared.Error() == ErrorCode::OutOfMemory) {
+            return Result<bool>::Failure(shared.Error());
+        }
+
+        if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                  "Node property cannot be read");
+            !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        return Result<bool>::Success(false);
+    }
+
+    out = translator_.ParameterIdentity(node_.id, out, shared.Value());
+    return read;
+}
+
+bool LoweringContext::FunctionInputBinding(Guid& call, Name& pin) const noexcept {
+    return translator_.FunctionInputBinding(node_.id, call, pin);
+}
+
+Result<IrValueId> LoweringContext::CallerInput(Guid call, Name pin, bool& connected) noexcept {
+    connected = false;
+    const nodegraph::GraphNode* caller = translator_.FindNode(call);
+    if (caller == nullptr) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto value = translator_.LowerConnection(*caller, pin, connected);
+    if (value && connected && value.Value() == NoIrValue) {
+        poisoned_ = true;
+    }
+
+    return value;
 }
 
 Result<bool> LoweringContext::ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept {
