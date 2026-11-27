@@ -1,6 +1,7 @@
 #include <RenderBase/BuiltinResources.h>
 
 #include <RenderBase/EngineShaderTypes.h>
+#include <RenderBase/NoiseTextures.h>
 
 // 내장 자원 팩이다(Docs/Design/RenderBase 11.4절 5·6항). 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::render {
@@ -245,6 +246,19 @@ Result<void> BuiltinResources::CreateTextures(graphics::Device& device) noexcept
     }
 
     textures_[Index(BuiltinTexture::FarDepth2D)] = depth.Value();
+    // noise 시스템 텍스처 둘(11.5절 6항): 컴파일 때 만든 표를 생성 업로드로 넘긴다.
+    auto gradient2D = device.CreateTexture(PerlinGradient2DDesc(), PerlinGradient2DTexels());
+    if (!gradient2D) {
+        return Fail(device, gradient2D.Error(), "builtin noise gradient 2D texture");
+    }
+
+    textures_[Index(BuiltinTexture::PerlinGradient2D)] = gradient2D.Value();
+    auto gradient3D = device.CreateTexture(PerlinGradient3DDesc(), PerlinGradient3DTexels());
+    if (!gradient3D) {
+        return Fail(device, gradient3D.Error(), "builtin noise gradient 3D texture");
+    }
+
+    textures_[Index(BuiltinTexture::PerlinGradient3D)] = gradient3D.Value();
     graphics::PassDesc pass;
     pass.colorCount = 0;
     pass.depth.texture = depth.Value();
