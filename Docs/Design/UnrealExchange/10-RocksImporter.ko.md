@@ -150,6 +150,6 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
    - `Struct`: 멤버 행 표로 재귀한다(값 struct — `SourceColorSettings`의 enum 멤버 접두 떼기).
    - `Ignore`: 설정이 아닌 UE 멤버(`LightingGuid`·`AssetImportData` 등 — 버림).
    - `Unsupported`: Rocks 필드가 없는 UE 설정이다. 값이 UE 기본값과 다르면 `UnsupportedSetting` 경고를 내고 버린다.
-   표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `CorruptData` 실패다(덤프 내용이 필드와 맞지 않음 — 표가 맞는지는 시험이 엔진 콘텐츠 묶음으로 막는다). 진단이 없는 `ImportJson` 오류는 그대로 전한다.
+   표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `CorruptData` 실패다(덤프 내용이 필드와 맞지 않음 — 표가 맞는지는 시험이 엔진 콘텐츠 묶음으로 막는다). 진단이 없는 `ImportJson` 오류는 그대로 전한다. 번역의 `CorruptData`(값이 행 종류와 맞지 않음)만 `InvalidSource`이고 행 표 결함(`InvalidArgument`)·writer 오류·writer 원문의 다시 읽기 실패는 코드 결함이라 진단 코드 없이 그 오류다(UX3b에서 정적 메시와 맞춤 — 5.5절 4번).
 9. **모듈 의존.** UnrealExchange가 ReflectionText(`ImportJson`), Texture(출력 타입)에 공개 의존한다. 제품 Commandlet은 A2f 임포터 등록(`AssetImporterSetup`)과 종류별 임포터 등록(`ExchangeKindSetup`)을 `ProductAssetSetup`(MeshAnimationAssets 13.1절 1)에 더한다.
 10. **새 진단.** 코드 `UnsupportedSourceLayout`(오류)·`GammaMismatch`(경고)를 AssetRuntime 진단 표에 더한다(AssetSystem 4.6절 표에 이미 있다 — 10.3절). 세부 규칙 `ServiceFailure`(2번)를 더한다.

@@ -281,9 +281,9 @@ struct ExchangeStaticMeshBuilder {
             return Result<void>::Failure(ErrorCode::OutOfMemory);
         }
 
-        return parsed.Succeeded()
-                   ? Result<void>::Success()
-                   : Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData, 0);
+        // writer가 쓴 원문이라 읽기 실패는 코드 결함이다(진단 코드 없이).
+        return parsed.Succeeded() ? Result<void>::Success()
+                                  : Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 기록 하나를 적재해 mesh.meshes_ 번호를 index에 둔다.

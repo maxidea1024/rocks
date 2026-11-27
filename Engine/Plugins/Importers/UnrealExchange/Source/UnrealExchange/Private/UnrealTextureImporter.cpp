@@ -130,12 +130,16 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
     input.rows = ExchangeTextureSettingRows();
     input.output = asset.exchangeClass;
     input.references = &options.references;
+    // 번역의 CorruptData만 덤프 내용이다. 행 표 결함·writer 오류는 진단 코드 없이 그대로다
+    // (UnrealExchange 5.5절 4번 — 정적 메시와 같은 분담).
     if (auto translated = TranslateExchangeSettings(input, writer, warnings); !translated) {
-        return FailImport(context, AssetDiagnosticCode::InvalidSource, translated.Error());
+        return translated.Error() == ErrorCode::CorruptData
+                   ? context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData)
+                   : Result<void>::Failure(translated.Error());
     }
 
     if (auto finished = writer.Finish(); !finished) {
-        return FailImport(context, AssetDiagnosticCode::InvalidSource, finished.Error());
+        return Result<void>::Failure(finished.Error());
     }
 
     JsonDocument document(allocator);
@@ -145,7 +149,7 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
     }
 
     if (!parsed.Succeeded()) {
-        return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData);
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     ReferenceResolver resolver(context, options.references);
@@ -161,8 +165,8 @@ Result<void> ApplySettings(AssetImportContext& context, const ExchangeAsset& ass
         // 없는 InvalidArgument는 호출 오류라 그대로다.
         const bool content =
             prepared.Error() == ErrorCode::InvalidArgument && diagnostics.Count() != 0;
-        return FailImport(context, AssetDiagnosticCode::InvalidSource,
-                          content ? ErrorCode::CorruptData : prepared.Error());
+        return content ? context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData)
+                       : Result<void>::Failure(prepared.Error());
     }
 
     if (auto published = prepared.Value().Publish(); !published) {

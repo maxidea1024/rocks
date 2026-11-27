@@ -27,9 +27,14 @@ constexpr char MapSeparator = ':';
 constexpr usize CommonOptionCount = 3;
 constexpr usize MaxOptionCount = CommonOptionCount + 1;
 
-// meshNormals 대입 값(ExchangeMeshNormals 도구 이름 — 5.5절 11번)이다.
+// meshNormals 대입 값이다. 리플렉션 enum ExchangeMeshNormals의 열거자 도구 이름과 같아야
+// 한다(이름을 바꾸면 여기도 — 명령 시험 UnrealExchangeStaticMesh_ImportCommand가 두 값 모두
+// 대입한다).
+constexpr StringView MeshNormalsUnrealText = "Unreal";
+constexpr StringView MeshNormalsRocksText = "Rocks";
+
 StringView MeshNormalsText(ExchangeMeshNormals normals) noexcept {
-    return normals == ExchangeMeshNormals::Rocks ? StringView("Rocks") : StringView("Unreal");
+    return normals == ExchangeMeshNormals::Rocks ? MeshNormalsRocksText : MeshNormalsUnrealText;
 }
 
 // 메시 원본 모드(5.3절)를 받는 클래스다.

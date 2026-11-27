@@ -2,6 +2,7 @@
 #include "ExchangeTestSupport.h"
 
 #include <AssetCommandlets/AssetEditCommandlet.h>
+#include <Platform/File.h>
 #include <Core/Commandlet/Commandlet.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
@@ -25,6 +26,11 @@ constexpr StringView CubePath = "/Engine/BasicShapes/Cube.Cube";
 constexpr StringView DegeneratePath = "/Game/RxGolden/SM_Degenerate.SM_Degenerate";
 constexpr StringView CubeAsset = "/Game/Unreal/Engine/BasicShapes/Cube";
 constexpr StringView DegenerateAsset = "/Game/Unreal/Game/RxGolden/SM_Degenerate";
+constexpr StringView SkeletalCubePath = "/Engine/EngineMeshes/SkeletalCube.SkeletalCube";
+// Cube 패키지 파일(프로젝트 안 상대 — /Game은 Content)이다.
+constexpr StringView CubePackage = "Content/Unreal/Engine/BasicShapes/Cube.rasset";
+// 원본 하나도 빼지 않는다(MakeSourceArgs 인자 목록 그대로).
+constexpr usize SkipNone = NumericLimits<usize>::Max();
 
 struct Captured {
     explicit Captured(Allocator& allocator) noexcept : out(allocator), error(allocator) {
@@ -72,6 +78,10 @@ struct Tool {
 
     int32 Info(Span<const StringView> args) noexcept {
         return Call(&commandlet_host::RunAssetInfoCommand, &assets, args);
+    }
+
+    int32 Set(Span<const StringView> args) noexcept {
+        return Call(&commandlet_host::RunAssetSetCommand, &assets, args);
     }
 
     bool Out(StringView text) const noexcept {
@@ -125,6 +135,24 @@ struct Scene {
                                            platform::FileOpenMode::CreateAlways)) &&
                static_cast<bool>(file.WriteAll(text.Data(), text.ByteCount()).status) &&
                static_cast<bool>(file.Close());
+    }
+
+    // 프로젝트 안 파일의 내용이 text를 담는지다(저장된 패키지의 태그 문자열 확인).
+    bool FileContains(StringView relative, StringView text) noexcept {
+        StringBuilder<1024> path(allocator);
+        platform::File file;
+        uint64 size = 0;
+        Array<char> bytes(allocator);
+        if (!path.TryAppendFormat("{}/{}", root.Root(), relative) ||
+            !file.Open(platform::PhysicalFileSystem(), path.CString(), path.ByteCount(),
+                       platform::FileOpenMode::ReadExisting) ||
+            !file.Size(size) || !bytes.TryResize(static_cast<usize>(size)) ||
+            !file.ReadExact(bytes.Data(), bytes.Size()).status) {
+            return false;
+        }
+
+        return StringView(bytes.Data(), bytes.Size())
+            .Contains(text, StringComparison::CaseSensitive);
     }
 
     Allocator& allocator;
@@ -232,7 +260,10 @@ TEST(UnrealExchangeStaticMesh_ImportCommand) {
               tool.Out("materialSlots[0].material=none") &&
               tool.Out("simpleCollision.boxes[0].size.x=100") &&
               tool.Out("sourceLods[0].build.recomputeTangents=false") &&
-              tool.Out("sourceLods[0].build.dstLightmapIndex=2"));
+              tool.Out("sourceLods[0].build.dstLightmapIndex=2") && !tool.Out("sourceLods[1]"));
+        // 태그(10.6절 7번): 저장된 패키지 Tags에 ObjectPath 키와 값이 있다.
+        CHECK(scene.FileContains(CubePackage, "UnrealExchange.ObjectPath") &&
+              scene.FileContains(CubePackage, CubePath));
         const StringView importInfo[] = {CubeAsset, "--import", scene.project.View()};
         CHECK(tool.Info(importInfo) == 0);
         CHECK(tool.Out("import.importer=unreal_static_mesh 1 current") &&
@@ -249,7 +280,17 @@ TEST(UnrealExchangeStaticMesh_ImportCommand) {
         CHECK(tool.Info(cubeInfo) == 0);
         CHECK(StringView(tool.captured.out.View()) == before.View());
 
-        // 일반 asset-reimport는 같은 결과다.
+        // 재임포트는 설정을 UE 값으로 되돌린다(replaceSettingsOnReimport — 원본 쪽이 정본).
+        const StringView edit[] = {CubeAsset, "lightMapResolution=8", scene.project.View()};
+        CHECK(tool.Set(edit) == 0);
+        CHECK(tool.Info(cubeInfo) == 0 && tool.Out("lightMapResolution=8"));
+        const StringView cubeRun[] = {scene.bundle.View(), onlyCube.View(), scene.project.View()};
+        CHECK(tool.Unreal(cubeRun) == 0);
+        CHECK(tool.Info(cubeInfo) == 0);
+        CHECK(StringView(tool.captured.out.View()) == before.View());
+
+        // 일반 asset-reimport는 같은 결과다(편집한 설정도 되돌린다).
+        CHECK(tool.Set(edit) == 0);
         const StringView plain[] = {CubeAsset, scene.project.View()};
         CHECK(tool.Reimport(plain) == 0);
         CHECK(tool.Info(cubeInfo) == 0);
@@ -299,8 +340,8 @@ TEST(UnrealExchangeStaticMesh_ImporterRejects) {
         // 정상: 경고는 Rocks 필드가 없는 설정 하나다.
         {
             Array<StringView> args(allocator);
-            REQUIRE(withSources("/Game/X/Good", args, NumericLimits<usize>::Max()) &&
-                    args.TryPushBack(Importer) && args.TryPushBack(objectPath.View()));
+            REQUIRE(withSources("/Game/X/Good", args, SkipNone) && args.TryPushBack(Importer) &&
+                    args.TryPushBack(objectPath.View()));
             CHECK(tool.Import(args.View()) == 0);
             CHECK(tool.Error("UnsupportedSetting"));
         }
@@ -314,10 +355,10 @@ TEST(UnrealExchangeStaticMesh_ImporterRejects) {
             StringView code;
         };
         const Case cases[] = {
-            {"/Game/X/Texture", "--importer=unreal_texture_2d", objectPath.View(),
-             NumericLimits<usize>::Max(), "InvalidSource"},
-            {"/Game/X/Path", Importer, "--objectPath=/Game/T/Other.Other",
-             NumericLimits<usize>::Max(), "InvalidImportOption"},
+            {"/Game/X/Texture", "--importer=unreal_texture_2d", objectPath.View(), SkipNone,
+             "InvalidSource"},
+            {"/Game/X/Path", Importer, "--objectPath=/Game/T/Other.Other", SkipNone,
+             "InvalidImportOption"},
             {"/Game/X/NoBlob", Importer, objectPath.View(), 1, "MissingSource"},
         };
         for (const Case& item : cases) {
@@ -329,6 +370,19 @@ TEST(UnrealExchangeStaticMesh_ImporterRejects) {
             if (!tool.Error(item.code)) {
                 tool.Print("case");
             }
+        }
+
+        // 정적 메시가 아닌 문서(스킨 메시)를 unreal_static_mesh로 주면 클래스 거부다(blob 전에
+        // 본다).
+        {
+            SourceArgs skeletal(allocator);
+            REQUIRE(MakeSourceArgs(allocator, scene.bundle.View(), SkeletalCubePath, skeletal));
+            StringBuilder<256> skeletalPath(allocator);
+            REQUIRE(skeletalPath.TryAppendFormat("--objectPath={}", SkeletalCubePath));
+            const StringView args[] = {"/Game/X/Skinned", scene.project.View(),
+                                       skeletal.texts[0].View(), Importer, skeletalPath.View()};
+            CHECK(tool.Import(args) == 1);
+            CHECK(tool.Error("InvalidSource"));
         }
 
         // 변환 실패: SourceModels 수(빈 LOD 설정을 앞에 하나 더함)와 data.lods 수가 다른

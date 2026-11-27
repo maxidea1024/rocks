@@ -20,6 +20,8 @@ using exchange_detail::ReadUInt;
 // 위상 배열 수와 배열마다의 components다(MeshAnimationAssets 9.1절, UnrealExchange 5.4절 2번).
 constexpr usize TopologyArrays = 7;
 constexpr uint64 TopologyComponents[TopologyArrays] = {1, 2, 1, 1, 1, 3, 1};
+// 원소 수를 counts로 정할 수 없는 위상 배열(둘레 길이 합)의 표지다.
+constexpr uint64 TopologyCountUnchecked = NumericLimits<uint64>::Max();
 
 // 기록 요소·값 타입 이름이다(번호 + 1 = MeshElement·MeshValueType 값 — 5.4절 2번).
 constexpr StringView ElementNames[] = {"Vertex",  "Corner",   "Edge",
@@ -258,19 +260,16 @@ Result<void> ReadTopology(const ExchangeAsset& asset, Span<const Span<const uint
 
     // 배열마다의 원소 수다(9.1절 — 코너·변·다각형 + 1·둘레 길이 합·다각형·삼각형·삼각형). 둘레
     // 길이 합은 counts로 정해지지 않아(코너 공유) Load의 길이 판정에 맡긴다.
-    const uint64 expected[TopologyArrays] = {data.cornerCount,
-                                             data.edgeCount,
-                                             static_cast<uint64>(data.polygonCount) + 1,
-                                             NumericLimits<uint64>::Max(),
-                                             data.polygonCount,
-                                             data.triangleCount,
-                                             data.triangleCount};
+    const uint64 expected[TopologyArrays] = {
+        data.cornerCount,       data.edgeCount,    static_cast<uint64>(data.polygonCount) + 1,
+        TopologyCountUnchecked, data.polygonCount, data.triangleCount,
+        data.triangleCount};
     Array<uint8> joined(allocator);
     for (usize index = 0; index < TopologyArrays; ++index) {
         const usize blob = FindBlob(asset, topology.At(index));
         if (blob == asset.blobs.Size() || asset.blobs[blob].layout != ExchangeBlobLayout::U32 ||
             asset.blobs[blob].components != TopologyComponents[index] ||
-            (expected[index] != NumericLimits<uint64>::Max() &&
+            (expected[index] != TopologyCountUnchecked &&
              asset.blobs[blob].count != expected[index])) {
             return Corrupt(failure);
         }

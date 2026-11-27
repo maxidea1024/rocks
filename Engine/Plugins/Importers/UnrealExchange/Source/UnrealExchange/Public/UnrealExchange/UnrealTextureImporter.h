@@ -43,7 +43,8 @@ public:
     // InvalidSource / InvalidArgument, objectPath InvalidImportOption / InvalidArgument, blob 원본
     // 없음 MissingSource / NotFound(detail = blob 번호), 쓰지 않는 blob 원본 InvalidImportOption /
     // InvalidArgument(detail = 원본 번호), blob 검사 CorruptBundle / CorruptData(detail = blob
-    // 번호), 원본 변환의 코드, 설정 번역·ImportJson InvalidSource / CorruptData.
+    // 번호), 원본 변환의 코드, 설정 번역의 값 종류 위반·ImportJson 진단 거부 InvalidSource /
+    // CorruptData(행 표 결함·writer·진단 없는 ImportJson 실패는 진단 없이 그 오류).
     // 출력·bulk·태그·Registry 오류와 할당 실패는 진단 없이 그 오류다. 경고:
     // UnsupportedSetting(detail = 설정 표 행 번호), GammaMismatch(detail = UE EGammaSpace 번호).
     Result<void> Import(AssetImportContext& context) noexcept override;
