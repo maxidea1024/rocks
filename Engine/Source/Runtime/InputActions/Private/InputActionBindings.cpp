@@ -226,6 +226,22 @@ void InputActionBindings::PurgeRemoved() noexcept {
 }
 
 void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
+    consumedActions_.Clear();
+    DispatchWith(input, consumedActions_);
+}
+
+void InputActionBindings::Dispatch(const PlayerActionInput& input, Array<Guid>& consumed) noexcept {
+    DispatchWith(input, consumed);
+}
+
+void InputActionBindings::ClearValues() noexcept {
+    for (ValueBinding& binding : values_) {
+        binding.value = InputValue(binding.value.type, Vec3d());
+    }
+}
+
+void InputActionBindings::DispatchWith(const PlayerActionInput& input,
+                                       Array<Guid>& consumedActions) noexcept {
     if (dispatching_) {
         return;
     }
@@ -234,7 +250,6 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
     const Span<const ActionEventRecord> events = input.Events();
     runList_.Clear();
     triggeredActions_.Clear();
-    consumedActions_.Clear();
     // 실행 목록: 등록 순, Started가 겹치면 앞에 끼워 넣는다(UE EmplaceAt(0) — :801-808).
     for (usize index = 0; index < bindings_.Size(); ++index) {
         const EventBinding& binding = *bindings_[index];
@@ -269,7 +284,7 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
         EventBinding& binding = *bindings_[runList_[at]];
         const Guid action = binding.action;
         // 앞선 소비 바인딩이 이 액션을 막았다(UE :838-844).
-        if (BindingsContain(consumedActions_.View(), action)) {
+        if (BindingsContain(consumedActions.View(), action)) {
             continue;
         }
 
@@ -303,8 +318,8 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
         }
 
         // 소비는 억제되지 않은 바인딩만 건다(UE :863·900-905 — bCanTrigger 블록 안).
-        if (consumes && !BindingsContain(consumedActions_.View(), action)) {
-            (void)consumedActions_.TryPushBack(action);
+        if (consumes && !BindingsContain(consumedActions.View(), action)) {
+            (void)consumedActions.TryPushBack(action);
         }
     }
 
