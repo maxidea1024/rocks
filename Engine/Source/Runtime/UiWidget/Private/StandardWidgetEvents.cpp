@@ -30,9 +30,9 @@ Result<WidgetEventCatalog> WidgetEventCatalog::CreateStandard(Allocator& allocat
     }
 
     if (registered) {
-        registered =
-            catalog.RegisterEvent(widgetEvents::ComboSelectionChanged, widgetSignatures::Integer,
-                                  &ComboBoxWidgetBase::OnSelectionChanged);
+        registered = catalog.RegisterEvent(widgetEvents::ComboSelectionChanged,
+                                           widgetSignatures::IndexWithCause,
+                                           &ComboBoxWidgetBase::OnSelectionChanged);
     }
 
     if (registered) {

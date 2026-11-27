@@ -89,9 +89,10 @@ Result<void> ComboBoxStringWidget::RemoveOption(StringView option) noexcept {
     return index ? RemoveOptionAt(*index) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> ComboBoxStringWidget::SelectOption(StringView option) noexcept {
+Result<void> ComboBoxStringWidget::SelectOption(ObjectRegistry& objects,
+                                                StringView option) noexcept {
     auto index = FindOptionIndex(option);
-    return index ? SetSelectedIndex(static_cast<int32>(*index))
+    return index ? SetSelectedIndex(objects, static_cast<int32>(*index))
                  : Result<void>::Failure(ErrorCode::NotFound);
 }
 

@@ -56,16 +56,16 @@ int VerifyWidgetSurfaces(Allocator& allocator, LaneUiRenderer& renderer,
     constexpr uint32 height = 8;
     const auto bounds = Geometry::Root({width, height}, {});
     auto root = SharedPtr<Overlay>::TryMake(allocator, allocator);
-    auto retainer = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
+    auto offscreen = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
     auto viewport = SharedPtr<Viewport>::TryMake(allocator, allocator);
     auto blur = SharedPtr<BackgroundBlur>::TryMake(allocator, allocator);
     auto capture = SharedPtr<PostBufferUpdate>::TryMake(allocator, allocator);
     auto scene = SharedPtr<SplitScene>::TryMake(allocator, allocator);
-    if (!root || !retainer || !viewport || !blur || !capture || !scene ||
-        !root.Value()->TryAddChild(retainer.Value()) ||
-        !retainer.Value()->TryAddChild(viewport.Value()) ||
+    if (!root || !offscreen || !viewport || !blur || !capture || !scene ||
+        !root.Value()->TryAddChild(offscreen.Value()) ||
+        !offscreen.Value()->TryAddChild(viewport.Value()) ||
         !root.Value()->TryAddChild(blur.Value()) || !root.Value()->TryAddChild(capture.Value()) ||
-        !retainer.Value()->SetPhase(0, 2) || !blur.Value()->SetStrength(4)) {
+        !offscreen.Value()->SetPhase(0, 2) || !blur.Value()->SetStrength(4)) {
         return 61;
     }
 

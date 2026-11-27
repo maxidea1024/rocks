@@ -7,5 +7,6 @@ using Rocks.Build.Rules;
 public sealed class UiWorld : EngineModuleRules
 {
     protected override string ModuleName => "UiWorld";
+
     protected override string[] PublicDependencies => ["World", "UiWidget", "UiRender"];
 }

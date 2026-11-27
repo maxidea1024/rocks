@@ -87,6 +87,12 @@ protected:
 
 private:
     friend class WidgetTemplate;
+    friend struct UserWidgetTeardown;
+    // 남은 미룬 해체(Docs/Design/UiToolkit 21.4절)를 지금 끝낸다: 애니메이션을 멈추고 OnDestruct를
+    // 부른 뒤 루트 Widget의 Element를 놓는다(UE SObjectWidget::ResetWidget — NativeDestruct가
+    // 먼저). 남은 해체가 없으면 아무 일도 없다. 다시 구성하기 전(BuildElement)과 대기열 항목이
+    // 부른다.
+    void FinishPendingTeardown(ObjectRegistry& objects) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "animations") ObjectRefArray<WidgetAnimation> animations_;
     ROCKS_PROPERTY(Transient, ReadOnly, Name = "viewModel") ObjectRef<Object> viewModel_;
     ROCKS_NATIVE() SharedPtr<WidgetModelConnections> modelConnections_;
@@ -100,6 +106,12 @@ private:
     ROCKS_NATIVE() WeakPtr<AnchorCanvas> viewportLayer_;
     ROCKS_NATIVE() CanvasSlot viewportSlot_ {.anchorMax = {1, 1}, .offset = {}, .alignment = {} };
     ROCKS_PROPERTY(ReadOnly, Name = "widgetTree") ObjectRef<WidgetTree> tree_;
+    // 미룬 해체 번호의 "없음" 표지다.
+    static constexpr uint64 NoPendingTeardown = 0;
+    // 남은 미룬 해체의 번호다. 대기열 항목은 자기 번호일 때만 해체한다 — 그 사이 다시 구성하면
+    // BuildElement가 먼저 끝내고 번호를 지운다.
+    ROCKS_NATIVE() uint64 pendingTeardown_ = NoPendingTeardown;
+    ROCKS_NATIVE() uint64 teardownSerial_ = 0;
 };
 
 } // namespace rocks::ui

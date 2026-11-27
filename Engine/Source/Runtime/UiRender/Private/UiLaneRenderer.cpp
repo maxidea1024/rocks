@@ -151,13 +151,25 @@ Result<void> UiLaneRenderer::ReloadShaders(graphics::Device& device,
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
+    if (&shaders == shaders_) {
+        return Result<void>::Success();
+    }
+
+    // 새 파이프라인이 새 집합의 셰이더를 붙잡으므로 lease를 먼저 잡는다(Retire된 집합·Ready 아님은
+    // NotReady — ShaderSetSlot 계약).
+    if (!shaders.TryAcquireLease()) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
     auto made = UniquePtr<Pipelines>::TryMake(allocator_);
     if (!made) {
+        shaders.ReleaseLease();
         return Result<void>::Failure(made.Error());
     }
 
     auto built = BuildPipelines(device, shaders, format_, *made.Value());
     if (!built) {
+        shaders.ReleaseLease();
         return built;
     }
 
@@ -178,6 +190,8 @@ Result<void> UiLaneRenderer::ReloadShaders(graphics::Device& device,
 
     current.textureSlot = next.textureSlot;
     current.backdropSlot = next.backdropSlot;
+    // 옛 파이프라인을 Retire한 뒤에 옛 집합의 lease를 놓는다(그 뒤 CollectRetired가 파괴한다).
+    shaders_->ReleaseLease();
     shaders_ = &shaders;
     return Result<void>::Success();
 }
@@ -188,23 +202,33 @@ Result<void> UiLaneRenderer::Open(graphics::Device& device, render::ShaderSet& s
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // 파이프라인이 집합의 셰이더를 붙잡는 동안 집합이 파괴되지 않게 lease를 잡는다(ShaderSetSlot
+    // 계약 — 교체 뒤에도 다시 만들 때까지 옛 파이프라인을 쓴다).
+    if (!shaders.TryAcquireLease()) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
     auto made = UniquePtr<Pipelines>::TryMake(allocator_);
     if (!made) {
+        shaders.ReleaseLease();
         return Result<void>::Failure(made.Error());
     }
 
     auto built = BuildPipelines(device, shaders, format, *made.Value());
     if (!built) {
+        shaders.ReleaseLease();
         return built;
     }
 
     auto pool = UniquePtr<render::GraphResourcePool>::TryMake(allocator_, allocator_, device);
     if (!pool) {
         made.Value()->Retire(device);
+        shaders.ReleaseLease();
         return Result<void>::Failure(pool.Error());
     }
 
     shaders_ = &shaders;
+    failedShaders_ = nullptr;
     resources_ = nullptr;
     format_ = format;
     pool_ = Move(pool.Value());
@@ -280,7 +304,13 @@ void UiLaneRenderer::Close(graphics::Device& device) noexcept {
         pipelines_.Reset();
     }
 
+    if (shaders_) {
+        shaders_->ReleaseLease();
+    }
+
     shaders_ = nullptr;
+    failedShaders_ = nullptr;
+    resources_ = nullptr;
 }
 
 const UiLaneRenderer::Stats& UiLaneRenderer::Statistics() const noexcept {
@@ -747,8 +777,11 @@ Result<void> UiLaneRenderer::AddPasses(render::RenderGraph& graph,
             continue;
         }
 
+        // 장면 기록은 이번 프레임의 현재 집합으로 자기 파이프라인을 만든다(UI 재빌드에 실패해 옛
+        // 집합을 붙잡고 있어도 Retire된 집합으로 새 파이프라인을 만들지 않게).
+        render::ShaderSet* current = resources_ ? resources_->Shaders() : nullptr;
         UiScenePassContext scene(graph, texture, pass.width, pass.height, pass.clear, context,
-                                 *this, *shaders_);
+                                 *this, current ? *current : *shaders_);
         for (const UiSceneRecord& record : pass.scenes) {
             record.Record(scene);
         }
@@ -822,16 +855,22 @@ void UiLaneRenderer::Render(render::RenderFrameContext& context, UiFramePacket& 
 
     // 감시 재컴파일의 셰이더 교체를 프레임 경계에서 받는다(ShaderSystem 16.3절 SSD76). UI
     // 파이프라인은 캐시를 거치지 않고 장치에 직접 만들므로 캐시는 넘기지 않는다.
-    if (resources_ && resources_->ApplyShaderUpdates(nullptr)) {
-        render::ShaderSet* swapped = resources_->Shaders();
-        auto reloaded = swapped ? ReloadShaders(context.Device(), *swapped)
-                                : Result<void>::Failure(ErrorCode::NotReady);
-        if (!reloaded) {
-            Log::Error(LogUiLane,
-                       "The UI pipelines could not be rebuilt after a shader swap: {Error}",
-                       ErrorCodeName(reloaded.Error()));
-            context.ReportFailure(reloaded.Error());
-            return;
+    // 다시 만들기에 실패하면 옛 파이프라인(lease로 붙잡은 옛 집합)으로 계속 그리고, 같은 집합은
+    // 다음 교체까지 다시 시도하지 않는다(계획 14.1절 "hot reload 실패 시 이전 검증 버전 유지").
+    if (resources_) {
+        if (resources_->ApplyShaderUpdates(nullptr)) {
+            failedShaders_ = nullptr;
+        }
+
+        render::ShaderSet* current = resources_->Shaders();
+        if (current && current != shaders_ && current != failedShaders_) {
+            if (auto reloaded = ReloadShaders(context.Device(), *current); !reloaded) {
+                failedShaders_ = current;
+                Log::Error(LogUiLane,
+                           "The UI pipelines could not be rebuilt after a shader swap; the "
+                           "previous shaders stay in use: {Error}",
+                           ErrorCodeName(reloaded.Error()));
+            }
         }
     }
 

@@ -12,5 +12,8 @@ int VerifyWorldWidgetPlane(Allocator& allocator, LaneUiRenderer& renderer,
 int VerifyViewportWorld(Allocator& allocator, UiRenderer& renderer) noexcept;
 int VerifyWidgetSurfaces(Allocator& allocator, LaneUiRenderer& renderer,
                          render::RenderLane& lane) noexcept;
+// UI 렌더러의 셰이더 다시 만들기 규칙(lease 유지, 실패 시 옛 집합 유지)을 렌더 lane에서
+// 본다(18.4절).
+int VerifyShaderReload(LaneUiRenderer& renderer, render::RenderLane& lane) noexcept;
 
 } // namespace rocks::ui

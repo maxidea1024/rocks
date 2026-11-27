@@ -5,6 +5,8 @@ using Rocks.Build.Rules;
 public sealed class UiFramework : EngineModuleRules
 {
     protected override string ModuleName => "UiFramework";
+
     protected override string[] PrivateDependencies => ["PlatformBase"];
+
     protected override string[] PublicDependencies => ["UiCore", "TextLayout", "Localization"];
 }

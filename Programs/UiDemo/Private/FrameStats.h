@@ -24,7 +24,7 @@ enum class FrameStage : uint8 {
 //   RouteInput();
 //   stats.Mark(FrameStage::Input);
 //   ...
-//   stats.EndFrame("Main");
+//   stats.EndFrame(windowIndex);
 class FrameStats {
 public:
     // 평균을 내는 프레임 수다.
@@ -38,14 +38,18 @@ public:
     void Mark(FrameStage stage) noexcept;
     // hit 후보 수(영역 지도 입력 크기)를 기록한다(구간 최대).
     void NoteCandidates(usize count) noexcept;
-    // 프레임 하나를 끝낸다. 구간이 차면 로그를 남기고 비운다.
-    void EndFrame(StringView window) noexcept;
+    // 프레임 하나를 끝낸다. 구간이 차면 로그를 남기고 비운다. 창 프레임(입력~batch 단계)은 "Window
+    // <index>"로, 제출만 잰 기록(모든 창을 한 번에 — Submit 단계)은 "Submit"으로 남는다. 재지 않은
+    // 단계는 적지 않는다.
+    void EndFrame(uint32 index) noexcept;
 
 private:
     double stages_[static_cast<usize>(FrameStage::Count)]{};
     double last_ = 0;
     uint32 frames_ = 0;
     usize candidates_ = 0;
+    // 이번 구간에 Mark한 단계의 비트다(제출 기록과 창 기록의 로그 형식을 가른다).
+    uint32 marked_ = 0;
     bool enabled_ = false;
     bool running_ = false;
 };

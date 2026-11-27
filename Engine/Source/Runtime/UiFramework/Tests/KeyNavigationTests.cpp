@@ -115,7 +115,7 @@ bool Build(Allocator& allocator, NavigationBench& bench) noexcept {
     return static_cast<bool>(bench.app.SetFocus(0, bench.left));
 }
 
-bool Press(NavigationBench& bench, input::Key key) noexcept {
+bool PressNavigationKey(NavigationBench& bench, input::Key key) noexcept {
     const auto routed = bench.adapter.Route(input::InputEvent::KeyDown(key));
     (void)bench.adapter.Route(input::InputEvent::KeyUp(key));
     return routed && routed.Value();
@@ -128,15 +128,15 @@ TEST(UiFramework_FocusedElementTurnsArrowsIntoNavigation) {
     NavigationBench bench(allocator);
     REQUIRE(Build(allocator, bench));
     // 초점 요소가 오른쪽을 navigation으로 바꾼다 — 조상은 그 키를 받지 않는다.
-    CHECK(Press(bench, input::Key::Right));
+    CHECK(PressNavigationKey(bench, input::Key::Right));
     CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
     CHECK(bench.spy->keys == 1); // KeyUp만 올라왔다(KeyUp은 navigation이 아니다)
     // navigation이 아닌 키(Home)는 조상까지 올라간다.
     const int before = bench.spy->keys;
-    CHECK(!Press(bench, input::Key::Home));
+    CHECK(!PressNavigationKey(bench, input::Key::Home));
     CHECK(bench.spy->keys == before + 2);
     // 찾을 곳이 없어도 navigation 키는 처리된 것이다(UE SetNavigation).
-    CHECK(Press(bench, input::Key::Right));
+    CHECK(PressNavigationKey(bench, input::Key::Right));
     CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
 }
 
@@ -145,7 +145,7 @@ TEST(UiFramework_NoFocusMeansNoNavigation) {
     NavigationBench bench(allocator);
     REQUIRE(Build(allocator, bench));
     REQUIRE(bench.app.SetFocus(0, SharedPtr<Element>{}));
-    CHECK(!Press(bench, input::Key::Right));
+    CHECK(!PressNavigationKey(bench, input::Key::Right));
     CHECK(!bench.app.GetFocus(0));
 }
 
@@ -158,14 +158,14 @@ TEST(UiFramework_NavigationConfigRemapsKeysPerUser) {
     REQUIRE(bench.app.SetNavigationConfig(0, config));
     // 키 navigation을 끄면 방향키는 navigation이 아니다 — 조상까지 올라간다.
     const int before = bench.spy->keys;
-    CHECK(!Press(bench, input::Key::Right));
+    CHECK(!PressNavigationKey(bench, input::Key::Right));
     CHECK(bench.app.GetFocus(0).Get() == bench.left.Get());
     CHECK(bench.spy->keys == before + 2);
     // 다른 키를 방향에 잇는다.
     config.keyNavigation = true;
     REQUIRE(config.SetKeyRule(input::Key::D, FocusDirection::Right));
     REQUIRE(bench.app.SetNavigationConfig(0, config));
-    CHECK(Press(bench, input::Key::D));
+    CHECK(PressNavigationKey(bench, input::Key::D));
     CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
     // 다른 사용자는 기본 대응이다.
     CHECK(bench.app.GetNavigationConfig(1).DirectionFromKey(
@@ -197,12 +197,12 @@ TEST(UiFramework_AncestorOnNavigationCanHandleADirection) {
     REQUIRE(Build(allocator, bench));
     bench.spy->blockDown = true;
     // 조상이 아래 방향을 스스로 처리하면 기하 탐색을 하지 않는다(초점 그대로).
-    CHECK(Press(bench, input::Key::Down));
+    CHECK(PressNavigationKey(bench, input::Key::Down));
     CHECK(bench.spy->handledDowns == 1);
     CHECK(bench.app.GetFocus(0).Get() == bench.left.Get());
     // 처리하지 않으면 기하 탐색으로 아래 요소에 간다.
     bench.spy->blockDown = false;
-    CHECK(Press(bench, input::Key::Down));
+    CHECK(PressNavigationKey(bench, input::Key::Down));
     CHECK(bench.app.GetFocus(0).Get() == bench.below.Get());
 }
 

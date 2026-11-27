@@ -29,7 +29,7 @@ constexpr Vec2 SceneButtonSize{120, 24};
 constexpr float MaximumBlur = 20;
 constexpr float DefaultBlur = 6;
 // 리테이너 effect tint 견본 색이다.
-constexpr LinearColor RetainerTint{1.0f, 0.8f, 0.6f, 1.0f};
+constexpr LinearColor OffscreenTint{1.0f, 0.8f, 0.6f, 1.0f};
 // 흐림 뒤 줄무늬 색 순서다.
 constexpr ThemeSlot StripeColors[] = {ThemeSlot::AccentBlue,   ThemeSlot::AccentGreen,
                                       ThemeSlot::AccentOrange, ThemeSlot::AccentPurple,
@@ -165,15 +165,15 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
 
     // 리테이너: 그린 결과를 표면에 보관하고 effect tint를 곱한다.
     {
-        auto retainer = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
+        auto offscreen = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
         auto block = MakeBlock(context, "Retained surface", ThemeSlot::AccentGreen);
-        if (status.Take(retainer) && status.Take(block)) {
-            auto built =
-                retainer.Value()->Construct({.content = block.Value(), .effectTint = RetainerTint});
-            auto stage = built ? MakeStage(context, retainer.Value())
+        if (status.Take(offscreen) && status.Take(block)) {
+            auto built = offscreen.Value()->Construct(
+                {.content = block.Value(), .effectTint = OffscreenTint});
+            auto stage = built ? MakeStage(context, offscreen.Value())
                                : Result<SharedPtr<Element>>::Failure(built.Error());
             if (status.Take(stage)) {
-                rows.AddRow("Retainer Box", "OffscreenLayer (effect tint)", stage.Value());
+                rows.AddRow("Offscreen Layer", "OffscreenLayer (effect tint)", stage.Value());
             }
         }
     }

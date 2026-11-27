@@ -167,9 +167,9 @@
   - H2 — vsync가 꺼져 있고(`UiWindowSurface` 기본) 제출 묶음이 없다. GPU가 포화하면 소프트웨어 커서 구성(원격·일부 하이브리드 GPU·화면 녹화)에서 DWM 합성이 늦어 진짜 커서가 끌린다. 일반 기기에서는 가능성이 낮다.
   - 둘을 가르려면 계측이 필요하다.
 - **조치.**
-  - (a) 커서 모양은 입력 처리 직후 한 번 정하고, 배치 뒤에도 한 번 더 정한다. 배치가 바뀌면 커서 아래 Element가 달라질 수 있어서다. UE도 입력 이벤트 처리 중 커서 질의(`QueryCursor`)를 한다.
+  - (a) 커서 모양은 입력 처리 직후 한 번 정하고, 배치 뒤에도 한 번 더 정한다. 배치가 바뀌면 커서 아래 Element가 달라질 수 있어서다. UE는 이동 이벤트 때 커서 질의를 요청만 하고(`FSlateUser::RequestCursorQuery`), 실제 질의(`QueryCursor`)는 메시지 처리 뒤 `TickPlatform`의 `UpdateCursor`에서 한다(SlateApplication.cpp 1725행, SlateUser.cpp 962–965행). Rocks도 입력 처리 직후 정하므로 순서는 같다(리뷰 2026-11-27 인용 정정).
   - (b) 영역 지도의 겹침 판정은 비 Client 항목만 먼저 모아 그것과만 대조한다(O(n·m), m은 막대·테두리 몇 개). 결과 지도는 전과 같다. 다시 만들지 않는 캐시는 두지 않는다 — 지도는 hit grid 계획에 들어 있지 않은 실시간 상태(후보의 보이기·입력 경로)에도 기대므로 계획 revision만으로는 바뀜을 알 수 없다. 게시는 지금처럼 바뀐 때만 한다(`SameAs`).
-  - (c) UiDemo `--frame-stats`는 창마다 단계별 시간(입력·배치·기록·paint cache·영역 지도·batch·제출 대기)과 hit 후보 수를 60프레임마다 로그로 남긴다. 진단용이며 시험이 시간에 기대지 않는다.
+  - (c) UiDemo `--frame-stats`는 창마다 단계별 시간(입력·배치·기록·paint cache·영역 지도·batch)과 hit 후보 수를 60프레임마다 `Frame stats Window <번호>`로 남긴다(번호는 만든 순서 — 0이 주 창). 제출 대기는 모든 창을 한 번에 하므로 따로 `Frame stats Submit`으로 남긴다. 재지 않은 단계는 적지 않는다. 진단용이며 시험이 시간에 기대지 않는다.
   - (d) 프레임 페이싱(H2 — frame-latency waitable 또는 표시 주기 제출)은 (c)로 확인한 뒤 18.4절에서 정한다. 증거 없이 vsync 기본을 바꾸지 않는다.
 - **곁가지 결함(같은 조사에서 찾음).**
   - `MenuBar::ScheduleHiddenCleanup`이 간격 0으로 `StartTimer`를 부르는데 `StartTimer`는 0 이하를 거부한다. 넘쳐 숨은 메뉴의 정리가 돌지 않는다. 다음 프레임 정리로 바꾼다.

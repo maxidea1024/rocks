@@ -88,8 +88,6 @@ private:
     MenuAnchor* owner_;
     MenuRow* openSub_ = nullptr;
     MenuRow* hoveredRow_ = nullptr;
-    // 패널 위에 포인터를 둔 사용자 수다(hover 경로의 진입·이탈 — 조상도 받는다).
-    uint32 pointerUsers_ = 0;
     Array<MenuRow*> rows_;
     float scroll_ = 0;
     float maxScroll_ = 0;

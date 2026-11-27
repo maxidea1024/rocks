@@ -12,7 +12,9 @@ inline constexpr int32 MaxSpinBoxFractionalDigits = 9;
 // SetOnChanged는 사용자 조작만 전달한다. SetValue는 모델이 보낸 값을 반영한다.
 enum class SpinCommitReason : uint8 {
     Enter,
-    FocusLost
+    FocusLost,
+    // 끝 표지다(값 개수 — Widget 층 미러가 개수를 대조한다).
+    Count
 };
 class ROCKS_UIFRAMEWORK_API SpinBox final : public Frame {
     ROCKS_UI_ELEMENT(SpinBox, Frame)

@@ -21,6 +21,9 @@ static_assert(static_cast<uint8>(WidgetSpinCommitReason::FocusLost) ==
                   static_cast<uint8>(SpinCommitReason::FocusLost),
               "WidgetSpinCommitReason::FocusLost must match SpinCommitReason::FocusLost");
 
+static_assert(static_cast<uint8>(SpinCommitReason::Count) == 2,
+              "SpinCommitReason gained or lost a value; update WidgetSpinCommitReason");
+
 // Element 층 값과 바꾼다.
 constexpr WidgetSpinCommitReason ToWidgetSpinCommitReason(SpinCommitReason value) noexcept {
     return static_cast<WidgetSpinCommitReason>(value);

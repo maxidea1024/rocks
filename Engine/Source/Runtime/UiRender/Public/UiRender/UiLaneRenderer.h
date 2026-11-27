@@ -57,20 +57,24 @@ public:
     UiLaneRenderer(const UiLaneRenderer&) = delete;
     UiLaneRenderer& operator=(const UiLaneRenderer&) = delete;
 
-    // 렌더 lane에서 연다: UI 파이프라인(format 색 대상), 텍스처 slot, 그래프 자원 풀. shaders는 이
-    // 객체가 닫힐 때까지 산다. 실패: 셰이더 집합이 Ready가 아니면 NotReady, UI 셰이더가 없으면
-    // NotFound, 장치 오류는 그 오류.
+    // 렌더 lane에서 연다: UI 파이프라인(format 색 대상), 텍스처 slot, 그래프 자원 풀. 닫히거나 다른
+    // 집합으로 다시 만들 때까지 shaders에 lease를 잡는다(ShaderSetSlot — 교체로 Retire되어도 그
+    // 사이 파괴되지 않는다). 실패: 셰이더 집합이 Ready가 아니거나 Retire되었으면 NotReady, UI
+    // 셰이더가 없으면 NotFound, 장치 오류는 그 오류.
     Result<void> Open(graphics::Device& device, render::ShaderSet& shaders,
                       graphics::PixelFormat format) noexcept;
     // resources의 지금 집합으로 연다. 프레임마다(Render 맨 앞) resources.ApplyShaderUpdates를 불러
     // 감시 재컴파일의 셰이더 교체를 받고, 바뀌면 UI 파이프라인을 새 집합으로 다시
-    // 만든다(ShaderSystem 16.3절 SSD76 — Docs/Design/UiToolkit 18.4절). resources는 이 객체가 닫힐
-    // 때까지 산다. 처리기가 자기 그래프에 AddPasses로 UI를 더하면서 교체를 스스로 받는 경우는
-    // ShaderSet 판 Open과 ReloadShaders를 쓴다.
+    // 만든다(ShaderSystem 16.3절 SSD76 — Docs/Design/UiToolkit 18.4절). 다시 만들지 못하면 옛
+    // 파이프라인으로 계속 그리고 그 집합은 다음 교체까지 다시 시도하지 않는다. resources는 이
+    // 객체가 닫힐 때까지 산다. 교체를 스스로 받는 처리기(자기 그래프에 AddPasses로 UI를 더하는
+    // 경우)는 ShaderSet 판 Open과 ReloadShaders를 쓴다.
     Result<void> Open(graphics::Device& device, render::EngineRenderResources& resources,
                       graphics::PixelFormat format) noexcept;
-    // shaders로 UI 파이프라인을 다시 만든다(셰이더 교체 뒤). 새 파이프라인을 모두 만든 뒤에만 옛
-    // 것을 Retire하고 바꾼다 — 실패하면 옛 파이프라인·집합을 그대로 둔다. 닫혀 있으면 NotReady다.
+    // shaders로 UI 파이프라인을 다시 만든다(셰이더 교체 뒤). 새 집합에 lease를 잡고 새 파이프라인을
+    // 모두 만든 뒤에만 옛 것을 Retire하고 옛 집합의 lease를 놓는다 — 실패하면 옛 파이프라인·집합·
+    // lease를 그대로 둔다. 같은 집합이면 아무 일도 없다. 실패: 닫혀 있거나 shaders가 Ready가
+    // 아니거나 Retire되었으면 NotReady, 그 밖은 Open과 같다.
     Result<void> ReloadShaders(graphics::Device& device, render::ShaderSet& shaders) noexcept;
     // 렌더 lane에서 닫는다(파이프라인·배경 텍스처·풀·남은 창 표면을 Retire한다).
     void Close(graphics::Device& device) noexcept;
@@ -116,7 +120,8 @@ public:
     // 돌려줄 때). error가 None이 아니면 실패로 보관한다.
     void StoreCapture(uint64 capture, Array<uint8>&& rgba, ErrorCode error) noexcept;
 
-    // 열 때 받은 셰이더 집합이다(닫혀 있으면 null). 렌더 lane에서만 쓴다.
+    // UI 파이프라인을 만든 셰이더 집합이다(lease를 잡고 있다 — 닫혀 있으면 null). 렌더 lane에서만
+    // 쓴다.
     render::ShaderSet* Shaders() const noexcept;
     Allocator& GetAllocator() const noexcept;
 
@@ -160,6 +165,8 @@ private:
 
     Allocator& allocator_;
     render::ShaderSet* shaders_ = nullptr;
+    // 다시 만들기에 실패한 집합이다(다음 교체까지 다시 시도하지 않는다 — 비교만 하고 쓰지 않는다).
+    const render::ShaderSet* failedShaders_ = nullptr;
     // Open(resources)로 열었으면 프레임마다 셰이더 교체를 받는 원천이다.
     render::EngineRenderResources* resources_ = nullptr;
     graphics::PixelFormat format_ = graphics::PixelFormat::RGBA8UnormSrgb;

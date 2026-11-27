@@ -22,7 +22,7 @@ public:
     Optional<usize> FindOptionIndex(ObjectHandle option) const noexcept;
     Result<ObjectHandle> SelectedOption() const noexcept;
     Result<void> RemoveOption(ObjectRegistry& objects, ObjectHandle option) noexcept;
-    Result<void> SelectOption(ObjectHandle option) noexcept;
+    Result<void> SelectOption(ObjectRegistry& objects, ObjectHandle option) noexcept;
 
 protected:
     Result<void> WriteLabel(ObjectRegistry& objects, usize index,

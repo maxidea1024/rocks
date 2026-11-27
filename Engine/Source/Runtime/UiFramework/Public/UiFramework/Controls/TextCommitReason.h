@@ -8,7 +8,9 @@ namespace rocks::ui {
 // 21.2절).
 enum class TextCommitReason : uint8 {
     Enter,
-    FocusLost
+    FocusLost,
+    // 끝 표지다(값 개수 — Widget 층 미러가 개수를 대조한다).
+    Count
 };
 
 } // namespace rocks::ui

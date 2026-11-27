@@ -21,7 +21,7 @@ public:
     Optional<usize> FindOptionIndex(StringView option) const noexcept;
     Result<StringView> SelectedOption() const noexcept;
     Result<void> RemoveOption(StringView option) noexcept;
-    Result<void> SelectOption(StringView option) noexcept;
+    Result<void> SelectOption(ObjectRegistry& objects, StringView option) noexcept;
 
 protected:
     Result<void> WriteLabel(ObjectRegistry& objects, usize index,

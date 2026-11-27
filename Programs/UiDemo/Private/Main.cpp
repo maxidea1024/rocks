@@ -141,6 +141,11 @@ int Run(launch::ApplicationContext& context) noexcept {
     }
 
     if (surfaceTest || selfTest) {
+        // 다시 만들기에 실패해도 옛 파이프라인으로 그리는지 아래 표면 검사가 이어서 본다.
+        if (const int reloadChecked = VerifyShaderReload(renderer, lane); reloadChecked != 0) {
+            return reloadChecked;
+        }
+
         const int checked = VerifyWidgetSurfaces(allocator, renderer, lane);
         if (checked != 0 || surfaceTest) {
             return checked;

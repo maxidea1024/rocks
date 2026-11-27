@@ -204,12 +204,13 @@ bool MenuPanel::FocusFirstItem(uint32 user) noexcept {
 }
 
 bool MenuPanel::IsPointerInside() const noexcept {
-    return pointerUsers_ > 0;
+    // 진입·이탈을 세지 않고 hover 경로를 묻는다 — 통지 중 경로가 바뀌어 이탈 통지가 끊겨도 계수가
+    // 남지 않는다(리뷰 2026-11-27).
+    return context_->GetApplication().IsHoveredByAnyUser(*this);
 }
 
 void MenuPanel::OnMouseEnter(uint32 user) noexcept {
     Element::OnMouseEnter(user);
-    ++pointerUsers_;
     if (openSub_) {
         openSub_->InvalidatePaint();
     }
@@ -217,10 +218,6 @@ void MenuPanel::OnMouseEnter(uint32 user) noexcept {
 
 void MenuPanel::OnMouseLeave(uint32 user) noexcept {
     Element::OnMouseLeave(user);
-    if (pointerUsers_ > 0) {
-        --pointerUsers_;
-    }
-
     if (openSub_) {
         openSub_->InvalidatePaint();
     }

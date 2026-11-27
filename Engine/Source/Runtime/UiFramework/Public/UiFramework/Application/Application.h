@@ -13,8 +13,6 @@
 
 namespace rocks::ui {
 
-// 포인터 이벤트를 전달한다. 콜백 전에 경로의 참조를 보관하므로 처리 중 Element를 제거해도
-// 현재 이벤트의 전달 대상이 소멸하지 않는다.
 // BuildWindowRegionMap의 작업량이다(Docs/Design/UiToolkit 19.5절 — 선형 상한 시험·진단용).
 struct WindowRegionMapStats {
     // 본 hit 후보 수와 사각형 겹침 비교 수다.
@@ -22,6 +20,8 @@ struct WindowRegionMapStats {
     usize comparisons = 0;
 };
 
+// 포인터 이벤트를 전달한다. 콜백 전에 경로의 참조를 보관하므로 처리 중 Element를 제거해도
+// 현재 이벤트의 전달 대상이 소멸하지 않는다.
 class ROCKS_UIFRAMEWORK_API Application {
 public:
     explicit Application(Allocator& allocator) noexcept;
@@ -147,6 +147,9 @@ public:
     void CloseToolTip(uint32 user) noexcept;
 
     bool IsHovered(const Element& target, uint32 user = 0) const noexcept;
+    // 어느 사용자든 target(또는 그 자손) 위에 포인터를 두고 있는지다(hover 경로 조회 — 진입·이탈
+    // 통지를 세지 않으므로 통지 중 경로가 바뀌어도 어긋나지 않는다).
+    bool IsHoveredByAnyUser(const Element& target) const noexcept;
     void ClearHover(uint32 user) noexcept;
     bool HasAnyUserFocus(const Element& element) const noexcept;
     // 여러 가상 창을 가로지르는 포인터의 다음 이벤트를 어느 창에 보낼지 결정한다.
@@ -175,8 +178,8 @@ public:
                                    const SharedPtr<Element>& scope = {}) noexcept;
     // 패드 상태 기억을 지운다(창 초점 잃음·입력 넘침).
     void ResetGamepads() noexcept;
-    // 패드 누름을 취소로 끝낸다(끊김·UI 밖으로 넘김 — 뗌을 보내면 버튼이 눌린다). 화면 입력 경로(ScreenInputRouter)가
-    // UI 입력을 끌 때도 부른다.
+    // 패드 누름을 취소로 끝낸다(끊김·UI 밖으로 넘김 — 뗌을 보내면 버튼이 눌린다). 화면 입력
+    // 경로(ScreenInputRouter)가 UI 입력을 끌 때도 부른다.
     void CancelGamepadKeys(uint32 user) noexcept;
     // 보내지 않고 패드 상태만 기억한다(UI가 이 입력을 받지 않을 때 — 다음 누름·뗌 판정이 맞게).
     void SyncGamepadState(uint32 user, uint32 index, const input::GamepadSnapshot& pad) noexcept;

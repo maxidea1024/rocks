@@ -105,8 +105,12 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 
 - **셰이더 감시 교체(최종 동기화 — ShaderSystem 16.3절 SSD76, RenderBase 9.8절 "SH4 연결").**
   - `UiLaneRenderer::Open(device, EngineRenderResources&, format)`으로 열면 `Render` 맨 앞에서 `ApplyShaderUpdates(nullptr)`를 부른다. UI 파이프라인은 캐시를 거치지 않고 장치에 직접 만들기 때문에 캐시를 넘기지 않는다.
-  - 집합이 바뀌면 `ReloadShaders`가 새 집합으로 파이프라인·텍스처 slot을 모두 만든다. 다 만든 뒤에만 옛 것을 Retire한다(실패하면 옛 것 유지, Error 로그, 그 프레임은 실패 보고).
-  - 처리기가 자기 그래프에 `AddPasses`로 UI를 더하면서 교체를 스스로 받는 경우(Sandbox `ScreenRenderer`)는 `ShaderSet` 판 `Open`과 `ReloadShaders`를 쓴다.
+  - 파이프라인을 만든 집합에 lease를 잡는다(`ShaderSetSlot` 계약 — `Current`가 돌려준 집합은 다음 `ApplyPending`까지만 유효하고, 넘어서 쓰는 쪽은 lease를 잡는다). 교체로 옛 집합이 Retire되어도 lease가 풀릴 때까지 파괴되지 않는다(리뷰 2026-11-27 — lease 없이 다시 만들기에 실패하면 `CollectRetired`가 파괴한 집합을 계속 가리켰다).
+  - 현재 집합이 내 집합과 다르면 `ReloadShaders`가 새 집합에 lease를 잡고 파이프라인·텍스처 slot을 모두 만든다. 다 만든 뒤에만 옛 파이프라인을 Retire하고 옛 lease를 놓는다.
+  - 실패하면 옛 파이프라인으로 계속 그린다(계획 14.1절 "hot reload 실패 시 이전 검증 버전 유지" — 프레임을 버리지 않는다). Error 로그를 한 번 남기고, 그 집합은 다음 교체까지 다시 시도하지 않는다.
+  - 장면 pass 기록(`UiScenePassContext`)에는 이번 프레임의 현재 집합을 넘긴다. UI 재빌드에 실패해 옛 집합을 붙잡고 있어도 장면 렌더러가 Retire된 집합으로 새 파이프라인을 만들지 않는다.
+  - 처리기가 자기 그래프에 `AddPasses`로 UI를 더하면서 교체를 스스로 받는 경우는 `ShaderSet` 판 `Open`과 `ReloadShaders`를 쓴다(지금 쓰는 곳은 없다 — Sandbox `ScreenRenderer`는 UT5에서 UI를 붙일 때 정한다).
+  - 시험: UiDemo self-test가 실제 장치(D3D11 WARP)에서 같은 집합 다시 만들기(변화 없음), Ready가 아닌 집합으로 다시 만들기(`NotReady` — 옛 파이프라인·lease 유지, 그 뒤 프레임이 그려짐)를 본다.
   - UiDemo `DemoLaneProcessor`는 집합 원천 판으로 연다.
 
 ### 18.5 UiDemo를 RenderLane으로(UW6c)

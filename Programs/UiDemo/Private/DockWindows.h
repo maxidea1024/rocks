@@ -66,6 +66,8 @@ private:
         SharedPtr<DemoTextInput> textInput;
         // --frame-stats 단계별 시간이다(제출은 모든 창을 한 번에 하므로 DockWindows가 센다).
         FrameStats stats;
+        // 로그에서 창을 가르는 번호다(만든 순서 — 0은 주 창).
+        uint32 statsIndex = 0;
     };
     Result<SlotHandle> Add(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                            StringView title) noexcept;
@@ -95,6 +97,8 @@ private:
     // --frame-stats이면 창마다·제출의 단계별 시간을 남긴다.
     bool frameStats_ = false;
     FrameStats submitStats_;
+    // 다음 창의 frame-stats 번호다.
+    uint32 nextStatsIndex_ = 0;
     // 모든 창이 함께 쓰는 스타일 등록부다(첫 창을 만들 때 — 앱 스타일은 EditorStyle, 20.11절).
     SharedPtr<StyleRegistry> styles_;
     SlotHandle primary_{};

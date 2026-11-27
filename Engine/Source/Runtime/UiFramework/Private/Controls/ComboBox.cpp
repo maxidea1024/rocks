@@ -84,7 +84,7 @@ void ComboBox::SetOptionFactory(MakeOption&& factory) noexcept {
     makeOption_ = Move(factory);
 }
 
-void ComboBox::SetOnSelectionChanged(Delegate<void(int32)>&& callback) noexcept {
+void ComboBox::SetOnSelectionChanged(Delegate<void(int32, SelectionCause)>&& callback) noexcept {
     selectionChanged_ = Move(callback);
 }
 
@@ -160,15 +160,20 @@ void ComboBox::UpdateOptions(usize count, int32 selected) noexcept {
     Close();
     rows_.Clear();
     count_ = count;
+    const bool cleared = selected_ >= 0 && selected < 0;
     selected_ = selected;
     if (selected < 0) {
         if (auto display = ChildRefAt(0)) {
             (void)RemoveChild(*display);
         }
     }
+
+    if (cleared) {
+        selectionChanged_.ExecuteIfBound(-1, SelectionCause::Direct);
+    }
 }
 
-Result<void> ComboBox::Select(int32 index) noexcept {
+Result<void> ComboBox::Select(int32 index, SelectionCause cause) noexcept {
     if (index == selected_) {
         Close();
         return Result<void>::Success();
@@ -176,7 +181,7 @@ Result<void> ComboBox::Select(int32 index) noexcept {
 
     auto changed = Refresh(count_, index);
     if (changed) {
-        selectionChanged_.ExecuteIfBound(index);
+        selectionChanged_.ExecuteIfBound(index, cause);
     }
 
     return changed;
@@ -255,7 +260,7 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
 
         row.Value()->SetOnClicked(Delegate<void()>::CreateWeakLambda(self, [this, i]() noexcept {
             if (IsOpen()) {
-                (void)Select(static_cast<int32>(i));
+                (void)Select(static_cast<int32>(i), SelectionCause::Pointer);
             }
         }));
     }
@@ -307,7 +312,7 @@ KeyReply ComboBox::OnKeyEvent(const KeyEvent& key) noexcept {
             if (IsOpen()) {
                 Highlight(next);
             } else {
-                (void)Select(next);
+                (void)Select(next, SelectionCause::Key);
             }
 
             return KeyReply::Handled();
@@ -315,7 +320,7 @@ KeyReply ComboBox::OnKeyEvent(const KeyEvent& key) noexcept {
 
         // 확인 동작(Enter·Space·패드 South)이면 강조 항목을 고른다(20.8절).
         if (IsOpen() && key.action == NavigationAction::Accept) {
-            (void)Select(highlighted_);
+            (void)Select(highlighted_, SelectionCause::Direct);
             return KeyReply::Handled();
         }
     }

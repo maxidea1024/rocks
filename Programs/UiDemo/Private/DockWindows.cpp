@@ -211,6 +211,7 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
 
     auto& host = *surface.Value();
     host.stats.SetEnabled(frameStats_);
+    host.statsIndex = nextStatsIndex_++;
     // 편집기 룩 창이라 UE 에디터처럼 앱 스타일이 EditorStyle이다(Docs/Design/UiToolkit 20.11절).
     if (!styles_) {
         auto styles = CreateStandardStyleRegistry(allocator_);
@@ -650,7 +651,7 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
     }
 
     host.stats.Mark(FrameStage::Batch);
-    host.stats.EndFrame("Window");
+    host.stats.EndFrame(host.statsIndex);
     if (!repaint) {
         return Result<bool>::Success(false);
     }
@@ -761,7 +762,7 @@ Result<void> DockWindows::Run(UniquePtr<platform::Window> window,
         submitStats_.Begin();
         auto drawn = DrawFrame(frame);
         submitStats_.Mark(FrameStage::Submit);
-        submitStats_.EndFrame("Submit");
+        submitStats_.EndFrame(0);
         if (!drawn) {
             return drawn;
         }

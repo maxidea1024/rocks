@@ -166,6 +166,8 @@ public abstract class TestsModule : ModuleRules
         ["Texture"] = ["AssetTestFixtures", "ObjectSerialization"],
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
+        // The widget event binding tests bind widget events to a reflected function of the reflection fixture (Docs/Design/UiToolkit section 21.5a).
+        ["UiWidget"] = ["ReflectionTestFixtures"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
         // The World collision tests build the profile table from a Config test fixture context (Docs/Design/CollisionData.ko.md CD2).
         ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"],

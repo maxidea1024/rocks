@@ -1,3 +1,4 @@
+#include <ReflectionTestFixtures/FunctionFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/GameWidgetStyles.h>
@@ -139,6 +140,72 @@ TEST(UiWidget_WidgetEventsReachEverySubscriberAndDropLateElementEvents) {
     CHECK(first == 1 && second == 1);
     click(*rebuilt.Value());
     CHECK(first == 2 && second == 2);
+}
+
+TEST(UiWidget_WidgetEventBindingIsDroppedWhenItsTargetIsDestroyed) {
+    // UW9f(UiToolkit 21.5a절): 리플렉션 바인딩(Event::TryBind)은 대상의 handle만 쥔다 — 대상을
+    // 파괴하면 발행이 그 바인딩을 부르지 않고 지운다(EventReflection ED7, UE dynamic delegate의
+    // 약한 대상). 같은 이벤트의 native 구독은 그대로 받는다.
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration modules(types, allocator);
+    REQUIRE(RegisterWidgetTypes(modules));
+    REQUIRE(GeneratedType<reflection_fixture::CallTarget>::Register(types));
+    ObjectRegistry objects(allocator, types, {0x554957, 100});
+    const auto access = objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    auto treeRef = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());
+    REQUIRE(treeRef);
+    auto owned = objects.ResolveForWrite<WidgetTree>(access, treeRef.Value().Handle());
+    REQUIRE(owned);
+    auto buttonRef = owned.Value().Get().Value()->ConstructWidget(
+        objects, GeneratedType<ButtonWidget>::Id(), "Button");
+    REQUIRE(buttonRef);
+    auto made = objects.NewObject<reflection_fixture::CallTarget>(
+        access, TypeIdOf<reflection_fixture::CallTarget>(), {}, {});
+    REQUIRE(made);
+    const ObjectHandle target = made.Value().Handle();
+    // CallTarget::Relay는 total에 1을 더한다(인자 없는 리플렉션 함수).
+    Guid relay{};
+    {
+        auto type = types.Acquire(TypeIdOf<reflection_fixture::CallTarget>());
+        REQUIRE(type);
+        for (const FunctionSchema& function : type.Value().Schema().functions) {
+            if (StringView(function.name.Data(), function.name.Size()) == "Relay") {
+                relay = function.id;
+            }
+        }
+    }
+
+    REQUIRE(relay != Guid{});
+    const auto totalOf = [&]() noexcept {
+        auto borrowed = objects.Resolve<reflection_fixture::CallTarget>(access, target);
+        return borrowed ? borrowed.Value().Get().Value()->total : -1;
+    };
+    auto b = objects.ResolveForWrite<ButtonWidget>(access, buttonRef.Value().Handle());
+    REQUIRE(b);
+    auto& button = *b.Value().Get().Value();
+    uint32 native = 0;
+    REQUIRE(button.OnClicked().TryAddLambda([&native]() noexcept { ++native; }));
+    REQUIRE(button.OnClicked().TryBind(objects, access, target, relay));
+    CHECK(button.OnClicked().BindingCount() == 1);
+    auto element = button.TakeElement(objects);
+    REQUIRE(element);
+    const auto click = [&]() noexcept {
+        (void)element.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Enter));
+        (void)element.Value()->SendKey(0, input::InputEvent::KeyUp(input::Key::Enter));
+    };
+    click();
+    CHECK(native == 1 && totalOf() == 1);
+    // 대상을 파괴한다(파괴 요청 — 살아 있지 않은 대상의 바인딩은 발행이 지운다, ED7). 바인딩은
+    // 대상을 붙잡지 않는다.
+    made.Value().Reset();
+    REQUIRE(objects.RequestDestroy(access, target));
+    click();
+    CHECK(native == 2);
+    CHECK(button.OnClicked().BindingCount() == 0);
+    CHECK(totalOf() != 2);
+    button.ReleaseElements();
 }
 
 } // namespace rocks::ui

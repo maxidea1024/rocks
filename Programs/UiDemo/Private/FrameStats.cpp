@@ -42,6 +42,7 @@ void FrameStats::Mark(FrameStage stage) noexcept {
 
     const double now = NowMilliseconds();
     stages_[static_cast<usize>(stage)] += now - last_;
+    marked_ |= 1u << static_cast<uint32>(stage);
     last_ = now;
 }
 
@@ -49,7 +50,7 @@ void FrameStats::NoteCandidates(usize count) noexcept {
     candidates_ = count > candidates_ ? count : candidates_;
 }
 
-void FrameStats::EndFrame(StringView window) noexcept {
+void FrameStats::EndFrame(uint32 index) noexcept {
     if (!running_) {
         return;
     }
@@ -63,20 +64,26 @@ void FrameStats::EndFrame(StringView window) noexcept {
     const auto average = [&](FrameStage stage) noexcept {
         return stages_[static_cast<usize>(stage)] / frames;
     };
-    Log::Info(LogUiDemo,
-              "Frame stats {Window} ({Frames} frames, ms/frame): input {Input}, layout {Layout}, "
-              "record {Record}, paint cache {PaintCache}, regions {Regions}, batch {Batch}, "
-              "submit {Submit}; hit candidates {Candidates}",
-              window, frames_, average(FrameStage::Input), average(FrameStage::Layout),
-              average(FrameStage::Record), average(FrameStage::PaintCache),
-              average(FrameStage::Regions), average(FrameStage::Batch), average(FrameStage::Submit),
-              candidates_);
+    if (marked_ == 1u << static_cast<uint32>(FrameStage::Submit)) {
+        Log::Info(LogUiDemo, "Frame stats Submit ({Frames} frames, ms/frame): submit {Submit}",
+                  frames_, average(FrameStage::Submit));
+    } else {
+        Log::Info(LogUiDemo,
+                  "Frame stats Window {Index} ({Frames} frames, ms/frame): input {Input}, layout "
+                  "{Layout}, record {Record}, paint cache {PaintCache}, regions {Regions}, batch "
+                  "{Batch}; hit candidates {Candidates}",
+                  index, frames_, average(FrameStage::Input), average(FrameStage::Layout),
+                  average(FrameStage::Record), average(FrameStage::PaintCache),
+                  average(FrameStage::Regions), average(FrameStage::Batch), candidates_);
+    }
+
     for (double& stage : stages_) {
         stage = 0;
     }
 
     frames_ = 0;
     candidates_ = 0;
+    marked_ = 0;
 }
 
 } // namespace rocks::ui

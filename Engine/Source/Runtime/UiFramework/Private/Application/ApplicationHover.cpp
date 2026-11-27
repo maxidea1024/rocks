@@ -18,6 +18,16 @@ bool Application::IsHovered(const Element& target, uint32 user) const noexcept {
     return false;
 }
 
+bool Application::IsHoveredByAnyUser(const Element& target) const noexcept {
+    for (const auto& entry : hover_) {
+        if (IsHovered(target, entry.user)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void Application::ClearHover(uint32 user) noexcept {
     CloseToolTip(user);
     for (usize i = 0; i < hover_.Size(); ++i) {

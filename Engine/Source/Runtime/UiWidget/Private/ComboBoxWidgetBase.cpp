@@ -33,17 +33,20 @@ int32 ComboBoxWidgetBase::SelectionAfterRemoving(usize index) const noexcept {
 }
 
 void ComboBoxWidgetBase::OptionsChanged(int32 selection) noexcept {
-    const bool cleared = selectedIndex_ >= 0 && selection < 0;
+    const bool changed = selectedIndex_ != selection;
     selectedIndex_ = selection;
+    // 선택 항목이 지워져 해제되면 Element가 (-1, Direct) 사건을 보낸다(UE RemoveOption →
+    // ClearSelection — 위젯이 있을 때만, 21.5a절).
     if (auto live = CachedElement()) {
         StaticElementCast<ComboBox>(*live).UpdateOptions(OptionCount(), selection);
     }
 
-    // 선택을 지운 것은 프로그램 변경이다 — 사건은 Element 선택 경로에서만 보낸다(UE, 21.5a절).
-    (void)cleared;
+    if (changed) {
+        NotifyPropertyChanged("selectedIndex");
+    }
 }
 
-Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
+Result<void> ComboBoxWidgetBase::SetSelectedIndex(ObjectRegistry& objects, int32 index) noexcept {
     if (index < -1 || (index >= 0 && static_cast<usize>(index) >= OptionCount())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -52,18 +55,28 @@ Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // Element가 있으면 그 선택 경로가 값·필드 통지·사건을 맡는다(까닭 Direct).
     if (auto live = CachedElement()) {
-        return StaticElementCast<ComboBox>(*live).Select(index);
+        return StaticElementCast<ComboBox>(*live).Select(index, SelectionCause::Direct);
     }
 
-    // Element가 없을 때의 선택은 값만 바꾼다(UE UComboBoxString::SetSelectedIndex — 사건
-    // 없음, 21.5a절).
+    if (index == selectedIndex_) {
+        return Result<void>::Success();
+    }
+
     selectedIndex_ = index;
+    NotifyPropertyChanged("selectedIndex");
+    // UE SetSelectedIndex는 위젯이 없으면 HandleSelectionChanged(Direct)로 사건을 보낸다
+    // (ComboBoxString.cpp 226–247행). 해제(-1)는 ClearSelection처럼 사건이 없다.
+    if (index >= 0) {
+        selectionChanged_.Broadcast({objects, objects.OwnerAccess(), Handle()}, index,
+                                    WidgetSelectionCause::Direct);
+    }
 
     return Result<void>::Success();
 }
 
-Event<int32>& ComboBoxWidgetBase::OnSelectionChanged() noexcept {
+Event<int32, WidgetSelectionCause>& ComboBoxWidgetBase::OnSelectionChanged() noexcept {
     return selectionChanged_;
 }
 
@@ -146,15 +159,17 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::BuildElement(ObjectRegistry& obje
             return widget ? widget.Value().Get().Value()->MakeOption(objects, i, display)
                           : Result<SharedPtr<Element>>::Failure(widget.Error());
         }));
-    combo.Value()->SetOnSelectionChanged(Delegate<void(int32)>::CreateLambda(
-        [&objects, owner = Handle(), native = combo.Value().Get()](int32 index) noexcept {
+    combo.Value()->SetOnSelectionChanged(Delegate<void(int32, SelectionCause)>::CreateLambda(
+        [&objects, owner = Handle(), native = combo.Value().Get()](int32 index,
+                                                                   SelectionCause cause) noexcept {
             auto widget = objects.ResolveForWrite<ComboBoxWidgetBase>(objects.OwnerAccess(), owner);
             if (widget) {
                 auto* value = widget.Value().Get().Value();
                 if (value->CachedElement().Get() == native) {
                     value->selectedIndex_ = index;
+                    value->NotifyPropertyChanged("selectedIndex");
                     value->selectionChanged_.Broadcast({objects, objects.OwnerAccess(), owner},
-                                                       index);
+                                                       index, ToWidgetSelectionCause(cause));
                 }
             }
         }));
@@ -163,8 +178,8 @@ Result<SharedPtr<Element>> ComboBoxWidgetBase::BuildElement(ObjectRegistry& obje
                   : Result<SharedPtr<Element>>::Failure(status.Error());
 }
 
-Result<void> ComboBoxWidgetBase::ClearSelection() noexcept {
-    return SetSelectedIndex(-1);
+Result<void> ComboBoxWidgetBase::ClearSelection(ObjectRegistry& objects) noexcept {
+    return SetSelectedIndex(objects, -1);
 }
 
 Result<void> ComboBoxWidgetBase::RefreshOptions() noexcept {

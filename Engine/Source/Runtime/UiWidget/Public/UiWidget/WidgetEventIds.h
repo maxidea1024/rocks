@@ -44,6 +44,8 @@ inline constexpr Guid TextCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820bULL};
 // const InputChordValue& 인자다(옛 KeyChord 인자 0x…206은 은퇴).
 inline constexpr Guid KeyChord{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820cULL};
 inline constexpr Guid Number{0x8c27ce53c5ba4f09ULL, 0xaa2354c570858207ULL};
+// (int32 index, WidgetSelectionCause)다(콤보 선택 — 옛 Integer 서명에서 바꿈, 21.5a절).
+inline constexpr Guid IndexWithCause{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820eULL};
 // (float, WidgetSpinCommitReason)다(옛 0x…208은 은퇴).
 inline constexpr Guid SpinCommit{0x8c27ce53c5ba4f09ULL, 0xaa2354c57085820dULL};
 

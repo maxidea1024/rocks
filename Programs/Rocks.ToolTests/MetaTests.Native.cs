@@ -43,6 +43,7 @@ internal static partial class MetaTests
             await probe.RejectAsync(Source("rocks::WeakPtr<Service> observed; rocks::SharedPtr<Service> owned;"),
                 "RMC2205", "strong object reference");
         });
+
         AddRejectGroup(context, "Meta.NativeMembersCannotHoldStrongReferences", new[]
             {
                 "rocks::ObjectRef<Value> cache;",

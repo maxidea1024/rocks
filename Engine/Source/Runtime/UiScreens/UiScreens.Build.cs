@@ -4,5 +4,6 @@ using Rocks.Build.Rules;
 public sealed class UiScreens : EngineModuleRules
 {
     protected override string ModuleName => "UiScreens";
+
     protected override string[] PublicDependencies => ["UiWidget", "Input"];
 }

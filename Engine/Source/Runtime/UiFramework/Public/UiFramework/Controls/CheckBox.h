@@ -7,7 +7,9 @@ namespace rocks::ui {
 enum class CheckState : uint8 {
     Unchecked,
     Checked,
-    Indeterminate
+    Indeterminate,
+    // 끝 표지다(값 개수 — Widget 층 미러가 개수를 대조한다).
+    Count
 };
 
 // 활성화할 때 체크 상태를 바꾸고 변경된 값을 통지한다. 모양은 CheckBoxStyle(UE "Checkbox")이다:

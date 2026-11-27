@@ -7,6 +7,22 @@
 
 namespace rocks::ui {
 
+// UserWidgetRoot(이 파일의 익명 이름공간)가 UserWidget의 미룬 해체 번호를 다루는 통로다.
+struct UserWidgetTeardown {
+    // 새 미룬 해체 번호를 매기고 돌려준다.
+    static uint64 Begin(UserWidget& widget) noexcept {
+        widget.pendingTeardown_ = ++widget.teardownSerial_;
+        return widget.pendingTeardown_;
+    }
+
+    // token이 아직 남은 해체이면 끝낸다(그 사이 다시 구성해 이미 끝났으면 아무 일도 없다).
+    static void Finish(UserWidget& widget, ObjectRegistry& objects, uint64 token) noexcept {
+        if (widget.pendingTeardown_ == token) {
+            widget.FinishPendingTeardown(objects);
+        }
+    }
+};
+
 namespace {
 
 constexpr LogCategory LogUiWidget{"UiWidget"};
@@ -29,7 +45,7 @@ public:
     }
 
     // 사용자 hook(OnDestruct·애니메이션 정지 통지)을 소멸자에서 부르지 않는다. 명시 해제 없이
-    // 버려지면 마지막으로 측정한 앱의 해체 대기열로 미룬다(Docs/Design/UiToolkit 21.4절).
+    // 버려지면 마지막으로 붙은 앱의 해체 대기열로 미룬다(Docs/Design/UiToolkit 21.4절).
     ~UserWidgetRoot() noexcept override {
         DetachDeferred();
     }
@@ -102,15 +118,17 @@ public:
         const auto handle = tree_;
         tree_ = {};
         const auto access = objects_.OwnerAccess();
-        auto tree = objects_.Resolve<WidgetTree>(access, handle);
-        if (tree) {
-            tree.Value().Get().Value()->DetachHost(objects_, *this);
-        }
-
+        // UE 순서다(SObjectWidget::ResetWidget — NativeDestruct 뒤에 자식 Slate 자원을 놓는다):
+        // OnDestruct는 아직 붙어 있는 자식 Element를 볼 수 있다.
         auto owner = objects_.Resolve<UserWidget>(access, owner_.Handle());
         if (owner) {
             owner.Value().Get().Value()->StopAllAnimations();
             owner.Value().Get().Value()->OnDestruct();
+        }
+
+        auto tree = objects_.Resolve<WidgetTree>(access, handle);
+        if (tree) {
+            tree.Value().Get().Value()->DetachHost(objects_, *this);
         }
 
         owner_.Reset();
@@ -126,9 +144,9 @@ public:
         const auto handle = tree_;
         tree_ = {};
         const auto access = objects_.OwnerAccess();
-        // 엔진 정리(호스트에서 Element 떼기)만 지금 한다. 루트 Widget의 ReleaseElements(중첩
-        // UserWidget·목록·화면 컨테이너의 사용자 hook)는 대기열에서 이 위젯의 OnDestruct보다 먼저
-        // 돈다.
+        // 엔진 정리(호스트에서 Element 떼기)만 지금 한다. 이 위젯의 OnDestruct와 루트 Widget의
+        // ReleaseElements(중첩 UserWidget·목록·화면 컨테이너의 사용자 hook)는 대기열이나 다시
+        // 구성하기 직전(FinishPendingTeardown)에 그 순서로 돈다.
         auto tree = objects_.Resolve<WidgetTree>(access, handle);
         if (tree) {
             tree.Value().Get().Value()->DetachHostElements(*this);
@@ -146,17 +164,22 @@ public:
             return;
         }
 
-        auto queued = host->DeferTeardown(Delegate<void()>::CreateLambda(
-            [objects = &objects_, owner = Move(owner_), handle]() noexcept {
-                const auto ownerAccess = objects->OwnerAccess();
-                if (auto widgets = objects->Resolve<WidgetTree>(ownerAccess, handle)) {
-                    widgets.Value().Get().Value()->ReleaseRootWidget(*objects);
-                }
+        auto widget = objects_.ResolveForWrite<UserWidget>(access, owner_.Handle());
+        if (!widget) {
+            Log::Warning(LogUiWidget,
+                         "Could not mark a user widget teardown ({Error}); OnDestruct is skipped",
+                         widget.Error());
+            owner_.Reset();
+            return;
+        }
 
-                auto widget = objects->Resolve<UserWidget>(ownerAccess, owner.Handle());
-                if (widget) {
-                    widget.Value().Get().Value()->StopAllAnimations();
-                    widget.Value().Get().Value()->OnDestruct();
+        const uint64 token = UserWidgetTeardown::Begin(*widget.Value().Get().Value());
+        auto queued = host->DeferTeardown(Delegate<void()>::CreateLambda(
+            [objects = &objects_, owner = Move(owner_), token]() noexcept {
+                auto pending =
+                    objects->ResolveForWrite<UserWidget>(objects->OwnerAccess(), owner.Handle());
+                if (pending) {
+                    UserWidgetTeardown::Finish(*pending.Value().Get().Value(), *objects, token);
                 }
             }));
         if (!queued) {
@@ -180,7 +203,7 @@ private:
 
     ObjectRegistry& objects_;
     RootRef<UserWidget> owner_;
-    // 마지막으로 측정한 앱의 호스트 묶음이다(미룬 해체 통지 자리).
+    // 마지막으로 붙은 앱의 호스트 묶음이다(미룬 해체 통지 자리 — 떨어질 때 지우지 않는다).
     WeakPtr<UiHostServices> host_;
     ObjectHandle tree_{};
 };
@@ -220,6 +243,9 @@ Result<void> UserWidget::Initialize(ObjectRegistry& objects) noexcept {
 }
 
 Result<SharedPtr<Element>> UserWidget::BuildElement(ObjectRegistry& objects) noexcept {
+    // 옛 Element의 미룬 해체가 남았으면 다시 구성하기 전에 끝낸다(UE 순서 — 옛 NativeDestruct 뒤
+    // 새 NativeConstruct, 21.4절). 대기열 항목은 번호가 지워져 아무 일도 하지 않는다.
+    FinishPendingTeardown(objects);
     auto initialized = Initialize(objects);
     if (!initialized) {
         return Result<SharedPtr<Element>>::Failure(initialized.Error());
@@ -318,6 +344,19 @@ void UserWidget::OnDestruct() noexcept {
 
 void UserWidget::OnRebuilt() noexcept {
     OnConstruct();
+}
+
+void UserWidget::FinishPendingTeardown(ObjectRegistry& objects) noexcept {
+    if (pendingTeardown_ == NoPendingTeardown) {
+        return;
+    }
+
+    pendingTeardown_ = NoPendingTeardown;
+    StopAllAnimations();
+    OnDestruct();
+    if (auto widgets = objects.Resolve<WidgetTree>(objects.OwnerAccess(), Tree())) {
+        widgets.Value().Get().Value()->ReleaseRootWidget(objects);
+    }
 }
 
 } // namespace rocks::ui

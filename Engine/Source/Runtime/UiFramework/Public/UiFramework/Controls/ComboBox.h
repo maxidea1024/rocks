@@ -1,6 +1,7 @@
 #pragma once
 
 #include <UiCore/Styles/CoreIcons.h>
+#include <UiFramework/Controls/SelectionCause.h>
 #include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Layout/SizeBox.h>
 #include <UiFramework/Scrolling/ScrollView.h>
@@ -23,7 +24,7 @@ public:
         usize count = 0;
         int32 selected = -1;
         MakeOption makeOption{};
-        Delegate<void(int32)> onSelectionChanged{};
+        Delegate<void(int32, SelectionCause)> onSelectionChanged{};
         Delegate<void()> onOpening{};
         float maxListHeight = 450;
         ElementArgs common{};
@@ -32,13 +33,18 @@ public:
     Result<void> Construct(Args&& args) noexcept;
     explicit ComboBox(Allocator& allocator) noexcept;
     void SetOptionFactory(MakeOption&& factory) noexcept;
-    void SetOnSelectionChanged(Delegate<void(int32)>&& callback) noexcept;
+    // 선택이 바뀌면 (새 인덱스, 까닭)으로 부른다(UE SComboBox OnSelectionChanged — 같은 항목을 다시
+    // 고르면 부르지 않는다). 선택 항목이 지워져 해제되면 (-1, Direct)다.
+    void SetOnSelectionChanged(Delegate<void(int32, SelectionCause)>&& callback) noexcept;
     // 외부에서 네이티브 참조를 계속 보유해도 해제된 게임 모델을 다시 호출하지 않는다.
     void DisconnectModel() noexcept;
     Result<void> Refresh(usize count, int32 selected) noexcept;
-    // 항목 추가·삭제 후 같은 선택 항목의 인덱스만 갱신한다. 선택이 제거되면 -1을 넘긴다.
+    // 항목 추가·삭제 후 같은 선택 항목의 인덱스만 갱신한다. 선택이 제거되면 -1을 넘긴다 — 선택이
+    // 있었으면 해제 사건 (-1, Direct)를 보낸다(UE UComboBoxString::RemoveOption → ClearSelection →
+    // SListView::ClearSelection의 Direct 통지).
     void UpdateOptions(usize count, int32 selected) noexcept;
-    Result<void> Select(int32 index) noexcept;
+    // index를 고른다(-1은 해제). 바뀌었으면 사건을 cause와 함께 보낸다.
+    Result<void> Select(int32 index, SelectionCause cause = SelectionCause::Direct) noexcept;
     Result<void> SetMaxListHeight(float height) noexcept;
     int32 SelectedIndex() const noexcept;
     KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
@@ -55,7 +61,7 @@ private:
     WeakPtr<SizeBox> menuBounds_;
     WeakPtr<ScrollView> scroll_;
     MakeOption makeOption_;
-    Delegate<void(int32)> selectionChanged_;
+    Delegate<void(int32, SelectionCause)> selectionChanged_;
     usize count_ = 0;
     int32 selected_ = -1;
     int32 highlighted_ = -1;

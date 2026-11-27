@@ -24,7 +24,7 @@ struct StyleBench {
     Application app;
 };
 
-bool Build(Allocator& allocator, StyleBench& bench) noexcept {
+bool BuildStyleBench(Allocator& allocator, StyleBench& bench) noexcept {
     auto registry = SharedPtr<StyleRegistry>::TryMake(allocator, allocator);
     auto core = SharedPtr<StyleSet>::TryMake(allocator, allocator);
     auto editor = SharedPtr<StyleSet>::TryMake(allocator, allocator);
@@ -47,7 +47,7 @@ bool Build(Allocator& allocator, StyleBench& bench) noexcept {
 TEST(UiFramework_StyleRegistryWalksParentSets) {
     SystemAllocator allocator;
     StyleBench bench(allocator);
-    REQUIRE(Build(allocator, bench));
+    REQUIRE(BuildStyleBench(allocator, bench));
     // EditorStyle에 없는 이름은 부모 CoreStyle에서 찾는다.
     CHECK(bench.registry->FindStyle<ButtonStyle>(*bench.editor, "PrimaryButton") != nullptr);
     CHECK(*bench.registry->FindStyle<ButtonStyle>(*bench.editor, "PrimaryButton") ==
@@ -66,7 +66,7 @@ TEST(UiFramework_StyleRegistryWalksParentSets) {
 TEST(UiFramework_ButtonTakesTheActiveAppStyleUnlessExplicit) {
     SystemAllocator allocator;
     StyleBench bench(allocator);
-    REQUIRE(Build(allocator, bench));
+    REQUIRE(BuildStyleBench(allocator, bench));
     ButtonStyle editorButton = DefaultButtonStyle();
     editorButton.normalPadding = {9, 3, 9, 3};
     REQUIRE(bench.editor->Set<ButtonStyle>("Button", editorButton));
@@ -138,7 +138,7 @@ TEST(UiFramework_StandardStyleRegistryHoldsTheThreeUeSets) {
 TEST(UiFramework_StyleRevisionNeverRepeatsAndMissingKeysFallBack) {
     SystemAllocator allocator;
     StyleBench bench(allocator);
-    REQUIRE(Build(allocator, bench));
+    REQUIRE(BuildStyleBench(allocator, bench));
     auto root = SharedPtr<Element>::TryMake(allocator, allocator);
     auto plain = SharedPtr<Button>::TryMake(allocator, allocator);
     REQUIRE(root && plain);

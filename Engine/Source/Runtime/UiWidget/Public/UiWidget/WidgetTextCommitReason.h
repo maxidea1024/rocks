@@ -21,6 +21,9 @@ static_assert(static_cast<uint8>(WidgetTextCommitReason::FocusLost) ==
                   static_cast<uint8>(TextCommitReason::FocusLost),
               "WidgetTextCommitReason::FocusLost must match TextCommitReason::FocusLost");
 
+static_assert(static_cast<uint8>(TextCommitReason::Count) == 2,
+              "TextCommitReason gained or lost a value; update WidgetTextCommitReason");
+
 // Element 층 값과 바꾼다.
 constexpr WidgetTextCommitReason ToWidgetTextCommitReason(TextCommitReason value) noexcept {
     return static_cast<WidgetTextCommitReason>(value);

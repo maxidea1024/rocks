@@ -462,10 +462,10 @@ private:
     uint64 bindingPass_ = 0;
     // 마지막으로 ApplyStyles를 부른 스타일 revision이다.
     uint64 styleRevision_ = 0;
-    // 마지막으로 스타일을 받은 호스트 묶음이다(다른 앱으로 옮겨지면 revision이 같아도 다시 받는다).
     // 이 요소와 모든 자식(비활성 포함)에 OnUiHostServicesChanged를 알리고 스타일 기억을 비운다
     // (다른 묶음의 같은 주소 재사용에도 다시 받게).
     void NotifyUiHostAttached() noexcept;
+    // 마지막으로 스타일을 받은 호스트 묶음이다(다른 앱으로 옮겨지면 revision이 같아도 다시 받는다).
     const UiHostServices* styleHost_ = nullptr;
 
     // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다. disabled는 이 요소나

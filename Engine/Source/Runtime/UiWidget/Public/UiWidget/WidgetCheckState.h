@@ -25,6 +25,9 @@ static_assert(static_cast<uint8>(WidgetCheckState::Indeterminate) ==
                   static_cast<uint8>(CheckState::Indeterminate),
               "WidgetCheckState::Indeterminate must match CheckState::Indeterminate");
 
+static_assert(static_cast<uint8>(CheckState::Count) == 3,
+              "CheckState gained or lost a value; update WidgetCheckState");
+
 // Element 층 값과 바꾼다.
 constexpr WidgetCheckState ToWidgetCheckState(CheckState value) noexcept {
     return static_cast<WidgetCheckState>(value);

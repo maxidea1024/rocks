@@ -5,6 +5,8 @@ using Rocks.Build.Rules;
 public sealed class UiWidget : EngineModuleRules
 {
     protected override string ModuleName => "UiWidget";
+
     protected override string[] PrivateDependencies => ["ObjectSerialization", "PlatformBase"];
+
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Curves", "Localization", "UiFramework", "AssetRuntime", "World"];
 }

@@ -4,6 +4,7 @@
 #include <Object/PropertyPath.h>
 #include <TestSupport/Test.h>
 #include <UiFramework/Application/Application.h>
+#include <UiWidget/BorderWidget.generated.h>
 #include <UiWidget/CheckBoxWidget.generated.h>
 #include <UiWidget/UserWidget.generated.h>
 #include <UiWidget/Widget.generated.h>
@@ -32,14 +33,20 @@ public:
 
     void OnConstruct() noexcept override {
         ++constructs;
+        lastConstruct = ++sequence;
     }
 
     void OnDestruct() noexcept override {
         ++destructs;
+        lastDestruct = ++sequence;
     }
 
     uint32 constructs = 0;
     uint32 destructs = 0;
+    // hook 순서를 보려는 순번이다(마지막 Construct·Destruct가 몇 번째 hook이었는지).
+    uint32 sequence = 0;
+    uint32 lastConstruct = 0;
+    uint32 lastDestruct = 0;
 };
 
 struct LifecycleBench {
@@ -125,6 +132,60 @@ TEST(UiWidget_DroppedTreeDefersDestructToTheNextFrame) {
     CHECK(FindProbe(bench.objects, handle)->destructs == 1);
     app.BeginFrame();
     CHECK(FindProbe(bench.objects, handle)->destructs == 1);
+}
+
+// 미룬 해체가 돌기 전에 같은 위젯을 다시 구성하면 옛 해체를 먼저 끝낸다(UE 순서 — 옛
+// NativeDestruct 뒤 새 NativeConstruct, Docs/Design/UiToolkit 21.4절). 대기열 항목은 아무 일도 하지
+// 않으므로 새 Element와 그 루트 Widget Element가 붙은 채 남는다.
+TEST(UiWidget_RebuildBeforeTheNextFrameFinishesThePendingDestructFirst) {
+    SystemAllocator allocator;
+    LifecycleBench bench(allocator);
+    REQUIRE(RegisterWidgetTypes(bench.modules));
+    auto token = RegisterNativeClass<LifecycleProbe>(bench.types);
+    REQUIRE(token);
+    const auto access = bench.objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    Application app(allocator);
+    auto made = bench.objects.NewObject<LifecycleProbe>(access, ObjectTypeIdOf<LifecycleProbe>());
+    REQUIRE(made);
+    const ObjectHandle handle = made.Value().Handle();
+    {
+        auto probe = bench.objects.ResolveForWrite<LifecycleProbe>(access, handle);
+        REQUIRE(probe);
+        auto& widget = *probe.Value().Get().Value();
+        REQUIRE(widget.Initialize(bench.objects));
+        auto tree = bench.objects.ResolveForWrite<WidgetTree>(access, widget.Tree());
+        REQUIRE(tree);
+        auto border = tree.Value().Get().Value()->ConstructWidget(
+            bench.objects, GeneratedType<BorderWidget>::Id(), "Content");
+        REQUIRE(border);
+        REQUIRE(tree.Value().Get().Value()->SetRoot(bench.objects, border.Value().Handle()));
+        auto live = widget.TakeElement(bench.objects);
+        REQUIRE(live);
+        app.SetRoot(live.Value());
+        REQUIRE(app.PrepareLayout(LifecycleViewport, 1));
+    }
+
+    app.SetRoot({});
+    CHECK(app.PendingTeardownCount() == 1);
+    auto probe = bench.objects.ResolveForWrite<LifecycleProbe>(access, handle);
+    REQUIRE(probe);
+    auto& widget = *probe.Value().Get().Value();
+    CHECK(widget.constructs == 1 && widget.destructs == 0);
+    auto rebuilt = widget.TakeElement(bench.objects);
+    REQUIRE(rebuilt);
+    CHECK(widget.constructs == 2 && widget.destructs == 1);
+    CHECK(widget.lastDestruct < widget.lastConstruct);
+    app.SetRoot(rebuilt.Value());
+    REQUIRE(app.PrepareLayout(LifecycleViewport, 1));
+    app.BeginFrame();
+    CHECK(app.PendingTeardownCount() == 0);
+    CHECK(widget.destructs == 1);
+    CHECK(widget.CachedElement().Get() == rebuilt.Value().Get());
+    CHECK(rebuilt.Value()->ChildCount() == 1);
+    widget.ReleaseElements();
+    CHECK(widget.constructs == 2 && widget.destructs == 2);
+    app.Shutdown();
 }
 
 TEST(UiWidget_ElementDroppedBeforeAnyApplicationSkipsDestruct) {

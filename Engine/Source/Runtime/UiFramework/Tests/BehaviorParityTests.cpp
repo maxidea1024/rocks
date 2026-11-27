@@ -79,8 +79,8 @@ private:
     Array<const Element*>* order_;
 };
 
-Result<SharedPtr<Probe>> Add(Allocator& allocator, Element& parent,
-                             Array<const Element*>* order = nullptr) noexcept {
+Result<SharedPtr<Probe>> AddParityProbe(Allocator& allocator, Element& parent,
+                                        Array<const Element*>* order = nullptr) noexcept {
     auto probe = SharedPtr<Probe>::TryMake(allocator, allocator, order);
     if (!probe) {
         return probe;
@@ -99,7 +99,7 @@ TEST(UiFramework_ParitySameValueDoesNotInvalidate) {
     SystemAllocator allocator;
     auto root = SharedPtr<Probe>::TryMake(allocator, allocator, nullptr);
     REQUIRE(root);
-    auto child = Add(allocator, *root.Value());
+    auto child = AddParityProbe(allocator, *root.Value());
     REQUIRE(child);
     Application app(allocator);
     app.SetRoot(root.Value());
@@ -120,7 +120,7 @@ TEST(UiFramework_ParityVisibilityReMeasuresParentButSizeInvariantLayoutDoesNot) 
     SystemAllocator allocator;
     auto root = SharedPtr<Probe>::TryMake(allocator, allocator, nullptr);
     REQUIRE(root);
-    auto child = Add(allocator, *root.Value());
+    auto child = AddParityProbe(allocator, *root.Value());
     REQUIRE(child);
     Application app(allocator);
     app.SetRoot(root.Value());
@@ -141,8 +141,8 @@ TEST(UiFramework_ParityCacheRootReusesAndRepaintsOnlyVolatile) {
     SystemAllocator allocator;
     auto root = SharedPtr<Probe>::TryMake(allocator, allocator, nullptr);
     REQUIRE(root);
-    auto still = Add(allocator, *root.Value());
-    auto moving = Add(allocator, *root.Value());
+    auto still = AddParityProbe(allocator, *root.Value());
+    auto moving = AddParityProbe(allocator, *root.Value());
     REQUIRE(still && moving);
     Application app(allocator);
     app.SetRoot(root.Value());
@@ -184,9 +184,9 @@ TEST(UiFramework_ParityPreviewTunnelsThenBubbles) {
     Array<const Element*> order(allocator);
     auto root = SharedPtr<Probe>::TryMake(allocator, allocator, &order);
     REQUIRE(root);
-    auto middle = Add(allocator, *root.Value(), &order);
+    auto middle = AddParityProbe(allocator, *root.Value(), &order);
     REQUIRE(middle);
-    auto leaf = Add(allocator, *middle.Value(), &order);
+    auto leaf = AddParityProbe(allocator, *middle.Value(), &order);
     REQUIRE(leaf);
     Application app(allocator);
     app.SetRoot(root.Value());
@@ -206,9 +206,9 @@ TEST(UiFramework_ParityVisibilityKindsForHitTesting) {
     SystemAllocator allocator;
     auto root = SharedPtr<Probe>::TryMake(allocator, allocator, nullptr);
     REQUIRE(root);
-    auto parent = Add(allocator, *root.Value());
+    auto parent = AddParityProbe(allocator, *root.Value());
     REQUIRE(parent);
-    auto child = Add(allocator, *parent.Value());
+    auto child = AddParityProbe(allocator, *parent.Value());
     REQUIRE(child);
     Application app(allocator);
     app.SetRoot(root.Value());
@@ -234,7 +234,7 @@ TEST(UiFramework_ParityExplicitCustomRulesAndTwoUsers) {
     REQUIRE(root);
     SharedPtr<Probe> boxes[3];
     for (auto& box : boxes) {
-        auto made = Add(allocator, *root.Value());
+        auto made = AddParityProbe(allocator, *root.Value());
         REQUIRE(made);
         box = made.Value();
         box->focusable = true;
@@ -273,7 +273,7 @@ TEST(UiFramework_ParityTabOrderSkipsDisabledAndCollapsed) {
     REQUIRE(root);
     SharedPtr<Probe> boxes[4];
     for (auto& box : boxes) {
-        auto made = Add(allocator, *root.Value());
+        auto made = AddParityProbe(allocator, *root.Value());
         REQUIRE(made);
         box = made.Value();
         box->focusable = true;

@@ -21,8 +21,8 @@ TEST(UiFramework_ComboPopupUsesOuterOverlayAndSelectsByPointer) {
             return frame ? Result<SharedPtr<Element>>::Success(frame.Value().AsSharedPtr())
                          : Result<SharedPtr<Element>>::Failure(frame.Error());
         }),
-        .onSelectionChanged = Delegate<void(int32)>::CreateLambda(
-            [&notified](int32 index) noexcept { notified = index; }),
+        .onSelectionChanged = Delegate<void(int32, SelectionCause)>::CreateLambda(
+            [&notified](int32 index, SelectionCause) noexcept { notified = index; }),
     });
     REQUIRE(root && nested && canvas && combo);
     REQUIRE(root.Value()->TryAddChild(nested.Value()));

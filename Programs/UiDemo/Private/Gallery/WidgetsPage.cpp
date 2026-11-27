@@ -155,9 +155,9 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
                      [target = &context](usize index, bool) noexcept -> Result<SharedPtr<Element>> {
                          return AsElement(MakeText(*target, ComboItems[index]));
                      }),
-                 .onSelectionChanged = Delegate<void(int32)>::CreateLambda(
-                     [target = &context,
-                      label = WeakPtr<TextLabel>(chosen.Value())](int32 index) noexcept {
+                 .onSelectionChanged = Delegate<void(int32, SelectionCause)>::CreateLambda(
+                     [target = &context, label = WeakPtr<TextLabel>(chosen.Value())](
+                         int32 index, SelectionCause) noexcept {
                          auto locked = label.Lock();
                          if (locked && index >= 0 && static_cast<usize>(index) < ComboItemCount) {
                              (void)target->text.SetText(*locked, ComboItems[index], NormalFont);

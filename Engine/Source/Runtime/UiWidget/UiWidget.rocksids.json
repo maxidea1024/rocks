@@ -2986,6 +2986,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ui::WidgetSelectionCause",
+      "id": "b3e39375b3a1482886967e81c40c2208",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::ui::WidgetSlot",
       "id": "f1f289feffa848758fefe742c56f4ec5",
       "aliases": [],

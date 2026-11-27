@@ -100,9 +100,9 @@ Result<void> ComboBoxKeyWidget::RemoveOption(Name option) noexcept {
     return index ? RemoveOptionAt(*index) : Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> ComboBoxKeyWidget::SelectOption(Name option) noexcept {
+Result<void> ComboBoxKeyWidget::SelectOption(ObjectRegistry& objects, Name option) noexcept {
     auto index = FindOptionIndex(option);
-    return index ? SetSelectedIndex(static_cast<int32>(*index))
+    return index ? SetSelectedIndex(objects, static_cast<int32>(*index))
                  : Result<void>::Failure(ErrorCode::NotFound);
 }
 
