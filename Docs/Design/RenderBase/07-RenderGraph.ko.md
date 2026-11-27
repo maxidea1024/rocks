@@ -38,7 +38,7 @@
 
 - 그래프 객체 하나가 한 프레임(또는 한 offscreen 작업)의 pass를 모은다. 렌더 lane이 프레임 packet을 처리하면서 만든다. 그래프 수명 할당은 CP3 프레임 arena다.
 - 자원: `GraphTexture`·`GraphBuffer`와 view(SRV·UAV, mip·slice 범위).
-- pass: 이름·파라미터 구조체·종류(Raster·Compute·AsyncCompute·Copy)·플래그(`HasSideEffects`·attachment 생략·병합 금지·병렬 금지)·기록 함수. 파라미터 구조체가 의존 선언이다(9.6절). 파라미터 없는 pass, readback·present pass는 `HasSideEffects`다(계획 11.3절).
+- pass: 이름·파라미터 구조체·종류(Raster·Compute·AsyncCompute·Copy)·플래그(`HasSideEffects`·attachment 생략·병합 금지·병렬 금지)·기록 함수. 파라미터 구조체가 의존 선언이다(9.6절). 파라미터 없는 pass, readback·present pass는 `HasSideEffects`다(계획 11.3절). 스왑체인 타깃 pass는 표시 없이 뿌리이고, 한 그래프에서 같은 스왑체인의 pass들은 백버퍼 하나를 함께 쓰며 마지막 pass만 present한다(8절 "스왑체인 공유 설계", 개정 64).
 - 접근 상태는 멤버 종류와 pass 종류의 조합으로 정한다(Raster의 SRV는 그래픽 SRV, Compute의 SRV·UAV는 compute 접근, Copy는 복사 원본·대상). UAV는 CS만 허용되므로(셰이더 시스템 7.2절 4항) Raster pass에 UAV 쓰기 멤버가 오면 검증 오류다.
 - 공유 값(`GraphSharedData`): 타입별 값 하나씩, 그래프 수명.
 - 즉시 실행 디버그 모드: pass를 추가하는 즉시 수집·할당·전이·실행한다. 지연 모드와 결과가 같아야 한다.
