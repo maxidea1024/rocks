@@ -6,6 +6,12 @@
 
 namespace rocks {
 
+// 일반 종료 코드의 상한이다(126 이상은 셸이 실행 불가·신호에 쓴다).
+inline constexpr int32 MaxCommandletExitCode = 125;
+// 취소로 끝난 명령의 종료 코드다(Docs/Design/EngineImplementationPlan.ko.md 28.4절 "사용자 중단",
+// 진행 보고 10.2절 ProgressCancelledExitCode와 같은 값).
+inline constexpr int32 CommandletCancelledExitCode = 130;
+
 enum class CommandletStream : uint8 {
     Output,
     Error
@@ -22,7 +28,8 @@ struct CommandletOutput {
 
 // args는 명령 이름을 제외한 원래 인수의 읽기 전용 view이며 Run 호출 중에만 유효하다.
 // callback/context의 수명은 Registry의 마지막 실행보다 길어야 한다. callback은 noexcept다.
-// 정상 종료 코드는 0..125다. 실행 오류는 Result 실패로 반환하고 호출자가 프로세스 오류로 변환한다.
+// 정상 종료 코드는 0..125와 CommandletCancelledExitCode(130 — 사용자 중단)다. 실행 오류는 Result
+// 실패로 반환하고 호출자가 프로세스 오류로 변환한다.
 using CommandletCallback = Result<int32> (*)(void*, Span<const StringView>,
                                              CommandletOutput&) noexcept;
 
