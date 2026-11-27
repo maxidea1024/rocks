@@ -108,15 +108,15 @@ SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 
 
 이에 따라 18.1절 완료 기준의 "셰이더 시스템 SH0–SH4"는 SH0–SH2가 된다(SH3·SH4는 셰이더 시스템 16절 표의 순서 그대로 RS0 전).
 
-### 18.5 엔진 창 렌더 경로 설계(SM1–SM8, 개정 46·48·54)
+### 18.5 엔진 창 렌더 경로 설계(SM1–SM8·UI overlay, 개정 46·48·54·69)
 
 Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입만 더한다. 정식 장면 렌더러는 RS0 `Renderer`다(렌더러 17절).
 
 1. **구조(SM1).**
-   - `ScreenRenderer`(렌더 lane 처리기): lane 시작에 스왑체인(표면이 있으면) → `EngineRenderResources::Open`(9.12절) → 파이프라인 캐시·그래프 풀을 만든다. 종료에 역순으로 `Retire`한다.
+   - `ScreenRenderer`(렌더 lane 처리기): lane 시작에 `EngineRenderResources::Open`(9.12절) → 파이프라인 캐시·그래프 풀 → `UiLaneRenderer`를 만든다. 종료에 역순으로 `Retire`한다. 창 스왑체인은 UI 창 표면이다(9항, 개정 69).
    - `ScreenHost`(게임 lane): 장치(명령줄 `--graphics=auto|d3d12|d3d11|vulkan|opengl`, 기본 auto — 만들 수 있는 첫 장치를 D3D12 → Vulkan → OpenGL ES 순으로, 플랫폼 분기 없음)·`RenderLane`을 만들고 엔진 루프 hook에서 프레임마다 view와 장면 목록을 프레임 packet으로 넘긴다. 엔진 종료 hook 다섯을 lane 종료 단계(`BlockFrames` → `WaitFramesIdle` → `DrainRetires` → `CloseResources` → `Stop`)에 잇는다. 장치는 엔진 `Shutdown` 뒤, 창보다 먼저 파괴한다.
    - 프레임 그래프: `SceneColor`(`RGBA16Float`)·`SceneDepth`(`D32Float`, clear 0) → `BasePass`(내장 메시를 fallback 메시 셰이더로, 깊이 `GreaterEqual`) → `Tonemap`(전체화면 pass, `SwapChainTarget`). present는 그래프가 그 스왑체인의 마지막 pass에서 한 번 한다(8절 "스왑체인 공유 설계", 개정 64 — 텍스처 표시·UI pass가 뒤에 붙어도 같다). 스왑체인의 그리기 view가 sRGB(장치 계약)라 tone map은 선형 값을 쓰고 부호화는 view가 한다. UE는 UNORM 백버퍼에 셰이더가 sRGB 부호화를 하지만 결과 값은 같다.
-   - 표면 작업: 창 크기 변경은 `PostSurface`(resize, 0 크기면 건너뜀), Android 표면 소실은 `PostSurfaceAndWait`(스왑체인 `Retire` 뒤 장치 대기) 뒤 `AcknowledgeSurfaceLost`, 새 표면은 다시 생성. 스왑체인이 없는 프레임은 packet을 보내지 않는다.
+   - 표면 작업: 창 크기 변경은 UI 창 표면 resize(0 크기면 건너뜀), Android 표면 소실은 창 표면 파괴(대기) 뒤 장치 대기(`PostSurfaceAndWait`) 다음 `AcknowledgeSurfaceLost`, 새 표면은 다시 생성(9항). 스왑체인이 없는 프레임은 packet을 보내지 않는다.
    - lane 시작 실패(예: Release·Android에 셰이더 공급자가 없어 `UnsupportedCapability`)는 Warning을 남기고 렌더 없이 엔진을 계속 돌린다(빈 프레임 경로). 실패를 숨기지 않되 입력·게임 시험 경로를 막지 않기 위해서다.
    - 장면: 이번 단계는 실행 파일이 고정 목록(바닥 plane, HDR 색 cube 셋, 내장 텍스처)을 만든다. World 추출은 렌더러 RS0(RQ20)이다. SM8은 텍스처 자원 쪽만 엔진 층으로 옮긴다(8항).
 2. **view(SM2).** 게임 lane이 첫 LocalPlayer의 `CameraDirector::View()`로 double 행렬을 만든다: 항목 local → 카메라 상대 world(이동에서 카메라 위치를 뺌, 계획 2.2절) × `MakeViewRotation`(UE `FInverseRotationMatrix` × 축 바꿈) × `TryMakePerspective(fov/2, 폭, 높이, 10 cm, ∞)`(reversed-Z). 항목마다 float `localToClip`을 packet에 담는다(fallback 메시 셰이더 `BuiltinMeshConstants`). 컬은 뒤면(앞면 반시계 — 10.6절 3항 내장 메시 감김)이고 view 행렬식이 음수면 뒤집는다(UE `bReverseCulling`).
@@ -279,3 +279,57 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
   - EngineTests `WorldIntegration_PlatformTextureSource*` 셋·`WorldIntegration_TextureRenderCache*` 일곱이 모두 PASS다(위 8항 시험 목록). `RenderBase_*`·`RenderGraph*`·`MeshComponent_*`도 그대로 PASS다.
   - Sandbox `--texture-self-test`: 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) Thread·Inline 두 모드 0 failures. 쿠킹 장면은 캐시 경로로 13 텍스처·53 표본점이다. GL core 위 ES만 49 표본점이다: `RGBA16Unorm` 하나가 NOT RUN이고, 사유는 SM7과 같다.
   - Sandbox `--self-test`: 여덟 장치 모두 PASS이고 전체 0 failures다. 엔진 쿠킹 화면(`cooked screen`)은 worktree에 엔진 쿠킹(`asset-cook --engine`)이 없어 NOT RUN이다. 이 단계와 무관하다.
+
+9. **UI overlay(UT5 — UiToolkit 18.6절 요청 2, 개정 69).** Sandbox 창 프레임 packet에 UI 프레임 packet 자리를 두고, 같은 스왑체인에 장면 위로 UI를 그린다.
+   - **UE 5.8 대응.**
+     - 창 스왑체인은 Slate 렌더러가 가진다(`FSlateRHIRenderer::WindowToViewportInfo`, `GetViewportResource` — `SlateRHIRenderer/Private/SlateRHIRenderer.cpp:1885–1896`).
+     - 게임 viewport는 따로 렌더 타깃을 두지 않고 그 창 백버퍼에 바로 그린다(`SViewport::RenderDirectlyToWindow` — `Engine/Private/GameEngine.cpp:215–222`). 크기 변경도 Slate 렌더러에 맡긴다(`Engine/Private/Slate/SceneViewport.cpp:2195–2198`).
+     - Slate는 그 백버퍼 위에 요소를 이어 그린다(지우지 않으면 `ELoad` — `SlateRHIRenderer.cpp:1072`).
+   - **스왑체인 소유: 창 스왑체인은 UI 창 표면이다.**
+     - 만들기: 게임 lane `ScreenHost::Start`가 lane을 시작한 뒤 `LaneUiRenderer::CreateWindowSurface`로 만든다(표면 작업 + 대기). `ScreenRenderer`는 스왑체인을 만들지도 갖지도 않는다. 프레임마다 packet의 창 표면 id로 `UiLaneRenderer::WindowSwapChain`을 찾는다. 이 조회는 UiRender에 더한 렌더 lane 함수 하나다.
+     - 5.5절 시작 순서의 "스왑체인 생성"이 엔진 셰이더 집합 열기 뒤로 간다. 순서 의존은 없다. 셰이더·파이프라인·내장 자원 생성은 스왑체인을 요구하지 않는다(offscreen self-test가 창 없이 돈다). 생성 대기가 lane 시작(엔진 셰이더 준비)도 함께 기다리므로 시작 화면 Shaders 단계 안이다.
+     - 크기 변경: 게임 lane이 `LaneUiRenderer::ResizeWindowSurface`를 부른다(표면 작업). 프레임 함수도 장면 pass를 선언하기 전에 `UiLaneRenderer::ResizeWindowSurface(id, packet 크기)`로 다시 맞춘다. 크기가 같으면 아무 일도 없고, 앞선 표면 작업이 실패했으면 여기서 다시 시도한다. 장면 pass보다 먼저여야 한다. UI pass가 Load라 앞 pass가 그린 백버퍼 크기를 바꿀 수 없기 때문이다(UiToolkit 18.4절). 실패하면 그 프레임을 그리지 않고 lane 실패로 남긴다(1항 resize 실패와 같다).
+     - 표면 소실(Android): `LaneUiRenderer::DestroyWindowSurface`(대기)로 스왑체인을 Retire한다. 이어 장치 대기 표면 작업(`PostSurfaceAndWait`, `WaitIdle`)을 기다린 뒤 `AcknowledgeSurfaceLost`한다. 새 표면은 `CreateWindowSurface`로 다시 만든다.
+     - 종료: `ScreenRenderer::OnLaneStop`은 파이프라인 캐시 → 그래프 풀 → `UiLaneRenderer::Close`(UI 파이프라인과 남은 창 표면을 Retire하고 셰이더 집합 lease를 놓는다) → 엔진 렌더 자원 순이다. UI가 lease를 먼저 놓아야 집합이 회수된다.
+     - 버린 대안:
+       - (가) `ScreenRenderer`가 스왑체인을 갖고 UI 표에 외부 스왑체인으로 등록한다. UI 계약에 창 id 발급과 비소유 표면을 더해야 하고, 한 창의 소유가 둘로 나뉜다.
+       - (나) UI를 오프스크린 타깃에 그려 tone map 뒤에 합성한다. 타깃·pass가 하나씩 늘고, UiToolkit 18.6절 요청 1(스왑체인 공유)이 겨냥한 구조가 아니다.
+   - **packet.** `ScreenPacket`에 세 가지를 더한다. `window`(UI 창 표면 id), `width`·`height`(게임 lane이 본 창 크기), `ui`(`UiFramePacket` — 대상이 없으면 UI를 그리지 않는다)다. 그래서 `ScreenPacket`은 이동 전용이다. UI 장면 packet은 프레임 packet 소멸 때 부서진다(5.3절 "프레임 packet 수명").
+   - **프레임 순서.**
+     - 장면: `BasePass` → `Tonemap`(스왑체인 Clear) → UI(`AddPasses(..., GraphLoadAction::Load)`) → `ScreenCapture`(capture를 요청했을 때).
+     - 텍스처 표시: `TextureInspector`(스왑체인 Clear) → UI → `ScreenCapture`.
+     - present는 그래프가 그 스왑체인의 마지막 pass 뒤에 한 번 한다(8절).
+     - 그래프에 기록하기 전의 UI 실패(대상 창 id가 packet 창과 다름, 모르는 창 표면, Load인데 크기 다름)는 UI만 빠지고 장면은 그린다(Warning 한 번, 통계 `uiFailures`). 그래프가 거부한 pass 선언은 그래프 오류로 남아 그 프레임 `Execute`가 실패한다(lane 실패). 스왑체인 첫 pass(tone map·텍스처 표시)를 더하지 못하면 UI·capture를 더하지 않고 그 프레임을 끝낸다.
+   - **capture.**
+     - 화면 capture는 마지막 pass 뒤에 둔 같은 스왑체인의 Load pass에서 `CopyPassTarget`으로 capture 텍스처에 복사한다. 창에 보일 byte(방향 포함)를 그대로 읽는다(Graphics 계약).
+     - capture 텍스처는 그래프에 선언하지 않은 장치 텍스처로 쓴다. 같은 pass 안 복사라서다(UiToolkit 18.4절 캡처 규칙 1). 그래프가 볼 수 없는 부작용이라 pass는 `HasSideEffects`다. capture 크기가 프레임 크기와 다르면 복사를 건너뛴다.
+     - 이전의 두 번 그리기(`TonemapCapture`·`TextureInspectorCapture`)는 없앤다. 그대로 두면 UI가 빠진 capture가 된다.
+     - capture 크기는 요청 때의 창 크기다(`ScreenHost::RequestCapture()` — 인자 없음).
+   - **셰이더 교체.** `UiLaneRenderer`를 `ShaderSet` 판 `Open`으로 연다. 자기 그래프에 `AddPasses`로 UI를 더하는 처리기의 방식이다(UiToolkit 18.4절). 프레임 처음의 `ApplyShaderUpdates`가 교체를 알리면 메시·tone map 요청을 다시 만들고 `ReloadShaders`를 부른다. 실패하면 교체마다 Error 한 번을 남기고, lease로 붙잡은 옛 집합의 UI 파이프라인으로 계속 그린다.
+   - **UI 내용(상태 패널).**
+     - 글꼴 에셋(Font FT3)이 아직 없어 글자 없는 패널이다. 글자는 FT3 뒤에 더한다. UiDemo의 시험 글꼴 경로를 복사하지 않는다.
+     - Element 층(UiFramework `AnchorCanvas`·`Frame`·`VerticalStack`·`ProgressBar`)으로 만든다. 위젯 층·UiScreens는 UT5 화면 stack이 생기면 그것으로 바꾼다.
+     - 모양: 왼쪽 아래 패널 하나에 진행 막대 셋이다. 막대 영역 뒤는 배경 흐림(`BackgroundBlur`, 2 픽셀 — 패널 여백 3보다 작아 장면을 섞지 않는다)이다. UI 흐림 셰이더와 pass 안 배경 복사가 장치마다 돈다. 위에서부터 표시 목록 위치((고른 항목 + 1)/항목 수), mip((mip + 1)/mip 수), 층((층 + 1)/층 수)이다. 장면이면 모두 0이다. 배율은 창 높이 360 픽셀마다 1(정수, 최소 1)이다.
+     - 게임 lane: `ScreenOverlay`가 `ui::Application`(루트 `AnchorCanvas`)을 가진다. 프레임마다 막대 값을 넣고 `UpdatePaintCache` → `DrawBatch::Update` → draw buffer `AddWindow(창 id, 크기)` → `LaneUiRenderer::RecordWindows(그 프레임 arena)` 순으로 packet을 만든다. 글자·벡터 이미지가 없어 atlas 업로드는 없다.
+     - 입력: 패널은 입력을 받지 않는다(Application에 입력을 넘기지 않는다 — hit test·초점 없음). 카메라·텍스처 표시 입력은 그대로다. F1이 패널을 켜고 끈다. 기본은 켬(`--engine --window`)이고, 텍스처 self-test는 끈 채 돈다.
+     - 수명: `ScreenOverlay` 소멸이 루트를 떼고 `Application::Shutdown`한다. `LaneUiRenderer`는 lane보다 먼저 부서진다(만든 텍스처가 없다).
+   - **모듈.**
+     - Sandbox에 `UiCore`·`UiFramework`·`UiRender`를 더한다.
+     - 쿠커(Commandlet)에도 같은 셋을 더한다(정책 cooker-module-set). UiRender 모듈 수명 객체가 UI 셰이더 타입을 등록하므로 쿠킹 엔진 셰이더 라이브러리에 UI 셰이더가 들어가고, 실행 파일과 타입 집합 SHA가 같다.
+     - 쿠킹 화면 self-test 호스트(`CookedSelfTestShaders`)도 `UiShaderTypes()`를 함께 등록한다.
+   - **시험(Sandbox `--self-test` 화면 검사, 여덟 장치 Thread·Inline).** 5항 화면 검사를 패널을 켠 채 돈다. 더하는 단언:
+     - (a) 프레임마다 그래프 present 1, 장치 `PresentCount` 1 증가(합이 프레임 수).
+     - (b) 모든 프레임에 UI pass가 붙는다(`uiFrames` = 프레임 수, `uiFailures` 0).
+     - (c) 장면 프레임의 패널 바탕 픽셀 = 패널 색 sRGB(±2), 막대 사이 흐림 영역 픽셀도 패널 색(고른 바탕의 흐림). 2D mip 1/3 프레임의 mip 막대는 채움 쪽과 바탕 쪽이 다르고 채움이 파란 쪽이다. 장면 프레임의 같은 자리는 바탕이다.
+     - (d) 기존 장면·텍스처 표시 단언이 그대로 PASS다(패널 밖 픽셀).
+     - (e) 두 모드 capture byte 동일, (f) 검증 오류 0.
+     - `--texture-self-test`는 패널 없이 같은 창 표면·capture 경로로 돈다.
+   - **사람 확인.** `Sandbox --engine --window`: 왼쪽 아래에 패널이 있다. 숫자 1–6·`,`·`.`·`-`·`=`·`[`·`]`로 막대가 바뀌고, F1로 사라졌다 다시 나온다. 창 크기를 바꿔도 패널이 왼쪽 아래에 있고 장면이 늘어나지 않는다.
+
+**구현(개정 70, 2026-11-28).** 9항을 위 설계대로 구현했다.
+- 파일: UiRender `UiLaneRenderer::WindowSwapChain`(렌더 lane 조회 하나). Sandbox `ScreenOverlay.h/.cpp`(상태 패널), `ScreenRenderer`(스왑체인을 갖지 않음, `ScreenPacket`의 `window`·`width`·`height`·`ui`, pass 조립을 `AddScenePasses`·`AddInspectorPass`·`AddUiPasses`·`AddCapturePass`로 나눔, 통계 `presents`·`devicePresents`·`uiFrames`·`uiFailures`), `ScreenHost`(`LaneUiRenderer`·창 표면·`EnableOverlay`·F1), `EngineHost`(창 실행에 패널 켬), `CookedSelfTestShaders`(`UiShaderTypes()` 등록). Sandbox·Commandlet Build.cs에 `UiCore`·`UiFramework`·`UiRender`.
+- 설계와 다르게 정한 것: 표면 작업 값 `SurfaceCreate`·`SurfaceResize`와 `SetInitialSurface`는 없앴다(UI 창 표면 작업이 대신한다). 표면 소실의 장치 대기는 `SurfaceReleaseWait`·`WaitSurfaceRelease`이고, 창 표면 파괴 대기가 실패해도 게시한다.
+- 함께 고친 것(EngineModular 링크): UiCore `ElementChild`에 모듈 API 표지가 없어 DLL 빌드에서 UiFramework가 `ElementChild::AttachTo`를 찾지 못했다(UI 병합 뒤 EngineModular 링크 실패). `struct ROCKS_UICORE_API ElementChild`로 고쳤다.
+- 리뷰(리뷰어 1명, 2026-11-28) 반영: 스왑체인 첫 pass 결과 확인, UI 실패 범위 문구, 흐림 패널로 흐림 셰이더 장치 시험, capture 크기를 창 크기로, 배율 1 가정 `static_assert`.
+- 함께 고친 것(UI 셰이더 GLES): Sandbox가 UiRender를 링크하자 OpenGL ES 두 장치의 엔진 셰이더 집합이 `ProviderFailed`로 열리지 않았다. 원인은 `UiBackdropBlur.rsf`가 `UiBackdrop`을 샘플러 표본과 샘플러 없는 접근(`Load`·`GetDimensions`)으로 함께 읽은 것이다. GLES 결합 샘플러 계획(`ShaderGlesBindings`)은 샘플러 쓰임이 있는 텍스처에 dummy 샘플러를 만들지 않으므로, SPIRV-Cross가 "texelFetch without sampler"로 실패한다. UiDemo는 D3D11 전용이라 드러나지 않았다. 셰이더는 표본만 쓰게 고쳤다: texel 반 크기는 화면 변환(2 / 폭, −2 / 높이)에서 얻고(배경 = 패스 대상 크기), 흐림 없는 복사는 그 픽셀 texel 가운데 `SampleLevel`이다(같은 값). 같은 텍스처의 표본·Load 혼용을 GLES 계획이 받게 하는 것은 셰이더 시스템 후속이다.
+- 시험(Debug, 엔진·TestContent 다시 쿠킹): Sandbox `--self-test` 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) 0 failures다. 화면 검사는 패널을 켠 채 Thread·Inline 두 모드 8 프레임이다. 프레임마다 present 1(그래프·장치), UI 프레임 8/8, 패널 바탕·mip 막대 픽셀, 기존 장면·텍스처 표시 픽셀, 두 모드 byte 동일, 검증 오류 0이다. 쿠킹 화면도 D3D·Vulkan 여섯 장치에서 UI 셰이더가 든 쿠킹 라이브러리로 PASS다(OpenGL ES는 쿠킹 형식이 없어 NOT RUN — 이전과 같다). `--texture-self-test`·`--shader-reload-self-test`도 0 failures다.

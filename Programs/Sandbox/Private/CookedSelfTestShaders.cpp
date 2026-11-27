@@ -10,6 +10,7 @@
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <RenderBase/EngineShaderTypes.h>
+#include <UiRender/UiShaderTypes.h>
 #include <stdio.h>
 
 // 쿠킹 엔진 셰이더 라이브러리 self-test의 셰이더 호스트(Docs/Design/ShaderSystem 16.1절 SSD48)다.
@@ -108,8 +109,10 @@ void CookedSelfTestShaders::Prepare() noexcept {
         return;
     }
 
-    // 쿠커와 같은 엔진 모듈 타입이다(타입 집합 SHA가 쿠킹 라이브러리와 같아야 한다).
+    // 쿠커와 같은 엔진 모듈 타입이다(타입 집합 SHA가 쿠킹 라이브러리와 같아야 한다 — RenderBase와
+    // UiRender 모듈이 등록하는 타입, Docs/Design/RenderBase 18.5절 9항).
     if (!host_.Registry().Register(render::EngineShaderTypes()) ||
+        !host_.Registry().Register(ui::UiShaderTypes()) ||
         !host_.Registry().RegisterVertexInputTypes(render::EngineVertexInputTypes()) ||
         !host_.Freeze()) {
         snprintf(reason_, sizeof(reason_), "the engine shader types could not be registered");

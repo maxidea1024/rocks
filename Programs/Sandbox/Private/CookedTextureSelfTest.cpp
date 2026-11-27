@@ -126,7 +126,7 @@ public:
 
         library_->Update();
         if (!captureRequested) {
-            captureRequested = screen_.RequestCapture(SceneCaptureWidth, SceneCaptureHeight).IsOk();
+            captureRequested = screen_.RequestCapture().IsOk();
         }
 
         // 올린 텍스처의 업로드 통지가 모두 온 뒤 차례로 그린다.

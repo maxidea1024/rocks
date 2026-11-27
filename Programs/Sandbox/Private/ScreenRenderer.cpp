@@ -26,9 +26,8 @@ constexpr uint32 FrontFaceMesh = 1;
 
 TraceScopeName BasePassName("Sandbox.BasePass");
 TraceScopeName TonemapName("Sandbox.Tonemap");
-TraceScopeName TonemapCaptureName("Sandbox.TonemapCapture");
+TraceScopeName ScreenCaptureName("Sandbox.ScreenCapture");
 TraceScopeName InspectorName("Sandbox.TextureInspector");
-TraceScopeName InspectorCaptureName("Sandbox.TextureInspectorCapture");
 
 // 차원·성분 계열마다 셰이더 타입·텍스처 이름·대체 텍스처 모양이다(InspectorKindCount 칸).
 struct InspectorKind {
@@ -118,7 +117,8 @@ Span<const uint8> Bytes(const void* data, usize size) noexcept {
 } // namespace
 
 ScreenRenderer::ScreenRenderer(Allocator& allocator, const render::EngineShaderHost& host) noexcept
-    : allocator_(allocator), host_(host), resources_(allocator), captured_(allocator) {
+    : allocator_(allocator), host_(host), resources_(allocator), ui_(allocator),
+      captured_(allocator) {
     // capture 자리는 미리 만든다(lane이 자리를 늘리지 않는다 — 할당 실패면 자리가 적을 뿐이다).
     if (captured_.TryReserve(MaxCaptureSlots)) {
         for (uint32 slot = 0; slot < MaxCaptureSlots; ++slot) {
@@ -140,35 +140,6 @@ uint32 InspectorLayerCount(const InspectorTexture& texture, uint32 mip) noexcept
 }
 
 ScreenRenderer::~ScreenRenderer() noexcept = default;
-
-void ScreenRenderer::SetInitialSurface(graphics::NativeSurface surface, uint32 width,
-                                       uint32 height) noexcept {
-    surface_ = surface;
-    width_ = width;
-    height_ = height;
-}
-
-Result<void> ScreenRenderer::CreateSwapChain(graphics::Device& device,
-                                             graphics::NativeSurface surface, uint32 width,
-                                             uint32 height) noexcept {
-    graphics::SwapChainDesc desc;
-    desc.surface = surface;
-    desc.width = width;
-    desc.height = height;
-    auto created = device.CreateSwapChain(desc);
-    if (!created) {
-        Log::Error(LogSandboxScreen,
-                   "The swap chain could not be created ({Width}x{Height}): {Error}", width, height,
-                   ErrorCodeName(created.Error()));
-        return Result<void>::Failure(created.Error());
-    }
-
-    swapChain_ = created.Value();
-    surface_ = surface;
-    width_ = width;
-    height_ = height;
-    return Result<void>::Success();
-}
 
 namespace {
 
@@ -238,13 +209,8 @@ Result<void> ScreenRenderer::PrepareRequests() noexcept {
 
 Result<void> ScreenRenderer::OnLaneStart(render::RenderLaneContext& context) noexcept {
     graphics::Device& device = context.Device();
-    // 시작 순서(5.5절): 스왑체인 → 엔진 셰이더 집합·내장 자원 팩 → 렌더러 자원.
-    if (surface_.window != nullptr && width_ != 0 && height_ != 0) {
-        if (auto created = CreateSwapChain(device, surface_, width_, height_); !created) {
-            return created;
-        }
-    }
-
+    // 시작 순서(5.5절·18.5절 9항): 엔진 셰이더 집합·내장 자원 팩 → 렌더러 자원 → UI 렌더러. 창
+    // 스왑체인은 이 뒤 게임 lane의 UI 창 표면 작업이 만든다.
     if (auto opened = resources_.Open(device, host_); !opened) {
         return opened;
     }
@@ -262,12 +228,25 @@ Result<void> ScreenRenderer::OnLaneStart(render::RenderLaneContext& context) noe
     }
 
     pool_ = Move(pool.Value());
-    return PrepareRequests();
+    if (auto prepared = PrepareRequests(); !prepared) {
+        return prepared;
+    }
+
+    // 자기 그래프에 UI pass를 더하므로 집합 판으로 열고 교체는 프레임 처음에 스스로
+    // 받는다(UiToolkit 18.4절).
+    if (auto opened = ui_.Open(device, *resources_.Shaders(), OutputFormat); !opened) {
+        Log::Error(LogSandboxScreen, "The UI renderer could not be opened: {Error}",
+                   ErrorCodeName(opened.Error()));
+        return opened;
+    }
+
+    return Result<void>::Success();
 }
 
 void ScreenRenderer::OnLaneStop(render::RenderLaneContext& context) noexcept {
     graphics::Device& device = context.Device();
-    // 종료 4·5단계(5.5절): 파이프라인 캐시 비우기 → 그래프 풀 → 엔진 렌더 자원 → 스왑체인.
+    // 종료 4·5단계(5.5절·18.5절 9항): 파이프라인 캐시 비우기 → 그래프 풀 → UI 렌더러(UI
+    // 파이프라인·창 표면 스왑체인 Retire, 셰이더 집합 lease 놓기) → 엔진 렌더 자원.
     if (cache_) {
         cache_->Clear();
         cache_.Reset();
@@ -278,16 +257,44 @@ void ScreenRenderer::OnLaneStop(render::RenderLaneContext& context) noexcept {
         pool_.Reset();
     }
 
+    ui_.Close(device);
     resources_.Retire(device);
-    if (!swapChain_.IsNull()) {
-        device.Retire(swapChain_);
-        swapChain_ = {};
+}
+
+bool ScreenRenderer::ApplyShaderSwap(render::RenderFrameContext& context) noexcept {
+    // 감시 재컴파일의 셰이더 교체(ShaderSystem 16.3절 SSD76): 프레임 경계에서 새 집합으로 바꾸면
+    // 옛 집합의 파이프라인은 캐시에서 회수되었으므로 요청(집합·항목)을 다시 만든다.
+    if (!resources_.ApplyShaderUpdates(cache_.Get())) {
+        return true;
     }
+
+    if (auto prepared = PrepareRequests(); !prepared) {
+        ++stats_.graphFailures;
+        Log::Error(LogSandboxScreen,
+                   "The screen pipelines could not be prepared after a shader swap: {Error}",
+                   ErrorCodeName(prepared.Error()));
+        context.ReportFailure(prepared.Error());
+        return false;
+    }
+
+    // UI 파이프라인은 캐시를 거치지 않는다. 다시 만들지 못하면 lease로 붙잡은 옛 집합의
+    // 파이프라인으로 계속 그린다(계획 14.1절 "hot reload 실패 시 이전 검증 버전 유지"). 교체마다 한
+    // 번 시도한다.
+    if (auto reloaded = ui_.ReloadShaders(context.Device(), *resources_.Shaders()); !reloaded) {
+        Log::Error(LogSandboxScreen,
+                   "The UI pipelines could not be rebuilt after a shader swap; the previous "
+                   "shaders stay in use: {Error}",
+                   ErrorCodeName(reloaded.Error()));
+    }
+
+    return true;
 }
 
 // 그래프를 실행하고 capture를 읽는다(그래프 실패는 lane 실패로 남긴다).
 bool ScreenRenderer::FinishFrame(render::RenderFrameContext& context, render::RenderGraph& graph,
                                  graphics::TextureHandle capture, uint32 slot) noexcept {
+    graphics::Device& device = context.Device();
+    const uint64 presentsBefore = device.PresentCount();
     if (auto executed = graph.Execute(); !executed) {
         ++stats_.graphFailures;
         Log::Error(LogSandboxScreen, "The screen frame graph failed: {Error} ({Detail})",
@@ -297,10 +304,12 @@ bool ScreenRenderer::FinishFrame(render::RenderFrameContext& context, render::Re
     }
 
     ++stats_.framesRendered;
+    stats_.presents += graph.Stats().presents;
+    stats_.devicePresents += device.PresentCount() - presentsBefore;
     if (!capture.IsNull() && slot < captured_.Size()) {
         Array<uint8>& pixels = captured_[slot];
         const usize bytes = static_cast<usize>(width_) * height_ * OutputBytesPerPixel;
-        if (pixels.TryResize(bytes) && context.Device().ReadPixels(capture, pixels.View())) {
+        if (pixels.TryResize(bytes) && device.ReadPixels(capture, pixels.View())) {
             captureWidth_ = width_;
             captureHeight_ = height_;
             ++stats_.captures;
@@ -311,8 +320,10 @@ bool ScreenRenderer::FinishFrame(render::RenderFrameContext& context, render::Re
 }
 
 // 텍스처 표시 view를 그린다(장면 대신 — 18.5절 6항).
-void ScreenRenderer::RenderInspector(render::RenderFrameContext& context,
-                                     const ScreenPacket& packet) noexcept {
+bool ScreenRenderer::AddInspectorPass(render::RenderFrameContext& context,
+                                      render::RenderGraph& graph,
+                                      graphics::SwapChainHandle swapChain,
+                                      const ScreenPacket& packet) noexcept {
     const InspectorTexture& target = packet.inspector;
     render::BuiltinResources& builtins = resources_.Builtins();
     const graphics::TextureHandle black = builtins.Texture(render::BuiltinTexture::Black2D);
@@ -365,70 +376,37 @@ void ScreenRenderer::RenderInspector(render::RenderFrameContext& context,
     constants.integer[0] = target.integerScale;
     constants.integer[1] = static_cast<float>(graphics::MipExtent(target.width, mip));
     constants.integer[2] = static_cast<float>(graphics::MipExtent(target.height, mip));
-    const uint32 view = kind;
-    const uint32 slot = inspectorTextureSlots_[view];
+    const uint32 slot = inspectorTextureSlots_[kind];
     auto bind = [texture, constants, slot](render::GraphPassContext& pass) noexcept {
         pass.Commands().SetTexture(graphics::ShaderStage::Pixel, slot, texture);
         (void)pass.Commands().SetDrawConstants(Bytes(&constants, sizeof(constants)));
     };
-    render::RenderGraph graph(render::MakeRenderGraphDesc(context, *pool_));
     render::GraphPassAccesses present(graph);
-    present.SwapChainTarget(swapChain_, render::GraphLoadAction::Clear, packet.clear);
-    (void)graph.AddFullscreenPass(InspectorName, render::GraphPassFlags::None, present, *cache_,
-                                  inspectorRequests_[view], bind);
-    graphics::TextureHandle captureTexture;
-    if (!packet.capture.IsNull()) {
-        auto target = graph.ImportTexture(packet.capture, "Capture");
-        auto device = context.Handles().Texture(packet.capture);
-        if (target && device) {
-            captureTexture = device.Value();
-            render::GraphPassAccesses capture(graph);
-            capture.RenderTarget(target.Value(), render::GraphLoadAction::DontCare);
-            (void)graph.AddFullscreenPass(InspectorCaptureName, render::GraphPassFlags::None,
-                                          capture, *cache_, inspectorRequests_[view], bind);
-        }
+    present.SwapChainTarget(swapChain, render::GraphLoadAction::Clear, packet.clear);
+    // 이 pass가 스왑체인 첫 pass다. 빠지면 뒤 Load pass(UI·capture)가 모두 거부되므로 여기서
+    // 끝낸다.
+    if (!graph.AddFullscreenPass(InspectorName, render::GraphPassFlags::None, present, *cache_,
+                                 inspectorRequests_[kind], bind)) {
+        ++stats_.graphFailures;
+        return false;
     }
 
-    if (FinishFrame(context, graph, captureTexture, packet.captureSlot)) {
-        ++stats_.inspectorFrames;
-    }
+    return true;
 }
 
-void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept {
-    auto& renderer = *static_cast<ScreenRenderer*>(context.Processor());
-    if (renderer.swapChain_.IsNull() || !renderer.resources_.IsReady()) {
-        ++renderer.stats_.framesSkipped;
-        return;
-    }
-
-    // 감시 재컴파일의 셰이더 교체(ShaderSystem 16.3절 SSD76): 프레임 경계에서 새 집합으로 바꾸면
-    // 옛 집합의 파이프라인은 캐시에서 회수되었으므로 요청(집합·항목)을 다시 만든다.
-    if (renderer.resources_.ApplyShaderUpdates(renderer.cache_.Get())) {
-        if (auto prepared = renderer.PrepareRequests(); !prepared) {
-            ++renderer.stats_.graphFailures;
-            Log::Error(LogSandboxScreen,
-                       "The screen pipelines could not be prepared after a shader swap: {Error}",
-                       ErrorCodeName(prepared.Error()));
-            context.ReportFailure(prepared.Error());
-            return;
-        }
-    }
-
-    if (packet.inspecting) {
-        renderer.RenderInspector(context, packet);
-        return;
-    }
-
-    render::BuiltinResources& builtins = renderer.resources_.Builtins();
+bool ScreenRenderer::AddScenePasses(render::RenderFrameContext& context, render::RenderGraph& graph,
+                                    graphics::SwapChainHandle swapChain,
+                                    const ScreenPacket& packet) noexcept {
+    render::BuiltinResources& builtins = resources_.Builtins();
     // 메시 파이프라인은 소유 스레드(이 자리)에서 만든다(그래프 기록 함수는 장치 생성을 하지
     // 않는다).
     graphics::PipelineHandle pipelines[2];
     for (uint32 index = 0; index < 2; ++index) {
-        auto pipeline = renderer.cache_->FindOrCreate(renderer.meshRequests_[index]);
+        auto pipeline = cache_->FindOrCreate(meshRequests_[index]);
         if (!pipeline) {
-            ++renderer.stats_.graphFailures;
+            ++stats_.graphFailures;
             context.ReportFailure(pipeline.Error());
-            return;
+            return false;
         }
 
         pipelines[index] = pipeline.Value();
@@ -438,8 +416,8 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
                                              shader::ShaderComponentType::Float);
     auto resolved = context.Arena().TryNewArray<ResolvedItem>(packet.items.Size());
     if (!fallback || !resolved) {
-        ++renderer.stats_.graphFailures;
-        return;
+        ++stats_.graphFailures;
+        return false;
     }
 
     for (usize index = 0; index < packet.items.Size(); ++index) {
@@ -457,25 +435,24 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
     }
 
     const Span<const ResolvedItem> items(resolved.Value().Data(), resolved.Value().Size());
-    render::RenderGraph graph(render::MakeRenderGraphDesc(context, *renderer.pool_));
     graphics::TextureDesc colorDesc;
-    colorDesc.width = renderer.width_;
-    colorDesc.height = renderer.height_;
+    colorDesc.width = width_;
+    colorDesc.height = height_;
     colorDesc.format = SceneColorFormat;
     colorDesc.usage = graphics::TextureUsage::RenderTarget;
     colorDesc.sampler.filter = graphics::Filter::Point;
     colorDesc.sampler.addressU = graphics::AddressMode::Clamp;
     colorDesc.sampler.addressV = graphics::AddressMode::Clamp;
     graphics::TextureDesc depthDesc;
-    depthDesc.width = renderer.width_;
-    depthDesc.height = renderer.height_;
+    depthDesc.width = width_;
+    depthDesc.height = height_;
     depthDesc.format = SceneDepthFormat;
     depthDesc.usage = graphics::TextureUsage::DepthStencil;
     auto color = graph.CreateTexture(colorDesc, "SceneColor");
     auto depth = graph.CreateTexture(depthDesc, "SceneDepth");
     if (!color || !depth) {
-        ++renderer.stats_.graphFailures;
-        return;
+        ++stats_.graphFailures;
+        return false;
     }
 
     const render::GraphTexture sceneColor = color.Value();
@@ -486,7 +463,7 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
         .DepthTarget(depthTarget);
     (void)graph.AddPass(
         BasePassName, render::GraphPassKind::Raster, render::GraphPassFlags::None, base,
-        [items, meshSlot = renderer.meshTextureSlot_](render::GraphPassContext& pass) noexcept {
+        [items, meshSlot = meshTextureSlot_](render::GraphPassContext& pass) noexcept {
             graphics::CommandContext& commands = pass.Commands();
             for (const ResolvedItem& item : items) {
                 commands.SetPipeline(item.pipeline);
@@ -499,76 +476,133 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
             }
         });
     const render::TonemapConstants tonemap = packet.tonemap;
-    auto bindTonemap = [sceneColor, tonemap, slot = renderer.tonemapTextureSlot_](
-                           render::GraphPassContext& pass) noexcept {
+    auto bindTonemap = [sceneColor, tonemap,
+                        slot = tonemapTextureSlot_](render::GraphPassContext& pass) noexcept {
         pass.Commands().SetTexture(graphics::ShaderStage::Pixel, slot, pass.Texture(sceneColor));
         (void)pass.Commands().SetDrawConstants(Bytes(&tonemap, sizeof(tonemap)));
     };
     render::GraphPassAccesses present(graph);
     present.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
-        .SwapChainTarget(renderer.swapChain_, render::GraphLoadAction::Clear, packet.clear);
-    (void)graph.AddFullscreenPass(TonemapName, render::GraphPassFlags::None, present,
-                                  *renderer.cache_, renderer.tonemapRequest_, bindTonemap);
-    graphics::TextureHandle captureTexture;
-    if (!packet.capture.IsNull()) {
-        auto target = graph.ImportTexture(packet.capture, "Capture");
-        auto device = context.Handles().Texture(packet.capture);
-        if (target && device) {
-            captureTexture = device.Value();
-            render::GraphPassAccesses capture(graph);
-            capture.Texture(sceneColor, graphics::ResourceAccess::SrvGraphics)
-                .RenderTarget(target.Value(), render::GraphLoadAction::DontCare);
-            (void)graph.AddFullscreenPass(TonemapCaptureName, render::GraphPassFlags::None, capture,
-                                          *renderer.cache_, renderer.tonemapRequest_, bindTonemap);
+        .SwapChainTarget(swapChain, render::GraphLoadAction::Clear, packet.clear);
+    // 이 pass가 스왑체인 첫 pass다(뒤 UI·capture pass는 Load).
+    if (!graph.AddFullscreenPass(TonemapName, render::GraphPassFlags::None, present, *cache_,
+                                 tonemapRequest_, bindTonemap)) {
+        ++stats_.graphFailures;
+        return false;
+    }
+
+    return true;
+}
+
+void ScreenRenderer::AddUiPasses(render::RenderFrameContext& context, render::RenderGraph& graph,
+                                 ScreenPacket& packet) noexcept {
+    bool added = false;
+    for (ui::UiFrameTarget& target : packet.ui.Targets()) {
+        // 앞 pass(tone map·텍스처 표시)가 그린 백버퍼에 이어 그린다. 다른 창 대상은 이 그래프의
+        // 스왑체인이 아니다. 그래프에 기록하기 전의 실패(창 불일치·모르는 창·크기 불일치)는 UI만
+        // 뺀다. 그래프가 거부한 pass 선언은 그래프 오류로 남아 프레임 Execute가 실패한다.
+        auto result = target.window == packet.window
+                          ? ui_.AddPasses(graph, context, target, render::GraphLoadAction::Load)
+                          : Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (!result) {
+            ++stats_.uiFailures;
+            if (!uiWarned_) {
+                uiWarned_ = true;
+                Log::Warning(LogSandboxScreen,
+                             "The UI overlay was left out of a screen frame: {Error} ({Detail})",
+                             ErrorCodeName(result.Error()), graph.LastError());
+            }
+
+            continue;
         }
+
+        added = true;
     }
 
-    (void)renderer.FinishFrame(context, graph, captureTexture, packet.captureSlot);
+    if (added) {
+        ++stats_.uiFrames;
+    }
 }
 
-void CreateSurface(render::RenderLaneContext& context, SurfaceCreate& value) noexcept {
+graphics::TextureHandle ScreenRenderer::AddCapturePass(render::RenderFrameContext& context,
+                                                       render::RenderGraph& graph,
+                                                       graphics::SwapChainHandle swapChain,
+                                                       const ScreenPacket& packet) noexcept {
+    if (packet.capture.IsNull() || captureTargetWidth_ != width_ ||
+        captureTargetHeight_ != height_) {
+        return {};
+    }
+
+    auto texture = context.Handles().Texture(packet.capture);
+    if (!texture) {
+        return {};
+    }
+
+    // 창에 보일 byte(UI 포함, 방향 포함)를 그대로 복사한다. capture 텍스처는 같은 pass 안 복사라
+    // 그래프에 선언하지 않는다(UiToolkit 18.4절 캡처 규칙 1) — 그래프가 볼 수 없는 부작용이다.
+    const graphics::TextureHandle capture = texture.Value();
+    render::GraphPassAccesses accesses(graph);
+    accesses.SwapChainTarget(swapChain, render::GraphLoadAction::Load);
+    auto added = graph.AddPass(ScreenCaptureName, render::GraphPassKind::Raster,
+                               render::GraphPassFlags::HasSideEffects, accesses,
+                               [capture](render::GraphPassContext& pass) noexcept {
+                                   (void)pass.Commands().CopyPassTarget(capture);
+                               });
+    return added ? capture : graphics::TextureHandle{};
+}
+
+void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept {
     auto& renderer = *static_cast<ScreenRenderer*>(context.Processor());
-    if (!renderer.swapChain_.IsNull() || value.width == 0 || value.height == 0) {
+    const graphics::SwapChainHandle swapChain = renderer.ui_.WindowSwapChain(packet.window);
+    if (swapChain.IsNull() || !renderer.resources_.IsReady() || packet.width == 0 ||
+        packet.height == 0) {
+        ++renderer.stats_.framesSkipped;
         return;
     }
 
-    (void)renderer.CreateSwapChain(context.Device(), value.surface, value.width, value.height);
-}
-
-void ResizeSurface(render::RenderLaneContext& context, SurfaceResize& value) noexcept {
-    auto& renderer = *static_cast<ScreenRenderer*>(context.Processor());
-    if (renderer.swapChain_.IsNull() || value.width == 0 || value.height == 0 ||
-        (value.width == renderer.width_ && value.height == renderer.height_)) {
+    if (!renderer.ApplyShaderSwap(context)) {
         return;
     }
 
-    auto resized = context.Device().ResizeSwapChain(renderer.swapChain_, value.width, value.height);
-    if (!resized) {
+    // UI pass가 Load라 앞 pass가 그린 백버퍼 크기를 바꿀 수 없다. 장면 pass를 선언하기 전에 창
+    // 크기로 맞춘다(같으면 무동작 — 게임 lane의 크기 변경 작업이 실패했으면 다시 시도한다).
+    if (auto resized = renderer.ui_.ResizeWindowSurface(packet.window, packet.width, packet.height,
+                                                        context.Device());
+        !resized) {
+        ++renderer.stats_.graphFailures;
         Log::Error(LogSandboxScreen,
-                   "The swap chain could not be resized to {Width}x{Height}: {Error}", value.width,
-                   value.height, ErrorCodeName(resized.Error()));
+                   "The swap chain could not be resized to {Width}x{Height}: {Error}", packet.width,
+                   packet.height, ErrorCodeName(resized.Error()));
         context.ReportFailure(resized.Error());
         return;
     }
 
-    renderer.width_ = value.width;
-    renderer.height_ = value.height;
-    ++renderer.stats_.resizes;
-}
-
-void ReleaseSurface(render::RenderLaneContext& context, SurfaceRelease&) noexcept {
-    auto& renderer = *static_cast<ScreenRenderer*>(context.Processor());
-    if (renderer.swapChain_.IsNull()) {
+    renderer.width_ = packet.width;
+    renderer.height_ = packet.height;
+    render::RenderGraph graph(render::MakeRenderGraphDesc(context, *renderer.pool_));
+    const bool added = packet.inspecting
+                           ? renderer.AddInspectorPass(context, graph, swapChain, packet)
+                           : renderer.AddScenePasses(context, graph, swapChain, packet);
+    if (!added) {
         return;
     }
 
-    context.Device().Retire(renderer.swapChain_);
-    renderer.swapChain_ = {};
-    // 표면을 돌려주기 전에 그 표면을 쓰는 GPU 일과 회수를 끝낸다(5.3절 예외 1).
+    renderer.AddUiPasses(context, graph, packet);
+    const graphics::TextureHandle capture =
+        renderer.AddCapturePass(context, graph, swapChain, packet);
+    if (renderer.FinishFrame(context, graph, capture, packet.captureSlot) && packet.inspecting) {
+        ++renderer.stats_.inspectorFrames;
+    }
+}
+
+void WaitSurfaceRelease(render::RenderLaneContext& context, SurfaceReleaseWait&) noexcept {
+    // 표면을 돌려주기 전에 그 표면을 쓰는 GPU 일과 회수를 끝낸다(5.3절 예외 1 — 스왑체인은 앞선 창
+    // 표면 파괴 작업이 Retire했다).
     (void)context.Device().WaitIdle();
 }
 
 void CreateCapture(render::RenderLaneContext& context, CaptureCreate& value) noexcept {
+    auto& renderer = *static_cast<ScreenRenderer*>(context.Processor());
     graphics::TextureDesc desc;
     desc.width = value.width;
     desc.height = value.height;
@@ -585,6 +619,8 @@ void CreateCapture(render::RenderLaneContext& context, CaptureCreate& value) noe
         context.Device().Retire(created.Value());
         return;
     } else {
+        renderer.captureTargetWidth_ = value.width;
+        renderer.captureTargetHeight_ = value.height;
         notice.kind = render::RenderNoticeKind::ResourceReady;
     }
 
