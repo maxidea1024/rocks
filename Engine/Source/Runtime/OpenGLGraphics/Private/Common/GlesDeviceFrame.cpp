@@ -3,14 +3,14 @@
 // 프레임 기록·CommandContext·present다(GlesDevice.h).
 namespace rocks::graphics::gles {
 
-Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
-                                               const ClearColor& clear) noexcept {
+Result<CommandContext*> GlesDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
     }
 
-    const SwapChainRecord* record = swapChains_.Find(handle.slot);
+    SwapChainRecord* record = swapChains_.Find(handle.slot);
     if (record == nullptr) {
         return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
     }
@@ -23,6 +23,15 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
+    // present 뒤의 백버퍼 내용은 다른 backend에서 정의되지 않으므로 같은 규칙을 둔다(이어 그리기는
+    // 그리는 중인 프레임만).
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        Diagnostic message;
+        message.Text("swap chain load without a frame drawn since its present");
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<CommandContext*>::Failure(rejected.Error());
+    }
+
     if (!MakeCurrentForResources()) {
         return FailWith<CommandContext*>("cannot make the OpenGL context current");
     }
@@ -30,6 +39,8 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     // 스왑체인은 offscreen 색 텍스처(첫 행 = 이미지 위쪽)에 그리고 EndFrame의 present가 창에
     // 옮긴다(ShaderSystem 7.2절 8항). 그래서 창·RenderTarget 패스의 규약이 같다.
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     pass_ = {};
     pass_.framebuffer = record->framebuffer;
     pass_.width = record->width;
@@ -39,7 +50,8 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     pass_.colorCount = 1;
     PassDesc pass;
     pass.colorCount = 1;
-    pass.colors[0].clear = clear;
+    pass.colors[0].load = desc.load;
+    pass.colors[0].clear = desc.clear;
     StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
@@ -111,15 +123,18 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     }
 
     Result<void> outcome = Result<void>::Success();
-    if (!presentTarget_.IsNull()) {
+    if (!presentTarget_.IsNull() && presentOnEnd_) {
         // 기록 중 Retire된 스왑체인은 present를 생략한다.
-        const SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
+        SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
         if (record != nullptr) {
+            record->frameOpen = false;
             Diagnostic error;
             if (!PresentBlit(*record)) {
                 outcome = Fail("present blit failed: cannot make the window surface current");
             } else if (!platform_->Present(record->surface, record->vsync, error)) {
                 outcome = Reject(error, ErrorCode::DependencyFailed);
+            } else {
+                ++presents_;
             }
 
             // present 실패는 장치가 남긴다(LoggingSystem 13절). 연속 실패는 한 번만 남긴다.
