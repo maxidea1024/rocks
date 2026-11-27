@@ -299,16 +299,17 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
      - 장면: `BasePass` → `Tonemap`(스왑체인 Clear) → UI(`AddPasses(..., GraphLoadAction::Load)`) → `ScreenCapture`(capture를 요청했을 때).
      - 텍스처 표시: `TextureInspector`(스왑체인 Clear) → UI → `ScreenCapture`.
      - present는 그래프가 그 스왑체인의 마지막 pass 뒤에 한 번 한다(8절).
-     - UI 대상의 창 id가 packet 창과 다르거나 `AddPasses`가 실패하면 UI만 빠지고 장면은 그린다(Warning 한 번, 통계 `uiFailures`).
+     - 그래프에 기록하기 전의 UI 실패(대상 창 id가 packet 창과 다름, 모르는 창 표면, Load인데 크기 다름)는 UI만 빠지고 장면은 그린다(Warning 한 번, 통계 `uiFailures`). 그래프가 거부한 pass 선언은 그래프 오류로 남아 그 프레임 `Execute`가 실패한다(lane 실패). 스왑체인 첫 pass(tone map·텍스처 표시)를 더하지 못하면 UI·capture를 더하지 않고 그 프레임을 끝낸다.
    - **capture.**
      - 화면 capture는 마지막 pass 뒤에 둔 같은 스왑체인의 Load pass에서 `CopyPassTarget`으로 capture 텍스처에 복사한다. 창에 보일 byte(방향 포함)를 그대로 읽는다(Graphics 계약).
      - capture 텍스처는 그래프에 선언하지 않은 장치 텍스처로 쓴다. 같은 pass 안 복사라서다(UiToolkit 18.4절 캡처 규칙 1). 그래프가 볼 수 없는 부작용이라 pass는 `HasSideEffects`다. capture 크기가 프레임 크기와 다르면 복사를 건너뛴다.
      - 이전의 두 번 그리기(`TonemapCapture`·`TextureInspectorCapture`)는 없앤다. 그대로 두면 UI가 빠진 capture가 된다.
-   - **셰이더 교체.** `UiLaneRenderer`를 `ShaderSet` 판 `Open`으로 연다. 자기 그래프에 `AddPasses`로 UI를 더하는 처리기의 방식이다(UiToolkit 18.4절). 프레임 처음의 `ApplyShaderUpdates`가 교체를 알리면 메시·tone map 요청을 다시 만들고 `ReloadShaders`를 부른다. 실패하면 Error 한 번을 남기고, lease로 붙잡은 옛 집합의 UI 파이프라인으로 계속 그린다.
+     - capture 크기는 요청 때의 창 크기다(`ScreenHost::RequestCapture()` — 인자 없음).
+   - **셰이더 교체.** `UiLaneRenderer`를 `ShaderSet` 판 `Open`으로 연다. 자기 그래프에 `AddPasses`로 UI를 더하는 처리기의 방식이다(UiToolkit 18.4절). 프레임 처음의 `ApplyShaderUpdates`가 교체를 알리면 메시·tone map 요청을 다시 만들고 `ReloadShaders`를 부른다. 실패하면 교체마다 Error 한 번을 남기고, lease로 붙잡은 옛 집합의 UI 파이프라인으로 계속 그린다.
    - **UI 내용(상태 패널).**
      - 글꼴 에셋(Font FT3)이 아직 없어 글자 없는 패널이다. 글자는 FT3 뒤에 더한다. UiDemo의 시험 글꼴 경로를 복사하지 않는다.
      - Element 층(UiFramework `AnchorCanvas`·`Frame`·`VerticalStack`·`ProgressBar`)으로 만든다. 위젯 층·UiScreens는 UT5 화면 stack이 생기면 그것으로 바꾼다.
-     - 모양: 왼쪽 아래 패널 하나에 진행 막대 셋이다. 위에서부터 표시 목록 위치((고른 항목 + 1)/항목 수), mip((mip + 1)/mip 수), 층((층 + 1)/층 수)이다. 장면이면 모두 0이다. 배율은 창 높이 360 픽셀마다 1(정수, 최소 1)이다.
+     - 모양: 왼쪽 아래 패널 하나에 진행 막대 셋이다. 막대 영역 뒤는 배경 흐림(`BackgroundBlur`, 2 픽셀 — 패널 여백 3보다 작아 장면을 섞지 않는다)이다. UI 흐림 셰이더와 pass 안 배경 복사가 장치마다 돈다. 위에서부터 표시 목록 위치((고른 항목 + 1)/항목 수), mip((mip + 1)/mip 수), 층((층 + 1)/층 수)이다. 장면이면 모두 0이다. 배율은 창 높이 360 픽셀마다 1(정수, 최소 1)이다.
      - 게임 lane: `ScreenOverlay`가 `ui::Application`(루트 `AnchorCanvas`)을 가진다. 프레임마다 막대 값을 넣고 `UpdatePaintCache` → `DrawBatch::Update` → draw buffer `AddWindow(창 id, 크기)` → `LaneUiRenderer::RecordWindows(그 프레임 arena)` 순으로 packet을 만든다. 글자·벡터 이미지가 없어 atlas 업로드는 없다.
      - 입력: 패널은 입력을 받지 않는다(Application에 입력을 넘기지 않는다 — hit test·초점 없음). 카메라·텍스처 표시 입력은 그대로다. F1이 패널을 켜고 끈다. 기본은 켬(`--engine --window`)이고, 텍스처 self-test는 끈 채 돈다.
      - 수명: `ScreenOverlay` 소멸이 루트를 떼고 `Application::Shutdown`한다. `LaneUiRenderer`는 lane보다 먼저 부서진다(만든 텍스처가 없다).
@@ -319,8 +320,16 @@ Sandbox(실행 파일)에 둔다. 엔진 층에는 SM3 셰이더와 그 타입�
    - **시험(Sandbox `--self-test` 화면 검사, 여덟 장치 Thread·Inline).** 5항 화면 검사를 패널을 켠 채 돈다. 더하는 단언:
      - (a) 프레임마다 그래프 present 1, 장치 `PresentCount` 1 증가(합이 프레임 수).
      - (b) 모든 프레임에 UI pass가 붙는다(`uiFrames` = 프레임 수, `uiFailures` 0).
-     - (c) 장면 프레임의 패널 바탕 픽셀 = 패널 색 sRGB(±2). 2D mip 1/3 프레임의 mip 막대는 채움 쪽과 바탕 쪽이 다르고 채움이 파란 쪽이다. 장면 프레임의 같은 자리는 바탕이다.
+     - (c) 장면 프레임의 패널 바탕 픽셀 = 패널 색 sRGB(±2), 막대 사이 흐림 영역 픽셀도 패널 색(고른 바탕의 흐림). 2D mip 1/3 프레임의 mip 막대는 채움 쪽과 바탕 쪽이 다르고 채움이 파란 쪽이다. 장면 프레임의 같은 자리는 바탕이다.
      - (d) 기존 장면·텍스처 표시 단언이 그대로 PASS다(패널 밖 픽셀).
      - (e) 두 모드 capture byte 동일, (f) 검증 오류 0.
      - `--texture-self-test`는 패널 없이 같은 창 표면·capture 경로로 돈다.
    - **사람 확인.** `Sandbox --engine --window`: 왼쪽 아래에 패널이 있다. 숫자 1–6·`,`·`.`·`-`·`=`·`[`·`]`로 막대가 바뀌고, F1로 사라졌다 다시 나온다. 창 크기를 바꿔도 패널이 왼쪽 아래에 있고 장면이 늘어나지 않는다.
+
+**구현(개정 70, 2026-11-28).** 9항을 위 설계대로 구현했다.
+- 파일: UiRender `UiLaneRenderer::WindowSwapChain`(렌더 lane 조회 하나). Sandbox `ScreenOverlay.h/.cpp`(상태 패널), `ScreenRenderer`(스왑체인을 갖지 않음, `ScreenPacket`의 `window`·`width`·`height`·`ui`, pass 조립을 `AddScenePasses`·`AddInspectorPass`·`AddUiPasses`·`AddCapturePass`로 나눔, 통계 `presents`·`devicePresents`·`uiFrames`·`uiFailures`), `ScreenHost`(`LaneUiRenderer`·창 표면·`EnableOverlay`·F1), `EngineHost`(창 실행에 패널 켬), `CookedSelfTestShaders`(`UiShaderTypes()` 등록). Sandbox·Commandlet Build.cs에 `UiCore`·`UiFramework`·`UiRender`.
+- 설계와 다르게 정한 것: 표면 작업 값 `SurfaceCreate`·`SurfaceResize`와 `SetInitialSurface`는 없앴다(UI 창 표면 작업이 대신한다). 표면 소실의 장치 대기는 `SurfaceReleaseWait`·`WaitSurfaceRelease`이고, 창 표면 파괴 대기가 실패해도 게시한다.
+- 함께 고친 것(EngineModular 링크): UiCore `ElementChild`에 모듈 API 표지가 없어 DLL 빌드에서 UiFramework가 `ElementChild::AttachTo`를 찾지 못했다(UI 병합 뒤 EngineModular 링크 실패). `struct ROCKS_UICORE_API ElementChild`로 고쳤다.
+- 리뷰(리뷰어 1명, 2026-11-28) 반영: 스왑체인 첫 pass 결과 확인, UI 실패 범위 문구, 흐림 패널로 흐림 셰이더 장치 시험, capture 크기를 창 크기로, 배율 1 가정 `static_assert`.
+- 함께 고친 것(UI 셰이더 GLES): Sandbox가 UiRender를 링크하자 OpenGL ES 두 장치의 엔진 셰이더 집합이 `ProviderFailed`로 열리지 않았다. 원인은 `UiBackdropBlur.rsf`가 `UiBackdrop`을 샘플러 표본과 샘플러 없는 접근(`Load`·`GetDimensions`)으로 함께 읽은 것이다. GLES 결합 샘플러 계획(`ShaderGlesBindings`)은 샘플러 쓰임이 있는 텍스처에 dummy 샘플러를 만들지 않으므로, SPIRV-Cross가 "texelFetch without sampler"로 실패한다. UiDemo는 D3D11 전용이라 드러나지 않았다. 셰이더는 표본만 쓰게 고쳤다: texel 반 크기는 화면 변환(2 / 폭, −2 / 높이)에서 얻고(배경 = 패스 대상 크기), 흐림 없는 복사는 그 픽셀 texel 가운데 `SampleLevel`이다(같은 값). 같은 텍스처의 표본·Load 혼용을 GLES 계획이 받게 하는 것은 셰이더 시스템 후속이다.
+- 시험(Debug, 엔진·TestContent 다시 쿠킹): Sandbox `--self-test` 여덟 장치(D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES·GL core 위 ES·Vulkan·lavapipe) 0 failures다. 화면 검사는 패널을 켠 채 Thread·Inline 두 모드 8 프레임이다. 프레임마다 present 1(그래프·장치), UI 프레임 8/8, 패널 바탕·mip 막대 픽셀, 기존 장면·텍스처 표시 픽셀, 두 모드 byte 동일, 검증 오류 0이다. 쿠킹 화면도 D3D·Vulkan 여섯 장치에서 UI 셰이더가 든 쿠킹 라이브러리로 PASS다(OpenGL ES는 쿠킹 형식이 없어 NOT RUN — 이전과 같다). `--texture-self-test`·`--shader-reload-self-test`도 0 failures다.
