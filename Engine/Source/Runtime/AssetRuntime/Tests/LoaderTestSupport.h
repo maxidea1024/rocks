@@ -25,7 +25,10 @@ inline bool FillLoaderEntry(Allocator& allocator, CookedManifestEntry& entry,
     entry.cookKey = ManifestDigestOf(static_cast<uint8>(id));
     entry.bulkRawBytes = 0;
     for (const PackageBulkEntry& bulk : read.Value().bulkEntries) {
-        entry.bulkRawBytes += bulk.rawBytes;
+        // sidecar entry는 상주 raw 합에 들지 않는다(AS 20.1 4).
+        if ((bulk.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) == 0) {
+            entry.bulkRawBytes += bulk.rawBytes;
+        }
     }
 
     for (const PackageDependencyEntry& dependency : read.Value().dependencies) {
@@ -70,6 +73,8 @@ struct LoaderNode {
     uint64 soft = 0;
     // 0이 아니면 이 크기의 bulk(Zstd)를 붙인다.
     uint32 bulkBytes = 0;
+    // 참이면 그 bulk를 sidecar(스트리밍 bulk — AS 20.1)에 둔다(bulkBytes가 0이 아닐 때).
+    bool sidecar = false;
     // 참이면 이 패키지는 다른 Registry에서 대표 에셋을 TestRequiredAsset(target → 자기)으로 다시 쓴
     // 쿠킹 결과로 바꾼다 — 이 패키지를 Hard로 가리키는 패키지는 TestAsset을 기대하고 쓰였으므로
     // 공개 단계에서 TypeMismatch다(오래된 의존 쿠킹 결과).
@@ -84,7 +89,7 @@ class LoaderScene {
 public:
     explicit LoaderScene(AssetEnv& env) noexcept
         : manifest(env.allocator), env_(env), nodes_(env.allocator), files_(env.allocator),
-          paths_(env.allocator) {
+          paths_(env.allocator), sidecars_(env.allocator), sidecarPaths_(env.allocator) {
     }
 
     // 노드를 더한다(id 오름차순일 필요는 없다).
@@ -193,12 +198,16 @@ public:
             TestBulkSource bulk;
             Array<uint8> data(env_.allocator);
             PackageWriteOptions options = CookedOptions();
+            MemoryPackageSink sidecar(env_.allocator);
             if (node.bulkBytes != 0) {
                 FillCompressible(data, node.bulkBytes, static_cast<uint32>(node.id));
                 TestAsset* pointer = Pointer<TestAsset>(source, assets[index]);
-                pointer->pixels = bulk.Add(1, data.View());
+                pointer->pixels = bulk.Add(1, data.View(),
+                                           node.sidecar ? PackageBulkPlacement::Sidecar
+                                                        : PackageBulkPlacement::Package);
                 options.bulkSource = &bulk;
                 options.bulkCodec = BulkCodec::Zstd;
+                options.sidecar = &sidecar;
             }
 
             Array<uint8> file =
@@ -210,6 +219,26 @@ public:
 
             auto added = manifest.entries.TryEmplaceBack(env_.allocator);
             if (!added || !FillLoaderEntry(env_.allocator, *added.Value(), file, node.id)) {
+                return false;
+            }
+
+            // sidecar 칸·경로(AS 20.1 3·5 — 없으면 0과 빈 경로)다.
+            Array<uint8> streamed = sidecar.Take();
+            String streamedPath(env_.allocator);
+            if (!streamed.IsEmpty()) {
+                added.Value()->sidecarBytes = streamed.Size();
+                added.Value()->sidecarSha256 = Sha256::Hash(streamed.View());
+                StringBuilder<128> path(env_.allocator);
+                if (!path.TryAppend(root) || !path.TryAppendAscii('/') ||
+                    !AppendCookedSidecarPath(path, FixedId(node.id),
+                                             added.Value()->sidecarSha256) ||
+                    !streamedPath.TryAssign(path.View())) {
+                    return false;
+                }
+            }
+
+            if (!sidecars_.TryPushBack(Move(streamed)) ||
+                !sidecarPaths_.TryPushBack(Move(streamedPath))) {
                 return false;
             }
 
@@ -258,6 +287,24 @@ public:
 
     StringView PathAt(usize index) const noexcept {
         return paths_[index].View();
+    }
+
+    // id 패키지의 sidecar byte와 경로다(sidecar 없는 패키지는 비어 있다 — 매니페스트 순서 index로도
+    // 찾는다).
+    Array<uint8>& SidecarOf(uint64 id) noexcept {
+        return sidecars_[EntryIndexOf(id)];
+    }
+
+    StringView SidecarPathOf(uint64 id) const noexcept {
+        return sidecarPaths_[EntryIndexOf(id)].View();
+    }
+
+    Array<uint8>& SidecarAt(usize index) noexcept {
+        return sidecars_[index];
+    }
+
+    StringView SidecarPathAt(usize index) const noexcept {
+        return sidecarPaths_[index].View();
     }
 
     CookedManifest manifest;
@@ -320,6 +367,8 @@ private:
     Array<LoaderNode> nodes_;
     Array<Array<uint8>> files_;
     Array<String> paths_;
+    Array<Array<uint8>> sidecars_;
+    Array<String> sidecarPaths_;
 };
 
 // 완료를 시험이 내보내는 IO다. 파일은 경로 → byte 표이고, 경로마다 오류를 끼울 수 있다. hold면
@@ -343,10 +392,15 @@ public:
         : files(allocator), held(allocator), begun(allocator) {
     }
 
-    // scene의 모든 파일을 등록한다.
+    // scene의 모든 파일(패키지와 sidecar)을 등록한다.
     bool AddScene(LoaderScene& scene) noexcept {
         for (usize index = 0; index < scene.FileCount(); ++index) {
             if (!Add(scene.PathAt(index), scene.FileAt(index).View())) {
+                return false;
+            }
+
+            if (!scene.SidecarAt(index).IsEmpty() &&
+                !Add(scene.SidecarPathAt(index), scene.SidecarAt(index).View())) {
                 return false;
             }
         }
@@ -395,6 +449,21 @@ public:
             if (file->bytes.Size() == read.expectedBytes) {
                 for (usize at = 0; at < file->bytes.Size(); ++at) {
                     read.destination[at] = file->bytes[at];
+                }
+
+                bytesRead += file->bytes.Size();
+                // 패키지를 다 읽었으면 sidecar 크기만 잰다(내용은 읽지 않는다 — AS 20.1 7).
+                if (read.sidecarPath != nullptr) {
+                    ++sidecarStats;
+                    const File* sidecar =
+                        FindFile(StringView(read.sidecarPath, read.sidecarPathBytes));
+                    if (sidecar == nullptr) {
+                        entry.result.sidecarError = ErrorCode::NotFound;
+                    } else if (sidecar->completeError != ErrorCode::None) {
+                        entry.result.sidecarError = sidecar->completeError;
+                    } else {
+                        entry.result.sidecarFileBytes = sidecar->bytes.Size();
+                    }
                 }
             }
         }
@@ -462,6 +531,9 @@ public:
     bool hold = false;
     uint32 active = 0;
     uint32 released = 0;
+    // 대상에 복사한 패키지 byte 합과 sidecar Stat 횟수다(sidecar byte는 읽지 않는다).
+    uint64 bytesRead = 0;
+    uint32 sidecarStats = 0;
 };
 
 // 손으로 돌리는 worker다. hold면 작업을 쌓아 두고 RunAll·RunFirst가 실행한다(아니면 Run 안에서

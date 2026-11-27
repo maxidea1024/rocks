@@ -54,7 +54,8 @@ struct LoaderCompletionQueue;
 
 // 패키지 하나의 로드 작업이다. 주소가 고정이어야 하므로(IO·worker가 포인터를 쥔다) 하나씩 할당한다.
 struct LoaderPackageJob {
-    explicit LoaderPackageJob(Allocator& allocator) noexcept : file(allocator), path(allocator) {
+    explicit LoaderPackageJob(Allocator& allocator) noexcept
+        : file(allocator), path(allocator), sidecarPath(allocator) {
     }
 
     LoaderCompletionQueue* queue = nullptr;
@@ -65,6 +66,8 @@ struct LoaderPackageJob {
     UniquePtr<PackageLoadState> state;
     Array<uint8> file;
     StringBuilder<LoaderPathInlineBytes> path;
+    // sidecar 파일 경로다(AS 20.1 7 — 매니페스트 sidecarBytes가 0이면 비어 있다).
+    StringBuilder<LoaderPathInlineBytes> sidecarPath;
     CookedPackageRead read;
     // io.Release가 남았는지다(Begin 성공 뒤 완료를 처리할 때까지).
     bool readBegun = false;

@@ -202,6 +202,13 @@ Result<void> AssetLoader::Impl::BeginPackage(uint32 unit, uint32 member,
     LoaderKeepFirst(built, job->path.TryAppend(root.View()));
     LoaderKeepFirst(built, job->path.TryAppendAscii('/'));
     LoaderKeepFirst(built, AppendCookedPackagePath(job->path, entry.asset, entry.packageSha256));
+    if (entry.sidecarBytes != 0) {
+        LoaderKeepFirst(built, job->sidecarPath.TryAppend(root.View()));
+        LoaderKeepFirst(built, job->sidecarPath.TryAppendAscii('/'));
+        LoaderKeepFirst(
+            built, AppendCookedSidecarPath(job->sidecarPath, entry.asset, entry.sidecarSha256));
+    }
+
     if (built != ErrorCode::None) {
         return Result<void>::Failure(built);
     }
@@ -211,6 +218,8 @@ Result<void> AssetLoader::Impl::BeginPackage(uint32 unit, uint32 member,
     read.pathBytes = job->path.View().ByteCount();
     read.expectedBytes = entry.packageBytes;
     read.destination = job->file.Data();
+    read.sidecarPath = entry.sidecarBytes != 0 ? job->sidecarPath.CString() : nullptr;
+    read.sidecarPathBytes = entry.sidecarBytes != 0 ? job->sidecarPath.View().ByteCount() : 0;
     read.complete = OnLoaderReadComplete;
     read.owner = job;
     read.backendState = nullptr;
@@ -355,6 +364,26 @@ void AssetLoader::Impl::HandleCompletion(LoaderPackageJob* job) noexcept {
             diagnostic.detail = CookedManifestNoEntry;
             FailUnit(unit, job->entry, ErrorCode::CorruptData, diagnostic);
             return;
+        }
+
+        // sidecar 파일은 있고 크기가 매니페스트와 같아야 한다(AS 20.1 7 — 없거나 다르면 패키지
+        // 손상, 그 밖 IO 오류는 그 오류).
+        if (entry.sidecarBytes != 0) {
+            const ErrorCode sidecar = result.sidecarError;
+            if (sidecar != ErrorCode::None && sidecar != ErrorCode::NotFound) {
+                diagnostic.error = sidecar;
+                FailUnit(unit, job->entry, sidecar, diagnostic);
+                return;
+            }
+
+            if (sidecar == ErrorCode::NotFound || result.sidecarFileBytes != entry.sidecarBytes) {
+                diagnostic.code = AssetDiagnosticCode::CorruptPackage;
+                diagnostic.error = ErrorCode::CorruptData;
+                diagnostic.section = static_cast<uint32>(CookedManifestField::SidecarBytes);
+                diagnostic.detail = CookedManifestNoEntry;
+                FailUnit(unit, job->entry, ErrorCode::CorruptData, diagnostic);
+                return;
+            }
         }
 
         SetPhase(*job, AssetLoaderPackagePhase::Preparing);

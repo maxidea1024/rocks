@@ -4,7 +4,7 @@
 #include <Core/Text/NameComponent.h>
 #include <TestSupport/NFailAllocator.h>
 
-// 쿠킹 매니페스트 v2 시험이다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항 A4f2): 왕복·
+// 쿠킹 매니페스트 v3 시험이다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항 A4f2): 왕복·
 // 결정성·Find·FindArtifact, 칸마다 규칙 위반(검증·writer·reader가 같은 진단 — backend·artifact 표
 // 포함), 구조 변조(CRC를 다시 맞춘 잘림·개수·길이·남는 byte), 버전(v1 포함), 대조
 // 함수(프로파일·병합· 패키지 — A1a writer가 쓴 쿠킹 패키지와, artifact 파일), 파일
@@ -60,6 +60,9 @@ bool SameEntry(const CookedManifestEntry& left, const CookedManifestEntry& right
                           Span<const uint8>(right.packageSha256.bytes, 32)) &&
                 left.packageBytes == right.packageBytes &&
                 left.bulkRawBytes == right.bulkRawBytes &&
+                left.sidecarBytes == right.sidecarBytes &&
+                SameBytes(Span<const uint8>(left.sidecarSha256.bytes, 32),
+                          Span<const uint8>(right.sidecarSha256.bytes, 32)) &&
                 SameBytes(Span<const uint8>(left.cookKey.bytes, 32),
                           Span<const uint8>(right.cookKey.bytes, 32)) &&
                 left.flags == right.flags && left.bundles.Size() == right.bundles.Size() &&
@@ -669,8 +672,9 @@ TEST(CookedManifest_StructureTampering) {
         CHECK(expect(withRaw([&](ManifestRaw& raw) { raw.magic[index] ^= 1; }), F::Magic, Head));
     }
 
-    // v1(10.3절 4항 — reader를 두지 않는다)도 UnsupportedVersion이다.
-    const uint32 versions[] = {0, 1, CookedManifestFormatVersion + 1, NumericLimits<uint32>::Max()};
+    // v1·v2(10.3절 4항·20.1 5 — reader를 두지 않는다)도 UnsupportedVersion이다.
+    const uint32 versions[] = {0, 1, 2, CookedManifestFormatVersion + 1,
+                               NumericLimits<uint32>::Max()};
     for (uint32 version : versions) {
         AssetDiagnostic failure;
         CHECK(ReadCookedManifest(
@@ -941,6 +945,8 @@ TEST(CookedManifest_EntryTruncation) {
         {F::PackageSha256, DigestBytes},
         {F::PackageBytes, sizeof(uint64)},
         {F::BulkRawBytes, sizeof(uint64)},
+        {F::SidecarBytes, sizeof(uint64)},
+        {F::SidecarSha256, DigestBytes},
         {F::CookKey, DigestBytes},
         {F::Flags, sizeof(uint32)},
         {F::BundleCount, CountBytes + MinBundleBytes},
@@ -1213,7 +1219,10 @@ bool FillEntry(CookedManifestEntry& entry, Allocator& allocator, const Array<uin
     entry.packageSha256 = Sha256::Hash(file.View());
     entry.bulkRawBytes = 0;
     for (const PackageBulkEntry& bulk : read.Value().bulkEntries) {
-        entry.bulkRawBytes += bulk.rawBytes;
+        // sidecar entry는 상주 raw 합에 들지 않는다(AS 20.1 4).
+        if ((bulk.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) == 0) {
+            entry.bulkRawBytes += bulk.rawBytes;
+        }
     }
 
     for (const PackageDependencyEntry& dependency : read.Value().dependencies) {
