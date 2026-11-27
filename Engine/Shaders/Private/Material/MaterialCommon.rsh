@@ -15,6 +15,7 @@
 #include "/Engine/Private/Shading/SurfaceAttributes.rsh"
 #include "/Engine/Private/Material/MaterialSelect.rsh"
 #include "/Engine/Private/Material/MaterialTexture.rsh"
+#include "/Engine/Private/Material/MaterialNoise.rsh"
 
 // 문맥 구조체(MaterialVertexInputs·MaterialInputs)·공급 표지·접근자다(6.9절 — 문맥 값 표에서 만든
 // 파일).

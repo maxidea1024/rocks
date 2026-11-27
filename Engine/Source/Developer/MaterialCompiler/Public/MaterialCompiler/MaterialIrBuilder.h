@@ -94,6 +94,11 @@ public:
     Result<IrValueId> SurfaceRef(uint32 record) noexcept;
     // 속성 집합 값이다(6.12절 MS2e1 — record는 번역기 속성 기록 번호).
     Result<IrValueId> AttributesRef(uint32 record) noexcept;
+    // 라이브러리 함수 호출이다(6.13절 MS2f3). parameters는 즉시값 [1]–[3](최대 3), arguments는 실행
+    // 값(최대 MaxIrOperands)이다. 접지 않는다. 오류: function·type이 규칙 밖이거나 개수를 넘거나
+    // 인자가 빌더 밖·수 값이 아니면 InvalidArgument.
+    Result<IrValueId> Library(uint32 function, Span<const uint64> parameters, IrType type,
+                              Span<const IrValueId> arguments) noexcept;
     // 텍스처 slot의 논리 크기(texel이면 1/크기)다. 2DArray·Texture3D는 Float3, 2D는 Float2다.
     // 오류: 다른 종류이거나 텍스처가 아니면 InvalidArgument.
     Result<IrValueId> TextureSize(IrValueId texture, bool texel) noexcept;

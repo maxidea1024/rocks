@@ -2675,7 +2675,9 @@
       "supply": "",
       "source": "",
       "prerequisite": "",
-      "propertyPrerequisites": []
+      "propertyPrerequisites": [
+        "MPQ-NoiseTexture"
+      ]
     },
     {
       "unrealClass": "UMaterialExpressionVectorNoise",

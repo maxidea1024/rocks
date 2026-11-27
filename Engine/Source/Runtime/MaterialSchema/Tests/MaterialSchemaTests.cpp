@@ -568,6 +568,7 @@ TEST(MaterialSchema_PrerequisiteIdsMatchTable) {
         "MPQ-ColoredTransmittance",
         "MPQ-AlphaHoldout",
         "MPQ-LightBake",
+        "MPQ-NoiseTexture",
     };
     static_assert(sizeof(table) / sizeof(table[0]) + 1 == MaterialPrerequisiteCount,
                   "prerequisite table must list every value except None");

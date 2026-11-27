@@ -11,6 +11,7 @@
 #include "../Translation/CustomOutputTable.h"
 #include "EntryDefineNames.h"
 #include "HlslFloatLiteral.h"
+#include <MaterialCompiler/MaterialIrLibrary.h>
 
 // 생성 원문 작성이다(Docs/Design/MaterialSystem 7.3·7.7·6.9절).
 namespace rocks::material {
@@ -313,6 +314,8 @@ private:
     const IrResult* FindResult(IrEntry entry, StringView slot) const noexcept;
     bool IsZero(const IrResult* result) const noexcept;
     Result<void> Extern(const IrValue& value) noexcept;
+    // 라이브러리 함수 호출이다(6.13절 MS2f3 — UE 함수 이름·인자 순서).
+    Result<void> LibraryCall(const IrValue& value) noexcept;
     bool InvolvesDouble(const IrValue& value) const noexcept;
     Result<void> DoubleLiteral(const IrValue& value) noexcept;
     Result<void> DoubleParts(const IrValue& value, StringView part) noexcept;
@@ -588,8 +591,80 @@ Result<void> SourceWriter::Extern(const IrValue& value) noexcept {
     return Raw(")");
 }
 
+Result<void> SourceWriter::LibraryCall(const IrValue& value) noexcept {
+    // 정적 인자는 리터럴, 실행 값은 피연산자 식이다(LWC 위치는 MaterialDouble3 그대로 — 오버로드).
+    const auto integer = [&](uint64 number) noexcept -> Result<void> {
+        StringBuilder<> text(allocator_);
+        text << number;
+        if (auto status = text.Status(); !status) {
+            return status;
+        }
+
+        return Raw(text.View());
+    };
+
+    const auto boolean = [&](bool flag) noexcept { return Raw(flag ? "true" : "false"); };
+    const auto separator = [&]() noexcept { return Raw(", "); };
+    const uint64 packed = value.immediate[1];
+    const uint64 function = packed & IrLibraryByteMask;
+    const uint64 quality = (packed >> IrLibraryQualityShift) & IrLibraryByteMask;
+    const uint64 size = (packed >> IrLibraryHighWordShift) & IrLibraryWordMask;
+    Result<void> written = Result<void>::Success();
+    const auto step = [&](Result<void> part) noexcept {
+        if (written) {
+            written = Move(part);
+        }
+    };
+
+    if (value.immediate[0] == static_cast<uint64>(IrLibraryFunction::Noise)) {
+        step(Raw("MaterialExpressionNoise("));
+        step(Operand(value.operands[0]));
+        step(separator());
+        step(FloatLiteral(value.immediate[2] & IrLibraryWordMask));
+        step(separator());
+        step(integer(quality));
+        step(separator());
+        step(integer(function));
+        step(separator());
+        step(boolean(((packed >> IrLibraryNoiseTurbulenceShift) & 1u) != 0));
+        step(separator());
+        step(integer((packed >> IrLibraryNoiseLevelsShift) & IrLibraryByteMask));
+        step(Raw("u, "));
+        step(FloatLiteral(value.immediate[3] & IrLibraryWordMask));
+        step(separator());
+        step(FloatLiteral((value.immediate[3] >> IrLibraryHighWordShift) & IrLibraryWordMask));
+        step(separator());
+        step(FloatLiteral((value.immediate[2] >> IrLibraryHighWordShift) & IrLibraryWordMask));
+        step(separator());
+        step(Operand(value.operands[1]));
+        step(separator());
+        step(boolean(((packed >> IrLibraryNoiseTilingShift) & 1u) != 0));
+        step(separator());
+        step(FloatLiteral(WriterFloatBits(static_cast<float>(size))));
+        step(Raw(")"));
+        return written;
+    }
+
+    if (value.immediate[0] == static_cast<uint64>(IrLibraryFunction::VectorNoise)) {
+        step(Raw("MaterialExpressionVectorNoise("));
+        step(Operand(value.operands[0]));
+        step(separator());
+        step(integer(quality));
+        step(separator());
+        step(integer(function));
+        step(separator());
+        step(boolean(((packed >> IrLibraryVectorNoiseTilingShift) & 1u) != 0));
+        step(separator());
+        step(FloatLiteral(WriterFloatBits(static_cast<float>(size))));
+        step(Raw(")"));
+        return written;
+    }
+
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
 bool SourceWriter::InvolvesDouble(const IrValue& value) const noexcept {
-    if (value.op == IrOp::Extern || value.op == IrOp::Branch) {
+    if (value.op == IrOp::Extern || value.op == IrOp::Branch || value.op == IrOp::Library) {
         // 문맥 값은 표 타입 그대로(접근자), 분기는 대입문이라 Double도 같은 철자다.
         return false;
     }
@@ -1199,6 +1274,8 @@ Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
     switch (value.op) {
     case IrOp::Extern:
         return Extern(value);
+    case IrOp::Library:
+        return LibraryCall(value);
     case IrOp::Interpolate:
         return Interpolated(value);
     case IrOp::Pending: {

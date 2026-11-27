@@ -2,6 +2,11 @@
 #include <MaterialSchema/Nodes/Color/DesaturationProperties.h>
 #include <MaterialSchema/Nodes/Math/RotateAboutAxisProperties.generated.h>
 #include <MaterialSchema/Nodes/Math/RotateAboutAxisProperties.h>
+#include <MaterialSchema/Nodes/Noise/NoiseProperties.generated.h>
+#include <MaterialSchema/Nodes/Noise/NoiseProperties.h>
+#include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.generated.h>
+#include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.h>
+#include <MaterialCompiler/MaterialSourceWriter.h>
 #include <Platform/PlatformMath.h>
 
 #include "MaterialGraphFixture.h"
@@ -465,6 +470,118 @@ TEST(MaterialAdvanced_Sobol) {
     MaterialTranslation pixelOut(env.allocator);
     REQUIRE(Translate(pixel, Traits(), pixelOut));
     CHECK(pixelOut.succeeded);
+}
+
+// Noise·VectorNoise: IR Library 호출 하나로 UE 함수 이름·인자 순서를 낸다(levels 클램프), LUT
+// 함수는 MPQ-NoiseTexture 늦은 진단, Double 위치는 LWC 판, VectorNoise는 함수에 따라
+// float3·float4다.
+TEST(MaterialAdvanced_Noise) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto generate = [&](GraphFixture& fixture, MaterialTranslation& out,
+                              MaterialGeneratedSource& source) noexcept {
+        return Translate(fixture, Traits(), out).IsOk() && out.succeeded &&
+               WriteMaterialSource(env.allocator, out.module, Traits(), TestAssetId, MainGraphId,
+                                   source)
+                   .IsOk() &&
+               source.succeeded;
+    };
+
+    {
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        properties.noiseFunction = NoiseFunction::GradientALU;
+        properties.levels = 20;
+        properties.turbulence = false;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(AddVector3(fixture, 1.0f, 2.0f, 3.0f), "Result", noise, "Position");
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        CHECK(source.text.View().Contains("MaterialExpressionNoise(",
+                                          StringComparison::CaseSensitive));
+        CHECK(source.text.View().Contains(", 1.0, 1, 3, false, 10u, -1.0, 1.0, 2.0, ",
+                                          StringComparison::CaseSensitive));
+        CHECK(source.text.View().Contains(", false, 512.0)", StringComparison::CaseSensitive));
+    }
+
+    {
+        // 기본 함수 SimplexTex는 LUT가 필요하다(쓰이면 PrerequisiteMissing).
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(AddVector3(fixture, 1.0f, 2.0f, 3.0f), "Result", noise, "Position");
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, Traits(), out));
+        CHECK(!out.succeeded);
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::PrerequisiteMissing, noise));
+    }
+
+    {
+        // Position이 없으면 절대 월드 위치(Double)라 LWC 판을 부른다.
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        properties.noiseFunction = NoiseFunction::ValueALU;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        bool wide = false;
+        for (const IrValue& value : out.module.Values()) {
+            wide = wide || (value.op == IrOp::Library &&
+                            out.module.Values()[value.operands[0]].type.scalar == IrScalar::Double);
+        }
+
+        CHECK(wide);
+    }
+
+    // 호출 결과는 늘 float4이고, GradientALU·Voronoi가 아니면 출력이 xyz다(UE `.xyz`).
+    const struct {
+        VectorNoiseFunction function;
+        bool full;
+    } vectors[] = {{VectorNoiseFunction::CellnoiseALU, false},
+                   {VectorNoiseFunction::GradientALU, true},
+                   {VectorNoiseFunction::VoronoiALU, true},
+                   {VectorNoiseFunction::CurlALU, false}};
+    ComponentMaskProperties rgb;
+    rgb.r = true;
+    rgb.g = true;
+    rgb.b = true;
+    for (const auto& item : vectors) {
+        GraphFixture fixture(env);
+        VectorNoiseProperties properties;
+        properties.noiseFunction = item.function;
+        const Guid noise = fixture.Add("Material.VectorNoise", env.Save(properties));
+        fixture.Connect(AddVector3(fixture, 1.0f, 2.0f, 3.0f), "Result", noise, "Position");
+        const Guid unlit = fixture.Add("Material.SurfaceUnlit");
+        const Guid mask = fixture.Add("Material.ComponentMask", env.Save(rgb));
+        fixture.Connect(noise, "Result", mask, "Input");
+        fixture.Connect(mask, "Result", unlit, "EmissiveColor");
+        fixture.Connect(unlit, "Result", OutputNodeId, "Surface");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        CHECK(source.text.View().Contains("MaterialExpressionVectorNoise(",
+                                          StringComparison::CaseSensitive));
+        uint8 width = 0;
+        bool narrowed = false;
+        for (usize at = 0; at < out.module.Values().Size(); ++at) {
+            const IrValue& value = out.module.Values()[at];
+            if (value.op == IrOp::Library) {
+                width = value.type.components;
+            }
+
+            narrowed = narrowed || (value.op == IrOp::Swizzle && value.operandCount == 1 &&
+                                    out.module.Values()[value.operands[0]].op == IrOp::Library &&
+                                    value.type.components == 3);
+        }
+
+        CHECK(width == 4);
+        CHECK(narrowed || item.full);
+    }
 }
 
 } // namespace material_advanced_tests_file

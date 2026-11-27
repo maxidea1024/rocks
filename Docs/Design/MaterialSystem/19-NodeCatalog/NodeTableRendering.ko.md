@@ -88,7 +88,7 @@
 
 | UE 5.8 | Rocks 노드 | 상태 | 단계 | 공급·선행 | 비고 |
 |---|---|---|---|---|---|
-| `UMaterialExpressionNoise` | `Material.Noise` | 구현 | MS2f | — | 함수 종류 전부(Simplex·Gradient·Value·Voronoi 등). 원문은 엔진 셰이더 라이브러리 SL 함수 |
+| `UMaterialExpressionNoise` | `Material.Noise` | 구현 | MS2f | `속성 TODO: MPQ-NoiseTexture` | ALU 함수(GradientALU·ValueALU·Voronoi)는 구현. LUT 함수(SimplexTex·GradientTex·GradientTex3D)는 렌더러 noise 시스템 텍스처가 필요하다(6.13절 MS2f3). 원문은 MaterialNoise.rsh |
 | `UMaterialExpressionVectorNoise` | `Material.VectorNoise` | 구현 | MS2f | — |  |
 | `UMaterialExpressionScalarBlueNoise` | `Material.ScalarBlueNoise` | 구현 | MS2b | `view` | blue noise 텍스처는 view 공급 |
 | `UMaterialExpressionSobol` | `Material.Sobol` | 구현 | MS2f | — |  |

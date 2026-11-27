@@ -41,10 +41,13 @@ enum class MaterialPrerequisite : uint8 {
     ColoredTransmittance = 14,
     AlphaHoldout = 15,
     LightBake = 16,
+    // 렌더러 noise 시스템 텍스처(UE View PerlinNoiseGradientTexture·PerlinNoise3DTexture — 6.13절
+    // MS2f3).
+    NoiseTexture = 17,
 };
 
 // 선행 수다(None 포함, 마지막 값 + 1).
-inline constexpr uint32 MaterialPrerequisiteCount = 17;
+inline constexpr uint32 MaterialPrerequisiteCount = 18;
 
 // "MPQ-<이름>" 문자열이다(19.4.1절 ID). None·범위 밖이면 빈 문자열이다.
 ROCKS_MATERIALSCHEMA_API StringView

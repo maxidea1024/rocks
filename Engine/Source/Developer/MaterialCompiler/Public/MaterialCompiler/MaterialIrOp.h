@@ -144,11 +144,14 @@ enum class IrOp : uint8 {
     SurfaceRef = 91,
     // 속성 집합 값이다(6.12절 MS2e1). 즉시값 [0]은 번역기 속성 기록 번호다. 모듈에는 남지 않는다
     // (쓰는 곳이 칸을 읽는다).
-    AttributesRef = 92
+    AttributesRef = 92,
+    // 라이브러리 함수 호출이다(6.13절 MS2f3). 즉시값 [0]은 IrLibraryFunction, [1]–[3]은 그 함수의
+    // 정적 인자 묶음(MaterialIrLibrary.h), 피연산자는 실행 값이다. 접지 않는다.
+    Library = 93
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 93;
+inline constexpr uint32 IrOpCount = 94;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

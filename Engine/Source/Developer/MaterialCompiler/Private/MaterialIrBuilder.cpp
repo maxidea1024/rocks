@@ -2,6 +2,7 @@
 #include <Core/Move.h>
 #include <DeterministicMath/DeterministicMath.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
+#include <MaterialCompiler/MaterialIrLibrary.h>
 #include <Platform/Memory.h>
 
 // 머티리얼 IR 빌더다(Docs/Design/MaterialSystem 6.5·6.8절).
@@ -1303,6 +1304,33 @@ Result<IrValueId> IrBuilder::AttributesRef(uint32 record) noexcept {
     value.type = IrAttributesType();
     value.op = IrOp::AttributesRef;
     value.immediate[0] = record;
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::Library(uint32 function, Span<const uint64> parameters, IrType type,
+                                     Span<const IrValueId> arguments) noexcept {
+    if (function >= IrLibraryFunctionCount || !IsValidIrType(type) ||
+        parameters.Size() >= IrImmediateSlots || arguments.Size() > MaxIrOperands) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = type;
+    value.op = IrOp::Library;
+    value.operandCount = static_cast<uint8>(arguments.Size());
+    for (usize at = 0; at < arguments.Size(); ++at) {
+        if (!IsNumeric(arguments[at])) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        value.operands[at] = arguments[at];
+    }
+
+    value.immediate[0] = function;
+    for (usize at = 0; at < parameters.Size(); ++at) {
+        value.immediate[at + 1] = parameters[at];
+    }
+
     return Intern(value);
 }
 
