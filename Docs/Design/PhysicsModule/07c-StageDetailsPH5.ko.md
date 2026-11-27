@@ -155,3 +155,29 @@ PH5는 넷으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설�
 
 **PH5c2 리뷰 반영(2026-11-28).** 치명 0, 중요 1, 경미 9. 시험 공백을 메웠다: 구속이 있는 body의 질량 중심 변경(구속 다시 붙임·잠금 유지), 질량 중심 변경 전후 원점 유지, 반폭이 다른 상자의 관성 세 성분, 회전 잠금 해제 뒤 gyroscopic 복귀·잠긴 body의 gyroscopic 요청, Kinematic은 중력을 켜도 깨지 않음, 덮어쓰기 아닌 상한에 더하기. 질량만 바뀌면 형상을 바꾸지 않고(접촉 cache 유지), 형상 실패를 경고하고 칸을 그대로 두며, body 없는 addToCurrent를 UE처럼 더하지 않게, 모르는 `DofMode`를 거르게 고쳤다. 관성이 텐서 대각(축 정렬 형상에서 주값)임을 적었다. 2.6절 표·주석 정리.
 
+### 7.1.19 PH5d 구현 세부(2026-11-28)
+
+잠듦·깨움 API·이벤트와 물리 상태 이벤트다(2.7절). UE `UPrimitiveComponent::WakeRigidBody`·`PutRigidBodyToSleep`·`RigidBodyIsAwake`(`E/Private/PrimitiveComponentPhysics.cpp:540–567`·`850–855`) → `FBodyInstance::WakeInstance`·`PutInstanceToSleep`·`IsInstanceAwake`(`BodyInstance.cpp:3580–3615`) → Chaos(`PhysicsCore/Private/ChaosEngineInterface.cpp:468–492`), 이벤트는 `DispatchWakeEvents`(`E/Private/Components/PrimitiveComponent.cpp:3609–3658`)·`FPhysScene_Chaos::OnSyncBodies`(`PhysScene_Chaos.cpp:2506–2516`·`2693–2718`)·Chaos `SetObjectState(…, bAllowEvents)`(`CH/Public/Chaos/ParticleHandle.h:3740–3753`), 물리 상태 이벤트는 `OnCreatePhysicsState`·`OnDestroyPhysicsState`(`PrimitiveComponent.cpp:971`·`1169`)를 따른다.
+
+**컴포넌트 API.**
+- `WakeRigidBody()`·`PutRigidBodyToSleep()`: Dynamic body에만 효력이 있다(UE `IsDynamic && !IsKinematic`). 잠재우면 속도가 0이고(Jolt 비활성화 — `BodyManager.cpp:565–567`, Chaos `SetObjectState(Sleeping)`) 대기 충격량·누적 힘·프레임 힘을 버린다(Chaos가 dynamics 표지를 지운다 — `ParticleHandle.h:3762–3766`).
+- `RigidBodyIsAwake()`: Dynamic이고 깨어 있으면 참이다(Kinematic·Static·body 없음 거짓 — UE `IsInstanceAwake`).
+- `SetGenerateWakeEvents(bool)`·`GetGenerateWakeEvents()`(`bodySettings.generateWakeEvents` — UE `bGenerateWakeEvents`는 공개 필드라 setter가 없다, Rocks는 setter로 둔다).
+- 이벤트 필드: `componentWake(wakingComponent)`·`componentSleep(sleepingComponent)`(UE `OnComponentWake`·`OnComponentSleep` — 뼈 이름 인자는 CM7), `componentPhysicsStateChanged(changedComponent, stateChange)`(`ComponentPhysicsStateChange { Created, Destroyed }` — UE `EComponentPhysicsStateChange`).
+
+**깨움·잠듦 이벤트(UE Chaos 규칙).** Chaos는 입자마다 마지막 전이 하나(`EWakeEventEntry` Awake·Sleep)를 두고 결과 동기화(`OnSyncBodies`)에서 컴포넌트 이동 뒤 `DispatchWakeEvents`를 부른다. 그것이 `bGenerateWakeEvents`일 때만 `OnComponentWake`·`OnComponentSleep`을 낸다.
+- 이벤트를 내는 전이: solver의 잠듦·깨움(접촉으로 깨움 포함), 그리고 게임 API의 깨움 중 Chaos가 `bAllowEvents` 참으로 바꾸는 것 — 힘·충격량·토크(7.1.17절), 속도 setter의 깨움, teleport(`SetX`가 잠든 입자를 깨움 — `SingleParticlePhysicsProxy.h:240–250`).
+- 내지 않는 전이: `WakeRigidBody`(`WakeUp_AssumesLocked`가 이벤트 없이 바꾸고 대기 이벤트를 지운다 — `ClearEvents`), `PutRigidBodyToSleep`(이벤트 없이, 대기 이벤트는 둔다), body 생성(시작 잠듦 포함), 형상 변경의 깨움(`UpdateBodyScale` → `WakeUp_AssumesLocked` — 대기 이벤트도 지운다), Kinematic → Dynamic 전환의 깨움(`SetInstanceSimulatePhysics` → `WakeInstance` — 지운다), 중력 켬의 깨움(`SetEnableGravity` → `WakeInstance` — `BodyInstance.cpp:3969`, 지운다), 충돌 필터 변경의 깨움(`WakeUp_AssumesLocked` — `:1126`, 지운다), body 삭제의 비활성. Kinematic으로 바꾸면 쌓인 이벤트를 버린다. Kinematic body의 활성 변화는 이벤트가 아니다(Chaos Kinematic은 잠들지 않는다).
+- Jolt 구현: `BodyActivationListener`가 활성·비활성(user data, 깨움 여부)을 미리 잡은 배열에 쌓는다(step 중 worker에서도 불리므로 잠금·할당 없음 — 용량이 모자라면 세고 Warning). 위 "내지 않는" 경로는 장면이 기록을 끈 채 Jolt를 부르고, 지우는 경로는 칸의 대기 이벤트도 지운다. 쌓인 기록은 step 직전·직후와 결과 반영 때 칸에 옮긴다(살아 있는 같은 세대·Dynamic 칸만, 마지막 전이가 이긴다 — 한 step 안의 순서와 무관하다).
+- 발행: 결과 반영(PhysicsResults — 3.4절)에서 컴포넌트 자세를 반영한 뒤 칸 번호 순으로 낸다(UE는 입자마다 이동·발행 — 몸끼리의 순서만 다르다). 발행 때 `generateWakeEvents`가 참이고 컴포넌트가 파괴 대기가 아니어야 한다. 같은 프레임에 깼다 잠들면 잠듦 하나다(Chaos 마지막 값). weld 자식에 전하기는 PH6이다. 고정 스텝이 0인 프레임에도 게임 API의 깨움 이벤트를 그 프레임 결과 반영에서 낸다(UE는 프레임마다 step하므로 다음 동기화 — 한계). 같은 자세 teleport는 UE `SetGlobalPose`가 깨어 있는 body만 일찍 끝내고(`ChaosEngineInterface.cpp:2542–2547`) 잠든 body는 `SetX`로 깨우며 이벤트를 낸다 — Rocks도 깨어 있는 body의 활성은 아무 일도 하지 않아 같다.
+
+**물리 상태 이벤트.** World가 시스템 상태 bit·등록 표지를 확정한 뒤 부르는 새 hook `Component::OnSystemStateChanged(kind, created)`(엔진 런타임 23.2절 보강)에서 `componentPhysicsStateChanged(this, Created·Destroyed)`를 낸다. 등록은 모든 종류를 만든 뒤, 해제는 bit를 비운 뒤, 즉시·갱신 지점 다시 만들기는 진행 표지를 푼 뒤 Destroyed → Created 순이다(UE는 `bPhysicsStateCreated` 확정 뒤 — handler 안의 다시 만들기·충돌 변경이 동작한다). body를 만들지 못하면 Created는 없다.
+
+**World 접점.** `SetBodyAwake(body, awake)`(Dynamic만, 이벤트 없음 — 위 규칙). 이벤트 목록은 Physics 내부(`JoltPhysicsScene::TakeWakeEvents` — `TakeMovedBodies`처럼 `PhysicsWorldSubsystem::ApplyResults`만 부른다)다. 깨움 여부는 `ReadKinematics().awake`다.
+
+**시험.**
+- 장면(Monolithic — `PhysicsSleepSceneTests.cpp`): 잠재우기가 속도 0·대기 몫 버림, 깨우기·잠재우기는 이벤트 없음(대기 이벤트를 지우는 쪽과 두는 쪽), 힘·teleport·속도 setter의 깨움은 Awake, 떠 있는 body가 시간이 지나 잠들면 Sleep(step 수는 Jolt `mTimeBeforeSleep` 0.5 s로 정한 고정 값), 깼다 잠들면 마지막 값, Kinematic 무시, 생성·Kinematic → Dynamic 전환은 이벤트 없음, 지운 body의 기록은 버림.
+- 컴포넌트(`PhysicsSleepTests.cpp`): `componentWake`·`componentSleep` 발행(`generateWakeEvents` 거짓이면 없음), `RigidBodyIsAwake`, `componentPhysicsStateChanged` Created·Destroyed(등록·해제·충돌 켬 재생성).
+
+**PH5d 리뷰 반영(2026-11-28).** 치명 0, 중요 3, 경미 6. 중력 켬·충돌 필터 변경의 깨움을 UE처럼 이벤트 없이(쌓인 것 지움) 바꿨다. 물리 상태 이벤트를 상태 bit 확정 뒤 hook(`OnSystemStateChanged`)으로 옮겨 handler 안의 다시 만들기가 동작하게 했다. "마지막 전이" 시험이 실제로 Awake 뒤 Sleep을 보게 고쳤다. body 삭제의 비활성을 기록하지 않아 용량을 아끼고, Kinematic 전환이 쌓인 이벤트를 버리며, 잠듦 대기 step을 Jolt 기본값에서 유도했다. 0스텝 프레임 발행·같은 자세 teleport의 근거를 적었다.
+

@@ -225,6 +225,14 @@ protected:
     virtual void DestroySystemState(SystemStateKind) noexcept {
     }
 
+    // 시스템 상태 kind를 만들었거나(created) 지웠다는 통지다. World가 상태 bit·등록 표지를 확정한
+    // 뒤 부르므로(등록은 모든 종류를 만든 뒤, 즉시·갱신 지점 다시 만들기는 진행 표지를 푼 뒤
+    // Destroyed → Created 순) 여기서 다시 만들기·값 변경을 해도 된다(UE OnComponentPhysicsState-
+    // Changed가 bPhysicsStateCreated 확정 뒤 나는 것과 같다 — PhysicsModule 7.1.19절). 기본은
+    // 아무것도 하지 않는다.
+    virtual void OnSystemStateChanged(SystemStateKind, bool) noexcept {
+    }
+
     TickSettings& PrimaryTick() noexcept {
         return tickSettings_;
     }

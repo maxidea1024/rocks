@@ -11,6 +11,7 @@
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
 #include <World/Physics/BodySettingsChange.h>
+#include <World/Physics/ComponentPhysicsStateChange.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
 #include <World/Physics/MtdResult.h>
@@ -54,7 +55,8 @@ public:
 
     explicit PrimitiveComponent(Allocator& allocator) noexcept
         : SceneComponent(allocator), componentHit(allocator), componentOverlapBegan(allocator),
-          componentOverlapEnded(allocator), collisionProfileName_(allocator),
+          componentOverlapEnded(allocator), componentWake(allocator), componentSleep(allocator),
+          componentPhysicsStateChanged(allocator), collisionProfileName_(allocator),
           bodySettings_(allocator), moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator),
           overlappingComponents_(allocator) {
     }
@@ -576,6 +578,33 @@ public:
     // 그대로, 7.1.16절). 모르는 값은 Warning InvalidBodyValue다.
     void SetConstraintMode(DofMode mode) noexcept;
 
+    // --- 잠듦·깨움(PhysicsModule 2.7절·7.1.19절 — UE WakeRigidBody·PutRigidBodyToSleep) ---
+    //
+    // Dynamic body에만 효력이 있다. 깨움·잠듦 이벤트를 내지 않는다(UE — 깨우면 쌓인 이벤트도
+    // 지운다). 재우면 속도가 0이고 대기 충격량·힘을 버린다.
+    //
+    // 사용 예:
+    //   crate.PutRigidBodyToSleep();   // 쌓아 둔 상자를 처음부터 재운다
+    //   if (!crate.RigidBodyIsAwake()) { crate.WakeRigidBody(); }
+    void WakeRigidBody() noexcept;
+    void PutRigidBodyToSleep() noexcept;
+    // Dynamic body가 깨어 있는지다(Kinematic·Static·body 없음 거짓 — UE IsInstanceAwake).
+    bool RigidBodyIsAwake() const noexcept;
+
+    // 깨움·잠듦 이벤트(componentWake·componentSleep)를 낼지다(UE bGenerateWakeEvents — 영속, 기본
+    // 거짓, 발행 때 본다).
+    void SetGenerateWakeEvents(bool generate) noexcept {
+        bodySettings_.generateWakeEvents = generate;
+    }
+
+    bool GetGenerateWakeEvents() const noexcept {
+        return bodySettings_.generateWakeEvents;
+    }
+
+    // 깨움(awake)·잠듦 이벤트를 발행한다(UE DispatchWakeEvents — Physics의 PhysicsResults만 부른다,
+    // 7.1.19절). generateWakeEvents가 거짓이거나 파괴 대기면 하지 않는다. weld 자식 전파는 PH6이다.
+    void DispatchWakeEvents(bool awake) noexcept;
+
     // 방사 충격량·힘을 무시하는지다(UE bIgnoreRadialImpulse·bIgnoreRadialForce — 영속, 기본 거짓).
     bool GetIgnoreRadialImpulse() const noexcept {
         return ignoreRadialImpulse_;
@@ -707,6 +736,17 @@ public:
           WeakObjectRef<PrimitiveComponent>>
         componentOverlapEnded;
 
+    // 깨움·잠듦 이벤트다(UE OnComponentWake·OnComponentSleep — 7.1.19절, generateWakeEvents일
+    // 때만, 결과 반영 때 컴포넌트 자세 반영 뒤). 뼈 이름 인자는 skeletal(CM7) 때 더한다.
+    ROCKS_PROPERTY(Params = "wakingComponent")
+    Event<WeakObjectRef<PrimitiveComponent>> componentWake;
+    ROCKS_PROPERTY(Params = "sleepingComponent")
+    Event<WeakObjectRef<PrimitiveComponent>> componentSleep;
+    // 물리 body를 만들었거나(Created) 지웠다(Destroyed — UE OnComponentPhysicsStateChanged).
+    ROCKS_PROPERTY(Params = "changedComponent,stateChange")
+    Event<WeakObjectRef<PrimitiveComponent>, ComponentPhysicsStateChange>
+        componentPhysicsStateChanged;
+
     // 시뮬레이션 접촉 hit 하나를 발행한다(UE AActor::DispatchPhysicsCollisionHit — PhysicsModule
     // 7.1.12절, Physics의 PhysicsResults만 부른다). hit.myComponent나 그 소유 Actor가 사라졌거나
     // 파괴 대기면 하지 않는다. 소유 Actor의 OnHit(myComponent, otherActor, otherComponent,
@@ -821,6 +861,9 @@ protected:
     bool WantsSystemState(SystemStateKind kind) const noexcept override;
     Result<void> CreateSystemState(SystemStateKind kind) noexcept override;
     void DestroySystemState(SystemStateKind kind) noexcept override;
+    // 물리 상태가 확정되면 componentPhysicsStateChanged를 낸다(7.1.19절). 파생이 재정의하면 이것을
+    // 부른다.
+    void OnSystemStateChanged(SystemStateKind kind, bool created) noexcept override;
 
     // body가 있으면 월드 transform으로 옮긴다(3.3절 — UE OnUpdateTransform → SendPhysicsTransform).
     // scale이 바뀌었으면 장면이 형상을 다시 만든다(7.1.5절). 파생이 재정의하면 이것을 부른다.

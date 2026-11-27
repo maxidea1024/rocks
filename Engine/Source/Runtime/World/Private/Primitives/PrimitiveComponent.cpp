@@ -533,6 +533,38 @@ void PrimitiveComponent::DestroySystemState(SystemStateKind kind) noexcept {
     }
 }
 
+void PrimitiveComponent::OnSystemStateChanged(SystemStateKind kind, bool created) noexcept {
+    SceneComponent::OnSystemStateChanged(kind, created);
+    if (kind != SystemStateKind::Physics) {
+        return;
+    }
+
+    // UE OnCreatePhysicsState·OnDestroyPhysicsState 끝(PrimitiveComponent.cpp:971·1169 — bit 확정
+    // 뒤, 7.1.19절).
+    componentPhysicsStateChanged.Broadcast(
+        {GetWorld().Objects(), GetWorld().Access(), Handle()}, PrimitiveRef(Handle()),
+        created ? ComponentPhysicsStateChange::Created : ComponentPhysicsStateChange::Destroyed);
+}
+
+void PrimitiveComponent::DispatchWakeEvents(bool awake) noexcept {
+    // UE ShouldDispatchWakeEvents — 발행 때의 bGenerateWakeEvents(PrimitiveComponent.cpp:3652).
+    if (!bodySettings_.generateWakeEvents) {
+        return;
+    }
+
+    World& world = GetWorld();
+    if (!CanNotifyComponent(world, Handle(), false)) {
+        return;
+    }
+
+    const EventContext context{world.Objects(), world.Access(), Handle()};
+    if (awake) {
+        componentWake.Broadcast(context, PrimitiveRef(Handle()));
+    } else {
+        componentSleep.Broadcast(context, PrimitiveRef(Handle()));
+    }
+}
+
 void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
     // 켤 때 부모에서 뗀다(UE FBodyInstance::SetInstanceSimulatePhysics —
     // BodyInstance.cpp:2671-2686). 떼기가 실패하면(KeepWorld를 표현할 수 없는 부모 scale) 붙은 채
