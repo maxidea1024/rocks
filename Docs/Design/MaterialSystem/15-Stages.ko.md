@@ -44,7 +44,7 @@
 | MS6 | 함수·Attributes·컬렉션·인스턴스 static 변형·Dynamic Bool·Component Mask | 계획 MT06(함수·인스턴스), MS-T9 | MAT2 |
 | MS7 | 레이어 스택·레이어 인스턴스·SF2(반투명 블렌드 모드)·DeferredDecal·PostProcess·UserInterface 영역 | 계획 MT06(레이어), 영역별 기준 영상 | MAT3 |
 | MS8 | SF3 표면(고급 shading model preset·slab 직접 입력·표면 연산) | 기준 영상, GLES Deferred 거르기(결정 RN4) | MAT4 |
-| MS9 | SF4 여러 closure 저장, Hair(P3) | 계획 14.4절 연구 gate·계획 11.1절 P3 gate 판정 | 연구 gate |
+| MS9 | SF4 여러 closure 저장, Hair(P3) | 필수 후속 [LayeredSurface](../LayeredSurface.ko.md)(LS1은 SF3 뒤)·계획 11.1절 P3 gate 판정 | 필수 후속 |
 
 ### 15.3 시험
 

@@ -109,7 +109,7 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 | SF2 | `Translucent`·`Additive`·`Modulate`·`AlphaComposite` | MAT2–MAT3, Renderer RS5 |
 | SF3 | `ClearCoat`·`Subsurface`·`SubsurfaceProfile`·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater` preset, `SurfaceSlab` 직접 입력, 표면 연산(parameter blending) | MAT4, 계획 11.1절 "M6–M8 고급 공통 재질", Renderer RS9 |
 | Hair | `Hair` preset 값·`SurfaceHair` | 계획 11.1절 P3 별도 gate, Renderer 14.2절 |
-| SF4 | 여러 closure 저장(기능 등급 SM6 형식만), glint·rough refraction | 계획 14.4절 연구 gate |
+| SF4 | 여러 closure 저장(기능 등급 SM6 형식만), glint·rough refraction | 필수 후속 — [LayeredSurface](../LayeredSurface.ko.md) |
 
 SF 단계는 **렌더러가 그 표면을 그리는** 단계다. 번역은 단계 MS2d에서 모든 표면 노드·preset 값·연산을 받는다(19장, 개정 10). SF 단계 전의 조합은 V6로 거르기에서 빠지므로, MS2d 산출물은 SF 단계를 기다리지 않는다.
 

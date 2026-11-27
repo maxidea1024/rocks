@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 36(초안) | 2026-11-27 | UE Substrate 전체 지원을 필수 후속으로(사용자 결정 2026-11-27, 렌더 세션 요청): MD1·SF4·MS9·13장 표를 LayeredSurface.ko.md에 잇는다(범위·MD1 (나)·SF1–SF3 순서는 그대로), MS2f3 노드 표의 Noise 속성 선행 |
 | 35(초안) | 2026-11-27 | 6.13절 MS2f3 Noise: IR 라이브러리 호출 연산 `Library`(93)·MaterialNoise.rsh, Noise·VectorNoise 규칙(위치 원점·levels 클램프·LWC), LUT 함수는 새 선행 MPQ-NoiseTexture |
 | 34(초안) | 2026-11-27 | 6.13절 MS2f2 Sobol: LUT를 ALU 동치식으로(ComputeGPUSpatialSeed XOR 상수), SobolIndex, Sobol·TemporalSobol 식, 새 문맥 값 SvPosition·StateFrameIndexMod8 |
 | 33(초안) | 2026-11-27 | 6.13절 MS2f 구현 세부(새 파일 06-IR/AdvancedNodes): 다섯 묶음(MS2f1 ALU 11노드·MS2f2 Sobol·MS2f3 Noise·MS2f4 ColorRamp·MS2f5 CustomHlsl), IR 펼치기·float 정밀도(편차)·연결 여부 분기 결정, MS2f1 노드별 UE 식·문구·기본값, BlackBody Temp 미연결 진단(편차) |

@@ -18,7 +18,7 @@
 | wave 연산 | 가능(형식 기능) | 불가 | 불가 | 불가 | 불가 |
 | GBuffer MRT(GBufferD가 필요한 shading model) | 8, 지원 | 8, 지원 | 8(결정 RN3 장치 요구), 지원 | 8, 지원 | 4, Deferred `Unsupported`·Forward+ 지원(결정 RN4) |
 | scene color·depth 읽기(반투명) | pass가 제공 | 같음 | 같음 | 같음 | pass가 제공(framebuffer fetch는 후속) |
-| 여러 closure 저장(SF4) | 연구 gate 대상 | 불가 | 불가 | 불가 | 불가 |
+| 여러 closure 저장(SF4) | 필수 후속([LayeredSurface](../LayeredSurface.ko.md)) | 불가 | 불가 | 불가 | 불가 |
 | 가상 텍스처 | 후속 | 후속 | 후속 | 후속 | 후속 |
 
 UE 대조:
