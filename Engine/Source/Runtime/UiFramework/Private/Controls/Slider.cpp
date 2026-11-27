@@ -156,7 +156,7 @@ void Slider::OnFocusLost(uint32 user) noexcept {
     }
 }
 
-bool Slider::OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept {
+bool Slider::HandleGamepadButton(uint32 user, input::GamepadButton button) noexcept {
     using B = input::GamepadButton;
     if (locked_ || (controllerCaptured_ && controllerUser_ != user)) {
         return false;
@@ -243,6 +243,16 @@ bool Slider::SupportsKeyboardFocus() const noexcept {
 
 KeyReply Slider::OnKeyEvent(const KeyEvent& key) noexcept {
     const input::InputEvent& event = key.input;
+    // 패드 버튼은 키 경로로 온다(Docs/Design/UiToolkit 20.8절 — chord.gamepad). 누름만 본다.
+    if (key.chord.gamepad != input::GamepadButton::Count) {
+        if (event.type == input::InputEventType::KeyDown &&
+            HandleGamepadButton(key.user, key.chord.gamepad)) {
+            return KeyReply::Handled();
+        }
+
+        return Element::OnKeyEvent(key);
+    }
+
     if (locked_ || event.type != input::InputEventType::KeyDown) {
         return Element::OnKeyEvent(key);
     }

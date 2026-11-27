@@ -29,7 +29,6 @@ private:
     Vec2 position_{};
     uint32 mouseUserId_ = 0;
     bool hasPosition_ = false;
-    uint32 gamepadButtons_[input::MaxGamepads]{};
     uint64 droppedCount_ = 0;
 };
 

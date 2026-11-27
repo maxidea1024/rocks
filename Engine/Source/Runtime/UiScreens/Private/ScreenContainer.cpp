@@ -292,25 +292,30 @@ void ScreenContainer::Activate(Page& page) noexcept {
     auto* screen = borrowed.Value().Get().Value();
     screen->active_ = true;
     screen->OnActivated();
-    if (screen->restoreFocus_) {
+    (void)ApplyDesiredFocus(page, *screen);
+}
+
+bool ScreenContainer::ApplyDesiredFocus(Page& page, const Screen& screen) noexcept {
+    if (screen.restoreFocus_) {
         auto focus = page.focus.Lock();
         if (focus && focus->IsWithin(*page.root) &&
             app_.SetFocus(userId_, focus, page.focusCause)) {
-            return;
+            return true;
         }
     }
 
-    if (!screen->FocusTarget().IsNull()) {
-        auto widget = objects_.Resolve<Widget>(objects_.OwnerAccess(), screen->FocusTarget());
+    if (!screen.FocusTarget().IsNull()) {
+        auto widget = objects_.Resolve<Widget>(objects_.OwnerAccess(), screen.FocusTarget());
         if (widget) {
             auto focus = widget.Value().Get().Value()->CachedElement();
             if (focus && focus->IsWithin(*page.root) && app_.SetFocus(userId_, focus, lastCause_)) {
-                return;
+                return true;
             }
         }
     }
 
-    (void)app_.MoveFocusWithin(userId_, page.root, true, false, lastCause_);
+    auto moved = app_.MoveFocusWithin(userId_, page.root, true, false, lastCause_);
+    return moved && moved.Value();
 }
 
 Result<void> ScreenContainer::RemoveScreen(ObjectHandle handle) noexcept {

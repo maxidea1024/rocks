@@ -227,7 +227,6 @@ public:
     virtual bool OnPreviewKeyChord(uint32 user, const input::InputEvent& event,
                                    KeyChord chord) noexcept;
     // 게임패드 스냅숏에서 새로 눌린 버튼을 포커스 위젯에 먼저 보낸다.
-    virtual bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept;
     virtual bool OnPreviewKeyDown(uint32, const input::InputEvent&) noexcept;
 
     // 키 이벤트다(Docs/Design/UiToolkit 20.7절 — UE SWidget::OnKeyDown). 기본 처리는 초점 받을 수
@@ -242,6 +241,9 @@ public:
     // (시험·위젯 전달용 — 라우팅을 거치지 않는다).
     KeyReply SendKey(uint32 user, const input::InputEvent& event,
                      const KeyChord& chord = {}) noexcept;
+    // 패드 버튼 누름(pressed) 또는 뗌을 기본 대응으로 KeyEvent(chord.gamepad)로 만들어 보낸다.
+    KeyReply SendGamepadButton(uint32 user, input::GamepadButton button,
+                               bool pressed = true) noexcept;
 
     // 장치 연결이 끊기면 누른 키를 활성화 없이 해제한다.
     virtual void OnKeyCancelled(uint32 userId, input::Key key) noexcept;

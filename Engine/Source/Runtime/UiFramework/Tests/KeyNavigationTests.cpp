@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Application/InputAdapter.h>
+#include <UiCore/ManualClock.h>
 
 // 키 navigation 변환 시험이다(Docs/Design/UiToolkit 20.7절 — UE SWidget::OnKeyDown 415–427행,
 // FNavigationConfig, AttemptNavigation): 초점 요소가 방향키를 navigation으로 바꿔 조상은 그 키를
@@ -45,7 +46,35 @@ public:
     bool SupportsKeyboardFocus() const noexcept override {
         return true;
     }
+
+    // 확인 동작(Enter·Space·패드 South)의 누름을 센다.
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override {
+        if (key.action == NavigationAction::Accept &&
+            key.input.type == input::InputEventType::KeyDown) {
+            ++accepts;
+            return KeyReply::Handled();
+        }
+
+        return Element::OnKeyEvent(key);
+    }
+
+    int accepts = 0;
 };
+
+input::GamepadSnapshot Pad(input::GamepadButton button) noexcept {
+    input::GamepadSnapshot pad;
+    pad.connected = true;
+    pad.buttons = uint32{1} << static_cast<uint32>(button);
+    return pad;
+}
+
+input::GamepadSnapshot Stick(float x, float y) noexcept {
+    input::GamepadSnapshot pad;
+    pad.connected = true;
+    pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)] = x;
+    pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)] = y;
+    return pad;
+}
 
 struct NavigationBench {
     explicit NavigationBench(Allocator& allocator) noexcept : app(allocator), adapter(app) {
@@ -171,6 +200,65 @@ TEST(UiFramework_AncestorOnNavigationCanHandleADirection) {
     bench.spy->blockDown = false;
     CHECK(Press(bench, input::Key::Down));
     CHECK(bench.app.GetFocus(0).Get() == bench.below.Get());
+}
+
+TEST(UiFramework_GamepadButtonsTakeTheKeyPath) {
+    SystemAllocator allocator;
+    NavigationBench bench(allocator);
+    REQUIRE(Build(allocator, bench));
+    // D-pad는 초점 요소에서 navigation이 된다(20.8절). 누르고 있는 동안 다시 오지 않는다.
+    auto routed = bench.app.RouteGamepadState(0, 0, Pad(input::GamepadButton::DPadRight));
+    REQUIRE(routed);
+    CHECK(routed.Value());
+    CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Pad(input::GamepadButton::DPadRight)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
+    REQUIRE(bench.app.RouteGamepadState(0, 0, input::GamepadSnapshot{.connected = true}));
+    // South는 확인 동작이다(버튼류가 키 대신 동작으로 누름을 판정한다).
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Pad(input::GamepadButton::South)));
+    CHECK(bench.right->accepts == 1);
+    // 상태를 지우면 누르고 있던 버튼이 새 누름으로 다시 온다.
+    bench.app.ResetGamepads();
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Pad(input::GamepadButton::South)));
+    CHECK(bench.right->accepts == 2);
+}
+
+TEST(UiFramework_AnalogStickRepeatsOnFrameTime) {
+    SystemAllocator allocator;
+    NavigationBench bench(allocator);
+    REQUIRE(Build(allocator, bench));
+    ManualClock clock;
+    bench.app.SetClock(clock.Function());
+    bench.app.BeginFrame();
+    // 임계값 밑은 navigation이 아니다.
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(0.4f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.left.Get());
+    // 넘는 순간 한 번 간다.
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(0.6f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
+    // 첫 반복은 0.5초 뒤다(그 전에는 다시 가지 않는다). 왼쪽으로 반복해 본다.
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(-0.6f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.left.Get());
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(0.6f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
+    clock.Advance(0.4);
+    bench.app.BeginFrame();
+    REQUIRE(bench.app.SetFocus(0, bench.left));
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(0.6f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.left.Get());
+    clock.Advance(0.11);
+    bench.app.BeginFrame();
+    REQUIRE(bench.app.RouteGamepadState(0, 0, Stick(0.6f, 0)));
+    CHECK(bench.app.GetFocus(0).Get() == bench.right.Get());
+    // 그 뒤는 0.25초 간격이고, 세게 밀면(0.9 초과) 절반이다.
+    CHECK(NavigationConfig::AnalogRepeatInterval(0.6f, 0) == 0.5);
+    CHECK(NavigationConfig::AnalogRepeatInterval(0.6f, 1) == 0.25);
+    CHECK(NavigationConfig::AnalogRepeatInterval(0.95f, 1) == 0.125);
+    // 두 축이 모두 넘으면 더 크게 민 축이다(y 위가 양수).
+    const auto& config = NavigationConfig::Default();
+    CHECK(config.DirectionFromAnalog(0.6f, 0.8f) == Optional<FocusDirection>(FocusDirection::Up));
+    CHECK(config.DirectionFromAnalog(-0.9f, -0.7f) ==
+          Optional<FocusDirection>(FocusDirection::Left));
 }
 
 } // namespace rocks::ui

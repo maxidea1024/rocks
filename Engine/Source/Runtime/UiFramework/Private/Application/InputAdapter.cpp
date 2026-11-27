@@ -37,16 +37,9 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
     }
 
     if (event.type == input::InputEventType::GamepadState) {
-        if (event.gamepadIndex >= input::MaxGamepads) {
-            return Result<bool>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        auto& previous = gamepadButtons_[event.gamepadIndex];
-        const uint32 buttons = event.gamepad.connected ? event.gamepad.buttons : 0;
-        const uint32 pressed = buttons & ~previous;
-        previous = buttons;
-        return Result<bool>::Success(
-            pressed && application_.RouteGamepadButtons(event.userId, pressed, scope));
+        // 버튼 변화와 스틱 navigation은 Application이 반영한다(Docs/Design/UiToolkit 20.8절).
+        return application_.RouteGamepadState(event.userId, event.gamepadIndex, event.gamepad,
+                                              scope);
     }
 
     if (event.type == input::InputEventType::MouseLeave) {
@@ -66,9 +59,7 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
     }
 
     if (event.type == input::InputEventType::FocusLost) {
-        for (auto& buttons : gamepadButtons_) {
-            buttons = 0;
-        }
+        application_.ResetGamepads();
 
         hasPosition_ = false;
         application_.ResetInput();
@@ -157,9 +148,7 @@ Result<void> InputAdapter::RouteBatch(Span<const input::InputEvent> events, Span
         }
 
         droppedCount_ = droppedCount;
-        for (auto& buttons : gamepadButtons_) {
-            buttons = 0;
-        }
+        application_.ResetGamepads();
 
         hasPosition_ = false;
         application_.ResetInput();

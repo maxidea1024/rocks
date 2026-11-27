@@ -138,8 +138,18 @@ public:
     FocusCause GetFocusCause(uint32 userId) const noexcept;
 
     // focus 경로의 키·문자 이벤트를 전달한다. 문자와 키 해제는 미리보기 없이 전달한다.
-    bool RouteGamepadButtons(uint32 user, uint32 pressed,
+    // 패드 버튼 누름·뗌을 키 경로로 보낸다(Docs/Design/UiToolkit 20.8절 — KeyEvent::chord.gamepad,
+    // D-pad는 navigation, South 확인·East 뒤로). 하나라도 처리하면 true다.
+    bool RouteGamepadButtons(uint32 user, uint32 pressed, uint32 released = 0,
                              const SharedPtr<Element>& scope = {}) noexcept;
+    // 패드 상태 하나를 반영한다: 버튼 변화(RouteGamepadButtons)와 왼쪽 스틱 navigation(임계값·반복
+    // 간격 — 프레임 시각). index는 패드 자리다. 처리하면 true다.
+    Result<bool> RouteGamepadState(uint32 user, uint32 index, const input::GamepadSnapshot& pad,
+                                   const SharedPtr<Element>& scope = {}) noexcept;
+    // 패드 상태 기억을 지운다(창 초점 잃음·입력 넘침).
+    void ResetGamepads() noexcept;
+    // 보내지 않고 패드 상태만 기억한다(UI가 이 입력을 받지 않을 때 — 다음 누름·뗌 판정이 맞게).
+    void SyncGamepadState(uint32 index, const input::GamepadSnapshot& pad) noexcept;
     Result<bool> RouteKey(uint32 userId, const input::InputEvent& event) noexcept;
 
     Result<bool> RouteKeyWithin(uint32 userId, const input::InputEvent& event,
@@ -326,6 +336,16 @@ private:
         uint32 user;
         NavigationConfig config;
     };
+    // 패드 자리마다의 지난 버튼과 스틱 navigation 상태다.
+    struct PadState {
+        uint32 buttons = 0;
+        Optional<FocusDirection> analog{};
+        double analogLast = 0;
+        uint32 analogRepeats = 0;
+    };
+    PadState pads_[input::MaxGamepads]{};
+    // 키 경로 본체다(키보드·패드 공용 — 초점 경로 preview·명령·OnKeyEvent·navigation 응답).
+    Result<bool> RouteKeyEvent(const KeyEvent& key, const SharedPtr<Element>& scope) noexcept;
     Array<UserNavigation> navigationConfigs_;
     // KeyDown의 navigation 응답을 실행한다(다음·이전은 tree 순서, 방향은 기하 — 20.7절).
     Result<bool> PerformNavigation(uint32 userId, FocusDirection direction,

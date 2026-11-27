@@ -64,14 +64,19 @@ TEST(UiFramework_SliderLockPreservesProgrammaticChangesAndFinishesCapture) {
     using B = input::GamepadButton;
     slider.SetLocked(false);
     REQUIRE(slider.SetStep(0.25f));
-    CHECK(!slider.OnGamepadButtonDown(2, B::DPadRight));
-    CHECK(slider.OnGamepadButtonDown(2, B::South));
-    CHECK(!slider.OnGamepadButtonDown(3, B::DPadRight));
-    CHECK(slider.OnGamepadButtonDown(2, B::DPadRight) && slider.GetValue() == 0.75f);
+    // 패드 버튼은 키 경로로 온다(20.8절). 슬라이더가 스스로 처리했는지(navigation 아님)를 본다.
+    const auto consumed = [&slider](uint32 user, B button) noexcept {
+        const KeyReply reply = slider.SendGamepadButton(user, button);
+        return reply.IsHandled() && !reply.Navigation();
+    };
+    CHECK(!consumed(2, B::DPadRight));
+    CHECK(consumed(2, B::South));
+    CHECK(!consumed(3, B::DPadRight));
+    CHECK(consumed(2, B::DPadRight) && slider.GetValue() == 0.75f);
     slider.OnFocusLost(2);
-    CHECK(!slider.OnGamepadButtonDown(2, B::DPadRight));
+    CHECK(!consumed(2, B::DPadRight));
     slider.SetRequiresControllerLock(false);
-    CHECK(slider.OnGamepadButtonDown(2, B::DPadLeft) && slider.GetValue() == 0.5f);
+    CHECK(consumed(2, B::DPadLeft) && slider.GetValue() == 0.5f);
 }
 
 TEST(UiFramework_SpinBoxFormatsAndCommitsTypedValueWithDeltaSnap) {

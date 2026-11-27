@@ -32,7 +32,7 @@
   - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다.
   - 한 번도 `BeginFrame`을 부르지 않은 호스트(시험·단순 호스트)는 암묵 시작이다. 프레임이 열려 있지 않으면 입력 처리(`RoutePointer`·`RouteKey` 등)나 `PrepareLayout`이 먼저 연다. `PrepareLayout`이 그 프레임을 닫는다. 호스트가 `BeginFrame`을 한 번이라도 부르면 그 뒤로는 암묵 시작을 하지 않는다. 한 틱 안의 여러 `PrepareLayout`(월드 위젯 입력마다 배치)이 프레임을 여러 번 여는 일과, 바깥 시각과 앱 시계가 한 틱 안에서 섞이는 일을 막는다.
   - 프레임 타이머는 프레임마다 한 번, 자른 `deltaTime` 이하만 진행한다(UE active timer에 앱 DeltaTime). interval 타이머 마감은 시각 그대로 본다.
-  - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) 월드 위젯은 자기 Application 시계로 `PrepareLayout`이 프레임을 시작한다.
+  - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) `WorldWidgetPresenter::Prepare`가 그리기 프레임마다 앱 시계로 `BeginFrame()`을 부른다.
 - **읽는 곳.**
   - `UiHostServices`가 그 프레임의 `FrameTime`을 든다. Element는 그리기 밖(속성 갱신·Arrange·`Show`·`SetMarquee`)에서도 `FindUiHostServices()->Time()`으로 같은 값을 읽는다.
   - `PaintList`도 같은 값을 든다(UE `FPaintArgs`). cache root·표면 기록(`SurfaceRecorder`)의 목록도 같은 값을 받는다. `ViewportSource::Advance`는 프레임 번호와 함께 이 값을 받는다. 애니메이션 부품(`ActivityIndicator`·`ProgressBar` marquee·`Carousel`)은 이 값으로 위상을 계산하고 자기 시계 멤버를 지운다.
@@ -106,8 +106,9 @@
 
 ### 20.8 게임패드·초기 초점(UW8e2 — UW8a·UW8e1 뒤)
 
-- 버튼 누름(`GamepadState`)을 가상 키(`GamepadDPadUp`·`GamepadFaceBottom` 등)의 KeyDown·KeyUp으로 바꿔 같은 키 경로에 넣는다. `OnGamepadButtonDown`은 지운다.
-- 왼쪽 스틱은 임계값을 넘는 순간과 반복 간격(프레임 시각)으로 방향 navigation을 만든다(UE `GetNavigationDirectionFromAnalog`).
+- 버튼 누름·뗌(`GamepadState`)을 같은 키 경로의 KeyDown·KeyUp으로 보낸다. `input::Key`(Input 모듈 — 다른 시스템과 공유)에 가상 키를 더하지 않고, `KeyEvent::chord.gamepad`에 버튼을 싣는다. 방향(D-pad)·동작(South 확인, East 뒤로)은 `NavigationConfig`가 정한다. `OnGamepadButtonDown`은 지우고, 패드를 직접 다루던 Slider(조종 잠금)·InputKeySelector(버튼 고르기)는 `OnKeyEvent`의 패드 분기로 옮긴다.
+- 패드 상태(지난 버튼·스틱 반복)는 `Application`이 패드 자리마다 든다(`RouteGamepadState`). UI가 받지 않는 입력(Game 모드, 초기 초점으로 소비)도 `SyncGamepadState`로 상태를 맞춘다. 그래야 누르고 있던 버튼이 다음에 새 누름으로 보이지 않는다.
+- 왼쪽 스틱은 임계값을 넘는 순간과 반복 간격(프레임 시각)으로 방향 navigation을 만든다(UE `GetNavigationDirectionFromAnalog` 83–105행 — 첫 반복 0.5초, 다음 0.25초, 0.9보다 세면 절반). 두 축이 모두 넘으면 더 크게 민 축이다. 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다.
 - `ScreenInputRouter`의 직접 `Navigate`·Enter 합성을 지운다. 확인·뒤로는 `NavigationConfig` 동작으로 처리한다(South = 확인, East = 뒤로 — UE `Virtual_Gamepad_Accept`·`Back`).
 - **초기 초점.** UE Slate는 초점이 없으면 아무것도 하지 않고, 게임 UI는 화면 활성화 때 원하는 초점 대상에 초점을 준다(UE `UUserWidget::DesiredFocusWidget`, CommonUI `GetDesiredFocusTarget`). Rocks도 `Application`은 초점 없는 navigation을 하지 않는다. 대신 UiScreens 화면이 활성화될 때와 초점이 사라진 채 navigation·확인 입력이 올 때 화면의 원하는 초점 대상에 초점을 준다. 지금 Navigation.cpp 66행의 "첫 후보" 동작은 이 정책으로 옮긴다.
 

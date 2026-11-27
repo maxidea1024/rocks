@@ -707,7 +707,7 @@ bool Application::ResolveFocusOutline(const Element& target, FocusCause cause) c
     return cause == FocusCause::Navigation;
 }
 
-bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
+bool Application::RouteGamepadButtons(uint32 user, uint32 pressed, uint32 released,
                                       const SharedPtr<Element>& scope) noexcept {
     EnsureFrame();
     // 키보드 KeyDown처럼 버튼 누름도 열린 툴팁을 닫는다.
@@ -715,19 +715,111 @@ bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
         CloseToolTip(user);
     }
 
-    auto target = GetFocus(user);
-    if (!target || !IsFocusablePath(target.Get()) || (scope && !target->IsWithin(*scope))) {
-        return false;
-    }
-
+    const NavigationConfig& config = GetNavigationConfig(user);
+    KeyChord chord;
+    chord.shift = IsShiftDown(user);
+    chord.control = IsControlDown(user);
+    chord.alt = IsAltDown(user);
+    bool handled = false;
     for (uint32 i = 0; i < input::GamepadButtonCount; ++i) {
-        if ((pressed & (uint32{1} << i)) &&
-            target->OnGamepadButtonDown(user, static_cast<input::GamepadButton>(i))) {
-            return true;
+        const uint32 bit = uint32{1} << i;
+        if (!((pressed | released) & bit)) {
+            continue;
         }
+
+        const auto button = static_cast<input::GamepadButton>(i);
+        const bool down = (pressed & bit) != 0;
+        const auto event = down ? input::InputEvent::KeyDown(input::Key::None)
+                                : input::InputEvent::KeyUp(input::Key::None);
+        chord.gamepad = button;
+        const KeyEvent key{user, event, chord,
+                           down ? config.DirectionFromGamepad(button) : Optional<FocusDirection>{},
+                           config.ActionFromGamepad(button)};
+        auto routed = RouteKeyEvent(key, scope);
+        handled = handled || (routed && routed.Value());
     }
 
-    return false;
+    return handled;
+}
+
+Result<bool> Application::RouteGamepadState(uint32 user, uint32 index,
+                                            const input::GamepadSnapshot& pad,
+                                            const SharedPtr<Element>& scope) noexcept {
+    if (index >= input::MaxGamepads) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    EnsureFrame();
+    PadState& state = pads_[index];
+    const uint32 buttons = pad.connected ? pad.buttons : 0;
+    const uint32 pressed = buttons & ~state.buttons;
+    const uint32 released = state.buttons & ~buttons;
+    state.buttons = buttons;
+    bool handled = (pressed | released) && RouteGamepadButtons(user, pressed, released, scope);
+
+    // 왼쪽 스틱: 임계값을 넘는 순간 한 번, 그 뒤 반복 간격마다(UE GetNavigationDirectionFromAnalog
+    // 83–105행). 간격은 프레임 시각으로 잰다(20.3절).
+    const NavigationConfig& config = GetNavigationConfig(user);
+    const float x = pad.connected ? pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)] : 0;
+    const float y = pad.connected ? pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)] : 0;
+    const auto direction = config.DirectionFromAnalog(x, y);
+    if (!direction) {
+        state.analog = {};
+        state.analogRepeats = 0;
+        return Result<bool>::Success(handled);
+    }
+
+    const double now = frameTime_.current;
+    const float pressure = math::Max(x < 0 ? -x : x, y < 0 ? -y : y);
+    const bool fresh = state.analog != direction;
+    if (!fresh && now - state.analogLast <=
+                      NavigationConfig::AnalogRepeatInterval(pressure, state.analogRepeats - 1)) {
+        return Result<bool>::Success(handled);
+    }
+
+    if (fresh) {
+        state.analog = direction;
+        state.analogRepeats = 0;
+    }
+
+    state.analogLast = now;
+    ++state.analogRepeats;
+    // 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다(초점 요소가 쓸 수 있다).
+    const auto event = input::InputEvent::KeyDown(input::Key::None);
+    const KeyEvent key{user, event, {}, direction, NavigationAction::None};
+    auto routed = RouteKeyEvent(key, scope);
+    if (!routed) {
+        return routed;
+    }
+
+    return Result<bool>::Success(handled || routed.Value());
+}
+
+void Application::SyncGamepadState(uint32 index, const input::GamepadSnapshot& pad) noexcept {
+    if (index >= input::MaxGamepads) {
+        return;
+    }
+
+    PadState& state = pads_[index];
+    state.buttons = pad.connected ? pad.buttons : 0;
+    const NavigationConfig& config = NavigationConfig::Default();
+    const auto direction =
+        pad.connected
+            ? config.DirectionFromAnalog(pad.axes[static_cast<uint32>(input::GamepadAxis::LeftX)],
+                                         pad.axes[static_cast<uint32>(input::GamepadAxis::LeftY)])
+            : Optional<FocusDirection>{};
+    // 밀고 있던 스틱은 이어지는 방향으로 본다(반복 간격부터 센다).
+    if (direction != state.analog) {
+        state.analog = direction;
+        state.analogRepeats = direction ? 1 : 0;
+        state.analogLast = frameTime_.current;
+    }
+}
+
+void Application::ResetGamepads() noexcept {
+    for (auto& pad : pads_) {
+        pad = {};
+    }
 }
 
 Result<void> Application::SetNavigationConfig(uint32 userId,
@@ -787,15 +879,20 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
         return Result<bool>::Failure(chord.Error());
     }
 
-    const bool down = event.type == input::InputEventType::KeyDown;
-    SharedPtr<Element> target;
-    for (usize i = 0; i < focus_.Size(); ++i) {
-        if (focus_[i].userId == userId) {
-            target = focus_[i].target.Lock();
-            break;
-        }
-    }
+    // 키마다 navigation 방향·동작을 사용자의 대응으로 미리 계산한다(Element는 Application을
+    // 모른다).
+    const NavigationConfig& config = GetNavigationConfig(userId);
+    const KeyEvent key{userId, event, chord.Value(), config.DirectionFromKey(event, chord.Value()),
+                       config.ActionFromKey(event)};
+    return RouteKeyEvent(key, scope);
+}
 
+Result<bool> Application::RouteKeyEvent(const KeyEvent& key,
+                                        const SharedPtr<Element>& scope) noexcept {
+    const uint32 userId = key.user;
+    const input::InputEvent& event = key.input;
+    const bool down = event.type == input::InputEventType::KeyDown;
+    SharedPtr<Element> target = GetFocus(userId);
     if (!target || !IsFocusablePath(target.Get())) {
         auto cleared = SetFocus(userId, {});
         if (!cleared) {
@@ -803,7 +900,7 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
         }
 
         return Result<bool>::Success(down && !scope &&
-                                     ProcessCommands(nullptr, chord.Value(), event.repeat));
+                                     ProcessCommands(nullptr, key.chord, event.repeat));
     }
 
     Array<SharedPtr<Element>> path(allocator_);
@@ -816,21 +913,16 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
         return Result<bool>::Failure(pathResult.Error());
     }
 
-    if (event.type == input::InputEventType::KeyDown) {
+    if (down) {
         for (usize i = path.Size(); i > 0; --i) {
-            if (path[i - 1]->OnPreviewKeyChord(userId, event, chord.Value())) {
+            if (path[i - 1]->OnPreviewKeyChord(userId, event, key.chord)) {
                 return Result<bool>::Success(true);
             }
         }
     }
 
-    // 키마다 navigation 방향·동작을 사용자의 대응으로 미리 계산한다(Element는 Application을
-    // 모른다).
-    const NavigationConfig& config = GetNavigationConfig(userId);
-    const KeyEvent key{userId, event, chord.Value(), config.DirectionFromKey(event, chord.Value()),
-                       config.ActionFromKey(event)};
     for (usize i = 0; i < path.Size(); ++i) {
-        if (down && ProcessCommands(path[i].Get(), chord.Value(), event.repeat)) {
+        if (down && ProcessCommands(path[i].Get(), key.chord, event.repeat)) {
             return Result<bool>::Success(true);
         }
 
@@ -848,7 +940,7 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
     }
 
     return Result<bool>::Success(down && !scope &&
-                                 ProcessCommands(nullptr, chord.Value(), event.repeat));
+                                 ProcessCommands(nullptr, key.chord, event.repeat));
 }
 
 void Application::CancelAllPointers() noexcept {

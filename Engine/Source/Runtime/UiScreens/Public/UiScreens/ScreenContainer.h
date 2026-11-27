@@ -25,6 +25,10 @@ public:
     ScreenInputConfig InputConfig() const noexcept;
     bool IsModal() const noexcept;
     SharedPtr<Element> ActiveRoot() const noexcept;
+    // 활성 화면의 원하는 초점 대상에 초점을 준다(Docs/Design/UiToolkit 20.8절 — UE
+    // DesiredFocusWidget): 남겨 둔 초점(restoreFocus) → 화면 FocusTarget → 화면 안 첫 대상. 활성화
+    // 때와 초점이 사라진 채 navigation·확인 입력이 올 때 쓴다. 초점을 주었으면 true다.
+    bool FocusDesiredTarget() noexcept;
     Result<bool> DispatchAction(Guid domain, Guid action) noexcept;
 
     Result<void> AttachPopupLayer(const PopupRequest& popup) noexcept override;
@@ -61,6 +65,7 @@ private:
     usize Top() const noexcept;
     void Deactivate(Page& page) noexcept;
     void Activate(Page& page) noexcept;
+    bool ApplyDesiredFocus(Page& page, const Screen& screen) noexcept;
 
     ObjectRegistry& objects_;
     Application& app_;

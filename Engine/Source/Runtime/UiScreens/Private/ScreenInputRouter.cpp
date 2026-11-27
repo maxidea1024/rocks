@@ -116,7 +116,6 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
     pads_[index] = pad;
     const auto buttons = pad.connected ? pad.buttons : 0u;
     const uint32 pressed = buttons & ~old.buttons;
-    const uint32 released = old.buttons & ~buttons;
     bool active = pressed != 0;
     for (usize i = 0; i < input::GamepadAxisCount && pad.connected; ++i) {
         if (math::Abs(pad.axes[i]) > 0.25f && math::Abs(old.axes[i] - pad.axes[i]) > 0.02f) {
@@ -128,26 +127,36 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
         Observe(ScreenInputDevice::Gamepad);
     }
 
-    const auto accept = Mask(input::GamepadButton::South);
-    if (released & accept) {
-        auto target = acceptTargets_[index].Lock();
-        acceptTargets_[index] = {};
-        const auto root = screens_.ActiveRoot();
-        if (target && (!pad.connected || !allowUi || !root || !target->IsWithin(*root))) {
-            target->OnKeyCancelled(screens_.UserId(), input::Key::Enter);
-        } else if (target && app_.GetFocus(screens_.UserId()).Get() == target.Get()) {
-            return app_.RouteKeyWithin(screens_.UserId(),
-                                       input::InputEvent::KeyUp(input::Key::Enter), root);
-        }
-    }
-
-    if (!allowUi || !pressed) {
+    if (!allowUi) {
+        // UI가 받지 않아도 패드 상태는 맞춘다(다음에 UI가 받을 때 누른 버튼을 새 누름으로 보지
+        // 않게).
+        app_.SyncGamepadState(index, pad);
         return Result<bool>::Success(false);
     }
 
-    const auto root = screens_.ActiveRoot();
-    if (root && app_.RouteGamepadButtons(screens_.UserId(), pressed, root)) {
+    // 초점이 사라진 채 방향·확인이 오면 화면의 원하는 초점 대상에 초점을 준다(20.8절 — UE는 초점
+    // 없는 navigation을 하지 않는다).
+    const uint32 user = screens_.UserId();
+    const uint32 navigationButtons =
+        Mask(input::GamepadButton::DPadLeft) | Mask(input::GamepadButton::DPadRight) |
+        Mask(input::GamepadButton::DPadUp) | Mask(input::GamepadButton::DPadDown) |
+        Mask(input::GamepadButton::South);
+    if ((pressed & navigationButtons) && !app_.GetFocus(user) && screens_.FocusDesiredTarget()) {
+        app_.SyncGamepadState(index, pad);
         return Result<bool>::Success(true);
+    }
+
+    // 버튼·스틱은 키 경로로 간다(D-pad navigation, South 확인, East 뒤로 — 20.8절).
+    const auto root = screens_.ActiveRoot();
+    if (root) {
+        auto routed = app_.RouteGamepadState(user, index, pad, root);
+        if (!routed || routed.Value()) {
+            return routed;
+        }
+    }
+
+    if (!pressed) {
+        return Result<bool>::Success(false);
     }
 
     auto mapped = Dispatch(input::Key::None, pressed);
@@ -155,36 +164,9 @@ Result<bool> ScreenInputRouter::Gamepad(const input::InputEvent& event, bool all
         return mapped;
     }
 
+    // 아무도 받지 않은 뒤로는 화면 뒤로 가기다.
     if (pressed & Mask(input::GamepadButton::East)) {
         return screens_.Back();
-    }
-
-    struct DirectionButton {
-        input::GamepadButton button;
-        FocusDirection direction;
-    };
-    constexpr DirectionButton directions[] = {
-        {input::GamepadButton::DPadLeft, FocusDirection::Left},
-        {input::GamepadButton::DPadRight, FocusDirection::Right},
-        {input::GamepadButton::DPadUp, FocusDirection::Up},
-        {input::GamepadButton::DPadDown, FocusDirection::Down}};
-    for (const auto& direction : directions) {
-        if (pressed & Mask(direction.button)) {
-            return app_.Navigate(screens_.UserId(), direction.direction, screens_.ActiveRoot(),
-                                 FocusCause::Navigation);
-        }
-    }
-
-    if (pressed & accept) {
-        auto focus = app_.GetFocus(screens_.UserId());
-        auto handled =
-            app_.RouteKeyWithin(screens_.UserId(), input::InputEvent::KeyDown(input::Key::Enter),
-                                screens_.ActiveRoot());
-        if (handled && handled.Value()) {
-            acceptTargets_[index] = WeakPtr<Element>(focus);
-        }
-
-        return handled;
     }
 
     return Result<bool>::Success(false);
@@ -206,8 +188,9 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
     if (event.type == InputEventType::FocusLost) {
         for (usize i = 0; i < input::MaxGamepads; ++i) {
             pads_[i] = {};
-            acceptTargets_[i] = {};
         }
+
+        app_.ResetGamepads();
 
         return adapter_.Route(event);
     }
@@ -244,6 +227,20 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
     auto handled = adapter_.RouteWithin(local, screens_.ActiveRoot());
     if (!handled || handled.Value()) {
         return handled;
+    }
+
+    // 초점이 사라진 채 방향·Tab·확인 키가 오면 화면의 원하는 초점 대상에 초점을 준다(20.8절).
+    if (event.type == InputEventType::KeyDown && !app_.GetFocus(local.userId)) {
+        const NavigationConfig& config = app_.GetNavigationConfig(local.userId);
+        KeyChord chord;
+        chord.shift = app_.IsShiftDown(local.userId);
+        chord.control = app_.IsControlDown(local.userId);
+        chord.alt = app_.IsAltDown(local.userId);
+        if ((config.DirectionFromKey(event, chord) ||
+             config.ActionFromKey(event) == NavigationAction::Accept) &&
+            screens_.FocusDesiredTarget()) {
+            return Result<bool>::Success(true);
+        }
     }
 
     if (event.type == InputEventType::KeyDown && event.key == input::Key::Escape && !event.repeat) {

@@ -37,7 +37,7 @@ public:
                            KeyChord chord) noexcept override;
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
-    bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept override;
+
     KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     void OnFocusLost(uint32 user) noexcept override;
 
@@ -45,6 +45,8 @@ protected:
     void OnActivated() noexcept override;
 
 private:
+    // 패드 버튼 처리다(선택 중이면 고르기, West는 지우기). 처리했으면 true다.
+    bool HandleGamepadButton(uint32 user, input::GamepadButton button) noexcept;
     Result<void> RefreshCaption(KeyChord chord, bool selecting) noexcept;
     void Select(KeyChord chord) noexcept;
     void Cancel() noexcept;

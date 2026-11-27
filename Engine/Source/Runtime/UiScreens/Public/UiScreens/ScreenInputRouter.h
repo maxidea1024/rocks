@@ -39,7 +39,6 @@ private:
     InputAdapter adapter_;
     Array<ScreenActionMapping> mappings_;
     input::GamepadSnapshot pads_[input::MaxGamepads]{};
-    WeakPtr<Element> acceptTargets_[input::MaxGamepads]{};
     SharedPtr<ScreenDeviceState> deviceState_;
     ScreenInputDevice device_ = ScreenInputDevice::KeyboardMouse;
     Delegate<void(ScreenInputDevice)> deviceChanged_;

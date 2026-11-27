@@ -167,7 +167,7 @@ PointerReply InputKeySelector::OnPointerEvent(const PointerEvent& event) noexcep
     return Button::OnPointerEvent(event);
 }
 
-bool InputKeySelector::OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept {
+bool InputKeySelector::HandleGamepadButton(uint32 user, input::GamepadButton button) noexcept {
     if (selecting_ && user == selectingUser_) {
         if (allowGamepad_) {
             Select({.gamepad = button});
@@ -187,6 +187,13 @@ bool InputKeySelector::OnGamepadButtonDown(uint32 user, input::GamepadButton but
 
 KeyReply InputKeySelector::OnKeyEvent(const KeyEvent& key) noexcept {
     const uint32 user = key.user;
+    // 패드 버튼은 키 경로로 온다(20.8절). 선택 중이면 그 버튼을 고른다.
+    if (key.chord.gamepad != input::GamepadButton::Count &&
+        key.input.type == input::InputEventType::KeyDown &&
+        HandleGamepadButton(user, key.chord.gamepad)) {
+        return KeyReply::Handled();
+    }
+
     if (selecting_) {
         return KeyReply::Handled();
     }

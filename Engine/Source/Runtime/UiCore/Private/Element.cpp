@@ -294,10 +294,6 @@ bool Element::OnPreviewKeyChord(uint32 user, const input::InputEvent& event, Key
     return OnPreviewKeyDown(user, event);
 }
 
-bool Element::OnGamepadButtonDown(uint32, input::GamepadButton) noexcept {
-    return false;
-}
-
 bool Element::OnPreviewKeyDown(uint32, const input::InputEvent&) noexcept {
     return false;
 }
@@ -315,6 +311,19 @@ KeyReply Element::OnKeyEvent(const KeyEvent& key) noexcept {
 
 NavigationBoundary Element::OnNavigation(uint32, FocusDirection direction) noexcept {
     return GetNavigationRule(direction);
+}
+
+KeyReply Element::SendGamepadButton(uint32 user, input::GamepadButton button,
+                                    bool pressed) noexcept {
+    const auto& config = NavigationConfig::Default();
+    const auto event = pressed ? input::InputEvent::KeyDown(input::Key::None)
+                               : input::InputEvent::KeyUp(input::Key::None);
+    KeyChord chord;
+    chord.gamepad = button;
+    const KeyEvent key{user, event, chord,
+                       pressed ? config.DirectionFromGamepad(button) : Optional<FocusDirection>{},
+                       config.ActionFromGamepad(button)};
+    return OnKeyEvent(key);
 }
 
 KeyReply Element::SendKey(uint32 user, const input::InputEvent& event,

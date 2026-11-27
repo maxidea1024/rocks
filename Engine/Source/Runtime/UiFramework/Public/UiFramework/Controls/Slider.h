@@ -26,7 +26,7 @@ public:
     void SetRequiresControllerLock(bool required) noexcept;
     void SetOnControllerCaptureBegin(Delegate<void()>&& callback) noexcept;
     void SetOnControllerCaptureEnd(Delegate<void()>&& callback) noexcept;
-    bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept override;
+
     void OnFocusLost(uint32 user) noexcept override;
     void SetIndentHandle(bool indent) noexcept;
     void SetHandleColor(LinearColor color) noexcept;
@@ -77,6 +77,8 @@ protected:
     void SetDragging(bool dragging) noexcept;
 
 private:
+    // 패드 버튼 처리다(조종 잠금 South·East, D-pad 값 증감). 처리했으면 true다.
+    bool HandleGamepadButton(uint32 user, input::GamepadButton button) noexcept;
     Delegate<void(float)> onChanged_;
     LinearColor fillColor_{0, 0, 0, 0};
     SliderStyle style_ = DefaultSliderStyle();
