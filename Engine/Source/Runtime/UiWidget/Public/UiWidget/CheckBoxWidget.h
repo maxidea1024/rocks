@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiWidget/UiTypeBindings.h>
+#include <UiWidget/WidgetCheckState.h>
 #include <Core/Delegate.h>
 #include <UiFramework/Controls/CheckBox.h>
 #include <UiWidget/ContentWidget.h>
@@ -19,7 +19,7 @@ public:
     CheckState GetState() const noexcept;
     // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
     // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
-    Event<CheckState>& OnStateChanged() noexcept;
+    Event<WidgetCheckState>& OnStateChanged() noexcept;
     bool IsChecked() const noexcept;
     Event<bool>& OnChanged() noexcept;
 
@@ -32,7 +32,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "checked") bool checked_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "indeterminate") bool indeterminate_ = false;
     ROCKS_PROPERTY(Transient, Name = "stateChanged", Params = "state")
-    Event<CheckState> stateChanged_;
+    Event<WidgetCheckState> stateChanged_;
     ROCKS_PROPERTY(Transient, Name = "changed", Params = "checked") Event<bool> changed_;
 };
 

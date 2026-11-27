@@ -83,7 +83,7 @@ void SpinBoxWidget::SetSnapToStep(bool enabled) noexcept {
     }
 }
 
-Event<float, SpinCommitReason>& SpinBoxWidget::OnCommitted() noexcept {
+Event<float, WidgetSpinCommitReason>& SpinBoxWidget::OnCommitted() noexcept {
     return committed_;
 }
 
@@ -131,7 +131,15 @@ Result<SharedPtr<Element>> SpinBoxWidget::BuildElement(ObjectRegistry& objects) 
     box.SetSnapToStep(snapToStep_);
     box.SetOnDragBegin(BindLiveWidgetEvent(objects, Handle(), &box, &SpinBoxWidget::beginDrag_));
     box.SetOnDragEnd(BindLiveWidgetEvent(objects, Handle(), &box, &SpinBoxWidget::endDrag_));
-    box.SetOnCommitted(BindLiveWidgetEvent(objects, Handle(), &box, &SpinBoxWidget::committed_));
+    box.SetOnCommitted(Delegate<void(float, SpinCommitReason)>::CreateLambda(
+        [&objects, owner = Handle(), native = &box](float value, SpinCommitReason reason) noexcept {
+            auto widget = objects.ResolveForWrite<SpinBoxWidget>(objects.OwnerAccess(), owner);
+            if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
+                widget.Value().Get().Value()->committed_.Broadcast(
+                    {objects, objects.OwnerAccess(), owner}, value,
+                    ToWidgetSpinCommitReason(reason));
+            }
+        }));
     auto caption = AttachControlCaption(objects, Handle(), box);
     if (!caption) {
         return Result<SharedPtr<Element>>::Failure(caption.Error());

@@ -30,7 +30,7 @@ CheckState CheckBoxWidget::GetState() const noexcept {
                           : CheckState::Unchecked;
 }
 
-Event<CheckState>& CheckBoxWidget::OnStateChanged() noexcept {
+Event<WidgetCheckState>& CheckBoxWidget::OnStateChanged() noexcept {
     return stateChanged_;
 }
 
@@ -85,7 +85,8 @@ Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects)
 
                 value->changed_.Broadcast({objects, objects.OwnerAccess(), owner},
                                           state == CheckState::Checked);
-                value->stateChanged_.Broadcast({objects, objects.OwnerAccess(), owner}, state);
+                value->stateChanged_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                               ToWidgetCheckState(state));
             }));
     return box;
 }

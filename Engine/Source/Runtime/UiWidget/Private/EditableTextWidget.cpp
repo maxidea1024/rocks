@@ -97,7 +97,8 @@ void EditableTextWidget::OnCommittedText(ObjectRegistry& objects, StringView tex
                                          TextCommitReason reason) noexcept {
     String snapshot(objects.ObjectAllocator());
     if (snapshot.TryAssign(text)) {
-        committed_.Broadcast({objects, objects.OwnerAccess(), Handle()}, snapshot, reason);
+        committed_.Broadcast({objects, objects.OwnerAccess(), Handle()}, snapshot,
+                             ToWidgetTextCommitReason(reason));
     }
 }
 
@@ -234,7 +235,7 @@ Event<const String&>& EditableTextWidget::OnChanged() noexcept {
     return changed_;
 }
 
-Event<const String&, TextCommitReason>& EditableTextWidget::OnCommitted() noexcept {
+Event<const String&, WidgetTextCommitReason>& EditableTextWidget::OnCommitted() noexcept {
     return committed_;
 }
 

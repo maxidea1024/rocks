@@ -2958,6 +2958,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ui::WidgetCheckState",
+      "id": "08e3cfa686204d42acae489117c570fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::ui::WidgetEventBinding",
       "id": "fadc33175cd34296a63fc71ad596d67d",
       "aliases": [],
@@ -2986,6 +2993,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ui::WidgetSpinCommitReason",
+      "id": "94ff9502c4bb49b2b71de6ccb8dcad19",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::ui::WidgetSwitcherWidget",
       "id": "28fb51b1207f49fd8631f8d4536ae315",
       "aliases": [],
@@ -2995,6 +3009,13 @@
       "kind": "type",
       "name": "rocks::ui::WidgetSwitcherWidgetSlot",
       "id": "22f7b25320514f55ab13c220898687c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WidgetTextCommitReason",
+      "id": "95a21653c19440f380efa65bfeb18b0e",
       "aliases": [],
       "retired": false
     },
@@ -3042,27 +3063,6 @@
       "aliases": [
         "rocks::ui::WrapBoxWidgetSlot"
       ],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::ui_type_bindings::CheckStateBinding",
-      "id": "08e3cfa686204d42acae489117c570fe",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::ui_type_bindings::SpinCommitReasonBinding",
-      "id": "94ff9502c4bb49b2b71de6ccb8dcad19",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::ui_type_bindings::TextCommitReasonBinding",
-      "id": "95a21653c19440f380efa65bfeb18b0e",
-      "aliases": [],
       "retired": false
     }
   ]

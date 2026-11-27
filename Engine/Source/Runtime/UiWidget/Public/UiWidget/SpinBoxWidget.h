@@ -1,6 +1,6 @@
 #pragma once
 
-#include <UiWidget/UiTypeBindings.h>
+#include <UiWidget/WidgetSpinCommitReason.h>
 #include <Core/Delegate.h>
 #include <UiFramework/Controls/SpinBox.h>
 #include <UiWidget/Widget.h>
@@ -23,7 +23,7 @@ public:
     void SetSnapToStep(bool enabled) noexcept;
     // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
     // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 구독은 여럿일 수 있다.
-    Event<float, SpinCommitReason>& OnCommitted() noexcept;
+    Event<float, WidgetSpinCommitReason>& OnCommitted() noexcept;
     Event<>& OnDragBegin() noexcept;
     Event<float>& OnDragEnd() noexcept;
     float Value() const noexcept;
@@ -42,7 +42,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "minFractionDigits") int32 minFractionDigits_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "maxFractionDigits") int32 maxFractionDigits_ = -1;
     ROCKS_PROPERTY(Transient, Name = "committed", Params = "value,reason")
-    Event<float, SpinCommitReason> committed_;
+    Event<float, WidgetSpinCommitReason> committed_;
     ROCKS_PROPERTY(Transient, Name = "dragBegin") Event<> beginDrag_;
     ROCKS_PROPERTY(Transient, Name = "dragEnd", Params = "value") Event<float> endDrag_;
     ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;

@@ -4,7 +4,7 @@
 #include <Core/Text/String.h>
 #include <Localization/Text.h>
 #include <UiFramework/Controls/TextCommitReason.h>
-#include <UiWidget/UiTypeBindings.h>
+#include <UiWidget/WidgetTextCommitReason.h>
 #include <UiWidget/TextLayoutWidget.h>
 
 namespace rocks::ui {
@@ -43,7 +43,7 @@ public:
     // 사건은 리플렉션 이벤트다(Docs/Design/UiToolkit 21.5a절): C++는 TryAddLambda·TryAdd(native
     // 구독), 에셋·Sparks는 TryBind(리플렉션 함수)로 받는다. 글자는 발행마다 만든 사본이다.
     Event<const String&>& OnChanged() noexcept;
-    Event<const String&, TextCommitReason>& OnCommitted() noexcept;
+    Event<const String&, WidgetTextCommitReason>& OnCommitted() noexcept;
 
 protected:
     TextLabel& ResolveTextLabel(Element& element) const noexcept override;
@@ -69,7 +69,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "password") bool password_ = false;
     ROCKS_PROPERTY(Transient, Name = "changed", Params = "text") Event<const String&> changed_;
     ROCKS_PROPERTY(Transient, Name = "committed", Params = "text,reason")
-    Event<const String&, TextCommitReason> committed_;
+    Event<const String&, WidgetTextCommitReason> committed_;
 };
 
 } // namespace rocks::ui

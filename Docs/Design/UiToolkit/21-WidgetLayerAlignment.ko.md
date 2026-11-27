@@ -131,7 +131,7 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - 인자 규칙(ED1)에 맞춘다. `StringView` 인자는 `const String&`로 바꾼다(편집 텍스트 `changed`·`committed` 등). 값 인자는 nothrow 복사, struct는 `const T&`다.
   - 이벤트 필드를 가진 클래스는 `T(Allocator&)` 생성자가 있어야 한다(ED14). Widget은 이미 그렇다.
   - 인자 형식은 리플렉션 형식이어야 한다(ED1·FD4 — 바인딩 frame). UiCore·UiFramework는 Object 층에 의존하지 않아 리플렉션이 없으므로 다음처럼 싣는다.
-    - `CheckState`·`TextCommitReason`·`SpinCommitReason`(UiFramework enum)은 UiWidget `UiTypeBindings.h`의 `ROCKS_ENUM(Binds = "rocks::ui::…")` 미러로 싣는다(CoreTypeBindings와 같은 방식 — 미러 여러 개를 한 헤더에 둔다).
+    - `CheckState`·`TextCommitReason`·`SpinCommitReason`(UiFramework enum)은 Widget 층의 리플렉션 enum `WidgetCheckState`·`WidgetTextCommitReason`·`WidgetSpinCommitReason`으로 넘긴다. UE UMG가 Slate `EVisibility`에 대응하는 `ESlateVisibility`를 두는 방식이다. 값은 같은 번호이고, 헤더마다 변환 함수와 번호 일치 static_assert를 둔다. Binds 미러는 CoreTypeBindings 모듈에서만 쓸 수 있어(메타 컴파일러 RMC2004 — 두 모듈이 한 형식을 싣지 않게) 쓰지 않는다.
     - `KeyChord`는 UE `FInputChord`처럼 리플렉션 struct `InputChordValue`(키 이름 + Shift·Ctrl·Alt·Super)로 넘긴다. 키 선택기 위젯이 이미 키를 이름으로 저장한다. 키 enum 전체를 미러로 옮기지 않는다.
     - `StringView`는 `const String&`이다(발행 때 한 번 복사).
   - 바인딩은 모두 `Transient`다. 에셋 바인딩은 EV3b 템플릿 바인딩 표가 맡고, 실행 중 바인딩을 Widget 에셋 바이트에 넣지 않는다.
@@ -143,7 +143,7 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - 발행은 `BindLiveWidgetEvent`의 `Event` 판과 Element 사건 lambda의 `Broadcast({objects, access, owner}, …)`다.
   - 편집 텍스트는 발행마다 `String` 사본을 넘긴다. 키 선택기는 `InputChordValue`로 바꿔 넘긴다.
   - 프로그램 setter의 발행을 없앴다(ComboBox 선택·지움, ExpandableArea 펼침). ExpandableArea는 머리 버튼을 누를 때 보낸다.
-  - ID 명세에 이벤트 필드 31개, `InputChordValue`(필드 5개), 미러 enum 셋을 등록했다.
+  - ID 명세에 이벤트 필드 31개, `InputChordValue`(필드 5개), Widget enum 셋을 등록했다.
 - **시험.** 구독 둘이 모두 불림, 대상 파괴 뒤 자동 해제, 재구성된 Element의 늦은 사건 버림. 바인딩 저장(EV3a1 — `Transient`가 아니면)은 그래프 저장 시험 하나로 본다.
 
 ### 21.6 단계

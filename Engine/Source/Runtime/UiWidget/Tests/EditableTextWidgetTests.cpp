@@ -153,8 +153,8 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         REQUIRE(
             widget->OnChanged().TryAddLambda([&changes](const String&) noexcept { ++changes; }));
         REQUIRE(widget->OnCommitted().TryAddLambda(
-            [&enters](const String&, TextCommitReason why) noexcept {
-                if (why == TextCommitReason::Enter) {
+            [&enters](const String&, WidgetTextCommitReason why) noexcept {
+                if (why == WidgetTextCommitReason::Enter) {
                     ++enters;
                 }
             }));
@@ -338,9 +338,9 @@ TEST(UiWidget_EditableTextInputContextFollowsPlatformOrder) {
     REQUIRE(widget->SetText("a"));
     uint32 focusLostCommits = 0;
     String committedText(allocator);
-    REQUIRE(
-        widget->OnCommitted().TryAddLambda([&](const String& text, TextCommitReason why) noexcept {
-            if (why == TextCommitReason::FocusLost) {
+    REQUIRE(widget->OnCommitted().TryAddLambda(
+        [&](const String& text, WidgetTextCommitReason why) noexcept {
+            if (why == WidgetTextCommitReason::FocusLost) {
                 ++focusLostCommits;
                 (void)committedText.TryAssign(text.View());
             }
