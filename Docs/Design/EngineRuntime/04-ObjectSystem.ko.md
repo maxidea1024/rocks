@@ -19,7 +19,7 @@
 - 파괴는 **명시적**이다. World가 hook을 부른 뒤 소유자의 간선에서 빼고 `RequestDestroy`한다. GC는 그 뒤 저장소를 회수하는 수단이다. Level 파괴는 소속 Actor를 모두 정리한 뒤 Level 루트를 반환한다.
 - `ObjectRefArray`는 이번 단계에서 Core(ObjectRuntime)에 추가했다(4.5절). 추가할 때 대상 타입·생존·같은 Registry를 검증하고, 증분 GC Marking 중이면 대상을 shade한 뒤 게시한다(삽입 장벽). 제거에는 장벽이 필요 없다.
 - Actor의 root component는 **영속 강한 참조 `ObjectRef<SceneComponent>`**다(UE `AActor::RootComponent`와 같다). root는 늘 자기 `components` 안의 객체라 새 생존 간선을 만들지 않는다. 쓰기는 Registry `SetReference`로만 하고(Marking 중 삽입 장벽), root Component를 파괴하는 모든 경로(정상 정리·Registry 우회 파괴의 수리)에서 비운다 — 강한 참조는 파괴된 대상을 null로 만들지 않아 비우지 않으면 저장소가 좀비로 남는다.
-- 소유가 아닌 그 밖의 객체 사이 참조(부모·자식 SceneComponent, Controller↔Pawn)는 `ObjectHandle`이다. 대상 파괴 후 접근은 핸들 generation 검사로 실패한다. 부착 계층(parent·children)은 저장하지 않는 런타임 상태다(4.6절).
+- 소유가 아닌 그 밖의 객체 사이 참조(부모·자식 SceneComponent, Controller↔Pawn)는 `ObjectHandle`이다. 대상 파괴 후 접근은 핸들 generation 검사로 실패한다. 부착 계층의 실행 상태(parent·children)는 NATIVE이고 부모만 영속 `attachParent`로 저장한다(4.6절).
 - Actor·Component·Level은 소속 `World*`를 `ROCKS_NATIVE` 멤버로 보관한다. World는 C++ 객체이며 자신의 Registry와 모든 객체보다 오래 산다.
 - Level·Actor·Component는 `ROCKS_CLASS(WorldOnly)`, SceneComponent는 `ROCKS_CLASS()`(WorldOnly 상속)인 리플렉션 클래스다(A0-B B8b, [리플렉션·빌드 보강 설계](../ReflectionFoundations.ko.md) 9.1절). 메타컴파일러가 컨테이너(B5)와 `ROCKS_NATIVE`(B2)를 지원하게 되어 이전의 수동 네이티브 등록 이유가 사라졌다. 멤버 분류는 4.6절이다.
 
@@ -84,6 +84,7 @@ registry.RemoveReference(access, actor, actorPointer->components_, component);
 | Component | `enabled` | World 포인터 · 소유 Actor · Tick 설정 · 수명 기록 |
 | SceneComponent | `relativeTransform`(Transform — CoreTypeBindings 미러) | 월드 행렬 캐시 · dirty · parent · children(유도값) |
 
+- **prefab이 더할 것(자리 — [Prefab](../Prefab/README.ko.md), 2026-11-28 PF0)**: Component의 Outer는 소유 Actor이고, 선언 subobject(`ROCKS_PROPERTY(Subobject)`)는 subobject 표를 ObjectRuntime instancing이 만들며 SpawnActor는 Actor와 subobject를 한 트랜잭션에서 Commit한다(PF1 — Prefab 3.2절. 지금은 Actor·Component 모두 Outer·이름 없이 만들고 AddComponent가 별도 트랜잭션이다). Level에 Transient `spawnedActors`(펼친 Actor 소유 목록, PF3)와 영속 `PrefabPlacement` 배열·`placementNodeReferences`(PF5), Actor에 Unpack용 영속 Entity Guid(PF7)를 더한다. 객체 생성 출처(`ClassSubobject`·`PrefabNode`·`InstanceAdded`·`Runtime`)는 Registry slot 표지다.
 - **ReadOnly**: 경로·리플렉션 쓰기가 World 장부(ActorRecord·hook·MarkDirty·Tick 등록)를 우회하지 않게 World 필드는 모두 ReadOnly다(로드의 staged 쓰기는 허용). 값은 World API(`SetEnabled`·`SetRootComponent`·`SetRelativeTransform`·`SetLevelScript`(편집 World 전용) 등)로 바꾼다. 그래서 CU5 setter hook 전에는 에디터에서 `relativeTransform`을 경로로 편집할 수 없다(UE `EditAnywhere`와 다른 제약).
 - **Tick 설정은 NATIVE**다(UE `PrimaryActorTick`은 archetype 차분 직렬화 — Rocks에는 아직 클래스 기본값 레코드와 차이 저장이 없어 인스턴스 저장값이 클래스 기본값 변경을 가린다). 레코드와 struct 멤버 단위 비교가 생기는 A5에서 리플렉션 struct·enum으로 옮기며, 그래서 `TickSettings`를 단순 값 구조로 둔다([RuntimeClassMetadata](../RuntimeClassMetadata.ko.md) '클래스 기본값 결정').
 - **부착 계층**: 실행 중 `parent_`·`children_`은 NATIVE이고, 부모는 영속 `attachParent`(`WeakObjectRef<SceneComponent>` — 같은 그래프 안 대상만 보존)로 저장한다(parent는 다른 Actor의 Component에 붙을 수 있어 강한 참조로 두면 좀비와 그래프 끌어오기가 생긴다 — UE는 Outer·레벨 패키지·garbage elimination으로 푼다). 편입이 `attachParent`에서 `parent_`·`children_`을 다시 만든다(29절). 리플렉션 B9가 `WeakObjectRef<T>` PROPERTY(같은 그래프 안 대상만 보존)를 가능하게 하며, 부착 계층을 리플렉션으로 옮길지는 World 단계가 정한다([리플렉션 B9](../ReflectionExtensions.ko.md) 5.1절).

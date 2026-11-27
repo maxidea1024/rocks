@@ -446,6 +446,8 @@ protected:
 
 ### 5.1 형식
 
+예정 개정(2026-11-28, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절 — PF1): NodeTable 항목에 노드 종류 칸을 더한다. 종류 "선언 subobject"는 새 객체를 만들지 않고 "노드 k(소유 객체)의 SubobjectGuid g"를 가리키며, 복원 2a가 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶는다. A1 Exports도 같은 칸을 쓴다. 형식 버전은 3이 되고(하위호환 없음) 클래스 기본값 지문이 함께 바뀐다. 차이 기준 `GraphBaseline`에는 노드별 기준 제공자(subobject 노드 = subobject 기본값 레코드)를 더한다. 아래는 지금(형식 2) 형식이다.
+
 모든 정수 little-endian, Guid·문자열·Bytes는 Archive 규칙이다(정수는 고정 폭 — `Archive.h`).
 
 ```

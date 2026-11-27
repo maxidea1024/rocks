@@ -47,7 +47,7 @@
   - LevelStreaming은 `ULevelStreamingLevelInstance`로 임시 패키지 레벨을 런타임에 로드한다(LevelInstanceLevelStreaming.cpp:389-445).
 - **안의 Actor ID.** 스트리밍 때 `FSetActorInstanceGuid(Actor, ContainerID.GetActorGuid(ActorGuid))`(LevelInstanceLevelStreaming.cpp:262) — 컨테이너 ID와 원래 ActorGuid를 결합한다(WorldPartitionActorContainerID.h:112-115). 런타임도 OwnerLevel 체인의 GUID를 재귀로 결합한다(ENG/Private/WorldPartition/ActorInstanceGuids.cpp:66-112·133-166). **배치마다 결정적으로 파생된 ID**다.
 - **순환 검사.** `ULevelInstanceSubsystem::CheckForLoop`(LevelInstanceSubsystem.cpp:886)는 조상과 자신이 속한 레벨 패키지가 WorldAsset과 같으면 순환이다. 호출은 스트리밍 로드(LevelInstanceLevelStreaming.cpp:393)와 편집 검증(LevelInstanceActorImpl.cpp:448)이며 둘 다 `WITH_EDITOR` 안이다. 쿡 쪽 WorldPartition 검증은 별도 함수 `FLevelInstanceActorDesc::ValidateCircularReference`(LevelInstanceActorDesc.cpp:327, 호출 :292·354)다.
-- **속성 override(5.4+, 실험).** `ULevelInstancePropertyOverrideAsset : UWorldPartitionPropertyOverride`(ENG/Public/LevelInstance/LevelInstancePropertyOverrideAsset.h:30-79). 자료는 `컨테이너 경로 → ActorGuid → 하위 객체 경로 문자열 → 태그 직렬화 바이트`이고 전부 `WITH_EDITORONLY_DATA`다(ENG/Public/WorldPartition/WorldPartitionPropertyOverride.h:15-102). 저장은 원형 월드의 Actor를 기준으로 한 `SerializeTaggedProperties` 차이다(LevelInstancePropertyOverrideAsset.cpp:71·122-127). 실험 설정과 정책이 있어야 켜진다(LevelInstanceSettings.cpp:15-30). 런타임 데이터가 아니므로 쿡 때 적용되는 것으로 보이나 최종 경로는 확인하지 못했다(8절).
+- **속성 override(5.4+, 실험).** `ULevelInstancePropertyOverrideAsset : UWorldPartitionPropertyOverride`(ENG/Public/LevelInstance/LevelInstancePropertyOverrideAsset.h:30-79). 자료는 `컨테이너 경로 → ActorGuid → 하위 객체 경로 문자열 → 태그 직렬화 바이트`이고 전부 `WITH_EDITORONLY_DATA`다(ENG/Public/WorldPartition/WorldPartitionPropertyOverride.h:15-102). 저장은 원형 월드의 Actor를 기준으로 한 `SerializeTaggedProperties` 차이다(LevelInstancePropertyOverrideAsset.cpp:71·122-127). 실험 설정과 정책이 있어야 켜진다(LevelInstanceSettings.cpp:15-30). 쿡 때 적용된다(2026-11-28 확인): 셀 매핑이 override를 기록하고(ENG/Private/WorldPartition/WorldPartitionRuntimeLevelStreamingCell.cpp:398-402), `OnPopulateGeneratedPackageForCook`(:574-620) → `FWorldPartitionLevelHelper::LoadActors` → `LoadActorsWithPropertyOverridesInternal`(WorldPartitionLevelHelper.cpp:587-726)이 액터를 로드할 때 `ApplyPropertyOverrides`를 부른다(:1044-1074 — construction script 속성은 그 뒤 annotation으로, :114-135·353). 파일 전체가 `WITH_EDITOR`다(:78-1294).
 
 ### 2.6 Packed Level Actor
 
@@ -57,7 +57,7 @@
 
 - 헤더가 "Overridable serialization is experimental, not supported"라고 적는다(CUO/Public/UObject/OverriddenPropertySet.h:34-38, OverridableManager.h:17-21).
 - `EOverriddenPropertyOperation`: None·Modified·Replace·Add·Remove·SubObjectsShadowing·Externalized(OverriddenPropertySet.h:229-238, 직접 확인). 노드는 `FOverriddenPropertyNodeID{Path, Object}`(:327-380, 맵 키용 `FromMapKey` :345)와 하위 노드 트리다(:389-463).
-- `FOverridableManager`는 객체별 sparse annotation이며 `WITH_EDITORONLY_DATA` 전용이다(OverridableManager.h:23-60, 비에디터 `IsEnabled`는 false — OverridableManager.cpp:26-33). 클래스 플래그가 아니라 객체 단위로 켜지고 Outer·archetype에서 상속된다(`InheritEnabledFrom`, .cpp:71-83 — `InitProperties`가 부른다, UObjectGlobals.cpp:4456-4459).
+- `FOverridableManager`는 객체별 sparse annotation이며 `WITH_EDITORONLY_DATA` 전용이다(OverridableManager.h:23-60, 비에디터 `IsEnabled`는 false — OverridableManager.cpp:26-33). 클래스 플래그가 아니라 객체 단위로 켜지고 Outer·archetype에서 상속된다(`InheritEnabledFrom`, .cpp:71-83 — `InitProperties`가 부른다, UObjectGlobals.cpp:4456-4459). Engine/Source·Plugins 어디에도 `Enable()`의 외부 호출은 없다. 켜지는 경로는 `FindOrAdd`를 부르는 `RestoreOverrideOperation`(OverridableManager.cpp:117-127)뿐이고, 이것은 override 정보를 이미 담은 데이터를 로드할 때(Class.cpp:1598-1611, Obj.cpp:1849-1854 → OverridableManager.cpp:441-458)와 T3D 붙여넣기 때(ED/UnrealEd/Private/EditorObject.cpp:837·1518, Factories/EditorFactories.cpp:5440) 불린다 — 엔진 안에 처음 켜는 지점은 없다(2026-11-28 확인).
 - 컨테이너: 배열은 `CPF_ExperimentalOverridableLogic`이 없으면 통째 Replace이고(OverriddenPropertySet.cpp:1172-1189), 있으면 instanced 원소만 Add(추가된 하위 객체 ID)·Remove(**원형 하위 객체 ID**)로 기록한다(:1235-1326). 맵은 key 기반 Add·Remove·Replace다(:1497-1569).
 - 저장: 추적이 켜지면 op ≠ None인 속성만 쓴다(Class.cpp:2017). **값이 원형과 같아도 "일부러 넣은 값"이 남는다** — RCM의 명시 override 집합과 같은 목적이다.
 - 전파: 이 객체들은 값 전파를 하지 않고 "propagation is done via reinstantiation"이다(ED/PropertyEditor/Private/PropertyHandleImpl.cpp:629-639).
@@ -70,7 +70,7 @@
 
 ### 2.9 클러스터
 
-`ULevel::CreateCluster`(ENG/Private/Level.cpp:1526-1561)는 cooked이고 액터 클러스터링이 켜졌을 때 `CanBeInCluster` 액터를 `ULevelActorContainer`로 묶는다(Level.cpp:1528-1531 주석 — Level 자신은 루트가 아니다). 호출은 로드 때 컴포넌트 증분 갱신을 마칠 때 한 번이다(Level.cpp:1930). 그래서 **실행 중 spawn한 Actor는 Level 클러스터에 들어가지 않는다.** 클러스터 생성 자체가 cooked 전용이다(CUO/Private/UObject/UObjectClusters.cpp:26-37·854-857). UE에 "prefab 단위 클러스터"는 없다.
+`ULevel::CreateCluster`(ENG/Private/Level.cpp:1526-1561)는 cooked이고 액터 클러스터링이 켜졌을 때 `CanBeInCluster` 액터를 `ULevelActorContainer`로 묶는다(Level.cpp:1528-1531 주석 — Level 자신은 루트가 아니다). 호출은 로드 때 컴포넌트 증분 갱신을 마칠 때 한 번이다(Level.cpp:1930). 그래서 **실행 중 spawn한 Actor는 Level 클러스터에 들어가지 않는다.** `AActor::bCanBeInCluster`의 기본값은 false다(`InitializeDefaults`가 설정하지 않고 — ENG/Private/Actor.cpp:274, 객체 메모리를 0으로 채운다 — CUO/Private/UObject/UObjectGlobals.cpp:3766). true로 두는 것은 `AReflectionCapture`(ENG/Private/Components/ReflectionCaptureComponent.cpp:218-223)와 정확히 `AStaticMeshActor` 클래스(ENG/Private/StaticMeshActor.cpp:40-41)뿐이므로 UE Level 클러스터는 사실상 이 두 Actor만 묶는다(2026-11-28 확인). 클러스터 생성 자체가 cooked 전용이다(CUO/Private/UObject/UObjectClusters.cpp:26-37·854-857). UE에 "prefab 단위 클러스터"는 없다.
 
 ### 2.10 Unity 비교(짧게)
 

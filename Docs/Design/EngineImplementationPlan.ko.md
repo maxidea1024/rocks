@@ -522,7 +522,7 @@ ObjectHandle은 프로세스 전역 slot identity다. World 전용 API는 별도
 
 생성자는 backend 등록이나 최종 설정에 의존하는 파생 cache 계산을 수행하지 않는다. 값 복사·참조 remap 뒤 Initialize에서 파생 상태를 계산하고 Register에서 backend에 공개한다. pre-commit Initialize는 Result와 가역 journal을 사용하며 실패 시 미공개 graph를 rollback한다. graph Commit 이후 Register/Activate 실패는 신규 admission 차단·RequestDestroy·teardown/retire로 처리한다. 공개된 객체를 미공개 rollback 경로로 직접 해제하지 않는다.
 
-복제·Undo 복구·prefab instantiate는 AllocateGraph → ApplyDefaults → Deserialize/Remap → Validate → pre-commit Initialize → Commit → Register → BeginPlay의 공통 instancing API를 사용한다. GUID/Outer·editor-only·transient field의 복사 정책을 명시하고 Commit 전 실패만 미공개 graph 전체를 역순 정리한다. Commit 성공 이후에는 context를 소비한 것으로 보고 정상 파괴·회수 경로를 사용한다.
+복제·Undo 복구·prefab instantiate는 AllocateGraph → ApplyDefaults → Deserialize/Remap → Validate → pre-commit Initialize → Commit → Register → BeginPlay의 공통 instancing API를 사용한다. GUID/Outer·editor-only·transient field의 복사 정책을 명시하고(prefab: 원형 본문은 DuplicateTransient 계열까지 보존하고 spawn 복원이 decode 정책으로 빼며, EditorOnly는 쿡에서 뺀다 — [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.3절 7항, D20) Commit 전 실패만 미공개 graph 전체를 역순 정리한다. Commit 성공 이후에는 context를 소비한 것으로 보고 정상 파괴·회수 경로를 사용한다.
 
 ### 5.4 ConstructionContext와 비공개 graph
 
@@ -1834,6 +1834,8 @@ override는 NodeGuid+FieldId+요소 stable key를 주소로 하는 patch다. fie
 
 variant는 base prefab과 patch를 저장한다. nested prefab은 참조 AssetId와 별도 instance namespace를 갖고 reference cycle을 cooker가 거부한다. 초기 중첩 depth 상한 16을 제안한다. 원본 변경 전파는 old base/new base/local override의 3-way 비교로 수행한다. override가 없는 필드는 갱신하고, local override는 보존하며, 삭제된 node·변경된 field type·동시 구조 수정은 conflict로 표시한다.
 
+2026-11-28 정합([Prefab](Prefab/README.ko.md) PF0 — 결정 D1–D22): 위 API는 `Prefab` 모듈(World 위)의 `SpawnPrefab(World&, const AssetLease&, const SpawnPrefabParams&)` 하나로 통일한다(`PrefabInstanceDesc`·`InstantiatePrefab`을 대신한다 — lease 인자, `tracked` 인스턴스만 장부·노드 대응표를 둔다, World는 staged 묶음 등록 키만 내준다 — Prefab 3.3절). 외부 world object 참조는 1차에 저장을 거부하고, World 단계의 영속 Entity 참조가 생기면 SoftEntityId로 저장한다(D12 — 최종 방향은 위와 같다). 배열 원소에는 ElementGuid를 두지 않는다: 배열 override는 필드 통째이고 원소 단위는 keyed collection(OrderedMap·OrderedSet)의 key가 안정 ID다(D4 — ElementGuid는 실제 요구가 생기면 따로 설계). reference cycle은 cooker뿐 아니라 편집기 저장·로드도 거부한다(3.8절). 펼친 노드의 ID는 저장하지 않고 인스턴스 Guid와 노드 주소에서 결정적으로 파생한다(D6 — 3.4절).
+
 editor는 Apply to source, Revert override, Unpack instance, Make variant, Compare revision을 제공한다. Apply는 source asset 편집 transaction과 그 영향 목록을 생성하며 동일 instance를 무제한 연쇄 재적용하지 않는다. instance root와 child의 영속 ID를 유지하여 save game·외부 actor reference·network spawn이 흔들리지 않게 한다. 네트워크는 prefab ID·revision·spawn parameter와 authoritative override를 검증한 뒤 생성한다.
 
 Tryout 시작은 편집 graph를 별도 World로 복제하고 prefab/actor ID remap을 유지한다. Tryout 중 원본 수정은 명시적인 live patch 범위에서만 반영한다. structural change가 있으면 해당 instance 또는 Tryout 재시작으로 처리한다. 변경 propagation·GC·Undo/Redo·save/load·cell unload·replication을 함께 수행하는 통합 테스트를 M5의 필수 gate로 지정한다.
@@ -1852,7 +1854,7 @@ MatchRules는 서버 전용 규칙·spawn/respawn·match lifecycle, MatchState�
 
 CameraDirector는 UE `APlayerCameraManager`(view target·blend·camera modifier)에 대응하고, 카메라 컴포넌트(`CameraComponent`·`SpringArmComponent`·`CameraShakeSourceComponent`·`CinematicCameraComponent`)가 view의 원천이다. 컴포넌트 쪽 범위·선행은 [컴포넌트 도입](ComponentCatalog/08-OutsideFolder.ko.md) 8.4–8.6절(CM0·CM12·CM15)이 정하고, 그 문서의 카메라 시스템 선행 CR29는 이 절을 정본으로 한다. AI가 Pawn을 조종하는 Controller(UE `AAIController`)는 같은 문서 CR39다.
 
-nested prefab의 주소는 PrefabInstanceGuid + 중첩 instance 경로 + NodeGuid + FieldId + ElementGuid다. 같은 NodeGuid를 가진 원본이 여러 번 중첩되어도 충돌하지 않는다. instance EntityGuid는 저장 시 보존하고 새 복제 시 재발급한다. runtime component 추가/제거·class default 갱신·script reload·network subobject 생성은 같은 instancing registry를 사용한다.
+nested prefab의 주소는 PrefabInstanceGuid + 중첩 instance 경로 + NodeGuid + PropertyPath(필드 ID + keyed collection의 key — ElementGuid 없음, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.4절 D4)다. 같은 NodeGuid를 가진 원본이 여러 번 중첩되어도 충돌하지 않는다. instance EntityGuid는 저장 시 보존하고 새 복제 시 재발급한다(노드 ID는 인스턴스 Guid와 주소에서 `DeriveGuid`로 파생하므로 함께 보존·재발급된다 — Prefab 3.4절). runtime component 추가/제거·class default 갱신·script reload·network subobject 생성은 같은 instancing registry를 사용한다.
 
 Behavior/State tree의 조건·action, ability task·UI binding·sequence event는 자체 언어의 검증된 함수와 typed data를 사용한다. 범용 event/action node로 게임플레이를 작성하는 우회 Blueprint 체계는 도입하지 않는다. 레벨 단위 연결(트리거와 문 잇기, 시작 연출)은 `LevelScript`로 하고 레벨 사이 연락은 World 이벤트로 한다(이름 문자열 호출 없음 — [레벨 스크립트](LevelScript.ko.md) LD10).
 
