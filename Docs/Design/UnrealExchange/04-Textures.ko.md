@@ -77,7 +77,7 @@ UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 �
    | TextureCubeArray | `unreal_texture_cube_array` | `TextureCubeArray` | `a49f013e-97bc-4fe4-b46d-fb6b0f126a37` |
    | VolumeTexture | `unreal_volume_texture` | `VolumeTexture` | `babb45b2-7cbe-49c3-ac8a-9bad95195d23` |
 
-   종류별 임포터 하나(`ExchangeTextureKind`)가 다섯 클래스에 등록되고 클래스로 임포터 이름을 고른다.
+   종류별 임포터 하나(`ExchangeTextureKind` — UX3b에서 정적 메시까지 받는 `ExchangeServiceKind`로 일반화, 5.5절 11번)가 다섯 클래스에 등록되고 클래스로 임포터 이름을 고른다.
 2. **원본 변환(`ConvertExchangeTextureSource`).** `data.source`(4.5절 1번)에서 Rocks `TextureSource` 값과 픽셀 byte를 만든다. 검사 순서와 실패(코드 / 오류):
    1. `source`가 null(플러그인 오류 진단이 있어 문서 읽기가 이미 거부한다)·형식 위반 → `CorruptBundle` / `CorruptData`. 텍스처가 아닌 클래스·`asset.blobs`와 수가 다른 blob 목록은 호출 계약 위반 `InvalidSource` / `InvalidArgument`다.
    2. `numLayers` ≠ 1, `numBlocks` ≠ 1, `longLat` 참 → `UnsupportedSourceLayout` / `Unsupported`(4.1절 — 다층·UDIM·위도경도 큐브).

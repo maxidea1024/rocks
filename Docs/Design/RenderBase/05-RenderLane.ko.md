@@ -31,7 +31,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 ```
 
 - 렌더 lane은 CP1 `DedicatedLane`의 인스턴스다. lane 작업 종류는 넷으로 닫는다: 프레임 packet 처리, 장치 자원 생성·갱신·`Retire`, 표면 작업(스왑체인 생성·resize·파괴, 표면 소실·재생성), lane 표지.
-- **전달 가능한 타입.** lane 작업이 받는 값 타입은 "렌더 전달 가능" 표시를 명시 등록한 것만 허용한다(등록되지 않은 타입은 컴파일 오류). 등록 타입이 리플렉션 스키마를 가지면 Development에서 Object 참조 필드가 없는지 검사한다. 원시 포인터는 C++ 타입 검사로 걸러낼 수 없으므로(trivially copyable 구조체 안의 포인터) 이 두 단계가 강제할 수 있는 범위다. 프레임 packet의 가변 길이 목록은 그 프레임 slot의 프레임 arena(CP3)에 둔다.
+- **전달 가능한 타입.** lane 작업이 받는 값 타입은 "렌더 전달 가능" 표시를 명시 등록한 것만 허용한다(등록되지 않은 타입은 컴파일 오류). 등록 타입이 리플렉션 스키마를 가지면 Development에서 Object 참조 필드가 없는지 검사한다. **이벤트 필드(`FieldKind::Event` — `Event<Args...>`, 이벤트 리플렉션 ED9)도 거부한다(개정 61):** 강한 참조는 아니지만 구독(대상 객체·함수)과 발행자를 붙잡으므로, 렌더 lane으로 넘어가면 게임 객체의 수명·스레드 규칙(게임 lane 전용 — Object 접근)을 렌더 lane이 어기게 된다. 판정은 `IsEventField`이고 거부는 다른 Object 참조와 같은 `InvalidArgument`다. 원시 포인터는 C++ 타입 검사로 걸러낼 수 없으므로(trivially copyable 구조체 안의 포인터) 이 두 단계가 강제할 수 있는 범위다. 프레임 packet의 가변 길이 목록은 그 프레임 slot의 프레임 arena(CP3)에 둔다.
 - **인라인 모드**는 CP1 인라인 모드(trampoline)를 쓴다. 두 모드의 결과(장치 호출 열, 자원 상태)가 같아야 한다.
 - **완료 통지 큐** `RenderNotices`: readback 결과, timestamp, `Retire` 회수 완료, 셰이더 공급 완료, 텍스처 스트리밍의 보임 신호(사용 기록별 마지막으로 그린 프레임)와 mip 전송 완료([텍스처 스트리밍](../TextureStreaming.ko.md) 결정 T3) 같은 결과를 렌더 lane이 넣고, 게임 lane이 프레임 시작 때 비운다. 게임 쪽 CPU 데이터를 GPU 완료 뒤까지 붙잡아야 하는 경우(ObjectRuntime `BackendLease`, `ObjectRefs.h:216–220`) 그 해제는 게임 쪽 통합 계층(WorldIntegration)이 이 통지를 받아 한다. RenderBase는 ObjectRuntime에 의존하지 않는다.
 - **fence 관찰.** 렌더 lane은 GX7 완료 이벤트를 lane 작업으로 받는다(폴링하지 않는다). 그래서 lane이 놀고 있어도 slot 완료와 회수가 진행된다.

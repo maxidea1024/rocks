@@ -149,6 +149,11 @@ public:
     // Retire하고 LastFailure에 영어 이유(자원 이름)를 둔다.
     Result<void> Create(graphics::Device& device, ShaderSet& engineShaders) noexcept;
 
+    // 셰이더 교체 뒤 fallback 셰이더 항목을 새 집합에서 다시 찾는다(Docs/Design/RenderBase 9.8절
+    // "SH4 연결" — 장치 자원은 그대로다, 장치 셰이더는 첫 사용에서 만든다). 실패: 준비 전 NotReady,
+    // 항목이 없음 NotFound(그때 항목은 바뀌지 않고 LastFailure에 이름을 둔다).
+    Result<void> AdoptShaders(ShaderSet& engineShaders) noexcept;
+
     // 모든 자원을 장치에 Retire한다(종료 4단계 — 마지막 사용 fence 뒤 해제). 만들지 않았으면 아무
     // 것도 하지 않는다. 다시 Create할 수 있다.
     void Retire(graphics::Device& device) noexcept;

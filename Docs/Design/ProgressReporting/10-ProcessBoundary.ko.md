@@ -7,9 +7,9 @@
 ### 10.1 자식이 보내는 진행
 
 - 자식 프로세스(쿠킹 프로세스·`shader-compile` 명령·외부 도구 어댑터)는 `--progress=jsonl`로 9.3절 줄을 stdout에 쓴다.
-- 부모는 `ChildProgressReader`로 읽어 자기 작업 아래 하위 작업으로 다시 만든다. 자식 id → 부모 쪽 id 대응표 상한은 `kMaxChildProgressTasks` = 4096이고, 넘는 하위 작업은 만들지 않고(그 진행은 부모 쪽에서 안 보임) 처음 한 번 Warning.
+- 부모는 `ChildProgressReader`로 읽어 자기 작업 아래 하위 작업으로 다시 만든다. 자식 id → 부모 쪽 id 대응표 상한은 `MaxChildProgressTasks` = 4096이고, 넘는 하위 작업은 만들지 않고(그 진행은 부모 쪽에서 안 보임) 처음 한 번 Warning.
 - 깨진 줄은 Warning을 한 번 남기고 무시한다. 자식이 끝나면 남은 하위 작업을 받은 결과로, 결과가 없으면 `Failed`(비정상 종료) 또는 `Abandoned`(정상 종료인데 end가 없음)로 닫는다.
-- **pipe 소유.** P1 `Process`는 한 객체를 한 번에 한 스레드만 다루고 교차 스레드 깨우기가 없다(`PlatformBase/Process.h` 스레드 계약). 그래서 `ChildProgressReader`는 Process를 소유한 한 스레드가 돌린다: `Read(timeout = kChildControlPollInterval)`(0.1 s)를 반복하고, 반복 사이에 부모 token을 보아 취소면 stdin에 `cancel` 줄을 한 번 쓴다(10.2절). 셰이더 워커 채널과 같은 방식이다.
+- **pipe 소유.** P1 `Process`는 한 객체를 한 번에 한 스레드만 다루고 교차 스레드 깨우기가 없다(`PlatformBase/Process.h` 스레드 계약). 그래서 `ChildProgressReader`는 Process를 소유한 한 스레드가 돌린다: `Read(timeout = ChildControlPollInterval)`(0.1 s)를 반복하고, 반복 사이에 부모 token을 보아 취소면 stdin에 `cancel` 줄을 한 번 쓴다(10.2절). 셰이더 워커 채널과 같은 방식이다.
 - **stderr.** 자식 stderr는 부모 stderr를 상속하거나 파일로 보낸다. stdout 하나만 오래 읽으므로 stderr를 pipe로 열어 두면 교착이 난다(`Process.h` 경고). `mergeErrorIntoOutput`은 쓰지 않는다(JSONL과 섞인다).
 
 ### 10.2 부모 제어 모드와 취소

@@ -71,6 +71,7 @@
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 61(2026-11-27): 5.2절 "전달 가능한 타입" — 이벤트 필드(`FieldKind::Event`)를 가진 리플렉션 타입도 Development 전달 검사가 거부한다(구독 대상·발행자를 붙잡는다 — 이벤트 리플렉션 3.1절 점검표 "렌더 전송" 행 정정).
 - 개정 60(2026-11-27): 5.3절 "프레임 packet 수명" — `SubmitFrame`이 모든 반환 경로에서 packet을 소비하고, lane 작업이 slot 반환(`FinishFrame`) 전에 packet을 파괴한다(Thread 모드 arena Reset 경쟁 수정).
 - 개정 59(2026-11-27): SH4 연결 설계(셰이더 시스템 개정 60) — 9.8절 "SH4 연결"(`ShaderProvider` revision·reload 통지, `EngineRenderResources`의 `ShaderSetSlot`과 `ApplyShaderUpdates`, `BuiltinResources::AdoptShaders`), 18.4절 SM12 행.
 - 개정 58(2026-11-27): 6.6절 손상 데이터 오류 — 렌더 소유 읽기 경로(쿠킹 텍스처 판정·묶기, 쿠킹 셰이더 라이브러리 사본·형식 선택, `ShaderSet` 손상 문제, `EngineRenderResources::Open` 전달)를 AssetSystem 19장 규칙대로 `CorruptData`로 옮겼다. 6.5절 `CorruptEntry` 오류 값 정정.

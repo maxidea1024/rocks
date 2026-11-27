@@ -379,6 +379,42 @@ Result<void> BuiltinResources::PrepareShaders(ShaderSet& engineShaders) noexcept
     return Result<void>::Success();
 }
 
+Result<void> BuiltinResources::AdoptShaders(ShaderSet& engineShaders) noexcept {
+    if (!ready_) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    struct ShaderRecipe {
+        uint64 type;
+        shader::VertexInputTypeId vertexInput;
+        uint32 BuiltinShaderEntries::* entry;
+        const char* name;
+    };
+
+    const ShaderRecipe recipes[] = {
+        {BuiltinMeshVertexType.hash, BuiltinVertexInputName.hash, &BuiltinShaderEntries::meshVertex,
+         "fallback shader BuiltinMeshVertex (BuiltinVertexInput)"},
+        {BuiltinMeshPixelType.hash, shader::NoVertexInputType, &BuiltinShaderEntries::meshPixel,
+         "fallback shader BuiltinMeshPixel"},
+        {FullscreenTriangleVertexType.hash, shader::NoVertexInputType,
+         &BuiltinShaderEntries::fullscreenVertex, "fallback shader FullscreenTriangleVertex"},
+        {CopyTexturePixelType.hash, shader::NoVertexInputType, &BuiltinShaderEntries::copyPixel,
+         "fallback shader CopyTexturePixel"}};
+    BuiltinShaderEntries found;
+    for (const ShaderRecipe& recipe : recipes) {
+        auto entry = engineShaders.FindEntry(recipe.type, recipe.vertexInput);
+        if (!entry) {
+            failure_ = recipe.name;
+            return Result<void>::Failure(entry.Error());
+        }
+
+        found.*recipe.entry = entry.Value();
+    }
+
+    entries_ = found;
+    return Result<void>::Success();
+}
+
 Result<void> BuiltinResources::Create(graphics::Device& device, ShaderSet& engineShaders) noexcept {
     if (created_) {
         failure_ = "builtin resources are already created for this device";

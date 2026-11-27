@@ -154,6 +154,17 @@ Result<void> ShaderSetSlot::Shutdown(PipelineCache* cache) noexcept {
     return RetiredCount() == 0 ? Result<void>::Success() : Result<void>::Failure(ErrorCode::Busy);
 }
 
+void ShaderSetSlot::Abandon() noexcept {
+    platform::LockGuard lock(gate_);
+    if (pending_.Get() != nullptr) {
+        (void)pending_->WaitUntilSettled();
+        pending_.Reset();
+    }
+
+    current_.Reset();
+    retired_.Clear();
+}
+
 ShaderSet* ShaderSetSlot::Current() const noexcept {
     platform::LockGuard lock(gate_);
     return current_.Get();

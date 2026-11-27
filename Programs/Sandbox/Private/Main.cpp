@@ -36,6 +36,10 @@
 //                                  없이 창만 연다 (Docs/Design/RenderBase 18.5절). 창 모드는 엔진이
 //                                  설 때까지 시작 화면(스플래시)을 띄우고 --no-splash는 끈다
 //                                  (Docs/Design/SplashScreen 4절)
+//   Sandbox --shader-reload-self-test
+//                                  장치마다 감시 재컴파일만 돈다(ShaderSystem 16.3절 SSD78 — 시험
+//                                  루트 원문을 고쳐 쓰고 교체·픽셀·실패 유지·저장 → 교체 시간,
+//                                  --self-test에도 들어 있다)
 //   Sandbox --splash-self-test
 //                                  실제 스플래시 창을 세 번 띄웠다 닫는다(Docs/Design/SplashScreen
 //                                  14절 시험 10, 종료 코드 0 = 통과, 1 = 실패, 2 = 데스크톱·창
@@ -59,7 +63,8 @@ using rocks::StringView;
 int Usage() noexcept {
     fprintf(stderr,
             "usage: Sandbox [--self-test] [--gpu-validation] | --engine-shader-self-test | "
-            "--cooked-shader-self-test | --texture-self-test | --splash-self-test | "
+            "--cooked-shader-self-test | --texture-self-test | --shader-reload-self-test | "
+            "--splash-self-test | "
             "--audio-tone [--seconds N] | "
             "--engine [--window] [--frames N] "
             "[--graphics=auto|d3d12|d3d11|vulkan|opengl] [--graphics-validation] [--no-render] "
@@ -128,6 +133,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     bool engineShaders = false;
     bool cookedShaders = false;
     bool textures = false;
+    bool shaderReload = false;
     bool framesGiven = false;
     bool audioTone = false;
     bool splashSelfTest = false;
@@ -155,6 +161,8 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
             cookedShaders = true;
         } else if (Is(argument, "--texture-self-test")) {
             textures = true;
+        } else if (Is(argument, "--shader-reload-self-test")) {
+            shaderReload = true;
         } else if (Is(argument, "--gpu-validation")) {
             gpuValidation = true;
         } else if (Is(argument, "--window")) {
@@ -210,10 +218,11 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
                                      static_cast<rocks::uint32>(toneSeconds));
     }
 
-    if (engineShaders || cookedShaders || textures) {
+    if (engineShaders || cookedShaders || textures || shaderReload) {
         const sandbox::GraphicsSelfTestScope scope =
             engineShaders   ? sandbox::GraphicsSelfTestScope::EngineShaders
             : cookedShaders ? sandbox::GraphicsSelfTestScope::CookedShaders
+            : shaderReload  ? sandbox::GraphicsSelfTestScope::ShaderReload
                             : sandbox::GraphicsSelfTestScope::Textures;
         return sandbox::RunGraphicsSelfTest(context.DefaultAllocator(), context.Modules(), false,
                                             scope);
