@@ -23,7 +23,8 @@ uint64 CellKey(int32 x, int32 y) noexcept {
 } // namespace
 
 HitGrid::HitGrid(Allocator& allocator) noexcept
-    : entries_(allocator), cells_(allocator), links_(allocator), broad_(allocator) {
+    : entries_(allocator), cells_(allocator), links_(allocator), broad_(allocator),
+      candidates_(allocator) {
 }
 
 void HitGrid::Reset() noexcept {
@@ -32,6 +33,7 @@ void HitGrid::Reset() noexcept {
     cells_.Clear();
     links_.Clear();
     broad_.Clear();
+    candidates_.Clear();
 }
 
 bool HitGrid::HasSnapshot() const noexcept {
@@ -92,6 +94,10 @@ Result<void> HitGrid::Record(const SharedPtr<Element>& element, usize parentClip
 
         if (visibility == Visibility::Visible && geometry.size.x > 0 && geometry.size.y > 0) {
             auto indexed = Index(index, area);
+            if (indexed) {
+                indexed = candidates_.TryPushBack({index, area});
+            }
+
             if (!indexed) {
                 return indexed;
             }
@@ -166,6 +172,27 @@ bool HitGrid::Accepts(usize index, Vec2 point, const Element& scope,
 
     hit = Move(target);
     return true;
+}
+
+usize HitGrid::CandidateCount() const noexcept {
+    return candidates_.Size();
+}
+
+SharedPtr<Element> HitGrid::CandidateFromTop(usize fromTop, Box2<float>& area) const noexcept {
+    const auto owner = root_.Lock();
+    if (!owner || fromTop >= candidates_.Size()) {
+        return {};
+    }
+
+    const Candidate& candidate = candidates_[candidates_.Size() - 1 - fromTop];
+    auto target = entries_[candidate.entry].element.Lock();
+    if (!target || target->GetVisibility() != Visibility::Visible ||
+        !target->IsInputPathActive(*owner, true)) {
+        return {};
+    }
+
+    area = candidate.area;
+    return target;
 }
 
 SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope) const noexcept {

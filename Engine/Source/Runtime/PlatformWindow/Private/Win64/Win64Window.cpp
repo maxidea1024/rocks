@@ -1,6 +1,7 @@
 #include "Win64InlineComposition.h"
 #include <Core/Assert.h>
 #include <Platform/Clock.h>
+#include <Platform/Sync.h>
 #include <Platform/DynamicLibrary.h>
 #include <Platform/Win64/WideString.h>
 #include <Input/TouchIndexAllocator.h>
@@ -441,8 +442,10 @@ public:
         return requested;
     }
 
-    void SetRegionHitTest(RegionHitTest&& callback) noexcept override {
-        regionHitTest_ = Move(callback);
+    void PublishRegionMap(const input::WindowRegionMap& map) noexcept override {
+        AssertOwnerThread();
+        LockGuard guard(regionGate_);
+        regionMap_ = map;
     }
 
     void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept override {
@@ -765,11 +768,22 @@ private:
     input::WindowRegion ClientRegion(LPARAM coordinates) noexcept {
         POINT point{static_cast<short>(LOWORD(coordinates)),
                     static_cast<short>(HIWORD(coordinates))};
-        if (regionHitTest_ && ScreenToClient(window_, &point)) {
-            return regionHitTest_.Execute({point.x, point.y});
+        if (ScreenToClient(window_, &point)) {
+            return LookupRegion({point.x, point.y}).region;
         }
 
         return input::WindowRegion::Client;
+    }
+
+    struct RegionLookup {
+        input::WindowRegion region;
+        bool popupOpen;
+    };
+
+    // 게시한 지도에서 한 점의 영역을 찾는다(잠금 — OS 질의는 다른 스레드에서도 올 수 있다).
+    RegionLookup LookupRegion(IntVec2 point) const noexcept {
+        LockGuard guard(regionGate_);
+        return {regionMap_.Find(point), regionMap_.popupOpen};
     }
 
     void ToggleBorderlessFullscreen() noexcept {
@@ -803,8 +817,8 @@ private:
     }
 
     WindowZone HitZone(IntVec2 clientPoint) const noexcept override {
-        const input::WindowRegion region =
-            regionHitTest_ ? regionHitTest_.Execute(clientPoint) : input::WindowRegion::Client;
+        const RegionLookup lookup = LookupRegion(clientPoint);
+        const input::WindowRegion region = lookup.region;
         // OS 테두리 창은 UI 영역만 본다: client·팝업 말고는 끌기 영역이다.
         if (!customFrame_) {
             return region == input::WindowRegion::Client || region == input::WindowRegion::Popup
@@ -817,8 +831,9 @@ private:
             return WindowZone::Client;
         }
 
+        // 열린 팝업(메뉴)이 있으면 크기 조절 가장자리를 끈다(UE AnyMenusVisible — 19.2절).
         RECT client{};
-        if (resizable_ && !IsZoomed(window_) && !fullscreenStyle_ &&
+        if (resizable_ && !IsZoomed(window_) && !fullscreenStyle_ && !lookup.popupOpen &&
             GetClientRect(window_, &client)) {
             const UINT dpi = GetDpiForWindow(window_);
             const int border = MulDiv(CustomFrameResizeBorder, dpi, USER_DEFAULT_SCREEN_DPI);
@@ -1338,7 +1353,9 @@ private:
     Allocator& allocator_;
     HWND window_ = nullptr;
     HCURSOR cursor_ = nullptr;
-    RegionHitTest regionHitTest_;
+    // UI가 게시한 영역 지도다(OS 질의가 다른 스레드에서 와도 읽도록 잠금 아래 둔다).
+    mutable Mutex regionGate_;
+    input::WindowRegionMap regionMap_;
     LONG_PTR fullscreenStyle_ = 0;
     WINDOWPLACEMENT windowedPlacement_{};
     bool trackingMouse_ = false;

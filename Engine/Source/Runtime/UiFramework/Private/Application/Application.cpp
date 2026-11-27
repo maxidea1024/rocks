@@ -1,9 +1,12 @@
 #include <UiFramework/Application/Application.h>
+#include <Core/Diagnostics/Log.h>
 #include <Platform/Clock.h>
 
 namespace rocks::ui {
 
 namespace {
+
+constexpr LogCategory LogUiApplication{"UiFramework"};
 
 bool IsModifierKey(input::Key key) noexcept {
     return key == input::Key::LeftShift || key == input::Key::RightShift ||
@@ -207,14 +210,10 @@ void Application::ResetInput() noexcept {
     ClearAllFocus();
 }
 
-input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept {
-    if (!root_) {
-        return input::WindowRegion::Client;
-    }
+namespace {
 
-    const bool snapshot = hitGrid_.HasSnapshot();
-    const auto hit = snapshot ? hitGrid_.Find(position, *root_) : SharedPtr<Element>{};
-    auto* target = snapshot ? hit.Get() : root_->HitTest(position);
+// hit 대상 Element의 창 영역이다(QueryWindowRegion·BuildWindowRegionMap이 같은 규칙을 쓴다).
+input::WindowRegion RegionOfTarget(const Element* target) noexcept {
     // 팝업 층 안 지점은 다른 판정보다 앞선다(직접 그린 창의 크기 조절 가장자리보다도 — UW7c R6).
     for (const Element* current = target; current && current->Parent();
          current = current->Parent()) {
@@ -233,6 +232,109 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
     }
 
     return input::WindowRegion::Client;
+}
+
+// 창 좌표 사각형을 정수 client 사각형으로 바꾼다. outward면 바깥으로(구멍·Popup), 아니면 안으로.
+IntRect ToClientRect(const Box2<float>& area, bool outward) noexcept {
+    const auto lower = [outward](float value) noexcept {
+        return static_cast<int32>(outward ? math::Floor(value) : math::Ceil(value));
+    };
+    const auto upper = [outward](float value) noexcept {
+        return static_cast<int32>(outward ? math::Ceil(value) : math::Floor(value));
+    };
+    return {{lower(area.min.x), lower(area.min.y)}, {upper(area.max.x), upper(area.max.y)}};
+}
+
+bool Overlaps(const IntRect& a, const IntRect& b) noexcept {
+    return a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y;
+}
+
+} // namespace
+
+input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept {
+    if (!root_) {
+        return input::WindowRegion::Client;
+    }
+
+    const bool snapshot = hitGrid_.HasSnapshot();
+    const auto hit = snapshot ? hitGrid_.Find(position, *root_) : SharedPtr<Element>{};
+    return RegionOfTarget(snapshot ? hit.Get() : root_->HitTest(position));
+}
+
+void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexcept {
+    map = {};
+    if (!root_ || !hitGrid_.HasSnapshot()) {
+        return;
+    }
+
+    // hit 후보를 위에서부터 보고 영역을 정한다(각 후보가 위에서 처음 걸리는 점의 답이다).
+    struct Answer {
+        IntRect rect;
+        input::WindowRegion region;
+    };
+    Array<Answer> answers(allocator_);
+    const usize count = hitGrid_.CandidateCount();
+    if (!answers.TryReserve(count)) {
+        return;
+    }
+
+    for (usize fromTop = 0; fromTop < count; ++fromTop) {
+        Box2<float> area;
+        const auto candidate = hitGrid_.CandidateFromTop(fromTop, area);
+        if (!candidate) {
+            continue;
+        }
+
+        const auto region = RegionOfTarget(candidate.Get());
+        const bool outward =
+            region == input::WindowRegion::Client || region == input::WindowRegion::Popup;
+        const IntRect rect = ToClientRect(area, outward);
+        if (!rect.IsEmpty()) {
+            (void)answers.TryPushBack({rect, region});
+        }
+
+        map.popupOpen |= region == input::WindowRegion::Popup;
+    }
+
+    // Client가 아닌 영역과, 그 뒤(아래) 영역을 가리는 Client 구멍만 담는다(어느 항목에도 없으면
+    // Client이므로 나머지 Client는 필요 없다).
+    bool overflow = false;
+    for (usize index = 0; index < answers.Size() && !overflow; ++index) {
+        bool needed = answers[index].region != input::WindowRegion::Client;
+        for (usize below = index + 1; below < answers.Size() && !needed; ++below) {
+            needed = answers[below].region != input::WindowRegion::Client &&
+                     Overlaps(answers[index].rect, answers[below].rect);
+        }
+
+        if (needed) {
+            overflow = !map.TryAdd({answers[index].rect, answers[index].region});
+        }
+    }
+
+    if (!overflow) {
+        return;
+    }
+
+    // 넘치면 끌기(Caption)와 구멍을 빼고 누르는 영역만 남긴다(그 밖은 Client — 끌 수 없을 뿐 잘못
+    // 누르지는 않는다).
+    const bool popupOpen = map.popupOpen;
+    map = {};
+    map.popupOpen = popupOpen;
+    for (const Answer& answer : answers) {
+        if (answer.region != input::WindowRegion::Client &&
+            answer.region != input::WindowRegion::Caption &&
+            !map.TryAdd({answer.rect, answer.region})) {
+            break;
+        }
+    }
+
+    if (!regionMapOverflowLogged_) {
+        regionMapOverflowLogged_ = true;
+        Log::Warning(LogUiApplication,
+                     "The window region map overflowed {Count} rects; caption dragging is "
+                     "disabled until it fits",
+                     input::MaxWindowRegionRects);
+    }
 }
 
 input::MouseCursor Application::QueryMouseCursor(Vec2 position, uint32 userId) const noexcept {

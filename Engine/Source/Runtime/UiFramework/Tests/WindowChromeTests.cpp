@@ -1,3 +1,5 @@
+#include "RegionMapCheck.h"
+
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/Styles/CoreStyles.h>
@@ -128,6 +130,36 @@ TEST(UiFramework_WindowChromeAnswersWindowRegions) {
           input::WindowRegion::SystemMenu);
     // 내용은 클라이언트다.
     CHECK(at(*bench.content) == input::WindowRegion::Client);
+    // 창 backend가 읽는 영역 지도는 점마다 같은 답이다(Docs/Design/UiToolkit 19.2절). 버튼·아이콘은
+    // 제목보다 앞에 있고, 메뉴가 없으므로 popupOpen이 아니다.
+    IntVec2 mismatch;
+    CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
+    input::WindowRegionMap map;
+    bench.app.BuildWindowRegionMap(map);
+    CHECK(!map.popupOpen && map.count > 0);
+}
+
+TEST(UiFramework_RegionMapIsEmptyBeforePaintAndFollowsFullscreen) {
+    ChromeBench bench;
+    input::WindowRegionMap map;
+    // 그리기 전(hit grid 없음)에는 빈 지도다(전부 Client).
+    bench.app.BuildWindowRegionMap(map);
+    CHECK(map.count == 0 && !map.popupOpen);
+    REQUIRE(bench.Build());
+    bench.app.BuildWindowRegionMap(map);
+    CHECK(map.count > 0);
+    // 전체 화면에서 제목 막대는 Client로 답하므로 지도에서 Caption이 빠진다(창 버튼은 남는다).
+    bench.chrome->SetFullscreen(true);
+    REQUIRE(bench.Step());
+    bench.app.BuildWindowRegionMap(map);
+    bool caption = false;
+    for (uint32 index = 0; index < map.count; ++index) {
+        caption |= map.rects[index].region == input::WindowRegion::Caption;
+    }
+
+    CHECK(!caption);
+    IntVec2 mismatch;
+    CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
 }
 
 TEST(UiFramework_WindowChromeButtonsInvokeActions) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Input/WindowRegionMap.h>
+
 #include <Core/Delegate.h>
 #include <Core/Diagnostics/LogCategory.h>
 #include <Core/Math/IntVector.h>
@@ -170,10 +172,12 @@ public:
 
     // 노출·복원 등으로 표시 내용만 다시 제출할 필요가 있는지 소비한다.
     virtual bool ConsumeRepaint() noexcept;
-    // 클라이언트 영역과 이 창이 마우스를 캡처한 동안 사용할 커서다.
-    using RegionHitTest = Delegate<input::WindowRegion(IntVec2)>;
-    // 클라이언트 좌표를 UI의 영역으로 바꾼다. 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
-    virtual void SetRegionHitTest(RegionHitTest&& hitTest) noexcept;
+    // UI가 그리기마다 만든 영역 지도를 게시한다(Docs/Design/UiToolkit 19.2절). OS 영역 질의(Windows
+    // WM_NCHITTEST)는 UI 트리 대신 이 지도만 읽는다 — OS 콜백이 UI 코드로 재진입하지 않고, 다른
+    // 스레드의 질의(Mac 메인 스레드, 다른 프로세스)도 안전하다. backend가 복사해 잠금 아래 둔다.
+    // 판정 순서는 Popup 항목 → 크기 조절 가장자리(popupOpen이면 끔) → 나머지 항목 → Client다. 게시
+    // 전에는 빈 지도(전부 Client)다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+    virtual void PublishRegionMap(const input::WindowRegionMap& map) noexcept;
     // 창 테두리를 끄는 동안(Windows 크기·이동 modal 루프 — 그동안 호스트 프레임 루프가 멈춘다)
     // 크기가 바뀌면 PumpMessages 안에서 동기로 부른다(UE FSlateApplication::OnSizeChanged가 그
     // 자리에서 그리는 것과 같다, Docs/Design/UiToolkit 9.1절 UW7a). 호스트는 ConsumeResize로 새

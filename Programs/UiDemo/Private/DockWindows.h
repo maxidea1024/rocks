@@ -51,6 +51,8 @@ private:
         IntVec2 previewPosition{};
         uint64 batchRevision = 0;
         bool presented = false;
+        // 창에 마지막으로 게시한 영역 지도다(바뀐 때만 다시 게시한다).
+        input::WindowRegionMap regions;
         // 크기 조절 modal 루프 안의 실시간 그리기가 실패한 원인이다(Run이 다음 차례에 돌려준다).
         ErrorCode liveResizeError = ErrorCode::None;
     };

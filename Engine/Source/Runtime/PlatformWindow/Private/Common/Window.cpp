@@ -52,7 +52,7 @@ bool Window::ConsumeRepaint() noexcept {
 void Window::SetLiveResizeHandler(LiveResizeHandler&&) noexcept {
 }
 
-void Window::SetRegionHitTest(RegionHitTest&&) noexcept {
+void Window::PublishRegionMap(const input::WindowRegionMap&) noexcept {
 }
 
 void Window::SetMouseCursor(input::MouseCursor) noexcept {

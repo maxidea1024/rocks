@@ -14,11 +14,22 @@ public:
     bool HasSnapshot() const noexcept;
     SharedPtr<Element> Find(Vec2 position, const Element& scope) const noexcept;
 
+    // hit 후보 수다(Visible이고 크기가 있는 항목 — 그리기 순서). 영역 지도 생성이 쓴다.
+    usize CandidateCount() const noexcept;
+    // 위에서부터 fromTop번째 후보와 그 클립된 창 영역(AABB)이다. 사라졌거나 지금 입력 경로가 아닌
+    // 후보는 빈 포인터다.
+    SharedPtr<Element> CandidateFromTop(usize fromTop, Box2<float>& area) const noexcept;
+
 private:
     struct Entry {
         WeakPtr<Element> element;
         Geometry geometry;
         usize parentClip;
+    };
+
+    struct Candidate {
+        usize entry;
+        Box2<float> area;
     };
     struct Link {
         usize entry;
@@ -33,6 +44,7 @@ private:
     HashMap<uint64, usize> cells_;
     Array<Link> links_;
     Array<usize> broad_;
+    Array<Candidate> candidates_;
     WeakPtr<Element> root_;
     uint64 plan_ = 0;
 };

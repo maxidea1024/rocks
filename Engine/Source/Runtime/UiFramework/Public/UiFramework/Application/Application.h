@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Input/WindowRegionMap.h>
+
 #include <UiCore/CacheRoot.h>
 #include <UiCore/HitGrid.h>
 #include <UiFramework/Application/Commands.h>
@@ -164,6 +166,19 @@ public:
     // 플랫폼 창의 제목 표시줄 히트 검사에 연결한다. 버튼 등 포커스 가능한 자식은 드래그 영역에서
     // 제외한다.
     input::WindowRegion QueryWindowRegion(Vec2 position) const noexcept;
+    // 마지막 그리기의 영역 지도를 만든다(Docs/Design/UiToolkit 19.2절 — 창 backend가 OS 영역
+    // 질의에서 UI 트리 대신 읽는다). 점마다 QueryWindowRegion과 같은 답을 낸다: hit 후보를 위에서
+    // 보고, Client가 아닌 영역과 그 뒤 영역과 겹치는 Client 구멍을 앞에서부터 담는다. Popup 항목은
+    // 팝업 층 아래 hit 판정되는 항목이고, 팝업이 있으면 popupOpen이다. 사각형은 창 좌표(= client
+    // 픽셀)로 구멍·Popup은 바깥으로, 영역은 안으로 반올림한다. 넘치면 Caption과 구멍을 빼고 버튼·
+    // 시스템 메뉴·Popup만 남긴다(끌기 대신 Client — 보수적). 그리기 전(hit grid 없음)이면 빈
+    // 지도다.
+    //
+    // 사용 예(호스트, 그리기마다):
+    //   input::WindowRegionMap map;
+    //   app.BuildWindowRegionMap(map);
+    //   if (!map.SameAs(published)) { window->PublishRegionMap(map); published = map; }
+    void BuildWindowRegionMap(input::WindowRegionMap& map) const noexcept;
     input::MouseCursor QueryMouseCursor(Vec2 position, uint32 userId = 0) const noexcept;
 
     // 창 입력이 끊어지면 모든 사용자의 포인터 캡처와 키보드 포커스를 해제한다.
@@ -233,6 +248,8 @@ private:
     HitGrid hitGrid_;
     SharedPtr<Element> root_;
     Array<WeakPtr<UiTimer>> timers_;
+    // 영역 지도가 넘쳤다는 경고를 한 번만 남겼는지다.
+    mutable bool regionMapOverflowLogged_ = false;
     bool runningTimers_ = false;
     void AdvanceTimers() noexcept;
     // 다음 툴팁 마감(열기 지연·떠남 지연)까지 남은 초다. 페이드 중이면 0이다.

@@ -14,25 +14,20 @@ constexpr int32 TitleHeight = 30;
 constexpr int32 ButtonWidth = 42;
 constexpr int32 IconWidth = 30;
 
-input::WindowRegion TestRegion(IntVec2 point) noexcept {
-    if (point.y >= TitleHeight) {
-        return input::WindowRegion::Client;
-    }
-
-    const int32 fromRight = static_cast<int32>(FrameWidth) - point.x;
-    if (fromRight <= ButtonWidth) {
-        return input::WindowRegion::CloseButton;
-    }
-
-    if (fromRight <= 2 * ButtonWidth) {
-        return input::WindowRegion::MaximizeButton;
-    }
-
-    if (fromRight <= 3 * ButtonWidth) {
-        return input::WindowRegion::MinimizeButton;
-    }
-
-    return point.x < IconWidth ? input::WindowRegion::SystemMenu : input::WindowRegion::Caption;
+// 위 배치의 영역 지도다(앞 항목이 이긴다: 버튼·시스템 메뉴가 제목보다 앞).
+input::WindowRegionMap TestRegionMap(bool popupOpen = false) noexcept {
+    const int32 width = static_cast<int32>(FrameWidth);
+    input::WindowRegionMap map;
+    (void)map.TryAdd(
+        {{{width - ButtonWidth, 0}, {width, TitleHeight}}, input::WindowRegion::CloseButton});
+    (void)map.TryAdd({{{width - 2 * ButtonWidth, 0}, {width - ButtonWidth, TitleHeight}},
+                      input::WindowRegion::MaximizeButton});
+    (void)map.TryAdd({{{width - 3 * ButtonWidth, 0}, {width - 2 * ButtonWidth, TitleHeight}},
+                      input::WindowRegion::MinimizeButton});
+    (void)map.TryAdd({{{0, 0}, {IconWidth, TitleHeight}}, input::WindowRegion::SystemMenu});
+    (void)map.TryAdd({{{0, 0}, {width, TitleHeight}}, input::WindowRegion::Caption});
+    map.popupOpen = popupOpen;
+    return map;
 }
 
 Result<UniquePtr<Window>> CreateCustom(Allocator& allocator, bool resizable) noexcept {
@@ -59,7 +54,7 @@ TEST(PlatformWindow_CustomFrameHitZones) {
     CHECK(frame.Frame() == WindowFrame::Custom && frame.IsResizable());
     // OS 테두리가 없어 client가 창 크기 그대로다.
     CHECK(frame.Width() == FrameWidth && frame.Height() == FrameHeight);
-    frame.SetRegionHitTest(Window::RegionHitTest::CreateStatic(&TestRegion));
+    frame.PublishRegionMap(TestRegionMap());
     const int32 right = static_cast<int32>(FrameWidth) - 1;
     const int32 bottom = static_cast<int32>(FrameHeight) - 1;
     // 크기 조절 가장자리가 UI 영역보다 먼저다(96 DPI 기준 두께 5 이상).
@@ -82,7 +77,16 @@ TEST(PlatformWindow_CustomFrameHitZones) {
     CHECK(frame.HitZone({right - 2 * ButtonWidth - 10, y}) == WindowZone::MinimizeButton);
     CHECK(frame.HitZone({right - 20, y}) == WindowZone::CloseButton);
     CHECK(frame.HitZone({200, 150}) == WindowZone::Client);
-    frame.SetRegionHitTest({});
+    // 열린 팝업(메뉴)이 있으면 크기 조절 가장자리를 끈다(UE AnyMenusVisible — 19.2절). 지도가
+    // 그 점에 답한다.
+    frame.PublishRegionMap(TestRegionMap(true));
+    CHECK(frame.HitZone({200, 0}) == WindowZone::Caption);
+    CHECK(frame.HitZone({0, 150}) == WindowZone::Client);
+    CHECK(frame.HitZone({right, 0}) == WindowZone::CloseButton);
+    frame.PublishRegionMap({});
+    // 빈 지도는 전부 Client이고 가장자리만 남는다.
+    CHECK(frame.HitZone({200, y}) == WindowZone::Client);
+    CHECK(frame.HitZone({200, 0}) == WindowZone::TopBorder);
 }
 
 TEST(PlatformWindow_CustomFrameFixedSizeHasNoEdgesOrMaximize) {
@@ -95,14 +99,14 @@ TEST(PlatformWindow_CustomFrameFixedSizeHasNoEdgesOrMaximize) {
     auto window = CreateCustom(allocator, false);
     REQUIRE(window);
     Window& frame = *window.Value();
-    frame.SetRegionHitTest(Window::RegionHitTest::CreateStatic(&TestRegion));
+    frame.PublishRegionMap(TestRegionMap());
     // 크기 고정 창은 가장자리 판정이 없고 최대화도 하지 않는다(UE HasMaximizeBox false).
     CHECK(!frame.IsResizable());
     CHECK(frame.HitZone({0, 150}) == WindowZone::Client);
     CHECK(frame.HitZone({200, 0}) == WindowZone::Caption);
     frame.ToggleMaximize();
     CHECK(!frame.IsMaximized());
-    frame.SetRegionHitTest({});
+    frame.PublishRegionMap({});
 }
 
 TEST(PlatformWindow_CustomFrameCloseRequestAndSystemFrameZones) {
@@ -128,10 +132,10 @@ TEST(PlatformWindow_CustomFrameCloseRequestAndSystemFrameZones) {
     CHECK(custom.Value()->IsCloseRequested());
     // OS 테두리 창은 가장자리를 OS가 판정하므로 UI 영역만 본다(끌기 영역 또는 클라이언트).
     CHECK(system.Value()->Frame() == WindowFrame::System);
-    system.Value()->SetRegionHitTest(Window::RegionHitTest::CreateStatic(&TestRegion));
+    system.Value()->PublishRegionMap(TestRegionMap());
     CHECK(system.Value()->HitZone({0, 0}) == WindowZone::Caption);
     CHECK(system.Value()->HitZone({200, 150}) == WindowZone::Client);
-    system.Value()->SetRegionHitTest({});
+    system.Value()->PublishRegionMap({});
 }
 
 TEST(PlatformWindow_WorkAreaAtReturnsMonitorWorkAreaInClientSpace) {

@@ -65,17 +65,11 @@ DockWindows::Surface::Surface(Allocator& allocator, UiRenderer& uiRenderer,
                     {static_cast<float>(rect.max.x), static_cast<float>(rect.max.y)}};
             return true;
         }));
-    window->SetRegionHitTest(
-        platform::Window::RegionHitTest::CreateLambda([this](IntVec2 point) noexcept {
-            return app.QueryWindowRegion(
-                {static_cast<float>(point.x), static_cast<float>(point.y)});
-        }));
 }
 
 DockWindows::Surface::~Surface() noexcept {
     // 창이 멤버 중 거의 마지막에 파괴되므로 그 전에 이 호스트를 가리키는 콜백을 먼저 끊는다.
     window->SetLiveResizeHandler({});
-    window->SetRegionHitTest({});
     area->SetOnExternalDrop({});
     area->SetWindowHitTest({});
     // 창 표면 파괴는 그 창의 프레임이 모두 처리될 때까지 기다린다. 그 뒤 native 창이 부서진다
@@ -559,6 +553,15 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
     if (!cache) {
         buffer.DiscardPending();
         return Result<bool>::Failure(cache.Error());
+    }
+
+    // 이번 배치의 영역 지도를 창에 게시한다(바뀐 때만 — Docs/Design/UiToolkit 19.2절). OS 영역
+    // 질의는 UI 트리 대신 이 지도를 읽는다.
+    input::WindowRegionMap regions;
+    host.app.BuildWindowRegionMap(regions);
+    if (!regions.SameAs(host.regions)) {
+        host.window->PublishRegionMap(regions);
+        host.regions = regions;
     }
 
     // 미리보기 표시에 실패해도 원래 탭과 드롭 처리는 유지한다. 같은 끌기 동안 다시 시도하도록

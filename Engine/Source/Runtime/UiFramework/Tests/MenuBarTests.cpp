@@ -1,3 +1,5 @@
+#include "RegionMapCheck.h"
+
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiFramework/Controls/Button.h>
@@ -336,6 +338,18 @@ TEST(UiFramework_MenuWindowChromeHostsMenuBarPopups) {
     CHECK(bench.app.QueryWindowRegion(MenuBench::Center(*RowAt(*panel, 0))) ==
           input::WindowRegion::Popup);
     CHECK(bench.app.QueryWindowRegion({220, 5}) == input::WindowRegion::Caption);
+    // 영역 지도도 같은 답이고, 메뉴가 열려 있어 popupOpen이다(backend가 가장자리를 끈다 — 19.2절).
+    {
+        IntVec2 mismatch;
+        CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
+        input::WindowRegionMap map;
+        bench.app.BuildWindowRegionMap(map);
+        CHECK(map.popupOpen);
+        CHECK(map.Find({static_cast<int32>(MenuBench::Center(*RowAt(*panel, 0)).x),
+                        static_cast<int32>(MenuBench::Center(*RowAt(*panel, 0)).y)}) ==
+              input::WindowRegion::Popup);
+    }
+
     MenuRow& recent = *RowAt(*panel, 3);
     REQUIRE(bench.Hover(recent));
     REQUIRE(bench.Frame());
