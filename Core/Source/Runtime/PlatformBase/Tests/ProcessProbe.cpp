@@ -77,6 +77,41 @@ int PlatformCat() noexcept {
                : 99;
 }
 
+// 시간 제한 표준 입력 읽기(ReadStandardInput timeout)를 본다: 부모가 아직 아무것도 안 썼으면
+// NoProgress("timeout\n"), 그다음 받은 byte를 그대로 옮기고, 입력이 닫히면 "eof\n"을 쓰고 끝난다.
+int PlatformTimedInput() noexcept {
+    static char chunk[256];
+    const FileTransfer first = platform::ReadStandardInput(chunk, sizeof(chunk), 0);
+    if (first.status.code != FileCode::NoProgress) {
+        return 95;
+    }
+
+    const char timeout[] = "timeout\n";
+    (void)platform::WriteStandardStream(platform::StandardStream::Output, timeout,
+                                        sizeof(timeout) - 1);
+    for (;;) {
+        const FileTransfer read = platform::ReadStandardInput(chunk, sizeof(chunk), 50);
+        if (read.status.code == FileCode::NoProgress) {
+            continue;
+        }
+
+        if (read.status.code == FileCode::EndOfFile) {
+            const char eof[] = "eof\n";
+            return platform::WriteStandardStream(platform::StandardStream::Output, eof,
+                                                 sizeof(eof) - 1)
+                           .status
+                       ? 0
+                       : 96;
+        }
+
+        if (!read.status || read.bytes == 0) {
+            return 97;
+        }
+
+        (void)platform::WriteStandardStream(platform::StandardStream::Output, chunk, read.bytes);
+    }
+}
+
 int Cat() noexcept {
     static uint8 chunk[16 * 1024];
     for (;;) {
@@ -253,6 +288,10 @@ int RunProcessProbe(int argc, const char* const* argv) noexcept {
 
     if (Equal(mode, "platform-cat")) {
         return PlatformCat();
+    }
+
+    if (Equal(mode, "timed-input")) {
+        return PlatformTimedInput();
     }
 
     if (Equal(mode, "flood") && argc == 4) {

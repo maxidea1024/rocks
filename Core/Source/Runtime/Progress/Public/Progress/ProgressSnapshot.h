@@ -33,6 +33,11 @@ struct ProgressTaskView {
     uint64 startNanoseconds = 0;
     uint64 lastProgressNanoseconds = 0;
     double modalDelaySeconds = DefaultModalProgressDelay;
+    // 자기 구간·계수를 보고한 적이 있는지(5.5절 3의 w₀ > 0)와 합성 가중치다. 프로세스 경계로 진행을
+    // 옮기는 쪽(JSONL — 10.1절)이 부모 쪽에서 같은 합성을 하도록 그대로 보낸다.
+    bool selfReported = false;
+    double weightInParent = 1.0;
+    double selfWeight = 1.0;
     bool cancellable = false;
     bool cancelRequested = false;
 
