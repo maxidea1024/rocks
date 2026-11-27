@@ -100,4 +100,45 @@ TEST(UiWidget_SliderTakesTheGameWidgetSliderStyle) {
     CHECK(StaticElementCast<Slider>(*live.Value()).GetStyle() == GameSliderStyle());
 }
 
+TEST(UiWidget_WidgetEventsReachEverySubscriberAndDropLateElementEvents) {
+    // UW9f(UiToolkit 21.5a절): Widget 사건은 리플렉션 Event다 — 구독이 여럿이면 모두 받고(UE
+    // multicast OnClicked), 해제된 Element가 뒤늦게 보낸 사건은 재구성된 Widget에 가지 않는다.
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration modules(types, allocator);
+    REQUIRE(RegisterWidgetTypes(modules));
+    ObjectRegistry objects(allocator, types, {0x554957, 99});
+    const auto access = objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    auto treeRef = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());
+    REQUIRE(treeRef);
+    auto owned = objects.ResolveForWrite<WidgetTree>(access, treeRef.Value().Handle());
+    REQUIRE(owned);
+    auto buttonRef = owned.Value().Get().Value()->ConstructWidget(
+        objects, GeneratedType<ButtonWidget>::Id(), "Button");
+    REQUIRE(buttonRef);
+    auto b = objects.ResolveForWrite<ButtonWidget>(access, buttonRef.Value().Handle());
+    REQUIRE(b);
+    auto& button = *b.Value().Get().Value();
+    uint32 first = 0, second = 0;
+    REQUIRE(button.OnClicked().TryAddLambda([&first]() noexcept { ++first; }));
+    REQUIRE(button.OnClicked().TryAddLambda([&second]() noexcept { ++second; }));
+    const auto click = [](Element& element) noexcept {
+        (void)element.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter));
+        (void)element.SendKey(0, input::InputEvent::KeyUp(input::Key::Enter));
+    };
+    auto original = button.TakeElement(objects);
+    REQUIRE(original);
+    click(*original.Value());
+    CHECK(first == 1 && second == 1);
+    // 다시 만든 뒤 옛 Element의 클릭은 버린다.
+    button.ReleaseElements();
+    auto rebuilt = button.TakeElement(objects);
+    REQUIRE(rebuilt);
+    click(*original.Value());
+    CHECK(first == 1 && second == 1);
+    click(*rebuilt.Value());
+    CHECK(first == 2 && second == 2);
+}
+
 } // namespace rocks::ui
