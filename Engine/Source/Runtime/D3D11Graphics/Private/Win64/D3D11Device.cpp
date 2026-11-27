@@ -3,6 +3,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <DxgiGraphics/DxgiAdapter.h>
+#include <GraphicsTypes/CookSampling.h>
 #include <Platform/Atomics.h>
 
 #include <Platform/Fatal.h>
@@ -218,6 +219,21 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
         }
 
         formatCaps_[number] = formatCaps;
+    }
+
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): FL 11_0 필수 형식이 표의 보장 칸이다. 빠진
+    // 능력이 있으면 backend 대응표의 오류이므로 장치를 받지 않는다.
+    const PixelFormat missing = FindMissingCookSampling(Backend::D3D11, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (missing != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::D3D11, HostGraphicsPlatform(),
+                                   missing);
+        auto failed = Fail(detail);
+        (void)failed;
+        failureTruncated_ =
+            CopyTruncated(failureStage_, sizeof(failureStage_), "CookSamplingGuarantee");
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     // 업로드 ring(GX8): 시스템 메모리 하나를 나눠 쓴다.

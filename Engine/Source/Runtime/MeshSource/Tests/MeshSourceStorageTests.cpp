@@ -536,7 +536,7 @@ TEST(MeshSource_LoadRecordNameTokens) {
     // 진단 없이 불러도 내용 위반(묶음 번호 범위)은 실패다.
     asset->mesh.polygonGroupCount = 0;
     auto content = out.Load(asset->mesh, *package, env.names);
-    CHECK(!content && content.Error() == ErrorCode::InvalidArgument);
+    CHECK(!content && content.Error() == ErrorCode::CorruptData);
     asset->mesh.polygonGroupCount = 1;
     CHECK(out.Load(asset->mesh, *package, env.names));
 }
@@ -1060,7 +1060,7 @@ TEST(MeshSource_LoadBoundsElementAllocations) {
                 return true;
             },
             out, diagnostic);
-        CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+        CHECK(!loaded && loaded.Error() == ErrorCode::CorruptData);
         CHECK(HasIssue(diagnostic, AssetDiagnosticCode::CorruptPackage, item.issue));
         CHECK(bounded.Peak() <= limit);
     }

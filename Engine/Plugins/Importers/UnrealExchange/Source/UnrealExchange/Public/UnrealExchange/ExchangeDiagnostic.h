@@ -89,8 +89,8 @@ struct ExchangeDiagnostic {
     // AssetSystem 4.6절 진단 이름(CorruptBundle 등)이다.
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
     ExchangeSeverity severity = ExchangeSeverity::Error;
-    // 원본 오류 코드다(손상 InvalidArgument, 버전 Unsupported, 파일 오류는 그대로). 경고·정보는
-    // None.
+    // 원본 오류 코드다(손상 CorruptData, 상한 CapacityExceeded, 버전 Unsupported, 파일 오류는
+    // 그대로). 경고·정보는 None.
     ErrorCode error = ErrorCode::None;
     ExchangeIssue issue = ExchangeIssue::None;
     ExchangeFile file = ExchangeFile::None;

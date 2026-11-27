@@ -64,7 +64,7 @@ Result<void> Reject(ExchangeTextureFailure& failure, AssetDiagnosticCode code,
 }
 
 Result<void> Corrupt(ExchangeTextureFailure& failure) noexcept {
-    return Reject(failure, AssetDiagnosticCode::CorruptBundle, ErrorCode::InvalidArgument);
+    return Reject(failure, AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData);
 }
 
 bool ReadUnsigned(JsonValue object, StringView key, uint64& out) noexcept {
@@ -190,6 +190,11 @@ void SwapBlueRed(Span<const uint8> source, uint8* out) noexcept {
 
 Result<void> ConvertInto(const ExchangeAsset& asset, Span<const Span<const uint8>> blobBytes,
                          ExchangeTextureSource& out, ExchangeTextureFailure& failure) noexcept {
+    // 텍스처 클래스가 아니면 호출 계약 위반이다.
+    if (!IsExchangeTextureClass(asset.exchangeClass)) {
+        return Reject(failure, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
+    }
+
     const JsonValue source = asset.data.IsObject() ? asset.data.Find("source") : JsonValue();
     uint64 layers = 0;
     uint64 blocks = 0;
@@ -272,7 +277,7 @@ Result<void> ConvertInto(const ExchangeAsset& asset, Span<const Span<const uint8
 
     // 5. 클래스 slice 규칙과 크기 상한(파일 임포트와 같다).
     if (!SlicesMatchClass(asset.exchangeClass, slices)) {
-        return Reject(failure, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
+        return Reject(failure, AssetDiagnosticCode::InvalidSource, ErrorCode::CorruptData);
     }
 
     const uint32 texelBytes = TextureSourceTexelBytes(format->format);
@@ -288,8 +293,13 @@ Result<void> ConvertInto(const ExchangeAsset& asset, Span<const Span<const uint8
     const JsonValue pixels = mip.Find("pixels");
     usize blob = 0;
     if (!pixels.IsArray() || pixels.Size() != layers ||
-        !FindPixelBlob(asset, pixels.At(0), *format, texels, blob) || blob >= blobBytes.Size()) {
+        !FindPixelBlob(asset, pixels.At(0), *format, texels, blob)) {
         return Corrupt(failure);
+    }
+
+    // blobBytes는 asset.blobs와 같은 순서·수여야 한다(호출 계약).
+    if (blob >= blobBytes.Size()) {
+        return Reject(failure, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
     }
 
     const Span<const uint8> bytes = blobBytes[blob];

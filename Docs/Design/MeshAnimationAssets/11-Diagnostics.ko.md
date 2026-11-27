@@ -21,3 +21,10 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | `UnknownBoneTrack` | 경고 | 스켈레톤에 없는 본의 트랙 |
 | `InvalidClipData` | 오류 | 클립 상한·frame rate 위반 |
 | `EventPropertiesDropped` | 경고 | 이벤트 종류별 속성을 버림 |
+
+### 11.1 손상 데이터 오류(`CorruptData` — AssetSystem 19장)
+
+2026-11-27(에셋 세션 공지 420f68b8 — 담당 세션이 옮긴다). 진단 코드는 그대로이고 오류 값만 19.1절 규칙으로 가른다.
+
+- `CorruptData` — 저장된 데이터(원본 bulk·쿠킹 데이터·너겟)를 읽거나 검사하다 규칙을 어긴 경우: 메시 원본 bulk 배치와 읽은 원본의 모델 검증(`MeshSource::Load` — `CorruptPackage`, 한도 초과는 `CapacityExceeded`), 볼록 충돌 bulk(`LoadConvexGeometry` — 한도 초과는 그대로), 클립 원본 bulk(`LoadClipSource`), 쿠킹 데이터 검증(`ValidateStaticMeshRenderData`·`ValidateStaticMeshIndices`·`ValidateSkeletalMeshRenderData`·`ValidateSkinnedRenderLodBulk`·`ValidateStaticMesh`·`ValidateSkeletalMesh`·`LoadClipPlayback`·`ValidateCookedAnimationClip` — 쿠커가 만든 데이터를 소비자가 부르는 검사라 위반은 손상이다, PostLoad·리플렉션 검증 hook이 없다), 정적·스킨 메시 너겟 머리 읽기(`ReadStaticMeshNuggetHeader`·`ReadSkeletalMeshNuggetHeader` — 쿠킹 처리기는 적중 거절로 다시 만든다, 동작 같음. 이름 pool 상태 오류는 그대로 전한다).
+- `InvalidArgument` — 원본·편집 모델 검증(`ValidateMeshSource`·`ValidateSkeleton`·`ValidateClipSource`·`ValidateSimpleCollision` — 호출자가 만든 모델 검사), 빌드·패킹·너겟 머리 쓰기의 인자와 한도, 임포트 명세(사람이 준 요청), 쿠킹 verify의 너겟 불일치(`NuggetMismatch` — 손상이 아니라 결정성 문제, 텍스처 처리기와 같다).

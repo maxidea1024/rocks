@@ -65,7 +65,7 @@ CheckShaderFormatFitsDevice(const shader::ShaderFormatFacts& facts, graphics::Ba
 //
 // 오류: 셰이더 없는 쿠킹(Backends() 빔) Unsupported("this cook has no shader formats"), 장치
 // backend가 쿠킹에 없음 NotFound(공급자 경로), 맞는 형식이 없음 Unsupported(problem에 형식마다
-// 이유), 라이브러리 머리를 읽지 못함 InvalidArgument(손상), ReadLibrary의 그 밖 오류(그대로 —
+// 이유), 라이브러리 머리를 읽지 못함 CorruptData(손상 — 6.6절), ReadLibrary의 그 밖 오류(그대로 —
 // problem에 원천 설명).
 ROCKS_RENDERBASE_API Result<void> SelectCookedShaderFormat(CookedShaderLibrarySource& source,
                                                            const graphics::Device& device,

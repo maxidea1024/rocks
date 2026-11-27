@@ -158,7 +158,7 @@ Result<void> SelectCookedShaderFormat(CookedShaderLibrarySource& source,
         if (const shader::ShaderReadStatus opened = view.Open(bytes.View()); !opened) {
             snprintf(out.problem, sizeof(out.problem), "%.*s: the library header is corrupt: %s",
                      static_cast<int>(format.ByteCount()), format.Data(), opened.reason);
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         if (const char* reason = CheckShaderFormatFitsDevice(view.Facts(), backend, caps)) {

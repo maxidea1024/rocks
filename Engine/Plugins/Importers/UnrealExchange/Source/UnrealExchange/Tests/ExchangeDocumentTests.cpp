@@ -84,18 +84,18 @@ TEST(UnrealExchange_DocumentFromBytesRejects) {
     SystemAllocator allocator;
     {
         const RejectCase cases[] = {
-            {"{\"objectPath\": ", ExchangeIssue::JsonSyntax, ErrorCode::InvalidArgument},
-            {"\xEF\xBB\xBF{}", ExchangeIssue::ByteOrderMark, ErrorCode::InvalidArgument},
-            {"[]", ExchangeIssue::WrongType, ErrorCode::InvalidArgument},
-            {"{\"class\": \"Texture2D\"}", ExchangeIssue::MissingKey, ErrorCode::InvalidArgument},
+            {"{\"objectPath\": ", ExchangeIssue::JsonSyntax, ErrorCode::CorruptData},
+            {"\xEF\xBB\xBF{}", ExchangeIssue::ByteOrderMark, ErrorCode::CorruptData},
+            {"[]", ExchangeIssue::WrongType, ErrorCode::CorruptData},
+            {"{\"class\": \"Texture2D\"}", ExchangeIssue::MissingKey, ErrorCode::CorruptData},
             {R"({"objectPath": "Rock", "class": "Texture2D"})", ExchangeIssue::ObjectPathSyntax,
-             ErrorCode::InvalidArgument},
+             ErrorCode::CorruptData},
             {R"({"objectPath": "/Game/T/Rock.Rock", "class": 3})", ExchangeIssue::WrongType,
-             ErrorCode::InvalidArgument},
+             ErrorCode::CorruptData},
             {R"({"objectPath": "/Game/T/Rock.Rock", "class": "Texture2D", "ueClass": "/Script/Engine.Texture2D",
 "dependencies": [{"objectPath": "/Game/T/A.A", "class": "Texture2D", "kind": "weak"}], "diagnostics": [],
 "settings": {}, "data": {}})",
-             ExchangeIssue::InvalidValue, ErrorCode::InvalidArgument},
+             ExchangeIssue::InvalidValue, ErrorCode::CorruptData},
             {R"({"objectPath": "/Game/T/Rock.Rock", "class": "Texture2D", "ueClass": "/Script/Engine.Texture2D",
 "dependencies": [], "diagnostics": [{"code": "NoSourceData", "severity": "error", "message": "x"}],
 "settings": {}, "data": {}})",
@@ -103,11 +103,11 @@ TEST(UnrealExchange_DocumentFromBytesRejects) {
              AssetDiagnosticCode::InvalidSource},
             {R"({"objectPath": "/Game/T/Rock.Rock", "class": "Texture2D", "ueClass": "/Script/Engine.Texture2D",
 "dependencies": [], "diagnostics": [], "settings": [], "data": {}})",
-             ExchangeIssue::WrongType, ErrorCode::InvalidArgument},
+             ExchangeIssue::WrongType, ErrorCode::CorruptData},
             {R"({"objectPath": "/Game/T/Rock.Rock", "class": "Texture2D", "ueClass": "/Script/Engine.Texture2D",
 "dependencies": [], "diagnostics": [], "settings": {}, "data": {"p": {"blob": "XY", "bytes": 1,
 "layout": "u8", "components": 1, "count": 1}}})",
-             ExchangeIssue::InvalidValue, ErrorCode::InvalidArgument},
+             ExchangeIssue::InvalidValue, ErrorCode::CorruptData},
         };
         for (const RejectCase& item : cases) {
             // 앞서 읽은 문서가 있어도 실패하면 비운다.
@@ -192,7 +192,7 @@ TEST(UnrealExchange_VerifyBlob) {
     CHECK(VerifyExchangeBlob(blob, Span<const uint8>(raw), &issue) && issue == ExchangeIssue::None);
 
     CHECK(VerifyExchangeBlob(blob, Span<const uint8>(raw, 3), &issue).Error() ==
-              ErrorCode::InvalidArgument &&
+              ErrorCode::CorruptData &&
           issue == ExchangeIssue::BlobSize);
 
     const uint8 changed[] = {1, 2, 3, 5};

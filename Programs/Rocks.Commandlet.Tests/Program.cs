@@ -543,7 +543,7 @@ try
         "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)",
         $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'",
         $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'",
-        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, CorruptData)",
         "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
         $"MissingDependency: Content/Copy/Hero2.rasset: dependency {missingId} is not in the index",
         $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index",

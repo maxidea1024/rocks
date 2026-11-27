@@ -35,8 +35,8 @@ public:
     // 문서 읽기 CorruptBundle 또는 InvalidSource(플러그인 error 진단) / 그 오류, 클래스
     // InvalidSource / InvalidArgument, objectPath InvalidImportOption / InvalidArgument, blob 원본
     // 없음 MissingSource / NotFound(detail = blob 번호), 쓰지 않는 blob 원본 InvalidImportOption /
-    // InvalidArgument(detail = 원본 번호), blob 검사 CorruptBundle / InvalidArgument(detail = blob
-    // 번호), 원본 변환의 코드, 설정 번역·ImportJson InvalidSource / InvalidArgument.
+    // InvalidArgument(detail = 원본 번호), blob 검사 CorruptBundle / CorruptData(detail = blob
+    // 번호), 원본 변환의 코드, 설정 번역·ImportJson InvalidSource / CorruptData.
     // 출력·bulk·태그·Registry 오류와 할당 실패는 진단 없이 그 오류다. 경고:
     // UnsupportedSetting(detail = 설정 표 행 번호), GammaMismatch(detail = UE EGammaSpace 번호).
     Result<void> Import(AssetImportContext& context) noexcept override;

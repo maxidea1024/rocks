@@ -117,7 +117,7 @@ ROCKS_ANIMATION_API Result<void> StoreClipSource(const ClipSource& source, Memor
 // data의 본 트랙 bulk를 package에서 읽어 out을 다시 만든다. 배치(원소 크기·개수)·순서(이름 원문
 // 엄격 증가)·ValidateClipSource를 본다.
 //
-// 오류: 위반은 CorruptPackage·InvalidArgument(원래 판정은 issue)다. bulk를 못 읽으면
+// 오류: 위반은 CorruptPackage·CorruptData(원래 판정은 issue)다. bulk를 못 읽으면
 // CorruptPackage(BulkUnreadable)와 Package::BulkBytes의 오류, 이름 원문을 못 읽으면 그 pool 오류,
 // 할당 실패는 그 오류다. 실패하면 out은 그대로다.
 // 스레드: package를 읽으므로 그 Registry 소유 스레드에서 부른다.
@@ -205,7 +205,7 @@ ROCKS_ANIMATION_API Result<void> StoreClipPlayback(const ClipPlayback& playback,
 
 // data를 package에서 읽어 out을 다시 만든다(배치·길이·값 유한, sampleCount 1–ClipMaxFrames + 1,
 // 비율 ≤ ClipMaxFrameRate, trackToBone 길이 = 트랙 수를 본다). 오류: 위반은
-// CorruptPackage·InvalidArgument (issue로 규칙 —
+// CorruptPackage·CorruptData (issue로 규칙 —
 // NoSamples·TooManyFrames·FrameRateTooHigh·BulkLength·TrackKeyCount·NonFiniteKey·
 // TrackBoneLength·TooManyTracks), bulk를 못 읽으면 그 오류, 할당 실패는 그 오류다. 실패하면 out은
 // 그대로다.
@@ -228,7 +228,7 @@ ROCKS_ANIMATION_API Result<void> LoadClipPlayback(const ClipPlaybackData& data,
 //       Report(ClipIssueName(failure.issue), failure.index);
 //   }
 //
-// 오류: LoadClipPlayback의 오류, 대조 위반은 CorruptPackage·InvalidArgument(issue 위, index =
+// 오류: LoadClipPlayback의 오류, 대조 위반은 CorruptPackage·CorruptData(issue 위, index =
 // 트랙), 할당 실패는 그 오류다. 실패하면 out은 그대로다. 스레드: package의 Registry 소유 스레드.
 ROCKS_ANIMATION_API Result<void>
 ValidateCookedAnimationClip(const AnimationClip& clip, const Package& package,

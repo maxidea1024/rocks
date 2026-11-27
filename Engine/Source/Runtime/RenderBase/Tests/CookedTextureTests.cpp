@@ -10,8 +10,8 @@
 
 // 쿠킹 텍스처 업로드 시험이다(Docs/Design/RenderBase 6.5절 "업로드", 18.5절 7항): 다섯 차원의 desc·
 // 크기, 꼬리 정렬 패딩을 뺀 묶기, 블록 압축 크기(BC·ASTC 올림), 샘플러(이방성 0 → 4·16 자르기),
-// 데이터 계약 위반(InvalidArgument + 원인)과 장치 못 함(UnsupportedCapability + 원인), 렌더 lane
-// 작업의 Ready 통지.
+// 데이터 계약 위반(CorruptData + 원인 — 6.6절)과 장치 못 함(UnsupportedCapability + 원인), 렌더
+// lane 작업의 Ready 통지.
 using namespace rocks;
 using namespace rocks::render;
 using rocks::render::testing::RecordingDevice;
@@ -223,8 +223,7 @@ TEST(RenderBase_CookedTextureBlockCompressedSizes) {
     Fixture unaligned(Allocator_());
     REQUIRE(unaligned.Make(graphics::TextureDimension::Texture2D, graphics::PixelFormat::BC1Unorm,
                            6, 8, 1, 1, 1, 1));
-    CHECK(
-        Rejects(unaligned.source, ErrorCode::InvalidArgument, CookedTextureIssue::BlockAlignment));
+    CHECK(Rejects(unaligned.source, ErrorCode::CorruptData, CookedTextureIssue::BlockAlignment));
 }
 
 TEST(RenderBase_CookedTextureSampler) {
@@ -248,10 +247,10 @@ TEST(RenderBase_CookedTextureSampler) {
     REQUIRE(desc);
     CHECK(desc.Value().sampler.maxAnisotropy == 16);
     fixture.source.sampler.filter = static_cast<graphics::Filter>(9);
-    CHECK(Rejects(fixture.source, ErrorCode::InvalidArgument, CookedTextureIssue::InvalidSampler));
+    CHECK(Rejects(fixture.source, ErrorCode::CorruptData, CookedTextureIssue::InvalidSampler));
     fixture.source.sampler.filter = graphics::Filter::Bilinear;
     fixture.source.sampler.comparison = true;
-    CHECK(Rejects(fixture.source, ErrorCode::InvalidArgument, CookedTextureIssue::InvalidSampler));
+    CHECK(Rejects(fixture.source, ErrorCode::CorruptData, CookedTextureIssue::InvalidSampler));
 }
 
 TEST(RenderBase_CookedTextureRejectsCorruptData) {
@@ -259,7 +258,7 @@ TEST(RenderBase_CookedTextureRejectsCorruptData) {
         return fixture.Make(graphics::TextureDimension::Texture2D,
                             graphics::PixelFormat::RGBA8Unorm, 8, 8, 1, 1, 4, 2);
     };
-    const ErrorCode Corrupt = ErrorCode::InvalidArgument;
+    const ErrorCode Corrupt = ErrorCode::CorruptData;
     {
         Fixture fixture(Allocator_());
         REQUIRE(fresh(fixture));
@@ -323,7 +322,7 @@ TEST(RenderBase_CookedTextureRejectsCorruptData) {
         fixture.mips[0].bulk =
             Span<const uint8>(fixture.mips[0].bulk.Data(), fixture.mips[0].bulk.Size() - 1);
         CHECK(Rejects(fixture.source, Corrupt, CookedTextureIssue::BulkSize));
-        CHECK(!PackCookedTexturePixels(Allocator_(), fixture.source));
+        CHECK(PackCookedTexturePixels(Allocator_(), fixture.source).Error() == Corrupt);
     }
 
     {
@@ -338,7 +337,7 @@ TEST(RenderBase_CookedTextureRejectsCorruptData) {
         fixture.mips[3].tailOffset = offset;
         fixture.source.tail = Span<const uint8>(fixture.tail.Data(), fixture.tail.Size() - 1);
         CHECK(Rejects(fixture.source, Corrupt, CookedTextureIssue::TailRange));
-        CHECK(!PackCookedTexturePixels(Allocator_(), fixture.source));
+        CHECK(PackCookedTexturePixels(Allocator_(), fixture.source).Error() == Corrupt);
         fixture.mips[3].tailOffset = NumericLimits<uint64>::Max() - 15;
         CHECK(Rejects(fixture.source, Corrupt, CookedTextureIssue::TailRange));
     }

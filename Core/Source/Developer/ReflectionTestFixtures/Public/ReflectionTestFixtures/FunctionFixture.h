@@ -2,6 +2,7 @@
 
 #include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
+#include <Core/Delegate.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
@@ -105,6 +106,16 @@ public:
         total = 0;
     }
 #endif
+
+    // 바인딩 시험용 재진입 hook이다(EventReflection EV1b — 실행 중인 리플렉션 바인딩이 같은
+    // 이벤트를 바꾸는 경로). relay가 묶였으면 부르고 total에 1을 더한다.
+    ROCKS_FUNCTION() void Relay() noexcept {
+        relay.ExecuteIfBound();
+        total += 1;
+    }
+
+    // Relay가 부르는 native 대상이다(리플렉션하지 않는다).
+    ROCKS_NATIVE() Delegate<void()> relay;
 
 private:
     ROCKS_FUNCTION() void Bump() noexcept {

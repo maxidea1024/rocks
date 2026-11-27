@@ -116,7 +116,7 @@ TEST(ShaderNugget_DamagedRecordsAreRejected) {
     Array<NuggetValue> duplicate = record({0, 1, 1});
     Array<NuggetValue> unsorted = record({0, 2, 1});
     for (Array<NuggetValue>* bad : {&unknown, &duplicate, &unsorted}) {
-        CHECK(MoveShaderValuesFromNugget(*bad, out).Error() == ErrorCode::InvalidArgument);
+        CHECK(MoveShaderValuesFromNugget(*bad, out).Error() == ErrorCode::CorruptData);
         CHECK(out.present == 0);
     }
 }

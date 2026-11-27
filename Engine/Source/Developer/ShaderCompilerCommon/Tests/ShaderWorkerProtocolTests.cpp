@@ -153,7 +153,7 @@ TEST(ShaderWorkerProtocol_ResponseRoundTrips) {
           back.systemTools[0].version.View() == StringView("Apple metal version 1\nTarget: air64"));
     // 요청 파일은 응답으로 읽지 않는다(magic이 다르다).
     ShaderWorkerRequest request(allocator);
-    CHECK(DecodeShaderWorkerRequest(bytes.View(), request).Error() == ErrorCode::InvalidArgument);
+    CHECK(DecodeShaderWorkerRequest(bytes.View(), request).Error() == ErrorCode::CorruptData);
 }
 
 TEST(ShaderWorkerProtocol_RejectsDamagedFiles) {
@@ -163,25 +163,27 @@ TEST(ShaderWorkerProtocol_RejectsDamagedFiles) {
     REQUIRE(EncodeShaderWorkerRequest(request, bytes));
     ShaderWorkerRequest back(ProtocolAllocator());
 
-    // 메시지 버전이 다르면 Unsupported, magic·잘림은 InvalidArgument다.
+    // 메시지 버전이 다르면 Unsupported, magic·잘림은 CorruptData다(ShaderSystem 11.2절).
     Array<uint8> copy(ProtocolAllocator());
     REQUIRE(copy.TryAppend(bytes.View()));
     copy[ShaderWorkerMagicBytes] ^= 0x01;
     CHECK(DecodeShaderWorkerRequest(copy.View(), back).Error() == ErrorCode::Unsupported);
     copy[ShaderWorkerMagicBytes] ^= 0x01;
     copy[0] = 'X';
-    CHECK(DecodeShaderWorkerRequest(copy.View(), back).Error() == ErrorCode::InvalidArgument);
-    CHECK(!ReadShaderWorkerMessageVersion(copy.View(), ShaderWorkerInputMagic));
-    CHECK(!ReadShaderWorkerMessageVersion(bytes.View().Left(3), ShaderWorkerInputMagic));
+    CHECK(DecodeShaderWorkerRequest(copy.View(), back).Error() == ErrorCode::CorruptData);
+    CHECK(ReadShaderWorkerMessageVersion(copy.View(), ShaderWorkerInputMagic).Error() ==
+          ErrorCode::CorruptData);
+    CHECK(ReadShaderWorkerMessageVersion(bytes.View().Left(3), ShaderWorkerInputMagic).Error() ==
+          ErrorCode::CorruptData);
     // 모든 잘린 길이는 거부한다.
     for (usize size = 0; size < bytes.Size(); ++size) {
         const ErrorCode error = DecodeShaderWorkerRequest(bytes.View().Left(size), back).Error();
-        if (error != ErrorCode::InvalidArgument) {
+        if (error != ErrorCode::CorruptData) {
             fprintf(stderr, "truncated request of %zu bytes: error %u\n", static_cast<size_t>(size),
                     static_cast<unsigned>(error));
         }
 
-        CHECK(error == ErrorCode::InvalidArgument);
+        CHECK(error == ErrorCode::CorruptData);
     }
 
     // Record 머리·TLV의 byte를 바꾸면 거부한다(길이·wire tag·schema 영역).

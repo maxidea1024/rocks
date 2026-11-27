@@ -28,6 +28,8 @@ ErrorCode PlanFailureError(AssetDiagnosticCode code) noexcept {
         return ErrorCode::CycleDetected;
     case AssetDiagnosticCode::MissingDependency:
         return ErrorCode::NotFound;
+    case AssetDiagnosticCode::CorruptBundle:
+        return ErrorCode::CorruptData;
     default:
         return ErrorCode::InvalidArgument;
     }
