@@ -4852,6 +4852,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::EventRelay",
+      "id": "e42cd2ab3ac94426a9085883a492a601",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EventRelayLeaf",
+      "id": "c2ddddd799e3437397ecfaf0bef7f698",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::FixedLink",
       "id": "7b9d6fbecf264d129ed80bccfcd2ff74",
       "aliases": [],

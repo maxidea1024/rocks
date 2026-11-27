@@ -4,6 +4,7 @@
 #include <Core/Math/Rotator.h>
 #include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
+#include <Object/Event.h>
 #include <Object/NativeClass.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
@@ -86,7 +87,9 @@ class ROCKS_WORLD_API Actor : public Object {
 
 public:
     // allocator는 Registry allocator다(Object 생성 시 주입). 파생 클래스 생성자도 받아서 넘긴다.
-    explicit Actor(Allocator& allocator) noexcept : components_(allocator), tags_(allocator) {
+    explicit Actor(Allocator& allocator) noexcept
+        : actorHit(allocator), actorOverlapBegan(allocator), actorOverlapEnded(allocator),
+          components_(allocator), tags_(allocator) {
     }
 
     virtual ~Actor() noexcept = default;
@@ -269,6 +272,23 @@ public:
     virtual void OnEndOverlap(ObjectHandle otherActor) noexcept {
         (void)otherActor;
     }
+
+    // hit·overlap 이벤트다(UE OnActorHit·OnActorBeginOverlap·OnActorEndOverlap —
+    // Docs/Design/PhysicsModule 5.5절·7.1.14절). 같은 자리의 가상 hook(OnHit·OnBeginOverlap·
+    // OnEndOverlap) 바로 뒤에 발행한다(overlap 끝은 Actor마다 hook → 이벤트). 리플렉션 바인딩은
+    // 저장한다.
+    //
+    // 사용 예:
+    //   (void)door.actorOverlapBegan.TryAddLambda(
+    //       [](WeakObjectRef<Actor> self, WeakObjectRef<Actor> other) noexcept { ... });
+    //
+    // Actor·컴포넌트 인자는 WeakObjectRef다(Sparks가 객체 인자로 받는다 — SparksBinding B14).
+    ROCKS_PROPERTY(Params = "selfActor,otherActor,normalImpulse,hit")
+    Event<WeakObjectRef<Actor>, WeakObjectRef<Actor>, Vec3d, const HitResult&> actorHit;
+    ROCKS_PROPERTY(Params = "overlappedActor,otherActor")
+    Event<WeakObjectRef<Actor>, WeakObjectRef<Actor>> actorOverlapBegan;
+    ROCKS_PROPERTY(Params = "overlappedActor,otherActor")
+    Event<WeakObjectRef<Actor>, WeakObjectRef<Actor>> actorOverlapEnded;
 
     // 정리 hook이다. 다른 Actor 파괴·Spawn 요청은 허용한다(같은 프레임 정리 단계에서 처리된다).
     // reason은 정리 이유다(17.2절). OnStart를 받지 못했어도 OnAwake가 성공했으면 받는다.

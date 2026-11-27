@@ -3,6 +3,27 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::Actor::actorHit",
+      "id": "04e1337c7f7349e49c213f9266cd4005",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Actor::actorOverlapBegan",
+      "id": "11e215ef88f6484687fe4baf2fcead3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Actor::actorOverlapEnded",
+      "id": "9a50649a3ffd4cdd8ce4b46b55fea7f5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Actor::components_",
       "id": "ca55b362bf6e41618d6f9a0999bfdee4",
       "aliases": [],
@@ -544,6 +565,90 @@
       "kind": "field",
       "name": "rocks::HeightFogSettings::volumetricFogStaticLightingScatteringIntensity",
       "id": "a31e7b5411f94cf791ffdb0c1a1ab809",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::blockingHit",
+      "id": "120617bdabf04c71ab61818a91b97b82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::distance",
+      "id": "72adadc7b9fd4e529b2a159049d1158d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::faceIndex",
+      "id": "4f94062774cc4c2b8608da9a618b9cc9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::impactNormal",
+      "id": "70b4281830ed436fad2f3ed9e3bf2a14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::impactPoint",
+      "id": "d918dca525b441b09a266a008105c6e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::location",
+      "id": "6b50cfef4af74c64a0ce3a6e309e172b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::normal",
+      "id": "2cd5bd68c34c4897a129940e5cd19ef0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::penetrationDepth",
+      "id": "aae9dab1a8cf43e69278f093e0110744",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::startPenetrating",
+      "id": "0f4817f5514b4ba78b5e00cc7f562ec8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::time",
+      "id": "850daa02a55f458883b12ab4d0599207",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::traceEnd",
+      "id": "61aada36107c4d2cacf52acf6ebafa37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::HitResult::traceStart",
+      "id": "2eb8e1434b0c460db6b44213966d7e76",
       "aliases": [],
       "retired": false
     },
@@ -1706,6 +1811,27 @@
       "kind": "field",
       "name": "rocks::PrimitiveComponent::collisionProfileName_",
       "id": "eafa8eafb6a2466ca4e3cf640df6e942",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentHit",
+      "id": "f872afafc6354c69b4f18f444156f43f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentOverlapBegan",
+      "id": "b9d6dd932e47433b93353b4581ab7503",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentOverlapEnded",
+      "id": "c89a23a3d6d2488480754dffe4a011d7",
       "aliases": [],
       "retired": false
     },
@@ -2910,6 +3036,13 @@
       "kind": "type",
       "name": "rocks::HeightFogSettings",
       "id": "a97022e6200b40b9877e5ee5694502f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::HitResult",
+      "id": "b6edff7dc9c04c93a71a9da31af3bae3",
       "aliases": [],
       "retired": false
     },
