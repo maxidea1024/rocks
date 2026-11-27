@@ -118,9 +118,10 @@ public:
     ROCKS_PROPERTY() TexturePlatformData platformData;
 };
 
-// 2D 텍스처다(UE UTexture2D — 주소 X·Y, Rocks Border 색).
+// 2D 텍스처다(UE UTexture2D — 주소 X·Y, Rocks Border 색). 파생 클래스(색 커브 atlas — CurveAssets
+// 4장, UE UCurveLinearColorAtlas)도 2D 텍스처로 빌드·쿠킹된다.
 ROCKS_CLASS()
-class ROCKS_TEXTURE_API Texture2D final : public Texture {
+class ROCKS_TEXTURE_API Texture2D : public Texture {
     ROCKS_GENERATED_BODY()
 
 public:

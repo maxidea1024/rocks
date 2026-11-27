@@ -9,7 +9,7 @@ internal static class MetaProbeIdentity
     // Sparks binding 시험(MetaTests.SparksBinding)의 타입이다. rocks::Asset은 probe가 asset 종류 판정을 위해 두는 최소 선언이다.
     private static readonly string[] SparksBindingTypes =
         ["rocks::Asset", "probe::Mood", "probe::Secret", "probe::Cut", "probe::Sound", "probe::Thing", "probe::Sealed", "probe::Internal",
-            "probe::Again", "probe::Vec3d", "probe::Both", "probe::Sword", "probe::Label", "probe::Empty"];
+            "probe::Again", "probe::Vec3d", "probe::Both", "probe::Sword", "probe::Label", "probe::Empty", "probe::Bell", "probe::Quiet", "probe::Note"];
 
     // Sparks binding 시험의 필드다.
     private static readonly string[] SparksBindingFields =
@@ -29,7 +29,7 @@ internal static class MetaProbeIdentity
             "probe::Value::touch", "probe::Child::touch", "probe::Value::Place", "probe::Value::Settle", "probe::Value::Label", "probe::Value::Rest",
             "probe::Value::Guess", "probe::Thing::Jump", "probe::Thing::TryMove", "probe::Thing::TryCount", "probe::Thing::Make", "probe::Thing::Hidden",
             "probe::Thing::Limit", "probe::Thing::Act", "probe::Thing::TryAct", "probe::Thing::Do_It", "probe::Thing::Score", "probe::Thing::Update",
-            "probe::Child::Jump", "probe::Plain::Act", "probe::Thing::TryParse", "probe::Thing::SetScore"];
+            "probe::Child::Jump", "probe::Plain::Act", "probe::Thing::TryParse", "probe::Thing::SetScore", "probe::Thing::Pinged"];
 
     // 리플렉션 함수 시험의 타입·필드다(base가 있고 접근 수준이 섞인 struct 매개변수).
     private static readonly string[] FunctionTypes = ["probe::Root", "probe::Mixed"];
@@ -39,7 +39,12 @@ internal static class MetaProbeIdentity
     // 이벤트 필드 시험(MetaTests.Events)의 필드다.
     private static readonly string[] EventFields =
         ["probe::Value::changed", "probe::Value::named", "probe::Value::pinged", "probe::Value::placed", "probe::Value::edited",
-            "probe::Value::secret", "probe::Value::many", "probe::Holder::changed", "probe::Root::changed"];
+            "probe::Value::secret", "probe::Value::many", "probe::Holder::changed", "probe::Root::changed",
+            // Sparks 이벤트 시험(MetaTests.SparksEvents)의 이벤트·필드다.
+            "probe::Thing::scored", "probe::Thing::pinged", "probe::Thing::place_it", "probe::Thing::hidden", "probe::Thing::quiet",
+            "probe::Thing::value", "probe::Thing::was_hit", "probe::Thing::struck", "probe::Thing::changed",
+            "probe::Thing::edited", "probe::Bell::rang", "probe::Quiet::rang", "probe::Thing::opened", "probe::Thing::pinged2",
+            "probe::Note::rang"];
 
     public static void Create(string path)
     {

@@ -159,8 +159,10 @@ private:
 // EngineAudio에서 뗐다). 이 목록을 쓰는 호스트(기본 typeModule)는 목록의 모든 모듈을 링크해야
 // 한다(없으면 Start가 실패한다). CurveAssets는 커브 에셋이다(Docs/Design/CurveAssets 5.1절 — 커브
 // 임포터 등록이 출력 타입을 찾으므로, 빠지면 asset-import가 임포터 등록 NotFound로 실패한다).
-inline constexpr StringView AssetTypeModules[] = {"Animation", "Mesh", "Texture", "AudioAssets",
-                                                  "CurveAssets"};
+// CurveAtlas는 색 커브 atlas(Texture2D 파생 — CurveAssets 4장)다. 그 hook 등록은 타입을 보지
+// 않으므로 빠지면 시작은 되지만 atlas 패키지 열기·asset-new가 모르는 타입으로 실패한다.
+inline constexpr StringView AssetTypeModules[] = {"Animation",   "Mesh",        "Texture",
+                                                  "AudioAssets", "CurveAssets", "CurveAtlas"};
 
 // 대입 진단 줄의 진단 이름이다(AS 13절 `<command>: <진단>: <경로>: <설명>`). 숨김 열거자 입력
 // (HiddenEnumerator — 저장 값으로만 유효한 값)은 에셋 설정 진단 InvalidSetting으로 낸다

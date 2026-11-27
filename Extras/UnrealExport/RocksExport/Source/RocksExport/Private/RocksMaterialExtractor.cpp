@@ -37,6 +37,7 @@ namespace RocksMaterialExtractorPrivate
 	static const TCHAR* const ExpressionInputStruct = TEXT("/Script/Engine.ExpressionInput");
 	static const TCHAR* const MaterialInputStruct = TEXT("/Script/Engine.MaterialInput");
 	static const TCHAR* const MaterialAttributesPin = TEXT("MaterialAttributes");
+	static const TCHAR* const FrontMaterialPin = TEXT("FrontMaterial");
 
 	// 노드 properties에서 빼는 UMaterialExpression 멤버다(소유 머티리얼·함수 역참조, 위치·guid·출력은 노드 키로 따로 쓴다).
 	static const TCHAR* const NodeExcludedProperties[] = {
@@ -246,7 +247,8 @@ namespace RocksMaterialExtractorPrivate
 		Writer.EndArray();
 	}
 
-	// 머티리얼 출력 핀이다(8.1절): bUseMaterialAttributes면 MaterialAttributes 핀 하나, 아니면 나머지 핀 전부(선언 순).
+	// 머티리얼 출력 핀이다(8.1절): bUseMaterialAttributes면 MaterialAttributes·FrontMaterial 두 핀, 아니면
+	// MaterialAttributes 밖의 핀 전부(선언 순).
 	// 핀마다 연결 또는 미연결 상수다. 고정 배열 핀(CustomizedUVs[8])은 칸마다 "이름[번호]"로 쓴다.
 	static void WriteMaterialOutputs(UMaterial& Material, FRocksPropertyDumper& Dumper, FRocksJsonWriter& Writer)
 	{
@@ -263,7 +265,10 @@ namespace RocksMaterialExtractorPrivate
 					continue;
 				}
 
-				if ((Pin->GetName() == MaterialAttributesPin) != bool(Material.bUseMaterialAttributes))
+				// FrontMaterial은 두 모드 모두 쓴다. UE가 bUseMaterialAttributes에서도 이 핀으로 Substrate 갈래를 정하기
+				// 때문이다(SubstrateTranslatorCommon.cpp:1574-1579, 8.8절 1·2번).
+				const bool bFrontMaterial = Pin->GetName() == FrontMaterialPin;
+				if (!bFrontMaterial && (Pin->GetName() == MaterialAttributesPin) != bool(Material.bUseMaterialAttributes))
 				{
 					continue;
 				}

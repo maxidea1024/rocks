@@ -83,6 +83,14 @@ constexpr StringView GoldenDegeneratePath = "/Game/RxGolden/SM_Degenerate.SM_Deg
 constexpr StringView GoldenClipPath =
     "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.SK_Column_Anim";
 constexpr StringView GoldenSoftTargetPath = "/Game/RxGolden/SK_SoftTarget.SK_SoftTarget";
+// Substrate golden 묶음(Tests/Bundles/GoldenSubstrate.rxbundle — 8.8절 6번)의 기대 값이다: 머티리얼
+// 3개 (Substrate 개별 핀·Substrate 속성 집합·FrontMaterial 없는 옛 핀), 의존 없음.
+constexpr usize GoldenSubstrateAssets = 3;
+constexpr StringView GoldenSubstrateLayeredPath =
+    "/Game/RxGoldenSubstrate/M_GoldenSubstrate.M_GoldenSubstrate";
+constexpr StringView GoldenSubstrateAttributesPath =
+    "/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.M_GoldenSubstrateAttributes";
+constexpr StringView GoldenSubstrateLegacyPath = "/Game/RxGoldenSubstrate/M_Golden.M_Golden";
 // UE FRichCurve 열거 값 이름(Rocks Curves 열거 순서)이다. RCTM_SmartAuto는 Auto로 본다.
 constexpr StringView CurveInterpNames[] = {"RCIM_Linear", "RCIM_Constant", "RCIM_Cubic"};
 constexpr StringView CurveTangentNames[] = {"RCTM_Auto", "RCTM_User", "RCTM_Break",
@@ -1236,6 +1244,80 @@ TEST(UnrealExchange_GoldenBundle) {
     }
 
     CHECK(soft);
+}
+
+// 머티리얼 출력 핀 name이다(없으면 무효 JsonValue).
+JsonValue FindOutputPin(const ExchangeAsset& asset, StringView name) noexcept {
+    const JsonValue pins = asset.data.Find("outputs");
+    for (usize index = 0; index < pins.Size(); ++index) {
+        if (pins.At(index).Find("name").GetString() == name) {
+            return pins.At(index);
+        }
+    }
+
+    return JsonValue();
+}
+
+// 핀이 이어진 노드의 class다(연결이 없으면 빈 view).
+StringView LinkedNodeClass(const ExchangeAsset& asset, JsonValue pin) noexcept {
+    const JsonValue from = pin.Find("from");
+    if (!from.IsObject()) {
+        return StringView();
+    }
+
+    const JsonValue nodes = asset.data.Find("nodes");
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        if (nodes.At(index).Find("name").GetString() == from.Find("node").GetString()) {
+            return nodes.At(index).Find("class").GetString();
+        }
+    }
+
+    return StringView();
+}
+
+// Substrate 프로젝트에서 내보낸 golden 묶음(UX5a — 8.8절 6번)을 늘 읽어 외부 묶음 판정을 돌리고,
+// Substrate 번역 판정의 입력을 확인한다: projectSettings.substrate 참, 개별 핀 머티리얼의
+// FrontMaterial이 VerticalLayering이고 읽지 않는 BaseColor도 이어져 있음, 속성 집합 머티리얼이
+// MaterialAttributes·FrontMaterial 두 핀(FrontMaterial은 Slab), FrontMaterial 없는 머티리얼의 핀이
+// 비어 있음(옛 핀 모드).
+TEST(UnrealExchange_GoldenSubstrateBundle) {
+    SystemAllocator allocator;
+    StringBuilder<512> directory(allocator);
+    REQUIRE(FixtureSourcePath("GoldenSubstrate.rxbundle", directory));
+    ExchangeBundle bundle(allocator);
+    const BundleTotals totals = CheckBundle(directory.View(), allocator, bundle);
+    CHECK(bundle.substrate);
+    CHECK(totals.assets == GoldenSubstrateAssets);
+    CHECK(totals.materialRecords == GoldenSubstrateAssets);
+
+    const uint32 layered = FindAsset(bundle, GoldenSubstrateLayeredPath);
+    const uint32 attributes = FindAsset(bundle, GoldenSubstrateAttributesPath);
+    const uint32 legacy = FindAsset(bundle, GoldenSubstrateLegacyPath);
+    REQUIRE(layered != ExchangeNoIndex);
+    REQUIRE(attributes != ExchangeNoIndex);
+    REQUIRE(legacy != ExchangeNoIndex);
+
+    const ExchangeAsset& layeredAsset = bundle.Assets()[layered];
+    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, "FrontMaterial")) ==
+          "MaterialExpressionSubstrateVerticalLayering");
+    CHECK(LinkedNodeClass(layeredAsset, FindOutputPin(layeredAsset, "BaseColor")) ==
+          "MaterialExpressionConstant3Vector");
+    CHECK(!FindOutputPin(layeredAsset, "MaterialAttributes").IsValid());
+
+    const ExchangeAsset& attributesAsset = bundle.Assets()[attributes];
+    const JsonValue attributesPins = attributesAsset.data.Find("outputs");
+    REQUIRE(attributesPins.Size() == 2);
+    CHECK(attributesPins.At(0).Find("name").GetString() == "MaterialAttributes");
+    CHECK(attributesPins.At(1).Find("name").GetString() == "FrontMaterial");
+    CHECK(LinkedNodeClass(attributesAsset, attributesPins.At(1)) ==
+          "MaterialExpressionSubstrateSlabBSDF");
+
+    const ExchangeAsset& legacyAsset = bundle.Assets()[legacy];
+    const JsonValue legacyFront = FindOutputPin(legacyAsset, "FrontMaterial");
+    REQUIRE(legacyFront.IsValid());
+    CHECK(!legacyFront.Find("from").IsObject());
+    CHECK(LinkedNodeClass(legacyAsset, FindOutputPin(legacyAsset, "BaseColor")) ==
+          "MaterialExpressionConstant3Vector");
 }
 
 } // namespace exchange_external_bundle_tests_file
