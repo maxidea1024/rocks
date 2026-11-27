@@ -7,7 +7,7 @@
 ```json
 { "guid": "…", "class": "MaterialExpressionTextureSampleParameter2D",
   "position": [x, y],
-  "inputs":  [ { "name": "UVs", "from": { "node": "<guid>", "output": 0 }, "mask": [r, g, b, a] | null } ],
+  "inputs":  [ { "name": "Coordinates", "from": { "node": "<guid>", "output": 0 }, "mask": [r, g, b, a] | null } ],
   "outputs": [ { "name": "RGB", "mask": [1, 1, 1, 0] } ],
   "properties": { … 노드 고유 UPROPERTY 덤프(11.5절) … } }
 ```
@@ -40,7 +40,7 @@ UE 5.8은 엔진 기본이 Substrate 꺼짐이지만(`r.Substrate` 기본 0 — 
 
 ### 8.5 Rocks 쪽 번역
 
-- **번역 표**: UE 노드 클래스 → Rocks 노드(MaterialSystem 5.7절 1차 노드 묶음). 표는 `UnrealExchange`의 데이터(노드 클래스 이름, 핀 이름 대응, 속성 대응, 버전)다.
+- **번역 표**: UE 노드 클래스 → Rocks 노드. 정본은 머티리얼 쪽 노드 카탈로그(MaterialSystem 19장)이고 교환 쪽은 카탈로그 규칙으로 풀리지 않는 핀 별칭·속성 예외만 둔다(8.7절 1·3·4번 — 개정 25에서 고침).
 - **같은 이름 파라미터 병합**: UE는 한 머티리얼 안에서 이름이 같은 파라미터 노드 여러 개를 파라미터 하나로 다룬다. 함수 안 파라미터도 global association이면 이름으로 합친다. Rocks는 같은 scope의 같은 이름을 검증 오류(MaterialSystem 5.4절 V8)로 보고 함수 호출 위치마다 독립 파라미터로 만든다. 번역은 같은 이름·같은 종류의 파라미터를 Rocks 파라미터 노드 하나로 합치고 나머지 사용처를 그 노드에 잇는다. 기본값이 다르면 GUID 순으로 첫 노드의 값을 쓰고 `ParameterDefaultConflict` 경고를 낸다(UE가 어느 값을 쓰는지는 UX4에서 원본으로 확인한다). 함수 안 global association 파라미터는 "공유" 표시를 붙인 전역 scope 파라미터로 옮긴다. 결과 그래프에는 같은 scope의 같은 이름이 남지 않아 V8을 통과한다(MaterialSystem 9.2절 "외부 그래프 번역", UXR4 반영).
 - **결과 결정**:
   1. 출력에 닿는 모든 노드가 번역되면 `Material` 그래프로 저장한다.
@@ -65,3 +65,43 @@ UX4a(UE 쪽 머티리얼 계열 추출, `FRocksMaterialExtractor`) 중 8.1·8.2�
 10. **수동 검증(2026-11-22).** 엔진 머티리얼 5개 선택(`M_Grid`, `M_RenderNormalizedDepth_01`·`M_RenderMotionVectors` — MPC `MPC_R2T` 참조, `Widget3DPassThrough_Translucent_OneSided`·`TranslucentLaserPointerMaterialInst` — 인스턴스 사슬 2단)을 닫힘과 함께 내보낸 묶음(에셋 46개 — Material 5·MaterialFunction 24·MaterialInstanceConstant 4·MPC 1·텍스처 12)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 머티리얼 계열 34개 모두 위 8번을 통과했다(노드 1,046개 연결 전부 해석). 정적 메시·스킨 메시 묶음을 다시 내보내 그 안의 엔진 머티리얼(`WorldGridMaterial`, Interchange 기본 머티리얼·함수, 튜토리얼 캐릭터 머티리얼)도 통과했다. 교환 범위 밖 의존(`TextureRenderTarget2D` 등)은 기존대로 의존에만 남는다.
 
 11. **`resolved` 참조는 Soft(개정 15).** `resolved`의 텍스처·컬렉션·font 참조는 부모 사슬을 풀어 계산한 값이라 덤프 참조와 달리 의존을 새로 만들지 않아야 한다(부모·override가 이미 Hard로 담는다). 그래서 의존에 Soft로 합친다(같은 대상이 Hard로도 있으면 Hard 하나).
+
+### 8.7 Rocks 임포트 설계(UX4b — 명세만)
+
+설계일 2026-11-27(사용자 결정: 선행 MaterialSystem MS3·MS6 전이라 명세만 먼저). 기준은 머티리얼 세션의 최신 설계(`feature/material` — MaterialSystem 04·05·09·11·19장, `MaterialSchema` 노드 정의·`MaterialNodeCatalog.json`, NodeGraph `GraphDocument`)다. 교차 검증(리뷰어 1명 — 14건 반영) 뒤 확정했다. 구현은 MS3(Material 필드·쿠킹)·MS6(함수·인스턴스·컬렉션) 뒤 UX4b1·UX4b2로 한다. 8.5절 결과 결정 1–3번과 파라미터 병합은 아래로 구체화한다. 모두 권장안이다.
+
+1. **노드 찾기와 번역 가능 판정(8.5절 "번역 표는 UnrealExchange 데이터"를 고침).** 정본은 머티리얼 쪽 노드 카탈로그다(MaterialSystem 19장 — 교환 쪽에 같은 표를 두면 어긋난다). 카탈로그 키는 `UMaterialExpression<X>`(옛 클래스는 `UDEPRECATED_…`)이고 내보낸 `class`는 `MaterialExpression<X>`라 앞에 `U`를 붙여 찾는다. Rocks 노드 타입 이름은 카탈로그의 값을 그대로 쓴다(이름 규칙을 추측하지 않는다 — `CollectionParameter` → `ParameterCollectionValue`, `Custom` → `CustomHlsl` 등). 번역 가능 = 그 노드 타입이 임포트 때 스키마에 **등록**되어 있다(플러그인 노드는 플러그인이 등록했으면 가능) 또는 공용 그래프 노드(`CommonGraph` — `Reroute`·`Composite`·`PinBase`·`Comment`, 5번). 그 밖(카탈로그에 없음·등록 안 됨·`PrerequisiteMissing`·추상·제외)은 "번역 못 한 노드"다. 등록된 정의가 UE 클래스를 갖지 않으므로 요구 UXR12다.
+2. **노드 식별자.** `GraphNode.id`(Guid)는 결정적으로 만든다: UE 노드는 SHA-256(그래프 소유 objectPath, `"node:"`, UE 노드 이름) 앞 128비트(UE GUID는 겹친다 — 8.6절 1번), 임포터가 만드는 노드는 같은 해시에 역할 문자열(`"output"`, `"surface"`, `"domain"`, `"mask:<노드>:<입력>"`, `"const:<핀>"`)이다. `GraphEdge.order`는 대상 입력 순서다. 파라미터 노드의 `parameterId`는 UE `ExpressionGUID`다(인스턴스 override가 이 id로 이어진다 — 8.6절 1번 `guid`(MaterialExpressionGuid)와 다르다). 병합(8번) 뒤에도 서로 다른 파라미터가 같은 `ExpressionGUID`면 둘째부터 위 해시(`"param:<이름>"`)로 바꾸고 warning `ParameterIdCollision`(새 코드)이다. 8.5절·8번의 "GUID 순"은 `ExpressionGUID` 순(같으면 UE 노드 이름 순)이다.
+3. **핀 대응.** 노드 속성(4번)으로 그 노드의 실제 핀 목록(정적 핀 + 속성이 정하는 동적 핀 — `MaterialDynamicPins`)을 먼저 만들고, 내보낸 입력 `name`(UE `GetInputName` 표시 이름)을 그 목록의 UE 표시 이름에 맞춘다. 맞지 않는 입력은 남은(아직 짝 없는) 핀과 번호 순으로 맞춘다. UE와 Rocks의 표시 이름이 다른 알려진 경우(빈 이름 Custom·Switch 입력 — Rocks `Input<n>`, 속성마다 바뀌는 대표 이름 — Substrate 계열, 27번째 이후 연산자 입력)는 교환 쪽 별칭 표(`ExchangeMaterialPinAliases`)에 둔다. 출력은 내보낸 번호를 실제 출력 목록 순서에 맞춘다. 표시 이름의 빈틈을 머티리얼 쪽이 메우는 것이 요구 UXR13이다. 8.1절 예의 입력 이름 `UVs`는 실제로 `Coordinates`다(UE `MaterialExpressions.cpp` — 예만 고친다).
+4. **연결·상수·속성.**
+   - 연결은 `GraphEdge{fromNode, fromPin, toNode, toPin, order}`다. UE `ConnectExpression`은 출력 mask를 입력 mask로 복사하므로 대부분의 R·G·B·A 연결에 mask가 있다. **입력 mask가 원본 출력의 mask와 다를 때만** 사이에 `Material.ComponentMask`(2번의 `mask:` id)를 끼운다.
+   - 미연결 입력의 UE 상수(`OverridingInputProperty` 계열 `ConstA` 등)는 그 노드의 `GraphNode.inputDefaults`(`PinValueEntry{pin, value}` — 타입 공용 `MaterialPinDefault`가 아니다)다. 동적 핀의 상수는 노드 속성으로 남는다(카탈로그 규칙).
+   - `properties`(UE 덤프)는 10.6절 8번 설정 번역의 공통 규칙으로 번역해 노드 정의의 속성 struct에 값 대상 `ImportJson`한다(5.5절 4번과 같은 방식). 이름·모양이 다른 속성만 노드 타입별 교환 쪽 표(`ExchangeMaterialNodeRules`)에 둔다(예: `Constant3Vector.Constant` → `constant`, `TextureSample.ConstCoordinate` → `constCoordinate`, 파라미터 공통 `ParameterName`·`ExpressionGUID`·`Group`·`SortPriority`). UE 기반 클래스 `UMaterialExpression`의 칸(`Desc`·`bRealtimePreview`·`bCollapsed`·`SubgraphExpression`·편집기 위치·`bShowOutputNameOnPin` 등)은 공용 무시 표로 버리고, `Desc`는 layout 설명 풍선으로 옮긴다. 그 밖에 표에 없는 키는 노드마다 `UnsupportedSetting`(detail = 노드 번호)이다.
+   - 속성 값이 머티리얼 쪽에서 아직 TODO인 칸(`subsurfaceProfile` 등 — 값이 있으면 `PrerequisiteMissing`)은 값을 버리고 `UnsupportedSetting`이다(노드는 번역한다).
+   - 텍스처·함수·컬렉션 참조는 옵션 `references`로 연다(없으면 텍스처 null — 엔진 기본 텍스처, 함수·컬렉션이 없으면 그 노드는 번역 못 한 노드).
+5. **공용 그래프 노드·layout.** UE `Reroute` → `Graph.Reroute`, `Composite`·`PinBase` → `Graph.CollapsedGraph`(하위 그래프), 이름 있는 reroute → `Material.NamedRerouteDeclaration`·`Usage`(`declaration`은 선언 노드의 2번 id). comment와 노드 `position`은 `GraphDocumentLayout`(EditorOnly, semantic hash 밖)이다.
+6. **머티리얼 출력(MaterialSystem 19.8절).** `Material.Output` 하나(2번 `output` id)다.
+   - 옛 표면 핀은 `Material.SurfaceFromShadingModel`(2번 `surface` id — UE Substrate 변환 `ShadingModels` 노드와 같은 모양)의 입력이고 그 `Result`가 `Output.Surface`다. 키는 명시 표로 옮긴다(표시 이름 규칙을 쓰지 않는다): `BaseColor`·`Metallic`·`Specular`·`Roughness`·`Anisotropy`·`EmissiveColor`·`Normal`·`Tangent`·`SubsurfaceColor` → `SubSurfaceColor`·`ClearCoat`·`ClearCoatRoughness`, `ShadingModelFromMaterialExpression` → `ShadingModel`.
+   - `Opacity`는 UE처럼 `Output.Opacity`와 `SurfaceFromShadingModel.Opacity` 둘 다에 잇는다(UE `Material.cpp` — Subsurface·Foliage·ThinTranslucent가 표면 쪽 Opacity를 쓴다).
+   - `OpacityMask`·`AmbientOcclusion`·`WorldPositionOffset`·`PixelDepthOffset`·`Refraction`·`Displacement`·`SurfaceThickness`·`CustomizedUVs[i]`(→ `CustomizedUv<i>`)·`MaterialAttributes`(→ `Attributes`)는 `Material.Output`의 같은 핀이다. `FrontMaterial`은 Substrate 그래프라 UX5다(8.3절).
+   - UE 설정 `ShadingModel`은 `shadingModelOverride`(UE `MSM_*` → `ShadingModelPreset` 이름), `MSM_FromMaterialExpression`이면 위 `ShadingModel` 핀이다. `SubsurfaceProfile`은 머티리얼 쪽 TODO라 4번 규칙(값을 버리고 경고)이다.
+   - 미연결 핀의 `constant`(8.6절 3번)는 상수 노드(`Material.Constant`·`Constant2`·`Constant3`·`Constant4` — 2번 `const:` id)를 만들어 잇는다(`SurfaceFromShadingModel` 핀은 값 칸이 없다 — UE도 상수 노드를 만든다).
+   - domain이 Surface가 아니면 UE처럼 domain 변환 노드를 거친다(`Material.SurfaceToDecal`·`SurfaceLightFunction`·`SurfacePostProcess`·`SurfaceUserInterface` — 2번 `domain` id, UE `Material.cpp` domain 변환과 같은 연결).
+   - 블렌드 모드가 받지 않는 핀은 스키마 V5가 경고와 함께 버린다(교환은 그대로 옮긴다).
+7. **머티리얼 설정(`settings`).** 번역 표 `ExchangeMaterialSettingRows`로 `Material.traits`(`MaterialTraitsDesc`)에 `ImportJson`한다(MaterialSystem 19.9절: `MaterialDomain`(`MD_`)·`BlendMode`(`BLEND_`)·`TwoSided`·`OpacityMaskClipValue`·`bTangentSpaceNormal`·`bUseMaterialAttributes`·`NumCustomizedUVs` 등). `bUsedWith*`는 `usage` 정점 입력 집합(19.10절 — 구현된 것만, 나머지 `UnsupportedSetting`). 19.9절 "다른 곳" 키(`ShadingModel`·`SubsurfaceProfile`)는 6번, 대응 없는 키는 Unsupported 행이다. 레이어 그래프(`MaterialAttributeLayers` 기본 레이어)는 MS7 전이라 번역 못 한 노드다.
+8. **파라미터 병합(8.5절 — MaterialSystem 9.2절 UXR4).** 그래프 하나 안에서 파라미터 노드를 (종류, 이름 — 대소문자 무시)로 묶어 `ExpressionGUID` 순 첫 노드를 남기고 나머지 노드의 출력 간선을 그 노드로 옮긴 뒤 지운다(기본값이 다르면 `ParameterDefaultConflict`). 함수 그래프에서 UE association이 global인 파라미터는 `shared` 참(Global scope)이다. 같은 이름·다른 종류는 V8 오류라 결과 결정 3번이고 경고는 `ParameterKindConflict`(새 코드)다 — 8.5절 병합은 같은 종류만 합치므로 모순이 없다. 그래프 사이(머티리얼의 `Tint`와 함수의 global `Tint`)는 Rocks에서 키가 둘이므로 합치지 않고 인스턴스 override를 둘 다에 쓴다(11번). V8 문구(05장 "다른 종류" / 09장 "같은 이름")의 정리는 요구 UXR16이다.
+9. **함수·컬렉션.**
+   - MaterialFunction: 같은 그래프 번역, 입출력 노드 `Material.FunctionInput`·`FunctionOutput`(UE `Id` GUID → `id`), `usage`(UE `Default`·`MaterialLayer`·`MaterialLayerBlend` → `General`·`Layer`·`LayerBlend`), `exposeToLibrary`·`libraryCategories`·`description`.
+   - 함수 호출 `Material.FunctionCall`의 `inputs`·`outputs`는 **그 호출 노드의 덤프**(`FunctionInputs`·`FunctionOutputs`의 `ExpressionInputId`·`InputName` 등)로 만든다(함수 에셋에서 다시 만들면 낡은 호출 노드가 내보낸 입력 번호와 어긋난다 — 임포트 순서 요구도 없다, 참조는 Hard 의존 그대로).
+   - MaterialFunctionInstance: 부모와 override(11번 키 — owner는 함수).
+   - MaterialParameterCollection → `ParameterCollection`(`scalars`·`vectors` — UE `Id`·이름·기본값, `Base`와 base override → `base`·`scalarBaseOverrides`·`vectorBaseOverrides`), 컬렉션 노드 → `Material.ParameterCollectionValue{collection, parameterName, parameterId}`(9.7절 상한 2개 위반은 오류 → 결과 결정 3번).
+10. **결과 결정의 판정.** "번역 못 한 노드가 결과에 닿는가"는 렌더 경로·capability 분기에 따라 (형식, pass) 조합마다 다르다. 판정은 엔진 컴파일 프로필의 **모든 조합 중 하나라도** 닿으면 닿음이다(그 조합의 쿠킹이 실패하므로). 카탈로그에 없는 클래스는 노드 정의가 없어 간선 끝이 될 수 없으므로, 저장 전 판정용 그래프에서는 내보낸 입출력 수만큼 핀을 가진 자리 노드로 둔다(NodeGraph 자리 노드 GD14 — 자리 노드를 핀과 함께 만드는 API와 판정 API가 요구 UXR14). 닿는 노드 클래스 목록이 `UntranslatedMaterialNode` 경고 detail이다. 닿지 않는 번역 못 한 노드는 저장 그래프에서 빼고 info다.
+11. **인스턴스(MaterialInstanceConstant → `MaterialInstance`).**
+    - `parent`(옵션 `references`), override 배열 → Rocks `ParameterKey{ownerAssetId, parameterId, scope}`. `ownerAssetId`는 그 파라미터 노드를 가진 에셋이다(머티리얼이면 그 머티리얼, 함수 안 global 파라미터면 그 함수 에셋 — `shared`라 scope Global — MaterialSystem 9장).
+    - UE `ParameterInfo{Name, Association, Index}`의 이름 → `parameterId`는 **부모 사슬의 번역된 에셋을 읽어** 찾는다(따로 표를 두면 낡는다). 같은 이름이 여러 키(8번 그래프 사이)면 모두에 쓴다.
+    - 레이어 association(`LayerParameter`·`BlendParameter`)과 `layerStack`·`overridesLayerStack`은 MS7 전이라 `UnsupportedSetting`이다.
+    - static switch·component mask → `staticSwitchOverrides`·`staticComponentMaskOverrides`, `BasePropertyOverrides` → `traitOverrides`(19.11절 — `bOverride_X`가 켜진 것만 `Optional` 값).
+    - 부모가 2·3번 결과면 인스턴스도 같은 결과를 따른다(8.5절).
+12. **확인.** `resolved`와 Rocks 인스턴스 해석 결과의 대조(`ParameterResolveMismatch` — 8.5절)는 해석 API가 MaterialRuntime(MS4)이라 MS4 뒤다. UX4b2는 override 키·값이 옮겨졌는지만 본다.
+13. **내장 머티리얼(8.5절 2·3번).** 엔진 기본 머티리얼(domain별)과 "구운 표면"의 파라미터는 MaterialSystem 11.3절이 정했다. 교환은 이름이 아니라 고정 AssetId와 `parameterId`로 건다(override 키가 id라서). 그 고정 id 목록과, `/Engine` 마운트 전 내장 라이브러리 머티리얼을 `MaterialInstance.parent`(Hard `ObjectRef`)로 가리키는 방법이 요구 UXR15다.
+14. **단계.** UX4b1(1–10번 — MS3·MS6, UXR12–UXR14·UXR16), UX4b2(11·12번 — MS6, 대조는 MS4). 시험: golden `M_Golden`·`MI_Golden`, 외부 묶음 엔진 머티리얼(M_Grid — 함수 호출·이름 있는 reroute·GUID 겹침), 경로 편집으로 병합·종류 충돌·id 충돌·번역 못 한 노드(닿음·안 닿음)·mask가 다른 간선·옛 출력 핀·Opacity 두 곳·domain 변환·ShadingModel·인스턴스 override(그래프 사이 같은 이름 포함)·레이어 경고.
