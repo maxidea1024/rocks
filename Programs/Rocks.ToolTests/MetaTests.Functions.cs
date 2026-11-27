@@ -51,7 +51,7 @@ internal static partial class MetaTests
                     "private:\nROCKS_PROPERTY() rocks::int32 c = 0;\n};\nusing Nothing = void;\n"));
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor)))
             {
-                Verify.Equal(8, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 8");
+                Verify.Equal(9, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 9");
                 JsonElement[] functions = [.. DescriptorType(descriptor, "probe::Value").GetProperty("functions").EnumerateArray()];
                 string[] names = [.. functions.Select(function => function.GetProperty("name").GetString() ?? "")];
                 Verify.That(names.SequenceEqual(["Touch", "Count", "Build", "Apply", "Inspect", "Place", "Settle", "Label", "Rest", "Guess", "Secret"]),

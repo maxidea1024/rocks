@@ -83,7 +83,11 @@ enum class FieldFlags : uint32 {
     TextExportTransient = 128,
     // JSON import가 이 Map 필드를 키별로 병합한다(TextCodecOptions::mapMerge가 Replace여도 — Map
     // 필드만, 바깥·안쪽으로 전파하지 않는다, Docs/Design/AssetSystem 10.3.1절).
-    TextMapMergeByKey = 256
+    TextMapMergeByKey = 256,
+    // 실행 중 변경 통지 대상이다(ROCKS_PROPERTY(Notify) — Docs/Design/ChangeNotification.ko.md
+    // CN-D1, UE FieldNotify). 클래스의 이벤트가 아닌 EditorOnly 아닌 필드만(struct 멤버는 그것을
+    // 담은 최상위 필드로 통지한다). 안쪽으로 전파하지 않는다.
+    Notify = 512
 };
 
 constexpr bool HasFlag(uint32 flags, TypeFlags flag) noexcept {
@@ -700,10 +704,22 @@ enum class FunctionFlags : uint32 {
     Pure = 1u << 2,
     EditorOnly = 1u << 3,
     ReturnsResult = 1u << 4,
+    // 계산 값의 변경 통지 대상이다(ROCKS_FUNCTION(Notify) — Docs/Design/ChangeNotification.ko.md
+    // CN-D1, UE FieldNotify 함수). 매개변수가 없고 값을 돌려주는 Pure·Const 함수(Static·EditorOnly
+    // 아님)만이고, 값이 바뀌었을 수 있음을 코드가 알린다.
+    Notify = 1u << 5,
 };
 
 // FunctionFlags의 알려진 비트 전부다(등록 검사).
-inline constexpr uint32 KnownFunctionFlags = (1u << 5) - 1;
+inline constexpr uint32 KnownFunctionFlags = (1u << 6) - 1;
+
+// 타입 체인 하나의 변경 통지 대상(Notify 필드·함수) 수
+// 상한이다(Docs/Design/ChangeNotification.ko.md CN-D2 — 넘으면 등록 InvalidArgument). 통지 번호는
+// 0부터 이 값 미만이다.
+inline constexpr uint32 MaxNotifyTargets = 4096;
+
+// 통지 번호가 없음을 나타낸다(TypeLease::NotifyIndex — 그 타입의 통지 대상이 아니다).
+inline constexpr uint32 NotifyIndexNone = NumericLimits<uint32>::Max();
 
 // 한 함수의 매개변수 수 상한이다(UE UFunction::NumParms와 같이 작은 정수 — 등록 검사·생성 검사).
 inline constexpr usize MaxFunctionParameters = 16;

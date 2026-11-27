@@ -40,7 +40,7 @@ constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient) |
     static_cast<uint32>(FieldFlags::SaveGame) |
     static_cast<uint32>(FieldFlags::TextExportTransient) |
-    static_cast<uint32>(FieldFlags::TextMapMergeByKey);
+    static_cast<uint32>(FieldFlags::TextMapMergeByKey) | static_cast<uint32>(FieldFlags::Notify);
 
 // 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
 // 가져 패키지 저장의 rejectMissingRequired가 실패한다).
@@ -210,6 +210,13 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
                        !IsAsciiIdentifier(field.name) || field.assetBundles.Size() != 0 ||
                        (field.flags & ~EventFieldFlags) != 0)) ||
             (!event && field.eventParameters.Size() != 0)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 변경 통지 대상은 클래스의 EditorOnly 아닌 값·참조 필드다(struct 멤버는 그것을 담은
+        // 최상위 필드로 통지한다 — Docs/Design/ChangeNotification.ko.md CN-D1).
+        if (HasFlag(field.flags, FieldFlags::Notify) &&
+            (structMembers || HasFlag(field.flags, FieldFlags::EditorOnly))) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -465,6 +472,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
 
     Record* base = nullptr;
+    uint32 notifyCount = 0;
     {
         platform::LockGuard lock(gate_);
         if (closed_ || mutating_ || nextGeneration_ == 0) {
@@ -563,7 +571,82 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 변경 통지 대상 수다(Docs/Design/ChangeNotification.ko.md CN-D2): 기반의 대상(번호 그대로)
+        // 뒤에 자기 Notify 필드(파생 schema가 다시 싣는 상속 필드는 기반 몫)와 자기 Notify 함수가
+        // 온다. 대상 ID는 겹칠 수 없다(번호 조회가 모호해진다).
+        usize targets = base ? base->notifyCount : 0;
+        const auto inherited = [&](Guid id) noexcept -> const FieldSchema* {
+            if (base) {
+                for (const FieldSchema& field : base->schema.fields) {
+                    if (field.id == id) {
+                        return &field;
+                    }
+                }
+            }
+
+            return nullptr;
+        };
+        const auto inBase = [&](Guid id) noexcept {
+            for (uint32 index = 0; base && index < base->notifyCount; ++index) {
+                if (base->notifyIds[index] == id) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        for (const FieldSchema& field : schema.fields) {
+            const bool notify = HasFlag(field.flags, FieldFlags::Notify);
+            // 상속 필드는 기반 몫이다(flag가 기반과 다르면 위 상속 필드 대조가 이미
+            // TypeMismatch다).
+            if (inherited(field.id) != nullptr) {
+                continue;
+            }
+
+            // 자기 Notify 필드의 ID는 기반의 통지 대상(기반 함수 포함)과 겹칠 수 없다.
+            if (notify && inBase(field.id)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            targets += notify ? 1 : 0;
+        }
+
+        for (const FunctionSchema& function : schema.functions) {
+            if ((function.flags & static_cast<uint32>(FunctionFlags::Notify)) == 0) {
+                continue;
+            }
+
+            bool clash = inBase(function.id);
+            for (const FieldSchema& field : schema.fields) {
+                clash =
+                    clash || (HasFlag(field.flags, FieldFlags::Notify) && field.id == function.id);
+            }
+
+            if (clash) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            ++targets;
+        }
+
+        if (targets > MaxNotifyTargets) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        notifyCount = static_cast<uint32>(targets);
+
         mutating_ = true;
+    }
+
+    // 통지 표(번호 → ID, ID 정렬 순의 번호)를 블록 끝에 둔다.
+    const usize notifyIdsOffset = (bytes + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
+    const usize notifyOrderOffset = notifyIdsOffset + notifyCount * sizeof(Guid);
+    bytes = notifyIdsOffset;
+    if (!AddBytes(bytes, notifyCount * sizeof(Guid)) ||
+        !AddBytes(bytes, notifyCount * sizeof(uint32))) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
 
     // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
@@ -662,6 +745,49 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->ops.functions = functionOps;
     record->ops.events = eventOps;
     record->base = base;
+    if (notifyCount != 0) {
+        record->notifyIds =
+            reinterpret_cast<Guid*>(static_cast<uint8*>(memory.Value()) + notifyIdsOffset);
+        record->notifyOrder =
+            reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + notifyOrderOffset);
+        record->notifyCount = notifyCount;
+        // 번호: 기반의 번호 그대로(기반 lease로 얻은 번호가 파생 객체에서도 같은 대상이다) → 자기
+        // Notify 필드(schema 순서, 상속 필드 제외) → 자기 Notify 함수(선언 순서). mutating_이 등록·
+        // 해제를 막으므로 기반 레코드가 그대로다.
+        uint32 next = 0;
+        for (uint32 index = 0; base && index < base->notifyCount; ++index) {
+            record->notifyIds[next++] = base->notifyIds[index];
+        }
+
+        for (const FieldSchema& field : record->schema.fields) {
+            bool own = HasFlag(field.flags, FieldFlags::Notify);
+            for (usize index = 0; own && base && index < base->schema.fields.Size(); ++index) {
+                own = base->schema.fields[index].id != field.id;
+            }
+
+            if (own) {
+                record->notifyIds[next++] = field.id;
+            }
+        }
+
+        for (const FunctionSchema& function : record->schema.functions) {
+            if ((function.flags & static_cast<uint32>(FunctionFlags::Notify)) != 0) {
+                record->notifyIds[next++] = function.id;
+            }
+        }
+
+        for (uint32 index = 0; index < notifyCount; ++index) {
+            record->notifyOrder[index] = index;
+        }
+
+        Guid* ids = record->notifyIds;
+        algo::Sort(Span<uint32>(record->notifyOrder, notifyCount),
+                   [ids](uint32 left, uint32 right) noexcept {
+                       const Guid a = ids[left];
+                       const Guid b = ids[right];
+                       return a.high != b.high ? a.high < b.high : a.low < b.low;
+                   });
+    }
 
     platform::LockGuard lock(gate_);
     PublishLocked(record, growth);
