@@ -39,7 +39,8 @@ enum class AudioStreamState : uint8 {
 
 class ROCKS_AUDIO_API AudioStreamRing {
 public:
-    // 링을 만든다. 채널 1–MaxClipChannels(2), 용량 [StreamRingMinFrames, StreamRingMaxFrames] 밖은
+    // 링을 만든다. channels는 담을 수 있는 최대 채널 수(1–MaxClipChannels(2))이고 처음 쓰는 채널
+    // 수도 그 값이다(Reset으로 줄일 수 있다). 용량 [StreamRingMinFrames, StreamRingMaxFrames] 밖은
     // InvalidArgument, 할당 실패는 OutOfMemory다. allocator는 링보다 오래 살아야 한다.
     [[nodiscard]] static Result<UniquePtr<AudioStreamRing>>
     TryCreate(Allocator& allocator, uint32 channels, uint32 capacityFrames) noexcept;
@@ -88,8 +89,14 @@ public:
 
     // --- 제어(생산자·소비자가 없을 때) ---
 
-    // 위치·상태를 처음으로 되돌린다(슬롯 재사용 — 3.40.1절).
-    void Reset() noexcept;
+    // 위치·상태를 처음으로 되돌리고 쓰는 채널 수를 channels(1–최대 채널 수)로 둔다(슬롯 재사용 —
+    // 3.40.1절). 범위 밖이면 assert다.
+    void Reset(uint32 channels) noexcept;
+
+    // 만들 때 정한 최대 채널 수다.
+    uint32 MaxChannelCount() const noexcept {
+        return maxChannels_;
+    }
 
 private:
     // 쓰기 위치(아래 62 bit)와 상태(위 2 bit)다.
@@ -105,6 +112,7 @@ private:
     ReadSide read_;
     Array<float> samples_;
     uint32 channels_ = 0;
+    uint32 maxChannels_ = 0;
     uint32 capacity_ = 0;
 };
 

@@ -56,7 +56,7 @@ Result<UniquePtr<AudioStreamRing>> AudioStreamRing::TryCreate(Allocator& allocat
 
 AudioStreamRing::AudioStreamRing(Allocator& allocator, uint32 channels,
                                  uint32 capacityFrames) noexcept
-    : samples_(allocator), channels_(channels), capacity_(capacityFrames) {
+    : samples_(allocator), channels_(channels), maxChannels_(channels), capacity_(capacityFrames) {
 }
 
 uint32 AudioStreamRing::WritableFrames() const noexcept {
@@ -147,7 +147,9 @@ void AudioStreamRing::Consume(uint32 frames) noexcept {
     AtomicStore<MemoryOrder::Release>(&read_.position, read + frames);
 }
 
-void AudioStreamRing::Reset() noexcept {
+void AudioStreamRing::Reset(uint32 channels) noexcept {
+    ROCKS_ASSERT(channels != 0 && channels <= maxChannels_);
+    channels_ = channels;
     AtomicStore<MemoryOrder::Relaxed>(&read_.position, uint64{0});
     AtomicStore<MemoryOrder::Release>(&write_.word, uint64{0});
 }

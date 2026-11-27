@@ -245,7 +245,7 @@ TEST(Audio_Stream_RingProtocol) {
     CHECK(ring->Write(one).Error() == ErrorCode::InvalidArgument);
 
     // 비유한 표본은 쓰지 않고 Failed다.
-    ring->Reset();
+    ring->Reset(1);
     CHECK(ring->State() == AudioStreamState::Running && ring->ReadableFrames() == 0);
     const float bad[2] = {0.5f, platform::PlatformMath::QuietNaN<float>()};
     PlanarConstView badView;
@@ -256,7 +256,7 @@ TEST(Audio_Stream_RingProtocol) {
     CHECK(ring->State() == AudioStreamState::Failed && ring->ReadableFrames() == 0);
     PlanarConstView stereo = badView;
     stereo.channelCount = 2;
-    ring->Reset();
+    ring->Reset(1);
     CHECK(ring->Write(stereo).Error() == ErrorCode::InvalidArgument);
 }
 
