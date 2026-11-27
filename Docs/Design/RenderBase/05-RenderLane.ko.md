@@ -31,7 +31,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 ```
 
 - 렌더 lane은 CP1 `DedicatedLane`의 인스턴스다. lane 작업 종류는 넷으로 닫는다: 프레임 packet 처리, 장치 자원 생성·갱신·`Retire`, 표면 작업(스왑체인 생성·resize·파괴, 표면 소실·재생성), lane 표지.
-- **전달 가능한 타입.** lane 작업이 받는 값 타입은 "렌더 전달 가능" 표시를 명시 등록한 것만 허용한다(등록되지 않은 타입은 컴파일 오류). 등록 타입이 리플렉션 스키마를 가지면 Development에서 Object 참조 필드가 없는지 검사한다. 원시 포인터는 C++ 타입 검사로 걸러낼 수 없으므로(trivially copyable 구조체 안의 포인터) 이 두 단계가 강제할 수 있는 범위다. 프레임 packet의 가변 길이 목록은 그 프레임 slot의 프레임 arena(CP3)에 둔다.
+- **전달 가능한 타입.** lane 작업이 받는 값 타입은 "렌더 전달 가능" 표시를 명시 등록한 것만 허용한다(등록되지 않은 타입은 컴파일 오류). 등록 타입이 리플렉션 스키마를 가지면 Development에서 Object 참조 필드가 없는지 검사한다. **이벤트 필드(`FieldKind::Event` — `Event<Args...>`, 이벤트 리플렉션 ED9)도 거부한다(개정 61):** 강한 참조는 아니지만 구독(대상 객체·함수)과 발행자를 붙잡으므로, 렌더 lane으로 넘어가면 게임 객체의 수명·스레드 규칙(게임 lane 전용 — Object 접근)을 렌더 lane이 어기게 된다. 판정은 `IsEventField`이고 거부는 다른 Object 참조와 같은 `InvalidArgument`다. 원시 포인터는 C++ 타입 검사로 걸러낼 수 없으므로(trivially copyable 구조체 안의 포인터) 이 두 단계가 강제할 수 있는 범위다. 프레임 packet의 가변 길이 목록은 그 프레임 slot의 프레임 arena(CP3)에 둔다.
 - **인라인 모드**는 CP1 인라인 모드(trampoline)를 쓴다. 두 모드의 결과(장치 호출 열, 자원 상태)가 같아야 한다.
 - **완료 통지 큐** `RenderNotices`: readback 결과, timestamp, `Retire` 회수 완료, 셰이더 공급 완료, 텍스처 스트리밍의 보임 신호(사용 기록별 마지막으로 그린 프레임)와 mip 전송 완료([텍스처 스트리밍](../TextureStreaming.ko.md) 결정 T3) 같은 결과를 렌더 lane이 넣고, 게임 lane이 프레임 시작 때 비운다. 게임 쪽 CPU 데이터를 GPU 완료 뒤까지 붙잡아야 하는 경우(ObjectRuntime `BackendLease`, `ObjectRefs.h:216–220`) 그 해제는 게임 쪽 통합 계층(WorldIntegration)이 이 통지를 받아 한다. RenderBase는 ObjectRuntime에 의존하지 않는다.
 - **fence 관찰.** 렌더 lane은 GX7 완료 이벤트를 lane 작업으로 받는다(폴링하지 않는다). 그래서 lane이 놀고 있어도 slot 완료와 회수가 진행된다.
@@ -45,6 +45,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 - **예외.** (1) 표면 소실 handshake: Android가 surface를 거둘 때 앱 스레드는 렌더 lane의 surface 사용 중단(표면 작업 완료)을 동기로 기다려야 한다(P13). (2) 전체 비우기 `RenderLane::Drain`: 종료·장치 재생성·시험 전용이며 호출 이유(열거)를 인자로 받아 계측에 남긴다. 일반 자원 해제는 `Retire`로 하고 비우기를 쓰지 않는다. 자원 해제 뒤 비우기까지 하는 API는 두지 않는다.
 - 대기 시간 상한(UE 120초 hang 판정, 5.1절)은 진단 전용이다. 시간 초과는 hang 보고 후 실패로 끝내되 기능 판정에 쓰지 않고, 디버거 연결·명시 정지 계수가 있으면 끈다. 시험은 시간 초과에 기대지 않는다.
 - 렌더 설정(CP4)은 프레임 packet에 snapshot으로 담는다. 렌더 쪽 사본 주소에 쓰는 전파는 하지 않는다.
+- **프레임 packet 수명(개정 60).** packet은 그 slot의 프레임 arena를 가리킬 수 있으므로(가변 길이 목록) slot을 돌려주기 전에 끝나야 한다. `SubmitFrame`은 진입 직후 packet을 지역 값으로 옮겨 **모든 반환 경로에서 소비**한다(빈 함수·잘못된 ticket·종료 단계·전달 검사·게시 실패 — 실패 뒤 호출자의 packet은 옮겨진 원본이다). lane 작업은 `render(context, packet)` → **packet 파괴** → 지연 Retire 처리(`FinishDeferredRetires` — packet 소멸자가 요청한 Retire도 이 프레임에서 처리한다) → lane 처리 완료 표지(`FinishFrame`, slot 반환 시작) 순서다. 그래서 게임 lane이 다음 `BeginFrame`에서 그 slot의 arena를 비울 때 lane 스레드가 같은 arena를 읽지 않는다. 이전에는 packet이 lane 작업 객체에 담긴 채 작업이 끝난 뒤(`DedicatedLane` 작업 객체 해제) 파괴되어, Thread 모드에서 slot이 Free가 된 뒤 arena Reset과 경쟁할 수 있었다(UI 세션 보고). 자원·표면 작업의 값은 arena를 쓰지 않으므로 그대로다.
 
 ### 5.4 장치 스레드 모델(GX10·GX11)
 

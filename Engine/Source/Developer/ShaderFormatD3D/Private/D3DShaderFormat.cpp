@@ -86,20 +86,28 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         return;
     }
 
-    const StringView arguments[MaxDxcArguments] = {"-E",
-                                                   job.entry.View(),
-                                                   "-T",
-                                                   StringView(profile),
-                                                   "-HV",
-                                                   job.options.hlsl2021 ? StringView("2021")
-                                                                        : StringView("2018"),
-                                                   OptimizationFlags[job.options.optimization],
-                                                   "-Zpr",
-                                                   "-WX"};
-    constexpr usize ArgumentCount = 9;
+    StringView arguments[MaxDxcArguments] = {"-E",
+                                             job.entry.View(),
+                                             "-T",
+                                             StringView(profile),
+                                             "-HV",
+                                             job.options.hlsl2021 ? StringView("2021")
+                                                                  : StringView("2018"),
+                                             OptimizationFlags[job.options.optimization],
+                                             "-Zpr",
+                                             "-WX"};
+    usize count = 9;
+    // 디버그 심볼(16.3절 SSD73, UE D3DShaderCompilerDXC.cpp와 같다): PDB를 만들고(-Zi) DXIL에서
+    // 떼며(-Qstrip_debug) PDB 이름을 출력 binary hash로 정한다(-Zsb).
+    if (job.options.debugSymbols) {
+        arguments[count++] = "-Zi";
+        arguments[count++] = "-Qstrip_debug";
+        arguments[count++] = "-Zsb";
+    }
+
     DxcCompileRequest request;
     request.source = job.source.View();
-    request.arguments = Span<const StringView>(arguments, ArgumentCount);
+    request.arguments = Span<const StringView>(arguments, count);
     DxcCompileResult compiled(result.values.GetAllocator());
     const ShaderToolLoadStatus ran = CompileWithDxc(tools.Dxc(), request, compiled);
     if (!ran) {
@@ -123,7 +131,16 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         return;
     }
 
+    if (job.options.debugSymbols && compiled.pdb.IsEmpty()) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "DXC produced no PDB");
+        return;
+    }
+
     Succeed(D3DCodeKind::Dxil, format, job, tools, result, compiled.object);
+    if (job.options.debugSymbols) {
+        AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::Pdb, compiled.pdbName.View(),
+                                 compiled.pdb.View());
+    }
 }
 
 // 대체 경로: DXC(-fspv-reflect) → SPIR-V 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location) → SPIRV-Cross
@@ -132,7 +149,7 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
 ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
                                   const ShaderToolSet& tools, StringView fxcProfile,
                                   Array<uint8>& object, Array<SpirvSamplerUse>& pairs,
-                                  String& diagnostics) noexcept {
+                                  String& diagnostics, FxcSymbols& symbols) noexcept {
     char spirvProfile[MaxShaderProfileBytes];
     if (!MakeShaderProfile(job.stage, FallbackSpirvModel, spirvProfile)) {
         (void)diagnostics.TryAppend("invalid shader stage");
@@ -199,7 +216,8 @@ ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const Sh
     fxcRequest.entry = CrossEntry;
     fxcRequest.profile = fxcProfile;
     fxcRequest.optimization = job.options.optimization;
-    return CompileWithFxc(tools.Fxc(), fxcRequest, object, diagnostics);
+    fxcRequest.debugSymbols = job.options.debugSymbols;
+    return CompileWithFxc(tools.Fxc(), fxcRequest, object, diagnostics, &symbols);
 }
 
 // D3D11_SM5: FXC, 원문 탓 실패나 HLSL 2021이면 대체 경로(SC10, E3·E4)다.
@@ -222,16 +240,26 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     Allocator& allocator = result.values.GetAllocator();
     Array<uint8> object(allocator);
     String fxcDiagnostics(allocator);
+    FxcSymbols symbols(allocator);
+    // 디버그 심볼(16.3절 SSD73): 값 0은 디버그 정보를 뗀 DXBC, 값 3은 FXC PDB다.
+    const auto succeed = [&](const Array<SpirvSamplerUse>* pairs) noexcept {
+        Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object, pairs);
+        if (job.options.debugSymbols) {
+            AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::Pdb, symbols.name.View(),
+                                     symbols.pdb.View());
+        }
+    };
     if (!job.options.hlsl2021) {
         FxcCompileRequest request;
         request.source = job.source.View();
         request.entry = job.entry.View();
         request.profile = StringView(profile);
         request.optimization = job.options.optimization;
+        request.debugSymbols = job.options.debugSymbols;
         const ShaderToolOutcome compiled =
-            CompileWithFxc(tools.Fxc(), request, object, fxcDiagnostics);
+            CompileWithFxc(tools.Fxc(), request, object, fxcDiagnostics, &symbols);
         if (compiled == ShaderToolOutcome::Success) {
-            Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object);
+            succeed(nullptr);
             return;
         }
 
@@ -246,9 +274,9 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     String fallbackDiagnostics(allocator);
     Array<SpirvSamplerUse> pairs(allocator);
     const ShaderToolOutcome fallback = CompileFallback(format, job, tools, StringView(profile),
-                                                       object, pairs, fallbackDiagnostics);
+                                                       object, pairs, fallbackDiagnostics, symbols);
     if (fallback == ShaderToolOutcome::Success) {
-        Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object, &pairs);
+        succeed(&pairs);
         return;
     }
 

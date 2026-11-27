@@ -3,6 +3,8 @@
 #include <Base/PlacementNew.h>
 #include <Core/Text/StringView.h>
 #include <Meta/TypeSchema.h>
+#include <Object/FunctionBinding.h>
+#include <Object/FunctionCall.h>
 
 #include "TypeRegistryRegisterInternal.h"
 
@@ -40,7 +42,7 @@ bool IsAggregateSlot(const ParameterSchema& slot) noexcept {
 // 칸 하나의 서술이다: 값 종류가 있고 frame 범위·정렬 안이며, 값 ops가 있고 write·read는 단일 값
 // 칸에만 있다. 강한 참조(ObjectReference)·InstancedStruct·정적 배열은 frame에 둘 수 없다(FD4).
 bool ValidSlot(const ParameterSchema& slot, const RuntimeParameterOps& ops,
-               const FunctionSchema& function) noexcept {
+               uint32 frameSize) noexcept {
     const ValueKind kind = slot.value.kind;
     if ((slot.flags & ~KnownParameterFlags) != 0 || kind == ValueKind::Opaque ||
         kind == ValueKind::ObjectReference || kind == ValueKind::InstancedStruct ||
@@ -48,8 +50,8 @@ bool ValidSlot(const ParameterSchema& slot, const RuntimeParameterOps& ops,
         slot.key.kind == ValueKind::ObjectReference || ops.value == nullptr ||
         ops.value->size == 0 || ops.value->construct == nullptr || ops.value->destroy == nullptr ||
         !IsPowerOfTwo(static_cast<uint32>(ops.value->alignment)) ||
-        slot.offset % ops.value->alignment != 0 || slot.offset > function.frameSize ||
-        ops.value->size > function.frameSize - slot.offset) {
+        slot.offset % ops.value->alignment != 0 || slot.offset > frameSize ||
+        ops.value->size > frameSize - slot.offset) {
         return false;
     }
 
@@ -100,7 +102,7 @@ Result<FunctionBlockLayout> ValidateFunctionList(const TypeSchema& schema,
         for (usize parameter = 0; parameter < function.parameters.Size(); ++parameter) {
             const ParameterSchema& slot = function.parameters[parameter];
             if (!ValidName(slot.name) ||
-                !ValidSlot(slot, functionOps.parameters[parameter], function)) {
+                !ValidSlot(slot, functionOps.parameters[parameter], function.frameSize)) {
                 return Result<FunctionBlockLayout>::Failure(ErrorCode::InvalidArgument);
             }
 
@@ -116,7 +118,7 @@ Result<FunctionBlockLayout> ValidateFunctionList(const TypeSchema& schema,
         // 반환 칸: 있으면 매개변수 칸과 같은 규칙, 없으면 연산도 없다. 실패 코드 칸은 Result
         // 함수만.
         if (hasResult
-                ? !ValidSlot(function.result, functionOps.result, function)
+                ? !ValidSlot(function.result, functionOps.result, function.frameSize)
                 : (functionOps.result.value != nullptr || functionOps.result.write != nullptr ||
                    functionOps.result.read != nullptr)) {
             return Result<FunctionBlockLayout>::Failure(ErrorCode::InvalidArgument);
@@ -211,6 +213,136 @@ void CopyFunctions(const FunctionBlockLayout& layout, uint8* block, const TypeSc
 
     functions = {copiedFunctions, schema.functions.Size()};
     functionOps = {copiedOps, schema.functions.Size()};
+}
+
+Result<EventBlockLayout> ValidateEventList(const TypeSchema& schema,
+                                           const RuntimeTypeOps& ops) noexcept {
+    EventBlockLayout layout;
+    usize eventIndex = 0;
+    for (const FieldSchema& field : schema.fields) {
+        if (!IsEventField(field)) {
+            continue;
+        }
+
+        if (eventIndex >= ops.events.Size()) {
+            return Result<EventBlockLayout>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const RuntimeEventOps& event = ops.events[eventIndex++];
+        const usize count = field.eventParameters.Size();
+        // 연산표는 이벤트 필드와 같은 순서다(값 필드 연산표는 ID로 맞추지만 이벤트는 순서까지).
+        // 기대 배치(frameLayout)는 frame 크기·정렬·칸 수가 연산표와 같다.
+        const FrameLayout* expected = event.frameLayout;
+        if (event.fieldId != field.id || event.bind == nullptr || event.unbind == nullptr ||
+            event.unbindFunction == nullptr || event.unbindAll == nullptr ||
+            event.clear == nullptr || event.compact == nullptr ||
+            event.broadcastFromFrame == nullptr || event.construct == nullptr ||
+            event.destroy == nullptr || event.frameSize == 0 ||
+            !IsPowerOfTwo(event.frameAlignment) || count > MaxFunctionParameters ||
+            event.parameters.Size() != count || expected == nullptr ||
+            expected->size != event.frameSize || expected->alignment != event.frameAlignment ||
+            expected->count != count) {
+            return Result<EventBlockLayout>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize parameter = 0; parameter < count; ++parameter) {
+            const ParameterSchema& slot = field.eventParameters[parameter];
+            // 칸 서술(값 형식·대상 TypeId·형식 flag·크기·정렬 — ED5)이 C++ 칸과 같아야
+            // 한다(schema를 믿고 frame에 쓰는 descriptor·host·저장이 다른 배치로 쓰지 않게).
+            if (!ValidName(slot.name) ||
+                !ValidSlot(slot, event.parameters[parameter], event.frameSize) ||
+                !SlotDescriptionMatches(slot, event.parameters[parameter].value,
+                                        expected->slots[parameter]) ||
+                slot.offset != expected->slots[parameter].offset) {
+                return Result<EventBlockLayout>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            for (usize previous = 0; previous < parameter; ++previous) {
+                if (StringView(slot.name.Data(), slot.name.Size()) ==
+                    StringView(field.eventParameters[previous].name.Data(),
+                               field.eventParameters[previous].name.Size())) {
+                    return Result<EventBlockLayout>::Failure(ErrorCode::AlreadyExists);
+                }
+            }
+
+            if (!AddBytes(layout.textBytes, slot.name.Size())) {
+                return Result<EventBlockLayout>::Failure(ErrorCode::Overflow);
+            }
+        }
+
+        layout.parameters += count;
+    }
+
+    if (eventIndex != ops.events.Size()) {
+        return Result<EventBlockLayout>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    layout.events = eventIndex;
+    return Result<EventBlockLayout>::Success(layout);
+}
+
+usize EventBlockLayout::Place(usize offset) noexcept {
+    parameterOffset = AlignUp(offset, alignof(ParameterSchema));
+    eventOpsOffset =
+        AlignUp(parameterOffset + parameters * sizeof(ParameterSchema), alignof(RuntimeEventOps));
+    parameterOpsOffset =
+        AlignUp(eventOpsOffset + events * sizeof(RuntimeEventOps), alignof(RuntimeParameterOps));
+    return parameterOpsOffset + parameters * sizeof(RuntimeParameterOps);
+}
+
+bool SameEventParameters(const FieldSchema& left, const FieldSchema& right) noexcept {
+    if (left.eventParameters.Size() != right.eventParameters.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.eventParameters.Size(); ++index) {
+        const ParameterSchema& a = left.eventParameters[index];
+        const ParameterSchema& b = right.eventParameters[index];
+        if (StringView(a.name.Data(), a.name.Size()) != StringView(b.name.Data(), b.name.Size()) ||
+            a.value.kind != b.value.kind || a.value.type != b.value.type ||
+            a.element.kind != b.element.kind || a.element.type != b.element.type ||
+            a.key.kind != b.key.kind || a.key.type != b.key.type || a.flags != b.flags ||
+            a.maxElements != b.maxElements || a.offset != b.offset) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void CopyEvents(const EventBlockLayout& layout, uint8* block, const TypeSchema& schema,
+                const RuntimeTypeOps& ops, uint8*& text, FieldSchema* fields,
+                Span<const RuntimeEventOps>& eventOps) noexcept {
+    auto* copiedParameters = reinterpret_cast<ParameterSchema*>(block + layout.parameterOffset);
+    auto* copiedOps = reinterpret_cast<RuntimeEventOps*>(block + layout.eventOpsOffset);
+    auto* copiedParameterOps =
+        reinterpret_cast<RuntimeParameterOps*>(block + layout.parameterOpsOffset);
+    usize next = 0;
+    usize eventIndex = 0;
+    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+        const FieldSchema& source = schema.fields[fieldIndex];
+        if (!IsEventField(source)) {
+            continue;
+        }
+
+        RuntimeEventOps* event =
+            ::new (copiedOps + eventIndex) RuntimeEventOps(ops.events[eventIndex]);
+        const usize count = source.eventParameters.Size();
+        for (usize parameter = 0; parameter < count; ++parameter) {
+            ParameterSchema* slot = ::new (copiedParameters + next + parameter)
+                ParameterSchema(source.eventParameters[parameter]);
+            slot->name = CopyBytes(source.eventParameters[parameter].name, text);
+            ::new (copiedParameterOps + next + parameter)
+                RuntimeParameterOps(ops.events[eventIndex].parameters[parameter]);
+        }
+
+        fields[fieldIndex].eventParameters = {copiedParameters + next, count};
+        event->parameters = {copiedParameterOps + next, count};
+        next += count;
+        ++eventIndex;
+    }
+
+    eventOps = {copiedOps, layout.events};
 }
 
 } // namespace rocks::detail

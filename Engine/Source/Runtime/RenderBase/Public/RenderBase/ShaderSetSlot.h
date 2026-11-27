@@ -64,6 +64,11 @@ public:
     // lease가 남은 집합이 있으면 Busy다(closure 실패 — 강제로 파괴하지 않는다, 다시 부를 수 있다).
     Result<void> Shutdown(PipelineCache* cache) noexcept;
 
+    // 장치를 쓰지 않고 남은 집합(현재·후보·회수 대기)을 모두 파괴한다. 주인이 종료 단계에서
+    // Shutdown하지 못한 경로(파괴자)만 쓴다 — Retire하지 않은 장치 셰이더는 장치 closure 확인이
+    // 잡고, 남은 lease는 집합 파괴자의 assert가 잡는다.
+    void Abandon() noexcept;
+
     // 현재 집합이다(없으면 null).
     ShaderSet* Current() const noexcept;
 
