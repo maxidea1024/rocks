@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Platform/Sync/WaitTypes.h>
+
 #include <Platform/File.h>
 
 // 이 프로세스의 표준 스트림이다(Docs/Design/SparksTools.ko.md T2 — SparksEngineIntegration SE-B7).
@@ -32,5 +34,18 @@ ROCKS_PLATFORMBASE_API FileTransfer WriteStandardStream(StandardStream stream, c
 // 1 byte 이상이다. 입력이 끝났으면(쓰는 쪽이 닫힘) EndOfFile과 0이다. 실패: 표준 입력이 없으면
 // NotOpen, capacity가 0이거나 buffer가 null이면 InvalidArgument, 그 밖은 OS 오류.
 ROCKS_PLATFORMBASE_API FileTransfer ReadStandardInput(void* buffer, usize capacity) noexcept;
+
+// ReadStandardInput과 같되 데이터가 없으면 최대 timeoutMilliseconds만 기다린다. 시간이 다하면
+// NoProgress와 0이다(InfiniteTimeout이면 위와 같다). 전용 스레드가 표준 입력을 읽다가 끝내야 할 때
+// (Docs/Design/ProgressReporting 10.2절 부모 제어 수신 — 부모가 stdin을 열어 둔 채 자식이 먼저
+// 끝나는 경우) 쓴다. Windows: pipe는 남은 byte를 확인하며(PeekNamedPipe) 5 ms씩 쉬며
+// 기다리고(그동안 초당 수십 번 깬다), 파일은 바로 읽고, 콘솔은 Unsupported다(줄 입력이 Enter까지
+// 막고 입력 handle이 포커스·마우스 사건에도 깨어 시간 제한을 지킬 수 없다). POSIX: poll로 기다린다.
+//
+// 사용 예:
+//   const FileTransfer read = ReadStandardInput(buffer, sizeof(buffer), 100);
+//   if (read.status.code == FileCode::NoProgress) { /* 멈춤 요청 확인 뒤 다시 */ }
+ROCKS_PLATFORMBASE_API FileTransfer ReadStandardInput(void* buffer, usize capacity,
+                                                      uint32 timeoutMilliseconds) noexcept;
 
 } // namespace rocks::platform
