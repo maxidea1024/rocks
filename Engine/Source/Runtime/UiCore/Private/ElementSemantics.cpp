@@ -61,11 +61,20 @@ const SlotPlacement* Element::GetSlotPlacement() const noexcept {
 }
 
 Vec2 Element::SlotDesiredSize() const noexcept {
+    // 접힌 자식은 여백도 차지하지 않는다(옛 SlotPresenter·UE SBox의 Collapsed 처리).
+    if (GetVisibility() == Visibility::Collapsed) {
+        return {};
+    }
+
     const SlotPlacement* slot = GetSlotPlacement();
     return slot ? slot->PaddedSize(GetDesiredSize()) : GetDesiredSize();
 }
 
 Vec2 Element::MeasureInSlot(float width) noexcept {
+    if (GetVisibility() == Visibility::Collapsed) {
+        return {};
+    }
+
     const SlotPlacement* slot = GetSlotPlacement();
     if (!slot) {
         return MeasureForWidth(width);

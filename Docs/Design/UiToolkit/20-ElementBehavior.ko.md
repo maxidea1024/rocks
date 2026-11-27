@@ -130,6 +130,12 @@
   - 고른 후보의 조상이 비활성이면 그 후보를 비활성 목적지에 넣고 다시 찾는다(`IsParentsEnabled`, 528–533행).
 - **경계 규칙.** 찾은 것이 경계를 넘으면 규칙을 적용한다(495–523행). Explicit는 지정 대상, Custom·CustomBoundary는 delegate, Stop은 없음이다. Wrap은 반대쪽 변에서 한 번 더 훑는다(516–523·543–560행).
 - **scope.** Rocks 팝업은 같은 창 grid 안에 있다. 그래서 지금의 `scope` 인자(팝업·modal 범위)를 유지한다. Escape 규칙이어도 scope 밖으로는 나가지 않는다. UE는 팝업이 별도 창이라 이 문제가 없다.
+- **셀 범위(리뷰 반영).**
+  - 셀 수는 창 크기 / 128 + 1이다(UE `SetHittestArea`). 축마다 2^16개를 넘지 않는다.
+  - 등록과 점 찾기 모두 셀 좌표를 이 범위로 자른다(UE `GetCellCoordinate` 891행). 창 밖에 있는 요소(창보다 넓은 내용 안의 후보)는 가장자리 셀에 들어가므로 탐색에서 빠지지 않는다.
+  - 셀 64개를 넘는 넓은 요소는 셀 대신 따로 보관한다. 탐색에서는 그 요소가 덮는 셀 줄과 띠 범위에서만 만난다. UE는 이런 요소도 모든 셀에 넣으므로 결과가 같다.
+  - 비활성 조상 재시작의 상한은 1024회다(재시작마다 후보가 하나씩 빠진다). UE에는 상한이 없다. 상한을 넘으면 찾지 못한 것으로 끝낸다.
+- **시험.** `NavigationSearchTests`는 Application 경로를 본다. `FocusSearchTests`는 거르기 없이 grid에 직접 묻는다: 비활성 조상 재시작, 자손 검사와 Escape, 경계 밖 후보의 Stop·CustomBoundary·Wrap, ReachedEdge, 넓은 후보, 창 밖 후보.
 - **확장점.** UE 1179행은 하위 트리 메타데이터 확장점으로, `GEnableNavigationExperimental`(기본 false, 35행)일 때만 쓴다. Rocks는 탐색 방식을 교체 가능한 계약으로 두되 기본값은 위 규칙 하나다.
 
 ### 20.10 단일 자식 slot·CB2(UW8g)
@@ -145,6 +151,11 @@
   - 두 함수 모두 `static_assert(IsSameV<typename T::ThisClass, T>)`로 매크로를 빠뜨린 파생 클래스를 막는다(부모 `StaticType`이 상속되어 잘못된 변환이 통과하는 일).
   - policy는 변환 대상 형식이 Element 계열인지로 판정한다(형식 이름이 아니라). UI 모듈의 Element 하향 `static_cast`를 0으로 만든다.
   - 약 186곳 변환 교체는 동작 불변 기계 변경이라 따로 커밋한다.
+- **리뷰 반영.**
+  - 접힌 자식은 slot 여백도 차지하지 않는다. `SlotDesiredSize`·`MeasureInSlot`이 `{}`를 돌려준다(옛 `SlotPresenter`와 같다).
+  - 형식 같음 판정은 주소가 같거나, 부모 사슬 전체의 이름이 같은지로 한다. 이름 비교로 물러나는 경우는 Modular 링크에서 inline 정적 사본이 모듈마다 생길 때다.
+  - 이름은 이름공간 없는 클래스 이름이다. 그래서 policy `ui-element-name`이 UI 모듈(시험 포함) 안의 `ROCKS_UI_ELEMENT` 이름 중복을 거부한다.
+  - policy `ui-element-cast`는 class·struct, 모든 기반(둘째 기반, protected·private 상속), 이름공간 한정, 뒤쪽 const(`<T const&>`)까지 본다.
 - **버린 대안.** CRTP 기반 클래스(`ElementBase<Self, Super>`)는 매크로 없이 되지만, 모든 Element의 상속 줄을 바꾸고 다중 상속(`TextInputContext`)과 섞기 어렵다.
 
 ### 20.11 스타일 등록부(UW8h1·UW8h2)

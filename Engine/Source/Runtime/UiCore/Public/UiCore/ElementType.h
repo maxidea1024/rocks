@@ -6,8 +6,9 @@ namespace rocks::ui {
 
 // Element 형식 정보다(Docs/Design/UiToolkit 20.10절 CB2 — UE SLATE_DECLARE_WIDGET의 형식 정보).
 // 클래스 선언의 ROCKS_UI_ELEMENT가 만들고, IsA·ElementCast·StaticElementCast가 부모 사슬을 따라
-// 판정한다. 같은 형식인지는 주소 또는 이름으로 본다(Modular 링크에서 inline 정적 변수가 모듈마다
-// 따로 생길 수 있다).
+// 판정한다. 같은 형식인지는 주소 또는 부모 사슬 전체의 이름으로 본다(Modular 링크에서 inline 정적
+// 변수가 모듈마다 따로 생길 수 있다). 그래서 ROCKS_UI_ELEMENT 클래스 이름은 UI 모듈(시험 포함)
+// 안에서 겹치면 안 된다(policy ui-element-name).
 struct ElementType {
     const char* name;
     const ElementType* parent;

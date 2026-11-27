@@ -64,10 +64,10 @@ TEST(UiWidget_StackAndAlignedSlotsSurviveTemplateInstantiation) {
     auto* right = bar->ChildAt(0);
     REQUIRE(right);
     CHECK(right->GetGeometry().size == Vec2(92, 60));
-    auto* presenter = right->ChildAt(0);
-    REQUIRE(presenter);
-    auto* icon = presenter->ChildAt(0);
-    REQUIRE(icon);
+    // slot 여백·정렬은 wrapper 없이 자식 Element가 직접 든다(20.10절).
+    auto* icon = right->ChildAt(0);
+    REQUIRE(icon && icon->GetSlotPlacement());
+    CHECK(*icon->GetSlotPlacement() == placement);
     CHECK(icon->GetGeometry().size == Vec2(12, 8));
     CHECK(icon->GetGeometry().layout.Apply({0, 0}) == Vec2(82, 25));
     auto live = content->TakeElement(objects);
@@ -81,9 +81,12 @@ TEST(UiWidget_StackAndAlignedSlotsSurviveTemplateInstantiation) {
     auto mutableSlot = objects.ResolveForWrite<BorderWidgetSlot>(access, ordinary.Value());
     REQUIRE(mutableSlot);
     REQUIRE(mutableSlot.Value().Get().Value()->SetLayout(objects, placement));
-    REQUIRE(live.Value()->ChildAt(0)->ChildAt(0) == sameIcon.Get());
+    REQUIRE(live.Value()->ChildAt(0) == sameIcon.Get());
+    REQUIRE(sameIcon->GetSlotPlacement() && *sameIcon->GetSlotPlacement() == placement);
     REQUIRE(mutableSlot.Value().Get().Value()->SetLayout(objects, {}));
-    CHECK(live.Value()->ChildAt(0)->ChildAt(0) == sameIcon.Get());
+    CHECK(live.Value()->ChildAt(0) == sameIcon.Get());
+    // 기본값이면 slot 정보를 지운다.
+    CHECK(sameIcon->GetSlotPlacement() == nullptr);
     auto nativeStack = stack->TakeElement(objects);
     auto mutableStackSlot =
         objects.ResolveForWrite<HorizontalBoxWidgetSlot>(access, stackSlot.Value());

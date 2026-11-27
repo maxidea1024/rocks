@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Math/Vector4.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/StackLayout.h>
 

@@ -505,19 +505,35 @@ private:
 //   auto& editor = StaticElementCast<EditableTextElement>(*live);
 namespace detail {
 
-inline bool SameElementType(const ElementType& a, const ElementType& b) noexcept {
-    if (&a == &b) {
-        return true;
-    }
-
-    const char* x = a.name;
-    const char* y = b.name;
+inline bool SameElementTypeName(const char* x, const char* y) noexcept {
     while (*x && *x == *y) {
         ++x;
         ++y;
     }
 
     return *x == *y;
+}
+
+// 주소가 같거나, 주소가 달라도(모듈마다 생긴 정적 사본) 부모 사슬 전체의 이름이 같으면 같은
+// 형식이다. 이름은 이름공간 없는 클래스 이름이라 UI 모듈 안에서 겹치면 안 된다(policy
+// ui-element-name이 막는다).
+inline bool SameElementType(const ElementType& a, const ElementType& b) noexcept {
+    const ElementType* x = &a;
+    const ElementType* y = &b;
+    while (x && y) {
+        if (x == y) {
+            return true;
+        }
+
+        if (!SameElementTypeName(x->name, y->name)) {
+            return false;
+        }
+
+        x = x->parent;
+        y = y->parent;
+    }
+
+    return x == y;
 }
 
 } // namespace detail

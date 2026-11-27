@@ -66,8 +66,10 @@ private:
     Array<usize> broad_;
     Array<Candidate> candidates_;
     WeakPtr<Element> root_;
-    // 마지막으로 걸은 루트의 창 영역이다(방향 탐색의 셀 범위).
+    // 마지막으로 걸은 루트의 창 영역과 축별 셀 수다. 셀 좌표는 이 범위로 자른다(UE
+    // FHittestGrid::GetCellCoordinate — 창 밖 요소는 가장자리 셀에 들어간다).
     Box2<float> extent_{};
+    int32 numCells_[2] = {1, 1};
     uint64 plan_ = 0;
 };
 

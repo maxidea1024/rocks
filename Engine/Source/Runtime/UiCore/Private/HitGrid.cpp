@@ -10,10 +10,27 @@ constexpr uint32 GridKeyShift = 32;
 constexpr float CellSize = 128;
 // 전체 화면 배경 하나가 수천 개 셀을 중복 점유하지 않도록 넓은 요소는 별도로 보관한다.
 constexpr int64 MaxCellsPerEntry = 64;
+// 축별 셀 수 상한이다(약 8M px 창 — 셀 수 계산의 넘침과 비정상 extent를 막는다).
+constexpr int32 MaxCellsPerAxis = 1 << 16;
 
-bool Cell(Vec2 point, int32& x, int32& y) noexcept {
-    return math::TryFloorToInt32(static_cast<double>(point.x) / CellSize, x) &&
-           math::TryFloorToInt32(static_cast<double>(point.y) / CellSize, y);
+// 창 크기 / 128 + 1이다(UE FHittestGrid::SetHittestArea NumCells).
+int32 CellCount(float extent) noexcept {
+    if (!(extent > 0)) {
+        return 1;
+    }
+
+    const double cells = math::Floor(static_cast<double>(extent) / CellSize) + 1.0;
+    return cells >= MaxCellsPerAxis ? MaxCellsPerAxis : static_cast<int32>(cells);
+}
+
+// 셀 좌표를 [0, count)로 자른다(UE GetCellCoordinate). 비유한 값은 부호 쪽 가장자리다.
+int32 ClampCell(float value, int32 count) noexcept {
+    int32 cell = 0;
+    if (!math::TryFloorToInt32(static_cast<double>(value) / CellSize, cell)) {
+        cell = value < 0 ? 0 : count - 1;
+    }
+
+    return cell < 0 ? 0 : (cell >= count ? count - 1 : cell);
 }
 
 uint64 CellKey(int32 x, int32 y) noexcept {
@@ -34,6 +51,9 @@ void HitGrid::Reset() noexcept {
     links_.Clear();
     broad_.Clear();
     candidates_.Clear();
+    extent_ = {};
+    numCells_[0] = 1;
+    numCells_[1] = 1;
 }
 
 bool HitGrid::HasSnapshot() const noexcept {
@@ -50,6 +70,13 @@ Result<void> HitGrid::Update(const SharedPtr<Element>& root) noexcept {
     }
 
     HitGrid next(entries_.GetAllocator());
+    // 셀 범위를 먼저 정한다 — 등록이 이 범위로 셀을 자른다.
+    if (auto extent = root->GetGeometry().WindowBounds()) {
+        next.extent_ = extent.Value();
+    }
+
+    next.numCells_[0] = CellCount(next.extent_.max.x);
+    next.numCells_[1] = CellCount(next.extent_.max.y);
     auto result = next.Record(root, IndexNone, nullptr);
     if (!result) {
         return result;
@@ -57,9 +84,6 @@ Result<void> HitGrid::Update(const SharedPtr<Element>& root) noexcept {
 
     next.root_ = WeakPtr<Element>(root);
     next.plan_ = root->planRevision_;
-    if (auto extent = root->GetGeometry().WindowBounds()) {
-        next.extent_ = extent.Value();
-    }
 
     *this = Move(next);
     return Result<void>::Success();
@@ -127,11 +151,10 @@ Result<void> HitGrid::Record(const SharedPtr<Element>& element, usize parentClip
 }
 
 Result<void> HitGrid::Index(usize entry, const Box2<float>& bounds) noexcept {
-    int32 left, top, right, bottom;
-    if (!Cell(bounds.min, left, top) || !Cell(bounds.max, right, bottom)) {
-        return broad_.TryPushBack(entry);
-    }
-
+    const int32 left = ClampCell(bounds.min.x, numCells_[0]);
+    const int32 top = ClampCell(bounds.min.y, numCells_[1]);
+    const int32 right = ClampCell(bounds.max.x, numCells_[0]);
+    const int32 bottom = ClampCell(bounds.max.y, numCells_[1]);
     const int64 width = static_cast<int64>(right) - left + 1;
     const int64 height = static_cast<int64>(bottom) - top + 1;
     if (width > MaxCellsPerEntry || height > MaxCellsPerEntry / width) {
@@ -246,8 +269,8 @@ SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope,
         return {};
     }
 
-    int32 x, y;
-    const auto* found = Cell(point, x, y) ? cells_.Find(CellKey(x, y)) : nullptr;
+    const auto* found =
+        cells_.Find(CellKey(ClampCell(point.x, numCells_[0]), ClampCell(point.y, numCells_[1])));
     usize node = found ? *found : IndexNone;
     usize broad = broad_.Size();
     while (node != IndexNone || broad) {
@@ -274,8 +297,9 @@ namespace {
 // 방향 탐색의 비교 허용오차와 수직 축 줄임(UE FindNextFocusableWidgetDefault 598–640행)이다.
 constexpr float FocusCompareTolerance = 0.1f;
 constexpr float FocusSweepInset = 0.5f;
-// 조상이 비활성인 후보를 빼고 다시 찾는 횟수의 상한이다(트리 깊이를 넘는 반복을 막는다).
-constexpr usize MaxFocusSearchRestarts = 64;
+// 조상이 비활성인 후보를 빼고 다시 찾는 횟수의 상한이다. 재시작마다 비활성 조상 아래 후보가
+// 하나씩 빠지므로 이 값은 그런 후보의 수 상한이다(UE는 상한이 없다 — 넘으면 찾지 못함으로 끝낸다).
+constexpr usize MaxFocusSearchRestarts = 1024;
 
 struct FocusAxis {
     // 0이면 가로(좌·우), 1이면 세로(상·하)다.
@@ -315,15 +339,6 @@ bool ParentsEnabled(const Element& element) noexcept {
     return true;
 }
 
-int32 ClampCell(float value, int32 count) noexcept {
-    int32 cell = 0;
-    if (!math::TryFloorToInt32(static_cast<double>(value) / CellSize, cell)) {
-        cell = value < 0 ? 0 : count - 1;
-    }
-
-    return cell < 0 ? 0 : (cell >= count ? count - 1 : cell);
-}
-
 } // namespace
 
 FocusSearchResult HitGrid::FindNextFocusable(const Element& start, FocusDirection direction,
@@ -359,16 +374,8 @@ FocusSearchResult HitGrid::FindNextFocusable(const Element& start, FocusDirectio
         swept.max.x -= FocusSweepInset;
     }
 
-    // 셀 수는 창 영역으로 정한다(UE NumCells — 창 크기 / 128).
-    int32 numCells[2] = {1, 1};
-    for (int32 i = 0; i < 2; ++i) {
-        const float extent = i == 0 ? extent_.max.x : extent_.max.y;
-        int32 count = 1;
-        if (math::TryFloorToInt32(static_cast<double>(extent) / CellSize, count)) {
-            numCells[i] = count + 1;
-        }
-    }
-
+    // 셀 수는 창 영역으로 정한다(UE NumCells — 창 크기 / 128 + 1, Update가 정함).
+    const int32* numCells = numCells_;
     const Vec2 center = widget.Center();
     const int32 strideAxis = horizontal ? 1 : 0;
     const int32 strideMin = ClampCell(horizontal ? swept.min.y : swept.min.x, numCells[strideAxis]);
@@ -451,9 +458,30 @@ FocusSearchResult HitGrid::FindNextFocusable(const Element& start, FocusDirectio
                 }
             }
 
-            // 셀에 넣지 않은 넓은 항목은 줄마다 본다(위에서부터).
+            // 셀에 넣지 않은 넓은 항목은 자기가 덮는 줄에서만 본다(UE는 모든 셀에 넣으므로 덮는
+            // 줄에서만 만난다).
             for (usize i = broad_.Size(); i > 0; --i) {
-                consider(broad_[i - 1]);
+                const usize entryIndex = broad_[i - 1];
+                auto broadBounds = entries_[entryIndex].geometry.WindowBounds();
+                if (!broadBounds) {
+                    continue;
+                }
+
+                const Box2<float> rect = broadBounds.Value();
+                const int32 rowMin =
+                    ClampCell(axis.axis == 0 ? rect.min.x : rect.min.y, numCells[axis.axis]);
+                const int32 rowMax =
+                    ClampCell(axis.axis == 0 ? rect.max.x : rect.max.y, numCells[axis.axis]);
+                const int32 strideLow =
+                    ClampCell(horizontal ? rect.min.y : rect.min.x, numCells[strideAxis]);
+                const int32 strideHigh =
+                    ClampCell(horizontal ? rect.max.y : rect.max.x, numCells[strideAxis]);
+                if (processed < rowMin || processed > rowMax || strideHigh < strideMin ||
+                    strideLow > strideMax) {
+                    continue;
+                }
+
+                consider(entryIndex);
             }
 
             if (best) {
