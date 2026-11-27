@@ -3,8 +3,43 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::PhysicsSettings::bounceThresholdVelocity",
+      "id": "f119ec881d2444d19928f9e5f34781e7",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::collisionMarginFraction",
+      "id": "2d1d883329bc4e41a6a6d069aecd1609",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::collisionMarginMax",
+      "id": "ea365dd8d8cd4527ac02fbe8fef4e0b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PhysicsSettings::defaultGravityZ",
       "id": "cf2eb6bb4dd445a59ca8410db2bca628",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::frictionCombineMode",
+      "id": "357c34305d99438cab822b7f8a9e7dbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::maxAngularVelocity",
+      "id": "d2febd42011a46f197e10c3d0c10f97c",
       "aliases": [],
       "retired": false
     },
@@ -31,6 +66,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PhysicsSettings::maxLinearVelocity",
+      "id": "5ca716030a744b30bf41d439b0842e74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PhysicsSettings::minDeltaVelocityForHitEvents",
       "id": "a41f2ea36cae4c0b9076417b40668e6b",
       "aliases": [],
@@ -38,8 +80,29 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PhysicsSettings::restitutionCombineMode",
+      "id": "ebd922aecddb4e3097834c726a5e564b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PhysicsSettings::restitutionThreshold",
+      "id": "65fca7a848464bc3a5f2c6f8b1168235",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PhysicsSettings::tempAllocatorBytes",
       "id": "946995f2f2364c21becb64c5ffcb892e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CombineMode",
+      "id": "c0477cc5793d4c83a18f0f6395d978b8",
       "aliases": [],
       "retired": false
     },
