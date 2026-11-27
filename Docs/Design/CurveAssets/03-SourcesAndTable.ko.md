@@ -72,7 +72,7 @@ Rocks 객체 참조는 포인터가 아니라 handle이다. 그래서 참조를 
 - **모드가 쓸 맵을 정한다.** Plain이면 `plainRows`, Tangent면 `tangentRows`, Empty면 둘 다 쓰지 않는다.
   - 모드가 쓰지 않는 맵의 행은 조회·평가에서 없는 것으로 친다. 그래서 로드가 실패하지 않는다.
   - 경로 쓰기(`asset-set`)나 Inspector가 반대쪽 맵에 값을 써도 에셋은 열린다.
-  - 편집 함수와 임포터는 반대쪽 맵을 늘 비워 둔다.
+  - 편집 함수(추가·지우기·이름 바꾸기·비우기)와 임포터는 모드가 쓰지 않는 맵의 행과 저장소를 버린다.
   - 쿠킹 처리기는 쓰지 않는 맵을 비우고 비어 있지 않았으면 경고(`CurveTableUnusedRows`)를 남긴다(5.3절).
   - 버린 대안: 로드 뒤 불변식 검사를 CorruptData로 처리하는 것.
     - 클래스 PostLoad 판정 기반이 아직 없다(A5k가 미뤘다 — AssetSystem 12.15).
@@ -112,7 +112,7 @@ UE `AddRichCurve`·`AddSimpleCurve`·`RemoveRow`·`DeleteRow`·`RenameRow`·`Emp
 - `Result<void> TryRenameRow(Name from, Name to)`는 아래 순서로 판정한다.
   1. 이름이 같으면 아무 일도 하지 않고 성공이다.
   2. `from`이 없으면 NotFound다(UE는 무시 — ◇ 7.2절 4).
-  3. `to`가 None이면 InvalidArgument다.
+  3. `to`가 None이면 InvalidArgument다(UE `RenameRow`는 None으로도 바꾼다 — ★ 7.2절 3).
   4. `to`가 이미 있으면 아무 일도 하지 않고 성공이다(UE와 같다).
   5. 그 밖이면 행을 지우고 새 이름으로 끝에 넣는다.
   - UE는 Add 뒤 Remove(`:601-611`)이고, sparse set이라 자리가 다를 수 있다(◇ 7.2절 12).
@@ -133,3 +133,4 @@ UE `AddRichCurve`·`AddSimpleCurve`·`RemoveRow`·`DeleteRow`·`RenameRow`·`Emp
     - `Eval(X, OutY, Context)`: 성공 bool을 돌려주고, 실패하면 out은 그대로다(`CurveTable.cpp:1134-1146`).
     - 블루프린트 `EvaluateCurveTableRow`: RowFound·RowNotFound를 돌려준다(`DataTableFunctionLibrary.cpp:20-36`).
 - 같음은 리플렉션 값 비교다. UE `operator==`(포인터·이름)와 같다.
+- UE `IsValid(ContextString)`·`GetCurve`·`GetRichCurve`·`GetSimpleCurve`(`CurveTable.h:280-299`)는 두지 않는다. 커브 자체가 필요한 호출자는 표를 풀어 `FindRow`·`FindPlainRow`·`FindTangentRow`를 쓴다(도우미는 소비자가 생길 때 — 7.2절 16).

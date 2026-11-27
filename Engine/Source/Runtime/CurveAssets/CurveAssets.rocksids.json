@@ -199,6 +199,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::CurveTableAsset::mode",
+      "id": "cf4ad230fa2441ab8edc89e220be3b37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableAsset::plainRows",
+      "id": "8211ef4b325c4d9b95f1282bab1e20c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableAsset::tangentRows",
+      "id": "50c98e01f3044141bb485a831a66fc93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableRowRef::row",
+      "id": "a59e5b093f1b4b9bbe850b1a1eb89b61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CurveTableRowRef::table",
+      "id": "0ce165d775434894a763ee7d1bdd33cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::FloatCurveAsset::curve",
       "id": "0710b8cee63e401c915f05c1e7179046",
       "aliases": [],
@@ -306,6 +341,27 @@
       "kind": "type",
       "name": "rocks::CurveAsset",
       "id": "62fcc99e2eb94b0ca7ff27285a192940",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableAsset",
+      "id": "b481fd3bd9ab4befa811750d8963036e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableMode",
+      "id": "a7fe602c5eba410184bea3d5b72f7004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTableRowRef",
+      "id": "f0a4fb69908345a2966ef9fd0126f2ce",
       "aliases": [],
       "retired": false
     },

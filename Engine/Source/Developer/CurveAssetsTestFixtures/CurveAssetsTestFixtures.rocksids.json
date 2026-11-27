@@ -17,6 +17,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::curve_fixture::CurveSourceHolder::tableRow",
+      "id": "2a94370cc241477e89b49c2f4bccb40a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::curve_fixture::CurveSourceHolder::vectorSource",
       "id": "7417dd551ba94687a504e63dee974aac",
       "aliases": [],
