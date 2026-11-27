@@ -15,6 +15,8 @@ namespace {
 
 // 키를 세는 조상이다(초점은 받지 않는다). blockDown이면 아래 방향을 스스로 처리한다.
 class KeySpy final : public Element {
+    ROCKS_UI_ELEMENT(KeySpy, Element)
+
 public:
     explicit KeySpy(Allocator& allocator) noexcept : Element(allocator) {
     }
@@ -39,6 +41,8 @@ public:
 };
 
 class FocusBox final : public Element {
+    ROCKS_UI_ELEMENT(FocusBox, Element)
+
 public:
     explicit FocusBox(Allocator& allocator) noexcept : Element(allocator) {
     }

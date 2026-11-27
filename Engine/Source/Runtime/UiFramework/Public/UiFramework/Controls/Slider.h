@@ -10,6 +10,8 @@ namespace rocks::ui {
 // 마우스·터치 drag와 좌우 키로 값을 조절하는 수평 슬라이더다. 모양은 SliderStyle(UE "Slider")이고,
 // Frame 색은 막대 tint(UE SliderBarColor), 손잡이 색은 손잡이 tint(UE SliderHandleColor)다.
 class ROCKS_UIFRAMEWORK_API Slider : public Frame {
+    ROCKS_UI_ELEMENT(Slider, Frame)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     explicit Slider(Allocator& allocator) noexcept;

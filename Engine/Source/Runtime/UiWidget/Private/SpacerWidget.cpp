@@ -27,7 +27,7 @@ Vec2 SpacerWidget::Size() const noexcept {
 }
 
 void SpacerWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<SizeBox&>(element);
+    auto& native = StaticElementCast<SizeBox>(element);
     (void)native.SetWidthOverride(size_.x);
     (void)native.SetHeightOverride(size_.y);
     native.SetVisibility(Visibility::HitTestInvisible);

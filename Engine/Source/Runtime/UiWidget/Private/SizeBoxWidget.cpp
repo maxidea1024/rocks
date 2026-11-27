@@ -50,7 +50,7 @@ Result<void> SizeBoxWidget::SetWidthOverride(float value) noexcept {
 
     widthOverride_ = value;
     if (auto live = CachedElement()) {
-        return static_cast<SizeBox&>(*live).SetWidthOverride(value);
+        return StaticElementCast<SizeBox>(*live).SetWidthOverride(value);
     }
 
     return Result<void>::Success();
@@ -59,7 +59,7 @@ Result<void> SizeBoxWidget::SetWidthOverride(float value) noexcept {
 void SizeBoxWidget::ClearWidthOverride() noexcept {
     widthOverride_ = -1;
     if (auto live = CachedElement()) {
-        static_cast<SizeBox&>(*live).ClearWidthOverride();
+        StaticElementCast<SizeBox>(*live).ClearWidthOverride();
     }
 }
 
@@ -70,7 +70,7 @@ Result<void> SizeBoxWidget::SetHeightOverride(float value) noexcept {
 
     heightOverride_ = value;
     if (auto live = CachedElement()) {
-        return static_cast<SizeBox&>(*live).SetHeightOverride(value);
+        return StaticElementCast<SizeBox>(*live).SetHeightOverride(value);
     }
 
     return Result<void>::Success();
@@ -79,7 +79,7 @@ Result<void> SizeBoxWidget::SetHeightOverride(float value) noexcept {
 void SizeBoxWidget::ClearHeightOverride() noexcept {
     heightOverride_ = -1;
     if (auto live = CachedElement()) {
-        static_cast<SizeBox&>(*live).ClearHeightOverride();
+        StaticElementCast<SizeBox>(*live).ClearHeightOverride();
     }
 }
 
@@ -90,7 +90,7 @@ Result<void> SizeBoxWidget::SetAspectRatioRange(float minimum, float maximum) no
 
     aspectRange_ = {minimum, maximum};
     if (auto live = CachedElement()) {
-        return static_cast<SizeBox&>(*live).SetAspectRatioRange(minimum, maximum);
+        return StaticElementCast<SizeBox>(*live).SetAspectRatioRange(minimum, maximum);
     }
 
     return Result<void>::Success();
@@ -101,7 +101,7 @@ Vec2 SizeBoxWidget::MinimumSize() const noexcept {
 }
 
 void SizeBoxWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<SizeBox&>(element);
+    auto& native = StaticElementCast<SizeBox>(element);
     (void)native.SetSizeRange(minimumSize_, maximumSize_);
     (void)native.SetAspectRatioRange(aspectRange_.x, aspectRange_.y);
     if (widthOverride_ >= 0) {

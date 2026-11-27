@@ -27,12 +27,13 @@ enum class MenuPlacement : uint8 {
 // 스크롤·패널 클리핑을 벗어날 수 있다. 아래쪽 공간이 좁으면 위쪽을 사용한다.
 // 메뉴 밖의 누름이나 Escape로 닫으며, Close는 닫힌 상태에서도 호출할 수 있다.
 class ROCKS_UIFRAMEWORK_API MenuAnchor : public Button {
+    ROCKS_UI_ELEMENT(MenuAnchor, Button)
+
 public:
     explicit MenuAnchor(Allocator& allocator) noexcept;
     ~MenuAnchor() noexcept override;
 
     using MenuFactory = Delegate<Result<SharedPtr<Element>>()>;
-    using Super = Button;
     struct Args {
         ElementChild content{};
         MenuFactory makeMenu{};

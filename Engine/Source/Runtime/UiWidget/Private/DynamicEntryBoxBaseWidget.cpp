@@ -14,14 +14,14 @@ Result<void> ApplySpacing(Element& element, DynamicBoxType type, Vec2 spacing) n
     switch (type) {
     case DynamicBoxType::Vertical:
     case DynamicBoxType::Horizontal:
-        return static_cast<StackPanel&>(element).SetSpacing(
+        return StaticElementCast<StackPanel>(element).SetSpacing(
             type == DynamicBoxType::Vertical ? spacing.y : spacing.x);
     case DynamicBoxType::Wrap:
     case DynamicBoxType::VerticalWrap:
-        return static_cast<WrapStack&>(element).SetSpacing(spacing);
+        return StaticElementCast<WrapStack>(element).SetSpacing(spacing);
     case DynamicBoxType::Overlay:
     case DynamicBoxType::Radial:
-        static_cast<EntryPatternPanel&>(element).SetSpacing(spacing);
+        StaticElementCast<EntryPatternPanel>(element).SetSpacing(spacing);
         return Result<void>::Success();
     }
 
@@ -88,7 +88,7 @@ Result<SharedPtr<Element>> DynamicEntryBoxBaseWidget::CreatePanel(Allocator& all
                                                                     ? StackDirection::Horizontal
                                                                     : StackDirection::Vertical);
             if (wrap) {
-                static_cast<WrapStack&>(*wrap.Value()).SetUseAllottedSize(true);
+                StaticElementCast<WrapStack>(*wrap.Value()).SetUseAllottedSize(true);
             }
 
             return wrap;
@@ -102,7 +102,7 @@ Result<SharedPtr<Element>> DynamicEntryBoxBaseWidget::CreatePanel(Allocator& all
     };
     auto panel = makePanel();
     if (panel && (type == DynamicBoxType::Radial || type == DynamicBoxType::Overlay)) {
-        auto& patterned = static_cast<EntryPatternPanel&>(*panel.Value());
+        auto& patterned = StaticElementCast<EntryPatternPanel>(*panel.Value());
         if (!radialSettings_.IsValid()) {
             return Result<SharedPtr<Element>>::Failure(ErrorCode::InvalidArgument);
         }
@@ -138,7 +138,7 @@ Result<void> DynamicEntryBoxBaseWidget::SetSpacingPattern(Span<const Vec2> steps
     }
 
     if (auto live = CachedElement(); live && BoxType() == DynamicBoxType::Overlay) {
-        auto applied = static_cast<EntryPatternPanel&>(*live).SetPattern(staged.View());
+        auto applied = StaticElementCast<EntryPatternPanel>(*live).SetPattern(staged.View());
         if (!applied) {
             return applied;
         }
@@ -159,7 +159,7 @@ DynamicEntryBoxBaseWidget::SetRadialSettings(const RadialBoxSettings& settings) 
     }
 
     if (auto live = CachedElement(); live && BoxType() == DynamicBoxType::Radial) {
-        static_cast<EntryPatternPanel&>(*live).SetRadialSettings(settings);
+        StaticElementCast<EntryPatternPanel>(*live).SetRadialSettings(settings);
     }
 
     radialSettings_ = settings;

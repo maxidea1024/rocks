@@ -61,7 +61,7 @@ TEST(UiWidget_TextShaperFailurePreservesPublishedText) {
     widgets->SetTextShaper(shaper.Value());
     auto element = label->TakeElement(objects);
     REQUIRE(element);
-    auto& native = static_cast<TextLabel&>(*element.Value());
+    auto& native = StaticElementCast<TextLabel>(*element.Value());
     CHECK(native.GetText() == "A");
     REQUIRE(label->SetJustification(text::TextAlignment::Right));
     REQUIRE(label->SetWrapWidth(80));

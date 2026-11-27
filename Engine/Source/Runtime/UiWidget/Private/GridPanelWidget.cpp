@@ -35,7 +35,7 @@ Result<void> GridPanelWidget::SetFill(Array<float>& weights, uint32 index, float
     }
 
     if (auto live = CachedElement()) {
-        auto& grid = static_cast<Grid&>(*live);
+        auto& grid = StaticElementCast<Grid>(*live);
         auto applied = column ? grid.SetColumnFill(index, value) : grid.SetRowFill(index, value);
         if (!applied) {
             (void)weights.TryResize(previous);
@@ -59,7 +59,7 @@ void GridPanelWidget::ClearFill() noexcept {
     columnFill_.Clear();
     rowFill_.Clear();
     if (auto live = CachedElement()) {
-        static_cast<Grid&>(*live).ClearFill();
+        StaticElementCast<Grid>(*live).ClearFill();
     }
 }
 
@@ -73,7 +73,7 @@ Result<SharedPtr<Element>> GridPanelWidget::CreatePanel(Allocator& allocator) no
         return made;
     }
 
-    auto& grid = static_cast<Grid&>(*made.Value());
+    auto& grid = StaticElementCast<Grid>(*made.Value());
     for (usize i = 0; i < columnFill_.Size(); ++i) {
         auto applied = grid.SetColumnFill(static_cast<uint32>(i), columnFill_[i]);
         if (!applied) {
@@ -112,7 +112,7 @@ Result<void> GridPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandle 
     }
 
     const auto layout = slot.Value().Get().Value()->Layout();
-    return static_cast<Grid&>(panel).TryAddSlot(child, layout);
+    return StaticElementCast<Grid>(panel).TryAddSlot(child, layout);
 }
 
 } // namespace rocks::ui

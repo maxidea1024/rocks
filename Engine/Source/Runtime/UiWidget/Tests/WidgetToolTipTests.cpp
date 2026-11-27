@@ -70,12 +70,12 @@ TEST(UiWidget_ToolTipsUseToolTipBoxes) {
     REQUIRE(label->SetToolTipText(objects, text.Value()));
     auto plain = element.Value()->MakeToolTip();
     REQUIRE(plain);
-    CHECK(static_cast<ToolTip&>(*plain.Value()).GetStyle() == DefaultToolTipStyle());
+    CHECK(StaticElementCast<ToolTip>(*plain.Value()).GetStyle() == DefaultToolTipStyle());
     // 사용자 위젯 툴팁은 바탕·여백 없는 상자에 담는다(UE SToolTip TextMargin 0, BorderImage null).
     REQUIRE(label->SetToolTip(objects, contentHandle.Value().Handle()));
     auto first = element.Value()->MakeToolTip();
     REQUIRE(first);
-    CHECK(static_cast<ToolTip&>(*first.Value()).GetStyle() == BareToolTipStyle());
+    CHECK(StaticElementCast<ToolTip>(*first.Value()).GetStyle() == BareToolTipStyle());
     // 닫힌 지난 상자에 남은 내용은 떼어 새 상자에 다시 담는다.
     auto second = element.Value()->MakeToolTip();
     REQUIRE(second);

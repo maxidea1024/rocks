@@ -9,8 +9,9 @@ namespace rocks::ui {
 // KeyChord로 전달한다. Escape 또는 포커스 상실은 기존 선택을 보존한다.
 // SetCaption은 화면 언어에 맞게 문자열을 셰이핑하는 콜백이다.
 class ROCKS_UIFRAMEWORK_API InputKeySelector final : public Button {
+    ROCKS_UI_ELEMENT(InputKeySelector, Button)
+
 public:
-    using Super = Button;
     struct Args {
         KeyChord selectedKey{};
         bool allowModifiers = true;

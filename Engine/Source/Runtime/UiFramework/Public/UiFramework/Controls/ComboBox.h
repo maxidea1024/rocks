@@ -15,9 +15,10 @@ inline constexpr float ComboArrowPadding = 2.0f;
 // 선택 값의 표현과 메뉴 행의 표현을 생성기로 분리한다. 생성기는 매번 부모 없는 새 Element를
 // 반환해야 한다. 선택 인덱스 -1은 선택 해제다. 열려 있는 동안 방향키로 이동하고 Enter로 확정한다.
 class ROCKS_UIFRAMEWORK_API ComboBox final : public MenuAnchor {
+    ROCKS_UI_ELEMENT(ComboBox, MenuAnchor)
+
 public:
     using MakeOption = Delegate<Result<SharedPtr<Element>>(usize, bool)>;
-    using Super = MenuAnchor;
     struct Args {
         usize count = 0;
         int32 selected = -1;

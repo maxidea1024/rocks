@@ -13,6 +13,8 @@ namespace {
 
 // 화면 트리가 UserWidget을 붙잡고, UserWidget은 이 루트를 약하게 참조한다.
 class UserWidgetRoot final : public Overlay {
+    ROCKS_UI_ELEMENT(UserWidgetRoot, Overlay)
+
 public:
     UserWidgetRoot(Allocator& allocator, ObjectRegistry& objects,
                    RootRef<UserWidget> owner) noexcept
@@ -194,7 +196,7 @@ void UserWidget::ReleaseElements() noexcept {
 
     Widget::ReleaseElements();
     if (root) {
-        static_cast<UserWidgetRoot*>(root.Get())->Detach();
+        StaticElementCast<UserWidgetRoot>(root.Get())->Detach();
     }
 }
 

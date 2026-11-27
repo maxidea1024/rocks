@@ -12,6 +12,8 @@ namespace {
 
 // 물려받은 전경색으로 상자 하나를 그린다(레이블 대역).
 class ForegroundProbe final : public Element {
+    ROCKS_UI_ELEMENT(ForegroundProbe, Element)
+
 public:
     explicit ForegroundProbe(Allocator& allocator) noexcept : Element(allocator) {
     }

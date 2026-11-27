@@ -15,6 +15,8 @@ namespace rocks::ui {
 // 메뉴, Esc는 팝업 층이 한 단계 닫는다. 하위 메뉴는 hover 즉시 열고, 다른 하위 메뉴가 열려 있으면
 // SubMenuClobberDelay 뒤 바꾼다(UE SubMenuOpenTime 0·SubMenuClobberTime 0.5 — MultiBox.h 34·39행).
 class ROCKS_UIFRAMEWORK_API MenuPanel final : public Element {
+    ROCKS_UI_ELEMENT(MenuPanel, Element)
+
 public:
     // owner는 이 메뉴를 연 anchor다(루트면 막대 버튼).
     MenuPanel(Allocator& allocator, const SharedPtr<MenuContext>& context,

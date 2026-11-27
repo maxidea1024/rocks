@@ -16,6 +16,8 @@ constexpr double InteractiveToolTipLeaveDelay = 0.15;
 
 // 호스트 Overlay의 전체 크기를 받되 내용만 커서 또는 소유 요소 옆에 배치한다.
 class ToolTipLayer final : public Element {
+    ROCKS_UI_ELEMENT(ToolTipLayer, Element)
+
 public:
     ToolTipLayer(Allocator& allocator, Vec2 point, const SharedPtr<Element>& owner,
                  bool interactive, bool belowOwner) noexcept

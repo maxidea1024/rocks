@@ -36,7 +36,7 @@ Result<void> CanvasPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandl
     }
 
     const auto layout = slot.Value().Get().Value()->Layout();
-    return static_cast<AnchorCanvas&>(panel).TryAddSlot(child, layout);
+    return StaticElementCast<AnchorCanvas>(panel).TryAddSlot(child, layout);
 }
 
 } // namespace rocks::ui

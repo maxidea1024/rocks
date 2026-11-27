@@ -14,7 +14,7 @@ ButtonWidget::ButtonWidget(Allocator& allocator) noexcept : ContentWidget(alloca
 void ButtonWidget::SetFocusable(bool enabled) noexcept {
     focusable_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<Button&>(*live).SetFocusable(enabled);
+        StaticElementCast<Button>(*live).SetFocusable(enabled);
     }
 }
 
@@ -24,12 +24,12 @@ bool ButtonWidget::IsFocusable() const noexcept {
 
 bool ButtonWidget::IsPressed() const noexcept {
     auto live = CachedElement();
-    return live && static_cast<Button&>(*live).IsPressed();
+    return live && StaticElementCast<Button>(*live).IsPressed();
 }
 
 bool ButtonWidget::IsHovered() const noexcept {
     auto live = CachedElement();
-    return live && static_cast<Button&>(*live).IsHovered();
+    return live && StaticElementCast<Button>(*live).IsHovered();
 }
 
 Result<void> ButtonWidget::SetInputMethods(ButtonClickMethod click, ButtonClickMethod touch,
@@ -43,7 +43,7 @@ Result<void> ButtonWidget::SetInputMethods(ButtonClickMethod click, ButtonClickM
     touchMethod_ = static_cast<uint8>(touch);
     pressMethod_ = static_cast<uint8>(press);
     if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetInputMethods(click, touch, press);
+        return StaticElementCast<Button>(*live).SetInputMethods(click, touch, press);
     }
 
     return Result<void>::Success();
@@ -56,7 +56,7 @@ Result<void> ButtonWidget::SetStyle(const ButtonStyle& style) noexcept {
 
     style_ = style;
     if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetStyle(style);
+        return StaticElementCast<Button>(*live).SetStyle(style);
     }
 
     return Result<void>::Success();
@@ -73,7 +73,7 @@ Result<void> ButtonWidget::SetBackgroundColor(LinearColor color) noexcept {
 
     backgroundColor_ = color;
     if (auto live = CachedElement()) {
-        static_cast<Button&>(*live).SetColor(color);
+        StaticElementCast<Button>(*live).SetColor(color);
     }
 
     return Result<void>::Success();
@@ -90,14 +90,14 @@ Result<void> ButtonWidget::SetPadding(Vec4 padding) noexcept {
 
     padding_ = padding;
     if (auto live = CachedElement()) {
-        return static_cast<Button&>(*live).SetContentPadding(padding);
+        return StaticElementCast<Button>(*live).SetContentPadding(padding);
     }
 
     return Result<void>::Success();
 }
 
 void ButtonWidget::ApplyProperties(Element& element) noexcept {
-    auto& button = static_cast<Button&>(element);
+    auto& button = StaticElementCast<Button>(element);
     button.SetColor(backgroundColor_);
     (void)button.SetStyle(style_);
     (void)button.SetContentPadding(padding_);
@@ -142,7 +142,7 @@ Result<SharedPtr<Element>> ButtonWidget::BuildElement(ObjectRegistry& objects) n
         return element;
     }
 
-    auto* button = static_cast<Button*>(element.Value().Get());
+    auto* button = StaticElementCast<Button>(element.Value().Get());
     auto bind = [&](Delegate<void()> ButtonWidget::* event) noexcept {
         return Delegate<void()>::CreateLambda(
             [&objects, owner = Handle(), button, event]() noexcept {

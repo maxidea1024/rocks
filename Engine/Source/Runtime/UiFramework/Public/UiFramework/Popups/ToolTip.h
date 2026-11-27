@@ -20,8 +20,9 @@ namespace rocks::ui {
 //   tip.Value()->Construct({.text = label.Value()});
 //   return tip;   // 상자 하나가 툴팁 층에 놓인다
 class ROCKS_UIFRAMEWORK_API ToolTip final : public Frame {
+    ROCKS_UI_ELEMENT(ToolTip, Frame)
+
 public:
-    using Super = Frame;
     struct Args {
         SharedPtr<TextLabel> text{};
         SharedPtr<TextLabel> title{};

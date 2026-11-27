@@ -57,8 +57,8 @@ TEST(UiWidget_ButtonEventsAndBorderImageStyleSurviveRebuilds) {
     REQUIRE(original.Value()->Arrange(Geometry::Root({50, 30}, {})));
     // 버튼 스타일 여백 (12, 1.5, 12, 1.5)과 테두리 여백 (2, 3, 4, 5) 안쪽이다.
     CHECK(image.CachedElement()->GetGeometry().size == Vec2(50 - 24 - 6, 30 - 3 - 8));
-    CHECK(static_cast<Button&>(*original.Value()).GetStyle() == PrimaryButtonStyle());
-    CHECK(static_cast<Button&>(*original.Value()).GetColor() == LinearColor(1, 0.5f, 1, 1));
+    CHECK(StaticElementCast<Button>(*original.Value()).GetStyle() == PrimaryButtonStyle());
+    CHECK(StaticElementCast<Button>(*original.Value()).GetColor() == LinearColor(1, 0.5f, 1, 1));
     CHECK(original.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
     CHECK(button.IsPressed() && presses == 1);
     CHECK(original.Value()->SendKey(0, input::InputEvent::KeyUp(input::Key::Enter)).IsHandled());

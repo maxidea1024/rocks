@@ -3,7 +3,7 @@
 namespace rocks::ui {
 
 TextLabel& TextLayoutWidget::ResolveTextLabel(Element& element) const noexcept {
-    return static_cast<TextLabel&>(element);
+    return StaticElementCast<TextLabel>(element);
 }
 
 Result<void> TextLayoutWidget::ApplyTextLayout(TextLabel& label) const noexcept {

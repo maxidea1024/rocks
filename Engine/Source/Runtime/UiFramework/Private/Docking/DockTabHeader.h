@@ -9,6 +9,8 @@
 namespace rocks::ui {
 
 class DockTabHeader final : public Element {
+    ROCKS_UI_ELEMENT(DockTabHeader, Element)
+
 public:
     DockTabHeader(Allocator& allocator, const DockTabStyle& style) noexcept;
 

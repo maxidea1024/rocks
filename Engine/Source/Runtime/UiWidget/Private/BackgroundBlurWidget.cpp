@@ -37,7 +37,7 @@ Result<void> BackgroundBlurWidget::SetCornerRadius(Vec4 corners) noexcept {
 
     cornerRadius_ = corners;
     if (auto live = CachedElement()) {
-        return static_cast<BackgroundBlur&>(*live).SetCornerRadius(corners);
+        return StaticElementCast<BackgroundBlur>(*live).SetCornerRadius(corners);
     }
 
     return Result<void>::Success();
@@ -50,7 +50,7 @@ Result<void> BackgroundBlurWidget::SetBlurRadius(int32 kernel) noexcept {
 
     blurRadius_ = kernel;
     if (auto live = CachedElement()) {
-        return static_cast<BackgroundBlur&>(*live).SetBlurRadius(kernel);
+        return StaticElementCast<BackgroundBlur>(*live).SetBlurRadius(kernel);
     }
 
     return Result<void>::Success();
@@ -59,14 +59,14 @@ Result<void> BackgroundBlurWidget::SetBlurRadius(int32 kernel) noexcept {
 void BackgroundBlurWidget::SetApplyAlphaToBlur(bool apply) noexcept {
     applyAlphaToBlur_ = apply;
     if (auto live = CachedElement()) {
-        static_cast<BackgroundBlur&>(*live).SetApplyAlphaToBlur(apply);
+        StaticElementCast<BackgroundBlur>(*live).SetApplyAlphaToBlur(apply);
     }
 }
 
 void BackgroundBlurWidget::SetLowQuality(bool enabled) noexcept {
     lowQuality_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<BackgroundBlur&>(*live).SetLowQuality(enabled);
+        StaticElementCast<BackgroundBlur>(*live).SetLowQuality(enabled);
     }
 }
 
@@ -78,14 +78,14 @@ Result<void> BackgroundBlurWidget::SetLowQualityFallbackBrush(const Brush& brush
     fallback_ = brush;
     fallbackTint_ = brush.tint;
     if (auto live = CachedElement()) {
-        return static_cast<BackgroundBlur&>(*live).SetLowQualityFallbackBrush(brush);
+        return StaticElementCast<BackgroundBlur>(*live).SetLowQualityFallbackBrush(brush);
     }
 
     return Result<void>::Success();
 }
 
 void BackgroundBlurWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<BackgroundBlur&>(element);
+    auto& native = StaticElementCast<BackgroundBlur>(element);
     (void)native.SetStrength(strength_);
     (void)native.SetCornerRadius(cornerRadius_);
     (void)native.SetBlurRadius(blurRadius_);

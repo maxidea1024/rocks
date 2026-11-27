@@ -7,6 +7,8 @@ namespace rocks::ui {
 // 처리한다. 창이 전체 화면이면 Client로 답해 끌어 옮기지 않고, 두 번 누르기를 직접 받아 전체 화면
 // 전환 요청을 부른다(UE SWindowTitleBarArea — Docs/Design/UiToolkit 19.2절).
 class ROCKS_UIFRAMEWORK_API WindowTitleBarArea final : public Frame {
+    ROCKS_UI_ELEMENT(WindowTitleBarArea, Frame)
+
 public:
     explicit WindowTitleBarArea(Allocator& allocator) noexcept;
     // 전체 화면에서 두 번 누르기가 전환 요청을 부를지다(UE bDoubleClickTogglesFullscreen).

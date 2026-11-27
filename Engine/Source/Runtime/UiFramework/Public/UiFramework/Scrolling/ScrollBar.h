@@ -16,9 +16,10 @@ inline constexpr float ScrollBarLengthFactor = 4.0f;
 // 예를 들어 100행 중 25행을 보고 있다면 thumbSize는 0.25이고 마지막 페이지의 offset은 0.75다.
 // SetState는 외부 스크롤 상태를 반영하며, 사용자 조작만 onScrolled를 발생시킨다.
 class ROCKS_UIFRAMEWORK_API ScrollBar final : public Frame {
+    ROCKS_UI_ELEMENT(ScrollBar, Frame)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
-    using Super = Frame;
     struct Args {
         float offset = 0;
         float thumbSize = 1;

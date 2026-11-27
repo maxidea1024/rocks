@@ -15,6 +15,8 @@ namespace rocks::ui {
 // 이력·변경 알림은 EndComposition에서 한 번 바뀐다. 조합 중 선택(anchor_·caret_)은 미리보기 안
 // 위치다.
 class EditableTextElement final : public Element, public TextInputContext {
+    ROCKS_UI_ELEMENT(EditableTextElement, Element)
+
 public:
     EditableTextElement(Allocator& allocator, ObjectRegistry& registry, ObjectHandle owner,
                         SharedPtr<WidgetTextShaper> shaper, Platform platform, bool multiline,

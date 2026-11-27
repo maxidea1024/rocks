@@ -9,6 +9,8 @@ namespace rocks::ui {
 
 // 호스트가 렌더링한 장면 텍스처 위에 자식 UI를 배치한다. 장면 수명과 카메라는 호스트가 소유한다.
 class ROCKS_UIFRAMEWORK_API Viewport final : public SizeBox, public WidgetSurface {
+    ROCKS_UI_ELEMENT(Viewport, SizeBox)
+
 public:
     struct Args {
         ElementChild content{};

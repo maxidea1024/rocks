@@ -9,7 +9,7 @@ Result<SharedPtr<Element>> ScrollBoxWidget::BuildElement(ObjectRegistry& objects
         return element;
     }
 
-    auto* scroll = static_cast<ScrollView*>(element.Value().Get());
+    auto* scroll = StaticElementCast<ScrollView>(element.Value().Get());
     scroll->SetOnUserScrolled(Delegate<void(float)>::CreateLambda(
         [&objects, id = Handle(), scroll](float offset) noexcept {
             auto ref = objects.ResolveForWrite<ScrollBoxWidget>(objects.OwnerAccess(), id);
@@ -30,10 +30,10 @@ Result<SharedPtr<Element>> ScrollBoxWidget::BuildElement(ObjectRegistry& objects
 }
 
 void ScrollBoxWidget::ApplyProperties(Element& element) noexcept {
-    auto& view = static_cast<ScrollView&>(element);
+    auto& view = StaticElementCast<ScrollView>(element);
     const auto direction = horizontal_ ? StackDirection::Horizontal : StackDirection::Vertical;
     view.SetDirection(direction);
-    static_cast<StackPanel&>(ChildHost(view)).SetDirection(direction);
+    StaticElementCast<StackPanel>(ChildHost(view)).SetDirection(direction);
     view.SetWheelPolicy(static_cast<ConsumeMouseWheel>(wheelPolicy_));
     (void)view.SetWheelMultiplier(wheelMultiplier_);
     (void)view.SetScrollbarThickness(thickness_);
@@ -47,7 +47,7 @@ void ScrollBoxWidget::ApplyProperties(Element& element) noexcept {
 
 void ScrollBoxWidget::ScrollToEnd() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ScrollView&>(*live).ScrollToEnd();
+        StaticElementCast<ScrollView>(*live).ScrollToEnd();
     } else {
         endRequested_ = true;
     }
@@ -65,27 +65,27 @@ Result<void> ScrollBoxWidget::ScrollWidgetIntoView(const Widget& child,
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    return static_cast<ScrollView&>(*view).ScrollIntoView(*entry, alignment, padding);
+    return StaticElementCast<ScrollView>(*view).ScrollIntoView(*entry, alignment, padding);
 }
 
 float ScrollBoxWidget::GetViewFraction() const noexcept {
     auto view = CachedElement();
-    return view ? static_cast<ScrollView&>(*view).GetViewFraction() : 1;
+    return view ? StaticElementCast<ScrollView>(*view).GetViewFraction() : 1;
 }
 
 float ScrollBoxWidget::GetViewOffsetFraction() const noexcept {
     auto view = CachedElement();
-    return view ? static_cast<ScrollView&>(*view).GetViewOffsetFraction() : 0;
+    return view ? StaticElementCast<ScrollView>(*view).GetViewOffsetFraction() : 0;
 }
 
 float ScrollBoxWidget::GetScrollOffsetOfEnd() const noexcept {
     auto view = CachedElement();
-    return view ? static_cast<ScrollView&>(*view).GetMaxScrollOffset() : 0;
+    return view ? StaticElementCast<ScrollView>(*view).GetMaxScrollOffset() : 0;
 }
 
 bool ScrollBoxWidget::IsScrolling() const noexcept {
     auto view = CachedElement();
-    return view ? static_cast<ScrollView&>(*view).IsScrolling() : false;
+    return view ? StaticElementCast<ScrollView>(*view).IsScrolling() : false;
 }
 
 Result<void> ScrollBoxWidget::SetOrientation(StackDirection value) noexcept {
@@ -154,7 +154,7 @@ Result<void> ScrollBoxWidget::SetScrollbarPadding(Vec4 padding) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        auto set = static_cast<ScrollView&>(*live).SetScrollbarPadding(padding);
+        auto set = StaticElementCast<ScrollView>(*live).SetScrollbarPadding(padding);
         if (!set) {
             return set;
         }
@@ -171,7 +171,7 @@ Vec4 ScrollBoxWidget::GetScrollbarPadding() const noexcept {
 void ScrollBoxWidget::SetAlwaysShowScrollbarTrack(bool show) noexcept {
     alwaysShowTrack_ = show;
     if (auto live = CachedElement()) {
-        static_cast<ScrollView&>(*live).SetAlwaysShowTrack(show);
+        StaticElementCast<ScrollView>(*live).SetAlwaysShowTrack(show);
     }
 }
 
@@ -183,7 +183,7 @@ void ScrollBoxWidget::SetScrollPadding(bool before, bool after) noexcept {
     padBefore_ = before;
     padAfter_ = after;
     if (auto live = CachedElement()) {
-        static_cast<ScrollView&>(*live).SetScrollPadding(before, after);
+        StaticElementCast<ScrollView>(*live).SetScrollPadding(before, after);
     }
 }
 

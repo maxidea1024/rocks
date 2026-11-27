@@ -173,7 +173,7 @@ void MenuBuilder::AddSubMenu(StringView label, MenuFill fill) noexcept {
         return;
     }
 
-    auto& row = static_cast<MenuRow&>(*panel_->ChildAt(panel_->ChildCount() - 1));
+    auto& row = StaticElementCast<MenuRow>(*panel_->ChildAt(panel_->ChildCount() - 1));
     // 채우기 delegate를 품은 factory는 인라인 저장보다 커서 allocator에 둔다.
     auto factory = MenuAnchor::MenuFactory::TryCreateLambda(
         context_->GetAllocator(),

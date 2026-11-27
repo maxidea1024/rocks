@@ -26,11 +26,12 @@ enum class ButtonPressMethod : uint8 {
 // 사용 예:
 //   Make<Button>({.content = Label("Apply"), .style = PrimaryButtonStyle(), .onClicked = apply});
 class ROCKS_UIFRAMEWORK_API Button : public Frame {
+    ROCKS_UI_ELEMENT(Button, Frame)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     // 바탕이 강조색(Primary 계열)이면 흰 외곽선을 쓴다.
     const StyleBrush* FocusOutlineBrush() const noexcept override;
-    using Super = Frame;
     struct Args {
         ElementChild content{};
         // 값을 복사한다. 상태별 brush·여백·전경색을 담는다.

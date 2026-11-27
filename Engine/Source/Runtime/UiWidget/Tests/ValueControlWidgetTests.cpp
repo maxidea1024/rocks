@@ -37,7 +37,7 @@ TEST(UiWidget_ScrollBarPersistsInputAndIgnoresReleasedControls) {
     model.ReleaseElements();
     auto rebuilt = model.TakeElement(objects);
     REQUIRE(rebuilt);
-    CHECK(static_cast<ScrollBar&>(*rebuilt.Value()).Offset() == 0.75f);
+    CHECK(StaticElementCast<ScrollBar>(*rebuilt.Value()).Offset() == 0.75f);
     REQUIRE(first.Value()->OnPointerEvent({PointerEventType::Move, {15, 5}}).handled);
     CHECK(model.Offset() == 0.75f);
 }
@@ -64,7 +64,7 @@ TEST(UiWidget_CheckBoxHandlesMixedStateAndPreservesBooleanAPI) {
     CHECK(!model.IsChecked());
     auto native = model.TakeElement(objects);
     REQUIRE(native);
-    CHECK(static_cast<CheckBox&>(*native.Value()).GetState() == CheckState::Indeterminate);
+    CHECK(StaticElementCast<CheckBox>(*native.Value()).GetState() == CheckState::Indeterminate);
     CHECK(native.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
     CHECK(native.Value()->SendKey(0, input::InputEvent::KeyUp(input::Key::Space)).IsHandled());
     CHECK(model.GetState() == CheckState::Checked && model.IsChecked());

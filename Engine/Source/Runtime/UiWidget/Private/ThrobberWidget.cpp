@@ -15,7 +15,7 @@ Result<void> ThrobberWidget::SetPieceCount(uint32 count) noexcept {
 
     pieceCount_ = count;
     if (auto live = CachedElement()) {
-        return static_cast<ActivityIndicator&>(*live).SetPieceCount(count);
+        return StaticElementCast<ActivityIndicator>(*live).SetPieceCount(count);
     }
 
     return Result<void>::Success();
@@ -24,7 +24,7 @@ Result<void> ThrobberWidget::SetPieceCount(uint32 count) noexcept {
 void ThrobberWidget::SetAnimating(bool animate) noexcept {
     animating_ = animate;
     if (auto live = CachedElement()) {
-        static_cast<ActivityIndicator&>(*live).SetAnimating(animate);
+        StaticElementCast<ActivityIndicator>(*live).SetAnimating(animate);
     }
 }
 
@@ -37,7 +37,7 @@ Result<void> ThrobberWidget::SetPieceBrush(const Brush& brush) noexcept {
     pieceSize_ = brush.imageSize;
     pieceTint_ = brush.tint;
     if (auto live = CachedElement()) {
-        return static_cast<ActivityIndicator&>(*live).SetPieceBrush(brush);
+        return StaticElementCast<ActivityIndicator>(*live).SetPieceBrush(brush);
     }
 
     return Result<void>::Success();
@@ -48,12 +48,12 @@ void ThrobberWidget::SetAnimationAxes(bool horizontal, bool vertical, bool opaci
     animateVertically_ = vertical;
     animateOpacity_ = opacity;
     if (auto live = CachedElement()) {
-        static_cast<ActivityIndicator&>(*live).SetAnimationAxes(horizontal, vertical, opacity);
+        StaticElementCast<ActivityIndicator>(*live).SetAnimationAxes(horizontal, vertical, opacity);
     }
 }
 
 void ThrobberWidget::ApplyProperties(Element& element) noexcept {
-    auto& indicator = static_cast<ActivityIndicator&>(element);
+    auto& indicator = StaticElementCast<ActivityIndicator>(element);
     (void)indicator.SetPieceCount(pieceCount_);
     auto brush = brush_;
     brush.imageSize = pieceSize_;

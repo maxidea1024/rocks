@@ -455,7 +455,7 @@ Result<SharedPtr<Element>> MakeSwitchRow(GalleryContext& context, bool carousel)
                 allocator, allocator,
                 CarouselPage::Factory::CreateLambda(
                     [target = &context, i]() noexcept { return MakeBlock(*target, Pages[i], i); }));
-            added = page ? static_cast<Carousel&>(*switcher.Value()).AddPage(page.Value())
+            added = page ? StaticElementCast<Carousel>(*switcher.Value()).AddPage(page.Value())
                          : Result<void>::Failure(page.Error());
         } else {
             added = switcher.Value()->TryAddChild(block.Value());
@@ -486,7 +486,7 @@ Result<SharedPtr<Element>> MakeSwitchRow(GalleryContext& context, bool carousel)
                 }
 
                 if (carousel) {
-                    (void)static_cast<Carousel&>(*locked).Show(i, true, CarouselSpeed);
+                    (void)StaticElementCast<Carousel>(*locked).Show(i, true, CarouselSpeed);
                 } else {
                     (void)locked->SetActiveIndex(i);
                 }

@@ -8,7 +8,7 @@ EditableTextWidget::EditableTextWidget(Allocator& allocator) noexcept : text_(al
 }
 
 TextLabel& EditableTextWidget::ResolveTextLabel(Element& element) const noexcept {
-    return static_cast<EditableTextElement&>(element).Label();
+    return StaticElementCast<EditableTextElement>(element).Label();
 }
 
 bool EditableTextWidget::IsMultiline() const noexcept {
@@ -30,7 +30,7 @@ bool EditableTextWidget::IsReadOnly() const noexcept {
 void EditableTextWidget::SetReadOnly(bool readOnly) noexcept {
     if (readOnly) {
         if (auto live = CachedElement()) {
-            static_cast<EditableTextElement&>(*live).CancelComposition(*this);
+            StaticElementCast<EditableTextElement>(*live).CancelComposition(*this);
         }
     }
 
@@ -38,7 +38,7 @@ void EditableTextWidget::SetReadOnly(bool readOnly) noexcept {
         readOnly_ = readOnly;
         if (auto live = CachedElement()) {
             // IME 허용이 바뀌었다(읽기 전용은 IME를 끈다 — 19.2절).
-            static_cast<EditableTextElement&>(*live).RefreshTextInput();
+            StaticElementCast<EditableTextElement>(*live).RefreshTextInput();
         }
 
         NotifyPropertyChanged("readOnly");
@@ -63,7 +63,7 @@ Result<void> EditableTextWidget::SetText(StringView text) noexcept {
     auto result = ExchangeText(copy);
     if (result) {
         if (auto live = CachedElement()) {
-            static_cast<EditableTextElement&>(*live).ClearHistory();
+            StaticElementCast<EditableTextElement>(*live).ClearHistory();
         }
     }
 
@@ -72,7 +72,7 @@ Result<void> EditableTextWidget::SetText(StringView text) noexcept {
 
 Result<void> EditableTextWidget::ExchangeText(String& copy) noexcept {
     if (auto live = CachedElement()) {
-        auto& editor = static_cast<EditableTextElement&>(*live);
+        auto& editor = StaticElementCast<EditableTextElement>(*live);
         auto shaped = editor.Shape(copy.View(), fontSize_, password_);
         if (!shaped) {
             return shaped;
@@ -97,7 +97,7 @@ bool EditableTextWidget::IsPassword() const noexcept {
 Result<void> EditableTextWidget::SetPassword(bool password) noexcept {
     if (password != password_) {
         if (auto live = CachedElement()) {
-            auto& editor = static_cast<EditableTextElement&>(*live);
+            auto& editor = StaticElementCast<EditableTextElement>(*live);
             auto shaped = editor.Shape(text_.View(), fontSize_, password);
             if (!shaped) {
                 return shaped;
@@ -110,7 +110,7 @@ Result<void> EditableTextWidget::SetPassword(bool password) noexcept {
         password_ = password;
         if (auto live = CachedElement()) {
             // 비밀번호 입력란은 IME를 끈다(19.2절).
-            static_cast<EditableTextElement&>(*live).RefreshTextInput();
+            StaticElementCast<EditableTextElement>(*live).RefreshTextInput();
         }
 
         NotifyPropertyChanged("password");
@@ -126,7 +126,7 @@ Result<void> EditableTextWidget::SetFontSize(float size) noexcept {
 
     if (fontSize_ != size) {
         if (auto live = CachedElement()) {
-            auto shaped = static_cast<EditableTextElement&>(*live).ResizeText(*this, size);
+            auto shaped = StaticElementCast<EditableTextElement>(*live).ResizeText(*this, size);
             if (!shaped) {
                 return shaped;
             }
@@ -156,8 +156,8 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
     }
 
     if (auto live = CachedElement()) {
-        auto ready =
-            static_cast<EditableTextElement&>(*live).SetCaption(copy.Value(), fontSize_, error);
+        auto ready = StaticElementCast<EditableTextElement>(*live).SetCaption(copy.Value(),
+                                                                              fontSize_, error);
         if (!ready) {
             return ready;
         }
@@ -202,7 +202,7 @@ void EditableTextWidget::SetRevertTextOnEscape(bool value) noexcept {
     if (revertOnEscape_ != value) {
         revertOnEscape_ = value;
         if (auto live = CachedElement()) {
-            static_cast<EditableTextElement&>(*live).RememberFocusText(*this);
+            StaticElementCast<EditableTextElement>(*live).RememberFocusText(*this);
         }
 
         NotifyPropertyChanged("revertOnEscape");
@@ -211,14 +211,15 @@ void EditableTextWidget::SetRevertTextOnEscape(bool value) noexcept {
 
 void EditableTextWidget::SelectAllText() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<EditableTextElement&>(*live).SelectAll();
+        StaticElementCast<EditableTextElement>(*live).SelectAll();
     }
 }
 
 StringView EditableTextWidget::SelectedText() const noexcept {
     auto live = CachedElement();
-    return live && !IsPassword() ? static_cast<EditableTextElement&>(*live).Selection(GetText())
-                                 : StringView{};
+    return live && !IsPassword()
+               ? StaticElementCast<EditableTextElement>(*live).Selection(GetText())
+               : StringView{};
 }
 
 void EditableTextWidget::SetOnChanged(Delegate<void(StringView)>&& callback) noexcept {

@@ -26,6 +26,8 @@ usize CountFocusOutlines(const CacheRoot& cache, const ThemeColors& theme, Vec2 
 
 // 외곽선 질의에 정해진 답을 하는 초점 요소다.
 class ForcedOutline final : public Frame {
+    ROCKS_UI_ELEMENT(ForcedOutline, Frame)
+
 public:
     ForcedOutline(Allocator& allocator, Optional<bool> answer) noexcept
         : Frame(allocator), answer_(answer) {
@@ -46,6 +48,8 @@ private:
 
 // 누르면 지정한 요소를 부모에서 떼어 내는 요소다(탭 머리를 눌러 페이지가 바뀌는 경우).
 class DetachOnPress final : public Frame {
+    ROCKS_UI_ELEMENT(DetachOnPress, Frame)
+
 public:
     explicit DetachOnPress(Allocator& allocator) noexcept : Frame(allocator) {
         SetDesiredSize({20, 10});

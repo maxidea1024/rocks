@@ -101,7 +101,7 @@ Result<void> ListViewWidget::SetRowHeight(float height) noexcept {
 
     rowHeight_ = height;
     if (auto live = CachedElement()) {
-        return static_cast<ListView&>(*live).SetRowHeight(height);
+        return StaticElementCast<ListView>(*live).SetRowHeight(height);
     }
 
     return Result<void>::Success();
@@ -109,7 +109,7 @@ Result<void> ListViewWidget::SetRowHeight(float height) noexcept {
 
 void ListViewWidget::ApplyProperties(Element& element) noexcept {
     ListViewBaseWidget::ApplyProperties(element);
-    (void)static_cast<ListView&>(element).SetRowHeight(rowHeight_);
+    (void)StaticElementCast<ListView>(element).SetRowHeight(rowHeight_);
 }
 
 } // namespace rocks::ui

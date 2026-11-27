@@ -7,6 +7,8 @@ namespace rocks::ui {
 
 // 모든 셀이 같은 크기를 갖는 행과 열 배치다.
 class ROCKS_UIFRAMEWORK_API UniformGrid : public Element {
+    ROCKS_UI_ELEMENT(UniformGrid, Element)
+
 public:
     explicit UniformGrid(Allocator& allocator) noexcept;
 

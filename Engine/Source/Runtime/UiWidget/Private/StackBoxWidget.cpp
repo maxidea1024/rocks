@@ -25,8 +25,8 @@ void StackBoxWidget::SetVertical(bool vertical) noexcept {
 }
 
 void StackBoxWidget::ApplyProperties(Element& element) noexcept {
-    static_cast<StackPanel&>(element).SetDirection(vertical_ ? StackDirection::Vertical
-                                                             : StackDirection::Horizontal);
+    StaticElementCast<StackPanel>(element).SetDirection(vertical_ ? StackDirection::Vertical
+                                                                  : StackDirection::Horizontal);
 }
 
 } // namespace rocks::ui

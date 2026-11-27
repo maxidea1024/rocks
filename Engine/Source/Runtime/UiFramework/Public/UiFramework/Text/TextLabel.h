@@ -24,6 +24,8 @@ struct LabelDecoration {
 };
 
 class ROCKS_UIFRAMEWORK_API TextLabel : public Element {
+    ROCKS_UI_ELEMENT(TextLabel, Element)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     explicit TextLabel(Allocator& allocator) noexcept;

@@ -88,7 +88,7 @@ Result<void> MenuAnchor::Open() noexcept {
     auto added = layer.Value()->TryAddChild(menu.Value());
     if (added) {
         added = AttachPopupLayer({layer.Value(), self, [](Element& owner) noexcept {
-                                      static_cast<MenuAnchor&>(owner).Close();
+                                      StaticElementCast<MenuAnchor>(owner).Close();
                                   }});
     }
 

@@ -7,6 +7,8 @@ namespace rocks::ui {
 // 원의 아래가 0도, 왼쪽이 90도다. 가동 범위 밖을 누르면 가까운 끝점을 고르며,
 // 드래그 중에는 이전 각도와의 차이를 따라가므로 0도 경계에서 반대쪽 끝으로 튀지 않는다.
 class ROCKS_UIFRAMEWORK_API RadialSlider final : public Slider {
+    ROCKS_UI_ELEMENT(RadialSlider, Slider)
+
 public:
     struct Args {
         float minimum = 0;

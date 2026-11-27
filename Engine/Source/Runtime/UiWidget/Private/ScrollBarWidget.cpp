@@ -12,7 +12,7 @@ Result<void> ScrollBarWidget::SetState(float offset, float thumbSize) noexcept {
     thumbSize_ = thumbSize;
     offset_ = math::Clamp(offset, 0.0f, 1.0f - thumbSize);
     if (auto live = CachedElement()) {
-        return static_cast<ScrollBar&>(*live).SetState(offset_, thumbSize_);
+        return StaticElementCast<ScrollBar>(*live).SetState(offset_, thumbSize_);
     }
 
     return Result<void>::Success();
@@ -29,7 +29,7 @@ float ScrollBarWidget::ThumbSize() const noexcept {
 void ScrollBarWidget::SetHorizontal(bool horizontal) noexcept {
     horizontal_ = horizontal;
     if (auto live = CachedElement()) {
-        static_cast<ScrollBar&>(*live).SetHorizontal(horizontal);
+        StaticElementCast<ScrollBar>(*live).SetHorizontal(horizontal);
     }
 }
 

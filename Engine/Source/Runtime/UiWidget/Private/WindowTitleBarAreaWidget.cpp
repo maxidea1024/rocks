@@ -18,7 +18,7 @@ Result<SharedPtr<Element>> WindowTitleBarAreaWidget::CreatePanel(Allocator& allo
 }
 
 void WindowTitleBarAreaWidget::ApplyProperties(Element& element) noexcept {
-    static_cast<WindowTitleBarArea&>(element).SetDoubleClickTogglesFullscreen(fullscreen_);
+    StaticElementCast<WindowTitleBarArea>(element).SetDoubleClickTogglesFullscreen(fullscreen_);
 }
 
 void WindowTitleBarAreaWidget::SetDoubleClickTogglesFullscreen(bool enabled) noexcept {

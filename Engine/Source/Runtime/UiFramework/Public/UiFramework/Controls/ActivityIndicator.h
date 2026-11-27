@@ -12,6 +12,8 @@ inline constexpr uint32 MaxActivityIndicatorPieces = 64;
 // 시각은 UI 프레임 시각이다(Docs/Design/UiToolkit 20.3절 — 일시 정지·녹화 재생은 Application
 // 시계로 한다).
 class ROCKS_UIFRAMEWORK_API ActivityIndicator final : public Element {
+    ROCKS_UI_ELEMENT(ActivityIndicator, Element)
+
 public:
     ActivityIndicator(Allocator& allocator, bool circular) noexcept;
     Result<void> SetPieceBrush(const Brush& brush) noexcept;

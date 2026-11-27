@@ -10,7 +10,7 @@ Result<void> RadialSliderWidget::SetLimits(float minimum, float maximum, float s
     }
 
     if (auto live = CachedElement()) {
-        auto& slider = static_cast<RadialSlider&>(*live);
+        auto& slider = StaticElementCast<RadialSlider>(*live);
         (void)slider.SetRange(minimum, maximum);
         (void)slider.SetStep(step);
     }
@@ -34,7 +34,7 @@ Result<void> RadialSliderWidget::SetValue(float value) noexcept {
 
     value_ = next;
     if (auto live = CachedElement()) {
-        auto applied = static_cast<RadialSlider&>(*live).SetValue(value_);
+        auto applied = StaticElementCast<RadialSlider>(*live).SetValue(value_);
         if (!applied) {
             return applied;
         }
@@ -57,7 +57,7 @@ Result<void> RadialSliderWidget::SetArc(float start, float end, float offset) no
     endAngle_ = end;
     angularOffset_ = offset;
     if (auto live = CachedElement()) {
-        return static_cast<RadialSlider&>(*live).SetArc(start, end, offset);
+        return StaticElementCast<RadialSlider>(*live).SetArc(start, end, offset);
     }
 
     return Result<void>::Success();
@@ -66,7 +66,7 @@ Result<void> RadialSliderWidget::SetArc(float start, float end, float offset) no
 void RadialSliderWidget::SetSnapToStep(bool enabled) noexcept {
     snapToStep_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<RadialSlider&>(*live).SetSnapToStep(enabled);
+        StaticElementCast<RadialSlider>(*live).SetSnapToStep(enabled);
     }
 }
 
@@ -74,7 +74,7 @@ void RadialSliderWidget::SetHandVisibility(bool handle, bool hand) noexcept {
     showHandle_ = handle;
     showHand_ = hand;
     if (auto live = CachedElement()) {
-        static_cast<RadialSlider&>(*live).SetHandVisibility(handle, hand);
+        StaticElementCast<RadialSlider>(*live).SetHandVisibility(handle, hand);
     }
 }
 
@@ -88,7 +88,7 @@ Result<void> RadialSliderWidget::SetColors(LinearColor track, LinearColor progre
     progressColor_ = progress;
     handleColor_ = handle;
     if (auto live = CachedElement()) {
-        auto& slider = static_cast<RadialSlider&>(*live);
+        auto& slider = StaticElementCast<RadialSlider>(*live);
         slider.SetColor(track);
         slider.SetFillColor(progress);
         slider.SetHandleColor(handle);

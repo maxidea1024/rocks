@@ -298,7 +298,7 @@ Result<void> MenuBar::OpenMenu(usize index, bool keyboard) noexcept {
         return opened;
     }
 
-    auto* panel = static_cast<MenuPanel*>(button.MenuContent());
+    auto* panel = StaticElementCast<MenuPanel>(button.MenuContent());
     if (!panel) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }

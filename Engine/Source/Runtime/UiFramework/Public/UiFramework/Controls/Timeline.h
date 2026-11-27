@@ -11,6 +11,8 @@ struct TimelineMark {
 
 // 눈금과 마커는 별도 자식으로 캐시한다. 재생 위치만 변하면 눈금은 다시 그리지 않는다.
 class ROCKS_UIFRAMEWORK_API Timeline final : public Slider {
+    ROCKS_UI_ELEMENT(Timeline, Slider)
+
 public:
     explicit Timeline(Allocator& allocator) noexcept;
     Result<void> SetRulerColor(LinearColor color) noexcept;

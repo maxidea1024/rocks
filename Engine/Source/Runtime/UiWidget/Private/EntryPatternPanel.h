@@ -7,6 +7,8 @@ namespace rocks::ui {
 
 // 생성 순서에 따라 겹치거나 원 둘레에 엔트리를 배치한다. 마지막 엔트리가 앞에 그려진다.
 class EntryPatternPanel final : public Element {
+    ROCKS_UI_ELEMENT(EntryPatternPanel, Element)
+
 public:
     EntryPatternPanel(Allocator& allocator, bool radial) noexcept;
     void SetSpacing(Vec2 spacing) noexcept;

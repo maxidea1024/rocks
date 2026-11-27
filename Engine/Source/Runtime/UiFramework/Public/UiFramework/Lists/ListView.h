@@ -16,6 +16,8 @@ enum class ListSelectionMode : uint8 {
 
 // 고정 높이 행을 사용한다. 소스와 Application은 뷰보다 오래 살아야 한다.
 class ROCKS_UIFRAMEWORK_API ListView : public Element {
+    ROCKS_UI_ELEMENT(ListView, Element)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     ListView(Allocator& allocator, Application& app, TableRowSource& source) noexcept;

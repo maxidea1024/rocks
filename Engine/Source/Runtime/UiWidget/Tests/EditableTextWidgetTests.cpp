@@ -207,7 +207,7 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         // 비밀번호는 IME를 끈다 — 서비스에 다시 알린다.
         CHECK(!context->AllowsInputMethod());
         CHECK(service.Value()->activations == 2);
-        auto& label = static_cast<TextLabel&>(*live.Value()->ChildAt(0));
+        auto& label = StaticElementCast<TextLabel>(*live.Value()->ChildAt(0));
         CHECK(label.ShapedClusters().Size() == 1);
         CHECK(label.ShapedClusters()[0].byteEnd == 4);
         REQUIRE(inputAdapter.Route(InputEvent::Text('x')));
@@ -447,8 +447,8 @@ TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {
     REQUIRE(app.UpdatePaintCache(Geometry::Root({120, 40}, {}), 1));
     CHECK(box->GetText().IsEmpty() && box->HasError());
     REQUIRE(live->ChildCount() == 3);
-    CHECK(static_cast<TextLabel*>(live->ChildAt(1))->GetText() == "Hint");
-    CHECK(static_cast<TextLabel*>(live->ChildAt(2))->GetText() == "Invalid");
+    CHECK(StaticElementCast<TextLabel>(live->ChildAt(1))->GetText() == "Hint");
+    CHECK(StaticElementCast<TextLabel>(live->ChildAt(2))->GetText() == "Invalid");
     CHECK(live->ChildAt(2)->GetGeometry().layout.ty > live->ChildAt(0)->GetGeometry().layout.ty);
     CHECK(live->GetDesiredSize().x >= 68);
     REQUIRE(box->SetText("Before"));

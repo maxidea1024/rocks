@@ -22,8 +22,9 @@ constexpr StackSlot Fill(float weight) noexcept {
 
 // 자식을 한 축으로 배치한다. Auto와 FillContent의 기준 크기는 자식의 측정 결과다.
 class ROCKS_UIFRAMEWORK_API StackPanel : public Element {
+    ROCKS_UI_ELEMENT(StackPanel, Element)
+
 public:
-    using Super = Element;
     struct SlotArgs {
         StackSlot size = Auto;
         float padding = 0;

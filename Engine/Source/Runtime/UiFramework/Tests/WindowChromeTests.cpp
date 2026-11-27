@@ -231,7 +231,7 @@ TEST(UiFramework_WindowTitleBarStatesAndToolTips) {
         auto tip = button.MakeToolTip();
         String text(allocator);
         if (tip && tip.Value()->ChildCount() == 1) {
-            (void)text.TryAssign(static_cast<TextLabel&>(*tip.Value()->ChildAt(0)).GetText());
+            (void)text.TryAssign(StaticElementCast<TextLabel>(*tip.Value()->ChildAt(0)).GetText());
         }
 
         return text;

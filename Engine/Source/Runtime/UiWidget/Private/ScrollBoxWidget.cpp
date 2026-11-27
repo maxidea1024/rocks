@@ -7,7 +7,7 @@ namespace rocks::ui {
 
 Result<void> ScrollBoxWidget::ApplySlotSize(Element& panel, Element& child, StackSizeRule rule,
                                             float weight) noexcept {
-    auto& stack = static_cast<StackPanel&>(ChildHost(panel));
+    auto& stack = StaticElementCast<StackPanel>(ChildHost(panel));
     // 여백·정렬은 자식의 slot 배치라 슬롯의 직접 자식이 그 요소다(20.10절).
     if (child.Parent() != &stack) {
         return Result<void>::Failure(ErrorCode::WrongContext);
@@ -74,7 +74,7 @@ Result<void> ScrollBoxWidget::SetScrollOffset(float offset) noexcept {
     endRequested_ = false;
     initialOffset_ = offset;
     if (auto live = CachedElement()) {
-        return static_cast<ScrollView&>(*live).SetScrollOffset(offset);
+        return StaticElementCast<ScrollView>(*live).SetScrollOffset(offset);
     }
 
     return Result<void>::Success();
@@ -82,7 +82,7 @@ Result<void> ScrollBoxWidget::SetScrollOffset(float offset) noexcept {
 
 float ScrollBoxWidget::ScrollOffset() const noexcept {
     auto live = CachedElement();
-    return live ? static_cast<const ScrollView&>(*live).GetScrollOffset() : initialOffset_;
+    return live ? StaticElementCast<ScrollView>(*live).GetScrollOffset() : initialOffset_;
 }
 
 } // namespace rocks::ui

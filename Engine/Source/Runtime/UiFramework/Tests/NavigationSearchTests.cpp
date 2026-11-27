@@ -13,6 +13,8 @@ namespace {
 constexpr Vec2 SearchViewport{400, 200};
 
 class SearchBox final : public Element {
+    ROCKS_UI_ELEMENT(SearchBox, Element)
+
 public:
     explicit SearchBox(Allocator& allocator) noexcept : Element(allocator) {
     }

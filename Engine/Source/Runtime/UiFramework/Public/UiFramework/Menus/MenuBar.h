@@ -28,6 +28,8 @@ namespace rocks::ui {
 //   }));
 //   bar.Value()->RegisterAccelerators();
 class ROCKS_UIFRAMEWORK_API MenuBar final : public Element {
+    ROCKS_UI_ELEMENT(MenuBar, Element)
+
 public:
     MenuBar(Allocator& allocator, const SharedPtr<MenuContext>& context,
             const MenuBarStyle& style = DefaultMenuBarStyle()) noexcept;

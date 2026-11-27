@@ -6,6 +6,8 @@ namespace rocks::ui {
 
 // 하나의 열린 메뉴가 차지하는 화면 레이어. 자식 영역 밖은 메뉴를 닫기 위한 입력 표면이다.
 class MenuPopupLayer final : public Element {
+    ROCKS_UI_ELEMENT(MenuPopupLayer, Element)
+
 public:
     MenuPopupLayer(Allocator& allocator, MenuAnchor& anchor) noexcept;
     void Disconnect() noexcept;

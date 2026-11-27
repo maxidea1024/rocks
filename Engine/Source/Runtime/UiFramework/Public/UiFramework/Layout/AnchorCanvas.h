@@ -20,8 +20,9 @@ struct ROCKS_UIFRAMEWORK_API CanvasSlot {
 
 // anchor와 offset으로 자식을 배치한다. 같은 zOrder는 추가 순서를 따른다.
 class ROCKS_UIFRAMEWORK_API AnchorCanvas : public Element {
+    ROCKS_UI_ELEMENT(AnchorCanvas, Element)
+
 public:
-    using Super = Element;
     struct SlotArgs {
         CanvasSlot layout{};
         ElementChild content{};

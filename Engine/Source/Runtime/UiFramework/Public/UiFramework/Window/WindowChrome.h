@@ -11,6 +11,8 @@ namespace rocks::ui {
 // SetMaximized로 알린다. 창 전체를 덮는 팝업 층의 호스트이기도 하다(UE SWindow 팝업 층 —
 // Overlay를 물려받는다): 제목 막대의 주 메뉴나 내용의 콤보가 연 메뉴는 창 전체 위에 놓인다.
 class ROCKS_UIFRAMEWORK_API WindowChrome final : public Overlay {
+    ROCKS_UI_ELEMENT(WindowChrome, Overlay)
+
 public:
     struct Args {
         SharedPtr<WindowTitleBar> titleBar{};

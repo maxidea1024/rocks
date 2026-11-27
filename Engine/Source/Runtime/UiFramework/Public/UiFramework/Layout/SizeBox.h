@@ -7,6 +7,8 @@ namespace rocks::ui {
 
 // 내용 하나의 원하는 크기를 최소·최대 범위로 제한한다. 자신은 그리지 않는다.
 class ROCKS_UIFRAMEWORK_API SizeBox : public Element {
+    ROCKS_UI_ELEMENT(SizeBox, Element)
+
 public:
     explicit SizeBox(Allocator& allocator) noexcept;
 

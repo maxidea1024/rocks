@@ -41,6 +41,8 @@ TEST(UiFramework_PartialPaintPreservesInheritedOpacityForVolatileChildren) {
 namespace {
 
 class HoverTarget final : public Element {
+    ROCKS_UI_ELEMENT(HoverTarget, Element)
+
 public:
     explicit HoverTarget(Allocator& allocator) noexcept : Element(allocator) {
     }

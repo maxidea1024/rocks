@@ -12,6 +12,8 @@ inline constexpr int32 MaxBlurKernelSize = 255;
 
 // 자식 아래까지 그려진 화면을 흐리게 합성한다. 강도는 대상 텍스처의 픽셀 반경이다.
 class ROCKS_UIFRAMEWORK_API BackgroundBlur final : public SizeBox {
+    ROCKS_UI_ELEMENT(BackgroundBlur, SizeBox)
+
 public:
     struct Args {
         ElementChild content{};

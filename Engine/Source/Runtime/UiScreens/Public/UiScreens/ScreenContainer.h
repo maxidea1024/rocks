@@ -11,6 +11,8 @@ namespace rocks::ui {
 
 // 저장소와 Application이 컨테이너보다 오래 살아야 한다. 화면과 포커스는 플레이어별로 관리한다.
 class ROCKS_UISCREENS_API ScreenContainer : public Switcher {
+    ROCKS_UI_ELEMENT(ScreenContainer, Switcher)
+
 public:
     ~ScreenContainer() noexcept override;
     Result<ObjectHandle> AddScreen(ClassRef<Screen> type) noexcept;
@@ -83,11 +85,15 @@ private:
 };
 
 class ROCKS_UISCREENS_API ScreenStack final : public ScreenContainer {
+    ROCKS_UI_ELEMENT(ScreenStack, ScreenContainer)
+
 public:
     ScreenStack(ObjectRegistry& objects, Application& app, uint32 userId) noexcept;
 };
 
 class ROCKS_UISCREENS_API ScreenQueue final : public ScreenContainer {
+    ROCKS_UI_ELEMENT(ScreenQueue, ScreenContainer)
+
 public:
     ScreenQueue(ObjectRegistry& objects, Application& app, uint32 userId) noexcept;
 };

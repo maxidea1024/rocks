@@ -20,7 +20,7 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
 
     auto built = CreateView(objects.ObjectAllocator(), *app_, source_.ToSharedRef());
     if (built) {
-        auto& view = static_cast<ListView&>(*built.Value());
+        auto& view = StaticElementCast<ListView>(*built.Value());
         view.SetOnItemClicked(
             Delegate<void(uint64)>::CreateLambda([&objects, owner = Handle()](uint64 key) noexcept {
                 auto widget =
@@ -50,7 +50,7 @@ Result<SharedPtr<Element>> ListViewBaseWidget::BuildElement(ObjectRegistry& obje
 }
 
 void ListViewBaseWidget::ApplyProperties(Element& element) noexcept {
-    auto& view = static_cast<ListView&>(element);
+    auto& view = StaticElementCast<ListView>(element);
     view.SetSelectionMode(static_cast<ListSelectionMode>(selectionMode_));
     view.SetScrollIntoViewAlignment(static_cast<ScrollIntoViewAlignment>(scrollAlignment_));
     view.SetPointerScrolling(pointerScrolling_);
@@ -60,21 +60,21 @@ void ListViewBaseWidget::ApplyProperties(Element& element) noexcept {
 
 void ListViewBaseWidget::Refresh() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).Refresh();
+        StaticElementCast<ListView>(*live).Refresh();
     }
 }
 
 void ListViewBaseWidget::SetPointerScrolling(bool enabled) noexcept {
     pointerScrolling_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).SetPointerScrolling(enabled);
+        StaticElementCast<ListView>(*live).SetPointerScrolling(enabled);
     }
 }
 
 void ListViewBaseWidget::SetSelectOnNavigation(bool enabled) noexcept {
     selectOnNavigation_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).SetSelectOnNavigation(enabled);
+        StaticElementCast<ListView>(*live).SetSelectOnNavigation(enabled);
     }
 }
 
@@ -85,7 +85,7 @@ Result<void> ListViewBaseWidget::SetWheelMultiplier(float multiplier) noexcept {
 
     wheelMultiplier_ = multiplier;
     if (auto live = CachedElement()) {
-        return static_cast<ListView&>(*live).SetWheelMultiplier(multiplier);
+        return StaticElementCast<ListView>(*live).SetWheelMultiplier(multiplier);
     }
 
     return Result<void>::Success();
@@ -93,7 +93,7 @@ Result<void> ListViewBaseWidget::SetWheelMultiplier(float multiplier) noexcept {
 
 double ListViewBaseWidget::ScrollOffset() const noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).ScrollOffset() : 0;
+    return live ? StaticElementCast<ListView>(*live).ScrollOffset() : 0;
 }
 
 Result<void> ListViewBaseWidget::ScrollToStart() noexcept {
@@ -102,31 +102,31 @@ Result<void> ListViewBaseWidget::ScrollToStart() noexcept {
 
 Result<void> ListViewBaseWidget::ScrollToEnd() noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).ScrollToEnd()
+    return live ? StaticElementCast<ListView>(*live).ScrollToEnd()
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> ListViewBaseWidget::SetScrollOffset(double offset) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).SetScrollOffset(offset)
+    return live ? StaticElementCast<ListView>(*live).SetScrollOffset(offset)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> ListViewBaseWidget::ScrollIndexIntoView(uint32 index) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).ScrollIndexIntoView(index)
+    return live ? StaticElementCast<ListView>(*live).ScrollIndexIntoView(index)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> ListViewBaseWidget::NavigateToIndex(uint32 index, uint32 user) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).NavigateToIndex(index, user)
+    return live ? StaticElementCast<ListView>(*live).NavigateToIndex(index, user)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> ListViewBaseWidget::SelectIndex(uint32 index) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).SelectIndex(index)
+    return live ? StaticElementCast<ListView>(*live).SelectIndex(index)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
@@ -145,35 +145,35 @@ void ListViewBaseWidget::SetOnItemScrolledIntoView(Delegate<void(uint64)>&& call
 void ListViewBaseWidget::SetSelectionMode(ListSelectionMode mode) noexcept {
     selectionMode_ = static_cast<uint8>(mode);
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).SetSelectionMode(mode);
+        StaticElementCast<ListView>(*live).SetSelectionMode(mode);
     }
 }
 
 void ListViewBaseWidget::SetScrollIntoViewAlignment(ScrollIntoViewAlignment align) noexcept {
     scrollAlignment_ = static_cast<uint8>(align);
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).SetScrollIntoViewAlignment(align);
+        StaticElementCast<ListView>(*live).SetScrollIntoViewAlignment(align);
     }
 }
 
 bool ListViewBaseWidget::IsItemVisible(uint64 key) const noexcept {
     auto live = CachedElement();
-    return live && static_cast<ListView&>(*live).IsItemVisible(key);
+    return live && StaticElementCast<ListView>(*live).IsItemVisible(key);
 }
 
 bool ListViewBaseWidget::IsRefreshPending() const noexcept {
     auto live = CachedElement();
-    return live && static_cast<ListView&>(*live).IsRefreshPending();
+    return live && StaticElementCast<ListView>(*live).IsRefreshPending();
 }
 
 Span<const uint64> ListViewBaseWidget::SelectedKeys() const noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).SelectedKeys() : Span<const uint64>{};
+    return live ? StaticElementCast<ListView>(*live).SelectedKeys() : Span<const uint64>{};
 }
 
 Result<void> ListViewBaseWidget::SetItemSelection(uint64 key, bool selected) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).SetItemSelection(key, selected)
+    return live ? StaticElementCast<ListView>(*live).SetItemSelection(key, selected)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
@@ -183,7 +183,7 @@ Result<void> ListViewBaseWidget::ScrollItemIntoView(uint64 key) noexcept {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    auto& view = static_cast<ListView&>(*live);
+    auto& view = StaticElementCast<ListView>(*live);
     auto index = view.FindIndex(key);
     return index ? view.ScrollIndexIntoView(index.Value()) : Result<void>::Failure(index.Error());
 }
@@ -194,20 +194,20 @@ Result<void> ListViewBaseWidget::NavigateToItem(uint64 key, uint32 user) noexcep
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    auto& view = static_cast<ListView&>(*live);
+    auto& view = StaticElementCast<ListView>(*live);
     auto index = view.FindIndex(key);
     return index ? view.NavigateToIndex(index.Value(), user) : Result<void>::Failure(index.Error());
 }
 
 void ListViewBaseWidget::CancelScrollIntoView() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).CancelScrollIntoView();
+        StaticElementCast<ListView>(*live).CancelScrollIntoView();
     }
 }
 
 void ListViewBaseWidget::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
-        auto& view = static_cast<ListView&>(*live);
+        auto& view = StaticElementCast<ListView>(*live);
         view.SetOnItemClicked({});
         view.SetOnSelectionChanged({});
         view.SetOnItemScrolledIntoView({});
@@ -218,13 +218,13 @@ void ListViewBaseWidget::ReleaseElements() noexcept {
 
 void ListViewBaseWidget::ClearSelection() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ListView&>(*live).ClearSelection();
+        StaticElementCast<ListView>(*live).ClearSelection();
     }
 }
 
 Optional<uint64> ListViewBaseWidget::SelectedKey() const noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ListView&>(*live).SelectedKey() : Optional<uint64>{};
+    return live ? StaticElementCast<ListView>(*live).SelectedKey() : Optional<uint64>{};
 }
 
 } // namespace rocks::ui

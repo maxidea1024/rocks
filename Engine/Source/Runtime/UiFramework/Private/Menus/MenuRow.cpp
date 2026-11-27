@@ -335,7 +335,7 @@ Result<void> MenuRow::OpenSubMenuFocused(uint32 user) noexcept {
         panel_->SwitchSubMenu(this);
     }
 
-    auto* sub = static_cast<MenuPanel*>(MenuContent());
+    auto* sub = StaticElementCast<MenuPanel>(MenuContent());
     if (!sub) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }

@@ -18,6 +18,8 @@ struct PostBufferUpdateInfo {
 
 // 자신의 그리기 순서에서 현재 패스의 색상 버퍼 전체를 복사한다. 자체 픽셀은 출력하지 않는다.
 class ROCKS_UIFRAMEWORK_API PostBufferUpdate final : public Element, public WidgetSurface {
+    ROCKS_UI_ELEMENT(PostBufferUpdate, Element)
+
 public:
     struct Args {
         Bindable<SlotHandle> destination{};

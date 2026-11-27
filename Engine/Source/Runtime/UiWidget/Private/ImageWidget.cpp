@@ -51,7 +51,7 @@ LinearColor ImageWidget::Tint() const noexcept {
 }
 
 void ImageWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<Image&>(element);
+    auto& native = StaticElementCast<Image>(element);
     (void)native.SetBrush(GetBrush());
 }
 

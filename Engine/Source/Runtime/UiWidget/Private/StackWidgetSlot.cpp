@@ -51,7 +51,7 @@ Result<void> StackWidgetSlot::SetLayout(ObjectRegistry& objects, const StackSlot
             return Result<void>::Failure(ErrorCode::NotReady);
         }
 
-        auto updated = static_cast<StackPanel&>(*native).SetSlotLayout(*child, layout);
+        auto updated = StaticElementCast<StackPanel>(*native).SetSlotLayout(*child, layout);
         if (!updated) {
             return updated;
         }

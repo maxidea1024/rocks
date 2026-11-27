@@ -6,6 +6,8 @@
 namespace rocks::ui {
 
 class ROCKS_UIFRAMEWORK_API TreeView final : public ListView {
+    ROCKS_UI_ELEMENT(TreeView, ListView)
+
 public:
     TreeView(Allocator& allocator, Application& app, TableRowSource& source) noexcept;
     TreeView(Allocator& allocator, Application& app,

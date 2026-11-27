@@ -17,8 +17,9 @@ enum class ConsumeMouseWheel : uint8 {
 
 // 내용 하나를 주어진 방향으로 스크롤한다. 현재 clip은 창 축에 평행해야 한다.
 class ROCKS_UIFRAMEWORK_API ScrollView : public Element {
+    ROCKS_UI_ELEMENT(ScrollView, Element)
+
 public:
-    using Super = Element;
     struct Args {
         ElementChild content{};
         StackDirection direction = StackDirection::Vertical;

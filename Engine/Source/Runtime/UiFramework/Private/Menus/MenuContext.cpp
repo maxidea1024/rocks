@@ -72,7 +72,7 @@ bool MenuContext::IsInOpenMenus(const Element& element) const noexcept {
             return true;
         }
 
-        anchor = static_cast<const MenuPanel*>(content)->OpenSubMenu();
+        anchor = StaticElementCast<MenuPanel>(content)->OpenSubMenu();
     }
 
     return false;
@@ -81,7 +81,7 @@ bool MenuContext::IsInOpenMenus(const Element& element) const noexcept {
 MenuRow* MenuContext::FindOpenRow(const Element& element) const noexcept {
     const MenuAnchor* anchor = root_;
     while (anchor) {
-        const auto* panel = static_cast<const MenuPanel*>(anchor->MenuContent());
+        const auto* panel = StaticElementCast<MenuPanel>(anchor->MenuContent());
         if (!panel) {
             return nullptr;
         }

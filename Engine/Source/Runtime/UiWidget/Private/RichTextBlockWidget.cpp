@@ -204,7 +204,7 @@ Result<void> RichTextBlockWidget::SetText(const Text& value) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        auto shaped = Shape(static_cast<TextLabel&>(*live), value, fontSize_, styles_.View(),
+        auto shaped = Shape(StaticElementCast<TextLabel>(*live), value, fontSize_, styles_.View(),
                             decorator_.Get());
         if (!shaped) {
             return shaped;
@@ -244,8 +244,8 @@ Result<void> RichTextBlockWidget::SetStyles(Span<const RichTextStyle> styles) no
     }
 
     if (auto live = CachedElement()) {
-        auto shaped = Shape(static_cast<TextLabel&>(*live), text_, fontSize_, replacement.View(),
-                            decorator_.Get());
+        auto shaped = Shape(StaticElementCast<TextLabel>(*live), text_, fontSize_,
+                            replacement.View(), decorator_.Get());
         if (!shaped) {
             return shaped;
         }
@@ -258,7 +258,7 @@ Result<void> RichTextBlockWidget::SetStyles(Span<const RichTextStyle> styles) no
 Result<void>
 RichTextBlockWidget::SetDecorator(const SharedPtr<RichTextDecorator>& decorator) noexcept {
     if (auto live = CachedElement()) {
-        auto shaped = Shape(static_cast<TextLabel&>(*live), text_, fontSize_, styles_.View(),
+        auto shaped = Shape(StaticElementCast<TextLabel>(*live), text_, fontSize_, styles_.View(),
                             decorator.Get());
         if (!shaped) {
             return shaped;
@@ -275,8 +275,8 @@ Result<void> RichTextBlockWidget::SetFontSize(float size) noexcept {
     }
 
     if (auto live = CachedElement(); live && size != fontSize_) {
-        auto shaped =
-            Shape(static_cast<TextLabel&>(*live), text_, size, styles_.View(), decorator_.Get());
+        auto shaped = Shape(StaticElementCast<TextLabel>(*live), text_, size, styles_.View(),
+                            decorator_.Get());
         if (!shaped) {
             return shaped;
         }
@@ -304,10 +304,10 @@ Result<void> RichTextBlockWidget::SetEllipsis(bool enabled) noexcept {
 
         // 말줄임을 켜면 여러 줄 끝 말줄임이다(Docs/Design/UiToolkit 9.1절 UW4o).
 
-        static_cast<TextLabel&>(*live).SetOverflow(marker ? TextOverflow::MultiLineEnd
-                                                          : TextOverflow::Clip);
+        StaticElementCast<TextLabel>(*live).SetOverflow(marker ? TextOverflow::MultiLineEnd
+                                                               : TextOverflow::Clip);
 
-        static_cast<TextLabel&>(*live).SetEllipsisMarker(Move(marker));
+        StaticElementCast<TextLabel>(*live).SetEllipsisMarker(Move(marker));
     }
 
     ellipsis_ = enabled;
@@ -321,7 +321,7 @@ Result<void> RichTextBlockWidget::SetTint(LinearColor tint) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        static_cast<TextLabel&>(*live).SetColor(tint);
+        StaticElementCast<TextLabel>(*live).SetColor(tint);
     }
 
     tint_ = tint;
@@ -330,7 +330,7 @@ Result<void> RichTextBlockWidget::SetTint(LinearColor tint) noexcept {
 
 Result<void> RichTextBlockWidget::RefreshText() noexcept {
     auto live = CachedElement();
-    return live ? Shape(static_cast<TextLabel&>(*live), text_, fontSize_, styles_.View(),
+    return live ? Shape(StaticElementCast<TextLabel>(*live), text_, fontSize_, styles_.View(),
                         decorator_.Get())
                 : Result<void>::Success();
 }

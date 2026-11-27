@@ -50,7 +50,7 @@ Result<void> ScaleBoxWidget::SetUserScale(float value) noexcept {
 
     userScale_ = value;
     if (auto live = CachedElement()) {
-        return static_cast<FitBox&>(*live).SetUserScale(value);
+        return StaticElementCast<FitBox>(*live).SetUserScale(value);
     }
 
     return Result<void>::Success();
@@ -61,7 +61,7 @@ Vec2 ScaleBoxWidget::Alignment() const noexcept {
 }
 
 void ScaleBoxWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<FitBox&>(element);
+    auto& native = StaticElementCast<FitBox>(element);
     native.SetFit(static_cast<FitMode>(fitMode_), static_cast<FitDirection>(fitDirection_));
     (void)native.SetUserScale(userScale_);
     (void)native.SetAlignment(alignment_);

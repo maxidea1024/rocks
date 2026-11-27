@@ -18,6 +18,8 @@ struct ROCKS_UIFRAMEWORK_API WrapSlot {
 
 // 주축의 한도에 맞춰 자식을 여러 줄로 배치한다. 한 줄의 교차축 크기는 가장 큰 자식을 따른다.
 class ROCKS_UIFRAMEWORK_API WrapStack : public Element {
+    ROCKS_UI_ELEMENT(WrapStack, Element)
+
 public:
     explicit WrapStack(Allocator& allocator,
                        StackDirection direction = StackDirection::Horizontal) noexcept;

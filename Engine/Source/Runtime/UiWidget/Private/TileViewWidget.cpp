@@ -20,7 +20,7 @@ Result<void> TileViewWidget::SetTileWidth(float width) noexcept {
 
     tileWidth_ = width;
     if (auto live = CachedElement()) {
-        return static_cast<TileView&>(*live).SetTileWidth(width);
+        return StaticElementCast<TileView>(*live).SetTileWidth(width);
     }
 
     return Result<void>::Success();
@@ -28,7 +28,7 @@ Result<void> TileViewWidget::SetTileWidth(float width) noexcept {
 
 void TileViewWidget::ApplyProperties(Element& element) noexcept {
     ListViewWidget::ApplyProperties(element);
-    (void)static_cast<TileView&>(element).SetTileWidth(tileWidth_);
+    (void)StaticElementCast<TileView>(element).SetTileWidth(tileWidth_);
 }
 
 } // namespace rocks::ui

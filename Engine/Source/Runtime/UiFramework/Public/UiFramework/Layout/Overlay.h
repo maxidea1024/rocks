@@ -6,6 +6,8 @@ namespace rocks::ui {
 
 // 자식들을 같은 영역에 겹친다. zOrder가 높을수록 앞에 있고 같은 값이면 추가 순서를 따른다.
 class ROCKS_UIFRAMEWORK_API Overlay : public Element {
+    ROCKS_UI_ELEMENT(Overlay, Element)
+
 public:
     explicit Overlay(Allocator& allocator) noexcept;
 

@@ -31,12 +31,12 @@ Result<void> Carousel::SetCacheChildren(bool cache) noexcept {
     }
 
     for (usize i = 0; i < ChildCount(); ++i) {
-        auto& page = static_cast<CarouselPage&>(*ChildAt(i));
+        auto& page = StaticElementCast<CarouselPage>(*ChildAt(i));
         if (cache) {
             if (auto made = page.Materialize(); !made) {
                 for (usize j = 0; j < i; ++j) {
                     if (ChildAt(j) != ActiveChild() && ChildAt(j) != sliding_[0].Get()) {
-                        static_cast<CarouselPage&>(*ChildAt(j)).ReleaseContent();
+                        StaticElementCast<CarouselPage>(*ChildAt(j)).ReleaseContent();
                     }
                 }
 
@@ -62,7 +62,7 @@ void Carousel::Finish() noexcept {
     sliding_[1] = {};
     progress_.Set(1);
     if (previous && previous.Get() != ActiveChild() && !cache_) {
-        static_cast<CarouselPage&>(*previous).ReleaseContent();
+        StaticElementCast<CarouselPage>(*previous).ReleaseContent();
     }
 
     if (previous) {
@@ -80,7 +80,7 @@ Result<void> Carousel::Show(usize index, bool forward, float speed) noexcept {
     }
 
     auto next = ChildRefAt(index);
-    if (auto ready = static_cast<CarouselPage&>(*next).Materialize(); !ready) {
+    if (auto ready = StaticElementCast<CarouselPage>(*next).Materialize(); !ready) {
         return ready;
     }
 

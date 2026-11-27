@@ -13,7 +13,7 @@ Result<SharedPtr<Element>> ScreenSwitcherWidget::CreateContainer(ObjectRegistry&
 
 Result<void> ScreenSwitcherWidget::SetActivePage(usize index) noexcept {
     auto view = NativeContainer();
-    return view ? static_cast<ScreenSwitcher&>(*view).SetActivePage(index)
+    return view ? StaticElementCast<ScreenSwitcher>(*view).SetActivePage(index)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 } // namespace rocks::ui

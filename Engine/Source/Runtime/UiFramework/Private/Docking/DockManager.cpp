@@ -277,7 +277,7 @@ void DockManager::RebuildChildren() noexcept {
 
         for (usize k = 0; k < node.tabs.Size(); ++k) {
             const auto& header = tabs_[node.tabs[k]].header;
-            static_cast<DockTabHeader&>(*header).SetForeground(k == node.selected);
+            StaticElementCast<DockTabHeader>(*header).SetForeground(k == node.selected);
             (void)visible_.TryPushBack(header);
         }
 

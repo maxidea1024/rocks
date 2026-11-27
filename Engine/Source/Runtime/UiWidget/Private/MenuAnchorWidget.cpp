@@ -5,7 +5,7 @@ namespace rocks::ui {
 
 MenuAnchorWidget::~MenuAnchorWidget() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<MenuAnchor&>(*live).DisconnectMenu();
+        StaticElementCast<MenuAnchor>(*live).DisconnectMenu();
     }
 }
 
@@ -23,7 +23,7 @@ Result<SharedPtr<Element>> MenuAnchorWidget::CreatePanel(Allocator& allocator) n
 Result<SharedPtr<Element>> MenuAnchorWidget::BuildElement(ObjectRegistry& objects) noexcept {
     auto value = PanelWidget::BuildElement(objects);
     if (value) {
-        auto& menu = static_cast<MenuAnchor&>(*value.Value());
+        auto& menu = StaticElementCast<MenuAnchor>(*value.Value());
         menu.SetPlacement(static_cast<MenuPlacement>(placement_));
         menu.SetFitInWindow(fitInWindow_);
         menu.SetOnOpenChanged(
@@ -55,13 +55,13 @@ Result<SharedPtr<Element>> MenuAnchorWidget::BuildElement(ObjectRegistry& object
 
 Result<void> MenuAnchorWidget::Open() noexcept {
     auto live = CachedElement();
-    return live ? static_cast<MenuAnchor&>(*live).Open()
+    return live ? StaticElementCast<MenuAnchor>(*live).Open()
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> MenuAnchorWidget::OpenFocused(Application& app, uint32 user) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<MenuAnchor&>(*live).OpenFocused(app, user, {})
+    return live ? StaticElementCast<MenuAnchor>(*live).OpenFocused(app, user, {})
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
@@ -77,20 +77,20 @@ Result<void> MenuAnchorWidget::ToggleOpen() noexcept {
 void MenuAnchorWidget::SetPlacement(MenuPlacement placement) noexcept {
     placement_ = static_cast<uint8>(placement);
     if (auto live = CachedElement()) {
-        static_cast<MenuAnchor&>(*live).SetPlacement(placement);
+        StaticElementCast<MenuAnchor>(*live).SetPlacement(placement);
     }
 }
 
 void MenuAnchorWidget::SetFitInWindow(bool fit) noexcept {
     fitInWindow_ = fit;
     if (auto live = CachedElement()) {
-        static_cast<MenuAnchor&>(*live).SetFitInWindow(fit);
+        StaticElementCast<MenuAnchor>(*live).SetFitInWindow(fit);
     }
 }
 
 Optional<Vec2> MenuAnchorWidget::MenuPosition() const noexcept {
     auto live = CachedElement();
-    return live ? static_cast<MenuAnchor&>(*live).MenuPosition() : Optional<Vec2>{};
+    return live ? StaticElementCast<MenuAnchor>(*live).MenuPosition() : Optional<Vec2>{};
 }
 
 void MenuAnchorWidget::SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcept {
@@ -99,18 +99,18 @@ void MenuAnchorWidget::SetOnOpenChanged(Delegate<void(bool)>&& callback) noexcep
 
 void MenuAnchorWidget::Close() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<MenuAnchor&>(*live).Close();
+        StaticElementCast<MenuAnchor>(*live).Close();
     }
 }
 
 bool MenuAnchorWidget::IsOpen() const noexcept {
     auto live = CachedElement();
-    return live && static_cast<MenuAnchor&>(*live).IsOpen();
+    return live && StaticElementCast<MenuAnchor>(*live).IsOpen();
 }
 
 void MenuAnchorWidget::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<MenuAnchor&>(*live).DisconnectMenu();
+        StaticElementCast<MenuAnchor>(*live).DisconnectMenu();
     }
 
     PanelWidget::ReleaseElements();

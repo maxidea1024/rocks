@@ -60,6 +60,8 @@ struct FloatingTabPreview {
 // 에디터 창 하나의 도킹 영역이다. 묶음의 모든 탭 머리와 선택한 탭의 내용만 트리에 노출한다.
 // 등록 ID는 레이아웃을 저장하고 다시 여는 데 쓰므로 지역화된 표시 문자열과 분리한다.
 class ROCKS_UIFRAMEWORK_API DockManager final : public Element {
+    ROCKS_UI_ELEMENT(DockManager, Element)
+
 public:
     explicit DockManager(Allocator& allocator) noexcept;
     ~DockManager() noexcept override;

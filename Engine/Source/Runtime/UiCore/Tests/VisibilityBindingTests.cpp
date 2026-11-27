@@ -15,6 +15,8 @@ namespace {
 
 // 묶음 하나를 가진 요소다(평가 횟수를 센다).
 class ProbeElement final : public Element {
+    ROCKS_UI_ELEMENT(ProbeElement, Element)
+
 public:
     explicit ProbeElement(Allocator& allocator) noexcept : Element(allocator), width_(*this, 0) {
     }

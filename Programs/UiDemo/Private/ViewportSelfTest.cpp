@@ -94,7 +94,7 @@ int VerifyViewportWorld(Allocator& allocator, UiRenderer& renderer) noexcept {
         return 127;
     }
 
-    const UiTextureId scene = static_cast<Viewport&>(*element.Value()).ManagedSurface();
+    const UiTextureId scene = StaticElementCast<Viewport>(*element.Value()).ManagedSurface();
     if (scene.IsNull() || !CaptureTarget(renderer, scene, pixels) || pixels.Size() != 8 * 8 * 4) {
         return 128;
     }

@@ -9,8 +9,9 @@ namespace rocks::ui {
 
 // 배경 사각형을 그리는 Element다. 자식 배치는 호출자가 지정한다.
 class ROCKS_UIFRAMEWORK_API Frame : public Element {
+    ROCKS_UI_ELEMENT(Frame, Element)
+
 public:
-    using Super = Element;
     struct Args {
         ElementChild content{};
         Bindable<LinearColor> color{LinearColor{1, 1, 1, 1}};

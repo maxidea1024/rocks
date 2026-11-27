@@ -194,7 +194,7 @@ struct MenuBench {
     // index 막대 메뉴의 열린 패널이다.
     MenuPanel* Panel(usize index) const noexcept {
         auto* button = bar->Button(index);
-        return button ? static_cast<MenuPanel*>(button->MenuContent()) : nullptr;
+        return button ? StaticElementCast<MenuPanel>(button->MenuContent()) : nullptr;
     }
 
     // 열린 File 메뉴 패널이다.
@@ -208,7 +208,7 @@ struct MenuBench {
         for (usize i = root->ChildCount(); i > 0; --i) {
             Element* layer = root->ChildAt(i - 1);
             if (layer->ChildCount() == 1) {
-                return static_cast<MenuPanel*>(layer->ChildAt(0));
+                return StaticElementCast<MenuPanel>(layer->ChildAt(0));
             }
         }
 
@@ -221,7 +221,7 @@ struct MenuBench {
 };
 
 MenuRow* RowAt(MenuPanel& panel, usize index) noexcept {
-    return static_cast<MenuRow*>(panel.ChildAt(index));
+    return StaticElementCast<MenuRow>(panel.ChildAt(index));
 }
 
 } // namespace
@@ -241,14 +241,14 @@ TEST(UiFramework_MenuBuilderLaysOutEntriesSeparatorsAndSections) {
     // 단축키 글자는 FormatKeyChord 규칙이다.
     MenuRow* save = RowAt(*panel, 0);
     REQUIRE(save->ChildCount() == 2);
-    CHECK(static_cast<TextLabel*>(save->ChildAt(1))->GetText() == "Ctrl+S");
+    CHECK(StaticElementCast<TextLabel>(save->ChildAt(1))->GetText() == "Ctrl+S");
     // 실행할 수 없는 항목은 꺼진다. 하위 메뉴·체크 표시.
     CHECK(!RowAt(*panel, 1)->IsEnabled());
     CHECK(RowAt(*panel, 3)->HasSubMenu());
     CHECK(RowAt(*panel, 7)->CheckKind() == MenuCheckKind::Check && RowAt(*panel, 7)->IsChecked());
     // 묶음 제목은 대문자로 보인다(UE SHeadingBlock).
     REQUIRE(panel->ChildAt(6)->ChildCount() == 1);
-    CHECK(static_cast<TextLabel*>(panel->ChildAt(6)->ChildAt(0))->GetText() == "SECTION");
+    CHECK(StaticElementCast<TextLabel>(panel->ChildAt(6)->ChildAt(0))->GetText() == "SECTION");
     // 아이콘과 설명 툴팁이 항목에 붙는다.
     CHECK(RowAt(*panel, 0)->Icon() == SaveIcon && RowAt(*panel, 0)->HasToolTip());
     CHECK(!RowAt(*panel, 3)->HasToolTip());
@@ -331,7 +331,7 @@ TEST(UiFramework_MenuWindowChromeHostsMenuBarPopups) {
     REQUIRE(position && bounds);
     CHECK(position->y == bounds.Value().max.y);
     // 하위 메뉴도 같은 호스트에 붙고, 연 항목은 포인터가 하위 메뉴로 옮겨 가도 강조를 유지한다.
-    auto* panel = static_cast<MenuPanel*>(file.MenuContent());
+    auto* panel = StaticElementCast<MenuPanel>(file.MenuContent());
     REQUIRE(panel);
     // 팝업 위 지점은 Popup 영역이다(창 끝에 붙어도 크기 조절 가장자리보다 앞선다 — R6). 제목
     // 막대의 빈 곳은 Caption이다.
@@ -393,7 +393,7 @@ TEST(UiFramework_MenuSubMenuOpensOnHoverAndClobbersAfterDelay) {
     REQUIRE(bench.Frame());
     REQUIRE(recent.IsOpen());
     Element* subLayer = bench.root->ChildAt(bench.root->ChildCount() - 1);
-    auto* subPanel = static_cast<MenuPanel*>(subLayer->ChildAt(0));
+    auto* subPanel = StaticElementCast<MenuPanel>(subLayer->ChildAt(0));
     REQUIRE(bench.Click(*RowAt(*subPanel, 0)));
     CHECK(bench.recent == 1 && bench.bar->OpenIndex() == IndexNone);
 }
@@ -535,7 +535,7 @@ TEST(UiFramework_MenuSubMenuSurvivesPassingOverSibling) {
     REQUIRE(bench.Hover(recent));
     REQUIRE(bench.Frame());
     REQUIRE(recent.IsOpen());
-    auto* sub = static_cast<MenuPanel*>(recent.MenuContent());
+    auto* sub = StaticElementCast<MenuPanel>(recent.MenuContent());
     REQUIRE(sub);
     // 하위 메뉴 첫 항목은 부모 항목과 같은 높이에서 시작한다.
     auto rowBounds = recent.GetGeometry().WindowBounds();
@@ -650,7 +650,7 @@ TEST(UiFramework_MenuBarOverflowHidesMenusThatDoNotFit) {
     // 넘침 메뉴는 숨은 메뉴들(Edit·View)을 하위 메뉴로 보인다.
     REQUIRE(bench.Click(*overflow));
     REQUIRE(bench.Frame());
-    auto* panel = static_cast<MenuPanel*>(overflow->MenuContent());
+    auto* panel = StaticElementCast<MenuPanel>(overflow->MenuContent());
     REQUIRE(panel);
     REQUIRE(panel->ChildCount() == 2);
     CHECK(RowAt(*panel, 0)->HasSubMenu() && RowAt(*panel, 0)->LabelText() == "Edit");
@@ -723,11 +723,11 @@ TEST(UiFramework_MenuHiddenMenuAcceleratorOpensItsSubMenu) {
     REQUIRE(bench.Frame());
     MenuBarButton* overflow = bench.bar->OverflowButton();
     REQUIRE(overflow && overflow->IsOpen());
-    auto* panel = static_cast<MenuPanel*>(overflow->MenuContent());
+    auto* panel = StaticElementCast<MenuPanel>(overflow->MenuContent());
     REQUIRE(panel);
     MenuRow* edit = RowAt(*panel, 0);
     REQUIRE(edit->IsOpen());
-    auto* sub = static_cast<MenuPanel*>(edit->MenuContent());
+    auto* sub = StaticElementCast<MenuPanel>(edit->MenuContent());
     REQUIRE(sub);
     CHECK(bench.app.GetFocus(0).Get() == sub->ChildAt(0));
 }

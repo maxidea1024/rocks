@@ -7,7 +7,7 @@ namespace rocks::ui {
 
 ComboBoxWidgetBase::~ComboBoxWidgetBase() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ComboBox&>(*live).DisconnectModel();
+        StaticElementCast<ComboBox>(*live).DisconnectModel();
     }
 }
 
@@ -31,7 +31,7 @@ void ComboBoxWidgetBase::OptionsChanged(int32 selection) noexcept {
     const bool cleared = selectedIndex_ >= 0 && selection < 0;
     selectedIndex_ = selection;
     if (auto live = CachedElement()) {
-        static_cast<ComboBox&>(*live).UpdateOptions(OptionCount(), selection);
+        StaticElementCast<ComboBox>(*live).UpdateOptions(OptionCount(), selection);
     }
 
     if (cleared) {
@@ -49,7 +49,7 @@ Result<void> ComboBoxWidgetBase::SetSelectedIndex(int32 index) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        return static_cast<ComboBox&>(*live).Select(index);
+        return StaticElementCast<ComboBox>(*live).Select(index);
     }
 
     if (selectedIndex_ != index) {
@@ -164,18 +164,19 @@ Result<void> ComboBoxWidgetBase::ClearSelection() noexcept {
 
 Result<void> ComboBoxWidgetBase::RefreshOptions() noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ComboBox&>(*live).Refresh(OptionCount(), selectedIndex_)
+    return live ? StaticElementCast<ComboBox>(*live).Refresh(OptionCount(), selectedIndex_)
                 : Result<void>::Success();
 }
 
 Result<void> ComboBoxWidgetBase::Open() noexcept {
     auto live = CachedElement();
-    return live ? static_cast<ComboBox&>(*live).Open() : Result<void>::Failure(ErrorCode::NotReady);
+    return live ? StaticElementCast<ComboBox>(*live).Open()
+                : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 void ComboBoxWidgetBase::Close() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ComboBox&>(*live).Close();
+        StaticElementCast<ComboBox>(*live).Close();
     }
 }
 
@@ -190,7 +191,7 @@ Result<void> ComboBoxWidgetBase::SetMaxListHeight(float height) noexcept {
 
     maxListHeight_ = height;
     if (auto live = CachedElement()) {
-        return static_cast<ComboBox&>(*live).SetMaxListHeight(height);
+        return StaticElementCast<ComboBox>(*live).SetMaxListHeight(height);
     }
 
     return Result<void>::Success();
@@ -198,12 +199,12 @@ Result<void> ComboBoxWidgetBase::SetMaxListHeight(float height) noexcept {
 
 bool ComboBoxWidgetBase::IsOpen() const noexcept {
     auto live = CachedElement();
-    return live && static_cast<ComboBox&>(*live).IsOpen();
+    return live && StaticElementCast<ComboBox>(*live).IsOpen();
 }
 
 void ComboBoxWidgetBase::ReleaseElements() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<ComboBox&>(*live).DisconnectModel();
+        StaticElementCast<ComboBox>(*live).DisconnectModel();
     }
 
     Widget::ReleaseElements();

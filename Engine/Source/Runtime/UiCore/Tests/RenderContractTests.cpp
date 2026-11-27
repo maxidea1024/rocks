@@ -71,6 +71,8 @@ public:
 };
 
 class FakeRetained final : public Element, public WidgetSurface {
+    ROCKS_UI_ELEMENT(FakeRetained, Element)
+
 public:
     explicit FakeRetained(Allocator& allocator) noexcept : Element(allocator) {
     }
@@ -110,6 +112,8 @@ public:
 };
 
 class FakeViewport final : public Element, public WidgetSurface {
+    ROCKS_UI_ELEMENT(FakeViewport, Element)
+
 public:
     explicit FakeViewport(Allocator& allocator) noexcept : Element(allocator) {
     }

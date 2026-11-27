@@ -28,6 +28,7 @@ Result<void> StackPanelWidget::AttachChild(ObjectRegistry& objects, ObjectHandle
                    : Result<void>::Failure(slot.Error());
     }
 
-    return static_cast<StackPanel&>(panel).TryAddSlot(child, slot.Value().Get().Value()->Layout());
+    return StaticElementCast<StackPanel>(panel).TryAddSlot(child,
+                                                           slot.Value().Get().Value()->Layout());
 }
 } // namespace rocks::ui

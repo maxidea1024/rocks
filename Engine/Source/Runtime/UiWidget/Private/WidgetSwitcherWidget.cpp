@@ -46,7 +46,7 @@ uint32 WidgetSwitcherWidget::ActiveIndex() const noexcept {
 
 void WidgetSwitcherWidget::ApplyProperties(Element& element) noexcept {
     if (activeIndex_ < element.ChildCount()) {
-        (void)static_cast<Switcher&>(element).SetActiveIndex(activeIndex_);
+        (void)StaticElementCast<Switcher>(element).SetActiveIndex(activeIndex_);
     }
 }
 

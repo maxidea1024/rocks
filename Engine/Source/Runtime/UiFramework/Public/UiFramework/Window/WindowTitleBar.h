@@ -18,6 +18,8 @@ namespace rocks::ui {
 //   bar.Value()->Construct({.title = shapedTitle,
 //                           .onMinimize = ..., .onToggleMaximize = ..., .onClose = ...});
 class ROCKS_UIFRAMEWORK_API WindowTitleBar final : public Element {
+    ROCKS_UI_ELEMENT(WindowTitleBar, Element)
+
 public:
     struct Args {
         // 호출자가 style.title.font로 shaping한 제목이다. 없으면 제목을 비운다.

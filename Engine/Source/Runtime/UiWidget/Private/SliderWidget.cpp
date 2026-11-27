@@ -14,7 +14,7 @@ Result<void> SliderWidget::SetRange(float minimum, float maximum) noexcept {
     maximum_ = maximum;
     value_ = math::Clamp(value_, minimum, maximum);
     if (auto live = CachedElement()) {
-        return static_cast<Slider&>(*live).SetRange(minimum, maximum);
+        return StaticElementCast<Slider>(*live).SetRange(minimum, maximum);
     }
 
     return Result<void>::Success();
@@ -27,7 +27,7 @@ Result<void> SliderWidget::SetStep(float step) noexcept {
 
     step_ = step;
     if (auto live = CachedElement()) {
-        return static_cast<Slider&>(*live).SetStep(step);
+        return StaticElementCast<Slider>(*live).SetStep(step);
     }
 
     return Result<void>::Success();
@@ -36,28 +36,28 @@ Result<void> SliderWidget::SetStep(float step) noexcept {
 void SliderWidget::SetVertical(bool vertical) noexcept {
     vertical_ = vertical;
     if (auto live = CachedElement()) {
-        static_cast<Slider&>(*live).SetVertical(vertical);
+        StaticElementCast<Slider>(*live).SetVertical(vertical);
     }
 }
 
 void SliderWidget::SetSnapToStep(bool enabled) noexcept {
     snapToStep_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<Slider&>(*live).SetSnapToStep(enabled);
+        StaticElementCast<Slider>(*live).SetSnapToStep(enabled);
     }
 }
 
 void SliderWidget::SetLocked(bool locked) noexcept {
     locked_ = locked;
     if (auto live = CachedElement()) {
-        static_cast<Slider&>(*live).SetLocked(locked);
+        StaticElementCast<Slider>(*live).SetLocked(locked);
     }
 }
 
 void SliderWidget::SetIndentHandle(bool indent) noexcept {
     indentHandle_ = indent;
     if (auto live = CachedElement()) {
-        static_cast<Slider&>(*live).SetIndentHandle(indent);
+        StaticElementCast<Slider>(*live).SetIndentHandle(indent);
     }
 }
 
@@ -69,7 +69,7 @@ Result<void> SliderWidget::SetTints(LinearColor bar, LinearColor handle) noexcep
     barTint_ = bar;
     handleTint_ = handle;
     if (auto live = CachedElement()) {
-        auto& slider = static_cast<Slider&>(*live);
+        auto& slider = StaticElementCast<Slider>(*live);
         slider.SetColor(bar);
         slider.SetHandleColor(handle);
     }
@@ -84,7 +84,7 @@ float SliderWidget::GetNormalizedValue() const noexcept {
 void SliderWidget::SetRequiresControllerLock(bool required) noexcept {
     requiresControllerLock_ = required;
     if (auto live = CachedElement()) {
-        static_cast<Slider&>(*live).SetRequiresControllerLock(required);
+        StaticElementCast<Slider>(*live).SetRequiresControllerLock(required);
     }
 }
 
@@ -132,7 +132,7 @@ Result<void> SliderWidget::SetValue(float value) noexcept {
 }
 
 void SliderWidget::ApplyProperties(Element& element) noexcept {
-    (void)static_cast<Slider&>(element).SetValue(value_);
+    (void)StaticElementCast<Slider>(element).SetValue(value_);
 }
 
 Result<SharedPtr<Element>> SliderWidget::BuildElement(ObjectRegistry& objects) noexcept {

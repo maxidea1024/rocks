@@ -13,6 +13,8 @@ class MenuBar;
 // UW7c). 누른 채 끌어 메뉴 항목에서 놓으면 그 항목을 실행한다(R8). 키보드 초점(F10)은 외곽선 대신
 // 올림 바탕으로 보이고, 아래·Enter는 메뉴 열기, 왼쪽·오른쪽은 옆 버튼, Esc는 막대에서 나가기다.
 class ROCKS_UIFRAMEWORK_API MenuBarButton final : public MenuAnchor {
+    ROCKS_UI_ELEMENT(MenuBarButton, MenuAnchor)
+
 public:
     MenuBarButton(Allocator& allocator, MenuBar& bar,
                   const MenuBarStyle& style = DefaultMenuBarStyle()) noexcept;

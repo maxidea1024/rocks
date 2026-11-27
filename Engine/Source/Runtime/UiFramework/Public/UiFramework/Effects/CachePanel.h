@@ -7,6 +7,8 @@ namespace rocks::ui {
 
 // 창 전체 캐시를 사용하지 않는 화면에서 내용 하나의 그리기 기록을 보존한다.
 class ROCKS_UIFRAMEWORK_API CachePanel final : public SizeBox {
+    ROCKS_UI_ELEMENT(CachePanel, SizeBox)
+
 public:
     explicit CachePanel(Allocator& allocator) noexcept;
 

@@ -24,9 +24,10 @@ enum class ProgressDirection : uint8 {
 // 진행률이 정해지면 채움 비율을 캐시한다. 작업량을 모를 때는 SetMarquee(true)로 이동하는 띠를
 // 표시한다.
 class ROCKS_UIFRAMEWORK_API ProgressBar : public Frame {
+    ROCKS_UI_ELEMENT(ProgressBar, Frame)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
-    using Super = Frame;
     struct Args {
         ElementChild content{};
         // 바탕 brush에 곱한다(바탕 모양은 스타일 — UE FProgressBarStyle.BackgroundImage).

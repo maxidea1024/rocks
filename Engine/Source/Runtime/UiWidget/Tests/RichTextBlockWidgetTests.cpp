@@ -100,7 +100,7 @@ TEST(UiWidget_RichTextStylesAndInlineImagePreserveClusterLayout) {
     auto invalid = Text::Invariant(allocator, "<other>A</>");
     REQUIRE(invalid);
     CHECK(!widget->SetText(invalid.Value()));
-    CHECK(static_cast<const TextLabel&>(*native.Value()).GetText() == "AB\xEF\xBF\xBC");
+    CHECK(StaticElementCast<TextLabel>(*native.Value()).GetText() == "AB\xEF\xBF\xBC");
 }
 
 } // namespace rocks::ui

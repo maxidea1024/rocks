@@ -6,6 +6,8 @@ namespace rocks::ui {
 
 // 원본 이미지의 논리 크기를 배치에 제공하고, 할당된 영역에 브러시를 그린다.
 class ROCKS_UIFRAMEWORK_API Image final : public Element {
+    ROCKS_UI_ELEMENT(Image, Element)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     explicit Image(Allocator& allocator) noexcept;

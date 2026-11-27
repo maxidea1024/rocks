@@ -98,7 +98,7 @@ Result<SharedPtr<Element>> ExpandableAreaWidget::BuildElement(ObjectRegistry& ob
     }
 
     auto* panel = root.Value().Get();
-    auto& header = static_cast<Button&>(*panel->ChildAt(0));
+    auto& header = StaticElementCast<Button>(*panel->ChildAt(0));
     header.SetOnClicked(Delegate<void()>::CreateLambda([&objects, owner = Handle(),
                                                         panel]() noexcept {
         auto widget = objects.ResolveForWrite<ExpandableAreaWidget>(objects.OwnerAccess(), owner);

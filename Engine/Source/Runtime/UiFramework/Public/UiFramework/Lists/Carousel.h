@@ -9,6 +9,8 @@ namespace rocks::ui {
 // Docs/Design/UiToolkit 20.4절). 키 입력은 현재 페이지로 간다. 완료되면 시간 속성의 등록을 해제해
 // 정지 화면에서 측정·배치·그리기 기록을 재사용한다.
 class ROCKS_UIFRAMEWORK_API Carousel final : public Switcher {
+    ROCKS_UI_ELEMENT(Carousel, Switcher)
+
 public:
     explicit Carousel(Allocator& allocator) noexcept;
     Result<void> AddPage(const SharedPtr<CarouselPage>& page) noexcept;

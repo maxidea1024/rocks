@@ -15,25 +15,25 @@ TreeViewWidget::CreateView(Allocator& allocator, Application& app,
 
 Result<void> TreeViewWidget::SetExpanded(uint64 key, bool expanded) noexcept {
     auto live = CachedElement();
-    return live ? static_cast<TreeView&>(*live).SetExpanded(key, expanded)
+    return live ? StaticElementCast<TreeView>(*live).SetExpanded(key, expanded)
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 Result<void> TreeViewWidget::ExpandAll() noexcept {
     auto live = CachedElement();
-    return live ? static_cast<TreeView&>(*live).ExpandAll()
+    return live ? StaticElementCast<TreeView>(*live).ExpandAll()
                 : Result<void>::Failure(ErrorCode::NotReady);
 }
 
 void TreeViewWidget::CollapseAll() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<TreeView&>(*live).CollapseAll();
+        StaticElementCast<TreeView>(*live).CollapseAll();
     }
 }
 
 bool TreeViewWidget::IsExpanded(uint64 key) const noexcept {
     auto live = CachedElement();
-    return live && static_cast<const TreeView&>(*live).IsExpanded(key);
+    return live && StaticElementCast<TreeView>(*live).IsExpanded(key);
 }
 
 } // namespace rocks::ui

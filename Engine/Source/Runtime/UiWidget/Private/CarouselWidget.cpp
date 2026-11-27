@@ -37,7 +37,7 @@ Result<void> CarouselWidget::SetMoveSpeed(float speed) noexcept {
 
 Result<void> CarouselWidget::SetCacheChildren(bool cache) noexcept {
     if (auto live = CachedElement()) {
-        auto changed = static_cast<Carousel&>(*live).SetCacheChildren(cache);
+        auto changed = StaticElementCast<Carousel>(*live).SetCacheChildren(cache);
         if (!changed) {
             return changed;
         }
@@ -70,7 +70,7 @@ Result<void> CarouselWidget::ChangePage(uint32 index, bool forward) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        auto changed = static_cast<Carousel&>(*live).Show(index, forward, moveSpeed_);
+        auto changed = StaticElementCast<Carousel>(*live).Show(index, forward, moveSpeed_);
         if (!changed) {
             return changed;
         }
@@ -148,7 +148,7 @@ Result<void> CarouselWidget::RemoveChild(ObjectRegistry& objects, ObjectHandle p
     auto removed = live ? live->ChildRefAt(index) : SharedPtr<Element>();
     // 비캐시 모드의 다음 페이지가 생성되지 않으면 기존 페이지를 그대로 유지한다.
     if (live && index == activeIndex_ && ChildCount() > 1) {
-        auto* next = static_cast<CarouselPage*>(live->ChildAt(index ? index - 1 : 1));
+        auto* next = StaticElementCast<CarouselPage>(live->ChildAt(index ? index - 1 : 1));
         auto ready = next->Materialize();
         if (!ready) {
             return ready;
@@ -174,7 +174,7 @@ Result<void> CarouselWidget::RemoveChild(ObjectRegistry& objects, ObjectHandle p
 Result<SharedPtr<Element>> CarouselWidget::CreatePanel(Allocator& allocator) noexcept {
     auto panel = MakeWidgetElement<Carousel>(allocator);
     if (panel) {
-        (void)static_cast<Carousel&>(*panel.Value()).SetCacheChildren(cacheChildren_);
+        (void)StaticElementCast<Carousel>(*panel.Value()).SetCacheChildren(cacheChildren_);
     }
 
     return panel;
@@ -206,7 +206,7 @@ Result<void> CarouselWidget::AttachChild(ObjectRegistry& objects, ObjectHandle i
         }
     }
 
-    return static_cast<Carousel&>(panel).AddPage(page.Value());
+    return StaticElementCast<Carousel>(panel).AddPage(page.Value());
 }
 
 Result<SharedPtr<Element>> CarouselWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -223,7 +223,7 @@ Result<SharedPtr<Element>> CarouselWidget::BuildElement(ObjectRegistry& objects)
     }
 
     if (ChildCount()) {
-        auto shown = static_cast<Carousel&>(*panel.Value()).Show(activeIndex_, true, 0);
+        auto shown = StaticElementCast<Carousel>(*panel.Value()).Show(activeIndex_, true, 0);
         if (!shown) {
             return Result<SharedPtr<Element>>::Failure(shown.Error());
         }

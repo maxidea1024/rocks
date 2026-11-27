@@ -39,7 +39,7 @@ TEST(UiWidget_ComboModelsKeepSelectionWhenAnEarlierOptionIsRemoved) {
     auto native = strings->TakeElement(objects);
     REQUIRE(host && native);
     REQUIRE(host.Value()->TryAddChild(native.Value()));
-    auto& combo = static_cast<ComboBox&>(*native.Value());
+    auto& combo = StaticElementCast<ComboBox>(*native.Value());
     REQUIRE(combo.Open());
     strings->ReleaseElements();
     CHECK(!combo.IsOpen() && !combo.Open() && host.Value()->ChildCount() == 1);

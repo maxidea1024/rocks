@@ -22,6 +22,8 @@ enum class WindowButtonRole : uint8 {
 //                                                         WindowButtonRole::Close);
 //   close.Value()->SetOnClicked(Delegate<void()>::CreateLambda([&] { window.RequestClose(); }));
 class ROCKS_UIFRAMEWORK_API WindowControlButton final : public Button {
+    ROCKS_UI_ELEMENT(WindowControlButton, Button)
+
 public:
     WindowControlButton(Allocator& allocator, WindowButtonRole role,
                         const WindowStyle& style = DefaultWindowStyle()) noexcept;

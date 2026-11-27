@@ -19,7 +19,7 @@ Result<SharedPtr<Element>> ScreenContainerWidget::BuildElement(ObjectRegistry& o
 
 SharedPtr<ScreenContainer> ScreenContainerWidget::NativeContainer() const noexcept {
     auto live = CachedElement();
-    return SharedPtr<ScreenContainer>(live, static_cast<ScreenContainer*>(live.Get()));
+    return SharedPtr<ScreenContainer>(live, StaticElementCast<ScreenContainer>(live.Get()));
 }
 
 Result<ObjectHandle> ScreenContainerWidget::PushScreen(ClassRef<Screen> type) noexcept {

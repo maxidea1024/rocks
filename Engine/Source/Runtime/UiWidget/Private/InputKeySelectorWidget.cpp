@@ -28,7 +28,7 @@ Result<void> InputKeySelectorWidget::SetSelectedKey(KeyChord chord) noexcept {
 
     auto live = CachedElement();
     if (live) {
-        auto updated = static_cast<InputKeySelector&>(*live).SetSelectedKey(chord);
+        auto updated = StaticElementCast<InputKeySelector>(*live).SetSelectedKey(chord);
         if (!updated) {
             return updated;
         }
@@ -36,7 +36,7 @@ Result<void> InputKeySelectorWidget::SetSelectedKey(KeyChord chord) noexcept {
 
     auto stored = StoreChord(chord);
     if (!stored && live) {
-        (void)static_cast<InputKeySelector&>(*live).SetSelectedKey(SelectedKey());
+        (void)StaticElementCast<InputKeySelector>(*live).SetSelectedKey(SelectedKey());
     }
 
     return stored;
@@ -55,14 +55,14 @@ KeyChord InputKeySelectorWidget::SelectedKey() const noexcept {
 void InputKeySelectorWidget::SetAllowModifiers(bool enabled) noexcept {
     allowModifiers_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<InputKeySelector&>(*live).SetAllowModifiers(enabled);
+        StaticElementCast<InputKeySelector>(*live).SetAllowModifiers(enabled);
     }
 }
 
 void InputKeySelectorWidget::SetAllowGamepad(bool enabled) noexcept {
     allowGamepad_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<InputKeySelector&>(*live).SetAllowGamepad(enabled);
+        StaticElementCast<InputKeySelector>(*live).SetAllowGamepad(enabled);
     }
 }
 

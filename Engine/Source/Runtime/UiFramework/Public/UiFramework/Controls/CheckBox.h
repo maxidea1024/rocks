@@ -18,6 +18,8 @@ enum class CheckState : uint8 {
 //   check.Value()->TryAddChild(label);                 // 상자 오른쪽 레이블
 //   check.Value()->SetOnChanged(Delegate<void(CheckState)>::CreateLambda(...));
 class ROCKS_UIFRAMEWORK_API CheckBox : public Button {
+    ROCKS_UI_ELEMENT(CheckBox, Button)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
     explicit CheckBox(Allocator& allocator) noexcept;

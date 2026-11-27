@@ -8,6 +8,8 @@ using namespace rocks::ui;
 namespace ui_application_tests {
 
 class TestElement final : public Element {
+    ROCKS_UI_ELEMENT(TestElement, Element)
+
 public:
     explicit TestElement(Allocator& allocator) noexcept : Element(allocator) {
     }

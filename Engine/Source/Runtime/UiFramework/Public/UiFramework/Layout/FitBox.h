@@ -22,6 +22,8 @@ enum class FitDirection : uint8 {
 
 // 자식 하나를 할당 영역에 맞춘다. Fit과 Cover는 자식의 종횡비를 유지한다.
 class ROCKS_UIFRAMEWORK_API FitBox : public Element {
+    ROCKS_UI_ELEMENT(FitBox, Element)
+
 public:
     explicit FitBox(Allocator& allocator) noexcept;
 

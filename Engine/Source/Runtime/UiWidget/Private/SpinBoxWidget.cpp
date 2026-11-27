@@ -13,7 +13,7 @@ Result<void> SpinBoxWidget::SetLimits(float minimum, float maximum, float step) 
     }
 
     if (auto live = CachedElement()) {
-        auto result = static_cast<SpinBox&>(*live).SetLimits(minimum, maximum, step);
+        auto result = StaticElementCast<SpinBox>(*live).SetLimits(minimum, maximum, step);
         if (!result) {
             return result;
         }
@@ -32,7 +32,7 @@ Result<void> SpinBoxWidget::SetValue(float value) noexcept {
     }
 
     if (auto live = CachedElement()) {
-        auto result = static_cast<SpinBox&>(*live).SetValue(value);
+        auto result = StaticElementCast<SpinBox>(*live).SetValue(value);
         if (!result) {
             return result;
         }
@@ -54,7 +54,7 @@ Result<void> SpinBoxWidget::SetFractionalDigits(int32 minimum, int32 maximum) no
     }
 
     if (auto live = CachedElement()) {
-        auto updated = static_cast<SpinBox&>(*live).SetFractionalDigits(minimum, maximum);
+        auto updated = StaticElementCast<SpinBox>(*live).SetFractionalDigits(minimum, maximum);
         if (!updated) {
             return updated;
         }
@@ -68,14 +68,14 @@ Result<void> SpinBoxWidget::SetFractionalDigits(int32 minimum, int32 maximum) no
 void SpinBoxWidget::SetSliderEnabled(bool enabled) noexcept {
     sliderEnabled_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<SpinBox&>(*live).SetSliderEnabled(enabled);
+        StaticElementCast<SpinBox>(*live).SetSliderEnabled(enabled);
     }
 }
 
 void SpinBoxWidget::SetSnapToStep(bool enabled) noexcept {
     snapToStep_ = enabled;
     if (auto live = CachedElement()) {
-        static_cast<SpinBox&>(*live).SetSnapToStep(enabled);
+        StaticElementCast<SpinBox>(*live).SetSnapToStep(enabled);
     }
 }
 

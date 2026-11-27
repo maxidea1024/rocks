@@ -20,6 +20,8 @@ struct GridSlot {
 
 // 자식이 여러 칸을 차지하면 원하는 크기를 해당 행과 열에 균등하게 나누어 반영한다.
 class ROCKS_UIFRAMEWORK_API Grid : public Element {
+    ROCKS_UI_ELEMENT(Grid, Element)
+
 public:
     explicit Grid(Allocator& allocator) noexcept;
 

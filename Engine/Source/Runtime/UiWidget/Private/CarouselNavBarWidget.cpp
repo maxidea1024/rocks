@@ -47,7 +47,7 @@ Result<void> CarouselNavBarWidget::Refresh(ObjectRegistry& objects, Element& hos
     auto old = host.ChildRefAt(0);
     if (!rebuild && old && old->ChildCount() == count) {
         for (usize i = 0; i < count; ++i) {
-            auto* button = static_cast<Button*>(old->ChildAt(i)->ChildAt(0));
+            auto* button = StaticElementCast<Button>(old->ChildAt(i)->ChildAt(0));
             button->SetColor(i == selected ? LinearColor{0.14f, 0.4f, 0.8f, 1}
                                            : LinearColor{0.2f, 0.2f, 0.2f, 1});
         }

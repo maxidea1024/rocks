@@ -241,7 +241,7 @@ TEST(UiFramework_TextOverflowFullTextToolTipOnlyWhenTruncated) {
     auto tip = bench.label.MakeToolTip();
     REQUIRE(tip);
     REQUIRE(tip.Value()->ChildCount() == 1);
-    auto* copy = static_cast<TextLabel*>(tip.Value()->ChildAt(0));
+    auto* copy = StaticElementCast<TextLabel>(tip.Value()->ChildAt(0));
     CHECK(copy != &bench.label && copy->GetText() == "ABCDEFGHIJ");
     // 다 들어가면 툴팁을 만들지 않는다.
     REQUIRE(bench.Paint({120, LineHeight}));

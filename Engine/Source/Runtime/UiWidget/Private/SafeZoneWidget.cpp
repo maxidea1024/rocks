@@ -109,7 +109,7 @@ void SafeZoneWidget::SetSidesToPad(bool left, bool top, bool right, bool bottom)
 
 void SafeZoneWidget::ApplyProperties(Element& element) noexcept {
     const Vec4 insets = (titleSafe_ ? titleInsets_ : actionInsets_) * scale_;
-    (void)static_cast<Frame&>(element).SetPadding(
+    (void)StaticElementCast<Frame>(element).SetPadding(
         {left_ ? insets.x : 0, top_ ? insets.y : 0, right_ ? insets.z : 0, bottom_ ? insets.w : 0});
 }
 

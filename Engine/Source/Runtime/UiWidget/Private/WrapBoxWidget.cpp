@@ -32,8 +32,8 @@ Result<void> WrapBoxWidget::AttachChild(ObjectRegistry& objects, ObjectHandle ha
                    : Result<void>::Failure(slot.Error());
     }
 
-    return static_cast<WrapStack&>(panel).TryAddSlot(child,
-                                                     slot.Value().Get().Value()->WrapLayout());
+    return StaticElementCast<WrapStack>(panel).TryAddSlot(child,
+                                                          slot.Value().Get().Value()->WrapLayout());
 }
 
 Result<void> WrapBoxWidget::UpdateAlignedSlot(ObjectRegistry& objects, ObjectHandle handle,
@@ -48,7 +48,7 @@ Result<void> WrapBoxWidget::UpdateAlignedSlot(ObjectRegistry& objects, ObjectHan
 
     auto layout = slot.Value().Get().Value()->WrapLayout();
     layout.placement = placement;
-    return static_cast<WrapStack&>(panel).SetSlot(child, layout);
+    return StaticElementCast<WrapStack>(panel).SetSlot(child, layout);
 }
 
 Result<SharedPtr<Element>> WrapBoxWidget::CreatePanel(Allocator& allocator) noexcept {
@@ -73,7 +73,7 @@ Vec2 WrapBoxWidget::Spacing() const noexcept {
 }
 
 void WrapBoxWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<WrapStack&>(element);
+    auto& native = StaticElementCast<WrapStack>(element);
     (void)native.SetSpacing(spacing_);
     native.SetUseAllottedSize(true);
 }

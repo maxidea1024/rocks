@@ -18,6 +18,8 @@ class MenuPanel;
 // 하위 메뉴(패널에서 다른 항목을 hover하지 않는 동안 — UE ShouldSubMenuAppearHovered) 중 하나다.
 // 초점은 외곽선 대신 이 강조로 보인다(Windows 메뉴).
 class ROCKS_UIFRAMEWORK_API MenuRow final : public MenuAnchor {
+    ROCKS_UI_ELEMENT(MenuRow, MenuAnchor)
+
 public:
     struct Args {
         SharedPtr<TextLabel> label{};

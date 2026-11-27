@@ -5,6 +5,8 @@
 namespace rocks::ui {
 
 class ROCKS_UIFRAMEWORK_API TileView final : public ListView {
+    ROCKS_UI_ELEMENT(TileView, ListView)
+
 public:
     using ListView::ListView;
     Result<void> SetTileWidth(float width) noexcept;

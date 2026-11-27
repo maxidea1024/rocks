@@ -15,9 +15,10 @@ enum class SpinCommitReason : uint8 {
     FocusLost
 };
 class ROCKS_UIFRAMEWORK_API SpinBox final : public Frame {
+    ROCKS_UI_ELEMENT(SpinBox, Frame)
+
 public:
     AccessibleRole GetAccessibleRole() const noexcept override;
-    using Super = Frame;
     struct Args {
         float value = 0;
         float minimum = 0;

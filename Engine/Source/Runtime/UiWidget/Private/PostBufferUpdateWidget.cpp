@@ -36,7 +36,7 @@ PostBufferUpdateWidget::SetBufferUpdates(Span<const PostBufferEntry> entries) no
     auto copied = next.TryAppend(entries);
     if (copied) {
         if (auto live = CachedElement()) {
-            copied = static_cast<PostBufferUpdate&>(*live).SetUpdates(native.Value().View());
+            copied = StaticElementCast<PostBufferUpdate>(*live).SetUpdates(native.Value().View());
         }
     }
 
@@ -51,7 +51,7 @@ PostBufferUpdateWidget::SetBufferUpdates(Span<const PostBufferEntry> entries) no
 
 SlotHandle PostBufferUpdateWidget::GetPostBuffer(uint32 channel) const noexcept {
     if (auto live = CachedElement()) {
-        return static_cast<PostBufferUpdate&>(*live).GetPostBuffer(channel);
+        return StaticElementCast<PostBufferUpdate>(*live).GetPostBuffer(channel);
     }
 
     return {};
@@ -74,7 +74,7 @@ Result<void> PostBufferUpdateWidget::SetUpdates(Span<const PostBufferUpdateInfo>
     auto status = next.TryAppend(updates);
     if (status) {
         if (auto live = CachedElement()) {
-            status = static_cast<PostBufferUpdate&>(*live).SetUpdates(updates);
+            status = StaticElementCast<PostBufferUpdate>(*live).SetUpdates(updates);
         }
     }
 
@@ -89,7 +89,7 @@ Result<void> PostBufferUpdateWidget::SetUpdates(Span<const PostBufferUpdateInfo>
 Result<SharedPtr<Element>> PostBufferUpdateWidget::BuildElement(ObjectRegistry& objects) noexcept {
     auto made = MakeWidgetElement<PostBufferUpdate>(objects.ObjectAllocator());
     if (made) {
-        auto& native = static_cast<PostBufferUpdate&>(*made.Value());
+        auto& native = StaticElementCast<PostBufferUpdate>(*made.Value());
         native.SetDestination(destination_);
         auto configured = ToNativeBuffers(updates_.GetAllocator(), bufferUpdates_.View());
         if (!configured) {
@@ -124,7 +124,7 @@ SlotHandle PostBufferUpdateWidget::CapturedBuffer() const noexcept {
     }
 
     if (auto live = CachedElement()) {
-        return static_cast<PostBufferUpdate&>(*live).ManagedSurface();
+        return StaticElementCast<PostBufferUpdate>(*live).ManagedSurface();
     }
 
     return {};
@@ -140,7 +140,7 @@ void PostBufferUpdateWidget::SetDestination(SlotHandle destination) noexcept {
 }
 
 void PostBufferUpdateWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<PostBufferUpdate&>(element);
+    auto& native = StaticElementCast<PostBufferUpdate>(element);
     if (updates_.IsEmpty() && bufferUpdates_.IsEmpty()) {
         native.SetDestination(destination_);
     }

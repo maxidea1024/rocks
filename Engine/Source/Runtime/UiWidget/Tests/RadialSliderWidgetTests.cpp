@@ -36,7 +36,7 @@ TEST(UiWidget_RadialSliderUsesAnglesCaptureAndRebuildsSavedValues) {
     REQUIRE(dial->SetValue(14));
     auto built = dial->TakeElement(objects);
     REQUIRE(built);
-    auto& native = static_cast<RadialSlider&>(*built.Value());
+    auto& native = StaticElementCast<RadialSlider>(*built.Value());
     // 회전 오프셋이 90도이므로 오른쪽 점은 원호의 중간이다. 로컬 좌표에 배율·이동도 적용한다.
     const auto area = Geometry::Root({100, 100}, {2, 0, 0, 2, 15, 10});
     REQUIRE(native.Arrange(area));
@@ -57,7 +57,7 @@ TEST(UiWidget_RadialSliderUsesAnglesCaptureAndRebuildsSavedValues) {
     dial->ReleaseElements();
     auto rebuilt = dial->TakeElement(objects);
     REQUIRE(rebuilt);
-    auto& restored = static_cast<RadialSlider&>(*rebuilt.Value());
+    auto& restored = StaticElementCast<RadialSlider>(*rebuilt.Value());
     CHECK(restored.GetValue() == 18);
     REQUIRE(restored.Arrange(area));
     PaintList paint(allocator);

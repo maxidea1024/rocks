@@ -56,7 +56,7 @@ Result<SharedPtr<Element>> ViewportWidget::BuildElement(ObjectRegistry& objects)
 
     auto panel = PanelWidget::BuildElement(objects);
     if (panel) {
-        static_cast<Viewport&>(*panel.Value()).SetSceneSource(world.Value());
+        StaticElementCast<Viewport>(*panel.Value()).SetSceneSource(world.Value());
     }
 
     return panel;
@@ -137,7 +137,7 @@ void ViewportWidget::SetSceneTexture(SlotHandle texture) noexcept {
 }
 
 void ViewportWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<Viewport&>(element);
+    auto& native = StaticElementCast<Viewport>(element);
     (void)native.SetBackground(background_);
     native.SetSceneTexture(scene_);
 }

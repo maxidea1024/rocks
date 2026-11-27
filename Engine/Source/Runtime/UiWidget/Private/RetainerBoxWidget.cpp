@@ -40,12 +40,12 @@ Result<void> RetainerBoxWidget::SetPhase(uint32 phase, uint32 count) noexcept {
 
 void RetainerBoxWidget::RequestRender() noexcept {
     if (auto live = CachedElement()) {
-        static_cast<RetainerBox&>(*live).RequestRender();
+        StaticElementCast<RetainerBox>(*live).RequestRender();
     }
 }
 
 void RetainerBoxWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<RetainerBox&>(element);
+    auto& native = StaticElementCast<RetainerBox>(element);
     (void)native.SetEffectTint(effectTint_);
     (void)native.SetPhase(phase_, phaseCount_);
 }

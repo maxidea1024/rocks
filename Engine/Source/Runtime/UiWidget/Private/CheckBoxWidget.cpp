@@ -53,7 +53,7 @@ Result<void> CheckBoxWidget::SetState(CheckState state) noexcept {
 }
 
 void CheckBoxWidget::ApplyProperties(Element& element) noexcept {
-    (void)static_cast<CheckBox&>(element).SetState(GetState());
+    (void)StaticElementCast<CheckBox>(element).SetState(GetState());
 }
 
 Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects) noexcept {
@@ -62,7 +62,7 @@ Result<SharedPtr<Element>> CheckBoxWidget::BuildElement(ObjectRegistry& objects)
         return Result<SharedPtr<Element>>::Failure(box.Error());
     }
 
-    static_cast<CheckBox&>(*box.Value())
+    StaticElementCast<CheckBox>(*box.Value())
         .SetOnChanged(Delegate<void(CheckState)>::CreateLambda(
             [&objects, owner = Handle(), native = box.Value().Get()](CheckState state) noexcept {
                 auto widget = objects.ResolveForWrite<CheckBoxWidget>(objects.OwnerAccess(), owner);

@@ -418,7 +418,7 @@ void ScreenTabListWidget::UpdateButtons(ObjectRegistry& objects, Element& host) 
     auto* row = host.ChildAt(0);
     auto active = SelectedTab(objects);
     for (usize i = 0; row && i < row->ChildCount() && i < tabIds_.Size(); ++i) {
-        auto* button = static_cast<Button*>(row->ChildAt(i));
+        auto* button = StaticElementCast<Button>(row->ChildAt(i));
         auto flags = Flags(i);
         button->SetEnabled((flags & TabEnabledFlag) != 0);
         button->SetVisibility((flags & TabVisibleFlag) ? Visibility::Visible

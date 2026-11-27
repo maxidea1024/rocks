@@ -36,7 +36,7 @@ Result<void> BorderWidget::SetBrush(const Brush& brush) noexcept {
 
     brush_ = brush;
     if (auto live = CachedElement()) {
-        return static_cast<Frame&>(*live).SetBrush(brush);
+        return StaticElementCast<Frame>(*live).SetBrush(brush);
     }
 
     return Result<void>::Success();
@@ -53,7 +53,7 @@ Result<void> BorderWidget::SetPadding(Vec4 padding) noexcept {
 
     padding_ = padding;
     if (auto live = CachedElement()) {
-        return static_cast<Frame&>(*live).SetPadding(padding);
+        return StaticElementCast<Frame>(*live).SetPadding(padding);
     }
 
     return Result<void>::Success();
@@ -68,7 +68,7 @@ LinearColor BorderWidget::Tint() const noexcept {
 }
 
 void BorderWidget::ApplyProperties(Element& element) noexcept {
-    auto& native = static_cast<Frame&>(element);
+    auto& native = StaticElementCast<Frame>(element);
     native.SetColor(tint_);
     (void)native.SetBrush(brush_);
     (void)native.SetPadding(padding_);
