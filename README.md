@@ -42,7 +42,7 @@ dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=Foundati
 
 ## 가이드
 
-- [Rocks 소개 — 엔진의 특성·구조·기능·로드맵 브로셔(HTML)](Docs/Guides/RocksIntroduction.ko.html)
+- [Rocks 소개 — 엔진의 특성·구조·기능·로드맵 브로셔(PDF)](Docs/Guides/RocksIntroduction.ko.pdf) · [HTML](Docs/Guides/RocksIntroduction.ko.html)
 - [빌드 환경 설정 — Windows·macOS·Linux 설치 순서·첫 빌드·Android 대상·문제 해결](Docs/Guides/BuildEnvironment.ko.md)
 - [저장소 구성 — 계층 규칙·규칙 파일·새 모듈 추가·프로젝트 기술자](Docs/Guides/RepositoryLayout.ko.md)
 - [엔진 구동과 렌더링 — 프레임 순서·스레드·렌더 그래프·셰이더·텍스처 스트리밍](Docs/Guides/RenderingGuide.ko.md)
