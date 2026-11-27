@@ -7,7 +7,7 @@
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/RenderLane.h>
 #include <RenderBase/RenderNotices.h>
-#include <RenderBase/RenderTransfer.h>
+#include <Meta/LaneTransfer.h>
 
 // 쿠킹 텍스처 업로드다(Docs/Design/RenderBase 6.5절 "업로드", 18.5절 7항 — SM7). 에셋 타입(Texture
 // 모듈)을 모르는 중립 입력(CookedTextureSource)을 6.5절 계약으로 검사해 장치 텍스처 설정을 만들고,
@@ -155,4 +155,4 @@ ROCKS_RENDERBASE_API void CreateCookedTextureOnLane(RenderLaneContext& context,
 
 } // namespace rocks::render
 
-ROCKS_RENDER_TRANSFERABLE(rocks::render::CookedTextureUpload);
+ROCKS_LANE_TRANSFERABLE(rocks::render::CookedTextureUpload);

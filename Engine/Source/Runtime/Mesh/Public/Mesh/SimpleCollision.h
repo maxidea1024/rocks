@@ -174,7 +174,7 @@ struct ConvexGeometry {
 };
 
 // 진단이 가리키는 형상 종류다.
-enum class CollisionShapeKind : uint8 {
+enum class SimpleCollisionShapeKind : uint8 {
     None,
     Sphere,
     Box,
@@ -216,7 +216,7 @@ enum class CollisionIssue : uint8 {
 
 // 이름이다(정적 수명, 모르는 값은 "Unknown").
 ROCKS_MESH_API const char* CollisionIssueName(CollisionIssue issue) noexcept;
-ROCKS_MESH_API const char* CollisionShapeKindName(CollisionShapeKind kind) noexcept;
+ROCKS_MESH_API const char* SimpleCollisionShapeKindName(SimpleCollisionShapeKind kind) noexcept;
 ROCKS_MESH_API const char*
 UnsupportedCollisionFeatureName(UnsupportedCollisionFeature feature) noexcept;
 
@@ -231,7 +231,7 @@ struct CollisionDiagnostic {
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
     ErrorCode error = ErrorCode::None;
     CollisionIssue issue = CollisionIssue::None;
-    CollisionShapeKind shape = CollisionShapeKind::None;
+    SimpleCollisionShapeKind shape = SimpleCollisionShapeKind::None;
     // 그 형상 배열의 번호다. 없으면 CollisionNoIndex다.
     uint32 index = CollisionNoIndex;
     // 관련 번호(성분·점·index 위치·feature)다. 없으면 CollisionNoIndex다.

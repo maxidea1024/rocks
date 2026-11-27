@@ -56,8 +56,10 @@ void Expand565(uint32 color, uint8 (&rgb)[ColorChannels]) noexcept {
     rgb[2] = static_cast<uint8>((b << 3) | (b >> 2));
 }
 
-// 색 블록 하나를 RGBA로 푼다(BlockDXT1::decodeBlock — 끝점 비교로 4색·3색).
-void DecodeColour(const uint8* bytes, uint8 (&texels)[TextureBlockRgbaBytes]) noexcept {
+// 색 블록 하나를 RGBA로 푼다(BlockDXT1::decodeBlock — 끝점 비교로 4색·3색). fourColor면 끝점 순서와
+// 무관하게 4색이다(D3D 명세 — BC2·BC3 색 블록은 늘 4색, 하드웨어·DirectXTex D3DXDecodeBC3와 같다).
+void DecodeColour(const uint8* bytes, bool fourColor,
+                  uint8 (&texels)[TextureBlockRgbaBytes]) noexcept {
     const uint32 col0 = uint32{bytes[0]} | (uint32{bytes[1]} << ByteBits);
     const uint32 col1 = uint32{bytes[2]} | (uint32{bytes[3]} << ByteBits);
     uint8 palette[ColorPaletteSize][TextureBlockTexelBytes] = {};
@@ -65,10 +67,11 @@ void DecodeColour(const uint8* bytes, uint8 (&texels)[TextureBlockRgbaBytes]) no
     uint8 c1[ColorChannels];
     Expand565(col0, c0);
     Expand565(col1, c1);
+    const bool four = fourColor || col0 > col1;
     for (uint32 k = 0; k < ColorChannels; ++k) {
         palette[0][k] = c0[k];
         palette[1][k] = c1[k];
-        if (col0 > col1) {
+        if (four) {
             palette[2][k] = static_cast<uint8>((2 * c0[k] + c1[k]) / 3);
             palette[3][k] = static_cast<uint8>((2 * c1[k] + c0[k]) / 3);
         } else {
@@ -80,7 +83,7 @@ void DecodeColour(const uint8* bytes, uint8 (&texels)[TextureBlockRgbaBytes]) no
     palette[0][3] = Opaque;
     palette[1][3] = Opaque;
     palette[2][3] = Opaque;
-    palette[3][3] = col0 > col1 ? Opaque : uint8{0};
+    palette[3][3] = four ? Opaque : uint8{0};
     for (uint32 i = 0; i < TextureBlockTexels; ++i) {
         const uint32 index = (bytes[ColorIndexOffset + i / TextureBlockSize] >>
                               (ColorIndexBits * (i % TextureBlockSize))) &
@@ -166,10 +169,10 @@ void DecodeTextureBlock(TextureBlockFormat format, const uint8* block,
     uint8 second[TextureBlockTexels];
     switch (format) {
     case TextureBlockFormat::Bc1:
-        DecodeColour(block, texels);
+        DecodeColour(block, false, texels);
         break;
     case TextureBlockFormat::Bc3:
-        DecodeColour(block + SmallBlockBytes, texels);
+        DecodeColour(block + SmallBlockBytes, true, texels);
         DecodeAlpha(block, first);
         for (uint32 i = 0; i < TextureBlockTexels; ++i) {
             texels[i * TextureBlockTexelBytes + 3] = first[i];

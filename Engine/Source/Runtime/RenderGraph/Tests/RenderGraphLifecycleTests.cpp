@@ -404,9 +404,9 @@ void CreateTargetOnLane(RenderLaneContext& context, TargetRequest& request) noex
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(GraphFramePacket);
-ROCKS_RENDER_TRANSFERABLE(LeaseStep);
-ROCKS_RENDER_TRANSFERABLE(TargetRequest);
+ROCKS_LANE_TRANSFERABLE(GraphFramePacket);
+ROCKS_LANE_TRANSFERABLE(LeaseStep);
+ROCKS_LANE_TRANSFERABLE(TargetRequest);
 
 // 렌더 lane 프레임 작업 안의 그래프: 프레임 slot arena·handle 표·장치를 문맥에서 받고, 그 프레임의
 // 마지막 제출이 slot GPU 완료 표지가 된다.

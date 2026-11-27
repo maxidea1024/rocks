@@ -18,8 +18,7 @@
 
 namespace rocks {
 
-// 질의 형상이다(Collision/CollisionShape.h — 헤더는 구현 파일만 include한다: Mesh
-// SimpleCollision.h의 같은 이름 enum CollisionShapeKind와 한 번역 단위에서 만나지 않게).
+// 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
 struct CollisionShape;
 
 // 그리거나 충돌하는 Component의 기반이다(UE UPrimitiveComponent —
