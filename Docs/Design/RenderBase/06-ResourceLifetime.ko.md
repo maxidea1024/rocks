@@ -108,5 +108,6 @@ Core `ErrorCode::CorruptData`가 생기며 에셋 계열이 읽기 손상을 `In
 | `SelectCookedShaderFormat`(`CookedShaderFormat.h`) | 라이브러리 머리를 읽지 못함 | `InvalidArgument` → `CorruptData` |
 | `ShaderSet::OpenCooked`·`OpenFromProvider`(9.2절) | `CorruptLibrary`·`CorruptEntry` 문제 | `DependencyFailed` → `CorruptData`(그 밖 검사 실패는 `DependencyFailed` 그대로, 항목 표 할당 실패는 `OutOfMemory`로 바로잡음) |
 | `EngineRenderResources::Open`(9.12절) | 위의 손상을 그대로 전달 | `InvalidArgument` → `CorruptData` |
+| `MakePlatformTextureSource`(WorldIntegration, 18.5절 8항) | 모르는 차원·PixelFormat 번호·샘플러 enum·swizzle, mip 배열 수 ≠ numMips, 빈 bulk ref | `InvalidArgument` → `CorruptData`. `TextureRenderCache`의 `TextureRenderInfo::error`도 그대로 이 값이다 |
 
 바꾸지 않은 것: 장치 `CreateShader`의 바인딩 layout·GLES 머리 decode 실패는 장치 계약상 desc 입력 오류라 `InvalidArgument` 그대로다(장치는 파일을 읽지 않는다 — 쿠킹 byte의 손상은 그 전에 `ShaderSet`이 `CorruptEntry`로 거른다). ShaderCore decode 함수는 `ShaderReadStatus`(`CorruptPackage`·`UnsupportedVersion`)를 돌려주며 `ErrorCode`가 없다.
