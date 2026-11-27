@@ -45,6 +45,7 @@
 19. ★ 올바르지 않은 UTF-8·UTF-16(짝 없는 surrogate·홀수 byte)은 `CorruptData`로 거부한다. UE `BufferToString`은 대체 문자로 바꾸거나 그대로 통과시킨다(`FileHelper.cpp:147-195`).
 20. ◇ 숫자 칸은 double을 거쳐 float로 바꾼다(UE Windows `Atof` = `(float)_tstof`와 같다). UE Linux·Mac `wcstof`(float로 바로)와는 드물게 1 ulp 다를 수 있다.
 21. ★ 쿠킹 중복 키 제거에서 비교 차가 NaN인 키는 남긴다(UE는 지운다 — CurveData 15절과 같은 수정).
+22. ◇ 색 커브 atlas는 쿠킹 때 커브에서 메모리로 굽고 원본 bulk를 에디터 패키지에 저장하지 않는다(CAD5). UE `UpdateTextures`(`CurveLinearColorAtlas.cpp:300-317`)는 편집기에서 `Source.Init(TSF_RGBA16F)`로 원본에 구워 저장하고 쿠킹은 보통 텍스처 경로다. 근거: Rocks에는 커브 변경을 구독하는 편집기가 아직 없어 명령행 편집(`asset-set`)이 커브를 바꾸면 저장된 원본이 낡는다. 굽기가 결정적이라 원본을 저장하지 않아도 같은 결과이고 패키지가 작다. Studio의 커브 편집기가 생겨 구독으로 다시 굽게 되면 UE 방식(원본 저장)으로 바꿀지 다시 본다.
 
 ### 7.3 단계
 
