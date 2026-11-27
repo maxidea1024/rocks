@@ -21,3 +21,4 @@
 | [5. sweep 이동과 이벤트](05-MovementEvents.ko.md) | `MoveComponent` sweep, 침투 해소, overlap 이벤트, hit 이벤트 |
 | [6. Jolt 사상(CD3)](06-JoltMapping.ko.md) | 층·필터 bit, 질의 전용·탐침, body 값 사상, job·할당, 설정 |
 | [7. 단계·시험·결정](07-StagesDecisions.ko.md) | PH 단계, 시험, 결정 표, 미확인, 다른 문서 개정 요청, 개정 이력 |
+| [7.1 단계별 구현 세부(PH1–PH3)](07a-StageDetailsPH1-PH3.ko.md) | PH1–PH3 하위 단계의 구현 세부·리뷰 반영(7.1.1–7.1.9절) |
