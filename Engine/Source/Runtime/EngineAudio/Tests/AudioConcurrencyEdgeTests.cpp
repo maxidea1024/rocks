@@ -54,6 +54,9 @@ SoundSourceRef Grouped(Allocator& allocator, const SharedPtr<const SoundPcm>& pc
     playable.looping = looping;
     playable.priority = priority;
     playable.attenuation = attenuation;
+    // 동시 발음만 본다: 가상화를 끄면 빼앗기거나 거부된 loop는 UE처럼 끝난다(가상화 가능 loop는
+    // 가상이 된다 — AudioVirtualizationTests).
+    playable.virtualizationMode = SoundVirtualizationMode::Disabled;
     for (const SoundConcurrencyEntry& entry : entries) {
         playable.concurrency[playable.concurrencyCount++] = entry;
     }
@@ -119,6 +122,7 @@ void RequireIdle(AudioEngine& fixture) noexcept {
     (void)fixture.RunUntilIdle();
     const AudioControlStats stats = fixture.audio->ControlStats();
     CHECK(stats.activeVoices == 0 && stats.stoppingVoices == 0 && stats.voicelessPlaybacks == 0);
+    CHECK(stats.virtualPlaybacks == 0);
     CHECK(stats.releasingVoices == 0 && stats.registeredClips == 0);
     REQUIRE(fixture.Frame());
 }

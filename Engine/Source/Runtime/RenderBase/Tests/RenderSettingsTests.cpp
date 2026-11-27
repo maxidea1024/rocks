@@ -21,7 +21,7 @@ struct SettingsPacket {
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(SettingsPacket);
+ROCKS_LANE_TRANSFERABLE(SettingsPacket);
 
 namespace {
 

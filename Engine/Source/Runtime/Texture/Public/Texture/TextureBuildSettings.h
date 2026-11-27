@@ -60,6 +60,9 @@ struct TextureBuildSettings {
     ROCKS_PROPERTY() bool samplerPointFilter = false;
     ROCKS_PROPERTY() uint8 cookPlatform = 0;
     ROCKS_PROPERTY() uint32 cookBackends = 0;
+    // ASTC 블록 크기를 정하는 압축 품질이다(12.16.2·12.17.8 7 — Android만 본다).
+    ROCKS_PROPERTY()
+    TextureCompressionQuality compressionQuality = TextureCompressionQuality::Default;
 };
 
 } // namespace rocks

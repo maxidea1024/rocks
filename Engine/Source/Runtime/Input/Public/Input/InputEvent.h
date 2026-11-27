@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Memory/SharedPtr.h>
+#include <Core/Text/String.h>
 #include <Input/InputTypes.h>
 
 namespace rocks::input {
@@ -18,6 +20,8 @@ enum class InputEventType : uint8 {
     MouseUp,
     // 휠 회전. wheel은 한 칸 = 1.0이며 위(앞)로 굴리면 +다.
     MouseWheel,
+    // OS가 마우스 capture를 강제로 해제했다.
+    PointerCaptureLost,
     // 게임패드 한 개의 전체 상태(backend가 폴링한 값). 연결 해제도 이 이벤트로 알린다.
     GamepadState,
     // 손가락(또는 펜)이 닿았다·움직였다(위치·압력)·떨어졌다(Docs/Design/TouchInput.ko.md 3.1절).
@@ -28,7 +32,15 @@ enum class InputEventType : uint8 {
     TouchMoved,
     TouchEnded,
     // 창이 입력 포커스를 잃음. 눌려 있던 키·버튼을 모두 놓은 것으로 처리한다.
-    FocusLost
+    FocusLost,
+    // IME 처리 기록 표지다(textInputRecord — Docs/Design/UiToolkit 19.2절). IME 문자열은 이벤트가
+    // 아니라 활성 텍스트 입력 문맥으로 간다. 표지는 키·문자 이벤트와의 순서를 지킨다(UI 입력
+    // adapter가 이 자리에서 창의 기록을 처리한다).
+    TextInputMethod,
+    MouseLeave,
+    // 창 테두리(제목 막대·가장자리)를 눌렀거나 창 옮기기·크기 조절을 시작했다. UI는 열린 메뉴와
+    // 툴팁을 닫는다(UE FSlateApplication::OnWindowAction ClickedNonClientArea → DismissAllMenus).
+    NonClientPressed
 };
 
 // 게임패드 한 개의 폴링 결과다. 축은 데드존을 적용하기 전의 정규화 값이다.
@@ -44,17 +56,24 @@ struct InputEvent {
     InputEventType type = InputEventType::FocusLost;
     Key key = Key::None;
     bool repeat = false;
+    // 마우스 버튼·휠 이벤트에 창 client 좌표가 함께 실렸는지다.
+    bool hasPointerPosition = false;
     MouseButton mouseButton = MouseButton::Left;
     uint8 gamepadIndex = 0;
     uint32 codePoint = 0;
+    uint32 userId = 0;
     float x = 0.0f;
     float y = 0.0f;
     float wheel = 0.0f;
     GamepadSnapshot gamepad;
+    // TextInputMethod의 창 IME 기록 번호다.
+    uint32 textInputRecord = 0;
     uint8 touchIndex = 0;
     float force = 1.0f;
     bool hasForce = false;
     bool cancelled = false;
+    // 마우스 누름의 연속 횟수다(OS 두 번 누르기 메시지면 2 — UE OnMouseDoubleClick).
+    uint8 clickCount = 1;
 
     static InputEvent KeyDown(Key value, bool isRepeat = false) noexcept {
         InputEvent event;
@@ -78,6 +97,13 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent TextInputMethod(uint32 record) noexcept {
+        InputEvent event;
+        event.type = InputEventType::TextInputMethod;
+        event.textInputRecord = record;
+        return event;
+    }
+
     static InputEvent MouseMove(float positionX, float positionY) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseMove;
@@ -93,6 +119,16 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent MouseDown(MouseButton button, float positionX, float positionY,
+                                uint8 clicks = 1) noexcept {
+        InputEvent event = MouseDown(button);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
+        event.clickCount = clicks;
+        return event;
+    }
+
     static InputEvent MouseUp(MouseButton button) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseUp;
@@ -100,10 +136,26 @@ struct InputEvent {
         return event;
     }
 
+    static InputEvent MouseUp(MouseButton button, float positionX, float positionY) noexcept {
+        InputEvent event = MouseUp(button);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
+        return event;
+    }
+
     static InputEvent MouseWheel(float delta) noexcept {
         InputEvent event;
         event.type = InputEventType::MouseWheel;
         event.wheel = delta;
+        return event;
+    }
+
+    static InputEvent MouseWheel(float delta, float positionX, float positionY) noexcept {
+        InputEvent event = MouseWheel(delta);
+        event.x = positionX;
+        event.y = positionY;
+        event.hasPointerPosition = true;
         return event;
     }
 
@@ -150,7 +202,17 @@ struct InputEvent {
         event.type = InputEventType::FocusLost;
         return event;
     }
+
+    static InputEvent CaptureLost() noexcept {
+        InputEvent event;
+        event.type = InputEventType::PointerCaptureLost;
+        return event;
+    }
 };
+
+// 이벤트는 문자열을 들지 않는 값이다(IME 문자열은 텍스트 입력 문맥으로 간다 — 19.2절). 큐 복사가
+// 참조 계수를 건드리지 않는다.
+static_assert(IsTriviallyCopyableV<InputEvent>, "InputEvent must stay trivially copyable");
 
 // 한 프레임 동안 모은 입력 이벤트 큐다. 입력 backend가 Push하고 InputState::BeginFrame이 소비한 뒤
 // Clear한다. 용량은 생성 시 정하며 프레임 중 할당하지 않는다. 가득 차면 이벤트를 버리고
@@ -176,6 +238,9 @@ public:
     // 이벤트를 추가한다. 가득 찼으면 버리고 false를 반환한다.
     bool Push(const InputEvent& event) noexcept;
 
+    // 보관한 이벤트와 직전 전달 이후의 유실 건수를 대상 큐에 넘긴다.
+    void DrainTo(InputQueue& target) noexcept;
+
     Span<const InputEvent> Events() const noexcept {
         return events_.View();
     }
@@ -194,6 +259,7 @@ private:
     Array<InputEvent> events_;
     usize capacity_ = 0;
     uint64 dropped_ = 0;
+    uint64 forwardedDropped_ = 0;
 };
 
 } // namespace rocks::input

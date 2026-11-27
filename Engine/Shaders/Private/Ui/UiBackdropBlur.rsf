@@ -1,0 +1,76 @@
+// UI 배경 흐림 셰이더다(Docs/Design/UiToolkit 9.1절 UW1a — UE SlateBackgroundBlur 대응). 뒤에 그린
+// 화면(UiBackdrop)을 5×5 가우스로 흐리고 둥근 모서리 밖은 버린다. UV는 현재 패스의 전체 화면 기준이라
+// 위젯을 옮기거나 돌려도 같은 화면 좌표를 표본한다. 표본 간격은 출력 픽셀 단위다.
+//
+// 정점 속성: 위치(UI 픽셀), color = 위젯 안 위치·크기(xy·zw), uv = (sigma, 세기). Draw.cornerRadius
+// x < 0이면 흐림 없이 원본을 그대로 읽는다.
+
+struct UiBlurConstants {
+    float4 screen;
+    float4 cornerRadius;
+};
+
+ROCKS_ROOT_CONSTANTS(UiBlurConstants, Draw);
+
+struct UiBlurInput {
+    float2 position : ATTRIBUTE0;
+    float4 localBox : ATTRIBUTE1;
+    float2 blur : ATTRIBUTE2;
+};
+
+struct UiBlurOutput {
+    float4 position : SV_Position;
+    float4 samplePoint : TEXCOORD0;
+    float4 localBox : TEXCOORD1;
+    float4 radii : TEXCOORD2;
+};
+
+Texture2D UiBackdrop;
+SamplerState UiBackdropSampler;
+
+UiBlurOutput UiBlurVertex(UiBlurInput input) {
+    UiBlurOutput output;
+    output.position = float4(input.position * Draw.screen.xy + Draw.screen.zw, 0.0, 1.0);
+    const float ratio = input.blur.y / max(0.001, input.blur.x);
+    output.samplePoint = float4(input.position * float2(Draw.screen.x, -Draw.screen.y) * 0.5,
+                                exp(-0.5 * ratio * ratio), input.blur.y);
+    output.localBox = input.localBox;
+    output.radii = Draw.cornerRadius;
+    return output;
+}
+
+float4 UiBlurPixel(UiBlurOutput input) : SV_Target0 {
+    uint width;
+    uint height;
+    UiBackdrop.GetDimensions(width, height);
+    if (input.radii.x < 0.0) {
+        return UiBackdrop.Load(int3(int2(input.position.xy), 0));
+    }
+
+    const float2 halfTexel = 0.5 / float2(width, height);
+    const float2 stepSize = input.samplePoint.w * halfTexel;
+    const float2 boxHalf = 0.5 * input.localBox.zw;
+    const float2 delta = input.localBox.xy - boxHalf;
+    float radius = delta.y < 0.0 ? (delta.x < 0.0 ? input.radii.x : input.radii.y)
+                                 : (delta.x < 0.0 ? input.radii.w : input.radii.z);
+    radius = min(radius, min(boxHalf.x, boxHalf.y));
+    if (length(max(abs(delta) - boxHalf + radius, 0.0)) > radius) {
+        discard;
+    }
+
+    const float w1 = input.samplePoint.z;
+    const float w2 = w1 * w1 * w1 * w1;
+    const float weights[5] = {w2, w1, 1.0, w1, w2};
+    const float total = 1.0 + 2.0 * (w1 + w2);
+    float4 sum = 0.0;
+    [unroll] for (int y = -2; y <= 2; ++y) {
+        [unroll] for (int x = -2; x <= 2; ++x) {
+            const float weight = weights[x + 2] * weights[y + 2];
+            const float2 uv = clamp(input.samplePoint.xy + float2(x, y) * stepSize, halfTexel,
+                                    1.0 - halfTexel);
+            sum += weight * UiBackdrop.SampleLevel(UiBackdropSampler, uv, 0.0);
+        }
+    }
+
+    return sum / (total * total);
+}

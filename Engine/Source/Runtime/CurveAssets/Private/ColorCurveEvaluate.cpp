@@ -1,5 +1,9 @@
 #include <CurveAssets/ColorCurveEvaluate.h>
 #include <CurveAssets/CurveAssetConstants.h>
+#include <Core/Math/MathUtility.h>
+#include <Curves/CurveMathDeterministic.h>
+#include <DeterministicMath/DeterministicMath.h>
+#include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
 // 색 커브 평가다(Docs/Design/CurveAssets 2.4.2·2.4.3절). UE
@@ -100,20 +104,51 @@ LinearColor HsvToRgb(const LinearColor& hsv) noexcept {
     return LinearColor(values[swizzle[0]], values[swizzle[1]], values[swizzle[2]], hsv.a);
 }
 
-} // namespace
+// 런타임 수학(UE 비트 — 커브 Evaluate, 플랫폼 powf)이다.
+struct PlatformColorMath {
+    static float Evaluate(const TangentCurve& curve, float time) noexcept {
+        return curve.Evaluate(time);
+    }
 
-LinearColor EvaluateUnadjustedColorCurve(const TangentCurve& r, const TangentCurve& g,
-                                         const TangentCurve& b, const TangentCurve& a,
-                                         float time) noexcept {
-    const float alpha = a.KeyCount() == 0 ? 1.0f : a.Evaluate(time);
-    return LinearColor(r.Evaluate(time), g.Evaluate(time), b.Evaluate(time), alpha);
+    static float Pow(float base, float exponent) noexcept {
+        return platform::PlatformMath::Pow(base, exponent);
+    }
+
+    static LinearColor Finish(const LinearColor& color) noexcept {
+        return color;
+    }
+};
+
+// 쿠킹 수학(결정적 — 설계 2.4.5절)이다.
+struct DeterministicColorMath {
+    static float Evaluate(const TangentCurve& curve, float time) noexcept {
+        return curve.EvaluateDeterministic(time);
+    }
+
+    static float Pow(float base, float exponent) noexcept {
+        return DeterministicPowf(base, exponent);
+    }
+
+    static LinearColor Finish(const LinearColor& color) noexcept {
+        return LinearColor(
+            CurveMathDeterministic::Canonical(color.r), CurveMathDeterministic::Canonical(color.g),
+            CurveMathDeterministic::Canonical(color.b), CurveMathDeterministic::Canonical(color.a));
+    }
+};
+
+template <class Math>
+LinearColor Unadjusted(const TangentCurve& r, const TangentCurve& g, const TangentCurve& b,
+                       const TangentCurve& a, float time) noexcept {
+    const float alpha = a.KeyCount() == 0 ? 1.0f : Math::Evaluate(a, time);
+    return LinearColor(Math::Evaluate(r, time), Math::Evaluate(g, time), Math::Evaluate(b, time),
+                       alpha);
 }
 
-LinearColor EvaluateAdjustedColorCurve(const TangentCurve& r, const TangentCurve& g,
-                                       const TangentCurve& b, const TangentCurve& a,
-                                       const ColorCurveAdjustments& adjustments, float time,
-                                       bool clampAlways) noexcept {
-    const LinearColor original = EvaluateUnadjustedColorCurve(r, g, b, a, time);
+template <class Math>
+LinearColor Adjusted(const TangentCurve& r, const TangentCurve& g, const TangentCurve& b,
+                     const TangentCurve& a, const ColorCurveAdjustments& adjustments, float time,
+                     bool clampAlways) noexcept {
+    const LinearColor original = Unadjusted<Math>(r, g, b, a, time);
     // 원본 RGB가 LDR이면(퍼지) 명도를 [0, 1]로 자른다.
     const bool clampValue =
         clampAlways || Max3(original.r, original.g, original.b) < 1.0f + ColorAdjustTolerance;
@@ -124,12 +159,11 @@ LinearColor EvaluateAdjustedColorCurve(const TangentCurve& r, const TangentCurve
     value *= adjustments.brightness;
     if (!(AbsOf(adjustments.brightnessCurve - 1.0f) <= ColorAdjustTolerance) &&
         adjustments.brightnessCurve != 0.0f) {
-        value = platform::PlatformMath::Pow(value, adjustments.brightnessCurve);
+        value = Math::Pow(value, adjustments.brightnessCurve);
     }
 
     if (!(AbsOf(adjustments.vibrance) <= ColorAdjustTolerance)) {
-        const float raised =
-            platform::PlatformMath::Pow(1.0f - saturation, VibranceSaturationExponent);
+        const float raised = Math::Pow(1.0f - saturation, VibranceSaturationExponent);
         const float clamped = ClampOf(adjustments.vibrance, 0.0f, 1.0f);
         const float half = clamped * VibranceScale;
         saturation += half * raised;
@@ -144,6 +178,102 @@ LinearColor EvaluateAdjustedColorCurve(const TangentCurve& r, const TangentCurve
     LinearColor result = HsvToRgb(hsv);
     result.a = LerpOf(adjustments.minAlpha, adjustments.maxAlpha, original.a);
     return result;
+}
+
+// 정수 float의 홀수 여부다(|y| ≥ 2^24인 float 정수는 모두 짝수다).
+constexpr float FloatIntegerExact = 16777216.0f; // 2^24
+
+// float ±Inf와 고정 quiet NaN의 비트다.
+constexpr uint32 PositiveInfinityBits = 0x7F800000u;
+constexpr uint32 NegativeInfinityBits = 0xFF800000u;
+constexpr uint32 CanonicalNaNBits = 0x7FC00000u;
+
+bool IsInteger(float value) noexcept {
+    return deterministic::Trunc(static_cast<double>(value)) == static_cast<double>(value);
+}
+
+bool IsOddInteger(float value) noexcept {
+    const float magnitude = AbsOf(value);
+    return magnitude < FloatIntegerExact && IsInteger(value) &&
+           (static_cast<uint32>(magnitude) & 1u) != 0;
+}
+
+} // namespace
+
+LinearColor EvaluateUnadjustedColorCurve(const TangentCurve& r, const TangentCurve& g,
+                                         const TangentCurve& b, const TangentCurve& a,
+                                         float time) noexcept {
+    return Unadjusted<PlatformColorMath>(r, g, b, a, time);
+}
+
+LinearColor EvaluateAdjustedColorCurve(const TangentCurve& r, const TangentCurve& g,
+                                       const TangentCurve& b, const TangentCurve& a,
+                                       const ColorCurveAdjustments& adjustments, float time,
+                                       bool clampAlways) noexcept {
+    return Adjusted<PlatformColorMath>(r, g, b, a, adjustments, time, clampAlways);
+}
+
+LinearColor EvaluateUnadjustedColorCurveDeterministic(const TangentCurve& r, const TangentCurve& g,
+                                                      const TangentCurve& b, const TangentCurve& a,
+                                                      float time) noexcept {
+    return DeterministicColorMath::Finish(Unadjusted<DeterministicColorMath>(r, g, b, a, time));
+}
+
+LinearColor EvaluateAdjustedColorCurveDeterministic(const TangentCurve& r, const TangentCurve& g,
+                                                    const TangentCurve& b, const TangentCurve& a,
+                                                    const ColorCurveAdjustments& adjustments,
+                                                    float time, bool clampAlways) noexcept {
+    return DeterministicColorMath::Finish(
+        Adjusted<DeterministicColorMath>(r, g, b, a, adjustments, time, clampAlways));
+}
+
+float DeterministicPowf(float base, float exponent) noexcept {
+    // C powf 특수값(C11 F.10.4.4)을 먼저 본다.
+    if (exponent == 0.0f || base == 1.0f) {
+        return 1.0f;
+    }
+
+    if (math::IsNaN(base) || math::IsNaN(exponent)) {
+        return CurveMathDeterministic::Canonical(base + exponent);
+    }
+
+    const bool infiniteExponent = !math::IsFinite(exponent);
+    if (base == -1.0f && infiniteExponent) {
+        return 1.0f;
+    }
+
+    if (base == 0.0f) {
+        // ±0 밑: 홀수 정수 지수면 부호를 지킨다.
+        const bool keepSign = IsOddInteger(exponent);
+        const float zero = keepSign ? base : 0.0f;
+        if (exponent < 0.0f) {
+            return platform::BitCast<float>(keepSign && (platform::BitCast<uint32>(base) >> 31) != 0
+                                                ? NegativeInfinityBits
+                                                : PositiveInfinityBits);
+        }
+
+        return zero;
+    }
+
+    const double magnitude = static_cast<double>(AbsOf(base));
+    const float raised =
+        static_cast<float>(deterministic::Pow(magnitude, static_cast<double>(exponent)));
+    if (base > 0.0f) {
+        return CurveMathDeterministic::Canonical(raised);
+    }
+
+    // −Inf 밑(C11 F.10.4.4): 홀수 정수 지수면 부호를 지키고(y > 0 → −Inf, y < 0 → −0), 그 밖은
+    // y > 0 → +Inf, y < 0 → +0이다(raised = |밑|^y가 이미 +Inf·+0이다).
+    if (!math::IsFinite(base)) {
+        return IsOddInteger(exponent) ? -raised : raised;
+    }
+
+    // 유한 음수 밑: 정수 지수(±Inf는 짝수로 본다)만 실수 결과다.
+    if (!infiniteExponent && !IsInteger(exponent)) {
+        return platform::BitCast<float>(CanonicalNaNBits);
+    }
+
+    return CurveMathDeterministic::Canonical(IsOddInteger(exponent) ? -raised : raised);
 }
 
 } // namespace rocks

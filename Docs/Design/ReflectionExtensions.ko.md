@@ -2,7 +2,7 @@
 
 기준일: 2026-11-15, 확정안(설계 교차검증 3건 — UE 5.8 대조, Rocks 코드·스펙 정합과 구현 가능성, 소비자 적합성 — 과 사용자 결정(2026-11-15), 반영 확인 리뷰 1건과 조정자 결정을 반영). [에셋 시스템 설계](AssetSystem/README.ko.md)(이하 AS) 1절의 A0-O와 A0-G 사이에 두는 리플렉션 보강 단계다. 기준 코드는 `a4a7bcc`(A0-B B1–B8, A0-O Oa–Oe 구현 완료)다. 이름은 [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP)의 벤치마크 ID `B9`(EIP 2416·2538행)와 구별하려고 문서에서 "리플렉션 B9"라고 쓴다. 하위 단계는 B9a–B9m이고 문자 순서가 의존 순서다.
 
-근거: [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF) 3–7절과 12절 열린 문제, [객체·그래프 보강 설계](ObjectFoundations.ko.md)(이하 OF) 1·4·5절, [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [Sparks 언어](SparksLanguage/README.ko.md)(이하 SL), [UI 툴킷](UiToolkit.ko.md)(이하 UI) CU4·CU8, [리플렉션 메타데이터 구현](../Implementation/ReflectionMetadata.ko.md)(이하 RM), 현재 코드(`Core/Source/Runtime/MetaSchema`·`ObjectRuntime`·`ObjectSerialization`·`Serialization`·`Core`·`Localization`, `Programs/Rocks.MetaCompiler`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본을 파일:행으로 확인했다(18절).
+근거: [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF) 3–7절과 12절 열린 문제, [객체·그래프 보강 설계](ObjectFoundations.ko.md)(이하 OF) 1·4·5절, [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [Sparks 언어](SparksLanguage/README.ko.md)(이하 SL), [UI 툴킷](UiToolkit/README.ko.md)(이하 UI) CU4·CU8, [리플렉션 메타데이터 구현](../Implementation/ReflectionMetadata.ko.md)(이하 RM), 현재 코드(`Core/Source/Runtime/MetaSchema`·`ObjectRuntime`·`ObjectSerialization`·`Serialization`·`Core`·`Localization`, `Programs/Rocks.MetaCompiler`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본을 파일:행으로 확인했다(18절).
 
 원칙(RF와 같다): 실패 원자성(읽기 실패는 출력 불변, 쓰기 실패는 미게시, 로드는 전부 공개 또는 전부 rollback), 결정성(같은 입력 → 같은 byte), 모든 길이·개수·작업량에 한도, 하위호환 없음(`FieldSchema`·wire tag·`PathStep`·생성 코드 형식을 바로 바꾸고 시험을 고친다). 필드 접근은 생성 thunk만 쓰고 raw offset을 공개하지 않는다(RF 원칙). 범용 기능(해시·텍스트 분해·숫자 표기·JSON)은 Core 공용 모듈에 두고 기능 모듈에 다시 만들지 않는다.
 
@@ -1713,7 +1713,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 ## 23. struct 검증 hook(CurveData CV3)
 
-[커브 데이터](CurveData.ko.md) 9.1절(D7)의 struct 검증 hook을 기반에 넣었다. 결정과 세부는 그 문서 17.2절 V1–V8이고 여기에는 기반 쪽 접점만 적는다.
+[커브 데이터](CurveData/README.ko.md) 9.1절(D7)의 struct 검증 hook을 기반에 넣었다. 결정과 세부는 그 문서 17.2절 V1–V8이고 여기에는 기반 쪽 접점만 적는다.
 
 - 선언: `ROCKS_STRUCT`의 `static Result<void> Validate(const S&) noexcept`. 모양 오류와 참조 struct는 RMC2309(15절). Binds 미러는 CV3에서 막아 두었다가 CV9에서 열었다 — 미러의 `static Validate(const 실제 타입&)`가 실제 타입의 hook이다(25절). 생성 특수화는 `HasValidateSelf`·`ValidateSelf`(base 사슬 다음 자기 hook)·`HasValidateTree`·`ValidateTree`(트리 전체)와 `detail::ValueValidate<S>` 특수화를 낸다.
 - 표: `RuntimeStructOps::validate`(자기 수준)·`validateTree`(트리), `RuntimeValueOps::validateTree`. TypeRegistry는 `validate`가 있으면 강한 참조·Registry 컨테이너가 없고 `validateTree`·`copy`·`swap`이 있어야 등록한다.
@@ -1724,7 +1724,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 ## 24. 바이트 배열 Bytes 블록(CurveData CV4)
 
-[커브 데이터](CurveData.ko.md) D18을 기반에 넣었다. 결정과 세부는 그 문서 17.3절 B1–B7이고 여기에는 기반 쪽 접점만 적는다.
+[커브 데이터](CurveData/README.ko.md) D18을 기반에 넣었다. 결정과 세부는 그 문서 17.3절 B1–B7이고 여기에는 기반 쪽 접점만 적는다.
 
 - wire: `Array<uint8>`(가변 배열·원소 UInt8) 필드·멤버는 ValueArray(원소당 U32 4 byte) 대신 `WireType::Bytes` 블록 하나(u64 길이 + byte)다. 필드 단위 wire 판정 `FieldWireType(const FieldSchema&)`가 `detail::IsByteArrayField`로 고른다(정적 배열 `uint8 x[N]`은 ValueArray 그대로). 저장은 `EncodeArrayField`의 `Array<uint8>` 가지, 로드는 `DecodeArrayField`의 `DecodeByteArray`다. 원소별 wire는 읽지 않는다(하위호환 없음).
 - 한도: 블록 크기는 원문 String과 같이 archive 값 한도(maxValueBytes)로, 원소 수는 MaxArrayElements와 필드 MaxElements(저장만)로 막는다. 원소 누계에는 세지 않고 2단계 몫은 1 + 2 × byte 수다.
@@ -1736,7 +1736,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 ## 25. Binds 확장 — enum 미러·private 멤버·미러 검증 hook(CurveData CV9)
 
-[커브 데이터](CurveData.ko.md) 12.1절(D19)의 `InterpCurve` 미러를 위해 Binds(RF 4.5·4.6절)를 넓혔다. 결정과 세부는 그 문서 17.8절 I2–I4이고 여기에는 기반 쪽 접점만 적는다.
+[커브 데이터](CurveData/README.ko.md) 12.1절(D19)의 `InterpCurve` 미러를 위해 Binds(RF 4.5·4.6절)를 넓혔다. 결정과 세부는 그 문서 17.8절 I2–I4이고 여기에는 기반 쪽 접점만 적는다.
 
 - **enum Binds**: `ROCKS_ENUM(Binds = "<실제 enum 철자>")`(CoreTypeBindings만 — 밖은 RMC2004). 철자는 struct와 같은 별칭 Clang 실행으로 정규화하고 대상이 enum이 아니면 RMC3000이다. 생성 코드는 실제 enum의 `GeneratedType`(스키마 이름은 미러 이름)을 내고 underlying과 미러 열거자마다 `static_cast<int64>(실제::이름) == 값`을 static_assert로 대조한다. 미러는 실제 enum의 열거자를 이름·값 1:1로 나열해야 한다 — MetaCompiler가 첫 Clang 실행의 AST(번역 단위의 정의된 enum 색인)에서 실제 열거자 목록을 읽어 대조하고, 빠지거나 값이 다르거나 실제 enum에 없는 열거자는 RMC2401이다(생성 static_assert는 미러 쪽 열거자만 본다). 실제 enum 형식의 필드(클래스 필드·미러 멤버·Map 키)는 미러로 풀리고 native 키는 실제 enum이다. descriptor enum 항목에 `binds` 칸이 생겼다(미러가 아니면 "").
 - **private 멤버**: 실제 타입이 `template <class> friend struct ::rocks::GeneratedType;`을 선언하면(Core는 앞 선언만 한다) 미러가 private 멤버를 C++ 이름으로 나열할 수 있다. 대조 static_assert·구조적 바인딩(C++20 접근 가능 멤버 규칙)·멤버 포인터 thunk·깊은 복사·검증 트리가 모두 `GeneratedType` 특수화 안이라 생성 코드는 바뀌지 않았다. friend가 없는 private 멤버는 여전히 생성 코드 컴파일 실패다. 도구 이름은 `Name=`으로 준다.

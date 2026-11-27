@@ -1,0 +1,72 @@
+// UI 요소 셰이더다(Docs/Design/UiToolkit 9.1절 UW1a — 엔진 셰이더 A19 UiElements의 첫 부분,
+// UE SlateVertexShader.usf·SlateElementPixelShader.usf 대응). 정점은 UI 픽셀 좌표 위치·색·UV이고
+// Draw.screen(xy 배율, zw 이동)이 clip 좌표로 바꾼다.
+//
+// 엔트리: UiSolidVertex·UiSolidPixel(단색), UiImageVertex·UiImagePixel(텍스처 × 색),
+// UiMaskPixel(R 채널을 덮임률로 — 글리프 mask), UiRetainedPixel(premultiplied 보관 표면 × 색조).
+
+struct UiDrawConstants {
+    float4 screen;
+};
+
+ROCKS_ROOT_CONSTANTS(UiDrawConstants, Draw);
+
+struct UiSolidInput {
+    float2 position : ATTRIBUTE0;
+    float4 color : ATTRIBUTE1;
+};
+
+// 단계 사이 값은 TEXCOORDn이다(ShaderSystem 7.2절 7항).
+struct UiSolidOutput {
+    float4 position : SV_Position;
+    float4 color : TEXCOORD0;
+};
+
+UiSolidOutput UiSolidVertex(UiSolidInput input) {
+    UiSolidOutput output;
+    output.position = float4(input.position * Draw.screen.xy + Draw.screen.zw, 0.0, 1.0);
+    output.color = input.color;
+    return output;
+}
+
+float4 UiSolidPixel(UiSolidOutput input) : SV_Target0 {
+    return input.color;
+}
+
+struct UiImageInput {
+    float2 position : ATTRIBUTE0;
+    float4 color : ATTRIBUTE1;
+    float2 uv : ATTRIBUTE2;
+};
+
+struct UiImageOutput {
+    float4 position : SV_Position;
+    float2 uv : TEXCOORD0;
+    float4 color : TEXCOORD1;
+};
+
+Texture2D UiTexture;
+SamplerState UiTextureSampler;
+
+UiImageOutput UiImageVertex(UiImageInput input) {
+    UiImageOutput output;
+    output.position = float4(input.position * Draw.screen.xy + Draw.screen.zw, 0.0, 1.0);
+    output.color = input.color;
+    output.uv = input.uv;
+    return output;
+}
+
+float4 UiImagePixel(UiImageOutput input) : SV_Target0 {
+    return UiTexture.Sample(UiTextureSampler, input.uv) * input.color;
+}
+
+float4 UiMaskPixel(UiImageOutput input) : SV_Target0 {
+    return float4(input.color.rgb, input.color.a * UiTexture.Sample(UiTextureSampler, input.uv).r);
+}
+
+// 투명 바탕에 합성한 텍스처는 RGB에 알파가 곱해져 있으므로, 위젯 불투명도도 RGB와 A에 함께
+// 적용한다.
+float4 UiRetainedPixel(UiImageOutput input) : SV_Target0 {
+    const float4 sampleColor = UiTexture.Sample(UiTextureSampler, input.uv);
+    return float4(sampleColor.rgb * input.color.rgb * input.color.a, sampleColor.a * input.color.a);
+}

@@ -1,5 +1,6 @@
 #include "MemoryPlatformTexture.h"
 
+#include "BlockEncode.h"
 #include "TexelCodec.h"
 
 #include <Core/Move.h>
@@ -24,7 +25,8 @@ Result<void> MemoryPlatformTexture::Build(const MemoryTextureSpec& spec, MemoryT
     bulks_.Clear();
     const graphics::PixelFormatInfo& info = graphics::GetPixelFormatInfo(spec.format);
     const bool block = IsBlockCodecFormat(spec.format);
-    // 블록 형식은 부호화 입력(RGBA8)으로 texel을 쓴 뒤 mip마다 블록으로 압축한다.
+    // 블록 형식은 부호화 입력(RGBA8, BC6H는 RGBA16Float)으로 texel을 쓴 뒤 mip마다 블록으로
+    // 압축한다.
     const graphics::PixelFormat texelFormat = BlockStagingFormat(spec.format);
     const usize texelBytes = graphics::GetPixelFormatInfo(texelFormat).blockBytes;
     if ((!IsTexelCodecFormat(spec.format) && !block) || spec.width == 0 || spec.height == 0 ||

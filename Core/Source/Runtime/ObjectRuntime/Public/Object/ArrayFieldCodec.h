@@ -135,8 +135,8 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
         return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    // `Array<uint8>`은 Bytes 블록 하나다(Docs/Design/CurveData.ko.md D18): u64 길이 + byte. 크기
-    // 한도는 원문 byte와 같은 writer 값 한도(maxValueBytes)와 MaxArrayElements이고, 원소
+    // `Array<uint8>`은 Bytes 블록 하나다(Docs/Design/CurveData/README.ko.md D18): u64 길이 + byte.
+    // 크기 한도는 원문 byte와 같은 writer 값 한도(maxValueBytes)와 MaxArrayElements이고, 원소
     // 누계(AddElements)에는 세지 않는다(문자열 byte와 같다).
     if constexpr (IsSameV<Container, Array<uint8>>) {
         if (count > MaxArrayElements) {
@@ -470,13 +470,13 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
     return ReserveArrayApply(context, count, sizeof(Element), textWork);
 }
 
-// 바이트 배열(`Array<uint8>` — Docs/Design/CurveData.ko.md D18)의 decode다(DecodeArrayField의 Bytes
-// 가지): 필드 payload 전부가 Bytes 블록 하나(u64 길이 + byte)여야 한다(남은 byte InvalidArgument).
-// 길이는 reader의 값 한도(maxValueBytes — 넘으면 CapacityExceeded, 잘렸으면 InvalidArgument)와
-// MaxArrayElements(넘으면 CapacityExceeded) 안이어야 한다. 원소 누계에는 세지 않는다(문자열 byte와
-// 같다). 2단계 몫은 원문 문자열과 같은 규칙 1 + 2 × byte 수(배열 복사와 Reserve)를 미리 청구한다.
-// target이 없으면 검증만, 있으면(관찰·적용) Clear → TryReserve → TryAppend다(할당 실패는 그 오류 —
-// 2단계면 그래프 rollback).
+// 바이트 배열(`Array<uint8>` — Docs/Design/CurveData/README.ko.md D18)의
+// decode다(DecodeArrayField의 Bytes 가지): 필드 payload 전부가 Bytes 블록 하나(u64 길이 + byte)여야
+// 한다(남은 byte InvalidArgument). 길이는 reader의 값 한도(maxValueBytes — 넘으면 CapacityExceeded,
+// 잘렸으면 InvalidArgument)와 MaxArrayElements(넘으면 CapacityExceeded) 안이어야 한다. 원소
+// 누계에는 세지 않는다(문자열 byte와 같다). 2단계 몫은 원문 문자열과 같은 규칙 1 + 2 × byte 수(배열
+// 복사와 Reserve)를 미리 청구한다. target이 없으면 검증만, 있으면(관찰·적용) Clear → TryReserve →
+// TryAppend다(할당 실패는 그 오류 — 2단계면 그래프 rollback).
 inline Result<void> DecodeByteArray(Array<uint8>* target, const FieldView& field,
                                     FieldDecodeContext& context) noexcept {
     auto opened = context.OpenValue(field);

@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Curve value types (Docs/Design/CurveData.ko.md sections 3 and 4, CV5 and CV6): ScalarCurveBase, TangentCurve and PlainCurve with their
+// Curve value types (Docs/Design/CurveData/README.ko.md sections 3 and 4, CV5 and CV6): ScalarCurveBase, TangentCurve and PlainCurve with their
 // keys, evaluation, automatic tangents, key editing, redundant key removal and value range, the step curves IntegerStepCurve,
 // NameStepCurve and StringStepCurve, and PackedTangentCurve (section 11). The evaluation formulas live in Core
 // (Core/Math/KeyCurveMath.h, Core/Time/FrameRate.h). This module holds the reflected value types. Reflection headers: Curves/CurveTypes.h,
@@ -15,4 +15,8 @@ public sealed class Curves : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectRuntime"];
+
+    // DeterministicMath: the cooking evaluation math policy (CurveMathDeterministic — Docs/Design/CurveData section 5.9 D22). Not used by
+    // the public headers.
+    protected override string[] PrivateDependencies => ["DeterministicMath"];
 }

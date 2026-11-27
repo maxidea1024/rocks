@@ -253,8 +253,9 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     // 빠진다).
     productImporters.unrealExchange = modules.Load(UnrealExchangeModuleName).IsOk();
     assetContext.importers = {&RegisterProductImporters, &productImporters};
-    // 타입 hook은 텍스처(설정 정규화·원본 재구성)와 애니메이션(Build 의존 —
-    // MeshAnimationAssets 7.6.1절 2)이다(사운드는 hook이 없다).
+    // 타입 hook은 텍스처(설정 정규화·원본 재구성), 애니메이션(Build 의존 — MeshAnimationAssets
+    // 7.6.1절 2), 색 커브 atlas(굽기·Build 의존·정규화 — CurveAssets 4.3절)다(사운드는 hook이
+    // 없다).
     assetContext.typeHooks = {&RegisterProductTypeHooks, nullptr};
     assetContext.importTranslator = {&TranslateTextureImportArguments, nullptr};
     // 쿠킹 처리기다(텍스처 12.14절, 정적·스킨 메시·애니메이션 클립 — MeshAnimationAssets 13.1절 1).

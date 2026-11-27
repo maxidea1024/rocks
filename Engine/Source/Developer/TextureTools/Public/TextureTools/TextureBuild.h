@@ -8,6 +8,7 @@
 #include <GraphicsTypes/PixelFormat.h>
 #include <Texture/Texture.h>
 #include <Texture/TextureBuildSettings.h>
+#include <TextureTools/TextureFormatSelect.h>
 
 // 텍스처 빌드다(Docs/Design/AssetSystem 12.13절 — A5i, 규칙은 UE 5.8에 맞춘 12.5절·12.2절 1–5번,
 // 출력 형식은 12.17.5절): 원본 정규 픽셀을 선형화 → flipGreen → PowerOfTwoMode → 최대 크기 → mip
@@ -86,7 +87,8 @@ struct TextureBuildResult {
 
 // 빌드 규칙 버전이다(12.5·12.13·12.17절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
 // 3: 압축 형식 선택·채널 복제·BC 인코딩(12.17.5 — TC2).
-inline constexpr uint32 TextureBuildVersion = 3;
+// 4: 빌드 설정 compressionQuality(ASTC 블록 크기 — 12.17.8 7).
+inline constexpr uint32 TextureBuildVersion = 4;
 
 // 빌드 경고 수
 // 상한이다(SrgbIgnored·PreserveBorderWithWrap·EncoderUnavailable·PlatformFormatFallback).
@@ -98,6 +100,8 @@ struct TextureBuildOutputInfo {
     bool srgb = false;
     TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
                                  TextureSwizzle::A};
+    // 인코딩(인코더 종류 — 쿠킹 너겟 키의 인코더 버전·신원을 고른다, 12.17.8 8)이다.
+    TextureFormatEncoding encoding = TextureFormatEncoding::Uncompressed;
 };
 
 // settings와 알파 판정 결과의 빌드 경고를 out에 쓰고 수를 돌려준다(설정·알파만으로 정한다 — 너겟

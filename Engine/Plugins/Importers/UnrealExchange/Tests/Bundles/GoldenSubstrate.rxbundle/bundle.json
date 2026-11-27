@@ -1,0 +1,32 @@
+{
+  "formatVersion": 1,
+  "exporter": {
+    "plugin": "RocksExport",
+    "pluginVersion": "1.0.0",
+    "engineVersion": "5.8.4",
+    "engineCommit": "58902052"
+  },
+  "projectSettings": {
+    "substrate": true,
+    "retainJpegFormat": true
+  },
+  "createdUtc": "2026-11-27T13:05:29Z",
+  "assets": [
+    {
+      "objectPath": "/Game/RxGoldenSubstrate/M_Golden.M_Golden",
+      "class": "Material",
+      "file": "assets/Game/RxGoldenSubstrate/M_Golden.json"
+    },
+    {
+      "objectPath": "/Game/RxGoldenSubstrate/M_GoldenSubstrate.M_GoldenSubstrate",
+      "class": "Material",
+      "file": "assets/Game/RxGoldenSubstrate/M_GoldenSubstrate.json"
+    },
+    {
+      "objectPath": "/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.M_GoldenSubstrateAttributes",
+      "class": "Material",
+      "file": "assets/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.json"
+    }
+  ],
+  "redirects": []
+}

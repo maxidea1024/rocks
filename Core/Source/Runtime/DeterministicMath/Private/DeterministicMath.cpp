@@ -313,6 +313,54 @@ double SqrtApproximation(double z) noexcept {
     return y * PowerOfTwo(half);
 }
 
+// π/2의 3단 Cody-Waite 조각이다(fdlibm __ieee754_rem_pio2 — 앞 세 조각은 33비트라 n < 2^20이면
+// n·조각이 오차 없다. 네 조각의 합과 π/2의 차는 1e−48 아래).
+constexpr double InversePiOverTwo = BitCast<double>(uint64{0x3FE45F306DC9C883});
+constexpr double PiOverTwoPart1 = BitCast<double>(uint64{0x3FF921FB54400000});
+constexpr double PiOverTwoPart2 = BitCast<double>(uint64{0x3DD0B4611A600000});
+constexpr double PiOverTwoPart3 = BitCast<double>(uint64{0x3BA3198A2E000000});
+constexpr double PiOverTwoPart3Tail = BitCast<double>(uint64{0x397B839A252049C1});
+
+// 축소가 정확한 4분면 번호의 상한이다(n ≤ 2^20 — n·조각이 오차 없다, 2^20은 2의 거듭제곱이라
+// 조각 곱이 정확하다). 넘으면 Cos는 CosPi(|x|/π)로 결정적인 [−1, 1] 값을 낸다(정확도는 보장하지
+// 않는다).
+constexpr double CosExactQuadrantLimit = 1048576.0; // 2^20
+
+// atan(k/8)(k = 0..8)의 double-double이다(hi = 가장 가까운 double, lo = 나머지의 가장 가까운 double
+// — 고정밀 계산의 비트 패턴, 기준값 표 시험이 k/8 입력으로 확인한다). atan(1) = π/4.
+constexpr DoubleDouble AtanEighths[9] = {
+    {0.0, 0.0},
+    {BitCast<double>(uint64{0x3FBFD5BA9AAC2F6E}), BitCast<double>(uint64{0xBC4CD37686760C17})},
+    {BitCast<double>(uint64{0x3FCF5B75F92C80DD}), BitCast<double>(uint64{0x3C68AB6E3CF7AFBD})},
+    {BitCast<double>(uint64{0x3FD6F61941E4DEF1}), BitCast<double>(uint64{0xBC7C63AAE6F6E918})},
+    {BitCast<double>(uint64{0x3FDDAC670561BB4F}), BitCast<double>(uint64{0x3C7A2B7F222F65E2})},
+    {BitCast<double>(uint64{0x3FE1E00BABDEFEB4}), BitCast<double>(uint64{0xBC5928DF287A668F})},
+    {BitCast<double>(uint64{0x3FE4978FA3269EE1}), BitCast<double>(uint64{0x3C72419A87F2A458})},
+    {BitCast<double>(uint64{0x3FE700A7C5784634}), BitCast<double>(uint64{0xBC78C34D25AADEF6})},
+    {BitCast<double>(uint64{0x3FE921FB54442D18}), BitCast<double>(uint64{0x3C81A62633145C07})}};
+
+// atan(r) − r의 홀수 Taylor 꼬리 −r³/3 + r⁵/5 − …(r^19까지)다. |r| ≤ 1/16 남짓이면 나머지가 r의
+// 2^−80배 아래다.
+constexpr int AtanTailTerms = 9;
+
+double AtanTail(double r) noexcept {
+    const double y = r * r;
+    double sum = 0.0;
+    for (int k = AtanTailTerms; k >= 1; --k) {
+        const double coefficient = 1.0 / static_cast<double>(2 * k + 1);
+        sum = sum * y + ((k & 1) != 0 ? -coefficient : coefficient);
+    }
+
+    return r * y * sum;
+}
+
+// 이 이상이면 atan(x) = π/2 − 1/x가 π/2의 hi로 반올림된다(1/x ≤ 2^−53 < ulp(π/2)/2 — 1/x의
+// double-double 나눗셈이 Veltkamp 분할에서 넘치기 전에 끊는다).
+constexpr double AtanHalfPiLimit = 9007199254740992.0; // 2^53
+
+// 너무 작아 atan(x)가 x로 반올림되는 크기의 경계다(|x| < 2^−27이면 x³/3 < ulp(x)/2).
+constexpr double AtanIdentityLimit = BitCast<double>(uint64{0x3E40000000000000}); // 2^−27
+
 // sin(π(n/2 + r))를 4분면으로 나눠 계산한다(|r| ≤ ¼, quadrant = n mod 4).
 double SinPiQuadrant(double r, int64 quadrant) noexcept {
     const double t = r * Pi;
@@ -540,6 +588,81 @@ double Acos(double x) noexcept {
     // acos(x) = π − 2·asin(√z)(x < −½).
     const DoubleDouble head = TwoSum(PiExtended.hi, -2.0 * s);
     return Canonical(head.hi + (head.lo + (PiExtended.lo - 2.0 * tail)));
+}
+
+double Cos(double x) noexcept {
+    if (IsNaN(x) || IsInfinite(x)) {
+        return NaN();
+    }
+
+    // cos는 짝함수다. n = round(|x|·2/π), r = |x| − n·π/2를 double-double로 줄인다(n·조각 셋은
+    // 오차 없고, 첫 뺄셈은 Sterbenz로 정확하다 — n ≥ 1이면 |x|와 n·조각1이 두 배 안이다).
+    const double magnitude = Magnitude(x);
+    const double n = RoundHalfEven(magnitude * InversePiOverTwo);
+    if (n > CosExactQuadrantLimit) {
+        return CosPi(magnitude / Pi);
+    }
+
+    const double head = magnitude - n * PiOverTwoPart1;
+    DoubleDouble r = TwoSum(head, -n * PiOverTwoPart2);
+    r = Add(r, {-n * PiOverTwoPart3, 0.0});
+    r = Add(r, {-n * PiOverTwoPart3Tail, 0.0});
+    // n mod 4를 정확히(n은 정수 double — 곱·내림·뺄셈이 모두 정확하다).
+    const int quadrant = static_cast<int>(n - 4.0 * Floor(0.25 * n));
+    // cos(r + e) ≈ cos r − e·sin r, sin(r + e) ≈ sin r + e·cos r(e = r.lo는 ulp 수준).
+    double result;
+    switch (quadrant) {
+    case 0:
+        result = CosKernel(r.hi) - r.lo * SinKernel(r.hi);
+        break;
+    case 1:
+        result = -(SinKernel(r.hi) + r.lo * CosKernel(r.hi));
+        break;
+    case 2:
+        result = -(CosKernel(r.hi) - r.lo * SinKernel(r.hi));
+        break;
+    default:
+        result = SinKernel(r.hi) + r.lo * CosKernel(r.hi);
+        break;
+    }
+
+    return Canonical(result);
+}
+
+double Atan(double x) noexcept {
+    if (IsNaN(x)) {
+        return NaN();
+    }
+
+    const bool negative = (BitCast<uint64>(x) & SignBit) != 0;
+    const double magnitude = Magnitude(x);
+    const DoubleDouble halfPi{0.5 * PiExtended.hi, 0.5 * PiExtended.lo};
+    if (IsInfinite(x) || magnitude >= AtanHalfPiLimit) {
+        return negative ? -halfPi.hi : halfPi.hi;
+    }
+
+    if (magnitude < AtanIdentityLimit) {
+        return x; // ±0·비정규 수 포함 — atan(x)는 x로 반올림된다
+    }
+
+    // |x| > 1이면 atan(|x|) = π/2 − atan(1/|x|)(1/|x|는 double-double).
+    const bool inverted = magnitude > 1.0;
+    const DoubleDouble t =
+        inverted ? Divide({1.0, 0.0}, {magnitude, 0.0}) : DoubleDouble{magnitude, 0.0};
+    // t ∈ [0, 1]을 가장 가까운 k/8로 나눈다: atan(t) = atan(k/8) + atan(r), r = (t − c)/(1 + t·c).
+    const double k = RoundHalfEven(8.0 * t.hi);
+    const double c = 0.125 * k;
+    const DoubleDouble numerator = Add(t, {-c, 0.0});
+    const DoubleDouble denominator = Add({1.0, 0.0}, Multiply(t, {c, 0.0}));
+    const DoubleDouble r = Divide(numerator, denominator);
+    const DoubleDouble atanR = FastTwoSum(r.hi, r.lo + AtanTail(r.hi));
+    DoubleDouble sum = Add(AtanEighths[static_cast<int>(k)], atanR);
+    if (inverted) {
+        sum = Add(halfPi, {-sum.hi, -sum.lo});
+    }
+
+    const double result = sum.hi + sum.lo;
+    return Canonical(negative ? -result : result);
 }
 
 double SrgbToLinear(double encoded) noexcept {

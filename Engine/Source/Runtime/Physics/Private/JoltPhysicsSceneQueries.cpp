@@ -18,7 +18,9 @@
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/Shape/DecoratedShape.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
+#include <Jolt/Physics/Collision/TransformedShape.h>
 // clang-format on
 
 namespace rocks::physics {
@@ -519,7 +521,18 @@ HitResult JoltPhysicsScene::MakeShapeHit(const Vec3d& start, const Vec3d& end,
     }
 
     JPH::BodyLockRead lock(system_.GetBodyLockInterface(), record.body);
-    if (!lock.Succeeded() || lock.GetBody().GetShape()->GetSubType() != JPH::EShapeSubType::Box) {
+    if (!lock.Succeeded()) {
+        return hit;
+    }
+
+    // 질량 중심 이동 body는 형상이 OffsetCenterOfMassShape로 감싸여 있다(7.1.15절) — 안쪽을
+    // 본다(상자는 body 원점 중심이고 회전만 쓴다).
+    const JPH::Shape* bodyShape = lock.GetBody().GetShape();
+    if (bodyShape->GetSubType() == JPH::EShapeSubType::OffsetCenterOfMass) {
+        bodyShape = static_cast<const JPH::DecoratedShape*>(bodyShape)->GetInnerShape();
+    }
+
+    if (bodyShape->GetSubType() != JPH::EShapeSubType::Box) {
         return hit;
     }
 
@@ -879,6 +892,78 @@ Result<bool> JoltPhysicsScene::OverlapShape(const Vec3d& position, const Quatd& 
     return WithJoltQueryShape(shape, [&](const JPH::Shape& joltShape) noexcept {
         return OverlapJoltShape(joltShape, position, unit.Value(), filter, params, mode, all, {});
     });
+}
+
+namespace {
+
+// 가장 깊은 겹침 하나를 고른다(ComputePenetration — 7.1.13절). 같은 깊이면 먼저 온 것이다.
+class DeepestCollideCollector final : public JPH::CollideShapeCollector {
+public:
+    void AddHit(const JPH::CollideShapeResult& result) override {
+        if (!found || result.mPenetrationDepth > depth) {
+            found = true;
+            depth = result.mPenetrationDepth;
+            axis = result.mPenetrationAxis;
+        }
+    }
+
+    bool found = false;
+    float depth = 0.0f;
+    JPH::Vec3 axis = JPH::Vec3::sZero();
+};
+
+} // namespace
+
+bool JoltPhysicsScene::ComputePenetration(PhysicsBodyHandle body, const CollisionShape& shape,
+                                          const Vec3d& position, const Quatd& rotation,
+                                          MtdResult& out) const noexcept {
+    AssertNotStepping();
+    const BodySlot* slot = FindSlot(body);
+    if (slot == nullptr || shape.kind == CollisionShapeKind::Line || !math::IsFinite(position.x) ||
+        !math::IsFinite(position.y) || !math::IsFinite(position.z)) {
+        return false;
+    }
+
+    auto unit = rotation.TryNormalize();
+    if (!unit) {
+        return false;
+    }
+
+    // body의 형상·자세다(UE FBodyInstance::OverlapTest — 이 body 하나만 본다).
+    JPH::TransformedShape target;
+    {
+        JPH::BodyLockRead lock(system_.GetBodyLockInterface(), slot->body);
+        if (!lock.Succeeded()) {
+            return false;
+        }
+
+        target = lock.GetBody().GetTransformedShape();
+    }
+
+    auto found = WithJoltQueryShape(shape, [&](const JPH::Shape& joltShape) noexcept {
+        const JPH::RVec3 base = ToJoltPosition(position, origin_);
+        const JPH::RMat44 transform =
+            JPH::RMat44::sRotationTranslation(ToJoltRotation(unit.Value()), base);
+        // 닿기만 한 형상(깊이 0)도 겹침이다(분리 거리 0 — overlap 질의와 같다).
+        JPH::CollideShapeSettings settings;
+        settings.mMaxSeparationDistance = 0.0f;
+        DeepestCollideCollector collector;
+        target.CollideShape(&joltShape, JPH::Vec3::sReplicate(1.0f),
+                            transform.PreTranslated(joltShape.GetCenterOfMass()), settings, base,
+                            collector);
+        if (!collector.found) {
+            return Result<bool>::Success(false);
+        }
+
+        // Jolt 축은 body(shape 2)를 밀어낼 방향이라 질의 형상은 반대로 간다. 축이 0·비유한이면
+        // (중심이 겹침) sweep 시작 겹침 hit와 같이 +Z다(MakeShapeHit — UE MTD 없음의 막음 법선).
+        const float axisLength = collector.axis.Length();
+        const bool hasAxis = axisLength > 0.0f && math::IsFinite(axisLength);
+        out.direction = hasAxis ? FromJoltNormal(-collector.axis / axisLength) : Vec3d::Up();
+        out.distance = math::Max(FromJoltLength(collector.depth), 0.0);
+        return Result<bool>::Success(true);
+    });
+    return found && found.Value();
 }
 
 Result<bool> JoltPhysicsScene::OverlapBody(PhysicsBodyHandle body, const Vec3d& position,

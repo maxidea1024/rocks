@@ -13,7 +13,7 @@
 #include <Platform/PlatformMath.h>
 
 // 커브 값 타입(TangentCurve·PlainCurve·계단 커브 셋)이 함께 쓰는 키 배열 연산이다(Docs/Design/
-// CurveData.ko.md 5·7절). 키 형식은 float time 칸과 value 칸을 가진 struct이고 배열은 시간
+// CurveData/README.ko.md 5·7절). 키 형식은 float time 칸과 value 칸을 가진 struct이고 배열은 시간
 // 오름차순·유한 시간이다. 키는 옮기기(Move)로 다루고 복사가 필요한 곳은 CloneCurveKey를 쓴다
 // (String 키는 할당하는 복사다). 함수마다 실패하면 배열을 바꾸지 않는다.
 namespace rocks {

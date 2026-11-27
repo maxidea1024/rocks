@@ -8,7 +8,7 @@
 #include <ReflectionText/TextJson.h>
 #include <TestSupport/Test.h>
 
-// struct 검증 hook의 대입 묶음·JSON import 시험이다(Docs/Design/CurveData.ko.md 9.1절 — CV3,
+// struct 검증 hook의 대입 묶음·JSON import 시험이다(Docs/Design/CurveData/README.ko.md 9.1절 — CV3,
 // fixture ReflectionTestFixtures/ValidateFixture.h): 준비한 사본(상자)에 모든 대입을 적용한 뒤
 // Publish 전에 hook을 부른다. 묶음 안에서 잠시 깨졌다가 끝에 맞는 대입은 통과하고, 끝 값이 거부되면
 // 진단 InvalidStructValue와 InvalidArgument로 아무것도 게시하지 않는다(다른 단위도). StructRefArray

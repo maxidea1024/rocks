@@ -34,16 +34,35 @@ bool KeepsWithoutVoice(const SoundPlayable& playable, bool remainActive) noexcep
 
 } // namespace
 
-bool AudioDeviceContext::IsAudible(const Record& record) const noexcept {
+bool AudioDeviceContext::IsAudible(const Record& record, bool shortSound) const noexcept {
     const SoundPlayable& playable = *record.sound.Get();
-    // NonSpatial 배치·감쇠 없음은 늘 들린다(UE bAllowSpatialization 아님 — 3.41.3절).
-    if (record.placement == PlayPlacement::NonSpatial || !playable.attenuation.HasValue()) {
+    // NonSpatial 배치·감쇠 없음·PlayWhenSilent(허용될 때)는 늘 들린다(UE IsInAudibleRange
+    // — 3.41.3절).
+    if (record.placement == PlayPlacement::NonSpatial || !playable.attenuation.HasValue() ||
+        (playable.virtualizationMode == SoundVirtualizationMode::PlayWhenSilent &&
+         (virtual_.allowPlayWhenSilent || shortSound))) {
         return true;
     }
 
+    // 짧은 소리 판정은 focus 거리 배수가 하나라도 1이 아니면 늘 들린다(UE AD 6362–6375).
+    const SoundAttenuation& attenuation = playable.attenuation.Value();
+    if (shortSound &&
+        (attenuation.focusDistanceScale != 1.0f || attenuation.nonFocusDistanceScale != 1.0f ||
+         focus_.focusDistanceScale != 1.0f || focus_.nonFocusDistanceScale != 1.0f)) {
+        return true;
+    }
+
+    // emitter 재생은 emitter의 지금 위치로 본다.
+    Vec3d position = record.position;
+    if (record.placement == PlayPlacement::Emitter && record.emitter.slot < emitters_.Size() &&
+        emitters_[record.emitter.slot].generation == record.emitter.generation) {
+        position = emitters_[record.emitter.slot].position;
+    }
+
     const ControlScene& scene = scenes_[record.scene];
-    return IsWithinAudibleRange(playable.attenuation.Value(), scene.listenerPosition,
-                                record.position);
+    return IsWithinAudibleRange(attenuation, scene.listenerPosition, position,
+                                virtual_.maxWorldDistance,
+                                shortSound ? 1.0f : record.focus.distance);
 }
 
 void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexcept {
@@ -99,9 +118,15 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
             record.playbackMixFrame = now;
         }
 
-        record.unscaledEstimate =
-            record.volume.At(now) * playable.volume * record.spatial.attenuationGain;
+        record.unscaledEstimate = UnscaledEstimate(record, now);
     }
+}
+
+float AudioDeviceContext::UnscaledEstimate(const Record& record, uint64 now) const noexcept {
+    // 동시 발음 scale을 빼기 전의 들리는 크기다(3.41.1절 v — 사용자·사운드 볼륨 × 감쇠 × focus
+    // 볼륨).
+    return record.volume.At(now) * record.sound.Get()->volume * record.spatial.attenuationGain *
+           record.focus.volume * record.occlusionVolume.At(now);
 }
 
 void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
@@ -129,10 +154,10 @@ void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
         // UE FWaveInstance::GetVolumeWeightedPriority(Audio.cpp:1328–1359).
         if (record.estimate > 0.0f) {
             record.weight = playable.bypassVolumeScaleForPriority
-                                ? record.priority
-                                : record.estimate * record.priority;
+                                ? record.voicePriority
+                                : record.estimate * record.voicePriority;
         } else {
-            record.weight = record.priority - InaudibleWeightOffset;
+            record.weight = record.voicePriority - InaudibleWeightOffset;
         }
     }
 }
@@ -141,14 +166,17 @@ void AudioDeviceContext::AssignVoices(ControlBatch& batch, uint64 now) noexcept 
     candidates_.Clear();
     for (uint32 slot = 0; slot < records_.Size(); ++slot) {
         Record& record = records_[slot];
-        // 정지·steal fade 중인 재생은 경쟁하지 않고 voice를 끝까지 쥔다.
-        if (record.state == RecordState::Inactive || record.stopRequested) {
+        // 정지·steal fade 중인 재생은 경쟁하지 않고 voice를 끝까지 쥔다. 가상 재생은 후보가 아니다.
+        if (record.state == RecordState::Inactive || record.state == RecordState::Virtual ||
+            record.stopRequested) {
             continue;
         }
 
         const SoundPlayable& playable = *record.sound.Get();
-        const bool exempt = record.volume.IsRising(now) ||
-                            playable.virtualizationMode == SoundVirtualizationMode::PlayWhenSilent;
+        const bool exempt =
+            record.volume.IsRising(now) ||
+            (playable.virtualizationMode == SoundVirtualizationMode::PlayWhenSilent &&
+             virtual_.allowPlayWhenSilent);
         if (record.estimate <= SilentVolumeThreshold && !exempt) {
             HandleSilent(slot, batch, now);
             continue;
@@ -214,6 +242,7 @@ void AudioDeviceContext::HandleSilent(uint32 slot, ControlBatch& batch, uint64 n
         }
 
         break;
+    case RecordState::Virtual:
     case RecordState::Inactive:
         break;
     }
@@ -250,6 +279,7 @@ void AudioDeviceContext::DropVoice(uint32 slot, ControlBatch& batch, uint64 now)
         }
 
         break;
+    case RecordState::Virtual:
     case RecordState::Inactive:
         break;
     }
@@ -361,14 +391,17 @@ void AudioDeviceContext::OnStartFailure(uint32 slot, StartOutcome outcome,
     EndVoiceless(slot, PlaybackEndReason::VoiceLimit, batch);
 }
 
-void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 now) noexcept {
+void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 now,
+                                     uint32 stealFadeFrames) noexcept {
     Record& record = records_[slot];
     ROCKS_ASSERT(record.state == RecordState::Submitted);
     // Thread 렌더에서는 수거 뒤에 시작이 게시될 수 있다: 떼어 낸 voice는 이벤트를 내지 않으므로
     // 이미 시작했으면 여기서 Started를 낸다(소리가 난 재생은 Started가 있어야 한다).
+    bool voiceStarted = record.started;
     if (!record.started) {
         auto status = mixer_.QueryVoice(record.voice);
         if (status && status.Value().startMixFrame != audio::UnsetMixFrame) {
+            voiceStarted = true;
             if (!record.everStarted) {
                 record.everStarted = true;
                 Emit(batch, PlaybackHandle{slot, record.generation}, PlaybackEventKind::Started,
@@ -382,10 +415,28 @@ void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 no
     }
 
     ROCKS_ASSERT(detached_.Size() < detached_.Capacity());
-    (void)detached_.TryPushBack(DetachedVoice{record.voice, record.clip, record.weight,
-                                              record.sequence, audio::DefaultStopFadeFrames});
+    DetachedVoice detached;
+    detached.voice = record.voice;
+    detached.clip = record.clip;
+    detached.weight = record.weight;
+    detached.sequence = record.sequence;
+    detached.scene = record.scene;
+    detached.sceneEpoch = record.sceneEpoch;
+    // 시작하지 않은 voice는 fade 없이 바로 멈춘다: 늦게 시작해 steal fade 동안 소리를 내면 Started
+    // 없는 소리가 된다(3.41.2절).
+    if (stealFadeFrames != 0 && voiceStarted) {
+        // 동시 발음 steal fade를 떼어 낸 voice가 마저 한다(재생은 가상이 된다 — 3.41.2절).
+        detached.fading = true;
+        detached.params = ParamsFor(record, now);
+        detached.fader.Set(1.0f, StealFadeFloorDb);
+        detached.fader.StartTo(0.0f, now, stealFadeFrames);
+        detached.fadeEnd = now + stealFadeFrames;
+    } else {
+        (void)mixer_.RequestStop(record.voice, audio::DefaultStopFadeFrames);
+    }
+
+    (void)detached_.TryPushBack(detached);
     voiceOwners_[record.voice.index] = 0;
-    (void)mixer_.RequestStop(record.voice, audio::DefaultStopFadeFrames);
     RemoveSlot(awaitingStart_, slot);
     record.voice = audio::AudioVoiceHandle{};
     record.clip = 0;
@@ -467,6 +518,7 @@ bool AudioDeviceContext::CutStoppingVoice(bool streamOnly) noexcept {
 
     if (bestDetached != None) {
         detached_[bestDetached].stopFade = MinStopFadeFrames;
+        detached_[bestDetached].fading = false;
         (void)mixer_.RequestStop(detached_[bestDetached].voice, MinStopFadeFrames);
         return true;
     }
@@ -483,7 +535,7 @@ bool AudioDeviceContext::CutStoppingVoice(bool streamOnly) noexcept {
 void AudioDeviceContext::EndVoiceless(uint32 slot, PlaybackEndReason reason,
                                       ControlBatch& batch) noexcept {
     Record& record = records_[slot];
-    ROCKS_ASSERT(record.state == RecordState::Voiceless);
+    ROCKS_ASSERT(record.state == RecordState::Voiceless || record.state == RecordState::Virtual);
     LeaveConcurrencyGroups(slot, mixer_.CompletedMixFrame());
     // 한 번도 소리를 내지 않았으면 끝 frame이 없다(3.41.4절).
     const uint64 mixFrame = record.everStarted ? mixer_.CompletedMixFrame() : audio::UnsetMixFrame;

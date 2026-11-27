@@ -409,9 +409,9 @@ TEST(EngineAudio_ShortSoundRangeAndVoicelessStop) {
     CHECK(EndOf(log, far) == PlaybackEndReason::Inaudible);
     CHECK(CountFor(log, far, PlaybackEventKind::Started) == 0);
     CHECK(CountFor(log, near, PlaybackEventKind::Started) == 1);
-    // 거리 밖 loop는 감쇠 0이라 voice 없이 남는다(가상화는 AU7c).
+    // 거리 밖 loop는 끝나지 않고 가상으로 남는다(3.41.3절).
     CHECK(CountFor(log, farLoop, PlaybackEventKind::Ended) == 0);
-    CHECK(fixture.audio->ControlStats().voicelessPlaybacks == 1);
+    CHECK(fixture.audio->ControlStats().virtualPlaybacks == 1);
     REQUIRE(fixture.audio->Stop(farLoop, 0));
     REQUIRE(fixture.Frames(2));
     CHECK(EndOf(log, farLoop) == PlaybackEndReason::Stopped);
@@ -600,7 +600,8 @@ TEST(EngineAudio_VoicelessPlaybackRemoval) {
     REQUIRE(far);
     const PlaybackHandle fixed = PlayAtLogged(fixture, log, scene, loop, 1.0e6);
     REQUIRE(fixture.Frames(StartDelivery));
-    REQUIRE(fixture.audio->ControlStats().voicelessPlaybacks == 2);
+    // 거리 밖 loop라 가상이다(voice 없음 — 3.41.3절).
+    REQUIRE(fixture.audio->ControlStats().virtualPlaybacks == 2);
     fixture.audio->UnregisterEmitter(emitter.Value());
     REQUIRE(fixture.Frames(2));
     CHECK(EndOf(log, far.Value()) == PlaybackEndReason::EmitterRemoved);
@@ -608,7 +609,7 @@ TEST(EngineAudio_VoicelessPlaybackRemoval) {
     CHECK(fixture.audio->Status(fixed) == PlaybackStatus::Finished);
     REQUIRE(fixture.Frames(2));
     CHECK(CountFor(log, fixed, PlaybackEventKind::Ended) == 0);
-    CHECK(fixture.audio->ControlStats().voicelessPlaybacks == 0);
+    CHECK(fixture.audio->ControlStats().virtualPlaybacks == 0);
     RequireIdle(fixture);
 }
 

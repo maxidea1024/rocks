@@ -2,6 +2,7 @@
 
 #include <AssetNugget/NuggetCache.h>
 #include <Base/Types.h>
+#include <Core/CancelToken.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
@@ -11,6 +12,7 @@
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCompiler/ShaderPreprocessor.h>
 #include <ShaderCompiler/ShaderSourceTree.h>
+#include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 #include <ShaderCore/ShaderParameterLayout.h>
@@ -29,8 +31,13 @@
 //   Miss·Corrupt·DigestChanged·Dropped는 다시 컴파일해 게시, Cancelled는 job 취소, 캐시 실패는
 //   required면 job 오류(CacheFailed)이고 아니면 진단만이다. Put Conflict는 결정성 위반으로 통계를
 //   남긴다. 실패 job은 게시하지 않는다.
-// - 진행(진행 보고 12절): 전체·완료·실패·캐시 적중 job 수와 워커 job 줄의 잠정 완료 수를 원자
-//   계수로 내놓는다(Progress). 묶음이 끝나면 잠정 값을 실제 결과로 바꾼다.
+// - 진행(진행 보고 12절): 전체·완료·실패·취소·캐시 적중 job 수와 워커 job 줄의 잠정 완료 수를 원자
+//   계수로 내놓는다(Progress). 묶음이 끝나면 잠정 값을 실제 결과로 바꾼다. Compile마다 control의
+//   sink가 이 호출의 job 수(added 한 번)와 끝난 수(finished — 잠정 완료 포함, 높은 물 표시라 늘
+//   때만)를 받는다. Compile이 돌아올 때 finished 합 = added다(실패·취소 포함).
+// - 취소(11.1절 PG5 메모): control.cancel을 job 준비마다·너겟 조회 전·묶음을 맡길 때 본다. 진행 중
+//   묶음은 채널이 워커를 강제 종료한다. 취소 뒤 남은 job은 Cancelled이고 이미 성공한 job은 그대로
+//   게시한다. token으로 취소된 job이 있으면 Compile은 Cancelled다.
 //
 // 사용 예:
 //   ShaderCompileManager manager(config);
@@ -46,6 +53,7 @@
 //   manager.Shutdown();
 namespace rocks {
 
+class ProgressCounter;
 class WorkerScheduler;
 
 } // namespace rocks
@@ -62,6 +70,39 @@ inline constexpr char MaterialGeneratedIncludePath[] = "/Engine/Generated/Materi
 inline constexpr uint32 MaxDefaultShaderWorkers = 8;
 // 작업 디렉터리 이름(<root>/Intermediate/ShaderWorkers)이다.
 inline constexpr char ShaderWorkerDirectoryName[] = "Intermediate/ShaderWorkers";
+// Compile 한 번이 받는 진행 sink 수 상한이다(대기 작업·진행 작업·호스트 준비 진행 + 여유 하나).
+inline constexpr usize MaxShaderCompileProgressSinks = 4;
+
+// Compile 한 번의 진행을 받는 곳이다(진행 보고 12장, ShaderSystem 11.1절 PG5 메모). added는 시작에
+// 한 번(이 호출의 job 수), finished는 끝난 job 수만큼 아무 스레드(조정 스레드·워커 채널 스레드)에서
+// 불린다. 받는 곳은 잠금 없는 일만 한다.
+struct ShaderCompileProgressSink {
+    void (*added)(void* context, uint64 jobs) noexcept = nullptr;
+    void (*finished)(void* context, uint64 jobs) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+// Compile 한 번의 취소와 진행이다.
+struct ShaderCompileControl {
+    // 취소다(기본은 취소될 수 없는 token).
+    CancelToken cancel;
+    // 진행 sink다(최대 MaxShaderCompileProgressSinks개 — 넘는 sink는 받지 않는다). Compile이 돌아올
+    // 때까지 살아 있어야 한다.
+    Span<const ShaderCompileProgressSink> sinks{};
+};
+
+// counter의 AddTotal·Add로 잇는 sink다(작업 수준 계수·구간 계수 모두). counter는 sink를 쓰는
+// Compile이 끝날 때까지 산다.
+//
+// 사용 예:
+//   auto counter = ProgressCounter::ForTask(task, 0);
+//   const ShaderCompileProgressSink sinks[] = {MakeShaderCompileCounterSink(counter.Value())};
+//   ShaderCompileControl control;
+//   control.cancel = task.Token();
+//   control.sinks = sinks;
+//   (void)manager.Compile(jobs, results, control);
+ROCKS_SHADERCOMPILER_API ShaderCompileProgressSink
+MakeShaderCompileCounterSink(ProgressCounter& counter) noexcept;
 
 // 형식 정의 snapshot이다(세션을 시작할 때 한 번 읽은 byte와 그 정의 — 키와 워커 메시지가 같은
 // byte를 쓴다, 10절).
@@ -97,6 +138,8 @@ struct ShaderCompileManagerConfig {
     bool keepInput = false;
     // 시험 hook job(ShaderCompileJob::testHook)을 받는 워커다(SC7).
     bool testHooks = false;
+    // 모든 채널에 거는 시험 hook이다(SC7 held — 제품 코드는 걸지 않는다).
+    ShaderWorkerChannelHooks channelHooks{};
 };
 
 struct ShaderCompileJob {
@@ -144,7 +187,7 @@ enum class ShaderCompileStatus : uint8 {
     WorkerFailed,
     // required 캐시의 실패다.
     CacheFailed,
-    // 캐시가 닫혀 취소되었다.
+    // 취소되었다(Compile의 취소 token 또는 닫힌 너겟 캐시).
     Cancelled
 };
 
@@ -172,6 +215,8 @@ struct ShaderCompileProgress {
     uint64 total = 0;
     uint64 completed = 0;
     uint64 failed = 0;
+    // Cancelled 상태로 끝난 job 수다(failed에 넣지 않는다).
+    uint64 cancelled = 0;
     uint64 cacheHits = 0;
     // 워커 job 줄로 받은 아직 정산하지 않은 완료 수다.
     uint64 provisional = 0;
@@ -211,10 +256,12 @@ public:
     // InvalidArgument, 작업 디렉터리 실패는 그 파일 오류, 채널 시작 실패.
     Result<void> Start() noexcept;
 
-    // jobs를 컴파일해 out(job 순서)에 둔다(out은 먼저 비운다). 실행 실패(할당)만 Result 실패이고
-    // job 실패는 결과 상태다.
-    Result<void> Compile(Span<const ShaderCompileJob> jobs,
-                         Array<ShaderCompileJobResult>& out) noexcept;
+    // jobs를 컴파일해 out(job 순서)에 둔다(out은 먼저 비운다). 실행 실패(할당)와 취소만 Result
+    // 실패이고 job 실패는 결과 상태다. control.cancel로 취소된 job이 있으면 Cancelled를
+    // 돌려준다(out은 그래도 job 순서로 채운다 — 성공한 job 결과는 쓸 수 있다). control의 sink는
+    // 헤더 주석대로다.
+    Result<void> Compile(Span<const ShaderCompileJob> jobs, Array<ShaderCompileJobResult>& out,
+                         const ShaderCompileControl& control = {}) noexcept;
 
     // 한 건을 동기 Get·Put으로 컴파일한다(SC12 — Development 필요 시 컴파일).
     Result<void> CompileNow(const ShaderCompileJob& job, ShaderCompileJobResult& out) noexcept;

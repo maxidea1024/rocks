@@ -139,12 +139,13 @@ TEST(EngineAudio_SoundSourceRefValidatesSnapshot) {
     playable.pitch = 0.1f;
     CHECK(SoundSourceRef::TryCreate(allocator, playable).Error() == ErrorCode::InvalidArgument);
     playable.pitch = 1.0f;
+    // Custom 모델인데 곡선이 없으면 거부한다(3.42.1절).
     SoundAttenuation custom;
     custom.distance.model = audio::DistanceAttenuationModel::Custom;
     playable.attenuation = custom;
     CHECK(SoundSourceRef::TryCreate(allocator, playable).Error() == ErrorCode::InvalidArgument);
     SoundAttenuation negative;
-    negative.innerRadius = -1.0f;
+    negative.shapeExtents.x = -1.0f;
     playable.attenuation = negative;
     CHECK(SoundSourceRef::TryCreate(allocator, playable).Error() == ErrorCode::InvalidArgument);
     playable.attenuation = SoundAttenuation{};
@@ -182,27 +183,39 @@ TEST(EngineAudio_MakePlayableCopiesAttenuationSnapshot) {
         CHECK(sound.PcmRevision() == 1);
         sound.looping = true;
         sound.volume = 0.5f;
-        attenuation.innerRadius = 50.0f;
+        attenuation.shapeExtents.x = 50.0f;
         attenuation.model = SoundDistanceModel::NaturalSound;
         REQUIRE(objects.SetReference(objects.OwnerAccess(), clip.Value().Handle(),
                                      sound.attenuation, settings.Value().Handle()));
         auto first = sound.MakePlayable(allocator, objects, objects.OwnerAccess());
         REQUIRE(first);
         // 원본을 바꿔도 이미 만든 스냅숏은 그대로다.
-        attenuation.innerRadius = 900.0f;
+        attenuation.shapeExtents.x = 900.0f;
         sound.volume = 1.0f;
         const SoundPlayable& snapshot = *first.Value().Get();
         CHECK(snapshot.looping);
         CHECK(snapshot.volume == 0.5f);
         REQUIRE(snapshot.attenuation.HasValue());
-        CHECK(snapshot.attenuation.Value().innerRadius == 50.0f);
+        CHECK(snapshot.attenuation.Value().shapeExtents.x == 50.0f);
         CHECK(snapshot.attenuation.Value().distance.model ==
               audio::DistanceAttenuationModel::NaturalSound);
         CHECK(snapshot.pcm.Get() == pcm.Get());
         CHECK(snapshot.revision == 1);
+        // Custom 모델은 곡선을 깊이 복사한다(쓰지 않는 곡선은 넣지 않는다 — 3.42.1절).
         attenuation.model = SoundDistanceModel::Custom;
+        REQUIRE(attenuation.customDistanceCurve.curve.TryAddKey(0.0f, 1.0f));
+        auto custom = sound.MakePlayable(allocator, objects, objects.OwnerAccess());
+        REQUIRE(custom);
+        const SoundAttenuation& curved = custom.Value().Get()->attenuation.Value();
+        REQUIRE(curved.customDistanceCurve.Get() != nullptr);
+        CHECK(curved.customDistanceCurve.Get() != &attenuation.customDistanceCurve.curve);
+        CHECK(curved.customDistanceCurve->Keys().Size() == 1);
+        CHECK(curved.customLowPassAbsorptionCurve.Get() == nullptr &&
+              curved.customPriorityAttenuationCurve.Get() == nullptr);
+        attenuation.focusAzimuth = 181.0f;
         CHECK(sound.MakePlayable(allocator, objects, objects.OwnerAccess()).Error() ==
               ErrorCode::InvalidArgument);
+        attenuation.focusAzimuth = DefaultFocusAzimuth;
     }
 
     CHECK(registration.Unregister());

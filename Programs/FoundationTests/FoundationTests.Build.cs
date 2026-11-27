@@ -21,10 +21,10 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectDeveloperModules = ["GcSoak"];
 
     // Tests of Object family modules (included in FoundationTests and EngineTests).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
+    private static readonly string[] ObjectTestModules = ["MetaSchema", "ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/InputActions", "Runtime/CurveAssets", "Developer/CurveAssetTools", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/WorldIntegration", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Developer/AnimationTools", "Runtime/Material", "Runtime/MaterialSchema", "Developer/MaterialCompiler", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Runtime/AudioMiniaudio", "Runtime/EngineAudio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend", "Runtime/SplashScreen"];
+    private static readonly string[] EngineTestModules = ["Runtime/UiCore", "Runtime/UiFramework", "Runtime/UiRender", "Runtime/UiWidget", "Runtime/UiScreens", "Runtime/UiWorld", "Runtime/Input", "Runtime/InputActions", "Runtime/CurveAssets", "Developer/CurveAssetTools", "Developer/CurveAtlasTools", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/WorldIntegration", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Developer/AnimationTools", "Runtime/Material", "Runtime/MaterialSchema", "Developer/MaterialCompiler", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Runtime/AudioMiniaudio", "Runtime/EngineAudio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend", "Runtime/SplashScreen"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,7 +32,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Physics", "InputActions", "CurveAssets", "CurveAssetTools", "Engine", "Gameplay", "WorldIntegration", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "AnimationTools", "Material", "MaterialSchema", "MaterialCompiler", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioMiniaudio", "EngineAudio", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend", "SplashScreen"];
+    private static readonly string[] EngineTestDependencies = ["UiCore", "UiFramework", "UiRender", "UiWidget", "UiScreens", "UiWorld", "PlatformWindow", "Physics", "InputActions", "CurveAssets", "CurveAssetTools", "CurveAtlas", "CurveAtlasTools", "Engine", "Gameplay", "WorldIntegration", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "AnimationTools", "Material", "MaterialSchema", "MaterialCompiler", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioMiniaudio", "EngineAudio", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend", "SplashScreen"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1), the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
@@ -52,6 +52,7 @@ public abstract class TestsModule : ModuleRules
     [
         "Programs/FoundationTests/Engine/ThirdPartyJoltTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsAdapterTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsBodyValueSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsContactSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp"
     ];
@@ -72,6 +73,7 @@ public abstract class TestsModule : ModuleRules
         "Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp",
         "Core/Source/Runtime/Core/Tests/StackAllocatorTests.cpp",
         "Core/Source/Runtime/Core/Tests/StringFormatTests.cpp",
+        "Core/Source/Runtime/MetaSchema/Tests/LaneTransferTests.cpp",
         "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderFailureControls.cpp",
         "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderTests.cpp",
         "Core/Source/Runtime/ObjectRuntime/Tests/DestroyRequestedFailureTests.cpp",
@@ -108,7 +110,8 @@ public abstract class TestsModule : ModuleRules
         ["AssetCooker"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetDatabase"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
         ["AssetNugget"] = ["AssetDatabase", "AssetRuntime", "AssetTestFixtures", "ObjectSerialization"],
-        ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves"],
+        // The package event binding tests put the reflection fixture's event publisher and call target in a package (Docs/Design/EventReflection EV3a2).
+        ["AssetRuntime"] = ["AssetTestFixtures", "CoreTypeBindings", "Curves", "ReflectionTestFixtures"],
         // The Opus codec tests round-trip the AudioTools encoder through the AudioOpus decoder (AudioTools itself does not depend on it).
         ["AudioTools"] = ["AudioOpus"],
         ["Base"] = ["Core"],
@@ -123,6 +126,9 @@ public abstract class TestsModule : ModuleRules
         ["CurveAssets"] = ["CurveAssetsTestFixtures"],
         // The curve table cook tests write and load packages with the asset test support (AssetTestSupport.h uses the fixture types).
         ["CurveAssetTools"] = ["AssetTestFixtures"],
+        // The atlas cook test opens and saves editor packages with the AssetDatabase test scenes (Tests headers) and cooks the atlas with
+        // the texture processor (CurveAssets 4.3, AssetSystem 12.14 A5j2c); the hook tests register the Texture hooks under the atlas hooks.
+        ["CurveAtlasTools"] = ["AssetTestFixtures", "AssetDatabase", "AssetCooker", "TargetProfiles", "TextureTools", "CoreTypeBindings", "Curves"],
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
         // Gameplay diagnostics tests drive the console commands through the Config test fixture context; the input asset tests
         // (InputActions IA6b) cook input context packages with the asset test scene support.
@@ -147,6 +153,8 @@ public abstract class TestsModule : ModuleRules
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
+        // The lane transfer tests check the reflected fixture structs (Object references, weak references) against the schema rule.
+        ["MetaSchema"] = ["ReflectionTestFixtures"],
         ["ModuleLoader"] = ["DynamicModuleTestApi"],
         ["NodeGraph"] = ["ReflectionText"],
         ["NodeGraphTools"] = ["ReflectionTestFixtures"],
@@ -174,6 +182,8 @@ public abstract class TestsModule : ModuleRules
         ["Texture"] = ["AssetTestFixtures", "ObjectSerialization"],
         ["TraceCapture"] = ["TraceAnalysis"],
         ["TraceControl"] = ["ConfigTestFixtures", "CoreTypeBindings", "TraceAnalysis"],
+        // The widget event binding tests bind widget events to a reflected function of the reflection fixture (Docs/Design/UiToolkit section 21.5a).
+        ["UiWidget"] = ["ReflectionTestFixtures"],
         ["UnrealExchange"] = ["Animation", "AssetTestFixtures", "CoreTypeBindings", "Curves", "Mesh", "MeshTools"],
         // The World collision tests build the profile table from a Config test fixture context (Docs/Design/CollisionData.ko.md CD2).
         ["World"] = ["ConfigTestFixtures", "ObjectSerialization", "Task", "WorldTestFixtures"],

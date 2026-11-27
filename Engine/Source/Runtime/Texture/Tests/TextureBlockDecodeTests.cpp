@@ -187,6 +187,22 @@ TEST(TextureBlockDecode_KnownBlocks) {
     CHECK(texels[0] == 0 && texels[3] == 0);
 }
 
+// BC3 색 블록은 c0 ≤ c1이어도 4색이다(D3D 명세 — BC1만 3색 + 투명 검정). 같은 색 블록을 BC1로 풀면
+// index 3이 투명 검정이다.
+TEST(TextureBlockDecode_Bc3ColorAlwaysFourColor) {
+    // 색 블록: c0 = 0x001F(파랑) < c1 = 0xF800(빨강), 모든 index 3. 알파 블록: alpha0 = alpha1 =
+    // 255, index 0.
+    const uint8 color[8] = {0x1F, 0x00, 0x00, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF};
+    uint8 bc3[Bptc] = {0xFF, 0xFF};
+    memcpy(bc3 + 8, color, sizeof(color));
+    uint8 texels[TextureBlockRgbaBytes];
+    DecodeTextureBlock(TextureBlockFormat::Bc3, bc3, texels);
+    // 4색 index 3 = (2·c1 + c0) / 3 = (170, 0, 85), 알파는 알파 블록(255).
+    CHECK(texels[0] == 170 && texels[1] == 0 && texels[2] == 85 && texels[3] == 255);
+    DecodeTextureBlock(TextureBlockFormat::Bc1, color, texels);
+    CHECK(texels[0] == 0 && texels[1] == 0 && texels[2] == 0 && texels[3] == 0);
+}
+
 // 크기 질의: 블록 byte와 출력 byte(블록보다 작은 mip도 블록 하나, 크기 0 거부).
 TEST(TextureBlockDecode_Sizes) {
     CHECK(TextureBlockBytes(TextureBlockFormat::Bc1) == 8 &&
@@ -205,6 +221,124 @@ TEST(TextureBlockDecode_Sizes) {
           palette[7] == (200 + 6 * 10) / 7);
     TextureBlockAlphaPalette(10, 200, palette);
     CHECK(palette[2] == (4 * 10 + 200) / 5 && palette[6] == 0 && palette[7] == 255);
+}
+
+// EAC R11 블록을 big-endian 64 bit로 만든다(base·multiplier·표, index는 열 우선 순서 — 명세 Table
+// C.2·C.9).
+namespace {
+
+void MakeEac(uint32 base, uint32 multiplier, uint32 table, const uint32 (&indices)[16],
+             uint8 (&block)[8]) noexcept {
+    uint64 bits = (uint64{base} << 56) | (uint64{multiplier} << 52) | (uint64{table} << 48);
+    for (uint32 order = 0; order < 16; ++order) {
+        bits |= uint64{indices[order]} << (45 - 3 * order);
+    }
+
+    for (uint32 i = 0; i < 8; ++i) {
+        block[i] = static_cast<uint8>(bits >> (8 * (7 - i)));
+    }
+}
+
+} // namespace
+
+static_assert(TextureEacR11Value(103, 2, TextureEacModifiers[13][3]) == 668);
+static_assert(TextureEacR11Value(103, 0, TextureEacModifiers[13][3]) == 818);
+static_assert(TextureEacR11Value(0, 15, -15) == 0 && TextureEacR11Value(255, 15, 14) == 2047);
+
+// EAC R11: 명세 예(base 103, 표 13, multiplier 2, index 3 → 668, multiplier 0 → 818), 열 우선 index
+// 순서, 8 bit RGBA 디코드(round(x · 255 / 2047)).
+TEST(TextureBlockDecode_EacR11) {
+    uint32 same[16];
+    for (uint32& index : same) {
+        index = 3;
+    }
+
+    uint8 block[8];
+    uint16 values[TextureBlockTexels];
+    MakeEac(103, 2, 13, same, block);
+    DecodeEacR11Block(block, values);
+    for (const uint16 value : values) {
+        CHECK(value == 668);
+    }
+
+    MakeEac(103, 0, 13, same, block);
+    DecodeEacR11Block(block, values);
+    CHECK(values[0] == 818 && values[15] == 818);
+    // 순서 k(열 우선: k = x · 4 + y)마다 index k % 8을 쓰면 texel (x, y)는 표 0의 index (x · 4 + y)
+    // % 8이다.
+    uint32 ordered[16];
+    for (uint32 k = 0; k < 16; ++k) {
+        ordered[k] = k % 8;
+    }
+
+    MakeEac(128, 1, 0, ordered, block);
+    DecodeEacR11Block(block, values);
+    for (uint32 y = 0; y < 4; ++y) {
+        for (uint32 x = 0; x < 4; ++x) {
+            CHECK(values[y * 4 + x] ==
+                  TextureEacR11Value(128, 1, TextureEacModifiers[0][(x * 4 + y) % 8]));
+        }
+    }
+
+    uint8 texels[TextureBlockRgbaBytes];
+    DecodeTextureBlock(TextureBlockFormat::EacR11, block, texels);
+    for (uint32 i = 0; i < TextureBlockTexels; ++i) {
+        CHECK(texels[i * 4] == (uint32{values[i]} * 255 + 1023) / 2047);
+        CHECK(texels[i * 4 + 1] == 0 && texels[i * 4 + 2] == 0 && texels[i * 4 + 3] == 255);
+    }
+
+    // 잘림: base 0·가장 큰 음수 수정값은 0, base 255·가장 큰 양수는 2047.
+    MakeEac(0, 15, 0, same, block);
+    DecodeEacR11Block(block, values);
+    CHECK(values[0] == 0);
+    uint32 top[16];
+    for (uint32& index : top) {
+        index = 7;
+    }
+
+    MakeEac(255, 15, 0, top, block);
+    DecodeEacR11Block(block, values);
+    CHECK(values[0] == 2047);
+}
+
+// EAC·ASTC 크기 질의: 블록 byte·가로·세로, ASTC 출력 byte(가장자리 블록 포함), ASTC 판정, 4 × 4가
+// 아닌 형식은 DecodeTextureBlock이 0으로 채운다.
+TEST(TextureBlockDecode_EacAstcSizes) {
+    CHECK(TextureBlockBytes(TextureBlockFormat::EacR11) == 8);
+    CHECK(TextureBlockWidth(TextureBlockFormat::EacR11) == 4 &&
+          TextureBlockHeight(TextureBlockFormat::Bc7) == 4);
+    struct Expected {
+        TextureBlockFormat format;
+        uint32 edge;
+    };
+    for (const Expected one :
+         {Expected{TextureBlockFormat::Astc4x4, 4}, Expected{TextureBlockFormat::Astc6x6, 6},
+          Expected{TextureBlockFormat::Astc8x8, 8}, Expected{TextureBlockFormat::Astc10x10, 10},
+          Expected{TextureBlockFormat::Astc12x12, 12}}) {
+        CHECK(TextureBlockBytes(one.format) == 16);
+        CHECK(TextureBlockWidth(one.format) == one.edge &&
+              TextureBlockHeight(one.format) == one.edge);
+        CHECK(TextureBlockIsAstc(one.format));
+        auto bytes = TextureBlockOutputBytes(one.format, 25, 13, 3);
+        const uint64 blocks = ((25 + one.edge - 1) / one.edge) * ((13 + one.edge - 1) / one.edge);
+        CHECK(bytes && bytes.Value() == blocks * 16 * 3);
+    }
+
+    CHECK(!TextureBlockIsAstc(TextureBlockFormat::EacR11) &&
+          !TextureBlockIsAstc(TextureBlockFormat::Bc7));
+    auto eac = TextureBlockOutputBytes(TextureBlockFormat::EacR11, 5, 3, 1);
+    CHECK(eac && eac.Value() == 2 * 1 * 8);
+    uint8 block[16];
+    memset(block, 0xAB, sizeof(block));
+    uint8 texels[TextureBlockRgbaBytes];
+    memset(texels, 0x5A, sizeof(texels));
+    DecodeTextureBlock(TextureBlockFormat::Astc6x6, block, texels);
+    bool zero = true;
+    for (const uint8 value : texels) {
+        zero = zero && value == 0;
+    }
+
+    CHECK(zero);
 }
 
 } // namespace texture_block_decode_tests_file

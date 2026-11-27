@@ -1,5 +1,6 @@
 #pragma once
 
+#include "JoltBodyBuild.h"
 #include "JoltLayers.h"
 #include "JoltResponseSets.h"
 #include "JoltRuntime.h"
@@ -77,6 +78,9 @@ public:
     Result<void> SetBodyGeometry(PhysicsBodyHandle body,
                                  const BodyGeometry& geometry) noexcept override;
     void SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept override;
+    bool ComputePenetration(PhysicsBodyHandle body, const CollisionShape& shape,
+                            const Vec3d& position, const Quatd& rotation,
+                            MtdResult& out) const noexcept override;
     Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept override;
     Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                            const QueryParams& params, TraceMode mode, HitResult* first,
@@ -151,6 +155,8 @@ private:
         BodyGeometry geometry;
         Vec3d scale = Vec3d::One();
         bool updateMassOnShapeChange = true;
+        // 질량 계산 입력이다(형상을 바꿀 때 UE 질량 규칙으로 다시 계산 — 7.1.15절).
+        BodyMassValues mass;
         // 결과 목록에 이미 있는지다(중복 방지).
         bool pendingResult = false;
         // 시뮬레이션 접촉 hit를 모으는지다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
@@ -384,6 +390,14 @@ private:
     uint64 lostContactHits_ = 0;
     // 접촉 hit 문턱(cm/s — PhysicsSettings::minDeltaVelocityForHitEvents)이다.
     double minDeltaVelocityForHitEvents_ = 0.0;
+    // body 형상·값을 정하는 장면 설정이다(7.1.15절): 상자 margin, 각속도 상한(rad/s — body가
+    // 덮어쓰지 않을 때), 선속도 상한(m/s).
+    BodyShapeOptions shapeOptions_;
+    float maxAngularVelocityRadians_ = 0.0f;
+    float maxLinearVelocityMeters_ = 0.0f;
+    // 반발 문턱(cm/s² — 물리 설정)과 그 값을 Jolt에 넣은 step dt(초 — 0이면 아직)다.
+    double restitutionThreshold_ = 0.0;
+    float restitutionStepSeconds_ = 0.0f;
     // 질의 All이 모으는 임시 목록이다(재사용 — 질의는 게임 thread에서 하나씩).
     mutable Array<QueryHitRecord> queryHits_;
     bool simulates_ = false;

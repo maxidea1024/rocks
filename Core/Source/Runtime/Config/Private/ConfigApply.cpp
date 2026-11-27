@@ -293,7 +293,7 @@ Result<void> SectionApplier::WriteField(WriteSession& session, JsonValue value, 
     case ValueKind::Set:
         if (value.IsObject()) {
             // byte 배열(`Array<uint8>`)의 값은 Base64 문자열 하나라 원소 단위 배열 연산이 없다
-            // (Docs/Design/CurveData.ko.md 17.3절 B5).
+            // (Docs/Design/CurveData/README.ko.md 17.3절 B5).
             if (::rocks::detail::IsByteArrayField(field)) {
                 if (auto reported =
                         Diagnose(ConfigDiagnosticCode::InvalidArrayOperation, &at,
@@ -872,8 +872,8 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
                                             const Array<OffsetOrigin>* map, JsonValue original,
                                             const JsonPosition* fallback,
                                             Array<String>* paths) noexcept {
-    // 묶음 진단(준비 실패·게시 전 struct 검증 hook 거부 — Docs/Design/CurveData.ko.md 17.2절)을
-    // 설정 진단으로 옮긴다.
+    // 묶음 진단(준비 실패·게시 전 struct 검증 hook 거부 —
+    // Docs/Design/CurveData/README.ko.md 17.2절)을 설정 진단으로 옮긴다.
     const auto reportText = [&]() noexcept -> Result<bool> {
         failed_ = true;
         for (usize index = 0; index < diagnostics.Count(); ++index) {

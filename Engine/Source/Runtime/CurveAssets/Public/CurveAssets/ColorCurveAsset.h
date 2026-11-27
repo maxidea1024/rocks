@@ -40,6 +40,16 @@ public:
         return EvaluateUnadjustedColorCurve(r, g, b, a, time);
     }
 
+    // 쿠킹용 결정적 판이다(설계 2.4.5절 — atlas 굽기·머티리얼 상수). Evaluate·EvaluateUnadjusted와
+    // 같은 식이고 수학만 결정적이다(호스트와 무관한 비트, 런타임 판과 몇 ulp 다를 수 있다).
+    LinearColor EvaluateDeterministic(float time) const noexcept {
+        return EvaluateAdjustedColorCurveDeterministic(r, g, b, a, Adjustments(), time, false);
+    }
+
+    LinearColor EvaluateUnadjustedDeterministic(float time) const noexcept {
+        return EvaluateUnadjustedColorCurveDeterministic(r, g, b, a, time);
+    }
+
     // a에 키가 있는지다(UE HasAnyAlphaKeys).
     bool HasAlphaKeys() const noexcept {
         return a.KeyCount() > 0;

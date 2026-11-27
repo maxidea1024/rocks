@@ -5,8 +5,8 @@
 #include <Platform/PlatformMath.h>
 #include <TestSupport/Test.h>
 
-// 커브 평가의 독립 고정 벡터다(Docs/Design/CurveData.ko.md 5절·16절 — UE 참조 코드를 거치지 않은 손
-// 계산 기대값). 계산 과정은 사례마다 주석에 적었다. 빈 커브·키 하나·같은 시간 키, 외삽 5종,
+// 커브 평가의 독립 고정 벡터다(Docs/Design/CurveData/README.ko.md 5절·16절 — UE 참조 코드를 거치지
+// 않은 손 계산 기대값). 계산 과정은 사례마다 주석에 적었다. 빈 커브·키 하나·같은 시간 키, 외삽 5종,
 // Constant·Linear·Cubic 구간, 가중 접선이 비가중과 같은 곡선이 되는 사례, PlainCurve 경계 차이,
 // NaN·±Inf, double 재배치로 가는 큰 순환 시간.
 using namespace rocks;

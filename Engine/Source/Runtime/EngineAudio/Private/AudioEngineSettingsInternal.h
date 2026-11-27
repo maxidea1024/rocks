@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ControlBatch.h"
+
 #include <Base/Types.h>
 #include <Config/CVarHandle.h>
 #include <Core/Diagnostics/LogCategory.h>
@@ -34,6 +36,23 @@ extern cvar::BootCVar<int32> StreamRingFramesVar;
 extern cvar::BootCVar<int32> StreamMaxStreamsVar;
 extern cvar::CVar<int32> StreamDefaultLoadingVar;
 extern cvar::CVar<float> ConcurrencyMinDistanceDeltaVar;
+extern cvar::CVar<int32> FocusInitializeOnFirstUpdateVar;
+extern cvar::CVar<float> OcclusionCheckIntervalVar;
+extern cvar::CVar<int32> OcclusionDisableVar;
+extern cvar::CVar<int32> OcclusionFilterScaleVar;
+extern cvar::CVar<int32> VirtualEnabledVar;
+extern cvar::CVar<int32> VirtualAllowPlayWhenSilentVar;
+extern cvar::CVar<float> VirtualUpdateMinVar;
+extern cvar::CVar<float> VirtualUpdateMaxVar;
+extern cvar::CVar<float> VirtualPerfDistanceVar;
+extern cvar::CVar<float> VirtualForceUpdateDistanceVar;
+extern cvar::CVar<float> VirtualMaxWorldDistanceVar;
+
+// audio.virtual.updatemin·updatemax의 상한(초)이다.
+inline constexpr float MaxVirtualUpdateSeconds = 60.0f;
+
+// audio.virtual.* CVar 값을 묶음 값으로 모은다(설정 문맥이 있을 때만 부른다).
+VirtualizationSettings VirtualizationFromSettings() noexcept;
 
 } // namespace engine_audio_detail
 

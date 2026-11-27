@@ -1,0 +1,65 @@
+// UI 둥근 상자 셰이더다(Docs/Design/UiToolkit 9.1절 UW3a, 14장 5절 — UE FSlateRoundedBoxBrush,
+// SlateShaderCommon.ush 69–119행 GetRoundedBoxElementColorInternal과 같은 식). 채움색은 정점 색,
+// 외곽선은 상자 안쪽에 그린다. 출력은 straight 알파다(SrcAlpha 블렌드 — UE와 같다).
+//
+// 그리기 상수: screen(화면 변환), params = (0, 외곽선 두께, 상자 로컬 크기 x, y),
+// radii = 모서리 반경(왼쪽 위·오른쪽 위·오른쪽 아래·왼쪽 아래), outline = 외곽선 색(linear).
+
+struct UiRoundedBoxConstants {
+    float4 screen;
+    float4 params;
+    float4 radii;
+    float4 outline;
+};
+
+ROCKS_ROOT_CONSTANTS(UiRoundedBoxConstants, Draw);
+
+struct UiRoundedBoxInput {
+    float2 position : ATTRIBUTE0;
+    float4 color : ATTRIBUTE1;
+    float2 uv : ATTRIBUTE2;
+};
+
+struct UiRoundedBoxOutput {
+    float4 position : SV_Position;
+    float2 uv : TEXCOORD0;
+    float4 color : TEXCOORD1;
+};
+
+UiRoundedBoxOutput UiRoundedBoxVertex(UiRoundedBoxInput input) {
+    UiRoundedBoxOutput output;
+    output.position = float4(input.position * Draw.screen.xy + Draw.screen.zw, 0.0, 1.0);
+    output.uv = input.uv;
+    output.color = input.color;
+    return output;
+}
+
+// 둥근 사각형 거리다. 모서리 사분면 밖(곧은 변)은 변까지의 거리를 쓴다(반경 ≈ 두께일 때의 보정 —
+// UE와 같다).
+float RoundedBoxDistance(float2 position, float2 center, float radius, float inset) {
+    float2 p = abs(position - center) - (center - (radius + inset));
+    return (p.x <= 0.0 || p.y <= 0.0) ? max(p.x - radius, p.y - radius) : length(p) - radius;
+}
+
+float4 UiRoundedBoxPixel(UiRoundedBoxOutput input) : SV_Target0 {
+    const float2 size = Draw.params.zw;
+    const float thickness = Draw.params.y;
+    const float2 position = size * input.uv;
+    const float2 center = size * 0.5;
+    // UV 사분면으로 반경을 고른다(x = 왼쪽 위, y = 오른쪽 위, z = 오른쪽 아래, w = 왼쪽 아래).
+    const float2 quadrant = step(input.uv, float2(0.5, 0.5));
+    const float top = lerp(Draw.radii.y, Draw.radii.x, quadrant.x);
+    const float bottom = lerp(Draw.radii.z, Draw.radii.w, quadrant.x);
+    const float radius = lerp(bottom, top, quadrant.y);
+    const float outer = RoundedBoxDistance(position, center, radius, 0.0);
+    const float inner = RoundedBoxDistance(position, center, max(radius - thickness, 0.0), thickness);
+    const float borderCoverage = smoothstep(1.0, -1.0, outer);
+    const float fillCoverage = smoothstep(0.5, -0.5, inner);
+    const float4 fill = input.color;
+    const float4 border = Draw.outline;
+    float4 color = thickness > radius ? fill : border;
+    color.a = 0.0;
+    color = lerp(color, border, borderCoverage);
+    color = lerp(color, fill, fillCoverage);
+    return color;
+}

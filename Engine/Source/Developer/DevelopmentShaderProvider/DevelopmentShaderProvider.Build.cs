@@ -17,9 +17,11 @@ public sealed class DevelopmentShaderProvider : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["RenderBase", "Core"];
+    // Engine: the "Shaders" pending work kind (CountedPendingWork) that the module registers with the engine's pending work registry service
+    // (Docs/Design/ProgressReporting section 8 PG5). Progress: the compile progress tasks and counters.
+    protected override string[] PublicDependencies => ["RenderBase", "Engine", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
     protected override string[] PrivateDependencies => ["ShaderCompiler", "ShaderCompilerCommon", "ShaderCore", "AssetNugget", "ObjectRuntime", "Task", "HostConfig",
-        "ModuleLoader", "PlatformBase", "Config"];
+        "ModuleLoader", "PlatformBase", "Config", "Progress", "Localization"];
 }

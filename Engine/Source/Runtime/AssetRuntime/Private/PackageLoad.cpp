@@ -30,6 +30,9 @@ ObjectGraphLoadOptions StageOptions(const PackageLoadOptions& options,
         // 에디터 패키지는 더 새 데이터를 읽기 전용으로 연다(모르는 필드는 진단 후 건너뛰기).
         load.policy.unknownField = UnknownFieldPolicy::SkipAndReport;
         load.policy.newerVersion = NewerVersionPolicy::LoadNewerSkippingUnknown;
+        // 풀리지 않은 이벤트 바인딩은 보존해 다시 저장할 때 잃지 않는다(Docs/Design/
+        // EventReflection.ko.md ED24 — 쿠킹 데이터는 쿠킹이 거부했으므로 없다).
+        load.keepUnresolvedEventBindings = true;
     }
 
     return load;
@@ -143,6 +146,9 @@ Result<void> PackageLoadHooks::Report(const FieldDiagnostic& diagnostic) noexcep
         return cooked_ ? Result<void>::Failure(ErrorCode::CorruptData) : Result<void>::Success();
     case FieldDiagnosticKind::EventBindingDropped:
         ++droppedEventBindings;
+        return Result<void>::Success();
+    case FieldDiagnosticKind::EventBindingUnresolved:
+        ++unresolvedEventBindings;
         return Result<void>::Success();
     default:
         return Result<void>::Success();

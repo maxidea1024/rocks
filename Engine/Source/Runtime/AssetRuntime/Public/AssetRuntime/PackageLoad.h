@@ -55,6 +55,8 @@ public:
     // Commit 뒤 다시 만들지 못해 버린 이벤트 바인딩 수다(EventBindingDropped — Docs/Design/
     // EventReflection.ko.md ED22).
     uint32 droppedEventBindings = 0;
+    // 에디터 패키지가 미해결 레코드로 보존한 이벤트 바인딩 수다(EventBindingUnresolved — ED24).
+    uint32 unresolvedEventBindings = 0;
     // 모은 present 경로다: i번째는 노드 위치 presentObjects[i]와 필드 ID
     // presentIds[presentStarts[i] .. + presentLengths[i]).
     Array<uint32> presentObjects;
@@ -180,8 +182,8 @@ public:
 
     // Commit 뒤 이 패키지 그래프의 이벤트 바인딩을 다시 만든다(ObjectGraphStage::BindEvents —
     // Docs/Design/EventReflection.ko.md ED21). InstantiatePackages 뒤 transaction.Commit()이
-    // 성공하면 패키지마다 한 번 부른다. 버린 바인딩 수는 DroppedEventBindings다. 반환: 만든 바인딩
-    // 수.
+    // 성공하면 패키지마다 한 번 부른다. 버린 바인딩 수는 DroppedEventBindings, 미해결 레코드로
+    // 보존한 수(에디터 패키지 — ED24)는 UnresolvedEventBindings다. 반환: 만든 바인딩 수.
     //
     // 사용 예:
     //   if (auto committed = transaction.Commit(handles, roots); committed) {
@@ -196,6 +198,12 @@ public:
     // BindEvents가 버린 이벤트 바인딩 수다(함수 없음·서명 다름 등 — 경고로 알린다).
     uint32 DroppedEventBindings() const noexcept {
         return hooks_.droppedEventBindings;
+    }
+
+    // BindEvents가 미해결 레코드로 보존한 이벤트 바인딩 수다(에디터 패키지 — 다시 저장하면 그대로
+    // 쓰이고 쿠킹은 거부한다, 경고로 알린다).
+    uint32 UnresolvedEventBindings() const noexcept {
+        return hooks_.unresolvedEventBindings;
     }
 
     // 그래프 Stage다(InstantiatePackages가 쓴다).

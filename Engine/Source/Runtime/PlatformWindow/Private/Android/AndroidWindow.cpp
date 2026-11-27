@@ -23,7 +23,8 @@
 
 // Android 창이다(Docs/Design/AndroidPlatform.ko.md 4·5절). 앱의 그 창 하나이며, Launch 액티비티
 // 층의 listener로 창·포커스·입력 큐 콜백(UI 스레드)을 받는다. 입력은 이 창이 띄운 입력 스레드의
-// looper에서 읽어 고정 크기 큐에 넣고, 게임 스레드의 PumpEvents가 호스트 InputQueue로 옮긴다.
+// looper에서 읽어 고정 크기 큐에 넣고, 게임 스레드의 TakeEvents가 호스트 InputQueue로 옮긴다. 넣을
+// 때마다 펌프 수준 대기(WaitForMessages)를 깨운다(Docs/Design/UiToolkit 19.2절).
 //
 // 터치는 손가락마다 TouchBegan·TouchMoved·TouchEnded로 넘기고, 손가락 번호는 TouchIndexAllocator가
 // OS pointerId에 배정한다(Docs/Design/TouchInput.ko.md 3·4.2절). 마우스(AINPUT_SOURCE_MOUSE)는
@@ -533,6 +534,26 @@ bool IsGamepadSource(int32_t source) noexcept {
 
 } // namespace
 
+namespace {
+
+// 펌프 수준 대기의 신호다. 입력 스레드·UI 스레드가 상태를 바꾸면 올리고, 게임 스레드의
+// WaitForMessages가 지난 대기 뒤 신호가 없을 때만 기다린다(창 mutex → 이 잠금 순서).
+Mutex messageGate;
+ConditionVariable messageSignal;
+uint64 messageSignals = 0;
+uint64 consumedSignals = 0;
+
+void SignalMessages() noexcept {
+    {
+        LockGuard guard(messageGate);
+        ++messageSignals;
+    }
+
+    messageSignal.NotifyAll();
+}
+
+} // namespace
+
 class AndroidWindow final : public Window, public launch::android::ActivityListener {
 public:
     AndroidWindow() noexcept = default;
@@ -577,7 +598,7 @@ public:
 
     // --- Window(게임 스레드) ---
 
-    void PumpEvents(input::InputQueue& queue) noexcept override {
+    void TakeEvents(input::InputQueue& queue) noexcept override {
         LockGuard guard(mutex_);
         for (usize index = 0; index < pendingCount_; ++index) {
             (void)queue.Push(pending_[index]);
@@ -688,6 +709,8 @@ public:
     // --- ActivityListener(UI 스레드) ---
 
     void OnWindowCreated(ANativeWindow* window) noexcept override {
+        // 게임 lane의 펌프 수준 대기를 깨운다(창 상태가 바뀌었다).
+        SignalMessages();
         ANativeWindow_acquire(window);
         LockGuard guard(mutex_);
         if (window_ != nullptr) {
@@ -703,6 +726,8 @@ public:
     // 창 파괴 gate(AD3): 게임 스레드가 surface를 놓았다고 알릴 때까지(최대 4초) 기다린 뒤 창을
     // 놓는다.
     void OnWindowDestroyed(ANativeWindow* window) noexcept override {
+        // 게임 lane의 펌프 수준 대기를 깨운다(창 상태가 바뀌었다).
+        SignalMessages();
         {
             LockGuard guard(mutex_);
             surfaceReleased_.Reset();
@@ -724,6 +749,8 @@ public:
     }
 
     void OnWindowResized(ANativeWindow* window) noexcept override {
+        // 게임 lane의 펌프 수준 대기를 깨운다(창 상태가 바뀌었다).
+        SignalMessages();
         LockGuard guard(mutex_);
         if (window_ == window) {
             UpdateSize(window);
@@ -731,6 +758,8 @@ public:
     }
 
     void OnFocusChanged(bool focused) noexcept override {
+        // 게임 lane의 펌프 수준 대기를 깨운다(창 상태가 바뀌었다).
+        SignalMessages();
         GamepadStore().SetFocused(focused);
         LockGuard guard(mutex_);
         focused_ = focused;
@@ -780,10 +809,11 @@ private:
     void PushLocked(const input::InputEvent& event) noexcept {
         if (pendingCount_ == PendingEventCapacity) {
             overflowed_ = true;
-            return;
+        } else {
+            pending_[pendingCount_++] = event;
         }
 
-        pending_[pendingCount_++] = event;
+        SignalMessages();
     }
 
     // 입력 스레드다. looper를 만들고, 붙이기·떼기 요청과 입력 큐 이벤트를 처리한다.
@@ -1412,7 +1442,7 @@ private:
     uint32 height_ = 0;
     ANativeWindow* window_ = nullptr;
     AInputQueue* attachRequest_ = nullptr;
-    // 손가락 번호 배정이다(입력 스레드가 배정하고 게임 스레드 PumpEvents가 프레임 경계를 알린다).
+    // 손가락 번호 배정이다(입력 스레드가 배정하고 게임 스레드 TakeEvents가 프레임 경계를 알린다).
     input::TouchIndexAllocator touches_;
     AInputQueue* detachRequest_ = nullptr;
     // 창 파괴 gate다. 게임 스레드가 AcknowledgeSurfaceLost로, 소멸자가 closing으로 연다.
@@ -1443,6 +1473,11 @@ private:
     AInputQueue* queue_ = nullptr;
 };
 
+bool Window::SupportsFrame(WindowFrame frame) noexcept {
+    // 직접 그린 창 테두리는 데스크톱 Windows만 지원한다.
+    return frame == WindowFrame::System;
+}
+
 Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc,
                                          WindowCreateReport* report) noexcept {
     auto fail = [report](ErrorCode error) noexcept {
@@ -1456,6 +1491,10 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
 
     if (desc.width == 0 || desc.height == 0 || !desc.title.IsValidUtf8()) {
         return fail(ErrorCode::InvalidArgument);
+    }
+
+    if (!SupportsFrame(desc.frame)) {
+        return fail(ErrorCode::Unsupported);
     }
 
     // APK가 아닌 실행 파일(adb 시험)에는 액티비티가 없다.
@@ -1493,6 +1532,37 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
 
     return Result<UniquePtr<GamepadBackend>>::Success(
         UniquePtr<GamepadBackend>(Move(created.Value())));
+}
+
+// Android에는 다른 스레드가 보낸 창 메시지가 없다(입력은 입력 스레드가 넘기고 TakeEvents가 옮긴다).
+// 이 플랫폼의 DPI는 창 backend가 따로 정한다(Android density — 그 플랫폼 단계).
+bool EnableHighDpiAwareness() noexcept {
+    return false;
+}
+
+void PumpSentMessages() noexcept {
+}
+
+// OS 메시지는 입력 스레드·UI 스레드가 받아 창 큐에 넘기므로 게임 lane이 펌프할 것이 없다.
+void PumpMessages() noexcept {
+}
+
+void WaitForMessages(uint32 milliseconds) noexcept {
+    LockGuard guard(messageGate);
+    if (messageSignals == consumedSignals) {
+        (void)messageSignal.Wait(messageGate, milliseconds);
+    }
+
+    consumedSignals = messageSignals;
+}
+
+bool HasPendingWindowEvents() noexcept {
+    LockGuard guard(messageGate);
+    return messageSignals != consumedSignals;
+}
+
+void WakeMessageWait() noexcept {
+    SignalMessages();
 }
 
 DesktopSessionState QueryDesktopSessionState() noexcept {

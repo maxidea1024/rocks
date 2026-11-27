@@ -55,4 +55,4 @@ UE `UTrueTypeFontFactory`(`TTF`·`TTI`) 대응. UE는 **설치된 시스템 글�
 
 ### 5.5 편집기(UiToolkit UT4 이후)
 
-UE `FontEditor` 모듈 대응(FontFace 편집기, 조합 글꼴 편집기 `SCompositeFontEditor`, 미리보기 viewport, FontFace 세부 정보, 미리 구운 글꼴 페이지 내보내기·다시 굽기 — `Editor/FontEditor/Private`)은 [UI 툴킷](../UiToolkit.ko.md) UT4의 자산 편집기 host 위에 만든다. 이 문서가 정하는 것은 편집기가 쓸 데이터 API(4장)와 미리보기용 측정·래스터 API(6장)다.
+UE `FontEditor` 모듈 대응(FontFace 편집기, 조합 글꼴 편집기 `SCompositeFontEditor`, 미리보기 viewport, FontFace 세부 정보, 미리 구운 글꼴 페이지 내보내기·다시 굽기 — `Editor/FontEditor/Private`)은 [UI 툴킷](../UiToolkit/README.ko.md) UT4의 자산 편집기 host 위에 만든다. 이 문서가 정하는 것은 편집기가 쓸 데이터 API(4장)와 미리보기용 측정·래스터 API(6장)다.

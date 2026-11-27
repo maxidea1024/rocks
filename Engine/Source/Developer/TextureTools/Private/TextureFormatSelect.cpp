@@ -145,14 +145,16 @@ FormatName UncompressedFallback(const TextureFormatRequest& request) noexcept {
     return FormatName::Bgra8;
 }
 
-// 압축을 끄는 조건이다(Texture.cpp 4237–4263 — Android는 TC4 전까지 BC를 내지 않는다, TD11).
+// 압축을 끄는 조건이다(Texture.cpp 4237–4263). Android 볼륨은 비압축이다(12.16.2 — GLES는 ETC2·EAC
+// 3D가 없고 ASTC 3D는 확장이 있어야 한다, UE의 ETC2 대체와 다르다).
 bool NoCompression(const TextureFormatRequest& request,
                    const TextureFormatTarget& target) noexcept {
     if (request.compressionNone || request.compression == TextureCompressionSettings::EditorIcon ||
         request.lodGroup == TextureGroup::ColorLookupTable ||
         request.lodGroup == TextureGroup::Bokeh ||
         request.lodGroup == TextureGroup::IESLightProfile ||
-        target.platform == GraphicsPlatform::Android) {
+        (target.platform == GraphicsPlatform::Android &&
+         request.dimension == TextureDimension::Volume)) {
         return true;
     }
 
@@ -220,8 +222,83 @@ PixelFormat LinearFormat(FormatName name) noexcept {
     }
 }
 
-TextureFormatEncoding EncodingOf(PixelFormat format) noexcept {
+// UE ini 기본 ASTC 크기 단계다(DefaultASTCQualityBySize·DefaultASTCQualityBySizeHQ — 12.17.8 3).
+// 단계 0–4는 12×12·10×10·8×8·6×6·4×4다.
+constexpr uint32 AstcSizeStepDefault = 3;
+constexpr uint32 AstcSizeStepDefaultHq = 4;
+// 노멀은 품질과 무관하게 6×6이다(UE GetQualityFormat).
+constexpr uint32 AstcSizeStepNormal = 3;
+
+PixelFormat AstcFormatOf(uint32 step) noexcept {
+    constexpr PixelFormat Formats[] = {PixelFormat::ASTC12x12Unorm, PixelFormat::ASTC10x10Unorm,
+                                       PixelFormat::ASTC8x8Unorm, PixelFormat::ASTC6x6Unorm,
+                                       PixelFormat::ASTC4x4Unorm};
+    return Formats[step];
+}
+
+// 품질 → 크기 단계다(UE GetQualityFormat — Default는 ini 기본, 그 밖은 품질 − 1).
+uint32 AstcSizeStep(TextureCompressionQuality quality, bool hq) noexcept {
+    if (quality == TextureCompressionQuality::Default) {
+        return hq ? AstcSizeStepDefaultHq : AstcSizeStepDefault;
+    }
+
+    return static_cast<uint32>(quality) - 1;
+}
+
+// Android 재대응이다(12.17.8 6 — UE AndroidTexFormat::ASTCRemap, BC5는 NormalLA, BC6H는 ASTC HDR이
+// 없어 ASTC RGB). 압축 이름이 아니면 Unknown이다.
+PixelFormat AndroidFormat(FormatName name, const TextureFormatRequest& request, bool alpha,
+                          TextureAstcMode& mode) noexcept {
+    const uint32 step = AstcSizeStep(request.compressionQuality, false);
+    switch (name) {
+    case FormatName::Dxt1:
+        mode = TextureAstcMode::Rgb;
+        return AstcFormatOf(step);
+    case FormatName::Dxt5:
+        mode = alpha ? TextureAstcMode::Rgba : TextureAstcMode::Rgb;
+        return AstcFormatOf(step);
+    case FormatName::Bc7:
+        mode = alpha ? TextureAstcMode::Rgba : TextureAstcMode::Rgb;
+        return AstcFormatOf(AstcSizeStep(request.compressionQuality, true));
+    case FormatName::Bc5:
+        mode = TextureAstcMode::NormalLa;
+        return AstcFormatOf(AstcSizeStepNormal);
+    case FormatName::Bc6h:
+        mode = TextureAstcMode::Rgb;
+        return AstcFormatOf(step);
+    case FormatName::Bc4:
+        return PixelFormat::EACR11Unorm;
+    default:
+        return PixelFormat::Unknown;
+    }
+}
+
+bool IsAstcFormat(PixelFormat format) noexcept {
     switch (format) {
+    case PixelFormat::ASTC4x4Unorm:
+    case PixelFormat::ASTC4x4UnormSrgb:
+    case PixelFormat::ASTC6x6Unorm:
+    case PixelFormat::ASTC6x6UnormSrgb:
+    case PixelFormat::ASTC8x8Unorm:
+    case PixelFormat::ASTC8x8UnormSrgb:
+    case PixelFormat::ASTC10x10Unorm:
+    case PixelFormat::ASTC10x10UnormSrgb:
+    case PixelFormat::ASTC12x12Unorm:
+    case PixelFormat::ASTC12x12UnormSrgb:
+        return true;
+    default:
+        return false;
+    }
+}
+
+TextureFormatEncoding EncodingOf(PixelFormat format) noexcept {
+    if (IsAstcFormat(format)) {
+        return TextureFormatEncoding::Astc;
+    }
+
+    switch (format) {
+    case PixelFormat::EACR11Unorm:
+        return TextureFormatEncoding::EacR11;
     case PixelFormat::BC1Unorm:
     case PixelFormat::BC1UnormSrgb:
         return TextureFormatEncoding::Bc1;
@@ -268,6 +345,8 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
     out = TextureFormatChoice{};
     if (!IsKnownCompression(request.compression) || !IsKnownSource(request.sourceFormat) ||
         request.topSizeX == 0 || request.topSizeY == 0 ||
+        static_cast<uint32>(request.compressionQuality) >
+            static_cast<uint32>(TextureCompressionQuality::Highest) ||
         static_cast<uint32>(target.platform) >= graphics::GraphicsPlatformCount ||
         target.backends >= (uint32{1} << BackendCount)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -314,15 +393,19 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
         norm16Remapped = true;
     }
 
-    // PixelFormat(sRGB 짝이 있으면 그것).
+    // PixelFormat(sRGB 짝이 있으면 그것). 7. Android는 압축 이름을 ASTC·EAC R11로 바꾼다(12.17.8 6
+    // — 2–4번 비압축 강제·4의 배수 규칙 뒤, UE GetDefaultTextureFormatName 뒤 ASTCRemap과 같은
+    // 순서).
+    TextureAstcMode astcMode = TextureAstcMode::Rgba;
     PixelFormat format = LinearFormat(name);
+    if (target.platform == GraphicsPlatform::Android && IsCompressedName(name)) {
+        format = AndroidFormat(name, request, alpha, astcMode);
+    }
+
     const PixelFormat pair = graphics::GetPixelFormatInfo(format).srgbPair;
     if (srgb && pair != PixelFormat::Unknown) {
         format = pair;
     }
-
-    // 7. 단계 사이 대체(TD11)는 TC3에서 없어졌다: BC6H·BC7은 ISPC Texture Compressor로
-    // 압축한다(12.17.6 6). Android는 TC4까지 2–4번 비압축 강제로 BC에 닿지 않는다.
 
     // 8. 샘플링 검증(TD12).
     const PixelFormatCaps required =
@@ -340,12 +423,20 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
         format = fallback;
     }
 
+    // 블록 형식인데 인코더가 없는 형식(ASTC HDR·ETC2 등 — 지금 선택·대체 표가 고르지 않는다)은
+    // 비압축 byte로 쓸 수 없으므로 거부한다.
+    if (graphics::GetPixelFormatInfo(format).compression != graphics::PixelCompression::None &&
+        EncodingOf(format) == TextureFormatEncoding::Uncompressed) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     out.pixelFormat = format;
     out.srgb = graphics::GetPixelFormatInfo(format).srgb;
     out.srgbIgnored =
         request.srgb && (prevented || (IsHdrSource(request.sourceFormat) && IsFloatFormat(format)));
     out.encoding = EncodingOf(format);
     out.alphaProfile = out.encoding == TextureFormatEncoding::Bc7 && alpha;
+    out.astcMode = out.encoding == TextureFormatEncoding::Astc ? astcMode : TextureAstcMode::Rgba;
     out.norm16Remapped = norm16Remapped;
 
     // swizzle(sampler type 계약 — CompressionSettings로만)과 채널 복제.
@@ -360,8 +451,11 @@ Result<void> Select(const TextureFormatRequest& request, const TextureFormatTarg
                    TextureSwizzle::One);
         break;
     case TextureCompressionSettings::Normalmap:
-        SetSwizzle(out, TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::Zero,
-                   TextureSwizzle::One);
+        // 형식에 달린 예외 하나(12.17.8 6): ASTC 노멀 LA는 X = R, Y = A다.
+        SetSwizzle(out, TextureSwizzle::R,
+                   out.astcMode == TextureAstcMode::NormalLa ? TextureSwizzle::A
+                                                             : TextureSwizzle::G,
+                   TextureSwizzle::Zero, TextureSwizzle::One);
         break;
     default:
         break;
@@ -386,7 +480,8 @@ bool NeedsAlpha(const TextureFormatRequest& request, const TextureFormatTarget& 
     }
 
     return opaque.pixelFormat != transparent.pixelFormat ||
-           opaque.alphaProfile != transparent.alphaProfile;
+           opaque.alphaProfile != transparent.alphaProfile ||
+           opaque.astcMode != transparent.astcMode;
 }
 
 } // namespace format_select
