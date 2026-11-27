@@ -1,9 +1,9 @@
-#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/OffscreenLayer.h>
 #include <UiCore/PaintList.h>
 
 namespace rocks::ui {
 
-Result<void> RetainerBox::Construct(Args&& args) noexcept {
+Result<void> OffscreenLayer::Construct(Args&& args) noexcept {
     auto phase = SetPhase(args.phase, args.phaseCount);
     if (!phase) {
         return phase;
@@ -17,31 +17,31 @@ Result<void> RetainerBox::Construct(Args&& args) noexcept {
     return args.content.AttachTo(*this);
 }
 
-WidgetSurface* RetainerBox::GetWidgetSurface() noexcept {
+WidgetSurface* OffscreenLayer::GetWidgetSurface() noexcept {
     return this;
 }
 
-WidgetSurfaceKind RetainerBox::SurfaceKind() const noexcept {
+WidgetSurfaceKind OffscreenLayer::SurfaceKind() const noexcept {
     return WidgetSurfaceKind::RetainedContent;
 }
 
-bool RetainerBox::WantsManagedSurface() const noexcept {
+bool OffscreenLayer::WantsManagedSurface() const noexcept {
     return true;
 }
 
-SlotHandle RetainerBox::ManagedSurface() const noexcept {
+SlotHandle OffscreenLayer::ManagedSurface() const noexcept {
     return retained_;
 }
 
-void RetainerBox::SetManagedSurface(SlotHandle texture) noexcept {
+void OffscreenLayer::SetManagedSurface(SlotHandle texture) noexcept {
     SetRetainedTexture(texture);
 }
 
-RetainerBox::RetainerBox(Allocator& allocator) noexcept
+OffscreenLayer::OffscreenLayer(Allocator& allocator) noexcept
     : SizeBox(allocator), contentCache_(allocator) {
 }
 
-Result<void> RetainerBox::TryAddChild(const SharedPtr<Element>& child) noexcept {
+Result<void> OffscreenLayer::TryAddChild(const SharedPtr<Element>& child) noexcept {
     auto added = SizeBox::TryAddChild(child);
     if (added) {
         contentCache_.Reset();
@@ -51,7 +51,7 @@ Result<void> RetainerBox::TryAddChild(const SharedPtr<Element>& child) noexcept 
     return added;
 }
 
-bool RetainerBox::RemoveChild(Element& child) noexcept {
+bool OffscreenLayer::RemoveChild(Element& child) noexcept {
     if (!SizeBox::RemoveChild(child)) {
         return false;
     }
@@ -61,7 +61,7 @@ bool RetainerBox::RemoveChild(Element& child) noexcept {
     return true;
 }
 
-Result<void> RetainerBox::SetPhase(uint32 phase, uint32 count) noexcept {
+Result<void> OffscreenLayer::SetPhase(uint32 phase, uint32 count) noexcept {
     if (count == 0 || phase >= count) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -71,11 +71,11 @@ Result<void> RetainerBox::SetPhase(uint32 phase, uint32 count) noexcept {
     return Result<void>::Success();
 }
 
-bool RetainerBox::NeedsCapture(uint64 frame) const noexcept {
+bool OffscreenLayer::NeedsCapture(uint64 frame) const noexcept {
     return requested_ || frame % phaseCount_ == phase_;
 }
 
-Result<void> RetainerBox::SetEffectTint(LinearColor tint) noexcept {
+Result<void> OffscreenLayer::SetEffectTint(LinearColor tint) noexcept {
     if (!tint.IsFinite()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -88,11 +88,11 @@ Result<void> RetainerBox::SetEffectTint(LinearColor tint) noexcept {
     return Result<void>::Success();
 }
 
-void RetainerBox::RequestRender() noexcept {
+void OffscreenLayer::RequestRender() noexcept {
     requested_ = true;
 }
 
-void RetainerBox::SetRetainedTexture(SlotHandle texture) noexcept {
+void OffscreenLayer::SetRetainedTexture(SlotHandle texture) noexcept {
     requested_ = texture.IsNull();
     if (retained_ != texture) {
         retained_ = texture;
@@ -100,15 +100,15 @@ void RetainerBox::SetRetainedTexture(SlotHandle texture) noexcept {
     }
 }
 
-Span<const SharedPtr<Element>> RetainerBox::PaintChildren() const noexcept {
+Span<const SharedPtr<Element>> OffscreenLayer::PaintChildren() const noexcept {
     return retained_.IsNull() ? ActiveChildren() : Span<const SharedPtr<Element>>{};
 }
 
-Span<const SharedPtr<Element>> RetainerBox::HitTestChildren() const noexcept {
+Span<const SharedPtr<Element>> OffscreenLayer::HitTestChildren() const noexcept {
     return ActiveChildren();
 }
 
-Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
+Result<void> OffscreenLayer::RecordContent(PaintList& output) const noexcept {
     const auto* child = ChildAt(0);
     if (!child) {
         return Result<void>::Success();
@@ -153,7 +153,7 @@ Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
     return Result<void>::Success();
 }
 
-Result<void> RetainerBox::OnPaint(PaintList& list, int32 layer) const noexcept {
+Result<void> OffscreenLayer::OnPaint(PaintList& list, int32 layer) const noexcept {
     if (retained_.IsNull()) {
         return Result<void>::Success();
     }

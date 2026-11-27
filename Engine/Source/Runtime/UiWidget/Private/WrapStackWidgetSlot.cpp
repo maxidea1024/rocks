@@ -1,18 +1,18 @@
-#include <UiWidget/WrapBoxWidgetSlot.h>
+#include <UiWidget/WrapStackWidgetSlot.h>
 
 #include "UpdateLiveWidgetSlot.h"
-#include <UiWidget/WrapBoxWidget.generated.h>
+#include <UiWidget/WrapStackWidget.generated.h>
 #include <UiFramework/Layout/WrapStack.h>
 
 namespace rocks::ui {
 
-WrapSlot WrapBoxWidgetSlot::WrapLayout() const noexcept {
+WrapSlot WrapStackWidgetSlot::WrapLayout() const noexcept {
     return {forceNewLine_, fillEmptySpace_, fillLineWhenSizeLessThan_, Layout()};
 }
 
-Result<void> WrapBoxWidgetSlot::UpdateLayout(ObjectRegistry& objects,
-                                             const WrapSlot& layout) noexcept {
-    auto applied = UpdateLiveWidgetSlot<WrapBoxWidget, WrapStack>(
+Result<void> WrapStackWidgetSlot::UpdateLayout(ObjectRegistry& objects,
+                                               const WrapSlot& layout) noexcept {
+    auto applied = UpdateLiveWidgetSlot<WrapStackWidget, WrapStack>(
         objects, *this, [&layout](WrapStack& panel, Element& child) noexcept {
             return panel.SetSlot(child, layout);
         });
@@ -23,7 +23,7 @@ Result<void> WrapBoxWidgetSlot::UpdateLayout(ObjectRegistry& objects,
     return Configure(layout);
 }
 
-Result<void> WrapBoxWidgetSlot::Configure(const WrapSlot& layout) noexcept {
+Result<void> WrapStackWidgetSlot::Configure(const WrapSlot& layout) noexcept {
     if (!layout.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -39,20 +39,20 @@ Result<void> WrapBoxWidgetSlot::Configure(const WrapSlot& layout) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> WrapBoxWidgetSlot::SetNewLine(ObjectRegistry& objects, bool value) noexcept {
+Result<void> WrapStackWidgetSlot::SetNewLine(ObjectRegistry& objects, bool value) noexcept {
     auto layout = WrapLayout();
     layout.forceNewLine = value;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> WrapBoxWidgetSlot::SetFillEmptySpace(ObjectRegistry& objects, bool value) noexcept {
+Result<void> WrapStackWidgetSlot::SetFillEmptySpace(ObjectRegistry& objects, bool value) noexcept {
     auto layout = WrapLayout();
     layout.fillEmptySpace = value;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> WrapBoxWidgetSlot::SetFillSpanWhenLessThan(ObjectRegistry& objects,
-                                                        float value) noexcept {
+Result<void> WrapStackWidgetSlot::SetFillSpanWhenLessThan(ObjectRegistry& objects,
+                                                          float value) noexcept {
     auto layout = WrapLayout();
     layout.fillLineWhenSizeLessThan = value;
     return UpdateLayout(objects, layout);

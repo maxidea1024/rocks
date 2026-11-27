@@ -7,7 +7,7 @@
 | 항목 | 지금(Rocks) | UE 5.8 | 결과 차이 |
 |---|---|---|---|
 | 시계 | 툴팁·타이머만 함수 포인터로 주입(`SetToolTipClock`·`SetTimerClock`). `ActivityIndicator`(자기 `Clock`)·`ProgressBar`·`Carousel`·`ViewportWorld`는 `platform::MonotonicNanoseconds`를 직접 읽는다. Carousel·ProgressBar는 그리기 밖(`Show`·`SetMarquee`·속성 갱신·Arrange)에서도 읽는다 | `FSlateApplication::TickTime`이 프레임마다 `CurrentTime`을 실제 시계로 정하고, 간격이 1/8초를 넘으면 `LastTickTime`만 당긴다(SlateApplication.cpp 1675–1686행). 위젯은 `FPaintArgs::GetCurrentTime`·`GetDeltaTime`(PaintArgs.h 71–79행)과 `GetCurrentTime()`(active timer 등록 — SWidget.cpp 1896–1898행)으로 읽는다 | 같은 프레임 안에서 부품마다 시각이 다르다. 시험·snapshot이 실제 시간에 묶인다(18장 Widgets 탭 기준 불일치) |
-| hit grid 생성 | 그리기가 끝난 뒤 `HitGrid::Update`가 `ActiveChildren` 순서로 트리를 따로 돈다. clip과 겹치지 않는 Element는 뺀다 | 그리기 중 `SWidget::Paint`가 `AddWidget(this, 0, LayerId, 정렬 순서)`로 등록한다(SWidget.cpp 1577행). cache 패널·retainer는 자기 grid를 `AddGrid`로 끼운다(SInvalidationPanel.cpp 385행, SRetainerWidget.cpp 685행, HittestGrid.cpp 766행) | `PaintChildren`을 바꾼 Element(`RetainerBox`·`Carousel`)는 hit 대상과 그리기 대상이 어긋난다. 그리기 정렬(DrawBatch의 layer·순번)과 hit 순서도 다를 수 있다 |
+| hit grid 생성 | 그리기가 끝난 뒤 `HitGrid::Update`가 `ActiveChildren` 순서로 트리를 따로 돈다. clip과 겹치지 않는 Element는 뺀다 | 그리기 중 `SWidget::Paint`가 `AddWidget(this, 0, LayerId, 정렬 순서)`로 등록한다(SWidget.cpp 1577행). cache 패널·retainer는 자기 grid를 `AddGrid`로 끼운다(SInvalidationPanel.cpp 385행, SRetainerWidget.cpp 685행, HittestGrid.cpp 766행) | `PaintChildren`을 바꾼 Element(`OffscreenLayer`·`Carousel`)는 hit 대상과 그리기 대상이 어긋난다. 그리기 정렬(DrawBatch의 layer·순번)과 hit 순서도 다를 수 있다 |
 | 비활성 hit | 비활성 Element와 그 하위 트리를 grid에서 뺀다. `Accepts`·`CandidateFromTop`·대체 `Element::HitTest`가 `IsInputPathActive`로 조상 비활성도 거른다(Element.cpp 159행) | 비활성도 등록하고, 경로를 루트부터 내려가 첫 비활성 위젯에서 자른다(HittestGrid.cpp 235–246행). 툴팁은 `bIgnoreEnabledStatus = true`로 찾는다(SlateUser.cpp 1351행) | 비활성 버튼을 누르면 그 뒤 형제가 맞는다(UE는 비활성 버튼의 부모가 받는다). 비활성 위젯의 툴팁이 안 뜬다 |
 | 속성 갱신 | `UpdateBoundAttributes`가 Hidden·Collapsed 하위 트리를 통째로 건너뛴다. 보이기는 묶을 수 없다 | 자식마다 보이기 속성을 먼저 갱신하고, Collapsed가 아니면(Hidden 포함) 나머지 속성을 갱신한다(SWidget.cpp 1846–1859행) | Hidden(공간 유지) Element의 원하는 크기가 낡는다. 보이기를 묶을 수 없다 |
 | navigation 변환 | 아무 Element도 키를 처리하지 않으면 `InputAdapter`가 방향키·Tab을 navigation으로 바꾼다(InputAdapter.cpp 84–106행). `ScreenInputRouter`도 D-pad를 바로 `Navigate`하고 East를 뒤로, South를 Enter로 합성한다(UiScreens ScreenInputRouter.cpp 120–190행). 초점이 없으면 첫 후보에 초점을 준다(Navigation.cpp 66행) | 초점 가능한 위젯의 기본 `OnKeyDown`이 bubble 중에 `FNavigationConfig`로 키를 방향으로 바꿔 `FReply::SetNavigation`을 돌려준다(SWidget.cpp 415–427행, NavigationConfig.cpp 13–38·59–81행). 그 뒤 초점 경로의 `OnNavigation`이 경계 규칙을 정한다. 처리 안 된 키에 대체 경로는 없다(SlateApplication.cpp 5045–5072행) | 초점 Element의 조상이 방향키를 먼저 받는다(UE는 `OnNavigation`으로만 본다). 키 대응을 사용자별로 바꿀 수 없다 |
@@ -53,7 +53,7 @@
   - 대신 grid를 **그리기와 같은 순서로 걷는** 방식으로 만든다. 걷기는 plan revision이 바뀐 프레임의 그리기 직후에 한다(지금 규칙).
   - 결과는 UE와 같다. Rocks의 layer는 그리기 순서를 따라 줄지 않기 때문이다: Element의 layer는 부모가 지금까지 쓴 가장 높은 layer에서 시작하고(Element.cpp `PaintContents`), 형제는 그보다 낮아지지 않는다. 그래서 `DrawBatch`의 (layer, 순번) 정렬(DrawBatch.cpp 104–111행)은 그리기 순서와 같고, 그리기 순서로 걸은 grid의 위·아래가 화면의 위·아래와 같다.
 - **걷는 자식.** `Element::HitTestChildren()`이다. 기본값은 `PaintChildren()`(그리기 자식)이다. 지금 `ActiveChildren` 대신 이것을 쓰므로, Carousel이 슬라이드 중 그리는 두 쪽만 맞는다(UE와 같이 보이는 것만).
-  - `RetainerBox`는 보관 텍스처로 그리는 동안 `PaintChildren`이 비지만(RetainerBox.cpp 103–104행), 자식은 같은 자리에 보인다. 그래서 `HitTestChildren`을 활성 자식으로 재정의한다(UE `SRetainerWidget`이 자기 grid를 `AddGrid`로 붙이는 것과 같은 효과).
+  - `OffscreenLayer`는 보관 텍스처로 그리는 동안 `PaintChildren`이 비지만(OffscreenLayer.cpp 103–104행), 자식은 같은 자리에 보인다. 그래서 `HitTestChildren`을 활성 자식으로 재정의한다(UE `SRetainerWidget`이 자기 grid를 `AddGrid`로 붙이는 것과 같은 효과).
   - 그리기 자식을 바꾸는 Element(재정의하는 곳)는 바뀔 때 plan revision을 올려야 한다(grid를 다시 걷게).
 - **등록 조건(지금 `Record`와 같다).**
   - Hidden·Collapsed는 하위 트리까지 뺀다.
@@ -230,7 +230,7 @@
 | 단계 | 범위 | 완료 판정 |
 |---|---|---|
 | UW8a | `UiHostServices` 묶음(20.2절), `ui::Clock`·`ManualClock`, `BeginFrame`(delta 자름), 프레임 시각을 그리기 안팎에서 읽기, 애니메이션 부품·툴팁·타이머·`ViewportWorld` 이관, 월드 위젯 World 시간, UiDemo 수동 시계 | 시계 전진 시험(툴팁·타이머·throbber 위상, 긴 간격 자름 뒤 타이머 마감), snapshot 7탭 모두 실행마다 byte 동일 |
-| UW8b | 그리기 순서 걷기(`HitTestChildren` — 기본 그리기 자식, `RetainerBox`는 활성 자식), 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서(Overlay layer·Carousel 슬라이드), CachePanel·RetainerBox 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
+| UW8b | 그리기 순서 걷기(`HitTestChildren` — 기본 그리기 자식, `OffscreenLayer`는 활성 자식), 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서(Overlay layer·Carousel 슬라이드), CachePanel·OffscreenLayer 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
 | UW8c | `IsInputPathActive` 활성 인자 분리, 비활성 경로 자름, 툴팁·영역 지도 비활성 무시 | 비활성 버튼 클릭 → 부모, 비활성 위젯 툴팁 표시 |
 | UW8d | `BindVisibility`, 보이기 먼저 평가, Hidden 갱신 | 접힌 Element가 묶음으로 다시 보임, Hidden Element 원하는 크기 갱신 |
 | UW8e1 | `KeyReply`·`KeyEvent`, 기본 navigation 변환, `OnNavigation`·`NavigationReply`, `NavigationConfig`(키·동작), 메뉴·목록·스크롤·슬라이더 이관, `InputAdapter` 대체 변환 제거 | 조상이 방향키를 받지 않음, 초점 없음 → navigation 없음, 키 대응 교체, 메뉴·목록 키보드 회귀 없음 |

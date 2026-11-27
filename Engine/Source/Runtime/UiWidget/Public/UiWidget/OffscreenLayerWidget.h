@@ -8,10 +8,10 @@ namespace rocks::ui {
 // 연동한다. 효과 재질은 머티리얼 셰이더가 생기면 Material 참조로 더한다(UiToolkit 3.6절·9.1절
 // UW1a).
 ROCKS_CLASS()
-class ROCKS_UIWIDGET_API RetainerBoxWidget final : public ContentWidget {
+class ROCKS_UIWIDGET_API OffscreenLayerWidget final : public ContentWidget {
     ROCKS_GENERATED_BODY()
 public:
-    explicit RetainerBoxWidget(Allocator& allocator) noexcept;
+    explicit OffscreenLayerWidget(Allocator& allocator) noexcept;
 
     Result<void> SetPhase(uint32 phase, uint32 count) noexcept;
     Result<void> SetEffectTint(LinearColor tint) noexcept;

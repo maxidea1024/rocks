@@ -28,7 +28,7 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 | Lists | "List Widgets" | 16.5절 | UW4a·UW4c |
 | Layout | (없음 — Rocks 추가) | 16.6절 | UW4a·UW4c |
 | Behavior | (없음 — Rocks 추가) | Element 공통 기능과 앱 기능(16.9.2): 렌더 변환·불투명도·자르기·가시성 5종·전경색 상속·커서 11종·초점 이동 규칙·접근성 트리·타이머·속성 바인딩 | UW4a(초점 표시가 필요한 행은 UW4b) |
-| Effects | (없음 — Rocks 추가) | 표면·캐시·흐림: CachePanel(캐시 통계 레이블), RetainerBox(phase·tint), BackgroundBlur(강도·반경·저품질 대체), PostBufferUpdate(채널), Viewport(절차 생성 장면 텍스처) | UW4a |
+| Effects | (없음 — Rocks 추가) | 표면·캐시·흐림: CachePanel(캐시 통계 레이블), OffscreenLayer(phase·tint), BackgroundBlur(강도·반경·저품질 대체), PostBufferUpdate(채널), Viewport(절차 생성 장면 텍스처) | UW4a |
 | Icons | "Icons" | 등록한 SVG 아이콘 전부를 16·20·32 px로 키 문자열과 함께 보이고 tint(Foreground·Primary·Warning)를 바꿔 본다(17.4절). UE 탭은 엔진 아이콘 폴더 PNG 목록이지만 Rocks는 자체 제작 SVG 세트를 보인다 | UW4s |
 | Drag & Drop | (없음 — Rocks 추가) | 드래그·드롭 틀(9.1절 UW4g)의 견본: 목록 행 → drop 칸(형식이 맞으면 받음·안 맞으면 거부 표시), 같은 목록 안 순서 바꾸기(끼워 넣을 자리 표시), 커서 옆 장식(아이콘 + "Move"/"Copy" 문구, Ctrl로 복사 전환), 문턱(5 px) 전 놓기 = 클릭, Escape 취소, 창 밖 놓기 취소, 받은 결과 레이블 | UW4g |
 | Editor Parts | (없음 — Rocks 추가) | 16.7절 | UW4d1–UW4d3, 그 뒤 |
@@ -151,10 +151,10 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 - **텍스트**: TextLabel(줄바꿈 정책·정렬·말줄임·장식·그림자·자간·ParagraphMetrics·최소 폭·HitText·CaretPosition), 문자 체계(라틴·한글·아랍 RTL·BiDi·이모지·수학), 글꼴 렌더링 선택(방향·shaping 방식·hinting — 데모가 노출할 때).
 - **목록**: ListView(선택 방식 넷, 행 높이, 휠, 포인터 스크롤, 이동 선택, ScrollIntoView, ScrollToEnd, 터치 팬), TreeView(펼침·모두), TileView(타일 너비), TableRowSource.
 - **배치**: HorizontalStack·VerticalStack·StackPanel, Grid(span·layer·nudge·채움 비율), UniformGrid, WrapStack(줄바꿈 선택 사항), Overlay, SizeBox(최소·최대·고정·종횡비), Frame, SlotPresenter, AnchorCanvas, FitBox(맞춤 7 × 방향 3), ScaleLayer, ScrollView(휠 정책·막대·scroll padding·터치·오른쪽 드래그), Switcher, Carousel·CarouselPage, DockManager(역할·분할·탭 끌기·분리 창·spawner·배치 JSON), WindowTitleBarArea.
-- **표면·효과**: CachePanel, RetainerBox, BackgroundBlur, PostBufferUpdate, Viewport.
+- **표면·효과**: CachePanel, OffscreenLayer, BackgroundBlur, PostBufferUpdate, Viewport.
 - **앱·입력·명령**: CommandSet·BindingManager·CommandList·SetCommands, 타이머(StartTimer·StartFrameTimer), 초점(SetFocus·MoveFocus·Navigate·게임패드), tooltip 상태, AccessibleTree, 커서(SetCursorOverride), SetTheme, InputAdapter·TouchPan.
 - **Widget 층 전용**: RichTextBlockWidget(+RichTextStyle·Decorator·ImageDecorator), EditableText·EditableTextBox·MultiLineEditableText(Box)Widget, ExpandableAreaWidget, ComboBoxString·KeyWidget, CarouselWidget(자동 넘김)·CarouselNavBarWidget, SafeZoneWidget, DynamicEntryBoxWidget(+RadialBoxSettings — 원형 배치는 private `EntryPatternPanel`), ListViewWidget::UseObjectItems·WidgetPool, UserWidget·UserWidgetAnimation·WidgetAnimation(채널·재생 방식), WidgetTransform, Widget 공통(SetToolTipText·SetAccessibleText·SetNavigationRule·SetCursor), MVVM 바인딩(WidgetFieldBindings·WidgetModelSource·WidgetPropertyBinding·WidgetEventBinding).
-- **Widget 층 감싼 것(이름 대응)**: Button·CheckBox·ComboBox·MenuAnchor·Image·ProgressBar·Slider·SpinBox·RadialSlider·ScrollBar·InputKeySelector·Throbber·CircularThrobber·TextLabel·Border(Frame)·SizeBox·Spacer·NamedSlot·NativeWidgetHost·Overlay·CanvasPanel(AnchorCanvas)·GridPanel·UniformGridPanel·HorizontalBox·VerticalBox·StackPanel·StackBox·WrapBox·ScaleBox(FitBox)·WidgetSwitcher·ScrollBox·InvalidationBox(CachePanel)·RetainerBox·BackgroundBlur·PostBufferUpdate·Viewport·WindowTitleBarArea·ListView·TileView·TreeView Widget.
+- **Widget 층 감싼 것(이름 대응)**: Button·CheckBox·ComboBox·MenuAnchor·Image·ProgressBar·Slider·SpinBox·RadialSlider·ScrollBar·InputKeySelector·Throbber·CircularThrobber·TextLabel·Border(Frame)·SizeBox·Spacer·NamedSlot·NativeWidgetHost·Overlay·CanvasPanel(AnchorCanvas)·GridPanel·UniformGridPanel·HorizontalBox·VerticalBox·StackPanel·StackBox·WrapBox·ScaleBox(FitBox)·WidgetSwitcher·ScrollBox·InvalidationBox(CachePanel)·OffscreenLayer·BackgroundBlur·PostBufferUpdate·Viewport·WindowTitleBarArea·ListView·TileView·TreeView Widget.
 - **UiScreens**: Screen(입력 모드), ScreenStack·Queue·Switcher(초점 복구·플레이어별 초점)와 Widget 판, ScreenTabListWidget, HardwareVisibilityWidget, ScreenInputRouter·ScreenDeviceState.
 - **UiWorld·UiRender**: 월드 위젯(갤러리 밖 — WorldWidgetSelfTest), 렌더 기반(Effects가 간접으로 보인다).
 
@@ -166,7 +166,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 
 16.4·16.6절 표에 "있음"인데 아직 갤러리에 없는 행이다. UW4b 2차(콤보·숫자 입력·tooltip·토글·라디오)를 넣을 때 함께 넣는다.
 - Widgets: 선형 throbber(UE SThrobber — 조각 이미지는 UW4s 뒤), Combo Button(`MenuAnchor`), No Border Button, Button Click Methods(누름·뗌·정확한 클릭), 세로·단계 슬라이더, 진행 방향 7종·Mask 채움, 값 레이블(슬라이더·원형 슬라이더·타임라인·체크 상자 — 16.1절), 타임라인 눈금·마커 설정.
-- Effects: PostBufferUpdate 행, CachePanel 캐시 통계 레이블, RetainerBox phase.
+- Effects: PostBufferUpdate 행, CachePanel 캐시 통계 레이블, OffscreenLayer phase.
 - Layout: SizeBox(최소·최대·비율), Frame(SBorder), SlotPresenter, StackPanel 오른쪽에서 왼쪽, 도킹 역할(Panel·Document)과 배치 JSON 견본.
 
 ### 16.10 막힌 것과 푸는 방법

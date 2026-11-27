@@ -8,7 +8,7 @@
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Effects/BackgroundBlur.h>
 #include <UiFramework/Effects/PostBufferUpdate.h>
-#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/OffscreenLayer.h>
 #include <UiFramework/Effects/Viewport.h>
 #include <UiFramework/Layout/Overlay.h>
 
@@ -56,7 +56,7 @@ int VerifyWidgetSurfaces(Allocator& allocator, LaneUiRenderer& renderer,
     constexpr uint32 height = 8;
     const auto bounds = Geometry::Root({width, height}, {});
     auto root = SharedPtr<Overlay>::TryMake(allocator, allocator);
-    auto retainer = SharedPtr<RetainerBox>::TryMake(allocator, allocator);
+    auto retainer = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
     auto viewport = SharedPtr<Viewport>::TryMake(allocator, allocator);
     auto blur = SharedPtr<BackgroundBlur>::TryMake(allocator, allocator);
     auto capture = SharedPtr<PostBufferUpdate>::TryMake(allocator, allocator);

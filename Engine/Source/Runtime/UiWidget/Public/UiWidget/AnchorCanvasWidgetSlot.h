@@ -8,7 +8,7 @@ namespace rocks::ui {
 // 앵커와 오프셋으로 HUD를 배치한다. 늘어나는 축의 끝 오프셋은 반대쪽 여백이다. 배치는 위젯 트리의
 // 슬롯에 저장되어 화면을 재구성할 때도 유지된다.
 ROCKS_CLASS()
-class ROCKS_UIWIDGET_API CanvasWidgetSlot final : public WidgetSlot {
+class ROCKS_UIWIDGET_API AnchorCanvasWidgetSlot final : public WidgetSlot {
     ROCKS_GENERATED_BODY()
 public:
     CanvasSlot Layout() const noexcept;
@@ -33,7 +33,7 @@ public:
     Result<void> SetZOrder(ObjectRegistry& objects, float order) noexcept;
 
 private:
-    friend class CanvasPanelWidget;
+    friend class AnchorCanvasWidget;
     Result<void> Configure(const CanvasSlot& layout) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "anchorMin") Vec2 anchorMin_ {};
     ROCKS_PROPERTY(ReadOnly, Name = "anchorMax") Vec2 anchorMax_ {};

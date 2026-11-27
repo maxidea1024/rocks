@@ -1,48 +1,48 @@
 #include "UpdateLiveWidgetSlot.h"
-#include <UiWidget/CanvasPanelWidget.generated.h>
-#include <UiWidget/CanvasWidgetSlot.h>
+#include <UiWidget/AnchorCanvasWidget.generated.h>
+#include <UiWidget/AnchorCanvasWidgetSlot.h>
 
 namespace rocks::ui {
 
-CanvasSlot CanvasWidgetSlot::Layout() const noexcept {
+CanvasSlot AnchorCanvasWidgetSlot::Layout() const noexcept {
     return {anchorMin_, anchorMax_, offset_, alignment_, zOrder_, autoSize_};
 }
 
-Vec2 CanvasWidgetSlot::Position() const noexcept {
+Vec2 AnchorCanvasWidgetSlot::Position() const noexcept {
     return {offset_.x, offset_.y};
 }
 
-Vec2 CanvasWidgetSlot::Size() const noexcept {
+Vec2 AnchorCanvasWidgetSlot::Size() const noexcept {
     return {offset_.z, offset_.w};
 }
 
-Vec4 CanvasWidgetSlot::Offsets() const noexcept {
+Vec4 AnchorCanvasWidgetSlot::Offsets() const noexcept {
     return offset_;
 }
 
-Vec2 CanvasWidgetSlot::Minimum() const noexcept {
+Vec2 AnchorCanvasWidgetSlot::Minimum() const noexcept {
     return anchorMin_;
 }
 
-Vec2 CanvasWidgetSlot::Maximum() const noexcept {
+Vec2 AnchorCanvasWidgetSlot::Maximum() const noexcept {
     return anchorMax_;
 }
 
-Vec2 CanvasWidgetSlot::Alignment() const noexcept {
+Vec2 AnchorCanvasWidgetSlot::Alignment() const noexcept {
     return alignment_;
 }
 
-float CanvasWidgetSlot::ZOrder() const noexcept {
+float AnchorCanvasWidgetSlot::ZOrder() const noexcept {
     return zOrder_;
 }
 
-bool CanvasWidgetSlot::AutoSize() const noexcept {
+bool AnchorCanvasWidgetSlot::AutoSize() const noexcept {
     return autoSize_;
 }
 
-Result<void> CanvasWidgetSlot::UpdateLayout(ObjectRegistry& objects,
-                                            const CanvasSlot& layout) noexcept {
-    auto live = UpdateLiveWidgetSlot<CanvasPanelWidget, AnchorCanvas>(
+Result<void> AnchorCanvasWidgetSlot::UpdateLayout(ObjectRegistry& objects,
+                                                  const CanvasSlot& layout) noexcept {
+    auto live = UpdateLiveWidgetSlot<AnchorCanvasWidget, AnchorCanvas>(
         objects, *this, [&layout](AnchorCanvas& canvas, Element& child) noexcept {
             return canvas.SetSlot(child, layout);
         });
@@ -53,65 +53,66 @@ Result<void> CanvasWidgetSlot::UpdateLayout(ObjectRegistry& objects,
     return Configure(layout);
 }
 
-Result<void> CanvasWidgetSlot::SetPosition(ObjectRegistry& objects, Vec2 position) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetPosition(ObjectRegistry& objects, Vec2 position) noexcept {
     auto layout = Layout();
     layout.offset.x = position.x;
     layout.offset.y = position.y;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetSize(ObjectRegistry& objects, Vec2 size) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetSize(ObjectRegistry& objects, Vec2 size) noexcept {
     auto layout = Layout();
     layout.offset.z = size.x;
     layout.offset.w = size.y;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetOffsets(ObjectRegistry& objects, Vec4 offsets) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetOffsets(ObjectRegistry& objects, Vec4 offsets) noexcept {
     auto layout = Layout();
     layout.offset = offsets;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetAnchors(ObjectRegistry& objects, Vec2 minimum,
-                                          Vec2 maximum) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetAnchors(ObjectRegistry& objects, Vec2 minimum,
+                                                Vec2 maximum) noexcept {
     auto layout = Layout();
     layout.anchorMin = minimum;
     layout.anchorMax = maximum;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetMinimum(ObjectRegistry& objects, Vec2 minimum) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetMinimum(ObjectRegistry& objects, Vec2 minimum) noexcept {
     auto layout = Layout();
     layout.anchorMin = minimum;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetMaximum(ObjectRegistry& objects, Vec2 maximum) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetMaximum(ObjectRegistry& objects, Vec2 maximum) noexcept {
     auto layout = Layout();
     layout.anchorMax = maximum;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetAlignment(ObjectRegistry& objects, Vec2 alignment) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetAlignment(ObjectRegistry& objects,
+                                                  Vec2 alignment) noexcept {
     auto layout = Layout();
     layout.alignment = alignment;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetAutoSize(ObjectRegistry& objects, bool enabled) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetAutoSize(ObjectRegistry& objects, bool enabled) noexcept {
     auto layout = Layout();
     layout.autoSize = enabled;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::SetZOrder(ObjectRegistry& objects, float order) noexcept {
+Result<void> AnchorCanvasWidgetSlot::SetZOrder(ObjectRegistry& objects, float order) noexcept {
     auto layout = Layout();
     layout.zOrder = order;
     return UpdateLayout(objects, layout);
 }
 
-Result<void> CanvasWidgetSlot::Configure(const CanvasSlot& layout) noexcept {
+Result<void> AnchorCanvasWidgetSlot::Configure(const CanvasSlot& layout) noexcept {
     if (!layout.IsValid()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

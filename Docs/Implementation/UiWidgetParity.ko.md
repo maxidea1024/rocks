@@ -11,7 +11,7 @@
 | `UBackgroundBlur` | 구체 | 등록 `BackgroundBlurWidget` | 강도·커널 반경·알파 반영·둥근 모서리와 저품질 대체 브러시를 적용한다. 장치별 결과는 렌더 테스트 범위를 참조한다. | `Public/Components/BackgroundBlur.h` |
 | `UBorder` | 구체 | 등록 `BorderWidget` | 자식 하나의 브러시와 tint, 안쪽 여백을 적용한다. 자식 정렬은 BorderWidgetSlot이 맡는다. UE 머티리얼 자산 변환은 별도다. | `Public/Components/Border.h` |
 | `UButton` | 구체 | 등록 `ButtonWidget` | 포인터·터치·키보드 입력 방식을 선택하고 눌림·해제·클릭·hover 이벤트를 연결한다. 상태별 브러시와 tint를 지정할 수 있다. | `Public/Components/Button.h` |
-| `UCanvasPanel` | 구체 | 등록 `CanvasPanelWidget` | 앵커, 위치, 크기, 정렬, z 순서를 전용 슬롯에 저장. | `Public/Components/CanvasPanel.h` |
+| `UCanvasPanel` | 구체 | 등록 `AnchorCanvasWidget` | 앵커, 위치, 크기, 정렬, z 순서를 전용 슬롯에 저장. | `Public/Components/CanvasPanel.h` |
 | `UCheckBox` | 구체 | 등록 `CheckBoxWidget` | 2상·3상 상태, 자식 하나, 상태 변경 콜백을 제공한다. | `Public/Components/CheckBox.h` |
 | `UCircularThrobber` | 구체 | 등록 `CircularThrobberWidget` | 조각 수·브러시·반경·회전 주기를 지정하고 애니메이션을 정지할 수 있다. | `Public/Components/CircularThrobber.h` |
 | `UComboBox` | 구체 | 등록 `ComboBoxWidget` | 객체 참조 목록·선택·항목 생성기를 제공한다. 메뉴는 전면 Overlay에 붙는다. | `Public/Components/ComboBox.h` |
@@ -27,7 +27,7 @@
 | `UHorizontalBox` | 구체 | 등록 `HorizontalBoxWidget` | 가로 스택에 자식을 추가. 슬롯별 Auto/Fill·여백의 게임 객체 노출은 슬롯 표 참조. | `Public/Components/HorizontalBox.h` |
 | `UImage` | 구체 | 등록 `ImageWidget` | 논리 크기·tint와 Rocks Brush를 적용한다. UE의 soft texture·동적 머티리얼 자산 경로는 별도다. | `Public/Components/Image.h` |
 | `UInputKeySelector` | 구체 | 등록 `InputKeySelectorWidget` | 일반 키·보조키·마우스 및 선택적 게임패드 입력. Escape/포커스 상실 때 취소한다. | `Public/Components/InputKeySelector.h` |
-| `UInvalidationBox` | 구체 | 등록 `InvalidationBoxWidget` | CachePanel 하위 트리의 그리기 결과를 무효화 사유에 따라 재사용. | `Public/Components/InvalidationBox.h` |
+| `UInvalidationBox` | 구체 | 등록 `CachePanelWidget` | CachePanel 하위 트리의 그리기 결과를 무효화 사유에 따라 재사용. | `Public/Components/InvalidationBox.h` |
 | `UListView` | 구체 | 등록 `ListViewWidget` | 객체 항목 추가·삽입·제거, ID로 표현한 선택 및 스크롤, 화면에 보이는 행의 재사용을 지원한다. | `Public/Components/ListView.h` |
 | `UListViewBase` | 추상 | 등록 `ListViewBaseWidget` | 가시 행 가상화, 단일·다중 선택, 항목 탐색, 대상 스크롤 정렬과 취소, 휠 제어 및 선택 콜백. 관성·터치 이벤트 범위는 별도다. | `Public/Components/ListViewBase.h` |
 | `UMenuAnchor` | 구체 | 등록 `MenuAnchorWidget` | 전면 Overlay의 메뉴 위치·창 안 맞춤, 열기·닫기·상태 통지 및 스코프 포커스 복귀를 제공한다. | `Public/Components/MenuAnchor.h` |
@@ -39,10 +39,10 @@
 | `UPanelWidget` | 추상 | 등록 `PanelWidget` | 자식과 슬롯을 핸들·인덱스로 조회하고, 포함 여부 검사·제거·전체 비우기를 GC 참조와 화면 트리에 반영한다. | `Public/Components/PanelWidget.h` |
 | `UPostBufferUpdate` | 구체 | 등록 `PostBufferUpdateWidget` | 여러 후처리 버퍼의 갱신 설정을 저장하고 그리기 순서에 맞춰 호스트에 제출한다. | `Public/Components/PostBufferUpdate.h` |
 | `UProgressBar` | 구체 | 등록 `ProgressBarWidget` | 정규화된 진행률, 채움 방향·스타일·색·여백, marquee와 채움 브러시를 적용한다. | `Public/Components/ProgressBar.h` |
-| `URetainerBox` | 구체 | 등록 `RetainerBoxWidget` | 위상별 렌더 타깃 캡처, 명시적 갱신, 저장된 효과 머티리얼과 텍스처 파라미터·tint 합성을 지원한다. | `Public/Components/RetainerBox.h` |
+| `URetainerBox` | 구체 | 등록 `OffscreenLayerWidget` | 위상별 렌더 타깃 캡처, 명시적 갱신, 저장된 효과 머티리얼과 텍스처 파라미터·tint 합성을 지원한다. | `Public/Components/OffscreenLayer.h` |
 | `URichTextBlock` | 구체 | 등록 `RichTextBlockWidget` | 이름 스타일·인라인 데코레이터의 문단 단위 셰이핑, 그림자·장식·말줄임을 제공한다. UE 머티리얼과 데이터 테이블의 직접 로딩은 별도다. | `Public/Components/RichTextBlock.h` |
 | `USafeZone` | 구체 | 등록 `SafeZoneWidget` | 뷰포트 여백과 적용할 변을 지정. 실제 기기별 여백은 호스트가 제공. | `Public/Components/SafeZone.h` |
-| `UScaleBox` | 구체 | 등록 `ScaleBoxWidget` | 정렬, 맞춤 방식, 확대·축소 허용 방향과 사용자 지정 배율. 상위 배율 무시 옵션은 별도. | `Public/Components/ScaleBox.h` |
+| `UScaleBox` | 구체 | 등록 `ScaleLayerWidget` | 정렬, 맞춤 방식, 확대·축소 허용 방향과 사용자 지정 배율. 상위 배율 무시 옵션은 별도. | `Public/Components/ScaleBox.h` |
 | `UScrollBar` | 구체 | 등록 `ScrollBarWidget` | thumb 위치·크기와 방향, 드래그 입력과 스크롤 변경 콜백을 연결한다. | `Public/Components/ScrollBar.h` |
 | `UScrollBox` | 구체 | 등록 `ScrollBoxWidget` | 가로·세로 스크롤, 뷰 비율, 자식으로 이동, 휠·터치·오른쪽 드래그 정책과 사용자 스크롤 이벤트를 제공한다. | `Public/Components/ScrollBox.h` |
 | `USizeBox` | 구체 | 등록 `SizeBoxWidget` | 최소·최대 크기, 폭·높이 override 및 해제, 최소·최대 종횡비를 지원한다. | `Public/Components/SizeBox.h` |
@@ -62,7 +62,7 @@
 | `UWidget` | 추상 | 등록 `Widget` | 변환·피벗·불투명도·가시성·휘발성·클리핑, 커서·hover·포커스·캡처, 지연 툴팁, 접근성 이름·요약 및 방향별 탐색 규칙을 제공한다. 함수 이름에 의한 동적 호출은 별도다. | `Public/Components/Widget.h` |
 | `UWidgetSwitcher` | 구체 | 등록 `WidgetSwitcherWidget` | 활성 페이지 하나만 측정·그리기. 자식 제거 시 활성 인덱스 보정. | `Public/Components/WidgetSwitcher.h` |
 | `UWindowTitleBarArea` | 구체 | 등록 `WindowTitleBarAreaWidget` | 네이티브 창 이동·제목 표시줄 더블클릭 동작을 호스트에 전달. | `Public/Components/WindowTitleBarArea.h` |
-| `UWrapBox` | 구체 | 등록 `WrapBoxWidget` | 줄바꿈과 간격, 자식별 한 줄 차지·잔여 공간 채움 및 두 축 정렬. 폭 경계 규칙은 슬롯 표 참조. | `Public/Components/WrapBox.h` |
+| `UWrapBox` | 구체 | 등록 `WrapStackWidget` | 줄바꿈과 간격, 자식별 한 줄 차지·잔여 공간 채움 및 두 축 정렬. 폭 경계 규칙은 슬롯 표 참조. | `Public/Components/WrapBox.h` |
 
 ## 패널 슬롯
 
@@ -73,13 +73,13 @@
 | `UBackgroundBlurSlot` | `BackgroundBlurWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/BackgroundBlurSlot.h` |
 | `UBorderSlot` | `BorderWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/BorderSlot.h` |
 | `UButtonSlot` | `ButtonWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/ButtonSlot.h` |
-| `UCanvasPanelSlot` | `CanvasWidgetSlot` | 앵커·오프셋·정렬·AutoSize·z 순서를 실행 중 바꿀 수 있다. 자식을 유지하며 히트 테스트 순서도 바뀐다. | `Public/Components/CanvasPanelSlot.h` |
+| `UCanvasPanelSlot` | `AnchorCanvasWidgetSlot` | 앵커·오프셋·정렬·AutoSize·z 순서를 실행 중 바꿀 수 있다. 자식을 유지하며 히트 테스트 순서도 바뀐다. | `Public/Components/CanvasPanelSlot.h` |
 | `UGridSlot` | `GridWidgetSlot` | 행·열·span·layer·padding, 수평·수직 내용 정렬과 nudge. nudge는 트랙 측정에 영향을 주지 않는다. 부착 후 UpdateLayout으로 레이어를 바꿔도 기존 자식을 유지한다. | `Public/Components/GridSlot.h` |
 | `UHorizontalBoxSlot` | `HorizontalBoxWidgetSlot` | 주축 Auto/Fill/FillContent, 가중치·최소/최대 크기·여백 및 두 축의 내용 정렬을 실행 중 갱신한다. | `Public/Components/HorizontalBoxSlot.h` |
 | `UOverlaySlot` | `OverlayWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/OverlaySlot.h` |
 | `UPanelSlot` | `WidgetSlot` | 콘텐츠를 GC 참조로 보관한다. Parent는 현재 연결된 부모를 반환하며 제거된 슬롯은 빈 핸들을 반환한다. | `Public/Components/PanelSlot.h` |
 | `USafeZoneSlot` | `SafeZoneWidgetSlot` | 타이틀/액션 안전 영역과 각 변의 배율, 내용 여백·정렬을 따로 지정한다. | `Public/Components/SafeZoneSlot.h` |
-| `UScaleBoxSlot` | `ScaleBoxWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/ScaleBoxSlot.h` |
+| `UScaleBoxSlot` | `ScaleLayerWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/ScaleBoxSlot.h` |
 | `UScrollBoxSlot` | `ScrollBoxWidgetSlot` | Auto/Fill 가중치와 여백·정렬을 실행 중 갱신한다. 애셋 복원 뒤에도 두 설정을 함께 적용한다. | `Public/Components/ScrollBoxSlot.h` |
 | `USizeBoxSlot` | `SizeBoxWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/SizeBoxSlot.h` |
 | `UStackBoxSlot` | `StackBoxWidgetSlot` | 주축 Auto/Fill/FillContent, 가중치·최소/최대 크기·여백 및 두 축의 내용 정렬을 실행 중 갱신한다. | `Public/Components/StackBoxSlot.h` |
@@ -87,7 +87,7 @@
 | `UVerticalBoxSlot` | `VerticalBoxWidgetSlot` | 주축 Auto/Fill/FillContent, 가중치·최소/최대 크기·여백 및 두 축의 내용 정렬을 실행 중 갱신한다. | `Public/Components/VerticalBoxSlot.h` |
 | `UWidgetSwitcherSlot` | `WidgetSwitcherWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/WidgetSwitcherSlot.h` |
 | `UWindowTitleBarAreaSlot` | `WindowTitleBarAreaWidgetSlot` | SetLayout으로 여백·가로 및 세로 정렬을 바꾼다. 부착된 슬롯의 핸들과 내용을 유지한다. | `Public/Components/WindowTitleBarAreaSlot.h` |
-| `UWrapBoxSlot` | `WrapBoxWidgetSlot` | 네 변 여백·가로 및 세로 정렬. 강제 개행, 임계값 미만 한 줄 차지, 마지막 항목의 남은 공간 채우기. 기본 WidgetSlot으로 만든 이전 에셋을 읽을 수 있으며 전용 슬롯에서는 UpdateLayout으로 실제 배치도 갱신한다. | `Public/Components/WrapBoxSlot.h` |
+| `UWrapBoxSlot` | `WrapStackWidgetSlot` | 네 변 여백·가로 및 세로 정렬. 강제 개행, 임계값 미만 한 줄 차지, 마지막 항목의 남은 공간 채우기. 기본 WidgetSlot으로 만든 이전 에셋을 읽을 수 있으며 전용 슬롯에서는 UpdateLayout으로 실제 배치도 갱신한다. | `Public/Components/WrapBoxSlot.h` |
 
 ## 속성·함수 대조
 

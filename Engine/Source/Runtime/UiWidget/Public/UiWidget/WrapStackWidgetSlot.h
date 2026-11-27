@@ -8,7 +8,7 @@ namespace rocks::ui {
 // 줄바꿈 패널의 자식 하나에 적용하는 배치 규칙이다. 부모가 다시 생성되어도 새 줄 시작,
 // 남는 공간 채우기, 좁은 패널에서 한 줄 전체 차지와 여백·정렬을 그대로 복원한다.
 ROCKS_CLASS()
-class ROCKS_UIWIDGET_API WrapBoxWidgetSlot final : public AlignedWidgetSlot {
+class ROCKS_UIWIDGET_API WrapStackWidgetSlot final : public AlignedWidgetSlot {
     ROCKS_GENERATED_BODY()
 public:
     Result<void> SetNewLine(ObjectRegistry& objects, bool value) noexcept;
@@ -21,7 +21,7 @@ public:
     Result<void> UpdateLayout(ObjectRegistry& objects, const WrapSlot& layout) noexcept;
 
 private:
-    friend class WrapBoxWidget;
+    friend class WrapStackWidget;
     Result<void> Configure(const WrapSlot& layout) noexcept;
 
     ROCKS_PROPERTY(ReadOnly, Name = "forceNewLine") bool forceNewLine_ = false;

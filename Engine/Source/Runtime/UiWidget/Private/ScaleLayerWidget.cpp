@@ -1,22 +1,22 @@
-#include <UiWidget/ScaleBoxWidgetSlot.generated.h>
+#include <UiWidget/ScaleLayerWidgetSlot.generated.h>
 #include "MakeWidgetElement.h"
-#include <UiWidget/ScaleBoxWidget.h>
+#include <UiWidget/ScaleLayerWidget.h>
 #include <UiFramework/Layout/FitBox.h>
 
 namespace rocks::ui {
 
-TypeId ScaleBoxWidget::SlotType() const noexcept {
-    return GeneratedType<ScaleBoxWidgetSlot>::Id();
+TypeId ScaleLayerWidget::SlotType() const noexcept {
+    return GeneratedType<ScaleLayerWidgetSlot>::Id();
 }
 
-ScaleBoxWidget::ScaleBoxWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
+ScaleLayerWidget::ScaleLayerWidget(Allocator& allocator) noexcept : ContentWidget(allocator) {
 }
 
-Result<SharedPtr<Element>> ScaleBoxWidget::CreatePanel(Allocator& allocator) noexcept {
+Result<SharedPtr<Element>> ScaleLayerWidget::CreatePanel(Allocator& allocator) noexcept {
     return MakeWidgetElement<FitBox>(allocator);
 }
 
-Result<void> ScaleBoxWidget::SetAlignment(Vec2 value) noexcept {
+Result<void> ScaleLayerWidget::SetAlignment(Vec2 value) noexcept {
     if (!value.IsFinite() || value.x < 0 || value.y < 0 || value.x > 1 || value.y > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -29,7 +29,7 @@ Result<void> ScaleBoxWidget::SetAlignment(Vec2 value) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> ScaleBoxWidget::SetFit(FitMode mode, FitDirection direction) noexcept {
+Result<void> ScaleLayerWidget::SetFit(FitMode mode, FitDirection direction) noexcept {
     if (mode > FitMode::User || direction > FitDirection::GrowOnly) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -43,7 +43,7 @@ Result<void> ScaleBoxWidget::SetFit(FitMode mode, FitDirection direction) noexce
     return Result<void>::Success();
 }
 
-Result<void> ScaleBoxWidget::SetUserScale(float value) noexcept {
+Result<void> ScaleLayerWidget::SetUserScale(float value) noexcept {
     if (!math::IsFinite(value) || value < 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -56,11 +56,11 @@ Result<void> ScaleBoxWidget::SetUserScale(float value) noexcept {
     return Result<void>::Success();
 }
 
-Vec2 ScaleBoxWidget::Alignment() const noexcept {
+Vec2 ScaleLayerWidget::Alignment() const noexcept {
     return alignment_;
 }
 
-void ScaleBoxWidget::ApplyProperties(Element& element) noexcept {
+void ScaleLayerWidget::ApplyProperties(Element& element) noexcept {
     auto& native = StaticElementCast<FitBox>(element);
     native.SetFit(static_cast<FitMode>(fitMode_), static_cast<FitDirection>(fitDirection_));
     (void)native.SetUserScale(userScale_);

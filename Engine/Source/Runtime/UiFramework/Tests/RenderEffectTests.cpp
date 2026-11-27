@@ -4,7 +4,7 @@
 #include <UiFramework/Effects/BackgroundBlur.h>
 #include <UiFramework/Layout/Frame.h>
 #include <UiFramework/Effects/PostBufferUpdate.h>
-#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/OffscreenLayer.h>
 #include <UiFramework/Effects/Viewport.h>
 
 using namespace rocks;
@@ -47,7 +47,7 @@ TEST(UiFramework_BackdropEffectsPreservePaintOrderAndSeparateBatches) {
 
 TEST(UiFramework_RetainedTextureReplacesOnlyChildPainting) {
     SystemAllocator allocator;
-    RetainerBox box(allocator);
+    OffscreenLayer box(allocator);
     auto child = SharedPtr<Frame>::TryMake(allocator, allocator);
     REQUIRE(child);
     REQUIRE(box.TryAddChild(child.Value()));
@@ -84,7 +84,7 @@ TEST(UiFramework_DeclarativeBlurBindsItsStrengthWithoutChangingLayout) {
     struct Values {
         float radius = 2;
     } values;
-    auto root = Build<RetainerBox>(
+    auto root = Build<OffscreenLayer>(
         {.content = Make<BackgroundBlur>({.strength = Bind(&values, &Values::radius)}),
          .phase = 1,
          .phaseCount = 3});

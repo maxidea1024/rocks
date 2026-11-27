@@ -2,8 +2,8 @@
 #include <TestSupport/Test.h>
 #include <UiCore/HitGrid.h>
 #include <UiWidget/ButtonWidget.generated.h>
-#include <UiWidget/CanvasPanelWidget.generated.h>
-#include <UiWidget/CanvasWidgetSlot.generated.h>
+#include <UiWidget/AnchorCanvasWidget.generated.h>
+#include <UiWidget/AnchorCanvasWidgetSlot.generated.h>
 #include <UiWidget/SpacerWidget.generated.h>
 #include <UiWidget/UserWidget.generated.h>
 #include <UiWidget/WidgetAsset.generated.h>
@@ -28,11 +28,11 @@ TEST(UiWidget_CanvasSlotSurvivesTemplateInstantiation) {
     auto treeBorrow = objects.ResolveForWrite<WidgetTree>(access, asset->Tree());
     REQUIRE(treeBorrow);
     auto* tree = treeBorrow.Value().Get().Value();
-    auto root = tree->ConstructWidget(objects, GeneratedType<CanvasPanelWidget>::Id(), "Hud");
+    auto root = tree->ConstructWidget(objects, GeneratedType<AnchorCanvasWidget>::Id(), "Hud");
     auto gap = tree->ConstructWidget(objects, GeneratedType<SpacerWidget>::Id(), "Reticle");
     REQUIRE(root && gap);
     REQUIRE(tree->SetRoot(objects, root.Value().Handle()));
-    auto rootBorrow = objects.ResolveForWrite<CanvasPanelWidget>(access, root.Value().Handle());
+    auto rootBorrow = objects.ResolveForWrite<AnchorCanvasWidget>(access, root.Value().Handle());
     REQUIRE(rootBorrow);
     auto* panel = rootBorrow.Value().Get().Value();
     auto invalid = panel->AddAt(objects, gap.Value().Handle(), {.anchorMin = {1, 1}});
@@ -43,7 +43,7 @@ TEST(UiWidget_CanvasSlotSurvivesTemplateInstantiation) {
                       .alignment = {0, 0}};
     auto slot = panel->AddAt(objects, gap.Value().Handle(), layout);
     REQUIRE(slot);
-    REQUIRE(objects.Resolve<CanvasWidgetSlot>(access, slot.Value()));
+    REQUIRE(objects.Resolve<AnchorCanvasWidgetSlot>(access, slot.Value()));
 
     auto compiled = asset->Compile(objects, allocator);
     REQUIRE(compiled);
@@ -70,7 +70,7 @@ TEST(UiWidget_CanvasSlotSurvivesTemplateInstantiation) {
     auto lowerSlot = panel->AddAt(objects, lower.Value().Handle(), bounds);
     auto upperSlot = panel->AddAt(objects, upper.Value().Handle(), bounds);
     REQUIRE(lowerSlot && upperSlot);
-    auto mutableSlot = objects.ResolveForWrite<CanvasWidgetSlot>(access, lowerSlot.Value());
+    auto mutableSlot = objects.ResolveForWrite<AnchorCanvasWidgetSlot>(access, lowerSlot.Value());
     REQUIRE(mutableSlot);
     auto* moved = mutableSlot.Value().Get().Value();
     auto native = panel->TakeElement(objects);

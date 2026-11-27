@@ -9,7 +9,7 @@
 #include <UiFramework/Layout/HorizontalStack.h>
 #include <UiFramework/Controls/Image.h>
 #include <UiFramework/Layout/Overlay.h>
-#include <UiFramework/Effects/RetainerBox.h>
+#include <UiFramework/Effects/OffscreenLayer.h>
 #include <UiFramework/Controls/Slider.h>
 #include <UiFramework/Effects/Viewport.h>
 
@@ -165,7 +165,7 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
 
     // 리테이너: 그린 결과를 표면에 보관하고 effect tint를 곱한다.
     {
-        auto retainer = SharedPtr<RetainerBox>::TryMake(allocator, allocator);
+        auto retainer = SharedPtr<OffscreenLayer>::TryMake(allocator, allocator);
         auto block = MakeBlock(context, "Retained surface", ThemeSlot::AccentGreen);
         if (status.Take(retainer) && status.Take(block)) {
             auto built =
@@ -173,7 +173,7 @@ Result<EffectsPage> BuildEffectsPage(GalleryContext& context) noexcept {
             auto stage = built ? MakeStage(context, retainer.Value())
                                : Result<SharedPtr<Element>>::Failure(built.Error());
             if (status.Take(stage)) {
-                rows.AddRow("Retainer Box", "RetainerBox (effect tint)", stage.Value());
+                rows.AddRow("Retainer Box", "OffscreenLayer (effect tint)", stage.Value());
             }
         }
     }

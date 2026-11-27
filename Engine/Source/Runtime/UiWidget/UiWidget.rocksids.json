@@ -24,6 +24,60 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::alignment_",
+      "id": "02d57695f0344716b7b67ea5a3c01f0e",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::alignment_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::anchorMax_",
+      "id": "c90b1c21cff143128b9c524544891d3c",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::anchorMax_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::anchorMin_",
+      "id": "10fbfe4ef4de4079a1fce0ab0016f4a1",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::anchorMin_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::autoSize_",
+      "id": "d54ed1156217467cb3e25798e4132e38",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::autoSize_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::offset_",
+      "id": "b7adf1ab21b64392935e9ea774fc4f0f",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::offset_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot::zOrder_",
+      "id": "56c87af7c2dd421d83c2af9b401d52ed",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot::zOrder_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::BackgroundBlurWidget::applyAlphaToBlur_",
       "id": "f49d8c9698b84d0fb125d914965c30a5",
       "aliases": [],
@@ -138,48 +192,6 @@
       "kind": "field",
       "name": "rocks::ui::ButtonWidget::touchMethod_",
       "id": "89c84e61f8dc43c38c7eb4c317194762",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::alignment_",
-      "id": "02d57695f0344716b7b67ea5a3c01f0e",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::anchorMax_",
-      "id": "c90b1c21cff143128b9c524544891d3c",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::anchorMin_",
-      "id": "10fbfe4ef4de4079a1fce0ab0016f4a1",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::autoSize_",
-      "id": "d54ed1156217467cb3e25798e4132e38",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::offset_",
-      "id": "b7adf1ab21b64392935e9ea774fc4f0f",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::CanvasWidgetSlot::zOrder_",
-      "id": "56c87af7c2dd421d83c2af9b401d52ed",
       "aliases": [],
       "retired": false
     },
@@ -626,6 +638,33 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::effectTint_",
+      "id": "984858b5f9c44330b381ea5a8bfdde3f",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::effectTint_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::phaseCount_",
+      "id": "90d63d13e9b94a1ab065f6eb44db06e4",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::phaseCount_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::OffscreenLayerWidget::phase_",
+      "id": "232318b0d95c4f219ebc7ee163def662",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget::phase_"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::PanelWidget::slots_",
       "id": "959b1a042b1f459c986fa1d422ce46a2",
       "aliases": [],
@@ -836,27 +875,6 @@
     },
     {
       "kind": "field",
-      "name": "rocks::ui::RetainerBoxWidget::effectTint_",
-      "id": "984858b5f9c44330b381ea5a8bfdde3f",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::RetainerBoxWidget::phaseCount_",
-      "id": "90d63d13e9b94a1ab065f6eb44db06e4",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
-      "name": "rocks::ui::RetainerBoxWidget::phase_",
-      "id": "232318b0d95c4f219ebc7ee163def662",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "field",
       "name": "rocks::ui::RetainerBoxWidget::textureParameter_",
       "id": "318c51ce84fa4eac8cd9e15dfaf6c4fc",
       "aliases": [],
@@ -990,30 +1008,38 @@
     },
     {
       "kind": "field",
-      "name": "rocks::ui::ScaleBoxWidget::alignment_",
+      "name": "rocks::ui::ScaleLayerWidget::alignment_",
       "id": "b14e1c31a7c54114a6d042bf33048f63",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::alignment_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::ScaleBoxWidget::fitDirection_",
+      "name": "rocks::ui::ScaleLayerWidget::fitDirection_",
       "id": "2459ad6bc3954d09a38162413be5788e",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::fitDirection_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::ScaleBoxWidget::fitMode_",
+      "name": "rocks::ui::ScaleLayerWidget::fitMode_",
       "id": "6b74b62671654b7b9a7bc3ed8affa454",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::fitMode_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::ScaleBoxWidget::userScale_",
+      "name": "rocks::ui::ScaleLayerWidget::userScale_",
       "id": "ed04d8933de34dada64df0b2af2b3268",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget::userScale_"
+      ],
       "retired": false
     },
     {
@@ -2061,30 +2087,38 @@
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WrapBoxWidget::spacing_",
+      "name": "rocks::ui::WrapStackWidget::spacing_",
       "id": "29e66806ad794f2aaff7b6dfe7b3e5b8",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidget::spacing_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WrapBoxWidgetSlot::fillEmptySpace_",
+      "name": "rocks::ui::WrapStackWidgetSlot::fillEmptySpace_",
       "id": "ecea274926ae4e9499f651b29d42d6a5",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::fillEmptySpace_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WrapBoxWidgetSlot::fillLineWhenSizeLessThan_",
+      "name": "rocks::ui::WrapStackWidgetSlot::fillLineWhenSizeLessThan_",
       "id": "5f403393d9eb40b5bc64d9737b20d850",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::fillLineWhenSizeLessThan_"
+      ],
       "retired": false
     },
     {
       "kind": "field",
-      "name": "rocks::ui::WrapBoxWidgetSlot::forceNewLine_",
+      "name": "rocks::ui::WrapStackWidgetSlot::forceNewLine_",
       "id": "ef8bf0e5aa3349d3991954becb476570",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot::forceNewLine_"
+      ],
       "retired": false
     },
     {
@@ -2092,6 +2126,24 @@
       "name": "rocks::ui::AlignedWidgetSlot",
       "id": "97656e72a07e48dbabd7091bda24cc32",
       "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::AnchorCanvasWidget",
+      "id": "25fd00fa0a1242ec91ff3d7f2ea7e187",
+      "aliases": [
+        "rocks::ui::CanvasPanelWidget"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::AnchorCanvasWidgetSlot",
+      "id": "0d03b2ab2749461080e70f070a1d2e50",
+      "aliases": [
+        "rocks::ui::CanvasWidgetSlot"
+      ],
       "retired": false
     },
     {
@@ -2138,16 +2190,11 @@
     },
     {
       "kind": "type",
-      "name": "rocks::ui::CanvasPanelWidget",
-      "id": "25fd00fa0a1242ec91ff3d7f2ea7e187",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
-      "name": "rocks::ui::CanvasWidgetSlot",
-      "id": "0d03b2ab2749461080e70f070a1d2e50",
-      "aliases": [],
+      "name": "rocks::ui::CachePanelWidget",
+      "id": "acc5132561ac4fadb69079b63ecdfdf0",
+      "aliases": [
+        "rocks::ui::InvalidationBoxWidget"
+      ],
       "retired": false
     },
     {
@@ -2299,13 +2346,6 @@
     },
     {
       "kind": "type",
-      "name": "rocks::ui::InvalidationBoxWidget",
-      "id": "acc5132561ac4fadb69079b63ecdfdf0",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
       "name": "rocks::ui::ListViewBaseWidget",
       "id": "0ed7a39377da432b9dc9a8ebc1d918ce",
       "aliases": [],
@@ -2351,6 +2391,15 @@
       "name": "rocks::ui::NativeWidgetHost",
       "id": "f48a417b0c724853b61a019cf3512e5b",
       "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::OffscreenLayerWidget",
+      "id": "41f11535158b4448a9c2d7e8319a10bc",
+      "aliases": [
+        "rocks::ui::RetainerBoxWidget"
+      ],
       "retired": false
     },
     {
@@ -2411,13 +2460,6 @@
     },
     {
       "kind": "type",
-      "name": "rocks::ui::RetainerBoxWidget",
-      "id": "41f11535158b4448a9c2d7e8319a10bc",
-      "aliases": [],
-      "retired": false
-    },
-    {
-      "kind": "type",
       "name": "rocks::ui::RetainerEffectMaterial",
       "id": "a0f7a2cb6d7b439295424f1e3f449bff",
       "aliases": [],
@@ -2453,16 +2495,20 @@
     },
     {
       "kind": "type",
-      "name": "rocks::ui::ScaleBoxWidget",
+      "name": "rocks::ui::ScaleLayerWidget",
       "id": "c8d69b9021894b10bc1ffe831de5bbf1",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidget"
+      ],
       "retired": false
     },
     {
       "kind": "type",
-      "name": "rocks::ui::ScaleBoxWidgetSlot",
+      "name": "rocks::ui::ScaleLayerWidgetSlot",
       "id": "5683c4f696ff418b8f99d1b0b5cd7487",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::ScaleBoxWidgetSlot"
+      ],
       "retired": false
     },
     {
@@ -2733,16 +2779,20 @@
     },
     {
       "kind": "type",
-      "name": "rocks::ui::WrapBoxWidget",
+      "name": "rocks::ui::WrapStackWidget",
       "id": "8d2a8b95177b45d49dbe87de0daf5326",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidget"
+      ],
       "retired": false
     },
     {
       "kind": "type",
-      "name": "rocks::ui::WrapBoxWidgetSlot",
+      "name": "rocks::ui::WrapStackWidgetSlot",
       "id": "7e02db887bac413c80e51142f64ef97c",
-      "aliases": [],
+      "aliases": [
+        "rocks::ui::WrapBoxWidgetSlot"
+      ],
       "retired": false
     }
   ]

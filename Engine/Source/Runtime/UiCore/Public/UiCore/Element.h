@@ -414,7 +414,7 @@ protected:
     virtual Span<const SharedPtr<Element>> PaintChildren() const noexcept;
     // hit 판정이 걷는 자식이다(Docs/Design/UiToolkit 20.4절 — 그리기 순서, 뒤가 위). 기본은
     // PaintChildren이다. 자식을 오프스크린 결과로 대신 그리는 동안에도 같은 자리에 보이는 요소
-    // (RetainerBox)는 활성 자식을 돌려준다. 돌려주는 목록이 바뀌면 plan revision을 올려야 한다.
+    // (OffscreenLayer)는 활성 자식을 돌려준다. 돌려주는 목록이 바뀌면 plan revision을 올려야 한다.
     virtual Span<const SharedPtr<Element>> HitTestChildren() const noexcept;
     // 보이기·clip만 보는 hit 판정이다(HitTest가 자르기 전에 쓴다).
     Element* HitTestVisible(Vec2 position) noexcept;

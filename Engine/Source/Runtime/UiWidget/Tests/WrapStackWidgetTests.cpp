@@ -4,8 +4,8 @@
 #include <UiWidget/UserWidget.generated.h>
 #include <UiWidget/WidgetAsset.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
-#include <UiWidget/WrapBoxWidget.generated.h>
-#include <UiWidget/WrapBoxWidgetSlot.generated.h>
+#include <UiWidget/WrapStackWidget.generated.h>
+#include <UiWidget/WrapStackWidgetSlot.generated.h>
 
 namespace rocks::ui {
 
@@ -27,9 +27,9 @@ TEST(UiWidget_WrapSlotsReflowAfterTemplateInstantiation) {
     REQUIRE(treeBorrow);
     auto* tree = treeBorrow.Value().Get().Value();
 
-    auto root = tree->ConstructWidget(objects, GeneratedType<WrapBoxWidget>::Id(), "Bar");
+    auto root = tree->ConstructWidget(objects, GeneratedType<WrapStackWidget>::Id(), "Bar");
     REQUIRE(root && tree->SetRoot(objects, root.Value().Handle()));
-    auto rootBorrow = objects.ResolveForWrite<WrapBoxWidget>(access, root.Value().Handle());
+    auto rootBorrow = objects.ResolveForWrite<WrapStackWidget>(access, root.Value().Handle());
     REQUIRE(rootBorrow);
     auto* wrap = rootBorrow.Value().Get().Value();
     REQUIRE(wrap->SetSpacing({2, 3}));
@@ -40,7 +40,7 @@ TEST(UiWidget_WrapSlotsReflowAfterTemplateInstantiation) {
         auto spacer = objects.ResolveForWrite<SpacerWidget>(access, item.Value().Handle());
         REQUIRE(spacer && spacer.Value().Get().Value()->SetSize({10, 5}));
         auto slot = wrap->AddAt(objects, item.Value().Handle(), layout);
-        REQUIRE(slot && objects.Resolve<WrapBoxWidgetSlot>(access, slot.Value()));
+        REQUIRE(slot && objects.Resolve<WrapStackWidgetSlot>(access, slot.Value()));
     };
     addSpacer("First", {});
     addSpacer("Second",
@@ -71,7 +71,7 @@ TEST(UiWidget_WrapSlotsReflowAfterTemplateInstantiation) {
     auto source = wrap->TakeElement(objects);
     REQUIRE(source && source.Value()->Prepass(1));
     REQUIRE(source.Value()->Arrange(Geometry::Root({99, 60}, {})));
-    auto slotBorrow = objects.ResolveForWrite<WrapBoxWidgetSlot>(access, wrap->SlotAt(1));
+    auto slotBorrow = objects.ResolveForWrite<WrapStackWidgetSlot>(access, wrap->SlotAt(1));
     REQUIRE(slotBorrow);
     auto* slot = slotBorrow.Value().Get().Value();
     const auto handle = slot->Handle();

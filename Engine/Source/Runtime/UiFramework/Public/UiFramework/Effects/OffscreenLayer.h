@@ -9,8 +9,8 @@
 namespace rocks::ui {
 
 // 자식의 그리기 결과를 텍스처로 보관한다. 배치와 입력은 보관 중에도 실제 자식 트리를 사용한다.
-class ROCKS_UIFRAMEWORK_API RetainerBox final : public SizeBox, public WidgetSurface {
-    ROCKS_UI_ELEMENT(RetainerBox, SizeBox)
+class ROCKS_UIFRAMEWORK_API OffscreenLayer final : public SizeBox, public WidgetSurface {
+    ROCKS_UI_ELEMENT(OffscreenLayer, SizeBox)
 
 public:
     struct Args {
@@ -30,7 +30,7 @@ public:
     SlotHandle ManagedSurface() const noexcept override;
     void SetManagedSurface(SlotHandle texture) noexcept override;
 
-    explicit RetainerBox(Allocator& allocator) noexcept;
+    explicit OffscreenLayer(Allocator& allocator) noexcept;
 
     Result<void> TryAddChild(const SharedPtr<Element>& child) noexcept override;
     bool RemoveChild(Element& child) noexcept override;
