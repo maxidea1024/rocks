@@ -671,13 +671,199 @@ private:
     uint64 position_ = 0;
 };
 
+// sidecar 파일 출력이다(AS 20.1 3·4). 쓰는 byte마다 파일 전체 SHA-256과 블록 SHA-256을 함께 잰다.
+class SidecarWriter {
+public:
+    SidecarWriter(Allocator& allocator, PackageSink& sink) noexcept
+        : sink_(sink), blocks_(allocator) {
+    }
+
+    Result<void> Append(Span<const uint8> bytes) noexcept {
+        if (auto appended = sink_.Append(bytes); !appended) {
+            return appended;
+        }
+
+        whole_.Update(bytes);
+        usize offset = 0;
+        while (offset < bytes.Size()) {
+            const usize room = static_cast<usize>(SidecarHashBlockBytes - blockFill_);
+            const usize take = bytes.Size() - offset < room ? bytes.Size() - offset : room;
+            block_.Update(bytes.Slice(offset, take));
+            blockFill_ += take;
+            offset += take;
+            if (blockFill_ == SidecarHashBlockBytes) {
+                if (auto pushed = blocks_.TryPushBack(block_.Finish()); !pushed) {
+                    return pushed;
+                }
+
+                blockFill_ = 0;
+            }
+        }
+
+        position_ += bytes.Size();
+        return Result<void>::Success();
+    }
+
+    Result<void> Pad(uint32 alignment) noexcept {
+        static constexpr uint8 Zeros[512] = {};
+        uint64 count = AlignUp(position_, alignment) - position_;
+        while (count > 0) {
+            const uint64 chunk = count < sizeof(Zeros) ? count : sizeof(Zeros);
+            if (auto appended = Append(Span<const uint8>(Zeros, static_cast<usize>(chunk)));
+                !appended) {
+                return appended;
+            }
+
+            count -= chunk;
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 마지막 짧은 블록을 닫고 Sidecar 섹션 byte를 만든다.
+    Result<void> Finish(Array<uint8>& section, Sha256Digest& sha256) noexcept {
+        if (blockFill_ != 0) {
+            if (auto pushed = blocks_.TryPushBack(block_.Finish()); !pushed) {
+                return pushed;
+            }
+
+            blockFill_ = 0;
+        }
+
+        sha256 = whole_.Finish();
+        const usize bytes = SidecarSectionFixedBytes + Sha256Digest::Bytes * blocks_.Size();
+        if (auto sized = section.TryResize(bytes); !sized) {
+            return sized;
+        }
+
+        uint8* out = section.Data();
+        StoreLittleEndian<uint64>(out, position_);
+        for (usize i = 0; i < Sha256Digest::Bytes; ++i) {
+            out[8 + i] = sha256.bytes[i];
+        }
+
+        StoreLittleEndian<uint32>(out + 40, SidecarHashBlockBytes);
+        StoreLittleEndian<uint32>(out + 44, static_cast<uint32>(blocks_.Size()));
+        for (usize block = 0; block < blocks_.Size(); ++block) {
+            for (usize i = 0; i < Sha256Digest::Bytes; ++i) {
+                out[SidecarSectionFixedBytes + Sha256Digest::Bytes * block + i] =
+                    blocks_[block].bytes[i];
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    uint64 Position() const noexcept {
+        return position_;
+    }
+
+private:
+    PackageSink& sink_;
+    Sha256 whole_;
+    Sha256 block_;
+    uint64 blockFill_ = 0;
+    Array<Sha256Digest> blocks_;
+    uint64 position_ = 0;
+};
+
+// sidecar 결과다(Sidecar 섹션 byte와 파일 크기·SHA-256).
+struct SidecarOutcome {
+    explicit SidecarOutcome(Allocator& allocator) noexcept : section(allocator) {
+    }
+
+    Array<uint8> section;
+    uint64 fileBytes = 0;
+    Sha256Digest sha256{};
+};
+
+// Sidecar bulk를 sidecar 파일에 쓴다(머리 → entry 본문을 bulkAlignment 정렬로 BulkIndex 순서대로 —
+// AS 20.1 3). raw를 그대로(codec None) 쓰고 index[position]에 sidecar 안 위치를 채운다.
+Result<void> WriteSidecar(Allocator& allocator, const PackageWriteOptions& options,
+                          uint32 alignment, Span<const BulkDraft> drafts,
+                          Span<const uint8> placements, Array<PackageBulkEntry>& index,
+                          AssetId self, SidecarOutcome& outcome,
+                          AssetDiagnostic* failure) noexcept {
+    uint32 count = 0;
+    uint64 fileBytes = SidecarHeaderBytes;
+    for (usize position = 0; position < drafts.Size(); ++position) {
+        if (placements[position] != 0) {
+            ++count;
+            fileBytes = AlignUp(fileBytes, alignment) + drafts[position].original.rawBytes;
+        }
+    }
+
+    if (count == 0) {
+        return Result<void>::Success();
+    }
+
+    uint8 header[SidecarHeaderBytes] = {};
+    for (usize i = 0; i < 4; ++i) {
+        header[i] = SidecarMagic[i];
+    }
+
+    StoreLittleEndian<uint16>(header + 4, SidecarFormatVersion);
+    StoreLittleEndian<uint16>(header + 6, static_cast<uint16>(SidecarHeaderBytes));
+    StoreLittleEndian<uint32>(header + 8, alignment);
+    StoreLittleEndian<uint32>(header + 12, count);
+    StoreLittleEndian<uint64>(header + 16, fileBytes);
+    StoreLittleEndian<uint64>(header + 24, self.value.high);
+    StoreLittleEndian<uint64>(header + 32, self.value.low);
+    StoreLittleEndian<uint32>(header + 60, Crc32(Span<const uint8>(header, 60)));
+    SidecarWriter out(allocator, *options.sidecar);
+    if (auto written = out.Append(Span<const uint8>(header, SidecarHeaderBytes)); !written) {
+        return written;
+    }
+
+    for (usize position = 0; position < drafts.Size(); ++position) {
+        if (placements[position] == 0) {
+            continue;
+        }
+
+        const BulkDraft& draft = drafts[position];
+        auto raw = options.bulkSource->ReadBulk(draft.original);
+        if (!raw) {
+            return Result<void>::Failure(raw.Error());
+        }
+
+        if (raw.Value().Size() != draft.original.rawBytes ||
+            !(Sha256::Hash(raw.Value()) == draft.original.sha256)) {
+            return FailAsset<void>(
+                failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData, self,
+                static_cast<uint32>(PackageSectionKind::Sidecar), draft.original.bulkId);
+        }
+
+        if (auto padded = out.Pad(alignment); !padded) {
+            return padded;
+        }
+
+        PackageBulkEntry& entry = index[position];
+        entry.bulkId = static_cast<uint32>(position + 1);
+        entry.flags = static_cast<uint32>(BulkEntryFlags::Sidecar);
+        entry.offset = out.Position();
+        entry.rawBytes = raw.Value().Size();
+        entry.storedBytes = raw.Value().Size();
+        entry.sha256 = draft.original.sha256;
+        entry.codec = BulkCodec::None;
+        entry.crc32 = Crc32(raw.Value());
+        if (auto appended = out.Append(raw.Value()); !appended) {
+            return appended;
+        }
+    }
+
+    // 미리 센 파일 크기와 실제로 쓴 크기는 같다(같은 rawBytes·정렬).
+    ROCKS_ASSERT(out.Position() == fileBytes);
+    outcome.fileBytes = fileBytes;
+    return out.Finish(outcome.section, outcome.sha256);
+}
+
 // bulk entry를 Bulk 섹션에 쓰고 BulkIndex 항목을 모은다. Zstd는 entry마다 블록 컨테이너(RCBK —
 // PackageBulkBlockSizeLog2 블록)로 블록 하나씩 압축해 sink에 흘려 쓰고, 인덱스 자리는 비워 뒀다가
 // 끝에 WriteAt으로 채운다 — 압축 메모리는 블록 하나다(AS 5.5절 3, 5.7절 6). 저장 CRC는 인덱스와
 // payload의 CRC를 이어 붙여(Crc32Combine) 만든다.
 Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWriteOptions& options,
                        uint32 alignment, Span<const BulkDraft> drafts,
-                       Array<PackageBulkEntry>& index, AssetId self,
+                       Array<PackageBulkEntry>& index, AssetId self, SidecarOutcome& sidecar,
                        AssetDiagnostic* failure) noexcept {
     if (drafts.IsEmpty()) {
         return Result<void>::Success();
@@ -687,11 +873,48 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 배치(AS 20.1 1): Sidecar는 쿠킹 패키지에 sidecar 출력이 있을 때만 받는다.
+    Array<uint8> placements(allocator);
+    if (auto sized = placements.TryResize(drafts.Size()); !sized) {
+        return sized;
+    }
+
+    usize packaged = 0;
+    for (usize position = 0; position < drafts.Size(); ++position) {
+        const bool streamed = options.bulkSource->Placement(drafts[position].original) ==
+                              PackageBulkPlacement::Sidecar;
+        if (streamed && (options.kind != PackageKind::Cooked || options.sidecar == nullptr ||
+                         drafts[position].editorOnly)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // rawBytes 0인 bulk는 읽을 byte가 없으므로 패키지 안에 둔다(AS 20.1 4).
+        const bool inSidecar = streamed && drafts[position].original.rawBytes != 0;
+        placements[position] = inSidecar ? 1 : 0;
+        packaged += inSidecar ? 0 : 1;
+    }
+
+    // BulkIndex는 bulkId(= 위치 + 1) 순서다 — 두 공간에 나눠 써도 자리에 채운다.
+    if (auto sized = index.TryResize(drafts.Size()); !sized) {
+        return sized;
+    }
+
+    if (auto streamed = WriteSidecar(allocator, options, alignment, drafts, placements.View(),
+                                     index, self, sidecar, failure);
+        !streamed) {
+        return streamed;
+    }
+
+    if (packaged == 0) {
+        return Result<void>::Success();
+    }
+
     if (auto padded = out.Pad(alignment); !padded) {
         return padded;
     }
 
     const uint64 start = out.Position();
+    bool first = true;
     Result<CompressedBlocksSettings> blocks =
         Result<CompressedBlocksSettings>::Failure(ErrorCode::None);
     if (options.bulkCodec == BulkCodec::Zstd) {
@@ -705,6 +928,10 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
     Array<uint8> payload(allocator);
     Array<uint8> container(allocator);
     for (usize position = 0; position < drafts.Size(); ++position) {
+        if (placements[position] != 0) {
+            continue;
+        }
+
         const BulkDraft& draft = drafts[position];
         // 저장 byte 재사용(12.12절): 같은 codec의 이전 파일 entry는 다시 압축하지 않고 복사한다.
         // 0 byte entry는 늘 None이라 쓰기 codec이 Zstd면 여기 오지 않는다(codec이 다르다).
@@ -724,12 +951,13 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
                     static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
             }
 
-            if (position > 0) {
+            if (!first) {
                 if (auto padded = out.Pad(alignment); !padded) {
                     return padded;
                 }
             }
 
+            first = false;
             PackageBulkEntry entry;
             entry.bulkId = static_cast<uint32>(position + 1);
             entry.flags = draft.editorOnly ? static_cast<uint32>(BulkEntryFlags::EditorOnly) : 0;
@@ -743,10 +971,7 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
                 return appended;
             }
 
-            if (auto pushed = index.TryPushBack(entry); !pushed) {
-                return pushed;
-            }
-
+            index[position] = entry;
             continue;
         }
 
@@ -762,12 +987,13 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
                 static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
         }
 
-        if (position > 0) {
+        if (!first) {
             if (auto padded = out.Pad(alignment); !padded) {
                 return padded;
             }
         }
 
+        first = false;
         const Span<const uint8> bytes = raw.Value();
         PackageBulkEntry entry;
         entry.bulkId = static_cast<uint32>(position + 1);
@@ -834,9 +1060,7 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
             }
         }
 
-        if (auto pushed = index.TryPushBack(entry); !pushed) {
-            return pushed;
-        }
+        index[position] = entry;
     }
 
     PackageSectionEntry section;
@@ -1539,9 +1763,10 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     }
 
     Array<PackageBulkEntry> bulkIndex(allocator);
+    SidecarOutcome sidecar(allocator);
     if (step) {
-        step =
-            WriteBulk(allocator, out, options, alignment, hooks.Bulk(), bulkIndex, selfId, failure);
+        step = WriteBulk(allocator, out, options, alignment, hooks.Bulk(), bulkIndex, selfId,
+                         sidecar, failure);
     }
 
     if (step && !bulkIndex.IsEmpty()) {
@@ -1583,6 +1808,10 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         if (step) {
             step = out.WriteSection(PackageSectionKind::BulkIndex, indexBytes.View());
         }
+    }
+
+    if (step && !sidecar.section.IsEmpty()) {
+        step = out.WriteSection(PackageSectionKind::Sidecar, sidecar.section.View());
     }
 
     if (step) {
@@ -1639,6 +1868,8 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
 
     PackageWriteResult result(allocator);
     result.fileBytes = out.Position();
+    result.sidecarBytes = sidecar.fileBytes;
+    result.sidecarSha256 = sidecar.sha256;
     Sha256 fingerprint;
     fingerprint.Update(Span<const uint8>(header, PackageHeaderBytes));
     fingerprint.Update(table.View());

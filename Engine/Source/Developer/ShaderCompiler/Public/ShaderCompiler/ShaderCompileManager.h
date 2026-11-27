@@ -23,8 +23,9 @@
 //
 // - 조정: Compile을 부른 스레드가 조정한다(너겟 요청을 시작하고 기다린다). 그 스레드는 너겟 요청의
 //   scheduler worker가 아니어야 한다(NuggetRequest.h 계약). 결과는 job 순서 그대로다.
-// - 워커 풀: 채널 workerCount개(기본 min(논리 코어 - 1, 8), 최소 1). 워커는 첫 묶음에서 띄운다(찬
-//   캐시는 워커 0개). 묶음 상한은 job maxBatchJobs개·원문 합 maxBatchSourceBytes다.
+// - 워커 풀: 채널 workerCount개(기본 DefaultShaderWorkerCount — ShaderSystem 16.4절 SSD82). 워커는
+//   첫 묶음에서 띄운다(찬 캐시는 워커 0개). 미적중은 PlanShaderBatches로 나눈다(회차마다
+//   min(ceil(남은 job / 채널 수), maxBatchJobs)개, 원문 합 maxBatchSourceBytes가 일찍 닫는다).
 // - 작업 디렉터리: `<workRoot>/<PID>/<n>/`. 시작할 때 자기 `<PID>`를 비우고, 다른 `<PID>` 가운데 그
 //   프로세스가 살아 있지 않은 것을 지운다(PID 재사용으로 살아 보이는 것은 남긴다 — SC4).
 // - 너겟: bucket shader, key = job 키. 값 0(Code)이 없는 적중은 손상으로 다시 컴파일한다.
@@ -60,11 +61,18 @@ class WorkerScheduler;
 
 namespace rocks::shader {
 
-// 워커 묶음 상한(측정 S8 — 워커 열기 비용을 묶음으로 나눠 갚는다)이다.
-inline constexpr uint32 DefaultShaderBatchJobs = 32;
+// 워커 묶음 상한이다(UE BaseEngine.ini [DevOptions.Shaders] MaxShaderJobBatchSize — ShaderSystem
+// 16.4절 SSD82. 워커는 채널마다 살아 있으므로 묶음 크기는 메시지 파일 수만 바꾼다).
+inline constexpr uint32 DefaultShaderBatchJobs = 10;
 inline constexpr usize DefaultShaderBatchSourceBytes = usize{4} * 1024 * 1024;
-// 기본 워커 수 상한이다(min(논리 코어 - 1, 이 값)).
-inline constexpr uint32 MaxDefaultShaderWorkers = 8;
+// 기본 워커 수 규칙의 값이다(UE ShaderCompiler.cpp CalculateNumberOfCompilingThreads,
+// BaseEngine.ini [DevOptions.Shaders] — SSD82): 논리 코어가 ShaderFewCoreThreshold 이하면 코어 - 1,
+// ShaderCompilerCoreCountThreshold 이하면 ShaderUnusedWorkerThreads개를 남기고, 그 위는
+// ShaderUnusedWorkerPercent%(올림)를 남긴다.
+inline constexpr uint32 ShaderFewCoreThreshold = 4;
+inline constexpr uint32 ShaderCompilerCoreCountThreshold = 12;
+inline constexpr uint32 ShaderUnusedWorkerThreads = 3;
+inline constexpr uint32 ShaderUnusedWorkerPercent = 50;
 // 작업 디렉터리 이름(<root>/Intermediate/ShaderWorkers)이다.
 inline constexpr char ShaderWorkerDirectoryName[] = "Intermediate/ShaderWorkers";
 // Compile 한 번이 받는 진행 sink 수 상한이다(대기 작업·진행 작업·호스트 준비 진행 + 여유 하나).
@@ -101,6 +109,23 @@ struct ShaderCompileControl {
 ROCKS_SHADERCOMPILER_API ShaderCompileProgressSink
 MakeShaderCompileCounterSink(ProgressCounter& counter) noexcept;
 
+// 논리 코어 logicalProcessors개 기계의 기본 워커 수다(위 규칙, 최소 1 — SSD82). UE는
+// commandlet·빌드 머신에서 코어를 더 쓰지만 Rocks는 여러 세션이 한 기계를 나눠 쓰므로 모든 호스트가
+// 같은 규칙이다 (더 쓰려면 ShaderCompileManagerConfig::workerCount). 예: 20 → 10, 8 → 5, 4 → 3.
+ROCKS_SHADERCOMPILER_API uint32 DefaultShaderWorkerCount(uint32 logicalProcessors) noexcept;
+
+// 미적중 job(원문 byte 수 sourceBytes, 순서 그대로)을 묶음 크기 목록 sizes로 나눈다(SSD82, UE
+// ShaderCompilerThreadRunnable.cpp NumJobsPerWorker·Min3): 한 회차는 묶음 workers개이고 회차 시작의
+// 목표 크기는 min(ceil(남은 job / workers), maxBatchJobs)다. 원문 합이 maxBatchSourceBytes를 넘을
+// 묶음은 그 앞에서 닫는다(첫 job은 늘 들어간다). sizes 합 = job 수다. 오류: workers·maxBatchJobs·
+// maxBatchSourceBytes가 0이면 InvalidArgument, 할당 실패 OutOfMemory.
+//
+// 사용 예(118 job, 워커 10, 상한 10): sizes = 10 × 10, 2 × 9.
+ROCKS_SHADERCOMPILER_API Result<void> PlanShaderBatches(Span<const usize> sourceBytes,
+                                                        uint32 workers, uint32 maxBatchJobs,
+                                                        usize maxBatchSourceBytes,
+                                                        Array<uint32>& sizes) noexcept;
+
 // 형식 정의 snapshot이다(세션을 시작할 때 한 번 읽은 byte와 그 정의 — 키와 워커 메시지가 같은
 // byte를 쓴다, 10절).
 struct ShaderFormatSnapshot {
@@ -128,7 +153,7 @@ struct ShaderCompileManagerConfig {
     // 워커 실행 파일과 작업 디렉터리 뿌리(<root>/Intermediate/ShaderWorkers)다.
     StringView workerExecutable{};
     StringView workRoot{};
-    // 0이면 기본값이다.
+    // 0이면 기본값(DefaultShaderWorkerCount)이다.
     uint32 workerCount = 0;
     uint32 maxBatchJobs = DefaultShaderBatchJobs;
     usize maxBatchSourceBytes = DefaultShaderBatchSourceBytes;
@@ -202,6 +227,8 @@ struct ShaderCompileJobResult {
     // 너겟에서 온 결과다.
     bool cacheHit = false;
     ShaderJobValues values;
+    // 실패 job의 진단, 또는 성공 job의 경고(warningsAsErrors false·D3D11 대체 경로 — ShaderSystem
+    // 16.4절 SSD79·SSD80)와 너겟 메모(캐시 실패·Conflict)다. 너겟 적중 job에는 경고가 없다.
     String diagnostics;
     // 전처리 결과(키 5행 입력)다.
     PreprocessedShader preprocessed;

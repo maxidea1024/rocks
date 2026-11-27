@@ -761,31 +761,146 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
     return Result<void>::Success();
 }
 
+// Sidecar 섹션을 읽는다(AS 20.1 4): { fileBytes u64, sha256, hashBlockBytes u32, hashCount u32,
+// 블록 SHA-256 × hashCount }. 크기 = 48 + 32 × hashCount, hashBlockBytes는 4 KiB–1 MiB의 2의
+// 거듭제곱, hashCount = ceil(fileBytes / hashBlockBytes), fileBytes는 머리보다 크다.
+Result<void> ReadSidecarSection(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    if (bytes.Size() < SidecarSectionFixedBytes) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    const uint64 fileBytes = LoadLittleEndian<uint64>(bytes.Data());
+    const uint32 blockBytes = LoadLittleEndian<uint32>(bytes.Data() + 40);
+    const uint32 count = LoadLittleEndian<uint32>(bytes.Data() + 44);
+    const bool power = blockBytes != 0 && (blockBytes & (blockBytes - 1)) == 0;
+    if (!power || blockBytes < SidecarMinHashBlockBytes || blockBytes > SidecarMaxHashBlockBytes ||
+        fileBytes <= SidecarHeaderBytes ||
+        uint64{count} != fileBytes / blockBytes + (fileBytes % blockBytes != 0 ? 1 : 0) ||
+        bytes.Size() != SidecarSectionFixedBytes + uint64{Sha256Digest::Bytes} * count) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    if (auto sized = contents.sidecarBlocks.TryResize(count); !sized) {
+        return sized;
+    }
+
+    for (usize byte = 0; byte < Sha256Digest::Bytes; ++byte) {
+        contents.sidecar.sha256.bytes[byte] = bytes[8 + byte];
+    }
+
+    for (uint32 block = 0; block < count; ++block) {
+        const uint8* digest =
+            bytes.Data() + SidecarSectionFixedBytes + usize{Sha256Digest::Bytes} * block;
+        for (usize byte = 0; byte < Sha256Digest::Bytes; ++byte) {
+            contents.sidecarBlocks[block].bytes[byte] = digest[byte];
+        }
+    }
+
+    contents.sidecar.fileBytes = fileBytes;
+    contents.sidecar.hashBlockBytes = blockBytes;
+    contents.sidecar.blockHashes = contents.sidecarBlocks.View();
+    return Result<void>::Success();
+}
+
 } // namespace
+
+SidecarHeaderExpectation ExpectedSidecarHeader(const PackageContents& contents) noexcept {
+    SidecarHeaderExpectation expected;
+    expected.bulkAlignment = contents.header.bulkAlignment;
+    expected.asset = contents.header.assetId;
+    expected.fileBytes = contents.sidecarPresent ? contents.sidecar.fileBytes : 0;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if ((entry.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            ++expected.entryCount;
+        }
+    }
+
+    return expected;
+}
+
+Result<void> ReadSidecarHeader(Span<const uint8> header,
+                               const SidecarHeaderExpectation& expected) noexcept {
+    // 머리 offset(PackageFormat.h SidecarHeaderBytes 주석)이다.
+    constexpr usize VersionOffset = 4;
+    constexpr usize HeaderBytesOffset = 6;
+    constexpr usize AlignmentOffset = 8;
+    constexpr usize CountOffset = 12;
+    constexpr usize FileBytesOffset = 16;
+    constexpr usize AssetOffset = 24;
+    constexpr usize ReservedOffset = 40;
+    constexpr usize CrcOffset = 60;
+    if (header.Size() != SidecarHeaderBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint8* bytes = header.Data();
+    bool same = Crc32(header.Slice(0, CrcOffset)) == LoadLittleEndian<uint32>(bytes + CrcOffset);
+    for (usize index = 0; index < sizeof(SidecarMagic); ++index) {
+        same = same && bytes[index] == SidecarMagic[index];
+    }
+
+    same = same && LoadLittleEndian<uint16>(bytes + VersionOffset) == SidecarFormatVersion &&
+           LoadLittleEndian<uint16>(bytes + HeaderBytesOffset) == SidecarHeaderBytes &&
+           LoadLittleEndian<uint32>(bytes + AlignmentOffset) == expected.bulkAlignment &&
+           LoadLittleEndian<uint32>(bytes + CountOffset) == expected.entryCount &&
+           LoadLittleEndian<uint64>(bytes + FileBytesOffset) == expected.fileBytes &&
+           AssetId{LoadGuid(bytes + AssetOffset)} == expected.asset &&
+           AllZero(header.Slice(ReservedOffset, CrcOffset - ReservedOffset));
+    return same ? Result<void>::Success() : Result<void>::Failure(ErrorCode::CorruptData);
+}
 
 namespace package_detail {
 
-// BulkIndex 배치를 Bulk 섹션 크기와 대조한다: bulkId 1부터 연속, offset = 앞 entry 끝을 정렬한
-// 값(첫 entry 0), 마지막 끝 = 섹션 크기, codec None이면 stored = raw, 정의된 flags만(쿠킹은 0).
-// 내용(entry 사이 패딩 0·저장 CRC)은 보지 않는다(ValidateBulk·VerifyPackageFile이 본다).
+// BulkIndex 배치를 Bulk 섹션 크기·Sidecar 섹션 값과 대조한다(AS 5.2절·20.1 4): bulkId 1부터 연속,
+// 정의된 flags만(쿠킹은 EditorOnly 없음, Sidecar는 쿠킹만), codec None이면 stored = raw. 두
+// 공간마다 offset = 앞 entry 끝을 정렬한 값이다 — 패키지 안은 첫 entry 0·마지막 끝 = Bulk 섹션
+// 크기, sidecar는 첫 entry가 머리 뒤 정렬 위치·마지막 끝 = sidecar fileBytes·codec None. Bulk
+// 섹션은 패키지 안 entry가 있을 때만, Sidecar 섹션은 sidecar entry가 있을 때만 있다. 내용(entry
+// 사이 패딩 0·저장 CRC)은 보지 않는다(ValidateBulk·VerifyPackageFile이 본다 — sidecar 내용은 범위
+// 읽기의 블록 해시가 본다).
 Result<void> ValidateBulkLayout(const PackageContents& contents, uint64 bulkBytes) noexcept {
     const uint64 alignment = contents.header.bulkAlignment;
+    const bool cooked = contents.header.kind == PackageKind::Cooked;
+    constexpr uint32 Sidecar = static_cast<uint32>(BulkEntryFlags::Sidecar);
     uint64 end = 0;
+    uint64 sidecarEnd = SidecarHeaderBytes;
+    usize packaged = 0;
+    usize streamed = 0;
     for (usize index = 0; index < contents.bulkEntries.Size(); ++index) {
         const PackageBulkEntry& entry = contents.bulkEntries[index];
-        const uint64 expectedOffset = index == 0 ? 0 : AlignUp(end, alignment);
-        if (entry.bulkId != index + 1 || entry.offset != expectedOffset ||
-            (entry.flags & ~static_cast<uint32>(BulkEntryFlags::EditorOnly)) != 0 ||
-            (contents.header.kind == PackageKind::Cooked && entry.flags != 0) ||
-            (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes) ||
-            entry.offset > bulkBytes || entry.storedBytes > bulkBytes - entry.offset) {
+        const bool inSidecar = (entry.flags & Sidecar) != 0;
+        if (entry.bulkId != index + 1 || (entry.flags & ~BulkEntryFlagsMask) != 0 ||
+            (cooked && (entry.flags & static_cast<uint32>(BulkEntryFlags::EditorOnly)) != 0) ||
+            (inSidecar && (!cooked || entry.codec != BulkCodec::None)) ||
+            (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes)) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
+        }
+
+        if (inSidecar) {
+            const uint64 limit = contents.sidecarPresent ? contents.sidecar.fileBytes : 0;
+            if (entry.offset != AlignUp(sidecarEnd, alignment) || entry.offset > limit ||
+                entry.storedBytes > limit - entry.offset) {
+                return Result<void>::Failure(ErrorCode::CorruptData);
+            }
+
+            sidecarEnd = entry.offset + entry.storedBytes;
+            ++streamed;
+            continue;
+        }
+
+        const uint64 expectedOffset = packaged == 0 ? 0 : AlignUp(end, alignment);
+        if (entry.offset != expectedOffset || entry.offset > bulkBytes ||
+            entry.storedBytes > bulkBytes - entry.offset) {
             return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         end = entry.offset + entry.storedBytes;
+        ++packaged;
     }
 
-    if (end != bulkBytes) {
+    if (end != bulkBytes || contents.bulkSectionPresent != (packaged != 0) ||
+        contents.sidecarPresent != (streamed != 0) ||
+        (streamed != 0 && sidecarEnd != contents.sidecar.fileBytes)) {
         return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
@@ -804,6 +919,10 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
 
     uint64 end = 0;
     for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if ((entry.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            continue;
+        }
+
         if (!AllZero(contents.bulk.Slice(static_cast<usize>(end),
                                          static_cast<usize>(entry.offset - end)))) {
             return Result<uint64>::Failure(ErrorCode::CorruptData);
@@ -1410,12 +1529,18 @@ Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource&
     if (!present[SectionKindValue(PackageSectionKind::Summary)] ||
         !present[SectionKindValue(PackageSectionKind::Exports)] ||
         !present[SectionKindValue(PackageSectionKind::Objects)] ||
-        present[SectionKindValue(PackageSectionKind::Bulk)] !=
-            present[SectionKindValue(PackageSectionKind::BulkIndex)] ||
+        present[SectionKindValue(PackageSectionKind::BulkIndex)] !=
+            (present[SectionKindValue(PackageSectionKind::Bulk)] ||
+             present[SectionKindValue(PackageSectionKind::Sidecar)]) ||
+        (present[SectionKindValue(PackageSectionKind::Sidecar)] &&
+         (!cooked || !present[SectionKindValue(PackageSectionKind::BulkIndex)])) ||
         (cooked && (present[SectionKindValue(PackageSectionKind::ImportRecord)] ||
                     present[SectionKindValue(PackageSectionKind::Tags)]))) {
         return Corrupt<PackageContents>(failure, asset, 0, 0);
     }
+
+    contents.bulkSectionPresent = present[SectionKindValue(PackageSectionKind::Bulk)];
+    contents.sidecarPresent = present[SectionKindValue(PackageSectionKind::Sidecar)];
 
     // 4. 섹션별: 모르는 종류·flags·schemaVersion·CRC·내용.
     for (const PackageSectionEntry& entry : contents.sections) {
@@ -1505,6 +1630,9 @@ Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource&
             break;
         case PackageSectionKind::BulkIndex:
             read = ReadBulkIndex(bytes, contents);
+            break;
+        case PackageSectionKind::Sidecar:
+            read = ReadSidecarSection(bytes, contents);
             break;
         }
 
@@ -1757,6 +1885,11 @@ Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& ou
     const uint32 section = SectionKindValue(PackageSectionKind::Bulk);
     uint64 total = 0;
     for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        // 스트리밍 bulk(sidecar)는 풀지 않고 상주 예산에도 넣지 않는다(AS 20.1 7).
+        if ((entry.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            continue;
+        }
+
         if (entry.rawBytes > maxRawBytes - total) {
             return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::CapacityExceeded,
                                    asset, section, entry.bulkId);
@@ -1783,6 +1916,14 @@ Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& ou
 
     usize cursor = baseBytes;
     for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if ((entry.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            PackageBulkSlot slot{entry.offset, entry.rawBytes, entry.sha256};
+            slot.streamed = true;
+            slot.crc32 = entry.crc32;
+            (void)slots.TryPushBack(slot);
+            continue;
+        }
+
         const Span<const uint8> stored = contents.bulk.Slice(static_cast<usize>(entry.offset),
                                                              static_cast<usize>(entry.storedBytes));
         const Span<uint8> raw(out.Data() + cursor, static_cast<usize>(entry.rawBytes));
@@ -1959,13 +2100,20 @@ Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
                                     0);
     }
 
-    if (auto layout = package_detail::ValidateBulkLayout(contents, bulk->bytes); !layout) {
+    // 모든 bulk가 sidecar면 Bulk 섹션이 없다(AS 20.1 4).
+    const uint64 bulkBytes = bulk != nullptr ? bulk->bytes : 0;
+    if (auto layout = package_detail::ValidateBulkLayout(contents, bulkBytes); !layout) {
         return SectionFailure<void>(failure, layout.Error(), asset, PackageSectionKind::BulkIndex,
                                     0);
     }
 
     uint64 entryEnd = 0;
     for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        // sidecar entry 내용은 sidecar 파일에 있다(블록 해시·검증 명령이 본다).
+        if ((entry.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            continue;
+        }
+
         auto gap =
             StreamRange(reader, bulk->offset + entryEnd, entry.offset - entryEnd, scratch, true);
         auto crc = gap && gap.Value() == 0 ? StreamRange(reader, bulk->offset + entry.offset,

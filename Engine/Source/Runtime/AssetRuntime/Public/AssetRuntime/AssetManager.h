@@ -240,7 +240,9 @@ private:
 struct AssetFootprint {
     uint32 packages = 0;
     uint64 packageBytes = 0;
+    // 패키지 안 bulk(상주)만이다 — sidecar(스트리밍 bulk)는 sidecarBytes로 따로 센다(AS 20.1 7).
     uint64 bulkRawBytes = 0;
+    uint64 sidecarBytes = 0;
 };
 
 using AssetReadyCallback = Function<void(Result<AssetLease>, const AssetDiagnostic&)>;
@@ -389,8 +391,9 @@ public:
     Result<void> OnReady(PrimaryAssetTicket& ticket, TaskLane lane,
                          PrimaryReadyCallback&& callback) noexcept;
 
-    // 대표·지정 bundle 구성원의 Hard 전이 폐포에 대한 매니페스트 packageBytes·bulkRawBytes 합이다
-    // (로드하지 않는다). 오류는 LoadPrimaryAsset의 인자 오류와 같고, 할당 실패는 그 오류다.
+    // 대표·지정 bundle 구성원의 Hard 전이 폐포에 대한 매니페스트 packageBytes·bulkRawBytes·
+    // sidecarBytes 합이다(로드하지 않는다). 오류는 LoadPrimaryAsset의 인자 오류와 같고, 할당 실패는
+    // 그 오류다.
     Result<AssetFootprint> EstimatePrimaryAsset(AssetId asset,
                                                 Span<const StringView> bundles) const noexcept;
 

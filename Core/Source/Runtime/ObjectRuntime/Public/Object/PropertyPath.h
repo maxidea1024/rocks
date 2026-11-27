@@ -440,6 +440,11 @@ ROCKS_OBJECTRUNTIME_API Result<void>
 PathRead(ObjectRegistry& registry, const ObjectAccessContext& access, const PathTarget& target,
          PropertyPath path, FieldValue& out, PropertyPathFailure* failure = nullptr) noexcept;
 
+// 변경 통지(Docs/Design/ChangeNotification.ko.md CN-D10): 게시된 객체의 변경 연산(PathWrite·
+// 넣기·지우기·비우기·Optional·InstancedStruct·키 연산)은 성공하면 path의 최상위 필드가 Notify일 때
+// 구독자에게 한 번 알린다(최상위 단일 값은 같은 값이면 알리지 않고, 하위 경로·컨테이너는 비교
+// 없이). staged 객체·분리된 값은 알리지 않는다.
+//
 // path의 단일 값(배열 원소 교체, Map 항목 넣기·교체 포함)을 value로 쓴다. previous가 있으면
 // 성공했을 때 쓰기 전 값을 담는다(CU4 Undo용 — Map에 없던 키를 넣었으면 previous는 kind = 값 종류,
 // present = false다: Undo는 PathEraseKey다, 리플렉션 B9f3): String·Soft는 previous의 allocator가

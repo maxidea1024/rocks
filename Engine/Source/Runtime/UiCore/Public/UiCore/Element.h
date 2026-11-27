@@ -27,6 +27,9 @@ struct PopupRequest {
     SharedPtr<Element> layer;
     SharedPtr<Element> anchor;
     void (*close)(Element&) noexcept = nullptr;
+    // anchor가 숨어도(고르지 않은 탭 등) 닫지 않고 층만 접는다(Docs/Design/UiToolkit 22.6절 —
+    // 초점을 받지 않는 오류 팝업). 거짓이면 호스트가 닫는다.
+    bool keepWhileHidden = false;
 };
 
 // 요소가 커서를 정하지 않았다는 표지다(cursorOverride_ — 부모나 기본 커서를 쓴다).
@@ -240,6 +243,11 @@ public:
 
     // 키보드 focus를 받을 수 있는 Element만 재정의한다.
     virtual bool SupportsKeyboardFocus() const noexcept;
+    // 초점을 직접 받지 않는 요소에 SetFocus하면 대신 초점을 받을 자손이다(UE SEditableTextBox가
+    // OnFocusReceived에서 안쪽 편집기로 넘기는 것과 같은 결과 — Docs/Design/UiToolkit 22.2절). 이
+    // 요소는 Tab·방향 탐색의 정지가 아니다(SupportsKeyboardFocus가 거짓 — 정지가 하나로 남는다).
+    // 기본은 없음이다.
+    virtual SharedPtr<Element> FocusDelegate() const noexcept;
 
     // 키 누름은 미리보기에서 루트부터, 본 이벤트에서 focus 대상부터 전달된다.
     // 보조 키가 필요한 입력 컨트롤은 이 경로에서 키를 선점한다. 기본 구현은 기존 미리보기로

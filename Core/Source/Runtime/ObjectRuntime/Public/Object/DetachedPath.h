@@ -137,6 +137,11 @@ private:
 // 변경은 변경 표지가 잡아 BeginBatchPublish가 Busy다 — C++ 직접 쓰기는 호출자 책임) 상자를 비우면
 // 계약 위반이다. 같은 묶음의 게시 자리들은 서로 겹치지 않아야 한다(한 자리가 다른 자리를 담으면
 // 먼저 게시한 쪽이 뒤 자리의 주소를 무효로 만들 수 있다).
+//
+// 변경 통지: 구간 안의 게시는 Notify 필드를 알리지 않는다(그 구간의 통지는 Busy다 —
+// Docs/Design/ChangeNotification.ko.md CN-D10·CN-D11). 게시한 호출자가 End 뒤에 게시한 최상위
+// 필드를 ObjectRegistry::NotifyIfTarget으로 알린다(여러 자리면 NotifyGroup으로 한 번씩 — 경로
+// 진입점과 ReflectionText 대입 묶음이 그렇게 한다). 알리지 않으면 구독자는 그 변경을 놓친다.
 class ROCKS_OBJECTRUNTIME_API PreparedAttach {
 public:
     PreparedAttach() noexcept = default;

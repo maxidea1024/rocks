@@ -283,9 +283,12 @@ public:
     }
 
     // owner 저장소 안에 직접 포함된 field만 허용한다. 대상 타입/문맥/생존 검증 실패 시 field는
-    // 불변이다. Marking 동안 대상 shade와 field 게시를 같은 gate 안에서 수행한다. owner가 encode
-    // 고정(PinForEncode) 중이면 Busy다. Registry API로 쓰는 모든 참조(이 field와 컨테이너 원소)는
-    // owner 타입의 Trace가 방문해야 한다 — GC와 관찰자의 Commit·Discard 계수가 Trace로 센다.
+    // 불변이다. field를 담은 owner의 Notify 필드는 handle이 바뀌면 구독자에게 알린다(아래 컨테이너·
+    // StructRefArray 변경 API는 성공마다 — Docs/Design/ChangeNotification.ko.md CN-D10, 살아 있지
+    // 않은 owner는 알리지 않는다). Marking 동안 대상 shade와 field 게시를 같은 gate 안에서
+    // 수행한다. owner가 encode 고정(PinForEncode) 중이면 Busy다. Registry API로 쓰는 모든 참조(이
+    // field와 컨테이너 원소)는 owner 타입의 Trace가 방문해야 한다 — GC와 관찰자의 Commit·Discard
+    // 계수가 Trace로 센다.
     //
     // 관찰자 Registry(RegistryOptions::referenceObserver)에서는 옛 대상·새 대상의 패키지 사이 간선
     // 변화를 기록한다(옛 대상 키 먼저, 두 패키지가 같으면 기록·예약하지 않는다). 새 키 공간이
@@ -643,6 +646,32 @@ public:
     Result<void> NotifyIndex(const ObjectAccessContext& access, ObjectHandle object,
                              uint32 index) noexcept;
 
+    // id가 이 객체 타입의 통지 대상이면 Notify와 같고, 대상이 아니면 아무것도 하지 않고 Success다
+    // (경로 쓰기·대입 묶음처럼 필드가 Notify인지 모르는 일반 쓰기 지점용 — CN-D10). 그 밖의 오류는
+    // Notify와 같다.
+    //
+    // 사용 예(경로 쓰기가 끝난 뒤 최상위 필드를 알린다):
+    //   (void)registry.NotifyIfTarget(access, actor, path.steps[0].fieldId);
+    Result<void> NotifyIfTarget(const ObjectAccessContext& access, ObjectHandle object,
+                                Guid id) noexcept;
+
+    // 통지 묶음을 연다(CN-D10): 열려 있는 동안의 통지(Notify·NotifyIndex·NotifyIfTarget과 쓰기
+    // 경로의 통지)는 바로 부르지 않고 (객체, 대상)마다 한 번으로 모았다가, 가장 바깥 묶음을 닫을 때
+    // (NotifyGroup::End·소멸) 모은 순서대로 낸다. 묶음은 중첩할 수 있다(안쪽 묶음을 닫는 것은
+    // 아무것도 하지 않는다). 모을 자리를 할당하지 못하면 그 통지는 바로 낸다(같은 대상이 두 번 갈
+    // 수 있다 — "바뀌었을 수 있음"이고 놓침은 없다). 닫을 때 이미 파괴 요청·회수된 객체의 통지는
+    // 부르지 않는다. 경로 연산 진입점은 게시된 객체의 변경마다 스스로 연다. 처리 표시·묶음 게시
+    // 구간 안에서 닫거나 묶음이 열린 채 Registry를 소멸하면 Fatal이다(모은 통지가 사라진다). 오류:
+    // 접근(WrongThread·WrongContext), 종료 뒤 ShuttingDown, 중첩 수 상한 Overflow.
+    //
+    // 사용 예(한 대상의 여러 변경을 한 번으로 알린다):
+    //   auto group = registry.BeginNotifyGroup(access);
+    //   if (!group) { return Result<void>::Failure(group.Error()); }
+    //   (void)registry.Notify(access, actor, NotifyTarget{healthId});
+    //   (void)registry.Notify(access, actor, NotifyTarget{healthId});
+    //   group.Value().End(); // health 구독자는 한 번 받는다
+    Result<NotifyGroup> BeginNotifyGroup(const ObjectAccessContext& access) noexcept;
+
     // 객체가 지금 클러스터 소속인지다(진단·시험용 — 장기 smoke가 경계 비율 안전장치의 해체를 모델에
     // 맞춘다). 클러스터를 켜지 않은 Registry는 언제나 false다. handle·접근 규칙과 오류는
     // InspectLifecycle과 같다(cutoff white는 false). 결과는 반환 후에도 바뀔 수 있다.
@@ -769,6 +798,8 @@ private:
     friend struct detail::ObjectRegistryAccess;
     friend class ObjectBatchPublish;
     friend class PreparedStructElements;
+    friend class FieldWriteOperation;
+    friend class NotifyGroup;
 
     struct Slot;
     struct SlotCold;
@@ -996,6 +1027,27 @@ private:
                              bool requireAlive) noexcept;
     Result<void> NotifyChecked(const ObjectAccessContext& access, ObjectHandle object,
                                Guid targetId, uint32 index) noexcept;
+    // 쓰기 경로의 통지(CN1b — CN-D10). NotifyWatched는 객체에 통지 상태가 있는지(구독자 있음 — 소유
+    // 스레드, 접근 검사를 마친 쓰기 경로만)다. NotifyMember는 Registry 참조·컨테이너 API가 성공한
+    // 뒤 받은 멤버 주소를 담은 Notify 필드를 알린다(owner가 살아 있지 않으면 알리지 않는다).
+    bool NotifyWatched(ObjectHandle object) const noexcept;
+    void NotifyMember(const ObjectAccessContext& access, ObjectHandle owner,
+                      const void* member) noexcept;
+
+    template <class R>
+    R NotifyAfter(const ObjectAccessContext& access, ObjectHandle owner, const void* member,
+                  R result) noexcept {
+        if (result) {
+            NotifyMember(access, owner, member);
+        }
+
+        return result;
+    }
+
+    // 묶음 안의 통지를 모은다(같은 (객체, 번호)가 있으면 그대로 참). 할당 실패면 거짓이다(바로
+    // 낸다).
+    bool DeferNotify(ObjectHandle object, uint32 slotIndex, uint32 index) noexcept;
+    void EndNotifyGroup(const ObjectAccessContext& access) noexcept;
     Result<ObjectAccessContext> ScopedAccess() const noexcept;
     Result<ObjectLifecycle> InspectChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
                                            bool requireBorrow) const noexcept;
@@ -1402,6 +1454,16 @@ private:
     HashMap<uint32, UniquePtr<NotifyState>> notifyStates_;
     uint32 notifyDepth_ = 0;
     uint64 notifySerial_ = 0;
+    // 열린 통지 묶음 수와 모은 통지다(CN-D10 — 소유 스레드만).
+    struct PendingNotify {
+        ObjectHandle object{};
+        uint32 index = 0;
+    };
+
+    uint32 notifyGroupDepth_ = 0;
+    Array<PendingNotify> notifyPending_;
+    // (슬롯 index << 32 | 통지 번호) → 모은 handle이다(중복 판정).
+    HashMap<uint64, ObjectHandle> notifyPendingIndex_;
     // 아래 둘은 Stats가 읽으므로 잠금(gate_) 안에서 바꾼다.
     uint32 notifiedObjects_ = 0;
     uint32 droppedNotifications_ = 0;

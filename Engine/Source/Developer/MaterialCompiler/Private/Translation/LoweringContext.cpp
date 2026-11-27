@@ -396,6 +396,21 @@ Result<const MaterialColorCurveSnapshot*> LoweringContext::FindColorCurve(Guid a
     return Result<const MaterialColorCurveSnapshot*>::Success(snapshot);
 }
 
+Result<const MaterialCurveAtlasSnapshot*> LoweringContext::FindCurveAtlas(Guid asset) noexcept {
+    const MaterialSourceProvider* sources = translator_.Input().sources;
+    const MaterialCurveAtlasSnapshot* snapshot =
+        sources == nullptr || asset == Guid{} ? nullptr : sources->FindCurveAtlas(asset);
+    if (snapshot == nullptr) {
+        return Result<const MaterialCurveAtlasSnapshot*>::Success(nullptr);
+    }
+
+    if (auto added = translator_.AddDependency(MaterialDependencyRole::CurveAtlas, asset); !added) {
+        return Result<const MaterialCurveAtlasSnapshot*>::Failure(added.Error());
+    }
+
+    return Result<const MaterialCurveAtlasSnapshot*>::Success(snapshot);
+}
+
 Result<bool> LoweringContext::UseSampler(IrTextureSource source, Guid id) noexcept {
     uint32 count = 0;
     auto admitted = translator_.ReferenceSampler(static_cast<uint8>(source), id, count);

@@ -22,7 +22,7 @@ constexpr usize LengthPrefixBytes = sizeof(uint64);
 constexpr usize MinFileBytes = MagicBytes + 3 * sizeof(uint32);
 // 항목 하나의 최소 byte다(문자열은 길이 칸만, 개수 칸은 0) — 개수 칸을 남은 byte로 묶는다.
 constexpr usize MinEntryBytes = 2 * GuidBytes + LengthPrefixBytes + DigestBytes +
-                                2 * sizeof(uint64) + DigestBytes + 3 * sizeof(uint32);
+                                3 * sizeof(uint64) + 2 * DigestBytes + 3 * sizeof(uint32);
 // bundle 하나의 최소 byte다(이름 길이 칸 + 구성원 개수 칸).
 constexpr usize MinBundleBytes = LengthPrefixBytes + sizeof(uint32);
 constexpr usize DependencyBytes = GuidBytes + sizeof(uint32);
@@ -383,6 +383,11 @@ Result<void> ValidateEntry(const CookedManifestEntry& entry, uint64 index, Alloc
         return ManifestCorrupt<void>(failure, Field::PackageBytes, index, entry.asset);
     }
 
+    // sidecar가 없으면(0 byte) SHA-256도 0이다(AS 20.1 5).
+    if (entry.sidecarBytes == 0 && !SameDigest(entry.sidecarSha256, Sha256Digest{})) {
+        return ManifestCorrupt<void>(failure, Field::SidecarSha256, index, entry.asset);
+    }
+
     if ((entry.flags & ~CookedManifestFlagsMask) != 0) {
         return ManifestCorrupt<void>(failure, Field::Flags, index, entry.asset);
     }
@@ -645,6 +650,8 @@ Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedMani
         step(writer.WriteRaw(Span<const uint8>(entry.packageSha256.bytes, DigestBytes)));
         step(writer.WriteU64(entry.packageBytes));
         step(writer.WriteU64(entry.bulkRawBytes));
+        step(writer.WriteU64(entry.sidecarBytes));
+        step(writer.WriteRaw(Span<const uint8>(entry.sidecarSha256.bytes, DigestBytes)));
         step(writer.WriteRaw(Span<const uint8>(entry.cookKey.bytes, DigestBytes)));
         step(writer.WriteU32(entry.flags));
         step(writer.WriteU32(static_cast<uint32>(entry.bundles.Size())));
@@ -871,6 +878,16 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
         }
 
         entry.bulkRawBytes = rawBytes.Value();
+        auto sidecarBytes = in.ReadU64();
+        if (!sidecarBytes) {
+            return ManifestCorrupt<Out>(failure, Field::SidecarBytes, index, entry.asset);
+        }
+
+        entry.sidecarBytes = sidecarBytes.Value();
+        if (!readDigest(entry.sidecarSha256)) {
+            return ManifestCorrupt<Out>(failure, Field::SidecarSha256, index, entry.asset);
+        }
+
         if (!readDigest(entry.cookKey)) {
             return ManifestCorrupt<Out>(failure, Field::CookKey, index, entry.asset);
         }
@@ -1081,6 +1098,11 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
     uint64 rawBytes = 0;
     bool overflow = false;
     for (const PackageBulkEntry& bulk : contents.bulkEntries) {
+        // sidecar entry는 상주하지 않으므로 bulkRawBytes에 들지 않는다(AS 20.1 4).
+        if ((bulk.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) != 0) {
+            continue;
+        }
+
         if (bulk.rawBytes > NumericLimits<uint64>::Max() - rawBytes) {
             overflow = true;
             break;
@@ -1091,6 +1113,16 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
 
     if (overflow || rawBytes != entry.bulkRawBytes) {
         return ManifestCorrupt<void>(failure, Field::BulkRawBytes, CookedManifestNoEntry, asset);
+    }
+
+    // 패키지 Sidecar 섹션의 정체가 매니페스트와 같다(AS 20.1 5).
+    const uint64 sidecarBytes = contents.sidecarPresent ? contents.sidecar.fileBytes : 0;
+    if (sidecarBytes != entry.sidecarBytes) {
+        return ManifestCorrupt<void>(failure, Field::SidecarBytes, CookedManifestNoEntry, asset);
+    }
+
+    if (contents.sidecarPresent && !SameDigest(contents.sidecar.sha256, entry.sidecarSha256)) {
+        return ManifestCorrupt<void>(failure, Field::SidecarSha256, CookedManifestNoEntry, asset);
     }
 
     const PackageSummary& summary = contents.summary;
@@ -1118,9 +1150,11 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
     return Result<void>::Success();
 }
 
-Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
-                                     const Sha256Digest& packageSha256) noexcept {
-    // 4.2절: Packages/<a>/<A>-<h>.rpkg — a = A의 앞 2자, h = SHA-256 앞 16자.
+namespace {
+
+// 4.2절: Packages/<a>/<A>-<h><extension> — a = A의 앞 2자, h = SHA-256 앞 16자.
+Result<void> AppendShardedPath(StringBuilderBase& out, AssetId asset, const Sha256Digest& sha256,
+                               StringView extension) noexcept {
     constexpr usize ShardChars = 2;
     constexpr usize HashChars = 16;
     StringBuilder<KeyInlineBytes> text(out.GetAllocator());
@@ -1129,7 +1163,7 @@ Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
     }
 
     char hex[Sha256Digest::HexBytes + 1];
-    packageSha256.ToHex(hex);
+    sha256.ToHex(hex);
     const StringView id = text.View();
     ErrorCode error = ErrorCode::None;
     auto step = [&](Result<void> result) noexcept {
@@ -1143,8 +1177,21 @@ Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
     step(out.TryAppend(id));
     step(out.TryAppendAscii('-'));
     step(out.TryAppend(StringView(hex, HashChars)));
-    step(out.TryAppend(".rpkg"));
+    step(out.TryAppend(extension));
     return error == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(error);
+}
+
+} // namespace
+
+Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
+                                     const Sha256Digest& packageSha256) noexcept {
+    return AppendShardedPath(out, asset, packageSha256, ".rpkg");
+}
+
+Result<void> AppendCookedSidecarPath(StringBuilderBase& out, AssetId asset,
+                                     const Sha256Digest& sidecarSha256) noexcept {
+    // AS 20.1 3: 패키지와 같은 디렉터리 규칙, 확장자만 다르다.
+    return AppendShardedPath(out, asset, sidecarSha256, ".rbsc");
 }
 
 Result<void> AppendCookedArtifactPath(StringBuilderBase& out,

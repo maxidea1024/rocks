@@ -1,5 +1,9 @@
 #include "WidgetsPage.h"
 
+#include "../DemoTextShaper.h"
+
+#include <Core/Text/StringBuilder.h>
+#include <PlatformWindow/Clipboard.h>
 #include <UiCore/KeyChord.h>
 #include <UiFramework/Controls/ActivityIndicator.h>
 #include <UiFramework/Controls/CheckBox.h>
@@ -12,6 +16,7 @@
 #include <UiFramework/Controls/Slider.h>
 #include <UiFramework/Controls/SpinBox.h>
 #include <UiFramework/Layout/HorizontalStack.h>
+#include <UiFramework/Layout/SizeBox.h>
 #include <UiFramework/Controls/Timeline.h>
 #include <UiFramework/Popups/ToolTip.h>
 #include <UiFramework/Layout/VerticalStack.h>
@@ -45,6 +50,15 @@ constexpr float ProgressValue = 0.5f;
 constexpr float SliderValue = 0.5f;
 constexpr float ScrollThumb = 0.3f;
 constexpr float ImageRadius = 6;
+// 편집 텍스트 견본 폭과 여러 줄 견본 크기다(UE 갤러리 SBox MinDesiredWidth 200·MinDesiredHeight
+// 48 — SStarshipGallery.cpp 1386·1398행). 여러 줄 상자는 스크롤 막대가 보이게 조금 더 높다.
+constexpr float EditWidth = 200;
+constexpr Vec2 MultiLineSize{200, 48};
+constexpr Vec2 MultiLineBoxSize{200, 64};
+// 여러 줄 상자 견본의 줄 수다(보이는 높이를 넘어 스크롤 막대가 생긴다).
+constexpr int32 MultiLineSampleLines = 12;
+// 값 레이블 처음 글자다.
+constexpr StringView ValueIdle = "Value: (type in the box)";
 
 // 위젯이 정한 표시 문자열을 레이블에 shaping하는 콜백이다(SpinBox·InputKeySelector caption).
 // 레이블이 사라져도 매달리지 않게 약한 참조로 잡는다.
@@ -59,6 +73,191 @@ Delegate<Result<void>(StringView)> Caption(GalleryContext& context,
 
 template <typename T>
 Result<SharedPtr<Element>> AsElement(Result<SharedPtr<T>>&& made) noexcept;
+
+// content의 폭만 정한다(높이는 내용 — UE SBox WidthOverride).
+Result<SharedPtr<Element>> Wide(GalleryContext& context, const SharedPtr<Element>& content,
+                                float width) noexcept {
+    auto box = SharedPtr<SizeBox>::TryMake(context.allocator, context.allocator);
+    if (!box) {
+        return Result<SharedPtr<Element>>::Failure(box.Error());
+    }
+
+    auto result = box.Value()->SetWidthOverride(width);
+    if (result) {
+        result = box.Value()->TryAddChild(content);
+    }
+
+    return result ? Result<SharedPtr<Element>>::Success(box.Value())
+                  : Result<SharedPtr<Element>>::Failure(result.Error());
+}
+
+// 편집기의 클립보드는 창 세션의 것이다.
+Platform DesktopPlatform() noexcept {
+    return Platform{.readClipboardText = &platform::ReadClipboardText,
+                    .writeClipboardText = &platform::WriteClipboardText};
+}
+
+// 힌트 글자를 붙인다.
+Result<void> SetHint(GalleryContext& context, EditableText& editor, StringView hint) noexcept {
+    auto text = Text::Invariant(context.allocator, hint);
+    return text ? editor.SetHintText(text.Value()) : Result<void>::Failure(text.Error());
+}
+
+// 상자를 만들어 text로 시작한다.
+Result<SharedPtr<EditableTextBox>> MakeBox(GalleryContext& context,
+                                           const SharedPtr<TextShaper>& shaper, StringView text,
+                                           bool multiline) noexcept {
+    auto box = SharedPtr<EditableTextBox>::TryMake(context.allocator, context.allocator, shaper,
+                                                   DesktopPlatform(), multiline);
+    if (!box) {
+        return box;
+    }
+
+    auto ready = box.Value()->Initialize(text, NormalFontSize);
+    if (!ready) {
+        return Result<SharedPtr<EditableTextBox>>::Failure(ready.Error());
+    }
+
+    return box;
+}
+
+// 값 레이블에 "prefix: value"를 보인다.
+void ShowValue(GalleryContext& context, const WeakPtr<TextLabel>& target, StringView prefix,
+               StringView value) noexcept {
+    auto label = target.Lock();
+    StringBuilder<> line(context.allocator);
+    if (label && line.TryAppend(prefix) && line.TryAppend(": ") && line.TryAppend(value)) {
+        (void)context.text.SetText(*label, line.View(), NormalFont);
+    }
+}
+
+// 확정 사유 이름이다(값 레이블).
+StringView CommitPrefix(TextCommitReason reason) noexcept {
+    return reason == TextCommitReason::Enter ? StringView("Committed (Enter)")
+                                             : StringView("Committed (focus lost)");
+}
+
+// "Text Input" 묶음(UE 갤러리 1365–1405행 — SEditableText·SEditableTextBox·여러 줄)과 Rocks가 더한
+// 읽기 전용·비밀번호·오류·값 레이블 행이다(22.9절).
+void AddTextInputRows(GalleryContext& context, GalleryGrid& rows, BuildStatus& status,
+                      TextInputSamples& samples) noexcept {
+    Allocator& allocator = context.allocator;
+    auto made = SharedPtr<DemoTextShaper>::TryMake(allocator, allocator, context.text);
+    if (!status.Take(made, "Text Input shaper")) {
+        return;
+    }
+
+    const SharedPtr<TextShaper> shaper = made.Value();
+    const auto one = [&](StringView name, StringView usage,
+                         Result<SharedPtr<Element>> widget) noexcept {
+        if (status.Take(widget, name)) {
+            rows.AddRow(name, usage, widget.Value());
+        }
+    };
+
+    // 바탕 없는 편집기(UE SEditableText).
+    {
+        auto editor = SharedPtr<EditableText>::TryMake(allocator, allocator, shaper,
+                                                       DesktopPlatform(), false);
+        if (status.Take(editor)) {
+            auto ready = editor.Value()->Initialize({}, NormalFontSize);
+            if (ready) {
+                ready = SetHint(context, *editor.Value(), "This is editable text");
+            }
+
+            if (status.Take(ready, "Editable Text")) {
+                one("Editable Text", "EditableText + SetHintText",
+                    Wide(context, editor.Value(), EditWidth));
+            }
+        }
+    }
+
+    // 힌트 상자와 값 레이블(바뀐 값·확정 사유).
+    {
+        auto box = MakeBox(context, shaper, {}, false);
+        auto value = MakeText(context, ValueIdle, NormalFont, ColorRef::Specified(LabelColor));
+        if (status.Take(box) && status.Take(value)) {
+            EditableText& editor = box.Value()->Editor();
+            auto ready = SetHint(context, editor, "This is an editable text box");
+            const WeakPtr<TextLabel> target(value.Value());
+            GalleryContext* owner = &context;
+            editor.SetOnTextChanged(
+                Delegate<void(StringView)>::CreateLambda([owner, target](StringView text) noexcept {
+                    ShowValue(*owner, target, "Changed", text);
+                }));
+            editor.SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
+                [owner, target](StringView text, TextCommitReason reason) noexcept {
+                    ShowValue(*owner, target, CommitPrefix(reason), text);
+                }));
+            auto wide = Wide(context, box.Value(), EditWidth);
+            if (status.Take(ready, "Editable Text Box") && status.Take(wide)) {
+                const SharedPtr<Element> parts[] = {wide.Value(), value.Value()};
+                rows.AddRow("Editable Text Box", "EditableTextBox + SetOnTextChanged / Committed",
+                            parts);
+                samples.box = box.Value();
+                samples.value = value.Value();
+            }
+        }
+    }
+
+    // 읽기 전용(UE ReadOnly 바탕 Header)·비밀번호.
+    {
+        auto readOnly = MakeBox(context, shaper, "Read only text", false);
+        auto password = MakeBox(context, shaper, "secret", false);
+        if (status.Take(readOnly) && status.Take(password)) {
+            readOnly.Value()->Editor().SetReadOnly(true);
+            auto masked = password.Value()->Editor().SetPassword(true);
+            if (status.Take(masked, "Password")) {
+                one("Editable Text Box (read only)", "EditableText::SetReadOnly",
+                    Wide(context, readOnly.Value(), EditWidth));
+                one("Editable Text Box (password)", "EditableText::SetPassword",
+                    Wide(context, password.Value(), EditWidth));
+            }
+        }
+    }
+
+    // 오류 표지와 팝업(UE SPopupErrorText — 22.6절).
+    {
+        auto box = MakeBox(context, shaper, "Untitled", false);
+        auto message = Text::Invariant(allocator, "Name is already in use");
+        if (status.Take(box) && status.Take(message)) {
+            auto set = box.Value()->SetError(message.Value());
+            if (status.Take(set, "Editable Text Box (error)")) {
+                one("Editable Text Box (error)", "EditableTextBox::SetError",
+                    Wide(context, box.Value(), EditWidth));
+                samples.error = box.Value();
+            }
+        }
+    }
+
+    // 여러 줄(UE SMultiLineEditableText·Box): 힌트 편집기와 넘치는 긴 글 상자(스크롤 막대).
+    {
+        auto editor =
+            SharedPtr<EditableText>::TryMake(allocator, allocator, shaper, DesktopPlatform(), true);
+        StringBuilder<> lines(allocator);
+        bool written = true;
+        for (int32 i = 1; i <= MultiLineSampleLines && written; ++i) {
+            written = lines.TryAppend(i == 1 ? StringView("Line 1") : StringView("\nLine ")) &&
+                      (i == 1 || lines.TryAppendFormat("{}", i));
+        }
+
+        auto box = MakeBox(context, shaper, written ? lines.View() : StringView{}, true);
+        if (status.Take(editor) && status.Take(box)) {
+            auto ready = editor.Value()->Initialize({}, NormalFontSize);
+            if (ready) {
+                ready = SetHint(context, *editor.Value(), "This is multi-line\neditable text");
+            }
+
+            if (status.Take(ready, "Multi-Line Editable Text")) {
+                one("Multi-Line Editable Text", "EditableText (multiline)",
+                    Sized(context, editor.Value(), MultiLineSize));
+                one("Multi-Line Editable Text Box", "EditableTextBox (multiline) + ScrollBar",
+                    Sized(context, box.Value(), MultiLineBoxSize));
+                samples.multiLine = box.Value();
+            }
+        }
+    }
+}
 
 // 글자 툴팁이다(밝은 바탕 위 검은 글자 — DefaultToolTipStyle).
 Result<SharedPtr<Element>> MakeTextToolTip(GalleryContext& context, StringView text) noexcept {
@@ -236,6 +435,10 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         }
     }
 
+    // 편집 텍스트(UE 순서 — 숫자 입력 다음, 1365행).
+    TextInputSamples textInput;
+    AddTextInputRows(context, rows, status, textInput);
+
     // UE 갤러리에 없는 Rocks 부품(16.4절 뒤쪽 행).
     {
         auto keys = SharedPtr<InputKeySelector>::TryMake(allocator, allocator);
@@ -338,7 +541,7 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         return Result<WidgetsPage>::Failure(root.Error());
     }
 
-    return Result<WidgetsPage>::Success({root.Value(), Move(grid.Value())});
+    return Result<WidgetsPage>::Success({root.Value(), Move(grid.Value()), Move(textInput)});
 }
 
 } // namespace rocks::ui::gallery

@@ -11,11 +11,12 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 
-// 쿠킹 매니페스트 v2(`CookedManifest.rman`)다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항
-// A4f2). 쿠커(A4)가 모델을 만들어 WriteCookedManifest로 쓰고, 로더(A1c)가 ReadCookedManifest로 읽어
-// 패키지를 찾고(Find) 연 패키지를 CheckCookedPackage로 대조한다. backend 표·artifact 표(셰이더
-// 라이브러리 등 비에셋 산출물)는 셰이더 쪽이 FindArtifact로 찾고 CheckCookedArtifactFile로
-// 대조한다. 서명 봉투(ContentSigning)는 검증한 같은 버퍼의 매니페스트 byte를 reader에 넘긴다.
+// 쿠킹 매니페스트 v3(`CookedManifest.rman`)다(Docs/Design/AssetSystem 10절, 10.1절 A1b·10.3절 4항
+// A4f2·20.1 5). 쿠커(A4)가 모델을 만들어 WriteCookedManifest로 쓰고, 로더(A1c)가
+// ReadCookedManifest로 읽어 패키지를 찾고(Find) 연 패키지를 CheckCookedPackage로 대조한다. backend
+// 표·artifact 표(셰이더 라이브러리 등 비에셋 산출물)는 셰이더 쪽이 FindArtifact로 찾고
+// CheckCookedArtifactFile로 대조한다. 서명 봉투(ContentSigning)는 검증한 같은 버퍼의 매니페스트
+// byte를 reader에 넘긴다.
 namespace rocks {
 
 // 서명하지 않은 쿠킹 매니페스트 파일 이름이다(쿠킹 루트 바로 아래 — 쿠커가 쓰고 EngineAssets가
@@ -26,7 +27,8 @@ inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
 inline constexpr uint8 CookedManifestMagic[4] = {'R', 'M', 'A', 'N'};
 
 // 이 reader·writer가 쓰는 형식 버전이다(다른 값은 UnsupportedVersion).
-inline constexpr uint32 CookedManifestFormatVersion = 2;
+// 3: 항목의 sidecar 크기·SHA-256(AS 20.1 5 — 스트리밍 bulk).
+inline constexpr uint32 CookedManifestFormatVersion = 3;
 
 // 파일 byte 상한이다.
 inline constexpr uint64 CookedManifestMaxFileBytes = uint64{1} * 1024 * 1024 * 1024;
@@ -132,7 +134,10 @@ enum class CookedManifestField : uint32 {
     ArtifactCount,
     // artifact SHA-256(reader 잘림·런타임 파일 대조)과 cookKey(reader 잘림)다.
     ArtifactSha256,
-    ArtifactCookKey
+    ArtifactCookKey,
+    // v3 항목의 sidecar 크기·SHA-256(reader 잘림·0 규칙·패키지 대조 — AS 20.1 5)이다.
+    SidecarBytes,
+    SidecarSha256
 };
 
 // 헤더 칸 진단의 detail 값이다(항목 번호가 없다).
@@ -179,8 +184,12 @@ struct CookedManifestEntry {
     String pathHint;
     Sha256Digest packageSha256{};
     uint64 packageBytes = 0;
-    // 패키지 BulkIndex rawBytes 합이다(로더의 PackageLoadOptions::maxBulkRawBytes — AS 5.7절 11).
+    // 패키지 안 bulk entry의 rawBytes 합이다(로더의 PackageLoadOptions::maxBulkRawBytes — AS 5.7절
+    // 11). sidecar entry는 넣지 않는다(상주하지 않는다 — AS 20.1 4).
     uint64 bulkRawBytes = 0;
+    // 패키지 sidecar 파일의 크기·SHA-256이다(없으면 0 — AS 20.1 5).
+    uint64 sidecarBytes = 0;
+    Sha256Digest sidecarSha256{};
     Sha256Digest cookKey{};
     // CookedManifestFlags 비트 합이다.
     uint32 flags = 0;
@@ -305,7 +314,7 @@ WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest, Array<
 
 // 매니페스트 byte를 검증하고 모델로 푼다(AS 10.1절 2의 순서). 결과는 bytes를 빌리지 않는다.
 //
-// 오류: formatVersion이 2가 아니면(v1 포함) UnsupportedVersion / Unsupported, 그 밖의
+// 오류: formatVersion이 3이 아니면(v1·v2 포함) UnsupportedVersion / Unsupported, 그 밖의
 // 위반(magic·CRC·칸·항목 사이 규칙·남는 byte)은 CorruptPackage / CorruptData, 할당 실패는 진단
 // None과 그 오류다.
 //
@@ -345,9 +354,11 @@ Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const
                                     AssetDiagnostic* failure = nullptr) noexcept;
 
 // 내용 쪽 대조다(AS 11.6절 3 — 로더가 Prepare 뒤에 부른다): contents의 종류(PackageKind)·
-// assetId(AssetId)·대표 에셋 타입(TypeId)·BulkIndex rawBytes 합(BulkRawBytes — 합이 u64를 넘으면
-// 불일치)·Summary 프로파일 칸(PackageProfile)·Dependencies(PackageDependencies — (asset, kind) 순서
-// 배열이 같아야 한다)를 manifest·entry와 본다. 오류는 CheckCookedPackage와 같다.
+// assetId(AssetId)·대표 에셋 타입(TypeId)·패키지 안 BulkIndex rawBytes 합(BulkRawBytes — sidecar
+// entry는 빼고, 합이 u64를 넘으면 불일치)·Sidecar 섹션 fileBytes·sha256(SidecarBytes·SidecarSha256
+// — 섹션이 없으면 sidecarBytes 0)·Summary 프로파일
+// 칸(PackageProfile)·Dependencies(PackageDependencies — (asset, kind) 순서 배열이 같아야 한다)를
+// manifest·entry와 본다. 오류는 CheckCookedPackage와 같다.
 Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
                                         const CookedManifestEntry& entry,
                                         const PackageContents& contents,
@@ -359,6 +370,19 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
 ROCKS_ASSETRUNTIME_API Result<void>
 AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
                         const Sha256Digest& packageSha256) noexcept;
+
+// 쿠킹 루트 기준 sidecar 파일 경로(AS 20.1 3 `Packages/<a>/<A>-<h>.rbsc` — h = sidecar SHA-256 앞
+// 16자, 패키지와 같은 디렉터리 규칙)를 out 뒤에 붙인다. 내용 주소라 다시 쿠킹하면 새 경로다.
+//
+// 사용 예:
+//   StringBuilder<128> path(allocator);
+//   path.TryAppend(root); path.TryAppendAscii('/');
+//   AppendCookedSidecarPath(path, entry.asset, entry.sidecarSha256);
+//
+// 오류: out의 할당 실패는 그 오류다(실패하면 out 길이는 그대로가 아닐 수 있다 — 호출자가 버린다).
+ROCKS_ASSETRUNTIME_API Result<void>
+AppendCookedSidecarPath(StringBuilderBase& out, AssetId asset,
+                        const Sha256Digest& sidecarSha256) noexcept;
 
 // 쿠킹 루트 기준 artifact 파일 경로(`Shaders/<이름>-<formatId>-<sha256 앞 16 hex>.rshl` — 10.3절
 // 4항)를 out 뒤에 붙인다. kind·이름·formatId 칸 규칙을 다시 본다(경로 조각이라 검증하지 않은 항목도

@@ -13,6 +13,7 @@ constexpr StringView Hlsl2021Name("hlsl2021");
 constexpr StringView OptimizationName("optimization");
 constexpr StringView DebugSymbolsName("debugSymbols");
 constexpr StringView MatrixLayoutName("matrixLayout");
+constexpr StringView WarningsAsErrorsName("warningsAsErrors");
 constexpr StringView TrueText("true");
 constexpr StringView FalseText("false");
 
@@ -22,6 +23,7 @@ enum class OptionKind : uint8 {
     Optimization,
     DebugSymbols,
     MatrixLayout,
+    WarningsAsErrors,
     Unknown
 };
 
@@ -52,6 +54,10 @@ OptionKind KindOf(StringView name) noexcept {
 
     if (name == MatrixLayoutName) {
         return OptionKind::MatrixLayout;
+    }
+
+    if (name == WarningsAsErrorsName) {
+        return OptionKind::WarningsAsErrors;
     }
 
     return OptionKind::Unknown;
@@ -142,6 +148,9 @@ ShaderOptionStatus ParseShaderCompileOptions(Span<const StringView> assignments,
             break;
         case OptionKind::DebugSymbols:
             valid = ParseBool(value, parsed.debugSymbols);
+            break;
+        case OptionKind::WarningsAsErrors:
+            valid = ParseBool(value, parsed.warningsAsErrors);
             break;
         case OptionKind::Optimization:
             for (const OptimizationEntry& entry : OptimizationNames) {

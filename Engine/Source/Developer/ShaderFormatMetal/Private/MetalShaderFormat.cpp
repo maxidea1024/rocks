@@ -170,6 +170,7 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     request.optimization = job.options.optimization;
     request.dxPositionW = format.compiler.dxPositionW;
     request.reflect = true;
+    request.warningsAsErrors = job.options.warningsAsErrors;
     ShaderParameterLayoutSet layouts(allocator);
     if (!DecodeShaderJobLayouts(job, layouts, result)) {
         return;
@@ -189,6 +190,15 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
         FailShaderJob(result, MetalJobStatus(compiled), diagnostics.View());
         return;
     }
+
+    // DXC 경고는 결과 값 뒤에 진단으로 둔다(16.4절 SSD79 — 중간 MSL의 metal 경고는 보지 않는다).
+    String warnings(allocator);
+    if (!warnings.TryAppend(diagnostics.View())) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
+    diagnostics.Clear();
 
     // 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location, set·binding)·검증·사용 쌍·값 1과 Metal 인덱스(16.1절
     // SSD36·SSD39)다.
@@ -320,6 +330,7 @@ void MetalShaderFormatBackend::Compile(const ShaderFormatDefinition& format,
     }
 
     SucceedShaderJob(result, code, bound.bindingLayout);
+    AddShaderJobWarnings(result, "DXC", warnings.View());
 }
 
 } // namespace rocks::shader

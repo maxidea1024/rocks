@@ -89,10 +89,13 @@ ShaderToolOutcome CompileHlslToSpirv(const ShaderToolSet& tools, const SpirvComp
                                                                    : StringView("2018"),
                                                   OptimizationFlags[request.optimization],
                                                   "-Zpr",
-                                                  "-WX",
                                                   "-spirv",
                                                   "-fspv-target-env=vulkan1.1"};
-    usize count = 11;
+    usize count = 10;
+    if (request.warningsAsErrors) {
+        arguments[count++] = "-WX";
+    }
+
     if (request.dxPositionW) {
         arguments[count++] = "-fvk-use-dx-position-w";
     }
@@ -128,7 +131,30 @@ ShaderToolOutcome CompileHlslToSpirv(const ShaderToolSet& tools, const SpirvComp
     }
 
     spirv = Move(compiled.object);
+    // 경고를 돌려준다(SSD79 — 경고를 오류로 다루지 않는 요청만 남는다).
+    if (!diagnostics.TryAppend(compiled.diagnostics.View())) {
+        Note(diagnostics, "out of memory");
+        return ShaderToolOutcome::ToolError;
+    }
+
     return ShaderToolOutcome::Success;
+}
+
+bool FxcHasSourceDiagnostic(StringView errors) noexcept {
+    // FXC 진단 번호 접두와 내부 오류 문구다(16.4절 SSD80).
+    constexpr StringView SourceErrorMarker("error X");
+    constexpr StringView InternalErrorMarkers[] = {"internal error:", "Internal Compiler Error:"};
+    if (errors.Contains(SourceErrorMarker, StringComparison::CaseSensitive)) {
+        return true;
+    }
+
+    for (const StringView marker : InternalErrorMarkers) {
+        if (errors.Contains(marker, StringComparison::CaseSensitive)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 namespace cross_binding_detail {

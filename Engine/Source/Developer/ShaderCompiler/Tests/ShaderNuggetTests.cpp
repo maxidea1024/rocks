@@ -227,7 +227,7 @@ TEST(ShaderCompileOptions_ParsesAssignments) {
     ShaderCompileOptions options = DefaultShaderCompileOptions(format);
     CHECK(options.hlsl2021 == format.hlsl2021 && !options.hlsl2021);
     CHECK(options.optimization == ShaderOptimization::O3 && !options.debugSymbols &&
-          options.matrixLayout == ShaderMatrixLayout::Row);
+          options.matrixLayout == ShaderMatrixLayout::Row && options.warningsAsErrors);
     CHECK(ValidateShaderCompileOptions(options));
 
     const StringView given[] = {"optimization=O0", "hlsl2021=true", "matrixLayout=Row",
@@ -247,6 +247,14 @@ TEST(ShaderCompileOptions_ParsesAssignments) {
     CHECK(ParseShaderCompileOptions(symbols, options));
     CHECK(options.debugSymbols && ValidateShaderCompileOptions(options));
     options.debugSymbols = false;
+
+    // 경고 오류(ShaderSystem 16.4절 SSD79 — 머티리얼 job은 false).
+    const StringView warnings[] = {"warningsAsErrors=false"};
+    CHECK(ParseShaderCompileOptions(warnings, options));
+    CHECK(!options.warningsAsErrors && ValidateShaderCompileOptions(options));
+    const StringView strict[] = {"warningsAsErrors=true"};
+    CHECK(ParseShaderCompileOptions(strict, options));
+    CHECK(options.warningsAsErrors);
 
     // 빈 목록은 아무것도 바꾸지 않는다.
     const ShaderCompileOptions before = options;
@@ -280,6 +288,12 @@ TEST(ShaderCompileOptions_RejectsInvalidAssignments) {
          2,
          "optimization"},
         {{"debugSymbols=yes"}, 1, ShaderOptionError::InvalidValue, 0, "debugSymbols"},
+        {{"warningsAsErrors=0"}, 1, ShaderOptionError::InvalidValue, 0, "warningsAsErrors"},
+        {{"warningsAsErrors=false", "warningsAsErrors=true"},
+         2,
+         ShaderOptionError::Duplicate,
+         1,
+         "warningsAsErrors"},
     };
     for (const Case& test : cases) {
         ShaderCompileOptions options;

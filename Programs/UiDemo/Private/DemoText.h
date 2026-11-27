@@ -42,6 +42,10 @@ public:
     // 넣는다.
     Result<void> SetText(TextLabel& label, StringView value, const FontStyle& font) noexcept;
 
+    // utf8의 ICU 단어 경계를 out에 쓴다(0은 빼고 끝은 넣는다 — text::TextBackend FindBoundaries
+    // (Word), 편집 텍스트 더블클릭·Ctrl 이동). Initialize 전이면 NotReady다.
+    Result<void> FindWordBoundaries(StringView utf8, Array<usize>& out) noexcept;
+
 private:
     Result<void> LoadFace(StringView relativePath,
                           SharedPtr<const text::FontFaceData>& out) noexcept;

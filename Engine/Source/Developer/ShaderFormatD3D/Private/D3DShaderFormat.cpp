@@ -26,6 +26,13 @@ constexpr usize MaxDxcArguments = 16;
 constexpr ShaderVersion FallbackSpirvModel{6, 0};
 // SPIRV-Cross HLSL 출력의 엔트리 이름이다.
 constexpr StringView CrossEntry("main");
+// 대체 경로 중간 HLSL 앞에 붙이는 줄이다(ShaderSystem 16.4절 SSD81, UE D3DShaderCompiler.cpp
+// PatchHlslForPrecompilation — 중간 원문이 만든 pow 음수 밑 경고 X3571을 끄고 원래 원문의 경고만
+// 본다).
+constexpr StringView IntermediateWarningPragma("#pragma warning(disable : 3571)\n");
+// 대체 경로가 성공했을 때 1차 FXC 진단 뒤에 붙이는 문구다(SSD80).
+constexpr StringView
+    FallbackSucceededNote("compiled through the fallback path (DXC, SPIR-V, HLSL 5.0, FXC)\n");
 
 constexpr StringView OptimizationFlags[ShaderOptimizationLevels] = {"-O0", "-O1", "-O2", "-O3"};
 
@@ -94,9 +101,13 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
                                              job.options.hlsl2021 ? StringView("2021")
                                                                   : StringView("2018"),
                                              OptimizationFlags[job.options.optimization],
-                                             "-Zpr",
-                                             "-WX"};
-    usize count = 9;
+                                             "-Zpr"};
+    usize count = 8;
+    // 경고는 오류(16.4절 SSD79 — job 옵션)다.
+    if (job.options.warningsAsErrors) {
+        arguments[count++] = "-WX";
+    }
+
     // 디버그 심볼(16.3절 SSD73, UE D3DShaderCompilerDXC.cpp와 같다): PDB를 만들고(-Zi) DXIL에서
     // 떼며(-Qstrip_debug) PDB 이름을 출력 binary hash로 정한다(-Zsb).
     if (job.options.debugSymbols) {
@@ -141,15 +152,29 @@ void CompileDxil(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::Pdb, compiled.pdbName.View(),
                                  compiled.pdb.View());
     }
+
+    AddShaderJobWarnings(result, "DXC", compiled.diagnostics.View());
+}
+
+// 한 단계 경고를 warnings에 `<stage>: <text>` 줄로 모은다(16.4절 SSD79). 할당 실패면 false다.
+bool KeepWarnings(String& warnings, StringView stage, StringView text) noexcept {
+    if (text.IsEmpty()) {
+        return true;
+    }
+
+    return warnings.TryAppend(stage) && warnings.TryAppend(": ") && warnings.TryAppend(text) &&
+           (text.EndsWith("\n", StringComparison::CaseSensitive) || warnings.TryAppend("\n"));
 }
 
 // 대체 경로: DXC(-fspv-reflect) → SPIR-V 고쳐 쓰기(ATTRIBUTEn·TEXCOORDn location) → SPIRV-Cross
-// HLSL 5.0(register 배정·ATTRIBUTEn, 16.1절 SSD38) → FXC(E4). 사용 쌍은 pairs에 둔다(SSD36).
-// 실패하면 outcome과 diagnostics다.
+// HLSL 5.0(register 배정·ATTRIBUTEn, 16.1절 SSD38) → X3571 끄기(16.4절 SSD81) → FXC(E4). 사용
+// 쌍은 pairs에 둔다(SSD36). 성공하면 단계 경고(`fallback DXC: `·`fallback FXC: `)를 warnings에
+// 더한다. 실패하면 outcome과 diagnostics다.
 ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
                                   const ShaderToolSet& tools, StringView fxcProfile,
                                   Array<uint8>& object, Array<SpirvSamplerUse>& pairs,
-                                  String& diagnostics, FxcSymbols& symbols) noexcept {
+                                  String& diagnostics, String& warnings,
+                                  FxcSymbols& symbols) noexcept {
     char spirvProfile[MaxShaderProfileBytes];
     if (!MakeShaderProfile(job.stage, FallbackSpirvModel, spirvProfile)) {
         (void)diagnostics.TryAppend("invalid shader stage");
@@ -164,12 +189,20 @@ ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const Sh
     spirvRequest.optimization = job.options.optimization;
     spirvRequest.dxPositionW = format.compiler.dxPositionW;
     spirvRequest.reflect = true;
+    spirvRequest.warningsAsErrors = job.options.warningsAsErrors;
     Allocator& allocator = object.GetAllocator();
     Array<uint8> raw(allocator);
     const ShaderToolOutcome compiled = CompileHlslToSpirv(tools, spirvRequest, raw, diagnostics);
     if (compiled != ShaderToolOutcome::Success) {
         return compiled;
     }
+
+    if (!KeepWarnings(warnings, "fallback DXC", diagnostics.View())) {
+        (void)diagnostics.TryAssign("out of memory");
+        return ShaderToolOutcome::ToolError;
+    }
+
+    diagnostics.Clear();
 
     Array<uint32> words(allocator);
     Array<uint32> rewritten(allocator);
@@ -211,16 +244,33 @@ ShaderToolOutcome CompileFallback(const ShaderFormatDefinition& format, const Sh
         return crossed;
     }
 
+    // 중간 원문 경고 X3571을 끈다(16.4절 SSD81 — 원문 FXC 경로는 그대로다).
+    String patched(allocator);
+    if (!patched.TryAppend(IntermediateWarningPragma) || !patched.TryAppend(hlsl.View())) {
+        (void)diagnostics.TryAssign("out of memory");
+        return ShaderToolOutcome::ToolError;
+    }
+
     FxcCompileRequest fxcRequest;
-    fxcRequest.source = hlsl.View();
+    fxcRequest.source = patched.View();
     fxcRequest.entry = CrossEntry;
     fxcRequest.profile = fxcProfile;
     fxcRequest.optimization = job.options.optimization;
     fxcRequest.debugSymbols = job.options.debugSymbols;
-    return CompileWithFxc(tools.Fxc(), fxcRequest, object, diagnostics, &symbols);
+    fxcRequest.warningsAsErrors = job.options.warningsAsErrors;
+    const ShaderToolOutcome fxc =
+        CompileWithFxc(tools.Fxc(), fxcRequest, object, diagnostics, &symbols);
+    if (fxc == ShaderToolOutcome::Success &&
+        !KeepWarnings(warnings, "fallback FXC", diagnostics.View())) {
+        (void)diagnostics.TryAssign("out of memory");
+        return ShaderToolOutcome::ToolError;
+    }
+
+    return fxc;
 }
 
-// D3D11_SM5: FXC, 원문 탓 실패나 HLSL 2021이면 대체 경로(SC10, E3·E4)다.
+// D3D11_SM5: FXC, 원문 탓 실패(16.4절 SSD80 분류)나 HLSL 2021이면 대체 경로(SC10, E3·E4)다.
+// 대체 경로가 성공하면 1차 FXC 진단을 결과 진단 앞에 남긴다(SSD80 — UE와 같다).
 void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& job,
                  const ShaderToolSet& tools, ShaderWorkerJobResult& result) noexcept {
     char profile[MaxShaderProfileBytes];
@@ -241,12 +291,19 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     Array<uint8> object(allocator);
     String fxcDiagnostics(allocator);
     FxcSymbols symbols(allocator);
-    // 디버그 심볼(16.3절 SSD73): 값 0은 디버그 정보를 뗀 DXBC, 값 3은 FXC PDB다.
-    const auto succeed = [&](const Array<SpirvSamplerUse>* pairs) noexcept {
+    // 디버그 심볼(16.3절 SSD73): 값 0은 디버그 정보를 뗀 DXBC, 값 3은 FXC PDB다. 경고는 값 뒤에
+    // 진단으로 둔다(SSD79).
+    const auto succeed = [&](const Array<SpirvSamplerUse>* pairs, StringView warnings) noexcept {
         Succeed(D3DCodeKind::Dxbc, format, job, tools, result, object, pairs);
         if (job.options.debugSymbols) {
             AddShaderJobDebugSymbols(result, ShaderDebugSymbolKind::Pdb, symbols.name.View(),
                                      symbols.pdb.View());
+        }
+
+        if (result.status == ShaderWorkerJobStatus::Success && !warnings.IsEmpty() &&
+            !result.diagnostics.TryAppend(warnings)) {
+            FailShaderJob(result, ShaderWorkerJobStatus::ToolError,
+                          "out of memory while keeping shader warnings");
         }
     };
     if (!job.options.hlsl2021) {
@@ -256,10 +313,17 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
         request.profile = StringView(profile);
         request.optimization = job.options.optimization;
         request.debugSymbols = job.options.debugSymbols;
+        request.warningsAsErrors = job.options.warningsAsErrors;
         const ShaderToolOutcome compiled =
             CompileWithFxc(tools.Fxc(), request, object, fxcDiagnostics, &symbols);
         if (compiled == ShaderToolOutcome::Success) {
-            succeed(nullptr);
+            String warnings(allocator);
+            if (!KeepWarnings(warnings, "FXC", fxcDiagnostics.View())) {
+                FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+                return;
+            }
+
+            succeed(nullptr, warnings.View());
             return;
         }
 
@@ -272,11 +336,20 @@ void CompileDxbc(const ShaderFormatDefinition& format, const ShaderWorkerJob& jo
     }
 
     String fallbackDiagnostics(allocator);
+    // 성공 진단: 1차 FXC가 실패했으면 그 진단과 대체 경로 표시, 그 뒤 대체 경로 단계 경고다.
+    String warnings(allocator);
+    if (!fxcDiagnostics.IsEmpty() && !(KeepWarnings(warnings, "FXC", fxcDiagnostics.View()) &&
+                                       warnings.TryAppend(FallbackSucceededNote))) {
+        FailShaderJob(result, ShaderWorkerJobStatus::ToolError, "out of memory");
+        return;
+    }
+
     Array<SpirvSamplerUse> pairs(allocator);
-    const ShaderToolOutcome fallback = CompileFallback(format, job, tools, StringView(profile),
-                                                       object, pairs, fallbackDiagnostics, symbols);
+    const ShaderToolOutcome fallback =
+        CompileFallback(format, job, tools, StringView(profile), object, pairs, fallbackDiagnostics,
+                        warnings, symbols);
     if (fallback == ShaderToolOutcome::Success) {
-        succeed(&pairs);
+        succeed(&pairs, warnings.View());
         return;
     }
 

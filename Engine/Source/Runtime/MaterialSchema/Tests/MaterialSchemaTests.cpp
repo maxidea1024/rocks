@@ -557,7 +557,6 @@ TEST(MaterialSchema_PrerequisiteIdsMatchTable) {
         "MPQ-VirtualTexture",
         "MPQ-ExternalTexture",
         "MPQ-Font",
-        "MPQ-CurveAsset",
         "MPQ-MaterialAggregate",
         "MPQ-SubsurfaceProfile",
         "MPQ-SpecularProfile",

@@ -154,6 +154,8 @@ struct SceneUpdate {
     uint32 epoch = 0;
     Vec3d position;
     Quatd rotation = Quatd::Identity();
+    // scene 일시정지(World 값 OR SetScenePaused — 3.44.1절)다.
+    bool paused = false;
 };
 
 // emitter 위치 스냅숏이다(등록·이동한 프레임에만).

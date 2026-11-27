@@ -35,7 +35,7 @@ namespace rocks::shader {
 
 // 메시지 형식 버전이다(필드·의미를 바꾸면 올린다 — 다른 버전의 워커는 BadMessageVersion으로
 // 끝난다).
-inline constexpr uint32 ShaderWorkerMessageVersion = 3;
+inline constexpr uint32 ShaderWorkerMessageVersion = 4;
 // 파일 앞 magic(4 byte)과 버전(u32)의 크기다.
 inline constexpr usize ShaderWorkerMagicBytes = 4;
 inline constexpr usize ShaderWorkerPrefixBytes = ShaderWorkerMagicBytes + sizeof(uint32);
@@ -139,6 +139,8 @@ struct ShaderWorkerJobOptions {
     bool debugSymbols = false;
     // 0(Row).
     uint8 matrixLayout = 0;
+    // 경고를 오류로 다룬다(ShaderSystem 16.4절 SSD79, 메시지 버전 4).
+    bool warningsAsErrors = true;
 };
 
 struct ShaderWorkerJob {
@@ -192,7 +194,8 @@ struct ShaderWorkerJobResult {
     ShaderWorkerJobStatus status = ShaderWorkerJobStatus::Success;
     // ValueId 오름차순이다.
     Array<ShaderWorkerValue> values;
-    // 실패 job의 진단(영어, 도구 원문)이다. 성공 job은 비어 있다.
+    // 실패 job의 진단 또는 성공 job의 경고(영어, 도구 원문 — ShaderSystem 16.4절 SSD79)다. 경고
+    // 없는 성공 job은 비어 있다.
     String diagnostics;
 };
 
