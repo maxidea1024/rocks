@@ -40,6 +40,15 @@ public:
     // Clone 실패는 그 오류.
     Result<void> SetMessage(const Text& message) noexcept;
 
+    // 바깥에서 받은 진행을 그대로 싣는다(Docs/Design/ProgressReporting 10.1절 — 자식 프로세스
+    // 진행을 부모 쪽 하위 작업으로 옮길 때). shape이 Count면 done·total(done은 total로 자름)이
+    // 진행이고, Fraction이면 fraction(0–1)이 자기 진행 S다. Indeterminate는 아무것도 바꾸지 않는다.
+    // 이 작업에는 구간·계수로 보고하지 않는다(쓰는 쪽은 한 스레드). 보이는 비율은 hub 규칙대로 뒤로
+    // 가지 않는다. 오류: 빈 handle·범위 밖 fraction InvalidArgument, hub가 닫혔으면 ShuttingDown,
+    // 끝났으면 ScopeClosed.
+    Result<void> SetExternalProgress(ProgressShape shape, double fraction, uint64 done,
+                                     uint64 total) noexcept;
+
     // 작업을 끝낸다(한 번). 살아 있는 하위 작업은 먼저 Abandoned로 닫힌다. Succeeded면 보이는
     // 비율이 1이 된다. 오류: SetMessage와 같다. detail Clone이 실패하면 사유 없이 끝내고 그 오류를
     // 돌려준다.

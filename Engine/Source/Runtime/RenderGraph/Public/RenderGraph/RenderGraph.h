@@ -265,9 +265,15 @@ MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool& pool, GpuTrace
 // - 실행: Raster pass마다 장치 기록(BeginPass·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
 //   pass는 열린 기록에 이어 쓰고, 열린 기록이 없으면 attachment 없는 BeginPass로 연다. pass마다 CPU
 //   구간과(trace가 있으면) GpuScope 구간을 둔다.
+// - 스왑체인: 같은 스왑체인을 대상으로 하는 pass들은 백버퍼 하나를 함께 쓰고(뒤 pass는 보통
+//   GraphLoadAction::Load) present는 스왑체인마다 한 번이다. Deferred는 그 스왑체인의 마지막 pass가
+//   연 기록이 닫힐 때, Immediate는 Execute 끝의 그리기 없는 present 기록에서 낸다. 실행이 실패하면
+//   (마지막 pass 기록이 이미 열린 경우가 아니면) present하지 않는다(RenderBase 8절 "스왑체인 공유
+//   설계").
 // - 검증(항상): 생산 전 읽기, 한 pass 안 같은 subresource의 상충 접근, Raster pass의 UAV, pass
 // 종류에
-//   맞지 않는 접근, Retire된 자원 import, 생산 전 export, 다른 그래프의 handle. 실패한 호출은
+//   맞지 않는 접근, Retire된 자원 import, 생산 전 export, 다른 그래프의 handle, 그래프의 첫
+//   스왑체인 pass가 Load. 실패한 호출은
 //   InvalidArgument(import는 lease 오류)를 돌려주고 LastError에 영어 문구를 남기며, 그 뒤 Execute는
 //   InvalidArgument다(그래프 전체를 버린다).
 //

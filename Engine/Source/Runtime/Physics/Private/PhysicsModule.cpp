@@ -25,7 +25,9 @@ public:
 Result<void> PhysicsSettings::Validate(const PhysicsSettings& settings) noexcept {
     if (!math::IsFinite(settings.defaultGravityZ) || settings.maxBodies == 0 ||
         settings.maxBodyPairs == 0 || settings.maxContactConstraints == 0 ||
-        settings.tempAllocatorBytes == 0) {
+        settings.tempAllocatorBytes == 0 ||
+        !math::IsFinite(settings.minDeltaVelocityForHitEvents) ||
+        settings.minDeltaVelocityForHitEvents < 0.0f) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

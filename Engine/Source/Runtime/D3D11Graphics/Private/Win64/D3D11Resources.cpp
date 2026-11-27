@@ -90,8 +90,9 @@ Result<void> D3D11Device::ResizeSwapChain(SwapChainHandle handle, uint32 width,
     // ResizeBuffers는 버퍼 참조가 모두 풀려야 한다. immediate context에 남은 묶음도 푼다.
     immediate_->ClearState();
     immediate_->Flush();
-    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다.
+    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다. 그리는 중인 프레임도 버린다.
     record->broken = true;
+    record->frameOpen = false;
     const HRESULT resized = record->swapChain->ResizeBuffers(SwapChainBufferCount, width, height,
                                                              DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(resized)) {

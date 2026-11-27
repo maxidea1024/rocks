@@ -481,6 +481,47 @@ TEST(StandardStream_PipesPassBytesUnchanged) {
     }
 }
 
+// 시간 제한 읽기: 쓰지 않은 동안은 NoProgress(자식이 "timeout"을 알린 뒤에 부모가 쓴다 — 순서는
+// 자식의 출력으로 정한다), 받은 byte는 그대로, 입력을 닫으면 EOF다.
+TEST(StandardStream_TimedInputReportsNoProgressDataAndEof) {
+    Probe probe;
+    probe.Add("timed-input");
+    ProcessStartInfo info = probe.Info();
+    info.input = ProcessStreamMode::Pipe;
+    info.output = ProcessStreamMode::Pipe;
+    Process child;
+    const FileStatus started = child.Start(info);
+    if (!SkipUnsupported(started)) {
+        REQUIRE(started);
+        char output[64];
+        usize count = 0;
+        const auto readUntil = [&](const char* expected) noexcept {
+            const usize bytes = strlen(expected);
+            while (count < bytes) {
+                const FileTransfer read =
+                    child.Read(ProcessStream::Output, output + count, sizeof(output) - count);
+                if (!read.status) {
+                    return false;
+                }
+
+                count += read.bytes;
+            }
+
+            const bool same = memcmp(output, expected, bytes) == 0;
+            count = 0;
+            return same;
+        };
+        CHECK(readUntil("timeout\n"));
+        CHECK(child.WriteInput("hi", 2).status);
+        CHECK(readUntil("hi"));
+        CHECK(child.CloseInput());
+        CHECK(readUntil("eof\n"));
+        CHECK(child.Wait() == WaitResult::Signaled);
+        ProcessExit exit;
+        CHECK(child.GetExit(exit) && exit.kind == ProcessExitKind::Exited && exit.code == 0);
+    }
+}
+
 TEST(StandardStream_RejectsBadArguments) {
     // null buffer·용량 0은 InvalidArgument, 0 byte 쓰기는 성공(아무것도 쓰지 않는다).
     CHECK(platform::WriteStandardStream(StandardStream::Output, nullptr, 1).status.code ==

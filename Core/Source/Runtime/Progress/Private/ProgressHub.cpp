@@ -366,6 +366,9 @@ Result<void> HubFillView(ProgressTaskView& view, ProgressTaskRecord& record, uin
     view.startNanoseconds = record.startNanoseconds;
     view.lastProgressNanoseconds = record.lastProgressNanoseconds;
     view.modalDelaySeconds = record.modalDelaySeconds;
+    view.selfReported = record.selfReported.Load<platform::MemoryOrder::Relaxed>() != 0;
+    view.weightInParent = record.weightInParent;
+    view.selfWeight = record.selfWeight;
     view.cancellable = record.cancel == ProgressCancel::UserCancellable;
     view.cancelRequested = record.token.IsCancellationRequested();
 
@@ -570,6 +573,7 @@ Result<void> ProgressHub::Initialize(Allocator& allocator,
 
     hub.ringFirstSerial = hub.nextEventSerial;
     hub.warnedOnce.Store<platform::MemoryOrder::Relaxed>(0u);
+    hub.cancelAllPending = false;
     for (auto& count : hub.warningCounts) {
         count.Store<platform::MemoryOrder::Relaxed>(0u);
     }
@@ -701,6 +705,11 @@ Result<ProgressTaskHandle> ProgressHub::Begin(const ProgressTaskDesc& desc) noex
     record->startNanoseconds = detail::ProgressNow();
     record->lastProgressNanoseconds = record->startNanoseconds;
     record->token = source.IsValid() ? source.Token() : base;
+    // 전체 취소를 이미 받았으면 새 최상위 취소 가능 작업도 취소된 채 시작한다(7.4절).
+    if (parent == nullptr && hub.cancelAllPending) {
+        source.Cancel();
+    }
+
     record->source = Move(source);
     record->parent = parent;
     if (parent != nullptr) {
@@ -742,6 +751,7 @@ void ProgressHub::RequestCancelAllTopLevel() noexcept {
         return;
     }
 
+    hub.cancelAllPending = true;
     for (uint32 index = 0; index < hub.liveCount; ++index) {
         ProgressTaskRecord& record = *hub.live[index];
         if (record.parent == nullptr && record.cancel == ProgressCancel::UserCancellable) {
@@ -912,6 +922,42 @@ Result<void> ProgressTaskHandle::SetMessage(const Text& message) noexcept {
         Text previous = Move(record_->taskMessage);
         record_->taskMessage = Move(replaced);
         replaced = Move(previous);
+    }
+
+    detail::MaybePumpUi();
+    return Result<void>::Success();
+}
+
+Result<void> ProgressTaskHandle::SetExternalProgress(ProgressShape shape, double fraction,
+                                                     uint64 done, uint64 total) noexcept {
+    if (record_ == nullptr || !HubIsFinite(fraction) || fraction < 0.0 || fraction > 1.0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!detail::IsCurrentEpoch(*record_)) {
+        return Result<void>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    if (record_->finished.Load<platform::MemoryOrder::Acquire>() != 0) {
+        return Result<void>::Failure(ErrorCode::ScopeClosed);
+    }
+
+    switch (shape) {
+    case ProgressShape::Indeterminate:
+        break;
+    case ProgressShape::Count:
+        // 작업 수준 계수 칸에 그대로 싣는다(이 작업에는 ProgressCounter를 만들지 않는다).
+        record_->taskTotal.Store<platform::MemoryOrder::Relaxed>(total);
+        record_->taskDone.Store<platform::MemoryOrder::Relaxed>(done < total ? done : total);
+        record_->taskCounterClaimed.Store<platform::MemoryOrder::Relaxed>(1u);
+        record_->hasTaskCounter.Store<platform::MemoryOrder::Release>(1u);
+        record_->selfReported.Store<platform::MemoryOrder::Relaxed>(1u);
+        break;
+    case ProgressShape::Fraction:
+        detail::PublishSelfProgress(
+            *record_, record_->nextStepSerial.FetchAdd<platform::MemoryOrder::Relaxed>(1), fraction,
+            0.0);
+        break;
     }
 
     detail::MaybePumpUi();

@@ -40,6 +40,11 @@
 14. ◇ JSON 한 객체 안의 중복 키는 문서 오류다. UE는 뒤의 값이 이긴다.
 15. ◇ 쓰지 않는 모드의 맵에 행이 있어도 로드는 성공한다. 쿠킹이 그 맵을 비우고 경고를 남긴다. UE는 이런 상태가 생기지 않는다(맵이 하나다).
 16. ◇ 행 참조에 커브 접근자(UE `GetCurve`·`GetRichCurve`·`GetSimpleCurve`·`IsValid`)가 없다. 표를 풀어 `Find*Row`를 쓴다.
+17. ★ JSON 시간 키는 칸 전체가 숫자여야 한다. UE `LexTryParseString`은 `Atof` 결과가 0이 아니면 뒤 쓰레기(`2abc`)도 받는다.
+18. ◇ JSON 숫자 `Name`은 원문 토큰으로 행 이름을 만든다. UE는 `SanitizeFloat(Value, 0)` 서식이라 `1e2`처럼 표기가 다른 숫자는 이름이 다를 수 있다.
+19. ★ 올바르지 않은 UTF-8·UTF-16(짝 없는 surrogate·홀수 byte)은 `CorruptData`로 거부한다. UE `BufferToString`은 대체 문자로 바꾸거나 그대로 통과시킨다(`FileHelper.cpp:147-195`).
+20. ◇ 숫자 칸은 double을 거쳐 float로 바꾼다(UE Windows `Atof` = `(float)_tstof`와 같다). UE Linux·Mac `wcstof`(float로 바로)와는 드물게 1 ulp 다를 수 있다.
+21. ★ 쿠킹 중복 키 제거에서 비교 차가 NaN인 키는 남긴다(UE는 지운다 — CurveData 15절과 같은 수정).
 
 ### 7.3 단계
 
@@ -104,14 +109,17 @@
   - JSON 값 종류(숫자·숫자 문자열·bool), 중복 키
   - 시간 열 0개
   - 재임포트 옵션 보존, 재임포트가 기본값·조정을 지키는지
-  - 모드 결정(보간 셋), Cubic 키 접선의 UE 대조
+  - 모드 결정(보간 셋), Cubic 키 접선(같은 키로 `AutoSetTangents`한 커브와 대조 — `AutoSetTangents` 자체의 UE 대조는 CurveData 시험이 한다)
+  - 재임포트 실패가 기존 표를 지키는지, 모드를 바꾸는 재임포트가 반대쪽 맵을 비우는지
+  - 등록 묶음의 부분 실패 되돌림, 임포트 할당 실패
   - 결정성(같은 원본 → 같은 byte)
 - **`CurveTableCook_`**
-  - 중복 키 제거 결과(Plain·Tangent)
-  - Tangent의 키 3개 이상이면 접선 재계산, 미만이면 그대로
-  - 에디터 객체 불변
-  - 쓰지 않는 맵 비우기와 경고
-  - 처리기 버전이 너겟 키에 드는지
+  - 중복 키 제거 결과(Plain·Tangent), 정확히 키 3개인 경계
+  - Tangent의 키 3개 이상이면 접선 재계산(지운 키 옆 Cubic Auto 키의 접선이 바뀐다), 미만이면 그대로
+  - 에디터 객체 불변(성공, 쓰기 실패, 경고 push 할당 실패)
+  - 쓰지 않는 맵 비우기와 경고(Plain·Tangent·Empty 모드)
+  - 같은 입력을 두 번 쿠킹하면 같은 byte
+  - 처리기 정체성(쿠킹 키에 드는 것은 쿠커 A4c 시험이 본다)
 - **`ColorCurveAtlas_`**(CA6)
   - 굽기 표본 시간(역수 곱, width 0·1 → 2)
   - null 커브 흰색

@@ -2,8 +2,8 @@
 
 namespace rocks::graphics::d3d12 {
 
-Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
-                                                const ClearColor& clear) noexcept {
+Result<CommandContext*> D3D12Device::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -28,6 +28,12 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
 
+    // present 뒤의 백버퍼 내용은 정의되지 않는다(flip discard). 이어 그리기는 그리는 중인 프레임만.
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        return FailCode<CommandContext*>(ErrorCode::InvalidArgument,
+                                         "swap chain load without a frame drawn since its present");
+    }
+
     const uint32 backBuffer = record->swapChain->GetCurrentBackBufferIndex();
     auto begun = BeginRecording();
     if (!begun) {
@@ -44,9 +50,12 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
     target_.colorCount = 1;
     target_.rtvs[0] = target_.rtv;
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     PassDesc pass;
     pass.colorCount = 1;
-    pass.colors[0].clear = clear;
+    pass.colors[0].load = desc.load;
+    pass.colors[0].clear = desc.clear;
     StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
@@ -123,13 +132,16 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     SettleTracking(true);
 
     Result<void> outcome = Result<void>::Success();
-    if (!presentTarget_.IsNull()) {
+    if (!presentTarget_.IsNull() && presentOnEnd_) {
         SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
         if (record != nullptr) {
+            record->frameOpen = false;
             const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
             if (FAILED(presented)) {
                 // Fail이 장치 제거를 판정해 손실 전이 때 한 번 Error로 남긴다.
                 outcome = Fail("IDXGISwapChain::Present", presented);
+            } else {
+                ++presents_;
             }
         }
     }

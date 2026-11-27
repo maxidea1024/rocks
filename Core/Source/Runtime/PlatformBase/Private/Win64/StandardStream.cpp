@@ -154,4 +154,57 @@ FileTransfer ReadStandardInput(void* buffer, usize capacity) noexcept {
     return result;
 }
 
+FileTransfer ReadStandardInput(void* buffer, usize capacity, uint32 timeoutMilliseconds) noexcept {
+    if (timeoutMilliseconds == InfiniteTimeout || buffer == nullptr || capacity == 0) {
+        return ReadStandardInput(buffer, capacity);
+    }
+
+    FileTransfer result;
+    HANDLE handle = StandardHandle(STD_INPUT_HANDLE);
+    if (handle == nullptr) {
+        result.status.code = FileCode::NotOpen;
+        return result;
+    }
+
+    const DWORD type = GetFileType(handle);
+    if (type == FILE_TYPE_CHAR) {
+        // 콘솔은 줄 입력이 Enter까지 막고, 입력 handle은 포커스·마우스 사건에도 signaled라 시간
+        // 제한을 지킬 수 없다 — 지원하지 않는다(부모 제어는 pipe다).
+        result.status.code = FileCode::Unsupported;
+        return result;
+    }
+
+    if (type != FILE_TYPE_PIPE) {
+        return ReadStandardInput(buffer, capacity);
+    }
+
+    // 익명 pipe는 기다릴 수 있는 handle이 아니라 남은 byte를 확인하며 짧게 쉰다.
+    constexpr DWORD PipePollMilliseconds = 5;
+    const ULONGLONG started = GetTickCount64();
+    for (;;) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr)) {
+            const DWORD error = GetLastError();
+            result.status = error == ERROR_BROKEN_PIPE || error == ERROR_HANDLE_EOF
+                                ? FileStatus{FileCode::EndOfFile, static_cast<uint32>(error)}
+                                : detail::NativeError(error);
+            return result;
+        }
+
+        if (available != 0) {
+            return ReadStandardInput(buffer, capacity < available ? capacity : available);
+        }
+
+        const ULONGLONG elapsed = GetTickCount64() - started;
+        if (elapsed >= timeoutMilliseconds) {
+            result.status.code = FileCode::NoProgress;
+            return result;
+        }
+
+        const ULONGLONG remaining = timeoutMilliseconds - elapsed;
+        Sleep(static_cast<DWORD>(remaining < PipePollMilliseconds ? remaining
+                                                                  : PipePollMilliseconds));
+    }
+}
+
 } // namespace rocks::platform
