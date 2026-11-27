@@ -203,6 +203,29 @@ bool MenuPanel::FocusFirstItem(uint32 user) noexcept {
     return false;
 }
 
+bool MenuPanel::IsPointerInside() const noexcept {
+    return pointerUsers_ > 0;
+}
+
+void MenuPanel::OnMouseEnter(uint32 user) noexcept {
+    Element::OnMouseEnter(user);
+    ++pointerUsers_;
+    if (openSub_) {
+        openSub_->InvalidatePaint();
+    }
+}
+
+void MenuPanel::OnMouseLeave(uint32 user) noexcept {
+    Element::OnMouseLeave(user);
+    if (pointerUsers_ > 0) {
+        --pointerUsers_;
+    }
+
+    if (openSub_) {
+        openSub_->InvalidatePaint();
+    }
+}
+
 void MenuPanel::OnRowUnhovered(MenuRow& row) noexcept {
     if (hoveredRow_ != &row) {
         return;

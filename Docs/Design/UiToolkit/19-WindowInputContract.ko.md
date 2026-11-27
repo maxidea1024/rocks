@@ -149,6 +149,13 @@
 ### 19.5 메뉴 뒤 커서 지연 보고(UW9g — 2026-11-27 사용자 보고)
 
 - **보고.** UiDemo에서 긴 하위 메뉴(File > Recent Levels — 40줄 + 구분선 + 지우기, 창보다 길어 스크롤)를 연 뒤, 상단 메뉴 막대 아래로 마우스를 움직이면 커서가 이전 위치에 보이다가 따라온다.
+- **원인(사용자 설명으로 확정).** 늦게 따라오는 것은 커서가 아니라 **메뉴 강조**다. 강조가 이전 항목으로 잠깐 되돌아갔다가 커서가 있는 항목으로 온다. 늘 재현된다(데모에서 하위 메뉴가 있는 메뉴는 Recent Levels 하나뿐이다). 화면 안 배치(UW7d)와는 상관없다.
+  - `MenuRow::IsHighlighted`는 하위 메뉴가 열린 항목을 "패널에서 hover 중인 항목이 없으면" 강조했다.
+  - 포인터가 항목 사이 틈·구분선·패널 여백 위에 있는 동안에는 hover 항목이 없다. 그래서 강조가 열린 항목(Recent Levels)으로 돌아갔다.
+  - 그 순간 `OnRowUnhovered`가 대기 중인 하위 메뉴 바꾸기를 취소한다(UE `CancelPendingSubMenu`와 같다). 그래서 계속 움직이는 동안 하위 메뉴가 닫히지 않고 같은 일이 되풀이된다.
+  - UE는 열린 하위 메뉴 항목을 "열렸고 소유 메뉴 위젯이 hover가 아닐 때"만 hover처럼 보인다(`SMenuEntryBlock::ShouldSubMenuAppearHovered`, SMenuEntryBlock.cpp 1136–1141).
+  - 고침: `MenuPanel`이 hover 경로의 진입·이탈로 포인터가 패널 위에 있는지 센다(`IsPointerInside`). 열린 항목은 그것이 거짓일 때만 강조한다. 회귀 시험은 `MenuSubMenuSurvivesPassingOverSibling`에서 구분선 위를 지날 때 강조가 없는지 본다.
+  - 아래 (a)–(c)는 같은 조사에서 나온 별개 개선으로 그대로 둔다.
 - **확인한 사실.**
   - 사용자가 돌린 exe는 UW8a 시점의 Debug 빌드다(그 뒤는 미빌드).
   - 앱이 OS 커서 *위치*를 늦출 수 있는 경로가 코드에 없다. `WH_MOUSE_LL`·`SetCursorPos`·`ClipCursor`(UW9c 전)·raw input을 쓰지 않는다. Windows 하드웨어 커서는 시스템 입력 스레드가 옮긴다.

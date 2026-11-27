@@ -125,11 +125,12 @@ bool MenuRow::IsHighlighted() const noexcept {
         return true;
     }
 
-    // 하위 메뉴가 열린 항목은 패널에서 다른 항목을 hover하지 않는 동안 강조를 유지한다(하위
-    // 메뉴로 옮겨 가도 단계마다 강조 — UE ShouldSubMenuAppearHovered).
+    // 하위 메뉴가 열린 항목은 포인터가 이 패널 밖(하위 메뉴 쪽)에 있는 동안 강조를
+    // 유지한다(단계마다 강조 — UE ShouldSubMenuAppearHovered, SMenuEntryBlock.cpp 1136–1141: 열렸고
+    // 소유 메뉴가 hover 아님). 패널 위라면 항목 사이 틈·구분선이어도 강조하지 않는다 — 다른 항목을
+    // 지나며 내려갈 때 강조가 열린 항목으로 되돌아갔다 오지 않게(19.5절 사용자 보고).
     if (IsOpen()) {
-        const MenuRow* hovered = panel_ ? panel_->HoveredRow() : nullptr;
-        return hovered == nullptr || hovered == this;
+        return !(panel_ && panel_->IsPointerInside());
     }
 
     return false;

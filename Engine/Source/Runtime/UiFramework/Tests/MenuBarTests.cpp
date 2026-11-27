@@ -547,6 +547,11 @@ TEST(UiFramework_MenuSubMenuSurvivesPassingOverSibling) {
     REQUIRE(bench.Frame());
     // 형제를 hover하는 동안 열린 항목의 강조는 꺼진다.
     CHECK(!recent.IsHighlighted());
+    // 회귀(19.5절): 패널 위의 항목 아닌 곳(구분선)을 지나도 강조가 열린 항목으로 되돌아가지 않는다.
+    REQUIRE(bench.Hover(*panel->ChildAt(2)));
+    REQUIRE(bench.Frame());
+    CHECK(!recent.IsHighlighted() && !other.IsHighlighted());
+    CHECK(panel->IsPointerInside() && recent.IsOpen());
     REQUIRE(bench.Hover(*sub->ChildAt(0)));
     REQUIRE(bench.Frame());
     menuClock = SubMenuClobberDelay + 0.1;

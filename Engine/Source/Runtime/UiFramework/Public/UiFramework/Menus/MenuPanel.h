@@ -45,6 +45,11 @@ public:
     void OnRowUnhovered(MenuRow& row) noexcept;
     // 지금 포인터가 올라간 항목이다(없으면 null).
     MenuRow* HoveredRow() const noexcept;
+    // 포인터가 패널 위(항목·구분선·여백 어디든)에 있는지다(UE OwnerMultiBoxWidget->IsHovered —
+    // 열린 하위 메뉴 항목은 이것이 거짓일 때만 강조한다, Docs/Design/UiToolkit 19.5절).
+    bool IsPointerInside() const noexcept;
+    void OnMouseEnter(uint32 user) noexcept override;
+    void OnMouseLeave(uint32 user) noexcept override;
     // 지금 열린 하위 메뉴 항목이다(없으면 null).
     MenuRow* OpenSubMenu() const noexcept;
     // 열린 하위 메뉴를 next로 바꾼다(null이면 닫기만). 대기 중인 바꾸기는 취소한다.
@@ -83,6 +88,8 @@ private:
     MenuAnchor* owner_;
     MenuRow* openSub_ = nullptr;
     MenuRow* hoveredRow_ = nullptr;
+    // 패널 위에 포인터를 둔 사용자 수다(hover 경로의 진입·이탈 — 조상도 받는다).
+    uint32 pointerUsers_ = 0;
     Array<MenuRow*> rows_;
     float scroll_ = 0;
     float maxScroll_ = 0;
