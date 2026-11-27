@@ -1,4 +1,4 @@
-#include <AssetRuntime/CancelToken.h>
+#include <Core/CancelToken.h>
 
 #include <Core/Move.h>
 #include <Platform/Atomics.h>
@@ -7,11 +7,14 @@ namespace rocks {
 
 namespace detail {
 
-// 취소 공유 상태다: 참조 계수(Source·Token 수)와 표시(0·1).
+// 취소 공유 상태다: 참조 계수(Source·Token·연결된 자식 수), 표시(0·1), 연결된 부모(붙잡는다)와
+// 사슬 깊이(자기 자신 포함).
 struct CancelState {
     Allocator* allocator = nullptr;
     uint32 references = 1;
     uint32 cancelled = 0;
+    CancelState* parent = nullptr;
+    uint32 depth = 1;
 };
 
 } // namespace detail
@@ -25,19 +28,31 @@ void RetainCancelState(detail::CancelState* state) noexcept {
 }
 
 void ReleaseCancelState(detail::CancelState* state) noexcept {
-    if (state == nullptr) {
-        return;
+    // 부모 사슬을 따라 놓는다(마지막 계수를 놓은 상태만 지우고, 그 상태가 붙잡던 부모로 이어 간다 —
+    // 재귀 없이).
+    while (state != nullptr) {
+        // 마지막 계수를 놓는 쪽이 지운다(앞선 쓰기가 보이도록 acquire-release).
+        if (platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&state->references,
+                                                                            1u) != 1u) {
+            return;
+        }
+
+        detail::CancelState* parent = state->parent;
+        Allocator* allocator = state->allocator;
+        state->~CancelState();
+        (void)allocator->Deallocate(state);
+        state = parent;
+    }
+}
+
+bool IsChainCancelled(const detail::CancelState* state) noexcept {
+    for (; state != nullptr; state = state->parent) {
+        if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&state->cancelled) != 0) {
+            return true;
+        }
     }
 
-    // 마지막 계수를 놓는 쪽이 지운다(앞선 쓰기가 보이도록 acquire-release).
-    if (platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&state->references, 1u) !=
-        1u) {
-        return;
-    }
-
-    Allocator* allocator = state->allocator;
-    state->~CancelState();
-    (void)allocator->Deallocate(state);
+    return false;
 }
 
 } // namespace
@@ -84,8 +99,12 @@ void CancelToken::Release() noexcept {
 }
 
 bool CancelToken::IsCancellationRequested() const noexcept {
-    return state_ != nullptr &&
-           platform::AtomicLoad<platform::MemoryOrder::Acquire>(&state_->cancelled) != 0;
+    return IsChainCancelled(state_);
+}
+
+Result<void> CancelToken::CheckCancelled() const noexcept {
+    return IsChainCancelled(state_) ? Result<void>::Failure(ErrorCode::Cancelled)
+                                    : Result<void>::Success();
 }
 
 CancelSource::CancelSource(CancelSource&& other) noexcept : state_(other.state_) {
@@ -107,6 +126,17 @@ CancelSource::~CancelSource() noexcept {
 }
 
 Result<CancelSource> CancelSource::Create(Allocator& allocator) noexcept {
+    return CreateLinked(allocator, CancelToken());
+}
+
+Result<CancelSource> CancelSource::CreateLinked(Allocator& allocator,
+                                                const CancelToken& parent) noexcept {
+    detail::CancelState* parentState = parent.state_;
+    const uint32 depth = parentState != nullptr ? parentState->depth + 1 : 1;
+    if (depth > MaxCancelChainDepth) {
+        return Result<CancelSource>::Failure(ErrorCode::CapacityExceeded);
+    }
+
     auto memory = allocator.Allocate(sizeof(detail::CancelState), alignof(detail::CancelState));
     if (!memory) {
         return Result<CancelSource>::Failure(memory.Error());
@@ -114,6 +144,9 @@ Result<CancelSource> CancelSource::Create(Allocator& allocator) noexcept {
 
     auto* state = InitializeAt<detail::CancelState>(memory.Value());
     state->allocator = &allocator;
+    state->parent = parentState;
+    state->depth = depth;
+    RetainCancelState(parentState);
     CancelSource source;
     source.state_ = state;
     return Result<CancelSource>::Success(Move(source));
@@ -130,8 +163,7 @@ void CancelSource::Cancel() noexcept {
 }
 
 bool CancelSource::IsCancellationRequested() const noexcept {
-    return state_ != nullptr &&
-           platform::AtomicLoad<platform::MemoryOrder::Acquire>(&state_->cancelled) != 0;
+    return IsChainCancelled(state_);
 }
 
 } // namespace rocks

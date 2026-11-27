@@ -84,7 +84,7 @@
 - 개정 24(2026-11-23): SH1a 구현 메모(11.1절 — 구조, 상대 include 접기·`Shared` 범위·재정의 오류·`true`·출력 공백과 `#line` 기준·한도 묶음·`ROCKS_SPIRV`, S7 도구 `CompileWithDxc`와 시험 위치, 대소문자 한계)와 측정 S7 결과(5.4절: DXIL·SPIR-V byte 동일, 오류 위치 동일).
 - 개정 25(2026-11-23): SH1b 구현 메모(11.1절 — `ShaderCompilerCommon` 분리, 옵션 파서, 키 2–7행 함수와 system 도구 지문 입력, 값 표 도우미, 너겟 위치, 정책 `shader-worker-isolation`).
 - 개정 26(2026-11-23): SH1c 구현 메모(11.1절 — 워커 메시지·종료 코드 보충, 워커·형식 모듈, 제어 줄, DXC 인자, 동반 타깃, system 도구 지문 SH1e로).
-- 개정 27(2026-11-23): 11.1절 SC4에 워커 job 진행 줄 `job <seq> <index>`과 잠정·실제 계수 규칙을 더하고 메시지 버전을 2로 올렸다([진행 보고](../ProgressReporting.ko.md) 10.3절·12절).
+- 개정 27(2026-11-23): 11.1절 SC4에 워커 job 진행 줄 `job <seq> <index>`과 잠정·실제 계수 규칙을 더하고 메시지 버전을 2로 올렸다([진행 보고](../ProgressReporting/README.ko.md) 10.3절·12절).
 - 개정 28(2026-11-23): SH1d 구현 메모(11.1절 — 관리자와 채널 풀, 조정 스레드, 너겟 결과 처리, 진행 계수, 작업 디렉터리 정리, 형식 snapshot, `shader-compile` 인자·출력, Commandlet 동반 타깃). 문서를 장별 파일로 나눴다(내용 변경 없음, [문서 배치 규칙](../../Guides/DocumentLayout.ko.md)).
 - 개정 29(2026-11-23): SH1e 설계(11.1절 E1–E11 — 처리기 문맥, 공용 도구 호출, FXC 플래그·결과 분류, 대체 경로, ESSL·MSL 경로, Metal 도구 찾기·지문, `typedUavLoad`, 처리기 버전, macOS 측정 이전, 스파이크 삭제)와 엔진 셰이더 요구 SLR1(SC10 `ROCKS_FEATURE_*`, 12.1절 `typedUavLoad`)·SLR2(SC2·12.3절 `/Plugin/EngineShaderTests`).
 - 개정 30(2026-11-23): SH1e 구현 메모(11.1절 — 모듈·공용 도구 호출, 처리기 문맥, 결과 분류, `ROCKS_FEATURE_*`와 `typedUavLoad`, 스파이크 삭제, 시험, Metal·macOS 미확인). 9절 스파이크 진척 갱신. E6의 MSL 2.x 언어 인자를 UE대로 `-std=macos-metal2.4`로 고쳤다.

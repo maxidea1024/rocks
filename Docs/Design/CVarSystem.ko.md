@@ -436,7 +436,7 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 ## 12. 지연 바인딩과 진단
 
 - Config 파일·`--set`에 아직 등록되지 않은 이름이 있으면 대기 값으로 둔다(Config 5.1). 나중에 등록되면 `Register`가 바로 검사·적용하고 `LateBound` 진단(정보)을 남긴다. 늦게 로드된 플러그인 변수도 같다.
-- `ConfigContext::ReportUnresolved()`는 호스트가 `CompleteStartup` 바로 뒤에 부른다. 남은 대기 이름마다 `UnresolvedName` 진단을 남기고, 등록된 이름 중 편집 거리가 가장 작은 것(거리 ≤ `MaxSuggestionDistance` = 3)을 `did you mean 'render.shadow.distance'?`로 붙인다. 편집 거리 함수는 Core 텍스트 유틸리티의 `EditDistance`(OSA — 제한된 Damerau-Levenshtein, 인접 두 글자 맞바꾸기 하나가 1)다. 명령줄 이름 제안([AppInfo·CommandLine](AppInfoCommandLine.ko.md))과 같은 함수이고, CVar는 대소문자를 구분해 비교한다(콘솔 이름은 소문자 규칙).
+- `ConfigContext::ReportUnresolved()`는 호스트가 `CompleteStartup` 바로 뒤에 부른다. 남은 대기 이름마다 `UnresolvedName` 진단을 남기고, 등록된 이름 중 편집 거리가 가장 작은 것(거리 ≤ `MaxSuggestionDistance` = 3)을 `did you mean 'render.shadow.distance'?`로 붙인다. 편집 거리 함수는 Core 텍스트 유틸리티의 `EditDistance`(OSA — 제한된 Damerau-Levenshtein, 인접 두 글자 맞바꾸기 하나가 1)다. 명령줄 이름 제안([AppInfo·CommandLine](AppInfoCommandLine/README.ko.md))과 같은 함수이고, CVar는 대소문자를 구분해 비교한다(콘솔 이름은 소문자 규칙).
 - 모든 거부·보정은 Config 진단(`ConfigDiagnostic` — 출처·코드·이름·메시지)으로 모으고 Log API로 기록한다(영어). `TakeDiagnostics()`는 모은 진단을 꺼내고 비운다.
 
 | 코드 | 경우 |
@@ -722,7 +722,7 @@ public:
 - 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)으로 들어온 아직 등록되지 않은 이름의 값은 그 이름을 부팅 독립 콘솔 설정(`BootCVar`·CF2 `StartupOnly`·`RestartRequired`)으로 등록할 때 받지 않고 Error `BootSealed`를 남긴다(늦은 등록으로 `BootSealed`를 우회하던 것). 뒤 Sync에서도 그 값은 닿지 않는다.
 - 바로 쓰는 층의 문서 입력에 부팅 값이 하나라도 있으면 문서 전체를 거부한다(의도 — 지금 호출자 없음, 9절 표·`AddLayerText` 주석).
 - `CheckConsoleLayer`는 출시 규칙의 `DevelopmentOnly` 판정을 `BootSealed`보다 먼저 한다.
-- 편집 거리는 확정 스펙(AppInfoCommandLine 942행)대로 `EditDistance`(OSA·비교 방식 인자)로 바꿨다(위 항목).
+- 편집 거리는 확정 스펙(AppInfoCommandLine 14.4절)대로 `EditDistance`(OSA·비교 방식 인자)로 바꿨다(위 항목).
 - `ReportUnresolved`: 콘솔 명령 이름에 넣은 값은 같은 코드 `UnresolvedName`에 "is a console command, not a setting; it does not take a value"로 알린다(진단 코드를 늘리지 않았다 — 고칠 곳이 "값의 대상 이름"으로 같다). 문맥마다 이미 보고한 이름은 다시 보고하지 않는다(반환은 새로 보고한 수). `HostSettings`는 보고 실패도 Error 로그만 남기고 시작을 이어 간다.
 - `TakeDiagnostics`: 전부 옮기거나 하나도 옮기지 않고(실패하면 out을 되돌린다), 넘친 수(`Omitted`)도 out에 더한다(`ConfigDiagnostics::AddOmitted`). out이 문맥의 모음 자신이면 `InvalidArgument`다.
 - CVR6 후속: 콘솔 안내 문구의 형식 — 지금 진단은 `error BootSealed render.backend: is a boot variable…`이고 스펙(9절)은 `render.backend is a boot variable…`이다. CVR6 콘솔이 스펙 형식으로 출력한다.
