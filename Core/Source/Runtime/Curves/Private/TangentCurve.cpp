@@ -2,8 +2,10 @@
 
 #include "CurveKeyEdit.h"
 
-// TangentCurve의 평가·자동 접선·키 편집이다(Docs/Design/CurveData.ko.md 5–7절). 중복 키 제거는
-// TangentCurveRedundant.cpp, 값 범위는 TangentCurveValueRange.cpp다.
+#include <Curves/CurveMathDeterministic.h>
+
+// TangentCurve의 평가·자동 접선·키 편집이다(Docs/Design/CurveData/README.ko.md 5–7절). 중복 키
+// 제거는 TangentCurveRedundant.cpp, 값 범위는 TangentCurveValueRange.cpp다.
 namespace rocks {
 
 namespace {
@@ -41,6 +43,15 @@ float TangentCurve::Evaluate(float time, float fallback) const noexcept {
         [](const TangentCurveKey& first, const TangentCurveKey& second, float at) noexcept {
             return math::EvalCurveSegment(first, second, at);
         });
+}
+
+float TangentCurve::EvaluateDeterministic(float time, float fallback) const noexcept {
+    const float value = curves_detail::EvaluateCurve(
+        defaultValue, preExtrapolation, postExtrapolation, keys_.View(), time, fallback, false,
+        [](const TangentCurveKey& first, const TangentCurveKey& second, float at) noexcept {
+            return math::EvalCurveSegment<CurveMathDeterministic>(first, second, at);
+        });
+    return CurveMathDeterministic::Canonical(value);
 }
 
 // UE FRichCurve::IsConstant(RC 485–502).

@@ -4,10 +4,10 @@
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
-// FrameRate·FrameNumber·FrameTime(Docs/Design/CurveData.ko.md D20) 시험이다. UE 식 대조는 UE 5.8.4
-// Runtime/Core/Public/Misc/FrameRate.h 232–238(AsSeconds)·240–255(AsFrameTime)와 FrameTime.h의
-// 생성자 (FFrameTime(FFrameNumber, float) — Clamp(InSubFrame + 0.5f − 0.5f, 0, MaxSubframe))를 옮긴
-// 참조로 한다.
+// FrameRate·FrameNumber·FrameTime(Docs/Design/CurveData/README.ko.md D20) 시험이다. UE 식 대조는
+// UE 5.8.4 Runtime/Core/Public/Misc/FrameRate.h 232–238(AsSeconds)·240–255(AsFrameTime)와
+// FrameTime.h의 생성자 (FFrameTime(FFrameNumber, float) — Clamp(InSubFrame + 0.5f − 0.5f, 0,
+// MaxSubframe))를 옮긴 참조로 한다.
 namespace rocks::test {
 
 namespace frame_rate_tests {

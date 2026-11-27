@@ -16,14 +16,82 @@ bool NonNegative(float value) noexcept {
 } // namespace
 
 Result<void> ValidateSoundAttenuation(const SoundAttenuation& value) noexcept {
+    const auto fail = []() noexcept { return Result<void>::Failure(ErrorCode::InvalidArgument); };
     const audio::DistanceAttenuationSettings& distance = value.distance;
-    if (!NonNegative(value.innerRadius) || !NonNegative(value.nonSpatializedRadiusStart) ||
-        !NonNegative(value.nonSpatializedRadiusEnd) || !NonNegative(distance.falloffDistance) ||
-        !NonNegative(distance.distanceScale) ||
+    if (!NonNegative(distance.falloffDistance) || !NonNegative(distance.distanceScale) ||
         !math::IsFinite(distance.naturalSoundAttenuationDb) ||
         distance.naturalSoundAttenuationDb > 0.0f ||
-        distance.model == audio::DistanceAttenuationModel::Custom) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        static_cast<uint8>(distance.model) >
+            static_cast<uint8>(audio::DistanceAttenuationModel::Custom) ||
+        static_cast<uint8>(distance.naturalSoundFalloffMode) >
+            static_cast<uint8>(audio::NaturalSoundFalloffMode::Continues)) {
+        return fail();
+    }
+
+    // 모양(3.42.2절): 크기 성분·거리 ≥ 0, Cone의 Y·Z는 각도.
+    if (static_cast<uint8>(value.shape) > static_cast<uint8>(SoundAttenuationShape::Cone) ||
+        !NonNegative(value.shapeExtents.x) || !NonNegative(value.shapeExtents.y) ||
+        !NonNegative(value.shapeExtents.z) || !NonNegative(value.coneOffset) ||
+        !NonNegative(value.coneSphereRadius) || !NonNegative(value.coneSphereFalloffDistance)) {
+        return fail();
+    }
+
+    if (value.shape == SoundAttenuationShape::Cone &&
+        (value.shapeExtents.y > MaxAttenuationAngleDegrees ||
+         value.shapeExtents.z > MaxAttenuationAngleDegrees)) {
+        return fail();
+    }
+
+    // 공기 흡수(3.42.3절): 구간 Min ≤ Max, 주파수 [0, 20000].
+    if (static_cast<uint8>(value.absorptionMethod) >
+            static_cast<uint8>(SoundAbsorptionMethod::CustomCurve) ||
+        !NonNegative(value.absorptionDistanceMin) || !NonNegative(value.absorptionDistanceMax) ||
+        value.absorptionDistanceMin > value.absorptionDistanceMax ||
+        !IsFiniteWithin(value.lowPassFrequencyAtMin, 0.0f, MaxAttenuationFilterFrequency) ||
+        !IsFiniteWithin(value.lowPassFrequencyAtMax, 0.0f, MaxAttenuationFilterFrequency) ||
+        !IsFiniteWithin(value.highPassFrequencyAtMin, 0.0f, MaxAttenuationFilterFrequency) ||
+        !IsFiniteWithin(value.highPassFrequencyAtMax, 0.0f, MaxAttenuationFilterFrequency)) {
+        return fail();
+    }
+
+    // 우선순위(3.42.4절)·focus(3.42.5절): 배수 ≥ 0, 방위각 [0, 180], 속도 ≥ 0.
+    if (static_cast<uint8>(value.priorityAttenuationMethod) >
+            static_cast<uint8>(SoundPriorityAttenuationMethod::Manual) ||
+        !NonNegative(value.priorityAttenuationMin) || !NonNegative(value.priorityAttenuationMax) ||
+        !NonNegative(value.priorityAttenuationDistanceMin) ||
+        !NonNegative(value.priorityAttenuationDistanceMax) ||
+        !NonNegative(value.manualPriorityAttenuation) ||
+        !IsFiniteWithin(value.focusAzimuth, 0.0f, MaxAttenuationAngleDegrees) ||
+        !IsFiniteWithin(value.nonFocusAzimuth, 0.0f, MaxAttenuationAngleDegrees) ||
+        !NonNegative(value.focusDistanceScale) || !NonNegative(value.nonFocusDistanceScale) ||
+        !NonNegative(value.focusPriorityScale) || !NonNegative(value.nonFocusPriorityScale) ||
+        !NonNegative(value.focusVolumeAttenuation) ||
+        !NonNegative(value.nonFocusVolumeAttenuation) ||
+        !NonNegative(value.focusAttackInterpSpeed) || !NonNegative(value.focusReleaseInterpSpeed)) {
+        return fail();
+    }
+
+    // 스테레오·비공간화(3.42.6절)·차폐(3.42.7절).
+    if (!NonNegative(value.stereoSpread) || !NonNegative(value.nonSpatializedRadiusStart) ||
+        !NonNegative(value.nonSpatializedRadiusEnd) ||
+        static_cast<uint8>(value.nonSpatializedMode) >
+            static_cast<uint8>(SoundNonSpatializedMode::Surround2D) ||
+        !IsFiniteWithin(value.occlusionLowPassFrequency, 0.0f, MaxAttenuationFilterFrequency) ||
+        !IsFiniteWithin(value.occlusionVolumeAttenuation, 0.0f, 1.0f) ||
+        !NonNegative(value.occlusionInterpolationSeconds)) {
+        return fail();
+    }
+
+    // 쓰이는 곡선은 있어야 한다(3.42.1절).
+    const bool absorptionCurves =
+        value.attenuateWithLowPass && value.absorptionMethod == SoundAbsorptionMethod::CustomCurve;
+    if ((distance.model == audio::DistanceAttenuationModel::Custom && !value.customDistanceCurve) ||
+        (absorptionCurves &&
+         (!value.customLowPassAbsorptionCurve || !value.customHighPassAbsorptionCurve)) ||
+        (value.enablePriorityAttenuation &&
+         value.priorityAttenuationMethod == SoundPriorityAttenuationMethod::CustomCurve &&
+         !value.customPriorityAttenuationCurve)) {
+        return fail();
     }
 
     return Result<void>::Success();

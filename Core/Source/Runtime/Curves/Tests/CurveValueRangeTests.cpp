@@ -4,9 +4,9 @@
 #include <TestSupport/MathTestSupport.h>
 #include <TestSupport/Test.h>
 
-// TangentCurve 값 범위 시험이다(Docs/Design/CurveData.ko.md 7.3절, D11): 손 계산 극값(비가중 Cubic
-// 넘침), 가중 구간의 단조·비단조(시간 Bezier가 되돌아가는 경우), 무작위 커브에서 촘촘한 Evaluate
-// 표본의 최소·최대가 범위 안이고 범위 끝에 닿는지, 비유한 값의 거부.
+// TangentCurve 값 범위 시험이다(Docs/Design/CurveData/README.ko.md 7.3절, D11): 손 계산 극값(비가중
+// Cubic 넘침), 가중 구간의 단조·비단조(시간 Bezier가 되돌아가는 경우), 무작위 커브에서 촘촘한
+// Evaluate 표본의 최소·최대가 범위 안이고 범위 끝에 닿는지, 비유한 값의 거부.
 using namespace rocks;
 namespace curve_value_range_tests_file {
 

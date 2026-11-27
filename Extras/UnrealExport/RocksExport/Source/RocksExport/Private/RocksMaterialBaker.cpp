@@ -35,8 +35,9 @@ namespace RocksMaterialBakerPrivate
 		{MP_AmbientOcclusion, TEXT("AmbientOcclusion")},
 	};
 
-	// 8비트 결과의 알파다(굽기 결과 알파는 0이다 — GLTFExporter bFillAlpha와 같이 채운다).
+	// 결과의 알파다(굽기 결과 알파는 0이다 — GLTFExporter bFillAlpha와 같이 채운다. HDR은 1.0).
 	static constexpr uint8 OpaqueAlpha = 255;
+	static constexpr float OpaqueHdrAlpha = 1.0f;
 
 	// 층 감마 이름이다(4.5절 1번 gammaSpace).
 	static const TCHAR* const LinearGamma = TEXT("Linear");
@@ -125,11 +126,16 @@ namespace RocksMaterialBakerPrivate
 		return Size.X > 0 && Size.Y > 0 && Length == int64(Size.X) * int64(Size.Y);
 	}
 
-	// 굽기 동안 모듈 전역 상태를 바꾸고 끝에 되돌린다(GLTFExporter와 같은 값 — GLTFMaterialUtilities.cpp:157-160).
+	// linear 상태를 읽는 속성이다(SetLinearBake(false)면 sRGB, true면 linear — MaterialBakingModule.cpp:1136-1158).
+	static const EMaterialProperty LinearProbe = MP_Metallic;
+
+	// 굽기 동안 모듈 전역 상태를 바꾸고 끝에 되돌린다: linear는 굽기 전 값(모듈 시작 값은 true —
+	// MaterialBakingModule.cpp:287), EmissiveHDR는 getter가 없어 기본값 false다(GLTF·FBX 내보내기도 켜지 않는다).
 	struct FBakeModuleState
 	{
 		explicit FBakeModuleState(IMaterialBakingModule& InModule)
 			: Module(InModule)
+			, bLinearBefore(InModule.IsLinearBake(FMaterialPropertyEx(LinearProbe)))
 		{
 			Module.SetLinearBake(true);
 			Module.SetEmissiveHDR(true);
@@ -137,11 +143,12 @@ namespace RocksMaterialBakerPrivate
 
 		~FBakeModuleState()
 		{
-			Module.SetLinearBake(false);
+			Module.SetLinearBake(bLinearBefore);
 			Module.SetEmissiveHDR(false);
 		}
 
 		IMaterialBakingModule& Module;
+		bool bLinearBefore;
 	};
 }
 
@@ -183,9 +190,12 @@ bool FRocksMaterialBaker::WriteBaked(UMaterialInterface& Material, int32 BakeSiz
 		Module.BakeMaterials(MaterialSettings, MeshSettings, Outputs);
 	}
 
+	Body.bBaked = true;
+
 	const auto Fail = [&Body, &Writer](const FString& Message)
 	{
-		Body.Diagnostics.Add({TEXT("BakeFailed"), RocksExport::SeverityError, Message});
+		// warning이다: error면 Rocks 리더가 에셋 전체를 거부한다(8.9절 1번 — baked null은 "구운 것 없음").
+		Body.Diagnostics.Add({TEXT("BakeFailed"), RocksExport::SeverityWarning, Message});
 		Writer.Key(TEXT("baked"));
 		Writer.Null();
 		return true;
@@ -242,7 +252,12 @@ bool FRocksMaterialBaker::WriteBaked(UMaterialInterface& Material, int32 BakeSiz
 		bool bWritten = false;
 		if (Entry.Property == MP_EmissiveColor)
 		{
-			const TArray<FFloat16Color>& Pixels = Output.HDRPropertyData.FindChecked(Key);
+			TArray<FFloat16Color> Pixels = Output.HDRPropertyData.FindChecked(Key);
+			for (FFloat16Color& Pixel : Pixels)
+			{
+				Pixel.A = FFloat16(OpaqueHdrAlpha);
+			}
+
 			const TConstArrayView64<uint8> Bytes(reinterpret_cast<const uint8*>(Pixels.GetData()), int64(Pixels.Num()) * int64(sizeof(FFloat16Color)));
 			bWritten = WriteSource(TSF_RGBA16F, bLinear, FIntPoint(BakeSize, BakeSize), Bytes, Bundle, Writer, OutError);
 		}

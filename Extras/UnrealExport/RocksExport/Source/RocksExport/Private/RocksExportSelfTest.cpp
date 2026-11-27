@@ -1379,12 +1379,12 @@ void RocksExportSelfTest::RunMaterialBaking(TArray<FString>& Errors)
 	Options.bClosure = false;
 	Options.BakeSize = TestBakeSize;
 	Options.Selections = {GoldenMaterialPath, GoldenInstancePath, LightFunctionPath};
+	// 굽기 전후 모듈 linear 상태가 같다(굽기 전 값으로 되돌린다 — Metallic은 linear 모드에서만 linear다).
+	IMaterialBakingModule& Module = FModuleManager::Get().LoadModuleChecked<IMaterialBakingModule>("MaterialBaking");
+	const bool bLinearBefore = Module.IsLinearBake(FMaterialPropertyEx(MP_Metallic));
 	FRocksExportResult Result;
 	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("baking export: %s"), *Result.Error));
-
-	// 굽기 뒤 모듈 전역 상태가 되돌려졌다(SetLinearBake(false)면 Metallic은 sRGB 굽기다).
-	IMaterialBakingModule& Module = FModuleManager::Get().LoadModuleChecked<IMaterialBakingModule>("MaterialBaking");
-	Expect(Errors, !Module.IsLinearBake(FMaterialPropertyEx(MP_Metallic)), TEXT("baking left the module in linear bake mode"));
+	Expect(Errors, Module.IsLinearBake(FMaterialPropertyEx(MP_Metallic)) == bLinearBefore, TEXT("baking did not restore the module linear bake state"));
 
 	TArray<uint8> BundleJson;
 	const TSharedPtr<FJsonObject> BundleObject = LoadBytes(Output / TEXT("bundle.json"), BundleJson) ? ParseJson(BundleJson) : nullptr;
@@ -1440,13 +1440,16 @@ void RocksExportSelfTest::RunMaterialBaking(TArray<FString>& Errors)
 				return false;
 			}
 
-			(*Layers)[0]->AsObject()->TryGetStringField(TEXT("gammaSpace"), Entry.Gamma);
+			const TSharedPtr<FJsonObject> Layer = (*Layers)[0]->AsObject();
 			const TSharedPtr<FJsonObject> Block = (*Blocks)[0]->AsObject();
-			const TArray<TSharedPtr<FJsonValue>>& Mips = Block->GetArrayField(TEXT("mips"));
-			Block->TryGetNumberField(TEXT("sizeX"), Entry.SizeX);
-			Block->TryGetNumberField(TEXT("sizeY"), Entry.SizeY);
+			const TArray<TSharedPtr<FJsonValue>>* Mips = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* MipPixels = nullptr;
+			const TSharedPtr<FJsonObject> Mip = Block.IsValid() && Block->TryGetArrayField(TEXT("mips"), Mips) && Mips->Num() == 1 ? (*Mips)[0]->AsObject() : nullptr;
+			const TSharedPtr<FJsonObject> Pixel = Mip.IsValid() && Mip->TryGetArrayField(TEXT("pixels"), MipPixels) && MipPixels->Num() == 1 ? (*MipPixels)[0]->AsObject() : nullptr;
 			FString Hex;
-			if (Mips.Num() != 1 || !Mips[0]->AsObject()->GetArrayField(TEXT("pixels"))[0]->AsObject()->TryGetStringField(TEXT("blob"), Hex)
+			// Pixel이 있으면 Block도 있다.
+			if (!Layer.IsValid() || !Layer->TryGetStringField(TEXT("gammaSpace"), Entry.Gamma) || !Pixel.IsValid() || !Block->TryGetNumberField(TEXT("sizeX"), Entry.SizeX)
+				|| !Block->TryGetNumberField(TEXT("sizeY"), Entry.SizeY) || !Pixel->TryGetStringField(TEXT("blob"), Hex)
 				|| !FFileHelper::LoadFileToArray(Entry.Pixels, *(Output / FRocksBundleWriter::BlobFileForHex(Hex))))
 			{
 				Problem = FString::Printf(TEXT("baked property %s blob"), *Name);

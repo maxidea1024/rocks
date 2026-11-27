@@ -15,4 +15,6 @@ struct FRocksAssetBody
 	TArray<uint8> Data;
 	TArray<FRocksPropertyDumper::FReference> References;
 	TArray<FRocksExportDiagnostic> Diagnostics;
+	// 이 에셋을 실제로 구웠는가다(BakeMaterials를 불렀다 — bundle.json environment의 조건, 8.9절 1번).
+	bool bBaked = false;
 };

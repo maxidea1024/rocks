@@ -2,6 +2,8 @@
 
 #include "CurveKeyEdit.h"
 
+#include <Curves/CurveMathDeterministic.h>
+
 // TangentCurve 중복 키 제거다(UE FRichCurve::RemoveRedundantKeysInternal, RC 966–1102 —
 // 설계 7.2절). UE와 다른 점: 범위판의 비교 기준이 시작 보존 키에서 시작하고(15절 8), 제거 뒤
 // AutoSetTangents를 부르지 않는다(D10), 표본 프레임 번호가 int32 끝에 닿으면 표본을 멈춘다(UE는
@@ -20,6 +22,7 @@ inline constexpr usize MaxRedundantSamples = curves_detail::MaxBakeSamples;
 
 // mostRecent(남긴 직전 키)·test·test + 1 세 키로 test 키를 남겨야 하는지다(RC 1022–1069). 표본판은
 // samples에 표본 수를 더하고, 상한을 넘으면 CapacityExceeded다.
+template <class MathPolicy>
 Result<bool> KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize test,
                      float tolerance, const Optional<FrameRate>& sampleRate,
                      usize& samples) noexcept {
@@ -38,10 +41,10 @@ Result<bool> KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize t
             }
 
             const float seconds = static_cast<float>(rate.AsSeconds(sample));
-            const float without = math::EvalCurveSegment(previous, next, seconds);
+            const float without = math::EvalCurveSegment<MathPolicy>(previous, next, seconds);
             const TangentCurveKey& first = seconds <= removedTime ? previous : candidate;
             const TangentCurveKey& second = seconds <= removedTime ? candidate : next;
-            const float with = math::EvalCurveSegment(first, second, seconds);
+            const float with = math::EvalCurveSegment<MathPolicy>(first, second, seconds);
             if (!(math::Abs(without - with) <= tolerance)) { // NaN 차는 남긴다
                 return Result<bool>::Success(true);
             }
@@ -61,13 +64,14 @@ Result<bool> KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize t
         return Result<bool>::Success(true);
     }
 
-    const float without = math::EvalCurveSegment(previous, next, candidate.time);
+    const float without = math::EvalCurveSegment<MathPolicy>(previous, next, candidate.time);
     // NaN 차는 남긴다.
     return Result<bool>::Success(!(math::Abs(without - candidate.value) <= tolerance));
 }
 
 // [start, end] 보존 키 사이의 키를 고른다(RC 966–1102). start < end다.
 // keptIndices가 있으면 남긴 키의 원래 index를 담는다(실패하면 그대로).
+template <class MathPolicy>
 Result<void> TangentCurveRedundantRemoveRedundant(Array<TangentCurveKey>& keys, float tolerance,
                                                   usize start, usize end,
                                                   const Optional<FrameRate>& sampleRate,
@@ -105,7 +109,7 @@ Result<void> TangentCurveRedundantRemoveRedundant(Array<TangentCurveKey>& keys, 
     usize mostRecent = start; // UE는 0(15절 8)
     usize samples = 0;
     for (usize test = start + 1; test < end; ++test) {
-        auto keepTest = KeepKey(view, mostRecent, test, tolerance, sampleRate, samples);
+        auto keepTest = KeepKey<MathPolicy>(view, mostRecent, test, tolerance, sampleRate, samples);
         if (!keepTest) {
             return Result<void>::Failure(keepTest.Error());
         }
@@ -128,7 +132,9 @@ Result<void> TangentCurveRedundantRemoveRedundant(Array<TangentCurveKey>& keys, 
     return Result<void>::Success();
 }
 
-// 전체판·범위판의 공통 진입이다(keptIndices는 nullptr일 수 있다).
+// 전체판·범위판의 공통 진입이다(keptIndices는 nullptr일 수 있다). MathPolicy는 비교 평가의 수학
+// 정책이다(기본 math::CurveMathPlatform, 쿠킹은 CurveMathDeterministic — 설계 5.9절).
+template <class MathPolicy = math::CurveMathPlatform>
 Result<void> TangentCurveRedundantRemoveRedundantAll(Array<TangentCurveKey>& keys, float tolerance,
                                                      const Optional<FrameRate>& sampleRate,
                                                      Array<usize>* keptIndices) noexcept {
@@ -140,8 +146,8 @@ Result<void> TangentCurveRedundantRemoveRedundantAll(Array<TangentCurveKey>& key
         return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
     }
 
-    return TangentCurveRedundantRemoveRedundant(keys, tolerance, 0, keys.Size() - 1, sampleRate,
-                                                keptIndices);
+    return TangentCurveRedundantRemoveRedundant<MathPolicy>(keys, tolerance, 0, keys.Size() - 1,
+                                                            sampleRate, keptIndices);
 }
 
 Result<void> TangentCurveRedundantRemoveRedundantRange(Array<TangentCurveKey>& keys,
@@ -158,8 +164,8 @@ Result<void> TangentCurveRedundantRemoveRedundantRange(Array<TangentCurveKey>& k
         return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
     }
 
-    return TangentCurveRedundantRemoveRedundant(keys, tolerance, start, end, sampleRate,
-                                                keptIndices);
+    return TangentCurveRedundantRemoveRedundant<math::CurveMathPlatform>(
+        keys, tolerance, start, end, sampleRate, keptIndices);
 }
 
 } // namespace
@@ -185,6 +191,13 @@ Result<void> TangentCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices, flo
                                                   Optional<FrameRate> sampleRate) noexcept {
     return TangentCurveRedundantRemoveRedundantRange(keys_, tolerance, first, last, sampleRate,
                                                      &keptIndices);
+}
+
+Result<void>
+TangentCurve::TryRemoveRedundantKeysDeterministic(float tolerance,
+                                                  Optional<FrameRate> sampleRate) noexcept {
+    return TangentCurveRedundantRemoveRedundantAll<CurveMathDeterministic>(keys_, tolerance,
+                                                                           sampleRate, nullptr);
 }
 
 } // namespace rocks

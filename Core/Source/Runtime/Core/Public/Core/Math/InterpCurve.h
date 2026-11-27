@@ -60,10 +60,10 @@ class InterpCurve {
     static_assert(InterpCurveValue<T>, "InterpCurve supports float, double, Vector2/3/4, "
                                        "Quaternion and LinearColor values");
 
-    // 리플렉션 미러(CoreTypeBindings InterpCurve 미러 — Docs/Design/CurveData.ko.md 12.1절)의 생성
-    // 코드가 private 멤버(points_·looped_·loopKeyOffset_)에 닿는다. 생성 코드는 decode한 값을
-    // 게시하기 전에 미러의 Validate(정렬·유한 입력값·루프 정합)를 부르므로 불변식이 깨진 값을
-    // 게시하지 않는다.
+    // 리플렉션 미러(CoreTypeBindings InterpCurve 미러 —
+    // Docs/Design/CurveData/README.ko.md 12.1절)의 생성 코드가 private
+    // 멤버(points_·looped_·loopKeyOffset_)에 닿는다. 생성 코드는 decode한 값을 게시하기 전에 미러의
+    // Validate(정렬·유한 입력값·루프 정합)를 부르므로 불변식이 깨진 값을 게시하지 않는다.
     template <class>
     friend struct ::rocks::GeneratedType;
 

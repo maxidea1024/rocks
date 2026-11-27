@@ -2,7 +2,7 @@
 
 #include "CurveKeyEdit.h"
 
-// 계단 커브 셋의 평가·편집이다(Docs/Design/CurveData.ko.md 5.8·7절 — UE IntegralCurve.cpp·
+// 계단 커브 셋의 평가·편집이다(Docs/Design/CurveData/README.ko.md 5.8·7절 — UE IntegralCurve.cpp·
 // StringCurve.cpp·NameCurve.cpp). 공통 연산은 CurveKeyEdit.h다.
 namespace rocks {
 

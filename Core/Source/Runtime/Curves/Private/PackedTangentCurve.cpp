@@ -5,7 +5,7 @@
 #include <Platform/Memory.h>
 #include "CurveKeyEdit.h"
 
-// PackedTangentCurve 압축·평가·풀기·정합이다(Docs/Design/CurveData.ko.md 11절 — UE 5.8
+// PackedTangentCurve 압축·평가·풀기·정합이다(Docs/Design/CurveData/README.ko.md 11절 — UE 5.8
 // RichCurve.cpp FindRichCurveCompressionFormat 1279–1330·FindRichCurveKeyFormat
 // 1332–1475·CompressCurve 1477–1682·키 시간·데이터 어댑터 1694–1947·InterpEval
 // 2016–2135·PopulateCurve 2441–2452를 고친 것).

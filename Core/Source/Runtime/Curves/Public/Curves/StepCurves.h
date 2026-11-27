@@ -11,10 +11,10 @@
 #include <Core/Text/StringView.h>
 #include <Meta/Annotations.h>
 
-// 계단 커브 셋이다(Docs/Design/CurveData.ko.md 2·4·5.8절 — CV6): int32 값 IntegerStepCurve(UE 5.8
-// FIntegralCurve), Name 값 NameStepCurve(UE FNameCurve — Rocks가 기본값과 평가를 더한다, D9),
-// String 값 StringStepCurve(UE FStringCurve). 키 사이를 보간하지 않고 시간 이하인 마지막 키 값을
-// 낸다.
+// 계단 커브 셋이다(Docs/Design/CurveData/README.ko.md 2·4·5.8절 — CV6): int32 값
+// IntegerStepCurve(UE 5.8 FIntegralCurve), Name 값 NameStepCurve(UE FNameCurve — Rocks가 기본값과
+// 평가를 더한다, D9), String 값 StringStepCurve(UE FStringCurve). 키 사이를 보간하지 않고 시간
+// 이하인 마지막 키 값을 낸다.
 //
 // 불변식·검증 hook·편집 연산의 실패 규약·스레드 규칙은 TangentCurve와 같다(TangentCurve.h): 키
 // 시간은 유한·오름차순(같은 시간 키 허용)이고 키 배열은 private이라 C++ API와 검증 hook Validate가

@@ -4,6 +4,8 @@
 // World·컴포넌트 공개 API만 쓰므로 Modular 시험에서도 돈다(문턱·CCD는 PhysicsContactSceneTests).
 #include "PhysicsBodyFixture.h"
 
+#include <DeterministicMath/DeterministicMath.h>
+
 using namespace rocks;
 namespace physics_contact_hit_tests_file {
 
@@ -16,8 +18,14 @@ constexpr int MaxRecords = 64;
 constexpr int MaxFallSteps = 90;
 // 닿은 뒤 쉬는 접촉을 보는 스텝 수다(Jolt 잠듦 0.5 s보다 짧게).
 constexpr int RestingSteps = 6;
+// 내려앉기를 기다리는 스텝 수와 멈췄다고 보는 수직 속도(cm/s)다.
+constexpr int MaxSettleSteps = 120;
+constexpr double RestVelocity = 2.0;
+// 연속으로 멈춰 있어야 하는 스텝 수다.
+constexpr int SettledSteps = 5;
 // Jolt 기본 밀도(kg/m³ — UE 기본 1 g/cm³와 같다)로 반경 20 cm 구의 질량(kg)이다.
 constexpr double JoltDefaultDensity = 1000.0;
+constexpr double UnrealRaiseMassToPower = 0.75;
 constexpr double CentimetersPerMeter = 100.0;
 // 쉬는 접촉 충격량(m·g·dt)의 상대 허용 오차다(감쇠·위치 보정 몫).
 constexpr double RestingImpulseTolerance = 0.05;
@@ -27,9 +35,12 @@ constexpr double NormalTolerance = 1.0e-3;
 constexpr double BelowFloor = -3.0 * FloorHalfThickness;
 constexpr int ProbeFallSteps = 150;
 
+// body 질량(kg)이다: 균일 밀도 질량^0.75(UE RaiseMassToPower — PhysicsModule 7.1.15절).
 double SphereMass(double radiusCentimeters) noexcept {
     const double radius = radiusCentimeters / CentimetersPerMeter;
-    return 4.0 / 3.0 * math::Pi<double> * radius * radius * radius * JoltDefaultDensity;
+    const double uniform =
+        4.0 / 3.0 * math::Pi<double> * radius * radius * radius * JoltDefaultDensity;
+    return deterministic::Pow(uniform, UnrealRaiseMassToPower);
 }
 
 // 쉬는 구가 한 스텝에 받는 충격량(kg·cm/s)이다: m·|g|·dt.
@@ -178,14 +189,25 @@ struct ContactWorld {
         return false;
     }
 
-    // 구가 닿을 때까지 떨어뜨린다(표지가 없으면 바닥 근처 높이까지).
-    void FallUntilNear(ObjectHandle ball) noexcept {
-        for (int step = 0; step < MaxFallSteps; ++step) {
+    // 구가 바닥에 내려앉을 때까지 간다: 기본 재질 반발(0.3 — 7.1.15절)로 한 번 튀고 반발 문턱(200
+    // cm/s) 아래 두 번째 충돌에서 멈춘다. 바닥 높이이고 수직 속도가 거의 0이면 끝이다(기록은
+    // 비운다).
+    bool SettleOnFloor(ObjectHandle ball) noexcept {
+        // 튀는 정점에서도 속도가 잠깐 0이므로 몇 스텝 연속으로 멈춰 있어야 내려앉은 것이다.
+        int still = 0;
+        for (int step = 0; step < MaxSettleSteps; ++step) {
             fixture.Step(1);
-            if (fixture.ComponentPose(ball).translation.z <= SphereRadius + RestHeightTolerance) {
-                return;
+            const BodyKinematics body = fixture.Kinematics(ball);
+            const bool resting = math::Abs(body.linearVelocity.z) < RestVelocity &&
+                                 body.location.z <= SphereRadius + RestHeightTolerance;
+            still = resting ? still + 1 : 0;
+            if (still >= SettledSteps) {
+                HitRecordingActor::Reset();
+                return true;
             }
         }
+
+        return false;
     }
 
     bool SetNotify(ObjectHandle component, bool notify) noexcept {
@@ -232,7 +254,8 @@ TEST(PhysicsContactHit_FallingSphereHitsFloor) {
     CHECK(first.impulse.z > 0.0);
     CHECK(HitRecordingActor::CountFor(floorActor) == 0);
 
-    // 쉬는 접촉: 스텝마다 hit 하나, 충격량 m·g·dt(+Z).
+    // 쉬는 접촉: 내려앉은 뒤 스텝마다 hit 하나, 충격량 m·g·dt(+Z).
+    REQUIRE(scene.SettleOnFloor(ball));
     for (int step = 0; step < RestingSteps; ++step) {
         HitRecordingActor::Reset();
         scene.fixture.Step(1);
@@ -290,7 +313,7 @@ TEST(PhysicsContactHit_NotifyFlagTogglesAtRuntime) {
     REQUIRE(!scene.Floor(false).IsNull());
     const ObjectHandle ball = scene.Ball(false);
     REQUIRE(!ball.IsNull());
-    scene.FallUntilNear(ball);
+    REQUIRE(scene.SettleOnFloor(ball));
     scene.fixture.Step(1);
     CHECK(HitRecordingActor::count == 0);
 
@@ -312,9 +335,7 @@ TEST(PhysicsContactHit_EachFixedStepReportsSeparately) {
     const ObjectHandle ball = scene.Ball(true);
     REQUIRE(!ball.IsNull());
     REQUIRE(scene.StepUntilHit(MaxFallSteps));
-    scene.fixture.Step(1);
-
-    HitRecordingActor::Reset();
+    REQUIRE(scene.SettleOnFloor(ball));
     CHECK(scene.fixture.world->Tick(StepSeconds * 2.0));
     REQUIRE(HitRecordingActor::count == 2);
     const HitRecord* records = HitRecordingActor::records;

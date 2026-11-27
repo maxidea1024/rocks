@@ -19,6 +19,7 @@
 | CAD9 | 사본 | 사본(평가기·재생기·값 struct)은 참조를 풀어 평탄 값으로 둔다 | Registry 없는 스레드·사본에서도 평가할 수 있어야 한다 |
 | CAD10 | 색 HSV | UE float 식을 `CurveAssets` 안에 따로 두고 Core는 바꾸지 않는다 | Core `LinearColor` HSV가 UE와 다르다(2.4.3절). Core 사용처에 영향을 주지 않는다 |
 | CAD11 | CSV 규칙 | UE `FCsvParser`와 같은 관대한 규칙을 쓴다 | 같은 파일을 같은 칸으로 나눈다. 엄격한 RFC 4180은 UE에서 열리는 파일을 거부한다 |
+| CAD12 | 쿠킹용 결정적 색 평가 | atlas 굽기·머티리얼 상수는 `EvaluateDeterministic` 계열(2.4.5절 — CurveData D22)이고 런타임 `Evaluate`는 UE 비트 그대로다 | 사용자 결정(2026-11-27) — 텍스처 빌드와 같은 정책(쿠킹 byte 호스트 독립). 결정적 평가는 UE와 몇 ulp 다를 수 있다 |
 
 ### 7.2 UE와 다른 점
 
@@ -45,7 +46,7 @@
 19. ★ 올바르지 않은 UTF-8·UTF-16(짝 없는 surrogate·홀수 byte)은 `CorruptData`로 거부한다. UE `BufferToString`은 대체 문자로 바꾸거나 그대로 통과시킨다(`FileHelper.cpp:147-195`).
 20. ◇ 숫자 칸은 double을 거쳐 float로 바꾼다(UE Windows `Atof` = `(float)_tstof`와 같다). UE Linux·Mac `wcstof`(float로 바로)와는 드물게 1 ulp 다를 수 있다.
 21. ★ 쿠킹 중복 키 제거에서 비교 차가 NaN인 키는 남긴다(UE는 지운다 — CurveData 15절과 같은 수정).
-22. ◇ 색 커브 atlas: (a) 열 때 굽기는 지금 원본과 다를 때만 원본을 바꾸고 dirty로 둔다. UE `PostLoad`는 늘 다시 그린다(`CurveLinearColorAtlas.cpp:221-226`). (b) 커브를 바꿔도 즉시 다시 굽지 않는다. UE는 편집기 구독(`OnCurveUpdated`)이 바로 굽는다. Rocks는 다음 열기(쿠킹 포함)가 굽고, 쿠킹 키는 Build 의존이 지킨다. (c) 너비·높이가 16384를 넘으면 `InvalidSetting`이다. UE는 그대로 굽고 텍스처 빌드가 줄인다. (d) `disableAdjustments`가 켜진 동안 조정 필드 대입은 정규화가 항등값으로 되돌린다. UE는 편집기가 막고(`CanEditChange`), 대입되면 그 필드를 0으로 둔다(`PostEditChangeProperty` `:112-152` — 밝기 0은 항등이 아니다). 끌 때 캐시 복원도 없다(4.4절). (e) 열 때 굽기가 실패하면(상한을 넘게 저장된 atlas) 그 열기와 참조 패키지 열기가 실패한다. UE `PostLoad`는 실패하지 않는다. (f) 풀리지 않는 커브는 `MissingDependency` 실패이고 미해결 import가 있는 atlas는 열 때 굽지 않는다(쿠커가 거부). UE는 빠진 커브를 흰 행으로 굽는다(`RenderGradient` — `CurveLinearColorAtlas.cpp:237-260`).
+22. ◇ 색 커브 atlas: (a) 열 때 굽기는 지금 원본과 다를 때만 원본을 바꾸고 dirty로 둔다. UE `PostLoad`는 늘 다시 그린다(`CurveLinearColorAtlas.cpp:221-226`). (b) 커브를 바꿔도 즉시 다시 굽지 않는다. UE는 편집기 구독(`OnCurveUpdated`)이 바로 굽는다. Rocks는 다음 열기(쿠킹 포함)가 굽고, 쿠킹 키는 Build 의존이 지킨다. (c) 너비·높이가 16384를 넘으면 `InvalidSetting`이다. UE는 그대로 굽고 텍스처 빌드가 줄인다. (d) `disableAdjustments`가 켜진 동안 조정 필드 대입은 정규화가 항등값으로 되돌린다. UE는 편집기가 막고(`CanEditChange`), 대입되면 그 필드를 0으로 둔다(`PostEditChangeProperty` `:112-152` — 밝기 0은 항등이 아니다). 끌 때 캐시 복원도 없다(4.4절). (e) 열 때 굽기가 실패하면(상한을 넘게 저장된 atlas) 그 열기와 참조 패키지 열기가 실패한다. UE `PostLoad`는 실패하지 않는다. (f) 풀리지 않는 커브는 `MissingDependency` 실패이고 미해결 import가 있는 atlas는 열 때 굽지 않는다(쿠커가 거부). UE는 빠진 커브를 흰 행으로 굽는다(`RenderGradient` — `CurveLinearColorAtlas.cpp:237-260`). (g) 굽기는 결정적 색 평가(CAD12)라 UE `PushToSourceData`(플랫폼 libm)와 half 반올림 전 값이 몇 ulp 다를 수 있다. 결과 NaN은 고정 half NaN 0x7E00이다(UE SSE 변환은 NaN payload를 보존한다).
 
 ### 7.3 단계
 
@@ -57,6 +58,7 @@
 | CA4 | `CurveTableCookProcessor` | 쿠킹 결과 키·접선, 에디터 객체 불변, 쓰지 않는 맵 비우기 |
 | CA5 | InputActions 연결(6.1절 — 소유 에셋 `curveAssets` + slot 번호, InputActions 2.9절 IA9) | 입력 시험 갱신, slot 평탄화(액션·바인딩·프로필·채널)·검증 거부·오류(범위 밖·null·풀리지 않음)·출력 그대로 시험 |
 | CA6 | AssetRuntime·AssetDatabase 원본 재구성 까닭 `Open`(AssetSystem 12.14절 A5j2c), Texture 변경 둘, Runtime `CurveAtlas`·Developer `CurveAtlasTools`(굽기·hook 셋) | Open 재구성 시험(같으면 dirty 아님·다르면 dirty·실패 되돌림·이미 열린 패키지 미호출), 굽기 UE 대조, 쿠킹 텍스처 결과 |
+| CA7 | 쿠킹용 결정적 색 평가(2.4.5절, CAD12 — CurveData CV11 뒤), atlas 굽기 전환 | 결정적 평가 = 런타임 평가(비가중·조정 없음 비트, 가중·조정 상대 오차), 음수 밑 거듭제곱 C 의미, NaN 고정, 굽기 golden byte |
 
 - 단계마다 리뷰어를 하나 두고, 바뀐 시험과 format·policy를 돌린다.
 - CA1이 push되면 6.2절의 세션들에 알린다.

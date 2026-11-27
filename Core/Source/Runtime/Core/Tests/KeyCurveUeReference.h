@@ -6,9 +6,9 @@
 #include <Core/Math/MathUtility.h>
 #include <Platform/PlatformMath.h>
 
-// UE 5.8 키 커브 평가 식을 그대로 옮긴 시험 참조 구현이다(Docs/Design/CurveData.ko.md 16절). Core
-// MathKeyCurveGoldenTests.cpp(수학 층)와 Curves/Tests의 커브 golden 시험(CurveGoldenTests.cpp —
-// RichCurve·SimpleCurve 평가·편집 참조가 이 참조를 쓴다)이 함께 쓴다. 참조는 UE 원본을 줄 단위로
+// UE 5.8 키 커브 평가 식을 그대로 옮긴 시험 참조 구현이다(Docs/Design/CurveData/README.ko.md 16절).
+// Core MathKeyCurveGoldenTests.cpp(수학 층)와 Curves/Tests의 커브 golden 시험(CurveGoldenTests.cpp
+// — RichCurve·SimpleCurve 평가·편집 참조가 이 참조를 쓴다)이 함께 쓴다. 참조는 UE 원본을 줄 단위로
 // 옮긴 것이고(형식·암묵 변환·연산 순서를 UE 소스 그대로 적었다) 설계 문서 15절의 수정을 Options로
 // 하나씩 켜고 끈다. 참조의 FloorToInt는 Windows x64 UE의 SSE 식 cvt(F + F − 0.5f) >> 1이고,
 // SinCos는 UE 다항식이다.

@@ -14,5 +14,7 @@ public sealed class AudioAssets : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // AssetRuntime: the Asset base class and bulk data references. Audio: mixer limits, distance attenuation settings.
-    protected override string[] PublicDependencies => ["AssetRuntime", "Audio"];
+    // CoreTypeBindings: reflected Vec3 (shape extents). Curves: TangentCurve in the attenuation snapshot. CurveAssets:
+    // FloatCurveSource fields of AttenuationSettings (section 3.42.1).
+    protected override string[] PublicDependencies => ["AssetRuntime", "Audio", "CoreTypeBindings", "Curves", "CurveAssets"];
 }

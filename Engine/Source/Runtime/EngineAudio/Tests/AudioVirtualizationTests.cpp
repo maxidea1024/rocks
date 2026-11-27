@@ -41,7 +41,7 @@ SoundSourceRef Loop(Allocator& allocator, const SharedPtr<const SoundPcm>& pcm,
     SoundAttenuation attenuation;
     // 감쇠 1인 넓은 내부 반경(출력 비교가 쉽게) — 최대 가청 거리는 inner + falloff다.
     attenuation.spatialize = false;
-    attenuation.innerRadius = 400.0f;
+    attenuation.shapeExtents.x = 400.0f;
     playable.attenuation = attenuation;
     for (const SoundConcurrencyEntry& entry : entries) {
         playable.concurrency[playable.concurrencyCount++] = entry;

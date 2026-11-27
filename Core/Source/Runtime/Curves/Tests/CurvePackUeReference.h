@@ -5,10 +5,10 @@
 #include "CurveUeReference.h"
 
 // UE 5.8 FRichCurve::CompressCurve(형식 결정·키 시간 형식 판정·byte 배치)를 그대로 옮긴 시험 참조다
-// (Docs/Design/CurveData.ko.md 11절·16절 — PackedTangentCurveTests.cpp가 Rocks PackedTangentCurve와
-// byte 단위로 대조한다). UE의 TArray는 Array, 포인터 쓰기는 같은 위치의 byte 쓰기(리틀 엔디언 —
-// UE Windows x64 메모리 배치와 같다)로 옮겼다. 두 키 사이 식은 Core KeyCurveUeReference.h
-// (ue58curve)를 쓴다.
+// (Docs/Design/CurveData/README.ko.md 11절·16절 — PackedTangentCurveTests.cpp가 Rocks
+// PackedTangentCurve와 byte 단위로 대조한다). UE의 TArray는 Array, 포인터 쓰기는 같은 위치의 byte
+// 쓰기(리틀 엔디언 — UE Windows x64 메모리 배치와 같다)로 옮겼다. 두 키 사이 식은 Core
+// KeyCurveUeReference.h (ue58curve)를 쓴다.
 //
 // 참조 함수 ↔ UE 5.8.4 원본(Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp, 리뷰어 줄
 // 단위 대조용):

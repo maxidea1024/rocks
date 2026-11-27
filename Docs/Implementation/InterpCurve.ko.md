@@ -1,6 +1,6 @@
 # 키 기반 보간 커브 — Core 수학 층(G09)
 
-기준일: 2026-11-16(리뷰 반영 개정 포함), 2026-11-18 Curve 단계 CV9 반영(값 범위 `TryCalcBounds`·리플렉션 미러 — 2절 표·4절 7·5절). 이 문서는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) G09와 [에셋 시스템](../Design/AssetSystem/01-Stages.ko.md) 1절 Curve 행 중 **Core 수학 층**의 설계다. 대상은 UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint<T>`(5.8.4, `Engine/Source/Runtime/Core/Public/Math/InterpCurve.h`·`InterpCurvePoint.h`, 보조 식은 `Math/UnrealMathUtility.h`의 `CubicInterp*`, `Private/Math/UnrealMath.cpp`의 `ClampFloatTangent`·`TQuat::CalcTangents`·`Slerp_NotNormalized`·`Squad`·`Log`·`Exp`)다. `FRichCurve` 계열 값 타입과 리플렉션 미러는 [커브 데이터](../Design/CurveData.ko.md)(Curve 단계)가 맡고 에셋 타입은 A 단계다. 기본은 UE 5.8과 같은 의미이고, 다른 곳은 4절에 UE 코드 근거와 함께 적는다.
+기준일: 2026-11-16(리뷰 반영 개정 포함), 2026-11-18 Curve 단계 CV9 반영(값 범위 `TryCalcBounds`·리플렉션 미러 — 2절 표·4절 7·5절). 이 문서는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) G09와 [에셋 시스템](../Design/AssetSystem/01-Stages.ko.md) 1절 Curve 행 중 **Core 수학 층**의 설계다. 대상은 UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint<T>`(5.8.4, `Engine/Source/Runtime/Core/Public/Math/InterpCurve.h`·`InterpCurvePoint.h`, 보조 식은 `Math/UnrealMathUtility.h`의 `CubicInterp*`, `Private/Math/UnrealMath.cpp`의 `ClampFloatTangent`·`TQuat::CalcTangents`·`Slerp_NotNormalized`·`Squad`·`Log`·`Exp`)다. `FRichCurve` 계열 값 타입과 리플렉션 미러는 [커브 데이터](../Design/CurveData/README.ko.md)(Curve 단계)가 맡고 에셋 타입은 A 단계다. 기본은 UE 5.8과 같은 의미이고, 다른 곳은 4절에 UE 코드 근거와 함께 적는다.
 
 ## 1. API
 

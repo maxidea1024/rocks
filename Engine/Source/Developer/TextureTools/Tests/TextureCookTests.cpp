@@ -1312,9 +1312,10 @@ TEST(TextureCook_Nuggets) {
 }
 
 // 형식 대상(12.17.5 4): 프로필 id의 플랫폼과 graphicsBackends로 형식을 고른다. AutoDXT의 알파
-// 판정은 너겟 적중에서도 같은 형식(머리 형식이 맞는 후보)이고, Android OpenGL은 BGRA8 보장이 없어
-// RGBA8 대체 + PlatformFormatFallback(setting = 바꾸기 전 형식 번호)이다 — 적중·미적중 경고가 같고
-// 키가 Windows와 다르다. 모르는 플랫폼 id·backend 이름은 InvalidSetting이다.
+// 판정은 너겟 적중에서도 같은 형식(머리 형식이 맞는 후보)이다. Android OpenGL은 ASTC(12.17.8 6 —
+// 경고 없음)이고, 비압축 BGRA8 설정(VectorDisplacementmap)은 BGRA8 보장이 없어 RGBA8 대체 +
+// PlatformFormatFallback(setting = 바꾸기 전 형식 번호)이다 — 적중·미적중 경고가 같고 키가
+// Windows와 다르다. 모르는 플랫폼 id·backend 이름은 InvalidSetting이다.
 TEST(TextureCook_FormatTargets) {
     CookScene scene;
     REQUIRE(scene.ready);
@@ -1361,6 +1362,17 @@ TEST(TextureCook_FormatTargets) {
     REQUIRE(scene.profile.graphicsBackends.TryPushBack(Move(gl)));
     for (int round = 0; round < 2; ++round) {
         CookOut out(scene.allocator);
+        CHECK(cookAndFormat(out) == graphics::PixelFormat::ASTC6x6Unorm);
+        CHECK(out.warnings.IsEmpty());
+    }
+
+    CHECK(processor.Builds() == 2 && !(processor.LastNuggetKey() == windows));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionSettings = TextureCompressionSettings::VectorDisplacementmap;
+        return true;
+    }));
+    for (int round = 0; round < 2; ++round) {
+        CookOut out(scene.allocator);
         CHECK(cookAndFormat(out) == graphics::PixelFormat::RGBA8Unorm);
         bool fallback = false;
         for (const CookDiagnostic& warning : out.warnings) {
@@ -1373,7 +1385,7 @@ TEST(TextureCook_FormatTargets) {
         CHECK(fallback && out.warnings.Size() == 1);
     }
 
-    CHECK(processor.Builds() == 2 && !(processor.LastNuggetKey() == windows));
+    CHECK(processor.Builds() == 3);
     // 모르는 backend 이름·플랫폼 id.
     REQUIRE(scene.profile.graphicsBackends[0].TryAssign("Glide"));
     {
@@ -1463,6 +1475,84 @@ TEST(TextureCook_IspcFormats) {
     CookOut hdr(scene.allocator);
     REQUIRE(cooked(hdr, format));
     CHECK(format == graphics::PixelFormat::BC6HUfloat && hdr.warnings.IsEmpty());
+}
+
+// Android ASTC·EAC 쿠킹(12.17.8 6–9): 압축 품질이 ASTC 블록 크기를 정하고 키를 바꾼다(데스크톱은
+// 품질이 키를 바꾸지 않아 적중이다), 같은 입력은 같은 byte, Alpha 설정은 EAC R11이다.
+TEST(TextureCook_AndroidAstcAndEac) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "texture-cook-android");
+    REQUIRE(nuggets.ready);
+    TextureCookProcessor processor;
+    Array<uint8> pixels = Pattern(scene.allocator, 16 * 16 * 4, 12);
+    REQUIRE(
+        scene.Make(1, TypeIdOf<Texture2D>(), TextureSourceFormat::RGBA8, 16, 16, 1, pixels.View()));
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 1;
+        texture.compressionNoAlpha = 1;
+        return true;
+    }));
+    const auto cooked = [&](CookOut& out, graphics::PixelFormat& format) noexcept {
+        Loaded loaded;
+        if (!scene.Cook(processor, out, nuggets.cache.Get()) ||
+            !scene.Load(out.sink.Bytes(), loaded)) {
+            return false;
+        }
+
+        const Texture* texture = scene.LoadedTexture(loaded);
+        if (texture == nullptr) {
+            return false;
+        }
+
+        auto number = graphics::PixelFormatFromNumber(texture->platformData.pixelFormat);
+        format = number ? number.Value() : graphics::PixelFormat::Unknown;
+        return true;
+    };
+    graphics::PixelFormat format = graphics::PixelFormat::Unknown;
+    // Windows: 품질을 바꿔도 같은 키(적중).
+    CookOut windows(scene.allocator);
+    REQUIRE(cooked(windows, format));
+    CHECK(format == graphics::PixelFormat::BC1UnormSrgb && processor.Builds() == 1);
+    const Sha256Digest windowsKey = processor.LastNuggetKey();
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionQuality = TextureCompressionQuality::Highest;
+        return true;
+    }));
+    CookOut windowsHighest(scene.allocator);
+    REQUIRE(cooked(windowsHighest, format));
+    CHECK(format == graphics::PixelFormat::BC1UnormSrgb && processor.Builds() == 1 &&
+          processor.LastNuggetKey() == windowsKey);
+    // Android: Highest → 4×4, Default → 6×6(키가 다르다), 같은 설정 다시는 적중·같은 byte.
+    REQUIRE(scene.profile.id.TryAssign("Android"));
+    CookOut highest(scene.allocator);
+    REQUIRE(cooked(highest, format));
+    CHECK(format == graphics::PixelFormat::ASTC4x4UnormSrgb && highest.warnings.IsEmpty());
+    CHECK(processor.Builds() == 2);
+    const Sha256Digest highestKey = processor.LastNuggetKey();
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.compressionQuality = TextureCompressionQuality::Default;
+        return true;
+    }));
+    CookOut first(scene.allocator);
+    CookOut second(scene.allocator);
+    REQUIRE(cooked(first, format));
+    CHECK(format == graphics::PixelFormat::ASTC6x6UnormSrgb && processor.Builds() == 3 &&
+          !(processor.LastNuggetKey() == highestKey));
+    REQUIRE(cooked(second, format));
+    CHECK(format == graphics::PixelFormat::ASTC6x6UnormSrgb && processor.Builds() == 3);
+    CHECK(first.sink.Bytes().Size() == second.sink.Bytes().Size() &&
+          memcmp(first.sink.Bytes().Data(), second.sink.Bytes().Data(),
+                 first.sink.Bytes().Size()) == 0);
+    // Alpha 설정 → EAC R11(선형).
+    REQUIRE(scene.Edit([](Texture& texture) noexcept {
+        texture.srgb = 0;
+        texture.compressionSettings = TextureCompressionSettings::Alpha;
+        return true;
+    }));
+    CookOut alpha(scene.allocator);
+    REQUIRE(cooked(alpha, format));
+    CHECK(format == graphics::PixelFormat::EACR11Unorm && alpha.warnings.IsEmpty());
 }
 
 TEST(TextureCook_Registration) {

@@ -245,6 +245,48 @@ TEST(Audio_Mixer_AzimuthPansMonoClip) {
     CHECK(Sample(output, 2, 50, 0) == 0.5f && Sample(output, 2, 50, 1) == 0.5f);
 }
 
+// stereo clip 방위각 패닝(3.42.6절): L 채널은 azimuthDegrees, R 채널은 rightAzimuthDegrees로 제
+// 행을 만든다. 비공간화 비율 1이면 omni 배치대로다(OmniDirectional 1/2씩, Direct2D L → FL·R → FR).
+TEST(Audio_Mixer_AzimuthPansStereoClip) {
+    SystemAllocator allocator;
+    float ones[32];
+    float halves[32];
+    for (uint32 index = 0; index < 32; ++index) {
+        ones[index] = 1.0f;
+        halves[index] = 0.5f;
+    }
+
+    const float* channels[] = {ones, halves};
+    const auto render = [&](float left, float right, float amount, AudioOmniMode mode,
+                            float& outLeft, float& outRight) {
+        OfflineAudioRender rig = MakeRig(ConfigOf(64), allocator);
+        const AudioClipId clip = RegisterClip(rig.Mixer(), Span<const float* const>(channels), 32);
+        AudioVoiceParams params;
+        params.panMode = AudioPanMode::Azimuth;
+        params.azimuthDegrees = left;
+        params.rightAzimuthDegrees = right;
+        params.nonSpatializedAmount = amount;
+        params.omniMode = mode;
+        PlayAt(rig, clip, 0, params);
+        const Array<float> output = RenderBlocks(rig, 1, allocator);
+        outLeft = Sample(output, 2, 5, 0);
+        outRight = Sample(output, 2, 5, 1);
+    };
+
+    float left = 0.0f;
+    float right = 0.0f;
+    render(270.0f, 90.0f, 0.0f, AudioOmniMode::OmniDirectional, left, right);
+    CHECK(test::Near(left, 1.0f, 1.0e-6f) && test::Near(right, 0.5f, 1.0e-6f));
+    render(90.0f, 270.0f, 0.0f, AudioOmniMode::OmniDirectional, left, right);
+    CHECK(test::Near(left, 0.5f, 1.0e-6f) && test::Near(right, 1.0f, 1.0e-6f));
+    render(90.0f, 270.0f, 1.0f, AudioOmniMode::OmniDirectional, left, right);
+    CHECK(test::Near(left, 0.75f, 1.0e-6f) && test::Near(right, 0.75f, 1.0e-6f));
+    render(90.0f, 270.0f, 1.0f, AudioOmniMode::Direct2D, left, right);
+    CHECK(test::Near(left, 1.0f, 1.0e-6f) && test::Near(right, 0.5f, 1.0e-6f));
+    render(90.0f, 270.0f, 1.0f, AudioOmniMode::Surround2D, left, right);
+    CHECK(test::Near(left, 1.0f, 1.0e-6f) && test::Near(right, 0.5f, 1.0e-6f));
+}
+
 TEST(Audio_Mixer_ScheduledOffsetsAcrossBlocks) {
     SystemAllocator allocator;
     const float impulse[] = {1.0f};
@@ -852,13 +894,17 @@ TEST(Audio_Mixer_ClampedParamsAreCounted) {
     RenderBlocks(rig, 1, allocator);
     CHECK(mixer.Counters().clampedParams == 1 + 2 + 1);
 
-    // stereo clip의 방위각 패닝은 PreparePlay가 거부한다.
+    // stereo clip도 방위각 패닝을 받는다(stereo spread — 3.42.6절). omni 배치가 범위 밖이면
+    // 거부한다.
     const float* stereo[] = {ones, ones};
     const AudioClipId pair = RegisterClip(mixer, Span<const float* const>(stereo), 64);
     AudioVoiceParams azimuth;
     azimuth.panMode = AudioPanMode::Azimuth;
     const AudioVoiceHandle other = mixer.AcquireVoice().Value();
+    azimuth.omniMode = static_cast<AudioOmniMode>(AudioOmniModeCount);
     CHECK(mixer.PreparePlay(other, pair, 0, false, azimuth).Error() == ErrorCode::InvalidArgument);
+    azimuth.omniMode = AudioOmniMode::Direct2D;
+    CHECK(mixer.PreparePlay(other, pair, 0, false, azimuth));
 }
 
 TEST(Audio_Mixer_SubnormalProductsFlushToZero) {

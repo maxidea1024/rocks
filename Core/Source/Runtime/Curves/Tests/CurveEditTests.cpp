@@ -5,9 +5,10 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// 커브 키 편집 연산 시험이다(Docs/Design/CurveData.ko.md 7절): 삽입 위치·회전 풀기·UpdateOrAdd
-// 허용오차·지우기·시간 옮기기·SetKeys 검증·FindKey·IsConstant·시간 범위·Shift·Scale·선택 키 이동·
-// Bake·중복 키 제거·Reset·복사, 그리고 모든 실패(잘못된 인자·할당 실패)에서 커브가 그대로인지.
+// 커브 키 편집 연산 시험이다(Docs/Design/CurveData/README.ko.md 7절): 삽입 위치·회전
+// 풀기·UpdateOrAdd 허용오차·지우기·시간 옮기기·SetKeys 검증·FindKey·IsConstant·시간
+// 범위·Shift·Scale·선택 키 이동· Bake·중복 키 제거·Reset·복사, 그리고 모든 실패(잘못된 인자·할당
+// 실패)에서 커브가 그대로인지.
 using namespace rocks;
 namespace curve_edit_tests_file {
 

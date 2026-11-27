@@ -1206,7 +1206,7 @@ internal static partial class SchemaValidator
                     "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
             }
 
-            // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
+            // 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
             // 복사해 검증한 뒤 게시한다. 그래서 hook struct는 참조 없는 값이어야 한다.
             if (model.HasValidate && (model.ContainsStrongReference || model.ContainsReferenceArray))
             {

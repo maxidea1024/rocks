@@ -2,7 +2,7 @@
 
 #include "CurveKeyEdit.h"
 
-// PlainCurve의 평가·키 편집·중복 키 제거다(Docs/Design/CurveData.ko.md 5.7·7절, UE
+// PlainCurve의 평가·키 편집·중복 키 제거다(Docs/Design/CurveData/README.ko.md 5.7·7절, UE
 // SimpleCurve.cpp).
 namespace rocks {
 

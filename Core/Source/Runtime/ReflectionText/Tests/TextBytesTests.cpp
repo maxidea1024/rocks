@@ -10,9 +10,9 @@
 #include <ReflectionText/TextValue.h>
 #include <TestSupport/Test.h>
 
-// 바이트 배열(`Array<uint8>`)의 명령행·JSON 표기 시험이다(Docs/Design/CurveData.ko.md D18 — CV4,
-// fixture ReflectionTestFixtures/BytesFixture.h): 통째 값은 명령행·JSON 모두 RFC 4648 Base64 문자열
-// 하나(빈 문자열 = 빈 배열)이고, 원소는 지금처럼 경로 `payload[i]=v`다. 잘못된 Base64는
+// 바이트 배열(`Array<uint8>`)의 명령행·JSON 표기 시험이다(Docs/Design/CurveData/README.ko.md D18 —
+// CV4, fixture ReflectionTestFixtures/BytesFixture.h): 통째 값은 명령행·JSON 모두 RFC 4648 Base64
+// 문자열 하나(빈 문자열 = 빈 배열)이고, 원소는 지금처럼 경로 `payload[i]=v`다. 잘못된 Base64는
 // InvalidValue, 필드 MaxElements를 넘는 길이는 OutOfRange, JSON 숫자 배열은 InvalidValue다.
 using namespace rocks;
 namespace text_bytes_tests_file {

@@ -68,6 +68,7 @@ PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1
 
 ## 7.6 개정 이력
 
+- 개정 20(2026-11-27): PH4e 완료(6a83ef764 — PH4 끝), PH5 하위 단계 PH5a–PH5d와 PH5a 구현 세부(7.1.15절, 07c-StageDetailsPH5.ko.md).
 - 개정 19(2026-11-27): PH4d 완료(5162526b3 — 리뷰 반영), PH4e 구현 세부(7.1.14절 — 이벤트 필드 여섯, HitResult 리플렉션, 대기 겹침의 sweep 결과, 깨움·잠듦은 PH5).
 - 개정 18(2026-11-27): PH4c 완료(1430bbac0 — 리뷰 반영), PH4d 구현 세부(7.1.13절 — 침투 해소는 UE처럼 MovementComponent, ComputePenetration·GetCollisionShape는 PrimitiveComponent).
 - 개정 17(2026-11-27): PH4b 완료(b8a28157e), PH4c 구현 세부(7.1.12절) — 5.4절 스텝 합치기 정정(UE key는 쌍과 solver 시간), UE 5.8 hit 문턱 미적용 확인.

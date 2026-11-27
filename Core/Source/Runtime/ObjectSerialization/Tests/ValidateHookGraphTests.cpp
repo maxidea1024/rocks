@@ -5,7 +5,7 @@
 #include <Platform/Fatal.h>
 #include <TestSupport/Test.h>
 
-// struct 검증 hook의 graph decode 시험이다(Docs/Design/CurveData.ko.md 9.1절 — CV3, fixture
+// struct 검증 hook의 graph decode 시험이다(Docs/Design/CurveData/README.ko.md 9.1절 — CV3, fixture
 // ReflectionTestFixtures/ValidateFixture.h): 복원 2단계가 struct 값을 다 채운 뒤 게시 전에 hook을
 // 부른다. 모든 자리(struct 필드·멤버·Array·정적 배열 원소·Optional 내부·Map 값·InstancedStruct
 // 내용· StructRefArray 원소 멤버·base hook)에서 거부하면 복원 전체가 InvalidArgument이고 대상

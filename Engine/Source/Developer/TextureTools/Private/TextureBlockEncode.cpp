@@ -1,4 +1,5 @@
 #include "TextureBlockBptc.h"
+#include "TextureBlockEacAstc.h"
 #include "TextureBlockTables.h"
 
 #include <Base/NumericLimits.h>
@@ -21,7 +22,6 @@ using texture_block_detail::SingleColor6;
 
 // 블록 byte 수다.
 constexpr uint32 SmallBlockBytes = 8;
-constexpr uint32 LargeBlockBytes = 16;
 // 565 양자화 격자다.
 constexpr float Grid5 = 31.0f;
 constexpr float Grid6 = 63.0f;
@@ -789,13 +789,21 @@ void ChannelValues(const uint8 (&texels)[TextureBlockRgbaBytes], uint32 channel,
 using bc_encode::ChannelValues;
 using bc_encode::CompressAlpha;
 using bc_encode::CompressColour;
-using bc_encode::LargeBlockBytes;
 using bc_encode::SmallBlockBytes;
 
 } // namespace
 
 uint32 TextureBlockSourceTexelBytes(TextureBlockFormat format) noexcept {
-    return format == TextureBlockFormat::Bc6h ? TextureBlockHalfTexelBytes : TextureBlockTexelBytes;
+    // EAC R11 입력 R16 unorm texel 하나의 byte 수다.
+    constexpr uint32 R16TexelBytes = 2;
+    switch (format) {
+    case TextureBlockFormat::Bc6h:
+        return TextureBlockHalfTexelBytes;
+    case TextureBlockFormat::EacR11:
+        return R16TexelBytes;
+    default:
+        return TextureBlockTexelBytes;
+    }
 }
 
 StringView IspcBcEncoderIdentity() noexcept {
@@ -838,7 +846,13 @@ void EncodeTextureBlock(TextureBlockFormat format, const uint8 (&texels)[Texture
     }
     case TextureBlockFormat::Bc6h:
     case TextureBlockFormat::Bc7:
-        for (uint32 i = 0; i < LargeBlockBytes; ++i) {
+    case TextureBlockFormat::EacR11:
+    case TextureBlockFormat::Astc4x4:
+    case TextureBlockFormat::Astc6x6:
+    case TextureBlockFormat::Astc8x8:
+    case TextureBlockFormat::Astc10x10:
+    case TextureBlockFormat::Astc12x12:
+        for (uint32 i = 0; i < TextureBlockBytes(format); ++i) {
             out[i] = 0;
         }
 
@@ -897,6 +911,18 @@ Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockIm
 
     if (format == TextureBlockFormat::Bc6h || format == TextureBlockFormat::Bc7) {
         return texture_block_detail::EncodeIspcBlocks(format, image.rgba.Data(), image.sizeX,
+                                                      image.sizeY, image.numSlices, rowPitch,
+                                                      slicePitch, options, out);
+    }
+
+    if (format == TextureBlockFormat::EacR11) {
+        texture_block_detail::EncodeEacBlocks(image.rgba.Data(), image.sizeX, image.sizeY,
+                                              image.numSlices, rowPitch, slicePitch, out);
+        return Result<void>::Success();
+    }
+
+    if (TextureBlockIsAstc(format)) {
+        return texture_block_detail::EncodeAstcBlocks(format, image.rgba.Data(), image.sizeX,
                                                       image.sizeY, image.numSlices, rowPitch,
                                                       slicePitch, options, out);
     }
