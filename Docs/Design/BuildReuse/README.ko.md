@@ -11,13 +11,13 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)다. UBT 경로는 `Engine/Source/Programs/UnrealBuildTool/`(약어 `UBT/`), UBA 경로는 `Engine/Source/Programs/UnrealBuildAccelerator/`(약어 `UBA/`) 기준이다. UE 이름은 아래 대응표와 근거에만 적는다.
 
-상태: **설계 초안**(결정 BR1–BR24, 모두 권장안). 구현 단계는 MI0–MI4(메타 단계)와 SCS1–SCS6(공유 저장소)이다(5장). 착수는 사용자가 정한다. 설계 중에는 native 빌드를 돌리지 않았다. 측정은 끝난 빌드의 기록·로그(읽기만)와 작은 clang-cl 탐침(7장)으로 했다.
+상태: **설계 초안 개정 2**(결정 BR1–BR30, 모두 권장안 — 2026-11-28 교차 검증 반영). 구현 단계는 MI0–MI4(메타 단계)와 SCS1–SCS6(공유 저장소)이고, 순서는 MI0 → MI1(+MI2, shadow mode) → SCS1 → MI3·MI4 → SCS2–SCS6이다(5장). 착수는 사용자가 정한다. 설계 중에는 native 빌드를 돌리지 않았다. 측정은 끝난 빌드의 기록·로그(읽기만)와 작은 clang-cl 탐침(7장)으로 했다.
 
 ## 우선순위와 기대 효과
 
 | 순위 | 항목 | 대상 빌드 | 지금 | 기대 | 줄어드는 시간 |
 |---|---|---|---|---|---|
-| 1 | 메타 단계 증분(MI1–MI2) | 리플렉션 입력이 바뀌지 않은 증분 빌드(예: wt-ut5 Sandbox, `.cpp` 하나 수정) | 523초(native `executed=9`) | 약 1분(native·선행 타깃·검사) | **빌드마다 약 7–8분** |
+| 1 | 메타 단계 증분(MI1–MI2, shadow 확인 뒤 건너뛰기 켬) | 리플렉션 입력이 바뀌지 않은 증분 빌드(예: wt-ut5 Sandbox, `.cpp` 하나 수정) | 523초(native `executed=9`) | 약 1분(native·선행 타깃·검사) | **빌드마다 약 7–8분** |
 | 1 | 같음 | 무변경 빌드(sparks·ma2b EngineTests 등) | 321–720초 | 1분 안팎 | 빌드마다 약 4–11분 |
 | 1 | 메타 모듈 병렬(MI3) | 리플렉션 헤더가 많이 바뀐 빌드(병합 등) | 메타 단계 287–875초 | 의존이 없는 모듈을 동시에 | 모듈별 시간을 잰 뒤 정한다(MI0) — MaterialSchema 하나가 하한 |
 | 2 | 공유 compile 저장소(SCS1–SCS4) | 새 작업 사본의 첫 빌드(Commandlet Debug) | native 단계 126초 | compile CPU의 34%(지금 include 규칙)–67%(정밀 include 검증) 적중 | 빌드마다 약 0.7–1.4분 |
