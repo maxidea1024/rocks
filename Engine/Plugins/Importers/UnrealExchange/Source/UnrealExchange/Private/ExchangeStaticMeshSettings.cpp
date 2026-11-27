@@ -1,32 +1,15 @@
 #include <UnrealExchange/ExchangeStaticMeshSettings.h>
 
+#include "ExchangeMeshSettingTables.h"
+
 // 정적 메시 설정 번역 표다(Docs/Design/UnrealExchange 5.5절 3–5번).
 
 namespace rocks {
 
 namespace exchange_static_mesh_settings {
 
+using namespace exchange_detail;
 using Kind = ExchangeSettingKind;
-
-// 행을 만든다(모든 칸을 채운다).
-constexpr ExchangeSettingRow Row(StringView key, Kind kind = Kind::Same) noexcept {
-    return ExchangeSettingRow{key, kind, 0, nullptr, 0, StringView(), StringView()};
-}
-
-// 출력 키가 UE 키와 다른 행이다(5.5절 4번).
-constexpr ExchangeSettingRow Renamed(StringView key, StringView rocksKey) noexcept {
-    return ExchangeSettingRow{key, Kind::Same, 0, nullptr, 0, StringView(), rocksKey};
-}
-
-template <usize Count>
-constexpr ExchangeSettingRow StructRow(StringView key, Kind kind,
-                                       const ExchangeSettingRow (&members)[Count]) noexcept {
-    return ExchangeSettingRow{key, kind, 0, members, Count, StringView(), StringView()};
-}
-
-constexpr ExchangeSettingRow UnsupportedRow(StringView key, StringView defaultValue) noexcept {
-    return ExchangeSettingRow{key, Kind::Unsupported, 0, nullptr, 0, defaultValue, StringView()};
-}
 
 // UE FMeshBuildSettings → MeshBuildSettings. DistanceFieldReplacementMesh는 LOD 0 값만 에셋 칸으로
 // 코드가 옮긴다(5.5절 3번 — 표에서는 버린다).
@@ -88,22 +71,6 @@ constexpr ExchangeSettingRow SourceModelMembers[] = {
     Row("bImportWithBaseMesh", Kind::Ignore),
 };
 
-// UE FMeshUVChannelInfo → MeshUvDensity.
-constexpr ExchangeSettingRow UvDensityMembers[] = {
-    Row("bInitialized"),
-    Row("bOverrideDensities"),
-    Row("LocalUVDensities"),
-};
-
-// UE FStaticMaterial(5.5절 6번).
-constexpr ExchangeSettingRow SlotMembers[] = {
-    Row("MaterialInterface", Kind::Reference),
-    Row("MaterialSlotName"),
-    Row("ImportedMaterialSlotName"),
-    StructRow("UVChannelData", Kind::Struct, UvDensityMembers),
-    Row("OverlayMaterialInterface", Kind::Reference),
-};
-
 // UE FMeshSectionInfo → MeshSectionInfo.
 constexpr ExchangeSettingRow SectionInfoMembers[] = {
     Row("MaterialIndex"),
@@ -140,35 +107,6 @@ constexpr ExchangeSettingRow SocketMembers[] = {
     Row("subobject"),
     Row("class", Kind::Ignore),
     StructRow("properties", Kind::Struct, SocketPropertyMembers),
-};
-
-// UE FMeshNaniteSettings → VirtualGeometrySettings(이름은 대소문자만 다르다).
-constexpr ExchangeSettingRow NaniteMembers[] = {
-    Row("bEnabled"),
-    Row("bExplicitTangents"),
-    Row("bLerpUVs"),
-    Row("bSeparable"),
-    Row("bVoxelNDF"),
-    Row("bVoxelOpacity"),
-    Row("ShapePreservation", Kind::Enum),
-    Row("PositionPrecision"),
-    Row("NormalPrecision"),
-    Row("TangentPrecision"),
-    Row("BoneWeightPrecision"),
-    Row("TargetMinimumResidencyInKB"),
-    Row("KeepPercentTriangles"),
-    Row("TrimRelativeError"),
-    Row("GenerateFallback", Kind::Enum),
-    Row("FallbackTarget", Kind::Enum),
-    Row("FallbackPercentTriangles"),
-    Row("FallbackRelativeError"),
-    Row("MaxEdgeLengthFactor"),
-    Row("NumRays"),
-    Row("VoxelLevel"),
-    Row("RayBackUp"),
-    Row("DisplacementUVChannel"),
-    UnsupportedRow("DisplacementMaps", "[]"),
-    UnsupportedRow("NaniteAssemblyData", R"({"Parts": [], "Nodes": []})"),
 };
 
 // 5.5절 5번 표 순서다(행 번호 = 배열 번호 — ExchangeStaticMeshSettingRow).

@@ -314,6 +314,12 @@ public:
         }
 
         ++handOffFrames_;
+        // 첫 프레임을 냈다 — 시작 일은 여기까지다(그 뒤 최소 표시 대기는 단계 시간에 넣지 않는다,
+        // Docs/Design/SplashScreen 8.2절).
+        if (options_.startup != nullptr) {
+            options_.startup->MarkReady();
+        }
+
         if (windowShown_) {
             if (options_.startup != nullptr) {
                 options_.startup->Finish();
@@ -991,6 +997,11 @@ constexpr splash::StartupStep SandboxStartupSteps[] = {splash::StartupStep::Host
                                                        splash::StartupStep::Engine,
                                                        splash::StartupStep::FirstFrame};
 
+// 시작 단계 보정 프로필의 엔진 폴더 기준 경로·대상 이름·경로 칸 크기다(8.2절).
+constexpr StringView SandboxStartupProfileRelative = "Saved/Startup/StartupProfile.json";
+constexpr StringView SandboxStartupProfileTarget = "Sandbox";
+constexpr usize SandboxStartupProfilePathBytes = 4096;
+
 // 띄운 시작 화면과 그 진행이다. 진행은 스플래시가 뜰 때만 있다.
 struct SandboxSplash {
     Optional<splash::SplashScreen> screen;
@@ -1038,6 +1049,19 @@ SandboxSplash ShowSandboxSplash(Allocator& allocator, const EngineHostOptions& o
         splash::StartupProgressDesc startupDesc;
         startupDesc.appTitle = &appTitle.Value();
         startupDesc.steps = Span<const splash::StartupStep>(SandboxStartupSteps);
+        // 보정 프로필(Docs/Design/SplashScreen 8.2절): 프로젝트가 없는 엔진 프로그램이라 엔진
+        // Saved 아래에 둔다(UE 엔진 프로그램과 같은 자리).
+        char profilePath[SandboxStartupProfilePathBytes];
+        FixedStringBuilder profile{Span<char>(profilePath)};
+        if (!engineDirectory.IsEmpty() &&
+            profile.TryAppendFormat("{}/{}", engineDirectory, SandboxStartupProfileRelative)) {
+            startupDesc.profilePath = profile.View();
+            startupDesc.profileTarget = SandboxStartupProfileTarget;
+        } else if (!engineDirectory.IsEmpty()) {
+            Log::Debug(LogSandboxHost,
+                       "The startup profile path is too long; step weights are not calibrated");
+        }
+
         if (auto begun = splash::StartupProgress::Begin(allocator, startupDesc)) {
             if (auto source = begun.Value().MakeSplashSource(allocator, nullptr)) {
                 desc.source = source.Value();

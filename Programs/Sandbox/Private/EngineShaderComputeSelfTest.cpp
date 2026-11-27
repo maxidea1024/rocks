@@ -1,6 +1,7 @@
 #include "EngineShaderComputeProbes.h"
 #include "SandboxShaders.h"
 
+#include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
 #include <Platform/Memory.h>
 #include <RenderBase/ComputeDispatch.h>
@@ -25,7 +26,8 @@ constexpr uint32 GroupOperationRecords = 3;
 constexpr uint32 WrappedGroups = 65540;
 constexpr uint32 ArgumentBytes = 32;
 constexpr uint32 ArgumentOffset = 16;
-constexpr uint32 NoWave = 0xffffffffu;
+constexpr uint32 Uint32Max = NumericLimits<uint32>::Max();
+constexpr uint32 NoWave = Uint32Max;
 constexpr uint32 SignBit = 0x80000000u;
 // 그룹 연산 float 입력 모양(ComputeProbes.rsf와 같다)이다.
 constexpr uint32 FloatModes = 4;
@@ -154,7 +156,7 @@ uint32 MortonCompact(uint32 x) noexcept {
     return result;
 }
 
-constexpr uint32 SpecialThreads[8] = {0u, 1u, 63u, 64u, 65u, 4194240u, 4194241u, 0xffffffffu};
+constexpr uint32 SpecialThreads[8] = {0u, 1u, 63u, 64u, 65u, 4194240u, 4194241u, Uint32Max};
 
 void DispatchArgumentsReference(uint32 threads, uint32 groupSize, uint32 out[3]) noexcept {
     const uint32 groups = DivideRoundUp(threads, groupSize);
@@ -167,8 +169,8 @@ void DispatchArgumentsReference(uint32 threads, uint32 groupSize, uint32 out[3])
 
 void DispatchReference(uint32 function, uint32 selector, uint32 c, uint32 out[4]) noexcept {
     if (function == ProbeDivideRoundUp) {
-        const uint32 a = c < 4 ? (c < 2 ? 0xffffffffu : 0u) : ProbeBits(c, 0, 0);
-        const uint32 b = c < 4 ? ((c & 1u) != 0 ? 0xffffffffu : 1u)
+        const uint32 a = c < 4 ? (c < 2 ? Uint32Max : 0u) : ProbeBits(c, 0, 0);
+        const uint32 b = c < 4 ? ((c & 1u) != 0 ? Uint32Max : 1u)
                                : (ProbeBits(c, 1, 0) >> (ProbeBits(c, 2, 0) & 31u)) | 1u;
         out[0] = DivideRoundUp(a, b);
         out[1] = DivideRoundUp(a >> 1, b);
@@ -448,11 +450,11 @@ bool CheckGroupOperationRun(ProbeContext& context, uint32 sizeIndex, const char*
     for (uint32 group = 0; group < GroupOperationGroups; ++group) {
         const uint32 base = group * threads;
         uint32 sum = 0;
-        uint32 minimum = 0xffffffffu;
+        uint32 minimum = Uint32Max;
         uint32 maximum = 0;
         double floatSum = 0.0;
         double floatMagnitude = 0.0;
-        uint32 floatMinimum = 0xffffffffu;
+        uint32 floatMinimum = Uint32Max;
         uint32 floatMaximum = 0;
         for (uint32 i = 0; i < threads; ++i) {
             const uint32 value = ProbeBits(base + i, 0, 0);

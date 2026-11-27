@@ -1,3 +1,5 @@
+#include "StartupProfile.h"
+
 #include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
 #include <Localization/Catalog.h>
@@ -167,7 +169,8 @@ const char* StartupStepName(StartupStep step) noexcept {
 }
 
 struct StartupProgress::State {
-    explicit State(Allocator& memory) noexcept : allocator(memory) {
+    explicit State(Allocator& memory) noexcept
+        : allocator(memory), profilePath(memory), profileTarget(memory), profileText(memory) {
     }
 
     Allocator& allocator;
@@ -187,6 +190,13 @@ struct StartupProgress::State {
     void* clockContext = nullptr;
     bool warnedMisuse = false;
     bool finished = false;
+    // MarkReady 뒤에는 단계 시간을 재지 않는다.
+    bool ready = false;
+    // 보정 프로필(8.2절)이다. 경로가 비면 끈다.
+    String profilePath;
+    String profileTarget;
+    String profileText;
+    detail::StartupProfileEntry saved;
 
     uint64 Now() const noexcept {
         return clock(clockContext);
@@ -194,7 +204,7 @@ struct StartupProgress::State {
 
     // 지금 단계의 시간을 닫는다.
     void CloseStep() noexcept {
-        if (current < StartupStepCount) {
+        if (!ready && current < StartupStepCount) {
             const uint64 now = Now();
             times.seconds[current] +=
                 static_cast<double>(now - stepStarted) / StartupNanosecondsPerSecond;
@@ -270,6 +280,11 @@ Result<StartupProgress> StartupProgress::Begin(Allocator& allocator,
         }
     }
 
+    if (!desc.profilePath.IsEmpty() &&
+        (desc.profileTarget.IsEmpty() || desc.profileTarget == StringView("v"))) {
+        return Result<StartupProgress>::Failure(ErrorCode::InvalidArgument);
+    }
+
     auto memory = allocator.Allocate(sizeof(State), alignof(State));
     if (!memory) {
         return Result<StartupProgress>::Failure(memory.Error());
@@ -282,10 +297,37 @@ Result<StartupProgress> StartupProgress::Begin(Allocator& allocator,
         state.clockContext = desc.clockContext;
     }
 
+    // 보정 프로필(8.2절): 지난 실행의 단계 시간이 가중치다.
+    if (!desc.profilePath.IsEmpty()) {
+        if (auto copied = state.profilePath.TryAppend(desc.profilePath); !copied) {
+            return Result<StartupProgress>::Failure(copied.Error());
+        }
+
+        if (auto copied = state.profileTarget.TryAppend(desc.profileTarget); !copied) {
+            return Result<StartupProgress>::Failure(copied.Error());
+        }
+
+        const detail::StartupProfileLoad loaded = detail::LoadStartupProfile(
+            allocator, desc.profilePath, desc.profileTarget, state.saved, state.profileText);
+        if (loaded == detail::StartupProfileLoad::Invalid) {
+            Log::Warning(LogStartupProgress,
+                         "Startup profile {Path} is invalid for {Target}; default step weights are "
+                         "used and the entry is rewritten after a successful start",
+                         desc.profilePath, desc.profileTarget);
+        } else if (loaded == detail::StartupProfileLoad::ReadFailed) {
+            // 다른 대상 항목을 모르는 채 덮어쓰지 않도록 이번 실행은 쓰지 않는다.
+            Log::Warning(LogStartupProgress,
+                         "Startup profile {Path} could not be read; default step weights are used "
+                         "and the profile is not updated by this run",
+                         desc.profilePath);
+            state.profilePath.Clear();
+        }
+    }
+
+    detail::ComputeStartupWeights(included, state.saved, state.weights);
     double total = 0.0;
     for (uint32 index = 0; index < StartupStepCount; ++index) {
         state.included[index] = included[index];
-        state.weights[index] = included[index] ? DefaultStartupStepWeights[index] : 0.0;
         total += state.weights[index];
         if (!included[index]) {
             continue;
@@ -337,11 +379,13 @@ void StartupProgress::Enter(StartupStep step) noexcept {
 
     State& state = *state_;
     const auto index = static_cast<uint32>(step);
-    if (index >= StartupStepCount || !state.included[index] || state.entered[index]) {
+    if (index >= StartupStepCount || !state.included[index] || state.entered[index] ||
+        state.ready) {
         if (!state.warnedMisuse) {
             state.warnedMisuse = true;
             Log::Warning(LogStartupProgress,
-                         "Startup step {Step} was not declared or was entered twice; it is ignored",
+                         "Startup step {Step} was not declared, was entered twice or came after "
+                         "MarkReady; it is ignored",
                          StringView(StartupStepName(step)));
         }
 
@@ -406,6 +450,18 @@ void StartupProgress::Finish(ProgressOutcome outcome) noexcept {
     }
 
     const StartupStepTimes& times = state.times;
+    if (!state.profilePath.IsEmpty()) {
+        const detail::StartupProfileEntry blended =
+            detail::BlendStartupProfile(state.saved, times, state.entered);
+        if (auto written = detail::WriteStartupProfile(state.allocator, state.profilePath.View(),
+                                                       state.profileTarget.View(), blended,
+                                                       state.profileText.View());
+            !written) {
+            Log::Warning(LogStartupProgress, "Startup profile {Path} could not be written: {Error}",
+                         state.profilePath.View(), ErrorCodeName(written.Error()));
+        }
+    }
+
     Log::Info(LogStartupProgress,
               "Startup steps (s): HostServices {HostServices:.3f}, Engine {Engine:.3f}, Assets "
               "{Assets:.3f}, Shaders {Shaders:.3f}, Content {Content:.3f}, FirstFrame "
@@ -414,13 +470,22 @@ void StartupProgress::Finish(ProgressOutcome outcome) noexcept {
               times.seconds[4], times.seconds[5]);
 }
 
+void StartupProgress::MarkReady() noexcept {
+    if (state_ == nullptr || state_->finished || state_->ready) {
+        return;
+    }
+
+    state_->CloseStep();
+    state_->ready = true;
+}
+
 StartupStepTimes StartupProgress::StepTimes() const noexcept {
     if (state_ == nullptr) {
         return {};
     }
 
     StartupStepTimes times = state_->times;
-    if (state_->current < StartupStepCount) {
+    if (!state_->ready && state_->current < StartupStepCount) {
         times.seconds[state_->current] +=
             static_cast<double>(state_->Now() - state_->stepStarted) / StartupNanosecondsPerSecond;
     }

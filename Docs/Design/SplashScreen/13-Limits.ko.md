@@ -20,3 +20,5 @@
 | 최소 표시 시간 기본·상한(`ui.splash.min_seconds`) | 2 s · 10 s | 사용자 요구(2초), 상한은 시작을 지나치게 늦추는 값을 막는다 |
 | `kStartupProfileBlend` | 0.5 | 지난 값과 새 값의 반반 |
 | `kStartupStepWeightFloor` | 0.02 | 단계 최소 몫 |
+| `MaxStartupStepSeconds` | 600 s | 저장값 상한·측정값 자르기(이상값 차단) |
+| `MaxStartupProfileBytes` | 64 KiB | 프로필 읽기 상한 |

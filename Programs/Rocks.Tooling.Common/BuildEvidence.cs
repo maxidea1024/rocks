@@ -8,6 +8,13 @@ namespace Rocks.Tooling.Common;
 /// <summary>생성물/캐시를 제외한 저장소 입력의 content snapshot이다. Git 상태와 별도로 비교한다.</summary>
 public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCount)
 {
+    // 소스 snapshot에서 빼는 실행 산출물 폴더(저장소 루트 기준, .gitignore와 같은 목록)다.
+    public static readonly string[] RunOutputDirectories =
+    [
+        "Saved", "Intermediate", "Engine/Saved", "Engine/Intermediate", "Programs/Sandbox/TestContent/Saved",
+        "Programs/Sandbox/TestContent/Intermediate"
+    ];
+
     public static SourceSnapshot Capture(string root)
     {
         root = Path.GetFullPath(root);
@@ -71,7 +78,7 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
                         continue;
                     }
 
-                    if (Relative(entry) is "Build/Artifacts" or "Build/Cache")
+                    if (Relative(entry) is "Build/Artifacts" or "Build/Cache" || IsRunOutput(Relative(entry)))
                     {
                         continue;
                     }
@@ -86,6 +93,12 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
         }
 
         string Relative(string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
+
+        // 실행 산출물 폴더다(.gitignore와 같은 고정 경로 — 너겟 캐시·쿠킹 출력·셰이더 심볼·시작 화면 보정 프로필,
+        // Docs/Design/SplashScreen 8.2절). 빌드 중에 엔진 프로그램이 거기에 써도 소스 변경이 아니다. 고정 경로만 빼므로 같은 이름의
+        // 소스 폴더(예: Public/Engine/Saved)는 그대로 센다.
+        static bool IsRunOutput(string relative) =>
+            RunOutputDirectories.Any(directory => relative == directory || relative.StartsWith(directory + "/", StringComparison.Ordinal));
         void Visit(string directory)
         {
             foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
@@ -93,7 +106,7 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
                 string relative = Relative(entry);
                 string[] parts = relative.Split('/');
                 if (parts.Any(part => part is "bin" or "obj" or "__pycache__") ||
-                    (parts.Length >= 2 && parts[0] == "Build" && parts[1] is "Artifacts" or "Cache"))
+                    (parts.Length >= 2 && parts[0] == "Build" && parts[1] is "Artifacts" or "Cache") || IsRunOutput(relative))
                 {
                     continue;
                 }

@@ -38,7 +38,7 @@
 1. 호스트는 주 창을 숨긴 채 만들고(`WindowDesc::visible = false`) 첫 프레임을 렌더한다.
 2. 주 창을 보이고 **보인 뒤 한 프레임을 더 present한다**(숨긴 창에 그린 present가 보이는 순간 화면에 남는다는 보장이 flip model·DWM에 없다).
 3. 주 창을 앞으로 가져온다(2·3은 `platform::Window::ShowAndActivate` 하나 — 개정 2에서 PlatformWindow에 더함, Windows는 `ShowWindow` + `SetForegroundWindow`). 같은 프로세스의 스플래시가 전경이면 허용된다. 사용자가 시작 중에 다른 앱으로 옮겼으면 실패하는데, 이때는 강제하지 않는다(OS가 작업 표시줄 단추를 깜빡인다).
-4. `StartupProgress::Finish()` → `SplashScreen::Hide()`. 넘기기 전에 엔진이 끝나면(시작 중 창 닫기·짧은 `--frames`·실패) 호스트가 `Finish(Abandoned·Failed)`로 닫는다(단계 시간 로그·SP5 프로필 없음).
+4. `StartupProgress::Finish()` → `SplashScreen::Hide()`. 첫 프레임을 낸 프레임 끝(1 뒤)에 `MarkReady()`를 불러 최소 표시 대기를 단계 시간에서 뺀다(SP5, 8.2절). 넘기기 전에 엔진이 끝나면(시작 중 창 닫기·짧은 `--frames`·실패) 호스트가 `Finish(Abandoned·Failed)`로 닫는다(단계 시간 로그·SP5 프로필 없음).
 - Sandbox(SP1)는 프레임 수와 최소 표시 시간으로 정한다: 엔진 프레임 1 이상이 끝났고 `CanHide()`가 참인 첫 프레임 끝에 `ShowAndActivate`, 그다음 프레임 끝에 Hide(호스트 루프 다리의 `EndFrame` — 9.7절).
 - 주 창을 먼저 보이므로 UE의 guard 창(1.4절)이 필요 없고 빈 화면 틈도 없다. 시작 중 Fatal이나 정상 종료 요청으로 주 창 없이 끝나면 `SplashScreen` 소멸이 Hide한다.
 
