@@ -499,6 +499,8 @@ void AudioDeviceContext::CollectTerminals(ControlBatch& batch) noexcept {
                 break;
             case audio::AudioVoiceEndReason::None:
             case audio::AudioVoiceEndReason::StartFailed:
+            // 스트림 디코드·데이터 오류(Docs/Design/AudioSystem 3.40.3절).
+            case audio::AudioVoiceEndReason::StreamFailed:
                 reason = PlaybackEndReason::Failed;
                 break;
             }

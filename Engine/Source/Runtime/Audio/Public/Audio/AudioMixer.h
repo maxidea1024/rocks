@@ -61,6 +61,11 @@ public:
     // CapacityExceeded.
     Result<AudioClipId> RegisterClip(const AudioClipDesc& desc) noexcept;
 
+    // 스트림 clip을 등록한다(3.40.1절). 채널 1–2(링 채널 수와 같음), frame 1 이상, rate 범위, loop
+    // 구간, startFrame < frameCount(loop면 < loop 끝)가 맞아야 한다(아니면 InvalidArgument). 표가
+    // 차면 CapacityExceeded. voice는 하나만 묶을 수 있다(SPSC 링).
+    Result<AudioClipId> RegisterStreamClip(const AudioStreamClipDesc& desc) noexcept;
+
     // clip을 해제한다. 묶인 voice가 있으면 Busy, 이전 generation이면 StaleHandle. 성공한 뒤에만
     // 호출자가 PCM 메모리를 돌려준다.
     Result<void> UnregisterClip(AudioClipId clip) noexcept;
@@ -70,6 +75,9 @@ public:
 
     // voice에 clip을 묶고 Play 명령을 만든다(mixFrame은 ImmediateMixFrame, 호출자가 바꿔도 된다).
     // - 이전 generation의 voice·clip은 StaleHandle.
+    // - 스트림 clip: startFrame·loop가 등록 값과 다르거나 이미 묶인 voice가 있으면 InvalidArgument.
+    //   Play가 적용돼도 링이 min(StreamStartFrames, 남은 frame)을 채우거나 끝 상태가 될 때까지
+    //   시작하지 않는다(시작 시각은 실제 시작 블록 frame이다).
     // - Reserved가 아닌 voice, startFrame ≥ frameCount, loop인데 startFrame ≥ loop 끝, 범위 밖
     //   파라미터, stereo clip의 Azimuth는 InvalidArgument.
     Result<AudioRtCommand> PreparePlay(AudioVoiceHandle voice, AudioClipId clip, uint32 startFrame,
@@ -147,6 +155,10 @@ private:
         uint32 generation = 1;
         uint32 users = 0;
         bool registered = false;
+        // 스트림 clip이면 링과 그 시작 frame·loop다(desc.channels는 비어 있다).
+        AudioStreamRing* stream = nullptr;
+        uint32 streamStartFrame = 0;
+        bool streamLoop = false;
     };
 
     // 제어 스레드만 쓴다.
@@ -174,6 +186,8 @@ private:
         uint64 lastMailbox = 0;
         // fade가 끝날 때 낼 terminal 사유(Stopped·StoppedAll)다.
         AudioVoiceEndReason stopReason = AudioVoiceEndReason::Stopped;
+        // 스트림 원본이 시작 수위를 기다리는 중이다(시작 시각을 아직 출판하지 않았다).
+        bool awaitingStream = false;
         LinearResampler resampler;
         OnePoleLowPass lowPass;
         OnePoleHighPass highPass;
@@ -234,6 +248,10 @@ private:
     void RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint32 frames) noexcept;
     uint32 FillInput(VoiceSlot& slot, uint32 frames) noexcept;
     void AdvanceCursor(VoiceSlot& slot, uint32 consumed) noexcept;
+    void PublishStart(uint32 index, VoiceSlot& slot, uint64 frame) noexcept;
+    bool StreamReadyToStart(const VoiceSlot& slot) const noexcept;
+    uint32 StreamRenderableFrames(VoiceSlot& slot, uint32 chunk) const noexcept;
+    void SignalStreamRefill() noexcept;
     void FinishMaster(Span<float> interleavedOut) noexcept;
     void PublishBlockEnd() noexcept;
 

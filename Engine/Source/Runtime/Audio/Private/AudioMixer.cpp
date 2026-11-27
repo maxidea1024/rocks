@@ -1,5 +1,6 @@
 #include <Audio/AudioMixer.h>
 
+#include <Audio/AudioStreamRing.h>
 #include <Audio/Panner.h>
 #include <Core/Assert.h>
 #include <Core/Math/MathUtility.h>
@@ -7,6 +8,7 @@
 #include <Platform/Atomics.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
+#include <Platform/Sync/RealtimeWakeSignal.h>
 
 namespace rocks::audio {
 
@@ -26,6 +28,9 @@ static_assert(MaxMixBlockFrames < MaxBlockFrames,
 // (UE ToMonoMatrix의 FL·FR)이다.
 constexpr float MonoUpmixLinearGain = 0.5f;
 constexpr float StereoToMonoGain = 0.707f;
+
+// 스트림 refill 수위 = 링 용량 / 이 값이다(3.40.1절 — 절반).
+constexpr uint32 StreamRefillDivisor = 2;
 
 // 64비트 원자 word의 상위 32비트 자리와 하위 mask다(mailbox·stop-all·terminal 묶음).
 constexpr uint32 HighWordShift = 32;
@@ -223,6 +228,47 @@ Result<AudioClipId> AudioMixer::RegisterClip(const AudioClipDesc& desc) noexcept
     return Result<AudioClipId>::Failure(ErrorCode::CapacityExceeded);
 }
 
+Result<AudioClipId> AudioMixer::RegisterStreamClip(const AudioStreamClipDesc& desc) noexcept {
+    if (desc.ring == nullptr || desc.channelCount == 0 || desc.channelCount > MaxClipChannels ||
+        desc.ring->ChannelCount() != desc.channelCount || desc.frameCount == 0 ||
+        desc.sampleRate < MinClipSampleRate || desc.sampleRate > MaxClipSampleRate) {
+        return Result<AudioClipId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    AudioClipDesc clip;
+    clip.channelCount = desc.channelCount;
+    clip.frameCount = desc.frameCount;
+    clip.sampleRate = desc.sampleRate;
+    clip.loopBegin = desc.loopBegin;
+    clip.loopEnd = desc.loopEnd;
+    const bool wholeLoop = clip.loopBegin == 0 && clip.loopEnd == 0;
+    if (!wholeLoop && !(clip.loopBegin < clip.loopEnd && clip.loopEnd <= clip.frameCount)) {
+        return Result<AudioClipId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    uint32 loopBegin = 0;
+    uint32 loopEnd = 0;
+    LoopRange(clip, loopBegin, loopEnd);
+    if (desc.startFrame >= clip.frameCount || (desc.loop && desc.startFrame >= loopEnd)) {
+        return Result<AudioClipId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (uint32 index = 0; index < clips_.Size(); ++index) {
+        ClipSlot& slot = clips_[index];
+        if (!slot.registered) {
+            slot.desc = clip;
+            slot.registered = true;
+            slot.users = 0;
+            slot.stream = desc.ring;
+            slot.streamStartFrame = desc.startFrame;
+            slot.streamLoop = desc.loop;
+            return Result<AudioClipId>::Success(AudioClipId{index, slot.generation});
+        }
+    }
+
+    return Result<AudioClipId>::Failure(ErrorCode::CapacityExceeded);
+}
+
 Result<void> AudioMixer::UnregisterClip(AudioClipId clip) noexcept {
     if (clip.index >= clips_.Size() || !clips_[clip.index].registered ||
         clips_[clip.index].generation != clip.generation) {
@@ -236,6 +282,9 @@ Result<void> AudioMixer::UnregisterClip(AudioClipId clip) noexcept {
 
     slot.registered = false;
     slot.desc = AudioClipDesc{};
+    slot.stream = nullptr;
+    slot.streamStartFrame = 0;
+    slot.streamLoop = false;
     slot.generation = NextGeneration(slot.generation);
     return Result<void>::Success();
 }
@@ -310,6 +359,13 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     const bool azimuthOnStereo = params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1;
     if (slot->state != ControlState::Reserved || startFrame >= desc.frameCount ||
         (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnStereo) {
+        return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 스트림 clip은 등록 값과 같은 시작·loop이고 voice 하나만 묶는다(SPSC 링 — 3.40.1절).
+    const ClipSlot& clipSlot = clips_[clip.index];
+    if (clipSlot.stream != nullptr && (startFrame != clipSlot.streamStartFrame ||
+                                       loop != clipSlot.streamLoop || clipSlot.users != 0)) {
         return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -562,6 +618,8 @@ AudioMixerCounters AudioMixer::CountersSnapshot() const noexcept {
     counters.nonFiniteSamples = words[next++];
     counters.clippedSamples = words[next++];
     counters.skippedSeqlockReads = words[next++];
+    counters.streamStarvedFrames = words[next++];
+    counters.streamStartDelayFrames = words[next++];
     return counters;
 }
 
@@ -574,6 +632,7 @@ void AudioMixer::AdoptLifetime(VoiceSlot& slot, uint32 generation) noexcept {
     slot.pendingParamsSequence = 0;
     slot.lastAppliedSequence = 0;
     slot.stopReason = AudioVoiceEndReason::Stopped;
+    slot.awaitingStream = false;
 }
 
 void AudioMixer::Finish(uint32 index, VoiceSlot& slot, AudioVoiceEndReason reason,
@@ -596,7 +655,8 @@ void AudioMixer::ApplyStop(uint32 index, VoiceSlot& slot, uint32 fadeFrames, uin
         Finish(index, slot, reason, frame);
         return;
     case AudioVoiceState::Playing:
-        if (fadeFrames == 0) {
+        // 시작 수위를 기다리는 스트림 voice는 낸 소리가 없으므로 바로 끝낸다(3.40.1절).
+        if (fadeFrames == 0 || slot.awaitingStream) {
             Finish(index, slot, reason, frame);
         } else {
             slot.state = AudioVoiceState::Stopping;
@@ -864,13 +924,78 @@ void AudioMixer::StartVoice(uint32 index, VoiceSlot& slot, const AudioRtCommand&
     ApplyParams(slot, initial, 0, true);
     slot.hasPendingParams = false;
     slot.state = AudioVoiceState::Playing;
-
-    SharedVoice& shared = sharedVoices_[index];
-    AtomicStore<MemoryOrder::Relaxed>(&shared.startMixFrame, frame);
-    AtomicStore<MemoryOrder::Release>(&shared.startGeneration, slot.generation);
+    // 스트림 원본은 시작 수위를 채운 블록에서 시작 시각을 출판한다(3.40.1절).
+    slot.awaitingStream = clips_[slot.clipIndex].stream != nullptr;
+    if (!slot.awaitingStream) {
+        PublishStart(index, slot, frame);
+    }
 
     // PreparePlay 뒤 Play 적용 전에 낸 출판도 바로 반영한다(3.23.2절).
     ApplySeqlock(index, slot, true);
+}
+
+void AudioMixer::PublishStart(uint32 index, VoiceSlot& slot, uint64 frame) noexcept {
+    SharedVoice& shared = sharedVoices_[index];
+    AtomicStore<MemoryOrder::Relaxed>(&shared.startMixFrame, frame);
+    AtomicStore<MemoryOrder::Release>(&shared.startGeneration, slot.generation);
+}
+
+bool AudioMixer::StreamReadyToStart(const VoiceSlot& slot) const noexcept {
+    const ClipSlot& clip = clips_[slot.clipIndex];
+    const AudioStreamRing& ring = *clip.stream;
+    if (ring.State() != AudioStreamState::Running) {
+        return true;
+    }
+
+    uint32 wanted = StreamStartFrames;
+    if (!slot.loop) {
+        const uint32 remaining = clip.desc.frameCount - static_cast<uint32>(slot.sourceCursor);
+        wanted = remaining < wanted ? remaining : wanted;
+    }
+
+    return ring.ReadableFrames() >= wanted;
+}
+
+uint32 AudioMixer::StreamRenderableFrames(VoiceSlot& slot, uint32 chunk) const noexcept {
+    const ClipSlot& clip = clips_[slot.clipIndex];
+    const uint32 needed = slot.resampler.InputFramesNeeded(chunk).Value();
+    uint64 ringNeeded = needed;
+    if (!slot.loop) {
+        // 원본 끝 뒤는 0 꼬리라 링을 읽지 않는다.
+        const int64 remaining =
+            static_cast<int64>(clip.desc.frameCount) - static_cast<int64>(slot.sourceCursor);
+        ringNeeded = remaining <= 0
+                         ? 0
+                         : (static_cast<uint64>(remaining) < needed ? static_cast<uint64>(remaining)
+                                                                    : needed);
+    }
+
+    const uint32 available = clip.stream->ReadableFrames();
+    if (available >= ringNeeded) {
+        return chunk;
+    }
+
+    // 끝까지의 PCM이 다 오지 않았으므로 0 꼬리도 없다 — 가진 입력으로 낼 수 있는 만큼이다.
+    return slot.resampler.OutputFramesFor(available, chunk);
+}
+
+void AudioMixer::SignalStreamRefill() noexcept {
+    if (config_.streamRefillSignal == nullptr) {
+        return;
+    }
+
+    for (const VoiceSlot& slot : voices_) {
+        if (slot.state != AudioVoiceState::Playing && slot.state != AudioVoiceState::Stopping) {
+            continue;
+        }
+
+        const AudioStreamRing* ring = clips_[slot.clipIndex].stream;
+        if (ring != nullptr && ring->State() == AudioStreamState::Running &&
+            ring->ReadableFrames() < ring->CapacityFrames() / StreamRefillDivisor) {
+            config_.streamRefillSignal->Signal();
+            return;
+        }
+    }
 }
 
 void AudioMixer::ApplyCommand(const AudioRtCommand& command, uint64 frame) noexcept {
@@ -1023,6 +1148,7 @@ RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
 
     RenderSegment(segmentStart, blockFrames - segmentStart);
     FinishMaster(interleavedOut);
+    SignalStreamRefill();
     mixFrame_ = blockEnd;
     PublishBlockEnd();
     RenderBlockResult result;
@@ -1047,7 +1173,30 @@ void AudioMixer::RenderSegment(uint32 offset, uint32 frames) noexcept {
 }
 
 uint32 AudioMixer::FillInput(VoiceSlot& slot, uint32 frames) noexcept {
-    const AudioClipDesc& desc = clips_[slot.clipIndex].desc;
+    const ClipSlot& clip = clips_[slot.clipIndex];
+    if (clip.stream != nullptr) {
+        // 링은 재생 순서(loop면 감은 순서)라 앞에서부터 읽는다. non-loop의 끝 뒤는 0 꼬리다.
+        uint32 ringFrames = frames;
+        if (!slot.loop) {
+            const uint64 cursor = slot.sourceCursor;
+            const uint64 remaining =
+                cursor < clip.desc.frameCount ? clip.desc.frameCount - cursor : 0;
+            ringFrames = remaining < frames ? static_cast<uint32>(remaining) : frames;
+        }
+
+        const PlanarView input = WithChannels(inputScratch_.View(frames), clip.desc.channelCount);
+        clip.stream->Peek(ringFrames, input);
+        for (uint32 channel = 0; channel < clip.desc.channelCount; ++channel) {
+            float* target = input.channels[channel];
+            for (uint32 frame = ringFrames; frame < frames; ++frame) {
+                target[frame] = 0.0f;
+            }
+        }
+
+        return frames;
+    }
+
+    const AudioClipDesc& desc = clip.desc;
     uint32 loopBegin = 0;
     uint32 loopEnd = 0;
     LoopRange(desc, loopBegin, loopEnd);
@@ -1074,6 +1223,20 @@ uint32 AudioMixer::FillInput(VoiceSlot& slot, uint32 frames) noexcept {
 }
 
 void AudioMixer::AdvanceCursor(VoiceSlot& slot, uint32 consumed) noexcept {
+    AudioStreamRing* stream = clips_[slot.clipIndex].stream;
+    if (stream != nullptr) {
+        // 링에서 온 frame만 버린다(non-loop의 끝 뒤 0 꼬리는 링에 없다).
+        uint64 fromRing = consumed;
+        if (!slot.loop) {
+            const uint64 frameCount = clips_[slot.clipIndex].desc.frameCount;
+            const uint64 remaining =
+                slot.sourceCursor < frameCount ? frameCount - slot.sourceCursor : 0;
+            fromRing = remaining < fromRing ? remaining : fromRing;
+        }
+
+        stream->Consume(static_cast<uint32>(fromRing));
+    }
+
     slot.sourceCursor += consumed;
     if (!slot.loop) {
         return;
@@ -1089,9 +1252,22 @@ void AudioMixer::AdvanceCursor(VoiceSlot& slot, uint32 consumed) noexcept {
 
 void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint32 frames) noexcept {
     const AudioClipDesc& desc = clips_[slot.clipIndex].desc;
+    AudioStreamRing* stream = clips_[slot.clipIndex].stream;
     const uint32 sourceChannels = desc.channelCount;
     const uint32 outputs = OutputChannelCount();
     const uint64 segmentStartFrame = mixFrame_ + offset;
+    // 시작 대기(3.40.1절 — UE IsPreparedToInit): 수위를 채우거나 끝 상태가 될 때까지 소리도 cursor
+    // 진행도 없다. 채운 구간에서 시작 시각을 출판한다.
+    if (slot.awaitingStream) {
+        if (!StreamReadyToStart(slot)) {
+            counters_.streamStartDelayFrames += frames;
+            return;
+        }
+
+        slot.awaitingStream = false;
+        PublishStart(index, slot, segmentStartFrame);
+    }
+
     uint32 produced = 0;
     while (produced < frames) {
         uint32 chunk = frames - produced;
@@ -1125,20 +1301,45 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
         }
 
         if (chunk > 0) {
-            needed = slot.resampler.InputFramesNeeded(chunk).Value();
-            FillInput(slot, needed);
-            const PlanarView input = WithChannels(inputScratch_.View(needed), sourceChannels);
-            const PlanarView voice = WithChannels(voiceScratch_.View(chunk), sourceChannels);
-            const uint32 consumed = slot.resampler.Process(input, voice).Value();
-            AdvanceCursor(slot, consumed);
-            slot.lowPass.Process(voice);
-            slot.highPass.Process(voice);
-            slot.gain.Apply(voice);
-            slot.fade.Apply(voice);
-            for (uint32 source = 0; source < sourceChannels; ++source) {
-                for (uint32 output = 0; output < outputs; ++output) {
-                    slot.channelGains[source][output].MixAdd(
-                        voice.channels[source], master_.Channel(output) + offset + produced, chunk);
+            // 스트림 원본은 링에 있는 만큼만 낸다(3.40.1절 굶음).
+            const uint32 rendered = stream != nullptr ? StreamRenderableFrames(slot, chunk) : chunk;
+            if (rendered > 0) {
+                needed = slot.resampler.InputFramesNeeded(rendered).Value();
+                FillInput(slot, needed);
+                const PlanarView input = WithChannels(inputScratch_.View(needed), sourceChannels);
+                const PlanarView voice = WithChannels(voiceScratch_.View(rendered), sourceChannels);
+                const uint32 consumed = slot.resampler.Process(input, voice).Value();
+                AdvanceCursor(slot, consumed);
+                slot.lowPass.Process(voice);
+                slot.highPass.Process(voice);
+                slot.gain.Apply(voice);
+                slot.fade.Apply(voice);
+                for (uint32 source = 0; source < sourceChannels; ++source) {
+                    for (uint32 output = 0; output < outputs; ++output) {
+                        slot.channelGains[source][output].MixAdd(
+                            voice.channels[source], master_.Channel(output) + offset + produced,
+                            rendered);
+                    }
+                }
+            }
+
+            if (rendered < chunk) {
+                // 굶은 구간은 무음이다. 리샘플러·cursor·필터·gain은 멈추고(이어 재생), fade만
+                // 진행해 Stop·StopAll·종료 drain이 생산자와 상관없이 끝나게 한다. 자연 끝은 PCM이
+                // 올 때까지 미룬다. 끝 상태(Failed, 또는 Ended인데 모자람)면 스트림 실패로 끝낸다.
+                const uint32 silent = chunk - rendered;
+                counters_.streamStarvedFrames += silent;
+                if (slot.state == AudioVoiceState::Stopping) {
+                    slot.fade.Advance(silent);
+                }
+
+                if (ending == AudioVoiceEndReason::NaturalEnd) {
+                    ending = AudioVoiceEndReason::None;
+                }
+
+                if (ending == AudioVoiceEndReason::None &&
+                    stream->State() != AudioStreamState::Running) {
+                    ending = AudioVoiceEndReason::StreamFailed;
                 }
             }
 
@@ -1200,6 +1401,8 @@ void AudioMixer::PublishBlockEnd() noexcept {
     words[next++] = counters_.nonFiniteSamples;
     words[next++] = counters_.clippedSamples;
     words[next++] = counters_.skippedSeqlockReads;
+    words[next++] = counters_.streamStarvedFrames;
+    words[next++] = counters_.streamStartDelayFrames;
     for (uint32 word = 0; word < CounterSnapshotWords; ++word) {
         AtomicStore<MemoryOrder::Relaxed>(&counterSnapshot_[word], words[word]);
     }
