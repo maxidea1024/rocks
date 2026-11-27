@@ -11,6 +11,7 @@
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
 #include <World/Physics/PhysicsBodyHandle.h>
+#include <World/Physics/PhysicsContactHit.h>
 #include <World/SceneComponent.h>
 #include <World/Primitives/PrimitiveTypes.h>
 
@@ -421,6 +422,15 @@ public:
     //   ball.SetSimulatePhysics(true);   // 다음 고정 스텝부터 떨어진다
     void SetSimulatePhysics(bool simulate) noexcept;
 
+    // 시뮬레이션 접촉 hit를 받을지 바꾼다(UE SetNotifyRigidBodyCollision —
+    // bodySettings.notifyRigidBodyCollision, PhysicsModule 5.4절·7.1.12절). 켜면 이 컴포넌트의
+    // body가 닿는 스텝마다(solver 충격량이 있거나 probe 접촉) 소유 Actor의 OnHit가 불린다. body가
+    // 있으면 다음 step부터 적용된다.
+    //
+    // 사용 예:
+    //   ball.SetNotifyRigidBodyCollision(true);   // 바닥에 닿으면 Actor::OnHit
+    void SetNotifyRigidBodyCollision(bool notify) noexcept;
+
     // 이 컴포넌트를 delta만큼 옮기고 rotation으로 돌린다(UE MoveComponent —
     // Docs/Design/PhysicsModule 5.1절·7.1.10절). sweep이면 자기 body 형상으로 쓸고 가(채널·응답은
     // 자기 것, 자기 Actor와 이동 무시 목록은 뺀다) 막는 hit 앞(pullback)에 멈추고 hit를
@@ -492,6 +502,12 @@ public:
     // MOVECOMP_SkipPhysicsMove). 부착된 자식은 따라가고 자기 body를 옮긴다. 오류: 이동 실패(그대로
     // 돌려준다 — SetWorldLocationAndRotation).
     Result<void> ApplyPhysicsTransform(const Vec3d& location, const Quatd& rotation) noexcept;
+
+    // 시뮬레이션 접촉 hit 하나를 발행한다(UE AActor::DispatchPhysicsCollisionHit — PhysicsModule
+    // 7.1.12절, Physics의 PhysicsResults만 부른다). hit.myComponent나 그 소유 Actor가 사라졌거나
+    // 파괴 대기면 하지 않는다. 소유 Actor의 OnHit(myComponent, otherActor, otherComponent,
+    // selfMoved 참, normalImpulse, hit)다.
+    static void DispatchPhysicsHit(World& world, const PhysicsContactHit& hit) noexcept;
 
     // 실효 충돌 값이다(CollisionData 5절 ResolveCollision — World의 profile 표, 이름은
     // CollisionProfileName). profileName은 World 표가 살아 있는 동안 유효하다. 오류: World 장부 밖
