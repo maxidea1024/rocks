@@ -21,7 +21,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectDeveloperModules = ["GcSoak"];
 
     // Tests of Object family modules (included in FoundationTests and EngineTests).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
+    private static readonly string[] ObjectTestModules = ["MetaSchema", "ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/InputActions", "Runtime/CurveAssets", "Developer/CurveAssetTools", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/WorldIntegration", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Developer/AnimationTools", "Runtime/Material", "Runtime/MaterialSchema", "Developer/MaterialCompiler", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Runtime/AudioMiniaudio", "Runtime/EngineAudio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend", "Runtime/SplashScreen"];
@@ -72,6 +72,7 @@ public abstract class TestsModule : ModuleRules
         "Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp",
         "Core/Source/Runtime/Core/Tests/StackAllocatorTests.cpp",
         "Core/Source/Runtime/Core/Tests/StringFormatTests.cpp",
+        "Core/Source/Runtime/MetaSchema/Tests/LaneTransferTests.cpp",
         "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderFailureControls.cpp",
         "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderTests.cpp",
         "Core/Source/Runtime/ObjectRuntime/Tests/DestroyRequestedFailureTests.cpp",
@@ -146,6 +147,8 @@ public abstract class TestsModule : ModuleRules
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
+        // The lane transfer tests check the reflected fixture structs (Object references, weak references) against the schema rule.
+        ["MetaSchema"] = ["ReflectionTestFixtures"],
         ["ModuleLoader"] = ["DynamicModuleTestApi"],
         ["NodeGraph"] = ["ReflectionText"],
         ["NodeGraphTools"] = ["ReflectionTestFixtures"],

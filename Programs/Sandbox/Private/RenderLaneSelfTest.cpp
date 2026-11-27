@@ -54,9 +54,9 @@ struct SurfaceResize {
 
 } // namespace sandbox
 
-ROCKS_RENDER_TRANSFERABLE(sandbox::ScenePacket);
-ROCKS_RENDER_TRANSFERABLE(sandbox::CheckerUpload);
-ROCKS_RENDER_TRANSFERABLE(sandbox::SurfaceResize);
+ROCKS_LANE_TRANSFERABLE(sandbox::ScenePacket);
+ROCKS_LANE_TRANSFERABLE(sandbox::CheckerUpload);
+ROCKS_LANE_TRANSFERABLE(sandbox::SurfaceResize);
 
 namespace sandbox {
 
