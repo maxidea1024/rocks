@@ -228,8 +228,9 @@ internal static partial class MetaTests
             }
         });
         // 동기화 SY0 통과 조건(Docs/Design/Synchronization 11.1·15절): C++ 원자 타입 platform::Atomic<T>의 필드 형식을 리플렉션
-        // struct 지정자 Atomic과 혼동하지 않는다. NATIVE 원자 멤버가 있는 클래스는 flags가 비어 있고, 같은 헤더의
-        // ROCKS_STRUCT(Atomic)만 Atomic이다.
+        // struct 지정자 Atomic과 혼동하지 않는다. NATIVE 원자 멤버(정수·Object가 아닌 포인터)가 있는 클래스는 flags가
+        // 비어 있고, 같은 헤더의 ROCKS_STRUCT(Atomic)만 Atomic이다. Object 파생 포인터를 담는 원자 멤버는 강한 참조라
+        // RMC2205다(아래 Meta.NativeAtomicObjectPointerIsRejected).
         suite.Add("Meta.AtomicFieldTypeIsNotTheAtomicSpecifier", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -237,7 +238,7 @@ internal static partial class MetaTests
                 "ROCKS_STRUCT(Atomic)\nstruct Point {\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Point point;\n" +
                 "ROCKS_NATIVE() rocks::platform::Atomic<rocks::uint32> hits;\n" +
-                "ROCKS_NATIVE() rocks::platform::Atomic<Value*> next;\n};\n}\n";
+                "ROCKS_NATIVE() rocks::platform::Atomic<rocks::int32*> cursor;\n};\n}\n";
             await probe.GenerateAsync(source);
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
@@ -262,6 +263,12 @@ internal static partial class MetaTests
             Preamble + referenceHolder + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_NATIVE() Holder cache;\n};\n}\n",
             Preamble + referenceHolder + "ROCKS_STRUCT()\nstruct Box {\nROCKS_PROPERTY() rocks::int32 count = 0;\nROCKS_NATIVE() Holder cache;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
+            "RMC2205", "strong object reference");
+        // platform::Atomic으로 감싸도 Object 파생 raw pointer는 GC가 보지 못하는 강한 참조다(RMC2205 — 원자 형식이 검사를
+        // 비켜 가지 않는다).
+        AddRejectGroup(context, "Meta.NativeAtomicObjectPointerIsRejected", [
+            Preamble.Replace("namespace probe {", "#include <Platform/Atomics.h>\nnamespace probe {", StringComparison.Ordinal) +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_NATIVE() rocks::platform::Atomic<Value*> next;\n};\n}\n"],
             "RMC2205", "strong object reference");
         // WorldOnly 소유자 형질(NATIVE)은 struct에서 형질로 전파되고(중첩 포함), 그 struct를 필드로 둔 WorldOnly 아닌
         // 클래스가 RMC2206이다.
