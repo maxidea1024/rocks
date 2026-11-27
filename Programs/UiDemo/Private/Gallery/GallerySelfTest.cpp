@@ -1,4 +1,5 @@
 #include "GallerySelfTest.h"
+#include <UiCore/ManualClock.h>
 #include <Core/ScopeExit.h>
 #include <UiCore/Styles/CoreStyles.h>
 
@@ -29,12 +30,6 @@ enum Failure : int {
     TabHeaderMissing = 52,
     TabClickIgnored = 53
 };
-
-// 툴팁 확인용 시계다(지연을 기다리지 않고 결정적으로 연다).
-double galleryTipClock = 0;
-double ReadGalleryTipClock() noexcept {
-    return galleryTipClock;
-}
 
 Optional<Vec2> Center(const Element* element) noexcept {
     if (!element) {
@@ -119,7 +114,10 @@ bool HasBox(const CacheRoot& cache, const Element& within, LinearColor color) no
 
 int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
                   const SharedPtr<DockManager>& area) noexcept {
+    // 시험 전체가 수동 시계다(Docs/Design/UiToolkit 20.3절 — 툴팁 지연을 기다리지 않고 결정적으로).
+    ManualClock clock;
     Application app(allocator);
+    app.SetClock(clock.Function());
     app.SetRoot(area);
     if (!app.SetCommands({}, gallery.Commands())) {
         return LayoutFailed;
@@ -198,23 +196,21 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     }
 
     const auto tipPoint = Center(tipOwner);
-    galleryTipClock = 0;
-    app.SetClock(ClockFunction::CreateStatic(&ReadGalleryTipClock));
-    // 바꾼 시계로 프레임을 시작한다 — 툴팁 예약은 프레임 시각을 본다(Docs/Design/UiToolkit 20.3절).
+    // 툴팁 예약은 프레임 시각을 본다 — 지금 시각으로 프레임을 연다.
     app.BeginFrame();
     // 나타나기(fade)를 끄고 연 첫 프레임의 바탕을 그대로 본다(앱 설정은 끝에 되돌린다).
     const double savedDelay = app.ToolTipDelay();
     const double savedFade = app.ToolTipFade();
     (void)app.SetToolTipTiming(savedDelay, 0);
     ROCKS_ON_SCOPE_EXIT {
-        app.SetClock({});
         (void)app.SetToolTipTiming(savedDelay, savedFade);
     };
     if (!tipPoint || !app.RoutePointer({PointerEventType::Move, *tipPoint})) {
         return ToolTipMissing;
     }
 
-    galleryTipClock = 1;
+    clock.Advance(1);
+    app.BeginFrame();
     cache = app.UpdatePaintCache(viewport, 1);
     if (cache) {
         cache = app.UpdatePaintCache(viewport, 1);

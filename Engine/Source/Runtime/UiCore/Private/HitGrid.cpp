@@ -109,7 +109,9 @@ Result<void> HitGrid::Record(const SharedPtr<Element>& element, usize parentClip
         }
     }
 
-    for (const auto& child : element->ActiveChildren()) {
+    // 그리기 순서로 걷는다(Docs/Design/UiToolkit 20.4절 — layer가 그리기 순서를 따라 줄지 않아
+    // DrawBatch의 (layer, 순번) 순서와 같다).
+    for (const auto& child : element->HitTestChildren()) {
         auto added = Record(child, parentClip, clip);
         if (!added) {
             return added;

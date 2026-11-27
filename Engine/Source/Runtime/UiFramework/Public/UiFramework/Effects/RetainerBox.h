@@ -46,6 +46,8 @@ public:
 
 protected:
     Span<const SharedPtr<Element>> PaintChildren() const noexcept override;
+    // 보관 텍스처로 그리는 동안에도 자식은 같은 자리에 보이므로 hit 대상이다(20.4절).
+    Span<const SharedPtr<Element>> HitTestChildren() const noexcept override;
 
 private:
     LinearColor effectTint_{1, 1, 1, 1};

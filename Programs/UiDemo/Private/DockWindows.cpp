@@ -76,6 +76,8 @@ DockWindows::Surface::Surface(Allocator& allocator, UiRenderer& uiRenderer,
 DockWindows::Surface::~Surface() noexcept {
     // 창이 멤버 중 거의 마지막에 파괴되므로 그 전에 이 호스트를 가리키는 콜백을 먼저 끊는다.
     window->SetLiveResizeHandler({});
+    // 팝업 공급자는 이 호스트를 잡는다 — area가 더 오래 살 수 있어 먼저 뗀다.
+    (void)app.SetPopupWorkArea({});
     // 편집 요소가 서비스를 더 오래 쥘 수 있어 창과의 연결을 먼저 끊는다.
     if (textInput) {
         textInput->Detach();

@@ -25,39 +25,44 @@
 
 ### 20.3 시계(UW8a)
 
-- **시계 원천.** `ui::Clock`(UiCore)은 초 단위 시각 공급 delegate다. 기본은 단조 시계다. 시험·snapshot은 `ManualClock`을 준다. 이 시계는 읽어도 전진하지 않고, 호스트가 `Advance(초)`로 올린다. 읽는 횟수가 결과를 바꾸지 않게 하려는 것이다.
+- **시계 원천.** `ClockFunction`(UiCore `FrameTime.h`)은 초 단위 시각 공급 delegate다. 기본은 단조 시계다. 시험·snapshot은 `ManualClock`을 준다. 이 시계는 읽어도 전진하지 않고, 호스트가 `Advance(초)`로 올린다. 읽는 횟수가 결과를 바꾸지 않게 하려는 것이다.
 - **프레임 시각(UE `TickTime`).**
   - `Application::BeginFrame()`이 프레임마다 한 번 시계를 읽는다. `currentTime`은 읽은 값 그대로다.
   - 간격이 1/8초(`MaxFrameDeltaSeconds`)를 넘으면 이전 시각(`lastTime`)만 당겨 `deltaTime`을 자른다. 누적 시각을 따로 두지 않으므로 타이머 마감과 시간 기준이 갈라지지 않는다.
-  - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다. 부르지 않은 채 `PrepareLayout`이 오면 그것이 먼저 부른다(시험·단순 호스트). 그때 그 프레임의 입력은 지난 프레임 시각을 본다.
+  - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다.
+  - 한 번도 `BeginFrame`을 부르지 않은 호스트(시험·단순 호스트)는 암묵 시작이다. 프레임이 열려 있지 않으면 입력 처리(`RoutePointer`·`RouteKey` 등)나 `PrepareLayout`이 먼저 연다. `PrepareLayout`이 그 프레임을 닫는다. 호스트가 `BeginFrame`을 한 번이라도 부르면 그 뒤로는 암묵 시작을 하지 않는다. 한 틱 안의 여러 `PrepareLayout`(월드 위젯 입력마다 배치)이 프레임을 여러 번 여는 일과, 바깥 시각과 앱 시계가 한 틱 안에서 섞이는 일을 막는다.
+  - 프레임 타이머는 프레임마다 한 번, 자른 `deltaTime` 이하만 진행한다(UE active timer에 앱 DeltaTime). interval 타이머 마감은 시각 그대로 본다.
   - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) 월드 위젯은 자기 Application 시계로 `PrepareLayout`이 프레임을 시작한다.
 - **읽는 곳.**
   - `UiHostServices`가 그 프레임의 `FrameTime`을 든다. Element는 그리기 밖(속성 갱신·Arrange·`Show`·`SetMarquee`)에서도 `FindUiHostServices()->Time()`으로 같은 값을 읽는다.
   - `PaintList`도 같은 값을 든다(UE `FPaintArgs`). cache root·표면 기록(`SurfaceRecorder`)의 목록도 같은 값을 받는다. `ViewportSource::Advance`는 프레임 번호와 함께 이 값을 받는다. 애니메이션 부품(`ActivityIndicator`·`ProgressBar` marquee·`Carousel`)은 이 값으로 위상을 계산하고 자기 시계 멤버를 지운다.
   - 툴팁 지연·타이머 등록·마감은 프레임 시각을 쓴다(UE `RegisterActiveTimer`가 `GetCurrentTime()` — SWidget.cpp 1898행). `SetToolTipClock`·`SetTimerClock`은 `SetClock` 하나로 합친다.
-  - 호스트 대기 시간(`SecondsUntilNextTimer`)은 시계를 다시 읽어 마감까지 남은 시간을 계산한다(대기 계산만 — 상태는 바꾸지 않는다).
-- **결정성.** UiDemo `--snapshot`·`--self-test`는 `ManualClock`을 0초에서 시작해 프레임마다 1/60초 올린다. 그러면 Widgets 탭도 실행마다 byte가 같다.
+  - 호스트 대기 시간(`SecondsUntilNextTimer`)은 시계를 다시 읽어 마감까지 남은 시간을 계산한다(대기 계산만 — 상태는 바꾸지 않는다). 바깥 시각으로 연 프레임 뒤에는 시계 대신 그 프레임 시각을 기준으로 한다(마감이 바깥 시각 기준이다).
+  - **시계 교체.** 프레임을 연 뒤 `SetClock`으로 시계를 바꾸면 UI 시각이 끊기지 않게 이어 붙인다(새 시계 값 + 차이). 걸린 타이머 마감·부품 원점이 옛 기준 그대로 맞는다. 첫 프레임 전에 바꾸면 새 시계 값 그대로다.
+  - 바깥 시각(`BeginFrame(FrameTime)`)은 유한하지 않으면 무시하고, 간격은 0과 `MaxFrameDeltaSeconds` 사이로 자른다.
+- **결정성.** UiDemo `--snapshot`·`--self-test`의 갤러리 확인은 `ManualClock`을 0초에서 시작해 프레임마다 1/60초 올린다. 그러면 Widgets 탭도 실행마다 byte가 같다.
+- **묶음 수명.** `Application`은 루트를 받을 때(`SetRoot`) 묶음을 만든다. 루트를 바꾸거나 소멸할 때 옛 루트가 이 묶음을 들고 있으면 뗀다(가장 가까운 묶음이 이기므로, 옛 묶음이 남으면 다른 Application에 붙은 뒤에도 그것을 본다).
 - **버린 대안.**
   - Element에 `Application*`를 주는 방식은 UiCore가 UiFramework를 알게 되어 버렸다.
   - 전역 시계는 창이 여럿인 호스트와 시험을 섞는다.
   - 읽을 때마다 전진하는 고정 시계는 읽는 횟수에 결과가 묶여 버렸다.
 
-### 20.4 그리기 중 hit grid(UW8b)
+### 20.4 그리기 순서 hit grid(UW8b)
 
-- **등록.** `PaintList`가 `HitGridBuilder*`를 든다(UE `FPaintArgs::GetHittestGrid`). `Element::PaintSubtree`는 자신을 (Element, geometry, 부모 clip 항목, layer, 순번)으로 등록한다.
-  - 등록 위치는 local cache 빠른 경로의 `return`보다 앞이다(Element.cpp 389–407행). 그래야 CachePanel 자신도 등록된다.
-  - 조건은 지금 `Record`와 같다: Hidden·Collapsed가 아니고 clip과 겹친다.
-  - `HitTestInvisible`은 자신과 자식을 후보에서 빼되 clip 항목으로는 남긴다. `SelfHitTestInvisible`은 자신만 뺀다. 비활성은 빼지 않는다(20.5절).
+- **방식(구현 때 개정).** 처음 안은 그리기 중 등록(UE `AddWidget`)이었다. 하지만 Rocks는 cache root가 그리기를 부분 재사용한다(바뀌지 않은 하위 트리는 다시 그리지 않는다). 그래서 그리기 중에 등록하면 캐시된 하위 트리가 grid에서 빠진다. UE는 무효화 root가 grid를 들고 있다가 바뀐 위젯만 고치는 방식으로 이를 푸는데(`FHittestGrid::UpdateWidget`·`AddGrid`), Rocks에는 그 구조가 없다.
+  - 대신 grid를 **그리기와 같은 순서로 걷는** 방식으로 만든다. 걷기는 plan revision이 바뀐 프레임의 그리기 직후에 한다(지금 규칙).
+  - 결과는 UE와 같다. Rocks의 layer는 그리기 순서를 따라 줄지 않기 때문이다: Element의 layer는 부모가 지금까지 쓴 가장 높은 layer에서 시작하고(Element.cpp `PaintContents`), 형제는 그보다 낮아지지 않는다. 그래서 `DrawBatch`의 (layer, 순번) 정렬(DrawBatch.cpp 104–111행)은 그리기 순서와 같고, 그리기 순서로 걸은 grid의 위·아래가 화면의 위·아래와 같다.
+- **걷는 자식.** `Element::HitTestChildren()`이다. 기본값은 `PaintChildren()`(그리기 자식)이다. 지금 `ActiveChildren` 대신 이것을 쓰므로, Carousel이 슬라이드 중 그리는 두 쪽만 맞는다(UE와 같이 보이는 것만).
+  - `RetainerBox`는 보관 텍스처로 그리는 동안 `PaintChildren`이 비지만(RetainerBox.cpp 103–104행), 자식은 같은 자리에 보인다. 그래서 `HitTestChildren`을 활성 자식으로 재정의한다(UE `SRetainerWidget`이 자기 grid를 `AddGrid`로 붙이는 것과 같은 효과).
+  - 그리기 자식을 바꾸는 Element(재정의하는 곳)는 바뀔 때 plan revision을 올려야 한다(grid를 다시 걷게).
+- **등록 조건(지금 `Record`와 같다).**
+  - Hidden·Collapsed는 하위 트리까지 뺀다.
+  - clip과 겹치지 않는 clip Element도 하위 트리까지 뺀다.
+  - `HitTestInvisible`은 자신과 자식을 후보에서 뺀다. `SelfHitTestInvisible`은 자신만 뺀다(clip 항목으로는 남는다).
+  - 비활성은 빼지 않는다(UW8c, 20.5절).
   - 셀 색인·넓은 항목 목록은 지금 구조 그대로다(셀 128 px — UE HittestGrid.cpp 109행).
-- **순서 키.** (layer, 순번)이다. `DrawBatch`가 그리기를 같은 키로 정렬하므로(DrawBatch.cpp 104–111행) 위에 보이는 것이 위에서 맞는다. 셀 안에서는 키의 역순으로 검사한다.
-- **grid 조각(UE `AddGrid`).**
-  - `CacheRoot`(창 cache·CachePanel)는 기록할 때 하위 트리의 hit 항목을 조각에 담고, 다시 쓸 때 바깥 builder에 통째로 붙인다.
-  - `RetainerBox`도 보관 텍스처를 만들 때(`RecordContent`) 조각을 담고, 보관본을 쓰는 프레임마다 붙인다. 지금은 보관 중 `PaintChildren`이 비어 자식이 hit에서 사라진다(RetainerBox.cpp 103–104행).
-  - `Carousel`은 슬라이드 중 `PaintChildren`이 그리는 두 자식만 등록한다(UE와 같이 보이는 것만 맞는다).
-  - 조각의 geometry는 기록 때 창 좌표다. 부모 변환이 바뀌면 plan revision이 올라 다시 기록되므로(지금 규칙) 낡지 않는다.
-- **완성.** 그리기가 끝나면 `Application`이 builder를 `HitGrid`로 바꿔 넣는다. 따로 도는 `HitGrid::Update`는 지운다. 영역 지도(19.2절)·`QueryWindowRegion`·툴팁은 이 grid를 읽는다.
-- **스냅샷 없는 판정.** grid가 없을 때 쓰는 `Element::HitTest`(Element.cpp 782행)는 같은 규칙(그리기 자식 순서, 비활성 자름)으로 맞춘다. 둘이 다르면 첫 프레임 입력이 다르게 간다.
-- **한계.** 그리지 않은 프레임(최소화)에는 grid가 지난 프레임 것으로 남는다(UE와 같다).
+- **스냅샷 없는 판정.** grid가 없을 때 쓰는 `Element::HitTest`(Element.cpp 782행)도 `HitTestChildren` 역순·같은 규칙으로 맞춘다. 둘이 다르면 첫 프레임 입력이 다르게 간다.
+- **한계.** grid는 plan revision이 바뀐 그리기 뒤에만 다시 만든다. 그리지 않은 프레임(최소화)에는 지난 것이 남는다(UE와 같다).
 
 ### 20.5 비활성 Element 경로 자름(UW8c — UW8b 뒤)
 
@@ -181,7 +186,7 @@
 | 단계 | 범위 | 완료 판정 |
 |---|---|---|
 | UW8a | `UiHostServices` 묶음(20.2절), `ui::Clock`·`ManualClock`, `BeginFrame`(delta 자름), 프레임 시각을 그리기 안팎에서 읽기, 애니메이션 부품·툴팁·타이머·`ViewportWorld` 이관, 월드 위젯 World 시간, UiDemo 수동 시계 | 시계 전진 시험(툴팁·타이머·throbber 위상, 긴 간격 자름 뒤 타이머 마감), snapshot 7탭 모두 실행마다 byte 동일 |
-| UW8b | 그리기 중 hit grid 등록(`HitGridBuilder`, (layer, 순번) 키), cache root·`RetainerBox` grid 조각, `HitGrid::Update` 제거, 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서, CachePanel·RetainerBox 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
+| UW8b | 그리기 순서 걷기(`HitTestChildren` — 기본 그리기 자식, `RetainerBox`는 활성 자식), 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서(Overlay layer·Carousel 슬라이드), CachePanel·RetainerBox 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
 | UW8c | `IsInputPathActive` 활성 인자 분리, 비활성 경로 자름, 툴팁·영역 지도 비활성 무시 | 비활성 버튼 클릭 → 부모, 비활성 위젯 툴팁 표시 |
 | UW8d | `BindVisibility`, 보이기 먼저 평가, Hidden 갱신 | 접힌 Element가 묶음으로 다시 보임, Hidden Element 원하는 크기 갱신 |
 | UW8e1 | `KeyReply`·`KeyEvent`, 기본 navigation 변환, `OnNavigation`·`NavigationReply`, `NavigationConfig`(키·동작), 메뉴·목록·스크롤·슬라이더 이관, `InputAdapter` 대체 변환 제거 | 조상이 방향키를 받지 않음, 초점 없음 → navigation 없음, 키 대응 교체, 메뉴·목록 키보드 회귀 없음 |

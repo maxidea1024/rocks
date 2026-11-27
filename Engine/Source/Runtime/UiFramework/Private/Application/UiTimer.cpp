@@ -1,5 +1,3 @@
-#include <UiCore/TimeUnits.h>
-#include <Platform/Clock.h>
 #include <UiFramework/Application/UiTimer.h>
 #include <UiFramework/Application/Application.h>
 
@@ -43,7 +41,7 @@ double Application::SecondsUntilNextTimer() const noexcept {
     }
 
     // 대기 시간은 지금 시계로 잰다(20.3절).
-    const double now = ReadClock();
+    const double now = WaitClock();
     for (const auto& weak : timers_) {
         auto timer = weak.Lock();
         if (!timer) {
@@ -62,12 +60,15 @@ double Application::SecondsUntilNextTimer() const noexcept {
 }
 
 void Application::AdvanceTimers() noexcept {
-    if (runningTimers_ || timers_.IsEmpty() || !root_) {
+    // 프레임마다 한 번이다(같은 프레임의 배치를 여러 번 해도 타이머는 한 번 진행한다).
+    if (runningTimers_ || timers_.IsEmpty() || !root_ || timerFrame_ == frameSerial_) {
         return;
     }
 
+    timerFrame_ = frameSerial_;
     runningTimers_ = true;
     const double now = TimerTime();
+    const double delta = frameTime_.delta;
     usize limit = timers_.Size();
     for (usize i = 0; i < limit;) {
         auto timer = timers_[i].Lock();
@@ -78,7 +79,7 @@ void Application::AdvanceTimers() noexcept {
         }
 
         if (root_) {
-            timer->Advance(now, *root_);
+            timer->Advance(now, delta, *root_);
         }
 
         ++i;
@@ -102,9 +103,11 @@ double Application::TimerTime() const noexcept {
     return frameTime_.current;
 }
 
-void UiTimer::Advance(double now, const Element& root) noexcept {
+void UiTimer::Advance(double now, double delta, const Element& root) noexcept {
     if (frame_) {
-        const double elapsed = math::Max(0.0, now - due_);
+        // 자른 프레임 간격 이하만 진행한다(UE active timer에 앱 DeltaTime — 20.3절). 이번 프레임에
+        // 건 타이머는 0이다.
+        const double elapsed = math::Min(math::Max(0.0, now - due_), delta);
         due_ = now;
         // 입력이 비활성화된 화면도 페이드아웃을 마칠 수 있다.
         auto owner = owner_.Lock();

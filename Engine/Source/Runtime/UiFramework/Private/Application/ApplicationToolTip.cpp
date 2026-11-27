@@ -1,7 +1,6 @@
 #include <UiCore/TimeUnits.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Layout/Overlay.h>
-#include <Platform/Clock.h>
 
 namespace rocks::ui {
 
@@ -371,7 +370,7 @@ Result<void> Application::AttachToolTip(const PopupRequest& popup) noexcept {
 double Application::SecondsUntilNextToolTip() const noexcept {
     double wait = NoTimerDeadline;
     // 대기 시간은 지금 시계로 잰다(프레임 시각 뒤로 흐른 시간을 뺀다 — 20.3절).
-    const double now = ReadClock();
+    const double now = WaitClock();
     for (const ToolTipState& state : toolTips_) {
         if (!state.attempted) {
             wait = math::Min(wait, math::Max(0.0, state.due - now));

@@ -1,5 +1,7 @@
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
+**초안 2.14(2026.11.27):** UW8b 구현 전에 20.4절을 "그리기 중 등록"에서 "그리기 순서 걷기"로 바꿨다. cache root가 그리기를 부분 재사용해 그리기 중 등록은 캐시된 하위 트리를 빠뜨리고, Rocks의 layer가 그리기 순서를 따라 줄지 않아 걷는 순서가 UE (layer, 순번)과 같기 때문이다. UW8a 구현 결정(묶음은 Application마다, `PrepareLayout`의 프레임 시작, World 시각 접근자 후속)도 20.2·20.3절에 적었다.
+
 **초안 2.13(2026.11.27):** 20장 설계 리뷰 20건을 반영했다: host 서비스 묶음, 시계(실제 시각·delta만 자름·수동 시계·그리기 밖 읽기·World 시간), hit 순서 키(layer, 순번)·RetainerBox 조각·CachePanel 등록 위치, 활성 검사 분리, `OnNavigation`과 메뉴·목록 이관, 게임패드·`ScreenInputRouter`·초기 초점(UW8e2), UE 탐색 세부(첫 줄 반환·허용오차·조상 비활성·scope), 단일 자식 slot으로 정정, `ElementCast` static_assert·policy 판정, 스타일 조회 시점·revision, 단계 의존과 분할(e1·e2·h1·h2).
 
 **초안 2.12(2026.11.27):** UW7h 리뷰 반영으로 19.2절 IMM 경로에 취소 판정(빈 조합·`lParam` 0), 커서 플래그, 읽기 실패 처리, SETCONTEXT 다시 받기, 늦은 확정 배출, 표지 잃음 복구, 조합 창 위치를 더했다.

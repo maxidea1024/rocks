@@ -104,6 +104,10 @@ Span<const SharedPtr<Element>> RetainerBox::PaintChildren() const noexcept {
     return retained_.IsNull() ? ActiveChildren() : Span<const SharedPtr<Element>>{};
 }
 
+Span<const SharedPtr<Element>> RetainerBox::HitTestChildren() const noexcept {
+    return ActiveChildren();
+}
+
 Result<void> RetainerBox::RecordContent(PaintList& output) const noexcept {
     const auto* child = ChildAt(0);
     if (!child) {

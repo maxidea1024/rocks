@@ -33,6 +33,10 @@ Result<void> Element::SetUiHostServices(const SharedPtr<UiHostServices>& service
     return ready;
 }
 
+const UiHostServices* Element::GetUiHostServices() const noexcept {
+    return semantics_ ? semantics_->host.Get() : nullptr;
+}
+
 const UiHostServices* Element::FindUiHostServices() const noexcept {
     for (const Element* current = this; current; current = current->parent_) {
         if (current->semantics_ && current->semantics_->host) {

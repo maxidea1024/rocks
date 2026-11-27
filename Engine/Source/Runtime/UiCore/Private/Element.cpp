@@ -168,7 +168,8 @@ bool Element::IsInputPathActive(const Element& root, bool pointer) const noexcep
 
         const auto* parent = current->parent_;
         if (parent) {
-            const auto active = parent->ActiveChildren();
+            // 포인터 경로는 hit 판정이 걷는 자식(그리기 자식 — 20.4절), 키 경로는 활성 자식이다.
+            const auto active = pointer ? parent->HitTestChildren() : parent->ActiveChildren();
             if (active.Size() != parent->ChildCount()) {
                 bool found = false;
                 for (const auto& child : active) {
@@ -442,6 +443,10 @@ Result<void> Element::PaintSubtree(PaintList& list, int32 layer, int32& highest,
 
 Span<const SharedPtr<Element>> Element::PaintChildren() const noexcept {
     return ActiveChildren();
+}
+
+Span<const SharedPtr<Element>> Element::HitTestChildren() const noexcept {
+    return PaintChildren();
 }
 
 Result<void> Element::PaintContents(PaintList& list, int32 layer, int32& highest, CacheRoot* cache,
@@ -792,7 +797,8 @@ Element* Element::HitTest(Vec2 position) noexcept {
         return nullptr;
     }
 
-    const auto children = ActiveChildren();
+    // hit grid와 같은 자식·순서다(20.4절 — 뒤에 그린 것이 위).
+    const auto children = HitTestChildren();
     for (usize i = children.Size(); i > 0; --i) {
         if (Element* hit = children[i - 1]->HitTest(position)) {
             return hit;

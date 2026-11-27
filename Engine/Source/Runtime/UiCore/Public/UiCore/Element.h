@@ -155,6 +155,8 @@ public:
     //   const double now = FindFrameTime().current;
     using PopupWorkArea = UiHostServices::PopupWorkArea;
     Result<void> SetUiHostServices(const SharedPtr<UiHostServices>& services) noexcept;
+    // 이 요소에 직접 단 묶음이다(조상 것은 보지 않는다). 없으면 nullptr이다.
+    const UiHostServices* GetUiHostServices() const noexcept;
     // 자신부터 조상으로 올라가 가장 가까운 묶음이다. 없으면 nullptr이다(트리에 붙기 전·헤드리스).
     // 돌려준 주소는 그 묶음을 단 Element가 살아 있는 동안 유효하다.
     const UiHostServices* FindUiHostServices() const noexcept;
@@ -340,6 +342,10 @@ protected:
     virtual void OnDescendantDetached(const Element& subtree) noexcept;
     // 직접 그리는 자식의 범위다. 오프스크린 결과를 표시할 때 입력·측정 트리를 유지한다.
     virtual Span<const SharedPtr<Element>> PaintChildren() const noexcept;
+    // hit 판정이 걷는 자식이다(Docs/Design/UiToolkit 20.4절 — 그리기 순서, 뒤가 위). 기본은
+    // PaintChildren이다. 자식을 오프스크린 결과로 대신 그리는 동안에도 같은 자리에 보이는 요소
+    // (RetainerBox)는 활성 자식을 돌려준다. 돌려주는 목록이 바뀌면 plan revision을 올려야 한다.
+    virtual Span<const SharedPtr<Element>> HitTestChildren() const noexcept;
     void InvalidatePaintPlan() noexcept;
 
     virtual CacheRoot* LocalPaintCache() const noexcept;

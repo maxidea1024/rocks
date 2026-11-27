@@ -93,7 +93,8 @@ public:
     //   adapter.RouteBatch(events, consumed, dropped);
     //   app.PrepareLayout(root, scale);
     void BeginFrame() noexcept;
-    // 바깥 시간으로 프레임을 시작한다(월드 위젯 — World 시간, UE WidgetComponent).
+    // 바깥 시간으로 프레임을 시작한다(월드 위젯 — World 시간, UE WidgetComponent). 유한하지 않은
+    // 시각은 무시하고, 간격은 0과 MaxFrameDeltaSeconds 사이로 자른다.
     void BeginFrame(const FrameTime& time) noexcept;
     const FrameTime& GetFrameTime() const noexcept;
     // 다음 타이머·툴팁 마감까지 남은 초다. 호스트가 펌프 대기 시간을 정한다(Docs/Design/UiToolkit
@@ -305,12 +306,27 @@ private:
     UiHostServices* EnsureHostServices() noexcept;
     // 지금 루트에 묶음을 단다. 할당에 실패하면 팝업은 창 경계만 지키고 IME 글자는 Text로 온다.
     void ApplyHostServices() noexcept;
+    // 시계 원천 값이다(교체 이어 붙이기 차이를 더하기 전).
+    double ReadSourceClock() const noexcept;
+    // UI 시각이다(원천 + 교체 차이 — 20.3절).
     double ReadClock() const noexcept;
+    // 대기 계산 기준 시각이다(바깥 시각 프레임 뒤에는 그 프레임 시각).
+    double WaitClock() const noexcept;
+    // 암묵 시작 호스트에서 프레임이 열려 있지 않으면 연다(20.3절).
+    void EnsureFrame() noexcept;
+    void StartFrame(const FrameTime& time, bool external) noexcept;
+    // 옛 루트가 이 묶음을 들고 있으면 뗀다.
+    void DetachHostServices() noexcept;
     ClockFunction clock_;
     FrameTime frameTime_{};
     double lastClock_ = 0;
+    double clockOffset_ = 0;
+    uint64 frameSerial_ = 0;
+    uint64 timerFrame_ = 0;
     bool clockStarted_ = false;
     bool frameBegun_ = false;
+    bool explicitFrames_ = false;
+    bool externalTime_ = false;
     usize FindToolTip(uint32 user) const noexcept;
     double ToolTipTime() const noexcept;
     Array<ToolTipState> toolTips_;

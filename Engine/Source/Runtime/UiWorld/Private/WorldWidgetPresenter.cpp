@@ -25,6 +25,9 @@ UiTextureId WorldWidgetPresenter::Resource() const noexcept {
 
 Result<bool> WorldWidgetPresenter::Prepare(WorldWidgetComponent& component, uint64 frame,
                                            UiDrawBuffer& buffer) noexcept {
+    // 그리기 프레임마다 한 번 프레임을 연다(Docs/Design/UiToolkit 20.3절). World 시각 접근자가
+    // 생기면 BeginFrame(FrameTime)으로 바꾼다.
+    component.WindowApplication().BeginFrame();
     auto arranged = component.PrepareWindow();
     if (!arranged) {
         return Result<bool>::Failure(arranged.Error());

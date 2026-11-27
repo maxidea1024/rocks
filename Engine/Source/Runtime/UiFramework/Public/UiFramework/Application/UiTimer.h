@@ -17,7 +17,7 @@ public:
 
 private:
     friend class Application;
-    void Advance(double now, const Element& root) noexcept;
+    void Advance(double now, double delta, const Element& root) noexcept;
     WeakPtr<Element> owner_;
     double interval_;
     double due_;

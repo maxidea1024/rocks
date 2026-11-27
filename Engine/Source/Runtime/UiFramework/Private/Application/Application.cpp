@@ -70,11 +70,26 @@ Application::~Application() noexcept {
     }
 
     ResetInput();
+    DetachHostServices();
+    if (host_) {
+        // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
+        host_->SetPopupWorkArea({});
+        host_->SetTextInputService({});
+    }
+}
+
+void Application::DetachHostServices() noexcept {
+    if (root_ && host_ && root_->GetUiHostServices() == host_.Get()) {
+        (void)root_->SetUiHostServices({});
+    }
 }
 
 void Application::SetRoot(const SharedPtr<Element>& root) noexcept {
     ResetInput();
+    DetachHostServices();
     root_ = root;
+    // 묶음은 루트를 받을 때 만든다(20.3절 — Element가 프레임 시각을 읽는다). 실패하면 시각 0이다.
+    (void)EnsureHostServices();
     cache_.Reset();
     hitGrid_.Reset();
     ApplyHostServices();
@@ -113,16 +128,25 @@ Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) no
     return Result<void>::Success();
 }
 
-double Application::ReadClock() const noexcept {
+double Application::ReadSourceClock() const noexcept {
     return clock_.IsBound()
                ? clock_.Execute()
                : static_cast<double>(platform::MonotonicNanoseconds()) * SecondsPerNanosecond;
 }
 
+double Application::ReadClock() const noexcept {
+    return ReadSourceClock() + clockOffset_;
+}
+
+double Application::WaitClock() const noexcept {
+    return externalTime_ ? frameTime_.current : ReadClock();
+}
+
 void Application::BeginFrame() noexcept {
+    explicitFrames_ = true;
     const double now = ReadClock();
     if (!clockStarted_ || !(now >= lastClock_)) {
-        // 첫 프레임이거나 시계가 거꾸로 갔다(바꾼 시계) — 간격 0에서 다시 센다.
+        // 첫 프레임이거나 시계가 거꾸로 갔다 — 간격 0에서 다시 센다.
         lastClock_ = now;
         clockStarted_ = true;
     }
@@ -132,16 +156,47 @@ void Application::BeginFrame() noexcept {
         lastClock_ = now - MaxFrameDeltaSeconds;
     }
 
-    BeginFrame(FrameTime{now, now - lastClock_});
+    StartFrame(FrameTime{now, now - lastClock_}, false);
     lastClock_ = now;
 }
 
 void Application::BeginFrame(const FrameTime& time) noexcept {
+    explicitFrames_ = true;
+    if (!math::IsFinite(time.current) || !math::IsFinite(time.delta)) {
+        return;
+    }
+
+    StartFrame(FrameTime{time.current, math::Clamp(time.delta, 0.0, MaxFrameDeltaSeconds)}, true);
+}
+
+void Application::StartFrame(const FrameTime& time, bool external) noexcept {
     frameTime_ = time;
+    externalTime_ = external;
     frameBegun_ = true;
+    ++frameSerial_;
     if (host_) {
         host_->SetFrameTime(frameTime_);
     }
+}
+
+void Application::EnsureFrame() noexcept {
+    if (explicitFrames_ || frameBegun_) {
+        return;
+    }
+
+    // 암묵 시작 호스트다(BeginFrame을 부른 적이 없다) — 앱 시계로 연다.
+    const double now = ReadClock();
+    if (!clockStarted_ || !(now >= lastClock_)) {
+        lastClock_ = now;
+        clockStarted_ = true;
+    }
+
+    if (now - lastClock_ > MaxFrameDeltaSeconds) {
+        lastClock_ = now - MaxFrameDeltaSeconds;
+    }
+
+    StartFrame(FrameTime{now, now - lastClock_}, false);
+    lastClock_ = now;
 }
 
 const FrameTime& Application::GetFrameTime() const noexcept {
@@ -153,8 +208,11 @@ void Application::SetClock(ClockFunction&& clock) noexcept {
         CloseToolTip(toolTips_[toolTips_.Size() - 1].user);
     }
 
+    // 프레임을 연 뒤의 교체는 UI 시각을 이어 붙인다(20.3절 — 걸린 마감·부품 원점이 그대로 맞는다).
+    const bool continuing = clockStarted_;
+    const double ui = continuing ? lastClock_ : 0;
     clock_ = Move(clock);
-    clockStarted_ = false;
+    clockOffset_ = continuing ? ui - ReadSourceClock() : 0;
 }
 
 Result<void> Application::SetTextInputService(SharedPtr<TextInputService> service) noexcept {
@@ -478,11 +536,8 @@ Result<const CacheRoot*> Application::UpdateArrangedPaintCache() noexcept {
 }
 
 Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutScale) noexcept {
-    // 호스트가 BeginFrame을 부르지 않았으면 여기서 프레임을 시작한다(20.3절).
-    if (!frameBegun_) {
-        BeginFrame();
-    }
-
+    // 암묵 시작 호스트면 여기서 프레임을 연다(20.3절). 이 배치가 그 프레임을 닫는다.
+    EnsureFrame();
     frameBegun_ = false;
     AdvanceTimers();
     AdvanceToolTips();
@@ -653,6 +708,7 @@ bool Application::ResolveFocusOutline(const Element& target, FocusCause cause) c
 
 bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
                                       const SharedPtr<Element>& scope) noexcept {
+    EnsureFrame();
     // 키보드 KeyDown처럼 버튼 누름도 열린 툴팁을 닫는다.
     if (pressed != 0) {
         CloseToolTip(user);
@@ -679,6 +735,7 @@ Result<bool> Application::RouteKey(uint32 userId, const input::InputEvent& event
 
 Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent& event,
                                          const SharedPtr<Element>& scope) noexcept {
+    EnsureFrame();
     if (event.type != input::InputEventType::KeyDown &&
         event.type != input::InputEventType::KeyUp && event.type != input::InputEventType::Text) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
@@ -779,6 +836,7 @@ Result<bool> Application::RoutePointer(const PointerEvent& event) noexcept {
 
 Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
                                              const SharedPtr<Element>& scope) noexcept {
+    EnsureFrame();
     if (cancelling_) {
         return Result<bool>::Failure(ErrorCode::Busy);
     }

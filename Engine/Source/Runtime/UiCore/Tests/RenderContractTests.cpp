@@ -65,7 +65,6 @@ public:
     }
 
     uint64 lastFrame = 0;
-
     FrameTime lastTime{};
     int advances = 0;
     ViewportTarget lastTarget{};
@@ -221,7 +220,14 @@ TEST(UiCore_SurfaceRecorderRedrawsRetainedOnlyWhenNeeded) {
     auto tree = MakeNestedTree(allocator);
     SurfaceRecorder recorder(allocator, renderer);
     UiDrawBuffer buffer(allocator);
+    // 루트에 단 묶음의 프레임 시각이 장면 진행에 간다(20.3절).
+    auto host = SharedPtr<UiHostServices>::TryMake(allocator);
+    REQUIRE(host);
+    host.Value()->SetFrameTime({3.0, 0.5});
+    REQUIRE(tree.root->SetUiHostServices(host.Value()));
     REQUIRE(recorder.Record(tree.root, 1, 200, 100, buffer));
+    CHECK(tree.scene->lastTime.current == 3.0);
+    CHECK(tree.scene->lastTime.delta == 0.5);
     const UiTextureId retained = tree.retained->managed;
     buffer.Clear();
     // 바뀌지 않은 보관 표면은 다시 캡처하지 않는다. 그 안의 장면은 상태만 진행하고(Advance) pass를
