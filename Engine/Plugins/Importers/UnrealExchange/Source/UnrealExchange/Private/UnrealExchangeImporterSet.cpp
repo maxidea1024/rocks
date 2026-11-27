@@ -25,10 +25,13 @@ Result<void> RegisterUnrealExchangeImporters(void* state, AssetImporterTable& ta
 
     AssetImporter* all[UnrealExchangeImporterCount] = {};
     for (usize index = 0; index < UnrealTextureImporterCount; ++index) {
-        all[index] = &importers.Texture(UnrealTextureClasses[index]);
+        all[index] = &importers.TextureImporter(UnrealTextureClasses[index]);
     }
 
-    all[UnrealTextureImporterCount] = &importers.StaticMesh();
+    all[UnrealTextureImporterCount] = &importers.StaticMeshImporter();
+    all[UnrealTextureImporterCount + 1] = &importers.SkeletonImporter();
+    all[UnrealTextureImporterCount + 2] = &importers.SkeletalMeshImporter();
+    all[UnrealTextureImporterCount + 3] = &importers.AnimSequenceImporter();
     for (AssetImporter* importer : all) {
         auto registered = table.Register(*importer);
         if (!registered) {

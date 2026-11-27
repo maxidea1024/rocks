@@ -760,6 +760,12 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (options.priority.HasValue() &&
+        !engine_audio_detail::IsFiniteInRange(options.priority.Value(), MinSoundPriority,
+                                              MaxSoundPriority)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (playable->looping && playable->loopEnd != 0 && options.startFrame >= playable->loopEnd) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -811,6 +817,9 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
         command.pitch = options.pitch;
         command.startFrame = options.startFrame;
         command.fadeInFrames = options.fadeInFrames;
+        command.priority =
+            options.priority.HasValue() ? options.priority.Value() : sound.Get()->priority;
+        command.remainActiveIfDropped = options.remainActiveIfDropped;
         if (!current_->commands.TryPushBack(Move(command))) {
             return Accepted::Failure(ErrorCode::OutOfMemory);
         }

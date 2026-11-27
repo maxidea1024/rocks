@@ -36,9 +36,9 @@ namespace rocks::render {
 struct ClearValue {
     uint32 words[4] = {};
 
-    static ClearValue Float(float r, float g, float b, float a) noexcept;
-    static ClearValue Uint(uint32 r, uint32 g, uint32 b, uint32 a) noexcept;
-    static ClearValue Sint(int32 r, int32 g, int32 b, int32 a) noexcept;
+    ROCKS_RENDERBASE_API static ClearValue Float(float r, float g, float b, float a) noexcept;
+    ROCKS_RENDERBASE_API static ClearValue Uint(uint32 r, uint32 g, uint32 b, uint32 a) noexcept;
+    ROCKS_RENDERBASE_API static ClearValue Sint(int32 r, int32 g, int32 b, int32 a) noexcept;
 };
 
 // 쓰기 텍스처 view 안의 범위다(texel). 2D는 z·depth를 0·1로, 2D 배열은 z·depth가 층, 3D는 깊이다.

@@ -2,6 +2,7 @@
 #include "EngineShaderComputeProbes.h"
 #include "SandboxShaders.h"
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Color.h>
 #include <Core/Math/Float16.h>
@@ -487,7 +488,7 @@ void CheckWritableClears(Device& device, render::ShaderSet& set, render::Pipelin
                                 {123456, 0, 0, 1}},
                                {PixelFormat::RGBA32Uint,
                                 render::ClearValue::Uint(1, 2, 3, 4),
-                                render::ClearValue::Uint(9, 8, 7, 0xffffffffu),
+                                render::ClearValue::Uint(9, 8, 7, NumericLimits<uint32>::Max()),
                                 {1, 2, 3, 4},
                                 {9, 8, 7, 4294967295.0}},
                                {PixelFormat::RG16Float,

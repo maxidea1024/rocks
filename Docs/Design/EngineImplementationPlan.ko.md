@@ -1359,7 +1359,7 @@ Deferred와 Forward 모두 공통 GI 결과를 조명 입력으로 소비한다.
 
 고급 공통 Material IR은 clear coat·anisotropy·subsurface/profile skin·cloth·eye·two-sided foliage·thin translucent·water를 명시 shading model로 정의한다. detail normal·UV transform·vertex color·material function/layer instance·parameter collection·per-instance data·WPO와 이전 WPO를 지원한다. 모델별 Deferred encoding과 Forward evaluation을 모두 제공하며 표현 한계는 capability로 노출한다. Unreal 재질 분류를 비교 기준으로 사용한다. [S32](https://dev.epicgames.com/documentation/en-us/unreal-engine/shading-models-in-unreal-engine)
 
-Substrate 유사 임의 closure/layer 체계는 기존 PBR에 자동 포함되지 않는다. 재질 compiler·GBuffer 저장·ray evaluation·shader permutation 비용을 별도 연구 gate에서 검증한다. [S33](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
+Substrate 유사 임의 closure/layer 체계는 기존 PBR에 자동 포함되지 않는다. 대신 필수 후속으로 지원한다(2026-11-27 사용자 지시, [다층 표면 후속 계획](LayeredSurface.ko.md)). 재질 compiler·GBuffer 저장·ray evaluation·shader permutation 비용은 그 문서의 LS0 단계에서 측정한다. [S33](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
 
 Transparency는 blend mode·sort key·depth write·two-sided·refraction·separate translucency·velocity/DOF 정책을 포함한다. planar reflection·scene capture·render-to-texture·orthographic view와 recursion depth 제한을 M6–M8에 추가한다. OIT는 선택 후속 알고리즘이며 기본 sorted transparency의 한계를 숨기지 않는다. baked lightmap·irradiance probe·reflection capture는 정적 조명 축(14.3절)으로 제공한다.
 

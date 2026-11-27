@@ -626,4 +626,41 @@ TEST(Audio_Mixer2_ControlRejectsAndClipRelease) {
     CHECK(mixer.UnregisterClip(clip));
 }
 
+// 보내지 않은 Play 버리기(3.41.1절 — 명령 링이 차서 미뤘던 Play를 제어 쪽이 거둘 때): voice는
+// Reserved로 돌아가 바로 놓이고 clip 사용 수가 내려가 해제된다. Reserved·정지 요청 뒤·낡은 handle은
+// 거부한다. 버린 Play의 순번 틈은 다른 voice 재생에 영향이 없다.
+TEST(Audio_Mixer2_AbandonPreparedPlay) {
+    SystemAllocator allocator;
+    float ones[2048];
+    for (float& value : ones) {
+        value = 1.0f;
+    }
+
+    OfflineAudioRender rig = MakeRig(ConfigOf(), allocator);
+    AudioMixer& mixer = rig.Mixer();
+    const AudioClipId clip = RegisterOnes(mixer, ones, 2048);
+    const AudioClipId abandonedClip = RegisterOnes(mixer, ones, 1024);
+    auto reserved = mixer.AcquireVoice();
+    REQUIRE(reserved);
+    CHECK(mixer.AbandonPreparedPlay(reserved.Value()).Error() == ErrorCode::InvalidArgument);
+    REQUIRE(mixer.PreparePlay(reserved.Value(), abandonedClip, 0, false, AudioVoiceParams{}));
+    CHECK(mixer.ReleaseVoice(reserved.Value()).Error() == ErrorCode::Busy);
+    CHECK(mixer.UnregisterClip(abandonedClip).Error() == ErrorCode::Busy);
+    REQUIRE(mixer.AbandonPreparedPlay(reserved.Value()));
+    REQUIRE(mixer.ReleaseVoice(reserved.Value()));
+    // clip 사용 수가 내려가 해제된다.
+    CHECK(mixer.UnregisterClip(abandonedClip));
+    CHECK(mixer.AbandonPreparedPlay(reserved.Value()).Error() == ErrorCode::StaleHandle);
+    // 정지 요청을 낸 voice는 이미 보낸 것으로 본다.
+    auto stopped = mixer.AcquireVoice();
+    REQUIRE(stopped);
+    REQUIRE(mixer.PreparePlay(stopped.Value(), clip, 0, false, AudioVoiceParams{}));
+    REQUIRE(mixer.RequestStop(stopped.Value(), 0));
+    CHECK(mixer.AbandonPreparedPlay(stopped.Value()).Error() == ErrorCode::InvalidArgument);
+    // 다른 voice의 재생은 틈과 상관없이 시작한다.
+    const AudioVoiceHandle playing = PlayAt(rig, clip, 0);
+    RenderBlocks(rig, 2, allocator);
+    CHECK(StatusOf(mixer, playing).startMixFrame == 0);
+}
+
 } // namespace audio_mixer_boundary_tests_file

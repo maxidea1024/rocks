@@ -10,8 +10,29 @@
     },
     {
       "kind": "field",
+      "name": "rocks::AudioComponent::overridePriority",
+      "id": "e39727858ea3452da18897e9e6f052bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AudioComponent::pitchMultiplier",
       "id": "3d7b9b7ad54c41318ff48b8af3ad1ad2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::priority",
+      "id": "39c4cfe959044e03824dac9c4ad397b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioComponent::remainActiveIfDropped",
+      "id": "f85cae320c9840b0b04b2bf955b862ff",
       "aliases": [],
       "retired": false
     },

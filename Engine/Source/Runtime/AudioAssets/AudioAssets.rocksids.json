@@ -283,8 +283,29 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundSource::bypassVolumeScaleForPriority",
+      "id": "fe24738c26ba4941ba1c9f5e8cef2879",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundSource::pitch",
       "id": "596c573e5b4244cfa6c1d91d76f53b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::priority",
+      "id": "f35489aa1c404268a73b7fdfe2d3d174",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::virtualizationMode",
+      "id": "2ba429372ed440c8b0b8ca080aa389ce",
       "aliases": [],
       "retired": false
     },
@@ -397,6 +418,13 @@
       "kind": "type",
       "name": "rocks::SoundSourceStorage",
       "id": "dd302658307b44c19c998c5a33ae19b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundVirtualizationMode",
+      "id": "c95e4ae97c2b47c2b3733be5bbfa70a3",
       "aliases": [],
       "retired": false
     }

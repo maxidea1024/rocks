@@ -336,9 +336,10 @@ const char* WarningName(EditorWarningKind kind) noexcept {
                                      "OrphanedOutput",
                                      "ClassDefaultsChanged",
                                      "ClassDefaultsUnavailable",
-                                     "SourceRebuildWarning"};
+                                     "SourceRebuildWarning",
+                                     "DroppedEventBindings"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
-                      static_cast<usize>(EditorWarningKind::SourceRebuildWarning) + 1,
+                      static_cast<usize>(EditorWarningKind::DroppedEventBindings) + 1,
                   "every editor warning needs a name");
     return Names[static_cast<usize>(kind)];
 }

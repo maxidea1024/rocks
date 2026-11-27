@@ -20,7 +20,7 @@
 | A18 `Utility/CopyDepth.rsf` | 단일 표본 둘 구현(14.4절) | MSAA 깊이 복사는 RS8 `MsaaResolve.rsf`(RB 11.2절 깊이 resolve)가 맡는다 |
 | A18 `Utility/ClearResources.rsf` + RB RR17 | 구현(14.4·14.5절) | 기본 텍스처 캐시는 RenderBase C++ |
 | A18 `Utility/GenerateMips.rsf` | 구현(14.4·14.5절) | 한 dispatch 여러 mip은 후속(14.8절) |
-| SL0 함수의 compute probe(6장 SL1 행) | 구현(14.6절 3항) | CS 단계에서 같은 함수가 같은 결과인지 |
+| SL0 함수의 compute probe(6장 SL1 행) | 남김(14.9절) | CS 단계에서 같은 함수가 같은 결과인지 — 이번 묶음에 넣지 못했다 |
 | A18 `CopyTexture.rsf` 나머지(배열 slice·cube 면·3D 단면·mip 복사·형식 변환·채널 고르기·CS) | 남김 | SM13 행 밖이다. 첫 소비자(스크린샷·썸네일·편집기 미리보기)가 생길 때. 같은 형식 mip 0 전체 복사는 장치 `CopyTexture`가 있다 |
 | A18 `TextureReadback.rsf` | 남김 | SM13 행 밖이다. readback 불가 형식(블록 압축·GLES 비색 형식)을 읽는 소비자가 아직 없다(결정 SLD21 — 지금 self-test는 읽을 수 있는 형식만 쓴다) |
 | A18 `FullscreenTriangle.rsf` 깊이 값·사각형 변형 | 남김 | 부분 clear는 viewport·scissor와 clear 전용 VS(14.4절 4항)로 한다. 다른 소비자가 생기면 더한다 |
@@ -52,7 +52,7 @@
    - **2D 펼친 LUT**(LUT 생성 렌더 타깃 — 볼륨 렌더 타깃이 없는 경로, UE `PostProcessCombineLUTs`의 2D 판과 같은 배치): 폭 size², 높이 size, x = 파랑 slice × size + 빨강, y = 초록. `UnwrappedLutPixelToTexel(pixel, size)`와 `SampleUnwrappedLut2D(lut, sampler, unit, size)`(파랑 축의 이웃 두 slice를 bilinear로 각각 표본해 선형 보간 — 3D 표본과 같은 삼선형 결과).
    - `SampleLut3D(lut, sampler, unit, size)` = 반 texel 보정 좌표의 `SampleLevel`(mip 0).
 2. **`DisplayEncoding.rsh`.** include 전에 `DISPLAY_OUTPUT_DEVICE`(출력 장치 번호 — pass 퍼뮤테이션)를 정의한다. 지금은 `DisplayOutputSdrSrgb`(0)만 받고 다른 값은 `#error`다(HDR10·scRGB는 후속 — 4.3절). `EncodeSdrSrgbDisplay(linear)` = sRGB 구간 함수(saturate 뒤 — SDR 범위 밖은 자른다), `EncodeDisplayColor(linear)` = 장치 번호로 고른 부호화. UE도 SDR sRGB 출력은 정확한 구간 함수다(`ACESDisplayEncoding.ush`·`GammaCorrectionCommon.ush`의 sRGB 경로). 스왑체인 view가 sRGB인 경로(RB 18.5절 1항)는 이 함수를 쓰지 않는다. UNORM 대상에 쓰는 경로(GLES 표면이 sRGB view를 주지 않을 때, 스크린샷 부호화)가 쓴다.
-3. **`ColorMaps.rsh`.** 반환 값 공간을 이름에 적는다: `TurboColorMapSrgb(t)`·`ViridisColorMapSrgb(t)`는 색 지도 정의 그대로의 sRGB 부호 값(t는 saturate), `TurboColorMap(t)`·`ViridisColorMap(t)`는 그 선형 값(sRGB 대상에 쓰는 셰이더용). Turbo는 Mikhailov(Google, 2019) 발표의 다항 근사(6차, 성분별), viridis는 matplotlib viridis 표에 맞춘 Zucker의 6차 다항(CC0)이다. 표 자체(256 항목)는 넣지 않는다 — 디버그 색에 다항 근사 오차(측정값 14.9절)로 충분하다. `DistinctIndexColor(index)` = `HashPcg(index)` 상위 24 bit의 색상(hue) + 고정 채도 0.75·명도 0.9의 HSV(sRGB 부호 공간) → 선형이다. 이웃 번호가 비슷한 색이 되지 않고(해시) 결정적이다(정수 해시 + 같은 HSV 식).
+3. **`ColorMaps.rsh`.** 반환 값 공간을 이름에 적는다: `TurboColorMapSrgb(t)`·`ViridisColorMapSrgb(t)`는 색 지도 정의 그대로의 sRGB 부호 값(t는 saturate), `TurboColorMap(t)`·`ViridisColorMap(t)`는 그 선형 값(sRGB 대상에 쓰는 셰이더용). Turbo는 Mikhailov(Google, 2019) 발표의 다항 근사(5차, 성분별), viridis는 matplotlib viridis 표에 맞춘 Zucker의 6차 다항(CC0)이다. 표 자체(256 항목)는 넣지 않는다 — 디버그 색에 다항 근사 오차(측정값 14.9절)로 충분하다. `DistinctIndexColor(index)` = `HashPcg(index)` 상위 24 bit의 색상(hue) + 고정 채도 0.75·명도 0.9의 HSV(sRGB 부호 공간) → 선형이다. 이웃 번호가 비슷한 색이 되지 않고(해시) 결정적이다(정수 해시 + 같은 HSV 식).
 
 ### 14.4 A18 유틸리티
 
@@ -77,7 +77,7 @@
 1. **`RenderBase/ComputeDispatch.h` 추가.** `MaxWrappedGroupsPerAxis = 65535`, `WrapGroupCount(groups)` → (min(g, 65535), ⌈g / 65535⌉, 1)(g = 0이면 빈 그룹 수). 셰이더 `UnwrapLinearGroupId`의 짝이다.
 2. **`RenderBase/GenerateMips.h`.** `MipGenerationPath{Compute, Raster}`, `SelectMipGenerationPath(device, desc)`(compute 조건: `Storage` 용도·형식 `StorageWrite`·image 형식 대응이 있고 cube 계열이 아님. 아니면 raster 조건: `RenderTarget` 용도·형식 `RenderTarget`. 둘 다 아니면 `Unsupported`, mip이 하나면 `InvalidArgument`), `GenerateMips(device, set, cache, texture, desc)`: mip 1부터 끝까지 그 경로로 만든다. compute는 기록 하나(attachment 없는 pass)에 mip마다 dispatch(Read view 원본 mip·쓰기 view 대상 mip, 전이는 장치 암묵 전이), raster는 (mip, slice)마다 pass 하나(attachment = 대상 mip·slice/3D 깊이 면)다. 렌더 프레임을 기록하지 않을 때 부른다(장치 한 기록 규칙 — `Busy`). 만든 view는 함수 안에서 Retire한다. 그래프 pass 판(UE `FGenerateMips::Execute(GraphBuilder, …)`)은 첫 소비자(렌더러 RS0의 런타임 생성 텍스처 — scene capture 등)와 함께 RenderGraph에 둔다(14.8절).
 3. **`RenderBase/ClearResources.h`.**
-   - `ClearWritableTexture(device, commands, set, cache, view, value, region)`: view 정보(`GetTextureViewInfo` — 형식·차원·크기)로 퍼뮤테이션을 골라 dispatch한다. region이 비면 view 전체다. 형식이 image 형식 표에 없거나 view가 쓰기 view가 아니면 `Unsupported`·`InvalidArgument`다. `ClearWritableBuffer(…, bufferView, value, firstElement, count)`는 typed 버퍼 view용이다(R32 정수·raw는 장치 `ClearWritableBufferView`가 더 싸다 — 그쪽을 권한다).
+   - `ClearWritableTexture(device, commands, set, cache, view, value, region)`: view 정보(`GetTextureViewInfo` — 형식·차원·크기)로 퍼뮤테이션을 골라 dispatch한다. 범위는 늘 준다(빈 범위 `InvalidArgument` — 14.9절 정정 1). 형식이 image 형식 표에 없거나 view가 쓰기 view가 아니면 `Unsupported`·`InvalidArgument`다. `ClearWritableBuffer(…, bufferView, value, firstElement, count)`는 typed 버퍼 view용이다(R32 정수·raw는 장치 `ClearWritableBufferView`가 더 싸다 — 그쪽을 권한다).
    - `ClearRegion(commands, set, cache, desc)`: 활성 raster pass 안에서 사각형(viewport·scissor) 부분 clear. desc는 사각형, 색 대상 형식·값(없으면 색을 쓰지 않는다), 깊이 형식·값, 스텐실 값이다. 파이프라인은 pass attachment 형식과 같아야 한다(호출자가 넘긴다). 그린 뒤 viewport·scissor를 대상 전체로 돌린다.
    - `InitializeDispatchArguments(commands, set, cache, bufferView, byteOffset, count, arguments)`.
    - 값 `ClearValue`: float4 또는 uint4(정수 형식은 정수로 읽는다 — 형식 값 계열을 따른다).
@@ -112,9 +112,37 @@
 - 밉 생성·clear의 렌더 그래프 pass 판(subresource 접근 선언·자원 생성 구조체)은 RS0 첫 소비자와 함께 RenderGraph에 둔다. 지금 도우미는 그래프 밖 기록이다.
 - 부분 clear MRT(색 타깃 여럿에 서로 다른 값)는 후속이다(UE `DrawClearQuadMRT`). 지금은 색 타깃 0만 지운다.
 - 웨이브 배치 가정이 깨진 장치가 나오면 그 장치의 웨이브 경로를 끄는 장치 능력 표시를 더한다(지금 웨이브 경로 형식은 `D3D12_SM6` 하나).
-- Turbo 다항 근사는 표 끝에서 0.1 가까이 어긋난다(14.9절 측정). 정확한 색이 필요한 시각화(색각 접근성 등)가 생기면 256 항목 표 텍스처로 바꾼다.
+- SL0 함수의 compute probe(SL0 probe 원문을 평가 함수 + PS·CS 엔트리로 나누기)는 남았다(14.9절).
+- Turbo 다항 근사는 표 끝에서 0.13 가까이 어긋난다(14.9절 측정 0.1255). 정확한 색이 필요한 시각화(색각 접근성 등)가 생기면 256 항목 표 텍스처로 바꾼다.
 - `DisplayEncoding`의 HDR 분기·dither는 후속(SL8 grain·EIP 26.4절).
 
-### 14.9 구현 메모
+### 14.9 구현 메모(개정 7, 2026-11-27)
 
-(구현 뒤 채운다.)
+14.1–14.8절 결정대로 구현했다. 바탕은 origin/feature/engine-runtime `92d173424`다.
+
+- **파일.** 셰이더: `Common/ComputeDispatch.rsh`·`Common/WaveOperations.rsh`, `Color/LutCoordinates.rsh`·`Color/DisplayEncoding.rsh`·`Color/ColorMaps.rsh`, `Utility/TextureSamplingHelpers.rsh`·`Utility/PlaceholderShaders.rsf`·`Utility/CopyDepth.rsf`·`Utility/ClearResources.rsf`·`Utility/GenerateMips.rsf`. RenderBase: `UtilityShaderTypes.h`(타입 이름·자원 이름·생성 상수 구조체 다섯·`StorageImageFormat`·퍼뮤테이션 ID 도우미, 등록은 `EngineShaderTypes()`), `GenerateMips.h`, `ClearResources.h`, `DefaultTextureCache.h`, `ComputeDispatch.h`의 `WrapGroupCount`·`MaxWrappedGroupsPerAxis`. 엔진 셰이더 타입은 11개(퍼뮤테이션 포함 D3D12 형식 조합 89개, GLES 형식 61개)가 늘었다.
+- **스펙과 다르게 정한 것.**
+  1. `ClearWritableTexture`의 범위는 늘 준다(빈 범위는 `InvalidArgument`). `TextureViewInfo`에 크기가 없어 "view 전체" 기본값을 만들 수 없다(14.5절 3항 정정).
+  2. 밉 생성은 cube 배열을 받지 않는다(`Unsupported` — raster PS 퍼뮤테이션이 2D·2D 배열·cube·3D뿐이다). 첫 소비자(반사 capture 배열)가 생기면 퍼뮤테이션을 더한다.
+  3. Turbo 다항은 5차다(14.3절 3항의 "6차"를 고쳤다 — viridis가 6차).
+  4. 그룹 연산 probe의 −0 입력은 그리기별 상수 bit로 준다. FXC(`D3D11_SM5`)가 셰이더 리터럴 `asfloat(0x80000000)`을 +0으로 접어 float 최소의 −0 판정이 장치마다 달라졌다(라이브러리 결함이 아니라 시험 입력 문제 — 상수로 준 −0은 D3D11에서도 bit 일치).
+  5. HLSL 키워드 `linear`는 변수 이름으로 쓸 수 없다(7.1절 규칙 그대로 — probe에서 한 번 걸렸다).
+  6. D3D12·D3D11 장치는 렌더 타깃·storage 텍스처의 `UpdateTexture`를 `InvalidArgument`로 거부한다(Vulkan·GLES는 받는다 — backend 계약 차이, Graphics 쪽 기록 대상). 밉 생성 self-test는 mip 0을 시험 PS(`MipPatternPixel`)로 그려 채운다.
+- **compile 행렬.** `EngineShaders_CompileMatrix`가 쿠킹과 같은 열거(`EnumerateShaderLibraryCombinations`)로 엔진 타입의 퍼뮤테이션 전부를 컴파일한다. 시험 엔트리는 compute probe 셋, 그룹 연산 probe 여섯(그룹 64·256·100 × 강제 groupshared), 유틸리티 probe 둘이 늘었다. `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5` 123, `GLES31_PC`·`GLES31_ANDROID` 95 job 통과, `METAL_SM5`는 도구 없음 SKIP, `VULKAN_ANDROID`·`METAL_IOS`는 자리표시 형식 SKIP.
+- **GPU 시험(2026-11-27 로컬, `Sandbox --engine-shader-self-test`).** 여덟 장치 모두 PASS, NOT RUN 없음. 엔진 셰이더 probe는 D3D12·WARP 280 검사(웨이브 경로 대조 셋 포함), 나머지 274 검사다(SL0 247 + SL1). 장치 사이 대조: 정수 probe bit 일치, 실수 최대 차이 0.0067(Catmull–Rom — bilinear 가중 정밀도).
+
+| 장치 | 엔진 셰이더 probe | 웨이브 | 밉 생성(compute·raster) | UAV clear(텍스처 실행) | 유틸리티 pass |
+|---|---|---|---|---|---|
+| D3D12(GTX 1060) | 280 PASS | 32 lane, 두 경로 정수 bit 일치 | 32(12·20) | 33 | PASS |
+| D3D12 WARP | 280 PASS | 4 lane, 두 경로 정수 bit 일치 | 32(12·20) | 33 | PASS |
+| D3D11(GTX 1060) | 274 PASS | 없음(groupshared) | 32(12·20) | 33 | PASS |
+| D3D11 WARP | 274 PASS | 없음 | 32(12·20) | 33 | PASS |
+| OpenGL ES(ES context) | 274 PASS | 없음 | 32(12·20) | 21(core image 형식만) | PASS |
+| GL core 위 ES | 274 PASS | 없음 | 32(12·20) | 21 | PASS |
+| Vulkan(GTX 1060) | 274 PASS | 없음 | 32(12·20) | 33 | PASS |
+| lavapipe | 274 PASS | 없음 | 32(12·20) | 33 | PASS |
+
+- **측정값.** 웨이브 배치 가정(연속 `SV_GroupIndex` 구간)은 D3D12 하드웨어(32 lane)·WARP(4 lane) 모두 성립했다. float 합은 순서 무관 상한 (N − 1)·2⁻²⁴·Σ|f|의 최대 0.039배, 두 경로 차이 최대 4.9e-4(256 스레드, 값 범위 ±16). Catmull–Rom 5 tap은 CPU 정확 식과 최대 0.0052(허용 0.01 — 하드웨어 bilinear 가중 8 bit, lavapipe는 6e-7), 2D 펼친 LUT·3D LUT 표본은 항등 LUT에서 최대 6.4e-4(허용 2e-3 — half 원본). 색 지도 다항과 공개 표의 차이는 viridis 0.0126, Turbo 0.1255(끝점 t = 0의 파랑 — 판정 0.13, 14.8절 한계). 밉 생성은 형식 다섯 × 차원 넷 × 장치가 받는 경로 32 실행이 모두 "장치가 쓴 이전 mip의 CPU 면적 박스"와 형식 정밀도 안이다. GL core 위 ES(범위 view 없음 — 텍스처 전체가 묶인다)에서도 raster 경로가 맞았다: 원본 mip만 `texelFetch`하고 대상 mip만 attachment라 같은 texel을 읽고 쓰지 않는다.
+- **EngineTests.** `RenderBase_WrapGroupCount`·`RenderBase_StorageImageFormatOf`·`RenderBase_UtilityShaderTypesRegistered`(도메인 크기·거르기 — 밉 D3D 27·GLES 15, clear GLES 32)·`RenderBase_MipGenerationPathSelection`·`RenderBase_ClearResourcesRecording`·`RenderBase_EncodeDefaultTexel`·`RenderBase_DefaultTextureCache`. 기록 장치 집합은 바인딩 layout이 비어 밉 생성은 원본 slot을 못 찾아 기록 전 `NotFound`까지만 본다(실제 기록 열은 Sandbox).
+- **SL0 compute probe(14.1절 표).** 이번 묶음에 넣지 못했다. CS 전용 API의 compute probe와 SL1 유틸리티 probe가 CS·PS 양쪽 경로를 덮었고, SL0 probe 원문의 PS 엔트리를 평가 함수 + CS 엔트리로 나누는 일은 남은 항목이다(14.8절에 더한다).
+

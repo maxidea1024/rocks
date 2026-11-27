@@ -235,7 +235,7 @@ Result<EventBlockLayout> ValidateEventList(const TypeSchema& schema,
         const FrameLayout* expected = event.frameLayout;
         if (event.fieldId != field.id || event.bind == nullptr || event.unbind == nullptr ||
             event.unbindFunction == nullptr || event.unbindAll == nullptr ||
-            event.clear == nullptr || event.compact == nullptr ||
+            event.clear == nullptr || event.compact == nullptr || event.bindings == nullptr ||
             event.broadcastFromFrame == nullptr || event.construct == nullptr ||
             event.destroy == nullptr || event.frameSize == 0 ||
             !IsPowerOfTwo(event.frameAlignment) || count > MaxFunctionParameters ||

@@ -35,6 +35,9 @@ constexpr double FrameSeconds = 1.0 / 60.0;
 constexpr usize MaxPathBytes = 4096;
 
 uint32 cookedFailures = 0;
+// 쿠킹 텍스처의 형식·swizzle·mip 수를 처음 돈 장치에서 한 번 찍었는가(쿠킹 결과 기록 — 에셋 빌드가
+// 고른 형식을 시험 출력에 남긴다).
+bool cookedFormatsListed = false;
 
 void CookedCheck(bool condition, const char* device, const char* what) noexcept {
     if (!condition) {
@@ -71,8 +74,30 @@ bool FindTestContentCook(String& root) noexcept {
            exists;
 }
 
+// 텍스처 하나의 표시 프레임 둘이다: mip 0(capture 자리 = 요청 번호)과 가장 작은 mip(자리 = 요청 수
+// + 요청 번호 — 블록 압축 형식의 4보다 작은 mip, cube 계열은 2 × 2, 개정 63). mip이 하나뿐이거나
+// CPU 대체면 둘째는 없다.
+constexpr uint32 FramesPerTexture = 2;
+
+// cube 계열은 1 × 1 mip 대신 2 × 2 mip이다: 1 × 1 면은 표본점이 면 가운데에서 조금만 벗어나도
+// 이음매 없는 cube 필터(D3D11 이후·Vulkan·GLES 모두)가 이웃 면 texel을 섞는다(첫 실행 — 모든 장치가
+// 같은 값으로 약 1% 섞였다). 2 × 2 면의 가운데는 그 면의 네 texel만 읽는다.
+constexpr uint32 CubeSmallestMipFromEnd = 2;
+
+uint32 SmallestMip(const screen::InspectorTexture& texture) noexcept {
+    if (texture.mips == 0) {
+        return 0;
+    }
+
+    if (graphics::IsCubeDimension(texture.dimension)) {
+        return texture.mips >= CubeSmallestMipFromEnd ? texture.mips - CubeSmallestMipFromEnd : 0u;
+    }
+
+    return texture.mips - 1;
+}
+
 // 엔진 루프를 화면과 쿠킹 텍스처 목록에 잇는다. 모든 텍스처가 정해지면(올렸거나 실패) 텍스처마다
-// 표시 프레임을 하나씩 그리고 끝낸다(준비 gate — 프레임 수에 기대지 않는다).
+// 표시 프레임(mip 0·가장 작은 mip)을 차례로 그리고 끝낸다(준비 gate — 프레임 수에 기대지 않는다).
 class CookedTextureHooks final : public EngineLoopHooks {
 public:
     CookedTextureHooks(screen::ScreenHost& screen, platform::Window& window,
@@ -106,18 +131,23 @@ public:
 
         // 올린 텍스처의 업로드 통지가 모두 온 뒤 차례로 그린다.
         if (library_->IsSettled() && screen_.PendingUploads() == 0) {
-            while (next < library_->Requested() &&
-                   library_->EntryOf(next) == screen::ScreenHost::NoInspectorEntry) {
+            const uint32 requested = library_->Requested();
+            const uint32 frames = requested * FramesPerTexture;
+            while (next < frames && !HasFrame(next)) {
                 ++next;
             }
 
-            if (next >= library_->Requested() || next >= screen::MaxCaptureSlots) {
+            if (next >= frames || next >= screen::MaxCaptureSlots) {
                 done = true;
                 engine.RequestExit();
                 return;
             }
 
-            screen_.SetInspectorEntry(library_->EntryOf(next), 0, 0);
+            const uint32 request = next % requested;
+            const uint32 entry = library_->EntryOf(request);
+            const uint32 mip =
+                next < requested ? 0u : SmallestMip(screen_.InspectorEntryAt(entry).texture);
+            screen_.SetInspectorEntry(entry, 0, mip);
             screen_.SetCaptureSlot(next);
             ++next;
         }
@@ -154,6 +184,18 @@ public:
     uint32 next = 0;
 
 private:
+    // frame(요청 번호 + 요청 수 × 0·1)을 그릴 것인가.
+    bool HasFrame(uint32 frame) const noexcept {
+        const uint32 requested = library_->Requested();
+        const uint32 entry = library_->EntryOf(frame % requested);
+        if (entry == screen::ScreenHost::NoInspectorEntry) {
+            return false;
+        }
+
+        const screen::InspectorTexture& texture = screen_.InspectorEntryAt(entry).texture;
+        return frame < requested || (!texture.cpuPlaceholder && SmallestMip(texture) != 0);
+    }
+
     static void PumpWindow(void* raw) noexcept {
         auto* self = static_cast<CookedTextureHooks*>(raw);
         self->window_.PumpEvents(self->queue_);
@@ -169,23 +211,57 @@ private:
 struct ExpectationContext {
     const screen::InspectorTexture* texture = nullptr;
     uint32 request = 0;
+    uint32 requested = 0;
     const char* path = nullptr;
     Array<SceneCheck>* checks = nullptr;
 };
 
-void ComputeExpectation(void* raw, const TexturePlatformData& data, PlatformBulkReader reader,
-                        void* readerContext) noexcept {
-    auto& context = *static_cast<ExpectationContext*>(raw);
-    auto bytes = MipBytes(data, reader, readerContext, 0);
-    auto format = graphics::PixelFormatFromNumber(data.pixelFormat);
-    if (!bytes || !format || data.mips.IsEmpty()) {
+void AppendMipChecks(const ExpectationContext& context, const TexturePlatformData& data,
+                     PlatformBulkReader reader, void* readerContext, graphics::PixelFormat format,
+                     uint32 level, uint32 frame, const char* name) noexcept {
+    auto bytes = MipBytes(data, reader, readerContext, level);
+    if (!bytes) {
         return;
     }
 
-    const TextureMipData& mip = data.mips[0];
-    AppendInspectorChecks(*context.texture, 0, 0, mip.sizeX, mip.sizeY, data.numSlices, mip.sizeZ,
-                          format.Value(), bytes.Value(), context.request, context.request,
-                          context.path, *context.checks);
+    const TextureMipData& mip = data.mips[level];
+    AppendInspectorChecks(*context.texture, 0, level, mip.sizeX, mip.sizeY, data.numSlices,
+                          mip.sizeZ, format, bytes.Value(), frame, frame, name, *context.checks);
+}
+
+void ComputeExpectation(void* raw, const TexturePlatformData& data, PlatformBulkReader reader,
+                        void* readerContext) noexcept {
+    auto& context = *static_cast<ExpectationContext*>(raw);
+    auto format = graphics::PixelFormatFromNumber(data.pixelFormat);
+    if (!format || data.mips.IsEmpty()) {
+        return;
+    }
+
+    if (!cookedFormatsListed) {
+        constexpr char Sources[] = "RGBA01";
+        const TextureSwizzle swizzles[4] = {data.swizzleR, data.swizzleG, data.swizzleB,
+                                            data.swizzleA};
+        char swizzle[5] = {};
+        for (uint32 channel = 0; channel < 4; ++channel) {
+            const uint32 source = static_cast<uint32>(swizzles[channel]);
+            swizzle[channel] = source < sizeof(Sources) - 1 ? Sources[source] : '?';
+        }
+
+        printf("  cooked texture %s: %s swizzle %s, %u x %u, %u mips\n", context.path,
+               graphics::PixelFormatName(format.Value()), swizzle, data.sizeX, data.sizeY,
+               static_cast<uint32>(data.mips.Size()));
+    }
+
+    AppendMipChecks(context, data, reader, readerContext, format.Value(), 0, context.request,
+                    context.path);
+    const uint32 smallest = SmallestMip(*context.texture);
+    if (!context.texture->cpuPlaceholder && smallest != 0 && smallest < data.mips.Size()) {
+        char name[MaxSceneCheckName];
+        snprintf(name, sizeof(name), "%s mip %u (%u x %u)", context.path, smallest,
+                 data.mips[smallest].sizeX, data.mips[smallest].sizeY);
+        AppendMipChecks(context, data, reader, readerContext, format.Value(), smallest,
+                        context.requested + context.request, name);
+    }
 }
 
 bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& device,
@@ -270,8 +346,8 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
             CookedCheck(requested != 0, name, "the cook lists texture assets");
             CookedCheck(engine.Run().IsOk(), name, "engine runs until every texture is drawn");
             CookedCheck(hooks.done, name, "every cooked texture settles before the frame limit");
-            // OpenGL ES는 Windows 쿠킹의 대상 backend가 아니다: 장치가 못 하는 형식(예: GL core
-            // 위 ES의 RGBA16Unorm — EXT_texture_norm16 없음)은 실패가 아니라 NOT RUN 사유다.
+            // OpenGL ES는 Windows 쿠킹의 대상 backend가 아니다: 장치가 못 하는 형식(BC 확장이
+            // 없는 장치의 블록 압축 형식 등)은 실패가 아니라 NOT RUN 사유다.
             const bool cookTarget = device.Info().backend != graphics::Backend::OpenGL;
             for (uint32 request = 0; library && request < library->Requested(); ++request) {
                 const ErrorCode error = library->FailureOf(request);
@@ -307,6 +383,7 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
                     ExpectationContext context;
                     context.texture = &screen.InspectorEntryAt(entry).texture;
                     context.request = request;
+                    context.requested = library->Requested();
                     String path(allocator);
                     (void)path.TryAppend(library->PathOf(request));
                     context.path = path.CStr();
@@ -315,6 +392,8 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
                         library->InspectCookedData(request, &ComputeExpectation, &context).IsOk(),
                         name, "cooked data is readable for the CPU reference");
                 }
+
+                cookedFormatsListed = true;
             }
         }
 
@@ -336,7 +415,8 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
     }
 
     const usize slotBytes = static_cast<usize>(SceneCaptureWidth) * SceneCaptureHeight * 4;
-    const uint32 slots = requested < screen::MaxCaptureSlots ? requested : screen::MaxCaptureSlots;
+    const uint32 frames = requested * FramesPerTexture;
+    const uint32 slots = frames < screen::MaxCaptureSlots ? frames : screen::MaxCaptureSlots;
     out.Clear();
     if (out.TryResize(slotBytes * slots)) {
         for (uint32 slot = 0; slot < slots; ++slot) {

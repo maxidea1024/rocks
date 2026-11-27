@@ -1,3 +1,4 @@
+#include "TextureBlockBptc.h"
 #include "TextureBlockTables.h"
 
 #include <Base/NumericLimits.h>
@@ -877,10 +878,26 @@ uint32 TextureBlockBytes(TextureBlockFormat format) noexcept {
         return SmallBlockBytes;
     case TextureBlockFormat::Bc3:
     case TextureBlockFormat::Bc5:
+    case TextureBlockFormat::Bc6h:
+    case TextureBlockFormat::Bc7:
         return LargeBlockBytes;
     }
 
     return 0;
+}
+
+uint32 TextureBlockSourceTexelBytes(TextureBlockFormat format) noexcept {
+    return format == TextureBlockFormat::Bc6h ? TextureBlockHalfTexelBytes : TextureBlockTexelBytes;
+}
+
+StringView IspcBcEncoderIdentity() noexcept {
+    // 정의는 ThirdParty IspcTextureCompressor가 소비자에게 낸다(데스크톱 — BuildTargets 3.12절
+    // BD50).
+#if defined(ROCKS_ISPC_IDENTITY)
+    return ROCKS_ISPC_IDENTITY;
+#else
+    return {};
+#endif
 }
 
 Result<uint64> TextureBlockOutputBytes(TextureBlockFormat format, uint32 sizeX, uint32 sizeY,
@@ -935,6 +952,13 @@ void EncodeTextureBlock(TextureBlockFormat format, const uint8 (&texels)[Texture
         CompressAlpha(green, out + SmallBlockBytes);
         break;
     }
+    case TextureBlockFormat::Bc6h:
+    case TextureBlockFormat::Bc7:
+        for (uint32 i = 0; i < LargeBlockBytes; ++i) {
+            out[i] = 0;
+        }
+
+        break;
     }
 }
 
@@ -977,18 +1001,36 @@ void DecodeTextureBlock(TextureBlockFormat format, const uint8* block,
         }
 
         break;
+    case TextureBlockFormat::Bc7:
+        texture_block_detail::DecodeBc7Block(block, texels);
+        break;
+    case TextureBlockFormat::Bc6h:
+        for (uint8& value : texels) {
+            value = 0;
+        }
+
+        break;
     }
+}
+
+void DecodeTextureBlockHalf(const uint8* block, uint16 (&halfs)[TextureBlockTexels * 4]) noexcept {
+    texture_block_detail::DecodeBc6hBlock(block, halfs);
 }
 
 Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockImage& image,
                                  Span<uint8> out) noexcept {
+    return EncodeTextureBlocks(format, image, TextureBlockOptions{}, out);
+}
+
+Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockImage& image,
+                                 const TextureBlockOptions& options, Span<uint8> out) noexcept {
     auto outputBytes = TextureBlockOutputBytes(format, image.sizeX, image.sizeY, image.numSlices);
     if (!outputBytes) {
         return Result<void>::Failure(outputBytes.Error());
     }
 
     constexpr uint64 Max = NumericLimits<uint64>::Max();
-    const uint64 rowBytes = uint64{image.sizeX} * TextureBlockTexelBytes;
+    const uint64 rowBytes = uint64{image.sizeX} * TextureBlockSourceTexelBytes(format);
     const uint64 rowPitch = image.rowPitch == 0 ? rowBytes : uint64{image.rowPitch};
     if (rowPitch < rowBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -1022,6 +1064,12 @@ Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockIm
     const uint64 needed = slicePitch * lastSlice + sliceExtent;
     if (image.rgba.Size() < needed || out.Size() != outputBytes.Value()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (format == TextureBlockFormat::Bc6h || format == TextureBlockFormat::Bc7) {
+        return texture_block_detail::EncodeIspcBlocks(format, image.rgba.Data(), image.sizeX,
+                                                      image.sizeY, image.numSlices, rowPitch,
+                                                      slicePitch, options, out);
     }
 
     // NVTT ColorBlock::init의 가장자리 remainder 표(ColorBlock.cpp 63–68)다.

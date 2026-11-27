@@ -18,6 +18,12 @@ public:
         return policy_;
     }
 
+    // 이 문맥이 이벤트 바인딩 기록(Docs/Design/EventReflection.ko.md ED19)을 쓰는지다. 그래프 저장
+    // 문맥만 참이다 — 바뀐 필드 판정·클래스 기본값처럼 값만 보는 문맥은 이벤트 필드를 건너뛴다.
+    virtual bool WritesEventBindings() const noexcept {
+        return false;
+    }
+
     // 이 유효 플래그의 필드를 저장하지 않는지다(Transient는 항상).
     bool IsExcluded(uint32 effectiveFlags) const noexcept {
         return HasFlag(effectiveFlags, FieldFlags::Transient) ||

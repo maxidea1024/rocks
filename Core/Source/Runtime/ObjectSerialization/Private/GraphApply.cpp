@@ -382,7 +382,8 @@ Result<void> InternNodeNames(Allocator& allocator, NamePool* pool,
 
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
                              Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
-                             Span<const ObjectHandle> imports) noexcept {
+                             Span<const ObjectHandle> imports,
+                             Array<PendingEventBinding>& pendingEvents) noexcept {
     GraphApplyContext context(allocator, options, nodes, imports);
     for (usize index = 0; index < nodes.Size(); ++index) {
         auto& node = nodes[index];
@@ -394,8 +395,13 @@ Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transact
                              node.lease.FieldEnum(stored.schemaIndex),
                              node.lease.FieldStruct(stored.schemaIndex), FieldCodecFrame::NoIndex,
                              node.lease.FieldKeyEnum(stored.schemaIndex));
-            auto written =
-                stored.ops->decode(*stored.ops, &transaction, node.handle, stored.view, context);
+            // 이벤트 바인딩 기록은 대상 handle을 보류 목록에 쌓는다(Commit 뒤 바인딩 — ED21).
+            auto written = stored.events != nullptr
+                               ? DecodeEventBindings(stored.view, context, &pendingEvents,
+                                                     static_cast<uint32>(index), schema.id,
+                                                     stored.schemaIndex, stored.events)
+                               : stored.ops->decode(*stored.ops, &transaction, node.handle,
+                                                    stored.view, context);
             if (!written) {
                 return written;
             }

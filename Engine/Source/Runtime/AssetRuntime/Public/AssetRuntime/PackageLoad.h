@@ -52,6 +52,9 @@ public:
     bool sawNewer = false;
     // Required 실효 값 누락 수다.
     uint32 missingRequired = 0;
+    // Commit 뒤 다시 만들지 못해 버린 이벤트 바인딩 수다(EventBindingDropped — Docs/Design/
+    // EventReflection.ko.md ED22).
+    uint32 droppedEventBindings = 0;
     // 모은 present 경로다: i번째는 노드 위치 presentObjects[i]와 필드 ID
     // presentIds[presentStarts[i] .. + presentLengths[i]).
     Array<uint32> presentObjects;
@@ -118,6 +121,7 @@ struct PackageLoadOptions {
 //   }
 //   RootRef<Object> roots[1];
 //   auto committed = transaction.Commit(packages, roots);
+//   // 성공하면 패키지마다 state.BindEvents()로 이벤트 바인딩을 다시 만든다(ED21).
 //
 // 수명: allocator는 스레드 사이 할당·해제를 지원해야 한다(Prepare가 worker에서 할당한 것을 소유
 // 스레드가 쓰고 해제한다). Prepare는 이 allocator만 쓰고 Registry allocator는 쓰지 않는다(그것은
@@ -172,6 +176,26 @@ public:
     // 버전).
     bool IsReadOnly() const noexcept {
         return readOnly_;
+    }
+
+    // Commit 뒤 이 패키지 그래프의 이벤트 바인딩을 다시 만든다(ObjectGraphStage::BindEvents —
+    // Docs/Design/EventReflection.ko.md ED21). InstantiatePackages 뒤 transaction.Commit()이
+    // 성공하면 패키지마다 한 번 부른다. 버린 바인딩 수는 DroppedEventBindings다. 반환: 만든 바인딩
+    // 수.
+    //
+    // 사용 예:
+    //   if (auto committed = transaction.Commit(handles, roots); committed) {
+    //       for (PackageLoadState* state : states) {
+    //           (void)state->BindEvents();
+    //       }
+    //   }
+    Result<usize> BindEvents() noexcept {
+        return stage_.BindEvents();
+    }
+
+    // BindEvents가 버린 이벤트 바인딩 수다(함수 없음·서명 다름 등 — 경고로 알린다).
+    uint32 DroppedEventBindings() const noexcept {
+        return hooks_.droppedEventBindings;
     }
 
     // 그래프 Stage다(InstantiatePackages가 쓴다).
@@ -270,7 +294,8 @@ protected:
 // 생성 → 모든 그래프 CreateObjects → import 해석(같은 묶음은 트랜잭션 안 객체, 밖은 resolver —
 // 에셋마다 패키지를 한 번 찾고 outer import 아래 이름 하나씩 푼다, import 수에 비례) → 모든
 // ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자 Commit
-// 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
+// 기록의 transaction id를 Commit 전에 읽어 둘 수 있게. Commit이 성공하면 호출자가 패키지마다
+// PackageLoadState::BindEvents를 부른다(이벤트 바인딩 — Docs/Design/EventReflection.ko.md ED21).
 //
 // 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId, Defer
 // 상태에 bulk entry가 있으면 SetBulkStore를 마침),

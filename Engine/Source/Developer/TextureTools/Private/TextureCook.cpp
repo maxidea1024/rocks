@@ -58,7 +58,8 @@ Result<void> CookFail(const CookContext& context, AssetDiagnosticCode code, Erro
 }
 
 // 처리기 경고를 문맥에 둔다(없으면 버린다). setting은 형식 경고의 대체 전 PixelFormat 번호다
-// (EncoderUnavailable·PlatformFormatFallback — 12.17.5 4, 그 밖 0). 할당 실패는 OutOfMemory다.
+// (PlatformFormatFallback — 12.17.5 4, 그 밖 0. EncoderUnavailable은 TC3부터 형식 선택이 내지
+// 않는다). 할당 실패는 OutOfMemory다.
 Result<void> CookWarn(const CookContext& context, AssetDiagnosticCode code,
                       uint32 setting = 0) noexcept {
     if (context.warnings == nullptr) {
@@ -199,16 +200,24 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
         const bool block =
             graphics::GetPixelFormatInfo(format).compression != graphics::PixelCompression::None;
         writer.WriteU32(graphics::PixelFormatNumber(format));
-        writer.WriteU32(block ? RocksBcEncoderVersion : 0u);
+        // BC6H·BC7은 ISPC 감싸기 버전과 커널을 빌드한 ISPC 신원(판·타깃·인자 — 12.17.6 9)을 쓴다.
+        const bool ispc = format == graphics::PixelFormat::BC6HUfloat ||
+                          format == graphics::PixelFormat::BC7Unorm ||
+                          format == graphics::PixelFormat::BC7UnormSrgb;
+        writer.WriteU32(ispc ? IspcBcEncoderVersion : block ? RocksBcEncoderVersion : 0u);
+        if (ispc) {
+            writer.WriteString(IspcBcEncoderIdentity());
+        }
     }
 
     writer.WriteGuid(facts.compressionCacheId);
     return writer.Finish();
 }
 
-// 적중 값을 받아들일 수 있으면 mips에 값 byte를 잇고 머리 형식에 맞는 알파 판정을 alpha에 쓴다
-// (12.14절 6번·12.17.5 4 — 머리 형식이 두 후보 중 하나여야 한다, 아니면 false로 미적중으로 다룬다).
-// 오류는 할당 실패뿐이다.
+// 적중 값을 받아들일 수 있으면 mips에 값 byte를 잇고 머리 형식에 맞는 알파 판정을 alpha에
+// 쓴다(형식이 알파로 갈리는 AutoDXT만 되살린다 — BC7은 두 후보 형식이 같아 늘 false다. alpha는 경고
+// 계산에만 쓰고 BC7 경고는 알파와 무관하다, 12.17.6 9) (12.14절 6번·12.17.5 4 — 머리 형식이 두 후보
+// 중 하나여야 한다, 아니면 false로 미적중으로 다룬다). 오류는 할당 실패뿐이다.
 Result<bool> CookAcceptHit(const NuggetCacheGetResult& got, const TextureBuildSettings& settings,
                            Allocator& allocator, Array<TextureCookMip>& mips,
                            bool& alpha) noexcept {
@@ -740,7 +749,8 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
         output.numSlices = dimension == TextureDimension::Volume ? 1u : settings.numSlices;
     }
 
-    // 10. 경고(설정과 알파 판정으로 정한다 — 적중은 머리 형식에 맞는 알파라 미적중과 같다).
+    // 10. 경고(설정과 알파 판정으로 정한다 — 적중은 머리 형식에 맞는 알파라 미적중과 같다. BC7
+    // 적중의 알파는 되살리지 못하지만 BC7 경고는 알파에 달려 있지 않다).
     {
         const bool alpha = useBuilt ? built.alphaTransparent : hitAlpha;
         TextureBuildWarning warnings[TextureBuildMaxWarnings];

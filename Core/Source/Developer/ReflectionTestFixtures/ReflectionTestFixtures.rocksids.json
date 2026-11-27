@@ -1595,6 +1595,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::EventPublisher::partner",
+      "id": "c13123a6358f4764b83b59551440ab68",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::EventPublisher::pinged",
       "id": "a84ecf8af4c54bd7b9634727c459900b",
       "aliases": [],
