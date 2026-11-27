@@ -30,6 +30,24 @@ public sealed class NativeBuildEngine
         // 경로를 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절). 같은 트리를 c:\와 C:\처럼 철자만 다르게 실행해도
         // 인자·action key·compile DB·도구 빌드 ID가 같다. 검증은 받은 그대로의 요청으로 먼저 한다.
         request = PathSpelling.OnDisk(request);
+        // ISPC 컴파일러는 빌드 대상에서 닿는 모듈에 ISPC 원본이 있을 때만 찾는다(Docs/Design/BuildTargets 3.12절 BD45 — 그 밖의 빌드는
+        // ISPC 없이 된다). 찾지 못하거나 버전이 다르면 설치 명령을 담은 오류다.
+        if (request.Ispc is null && request.Modules.Any(module => module.IspcSources.Count != 0))
+        {
+            // 정확히 같은 이름의 중복은 액션 그래프가 알린다(여기서는 첫 모듈만 본다).
+            var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+            foreach (NativeModuleInput module in request.Modules)
+            {
+                byName.TryAdd(module.Name, module);
+            }
+
+            HashSet<string> reached = LinkClosure.Reachable(request.Targets.Count == 0 ? byName.Keys : request.Targets, byName);
+            if (byName.Values.Any(module => module.IspcSources.Count != 0 && reached.Contains(module.Name)))
+            {
+                request = request with { Ispc = await IspcTools.DiscoverAsync(request.RootDirectory, request.Toolchain.Environment, cancellationToken) };
+            }
+        }
+
         Directory.CreateDirectory(request.OutputDirectory);
         await using var outputLock = await AcquireOutputLockAsync(request.OutputDirectory, cancellationToken);
         // 실행 파일마다 모듈 표 TU를 생성 소스로 더한다(Docs/Design/ModuleLoader 3.2절). 아래에서 규칙 생성 TU와 함께 쓴다.
@@ -249,6 +267,9 @@ public sealed class NativeBuildEngine
         {
             Remove(directory, produced, SearchOption.AllDirectories);
             Remove(Path.GetDirectoryName(directory)!, produced, SearchOption.TopDirectoryOnly);
+            // ISPC 생성 헤더 디렉터리(<out>/Ispc/<모듈> — Docs/Design/BuildTargets 3.12절 BD48)에서 이번 계획이 만들지 않은 헤더를 지운다.
+            // 남으면 이름을 바꾼 원본의 옛 헤더가 증분 빌드에서만 include된다(깨끗한 빌드와 결과가 갈린다). 변형과 무관한 한 벌이다.
+            Remove(IspcTools.HeaderDirectory(request.OutputDirectory, module), produced, SearchOption.TopDirectoryOnly);
             // 묶음 디렉터리는 유니티를 켠 변형만 쓴다. 끈 빌드(검증 변형)가 켠 빌드의 묶음 파일을 지우지 않는다.
             if (request.Unity)
             {

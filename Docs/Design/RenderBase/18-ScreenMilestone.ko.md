@@ -79,7 +79,7 @@ SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 
 | RR14 | RB4 | 바인딩 지도를 MetaSchema 스키마로 만들기(결정 R11) | 손으로 쓴 레이아웃 표 | 후속(SH3·P7) | — |
 | RR15 | RB5 | 정적 정점 배치 등록·PSO 미리 준비(10.2·9.7절) | 없음 | 후속(9.7절 미리 준비와 함께). 엔진 기본 정점 입력 타입의 배치는 RenderBase 상수다(10.6절 3항) | — |
 | RR16 | RB5 | 메시 정점 입력 `.rsh` 함수 인터페이스(10.2·10.5절) | 없음 | 후속(렌더러 RS0) | — |
-| RR17 | RB6 | viewport 부분 clear·UAV clear 셰이더, (값, 형식, 차원) 기본 텍스처 캐시(11.1·11.2절) | 없음 | 후속(스펙 그대로 — 엔진 셰이더 SL1 `ClearResources`) | — |
+| RR17 | RB6 | viewport 부분 clear·UAV clear 셰이더, (값, 형식, 차원) 기본 텍스처 캐시(11.1·11.2절) | 없음 | 구현(개정 62 — SM13과 함께, 엔진 셰이더 14.4절 4항·14.5절 3·4항) | — |
 | RR18 | RB2 | 장치 재생성(6.2절, BR04의 device loss) | 없음 | 후속(장치 손실 복구 단계) | — |
 | RR19 | GX13 | subpass·framebuffer fetch 검토 | 후속 | 후속 확정(4.4절 GX13 결정) | — |
 
@@ -103,7 +103,7 @@ SH2e3(RB3 셰이더 집합·RB4의 SH2분)·GX3·GX4(개정 37)·GX6(개정 39) 
 | SM10 | RR13 공유 상수 slot 표 | 18.3절 후속 | 기반(표·파이프라인 지도·묶음)은 구현(9.14절 개정 53). 렌더러 slot 등록·view마다 묶기는 RS0(view 상수 slot이 첫 소비자다) | — |
 | SM11 | 셰이더 시스템 SH3(파라미터 구조체 P7·생성 HLSL·그래프 파라미터 수집기) | 손으로 쓴 레이아웃 표 | 렌더러 RS0 전으로 옮김: 마일스톤 셰이더(유틸리티·tone map·텍스처 표시)는 루트 상수와 텍스처 하나라 손으로 쓴 표(셰이더 시스템 7.2절 5항)로 충분하다. 생성 구조체의 첫 소비자는 view 상수(SM10)와 머티리얼(MS)이다 | SH3a(상수 멤버·생성 C++ 표·HLSL·바인딩 layout v4 identity·엔진 셰이더 이관)는 구현(셰이더 시스템 16.2절 개정 55), SH3b(자원 멤버·바인딩 layout v5·생성 표 자원 지도·`SetParameters`)는 구현(개정 57), SH3c(그래프 수집기)는 구현(개정 58) — SH3 끝 | — |
 | SM12 | 셰이더 시스템 SH4(감시 재컴파일 → `ShaderSetSlot::Propose`, 오류 위치, 디버그 심볼) | 런타임 교체(RR8)만 | 설계 셰이더 시스템 16.3절(개정 60)·연결 9.8절 "SH4 연결"(개정 59). 렌더러 RS0 전으로 옮김: 교체 경로(RR8)는 끝났고, 감시·재컴파일은 개발 반복 편의라 화면 완료 기준(픽셀 대조·검증 오류 0·Release 컴파일러 없음)에 들지 않는다. 셰이더 수가 늘어나는 RS0에서 이득이 크다 | — |
-| SM13 | 엔진 셰이더 SL1 나머지: `GenerateMips`·`ClearResources`(RR17)·`CopyDepth`·`PlaceholderShaders`·`TextureSamplingHelpers`·`ComputeDispatch`·`WaveOperations` probe·`LutCoordinates`·`ColorMaps` | 없음 | 후속: 쿠킹 텍스처는 mip을 갖고 오므로 밉 생성은 런타임 생성 텍스처가 생길 때, LUT 좌표는 SL8, 자리표시는 MS MSR10과 함께. SM6이 쓰는 깊이·정수 시각화는 SM6에서 그 셰이더 안에 둔다 | — |
+| SM13 | 엔진 셰이더 SL1 나머지: `GenerateMips`·`ClearResources`(RR17)·`CopyDepth`·`PlaceholderShaders`·`TextureSamplingHelpers`·`ComputeDispatch`·`WaveOperations` probe·`LutCoordinates`·`ColorMaps` | 없음 | 렌더러 RS0 전으로 옮김(개정 62, 2026-11-27 렌더 세션 순서): RS0 첫 pass가 clear·깊이 복사·자리표시·compute 보조를 바로 쓰고, CS 전용 API는 SL3·SL6의 바탕이다. 설계는 [엔진 셰이더 14장](../EngineShaders/14-ScreenMilestoneScope.ko.md)(개정 6 — `DisplayEncoding` SDR과 SL0 compute probe 포함, SM13 행 밖 SL1 항목은 남김). 밉 생성 도우미는 그래프 밖 기록 판이고 그래프 판은 RS0 첫 소비자와 함께다. SM6이 쓰는 깊이·정수 시각화는 SM6에서 그 셰이더 안에 둔다 | — |
 | SM14 | Release 실행 파일에 셰이더 컴파일러 없음(18.1절) | SH2 9절 정책이 검사 | 확인만(바뀐 것 없음) | — |
 
 이에 따라 18.1절 완료 기준의 "셰이더 시스템 SH0–SH4"는 SH0–SH2가 된다(SH3·SH4는 셰이더 시스템 16절 표의 순서 그대로 RS0 전).

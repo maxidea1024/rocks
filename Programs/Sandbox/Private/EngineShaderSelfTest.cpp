@@ -1,4 +1,5 @@
 #include "EngineShaderSelfTest.h"
+#include "EngineShaderComputeProbes.h"
 #include "EngineShaderProbe.h"
 #include "SandboxShaders.h"
 
@@ -22,13 +23,6 @@ namespace {
 using namespace rocks;
 using namespace rocks::graphics;
 using namespace sandbox::engine_shaders;
-
-// ProbeCommon.rsh ProbeConstants의 C++ 판이다(레이아웃 표는 SandboxShaders.h ProbeConstantLayouts).
-struct alignas(16) ProbeConstants {
-    shader::ShaderUint4 control;
-    shader::ShaderFloat4 parameters;
-    shader::ShaderFloat4x4 values;
-};
 
 static_assert(sizeof(ProbeConstants) == shaders::ProbeConstantBytes,
               "ProbeConstants must match ProbeCommon.rsh");
@@ -374,6 +368,8 @@ constexpr CoverageReason UntestedFunctions[] = {
     {"ROCKS_SHADER_SHARED_BEGIN/END, ShaderTypeAliases C++ side",
      "C++ inclusion of Engine/Shaders/Shared is SL2 (RenderData static_assert)"},
     {"ROCKS_SHADER_STATIC_ASSERT C++ side", "SL2 together with ShaderTypeAliases"},
+    {"FloatToOrderedUint, OrderedUintToFloat, GroupOperationCombine",
+     "WaveOperations internals checked through GroupMin/MaxFloat and the group sums (SL1)"},
     {"helpers checked through their public callers",
      "ChromaticAdaptationMatrix, ConvolveCosineLobeSH2, DaylightLocusXy, ExactPowerOfTwo, "
      "ExtendedSubtract, "
@@ -399,6 +395,11 @@ uint32 RunEngineShaderChecks(const char* name, Device& device, Allocator& alloca
     RunRandomSamplingProbes(context);
     RunColorProbes(context);
     RunShadingProbes(context);
+    // SL1(Docs/Design/EngineShaders 14.6절 2항): A03 LUT·부호화·색 지도, CS 전용 API, 텍스처 표본
+    // 보조.
+    RunColorUtilityProbes(context);
+    RunComputeProbes(context, device);
+    RunUtilityProbes(context, device);
     printf("  [%s] %s engine shader probes: %u checks, %u failure%s\n",
            context.failures == 0 ? "PASS" : "FAIL", name, context.probes, context.failures,
            context.failures == 1 ? "" : "s");

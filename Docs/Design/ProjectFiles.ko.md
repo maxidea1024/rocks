@@ -103,7 +103,7 @@ Foundation Debug에서 모듈 31개는 모든 파일이 같은 인자다. 나머
 | `/GR-` `/EHs-c-` `/Zc:__cplusplus` `/utf-8` | C++ 항목 | `AdditionalOptions` | `_CPPRTTI`·`__cpp_exceptions`·`__cplusplus` 값, 원본 문자 집합 |
 | `/fsanitize=address` | Asan | `AdditionalOptions` | `__SANITIZE_ADDRESS__` |
 | `--no-default-config` | 전부 | 버림 | clang 설정 파일 탐색만 바꾼다 |
-| `/nologo` `/c` `/W4` `/WX` `-Wunique-object-duplication` `/Z7` | 전부 | 버림 | 진단·출력 형식 |
+| `/nologo` `/c` `/W4` `/WX` `-Wunique-object-duplication` `-Wthread-safety` `/Z7` | 전부 | 버림 | 진단·출력 형식 |
 | `/Od` `/O2` | 구성별 | 버림 | 코드 생성. clang이 정의하는 `__OPTIMIZE__`는 제품 코드가 쓰지 않는다(정책으로 지킨다, 8.2절) |
 | `/clang:-ffp-contract=off` `-fno-strict-aliasing` `-fno-strict-overflow` `-flto=thin` `-fprofile-instr-generate` `-fcoverage-mapping` | 구성·모듈별 | 버림 | 코드 생성 |
 | `/clang:-fmacro-prefix-map=<root>\=` | 전부 | 버림 | `__FILE__` 철자만 바꾼다 |

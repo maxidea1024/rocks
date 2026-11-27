@@ -31,6 +31,7 @@
 | SLD19 | (개정 3) 시험을 둘로 나눈다. 컴파일 행렬(C)은 EngineTests가 실제 워커로 형식 정의 전부에 컴파일하고, GPU probe(N·G·S·P)는 실제 장치가 있는 Sandbox self-test가 여덟 장치(D3D12·WARP, D3D11·WARP, OpenGL ES 두 context, Vulkan 하드웨어·소프트웨어)에서 돌린다. 시험 셰이더 폴더는 `Programs/Sandbox/EngineShaderTests` 하나이고 두 runner가 `/Plugin/EngineShaderTests`로 mount한다. CPU 기준 구현은 Sandbox 쪽 `EngineShaderReference*.cpp`다 | EngineTests에는 GPU 장치 시험이 없고(장치 계약은 Sandbox self-test 몫 — SS P11·S4), Sandbox self-test는 장치마다 그 형식 하나만 컴파일하므로 `GLES31_ANDROID`·`VULKAN_ANDROID`·Metal 컴파일은 워커를 직접 부르는 EngineTests가 맞다 | 7.6 |
 | SLD20 | (개정 3) probe 입력은 시험 전용 정수 생성기(사례 번호·흐름 번호 → 32 bit, 곱셈·xorshift만)와 24 bit 가수 변환으로 만든다. 라이브러리 해시(`IntegerHash.rsh`)를 입력 생성에 쓰지 않는다 | 시험 대상 함수로 입력을 만들면 그 함수의 오류가 입력에 섞인다(SLD10과 같은 이유). 정수 연산만 쓰므로 GPU·CPU 입력이 bit 단위로 같고 CPU 기준은 같은 입력을 `double`로 계산한다 | 7.6, 8.4 |
 | SLD21 | (개정 3) SL0 probe 결과는 `Device::ReadTexture`로 `RGBA32Float`·`R32Uint` 렌더 타깃을 바로 읽는다. `Utility/TextureReadback.rsf`는 SL1로 옮긴다 | 두 형식은 네 backend가 모두 렌더 타깃·readback을 지원한다(A0-G, RB GX8). 변환 셰이더는 readback 불가 형식(블록 압축·GLES의 비색 형식)에만 필요하다 | 7.6, 4.18 |
+| SLD22–SLD28 | (개정 6) SL1 나머지(RB SM13): 범위(SM13 행 밖 SL1 항목은 소비자가 생길 때), 밉 생성 두 경로·정확한 면적 박스, 부분 clear·UAV clear 퍼뮤테이션, 그룹 연산 웨이브 배치 가정의 장치별 확인, 65,535 고정 폭 감싸기, 상수는 생성 구조체·자원은 원문 선언, 기본 텍스처 캐시 | 14.7절 표(근거·버린 대안 함께) | 14 |
 
 ### 10.2 버린 대안
 
@@ -49,3 +50,4 @@
 | (개정 3) GPU probe를 EngineTests에 두고 장치를 직접 만들기 | EngineTests는 CI에서 GPU 없이 돌고, 여덟 장치 생성·공급자·셰이더 집합 연결이 Sandbox self-test에 이미 있다. 같은 연결을 EngineTests에 다시 두면 장치 준비 코드가 두 벌이 된다 |
 | (개정 3) probe 입력을 라이브러리 `HashPcg`로 만들기 | SLD20. 해시 오류가 입력에 섞이고 golden이 그 오류를 함께 굳힌다 |
 | 플러그인 셰이더(Niagara 등)를 이 문서 범위에 넣기 | 지시 범위는 `Engine/Shaders`. 플러그인은 CC 9절·기능 문서가 정한다 |
+| (개정 6) SL1 나머지의 버린 대안 | 14.7절 표 "버린 대안" 열 |

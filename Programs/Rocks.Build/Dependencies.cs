@@ -2,6 +2,9 @@ using System.Text;
 
 namespace Rocks.Build;
 
+/// <summary>도구가 쓰는 의존 파일의 문법이다. Make는 clang depfile(<see cref="Depfile"/>), Lines는 ISPC <c>-MMM</c>(<see cref="IspcTools.ParseDependencies"/>)다.</summary>
+internal enum DependencyFileFormat { Make, Lines }
+
 /// <summary>
 /// 컴파일러가 낸 depfile(Make 문법)을 읽는다(Docs/Design/UnityBuildPch.ko.md 4.1절). clang의 쓰기 규칙(DependencyFile.cpp의
 /// PrintFilename)에 맞춘다.

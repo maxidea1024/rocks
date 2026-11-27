@@ -1,0 +1,27 @@
+// 자리표시 PS다(Docs/Design/EngineShaders 4.18절 A18·14.4절 2항, UE OneColorShader.usf·NullPixelShader.usf·
+// MissingShaderPixelShader.usf 역할). 아무 VS(FullscreenTriangleVertex·메시 VS)와 짝이다.
+// - SolidColorPixel: 그리기별 상수 색 그대로(단색 칠하기·디버그 덮기).
+// - DepthOnlyPixel: 출력 없음(색 타깃 없는 깊이 전용 pass, 깊이만 지우는 부분 clear).
+// - MissingShaderPixel: 8 px 칸 자홍·검정 바둑판(알파 1) — 셰이더가 없거나 아직 준비되지 않은 그리기를 화면에서
+//   찾게 한다. 머티리얼 셰이더의 대체는 기본 머티리얼이다(MS MSR10 — 이 셰이더가 아니다).
+
+// 그리기별 상수 SolidColor는 C++ RenderBase/UtilityShaderTypes.h SolidColorConstants의 생성 원문이다(16 byte).
+// 세 엔트리가 같은 표를 갖는다(쓰지 않는 엔트리에서는 컴파일러가 버린다).
+#include "/Engine/Generated/RenderBase/SolidColorConstants.rsh"
+
+// 바둑판 칸 한 변(2^3 = 8 px)과 두 색이다.
+static const uint MissingShaderCellShift = 3u;
+static const float4 MissingShaderColorA = float4(1.0, 0.0, 1.0, 1.0);
+static const float4 MissingShaderColorB = float4(0.0, 0.0, 0.0, 1.0);
+
+float4 SolidColorPixel(float4 position : SV_Position) : SV_Target0 {
+    return SolidColor.color;
+}
+
+void DepthOnlyPixel(float4 position : SV_Position) {
+}
+
+float4 MissingShaderPixel(float4 position : SV_Position) : SV_Target0 {
+    const uint2 cell = uint2(position.xy) >> MissingShaderCellShift;
+    return ((cell.x ^ cell.y) & 1u) == 0u ? MissingShaderColorA : MissingShaderColorB;
+}
