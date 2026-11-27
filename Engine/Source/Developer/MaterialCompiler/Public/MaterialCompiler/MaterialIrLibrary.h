@@ -22,15 +22,16 @@ enum class IrLibraryFunction : uint8 {
 // 함수 수다(마지막 값 + 1).
 inline constexpr uint32 IrLibraryFunctionCount = 2;
 
-// 즉시값 묶음의 bit 위치·폭이다.
+// 즉시값 묶음의 bit 위치·폭이다. 바이트 칸은 8 bit씩(함수 번호 0번 바이트, quality 1번, 플래그 2번,
+// levels 3번 바이트)이고 상위 32 bit는 word 칸이다.
 inline constexpr uint32 IrLibraryByteBits = 8;
-inline constexpr uint64 IrLibraryByteMask = 0xFFu;
-inline constexpr uint32 IrLibraryQualityShift = 8;
-inline constexpr uint32 IrLibraryNoiseTurbulenceShift = 16;
-inline constexpr uint32 IrLibraryNoiseTilingShift = 17;
-inline constexpr uint32 IrLibraryNoiseLevelsShift = 24;
-inline constexpr uint32 IrLibraryVectorNoiseTilingShift = 16;
-inline constexpr uint32 IrLibraryHighWordShift = 32;
+inline constexpr uint64 IrLibraryByteMask = (uint64{1} << IrLibraryByteBits) - 1;
+inline constexpr uint32 IrLibraryQualityShift = IrLibraryByteBits;
+inline constexpr uint32 IrLibraryNoiseTurbulenceShift = 2 * IrLibraryByteBits;
+inline constexpr uint32 IrLibraryNoiseTilingShift = IrLibraryNoiseTurbulenceShift + 1;
+inline constexpr uint32 IrLibraryNoiseLevelsShift = 3 * IrLibraryByteBits;
+inline constexpr uint32 IrLibraryVectorNoiseTilingShift = 2 * IrLibraryByteBits;
+inline constexpr uint32 IrLibraryHighWordShift = 4 * IrLibraryByteBits;
 inline constexpr uint64 IrLibraryWordMask = NumericLimits<uint32>::Max();
 
 } // namespace rocks::material

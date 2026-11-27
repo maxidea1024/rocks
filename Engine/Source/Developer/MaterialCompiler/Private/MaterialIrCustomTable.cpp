@@ -108,8 +108,9 @@ Result<void> IrCustomTable::Begin(Guid node, IrCustomContext context, IrType ret
         return opened;
     }
 
-    // 본문: return이 없으면 return <code>;로 감싸고 \r\n을 \n으로 바꾼다(UE 순서 그대로).
-    const bool wrap = !code.Contains("return", StringComparison::CaseSensitive);
+    // 본문: return이 없으면(대소문자 무시 — UE FString::Contains 기본) return <code>;로 감싸고
+    // \r\n을 \n으로 바꾼다(UE 순서 그대로).
+    const bool wrap = !code.Contains("return", StringComparison::IgnoreAsciiCase);
     const usize start = text_.Size();
     const StringView parts[] = {wrap ? CustomReturnPrefix : StringView(), code,
                                 wrap ? CustomReturnSuffix : StringView()};

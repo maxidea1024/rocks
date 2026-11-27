@@ -5,6 +5,7 @@
 
 #include "LoweringContext.h"
 #include "LoweringTable.h"
+#include "PositionTransforms.h"
 
 // 공간 변환 노드 lowering이다(Docs/Design/MaterialSystem 6.9절 MS2b2b). UE 기본 번역기
 // TransformBase(HLSLMaterialTranslator.cpp:11093–11507)와 같은 직접 쌍·경유 공간·입력 캐스트·결과
@@ -367,7 +368,7 @@ Result<IrValueId> TransformBase(LoweringContext& context, Basis from, Basis to, 
 // 두 노드 공통의 검증·전처리다(UE TransformBase 앞부분 — HLSLMaterialTranslator.cpp:11106–11139).
 // 오류를 진단하면 value를 NoIrValue로 돌려준다.
 Result<IrValueId> PrepareTransformInput(LoweringContext& context, Basis from, Basis to,
-                                        IrValueId value, bool position) noexcept {
+                                        IrValueId value, bool position, StringView pin) noexcept {
     if (position && (from == Basis::Tangent || to == Basis::Tangent)) {
         if (auto reported = context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
                                           "Tangent basis not available for position "
@@ -426,7 +427,7 @@ Result<IrValueId> PrepareTransformInput(LoweringContext& context, Basis from, Ba
         }
 
         if (auto reported =
-                context.Error(MaterialDiagnosticCode::TypeMismatch, "Input", message.View());
+                context.Error(MaterialDiagnosticCode::TypeMismatch, pin, message.View());
             !reported) {
             return Result<IrValueId>::Failure(reported.Error());
         }
@@ -473,7 +474,7 @@ Result<void> LowerTransformVector(LoweringContext& context) noexcept {
         return Result<void>::Failure(input.Error());
     }
 
-    auto prepared = PrepareTransformInput(context, from, to, input.Value(), false);
+    auto prepared = PrepareTransformInput(context, from, to, input.Value(), false, "Input");
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());
     }
@@ -572,7 +573,7 @@ Result<void> LowerTransformPosition(LoweringContext& context) noexcept {
         extras.alpha = single.Value();
     }
 
-    auto prepared = PrepareTransformInput(context, from, to, input.Value(), true);
+    auto prepared = PrepareTransformInput(context, from, to, input.Value(), true, "Input");
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());
     }
@@ -591,6 +592,18 @@ constexpr LoweringEntry TransformEntries[] = {
 };
 
 } // namespace
+
+Result<IrValueId> TranslatedWorldPositionToWorld(LoweringContext& context, IrValueId value,
+                                                 StringView pin) noexcept {
+    auto prepared =
+        PrepareTransformInput(context, Basis::TranslatedWorld, Basis::World, value, true, pin);
+    if (!prepared || prepared.Value() == NoIrValue) {
+        return prepared;
+    }
+
+    return TransformBase(context, Basis::TranslatedWorld, Basis::World, prepared.Value(), true,
+                         TransformExtras{}, 0);
+}
 
 Span<const LoweringEntry> TransformLowerings() noexcept {
     return TransformEntries;

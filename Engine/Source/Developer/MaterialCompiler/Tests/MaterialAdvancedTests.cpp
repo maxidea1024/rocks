@@ -7,6 +7,7 @@
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.generated.h>
 #include <MaterialSchema/Nodes/Noise/VectorNoiseProperties.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
+#include <MaterialSchema/MaterialContextValue.h>
 #include <Platform/PlatformMath.h>
 
 #include "MaterialGraphFixture.h"
@@ -70,6 +71,23 @@ bool Near(float value, float expected) noexcept {
 bool NearVector(const EvaluatedIr& value, float x, float y, float z) noexcept {
     return value.count == 3 && Near(value.values[0], x) && Near(value.values[1], y) &&
            Near(value.values[2], z);
+}
+
+// 모듈이 name 문맥 값을 읽는가.
+bool UsesContext(const MaterialTranslation& out, StringView name) noexcept {
+    const MaterialContextValue* entry = FindMaterialContextValue(name);
+    if (entry == nullptr) {
+        return false;
+    }
+
+    const uint64 index = static_cast<uint64>(entry - MaterialContextValues().Data());
+    for (const IrValue& value : out.module.Values()) {
+        if (value.op == IrOp::Extern && value.immediate[0] == index) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool HasText(const MaterialTranslation& out, StringView message) noexcept {
@@ -581,6 +599,207 @@ TEST(MaterialAdvanced_Noise) {
 
         CHECK(width == 4);
         CHECK(narrowed || item.full);
+    }
+}
+
+// RotateAboutAxis 스칼라 축은 UE처럼 오류다(MCT_Float는 ForceCast가 그대로 두고 Float4 맞춤이
+// 실패한다).
+TEST(MaterialAdvanced_RotateAboutAxisScalarAxis) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    RotateAboutAxisProperties properties;
+    const Guid rotate = fixture.Add("Material.RotateAboutAxis", env.Save(properties));
+    fixture.Connect(AddConstant(fixture, 1.0f), "Result", rotate, "NormalizedRotationAxis");
+    fixture.Connect(AddConstant(fixture, 0.125f), "Result", rotate, "RotationAngle");
+    fixture.Connect(AddVector3(fixture, 0.0f, 0.0f, 0.0f), "Result", rotate, "PivotPoint");
+    fixture.Connect(AddVector3(fixture, 1.0f, 0.0f, 0.0f), "Result", rotate, "Position");
+    fixture.Connect(rotate, "Result", OutputNodeId, "WorldPositionOffset");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(Translate(fixture, Traits(), out));
+    CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::TypeMismatch, rotate));
+    CHECK(HasText(out, "Cannot cast from smaller type float2 to larger type float4."));
+}
+
+// 연결 분기: Fresnel Normal이 연결되면 PixelNormal을 읽지 않고, BumpOffset Coordinate가 연결되면
+// TexCoord를 읽지 않는다.
+TEST(MaterialAdvanced_ContextInputBranches) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto fresnel = [&](bool normal, MaterialTranslation& out) noexcept {
+        GraphFixture fixture(env);
+        const Guid node = fixture.Add("Material.Fresnel");
+        if (normal) {
+            fixture.Connect(AddVector3(fixture, 0.0f, 0.0f, 1.0f), "Result", node, "Normal");
+        }
+
+        const Guid unlit = fixture.Add("Material.SurfaceUnlit");
+        fixture.Connect(node, "Result", unlit, "EmissiveColor");
+        fixture.Connect(unlit, "Result", OutputNodeId, "Surface");
+        return fixture.ready && Translate(fixture, Traits(), out).IsOk() && out.succeeded;
+    };
+
+    MaterialTranslation implicitNormal(env.allocator);
+    MaterialTranslation explicitNormal(env.allocator);
+    REQUIRE(fresnel(false, implicitNormal));
+    REQUIRE(fresnel(true, explicitNormal));
+    CHECK(UsesContext(implicitNormal, "PixelNormal"));
+    CHECK(!UsesContext(explicitNormal, "PixelNormal"));
+    CHECK(UsesContext(explicitNormal, "CameraVector"));
+
+    const auto bump = [&](bool coordinate, MaterialTranslation& out) noexcept {
+        GraphFixture fixture(env);
+        const Guid node = fixture.Add("Material.BumpOffset");
+        fixture.Connect(AddConstant(fixture, 0.7f), "Result", node, "Height");
+        if (coordinate) {
+            fixture.Connect(AddVector2(fixture, 0.25f, 0.5f), "Result", node, "Coordinate");
+        }
+
+        const Guid unlit = fixture.Add("Material.SurfaceUnlit");
+        const Guid append = fixture.Add("Material.Append");
+        fixture.Connect(node, "Result", append, "A");
+        fixture.Connect(AddConstant(fixture, 0.0f), "Result", append, "B");
+        fixture.Connect(append, "Result", unlit, "EmissiveColor");
+        fixture.Connect(unlit, "Result", OutputNodeId, "Surface");
+        return fixture.ready && Translate(fixture, Traits(), out).IsOk() && out.succeeded;
+    };
+
+    MaterialTranslation implicitCoordinate(env.allocator);
+    MaterialTranslation explicitCoordinate(env.allocator);
+    REQUIRE(bump(false, implicitCoordinate));
+    REQUIRE(bump(true, explicitCoordinate));
+    CHECK(UsesContext(implicitCoordinate, "TexCoord"));
+    CHECK(!UsesContext(explicitCoordinate, "TexCoord"));
+}
+
+// Sobol Cell이 없으면 (0, 0) 칸이고, TemporalSobol은 SvPosition·StateFrameIndexMod8을 읽는다.
+TEST(MaterialAdvanced_SobolDefaultsAndTemporal) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    // (0, 0) 칸의 공간 seed는 0이고 Index 3은 SobolNumbers 0·1번의 XOR이다.
+    const uint32 sobol[2] = {0x8680u ^ 0xf240u, 0x4c80u ^ 0x9240u};
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.Sobol");
+    fixture.Connect(AddConstant(fixture, 3.0f), "Result", node, "Index");
+    fixture.Connect(AddVector2(fixture, 0.0f, 0.0f), "Result", node, "Seed");
+    const Guid append = fixture.Add("Material.Append");
+    fixture.Connect(node, "Result", append, "A");
+    fixture.Connect(AddConstant(fixture, 0.0f), "Result", append, "B");
+    EvaluatedIr result;
+    MaterialTranslation out(env.allocator);
+    REQUIRE(EmissiveOf(fixture, append, "Result", result, out));
+    CHECK(NearVector(result, static_cast<float>(sobol[0]) / 65536.0f,
+                     static_cast<float>(sobol[1]) / 65536.0f, 0.0f));
+
+    GraphFixture pixel(env);
+    const Guid temporal = pixel.Add("Material.TemporalSobol");
+    const Guid widen = pixel.Add("Material.Append");
+    pixel.Connect(temporal, "Result", widen, "A");
+    pixel.Connect(AddConstant(pixel, 0.0f), "Result", widen, "B");
+    const Guid unlit = pixel.Add("Material.SurfaceUnlit");
+    pixel.Connect(widen, "Result", unlit, "EmissiveColor");
+    pixel.Connect(unlit, "Result", OutputNodeId, "Surface");
+    MaterialTranslation pixelOut(env.allocator);
+    REQUIRE(Translate(pixel, Traits(), pixelOut));
+    REQUIRE(pixelOut.succeeded);
+    CHECK(UsesContext(pixelOut, "SvPosition"));
+    CHECK(UsesContext(pixelOut, "StateFrameIndexMod8"));
+}
+
+// Noise 원점·클램프: CameraRelative 위치는 World(Double)로 바꾸고 3성분 미만은 UE 문구, quality는
+// [1, 4]·levels는 [1, 10]으로 자른다. VectorNoise의 Double 위치는 float3로 낮춘다.
+TEST(MaterialAdvanced_NoiseOriginAndClamps) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto generate = [&](GraphFixture& fixture, MaterialTranslation& out,
+                              MaterialGeneratedSource& source) noexcept {
+        return Translate(fixture, Traits(), out).IsOk() && out.succeeded &&
+               WriteMaterialSource(env.allocator, out.module, Traits(), TestAssetId, MainGraphId,
+                                   source)
+                   .IsOk() &&
+               source.succeeded;
+    };
+
+    {
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        properties.noiseFunction = NoiseFunction::GradientALU;
+        properties.worldPositionOriginType = PositionOrigin::CameraRelative;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(AddVector3(fixture, 1.0f, 2.0f, 3.0f), "Result", noise, "Position");
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        CHECK(UsesContext(out, "PreViewTranslation"));
+        bool wide = false;
+        for (const IrValue& value : out.module.Values()) {
+            wide = wide || (value.op == IrOp::Library &&
+                            out.module.Values()[value.operands[0]].type == IrDouble(3));
+        }
+
+        CHECK(wide);
+    }
+
+    {
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        properties.noiseFunction = NoiseFunction::GradientALU;
+        properties.worldPositionOriginType = PositionOrigin::CameraRelative;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(AddConstant(fixture, 1.0f), "Result", noise, "Position");
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        REQUIRE(Translate(fixture, Traits(), out));
+        CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::TypeMismatch, noise));
+        CHECK(HasText(out, "input must be a 3-component vector (current: float) or a scalar (if "
+                           "source is Tangent)"));
+    }
+
+    const struct {
+        int32 quality;
+        int32 levels;
+        StringView expected;
+    } clamps[] = {{300, 0, ", 1.0, 4, 3, false, 1u, "}, {-3, 25, ", 1.0, 1, 3, false, 10u, "}};
+    for (const auto& item : clamps) {
+        GraphFixture fixture(env);
+        NoiseProperties properties;
+        properties.noiseFunction = NoiseFunction::GradientALU;
+        properties.turbulence = false;
+        properties.quality = item.quality;
+        properties.levels = item.levels;
+        const Guid noise = fixture.Add("Material.Noise", env.Save(properties));
+        fixture.Connect(AddVector3(fixture, 1.0f, 2.0f, 3.0f), "Result", noise, "Position");
+        fixture.Connect(noise, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        CHECK(source.text.View().Contains(item.expected, StringComparison::CaseSensitive));
+    }
+
+    {
+        // Position이 없으면 절대 월드 위치(Double)지만 VectorNoise는 float3로 부른다.
+        GraphFixture fixture(env);
+        VectorNoiseProperties properties;
+        properties.noiseFunction = VectorNoiseFunction::GradientALU;
+        const Guid noise = fixture.Add("Material.VectorNoise", env.Save(properties));
+        const Guid mask = fixture.Add("Material.ComponentMask", [&]() noexcept {
+            ComponentMaskProperties red;
+            red.r = true;
+            return env.Save(red);
+        }());
+        fixture.Connect(noise, "Result", mask, "Input");
+        fixture.Connect(mask, "Result", OutputNodeId, "AmbientOcclusion");
+        MaterialTranslation out(env.allocator);
+        MaterialGeneratedSource source(env.allocator);
+        REQUIRE(generate(fixture, out, source));
+        bool narrowed = false;
+        for (const IrValue& value : out.module.Values()) {
+            narrowed = narrowed || (value.op == IrOp::Library &&
+                                    out.module.Values()[value.operands[0]].type == IrFloat(3));
+        }
+
+        CHECK(narrowed);
     }
 }
 

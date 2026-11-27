@@ -1,4 +1,6 @@
 #include <Core/Text/StringBuilder.h>
+#include <MaterialCompiler/MaterialIrBuilder.h>
+#include <MaterialCompiler/MaterialIrModule.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
 #include <MaterialSchema/Nodes/Custom/CustomHlslProperties.generated.h>
 #include <MaterialSchema/Nodes/Custom/CustomHlslProperties.h>
@@ -408,7 +410,8 @@ TEST(MaterialCustom_CodeRules) {
         // 주석 안의 토큰·중괄호는 검사하지 않는다.
         GraphFixture fixture(env);
         CustomSpec spec(env);
-        spec.Code("// static register }\n/* cbuffer } */ return float3(1, 1, 1);");
+        spec.Code("// static register } #include\n/* cbuffer } # */ const uint t = "
+                  "StringLength(\"} static #pragma /*\"); return float3(1, 1, 1);");
         const Guid custom = spec.Add(fixture);
         ToEmissive(fixture, custom, "Result");
         MaterialTranslation out(env.allocator);
@@ -518,6 +521,225 @@ TEST(MaterialCustom_CodeInHash) {
     REQUIRE(hash("return float3(1, 0, 0);", again));
     CHECK(!(first == second));
     CHECK(first == again);
+}
+
+// V13 우회 사례: 줄 잇기·닫히지 않은 주석·문자열·코드 안 # 지시·## 연산자·_Pragma·열린 중괄호,
+// 정의 값의 주석·예약 이름.
+TEST(MaterialCustom_CodeRuleBypasses) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto rejected = [&](CustomSpec& spec, StringView message) noexcept {
+        GraphFixture fixture(env);
+        const Guid custom = spec.Add(fixture);
+        ToEmissive(fixture, custom, "Result");
+        MaterialTranslation out(env.allocator);
+        return TranslateCustom(fixture, out) && !out.succeeded &&
+               HasMessage(out, MaterialDiagnosticCode::CustomCodeRule, message);
+    };
+
+    const struct {
+        StringView code;
+        StringView message;
+    } codes[] = {
+        {"stat\\\nic float g; return g;", "Custom HLSL code must not contain line continuations"},
+        {"/* *\\\r\n/ return 0; } cbuffer E { float4 x; }; float3 F() { return 0;",
+         "Custom HLSL code must not contain line continuations"},
+        {"return 1; /* open", "Custom HLSL code must not contain an unterminated comment"},
+        {"return StringLength(\"open);",
+         "Custom HLSL code must not contain an unterminated string"},
+        {"#if 0\n{\n#endif\n} Texture2D Evil; float3 F() { return 0;",
+         "Custom HLSL code must not contain '#if'"},
+        {"#define S(a, b) a##b\nS(sta, tic) float g; return g;",
+         "Custom HLSL code must not contain '#define'"},
+        {"_Pragma(\"once\") return 1;", "Custom HLSL code must not contain '_Pragma'"},
+        {"__pragma(once) return 1;", "Custom HLSL code must not contain '__pragma'"},
+        {"if (true) { return 1;", "Custom HLSL code must not leave a brace open"},
+    };
+    for (const auto& item : codes) {
+        CustomSpec spec(env);
+        spec.Code(item.code);
+        CHECK(rejected(spec, item.message));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Define("OPEN", "/*");
+        CHECK(rejected(spec, "Custom HLSL define value must not contain comments: OPEN"));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Define("CLOSE", "}");
+        CHECK(rejected(spec, "Custom HLSL code must not close the function body"));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Define("GLUE", "a ## b");
+        CHECK(rejected(spec, "Custom HLSL code must not contain '#'"));
+    }
+
+    const StringView reserved[] = {"c", "s", "m12", "MaterialTexture0", "MATERIAL_TWO_SIDED"};
+    for (StringView name : reserved) {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Define(name, "1");
+        StringBuilder<> message(env.allocator);
+        message << "Custom HLSL name is reserved: " << name;
+        REQUIRE(message.Status());
+        CHECK(rejected(spec, message.View()));
+    }
+}
+
+// 함수 인자 이름: 문맥 인자 c는 쓸 수 없고, 입력·텍스처 샘플러·추가 출력 이름은 겹치지 않아야 하며,
+// 식별자가 아니면 오류다.
+TEST(MaterialCustom_ParameterNames) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto check = [&](CustomSpec& spec, StringView input, bool texture,
+                           StringView message) noexcept {
+        GraphFixture fixture(env);
+        const Guid custom = spec.Add(fixture);
+        if (texture) {
+            TextureObjectProperties object;
+            object.texture.assetId = AssetId{CustomBrickId};
+            fixture.Connect(fixture.Add("Material.TextureObject", env.Save(object)), "Result",
+                            custom, input);
+        } else {
+            fixture.Connect(AddScalar(fixture, 1.0f), "Result", custom, input);
+        }
+
+        ToEmissive(fixture, custom, "Result");
+        MaterialTranslation out(env.allocator);
+        return TranslateCustom(fixture, out) && !out.succeeded &&
+               HasMessage(out, MaterialDiagnosticCode::CustomCodeRule, message);
+    };
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return c;").Input("c");
+        CHECK(check(spec, "c", false, "Custom HLSL name is reserved: c"));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Input("A").Extra("A", CustomOutputType::Float1);
+        CHECK(check(spec, "A", false, "Custom HLSL name is used more than once: A"));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Input("T").Extra("TSampler", CustomOutputType::Float1);
+        CHECK(check(spec, "T", true, "Custom HLSL name is used more than once: TSampler"));
+    }
+
+    {
+        CustomSpec spec(env);
+        spec.Code("return 1;").Input("two words");
+        CHECK(check(spec, "two words", false,
+                    "Custom HLSL name is not a valid identifier: two words"));
+    }
+}
+
+// clip 선언 No는 주석·문자열 밖 토큰만 본다(clip 뒤 공백·주석도 호출이다).
+TEST(MaterialCustom_ClipTokens) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const auto translated = [&](StringView code) noexcept {
+        GraphFixture fixture(env);
+        CustomSpec spec(env);
+        spec.Code(code).Clip(CustomClipInstruction::No);
+        const Guid custom = spec.Add(fixture);
+        ToEmissive(fixture, custom, "Result");
+        MaterialTranslation out(env.allocator);
+        return TranslateCustom(fixture, out) && out.succeeded;
+    };
+
+    CHECK(translated("// no discard here\nconst float discardMask = 1; return 1;"));
+    CHECK(translated("const float clipped = 1; return clipped;"));
+    CHECK(!translated("clip (-1); return 1;"));
+    CHECK(!translated("clip/**/(-1); return 1;"));
+    CHECK(!translated("if (true) discard; return 1;"));
+}
+
+// return 감싸기 판정은 대소문자를 무시한다(UE FString::Contains 기본).
+TEST(MaterialCustom_ReturnCaseInsensitive) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    CustomSpec spec(env);
+    spec.Code("float3(1, 1, 1) /* Returns white */");
+    const Guid custom = spec.Add(fixture);
+    ToEmissive(fixture, custom, "Result");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateCustom(fixture, out));
+    REQUIRE(out.succeeded);
+    REQUIRE(out.module.CustomFunctions().Functions().Size() == 1);
+    const IrCustomTable& table = out.module.CustomFunctions();
+    CHECK(table.Text(table.Functions()[0].code) ==
+          StringView("float3(1, 1, 1) /* Returns white */"));
+}
+
+// 표 동작(같은 항목 재사용·버림)과 모듈 재번호: 빌더 표 앞 항목이 닿지 않으면 닿는 항목이 0번이다.
+TEST(MaterialCustom_TableAndModuleRemap) {
+    SystemAllocator allocator;
+    IrBuilder builder(allocator);
+    IrCustomTable& table = builder.CustomFunctions();
+    const Guid unused{1, 2};
+    const Guid used{3, 4};
+    REQUIRE(table.Begin(unused, IrCustomContext::Pixel, IrFloat(1), "1", false));
+    auto first = table.End();
+    REQUIRE(first);
+    CHECK(first.Value() == 0);
+
+    REQUIRE(table.Begin(used, IrCustomContext::Pixel, IrFloat(3), "x", false));
+    REQUIRE(table.AddArgument("x", IrFloat(3)));
+    REQUIRE(table.AddOutput("o", IrFloat(2)));
+    auto second = table.End();
+    REQUIRE(second);
+    CHECK(second.Value() == 1);
+    CHECK(table.Text(table.Functions()[1].code) == StringView("return x;"));
+
+    // 같은 (노드, 문맥, 인자 형)은 기존 항목이고 새로 쓴 칸은 버린다.
+    REQUIRE(table.Begin(used, IrCustomContext::Pixel, IrFloat(3), "x", false));
+    REQUIRE(table.AddArgument("x", IrFloat(3)));
+    auto again = table.End();
+    REQUIRE(again);
+    CHECK(again.Value() == 1);
+    CHECK(table.Functions().Size() == 2);
+
+    // 순서를 어긴 칸(출력 뒤 인자)은 거부하고, 버린 항목은 남지 않는다.
+    REQUIRE(table.Begin(Guid{5, 6}, IrCustomContext::Vertex, IrFloat(1), "1", false));
+    REQUIRE(table.AddOutput("o", IrFloat(1)));
+    CHECK(!table.AddArgument("x", IrFloat(1)));
+    table.Abandon();
+    CHECK(table.Functions().Size() == 2);
+
+    const float components[] = {1.0f, 2.0f, 3.0f};
+    auto argument = builder.FloatConstant(components);
+    REQUIRE(argument);
+    const IrValueId arguments[] = {argument.Value()};
+    auto call = builder.CustomCall(1, arguments);
+    REQUIRE(call);
+    auto output = builder.CustomOutput(call.Value(), 0);
+    REQUIRE(output);
+    CHECK(!builder.CustomOutput(call.Value(), 1));
+    const IrValueId wrong[] = {argument.Value(), argument.Value()};
+    CHECK(!builder.CustomCall(1, wrong));
+
+    const IrResult results[] = {{IrEntry::Surface, "Emissive", call.Value()},
+                                {IrEntry::Surface, "Roughness", output.Value()}};
+    IrModule module(allocator);
+    REQUIRE(BuildIrModule(builder, results, module));
+    REQUIRE(module.CustomFunctions().Functions().Size() == 1);
+    CHECK(module.CustomFunctions().Functions()[0].node == used);
+    CHECK(module.CustomFunctions().Arguments(module.CustomFunctions().Functions()[0]).Size() == 1);
+    CHECK(module.CustomFunctions().Outputs(module.CustomFunctions().Functions()[0]).Size() == 1);
+    bool remapped = false;
+    for (const IrValue& value : module.Values()) {
+        remapped = remapped || (value.op == IrOp::CustomCall && value.immediate[0] == 0);
+    }
+
+    CHECK(remapped);
 }
 
 } // namespace material_custom_tests_file

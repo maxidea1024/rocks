@@ -1,3 +1,4 @@
+#include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <MaterialSchema/Nodes/Custom/CustomDefine.generated.h>
 #include <MaterialSchema/Nodes/Custom/CustomDefine.h>
@@ -5,6 +6,7 @@
 #include <MaterialSchema/Nodes/Custom/CustomOutput.generated.h>
 #include <MaterialSchema/Nodes/Custom/CustomOutput.h>
 
+#include "CustomCodeScan.h"
 #include "LoweringContext.h"
 #include "LoweringTable.h"
 #include "Translator.h"
@@ -16,112 +18,10 @@ namespace rocks::material::detail {
 
 namespace {
 
-// V13이 막는 코드 토큰이다(7.5절 — 자원·전역·정적 선언과 전처리 지시).
-constexpr StringView CustomForbiddenWords[] = {"register", "cbuffer", "tbuffer", "groupshared",
-                                               "static"};
-constexpr StringView CustomForbiddenDirectives[] = {"include", "pragma"};
-constexpr usize CustomForbiddenWordCount = sizeof(CustomForbiddenWords) / sizeof(StringView);
-constexpr usize CustomForbiddenDirectiveCount =
-    sizeof(CustomForbiddenDirectives) / sizeof(StringView);
-
-bool IsIdentifierStart(char character) noexcept {
-    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-           character == '_';
-}
-
-bool IsIdentifierPart(char character) noexcept {
-    return IsIdentifierStart(character) || (character >= '0' && character <= '9');
-}
-
-bool IsIdentifier(StringView text) noexcept {
-    if (text.IsEmpty() || !IsIdentifierStart(text.Data()[0])) {
-        return false;
-    }
-
-    for (usize at = 1; at < text.ByteCount(); ++at) {
-        if (!IsIdentifierPart(text.Data()[at])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// 코드 토큰 검사 결과다(주석 밖 — // 줄 주석·/* */ 묶음 주석은 건너뛴다).
-struct CustomCodeScan {
-    // CustomForbiddenWords·CustomForbiddenDirectives 순서의 발견 표시다.
-    bool words[CustomForbiddenWordCount] = {};
-    bool directives[CustomForbiddenDirectiveCount] = {};
-    // 중괄호가 함수 본문 밖으로 닫히는가(깊이가 0 아래로 내려간다).
-    bool closesBody = false;
-};
-
-void ScanCustomCode(StringView code, CustomCodeScan& scan) noexcept {
-    const char* text = code.Data();
-    const usize size = code.ByteCount();
-    int64 depth = 0;
-    bool directive = false;
-    usize at = 0;
-    while (at < size) {
-        const char character = text[at];
-        if (character == '/' && at + 1 < size && text[at + 1] == '/') {
-            while (at < size && text[at] != '\n') {
-                ++at;
-            }
-
-            continue;
-        }
-
-        if (character == '/' && at + 1 < size && text[at + 1] == '*') {
-            at += 2;
-            while (at + 1 < size && !(text[at] == '*' && text[at + 1] == '/')) {
-                ++at;
-            }
-
-            at = at + 2 < size ? at + 2 : size;
-            continue;
-        }
-
-        if (character == '#') {
-            directive = true;
-            ++at;
-            continue;
-        }
-
-        if (IsIdentifierStart(character)) {
-            const usize start = at;
-            while (at < size && IsIdentifierPart(text[at])) {
-                ++at;
-            }
-
-            const StringView word(text + start, at - start);
-            if (directive) {
-                for (usize index = 0; index < CustomForbiddenDirectiveCount; ++index) {
-                    scan.directives[index] =
-                        scan.directives[index] || word == CustomForbiddenDirectives[index];
-                }
-            }
-
-            for (usize index = 0; index < CustomForbiddenWordCount; ++index) {
-                scan.words[index] = scan.words[index] || word == CustomForbiddenWords[index];
-            }
-
-            directive = false;
-            continue;
-        }
-
-        if (character == '{') {
-            ++depth;
-        } else if (character == '}') {
-            --depth;
-            scan.closesBody = scan.closesBody || depth < 0;
-        }
-
-        // # 뒤의 공백·탭만 지시 이름까지 이어진다.
-        directive = directive && (character == ' ' || character == '\t');
-        ++at;
-    }
-}
+// 문맥 인자 이름이다(생성 함수의 첫 인자 — 6.13절 MS2f5).
+constexpr StringView CustomContextName = "c";
+// 정의 이름으로 쓸 수 없는 생성 원문 식별자 접두다(맨 식별자 c·s·m<숫자>는 따로 본다).
+constexpr StringView CustomReservedPrefixes[] = {"Material", "MATERIAL_"};
 
 // 허용 include 경로인가(/로 시작하는 가상 경로, ..·따옴표·역슬래시·제어 문자 없음).
 bool IsAllowedIncludePath(StringView path) noexcept {
@@ -150,9 +50,28 @@ bool HasLineBreak(StringView text) noexcept {
     return false;
 }
 
-// parts를 이어 붙인 문구로 진단한다.
-Result<void> CustomError(LoweringContext& context, MaterialDiagnosticCode code, StringView pin,
-                         Span<const StringView> parts) noexcept {
+// 정의 이름으로 예약된 생성 원문 식별자인가(c·s·m<숫자>…·Material·MATERIAL_ 접두).
+bool IsReservedDefineName(StringView name) noexcept {
+    if (name == CustomContextName || name == StringView("s")) {
+        return true;
+    }
+
+    if (name.ByteCount() >= 2 && name.Data()[0] == 'm' && name.Data()[1] >= '0' &&
+        name.Data()[1] <= '9') {
+        return true;
+    }
+
+    for (StringView prefix : CustomReservedPrefixes) {
+        if (name.StartsWith(prefix, StringComparison::CaseSensitive)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// parts를 이어 붙인 문구로 V13을 진단한다.
+Result<void> CustomRule(LoweringContext& context, Span<const StringView> parts) noexcept {
     SystemAllocator scratch;
     StringBuilder<> message(scratch);
     for (StringView part : parts) {
@@ -163,48 +82,73 @@ Result<void> CustomError(LoweringContext& context, MaterialDiagnosticCode code, 
         return status;
     }
 
-    return context.Error(code, pin, message.View());
+    return context.Error(MaterialDiagnosticCode::CustomCodeRule, StringView(), message.View());
 }
 
-// 코드·정의 값의 V13 토큰 검사다. 위반을 모두 진단하고 위반이 있으면 false다.
-Result<bool> CheckCustomTokens(LoweringContext& context, StringView text) noexcept {
+// 코드·정의 값의 V13 토큰 검사다(6.13절 MS2f5 목록). 위반을 모두 진단하고 위반이 있으면 false다.
+// define이 비어 있지 않으면 정의 값 규칙(한 줄·주석 없음)도 본다.
+Result<bool> CheckCustomTokens(LoweringContext& context, StringView text,
+                               StringView define) noexcept {
     CustomCodeScan scan;
     ScanCustomCode(text, scan);
-    bool clean = !scan.closesBody;
-    for (usize index = 0; index < CustomForbiddenDirectiveCount; ++index) {
-        if (!scan.directives[index]) {
-            continue;
-        }
-
+    bool clean = true;
+    const auto report = [&](Span<const StringView> parts) noexcept -> Result<void> {
         clean = false;
-        const StringView parts[] = {"Custom HLSL code must not contain '#",
-                                    CustomForbiddenDirectives[index], "'"};
-        if (auto reported =
-                CustomError(context, MaterialDiagnosticCode::CustomCodeRule, StringView(), parts);
-            !reported) {
-            return Result<bool>::Failure(reported.Error());
-        }
-    }
+        return CustomRule(context, parts);
+    };
 
     for (usize index = 0; index < CustomForbiddenWordCount; ++index) {
         if (!scan.words[index]) {
             continue;
         }
 
-        clean = false;
         const StringView parts[] = {"Custom HLSL code must not contain '",
-                                    CustomForbiddenWords[index], "'"};
-        if (auto reported =
-                CustomError(context, MaterialDiagnosticCode::CustomCodeRule, StringView(), parts);
-            !reported) {
+                                    CustomForbiddenWord(index), "'"};
+        if (auto reported = report(parts); !reported) {
             return Result<bool>::Failure(reported.Error());
         }
     }
 
-    if (scan.closesBody) {
-        if (auto reported = context.Error(MaterialDiagnosticCode::CustomCodeRule, StringView(),
-                                          "Custom HLSL code must not close the function body");
-            !reported) {
+    if (scan.directive) {
+        const StringView parts[] = {"Custom HLSL code must not contain '#", scan.directiveName,
+                                    "'"};
+        if (auto reported = report(parts); !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+    }
+
+    struct Flagged {
+        bool present;
+        StringView message;
+    };
+
+    const Flagged flags[] = {
+        {scan.lineContinuation, "Custom HLSL code must not contain line continuations"},
+        {scan.unterminatedComment, "Custom HLSL code must not contain an unterminated comment"},
+        {scan.unterminatedString, "Custom HLSL code must not contain an unterminated string"},
+        {scan.closesBody, "Custom HLSL code must not close the function body"},
+        {scan.leavesOpen, "Custom HLSL code must not leave a brace open"}};
+    for (const Flagged& flag : flags) {
+        if (!flag.present) {
+            continue;
+        }
+
+        const StringView parts[] = {flag.message};
+        if (auto reported = report(parts); !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+    }
+
+    if (!define.IsEmpty() && HasLineBreak(text)) {
+        const StringView parts[] = {"Custom HLSL define value must be a single line: ", define};
+        if (auto reported = report(parts); !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+    }
+
+    if (!define.IsEmpty() && scan.comment) {
+        const StringView parts[] = {"Custom HLSL define value must not contain comments: ", define};
+        if (auto reported = report(parts); !reported) {
             return Result<bool>::Failure(reported.Error());
         }
     }
@@ -214,18 +158,65 @@ Result<bool> CheckCustomTokens(LoweringContext& context, StringView text) noexce
 
 // 이름 규칙(HLSL 식별자) 검사다. 어기면 진단하고 false다.
 Result<bool> CheckCustomName(LoweringContext& context, StringView name) noexcept {
-    if (IsIdentifier(name)) {
+    if (IsCustomIdentifier(name)) {
         return Result<bool>::Success(true);
     }
 
     const StringView parts[] = {"Custom HLSL name is not a valid identifier: ", name};
-    if (auto reported =
-            CustomError(context, MaterialDiagnosticCode::CustomCodeRule, StringView(), parts);
-        !reported) {
+    if (auto reported = CustomRule(context, parts); !reported) {
         return Result<bool>::Failure(reported.Error());
     }
 
     return Result<bool>::Success(false);
+}
+
+// 예약 이름 진단이다(false).
+Result<bool> ReservedCustomName(LoweringContext& context, StringView name) noexcept {
+    const StringView parts[] = {"Custom HLSL name is reserved: ", name};
+    if (auto reported = CustomRule(context, parts); !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
+// 함수 인자 이름 목록(입력·텍스처 샘플러·추가 출력)이 겹치지 않고 문맥 인자 c가 없는지 본다.
+// 겹치는 이름마다 한 번 진단하고 어기면 false다.
+Result<bool> CheckCustomParameterNames(LoweringContext& context,
+                                       Span<const StringView> names) noexcept {
+    bool clean = true;
+    for (usize index = 0; index < names.Size(); ++index) {
+        if (names[index] == CustomContextName) {
+            auto reserved = ReservedCustomName(context, names[index]);
+            if (!reserved) {
+                return reserved;
+            }
+
+            clean = false;
+            continue;
+        }
+
+        bool repeated = false;
+        bool earlier = false;
+        for (usize other = 0; other < names.Size(); ++other) {
+            if (other != index && names[other] == names[index]) {
+                repeated = true;
+                earlier = earlier || other < index;
+            }
+        }
+
+        if (!repeated || earlier) {
+            continue;
+        }
+
+        clean = false;
+        const StringView parts[] = {"Custom HLSL name is used more than once: ", names[index]};
+        if (auto reported = CustomRule(context, parts); !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+    }
+
+    return Result<bool>::Success(clean);
 }
 
 // CustomOutputType 값의 IR 형이다(MaterialAttributes·범위 밖이면 false).
@@ -364,23 +355,20 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
             return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), Unreadable);
         }
 
-        // 정의 이름은 식별자, 값은 한 줄이고 코드와 같은 토큰 검사를 받는다(파일 범위로 나간다).
+        // 정의 이름은 예약되지 않은 식별자, 값은 한 줄·주석 없음이고 코드와 같은 토큰 검사를
+        // 받는다(파일 범위로 나간다).
         if (auto checked = check(CheckCustomName(context, name.Value())); !checked) {
             return checked;
         }
 
-        if (HasLineBreak(value.Value())) {
-            valid = false;
-            const StringView parts[] = {"Custom HLSL define value must be a single line: ",
-                                        name.Value()};
-            if (auto reported = CustomError(context, MaterialDiagnosticCode::CustomCodeRule,
-                                            StringView(), parts);
-                !reported) {
-                return reported;
+        if (IsCustomIdentifier(name.Value()) && IsReservedDefineName(name.Value())) {
+            if (auto checked = check(ReservedCustomName(context, name.Value())); !checked) {
+                return checked;
             }
         }
 
-        if (auto checked = check(CheckCustomTokens(context, value.Value())); !checked) {
+        if (auto checked = check(CheckCustomTokens(context, value.Value(), name.Value()));
+            !checked) {
             return checked;
         }
 
@@ -391,7 +379,7 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
     }
 
     // V13: 코드 토큰·include 경로·clip 선언(7.5절).
-    if (auto checked = check(CheckCustomTokens(context, code.Value())); !checked) {
+    if (auto checked = check(CheckCustomTokens(context, code.Value(), StringView())); !checked) {
         return checked;
     }
 
@@ -403,17 +391,20 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
         valid = false;
         const StringView parts[] = {"Custom HLSL include path is not an allowed virtual path: ",
                                     path};
-        if (auto reported =
-                CustomError(context, MaterialDiagnosticCode::CustomCodeRule, StringView(), parts);
-            !reported) {
+        if (auto reported = CustomRule(context, parts); !reported) {
             return reported;
         }
     }
 
-    // UE HasPixelDiscard: Yes, 또는 Search이면서 코드에 clip( 또는 discard가 있다(부분 문자열).
-    const bool discards = code.Value().Contains("clip(", StringComparison::CaseSensitive) ||
+    // 주석·문자열 밖 clip 호출·discard 토큰이다(No 선언 거부 — UE 부분 문자열보다 정확하다).
+    CustomCodeScan scan;
+    ScanCustomCode(code.Value(), scan);
+    const bool tokens = scan.clipCall || scan.discardWord;
+    // UE HasPixelDiscard: Yes, 또는 Search이면서 clip(·discard 부분 문자열 — 토큰 검출도 더한다.
+    const bool discards = tokens ||
+                          code.Value().Contains("clip(", StringComparison::CaseSensitive) ||
                           code.Value().Contains("discard", StringComparison::CaseSensitive);
-    if (clip.Value() == static_cast<int64>(CustomClipInstruction::No) && discards) {
+    if (clip.Value() == static_cast<int64>(CustomClipInstruction::No) && tokens) {
         valid = false;
         if (auto reported =
                 context.Error(MaterialDiagnosticCode::CustomCodeRule, StringView(),
@@ -446,12 +437,21 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
             continue;
         }
 
-        auto connected = context.IsConnected(pin.displayName);
-        if (!connected) {
-            return Result<void>::Failure(connected.Error());
+        if (auto checked = check(CheckCustomName(context, pin.displayName)); !checked) {
+            return checked;
         }
 
-        if (!connected.Value()) {
+        // 연결이 없으면 값 없음이고 독(연결된 입력이 값 없이 온 것)이 아니다(키로 찾는다).
+        auto value = context.DynamicInput(pin.key, Optional<float>(), false);
+        if (!value) {
+            return Result<void>::Failure(value.Error());
+        }
+
+        if (value.Value() == NoIrValue && context.Poisoned()) {
+            return Result<void>::Success();
+        }
+
+        if (value.Value() == NoIrValue) {
             SystemAllocator messageScratch;
             StringBuilder<> message(messageScratch);
             message << "Custom material " << description.Value() << " missing input " << inputNumber
@@ -462,15 +462,6 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
 
             return context.Error(MaterialDiagnosticCode::MissingInput, pin.displayName,
                                  message.View());
-        }
-
-        if (auto checked = check(CheckCustomName(context, pin.displayName)); !checked) {
-            return checked;
-        }
-
-        auto value = context.DynamicInput(pin.key, Optional<float>(), false);
-        if (!value || value.Value() == NoIrValue) {
-            return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
         }
 
         IrValueId argument = value.Value();
@@ -510,6 +501,50 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
             !pushed) {
             return pushed;
         }
+    }
+
+    // 함수 인자 이름(입력·텍스처 입력의 <이름>Sampler·추가 출력)이 겹치거나 c면 HLSL 재정의다.
+    Array<String> samplers(scratch);
+    for (const CustomArgumentSlot& argument : arguments) {
+        if (context.TypeOf(argument.value).scalar != IrScalar::Texture) {
+            continue;
+        }
+
+        String sampler(scratch);
+        if (auto assigned = sampler.TryAssign(argument.name); !assigned) {
+            return assigned;
+        }
+
+        if (auto appended = sampler.TryAppend("Sampler"); !appended) {
+            return appended;
+        }
+
+        if (auto pushed = samplers.TryPushBack(Move(sampler)); !pushed) {
+            return pushed;
+        }
+    }
+
+    Array<StringView> parameterNames(scratch);
+    for (const CustomArgumentSlot& argument : arguments) {
+        if (auto pushed = parameterNames.TryPushBack(argument.name); !pushed) {
+            return pushed;
+        }
+    }
+
+    for (const String& sampler : samplers) {
+        if (auto pushed = parameterNames.TryPushBack(sampler.View()); !pushed) {
+            return pushed;
+        }
+    }
+
+    for (const CustomOutputSlot& output : outputs) {
+        if (auto pushed = parameterNames.TryPushBack(output.name); !pushed) {
+            return pushed;
+        }
+    }
+
+    if (auto checked = check(CheckCustomParameterNames(context, parameterNames.View())); !checked) {
+        return checked;
     }
 
     if (!valid) {

@@ -202,8 +202,16 @@ Result<void> LowerRotateAboutAxis(LoweringContext& context) noexcept {
     }
 
     SurfaceMath m(context);
-    const IrValueId axis =
-        m.Track(AdvancedCast(context, AdvancedInput(m, pins[0]), AdvancedVector3, true, pins[0]));
+    const IrValueId axisIn = AdvancedInput(m, pins[0]);
+    if (axisIn != NoIrValue && context.TypeOf(axisIn).components == 1 &&
+        !context.TypeOf(axisIn).IsMatrix()) {
+        // UE: 스칼라(MCT_Float)는 ForceCast가 그대로 두고 AppendVector 뒤 CoerceParameter(Float4)가
+        // 실패한다(HT:4791·4915 — 6.13절 MS2f1).
+        return context.Error(MaterialDiagnosticCode::TypeMismatch, StringView(),
+                             "Cannot cast from smaller type float2 to larger type float4.");
+    }
+
+    const IrValueId axis = m.Track(AdvancedCast(context, axisIn, AdvancedVector3, true, pins[0]));
     // 2π / Period는 UE처럼 번역 때 float로 계산한다.
     const float scale = 2.0f * static_cast<float>(AdvancedPi) / period;
     const IrValueId angle = m.Track(AdvancedCast(
