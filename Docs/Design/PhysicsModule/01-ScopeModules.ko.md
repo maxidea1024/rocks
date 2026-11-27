@@ -44,3 +44,7 @@ Rocks 고유 이름 원칙(UE 이름은 대응표에만, 업계 공용어는 예
 | `UPrimitiveComponent::MoveComponent` | `PrimitiveComponent::MoveComponent` | 공용 동작 이름 |
 | `UpdateOverlaps` | `UpdateOverlaps` | |
 | `FCollisionNotifyInfo` | `ContactNotice`(Physics 내부) | |
+| `AActor::NotifyHit`·`NotifyActorBeginOverlap`·`NotifyActorEndOverlap` | `Actor::OnHit`·`OnBeginOverlap`·`OnEndOverlap`(가상 hook) | Rocks hook 이름(`OnStart`)을 따른다(7.1.10절) |
+| `OnComponentHit`·`OnComponentBeginOverlap`·`OnComponentEndOverlap` | `componentHit`·`componentOverlapBegan`·`componentOverlapEnded`(이벤트 필드) | 7.1.14절 |
+| `OnActorHit`·`OnActorBeginOverlap`·`OnActorEndOverlap` | `actorHit`·`actorOverlapBegan`·`actorOverlapEnded`(이벤트 필드) | 7.1.14절 |
+| `FMTDResult` | `MtdResult` | 7.1.13절 |

@@ -46,10 +46,27 @@ namespace RocksExportSelfTest
 	// 같은지 본다.
 	void RunMaterialExtraction(TArray<FString>& Errors);
 
+	// Substrate 추출(8.8절 6번): Substrate 프로젝트(r.Substrate=True)의 golden 콘텐츠를 내보내 projectSettings.substrate,
+	// FrontMaterial 연결 대상, 속성 집합 머티리얼의 MaterialAttributes·FrontMaterial 두 핀, Slab 입력 이름(GetInputName),
+	// FrontMaterial 없는 머티리얼이 로드 뒤에도 비었음(숨은 그래프 재작성 없음)을 본다. Substrate가 꺼졌으면 돌지 않고
+	// MarkNotRun으로 "not run"을 남긴다.
+	void RunSubstrateExtraction(TArray<FString>& Errors);
+
+	// 머티리얼 굽기(8.9절 1·2·8번): golden M_Golden·MI_Golden과 LightFunction 엔진 머티리얼을 작은 크기로 구워 속성 9개
+	// 순서·색 공간·크기(상수 1×1, HDR emissive 요청 크기), BaseColor(sRGB)·Roughness(선형) 값, 인스턴스 override 반영,
+	// environment, 굽지 않는 영역의 BakeSkipped, 굽기 뒤 모듈 상태 복원을 본다. 렌더링이 안 되면 MarkNotRun으로 남긴다.
+	void RunMaterialBaking(TArray<FString>& Errors);
+
 	// 메시 기록 writer의 경계 사례(5.4절 9·11번, 6.3절 11번): 퇴화 다각형(자기 변을 빼고 변 속성을 같이 옮김, 둘레
 	// 복원), 정점 영향 12개 초과(상위 12개·재정규화·TooManyInfluences), 정점 0개 메시, 다채널 Name 속성.
 	void RunMeshWriterEdgeCases(TArray<FString>& Errors);
 
-	// 위 전부를 돌린다. 모두 통과하면 true다.
+	// 환경이 조건을 갖추지 못해 돌지 않은 시험을 기록한다(통과로 세지 않는다). Reason은 "<시험>: not run: <이유>" 꼴이다.
+	void MarkNotRun(const FString& Reason);
+
+	// 지금까지 기록한 "not run" 목록을 꺼내고 비운다.
+	TArray<FString> TakeNotRun();
+
+	// 위 전부를 돌린다. 실패가 없으면 true다(돌지 않은 시험은 TakeNotRun으로 따로 꺼낸다).
 	bool RunAll(TArray<FString>& Errors);
 }

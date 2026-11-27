@@ -94,8 +94,17 @@ constexpr TypeId BindingTargetIdOf() noexcept {
 }
 
 // 단일 값 형식 T(컨테이너 아님)의 ValueType이다.
+// enum 칸은 생성 헤더가 보이는 리플렉션 enum이어야 한다. enum에는 선언 표지가 없어
+// (GeneratedHeaderVisible이 잡지 못한다) 생성 헤더가 빠진 TU는 칸을 Opaque로 보고, 이 판정을
+// 담은 inline 배치(FrameLayoutOf·EventOps의 frameLayout)가 TU마다 달라져 링커가 고른 판이 생성
+// schema와 어긋난다(ODR — Docs/Design/EventReflection.ko.md ED18).
 template <class T>
 constexpr ValueType BindingValueTypeOf() noexcept {
+    static_assert(!IsEnumV<T> || ReflectedEnumField<T>::Supported,
+                  "an enum argument of a reflected function or event must be a reflected enum "
+                  "whose generated header is included in this translation unit; include "
+                  "<Module/Header.generated.h> of the enum (or of the class that declares the "
+                  "event) before this use");
     if constexpr (IsSameV<T, ObjectHandle>) {
         return ValueType{ValueKind::WeakObjectReference, TypeId{}};
     } else if constexpr (WeakReferenceField<T>::Supported) {

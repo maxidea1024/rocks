@@ -1,0 +1,37 @@
+{
+  "formatVersion": 1,
+  "exporter": {
+    "plugin": "RocksExport",
+    "pluginVersion": "1.0.0",
+    "engineVersion": "5.8.4",
+    "engineCommit": "58902052"
+  },
+  "projectSettings": {
+    "substrate": false,
+    "retainJpegFormat": true
+  },
+  "environment": {
+    "rhi": "D3D12",
+    "gpu": "NVIDIA GeForce GTX 1060 3GB",
+    "driver": "560.94"
+  },
+  "createdUtc": "2026-11-27T13:42:27Z",
+  "assets": [
+    {
+      "objectPath": "/Engine/EngineMaterials/DefaultLightFunctionMaterial.DefaultLightFunctionMaterial",
+      "class": "Material",
+      "file": "assets/Engine/EngineMaterials/DefaultLightFunctionMaterial.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/MI_Golden.MI_Golden",
+      "class": "MaterialInstanceConstant",
+      "file": "assets/Game/RxGolden/MI_Golden.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden",
+      "class": "Material",
+      "file": "assets/Game/RxGolden/M_Golden.json"
+    }
+  ],
+  "redirects": []
+}

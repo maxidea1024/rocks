@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAtlas::curves",
+      "id": "29441a715493401bbb442f01b5fa925b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAtlas::disableAdjustments",
+      "id": "3b76b929ab724470a450ea631eadf7a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ColorCurveAtlas::width",
+      "id": "a420ee289e114f01b39f2e40337f2bf0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ColorCurveAtlas",
+      "id": "979156eaf6654fc395dbadb9fc1c61b1",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

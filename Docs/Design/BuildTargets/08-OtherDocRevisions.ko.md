@@ -6,7 +6,7 @@
 - [유니티 빌드·PCH](../UnityBuildPch.ko.md) 8.4절 248행: 제공 모듈 후보를 "컴파일 환경에 보이는 제공 모듈"로 고쳤다.
 - [셰이더 시스템](../ShaderSystem/09-ToolLoadingReleaseExclusion.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.
 - [AppInfo·CommandLine](../AppInfoCommandLine/README.ko.md) 6장·11.1절 `build::TargetType`: 다섯 값으로 고쳤다. `HostKind`(304행)는 Editor·Server 타깃이 생길 때 더한다.
-- [UI 툴킷](../UiToolkit.ko.md) 7.3절 (g) `MinimalAPI`·`*_API` 행(개정 2): BD27·BD28로 정했다고 고쳤다.
+- [UI 툴킷](../UiToolkit/README.ko.md) 7.3절 (g) `MinimalAPI`·`*_API` 행(개정 2): BD27·BD28로 정했다고 고쳤다.
 - [셰이더 시스템](../ShaderSystem/16-LaterStages/16.01-SH2Design.ko.md) 16.1절 SSD19(개정 36): Sandbox의 워커를 선행 타깃(3.11절)으로 먼저 빌드한다고 고쳤다.
 
 구현 때 고칠 문서:

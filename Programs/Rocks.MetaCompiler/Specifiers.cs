@@ -99,6 +99,10 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public string ScriptName { get; init; } = "";
 
+    // 이벤트 필드의 Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B20 — UE BlueprintAssignable). 이벤트가 아닌 필드는
+    // SchemaValidator가 RMC2603으로 거부한다.
+    public bool ScriptAssignable { get; init; }
+
     // 이벤트 필드 인자 이름 목록 Params="a,b"(Docs/Design/EventReflection.ko.md ED14·ED18 — Event<…> 필드 전용, 쓰지 않았으면 null)다.
     // 이름 규칙과 수는 SchemaValidator(RMC2803)가 본다.
     public string? Params { get; init; }
@@ -271,7 +275,7 @@ internal static class Specifiers
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
-                "ScriptReadOnly" or "ScriptWritable";
+                "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable";
             bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
@@ -303,14 +307,21 @@ internal static class Specifiers
                 "RMC2212", "Write AssetBundles = \"UI,Game\" with identifier names ([A-Za-z_][A-Za-z0-9_]*) and no repeated name.");
         }
 
-        // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1·B10 — RMC2603·RMC2604).
+        // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1·B10·B20 — RMC2603·RMC2604).
         bool scriptReadOnly = values.ContainsKey("ScriptReadOnly");
         bool scriptWritable = values.ContainsKey("ScriptWritable");
+        bool scriptAssignable = values.ContainsKey("ScriptAssignable");
         string scriptName = values.GetValueOrDefault("ScriptName")?.Text ?? "";
         if (scriptReadOnly && scriptWritable)
         {
             throw new MetadataException($"{symbol}: ScriptReadOnly and ScriptWritable cannot be combined", "RMC2603",
                 "Choose ScriptReadOnly (scripts read the field) or ScriptWritable (scripts read and write it).");
+        }
+
+        if (scriptAssignable && (scriptReadOnly || scriptWritable))
+        {
+            throw new MetadataException($"{symbol}: ScriptAssignable cannot be combined with ScriptReadOnly or ScriptWritable", "RMC2603",
+                "ScriptAssignable exposes an Event field to Sparks 'on' handlers; ScriptReadOnly and ScriptWritable expose value fields.");
         }
 
         if (scriptWritable && values.ContainsKey("ReadOnly"))
@@ -319,10 +330,10 @@ internal static class Specifiers
                 "Reflection writes refuse ReadOnly fields; use ScriptReadOnly, or remove ReadOnly if scripts should write the field.");
         }
 
-        if (values.ContainsKey("ScriptName") && !scriptReadOnly && !scriptWritable)
+        if (values.ContainsKey("ScriptName") && !scriptReadOnly && !scriptWritable && !scriptAssignable)
         {
-            throw new MetadataException($"{symbol}: ScriptName needs ScriptReadOnly or ScriptWritable", "RMC2603",
-                "ScriptName renames a field that scripts can see; add ScriptReadOnly or ScriptWritable, or remove ScriptName.");
+            throw new MetadataException($"{symbol}: ScriptName needs ScriptReadOnly, ScriptWritable or ScriptAssignable", "RMC2603",
+                "ScriptName renames a field or event that scripts can see; add ScriptReadOnly or ScriptWritable (an event: ScriptAssignable), or remove ScriptName.");
         }
 
         if (values.ContainsKey("ScriptName") && !IsScriptName(scriptName))
@@ -360,6 +371,7 @@ internal static class Specifiers
             ScriptReadOnly = scriptReadOnly,
             ScriptWritable = scriptWritable,
             ScriptName = scriptName,
+            ScriptAssignable = scriptAssignable,
             Params = values.GetValueOrDefault("Params")?.Text
         };
     }

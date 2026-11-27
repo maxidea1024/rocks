@@ -1,0 +1,44 @@
+## 12. 개정 기록과 기존 스펙의 개정 위치
+
+**초안 2.15(2026.11.27):** UW9 상세 설계 21장을 더했다. 다섯 이름을 UD12대로 바꾸고, 편집 텍스트 Element를 UiFramework로 옮긴다(글자 상태는 Element가 든다, `TextShaper`). 화면 입력 설정은 `ScreenInputHost`로 적용하고(UE `ApplyUIInputConfig`), 플랫폼 창에 커서 보이기·마우스 잠금을 더한다. Element·Widget 소멸자에서는 사용자 코드를 부르지 않는다 — 명시 해제 경로에서 부르고, 그 밖에는 해체 대기열로 미룬다(UE `SObjectWidget` 소멸자와 다른 개선). UV7 음성 시험도 정했다. UW8h2 세 스타일 집합 값(20.11절)과 UW8f·g 리뷰 반영(20.9·20.10절)도 이 판에 들어갔다.
+
+**초안 2.14(2026.11.27):** UW8b 구현 전에 20.4절을 "그리기 중 등록"에서 "그리기 순서 걷기"로 바꿨다. cache root가 그리기를 부분 재사용해 그리기 중 등록은 캐시된 하위 트리를 빠뜨리고, Rocks의 layer가 그리기 순서를 따라 줄지 않아 걷는 순서가 UE (layer, 순번)과 같기 때문이다. UW8a 구현 결정(묶음은 Application마다, `PrepareLayout`의 프레임 시작, World 시각 접근자 후속)도 20.2·20.3절에 적었다.
+
+**초안 2.13(2026.11.27):** 20장 설계 리뷰 20건을 반영했다: host 서비스 묶음, 시계(실제 시각·delta만 자름·수동 시계·그리기 밖 읽기·World 시간), hit 순서 키(layer, 순번)·RetainerBox 조각·CachePanel 등록 위치, 활성 검사 분리, `OnNavigation`과 메뉴·목록 이관, 게임패드·`ScreenInputRouter`·초기 초점(UW8e2), UE 탐색 세부(첫 줄 반환·허용오차·조상 비활성·scope), 단일 자식 slot으로 정정, `ElementCast` static_assert·policy 판정, 스타일 조회 시점·revision, 단계 의존과 분할(e1·e2·h1·h2).
+
+**초안 2.12(2026.11.27):** UW7h 리뷰 반영으로 19.2절 IMM 경로에 취소 판정(빈 조합·`lParam` 0), 커서 플래그, 읽기 실패 처리, SETCONTEXT 다시 받기, 늦은 확정 배출, 표지 잃음 복구, 조합 창 위치를 더했다.
+
+**초안 2.11(2026.11.27):** 20장(Element 동작 정렬 — UW8 상세 설계: 주입 시계, 그리기 중 hit grid, 비활성 경로 자름, 보이기 묶기와 Hidden 갱신, bubble 중 navigation 변환·`NavigationConfig`, UE 방향 탐색, slot 여백·정렬과 CB2 형식 정보, 스타일 등록부, UV2·UV3 시험, 하위 단계 UW8a–UW8i)을 더했다.
+
+**초안 2.10(2026.11.27):** UW7h 착수 전에 19.2절 텍스트 입력 문맥을 구현 형태로 확정했다. 인터페이스를 UiCore에 두고, 시스템·통지를 창별 `TextInputService` 하나로 합쳤다(`GetWindow` 없음). 플랫폼 쪽은 `TextInputClient`와 창 API, 공용 `TextInputSession`이다. 기록은 id·세대 대신 다시 쓰지 않는 일련번호로 들고, 버퍼 키우기를 버리고 고정 용량 넘침 규칙을 적었다.
+
+**초안 2.9(2026.11.27):** 19장(창·입력 계약 — UW7 상세 설계: 영역 지도 게시, 스레드 계약, WindowMode, 펌프 수준 대기, DPI, 텍스트 입력 문맥, 리뷰 18건 반영)을 더했다. 9.1절 UW7 행의 "이벤트 문자열은 프레임 버퍼 offset"을 IME 문자열을 context로 보내는 결정으로 바꿨다.
+
+**초안 2.8(2026.11.26):** 18장(렌더 경계 — UW6 상세 설계, 리뷰 21건 반영)을 더했다. 3.4절 draw buffer 순환 문장을 복사 방식으로 고쳤다. 9.1절 UW6 행의 완료 판정을 RenderGraph 사실(raster pass마다 장치 기록 하나)에 맞게 고쳤다.
+
+**초안 2.7(2026.11.26):** 17장(SVG 벡터 이미지와 아이콘)을 더했다. UD10을 사용자 결정으로 자체 제작 SVG 아이콘으로 개정했다. 9.1절에 UW4s(SVG 경로·아이콘)와 UW4f(초점 표시·텍스트 입력과 IME, 사용자 지적)·UW4g(드래그·드롭 틀, 사용자 요청) 단계를, 16.2절에 Icons·Drag & Drop 탭을 더했다.
+
+**초안 2.6(2026.11.25):** 문서를 장별 폴더로 옮겼다(500줄 규칙, 내용 변경 없음 — 별도 커밋). 단계 순서보다 먼저 만든 UI 코드를 리뷰하고 9.1절(UW0–UW7 재작업 단계·병합 때 정한 터치 스키마·capture 취소 의미)을 더했다. 상태 줄을 "선행 구현 재작업 중"으로 고쳤다.
+
+**초안 2.5(2026.11.24):** [글꼴 설계](../Font/README.ko.md) 개정 1에 맞춰 2절 TextLayout 행의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮기고(서버 타깃 제외 — 빌드 타깃 BD25), 3.12절에 글꼴 상세의 소유 문서를 적고, UT2 행과 UD3에 글꼴 설계 단계·버전 결정(FD14, 사용자 결정 2026-11-24)을 연결했다.
+
+**초안 2.4(2026.11.22):** [노드 그래프](../NodeGraph/README.ko.md) 개정 2의 GR1을 반영했다. 2절 모듈 표의 EditorFramework 책임에서 그래프 Element를 빼고 `GraphView` 모듈(Editor 계층) 행을 더했다. 6절 "그래프 편집" 행을 `GraphView` 모듈과 `NodeGraph` 데이터 모델 기준으로 고쳤다. 9절 UT6에서 그래프 Element를 빼고, 그래프 편집 화면은 노드 그래프 NG5–NG7로 이었다.
+
+**초안 2.3(2026.11.20):** UD15의 확정 범위를 레벨 스크립트가 실제로 쓰는 CLASS 지정자 `NotPlaceable` 하나로 좁혔다. 나머지 표시 메타·편집 메타는 권장안으로 되돌렸다(사용자 결정).
+
+**초안 2.2(2026.11.20):** [레벨 스크립트](../LevelScript.ko.md) 확정(LD3)에 맞춰 7.3절 (e) `NotPlaceable` 행에 사용처(`LevelScript`)와 Outliner 숨김이 편집기 규칙이라는 점을 적고, `NotPlaceable`을 포함한 UD15를 권장안대로 확정했다.
+
+**초안 2.1(2026.11.19):** UE 5.8 `Templates` 대조로 7.3절(CU1·CU2·CU9 보강: Inspector 노출과 편집 위치·도움말·타입·함수 표시 메타·분류 계층·타입 단위 편집 메타·스크립트 재정의 함수·남은 공백 목록)과 결정 UD13–UD17을 더했다. 초안 작성 뒤 서브에이전트 3개(빌드 문서 UE 대조, 7.3절 UE·Rocks 대조, Templates 독립 재대조)로 교차 검증하여 설명 키 통일(`Help`), `DisplayOnly`·`ReadOnly` 분리, 노출 명시(`Edit`), 저장 위치 기준 문맥·Designer 문맥, 편집기 쓰기 경로 거부, 중첩 전파 규칙, 편집 메타데이터 블록, 스크립트 재정의 함수 계약을 반영하고 UE 인용 위치를 바로잡았다. 반영본을 서브에이전트 1개로 다시 검증해 대리 클래스의 등록·저장 관계, interface 다중 상속 허용, `category` 실행 소비처, Category 표시 순서(Rocks 고유), `PrioritizeCategories`·펼침/접힘 병합 규칙, 시험 fixture 예외를 반영했다.
+
+이 개정에 맞춰 함께 고친 문서: [Prefab](../Prefab.ko.md) 개정 4(3.7·3.11·3.13절 — 편집 위치 규칙), [빌드 타깃](../BuildTargets/README.ko.md)(새 문서, `ROCKS_WITH_EDITOR_DATA`). 구현 전에 맞출 문서: [Sparks](../SparksLanguage/README.ko.md) — `@edit(Scope:)` 표기, `ScriptOverridable` 함수와 `override fn`의 대응, 타입·필드 `Help`와 `///` 문서 주석의 기록, 10.1절 예시의 `Edit`이 이 절의 지정자임을 표기. [리플렉션 기반](../ReflectionFoundations.ko.md) 지정자 표 — `Edit`·`DisplayOnly`·`EditScope`·`Help`, CLASS 편집 메타 지정자, `ScriptOverridable`·`NativeOnly`. 빌드 쪽 공백(타깃 종류·의존 공개 범위·플러그인 활성 조건)은 [빌드 타깃](../BuildTargets/README.ko.md)으로 분리했다.
+
+**초안 2.0(2026.11.16):** 초안 1.0의 단일 층 설계를 폐기하고 UE 5.8 두 층 구조로 전면 재작성하였다. 외부 엔진 실행 결과와 비교하던 시험 GO1–GO6, 테마 상속·자식 Widget 배치 속성·`Affects` 효과 플래그 체계(UE 무효화 사유로 대체), AccessKit 후보를 삭제하였다. CU1–CU9의 ID와 7절 번호는 유지하였다. UD7·UD8은 같은 사안으로 유지하였다. UR4·UR5·UD5·UD6은 번호를 새 사안에 다시 사용하였다(이전 의미: UR4 세부 동작 차이, UR5 비교 기준 버전 변동, UD5 외부 코드 차용 방식, UD6 비교 기준 버전). 초안 작성 후 서브에이전트 3개(Element 층 UE 대조, Widget·에디터 층 UE 대조, Rocks 문서 정합성)로 교차 검증하여 무효화 기본 경로, hit grid 셀 크기, 정규화 표, 기본 스타일 출처, 글꼴 구성, 결합 표, Widget 풀, lane 모델 등을 바로잡았다.
+
+이 개정에 맞춰 다음 문서를 고쳤다.
+
+| 문서 · 절 | 개정 전 | 개정 후 |
+|---|---|---|
+| 전체 계획 표지 · 1.4 · 1.9 · 2.5 · 3.1 · 3.2 | 단일 층 툴킷, 하위 viewport widget, UI·TextLayout 모듈 | 개정 1.9 기록, UE 5.8 두 층 구조, viewport Element, UiCore·UiFramework·UiWidget·UiScreens 모듈 |
+| 전체 계획 21 · 21.2 · 21.4 · 21.5 · 22.1 | 단일 층 Control 체계, 자식 widget 배치 속성, 단일 층 입력 전파 순서, GO1–GO6 | Element·Widget 층, slot 배치 속성, tunnel·bubble 라우팅, UV1–UV9 |
+| 전체 계획 29.2 · 30.1 · 30.2 · 31 · 32 · 33.2 · 33.9 · 33.14 · 34 | B12·M3·R08·추적표의 GO1–GO6, 외부 엔진 참고 자료 S75–S77 | UV1–UV9, 개정 1.9 기록, S75–S77 본문 인용 철회 표시 |
+| 상세안 9 · 19.2 · 22.1 · 요구 추적 | 하위 viewport widget, 외부 엔진 비교 시험 | viewport Element·사용자 focus 경로, UV1–UV9 |

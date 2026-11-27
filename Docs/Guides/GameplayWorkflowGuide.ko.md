@@ -176,7 +176,7 @@ rocks::Result<void> Health::ApplyDamage(rocks::int32 amount, rocks::WeakObjectRe
 상태:
 
 - **있음**: `ROCKS_CLASS`, `ROCKS_PROPERTY`, `SaveGame`, `ReadOnly`, `MulticastDelegate`, `OnAwake`
-- **스펙**: `Edit`, `Params`, `ROCKS_FUNCTION`, `ScriptExtensible`([UI 툴킷](../Design/UiToolkit.ko.md) CU1–CU3, Sparks 10.1절)
+- **스펙**: `Edit`, `Params`, `ROCKS_FUNCTION`, `ScriptExtensible`([UI 툴킷](../Design/UiToolkit/README.ko.md) CU1–CU3, Sparks 10.1절)
 - **네트워크 단계**: `Replicated`
 
 작업 순서:

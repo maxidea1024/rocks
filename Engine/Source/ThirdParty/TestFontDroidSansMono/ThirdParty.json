@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "TestFontDroidSansMono",
+  "version": "android-4.4_r1",
+  "upstreamDirectory": "aosp-android-4.4_r1",
+  "source": {
+    "url": "https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-4.4_r1/data/fonts/DroidSansMono.ttf",
+    "sha256": "12b552de765dc1265d64f9f5566649930dde4dba07da0251d9f92801e70a1047",
+    "verification": "Byte copy of data/fonts/DroidSansMono.ttf and data/fonts/NOTICE at AOSP platform/frameworks/base tag android-4.4_r1, fetched 2026-11-25 through the gitiles ?format=TEXT endpoint (base64) and decoded. DroidSansMono is the Mono typeface of the UE 5.8 editor composite font (LegacySlateFontInfoCache.cpp lines 111-122); the copy UE ships (Engine/Content/Slate/Fonts/DroidSansMono.ttf, 78296 bytes) is a different revision than the AOSP file."
+  },
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "NOTICE (Apache License 2.0, The Android Open Source Project)",
+      "file": "aosp-android-4.4_r1/NOTICE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "DroidSansMono.ttf": "12b552de765dc1265d64f9f5566649930dde4dba07da0251d9f92801e70a1047",
+    "NOTICE": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Fixed test font for the UiDemo widget gallery Mono typeface (Docs/Design/UiToolkit section 16.3): read from the repository, never from fonts installed on the machine. Not shipped in any product; the engine default font asset (font design FT3) replaces it."
+  ]
+}

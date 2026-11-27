@@ -15,6 +15,8 @@ struct FRocksExportOptions
 	TArray<FAssetData> SelectedAssets;
 	FString OutputDirectory;
 	bool bClosure = true;
+	// 머티리얼 굽기 텍스처 한 변이다(8.9절 1번). 0이면 굽지 않는다. 굽기는 렌더링이 되는 프로세스에서만 한다.
+	int32 BakeSize = 0;
 };
 
 // 내보내기 결과 요약이다.
@@ -42,8 +44,9 @@ public:
 	// 내보낸다. 실패하면 false이고 OutResult.Error에 이유가 있으며 출력 디렉터리는 바뀌지 않는다.
 	static bool Export(const FRocksExportOptions& Options, FRocksExportResult& OutResult);
 
-	// bundle.json bytes다(3.4절). CreatedUtc가 비면 createdUtc를 쓰지 않는다.
-	static TArray<uint8> MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc);
+	// bundle.json bytes다(3.4절). CreatedUtc가 비면 createdUtc를 쓰지 않는다. bBaked면 environment(굽기 RHI·GPU·드라이버)를 쓴다.
+	static TArray<uint8> MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc,
+		bool bBaked = false);
 
 	// 에셋 JSON bytes다(3.5절). Body의 settings·data 조각이 비면 빈 객체다.
 	static TArray<uint8> MakeAssetJson(const FRocksExportAsset& Asset, const FRocksAssetBody& Body);
