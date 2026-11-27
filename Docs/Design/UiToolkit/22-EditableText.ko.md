@@ -95,6 +95,34 @@
   - 배치: 편집기를 막대 없이 먼저 배치하고, 넘치면 막대 폭만큼 줄여 다시 배치한다(줄바꿈이 바뀌어도 더 넘칠 뿐이라 두 번이면 끝난다 — 결정적). UE는 다음 Tick에 막대를 보이고 한 프레임 흔들린다.
   - 동기화: 상자 배치가 편집기 스크롤로 막대 `SetState(offset / 내용, 보이는 / 내용)`을 맞춘다(편집기 스크롤이 바뀌면 배치 무효화가 상자까지 올라온다). 막대를 끌면 `onScrolled(fraction)` → `SetScrollOffset(fraction × 내용)`.
 
+### 22.7a 편집 문맥 메뉴와 오른쪽 끌기 스크롤(UW4f2e)
+
+- **오른쪽 누름**(UE `FSlateEditableTextLayout::HandleMouseButtonDown` 1320–1366행): 조합 중이면 무시한다(지금 포인터 규칙). 선택이 있고 누른 자리가 선택 밖이면 선택을 풀고 caret을 누른 자리로 옮긴다. 선택 안을 누르면 그대로 둔다(그 선택을 잘라내기·복사한다). 포인터를 잡는다(capture). 초점은 Application 누름 규칙으로 편집기에 온다(UE `SetUserFocus(Mouse)`). 끈 양은 0으로 둔다.
+- **오른쪽 끌기 스크롤**(UE `SMultiLineEditableText::OnMouseMove` 823–857행, `IsRightClickScrolling` 914–917행)
+  - 여러 줄이고 넘칠 때만이다(ContentHeight > ViewHeight — UE `VScrollBar->IsNeeded`). 세로 이동량의 절댓값을 누적한다.
+  - 누적이 `PointerDragThreshold`(5 px — UE `GetDragTriggerDistance`) 이상이면 스크롤 중이다. 스크롤을 포인터 이동만큼 반대로 옮긴다(`scroll -= dy` — 내용을 잡아 끄는 방향).
+  - 커서: UE는 숨기고 놓을 때 누른 자리로 되돌린다(high precision mouse, software cursor). Rocks에는 Platform 커서 숨김·위치 hook이 아직 없어 커서를 그대로 둔다. hook은 UW4n(숫자 입력 끌기 — 같은 요구)에서 생기면 이 규칙에도 넣는다.
+- **오른쪽 놓기**(UE `HandleMouseButtonUp` 1436–1470행, `SMultiLineEditableText::OnMouseButtonUp` 803–821행): capture를 놓는다. 스크롤 중이었으면 메뉴를 열지 않는다. 아니고 놓은 자리가 편집기 안이면 문맥 메뉴를 놓은 자리에 연다.
+- **키보드로 열기(Rocks 보강)**: Shift+F10이면 caret 자리(caret 줄 아래)에 연다(Windows 관례 — UE 편집 텍스트에는 없다). 메뉴 키(Apps)는 `input::Key`에 없어 넣지 않는다.
+- **메뉴 항목**(UE `BuildDefaultContextMenu` 3808–3852행): 묶음 "Modify Text"(제목 — ASCII 대문자로 보임)에 Undo, 다음 묶음 Cut·Copy·Paste·Delete, 다음 묶음 Select All. 단축키 표시는 Ctrl+Z·Ctrl+X·Ctrl+C·Ctrl+V·Delete·Ctrl+A다(macOS는 Ctrl 대신 Cmd — 키 처리의 command 규칙과 같다).
+- **사용 조건**(UE `CanExecute*`)
+  - Undo: 읽기 전용이 아니고 조합 중이 아니다(3359–3367행 — 이력이 비어도 켜져 있고, 실행은 이력이 있을 때만 한다).
+  - Cut: 읽기 전용·비밀번호가 아니고 선택이 있다(1960–1983행).
+  - Copy: 비밀번호가 아니고 선택이 있다(2013–2030행).
+  - Paste: 읽기 전용이 아니고 클립보드에 글자가 있다(2054–2073행). UE는 항목을 그릴 때마다 클립보드를 읽는다. Rocks는 메뉴를 열 때 한 번 읽은 값으로 정한다(메뉴가 열린 동안 다른 앱이 클립보드를 바꾸는 경우만 다르다).
+  - Delete: 읽기 전용이 아니고 선택이 있다(1741–1758행).
+  - Select All: 늘 켜져 있다(1881–1884행).
+  - 실행은 키 동작과 같은 함수다(사용자 편집 — 통지·이력). 항목을 실행하면 메뉴가 닫힌다.
+- **초점**
+  - 메뉴는 열 때 초점을 받는다(UE `PushMenu(bFocusImmediately = true)`). 마우스로 열면 Pointer(외곽선 없음), Shift+F10이면 Navigation(첫 항목 외곽선)이다.
+  - 메뉴가 열린 동안 편집기의 초점 잃음·받음은 아무 일도 하지 않는다: 확정·선택 해제·IME 끄기·전체 선택·초점 글자 기억 모두 없다(UE `HandleFocusReceived`·`HandleFocusLost`의 ActiveContextMenu 검사 871·934행). caret은 그리지 않고 선택은 그대로 그린다.
+  - 메뉴가 닫히면 초점은 편집기로 돌아온다(MenuAnchor 초점 복원 — UE `OnContextMenuClosed` 2219–2224행). 사용자가 메뉴 밖을 눌러 다른 요소로 초점을 옮겼으면 편집기는 그때 초점 잃음을 처리한다(확정).
+- **메뉴 자리**: 편집기 안에 크기 0의 `MenuAnchor`를 메뉴가 열린 동안만 자식으로 두고 연 자리에 배치한다(`MenuPlacement::Below` — 메뉴 왼쪽 위가 연 자리, 창에 맞춤). 닫히면 뗀다(편집기 자식 수는 평소대로 레이블·힌트다).
+- **Application 찾기**: 메뉴 문맥(`MenuContext`)에 Application이 필요하다. `Application::Find(const Element&)`(UiFramework 정적 함수)를 이번에 둔다. `UiHostServices`에 소유자 표지(`SetOwner(kind, owner)`·`FindOwner(kind)` — UiCore는 형식을 모르므로 표지 주소가 같을 때만 돌려준다)를 두고, Application이 자기 묶음에 자기를 단다(소멸 때 뗀다). 트리에 붙지 않았거나 Application이 없으면 null이고 메뉴를 열지 않는다. 16.5절 `Element::FindApplication`의 기반이다 — UiCore Element는 Application 형식을 모르므로 이름은 `Application::Find`다. 다른 API 이전(목록·화면 컨테이너 등)은 UW4a2 몫이다.
+- 메뉴 글자는 편집기 셰이퍼로 shaping한다(메뉴 스타일 글꼴 크기 — 글꼴 종류는 셰이퍼 서명이 바뀔 때, 22장 첫 문단).
+- **초점 받음의 스크롤(UE와 맞춤)**: 초점을 받을 때 전체 선택(`SetSelectAllTextWhenFocused`)으로 caret이 움직여도 스크롤하지 않는다(UE `HandleFocusReceived` 912–917행 `PositionToScrollIntoView.Reset`).
+- 시험: 선택 밖·안 오른쪽 누름, 놓은 자리에 메뉴, 항목 사용 조건(읽기 전용·비밀번호·선택·클립보드·조합), 항목 실행(잘라내기·복사·붙여 넣기·지우기·전체 선택·되돌리기와 통지), 메뉴 초점과 복원, 메뉴 동안 초점 잃음이 확정하지 않음, 끌기 문턱(4 px는 메뉴, 6 px는 스크롤), 한 줄은 끌어도 메뉴, Shift+F10, `Application::Find`, 초점 받음 전체 선택이 스크롤하지 않음.
+
 ### 22.8 Widget 층
 
 - `EditableTextWidget`·`MultiLineEditableTextWidget`은 `EditableText`를, `EditableTextBoxWidget`·`MultiLineEditableTextBoxWidget`은 `EditableTextBox`를 만든다. 속성(글자·힌트·오류·비밀번호·읽기 전용·글꼴 크기·전체 선택 설정)을 밀어 넣는 방식은 지금과 같다.
@@ -126,6 +154,6 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 - **UW4f2b**: 더블·세 번 클릭 선택·caret 깜박임.
 - **UW4f2c**: 오류 표지·팝업·여러 줄 스크롤 막대.
 - **UW4f2d**: 갤러리 "Text Input" 묶음·self-test 화소 확인.
-- **UW4f2e**: 편집 문맥 메뉴(오른쪽 단추 — UE 기본 메뉴 항목·활성 조건)와 여러 줄 오른쪽 단추 끌기 스크롤(끈 양이 문턱 아래면 메뉴, 넘으면 스크롤 — UE 규칙). 상세는 착수 때 22.7절 뒤에 쓴다.
+- **UW4f2e**: 편집 문맥 메뉴와 여러 줄 오른쪽 단추 끌기 스크롤(22.7a절), `Application::Find`.
 
 리뷰어는 9.1절대로 UW4f(f2·f3) 끝에 한 번 둔다.
