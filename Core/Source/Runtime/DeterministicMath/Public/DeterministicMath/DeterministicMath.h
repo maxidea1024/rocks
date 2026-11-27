@@ -18,8 +18,8 @@
 // - 결과가 NaN이면 항상 고정 quiet NaN(double 0x7FF8000000000000)이다(CPU마다 다른 기본 NaN 비트를
 //   쓰지 않는다).
 // - 정확도는 결정성과 별개다. 상한(가장 가까운 double까지의 비트 거리)은 생성한 고정밀 기준값 표로
-//   시험한다: Exp2·Log2·Acos 1, Pow·sRGB·Gamma22 2, SinPi·CosPi 2(비정규 결과는 1 더). 결과 비트를
-//   바꾸는 변경은 Version을 올린다(너겟 키·cookKey에 들어간다).
+//   시험한다: Exp2·Log2·Acos 1, Pow·sRGB·Gamma22 2, SinPi·CosPi 2(비정규 결과는 1 더), Cos·Atan 2.
+//   결과 비트를 바꾸는 변경은 Version을 올린다(너겟 키·cookKey에 들어간다).
 //
 // 사용 예:
 //   double linear = deterministic::SrgbToLinear(0.5);          // sRGB 부호화 값 → 선형
@@ -50,6 +50,16 @@ ROCKS_DETERMINISTICMATH_API double Pow(double base, double exponent) noexcept;
 // (SinPi(±n) = ±0, CosPi(n + ½) = +0). ±Inf·NaN은 고정 NaN.
 ROCKS_DETERMINISTICMATH_API double SinPi(double x) noexcept;
 ROCKS_DETERMINISTICMATH_API double CosPi(double x) noexcept;
+
+// cos(x)(라디안)다. 3단 Cody-Waite π/2 축소(|x| ≤ 2^20·π/2에서 정확 — 정확도 상한 2 ulp)로 sin·cos
+// 핵을 고른다. 그보다 큰 |x|는 CosPi(|x|/π)로 결정적인 [−1, 1] 값을 내지만 정확도는 보장하지
+// 않는다. ±Inf·NaN은 고정 NaN. 커브 쿠킹 평가의 Cardano 세 실근(Docs/Design/CurveData 5.9절 D22)이
+// 쓴다.
+ROCKS_DETERMINISTICMATH_API double Cos(double x) noexcept;
+
+// arctan(x)(라디안, [−π/2, π/2])다. 정확도 상한 2 ulp, ±Inf → ±π/2(가장 가까운 double), ±0 → ±0,
+// NaN → 고정 NaN. 커브 쿠킹 평가의 가중 접선 각도(UE atanf 자리 — CurveData 5.9절)가 쓴다.
+ROCKS_DETERMINISTICMATH_API double Atan(double x) noexcept;
 
 // arccos(x)(라디안, [0, π])다. Acos(1) = +0, Acos(−1) = π(가장 가까운 double), |x| > 1·NaN은
 // 고정 NaN. MikkTSpace 패치·가중 법선의 코너 각(Docs/Design/MeshAnimationAssets 결정 MA-D5)이 쓴다.
