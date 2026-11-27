@@ -7,6 +7,34 @@
 
 namespace rocks::exchange_detail {
 
+usize FindAssetBlob(const ExchangeAsset& asset, JsonValue reference) noexcept {
+    StringView hex;
+    StringView layout;
+    uint64 count = 0;
+    uint64 components = 0;
+    if (!ReadString(Member(reference, "blob"), hex) ||
+        !ReadString(Member(reference, "layout"), layout) ||
+        !ReadUInt(Member(reference, "count"), count) ||
+        !ReadUInt(Member(reference, "components"), components)) {
+        return asset.blobs.Size();
+    }
+
+    auto digest = Sha256Digest::ParseHex(hex);
+    if (!digest) {
+        return asset.blobs.Size();
+    }
+
+    for (usize index = 0; index < asset.blobs.Size(); ++index) {
+        const ExchangeBlobRef& blob = asset.blobs[index];
+        if (blob.digest == digest.Value() && blob.count == count && blob.components == components &&
+            StringView(ExchangeBlobLayoutName(blob.layout)) == layout) {
+            return index;
+        }
+    }
+
+    return asset.blobs.Size();
+}
+
 bool Number(JsonValue value, double& out) noexcept {
     return static_cast<bool>(ReadExchangeNumber(value, out));
 }

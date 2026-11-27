@@ -726,9 +726,10 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             continue;
         }
 
-        // 이벤트 필드는 값으로 저장되지 않는다(Docs/Design/EventReflection.ko.md 3.1절) — 레코드에
-        // 있으면 읽은 byte의 손상이다(Transient 이벤트도).
-        if (IsEventField(schema.fields[schemaIndex])) {
+        // 이벤트 필드는 바인딩 기록이다(Docs/Design/EventReflection.ko.md ED21). Transient 이벤트는
+        // 쓰지 않으므로 레코드에 있으면 읽은 byte의 손상이다.
+        const bool event = IsEventField(schema.fields[schemaIndex]);
+        if (event && HasFlag(schema.fields[schemaIndex].flags, FieldFlags::Transient)) {
             return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
@@ -743,6 +744,40 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             (context.Policy().includeFlags != 0 &&
              (schema.fields[schemaIndex].flags & context.Policy().includeFlags) == 0)) {
             return Result<void>::Failure(ErrorCode::CorruptData);
+        }
+
+        if (event) {
+            const RuntimeEventOps* events = node.lease.EventOps(schemaIndex);
+            if (events == nullptr) {
+                return Result<void>::Failure(ErrorCode::Unsupported);
+            }
+
+            FieldScope eventScope(context, schema.fields[schemaIndex], schema.id, nullptr,
+                                  StructView{}, FieldCodecFrame::NoIndex, nullptr);
+            context.BeginField();
+            const uint64 eventBefore = budget.Used();
+            if (auto checked = DecodeEventBindings(field.Value(), context, nullptr, 0, schema.id,
+                                                   schemaIndex, events);
+                !checked) {
+                return checked;
+            }
+
+            // 2단계가 같은 기록을 다시 읽으므로 1단계 작업량만큼 미리 청구한다(값 필드와 같다).
+            const uint64 eventUsed = budget.Used() - eventBefore;
+            spent = budget.Spend(eventUsed > context.Charged() ? eventUsed - context.Charged() : 0);
+            if (!spent) {
+                return spent;
+            }
+
+            StoredField kept;
+            kept.schemaIndex = schemaIndex;
+            kept.view = field.Value();
+            kept.events = events;
+            if (!node.fields.TryPushBack(kept)) {
+                platform::Fatal("Object graph field index reservation failed");
+            }
+
+            continue;
         }
 
         auto accessor = FindOps(node.lease, field.Value().id, budget);

@@ -26,7 +26,7 @@ DisplayPixel ExpectedTonemapPixel(const float (&scene)[3],
                                   const render::TonemapConstants& constants = {}) noexcept;
 
 // 텍스처 표시 픽셀이다: texel(셰이더가 읽는 값 — TexelCodec DecodeTexel) → 쿠킹 swizzle → 정수면
-// 배율 → 표시 방식(LDR 그대로·HDR 노출 + filmic·깊이 빨강 회색).
+// 배율 → 표시 방식(LDR 그대로·HDR 노출 + filmic·깊이 빨강 회색·노멀 맵 복원 법선 n × 0.5 + 0.5).
 DisplayPixel ExpectedInspectorPixel(const screen::InspectorTexture& texture,
                                     const float (&texel)[4],
                                     const render::TonemapConstants& constants = {}) noexcept;

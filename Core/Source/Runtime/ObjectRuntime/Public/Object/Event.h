@@ -232,6 +232,34 @@ public:
         return removed;
     }
 
+    // 살아 있는 리플렉션 바인딩을 등록 순서로 visit(target, functionId)한다(native 구독은 빼고,
+    // 죽음 표시는 건너뛴다 — EventReflection ED20 저장·EV5 목록). visit은 Result<void>를 돌려주고
+    // 실패하면 그 오류로 멈춘다. visit 안에서 이 이벤트를 바꾸지 않는다.
+    //
+    // 사용 예:
+    //   auto visited = died.ForEachBinding([&](ObjectHandle target, Guid function) noexcept {
+    //       return list.TryPushBack({target, function});
+    //   });
+    template <class Visit>
+    Result<void> ForEachBinding(Visit&& visit) const noexcept {
+        if (state_ == nullptr) {
+            return Result<void>::Success();
+        }
+
+        for (const Record& record : state_->records) {
+            if (record.dead) {
+                continue;
+            }
+
+            if (auto visited = visit(record.binding.Target(), record.binding.FunctionId());
+                !visited) {
+                return visited;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
     bool IsBound() const noexcept {
         return state_ != nullptr && state_->delegate.IsBound();
     }

@@ -239,12 +239,30 @@ bool RunUntilStreamsIdle(AudioEngine& fixture,
                          AudioControlMode mode = AudioControlMode::Inline) noexcept {
     for (uint32 frame = 0; frame < MaxTestFrames; ++frame) {
         const AudioControlStats stats = fixture.audio->ControlStats();
-        if (stats.activeVoices == 0 && stats.releasingVoices == 0 && stats.registeredClips == 0 &&
-            stats.activeStreams == 0) {
+        if (stats.activeVoices == 0 && stats.stoppingVoices == 0 && stats.voicelessPlaybacks == 0 &&
+            stats.releasingVoices == 0 && stats.registeredClips == 0 && stats.activeStreams == 0) {
             return true;
         }
 
         if (!StepFrame(fixture, mode)) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+// 살아 있는 voice가 expectedVoices이고 분리·놓기·스트림 회수가 끝날 때까지 돈다(voice 없는 재생은
+// 남는다).
+bool RunUntilStreamsIdleExcept(AudioEngine& fixture, uint32 expectedVoices) noexcept {
+    for (uint32 frame = 0; frame < MaxTestFrames; ++frame) {
+        const AudioControlStats stats = fixture.audio->ControlStats();
+        if (stats.activeVoices == expectedVoices && stats.stoppingVoices == 0 &&
+            stats.releasingVoices == 0 && stats.activeStreams == 0) {
+            return true;
+        }
+
+        if (!fixture.Frame()) {
             return false;
         }
     }
@@ -409,9 +427,10 @@ TEST(EngineAudio_StreamReplayHasNoGrowth) {
     CHECK(fixture.audio->ControlStats().activeStreams == 0);
 }
 
-// 슬롯이 다 차면 새 스트림 재생은 VoiceLimit로 끝나고 streamSlotRejects가 오른다(Ignored는 장치
-// 없음이라 따로 둔다). voice를 먼저 잡았다가 놓으므로 voice 계수는 그대로다. 슬롯이 풀리면 다시
-// 재생된다.
+// 슬롯이 다 차면 새 스트림 one-shot은 VoiceLimit로 끝나고 streamSlotRejects가 오른다(Ignored는 장치
+// 없음이라 따로 둔다). 새 스트림 loop는 끝나지 않고 voice 없이 남아 묶음마다 다시 시도하고
+// (resumeFailures), 슬롯이 풀리면 시작한다(3.41.1절). voice를 먼저 잡았다가 놓으므로 voice 계수는
+// 그대로다.
 TEST(EngineAudio_StreamSlotsExhausted) {
     AudioEngineHostOptions options = DeterministicOptions(true);
     options.streamSlots = 1;
@@ -420,15 +439,27 @@ TEST(EngineAudio_StreamSlotsExhausted) {
     REQUIRE(fixture.initialized);
     const SharedPtr<const SoundStreamData> data =
         MakeStreamData(fixture.allocator, audio::OpusPlatformSampleRate);
-    const SoundSourceRef sound = StreamSound(fixture.allocator, data, true);
+    const SoundSourceRef loop = StreamSound(fixture.allocator, data, true);
+    const SoundSourceRef shot = StreamSound(fixture.allocator, data, false);
     EventLog log(fixture.allocator);
+    // 긴 정지 fade 중인 PCM voice: 스트림 슬롯이 모자라도 이것을 끊지 않는다(끊어도 슬롯이 생기지
+    // 않는다 — 3.41.1절 여유 부족).
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.01f, TestRate);
+    auto fading = fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true));
+    REQUIRE(fading);
+    REQUIRE(fixture.Frames(2));
+    REQUIRE(fixture.audio->Stop(fading.Value(), TestRate * 10));
     PlayOptions first;
     first.onEvent = log.Callback(fixture.allocator);
-    auto playing = fixture.audio->Play2D(sound, Move(first));
+    auto playing = fixture.audio->Play2D(loop, Move(first));
     REQUIRE(playing);
     PlayOptions second;
     second.onEvent = log.Callback(fixture.allocator);
-    REQUIRE(fixture.audio->Play2D(sound, Move(second)));
+    REQUIRE(fixture.audio->Play2D(shot, Move(second)));
+    PlayOptions third;
+    third.onEvent = log.Callback(fixture.allocator);
+    auto waiting = fixture.audio->Play2D(loop, Move(third));
+    REQUIRE(waiting);
     REQUIRE(fixture.Frames(3));
     REQUIRE(log.Count(PlaybackEventKind::Ended) == 1);
     bool limited = false;
@@ -441,14 +472,74 @@ TEST(EngineAudio_StreamSlotsExhausted) {
     const AudioControlStats rejected = fixture.audio->ControlStats();
     CHECK(rejected.streamSlotRejects == 1);
     CHECK(rejected.voiceLimitRejects == 0 && rejected.activeVoices == 1);
+    CHECK(rejected.voicelessPlaybacks == 1 && rejected.resumeFailures >= 1);
+    CHECK(rejected.headroomCuts == 0 && rejected.stoppingVoices == 1);
+    CHECK(fixture.audio->Status(waiting.Value()) == PlaybackStatus::Pending);
     REQUIRE(fixture.audio->Stop(playing.Value(), 0));
-    REQUIRE(RunUntilStreamsIdle(fixture));
-    PlayOptions third;
-    third.onEvent = log.Callback(fixture.allocator);
-    REQUIRE(fixture.audio->Play2D(sound, Move(third)));
-    REQUIRE(fixture.Frames(3));
+    for (uint32 frame = 0; frame < MaxTestFrames && log.Count(PlaybackEventKind::Started) < 2;
+         ++frame) {
+        REQUIRE(fixture.Frame());
+    }
+
     CHECK(log.Count(PlaybackEventKind::Started) == 2);
+    CHECK(fixture.audio->Status(waiting.Value()) == PlaybackStatus::Playing);
+    CHECK(fixture.audio->ControlStats().voicelessPlaybacks == 0);
     CHECK(fixture.audio->ControlStats().streamSlotRejects == 1);
+    REQUIRE(fixture.audio->Stop(waiting.Value(), 0));
+    REQUIRE(fixture.audio->Stop(fading.Value(), 0));
+    REQUIRE(RunUntilStreamsIdle(fixture));
+}
+
+// 상한에서 빼앗긴 스트림 loop는 스트림 슬롯을 돌려주고(activeStreams 0) voice 없이 남았다가, 자리가
+// 나면 새 디코더로 다시 시작한다(Started는 한 번 — 3.41.1절).
+TEST(EngineAudio_StreamLoopStolenReturnsSlot) {
+    constexpr uint32 Fillers = 32;
+    OpusRegistryScope opus;
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const SharedPtr<const SoundStreamData> data =
+        MakeStreamData(fixture.allocator, audio::OpusPlatformSampleRate);
+    EventLog log(fixture.allocator);
+    PlayOptions streamOptions;
+    streamOptions.onEvent = log.Callback(fixture.allocator);
+    auto stream =
+        fixture.audio->Play2D(StreamSound(fixture.allocator, data, true), Move(streamOptions));
+    REQUIRE(stream);
+    REQUIRE(fixture.Frames(3));
+    REQUIRE(fixture.audio->ControlStats().activeStreams == 1);
+    const SharedPtr<const SoundPcm> silent = MakeConstantPcm(fixture.allocator, 0.0f, TestRate);
+    SoundPlayable fillerPlayable;
+    fillerPlayable.pcm = silent;
+    fillerPlayable.looping = true;
+    fillerPlayable.priority = 10.0f;
+    auto filler = SoundSourceRef::TryCreate(fixture.allocator, fillerPlayable);
+    REQUIRE(filler);
+    Array<PlaybackHandle> fillers(fixture.allocator);
+    for (uint32 index = 0; index < Fillers; ++index) {
+        auto played = fixture.audio->Play2D(filler.Value());
+        REQUIRE(played);
+        REQUIRE(fillers.TryPushBack(played.Value()));
+    }
+
+    REQUIRE(RunUntilStreamsIdleExcept(fixture, Fillers));
+    CHECK(fixture.audio->ControlStats().voicelessPlaybacks == 1);
+    CHECK(fixture.audio->ControlStats().activeStreams == 0);
+    for (const PlaybackHandle handle : fillers) {
+        REQUIRE(fixture.audio->Stop(handle, 0));
+    }
+
+    for (uint32 frame = 0;
+         frame < MaxStreamFrames && fixture.audio->ControlStats().activeStreams == 0; ++frame) {
+        REQUIRE(fixture.Frame());
+    }
+
+    REQUIRE(fixture.Frames(3));
+    CHECK(fixture.audio->ControlStats().activeStreams == 1);
+    CHECK(fixture.audio->ControlStats().voicelessPlaybacks == 0);
+    CHECK(log.Count(PlaybackEventKind::Started) == 1);
+    CHECK(log.Count(PlaybackEventKind::Ended) == 0);
+    REQUIRE(fixture.audio->Stop(stream.Value(), 0));
+    REQUIRE(RunUntilStreamsIdle(fixture));
 }
 
 // 재생 중(loop) 엔진을 내려도 종료 drain이 끝난다(서비스는 장치 Close 뒤 멈추고 활성 작업을

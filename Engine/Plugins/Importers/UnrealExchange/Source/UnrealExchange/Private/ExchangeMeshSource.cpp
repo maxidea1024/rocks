@@ -5,7 +5,7 @@
 #include <MeshSource/MeshSourceData.h>
 #include <UnrealExchange/ExchangeMeshSource.h>
 
-#include "ExchangeJsonRead.h"
+#include "ExchangeMeshCommon.h"
 
 // 교환 MeshSource 기록 적재다(Docs/Design/UnrealExchange 5.5절 1번).
 
@@ -13,6 +13,7 @@ namespace rocks {
 
 namespace exchange_mesh_source {
 
+using exchange_detail::FindAssetBlob;
 using exchange_detail::Member;
 using exchange_detail::ReadString;
 using exchange_detail::ReadUInt;
@@ -67,36 +68,6 @@ usize FindName(Span<const StringView> names, StringView name) noexcept {
     }
 
     return names.Size();
-}
-
-// 기록 안 blob 참조 객체({blob, bytes, layout, components, count})가 가리키는 asset.blobs 번호다.
-// 없으면 blobs 수다.
-usize FindBlob(const ExchangeAsset& asset, JsonValue reference) noexcept {
-    StringView hex;
-    StringView layout;
-    uint64 count = 0;
-    uint64 components = 0;
-    if (!ReadString(Member(reference, "blob"), hex) ||
-        !ReadString(Member(reference, "layout"), layout) ||
-        !ReadUInt(Member(reference, "count"), count) ||
-        !ReadUInt(Member(reference, "components"), components)) {
-        return asset.blobs.Size();
-    }
-
-    auto digest = Sha256Digest::ParseHex(hex);
-    if (!digest) {
-        return asset.blobs.Size();
-    }
-
-    for (usize index = 0; index < asset.blobs.Size(); ++index) {
-        const ExchangeBlobRef& blob = asset.blobs[index];
-        if (blob.digest == digest.Value() && blob.count == count && blob.components == components &&
-            StringView(ExchangeBlobLayoutName(blob.layout)) == layout) {
-            return index;
-        }
-    }
-
-    return asset.blobs.Size();
 }
 
 uint32 ReadWord(const uint8* bytes) noexcept {
@@ -266,7 +237,7 @@ Result<void> ReadTopology(const ExchangeAsset& asset, Span<const Span<const uint
         data.triangleCount};
     Array<uint8> joined(allocator);
     for (usize index = 0; index < TopologyArrays; ++index) {
-        const usize blob = FindBlob(asset, topology.At(index));
+        const usize blob = FindAssetBlob(asset, topology.At(index));
         if (blob == asset.blobs.Size() || asset.blobs[blob].layout != ExchangeBlobLayout::U32 ||
             asset.blobs[blob].components != TopologyComponents[index] ||
             (expected[index] != TopologyCountUnchecked &&
@@ -316,7 +287,7 @@ Result<void> ReadAttribute(const ExchangeAsset& asset, Span<const Span<const uin
     out.record.element = static_cast<MeshElement>(elementIndex + 1);
     out.record.type = static_cast<MeshValueType>(typeIndex + 1);
     out.record.channels = static_cast<uint8>(channels);
-    const usize blob = FindBlob(asset, Member(item, "data"));
+    const usize blob = FindAssetBlob(asset, Member(item, "data"));
     if (blob == asset.blobs.Size()) {
         return Corrupt(failure);
     }
