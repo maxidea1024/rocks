@@ -82,6 +82,16 @@ public:
     // 할당하지 않고 Fatal로 가는 경로가 없다.
     float Evaluate(float time, float fallback = 0.0f) const noexcept;
 
+    // 쿠킹용 결정적 평가다(설계 5.9절 D22). Evaluate와 같은 의미(외삽·순환·빈 커브·특수 입력)이고
+    // 가중 구간의 수학만 결정적이다(CurveMathDeterministic — 호스트와 무관하게 같은 비트). 결과가
+    // NaN이면 고정 quiet NaN(0x7FC00000)이다. 비가중 구간은 Evaluate와 비트가 같고, 가중 구간은 몇
+    // ulp 다를 수 있다. 결과가 쿠킹 byte(쿠킹 패키지·너겟·구운 원본)에 들어가는 곳만 쓴다 —
+    // 런타임은 Evaluate(UE 비트).
+    //
+    // 사용 예(atlas 굽기):
+    //   const float value = curve.EvaluateDeterministic(time);
+    float EvaluateDeterministic(float time, float fallback = 0.0f) const noexcept;
+
     // 키 ≤ 1이거나, 모든 키 값이 첫 키 값과 tolerance 안이고 Cubic 키가 없으면 참이다(UE
     // FRichCurve::IsConstant). tolerance가 NaN이면 키가 둘 이상일 때 거짓이다.
     bool IsConstant(float tolerance = 1.0e-8f) const noexcept;
@@ -208,6 +218,13 @@ public:
     // 실패면 OutOfMemory(실패하면 커브는 그대로다).
     Result<void> TryRemoveRedundantKeys(float tolerance,
                                         Optional<FrameRate> sampleRate = {}) noexcept;
+
+    // 쿠킹용 결정적 판이다(설계 5.9절 D22): 위와 같은 규칙이고 비교 평가만 결정적 수학 정책
+    // (CurveMathDeterministic)이다. 허용오차 0의 비교가 마지막 비트로 키를 남길지 정하므로, 결과가
+    // 쿠킹 byte에 들어가는 곳(커브 표 쿠킹)이 쓴다. 호출자는 RunWithDeterministicFloatingPoint
+    // 안에서 부른다. 실패는 위와 같다.
+    Result<void> TryRemoveRedundantKeysDeterministic(float tolerance,
+                                                     Optional<FrameRate> sampleRate = {}) noexcept;
 
     // 범위판이다: 시간이 first 이하인 마지막 키부터 last 이상인 첫 키까지만 본다(그 둘과 바깥 키는
     // 남긴다). 비교 기준은 시작 키에서 시작한다(UE는 index 0 — 설계 15절 8). first ≥ last이거나
