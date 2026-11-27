@@ -95,7 +95,8 @@ Result<void> WindowTitleBar::AttachToolTip(WindowControlButton& button,
                                     : button.IsFullscreen()            ? ExitFullscreenToolTip
                                     : button.IsMaximized()             ? RestoreToolTip
                                                                        : MaximizeToolTip;
-            auto label = makeLabel_.Execute(text, DefaultToolTipStyle().text.font);
+            auto label = makeLabel_.Execute(
+                text, FindStyle<ToolTipStyle>("ToolTip", DefaultToolTipStyle()).text.font);
             if (!label) {
                 return Result<SharedPtr<Element>>::Failure(label.Error());
             }

@@ -179,6 +179,13 @@ public:
     SharedPtr<TextInputService> FindTextInputService() const noexcept;
     // 그 프레임의 UI 시각이다(20.3절). 묶음이 없으면 0이다.
     FrameTime FindFrameTime() const noexcept;
+    // 활성 앱 스타일에서 name을 찾는다(20.11절 — 측정·배치·그리기 어디서나). 없으면 fallback이다.
+    template <typename T>
+    const T& FindStyle(StringView name, const T& fallback) const noexcept {
+        const UiHostServices* host = FindUiHostServices();
+        const T* found = host ? host->FindStyle<T>(name) : nullptr;
+        return found ? *found : fallback;
+    }
 
     using ToolTipFactory = Delegate<Result<SharedPtr<Element>>()>;
     Result<void> SetToolTipFactory(ToolTipFactory&& factory, StringView description = {},
@@ -377,6 +384,12 @@ public:
     // slot 여백·정렬을 적용해 area 안에 배치한다.
     Result<void> ArrangeInSlot(const Geometry& area) noexcept;
 
+protected:
+    // 스타일이 바뀌었거나(등록부·활성 집합) 처음 측정된다(20.11절). 명시 스타일이 없는 부품은
+    // host의 활성 집합에서 자기 키로 스타일을 받는다. 측정(Prepass) 앞에서 불린다.
+    virtual void ApplyStyles(const UiHostServices& host) noexcept;
+
+public:
     void SetEnabled(bool enabled) noexcept;
 
     bool IsEnabled() const noexcept;
@@ -439,6 +452,8 @@ private:
     AttributeBinding* bindings_ = nullptr;
     usize subtreeBindings_ = 0;
     uint64 bindingPass_ = 0;
+    // 마지막으로 ApplyStyles를 부른 스타일 revision이다.
+    uint64 styleRevision_ = 0;
 
     // 부모 전경색 inherited 아래에서 이 요소가 자식에게 물려줄 전경색이다. disabled는 이 요소나
     // 조상이 비활성인지다.

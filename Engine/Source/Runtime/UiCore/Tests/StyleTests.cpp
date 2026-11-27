@@ -81,12 +81,12 @@ TEST(UiCore_TextStylesMatchUe) {
     SystemAllocator allocator;
     StyleSet styles(allocator);
     REQUIRE(AddCoreStyles(styles));
-    CHECK(styles.GetText("NormalText") == NormalTextStyle());
+    CHECK(*styles.Find<TextStyle>("NormalText") == NormalTextStyle());
     CHECK((NormalTextStyle().font == FontStyle{Typeface::Regular, 10}));
     CHECK(NormalTextStyle().color == ColorRef{ColorSource::Foreground});
-    const TextStyle* small = styles.FindText("SmallText");
-    const TextStyle* large = styles.FindText("Text.Large");
-    const TextStyle* primary = styles.FindText("PrimaryButtonText");
+    const TextStyle* small = styles.Find<TextStyle>("SmallText");
+    const TextStyle* large = styles.Find<TextStyle>("Text.Large");
+    const TextStyle* primary = styles.Find<TextStyle>("PrimaryButtonText");
     REQUIRE(small && large && primary);
     CHECK((small->font == FontStyle{Typeface::Regular, 8}));
     CHECK((large->font == FontStyle{Typeface::Regular, 14}));
@@ -97,20 +97,20 @@ TEST(UiCore_StyleSetFindsReplacesAndFallsBack) {
     SystemAllocator allocator;
     StyleSet styles(allocator);
     REQUIRE(AddCoreStyles(styles));
-    REQUIRE(styles.FindButton("Button") && styles.FindButton("PrimaryButton") &&
-            styles.FindButton("SimpleButton"));
-    CHECK(*styles.FindButton("PrimaryButton") == PrimaryButtonStyle());
-    // 이름은 대소문자를 가리고, 없는 이름은 nullptr·형식 기본값이다.
-    CHECK(styles.FindButton("button") == nullptr);
-    CHECK(styles.GetButton("Missing") == DefaultButtonStyle());
-    CHECK(styles.GetText("Missing") == NormalTextStyle());
+    REQUIRE(styles.Find<ButtonStyle>("Button") && styles.Find<ButtonStyle>("PrimaryButton") &&
+            styles.Find<ButtonStyle>("SimpleButton"));
+    CHECK(*styles.Find<ButtonStyle>("PrimaryButton") == PrimaryButtonStyle());
+    // 이름은 대소문자를 가리고, 없는 이름은 nullptr다(부품의 내장 기본값은 부품이 쓴다).
+    CHECK(styles.Find<ButtonStyle>("button") == nullptr);
+    CHECK(!styles.Find<ButtonStyle>("Missing"));
+    CHECK(!styles.Find<TextStyle>("Missing"));
     // 같은 이름은 값을 바꾸고, 빈 이름은 거부한다.
     ButtonStyle custom = DefaultButtonStyle();
     custom.normalPadding = {1, 2, 3, 4};
-    REQUIRE(styles.SetButton("Button", custom));
-    CHECK(styles.FindButton("Button")->normalPadding == Vec4(1, 2, 3, 4));
-    CHECK(!styles.SetButton({}, custom));
-    CHECK(!styles.SetText({}, NormalTextStyle()));
+    REQUIRE(styles.Set<ButtonStyle>("Button", custom));
+    CHECK(styles.Find<ButtonStyle>("Button")->normalPadding == Vec4(1, 2, 3, 4));
+    CHECK(!styles.Set<ButtonStyle>({}, custom));
+    CHECK(!styles.Set<TextStyle>({}, NormalTextStyle()));
 }
 
 TEST(UiCore_PaintListThemeDefaultsToUeDark) {

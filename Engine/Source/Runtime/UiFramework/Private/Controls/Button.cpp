@@ -9,7 +9,7 @@ Result<void> Button::Construct(Args&& args) noexcept {
                                     .horizontalAlignment = args.horizontalAlignment,
                                     .verticalAlignment = args.verticalAlignment});
     if (status) {
-        status = SetStyle(args.style);
+        status = args.style ? SetStyle(*args.style) : ApplyStyle(style_);
     }
 
     if (status) {
@@ -113,6 +113,23 @@ bool Button::IsValidStyle(const ButtonStyle& style) noexcept {
 }
 
 Result<void> Button::SetStyle(const ButtonStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+void Button::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        if (const ButtonStyle* style = host.FindStyle<ButtonStyle>("Button")) {
+            (void)ApplyStyle(*style);
+        }
+    }
+}
+
+Result<void> Button::ApplyStyle(const ButtonStyle& style) noexcept {
     if (!IsValidStyle(style)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

@@ -60,11 +60,17 @@ public:
     void SetFillColor(LinearColor color) noexcept;
     // 바탕·채움·marquee 모양이다(UE FProgressBarStyle — 기본 "ProgressBar"). Frame brush는 쓰지
     // 않고, Frame 색은 바탕 tint다.
+    // 명시 스타일이다. 부르지 않으면 활성 앱 스타일의 "ProgressBar"(없으면
+    // DefaultProgressBarStyle)다(20.11절).
     Result<void> SetStyle(const ProgressBarStyle& style) noexcept;
     const ProgressBarStyle& GetStyle() const noexcept;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
 
 private:
+    // 스타일을 바꾼다(명시 표시는 건드리지 않는다).
+    Result<void> ApplyStyle(const ProgressBarStyle& style) noexcept;
+    void ApplyStyles(const UiHostServices& host) noexcept override;
+    bool styleExplicit_ = false;
     ElementAttribute<float, InvalidateReason::Paint> value_;
     ProgressDirection direction_ = ProgressDirection::LeftToRight;
     Brush fillBrush_{};

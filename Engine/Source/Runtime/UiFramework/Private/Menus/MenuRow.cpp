@@ -61,8 +61,9 @@ Result<void> MenuRow::Construct(Args&& args) noexcept {
         if (copied) {
             copied = SetToolTipFactory(
                 ToolTipFactory::CreateLambda([this]() noexcept -> Result<SharedPtr<Element>> {
-                    auto text =
-                        context_->MakeLabel(toolTip_.View(), DefaultToolTipStyle().text.font);
+                    auto text = context_->MakeLabel(
+                        toolTip_.View(),
+                        FindStyle<ToolTipStyle>("ToolTip", DefaultToolTipStyle()).text.font);
                     if (!text) {
                         return Result<SharedPtr<Element>>::Failure(text.Error());
                     }

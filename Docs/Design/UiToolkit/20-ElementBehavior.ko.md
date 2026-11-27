@@ -157,6 +157,11 @@
   - 부품의 `Args::style`이 nullptr이면 부품은 처음 측정될 때 `FindUiHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 그 주소를 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다.
   - 집합 revision이 바뀌면(집합 교체·값 변경) `Application`이 테마 revision처럼 전체 Layout·그리기 cache를 무효화한다. 부품은 다음 측정 때 다시 찾는다.
 - **형식별 표.** 지금 있는 스타일 구조체 전부를 표로 둔다: 버튼, 체크, 텍스트, 편집 텍스트, 스크롤 막대, 진행 막대, 슬라이더, 콤보, 표 머리, 독 탭, 창, 메뉴, 툴팁. 색·brush·실수·여백 표도 둔다.
+- **구현(UW8h1).**
+  - 스타일을 값으로 드는 부품(Button·ProgressBar·Slider·ScrollBar)은 `SetStyle`(Button은 `Args::style` — 이제 `Optional`)로 명시하지 않았으면 `ApplyStyles`에서 활성 집합의 UE 키 값을 받는다. `Element::Prepass`가 스타일 revision이 바뀐 요소에서 `ApplyStyles`를 부른다. 새로 붙은 하위 트리는 처음 측정 때 받는다.
+  - 기본 함수를 그 자리에서 부르던 곳(독 탭 크기, 스크롤 막대, 메뉴·제목 막대 툴팁 글꼴)은 `Element::FindStyle(키, 기본값)`으로 그 자리에서 찾는다.
+  - revision이 바뀌면 `Application`이 테마 revision을 올리고 트리 전체 측정을 다시 하게 한다(`SyncStyleRevision`).
+  - 한계: `ToolTip`은 생성 때(트리에 붙기 전) 스타일로 부분을 짜므로 아직 활성 집합을 쓰지 않는다(툴팁 factory가 명시 스타일을 넘긴다). Widget 층(`ButtonWidget` 등)은 늘 명시 스타일을 넘긴다 — 게임 Widget 기본 집합(`GameWidgetStyle`)은 UW8h2에서 Widget 기본값의 출처로 맞춘다.
 - **두 단계.**
   - UW8h1은 등록부·앱 스타일·조회·무효화와 `CoreStyle`의 지금 값(함수 기본값 옮김)이다.
   - UW8h2는 세 집합 값을 4.2절 출처(StarshipCoreStyle.cpp, StarshipStyle.cpp, UMGCoreStyle.cpp)에서 옮기고 출처 행 대조 시험을 단다(UV8 일부). Rocks 구조체가 없는 항목은 15장 빈칸 목록에 남긴다.

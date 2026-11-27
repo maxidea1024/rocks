@@ -8,6 +8,7 @@
 #include <UiFramework/Application/AccessibleNode.h>
 #include <UiCore/FocusCause.h>
 #include <UiCore/NavigationConfig.h>
+#include <UiCore/StyleRegistry.h>
 #include <UiFramework/Application/UiTimer.h>
 
 namespace rocks::ui {
@@ -80,6 +81,14 @@ public:
     bool IsControlDown(uint32 userId) const noexcept;
     bool IsShiftDown(uint32 userId) const noexcept;
     bool IsAltDown(uint32 userId) const noexcept;
+
+    // 스타일 등록부다(Docs/Design/UiToolkit 20.11절 — 호스트가 하나 만들어 모든 Application에
+    // 준다). 바꾸면 활성 집합 이름으로 다시 찾는다.
+    void SetStyleRegistry(SharedPtr<StyleRegistry> registry) noexcept;
+    // 활성 앱 스타일 집합을 이름으로 고른다(UE FAppStyle — 기본 CoreStyleName, 에디터는
+    // EditorStyle). 등록부에 없으면 NotFound이고 바꾸지 않는다. 바뀌면 전체 측정·그리기를 다시
+    // 한다.
+    Result<void> SetAppStyle(StringView name) noexcept;
 
     // UI 시계다(Docs/Design/UiToolkit 20.3절 — 툴팁 지연·타이머·애니메이션 부품이 모두 이것을
     // 본다). 비우면 단조 시계다. 시험·snapshot은 ManualClock을 준다. 바꾸면 열린 툴팁을 닫고 다음
@@ -359,6 +368,10 @@ private:
     // KeyDown의 navigation 응답을 실행한다(다음·이전은 tree 순서, 방향은 기하 — 20.7절).
     Result<bool> PerformNavigation(uint32 userId, FocusDirection direction,
                                    const SharedPtr<Element>& scope) noexcept;
+    // 스타일이 바뀌었으면 테마 revision을 올리고 트리 전체 측정을 다시 하게 한다.
+    void SyncStyleRevision() noexcept;
+    SharedPtr<StyleRegistry> styles_;
+    uint64 styleRevision_ = 0;
     ClockFunction clock_;
     FrameTime frameTime_{};
     double lastClock_ = 0;
@@ -402,6 +415,7 @@ private:
     SharedPtr<CommandList> globalCommands_;
     Array<SharedPtr<CommandList>> windowCommands_;
     Array<UserNavigation> navigationConfigs_;
+    String appStyleName_;
     Result<KeyChord> UpdateChord(uint32 userId, const input::InputEvent& event) noexcept;
     bool ProcessCommands(const Element* scope, KeyChord chord, bool repeat) const noexcept;
     uint64 focusVersion_ = 0;

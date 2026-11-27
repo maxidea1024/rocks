@@ -34,8 +34,9 @@ public:
     const StyleBrush* FocusOutlineBrush() const noexcept override;
     struct Args {
         ElementChild content{};
-        // 값을 복사한다. 상태별 brush·여백·전경색을 담는다.
-        ButtonStyle style = DefaultButtonStyle();
+        // 값을 복사한다. 상태별 brush·여백·전경색을 담는다. 비우면 활성 앱 스타일의
+        // "Button"이다(20.11절).
+        Optional<ButtonStyle> style{};
         // brush 색에 곱한다(UE ButtonColorAndOpacity). 기본 흰색은 스타일 색 그대로다.
         Bindable<LinearColor> color{LinearColor{1, 1, 1, 1}};
         // 자식 전경색이다. 없으면 스타일의 상태별 전경색이다(UE ForegroundColor = UseStyle).
@@ -71,6 +72,8 @@ public:
                                  ButtonPressMethod press) noexcept;
     void SetFocusable(bool enabled) noexcept;
     // 여백이 음수·비유한이거나 brush·색이 그릴 수 없는 값이면 InvalidArgument다.
+    // 명시 스타일이다. 부르지 않으면 활성 앱 스타일의 "Button"(없으면
+    // DefaultButtonStyle)다(20.11절).
     Result<void> SetStyle(const ButtonStyle& style) noexcept;
     static bool IsValidStyle(const ButtonStyle& style) noexcept;
     const ButtonStyle& GetStyle() const noexcept;
@@ -113,6 +116,10 @@ protected:
     virtual void OnActivated() noexcept;
 
 private:
+    // 스타일을 바꾼다(명시 표시는 건드리지 않는다).
+    Result<void> ApplyStyle(const ButtonStyle& style) noexcept;
+    void ApplyStyles(const UiHostServices& host) noexcept override;
+    bool styleExplicit_ = false;
     void ReleasePointer() noexcept;
     // 눌림 상태가 바뀌면 스타일 여백 + 내용 여백을 다시 정한다(UE UpdatePadding).
     void UpdatePadding() noexcept;

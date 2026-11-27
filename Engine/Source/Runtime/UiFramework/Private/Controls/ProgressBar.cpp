@@ -132,6 +132,23 @@ void ProgressBar::SetFillColor(LinearColor color) noexcept {
 }
 
 Result<void> ProgressBar::SetStyle(const ProgressBarStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+void ProgressBar::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        if (const ProgressBarStyle* style = host.FindStyle<ProgressBarStyle>("ProgressBar")) {
+            (void)ApplyStyle(*style);
+        }
+    }
+}
+
+Result<void> ProgressBar::ApplyStyle(const ProgressBarStyle& style) noexcept {
     const ThemeColors& theme = DefaultThemeColors();
     const StyleBrush* brushes[] = {&style.background, &style.fill, &style.marquee};
     for (const StyleBrush* brush : brushes) {

@@ -2,58 +2,122 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
-#include <UiCore/Style.h>
+#include <UiCore/Styles/ButtonStyle.h>
+#include <UiCore/Styles/CheckBoxStyle.h>
+#include <UiCore/Styles/DockTabStyle.h>
+#include <UiCore/Styles/MenuBarStyle.h>
+#include <UiCore/Styles/MenuStyle.h>
+#include <UiCore/Styles/ProgressBarStyle.h>
+#include <UiCore/Styles/ScrollBarStyle.h>
+#include <UiCore/Styles/SliderStyle.h>
+#include <UiCore/Styles/TextStyle.h>
+#include <UiCore/Styles/ToolTipStyle.h>
+#include <UiCore/Styles/WindowStyle.h>
+#include <UiCore/Styles/StyleBrush.h>
+#include <UiCore/ColorRef.h>
 
-// 이름으로 형식별 스타일을 찾는 표다(Docs/Design/UiToolkit 9.1절 UW3b — UE FSlateStyleSet의
-// GetWidgetStyle). 전역 등록부는 없고, 소유자(에디터·게임)가 집합을 만들어 위젯에 넘긴다(4.1절).
+// 이름으로 형식별 스타일을 찾는 표다(UE FSlateStyleSet — Docs/Design/UiToolkit 4.1·20.11절).
+// Element 스타일 구조체와 brush·색·실수·여백 표를 둔다. 부모 집합 이름을 가질 수 있고, 찾지 못한
+// 이름은 StyleRegistry가 부모로 올라가 찾는다(UE ParentStyleName). 전역 등록부는 없다 — 호스트가
+// StyleRegistry에 등록해 Application에 넘긴다.
 //
 // 사용 예:
 //   StyleSet styles(allocator);
 //   if (auto added = AddCoreStyles(styles); !added) { return added; }
-//   const ButtonStyle* primary = styles.FindButton("PrimaryButton");
+//   const ButtonStyle* primary = styles.Find<ButtonStyle>("PrimaryButton");
 namespace rocks::ui {
 
 class ROCKS_UICORE_API StyleSet {
 public:
     explicit StyleSet(Allocator& allocator) noexcept;
-
     StyleSet(const StyleSet&) = delete;
     StyleSet& operator=(const StyleSet&) = delete;
 
     // 같은 이름이 있으면 값을 바꾼다. 빈 이름은 InvalidArgument, 할당 실패면 표를 바꾸지 않는다.
-    Result<void> SetButton(StringView name, const ButtonStyle& style) noexcept;
-    Result<void> SetText(StringView name, const TextStyle& style) noexcept;
+    // 바꿀 때마다 Revision이 오른다(등록부를 쓰는 Application이 배치·그리기를 다시 한다).
+    template <typename T>
+    Result<void> Set(StringView name, const T& value) noexcept {
+        return SetValue(name, value);
+    }
 
-    // 없으면 nullptr이다. 반환한 주소는 다음 Set 호출 전까지 유효하다. 이름은 대소문자를 가린다.
-    const ButtonStyle* FindButton(StringView name) const noexcept;
-    const TextStyle* FindText(StringView name) const noexcept;
+    // 없으면 nullptr이다(부모는 보지 않는다 — StyleRegistry가 본다). 주소는 다음 Set 전까지
+    // 유효하다.
+    template <typename T>
+    const T* Find(StringView name) const noexcept {
+        return FindValue(name, static_cast<const T*>(nullptr));
+    }
 
-    // 없으면 형식의 기본 스타일(DefaultButtonStyle·NormalTextStyle)이다(UE는 경고 뒤 기본값).
-    const ButtonStyle& GetButton(StringView name) const noexcept;
-    const TextStyle& GetText(StringView name) const noexcept;
+    // 부모 집합 이름이다(빈 이름이면 부모 없음).
+    Result<void> SetParentName(StringView name) noexcept;
+    StringView ParentName() const noexcept;
+    uint64 Revision() const noexcept;
+
+    Result<void> SetValue(StringView name, const ButtonStyle& value) noexcept;
+    const ButtonStyle* FindValue(StringView name, const ButtonStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const CheckBoxStyle& value) noexcept;
+    const CheckBoxStyle* FindValue(StringView name, const CheckBoxStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const DockTabStyle& value) noexcept;
+    const DockTabStyle* FindValue(StringView name, const DockTabStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const MenuBarStyle& value) noexcept;
+    const MenuBarStyle* FindValue(StringView name, const MenuBarStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const MenuStyle& value) noexcept;
+    const MenuStyle* FindValue(StringView name, const MenuStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const ProgressBarStyle& value) noexcept;
+    const ProgressBarStyle* FindValue(StringView name, const ProgressBarStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const ScrollBarStyle& value) noexcept;
+    const ScrollBarStyle* FindValue(StringView name, const ScrollBarStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const SliderStyle& value) noexcept;
+    const SliderStyle* FindValue(StringView name, const SliderStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const TextStyle& value) noexcept;
+    const TextStyle* FindValue(StringView name, const TextStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const ToolTipStyle& value) noexcept;
+    const ToolTipStyle* FindValue(StringView name, const ToolTipStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const WindowStyle& value) noexcept;
+    const WindowStyle* FindValue(StringView name, const WindowStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const StyleBrush& value) noexcept;
+    const StyleBrush* FindValue(StringView name, const StyleBrush*) const noexcept;
+    Result<void> SetValue(StringView name, const ColorRef& value) noexcept;
+    const ColorRef* FindValue(StringView name, const ColorRef*) const noexcept;
+    Result<void> SetValue(StringView name, const float& value) noexcept;
+    const float* FindValue(StringView name, const float*) const noexcept;
+    Result<void> SetValue(StringView name, const Vec4& value) noexcept;
+    const Vec4* FindValue(StringView name, const Vec4*) const noexcept;
 
 private:
     template <typename T>
     struct Entry {
         String name;
-        T style;
+        T value;
     };
 
     template <typename T>
-    static Result<void> Set(Allocator& allocator, Array<Entry<T>>& entries, StringView name,
-                            const T& style) noexcept;
-
+    Result<void> Store(Array<Entry<T>>& entries, StringView name, const T& value) noexcept;
     template <typename T>
-    static const T* Find(const Array<Entry<T>>& entries, StringView name) noexcept;
+    static const T* Lookup(const Array<Entry<T>>& entries, StringView name) noexcept;
 
     Allocator& allocator_;
+    String parent_;
+    uint64 revision_ = 0;
     Array<Entry<ButtonStyle>> buttons_;
+    Array<Entry<CheckBoxStyle>> checkBoxes_;
+    Array<Entry<DockTabStyle>> dockTabs_;
+    Array<Entry<MenuBarStyle>> menuBars_;
+    Array<Entry<MenuStyle>> menus_;
+    Array<Entry<ProgressBarStyle>> progressBars_;
+    Array<Entry<ScrollBarStyle>> scrollBars_;
+    Array<Entry<SliderStyle>> sliders_;
     Array<Entry<TextStyle>> texts_;
+    Array<Entry<ToolTipStyle>> toolTips_;
+    Array<Entry<WindowStyle>> windows_;
+    Array<Entry<StyleBrush>> brushes_;
+    Array<Entry<ColorRef>> colors_;
+    Array<Entry<float>> floats_;
+    Array<Entry<Vec4>> margins_;
 };
 
-// UE 5.8 에디터 핵심 스타일 중 Rocks 형식이 있는 항목을 넣는다(14장 — "Button", "PrimaryButton",
-// "SimpleButton", "NoBorder", "NormalText", "SmallText", "Text.Large", "PrimaryButtonText"). 이름은
-// UE 키와 같다 (StarshipCoreStyle.cpp 1333–1339행, 1503–1511행).
+// UE 5.8 핵심 스타일 중 Rocks 형식이 있는 항목을 넣는다(14장·20.11절). 이름은 UE 키와 같다
+// (StarshipCoreStyle.cpp — 버튼 1333–1339행, 글자 1503–1511행 등). UE에 같은 키가 없는 Rocks 형식은
+// Rocks 이름("Menu"·"MenuBar")이다.
 ROCKS_UICORE_API Result<void> AddCoreStyles(StyleSet& styles) noexcept;
 
 } // namespace rocks::ui

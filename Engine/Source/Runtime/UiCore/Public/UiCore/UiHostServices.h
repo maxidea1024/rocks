@@ -3,6 +3,7 @@
 #include <Core/Math/Rect.h>
 #include <Core/Memory/SharedPtr.h>
 #include <UiCore/FrameTime.h>
+#include <UiCore/StyleRegistry.h>
 #include <UiCore/TextInputService.h>
 
 namespace rocks::ui {
@@ -31,10 +32,25 @@ public:
     void SetFrameTime(const FrameTime& time) noexcept;
     const FrameTime& Time() const noexcept;
 
+    // 스타일 등록부와 활성 앱 스타일 집합이다(20.11절 — UE FAppStyle). 바꾸면 StyleRevision이
+    // 오른다.
+    void SetStyles(SharedPtr<StyleRegistry> registry, SharedPtr<StyleSet> appStyle) noexcept;
+    // 활성 집합에서 부모로 올라가며 찾는다. 없으면 nullptr이다(부품은 내장 기본값을 쓴다).
+    template <typename T>
+    const T* FindStyle(StringView name) const noexcept {
+        return registry_ && appStyle_ ? registry_->FindStyle<T>(*appStyle_, name) : nullptr;
+    }
+
+    // 스타일이 바뀐 횟수다(등록부·집합 값·활성 집합). 0이 아니다(처음 측정에서 한 번 적용하게).
+    uint64 StyleRevision() const noexcept;
+
 private:
     PopupWorkArea popupWorkArea_;
     SharedPtr<TextInputService> textInput_;
     FrameTime time_{};
+    SharedPtr<StyleRegistry> registry_;
+    SharedPtr<StyleSet> appStyle_;
+    uint64 styleChanges_ = 1;
 };
 
 } // namespace rocks::ui

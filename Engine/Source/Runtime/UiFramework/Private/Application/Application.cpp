@@ -22,7 +22,7 @@ Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
       modifiers_(allocator), commandScopes_(allocator), pressObservers_(allocator),
-      windowCommands_(allocator), navigationConfigs_(allocator) {
+      windowCommands_(allocator), navigationConfigs_(allocator), appStyleName_(allocator) {
     cache_.SetTheme(&theme_);
 }
 
@@ -201,6 +201,66 @@ void Application::EnsureFrame() noexcept {
 
 const FrameTime& Application::GetFrameTime() const noexcept {
     return frameTime_;
+}
+
+void Application::SetStyleRegistry(SharedPtr<StyleRegistry> registry) noexcept {
+    styles_ = Move(registry);
+    UiHostServices* host = EnsureHostServices();
+    if (host) {
+        host->SetStyles(styles_,
+                        styles_ ? styles_->FindSet(appStyleName_.IsEmpty() ? CoreStyleName
+                                                                           : appStyleName_.View())
+                                : SharedPtr<StyleSet>{});
+    }
+}
+
+Result<void> Application::SetAppStyle(StringView name) noexcept {
+    if (!styles_) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    auto set = styles_->FindSet(name);
+    if (!set) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    if (auto assigned = appStyleName_.TryAssign(name); !assigned) {
+        return assigned;
+    }
+
+    UiHostServices* host = EnsureHostServices();
+    if (!host) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    host->SetStyles(styles_, Move(set));
+    return Result<void>::Success();
+}
+
+namespace {
+
+void InvalidateSubtreeLayout(Element& element) noexcept {
+    element.InvalidateLayout();
+    for (usize i = 0; i < element.ChildCount(); ++i) {
+        InvalidateSubtreeLayout(*element.ChildAt(i));
+    }
+}
+
+} // namespace
+
+void Application::SyncStyleRevision() noexcept {
+    const uint64 revision = host_ ? host_->StyleRevision() : 0;
+    if (revision == styleRevision_) {
+        return;
+    }
+
+    // 스타일 값이 크기를 바꿀 수 있어(여백·글꼴) 측정과 그리기 기록을 모두 다시 한다(테마와 같다).
+    styleRevision_ = revision;
+    ++themeRevision_;
+    cache_.SetTheme(&theme_, themeRevision_);
+    if (root_) {
+        InvalidateSubtreeLayout(*root_);
+    }
 }
 
 void Application::SetClock(ClockFunction&& clock) noexcept {
@@ -540,6 +600,7 @@ Result<void> Application::PrepareLayout(const Geometry& geometry, float layoutSc
     // 암묵 시작 호스트면 여기서 프레임을 연다(20.3절). 이 배치가 그 프레임을 닫는다.
     EnsureFrame();
     frameBegun_ = false;
+    SyncStyleRevision();
     AdvanceTimers();
     AdvanceToolTips();
     AdvanceAnalogRepeats();

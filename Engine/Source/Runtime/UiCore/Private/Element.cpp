@@ -318,6 +318,9 @@ KeyReply Element::OnKeyEvent(const KeyEvent& key) noexcept {
     return KeyReply::Unhandled();
 }
 
+void Element::ApplyStyles(const UiHostServices&) noexcept {
+}
+
 NavigationBoundary Element::OnNavigation(uint32, FocusDirection direction) noexcept {
     return GetNavigationRule(direction);
 }
@@ -622,6 +625,15 @@ Result<void> Element::Prepass(float scale) noexcept {
     if (scale != measuredScale_) {
         layoutDirty_ = true;
         InvalidatePaintPlan();
+    }
+
+    // 스타일이 바뀌었거나 처음 측정이면 활성 집합의 스타일을 받는다(20.11절).
+    if (const UiHostServices* host = FindUiHostServices()) {
+        const uint64 revision = host->StyleRevision();
+        if (revision != styleRevision_) {
+            styleRevision_ = revision;
+            ApplyStyles(*host);
+        }
     }
 
     if (visibility_ == Visibility::Collapsed) {

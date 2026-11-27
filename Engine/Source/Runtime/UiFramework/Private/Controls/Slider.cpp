@@ -353,6 +353,23 @@ Result<void> Slider::OnPaint(PaintList& list, int32 layer) const noexcept {
 }
 
 Result<void> Slider::SetStyle(const SliderStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+void Slider::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        if (const SliderStyle* style = host.FindStyle<SliderStyle>("Slider")) {
+            (void)ApplyStyle(*style);
+        }
+    }
+}
+
+Result<void> Slider::ApplyStyle(const SliderStyle& style) noexcept {
     const ThemeColors& theme = DefaultThemeColors();
     const StyleBrush* brushes[] = {&style.bar,   &style.barHovered,   &style.barDisabled,
                                    &style.thumb, &style.thumbHovered, &style.thumbDisabled};

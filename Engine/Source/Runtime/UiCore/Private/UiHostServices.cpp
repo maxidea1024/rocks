@@ -26,4 +26,15 @@ const FrameTime& UiHostServices::Time() const noexcept {
     return time_;
 }
 
+void UiHostServices::SetStyles(SharedPtr<StyleRegistry> registry,
+                               SharedPtr<StyleSet> appStyle) noexcept {
+    registry_ = Move(registry);
+    appStyle_ = Move(appStyle);
+    ++styleChanges_;
+}
+
+uint64 UiHostServices::StyleRevision() const noexcept {
+    return styleChanges_ + (registry_ ? registry_->Revision() : 0);
+}
+
 } // namespace rocks::ui

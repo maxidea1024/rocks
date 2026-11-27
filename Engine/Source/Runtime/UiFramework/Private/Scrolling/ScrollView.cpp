@@ -233,7 +233,8 @@ Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noex
             GetGeometry().MakeChild(size, {1, 0, 0, 1, position.x, position.y}, {}, {});
         // 항상 보이는 트랙은 스타일 트랙이다(UE AlwaysShowScrollbarTrack — Starship 트랙은 None이라
         // 기본 스타일에서는 그리지 않는다).
-        const StyleBrush& trackBrush = DefaultScrollBarStyle().track;
+        const StyleBrush& trackBrush =
+            FindStyle<ScrollBarStyle>("ScrollBar", DefaultScrollBarStyle()).track;
         if (trackBrush.mode != BrushMode::None) {
             auto track =
                 list.TryAddBrush(geometry, trackBrush.Resolve(list.Theme(), list.ColorContext()),
@@ -250,7 +251,7 @@ Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noex
 
     // 손잡이는 스크롤 막대 스타일이다(UE "Scrollbar"). 손잡이를 끄는 동안 끌기, 손잡이 위면 올림
     // 모양이다. 내용 끌기·터치 팬은 손잡이 끌기가 아니다(UE bDraggingThumb).
-    const ScrollBarStyle& style = DefaultScrollBarStyle();
+    const ScrollBarStyle& style = FindStyle<ScrollBarStyle>("ScrollBar", DefaultScrollBarStyle());
     const StyleBrush& thumb = dragging_ && !draggingContent_ ? style.thumbDragged
                               : thumbHovered_                ? style.thumbHovered
                                                              : style.thumb;

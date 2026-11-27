@@ -36,6 +36,8 @@ public:
     // 높이))다 (세로면 뒤집는다). Frame 원하는 크기를 정했으면 그것을 쓴다.
     Vec2 ComputeDesiredSize(float scale) const noexcept override;
     // 막대·손잡이 brush가 그릴 수 없는 값이거나 두께·크기가 음수·비유한이면 InvalidArgument다.
+    // 명시 스타일이다. 부르지 않으면 활성 앱 스타일의 "Slider"(없으면
+    // DefaultSliderStyle)다(20.11절).
     Result<void> SetStyle(const SliderStyle& style) noexcept;
     const SliderStyle& GetStyle() const noexcept;
     void OnMouseEnter(uint32 user) noexcept override;
@@ -79,6 +81,10 @@ protected:
     void SetDragging(bool dragging) noexcept;
 
 private:
+    // 스타일을 바꾼다(명시 표시는 건드리지 않는다).
+    Result<void> ApplyStyle(const SliderStyle& style) noexcept;
+    void ApplyStyles(const UiHostServices& host) noexcept override;
+    bool styleExplicit_ = false;
     // 패드 버튼 처리다(조종 잠금 South·East, D-pad 값 증감). 처리했으면 true다.
     bool HandleGamepadButton(uint32 user, input::GamepadButton button) noexcept;
     Delegate<void(float)> onChanged_;

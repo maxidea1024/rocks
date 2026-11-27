@@ -168,7 +168,8 @@ Vec2 DockManager::MeasureNode(SlotHandle handle) const noexcept {
     if (node.kind == Kind::Stack) {
         const Tab& tab = tabs_[node.tabs[node.selected]];
         const Vec2 content = tab.content->GetDesiredSize();
-        const float maxWidth = DefaultDockTabStyle().maxTabSize.x;
+        const float maxWidth =
+            FindStyle<DockTabStyle>("Docking.Tab", DefaultDockTabStyle()).maxTabSize.x;
         float width = TabGap() * static_cast<float>(node.tabs.Size() - 1);
         for (usize i : node.tabs) {
             width += math::Min(tabs_[i].header->GetDesiredSize().x, maxWidth);
@@ -191,11 +192,12 @@ float DockManager::TabHeight() const noexcept {
         }
     }
 
-    return math::Min(height > 0 ? height : EmptyTabHeight, DefaultDockTabStyle().maxTabSize.y);
+    return math::Min(height > 0 ? height : EmptyTabHeight,
+                     FindStyle<DockTabStyle>("Docking.Tab", DefaultDockTabStyle()).maxTabSize.y);
 }
 
 float DockManager::TabGap() const noexcept {
-    return DefaultDockTabStyle().tabGap;
+    return FindStyle<DockTabStyle>("Docking.Tab", DefaultDockTabStyle()).tabGap;
 }
 
 Vec2 DockManager::ComputeDesiredSize(float) const noexcept {
@@ -221,7 +223,9 @@ Result<void> DockManager::ArrangeNode(SlotHandle handle, Vec2 origin, Vec2 size)
         const float gap = TabGap();
         const float count = static_cast<float>(node.tabs.Size());
         const float width = math::Max(
-            0.0f, math::Min((size.x + gap) / count - gap, DefaultDockTabStyle().maxTabSize.x));
+            0.0f,
+            math::Min((size.x + gap) / count - gap,
+                      FindStyle<DockTabStyle>("Docking.Tab", DefaultDockTabStyle()).maxTabSize.x));
         float x = origin.x;
         for (usize i : node.tabs) {
             auto& tab = tabs_[i];
@@ -272,7 +276,7 @@ Result<void> DockManager::ArrangeNode(SlotHandle handle, Vec2 origin, Vec2 size)
 Result<void> DockManager::OnPaint(PaintList& list, int32 layer) const noexcept {
     // 탭 줄은 TabWellBrush, 내용은 ContentAreaBrush, 패널 사이 틈은 탭 줄과 같은 바탕이다(UE
     // "Docking.Tab"). 탭 자체는 DockTabHeader가 그린다.
-    const DockTabStyle& style = DefaultDockTabStyle();
+    const DockTabStyle& style = FindStyle<DockTabStyle>("Docking.Tab", DefaultDockTabStyle());
     const ThemeColors& theme = list.Theme();
     const StyleColorContext context = list.ColorContext();
     const auto paint = [&](const StyleBrush& brush, Box2<float> rect) noexcept {

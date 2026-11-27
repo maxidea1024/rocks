@@ -150,6 +150,23 @@ void ScrollBar::OnPointerCaptureLost(PointerSource source, uint32 user, uint32 p
 }
 
 Result<void> ScrollBar::SetStyle(const ScrollBarStyle& style) noexcept {
+    auto applied = ApplyStyle(style);
+    if (applied) {
+        styleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+void ScrollBar::ApplyStyles(const UiHostServices& host) noexcept {
+    if (!styleExplicit_) {
+        if (const ScrollBarStyle* style = host.FindStyle<ScrollBarStyle>("ScrollBar")) {
+            (void)ApplyStyle(*style);
+        }
+    }
+}
+
+Result<void> ScrollBar::ApplyStyle(const ScrollBarStyle& style) noexcept {
     const ThemeColors& theme = DefaultThemeColors();
     const StyleBrush* brushes[] = {&style.track, &style.thumb, &style.thumbHovered,
                                    &style.thumbDragged};
