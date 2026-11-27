@@ -52,6 +52,21 @@ struct AudioVoiceHandle {
     uint32 generation = 0;
 };
 
+class AudioStreamRing;
+
+} // namespace rocks::audio
+
+namespace rocks::platform {
+
+class RealtimeWakeSignal;
+
+} // namespace rocks::platform
+
+namespace rocks::audio {
+
+// 스트림 원본이 시작하는 링 수위(frame)다(3.40.1절 시작 대기 — StreamRingMinFrames의 절반).
+inline constexpr uint32 StreamStartFrames = 4096;
+
 // clip 표 handle이다. generation 0은 무효다.
 struct AudioClipId {
     uint32 index = 0;
@@ -67,6 +82,21 @@ struct AudioClipDesc {
     uint32 sampleRate = 0;
     uint32 loopBegin = 0;
     uint32 loopEnd = 0;
+};
+
+// 스트림 clip이다(3.40.1절). ring은 RegisterStreamClip이 성공한 뒤 UnregisterClip이 성공할 때까지
+// 살아 있어야 한다. 링의 첫 frame은 startFrame이고, 생산자가 재생 순서대로(loop면 loop 구간을
+// 감아서) 쓴다. startFrame·loop는 PreparePlay에 같은 값을 넘겨야 한다(생산자와 RT가 같은 값을 쓰게
+// 한 곳에 둔다). loopBegin·loopEnd가 둘 다 0이면 loop 구간은 clip 전체다.
+struct AudioStreamClipDesc {
+    AudioStreamRing* ring = nullptr;
+    uint32 channelCount = 0;
+    uint32 frameCount = 0;
+    uint32 sampleRate = 0;
+    uint32 loopBegin = 0;
+    uint32 loopEnd = 0;
+    uint32 startFrame = 0;
+    bool loop = false;
 };
 
 enum class AudioPanMode : uint8 {
@@ -136,7 +166,9 @@ enum class AudioVoiceEndReason : uint8 {
     // StopAll(장치 stop-all epoch).
     StoppedAll,
     // clip 묶음이 잘못된 Play(제어 API를 거치지 않은 손 명령).
-    StartFailed
+    StartFailed,
+    // 스트림 링이 Failed이거나 Ended인데 남은 PCM이 모자람(3.40.1절).
+    StreamFailed
 };
 
 // QueryVoice 결과다. 제어 쪽은 RT의 Stopping을 따로 보지 못하므로 재생 중이면 Playing이다.
@@ -170,6 +202,10 @@ struct AudioMixerCounters {
     uint64 clampedParams = 0;
     uint64 nonFiniteSamples = 0;
     uint64 clippedSamples = 0;
+    // 스트림 원본이 링에 PCM이 없어 무음으로 낸 frame 수와, 시작 수위를 기다린 frame
+    // 수다(3.40.1절).
+    uint64 streamStarvedFrames = 0;
+    uint64 streamStartDelayFrames = 0;
 };
 
 // 마스터 limiter 기본 프리셋이다(3.22.7절): −1 dBFS, 지연 0, 즉시 어택, 100 ms 릴리스.
@@ -195,6 +231,10 @@ struct AudioMixerConfig {
     uint32 maxClips = DefaultMaxClips;
     DynamicsSettings masterLimiter = DefaultMasterLimiterSettings();
     bool masterLimiterEnabled = true;
+    // 스트림 링이 refill 수위(용량의 절반) 아래로 내려가면 블록 끝에 Signal할 신호다(디코드
+    // 서비스가 기다린다 — 3.40.1절). null이면 알리지 않는다(Inline 시험). 믹서보다 오래 살아야
+    // 한다.
+    platform::RealtimeWakeSignal* streamRefillSignal = nullptr;
 };
 
 // RenderBlock 결과다. consumedCommands는 commands 앞에서부터 소비한 수다.

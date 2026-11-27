@@ -108,6 +108,7 @@ internal static partial class MetaTests
         RegisterRejectedSpecifiers(context);
         RegisterSparksBinding(context);
         RegisterFunctions(context);
+        RegisterEvents(context);
         RegisterSparksFunctions(context);
     }
 

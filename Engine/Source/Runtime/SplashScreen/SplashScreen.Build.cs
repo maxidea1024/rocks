@@ -13,8 +13,9 @@ public sealed class SplashScreen : EngineModuleRules
 
     protected override ModuleType ModuleType => ModuleType.ClientOnly;
 
-    // DesktopSessionState appears in the public visibility input.
-    protected override string[] PublicDependencies => ["Core", "PlatformWindow"];
+    // DesktopSessionState appears in the public visibility input. Progress (with Localization): StartupProgress (Docs/Design/SplashScreen
+    // sections 7 and 8) opens the startup task and its step scope, and its splash source pulls ProgressHub snapshots.
+    protected override string[] PublicDependencies => ["Core", "PlatformWindow", "Progress"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {

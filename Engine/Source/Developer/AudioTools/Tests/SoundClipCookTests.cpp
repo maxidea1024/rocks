@@ -11,9 +11,11 @@
 #include <Audio/AudioDecoder.h>
 #include <AudioAssets/AudioAssetsTypes.h>
 #include <AudioAssets/SoundClip.generated.h>
+#include <AudioAssets/SoundStreamData.h>
 #include <AudioOpus/OpusAudioDecoder.h>
 #include <AudioTools/CookResampler.h>
 #include <AudioTools/SoundClipCook.h>
+#include <Base/InitializerList.h>
 #include <Base/NumericLimits.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -1118,6 +1120,177 @@ TEST(SoundClipCook_LoadCookedPcmErrors) {
     cooked->platformData = ref;
     REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
     CHECK(cooked->PcmRevision() == revision);
+}
+
+// 디코드 방식 결정(3.40.3절 표): UE 5.8처럼 로딩 동작과 길이에 상관없이 상주 압축 실시간 디코드다
+// (ForceInline = non-streaming DTYPE_RealTime). loop 길이가 1 s 미만이면 통째다(Rocks 비용 규칙 — 1
+// s 정확히는 실시간, loop 꺼짐은 길이를 보지 않는다). 한쪽으로 바꾸면 다른 쪽 원본을 놓는다. 실효
+// 동작은 Inherited면 옵션 값을 RetainOnLoad–LoadOnDemand로 clamp한다(UE
+// GetDefaultLoadingBehaviorCVar).
+TEST(SoundClipCook_LoadCookedChoosesDecodeMode) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    REQUIRE(scene.Make(71, 1, Rate48 * 2, Rate48));
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    REQUIRE(scene.Cook(processor, out) && scene.Load(out.sink.Bytes(), loaded));
+    SoundClip* cooked = scene.LoadedClip(loaded);
+    REQUIRE(cooked != nullptr);
+    Package* owner = const_cast<Package*>(scene.LoadedPackage(loaded));
+    REQUIRE(cooked->loadingBehavior == SoundLoadingBehavior::Inherited);
+    const SoundCookedLoadOptions defaults;
+    CHECK(defaults.defaultLoading == SoundLoadingBehavior::LoadOnDemand);
+    const auto load = [&](SoundLoadingBehavior behavior, bool& inlinePcm) noexcept {
+        cooked->loadingBehavior = behavior;
+        const bool loadedOk =
+            cooked->LoadCooked(scene.allocator, &ReadPackageBulk, owner, scene.decoders, defaults)
+                .IsOk();
+        CHECK(loadedOk);
+        // 정확히 한쪽만 있다.
+        CHECK(static_cast<bool>(cooked->Pcm()) != static_cast<bool>(cooked->Stream()));
+        inlinePcm = static_cast<bool>(cooked->Pcm());
+        return loadedOk;
+    };
+
+    bool inlinePcm = false;
+    for (SoundLoadingBehavior behavior :
+         {SoundLoadingBehavior::Inherited, SoundLoadingBehavior::RetainOnLoad,
+          SoundLoadingBehavior::PrimeOnLoad, SoundLoadingBehavior::LoadOnDemand,
+          SoundLoadingBehavior::ForceInline}) {
+        REQUIRE(load(behavior, inlinePcm));
+        CHECK(!inlinePcm);
+        CHECK(cooked->Stream()->FrameCount() == cooked->frameCount);
+    }
+
+    // 짧은 loop(1 s 미만 구간)는 동작과 상관없이 통째, 1 s 구간·loop 꺼짐·전체 loop(2 s)는
+    // 실시간이다.
+    cooked->looping = true;
+    cooked->loopOverride.enabled = true;
+    cooked->loopOverride.begin = Rate48 / 2;
+    cooked->loopOverride.end = Rate48 / 2 + Rate48 - 1;
+    for (SoundLoadingBehavior behavior :
+         {SoundLoadingBehavior::LoadOnDemand, SoundLoadingBehavior::ForceInline}) {
+        REQUIRE(load(behavior, inlinePcm));
+        CHECK(inlinePcm);
+    }
+
+    cooked->loopOverride.end = Rate48 / 2 + Rate48;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+    cooked->loopOverride.end = Rate48 / 2 + Rate48 - 1;
+    cooked->looping = false;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+    cooked->looping = true;
+    cooked->loopOverride.enabled = false;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+
+    // 실효 동작: clip 값이 먼저, Inherited면 옵션 값을 clamp한다.
+    SoundCookedLoadOptions options;
+    cooked->loadingBehavior = SoundLoadingBehavior::ForceInline;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::ForceInline);
+    cooked->loadingBehavior = SoundLoadingBehavior::Inherited;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::LoadOnDemand);
+    options.defaultLoading = SoundLoadingBehavior::PrimeOnLoad;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::PrimeOnLoad);
+    options.defaultLoading = SoundLoadingBehavior::ForceInline;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::LoadOnDemand);
+    options.defaultLoading = SoundLoadingBehavior::Inherited;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::RetainOnLoad);
+}
+
+// LoadCookedStream 오류(3.40.3절): platformData 없음·reader null NotReady, 채널 셋 Unsupported,
+// 손상 청크(로드 때 모든 청크 SHA)·형식 위반·잘림·머리와 필드 불일치 CorruptData, 모르는 형식 판
+// Unsupported, codec 디코더 없음 NotFound. 실패는 앞 원본을 두고, 같은 키는 다시 올리지 않는다.
+// 재생 원본은 PCM이 아니다.
+TEST(SoundClipCook_LoadCookedStreamErrors) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    REQUIRE(scene.Make(72, 1, Rate48 * 2, Rate48));
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    REQUIRE(scene.Cook(processor, out) && scene.Load(out.sink.Bytes(), loaded));
+    SoundClip* cooked = scene.LoadedClip(loaded);
+    REQUIRE(cooked != nullptr);
+    Package* owner = const_cast<Package*>(scene.LoadedPackage(loaded));
+
+    // 청크 가운데 byte 하나(그 청크 SHA가 다르다 — 재생 전, 로드 때 잡는다).
+    Array<uint8> damaged = scene.PlatformBytes(loaded);
+    REQUIRE(!damaged.IsEmpty());
+    damaged[damaged.Size() / 2] ^= 0x5Au;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &damaged, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> broken = scene.PlatformBytes(loaded);
+    broken[0] ^= 0xFFu;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &broken, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> truncated = scene.PlatformBytes(loaded);
+    REQUIRE(truncated.TryResize(truncated.Size() - 1));
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &truncated, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> newer = scene.PlatformBytes(loaded);
+    newer[PlatformDataVersionOffset] = static_cast<uint8>(newer[PlatformDataVersionOffset] + 1);
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &newer, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    CHECK(!cooked->Stream() && !cooked->Pcm());
+    // 디코더 없음(Opus 없는 표): 재생 때마다 실패하지 않게 로드 때 NotFound다(LoadCookedPcm과
+    // 같다).
+    audio::AudioDecoderTable builtIn;
+    REQUIRE(audio::RegisterBuiltInAudioDecoders(builtIn));
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, builtIn).Error() ==
+          ErrorCode::NotFound);
+    CHECK(cooked
+              ->LoadCooked(scene.allocator, &ReadPackageBulk, owner, builtIn,
+                           SoundCookedLoadOptions{})
+              .Error() == ErrorCode::NotFound);
+    CHECK(!cooked->Stream() && !cooked->Pcm());
+
+    // 정상 로드: 원본 byte 크기의 사본이고 PCM은 없다. 같은 키는 다시 올리지 않는다.
+    REQUIRE(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    REQUIRE(cooked->Stream());
+    CHECK(!cooked->Pcm());
+    CHECK(cooked->Stream()->ByteCount() == scene.PlatformBytes(loaded).Size());
+    const uint64 revision = cooked->PcmRevision();
+    const SoundStreamData* first = cooked->Stream().Get();
+    REQUIRE(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    CHECK(cooked->PcmRevision() == revision && cooked->Stream().Get() == first);
+
+    // 머리와 필드가 다르면 CorruptData이고 앞 원본을 둔다.
+    cooked->sampleRate = Rate44;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    CHECK(cooked->PcmRevision() == revision && cooked->Stream().Get() == first);
+    cooked->sampleRate = Rate48;
+    cooked->frameCount = cooked->frameCount + 1;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    cooked->frameCount = cooked->frameCount - 1;
+    cooked->channelCount = 3;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    cooked->channelCount = 1;
+    const BulkDataRef ref = cooked->platformData;
+    cooked->platformData = BulkDataRef{};
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::NotReady);
+    cooked->platformData = ref;
+    CHECK(cooked->LoadCookedStream(scene.allocator, nullptr, owner, scene.decoders).Error() ==
+          ErrorCode::NotReady);
+    CHECK(cooked->Stream().Get() == first);
+
+    // 재생 스냅숏은 스트림 원본을 담는다(pcm 없음, 차원은 원본의 것).
+    auto sound = cooked->MakePlayable(scene.allocator, *scene.cooked, scene.cooked->OwnerAccess());
+    REQUIRE(sound);
+    const SoundPlayable* playable = sound.Value().Get();
+    CHECK(!playable->pcm && playable->stream.Get() == first);
+    CHECK(playable->FrameCount() == cooked->frameCount && playable->SampleRate() == Rate48 &&
+          playable->ChannelCount() == 1);
+    // 통째 PCM을 올리면 스트림 원본을 놓는다.
+    REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    CHECK(cooked->Pcm() && !cooked->Stream());
 }
 
 // 인코딩 rate·실효 품질(3.39.3절): 끔이면 원본, 켬이면 min(등급 rate, 원본)(원본보다 높이지 않는다,

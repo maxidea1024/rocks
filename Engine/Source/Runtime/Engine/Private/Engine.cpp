@@ -8,6 +8,9 @@
 #include <Core/ScopeExit.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <Engine/ModuleStartProgress.h>
+#include <Localization/Text.h>
+#include <Progress/ProgressScope.h>
 #include <World/DiagnosticText.h>
 #include <World/WorldLog.h>
 #include <Platform/Atomics.h>
@@ -62,6 +65,33 @@ static_assert(sizeof(InitStageNames) / sizeof(InitStageNames[0]) ==
 
 const char* InitStageName(InitStage stage) noexcept {
     return InitStageNames[static_cast<usize>(stage)];
+}
+
+// Engine::Initialize 진행 구간의 몫이다(Docs/Design/SplashScreen 8.1절 — 엔진 단계 모듈 60,
+// Registry·EngineSubsystem 30, PostEngineInit 10). 바인딩 없는 실행에서는 구간이 아무 일도 하지
+// 않는다.
+constexpr double EngineInitTotalWork = 100.0;
+constexpr double EngineInitModulesWork = 60.0;
+constexpr double EngineInitSubsystemsWork = 30.0;
+constexpr double EngineInitFinishWork = 10.0;
+static_assert(EngineInitModulesWork + EngineInitSubsystemsWork + EngineInitFinishWork ==
+                  EngineInitTotalWork,
+              "Engine::Initialize progress steps must fill the scope");
+
+// 진행 단계에 들어간다. 문구는 보고가 쓰일 때만 만든다(할당).
+void EnterEngineInitStep(ProgressScope& scope, Allocator& allocator, double work,
+                         StringView message) noexcept {
+    if (!scope.IsReporting()) {
+        scope.EnterStep(work);
+        return;
+    }
+
+    auto text = Text::Invariant(allocator, message);
+    if (text) {
+        scope.EnterStep(work, text.Value());
+    } else {
+        scope.EnterStep(work);
+    }
 }
 
 // 초기화 단계 하나 동안 "Stage" 로그 문맥을 건다.
@@ -243,6 +273,9 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         return Result<void>::Failure(error);
     };
 
+    // 시작 화면 진행(Docs/Design/SplashScreen 8.1절): 엔진 단계 모듈 → Registry·Subsystem → 마무리.
+    ProgressScope progress(EngineInitTotalWork);
+    EnterEngineInitStep(progress, allocator_, EngineInitModulesWork, "Starting engine modules");
     {
         InitStageContext stage(InitStage::TypeRegistry);
         auto types = UniquePtr<TypeRegistry>::TryMake(allocator_, allocator_);
@@ -284,6 +317,8 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         initializedSteps_ = StepTypesRegistered;
     }
 
+    EnterEngineInitStep(progress, allocator_, EngineInitSubsystemsWork,
+                        "Creating engine subsystems");
     {
         InitStageContext stage(InitStage::ObjectRegistry);
         // 엔진 이름 pool을 Registry보다 먼저 연다(31.2절 — Registry·World가 빌린다).
@@ -394,6 +429,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     {
         // 클라이언트 시작 뒤 첫 프레임 전 단계다(UE PostEngineInit). 실패하면 시작한 클라이언트를
         // 먼저 멈춘 뒤 초기화 실패 정리를 한다.
+        EnterEngineInitStep(progress, allocator_, EngineInitFinishWork, "Finishing engine startup");
         InitStageContext stage(InitStage::PostEngineInit);
         if (auto started = StartPostEngineInitModules(); !started) {
             if (config_.client != nullptr) {
@@ -1139,7 +1175,12 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     attachedModules_ = loader;
     // 엔진 단계(PreDefault·Default·PostDefault) 모듈을 시작한다. 등록기가 붙어 있으므로 각 모듈의
     // 타입은 Startup 직전에 등록된다. 이미 다른 Engine이 시작했으면 사용자 수만 는다.
-    const ModuleLoadReport started = loader->StartEngineGroup();
+    ModuleLoadReport started;
+    {
+        ModuleStartProgress progress(*loader, allocator_);
+        started = loader->StartEngineGroup();
+    }
+
     if (!started.IsOk()) {
         Log::Error(LogEngine,
                    "Engine modules could not start ({Code}): {Module} failed at {Stage}: {Message}",
@@ -1154,7 +1195,12 @@ Result<void> Engine::AttachModuleTypes() noexcept {
 }
 
 Result<void> Engine::StartPostEngineInitModules() noexcept {
-    const ModuleLoadReport started = attachedModules_->StartPhase(LoadingPhase::PostEngineInit);
+    ModuleLoadReport started;
+    {
+        ModuleStartProgress progress(*attachedModules_, allocator_);
+        started = attachedModules_->StartPhase(LoadingPhase::PostEngineInit);
+    }
+
     if (!started.IsOk()) {
         Log::Error(LogEngine,
                    "PostEngineInit modules could not start ({Code}): {Module} failed at {Stage}: "

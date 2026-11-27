@@ -17,3 +17,4 @@
 - [3.13 ML4a 구현 세부 — manifest 적재(개정 9)](03.13-ML4aManifestLoad.ko.md)
 - [3.14 ML4b 구현 세부 — 실행 파일 연결(개정 10)](03.14-ML4bExecutableLink.ko.md)
 - [3.15 ML5a 구현 세부 — 엔진 플러그인 Modular(개정 11)](03.15-ML5aEnginePlugins.ko.md)
+- [3.16 모듈 시작 관찰자 — 시작 진행(개정 13)](03.16-StartObserver.ko.md)
