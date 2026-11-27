@@ -21,6 +21,7 @@
   - 초점은 안쪽 `EditableText`가 받는다. 상자 여백은 편집기의 내용 여백(`SetContentPadding`)으로 넘겨 편집기가 상자 안쪽 전체를 덮는다 — 여백을 눌러도 편집기가 맞아 초점을 받고, Tab 정지도 하나다. UE는 상자가 초점을 받아 안쪽으로 넘긴다(`SEditableTextBox::OnFocusReceived`, SEditableTextBox.cpp 309–317행). 코드가 상자에 초점을 주는 경우(화면의 초점 대상, `SetFocus(상자)`)는 `Element::FocusDelegate`(상자 → 편집기)로 넘긴다 — `Application::SetFocus`가 초점을 받지 못하는 요소의 위임을 하위 트리 안에서 따라간다. 상자는 `SupportsKeyboardFocus`가 거짓이라 Tab 정지가 아니다(UE처럼 상자가 초점을 받게 하면 상자와 편집기가 두 정지가 된다 — 버린 대안). 초점 외곽선은 그리지 않는다 — 초점은 상자 테두리 색으로 보인다(UE `SEditableText::GetFocusBrush` = null과 같은 이유).
   - 편집기는 초점·읽기 전용이 바뀌면 `SetOnStateChanged` 콜백으로 상자에 알린다 — 상자가 바탕·전경을 다시 고른다. 상자 소멸자가 이 콜백을 끊는다(편집기가 밖에 붙잡혀 상자보다 오래 살 수 있다).
   - 상태별 전경은 `CurrentForeground()`로 읽을 수 있다(그리기의 `PaintForegroundColor`가 같은 값을 쓴다).
+  - 편집기가 덮지 않는 상자 칸(표지·막대 오른쪽 여백 띠, 표지·막대 열의 위·아래 여백)을 눌러도 편집기가 초점을 받는다 — 상자가 누름을 받아 편집기에 초점을 준다(리뷰 2026-11-28 — UE 상자는 어디를 눌러도 안쪽에 초점을 넘긴다).
   - 상자는 hover를 자기 것으로 본다(바탕 brush 선택). 상자가 비활성이면 안쪽도 비활성이다.
   - 사용자는 상자의 `Text()`(안쪽 `EditableText&`)로 편집 API를 쓴다. 상자가 같은 setter를 따로 두지 않는다(두 층의 API가 갈라지지 않게 — UE는 `SEditableTextBox`가 대부분을 다시 노출하지만 Rocks는 하나로 둔다).
 - **버린 대안**: `boxed` 인자를 유지한다. 상자 기능(hover 바탕·오류 팝업·스크롤 막대)이 편집 로직에 더 섞이고 UE 구조와 다르다.
@@ -75,8 +76,12 @@
 - **트리에 붙기 전에 정한 오류(Rocks 보강)**: UE는 창에 붙기 전 `SetError`의 팝업을 열지 못하고 버린다(Widget 층은 속성을 붙기 전에 넣는다 — 갤러리·UMG에서 팝업이 안 뜬다). Rocks는 상자가 호스트 묶음이 있는 트리에 붙을 때(`OnUiHostServicesChanged`) 오류가 있으면 연다.
   - 붙는 통지 안에서 바로 열지 않는다 — 통지는 트리 순회(루트 교체·목록 행 생성이 배치 중에 일어난다) 안에서 오므로 루트 Overlay 자식 목록을 바꾸면 순회가 깨진다. `UiHostServices::DeferFrameAction`에 넣어 다음 프레임 시작(`Application::StartFrame` — 해체 대기열 다음)에 연다.
   - 대기열 항목은 상자를 약하게 잡는다(그 사이 버려진 상자는 아무 일도 하지 않는다). 한 상자는 대기 항목을 하나만 둔다.
+  - 대기열이 버려지면(`Shutdown`·Application 소멸) 그 항목은 돌지 않는다. 상자는 넣은 묶음과 그 묶음의 버림 세대(`UiHostServices::FrameActionEpoch` — 버릴 때마다 오른다)를 기억하고, 다시 붙을 때 묶음이나 세대가 다르면 대기를 새로 넣는다(리뷰 2026-11-28 — 다시 붙여도 팝업이 영영 안 열리던 결함).
   - 상자가 화면에서 빠지면 팝업은 닫힌다(Overlay `OnDescendantDetached` — 팝업 층 규칙). 다시 붙으면 위 규칙으로 다시 연다.
-  - **숨은 anchor의 팝업(Rocks 보강 — 모든 `MenuAnchor` 팝업)**: 트리에는 남았지만 보이지 않는 anchor(고르지 않은 탭 — `ActiveChildren` 밖, 접히거나 숨은 조상)의 팝업은 팝업 호스트(Overlay)가 배치할 때 층을 접고(Collapsed), 다시 보이면 처음 보이기로 되돌린다. 판정은 anchor에서 호스트까지 `IsInputPathActive(host, 키 경로, 활성 무시)`다. 오류 팝업이 다른 탭 위에 떠 있지 않고 탭으로 돌아오면 다시 보인다. UE는 숨은 anchor가 Tick되지 않아 팝업 창이 옛 자리에 남는다(편집기는 탭 누름으로 메뉴를 닫아 가린다).
+  - **숨은 anchor의 팝업(Rocks 보강)**: 트리에는 남았지만 보이지 않는 anchor(고르지 않은 탭 — `ActiveChildren` 밖, 접히거나 숨은 조상)의 팝업은 팝업 호스트(Overlay)가 배치할 때 처리한다. 판정은 anchor에서 호스트까지 `IsInputPathActive(host, 키 경로, 활성 무시)`다.
+    - 보통 팝업(메뉴·콤보·문맥 메뉴 — 초점을 받는다)은 닫는다(UE는 탭을 누르면 메뉴 stack을 닫는다). 접기만 하면 초점이 빈 층에 남아 사라지고, 돌아와도 복원되지 않는다(리뷰 2026-11-28).
+    - 숨어도 남는 팝업(`PopupRequest::keepWhileHidden` — `MenuAnchor::SetKeepOpenWhileHidden`, 오류 팝업만 켠다)은 층을 접고(Collapsed), 다시 보이면 붙일 때의 보이기로 되돌린다. 오류 팝업이 다른 탭 위에 떠 있지 않고 탭으로 돌아오면 다시 보인다. 이런 팝업은 초점을 받지 않는다.
+    - UE는 숨은 anchor가 Tick되지 않아 팝업 창이 옛 자리에 남는다.
   - 갤러리 self-test·스냅샷 루트도 실제 창처럼 Overlay(팝업 호스트)로 감싼다.
 - 문구 shaping은 호출자가 넘긴 `Text`를 상자가 `TextShaper`로 한다(지역화 — 지금 오류 캡션과 같다).
 - **`UiHostServices` 프레임 동작 대기열**(새 계약): `Result<void> DeferFrameAction(Delegate<void()>&&)`·`usize RunFrameActions()`·`PendingFrameActionCount()`. 해체 대기열(21.4절)과 같은 방식(넣은 순서, 도는 중 넣은 항목은 다음 프레임, 재진입 0)이지만 사용자 hook 해체가 아니라 "트리 순회 밖에서 할 일"이다. `Shutdown`에서는 돌리지 않고 버린다(닫는 앱에서 팝업을 열지 않는다). 빈 delegate는 `InvalidArgument`, 할당 실패는 `OutOfMemory`다.
@@ -139,7 +144,7 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 
 - 나눔: 상자의 상태별 바탕(보통·hover·초점·읽기 전용)·전경, 여백, 상자를 누르면 안쪽 초점, 초점 외곽선 없음.
 - 스타일: CoreStyle 키 둘과 값, 앱 스타일 교체 뒤 다시 받음.
-- 선택: 더블클릭 단어(LTR·한글·숫자 섞임), 끌어 단어 확장, 세 번 클릭 줄(여러 줄의 가운데 줄·한 줄 전체), 비밀번호 더블클릭 전체.
+- 선택: 더블클릭 단어(LTR·한글·숫자 섞임, 글자 끝 오른쪽 빈 곳 — 마지막 단어, 리뷰 2026-11-28), 끌어 단어 확장, 세 번 클릭 줄(여러 줄의 가운데 줄·한 줄 전체), 비밀번호 더블클릭 전체.
 - 이력: 99단계에서 가장 오래된 것이 빠짐.
 - 힌트 색 = 전경 × 0.35.
 - caret: 폭(작은·큰 글꼴 clamp), 주입 시계로 0.1초 고정·0.25초 경계 켜짐·꺼짐(시각을 정해 두고 단언 — 시간 경쟁 없음), 초점 잃으면 volatile 해제.
@@ -180,26 +185,33 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
   - 거울은 OS 콜백 안에서 할당하지 않도록 고정 용량이다(`MaxTextInputDocumentCodeUnits` 16384 code unit). 문맥 글자가 더 길면 그 문맥에는 TSF 문서를 만들지 않고 IMM으로 받는다(경고 로그 한 번).
   - 글자 위치(`GetTextExt`·`GetScreenExt`·`GetACPFromPoint`)는 문맥에 바로 묻는다(읽기만 — UI 상태를 바꾸지 않는다). 거울이 문맥보다 앞서 있으면(적용 전 기록이 있으면) 조합 시작 위치로 근사한다.
   - 그래서 19.2절의 "TSF 동기 질의는 펌프 중에만, lane 대기 펌프면 `TS_E_SYNCHRONOUS`" 규칙은 필요 없다 — 거울과 읽기 전용 위치 질의는 언제 불려도 UI를 고치지 않는다. 19.2절을 이 절로 고친다. `TS_E_SYNCHRONOUS`는 잠금 안에서 다시 동기 잠금을 청할 때만 쓴다(`ITextStoreACP` 규약).
-- **거울 맞추기.** 게임 lane이 Activate·`NotifyTextInputLayoutChanged`(편집기가 배치할 때마다)·표지 처리 뒤에 문맥의 글자·선택을 읽어 거울과 비교한다. 다르면 거울을 바꾸고 TSF에 알린다(`ITextStoreACPSink::OnTextChange`·`OnSelectionChange` — UE `NotifyTextChanged`·`NotifySelectionChanged`). 배치가 바뀌면 `OnLayoutChange(TS_LC_CHANGE)`다. 적용 전 기록이 있으면(거울이 앞섬) 맞추지 않는다.
+- **거울 맞추기.** 게임 lane이 Activate·`NotifyTextInputLayoutChanged`(편집기가 배치할 때마다)·표지 처리 뒤에 문맥의 글자·선택을 읽어 거울과 비교한다. 붙어 있는 동안 문맥 글자가 거울 용량을 넘으면 조합을 확정하고 문서를 떼어 IMM으로 받는다(리뷰 2026-11-28 — 멈춘 거울로 엉뚱한 자리에 쓰지 않게). 다르면 거울을 바꾸고 TSF에 알린다(`ITextStoreACPSink::OnTextChange`·`OnSelectionChange` — UE `NotifyTextChanged`·`NotifySelectionChanged`). 배치가 바뀌면 `OnLayoutChange(TS_LC_CHANGE)`다. 적용 전 기록이 있으면(거울이 앞섬) 맞추지 않는다.
   - `platform::TextInputClient`에 `GetTextLength`·`GetText(범위)`·`GetCharacterIndexFromPoint`·`GetScreenBounds`를 더한다(`ui::TextInputContext`에 이미 있다 — 데모 어댑터가 넘긴다).
-- **기록으로 바꾸기**(잠금을 풀 때 — 거울의 바뀐 것을 그대로 옮긴다). IMM 기록(조합·확정·끝)은 "선택을 조합 범위로 잡아 통째로 바꾼다"는 IMM 모델이라 TSF 편집(조합 밖 고침·재변환·조합 안 부분 고침)을 담지 못한다. 그래서 TSF용 기록 다섯을 더한다(위치는 앞 기록을 적용한 뒤의 글자 기준).
+- **기록으로 바꾸기**(잠금을 풀 때 — 거울의 바뀐 것을 그대로 옮긴다). IMM 기록(조합·확정·끝)은 "선택을 조합 범위로 잡아 통째로 바꾼다"는 IMM 모델이라 TSF 편집(조합 밖 고침·재변환·조합 안 부분 고침)을 담지 못한다. 그래서 TSF용 기록 여섯을 더한다(위치는 앞 기록을 적용한 뒤의 글자 기준 — `Rebase` 어긋남을 더한다).
+  - `Rebase(기준 선택 시작)`: 이번 Flush 위치의 기준이다(아래 "위치 기준").
   - `CompositionBegin`: 조합을 시작한다(이미 조합 중이면 없음).
   - `TextReplace(범위, 글자)`: 조합 중이면 미리보기를 고치고, 아니면 Begin·SetText·End로 확정 편집 하나다(이력·변경 알림 한 번 — 자동 고침·이모지 패널).
   - `CompositionRange(범위)`: 조합 범위(밑줄)다. 조합 중이 아니면 시작한다.
   - `CompositionCommit`: 조합을 확정하고 끝낸다.
   - `Selection(범위)`: 선택(조합 중이면 미리보기 안 caret)을 옮긴다.
-  - 잠금을 풀 때 거울을 기준(문맥이 기록 적용 뒤 가질 상태)과 견주어 차례로 낸다: 이번에 조합이 시작됐으면 `CompositionBegin` → 글자가 달라졌으면 공통 앞·뒤를 뺀 한 구간 `TextReplace` → 조합 중이면 범위가 달라졌을 때 `CompositionRange` → 이번에 조합이 끝났으면 `CompositionCommit` → 선택이 기준과 다르거나 글자가 달라졌으면 `Selection`. 그다음 기준을 거울로 옮긴다.
-  - 넘치면(기록 버퍼) 조합을 끝내고(`TerminateComposition`) 거울을 문맥으로 다시 맞춘다(그 동안의 편집은 잃는다 — IMM 넘침 규칙과 같다).
+  - 잠금을 풀 때 거울을 기준(문맥이 기록 적용 뒤 가질 상태)과 견주어 차례로 낸다: 맨 앞에 `Rebase` → 이번에 조합이 시작됐으면 `CompositionBegin` → 글자가 달라졌으면 공통 앞·뒤를 뺀 한 구간 `TextReplace` → 조합 중이면 범위가 달라졌을 때 `CompositionRange` → 이번에 조합이 끝났으면 `CompositionCommit` → 선택이 기준과 다르거나 글자가 달라졌으면 `Selection`. 그다음 기준을 거울로 옮긴다.
+  - **위치 기준(`Rebase`, 리뷰 2026-11-28).** TSF가 위치를 정하는 때(OS 펌프 안)에는 TIP를 그냥 통과한 키·문자(공백·Backspace·Enter·방향키)가 아직 입력 큐에만 있어 거울에도 문맥에도 없다. 그래서 거울 위치를 그대로 쓰면 그 키를 적용한 문맥에서 엉뚱한 곳을 고친다(예: "가" → Space → "ㄴ"이 "가ㄴ "가 된다). `Rebase(기준 선택 시작)`를 적용할 때 문맥이 조합 중이 아니면 "지금 문맥 선택 시작 − 기준 선택 시작"을 어긋남으로 잡고, 뒤따르는 TSF 기록의 위치에 더한다(글자 길이로 자른다). 조합 중이면(키는 IME가 먹는다) 어긋남은 0이다. 처리 뒤 거울을 문맥으로 다시 맞추므로 TIP도 곧 그 키를 본다. IMM 기록은 적용 때 선택을 조합 범위로 잡아 이 문제가 없다.
+  - **조합 경계는 바로 낸다(리뷰 2026-11-28).** 한 잠금 안에서 조합이 끝나고 새 조합이 시작될 수 있다(한국어 TIP는 다음 음절로 넘어갈 때 한 편집 세션 안에서 끝·시작을 잇는다고 알려져 있다 — 사람 확인 목록). 불리언 둘만 견주면 확정·시작 없이 범위만 옮겨 앞 음절이 확정되지 않는다. 그래서 저장소는 `OnStartComposition`·`OnEndComposition`에서 잠금 안이라도 그 자리에서 거울을 기록으로 낸다(큐 기록이라 TSF 알림 금지 규약과 무관). 거울도 조합 세대를 세어, 기준과 세대가 다르면 앞 조합 `CompositionCommit`과 새 `CompositionBegin`을 낸다(안전망).
+  - **넘침(리뷰 2026-11-28).** 기록 버퍼가 넘치면 그 Flush의 남은 기록은 내지 않는다(버려진 기록을 전제로 한 위치라서). 세션은 넘침 '끝' 기록으로 문맥 조합을 지운다 — 세션이 TSF 조합 범위(`CompositionRange`)도 따라가므로 지우는 범위가 맞다(IMM 취소와 같은 결과). 창은 처리 뒤 TSF 조합을 끝내고(`TerminateComposition`) 그 잠금이 낸 기록은 버린 뒤(`Cancel`) 거울을 문맥으로 다시 맞춘다. 넘침 뒤의 편집은 잃는다.
 - **잠금**(`RequestLock`, UE FTextStoreACP::RequestLock): 잠겨 있지 않으면 바로 허락하고(`OnLockGranted`) 풀 때 기록을 낸다. 잠긴 채 동기 청은 `TS_E_SYNCHRONOUS`, 비동기 청은 허락 뒤에 한 번 더 준다(`TS_S_ASYNC`, 읽기 → 쓰기 올림 포함).
 - **TSF와 IMM 고르기**(UE와 같다)
   - 창을 만드는 스레드(게임 lane)에서 COM STA를 연다(`CoInitializeEx(COINIT_APARTMENTTHREADED)`). 이미 다른 모드면(`RPC_E_CHANGED_MODE`) TSF 없이 IMM만 쓴다.
   - 스레드마다 `ITfThreadMgr`(Activate)·입력기 프로필 sink(`ITfInputProcessorProfileActivationSink`)를 둔다. 활성 입력기가 TIP이면 TSF, 키보드 배치(옛 IMM 입력기)면 IMM이다.
-  - 문맥이 없을 때는 빈 문서 관리자(`disabled`)에 초점을 둔다. 그래서 TSF 입력기도 게임 문자 입력에 `WM_CHAR`를 보낸다(지금 IMM 경로와 같은 결과).
+  - 문맥이 없을 때(문서를 뗀 뒤)는 창의 문서 연결을 붙이기 전(대개 없음)으로 되돌린다. 창에 초점이 있으면, 되돌린 문서 관리자가 있으면 거기에 초점을 두고, 없으면 `WM_IME_SETCONTEXT`를 다시 보낸다. 그러면 CUAS가 창 IMM 문맥의 자기 문서로 초점을 옮겨, 문맥 밖 게임 문자 입력이 지금처럼 IMM 경로로 IME 조합을 받는다(19.2절 결정 유지).
+    - UE는 빈 문서 관리자(`TSFDisabledDocumentManager`)에 초점을 두어 문맥 밖에서는 IME를 끈다. Rocks는 19.2절의 "문맥이 없을 때도 게임 문자 입력에 IME를 쓴다"를 지키려고 이 방식을 버렸다(리뷰 2026-11-28 — 원안의 disabled 문장은 IMM 결과와 같지 않아 고쳤다).
+    - 사람 확인 목록: TIP가 켜진 채 문맥 밖 게임 문자 입력에 IME 조합이 오는지.
   - TSF로 받는 동안 IMM 메시지(`WM_IME_COMPOSITION` 등)는 기록하지 않고 OS 기본 처리로 넘긴다.
-- **문맥마다**(Activate·Deactivate): `CreateDocumentMgr` → `CreateContext(store)` → `Push` → `SetFocus(문서)`. Deactivate는 조합을 확정하고(`ITfContextOwnerCompositionServices::TerminateComposition` — IMM `CPS_COMPLETE`와 같은 결과), 그 잠금이 낸 기록을 처리한 뒤 `Pop`·`SetFocus(disabled)`다. 비밀번호·읽기 전용 문맥은 TSF 문서를 만들지 않는다(IME 끔 — IMM과 같다). Cancel(앱이 조합 중에 글자를 바꿈)은 조합을 끝내고 남은 기록을 버린 뒤 거울을 다시 맞춘다.
-- **조합 sink**(`ITfContextOwnerCompositionSink`): `OnStartComposition`은 허락하고 조합 범위를 거울에 표시한다. `OnUpdateComposition`은 새 범위(`ITfRangeACP::GetExtent`), `OnEndComposition`은 끝 표시다. 셋 다 잠금 안에서 오므로 풀 때 기록이 된다.
+- **문맥마다**(Activate·Deactivate): `CreateDocumentMgr` → `CreateContext(store)` → `Push` → `AssociateFocus(창, 문서)`(초점이 있으면 `SetFocus(문서)`). Deactivate는 조합을 확정하고(`ITfContextOwnerCompositionServices::TerminateComposition` — IMM `CPS_COMPLETE`와 같은 결과), 그 잠금이 낸 기록을 처리한 뒤 `Pop`하고 창 연결을 위 규칙으로 되돌린다. 비밀번호·읽기 전용 문맥은 TSF 문서를 만들지 않는다(IME 끔 — IMM과 같다).
+  - 초점이 있는 채 문맥이 비밀번호·읽기 전용으로 바뀌면(같은 문맥 다시 Activate) 문서를 뗀다. 반대로 IME를 다시 허용하면 문서를 붙인다(리뷰 2026-11-28 — 비밀번호 칸에 TIP 조합·평문 거울이 남던 결함).
+  - 입력기 종류가 바뀌면(TIP ↔ IMM) 다음 `TakeEvents`에서 남은 기록을 즉시 적용하지 않고 길을 바꾼다: TSF → IMM이면 문서를 떼고(확정 기록은 표지로 큐 순서를 지킨다), IMM → TSF면 IMM 조합을 확정(`CPS_COMPLETE` — 기록·표지)한 뒤 문서를 붙인다(리뷰 2026-11-28 — 앞선 키보다 기록이 먼저 들어가지 않게). Cancel(앱이 조합 중에 글자를 바꿈)은 조합을 끝내고 남은 기록을 버린 뒤 거울을 다시 맞춘다.
+- **조합 sink**(`ITfContextOwnerCompositionSink`): `OnStartComposition`은 허락하고 조합 범위를 거울에 표시한다. `OnUpdateComposition`은 새 범위(`ITfRangeACP::GetExtent`), `OnEndComposition`은 끝 표시다. 시작·끝은 위 "조합 경계" 규칙대로 그 자리에서 기록을 낸다. 범위 갱신은 잠금을 풀 때 기록이 된다.
 - **속성·embedded**: 지원 속성은 없음(`RequestSupportedAttrs` 등은 빈 결과), embedded는 `E_NOTIMPL`(UE와 같다).
-- **시험**: `TextInputDocument`(OS 없음) — 거울 편집(바꿈·삽입·선택·조합 범위 따라가기·잘못된 범위·용량), 조합 시작·갱신·끝·취소, 조합 밖 삽입, 재변환(선택한 글자 위 조합), 선택만 바뀜이 기록 순서로 나오는지, 거울 맞추기 통지, 용량 넘침. `TextInputSession` TSF 기록 다섯의 적용(조합 중·밖). 실제 TSF(한국어·일본어 TIP, 재변환, 이모지 패널, IMM 입력기 전환)는 사람 확인 목록에 둔다.
+- **시험**: `TextInputDocument`(OS 없음) — 거울 편집(바꿈·삽입·선택·조합 범위 따라가기·잘못된 범위·용량), 조합 시작·갱신·끝·취소(TIP가 조합 글자를 비우고 끝냄 — 글자 원복·이력 없음), 한 잠금 안의 끝 → 시작(세대), Flush와 처리 사이에 문맥이 따로 바뀜(`Rebase`), TSF 기록 넘침(조합 전 글자로), 조합 밖 삽입, 재변환(선택한 글자 위 조합), 선택만 바뀜이 기록 순서로 나오는지, 거울 맞추기 통지, 용량 넘침. `TextInputSession` TSF 기록 여섯의 적용(조합 중·밖, Rebase 어긋남, 조합 범위 추적). 실제 TSF(한국어·일본어 TIP, 재변환, 이모지 패널, IMM 입력기 전환)는 사람 확인 목록에 둔다.
 
 ### 22.11 단계
 
