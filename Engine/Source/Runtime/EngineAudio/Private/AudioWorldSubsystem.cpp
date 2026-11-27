@@ -53,6 +53,11 @@ void AudioWorldSubsystem::ReleaseScene() noexcept {
         engine_->UnregisterScene(scene_);
     }
 
+    if (engine_ != nullptr && changedBaseMix_) {
+        engine_->RestoreDefaultBaseMix();
+        changedBaseMix_ = false;
+    }
+
     scene_ = AudioSceneId{};
 }
 
@@ -147,6 +152,16 @@ void AudioWorldSubsystem::UpdateEmitter(AudioEmitterId emitter, const Vec3d& pos
     if (engine_ != nullptr) {
         engine_->UpdateEmitter(emitter, position, rotation);
     }
+}
+
+Result<void> AudioWorldSubsystem::SetBaseMix(const MixSnapshotRef& mix) noexcept {
+    if (engine_ == nullptr) {
+        return Result<void>::Success();
+    }
+
+    auto set = engine_->SetBaseMix(mix);
+    changedBaseMix_ = changedBaseMix_ || (set && mix);
+    return set;
 }
 
 void AudioWorldSubsystem::SetOcclusionQuery(AudioOcclusionQuery* query) noexcept {

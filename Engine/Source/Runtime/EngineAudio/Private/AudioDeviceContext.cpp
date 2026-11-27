@@ -59,7 +59,9 @@ AudioDeviceContext::AudioDeviceContext(Allocator& allocator, audio::AudioOutputD
       decoders_(decoders), records_(allocator), voiceOwners_(allocator), clips_(allocator),
       scenes_(allocator), emitters_(allocator), releasing_(allocator), detached_(allocator),
       deferred_(allocator), awaitingStart_(allocator), terminalScratch_(allocator),
-      candidates_(allocator), groups_(allocator), groupScratch_(allocator) {
+      candidates_(allocator), groups_(allocator), groupScratch_(allocator), mixes_(allocator),
+      overrides_(allocator), adjustments_(allocator), categoryScales_(allocator),
+      categoryCache_(allocator), passive_(allocator) {
 }
 
 AudioDeviceContext::~AudioDeviceContext() noexcept = default;
@@ -73,7 +75,11 @@ Result<void> AudioDeviceContext::Initialize(uint32 maxActiveVoices) noexcept {
         !groups_.TryResize(MaxActiveConcurrencyGroups) || !groupScratch_.TryReserve(MaxPlaybacks) ||
         !deferred_.TryReserve(MaxPlaybacks) || !awaitingStart_.TryReserve(MaxPlaybacks) ||
         !terminalScratch_.TryResize(TerminalBatch) || !scenes_.TryResize(MaxAudioScenes) ||
-        !emitters_.TryResize(MaxAudioEmitters)) {
+        !emitters_.TryResize(MaxAudioEmitters) || !mixes_.TryReserve(MaxActiveMixes) ||
+        !overrides_.TryReserve(MaxMixOverrides) ||
+        !adjustments_.TryReserve(MaxActiveMixes * MaxMixAdjusters + MaxMixOverrides) ||
+        !categoryScales_.TryReserve(MaxCategoryDistanceScales) ||
+        !categoryCache_.TryReserve(MaxPlaybacks) || !passive_.TryReserve(MaxActiveMixes)) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -95,6 +101,7 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     focus_ = batch.focus;
     focusInitializeOnFirstUpdate_ = batch.focusInitializeOnFirstUpdate;
     occlusion_ = batch.occlusion;
+    userVolume_ = batch.userVolume;
     ApplySnapshots(batch);
     RetryDeferred();
     // 수거를 먼저 한다(3.41.4절 — 이번 묶음에 끝난 voice가 배정의 상한 수에 들어가지 않게).
@@ -102,6 +109,15 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     CollectTerminals(batch);
     ReclaimVoices();
     ReclaimClips();
+    // 믹스 명령을 먼저 적용하고 상태·조정을 갱신한다(UE UpdateSoundClassProperties가 parse 앞 —
+    // 이번 묶음 수락 판정이 이번 묶음 분류 값을 본다, 3.43.8절).
+    for (const ControlCommand& command : batch.commands) {
+        if (IsMixCommand(command.type)) {
+            ApplyMixCommand(command, now);
+        }
+    }
+
+    UpdateMixes(now);
     for (ControlCommand& command : batch.commands) {
         switch (command.type) {
         case ControlCommandType::Play:
@@ -122,9 +138,20 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
         case ControlCommandType::SetOcclusion:
             ApplySetOcclusion(command, now);
             break;
+        case ControlCommandType::PushMix:
+        case ControlCommandType::PopMix:
+        case ControlCommandType::ClearMix:
+        case ControlCommandType::ClearAllMixes:
+        case ControlCommandType::SetBaseMix:
+        case ControlCommandType::SetMixCategoryOverride:
+        case ControlCommandType::ClearMixCategoryOverride:
+        case ControlCommandType::SetCategoryDistanceScale:
+            // 위에서 이미 적용했다.
+            break;
         }
     }
 
+    UpdateCategories(now);
     // 가상 재생은 검사 때만 갱신한다(UE FAudioVirtualLoop::UpdateFocusData — AVL 275–295).
     for (Record& record : records_) {
         if (record.state != RecordState::Inactive && record.state != RecordState::Virtual &&
@@ -140,6 +167,9 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
         UpdateConcurrency(batch, now);
         UpdateWeights(now);
         AssignVoices(batch, now);
+        // passive 믹스는 배정 뒤에 본다(UE UpdatePassiveSoundMixModifiers — 다음 묶음
+        // 반영, 3.43.7절).
+        UpdatePassiveMixes(now);
     }
 
     ApplyMasterGain(batch.masterGain);
@@ -331,6 +361,18 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     record.focusInitialized = false;
     record.focusMixFrame = now;
     record.focus = FocusScales{};
+    // 분류(3.43.2절): 수락 판정(짧은 소리·가상·동시 발음)도 이번 묶음 분류 값을 본다.
+    record.category = Move(command.category);
+    record.categoryValues = ComputeCategory(record.category.Get(), now);
+    record.optionAlwaysPlay = command.alwaysPlay;
+    record.optionUiSound = command.isUiSound;
+    record.alwaysPlay = command.alwaysPlay || record.categoryValues.alwaysPlay;
+    record.isUiSound = command.isUiSound || record.categoryValues.isUiSound;
+    record.playbackLowPass = command.lowPassFrequency;
+    record.playbackHighPass = command.highPassFrequency;
+    record.hasOcclusionInterval = command.hasOcclusionInterval;
+    record.occlusionInterval = command.occlusionInterval;
+    record.everAssigned = false;
     record.occlusionPending = false;
     record.occlusionChecked = false;
     record.occlusionSequence = 0;
@@ -429,6 +471,19 @@ void AudioDeviceContext::ApplyStop(const ControlCommand& command, ControlBatch& 
 void AudioDeviceContext::ApplySetParameter(const ControlCommand& command, uint64 now) noexcept {
     Record* record = FindRecord(command.handle);
     if (record == nullptr) {
+        return;
+    }
+
+    // 재생 LPF·HPF는 바로 바뀐다(UE SetLowPassFilterFrequency — 3.43.1절).
+    if (command.parameter == PlaybackParameter::LowPassFrequency) {
+        record->playbackLowPass = command.value;
+        record->paramsDirty = true;
+        return;
+    }
+
+    if (command.parameter == PlaybackParameter::HighPassFrequency) {
+        record->playbackHighPass = command.value;
+        record->paramsDirty = true;
         return;
     }
 
@@ -604,10 +659,12 @@ void AudioDeviceContext::UpdateSpatial(Record& record, uint64 now, bool acceptin
         record.concurrencyPriority = record.priority;
     }
 
-    // 3) 거리 감쇠·공기 흡수·패닝(UE AS 2135–2156·2257–2276).
-    record.spatial = ComputeSpatialParams(attenuation, playable.ChannelCount(),
-                                          scene.listenerPosition, scene.listenerRotation,
-                                          record.position, record.rotation, record.focus.distance);
+    // 3) 거리 감쇠·공기 흡수·패닝(UE AS 2135–2156·2257–2276). 거리 배수에 분류 감쇠 배수가 곱해진다
+    // (가청 판정에는 들어가지 않는다 — 3.43.6절).
+    record.spatial =
+        ComputeSpatialParams(attenuation, playable.ChannelCount(), scene.listenerPosition,
+                             scene.listenerRotation, record.position, record.rotation,
+                             record.focus.distance * record.categoryValues.distanceScale);
     record.paramsDirty = true;
 }
 
@@ -820,14 +877,19 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     const SoundPlayable& playable = *record.sound.Get();
     audio::AudioVoiceParams params;
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
-    params.gain =
-        ClampGain(record.volume.At(frame) * playable.volume * record.spatial.attenuationGain *
-                  record.focus.volume * record.occlusionVolume.At(frame) * record.resume.At(frame) *
-                  record.concurrencyScale * record.stealFader.At(frame));
-    // LPF는 공기 흡수와 차폐의 최솟값이다(UE FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
-    params.lowPassCutoffHz = math::Min(record.spatial.lowPassHz, OcclusionFilterAt(record, frame));
-    params.highPassCutoffHz = record.spatial.highPassHz;
-    params.pitch = ClampVoicePitch(record.pitch.At(frame) * playable.pitch);
+    const float stereo =
+        playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
+    params.gain = ClampGain(
+        record.volume.At(frame) * playable.volume * stereo * record.categoryValues.volume *
+        record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(frame) *
+        record.resume.At(frame) * record.concurrencyScale * record.stealFader.At(frame));
+    // LPF는 공기 흡수·차폐·분류·재생 값의 최솟값, HPF는 최댓값이다(UE
+    // FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
+    params.lowPassCutoffHz =
+        math::Min(math::Min(record.spatial.lowPassHz, OcclusionFilterAt(record, frame)),
+                  math::Min(record.categoryValues.lowPassFrequency, record.playbackLowPass));
+    params.highPassCutoffHz = math::Max(record.spatial.highPassHz, record.playbackHighPass);
+    params.pitch = EffectivePitch(record, frame);
     params.panMode = audio::AudioPanMode::Direct;
     if (record.spatial.azimuthPan) {
         params.panMode = audio::AudioPanMode::Azimuth;
