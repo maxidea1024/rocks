@@ -567,6 +567,8 @@ private:
     ModuleLoader* attachedModules_ = nullptr;
     // 이 Engine이 로더의 엔진 묶음 사용자다(StartEngineGroup 성공).
     bool engineGroupStarted_ = false;
+    // 이 Engine이 등록소를 로더 호스트 서비스로 올렸다(Docs/Design/ProgressReporting 8장 PG5).
+    bool pendingWorkService_ = false;
     // 엔진 이름 pool이다(31.2절). Registry·World보다 먼저 선언해 나중에 소멸시킨다.
     UniquePtr<NamePool> names_;
     UniquePtr<TypeRegistry> types_;

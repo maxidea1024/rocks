@@ -39,6 +39,10 @@ public static partial class PolicyChecks
         // float 부호 bit를 지우는 SIMD 마스크다(lane마다 0x7fffffff).
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Math/VectorRegisterSse.h"] = Pattern(
             "\\b_mm_set1_epi32\\s*\\(\\s*0x7fffffff\\s*\\)"),
+        // 테마 색 표의 RGBA 8888 값이다(불투명 흰색 0xFFFFFFFF는 형식 한계가 아니라 색이다). 검사는 문자열을 비운
+        // 줄을 보므로 {"이름", 0xFFFFFFFFu} 항목은 { , 0xFFFFFFFFu}로 보인다.
+        ["Engine/Source/Runtime/UiCore/Private/ThemeColors.cpp"] = Pattern(
+            "\\{\\s*,\\s*0[xX][fF]{8}u\\s*\\}"),
     };
 
     /// <summary>

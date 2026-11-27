@@ -1,7 +1,7 @@
 using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
-// Curve value type test fixture module (Docs/Design/CurveData.ko.md section 16, CV5). The Foundation and Engine test executables depend on it.
+// Curve value type test fixture module (Docs/Design/CurveData/README.ko.md section 16, CV5). The Foundation and Engine test executables depend on it.
 // This module owns the reflection header that places curves in every value position (class field, array element, Optional, map value,
 // InstancedStruct content), the InterpCurve mirror holder (CV9 — fields of the CoreTypeBindings InterpCurve mirrors) and its identity spec
 // (CurvesTestFixtures.rocksids.json). Header only. It is kept separate from ReflectionTestFixtures so the reflection fixtures do not depend on

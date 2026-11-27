@@ -91,6 +91,7 @@ Result<void> AudioDeviceContext::Initialize(uint32 maxActiveVoices) noexcept {
 void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     const uint64 now = mixer_.CompletedMixFrame();
     minDistanceDelta_ = batch.concurrencyMinDistanceDelta;
+    virtual_ = batch.virtualization;
     ApplySnapshots(batch);
     RetryDeferred();
     // 수거를 먼저 한다(3.41.4절 — 이번 묶음에 끝난 voice가 배정의 상한 수에 들어가지 않게).
@@ -126,6 +127,7 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
 
     if (!shuttingDown_) {
         UpdateEstimates(batch, now);
+        UpdateVirtualization(batch, now);
         UpdateConcurrency(batch, now);
         UpdateWeights(now);
         AssignVoices(batch, now);
@@ -149,7 +151,8 @@ void AudioDeviceContext::StopAll(uint32 fadeFrames) noexcept {
     // voice 없는 재생은 믹서가 모른다. 종료에서는 콜백을 부르지 않으므로 결과 없이
     // 비운다(그룹에서도 뺀다 — voice를 쥔 재생은 terminal에서 뺀다).
     for (uint32 slot = 0; slot < records_.Size(); ++slot) {
-        if (records_[slot].state == RecordState::Voiceless) {
+        if (records_[slot].state == RecordState::Voiceless ||
+            records_[slot].state == RecordState::Virtual) {
             LeaveConcurrencyGroups(slot, mixer_.CompletedMixFrame());
             records_[slot] = Record{};
         }
@@ -220,9 +223,12 @@ AudioControlStats AudioDeviceContext::StatsWithoutStreams() const noexcept {
     stats.activeVoices = 0;
     stats.stoppingVoices = static_cast<uint32>(detached_.Size());
     stats.voicelessPlaybacks = 0;
+    stats.virtualPlaybacks = 0;
     for (const Record& record : records_) {
         if (record.state == RecordState::Voiceless) {
             ++stats.voicelessPlaybacks;
+        } else if (record.state == RecordState::Virtual) {
+            ++stats.virtualPlaybacks;
         } else if (record.state != RecordState::Inactive) {
             if (record.stopRequested) {
                 ++stats.stoppingVoices;
@@ -341,16 +347,33 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     // 가청 거리 밖의 짧은 one-shot은 만들지 않는다(UE au.SoundDistanceOptimizationLength
     // — 3.41.1절).
     const uint64 shortFrames = static_cast<uint64>(playable.SampleRate()) * ShortSoundSeconds;
-    if (!playable.looping && playable.FrameCount() <= shortFrames && !IsAudible(record)) {
+    if (!playable.looping && playable.FrameCount() <= shortFrames && !IsAudible(record, true)) {
         ++stats_.inaudibleEnds;
         EndVoiceless(slot, PlaybackEndReason::Inaudible, batch);
         return;
     }
 
-    // 동시 발음 그룹(3.41.2절): 하나라도 거부하면 시작하지 못한다(Ended(Concurrency)).
+    record.owner = command.owner;
+    record.concurrencyCount = command.concurrencyCount;
+    for (uint32 index = 0; index < command.concurrencyCount; ++index) {
+        record.concurrency[index] = command.concurrency[index];
+    }
+
+    // 가청 거리 밖의 가상화 가능한 loop는 voice 없이 가상으로 시작한다(UE AD 5387–5400 — 동시
+    // 발음은 실현 때 본다, 3.41.3절).
+    if (IsVirtualizable(record) && !IsAudible(record)) {
+        EnterVirtual(slot, now);
+        return;
+    }
+
+    // 동시 발음 그룹(3.41.2절): 하나라도 거부하면 시작하지 못한다(Ended(Concurrency)). 가상화
+    // 가능한 loop는 거부 대신 가상으로 둔다(UE AD 5412–5432).
     if (command.concurrencyCount != 0) {
-        const ConcurrencyOutcome outcome = EvaluateConcurrency(slot, command, batch, now, false);
-        if (outcome == ConcurrencyOutcome::Rejected) {
+        const ConcurrencyOutcome outcome = EvaluateConcurrency(slot, batch, now, false);
+        if (outcome == ConcurrencyOutcome::Rejected && IsVirtualizable(record)) {
+            ++stats_.concurrencyRejects;
+            EnterVirtual(slot, now);
+        } else if (outcome == ConcurrencyOutcome::Rejected) {
             ++stats_.concurrencyRejects;
             EndVoiceless(slot, PlaybackEndReason::Concurrency, batch);
         } else if (outcome == ConcurrencyOutcome::TableFull) {
@@ -367,7 +390,7 @@ void AudioDeviceContext::ApplyStop(const ControlCommand& command, ControlBatch& 
     }
 
     // voice가 없으면 믹서를 부르지 않고 바로 끝낸다(3.41.4절).
-    if (record->state == RecordState::Voiceless) {
+    if (record->state == RecordState::Voiceless || record->state == RecordState::Virtual) {
         EndVoiceless(command.handle.slot, PlaybackEndReason::Stopped, batch);
         return;
     }
@@ -391,9 +414,18 @@ void AudioDeviceContext::ApplySetParameter(const ControlCommand& command, uint64
 }
 
 void AudioDeviceContext::ApplySnapshots(const ControlBatch& batch) noexcept {
+    for (ControlScene& scene : scenes_) {
+        scene.listenerJumped = false;
+    }
+
+    const double force = static_cast<double>(virtual_.forceUpdateDistance);
     for (const SceneUpdate& update : batch.scenes) {
         if (update.index < scenes_.Size()) {
             ControlScene& scene = scenes_[update.index];
+            // 리스너가 forceUpdateDistance보다 많이 움직이면 가상 재생을 바로 검사한다(UE AVL
+            // 451–456).
+            scene.listenerJumped =
+                (update.position - scene.listenerPosition).LengthSquared() > force * force;
             scene.epoch = update.epoch;
             scene.listenerPosition = update.position;
             scene.listenerRotation = update.rotation;
@@ -428,10 +460,23 @@ void AudioDeviceContext::ApplyRemoveScene(const ControlCommand& command,
             continue;
         }
 
-        if (record.state == RecordState::Voiceless) {
+        if (record.state == RecordState::Voiceless || record.state == RecordState::Virtual) {
             EndVoiceless(slot, PlaybackEndReason::SceneRemoved, batch);
         } else {
             RequestStop(record, SceneRemoveFadeFrames, PlaybackEndReason::SceneRemoved);
+        }
+    }
+
+    // 가상이 된 재생에서 떼어 낸 voice(steal fade 중 포함)도 그 World와 함께 짧게 끊는다.
+    for (DetachedVoice& detached : detached_) {
+        if (detached.scene != command.scene || detached.sceneEpoch != command.sceneEpoch) {
+            continue;
+        }
+
+        detached.fading = false;
+        if (detached.stopFade > SceneRemoveFadeFrames) {
+            detached.stopFade = SceneRemoveFadeFrames;
+            (void)mixer_.RequestStop(detached.voice, SceneRemoveFadeFrames);
         }
     }
 }
@@ -454,7 +499,7 @@ void AudioDeviceContext::ApplyRemoveEmitter(const ControlCommand& command,
             continue;
         }
 
-        if (record.state == RecordState::Voiceless) {
+        if (record.state == RecordState::Voiceless || record.state == RecordState::Virtual) {
             EndVoiceless(slot, PlaybackEndReason::EmitterRemoved, batch);
         } else {
             RequestStop(record, audio::DefaultStopFadeFrames, PlaybackEndReason::EmitterRemoved);

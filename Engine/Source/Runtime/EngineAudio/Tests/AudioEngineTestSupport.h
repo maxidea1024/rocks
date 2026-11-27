@@ -118,8 +118,8 @@ struct AudioEngine {
         for (uint32 frame = 0; frame < MaxTestFrames; ++frame) {
             const AudioControlStats stats = audio->ControlStats();
             if (stats.activeVoices == 0 && stats.stoppingVoices == 0 &&
-                stats.voicelessPlaybacks == 0 && stats.releasingVoices == 0 &&
-                stats.registeredClips == 0) {
+                stats.voicelessPlaybacks == 0 && stats.virtualPlaybacks == 0 &&
+                stats.releasingVoices == 0 && stats.registeredClips == 0) {
                 return true;
             }
 

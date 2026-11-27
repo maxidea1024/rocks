@@ -57,10 +57,11 @@ private:
 Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& field, usize count,
                                TextSource source, StringView pathText) noexcept;
 
-// 바이트 배열(`Array<uint8>` 필드·멤버 통째 — Docs/Design/CurveData.ko.md D18, CV4)의 값 텍스트는
-// 명령행·JSON 모두 RFC 4648 Base64 문자열 하나다(Core/Encoding/Base64.h — 엄격: 4의 배수 길이·'='
-// 패딩·공백 없음, 빈 텍스트는 빈 배열). text를 풀어 out을 원소 목록(UInt8 FieldValue)으로 채운다.
-// Base64가 아니면 InvalidValue, 원소 수 한도(CheckElementCount)를 넘으면 그 진단을 남기고 false다.
+// 바이트 배열(`Array<uint8>` 필드·멤버 통째 — Docs/Design/CurveData/README.ko.md D18, CV4)의 값
+// 텍스트는 명령행·JSON 모두 RFC 4648 Base64 문자열 하나다(Core/Encoding/Base64.h — 엄격: 4의 배수
+// 길이·'=' 패딩·공백 없음, 빈 텍스트는 빈 배열). text를 풀어 out을 원소 목록(UInt8 FieldValue)으로
+// 채운다. Base64가 아니면 InvalidValue, 원소 수 한도(CheckElementCount)를 넘으면 그 진단을 남기고
+// false다.
 Result<bool> ParseByteList(TextCodecContext& context, const FieldSchema& field, StringView text,
                            TextSource source, StringView pathText, TextValue& out) noexcept;
 

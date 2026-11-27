@@ -1,0 +1,951 @@
+{
+  "objectPath": "/Game/RxGoldenSubstrate/M_GoldenSubstrate.M_GoldenSubstrate",
+  "class": "Material",
+  "ueClass": "/Script/Engine.Material",
+  "dependencies": [],
+  "diagnostics": [],
+  "settings": {
+    "PhysMaterial": null,
+    "PhysMaterialMask": null,
+    "PhysicalMaterialMap": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "RenderTracePhysicalMaterialOutputs": [],
+    "MaterialDomain": "MD_Surface",
+    "BlendMode": "BLEND_Opaque",
+    "DecalBlendMode": "DBM_Translucent",
+    "MaterialDecalResponse": "MDR_ColorNormalRoughness",
+    "NaniteOverrideMaterial": {
+      "bEnableOverride": true,
+      "OverrideMaterialEditor": null,
+      "OverrideMaterial": null,
+      "OverrideMaterialRef": null
+    },
+    "DisplacementScaling": {
+      "Magnitude": 4,
+      "Center": 0.5
+    },
+    "DisplacementFadeRange": {
+      "StartSizePixels": 4,
+      "EndSizePixels": 1
+    },
+    "ShadingModel": "MSM_DefaultLit",
+    "bCastDynamicShadowAsMasked": false,
+    "ShadingModels": {
+      "ShadingModelField": 2
+    },
+    "OpacityMaskClipValue": 0.333299994,
+    "bEnableResponsiveAA": false,
+    "bScreenSpaceReflections": false,
+    "bContactShadows": false,
+    "TwoSided": false,
+    "bIsThinSurface": false,
+    "DitheredLODTransition": false,
+    "DitherOpacityMask": false,
+    "bAllowNegativeEmissiveColor": false,
+    "bHasPixelAnimation": false,
+    "bEnableTessellation": false,
+    "bEnableDisplacementFade": false,
+    "TranslucencyPass": "MTP_AfterDOF",
+    "TranslucencyLightingMode": "TLM_VolumetricNonDirectional",
+    "bEnableMobileSeparateTranslucency": false,
+    "NumCustomizedUVs": 0,
+    "TranslucencyDirectionalLightingIntensity": 1,
+    "TranslucentShadowDensityScale": 0.5,
+    "TranslucentSelfShadowDensityScale": 2,
+    "TranslucentSelfShadowSecondDensityScale": 10,
+    "TranslucentSelfShadowSecondOpacity": 0,
+    "TranslucentBackscatteringExponent": 30,
+    "TranslucentMultipleScatteringExtinction": {
+      "R": 1,
+      "G": 0.833000004,
+      "B": 0.588,
+      "A": 1
+    },
+    "TranslucentShadowStartOffset": 100,
+    "bDisableDepthTest": false,
+    "bWriteOnlyAlpha": false,
+    "bGenerateSphericalParticleNormals": false,
+    "bTangentSpaceNormal": true,
+    "bUseEmissiveForDynamicAreaLighting": false,
+    "bUsedAsSpecialEngineMaterial": false,
+    "bSubstrateRoughnessTracking": true,
+    "bUsedWithSkeletalMesh": false,
+    "bUsedWithMeshDeformer": false,
+    "bUsedWithEditorCompositing": false,
+    "bUsedWithParticleSprites": false,
+    "bUsedWithBeamTrails": false,
+    "bUsedWithMeshParticles": false,
+    "bUsedWithNiagaraSprites": false,
+    "bUsedWithNiagaraRibbons": false,
+    "bUsedWithNiagaraMeshParticles": false,
+    "bUsedWithGeometryCache": false,
+    "bUsedWithStaticLighting": false,
+    "bUsedWithMorphTargets": false,
+    "bUsedWithSplineMeshes": false,
+    "bUsedWithInstancedStaticMeshes": false,
+    "bUsedWithGeometryCollections": false,
+    "bUsesDistortion": false,
+    "bUsedWithClothing": false,
+    "bUsedWithWater": false,
+    "bUsedWithHairStrands": false,
+    "bUsedWithLidarPointCloud": false,
+    "bUsedWithVirtualHeightfieldMesh": false,
+    "bUsedWithNanite": false,
+    "bUsedWithVoxels": false,
+    "bUsedWithCurves": false,
+    "bUsedWithVolumetricCloud": false,
+    "bUsedWithHeterogeneousVolumes": false,
+    "bUsedWithInstancedSkinnedMesh": false,
+    "bUsedWithStaticMesh": true,
+    "bForceCompatibleWithLightFunctionAtlas": false,
+    "bAutomaticallySetUsageInEditor": true,
+    "bFullyRough": false,
+    "FloatPrecisionMode": "MFPM_Default",
+    "bUseLightmapDirectionality": true,
+    "bUseAlphaToCoverage": false,
+    "bForwardRenderUsePreintegratedGFForSimpleIBL": false,
+    "bUseHQForwardReflections": false,
+    "bForwardBlendsSkyLightCubemaps": false,
+    "bUsePlanarForwardReflections": false,
+    "bNormalCurvatureToRoughness": false,
+    "AllowTranslucentCustomDepthWrites": false,
+    "bAllowFrontLayerTranslucency": true,
+    "bCompatibleWithLumenCardSharing": false,
+    "Wireframe": false,
+    "bAllowTranslucentLocalLightShadow": false,
+    "TranslucentLocalLightShadowQuality": 0,
+    "TranslucentDirectionalLightShadowQuality": 0,
+    "ShadingRate": "MSR_1x1",
+    "bAllowVariableRateShading": true,
+    "EditorX": 0,
+    "EditorY": 0,
+    "EditorPitch": 0,
+    "EditorYaw": 0,
+    "bCanMaskedBeAssumedOpaque": false,
+    "bUseMaterialAttributes": false,
+    "bEnableExecWire": false,
+    "bEnableNewHLSLGenerator": false,
+    "bCastRayTracedShadows": true,
+    "bUseTranslucencyVertexFog": true,
+    "bApplyCloudFogging": false,
+    "bIsSky": false,
+    "bComputeFogPerPixel": false,
+    "bOutputTranslucentVelocity": false,
+    "bIsTranslucencyVelocityFromDepth": false,
+    "bRelaxRuntimeVirtualTextureRestrictions": false,
+    "BlendableLocation": "BL_SceneColorAfterTonemapping",
+    "BlendableOutputAlpha": false,
+    "UserSceneTexture": "None",
+    "UserTextureDivisor": {
+      "X": 0,
+      "Y": 0
+    },
+    "ResolutionRelativeToInput": "None",
+    "bDisablePreExposureScale": false,
+    "bUsedWithNeuralNetworks": false,
+    "bEnableStencilTest": false,
+    "StencilCompare": "MSC_Less",
+    "StencilRefValue": 0,
+    "NeuralProfileId": -1,
+    "RefractionMethod": "RM_None",
+    "RefractionCoverageMode": "RCM_CoverageAccountedFor",
+    "PixelDepthOffsetMode": "PDOM_AlongCameraVector",
+    "BlendablePriority": 0,
+    "bIsBlendable": true,
+    "PreshaderGap": 0,
+    "RefractionDepthBias": 0,
+    "MaxWorldPositionOffsetDisplacement": 0,
+    "bAlwaysEvaluateWorldPositionOffset": false,
+    "StateId": {
+      "A": -206739715,
+      "B": 1197577802,
+      "C": -1345304429,
+      "D": 111777465
+    },
+    "ReferencedTextureGuids": [],
+    "EditorOnlyData": {
+      "subobject": "M_GoldenSubstrateEditorOnlyData",
+      "class": "/Script/Engine.MaterialEditorOnlyData",
+      "properties": {
+        "ParameterGroupData": [],
+        "SubstrateConversionVersion": -1,
+        "SubstrateVersion": -1,
+        "bIsSubsutrateAutoConvertedAndNotSaved": false
+      }
+    },
+    "SubsurfaceProfile": null,
+    "SubsurfaceProfiles": [],
+    "SpecularProfiles": [],
+    "ToonProfiles": [],
+    "NeuralProfile": null,
+    "LightmassSettings": {
+      "EmissiveBoost": 1,
+      "DiffuseBoost": 1,
+      "ExportResolutionScale": 1,
+      "bCastShadowAsMasked": false,
+      "bOverrideCastShadowAsMasked": false,
+      "bOverrideEmissiveBoost": false,
+      "bOverrideDiffuseBoost": false,
+      "bOverrideExportResolutionScale": false
+    },
+    "TextureStreamingDataVersion": 0,
+    "TextureStreamingData": [],
+    "ReferencedDefaultTextures": [],
+    "AssetUserData": [],
+    "bIncludedInBaseGame": false,
+    "PreviewMesh": null,
+    "ThumbnailInfo": null,
+    "LayerParameterExpansion": [],
+    "ParameterOverviewExpansion": [],
+    "AssetImportData": null,
+    "LightingGuid": {
+      "A": -926467649,
+      "B": 1255627371,
+      "C": -752606566,
+      "D": -525904909
+    }
+  },
+  "data": {
+    "nodes": [
+      {
+        "guid": "604fb5a4-480f-13ae-365c-d08f9a098866",
+        "name": "MaterialExpressionSubstrateSlabBSDF_0",
+        "class": "MaterialExpressionSubstrateSlabBSDF",
+        "position": [
+          -400,
+          -200
+        ],
+        "inputs": [
+          {
+            "name": "Diffuse Albedo",
+            "from": {
+              "node": "MaterialExpressionConstant3Vector_0",
+              "output": 0
+            },
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "F0",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "F90",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Anisotropy",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Normal",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Tangent",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS MFP",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS MFP Scale",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS Phase Anisotropy",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Emissive Color",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Second Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Second Roughness Weight",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Amount",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Color",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Glint Density (Disabled)",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Glint UVs (Disabled)",
+            "from": null,
+            "mask": null
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "mask": null
+          }
+        ],
+        "properties": {
+          "SubsurfaceProfile": null,
+          "SpecularProfile": null,
+          "bUseSSSDiffusion": true,
+          "SubSurfaceType": "MSS_Diffusion",
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": true,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Substrate BSDFs"
+          ]
+        }
+      },
+      {
+        "guid": "f5dc3820-45d2-7861-ff26-17b09622f50d",
+        "name": "MaterialExpressionConstant3Vector_0",
+        "class": "MaterialExpressionConstant3Vector",
+        "position": [
+          -700,
+          -200
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              0,
+              1,
+              0
+            ]
+          }
+        ],
+        "properties": {
+          "Constant": {
+            "R": 0.800000012,
+            "G": 0.200000003,
+            "B": 0.100000001,
+            "A": 1
+          },
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": false,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Constants",
+            "Vectors"
+          ]
+        }
+      },
+      {
+        "guid": "eaf1ac73-4393-089c-dcaa-a4aa4dc32483",
+        "name": "MaterialExpressionSubstrateSlabBSDF_1",
+        "class": "MaterialExpressionSubstrateSlabBSDF",
+        "position": [
+          -400,
+          200
+        ],
+        "inputs": [
+          {
+            "name": "Diffuse Albedo",
+            "from": {
+              "node": "MaterialExpressionConstant3Vector_1",
+              "output": 0
+            },
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "F0",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "F90",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Anisotropy",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Normal",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Tangent",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS MFP",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS MFP Scale",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "SSS Phase Anisotropy",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Emissive Color",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Second Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Second Roughness Weight",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Roughness",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Amount",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Fuzz Color",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Glint Density (Disabled)",
+            "from": null,
+            "mask": null
+          },
+          {
+            "name": "Glint UVs (Disabled)",
+            "from": null,
+            "mask": null
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "mask": null
+          }
+        ],
+        "properties": {
+          "SubsurfaceProfile": null,
+          "SpecularProfile": null,
+          "bUseSSSDiffusion": true,
+          "SubSurfaceType": "MSS_Diffusion",
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": true,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Substrate BSDFs"
+          ]
+        }
+      },
+      {
+        "guid": "9e05c8bc-4d1a-177d-10ea-1f8729a676ab",
+        "name": "MaterialExpressionConstant3Vector_1",
+        "class": "MaterialExpressionConstant3Vector",
+        "position": [
+          -700,
+          200
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              0,
+              1,
+              0
+            ]
+          }
+        ],
+        "properties": {
+          "Constant": {
+            "R": 0.100000001,
+            "G": 0.200000003,
+            "B": 0.800000012,
+            "A": 1
+          },
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": false,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Constants",
+            "Vectors"
+          ]
+        }
+      },
+      {
+        "guid": "8ce85dd0-4e8a-40cb-2113-70abf357b724",
+        "name": "MaterialExpressionSubstrateVerticalLayering_0",
+        "class": "MaterialExpressionSubstrateVerticalLayering",
+        "position": [
+          -100,
+          0
+        ],
+        "inputs": [
+          {
+            "name": "Top",
+            "from": {
+              "node": "MaterialExpressionSubstrateSlabBSDF_0",
+              "output": 0
+            },
+            "mask": null
+          },
+          {
+            "name": "Bottom",
+            "from": {
+              "node": "MaterialExpressionSubstrateSlabBSDF_1",
+              "output": 0
+            },
+            "mask": null
+          },
+          {
+            "name": "Top Thickness",
+            "from": null,
+            "mask": null
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "mask": null
+          }
+        ],
+        "properties": {
+          "bUseParameterBlending": false,
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": true,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Substrate Operators"
+          ]
+        }
+      },
+      {
+        "guid": "e62adf36-4acd-f3c0-c1b5-7aa666bdcd1f",
+        "name": "MaterialExpressionConstant3Vector_2",
+        "class": "MaterialExpressionConstant3Vector",
+        "position": [
+          -400,
+          500
+        ],
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "mask": [
+              1,
+              1,
+              1,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "",
+            "mask": [
+              0,
+              0,
+              1,
+              0
+            ]
+          }
+        ],
+        "properties": {
+          "Constant": {
+            "R": 0.300000012,
+            "G": 0.300000012,
+            "B": 0.300000012,
+            "A": 1
+          },
+          "SubgraphExpression": null,
+          "Desc": "",
+          "bRealtimePreview": false,
+          "bIsParameterExpression": false,
+          "bCommentBubbleVisible": false,
+          "bShowOutputNameOnPin": false,
+          "bShowMaskColorsOnPin": true,
+          "bHidePreviewWindow": false,
+          "bCollapsed": false,
+          "bShaderInputData": false,
+          "bShowInputs": true,
+          "bShowOutputs": true,
+          "MenuCategories": [
+            "Constants",
+            "Vectors"
+          ]
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "BaseColor",
+        "from": {
+          "node": "MaterialExpressionConstant3Vector_2",
+          "output": 0
+        },
+        "mask": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "constant": null
+      },
+      {
+        "name": "Metallic",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Specular",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Roughness",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Anisotropy",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Normal",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Tangent",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "EmissiveColor",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Opacity",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "OpacityMask",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "WorldPositionOffset",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Displacement",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "SubsurfaceColor",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ClearCoat",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ClearCoatRoughness",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "AmbientOcclusion",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "Refraction",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[0]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[1]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[2]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[3]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[4]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[5]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[6]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "CustomizedUVs[7]",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "PixelDepthOffset",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "ShadingModelFromMaterialExpression",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "SurfaceThickness",
+        "from": null,
+        "mask": null,
+        "constant": null
+      },
+      {
+        "name": "FrontMaterial",
+        "from": {
+          "node": "MaterialExpressionSubstrateVerticalLayering_0",
+          "output": 0
+        },
+        "mask": null,
+        "constant": null
+      }
+    ]
+  }
+}

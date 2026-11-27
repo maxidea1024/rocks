@@ -1,0 +1,251 @@
+## 20. Element 동작 정렬(UW8 상세 설계)
+
+9.1절 UW8의 상세다. 2026-11-25 리뷰가 찾은 Element 동작 차이를 UE 5.8과 같게 맞추고, 완료 판정인 UV2(무효화)·UV3(입력 라우팅) 시험과 UV4 일부를 채운다. 근거 행은 UE 5.8.4 소스(`C:\github\UnrealEngine`) 기준이다. 설계 리뷰 20건을 반영했다(12장 초안 2.13).
+
+### 20.1 지금 상태와 UE 차이
+
+| 항목 | 지금(Rocks) | UE 5.8 | 결과 차이 |
+|---|---|---|---|
+| 시계 | 툴팁·타이머만 함수 포인터로 주입(`SetToolTipClock`·`SetTimerClock`). `ActivityIndicator`(자기 `Clock`)·`ProgressBar`·`Carousel`·`ViewportWorld`는 `platform::MonotonicNanoseconds`를 직접 읽는다. Carousel·ProgressBar는 그리기 밖(`Show`·`SetMarquee`·속성 갱신·Arrange)에서도 읽는다 | `FSlateApplication::TickTime`이 프레임마다 `CurrentTime`을 실제 시계로 정하고, 간격이 1/8초를 넘으면 `LastTickTime`만 당긴다(SlateApplication.cpp 1675–1686행). 위젯은 `FPaintArgs::GetCurrentTime`·`GetDeltaTime`(PaintArgs.h 71–79행)과 `GetCurrentTime()`(active timer 등록 — SWidget.cpp 1896–1898행)으로 읽는다 | 같은 프레임 안에서 부품마다 시각이 다르다. 시험·snapshot이 실제 시간에 묶인다(18장 Widgets 탭 기준 불일치) |
+| hit grid 생성 | 그리기가 끝난 뒤 `HitGrid::Update`가 `ActiveChildren` 순서로 트리를 따로 돈다. clip과 겹치지 않는 Element는 뺀다 | 그리기 중 `SWidget::Paint`가 `AddWidget(this, 0, LayerId, 정렬 순서)`로 등록한다(SWidget.cpp 1577행). cache 패널·retainer는 자기 grid를 `AddGrid`로 끼운다(SInvalidationPanel.cpp 385행, SRetainerWidget.cpp 685행, HittestGrid.cpp 766행) | `PaintChildren`을 바꾼 Element(`OffscreenLayer`·`Carousel`)는 hit 대상과 그리기 대상이 어긋난다. 그리기 정렬(DrawBatch의 layer·순번)과 hit 순서도 다를 수 있다 |
+| 비활성 hit | 비활성 Element와 그 하위 트리를 grid에서 뺀다. `Accepts`·`CandidateFromTop`·대체 `Element::HitTest`가 `IsInputPathActive`로 조상 비활성도 거른다(Element.cpp 159행) | 비활성도 등록하고, 경로를 루트부터 내려가 첫 비활성 위젯에서 자른다(HittestGrid.cpp 235–246행). 툴팁은 `bIgnoreEnabledStatus = true`로 찾는다(SlateUser.cpp 1351행) | 비활성 버튼을 누르면 그 뒤 형제가 맞는다(UE는 비활성 버튼의 부모가 받는다). 비활성 위젯의 툴팁이 안 뜬다 |
+| 속성 갱신 | `UpdateBoundAttributes`가 Hidden·Collapsed 하위 트리를 통째로 건너뛴다. 보이기는 묶을 수 없다 | 자식마다 보이기 속성을 먼저 갱신하고, Collapsed가 아니면(Hidden 포함) 나머지 속성을 갱신한다(SWidget.cpp 1846–1859행) | Hidden(공간 유지) Element의 원하는 크기가 낡는다. 보이기를 묶을 수 없다 |
+| navigation 변환 | 아무 Element도 키를 처리하지 않으면 `InputAdapter`가 방향키·Tab을 navigation으로 바꾼다(InputAdapter.cpp 84–106행). `ScreenInputRouter`도 D-pad를 바로 `Navigate`하고 East를 뒤로, South를 Enter로 합성한다(UiScreens ScreenInputRouter.cpp 120–190행). 초점이 없으면 첫 후보에 초점을 준다(Navigation.cpp 66행) | 초점 가능한 위젯의 기본 `OnKeyDown`이 bubble 중에 `FNavigationConfig`로 키를 방향으로 바꿔 `FReply::SetNavigation`을 돌려준다(SWidget.cpp 415–427행, NavigationConfig.cpp 13–38·59–81행). 그 뒤 초점 경로의 `OnNavigation`이 경계 규칙을 정한다. 처리 안 된 키에 대체 경로는 없다(SlateApplication.cpp 5045–5072행) | 초점 Element의 조상이 방향키를 먼저 받는다(UE는 `OnNavigation`으로만 본다). 키 대응을 사용자별로 바꿀 수 없다 |
+| 방향 탐색 | 초점 가능한 후보 전체에서 중심 거리 비교 | hit grid 셀을 진행 방향으로 훑어, 후보가 있는 첫 줄에서 고른다(`FindFocusableWidget`, HittestGrid.cpp 366–570행, 쓸어 넓힌 사각형 598–640행) | 겹친 후보·멀리 떨어진 후보의 선택이 다르다 |
+| 단일 자식 slot | 패널 slot은 이미 여백·정렬(`StackSlot`, `SlotPlacement` — Grid·UniformGrid·Wrap)을 가진다. 그러나 Widget 층 단일 자식 slot(`AlignedWidgetSlot` — Border·Button·SizeBox·ScaleBox·SafeZone·BackgroundBlur·Switcher·WindowTitleBarArea·Overlay·ScrollBox)은 `SlotPresenter` wrapper Element를 끼운다 | 단일 자식 위젯이 slot 여백·정렬을 직접 든다(`FSimpleSlot`·`TSingleWidgetChildrenWithBasicLayoutSlot`, BasicLayoutWidgetSlot.h) | 트리에 보이지 않는 Element가 끼어 hit·초점·접근성 경로가 길어진다 |
+| 형 변환(CB2) | Element 계열 하향 `static_cast` 약 186곳, 검사 없음 | `SLATE_DECLARE_WIDGET`의 형식 정보와 `StaticCastSharedRef` | 잘못된 변환이 조용히 정의되지 않은 동작이 된다 |
+| 스타일 | `StyleSet`·`AddCoreStyles`(버튼·텍스트 8개)는 있으나 아무도 쓰지 않는다. 부품은 `DefaultButtonStyle()` 같은 함수 기본값을 직접 쓴다 | 전역 `FSlateStyleRegistry`에 집합을 등록하고, 위젯이 생성 때 `FAppStyle::Get().GetWidgetStyle<T>("이름")`으로 받는다 | 에디터·게임 스타일 교체가 안 된다. 4.2절 세 집합이 없다 |
+
+### 20.2 host 서비스 묶음
+
+시계·스타일·텍스트 입력·팝업 허용 영역은 모두 "창 호스트가 주고 Element가 루트로 올라가 찾는" 값이다. 지금은 Element semantics에 하나씩 들어 있다. 이것을 `UiHostServices`(UiCore, 공유 레코드) 하나로 묶는다.
+- `Application::ApplyHostServices`가 루트(툴팁 임시 호스트 포함)에 단다. `Element::FindUiHostServices()`는 한 번 올라가서 찾는다.
+- 트리에 아직 붙지 않은 Element는 못 찾는다. 이때 시각은 0, 스타일은 내장 기본값이다. 붙으면 `TryAddChild`의 Layout 무효화로 다시 측정한다.
+- 묶음은 Application마다 하나다. 프레임 시각이 Application마다 다르기 때문이다(월드 위젯은 World 시간). 여러 Application이 나눠 쓰는 자원(스타일 등록부)은 묶음 안의 공유 포인터로, 호스트가 한 번 만들어 모든 Application에 준다.
+
+### 20.3 시계(UW8a)
+
+- **시계 원천.** `ClockFunction`(UiCore `FrameTime.h`)은 초 단위 시각 공급 delegate다. 기본은 단조 시계다. 시험·snapshot은 `ManualClock`을 준다. 이 시계는 읽어도 전진하지 않고, 호스트가 `Advance(초)`로 올린다. 읽는 횟수가 결과를 바꾸지 않게 하려는 것이다.
+- **프레임 시각(UE `TickTime`).**
+  - `Application::BeginFrame()`이 프레임마다 한 번 시계를 읽는다. `currentTime`은 읽은 값 그대로다.
+  - 간격이 1/8초(`MaxFrameDeltaSeconds`)를 넘으면 이전 시각(`lastTime`)만 당겨 `deltaTime`을 자른다. 누적 시각을 따로 두지 않으므로 타이머 마감과 시간 기준이 갈라지지 않는다.
+  - 호스트는 입력 처리 전에 `BeginFrame`을 부른다. 측정·배치(`PrepareLayout`)와는 따로다.
+  - 한 번도 `BeginFrame`을 부르지 않은 호스트(시험·단순 호스트)는 암묵 시작이다. 프레임이 열려 있지 않으면 입력 처리(`RoutePointer`·`RouteKey` 등), 예약(`StartTimer`·`StartFrameTimer`·`SetFocus`의 키보드 툴팁)이나 `PrepareLayout`이 먼저 연다. 입력이 연 프레임은 그 `PrepareLayout`까지 이어지므로, 입력과 배치 사이에 흐른 시간은 다음 프레임에 반영된다(UE 틱 순서와 같다). `PrepareLayout`이 그 프레임을 닫는다. 호스트가 `BeginFrame`을 한 번이라도 부르면 그 뒤로는 암묵 시작을 하지 않는다. 한 틱 안의 여러 `PrepareLayout`(월드 위젯 입력마다 배치)이 프레임을 여러 번 여는 일과, 바깥 시각과 앱 시계가 한 틱 안에서 섞이는 일을 막는다.
+  - 프레임 타이머는 프레임마다 한 번, 자른 `deltaTime` 이하만 진행한다(UE active timer에 앱 DeltaTime). interval 타이머 마감은 시각 그대로 본다.
+  - 월드 위젯(UiWorld)은 `BeginFrame(FrameTime{world current, world delta})`로 World 시간을 준다(UE `WidgetComponent`의 widget tick). 지금 World에는 시각을 읽는 공개 접근자가 없다(`lastRealDeltaSeconds_`가 private). 그래서 그 접근자가 생길 때까지(World 모듈 요청, 엔진 런타임 세션) `WorldWidgetPresenter::Prepare`가 그리기 프레임마다 앱 시계로 `BeginFrame()`을 부른다.
+- **읽는 곳.**
+  - `UiHostServices`가 그 프레임의 `FrameTime`을 든다. Element는 그리기 밖(속성 갱신·Arrange·`Show`·`SetMarquee`)에서도 `FindUiHostServices()->Time()`으로 같은 값을 읽는다.
+  - `PaintList`도 같은 값을 든다(UE `FPaintArgs`). cache root·표면 기록(`SurfaceRecorder`)의 목록도 같은 값을 받는다. `ViewportSource::Advance`는 프레임 번호와 함께 이 값을 받는다. 애니메이션 부품(`ActivityIndicator`·`ProgressBar` marquee·`Carousel`)은 이 값으로 위상을 계산하고 자기 시계 멤버를 지운다.
+  - 툴팁 지연·타이머 등록·마감은 프레임 시각을 쓴다(UE `RegisterActiveTimer`가 `GetCurrentTime()` — SWidget.cpp 1898행). `SetToolTipClock`·`SetTimerClock`은 `SetClock` 하나로 합친다.
+  - 호스트 대기 시간(`SecondsUntilNextTimer`)은 시계를 다시 읽어 마감까지 남은 시간을 계산한다(대기 계산만 — 상태는 바꾸지 않는다). 바깥 시각으로 연 프레임 뒤에는 시계 대신 그 프레임 시각을 기준으로 한다(마감이 바깥 시각 기준이다).
+  - **시계 교체.** 프레임을 연 뒤 `SetClock`으로 시계를 바꾸면 UI 시각이 끊기지 않게 이어 붙인다(새 시계 값 + 차이). 걸린 타이머 마감·부품 원점이 옛 기준 그대로 맞는다. 첫 프레임 전에 바꾸면 새 시계 값 그대로다.
+  - 바깥 시각(`BeginFrame(FrameTime)`)은 유한하지 않으면 무시하고, 간격은 0과 `MaxFrameDeltaSeconds` 사이로 자른다.
+- **결정성.** UiDemo `--snapshot`·`--self-test`의 갤러리 확인은 `ManualClock`을 0초에서 시작해 프레임마다 1/60초 올린다. 그러면 Widgets 탭도 실행마다 byte가 같다.
+- **묶음 수명.** `Application`은 루트를 받을 때(`SetRoot`) 묶음을 만든다. 루트를 바꾸거나 소멸할 때 옛 루트가 이 묶음을 들고 있으면 뗀다(가장 가까운 묶음이 이기므로, 옛 묶음이 남으면 다른 Application에 붙은 뒤에도 그것을 본다).
+- **버린 대안.**
+  - Element에 `Application*`를 주는 방식은 UiCore가 UiFramework를 알게 되어 버렸다.
+  - 전역 시계는 창이 여럿인 호스트와 시험을 섞는다.
+  - 읽을 때마다 전진하는 고정 시계는 읽는 횟수에 결과가 묶여 버렸다.
+
+### 20.4 그리기 순서 hit grid(UW8b)
+
+- **방식(구현 때 개정).** 처음 안은 그리기 중 등록(UE `AddWidget`)이었다. 하지만 Rocks는 cache root가 그리기를 부분 재사용한다(바뀌지 않은 하위 트리는 다시 그리지 않는다). 그래서 그리기 중에 등록하면 캐시된 하위 트리가 grid에서 빠진다. UE는 무효화 root가 grid를 들고 있다가 바뀐 위젯만 고치는 방식으로 이를 푸는데(`FHittestGrid::UpdateWidget`·`AddGrid`), Rocks에는 그 구조가 없다.
+  - 대신 grid를 **그리기와 같은 순서로 걷는** 방식으로 만든다. 걷기는 plan revision이 바뀐 프레임의 그리기 직후에 한다(지금 규칙).
+  - 결과는 UE와 같다. Rocks의 layer는 그리기 순서를 따라 줄지 않기 때문이다: Element의 layer는 부모가 지금까지 쓴 가장 높은 layer에서 시작하고(Element.cpp `PaintContents`), 형제는 그보다 낮아지지 않는다. 그래서 `DrawBatch`의 (layer, 순번) 정렬(DrawBatch.cpp 104–111행)은 그리기 순서와 같고, 그리기 순서로 걸은 grid의 위·아래가 화면의 위·아래와 같다.
+- **걷는 자식.** `Element::HitTestChildren()`이다. 기본값은 `PaintChildren()`(그리기 자식)이다. 지금 `ActiveChildren` 대신 이것을 쓰므로, Carousel이 슬라이드 중 그리는 두 쪽만 맞는다(UE와 같이 보이는 것만).
+  - `OffscreenLayer`는 보관 텍스처로 그리는 동안 `PaintChildren`이 비지만(OffscreenLayer.cpp 103–104행), 자식은 같은 자리에 보인다. 그래서 `HitTestChildren`을 활성 자식으로 재정의한다(UE `SRetainerWidget`이 자기 grid를 `AddGrid`로 붙이는 것과 같은 효과).
+  - 그리기 자식을 바꾸는 Element(재정의하는 곳)는 바뀔 때 plan revision을 올려야 한다(grid를 다시 걷게).
+- **등록 조건(지금 `Record`와 같다).**
+  - Hidden·Collapsed는 하위 트리까지 뺀다.
+  - clip과 겹치지 않는 clip Element도 하위 트리까지 뺀다.
+  - `HitTestInvisible`은 자신과 자식을 후보에서 뺀다. `SelfHitTestInvisible`은 자신만 뺀다(clip 항목으로는 남는다).
+  - 비활성은 빼지 않는다(UW8c, 20.5절).
+  - 셀 색인·넓은 항목 목록은 지금 구조 그대로다(셀 128 px — UE HittestGrid.cpp 109행).
+- **스냅샷 없는 판정.** grid가 없을 때 쓰는 `Element::HitTest`(Element.cpp 782행)도 `HitTestChildren` 역순·같은 규칙으로 맞춘다. 둘이 다르면 첫 프레임 입력이 다르게 간다.
+- **한계.** grid는 plan revision이 바뀐 그리기 뒤에만 다시 만든다. 그리지 않은 프레임(최소화)에는 지난 것이 남는다(UE와 같다).
+
+### 20.5 비활성 Element 경로 자름(UW8c — UW8b 뒤)
+
+- `IsInputPathActive(scope, requireEnabled)`로 활성 검사를 인자로 뗀다. hit 판정은 보이기·scope만 보고, 활성은 아래 자름으로만 다룬다.
+- `HitGrid::Find(point, scope, ignoreEnabled)`가 맨 위 후보를 찾은 뒤, 루트에서 그 후보까지의 경로를 내려가며 첫 비활성 Element 앞에서 자른다. 결과는 남은 경로의 가장 깊은 Element다(UE `GetBubblePath`). 경로가 비면(루트가 비활성) 없음이다. 자른 결과를 버리고 뒤 후보로 가지 않는다.
+- `ignoreEnabled`의 쓰임은 다음과 같다.
+  - 포인터 라우팅·커서 모양은 false다.
+  - 툴팁 대상 찾기는 true다(UE SlateUser.cpp 1351행 — 비활성 위젯도 툴팁을 띄운다).
+  - 영역 지도(UW7f)는 구조 판정이라 true다. 비활성 최대화 버튼도 그 자리는 버튼 영역이다.
+- 키 라우팅은 지금처럼 초점 경로에서 비활성 Element를 건너뛴다(UE `RouteAlongFocusPath`의 `IsEnabled` 검사, SlateApplication.cpp 5049행).
+
+### 20.6 속성 갱신과 보이기 묶기(UW8d)
+
+- 보이기를 `Bindable<Visibility>`로 묶을 수 있게 한다(`Element::BindVisibility`). 사유는 Layout이다(UE `Visibility` 속성 — 부모 Layout).
+- `UpdateBoundAttributes` 순서는 UE와 같다. 자식마다 보이기 묶음을 먼저 평가하고, Collapsed가 아니면(Hidden 포함) 나머지 묶음을 평가한 뒤 그 자식으로 내려간다. 루트도 같다.
+- Collapsed 하위 트리의 묶음은 평가하지 않는다(그 Element의 보이기 묶음만 평가한다). 보이기가 Collapsed에서 바뀌면 Layout 무효화로 다음 원하는 크기 계산에 들어간다.
+
+### 20.7 키 응답과 navigation 이벤트(UW8e1)
+
+- **키 응답.** `Element::OnKeyEvent`는 `KeyReply`를 돌려준다: 처리 안 함 · 처리함 · 방향 navigation. 인자는 `KeyEvent`(사용자, 입력 이벤트, 조합 키, 이 키의 navigation 방향·동작)다. UE의 원인 구분(`ENavigationGenesis` Keyboard·Controller)은 쓰는 곳이 생길 때 더한다(지금 초점 원인은 모두 Navigation).
+  - `NavigationConfig`는 입력 대응 규칙이라 그래픽·플랫폼과 무관해 UiCore에 둔다. Element 기본 처리와 시험용 `Element::SendKey`(사용자·입력으로 `KeyEvent`를 만들어 보냄)가 기본 대응을 쓴다.
+  - 처리했다는 `OnNavigation` 응답은 대상 없는 Explicit(`NavigationBoundary::Handled()`)다. 초점은 그 Element가 이미 옮겼다.
+- **기본 처리(UE `SWidget::OnKeyDown`).** 기본 구현은 Element가 초점을 받을 수 있고 KeyDown이며 `KeyEvent::navigation`이 있으면 navigation 응답이다. 키를 쓰고 싶은 override는 처리함을, 아니면 `Super::OnKeyEvent`를 돌려준다(UE 관례). override 13곳을 옮긴다.
+- **navigation 이벤트(UE `OnNavigation`).**
+  - navigation 응답이 나오면 키 라우팅을 멈춘다(조상은 키를 받지 않는다).
+  - 그 뒤 초점 경로를 초점 Element부터 루트로 올라가며 `OnNavigation(사용자, 방향)`을 부른다. 결과 `NavigationBoundary`가 Escape가 아니면 거기서 멈추고 그 규칙(Explicit·Custom·CustomBoundary·Stop·Wrap)과 경계 Element로 탐색한다(UE `FSlateApplication::AttemptNavigation`). 스스로 처리했다는 응답(`handled` 표지)이면 탐색하지 않는다.
+  - 기본 `OnNavigation`은 Element의 navigation 규칙(`SetNavigationRule`)을 돌려준다.
+  - 조상이 키로 하던 방향 처리를 `OnNavigation`으로 옮긴다:
+    - `MenuPanel`: Up·Down의 구분선 건너뛰기, Left의 하위 메뉴 닫기, Tab
+    - `ListView`·`TreeView`: 선택 이동
+    - `ScrollView`: 끝에서 경계 탈출
+    - `Slider`: 값 변경
+  - UE 근거: SListView.h 61–73행, SScrollBox.cpp 1285행, SSlider.cpp 193행.
+- **`NavigationConfig`(UiCore, `Application`이 사용자별로 든다 — UE `FNavigationConfig`).**
+  - 키 대응표 기본값은 UE와 같다: 방향키·게임패드 D-pad → 상하좌우(NavigationConfig.cpp 19–29행). 왼쪽 스틱은 아날로그 경로다(축 16–17행, 임계값 0.5 — 13–14행).
+  - Tab → Next, Shift+Tab → Previous다. Ctrl·Alt·Command가 눌려 있으면 바꾸지 않는다(59–81행). Next·Previous는 지금처럼 tree 순서(`MoveFocus`)로 찾는다.
+  - 동작 키: 확인은 Enter·Space·패드 확인, 뒤로는 Escape·패드 뒤로다(31–38행). 버튼류는 키 대신 동작으로 누름을 판정한다(UE `GetNavigationActionFromKey`).
+  - `Application`이 키마다 방향·동작을 계산해 `KeyEvent`에 넣는다(Element는 Application을 모른다).
+- `InputAdapter`의 대체 변환을 지운다. 초점 경로에 초점 가능한 Element가 없으면 navigation도 없다(UE와 같다). Ctrl+F1 툴팁(UW4t, UE에 없음)은 처리 안 된 키 단계에 남긴다.
+- **회귀 시험.** 메뉴(구분선·하위 메뉴·Tab)·목록 선택·스크롤·슬라이더의 키보드 동작을 이 단계 전 시험과 같은 결과로 확인한다.
+
+### 20.8 게임패드·초기 초점(UW8e2 — UW8a·UW8e1 뒤)
+
+- 버튼 누름·뗌(`GamepadState`)을 같은 키 경로의 KeyDown·KeyUp으로 보낸다. `input::Key`(Input 모듈 — 다른 시스템과 공유)에 가상 키를 더하지 않고, `KeyEvent::chord.gamepad`에 버튼을 싣는다. 방향(D-pad)·동작(South 확인, East 뒤로)은 `NavigationConfig`가 정한다. `OnGamepadButtonDown`은 지우고, 패드를 직접 다루던 Slider(조종 잠금)·InputKeySelector(버튼 고르기)는 `OnKeyEvent`의 패드 분기로 옮긴다.
+- 패드 상태(지난 버튼·스틱 반복)는 `Application`이 패드 자리마다 든다(`RouteGamepadState`). UI가 받지 않는 입력(Game 모드, 초기 초점으로 소비)도 `SyncGamepadState`로 상태를 맞춘다. 그래야 누르고 있던 버튼이 다음에 새 누름으로 보이지 않는다.
+- 왼쪽 스틱은 임계값을 넘는 순간과 반복 간격(프레임 시각)으로 방향 navigation을 만든다(UE `GetNavigationDirectionFromAnalog` 83–105행 — 첫 반복 0.5초, 다음 0.25초, 0.9보다 세면 절반). 두 축이 모두 넘으면 더 크게 민 축이다. 스틱 navigation은 키 없는 navigation 이벤트로 초점 경로에 보낸다.
+- `ScreenInputRouter`의 직접 `Navigate`·Enter 합성을 지운다. 확인·뒤로는 `NavigationConfig` 동작으로 처리한다(South = 확인, East = 뒤로 — UE `Virtual_Gamepad_Accept`·`Back`). 키를 보던 분기(메뉴 닫기 Escape, 콤보 고르기 Enter, 메뉴 팝업 preview)는 동작이나 패드 버튼으로 판정한다. 순서는 키보드와 같이 화면 action 매핑이 먼저다.
+- 끊긴 패드와 UI가 받지 않는 입력(Game 모드, 매핑·초기 초점이 소비)의 뗌은 초점 경로에 누름 취소(`OnKeyCancelled`)로 보낸다. 뗌으로 보내면 버튼이 눌린다.
+- 스틱을 민 채 이벤트가 오지 않아도(backend는 상태가 바뀔 때만 보낸다) `PrepareLayout`이 프레임마다 반복을 잇는다(UE는 analog를 매 tick 보낸다).
+- **초기 초점.** UE Slate는 초점이 없으면 아무것도 하지 않고, 게임 UI는 화면 활성화 때 원하는 초점 대상에 초점을 준다(UE `UUserWidget::DesiredFocusWidget`, CommonUI `GetDesiredFocusTarget`). Rocks도 `Application`은 초점 없는 navigation을 하지 않는다. 대신 UiScreens 화면이 활성화될 때와 초점이 사라진 채 navigation·확인 입력이 올 때 화면의 원하는 초점 대상에 초점을 준다. 지금 Navigation.cpp 66행의 "첫 후보" 동작은 이 정책으로 옮긴다.
+
+### 20.9 방향 탐색 UE 규칙(UW8f — UW8b·UW8c·UW8e1 뒤)
+
+`HitGrid::FindNextFocusable(start, direction, reply, user, scope)`가 UE `FindFocusableWidget`(HittestGrid.cpp 366–570행)과 호출부(598–640행)를 옮긴다.
+- **사각형.**
+  - 시작 사각형은 초점 Element의 그리기 경계(회전·배율 포함)다.
+  - 진행 축으로 경계 규칙 Element의 사각형 끝까지 쓸어 넓히고, 수직 축은 양쪽을 0.5씩 줄인다(598–640행).
+- **훑기.** 셀을 진행 방향으로 한 줄씩 훑는다.
+  - 후보가 있는 첫 줄에서 고른다. 진행 축 비교는 허용오차 0.1로 한다(`A ± 0.1 < B`).
+  - 같은 줄 안에서는 진행 축 거리가 가까운 것, 같으면 중심 거리 제곱이 작은 것이다.
+- **후보.**
+  - hit grid에 등록되고 초점 받을 수 있고 활성이며, 그 사용자가 볼 수 있는 Element다(UE `IsCompatibleUserIndex`·`SupportsKeyboardFocus`·`IsEnabled`).
+  - `HitTestInvisible` 아래 Element는 등록 후보가 아니므로 탐색 후보도 아니다(UE와 같다).
+  - 경계 Element의 자손이어야 한다(`NotADescendant` 검사 454–460행).
+  - 고른 후보의 조상이 비활성이면 그 후보를 비활성 목적지에 넣고 다시 찾는다(`IsParentsEnabled`, 528–533행).
+- **경계 규칙.** 찾은 것이 경계를 넘으면 규칙을 적용한다(495–523행). Explicit는 지정 대상, Custom·CustomBoundary는 delegate, Stop은 없음이다. Wrap은 반대쪽 변에서 한 번 더 훑는다(516–523·543–560행).
+- **scope.** Rocks 팝업은 같은 창 grid 안에 있다. 그래서 지금의 `scope` 인자(팝업·modal 범위)를 유지한다. Escape 규칙이어도 scope 밖으로는 나가지 않는다. UE는 팝업이 별도 창이라 이 문제가 없다.
+- **셀 범위(리뷰 반영).**
+  - 셀 수는 창 크기 / 128 + 1이다(UE `SetHittestArea`). 축마다 2^16개를 넘지 않는다.
+  - 등록과 점 찾기 모두 셀 좌표를 이 범위로 자른다(UE `GetCellCoordinate` 891행). 창 밖에 있는 요소(창보다 넓은 내용 안의 후보)는 가장자리 셀에 들어가므로 탐색에서 빠지지 않는다.
+  - 셀 64개를 넘는 넓은 요소는 셀 대신 따로 보관한다. 탐색에서는 그 요소가 덮는 셀 줄과 띠 범위에서만 만난다. UE는 이런 요소도 모든 셀에 넣으므로 결과가 같다.
+  - 비활성 조상 재시작의 상한은 1024회다(재시작마다 후보가 하나씩 빠진다). UE에는 상한이 없다. 상한을 넘으면 찾지 못한 것으로 끝낸다.
+- **시험.** `NavigationSearchTests`는 Application 경로를 본다. `FocusSearchTests`는 거르기 없이 grid에 직접 묻는다: 비활성 조상 재시작, 자손 검사와 Escape, 경계 밖 후보의 Stop·CustomBoundary·Wrap, ReachedEdge, 넓은 후보, 창 밖 후보.
+- **확장점.** UE 1179행은 하위 트리 메타데이터 확장점으로, `GEnableNavigationExperimental`(기본 false, 35행)일 때만 쓴다. Rocks는 탐색 방식을 교체 가능한 계약으로 두되 기본값은 위 규칙 하나다.
+
+### 20.10 단일 자식 slot·CB2(UW8g)
+
+- **단일 자식 slot(UE `FSimpleSlot`).**
+  - UiFramework 단일 자식 Element(`Frame`·`Button`·`SizeBox`·`ScaleLayer`·`SafeArea`·`BackgroundBlur`·`Switcher` slot·`WindowTitleBarArea`·`Overlay` slot·`ScrollView` 내용)가 `SlotPlacement`(여백·정렬)를 직접 든다.
+  - 배치는 지금 `SlotPlacement::ArrangeChild`를 쓴다(UE `ArrangeSingleChild`).
+  - Widget 층 `AlignedWidgetSlot`은 wrapper 대신 그 값을 Element에 넘긴다. `SlotPresenter` Element는 지운다. `SlotPlacement`는 mixin으로 남긴다.
+  - `ScrollBoxWidget`은 이미 `StackSlot` 여백으로 대체할 수 있다.
+- **형식 정보(CB2).**
+  - `ElementType`(이름, 부모 `ElementType*`)을 둔다. 클래스 선언에 `ROCKS_UI_ELEMENT(Class, Super)`를 쓴다(UE `SLATE_DECLARE_WIDGET` — `using Super`, `using ThisClass`, 정적 `StaticType()`, 가상 `GetType()`). 3.2절의 `ROCKS_UI_` 접두 규칙에 맞는다.
+  - `IsA<T>()`는 부모 사슬을 따라간다. `ElementCast<T>(ptr)`는 아니면 빈 포인터, `StaticElementCast<T>(ptr)`는 Release 밖에서 assert한다.
+  - 두 함수 모두 `static_assert(IsSameV<typename T::ThisClass, T>)`로 매크로를 빠뜨린 파생 클래스를 막는다(부모 `StaticType`이 상속되어 잘못된 변환이 통과하는 일).
+  - policy는 변환 대상 형식이 Element 계열인지로 판정한다(형식 이름이 아니라). UI 모듈의 Element 하향 `static_cast`를 0으로 만든다.
+  - 약 186곳 변환 교체는 동작 불변 기계 변경이라 따로 커밋한다.
+- **리뷰 반영.**
+  - 접힌 자식은 slot 여백도 차지하지 않는다. `SlotDesiredSize`·`MeasureInSlot`이 `{}`를 돌려준다(옛 `SlotPresenter`와 같다).
+  - 형식 같음 판정은 주소가 같거나, 부모 사슬 전체의 이름이 같은지로 한다. 이름 비교로 물러나는 경우는 Modular 링크에서 inline 정적 사본이 모듈마다 생길 때다.
+  - 이름은 이름공간 없는 클래스 이름이다. 그래서 policy `ui-element-name`이 UI 모듈(시험 포함) 안의 `ROCKS_UI_ELEMENT` 이름 중복을 거부한다.
+  - policy `ui-element-cast`는 class·struct, 모든 기반(둘째 기반, protected·private 상속), 이름공간 한정, 뒤쪽 const(`<T const&>`)까지 본다.
+- **버린 대안.** CRTP 기반 클래스(`ElementBase<Self, Super>`)는 매크로 없이 되지만, 모든 Element의 상속 줄을 바꾸고 다중 상속(`TextInputContext`)과 섞기 어렵다.
+
+### 20.11 스타일 등록부(UW8h1·UW8h2)
+
+- **`StyleRegistry`(UiCore, 공유 — UE `FSlateStyleRegistry`).** 이름 있는 `StyleSet`을 등록한다. 집합은 부모 집합 이름을 가질 수 있고, 찾지 못한 이름은 부모로 올라간다(UE `FSlateStyleSet::ParentStyleName`). 호스트가 한 번 만들어 `UiHostServices`로 모든 Application에 준다. 전역은 아니다.
+- **앱 스타일(UE `FAppStyle`).**
+  - `UiHostServices`가 활성 집합 이름과 집합 revision을 든다. 기본은 `CoreStyle`이다.
+  - 에디터 호스트는 `EditorStyle`(부모 `CoreStyle`)로 바꾼다. 게임 Widget 기본은 `GameWidgetStyle`(UMGCoreStyle)이다.
+- **조회 시점.** 측정·배치·그리기 모두 같은 값을 써야 한다. 크기를 정하는 여백·글꼴이 측정과 그리기에서 달라지면 안 되기 때문이다.
+  - 부품의 `Args::style`(`Optional`)이 비었으면 부품은 처음 측정될 때 `FindUiHostServices()`의 활성 집합에서 UE 키로 스타일을 찾아 값을 복사해 든다. UE가 생성 때 `FAppStyle`에서 받는 것과 같은 효과다. 키가 없으면(등록부 없음 포함) 내장 기본값으로 돌린다.
+  - 집합 revision이 바뀌면(집합 교체·값 변경) `Application`이 테마 revision처럼 전체 Layout·그리기 cache를 무효화한다. 부품은 다음 측정 때 다시 찾는다.
+- **형식별 표.** 지금 있는 스타일 구조체 전부를 표로 둔다: 버튼, 체크, 텍스트, 편집 텍스트, 스크롤 막대, 진행 막대, 슬라이더, 콤보, 표 머리, 독 탭, 창, 메뉴, 툴팁. 색·brush·실수·여백 표도 둔다.
+- **구현(UW8h1).**
+  - 스타일을 값으로 드는 부품(Button·ProgressBar·Slider·ScrollBar)은 `SetStyle`(Button은 `Args::style` — 이제 `Optional`)로 명시하지 않았으면 `ApplyStyles`에서 활성 집합의 UE 키 값을 받는다. `Element::Prepass`가 스타일 revision이 바뀐 요소에서 `ApplyStyles`를 부른다. 새로 붙은 하위 트리는 처음 측정 때 받는다.
+  - 기본 함수를 그 자리에서 부르던 곳(독 탭 크기, 스크롤 막대, 메뉴·제목 막대 툴팁 글꼴)은 `Element::FindStyle(키, 기본값)`으로 그 자리에서 찾는다.
+  - revision이 바뀌면 `Application`이 테마 revision을 올리고 트리 전체 측정을 다시 하게 한다(`SyncStyleRevision`).
+  - 한계: `ToolTip`은 생성 때(트리에 붙기 전) 스타일로 부분을 짜므로 아직 활성 집합을 쓰지 않는다(툴팁 factory가 명시 스타일을 넘긴다). Widget 층(`ButtonWidget` 등)은 늘 명시 스타일을 넘긴다 — 게임 Widget 기본 집합(`GameWidgetStyle`)은 UW8h2에서 Widget 기본값의 출처로 맞춘다.
+- **리뷰 반영(UW8h).**
+  - 이름은 UE `FName`처럼 ASCII 대소문자를 가리지 않는다. UE도 "Scrollbar"로 등록하고 "ScrollBar"로 찾는다(StarshipCoreStyle.cpp 194행, StarshipStyle.cpp 170행). Rocks 등록 철자는 UE 철자 "Scrollbar"다.
+  - `UiHostServices`는 활성 집합을 포인터가 아니라 이름으로 들고, 찾을 때마다 등록부에서 푼다. 같은 이름으로 다시 등록한 집합을 본다.
+  - revision은 늘어나기만 한다. 집합을 바꾸거나 빼거나 등록부를 바꾸면, 빠지는 쪽의 revision을 기준값에 접어 넣는다. 합이 같아져 무효화를 놓치는 일을 막는다.
+  - `Element::Prepass`는 측정이 깨끗해도 스타일 revision을 먼저 본다. 깨끗한 하위 트리가 다른 앱으로 옮겨지거나 루트로 다시 붙는 경우 때문이다. 다르면 다시 받고 자기와 자식을 다시 측정한다.
+  - 그리기 때 즉석 조회하던 독 탭·스크롤 막대 스타일은 `ApplyStyles`에서 받아 둔다(측정·그리기 같은 값).
+  - `Slider`는 막대 두께·손잡이 크기가 바뀌면 Layout을 무효화한다.
+  - 857ad29dc는 `CoreStyles.h` include가 빠져 그 커밋만으로는 빌드되지 않는다(a4cb3110d에서 해결 — bisect 주의).
+- **두 단계.**
+  - UW8h1은 등록부·앱 스타일·조회·무효화와 `CoreStyle`의 지금 값(함수 기본값 옮김)이다.
+  - UW8h2는 세 집합 값을 4.2절 출처(StarshipCoreStyle.cpp, StarshipStyle.cpp, UMGCoreStyle.cpp)에서 옮기고 출처 행 대조 시험을 단다(UV8 일부). Rocks 구조체가 없는 항목은 15장 빈칸 목록에 남긴다.
+
+- **구현(UW8h2) — 세 집합 값.** 줄 번호는 UE 5.8 로컬 클론 기준이다. `CreateStandardStyleRegistry`가 세 집합을 한 등록부에 넣는다.
+  - **`CoreStyle`(StarshipCoreStyle.cpp).** UW3 이후 함수 기본값이 이미 출처 행 대조 시험(`StyleTests`)을 갖고 있다. 집합은 그 값을 이름으로 낸다(UW8h1).
+  - **`EditorStyle`(StarshipStyle.cpp, 부모 `CoreStyle` — 205행 `SetParentStyleName`).**
+    - UE 에디터 스타일은 Rocks 형식이 있는 키를 하나도 다시 정하지 않는다. `SyncParentStyles`(170–174행)는 부모 값을 읽기만 한다. 그래서 그 키들은 부모로 올라가 코어 값을 받는다.
+    - 에디터에만 있는 키 `Menu.Label.Padding`(0)·`Menu.Label.ContentPadding`(10, 2)(3394–3395행)을 여백 표에 둔다.
+    - `Brushes.Title` tint(155–160행, 사용자 설정 색)는 Rocks에 소비처가 없어 빈칸이다.
+  - **`GameWidgetStyle`(UMGCoreStyle.cpp, 부모 없음 — UE와 같다).**
+    - 색은 테마 슬롯이 아니라 `FUMGColor` 고정 선형 색이다(42–91행). 원문 값을 그대로 옮긴다. `White`·`White25`·`ForegroundHover`가 (0, 1, 1)인 것도 그대로다 — 의도는 확인할 수 없고, 룩은 UE를 따른다.
+    - `Button`(407–427행): 둥근 상자(Secondary·Hover·Header, 반경 4, 외곽선 InputOutline·Hover·Hover, 두께 1, `Icon32x32`), 비활성 brush 없음, 두 여백 `ButtonMargins`(12, 1.5)(CoreStyle.cpp 54행), 전경 ForegroundHover(비활성 Foreground). `bUseBrushTransparency`(412–414행)는 외곽선 알파에 brush 알파를 곱하는 것인데 세 색이 모두 불투명이라 결과가 같다 — Rocks에 이 표지는 두지 않는다.
+    - `NoBorder`(307–323행): brush 없음, 여백 (0,0,0,1)·(0,1,0,0), 전경은 상속(UseForeground).
+    - `NormalText`(238–243행) Regular 10, `SmallText`(266–267행) Regular 8, 색은 상속이다. 그림자·강조색·강조 모양은 Rocks `TextStyle`에 칸이 없어 빈칸이다(코어도 같다).
+    - `Slider`(722–731행): 막대는 단색 흰색(비활성 회색 0.5 — Color.cpp 18행), 두께 2, 손잡이 크기 8×14. 손잡이 그림("Common/Button" PNG)은 옮기지 않고 코어 손잡이 brush를 쓴다.
+    - UE PNG 자원(`Common/*`·`Old/*`)으로만 정의된 키(`Checkbox`·`ProgressBar`·`Scrollbar`·`ToolTip.Background`·`Window`·`Docking.*`·`Menu.*`·`WindowMenuBar.*`)는 넣지 않는다. UE 콘텐츠는 재배포할 수 없어서다. 이 키들은 부품 기본값(코어 값)으로 떨어진다. 15장 2절 빈칸 목록에 남긴다.
+  - **Widget 기본값(UE `DefaultStyleCache` — SlateCore DefaultStyleCache.cpp 25–75행).** 게임 UMG 위젯은 생성 때 `FUMGCoreStyle`의 값을 받는다. 그래서 `ButtonWidget`의 기본 스타일은 `GameWidgetStyle`의 `Button`이고, `SliderWidget`은 `Slider`를 넘긴다. 나머지 Widget(`CheckBox`·`ProgressBar`·`ScrollBar`)은 위 PNG 빈칸 때문에 코어 값이다.
+    - 에디터 위젯(UE `IsEditorWidget` → 코어 `EditorUtilityButton`, 80행)의 구분은 Studio 단계에서 한다.
+    - `UTextBlock`은 캐시를 쓰지 않고 생성자에서 글꼴을 정한다(TextBlock.cpp 36행) — `TextLabelWidget`은 UW9에서 맞춘다.
+  - **호스트.** UiDemo 창(편집기 룩)은 표준 등록부를 받고 앱 스타일을 `EditorStyle`로 둔다(UE 에디터 `FAppStyle`). 게임 화면 Application은 `CoreStyle`이다(UE 게임의 Slate 위젯도 코어 스타일을 받는다).
+  - **시험.** `StyleTests`가 두 집합 값을 출처 행과 대조하고, 등록부 시험이 부모 사슬(에디터 → 코어)과 부모 없는 게임 집합을 본다.
+
+### 20.12 UV2·UV3·UV4 시험(UW8i)
+
+8장의 장면 구성 중 이 단계까지 구현된 것을 모두 시험으로 만든다. 기대값마다 UE 근거 행을 단다.
+- **UV2 무효화.**
+  - 같은 값 설정은 무효화 0회다.
+  - 사유 정규화: RenderTransform·Visibility 변경은 부모 Layout이다.
+  - 크기 불변 Layout은 부모로 전파하지 않는다.
+  - cache root 빠른 경로를 다시 쓰고, volatile Element만 다시 그린다.
+  - volatile 여부 변경(`SetVolatile`·`SetForceVolatile`)은 그 Element만 Paint로 무효화한다(UE `SWidget::Invalidate`가 Volatility를 PaintAndVolatility로 넓히고 fast path는 그 위젯의 `UpdateFastPathVolatility`만 한다 — SWidget.cpp 1317–1359행). 그리기 계획 revision은 올리지 않는다. 대신 자신과 조상의 volatility revision을 올린다. cache root는 계획이 같고 volatility revision만 다르면 다시 기록하지 않고 항목의 `everyFrame`(자기 volatile 또는 부모 본문 항목의 `everyFrame`)과 volatile 목록만 트리 순서로 다시 계산한다. 형제는 다시 그리지 않는다. 다시 비volatile이 된 Element는 Paint 무효화로 한 번 더 기록되어 캐시에 최신 모양이 남는다.
+  - 기본 경로(창 전체 cache 꺼짐)의 다시 그린 Element 수를 센다.
+  - 보이기 묶음 평가 순서(20.6절)와 Hidden 하위 트리 갱신을 본다.
+- **UV3 입력 라우팅.**
+  - 전처리기 구간과 capture를 본다.
+  - preview tunnel·bubble 순서를 본다.
+  - 보이기 5종과 겹친 layer를 본다.
+  - 비활성 경로 자름(20.5절)과 툴팁의 비활성 무시를 본다.
+  - 팝업 바깥 클릭과 IME 조합 중 게임 전처리기를 본다.
+  - modal 창은 기능이 생길 때(지금은 없음) 더한다.
+- **UV4 focus·navigation.**
+  - tab 순서와 bubble 중 navigation 변환(20.7절)을 본다.
+  - `OnNavigation` 경계와 기하 navigation(20.9절)을 본다.
+  - 규칙 6종, 사용자 2명, 비활성·접힘 Element 포함 장면을 본다.
+- **구현(UW8i) — 남은 항목.** 시험은 `BehaviorParityTests`(UV2 같은 값·보이기·크기 불변·cache root·volatile·기본 경로, UV3 tunnel·bubble·보이기 5종, UV4 Explicit·Custom·사용자 둘·tab 순서)와 단계별 시험(`FrameClockTests`·`HitOrderTests`·`DisabledHitTests`·`VisibilityBindingTests`·`KeyNavigationTests`·`NavigationSearchTests`·`StyleRegistryTests`)이다. 다음은 이 단계에서 시험하지 못했다.
+  - 전처리기 구간과 IME 조합 중 게임 전처리기: Rocks에 아직 `InputPreprocessor`가 없다(3.8절 — 게임 입력은 지금 `ScreenInputRouter`가 나눈다). 전처리기를 만들 때 시험을 더한다.
+  - RenderTransform 변경: 지금은 자기 배치만 다시 한다(부모 재측정 없음). UE 무효화 사유 정규화(`EInvalidateWidgetReason`)와 대조해 부모 Layout이 맞는지 정한 뒤 시험한다.
+  - modal 창: 기능이 생길 때 더한다.
+- **UE 실행 기준값(UD6).** UE 5.8로 빌드한 덤프 프로그램 결과는 UE 빌드 환경이 필요해 이 단계에서 만들지 않는다. 소스 근거 기준값만 둔다. 덤프는 UT1 판정 때 한다(10장 위험 목록에 남긴다).
+
+### 20.13 단계
+
+순서 의존: a → e1·e2(시계), b → c → f, e1 → e2·f. 나머지(d·g·h1·h2)는 독립이고 표 순서로 한다.
+
+| 단계 | 범위 | 완료 판정 |
+|---|---|---|
+| UW8a | `UiHostServices` 묶음(20.2절), `ui::Clock`·`ManualClock`, `BeginFrame`(delta 자름), 프레임 시각을 그리기 안팎에서 읽기, 애니메이션 부품·툴팁·타이머·`ViewportWorld` 이관, 월드 위젯 World 시간, UiDemo 수동 시계 | 시계 전진 시험(툴팁·타이머·throbber 위상, 긴 간격 자름 뒤 타이머 마감), snapshot 7탭 모두 실행마다 byte 동일 |
+| UW8b | 그리기 순서 걷기(`HitTestChildren` — 기본 그리기 자식, `OffscreenLayer`는 활성 자식), 대체 `HitTest` 맞춤 | 그리기 순서 = hit 순서(Overlay layer·Carousel 슬라이드), CachePanel·OffscreenLayer 보관 중 hit 동일, UiWorld 월드 위젯 hit, 영역 지도 동치 시험 유지 |
+| UW8c | `IsInputPathActive` 활성 인자 분리, 비활성 경로 자름, 툴팁·영역 지도 비활성 무시 | 비활성 버튼 클릭 → 부모, 비활성 위젯 툴팁 표시 |
+| UW8d | `BindVisibility`, 보이기 먼저 평가, Hidden 갱신 | 접힌 Element가 묶음으로 다시 보임, Hidden Element 원하는 크기 갱신 |
+| UW8e1 | `KeyReply`·`KeyEvent`, 기본 navigation 변환, `OnNavigation`·`NavigationReply`, `NavigationConfig`(키·동작), 메뉴·목록·스크롤·슬라이더 이관, `InputAdapter` 대체 변환 제거 | 조상이 방향키를 받지 않음, 초점 없음 → navigation 없음, 키 대응 교체, 메뉴·목록 키보드 회귀 없음 |
+| UW8e2 | 게임패드 가상 키·아날로그 반복, `ScreenInputRouter` 정리, 화면 원하는 초점 대상 | 패드 D-pad·스틱·확인·뒤로 시험, 화면 활성화 초기 초점 |
+| UW8f | UE `FindFocusableWidget` 이식, 경계 규칙, scope | UE 규칙 장면(겹친 후보·먼 후보·회전·비활성 조상·팝업 scope) 기준값 |
+| UW8g | 단일 자식 slot, `SlotPresenter` 제거, `ElementType`·`ROCKS_UI_ELEMENT`·`ElementCast`, policy(변환 교체는 별도 커밋) | wrapper 0, Element 하향 `static_cast` 0(policy) |
+| UW8h1 | `StyleRegistry`·앱 스타일·조회 시점·집합 revision 무효화, `CoreStyle` 지금 값 | 집합 교체 시험(측정·그리기 같은 값), snapshot 회귀 없음 |
+| UW8h2 | 세 집합 값(UE 출처) | UE 출처 대조 시험 |
+| UW8i | UV2·UV3·UV4 시험 묶음(20.12절) | 8장 장면 구성 중 구현된 항목 전부가 시험으로 있음 |

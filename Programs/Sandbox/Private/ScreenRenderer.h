@@ -10,7 +10,7 @@
 #include <RenderBase/EngineShaderTypes.h>
 #include <RenderBase/PipelineCache.h>
 #include <RenderBase/RenderLane.h>
-#include <RenderBase/RenderTransfer.h>
+#include <Meta/LaneTransfer.h>
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/RenderGraph.h>
 
@@ -143,11 +143,11 @@ struct CaptureCreate {
 
 } // namespace sandbox::screen
 
-ROCKS_RENDER_TRANSFERABLE(sandbox::screen::ScreenPacket);
-ROCKS_RENDER_TRANSFERABLE(sandbox::screen::SurfaceCreate);
-ROCKS_RENDER_TRANSFERABLE(sandbox::screen::SurfaceResize);
-ROCKS_RENDER_TRANSFERABLE(sandbox::screen::SurfaceRelease);
-ROCKS_RENDER_TRANSFERABLE(sandbox::screen::CaptureCreate);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::ScreenPacket);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceCreate);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceResize);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceRelease);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::CaptureCreate);
 
 namespace sandbox::screen {
 

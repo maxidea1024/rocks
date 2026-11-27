@@ -97,7 +97,10 @@ private:
         Deferred,
         Submitted,
         // 살아 있지만 voice가 없다(3.41.1절 — 새 재생, 상한 밖 loop·remainActive, 무음 loop).
-        Voiceless
+        Voiceless,
+        // 가상이다(3.41.3절 — 가청 거리 밖 loop, 동시 발음 거부·빼앗김). voice 경쟁에 나가지 않고
+        // 검사 간격마다 실현을 시도한다.
+        Virtual
     };
 
     // 동시 발음 그룹 모드다(UE FSoundConcurrencyManager 맵 넷 — SoundConcurrency.h:439–450).
@@ -236,6 +239,14 @@ private:
         bool stealing = false;
         DecibelRamp stealFader;
         uint64 stealFadeEnd = 0;
+        // 동시 발음 그룹 항목과 소유자다(가상 재생을 실현할 때 다시 평가한다 — 3.41.3절).
+        uint64 owner = 0;
+        uint32 concurrencyCount = 0;
+        SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
+        // 다음 가상 검사 mix frame과 마지막으로 정한 검사 간격(들리지만 실현이 거부되면 간격을
+        // 그대로 다시 쓴다 — UE AVL 339–352)이다.
+        uint64 virtualCheckFrame = 0;
+        uint64 virtualInterval = 0;
     };
 
     struct ClipEntry {
@@ -260,6 +271,9 @@ private:
         uint32 epoch = 0;
         Vec3d listenerPosition;
         Quatd listenerRotation = Quatd::Identity();
+        // 이번 묶음에 리스너가 forceUpdateDistance보다 많이 움직였다(가상 재생을 바로 검사
+        // — 3.41.3절).
+        bool listenerJumped = false;
     };
 
     struct ControlEmitter {
@@ -280,6 +294,15 @@ private:
         float weight = 0.0f;
         uint64 sequence = 0;
         uint32 stopFade = audio::DefaultStopFadeFrames;
+        // 떼어 낸 재생의 scene이다(scene 해제가 fade 중 voice도 짧게 끊는다 — 3.41.3절).
+        uint32 scene = 0;
+        uint32 sceneEpoch = 0;
+        // 동시 발음 steal fade를 이 voice에서 마저 한다(재생은 가상이 됐다 — 3.41.2절). 떼어 낼
+        // 때의 파라미터에 fader를 곱해 묶음마다 게시하고, 끝나면 믹서 정지 fade다.
+        bool fading = false;
+        DecibelRamp fader;
+        uint64 fadeEnd = 0;
+        audio::AudioVoiceParams params;
     };
 
     // voice 배정 후보다.
@@ -331,16 +354,28 @@ private:
     void DropVoice(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
     StartOutcome StartVoice(uint32 slot, uint64 now) noexcept;
     void OnStartFailure(uint32 slot, StartOutcome outcome, ControlBatch& batch) noexcept;
-    void DetachVoice(uint32 slot, ControlBatch& batch, uint64 now) noexcept;
+    void DetachVoice(uint32 slot, ControlBatch& batch, uint64 now,
+                     uint32 stealFadeFrames = 0) noexcept;
     void ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept;
     bool CutStoppingVoice(bool streamOnly) noexcept;
     void EndVoiceless(uint32 slot, PlaybackEndReason reason, ControlBatch& batch) noexcept;
-    bool IsAudible(const Record& record) const noexcept;
+    // ignorePlayWhenSilentSetting이면 PlayWhenSilent를 audio.virtual.allowplaywhensilent와 상관없이
+    // 늘 들리는 것으로 본다(짧은 one-shot 판정 — UE AD 6356은 사운드 모드만 본다).
+    bool IsAudible(const Record& record, bool ignorePlayWhenSilentSetting = false) const noexcept;
 
     // 동시 발음(AudioConcurrency.cpp — 3.41.2절).
-    ConcurrencyOutcome EvaluateConcurrency(uint32 slot, const ControlCommand& command,
-                                           ControlBatch& batch, uint64 now,
+    ConcurrencyOutcome EvaluateConcurrency(uint32 slot, ControlBatch& batch, uint64 now,
                                            bool realization) noexcept;
+
+    // 가상화(AudioVirtualization.cpp — 3.41.3절).
+    bool IsVirtualizable(const Record& record) const noexcept;
+    // voice를 놓고(steal이면 stealFadeFrames 동안 분리 fade) 그룹에서 빼고 가상으로 둔다.
+    void Virtualize(uint32 slot, ControlBatch& batch, uint64 now,
+                    uint32 stealFadeFrames = 0) noexcept;
+    // 상태를 Virtual로 바꾸고 첫 검사를 정한다(voice·그룹은 이미 정리됐다).
+    void EnterVirtual(uint32 slot, uint64 now) noexcept;
+    void UpdateVirtualization(ControlBatch& batch, uint64 now) noexcept;
+    uint64 VirtualCheckDelay(const Record& record) const noexcept;
     uint32 FindConcurrencyGroup(ConcurrencyMode mode, uint64 owner, uint64 key) const noexcept;
     void GatherGroupMembers(uint32 group, uint32 except) noexcept;
     bool CanPlayInGroup(uint32 group, uint32 slot, bool realization, uint64 now,
@@ -399,8 +434,9 @@ private:
     bool shuttingDown_ = false;
     // 다음 수락 순번이다.
     uint64 nextSequence_ = 0;
-    // 이 묶음의 audio.concurrency.mindistancedelta(cm)다.
+    // 이 묶음의 audio.concurrency.mindistancedelta(cm)·audio.virtual.* 값이다.
     float minDistanceDelta_ = 0.0f;
+    VirtualizationSettings virtual_;
     AudioControlStats stats_;
 };
 

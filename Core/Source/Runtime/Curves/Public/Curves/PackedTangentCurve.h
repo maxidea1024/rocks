@@ -39,8 +39,8 @@ enum class PackedKeyTimeFormat : uint8 {
     Float32 = 1,
 };
 
-// TangentCurve의 압축 저장 형태다(UE 5.8 FCompressedRichCurve — Docs/Design/CurveData.ko.md 11절,
-// D13·D14·D18·D21). 쿡된 애니메이션 커브처럼 많이 읽는 런타임 데이터용이다(저작 데이터는
+// TangentCurve의 압축 저장 형태다(UE 5.8 FCompressedRichCurve — Docs/Design/CurveData/README.ko.md
+// 11절, D13·D14·D18·D21). 쿡된 애니메이션 커브처럼 많이 읽는 런타임 데이터용이다(저작 데이터는
 // TangentCurve). 만드는 길은 TryPack과 리플렉션 decode뿐이다(칸은 private PROPERTY).
 //
 // - 형식 결정(11.1절)은 UE를 고친 것이다: Weighted는 구간 단위 가중 판정, Constant는 키 값이

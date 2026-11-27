@@ -5,6 +5,7 @@
 #include <Collision/CollisionTypes.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
+#include <Object/Event.h>
 #include <World/Lights/LightingChannels.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
@@ -18,9 +19,10 @@
 
 namespace rocks {
 
-// 질의 형상이다(Collision/CollisionShape.h — 헤더는 구현 파일만 include한다: Mesh
-// SimpleCollision.h의 같은 이름 enum CollisionShapeKind와 한 번역 단위에서 만나지 않게).
+// 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
 struct CollisionShape;
+
+class Actor;
 
 // 그리거나 충돌하는 Component의 기반이다(UE UPrimitiveComponent —
 // Docs/Design/EngineRuntime 24.3절). 데이터만 있다: 렌더 proxy(RS1)·충돌(CR16) 연결 전에는 아무것도
@@ -47,8 +49,9 @@ public:
     static constexpr const char* PrimitiveCollisionProfileName = "BlockAll";
 
     explicit PrimitiveComponent(Allocator& allocator) noexcept
-        : SceneComponent(allocator), collisionProfileName_(allocator), bodySettings_(allocator),
-          moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator),
+        : SceneComponent(allocator), componentHit(allocator), componentOverlapBegan(allocator),
+          componentOverlapEnded(allocator), collisionProfileName_(allocator),
+          bodySettings_(allocator), moveIgnoreActors_(allocator), moveIgnoreComponents_(allocator),
           overlappingComponents_(allocator) {
     }
 
@@ -524,6 +527,32 @@ public:
     // 돌려준다 — SetWorldLocationAndRotation).
     Result<void> ApplyPhysicsTransform(const Vec3d& location, const Quatd& rotation) noexcept;
 
+    // hit·overlap 이벤트다(UE OnComponentHit·OnComponentBeginOverlap·OnComponentEndOverlap —
+    // Docs/Design/PhysicsModule 5.5절·7.1.14절). componentHit는 소유 Actor의 OnHit·actorHit 뒤,
+    // overlap 이벤트는 World가 Playing일 때 Actor hook보다 먼저 발행한다(같은 Actor 컴포넌트끼리도
+    // 난다). componentOverlapBegan의 sweepResult는 sweep으로 생긴 겹침이면 그 hit(fromSweep 참),
+    // 아니면 상대 컴포넌트·Actor만 채운 hit다. 리플렉션 바인딩은 저장한다.
+    //
+    // 사용 예:
+    //   (void)trigger.componentOverlapBegan.TryAddLambda(
+    //       [](WeakObjectRef<PrimitiveComponent> self, WeakObjectRef<Actor> otherActor,
+    //          WeakObjectRef<PrimitiveComponent> otherComponent, bool fromSweep,
+    //          const HitResult& sweep) noexcept { ... });
+    //
+    // Actor·컴포넌트 인자는 WeakObjectRef다(Sparks가 객체 인자로 받는다 — SparksBinding B14).
+    ROCKS_PROPERTY(Params = "hitComponent,otherActor,otherComponent,normalImpulse,hit")
+    Event<WeakObjectRef<PrimitiveComponent>, WeakObjectRef<Actor>,
+          WeakObjectRef<PrimitiveComponent>, Vec3d, const HitResult&>
+        componentHit;
+    ROCKS_PROPERTY(Params = "overlappedComponent,otherActor,otherComponent,fromSweep,sweepResult")
+    Event<WeakObjectRef<PrimitiveComponent>, WeakObjectRef<Actor>,
+          WeakObjectRef<PrimitiveComponent>, bool, const HitResult&>
+        componentOverlapBegan;
+    ROCKS_PROPERTY(Params = "overlappedComponent,otherActor,otherComponent")
+    Event<WeakObjectRef<PrimitiveComponent>, WeakObjectRef<Actor>,
+          WeakObjectRef<PrimitiveComponent>>
+        componentOverlapEnded;
+
     // 시뮬레이션 접촉 hit 하나를 발행한다(UE AActor::DispatchPhysicsCollisionHit — PhysicsModule
     // 7.1.12절, Physics의 PhysicsResults만 부른다). hit.myComponent나 그 소유 Actor가 사라졌거나
     // 파괴 대기면 하지 않는다. 소유 Actor의 OnHit(myComponent, otherActor, otherComponent,
@@ -661,11 +690,19 @@ private:
     // 막는 hit를 자기 Actor와 상대 Actor에 발행한다(UE DispatchBlockingHit — 7.1.10절).
     void DispatchBlockingHit(const HitResult& hit) noexcept;
 
+    // 시작할 겹침 하나다(UE FOverlapInfo — 7.1.14절): 상대 컴포넌트와 그 hit(sweep이면 sweep
+    // hit, 아니면 상대 컴포넌트·Actor만 채운 hit).
+    struct PendingOverlap {
+        ObjectHandle component;
+        bool fromSweep = false;
+        HitResult hit;
+    };
+
     // overlap 장부(7.1.11절 — UE UpdateOverlapsImpl·BeginComponentOverlap·EndComponentOverlap·
     // ClearComponentOverlaps). pending은 이동 sweep이 지나며 만난 겹침(시작할 후보)이다.
-    void UpdateOverlapsWith(Span<const ObjectHandle> pending) noexcept;
+    void UpdateOverlapsWith(Span<const PendingOverlap> pending) noexcept;
     void RefreshOverlaps(World& world) noexcept;
-    void BeginComponentOverlap(ObjectHandle other) noexcept;
+    void BeginComponentOverlap(const PendingOverlap& overlap) noexcept;
     void EndComponentOverlap(ObjectHandle other) noexcept;
     void ClearComponentOverlaps() noexcept;
     // 두 컴포넌트가 겹침을 만들 수 있는지다(UE CanComponentsGenerateOverlap).
@@ -698,6 +735,9 @@ private:
     ROCKS_NATIVE() Array<ObjectHandle> moveIgnoreComponents_;
     // 겹친 컴포넌트다(UE OverlappingComponents — Transient, 대칭).
     ROCKS_NATIVE() Array<ObjectHandle> overlappingComponents_;
+    // OnDestroy가 겹침을 모두 끝내는 중이다(7.1.14절): 파괴 대기지만 자기 쪽·자기 Actor도 끝 알림을
+    // 받는다(UE는 MarkAsGarbage 전에 끝낸다 — ActorComponent.cpp:2201-2204).
+    ROCKS_NATIVE() bool clearingForDestroy_ = false;
 };
 
 } // namespace rocks

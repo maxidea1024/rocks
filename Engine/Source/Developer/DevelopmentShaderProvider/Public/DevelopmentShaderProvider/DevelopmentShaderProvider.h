@@ -22,9 +22,18 @@
 // 경로>(<줄>,<열>): error: …`)로 Error 로그에 남긴다(SSD72). 재컴파일이 끝날 때마다
 // 통지(WaitForReload)를 낸다.
 //
+// 진행과 취소(ShaderSystem 16.3절 PG5 메모, 진행 보고 8·12장): 형식 라이브러리 처음 만들기는
+// ProgressHub Background 작업 "Compiling shaders"(취소 불가), 감시 재컴파일은 "Recompiling
+// shaders"(사용자 취소 가능 — 취소면 이전 셰이더 유지, Info 로그)이고 둘 다 작업 수준 계수다(hub가
+// 꺼져 있으면 작업 없이). 대기 작업 "Shaders"(PendingWork — RunBefore "Textures")가
+// 만들기·재컴파일을 일 구간으로 세고 그 token이 컴파일을 취소한다(엔진 종료의 등록소 Shutdown).
+// 모든 컴파일의 job 수는 엔진 셰이더 호스트 준비 진행(EngineShaderHost::ReportPreparation…)으로도
+// 간다(시작 화면 Shaders 단계).
+//
 // 보통은 직접 만들지 않는다: 실행 파일이 Release 밖에서 이 모듈을 링크하면 모듈 수명 객체가
-// Startup에서 EngineShaderHost 서비스에 공급자를 붙이고 Shutdown에서 떼며 감시·워커를
-// 멈춘다(서비스가 없으면 아무 일도 하지 않고, 이미 다른 공급자가 붙어 있으면 붙이지 않는다). 설정은
+// Startup에서 EngineShaderHost 서비스에 공급자를 붙이고(엔진 대기 작업 등록소 서비스가 있으면
+// PendingWork도 등록하고) Shutdown에서 떼며 감시·워커를 멈춘다(서비스가 없으면 아무 일도 하지 않고,
+// 이미 다른 공급자가 붙어 있으면 붙이지 않는다). 설정은
 // CVar `shader.recompile_on_save`(기본 true)·`shader.symbols`(기본 false — 디버그 심볼과 심볼 파일
 // <너겟 root>/Saved/ShaderSymbols/<형식>/, SSD73–SSD75)다.
 //
@@ -46,6 +55,12 @@
 // 부른다. 이미 만든 형식의 RequestLibrary와 LibraryRevision은 다시 만드는 동안에도 짧은 잠금만
 // 잡는다 (렌더 lane을 막지 않는다). 처음 만드는 형식의 요청은 그 컴파일을 기다린다. Shutdown은
 // 마지막 요청이 끝난 뒤 부른다.
+namespace rocks {
+
+class PendingWorkSource;
+
+} // namespace rocks
+
 namespace rocks::shader {
 
 struct DevelopmentShaderProviderOptions {
@@ -83,16 +98,23 @@ public:
 
     // 원문이 바뀌었다(가상 경로 — 감시 스레드와 시험이 부른다). everything이면(감시 이벤트 손실)
     // 모든 셰이더가 영향받는다. 이 호출 안에서 다시 만들고 로그·통지를 낸다(재컴파일은 차례로
-    // 돈다). 아직 만든 라이브러리가 없으면 다시 만들 것 없이 성공 통지다. 실행 실패(할당·관리자)만
-    // Result 실패이고 그때도 실패 통지를 낸다.
+    // 돈다). 아직 만든 라이브러리가 없으면 다시 만들 것 없이 성공 통지다. 실행 실패(할당·관리자)와
+    // 취소(Cancelled — 진행 작업 취소·대기 작업 Shutdown, 이전 셰이더 유지)만 Result 실패이고
+    // 그때도 실패 통지를 낸다.
     Result<void> NotifySourcesChanged(Span<const StringView> virtualPaths,
                                       bool everything) noexcept;
 
     // 감시 스레드가 돌고 있는가(시험·진단).
     bool IsWatching() const noexcept;
 
-    // 감시를 멈추고 컴파일 관리자·워커·너겟 캐시를 멈춘다. 두 번째 호출은 아무 일도 하지 않는다.
+    // 대기 작업을 닫고(진행 중 컴파일 취소 — 끝날 때까지 기다림) 감시를 멈추고 컴파일
+    // 관리자·워커·너겟 캐시를 멈춘다. 두 번째 호출은 아무 일도 하지 않는다.
     void Shutdown() noexcept;
+
+    // 대기 작업 종류 "Shaders"다(Engine CountedPendingWork — 진행 보고 8장 PG5 연결). 모듈 수명
+    // 객체가 엔진 등록소에 등록한다. 등록을 뗀 뒤에 Shutdown한다(RemainingCount가 다른 스레드에서
+    // 불린다).
+    PendingWorkSource& PendingWork() noexcept;
 
     // 만든 라이브러리 수(형식 × 종류 — 시험·진단)다.
     usize BuiltLibraryCount() const noexcept;

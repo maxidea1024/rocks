@@ -7,10 +7,10 @@
 #include <TestSupport/Test.h>
 
 // 계단 커브를 UE 5.8 FIntegralCurve·FStringCurve 식을 그대로 옮긴 참조와 대조한다(Docs/Design/
-// CurveData.ko.md 5.8·16절 — CV6). 참조는 UE 원본을 줄 단위로 옮겼고(TArray는 Array, 키 핸들 표는
-// 뺐다) 설계 15절·17.5절의 수정을 Options로 켜고 끈다. 수정을 켠 참조 = Rocks 의미라 모든 사례에서
-// 같아야 하고, 끈 참조(UE 그대로)는 문서화한 경우(NaN 시간, 중복 제거 뒤 남은 키 하나의 기본값
-// 변환, FString 대소문자 무시 같음)에서만 다르다. FNameCurve에는 평가·중복 제거가 없으므로
+// CurveData/README.ko.md 5.8·16절 — CV6). 참조는 UE 원본을 줄 단위로 옮겼고(TArray는 Array, 키 핸들
+// 표는 뺐다) 설계 15절·17.5절의 수정을 Options로 켜고 끈다. 수정을 켠 참조 = Rocks 의미라 모든
+// 사례에서 같아야 하고, 끈 참조(UE 그대로)는 문서화한 경우(NaN 시간, 중복 제거 뒤 남은 키 하나의
+// 기본값 변환, FString 대소문자 무시 같음)에서만 다르다. FNameCurve에는 평가·중복 제거가 없으므로
 // NameStepCurve는 String 참조 규칙(D9)과 대조한다. 무작위 사례는 고정 seed다.
 //
 // 참조 함수 ↔ UE 5.8.4 원본(Engine/Source/Runtime/Engine/Private/Curves, 리뷰어 줄 단위 대조용):

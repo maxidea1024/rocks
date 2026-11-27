@@ -139,7 +139,7 @@ TEST(Collision_ValidateRules) {
     REQUIRE(ValidateSimpleCollision(good));
     struct Case {
         CollisionIssue issue;
-        CollisionShapeKind shape;
+        SimpleCollisionShapeKind shape;
         uint32 index;
         uint32 related;
     };
@@ -159,52 +159,52 @@ TEST(Collision_ValidateRules) {
 
     constexpr uint32 none = CollisionNoIndex;
     expect([](SimpleCollision& c) noexcept { c.spheres[0].center.y = NaN(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Sphere, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Sphere, 0, none});
     expect([](SimpleCollision& c) noexcept { c.spheres[0].restOffset = static_cast<float>(NaN()); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Sphere, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Sphere, 0, none});
     expect([](SimpleCollision& c) noexcept { c.spheres[0].radius = 0.0f; },
-           {CollisionIssue::NonPositiveSize, CollisionShapeKind::Sphere, 0, 0});
+           {CollisionIssue::NonPositiveSize, SimpleCollisionShapeKind::Sphere, 0, 0});
     expect(
         [](SimpleCollision& c) noexcept { c.spheres[0].radius = static_cast<float>(Infinity()); },
-        {CollisionIssue::NonFiniteValue, CollisionShapeKind::Sphere, 0, 0});
+        {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Sphere, 0, 0});
     expect([](SimpleCollision& c) noexcept { c.boxes[1].rotation.roll = Infinity(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Box, 1, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Box, 1, none});
     expect([](SimpleCollision& c) noexcept { c.boxes[1].size.z = -1.0; },
-           {CollisionIssue::NonPositiveSize, CollisionShapeKind::Box, 1, 2});
+           {CollisionIssue::NonPositiveSize, SimpleCollisionShapeKind::Box, 1, 2});
     expect([](SimpleCollision& c) noexcept { c.boxes[0].size.y = NaN(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Box, 0, 1});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Box, 0, 1});
     expect([](SimpleCollision& c) noexcept { c.capsules[0].center.z = Infinity(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Capsule, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Capsule, 0, none});
     expect([](SimpleCollision& c) noexcept { c.capsules[0].radius = -2.0f; },
-           {CollisionIssue::NonPositiveSize, CollisionShapeKind::Capsule, 0, 0});
+           {CollisionIssue::NonPositiveSize, SimpleCollisionShapeKind::Capsule, 0, 0});
     expect([](SimpleCollision& c) noexcept { c.capsules[0].length = -0.5f; },
-           {CollisionIssue::NegativeLength, CollisionShapeKind::Capsule, 0, none});
+           {CollisionIssue::NegativeLength, SimpleCollisionShapeKind::Capsule, 0, none});
     expect([](SimpleCollision& c) noexcept { c.capsules[0].length = static_cast<float>(NaN()); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Capsule, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Capsule, 0, none});
     expect([](SimpleCollision& c) noexcept { c.taperedCapsules[0].radius1 = 0.0f; },
-           {CollisionIssue::NonPositiveSize, CollisionShapeKind::TaperedCapsule, 0, 1});
+           {CollisionIssue::NonPositiveSize, SimpleCollisionShapeKind::TaperedCapsule, 0, 1});
     expect([](SimpleCollision& c) noexcept { c.taperedCapsules[0].length = -1.0f; },
-           {CollisionIssue::NegativeLength, CollisionShapeKind::TaperedCapsule, 0, none});
+           {CollisionIssue::NegativeLength, SimpleCollisionShapeKind::TaperedCapsule, 0, none});
     expect([](SimpleCollision& c) noexcept { c.taperedCapsules[0].center.x = Infinity(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::TaperedCapsule, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::TaperedCapsule, 0, none});
     expect([](SimpleCollision& c) noexcept { c.cylinders[0].length = 0.0f; },
-           {CollisionIssue::NonPositiveSize, CollisionShapeKind::Cylinder, 0, 1});
+           {CollisionIssue::NonPositiveSize, SimpleCollisionShapeKind::Cylinder, 0, 1});
     expect([](SimpleCollision& c) noexcept { c.cylinders[0].rotation.pitch = NaN(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Cylinder, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Cylinder, 0, none});
     expect(
         [](SimpleCollision& c) noexcept { c.convexes[1].restOffset = static_cast<float>(NaN()); },
-        {CollisionIssue::NonFiniteValue, CollisionShapeKind::Convex, 1, none});
+        {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Convex, 1, none});
     expect([](SimpleCollision& c) noexcept { c.convexes[0].transform.translation.z = NaN(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Convex, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Convex, 0, none});
     expect([](SimpleCollision& c) noexcept { c.convexes[0].transform.scale.x = Infinity(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Convex, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Convex, 0, none});
     expect([](SimpleCollision& c) noexcept { c.convexes[0].transform.rotation.w = NaN(); },
-           {CollisionIssue::NonFiniteValue, CollisionShapeKind::Convex, 0, none});
+           {CollisionIssue::NonFiniteValue, SimpleCollisionShapeKind::Convex, 0, none});
     expect(
         [](SimpleCollision& c) noexcept { c.convexes[1].transform.rotation = Quatd(0, 0, 0, 1.2); },
-        {CollisionIssue::TransformRotation, CollisionShapeKind::Convex, 1, none});
+        {CollisionIssue::TransformRotation, SimpleCollisionShapeKind::Convex, 1, none});
     expect([](SimpleCollision& c) noexcept { c.convexes[1].transform.scale.y = 0.0; },
-           {CollisionIssue::TransformScale, CollisionShapeKind::Convex, 1, 1});
+           {CollisionIssue::TransformScale, SimpleCollisionShapeKind::Convex, 1, 1});
     // 허용 경계: 길이 0 캡슐·테이퍼드, 음수 restOffset, 큰 회전 값, 정규화 허용치 안쪽 회전, 음수
     // 크기.
     SimpleCollision edge(env.allocator);
@@ -237,7 +237,7 @@ TEST(Collision_ConvexGeometryRules) {
         auto result = ValidateConvexGeometry(geometry, &failure);
         CHECK(!result && result.Error() == error);
         CHECK(failure.code == AssetDiagnosticCode::InvalidCollisionData && failure.issue == issue &&
-              failure.shape == CollisionShapeKind::Convex && failure.related == related);
+              failure.shape == SimpleCollisionShapeKind::Convex && failure.related == related);
         CHECK(!ValidateConvexGeometry(geometry));
     };
 
@@ -433,7 +433,7 @@ TEST(Collision_LoadRejectsConvexBytes) {
         CHECK(!result && out.vertices.IsEmpty());
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
               failure.issue == cases[at].issue && failure.related == cases[at].related &&
-              failure.shape == CollisionShapeKind::Convex);
+              failure.shape == SimpleCollisionShapeKind::Convex);
         CHECK(!LoadConvexGeometry(loaded->collision.convexes[at], *raw, out));
     }
 
@@ -647,12 +647,12 @@ TEST(Collision_DiagnosticNames) {
 
     CHECK(StringView(CollisionIssueName(static_cast<CollisionIssue>(last + 1))) ==
           StringView("Unknown"));
-    for (uint32 kind = 0; kind <= static_cast<uint32>(CollisionShapeKind::Convex); ++kind) {
-        CHECK(StringView(CollisionShapeKindName(static_cast<CollisionShapeKind>(kind))) !=
-              StringView("Unknown"));
+    for (uint32 kind = 0; kind <= static_cast<uint32>(SimpleCollisionShapeKind::Convex); ++kind) {
+        CHECK(StringView(SimpleCollisionShapeKindName(
+                  static_cast<SimpleCollisionShapeKind>(kind))) != StringView("Unknown"));
     }
 
-    CHECK(StringView(CollisionShapeKindName(static_cast<CollisionShapeKind>(7))) ==
+    CHECK(StringView(SimpleCollisionShapeKindName(static_cast<SimpleCollisionShapeKind>(7))) ==
           StringView("Unknown"));
     for (uint32 feature = 0;
          feature <= static_cast<uint32>(UnsupportedCollisionFeature::TaperedCapsuleOneSided);

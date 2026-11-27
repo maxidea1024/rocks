@@ -77,14 +77,75 @@ constinit cvar::CVar<float> ConcurrencyMinDistanceDeltaVar =
               "equally far. Read every frame.")
         .Range(0.0f, MaxAudioWorldDistance);
 
+// 가상화(3.41.3절, UE au.VirtualLoops.* — AudioVirtualLoop.cpp:9–42, au.MaxWorldDistance).
+constinit cvar::CVar<int32> VirtualEnabledVar =
+    cvar::Var("audio.virtual.enabled", 1)
+        .Help(
+            "1 lets inaudible looping sounds become virtual (no voice, cursor keeps moving). Read "
+            "every frame.")
+        .Range(0, 1);
+
+constinit cvar::CVar<int32> VirtualAllowPlayWhenSilentVar =
+    cvar::Var("audio.virtual.allowplaywhensilent", 1)
+        .Help("1 honors the PlayWhenSilent virtualization mode; 0 treats it as Restart. Read every "
+              "frame.")
+        .Range(0, 1);
+
+constinit cvar::CVar<float> VirtualUpdateMinVar =
+    cvar::Var("audio.virtual.updatemin", DefaultVirtualUpdateMinSeconds)
+        .Help(
+            "Shortest interval in seconds between audibility checks of a virtual sound. Read every "
+            "frame.")
+        .Range(0.0f, MaxVirtualUpdateSeconds);
+
+constinit cvar::CVar<float> VirtualUpdateMaxVar =
+    cvar::Var("audio.virtual.updatemax", DefaultVirtualUpdateMaxSeconds)
+        .Help(
+            "Longest interval in seconds between audibility checks of a virtual sound. Read every "
+            "frame.")
+        .Range(0.0f, MaxVirtualUpdateSeconds);
+
+constinit cvar::CVar<float> VirtualPerfDistanceVar =
+    cvar::Var("audio.virtual.perfdistance", DefaultVirtualPerfDistance)
+        .Help(
+            "Distance in centimeters beyond the audible range over which the check interval grows "
+            "from updatemin to updatemax. Read every frame.")
+        .Range(1.0f, MaxAudioWorldDistance);
+
+constinit cvar::CVar<float> VirtualForceUpdateDistanceVar =
+    cvar::Var("audio.virtual.forceupdatedistance", DefaultVirtualForceUpdateDistance)
+        .Help("Listener movement in centimeters between frames that checks every virtual sound at "
+              "once. Read every frame.")
+        .Range(0.0f, MaxAudioWorldDistance);
+
+constinit cvar::CVar<float> VirtualMaxWorldDistanceVar =
+    cvar::Var("audio.virtual.maxworlddistance", MaxAudioWorldDistance)
+        .Help("Sounds whose audible range reaches this distance in centimeters are always audible. "
+              "Read every frame.")
+        .Range(1.0f, MaxAudioWorldDistance);
+
+VirtualizationSettings VirtualizationFromSettings() noexcept {
+    VirtualizationSettings settings;
+    settings.enabled = VirtualEnabledVar.Get() != 0;
+    settings.allowPlayWhenSilent = VirtualAllowPlayWhenSilentVar.Get() != 0;
+    settings.updateMinSeconds = VirtualUpdateMinVar.Get();
+    settings.updateMaxSeconds = VirtualUpdateMaxVar.Get();
+    settings.perfDistance = VirtualPerfDistanceVar.Get();
+    settings.forceUpdateDistance = VirtualForceUpdateDistanceVar.Get();
+    settings.maxWorldDistance = VirtualMaxWorldDistanceVar.Get();
+    return settings;
+}
+
 } // namespace engine_audio_detail
 
 Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcept {
     using namespace engine_audio_detail;
-    return context.Register(MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar,
-                            MixerBufferCountVar, MixerSampleRateVar, MaxVoicesVar,
-                            StreamRingFramesVar, StreamMaxStreamsVar, StreamDefaultLoadingVar,
-                            ConcurrencyMinDistanceDeltaVar);
+    return context.Register(
+        MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar, MixerBufferCountVar,
+        MixerSampleRateVar, MaxVoicesVar, StreamRingFramesVar, StreamMaxStreamsVar,
+        StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar, VirtualEnabledVar,
+        VirtualAllowPlayWhenSilentVar, VirtualUpdateMinVar, VirtualUpdateMaxVar,
+        VirtualPerfDistanceVar, VirtualForceUpdateDistanceVar, VirtualMaxWorldDistanceVar);
 }
 
 } // namespace rocks

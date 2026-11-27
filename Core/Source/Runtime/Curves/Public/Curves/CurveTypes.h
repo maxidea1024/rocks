@@ -5,7 +5,7 @@
 #include <Core/Optional.h>
 #include <Meta/Annotations.h>
 
-// 스칼라 키 커브의 공통 칸과 키 형식이다(Docs/Design/CurveData.ko.md 2·4절 — CV5). UE 5.8
+// 스칼라 키 커브의 공통 칸과 키 형식이다(Docs/Design/CurveData/README.ko.md 2·4절 — CV5). UE 5.8
 // ERichCurveInterpMode·ERichCurveTangentMode·ERichCurveTangentWeightMode·ERichCurveExtrapolation·
 // FRichCurveKey·FSimpleCurveKey·FRealCurve 대응이다. 커브 자체는 TangentCurve.h·PlainCurve.h다.
 //

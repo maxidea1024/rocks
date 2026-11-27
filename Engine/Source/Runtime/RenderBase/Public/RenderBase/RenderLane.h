@@ -6,6 +6,7 @@
 #include <Core/Move.h>
 #include <Core/Optional.h>
 #include <Graphics/Device.h>
+#include <Meta/LaneTransfer.h>
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/RenderNotices.h>
 #include <RenderBase/RenderSettings.h>
@@ -259,7 +260,7 @@ using RenderFrameFunction = void (*)(RenderFrameContext& context, T& packet) noe
 //   lane.Shutdown();                              // 5.5절 종료 순서 전체(또는 단계별 함수)
 //
 // 작업 네 종류(5.2절): 프레임 packet(SubmitFrame), 장치 자원 생성·갱신(PostResource)·Retire, 표면
-// 작업(PostSurface·PostSurfaceAndWait), lane 표지(PostMarker). 값은 RenderTransferable만 받는다.
+// 작업(PostSurface·PostSurfaceAndWait), lane 표지(PostMarker). 값은 LaneTransferable만 받는다.
 //
 // 스레드:
 // - Start·BeginFrame·Arena·SubmitFrame·AbandonFrame·대기 함수·종료 단계 함수는 Start를 부른
@@ -311,7 +312,7 @@ public:
     // 파괴된다), 성공하면 lane이 render 직후 — slot을 돌려주기(lane 처리 완료 표지) 전에 —
     // 파괴한다(Docs/Design/RenderBase 5.3절 "프레임 packet 수명": packet이 가리키는 프레임 arena는
     // 그 뒤 게임 lane이 비운다).
-    template <RenderTransferable T>
+    template <LaneTransferable T>
     Result<void> SubmitFrame(FrameTicket&& ticket, T&& packet,
                              RenderFrameFunction<T> render) noexcept;
 
@@ -325,7 +326,7 @@ public:
 
     // 장치 자원 생성·갱신 작업을 게시한다. 실패: 종료 뒤 ShuttingDown, 전달 검사·빈 함수
     // InvalidArgument, 게시 실패는 그 오류다. value는 실패해도 소비된다.
-    template <RenderTransferable T>
+    template <LaneTransferable T>
     Result<void> PostResource(T&& value, RenderLaneFunction<T> run) noexcept;
 
     // 렌더 handle을 회수한다(6.2절 Retire). lane이 새 사용을 막고, 이어진 장치 자원을 장치 Retire로
@@ -353,12 +354,12 @@ public:
 
     // 표면 작업(스왑체인 생성·resize·파괴, 표면 소실·재생성)을 게시한다. 장치 소유권 이관 중에
     // 게시해도 lane이 소유권을 얻은 뒤에 실행된다.
-    template <RenderTransferable T>
+    template <LaneTransferable T>
     Result<void> PostSurface(T&& value, RenderLaneFunction<T> run) noexcept;
 
     // 표면 소실 handshake다(5.3절 예외 1: Android surface 반납). 표면 작업을 게시하고 lane이 그것을
     // 마칠 때까지 게임 lane이 기다린다(펌프하며). 게임 lane 전용이다.
-    template <RenderTransferable T>
+    template <LaneTransferable T>
     Result<void> PostSurfaceAndWait(T&& value, RenderLaneFunction<T> run) noexcept;
 
     // lane 표지를 게시한다.
@@ -562,12 +563,12 @@ Result<void> RenderLane::PostLaneTask(Body&& body) noexcept {
     return lane_.Post(Move(task.Value()));
 }
 
-template <RenderTransferable T>
+template <LaneTransferable T>
 Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
                                      RenderFrameFunction<T> render) noexcept {
     // 모든 반환 경로에서 packet을 소비한다(5.3절 "프레임 packet 수명").
     Optional<T> held(Move(packet));
-    auto checked = CheckRenderTransfer<T>();
+    auto checked = CheckLaneTransfer<T>();
     if (!checked || render == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -609,9 +610,9 @@ Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
     return Result<void>::Success();
 }
 
-template <RenderTransferable T>
+template <LaneTransferable T>
 Result<void> RenderLane::PostResource(T&& value, RenderLaneFunction<T> run) noexcept {
-    auto checked = CheckRenderTransfer<T>();
+    auto checked = CheckLaneTransfer<T>();
     if (!checked || run == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -624,12 +625,12 @@ Result<void> RenderLane::PostResource(T&& value, RenderLaneFunction<T> run) noex
     });
 }
 
-template <RenderTransferable T>
+template <LaneTransferable T>
 Result<void> RenderLane::PostSurface(T&& value, RenderLaneFunction<T> run) noexcept {
     return PostResource(Move(value), run);
 }
 
-template <RenderTransferable T>
+template <LaneTransferable T>
 Result<void> RenderLane::PostSurfaceAndWait(T&& value, RenderLaneFunction<T> run) noexcept {
     if (!IsGameThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);

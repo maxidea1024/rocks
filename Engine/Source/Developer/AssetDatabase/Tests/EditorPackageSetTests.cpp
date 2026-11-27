@@ -844,4 +844,284 @@ TEST(EditorPackageSet_Disk) {
     }
 }
 
+namespace {
+
+// 열 때 원본 재구성 시험 hook의 상태다(12.14절 A5j2c).
+struct OpenRebuildRecord {
+    static constexpr usize MaxCalls = 8;
+
+    AssetId calls[MaxCalls] = {};
+    usize count = 0;
+    bool otherCause = false;
+    bool fieldsGiven = false;
+    bool changedGiven = false;
+    // 원본을 다시 썼다고 알리고 value를 1 더한다.
+    bool mark = false;
+    // 이 id에서 sink.Fail(InvalidSetting, detail 7)로 실패한다.
+    AssetId failAt{};
+    // 이 id에서 진단 없이 Unsupported로 실패한다.
+    AssetId plainFailAt{};
+    // 이 id에서 경고 SourceCleared(detail 3)를 낸다.
+    AssetId warnAt{};
+};
+
+OpenRebuildRecord openRebuild;
+
+Result<void> RecordingOpenRebuild(const AssetTypeHookContext& context,
+                                  Span<const StringView> fields,
+                                  AssetSourceRebuildSink& sink) noexcept {
+    OpenRebuildRecord& record = openRebuild;
+    record.otherCause = record.otherCause || sink.Cause() != AssetSourceRebuildCause::Open;
+    record.fieldsGiven = record.fieldsGiven || !fields.IsEmpty();
+    record.changedGiven = record.changedGiven || !sink.ChangedSource().IsNull();
+    if (record.count < OpenRebuildRecord::MaxCalls) {
+        record.calls[record.count] = context.asset;
+    }
+
+    ++record.count;
+    if (context.asset == record.failAt) {
+        return sink.Fail(AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument, 7);
+    }
+
+    if (context.asset == record.plainFailAt) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (context.asset == record.warnAt) {
+        if (auto warned = sink.Warn(AssetDiagnosticCode::SourceCleared, 3); !warned) {
+            return warned;
+        }
+    }
+
+    if (!record.mark) {
+        return Result<void>::Success();
+    }
+
+    auto borrowed = context.registry.ResolveForWrite<TestAsset>(context.access, context.object);
+    if (!borrowed) {
+        // TestAsset이 아닌 대표 에셋은 바꾸지 않는다.
+        return Result<void>::Success();
+    }
+
+    auto value = borrowed.Value().Get();
+    if (!value) {
+        return Result<void>::Failure(value.Error());
+    }
+
+    value.Value()->value += 1;
+    sink.MarkRebuilt();
+    return Result<void>::Success();
+}
+
+// 모든 대표 에셋 타입(TestAsset·BaseGameAsset 사슬)에 시험 hook을 건 표다.
+struct OpenRebuildHooks {
+    explicit OpenRebuildHooks(AssetEnv& env) noexcept : table(env.allocator, env.types) {
+        AssetTypeHooks hooks;
+        hooks.rebuildSource = &RecordingOpenRebuild;
+        auto test = table.Register(IdOf<TestAsset>(), hooks);
+        auto base = table.Register(IdOf<BaseGameAsset>(), hooks);
+        ready = test && base;
+        if (ready) {
+            testToken = Move(test.Value());
+            baseToken = Move(base.Value());
+        }
+    }
+
+    AssetTypeHookTable table;
+    AssetTypeHookRegistration testToken;
+    AssetTypeHookRegistration baseToken;
+    bool ready = false;
+};
+
+EditorPackageSetConfig OpenRebuildConfig(AssetEnv& env, Project& project,
+                                         OpenRebuildHooks& hooks) noexcept {
+    EditorPackageSetConfig config = Config(env, project);
+    config.hooks = &hooks.table;
+    return config;
+}
+
+bool AddOpenRebuildFiles(Project& project, Sources& sources) noexcept {
+    MemoryFileSystem& files = project.files;
+    return files.AddFile("Base.rasset", sources.base.View()) &&
+           files.AddFile("Derived.rasset", sources.derived.View()) &&
+           files.AddFile("Hero.rasset", sources.hero.View()) &&
+           files.AddFile("Villain.rasset", sources.villain.View()) &&
+           files.AddFile("Leaf.rasset", sources.leaf.View()) && project.Rebuild();
+}
+
+} // namespace
+
+// 열 때 원본 재구성(12.14절 A5j2c — UE PostLoad): Open이 이번에 새로 연 패키지마다 id 순으로 대표
+// 에셋의 hook을 까닭 Open·빈 필드·바뀐 원소 null로 한 번 부르고, 이미 열린 패키지에는 부르지
+// 않는다. hook이 원본을 다시 쓰지 않으면 패키지는 깨끗하고, 다시 쓰면(MarkRebuilt) dirty·세대가
+// 오르며 저장하지 않는다(파일 그대로). 경고는 SourceRebuildWarning(asset = 그 패키지)이다. hook
+// 표가 없으면 부르지 않는다.
+TEST(EditorPackageSet_OpenRebuildCalls) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    Project project(env.allocator);
+    REQUIRE(project.ready && project.files.Ready() && AddOpenRebuildFiles(project, sources));
+    OpenRebuildHooks hooks(env);
+    REQUIRE(hooks.ready);
+    {
+        openRebuild = OpenRebuildRecord{};
+        EditorPackageSet set(env.allocator, OpenRebuildConfig(env, project, hooks));
+        REQUIRE(set.Initialize());
+        Array<EditorWarning> warnings(env.allocator);
+        REQUIRE(set.Open(FixedId(VillainId), &warnings));
+        REQUIRE(set.Count() == 4 && openRebuild.count == 4);
+        const uint64 expected[] = {BaseId, DerivedId, HeroId, VillainId};
+        for (usize at = 0; at < 4; ++at) {
+            CHECK(openRebuild.calls[at] == FixedId(expected[at]));
+            CHECK(!set.At(at).dirty);
+        }
+
+        CHECK(!openRebuild.otherCause && !openRebuild.fieldsGiven && !openRebuild.changedGiven);
+        CHECK(warnings.IsEmpty());
+        // 이미 열린 패키지: 부르지 않는다.
+        REQUIRE(set.Open(FixedId(HeroId)));
+        CHECK(openRebuild.count == 4);
+        // 새 패키지 하나만.
+        REQUIRE(set.Open(FixedId(LeafId)));
+        CHECK(openRebuild.count == 5 && openRebuild.calls[4] == FixedId(LeafId));
+    }
+
+    {
+        openRebuild = OpenRebuildRecord{};
+        openRebuild.mark = true;
+        openRebuild.warnAt = FixedId(HeroId);
+        const Array<uint8> heroFile = [&]() noexcept {
+            Array<uint8> copy(env.allocator);
+            CHECK(copy.TryAppend(project.files.Bytes("Hero.rasset")));
+            return copy;
+        }();
+        EditorPackageSet set(env.allocator, OpenRebuildConfig(env, project, hooks));
+        REQUIRE(set.Initialize());
+        Array<EditorWarning> warnings(env.allocator);
+        auto hero = set.Open(FixedId(HeroId), &warnings);
+        REQUIRE(hero);
+        // TestAsset(Hero)만 다시 썼다 — Base·Derived는 깨끗하다.
+        const EditorPackageInfo* info = set.Find(FixedId(HeroId));
+        REQUIRE(info != nullptr);
+        CHECK(info->dirty && info->generation != 0);
+        CHECK(!set.Find(FixedId(BaseId))->dirty && !set.Find(FixedId(DerivedId))->dirty);
+        TestAsset* asset = AssetOf(set, hero.Value());
+        REQUIRE(asset != nullptr);
+        CHECK(asset->value == HeroValue + 1);
+        REQUIRE(warnings.Size() == 1);
+        CHECK(warnings[0].kind == EditorWarningKind::SourceRebuildWarning &&
+              warnings[0].diagnostic.code == AssetDiagnosticCode::SourceCleared &&
+              warnings[0].diagnostic.detail == 3 &&
+              warnings[0].diagnostic.asset == FixedId(HeroId));
+        const Span<const uint8> heroNow = project.files.Bytes("Hero.rasset");
+        CHECK(heroNow.Size() == heroFile.Size() &&
+              memcmp(heroNow.Data(), heroFile.Data(), heroFile.Size()) == 0);
+        // Villain을 열면 Villain만 부른다(Hero는 한 번 더 굽지 않는다).
+        REQUIRE(set.Open(FixedId(VillainId)));
+        CHECK(openRebuild.count == 4 && asset->value == HeroValue + 1 &&
+              set.Find(FixedId(VillainId))->dirty);
+    }
+
+    {
+        // hook 표가 없으면 부르지 않는다.
+        openRebuild = OpenRebuildRecord{};
+        EditorPackageSet set(env.allocator, Config(env, project));
+        REQUIRE(set.Initialize());
+        REQUIRE(set.Open(FixedId(VillainId)));
+        CHECK(openRebuild.count == 0);
+    }
+}
+
+// 열 때 원본 재구성 실패(A5j2c): 요청한 패키지·의존 패키지 어느 hook이 실패해도 열기가 실패하고
+// 이번에 연 패키지를 모두 닫는다(이미 열려 있던 패키지는 남는다). failure는 hook의 진단(코드·
+// detail·asset)이고, hook이 진단 없이 실패하면 None과 그 오류(asset = 요청한 id)다. 이번 호출이
+// 붙인 경고(닫은 패키지의 SourceRebuildWarning 등)는 되돌리고 앞서 있던 경고는 둔다. 다시 열면
+// 된다.
+TEST(EditorPackageSet_OpenRebuildFailure) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    Project project(env.allocator);
+    REQUIRE(project.ready && project.files.Ready() && AddOpenRebuildFiles(project, sources));
+    OpenRebuildHooks hooks(env);
+    REQUIRE(hooks.ready);
+    openRebuild = OpenRebuildRecord{};
+    EditorPackageSet set(env.allocator, OpenRebuildConfig(env, project, hooks));
+    REQUIRE(set.Initialize());
+
+    // 의존 패키지(Hero)의 hook 실패: 아무것도 열리지 않는다.
+    openRebuild.failAt = FixedId(HeroId);
+    AssetDiagnostic failure;
+    CHECK(set.Open(FixedId(VillainId), nullptr, &failure).Error() == ErrorCode::InvalidArgument);
+    CHECK(failure.code == AssetDiagnosticCode::InvalidSetting && failure.detail == 7 &&
+          failure.asset == FixedId(HeroId));
+    CHECK(set.Count() == 0);
+
+    // 먼저 연 Hero(Base·Derived 포함)는 남고 이번에 연 Villain만 닫힌다.
+    openRebuild.failAt = AssetId{};
+    REQUIRE(set.Open(FixedId(HeroId)));
+    REQUIRE(set.Count() == 3);
+    openRebuild.plainFailAt = FixedId(VillainId);
+    AssetDiagnostic plain;
+    CHECK(set.Open(FixedId(VillainId), nullptr, &plain).Error() == ErrorCode::Unsupported);
+    CHECK(plain.code == AssetDiagnosticCode::None && plain.error == ErrorCode::Unsupported &&
+          plain.asset == FixedId(VillainId));
+    CHECK(set.Count() == 3 && set.Find(FixedId(VillainId)) == nullptr &&
+          set.Find(FixedId(HeroId)) != nullptr);
+
+    // 실패하면 이번 호출의 경고를 되돌린다(앞서 있던 경고는 남는다 — Hero의 경고는 실패 전에
+    // 붙었다).
+    REQUIRE(set.Close(FixedId(HeroId)));
+    REQUIRE(set.Close(FixedId(DerivedId)));
+    REQUIRE(set.Close(FixedId(BaseId)));
+    openRebuild.warnAt = FixedId(HeroId);
+    Array<EditorWarning> warnings(env.allocator);
+    EditorWarning earlier;
+    earlier.kind = EditorWarningKind::UnresolvedImport;
+    REQUIRE(warnings.TryPushBack(earlier));
+    CHECK(set.Open(FixedId(VillainId), &warnings).Error() == ErrorCode::Unsupported);
+    CHECK(warnings.Size() == 1 && warnings[0].kind == EditorWarningKind::UnresolvedImport);
+    CHECK(set.Count() == 0);
+
+    // 다시 열면 된다.
+    openRebuild.plainFailAt = AssetId{};
+    openRebuild.warnAt = AssetId{};
+    CHECK(set.Open(FixedId(VillainId)) && set.Count() == 4);
+}
+
+// 열 때 원본 재구성을 건너뛰는 패키지(A5j2c): 읽기 전용(모르는 커스텀 버전)·미해결 import(의존
+// 패키지가 빠짐)에는 부르지 않는다.
+TEST(EditorPackageSet_OpenRebuildSkips) {
+    struct Case {
+        BaseShape shape;
+        // Hero를 열 때 hook을 부르는 패키지(id 순).
+        uint64 called[3];
+        usize count;
+    };
+    // ReadOnly: Base는 읽기 전용이라 건너뛴다. Absent: Base가 빠져 Hero의 import가 null이다.
+    const Case cases[] = {{BaseShape::ReadOnly, {DerivedId, HeroId, 0}, 2},
+                          {BaseShape::Absent, {DerivedId, 0, 0}, 1}};
+    for (const Case& one : cases) {
+        AssetEnv env;
+        REQUIRE(env.Ready());
+        Sources sources(env.allocator);
+        REQUIRE(MakeSources(env, sources));
+        ShapeScene scene(env, sources, one.shape);
+        REQUIRE(scene.ready);
+        OpenRebuildHooks hooks(env);
+        REQUIRE(hooks.ready);
+        openRebuild = OpenRebuildRecord{};
+        EditorPackageSet set(env.allocator, OpenRebuildConfig(env, scene.project, hooks));
+        REQUIRE(set.Initialize());
+        REQUIRE(set.Open(FixedId(HeroId)));
+        REQUIRE(openRebuild.count == one.count);
+        for (usize at = 0; at < one.count; ++at) {
+            CHECK(openRebuild.calls[at] == FixedId(one.called[at]));
+        }
+    }
+}
+
 } // namespace editor_package_set_tests_file

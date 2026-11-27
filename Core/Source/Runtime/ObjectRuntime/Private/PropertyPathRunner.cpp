@@ -45,7 +45,8 @@ const ValueType& StepValueType(const FieldSchema& field, PathSelector selector) 
 // 쓰기 검증(ValidateFieldWrite·등록된 write) 오류의 사유다: Unsupported는 유효 플래그에 ReadOnly가
 // 있을 때만 ReadOnly(그 밖의 Unsupported — 수동 callback의 정책 등 — 는 None), 값 종류·enum
 // ID(TypeMismatch)와 값 내용(InvalidArgument)은 InvalidValue다.
-// 객체를 바꾸는 경로 연산인지다(struct 검증 hook 우회 판정 — Docs/Design/CurveData.ko.md 9.1절).
+// 객체를 바꾸는 경로 연산인지다(struct 검증 hook 우회 판정 —
+// Docs/Design/CurveData/README.ko.md 9.1절).
 bool IsMutation(PathOperation operation) noexcept {
     switch (operation) {
     case PathOperation::Write:
@@ -637,10 +638,10 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::ReadOnly);
         }
 
-        // 객체(게시·staged)에 놓는 상자는 게시 전에 검증 hook을 지난다(Docs/Design/CurveData.ko.md
-        // 9.1절): 자리 위(바깥) struct에 hook이 있으면 상자만으로 검증할 수 없으므로 거부하고, 상자
-        // 값 트리 안의 hook은 안쪽부터 부른다.
-        // struct 값 시작 위치(대입 묶음의 Value 대상 — 설정·콘솔)도 같다(게시 자리다).
+        // 객체(게시·staged)에 놓는 상자는 게시 전에 검증 hook을
+        // 지난다(Docs/Design/CurveData/README.ko.md 9.1절): 자리 위(바깥) struct에 hook이 있으면
+        // 상자만으로 검증할 수 없으므로 거부하고, 상자 값 트리 안의 hook은 안쪽부터 부른다. struct
+        // 값 시작 위치(대입 묶음의 Value 대상 — 설정·콘솔)도 같다(게시 자리다).
         if (objectRoot || cursor.root_ == PathTarget::Kind::Struct) {
             const usize hook = FindHookStep(cursor.frames_, last, steps.Size());
             if (hook != IndexNone) {
@@ -892,12 +893,12 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return operation == PathOperation::Read ? RunTopRead(cursor) : RunTopWrite(cursor);
     }
 
-    // 검증 hook 우회(Docs/Design/CurveData.ko.md 9.1절·17.2절): 객체(게시·staged)의 변경이 hook
-    // 있는 struct 안을 바꾸거나(가장 바깥 hook struct 단계), 값을 만드는 연산(원소·Map 값·Optional
-    // 내부· InstancedStruct 내용)이 트리에 hook이 있는 struct 기본값을 만들면(끝 단계) 연산하지
-    // 않고 그 단계를 남긴다 — 진입점이 그 자리를 상자로 분리해 연산·검증한 뒤 게시한다. 끝 지점
-    // 분류·검증(값싼 거부) 뒤, Borrow 직전이다. 쓰기 접근 판정(Busy·Destroyed·StaleHandle)은 제자리
-    // 경로와 같은 순서·코드로 먼저 본다. 참조 자리·준비 사본·원소 준비물은 hook struct 안에
+    // 검증 hook 우회(Docs/Design/CurveData/README.ko.md 9.1절·17.2절): 객체(게시·staged)의 변경이
+    // hook 있는 struct 안을 바꾸거나(가장 바깥 hook struct 단계), 값을 만드는 연산(원소·Map
+    // 값·Optional 내부· InstancedStruct 내용)이 트리에 hook이 있는 struct 기본값을 만들면(끝 단계)
+    // 연산하지 않고 그 단계를 남긴다 — 진입점이 그 자리를 상자로 분리해 연산·검증한 뒤 게시한다. 끝
+    // 지점 분류·검증(값싼 거부) 뒤, Borrow 직전이다. 쓰기 접근 판정(Busy·Destroyed·StaleHandle)은
+    // 제자리 경로와 같은 순서·코드로 먼저 본다. 참조 자리·준비 사본·원소 준비물은 hook struct 안에
     // 없다(hook struct는 참조가 없다).
     if (cursor.redirectHooks_ && objectRoot && IsMutation(operation) && !cursor.reference_ &&
         !cursor.stage_ && !cursor.elements_) {
@@ -1007,7 +1008,7 @@ using detail::PathOperation;
 using detail::PathRunner;
 
 // 객체(게시·staged)의 변경이 검증 hook 있는 struct(단계 hook) 안을 바꾸거나 hook 트리가 있는 값을
-// 만드는 경로다(Docs/Design/CurveData.ko.md 9.1절·17.2절): 그 자리(그 단계 — 원소·Map 값이면
+// 만드는 경로다(Docs/Design/CurveData/README.ko.md 9.1절·17.2절): 그 자리(그 단계 — 원소·Map 값이면
 // 선택자를 뗀 컨테이너 필드)를 상자로 분리하고, 상자 위에서 같은 연산을 한 뒤 원래 자리와 맞바꾼다.
 // 상자 값 트리의 검증은 PathPrepareAttach가 한다(거부는 InvalidArgument(StructValidation)). 게시된
 // 객체는 묶음 게시 구간이다(변경 표지·관찰자 규칙은 대입 묶음과 같다). staged 객체는 분리 전부터

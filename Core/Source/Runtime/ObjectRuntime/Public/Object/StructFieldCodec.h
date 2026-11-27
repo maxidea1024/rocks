@@ -363,9 +363,9 @@ inline Result<void> DecodeStructValue(StructView view, ConstructionContext* cons
     }
 
     // 적용(2단계)이면 다 채운 값을 게시 전에 struct 검증 hook으로
-    // 확인한다(Docs/Design/CurveData.ko.md 9.1절 — 마이그레이션 뒤, 멤버 struct가 먼저 확인되므로
-    // 안쪽부터다). 거부는 CorruptData이고 복원 전체가 실패해 트랜잭션이 되돌린다(게시하지
-    // 않는다).
+    // 확인한다(Docs/Design/CurveData/README.ko.md 9.1절 — 마이그레이션 뒤, 멤버 struct가 먼저
+    // 확인되므로 안쪽부터다). 거부는 CorruptData이고 복원 전체가 실패해 트랜잭션이
+    // 되돌린다(게시하지 않는다).
     if (construction != nullptr && value != nullptr && structOps.validate) {
         if (auto checked = structOps.validate(value); !checked) {
             return Result<void>::Failure(ErrorCode::CorruptData);

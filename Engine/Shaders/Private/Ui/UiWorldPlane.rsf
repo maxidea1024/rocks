@@ -1,0 +1,60 @@
+// 월드 공간 위젯 평면 셰이더다(Docs/Design/UiToolkit 5.9절·9.1절 UW1a — UE WidgetComponent의 평면
+// 그리기 대응). 단위 사각형 UV(0..1)를 이번·지난 프레임의 clip 공간 평면(원점·u 방향·v 방향)으로
+// 옮기고, 위젯 표면(UiSurface)을 표본한다. 알파 0은 버린다. 속도 PS는 두 번째 타깃에 화면 이동량을
+// 쓴다(지난 프레임 w ≤ 0이면 0).
+
+struct UiPlaneConstants {
+    // [0..2] 이번 프레임 원점·u·v, [3..5] 지난 프레임 원점·u·v(clip 공간).
+    float4 plane[6];
+};
+
+ROCKS_ROOT_CONSTANTS(UiPlaneConstants, Draw);
+
+struct UiPlaneOutput {
+    float4 position : SV_Position;
+    float2 uv : TEXCOORD0;
+    float4 current : TEXCOORD1;
+    float4 previous : TEXCOORD2;
+};
+
+Texture2D UiSurface;
+SamplerState UiSurfaceSampler;
+
+UiPlaneOutput UiWorldPlaneVertex(float2 uv : ATTRIBUTE0) {
+    UiPlaneOutput output;
+    output.current = Draw.plane[0] + uv.x * Draw.plane[1] + uv.y * Draw.plane[2];
+    output.previous = Draw.plane[3] + uv.x * Draw.plane[4] + uv.y * Draw.plane[5];
+    output.position = output.current;
+    output.uv = uv;
+    return output;
+}
+
+float4 UiWorldPlanePixel(UiPlaneOutput input) : SV_Target0 {
+    const float4 color = UiSurface.Sample(UiSurfaceSampler, input.uv);
+    if (color.a <= 0.0) {
+        discard;
+    }
+
+    return color;
+}
+
+struct UiPlaneVelocityOutput {
+    float4 color : SV_Target0;
+    float4 velocity : SV_Target1;
+};
+
+UiPlaneVelocityOutput UiWorldPlaneVelocityPixel(UiPlaneOutput input) {
+    UiPlaneVelocityOutput output;
+    output.color = UiSurface.Sample(UiSurfaceSampler, input.uv);
+    if (output.color.a <= 0.0) {
+        discard;
+    }
+
+    output.velocity = input.previous.w > 0.0
+                          ? float4((input.current.xy / input.current.w -
+                                    input.previous.xy / input.previous.w) *
+                                       float2(0.5, -0.5),
+                                   0.0, 0.0)
+                          : float4(0.0, 0.0, 0.0, 0.0);
+    return output;
+}

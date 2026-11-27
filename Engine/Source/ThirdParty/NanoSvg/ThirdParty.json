@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "name": "NanoSvg",
+  "version": "239e102ec2c6 (memononen/nanosvg master, 2026-07-09)",
+  "upstreamDirectory": "nanosvg-239e102ec2c6",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/memononen/nanosvg/archive/239e102ec2c691f2902e20ace2ed36ee4a35cfe6.tar.gz",
+    "sha256": "2bc68bdb518d7800252042e5cad50a0ab321596f0cbf49ef2a752926329063d2",
+    "verification": "GitHub HTTPS commit archive of the author's repository (head of master = 239e102ec2c691f2902e20ace2ed36ee4a35cfe6), downloaded on 2026-11-26 and its SHA-256 recorded. Upstream publishes no releases or signatures, so it is pinned by the commit and the archive hash. Imported files are src/nanosvg.h, src/nanosvgrast.h and LICENSE.txt (examples, build scripts and the AI policy file are not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "Zlib",
+      "upstreamExpression": "zlib license in LICENSE.txt and in the header comments",
+      "file": "nanosvg-239e102ec2c6/LICENSE.txt",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [
+    "NanoSvgGlue.c"
+  ],
+  "includeDirectories": [
+    "nanosvg-239e102ec2c6"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "nanosvg-239e102ec2c6/nanosvg.h",
+    "nanosvg-239e102ec2c6/nanosvgrast.h"
+  ],
+  "files": {
+    "LICENSE.txt": "e82bc3dd03400aecabe12201219ba14750dbc4b36faab58663a7a6068548d372",
+    "nanosvg.h": "0e800624964adbe96e5a9d059333335fe7ca47b0abc4ed6cc07bc0784b5b3fe3",
+    "nanosvgrast.h": "79a9c5f4db19debf9f3a648a1589e96d92854f245a5cb4f3d823f263785234d8"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "nanosvg.h",
+      "line": 216,
+      "text": "#pragma warning (push) /* Rocks modification: see ThirdParty.json modifications. */"
+    },
+    {
+      "file": "nanosvg.h",
+      "line": 217,
+      "text": "#pragma warning (disable: 4996) // Switch off security warnings"
+    },
+    {
+      "file": "nanosvg.h",
+      "line": 218,
+      "text": "#pragma warning (disable: 4100) // Switch off unreferenced formal parameter warnings"
+    },
+    {
+      "file": "nanosvg.h",
+      "line": 3278,
+      "text": "#pragma warning (pop) /* Rocks modification: see ThirdParty.json modifications. */"
+    }
+  ],
+  "notes": [
+    "SVG parsing and rasterization for UI vector images and icons (Docs/Design/UiToolkit/17-VectorImages.ko.md section 17.2), the same library UE 5.8 uses (Engine/Source/ThirdParty/nanosvg, SlateSVGRasterizer.cpp). The only Rocks consumer is UiRender, which keeps it a private dependency and declares the glue functions in its own private header (UiRender/Private/RocksNanoSvg.h): the nanosvg types stay behind opaque handles and NanoSvgGlue.c implements them.",
+    "Allocation: NanoSvgGlue.c includes the standard headers and then renames malloc, realloc and free to RocksNanoSvgMalloc, RocksNanoSvgRealloc and RocksNanoSvgFree before it compiles the implementation, so every parser and rasterizer allocation goes through the Rocks library heap (Core LibraryHeap). The module that links NanoSvg defines the three hooks.",
+    "Rocks never calls nsvgParseFromFile (fopen); callers read the file through the Rocks file system and pass a writable zero-terminated copy to nsvgParse. Colour parsing uses sscanf with %x and %u and number parsing uses the library's own nsvg__atof, so the results do not depend on the C locale.",
+    "Upstream nanosvg has no non-uniform scale entry point (UE patches in nsvgRasterizeFull); UiRender scales the parsed points itself when the horizontal and vertical scales differ.",
+    "Adapter headers: nanosvg.h and nanosvgrast.h (nanosvgrast.h includes nanosvg.h). The MSVC warning suppressions of nanosvg.h sit inside push/pop (see modifications). In practice no engine source includes either upstream header; UiRender calls only the glue functions it declares in UiRender/Private/RocksNanoSvg.h. Rocks builds with clang, where #pragma warning has no effect."
+  ],
+  "modifications": [
+    {
+      "file": "nanosvg.h",
+      "upstreamSha256": "e34fd5d084be106cea972d19ce5d27fd96d17ba89f8d06bdceee058420c8b2b0",
+      "reason": "nsvgParseFromFile stores the long result of ftell in a size_t and compares it with -1l; the comparison becomes (size_t)-1l, which is the value the implicit conversion already produced, and the engine warning rules reject -Wsign-compare. Rocks never calls nsvgParseFromFile, but the function is compiled with the rest of the implementation. The two MSVC pragma warning (disable) lines of the implementation part are wrapped in #pragma warning (push) and a matching (pop) at the end of the implementation, so the header no longer changes diagnostics for whatever follows it (adapter header rule)."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

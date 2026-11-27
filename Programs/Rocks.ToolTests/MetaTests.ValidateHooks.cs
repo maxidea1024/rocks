@@ -2,7 +2,7 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.ToolTests;
 
-// meta 시험 중 struct 검증 hook 시험이다(Docs/Design/CurveData.ko.md 9.1절 — CV3): `static Result<void> Validate(const S&) noexcept`의
+// meta 시험 중 struct 검증 hook 시험이다(Docs/Design/CurveData/README.ko.md 9.1절 — CV3): `static Result<void> Validate(const S&) noexcept`의
 // 감지와 생성(RuntimeStructOps::validate·validateTree, ValidateSelf·ValidateTree, detail::ValueValidate 특수화)과 모양 규칙의 거부(RMC2309).
 internal static partial class MetaTests
 {

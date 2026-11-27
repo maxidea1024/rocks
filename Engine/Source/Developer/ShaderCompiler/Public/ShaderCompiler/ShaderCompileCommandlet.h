@@ -6,6 +6,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <Progress/CommandProgress.h>
 
 // shader-compile 명령이다(Docs/Design/ShaderSystem 11.1절 SC13, UE ShaderCompileWorker를 부르는
 // `-run=ShaderCompile` 계열 대응). 셰이더 관리자(ShaderCompileManager)로 job을 컴파일하고 결과를
@@ -14,6 +15,7 @@
 //   shader-compile [--project=<dir>] --format=<id> [--format=<id>]...
 //                  [--define=<NAME>=<VALUE>]... [--option=<name>=<value>]... [--out=<dir>]
 //                  [--workers=<n>] [--no-cache] [--keep-input]
+//                  [--progress=console|jsonl] [--no-progress] [--parent-control]
 //                  <virtual path>:<entry>:<vertex|pixel|compute>...
 //
 //   - 원문: `/Engine` = `<engine>/Shaders`, --project가 있으면 `/Project` = `<project>/Shaders`
@@ -29,7 +31,12 @@
 //     16.3절 SSD73)을 같은 폴더에 심볼 이름(D3D PDB), 이름이 없으면 <name>.<entry>.<stage>.spv로
 //     쓴다. 끝에 관리자 계수 요약 한 줄이다(진행 줄은 찍지 않는다 — 진행 표시는 Progress 모듈 몫,
 //     진행 보고 12절).
-//   - 종료 코드: 모든 job 성공 0, job 실패·실행 실패 1, 사용법 오류 2.
+//   - 진행(진행 보고 9.5절 CommandProgress, PG5): 최상위 작업 "Compiling shaders"(Background,
+//   사용자
+//     취소 가능)의 작업 수준 계수다. --progress=jsonl이면 표준 출력은 JSONL v1이고 job 결과
+//     줄·요약은 표준 오류로 간다. --parent-control이면 표준 입력의 cancel 줄·EOF가 작업을 취소한다.
+//   - 종료 코드: 모든 job 성공 0, job 실패·실행 실패 1, 사용법 오류 2, 취소 130
+//     (ProgressCancelledExitCode).
 namespace rocks::shader {
 
 // 명령 문맥이다(commandlet_host가 건다).
@@ -40,6 +47,8 @@ struct ShaderCompileCommandContext {
     StringView engineDirectory{};
     // 워커 실행 파일이다. 비면 이 실행 파일 옆의 ShaderCompileWorker다.
     StringView workerExecutable{};
+    // 진행 출력·제어 입력 바꾸기다(시험). jsonlWrite가 비면 JSONL은 명령 출력의 표준 출력으로 간다.
+    CommandProgressDesc progress{};
 };
 
 ROCKS_SHADERCOMPILER_API Result<int32> RunShaderCompileCommand(void* context,

@@ -94,17 +94,17 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
 }
 
 // 바이트 배열 필드·멤버(`Array<uint8>` — 가변 배열이고 원소가 UInt8)인지다. 이 자리의 wire는
-// 원소마다의 ValueArray가 아니라 Bytes 블록 하나다(Docs/Design/CurveData.ko.md D18). 정적 배열
-// `uint8 x[N]`은 아니다(늘 N개라 ValueArray 그대로).
+// 원소마다의 ValueArray가 아니라 Bytes 블록 하나다(Docs/Design/CurveData/README.ko.md D18). 정적
+// 배열 `uint8 x[N]`은 아니다(늘 N개라 ValueArray 그대로).
 constexpr bool IsByteArrayField(const FieldSchema& field) noexcept {
     return field.value.kind == ValueKind::Array && field.element.kind == ValueKind::UInt8;
 }
 
 // 필드 하나의 wire tag다(5.6절). 배열·정적 배열(리플렉션 B9g)은 원소가 Struct면 RecordList, 그
 // 밖의 단일 값 원소면 ValueArray다(원소가 Opaque·컨테이너면 Unsupported). 단 `Array<uint8>`(가변
-// 배열·원소 UInt8)은 Bytes 블록 하나(u64 길이 + byte — Docs/Design/CurveData.ko.md D18, CV4)다.
-// Optional은 내부 종류가 Optional 내부 종류(성질 표)일 때 Optional이다(아니면 Unsupported — 내부
-// wire는 FieldWireType(element.kind)). Map은 키가 Map 키 종류이고 값이 Map 값
+// 배열·원소 UInt8)은 Bytes 블록 하나(u64 길이 + byte — Docs/Design/CurveData/README.ko.md D18,
+// CV4)다. Optional은 내부 종류가 Optional 내부 종류(성질 표)일 때 Optional이다(아니면 Unsupported —
+// 내부 wire는 FieldWireType(element.kind)). Map은 키가 Map 키 종류이고 값이 Map 값
 // 종류(ObjectReference는 ObjectRefMap — 리플렉션 B9f4)일 때 Map, Set은 원소가 Set 원소 종류일 때
 // Set이다(아니면 Unsupported — 리플렉션 B9f2). 그 밖은 값 종류의 wire다. 직렬화기의 wire
 // 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.

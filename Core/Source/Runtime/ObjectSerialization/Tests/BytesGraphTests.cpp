@@ -9,7 +9,7 @@
 #include <TestSupport/Test.h>
 #include "GraphTestSupport.h"
 
-// `Array<uint8>`의 Bytes 블록 wire 시험이다(Docs/Design/CurveData.ko.md D18 — CV4, fixture
+// `Array<uint8>`의 Bytes 블록 wire 시험이다(Docs/Design/CurveData/README.ko.md D18 — CV4, fixture
 // ReflectionTestFixtures/BytesFixture.h): 클래스 필드·struct 멤버·struct 원소 배열 안 멤버의 왕복과
 // 다시 저장한 byte 같음(빈 배열·큰 배열·MaxArrayElements 경계), 저장 크기가 원소 수 + 상수인지,
 // 필드 MaxElements·MaxArrayElements 초과 저장 거부, 변조한 블록 길이의 로드 거부, 정적 배열

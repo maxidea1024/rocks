@@ -9,7 +9,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
 
-// struct 검증 hook의 경로 쓰기 시험이다(Docs/Design/CurveData.ko.md 9.1절 — CV3, fixture
+// struct 검증 hook의 경로 쓰기 시험이다(Docs/Design/CurveData/README.ko.md 9.1절 — CV3, fixture
 // ReflectionTestFixtures/ValidateFixture.h): 객체(게시·staged)의 변경 연산이 hook 있는 struct 안을
 // 바꾸면 그 가장 바깥 hook struct를 담은 자리를 상자로 분리해 연산하고 상자 값 트리를 검증한 뒤
 // 게시한다. 거부는 InvalidArgument(StructValidation)이고 객체는 그대로다. hook struct 안 자리에

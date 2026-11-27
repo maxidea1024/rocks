@@ -9,8 +9,8 @@
 
 namespace rocks::reflection_fixture {
 
-// 바이트 배열 fixture다(Docs/Design/CurveData.ko.md D18 — CV4 `Array<uint8>` Bytes 블록 wire,
-// BytesGraphTests·TextBytesTests). BytesBlob은 struct 멤버 자리, BytesHolder는 클래스
+// 바이트 배열 fixture다(Docs/Design/CurveData/README.ko.md D18 — CV4 `Array<uint8>` Bytes 블록
+// wire, BytesGraphTests·TextBytesTests). BytesBlob은 struct 멤버 자리, BytesHolder는 클래스
 // 필드(MaxElements = MaxArrayElements· MaxElements 8)·struct 멤버·struct 원소 배열 안 멤버·정적
 // 배열 `uint8 x[4]`(ValueArray 그대로)와 Optional·Map 값·InstancedStruct 내용 안 struct의 멤버를
 // 담는다.

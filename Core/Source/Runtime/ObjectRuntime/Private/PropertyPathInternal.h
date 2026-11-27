@@ -79,7 +79,7 @@ struct PathRunner {
     }
 
     // 객체 시작 위치의 변경이 검증 hook 있는 struct 안이면 연산 대신 그 단계를 남기게 한다
-    // (Docs/Design/CurveData.ko.md 9.1절 — 공개 경로 연산 진입점만 켠다).
+    // (Docs/Design/CurveData/README.ko.md 9.1절 — 공개 경로 연산 진입점만 켠다).
     static void RedirectHooks(PathCursor& cursor) noexcept {
         cursor.redirectHooks_ = true;
     }

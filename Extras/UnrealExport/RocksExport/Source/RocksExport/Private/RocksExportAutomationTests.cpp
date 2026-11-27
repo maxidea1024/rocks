@@ -17,6 +17,12 @@ namespace RocksExportAutomationPrivate
 			Test.AddError(Error);
 		}
 
+		// 돌지 않은 시험은 경고로 보인다(통과와 구별한다).
+		for (const FString& Reason : RocksExportSelfTest::TakeNotRun())
+		{
+			Test.AddWarning(Reason);
+		}
+
 		return Errors.IsEmpty();
 	}
 }
@@ -32,6 +38,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportStaticMeshTest, "RocksExport.Static
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportSkeletalTest, "RocksExport.SkeletalExtraction", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportAnimationTest, "RocksExport.AnimationExtraction", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportMaterialTest, "RocksExport.MaterialExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportSubstrateTest, "RocksExport.SubstrateExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportBakingTest, "RocksExport.MaterialBaking", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportMeshWriterTest, "RocksExport.MeshWriterEdgeCases", RocksExportAutomationPrivate::Flags)
 
 bool FRocksExportSha256Test::RunTest(const FString&)
@@ -87,6 +95,16 @@ bool FRocksExportAnimationTest::RunTest(const FString&)
 bool FRocksExportMaterialTest::RunTest(const FString&)
 {
 	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunMaterialExtraction);
+}
+
+bool FRocksExportSubstrateTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunSubstrateExtraction);
+}
+
+bool FRocksExportBakingTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunMaterialBaking);
 }
 
 bool FRocksExportMeshWriterTest::RunTest(const FString&)
