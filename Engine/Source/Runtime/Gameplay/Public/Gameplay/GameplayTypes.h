@@ -21,8 +21,14 @@ inline constexpr LogCategory LogGameplay{"Gameplay"};
 // - InputEvaluationFailed: PlayerController의 입력 액션 평가가 실패했다(다시 만들기 할당 실패 —
 //   이전 목록으로 평가했다 — 또는 이벤트 기록 실패, Warning, 실패가 이어지는 동안 한 번 —
 //   Docs/Design/InputActions 5.1절).
+// - InputStackIncomplete: 입력 스택 쌓기가 할당 실패로 층을 빠뜨렸다(들어간 층만 전달, Error,
+//   실패가 이어지는 동안 한 번 — InputActions 5.5절).
+// - PlayerInputComponentFailed: Possess한 Pawn의 플레이어 입력 컴포넌트를 만들지 못했다(그 Pawn은
+//   다시 Possess할 때까지 플레이어 입력이 없다, Error — 5.5절).
 inline constexpr char DiagInvalidDirectorType[] = "InvalidDirectorType";
 inline constexpr char DiagInputEvaluationFailed[] = "InputEvaluationFailed";
+inline constexpr char DiagInputStackIncomplete[] = "InputStackIncomplete";
+inline constexpr char DiagPlayerInputComponentFailed[] = "PlayerInputComponentFailed";
 inline constexpr char DiagPossessDeniedNoAuthority[] = "PossessDeniedNoAuthority";
 
 // 게임플레이 프레임워크 통계다(22.1절). 호출 시점의 World 하나 기준 값이다.

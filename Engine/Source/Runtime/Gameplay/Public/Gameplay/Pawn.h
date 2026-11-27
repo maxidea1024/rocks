@@ -7,6 +7,8 @@
 
 namespace rocks {
 
+class InputComponent;
+
 // AI Controller를 자동으로 붙일 때다(UE EAutoPossessAI, Docs/Design/EngineRuntime 20.4절).
 enum class AutoPossessAi : uint8 {
     Disabled,
@@ -51,6 +53,19 @@ public:
         return playerState_;
     }
 
+    // 입력이 켜져 있는지다(UE bInputEnabled — 기본 참).
+    // PlayerController::EnableInput·DisableInput이 바꾼다. 꺼지면 이 Pawn의 InputComponent들은 입력
+    // 스택에 들지 않는다(InputActions 5.5절).
+    bool IsInputEnabled() const noexcept {
+        return inputEnabled_;
+    }
+
+    // PlayerController가 Possess할 때 만든 플레이어 입력 컴포넌트다(없으면 null — UnPossess가
+    // 파괴).
+    ObjectHandle PlayerInputComponent() const noexcept {
+        return playerInputComponent_;
+    }
+
     // 맵 배치(OpenWorld populate 중 Spawn)였는지다. 전환 정리는 배치한 Pawn을 지우지
     // 않는다(21.3절).
     bool IsPlacedInWorld() const noexcept {
@@ -92,6 +107,12 @@ protected:
     virtual void OnRestart() noexcept {
     }
 
+    // 사용자 hook: PlayerController가 Possess해 플레이어 입력 컴포넌트를 만든 직후(UE
+    // SetupPlayerInputComponent). input.Bindings()에 액션을 바인딩한다. 컴포넌트는 UnPossess가
+    // 파괴한다.
+    virtual void OnSetupPlayerInput(InputComponent&) noexcept {
+    }
+
     // 배치 여부를 정하고 autoPossessAi가 맞으면 AiController를 만들어 Possess된다.
     Result<void> OnFrameworkPostAwake() noexcept final;
     // Controller에 알린다(UE DetachFromControllerPendingDestroy).
@@ -103,8 +124,11 @@ protected:
 
 private:
     friend class Controller;
+    friend class PlayerController;
 
     ROCKS_NATIVE() ObjectHandle controller_;
+    ROCKS_NATIVE() ObjectHandle playerInputComponent_;
+    ROCKS_NATIVE() bool inputEnabled_ = true;
     ROCKS_NATIVE() ObjectHandle playerState_;
     ROCKS_NATIVE() bool placedInWorld_ = false;
 };

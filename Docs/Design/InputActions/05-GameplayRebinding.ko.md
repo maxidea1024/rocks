@@ -45,7 +45,7 @@
 - `consumes`: 실행 목록 순으로 그 바인딩 뒤의 같은 액션 바인딩 실행을 막는다. chord 억제로 건너뛴 바인딩은 소비하지 않는다(UE 리스너 소비 — `EnhancedInput.EnableListenerConsumption` 기본 1, :838-844·863·900-905). 실행 직전에 기록을 다시 찾고, 없으면 실행만 건너뛴다(소비는 건다 — UE :865).
 - chord 억제(4.4절)를 적용한다. "Triggered로 전달됨"은 Triggered 비트가 겹친 바인딩이 실행 목록에 든 액션이다(실행 전에 모은다 — UE :808-812). chord 짝은 바인딩마다 다시 읽는다(콜백의 즉시 다시 만들기가 목록을 바꾼다).
 - 실행은 평가 시점 목록의 사본으로 한다. 그래서 콜백이 바인딩을 더하거나 지우면 다음 평가부터 반영된다.
-- 입력 컴포넌트 **스택**(Pawn 등이 층을 쌓고 `bBlockInput`이 아래를 막는 것 — UE `PlayerInput.cpp:1500-1527`)은 CR26이다. 이번에는 PlayerController 한 층이다(7.4절).
+- 입력 컴포넌트 **스택**(Pawn 등이 층을 쌓고 `blockInput`이 아래를 막는 것 — UE `PlayerInput.cpp:1500-1527`)은 5.5절(IA8)이다. PlayerController의 `ActionBindings()`는 그 스택의 PlayerController 층이다.
 
 ### 5.2 사용자 설정·리바인딩(UE `EI/Public/UserSettings/EnhancedInputUserSettings.h`)
 
@@ -120,3 +120,48 @@ Rocks:
   - 호출자는 World 게임 스레드에서 부른다(PlayerController를 `World::With`로 읽고, 그 안에서 2.8절 도우미가 `AssetManager::With`를 중첩해 연다).
   - 쥔 플레이어가 없으면 성공이다(UE와 같다).
   - 실행 중 데이터 편집(키 바꾸기 — UE 에디터·런타임에서 매핑 객체를 고친 뒤 이 함수를 부르는 흐름)에 쓴다. `notifyUserSettings`로 등록된 컨텍스트면 사용자 설정의 등록 사본도 바뀐다(`UpdateContext`가 한다 — 행은 다시 매기지 않는다, 5.2절).
+
+### 5.5 입력 컴포넌트와 스택(IA8 — CR26·CM4 입력 부분, IAD16)
+
+2026-11-27 사용자 결정으로 화면 마일스톤 전에 당겨 넣는다([컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR26, CM4의 `InputComponent`). UE 경로 약어 `E/` = `Engine/Source/Runtime/Engine/`.
+
+**`InputComponent`(Gameplay 모듈 `Gameplay/Components/InputComponent.h` — UE `UInputComponent` + `UEnhancedInputComponent`):**
+- `Component` 파생 리플렉션 클래스다. UE는 옛 입력(축·키 바인딩)의 `UInputComponent`와 Enhanced Input의 `UEnhancedInputComponent`를 나누지만 Rocks에는 옛 입력이 없어 하나로 둔다.
+- 필드: `priority: int32`(기본 0 — UE `Priority`, `E/Classes/Components/InputComponent.h:782-783`), `blockInput: bool`(기본 거짓 — UE `bBlockInput`, `:785-786`). UE는 UPROPERTY가 아니지만 Rocks는 리플렉션 필드(ReadOnly — Inspector 표시·prefab 기본값)이고 setter `SetPriority`·`SetBlockInput`으로 바꾼다. 스택에 들어 있는 동안 우선순위를 바꾸면 다음 틱의 스택 정렬에 반영된다(UE는 Push 때의 자리를 쓰지만 매 틱 정렬하므로 결과는 같다).
+- `Bindings() → input::InputActionBindings&`(NATIVE — 이 층의 콜백·함수·값 바인딩, 5.1절 API 그대로). 바인딩은 저장하지 않는다(실행 중 값 — UE도 `Transient`).
+
+**스택 쌓기(매 `PlayerController::OnTick`, 평가 뒤 전달 전 — UE `APlayerController::BuildInputStack`, `E/Private/PlayerController.cpp:2668-2739`):**
+1. 조종하는 Pawn이 있고 그 Pawn의 입력이 켜져 있으면(`Pawn::IsInputEnabled`) 그 Pawn의 `InputComponent`들을 넣는다. 플레이어 입력 컴포넌트가 먼저(같은 priority에서 가장 아래 — UE "last dibs", `:2683-2686`), 그다음 나머지를 components 순서로(`:2687-2693`). Push로 이미 스택에 든 것은 빼고 넣는다(두 번 처리하지 않게 — UE는 플레이어 입력 컴포넌트를 Push해도 Pawn 층에 다시 넣어 두 번 처리한다).
+2. PlayerController 층(`ActionBindings()` — UE `PC_InputComponent0`, `PlayerController::ControllerLayerPriority` = 0, 막지 않음). PlayerController 입력이 꺼져 있으면(`IsInputEnabled` 거짓 — UE `bInputEnabled`, `:2711`) 넣지 않는다.
+3. Push로 넣은 컴포넌트(넣은 자리 순 — 아래 Push 규칙). 쓸 수 없는 항목(파괴 대기·회수 — 다시 살아나지 않는다)은 이때 스택에서 뺀다(UE `:2716-2726` — `IsValid`가 아니면 뺀다).
+4. priority 오름차순 안정 정렬(UE `PlayerController.Input.SortInputStackByPriority` 기본 참 — `:119-124`, `:2730-2739`).
+- 레벨 스크립트 Actor는 따로 끼우지 않는다(UE `:2698-2709`는 `ALevelScriptActor::InputComponent`를 넣는다). Rocks LevelScript는 Sparks Actor라 입력이 필요하면 아래 `EnableInput`으로 넣는다. 버린 대안: 레벨마다 고정 자리 — LevelScript 입력 연결(Sparks EI 단계)이 정해지기 전에 자리를 굳히지 않는다.
+- 파괴 대기 컴포넌트·소유 Actor는 넣지 않는다.
+
+**전달(위층부터 — UE `UPlayerInput::ProcessInputStack`, `PlayerInput.cpp:1500-1527`):**
+- 맨 위(가장 높은 priority, 같으면 늦게 쌓인 것)부터 아래로 층마다 5.1절 전달 규칙(실행 목록·Started 먼저·chord 억제·전달 중 지운 바인딩)으로 전달한다.
+- `consumes` 소비는 한 프레임 동안 층 사이에 이어진다. 위층 바인딩이 소비한 액션은 아래층 바인딩도 받지 않는다(UE `ConsumedInputActions`는 프레임마다 비우는 플레이어 하나의 집합 — `EI/Private/EnhancedPlayerInput.cpp:469·840·904`).
+- `blockInput`인 층을 전달한 뒤 그 아래층은 전달하지 않고 값 바인딩을 0으로 만든다(UE `EvaluateBlockedInputComponent` — 막힌 층의 값도 0).
+- 값 바인딩은 층마다 그 층 전달 때 갱신한다(5.1절).
+- 층 컴포넌트는 그 층을 전달하는 동안 World `With`로 빌린다. 콜백이 그 컴포넌트·Actor를 파괴해도 된다(파괴 대기).
+- 층은 틱 첫머리에 쌓지만 층마다 전달 직전에 다시 본다(UE `EvaluateInputDelegates`가 `IsValid`로 건너뛰는 것 — `PlayerInput.cpp:1503-1507`): 파괴 대기·회수된 컴포넌트, Pop된 Push 층, 조종이 풀렸거나 입력이 꺼진 Pawn의 층, 꺼진 PlayerController 층은 그 틱 남은 전달도 받지 않는다. 위층 콜백이 Pop·DestroyActor·UnPossess·DisableInput을 해도 아래층이 같은 입력을 받지 않는다. 콜백이 Push·EnableInput한 층은 다음 틱부터다.
+- 할당 실패로 층을 빠뜨리면 들어간 층만 전달하고 Error 로그(`InputStackIncomplete`, 실패가 이어지는 동안 한 번)를 남긴다. 작업 배열은 용량을 다시 쓰므로 첫 성장 뒤에는 할당하지 않는다.
+
+**Push·Pop(UE `PushInputComponent`·`PopInputComponent` — `:6035-6073`):**
+- `PlayerController::PushInputComponent(ObjectHandle component)`: 이미 있으면 빼고, 뒤에서부터 보며 priority가 같거나 작은 첫 항목 바로 뒤에 넣는다(없으면 맨 앞). 오류: InputComponent가 아니면 `TypeMismatch`, 없는 handle `StaleHandle`, 파괴 대기 `Destroyed`, 할당 실패 `OutOfMemory`(그대로).
+- `PopInputComponent(component) → bool`: 있었으면 빼고 그 컴포넌트의 값 바인딩을 0으로 한다. 없으면 거짓. UE `PopInputComponent`의 `ClearBindingValues`는 옛 축·제스처 값만 0으로 하고 Enhanced 값 바인딩은 마지막 값을 쥔다(`Components/InputComponent.cpp:387-405`). Rocks는 빠진 층이 누른 값을 영구히 쥐지 않게 0으로 한다. 입력을 끈 층(아래 `DisableInput`)도 같다.
+- `IsInputComponentInStack(component) → bool`.
+
+**Actor 입력 켜기(UE `AActor::EnableInput`·`DisableInput` — `E/Private/Actor.cpp:4893-4949`):** World 모듈은 Gameplay 아래라 Actor 쪽이 아니라 PlayerController에 둔다.
+- `PlayerController::EnableInput(ObjectHandle actor) → Result<ObjectHandle>`: 그 Actor의 첫 살아 있는(파괴 대기가 아닌) `InputComponent`를 쓰고 없으면 `AddComponent<InputComponent>`로 만든 뒤 (이미 있으면 빼고) Push한다. 쓴 컴포넌트 handle을 돌려준다. UE는 Actor의 `bBlockInput`·`InputPriority`를 새 컴포넌트에 옮기지만 Rocks는 컴포넌트 필드를 직접 정한다(Actor에 입력 필드를 두지 않는다 — World가 입력 계층을 모른다).
+- 이 PlayerController가 조종하는 Pawn이면 Push하지 않고 그 Pawn의 입력을 켠다(UE `APawn::EnableInput` — `E/Private/Pawn.cpp:1165-1175`, handle은 Pawn의 플레이어 입력 컴포넌트). 다른 Controller가 조종하거나 Controller가 없는 Pawn은 `InvalidArgument`다(UE는 Error 로그).
+- actor가 이 PlayerController 자신이면 PlayerController 층을 켠다(UE `APlayerController::EnableInput` — `bInputEnabled`, null handle을 돌려준다).
+- `DisableInput(ObjectHandle actor)`: 이 PlayerController가 조종하는 Pawn이면 그 Pawn의 입력을 끈다(UE `:1177-1187`). 자신이면 PlayerController 층을 끈다. 둘 다 그 층의 값 바인딩을 0으로 한다. 아니면 그 Actor 소유의 InputComponent를 모두 이 스택에서 Pop한다(UE는 Actor의 `InputComponent` 하나만 — Rocks Actor에는 입력 컴포넌트 필드가 없어 소유로 고른다). UE `DisableInput(nullptr)`(모든 PlayerController에서 Pop)는 `GameplayWorldSubsystem`을 거치는 도우미로 요구 시 둔다.
+- 오류: 이 World의 살아 있는 Actor가 아니면 `StaleHandle`, 파괴 대기 `Destroyed`, 컴포넌트 추가 오류(Component 규칙·할당)는 그대로다.
+
+**Pawn 플레이어 입력(UE `APawn::PawnClientRestart`·`DestroyPlayerInputComponent` — `E/Private/Pawn.cpp:496-527`·`:800-806`):**
+- PlayerController가 Pawn을 Possess하면(`OnPossess` 끝) 그 Pawn에 플레이어 입력 컴포넌트가 없을 때 `InputComponent`를 하나 만들고 사용자 hook `Pawn::OnSetupPlayerInput(InputComponent&)`(UE `SetupPlayerInputComponent`)를 부른다. hook은 컴포넌트 등록(`AddComponent`의 OnRegister·OnAwake) 뒤다(UE는 `RegisterComponent` 전 — 전달은 다음 틱이라 결과는 같다). 만들지 못하면 Error 로그(`PlayerInputComponentFailed`)를 남기고 그 Pawn은 다시 Possess할 때까지 플레이어 입력이 없다. UE는 로컬 PlayerController일 때만 한다 — Rocks의 PlayerController는 지금 모두 로컬이다(네트워크 단계에서 가른다).
+- UnPossess(`Pawn::UnPossessed`)가 그 컴포넌트를 파괴한다(UE `UnPossessed` → `DestroyPlayerInputComponent`, `:727`).
+- Pawn 입력 켜짐(`IsInputEnabled` — 기본 참, UE `bInputEnabled`)은 위 `EnableInput`·`DisableInput`으로만 바꾼다.
+
+**바뀌지 않는 것:** PlayerController의 평가·주입·사용자 설정·햅틱은 그대로다(5.1–5.4절). 스택은 전달만 바꾼다.

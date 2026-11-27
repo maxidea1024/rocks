@@ -14,6 +14,7 @@
 #include "RenderUtilitySelfTest.h"
 #include "ScreenSelfTest.h"
 #include "TextureSceneSelfTest.h"
+#include "ShaderReloadSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
@@ -107,6 +108,10 @@ bool engineShadersOnly = false;
 // 16.1절 SSD48).
 bool cookedShadersOnly = false;
 bool texturesOnly = false;
+// 감시 재컴파일 검사만 도는 실행인가(--shader-reload-self-test, ShaderSystem 16.3절 SSD78).
+bool shaderReloadOnly = false;
+// 감시 재컴파일 검사를 돈 장치 수다(장치마다 다른 색을 고른다).
+uint32 reloadDevices = 0;
 // 렌더 lane 검사의 엔진이 쓰는 프로세스 모듈 로더다(RunGraphicsSelfTest 동안 유효).
 ModuleLoader* selfTestModules = nullptr;
 
@@ -524,6 +529,14 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         return;
     }
 
+    if (shaderReloadOnly) {
+        failures +=
+            RunShaderReloadChecks(name, device, result.triangle.GetAllocator(), reloadDevices++);
+        result.passed = failures == before;
+        printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+        return;
+    }
+
     // 엔진 셰이더 SL0 GPU probe(Docs/Design/EngineShaders 7.6절): CPU 기준 대조와 장치 사이 기록.
     failures += RunEngineShaderChecks(name, device, result.triangle.GetAllocator());
     if (engineShadersOnly) {
@@ -792,6 +805,10 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 감시 재컴파일(ShaderSystem 16.3절 SSD78): 시험 루트 원문을 고쳐 쓰고 교체·픽셀·실패 유지.
+    // 활성 집합을 바꾸므로 그 집합을 쓰는 검사들 뒤에 둔다.
+    failures +=
+        RunShaderReloadChecks(name, device, result.triangle.GetAllocator(), reloadDevices++);
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: 파이프라인 대상 형식과 다른 대상에 그리면
@@ -965,6 +982,8 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     engineShadersOnly = scope == GraphicsSelfTestScope::EngineShaders;
     cookedShadersOnly = scope == GraphicsSelfTestScope::CookedShaders;
     texturesOnly = scope == GraphicsSelfTestScope::Textures;
+    shaderReloadOnly = scope == GraphicsSelfTestScope::ShaderReload;
+    reloadDevices = 0;
     ResetEngineShaderRecords();
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1025,12 +1044,13 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuVal
     RunVulkan(allocator, desc, vulkan, vulkanSoftware);
     // 엔진 셰이더 probe의 장치 사이 대조(Docs/Design/EngineShaders 8.5절)와 coverage 사유.
     failures += ReportEngineShaderCrossDevice();
-    if (engineShadersOnly || cookedShadersOnly || texturesOnly) {
+    if (engineShadersOnly || cookedShadersOnly || texturesOnly || shaderReloadOnly) {
         const bool ranAny = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran ||
                             glesProfile.ran || glesDesktop.ran || vulkan.ran || vulkanSoftware.ran;
         printf("%s self-test: %s (%u failure%s)\n",
                engineShadersOnly   ? "Engine shader"
                : cookedShadersOnly ? "Cooked shader"
+               : shaderReloadOnly  ? "Shader reload"
                                    : "Texture",
                failures == 0 && ranAny ? "PASS" : (ranAny ? "FAIL" : "NOT RUN"), failures,
                failures == 1 ? "" : "s");
