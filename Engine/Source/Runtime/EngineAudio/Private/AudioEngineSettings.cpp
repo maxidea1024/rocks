@@ -2,6 +2,9 @@
 
 #include <Audio/AudioMixerTypes.h>
 #include <Audio/AudioOutputRing.h>
+#include <Audio/AudioStreamRing.h>
+#include <Audio/AudioStreamService.h>
+#include <AudioAssets/SoundClip.h>
 #include <Config/CVar.h>
 #include <Config/ConfigContext.h>
 #include <EngineAudio/AudioEngineSettings.h>
@@ -44,12 +47,36 @@ constinit cvar::BootCVar<int32> MaxVoicesVar =
               "VoiceLimit. Fixed after startup.")
         .Range(1, int32{MaxActiveVoicesSetting});
 
+constinit cvar::BootCVar<int32> StreamRingFramesVar =
+    cvar::Boot("audio.stream.ringframes", int32{audio::StreamRingMinFrames})
+        .Help("PCM ring size in frames for each streaming voice (Docs/Design/AudioSystem 3.40.3). "
+              "Fixed after startup.")
+        .Range(int32{audio::StreamRingMinFrames}, int32{audio::StreamRingMaxFrames});
+
+static_assert(MixerVoiceHeadroomFactor == 2,
+              "audio.stream.maxstreams help text says twice audio.voices.max");
+
+constinit cvar::BootCVar<int32> StreamMaxStreamsVar =
+    cvar::Boot("audio.stream.maxstreams", 0)
+        .Help("Number of streaming decode slots. 0 uses twice audio.voices.max. Fixed after "
+              "startup.")
+        .Range(0, int32{audio::MaxStreamSlots});
+
+constinit cvar::CVar<int32> StreamDefaultLoadingVar =
+    cvar::Var("audio.stream.defaultloading",
+              int32{static_cast<uint8>(SoundLoadingBehavior::LoadOnDemand)})
+        .Help("Loading behavior used by sound clips set to Inherited: 1 RetainOnLoad, 2 "
+              "PrimeOnLoad, 3 LoadOnDemand. Read when a clip is loaded.")
+        .Range(int32{static_cast<uint8>(SoundLoadingBehavior::RetainOnLoad)},
+               int32{static_cast<uint8>(SoundLoadingBehavior::LoadOnDemand)});
+
 } // namespace engine_audio_detail
 
 Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcept {
     using namespace engine_audio_detail;
     return context.Register(MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar,
-                            MixerBufferCountVar, MixerSampleRateVar, MaxVoicesVar);
+                            MixerBufferCountVar, MixerSampleRateVar, MaxVoicesVar,
+                            StreamRingFramesVar, StreamMaxStreamsVar, StreamDefaultLoadingVar);
 }
 
 } // namespace rocks

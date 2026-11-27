@@ -74,9 +74,11 @@ inline void PumpDevice(AudioEngineSubsystem* audio, uint32 frames) noexcept {
 }
 
 struct AudioEngine {
+    // engineAllocator가 있으면 엔진(과 서브시스템)이 그것으로 할당한다(할당 계수 시험).
     explicit AudioEngine(const AudioEngineHostOptions& options,
-                         config::ConfigContext* settings = nullptr) noexcept
-        : scope(options), engine(allocator) {
+                         config::ConfigContext* settings = nullptr,
+                         Allocator* engineAllocator = nullptr) noexcept
+        : scope(options), engine(engineAllocator != nullptr ? *engineAllocator : allocator) {
         subsystems[0] = AudioEngineSubsystemType();
         EngineConfig config;
         config.modules = &test::ProcessModules();

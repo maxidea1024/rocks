@@ -11,6 +11,10 @@ namespace rocks {
 
 namespace {
 
+// 유니티 빌드에서 같은 묶음의 이름(rocks::Vec3·Min·Max 등)과 부딪히지 않게 이름 있는 namespace에
+// 둔다.
+namespace bc_encode {
+
 using texture_block_detail::SingleColor5;
 using texture_block_detail::SingleColor6;
 
@@ -853,6 +857,16 @@ void DecodeColour(const uint8* bytes, uint8 (&texels)[TextureBlockRgbaBytes]) no
         }
     }
 }
+
+} // namespace bc_encode
+
+using bc_encode::ChannelValues;
+using bc_encode::CompressAlpha;
+using bc_encode::CompressColour;
+using bc_encode::DecodeAlpha;
+using bc_encode::DecodeColour;
+using bc_encode::LargeBlockBytes;
+using bc_encode::SmallBlockBytes;
 
 } // namespace
 

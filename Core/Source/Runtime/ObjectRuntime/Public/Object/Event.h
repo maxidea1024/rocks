@@ -42,21 +42,17 @@ struct EventContext {
 
 namespace detail {
 
-// 이벤트 인자 형식 규칙이다(ED1): const T&이거나 nothrow 복사 가능한 값, StringView 아님, frame
-// 칸에 복사할 수 있음(ValueCopy — String은 const String&로).
+// 이벤트 인자 형식 규칙이다(ED1): const T&이거나 nothrow 복사 가능한 값, StringView 아님. frame 칸
+// 복사 가능(ValueCopy — 리플렉션 struct는 생성 헤더가 필요하다)은 여기서 보지 않고 바인딩·발행이
+// 쓰는 BindingFrame이 본다: 이벤트 필드 선언(클래스 정의)은 같은 헤더의 struct 생성 헤더보다 먼저
+// 오므로 클래스 수준 검사에 넣으면 리플렉션 struct 인자를 쓸 수 없다.
 template <class T>
 constexpr bool IsEventArgument() noexcept {
     if constexpr (IsReferenceV<T>) {
-        if constexpr (!IsConstV<RemoveReferenceT<T>> || IsRvalueReferenceV<T> ||
-                      IsSameV<BindingSlotType<T>, StringView>) {
-            return false;
-        } else {
-            return ValueCopy<BindingSlotType<T>>::Supported;
-        }
-    } else if constexpr (!IsNothrowCopyConstructibleV<T> || IsSameV<RemoveCvT<T>, StringView>) {
-        return false;
+        return IsConstV<RemoveReferenceT<T>> && !IsRvalueReferenceV<T> &&
+               !IsSameV<BindingSlotType<T>, StringView>;
     } else {
-        return ValueCopy<BindingSlotType<T>>::Supported;
+        return IsNothrowCopyConstructibleV<T> && !IsSameV<RemoveCvT<T>, StringView>;
     }
 }
 
@@ -65,8 +61,8 @@ constexpr bool IsEventArgument() noexcept {
 template <class... Args>
 class Event {
     static_assert((detail::IsEventArgument<Args>() && ...),
-                  "Event arguments must be nothrow-copyable values or const references to "
-                  "copyable types, not StringView");
+                  "Event arguments must be nothrow-copyable values or const references, not "
+                  "StringView");
 
 public:
     using DelegateType = Delegate<void(Args...)>;

@@ -48,8 +48,18 @@ struct TextureBuildSettings {
     ROCKS_PROPERTY() int32 maxTextureSize = 0;
     ROCKS_PROPERTY() int32 minLodSize = 1;
     ROCKS_PROPERTY() int32 maxLodSize = 4096;
-    // 대상이 R16·RG16·RGBA16 Unorm을 표본할 수 있는지다(false면 같은 채널 수의 16F — 12.14절).
+    // 대상이 R16 Unorm을 표본할 수 있는지다(false면 R16F — 12.14절).
     ROCKS_PROPERTY() bool norm16Supported = true;
+    // 출력 형식 선택 입력이다(AssetSystem 12.17.5 3 — TextureTools SelectTextureFormat). 텍스처의
+    // 압축 플래그와 LOD 그룹, 쿠킹 샘플러 필터가 Point인지, 쿠킹 대상 플랫폼(GraphicsPlatform 값)과
+    // backend 비트 집합(1 << Backend — 0이면 샘플링 보장 검증을 끈다)이다.
+    ROCKS_PROPERTY() bool compressionNone = false;
+    ROCKS_PROPERTY() bool compressionNoAlpha = false;
+    ROCKS_PROPERTY() bool compressionForceAlpha = false;
+    ROCKS_PROPERTY() TextureGroup lodGroup = TextureGroup::World;
+    ROCKS_PROPERTY() bool samplerPointFilter = false;
+    ROCKS_PROPERTY() uint8 cookPlatform = 0;
+    ROCKS_PROPERTY() uint32 cookBackends = 0;
 };
 
 } // namespace rocks

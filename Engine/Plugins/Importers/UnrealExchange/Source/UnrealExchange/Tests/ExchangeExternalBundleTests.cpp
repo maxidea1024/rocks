@@ -1,7 +1,5 @@
 #include "ExchangeTestSupport.h"
 
-#include <MeshSource/Tests/MeshSourceTestSupport.h>
-
 #include <Animation/ClipSource.h>
 #include <Animation/SkeletonMerge.h>
 #include <Animation/Tests/AnimationTestSupport.h>
@@ -13,6 +11,7 @@
 #include <MeshTools/StaticMeshBuilder.h>
 #include <TestSupport/Environment.h>
 #include <TestSupport/Test.h>
+#include <UnrealExchange/ExchangeMeshSource.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -24,10 +23,10 @@
 //   RocksExport로 만든 실제 묶음, 만드는 명령은 12.3절)과 그것이 담은 경계 사례.
 //
 // 판정: 읽기와 임포트 순서 계산이 성공하고, 오류 진단이 없으며, 범위 안 클래스 에셋은 모두 Ready,
-// 범위 밖은 Unsupported, 실패한 저장 단위가 없다. 메시 기록(5.2절)은 MA1 저장 형태(MeshSourceData의
-// 위상 bulk·속성 레코드 bulk = 교환 blob)로 옮겨 실제 패키지로 쓰고 로드한 뒤 MeshSource::Load(배치
-// 판정·ValidateMeshSource)를 통과해야 한다. 정적 메시는 LOD마다 source·prepared·baked 기록이
-// BuildStaticMeshLod(기본 빌드 설정)까지 성공해야 한다(5.4절 — UX3a, 임포트 연결은 UX3b).
+// 범위 밖은 Unsupported, 실패한 저장 단위가 없다. 메시 기록(5.2절)은 플러그인
+// 적재(LoadExchangeMeshSource — MA1 저장 형태 + 메모리 bulk → MeshSource::Load의 배치
+// 판정·ValidateMeshSource, 5.5절 1번)를 통과해야 한다. 정적 메시는 LOD마다 source·prepared·baked
+// 기록이 BuildStaticMeshLod(기본 빌드 설정)까지 성공해야 한다(5.4절 — UX3a, 임포트 연결은 UX3b).
 // 스켈레톤은 MA4a Skeleton으로 채워 ValidateSkeleton을, 스킨 메시는 메시 계층 검증·스켈레톤 병합
 // 판정(MergeBoneHierarchy)과 LOD 기록의 적재·검증(본 수)·BuildSkinnedMeshLod를 통과해야
 // 한다(6.3절 — UX7a). 클립은 MA6a ClipSource로 적재해
@@ -64,13 +63,6 @@ const char* SeverityName(ExchangeSeverity severity) noexcept {
     }
 }
 
-// 교환 MeshSource 기록의 요소·값 타입 이름이다(번호 + 1 = MeshElement·MeshValueType 값, 5.4절).
-constexpr StringView MeshElementNames[] = {"Vertex",  "Corner",   "Edge",
-                                           "Polygon", "Triangle", "PolygonGroup"};
-constexpr StringView MeshTypeNames[] = {"Float", "Vec2", "Vec3",           "Vec4",      "UInt32",
-                                        "Bool",  "Name", "BoneInfluences", "SparseVec3"};
-// 위상 배열 수다(MeshAnimationAssets 9.1절).
-constexpr usize MeshTopologyArrays = 7;
 // 이동 리타깃 방식 이름(UE EBoneTranslationRetargetingMode 값 이름 = BoneTranslationRetarget
 // 순서)이다.
 constexpr StringView RetargetModeNames[] = {"Animation", "Skeleton", "AnimationScaled",
@@ -79,8 +71,6 @@ constexpr StringView RetargetModeNames[] = {"Animation", "Skeleton", "AnimationS
 constexpr uint64 ExternalSkeletonFirstId = 0x7000;
 // 시험이 만드는 클립 패키지 id의 시작 값이다(에셋 번호를 더한다).
 constexpr uint64 ExternalClipFirstId = 0x9000;
-// 메시 기록 저장 왕복 패키지 id의 시작 값이다(기록마다 하나씩 늘린다 — 위 두 범위와 겹치지 않는다).
-constexpr uint64 ExternalMeshPackageFirstId = 0x100000;
 // golden 묶음(Tests/Bundles/Golden.rxbundle — 12.3절)의 기대 값이다: 에셋 11개(범위 밖 1),
 // 정적 메시 기록 4개(정육면체·퇴화 메시의 source·prepared), 스킨 메시 기록 3개와 클립 빌드 2개,
 // 머티리얼 기록 2개, 퇴화 메시 원본의 변 5개(UE 변 6개 중 자기 변 1개를 뺐다).
@@ -163,90 +153,42 @@ usize NameIndex(Span<const StringView> names, StringView name) noexcept {
     return names.Size();
 }
 
-// 교환 MeshSource 기록 하나를 MA1 저장 형태로 옮겨 실제 패키지로 쓰고 다시 로드한 뒤
-// MeshSource::Load로 만든다(UnrealExchange 12.3절 — UX3b 임포트가 할 저장과 같은 규칙):
-// MeshSourceData의 요소 수는 counts, 위상 bulk 하나는 위상 blob 일곱을 9.1절 순서로 이어 붙인 것,
-// 속성 레코드는 기록 순서(9.2절 정렬과 같다)이고 값 bulk는 교환 blob bytes 그대로다(배치가 같다 —
-// MeshAnimationAssets 3.4.1절). Load가 배치 판정과 ValidateMeshSource(본 수 모름)를 한다.
-// failure는 Load의 진단이다. 패키지 번호는 nextPackage에서 하나 쓴다.
+// 교환 MeshSource 기록 하나를 플러그인 적재(LoadExchangeMeshSource — UnrealExchange 5.5절 1번:
+// MA1 저장 형태 + 메모리 bulk → MeshSource::Load, 이름 NFC)로 만든다. 에셋의 blob을 모두 읽어
+// 넘긴다. failure는 Load의 진단이다.
 bool LoadExchangeMesh(const ExchangeBundle& bundle, uint32 asset, JsonValue record,
-                      asset_test::AssetEnv& env, uint64& nextPackage, MeshSource& mesh,
-                      ExchangeDiagnostics& diagnostics, MeshDiagnostic* failure) noexcept {
-    const JsonValue counts = record.Find("counts");
-    const JsonValue topology = record.Find("topology");
-    const JsonValue attributes = record.Find("attributes");
-    if (!topology.IsArray() || topology.Size() != MeshTopologyArrays || !attributes.IsArray()) {
-        return false;
+                      asset_test::AssetEnv& env, MeshSource& mesh, ExchangeDiagnostics& diagnostics,
+                      MeshDiagnostic* failure) noexcept {
+    const ExchangeAsset& entry = bundle.Assets()[asset];
+    Array<Array<uint8>> bytes(env.allocator);
+    Array<Span<const uint8>> spans(env.allocator);
+    for (const ExchangeBlobRef& blob : entry.blobs) {
+        auto made = bytes.TryEmplaceBack(env.allocator);
+        if (!made || !LoadExchangeBlob(bundle, asset, blob, *made.Value(), diagnostics)) {
+            return false;
+        }
     }
 
-    mesh_source_test::MeshPackage stored(env.allocator);
-    const bool written = mesh_source_test::WriteAndLoad(
-        env, nextPackage++, PackageKind::Editor, BulkCodec::None,
-        [&](asset_fixture::TestMeshAsset& target, MemoryBulkSource& bulk) {
-            MeshSourceData& data = target.mesh;
-            data.vertexCount = CountOf(counts, "vertices");
-            data.cornerCount = CountOf(counts, "corners");
-            data.edgeCount = CountOf(counts, "edges");
-            data.polygonCount = CountOf(counts, "polygons");
-            data.triangleCount = CountOf(counts, "triangles");
-            data.polygonGroupCount = CountOf(counts, "polygonGroups");
-            Array<uint8> joined(env.allocator);
-            for (usize index = 0; index < MeshTopologyArrays; ++index) {
-                Array<uint8> bytes(env.allocator);
-                if (!LoadBlobBytes(bundle, asset, topology.At(index), bytes, diagnostics) ||
-                    !joined.TryAppend(bytes.View())) {
-                    return false;
-                }
-            }
+    for (const Array<uint8>& item : bytes) {
+        if (!spans.TryPushBack(item.View())) {
+            return false;
+        }
+    }
 
-            auto topologyRef = bulk.Add(Move(joined));
-            if (!topologyRef) {
-                return false;
-            }
+    uint64 normalized = 0;
+    ExchangeMeshFailure loadFailure;
+    const bool loaded = static_cast<bool>(LoadExchangeMeshSource(
+        entry, spans.View(), record, env.names, mesh, normalized, loadFailure));
+    if (failure != nullptr) {
+        *failure = loadFailure.mesh;
+    }
 
-            data.topology = topologyRef.Value();
-            for (usize index = 0; index < attributes.Size(); ++index) {
-                const JsonValue item = attributes.At(index);
-                const usize element = NameIndex(Span<const StringView>(MeshElementNames),
-                                                item.Find("element").GetString());
-                const usize type =
-                    NameIndex(Span<const StringView>(MeshTypeNames), item.Find("type").GetString());
-                auto channels = item.Find("channels").TryGetUInt64();
-                auto name = env.names.TryIntern(item.Find("name").GetString());
-                Array<uint8> bytes(env.allocator);
-                if (element == sizeof(MeshElementNames) / sizeof(MeshElementNames[0]) ||
-                    type == sizeof(MeshTypeNames) / sizeof(MeshTypeNames[0]) || !channels ||
-                    !name || !LoadBlobBytes(bundle, asset, item.Find("data"), bytes, diagnostics)) {
-                    return false;
-                }
-
-                auto valueRef = bulk.Add(Move(bytes));
-                MeshAttributeRecord attribute;
-                attribute.name = name.Value();
-                attribute.element = static_cast<MeshElement>(element + 1);
-                attribute.type = static_cast<MeshValueType>(type + 1);
-                attribute.channels = static_cast<uint8>(channels.Value());
-                if (!valueRef) {
-                    return false;
-                }
-
-                attribute.data = valueRef.Value();
-                if (!data.attributes.TryPushBack(Move(attribute))) {
-                    return false;
-                }
-            }
-
-            return true;
-        },
-        stored);
-    return written && static_cast<bool>(mesh.Load(mesh_source_test::LoadedAsset(env, stored)->mesh,
-                                                  *mesh_source_test::LoadedPackage(env, stored),
-                                                  env.names, failure));
+    return loaded;
 }
 
 // 정적 메시 에셋의 LOD 기록(source·prepared·baked)마다 적재·검증·빌드한다. 확인한 기록 수다.
 usize CheckStaticMesh(const ExchangeBundle& bundle, uint32 asset, asset_test::AssetEnv& env,
-                      uint64& nextPackage, ExchangeDiagnostics& diagnostics) {
+                      ExchangeDiagnostics& diagnostics) {
     const JsonValue lods = bundle.Assets()[asset].data.Find("lods");
     CHECK(lods.IsArray());
     if (!lods.IsArray()) {
@@ -264,8 +206,8 @@ usize CheckStaticMesh(const ExchangeBundle& bundle, uint32 asset, asset_test::As
 
             MeshSource mesh(env.allocator);
             MeshDiagnostic failure;
-            const bool loaded = LoadExchangeMesh(bundle, asset, record, env, nextPackage, mesh,
-                                                 diagnostics, &failure);
+            const bool loaded =
+                LoadExchangeMesh(bundle, asset, record, env, mesh, diagnostics, &failure);
             const bool valid = loaded;
             StaticMeshBuildInput input;
             input.source = &mesh;
@@ -396,7 +338,7 @@ struct LoadedSkeleton {
 // 적재·검증 (본 수)·스킨 빌드(BuildSkinnedMeshLod). 확인한 기록 수다.
 usize CheckSkeletalMesh(const ExchangeBundle& bundle, uint32 asset,
                         Span<const LoadedSkeleton> skeletons, asset_test::AssetEnv& env,
-                        uint64& nextPackage, ExchangeDiagnostics& diagnostics) {
+                        ExchangeDiagnostics& diagnostics) {
     const ExchangeAsset& entry = bundle.Assets()[asset];
     BoneHierarchy meshBones(env.allocator);
     SkeletonDiagnostic boneFailure;
@@ -444,8 +386,8 @@ usize CheckSkeletalMesh(const ExchangeBundle& bundle, uint32 asset,
 
             MeshSource mesh(env.allocator);
             MeshDiagnostic failure;
-            const bool loaded = LoadExchangeMesh(bundle, asset, record, env, nextPackage, mesh,
-                                                 diagnostics, &failure);
+            const bool loaded =
+                LoadExchangeMesh(bundle, asset, record, env, mesh, diagnostics, &failure);
             MeshValidateOptions options;
             options.boneCount = static_cast<uint32>(meshBones.bones.Size());
             const bool valid =
@@ -792,7 +734,7 @@ usize CheckClip(const ExchangeBundle& bundle, uint32 asset, Span<const LoadedSke
 
 // 스켈레톤·스킨 메시를 확인한다(6.3절 7번). 둘 다 없으면 아무것도 하지 않는다. 확인한 기록 수다.
 usize CheckSkeletalAssets(const ExchangeBundle& bundle, asset_test::AssetEnv& env,
-                          uint64& nextPackage, ExchangeDiagnostics& diagnostics) {
+                          ExchangeDiagnostics& diagnostics) {
     bool any = false;
     for (const ExchangeAsset& asset : bundle.Assets()) {
         any = any || (asset.state == ExchangeAssetState::Ready &&
@@ -840,7 +782,7 @@ usize CheckSkeletalAssets(const ExchangeBundle& bundle, asset_test::AssetEnv& en
             printf("  skinned mesh [%zu] %.*s\n", index, PrintLength(asset.objectPath),
                    asset.objectPath.Data());
             checked += CheckSkeletalMesh(bundle, static_cast<uint32>(index), skeletons.View(), env,
-                                         nextPackage, diagnostics);
+                                         diagnostics);
         }
     }
 
@@ -1200,7 +1142,6 @@ BundleTotals CheckBundle(StringView directory, Allocator& allocator, ExchangeBun
         return totals;
     }
 
-    uint64 nextPackage = ExternalMeshPackageFirstId;
     for (usize index = 0; index < bundle.Assets().Size(); ++index) {
         const ExchangeAsset& asset = bundle.Assets()[index];
         if (asset.state == ExchangeAssetState::Ready &&
@@ -1208,12 +1149,12 @@ BundleTotals CheckBundle(StringView directory, Allocator& allocator, ExchangeBun
             printf("  mesh [%zu] %.*s\n", index, PrintLength(asset.objectPath),
                    asset.objectPath.Data());
             totals.meshRecords +=
-                CheckStaticMesh(bundle, static_cast<uint32>(index), env, nextPackage, diagnostics);
+                CheckStaticMesh(bundle, static_cast<uint32>(index), env, diagnostics);
         }
     }
 
     printf("Mesh records: %zu checked\n", totals.meshRecords);
-    totals.skeletalRecords = CheckSkeletalAssets(bundle, env, nextPackage, diagnostics);
+    totals.skeletalRecords = CheckSkeletalAssets(bundle, env, diagnostics);
     printf("Skinned mesh records and clip builds: %zu checked\n", totals.skeletalRecords);
     totals.materialRecords = CheckMaterials(bundle);
     printf("Material records: %zu checked\n", totals.materialRecords);

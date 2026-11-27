@@ -21,6 +21,10 @@ struct AudioControlStats {
     // 보낸 마스터 gain 명령 수(누계)와 링이 차서 다음 묶음으로 미룬 수(누계).
     uint64 masterGainCommands = 0;
     uint64 masterGainRetries = 0;
+    // 지금 잡은 스트림 슬롯 수(회수 대기 포함)와 슬롯이 없어 VoiceLimit로 끝낸 재생 수(누계)다
+    // (3.40.3절).
+    uint32 activeStreams = 0;
+    uint64 streamSlotRejects = 0;
 };
 
 } // namespace rocks

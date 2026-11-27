@@ -299,6 +299,21 @@ Span<const uint8> AudioPlatformDataView::ChunkPayload(uint32 index) const noexce
                              chunk.payloadBytes);
 }
 
+Result<void> VerifyAllAudioChunks(const AudioPlatformDataView& view) noexcept {
+    if (!view.HasAllPayload()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (uint32 index = 0; index < view.Header().chunkCount; ++index) {
+        if (auto verified = VerifyAudioChunk(view.Chunk(index), view.ChunkPayload(index));
+            !verified) {
+            return verified;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> VerifyAudioChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) noexcept {
     if (payload.Size() != chunk.payloadBytes) {
         return Result<void>::Failure(ErrorCode::CorruptData);
