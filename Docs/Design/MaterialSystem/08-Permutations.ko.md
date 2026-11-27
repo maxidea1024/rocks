@@ -43,6 +43,8 @@
 | isDefaultMaterial, isSpecialEngineMaterial | 엔진 기본 머티리얼 여부(항상 컴파일 대상) |
 | quality | 번역한 품질 수준 |
 
+**유도 규칙(MS3c — `MakeMaterialShaderTraits`).** domain·blendMode·twoSided·quality는 번역 입력의 기본 속성·번역 대상 그대로다. shadingModels·customOutputs는 번역 결과 그대로(customOutputs는 결과가 있는 출력 이름, 6.11절 표 순서). translucencyPass는 반투명 블렌드 모드(Translucent 이상)일 때만 `translucency.pass`, 아니면 기본값이다. writesVelocity는 불투명·Masked면 WPO 사용 또는 `hasPixelAnimation`, 반투명이면 `outputTranslucentVelocity`다(UE 머티리얼 velocity 출력 조건). castsShadow는 불투명·Masked이거나 `castDynamicShadowAsMasked`다. usesWpo·usesPreviousWpo·usesPdo는 그 결과가 있고 상수 0이 아닐 때(생성 원문의 `MATERIAL_USES_*` 정의와 같은 판정 — 7.3절), usesOpacityMask는 Masked일 때다(생성 원문과 같다). requiredCapabilities는 정점 문맥(Vertex·VertexPrevious·정점 custom 출력)과 픽셀 문맥(그 밖 진입점)의 문맥 기능 합집합 둘과 번역이 기록한 최소 기능 등급이다. isDefaultMaterial·isSpecialEngineMaterial은 `engineDefaultMaterial`이다. **정규 바이트**(little-endian): 형식 버전 u32, domain·blendMode·translucencyPass·quality·최소 등급 u8, 불 값 8개 u8(twoSided·writesVelocity·castsShadow·usesWpo·usesPreviousWpo·usesPdo·usesOpacityMask·isDefaultMaterial), shadingModels u32, 정점·픽셀 기능 u32 둘, custom 출력 수 u32와 이름마다 길이 u32 + UTF-8.
+
 pass 셰이더 타입의 거르기 함수 서명은 `bool ShouldCompile(const MaterialShaderTraits&, VertexInputTypeId, PermutationId, FormatId)`이다. 정점 입력 타입의 거르기는 `bool ShouldCompile(const MaterialShaderTraits&, FormatId)`이다. 두 거르기는 결정적이어야 한다(등록 순서·실행 순서와 무관한 순수 함수). 셰이더 시스템 P14의 "형식·퍼뮤테이션 거르기 함수"에 머티리얼 인자를 더한 것이다(16절 MSR5). pass 셰이더 타입이 custom 출력을 요구하면 그 출력이 없는 머티리얼은 거른다.
 - 사용 대상(정점 입력 타입 집합)은 특성에 넣지 않는다. 원문과 무관한 쿠킹 입력이라 job 목록만 바꾼다(8.4절).
 - 쿠커가 두 거르기를 장치 없이 실행해야 하므로 pass 셰이더 타입은 `RendererShaders`(Renderer 3.2절)에, 정점 입력 타입 선언은 장치 없는 모듈(16절 MRB8)에 있어야 한다.

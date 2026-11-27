@@ -11,6 +11,7 @@
 #include "../Translation/CustomOutputTable.h"
 #include "EntryDefineNames.h"
 #include "HlslFloatLiteral.h"
+#include "IrResultQueries.h"
 #include <MaterialCompiler/MaterialIrCustomTable.h>
 #include <MaterialCompiler/MaterialIrLibrary.h>
 
@@ -22,8 +23,6 @@ namespace {
 // Swizzle 즉시값의 성분 하나 bit 수와 마스크다(IR 빌더 형식 — 6.8절).
 constexpr uint32 WriterSwizzleBits = 2;
 constexpr uint64 WriterSwizzleMask = (uint64{1} << WriterSwizzleBits) - 1;
-// float 비트에서 부호를 뺀 마스크(부호 bit 31만 0)다(0 판정).
-constexpr uint32 WriterFloatMagnitudeMask = static_cast<uint32>(NumericLimits<int32>::Max());
 // DefaultLit shading model 번호다(Renderer 14.2절 — SurfaceAttributes.rsh ShadingModelDefaultLit).
 constexpr uint32 WriterDefaultLitShadingModel = 1;
 // SpeedTree가 쓰는 정점 UV 채널 수다(UV 2–7 — 6.9절 MS2b4b).
@@ -1842,32 +1841,11 @@ Result<void> SourceWriter::CheckSupported() noexcept {
 }
 
 const IrResult* SourceWriter::FindResult(IrEntry entry, StringView slot) const noexcept {
-    for (const IrResult& result : module_.Results()) {
-        if (result.entry == entry && result.slot == slot) {
-            return &result;
-        }
-    }
-
-    return nullptr;
+    return detail::FindIrResult(module_, entry, slot);
 }
 
 bool SourceWriter::IsZero(const IrResult* result) const noexcept {
-    if (result == nullptr) {
-        return true;
-    }
-
-    const IrValue& value = module_.Values()[result->value];
-    if (value.op != IrOp::Constant || value.type.scalar != IrScalar::Float) {
-        return false;
-    }
-
-    for (uint8 index = 0; index < value.type.components; ++index) {
-        if ((static_cast<uint32>(value.immediate[index]) & WriterFloatMagnitudeMask) != 0) {
-            return false;
-        }
-    }
-
-    return true;
+    return detail::IsZeroIrResult(module_, result);
 }
 
 Result<void> SourceWriter::UsageDefines() noexcept {
