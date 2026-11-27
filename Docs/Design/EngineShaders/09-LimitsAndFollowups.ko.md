@@ -33,7 +33,7 @@
 |---|---|---|---|
 | SLR1 | [SS 11.1절 SC10](../ShaderSystem/11-WorkerCommunication.ko.md)·[12.1절](../ShaderSystem/12-FormatDefinitionsCooking.ko.md) | SS의 기존 `features` 어휘(`compute`·`waveOperations`·`vertexViewportLayerOutput` — SS 2절·12.2절, 15절 결정 12)를 SC10 정의 조립이 `ROCKS_FEATURE_<대문자 이름>` = 0·1로 내보낸다. 새 어휘 `typedUavLoad`(형식 확장 typed UAV load)를 형식 정의에 더한다. 지금 형식 정의 파일에서 `waveOperations`는 `D3D12_SM6`에만 있다. 그 전에는 `ShaderFeatures.rsh`가 형식 id 임시 표로 같은 값을 낸다(3.2절) | SL0 착수 전(없으면 임시 표로 진행) |
 | SLR2 | [SS 11.1절 SC2](../ShaderSystem/11-WorkerCommunication.ko.md)·[12.3절](../ShaderSystem/12-FormatDefinitionsCooking.ko.md) | 시험 runner의 셰이더 폴더를 시험 전용 플러그인 루트(`/Plugin/EngineShaderTests`)로 mount하는 것을 허용하고, 엔진 내장 셰이더 라이브러리(쿠킹 산출물) 쿠킹에서 제외한다(7.6절) | SL0 |
-| SLR3 | [SS 16절 SH2](../ShaderSystem/16-LaterStages.ko.md) | SH2 완료 기준에 "SL0 공통 라이브러리 컴파일 행렬·CPU 대조"를 선택 항목으로 더한다(6장 SL0) | SH2 착수 전(선택) |
+| SLR3 | [SS 16절 SH2](../ShaderSystem/16-LaterStages/README.ko.md) | SH2 완료 기준에 "SL0 공통 라이브러리 컴파일 행렬·CPU 대조"를 선택 항목으로 더한다(6장 SL0) | SH2 착수 전(선택) |
 | SLR4 | RN 17.2절 | 각 RS 단계 완료 기준에 대응 SL 단계의 엔진 셰이더 시험(6장 표 마지막 열)을 더하고, RS 행에 SL 단계를 적는다 | RN 다음 개정 |
 | SLR5 | RB 11.1절 | 내장 자원 팩에 LTC 표(RS9), GGX 에너지 보존 표(RS1), 파란 잡음 텍스처(RS7 AO·SSR)를 더한다. 생성 방식은 BRDF LUT와 같은 CPU 생성을 권장 | 해당 RS 착수 전 |
 | SLR6 | MS 7.2·5.7절, RN 14.1절 | MS 7.2절 파일 구조에 세 파일을 적는다: `SurfaceAttributes` HLSL 정의 위치 `/Engine/Private/Shading/SurfaceAttributes.rsh`(지금 MS 7.2절은 "SurfaceAttributes 정의(Renderer 소유) — Renderer 14.1절"로 경로가 없다, `MaterialCommon.rsh`가 include), 노드 보조 함수 `Material/MaterialNodeLibrary.rsh`, 텍스처 표본 보조 `Material/MaterialTextureSampling.rsh`. RN 14.1절에도 같은 경로를 적는다 | MS2 착수 전(SurfaceAttributes는 SL0) |

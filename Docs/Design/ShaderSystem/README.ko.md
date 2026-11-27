@@ -25,5 +25,5 @@ UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c
 - [13. P7 MetaCompiler 셰이더 파라미터](13-MetaCompilerParameters.ko.md)
 - [14. P8 다른 문서 개정](14-OtherDocRevisions.ko.md)
 - [15. 결정 필요 사항](15-OpenDecisions.ko.md)
-- [16. 이후 단계(선행 작업 뒤)](16-LaterStages.ko.md)
+- [16. 이후 단계(선행 작업 뒤)](16-LaterStages/README.ko.md)
 - [17. 개정 이력](17-Revisions.ko.md)
