@@ -321,7 +321,18 @@ public:
 
     const Geometry& GetGeometry() const noexcept;
 
+    // 보이기 값을 준다. 묶음(BindVisibility)이 있으면 푼다.
     void SetVisibility(Visibility visibility) noexcept;
+    // 보이기를 묶는다(Docs/Design/UiToolkit 20.6절 — UE Visibility 속성, 사유 Layout). getter는
+    // 속성 갱신 단계(UpdateBoundAttributes)에서 이 요소의 다른 묶음보다 먼저, Collapsed여도
+    // 평가된다 — 접힌 요소가 묶음으로 다시 보일 수 있다. getter는 UI 트리를 바꾸면 안 된다. 빈
+    // delegate면 푼다.
+    //
+    // 사용 예:
+    //   (void)panel->BindVisibility(Delegate<Visibility()>::CreateLambda(
+    //       [&model]() noexcept { return model.open ? Visibility::Visible : Visibility::Collapsed;
+    //       }));
+    Result<void> BindVisibility(Delegate<Visibility()>&& getter) noexcept;
 
     Visibility GetVisibility() const noexcept;
 
@@ -370,11 +381,16 @@ protected:
 
 private:
     Result<void> EnsureSemantics() noexcept;
+    // 묶음 없이 보이기를 바꾼다(SetVisibility·보이기 묶음 평가가 쓴다).
+    void ApplyVisibility(Visibility visibility) noexcept;
+    void UnbindVisibility() noexcept;
+    void EvaluateVisibilityBinding(uint64 pass) noexcept;
     SharedPtr<ElementSemantics> semantics_;
     Guid navigationIdentity_{};
     Guid navigationDomain_{};
     friend class CacheRoot;
     friend class AttributeBinding;
+    friend class VisibilityAttribute;
     friend class HitGrid;
     AttributeBinding* bindings_ = nullptr;
     usize subtreeBindings_ = 0;

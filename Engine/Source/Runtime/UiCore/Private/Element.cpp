@@ -9,6 +9,8 @@ Element::Element(Allocator& allocator) noexcept : children_(allocator) {
 }
 
 Element::~Element() noexcept {
+    // 보이기 묶음은 이 요소의 묶음 목록에 걸려 있다 — 목록이 살아 있을 때 푼다.
+    UnbindVisibility();
     for (usize i = 0; i < children_.Size(); ++i) {
         children_[i]->parent_ = nullptr;
     }
@@ -743,6 +745,11 @@ const Geometry& Element::GetGeometry() const noexcept {
 }
 
 void Element::SetVisibility(Visibility visibility) noexcept {
+    UnbindVisibility();
+    ApplyVisibility(visibility);
+}
+
+void Element::ApplyVisibility(Visibility visibility) noexcept {
     if (visibility_ == visibility) {
         return;
     }

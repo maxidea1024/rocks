@@ -23,6 +23,10 @@ protected:
     ~AttributeBinding() noexcept;
     void SetRegistered(bool registered) noexcept;
     void Changed(InvalidateReason reason) noexcept;
+    Element& Owner() const noexcept {
+        return owner_;
+    }
+
     virtual void EvaluateValue() noexcept = 0;
 
 private:

@@ -1,3 +1,6 @@
+#include "VisibilityAttribute.h"
+
+#include <Core/Memory/UniquePtr.h>
 #include <UiCore/Element.h>
 
 namespace rocks::ui {
@@ -18,7 +21,41 @@ public:
     uint64 tipRevision = 0;
     SharedPtr<Element::ToolTipFactory> tip;
     SharedPtr<UiHostServices> host;
+    UniquePtr<VisibilityAttribute> visibility;
 };
+
+Result<void> Element::BindVisibility(Delegate<Visibility()>&& getter) noexcept {
+    if (!getter.IsBound()) {
+        UnbindVisibility();
+        return Result<void>::Success();
+    }
+
+    auto ready = EnsureSemantics();
+    if (!ready) {
+        return ready;
+    }
+
+    auto made =
+        UniquePtr<VisibilityAttribute>::TryMake(children_.GetAllocator(), *this, Move(getter));
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    semantics_->visibility = Move(made.Value());
+    return Result<void>::Success();
+}
+
+void Element::UnbindVisibility() noexcept {
+    if (semantics_) {
+        semantics_->visibility.Reset();
+    }
+}
+
+void Element::EvaluateVisibilityBinding(uint64 pass) noexcept {
+    if (semantics_ && semantics_->visibility) {
+        semantics_->visibility->Evaluate(pass);
+    }
+}
 
 Result<void> Element::SetUiHostServices(const SharedPtr<UiHostServices>& services) noexcept {
     if (!semantics_ && !services) {

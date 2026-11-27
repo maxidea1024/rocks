@@ -85,12 +85,20 @@ void AttributeBinding::Changed(InvalidateReason reason) noexcept {
 }
 
 void Element::UpdateBoundAttributes() noexcept {
-    if (!subtreeBindings_ || visibility_ == Visibility::Hidden ||
-        visibility_ == Visibility::Collapsed) {
+    if (!subtreeBindings_) {
         return;
     }
 
     ++bindingPass_;
+    // 보이기 묶음을 먼저 평가한다 — Collapsed여도 다시 보일 수 있게(UE
+    // UpdateOnlyVisibilityAttributes, SWidget.cpp 1846–1849행, Docs/Design/UiToolkit 20.6절).
+    EvaluateVisibilityBinding(bindingPass_);
+    if (visibility_ == Visibility::Collapsed) {
+        return;
+    }
+
+    // Hidden은 공간을 차지하므로 나머지 묶음도 평가한다(UE 1852–1859행). 보이기 묶음은 이번 회차에
+    // 이미 평가되어 건너뛴다.
     for (auto* binding = bindings_; binding;) {
         auto* next = binding->next_;
         binding->Evaluate(bindingPass_);
