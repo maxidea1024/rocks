@@ -510,6 +510,31 @@ internal static class ThirdPartyPolicyTests
                 }
             }
         });
+        suite.Add("Policy.ThirdPartyPatchCrlf", () =>
+        {
+            // CRLF로 배포한 원본(ISPC Texture Compressor): LF patch가 CR을 뗀 줄과 맞고, 복원한 원본은 CRLF다.
+            string patch = "diff --git a/x.h b/x.h\nindex 1..2 100644\n--- a/x.h\n+++ b/x.h\n@@ -1,2 +1,3 @@\n a\n+inserted\n b\n";
+            ThirdPartyPatch.FilePatch file = ThirdPartyPatch.Parse(patch).Single();
+            byte[]? original = ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes("a\r\ninserted\r\nb\r\n"));
+            Verify.That(original is not null && Encoding.UTF8.GetString(original) == "a\r\nb\r\n", "CRLF original restored with CRLF");
+            // CRLF 원본의 끝 줄바꿈 없음도 그대로 복원한다.
+            string tail = "diff --git a/y.h b/y.h\nindex 1..2 100644\n--- a/y.h\n+++ b/y.h\n@@ -1,2 +1,2 @@\n a\n-b\n" +
+                          "\\ No newline at end of file\n+b\n";
+            byte[]? restored = ThirdPartyPatch.Reverse(ThirdPartyPatch.Parse(tail).Single(), Encoding.UTF8.GetBytes("a\r\nb\r\n"));
+            Verify.That(restored is not null && Encoding.UTF8.GetString(restored) == "a\r\nb", "CRLF original without final newline restored");
+            foreach (string mixed in new[] { "a\r\ninserted\nb\r\n", "a\r\nins\rerted\r\nb\r\n", "a\ninserted\r\nb\n",
+                                             "a\r\r\ninserted\r\nb\r\n", "a\r\ninserted\r\nb\r" })
+            {
+                try
+                {
+                    ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes(mixed));
+                    throw new InvalidOperationException("mixed line endings reversed: " + mixed.Replace("\r", "\\r", StringComparison.Ordinal));
+                }
+                catch (FormatException)
+                {
+                }
+            }
+        });
         suite.Add("Policy.ThirdPartyArchitectureDefinesAndCompileArguments", () =>
         {
             using (TemporaryDirectory fixture = new())

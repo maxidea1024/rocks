@@ -179,7 +179,7 @@ double PsnrHdr(Allocator& allocator, const Array<uint8>& halfs, uint32 x, uint32
 
 // 생성기 그림 가운데 품질·해시 시험이 쓰는 것(32 × 32와 128 × 128)이다.
 bool Measured(const golden::Case& one) noexcept {
-    return !one.hashOnly && one.sizeX >= 32;
+    return golden::IsMeasured(one);
 }
 
 // BC6H·BC7 인코더가 있는 대상인지다(ISPC 커널 — Android에는 없다).
@@ -528,7 +528,7 @@ TEST(TextureBlockBptc_OutputHashGolden) {
 
     printf("  BC6H/BC7 output hash: %016llx\n", hash);
 #if ROCKS_ARCH_X64
-    CHECK(hash == 0xd7ca6ffb39737d3aull);
+    CHECK(hash == 0xa66a3317215b715dull);
 #endif
 }
 

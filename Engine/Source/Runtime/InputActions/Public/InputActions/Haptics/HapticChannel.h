@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Memory/Allocator.h>
+#include <CurveAssets/CurveAssetConstants.h>
 #include <Curves/TangentCurve.h>
 #include <Meta/Annotations.h>
 
@@ -20,6 +21,10 @@ struct HapticChannel {
     ROCKS_PROPERTY() bool affectsRightLarge = true;
     ROCKS_PROPERTY() bool affectsRightSmall = true;
     ROCKS_PROPERTY() TangentCurve curve;
+    // 커브 에셋 slot이다(HapticEffectAsset::curveAssets 번호, 없으면 NoCurveAssetSlot — UE
+    // FRuntimeFloatCurve::ExternalCurve, 2.9절 IA9). CopyHapticEffect가 에셋 커브를 curve로
+    // 복사하고 비운다(재생은 비운 값만 받는다).
+    ROCKS_PROPERTY() uint32 curveAsset = NoCurveAssetSlot;
 };
 
 } // namespace rocks::input

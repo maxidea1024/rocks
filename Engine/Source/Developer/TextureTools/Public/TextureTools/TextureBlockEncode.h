@@ -33,7 +33,8 @@ inline constexpr uint32 RocksBcEncoderVersion = 1;
 // 바뀌거나 커널 원본(ThirdParty IspcTextureCompressor의 kernel.ispc·ispc_texcomp.cpp — upstream
 // 갱신·Rocks.patch)이 바뀌면 올린다(커널 원본 내용은 키에 들어가지 않는다). ISPC 판·인자는
 // IspcBcEncoderIdentity가 따로 너겟 키에 넣는다.
-inline constexpr uint32 IspcBcEncoderVersion = 1;
+// 2: Rocks.patch — compute_axis 주축 재시작(12.17.6 10).
+inline constexpr uint32 IspcBcEncoderVersion = 2;
 
 // 형식의 입력 texel byte 수다(Bc6h 8 — RGBA16F, 그 밖 4 — RGBA8).
 ROCKS_TEXTURETOOLS_API uint32 TextureBlockSourceTexelBytes(TextureBlockFormat format) noexcept;

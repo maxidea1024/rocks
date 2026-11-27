@@ -54,7 +54,7 @@
 
 ### 2.3 InputAction
 
-리플렉션 클래스(`Asset` 파생 — 2.8절)다. 필드는 `id`와 설정 struct `settings`(`InputActionSettings` — 평가기가 그대로 복사한다, 2.7절)다. 아래 표에서 `id` 밖의 필드는 모두 `settings` 안이다. 필드와 기본값은 UE `EI/Public/InputAction.h`와 같다.
+리플렉션 클래스(`Asset` 파생 — 2.8절)다. 필드는 `id`와 설정 struct `settings`(`InputActionSettings` — 평가기가 그대로 복사한다, 2.7절), 응답 커브 모디파이어가 slot으로 가리키는 커브 에셋 목록 `curveAssets`(2.9절)다. 아래 표에서 `id` 밖의 필드는 모두 `settings` 안이다. 필드와 기본값은 UE `EI/Public/InputAction.h`와 같다.
 
 | 필드 | 기본 | UE |
 |---|---|---|
@@ -72,6 +72,7 @@
 
 `InputContext`(리플렉션 클래스)의 필드는 다음과 같다.
 - `id`(Guid, 0이면 잘못된 컨텍스트)
+- `curveAssets: ObjectRefArray<FloatCurveAsset>`(Required): 바인딩(기본·프로필) 모디파이어의 커브 slot이 가리키는 커브 에셋이다(2.9절).
 - `actions: ObjectRefArray<InputAction>`(Required — null 원소 없음): 바인딩이 가리키는 액션의 GC 간선이자 패키지 Hard 의존이다(함께 로드·쿠킹 — [에셋 시스템](../AssetSystem/06-AssetTypes.ko.md) 6장 참조 표). chord 트리거의 대상은 넣어도 되고 안 넣어도 된다(2.7절).
 - `data: InputContextData`(리플렉션 struct — 평가기가 그대로 복사한다):
   - `bindings: Array<InputBinding>`
@@ -141,11 +142,33 @@ Rocks 객체 규칙 때문에 UE처럼 평가기가 액션·컨텍스트 객체 
   - 패키지 없는 객체는 AssetId가 null이라 `id` 0이면 실효 id도 0이다. 검증이 거부한다(지금과 같다).
 - 패키지: 대표 에셋 하나다(AssetSystem 4.1절). InputContext의 `actions`가 다른 패키지의 InputAction을 가리키면 Hard 참조라 함께 로드·쿠킹된다(AssetSystem 6.2절). 액션을 컨텍스트 패키지 안 하위 객체(대표 에셋 아래 — 패키지 바로 아래에는 대표 에셋만 둔다)로 둘 수도 있다. 대표가 아니므로 `assetId_`는 null이고, 실효 id를 쓰려면 `id`를 직접 적는다.
 - 쿠킹은 기본 처리기다(리플렉션 필드 그대로 — AssetSystem 10절). 입력 에셋 전용 변환은 없다.
-- `HapticEffectAsset : Asset`(UE `UForceFeedbackEffect` — 에셋으로 쓰는 `UObject`, `RT/Engine/Classes/GameFramework/ForceFeedbackEffect.h:118`): 필드는 `effect: HapticEffect` 하나다(6.1절 값 struct를 그대로 감싼다). 재생은 효과의 깊은 사본을 쓰므로(6.2절) 값 struct를 그대로 둔다.
+- `HapticEffectAsset : Asset`(UE `UForceFeedbackEffect` — 에셋으로 쓰는 `UObject`, `RT/Engine/Classes/GameFramework/ForceFeedbackEffect.h:118`): 필드는 `effect: HapticEffect`(6.1절 값 struct를 그대로 감싼다)와 채널 커브 slot이 가리키는 `curveAssets: ObjectRefArray<FloatCurveAsset>`(Required — 2.9절)다. 재생은 효과의 깊은 사본을 쓰므로(6.2절) 값 struct를 그대로 둔다.
 - lease 읽기 도우미(`InputActions/InputAssetAccess.h`, AssetManager 소유 스레드(Game) — `AssetManager::With`가 에셋 문맥 접근 범위를 연다. World 접근 범위 안에서 불러도 된다(중첩):
   - `CollectInputContext(AssetManager&, const AssetLease&, InputContextBundle&)`: `AssetManager::With(lease)` 안에서 에셋 객체 Registry(`AssetManager::Registry()`)의 소유 접근 문맥으로 2.7절 `CollectInputContext`를 부른다. 오류: 회수·무효 lease는 `StaleHandle`, 다른 스레드는 `WrongThread`, 초기화 전 AssetManager는 `InvalidArgument`(With 오류 그대로), 대표 에셋이 InputContext가 아니면 `TypeMismatch`, 그 밖은 2.7절 모으기와 같다. 실패하면 bundle은 그대로다.
-  - `CopyHapticEffect(AssetManager&, const AssetLease&, HapticEffect& out)`: 같은 방식으로 `effect`의 깊은 사본을 out에 쓴다. 오류는 위와 같다(대표가 HapticEffectAsset이 아니면 `TypeMismatch`). 사본을 다 만든 뒤에 out을 바꾸므로 실패하면 out은 그대로다.
+  - `CopyHapticEffect(AssetManager&, const AssetLease&, HapticEffect& out)`: 같은 방식으로 `effect`의 깊은 사본을 out에 쓴다(채널 커브 slot 평탄화 포함 — 2.9절). 오류는 위와 같다(대표가 HapticEffectAsset이 아니면 `TypeMismatch`, 커브 slot 오류는 2.9절). 사본을 다 만든 뒤에 out을 바꾸므로 실패하면 out은 그대로다.
   - `HapticPlayer::PlayHapticEffect(AssetManager&, const AssetLease&, const HapticParams&)`: `CopyHapticEffect`로 만든 사본(실효 id)을 재생한다(재생이 그 사본을 다시 복사한다 — 실효 id를 적은 사본이 필요해 한 번으로 줄이지 않는다. 재생은 드물다)(UE `ClientPlayForceFeedback(UForceFeedbackEffect*, …)`). lease는 쥐지 않는다 — 재생이 사본을 쥔다(6.2절).
 - 버린 대안:
   - 감싸는 에셋 클래스(`InputContextAsset`이 `InputContext` 하위 객체를 쥠). 객체가 두 겹이 되고 UE와 다르며 얻는 것이 없다. `InputContext`는 이미 리플렉션 Object다.
   - `HapticEffect`를 클래스로 바꾸기. 재생은 값 사본을 쓰고, 코드로 만든 효과도 값으로 다룬다(6.2절).
+
+### 2.9 커브 에셋 slot(IA9 — IAD17, [커브 에셋](../CurveAssets/06-Consumers.ko.md) 6.1절)
+
+응답 커브 모디파이어(UE `UInputModifierResponseCurveUser::ResponseX/Y/Z` = `TObjectPtr<UCurveFloat>`)와 진동 채널(UE `FForceFeedbackChannelDetails::Curve` = `FRuntimeFloatCurve`)이 커브 에셋(`FloatCurveAsset` — CurveAssets 2.2절)을 쓸 수 있게 한다.
+
+- **제약**: 모디파이어·채널은 `Array` 원소 안의 값 struct다. 참조 struct(`ObjectRef`)를 둘 수 없다(2.7절 — 사본·코드로 만든 값 때문이다).
+- **모양(slot)**: 소유 에셋이 참조 목록을 갖고 값 struct는 번호를 갖는다.
+  - `InputAction`·`InputContext`·`HapticEffectAsset`에 `ROCKS_PROPERTY() ObjectRefArray<FloatCurveAsset> curveAssets`(Hard — 함께 로드·쿠킹).
+  - `InputModifier`에 `responseXAsset`·`responseYAsset`·`responseZAsset: uint32`, `HapticChannel`에 `curveAsset: uint32`. 기본은 `NoCurveAssetSlot`(CurveAssets `CurveAssetConstants.h` — 없음 표지)이다.
+  - 인라인 커브(`responseX`·`curve`)는 그대로 있고, slot이 있으면 에셋 커브가 이긴다(UE `FRuntimeFloatCurve`와 같다 — 응답 커브는 UE에 인라인이 없어 Rocks가 상위 집합이다).
+- **평탄화**(사본을 만드는 곳에서): slot의 에셋을 풀어 그 `curve`를 인라인 칸에 깊이 복사하고 slot을 `NoCurveAssetSlot`으로 비운다. 평가기·재생기는 Registry 없이 인라인만 쓴다.
+  - `CollectInputContext`: 액션 설정의 모디파이어는 그 `InputAction::curveAssets`, 바인딩(기본·프로필 override)의 모디파이어는 `InputContext::curveAssets` 번호다.
+  - `CopyHapticEffect`: 채널은 `HapticEffectAsset::curveAssets` 번호다.
+  - 공용 도우미 CurveAssets `TryResolveCurveSlot(registry, access, curveAssets, slot, curve)`.
+  - 오류: 범위 밖 번호·null 원소 `InvalidArgument`, 풀리지 않음은 Resolve 오류. 실패하면 bundle·out은 그대로다.
+- **검증**: 평탄화되지 않은 slot(번호가 남은 값)은 평가기·재생기에 넣을 수 없다. 모디파이어 검증(`ValidateInputContextBundle`·`ValidateInputActionSettings`·`ValidateInputElements` — AddContext·UpdateContext·Inject가 부른다)이 `InputDataIssue::UnresolvedCurveAsset`으로, `HapticPlayer::PlayHapticEffect`가 `InvalidArgument`로 거부한다(코드로 만든 값이 번호를 적은 경우).
+- **null 원소·풀리지 않는 참조**: 그 모으기·사본 전체가 실패한다(CurveAssets CAD8 — 다른 커브로 조용히 대신하지 않는다). UE는 null 응답 커브의 그 축만 0이고 null 외부 커브는 인라인으로 대신한다(7.3절 차이 표). `curveAssets`는 Required라 null 원소는 저장·쿠킹에서 먼저 막힌다.
+- **편집**: 편집기(IA6c)가 에셋을 고르면 `curveAssets`에 넣고 번호를 적는다. 지금은 `asset-set` 경로 텍스트로 쓴다.
+- 버린 대안:
+  - 값 struct 안 `SoftObjectRef` — 복사는 되지만 소유 에셋과 함께 로드되지 않아 모으기 때 대상이 없을 수 있다.
+  - 소유 에셋의 평행 `StructRefArray<FloatCurveSource>` — 구조가 두 번 생기고 모디파이어는 중첩(RMC2304)이라 못 쓴다.
+  - 값 struct의 커브를 감싸는 새 struct(커브 + 번호) — 평가 코드·리플렉션 경로가 모두 바뀐다. 옆 필드면 기존 인라인 경로가 그대로다.
