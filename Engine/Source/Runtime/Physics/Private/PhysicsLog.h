@@ -10,9 +10,12 @@ namespace rocks::physics {
 inline constexpr LogCategory LogPhysics{"Physics"};
 inline constexpr LogCategory LogPhysicsJolt{"Physics.Jolt"};
 
-// 진단 코드다(Docs/Design/PhysicsModule 7.1.6절).
+// 진단 코드다(Docs/Design/PhysicsModule 7.1.6·7.1.17절).
 // - ResponseSetCapacity: 장면의 응답 묶음 칸 수가 object 층 색인 bit(21)를 넘었다. 그 body는 만들지
 //   않거나(CreateBody 실패) 필터를 바꾸지 않는다(Warning).
 inline constexpr char DiagResponseSetCapacity[] = "ResponseSetCapacity";
+// - NonFiniteBodyInput: body 힘·충격량·속도 입력에 비유한 값이 있어 무시했다(Warning — 7.1.17절,
+//   Jolt에 NaN을 넣지 않는다).
+inline constexpr char DiagNonFiniteBodyInput[] = "NonFiniteBodyInput";
 
 } // namespace rocks::physics

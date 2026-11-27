@@ -13,22 +13,30 @@
 #include <Meta/LaneTransfer.h>
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/RenderGraph.h>
+#include <UiRender/UiFramePacket.h>
+#include <UiRender/UiLaneRenderer.h>
 
 // Sandbox 엔진 창 렌더 경로의 렌더 lane 쪽이다(Docs/Design/RenderBase 18.5절 1항 — SM1). 엔진 층이
 // 아니라 실행 파일의 화면 마일스톤 장면 그리기다. 정식 장면 렌더러는 RS0 Renderer다.
 //
 // 프레임 그래프: SceneColor(RGBA16Float)·SceneDepth(D32Float, reversed-Z clear 0) → BasePass(내장
-// 메시를 fallback 메시 셰이더로) → Tonemap(전체화면, 스왑체인) → (요청하면) TonemapCapture(capture
-// 텍스처). 텍스처 표시 프레임은 장면 대신 TextureInspector 한 pass다(텍스처는 게임 lane이 올린
-// RenderHandle — 18.5절 7항).
+// 메시를 fallback 메시 셰이더로) → Tonemap(전체화면, 스왑체인 Clear) → UI(스왑체인 Load — packet의
+// UI 프레임, 18.5절 9항) → (요청하면) ScreenCapture(스왑체인 내용을 capture 텍스처로 복사). 텍스처
+// 표시 프레임은 장면 대신 TextureInspector 한 pass다(텍스처는 게임 lane이 올린 RenderHandle —
+// 18.5절 7항). 그래프는 마지막 스왑체인 pass 뒤에 한 번 present한다.
+//
+// 창 스왑체인은 UI 창 표면이다(UiLaneRenderer가 가진다 — UE Slate가 창 viewport를 갖고 게임
+// viewport가 그 백버퍼에 바로 그리는 구조). 게임 lane은 Ui()를 짝으로 한 LaneUiRenderer로 창 표면을
+// 만들고 크기를 바꾼다. 프레임 함수는 packet의 창 id로 스왑체인을 찾고, 장면 pass 전에 packet
+// 크기로 맞춘다.
 //
 // 사용 예(게임 lane):
 //   screen::ScreenRenderer renderer(allocator, shaders::Host());
-//   renderer.SetInitialSurface(surface, width, height);
 //   config.processor = &renderer;
 //   lane.Start(config);
-//   ... lane.SubmitFrame(Move(ticket), screen::ScreenPacket{...}, &screen::RenderScreen);
-//   ... lane.PostSurface(screen::SurfaceResize{w, h}, &screen::ResizeSurface);
+//   ui::LaneUiRenderer ui(allocator, lane, renderer.Ui());
+//   auto window = ui.CreateWindowSurface(desc);
+//   ... lane.SubmitFrame(Move(ticket), Move(packet), &screen::RenderScreen);
 namespace sandbox::screen {
 
 using namespace rocks;
@@ -102,13 +110,21 @@ struct InspectorTexture {
 // 고른 mip에서 고를 수 있는 층 수다(배열 층·cube 배열 원소·volume z texel, 그 밖 1).
 uint32 InspectorLayerCount(const InspectorTexture& texture, uint32 mip) noexcept;
 
-// 프레임 packet이다. items는 그 slot의 프레임 arena에 있다.
+// 프레임 packet이다. items와 ui의 목록은 그 slot의 프레임 arena에 있다. ui 때문에 이동 전용이다.
 struct ScreenPacket {
+    // 그릴 창 표면과 게임 lane이 본 창 크기다(렌더 lane이 장면 pass 전에 스왑체인을 이 크기로
+    // 맞춘다).
+    ui::UiWindowSurfaceId window;
+    uint32 width = 0;
+    uint32 height = 0;
+    // 장면 위에 그릴 UI 프레임이다(LaneUiRenderer::RecordWindows — 대상이 없으면 UI 없음). 대상의
+    // 창은 window여야 한다.
+    ui::UiFramePacket ui;
     Span<const ScreenItem> items;
     graphics::ClearColor clear;
     render::TonemapConstants tonemap;
-    // null이 아니면 tone map(또는 텍스처 표시) 결과를 이 텍스처(RGBA8UnormSrgb RenderTarget,
-    // 스왑체인과 같은 크기)에도 그리고 lane이 captureSlot 자리에 읽어 둔다(self-test).
+    // null이 아니면 마지막 pass 뒤 스왑체인 내용(UI 포함)을 이 텍스처(RGBA8UnormSrgb RenderTarget,
+    // 스왑체인과 같은 크기)에 복사하고 lane이 captureSlot 자리에 읽어 둔다(self-test).
     render::RenderHandle capture;
     uint32 captureSlot = 0;
     // 참이면 장면 대신 텍스처 표시를 그린다(SM6·SM7). 층·mip은 게임 lane이 범위 안으로 맞춘다.
@@ -118,19 +134,8 @@ struct ScreenPacket {
     uint32 inspectorMip = 0;
 };
 
-// 표면 작업 값이다.
-struct SurfaceCreate {
-    graphics::NativeSurface surface;
-    uint32 width = 0;
-    uint32 height = 0;
-};
-
-struct SurfaceResize {
-    uint32 width = 0;
-    uint32 height = 0;
-};
-
-struct SurfaceRelease {
+// 표면 반납 대기 작업 값이다(창 표면 파괴 뒤 — Android 표면 소실 handshake).
+struct SurfaceReleaseWait {
     uint32 reserved = 0;
 };
 
@@ -144,9 +149,7 @@ struct CaptureCreate {
 } // namespace sandbox::screen
 
 ROCKS_LANE_TRANSFERABLE(sandbox::screen::ScreenPacket);
-ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceCreate);
-ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceResize);
-ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceRelease);
+ROCKS_LANE_TRANSFERABLE(sandbox::screen::SurfaceReleaseWait);
 ROCKS_LANE_TRANSFERABLE(sandbox::screen::CaptureCreate);
 
 namespace sandbox::screen {
@@ -161,14 +164,20 @@ struct ScreenRendererStats {
     uint64 framesSkipped = 0;
     uint64 graphFailures = 0;
     uint64 captures = 0;
-    uint64 resizes = 0;
+    // 그래프가 낸 present 수(GraphStats::presents 합)와 장치 PresentCount 증가 합이다(프레임마다
+    // 1이면 framesRendered와 같다).
+    uint64 presents = 0;
+    uint64 devicePresents = 0;
+    // UI pass를 붙인 프레임 수와 UI를 빼고 그린 횟수(창 불일치·AddPasses 실패)다.
+    uint64 uiFrames = 0;
+    uint64 uiFailures = 0;
     // 텍스처 표시로 그린 프레임 수다.
     uint64 inspectorFrames = 0;
     // 텍스처 표시가 준비되지 않은 handle을 대체(typed 대체·검정)로 그린 프레임 수다.
     uint64 inspectorFallbacks = 0;
 };
 
-// 렌더 lane 처리기다. 스왑체인·엔진 렌더 자원·파이프라인 캐시·그래프 풀을 lane에서 만들고 lane에서
+// 렌더 lane 처리기다. 엔진 렌더 자원·파이프라인 캐시·그래프 풀·UI 렌더러를 lane에서 만들고 lane에서
 // 정리한다. allocator와 host는 이 객체보다 오래 산다.
 class ScreenRenderer final : public render::RenderLaneProcessor {
 public:
@@ -177,9 +186,11 @@ public:
     ScreenRenderer(const ScreenRenderer&) = delete;
     ScreenRenderer& operator=(const ScreenRenderer&) = delete;
 
-    // lane 시작 때 만들 스왑체인 표면과 크기다(Start 전에 부른다). 표면이 비면 스왑체인 없이
-    // 시작한다.
-    void SetInitialSurface(graphics::NativeSurface surface, uint32 width, uint32 height) noexcept;
+    // lane 쪽 UI 렌더러다(창 표면 표 — 게임 lane LaneUiRenderer의 짝). lane 객체 주소라 게임 lane이
+    // LaneUiRenderer에 넘겨도 된다. 장치는 렌더 lane에서만 만진다.
+    ui::UiLaneRenderer& Ui() noexcept {
+        return ui_;
+    }
 
     Result<void> OnLaneStart(render::RenderLaneContext& context) noexcept override;
     void OnLaneStop(render::RenderLaneContext& context) noexcept override;
@@ -219,27 +230,42 @@ public:
 
 private:
     friend void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept;
-    friend void CreateSurface(render::RenderLaneContext& context, SurfaceCreate& value) noexcept;
-    friend void ResizeSurface(render::RenderLaneContext& context, SurfaceResize& value) noexcept;
-    friend void ReleaseSurface(render::RenderLaneContext& context, SurfaceRelease& value) noexcept;
     friend void CreateCapture(render::RenderLaneContext& context, CaptureCreate& value) noexcept;
 
-    Result<void> CreateSwapChain(graphics::Device& device, graphics::NativeSurface surface,
-                                 uint32 width, uint32 height) noexcept;
     // 메시 파이프라인(뒤면 컬 0, 앞면 컬 1)·tone map·텍스처 표시 파이프라인 요청을 준비한다.
     Result<void> PrepareRequests() noexcept;
+    // 셰이더 교체 뒤 요청과 UI 파이프라인을 새 집합으로 다시 만든다. 요청 준비가 실패하면 false다
+    // (UI 다시 만들기 실패는 Error를 남기고 옛 UI 파이프라인으로 계속 그린다).
+    bool ApplyShaderSwap(render::RenderFrameContext& context) noexcept;
+    // 장면 pass(BasePass·Tonemap)를 더한다. 실패하면 false다(통계를 올렸다).
+    bool AddScenePasses(render::RenderFrameContext& context, render::RenderGraph& graph,
+                        graphics::SwapChainHandle swapChain, const ScreenPacket& packet) noexcept;
+    // 텍스처 표시 pass를 더한다(장면 대신 — 18.5절 6항). 실패하면 false다(통계를 올렸다).
+    bool AddInspectorPass(render::RenderFrameContext& context, render::RenderGraph& graph,
+                          graphics::SwapChainHandle swapChain, const ScreenPacket& packet) noexcept;
+    // packet의 UI 대상을 같은 스왑체인에 Load로 더한다(18.5절 9항).
+    void AddUiPasses(render::RenderFrameContext& context, render::RenderGraph& graph,
+                     ScreenPacket& packet) noexcept;
+    // capture를 요청했으면 스왑체인 마지막 내용을 capture 텍스처로 복사하는 pass를 더하고 그
+    // 텍스처를 돌려준다(아니면 null).
+    graphics::TextureHandle AddCapturePass(render::RenderFrameContext& context,
+                                           render::RenderGraph& graph,
+                                           graphics::SwapChainHandle swapChain,
+                                           const ScreenPacket& packet) noexcept;
     // 그래프를 실행하고 capture를 slot 자리에 읽는다. 그래프가 실패하면 false다.
     bool FinishFrame(render::RenderFrameContext& context, render::RenderGraph& graph,
                      graphics::TextureHandle capture, uint32 slot) noexcept;
-    void RenderInspector(render::RenderFrameContext& context, const ScreenPacket& packet) noexcept;
 
     Allocator& allocator_;
     const render::EngineShaderHost& host_;
-    graphics::NativeSurface surface_;
+    // 이번 프레임 크기(스왑체인 크기)다.
     uint32 width_ = 0;
     uint32 height_ = 0;
-    graphics::SwapChainHandle swapChain_;
+    // capture 텍스처 크기다(CreateCapture — 프레임 크기와 다르면 복사하지 않는다).
+    uint32 captureTargetWidth_ = 0;
+    uint32 captureTargetHeight_ = 0;
     render::EngineRenderResources resources_;
+    ui::UiLaneRenderer ui_;
     UniquePtr<render::PipelineCache> cache_;
     UniquePtr<render::GraphResourcePool> pool_;
     render::GraphicsPipelineRequest meshRequests_[2];
@@ -255,16 +281,16 @@ private:
     uint32 captureHeight_ = 0;
     ScreenRendererStats stats_;
     bool opened_ = false;
+    // UI를 뺀 프레임의 Warning을 이미 남겼다.
+    bool uiWarned_ = false;
 };
 
 // 프레임 packet 작업이다.
 void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noexcept;
 
-// 표면 작업이다(5.2절 — 스왑체인 생성·resize·소실).
-void CreateSurface(render::RenderLaneContext& context, SurfaceCreate& value) noexcept;
-void ResizeSurface(render::RenderLaneContext& context, SurfaceResize& value) noexcept;
-// 스왑체인을 Retire하고 장치가 끝날 때까지 기다린다(Android 표면 소실 handshake).
-void ReleaseSurface(render::RenderLaneContext& context, SurfaceRelease& value) noexcept;
+// 표면 작업이다(5.2절 — Android 표면 소실 handshake). 창 표면을 파괴한(스왑체인 Retire) 뒤
+// 장치가 끝날 때까지 기다린다. 창 표면 생성·resize·파괴는 UI 창 표면 작업이다(18.5절 9항).
+void WaitSurfaceRelease(render::RenderLaneContext& context, SurfaceReleaseWait& value) noexcept;
 
 // capture 텍스처를 만들어 handle에 잇는다(자원 작업).
 void CreateCapture(render::RenderLaneContext& context, CaptureCreate& value) noexcept;

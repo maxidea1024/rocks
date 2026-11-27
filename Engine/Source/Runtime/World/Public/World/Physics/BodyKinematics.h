@@ -11,6 +11,8 @@ struct BodyKinematics {
     // body 원점(컴포넌트 위치와 같은 점 — 질량 중심이 아니다)의 월드 위치(cm)와 회전이다.
     Vec3d location = Vec3d::Zero();
     Quatd rotation;
+    // 월드 질량 중심(cm)이다(UE GetCOMPosition — 질량 중심 이동이 있으면 location과 다르다).
+    Vec3d centerOfMass = Vec3d::Zero();
     // 선속도(cm/s)와 각속도(rad/s, 월드 축)다.
     Vec3d linearVelocity = Vec3d::Zero();
     Vec3d angularVelocityRadians = Vec3d::Zero();

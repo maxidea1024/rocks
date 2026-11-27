@@ -44,3 +44,4 @@
 - [3.40 AU6 구현 세부 — 스트리밍 재생(개정 37)](03.40-Au6Streaming.ko.md)
 - [3.41 AU7 — 나눔, AU7a–AU7c voice 배정·동시 발음·가상화(개정 39–41)](03.41-Au7VoiceManagement.ko.md)
 - [3.42 AU7d — 감쇠 나머지(개정 42)](03.42-Au7dAttenuation.ko.md)
+- [3.43 AU7e — 분류·믹스 스냅숏(개정 43)](03.43-Au7eCategoriesAndMixes.ko.md)

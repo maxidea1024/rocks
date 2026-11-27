@@ -1879,6 +1879,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PrimitiveComponent::ignoreRadialForce_",
+      "id": "dae1dd85682841bf9cde9ba4a075bbe9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::ignoreRadialImpulse_",
+      "id": "adfc32af59874065b90bb47901897806",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PrimitiveComponent::lightingChannels_",
       "id": "165915b85233497d8d7b9083a5f6a59c",
       "aliases": [],
@@ -3183,6 +3197,13 @@
       "kind": "type",
       "name": "rocks::ProjectileMovementComponent",
       "id": "6d10c67ed1da42f0b39243ae193eb54e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RadialFalloff",
+      "id": "a53d50a97ed64b68989a69913c12635d",
       "aliases": [],
       "retired": false
     },

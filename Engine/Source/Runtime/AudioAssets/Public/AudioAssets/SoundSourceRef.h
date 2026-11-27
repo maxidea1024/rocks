@@ -6,6 +6,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
 #include <Curves/TangentCurve.h>
+#include <AudioAssets/SoundCategoryChain.h>
 #include <AudioAssets/SoundPcm.h>
 #include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundPlaybackSettings.h>
@@ -109,6 +110,9 @@ struct SoundPlayable {
     bool bypassVolumeScaleForPriority = false;
     // loop 재생의 가상화 모드다(3.41.3절). voice를 잃었다 되찾을 때의 시작 위치도 정한다.
     SoundVirtualizationMode virtualizationMode = SoundVirtualizationMode::Restart;
+    // 분류 사슬이다(3.43.1절 — 없으면 엔진 기본 분류나 분류 없음)와 2채널 볼륨 ×0.5 여부다.
+    SoundCategoryChainRef category;
+    bool normalizeStereo = false;
     // 동시 발음 그룹이다(3.41.2절 — 앞 concurrencyCount개, 없으면 제한 없음).
     uint32 concurrencyCount = 0;
     SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];

@@ -78,6 +78,11 @@ struct CookRunRequest {
     // 처리기에 넘길 너겟 캐시와 verify 표지다(CookContext로 그대로 넘긴다).
     NuggetCache* nuggets = nullptr;
     bool verifyNuggets = false;
+    // 처리기 안 병렬 실행이다(AssetSystem 12.17.9 4 — 텍스처 블록 압축). scheduler가 있으면
+    // scratch는 동시 Allocate·Deallocate가 안전한 allocator여야 한다. 결과 byte와 무관하다(너겟
+    // 키에 넣지 않는다).
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
     CookOutputSink* output = nullptr;
 };
 

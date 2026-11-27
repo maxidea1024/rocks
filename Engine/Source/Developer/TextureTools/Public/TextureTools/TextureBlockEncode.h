@@ -14,10 +14,11 @@
 // CPU와 무관한 byte, UE와는 품질로 대조). EAC R11은 자체 정확 최적 탐색(12.17.8 4), ASTC는 UE
 // TextureFormatASTC와 같은 설정의 ARM astc-encoder 5.1.0 불변성 빌드다(12.17.8 2·3). 입력은
 // RGBA8(BC6H는 RGBA16F, EAC R11은 R16)이고 출력은 GPU 블록 byte다. 같은 입력이면 같은 아키텍처의
-// 모든 호스트·스레드 수에서 같은 byte다. BC·EAC는 할당하지 않고, ASTC는 astcenc 컨텍스트(전역 new —
-// 할당 실패는 종료)와 행 여백이 있는 입력의 사본(TextureBlockOptions::scratch)을 할당한다. 블록
-// 형식·크기 함수와 기준 디코더는 런타임 Texture 모듈(Texture/TextureBlockDecode.h — 12.17.7)에
-// 있다.
+// 모든 호스트·스레드 수에서 같은 byte다(병렬 압축 TextureBlockOptions::scheduler의 worker 수와도
+// 무관 — 12.17.9). 직렬 BC·EAC는 할당하지 않는다. 병렬은 helper 작업을 scratch로 할당하고, ASTC는
+// astcenc 컨텍스트(전역 new — 할당 실패는 종료)와 행 여백 입력의 사본·slice 포인터(scratch)를
+// 할당한다. 블록 형식·크기 함수와 기준 디코더는 런타임 Texture 모듈(Texture/TextureBlockDecode.h —
+// 12.17.7)에 있다.
 //
 // 사용 예:
 //   auto bytes = TextureBlockOutputBytes(TextureBlockFormat::Bc1, 256, 256, 1);
@@ -30,6 +31,8 @@
 //   image.sizeY = 256;
 //   if (auto done = EncodeTextureBlocks(TextureBlockFormat::Bc1, image, out.View()); !done) { ... }
 namespace rocks {
+
+class WorkerScheduler;
 
 // BC1–BC5 인코더의 버전이다(12.17절 TD10 — 출력 byte가 바뀌면 올린다, 너겟 키에 들어간다).
 inline constexpr uint32 RocksBcEncoderVersion = 1;
@@ -81,7 +84,8 @@ enum class TextureAstcMode : uint8 {
     NormalLa,
 };
 
-// BC6H·BC7·ASTC 인코딩 선택이다(BC1–BC5·EAC는 보지 않는다).
+// 인코딩 선택이다. alphaProfile은 BC7, astcMode·srgb는 ASTC만 보고, 실행 칸(scheduler·
+// minBatchBlocks·scratch)은 모든 형식이 본다.
 struct TextureBlockOptions {
     // BC7이 알파 프로필(UE GetProfile_alpha_basic)을 쓰는지다. 거짓이면 RGB 프로필(GetProfile_basic
     // — 알파를 무시하고 255로 쓴다)이다. 쿠킹은 12.17절 TD5 알파 판정 결과를 넘긴다.
@@ -90,24 +94,34 @@ struct TextureBlockOptions {
     TextureAstcMode astcMode = TextureAstcMode::Rgba;
     // ASTC가 sRGB profile(ASTCENC_PRF_LDR_SRGB)인지다(…UnormSrgb 출력).
     bool srgb = false;
-    // ASTC 입력에 행 여백이 있을 때 빽빽한 slice 사본을 할당할 allocator다(호출 동안만 쓴다).
-    // 없으면 행 여백이 있는 ASTC 입력은 InvalidArgument다.
+    // 블록을 나눠 압축할 scheduler다(12.17.9 2 — (slice, 블록 행) 단위, ASTC는 astcenc
+    // thread_count). null이면 호출 스레드 혼자다. 같은 scheduler의 worker 안에서 부르거나 시작
+    // 전·종료 뒤이면 호출 스레드 혼자 실행한다. 결과 byte는 scheduler 유무·worker 수와 무관하다.
+    WorkerScheduler* scheduler = nullptr;
+    // batch 하나의 최소 블록 수다(0이면 형식 기본 — BC1–BC5 2048, 그 밖 블록 행 하나). 결과와
+    // 무관한 분배 조절값이다(시험은 작게 해 batch 경계를 본다).
+    uint32 minBatchBlocks = 0;
+    // 호출 동안 쓰는 할당용 allocator다: 병렬 helper 작업, ASTC 행 여백 입력의 빽빽한 사본과 slice
+    // 포인터. 여러 스레드가 동시에 Allocate·Deallocate해도 안전해야 한다(SystemAllocator는 맞다).
+    // scheduler가 있는데 없으면 InvalidArgument, 없으면 행 여백이 있는 ASTC 입력도
+    // InvalidArgument다.
     Allocator* scratch = nullptr;
 };
 
 // image를 format 블록으로 out에 쓴다. 출력은 slice 순, 블록 행 순, 블록 열 순이다. 블록보다 작은
 // 가장자리는 BC1–BC5·EAC R11이면 NVTT ColorBlock 주기 반복으로(폭 1은 0,0,0,0, 2는 0,1,0,1, 3은
 // 0,1,2,0 — 12.17절 TD4, EAC는 채운 texel을 오차에 넣지 않는다), BC6H·BC7·ASTC면 마지막 열·행
-// 복제로 채운다(UE PadImageToBlockSize·astcenc 좌표 clamp — 12.17.6 4·12.17.8 3). BC6H·BC7·ASTC는
-// 결정적 부동소수 환경(platform::RunWithDeterministicFloatingPoint)에서 압축하므로 호출자의 FTZ·DAZ
-// 설정과 무관하다.
+// 복제로 채운다(UE PadImageToBlockSize·astcenc 좌표 clamp — 12.17.6 4·12.17.8 3). 모든 형식은
+// 결정적 부동소수 환경(platform::RunWithDeterministicFloatingPoint — batch마다, 12.17.9 2)에서
+// 압축하므로 호출자와 worker의 FTZ·DAZ 설정과 무관하다.
 //
 // 오류(InvalidArgument): 크기 0, rowPitch가 sizeX × texel byte보다 작음, slicePitch가 slice가 닿는
 // byte(rowPitch × (sizeY − 1) + sizeX × texel byte)보다 작음, 입력 byte가 마지막 texel까지 닿지
 // 않음, out 크기가 TextureBlockOutputBytes와 다름. 출력 크기나 pitch로 계산한 입력 범위가 uint64를
 // 넘으면 CapacityExceeded다. BC6H·BC7 인코더가 없는 대상(Android)이나 x64에서 SSE4.2가 없는 CPU는
-// Unsupported다. ASTC는 행 여백이 있는데 scratch가 없으면 InvalidArgument, 사본 할당 실패는
-// OutOfMemory다. 실패하면 out 내용은 정하지 않는다.
+// Unsupported다. scheduler가 있는데 scratch가 없으면 InvalidArgument(그림 크기와 무관), ASTC는 행
+// 여백이 있는데 scratch가 없으면 InvalidArgument, 사본 할당 실패는 OutOfMemory다. 실패하면 out
+// 내용은 정하지 않는다.
 ROCKS_TEXTURETOOLS_API Result<void> EncodeTextureBlocks(TextureBlockFormat format,
                                                         const TextureBlockImage& image,
                                                         const TextureBlockOptions& options,

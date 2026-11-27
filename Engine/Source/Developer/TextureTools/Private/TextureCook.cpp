@@ -711,7 +711,9 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
         }
 
         ++builds_;
-        if (auto done = BuildTexture(allocator, settings, read.Value(), built); !done) {
+        // 블록 압축은 쿠킹의 scheduler로 나눠 실행한다(12.17.9 4 — 결과는 같다).
+        const TextureBuildExecution execution{context.scheduler, context.scratch};
+        if (auto done = BuildTexture(allocator, settings, read.Value(), built, execution); !done) {
             return CookFail(context, built.failure.code, done.Error(), built.failure.detail);
         }
 

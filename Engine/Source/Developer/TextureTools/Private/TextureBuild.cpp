@@ -1,6 +1,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
 #include <DeterministicMath/DeterministicMath.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include "TextureBuildInternal.h"
 #include "TextureImportInternal.h"
@@ -750,6 +751,8 @@ struct EncodeOptions {
     bool alphaProfile = false;
     // ASTC 채널 배치다(12.17.8 3 — TextureFormatChoice::astcMode).
     TextureAstcMode astcMode = TextureAstcMode::Rgba;
+    // 블록 압축 실행 방법이다(12.17.9 4 — BuildTexture 인자 그대로).
+    TextureBuildExecution execution{};
     // norm16 대체(G16 → R16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0이다(12.14절).
     bool clampUnit = false;
 };
@@ -821,6 +824,8 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
         blockOptions.alphaProfile = options.alphaProfile;
         blockOptions.astcMode = options.astcMode;
         blockOptions.srgb = srgb;
+        blockOptions.scheduler = options.execution.scheduler;
+        blockOptions.scratch = options.execution.scratch;
         return EncodeTextureBlocks(block, image, blockOptions, out.View());
     }
 
@@ -1328,12 +1333,18 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     return Result<void>::Success();
 }
 
-Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
-                          Span<const uint8> sourcePixels, TextureBuildResult& out) noexcept {
+// 빌드 본문이다(결정적 부동소수 환경 안에서 불린다 — BuildTexture).
+static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSettings& settings,
+                                     Span<const uint8> sourcePixels, TextureBuildResult& out,
+                                     const TextureBuildExecution& execution) noexcept {
     out.mips.Clear();
     out.warnings.Clear();
     out.failure = TextureBuildFailure{};
     out.pixelFormat = graphics::PixelFormat::Unknown;
+    // 병렬에는 helper 작업을 할당할 scratch가 필요하다(일을 하기 전에 거부한다 — 12.17.9 3).
+    if (execution.scheduler != nullptr && execution.scratch == nullptr) {
+        return Fail(out, AssetDiagnosticCode::None, ErrorCode::InvalidArgument, 0);
+    }
     out.srgb = false;
     const bool volume = settings.dimension == TextureDimension::Volume;
     const bool cube = settings.dimension == TextureDimension::TextureCube ||
@@ -1547,7 +1558,9 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     }
 
     // 7·8. 쿠킹 편향과 출력.
-    const EncodeOptions options = EncodeOptionsFor(settings, choice);
+    EncodeOptions options = EncodeOptionsFor(settings, choice);
+    options.execution = execution;
+
     for (uint32 mip = dropped; mip < chain; ++mip) {
         const Level& current = mips[mip];
         TextureBuiltMip built(allocator);
@@ -1570,6 +1583,41 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     out.alphaTransparent = alphaTransparent;
     out.numSlices = volume ? 1 : settings.numSlices;
     return Result<void>::Success();
+}
+
+namespace {
+
+// 유니티 빌드에서 같은 묶음의 이름과 부딪히지 않게 이름 있는 namespace에 둔다.
+namespace build_environment {
+
+struct Job {
+    Allocator* allocator;
+    const TextureBuildSettings* settings;
+    Span<const uint8> pixels;
+    TextureBuildResult* out;
+    const TextureBuildExecution* execution;
+    Result<void> result;
+};
+
+void Run(void* opaque) noexcept {
+    Job& job = *static_cast<Job*>(opaque);
+    job.result =
+        BuildTextureBody(*job.allocator, *job.settings, job.pixels, *job.out, *job.execution);
+}
+
+} // namespace build_environment
+
+} // namespace
+
+// 원본 decode·재표본·mip 생성·변환의 float·double 연산도 결정적 부동소수 환경 안에서 한다(12.17.9 6
+// — 호출자의 FTZ·DAZ·반올림 설정이 결과를 바꾸지 않게. 인코더 batch는 따로 같은 환경을 건다).
+Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
+                          Span<const uint8> sourcePixels, TextureBuildResult& out,
+                          const TextureBuildExecution& execution) noexcept {
+    build_environment::Job job{&allocator, &settings,  sourcePixels,
+                               &out,       &execution, Result<void>::Success()};
+    platform::RunWithDeterministicFloatingPoint(&build_environment::Run, &job);
+    return rocks::Move(job.result);
 }
 
 namespace texture_build_detail {

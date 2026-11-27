@@ -140,7 +140,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 Sandbox `ScreenRenderer`는 렌더 세션(지금 rocks-80 — 전 이름 rocks-6a·rocks-20·rocks-2e) 소유다. 게임 UI(UiScreens)를 Sandbox에 붙일 때는 `ScreenRenderer`가 장면 pass 뒤에 `UiLaneRenderer::AddPasses`를 부르게 한다. UW6 당시 그래프는 스왑 체인 pass마다 백버퍼를 잡고 present해서 장면 위에 UI를 그릴 수 없었다. 렌더 세션에 다음을 요청했고, 처리 상태를 각 항에 적는다.
 
 1. 한 그래프에서 같은 스왑 체인을 대상으로 하는 raster pass 여럿이 백버퍼 하나를 공유하고, 마지막 pass에서만 present한다(뒤 pass는 load). — 반영됨(4e0cf5cf3, RenderBase 개정 64): `GraphPassAccesses::SwapChainTarget(swapChain, load, clear)`. UI는 `AddPasses(graph, context, target, windowLoad)`로 받는다(기본 Clear — 장면 뒤면 Load).
-2. `ScreenPacket`에 UI packet 자리를 둔다. — UT5에서 렌더 세션이 한다(UI 병합 뒤 알림).
+2. `ScreenPacket`에 UI packet 자리를 둔다. — 반영됨(RenderBase 18.5절 9항, 개정 69·70): 창 스왑체인은 UI 창 표면이고(`UiLaneRenderer::WindowSwapChain`), 장면 → tone map(Clear) → `AddPasses(..., Load)` 순이다.
 3. `RenderLane::SubmitFrame`이 프레임 함수 값을 `FinishFrame` 전에 부순다. — 반영됨(829719a3e, RenderBase 5.3절 개정 60). UI의 `ReleaseScenes` 우회를 지웠다.
 4. lane 전달 등록 표지를 RenderBase 아래로 옮긴다. — 반영됨(9e1a92adc, RenderBase 5.2절 개정 66): `Meta/LaneTransfer.h`의 `ROCKS_LANE_TRANSFERABLE`·`LaneTransferable`·`CheckLaneTransfer`. `UiSceneExtract::Post<T>`가 같은 개념과 Development 스키마 검사를 건다(UiCore가 MetaSchema에 공개 의존).
 

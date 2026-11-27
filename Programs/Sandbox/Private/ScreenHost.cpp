@@ -411,8 +411,9 @@ void DescribeInspectorTexture(graphics::PixelFormat format, const graphics::Chan
 
 ScreenHost::ScreenHost(Allocator& allocator, graphics::Device& device,
                        const render::EngineShaderHost& host) noexcept
-    : device_(device), renderer_(allocator, host), lane_(allocator, device), allocator_(allocator),
-      inspectors_(allocator), notices_(allocator) {
+    : device_(device), renderer_(allocator, host), lane_(allocator, device),
+      ui_(allocator, lane_, renderer_.Ui()), allocator_(allocator), inspectors_(allocator),
+      notices_(allocator) {
     for (uint32& entry : engineEntries_) {
         entry = NoInspectorEntry;
     }
@@ -439,13 +440,6 @@ ScreenHost::~ScreenHost() noexcept {
 
 Result<void> ScreenHost::Start(platform::Window& window, render::RenderLaneMode mode,
                                render::RenderLanePump pump) noexcept {
-    const platform::NativeWindowHandle native = window.NativeHandle();
-    graphics::NativeSurface surface;
-    surface.window = native.window;
-    surface.instance = native.instance;
-    width_ = window.Width();
-    height_ = window.Height();
-    renderer_.SetInitialSurface(surface, width_, height_);
     render::RenderLaneConfig config;
     config.mode = mode;
     config.processor = &renderer_;
@@ -458,6 +452,30 @@ Result<void> ScreenHost::Start(platform::Window& window, render::RenderLaneMode 
 
     window_ = &window;
     started_ = true;
+    // 창 스왑체인은 UI 창 표면이다(18.5절 9항). 생성 대기가 lane 시작 작업(엔진 셰이더 준비)도
+    // 기다린다.
+    if (auto created = CreateWindowSurface(window); !created) {
+        failed_ = true;
+        return created;
+    }
+
+    if (overlayEnabled_) {
+        auto overlay = UniquePtr<ScreenOverlay>::TryMake(allocator_, allocator_);
+        if (!overlay) {
+            failed_ = true;
+            return Result<void>::Failure(overlay.Error());
+        }
+
+        if (auto made = overlay.Value()->Create(); !made) {
+            failed_ = true;
+            Log::Error(LogSandboxScreen, "The screen overlay could not be created: {Error}",
+                       ErrorCodeName(made.Error()));
+            return made;
+        }
+
+        overlay_ = Move(overlay.Value());
+    }
+
     // 다음 단계의 쿠킹 텍스처가 들어올 자리의 Pending handle이다(장치 자원을 잇지 않는다 — typed
     // 대체로 그려진다).
     auto pending = lane_.ReserveHandle(render::RenderResourceKind::Texture);
@@ -529,6 +547,20 @@ void ScreenHost::SubmitFrame(GameInstanceClient* client) noexcept {
     }
 
     ScreenPacket packet;
+    packet.window = surface_;
+    packet.width = width_;
+    packet.height = height_;
+    if (overlay_ && overlayVisible_) {
+        auto recorded = RecordOverlay(arena);
+        if (recorded) {
+            packet.ui = Move(recorded.Value());
+        } else if (!overlayWarned_) {
+            overlayWarned_ = true;
+            Log::Warning(LogSandboxScreen, "The screen overlay was left out of a frame: {Error}",
+                         ErrorCodeName(recorded.Error()));
+        }
+    }
+
     packet.items = items.Value();
     packet.clear = {SceneClearColor[0], SceneClearColor[1], SceneClearColor[2], 1.0f};
     packet.tonemap = tonemap_;
@@ -853,6 +885,11 @@ void ScreenHost::HandleInspectorInput(const input::InputState& input) noexcept {
         ++mip;
     }
 
+    if (overlay_ && input.WasPressed(input::Key::F1)) {
+        overlayVisible_ = !overlayVisible_;
+        Log::Info(LogSandboxScreen, "Screen overlay {State}", overlayVisible_ ? "on" : "off");
+    }
+
     if (entry != selected_ || layer != inspectorLayer_ || mip != inspectorMip_) {
         SetInspectorEntry(entry, layer, mip);
         if (selected_ < inspectors_.Size()) {
@@ -871,7 +908,10 @@ void ScreenHost::Resize(uint32 width, uint32 height) noexcept {
 
     width_ = width;
     height_ = height;
-    (void)lane_.PostSurface(SurfaceResize{width, height}, &ResizeSurface);
+    // 표면 작업이다. 프레임 함수도 장면 pass 전에 packet 크기로 다시 맞춘다(18.5절 9항).
+    if (!surface_.IsNull()) {
+        (void)ui_.ResizeWindowSurface(surface_, width, height);
+    }
 }
 
 void ScreenHost::ReleaseSurface() noexcept {
@@ -880,8 +920,18 @@ void ScreenHost::ReleaseSurface() noexcept {
     }
 
     surfaceLost_ = true;
-    if (auto released = lane_.PostSurfaceAndWait(SurfaceRelease{}, &screen::ReleaseSurface);
-        !released) {
+    // 창 표면 파괴가 그 창의 프레임을 모두 처리한 뒤 스왑체인을 Retire한다. 이어 장치 대기가 그
+    // 표면을 쓰는 GPU 일과 회수를 끝낸다(5.3절 예외 1).
+    auto destroyed =
+        surface_.IsNull() ? Result<void>::Success() : ui_.DestroyWindowSurface(surface_);
+    surface_ = {};
+    // 파괴 대기가 실패해도(대기 상한) 장치 대기는 게시한다(뒤에 처리된 파괴의 GPU 일까지 끝낸다).
+    auto released = lane_.PostSurfaceAndWait(SurfaceReleaseWait{}, &WaitSurfaceRelease);
+    if (!destroyed) {
+        released = Move(destroyed);
+    }
+
+    if (!released) {
         Log::Error(LogSandboxScreen, "The swap chain could not be released: {Error}",
                    ErrorCodeName(released.Error()));
     }
@@ -892,23 +942,65 @@ void ScreenHost::RecreateSurface(platform::Window& window) noexcept {
         return;
     }
 
-    const platform::NativeWindowHandle native = window.NativeHandle();
-    SurfaceCreate create;
-    create.surface.window = native.window;
-    create.surface.instance = native.instance;
-    create.width = window.Width();
-    create.height = window.Height();
-    if (create.width == 0 || create.height == 0) {
+    if (window.Width() == 0 || window.Height() == 0) {
         return;
     }
 
-    width_ = create.width;
-    height_ = create.height;
-    surfaceLost_ = false;
-    (void)lane_.PostSurface(Move(create), &CreateSurface);
+    if (CreateWindowSurface(window)) {
+        surfaceLost_ = false;
+    }
 }
 
-Result<void> ScreenHost::RequestCapture(uint32 width, uint32 height) noexcept {
+Result<void> ScreenHost::CreateWindowSurface(platform::Window& window) noexcept {
+    const platform::NativeWindowHandle native = window.NativeHandle();
+    ui::UiWindowSurfaceDesc desc;
+    desc.nativeWindow = native.window;
+    desc.nativeInstance = native.instance;
+    desc.width = window.Width();
+    desc.height = window.Height();
+    // 게임 창은 장치 스왑체인 기본(수직 동기화)이다(UI 창 표면 기본은 에디터 창 값이라 끔).
+    desc.vsync = graphics::SwapChainDesc{}.vsync;
+    auto created = ui_.CreateWindowSurface(desc);
+    if (!created) {
+        Log::Error(LogSandboxScreen,
+                   "The window surface could not be created ({Width}x{Height}): "
+                   "{Error}",
+                   desc.width, desc.height, ErrorCodeName(created.Error()));
+        return Result<void>::Failure(created.Error());
+    }
+
+    surface_ = created.Value();
+    width_ = desc.width;
+    height_ = desc.height;
+    return Result<void>::Success();
+}
+
+Result<ui::UiFramePacket> ScreenHost::RecordOverlay(FrameArena& arena) noexcept {
+    OverlayState state;
+    const uint32 count = InspectorEntryCount();
+    if (selected_ < count) {
+        const InspectorTexture& texture = inspectors_[selected_].texture;
+        const uint32 mips = texture.mips != 0 ? texture.mips : 1;
+        const uint32 layers = InspectorLayerCount(texture, inspectorMip_);
+        state.entry = static_cast<float>(selected_ + 1) / static_cast<float>(count);
+        state.mip = static_cast<float>(inspectorMip_ + 1) / static_cast<float>(mips);
+        state.layer =
+            static_cast<float>(inspectorLayer_ + 1) / static_cast<float>(layers != 0 ? layers : 1);
+    }
+
+    auto buffer = ui_.AcquireDrawBuffer();
+    if (!buffer) {
+        return Result<ui::UiFramePacket>::Failure(buffer.Error());
+    }
+
+    auto added = overlay_->Record(state, surface_, width_, height_, *buffer.Value());
+    auto packet = added ? ui_.RecordWindows(arena, *buffer.Value())
+                        : Result<ui::UiFramePacket>::Failure(added.Error());
+    ui_.ReleaseDrawBuffer(*buffer.Value());
+    return packet;
+}
+
+Result<void> ScreenHost::RequestCapture() noexcept {
     if (!started_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -919,7 +1011,7 @@ Result<void> ScreenHost::RequestCapture(uint32 width, uint32 height) noexcept {
     }
 
     capture_ = handle.Value();
-    return lane_.PostResource(CaptureCreate{capture_, width, height}, &CreateCapture);
+    return lane_.PostResource(CaptureCreate{capture_, width_, height_}, &CreateCapture);
 }
 
 void ScreenHost::BlockFrames() noexcept {

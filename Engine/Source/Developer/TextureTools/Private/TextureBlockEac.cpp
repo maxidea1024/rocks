@@ -1,4 +1,5 @@
 #include "TextureBlockEacAstc.h"
+#include "TextureBlockParallel.h"
 
 #include <Base/NumericLimits.h>
 #include <Platform/PlatformMath.h>
@@ -340,40 +341,72 @@ void EncodeEacR11Block(const uint16 (&values)[TextureBlockTexels], uint16 validM
 
 namespace texture_block_detail {
 
-void EncodeEacBlocks(const uint8* base, uint32 sizeX, uint32 sizeY, uint32 numSlices,
-                     uint64 rowPitch, uint64 slicePitch, Span<uint8> out) noexcept {
-    // NVTT ColorBlock::init의 가장자리 remainder 표다(BC4와 같은 채움 — 채운 texel은 오차에 넣지
-    // 않는다, 12.17.8 4).
+namespace {
+
+// 유니티 빌드에서 같은 묶음의 이름과 부딪히지 않게 이름 있는 namespace에 둔다.
+namespace eac_rows {
+
+struct Job {
+    const uint8* base;
+    uint32 sizeX;
+    uint32 sizeY;
+    uint32 blocksX;
+    uint32 blocksY;
+    uint64 rowPitch;
+    uint64 slicePitch;
+    uint8* out;
+};
+
+// 블록 행 [begin, end)를 압축한다(행 번호 = slice · blocksY + 블록 행 — 12.17.9 2). NVTT
+// ColorBlock::init의 가장자리 remainder 표로 채우고 채운 texel은 오차에 넣지 않는다(BC4와 같은 채움
+// — 12.17.8 4).
+void EncodeRows(void* context, uint64 begin, uint64 end) noexcept {
     constexpr uint32 Remainder[TextureBlockSize][TextureBlockSize] = {
         {0, 0, 0, 0}, {0, 1, 0, 1}, {0, 1, 2, 0}, {0, 1, 2, 3}};
     constexpr uint32 TexelBytes = 2;
-    uint8* cursor = out.Data();
-    for (uint32 slice = 0; slice < numSlices; ++slice) {
-        const uint8* plane = base + slicePitch * slice;
-        for (uint32 y = 0; y < sizeY; y += TextureBlockSize) {
-            const uint32 bh = sizeY - y < TextureBlockSize ? sizeY - y : TextureBlockSize;
-            for (uint32 x = 0; x < sizeX; x += TextureBlockSize) {
-                const uint32 bw = sizeX - x < TextureBlockSize ? sizeX - x : TextureBlockSize;
-                uint16 values[TextureBlockTexels];
-                uint16 mask = 0;
-                for (uint32 row = 0; row < TextureBlockSize; ++row) {
-                    const uint8* line = plane + rowPitch * (y + Remainder[bh - 1][row]);
-                    for (uint32 column = 0; column < TextureBlockSize; ++column) {
-                        const uint8* texel =
-                            line + uint64{x + Remainder[bw - 1][column]} * TexelBytes;
-                        const uint32 i = row * TextureBlockSize + column;
-                        values[i] = static_cast<uint16>(texel[0] | (texel[1] << 8));
-                        if (row < bh && column < bw) {
-                            mask = static_cast<uint16>(mask | (1u << i));
-                        }
+    const Job& job = *static_cast<const Job*>(context);
+    for (uint64 index = begin; index < end; ++index) {
+        const uint64 slice = index / job.blocksY;
+        const uint32 y = static_cast<uint32>(index % job.blocksY) * TextureBlockSize;
+        const uint8* plane = job.base + job.slicePitch * slice;
+        uint8* cursor = job.out + index * job.blocksX * eac_encode::BlockBytes;
+        const uint32 bh = job.sizeY - y < TextureBlockSize ? job.sizeY - y : TextureBlockSize;
+        for (uint32 x = 0; x < job.sizeX; x += TextureBlockSize) {
+            const uint32 bw = job.sizeX - x < TextureBlockSize ? job.sizeX - x : TextureBlockSize;
+            uint16 values[TextureBlockTexels];
+            uint16 mask = 0;
+            for (uint32 row = 0; row < TextureBlockSize; ++row) {
+                const uint8* line = plane + job.rowPitch * (y + Remainder[bh - 1][row]);
+                for (uint32 column = 0; column < TextureBlockSize; ++column) {
+                    const uint8* texel = line + uint64{x + Remainder[bw - 1][column]} * TexelBytes;
+                    const uint32 i = row * TextureBlockSize + column;
+                    values[i] = static_cast<uint16>(texel[0] | (texel[1] << 8));
+                    if (row < bh && column < bw) {
+                        mask = static_cast<uint16>(mask | (1u << i));
                     }
                 }
-
-                EncodeEacR11Block(values, mask, cursor);
-                cursor += eac_encode::BlockBytes;
             }
+
+            EncodeEacR11Block(values, mask, cursor);
+            cursor += eac_encode::BlockBytes;
         }
     }
+}
+
+} // namespace eac_rows
+
+} // namespace
+
+Result<void> EncodeEacBlocks(const uint8* base, uint32 sizeX, uint32 sizeY, uint32 numSlices,
+                             uint64 rowPitch, uint64 slicePitch, const TextureBlockOptions& options,
+                             Span<uint8> out) noexcept {
+    const uint32 blocksX =
+        static_cast<uint32>((uint64{sizeX} + TextureBlockSize - 1) / TextureBlockSize);
+    const uint32 blocksY =
+        static_cast<uint32>((uint64{sizeY} + TextureBlockSize - 1) / TextureBlockSize);
+    eac_rows::Job job{base, sizeX, sizeY, blocksX, blocksY, rowPitch, slicePitch, out.Data()};
+    return RunBlockRows(options, uint64{blocksY} * numSlices, blocksX, RowMinBatchBlocks, &job,
+                        &eac_rows::EncodeRows);
 }
 
 } // namespace texture_block_detail

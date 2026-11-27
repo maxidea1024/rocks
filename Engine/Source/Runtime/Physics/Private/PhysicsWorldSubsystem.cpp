@@ -134,6 +134,8 @@ Result<void> PhysicsWorldSubsystem::ApplyResults(World& world) noexcept {
     }
 
     physics::JoltPhysicsScene& scene = JoltScene(*scene_);
+    // 이번 프레임의 고정 스텝이 끝났다(프레임 힘 — 7.1.17절).
+    scene.EndFrame();
     auto moved = scene.TakeMovedBodies();
     ErrorCode failure = moved ? ErrorCode::None : moved.Error();
     const Span<const physics::MovedBody> bodies =
