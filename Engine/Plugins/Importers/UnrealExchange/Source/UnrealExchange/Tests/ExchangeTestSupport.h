@@ -326,6 +326,28 @@ inline bool FixtureSourcePath(StringView name, StringBuilderBase& out) noexcept 
            out.TryAppend("/Plugins/Importers/UnrealExchange/Tests/Bundles/") && out.TryAppend(name);
 }
 
+// 엔진 디렉터리 기준 상대 경로(`/Plugins/...`) 파일의 내용을 out에 읽는다.
+inline bool ReadRepositoryFile(Allocator& allocator, StringView relative,
+                               Array<char>& out) noexcept {
+    constexpr usize PathCapacity = 4096;
+    char engine[PathCapacity];
+    auto found = FindEngineDirectory(Span<char>(engine, PathCapacity));
+    StringBuilder<512> path(allocator);
+    if (!found || !path.TryAppend(StringView(engine, found.Value())) || !path.TryAppend(relative)) {
+        return false;
+    }
+
+    platform::File file;
+    uint64 size = 0;
+    if (!file.Open(platform::PhysicalFileSystem(), path.CString(), path.ByteCount(),
+                   platform::FileOpenMode::ReadExisting) ||
+        !file.Size(size) || !out.TryResize(static_cast<usize>(size))) {
+        return false;
+    }
+
+    return static_cast<bool>(file.ReadExact(out.Data(), out.Size()).status);
+}
+
 // 실제 파일 시스템의 source 디렉터리 아래 모든 파일을 files의 target 아래로 복사한다.
 inline bool CopyTree(Allocator& allocator, StringView source, StringView target,
                      MemoryFiles& files) noexcept {
