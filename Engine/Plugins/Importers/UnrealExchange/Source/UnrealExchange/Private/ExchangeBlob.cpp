@@ -272,11 +272,11 @@ bool FinishBlobCheck(BlobSource& source, const ExchangeBlobRef& blob,
     }
 
     if (!(digest == blob.digest)) {
-        return FailBlobFile(failure, ExchangeIssue::BlobHash, ErrorCode::InvalidArgument);
+        return FailBlobFile(failure, ExchangeIssue::BlobHash, ErrorCode::CorruptData);
     }
 
     if (!parsed) {
-        return FailBlobFile(failure, ExchangeIssue::BlobLayout, ErrorCode::InvalidArgument);
+        return FailBlobFile(failure, ExchangeIssue::BlobLayout, ErrorCode::CorruptData);
     }
 
     return true;
@@ -366,7 +366,7 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
 
     if (!regular) {
         return Result<bool>::Success(
-            FailBlobFile(failure, ExchangeIssue::NotRegularFile, ErrorCode::InvalidArgument));
+            FailBlobFile(failure, ExchangeIssue::NotRegularFile, ErrorCode::CorruptData));
     }
 
     platform::File file;
@@ -386,7 +386,7 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
     // 크기를 먼저 본다(조작된 크기로 큰 할당을 만들지 못하게).
     if (size != blob.bytes) {
         return Result<bool>::Success(
-            FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::InvalidArgument));
+            FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::CorruptData));
     }
 
     if (keep != nullptr) {
@@ -425,7 +425,7 @@ Result<void> VerifyExchangeBlob(const ExchangeBlobRef& blob, Span<const uint8> b
     exchange_detail::BlobCheckFailure failure;
     bool checked = false;
     if (static_cast<uint64>(bytes.Size()) != blob.bytes) {
-        checked = FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::InvalidArgument);
+        checked = FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::CorruptData);
     } else {
         MemoryBlobSource source(bytes);
         checked = FinishBlobCheck(source, blob, failure);
