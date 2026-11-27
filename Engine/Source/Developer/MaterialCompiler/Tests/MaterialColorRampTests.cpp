@@ -4,6 +4,7 @@
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.generated.h>
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.h>
 #include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 #include "MaterialGraphFixture.h"
 #include "MaterialIrEvaluator.h"
@@ -21,6 +22,10 @@ using namespace material_ir_evaluator;
 namespace {
 
 constexpr Guid RampCurveId{0x52414d50ull, 1};
+// 공급에 없는 커브 id다.
+constexpr Guid UnknownCurveId{0x52414d50ull, 9};
+// 키 구간 합의 float4 묶음 키 수다(UE ME:4949).
+constexpr usize RampVectorKeys = 4;
 // 구간 합 기대값의 허용 오차다(같은 연산 순서 — Dot 합 순서만 다를 수 있다).
 constexpr float RampTolerance = 1e-6f;
 
@@ -87,7 +92,7 @@ bool TranslateRamp(GraphFixture& fixture, const MaterialSourceProvider* sources,
     return fixture.ready && TranslateMaterial(fixture.env.allocator, input, out).IsOk();
 }
 
-// ramp Result의 R·G·B(emissive)와 A(AO 마스크)를 계산한다.
+// ramp Result의 R·G·B(emissive)와 A(PixelDepthOffset 마스크)를 계산한다.
 bool EvaluateRamp(GraphFixture& fixture, Guid ramp, const MaterialSourceProvider* sources,
                   MaterialTranslation& out, float (&color)[MaxIrComponents]) noexcept {
     const Guid unlit = fixture.Add("Material.SurfaceUnlit");
@@ -188,67 +193,134 @@ TEST(MaterialColorRamp_ConstantInputUsesCurveEvaluation) {
     REQUIRE(out.dependencies.Size() == 1);
     CHECK(out.dependencies[0].role == MaterialDependencyRole::ColorCurve);
     CHECK(out.dependencies[0].asset == RampCurveId);
+
+    // 핀 사용자 값(다성분이면 첫 성분)이 시간이다.
+    GraphFixture valued(env);
+    const Guid valuedRamp = AddRamp(valued, RampCurveId);
+    valued.SetValue(valuedRamp, "Input", PinValue(0.7f, 2));
+    MaterialTranslation valuedOut(env.allocator);
+    float valuedColor[MaxIrComponents] = {};
+    REQUIRE(EvaluateRamp(valued, valuedRamp, &sources, valuedOut, valuedColor));
+    const LinearColor at = EvaluateAdjustedColorCurve(curves.r, curves.g, curves.b, curves.a,
+                                                      adjustments, 0.7f, false);
+    CHECK(BitsOf(valuedColor[0]) == BitsOf(at.r));
+    CHECK(BitsOf(valuedColor[3]) == BitsOf(at.a));
 }
 
-// Input이 연결되면 UE 키 구간 합이다: 키 0개 0(알파도 — 상수 경로의 1과 다르다), 1개 그 값, 2개
-// 자르지 않는 lerp, 6개는 float4 묶음 하나와 나머지 한 구간이다. 색 조정은 쓰지 않는다.
+// Input이 연결되면 UE 키 구간 합이다(접히지 않는 입력 sin(c)): 키 0개 0(알파도 — 상수 경로의 1과
+// 다르다), 1개 그 값, 2개 자르지 않는 lerp, 그 밖은 float4 묶음 floor((N − 1) / 4)개(Dot)와 나머지
+// 스칼라 구간(Saturate)이다. 색 조정은 쓰지 않는다. 값은 첫 키 아래·안·위에서 본다.
 TEST(MaterialColorRamp_DynamicInputUsesKeySegments) {
     TranslatorEnv env;
     REQUIRE(env.ready);
-    RampCurves curves(env.allocator);
-    const float single[] = {0.75f};
-    const float oneTime[] = {0.2f};
-    const float pairTimes[] = {0.0f, 0.5f};
-    const float pairValues[] = {0.2f, 0.6f};
-    const float manyTimes[] = {0.0f, 0.1f, 0.25f, 0.4f, 0.7f, 1.0f};
-    const float manyValues[] = {0.0f, 0.5f, 0.2f, 0.9f, 0.3f, 1.0f};
-    REQUIRE(AddKeys(curves.g, oneTime, single));
-    REQUIRE(AddKeys(curves.b, pairTimes, pairValues));
-    REQUIRE(AddKeys(curves.a, manyTimes, manyValues));
-    ColorCurveAdjustments adjustments;
-    adjustments.hue = 90.0f;
-    adjustments.brightness = 2.0f;
-    const MaterialColorCurveSnapshot snapshot = curves.Snapshot(adjustments);
-    const RampSources sources(snapshot);
-
-    const float inputs[] = {0.33f, 0.8f, 1.5f};
-    for (float x : inputs) {
-        GraphFixture fixture(env);
-        const Guid ramp = AddRamp(fixture, RampCurveId);
-        ConstantProperties input;
-        input.r = x;
-        fixture.Connect(fixture.Add("Material.Constant", env.Save(input)), "Result", ramp, "Input");
-        MaterialTranslation out(env.allocator);
-        float color[MaxIrComponents] = {};
-        REQUIRE(EvaluateRamp(fixture, ramp, &sources, out, color));
-
-        // UE: Lerp(v0, v1, (x − t0) / (t1 − t0))는 범위 밖도 늘린다.
-        const float pair = pairValues[0] + ((x - pairTimes[0]) / (pairTimes[1] - pairTimes[0])) *
-                                               (pairValues[1] - pairValues[0]);
-        float many = manyValues[0];
-        for (usize at = 0; at + 1 < 6; ++at) {
-            many += (manyValues[at + 1] - manyValues[at]) *
-                    Saturate((x - manyTimes[at]) / (manyTimes[at + 1] - manyTimes[at]));
+    using Math = platform::PlatformMath;
+    const usize counts[] = {0, 1, 2, 3, 4, 5, 8, 9};
+    // sin(c)가 첫 키(0) 아래·안·마지막 키 위가 되는 c다.
+    const float seeds[] = {-0.3f, 0.45f, 1.4f};
+    for (usize count : counts) {
+        RampCurves curves(env.allocator);
+        float times[9] = {};
+        float values[9] = {};
+        for (usize at = 0; at < count; ++at) {
+            times[at] = static_cast<float>(at) * 0.11f;
+            values[at] = static_cast<float>((at * 7) % 5) * 0.2f + 0.05f;
         }
 
-        CHECK(color[0] == 0.0f);
-        CHECK(color[1] == single[0]);
-        CHECK(Near(color[2], pair));
-        CHECK(Near(color[3], many));
+        REQUIRE(
+            AddKeys(curves.r, Span<const float>(times, count), Span<const float>(values, count)));
+        ColorCurveAdjustments adjustments;
+        adjustments.hue = 90.0f;
+        adjustments.brightness = 2.0f;
+        const MaterialColorCurveSnapshot snapshot = curves.Snapshot(adjustments);
+        const RampSources sources(snapshot);
+        for (float seed : seeds) {
+            GraphFixture fixture(env);
+            const Guid ramp = AddRamp(fixture, RampCurveId);
+            fixture.Connect(AddVarying(fixture, seed), "Result", ramp, "Input");
+            MaterialTranslation out(env.allocator);
+            float color[MaxIrComponents] = {};
+            REQUIRE(EvaluateRamp(fixture, ramp, &sources, out, color));
+
+            const float x = Math::Sin(seed);
+            float expected = 0.0f;
+            if (count == 1) {
+                expected = values[0];
+            } else if (count == 2) {
+                expected =
+                    values[0] + ((x - times[0]) / (times[1] - times[0])) * (values[1] - values[0]);
+            } else if (count > 2) {
+                expected = values[0];
+                for (usize at = 0; at + 1 < count; ++at) {
+                    expected += (values[at + 1] - values[at]) *
+                                Saturate((x - times[at]) / (times[at + 1] - times[at]));
+                }
+            }
+
+            CHECK(Near(color[0], expected));
+            CHECK(color[1] == 0.0f);
+            CHECK(color[3] == 0.0f);
+
+            usize dots = 0;
+            usize saturates = 0;
+            usize lerps = 0;
+            for (const IrValue& value : out.module.Values()) {
+                dots += value.op == IrOp::Dot ? 1 : 0;
+                saturates += value.op == IrOp::Saturate ? 1 : 0;
+                lerps += value.op == IrOp::Lerp ? 1 : 0;
+            }
+
+            const usize segments = count > 2 ? count - 1 : 0;
+            const usize vectors = segments / RampVectorKeys;
+            CHECK(dots == vectors);
+            CHECK(saturates == vectors + (segments - vectors * RampVectorKeys));
+            CHECK(lerps == (count == 2 ? 1u : 0u));
+        }
     }
 }
 
-// 커브가 없거나(참조 없음·공급에 없음) 공급이 없으면 UE 문구 "Missing ColorCurve"다.
+// 키 둘의 값이 같으면 UE Lerp가 끝 값을 그대로 돌려준다(HT:10378 — lerp 연산이 남지 않는다).
+TEST(MaterialColorRamp_EqualPairSkipsLerp) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    RampCurves curves(env.allocator);
+    const float times[] = {0.2f, 0.6f};
+    const float values[] = {0.25f, 0.25f};
+    REQUIRE(AddKeys(curves.r, times, values));
+    const MaterialColorCurveSnapshot snapshot = curves.Snapshot(ColorCurveAdjustments{});
+    const RampSources sources(snapshot);
+    GraphFixture fixture(env);
+    const Guid ramp = AddRamp(fixture, RampCurveId);
+    fixture.Connect(AddVarying(fixture, 0.3f), "Result", ramp, "Input");
+    MaterialTranslation out(env.allocator);
+    float color[MaxIrComponents] = {};
+    REQUIRE(EvaluateRamp(fixture, ramp, &sources, out, color));
+    CHECK(color[0] == values[0]);
+    for (const IrValue& value : out.module.Values()) {
+        CHECK(value.op != IrOp::Lerp);
+    }
+}
+
+// 커브 진단: 참조가 비었거나 공급이 없으면 UE 문구 "Missing ColorCurve", 공급에 없으면 "Color curve
+// asset is not available", 채널이 빈 snapshot도 "Missing ColorCurve"다. 의존은 남지 않는다(빈
+// 채널은 찾은 커브라 남는다).
 TEST(MaterialColorRamp_MissingCurve) {
     TranslatorEnv env;
     REQUIRE(env.ready);
     RampCurves curves(env.allocator);
     const MaterialColorCurveSnapshot snapshot = curves.Snapshot(ColorCurveAdjustments{});
     const RampSources sources(snapshot);
+    MaterialColorCurveSnapshot empty = snapshot;
+    empty.g = nullptr;
+    const RampSources emptySources(empty);
     const struct {
         Guid curve;
         const MaterialSourceProvider* provider;
-    } cases[] = {{Guid{}, &sources}, {Guid{0x52414d50ull, 9}, &sources}, {RampCurveId, nullptr}};
+        StringView message;
+        usize dependencies;
+    } cases[] = {{Guid{}, &sources, "Missing ColorCurve", 0},
+                 {UnknownCurveId, &sources, "Color curve asset is not available", 0},
+                 {RampCurveId, nullptr, "Missing ColorCurve", 0},
+                 {RampCurveId, &emptySources, "Missing ColorCurve", 1}};
     for (const auto& item : cases) {
         GraphFixture fixture(env);
         const Guid ramp = AddRamp(fixture, item.curve);
@@ -258,8 +330,8 @@ TEST(MaterialColorRamp_MissingCurve) {
         MaterialTranslation out(env.allocator);
         REQUIRE(TranslateRamp(fixture, item.provider, out));
         CHECK(HasOnlyErrorAt(out, MaterialDiagnosticCode::MissingInput, ramp));
-        CHECK(HasMessage(out, "Missing ColorCurve"));
-        CHECK(out.dependencies.IsEmpty());
+        CHECK(HasMessage(out, item.message));
+        CHECK(out.dependencies.Size() == item.dependencies);
     }
 }
 

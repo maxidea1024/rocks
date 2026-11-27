@@ -377,6 +377,10 @@ const MaterialTextureFacts* LoweringContext::FindTexture(Guid asset) const noexc
     return nullptr;
 }
 
+const MaterialSourceProvider* LoweringContext::Sources() const noexcept {
+    return translator_.Input().sources;
+}
+
 Result<const MaterialColorCurveSnapshot*> LoweringContext::FindColorCurve(Guid asset) noexcept {
     const MaterialSourceProvider* sources = translator_.Input().sources;
     const MaterialColorCurveSnapshot* snapshot =

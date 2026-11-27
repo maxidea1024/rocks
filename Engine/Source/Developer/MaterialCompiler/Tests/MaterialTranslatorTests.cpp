@@ -290,7 +290,8 @@ TEST(MaterialTranslator_GraphErrors) {
     {
         GraphFixture fixture(env);
         const Guid unknown = fixture.Add("Material.DoesNotExist");
-        // 선행 작업을 기다리는 노드(MPQ-CurveAsset)다. MS2 끝에는 구현 노드가 모두 번역된다.
+        // 선행 작업을 기다리는 노드(MPQ-CurveAsset)다. MS2 끝에는 구현 노드가 모두 번역된다(구현
+        // 노드에 lowering이 있는지는 MaterialShaderCompileTests 모음이 본다).
         const Guid later = fixture.Add("Material.CurveAtlasRowParameter");
         fixture.Connect(unknown, "Result", OutputNodeId, "AmbientOcclusion");
         fixture.Connect(later, "R", OutputNodeId, "PixelDepthOffset");

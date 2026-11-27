@@ -4,9 +4,9 @@
 #include <MaterialCompiler/MaterialColorCurveSnapshot.h>
 #include <MaterialCompiler/MaterialGraphSnapshot.h>
 
-// 번역 입력의 원본 공급 interface다(Docs/Design/MaterialSystem 19.4.2절, 6.12절 MS2e2). 함수
-// 호출·레이어는 FindFunction, MaterialSample은 FindMaterial, ColorRamp는 FindColorCurve로 그 에셋의
-// snapshot을 받는다. 함수
+// 번역 입력의 원본 공급 interface다(Docs/Design/MaterialSystem 19.4.2절, 6.12절 MS2e2·6.13절
+// MS2f4). 함수 호출·레이어는 FindFunction, MaterialSample은 FindMaterial, ColorRamp는
+// FindColorCurve로 그 에셋의 snapshot을 받는다. 함수
 // 인스턴스는 구현이 기반 함수 snapshot으로 푼다(override 적용은 MS6). 시험은 메모리 provider로
 // 한다.
 //

@@ -101,7 +101,7 @@
 | `UMaterialExpressionHsvToRgb` | `Material.HsvToRgb` | 구현 | MS2f | — |  |
 | `UMaterialExpressionRgbToHsv` | `Material.RgbToHsv` | 구현 | MS2f | — |  |
 | `UMaterialExpressionBlackBody` | `Material.BlackBody` | 구현 | MS2f | — |  |
-| `UMaterialExpressionColorRamp` | `Material.ColorRamp` | 구현 | MS2f | `src:Curve` | UE와 같게: 구간별 선형식을 saturate해 더한다(보간 모드·접선 무시), key 둘이면 saturate 없는 lerp, 입력이 상수면 CPU에서 커브 평가(MaterialExpressions.cpp:4906–4987) |
+| `UMaterialExpressionColorRamp` | `Material.ColorRamp` | 구현 | MS2f | `src:Curve` | UE와 같게: 구간별 선형식을 saturate해 더한다(보간 모드·접선 무시), key 둘이면 saturate 없는 lerp, Input이 연결되지 않으면 번역 때 커브 평가식(조정 포함) 상수 — UE 기존 번역기 기준(MaterialExpressions.cpp:4899–5014, 6.13절 MS2f4) |
 | `UMaterialExpressionSRGBColorToWorkingColorSpace` | `Material.SrgbToWorkingColorSpace` | 구현 | MS2f | — | 작업 색공간이 sRGB/Rec.709 고정이면 항등(색공간 설정은 후속) |
 
 ### 19.6.4 좌표(13)

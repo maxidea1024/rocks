@@ -168,7 +168,7 @@ Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema&
 
 // 그래프 안 함수 호출·MaterialSample·레이어 노드 참조와 ColorRamp 색 커브를 Build 의존으로 더한다
 // (Docs/Design/MaterialSystem 6.12절 MS2e2·MS2e3 — 번역이 펼치는 그래프다, 6.13절 MS2f4 — 번역이
-// 읽는 커브다, 4.6.1절). 자기 참조는 건너뛴다(번역이 V3로 진단한다).
+// 읽는 커브다, 4.6.1절). 자기 참조는 건너뛴다(번역이 그래프면 V3, 커브면 커브 없음으로 진단한다).
 Result<void> AddGraphReferences(const AssetTypeHookContext& context,
                                 const nodegraph::GraphDocument& document,
                                 AssetDependencySink& sink) noexcept {
