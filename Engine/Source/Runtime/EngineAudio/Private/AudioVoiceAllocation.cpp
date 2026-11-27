@@ -85,7 +85,47 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
             continue;
         }
 
-        record.estimate = record.volume.At(now) * playable.volume * record.spatial.attenuationGain;
+        // 재생 시간(UE PlaybackTime — 감기지 않는 pitch 보정 경과, StopOldest)은 모든 상태에서
+        // 진행한다.
+        if (now > record.playbackMixFrame) {
+            const double pitch =
+                static_cast<double>(ClampVoicePitch(record.pitch.At(now) * playable.pitch));
+            const double elapsed = static_cast<double>(now - record.playbackMixFrame) * pitch;
+            record.playbackTime += elapsed;
+            if (record.state == RecordState::Submitted && record.started) {
+                record.voicedTime += elapsed;
+            }
+
+            record.playbackMixFrame = now;
+        }
+
+        record.unscaledEstimate =
+            record.volume.At(now) * playable.volume * record.spatial.attenuationGain;
+    }
+}
+
+void AudioDeviceContext::UpdateWeights(uint64 now) noexcept {
+    // 동시 발음 갱신(cull·순위) 뒤에 scale·v·W를 정한다(같은 묶음의 새 재생도 첫 묶음부터 제 scale
+    // — 3.41.4절).
+    for (Record& record : records_) {
+        if (record.state == RecordState::Inactive) {
+            continue;
+        }
+
+        // 동시 발음 scale은 그룹 scale의 곱이다(MinConcurrencyVolumeScale 이하는 0 — 3.41.2절).
+        float scale = 1.0f;
+        for (uint32 index = 0; index < record.linkCount; ++index) {
+            const float value = record.links[index].scale.At(now);
+            scale *= value <= MinConcurrencyVolumeScale ? 0.0f : value;
+        }
+
+        if (scale != record.concurrencyScale) {
+            record.concurrencyScale = scale;
+            record.paramsDirty = true;
+        }
+
+        const SoundPlayable& playable = *record.sound.Get();
+        record.estimate = record.unscaledEstimate * record.concurrencyScale;
         // UE FWaveInstance::GetVolumeWeightedPriority(Audio.cpp:1328–1359).
         if (record.estimate > 0.0f) {
             record.weight = playable.bypassVolumeScaleForPriority
@@ -444,6 +484,7 @@ void AudioDeviceContext::EndVoiceless(uint32 slot, PlaybackEndReason reason,
                                       ControlBatch& batch) noexcept {
     Record& record = records_[slot];
     ROCKS_ASSERT(record.state == RecordState::Voiceless);
+    LeaveConcurrencyGroups(slot, mixer_.CompletedMixFrame());
     // 한 번도 소리를 내지 않았으면 끝 frame이 없다(3.41.4절).
     const uint64 mixFrame = record.everStarted ? mixer_.CompletedMixFrame() : audio::UnsetMixFrame;
     Emit(batch, PlaybackHandle{slot, record.generation}, PlaybackEventKind::Ended, reason,

@@ -86,6 +86,10 @@ public:
     virtual Result<void> SetBodyGeometry(PhysicsBodyHandle body,
                                          const BodyGeometry& geometry) noexcept = 0;
 
+    // 시뮬레이션 접촉 hit를 모을지 바꾼다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
+    // 다음 step부터 적용된다. 없는 handle·옛 세대는 무시한다.
+    virtual void SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept = 0;
+
     // body의 현재 운동 상태다. 오류: 없는 handle·옛 세대(StaleHandle).
     virtual Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept = 0;
 

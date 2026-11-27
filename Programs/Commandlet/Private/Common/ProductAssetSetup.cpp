@@ -31,7 +31,12 @@ Result<void> RegisterProductCookProcessors(void* state, CookProcessorTable& tabl
         return registered;
     }
 
-    return RegisterSoundClipCookProcessor(&processors.soundClip, table);
+    if (auto registered = RegisterSoundClipCookProcessor(&processors.soundClip, table);
+        !registered) {
+        return registered;
+    }
+
+    return RegisterCurveTableCookProcessor(&processors.curveTable, table);
 }
 
 Result<void> RegisterProductTypeHooks(void* state, AssetTypeHookTable& table,

@@ -236,6 +236,9 @@ struct SwapChainRecord {
     uint32 width = 0;
     uint32 height = 0;
     bool vsync = true;
+    // present하지 않은 기록이 이 백버퍼에 그렸다(그리는 중인 프레임, SwapChainPassDesc). load
+    // Load는 이때만 받는다.
+    bool frameOpen = false;
 };
 
 // fence 완료 뒤에 지울 GL 객체다(장치 계약: OpenGL도 fence 뒤 회수).
@@ -326,8 +329,8 @@ public:
     GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
-    Result<CommandContext*> BeginFrame(SwapChainHandle handle,
-                                       const ClearColor& clear) noexcept override;
+    using Device::BeginFrame;
+    Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept override;
     Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
@@ -388,6 +391,7 @@ public:
     Result<void> AcquireOwnership() noexcept override;
     uint64 RejectedCalls() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+    uint64 PresentCount() const noexcept override;
     StringView LastError() const noexcept override;
     uint64 IgnoredDraws() const noexcept override;
     uint64 NullTextureBindings() const noexcept override;
@@ -648,7 +652,11 @@ private:
     };
     PassTarget pass_;
     TextureHandle white_;
+    // 지금 기록의 스왑체인(BeginFrame)과 EndFrame이 present할지다.
     SwapChainHandle presentTarget_;
+    bool presentOnEnd_ = false;
+    // EndFrame이 낸 present 수다(PresentCount).
+    uint64 presents_ = 0;
     PipelineHandle boundPipeline_;
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 정점 배열에 다시 묶는다).
     struct BoundVertexBuffer {

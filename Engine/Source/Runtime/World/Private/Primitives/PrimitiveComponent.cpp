@@ -486,6 +486,17 @@ void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
     scene->SetBodyMotion(bodyHandle_, motion, bodySettings_.startAwake);
 }
 
+void PrimitiveComponent::SetNotifyRigidBodyCollision(bool notify) noexcept {
+    bodySettings_.notifyRigidBodyCollision = notify;
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
+        scene->SetBodyNotifyContacts(bodyHandle_, notify);
+    }
+}
+
 void PrimitiveComponent::UpdateBodyCollision() noexcept {
     if (!IsRegistered()) {
         return;
@@ -1019,6 +1030,25 @@ void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
     reversed.normal = hit.normal * -1.0;
     reversed.impactNormal = hit.impactNormal * -1.0;
     notify(hit.actor, hit.component, owner, self, false, reversed);
+}
+
+void PrimitiveComponent::DispatchPhysicsHit(World& world, const PhysicsContactHit& hit) noexcept {
+    // 앞선 hit의 hook이 자기 컴포넌트·Actor를 파괴했을 수 있다(UE Info0.Actor.Get() 약한 참조,
+    // IsActorValidToNotify).
+    auto component = world.GetComponentState(hit.myComponent);
+    if (!component || component.Value() == ComponentState::PendingDestroy) {
+        return;
+    }
+
+    auto actor = world.GetActorState(hit.myActor);
+    if (!actor || actor.Value() == ActorState::PendingDestroy) {
+        return;
+    }
+
+    (void)world.With<Actor>(hit.myActor, [&](Actor& target) noexcept {
+        target.OnHit(hit.myComponent, hit.otherActor, hit.otherComponent, true, hit.normalImpulse,
+                     hit.hit);
+    });
 }
 
 Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,

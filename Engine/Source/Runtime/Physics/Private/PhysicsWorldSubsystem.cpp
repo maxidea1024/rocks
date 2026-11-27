@@ -133,13 +133,12 @@ Result<void> PhysicsWorldSubsystem::ApplyResults(World& world) noexcept {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
 
-    auto moved = JoltScene(*scene_).TakeMovedBodies();
-    if (!moved) {
-        return Result<void>::Failure(moved.Error());
-    }
-
-    ErrorCode failure = ErrorCode::None;
-    for (const physics::MovedBody& body : moved.Value()) {
+    physics::JoltPhysicsScene& scene = JoltScene(*scene_);
+    auto moved = scene.TakeMovedBodies();
+    ErrorCode failure = moved ? ErrorCode::None : moved.Error();
+    const Span<const physics::MovedBody> bodies =
+        moved ? moved.Value() : Span<const physics::MovedBody>();
+    for (const physics::MovedBody& body : bodies) {
         auto applied = world.With<PrimitiveComponent>(
             body.component, [&](PrimitiveComponent& primitive) noexcept {
                 return primitive.ApplyPhysicsTransform(body.location, body.rotation);
@@ -151,6 +150,13 @@ Result<void> PhysicsWorldSubsystem::ApplyResults(World& world) noexcept {
         if (!applied && !gone && failure == ErrorCode::None) {
             failure = applied.Error();
         }
+    }
+
+    // 결과 반영 뒤 시뮬레이션 접촉 hit를 스텝 순서대로 발행한다(3.1절 (2), 7.1.12절). 결과 반영이
+    // 실패해도 발행한다(쌓인 hit는 다음 프레임으로 미루지 않는다). 꺼낸 목록은 hook이 장면을 바꿔도
+    // 그대로다.
+    for (const PhysicsContactHit& hit : scene.TakeContactHits()) {
+        PrimitiveComponent::DispatchPhysicsHit(world, hit);
     }
 
     return failure == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(failure);

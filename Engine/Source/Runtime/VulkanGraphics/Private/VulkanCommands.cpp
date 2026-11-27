@@ -148,8 +148,8 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     return Result<void>::Success();
 }
 
-Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
-                                                 const ClearColor& clear) noexcept {
+Result<CommandContext*> VulkanDevice::BeginFrame(const SwapChainPassDesc& desc) noexcept {
+    const SwapChainHandle handle = desc.swapChain;
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -175,6 +175,14 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
         return Result<CommandContext*>::Failure(failed.Error());
     }
 
+    // present 뒤의 중간 이미지는 blit 원본이었고 처음에는 UNDEFINED다. 이어 그리기는 그리는 중인
+    // 프레임만(그때 layout은 attachment다).
+    if (desc.load == LoadAction::Load && !record->frameOpen) {
+        auto failed = FailCode("BeginFrame", ErrorCode::InvalidArgument,
+                               "swap chain load without a frame drawn since its present");
+        return Result<CommandContext*>::Failure(failed.Error());
+    }
+
     auto begun = BeginRecording();
     if (!begun) {
         return Result<CommandContext*>::Failure(begun.Error());
@@ -192,13 +200,17 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
     target_.colorCount = 1;
     target_.key.colorCount = 1;
     target_.key.colors[0] = VK_FORMAT_R8G8B8A8_SRGB;
-    target_.key.colorLoad[0] = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    target_.key.colorLoad[0] = desc.load == LoadAction::Load       ? VK_ATTACHMENT_LOAD_OP_LOAD
+                               : desc.load == LoadAction::DontCare ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                                                                   : VK_ATTACHMENT_LOAD_OP_CLEAR;
     target_.key.colorStore[0] = VK_ATTACHMENT_STORE_OP_STORE;
-    target_.clears[0].color.float32[0] = clear.r;
-    target_.clears[0].color.float32[1] = clear.g;
-    target_.clears[0].color.float32[2] = clear.b;
-    target_.clears[0].color.float32[3] = clear.a;
+    target_.clears[0].color.float32[0] = desc.clear.r;
+    target_.clears[0].color.float32[1] = desc.clear.g;
+    target_.clears[0].color.float32[2] = desc.clear.b;
+    target_.clears[0].color.float32[3] = desc.clear.a;
     presentTarget_ = handle;
+    presentOnEnd_ = desc.present;
+    record->frameOpen = true;
     renderPassSuspended_ = false;
     StartPass();
     return Result<CommandContext*>::Success(this);
@@ -270,9 +282,14 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         presentTarget_.IsNull() ? nullptr : swapChains_.Find(presentTarget_.slot);
     uint32 imageIndex = 0;
     VkSemaphore acquired = VK_NULL_HANDLE;
-    if (present != nullptr) {
+    if (present != nullptr && presentOnEnd_) {
+        present->frameOpen = false;
         outcome = RecordPresentBlit(*present, imageIndex, acquired);
         present->targetLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    } else if (present != nullptr) {
+        // present하지 않는 기록은 중간 이미지를 attachment layout으로 두고(render pass 끝 layout),
+        // 다음 BeginFrame이 attachment 쓰기 뒤에서 잇는다.
+        present->targetLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
     // offscreen 대상은 렌더 타깃 상태 그대로 둔다(GX5: 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
@@ -348,7 +365,9 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         info.pSwapchains = &present->swapchain;
         info.pImageIndices = &imageIndex;
         result = functions_.vkQueuePresentKHR(queue_, &info);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+            ++presents_;
+        } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             // 크기 경합이다. 프레임은 제출됐고 다음 EndFrame이 acquire 전에 다시 만든다.
             present->outOfDate = true;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {

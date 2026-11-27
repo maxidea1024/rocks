@@ -368,6 +368,9 @@ struct SwapChainRecord {
     // ResizeBuffers·버퍼 재취득이 실패해 버퍼가 없는 상태다. 다음 Resize가 성공할 때까지
     // BeginFrame은 DependencyFailed다.
     bool broken = false;
+    // present하지 않은 기록이 이 백버퍼에 그렸다(그리는 중인 프레임, SwapChainPassDesc). load
+    // Load는 이때만 받는다.
+    bool frameOpen = false;
 };
 
 // fence 완료 뒤에 해제할 자원과 descriptor다.
@@ -676,8 +679,8 @@ public:
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
 
-    Result<CommandContext*> BeginFrame(SwapChainHandle handle,
-                                       const ClearColor& clear) noexcept override;
+    using Device::BeginFrame;
+    Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept override;
 
     Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
 
@@ -768,6 +771,8 @@ public:
     uint64 RejectedCalls() const noexcept override;
 
     usize PendingRetireCount() const noexcept override;
+
+    uint64 PresentCount() const noexcept override;
 
     StringView LastError() const noexcept override;
 
@@ -1348,7 +1353,11 @@ private:
     // 마지막으로 신호한 graphics queue fence 값이다.
     uint64 fenceValue_ = 0;
     Target target_;
+    // 지금 기록의 스왑체인(BeginFrame)과 EndFrame이 present할지다.
     SwapChainHandle presentTarget_;
+    bool presentOnEnd_ = false;
+    // EndFrame이 낸 present 수다(PresentCount).
+    uint64 presents_ = 0;
     TextureHandle white_;
     SlotHandle boundPipeline_;
     BoundVertexBuffer boundVertex_[MaxVertexStreams];

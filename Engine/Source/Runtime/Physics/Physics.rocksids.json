@@ -31,6 +31,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PhysicsSettings::minDeltaVelocityForHitEvents",
+      "id": "a41f2ea36cae4c0b9076417b40668e6b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PhysicsSettings::tempAllocatorBytes",
       "id": "946995f2f2364c21becb64c5ffcb892e",
       "aliases": [],

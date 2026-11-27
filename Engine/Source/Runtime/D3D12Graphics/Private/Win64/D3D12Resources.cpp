@@ -101,8 +101,9 @@ Result<void> D3D12Device::ResizeSwapChain(SwapChainHandle handle, uint32 width,
     for (ComRef<ID3D12Resource>& buffer : record->buffers) {
         buffer.Reset();
     }
-    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다.
+    // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다. 그리는 중인 프레임도 버린다.
     record->broken = true;
+    record->frameOpen = false;
     const HRESULT resized = record->swapChain->ResizeBuffers(SwapChainBufferCount, width, height,
                                                              DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(resized)) {

@@ -3,8 +3,8 @@
 #include <Base/Types.h>
 #include <Meta/Annotations.h>
 
-// 재생 관리(우선순위·가상화)에 쓰는 값이다(Docs/Design/AudioSystem 3.41절). SoundSource 필드와 재생
-// 스냅숏(SoundPlayable)이 함께 쓴다.
+// 재생 관리(우선순위·가상화·동시 발음)에 쓰는 값이다(Docs/Design/AudioSystem 3.41절). SoundSource
+// 필드와 재생 스냅숏(SoundPlayable)이 함께 쓴다.
 namespace rocks {
 
 // 가상화 모드다(3.41.3절, UE EVirtualizationMode — SoundBase.h:57). loop 재생에만 쓰인다.

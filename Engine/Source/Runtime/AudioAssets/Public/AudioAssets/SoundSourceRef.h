@@ -4,6 +4,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
 #include <AudioAssets/SoundPcm.h>
+#include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundPlaybackSettings.h>
 #include <AudioAssets/SoundStreamData.h>
 #include <Object/AssetId.h>
@@ -54,6 +55,9 @@ struct SoundPlayable {
     bool bypassVolumeScaleForPriority = false;
     // loop 재생의 가상화 모드다(3.41.3절). voice를 잃었다 되찾을 때의 시작 위치도 정한다.
     SoundVirtualizationMode virtualizationMode = SoundVirtualizationMode::Restart;
+    // 동시 발음 그룹이다(3.41.2절 — 앞 concurrencyCount개, 없으면 제한 없음).
+    uint32 concurrencyCount = 0;
+    SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
     // 진단용 원본 에셋과 revision이다(메모리 생성이면 빈 값).
     AssetId asset;
     uint64 revision = 0;

@@ -119,8 +119,9 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
 
 - `FloatCurveAsset`·`VectorCurveAsset`·`ColorCurveAsset`은 기본 처리기다(A4c2 — 필드 그대로). UE도 커브 에셋에 쿠킹 변형이 없다(tagged property 그대로).
 - `CurveTableAsset`은 처리기 `CurveTableCookProcessor`(Developer `CurveAssetTools`)를 쓴다. 에디터 객체가 아니라 쓰기용 사본에서 다음을 한다(★ 7.2절 7).
-  1. 모드가 쓰지 않는 맵을 비운다. 비어 있지 않았으면 경고 `CurveTableUnusedRows`를 남긴다(3.2.1절).
+  1. 모드가 쓰지 않는 맵을 비운다. 비어 있지 않았으면 경고 `CurveTableUnusedRows`(쿠킹 진단의 setting = 버린 행 수)를 남긴다(3.2.1절).
   2. 행마다 중복 키를 제거한다(UE `CurveTable.cpp:215-232` — `CurveTable.RemoveRedundantKeys` CVar 기본 1).
+     - 키가 3개 이상인 행만 한다(UE `RemoveRedundantKeys`가 `Keys.Num() < 3`이면 바로 반환 — `SimpleCurve.cpp:454-462`, `RichCurve.cpp:921-929`).
      - Plain은 `TryRemoveRedundantKeys(0)`다(UE `FSimpleCurve::RemoveRedundantKeys(0.f)`).
      - Tangent는 표본 속도 없이 `TryRemoveRedundantKeys(0)`를 부르고, 키가 3개 이상이었으면 이어서 `AutoSetTangents()`를 부른다.
        - UE `RemoveRedundantAutoTangentKeys(0.f)` = `RemoveRedundantKeys(0, FFrameRate(0, 0))`다(`RichCurve.cpp:916-929`).
@@ -128,6 +129,11 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
        - Rocks `TryRemoveRedundantKeys`는 접선을 다시 계산하지 않는다(CurveData D10). 그래서 처리기가 그 차이를 메운다.
 - 끄는 설정은 두지 않는다. UE 기본은 켬이고, 끄는 요구가 생기면 쿠킹 설정 키를 더한다(◇ 7.2절 10).
   - 처리기 버전 Guid가 이 동작의 정체성이다. 동작을 바꾸면 버전을 올려 너겟 키를 바꾼다(AssetSystem 10.2절).
+- 쓰기 방식: 사본 맵을 에디터 객체에 이동으로 넣어 쓰고, 성공·실패 모두 원래 맵을 이동으로 되돌린다(애니메이션 클립 처리기와 같은 방식 — 되돌리기가 할당하지 않는다). 사본은 에디터 객체 맵의 allocator로 만든다.
+- 너겟은 쓰지 않는다(빌드 비용이 작다). 경고는 입력만으로 정해지므로 다시 쿠킹해도 같다. 쿠커가 byte를 재사용하는 대상은 처리기를 부르지 않으므로 그때는 경고도 나오지 않는다(모든 처리기에 공통인 쿠커 동작 — AssetSystem 10장).
+- 한계: 되돌리기의 쓰기 borrow가 실패하면(앞의 두 borrow가 성공한 뒤라 Busy·ShuttingDown 정도) 에디터 객체에 쿠킹 사본이 남고 원래 맵을 잃는다. 그 오류를 돌려주고, 쓰기 오류와 겹치면 쓰기 오류를 돌려준다(되돌릴 객체에 닿을 다른 방법이 없다).
+- 중복 키 판정에서 비교 차가 NaN이면 Rocks는 키를 남기고 UE는 지운다(UE는 `>` 비교 — CurveData 15절). 비유한 키 값이 든 표는 쿠킹 키 수가 UE와 다를 수 있다(7.2절 21).
+- 제품 쿠커(`Programs/Commandlet` `ProductCookProcessors`)가 등록한다.
 - `ColorCurveAtlas`는 4.3절 처리기다(`Texture2D` 처리기를 감싼다).
 
 ### 5.4 새로 만들기·명령행
