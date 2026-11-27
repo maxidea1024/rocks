@@ -51,7 +51,7 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 함수 사이에는 계산이 겹칠 수 있다(예: 마스크 계산과 표면 계산이 같은 텍스처를 읽는다). 진입점마다 필요한 값만 내므로, 한 pass가 쓰는 함수는 필요한 계산만 한다. 한 pass에서 두 함수를 부르면 겹치는 계산의 제거는 하위 컴파일러(DXC·FXC)의 CSE에 맡긴다.
 
 **문맥 구조체**(`MaterialCommon.rsh`):
-- `MaterialVertexInputs`·`MaterialInputs`의 칸은 문맥 값 표에서 만든 `MaterialContext.rsh`가 정한다(6.9절). 고정 칸은 `MaterialInputs.svPosition`·`interpolants`, `MaterialVertexResult.worldPositionOffset`·`customizedUvs`·`interpolants`다.
+- `MaterialVertexInputs`·`MaterialInputs`의 칸은 문맥 값 표에서 만든 `MaterialContext.rsh`가 정한다(6.9절). 고정 칸은 `MaterialInputs.svPosition`(문맥 값 표의 SvPosition 칸 — 6.13절 MS2f2)·`interpolants`, `MaterialVertexResult.worldPositionOffset`·`customizedUvs`·`interpolants`다.
 - `MaterialVertexInputs`: world·translated world 위치, local 위치, 법선·tangent 기저, UV 채널, 정점 색, instance 데이터 index, 이전 프레임 변환 접근.
 - `MaterialInputs`(Renderer 14.1절 이름): 화면 위치, translated world 위치, 기저, 보간된 UV·정점 색·custom 보간 값, 앞면 여부, view 상수 접근.
 - 채우는 쪽은 pass 원문과 정점 입력 타입이다. RenderBase 10.2절이 "첫 메시 셰이더 착수 전에 정한다"고 남긴 `.rsh` 함수 인터페이스를 이 구조체로 정한다(16절 MRB3). UE 템플릿의 픽셀·정점 파라미터 구조체(`SH/Private/MaterialTemplate.ush:427, 677`)와 역할이 같다.
@@ -112,3 +112,16 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 - **원문 위치 지도.** 값을 낸 줄마다 (줄 번호 1부터, 원인 NodeId — 같은 값을 여러 노드가 만들면 가장 작은 NodeId, 6.8절)를 기록한다(7.6절). 컴파일러는 include 경로로 파일 이름을 알므로 `#line`을 내지 않는다.
 - **결정성.** 같은 그래프는 같은 바이트다(6.6절, MS-T1). 노드 저장 순서와 화면 편집(재경유 추가 포함)은 결과에 영향이 없다(출력 핀에서 거슬러 가고 재경유는 값을 그대로 넘긴다 — MS-T2의 생성 원문 부분).
 - **시험(MS-T3).** fixture 그래프의 생성 원문을 저장된 기대 원문(`Tests/Golden/*.txt` — 셰이더 원문 검사 대상이 아니게 `.txt`)과 byte로 견준다. 생성 규칙을 바꾸면 기대 원문을 함께 고친다.
+
+### 7.8 MS2 완료 — 생성 원문 컴파일 확인
+
+MS2a–MS2f의 생성 원문이 실제 셰이더 컴파일러에서 통과하는지 본다(15장 MS2 완료). 문자열 골든(7.7절)은 모양만 보므로, 이 단계가 HLSL 문법·타입·바인딩 규칙 오류를 잡는다.
+
+- **생성 파일 연결(16절 MSR3 구현).** 셰이더 컴파일 job에 `materialSource`(생성 원문 메모리 텍스트)를 둔다. 비지 않으면 전처리가 `/Engine/Generated/Material.rsh` include를 그 텍스트로 잇는다(정점 입력 연결 `vertexInputSource`와 같은 `ShaderGeneratedInclude` 장치 — 원문이 include 폐포에 들어가 job 키가 머티리얼마다 다르다). 비면 잇지 않으므로 머티리얼 없는 셰이더가 이 경로를 include하면 전처리 오류다(7.2절). 경로 상수는 ShaderCompiler `MaterialGeneratedIncludePath`다. 셰이더 시스템 문서 반영(3절 가상 경로)은 담당 세션 몫이다(MSR3 상태 칸).
+- **시험 pass 셰이더.** `Engine/Source/Developer/MaterialCompiler/Tests/Shaders/MaterialTestPass.rsf`(가상 루트 `/Plugin/MaterialCompilerTests`). 엔트리는 정점 `MaterialTestVertex`(`EvaluateMaterialVertex`·`EvaluateMaterialVertexPrevious`)와 픽셀 `MaterialTestPixel`(`EvaluateMaterialNormal` → `c.pixelNormal`, `EvaluateMaterialSurface`·`Opacity`·`OpacityMask`·`PixelDepthOffset`·`Preview`)이고, 결과를 출력에 모아 하위 컴파일러가 지우지 않게 한다. 문맥 구조체는 실행 값(정점 번호·픽셀 위치의 스칼라를 구조체로 바꾼 값)으로 채운다 — 값을 실행하지 않는 컴파일 확인이지만, 상수 입력이면 FXC가 식을 접어 상수 경고(0 나누기·음수 제곱근, `-WX`로 오류)를 내므로 실제 pass처럼 실행 값이어야 한다. 퍼뮤테이션 `MATERIAL_TEST_SUPPLY_ALL` 0·1: 1이면 공급 표지(`MATERIAL_SUPPLY_<기능>`) 전부를 1로 둬 문맥 값 접근자의 공급 경로가 모두 컴파일되고, 0이면 UE 기본값 경로다. 공급 경로의 함수형 문맥 값은 pass가 `MaterialPass<이름>`(이전 프레임 판 `MaterialPassPrevious<이름>`)을 정의해야 하므로, 시험이 문맥 값 표에서 만든 0 값 stub 매크로를 그 퍼뮤테이션의 생성 원문 앞에 붙인다(표와 늘 맞는다 — 자원 형 값은 stub이 없다). 정점 입력 타입은 쓰지 않는다: 문맥 구조체를 채우는 정점 입력 `.rsh` 인터페이스는 첫 메시 셰이더 때 정한다(16절 MRB3) — 그때 시험 정점 입력 타입을 이 시험에 더한다.
+- **머티리얼 모음.** 두 갈래다.
+  - **노드 모음**(자동): 엔진 노드 정의 중 상태가 Implemented인 것마다 그래프 하나를 만든다. 수 입력 전부에 접히지 않는 값(스칼라 파라미터 — 상수 버퍼라 번역기도 하위 컴파일러도 접지 않는다, 핀 폭대로 Append)을, 텍스처 입력에 시험 텍스처 객체를 잇고, 출력 전부를 Custom HLSL 노드 하나(sink — 입력 형을 가리지 않는 인자, 본문 `return 0.0;`)의 입력으로 받아 그 결과를 AO에 낸다. 번역이 실패하면 필수 입력만 이어 다시 번역하고, 그래도 실패하면(에셋 참조가 필요한 노드, 표면·속성 집합 출력, 문맥 단계 밖) 모음에서 뺀다. 이때 진단에 NotYetLowered가 하나라도 있으면 시험 실패다(구현 노드는 모두 번역된다 — MS2 완료의 카탈로그 완전성). 빠진 노드 수와 들어간 노드 수를 찍고, 들어간 수가 하한(`MaterialCompileCorpusMinimumNodes`)보다 적으면 실패다. 노드 모음은 픽셀 엔트리만 컴파일한다(sink가 픽셀 문맥이다).
+  - **손 모음**: 노드 모음이 지나지 않는 길이다 — 정점 결과(WPO·이전 프레임·customized UV·보간기)와 Masked·PDO 수식(7.7절 Math 골든 그래프), Noise ALU 함수 셋(quality 1–4)·VectorNoise 다섯·Double 위치, ColorRamp 연결 입력(커브 공급), Custom HLSL(텍스처·Double 인자·추가 출력·정의, 정점·픽셀 두 판), 텍스처 샘플(자기·공유 샘플러), 기본 표면. 손 모음은 두 엔트리를 컴파일한다.
+- **형식·판정.** 형식 정의 전부(엔진 셰이더 컴파일 행렬과 같은 목록)로 실제 ShaderCompileWorker가 컴파일하고 경고는 오류다(워커 `-WX`·FXC). 이 호스트가 만들 수 없는 형식(Windows의 Metal)은 형식마다 SKIP과 사유, 워커가 없거나 도구 저장소가 준비되지 않으면 시험 전체가 SKIP이다(엔진 셰이더 행렬과 같은 규칙). 실패하면 머티리얼 이름·엔트리·퍼뮤테이션·형식과 컴파일러 진단을 찍는다.
+- **경고 정책과 편차.** 워커는 머티리얼 셰이더도 경고를 오류로 한다(셰이더 시스템 결정 7, 7.2절 결정 7 — UE는 `r.Shaders.WarningsAsErrors` 기본 0이라 머티리얼 경고를 오류로 하지 않는다). 그래서 생성기가 만드는 경고는 고친다(Power의 `abs` 밑, 시야각 기본값 — MD15). 사용자 그래프가 직접 만든 상수 경고(예: 상수 0으로 나누기 — UE는 그대로 `x / 0`을 내고 FXC 경고만 남는다)는 FXC 형식(`D3D11_SM5`)에서 컴파일 오류가 된다(UE보다 엄격한 편차 — 쿠킹 보고서에 그 형식의 컴파일 오류로 나온다).
+- **값 대조는 이 단계가 아니다.** noise 등 셰이더 함수의 값을 UE와 대조하려면 셰이더를 실행해야 한다. 그것은 GPU 시험 장치(소프트웨어 Vulkan 포함)에서 머티리얼을 그리는 첫 단계(MS4 — 렌더러 pass 연결)에서 한다. 그때까지 CPU 쪽 값은 IR 계산기 시험(6.13절)이 본다.

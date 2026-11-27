@@ -472,17 +472,24 @@ private:
             return;
         }
 
-        // 정점 입력 연결 하나와 레이아웃 표의 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체
-        // 정의는 바깥 원문 안에 있다)이다.
-        ShaderGeneratedInclude includes[MaxShaderParameterLayouts + 1];
+        // 정점 입력 연결 하나, 머티리얼 생성 원문 하나(MaterialSystem 7.8절 MSR3)와 레이아웃 표의
+        // 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체 정의는 바깥 원문 안에 있다)이다.
+        constexpr usize FixedGeneratedIncludes = 2;
+        ShaderGeneratedInclude includes[MaxShaderParameterLayouts + FixedGeneratedIncludes];
         usize includeCount = 0;
         if (!job.vertexInputSource.IsEmpty()) {
             includes[includeCount++] = ShaderGeneratedInclude{
                 StringView(VertexInputGeneratedIncludePath), job.vertexInputSource, StringView()};
         }
 
+        if (!job.materialSource.IsEmpty()) {
+            includes[includeCount++] = ShaderGeneratedInclude{
+                StringView(MaterialGeneratedIncludePath), StringView(), job.materialSource};
+        }
+
         for (const ShaderParameterLayout& layout : job.parameterLayouts) {
-            if (!layout.source.IsEmpty() && includeCount < MaxShaderParameterLayouts + 1) {
+            if (!layout.source.IsEmpty() &&
+                includeCount < MaxShaderParameterLayouts + FixedGeneratedIncludes) {
                 includes[includeCount++] =
                     ShaderGeneratedInclude{layout.sourcePath, StringView(), layout.source};
             }

@@ -68,15 +68,16 @@ SurfaceAttributes EvaluateMaterialSurface(in MaterialInputs c) {
     const float3 m15 = MaterialContextVertexTangent(c);
     const float m17 = m4.z;
     const bool m19 = (m17 <= 2.980233e-08);
-    const float m21 = pow(m17, 2.0);
-    const float m22 = MaterialSelect(m19, 0.0, m21);
-    const float m23 = MaterialAsinFast(m22);
-    const float m24 = saturate(m23);
+    const float m20 = abs(m17);
+    const float m22 = pow(m20, 2.0);
+    const float m23 = MaterialSelect(m19, 0.0, m22);
+    const float m24 = MaterialAsinFast(m23);
+    const float m25 = saturate(m24);
     s.normal = m14;
     s.tangent = m15;
     s.shadingModel = 1u;
     s.ambientOcclusion = m13;
-    s.opacityMask = m24;
+    s.opacityMask = m25;
     return s;
 }
 
@@ -91,26 +92,27 @@ float EvaluateMaterialOpacityMask(in MaterialInputs c) {
     const float3 m4 = float3(m2, m3);
     const float m17 = m4.z;
     const bool m19 = (m17 <= 2.980233e-08);
-    const float m21 = pow(m17, 2.0);
-    const float m22 = MaterialSelect(m19, 0.0, m21);
-    const float m23 = MaterialAsinFast(m22);
-    const float m24 = saturate(m23);
-    return m24;
+    const float m20 = abs(m17);
+    const float m22 = pow(m20, 2.0);
+    const float m23 = MaterialSelect(m19, 0.0, m22);
+    const float m24 = MaterialAsinFast(m23);
+    const float m25 = saturate(m24);
+    return m25;
 }
 
 float EvaluateMaterialPixelDepthOffset(in MaterialInputs c) {
     const float m1 = sin(0.5);
-    const bool m26 = (m1 < 1.0);
-    const float m27 = trunc(m1);
-    const uint m28 = uint(m27);
-    const float m29 = float(m28);
-    float m30;
-    [branch] if (m26) {
-        m30 = m29;
+    const bool m27 = (m1 < 1.0);
+    const float m28 = trunc(m1);
+    const uint m29 = uint(m28);
+    const float m30 = float(m29);
+    float m31;
+    [branch] if (m27) {
+        m31 = m30;
     } else {
-        m30 = 2.0;
+        m31 = 2.0;
     }
-    return m30;
+    return m31;
 }
 
 float4 EvaluateMaterialPreview(in MaterialInputs c) {

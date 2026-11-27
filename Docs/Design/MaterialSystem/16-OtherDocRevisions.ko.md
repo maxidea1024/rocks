@@ -10,7 +10,7 @@
 |---|---|---|
 | MSR1 | 7.2절 4항(상한) | 머티리얼 pass 셰이더의 머티리얼 텍스처 예산 = (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`(Renderer 7.4절, 결정 MD4). SRV 텍스처 상한은 프로필 공통 상한이 아니라 job 형식의 상한으로 검사하고, 워커 상한 검사 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다(Renderer RQ22 (2)). **반영(셰이더 시스템 개정 13, 7.2절 4항)** |
 | MSR2 | 3절(셰이더 맵 키)·12.2절(조회 키) | 머티리얼 셰이더 집합 id를 키 축으로(8.6절). RenderBase SX5 묶음 id와 같은 값 |
-| MSR3 | 3절(가상 경로)·결정 6(전처리기) | `/Engine/Generated/Material.rsh`를 job마다 메모리 텍스트로 잇는 규칙(7.2절) |
+| MSR3 | 3절(가상 경로)·결정 6(전처리기) | `/Engine/Generated/Material.rsh`를 job마다 메모리 텍스트로 잇는 규칙(7.2절) — 코드 구현(7.8절 MS2 완료: `ShaderCompileJob::materialSource`·`MaterialGeneratedIncludePath`), 셰이더 시스템 문서 반영은 담당 세션 |
 | MSR4 | 13절(P7)·15절 결정 4 | `ShaderParameterLayout`을 C++ 타입 없이도 만들 수 있는 데이터 형식으로(동적 layout, 결정 MD3). 셰이더 시스템 개정 12가 결정 4를 MetaCompiler 방식으로 확정하고 13절에 이 요구를 적었다 |
 | MSR5 | 12.2절(P14) | 셰이더 타입의 "머티리얼 셰이더" 표지와 거르기 인자 `MaterialShaderTraits`(8.3절), pass가 요구하는 custom 출력 선언. **반영(셰이더 시스템 개정 16, 12.2절)**: 머티리얼 셰이더 표지·custom 출력 선언, 이 문서 8.3절과 같은 두 거르기 서명과 AND 결합. 거르기는 `FormatId`로 형식 사실(`limits`·`features`)을 읽고 쿠커·런타임이 같은 값을 쓴다 |
 | MSR6 | 3절 | 임의 HLSL 노드의 include 허용 목록(가상 경로 범위) |

@@ -178,7 +178,6 @@ struct MaterialVertexInputs {
 };
 
 struct MaterialInputs {
-    float4 svPosition;
     float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];
     float3 cameraVector;
     float deltaTime;
@@ -378,8 +377,8 @@ struct MaterialInputs {
 #define MaterialContextScreenPosition(c) float4(0.0, 0.0, 0.0, 0.0)
 #define MaterialContextSvPosition(c) float4(0.0, 0.0, 0.0, 0.0)
 #define MaterialContextStateFrameIndexMod8(c) ((uint)0)
-#define MaterialContextViewFieldOfView(c) float2(0.0, 0.0)
-#define MaterialContextPreviousViewFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextViewFieldOfView(c) float2(1.5707964, 1.5707964)
+#define MaterialContextPreviousViewFieldOfView(c) float2(1.5707964, 1.5707964)
 #define MaterialContextViewTanHalfFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextPreviousViewTanHalfFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextViewCotanHalfFieldOfView(c) float2(0.0, 0.0)
@@ -394,8 +393,8 @@ struct MaterialInputs {
 #define MaterialContextResolutionFraction(c) (0.0)
 #define MaterialContextResolutionFractionInverse(c) (0.0)
 #define MaterialContextPostVolumeUserFlags(c) (0.0)
-#define MaterialContextFirstPersonFieldOfView(c) float2(0.0, 0.0)
-#define MaterialContextPreviousFirstPersonFieldOfView(c) float2(0.0, 0.0)
+#define MaterialContextFirstPersonFieldOfView(c) float2(1.5707964, 1.5707964)
+#define MaterialContextPreviousFirstPersonFieldOfView(c) float2(1.5707964, 1.5707964)
 #define MaterialContextFirstPersonTanHalfFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextPreviousFirstPersonTanHalfFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextFirstPersonCotanHalfFieldOfView(c) float2(0.0, 0.0)

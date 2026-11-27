@@ -303,10 +303,17 @@ Result<IrValueId> PowerValue(LoweringContext& context, IrValueId base, IrValueId
         return Result<IrValueId>::Failure(!e ? e.Error() : !floor ? floor.Error() : zero.Error());
     }
 
+    // pow의 밑은 abs(base)다: 골라지는 쪽은 base > 하한이라 값이 같고, FXC가 음수 밑 경고(X3571 —
+    // -WX로 오류)를 내지 않는다(6.8절 Power 행, 7.8절).
     auto small = context.Binary(IrOp::LessThanOrEquals, base, floor.Value(), NumberRule::FloatOnly);
-    auto power = context.Binary(IrOp::Pow, base, e.Value(), NumberRule::FloatOnly);
-    if (!small || !power) {
-        return Result<IrValueId>::Failure(!small ? small.Error() : power.Error());
+    auto magnitude = context.Unary(IrOp::Abs, base, NumberRule::FloatOnly);
+    if (!small || !magnitude) {
+        return Result<IrValueId>::Failure(!small ? small.Error() : magnitude.Error());
+    }
+
+    auto power = context.Binary(IrOp::Pow, magnitude.Value(), e.Value(), NumberRule::FloatOnly);
+    if (!power) {
+        return Result<IrValueId>::Failure(power.Error());
     }
 
     return context.Select(small.Value(), zero.Value(), power.Value());

@@ -166,9 +166,10 @@ Result<void> AppendStruct(StringBuilder<>& out, StringView name, MaterialStageMa
                           Span<const MaterialContextValue> table) noexcept {
     out << "\nstruct " << name << " {\n";
     if (stage == MaterialPixelStage) {
-        // pass가 늘 채우는 고정 칸이다(7.7절, 보간 값 — 6.9절 MS2b4a).
-        out << "    float4 svPosition;\n"
-            << "    float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];\n";
+        // pass가 늘 채우는 고정 칸이다(보간 값 — 6.9절 MS2b4a). svPosition은 문맥 값 표의
+        // SvPosition 칸이다(6.13절 MS2f2 — 따로 내면 같은 이름의 칸이 둘이 된다, 7.8절 MS2 완료
+        // 컴파일 확인).
+        out << "    float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];\n";
     }
 
     for (const MaterialContextValue& value : table) {
