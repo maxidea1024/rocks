@@ -518,7 +518,8 @@ Result<void> Translator::BuildIndex() noexcept {
         SurfaceLowerings(),       SurfaceOperatorLowerings(),
         SurfaceHelperLowerings(), OutputInputLowerings(),
         AttributeLowerings(),     FunctionLowerings(),
-        AdvancedLowerings(),      NoiseLowerings()};
+        AdvancedLowerings(),      NoiseLowerings(),
+        CustomLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);

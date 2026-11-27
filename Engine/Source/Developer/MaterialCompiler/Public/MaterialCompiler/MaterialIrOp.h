@@ -147,11 +147,21 @@ enum class IrOp : uint8 {
     AttributesRef = 92,
     // 라이브러리 함수 호출이다(6.13절 MS2f3). 즉시값 [0]은 IrLibraryFunction, [1]–[3]은 그 함수의
     // 정적 인자 묶음(MaterialIrLibrary.h), 피연산자는 실행 값이다. 접지 않는다.
-    Library = 93
+    Library = 93,
+    // Custom HLSL 인자 사슬 한 칸이다(6.13절 MS2f5). 즉시값 [0]은 이 칸의 인자 수(1–3), [1]은 앞
+    // 칸이 있으면 1이다. 피연산자는 앞 칸(있으면)과 인자 값이다. 원문 값이 아니다(CustomCall이
+    // 펼친다).
+    CustomArguments = 94,
+    // Custom HLSL 함수 호출이다. 즉시값 [0]은 모듈 Custom 함수 표 번호, 피연산자 [0]은 인자 사슬
+    // 끝(인자가 없으면 피연산자 없음)이다. 결과 형은 반환 형이고 빈도는 문맥(정점·픽셀)이다. 접지
+    // 않는다.
+    CustomCall = 95,
+    // Custom HLSL 추가 출력이다. 피연산자 [0]은 CustomCall, 즉시값 [0]은 추가 출력 번호다.
+    CustomOutput = 96
 };
 
 // 연산 수다(마지막 값 + 1).
-inline constexpr uint32 IrOpCount = 94;
+inline constexpr uint32 IrOpCount = 97;
 
 // Pending 자리 값의 종류다.
 enum class IrPendingKind : uint8 {

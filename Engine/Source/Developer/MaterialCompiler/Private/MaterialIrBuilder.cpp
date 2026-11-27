@@ -12,6 +12,8 @@ namespace {
 
 // Swizzle 즉시값의 성분 하나가 차지하는 bit 수다.
 constexpr uint32 SwizzleBitsPerComponent = 2;
+// CustomArguments 한 칸의 인자 수다(앞 칸 피연산자 하나 + 인자 셋 — 6.13절 MS2f5).
+constexpr usize CustomArgumentsPerLink = MaxIrOperands - 1;
 // Swizzle 즉시값의 성분 번호 마스크다.
 constexpr uint64 SwizzleComponentMask = (1u << SwizzleBitsPerComponent) - 1;
 
@@ -408,7 +410,8 @@ uint64 IrBuilder::KeyHash::operator()(const Key& key) const noexcept {
 }
 
 IrBuilder::IrBuilder(Allocator& allocator) noexcept
-    : values_(allocator), parameters_(allocator), textures_(allocator), lookup_(allocator) {
+    : values_(allocator), parameters_(allocator), textures_(allocator), customs_(allocator),
+      lookup_(allocator) {
 }
 
 const IrValue& IrBuilder::Value(IrValueId id) const noexcept {
@@ -478,7 +481,8 @@ Result<IrValueId> IrBuilder::Intern(IrValue value) noexcept {
     // 정한 빈도에서 시작한다(6.9절).
     IrFrequency frequency = value.op == IrOp::Extern || value.op == IrOp::Parameter ||
                                     value.op == IrOp::CollectionValue ||
-                                    value.op == IrOp::Texture || value.op == IrOp::Pending
+                                    value.op == IrOp::Texture || value.op == IrOp::Pending ||
+                                    value.op == IrOp::CustomCall
                                 ? value.frequency
                                 : IrFrequency::Constant;
     for (uint8 index = 0; index < value.operandCount; ++index) {
@@ -1304,6 +1308,91 @@ Result<IrValueId> IrBuilder::AttributesRef(uint32 record) noexcept {
     value.type = IrAttributesType();
     value.op = IrOp::AttributesRef;
     value.immediate[0] = record;
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::CustomCall(uint32 function, Span<const IrValueId> arguments) noexcept {
+    const Span<const IrCustomFunction> functions = customs_.Functions();
+    if (function >= functions.Size()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const IrCustomFunction& entry = functions[function];
+    const Span<const IrCustomItem> declared = customs_.Arguments(entry);
+    if (arguments.Size() != declared.Size()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize at = 0; at < arguments.Size(); ++at) {
+        if (!IsValid(arguments[at]) || !(values_[arguments[at]].type == declared[at].type)) {
+            return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    // 인자를 CustomArgumentsPerLink개씩 앞 칸에 잇는다(입력 수 제한 없음).
+    IrValueId chain = NoIrValue;
+    for (usize start = 0; start < arguments.Size(); start += CustomArgumentsPerLink) {
+        const usize count = arguments.Size() - start < CustomArgumentsPerLink
+                                ? arguments.Size() - start
+                                : CustomArgumentsPerLink;
+        IrValue link;
+        link.type = IrFloat(1);
+        link.op = IrOp::CustomArguments;
+        link.immediate[0] = count;
+        link.immediate[1] = chain == NoIrValue ? 0 : 1;
+        if (chain != NoIrValue) {
+            link.operands[link.operandCount++] = chain;
+        }
+
+        for (usize at = 0; at < count; ++at) {
+            link.operands[link.operandCount++] = arguments[start + at];
+        }
+
+        auto interned = Intern(link);
+        if (!interned) {
+            return interned;
+        }
+
+        chain = interned.Value();
+    }
+
+    IrValue value;
+    value.type = entry.returnType;
+    value.op = IrOp::CustomCall;
+    value.frequency =
+        entry.context == IrCustomContext::Vertex ? IrFrequency::Vertex : IrFrequency::Pixel;
+    value.immediate[0] = function;
+    if (chain != NoIrValue) {
+        value.operands[0] = chain;
+        value.operandCount = 1;
+    }
+
+    return Intern(value);
+}
+
+Result<IrValueId> IrBuilder::CustomOutput(IrValueId call, uint32 output) noexcept {
+    if (!IsValid(call) || values_[call].op != IrOp::CustomCall) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const Span<const IrCustomFunction> functions = customs_.Functions();
+    const uint64 function = values_[call].immediate[0];
+    if (function >= functions.Size()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const Span<const IrCustomItem> outputs =
+        customs_.Outputs(functions[static_cast<usize>(function)]);
+    if (output >= outputs.Size()) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    IrValue value;
+    value.type = outputs[output].type;
+    value.op = IrOp::CustomOutput;
+    value.operands[0] = call;
+    value.operandCount = 1;
+    value.immediate[0] = output;
     return Intern(value);
 }
 

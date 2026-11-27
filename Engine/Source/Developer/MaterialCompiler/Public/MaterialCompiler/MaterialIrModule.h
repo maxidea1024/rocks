@@ -8,6 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialIrCollection.h>
+#include <MaterialCompiler/MaterialIrCustomTable.h>
 #include <MaterialCompiler/MaterialIrDefine.h>
 #include <MaterialSchema/MaterialContextFeature.h>
 #include <MaterialSchema/MaterialContextValue.h>
@@ -56,7 +57,7 @@ class ROCKS_MATERIALCOMPILER_API IrModule {
 public:
     explicit IrModule(Allocator& allocator) noexcept
         : values_(allocator), results_(allocator), parameters_(allocator), textures_(allocator),
-          collections_(allocator), defines_(allocator) {
+          collections_(allocator), defines_(allocator), customs_(allocator) {
     }
 
     IrModule(const IrModule&) = delete;
@@ -108,6 +109,24 @@ public:
         shadingModels_ = mask;
     }
 
+    // 진입점에서 닿는 Custom HLSL 함수다(6.13절 MS2f5 — 처음 닿은 값 순서, CustomCall 즉시값 [0]이
+    // 이 번호다).
+    const IrCustomTable& CustomFunctions() const noexcept {
+        return customs_;
+    }
+
+    // 닿는 Custom HLSL 함수가 픽셀을 버릴 수 있는가(UE bUsesCustomHLSLPixelDiscard — 픽셀 문맥
+    // 항목만).
+    bool UsesCustomPixelDiscard() const noexcept {
+        for (const IrCustomFunction& function : customs_.Functions()) {
+            if (function.pixelDiscard && function.context == IrCustomContext::Pixel) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // 노드 속성이 정하는 생성 원문 정의다(6.11절 MS2d3 — 넣은 순서).
     Span<const IrDefine> Defines() const noexcept {
         return defines_.View();
@@ -134,6 +153,7 @@ public:
         textures_.Clear();
         collections_.Clear();
         defines_.Clear();
+        customs_.Clear();
         hash_ = Sha256Digest{};
         shadingModels_ = 0;
         for (MaterialContextFeatureMask& features : entryFeatures_) {
@@ -154,6 +174,7 @@ private:
     Array<IrTexture> textures_;
     Array<IrCollection> collections_;
     Array<IrDefine> defines_;
+    IrCustomTable customs_;
     Sha256Digest hash_{};
     uint32 shadingModels_ = 0;
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};

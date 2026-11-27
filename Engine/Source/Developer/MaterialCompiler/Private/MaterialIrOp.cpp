@@ -106,9 +106,12 @@ constexpr IrOpInfo IrOpInfos[IrOpCount] = {
     {"SurfaceRef", 0},
     {"AttributesRef", 0},
     {"Library", 0},
+    {"CustomArguments", 0},
+    {"CustomCall", 0},
+    {"CustomOutput", 1},
 };
 
-static_assert(static_cast<uint32>(IrOp::Library) + 1 == IrOpCount,
+static_assert(static_cast<uint32>(IrOp::CustomOutput) + 1 == IrOpCount,
               "IrOpCount must follow the last IrOp value");
 
 } // namespace

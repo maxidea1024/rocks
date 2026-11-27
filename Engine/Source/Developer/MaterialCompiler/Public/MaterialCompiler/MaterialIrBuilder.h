@@ -5,6 +5,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <MaterialCompiler/MaterialIrCustomTable.h>
 #include <MaterialCompiler/MaterialIrParameter.h>
 #include <MaterialCompiler/MaterialIrTexture.h>
 #include <MaterialCompiler/MaterialIrTextureSample.h>
@@ -99,6 +100,13 @@ public:
     // 인자가 빌더 밖·수 값이 아니면 InvalidArgument.
     Result<IrValueId> Library(uint32 function, Span<const uint64> parameters, IrType type,
                               Span<const IrValueId> arguments) noexcept;
+    // Custom HLSL 함수 호출이다(6.13절 MS2f5). function은 CustomFunctions() 번호, arguments는 그
+    // 항목의 인자 순서·형 그대로다(3개씩 CustomArguments 사슬로 잇는다). 오류: 번호가 표 밖이거나
+    // 인자 수·형이 항목과 다르면 InvalidArgument, 할당 실패.
+    Result<IrValueId> CustomCall(uint32 function, Span<const IrValueId> arguments) noexcept;
+    // CustomCall call의 추가 출력 output이다. 오류: call이 CustomCall이 아니거나 output이 항목의
+    // 추가 출력 수 밖이면 InvalidArgument.
+    Result<IrValueId> CustomOutput(IrValueId call, uint32 output) noexcept;
     // 텍스처 slot의 논리 크기(texel이면 1/크기)다. 2DArray·Texture3D는 Float3, 2D는 Float2다.
     // 오류: 다른 종류이거나 텍스처가 아니면 InvalidArgument.
     Result<IrValueId> TextureSize(IrValueId texture, bool texel) noexcept;
@@ -108,6 +116,15 @@ public:
     // 텍스처 표다(Texture 값의 즉시값 [3]이 가리킨다).
     Span<const IrTexture> Textures() const noexcept {
         return textures_.View();
+    }
+
+    // Custom HLSL 함수 표다(CustomCall 즉시값 [0]이 가리킨다 — lowering이 항목을 만든다).
+    IrCustomTable& CustomFunctions() noexcept {
+        return customs_;
+    }
+
+    const IrCustomTable& CustomFunctions() const noexcept {
+        return customs_;
     }
 
     // 파라미터 표다(Parameter 값의 즉시값 [3]이 가리킨다).
@@ -151,6 +168,7 @@ private:
     Array<IrValue> values_;
     Array<IrParameter> parameters_;
     Array<IrTexture> textures_;
+    IrCustomTable customs_;
     HashMap<Key, IrValueId, KeyHash, KeyEqual> lookup_;
     IrSite site_;
 };

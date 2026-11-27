@@ -11,6 +11,7 @@
 #include "../Translation/CustomOutputTable.h"
 #include "EntryDefineNames.h"
 #include "HlslFloatLiteral.h"
+#include <MaterialCompiler/MaterialIrCustomTable.h>
 #include <MaterialCompiler/MaterialIrLibrary.h>
 
 // 생성 원문 작성이다(Docs/Design/MaterialSystem 7.3·7.7·6.9절).
@@ -254,6 +255,27 @@ StringView BinaryOperator(IrOp op) noexcept {
     }
 }
 
+// 텍스처 slot의 HLSL 자원 종류다(External은 Texture2D — 6.10절 MS2c3).
+StringView TextureTypeName(IrTextureKind kind) noexcept {
+    switch (kind) {
+    case IrTextureKind::TextureCube:
+        return "TextureCube";
+    case IrTextureKind::Texture2DArray:
+        return "Texture2DArray";
+    case IrTextureKind::TextureCubeArray:
+        return "TextureCubeArray";
+    case IrTextureKind::Texture3D:
+        return "Texture3D";
+    default:
+        return "Texture2D";
+    }
+}
+
+// Custom 함수 이름의 NodeId 16진 자릿수다(Guid high 64 bit).
+constexpr uint32 CustomNameHexDigits = 16;
+constexpr uint32 CustomNameHexBits = 4;
+constexpr uint64 CustomNameHexMask = 0xF;
+
 StringView BinaryFunction(IrOp op) noexcept {
     switch (op) {
     case IrOp::And:
@@ -316,6 +338,10 @@ private:
     Result<void> Extern(const IrValue& value) noexcept;
     // 라이브러리 함수 호출이다(6.13절 MS2f3 — UE 함수 이름·인자 순서).
     Result<void> LibraryCall(const IrValue& value) noexcept;
+    // Custom HLSL 함수 이름·정의·호출이다(6.13절 MS2f5).
+    Result<void> CustomName(uint32 function) noexcept;
+    Result<void> CustomFunctions() noexcept;
+    Result<void> CustomCall(usize id, const IrValue& value) noexcept;
     bool InvolvesDouble(const IrValue& value) const noexcept;
     Result<void> DoubleLiteral(const IrValue& value) noexcept;
     Result<void> DoubleParts(const IrValue& value, StringView part) noexcept;
@@ -663,8 +689,188 @@ Result<void> SourceWriter::LibraryCall(const IrValue& value) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+Result<void> SourceWriter::CustomName(uint32 function) noexcept {
+    // MaterialCustom_<NodeId high 16 hex>_<표 번호>다.
+    const Span<const IrCustomFunction> functions = module_.CustomFunctions().Functions();
+    if (function >= functions.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    char digits[CustomNameHexDigits];
+    const uint64 node = functions[function].node.high;
+    for (uint32 at = 0; at < CustomNameHexDigits; ++at) {
+        const uint64 nibble =
+            (node >> ((CustomNameHexDigits - 1 - at) * CustomNameHexBits)) & CustomNameHexMask;
+        digits[at] = "0123456789abcdef"[nibble];
+    }
+
+    if (auto prefix = Raw("MaterialCustom_"); !prefix) {
+        return prefix;
+    }
+
+    if (auto hex = Raw(StringView(digits, CustomNameHexDigits)); !hex) {
+        return hex;
+    }
+
+    if (auto separator = Raw("_"); !separator) {
+        return separator;
+    }
+
+    return Uint(function);
+}
+
+Result<void> SourceWriter::CustomFunctions() noexcept {
+    // 정의(#ifndef/#define/#endif//) → include → 함수(UE CustomExpression 구현 문자열 순서).
+    const IrCustomTable& table = module_.CustomFunctions();
+    const Span<const IrCustomFunction> functions = table.Functions();
+    Result<void> written = Result<void>::Success();
+    const auto step = [&](Result<void> part) noexcept {
+        if (written) {
+            written = Move(part);
+        }
+    };
+
+    for (usize index = 0; index < functions.Size(); ++index) {
+        const IrCustomFunction& function = functions[index];
+        step(Raw("\n"));
+        for (const IrCustomItem& define : table.Defines(function)) {
+            const StringView name = table.Text(define.name);
+            const StringView parts[] = {"#ifndef ",   name, "\n#define ",
+                                        name,         " ",  table.Text(define.value),
+                                        "\n#endif//", name, "\n"};
+            for (StringView part : parts) {
+                step(Raw(part));
+            }
+        }
+
+        for (const IrCustomItem& include : table.Includes(function)) {
+            step(Raw("#include \""));
+            step(Raw(table.Text(include.value)));
+            step(Raw("\"\n"));
+        }
+
+        step(TypeName(function.returnType));
+        step(Raw(" "));
+        step(CustomName(static_cast<uint32>(index)));
+        step(Raw(function.context == IrCustomContext::Vertex
+                     ? StringView("(in MaterialVertexInputs c")
+                     : StringView("(in MaterialInputs c")));
+        for (const IrCustomItem& argument : table.Arguments(function)) {
+            const StringView name = table.Text(argument.name);
+            step(Raw(", "));
+            if (argument.type.scalar == IrScalar::Texture) {
+                const StringView parts[] = {TextureTypeName(argument.type.texture),
+                                            " ",
+                                            name,
+                                            ", SamplerState ",
+                                            name,
+                                            "Sampler"};
+                for (StringView part : parts) {
+                    step(Raw(part));
+                }
+
+                continue;
+            }
+
+            step(TypeName(argument.type));
+            step(Raw(" "));
+            step(Raw(name));
+        }
+
+        for (const IrCustomItem& output : table.Outputs(function)) {
+            step(Raw(", inout "));
+            step(TypeName(output.type));
+            step(Raw(" "));
+            step(Raw(table.Text(output.name)));
+        }
+
+        step(Raw(")\n{\n"));
+        step(Raw(table.Text(function.code)));
+        step(Raw("\n}\n"));
+    }
+
+    return written;
+}
+
+Result<void> SourceWriter::CustomCall(usize id, const IrValue& value) noexcept {
+    // <형> m<호출>_<k> = 0; …  const <반환 형> m<호출> = MaterialCustom_…(c, 인자…, m<호출>_<k>…);
+    const IrCustomTable& table = module_.CustomFunctions();
+    if (value.immediate[0] >= table.Functions().Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const IrCustomFunction& function = table.Functions()[static_cast<usize>(value.immediate[0])];
+    const Span<const IrCustomItem> outputs = table.Outputs(function);
+    Result<void> written = Result<void>::Success();
+    const auto step = [&](Result<void> part) noexcept {
+        if (written) {
+            written = Move(part);
+        }
+    };
+
+    for (usize output = 0; output < outputs.Size(); ++output) {
+        step(Raw(WriterIndent));
+        step(TypeName(outputs[output].type));
+        step(Raw(" m"));
+        step(Uint(id));
+        step(Raw("_"));
+        step(Uint(output));
+        step(Raw(" = 0;\n"));
+    }
+
+    // 사슬 끝에서 앞 칸으로 거슬러 칸을 모은 뒤 앞에서부터 인자를 낸다.
+    Array<IrValueId> links(allocator_);
+    IrValueId link = value.operandCount == 0 ? NoIrValue : value.operands[0];
+    while (link != NoIrValue) {
+        if (link >= module_.Values().Size() || module_.Values()[link].op != IrOp::CustomArguments) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto pushed = links.TryPushBack(link); !pushed) {
+            return pushed;
+        }
+
+        const IrValue& current = module_.Values()[link];
+        link = current.immediate[1] != 0 ? current.operands[0] : NoIrValue;
+    }
+
+    step(Raw("    const "));
+    step(TypeName(value.type));
+    step(Raw(" m"));
+    step(Uint(id));
+    step(Raw(" = "));
+    step(CustomName(static_cast<uint32>(value.immediate[0])));
+    step(Raw("(c"));
+    for (usize at = links.Size(); at > 0; --at) {
+        const IrValue& current = module_.Values()[links[at - 1]];
+        const uint8 first = current.immediate[1] != 0 ? 1 : 0;
+        for (uint8 operand = first; operand < current.operandCount; ++operand) {
+            const IrValueId argument = current.operands[operand];
+            step(Raw(", "));
+            step(Operand(argument));
+            if (module_.Values()[argument].op == IrOp::Texture) {
+                step(Raw(", "));
+                step(Operand(argument));
+                step(Raw("Sampler"));
+            }
+        }
+    }
+
+    for (usize output = 0; output < outputs.Size(); ++output) {
+        step(Raw(", m"));
+        step(Uint(id));
+        step(Raw("_"));
+        step(Uint(output));
+    }
+
+    step(Raw(");\n"));
+    return written;
+}
+
 bool SourceWriter::InvolvesDouble(const IrValue& value) const noexcept {
-    if (value.op == IrOp::Extern || value.op == IrOp::Branch || value.op == IrOp::Library) {
+    if (value.op == IrOp::Extern || value.op == IrOp::Branch || value.op == IrOp::Library ||
+        value.op == IrOp::CustomArguments || value.op == IrOp::CustomCall ||
+        value.op == IrOp::CustomOutput) {
         // 문맥 값은 표 타입 그대로(접근자), 분기는 대입문이라 Double도 같은 철자다.
         return false;
     }
@@ -989,6 +1195,16 @@ Result<void> SourceWriter::TextureDeclarations() noexcept {
     for (usize slot = 0; slot < table.Size(); ++slot) {
         bool own = false;
         for (const IrValue& value : module_.Values()) {
+            if (value.op == IrOp::CustomArguments) {
+                // Custom 인자 텍스처는 <이름>Sampler 인자로 자기 샘플러를 넘긴다(UE).
+                for (uint8 operand = 0; operand < value.operandCount; ++operand) {
+                    const IrValue& argument = module_.Values()[value.operands[operand]];
+                    own = own || (argument.op == IrOp::Texture && argument.immediate[3] == slot);
+                }
+
+                continue;
+            }
+
             if (value.op != IrOp::TextureSample ||
                 value.immediate[2] != static_cast<uint64>(IrSamplerSource::Own)) {
                 continue;
@@ -998,24 +1214,7 @@ Result<void> SourceWriter::TextureDeclarations() noexcept {
             own = own || texture.immediate[3] == slot;
         }
 
-        StringView type = "Texture2D";
-        switch (table[slot].kind) {
-        case IrTextureKind::TextureCube:
-            type = "TextureCube";
-            break;
-        case IrTextureKind::Texture2DArray:
-            type = "Texture2DArray";
-            break;
-        case IrTextureKind::TextureCubeArray:
-            type = "TextureCubeArray";
-            break;
-        case IrTextureKind::Texture3D:
-            type = "Texture3D";
-            break;
-        default:
-            break;
-        }
-
+        const StringView type = TextureTypeName(table[slot].kind);
         const StringView parts[] = {slot == 0 ? StringView("\n") : StringView(), type,
                                     " MaterialTexture"};
         for (StringView part : parts) {
@@ -1276,6 +1475,22 @@ Result<void> SourceWriter::Expression(const IrValue& value) noexcept {
         return Extern(value);
     case IrOp::Library:
         return LibraryCall(value);
+    case IrOp::CustomOutput: {
+        // 호출 앞에 둔 추가 출력 지역 변수다(m<호출>_<번호>).
+        if (auto prefix = Raw("m"); !prefix) {
+            return prefix;
+        }
+
+        if (auto call = Uint(value.operands[0]); !call) {
+            return call;
+        }
+
+        if (auto separator = Raw("_"); !separator) {
+            return separator;
+        }
+
+        return Uint(value.immediate[0]);
+    }
     case IrOp::Interpolate:
         return Interpolated(value);
     case IrOp::Pending: {
@@ -1473,7 +1688,8 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
 
     for (usize index = 0; index < values.Size(); ++index) {
         const IrValue& value = values[index];
-        if (!reached_[index] || value.op == IrOp::Constant || value.op == IrOp::Texture) {
+        if (!reached_[index] || value.op == IrOp::Constant || value.op == IrOp::Texture ||
+            value.op == IrOp::CustomArguments) {
             continue;
         }
 
@@ -1481,6 +1697,14 @@ Result<void> SourceWriter::Values(Span<const IrValueId> roots) noexcept {
                 out_.locations.TryPushBack(MaterialSourceLocation{line_, value.site.node});
             !located) {
             return located;
+        }
+
+        if (value.op == IrOp::CustomCall) {
+            if (auto call = CustomCall(index, value); !call) {
+                return call;
+            }
+
+            continue;
         }
 
         if (value.op == IrOp::Branch) {
@@ -2285,6 +2509,10 @@ Result<void> SourceWriter::Run() noexcept {
 
     if (auto textures = TextureDeclarations(); !textures) {
         return textures;
+    }
+
+    if (auto customs = CustomFunctions(); !customs) {
+        return customs;
     }
 
     if (auto vertex = Vertex(); !vertex) {

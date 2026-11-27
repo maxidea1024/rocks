@@ -1,3 +1,4 @@
+#include <Base/NumericLimits.h>
 #include <Core/Move.h>
 #include <MaterialCompiler/MaterialIrModule.h>
 
@@ -8,6 +9,9 @@ namespace {
 
 // IR hash 바이트의 형식 표지다(형식을 바꾸면 올린다).
 constexpr uint32 IrHashFormatVersion = 3;
+
+// 아직 옮기지 않은 Custom 함수 표지다.
+constexpr uint32 NoCustomFunction = NumericLimits<uint32>::Max();
 
 // 깊이 우선 순회 칸 하나다(재귀 없이 — 그래프가 깊어도 스택을 넘지 않는다).
 struct Visit {
@@ -354,6 +358,40 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
     }
 
+    // Custom 함수 표: 닿는 CustomCall의 항목을 값 순서(처음 닿은 순)로 옮기고 즉시값 [0]을 다시
+    // 매긴다(6.13절 MS2f5).
+    const IrCustomTable& sourceCustoms = builder.CustomFunctions();
+    Array<uint32> customRemap(out.values_.GetAllocator());
+    if (auto sized = customRemap.TryResize(sourceCustoms.Functions().Size()); !sized) {
+        return FailBuild(out, Move(sized));
+    }
+
+    for (uint32& slot : customRemap) {
+        slot = NoCustomFunction;
+    }
+
+    for (IrValue& value : out.values_) {
+        if (value.op != IrOp::CustomCall) {
+            continue;
+        }
+
+        const usize index = static_cast<usize>(value.immediate[0]);
+        if (index >= customRemap.Size()) {
+            return FailBuild(out, Result<void>::Failure(ErrorCode::InvalidArgument));
+        }
+
+        if (customRemap[index] == NoCustomFunction) {
+            auto copied = out.customs_.CopyFrom(sourceCustoms, static_cast<uint32>(index));
+            if (!copied) {
+                return FailBuild(out, Result<void>::Failure(copied.Error()));
+            }
+
+            customRemap[index] = copied.Value();
+        }
+
+        value.immediate[0] = customRemap[index];
+    }
+
     Sha256 hasher;
     WriteU32(hasher, IrHashFormatVersion);
     WriteU32(hasher, static_cast<uint32>(out.values_.Size()));
@@ -379,6 +417,37 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         WriteU32(hasher, static_cast<uint32>(result.entry));
         WriteText(hasher, result.slot);
         WriteU32(hasher, result.value);
+    }
+
+    // Custom 함수 표는 있을 때만 섞는다(없는 모듈의 hash는 그대로다 — 쿠킹 키).
+    const IrCustomTable& customs = out.customs_;
+    if (!customs.Functions().IsEmpty()) {
+        WriteU32(hasher, static_cast<uint32>(customs.Functions().Size()));
+        const auto items = [&](Span<const IrCustomItem> list) noexcept {
+            WriteU32(hasher, static_cast<uint32>(list.Size()));
+            for (const IrCustomItem& item : list) {
+                WriteText(hasher, customs.Text(item.name));
+                WriteText(hasher, customs.Text(item.value));
+                const uint8 type[] = {static_cast<uint8>(item.type.scalar), item.type.components,
+                                      item.type.rows, static_cast<uint8>(item.type.texture)};
+                hasher.Update(Span<const uint8>(type, sizeof(type)));
+            }
+        };
+
+        for (const IrCustomFunction& function : customs.Functions()) {
+            WriteU64(hasher, function.node.high);
+            WriteU64(hasher, function.node.low);
+            const uint8 header[] = {static_cast<uint8>(function.context),
+                                    static_cast<uint8>(function.returnType.scalar),
+                                    function.returnType.components,
+                                    static_cast<uint8>(function.pixelDiscard ? 1 : 0)};
+            hasher.Update(Span<const uint8>(header, sizeof(header)));
+            WriteText(hasher, customs.Text(function.code));
+            items(customs.Arguments(function));
+            items(customs.Outputs(function));
+            items(customs.Defines(function));
+            items(customs.Includes(function));
+        }
     }
 
     out.hash_ = hasher.Finish();
