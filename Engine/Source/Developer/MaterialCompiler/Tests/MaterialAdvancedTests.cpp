@@ -391,4 +391,80 @@ TEST(MaterialAdvanced_ContextNodes) {
     }
 }
 
+// Sobol: LUT 없이 UE 표(ComputeGPUSpatialSeed·SobolIndex)와 같은 값을 낸다. TemporalSobol은 픽셀
+// 전용(SvPosition)이다.
+TEST(MaterialAdvanced_Sobol) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    // UE FSobol::ComputeGPUSpatialSeed(Core Sobol.cpp:241–275)를 옮긴 기대값 계산이다.
+    const auto spatial = [](uint32 x, uint32 y, int index) noexcept {
+        const uint32 x0[] = {0xf68e, 0x8e56, 0x1135, 0x220a};
+        const uint32 y0[] = {0x94c4, 0x4ac2, 0xfb57, 0x0454};
+        const uint32 x1[] = {0x4414, 0x8828, 0xe69e, 0xae76};
+        const uint32 y1[] = {0xa28a, 0x265e, 0xe69e, 0xae76};
+        uint32 result = 0;
+        for (uint32 bit = 0; bit < 4; ++bit) {
+            result ^= (x & (1u << bit)) ? (index == 0 ? x0[bit] : x1[bit]) : 0u;
+            result ^= (y & (1u << bit)) ? (index == 0 ? y0[bit] : y1[bit]) : 0u;
+        }
+
+        return result;
+    };
+
+    const uint32 numbers[10][2] = {
+        {0x8680, 0x4c80}, {0xf240, 0x9240}, {0x8220, 0x0e20}, {0x4110, 0x1610}, {0xa608, 0x7608},
+        {0x8a02, 0x280a}, {0xe204, 0x9e04}, {0xa400, 0x4682}, {0xe300, 0xa74d}, {0xb700, 0x9817}};
+    const uint32 cellX = 19;
+    const uint32 cellY = 5;
+    const uint32 index = 7;
+    const uint32 packed = spatial(cellX & 0xF, cellY & 0xF, 0) ^ spatial(cellX >> 4, cellY >> 4, 1);
+    uint32 sobol[2] = {packed & 0xff00u, (packed << 8) & 0xff00u};
+    for (uint32 bit = 0; bit < 10; ++bit) {
+        if (index & (1u << bit)) {
+            sobol[0] ^= numbers[bit][0];
+            sobol[1] ^= numbers[bit][1];
+        }
+    }
+
+    const uint32 seed[2] = {static_cast<uint32>(0.25f * 65536.0f) & 0xffffu,
+                            static_cast<uint32>(0.5f * 65536.0f) & 0xffffu};
+    GraphFixture fixture(env);
+    const Guid node = fixture.Add("Material.Sobol");
+    fixture.Connect(AddVector2(fixture, static_cast<float>(cellX), static_cast<float>(cellY)),
+                    "Result", node, "Cell");
+    fixture.Connect(AddConstant(fixture, static_cast<float>(index)), "Result", node, "Index");
+    fixture.Connect(AddVector2(fixture, 0.25f, 0.5f), "Result", node, "Seed");
+    const Guid append = fixture.Add("Material.Append");
+    fixture.Connect(node, "Result", append, "A");
+    fixture.Connect(AddConstant(fixture, 0.0f), "Result", append, "B");
+    EvaluatedIr result;
+    MaterialTranslation out(env.allocator);
+    REQUIRE(EmissiveOf(fixture, append, "Result", result, out));
+    CHECK(NearVector(
+        result, static_cast<float>(cellX) + static_cast<float>(sobol[0] ^ seed[0]) / 65536.0f,
+        static_cast<float>(cellY) + static_cast<float>(sobol[1] ^ seed[1]) / 65536.0f, 0.0f));
+
+    GraphFixture vertex(env);
+    const Guid temporal = vertex.Add("Material.TemporalSobol");
+    const Guid widen = vertex.Add("Material.Append");
+    vertex.Connect(temporal, "Result", widen, "A");
+    vertex.Connect(AddConstant(vertex, 0.0f), "Result", widen, "B");
+    vertex.Connect(widen, "Result", OutputNodeId, "WorldPositionOffset");
+    MaterialTranslation vertexOut(env.allocator);
+    REQUIRE(Translate(vertex, Traits(), vertexOut));
+    CHECK(HasError(vertexOut, MaterialDiagnosticCode::StageViolation));
+
+    GraphFixture pixel(env);
+    const Guid pixelTemporal = pixel.Add("Material.TemporalSobol");
+    const Guid pixelWiden = pixel.Add("Material.Append");
+    pixel.Connect(pixelTemporal, "Result", pixelWiden, "A");
+    pixel.Connect(AddConstant(pixel, 0.0f), "Result", pixelWiden, "B");
+    const Guid unlit = pixel.Add("Material.SurfaceUnlit");
+    pixel.Connect(pixelWiden, "Result", unlit, "EmissiveColor");
+    pixel.Connect(unlit, "Result", OutputNodeId, "Surface");
+    MaterialTranslation pixelOut(env.allocator);
+    REQUIRE(Translate(pixel, Traits(), pixelOut));
+    CHECK(pixelOut.succeeded);
+}
+
 } // namespace material_advanced_tests_file

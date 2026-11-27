@@ -61,10 +61,13 @@ inline bool EvaluateIr(const MaterialTranslation& out, IrValueId id, EvaluatedIr
         for (uint8 at = 0; at < result.count; ++at) {
             result.values[at] = value.type.scalar == IrScalar::Float
                                     ? EvaluatorFloatBits(value.immediate[at])
+                                : value.type.scalar == IrScalar::UInt
+                                    ? static_cast<float>(static_cast<uint32>(value.immediate[at]))
                                     : static_cast<float>(value.immediate[at] != 0 ? 1 : 0);
         }
 
-        return value.type.scalar == IrScalar::Float || value.type.scalar == IrScalar::Bool;
+        return value.type.scalar == IrScalar::Float || value.type.scalar == IrScalar::Bool ||
+               value.type.scalar == IrScalar::UInt;
     case IrOp::Splat:
         for (uint8 at = 0; at < result.count; ++at) {
             result.values[at] = operands[0].values[0];
@@ -89,8 +92,38 @@ inline bool EvaluateIr(const MaterialTranslation& out, IrValueId id, EvaluatedIr
         return at == result.count;
     }
     case IrOp::Convert:
+        // UInt 값은 float에 정확히 담기는 범위(2^24 미만)만 쓴다. Float → UInt는 0 쪽으로 자른다.
         result = operands[0];
         result.count = value.type.components;
+        if (value.type.scalar == IrScalar::UInt) {
+            for (uint8 at = 0; at < result.count; ++at) {
+                result.values[at] = static_cast<float>(static_cast<uint32>(result.values[at]));
+            }
+        }
+
+        return true;
+    case IrOp::Floor:
+        for (uint8 at = 0; at < result.count; ++at) {
+            result.values[at] = Math::Floor(lane(0, at));
+        }
+
+        return true;
+    case IrOp::BitwiseAnd:
+    case IrOp::BitwiseXor:
+    case IrOp::BitShiftLeft:
+    case IrOp::BitShiftRight:
+    case IrOp::NotEquals:
+        for (uint8 at = 0; at < result.count; ++at) {
+            const uint32 x = static_cast<uint32>(lane(0, at));
+            const uint32 y = static_cast<uint32>(lane(1, at));
+            const uint32 bits = value.op == IrOp::BitwiseAnd      ? x & y
+                                : value.op == IrOp::BitwiseXor    ? x ^ y
+                                : value.op == IrOp::BitShiftLeft  ? x << y
+                                : value.op == IrOp::BitShiftRight ? x >> y
+                                                                  : (x != y ? 1u : 0u);
+            result.values[at] = static_cast<float>(bits);
+        }
+
         return true;
     case IrOp::Select:
         for (uint8 at = 0; at < result.count; ++at) {

@@ -622,6 +622,15 @@ constexpr MaterialContextValue ContextValues[] = {
     ContextValue("ScreenPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
                  MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
+    // UE 템플릿 필드 Parameters.SvPosition(TemporalSobol — Docs/Design/MaterialSystem 6.13절
+    // MS2f2).
+    ContextValue("SvPosition", "", MaterialPinType::Float4, MaterialContextValueForm::Field, 0,
+                 MaterialContextFeature::View, AllMaterialDomains, MaterialPixelStage,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Valid, {}, false),
+    // UE View.StateFrameIndexMod8(TemporalSobol — 6.13절 MS2f2).
+    ContextValue("StateFrameIndexMod8", "", MaterialPinType::UInt1, MaterialContextValueForm::Field,
+                 0, MaterialContextFeature::View, AllMaterialDomains, AllMaterialStages,
+                 MaterialCapabilityTier::Mobile, MaterialDerivative::Zero, {}, false),
     // UE 템플릿 필드 GetObjectWorldPosition(Parameters).
     ContextValue("ObjectPosition", "", MaterialPinType::Double3, MaterialContextValueForm::Field, 0,
                  MaterialContextFeature::Primitive, AllMaterialDomains, AllMaterialStages,

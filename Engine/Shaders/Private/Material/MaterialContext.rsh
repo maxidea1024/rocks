@@ -133,6 +133,7 @@ struct MaterialVertexInputs {
     float3 localPosition;
     float3 previousLocalPosition;
     float4 screenPosition;
+    uint stateFrameIndexMod8;
     MaterialDouble3 objectPosition;
     MaterialDouble3 actorPosition;
     MaterialDouble3 previousActorPosition;
@@ -217,6 +218,8 @@ struct MaterialInputs {
     float3 localPosition;
     float3 pixelNormal;
     float4 screenPosition;
+    float4 svPosition;
+    uint stateFrameIndexMod8;
     MaterialDouble3 objectPosition;
     MaterialDouble3 actorPosition;
     float distanceCullFade;
@@ -287,6 +290,8 @@ struct MaterialInputs {
 #define MaterialContextViewSize(c) ((c).viewSize)
 #define MaterialContextSceneTexelSize(c) ((c).sceneTexelSize)
 #define MaterialContextScreenPosition(c) ((c).screenPosition)
+#define MaterialContextSvPosition(c) ((c).svPosition)
+#define MaterialContextStateFrameIndexMod8(c) ((c).stateFrameIndexMod8)
 #define MaterialContextViewFieldOfView(c) ((c).viewFieldOfView)
 #define MaterialContextPreviousViewFieldOfView(c) ((c).previousViewFieldOfView)
 #define MaterialContextViewTanHalfFieldOfView(c) ((c).viewTanHalfFieldOfView)
@@ -371,6 +376,8 @@ struct MaterialInputs {
 #define MaterialContextViewSize(c) float2(0.0, 0.0)
 #define MaterialContextSceneTexelSize(c) float2(0.0, 0.0)
 #define MaterialContextScreenPosition(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextSvPosition(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextStateFrameIndexMod8(c) ((uint)0)
 #define MaterialContextViewFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextPreviousViewFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextViewTanHalfFieldOfView(c) float2(0.0, 0.0)

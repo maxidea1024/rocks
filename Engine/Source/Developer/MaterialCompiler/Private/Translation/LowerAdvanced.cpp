@@ -6,7 +6,7 @@
 #include "PowerValue.h"
 #include "SurfaceMath.h"
 
-// 고급·보조 노드 lowering이다(Docs/Design/MaterialSystem 6.13절 MS2f1). UE 셰이더 보조 함수를
+// 고급·보조 노드 lowering이다(Docs/Design/MaterialSystem 6.13절 MS2f1·MS2f2). UE 셰이더 보조 함수를
 // 부르지 않고 같은 식을 IR 기본 연산으로 펼친다(결정 MD2). UE가 C++에서 미리 계산하는 상수는 같은
 // float 식으로 번역 때 계산한다.
 namespace rocks::material::detail {
@@ -37,6 +37,26 @@ constexpr float BlackBodyExponent = 4.0f;
 constexpr float BlackBodyXyzToRgb[3][3] = {{3.2409699419f, -1.5373831776f, -0.4986107603f},
                                            {-0.9692436363f, 1.8759675015f, 0.0415550574f},
                                            {0.0556300797f, -0.2039769589f, 1.0569715142f}};
+// Sobol 표다(UE FSobol::ComputeGPUSpatialSeed — Core Sobol.cpp:241–275, 셀 하위·상위 4 bit의 x·y
+// bit 0–3마다 XOR하는 값, SobolIndex 표 — SobolRandom.ush:33–51).
+constexpr uint32 SobolBitsPerNibble = 4;
+constexpr uint32 SobolNibbleMask = 0xFu;
+constexpr uint32 SobolLowX[SobolBitsPerNibble] = {0xf68eu, 0x8e56u, 0x1135u, 0x220au};
+constexpr uint32 SobolLowY[SobolBitsPerNibble] = {0x94c4u, 0x4ac2u, 0xfb57u, 0x0454u};
+constexpr uint32 SobolHighX[SobolBitsPerNibble] = {0x4414u, 0x8828u, 0xe69eu, 0xae76u};
+constexpr uint32 SobolHighY[SobolBitsPerNibble] = {0xa28au, 0x265eu, 0xe69eu, 0xae76u};
+constexpr uint32 SobolIndexBits = 10;
+constexpr uint32 SobolNumbers[SobolIndexBits][2] = {
+    {0x8680u, 0x4c80u}, {0xf240u, 0x9240u}, {0x8220u, 0x0e20u}, {0x4110u, 0x1610u},
+    {0xa608u, 0x7608u}, {0x8a02u, 0x280au}, {0xe204u, 0x9e04u}, {0xa400u, 0x4682u},
+    {0xe300u, 0xa74du}, {0xb700u, 0x9817u}};
+// SobolPixel 결과 mask·shift, 고정소수 단위(0x10000)와 seed mask다.
+constexpr uint32 SobolPixelShift = 8;
+constexpr uint32 SobolPixelMask = 0xff00u;
+constexpr float SobolScale = 65536.0f;
+constexpr uint32 SobolSeedMask = 0xffffu;
+// TemporalSobol 프레임 묶음이다(UE StateFrameIndexMod8 + 8 * Index).
+constexpr float SobolFramesPerIndex = 8.0f;
 // 벡터 폭이다.
 constexpr uint8 AdvancedVector2 = 2;
 constexpr uint8 AdvancedVector3 = 3;
@@ -611,6 +631,149 @@ Result<void> LowerHairColor(LoweringContext& context) noexcept {
     return AdvancedEmit(context, m, "Color", m.Exp(m.Mul(negated, m.Scalar(d))));
 }
 
+// UInt 상수다(성분 하나 또는 둘).
+IrValueId SobolUInt(SurfaceMath& m, uint32 x) noexcept {
+    return m.Track(m.Context().Builder().UIntConstant(Span<const uint32>(&x, 1)));
+}
+
+IrValueId SobolUInt2(SurfaceMath& m, uint32 x, uint32 y) noexcept {
+    const uint32 values[] = {x, y};
+    return m.Track(m.Context().Builder().UIntConstant(values));
+}
+
+// 정수 연산이다.
+IrValueId SobolBinary(SurfaceMath& m, IrOp op, IrValueId left, IrValueId right) noexcept {
+    if (left == NoIrValue || right == NoIrValue) {
+        return NoIrValue;
+    }
+
+    return m.Track(m.Context().Binary(op, left, right, NumberRule::IntegerOnly));
+}
+
+// value(UInt 스칼라)의 bit가 있으면 whenSet, 아니면 zero다(UE (x & bit) ? c : 0).
+IrValueId SobolPick(SurfaceMath& m, IrValueId value, uint32 bit, IrValueId whenSet,
+                    IrValueId zero) noexcept {
+    const IrValueId masked = SobolBinary(m, IrOp::BitwiseAnd, value, SobolUInt(m, bit));
+    if (masked == NoIrValue || whenSet == NoIrValue || zero == NoIrValue) {
+        return NoIrValue;
+    }
+
+    const IrValueId set =
+        m.Track(m.Context().Binary(IrOp::NotEquals, masked, SobolUInt(m, 0), NumberRule::Equality));
+    return set == NoIrValue ? NoIrValue : m.Track(m.Context().Select(set, whenSet, zero));
+}
+
+// UE SobolPixel이다(SobolRandom.ush:21–31 — LUT 두 칸의 XOR을 표 상수로 계산한다).
+IrValueId SobolPixelValue(SurfaceMath& m, IrValueId pixel) noexcept {
+    const IrValueId nibble = SobolUInt2(m, SobolNibbleMask, SobolNibbleMask);
+    const IrValueId low = SobolBinary(m, IrOp::BitwiseAnd, pixel, nibble);
+    const IrValueId high =
+        SobolBinary(m, IrOp::BitwiseAnd,
+                    SobolBinary(m, IrOp::BitShiftRight, pixel,
+                                SobolUInt2(m, SobolBitsPerNibble, SobolBitsPerNibble)),
+                    nibble);
+    const IrValueId zero = SobolUInt(m, 0);
+    IrValueId packed = zero;
+    const IrValueId lanes[] = {m.Component(low, 0), m.Component(low, 1), m.Component(high, 0),
+                               m.Component(high, 1)};
+    const uint32* tables[] = {SobolLowX, SobolLowY, SobolHighX, SobolHighY};
+    for (usize lane = 0; lane < sizeof(lanes) / sizeof(lanes[0]); ++lane) {
+        for (uint32 bit = 0; bit < SobolBitsPerNibble; ++bit) {
+            packed = SobolBinary(
+                m, IrOp::BitwiseXor, packed,
+                SobolPick(m, lanes[lane], 1u << bit, SobolUInt(m, tables[lane][bit]), zero));
+        }
+    }
+
+    const IrValueId shifted =
+        SobolBinary(m, IrOp::BitShiftLeft, packed, SobolUInt(m, SobolPixelShift));
+    const IrValueId pair = packed == NoIrValue || shifted == NoIrValue
+                               ? NoIrValue
+                               : m.Track(m.Context().Append(packed, shifted));
+    return SobolBinary(m, IrOp::BitwiseAnd, pair, SobolUInt2(m, SobolPixelMask, SobolPixelMask));
+}
+
+// UE SobolIndex다(SobolRandom.ush:33–51 — Bits 10).
+IrValueId SobolIndexValue(SurfaceMath& m, IrValueId base, IrValueId index) noexcept {
+    const IrValueId zero = SobolUInt2(m, 0, 0);
+    IrValueId result = base;
+    for (uint32 bit = 0; bit < SobolIndexBits; ++bit) {
+        result =
+            SobolBinary(m, IrOp::BitwiseXor, result,
+                        SobolPick(m, index, 1u << bit,
+                                  SobolUInt2(m, SobolNumbers[bit][0], SobolNumbers[bit][1]), zero));
+    }
+
+    return result;
+}
+
+// float2(sobol ^ (uint2(Seed · 0x10000) & 0xffff)) / 0x10000이다.
+IrValueId SobolFinish(SurfaceMath& m, IrValueId sobol, IrValueId seed) noexcept {
+    LoweringContext& context = m.Context();
+    const IrValueId scaled = m.Mul(seed, m.Scalar(SobolScale));
+    const IrValueId seedBits = SobolBinary(
+        m, IrOp::BitwiseAnd,
+        scaled == NoIrValue ? NoIrValue : m.Track(context.Convert(scaled, IrScalar::UInt)),
+        SobolUInt2(m, SobolSeedMask, SobolSeedMask));
+    const IrValueId mixed = SobolBinary(m, IrOp::BitwiseXor, sobol, seedBits);
+    return m.Div(mixed == NoIrValue ? NoIrValue : m.Track(context.Convert(mixed, IrScalar::Float)),
+                 m.Scalar(SobolScale));
+}
+
+// Sobol이다(UE ME:18601–18607, HT:11946–11956).
+Result<void> LowerSobol(LoweringContext& context) noexcept {
+    auto cellConnected = context.IsConnected("Cell");
+    if (!cellConnected) {
+        return Result<void>::Failure(cellConnected.Error());
+    }
+
+    SurfaceMath m(context);
+    const IrValueId cell = cellConnected.Value()
+                               ? m.Track(AdvancedCast(context, AdvancedInput(m, "Cell"),
+                                                      AdvancedVector2, true, "Cell"))
+                               : m.Track(context.Zero(IrFloat(AdvancedVector2)));
+    const IrValueId index =
+        m.Track(AdvancedCast(context, AdvancedInput(m, "Index"), 1, false, "Index"));
+    const IrValueId seed =
+        m.Track(AdvancedCast(context, AdvancedInput(m, "Seed"), AdvancedVector2, true, "Seed"));
+    if (cell == NoIrValue || index == NoIrValue || seed == NoIrValue) {
+        return m.Status();
+    }
+
+    const IrValueId first = m.Track(context.Prefix(index, 1));
+    const IrValueId pixel = m.Track(context.Convert(cell, IrScalar::UInt));
+    const IrValueId bits =
+        first == NoIrValue ? NoIrValue : m.Track(context.Convert(first, IrScalar::UInt));
+    const IrValueId sobol = SobolIndexValue(m, SobolPixelValue(m, pixel), bits);
+    const IrValueId floor = m.Track(context.Unary(IrOp::Floor, cell, NumberRule::FloatOnly));
+    return AdvancedEmit(context, m, "Result", m.Add(floor, SobolFinish(m, sobol, seed)));
+}
+
+// TemporalSobol이다(UE ME:18618–18623, HT:11958–11966 — 픽셀 위치·프레임 번호 mod 8).
+Result<void> LowerTemporalSobol(LoweringContext& context) noexcept {
+    SurfaceMath m(context);
+    const IrValueId index =
+        m.Track(AdvancedCast(context, AdvancedInput(m, "Index"), 1, false, "Index"));
+    const IrValueId seed =
+        m.Track(AdvancedCast(context, AdvancedInput(m, "Seed"), AdvancedVector2, true, "Seed"));
+    const IrValueId position = m.Track(context.ContextValue("SvPosition"));
+    const IrValueId frame = m.Track(context.ContextValue("StateFrameIndexMod8"));
+    if (index == NoIrValue || seed == NoIrValue || position == NoIrValue || frame == NoIrValue) {
+        return m.Status();
+    }
+
+    const uint8 xy[] = {0, 1};
+    const IrValueId pixel =
+        m.Track(context.Convert(m.Track(context.Swizzle(position, xy)), IrScalar::UInt));
+    const IrValueId frameIndex =
+        m.Add(m.Track(context.Convert(frame, IrScalar::Float)),
+              m.Mul(m.Scalar(SobolFramesPerIndex), m.Track(context.Prefix(index, 1))));
+    const IrValueId bits =
+        frameIndex == NoIrValue ? NoIrValue : m.Track(context.Convert(frameIndex, IrScalar::UInt));
+    const IrValueId sobol = SobolIndexValue(m, SobolPixelValue(m, pixel), bits);
+    return AdvancedEmit(context, m, "Result", SobolFinish(m, sobol, seed));
+}
+
 constexpr LoweringEntry AdvancedEntries[] = {
     {"Material.RotateAboutAxis", &LowerRotateAboutAxis},
     {"Material.SphereMask", &LowerSphereMask},
@@ -623,6 +786,8 @@ constexpr LoweringEntry AdvancedEntries[] = {
     {"Material.BlackBody", &LowerBlackBody},
     {"Material.SrgbToWorkingColorSpace", &LowerSrgbToWorkingColorSpace},
     {"Material.HairColor", &LowerHairColor},
+    {"Material.Sobol", &LowerSobol},
+    {"Material.TemporalSobol", &LowerTemporalSobol},
 };
 
 } // namespace
