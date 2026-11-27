@@ -1,4 +1,5 @@
 #include "AllocatorMicroBench.h"
+#include "NotifyBench.h"
 
 #include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -53,6 +54,9 @@
 //                                    장기 tick 시뮬레이터(GcSoak)를 돌리고 불변식 위반을 보고한다
 //   GcBench --cluster-soak 2000 [--packages] [--seed 7] [--soak-objects 1500] [--soak-workers]
 //                                    클러스터 장기 smoke(GcClusterSoak — Debug면 장부 검증 포함)
+//   GcBench --notify 1000000 [--objects N]
+//                                    변경 통지 비용(Docs/Design/ChangeNotification.ko.md CN-D12 —
+//                                    NotifyBench.h, 객체 N개 기본 1024)
 //   GcBench --clusters               클러스터·영구 영역 시나리오(GC-S7, 패키지·World·영구 영역,
 //                                    간선 쓰기 비용 — 클러스터를 끈 경우와 번갈아 잰다)
 namespace {
@@ -64,6 +68,8 @@ constexpr uint32 RandomRoots = 1000;
 constexpr TypeId NodeTypeId{0x4763424e4f444531ULL, 1};
 constexpr TypeId LeafTypeId{0x4763424c45414631ULL, 1};
 constexpr TypeId PackageTypeId{0x4763425041434b31ULL, 1};
+// 변경 통지 벤치의 기본 객체 수다(--notify에 --objects가 없을 때).
+constexpr uint32 NotifyBenchObjects = 1024;
 
 // 할당 범주다. ObjectRuntime의 할당 태그(ObjectRegistryCreate.cpp·ObjectRegistryArrayEdges.cpp)로
 // 나눈다.
@@ -530,6 +536,8 @@ struct Options {
     uint32 packageSize = DefaultPackageSize;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
+    // 변경 통지 벤치의 반복 수다(--notify N — 0이면 돌리지 않는다).
+    uint64 notifyIterations = 0;
     uint64 seed = 7;
     uint32 soakObjects = 4000;
     bool soakWorkers = false;
@@ -2215,6 +2223,9 @@ bool Parse(Span<const StringView> arguments, Options& options) noexcept {
         } else if (platform::CStringEquals(argument, "--soak")) {
             options.soakTicks = value;
             ++index;
+        } else if (platform::CStringEquals(argument, "--notify")) {
+            options.notifyIterations = value;
+            ++index;
         } else if (platform::CStringEquals(argument, "--package-size")) {
             options.packageSize = static_cast<uint32>(
                 value < MinPackageSize || value > PackageObjects ? DefaultPackageSize : value);
@@ -2271,6 +2282,11 @@ int Run(const Options& options) noexcept {
 
     if (options.soakTicks != 0) {
         return RunSoak(options);
+    }
+
+    if (options.notifyIterations != 0) {
+        return gc_bench::RunNotifyBench(
+            options.notifyIterations, options.objects == 0 ? NotifyBenchObjects : options.objects);
     }
 
     if (options.clusterSoakTicks != 0) {

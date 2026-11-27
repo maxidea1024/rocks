@@ -93,6 +93,11 @@ struct PathRunner {
     static usize HookStep(const PathCursor& cursor) noexcept {
         return cursor.hookStep_;
     }
+
+    // Run이 최상위 단일 값의 등록된 read·write 경로를 썼는지다(그 쓰기는 스스로 알린다 — CN-D10).
+    static bool RanTopValue(const PathCursor& cursor) noexcept {
+        return cursor.topValue_;
+    }
 };
 
 } // namespace rocks::detail
