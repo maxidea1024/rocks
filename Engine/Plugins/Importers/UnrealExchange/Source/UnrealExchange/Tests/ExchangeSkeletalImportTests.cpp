@@ -43,7 +43,9 @@ TEST(UnrealExchangeSkeletal_ImportCommand) {
         CHECK(tool.Info(meshInfo) == 0);
         CHECK(tool.Out(ColumnSkeletonAsset) &&
               tool.Out("sourceLods[0].build.recomputeTangents=true") &&
-              tool.Out("sourceLods[0].reduction.maxTriangles=4") && !tool.Out("sourceLods[1]"));
+              tool.Out("sourceLods[0].reduction.maxTriangles=4") && !tool.Out("sourceLods[1]") &&
+              tool.Out("materialSlots[0].slotName=-1") &&
+              tool.Out("materialSlots[0].material=none"));
         const StringView skeletonInfo[] = {ColumnSkeletonAsset, scene.project.View()};
         CHECK(tool.Info(skeletonInfo) == 0);
         CHECK(tool.Out("Bulge") && tool.Out("Tip"));
@@ -63,6 +65,19 @@ TEST(UnrealExchangeSkeletal_ImportCommand) {
         CHECK(tool.Out("asset-import-unreal: 0 created, 2 reimported, 0 failed"));
         CHECK(tool.Info(meshInfo) == 0);
         CHECK(StringView(tool.captured.out.View()) == before.View());
+
+        // 스켈레톤도 재임포트가 원본 값으로 되돌린다(replaceOnReimport — 리타깃 방식).
+        CHECK(tool.Info(skeletonInfo) == 0);
+        String skeletonBefore(allocator);
+        REQUIRE(Keep(tool, skeletonBefore));
+        const StringView skeletonEdit[] = {ColumnSkeletonAsset, "retargetModes[1]=Skeleton",
+                                           scene.project.View()};
+        CHECK(tool.Set(skeletonEdit) == 0);
+        CHECK(tool.Info(skeletonInfo) == 0 &&
+              StringView(tool.captured.out.View()) != skeletonBefore.View());
+        CHECK(tool.Unreal(run) == 0);
+        CHECK(tool.Info(skeletonInfo) == 0 &&
+              StringView(tool.captured.out.View()) == skeletonBefore.View());
 
         const StringView plain[] = {ColumnAsset, scene.project.View()};
         CHECK(tool.Set(edit) == 0);

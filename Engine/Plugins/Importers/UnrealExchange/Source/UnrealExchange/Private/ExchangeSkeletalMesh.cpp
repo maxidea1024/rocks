@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <Mesh/Common/VirtualGeometrySettings.generated.h>
 #include <Mesh/MeshBuildSettings.generated.h>
 #include <Mesh/SkeletalMesh/SkeletalMeshReductionSettings.generated.h>
@@ -38,8 +39,12 @@ struct ExchangeSkeletalMeshBuilder : exchange_detail::ExchangeMeshContext {
             return done;
         }
 
+        // 모르는 data 키는 그대로(ExchangeUnknownSettingDetail), 슬롯 멤버 경고만 materials로
+        // 옮긴다.
         for (ExchangeSettingWarning warning : dataWarnings) {
-            warning.detail = ExchangeSkeletalMeshMaterialsDetail;
+            warning.detail = warning.detail == ExchangeUnknownSettingDetail
+                                 ? warning.detail
+                                 : ExchangeSkeletalMeshMaterialsDetail;
             if (auto pushed = warnings.TryPushBack(warning); !pushed) {
                 return pushed;
             }
@@ -200,7 +205,7 @@ struct ExchangeSkeletalMeshBuilder : exchange_detail::ExchangeMeshContext {
 
         const JsonValue platforms = Member(value, "PerPlatform");
         bool read = false;
-        if constexpr (sizeof(T) == sizeof(bool)) {
+        if constexpr (IsSameV<T, bool>) {
             read = ReadBool(Member(value, "Default"), out);
         } else {
             read = ReadInt32(Member(value, "Default"), out);
@@ -355,6 +360,16 @@ Result<void> ExchangeSkeletalMesh::Build(const ExchangeSkeletalMeshInput& input,
 
     if (auto done = builder.ReadLods(); !done) {
         return done;
+    }
+
+    // UX7a2 전 플러그인의 묶음에는 data.materials가 없다(형식 판은 같다) — 슬롯 없이 들이고 알린다.
+    const JsonValue materials = Member(input.asset->data, "materials");
+    if (!materials.IsValid()) {
+        if (auto warned = builder.Warn(AssetDiagnosticCode::UnsupportedSetting,
+                                       ExchangeSkeletalMeshMaterialsDetail, "materials");
+            !warned) {
+            return warned;
+        }
     }
 
     if (auto done = builder.ReadSlots(Member(translatedData_.Root(), "materials"), slots_,

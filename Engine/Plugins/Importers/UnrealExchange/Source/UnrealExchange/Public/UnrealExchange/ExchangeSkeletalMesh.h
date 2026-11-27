@@ -45,7 +45,8 @@ public:
     // 프로필 → 에셋 설정. replaceSettingsOnReimport는 참이다. 한 객체에 한 번만 부른다.
     //
     // 경고: 번역의 UnsupportedSetting(detail = 표 행 번호, 모르는 키 ExchangeUnknownSettingDetail,
-    // data.materials 슬롯 멤버 ExchangeSkeletalMeshMaterialsDetail), PerPlatform 프로필 값(detail =
+    // data.materials 슬롯 멤버·data.materials 없음(UX7a2 전 묶음 — 슬롯 없이 들인다)
+    // ExchangeSkeletalMeshMaterialsDetail), PerPlatform 프로필 값(detail =
     // SkinWeightProfiles 행), 이름 정규화 UnrealNameNormalized(끝에 하나).
     //
     // 오류(failure.code·detail): 호출 계약(asset·registry 없음, 스킨 메시가 아님, blobs 수, 두 번

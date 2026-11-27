@@ -408,6 +408,11 @@ TEST(UnrealExchange_SkeletalMeshGolden) {
             REQUIRE(mesh.Build(other, failure));
             CHECK(mesh.Spec().skeleton == AssetId{} && mesh.Spec().lods.Size() == 1 &&
                   mesh.Spec().lods[0].source != nullptr && mesh.Spec().bones.Size() == 2);
+            // 옛 에셋(bUseBackwardsCompatibleF16TruncUVs 참)의 LOD 설정 하나만 Rocks 필드가 없다.
+            CHECK(mesh.Warnings().Size() == 1 &&
+                  CountWarnings(mesh, AssetDiagnosticCode::UnsupportedSetting,
+                                MeshRow("SourceModels"),
+                                "bUseBackwardsCompatibleF16TruncUVs") == 1);
             PrintWarnings(mesh);
         }
 
@@ -497,6 +502,37 @@ TEST(UnrealExchange_SkeletalMeshEdits) {
                             ExchangeSkeletalMeshMaterialsDetail, "Extra") == 1);
         CHECK(attempt.mesh.Warnings().Size() == 4);
         PrintWarnings(attempt.mesh);
+
+        // 생성 LOD: 원본이 없고 baked 기록이 bakedSource다(UE 렌더 데이터 — 6.4절 2번).
+        StringBuilder<> record(allocator);
+        REQUIRE(ToText(golden.Asset(golden.column).data.Find("lods").At(0).Find("source"), {},
+                       allocator, record));
+        const JsonEdit generated[] = {{"data.lods.0.hasSource", "false"},
+                                      {"data.lods.0.source", "null"},
+                                      {"data.lods.0.generated", "true"},
+                                      {"data.lods.0.baked", record.View()}};
+        MeshAttempt bakedAttempt(allocator);
+        RunMesh(env, allocator, golden, golden.column, generated, bakedAttempt);
+        REQUIRE(bakedAttempt.error == ErrorCode::None);
+        CHECK(bakedAttempt.mesh.Spec().lods[0].source == nullptr &&
+              bakedAttempt.mesh.Spec().lods[0].bakedSource != nullptr &&
+              bakedAttempt.mesh.Spec().lods[0].bakedSource == bakedAttempt.mesh.LodBakedSource(0));
+        // 생성 LOD가 아닌데 baked 기록이 있으면 형식 위반이다.
+        const JsonEdit notGenerated = {"data.lods.0.baked", record.View()};
+        CHECK(MeshRejects(env, allocator, golden, golden.column, notGenerated,
+                          AssetDiagnosticCode::CorruptBundle, 0));
+
+        // data.materials가 없는 옛 묶음: 슬롯 없이 들이고 알린다. 모르는 data 키는 모르는 키
+        // 경고다.
+        const JsonEdit noMaterials[] = {{"data.materials", ""}, {"data.extra", "1"}};
+        MeshAttempt oldBundle(allocator);
+        RunMesh(env, allocator, golden, golden.column, noMaterials, oldBundle);
+        REQUIRE(oldBundle.error == ErrorCode::None);
+        CHECK(oldBundle.mesh.Spec().slots.IsEmpty() &&
+              CountWarnings(oldBundle.mesh, AssetDiagnosticCode::UnsupportedSetting,
+                            ExchangeSkeletalMeshMaterialsDetail, "materials") == 1 &&
+              CountWarnings(oldBundle.mesh, AssetDiagnosticCode::UnsupportedSetting,
+                            ExchangeUnknownSettingDetail, "extra") == 1);
 
         // 형식 거부(CorruptBundle).
         const struct {

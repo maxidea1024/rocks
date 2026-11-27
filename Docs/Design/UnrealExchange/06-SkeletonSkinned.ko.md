@@ -46,7 +46,7 @@ UX7a(UE 쪽 스켈레톤·스킨 메시 추출, `FRocksSkeletonExtractor`·`FRoc
    - 본: `data.bones`(스켈레톤과 같은 규칙, `retargetMode` 없음). 원본의 정점 가중치 본 번호는 이 순서다(6.3절 4번).
    - 스켈레톤: `settings.Skeleton`(참조 — 옵션 `references`, 없으면 null). null이면 서비스가 보조 출력 스켈레톤을 만든다(6.7.3절 — 묶음 밖 스켈레톤이 없을 때 UE도 새로 만든다).
    - LOD(`settings.SourceModels[i]`와 `data.lods[i]` — 수가 같아야 한다): 원본 `source`(`hasSource`), 생성 LOD는 `baked`를 `bakedSource`로. UE 준비 원본이 없으므로(6.2절) 원본 모드는 늘 순수 원본이다(옵션 `meshNormals`는 스킨 메시에 쓰지 않는다). `BuildSettings` → `SkinnedMeshBuildSettings`, `ReductionSettings` → `SkeletalMeshReductionSettings`(값 대상 `ImportJson`), `ScreenSize`(PerPlatform이 비지 않으면 경고), `LODHysteresis`, `LODMaterialMap`(정수 배열 — 값 검사는 서비스), `BonesToRemove`·`BonesToPrioritize`(UE `FBoneReference` `{BoneName}` 배열 → 이름), `WeightOfPrioritization`.
-   - 슬롯: `data.materials`(6.3절 13번 — 정적 메시 `StaticMaterials`와 같은 대응, 5.5절 6번). 섹션 정보는 없다(6.3절 13번 한계 — 서비스 기본값).
+   - 슬롯: `data.materials`(6.3절 13번 — 정적 메시 `StaticMaterials`와 같은 대응, 5.5절 6번). 슬롯 멤버 경고의 detail은 `ExchangeSkeletalMeshMaterialsDetail`(settings 표 밖), 모르는 `data` 키는 `ExchangeUnknownSettingDetail` 그대로다. `data.materials`가 없으면(UX7a2 전 플러그인의 묶음 — 형식 판이 같다) 슬롯 없이 들이고 `UnsupportedSetting`(같은 detail, 키 `materials`)으로 알린다(서비스가 다각형 묶음 이름으로 슬롯을 만든다 — `MaterialSlotFallback`). 섹션 정보는 없다(6.3절 13번 한계 — 서비스 기본값).
    - 소켓: `settings.Sockets`(스켈레톤 소켓과 같은 칸 — 본은 메시 본이어야 한다, 서비스가 본다).
    - 가중치 프로필: `settings.SkinWeightProfiles`의 `Name`·`DefaultProfile`(`{Default, PerPlatform}`)·`DefaultProfileFromLODIndex`(같은 모양) — PerPlatform이 비지 않으면 경고, `PerLODSourceFiles`는 편집기 임포트 기록이라 버린다.
    - 에셋: `PositiveBoundsExtension`·`NegativeBoundsExtension`·`MinLod`(PerPlatform)·`NaniteSettings`(→ `VirtualGeometrySettings`, 정적 메시와 같은 멤버 표).
