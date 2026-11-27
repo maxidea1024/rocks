@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::ui::WorldWidgetComponent::drawSize_",
+      "id": "79e3d3eb2d4d45e5831c48f8a1b1b6da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WorldWidgetComponent::pivot_",
+      "id": "d8460c8b4792435396ef27d55a4693a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WorldWidgetComponent::playerId_",
+      "id": "74585f95d06444cc890252b02dd57c22",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WorldWidgetComponent::screenSpace_",
+      "id": "293ce938328e4cd282b8f7db7cc7ab2a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::WorldWidgetComponent::widget_",
+      "id": "e9c23321986c449fa18ebe4152b774ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ui::WorldWidgetComponent",
+      "id": "6b0cc10eadd245fab59aa9280ed33dd0",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

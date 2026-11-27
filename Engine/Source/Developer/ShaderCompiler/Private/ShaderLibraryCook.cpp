@@ -546,7 +546,7 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         }
 
         line.jobs = static_cast<uint32>(jobs.Size());
-        if (auto compiled = desc.manager->Compile(jobs.View(), results); !compiled) {
+        if (auto compiled = desc.manager->Compile(jobs.View(), results, desc.control); !compiled) {
             return compiled;
         }
 

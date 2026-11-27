@@ -7,9 +7,12 @@
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/FileError.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
 #include <Core/Text/String.h>
+#include <Engine/CountedPendingWork.h>
 #include <HostConfig/HostSettings.h>
+#include <Localization/Text.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
@@ -20,6 +23,8 @@
 #include <Platform/Process.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
+#include <Progress/ProgressCounter.h>
+#include <Progress/ProgressHub.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCompiler/ShaderDiagnostics.h>
 #include <ShaderCompiler/ShaderJobKey.h>
@@ -72,6 +77,101 @@ constexpr char WorkerTargetName[] = "shadercompileworker";
 
 // 심볼 파일 디렉터리(<너겟 root> 아래 — UE <ProjectSaved>/ShaderSymbols, 16.3절 SSD74)다.
 constexpr char SymbolDirectoryName[] = "Saved/ShaderSymbols";
+
+// 대기 작업 종류 이름과 먼저 끝낼 종류(UE FShaderCompilingManager::GetDependentTypeNames — 텍스처가
+// 머티리얼을 다시 갱신하게 할 수 있어 먼저 끝낸다), 진행 문구다(진행 보고 8·12장).
+constexpr StringView ShadersPendingWorkName = "Shaders";
+constexpr StringView ShadersRunBefore[] = {"Textures"};
+constexpr StringView ShadersDisplayName = "Shaders";
+constexpr StringView CompilingShadersTitle = "Compiling shaders";
+constexpr StringView RecompilingShadersTitle = "Recompiling shaders";
+
+// 진행 중계로 넘어가는 Text(작업 제목 — 중계의 사건 기록이 Clone으로 노드를 붙잡는다)와 대기 작업
+// 취소 상태(연결 취소의 부모 — 중계 작업 source가 참조한다)의 저장소다. 중계는 이 모듈보다 오래 살
+// 수 있으므로(호스트가 엔진 묶음을 내린 뒤 끈다) 모듈 할당자가 아니라 프로세스 수명이다.
+Allocator& ProgressAllocator() noexcept {
+    static SystemAllocator allocator;
+    return allocator;
+}
+
+// 컴파일 한 번의 진행이다: 대기 작업·호스트 준비 진행·진행 작업 계수 sink와 그 작업(hub가 꺼져
+// 있으면 작업 없이). 만든 자리에서 움직이지 않는다(sink가 멤버 주소를 쥔다).
+class CompileProgress final {
+public:
+    CompileProgress(CountedPendingWork& pending, const render::EngineShaderHost& host,
+                    const Text& title, ProgressCancel cancel) noexcept
+        : host_(host) {
+        ProgressTaskDesc desc;
+        desc.title = &title;
+        desc.presentation = ProgressPresentation::Background;
+        desc.cancel = cancel;
+        // 사용자 취소 가능한 작업은 대기 작업 token에도 묶는다(엔진 종료가 취소한다).
+        desc.externalCancel =
+            cancel == ProgressCancel::UserCancellable ? pending.Token() : CancelToken();
+        if (title.IsValid()) {
+            if (auto begun = ProgressHub::Get().Begin(desc)) {
+                task_ = Move(begun.Value());
+                if (auto counter = ProgressCounter::ForTask(task_, 0)) {
+                    counter_ = Move(counter.Value());
+                }
+            }
+        }
+
+        sinks_[0] = ShaderCompileProgressSink{&PendingAdded, &PendingFinished, &pending};
+        sinks_[1] = ShaderCompileProgressSink{&HostAdded, &HostFinished, this};
+        sinks_[2] = MakeShaderCompileCounterSink(counter_);
+        control_.sinks = Span<const ShaderCompileProgressSink>(sinks_);
+        // 사용자 취소 가능한 작업이면 작업 token(대기 작업 token에 연결됨), 아니면 대기 작업
+        // token이다.
+        control_.cancel = task_.IsValid() && cancel == ProgressCancel::UserCancellable
+                              ? task_.Token()
+                              : pending.Token();
+    }
+
+    ~CompileProgress() noexcept {
+        Finish(ProgressOutcome::Abandoned);
+    }
+
+    CompileProgress(const CompileProgress&) = delete;
+    CompileProgress& operator=(const CompileProgress&) = delete;
+
+    const ShaderCompileControl& Control() const noexcept {
+        return control_;
+    }
+
+    // 작업을 끝낸다(두 번째부터는 아무 일도 하지 않는다).
+    void Finish(ProgressOutcome outcome) noexcept {
+        if (task_.IsValid() && !finished_) {
+            (void)task_.Finish(outcome);
+        }
+
+        finished_ = true;
+    }
+
+private:
+    static void PendingAdded(void* context, uint64 jobs) noexcept {
+        static_cast<CountedPendingWork*>(context)->AddWork(jobs);
+    }
+
+    static void PendingFinished(void* context, uint64 jobs) noexcept {
+        static_cast<CountedPendingWork*>(context)->FinishWork(jobs);
+    }
+
+    static void HostAdded(void* context, uint64 jobs) noexcept {
+        static_cast<CompileProgress*>(context)->host_.ReportPreparationAdded(jobs);
+    }
+
+    static void HostFinished(void* context, uint64 jobs) noexcept {
+        static_cast<CompileProgress*>(context)->host_.ReportPreparationFinished(jobs);
+    }
+
+    const render::EngineShaderHost& host_;
+    ProgressTaskHandle task_;
+    ProgressCounter counter_;
+    ShaderCompileProgressSink sinks_[3];
+    ShaderCompileControl control_;
+    bool finished_ = false;
+};
 
 bool IsSeparator(char c) noexcept {
     return c == '/' || c == '\\';
@@ -185,8 +285,26 @@ struct DevelopmentShaderProvider::State {
         watchStarted = false;
     }
 
+    // 대기 작업 종류와 진행 문구를 만든다(TryCreate). 오류는 그 오류다.
+    Result<void> Initialize() noexcept {
+        Allocator& progress = ProgressAllocator();
+        auto shaders = Text::Invariant(progress, ShadersDisplayName);
+        auto compiling = Text::Invariant(progress, CompilingShadersTitle);
+        auto recompiling = Text::Invariant(progress, RecompilingShadersTitle);
+        if (!shaders || !compiling || !recompiling) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        compilingTitle = Move(compiling.Value());
+        recompilingTitle = Move(recompiling.Value());
+        return pendingWork.Initialize(progress, ShadersPendingWorkName, shaders.Value(),
+                                      Span<const StringView>(ShadersRunBefore));
+    }
+
     void Shutdown() noexcept {
-        // 감시 스레드가 재컴파일 중이면 끝날 때까지 기다린다(그 뒤 관리자를 멈춘다).
+        // 진행 중 컴파일을 취소하고 끝날 때까지 기다린다(대기 작업 Shutdown — 엔진 종료가 먼저
+        // 불렀으면 기다리기만 한다). 그 뒤 감시 스레드를 멈추고 관리자를 멈춘다.
+        pendingWork.Shutdown();
         StopWatch();
         for (usize kind = 0; kind < LibraryKindCount; ++kind) {
             platform::AtomicStore<platform::MemoryOrder::Release>(
@@ -566,6 +684,10 @@ struct DevelopmentShaderProvider::State {
     // 바뀐 원문으로 만든 라이브러리를 다시 만들고 로그·통지를 낸다(SSD70·SSD71).
     Result<void> Reload(Span<const StringView> changed, bool everything) noexcept {
         platform::LockGuard lock(reloadGate);
+        // 재컴파일은 대기 작업의 일 구간이고 사용자 취소 가능한 진행 작업이다(PG5).
+        CountedPendingWork::WorkScope work = pendingWork.BeginWork();
+        CompileProgress progress(pendingWork, host, recompilingTitle,
+                                 ProgressCancel::UserCancellable);
         const uint64 started = platform::MonotonicNanoseconds();
         render::ShaderReloadNotice notice;
         notice.succeeded = true;
@@ -580,11 +702,18 @@ struct DevelopmentShaderProvider::State {
                 continue;
             }
 
-            if (auto reloaded = libraries->Reload(changed, everything, report); !reloaded) {
+            if (auto reloaded = libraries->Reload(changed, everything, report, progress.Control());
+                !reloaded) {
                 outcome = Result<void>::Failure(reloaded.Error());
                 notice.succeeded = false;
                 CopyText(notice.message, sizeof(notice.message),
                          StringView(ErrorCodeName(reloaded.Error())));
+                if (reloaded.Error() == ErrorCode::Cancelled) {
+                    // 사용자가 고른 일이다 — Error가 아니다(SSD71처럼 이전 셰이더 유지).
+                    Log::Info(LogDevelopmentShaderProvider,
+                              "Shader recompile was cancelled; the previous shaders stay");
+                }
+
                 break;
             }
 
@@ -624,6 +753,9 @@ struct DevelopmentShaderProvider::State {
                       static_cast<uint64>(formatsRebuilt));
         }
 
+        progress.Finish(outcome                                   ? ProgressOutcome::Succeeded
+                        : outcome.Error() == ErrorCode::Cancelled ? ProgressOutcome::Cancelled
+                                                                  : ProgressOutcome::Failed);
         Publish(notice);
         return outcome;
     }
@@ -657,6 +789,10 @@ struct DevelopmentShaderProvider::State {
     platform::Thread watchThread;
     platform::ManualResetEvent stopWatch;
     bool watchStarted = false;
+    // 대기 작업 "Shaders"와 진행 작업 제목이다(PG5).
+    CountedPendingWork pendingWork;
+    Text compilingTitle;
+    Text recompilingTitle;
     char worker[ProviderPathBytes] = {};
     char formats[ProviderPathBytes] = {};
     char prepareProblem[ProviderNoteBytes] = {};
@@ -671,6 +807,10 @@ DevelopmentShaderProvider::TryCreate(Allocator& allocator, const render::EngineS
     auto state = UniquePtr<State>::TryMake(allocator, allocator, host, options);
     if (!state) {
         return Result<UniquePtr<DevelopmentShaderProvider>>::Failure(state.Error());
+    }
+
+    if (auto initialized = state.Value()->Initialize(); !initialized) {
+        return Result<UniquePtr<DevelopmentShaderProvider>>::Failure(initialized.Error());
     }
 
     return UniquePtr<DevelopmentShaderProvider>::TryMake(allocator, allocator, Move(state.Value()));
@@ -702,6 +842,11 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
     }
 
     platform::LockGuard lock(state.gate);
+    // 첫 만들기(준비 포함)는 대기 작업의 일 구간이고 취소 불가 진행 작업이다(PG5 — 취소하면 렌더
+    // 집합이 열리지 않는다. 엔진 종료의 대기 작업 token은 본다).
+    CountedPendingWork::WorkScope work = state.pendingWork.BeginWork();
+    CompileProgress progress(state.pendingWork, state.host, state.compilingTitle,
+                             ProgressCancel::NotCancellable);
     state.diagnostics.Clear();
     ShaderLibraryReloader* libraries = nullptr;
     if (state.Prepare()) {
@@ -713,11 +858,21 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
 
     if (libraries != nullptr) {
         ShaderLibraryCookReport report(allocator_);
-        if (auto built = libraries->Build(request.formatId, report); !built) {
+        if (auto built = libraries->Build(request.formatId, report, progress.Control()); !built) {
             char line[ProviderNoteBytes];
             snprintf(line, sizeof(line), "shader library compile failed (%s)",
                      ErrorCodeName(built.Error()));
             state.Note(StringView(line));
+            if (built.Error() == ErrorCode::Cancelled) {
+                // 엔진 종료(대기 작업 Shutdown)가 취소했다 — 오류가 아니다.
+                Log::Info(LogDevelopmentShaderProvider,
+                          "The {Format} shader library build was cancelled", request.formatId);
+                progress.Finish(ProgressOutcome::Cancelled);
+                set.CompleteProvision(Result<void>::Failure(ErrorCode::Cancelled),
+                                      Array<uint8>(allocator_), state.diagnostics.View());
+                return Result<void>::Success();
+            }
+
             Array<ShaderDiagnostic> diagnostics(allocator_);
             if (CollectShaderLibraryDiagnostics(report, diagnostics)) {
                 state.LogDiagnostics(diagnostics);
@@ -738,15 +893,18 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
     }
 
     if (libraries == nullptr) {
+        progress.Finish(ProgressOutcome::Failed);
         set.CompleteProvision(Result<void>::Failure(ErrorCode::DependencyFailed),
                               Array<uint8>(allocator_), state.diagnostics.View());
         return Result<void>::Success();
     }
 
     if (auto copied = libraries->CopyLibrary(request.formatId, copy); !copied) {
+        progress.Finish(ProgressOutcome::Failed);
         return Result<void>::Failure(copied.Error());
     }
 
+    progress.Finish(ProgressOutcome::Succeeded);
     state.StartWatch();
     set.CompleteProvision(Result<void>::Success(), Move(copy), StringView());
     return Result<void>::Success();
@@ -790,10 +948,16 @@ bool DevelopmentShaderProvider::IsWatching() const noexcept {
 }
 
 void DevelopmentShaderProvider::Shutdown() noexcept {
-    // 감시 스레드는 gate 밖에서 멈춘다(그 재컴파일은 gate를 잡지 않지만 Shutdown은 둘 다 정리한다).
+    // 진행 중 컴파일을 먼저 취소하고 기다린다(gate를 쥔 첫 만들기가 빨리 끝나게). 감시 스레드는
+    // gate 밖에서 멈춘다(그 재컴파일은 gate를 잡지 않지만 Shutdown은 둘 다 정리한다).
+    state_->pendingWork.Shutdown();
     state_->StopWatch();
     platform::LockGuard lock(state_->gate);
     state_->Shutdown();
+}
+
+PendingWorkSource& DevelopmentShaderProvider::PendingWork() noexcept {
+    return state_->pendingWork;
 }
 
 usize DevelopmentShaderProvider::BuiltLibraryCount() const noexcept {

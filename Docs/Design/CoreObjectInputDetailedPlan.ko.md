@@ -8,7 +8,7 @@ Rocks 전체 구현 계획의 Core/Object Foundation과 입력 영역을 실제 
 
 문서의 경로·타입·API·작업 ID는 신규 엔진 저장소를 위한 제안이다. 엔진 소스가 이미 구현되었거나 예시 API가 컴파일·실행 검증되었다는 의미가 아니다. 기존 전체 기능 목표와 Blueprint 제외·커스텀 언어 정책을 유지한다. 함께 제공하는 작업 목록 52개와 파일 목록 297개는 본문과 같은 데이터로 관리한다.
 
-상세안 1.2는 전체 계획 개정 1.4의 UI 방향 전환(웹 에디터 미채택, 게임 UI와 에디터의 단일 UI 툴킷)에 맞춰 text owner·focus 규약과 InputProfileEditor 파일 경로를 정리하고, UI·에디터가 의존하는 리플렉션 계약 CU1–CU8을 [UI 툴킷 설계](UiToolkit.ko.md)에 연결한다.
+상세안 1.2는 전체 계획 개정 1.4의 UI 방향 전환(웹 에디터 미채택, 게임 UI와 에디터의 단일 UI 툴킷)에 맞춰 text owner·focus 규약과 InputProfileEditor 파일 경로를 정리하고, UI·에디터가 의존하는 리플렉션 계약 CU1–CU8을 [UI 툴킷 설계](UiToolkit/README.ko.md)에 연결한다.
 
 ## 1. 안정성·확장성 원칙과 첫 완료 지점
 
@@ -468,7 +468,7 @@ RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자�
 
 등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·Tryout 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
 
-UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU9로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
+UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit/README.ko.md) §7의 CU1–CU9로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
 
 ### 9.2 Archive 계약
 
@@ -1111,7 +1111,7 @@ modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require
 
 InputProfileEditor는 Action/Binding/Context 목록, processor parameter property panel, conflict report, 실제 장치 입력 표시, 현재 effective binding/glyph 미리보기를 제공하는 후속 도구다. runtime과 같은 schema·validator·CompileInputProfile을 호출한다. undo/redo는 profile transaction 단위이며 preview 실패가 저장된 profile을 훼손하지 않는다. 첫 I0/I1은 CLI probe와 fixture 파일로 충분하다.
 
-인게임 UI와 에디터 UI의 입력 연결은 사용자 focus 경로(`ui::User`)·navigation·TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
+인게임 UI와 에디터 UI의 입력 연결은 사용자 focus 경로(`ui::User`)·navigation·TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit/README.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
 
 ### 22.3 컷씬·개발자 콘솔·언어
 

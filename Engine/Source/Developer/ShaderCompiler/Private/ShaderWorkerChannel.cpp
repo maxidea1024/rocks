@@ -1,5 +1,6 @@
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 
+#include <Base/InitializerList.h>
 #include <Base/PlacementNew.h>
 #include <Platform/Atomics.h>
 #include <Platform/File.h>
@@ -101,7 +102,15 @@ struct ShaderWorkerChannel::State {
                 (void)queue.TryRemoveAt(0);
             }
 
-            Batch(*pending->out, pending->request, pending->progress);
+            if (pending->cancel.IsCancellationRequested()) {
+                // 대기 묶음은 워커를 띄우지 않고 끝낸다(UE CancelCompilation이 대기 job을 뺀다).
+                ResetResult(*pending->out);
+                Fail(*pending->out, ShaderWorkerBatchOutcome::Cancelled,
+                     "the shader compile was cancelled before the batch started");
+            } else {
+                Batch(*pending->out, pending->request, pending->progress, pending->cancel);
+            }
+
             pending->done.Signal();
         }
 
@@ -199,9 +208,20 @@ struct ShaderWorkerChannel::State {
         }
     }
 
-    // 출력 pipe에서 줄 하나를 읽는다(끝 \r 제거). EOF·오류면 false다.
-    bool ReadLine(StringView& text) noexcept {
+    enum class LineRead : uint8 {
+        Line,
+        // EOF·오류(워커가 끝났다)다.
+        Ended,
+        // token이 취소됐다.
+        Cancelled
+    };
+
+    // 출력 pipe에서 줄 하나를 읽는다(끝 \r 제거). 남은 줄이 없을 때마다 token을 보고, 취소될 수
+    // 있는 token이면 시간 제한 읽기로 다시 본다.
+    LineRead ReadLine(StringView& text, const CancelToken& cancel) noexcept {
         using namespace worker_channel_detail;
+        const uint32 timeout = cancel.CanBeCancelled() ? ShaderWorkerCancelPollMilliseconds
+                                                       : platform::InfiniteTimeout;
         while (true) {
             for (usize index = 0; index < line.Size(); ++index) {
                 if (line[index] != '\n') {
@@ -216,21 +236,60 @@ struct ShaderWorkerChannel::State {
                 lineText.Clear();
                 if (!lineText.TryAppend(Span<const char>(line.Data(), end)) ||
                     !line.TryRemoveAt(0, index + 1)) {
-                    return false;
+                    return LineRead::Ended;
                 }
 
                 text = StringView(lineText.Data(), lineText.Size());
-                return true;
+                return LineRead::Line;
+            }
+
+            if (cancel.IsCancellationRequested()) {
+                return LineRead::Cancelled;
             }
 
             char chunk[ReadChunkBytes];
             const platform::FileTransfer read =
-                process.Read(platform::ProcessStream::Output, chunk, sizeof(chunk));
+                process.Read(platform::ProcessStream::Output, chunk, sizeof(chunk), timeout);
+            if (read.status.code == platform::FileCode::NoProgress) {
+                continue;
+            }
+
             if (!read.status || read.bytes == 0 ||
                 !line.TryAppend(Span<const char>(chunk, read.bytes))) {
-                return false;
+                return LineRead::Ended;
             }
         }
+    }
+
+    // 취소된 묶음을 끝낸다: 워커(와 자손)를 강제 종료·회수하고 남은 입력·출력 파일을 지운다.
+    void CancelBatch(ShaderWorkerBatchResult& out, const char* input, const char* output) noexcept {
+        (void)process.Terminate();
+        WorkerEnded(out, input);
+        // 워커는 output.<seq>.tmp에 쓴 뒤 이름을 바꾼다 — 둘 다 지운다.
+        char temporary[worker_channel_detail::MaxChannelPathBytes];
+        const int written = snprintf(temporary, sizeof(temporary), "%s.tmp", output);
+        for (const char* path : {output, static_cast<const char*>(temporary)}) {
+            if (path == temporary &&
+                (written <= 0 || static_cast<usize>(written) >= sizeof(temporary))) {
+                continue;
+            }
+
+            bool exists = false;
+            if (platform::PhysicalFileSystem().FileExists(path, strlen(path), exists) && exists) {
+                (void)platform::PhysicalFileSystem().Delete(path, strlen(path));
+            }
+        }
+
+        Fail(out, ShaderWorkerBatchOutcome::Cancelled,
+             "the shader compile was cancelled; the worker was terminated");
+    }
+
+    static void ResetResult(ShaderWorkerBatchResult& out) noexcept {
+        out.outcome = ShaderWorkerBatchOutcome::ChannelFailed;
+        out.diagnostics.Clear();
+        out.children.Clear();
+        out.reportedJobs = 0;
+        out.exit = platform::ProcessExit{};
     }
 
     bool WriteControl(const char* text) noexcept {
@@ -240,13 +299,9 @@ struct ShaderWorkerChannel::State {
     }
 
     void Batch(ShaderWorkerBatchResult& out, Span<const uint8> request,
-               const ShaderWorkerProgress& progress) noexcept {
+               const ShaderWorkerProgress& progress, const CancelToken& cancel) noexcept {
         using namespace worker_channel_detail;
-        out.outcome = ShaderWorkerBatchOutcome::ChannelFailed;
-        out.diagnostics.Clear();
-        out.children.Clear();
-        out.reportedJobs = 0;
-        out.exit = platform::ProcessExit{};
+        ResetResult(out);
         if (!process.IsStarted() && !StartWorker(out)) {
             return;
         }
@@ -293,7 +348,13 @@ struct ShaderWorkerChannel::State {
 
         while (true) {
             StringView text;
-            if (!ReadLine(text)) {
+            const LineRead read = ReadLine(text, cancel);
+            if (read == LineRead::Cancelled) {
+                CancelBatch(out, input, output);
+                return;
+            }
+
+            if (read == LineRead::Ended) {
                 WorkerEnded(out, input);
                 return;
             }
@@ -349,6 +410,10 @@ struct ShaderWorkerChannel::State {
                     return;
                 }
 
+                if (action == ShaderWorkerHeldAction::Keep) {
+                    continue;
+                }
+
                 if (!WriteControl("release\n")) {
                     WorkerEnded(out, input);
                     return;
@@ -402,6 +467,8 @@ const char* ShaderWorkerBatchOutcomeName(ShaderWorkerBatchOutcome outcome) noexc
         return "ChannelFailed";
     case ShaderWorkerBatchOutcome::ShutDown:
         return "ShutDown";
+    case ShaderWorkerBatchOutcome::Cancelled:
+        return "Cancelled";
     }
 
     return "unknown";

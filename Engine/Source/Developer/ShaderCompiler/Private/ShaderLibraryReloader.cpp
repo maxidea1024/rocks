@@ -68,8 +68,10 @@ struct ShaderLibraryReloader::State {
         return nullptr;
     }
 
-    ShaderLibraryCookDesc CookDesc(const ShaderFormatSnapshot* const& snapshot) const noexcept {
+    ShaderLibraryCookDesc CookDesc(const ShaderFormatSnapshot* const& snapshot,
+                                   const ShaderCompileControl& control) const noexcept {
         ShaderLibraryCookDesc cook;
+        cook.control = control;
         cook.allocator = &allocator;
         cook.registry = desc.registry;
         cook.formats = Span<const ShaderFormatSnapshot* const>(&snapshot, 1);
@@ -200,8 +202,8 @@ ShaderLibraryReloader::ShaderLibraryReloader(const ShaderLibraryReloaderDesc& de
 
 ShaderLibraryReloader::~ShaderLibraryReloader() noexcept = default;
 
-Result<void> ShaderLibraryReloader::Build(StringView formatId,
-                                          ShaderLibraryCookReport& report) noexcept {
+Result<void> ShaderLibraryReloader::Build(StringView formatId, ShaderLibraryCookReport& report,
+                                          const ShaderCompileControl& control) noexcept {
     using namespace library_reloader_detail;
     if (!state_ || !state_->valid || state_->desc.registry == nullptr ||
         state_->desc.manager == nullptr || formatId.IsEmpty()) {
@@ -232,7 +234,7 @@ Result<void> ShaderLibraryReloader::Build(StringView formatId,
     }
 
     const ShaderFormatSnapshot* snapshot = &format.snapshot;
-    const ShaderLibraryCookDesc cook = state.CookDesc(snapshot);
+    const ShaderLibraryCookDesc cook = state.CookDesc(snapshot, control);
     if (auto compiled = CompileShaderLibrary(cook, report, format.bytes); !compiled) {
         (void)state.AddSources(report);
         return compiled;
@@ -291,7 +293,8 @@ usize ShaderLibraryReloader::FormatCount() const noexcept {
 }
 
 Result<void> ShaderLibraryReloader::Reload(Span<const StringView> changed, bool everything,
-                                           ShaderReloadReport& report) noexcept {
+                                           ShaderReloadReport& report,
+                                           const ShaderCompileControl& control) noexcept {
     using namespace library_reloader_detail;
     report.outcome = ShaderReloadOutcome::NoShaderAffected;
     report.affectedTypes = 0;
@@ -335,7 +338,7 @@ Result<void> ShaderLibraryReloader::Reload(Span<const StringView> changed, bool 
     for (BuiltFormat* format : targets) {
         ++report.formats;
         const ShaderFormatSnapshot* snapshot = &format->snapshot;
-        const ShaderLibraryCookDesc cook = state.CookDesc(snapshot);
+        const ShaderLibraryCookDesc cook = state.CookDesc(snapshot, control);
         ShaderLibraryCookReport cooked(state.allocator);
         Array<uint8> bytes(state.allocator);
         const Result<void> compiled = CompileShaderLibrary(cook, cooked, bytes);

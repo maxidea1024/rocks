@@ -128,7 +128,8 @@ public:
 | `NotScriptType` | CLASS·STRUCT | 그 타입과 파생에서 노출 상속을 끊는다(파생이 다시 `ScriptType`을 쓰면 노출 — 그 `base`는 쓰지 않는다). 확장 가능 상속은 끊지 않는다(UE `NotBlueprintType`) |
 | `ScriptExtensible`·`NotScriptExtensible` | CLASS | Sparks class가 상속할 수 있다(`ScriptType`을 함께 뜻한다, 상속된다) / 그 상속을 끊는다 |
 | `ScriptReadOnly`·`ScriptWritable` | PROPERTY | 필드가 Sparks에 읽기 전용·읽기 쓰기로 보인다(둘 중 하나, `ReadOnly` 필드에 `ScriptWritable`은 RMC2603) |
-| `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
+| `ScriptAssignable` | PROPERTY(이벤트 필드) | 이벤트가 Sparks `on`·`await`에 보인다(UE `BlueprintAssignable` — 노출 타입의 object 종류만, `EditorOnly` 불가, 이름은 필드 규칙이고 `Changed`는 예약 — SparksBinding B20–B22). 값 필드에 쓰거나 `ScriptReadOnly`·`ScriptWritable`과 함께 쓰면 RMC2603 |
+| `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자(`ScriptReadOnly`·`ScriptWritable`·이벤트의 `ScriptAssignable`)와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
 | `ScriptCallable` | FUNCTION | Sparks에서 부를 수 있다(UE `BlueprintCallable` — 노출 타입의 함수만, `EditorOnly` 불가). 입력 오류로 Fatal하지 않고 Game lane에서 부른다는 계약이다(파괴 대기 대상의 비 const 호출은 실행 host가 건너뛴다). 이름이 예약 이름(prelude·핵심 엔진 타입·문맥 이름 등)이면 RMC2606이다. 리플렉션 `Pure`가 schema `pure`다 |
 | `ScriptName="X"` | FUNCTION | Sparks 이름(PascalCase ASCII, `Try` 접두 없음). 없으면 도구 이름이고 `Result` 함수의 `TryX`는 `X`다 |
 | `ScriptEffects="spawn, io"` | FUNCTION | schema `effects`(`spawn`·`acquire`·`readiness`·`io`·`wallClock` — 정규 순서로 쓴다, `Pure`와 함께 쓸 수 없다) |
@@ -141,12 +142,14 @@ public:
 |---|---|
 | RMC2601 | Sparks에 대응 타입이 없는 필드(`Name`·`Guid`·`AssetId`·`ClassRef`·정적 배열·`InstancedStruct`·표 밖의 미러(enum 미러 포함)·중첩 컨테이너) |
 | RMC2602 | 필드 대상이 노출 타입이 아님(`rocks::Object`·노출하지 않은 클래스·enum·struct), `Soft<T>`의 대상이 asset이 아님 |
-| RMC2603 | 함께 쓸 수 없는 노출 지정자(`ScriptReadOnly`+`ScriptWritable`, `ReadOnly`+`ScriptWritable`, 노출 없는 `ScriptName`, 켜기·끄기 짝, `ScriptExtensible`+`NotScriptType`) |
+| RMC2603 | 함께 쓸 수 없는 노출 지정자(`ScriptReadOnly`+`ScriptWritable`, `ReadOnly`+`ScriptWritable`, 노출 없는 `ScriptName`, 값 필드의 `ScriptAssignable`, `ScriptAssignable`+`ScriptReadOnly`·`ScriptWritable`, 켜기·끄기 짝, `ScriptExtensible`+`NotScriptType`) |
 | RMC2604 | Sparks 이름 형식(필드의 `_`, `ScriptName`, 점이 든 타입 도구 이름, 대문자로 시작하지 않는 enum case) |
 | RMC2605 | 보이는 사슬(import 기반 포함) 안의 Sparks 필드 이름 겹침, 이 모듈과 import 모듈 사이 타입 이름 겹침(대소문자 무시) |
 | RMC2606 | 언어 이름 충돌 — 타입 이름이 언어 소유 이름(`Text`·`Asset` 등), object 종류(asset 아님) 필드 이름이 hook·`On`+hook·Unity hook 이름. 표는 `Programs/Rocks.MetaCompiler/SparksNames.json`(시험 `SparksBinding_NamesMatchCompiler`가 컴파일러와 대조) |
 | RMC2607 | 노출할 수 없는 타입·필드(`EditorOnly` 타입·필드와 EditorOnly 타입의 노출 필드, Binds 미러, Flags enum, 보이는 case가 없는 enum) |
-| RMC2608 | 노출하지 않은 타입의 노출 필드 |
+| RMC2608 | 노출하지 않은 타입의 노출 필드·함수·이벤트 |
+
+이벤트(EI1c — SparksBinding B21–B23)는 같은 코드를 쓴다: 표기할 수 없는 인자 RMC2601, `ObjectHandle`·노출하지 않은 인자 대상 RMC2602, 이름 형식 RMC2604, 필드·함수·이벤트 한 이름 공간의 겹침 RMC2605, `Changed`·hook·예약 이름·키워드 인자 RMC2606, `EditorOnly` 이벤트·asset 종류 타입의 이벤트 RMC2607.
 
 ### 리플렉션 함수(`ROCKS_FUNCTION`)
 

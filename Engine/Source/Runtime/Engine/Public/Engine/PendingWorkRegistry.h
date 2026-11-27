@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Engine/PendingWorkSource.h>
 #include <Platform/Sync.h>
 #include <Progress/ProgressTypes.h>
@@ -19,6 +20,11 @@ namespace rocks {
 //   ...
 //   shaderWork_.Shutdown();
 //   (void)engine.PendingWork().Unregister(shaderWork_);
+//
+// 호스트 서비스(PG5): Engine은 엔진 묶음 모듈을 시작하기 전에 이 등록소를 모듈 로더 호스트 서비스로
+// 올리고 엔진 묶음을 내린 뒤 뗀다. 엔진 묶음 모듈은 Startup에서
+// context.Services().Find<PendingWorkRegistry>()로 찾아 등록하고, Shutdown에서 그 서비스가 여전히
+// 같은 등록소일 때만 Unregister한다(같은 로더의 둘째 Engine은 서비스를 올리지 않는다 — 8장).
 //
 // 규칙:
 // - 소유 스레드(만든 스레드, AdoptCurrentThread로 바꿈)가 아니면 RemainingCount 말고는
@@ -111,3 +117,5 @@ private:
 };
 
 } // namespace rocks
+
+ROCKS_DECLARE_HOST_SERVICE(rocks::PendingWorkRegistry, ROCKS_ENGINE_API)

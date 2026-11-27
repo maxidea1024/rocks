@@ -2,7 +2,7 @@
 
 | 항목 | 현재 Rocks.Build | 문제 |
 |---|---|---|
-| 타깃 종류 | `TargetType { Game, Program }`(`BuildRules.cs:43`) | 에디터(Rocks Studio — [UI 툴킷](../UiToolkit.ko.md) 6절)와 전용 서버를 전제한 설계가 있는데 받을 타깃이 없다 |
+| 타깃 종류 | `TargetType { Game, Program }`(`BuildRules.cs:43`) | 에디터(Rocks Studio — [UI 툴킷](../UiToolkit/README.ko.md) 6절)와 전용 서버를 전제한 설계가 있는데 받을 타깃이 없다 |
 | 에디터 전용 코드·데이터 | `EditorOnly`는 쿠킹 저장·로드 정책(`FieldEncodePolicy::excludedFlags`)의 데이터 플래그이고 "항상 컴파일된다"([리플렉션 기반](../ReflectionFoundations.ko.md) 134행) | 게임 빌드에서도 필드가 메모리 배치에 남는다. 에디터 전용 함수·코드를 컴파일에서 뺄 수단이 없다 |
 | 모듈 type | 기술자 `type`(Runtime·Developer·Editor)은 게임·플러그인 모듈에만 있고 `Editor`는 "에디터 타깃이 아직 없음"으로 항상 뺀다([저장소 구성](../../Guides/RepositoryLayout.ko.md) 게임 빌드 연동). 엔진 모듈은 `SourceModuleRules.Group` 폴더뿐이다 | 엔진 모듈을 서버·클라이언트 전용으로 표시할 수 없다 |
 | Release 배제 정책 | `ReleaseExclusion.cs:90`이 `Type == Game` 타깃만 검사한다 | Client·Server 타깃이 생기면 빠진다 |
