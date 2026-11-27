@@ -318,6 +318,16 @@ Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row,
 
         return state.writer.EndArray();
     }
+    case ExchangeSettingKind::EnumMap:
+        if (value.IsString()) {
+            for (const ExchangeSettingRow& mapped : members) {
+                if (mapped.ueKey == value.GetString()) {
+                    return state.writer.String(mapped.rocksKey);
+                }
+            }
+        }
+
+        return Invalid();
     case ExchangeSettingKind::Ignore:
     case ExchangeSettingKind::Unsupported:
         break;

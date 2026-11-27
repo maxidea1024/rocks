@@ -48,6 +48,9 @@ enum class ExchangeSettingKind : uint8 {
     Struct,
     // 값 struct 배열 — 원소마다 members 표로 재귀한다.
     StructArray,
+    // 값 이름이 Rocks와 다른 enum — members 표의 ueKey(UE 값 이름) → rocksKey(Rocks 열거자 이름)로
+    // 바꾼다(UnrealExchange 6.4절 3번). 표에 없는 값·문자열이 아닌 값은 CorruptData다.
+    EnumMap,
     // 설정이 아닌 UE 멤버 — 버린다.
     Ignore,
     // Rocks 필드가 없는 UE 설정 — 값이 defaultValue와 다르면 UnsupportedSetting 경고 뒤 버린다.
@@ -69,7 +72,7 @@ struct ExchangeSettingRow {
     // 이 행을 쓰는 출력 클래스 집합이다(ExchangeClassBit의 합 — 0이면 모든 클래스). 집합 밖
     // 클래스의 출력이면 경고 없이 버린다(다른 차원 클래스의 주소 키 등).
     uint32 classes = 0;
-    // Struct·StructArray의 멤버 표다.
+    // Struct·StructArray의 멤버 표, EnumMap의 값 대응 표다.
     const ExchangeSettingRow* members = nullptr;
     usize memberCount = 0;
     // Unsupported의 UE 기본값(JSON 텍스트)이다.

@@ -148,6 +148,7 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
    - `PerPlatformFloat`: `Default` → `defaultValue`. `PerPlatform`이 비어 있지 않으면 버리고 `UnsupportedSetting` 경고(UE 플랫폼 이름과 TargetProfile 이름의 대응은 후속).
    - `Reference`·`ReferenceArray`: `{ "objectPath" }`를 resolver 텍스트(objectPath 그대로)로 바꾼다. resolver는 옵션 `references`에서 id를 찾아 `context.OpenAsset(id)`로 Hard 참조를 건다(대상 타입은 codec이 필드 타입으로 확인). `references`에 없는 objectPath(묶음에도 기존 에셋에도 없는 대상 — 계획이 `MissingUnrealDependency`를 이미 냈다)는 null로 둔다. 배열은 null 원소를 뺀다.
    - `Struct`: 멤버 행 표로 재귀한다(값 struct — `SourceColorSettings`의 enum 멤버 접두 떼기).
+   - `EnumMap`(UX7b — 6.4절 3번): 값 이름이 Rocks와 다른 enum이다. 멤버 표(`members`)의 행마다 `ueKey`(UE 값 이름) → `rocksKey`(Rocks 열거자 이름)이고 표에 없는 값·문자열이 아닌 값은 `CorruptData`다(스킨 메시 축소 `SMTC_*`·`SMOT_*`).
    - `Ignore`: 설정이 아닌 UE 멤버(`LightingGuid`·`AssetImportData` 등 — 버림).
    - `Unsupported`: Rocks 필드가 없는 UE 설정이다. 값이 UE 기본값과 다르면 `UnsupportedSetting` 경고를 내고 버린다.
    표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `CorruptData` 실패다(덤프 내용이 필드와 맞지 않음 — 표가 맞는지는 시험이 엔진 콘텐츠 묶음으로 막는다). 진단이 없는 `ImportJson` 오류는 그대로 전한다. 번역의 `CorruptData`(값이 행 종류와 맞지 않음)만 `InvalidSource`이고 행 표 결함(`InvalidArgument`)·writer 오류·writer 원문의 다시 읽기 실패는 코드 결함이라 진단 코드 없이 그 오류다(UX3b에서 정적 메시와 맞춤 — 5.5절 4번).
