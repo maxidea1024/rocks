@@ -7,7 +7,7 @@
 ### 9.1 명령줄 보고기(`ConsoleProgressReporter`)
 
 - 사람이 읽는 줄을 Log API로 낸다. 로그 범주 이름은 `"Progress"`(변수 `LogProgress`), 문구는 원문(9.2절). 로그는 stderr로 가므로 stdout JSONL과 섞이지 않는다.
-- `Pump(uint64 nowNanoseconds)`를 펌프 주인이 명시 호출한다. 시작·끝 사건은 Pump 때 바로, 진행 줄은 `kDefaultConsoleProgressInterval` = 2 s마다 최상위 작업별 한 줄: `Cooking packages: 1,234 / 5,000 (24%) - Maps/Arena`. 실패·취소·Abandoned 끝은 Warning, 나머지는 Display 수준. `Hidden` 작업은 시작·끝만.
+- `Pump(uint64 nowNanoseconds)`를 펌프 주인이 명시 호출한다. 시작·끝 사건은 Pump 때 바로, 진행 줄은 `DefaultConsoleProgressInterval` = 2 s마다 최상위 작업별 한 줄: `Cooking packages: 1,234 / 5,000 (24%) - Maps/Arena`. 실패·취소·Abandoned 끝은 Warning, 나머지는 Display 수준. `Hidden` 작업은 시작·끝만.
 - **펌프 주인.** 명령의 주 스레드 반복이 부른다. 한 호출로 오래 막는 명령은 `ProgressPumpThread`(Progress 모듈 — 전용 스레드가 간격 대기 후 `Pump`·종료 요청 확인)를 쓴다. 펌프 주인은 매 Pump에 `IsTerminationRequested()`(Launch)를 보고 처음 보았을 때 `RequestCancelAllTopLevel()`을 부른다. Progress 모듈은 Launch에 의존하지 않으므로 이 확인은 명령 쪽 glue(`ProgressPumpThread`에 함수로 주입)가 한다.
 - 명령은 기본으로 켜고 `--no-progress`로 끈다(AppInfoCommandLine `--kebab` 형식).
 
@@ -29,8 +29,8 @@ EngineImplementationPlan 28.4절의 "stdout은 선택 JSONL/progress protocol"�
 ```
 
 - `outcome`: `succeeded`·`failed`·`cancelled`·`abandoned`. `shape`: `indeterminate`·`fraction`·`count`(`done`·`total`은 count만). id 필드가 빈 문자열이면 원문만 있다.
-- `begin`·`end`·`lost`는 Pump 때 바로 쓰고, `progress`는 `kDefaultJsonlProgressInterval` = 0.2 s마다 쓰되 직전과 같은 작업은 건너뛴다.
-- 줄 최대 길이 `kMaxProgressJsonlLineBytes` = 64 KiB. 넘는 문구는 잘라 쓴다(UTF-8 경계에서).
+- `begin`·`end`·`lost`는 Pump 때 바로 쓰고, `progress`는 `DefaultJsonlProgressInterval` = 0.2 s마다 쓰되 직전과 같은 작업은 건너뛴다.
+- 줄 최대 길이 `MaxProgressJsonlLineBytes` = 64 KiB. 넘는 문구는 잘라 쓴다(UTF-8 경계에서).
 - 읽는 쪽은 `v`가 다르면 `Unsupported`로 거부하고 그 자식의 진행을 끊는다(자식 프로세스 자체는 계속).
 
 ### 9.4 에디터(나중 — UiToolkit·에디터 단계)

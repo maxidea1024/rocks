@@ -12,7 +12,7 @@ public abstract class TestsModule : ModuleRules
     protected enum TestLayer { Core, Foundation, Engine }
 
     // Tests of runtime modules outside the Object family.
-    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture", "ModuleLoader"];
+    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture", "ModuleLoader", "Progress"];
 
     // Tests of Core layer development tool modules (Core/Source/Developer) (included in every test executable).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
@@ -255,9 +255,9 @@ public abstract class TestsModule : ModuleRules
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));
         string[] dependencies = Layer switch
         {
-            TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules],
-            TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules],
-            _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules,
+            TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules],
+            TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules, .. ObjectDeveloperModules],
+            _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules, .. ObjectDeveloperModules,
                 .. EngineTestDependencies, .. (PluginTests ? PluginTestModules.Select(PluginModuleName).ToArray() : Array.Empty<string>())]
         };
 
