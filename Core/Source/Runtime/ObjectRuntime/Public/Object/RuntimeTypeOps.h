@@ -17,6 +17,7 @@
 namespace rocks {
 
 class ConstructionContext;
+class SubobjectDefaultsContext;
 class DelegateHandle;
 struct FrameLayout;
 class ArchiveWriter;
@@ -725,6 +726,15 @@ struct RuntimeEventOps {
 // Trace는 읽기만 수행한다. 콜백 중 생성·간선 변경·수집 재진입은 Busy로 거부한다.
 // lease 반환과 통계 조회는 허용한다. 활성 ConstructionContext의 롤백/소멸 재진입은 금지한다.
 // 동적 모듈의 함수 포인터를 제공한다면 module로 코드 수명도 유지해야 한다.
+// 선언 subobject 하나의 연산이다(Docs/Design/Prefab 10.2절 — TypeSchema::subobjects와 같은 수·순서,
+// 펼친 표). field는 소유 객체 안 소유 필드(ObjectRef<T>)의 주소를 돌려준다 — ObjectRuntime이 소유
+// 타입을 모른 채 배선하고(ConstructionContext::CreateDeclaredSubobjects), 기본값 덮기 문맥이 멤버
+// 포인터를 항목에 맞춘다(SubobjectDefaultsContext::With). owner는 이 타입 또는 파생 객체여야 한다.
+struct RuntimeSubobjectOps {
+    Guid id;
+    void* (*field)(Object& owner) noexcept = nullptr;
+};
+
 struct RuntimeTypeOps {
     usize size = 0;
     usize alignment = 0;
@@ -778,6 +788,13 @@ struct RuntimeTypeOps {
     // 포함, Docs/Design/EventReflection.ko.md ED15). 이벤트 필드에는 RuntimeFieldOps가 없다. 등록이
     // 배열과 매개변수 연산 배열을 깊게 복사한다.
     Span<const RuntimeEventOps> events{};
+    // 선언 subobject 연산이다(TypeSchema::subobjects와 같은 수·순서 — 펼친 표, Docs/Design/Prefab
+    // 10.2절). 등록이 배열을 깊게 복사한다.
+    Span<const RuntimeSubobjectOps> subobjects{};
+    // 이 클래스가 선언한 subobject 기본값 덮기다(static InitSubobjectDefaults — 자기 선언만, 없으면
+    // null). base 것을 부르지 않는다 — 런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다
+    // (Docs/Design/Prefab 10.2절). World 없이 값만 설정한다(생성자 결정성 계약과 같다).
+    Result<void> (*initSubobjectDefaults)(SubobjectDefaultsContext&) noexcept = nullptr;
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.

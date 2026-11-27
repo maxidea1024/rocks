@@ -823,6 +823,29 @@ internal sealed class ClassModel
 
     public string? WithinId { get; set; }
 
+    // 소유 구조 클래스 지정자의 원문(이 모듈 클래스가 직접 쓴 필드 도구 이름 — 없으면 "", Docs/Design/Prefab 10.2절)이다.
+    public string SubobjectListSpelling { get; init; } = "";
+
+    public string SubobjectRootSpelling { get; init; } = "";
+
+    public string SubobjectAttachSpelling { get; init; } = "";
+
+    // 실효 소유 구조 지정자(상속 포함)의 필드 ID다(없으면 null). 생성 스키마의 subobjectListField·RootField·AttachField와 descriptor다.
+    public string? SubobjectListId { get; set; }
+
+    public string? SubobjectRootId { get; set; }
+
+    public string? SubobjectAttachId { get; set; }
+
+    // 펼친 선언 subobject 표(base 표 뒤에 자기 항목 — Docs/Design/Prefab 10.2절)다. SchemaValidator가 채우고 import 클래스는
+    // descriptor에서 온다.
+    public List<SubobjectModel> Subobjects { get; set; } = [];
+
+    // static Result<void> InitSubobjectDefaults(SubobjectDefaultsContext&) noexcept를 선언했는지다(Prefab 10.2절 — 자기 선언만).
+    public bool HasInitSubobjectDefaults { get; set; }
+
+    public SourceSite? InitSubobjectDefaultsSite { get; set; }
+
     // TypeFlags 비트: Abstract 1, WorldOnly 2, Transient 4, Deprecated 8, EditorOnly 32(클래스), Atomic 16(struct). 생성 스키마의 flags다.
     public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Transient ? 4u : 0u) | (Deprecated ? 8u : 0u) | (Atomic ? 16u : 0u) |
         (EditorOnly ? 32u : 0u);
@@ -935,6 +958,11 @@ internal sealed class ClassModel
     // scriptExtensible은 노출된 타입에서 이 값이다(Docs/Design/SparksBinding.ko.md B1).
     public bool ScriptExtensible { get; set; }
 }
+
+// 펼친 선언 subobject 표의 항목 하나다(Docs/Design/Prefab 10.2절). Id는 소유 필드의 FieldId(= SubobjectGuid), Field는 소유 필드 C++
+// 이름(생성 접근자), ToolName은 객체 이름이 되는 실효 도구 이름, Type은 만드는 클래스의 정규 이름, AttachParent는 펼친 표 index(-1 = 붙이지
+// 않음), Owner는 필드를 선언한 클래스다.
+internal sealed record SubobjectModel(string Id, string Field, string ToolName, string Type, string TypeId, int AttachParent, bool Root, string Owner);
 
 // Classes는 이 모듈 타입(클래스·struct·enum)만, Imported는 import한 타입(정규 이름 → 모델)이다. Ordered는 이 모듈
 // 타입의 생성·등록 순서다(enum, struct는 쓰는 struct 먼저 — Rank·이름 순, 클래스는 base 먼저).

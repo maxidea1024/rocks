@@ -398,6 +398,11 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         @"^(?:::)?(?:[A-Za-z_][\w]*::)*Result<void> \(const (?:struct |class )?(?:::)?(?:[A-Za-z_][\w]*::)*(?<type>[A-Za-z_][\w]*) &\) noexcept$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
+    // subobject 기본값 덮기 hook 선언의 Clang 함수 형식 철자다: `Result<void> (SubobjectDefaultsContext &) noexcept`(이름공간 한정은 선택).
+    private static readonly System.Text.RegularExpressions.Regex SubobjectDefaultsSignature = new(
+        @"^(?:::)?(?:[A-Za-z_][\w]*::)*Result<void> \((?:class )?(?:::)?(?:[A-Za-z_][\w]*::)*SubobjectDefaultsContext &\) noexcept$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
     // struct의 Validate 멤버 하나를 검증 hook으로 받는다(RMC2309): 함수 템플릿·두 번째 선언(overload)·비정적·시그니처가 다른 선언과
     // GENERATED_BODY 없는 private·protected 선언을 거부한다.
     private void CheckValidateHook(ClassModel model, JsonElement member, string memberKind, string qualified, string access, bool generatedBody)
@@ -449,6 +454,34 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
         model.HasValidate = true;
         model.ValidateSite ??= currentSite;
+    }
+
+    // 클래스의 InitSubobjectDefaults 멤버 하나를 subobject 기본값 덮기로 받는다(RMC3003 — Docs/Design/Prefab 10.2절): 함수 템플릿·overload·
+    // 비정적·consteval·시그니처가 다른 선언과 GENERATED_BODY 없는 private·protected 선언을 거부한다.
+    private void CheckSubobjectDefaultsHook(ClassModel model, JsonElement member, string memberKind, string qualified, string access, bool generatedBody)
+    {
+        const string hint = "Declare exactly one `static rocks::Result<void> InitSubobjectDefaults(rocks::SubobjectDefaultsContext& context) noexcept;`.";
+        if (memberKind == "FunctionTemplateDecl" || model.HasInitSubobjectDefaults || Text(member, "storageClass") != "static" ||
+            DeclarationPrefixHas(member, "consteval"))
+        {
+            throw new MetadataException($"{qualified}::InitSubobjectDefaults: the subobject defaults hook must be one static non-template member function", "RMC3003", hint);
+        }
+
+        string spelling = member.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
+        string desugared = member.TryGetProperty("type", out JsonElement sugarType) ? Text(sugarType, "desugaredQualType") : "";
+        if (!SubobjectDefaultsSignature.IsMatch(spelling) && !(desugared.Length != 0 && SubobjectDefaultsSignature.IsMatch(desugared)))
+        {
+            throw new MetadataException($"{qualified}::InitSubobjectDefaults: the subobject defaults hook signature is `{spelling}`, not `Result<void> (SubobjectDefaultsContext &) noexcept`",
+                "RMC3003", hint);
+        }
+
+        if (access != "public" && !generatedBody)
+        {
+            throw new MetadataException($"{qualified}::InitSubobjectDefaults: a private/protected hook requires ROCKS_GENERATED_BODY", "RMC3003", hint);
+        }
+
+        model.HasInitSubobjectDefaults = true;
+        model.InitSubobjectDefaultsSite ??= currentSite;
     }
 
     // Validate 인자 철자의 별칭(`using Self = S;`처럼 struct 안에서 선언한 TypeAliasDecl·TypedefDecl)을 그 대상 철자로 바꾼다(Clang JSON의
@@ -854,6 +887,9 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     Deprecated = classSpec?.Deprecated ?? false,
                     EditorOnly = classSpec?.EditorOnly ?? false,
                     WithinSpelling = classSpec?.Within ?? "",
+                    SubobjectListSpelling = classSpec?.SubobjectList ?? "",
+                    SubobjectRootSpelling = classSpec?.SubobjectRoot ?? "",
+                    SubobjectAttachSpelling = classSpec?.SubobjectAttach ?? "",
                     Header = owner.Include,
                     Private = owner.Private,
                     IsStruct = isStruct,
@@ -928,6 +964,13 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     if (isStruct && memberName == "Validate" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
                     {
                         CheckValidateHook(model, member, memberKind, qualified, access, generatedBody);
+                    }
+
+                    // 클래스의 subobject 기본값 덮기(Docs/Design/Prefab 10.2절)는 `static Result<void> InitSubobjectDefaults(SubobjectDefaultsContext&)
+                    // noexcept` 한 개다(RMC3003 — 정확한 형식은 생성 static_assert도 대조한다).
+                    if (!isStruct && memberName == "InitSubobjectDefaults" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
+                    {
+                        CheckSubobjectDefaultsHook(model, member, memberKind, qualified, access, generatedBody);
                     }
 
                     if (isStruct && memberKind is "TypeAliasDecl" or "TypedefDecl" && member.TryGetProperty("type", out JsonElement aliasType))
@@ -1024,15 +1067,24 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         throw new MetadataException($"{symbol}: private/protected PROPERTY requires ROCKS_GENERATED_BODY");
                     }
 
+                    // 선언 subobject 필드는 manifest kind가 subobject다(Docs/Design/Prefab 10.2절 — SubobjectGuid = 이 FieldId). 파생 클래스의
+                    // InitSubobjectDefaults가 `&Base::field_`로 덮을 수 있게 private을 받지 않는다(RMC3002).
+                    PropertySpec propertySpec = Specifiers.Property(fieldSpecifiers, symbol, memberName);
+                    if (propertySpec.Subobject && access == "private")
+                    {
+                        throw new MetadataException($"{symbol}: a Subobject field must be protected or public", "RMC3002",
+                            "Derived classes select inherited subobjects with &Base::field in InitSubobjectDefaults; declare the field protected.");
+                    }
+
                     model.OwnFields.Add(new FieldModel
                     {
-                        Id = Identity("field", symbol),
+                        Id = Identity(propertySpec.Subobject ? "subobject" : "field", symbol),
                         Site = currentSite,
                         Name = memberName,
                         Owner = qualified,
                         NativeSpelling = spelling,
                         Bitfield = bitfield,
-                        Spec = Specifiers.Property(fieldSpecifiers, symbol, memberName)
+                        Spec = propertySpec
                     });
                 }
 

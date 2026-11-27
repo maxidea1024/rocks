@@ -18,6 +18,15 @@ internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, st
 
     public string Within { get; init; } = "";
 
+    // 소유 구조 클래스 지정자다(Docs/Design/Prefab 10.2절): 선언 subobject를 담는 소유 목록(SubobjectList), Root subobject를 넣는 필드
+    // (SubobjectRoot), 이 타입이 subobject일 때의 부착 부모 필드(SubobjectAttach). 값은 이 클래스 필드의 실효 도구 이름이고 쓰지
+    // 않았으면 ""다. 상속은 SchemaValidator가 정한다.
+    public string SubobjectList { get; init; } = "";
+
+    public string SubobjectRoot { get; init; } = "";
+
+    public string SubobjectAttach { get; init; } = "";
+
     // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1 — UE BlueprintType·NotBlueprintType·Blueprintable·NotBlueprintable).
     // 선언이 직접 쓴 값이고, 상속을 합친 실효 값은 SparksBinding.Resolve가 정한다.
     public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
@@ -111,6 +120,15 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     // 이름 규칙과 수는 SchemaValidator(RMC2803)가 본다.
     public string? Params { get; init; }
 
+    // 선언 subobject 지정자다(Docs/Design/Prefab 10.2절 — UE CreateDefaultSubobject): 이 ObjectRef 필드가 instancing이 만드는 default
+    // subobject다(Subobject — 암묵 ReadOnly), 소유 클래스의 SubobjectRoot 필드에 넣는다(Root), 부착 부모 subobject 필드의 도구 이름
+    // (AttachParent, 쓰지 않았으면 ""). 소유 클래스·타입 규칙은 SchemaValidator(RMC3002)가 본다.
+    public bool Subobject { get; init; }
+
+    public bool SubobjectRoot { get; init; }
+
+    public string AttachParent { get; init; } = "";
+
     public bool ScriptVisible => ScriptReadOnly || ScriptWritable;
 
     public bool HasSettings => UserConfig || ConsoleName.Length != 0 || RestartRequired || StartupOnly || RenderRead || DevelopmentOnly;
@@ -170,10 +188,19 @@ internal static class Specifiers
             bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated" or "EditorOnly" or "ScriptType" or "NotScriptType" or
                 "ScriptExtensible" or "NotScriptExtensible";
             bool number = key is "Version";
-            bool label = key is "Name" or "Within";
+            bool label = key is "Name" or "Within" or "SubobjectList" or "SubobjectRoot" or "SubobjectAttach";
             if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported CLASS specifier/value {key}");
+            }
+        }
+
+        foreach (string key in (string[])["SubobjectList", "SubobjectRoot", "SubobjectAttach"])
+        {
+            if (values.GetValueOrDefault(key)?.Text is string field && !IsAsciiIdentifier(field))
+            {
+                throw new MetadataException($"{symbol}: {key} must name a reflected field of this class by its tool name: \"{field}\"", "RMC3001",
+                    $"Write {key} = \"<field tool name>\" (an ASCII identifier — the Name=\"…\" of the field, or its C++ name without Name).");
             }
         }
 
@@ -191,6 +218,9 @@ internal static class Specifiers
             Deprecated = values.ContainsKey("Deprecated"),
             EditorOnly = values.ContainsKey("EditorOnly"),
             Within = within,
+            SubobjectList = values.GetValueOrDefault("SubobjectList")?.Text ?? "",
+            SubobjectRoot = values.GetValueOrDefault("SubobjectRoot")?.Text ?? "",
+            SubobjectAttach = values.GetValueOrDefault("SubobjectAttach")?.Text ?? "",
             Script = ScriptType(values, symbol, classes: true)
         };
     }
@@ -283,8 +313,8 @@ internal static class Specifiers
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
-                "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable" or "Notify";
-            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params";
+                "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable" or "Notify" or "Subobject" or "Root";
+            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params" or "AttachParent";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
                 (number && value?.Number is null))
@@ -356,9 +386,40 @@ internal static class Specifiers
                 "Choose one apply timing: RestartRequired (a change takes effect at the next start) or StartupOnly (the value cannot change after startup).");
         }
 
-        return new(values.ContainsKey("Transient"), values.ContainsKey("ReadOnly"),
+        // 선언 subobject(Docs/Design/Prefab 10.2절 — RMC3001): Root·AttachParent는 Subobject와만, 둘을 함께 쓰지 않는다. 정체성은 graph
+        // 노드 종류가, 생성은 instancing이 정하므로 저장·통지·Sparks 지정자와 섞지 않는다.
+        bool subobject = values.ContainsKey("Subobject");
+        string attachParent = values.GetValueOrDefault("AttachParent")?.Text ?? "";
+        const string subobjectHint = "Write ROCKS_PROPERTY(Subobject[, Root | AttachParent = \"<subobject field tool name>\"][, Name = \"…\"][, Category/DisplayName]) on an ObjectRef<T> field.";
+        if (!subobject && (values.ContainsKey("Root") || values.ContainsKey("AttachParent")))
+        {
+            throw new MetadataException($"{symbol}: Root and AttachParent need Subobject", "RMC3001", subobjectHint);
+        }
+
+        if (values.ContainsKey("Root") && values.ContainsKey("AttachParent"))
+        {
+            throw new MetadataException($"{symbol}: a Root subobject has no AttachParent", "RMC3001", subobjectHint);
+        }
+
+        if (values.ContainsKey("AttachParent") && !IsAsciiIdentifier(attachParent))
+        {
+            throw new MetadataException($"{symbol}: AttachParent must name a subobject field by its tool name: \"{attachParent}\"", "RMC3001", subobjectHint);
+        }
+
+        string[] subobjectConflicts = ["Transient", "EditorOnly", "Required", "Notify", "ScriptReadOnly", "ScriptWritable", "ScriptAssignable", "ScriptName",
+            "MaxElements", "Params", "DuplicateTransient", "NonTryoutDuplicateTransient", "SaveGame", "TextExportTransient", "AssetBundles", "UserConfig",
+            "ConsoleName", "RestartRequired", "StartupOnly", "RenderRead", "DevelopmentOnly", "TextMapMergeByKey"];
+        if (subobject && subobjectConflicts.FirstOrDefault(values.ContainsKey) is string conflict)
+        {
+            throw new MetadataException($"{symbol}: Subobject cannot be combined with {conflict}", "RMC3001", subobjectHint);
+        }
+
+        return new(values.ContainsKey("Transient"), values.ContainsKey("ReadOnly") || subobject,
             values.GetValueOrDefault("Category")?.Text ?? "", values.GetValueOrDefault("DisplayName")?.Text ?? "")
         {
+            Subobject = subobject,
+            SubobjectRoot = values.ContainsKey("Root"),
+            AttachParent = attachParent,
             EditorOnly = values.ContainsKey("EditorOnly"),
             Required = values.ContainsKey("Required"),
             DuplicateTransient = values.ContainsKey("DuplicateTransient"),

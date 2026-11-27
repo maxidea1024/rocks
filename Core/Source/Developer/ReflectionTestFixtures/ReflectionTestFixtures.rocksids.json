@@ -3667,6 +3667,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::SubobjectOwner::parts",
+      "id": "fab62567412e46d1b3b9cddc23c7a44c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::SubobjectOwner::root",
+      "id": "4a29f49096794788bf12b1ce373826d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::SubobjectPart::count",
+      "id": "87d006b54ee24eb2a115cd3b6aba03d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::SubobjectScenePart::parent",
+      "id": "63c50853dd34474fab281701118eae04",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::TextFieldCaption::label",
       "id": "bbc703355f21404a8611caaedf0f880f",
       "aliases": [],
@@ -4425,6 +4453,34 @@
       "kind": "function",
       "name": "rocks::reflection_fixture::NotifyModelChild::Fast",
       "id": "1f93717488aa47dbb29871fd4b97d328",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "subobject",
+      "name": "rocks::reflection_fixture::SubobjectOwner::arm",
+      "id": "cefdd342c0794b389922d427cb0ec590",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "subobject",
+      "name": "rocks::reflection_fixture::SubobjectOwner::body",
+      "id": "6d4aba0764814b1b8c9915b79bb41a37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "subobject",
+      "name": "rocks::reflection_fixture::SubobjectOwner::plain",
+      "id": "020a7214fe2549ba98c28ea9b381a40e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "subobject",
+      "name": "rocks::reflection_fixture::SubobjectOwnerChild::hand_",
+      "id": "c0edf57fe030463abe3fa3ca33d5b620",
       "aliases": [],
       "retired": false
     },
@@ -5736,6 +5792,34 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::StructOwner",
       "id": "96433d51c80441fcb18c132619c46e5f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::SubobjectOwner",
+      "id": "e7932f1d4d8d46ecbd51587753b4367e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::SubobjectOwnerChild",
+      "id": "7083e3538635409bb8b549b484dccf58",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::SubobjectPart",
+      "id": "92302da4449f4981a015fab6958fe0a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::SubobjectScenePart",
+      "id": "c0ff35feb93844828c096193be200aaf",
       "aliases": [],
       "retired": false
     },

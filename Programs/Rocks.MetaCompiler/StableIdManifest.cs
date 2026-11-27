@@ -212,6 +212,15 @@ internal sealed class StableIdManifest
     {
         ValidateKindAndName(kind, name);
         StableIdEntry? entry = entries.FirstOrDefault(value => value.Kind == kind && value.Name == name);
+        // field ↔ subobject 형태 변경은 ID를 조용히 새로 받지 않는다(Docs/Design/Prefab 10.2절): 같은 이름의 다른 kind 항목이 있으면 전용
+        // 진단이다.
+        if (entry is null && kind is "field" or "subobject" &&
+            entries.FirstOrDefault(value => value.Kind == (kind == "field" ? "subobject" : "field") && value.Name == name && !value.Retired) is StableIdEntry other)
+        {
+            throw new InvalidDataException($"{name} is registered as {other.Kind} but is now declared as {kind}; a field cannot silently change to or from a " +
+                "Subobject (its saved identity would change) — keep the declaration kind, or retire the old ID and register the new one explicitly");
+        }
+
         if (entry is null || entry.Retired)
         {
             throw new InvalidDataException($"Stable ID for {kind} {name} is missing or retired; register or explicitly rename it before building");
@@ -486,9 +495,10 @@ internal sealed class StableIdManifest
             return;
         }
 
-        // C++ 정규 이름(`a::b::Type`, 멤버는 `::member`)은 type·field·function(리플렉션 함수 `<클래스>::<함수>`)만 쓴다.
+        // C++ 정규 이름(`a::b::Type`, 멤버는 `::member`)은 type·field·function(리플렉션 함수 `<클래스>::<함수>`)·subobject(선언
+        // subobject 소유 필드 — Docs/Design/Prefab 10.2절)만 쓴다.
         string[] parts = name.Split("::", StringSplitOptions.None);
-        if (kind is not ("type" or "field" or "function") || (kind is "field" or "function" && parts.Length < 2) ||
+        if (kind is not ("type" or "field" or "function" or "subobject") || (kind is "field" or "function" or "subobject" && parts.Length < 2) ||
             parts.Any(part => !IsIdentifier(part)))
         {
             throw new InvalidDataException("Invalid qualified declaration name: " + name);

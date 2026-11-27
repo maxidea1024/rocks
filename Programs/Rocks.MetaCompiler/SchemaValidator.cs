@@ -1393,6 +1393,8 @@ internal static partial class SchemaValidator
             Order(model);
         }
 
+        ResolveSubobjects(ordered, Find, DerivesFrom);
+
         // Deprecated가 아닌 타입의 PROPERTY는 Deprecated 클래스를 가리키지 않는다(RMC2209 — UE도 막는다, 리플렉션 B9h2): 강한·weak·소프트
         // 참조와 ClassRef(그 컨테이너 원소·Map 값 포함)의 대상, Map 키의 Soft·ClassRef 대상. Deprecated 타입 자신의 필드와 NATIVE 멤버는
         // 보지 않는다. 상속 플래그가 정해진 뒤에 본다.
@@ -1415,6 +1417,155 @@ internal static partial class SchemaValidator
 
         return new(classes, ordered, imported);
     }
+
+    // 선언 subobject(Docs/Design/Prefab 10.2절 — RMC3002)를 푼다. ordered는 base가 먼저인 이 모듈 타입 순서다. 클래스마다 소유 구조 지정자
+    // (SubobjectList·Root·Attach — base에서 상속, 다시 지정 불가)의 필드 ID와 펼친 표(base 표 뒤에 자기 항목 — 자기 Root가 맨 앞, 나머지는
+    // 선언 순서)를 정한다. import 클래스는 descriptor가 같은 값을 준다.
+    private static void ResolveSubobjects(List<ClassModel> ordered, Func<string, ClassModel> find, Func<string, string, bool> derivesFrom)
+    {
+        const string hint = "Declare ROCKS_PROPERTY(Subobject[, Root | AttachParent = \"<subobject field>\"]) ObjectRef<T> fields in a class whose hierarchy " +
+            "has ROCKS_CLASS(SubobjectList = \"…\") (an Actor), with T a concrete, non-EditorOnly element type of that list (Docs/Design/Prefab 10.2).";
+        string[] reserved = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+        foreach (ClassModel model in ordered.Where(type => !type.IsEnum))
+        {
+            if (model.IsStruct)
+            {
+                if (model.OwnFields.FirstOrDefault(field => field.Spec.Subobject) is FieldModel structField)
+                {
+                    throw new MetadataException($"{structField.Owner}::{structField.Name}: a struct member cannot be a Subobject", "RMC3002", hint).At(structField.Site);
+                }
+
+                continue;
+            }
+
+            ClassModel? baseModel = model.Base == "rocks::Object" ? null : find(model.Base);
+            string? ResolveSpecifier(string key, string spelling, string? inherited, Func<FieldModel, bool> shape, string shapeText)
+            {
+                if (spelling.Length == 0)
+                {
+                    return inherited;
+                }
+
+                if (inherited is not null)
+                {
+                    throw new MetadataException($"{model.Name}: {key} is inherited from {model.Base} and cannot be specified again", "RMC3002", hint).At(model.Site);
+                }
+
+                FieldModel field = model.Fields.FirstOrDefault(candidate => candidate.EffectiveToolName == spelling) ??
+                    throw new MetadataException($"{model.Name}: {key} = \"{spelling}\" does not name a reflected field of this class", "RMC3002", hint).At(model.Site);
+                if (!shape(field))
+                {
+                    throw new MetadataException($"{model.Name}: {key} field {field.Name} must be {shapeText}", "RMC3002", hint).At(model.Site);
+                }
+
+                return field.Id;
+            }
+
+            model.SubobjectListId = ResolveSpecifier("SubobjectList", model.SubobjectListSpelling, baseModel?.SubobjectListId,
+                field => field.Kind == "Array" && field.ElementKind == "ObjectReference", "an ObjectRefArray<T>");
+            model.SubobjectRootId = ResolveSpecifier("SubobjectRoot", model.SubobjectRootSpelling, baseModel?.SubobjectRootId,
+                field => field.Kind == "ObjectReference", "an ObjectRef<T>");
+            model.SubobjectAttachId = ResolveSpecifier("SubobjectAttach", model.SubobjectAttachSpelling, baseModel?.SubobjectAttachId,
+                field => field.Kind == "WeakObjectReference", "a WeakObjectRef<T>");
+        }
+
+        // 표는 모든 클래스의 지정자가 정해진 뒤에 만든다(subobject 타입의 SubobjectAttach를 본다 — 이름 순서와 무관하게).
+        foreach (ClassModel model in ordered.Where(type => !type.IsEnum && !type.IsStruct))
+        {
+            ClassModel? baseModel = model.Base == "rocks::Object" ? null : find(model.Base);
+            List<SubobjectModel> table = [.. baseModel?.Subobjects ?? []];
+            // 자기 Root가 자기 항목의 맨 앞이다(생략한 AttachParent가 앞쪽 index만 가리키도록).
+            IEnumerable<FieldModel> own = model.OwnFields.Where(field => field.Spec.Subobject).OrderBy(field => field.Spec.SubobjectRoot ? 0 : 1);
+            foreach (FieldModel field in own)
+            {
+                string symbol = field.Owner + "::" + field.Name;
+                FieldModel? list = model.SubobjectListId is string listId ? model.Fields.First(candidate => candidate.Id == listId) : null;
+                if (list is null)
+                {
+                    throw new MetadataException($"{symbol}: Subobject needs ROCKS_CLASS(SubobjectList = \"…\") in the class hierarchy", "RMC3002", hint).At(field.Site);
+                }
+
+                if (field.Kind != "ObjectReference" || field.Reference is not string target)
+                {
+                    throw new MetadataException($"{symbol}: a Subobject field must be ObjectRef<T>", "RMC3002", hint).At(field.Site);
+                }
+
+                ClassModel targetModel = find(target);
+                if (list.Reference is string element && !derivesFrom(target, element))
+                {
+                    throw new MetadataException($"{symbol}: subobject type {target} must derive from {element} (the {list.Name} element type)", "RMC3002", hint).At(field.Site);
+                }
+
+                if (targetModel.Abstract || targetModel.EditorOnly)
+                {
+                    throw new MetadataException($"{symbol}: subobject type {target} must be a concrete, non-EditorOnly class", "RMC3002", hint).At(field.Site);
+                }
+
+                // 객체 이름 규칙(NameComponent — 첫 글자는 글자·숫자, 64 byte 이하, 장치 예약어 아님)이다.
+                string name = field.EffectiveToolName;
+                if (System.Text.Encoding.UTF8.GetByteCount(name) > SubobjectNameMaxBytes || !char.IsAsciiLetterOrDigit(name[0]) ||
+                    reserved.Contains(name.ToUpperInvariant()))
+                {
+                    throw new MetadataException($"{symbol}: subobject object name \"{name}\" must start with a letter or digit, be at most {SubobjectNameMaxBytes} bytes " +
+                        "and not be a reserved device name", "RMC3002", hint).At(field.Site);
+                }
+
+                if (table.Any(entry => entry.ToolName == name))
+                {
+                    throw new MetadataException($"{symbol}: subobject object name \"{name}\" is already used by another subobject", "RMC3002", hint).At(field.Site);
+                }
+
+                int parent = -1;
+                bool root = field.Spec.SubobjectRoot;
+                if (root)
+                {
+                    FieldModel? rootField = model.SubobjectRootId is string rootId ? model.Fields.First(candidate => candidate.Id == rootId) : null;
+                    if (rootField is null || table.Any(entry => entry.Root))
+                    {
+                        throw new MetadataException($"{symbol}: Root needs ROCKS_CLASS(SubobjectRoot = \"…\") and at most one Root subobject in the hierarchy", "RMC3002", hint)
+                            .At(field.Site);
+                    }
+
+                    if (rootField.Reference is string rootType && !derivesFrom(target, rootType))
+                    {
+                        throw new MetadataException($"{symbol}: Root subobject type {target} must derive from {rootType}", "RMC3002", hint).At(field.Site);
+                    }
+                }
+                else if (field.Spec.AttachParent.Length != 0)
+                {
+                    parent = table.FindIndex(entry => entry.ToolName == field.Spec.AttachParent);
+                    if (parent < 0)
+                    {
+                        throw new MetadataException($"{symbol}: AttachParent \"{field.Spec.AttachParent}\" must name a subobject declared in a base class or above this field",
+                            "RMC3002", hint).At(field.Site);
+                    }
+
+                    if (targetModel.SubobjectAttachId is null || find(table[parent].Type).SubobjectAttachId is null)
+                    {
+                        throw new MetadataException($"{symbol}: AttachParent needs ROCKS_CLASS(SubobjectAttach = \"…\") on both subobject types", "RMC3002", hint).At(field.Site);
+                    }
+                }
+                else if (targetModel.SubobjectAttachId is not null)
+                {
+                    parent = table.FindIndex(entry => entry.Root);
+                }
+
+                table.Add(new SubobjectModel(field.Id, field.Name, name, target, targetModel.Id, parent, root, model.Name));
+            }
+
+            if (table.Count > MaxClassSubobjects)
+            {
+                throw new MetadataException($"{model.Name}: {table.Count} subobjects exceed the limit {MaxClassSubobjects}", "RMC3002", hint).At(model.Site);
+            }
+
+            model.Subobjects = table;
+        }
+    }
+
+    // 선언 subobject 객체 이름의 byte 상한(Core MaxNameComponentBytes)과 클래스 하나의 펼친 표 상한(MetaSchema MaxClassSubobjects)이다.
+    private const int SubobjectNameMaxBytes = 64;
+    private const int MaxClassSubobjects = 256;
 
     // 콘솔 설정·설정 snapshot이 담을 수 있는 필드 종류다(Docs/Design/ConfigSystem.ko.md 5.1절 — bool·int32·int64·float·double·String·Name·
     // 리플렉션 enum). Optional·컨테이너·struct는 받지 않는다.
