@@ -12,7 +12,7 @@
 | CAD2 | 모듈 | Runtime `CurveAssets`(Curves·AssetRuntime)와 Runtime `CurveAtlas`(+Texture), Developer `CurveAssetTools`·`CurveAtlasTools`, Core `CsvReader` | 커브 소비자가 텍스처 모듈을 끌어오지 않는다. CSV 읽기는 범용이라 Core에 둔다 |
 | CAD3 | 표 저장 | 모드 하나와 맵 둘(`OrderedMap<Name, PlainCurve>`·`OrderedMap<Name, TangentCurve>`)을 두고, 모드가 쓸 맵을 정한다. 쓰지 않는 맵은 무시하고 쿠킹이 비운다 | CurveData 14절 D2. 행 다형 저장보다 싸고 UE 모드 규칙을 그대로 따른다. 로드 뒤 불변식 판정 기반이 없고, 사람이 편집한 데이터로 에셋이 열리지 않으면 안 된다 |
 | CAD4 | 색 커브 기본 키 | 생성자에 키를 넣지 않고, 편집기의 새로 만들기가 검정→흰색 키를 넣는다 | UE 편집기 생성자 키는 빌드 종류마다 클래스 기본값을 다르게 만든다(차이 저장 함정) |
-| CAD5 | atlas 굽기 | 쿠킹 처리기가 Build 의존으로 굽는다. 원본 bulk는 저장하지 않는다 | 구독 없는 명령행 편집에서도 atlas가 낡지 않는다 |
+| CAD5 | atlas 굽기 | (개정 3 예정 — 2026-11-27 렌더·에셋 세션 권고로 UE 방식으로 바꾼다) 아틀라스가 자기 TextureSource를 RGBA16F로 다시 쓰고 저장한다(원본 재구성 hook — asset-set·asset-new). 쿠커에게는 보통 `Texture2D`다. 참조 커브 변경의 전파 방식은 에셋 세션과 정하는 중이다 | UE `UpdateTextures`와 같다(애매하면 UE). 옛 안(쿠킹 때 메모리로 굽기)은 Texture 쿠킹에 메모리 원본 경로가 따로 필요했다 |
 | CAD6 | 임포터 기본 확장자 | 없음. `--importer=`로 고른다 | `csv`·`json`은 여러 종류가 쓴다. UE도 대화상자로 묻는다 |
 | CAD7 | 원천 참조 | 원천은 `ObjectRef`(Hard) 참조 struct다. 소유 객체의 필드나 `StructRefArray` 원소에만 둔다. World는 `SoftObjectRef` + lease다. 값 struct에는 평탄 값을 둔다 | AssetSystem 6.2·6.3절, `ObjectRef` 복사 금지(`ObjectRefs.h:175-206`). UE `TObjectPtr`(하드)와 같은 로드·쿠킹 의미다 |
 | CAD8 | 풀리지 않는 참조 | 오류로 돌려준다. 인라인으로 대신하지 않는다 | 조용히 다른 커브로 평가하면 데이터 문제가 숨는다 |
