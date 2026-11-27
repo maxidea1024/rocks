@@ -113,6 +113,20 @@ ScanScheduler::~ScanScheduler() noexcept {
     }
 }
 
+CookWorkScheduler::CookWorkScheduler(Allocator& allocator) noexcept : scheduler_(allocator) {
+    const uint32 processors = platform::LogicalProcessorCount();
+    const uint32 helpers = processors > 1 ? processors - 1 : 0;
+    WorkerSchedulerConfig config;
+    config.workerCount = helpers < CommandletCookWorkersMax ? helpers : CommandletCookWorkersMax;
+    started_ = config.workerCount != 0 && static_cast<bool>(scheduler_.Start(config));
+}
+
+CookWorkScheduler::~CookWorkScheduler() noexcept {
+    if (started_) {
+        (void)scheduler_.Shutdown();
+    }
+}
+
 AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules,
                                      StringView module) noexcept
     : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModules[0] : module),

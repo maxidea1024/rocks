@@ -25,7 +25,7 @@ public sealed class TextureTools : EngineModuleRules
 
     // ImageCodec decodes the source files (sections 12.9-12.11). DeterministicMath gives the build the same bytes on every host
     // (sRGB and gamma curves — section 12.13). AstcEncoder encodes ASTC for the Android cook (section 12.17.8).
-    protected override string[] PrivateDependencies => ["ImageCodec", "DeterministicMath", "AstcEncoder"];
+    protected override string[] PrivateDependencies => ["ImageCodec", "DeterministicMath", "AstcEncoder", "Task"];
 
     // IspcTextureCompressor encodes BC6H and BC7 (section 12.17.6). ISPC sources are desktop-only (Docs/Design/BuildTargets section 3.12,
     // BD46), so Android targets build without it and report BC6H and BC7 encoding as Unsupported (format selection never picks them there).

@@ -221,6 +221,29 @@ private:
     bool started_ = false;
 };
 
+// 쿠킹 처리기 안 병렬(텍스처 블록 압축 — AssetSystem 12.17.9 4) worker 수 상한이다(WorkerScheduler
+// 상한). worker 수는 min(논리 프로세서 − 1, 이 값)이다(셰이더 컴파일 관리자와 같은 규칙).
+inline constexpr uint32 CommandletCookWorkersMax = 64;
+
+// 명령 하나 동안의 쿠킹 처리기 scheduler다(검색용 ScanScheduler와 따로 — 그 worker 수는 IO 검색에
+// 맞춘 3이다). 시작하지 못하거나 논리 프로세서가 하나면 Get이 null이고 압축은 직렬이다(결과가
+// 같다). allocator는 여러 스레드의 동시 호출을 받는다(프로세스 기본 allocator).
+class ROCKS_ASSETCOMMANDLETS_API CookWorkScheduler {
+public:
+    explicit CookWorkScheduler(Allocator& allocator) noexcept;
+    ~CookWorkScheduler() noexcept;
+    CookWorkScheduler(const CookWorkScheduler&) = delete;
+    CookWorkScheduler& operator=(const CookWorkScheduler&) = delete;
+
+    WorkerScheduler* Get() noexcept {
+        return started_ ? &scheduler_ : nullptr;
+    }
+
+private:
+    WorkerScheduler scheduler_;
+    bool started_ = false;
+};
+
 struct EditSession {
     explicit EditSession(const AssetCommandContext& command) noexcept
         : context(&command), layout(*command.allocator), scan(*command.allocator),
