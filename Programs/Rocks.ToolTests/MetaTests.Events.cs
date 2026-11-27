@@ -102,6 +102,28 @@ internal static partial class MetaTests
             Verify.Equal(0, compiled.ExitCode, "inherited grandparent event compiles: " + compiled.StdOut + compiled.StdErr);
         });
 
+        // 다른 헤더의 enum을 이벤트 인자로 쓰면 클래스 생성 헤더가 그 enum 생성 헤더를 include한다(Broadcast를 부르는 구현 TU는 클래스
+        // 생성 헤더만 include한다). enum 생성 헤더가 보이지 않는 TU에서 배치를 계산하면 static_assert다(enum을 Opaque로 보는 inline
+        // 배치가 링크되는 ODR을 막는다 — UiWidget CheckBoxWidget::OnStateChanged 등록 실패에서 발견).
+        suite.Add("Meta.EventEnumArgumentNeedsItsGeneratedHeader", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            probe.WriteHeader("Tone.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Base/Types.h>\nnamespace probe {\n" +
+                "ROCKS_ENUM()\nenum class Tone : rocks::uint8 { Low, High };\n}\n");
+            await probe.GenerateAsync("#pragma once\n#include <Tone.h>\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "#include <Object/Event.h>\nnamespace probe {\nROCKS_CLASS()\nclass Value : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : changed(allocator) {}\n" +
+                "ROCKS_PROPERTY(Params = \"tone\") rocks::Event<Tone> changed;\n};\n}\n",
+                extra: ["--input", probe.HeaderPath("Tone.h"), "--include", "Tone.h"]);
+            Verify.Contains("#include <Tone.generated.h>", File.ReadAllText(probe.Output), "class generated header includes the event enum's");
+            const string layout = "\nauto rocksLayout = rocks::detail::FrameLayoutOf<probe::Tone>();\n";
+            ProcessResult withClassHeader = await probe.CompileSourceAsync("#include <Probe.generated.h>" + layout);
+            Verify.Equal(0, withClassHeader.ExitCode, "class generated header is enough: " + withClassHeader.StdOut + withClassHeader.StdErr);
+            ProcessResult without = await probe.CompileSourceAsync("#include <Probe.h>\n#include <Object/FunctionBinding.h>" + layout);
+            Verify.That(without.ExitCode != 0, "enum layout without its generated header compiled");
+            Verify.Contains("must be a reflected enum", without.StdOut + without.StdErr, "enum layout static_assert");
+        });
+
         // ROCKS_NATIVE 이벤트(RMC2801 — 저장·Sparks·도구가 보지 못한다).
         AddRejectGroup(context, "Meta.EventNeedsProperty", [
             EventValue("ROCKS_NATIVE() rocks::Event<rocks::int32> changed;", "changed(allocator)")],
