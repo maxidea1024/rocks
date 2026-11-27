@@ -18,7 +18,7 @@
 | `FirstFrame` | 주 창 첫 프레임 렌더·표시(9.4절) | 없음 | 5 |
 
 - **`Engine` 안쪽.** `Engine` 모듈은 Server 대상에도 들어가므로 `SplashScreen`·`StartupProgress`를 모른다. Progress 모듈의 `ProgressScope`만 연다: 엔진 단계 모듈 60, Registry·EngineSubsystem 30, `PostEngineInit` 10(기본값). `ModuleLoader::StartPhase`의 모듈 수 구간과 문구 "Starting module <이름>"(Invariant Text)은 로더의 시작 관찰자에 건 Engine `ModuleStartProgress`가 연다([모듈 로더](../ModuleLoader/03-Design/03.16-StartObserver.ko.md) 3.16절 — 로더는 부트 묶음이라 Progress에 의존하지 않는다). `Engine::Initialize`가 엔진 묶음·`PostEngineInit` 둘레에, 호스트가 `PostConfigInit` 둘레에 건다. 문구 Text는 구간이 발행할 때(`ProgressScope::IsReporting`)만 만든다. 바인딩이 없는 실행(도구·시험·서버)에서는 구간이 아무 일도 하지 않는다(ProgressReporting 6.2절).
-- 엔진 밖에서 에셋·셰이더를 준비하는 호스트가 아니면(지금의 Sandbox) `Assets`·`Shaders`는 들어가지 않는다.
+- 엔진 밖에서 에셋·셰이더를 준비하는 호스트가 아니면 `Assets`·`Shaders`는 들어가지 않는다. Sandbox는 창 렌더 경로를 열 때(`--window`이고 `--no-render`가 아님) `Shaders`에 들어간다(8.3절 PG5 연결). `Assets`는 들어가지 않는다.
 - UE `EditorInit`의 50/40/10과 같은 역할이다. 설정·로그(스플래시 전)는 단계에 넣지 않는다.
 
 ### 8.2 측정 보정(SP5)
@@ -49,7 +49,11 @@
 | 3 | 0.008 | 0.055 | 2.207 |
 
 - FirstFrame은 대부분 실제 일이다(SP5에서 로그 시각으로 다시 봄, 바로잡음 — 처음에는 최소 표시 대기로 읽었다): D3D12 장치 생성 약 0.2초, 그다음 개발용 셰이더 공급자(`DevelopmentShaderProvider`, ShaderSystem 16.3절 감시 재컴파일과 함께 들어옴)가 엔진 셰이더를 준비하는 약 2.3초 뒤 첫 프레임이 나간다. 1회째 4초는 셰이더 캐시가 차가운 경우다. SP5의 `MarkReady`(첫 프레임 직후)로 그 뒤의 최소 표시 대기·넘기기 프레임은 빠진다(이 측정에서는 일이 2초보다 길어 대기가 없었다).
-- 그래서 Sandbox 프로필은 HostServices·Engine이 합쳐 3–4%, FirstFrame이 96% 안팎이 된다(HostServices는 바닥 2%). FirstFrame에는 안쪽 진행이 없어 막대가 그 몫 안에서 멈춰 보인다. 후속: 엔진 셰이더 준비를 `Shaders` 단계(단계 계수 = 셰이더 수)로 보고하면 막대가 움직인다 — 렌더 세션의 PG5(셰이더 컴파일 관리자 진행 연결) 때 Sandbox가 `Shaders` 단계를 밝힌다.
+- 그래서 Sandbox 프로필은 HostServices·Engine이 합쳐 3–4%, FirstFrame이 96% 안팎이 된다(HostServices는 바닥 2%). FirstFrame에는 안쪽 진행이 없어 막대가 그 몫 안에서 멈춰 보인다. 후속이던 `Shaders` 단계 보고는 아래 PG5 연결에서 했다.
 - 결론: Sandbox에는 무거운 단계(Assets·Shaders·Content)가 없어 이 측정으로 게임·Studio 기본값을 정할 수 없다. 기본 가중치(8.1절 표)는 설계값 그대로 두고, 기기·대상별 보정은 SP5(8.2절)가 지난 실행 시간으로 한다. SP5는 FirstFrame에서 최소 표시 대기를 빼고 저장한다(대기는 일이 아니다 — 넣으면 다음 실행의 FirstFrame 몫이 부풀어 앞 단계 막대가 느려진다).
 - 시간이 짧은 실행에서 막대는 앞 단계를 금방 지나 FirstFrame 몫 안에서 머문다. 진행 문구는 "Showing the first frame"이고 퍼센트는 99에서 막힌다(7.2절).
 
+**PG5 연결(2026-11-27, 렌더 세션 — 진행 보고 12장).** Sandbox의 엔진 셰이더 준비를 `Shaders` 단계로 보고한다.
+- 단계: 창 렌더 경로를 열면 `SandboxStartupSteps`가 `HostServices → Engine → Shaders → FirstFrame`이다(아니면 `Shaders` 없이). 장치를 만든 뒤 렌더 lane을 시작하기 직전에 `Enter(Shaders)`, 첫 프레임을 낸 직후(첫 `SubmitFrame` — lane 시작 작업이 끝나야 첫 프레임 slot이 나온다, RenderBase 5.5절) `Enter(FirstFrame)`이다. 그래서 `Shaders`는 lane 시작(엔진 렌더 자원 — 셰이더 집합 열기와 내장 자원 팩)이고 `FirstFrame`은 첫 프레임 제출·표시다.
+- 계수: `Shaders`에 들어갈 때 `MakeStepCounter(0)`을 `EngineShaderHost::SetPreparationProgress`에 건다(RenderBase 9.12절 6항). Development 공급자가 컴파일할 job 수를 `AddTotal`로, 끝난 job을 `Add`로 보낸다(너겟 적중 포함). 쿠킹 라이브러리로 연 형식은 보고가 없어 0 / 0이다(단계 몫은 시간 보정 — 8.2절 — 이 정한다). 단계를 나갈 때 떼고 Info `Startup shader preparation reported <끝남> of <전체> shader job(s)`을 남긴다.
+- 확인: Sandbox `--self-test` 엔진 호스트 자식 `--engine --window --frames 3 --graphics=opengl`(Windows 쿠킹 프로필에 없는 형식이라 공급자가 만든다)의 그 줄이 N of N(N > 0)이다(진행 보고 14장 32). 스플래시를 띄우지 않는 실행(데스크톱 세션 끊김)은 판정 불가다.

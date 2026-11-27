@@ -25,3 +25,5 @@
 8. **취소 전달 지연.** 자식 취소는 최대 `ChildControlPollInterval`만큼 늦다. P1 `Process`에 교차 스레드 깨우기가 생기면 polling을 없앤다.
 9. **Windows pipe 표준 입력 대기.** 익명 pipe는 기다릴 수 있는 handle이 아니라 시간 제한 읽기가 5 ms씩 쉬며 남은 byte를 확인한다. 부모 제어 수신 스레드는 자식 명령이 사는 동안 초당 수십 번 깬다(가벼운 확인 한 번). 겹친 I/O pipe로 만들면 없앨 수 있지만 부모가 만든 pipe 종류를 자식이 고를 수 없다.
 10. **손자 명령의 취소.** 부모 cancel 줄은 그 순간의 자식에만 간다. 자식이 손자 명령을 띄우면 손자에게 넘기는 것은 자식의 `ChildProgressReader`가 한다(사슬).
+11. **같은 로더의 Engine 둘.** 등록소 호스트 서비스는 먼저 시작한 Engine 것 하나다(8장 PG5 연결). 그 Engine이 먼저 끝나면 엔진 묶음 모듈의 source는 남은 Engine의 등록소에 없다. Engine 여럿을 한 로더로 오래 돌리는 호스트가 생기면 서비스를 Engine마다가 아니라 로더 수명의 등록소 하나로 바꾼다.
+12. **명령의 Ctrl-C.** `RocksCommandlet`은 Ctrl-C를 종료 요청 표시로 받지 않는다(OS 기본 동작으로 바로 끝난다 — 다른 명령의 동작을 바꾸지 않으려고). 셰이더 워커는 입력 pipe EOF로 스스로 정리된다(ShaderSystem 11절 6항). 명령이 Ctrl-C에서 정상 경로 `Cancelled`를 내야 하면 `CommandProgressDesc::terminationRequested`와 Launch `handleTerminationRequests`를 그 명령에 켠다.

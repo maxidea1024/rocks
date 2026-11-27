@@ -43,3 +43,27 @@ EngineImplementationPlan 28.4절의 "stdout은 선택 JSONL/progress protocol"�
 - `Background` 작업은 알림(제목·막대·취소, 끝나면 결과 표시 후 사라짐, 실패는 남김 — UE `bKeepOpenOnFailure`).
 - 대기 작업 등록소 합계는 상태 표시줄.
 - UI 스레드는 프레임마다 스냅샷을 당기고, 막는 작업 중에는 UI 펌프 hook으로 그린다.
+
+### 9.5 명령 연결(`CommandProgress`, PG5)
+
+명령마다 hub 켜기·보고기·펌프 스레드·부모 제어 수신을 따로 짜지 않게 Progress 모듈에 공용 연결을 둔다(`Progress/CommandProgress.h`). 셰이더 컴파일(`shader-compile`)이 첫 사용처이고 쿠킹·임포트 명령(에셋 세션)도 이것을 쓴다.
+
+```cpp
+enum class CommandProgressMode : uint8 { Console, Jsonl, Off };
+struct CommandProgressOptions { CommandProgressMode mode = CommandProgressMode::Console; bool parentControl = false; };
+enum class CommandProgressArgument : uint8 { NotProgress, Consumed, Invalid };
+CommandProgressArgument ParseCommandProgressArgument(StringView argument, CommandProgressOptions& options) noexcept;
+
+class ROCKS_PROGRESS_API CommandProgress {     // 이동 불가
+public:
+    Result<void> Start(Allocator&, const CommandProgressOptions&, const CommandProgressDesc& = {}) noexcept;
+    void Stop() noexcept;                       // 소멸도 부른다
+};
+```
+
+- **인자.** `--progress=console`·`--progress=jsonl`·`--no-progress`·`--parent-control`(AppInfoCommandLine `--kebab`). 모드 인자는 한 번만이다(둘째 모드 인자·모르는 값은 `Invalid` — 명령의 사용법 오류). 그 밖의 인자는 `NotProgress`라 명령이 자기 인자로 읽는다.
+- **`Start`.** hub가 꺼져 있으면 켜고 `Stop`에서 끈다(이미 켜져 있으면 — 프로세스 안 시험·다른 호스트 — 그 hub를 쓰고 끄지 않는다). 모드대로 `ConsoleProgressReporter`·`ProgressJsonlWriter`를 만들고 `ProgressPumpThread`(간격 `ChildControlPollMilliseconds`)가 펌프한다. `Off`도 `desc.terminationRequested`가 있으면 종료 요청 확인을 위해 펌프 스레드를 돌린다(펌프는 아무 일도 하지 않는다). `parentControl`이면 `ParentControlListener`를 켠다. 실패하면 켠 것을 되돌리고 그 오류다.
+- **`Stop`.** 부모 제어 수신 → 펌프 스레드(마지막 Tick — 끝 사건 줄) → JSONL `Flush`(남은 progress 줄) → 소유한 hub `Shutdown` 순이다. 두 번째부터는 아무 일도 하지 않는다.
+- **`CommandProgressDesc`.** 시험·호스트가 바꿀 것만: JSONL 줄 출력(`ProgressLineWriter` — 비면 표준 출력), 사람용 줄 출력(`ProgressLogWriter` — 비면 Log API), 부모 제어 읽기(`ParentControlReader` — 비면 표준 입력), 종료 요청 확인(Launch `IsTerminationRequested`를 감싼 함수 — Progress는 Launch에 의존하지 않는다).
+- **명령의 의무.** 최상위 작업을 `UserCancellable`로 열고 일은 작업 token으로 취소를 본다. 취소로 끝나면 `Finish(Cancelled)`하고 종료 코드는 `ProgressCancelledExitCode`(130)다. JSONL 모드면 명령의 다른 표준 출력 줄은 표준 오류로 보낸다(9.3절). `Stop`은 작업을 끝낸 뒤 부른다(끝 줄이 빠지지 않게).
+- 버린 대안: 명령마다 직접 잇기(같은 순서 규칙 — 수신 → 펌프 → Flush → hub — 를 명령 수만큼 되풀이하고, 쿠킹·임포트와 셰이더 명령이 서로 다른 인자 철자를 갖게 된다).
