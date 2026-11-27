@@ -43,9 +43,10 @@
 // MS2 완료 시험이다(Docs/Design/MaterialSystem 7.8절): 머티리얼 모음(구현 노드마다 만드는 노드 모음
 // + 손 모음)의 생성 원문을 시험 pass 셰이더(Tests/Shaders/MaterialTestPass.rsf)의 엔트리 × 공급
 // 퍼뮤테이션 둘(공급 없음·공급 전부)로 형식 정의 전부에 실제 ShaderCompileWorker로 컴파일한다. 공급
-// 전부는 경고를 오류로 하고, 공급 없음은 머티리얼 job 정책대로 경고를 허용한다(warningsAsErrors가
-// 생기기 전까지는 FXC X4008만). 이 호스트가 만들 수 없는 형식은 형식마다 SKIP, 워커가 없거나 도구
-// 저장소가 준비되지 않았으면 컴파일 부분이 SKIP이다(모음 번역·카탈로그 완전성 검사는 늘 돈다).
+// 전부는 경고를 오류로 하고, 공급 없음은 머티리얼 job 정책대로 경고를 오류로 하지 않는다
+// (warningsAsErrors false — 경고는 진단). 이 호스트가 만들 수 없는 형식은 형식마다 SKIP, 워커가
+// 없거나 도구 저장소가 준비되지 않았으면 컴파일 부분이 SKIP이다(모음 번역·카탈로그 완전성 검사는 늘
+// 돈다).
 using namespace rocks;
 using namespace rocks::material;
 namespace material_shader_compile_tests_file {
@@ -84,16 +85,6 @@ constexpr float CorpusCurveValueStep = 0.4f;
 constexpr float CorpusCurveGreenValue = 0.5f;
 // 형 조사용 첫 번역의 sink 본문이다.
 constexpr StringView ProvisionalSinkCode = "return 0.0;";
-// FXC 허용 경고다(7.8절 판정): UE 원문 경고(pow 음수 밑 — 두 퍼뮤테이션)와 MD15 0 기본값의 상수
-// 접기(공급 없음만). -WX가 경고를 올린 오류 번호 X3129는 함께 나온다.
-constexpr StringView UeSourceWarning = "X3571";
-constexpr StringView UnsuppliedFoldWarning = "X4008";
-constexpr StringView WarningAsErrorCode = "X3129";
-// FXC 오류 번호 앞 철자("error X1234")와 번호 자리 수다.
-constexpr StringView FxcErrorPrefix = "error X";
-constexpr usize FxcErrorDigits = 4;
-// DXC(clang)식 오류 철자다(이것이 있으면 FXC 경고 허용이 아니다).
-constexpr StringView DxcErrorMarker = "error:";
 
 // Operator·ViewProperty 값 수다(MathNodeEnums·ConstantsNodeEnums의 마지막 값 + 1).
 constexpr uint8 OperatorKindCount = static_cast<uint8>(OperatorKind::Smoothstep) + 1;
@@ -185,16 +176,6 @@ usize CountLines(StringView text) noexcept {
     }
 
     return lines;
-}
-
-bool Contains(StringView text, StringView part) noexcept {
-    for (usize at = 0; at + part.ByteCount() <= text.ByteCount(); ++at) {
-        if (StringView(text.Data() + at, part.ByteCount()) == part) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 // 그래프 입력 값이다(7.8절 probe). 픽셀이면 보간기를 거친 픽셀 값(그래프마다 Float4 하나)에
@@ -1007,44 +988,6 @@ void ClearFailureFolder(StringView working) noexcept {
     }
 }
 
-// job 진단이 허용 FXC 경고뿐인가다(7.8절 판정): 오류 번호가 모두 X3129와 허용 번호이고 허용 번호가
-// 하나 이상이며 DXC식 오류가 없다. allowFold면 X4008도 허용이다(공급 없음).
-bool IsAllowedWarningOnly(const shader::ShaderCompileJobResult& result, bool allowFold) noexcept {
-    if (result.status != shader::ShaderCompileStatus::ToolError &&
-        result.status != shader::ShaderCompileStatus::CompileError) {
-        return false;
-    }
-
-    const StringView text = result.diagnostics.View();
-    if (Contains(text, DxcErrorMarker)) {
-        return false;
-    }
-
-    bool allowed = false;
-    // 번호는 "X"와 숫자 FxcErrorDigits개다.
-    const usize codeBytes = 1 + FxcErrorDigits;
-    for (usize at = 0; at + FxcErrorPrefix.ByteCount() <= text.ByteCount(); ++at) {
-        if (StringView(text.Data() + at, FxcErrorPrefix.ByteCount()) != FxcErrorPrefix) {
-            continue;
-        }
-
-        // "error " 뒤의 "X1234"다.
-        const usize start = at + FxcErrorPrefix.ByteCount() - 1;
-        if (start + codeBytes > text.ByteCount()) {
-            return false;
-        }
-
-        const StringView code(text.Data() + start, codeBytes);
-        if (code == UeSourceWarning || (allowFold && code == UnsuppliedFoldWarning)) {
-            allowed = true;
-        } else if (code != WarningAsErrorCode) {
-            return false;
-        }
-    }
-
-    return allowed;
-}
-
 // 실패 job의 원문을 <working>/out/MaterialCorpusFailures/<job>.rsh에 쓰고 경로를 찍는다.
 void DumpFailure(StringView working, usize job, StringView text) noexcept {
     char folder[manager_test::ManagerPathBytes];
@@ -1302,6 +1245,10 @@ TEST(MaterialShaders_CompileCorpus) {
                     job.stage = vertex ? shader::ShaderStageVertex : shader::ShaderStagePixel;
                     job.defines = all ? supplyAll.View() : Span<const shader::ShaderDefine>();
                     job.options = shader::DefaultShaderCompileOptions(snapshot->definition);
+                    // 공급 없음은 머티리얼 job 정책대로 경고를 오류로 하지 않는다(MD15 0 기본값의
+                    // 상수 접기 — 7.8절 판정). 공급 전부는 기본(경고는 오류 — 생성기 경고를
+                    // 잡는다).
+                    job.options.warningsAsErrors = all;
                     job.materialSource =
                         all ? material.supplied.View() : material.source.text.View();
                     REQUIRE(jobs.TryPushBack(job));
@@ -1345,19 +1292,15 @@ TEST(MaterialShaders_CompileCorpus) {
 
         usize compiled = 0;
         usize skipped = 0;
-        usize allowedWarnings = 0;
+        usize warned = 0;
         const char* reason = "";
         usize reported = 0;
         for (usize index = begin; index < end; ++index) {
             const shader::ShaderCompileJobResult& result = results[index];
             if (result.status == shader::ShaderCompileStatus::Success) {
                 ++compiled;
-                continue;
-            }
-
-            // 허용 FXC 경고뿐인 job이다(7.8절 판정 — warningsAsErrors가 생기기 전까지).
-            if (IsAllowedWarningOnly(result, permutations[index] == SupplyPermutation::None)) {
-                ++allowedWarnings;
+                // 경고는 진단으로 남는다(공급 없음 — 캐시 적중 job은 비어 있다).
+                warned += result.diagnostics.IsEmpty() ? 0 : 1;
                 continue;
             }
 
@@ -1411,9 +1354,8 @@ TEST(MaterialShaders_CompileCorpus) {
         }
 
         CHECK(skipped == 0);
-        printf("  MaterialShaders_CompileCorpus %.*s: %zu jobs compiled, %zu allowed with only "
-               "allowed FXC warnings\n",
-               static_cast<int>(id.ByteCount()), id.Data(), compiled, allowedWarnings);
+        printf("  MaterialShaders_CompileCorpus %.*s: %zu jobs compiled, %zu with warnings\n",
+               static_cast<int>(id.ByteCount()), id.Data(), compiled, warned);
     }
 }
 
