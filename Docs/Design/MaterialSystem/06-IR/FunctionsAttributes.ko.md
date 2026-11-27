@@ -34,8 +34,9 @@
 - **FunctionCall 오류**(ME:15774–15824, 14254–14272): 함수 참조 없음 "Missing Material Function", provider에 없음 "Material function asset is not available"(Rocks — UE는 로드 실패), 호출 사본의 입출력 id가 snapshot에 없음 "Function (<이름>) call input with index <i> is unset."·"… call output …", 함수 출력 연결 없음 "Missing function output connection '<이름>'".
 - **순환(V3).** 호출 경로에 같은 함수 에셋이 다시 나오면 그 호출 노드 위치 FunctionCycle "Material function call is recursive: <이름>"이다(UE 번역기에는 검사가 없고 편집 때 막는다 — ME:16019–16030, Rocks 문구). 쿠커의 Build 의존 SCC(4.4절 `UnsupportedCycle`)와 함께 둔다.
 - **진단 위치.** 함수 안 노드의 진단은 주 그래프의 가장 바깥 호출 노드 위치에 내고, 문구 앞에 "(Function <이름>|<이름>) "와 노드면 "(Node <종류 짧은 이름>) "를 붙인다(UE HT:4392–4437). 같은 (위치, 문구)는 한 번이다.
-- **파라미터 scope**(9.2절 MD5). 파라미터의 IR 정체 Guid는 주 그래프면 ParameterId 그대로, 함수 안이면 "공유"면 SHA-256(소유 에셋, ParameterId), 아니면 SHA-256(소유 에셋, ParameterId, 호출 경로) 앞 128 bit다. `IrParameter`·`IrTexture`·static 값(`MaterialStaticParameterValue`)은 이 정체로 찾는다(static 값 입력에 owner·scope 칸 — 9.4절 개정). 파라미터 노드 속성에 `shared`(bool, 기본 거짓)를 더한다. V8은 같은 정체의 다른 종류다.
+- **파라미터 scope**(9.2절 MD5). 파라미터의 IR 정체 Guid는 주 그래프면 ParameterId 그대로, 함수 안이면 "공유"면 SHA-256(소유 에셋, ParameterId), 아니면 SHA-256(소유 에셋, ParameterId, 호출 경로) 앞 128 bit다. `IrParameter`·`IrTexture`·static 값(`MaterialStaticParameterValue.parameterId`)은 이 정체 Guid로 찾는다(static 값을 만드는 쪽 — 인스턴스·쿠커 — 도 같은 식으로 정체를 만든다, 9.4절). 함수 사본의 호출 경로는 사본 호출 노드 id 하나에 담긴다(사본 id가 경로 hash이므로). 파라미터 노드 속성(컬렉션 참조 둘을 뺀 21종)에 `shared`(bool, 기본 거짓)를 더한다. V8은 scope별이다: 주 그래프와 "공유" 파라미터는 전역 scope 하나, 공유가 아닌 함수 파라미터는 그 호출 scope다.
 - **MaterialSample**(다른 머티리얼 참조): 참조 머티리얼 출력 노드 `Surface` 핀의 그래프를 펼쳐 그 표면 값을 낸다(scope 소유는 그 머티리얼, 번역 traits는 지금 머티리얼). 순환은 V3이다.
+- **사본 제외.** `MaterialSample`로 펼친 머티리얼 사본의 custom 출력 노드·출력 노드는 이 머티리얼의 출력이 아니다(펼친 함수 안의 custom 출력 노드는 UE처럼 출력이다 — `GatherCustomOutputExpressions`).
 - **의존 목록.** 번역 결과 `dependencies`는 번역이 읽은 snapshot(역할 Function·Material, AssetId)이다(12.2절 의존 입력 — 쿠커가 키를 붙인다).
 - **Build 의존 hook.** Material·MaterialFunction 그래프 안의 FunctionCall·MaterialSample·레이어 참조를 Build 의존으로 등록한다(4.6.1절).
 
