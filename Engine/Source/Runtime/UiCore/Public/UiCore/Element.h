@@ -177,7 +177,10 @@ public:
     Element* Parent() const noexcept;
     // 자신을 포함해 지정한 루트 아래에 붙어 있는지 검사한다.
     bool IsWithin(const Element& root) const noexcept;
-    bool IsInputPathActive(const Element& root, bool pointer) const noexcept;
+    // root까지의 경로가 입력을 받을 수 있는지다(보이기·scope·활성). requireEnabled가 false면 활성은
+    // 보지 않는다(hit 판정 — 비활성은 경로 자름으로 다룬다, Docs/Design/UiToolkit 20.5절).
+    bool IsInputPathActive(const Element& root, bool pointer,
+                           bool requireEnabled = true) const noexcept;
 
     usize ChildCount() const noexcept;
 
@@ -331,8 +334,10 @@ public:
 
     bool ClipsToBounds() const noexcept;
 
-    // 앞에 그려진 자식부터 검사하며, 경계 클리핑이 켜진 조상 밖의 점은 제외한다.
-    Element* HitTest(Vec2 position) noexcept;
+    // 앞에 그려진 자식부터 검사하며, 경계 클리핑이 켜진 조상 밖의 점은 제외한다. 맞은 요소까지의
+    // 경로를 이 요소에서 내려가며 첫 비활성 요소 앞에서 자른다(UE GetBubblePath — 20.5절).
+    // ignoreEnabled면 자르지 않는다(툴팁·영역 지도).
+    Element* HitTest(Vec2 position, bool ignoreEnabled = false) noexcept;
 
 protected:
     // 기존 자식 위치에 빈 배치 노드를 삽입한다. 슬롯 순서와 포커스, 입력 캡처는 그대로 이어진다.
@@ -346,6 +351,8 @@ protected:
     // PaintChildren이다. 자식을 오프스크린 결과로 대신 그리는 동안에도 같은 자리에 보이는 요소
     // (RetainerBox)는 활성 자식을 돌려준다. 돌려주는 목록이 바뀌면 plan revision을 올려야 한다.
     virtual Span<const SharedPtr<Element>> HitTestChildren() const noexcept;
+    // 보이기·clip만 보는 hit 판정이다(HitTest가 자르기 전에 쓴다).
+    Element* HitTestVisible(Vec2 position) noexcept;
     void InvalidatePaintPlan() noexcept;
 
     virtual CacheRoot* LocalPaintCache() const noexcept;

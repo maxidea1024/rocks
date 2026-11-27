@@ -12,7 +12,11 @@ public:
     Result<void> Update(const SharedPtr<Element>& root) noexcept;
     void Reset() noexcept;
     bool HasSnapshot() const noexcept;
-    SharedPtr<Element> Find(Vec2 position, const Element& scope) const noexcept;
+    // 맞은 요소다. scope에서 맞은 요소로 내려가는 경로를 첫 비활성 요소 앞에서 자른다(UE
+    // GetBubblePath — Docs/Design/UiToolkit 20.5절: 비활성 버튼을 누르면 그 부모가 받는다).
+    // ignoreEnabled면 자르지 않는다(툴팁 — 비활성 위젯도 툴팁을 띄운다, 영역 지도).
+    SharedPtr<Element> Find(Vec2 position, const Element& scope,
+                            bool ignoreEnabled = false) const noexcept;
 
     // hit 후보 수다(Visible이고 크기가 있는 항목 — 그리기 순서). 영역 지도 생성이 쓴다.
     usize CandidateCount() const noexcept;

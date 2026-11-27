@@ -63,9 +63,10 @@ Result<void> HitGrid::Update(const SharedPtr<Element>& root) noexcept {
 
 Result<void> HitGrid::Record(const SharedPtr<Element>& element, usize parentClip,
                              const Box2<float>* clip) noexcept {
+    // 비활성 요소도 등록한다 — 경로 자름이 Find에서 다룬다(20.5절).
     const auto visibility = element->GetVisibility();
-    if (!element->IsEnabled() || visibility == Visibility::HitTestInvisible ||
-        visibility == Visibility::Hidden || visibility == Visibility::Collapsed) {
+    if (visibility == Visibility::HitTestInvisible || visibility == Visibility::Hidden ||
+        visibility == Visibility::Collapsed) {
         return Result<void>::Success();
     }
 
@@ -168,13 +169,48 @@ bool HitGrid::Accepts(usize index, Vec2 point, const Element& scope,
 
     auto target = entry.element.Lock();
     if (!target || target->GetVisibility() != Visibility::Visible ||
-        !target->IsInputPathActive(scope, true)) {
+        !target->IsInputPathActive(scope, true, false)) {
         return false;
     }
 
     hit = Move(target);
     return true;
 }
+
+namespace {
+
+// scope에서 target으로 내려가는 경로를 첫 비활성 요소 앞에서 자른다(UE GetBubblePath 235–246행).
+SharedPtr<Element> CutAtDisabled(SharedPtr<Element> target, const Element& scope,
+                                 const SharedPtr<Element>& owner) noexcept {
+    const Element* highest = nullptr;
+    for (const Element* current = target.Get(); current; current = current->Parent()) {
+        if (!current->IsEnabled()) {
+            highest = current;
+        }
+
+        if (current == &scope) {
+            break;
+        }
+    }
+
+    if (!highest) {
+        return target;
+    }
+
+    if (highest == &scope) {
+        return {};
+    }
+
+    const Element* keep = highest->Parent();
+    if (keep == owner.Get()) {
+        return owner;
+    }
+
+    const Element* grand = keep ? keep->Parent() : nullptr;
+    return grand ? grand->FindChild(keep) : SharedPtr<Element>{};
+}
+
+} // namespace
 
 usize HitGrid::CandidateCount() const noexcept {
     return candidates_.Size();
@@ -187,9 +223,10 @@ SharedPtr<Element> HitGrid::CandidateFromTop(usize fromTop, Box2<float>& area) c
     }
 
     const Candidate& candidate = candidates_[candidates_.Size() - 1 - fromTop];
+    // 영역 지도는 구조 판정이라 활성을 보지 않는다(20.5절 — 비활성 최대화 버튼도 버튼 영역).
     auto target = entries_[candidate.entry].element.Lock();
     if (!target || target->GetVisibility() != Visibility::Visible ||
-        !target->IsInputPathActive(*owner, true)) {
+        !target->IsInputPathActive(*owner, true, false)) {
         return {};
     }
 
@@ -197,9 +234,10 @@ SharedPtr<Element> HitGrid::CandidateFromTop(usize fromTop, Box2<float>& area) c
     return target;
 }
 
-SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope) const noexcept {
+SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope,
+                                 bool ignoreEnabled) const noexcept {
     const auto owner = root_.Lock();
-    if (!point.IsFinite() || !owner || !scope.IsInputPathActive(*owner, true)) {
+    if (!point.IsFinite() || !owner || !scope.IsInputPathActive(*owner, true, false)) {
         return {};
     }
 
@@ -218,7 +256,8 @@ SharedPtr<Element> HitGrid::Find(Vec2 point, const Element& scope) const noexcep
 
         SharedPtr<Element> hit;
         if (Accepts(entry, point, scope, hit)) {
-            return hit;
+            // 맨 위 후보에서 멈춘다 — 자른 결과(부모)를 버리고 뒤 후보로 가지 않는다.
+            return ignoreEnabled ? hit : CutAtDisabled(Move(hit), scope, owner);
         }
     }
 

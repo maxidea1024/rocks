@@ -386,8 +386,9 @@ input::WindowRegion Application::QueryWindowRegion(Vec2 position) const noexcept
     }
 
     const bool snapshot = hitGrid_.HasSnapshot();
-    const auto hit = snapshot ? hitGrid_.Find(position, *root_) : SharedPtr<Element>{};
-    return RegionOfTarget(snapshot ? hit.Get() : root_->HitTest(position));
+    // 영역 판정은 구조라 활성을 보지 않는다(20.5절).
+    const auto hit = snapshot ? hitGrid_.Find(position, *root_, true) : SharedPtr<Element>{};
+    return RegionOfTarget(snapshot ? hit.Get() : root_->HitTest(position, true));
 }
 
 void Application::BuildWindowRegionMap(input::WindowRegionMap& map) const noexcept {
@@ -906,7 +907,19 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
     }
 
     if (event.source == PointerSource::Mouse) {
-        ObserveToolTip(event, hit, root);
+        // 툴팁은 비활성 요소도 띄운다 — 활성을 무시한 대상으로 본다(UE SlateUser.cpp 1351행).
+        SharedPtr<Element> tipRecorded;
+        Element* tipHit = hit;
+        if (!captured) {
+            if (hitGrid_.HasSnapshot()) {
+                tipRecorded = hitGrid_.Find(event.position, *root, true);
+                tipHit = tipRecorded.Get();
+            } else {
+                tipHit = root->HitTest(event.position, true);
+            }
+        }
+
+        ObserveToolTip(event, tipHit, root);
         // 마지막 툴팁을 닫으면 임시 루트가 해제된다. 같은 누름은 원래 화면에 계속 전달한다.
         if (!scope && root != root_) {
             root = root_;

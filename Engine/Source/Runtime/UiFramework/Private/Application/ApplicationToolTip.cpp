@@ -393,8 +393,8 @@ void Application::AdvanceToolTips() noexcept {
     for (usize i = 0; i < toolTips_.Size();) {
         const uint32 user = toolTips_[i].user;
         auto owner = toolTips_[i].owner.Lock();
-        if (!root_ || !owner || !owner->IsInputPathActive(*root_, true) || !owner->HasToolTip() ||
-            owner->ToolTipRevision() != toolTips_[i].revision ||
+        if (!root_ || !owner || !owner->IsInputPathActive(*root_, true, false) ||
+            !owner->HasToolTip() || owner->ToolTipRevision() != toolTips_[i].revision ||
             (toolTips_[i].leaveDue != 0 && now >= toolTips_[i].leaveDue)) {
             CloseToolTip(user);
             continue;
@@ -411,7 +411,7 @@ void Application::AdvanceToolTips() noexcept {
             }
 
             if (owner->ToolTipRevision() != toolTips_[i].revision || !root_ ||
-                !owner->IsInputPathActive(*root_, true)) {
+                !owner->IsInputPathActive(*root_, true, false)) {
                 CloseToolTip(user);
                 continue;
             }

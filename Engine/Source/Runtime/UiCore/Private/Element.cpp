@@ -153,10 +153,11 @@ bool Element::IsWithin(const Element& root) const noexcept {
     return false;
 }
 
-bool Element::IsInputPathActive(const Element& root, bool pointer) const noexcept {
+bool Element::IsInputPathActive(const Element& root, bool pointer,
+                                bool requireEnabled) const noexcept {
     for (const Element* current = this; current; current = current->parent_) {
         const auto visibility = current->visibility_;
-        if (!current->enabled_ || visibility == Visibility::Hidden ||
+        if ((requireEnabled && !current->enabled_) || visibility == Visibility::Hidden ||
             visibility == Visibility::Collapsed ||
             (pointer && visibility == Visibility::HitTestInvisible)) {
             return false;
@@ -787,8 +788,34 @@ bool Element::ClipsToBounds() const noexcept {
     return clipToBounds_;
 }
 
-Element* Element::HitTest(Vec2 position) noexcept {
-    if (!enabled_ || visibility_ == Visibility::Hidden || visibility_ == Visibility::Collapsed ||
+Element* Element::HitTest(Vec2 position, bool ignoreEnabled) noexcept {
+    Element* hit = HitTestVisible(position);
+    if (!hit || ignoreEnabled) {
+        return hit;
+    }
+
+    // 이 요소에서 맞은 요소로 내려가는 경로의 첫 비활성 요소 앞에서 자른다(UE GetBubblePath
+    // 235–246행). 올라가며 마지막에 본 비활성 요소가 이 요소에 가장 가깝다.
+    Element* highest = nullptr;
+    for (Element* current = hit; current; current = current->parent_) {
+        if (!current->enabled_) {
+            highest = current;
+        }
+
+        if (current == this) {
+            break;
+        }
+    }
+
+    if (!highest) {
+        return hit;
+    }
+
+    return highest == this ? nullptr : highest->parent_;
+}
+
+Element* Element::HitTestVisible(Vec2 position) noexcept {
+    if (visibility_ == Visibility::Hidden || visibility_ == Visibility::Collapsed ||
         visibility_ == Visibility::HitTestInvisible) {
         return nullptr;
     }
@@ -800,7 +827,7 @@ Element* Element::HitTest(Vec2 position) noexcept {
     // hit grid와 같은 자식·순서다(20.4절 — 뒤에 그린 것이 위).
     const auto children = HitTestChildren();
     for (usize i = children.Size(); i > 0; --i) {
-        if (Element* hit = children[i - 1]->HitTest(position)) {
+        if (Element* hit = children[i - 1]->HitTestVisible(position)) {
             return hit;
         }
     }
