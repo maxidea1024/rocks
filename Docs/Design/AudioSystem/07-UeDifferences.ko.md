@@ -40,6 +40,8 @@
 | 2D 재생의 동시 발음 거리 | ActiveSound Transform 위치로 잼 | 위치가 없어 0(3.41.2절) | NonSpatial 재생은 위치를 갖지 않는다 |
 | 기본 동시 발음 | `UAudioSettings::DefaultSoundConcurrency`(BaseEngine.ini에서는 비어 있음) | 두지 않음 — 그룹 없는 사운드는 제한 없음(3.41.2절) | 필요해지면 프로젝트 설정 개정 |
 | voice 상한 단위 | render cost 합(`au.EnableRelativeRenderCostVoiceLimit` 1, wave 1.0) | 개수(3.41.1절) | wave만 있는 동안 같다. SoundGraph(AU10)에서 다시 본다 |
+| 여유 부족 때 정지 중 voice 끊기 | `StopNow`(fade 없음 — `AudioDevice.cpp:4377–4446`), 동률이면 배열 앞쪽, 정지 중 voice가 없으면 loop 아닌 voice·아무 voice | 64 frame fade(`MinStopFadeFrames`), 동률이면 먼저 수락한 재생, 정지 중 voice만(스트림 슬롯 부족이면 스트림 clip을 쥔 것만 — 3.41.1절) | 끊김 방지·결정성, 자리 안 활성 voice는 상한 정렬이 지킴 |
+| 최대 가청 거리의 거리 배수 | 없음(`GetMaxFalloffDistance`) | `falloffDistance ÷ distanceScale`(3.41.3절) | Rocks 감쇠 평가의 `distanceScale` 칸과 같은 끝 |
 | 빈 retrigger 그룹 | 비어도 영구히 남음 | 간격이 지나면 지움(3.41.2절) | 동작은 같고 표가 쌓이지 않음 |
 | 살아 있는 재생 수 | 제한 없음(ActiveSound 배열) | `MaxPlaybacks` 1024(voice 없는·가상 포함), 그룹 8개·활성 그룹 1024 | 고정 용량 표(3.35.4절) |
 | 정지 fade 중 voice의 경쟁 | stopping이면 `v × P − 101`로 정렬에 남음 | 정지·steal fade 중인 재생은 경쟁하지 않고 voice를 끝까지 쥠, 상한 수에 세지 않음(3.41.1절) | 별도 stopping 풀(UE `NumStoppingSources`)과 같은 자리를 믹서 여유 voice가 받음 |

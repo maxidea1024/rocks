@@ -352,11 +352,15 @@ TEST(EngineAudio_NoOutputReturnsIgnoredHandles) {
     CHECK(fixture.audio->Play2D(sound));
 }
 
+// voice 상한(3.41.1절): 우선순위·크기가 같으면 먼저 수락한 32개가 voice를 갖는다. 상한 밖 새
+// one-shot은 Started 없이 VoiceLimit, 상한 밖 loop는 끝나지 않고 voice 없이 남는다(UE loop
+// ActiveSound). 같은 PCM·구간은 clip 등록 하나를 함께 쓴다.
 TEST(EngineAudio_VoiceLimitEndsExtraPlays) {
     AudioEngine fixture(DeterministicOptions(true));
     REQUIRE(fixture.initialized);
     const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.01f, 480);
     const SoundSourceRef loop = MakeSound(fixture.allocator, pcm, true);
+    const SoundSourceRef shot = MakeSound(fixture.allocator, pcm, false);
     Array<PlaybackHandle> handles(fixture.allocator);
     // 설정 문맥이 없으면 audio.voices.max는 기본 32다.
     for (uint32 index = 0; index < 33; ++index) {
@@ -365,13 +369,17 @@ TEST(EngineAudio_VoiceLimitEndsExtraPlays) {
         REQUIRE(handles.TryPushBack(played.Value()));
     }
 
+    auto extraShot = fixture.audio->Play2D(shot);
+    REQUIRE(extraShot);
     REQUIRE(fixture.Frame());
     REQUIRE(fixture.Frame());
-    CHECK(fixture.audio->ControlStats().activeVoices == 32);
-    CHECK(fixture.audio->ControlStats().voiceLimitRejects == 1);
-    CHECK(fixture.audio->Status(handles[32]) == PlaybackStatus::Finished);
-    // 같은 PCM·구간은 clip 등록 하나를 함께 쓴다.
-    CHECK(fixture.audio->ControlStats().registeredClips == 1);
+    AudioControlStats stats = fixture.audio->ControlStats();
+    CHECK(stats.activeVoices == 32);
+    CHECK(stats.voicelessPlaybacks == 1);
+    CHECK(stats.voiceLimitRejects == 1);
+    CHECK(fixture.audio->Status(handles[32]) == PlaybackStatus::Pending);
+    CHECK(fixture.audio->Status(extraShot.Value()) == PlaybackStatus::Finished);
+    CHECK(stats.registeredClips == 1);
     for (const PlaybackHandle handle : handles) {
         REQUIRE(fixture.audio->Stop(handle));
     }
@@ -380,18 +388,15 @@ TEST(EngineAudio_VoiceLimitEndsExtraPlays) {
     // terminal과 ACK가 같은 블록 끝에 게시되어 놓기가 바로 되므로(놓기 대기는 Thread render의
     // 경합에서만 생긴다) 표 크기로 여유를 확인한다.
     CHECK(fixture.audio->Device()->Mixer().Config().maxVoices == 64);
-    for (uint32 frame = 0; frame < MaxTestFrames && fixture.audio->ControlStats().activeVoices != 0;
-         ++frame) {
-        REQUIRE(fixture.Frame());
-    }
-
-    REQUIRE(fixture.audio->ControlStats().activeVoices == 0);
+    REQUIRE(fixture.RunUntilIdle());
     for (uint32 index = 0; index < 32; ++index) {
         REQUIRE(fixture.audio->Play2D(loop));
     }
 
     REQUIRE(fixture.Frame());
-    CHECK(fixture.audio->ControlStats().voiceLimitRejects == 1);
+    stats = fixture.audio->ControlStats();
+    CHECK(stats.activeVoices == 32 && stats.voicelessPlaybacks == 0);
+    CHECK(stats.voiceLimitRejects == 1);
 }
 
 TEST(EngineAudio_LoopRangesRegisterSeparateClips) {
@@ -722,8 +727,9 @@ TEST(EngineAudio_LoopRangePlaysOnlyItsRange) {
     REQUIRE(fixture.initialized);
     // 값이 frame/1000인 PCM: 전체 loop는 0.999까지, [200, 400) loop는 0.4 미만만 낸다.
     const SharedPtr<const SoundPcm> pcm = MakeRampPcm(fixture.allocator, 0.001f, 1000);
+    // 무음 컬링(3.41.1절 — 1e-4 이하)에 걸리지 않을 만큼 작은 volume이다.
     PlayOptions silent;
-    silent.volume = 0.0f;
+    silent.volume = 2.0e-4f;
     REQUIRE(fixture.audio->Play2D(MakeSound(fixture.allocator, pcm, true), Move(silent)));
     PlayOptions middle;
     middle.startFrame = 200;

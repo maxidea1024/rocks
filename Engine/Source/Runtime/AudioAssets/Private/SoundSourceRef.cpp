@@ -39,7 +39,10 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
     const bool hasStream = playable.stream.Get() != nullptr;
     if (hasPcm == hasStream || (hasPcm && !pcm->IsFinite()) ||
         !IsFiniteWithin(playable.volume, 0.0f, audio::MaxVoiceGain) ||
-        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch)) {
+        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch) ||
+        !IsFiniteWithin(playable.priority, MinSoundPriority, MaxSoundPriority) ||
+        static_cast<uint8>(playable.virtualizationMode) >
+            static_cast<uint8>(SoundVirtualizationMode::SeekRestart)) {
         return Created::Failure(ErrorCode::InvalidArgument);
     }
 
