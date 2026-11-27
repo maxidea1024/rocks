@@ -25,7 +25,9 @@
 - **`ComboBox`**
   - 스타일은 `ComboBoxStyle`이다(`SetStyle`·`ApplyStyles` — 20.11절 규칙). 버튼 모양은 `comboButton.button`을 MenuAnchor(Button)에 넘긴다.
   - 고정 크기 80×24를 지운다. 원하는 크기는 내용 + 버튼 여백 + 화살표 칸이다(UE `SComboButton` — 내용 슬롯 옆에 화살표 이미지 AutoWidth). 화살표 칸은 화살표 이미지 크기(16)와 `downArrowPadding`(2 — UE `SComboButton` 화살표 슬롯 `Padding(DownArrowMargin)`, SComboButton.cpp 26–41·82행)이다. 지금 상수 `ComboArrowPadding`(2)을 스타일 값으로 바꾼다.
-  - 펼침 목록은 `menuBorder` 바탕과 `menuBorderPadding` 안에 행을 둔다. 행 여백은 `menuRowPadding`, 올린 행 바탕·글자색은 행 스타일이다.
+  - 펼침 목록은 `menuBorder` 바탕과 `menuBorderPadding` 안에 행을 둔다. 바탕은 `Frame::SetStyleBrush`(새 — StyleBrush를 그릴 때 테마로 풀어 테마가 바뀌어도 따라간다, UE `SBorder` BorderImage가 FSlateBrush 그대로인 것과 같다. `SetBrush`로 풀린 Brush를 주면 지운다)로 그린다.
+  - 행은 콤보 전용 행 버튼이다(Private `ComboRow` — 버튼 스타일을 행 스타일에서 만든다: 보통 `evenRow`(없음), 올림·눌림 `evenRowHovered`(Primary), 글자 `text`(White), 여백 `menuRowPadding`). 키보드로 옮긴 강조 행도 올림 모양이다(`IsHighlighted`). 지금의 박힌 행 색(`SetColor` 두 상수)과 고정 행 높이 24를 지운다 — 행 높이는 내용 + 여백이다.
+  - 처음 펼칠 때 선택 행이 보이게 한다. 행 높이를 어림하지 않고 `ScrollView::RequestScrollIntoView(행, Nearest)`(새 — 다음 배치에서 자식을 배치한 뒤 같은 배치 안에서 맞춘다, UE `STableView::RequestScrollIntoView`)를 쓴다.
   - 콤보 버튼(`MenuAnchor` — 16장 87행 "Combo Button")도 `ComboButtonStyle`을 받는다(`MenuAnchor::SetComboButtonStyle`이 아니라 `ComboButton` Element 이름으로 둘지는 착수 때 UE `SComboButton` 구조를 보고 정한다 — 지금 `MenuAnchor`는 메뉴 막대·하위 메뉴의 기반이라 모양을 넣지 않는다).
 - 갤러리: Combo Box(스타일), Simple Combo Box(테두리 없음) 행.
 
