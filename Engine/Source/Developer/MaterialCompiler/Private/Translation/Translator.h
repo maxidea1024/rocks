@@ -127,6 +127,10 @@ public:
         return input_;
     }
 
+    // 번역이 읽은 다른 에셋을 의존 목록에 더한다(같은 (역할, 에셋)은 한 번 — 6.12절 MS2e2).
+    // 오류: 할당 실패.
+    Result<void> AddDependency(MaterialDependencyRole role, Guid asset) noexcept;
+
     // 번역 중인 주 그래프다(Run이 찾은 뒤).
     const nodegraph::Graph& Graph() const noexcept {
         return *graph_;

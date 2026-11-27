@@ -17,6 +17,8 @@
 #include <Material/MaterialPrerequisiteCheck.h>
 #include <Material/ParameterCollection.generated.h>
 #include <Material/ParameterCollection.h>
+#include <MaterialSchema/Nodes/Color/ColorRampProperties.generated.h>
+#include <MaterialSchema/Nodes/Color/ColorRampProperties.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallProperties.generated.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallProperties.h>
 #include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.generated.h>
@@ -734,8 +736,11 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
         source, function, [&](MaterialFunction& value) noexcept {
             material::FunctionCallProperties call(source.ObjectAllocator());
             call.materialFunction.assetId = asset_test::FixedId(0x6a3);
+            material::ColorRampProperties ramp;
+            ramp.colorCurve.assetId = asset_test::FixedId(0x6a6);
             value.graph.domain = source.Names()->TryIntern("MaterialFunction").Value();
-            return AddGraphNode(env, value.graph, Guid{0x30, 1}, "Material.FunctionCall", call);
+            return AddGraphNode(env, value.graph, Guid{0x30, 1}, "Material.FunctionCall", call) &&
+                   AddGraphNode(env, value.graph, Guid{0x30, 2}, "Material.ColorRamp", ramp);
         }));
 
     AssetTypeHookTable table(env.allocator, env.types);
@@ -756,8 +761,10 @@ TEST(Material_GraphReferencesAreBuildDependencies) {
     AssetDependencySink functionSink(env.allocator);
     REQUIRE(table.CollectBuildDependencies(source, access, function, TypeOf<MaterialFunction>(),
                                            asset_test::FixedId(0x6a1), functionSink));
-    REQUIRE(functionSink.Dependencies().Size() == 1);
+    REQUIRE(functionSink.Dependencies().Size() == 2);
     CHECK(functionSink.Dependencies()[0].asset == asset_test::FixedId(0x6a3));
+    // ColorRamp 색 커브도 번역이 읽는 Build 의존이다(6.13절 MS2f4).
+    CHECK(functionSink.Dependencies()[1].asset == asset_test::FixedId(0x6a6));
     registrations.Clear();
 }
 #endif

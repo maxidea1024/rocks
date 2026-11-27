@@ -16,7 +16,7 @@ public sealed class MaterialCompiler : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // MaterialSchema for the graph schema, node definitions and value types; Core for containers, text and SHA-256.
-    protected override string[] PublicDependencies => ["Core", "MaterialSchema", "Texture"];
+    protected override string[] PublicDependencies => ["Core", "CurveAssets", "MaterialSchema", "Texture"];
 
     // DeterministicMath gives constant folding the same bytes on every host (floor, truncation and rounding — section 6.5).
     protected override string[] PrivateDependencies => ["DeterministicMath"];
