@@ -75,6 +75,33 @@ TEST(PlatformWindow_WakeMessageWaitPostsToPumpThread) {
     CHECK(!HasPendingWindowEvents());
 }
 
+TEST(PlatformWindow_DpiChangeUpdatesScaleBeforeMoving) {
+    if (!test::SupportsWindowMessages()) {
+        return;
+    }
+
+    SystemAllocator allocator;
+    auto window = CreateHidden(allocator, "DpiChange");
+    REQUIRE(window);
+    float scale = 0;
+    // 시험 프로세스는 DPI를 인식하지 않으므로 처음 배율은 1이고 바뀐 것이 없다.
+    CHECK(window.Value()->DpiScale() == 1.0f);
+    CHECK(!window.Value()->ConsumeDpiChange(scale));
+    // 배율 2(192 DPI)로 바뀌었다는 메시지: 배율이 먼저 바뀌고 OS가 제안한 크기로 옮긴다.
+    constexpr uint32 DoubleDpi = 192;
+    const int32 size = static_cast<int32>(2 * PumpWindowSize);
+    REQUIRE(
+        test::SendWindowDpiChanged(window.Value()->NativeHandle().window, DoubleDpi, size, size));
+    CHECK(window.Value()->DpiScale() == 2.0f);
+    REQUIRE(window.Value()->ConsumeDpiChange(scale));
+    CHECK(scale == 2.0f);
+    CHECK(!window.Value()->ConsumeDpiChange(scale));
+    uint32 width = 0;
+    uint32 height = 0;
+    CHECK(window.Value()->ConsumeResize(width, height));
+    CHECK(width > PumpWindowSize && height > PumpWindowSize);
+}
+
 TEST(PlatformWindow_WindowModeDefaultsToWindowed) {
     SystemAllocator allocator;
     auto window = CreateHidden(allocator, "WindowMode");

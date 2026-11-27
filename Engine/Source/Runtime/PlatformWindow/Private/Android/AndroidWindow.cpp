@@ -1535,6 +1535,11 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
 }
 
 // Android에는 다른 스레드가 보낸 창 메시지가 없다(입력은 입력 스레드가 넘기고 TakeEvents가 옮긴다).
+// 이 플랫폼의 DPI는 창 backend가 따로 정한다(Android density — 그 플랫폼 단계).
+bool EnableHighDpiAwareness() noexcept {
+    return false;
+}
+
 void PumpSentMessages() noexcept {
 }
 

@@ -329,19 +329,22 @@ Result<void> DockWindows::FloatTab(Surface& source, StringView id, Vec2) noexcep
     const float barHeight = WindowTitleBar::DesiredHeight(frameStyle, titleHeight);
     platform::WindowDesc desc;
     desc.title = id;
-    desc.width = static_cast<uint32>(size.Value().x + inset.x + inset.z);
-    desc.height = static_cast<uint32>(size.Value().y + inset.y + inset.w + barHeight);
+    // 미리보기 크기·위치는 창 좌표(물리 픽셀)이고 테두리·제목 막대는 논리 크기다. WindowDesc 크기는
+    // 논리 크기(창이 놓인 모니터의 DPI로 키운다), desktopPosition은 물리 픽셀이다(19.2절).
+    const float scale = source.window->DpiScale();
+    desc.width = static_cast<uint32>(size.Value().x / scale + inset.x + inset.z);
+    desc.height = static_cast<uint32>(size.Value().y / scale + inset.y + inset.w + barHeight);
     desc.positionClientOrigin = true;
     desc.useDesktopPosition = true;
-    desc.desktopPosition = {desktop.Value().x - static_cast<int32>(inset.x),
-                            desktop.Value().y - static_cast<int32>(inset.y + barHeight)};
+    desc.desktopPosition = {desktop.Value().x - static_cast<int32>(inset.x * scale),
+                            desktop.Value().y - static_cast<int32>((inset.y + barHeight) * scale)};
     desc.frame = platform::WindowFrame::Custom;
     auto window = platform::Window::Create(allocator_, desc);
     // 직접 그린 테두리를 지원하지 않는 플랫폼은 OS 테두리로 연다.
     if (!window && window.Error() == ErrorCode::Unsupported) {
         desc.frame = platform::WindowFrame::System;
-        desc.width = static_cast<uint32>(size.Value().x);
-        desc.height = static_cast<uint32>(size.Value().y);
+        desc.width = static_cast<uint32>(size.Value().x / scale);
+        desc.height = static_cast<uint32>(size.Value().y / scale);
         desc.desktopPosition = desktop.Value();
         window = platform::Window::Create(allocator_, desc);
     }
@@ -525,8 +528,12 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
         return Result<bool>::Success(false);
     }
 
-    const Vec2 viewport(static_cast<float>(host.window->Width()),
-                        static_cast<float>(host.window->Height()));
+    // DPI 배율은 창 루트 변환으로 준다(UE 창 루트 변환 AppScale × DPI — Docs/Design/UiToolkit
+    // 19.2절). UI 창 좌표 = client 물리 픽셀이므로 입력·영역 지도·작업 영역은 변환하지 않는다. 크기
+    // 조절 중 그리기에서도 매번 읽는다(모니터를 옮기는 중 WM_DPICHANGED가 배율을 먼저 바꾼다).
+    const float scale = host.window->DpiScale();
+    const Vec2 viewport(static_cast<float>(host.window->Width()) / scale,
+                        static_cast<float>(host.window->Height()) / scale);
     // 최대화하면 테두리·여백을 빼고 최대화 버튼을 복원 모양으로 바꾼다.
     if (host.chrome) {
         host.chrome->SetMaximized(host.window->IsMaximized());
@@ -534,7 +541,8 @@ Result<bool> DockWindows::Render(Surface& host, bool refreshCursor, UiDrawBuffer
         host.chrome->SetActive(host.window->IsActive());
     }
 
-    auto arranged = host.app.PrepareLayout(Geometry::Root(viewport, {}), 1);
+    auto arranged =
+        host.app.PrepareLayout(Geometry::Root(viewport, {.m00 = scale, .m11 = scale}), scale);
     if (!arranged) {
         return Result<bool>::Failure(arranged.Error());
     }

@@ -381,6 +381,38 @@ public:
 
         width_ = desc.width;
         height_ = desc.height;
+        // 창이 놓인 모니터의 DPI로 크기를 다시 맞춘다(프로세스가 DPI를 인식할 때만 96이 아니다 —
+        // WindowDesc 크기는 논리 크기, desktopPosition은 물리 픽셀이다). 아직 보이지 않으므로
+        // 깜빡이지 않는다.
+        const UINT dpi = GetDpiForWindow(window_);
+        dpiScale_ = static_cast<float>(dpi) / static_cast<float>(USER_DEFAULT_SCREEN_DPI);
+        if (dpi != USER_DEFAULT_SCREEN_DPI && dpi != 0) {
+            RECT scaled = {0, 0, MulDiv(static_cast<int>(desc.width), dpi, USER_DEFAULT_SCREEN_DPI),
+                           MulDiv(static_cast<int>(desc.height), dpi, USER_DEFAULT_SCREEN_DPI)};
+            if (!customFrame_) {
+                AdjustWindowRectExForDpi(&scaled, style, FALSE, 0, dpi);
+            }
+
+            UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+            int left = 0;
+            int top = 0;
+            if (desc.useDesktopPosition && desc.positionClientOrigin) {
+                // client 원점이 desktopPosition에 오도록 비client 두께만큼 옮긴다.
+                left = desc.desktopPosition.x + scaled.left;
+                top = desc.desktopPosition.y + scaled.top;
+            } else {
+                flags |= SWP_NOMOVE;
+            }
+
+            SetWindowPos(window_, nullptr, left, top, scaled.right - scaled.left,
+                         scaled.bottom - scaled.top, flags);
+            RECT client{};
+            if (GetClientRect(window_, &client)) {
+                width_ = static_cast<uint32>(client.right - client.left);
+                height_ = static_cast<uint32>(client.bottom - client.top);
+            }
+        }
+
         if (customFrame_) {
             // 프레임을 다시 계산하게 해 OS 테두리를 없애고, DWM 그림자는 위 1 px 확장으로 살린다.
             const MARGINS shadow{0, 0, CustomFrameShadowMargin, 0};
@@ -450,6 +482,20 @@ public:
 
     void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept override {
         liveResize_ = Move(handler);
+    }
+
+    float DpiScale() const noexcept override {
+        return dpiScale_;
+    }
+
+    bool ConsumeDpiChange(float& scale) noexcept override {
+        if (!dpiChanged_) {
+            return false;
+        }
+
+        dpiChanged_ = false;
+        scale = dpiScale_;
+        return true;
     }
 
     void SetMouseCursor(input::MouseCursor shape) noexcept override {
@@ -1053,6 +1099,21 @@ private:
                 return 0;
             }
             break;
+        case WM_DPICHANGED: {
+            // 배율을 먼저 바꾸고 OS가 제안한 사각형으로 옮긴다(UE ProcessDeferredMessage — 이동
+            // modal 루프 안이어도 그 WM_SIZE의 live resize가 새 배율로 그린다, 19.2절).
+            dpiScale_ =
+                static_cast<float>(LOWORD(wParam)) / static_cast<float>(USER_DEFAULT_SCREEN_DPI);
+            dpiChanged_ = true;
+            const auto* suggested = reinterpret_cast<const RECT*>(lParam);
+            if (suggested != nullptr) {
+                SetWindowPos(window_, nullptr, suggested->left, suggested->top,
+                             suggested->right - suggested->left, suggested->bottom - suggested->top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+
+            return 0;
+        }
         case WM_NCHITTEST: {
             if (customFrame_ && !fullscreenStyle_) {
                 return CustomHitTest(lParam);
@@ -1357,6 +1418,9 @@ private:
     mutable Mutex regionGate_;
     input::WindowRegionMap regionMap_;
     LONG_PTR fullscreenStyle_ = 0;
+    // DPI 배율(유효 DPI / 96)과 마지막 소비 이후 바뀌었는지다.
+    float dpiScale_ = 1.0f;
+    bool dpiChanged_ = false;
     WINDOWPLACEMENT windowedPlacement_{};
     bool trackingMouse_ = false;
     // 최대화 버튼 위 비클라이언트 이동을 추적 중인지다(WM_NCMOUSELEAVE).
@@ -1656,6 +1720,10 @@ void WakeMessageWait() noexcept {
         // 빈 메시지 하나로 대기를 푼다(다음 PumpMessages가 버린다).
         (void)PostThreadMessageW(static_cast<DWORD>(thread), WM_NULL, 0, 0);
     }
+}
+
+bool EnableHighDpiAwareness() noexcept {
+    return SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != FALSE;
 }
 
 void PumpSentMessages() noexcept {

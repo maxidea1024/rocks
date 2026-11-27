@@ -45,6 +45,14 @@ WindowFrame Window::Frame() const noexcept {
     return WindowFrame::System;
 }
 
+float Window::DpiScale() const noexcept {
+    return 1.0f;
+}
+
+bool Window::ConsumeDpiChange(float&) noexcept {
+    return false;
+}
+
 bool Window::ConsumeRepaint() noexcept {
     return true;
 }

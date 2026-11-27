@@ -87,6 +87,12 @@ int Run(launch::ApplicationContext& context) noexcept {
         }
     }
 
+    // 창을 띄우는 실행은 모니터별 DPI를 인식한다(Docs/Design/UiToolkit 19.2절). 결정적이어야 하는
+    // 시험·캡처는 배율 1로 둔다.
+    if (!snapshot && !selfTest && !surfaceTest) {
+        (void)platform::EnableHighDpiAwareness();
+    }
+
     // 엔진 셰이더 호스트(셰이더 타입 등록·Development 공급자 — RenderBase 9.12절 RR11)다.
     DemoShaderHost shaderHost(context.Modules());
     if (!shaderHost.IsReady()) {

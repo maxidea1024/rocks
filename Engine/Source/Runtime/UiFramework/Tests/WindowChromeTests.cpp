@@ -22,6 +22,8 @@ struct ChromeBench {
     uint32 toggled = 0;
     uint32 closed = 0;
     Vec2 window{400, 300};
+    // DPI 배율이다(창 루트 변환 — 창 좌표 = 물리 픽셀, 19.2절).
+    float scale = 1.0f;
 
     bool Build() noexcept {
         auto madeChrome = SharedPtr<WindowChrome>::TryMake(allocator, allocator);
@@ -61,7 +63,8 @@ struct ChromeBench {
     }
 
     bool Step() noexcept {
-        return static_cast<bool>(app.UpdatePaintCache(Geometry::Root(window, {}), 1));
+        return static_cast<bool>(app.UpdatePaintCache(
+            Geometry::Root(window / scale, {.m00 = scale, .m11 = scale}), scale));
     }
 
     Box2<float> Bounds(const Element& element) const noexcept {
@@ -250,6 +253,30 @@ TEST(UiFramework_WindowTitleBarStatesAndToolTips) {
     REQUIRE(bar.Value()->SetTitle(renamed.Value()));
     CHECK(!title.Value()->Parent() && renamed.Value()->Parent() == bar.Value().Get());
     CHECK(renamed.Value()->ClipsToBounds());
+}
+
+TEST(UiFramework_WindowChromeScalesToPhysicalPixels) {
+    // 배율 2(192 DPI): 배치는 논리 크기(200 x 150)로 하고 창 루트 변환이 물리 픽셀로 키운다. 입력·
+    // 영역 지도는 물리 픽셀 그대로다(Docs/Design/UiToolkit 19.2절 — 변환 없음).
+    ChromeBench bench;
+    bench.scale = 2.0f;
+    REQUIRE(bench.Build());
+    const WindowStyle& style = DefaultWindowStyle();
+    const auto bar = bench.Bounds(*bench.bar);
+    // 테두리 여백과 막대 높이가 두 배로 그려지고 막대는 창 폭 전체(물리 400)를 덮는다.
+    CHECK(bar.min.x == 2 * style.borderPadding.x && bar.min.y == 2 * style.borderPadding.y);
+    CHECK(bar.max.x == bench.window.x - 2 * style.borderPadding.z);
+    CHECK(bar.max.y - bar.min.y >= 2 * style.buttonSize.y);
+    // 물리 픽셀 점이 그 자리의 영역을 답한다(닫기 버튼 가운데, 내용).
+    const auto close = bench.Bounds(*bench.bar->ControlButton(WindowButtonRole::Close));
+    CHECK(close.max.x - close.min.x == 2 * style.buttonSize.x);
+    CHECK(bench.app.QueryWindowRegion(ChromeBench::Center(close)) ==
+          input::WindowRegion::CloseButton);
+    CHECK(bench.app.QueryWindowRegion(ChromeBench::Center(bench.Bounds(*bench.content))) ==
+          input::WindowRegion::Client);
+    // 영역 지도는 물리 픽셀 사각형이고 점마다 같은 답이다.
+    IntVec2 mismatch;
+    CHECK(test::RegionMapMatchesQuery(bench.app, {400, 300}, mismatch));
 }
 
 } // namespace rocks::ui

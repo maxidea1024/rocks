@@ -89,7 +89,7 @@
 - **UI 좌표 모델: 루트 변환으로 배율을 준다(UE 창 루트 변환 `AppScale × DPI`와 같다).**
   - 호스트는 `PrepareLayout(Geometry::Root(viewport / s, Scale(s)), s)`로 그린다. s = `DpiScale × 앱 배율`이고, 매 Render에서 읽는다(live resize 포함).
   - `Geometry`는 창 좌표까지 누적된 변환이므로, UI 창 좌표가 곧 client 물리 픽셀이다. 그래서 `InputAdapter`·영역 지도·`WorkAreaAt`은 좌표를 변환하지 않는다.
-  - 글꼴·SVG는 누적 배율로 래스터한다.
+  - SVG는 누적 배율로 래스터한다(PaintList가 그려지는 크기로 Resolve). 글자는 지금 글리프 cache를 배율 1로 래스터해 늘려 그린다. 최종 배율 shaping은 `TextLabel`이 `FontInfo`·크기를 받아 스스로 shaping하는 3.12절 단계(병합 뒤 UW4 항목)에서 한다. 그 전에도 DPI를 인식하지 않을 때(DWM이 창 전체를 늘림)보다 나빠지지 않는다.
 - **snapshot·시험.** `--snapshot`·`--self-test`는 `EnableHighDpiAwareness`를 부르지 않고 s = 1로 고정한다(결정적, 회귀 기준이 배율 1). 배율 시험은 가짜 배율(s = 2)로 한다.
 
 **텍스트 입력 문맥(PW3, UE `ITextInputMethodContext`·`ITextInputMethodSystem`·`ITextInputMethodChangeNotifier`).**
@@ -152,5 +152,6 @@
 
 - 영역 판정은 마지막 그리기 기준이다(UE와 같다). 그리기 없이 바뀐 상태는 다음 그리기까지 늦다.
 - 독점 전체 화면은 렌더러 지원 뒤다.
+- 배율이 1보다 큰 모니터에서 글자는 3.12절 자체 shaping 전까지 늘려 그린다(19.2절 DPI).
 - TSF는 UW4f3이다.
 - 시스템 메뉴(Alt+Space) 같은 크기 조절 밖의 OS modal 루프 동안에는 프레임이 멈춘다(UE와 같다).

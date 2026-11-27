@@ -194,6 +194,16 @@ public:
     virtual void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept;
     virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
 
+    // 이 창의 DPI 배율(유효 DPI / 96)이다(Docs/Design/UiToolkit 19.2절 DPI). 프로세스가 DPI를
+    // 인식하지 않으면(EnableHighDpiAwareness를 부르지 않음) 늘 1이고 OS가 늘려 그린다. 창은
+    // WindowDesc 논리 크기 × 배율로 만들어지고, 모니터를 옮기면(WM_DPICHANGED) 배율을 먼저 바꾼 뒤
+    // OS가 제안한 사각형으로 옮긴다. 호스트는 그릴 때마다 이것을 읽어 창 루트 변환에 넣는다(크기
+    // 조절 중 그리기 포함).
+    virtual float DpiScale() const noexcept;
+    // 마지막 호출 이후 DPI 배율이 바뀌었으면 새 배율을 쓰고 true다(글꼴 cache 비우기 같은 부수
+    // 처리용 — 배치는 DpiScale을 매번 읽는다).
+    virtual bool ConsumeDpiChange(float& scale) noexcept;
+
     virtual bool HasFocus() const noexcept = 0;
 
     // 최소화되어 그릴 영역이 없는지다. 렌더러는 이때 present를 건너뛴다.
@@ -342,6 +352,13 @@ ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept
 // 한다 (Docs/Design/UiToolkit 18.5절). Windows는 PeekMessage(PM_NOREMOVE | PM_QS_SENDMESSAGE)이고,
 // 보낸 메시지가 없는 플랫폼은 아무것도 하지 않는다. 창을 만든 스레드에서 부른다.
 ROCKS_PLATFORMWINDOW_API void PumpSentMessages() noexcept;
+
+// 프로세스를 모니터별 DPI 인식(Windows PER_MONITOR_AWARE_V2 — 비client 배율까지 OS가 한다)으로
+// 바꾼다(Docs/Design/UiToolkit 19.2절, UE SetHighDPIMode). 실행 파일 시작 때 창·스플래시를 만들기
+// 전에 한 번 부른다. 부르지 않은 앱은 DPI를 인식하지 않는 채로 OS가 늘려 그린다. 결정적이어야 하는
+// 시험·캡처 실행은 부르지 않는다(배율 1). 지원하지 않는 OS(Windows 10 1703 전)·플랫폼은 아무것도
+// 하지 않고 false다.
+ROCKS_PLATFORMWINDOW_API bool EnableHighDpiAwareness() noexcept;
 
 // 이 스레드의 OS 메시지를 모두 처리해 창마다 대기 큐로 나눈다(Docs/Design/UiToolkit 19.2절 펌프
 // 수준 대기). 창을 만든 게임 lane에서 부른다. 닫기 요청(WM_QUIT)은 모든 창에 IsCloseRequested를

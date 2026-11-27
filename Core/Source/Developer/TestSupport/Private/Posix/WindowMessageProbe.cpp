@@ -15,4 +15,8 @@ bool HasThreadWakeMessage() noexcept {
     return false;
 }
 
+bool SendWindowDpiChanged(void*, uint32, int32, int32) noexcept {
+    return false;
+}
+
 } // namespace rocks::test
