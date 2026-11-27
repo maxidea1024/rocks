@@ -7,8 +7,12 @@ internal sealed record NativeAction(string Id, string Module, string Kind, strin
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
     IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null,
-    string? DependencyRecord = null, IReadOnlyList<string>? Members = null, Lazy<string?>? PreRun = null)
+    string? DependencyRecord = null, IReadOnlyList<string>? Members = null, Lazy<string?>? PreRun = null,
+    bool StageWorkingDirectory = false, DependencyFileFormat DependencyFormat = DependencyFileFormat.Make)
 {
+    // StageWorkingDirectory면 도구를 action 임시 디렉터리에서 실행하고 {OUTPUTn}·{DEPFILE}을 그 안의 파일 이름(상대 경로)으로 펼친다
+    // (Ispc — ISPC는 -h 경로를 생성 헤더 주석에 적으므로 실행마다 다른 임시 경로가 헤더 byte를 바꾼다, Docs/Design/BuildTargets 3.12절
+    // BD47). 그때 의존 파일의 상대 경로도 임시 디렉터리 기준이다. DependencyFormat은 의존 파일 문법이다(Make — clang, Lines — ISPC -MMM).
     // PreRun은 실행 직전에 한 번 평가하는 검사다(공유 PCH 사용 검사 — 선행 action의 산출물이 있어야 계산할 수 있다). 오류 문구를 돌려주면
     // 이 action은 도구를 실행하지 않고 실패한다. cache hit인 action은 평가하지 않는다(입력이 통과한 실행과 같다).
     // Source는 compile action이 컴파일러에 넘기는 파일이다(단독 번역 단위면 그 소스, 묶음이면 묶음 파일). Members는 이 번역 단위를
@@ -243,8 +247,19 @@ internal static class ActionGraph
             closures[module.Name] = hostModule
                 ? [module.Name, .. LinkClosure.Of(module.Name, modules, withDynamic)]
                 : [module.Name, .. linked.Select(value => value.Name)];
+            // ISPC 원본(Docs/Design/BuildTargets 3.12절)의 생성 헤더 디렉터리는 이 모듈만의 include 디렉터리다(BD48 — 비공개). action 출력
+            // 디렉터리라 header 디렉터리(key·InputSnapshot의 이름 목록)에는 넣지 않고, 생성 헤더는 C++ compile의 선언 입력이 된다. 계획 때
+            // 만들어 두어 첫 빌드에서도 include 디렉터리가 있다(IDE 계획은 출력에 쓰지 않는다).
+            string[] ispcSources = module.IspcSources.Select(Absolute).Order(StringComparer.Ordinal).ToArray();
+            string? ispcHeaders = ispcSources.Length == 0 ? null : IspcTools.HeaderDirectory(output, module.Name);
+            if (ispcHeaders is not null && !ide)
+            {
+                Directory.CreateDirectory(ispcHeaders);
+            }
+
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
+                .Concat(ispcHeaders is null ? [] : [ispcHeaders])
                 .Distinct(NativeToolchains.PathComparer).ToArray();
             // 모듈 정의: 모듈 public·private 정의와 의존 모듈의 public 정의, 진입점 모듈이면 ROCKS_MODULE_NAME(ModuleDefinitions — 리플렉션 AST
             // 생성도 같은 함수로 같은 정의를 받는다).
@@ -276,7 +291,7 @@ internal static class ActionGraph
                 }
             }
 
-            foreach (string include in ide ? [] : includes)
+            foreach (string include in ide ? [] : includes.Where(value => !NativeToolchains.PathComparer.Equals(value, ispcHeaders)))
             {
                 if (!Directory.Exists(include))
                 {
@@ -287,7 +302,8 @@ internal static class ActionGraph
             // 리플렉션 생성 소스의 디렉터리(<out>/Generated/<M>/Source)도 header 디렉터리가 아니다 — 생성 소스만 있고 include 루트가
             // 아니다(Docs/Design/ReflectionGeneratedSources.ko.md 6.1절). 생성 소스의 key는 cpp 내용과 include 디렉터리다.
             string[] headers = includes.Concat(module.Sources.Select(Absolute).Select(value => Path.GetDirectoryName(value)!))
-                .Where(value => !NativeToolchains.PathComparer.Equals(Path.TrimEndingDirectorySeparator(value), buildInfo))
+                .Where(value => !NativeToolchains.PathComparer.Equals(Path.TrimEndingDirectorySeparator(value), buildInfo) &&
+                    !NativeToolchains.PathComparer.Equals(value, ispcHeaders))
                 .Distinct(NativeToolchains.PathComparer).ToArray();
             string[] extraInputs = module.AdditionalInputs.Concat(dependencies.SelectMany(value => value.AdditionalInputs))
                 .Select(Absolute).Distinct(NativeToolchains.PathComparer).ToArray();
@@ -482,6 +498,52 @@ internal static class ActionGraph
                 }
             }
 
+            // ISPC action(BD47): 원본마다 object·생성 헤더·의존 기록을 낸다. 인자는 고정이다(IspcTools.Arguments — 아키텍처당 타깃 하나,
+            // FMA·fast-math 끔). ISPC는 stage 디렉터리에서 돌아 생성 헤더 주석에 상대 이름만 적는다(NativeAction.StageWorkingDirectory). -I는
+            // 이 모듈 ISPC 원본의 디렉터리만이고, include한 .isph는 -MMM 의존 기록이 검증한다(BD49). C++ compile은 모든 Ispc action 뒤에
+            // 돌고 생성 헤더를 선언 입력으로 받는다(BD48).
+            var ispcActions = new List<string>();
+            var ispcHeaderFiles = new List<string>();
+            if (ispcSources.Length != 0 && !ide)
+            {
+                IspcTool tool = request.Ispc ?? throw new ArgumentException($"Module {module.Name} has ISPC sources, but the request has no ISPC " +
+                    "compiler (NativeBuildRequest.Ispc — the build engine finds it with IspcTools.DiscoverAsync).");
+                IReadOnlyList<string> ispcArguments = IspcTools.Arguments(request.Toolchain.Platform, request.Toolchain.Architecture);
+                string[] ispcIncludes = ispcSources.Select(value => Path.GetDirectoryName(value)!).Distinct(NativeToolchains.PathComparer).ToArray();
+                // Windows ISPC는 비 ASCII 경로를 열지 못하므로 실행 때 넘기는 철자(stage 기준 상대 경로 — Executor)가 ASCII여야 한다. 실행 때
+                // 알 수 없는 ISPC 오류 대신 계획 때 알린다.
+                if (windows)
+                {
+                    foreach (string path in ispcSources.Concat(ispcIncludes))
+                    {
+                        string spelled = IspcTools.StageRelative(output, path);
+                        if (!System.Text.Ascii.IsValid(spelled))
+                        {
+                            throw new ArgumentException($"Module {module.Name}: ISPC on Windows cannot open the non-ASCII path '{spelled}' (relative to " +
+                                "the build output). Keep ISPC sources and the output directory under one folder whose path below the common " +
+                                "ancestor is ASCII (Docs/Design/BuildTargets section 3.12).");
+                        }
+                    }
+                }
+
+                foreach (string source in ispcSources)
+                {
+                    string objectPath = ObjectOf(source);
+                    string header = Path.Combine(ispcHeaders!, IspcTools.HeaderName(source));
+                    string recordPath = objectPath + DependencyRecord.Extension;
+                    string id = module.Name + ":ispc:" + variant + ":" + Path.GetFileNameWithoutExtension(objectPath);
+                    actions.Add(new(id, module.Name, "Ispc", tool.Path,
+                        [.. ispcArguments, .. ispcIncludes.SelectMany(directory => new[] { "-I", directory }), source,
+                            "-o", "{OUTPUT0}", "-h", "{OUTPUT1}", "-MMM", NativeAction.DepfilePlaceholder],
+                        [objectPath, header, recordPath], [source], ispcIncludes, [], [], ["ispc", tool.Version, tool.Digest], source,
+                        DependencyRecord: recordPath, StageWorkingDirectory: true, DependencyFormat: DependencyFileFormat.Lines));
+                    objectPaths.Add(objectPath);
+                    compileIds.Add(id);
+                    ispcActions.Add(id);
+                    ispcHeaderFiles.Add(header);
+                }
+            }
+
             foreach (var unit in units)
             {
                 bool batch = unit.Members.Length != 1 || !NativeToolchains.PathComparer.Equals(unit.File, unit.Members[0]);
@@ -513,7 +575,7 @@ internal static class ActionGraph
                 actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath,
                     [.. arguments, .. roots, .. forced, .. timing, .. depfile, .. TranslationUnit(unit.File, language)],
                     request.Timing ? [objectPath, recordPath, objectPath + TimingReport.TraceExtension] : [objectPath, recordPath],
-                    unitInputs, headers, extraInputs, usesPch ? [pch!.Action.Id] : [],
+                    unitInputs, headers, [.. extraInputs, .. ispcHeaderFiles], [.. usesPch ? new[] { pch!.Action.Id } : [], .. ispcActions],
                     [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), .. unit.Members], unit.File,
                     FailureNote: note, DependencyRecord: recordPath, Members: batch ? unit.Members : null, PreRun: usesPch ? pch!.Check : null));
                 foreach (string member in unit.Members)
@@ -530,7 +592,7 @@ internal static class ActionGraph
 
             // Base/MetaSchema 같은 header-only 모듈은 설정만 전파하고 가짜 빈 archive를 만들지 않는다. 리플렉션 생성 소스만 있는
             // 모듈은 그 object로 archive를 만든다.
-            if (sources.Length == 0)
+            if (sources.Length == 0 && objectPaths.Count == 0)
             {
                 continue;
             }
@@ -632,7 +694,8 @@ internal static class ActionGraph
                             finalInputs.Add(library);
                             predecessors.Add(terminalActions[dependency.Name]);
                         }
-                        else if (dependency.Sources.Count != 0 || dependency.GeneratedSources.Count != 0 || dependency.ReflectionSources.Count != 0)
+                        else if (dependency.Sources.Count != 0 || dependency.GeneratedSources.Count != 0 || dependency.ReflectionSources.Count != 0 ||
+                            dependency.IspcSources.Count != 0)
                         {
                             // 코드가 있는 모듈은 이 실행 파일보다 먼저 계획되어 archive가 있어야 한다(계획 순서가 깨지면 조용히 빠진 링크가 된다).
                             throw new InvalidOperationException($"Internal error: module {dependency.Name} linked by {module.Name} has no planned archive.");
@@ -796,7 +859,7 @@ internal static class ActionGraph
         var generated = actions.SelectMany(value => value.Outputs).ToHashSet(NativeToolchains.PathComparer);
         foreach (var module in ordered)
         {
-            foreach (string input in module.Sources.Concat(module.ReflectionSources).Concat(module.AdditionalInputs)
+            foreach (string input in module.Sources.Concat(module.ReflectionSources).Concat(module.IspcSources).Concat(module.AdditionalInputs)
                 .Concat(module.PrebuiltLibraries).Select(Absolute))
             {
                 if (generated.Contains(input))

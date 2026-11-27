@@ -97,6 +97,7 @@ public sealed class PathSpelling
             {
                 Sources = FixAll(module.Sources),
                 ReflectionSources = FixAll(module.ReflectionSources),
+                IspcSources = FixAll(module.IspcSources),
                 PublicIncludeDirectories = FixAll(module.PublicIncludeDirectories),
                 PrivateIncludeDirectories = FixAll(module.PrivateIncludeDirectories),
                 PrebuiltLibraries = FixAll(module.PrebuiltLibraries),
