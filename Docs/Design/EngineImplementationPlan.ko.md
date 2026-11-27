@@ -2077,7 +2077,7 @@ class DoorLogic : ScriptableComponent {
 
 ### 23.2 실행·참조·오류 규약
 
-**스크립트 단계와 이벤트.** Sparks 코드는 엔진의 정해진 지점(입력 batch, 물리 이벤트 batch, tick group, coroutine 재개)에서 실행되며 이 실행 묶음을 스크립트 단계라고 한다. 한 프레임의 순서는 8.2절의 데이터 전달 순서와 20.2절의 tick group을 따라 입력 batch → Tick(PrePhysics) → (FixedTick → 고정 물리) × n → 물리 이벤트 batch(PostPhysics) → 재개 → LateTick(LateUpdate)이다. `emit`과 필드 `Changed`는 큐에 등록되어 현재 실행 조각이 반환하거나 `await`에 도달한 뒤 같은 스크립트 단계 안에서 FIFO로 전달된다. 전달 순회는 한 항목에 그 시점 연결된 C++·Sparks handler를 연결 순서대로 모두 실행한 뒤 다음 항목으로 넘어가므로 handler의 재진입이 없다. 연쇄는 인과 깊이 16으로 제한한다. 활성 전환과 파괴는 이벤트 전달이 끝난 뒤 반영한다(5.2절). 이벤트 수신은 `on 경로.이벤트` 선언 한 형태이며 명시 구독 API는 없다. `Changed`는 실행 조각의 시작 값과 끝 값이 다를 때만 한 번 전달하며, 활성화 전에 적용된 값(초기값·spawn 시 저장 로드·late join)과 비활성 동안의 변경에는 발행하지 않으므로 현재 상태는 활성화마다 실행되는 Enable에서 반영한다. 실행 중인 instance에 저장을 적용할 때는 instance를 다시 생성한다.
+**스크립트 단계와 이벤트.** Sparks 코드는 엔진의 정해진 지점(입력 batch, 물리 이벤트 batch, tick group, coroutine 재개)에서 실행되며 이 실행 묶음을 스크립트 단계라고 한다. 한 프레임의 순서는 8.2절의 데이터 전달 순서와 20.2절의 tick group을 따라 입력 batch → Tick(PrePhysics) → (FixedTick → 고정 물리) × n → 물리 이벤트 batch(PostPhysics) → 재개 → LateTick(LateUpdate)이다. `emit`과 필드 `Changed`는 큐에 등록되어 현재 실행 조각이 반환하거나 `await`에 도달한 뒤 같은 스크립트 단계 안에서 FIFO로 전달된다. 전달 순회는 한 항목에 그 시점 연결된 handler(Sparks emit·Changed 항목은 C++·Sparks, native 이벤트 항목은 Sparks만 — native 발행의 C++ 구독자는 발행 때 바로 불린다, SL SD78)를 연결 순서대로 모두 실행한 뒤 다음 항목으로 넘어가므로 handler의 재진입이 없다. 연쇄는 인과 깊이 16으로 제한한다. 활성 전환과 파괴는 이벤트 전달이 끝난 뒤 반영한다(5.2절). 이벤트 수신은 `on 경로.이벤트` 선언 한 형태이며 명시 구독 API는 없다. `Changed`는 실행 조각의 시작 값과 끝 값이 다를 때만 한 번 전달하며, 활성화 전에 적용된 값(초기값·spawn 시 저장 로드·late join)과 비활성 동안의 변경에는 발행하지 않으므로 현재 상태는 활성화마다 실행되는 Enable에서 반영한다. 실행 중인 instance에 저장을 적용할 때는 instance를 다시 생성한다.
 
 **참조와 GC.** 스크립트 상태는 GC root가 되지 않는다. 엔진 객체 참조는 handle과 generation을 담은 약한 참조이고 파괴되면 null로 읽힌다. 값은 참조계수 copy-on-write 버퍼이며 closure가 없으므로 순환이 형성되지 않는다. 로드한 에셋 값은 AssetLease를 공유한다. 따라서 VM용 두 번째 tracing heap과 coroutine root가 없다. `await`를 지난 뒤 읽는 지역 이름(인자·지역 변수·binding·반복 변수)의 객체 타입은 `T?`가 되고, 재개 시 `this`의 generation을 확인해 사라졌으면 실행을 취소한다. native bridge는 handle을 검증한 뒤 같은 Game lane에서만 객체 필드를 수정하고 Borrow는 native call thunk 안에서만 유지한다.
 
@@ -3025,7 +3025,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 
 | 지적 | 조치 |
 |---|---|
-| 스크립트 단계·전달 단위·연쇄 계수·tick이 정의되지 않아 Changed 횟수와 handler 순서가 구현마다 달라짐 | 스크립트 단계와 프레임 순서, 실행 조각 기준 Changed, 인과 깊이 16, 전달 순회에서 C++·Sparks handler를 연결 순서로 실행(23.2절) |
+| 스크립트 단계·전달 단위·연쇄 계수·tick이 정의되지 않아 Changed 횟수와 handler 순서가 구현마다 달라짐 | 스크립트 단계와 프레임 순서, 실행 조각 기준 Changed, 인과 깊이 16, 전달 순회에서 handler를 연결 순서로 실행(23.2절 — native 발행의 C++ 구독자는 발행 때, SL SD78) |
 | 스크립트가 호출하지 않은 C++ handler의 파괴 요청은 즉시 전이되어 "단계 끝까지 유효" 보장이 성립하지 않음 | 스크립트 단계가 열린 동안의 모든 Game lane 파괴 요청과 활성 전환을 지연(5.2절) |
 | "비활성화"가 Disable·Detach·격리를 함께 가리키고 Tryout Stop에서 Destroy hook이 실행되지 않음 | fault 이후 상태를 격리 하나로 정의, 종료 경로별 hook(SD20, 20.2절) |
 | 기다리는 handler가 이벤트를 조용히 버림 | 재진입 정책 `@skipWhileBusy`·`@restart` 표시 필수(SD11, 23.2절) |
