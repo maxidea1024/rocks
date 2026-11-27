@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 37(초안) | 2026-11-27 | 6.13절 MS2f5 CustomHlsl: 모듈 Custom 함수 표와 IR 연산 CustomArguments·CustomCall·CustomOutput(94–96), 함수 모양(문맥 c 첫 인자·텍스처 두 인자·Double 한 인자·inout 추가 출력·return 감싸기·정의·include), V13 토큰·include·clip 검사, MaterialAttributes 출력 거부(편차) |
 | 36(초안) | 2026-11-27 | UE Substrate 전체 지원을 필수 후속으로(사용자 결정 2026-11-27, 렌더 세션 요청): MD1·SF4·MS9·13장 표를 LayeredSurface.ko.md에 잇는다(범위·MD1 (나)·SF1–SF3 순서는 그대로), MS2f3 노드 표의 Noise 속성 선행 |
 | 35(초안) | 2026-11-27 | 6.13절 MS2f3 Noise: IR 라이브러리 호출 연산 `Library`(93)·MaterialNoise.rsh, Noise·VectorNoise 규칙(위치 원점·levels 클램프·LWC), LUT 함수는 새 선행 MPQ-NoiseTexture |
 | 34(초안) | 2026-11-27 | 6.13절 MS2f2 Sobol: LUT를 ALU 동치식으로(ComputeGPUSpatialSeed XOR 상수), SobolIndex, Sobol·TemporalSobol 식, 새 문맥 값 SvPosition·StateFrameIndexMod8 |
