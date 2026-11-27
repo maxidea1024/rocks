@@ -170,3 +170,43 @@ overlap은 질의 기반 장부다(5.3절 — 시뮬레이션 접촉이 아니�
 - CCD: 얇은 벽으로 빠르게 가는 구는 `continuousCollision`이면 막히며 hit(추정 충격량, 0 아님)를 받고, 아니면 지나간다.
 - hook에서 상대 Actor를 파괴해도 남은 hit 발행이 안전하다(파괴 대기 Actor는 받지 않는다).
 - 같은 스텝의 여러 쌍은 칸 번호 순이다. 문턱이 있어도 probe hit는 남는다. listener 용량이 넘친 step 뒤 다음 step은 모두 받는다(`PhysicsContactSceneTests.cpp`).
+
+### 7.1.13 PH4d 구현 세부(2026-11-27)
+
+침투 해소 도우미다(5.2절). UE `UPrimitiveComponent::ComputePenetration`(`PrimitiveComponent.cpp:3984–3992` → `FBodyInstance::OverlapTest` `BodyInstance.cpp:4331`), `GetCollisionShape`(`PrimitiveComponent.cpp:3243`, `SphereComponent.cpp:201`·`BoxComponent.cpp:251`·`CapsuleComponent.cpp:240`), `UMovementComponent::SafeMoveUpdatedComponent`·`GetPenetrationAdjustment`·`ResolvePenetrationImpl`·`OverlapTest`(`MovementComponent.cpp:398–699`)를 따른다.
+
+**자리.** UE처럼 `ComputePenetration`·`GetCollisionShape`는 `PrimitiveComponent`, `SafeMoveUpdatedComponent`·`GetPenetrationAdjustment`·`ResolvePenetration`은 `MovementComponent`(D4 — 엔진 런타임 26.3절)다. 5.2절의 "D4 이동 컴포넌트는 sweep 없이"는 그대로다: 이 단계는 도우미와 sweep 이동 overload만 더하고, 파생(투사체·경로 이동)을 sweep으로 바꾸는 일은 CM12다.
+
+**`ComputePenetration(MtdResult& out, shape, position, rotation) → bool`.** 주어진 형상을 rotation으로 position에 놓았을 때 이 컴포넌트 body와 겹치면 참이고, `out`에 형상을 밀어낼 단위 방향(`direction`)과 거리(`distance`, cm)를 쓴다(UE `FMTDResult`). body·물리 장면이 없거나 겹치지 않으면 거짓이다. 장면 접점 `PhysicsScene::ComputePenetration(body, shape, position, rotation, MtdResult&)`(새 — step 밖)는 body의 Jolt `TransformedShape::CollideShape`(분리 거리 0 — 닿기만 해도 겹침, 깊이 0)로 가장 깊은 결과를 고른다. Jolt `mPenetrationAxis`는 body 쪽(shape 2)을 밀어낼 방향이라 질의 형상 방향은 그 반대다. 축 길이가 0이거나 비유한이면(중심이 겹침) 방향은 +Z, 거리는 깊이다(sweep 시작 겹침 hit의 막음 법선과 같다 — 7.1.8절). 형상 값이 비유한이거나 Line·Cylinder(CY2 전)·0 회전이면 거짓이다. `MtdResult`는 `World/Physics/MtdResult.h`다.
+
+**`GetCollisionShape(inflation) → CollisionShape`.** 기본은 bounds 상자(`Bounds().boxExtent` — UE `Bounds.BoxExtent`)이고, 구·상자·캡슐이 자기 크기(scaled — `ScaledSphereRadius`·`ScaledBoxExtent`·`ScaledCapsuleRadius`·`ScaledCapsuleHalfHeight`)로 덮어쓴다. 부풀리기는 `CollisionShape::Inflate(inflation)`(새 — UE `FCollisionShape::Inflate`: 0이면 그대로, 상자 반폭·구 반경·캡슐 반경·반 높이에 더하고 0 아래로 내리지 않는다, Line·Cylinder는 그대로).
+
+**`MovementComponent::MoveUpdatedComponent(delta, rotation, sweep, HitResult* outHit, TeleportMode) → Result<bool>`**(새 overload — UE `MoveUpdatedComponentImpl`): 평면 제약한 delta로 갱신 대상이 `PrimitiveComponent`면 `MoveComponent(…, sweep, outHit, MoveOptions{teleport})`, 아니면 sweep 없이 옮긴다(UE `USceneComponent::MoveComponentImpl` — outHit는 trace 끝점만 채운 빈 hit). 기존 두 인자 판(sweep 없음)은 그대로다. 내부 판은 `MoveOptions`를 받아 아래 표지를 넘긴다(UE는 컴포넌트 멤버 `MoveComponentFlags`를 범위로 바꾼다 — Rocks는 인자라 hook에 새지 않는다).
+
+**`GetPenetrationAdjustment(hit) → Vec3d`**(가상): 시작 겹침이 아니면 0. 아니면 `ConstrainDirectionToPlane(hit.normal × ((깊이 > 0 ? 깊이 : DefaultPenetrationDepth 0.125) + |PenetrationPullbackDistance 0.125|))`다.
+
+**`ResolvePenetration(adjustment, hit, rotation) → Result<bool>`**(가상 — UE `ResolvePenetrationImpl`): 평면 제약한 adjustment가 0이 아니고 갱신 대상이 Primitive이며 소유 Actor가 있을 때만 시도한다(그 밖은 거짓).
+1. `hit.traceStart + adjustment`에 `GetCollisionShape(PenetrationOverlapCheckInflation 0.1)`을 rotation으로 놓고 막는 겹침을 본다(UE `OverlapTest` — 채널은 대상 object type, 응답은 대상 실효 응답 묶음, 소유 Actor와 이동 무시 목록 제외 — `InitCollisionParams` → `InitSweepCollisionParams`).
+2. 비었으면 sweep 없이 `TeleportPhysics`로 adjustment만큼 옮기고 참.
+3. 막혔으면 `neverIgnoreBlockingOverlaps` 없이(빠져나가는 시작 겹침은 무시 — 5.1절 5) adjustment를 sweep한다. 못 움직였고 그 hit가 시작 겹침이면 두 번째 조정량을 더한 방향(두 조정량이 다르고 합이 0이 아닐 때)으로 다시 sweep한다.
+4. 아직이면 adjustment + 원래 이동(`hit.traceEnd − hit.traceStart`, 평면 제약)으로 sweep하고, 그것도 안 되고 원래 이동이 adjustment와 같은 쪽(내적 > 0)이면 원래 이동만 sweep한다. 반환 값은 마지막으로 움직였는지다.
+
+**`SafeMoveUpdatedComponent(delta, rotation, sweep, HitResult& outHit, TeleportMode) → Result<bool>`**: `neverIgnoreBlockingOverlaps`·`disableBlockingOverlapDispatch`로 이동한다(UE CVar `p.MoveIgnoreFirstBlockingOverlap` 기본 0 — 먼저 밀어낸다). outHit가 시작 겹침이면 `ResolvePenetration(GetPenetrationAdjustment(outHit), outHit, rotation)`가 참일 때 원래 이동을 다시 한다(같은 표지가 아닌 기본 표지 — UE도 재시도는 범위 밖이다). 갱신 대상이 없으면 outHit를 `time` 1로 비우고 거짓이다.
+
+**상수.** `PenetrationPullbackDistance` 0.125 cm·`PenetrationOverlapCheckInflation` 0.1 cm(UE CVar `p.PenetrationPullbackDistance`·`p.PenetrationOverlapCheckInflation` 기본값)·`DefaultPenetrationDepth` 0.125 cm(UE 리터럴)는 이름 있는 상수다. CVar 연결은 쓰는 곳(CM12 캐릭터 이동)이 생길 때 한다.
+
+**한계.**
+- MTD는 body의 모든 하위 형상을 본다(UE는 `bTraceComplex` 거짓이면 simple 형상만 — `PhysInterface_Chaos.cpp:1114–1170`). 지금 body는 상자·구·캡슐뿐이라 같고, 메시 body(PH6 complex-as-simple)가 들어올 때 하위 형상 표지로 거른다.
+- Primitive가 아닌 갱신 대상의 sweep 없는 이동은 `TeleportMode`를 자식 body에 넘기지 않는다(teleport 범위가 PrimitiveComponent 안에만 있다 — UE `InternalSetWorldLocationAndRotation`은 넘긴다). `ResolvePenetration`은 이 경로를 쓰지 않는다.
+- 음수 scale 상자의 `GetCollisionShape`는 부호 있는 반폭을 부풀려 0으로 잘린다(UE `GetScaledBoxExtent` + `Inflate`와 같다). 비균일 scale 캡슐의 질의 반경(min)과 body 반경(max)도 UE처럼 다르다.
+- UE의 `SafeMoveUpdatedComponent`·`MoveUpdatedComponentImpl`·`OverlapTest`처럼 Rocks 판도 가상이다. `OverlapTest`는 무시 목록 버퍼를 재사용해 const가 아니다.
+- `CollisionShapeKind`가 Collision과 Mesh(`SimpleCollision.h` — 진단 형상 종류)에 같은 이름으로 따로 있다(기존 — 한 번역 단위에서 만나면 컴파일 오류). `PrimitiveComponent.h`는 `CollisionShape`를 앞 선언만 하고 구현 파일이 include한다. 근본 해결(Mesh 쪽 개명)은 Mesh 담당 세션에 알린다.
+- `ResolvePenetration`의 "두 MTD 합산"·"조정량 + 원래 이동"·"원래 이동만" 분기는 시험 배치(쐐기 모서리)가 없어 시험하지 않았다(UE와 같은 순서 — 코드 대조만).
+
+**PH4d 리뷰 반영(2026-11-27).** 치명 0, 중요 1, 경미 9. 밀어낸 자리 겹침 시험이 질의를 마치지 못하면(대상을 빌리지 못함·충돌 해석 실패) "비었다"로 보고 teleport하던 것을 막힘으로 고쳤다(sweep으로 간다). 축 없는 MTD 방향(+Z), 가상 함수, 문서 식 괄호, 낡은 주석, include 순서를 고치고 한계를 적었다. 시험을 보강했다: 회전한 벽·회전한 캡슐 질의의 MTD, 장면 접점 오류 경로(옛 handle·0 회전·비유한 위치·Cylinder), 막힌 해소 뒤 재시도의 반환 값·hit, 이동 무시 Actor면 밀어낸 자리 겹침에서 빠짐, 평면 제약으로 조정량이 0이면 해소 안 함, 갱신 대상 없는 SafeMove.
+
+**시험**(`PhysicsPenetrationTests.cpp`):
+- `ComputePenetration`: 상자 body와 겹친 구의 방향(+X)·거리(겹친 깊이), 겹치지 않으면·body 없으면 거짓, 거의 닿으면 거리 ≈ 0.
+- `GetCollisionShape`: 구·상자·캡슐이 scale·부풀리기를 반영하고 0 아래로 줄지 않는다. `CollisionShape::Inflate` 경계.
+- `GetPenetrationAdjustment`: 시작 겹침 아님 → 0, 깊이 0 → 기본 깊이, 평면 제약.
+- `SafeMoveUpdatedComponent`: 벽에 5 cm 박힌 상자를 옆으로 옮기면 밀려나(teleport) 원래 이동을 마친다. 밀려날 자리가 다른 벽에 막히면 sweep으로 나온다. 박혀 있지 않으면 보통 sweep(벽에 막힘). 갱신 대상이 Primitive가 아니면 sweep 없이 옮긴다.

@@ -1,3 +1,4 @@
+#include <Collision/CollisionShape.h>
 #include <Core/Math/MathUtility.h>
 #include <World/Actor.generated.h>
 #include <World/Component.generated.h>
@@ -41,6 +42,10 @@ bool SphereComponent::TryLocalBounds(ComponentBounds& local) const noexcept {
     local.boxExtent = Vec3d(radius, radius, radius);
     local.sphereRadius = radius;
     return true;
+}
+
+CollisionShape SphereComponent::GetCollisionShape(double inflation) const noexcept {
+    return CollisionShape::Sphere(static_cast<double>(ScaledSphereRadius())).Inflate(inflation);
 }
 
 Result<VolumeShape> SphereComponent::TryWorldVolumeShape() const noexcept {

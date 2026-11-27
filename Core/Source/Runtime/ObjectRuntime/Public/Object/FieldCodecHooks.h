@@ -60,7 +60,17 @@ enum class FieldDiagnosticKind : uint8 {
     // 못해 버렸다(objectIndex = 발행자 노드, field = 이벤트 필드, valueType = 바인딩의 FunctionId,
     // value 1 = 대상 클래스에 함수 없음, 2 = 서명 다름, 3 = 대상이 그 사이 사라짐, 4 = 그 밖 — 할당
     // 실패 등). 로드는 실패하지 않는다(게시 뒤라 되돌릴 수 없다).
-    EventBindingDropped
+    EventBindingDropped,
+    // 쿠킹 저장이 이벤트 바인딩을 쓸 수 없다(Docs/Design/EventReflection.ko.md ED24 — field =
+    // 이벤트 필드, valueType = FunctionId, value 1 = EditorOnly 함수, 2 = 미해결 레코드). 이 진단
+    // 뒤 저장이 InvalidArgument로 실패한다.
+    EventBindingNotCookable,
+    // 에디터 로드(ObjectGraphLoadOptions::keepUnresolvedEventBindings)가 Commit 뒤 풀리지 않은
+    // 이벤트 바인딩을 미해결 레코드로 보존했다(Docs/Design/EventReflection.ko.md ED24 — 칸은
+    // EventBindingDropped와 같고 value는 그 이유 1 = 함수 없음, 2 = 서명 다름). 다시 저장하면
+    // 그대로 쓰이고 쿠킹은 거부한다. 보존이 실패하면(할당 실패) 이 진단 대신
+    // EventBindingDropped(4)다.
+    EventBindingUnresolved
 };
 
 // EventBindingDropped 진단의 이유(FieldDiagnostic::value)다.
@@ -68,6 +78,10 @@ inline constexpr int64 EventBindingDroppedFunctionMissing = 1;
 inline constexpr int64 EventBindingDroppedSignatureMismatch = 2;
 inline constexpr int64 EventBindingDroppedTargetGone = 3;
 inline constexpr int64 EventBindingDroppedOther = 4;
+
+// EventBindingNotCookable 진단의 이유다.
+inline constexpr int64 EventBindingNotCookableEditorOnly = 1;
+inline constexpr int64 EventBindingNotCookableUnresolved = 2;
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는
 // 필드 경로(호출 동안만 유효)다.

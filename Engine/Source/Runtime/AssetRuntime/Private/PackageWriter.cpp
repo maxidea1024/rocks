@@ -172,6 +172,19 @@ public:
         return unpackaged_;
     }
 
+    // 쿠킹 쓰기가 거부한 이벤트 바인딩의 이유다(EventBindingNotCookable* — 없으면 0, ED24).
+    int64 NotCookableEventBinding() const noexcept {
+        return notCookableEventBinding_;
+    }
+
+    Result<void> Report(const FieldDiagnostic& diagnostic) noexcept override {
+        if (diagnostic.kind == FieldDiagnosticKind::EventBindingNotCookable) {
+            notCookableEventBinding_ = diagnostic.value;
+        }
+
+        return Result<void>::Success();
+    }
+
 private:
     ObjectRegistry& registry_;
     ObjectAccessContext access_;
@@ -184,6 +197,7 @@ private:
     HashMap<uint32, uint32> bulkIds_;
     BulkDataRef substituted_{};
     bool unpackaged_ = false;
+    int64 notCookableEventBinding_ = 0;
 };
 
 // import 초안이다(외부 참조 대상 하나 또는 그 Outer 사슬의 한 단계 — 객체마다 하나).
@@ -1198,6 +1212,12 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         if (hooks.SawUnpackaged()) {
             return FailAsset<Out>(failure, AssetDiagnosticCode::UnpackagedReference, saved.Error(),
                                   selfId, static_cast<uint32>(PackageSectionKind::Objects), 0);
+        }
+
+        if (const int64 reason = hooks.NotCookableEventBinding(); reason != 0) {
+            return FailAsset<Out>(
+                failure, AssetDiagnosticCode::EventBindingNotCookable, saved.Error(), selfId,
+                static_cast<uint32>(PackageSectionKind::Objects), static_cast<uint64>(reason));
         }
 
         return Result<Out>::Failure(saved.Error());

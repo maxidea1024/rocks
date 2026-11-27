@@ -57,6 +57,39 @@ struct CollisionShape {
         return shape;
     }
 
+    // inflation(cm)만큼 부풀린 형상이다(UE FCollisionShape::Inflate — CollisionShape.h:215-254).
+    // 0이면 그대로다. 상자 반폭·구 반경·캡슐 반경과 반높이에 더하고 0 아래로 내리지 않는다(음수면
+    // 줄인다). Line·Cylinder는 그대로다(UE가 부풀리지 않는 형상).
+    //
+    // 사용 예:
+    //   const CollisionShape test = CollisionShape::Sphere(20.0).Inflate(0.1);   // 반경 20.1
+    CollisionShape Inflate(double inflation) const noexcept {
+        if (inflation == 0.0) {
+            return *this;
+        }
+
+        CollisionShape inflated = *this;
+        switch (kind) {
+        case CollisionShapeKind::Box:
+            inflated.halfExtent = Vec3d(math::Max(halfExtent.x + inflation, 0.0),
+                                        math::Max(halfExtent.y + inflation, 0.0),
+                                        math::Max(halfExtent.z + inflation, 0.0));
+            break;
+        case CollisionShapeKind::Sphere:
+            inflated.radius = math::Max(radius + inflation, 0.0);
+            break;
+        case CollisionShapeKind::Capsule:
+            inflated.radius = math::Max(radius + inflation, 0.0);
+            inflated.halfHeight = math::Max(halfHeight + inflation, 0.0);
+            break;
+        case CollisionShapeKind::Cylinder:
+        case CollisionShapeKind::Line:
+            break;
+        }
+
+        return inflated;
+    }
+
     // 크기가 거의 0인지다(UE IsNearlyZero — CollisionShape.h:139-158): 상자는 세 반폭이 모두
     // KindaSmallNumber 이하, 구·캡슐·실린더는 반경이 KindaSmallNumber 이하(높이는 보지 않는다),
     // Line은 참이다. 질의는 이 형상을 line trace로 바꾼다.
