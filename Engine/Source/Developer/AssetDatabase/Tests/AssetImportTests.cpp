@@ -1515,6 +1515,9 @@ struct RebuildRecord {
     bool fails = false;
     // 원본을 다시 썼다고 알릴지다(false면 묶음과 무관한 참조자처럼 아무것도 바꾸지 않는다).
     bool mark = true;
+    // 열 때(까닭 Open — A5j2c) 부른 횟수다. 이 hook은 묶음 텍스처 hook처럼 열기에서 아무것도 하지
+    // 않는다(다른 기록을 바꾸지 않는다).
+    usize opens = 0;
 
     StringView Fields() const noexcept {
         return StringView(fields, fieldBytes);
@@ -1527,6 +1530,11 @@ RebuildRecord rebuild;
 // sink.Fail(InvalidSetting).
 Result<void> RecordingRebuild(const AssetTypeHookContext& context, Span<const StringView> fields,
                               AssetSourceRebuildSink& sink) noexcept {
+    if (sink.Cause() == AssetSourceRebuildCause::Open) {
+        ++rebuild.opens;
+        return Result<void>::Success();
+    }
+
     ++rebuild.calls;
     rebuild.cause = sink.Cause();
     rebuild.importRecord = sink.HasImportRecord();
@@ -1637,9 +1645,12 @@ TEST(AssetImport_RebuildSourceHook) {
     // asset-set: Edit 까닭, 실패는 진단 그대로·저장하지 않음.
     Assignments edits(env.allocator);
     edits.Add("label=C");
+    const usize opensBeforeSet = rebuild.opens;
     REQUIRE(service.Set(scene.lock, "/Game/Bundle", edits.list.View(), false, diagnostics, nullptr,
                         nullptr));
     CHECK(rebuild.cause == AssetSourceRebuildCause::Edit && rebuild.Fields() == "label,");
+    // 닫힌 Bundle을 열 때 Open 까닭으로도 부른다(A5j2c — 함께 연 Rock은 이미 열려 있으면 빠진다).
+    CHECK(rebuild.opens > opensBeforeSet);
     REQUIRE(service.Packages().Close(made.Value()));
     Array<uint8> before(env.allocator);
     REQUIRE(before.TryAppend(scene.files.Bytes("Content/Bundle.rasset")) && !before.IsEmpty());

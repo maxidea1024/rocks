@@ -87,7 +87,7 @@
   - 표면 작업(스왑체인 생성·resize·파괴, Android surface 소실)
   - lane 표지
 
-  작업에 담을 수 있는 값 타입은 "렌더 전달 가능"으로 등록한 것뿐이며, 게임 객체 포인터는 담지 않는다.
+  작업에 담을 수 있는 값 타입은 "lane 전달 가능"으로 등록한 것(`ROCKS_LANE_TRANSFERABLE`, `Meta/LaneTransfer.h`)뿐이며, 게임 객체 포인터는 담지 않는다.
 - **렌더 → 게임**: 완료 통지 큐(`RenderNotices`)로 돌아온다. readback 결과, timestamp, 회수 완료, 보임 신호가 여기에 담기고, 게임 lane이 다음 프레임 시작에 비운다.
 - **렌더 → GPU**: `Submit`이 `GpuFencePoint`(device epoch, queue, value)를 돌려준다. fence가 완료되면 렌더 lane이 이벤트로 받는다. 폴링하지 않는다.
 - **게임 ↔ worker**: `ParallelFor`·직렬 작업 체인으로 넘기고 결과를 모은다.

@@ -128,9 +128,9 @@ void AudioDeviceContext::GatherGroupMembers(uint32 group, uint32 except) noexcep
 }
 
 AudioDeviceContext::ConcurrencyOutcome
-AudioDeviceContext::EvaluateConcurrency(uint32 slot, const ControlCommand& command,
-                                        ControlBatch& batch, uint64 now,
+AudioDeviceContext::EvaluateConcurrency(uint32 slot, ControlBatch& batch, uint64 now,
                                         bool realization) noexcept {
+    const Record& command = records_[slot];
     // UE EvaluateConcurrency(SC 818–899): 그룹마다 CanPlay(AND — 첫 거부에서 멈춘다), 희생자는 모은
     // 뒤 확정한다. UE CreateAndEvictActiveSounds(SC 902–990)처럼 새 재생을 그룹에 먼저
     // 넣고(ducking) 그 다음 희생자를 뺀다.
@@ -414,8 +414,17 @@ void AudioDeviceContext::StealPlayback(uint32 slot, bool evict, ControlBatch& ba
         fade = 0;
     }
 
+    // 가상화 가능한 loop는 끝내지 않고 거리 검사 없이 가상으로 둔다(SC 1085–1095). voice는 steal
+    // fade를 분리 목록에서 마친다(UE도 원래 sound를 fade로 멈추고 가상 사본을 만든다 — SC
+    // 1081–1100).
+    if (IsVirtualizable(record) && record.state != RecordState::Virtual) {
+        Virtualize(slot, batch, now, fade);
+        return;
+    }
+
     switch (record.state) {
     case RecordState::Voiceless:
+    case RecordState::Virtual:
         // voice가 없는 희생자는 바로 끝낸다.
         EndVoiceless(slot, PlaybackEndReason::Stolen, batch);
         return;
@@ -445,6 +454,23 @@ void AudioDeviceContext::StealPlayback(uint32 slot, bool evict, ControlBatch& ba
 }
 
 void AudioDeviceContext::UpdateConcurrency(ControlBatch& batch, uint64 now) noexcept {
+    // 떼어 낸 voice의 steal fade: fader를 곱해 게시하고, 끝나면 믹서 정지 fade다.
+    for (DetachedVoice& detached : detached_) {
+        if (!detached.fading) {
+            continue;
+        }
+
+        if (now >= detached.fadeEnd) {
+            detached.fading = false;
+            (void)mixer_.RequestStop(detached.voice, audio::DefaultStopFadeFrames);
+            continue;
+        }
+
+        audio::AudioVoiceParams params = detached.params;
+        params.gain = detached.params.gain * detached.fader.At(now);
+        (void)mixer_.PublishParams(detached.voice, params);
+    }
+
     // steal fader가 끝난 재생은 믹서 정지 fade로 넘긴다.
     for (Record& record : records_) {
         if (record.stealing && now >= record.stealFadeEnd) {

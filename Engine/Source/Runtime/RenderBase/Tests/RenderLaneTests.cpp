@@ -2,10 +2,9 @@
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Engine/Engine.h>
-#include <Meta/TypeSchema.h>
 #include <Platform/Fatal.h>
 #include <RenderBase/RenderLane.h>
-#include <RenderBase/RenderTransfer.h>
+#include <Meta/LaneTransfer.h>
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/WeakObjectRefFixture.generated.h>
 #include <TestSupport/Test.h>
@@ -63,16 +62,16 @@ struct Unregistered {
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(ScenePacket);
-ROCKS_RENDER_TRANSFERABLE(TextureUpload);
-ROCKS_RENDER_TRANSFERABLE(SurfaceResize);
-ROCKS_RENDER_TRANSFERABLE(OrderMark);
-ROCKS_RENDER_TRANSFERABLE(TimedPacket);
+ROCKS_LANE_TRANSFERABLE(ScenePacket);
+ROCKS_LANE_TRANSFERABLE(TextureUpload);
+ROCKS_LANE_TRANSFERABLE(SurfaceResize);
+ROCKS_LANE_TRANSFERABLE(OrderMark);
+ROCKS_LANE_TRANSFERABLE(TimedPacket);
 // 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakObjectRef 필드를, ArraySlot은 ObjectRef
 // 필드를 가진다.
-ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArrayTag);
-ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::WeakLink);
-ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArraySlot);
+ROCKS_LANE_TRANSFERABLE(rocks::reflection_fixture::ArrayTag);
+ROCKS_LANE_TRANSFERABLE(rocks::reflection_fixture::WeakLink);
+ROCKS_LANE_TRANSFERABLE(rocks::reflection_fixture::ArraySlot);
 
 namespace {
 
@@ -585,16 +584,16 @@ TEST(RenderLane_ThirdSlotWaitsForGpuCompletionWhilePumping) {
 }
 
 TEST(RenderLane_OnlyRegisteredTypesCrossTheLane) {
-    static_assert(!RenderTransferable<Unregistered>);
-    static_assert(!RenderTransferable<ScenePacket&>);
-    static_assert(RenderTransferable<ScenePacket>);
-    static_assert(RenderTransferable<RenderHandle>);
-    static_assert(RenderTransferable<RenderBlob>);
+    static_assert(!LaneTransferable<Unregistered>);
+    static_assert(!LaneTransferable<ScenePacket&>);
+    static_assert(LaneTransferable<ScenePacket>);
+    static_assert(LaneTransferable<RenderHandle>);
+    static_assert(LaneTransferable<RenderBlob>);
     // 등록하지 않은 값을 받는 lane 작업은 만들 수 없다(컴파일 오류).
     static_assert(!CanPostResource<Unregistered>);
     static_assert(CanPostResource<OrderMark>);
     // ObjectRef는 이동할 수 없으므로 그 필드를 가진 struct는 등록해도 C++ 타입 검사가 거부한다.
-    static_assert(!RenderTransferable<rocks::reflection_fixture::ArraySlot>);
+    static_assert(!LaneTransferable<rocks::reflection_fixture::ArraySlot>);
 
     SystemAllocator allocator;
     RecordingDevice device(allocator);
@@ -933,7 +932,7 @@ struct LifetimePacket {
 
 } // namespace
 
-ROCKS_RENDER_TRANSFERABLE(LifetimePacket);
+ROCKS_LANE_TRANSFERABLE(LifetimePacket);
 
 namespace {
 
@@ -1004,29 +1003,4 @@ TEST(RenderLane_FramePacketDiesBeforeTheSlotIsReturned) {
         REQUIRE(lane.Shutdown());
         packetLog.lane = nullptr;
     }
-}
-
-// 이벤트 필드(FieldKind::Event — 구독 대상·발행자를 붙잡는다)가 있는 리플렉션 스키마는 렌더 전달
-// 검사가 거부한다(Docs/Design/RenderBase 5.2절 "전달 가능한 타입", 개정 61). 값 필드만 있는
-// 스키마는 통과한다. 생성 fixture에 이벤트 필드 타입이 아직 없어(EV2b) 손으로 만든 스키마를 쓴다.
-TEST(RenderTransfer_RejectsEventFields) {
-    const char valueName[] = "value";
-    const char eventName[] = "changed";
-    FieldSchema fields[2];
-    fields[0].id = Guid{1, 1};
-    fields[0].kind = FieldKind::Value;
-    fields[0].name = Span<const char>(valueName, sizeof(valueName) - 1);
-    fields[0].value = ValueType{ValueKind::UInt32, TypeId{}};
-    fields[1].id = Guid{1, 2};
-    fields[1].kind = FieldKind::Event;
-    fields[1].name = Span<const char>(eventName, sizeof(eventName) - 1);
-    TypeSchema values;
-    values.fields = Span<const FieldSchema>(fields, 1);
-    CHECK(render::detail::SchemaHasNoObjectReferences(values));
-    TypeSchema events;
-    events.fields = Span<const FieldSchema>(fields, 2);
-    CHECK(IsEventField(fields[1]) && !render::detail::SchemaHasNoObjectReferences(events));
-    TypeSchema onlyEvent;
-    onlyEvent.fields = Span<const FieldSchema>(fields + 1, 1);
-    CHECK(!render::detail::SchemaHasNoObjectReferences(onlyEvent));
 }
