@@ -110,7 +110,10 @@ enum class CookConfigField : uint8 {
     TextureLodGroup,
     // 셰이더 칸(10.3절 1항 — TargetProfileField와 같은 뜻).
     GraphicsBackends,
-    ShaderFormats
+    ShaderFormats,
+    // 오디오 쿠킹 칸(Docs/Design/AudioSystem 3.39.1절 — TargetProfileField와 같은 뜻, index = 칸
+    // 번호).
+    AudioCook
 };
 
 // TargetProfiles 실패 칸·파일의 대응이다(같은 이름 값 1:1 — 10.3.1절).

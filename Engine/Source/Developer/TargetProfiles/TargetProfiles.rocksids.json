@@ -3,8 +3,64 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::AudioCookOverrides::compressionQualityModifier",
+      "id": "aaef228151cb4c5d937ff0ec82a710ad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::highSampleRate",
+      "id": "b763a1ec05284290addcd92900e9f9dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::lowSampleRate",
+      "id": "0c782df519894a2ab0f18d2baa912c28",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::maxSampleRate",
+      "id": "ceb0087cbd0940a1a174c11a187b2d3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::mediumSampleRate",
+      "id": "1c28bec180c747e4aed08c58272ed8bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::minSampleRate",
+      "id": "72420a5e057e477fa0d5a188887e9110",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AudioCookOverrides::resampleForDevice",
+      "id": "4458c6d2daef46c2914155771b4ded49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ShaderFormatList::formats",
       "id": "5cb0c1becb804e529f27e5d18b1d636d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TargetProfile::audioCook",
+      "id": "0b875976bfb241f3ae13df05a190fa30",
       "aliases": [],
       "retired": false
     },
@@ -166,6 +222,13 @@
       "kind": "field",
       "name": "rocks::TextureLodGroup::numStreamedMips",
       "id": "6268cf69dba74ef1a5fc139250f8ac67",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AudioCookOverrides",
+      "id": "f76a762c48c1449e97932d25e1776a13",
       "aliases": [],
       "retired": false
     },

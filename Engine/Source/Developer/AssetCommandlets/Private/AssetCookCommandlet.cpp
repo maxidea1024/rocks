@@ -200,6 +200,20 @@ Result<void> AppendConfigField(StringBuilderBase& out, const CookConfigFailure& 
         // index는 TextureGroup 값이다(12.14절 검증 — 크기·mipGen·mipLoadOptions).
         return out.TryAppendFormat("invalid textureLodGroups entry (TextureGroup value {})",
                                    failure.index);
+    case CookConfigField::AudioCook: {
+        // index는 AudioCookFieldIndex다(Docs/Design/AudioSystem 3.39.1절 — 이름은 그 순서).
+        constexpr const char* AudioCookFieldNames[] = {
+            "resampleForDevice",         "maxSampleRate", "highSampleRate",
+            "mediumSampleRate",          "lowSampleRate", "minSampleRate",
+            "compressionQualityModifier"};
+        constexpr uint32 AudioCookFieldCount =
+            sizeof(AudioCookFieldNames) / sizeof(AudioCookFieldNames[0]);
+        static_assert(AudioCookFieldCount == static_cast<uint32>(AudioCookFieldIndex::Count),
+                      "audioCook field names must match AudioCookFieldIndex");
+        return failure.index < AudioCookFieldCount
+                   ? out.TryAppendFormat("invalid audioCook.{}", AudioCookFieldNames[failure.index])
+                   : out.TryAppend("invalid audioCook");
+    }
     case CookConfigField::None:
         break;
     }
