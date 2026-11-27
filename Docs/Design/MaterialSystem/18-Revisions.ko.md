@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 35(초안) | 2026-11-27 | 6.13절 MS2f3 Noise: IR 라이브러리 호출 연산 `Library`(93)·MaterialNoise.rsh, Noise·VectorNoise 규칙(위치 원점·levels 클램프·LWC), LUT 함수는 새 선행 MPQ-NoiseTexture |
 | 34(초안) | 2026-11-27 | 6.13절 MS2f2 Sobol: LUT를 ALU 동치식으로(ComputeGPUSpatialSeed XOR 상수), SobolIndex, Sobol·TemporalSobol 식, 새 문맥 값 SvPosition·StateFrameIndexMod8 |
 | 33(초안) | 2026-11-27 | 6.13절 MS2f 구현 세부(새 파일 06-IR/AdvancedNodes): 다섯 묶음(MS2f1 ALU 11노드·MS2f2 Sobol·MS2f3 Noise·MS2f4 ColorRamp·MS2f5 CustomHlsl), IR 펼치기·float 정밀도(편차)·연결 여부 분기 결정, MS2f1 노드별 UE 식·문구·기본값, BlackBody Temp 미연결 진단(편차) |
 | 32(초안) | 2026-11-27 | MS2e 리뷰 반영(6.12절): 진단 사슬(함수 사본·레이어 합성 호출·MaterialSample을 끝까지)과 함수 안 호출 오류의 함수 경로 접두, 사본 노드 id 속성(NamedReroute 선언) 바꾸기, FunctionInput 미리보기 기본값 UE대로(MaterialAttributes EmissiveColor·Surface 기본 slab·Texture3D), AttributeLayers Input 늦은 입력, 혼합 입력 중복 선택 없음, LayerStack layerInputs를 혼합에도·대소문자 무시·사슬 우선, MaterialAttributes 출력 판정 확장, "Invalid function output", useMaterialAttributes의 CustomizedUv·Displacement 개별 핀 V5와 Displacement 칸, BlendAttributes 같은 값 먼저, 진단 형 이름, Aggregate 등록 표, 편차(LayerStack 함수 안 검사·UE 결함 미추종·MaterialSample 경로 접두)·한계(합성 노드 상한) |

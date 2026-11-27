@@ -177,6 +177,7 @@ UE는 형식·플랫폼에 따라 갈리는 스위치를 플랫폼별 번역 때
 | `MPQ-ColoredTransmittance` | dual-source blending 반투명 경로 | 블렌드 모드 `TranslucentColoredTransmittance` | Renderer RS5 뒤 |
 | `MPQ-AlphaHoldout` | holdout pass | 블렌드 모드 `AlphaHoldout`(10.3절) | Renderer 후속 값(14.2절) |
 | `MPQ-LightBake` | 정적 조명 굽기 도구 | 머티리얼 속성 `lightBakeSettings`·인스턴스 `lightBakeOverrides`(19.11·19.12절) | 조명 굽기 단계(스펙 없음) |
+| `MPQ-NoiseTexture` | 렌더러 noise 시스템 텍스처(UE View PerlinNoiseGradientTexture·PerlinNoise3DTexture) | `Noise` 함수 SimplexTex·GradientTex·GradientTex3D(6.13절 MS2f3) | 렌더러 시스템 텍스처(렌더 세션) |
 
 #### 19.4.2 원본 공급 interface(`src:`)
 
