@@ -1,5 +1,7 @@
 ## 12. 개정 기록과 기존 스펙의 개정 위치
 
+**초안 2.13(2026.11.27):** 20장 설계 리뷰 20건을 반영했다: host 서비스 묶음, 시계(실제 시각·delta만 자름·수동 시계·그리기 밖 읽기·World 시간), hit 순서 키(layer, 순번)·RetainerBox 조각·CachePanel 등록 위치, 활성 검사 분리, `OnNavigation`과 메뉴·목록 이관, 게임패드·`ScreenInputRouter`·초기 초점(UW8e2), UE 탐색 세부(첫 줄 반환·허용오차·조상 비활성·scope), 단일 자식 slot으로 정정, `ElementCast` static_assert·policy 판정, 스타일 조회 시점·revision, 단계 의존과 분할(e1·e2·h1·h2).
+
 **초안 2.12(2026.11.27):** UW7h 리뷰 반영으로 19.2절 IMM 경로에 취소 판정(빈 조합·`lParam` 0), 커서 플래그, 읽기 실패 처리, SETCONTEXT 다시 받기, 늦은 확정 배출, 표지 잃음 복구, 조합 창 위치를 더했다.
 
 **초안 2.11(2026.11.27):** 20장(Element 동작 정렬 — UW8 상세 설계: 주입 시계, 그리기 중 hit grid, 비활성 경로 자름, 보이기 묶기와 Hidden 갱신, bubble 중 navigation 변환·`NavigationConfig`, UE 방향 탐색, slot 여백·정렬과 CB2 형식 정보, 스타일 등록부, UV2·UV3 시험, 하위 단계 UW8a–UW8i)을 더했다.
