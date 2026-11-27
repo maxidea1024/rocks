@@ -118,7 +118,7 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 
 ### 21.5a Widget 사건을 리플렉션 이벤트로(UW9f — 최종 동기화 뒤)
 
-- **지금.** UI Widget의 사건 33개가 `ROCKS_NATIVE() Delegate<…>`다(UiWidget·UiScreens 16개 헤더, 예: `ButtonWidget::clicked_`). C++ 콜백 하나에는 동작하지만 네 가지가 UE와 다르다.
+- **지금.** UI Widget의 사건 30개가 `ROCKS_NATIVE() Delegate<…>`다(UiWidget·UiScreens 15개 헤더, 예: `ButtonWidget::clicked_`). C++ 콜백 하나에는 동작하지만 네 가지가 UE와 다르다.
   - 구독자가 하나다. `SetOnClicked`가 앞 구독을 덮어쓴다(UE `OnClicked`는 multicast다).
   - 리플렉션에 보이지 않는다. Sparks `on button.Clicked`와 WidgetAsset 바인딩 표(EventReflection EV3b — UE `UComponentDelegateBinding`)가 가리킬 수 없고, 에디터 이벤트 목록(EV5)에도 나오지 않는다.
   - 저장되지 않는다.
@@ -130,6 +130,12 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - Element 사건에서의 발행은 `Broadcast({registry, access, Handle()}, …)`다. 발행자 수명은 Event가 root로 붙잡는다(ED6). 지금의 `BindLiveWidgetEvent` 생존 확인(재구성된 Element의 늦은 사건 버림)은 그대로 둔다.
   - 인자 규칙(ED1)에 맞춘다. `StringView` 인자는 `const String&`로 바꾼다(편집 텍스트 `changed`·`committed` 등). 값 인자는 nothrow 복사, struct는 `const T&`다.
   - 이벤트 필드를 가진 클래스는 `T(Allocator&)` 생성자가 있어야 한다(ED14). Widget은 이미 그렇다.
+  - 인자 형식은 리플렉션 형식이어야 한다(ED1·FD4 — 바인딩 frame). UiCore·UiFramework는 Object 층에 의존하지 않아 리플렉션이 없으므로 다음처럼 싣는다.
+    - `CheckState`·`TextCommitReason`·`SpinCommitReason`(UiFramework enum)은 UiWidget `UiTypeBindings.h`의 `ROCKS_ENUM(Binds = "rocks::ui::…")` 미러로 싣는다(CoreTypeBindings와 같은 방식 — 미러 여러 개를 한 헤더에 둔다).
+    - `KeyChord`는 UE `FInputChord`처럼 리플렉션 struct `InputChordValue`(키 이름 + Shift·Ctrl·Alt·Super)로 넘긴다. 키 선택기 위젯이 이미 키를 이름으로 저장한다. 키 enum 전체를 미러로 옮기지 않는다.
+    - `StringView`는 `const String&`이다(발행 때 한 번 복사).
+  - 바인딩은 모두 `Transient`다. 에셋 바인딩은 EV3b 템플릿 바인딩 표가 맡고, 실행 중 바인딩을 Widget 에셋 바이트에 넣지 않는다.
+  - 사건이 아닌 `DelegateHandle` 3개(구독 handle)는 그대로 `ROCKS_NATIVE`다.
 - **시점.** `Event`는 engine-runtime에 있고(EV1b e12c17c5·EV2b 5778c89c) 이 브랜치에는 아직 없다. 최종 동기화 바로 뒤, 병합 전에 한다. 손으로 쓴 속성 표·descriptor 시험의 이벤트 필드 건너뛰기(EV2a `IsEventField`)를 같은 단계에서 점검한다.
 - **시험.** 구독 둘이 모두 불림, 대상 파괴 뒤 자동 해제, 재구성된 Element의 늦은 사건 버림. 바인딩 저장(EV3a1 — `Transient`가 아니면)은 그래프 저장 시험 하나로 본다.
 
@@ -142,4 +148,4 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 | UW9c | 화면 입력 설정 적용, `platform::Window` 커서·잠금(21.3절) | 적용 횟수 시험, UiDemo self-test |
 | UW9d | 소멸자 사용자 코드 제거, 해체 대기열, policy(21.4절) | UV7 수명 시험 |
 | UW9e | UV7 음성 시험 묶음(21.5절) | 21.5절 항목 전부 |
-| UW9f | Widget 사건 33개를 리플렉션 `Event`로(21.5a절 — 최종 동기화 뒤, 병합 전) | 구독 둘·자동 해제·늦은 사건 버림 시험, 옛 `SetOnX` 0 |
+| UW9f | Widget 사건 30개를 리플렉션 `Event`로(21.5a절 — 최종 동기화 뒤, 병합 전) | 구독 둘·자동 해제·늦은 사건 버림 시험, 옛 `SetOnX` 0 |
