@@ -25,7 +25,8 @@ namespace rocks::input {
 // 오류: 회수·무효 lease는 StaleHandle, 다른 스레드는 WrongThread, 초기화 전 AssetManager는
 // InvalidArgument(With 오류 그대로), 대표 에셋이
 // InputContext가 아니면 TypeMismatch, 그 밖은 2.7절 모으기와 같다(null actions 원소
-// InvalidArgument, 할당 실패 OutOfMemory). 실패하면 bundle은 그대로다.
+// InvalidArgument, 커브 slot 범위 밖·null 원소 InvalidArgument, 풀리지 않는 커브 에셋은 Resolve
+// 오류, 할당 실패 OutOfMemory). 실패하면 bundle은 그대로다.
 ROCKS_INPUTACTIONS_API Result<void> CollectInputContext(AssetManager& assets,
                                                         const AssetLease& context,
                                                         InputContextBundle& bundle) noexcept;
@@ -40,8 +41,11 @@ ROCKS_INPUTACTIONS_API Result<void> CollectInputContext(AssetManager& assets,
 //       (void)controller.Haptics().PlayHapticEffect(hit, {});
 //   }
 //
+// 채널의 커브 에셋 slot은 HapticEffectAsset::curveAssets로 평탄화한다(2.9절).
+//
 // 오류: lease 오류는 CollectInputContext와 같고, 대표 에셋이 HapticEffectAsset이 아니면
-// TypeMismatch, 할당 실패는 OutOfMemory다. 실패하면 out은 그대로다.
+// TypeMismatch, 커브 slot 범위 밖·null 원소 InvalidArgument, 풀리지 않는 커브 에셋은 Resolve 오류,
+// 할당 실패는 OutOfMemory다. 실패하면 out은 그대로다.
 ROCKS_INPUTACTIONS_API Result<void> CopyHapticEffect(AssetManager& assets, const AssetLease& effect,
                                                      HapticEffect& out) noexcept;
 

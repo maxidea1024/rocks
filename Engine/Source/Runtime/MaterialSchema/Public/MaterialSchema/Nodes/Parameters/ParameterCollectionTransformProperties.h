@@ -1,0 +1,27 @@
+#pragma once
+
+#include <Base/Guid.h>
+#include <Core/Text/Name.h>
+#include <MaterialSchema/MaterialAssetReference.h>
+#include <MaterialSchema/Nodes/Parameters/ParametersNodeEnums.h>
+#include <Meta/Annotations.h>
+
+// Parameter Collection Transform 노드의 속성이다(Docs/Design/MaterialSystem 19.6·19.13절, UE
+// UMaterialExpressionCollectionTransform —
+// RE/Public/Materials/MaterialExpressionCollectionTransform.h). 이름·기본값은 UE와 같다(b 접두를
+// 떼고 camelCase).
+namespace rocks::material {
+
+ROCKS_STRUCT()
+struct ParameterCollectionTransformProperties {
+    ROCKS_GENERATED_BODY()
+
+    // 기대 클래스는 ParameterCollection다(19.4.3절).
+    ROCKS_PROPERTY() MaterialAssetReference collection;
+    ROCKS_PROPERTY() Name parameterName;
+    // 컬렉션 파라미터를 찾는 id다(UE ParameterId — 이름은 진단 문구에만 쓴다).
+    ROCKS_PROPERTY() Guid parameterId {};
+    ROCKS_PROPERTY() CollectionTransformType transformType = CollectionTransformType::Position;
+};
+
+} // namespace rocks::material

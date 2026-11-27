@@ -1,6 +1,7 @@
 #include <ReflectionTestFixtures/EventFixture.generated.h>
 #include <ReflectionTestFixtures/FunctionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <Base/Compiler.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/EventOps.h>
 #include <Object/ModuleRegistration.h>
@@ -590,6 +591,244 @@ TEST(EventFieldGraph_StageBindsAfterCommit) {
         With<EventPublisher>(target, root.Value().Handle(), [](EventPublisher& value) noexcept {
             CHECK(value.changed.BindingCount() == 1);
         });
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 에디터 로드(keepUnresolvedEventBindings)는 풀리지 않은 바인딩(함수 없음·서명 다름)을 미해결
+// 레코드로 보존하고 EventBindingUnresolved로 알리며, 다시 저장한 byte가 읽은 byte와 같다(풀리지
+// 않은 바인딩이 살아 있는 바인딩 앞에 있어도 순서가 지켜진다). 게임 로드는 버린다
+// (EventBindingDropped). 쿠킹 저장은 미해결 레코드를 EventBindingNotCookable(2) 뒤
+// InvalidArgument로 거부한다(ED24).
+TEST(EventFieldGraph_EditorKeepsUnresolvedAndCookRejects) {
+    SystemAllocator allocator;
+    {
+        Registries registries(allocator);
+        ObjectRegistry& source = registries.source;
+        const ObjectAccessContext access = source.OwnerAccess();
+        RootRef<EventPublisher> publisher = New<EventPublisher>(source);
+        RootRef<CallTarget> listener = NewListener(source, publisher.Handle());
+        const Guid add = FunctionIdOf(registries.types, "Add");
+        const Guid bump = FunctionIdOf(registries.types, "Bump");
+        const Guid relay = FunctionIdOf(registries.types, "Relay");
+        const Guid absent{0x1234, 0x5678};
+        const Guid gone{0x1234, 0x5679};
+        // pinged는 [Bump, Relay] 순서이고 앞의 Bump를 없는 함수로 바꾼다(순서 보존 확인).
+        With<EventPublisher>(source, publisher.Handle(), [&](EventPublisher& value) noexcept {
+            REQUIRE(value.changed.TryBind(source, access, listener.Handle(), add));
+            REQUIRE(value.pinged.TryBind(source, access, listener.Handle(), bump));
+            REQUIRE(value.pinged.TryBind(source, access, listener.Handle(), relay));
+        });
+        auto saved = SaveSet(allocator, source, publisher.Handle(), listener.Handle());
+        REQUIRE(saved);
+        auto missing = CopyBytes(allocator, saved.Value().View());
+        REQUIRE(missing);
+        REQUIRE(PatchGuid(missing.Value(), add, absent) == 1);
+        REQUIRE(PatchGuid(missing.Value(), bump, gone) == 1);
+
+        // 게임 로드(기본): 버리고 EventBindingDropped다.
+        Collected gameDiagnostics;
+        ObjectGraphLoadOptions game;
+        game.hooks = &gameDiagnostics;
+        auto dropped =
+            LoadSet(allocator, registries.target, registries.types, missing.Value().View(), game);
+        REQUIRE(dropped);
+        CHECK(gameDiagnostics.Has(FieldDiagnosticKind::EventBindingDropped,
+                                  EventBindingDroppedFunctionMissing));
+        CHECK(!gameDiagnostics.Has(FieldDiagnosticKind::EventBindingUnresolved,
+                                   EventBindingDroppedFunctionMissing));
+        With<EventPublisher>(
+            registries.target, dropped.Value().roots[0].Handle(),
+            [](EventPublisher& value) noexcept {
+                CHECK(value.changed.BindingCount() == 0 && value.changed.UnresolvedCount() == 0 &&
+                      value.pinged.BindingCount() == 1 && value.pinged.UnresolvedCount() == 0);
+            });
+
+        // 에디터 로드: 보존하고 EventBindingUnresolved로 알린다(버림 진단은 없다). 보존한 레코드는
+        // 발행되지 않는다.
+        ObjectRegistry editor(allocator, registries.types, {0x45564701, 5});
+        Collected diagnostics;
+        ObjectGraphLoadOptions keep;
+        keep.keepUnresolvedEventBindings = true;
+        keep.hooks = &diagnostics;
+        auto kept = LoadSet(allocator, editor, registries.types, missing.Value().View(), keep);
+        REQUIRE(kept);
+        CHECK(kept.Value().bound == 1);
+        CHECK(diagnostics.Has(FieldDiagnosticKind::EventBindingUnresolved,
+                              EventBindingDroppedFunctionMissing));
+        CHECK(diagnostics.count == 2 && !diagnostics.dropped);
+        const ObjectHandle copy = kept.Value().roots[0].Handle();
+        const ObjectHandle copiedListener = kept.Value().roots[1].Handle();
+
+        // 발행 전에 다시 저장하면 읽은 byte 그대로다(미해결 레코드가 같은 자리 — pinged의 앞 — 에
+        // 쓰인다).
+        auto resaved = SaveSet(allocator, editor, copy, copiedListener);
+        REQUIRE(resaved);
+        CHECK(test::graph::SameBytes(missing.Value().View(), resaved.Value().View()));
+
+        With<EventPublisher>(editor, copy, [&](EventPublisher& value) noexcept {
+            CHECK(value.changed.BindingCount() == 0 && value.changed.UnresolvedCount() == 1 &&
+                  value.pinged.BindingCount() == 1 && value.pinged.UnresolvedCount() == 1);
+            REQUIRE(
+                value.changed.TryBroadcast(EventContext{editor, editor.OwnerAccess(), copy}, 3));
+            // Relay만 불린다(1).
+            REQUIRE(value.pinged.TryBroadcast(EventContext{editor, editor.OwnerAccess(), copy}));
+        });
+        CHECK(TotalOf(editor, copiedListener) == 1);
+
+        // 쿠킹 저장은 미해결 레코드를 거부한다.
+        Collected cookDiagnostics;
+        ObjectGraphSaveOptions cook;
+        cook.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+        cook.hooks = &cookDiagnostics;
+        auto rejected = SaveSet(allocator, editor, copy, copiedListener, cook);
+        CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+        CHECK(cookDiagnostics.Has(FieldDiagnosticKind::EventBindingNotCookable,
+                                  EventBindingNotCookableUnresolved));
+
+        // 편집자가 미해결 레코드를 지우면 쿠킹할 수 있고, 쿠킹 로드가 나머지를 다시 바인딩한다.
+        With<EventPublisher>(editor, copy, [&](EventPublisher& value) noexcept {
+            CHECK(value.changed.Unbind(copiedListener, absent));
+            CHECK(value.pinged.Unbind(copiedListener, gone));
+        });
+        auto cooked = SaveSet(allocator, editor, copy, copiedListener, cook);
+        REQUIRE(cooked);
+        ObjectRegistry played(allocator, registries.types, {0x45564701, 6});
+        ObjectGraphLoadOptions cookedLoad;
+        cookedLoad.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+        auto restored =
+            LoadSet(allocator, played, registries.types, cooked.Value().View(), cookedLoad);
+        REQUIRE(restored);
+        CHECK(restored.Value().bound == 1);
+
+        // 서명이 다른 함수(Add 자리에 Bump — 인자 없음)도 보존한다(진단 이유 2).
+        auto mismatched = CopyBytes(allocator, saved.Value().View());
+        REQUIRE(mismatched);
+        REQUIRE(PatchGuid(mismatched.Value(), add, bump) == 1);
+        ObjectRegistry third(allocator, registries.types, {0x45564701, 9});
+        Collected mismatch;
+        ObjectGraphLoadOptions keepMismatch;
+        keepMismatch.keepUnresolvedEventBindings = true;
+        keepMismatch.hooks = &mismatch;
+        auto reloaded =
+            LoadSet(allocator, third, registries.types, mismatched.Value().View(), keepMismatch);
+        REQUIRE(reloaded);
+        CHECK(mismatch.Has(FieldDiagnosticKind::EventBindingUnresolved,
+                           EventBindingDroppedSignatureMismatch));
+        With<EventPublisher>(
+            third, reloaded.Value().roots[0].Handle(),
+            [](EventPublisher& value) noexcept { CHECK(value.changed.UnresolvedCount() == 1); });
+        auto mismatchResaved = SaveSet(allocator, third, reloaded.Value().roots[0].Handle(),
+                                       reloaded.Value().roots[1].Handle());
+        REQUIRE(mismatchResaved);
+        CHECK(test::graph::SameBytes(mismatched.Value().View(), mismatchResaved.Value().View()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+#if ROCKS_WITH_EDITOR_DATA
+// EditorOnly 이벤트(edited)는 쿠킹 저장이 쓰지 않고, 그 기록이 있는 에디터 데이터를 쿠킹 로드하면
+// CorruptData다(값 필드와 같다).
+TEST(EventFieldGraph_EditorOnlyEventIsNotCooked) {
+    SystemAllocator allocator;
+    {
+        Registries registries(allocator);
+        ObjectRegistry& source = registries.source;
+        const ObjectAccessContext access = source.OwnerAccess();
+        RootRef<EventPublisher> publisher = New<EventPublisher>(source);
+        RootRef<CallTarget> listener = NewListener(source, publisher.Handle());
+        const Guid add = FunctionIdOf(registries.types, "Add");
+        auto plainCooked = [&]() noexcept {
+            ObjectGraphSaveOptions cook;
+            cook.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+            return SaveSet(allocator, source, publisher.Handle(), listener.Handle(), cook);
+        };
+        auto before = plainCooked();
+        REQUIRE(before);
+        With<EventPublisher>(source, publisher.Handle(), [&](EventPublisher& value) noexcept {
+            REQUIRE(value.edited.TryBind(source, access, listener.Handle(), add));
+        });
+
+        // 쿠킹 저장은 EditorOnly 이벤트를 필드째 뺀다(바인딩이 있어도 byte가 같다).
+        auto after = plainCooked();
+        REQUIRE(after);
+        CHECK(test::graph::SameBytes(before.Value().View(), after.Value().View()));
+
+        // 에디터 저장은 쓰고, 에디터 로드는 다시 바인딩한다.
+        auto editorBytes = SaveSet(allocator, source, publisher.Handle(), listener.Handle());
+        REQUIRE(editorBytes);
+        auto editorLoaded =
+            LoadSet(allocator, registries.target, registries.types, editorBytes.Value().View());
+        REQUIRE(editorLoaded);
+        With<EventPublisher>(
+            registries.target, editorLoaded.Value().roots[0].Handle(),
+            [](EventPublisher& value) noexcept { CHECK(value.edited.BindingCount() == 1); });
+
+        // 쿠킹 로드는 EditorOnly 이벤트 기록을 손상으로 거부한다.
+        ObjectRegistry game(allocator, registries.types, {0x45564701, 7});
+        ObjectGraphLoadOptions cookedLoad;
+        cookedLoad.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+        auto rejected =
+            LoadSet(allocator, game, registries.types, editorBytes.Value().View(), cookedLoad);
+        CHECK(!rejected && rejected.Error() == ErrorCode::CorruptData);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+#endif
+
+// 쿠킹 저장은 EditorOnly 함수를 가리키는 바인딩을 EventBindingNotCookable(1) 뒤 InvalidArgument로
+// 거부한다 — 에디터 저장은 쓴다(ED24). 시험 빌드는 ROCKS_WITH_EDITOR가 꺼져 fixture의 EditorOnly
+// 함수(Reset)가 없으므로, 생성 schema를 복사해 Add에 EditorOnly flag를 붙인 CallTarget을 따로 된
+// TypeRegistry에 등록한다.
+TEST(EventFieldGraph_CookRejectsEditorOnlyFunction) {
+    SystemAllocator allocator;
+    {
+        // 등록한 schema 표가 TypeRegistry보다 오래 산다.
+        Array<FunctionSchema> functions(allocator);
+        TypeRegistry types(allocator);
+        REQUIRE(GeneratedType<reflection_fixture::CallMode>::Register(types));
+        REQUIRE(GeneratedType<reflection_fixture::CallPoint>::Register(types));
+        const TypeSchema& generated = GeneratedType<CallTarget>::Schema();
+        Guid add{};
+        for (const FunctionSchema& function : generated.functions) {
+            REQUIRE(functions.TryPushBack(function));
+            if (StringView(function.name.Data(), function.name.Size()) == StringView("Add")) {
+                functions[functions.Size() - 1].flags |=
+                    static_cast<uint32>(FunctionFlags::EditorOnly);
+                add = function.id;
+            }
+        }
+
+        REQUIRE(add != Guid{});
+        TypeSchema edited = generated;
+        edited.functions = functions.View();
+        auto target = types.Register(edited, GeneratedType<CallTarget>::Ops());
+        REQUIRE(target);
+        REQUIRE(GeneratedType<EventPublisher>::Register(types));
+
+        ObjectRegistry source(allocator, types, {0x45564701, 8});
+        const ObjectAccessContext access = source.OwnerAccess();
+        RootRef<EventPublisher> publisher = New<EventPublisher>(source);
+        RootRef<CallTarget> listener = NewListener(source, publisher.Handle());
+        With<EventPublisher>(source, publisher.Handle(), [&](EventPublisher& value) noexcept {
+            REQUIRE(value.changed.TryBind(source, access, listener.Handle(), add));
+        });
+        auto editorBytes = SaveSet(allocator, source, publisher.Handle(), listener.Handle());
+        REQUIRE(editorBytes);
+
+        Collected diagnostics;
+        ObjectGraphSaveOptions cook;
+        cook.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+        cook.hooks = &diagnostics;
+        auto rejected = SaveSet(allocator, source, publisher.Handle(), listener.Handle(), cook);
+        CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+        CHECK(diagnostics.Has(FieldDiagnosticKind::EventBindingNotCookable,
+                              EventBindingNotCookableEditorOnly));
+
+        // 바인딩을 지우면 쿠킹된다.
+        With<EventPublisher>(source, publisher.Handle(),
+                             [&](EventPublisher& value) noexcept { value.changed.Clear(); });
+        CHECK(SaveSet(allocator, source, publisher.Handle(), listener.Handle(), cook));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

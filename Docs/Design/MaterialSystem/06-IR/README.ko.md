@@ -1,0 +1,95 @@
+# 머티리얼 시스템(MaterialSystem) 설계
+
+## 6. IR
+
+파일은 다음과 같다.
+- [MS2a 구현 세부 — MaterialCompiler 기반](CompilerFoundation.ko.md)(6.8절)
+- [MS2b 구현 세부 — 문맥 값·평가 문맥·스위치·공급 노드](ContextAndSupply.ko.md)(6.9절)
+- [MS2c 구현 세부 — 파라미터·텍스처·scene·선행 진단](ParametersAndTextures.ko.md)(6.10절)
+- [MS2d 구현 세부 — 표면·대표 노멀·추가 출력](Surface.ko.md)(6.11절)
+- [MS2e 구현 세부 — 속성 집합·함수·레이어](FunctionsAttributes.ko.md)(6.12절)
+- [MS2f 구현 세부 — 고급·보조 노드](AdvancedNodes.ko.md)(6.13절)
+
+### 6.1 UE 5.8 방식
+
+| 경로 | 5.8 상태 | 근거 |
+|---|---|---|
+| 노드가 코드 조각을 직접 내는 번역기(`FHLSLMaterialTranslator`, 진입 함수 `Translate_Legacy`) | **기본값.** 클래스에 deprecation 표시가 없다 | `RE/Private/Materials/HLSLMaterialTranslator.h:233`, 분기 `RE/Private/Materials/MaterialShared.cpp:3683–3704` |
+| Material IR + IR→HLSL(`FMaterialIRToHLSLTranslation`) | **실험.** `r.Material.Translator.EnableNew`(기본 false, 설명 "prototype (WIP)")와 머티리얼별 `bEnableNewHLSLGenerator`가 모두 켜져야 쓰인다. 사용 시 "new experimental material translator" 로그, 쿠킹 때 "still experimental" Display 로그 | `MaterialShared.cpp:108–112, 3616`, `RE/Private/Materials/MaterialInterface.cpp:233–237, 342–351`, `RE/Public/Materials/Material.h:1072–1074` |
+| 5.1–5.3의 HLSLTree(`MaterialHLSLGenerator`) | **코드 제거.** Runtime·Editor 전체 grep 0건이다. 플래그 이름 `bEnableNewHLSLGenerator`만 IR 스위치로 재사용된다 | grep 결과(2026-11-17) |
+
+UE IR 구조(참고):
+- 값 종류는 순수 값(상수·builtin·파라미터 컬렉션·uniform 등)과 명령(연산·분기·텍스처 읽기·Substrate 연산·단계 전환·미분·보간 설정·호출·preshader 파라미터)이다(`RE/Public/Materials/MaterialIR.h:43–90`).
+- 값은 POD이고, 빌더가 같은 계산을 해시로 찾아 한 인스턴스로 쓴다(`MaterialIR.h:97–118`).
+- 모듈은 단계(정점·픽셀·compute)와 custom 출력마다 진입점을 가진다(`RE/Public/Materials/MaterialIRModule.h:20–63`).
+- 빌드 단계는 초기화 → 노드 그래프를 IR로 → Substrate 출력 → 출력 설정 명령 → 의존 순 분석 → 모듈 전체 분석(한도·preshader fixup) → 명령을 가장 좁은 블록에 배치 → 산출 확정이다(`RE/Private/Materials/MaterialIRModuleBuilder.cpp:1532–1598`).
+- 상수 접기(`RE/Private/Materials/MaterialIREmitter.cpp:2142, 2755, 2902, 3016`)와 uniform 연산의 preshader 승격(`MaterialIREmitter.cpp:2738`, 설계 설명 `RE/Public/Materials/MaterialIRPreshader.h:12–32`)이 있다. 별도 DCE·CSE 패스가 있는지는 미확인이다.
+
+**Rocks 선택(결정 MD2).**
+- UE 기본 번역기는 "이름이 legacy인 기본값"이고 IR 쪽은 실험이다.
+- 계획은 처음부터 typed IR을 요구하고(14.1·14.7절), HLSL 말고도 CPU bake(`BakeMaterialProfile`, 계획 14.10절)와 ray profile(M8)이 IR을 소비한다.
+- 그래서 Rocks는 IR 하나를 정본으로 두고 HLSL은 그 소비자 가운데 하나로 만든다. 노드가 HLSL 조각을 직접 내는 경로는 두지 않는다.
+
+### 6.2 구조
+
+- **모듈** = (머티리얼 static 변형, 품질 수준)마다 하나다. 진입점은 정점 결과·이전 프레임 정점 결과·표면·opacity·opacity mask·pixel depth offset·custom 출력마다 하나다(7.3절 함수와 1:1).
+- **값** = `{ 타입, 연산, 피연산자 값들, 빈도, 단계 집합, 속성(공간·색공간·미분 요구) }`. 피연산자는 값 번호다. (타입, 연산, 피연산자, 속성, 진입점 문맥)이 같으면 한 값으로 공유한다(hash-consing). 진입점 문맥(현재·이전 프레임, 19.3.5절)이 다르면 같은 노드도 다른 값이다.
+- **연산 집합**은 UE `Operator` 노드의 연산 전부(`RE/Public/Materials/MaterialExpressionOperator.h:14–100` — 사칙·비교·논리·비트·shift·IsNan·IsInf·초월·쌍곡·Rsqrt·Transpose·행렬곱·LWC 타일 연산)와 텍스처·문맥 값(extern)·조건 값·동적 분기를 담는다. IsNan·IsInf는 생성 원문에서 fast-math가 지우지 않는 형태로 낸다(V11은 상수만 막는다).
+- **빈도** 격자: `Constant < Static < Uniform < Instance < Vertex < Pixel`.
+  - `Uniform`: 머티리얼 파라미터·컬렉션 값과 그것만으로 된 식. 상수 식 프로그램(9.4절)으로 간다.
+  - `Instance`: 그리기 단위 데이터(primitive·instance custom data). Renderer 스펙의 instance 데이터 계약을 따른다.
+  - 연산의 빈도는 피연산자 빈도의 최대다. 예외로 미분과 암묵 mip 텍스처 읽기는 `Pixel`이고, 명시 mip 텍스처 읽기는 최소 `Vertex`다(uniform으로 끌어올리지 않는다).
+- **조건 값.** 번역 때 정해지지 않는 static 조건(렌더 경로·기능 등급·pass 상태)은 문맥 값 표의 Bool 값을 조건으로 한 `Select`로 남긴다. pass가 그 값을 상수로 정의하므로 하위 컴파일러가 접는다(UE `GenericSwitch`와 같다 — 6.9절 MS2b3). 품질 수준과 static 파라미터는 번역 때 정해진다.
+
+### 6.3 생성(그래프 → IR)
+
+1. **입력 고정.** 그래프 snapshot(계획 14.6절 immutable)과 Build 의존 함수·컬렉션의 snapshot을 받는다. Object 주소는 들고 가지 않는다.
+2. **static 해석.** static 파라미터(인스턴스 override 반영), Quality Switch(번역 중인 품질 수준), Static Switch를 풀고, 선택되지 않은 입력은 IR로 만들지 않는다. UE도 Quality Switch는 유효 입력 하나만 컴파일한다(`RE/Private/Materials/MaterialExpressions.cpp:9082–9107`, 검증 때만 모든 입력 `:9088–9102`).
+3. **렌더 경로·기능 등급 분기.** Render Path Switch는 Deferred·ForwardPlus·Default 세 입력을 가진다. 경로 전용 pass(`GBuffer`·`ForwardOpaque`·`DepthAux`)는 그 경로 입력을, 두 경로가 함께 쓰는 pass(`Depth`·`ShadowDepth`·`Translucent`·`Velocity` 등)는 Default 입력을 쓴다(Renderer 14.3절 "경로" 열). pass 원문은 Renderer가 pass job에 넣는 `RENDER_PATH_DEFERRED`·`RENDER_PATH_FORWARD_PLUS`로 조건 값 RenderPathDeferred·RenderPathForwardPlus를 정의하고, 하위 컴파일러가 상수 조건을 접는다(6.9절 MS2b3). WPO·마스크·PDO에 닿는 Render Path Switch는 V15 오류다. Render Path Switch와 Capability Tier Switch는 모든 입력을 IR로 만들고 조건 값(Bool 문맥 값의 `Select` — 6.9절)으로 잇는다. UE는 shading path를 플랫폼당 하나로 정해 한쪽만 컴파일한다(`RE/Public/Materials/MaterialExpressionShadingPathSwitch.h:50`). Rocks는 한 실행 안에서 view마다 Deferred·Forward+를 고르므로(계획 11.1절) pass job이 정한다.
+4. **함수 펼치기.** 함수 호출은 scope를 쌓고 함수 그래프를 펼친다. 함수 입력은 호출한 쪽의 값이다. UE도 인라인이다(`RE/Private/Materials/MaterialExpressions.cpp:15774–15824`, 호출자 문맥 복귀 `:16564–16594`). 파라미터 scope 경로는 9.2절이다.
+5. **레이어 스택 펼치기.** 레이어 i를 펼치고 혼합 함수로 결합한다. 레이어·혼합 scope는 레이어 Guid다. UE는 레이어 index에 연관을 단다(`MaterialExpressions.cpp:7238–7239, 7273–7274`).
+6. **출력.** 영역·블렌드 모드가 쓰는 출력 핀만 진입점으로 만든다(V5).
+
+### 6.4 분석
+
+| 분석 | 내용 | 오류 |
+|---|---|---|
+| 타입 | 노드 lowering이 낸 타입과 암묵 변환을 확정한다 | V1 |
+| 단계 | 진입점에서 거슬러 각 값이 필요한 단계 집합을 구한다. 정점 진입점이 픽셀 전용 값을 쓰면 오류다 | V4 |
+| 미분 | 암묵 미분(암묵 mip 샘플·`ddx`)은 픽셀 단계에서만 허용한다. 미분 요구를 값에 기록한다. 후속 visibility 기반 shading이 analytic 미분을 요구할 때 쓰려는 것이다(UE는 analytic 미분 모드를 따로 둔다, `RE/Private/Materials/HLSLMaterialTranslator.cpp:150–178`) | V4 |
+| 공간 | 벡터 값의 좌표 공간 표지(local·world·translated world·view·tangent 등)를 따라가 잘못된 공간 결합을 경고한다. 노멀 출력은 tangent 공간이 기본이고 표지로 확인한다 | 계획 14.7절 "잘못된 normal 공간" |
+| 색공간 | 텍스처 샘플 종류가 sRGB 해제를 정하고 값에 선형 표지를 단다 | V10 |
+| 보간 배정 | 정점 → 픽셀 값(customized UV·Vertex Interpolator)을 `Float4` 묶음에 채운다. 순서는 핀 번호·NodeId 순이다 | V9 |
+| 자원 집계 | 텍스처·샘플러·상수 블록 크기·컬렉션·보간 벡터 수를 센다 | V9 |
+| capability | 노드가 요구하는 기능(scene texture 읽기·GBuffer 읽기·dual source blend 등)을 진입점별로 모아 `MaterialShaderTraits`에 기록한다 | V6 |
+
+### 6.5 최적화
+
+| 최적화 | 규칙 |
+|---|---|
+| 값 공유(CSE) | hash-consing으로 생성 중에 한다 |
+| 상수 접기 | **정확히 반올림되는 연산만** 호스트에서 접는다: 사칙·`min`·`max`·`abs`·`floor`·`frac`·비교·선택·swizzle. 초월 함수(`sin`·`pow`·`exp2`·`log2`)는 Core 결정적 수학(A0-C)으로만 접고, 결정적 수학 함수가 없는 연산은 접지 않는다. 호스트 libm으로 접으면 호스트마다 바이트가 달라진다(셰이더 시스템 10절 "상수 접기") |
+| 대수 단순화 | `x*1`, `x-0`, 이중 swizzle 합치기만 한다. `x*0 → 0`(NaN)과 `x+0 → x`(−0 부호)처럼 IEEE 결과를 바꾸는 단순화는 하지 않는다 |
+| 불필요 값 제거(DCE) | 진입점에서 닿지 않는 값을 버린다. 함수·레이어의 쓰지 않는 출력도 사라진다 |
+| uniform 끌어올림 | `Uniform` 빈도 부분식은 상수 식 프로그램의 출력 하나로 바꾸고, 셰이더는 상수 블록 값을 읽는다(9.4절). 텍스처 읽기는 끌어올리지 않는다 |
+| static 가지 제거 | 6.3절 2단계 |
+
+**IR hash.** 최적화를 마친 IR을 값 번호 순으로 직렬화한 바이트의 SHA-256이다. 번역 너겟 키는 번역 전에 계산해야 하므로 IR hash를 쓸 수 없다. IR hash는 결과 비교 진단과 시험(15절)에 쓴다. 셰이더 중복 제거는 셰이더 집합 id(8.6절)가 한다.
+
+### 6.6 결정성
+
+- 값 번호는 진입점 순서(7.3절 표 순서) → 핀 순서 → 피연산자 순서로 도는 깊이 우선 후위 순이다(피연산자가 먼저 번호를 받는다 — 생성 원문이 번호 순으로 선언할 수 있다). 해시 표 순회 순서에 기대지 않는다.
+- 노드를 훑는 순서는 NodeId 정렬이고, 함수 펼치기는 호출 위치 NodeId 정렬이다.
+- 실수 상수는 bit 패턴으로 다루고, 원문에는 최단 왕복 표기(A0-C CRT 없는 숫자 변환)로 쓴다.
+- 여러 머티리얼을 병렬로 번역하면 결과를 정렬한 뒤 기록한다(AssetSystem 10절).
+- 시험: 노드 저장 순서만 섞은 두 파일의 번역 결과 byte 동일, Windows·macOS 사이 byte 동일(15.3절 MS-T1).
+
+### 6.7 다른 IR 소비자
+
+| 소비자 | 단계 | 계약 |
+|---|---|---|
+| HLSL 생성(7절) | MAT0 | 이 문서 |
+| CPU bake(`BakeMaterialProfile`, 계획 14.10절) | M3–M4 | 같은 IR에서 지원 노드 부분집합을 CPU 평가기로 바꾼다. 지원하지 않는 값(미분·view 의존·임의 HLSL)은 노드 위치 오류다. 상세는 bake 스펙 |
+| ray profile(계획 14.4절 RayScene 재질표) | M8 | 후속 |
+
+IR은 소비자별 capability 검사를 받는다. 예를 들어 CPU bake는 임의 HLSL 노드를 지원하지 않는다.

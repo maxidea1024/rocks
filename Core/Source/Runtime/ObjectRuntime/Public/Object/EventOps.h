@@ -131,9 +131,20 @@ struct EventMemberTraits<Event<Args...> Class::*> {
 
             return WithEvent<Result<void>, false>(
                 registry, access, publisher, [&](Event<Args...>& event) noexcept {
-                    return event.ForEachBinding([&](ObjectHandle target, Guid functionId) noexcept {
-                        return visitor(user, target, functionId);
-                    });
+                    return event.ForEachBinding(
+                        [&](ObjectHandle target, Guid functionId, bool resolved) noexcept {
+                            return visitor(user, target, functionId, resolved);
+                        });
+                });
+        }
+
+        static Result<void> KeepUnresolved(ObjectRegistry& registry,
+                                           const ObjectAccessContext& access,
+                                           ObjectHandle publisher, ObjectHandle target,
+                                           Guid functionId) noexcept {
+            return WithEvent<Result<void>, true>(
+                registry, access, publisher, [&](Event<Args...>& event) noexcept {
+                    return event.TryKeepUnresolved(target, functionId);
                 });
         }
 
@@ -213,6 +224,7 @@ RuntimeEventOps MakeEventOps(Guid fieldId) noexcept {
     ops.clear = &Thunks::Clear;
     ops.compact = &Thunks::Compact;
     ops.bindings = &Thunks::Bindings;
+    ops.keepUnresolved = &Thunks::KeepUnresolved;
     ops.broadcastFromFrame = &Thunks::BroadcastFromFrame;
     ops.construct = &Thunks::Construct;
     ops.destroy = &Thunks::Destroy;

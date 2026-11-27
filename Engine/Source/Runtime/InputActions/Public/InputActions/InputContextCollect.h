@@ -16,7 +16,10 @@ namespace rocks::input {
 // context(InputContext 객체)와 그 actions를 Borrow해 bundle을 만든다. 컨텍스트·액션 id는 실효
 // id(EffectiveId — 에셋이 id를 0으로 두면 AssetId, 2.8절)다. registry·access는 그 객체를
 // 읽을 수 있는 문맥이다(에셋이면 AssetManager::With 범위). 같은 액션 객체가 actions에 여러 번
-// 있으면 한 번만 복사한다. 검증은 하지 않는다(평가기 AddContext·UpdateContext가 한다).
+// 있으면 한 번만 복사한다. 모디파이어의 커브 에셋 slot을 평탄화한다(2.9절 — 액션 설정은 그
+// InputAction::curveAssets, 바인딩은 InputContext::curveAssets). 검증은 하지 않는다(평가기
+// AddContext·UpdateContext가 한다). 커브 slot 오류: 범위 밖 번호·null 원소 InvalidArgument, 풀리지
+// 않는 커브 에셋은 Resolve 오류(Destroyed 등).
 //
 // 사용 예:
 //   InputContextBundle bundle(allocator);

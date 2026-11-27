@@ -41,7 +41,8 @@
   - 그 원본으로 `Texture2D` 빌드 경로(TextureTools)를 부른다.
 - 에디터 패키지에는 원본 bulk를 저장하지 않는다(굽기는 결정적이다). 편집기 미리보기는 같은 굽기 함수를 메모리에서 부른다.
 - 버린 대안:
-  - 편집 때 굽어 원본 bulk 저장(UE 방식): 구독 없는 명령행 편집(asset-set)이 커브를 바꾸면 atlas가 낡는다. UE는 편집기 구독으로 이 문제를 피한다.
+  - 편집 때 굽어 원본 bulk 저장(UE 방식 — `UpdateTextures`, `CurveLinearColorAtlas.cpp:300-317`): 구독 없는 명령행 편집(asset-set)이 커브를 바꾸면 atlas가 낡는다. UE는 편집기 구독(`OnUpdateCurve`)으로 이 문제를 피한다. UE와 다른 점으로 7.2절 22에 적는다. Studio 커브 편집기가 구독으로 다시 굽게 되면 다시 본다.
+- Texture 쪽 변경(final 해제·`CookDimensionOf`·메모리 원본 입력)은 에셋 세션(rocks-5f) 몫이다(렌더 세션 확인 2026-11-27 — 렌더 업로드는 플랫폼 데이터만 보고 에셋 클래스를 보지 않아 영향이 없다).
   - atlas를 텍스처가 아닌 에셋으로 두고 쿠킹이 별도 Texture2D를 생성: 머티리얼 참조가 둘로 갈린다.
 - 굽기 함수 `BakeColorCurveAtlas(...)`(Developer `CurveAtlasTools`): 입력은 atlas와 풀린 커브 목록이고, 출력은 RGBA16F 픽셀 배열이다.
   - 표본 시간은 float x × (1 / (W − 1))이다(UE 식 그대로 — 나눗셈 한 번이 아니라 역수 곱이라 반올림이 다르다). W는 위의 max(width, 2)다.

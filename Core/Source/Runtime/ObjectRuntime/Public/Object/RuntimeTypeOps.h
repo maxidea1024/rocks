@@ -647,10 +647,11 @@ struct RuntimeFunctionOps {
     uint32 errorOffset = 0;
 };
 
-// 이벤트 바인딩 나열의 방문 함수다(RuntimeEventOps::bindings — 바인딩 하나마다 대상·FunctionId).
+// 이벤트 바인딩 나열의 방문 함수다(RuntimeEventOps::bindings — 바인딩 하나마다 대상·FunctionId,
+// resolved는 살아 있는 바인딩이면 참·미해결 레코드면 거짓 — ED24).
 // 실패를 돌려주면 나열이 그 오류로 멈춘다.
-using EventBindingVisitor = Result<void> (*)(void* user, ObjectHandle target,
-                                             Guid functionId) noexcept;
+using EventBindingVisitor = Result<void> (*)(void* user, ObjectHandle target, Guid functionId,
+                                             bool resolved) noexcept;
 
 // 리플렉션 이벤트 필드 하나의 연산이다(Docs/Design/EventReflection.ko.md ED16 — 필드 형식
 // Event<Args...>). 모든 thunk는 publisher(이벤트 필드를 가진 객체 — Alive여야 한다)를 해석하고
@@ -666,13 +667,18 @@ using EventBindingVisitor = Result<void> (*)(void* user, ObjectHandle target,
 //   TypeMismatch·InvalidArgument·할당 실패).
 // - unbind: 리플렉션 바인딩 handle 하나를 지운다(Event::Unbind — native 구독 handle·없는 handle은
 //   NotFound).
-// - unbindFunction: target의 functionId 바인딩을 지운다(Event::Unbind(target, functionId) —
-//   handle은 저장해도 유지되지 않으므로 도구·저장 경로는 이 쌍으로 지운다, 없으면 NotFound).
-// - unbindAll: target을 대상으로 하는 리플렉션 바인딩을 모두 지우고 그 수를 돌려준다
+// - unbindFunction: target의 functionId 바인딩과 같은 쌍의 미해결 레코드를 지운다
+//   (Event::Unbind(target, functionId) — handle은 저장해도 유지되지 않으므로 도구·저장 경로는 이
+//   쌍으로 지운다, 둘 다 없으면 NotFound).
+// - unbindAll: target을 대상으로 하는 리플렉션 바인딩과 미해결 레코드를 모두 지우고 그 수를
+// 돌려준다
 //   (Event::UnbindAll(target)).
-// - clear: native 구독까지 모두 지운다(Event::Clear — 발행자 논리 파괴).
-// - compact: 죽은 대상의 바인딩을 지우고 그 수를 돌려준다(Event::Compact).
-// - bindings: 살아 있는 리플렉션 바인딩을 등록 순서로 visitor(user, target, functionId)에 넘긴다
+// - clear: native 구독·미해결 레코드까지 모두 지운다(Event::Clear — 발행자 논리 파괴).
+// - compact: 죽은 대상의 바인딩·미해결 레코드를 지우고 그 수를 돌려준다(Event::Compact).
+// - keepUnresolved: 풀리지 않은 바인딩을 미해결 레코드로 보존한다(Event::TryKeepUnresolved — ED24,
+//   에디터 로드의 바인딩 단계. null 대상·0 FunctionId는 InvalidArgument, 같은 쌍은 AlreadyExists).
+// - bindings: 살아 있는 리플렉션 바인딩(resolved 참)과 미해결 레코드(resolved 거짓 — ED24)를 등록
+//   번호 순서로 visitor(user, target, functionId, resolved)에 넘긴다
 //   (Event::ForEachBinding — 읽기 Borrow라 저장의 encode 고정 중에도 된다, ED20). native 구독은
 //   나열하지 않는다. visitor의 실패는 그대로 돌려준다. visitor 안에서 이 이벤트를 바꾸지 않는다.
 // - broadcastFromFrame: construct로 만든 발행 frame의 인자로 발행한다(Event::TryBroadcast). 발행
@@ -702,6 +708,9 @@ struct RuntimeEventOps {
     Result<void> (*bindings)(ObjectRegistry& registry, const ObjectAccessContext& access,
                              ObjectHandle publisher, EventBindingVisitor visitor,
                              void* user) noexcept = nullptr;
+    Result<void> (*keepUnresolved)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                   ObjectHandle publisher, ObjectHandle target,
+                                   Guid functionId) noexcept = nullptr;
     Result<void> (*broadcastFromFrame)(ObjectRegistry& registry, const ObjectAccessContext& access,
                                        ObjectHandle publisher, void* frame) noexcept = nullptr;
     Result<void> (*construct)(void* frame, Allocator& allocator) noexcept = nullptr;

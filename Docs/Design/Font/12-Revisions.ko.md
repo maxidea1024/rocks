@@ -8,7 +8,7 @@
 |---|---|---|
 | [UI 툴킷](../UiToolkit.ko.md) | 2절 모듈 표 TextLayout 행, 3.12절 표 앞, UT2 행, UD3 | TextLayout의 라이브러리 의존을 ClientOnly `TextLayoutBackend`로 옮김, 글꼴 상세의 소유 문서, 글꼴 단계 연결, UD3 버전 문구에 FD14(사용자 결정으로 확정) 연결 |
 | [컴포넌트 목록](../ComponentCatalog/04-Prerequisites.ko.md) | CR18 행 | 선행 문서를 이 문서 7.3절로, 단계 FT5·FT7 |
-| [머티리얼](../MaterialSystem.ko.md) | 파라미터 종류 "font — 후속" 행 | `FontSampleParameter`, 노드 단계 FT7 |
+| [머티리얼](../MaterialSystem/README.ko.md) | 파라미터 종류 "font — 후속" 행 | `FontSampleParameter`, 노드 단계 FT7 |
 | [압축](../Compression.ko.md) | 13절 "WOFF2 글꼴 importer는 글꼴 모듈의 몫" | FD10·FT8 연결 |
 | [렌더 기반](../RenderBase/README.ko.md) | "UI 글꼴" 행 | 7.5절 내장 UI 글꼴 연결 |
 

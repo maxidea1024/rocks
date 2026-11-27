@@ -3,8 +3,10 @@
 #include <AssetRuntime/Package.h>
 #include <Base/Guid.h>
 #include <Core/Memory/Allocator.h>
+#include <CurveAssets/FloatCurveAsset.h>
 #include <InputActions/InputActionSettings.h>
 #include <Meta/Annotations.h>
+#include <Object/ObjectRefArray.h>
 
 namespace rocks::input {
 
@@ -22,7 +24,8 @@ class ROCKS_INPUTACTIONS_API InputAction final : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit InputAction(Allocator& allocator) noexcept : settings(allocator) {
+    explicit InputAction(Allocator& allocator) noexcept
+        : settings(allocator), curveAssets(allocator) {
     }
 
     // 실효 id다(Docs/Design/InputActions 2.8절): id가 0이 아니면 id, 0이면 대표 에셋의 AssetId
@@ -35,6 +38,8 @@ public:
     // 0이면 잘못된 액션이다(검증이 거부한다).
     ROCKS_PROPERTY() Guid id;
     ROCKS_PROPERTY() InputActionSettings settings;
+    // settings.modifiers의 응답 커브 slot이 가리키는 커브 에셋이다(Hard — 2.9절 IA9).
+    ROCKS_PROPERTY(Required) ObjectRefArray<FloatCurveAsset> curveAssets;
 };
 
 } // namespace rocks::input

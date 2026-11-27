@@ -35,11 +35,12 @@ public static partial class PolicyChecks
 
     // DynamicLibrary::Open(절대 경로 열기)을 불러도 되는 곳이다: 도구 로드 허용 위치와 API 구현·시험(PlatformBase·TestSupport), 모듈
     // 로더의 Modular manifest 적재(Docs/Design/ModuleLoader 3.13절 — 엔진 모듈 공유 라이브러리를 manifest 폴더의 절대 경로로 연다).
-    // 그 밖(Runtime 모듈)은 OS 공급 라이브러리를 이름으로 여는 OpenSystem만 쓴다(Vulkan 로더·XInput).
+    // 텍스처 압축 품질 대조 도구(Docs/Design/AssetSystem 12.17.6 10 — UE 클론의 ispc_texcomp.dll을 절대 경로로 여는 개발 프로그램)도
+    // 파일 하나만 허용한다. 그 밖(Runtime 모듈)은 OS 공급 라이브러리를 이름으로 여는 OpenSystem만 쓴다(Vulkan 로더·XInput).
     private static readonly string[] DynamicLibraryOpenUsers =
     [
         .. ShaderToolLoadUsers, "Core/Source/Runtime/PlatformBase/", "Core/Source/Developer/TestSupport/",
-        "Core/Source/Runtime/ModuleLoader/Private/ModuleManifest.cpp"
+        "Core/Source/Runtime/ModuleLoader/Private/ModuleManifest.cpp", "Programs/TextureCodecCompare/Private/Main.cpp"
     ];
 
     private const string ShaderFormatPrefix = "Engine/Source/Developer/ShaderFormat";
@@ -113,7 +114,7 @@ public static partial class PolicyChecks
     /// <item><c>shader-tool-binary-load</c>: binary를 여는 코드는 워커·ShaderFormat*·ShaderToolLoader·시험 runner에만 둔다. 다음을 거부한다:
     /// 그 밖의 규칙이 ShaderToolLoader나 binary 라이브러리(<paramref name="binaryLibraries"/>, 예: DirectXShaderCompiler)를 이름으로
     /// 참조, 그 밖의 소스가 <c>&lt;ShaderToolLoader/...&gt;</c>나 binary 공개 헤더(<paramref name="binaryHeaders"/>, 예: dxc/dxcapi.h)를
-    /// include, DynamicLibrary를 쓰는 소스의 절대 경로 <c>Open(</c> 호출(PlatformBase·TestSupport·모듈 로더 manifest 적재 제외, OS 라이브러리는 OpenSystem).</item>
+    /// include, DynamicLibrary를 쓰는 소스의 절대 경로 <c>Open(</c> 호출(PlatformBase·TestSupport·모듈 로더 manifest 적재·텍스처 압축 품질 대조 도구 제외, OS 라이브러리는 OpenSystem).</item>
     /// <item><c>shader-worker-isolation</c>: 워커 쪽(Programs/ShaderCompileWorker·Developer/ShaderWorker·Developer/ShaderFormat*)은 메인 프로세스
     /// 전용 모듈 ShaderCompiler와 AssetNugget을 규칙에서 이름으로 참조하거나 그 헤더(<c>&lt;ShaderCompiler/...&gt;</c>·
     /// <c>&lt;AssetNugget/...&gt;</c>)를 include하지 않는다(11절 8항 — 워커는 너겟을 읽거나 쓰지 않는다, 11.1절 SC1). 공용 모듈

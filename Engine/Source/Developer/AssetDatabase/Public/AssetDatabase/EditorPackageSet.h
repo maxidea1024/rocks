@@ -119,10 +119,14 @@ enum class EditorWarningKind : uint8 {
     // 원본 재구성: 원본 묶음 hook의 경고다(진단 = 그 코드 — SourceCleared, asset = 그 에셋,
     // detail — Docs/Design/AssetSystem 12.14절 A5j2).
     SourceRebuildWarning,
-    // 열기: 이벤트 바인딩을 다시 만들지 못해 버렸다(진단 asset = 패키지, detail = 버린 수 — 함수
-    // 없음·서명 다름, Docs/Design/EventReflection.ko.md ED22). EV3a2 전에는 다시 저장하면 그
+    // 열기: 이벤트 바인딩을 다시 만들지 못해 버렸다(진단 asset = 패키지, detail = 버린 수 — 대상이
+    // 그 사이 사라짐·보존 실패 등, Docs/Design/EventReflection.ko.md ED22). 다시 저장하면 그
     // 바인딩이 사라진다.
-    DroppedEventBindings
+    DroppedEventBindings,
+    // 열기: 풀리지 않은 이벤트 바인딩(함수 없음·서명 다름)을 미해결 레코드로 보존했다(진단 asset =
+    // 패키지, detail = 보존한 수 — ED24). 다시 저장하면 그대로 쓰이지만 호출되지 않고, 함수를
+    // 고치거나 바인딩을 지우기 전에는 쿠킹이 거부한다.
+    UnresolvedEventBindings
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
