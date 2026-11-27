@@ -172,6 +172,56 @@ inline constexpr ShaderTypeDesc ShadingFloatProbe = EngineShaderProbeType(
     "EngineShaderShadingFloatProbe", "/Plugin/EngineShaderTests/Shading/ShadingTestKernels.rsf",
     "ShadingFloatProbePixel");
 
+// 엔진 셰이더 SL1 probe 타입이다(Docs/Design/EngineShaders 14.6절 2항). CS 셋과 그룹 연산
+// CS(퍼뮤테이션 PROBE_GROUP_SIZE 64·256·100 스레드 × PROBE_FORCE_GROUPSHARED), 텍스처를 읽는
+// 유틸리티 PS 하나다.
+constexpr ShaderTypeDesc EngineShaderComputeProbeType(StringView name, StringView entry) noexcept {
+    ShaderTypeDesc desc = rocks::shader::MakeShaderTypeDesc(
+        rocks::shader::ShaderTypeName{name, rocks::shader::ShaderTypeNameHash(name)},
+        "/Plugin/EngineShaderTests/Common/ComputeProbes.rsf", entry,
+        rocks::shader::ShaderStageCompute, rocks::shader::ShaderTypeOwner::EnginePlugin);
+    desc.parameterLayouts = ProbeConstantLayouts;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc ComputeDispatchProbe =
+    EngineShaderComputeProbeType("EngineShaderComputeDispatchProbe", "ComputeDispatchProbe");
+inline constexpr ShaderTypeDesc WrappedDispatchProbe =
+    EngineShaderComputeProbeType("EngineShaderWrappedDispatchProbe", "WrappedDispatchProbe");
+inline constexpr ShaderTypeDesc WriteDispatchArgumentsProbe = EngineShaderComputeProbeType(
+    "EngineShaderWriteDispatchArgumentsProbe", "WriteDispatchArgumentsProbe");
+
+// 그룹 연산 probe의 그룹 스레드 수(PROBE_GROUP_SIZE 값 순서)다.
+inline constexpr rocks::uint32 GroupOperationProbeSizes[] = {64, 256, 100};
+inline constexpr rocks::uint32 GroupOperationProbeSizeCount = 3;
+inline constexpr StringView GroupOperationProbeSizeNames[] = {"Threads64", "Threads256",
+                                                              "Threads100"};
+inline constexpr rocks::shader::ShaderPermutationDimension GroupOperationProbeDimensions[] = {
+    rocks::shader::ShaderPermutationDimension::Enum("PROBE_GROUP_SIZE",
+                                                    GroupOperationProbeSizeNames),
+    rocks::shader::ShaderPermutationDimension::Bool("PROBE_FORCE_GROUPSHARED")};
+
+// 퍼뮤테이션 ID다(크기가 낮은 자리).
+constexpr rocks::uint32 GroupOperationProbePermutation(rocks::uint32 size,
+                                                       bool forceGroupshared) noexcept {
+    return size + GroupOperationProbeSizeCount * (forceGroupshared ? 1u : 0u);
+}
+
+constexpr ShaderTypeDesc MakeGroupOperationsProbe() noexcept {
+    ShaderTypeDesc desc =
+        EngineShaderComputeProbeType("EngineShaderGroupOperationsProbe", "GroupOperationsProbe");
+    desc.permutation.dimensions = GroupOperationProbeDimensions;
+    return desc;
+}
+
+inline constexpr ShaderTypeDesc GroupOperationsProbe = MakeGroupOperationsProbe();
+inline constexpr ShaderTypeDesc MipPatternProbe =
+    EngineShaderProbeType("EngineShaderMipPatternProbe",
+                          "/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf", "MipPatternPixel");
+inline constexpr ShaderTypeDesc UtilityProbe = EngineShaderProbeType(
+    "EngineShaderUtilityProbe", "/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf",
+    "UtilityProbePixel");
+
 // 감시 재컴파일 self-test 타입이다(Docs/Design/ShaderSystem 16.3절 SSD78). 원문은 실행마다
 // Programs/Sandbox/ShaderReload를 복사한 임시 시험 루트(/Plugin/SandboxReload —
 // ReloadSourceDirectory)다.

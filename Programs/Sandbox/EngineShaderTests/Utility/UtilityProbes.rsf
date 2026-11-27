@@ -2,7 +2,8 @@
 // 하나가 픽셀 하나이고 기대값은 Sandbox EngineShaderComputeSelfTest.cpp(CPU)다. 텍스처는 C++가 만든 고정
 // 내용이다: SampleSource(RGBA16Float 16 × 16 — 표본 보조, bilinear·clamp 샘플러), UintSource(RGBA32Uint),
 // IntSource(R32Sint), UnwrappedLut(RGBA16Float 1024 × 32 항등 LUT), VolumeLut(RGBA16Float 32³ 항등 LUT).
-// parameters.xy는 표본 보조 원본 크기(texel)다.
+// parameters.xy는 표본 보조 원본 크기(texel)다. MipPatternPixel은 밉 생성 self-test가 mip 0을 채우는 무늬다
+// (D3D 장치는 렌더 타깃·storage 텍스처의 UpdateTexture를 받지 않는다).
 #include "/Engine/Private/Common/ShaderPrelude.rsh"
 #include "/Engine/Private/Color/LutCoordinates.rsh"
 #include "/Engine/Private/Utility/TextureSamplingHelpers.rsh"
@@ -20,8 +21,8 @@ SamplerState VolumeLutSampler;
 float4 UtilityProbePixel(float4 position : SV_Position) : SV_Target0 {
     const uint f = ProbeFunction();
     const uint c = ProbeCase(position);
-    // uv ∈ [-0.125, 1.125)(가장자리 clamp 포함 — 정확한 입력).
-    const float2 uv = float2(ProbeUnit(c, 0u), ProbeUnit(c, 1u)) * 1.25 - 0.125;
+    // uv ∈ [-0.5, 1.5)(가장자리 clamp 포함 — 2의 거듭제곱 배율과 빼기라 정확한 입력).
+    const float2 uv = float2(ProbeUnit(c, 0u), ProbeUnit(c, 1u)) * 2.0 - 0.5;
     const float2 size = Probe.parameters.xy;
     const float3 unit = float3(ProbeUnit(c, 0u), ProbeUnit(c, 1u), ProbeUnit(c, 2u));
     float4 result = float4(0.0, 0.0, 0.0, 0.0);
@@ -40,4 +41,11 @@ float4 UtilityProbePixel(float4 position : SV_Position) : SV_Target0 {
     }
 
     return result;
+}
+
+// 밉 생성 시험의 mip 0 무늬다: texel (x, y)·slice(control.y)의 [0, 1) 값 넷 × parameters.x.
+float4 MipPatternPixel(float4 position : SV_Position) : SV_Target0 {
+    const uint2 pixel = uint2(position.xy);
+    const uint c = (Probe.control.y * 4096u + pixel.y) * 4096u + pixel.x;
+    return float4(ProbeUnit(c, 0u), ProbeUnit(c, 1u), ProbeUnit(c, 2u), ProbeUnit(c, 3u)) * Probe.parameters.x;
 }

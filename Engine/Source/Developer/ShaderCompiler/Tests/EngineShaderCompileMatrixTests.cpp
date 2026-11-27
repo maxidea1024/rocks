@@ -61,6 +61,7 @@ constexpr ShaderDefine GroupProbe256Forced[] = {{"PROBE_GROUP_SIZE", "1"},
 constexpr ShaderDefine GroupProbe100Forced[] = {{"PROBE_GROUP_SIZE", "2"},
                                                 {"PROBE_FORCE_GROUPSHARED", "1"}};
 constexpr char ComputeProbes[] = "/Plugin/EngineShaderTests/Common/ComputeProbes.rsf";
+constexpr char UtilityProbes[] = "/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf";
 
 // 시험 엔트리다(Sandbox EngineShaderTestTypes.inl과 같은 엔트리 — 이 시험은 레이아웃 표 대조를 하지
 // 않는다. 레이아웃 대조는 Sandbox 등록 타입이 장치 형식마다 한다).
@@ -96,10 +97,8 @@ constexpr TestEntry TestEntries[] = {
     {ComputeProbes, "GroupOperationsProbe", ShaderStageCompute, GroupProbe64Forced},
     {ComputeProbes, "GroupOperationsProbe", ShaderStageCompute, GroupProbe256Forced},
     {ComputeProbes, "GroupOperationsProbe", ShaderStageCompute, GroupProbe100Forced},
-    {"/Plugin/EngineShaderTests/Utility/UtilityProbes.rsf",
-     "UtilityProbePixel",
-     ShaderStagePixel,
-     {}}};
+    {UtilityProbes, "UtilityProbePixel", ShaderStagePixel, {}},
+    {UtilityProbes, "MipPatternPixel", ShaderStagePixel, {}}};
 
 // 퍼뮤테이션 정의 문자열 한 벌이다(job이 가리키므로 컴파일이 끝날 때까지 산다).
 constexpr usize DefineValueBytes = 12;
