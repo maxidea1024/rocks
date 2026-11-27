@@ -1,3 +1,4 @@
+#include <Core/Move.h>
 #include <Platform/Win64/ComRef.h>
 #include <ShaderToolLoader/ShaderToolCalls.h>
 #include <stdio.h>
@@ -40,10 +41,68 @@ void AppendBlob(String& diagnostics, ID3DBlob* blob) noexcept {
     (void)diagnostics.TryAppend(StringView(text, bytes));
 }
 
+// D3DGetBlobPart·D3DStripShader 함수 형이다(SDK 헤더에 함수 포인터 typedef가 없다).
+using GetBlobPartFunction = HRESULT(WINAPI*)(LPCVOID data, SIZE_T bytes, D3D_BLOB_PART part,
+                                             UINT flags, ID3DBlob** out);
+using StripShaderFunction = HRESULT(WINAPI*)(LPCVOID data, SIZE_T bytes, UINT flags,
+                                             ID3DBlob** out);
+
+// D3D_BLOB_DEBUG_NAME part 머리(uint16 flags, uint16 이름 길이 — NUL 제외)다(d3dcompiler.h의
+// D3D_BLOB_DEBUG_NAME 설명).
+constexpr usize DebugNameHeaderBytes = 4;
+
+// code에서 PDB·디버그 이름을 symbols에 꺼내고 code를 디버그 정보를 뗀 DXBC로 바꾼다(16.3절 SSD73).
+// 실패하면 진단을 남기고 false다.
+bool ExtractSymbols(const FxcFunctions& fxc, platform::windows::ComRef<ID3DBlob>& code,
+                    FxcSymbols& symbols, String& diagnostics) noexcept {
+    const auto getPart =
+        reinterpret_cast<GetBlobPartFunction>(fxc.address[FxcFunctions::GetBlobPart]);
+    const auto strip =
+        reinterpret_cast<StripShaderFunction>(fxc.address[FxcFunctions::StripShader]);
+    if (getPart == nullptr || strip == nullptr) {
+        (void)diagnostics.TryAppend("FXC debug symbol functions are not open");
+        return false;
+    }
+
+    platform::windows::ComRef<ID3DBlob> pdb;
+    if (FAILED(
+            getPart(code->GetBufferPointer(), code->GetBufferSize(), D3D_BLOB_PDB, 0, pdb.Out())) ||
+        !pdb || !symbols.pdb.TryResize(pdb->GetBufferSize())) {
+        (void)diagnostics.TryAppend("FXC produced no PDB");
+        return false;
+    }
+
+    memcpy(symbols.pdb.Data(), pdb->GetBufferPointer(), symbols.pdb.Size());
+    platform::windows::ComRef<ID3DBlob> name;
+    symbols.name.Clear();
+    if (SUCCEEDED(getPart(code->GetBufferPointer(), code->GetBufferSize(), D3D_BLOB_DEBUG_NAME, 0,
+                          name.Out())) &&
+        name && name->GetBufferSize() > DebugNameHeaderBytes) {
+        const auto* bytes = static_cast<const uint8*>(name->GetBufferPointer());
+        const usize length = static_cast<usize>(bytes[2]) | (static_cast<usize>(bytes[3]) << 8);
+        if (length <= name->GetBufferSize() - DebugNameHeaderBytes) {
+            (void)symbols.name.TryAssign(
+                StringView(reinterpret_cast<const char*>(bytes + DebugNameHeaderBytes), length));
+        }
+    }
+
+    platform::windows::ComRef<ID3DBlob> stripped;
+    if (FAILED(strip(code->GetBufferPointer(), code->GetBufferSize(), D3DCOMPILER_STRIP_DEBUG_INFO,
+                     stripped.Out())) ||
+        !stripped) {
+        (void)diagnostics.TryAppend("FXC could not strip the debug information");
+        return false;
+    }
+
+    code = Move(stripped);
+    return true;
+}
+
 } // namespace fxc_call_detail
 
 ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc, const FxcCompileRequest& request,
-                                 Array<uint8>& object, String& diagnostics) noexcept {
+                                 Array<uint8>& object, String& diagnostics,
+                                 FxcSymbols* symbols) noexcept {
     using namespace fxc_call_detail;
     object.Clear();
     diagnostics.Clear();
@@ -73,8 +132,10 @@ ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc, const FxcCompileReques
         return ShaderToolOutcome::CompileError;
     }
 
+    const bool debug = request.debugSymbols && symbols != nullptr;
     const UINT flags = OptimizationFlags[request.optimization] | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR |
-                       D3DCOMPILE_WARNINGS_ARE_ERRORS;
+                       D3DCOMPILE_WARNINGS_ARE_ERRORS |
+                       (debug ? D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_BINARY : 0u);
     platform::windows::ComRef<ID3DBlob> code;
     platform::windows::ComRef<ID3DBlob> errors;
     const HRESULT compiled =
@@ -82,6 +143,10 @@ ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc, const FxcCompileReques
                 profile, flags, 0, code.Out(), errors.Out());
     if (SUCCEEDED(compiled) && code) {
         AppendBlob(diagnostics, errors.Get());
+        if (debug && !ExtractSymbols(fxc, code, *symbols, diagnostics)) {
+            return ShaderToolOutcome::ToolError;
+        }
+
         if (!object.TryResize(code->GetBufferSize())) {
             (void)diagnostics.TryAppend("out of memory");
             return ShaderToolOutcome::ToolError;

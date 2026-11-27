@@ -1,3 +1,4 @@
+#include <Base/NumericLimits.h>
 #include <Collision/BodySettings.generated.h>
 #include <Collision/CollisionSettings.generated.h>
 #include <Collision/CollisionTypes.generated.h>
@@ -9,6 +10,7 @@
 #include <World/Primitives/PrimitiveComponent.generated.h>
 #include <World/Physics/BodyCreateDesc.h>
 #include <World/Physics/PhysicsScene.h>
+#include <World/Physics/WorldCollision.h>
 #include <World/Primitives/PrimitiveComponent.h>
 #include <World/SceneComponent.generated.h>
 #include <World/World.h>
@@ -104,6 +106,105 @@ Result<void> CopyResolvedProfile(const CollisionProfileTable& table,
     }
 
     return MakeCustomCollision(table, resolved, body);
+}
+
+// MoveComponent 상수다(UE PrimitiveComponent.cpp — 7.1.10절).
+// sweep 최소 이동 배율(UE 4·KINDA_SMALL_NUMBER — :3281).
+constexpr double MinSweepMovementScale = 4.0;
+// pullback(UE PullBackHit — :3095-3099): hit time에서 clamp(PullbackTime, PullbackTime/D, 1/D) +
+// PullbackTimeSlack을 뺀다.
+constexpr double PullbackTime = 0.1;
+constexpr double PullbackTimeSlack = 0.001;
+// 시작 겹침에서 빠져나가는지 보는 내적 허용 오차와 시작 겹침으로 보는 hit 거리(UE CVar 기본값 0 —
+// :125·:134).
+constexpr double InitialOverlapTolerance = 0.0;
+constexpr double HitDistanceTolerance = 0.0;
+// 같은 회전으로 보는 성분 허용 오차(UE SCENECOMPONENT_QUAT_TOLERANCE — 최소 이동 판정).
+constexpr double MoveQuaternionTolerance = 1.0e-8;
+// 움직였는지 보는 위치·회전 허용 오차(UE InternalSetWorldLocationAndRotation의 FVector::Equals·
+// FQuat::Equals 기본값 KINDA_SMALL_NUMBER — SceneComponent.cpp).
+constexpr double MovedTolerance = math::KindaSmallNumber<double>;
+
+// 이동 중 body 이동 방식이다(자손의 OnTransformUpdated도 같은 방식 — UE UpdateComponentToWorld가
+// teleport를 자식에 넘긴다). 이동은 World 게임 thread에서 하므로 thread 범위 값이다. 한계: 범위
+// 안에서 자손의 OnTransformUpdated가 MoveComponent가 아닌 setter로 관계없는 컴포넌트를 옮기면 그
+// body도 이 방식을 받는다(안쪽 MoveComponent는 범위를 저장·복원한다).
+thread_local TeleportMode t_moveTeleport = TeleportMode::None;
+
+class MoveTeleportScope {
+public:
+    explicit MoveTeleportScope(TeleportMode teleport) noexcept : previous_(t_moveTeleport) {
+        t_moveTeleport = teleport;
+    }
+
+    ~MoveTeleportScope() {
+        t_moveTeleport = previous_;
+    }
+
+    MoveTeleportScope(const MoveTeleportScope&) = delete;
+    MoveTeleportScope& operator=(const MoveTeleportScope&) = delete;
+
+private:
+    TeleportMode previous_;
+};
+
+// UE FQuat::Equals: 성분마다 허용 오차 안이면 같고, 부호가 반대인 같은 회전도 같다.
+bool SameMoveRotation(const Quatd& a, const Quatd& b,
+                      double tolerance = MoveQuaternionTolerance) noexcept {
+    auto near = [tolerance](const Quatd& p, const Quatd& q, double sign) noexcept {
+        return math::Abs(p.x - sign * q.x) <= tolerance &&
+               math::Abs(p.y - sign * q.y) <= tolerance &&
+               math::Abs(p.z - sign * q.z) <= tolerance && math::Abs(p.w - sign * q.w) <= tolerance;
+    };
+    return near(a, b, 1.0) || near(a, b, -1.0);
+}
+
+// UE FVector::Equals: 성분마다 허용 오차 안이면 같다.
+bool SameMoveLocation(const Vec3d& a, const Vec3d& b) noexcept {
+    return math::Abs(a.x - b.x) <= MovedTolerance && math::Abs(a.y - b.y) <= MovedTolerance &&
+           math::Abs(a.z - b.z) <= MovedTolerance;
+}
+
+// UE PullBackHit: 막는 면에 붙지 않게 hit time을 조금 앞으로 당긴다.
+void PullBackHit(HitResult& hit, double distance) noexcept {
+    const double desiredTimeBack =
+        math::Clamp(PullbackTime, PullbackTime / distance, 1.0 / distance) + PullbackTimeSlack;
+    hit.time = math::Clamp(hit.time - desiredTimeBack, 0.0, 1.0);
+}
+
+// UE ShouldIgnoreHitResult(:3115-3165): 시작 겹침에서 빠져나가는 막는 hit는 무시한다.
+bool ShouldIgnoreHit(const HitResult& hit, const Vec3d& moveDirection,
+                     const MoveOptions& options) noexcept {
+    if (!hit.blockingHit || options.neverIgnoreBlockingOverlaps) {
+        return false;
+    }
+
+    if (hit.distance < HitDistanceTolerance || hit.startPenetrating) {
+        return Dot(hit.impactNormal, moveDirection) > InitialOverlapTolerance;
+    }
+
+    return false;
+}
+
+// include면 handle을 더하고(이미 있거나 null이면 그대로) 아니면 뺀다. 오류: 할당 실패.
+Result<void> SetHandleInList(Array<ObjectHandle>& list, ObjectHandle handle,
+                             bool include) noexcept {
+    for (usize index = 0; index < list.Size(); ++index) {
+        if (list[index] == handle) {
+            if (!include) {
+                list[index] = list[list.Size() - 1];
+                (void)list.TryPopBack();
+            }
+
+            return Result<void>::Success();
+        }
+    }
+
+    if (!include || handle.IsNull()) {
+        return Result<void>::Success();
+    }
+
+    return list.TryPushBack(handle);
 }
 
 bool KnownCollisionEnabled(CollisionEnabled value) noexcept {
@@ -422,6 +523,180 @@ void PrimitiveComponent::OnStart() noexcept {
     }
 }
 
+Result<void> PrimitiveComponent::IgnoreActorWhenMoving(ObjectHandle actor, bool ignore) noexcept {
+    return SetHandleInList(moveIgnoreActors_, actor, ignore);
+}
+
+Result<void> PrimitiveComponent::IgnoreComponentWhenMoving(ObjectHandle component,
+                                                           bool ignore) noexcept {
+    return SetHandleInList(moveIgnoreComponents_, component, ignore);
+}
+
+Result<bool> PrimitiveComponent::MoveComponent(const Vec3d& delta, const Quatd& rotation,
+                                               bool sweep, HitResult* outHit,
+                                               const MoveOptions& options) noexcept {
+    const Vec3d traceStart = WorldLocation();
+    const Vec3d traceEnd = traceStart + delta;
+    if (outHit != nullptr) {
+        *outHit = HitResult{};
+        outHit->traceStart = traceStart;
+        outHit->traceEnd = traceEnd;
+    }
+
+    // UE는 등록 뒤 Static 이동을 경고 뒤 거부한다(:3264-3271).
+    if (auto movable = CheckMovable("move"); !movable) {
+        return Result<bool>::Failure(movable.Error());
+    }
+
+    auto unit = rotation.TryNormalize();
+    if (!unit || !math::IsFinite(delta.x) || !math::IsFinite(delta.y) || !math::IsFinite(delta.z)) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const Quatd initialRotation = WorldQuaternion();
+    double deltaSizeSquared = (traceEnd - traceStart).LengthSquared();
+    // sweep은 아주 작은 이동을 하지 않는다(질의가 그 거리를 다루지 않는다 — :3281-3296).
+    const double minSweepDistance = MinSweepMovementScale * math::KindaSmallNumber<double>;
+    const double minMovementSquared = sweep ? minSweepDistance * minSweepDistance : 0.0;
+    if (deltaSizeSquared <= minMovementSquared) {
+        if (SameMoveRotation(unit.Value(), initialRotation)) {
+            return Result<bool>::Success(true);
+        }
+
+        deltaSizeSquared = 0.0;
+    }
+
+    HitResult blocking;
+    bool hasBlocking = false;
+    Vec3d newLocation = traceEnd;
+    if (sweep) {
+        newLocation = traceStart;
+        auto resolved = TryResolveCollision();
+        const bool queryEnabled =
+            resolved && CollisionEnabledHasQuery(resolved.Value().collisionEnabled);
+        if (HasWorld() && queryEnabled && deltaSizeSquared > 0.0) {
+            QueryParams params;
+            params.ignoreActors = moveIgnoreActors_.View();
+            params.ignoreComponents = moveIgnoreComponents_.View();
+            // 자기가 overlap 이벤트를 내지 않으면 겹침을 볼 일이 없다(:3351).
+            params.ignoreTouches = !generateOverlapEvents_;
+            Array<HitResult> hits(moveIgnoreActors_.GetAllocator());
+            auto traced = ComponentTraceAll(GetWorld(), Handle(), traceStart, traceEnd,
+                                            initialRotation, params, hits);
+            if (!traced) {
+                return Result<bool>::Failure(traced.Error());
+            }
+
+            const double deltaSize = math::Sqrt(deltaSizeSquared);
+            for (HitResult& hit : hits) {
+                PullBackHit(hit, deltaSize);
+            }
+
+            // 시작 겹침은 법선이 이동에 가장 맞서는 것, 없으면 첫 막음이다(:3380-3398).
+            const Vec3d moveDirection = delta * (1.0 / deltaSize);
+            usize blockingIndex = IndexNone;
+            double blockingDot = NumericLimits<double>::Max();
+            for (usize index = 0; index < hits.Size(); ++index) {
+                const HitResult& hit = hits[index];
+                if (!hit.blockingHit || ShouldIgnoreHit(hit, moveDirection, options)) {
+                    continue;
+                }
+
+                if (hit.startPenetrating) {
+                    const double normalDotDelta = Dot(hit.impactNormal, delta);
+                    if (normalDotDelta < blockingDot) {
+                        blockingDot = normalDotDelta;
+                        blockingIndex = index;
+                    }
+                } else if (blockingIndex == IndexNone) {
+                    blockingIndex = index;
+                    break;
+                }
+            }
+
+            if (blockingIndex != IndexNone) {
+                blocking = hits[blockingIndex];
+                hasBlocking = true;
+                newLocation = traceStart + (traceEnd - traceStart) * blocking.time;
+                // 아주 작은 이동으로 면 위·안에 들어가지 않는다(:3434-3456).
+                if ((newLocation - traceStart).LengthSquared() <= minMovementSquared) {
+                    newLocation = traceStart;
+                    blocking.time = 0.0;
+                }
+            } else {
+                newLocation = traceEnd;
+            }
+        } else if (deltaSizeSquared > 0.0) {
+            // 질의 충돌이 꺼져 있으면 그냥 옮긴다(:3480-3485).
+            newLocation = traceStart + delta;
+        }
+    }
+
+    // 바뀌지 않으면 transform을 설정하지 않는다(UE InternalSetWorldLocationAndRotation — 같으면
+    // UpdateComponentToWorld 없이 false, 자손 body·Render·bounds도 건드리지 않는다).
+    const bool moved = !SameMoveLocation(newLocation, traceStart) ||
+                       !SameMoveRotation(unit.Value(), initialRotation, MovedTolerance);
+    if (moved) {
+        MoveTeleportScope teleport(options.teleport);
+        const bool previousSkip = applyingPhysicsResult_;
+        applyingPhysicsResult_ = previousSkip || options.skipPhysicsMove;
+        auto placed = SetWorldLocationAndRotation(newLocation, unit.Value());
+        applyingPhysicsResult_ = previousSkip;
+        if (!placed) {
+            return Result<bool>::Failure(placed.Error());
+        }
+    }
+
+    // 막는 hit 발행(:3537-3550): 시작 겹침은 disableBlockingOverlapDispatch면 내지 않는다.
+    if (hasBlocking && (!blocking.startPenetrating || !options.disableBlockingOverlapDispatch) &&
+        GetState() != ComponentState::PendingDestroy) {
+        DispatchBlockingHit(blocking);
+    }
+
+    if (outHit != nullptr && hasBlocking) {
+        *outHit = blocking;
+    }
+
+    return Result<bool>::Success(moved);
+}
+
+void PrimitiveComponent::DispatchBlockingHit(const HitResult& hit) noexcept {
+    // UE DispatchBlockingHit(:3588-3607)·AActor::InternalDispatchBlockingHit(Actor.cpp:3525-3556).
+    if (hit.component.IsNull() || !HasWorld()) {
+        return;
+    }
+
+    World& world = GetWorld();
+    const ObjectHandle self = Handle();
+    const ObjectHandle owner = GetOwner();
+    auto notify = [&world](ObjectHandle actor, ObjectHandle myComponent, ObjectHandle otherActor,
+                           ObjectHandle otherComponent, bool selfMoved,
+                           const HitResult& value) noexcept {
+        // 파괴 대기 Actor에는 부르지 않는다(UE IsActorValidToNotify).
+        auto state = world.GetActorState(actor);
+        if (!state || state.Value() == ActorState::PendingDestroy) {
+            return;
+        }
+
+        (void)world.With<Actor>(actor, [&](Actor& target) noexcept {
+            target.OnHit(myComponent, otherActor, otherComponent, selfMoved, Vec3d::Zero(), value);
+        });
+    };
+
+    notify(owner, self, hit.actor, hit.component, true, hit);
+    // 발행 중 상대 컴포넌트가 파괴될 수 있다(UE IsValid(BlockingHitComponent)).
+    auto otherState = world.GetComponentState(hit.component);
+    if (!otherState || otherState.Value() == ComponentState::PendingDestroy) {
+        return;
+    }
+
+    // 상대에게는 뒤집은 hit다(UE FHitResult::GetReversedHit — 법선 부호만 바꾼다).
+    HitResult reversed = hit;
+    reversed.normal = hit.normal * -1.0;
+    reversed.impactNormal = hit.impactNormal * -1.0;
+    notify(hit.actor, hit.component, owner, self, false, reversed);
+}
+
 Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,
                                                        const Quatd& rotation) noexcept {
     applyingPhysicsResult_ = true;
@@ -437,7 +712,8 @@ void PrimitiveComponent::OnTransformUpdated() noexcept {
     }
 
     if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
-        scene->SetBodyTransform(bodyHandle_, BodyWorldTransform(), TeleportMode::None);
+        // MoveComponent 범위 안이면 그 이동의 teleport 방식이다(자손도 같다 — 7.1.10절).
+        scene->SetBodyTransform(bodyHandle_, BodyWorldTransform(), t_moveTeleport);
     }
 }
 

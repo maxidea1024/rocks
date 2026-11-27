@@ -216,6 +216,8 @@ ShaderToolLoadStatus CompileWithDxc(const DxcFunctions& functions, const DxcComp
     using platform::windows::ComRef;
     result.object.Clear();
     result.diagnostics.Clear();
+    result.pdb.Clear();
+    result.pdbName.Clear();
     result.compiled = false;
     ShaderToolLoadStatus status;
     status.tool = DxcToolName;
@@ -286,6 +288,33 @@ ShaderToolLoadStatus CompileWithDxc(const DxcFunctions& functions, const DxcComp
     const auto* bytes = static_cast<const uint8*>(object->GetBufferPointer());
     if (!result.object.TryAppend(Span<const uint8>(bytes, object->GetBufferSize()))) {
         return DxcCallFailed(E_OUTOFMEMORY);
+    }
+
+    // -Zi의 PDB와 그 이름(ShaderSystem 16.3절 SSD73)이다. -Zi가 없으면 출력이 없다.
+    if (compiled->HasOutput(DXC_OUT_PDB)) {
+        ComRef<IDxcBlob> pdb;
+        ComRef<IDxcBlobWide> name;
+        if (const HRESULT read =
+                compiled->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(pdb.Out()), name.Out());
+            FAILED(read) || !pdb) {
+            return DxcCallFailed(FAILED(read) ? read : E_FAIL);
+        }
+
+        const auto* pdbBytes = static_cast<const uint8*>(pdb->GetBufferPointer());
+        if (!result.pdb.TryAppend(Span<const uint8>(pdbBytes, pdb->GetBufferSize()))) {
+            return DxcCallFailed(E_OUTOFMEMORY);
+        }
+
+        if (name && name->GetStringLength() > 0) {
+            char text[MaxShaderToolPathBytes];
+            const platform::windows::TextConversion converted =
+                platform::windows::ConvertWideToUtf8(name->GetStringPointer(),
+                                                     name->GetStringLength(), text, sizeof(text),
+                                                     platform::windows::TextFit::Exact);
+            if (!converted || !result.pdbName.TryAssign(StringView(text, converted.length))) {
+                return DxcCallFailed(E_OUTOFMEMORY);
+            }
+        }
     }
 
     result.compiled = true;

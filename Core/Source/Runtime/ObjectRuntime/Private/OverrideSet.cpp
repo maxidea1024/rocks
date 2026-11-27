@@ -93,6 +93,11 @@ Result<void> VisitUnits(const TypeLease& lease, Span<const PathStep> path, Visit
         }
 
         const FieldSchema& field = top ? lease.Schema().fields[index] : view.Schema().fields[index];
+        // 이벤트 필드는 값이 아니라 재정의 단위가 아니다(Docs/Design/EventReflection.ko.md 3.1절).
+        if (IsEventField(field)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         const StructView nested = top ? lease.FieldStruct(index) : view.FieldStruct(index);
         unit[step] = at.fieldId;
         const Span<const Guid> here(unit, step + 1);

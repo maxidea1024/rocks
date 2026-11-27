@@ -45,7 +45,8 @@ struct ShaderCompileOptions {
     // HLSL 2021(결정 2). 기본은 형식 정의 language.hlsl2021이다(DefaultShaderCompileOptions).
     ROCKS_PROPERTY() bool hlsl2021 = false;
     ROCKS_PROPERTY() ShaderOptimization optimization = ShaderOptimization::O3;
-    // 디버그 심볼(값 3 — SH4). SH1은 true를 Unsupported로 거부한다.
+    // 디버그 심볼(값 3 — ShaderSystem 16.3절 SSD73). 켜면 형식이 심볼을 만들 수 있을 때 값 3이
+    // 생긴다 (D3D PDB·SPIR-V debug module, 텍스트 형식은 없음).
     ROCKS_PROPERTY() bool debugSymbols = false;
     ROCKS_PROPERTY() ShaderMatrixLayout matrixLayout = ShaderMatrixLayout::Row;
 };
@@ -62,9 +63,7 @@ enum class ShaderOptionError : uint8 {
     // 그 옵션이 받지 않는 값이다(bool은 true·false, enum은 열거자 이름).
     InvalidValue,
     // 같은 옵션을 두 번 주었다.
-    Duplicate,
-    // 이 단계가 지원하지 않는 값이다(SH1의 debugSymbols=true).
-    Unsupported
+    Duplicate
 };
 
 // 진단용 열거자 이름이다(정적 수명). 범위 밖이면 "unknown".
@@ -88,11 +87,11 @@ DefaultShaderCompileOptions(const ShaderFormatDefinition& format) noexcept;
 // "이름=값" 목록을 options에 적용한다(주지 않은 옵션은 그대로). 이름은 필드 이름 그대로
 // (hlsl2021·optimization·debugSymbols·matrixLayout), 값은 bool `true`·`false`, enum 열거자 이름
 // (`O0`–`O3`, `Row`)이고 공백을 받지 않는다. 오류: InvalidSyntax, UnknownName, InvalidValue,
-// Duplicate, Unsupported. 실패하면 options는 바뀌지 않는다.
+// Duplicate. 실패하면 options는 바뀌지 않는다.
 ROCKS_SHADERCOMPILER_API ShaderOptionStatus ParseShaderCompileOptions(
     Span<const StringView> assignments, ShaderCompileOptions& options) noexcept;
 
-// 이 단계가 받는 옵션인가(SH1: debugSymbols는 false여야 한다 — Unsupported).
+// 값이 범위 안인가(optimization O0–O3, matrixLayout Row — 밖이면 InvalidValue).
 ROCKS_SHADERCOMPILER_API ShaderOptionStatus
 ValidateShaderCompileOptions(const ShaderCompileOptions& options) noexcept;
 

@@ -242,6 +242,12 @@ TEST(ShaderCompileOptions_ParsesAssignments) {
         CHECK(static_cast<int>(options.optimization) == level[1] - '0');
     }
 
+    // debugSymbols=true는 SH4부터 받는다(ShaderSystem 16.3절 SSD73).
+    const StringView symbols[] = {"debugSymbols=true"};
+    CHECK(ParseShaderCompileOptions(symbols, options));
+    CHECK(options.debugSymbols && ValidateShaderCompileOptions(options));
+    options.debugSymbols = false;
+
     // 빈 목록은 아무것도 바꾸지 않는다.
     const ShaderCompileOptions before = options;
     CHECK(ParseShaderCompileOptions({}, options));
@@ -273,7 +279,7 @@ TEST(ShaderCompileOptions_RejectsInvalidAssignments) {
          ShaderOptionError::Duplicate,
          2,
          "optimization"},
-        {{"debugSymbols=true"}, 1, ShaderOptionError::Unsupported, 0, "debugSymbols"},
+        {{"debugSymbols=yes"}, 1, ShaderOptionError::InvalidValue, 0, "debugSymbols"},
     };
     for (const Case& test : cases) {
         ShaderCompileOptions options;
@@ -294,9 +300,9 @@ TEST(ShaderCompileOptions_RejectsInvalidAssignments) {
         CHECK(options.optimization == ShaderOptimization::O2 && !options.hlsl2021);
     }
 
-    ShaderCompileOptions debug;
-    debug.debugSymbols = true;
-    CHECK(ValidateShaderCompileOptions(debug).code == ShaderOptionError::Unsupported);
+    ShaderCompileOptions outOfRange;
+    outOfRange.optimization = static_cast<ShaderOptimization>(4);
+    CHECK(ValidateShaderCompileOptions(outOfRange).code == ShaderOptionError::InvalidValue);
 }
 
 } // namespace shader_nugget_tests_file

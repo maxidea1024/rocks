@@ -25,8 +25,10 @@
 //   - 출력: job마다 표준 출력에 `shader-compile: <format> <path>:<entry>:<stage> <key> <hit|miss>
 //     <status>[ <file>]` 한 줄, 진단은 표준 오류다. --out이 있으면 성공한 코드를
 //     `<out>/<format>/<name>.<entry>.<stage>.<ext>`(name은 가상 경로의 `/`를 `+`로 바꾼 것, ext는
-//     backend별 dxil·dxbc·spv·metallib·essl)에 쓴다. 끝에 관리자 계수 요약 한 줄이다(진행 줄은
-//     찍지 않는다 — 진행 표시는 Progress 모듈 몫, 진행 보고 12절).
+//     backend별 dxil·dxbc·spv·metallib·essl)에 쓴다. --option=debugSymbols=true면 값 3(ShaderSystem
+//     16.3절 SSD73)을 같은 폴더에 심볼 이름(D3D PDB), 이름이 없으면 <name>.<entry>.<stage>.spv로
+//     쓴다. 끝에 관리자 계수 요약 한 줄이다(진행 줄은 찍지 않는다 — 진행 표시는 Progress 모듈 몫,
+//     진행 보고 12절).
 //   - 종료 코드: 모든 job 성공 0, job 실패·실행 실패 1, 사용법 오류 2.
 namespace rocks::shader {
 

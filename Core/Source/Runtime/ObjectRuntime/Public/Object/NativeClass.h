@@ -298,6 +298,9 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
         schema.editorOnlyFieldIds = reflected.editorOnlyFieldIds;
         schema.flags |= reflected.flags & InheritedTypeFlags;
         ops.fields = GeneratedType<Reflected>::Ops().fields;
+        // 이벤트 필드 연산(EventReflection ED15)도 빌린다(thunk는
+        // Resolve·ResolveForWrite<Reflected> — 파생 객체도 받는다).
+        ops.events = GeneratedType<Reflected>::Ops().events;
         ops.completeFieldLayout = false;
         ops.parallelTraceSafe = false;
         ops.hasStrongReferences =

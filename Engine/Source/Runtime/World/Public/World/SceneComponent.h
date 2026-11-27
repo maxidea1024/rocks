@@ -360,9 +360,11 @@ protected:
     // affectsWorld). 막으면 InvalidArgument와 Warning 진단 ComponentDataLockedInGame이다.
     Result<void> CheckChangeBeforeGameInitialization(const char* property) const noexcept;
 
-private:
-    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다.
+    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다. action은 진단
+    // 문구의 동작 이름이다.
     Result<void> CheckMovable(const char* action) const noexcept;
+
+private:
     // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한다.
     void NotifyTransformUpdated() noexcept;
     // 링크만 바꾼다(검사·규칙 계산 뒤).
