@@ -34,6 +34,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 | `UnsupportedAsset` | 경고 | 범위 밖 클래스(2절) |
 | `UnsupportedSourceLayout` | 오류 | UDIM·다층·위도경도 큐브 |
 | `GammaMismatch` | 경고 | 4.2절 |
+| `UnrealNameNormalized` | 경고 | 메시 원본 속성 이름·Name 값을 NFC로 바꿈(5.5절 1번) |
 | `GeneratedLodBaked` / `BakedColorQuantized` | 정보 | 5.1·6.2절 |
 | `UnrealPathRenamed` | 정보 | 9.1절 |
 | `UnrealPathTooLong` / `UnrealPathCollision` | 오류 | 9.1절 |

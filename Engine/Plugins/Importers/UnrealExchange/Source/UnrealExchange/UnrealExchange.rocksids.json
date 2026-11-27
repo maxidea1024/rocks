@@ -24,6 +24,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ExchangeMeshNormals",
+      "id": "20ecb7d55cfd44d383a7295b02c55f14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::UnrealExchangeImportOptions",
       "id": "4babc834a3ec48049cc1f1ff2d70f09d",
       "aliases": [],

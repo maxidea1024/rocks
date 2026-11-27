@@ -17,6 +17,14 @@
 //   if (options->objectPath.View() != asset.objectPath) { /* InvalidImportOption */ }
 namespace rocks {
 
+// --mesh-normals 값이다(5.3절 — 정적·스킨 메시가 UE 준비 원본을 쓰는지, 5.5절 2번). Unreal은 UE가
+// 계산한 법선·tangent·lightmap UV를 담은 prepared 원본을, Rocks는 순수 원본과 UE 빌드 설정을 쓴다.
+ROCKS_ENUM()
+enum class ExchangeMeshNormals : uint8 {
+    Unreal,
+    Rocks
+};
+
 ROCKS_STRUCT()
 struct UnrealExchangeImportOptions {
     ROCKS_GENERATED_BODY()

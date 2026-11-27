@@ -16,9 +16,11 @@ public sealed class UnrealExchange : PluginModuleRules
     // AssetRuntime: AssetDiagnosticCode. MeshSource: variable blob layout limits (MeshMaxSourceInfluences, MaxNameFieldBytes).
     // AssetDatabase: the AssetIndex tag lookup and AssetService (section 10.5). AssetCommandlets: the asset command session.
     // ObjectRuntime: the reflected import options struct. ReflectionText: ImportJson for the translated settings (section 10.6 item 8).
-    // Texture: the texture output classes and TextureSource (section 4.6).
+    // Texture: the texture output classes and TextureSource (section 4.6). Mesh, MeshTools: the static mesh settings structs, collision
+    // and the static mesh import service spec (section 5.5).
     protected override string[] PublicDependencies =>
-        ["Core", "ObjectRuntime", "ReflectionText", "AssetRuntime", "MeshSource", "AssetDatabase", "AssetCommandlets", "Texture"];
+        ["Core", "ObjectRuntime", "ReflectionText", "AssetRuntime", "MeshSource", "AssetDatabase", "AssetCommandlets", "Texture", "Mesh",
+         "MeshTools"];
 
     // ImageCodec: the source size limits shared with file imports (ImageDecodeLimits defaults — section 4.6 item 2).
     protected override string[] PrivateDependencies => ["ImageCodec"];

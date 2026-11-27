@@ -79,6 +79,8 @@ TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnknownField) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedAsset) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::GammaMismatch) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnrealNameNormalized) ==
+          ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedSourceLayout) ==
           ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingUnrealDependency) ==

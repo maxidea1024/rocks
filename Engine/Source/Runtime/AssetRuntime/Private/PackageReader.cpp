@@ -1027,6 +1027,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnsupportedSourceLayout";
     case AssetDiagnosticCode::GammaMismatch:
         return "GammaMismatch";
+    case AssetDiagnosticCode::UnrealNameNormalized:
+        return "UnrealNameNormalized";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
     case AssetDiagnosticCode::AliasResolved:
@@ -1114,6 +1116,7 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::UnrealPathRenamed:
     case AssetDiagnosticCode::MissingUnrealDependency:
     case AssetDiagnosticCode::GammaMismatch:
+    case AssetDiagnosticCode::UnrealNameNormalized:
     case AssetDiagnosticCode::AliasResolved:
     case AssetDiagnosticCode::AliasInUse:
     case AssetDiagnosticCode::AliasSearchTruncated:

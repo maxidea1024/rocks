@@ -74,6 +74,9 @@ struct ExchangeSettingRow {
     usize memberCount = 0;
     // Unsupported의 UE 기본값(JSON 텍스트)이다.
     StringView defaultValue;
+    // 출력 키다(UnrealExchange 5.5절 4번). 비면 UE 키에서 bool 접두 b만 뗀 이름이다(대소문자는
+    // ImportJson이 무시한다 — 이름이 다른 행만 채운다, 예: BuildScale3D → buildScale).
+    StringView rocksKey;
 };
 
 // 경고 하나다. key는 settings 문서를 가리킨다(문서가 살아 있는 동안 유효).

@@ -24,24 +24,24 @@ namespace {
 using Kind = ExchangeSettingKind;
 
 constexpr ExchangeSettingRow MemberRows[] = {
-    {"Mode", Kind::Enum, 0, nullptr, 0, {}},
-    {"bOn", Kind::Same, 0, nullptr, 0, {}},
+    {"Mode", Kind::Enum, 0, nullptr, 0, {}, {}},
+    {"bOn", Kind::Same, 0, nullptr, 0, {}, {}},
 };
 
 constexpr ExchangeSettingRow SampleRows[] = {
-    {"bFlag", Kind::Same, 0, nullptr, 0, {}},
-    {"Plain", Kind::Same, 0, nullptr, 0, {}},
-    {"Group", Kind::Enum, 0, nullptr, 0, {}},
-    {"Id", Kind::Guid, 0, nullptr, 0, {}},
-    {"Scale", Kind::PerPlatformFloat, 0, nullptr, 0, {}},
-    {"Ref", Kind::Reference, 0, nullptr, 0, {}},
-    {"Refs", Kind::ReferenceArray, 0, nullptr, 0, {}},
-    {"Color", Kind::Struct, 0, MemberRows, 2, {}},
-    {"Layers", Kind::StructArray, 0, MemberRows, 2, {}},
-    {"Lighting", Kind::Ignore, 0, nullptr, 0, {}},
-    {"UserData", Kind::Unsupported, 0, nullptr, 0, "[]"},
-    {"Only2D", Kind::Same, ExchangeClassBit(ExchangeClass::Texture2D), nullptr, 0, {}},
-    {"BadDefault", Kind::Unsupported, 0, nullptr, 0, "{"},
+    {"bFlag", Kind::Same, 0, nullptr, 0, {}, {}},
+    {"Plain", Kind::Same, 0, nullptr, 0, {}, {}},
+    {"Group", Kind::Enum, 0, nullptr, 0, {}, {}},
+    {"Id", Kind::Guid, 0, nullptr, 0, {}, {}},
+    {"Scale", Kind::PerPlatformFloat, 0, nullptr, 0, {}, {}},
+    {"Ref", Kind::Reference, 0, nullptr, 0, {}, {}},
+    {"Refs", Kind::ReferenceArray, 0, nullptr, 0, {}, {}},
+    {"Color", Kind::Struct, 0, MemberRows, 2, {}, {}},
+    {"Layers", Kind::StructArray, 0, MemberRows, 2, {}, {}},
+    {"Lighting", Kind::Ignore, 0, nullptr, 0, {}, {}},
+    {"UserData", Kind::Unsupported, 0, nullptr, 0, "[]", {}},
+    {"Only2D", Kind::Same, ExchangeClassBit(ExchangeClass::Texture2D), nullptr, 0, {}, {}},
+    {"BadDefault", Kind::Unsupported, 0, nullptr, 0, "{", {}},
 };
 
 // settings 원문을 rows로 compact 번역해 out에 쓴다.
@@ -198,7 +198,7 @@ TEST(UnrealExchange_SettingsTranslateKinds) {
 TEST(UnrealExchange_SettingsEnumPrefix) {
     SystemAllocator allocator;
     {
-        const ExchangeSettingRow rows[] = {{"E", Kind::Enum, 0, nullptr, 0, {}}};
+        const ExchangeSettingRow rows[] = {{"E", Kind::Enum, 0, nullptr, 0, {}, {}}};
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);
         struct Case {
@@ -397,11 +397,11 @@ TEST(UnrealExchange_SettingsPrefixAndDefaults) {
     SystemAllocator allocator;
     {
         const ExchangeSettingRow rows[] = {
-            {"bake", Kind::Same, 0, nullptr, 0, {}},
-            {"b", Kind::Same, 0, nullptr, 0, {}},
-            {"bX", Kind::Same, 0, nullptr, 0, {}},
-            {"Bias", Kind::Unsupported, 0, nullptr, 0, "-1"},
-            {"Pair", Kind::Unsupported, 0, nullptr, 0, R"({"A": 1, "B": 2})"},
+            {"bake", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"b", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"bX", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"Bias", Kind::Unsupported, 0, nullptr, 0, "-1", {}},
+            {"Pair", Kind::Unsupported, 0, nullptr, 0, R"({"A": 1, "B": 2})", {}},
         };
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);
