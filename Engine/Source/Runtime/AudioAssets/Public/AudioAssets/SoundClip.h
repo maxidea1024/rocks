@@ -62,6 +62,9 @@ struct SoundCookedLoadOptions {
     // loadingBehavior가 Inherited일 때 쓰는 값이다. UE처럼 RetainOnLoad–LoadOnDemand로 clamp한다
     // (ForceInline은 clip에만 둘 수 있다 — UE GetDefaultLoadingBehaviorCVar).
     SoundLoadingBehavior defaultLoading = SoundLoadingBehavior::LoadOnDemand;
+    // clip이 Inherited일 때 분류 사슬이 정한 값이다(ChainLoadingBehavior — 3.12절, Inherited면
+    // defaultLoading으로 간다). 호출자가 사운드의 분류 사슬에서 채운다.
+    SoundLoadingBehavior categoryLoading = SoundLoadingBehavior::Inherited;
 };
 
 // 마지막으로 올린 재생 PCM의 키다(재사용 판정 — 3.36.4·3.37.4절). 리플렉션 밖 실행 데이터다. 에디터

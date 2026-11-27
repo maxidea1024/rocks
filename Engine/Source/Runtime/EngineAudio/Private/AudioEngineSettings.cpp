@@ -21,6 +21,31 @@ constinit cvar::CVar<float> MasterVolumeVar =
         .Help("Master output volume (linear). Applied at the next frame end.")
         .Range(0.0f, audio::MaxMasterGain);
 
+// 분류별 사용자 볼륨(3.43.3절 — Rocks, UE에는 대응 기능이 없다). 사용자 설정 층에 저장한다.
+constinit cvar::CVar<float> MusicVolumeVar =
+    cvar::Var("audio.volume.music", 1.0f)
+        .Help("User volume for sound categories marked Music. Read every frame.")
+        .Range(0.0f, 1.0f)
+        .UserSetting();
+
+constinit cvar::CVar<float> EffectsVolumeVar =
+    cvar::Var("audio.volume.effects", 1.0f)
+        .Help("User volume for sound categories marked Effects. Read every frame.")
+        .Range(0.0f, 1.0f)
+        .UserSetting();
+
+constinit cvar::CVar<float> DialogueVolumeVar =
+    cvar::Var("audio.volume.dialogue", 1.0f)
+        .Help("User volume for sound categories marked Dialogue. Read every frame.")
+        .Range(0.0f, 1.0f)
+        .UserSetting();
+
+constinit cvar::CVar<float> InterfaceVolumeVar =
+    cvar::Var("audio.volume.interface", 1.0f)
+        .Help("User volume for sound categories marked Interface. Read every frame.")
+        .Range(0.0f, 1.0f)
+        .UserSetting();
+
 constinit cvar::CVar<float> UnfocusedVolumeVar =
     cvar::Var("audio.unfocused.volume", 0.0f)
         .Help("Output volume multiplier while the application window is not in the foreground.")
@@ -171,6 +196,7 @@ Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcep
         MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar, MixerBufferCountVar,
         MixerSampleRateVar, MaxVoicesVar, StreamRingFramesVar, StreamMaxStreamsVar,
         StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar, FocusInitializeOnFirstUpdateVar,
+        MusicVolumeVar, EffectsVolumeVar, DialogueVolumeVar, InterfaceVolumeVar,
         OcclusionCheckIntervalVar, OcclusionDisableVar, OcclusionFilterScaleVar, VirtualEnabledVar,
         VirtualAllowPlayWhenSilentVar, VirtualUpdateMinVar, VirtualUpdateMaxVar,
         VirtualPerfDistanceVar, VirtualForceUpdateDistanceVar, VirtualMaxWorldDistanceVar);

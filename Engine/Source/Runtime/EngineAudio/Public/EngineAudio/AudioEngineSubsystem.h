@@ -6,6 +6,8 @@
 #include <AudioAssets/SoundClip.h>
 #include <EngineAudio/AudioAttenuation.h>
 #include <EngineAudio/AudioOcclusionQuery.h>
+#include <AudioAssets/MixSnapshotData.h>
+#include <AudioAssets/SoundCategory.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/BoundedSpscQueue.h>
 #include <Core/Math/Quaternion.h>
@@ -127,6 +129,34 @@ public:
     // 장치 전체 focus 배수다(UE FAudioDevice::SetGlobalFocusSettings — AudioDevice.cpp:7578–7589,
     // 3.42.5절). 다음 프레임 끝 묶음부터 쓰인다. 칸이 음수·비유한이면 InvalidArgument다.
     Result<void> SetGlobalFocusSettings(const GlobalFocusSettings& settings) noexcept;
+
+    // 엔진 기본 분류다(UE UAudioSettings::DefaultSoundClass — 3.43.1절). 분류가 없는 사운드의 다음
+    // Play부터 쓴다. 빈 ref면 분류 없음이다. 오류: 사슬 검사 실패(ValidateSoundCategoryChain).
+    Result<void> SetDefaultCategory(SoundCategoryChainRef chain) noexcept;
+
+    // 믹스 스냅숏(3.43.7절 — UE PushSoundMixModifier·PopSoundMixModifier·ClearSoundMixModifier(s)·
+    // SetBaseSoundMix)이다. 다음 프레임 끝 묶음에 실린다. 오류: 빈 ref·검사 실패 InvalidArgument.
+    // 활성 표가 차면 제어 쪽이 무시하고 mixRejects를 센다.
+    Result<void> PushMix(const MixSnapshotRef& mix) noexcept;
+    Result<void> PopMix(const MixSnapshotRef& mix) noexcept;
+    Result<void> ClearMix(const MixSnapshotRef& mix) noexcept;
+    void ClearAllMixes() noexcept;
+    Result<void> SetBaseMix(const MixSnapshotRef& mix) noexcept;
+    // 엔진 기본 base 믹스다(UE DefaultBaseSoundMix — 3.43.5절): 지금 base로 걸고, World가 base를
+    // 바꿨다 끝나면(RestoreDefaultBaseMix) 이것으로 돌아간다.
+    Result<void> SetDefaultBaseMix(const MixSnapshotRef& mix) noexcept;
+    void RestoreDefaultBaseMix() noexcept;
+
+    // 분류 override(UE SetSoundMixClassOverride·ClearSoundMixClassOverride — 3.43.6절)다. volume ≥
+    // 0, pitch [0, 8], seconds ≥ 0이 아니면 InvalidArgument다.
+    Result<void> SetMixCategoryOverride(const MixSnapshotRef& mix, const SoundCategory& category,
+                                        float volume, float pitch, float fadeSeconds,
+                                        bool applyToChildren) noexcept;
+    Result<void> ClearMixCategoryOverride(const MixSnapshotRef& mix, const SoundCategory& category,
+                                          float fadeSeconds) noexcept;
+    // 분류 감쇠 거리 배수(UE SetSoundClassDistanceScale — 3.43.6절)다. scale ≥ 0, seconds ≥ 0.
+    Result<void> SetCategoryDistanceScale(const SoundCategory& category, float scale,
+                                          float seconds) noexcept;
 
     // scene의 차폐 질의 공급자다(3.42.7절 — nullptr이면 차폐되지 않음). 수명은 호출자 책임이고
     // scene 해제가 놓는다. 낡은 id는 무시한다.
@@ -252,6 +282,8 @@ private:
     void AnswerOcclusion(const OcclusionRequest& request) noexcept;
     bool OcclusionDisabled(Engine& engine) const noexcept;
     void FlushDeferredOcclusionAnswers() noexcept;
+    // 믹스·분류 명령을 이번 묶음에 넣는다(제어가 없으면 할 일 없음).
+    Result<void> PushMixCommand(ControlCommand& command) noexcept;
     void SnapshotScenes() noexcept;
     Result<void> ValidateOptions(const SoundSourceRef& sound,
                                  const PlayOptions& options) const noexcept;
@@ -283,6 +315,8 @@ private:
     Array<uint32> sceneEpochs_;
     Array<GameEmitter> emitters_;
     GlobalFocusSettings focusSettings_;
+    SoundCategoryChainRef defaultCategory_;
+    MixSnapshotRef defaultBaseMix_;
     // 이번 프레임 끝에 정한 차폐 허용(mute·audio.occlusion.disable이 아님)이다. 다음 프레임의 Play
     // 첫 검사와 요청 응답이 쓴다.
     bool occlusionEnabled_ = true;

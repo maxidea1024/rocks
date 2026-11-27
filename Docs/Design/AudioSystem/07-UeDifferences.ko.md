@@ -42,6 +42,14 @@
 | voice 상한 단위 | render cost 합(`au.EnableRelativeRenderCostVoiceLimit` 1, wave 1.0) | 개수(3.41.1절) | wave만 있는 동안 같다. SoundGraph(AU10)에서 다시 본다 |
 | 여유 부족 때 정지 중 voice 끊기 | `StopNow`(fade 없음 — `AudioDevice.cpp:4377–4446`), 동률이면 배열 앞쪽, 정지 중 voice가 없으면 loop 아닌 voice·아무 voice | 64 frame fade(`MinStopFadeFrames`), 동률이면 먼저 수락한 재생, 정지 중 voice만(스트림 슬롯 부족이면 스트림 clip을 쥔 것만 — 3.41.1절) | 끊김 방지·결정성, 자리 안 활성 voice는 상한 정렬이 지킴 |
 | 최대 가청 거리의 거리 배수 | 없음(`GetMaxFalloffDistance`) | `falloffDistance ÷ distanceScale`(3.41.3절) | Rocks 감쇠 평가의 `distanceScale` 칸과 같은 끝 |
+| 분류 값의 계산 단위 | 장치에 등록된 분류 전체를 프레임마다 에셋 값으로 되돌려 계층·믹스를 적용(공유 값 — 에셋 변경이 재생 중 소리에도 바로 닿는다) | 재생마다 수락 때의 분류 사슬 스냅숏으로 같은 식을 계산(3.43.2절) | 스냅숏 원칙(3.35.3절) — 에셋을 고치면 새 재생부터. 결과는 같은 사슬이면 같다 |
+| 분류 없는 재생 | 프로젝트 `DefaultSoundClass`(설정이 비면 분류 없음) | 엔진 기본 분류(`SetDefaultCategory`, 호스트가 단다) 또는 분류 없음(3.43.1절) | 프로젝트 설정 로드는 호스트 몫이다 |
+| 분류별 사용자 볼륨 | 엔진 기능 없음(사용자 믹스 `SetSoundMixClassOverride` 관행) | CVar 넷(`audio.volume.music`·`effects`·`dialogue`·`interface`)을 분류 `userVolume`으로 곱함(3.43.3절) | 게임마다 같은 관행을 엔진이 준다. 믹스가 사용자 값을 바꾸지 않는다 |
+| always-play 동률 | 모두 `FLT_MAX/4`라 불안정 정렬이 순서를 정함 | 먼저 수락한 쪽(3.43.4절) | 결정적 출력·시험 |
+| 수락 직후의 분류 always-play | wave instance 전이라 첫 동시 발음 평가에서 보이지 않음(`ActiveSound.cpp:1908–1929`) | 수락 때부터 사슬 값으로 봄(3.43.4절) | 사슬 스냅숏이 수락 때 이미 있다. 첫 평가만 다르다 |
+| 믹스 다시 걸기(fade-out 중) | `duration ≥ 0`은 `FIS = now`·FIE를 고치지 않아 바로 t = 1, `duration < 0`은 `1 − t`로 역전(`AudioDevice.cpp:2744–2763`) — 레벨이 튄다 | 지금 레벨에서 이어 fade-in(`FIS = now − t × fadeIn`, 3.43.7절) | 튀는 것은 UE 결함으로 본다 |
+| fade-out 중 믹스를 base로 | 바로 t = 1 | 다시 걸기 규칙(연속, 3.43.7절) | 같은 이유 |
+| override·분류 거리 배수 fade 시간 | device delta(0.5 s로 자름 — `AudioDevice.cpp:7394–7398`) | mix clock(자르지 않음 — 3.43.7절) | 오프라인 렌더·Inline 시험 결정성. 끊긴 프레임에서만 다르다 |
 | 차폐 질의 시점 | 기본은 매 검사 동기 trace(`au.UseAsyncOcclusionTraces` 0 — `ActiveSound.cpp:25–27·1602`) | 첫 검사만 Play 때 동기, 이후는 제어 쪽 요청 → 게임 쪽 공급자 → 명령 왕복(3.42.7절) | 제어 쪽은 게임 스레드에서 질의할 수 없다. 결과가 한 프레임 이상 늦다 |
 | 첫 차폐 검사의 focus 볼륨 조건 | 첫 검사도 parse 안이라 focus 볼륨 뒤 `Volume > 0`일 때만(`ActiveSound.cpp:2178`) | Play 때 게임 쪽에서 하므로 focus 볼륨을 보지 않는다(3.42.8절) | 게임 쪽은 focus 계수를 모른다. 이후 검사는 같은 조건이다 |
 | focus 첫 갱신 보간(`InitializeFocusFactorOnFirstUpdate` 0) | 첫 parse의 게임 delta만큼 움직인다 | 첫 갱신이 수락과 같은 묶음이라 dt 0 — 다음 묶음부터 움직인다(3.42.8절) | 수락과 첫 갱신을 같은 묶음에서 한다. 한 묶음 차이다 |

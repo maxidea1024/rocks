@@ -79,6 +79,11 @@ public:
     // World 해제(scene 해제)가 놓는다.
     void SetOcclusionQuery(AudioOcclusionQuery* query) noexcept;
 
+    // 이 World의 base 믹스다(UE WorldSettings::DefaultBaseSoundMix — 3.43.5절). 지금 base로 걸고,
+    // World가 끝나면 엔진 기본 base 믹스로 돌아간다. 오류는 AudioEngineSubsystem::SetBaseMix와
+    // 같다.
+    Result<void> SetBaseMix(const MixSnapshotRef& mix) noexcept;
+
     // 이 World의 scene이다(놓은 뒤·엔진 오디오 없음이면 무효 id).
     AudioSceneId Scene() const noexcept {
         return scene_;
@@ -88,6 +93,8 @@ private:
     void ReleaseScene() noexcept;
 
     AudioEngineSubsystem* engine_ = nullptr;
+    // 이 World가 base 믹스를 바꿨다(끝날 때 엔진 기본으로 되돌린다).
+    bool changedBaseMix_ = false;
     AudioSceneId scene_;
 };
 

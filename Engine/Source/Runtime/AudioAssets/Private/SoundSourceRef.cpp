@@ -1,3 +1,5 @@
+#include "AudioAssetsValidation.h"
+
 #include <Core/Math/MathUtility.h>
 #include <AudioAssets/SoundSourceRef.h>
 
@@ -5,12 +7,10 @@ namespace rocks {
 
 namespace {
 
-bool IsFiniteWithin(float value, float low, float high) noexcept {
-    return math::IsFinite(value) && value >= low && value <= high;
-}
+using audio_assets_detail::IsFiniteWithin;
 
 bool NonNegative(float value) noexcept {
-    return math::IsFinite(value) && value >= 0.0f;
+    return audio_assets_detail::IsNonNegativeFinite(value);
 }
 
 } // namespace
@@ -123,6 +123,12 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
 
     if (playable.attenuation.HasValue()) {
         if (auto valid = ValidateSoundAttenuation(playable.attenuation.Value()); !valid) {
+            return Created::Failure(valid.Error());
+        }
+    }
+
+    if (playable.category) {
+        if (auto valid = ValidateSoundCategoryChain(*playable.category.Get()); !valid) {
             return Created::Failure(valid.Error());
         }
     }
