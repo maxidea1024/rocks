@@ -1,5 +1,9 @@
 #include <UiCore/StyleSet.h>
 
+#include <UiCore/StyleRegistry.h>
+#include <UiCore/Styles/CoreStyles.h>
+#include <UiCore/Styles/GameWidgetStyles.h>
+
 namespace rocks::ui {
 
 StyleSet::StyleSet(Allocator& allocator) noexcept
@@ -248,6 +252,48 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
 
     if (added) {
         added = styles.Set<MenuBarStyle>("MenuBar", DefaultMenuBarStyle());
+    }
+
+    return added;
+}
+
+Result<void> AddEditorStyles(StyleSet& styles) noexcept {
+    // StarshipStyle.cpp 205행 SetParentStyleName("CoreStyle"), 3394–3395행 메뉴 레이블 여백.
+    constexpr Vec4 MenuLabelPadding{0.0f, 0.0f, 0.0f, 0.0f};
+    constexpr Vec4 MenuLabelContentPadding{10.0f, 2.0f, 10.0f, 2.0f};
+    Result<void> added = styles.SetParentName(CoreStyleName);
+    if (added) {
+        added = styles.Set<Vec4>("Menu.Label.Padding", MenuLabelPadding);
+    }
+
+    if (added) {
+        added = styles.Set<Vec4>("Menu.Label.ContentPadding", MenuLabelContentPadding);
+    }
+
+    return added;
+}
+
+Result<void> AddGameWidgetStyles(StyleSet& styles) noexcept {
+    // UMGCoreStyle.cpp: Button 427행, NoBorder 323행, NormalText·SmallText 596·599행, Slider 731행.
+    Result<void> added = styles.SetParentName({});
+    if (added) {
+        added = styles.Set<ButtonStyle>("Button", GameButtonStyle());
+    }
+
+    if (added) {
+        added = styles.Set<ButtonStyle>("NoBorder", GameNoBorderButtonStyle());
+    }
+
+    if (added) {
+        added = styles.Set<TextStyle>("NormalText", GameNormalTextStyle());
+    }
+
+    if (added) {
+        added = styles.Set<TextStyle>("SmallText", GameSmallTextStyle());
+    }
+
+    if (added) {
+        added = styles.Set<SliderStyle>("Slider", GameSliderStyle());
     }
 
     return added;

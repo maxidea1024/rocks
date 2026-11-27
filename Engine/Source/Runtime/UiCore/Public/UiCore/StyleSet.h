@@ -120,4 +120,13 @@ private:
 // Rocks 이름("Menu"·"MenuBar")이다.
 ROCKS_UICORE_API Result<void> AddCoreStyles(StyleSet& styles) noexcept;
 
+// UE 5.8 에디터 스타일(StarshipStyle.cpp)을 넣는다(20.11절). 부모는 CoreStyle이다(205행). Rocks
+// 형식이 있는 키는 UE도 다시 정하지 않으므로 부모 값을 받고, 에디터에만 있는 여백
+// "Menu.Label.Padding"·"Menu.Label.ContentPadding"(3394–3395행)만 둔다.
+ROCKS_UICORE_API Result<void> AddEditorStyles(StyleSet& styles) noexcept;
+
+// UE 5.8 게임 위젯 스타일(UMGCoreStyle.cpp)을 넣는다(20.11절 — GameWidgetStyles.h). 부모는
+// 없다(UE와 같다).
+ROCKS_UICORE_API Result<void> AddGameWidgetStyles(StyleSet& styles) noexcept;
+
 } // namespace rocks::ui

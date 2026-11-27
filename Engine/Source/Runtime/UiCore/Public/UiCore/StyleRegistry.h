@@ -62,5 +62,20 @@ private:
 
 // 핵심 스타일 집합 이름이다(UE FStarshipCoreStyle "CoreStyle").
 inline constexpr StringView CoreStyleName = "CoreStyle";
+// 에디터 스타일 집합 이름이다(UE FStarshipEditorStyle "EditorStyle" — 부모 CoreStyle).
+inline constexpr StringView EditorStyleName = "EditorStyle";
+// 게임 위젯 스타일 집합 이름이다(UE FUMGCoreStyle "UMGCoreStyle" — Rocks 이름).
+inline constexpr StringView GameWidgetStyleName = "GameWidgetStyle";
+
+// CoreStyle·EditorStyle·GameWidgetStyle 세 집합을 넣은 등록부를 만든다(Docs/Design/UiToolkit
+// 20.11절). 호스트가 하나 만들어 모든 Application에 준다.
+//
+// 사용 예:
+//   auto styles = CreateStandardStyleRegistry(allocator);
+//   if (!styles) { return styles.Error(); }
+//   app.SetStyleRegistry(styles.Value());
+//   (void)app.SetAppStyle(EditorStyleName);
+ROCKS_UICORE_API Result<SharedPtr<StyleRegistry>>
+CreateStandardStyleRegistry(Allocator& allocator) noexcept;
 
 } // namespace rocks::ui

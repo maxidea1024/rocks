@@ -30,6 +30,24 @@ StyleBrush StyleBrush::Color(ThemeSlot fill) noexcept {
     return brush;
 }
 
+StyleBrush StyleBrush::RoundedBox(LinearColor fill, float radius, LinearColor outline,
+                                  float outlineWidth) noexcept {
+    StyleBrush brush;
+    brush.mode = BrushMode::RoundedBox;
+    brush.fill = ColorRef::Specified(fill);
+    brush.outlineColor = ColorRef::Specified(outline);
+    brush.outlineWidth = outlineWidth;
+    brush.cornerRadii = {radius, radius, radius, radius};
+    return brush;
+}
+
+StyleBrush StyleBrush::Color(LinearColor fill) noexcept {
+    StyleBrush brush;
+    brush.mode = BrushMode::Box;
+    brush.fill = ColorRef::Specified(fill);
+    return brush;
+}
+
 StyleBrush StyleBrush::Pill(ThemeSlot fill) noexcept {
     StyleBrush brush = RoundedBox(fill, 0.0f);
     brush.rounding = BrushRounding::HalfHeight;

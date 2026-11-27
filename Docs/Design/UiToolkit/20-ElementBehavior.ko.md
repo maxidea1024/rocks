@@ -177,6 +177,25 @@
   - UW8h1은 등록부·앱 스타일·조회·무효화와 `CoreStyle`의 지금 값(함수 기본값 옮김)이다.
   - UW8h2는 세 집합 값을 4.2절 출처(StarshipCoreStyle.cpp, StarshipStyle.cpp, UMGCoreStyle.cpp)에서 옮기고 출처 행 대조 시험을 단다(UV8 일부). Rocks 구조체가 없는 항목은 15장 빈칸 목록에 남긴다.
 
+- **구현(UW8h2) — 세 집합 값.** 줄 번호는 UE 5.8 로컬 클론 기준이다. `CreateStandardStyleRegistry`가 세 집합을 한 등록부에 넣는다.
+  - **`CoreStyle`(StarshipCoreStyle.cpp).** UW3 이후 함수 기본값이 이미 출처 행 대조 시험(`StyleTests`)을 갖고 있다. 집합은 그 값을 이름으로 낸다(UW8h1).
+  - **`EditorStyle`(StarshipStyle.cpp, 부모 `CoreStyle` — 205행 `SetParentStyleName`).**
+    - UE 에디터 스타일은 Rocks 형식이 있는 키를 하나도 다시 정하지 않는다. `SyncParentStyles`(170–174행)는 부모 값을 읽기만 한다. 그래서 그 키들은 부모로 올라가 코어 값을 받는다.
+    - 에디터에만 있는 키 `Menu.Label.Padding`(0)·`Menu.Label.ContentPadding`(10, 2)(3394–3395행)을 여백 표에 둔다.
+    - `Brushes.Title` tint(155–160행, 사용자 설정 색)는 Rocks에 소비처가 없어 빈칸이다.
+  - **`GameWidgetStyle`(UMGCoreStyle.cpp, 부모 없음 — UE와 같다).**
+    - 색은 테마 슬롯이 아니라 `FUMGColor` 고정 선형 색이다(42–91행). 원문 값을 그대로 옮긴다. `White`·`White25`·`ForegroundHover`가 (0, 1, 1)인 것도 그대로다 — 의도는 확인할 수 없고, 룩은 UE를 따른다.
+    - `Button`(407–427행): 둥근 상자(Secondary·Hover·Header, 반경 4, 외곽선 InputOutline·Hover·Hover, 두께 1, `Icon32x32`), 비활성 brush 없음, 두 여백 `ButtonMargins`(12, 1.5)(CoreStyle.cpp 54행), 전경 ForegroundHover(비활성 Foreground). `bUseBrushTransparency`(412–414행)는 외곽선 알파에 brush 알파를 곱하는 것인데 세 색이 모두 불투명이라 결과가 같다 — Rocks에 이 표지는 두지 않는다.
+    - `NoBorder`(307–323행): brush 없음, 여백 (0,0,0,1)·(0,1,0,0), 전경은 상속(UseForeground).
+    - `NormalText`(238–243행) Regular 10, `SmallText`(266–267행) Regular 8, 색은 상속이다. 그림자·강조색·강조 모양은 Rocks `TextStyle`에 칸이 없어 빈칸이다(코어도 같다).
+    - `Slider`(722–731행): 막대는 단색 흰색(비활성 회색 0.5 — Color.cpp 18행), 두께 2, 손잡이 크기 8×14. 손잡이 그림("Common/Button" PNG)은 옮기지 않고 코어 손잡이 brush를 쓴다.
+    - UE PNG 자원(`Common/*`·`Old/*`)으로만 정의된 키(`Checkbox`·`ProgressBar`·`Scrollbar`·`ToolTip.Background`·`Window`·`Docking.*`·`Menu.*`·`WindowMenuBar.*`)는 넣지 않는다. UE 콘텐츠는 재배포할 수 없어서다. 이 키들은 부품 기본값(코어 값)으로 떨어진다. 15장 2절 빈칸 목록에 남긴다.
+  - **Widget 기본값(UE `DefaultStyleCache` — SlateCore DefaultStyleCache.cpp 25–75행).** 게임 UMG 위젯은 생성 때 `FUMGCoreStyle`의 값을 받는다. 그래서 `ButtonWidget`의 기본 스타일은 `GameWidgetStyle`의 `Button`이고, `SliderWidget`은 `Slider`를 넘긴다. 나머지 Widget(`CheckBox`·`ProgressBar`·`ScrollBar`)은 위 PNG 빈칸 때문에 코어 값이다.
+    - 에디터 위젯(UE `IsEditorWidget` → 코어 `EditorUtilityButton`, 80행)의 구분은 Studio 단계에서 한다.
+    - `UTextBlock`은 캐시를 쓰지 않고 생성자에서 글꼴을 정한다(TextBlock.cpp 36행) — `TextLabelWidget`은 UW9에서 맞춘다.
+  - **호스트.** UiDemo 창(편집기 룩)은 표준 등록부를 받고 앱 스타일을 `EditorStyle`로 둔다(UE 에디터 `FAppStyle`). 게임 화면 Application은 `CoreStyle`이다(UE 게임의 Slate 위젯도 코어 스타일을 받는다).
+  - **시험.** `StyleTests`가 두 집합 값을 출처 행과 대조하고, 등록부 시험이 부모 사슬(에디터 → 코어)과 부모 없는 게임 집합을 본다.
+
 ### 20.12 UV2·UV3·UV4 시험(UW8i)
 
 8장의 장면 구성 중 이 단계까지 구현된 것을 모두 시험으로 만든다. 기대값마다 UE 근거 행을 단다.

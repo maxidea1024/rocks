@@ -33,6 +33,10 @@ struct ROCKS_UICORE_API StyleBrush {
     static StyleBrush RoundedBox(ThemeSlot fill, float radius) noexcept;
     // 테마 색 단색 상자다(UE FSlateColorBrush).
     static StyleBrush Color(ThemeSlot fill) noexcept;
+    // 고정 선형 색 둥근 상자·단색 상자다(UE FUMGColor처럼 테마를 따르지 않는 색 — 20.11절).
+    static StyleBrush RoundedBox(LinearColor fill, float radius, LinearColor outline,
+                                 float outlineWidth) noexcept;
+    static StyleBrush Color(LinearColor fill) noexcept;
     // 높이 절반 반경(알약·원)의 테마 색 둥근 상자다(UE FSlateRoundedBoxBrush(fill) — 반경 없이 만든
     // 것).
     static StyleBrush Pill(ThemeSlot fill) noexcept;

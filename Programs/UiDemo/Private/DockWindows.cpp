@@ -208,6 +208,21 @@ Result<SlotHandle> DockWindows::Add(UniquePtr<platform::Window> window,
     }
 
     auto& host = *surface.Value();
+    // 편집기 룩 창이라 UE 에디터처럼 앱 스타일이 EditorStyle이다(Docs/Design/UiToolkit 20.11절).
+    if (!styles_) {
+        auto styles = CreateStandardStyleRegistry(allocator_);
+        if (!styles) {
+            return Result<SlotHandle>::Failure(styles.Error());
+        }
+
+        styles_ = styles.Value();
+    }
+
+    host.app.SetStyleRegistry(styles_);
+    if (auto styled = host.app.SetAppStyle(EditorStyleName); !styled) {
+        return Result<SlotHandle>::Failure(styled.Error());
+    }
+
     if (auto chromed = AttachChrome(host, title, windows_.IsEmpty()); !chromed) {
         return Result<SlotHandle>::Failure(chromed.Error());
     }

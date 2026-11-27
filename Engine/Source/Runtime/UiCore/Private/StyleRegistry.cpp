@@ -57,6 +57,47 @@ const StyleSet* StyleRegistry::FindSetRaw(StringView name) const noexcept {
     return nullptr;
 }
 
+namespace {
+
+Result<void> RegisterSet(Allocator& allocator, StyleRegistry& registry, StringView name,
+                         Result<void> (*fill)(StyleSet&) noexcept) noexcept {
+    auto set = SharedPtr<StyleSet>::TryMake(allocator, allocator);
+    if (!set) {
+        return Result<void>::Failure(set.Error());
+    }
+
+    if (auto filled = fill(*set.Value()); !filled) {
+        return filled;
+    }
+
+    return registry.Register(name, set.Value());
+}
+
+} // namespace
+
+Result<SharedPtr<StyleRegistry>> CreateStandardStyleRegistry(Allocator& allocator) noexcept {
+    auto registry = SharedPtr<StyleRegistry>::TryMake(allocator, allocator);
+    if (!registry) {
+        return registry;
+    }
+
+    auto registered = RegisterSet(allocator, *registry.Value(), CoreStyleName, &AddCoreStyles);
+    if (registered) {
+        registered = RegisterSet(allocator, *registry.Value(), EditorStyleName, &AddEditorStyles);
+    }
+
+    if (registered) {
+        registered =
+            RegisterSet(allocator, *registry.Value(), GameWidgetStyleName, &AddGameWidgetStyles);
+    }
+
+    if (!registered) {
+        return Result<SharedPtr<StyleRegistry>>::Failure(registered.Error());
+    }
+
+    return registry;
+}
+
 uint64 StyleRegistry::Revision() const noexcept {
     uint64 total = revision_;
     for (const auto& entry : sets_) {

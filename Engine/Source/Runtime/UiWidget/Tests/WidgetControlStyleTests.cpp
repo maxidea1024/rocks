@@ -1,9 +1,11 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiFramework/Controls/Button.h>
+#include <UiFramework/Controls/Slider.h>
 #include <UiWidget/BorderWidget.generated.h>
 #include <UiWidget/ButtonWidget.generated.h>
 #include <UiWidget/ImageWidget.generated.h>
+#include <UiWidget/SliderWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
@@ -44,6 +46,8 @@ TEST(UiWidget_ButtonEventsAndBorderImageStyleSurviveRebuilds) {
     REQUIRE(button.AddChild(objects, borderRef.Value().Handle()));
     REQUIRE(button.SetBackgroundColor({1, 0.5f, 1, 1}));
     CHECK(button.GetBackgroundColor() == LinearColor(1, 0.5f, 1, 1));
+    // 기본은 게임 위젯 스타일 "Button"이다(UE DefaultStyleCache·UMGCoreStyle — UiToolkit 20.11절).
+    CHECK(button.GetStyle() == GameButtonStyle());
     REQUIRE(button.SetStyle(PrimaryButtonStyle()));
     ButtonStyle bad = DefaultButtonStyle();
     bad.normalPadding = {-1, 0, 0, 0};
@@ -70,6 +74,29 @@ TEST(UiWidget_ButtonEventsAndBorderImageStyleSurviveRebuilds) {
     original.Value()->OnMouseEnter(0);
     CHECK(!button.IsHovered());
     CHECK(border.GetBrush().mirrorX && image.GetBrush().imageSize == Vec2(11, 13));
+}
+
+TEST(UiWidget_SliderTakesTheGameWidgetSliderStyle) {
+    // UE USlider WidgetStyle = DefaultStyleCache의 UMGCoreStyle "Slider"(UiToolkit 20.11절).
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration modules(types, allocator);
+    REQUIRE(RegisterWidgetTypes(modules));
+    ObjectRegistry objects(allocator, types, {0x554957, 95});
+    const auto access = objects.OwnerAccess();
+    ObjectAccessScope scope(access);
+    auto treeRef = objects.NewObject<WidgetTree>(access, GeneratedType<WidgetTree>::Id());
+    REQUIRE(treeRef);
+    auto owned = objects.ResolveForWrite<WidgetTree>(access, treeRef.Value().Handle());
+    REQUIRE(owned);
+    auto& tree = *owned.Value().Get().Value();
+    auto sliderRef = tree.ConstructWidget(objects, GeneratedType<SliderWidget>::Id(), "Slider");
+    REQUIRE(sliderRef);
+    auto s = objects.ResolveForWrite<SliderWidget>(access, sliderRef.Value().Handle());
+    REQUIRE(s);
+    auto live = s.Value().Get().Value()->TakeElement(objects);
+    REQUIRE(live);
+    CHECK(StaticElementCast<Slider>(*live.Value()).GetStyle() == GameSliderStyle());
 }
 
 } // namespace rocks::ui

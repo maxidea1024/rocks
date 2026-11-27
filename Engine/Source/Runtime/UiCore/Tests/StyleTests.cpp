@@ -1,7 +1,10 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/PaintList.h>
+#include <UiCore/StyleRegistry.h>
 #include <UiCore/StyleSet.h>
+#include <UiCore/Styles/CoreStyles.h>
+#include <UiCore/Styles/GameWidgetStyles.h>
 
 using namespace rocks;
 using namespace rocks::ui;
@@ -126,4 +129,88 @@ TEST(UiCore_PaintListThemeDefaultsToUeDark) {
     CHECK(&list.Theme() == &custom);
     list.SetTheme(nullptr);
     CHECK(&list.Theme() == &DefaultThemeColors());
+}
+
+TEST(UiCore_GameWidgetStylesMatchUmgCoreStyle) {
+    // UMGCoreStyle.cpp 42–91행 FUMGColor(원문 그대로 — ForegroundHover는 (0, 1, 1)).
+    CHECK(GameSecondaryColor == LinearColor(0.495466f, 0.495466f, 0.495466f, 1));
+    CHECK(GameInputOutlineColor == LinearColor(0.695111f, 0.695111f, 0.695111f, 1));
+    CHECK(GameHeaderColor == LinearColor(0.384266f, 0.384266f, 0.384266f, 1));
+    CHECK(GameHoverColor == LinearColor(0.724268f, 0.724268f, 0.724268f, 1));
+    CHECK(GameForegroundColor == LinearColor(0.527115f, 0.527115f, 0.527115f, 1));
+    CHECK(GameForegroundHoverColor == LinearColor(0, 1, 1, 1));
+    // 407–427행 Button: RB(Secondary, 4, InputOutline, 1, Icon32x32)·RB(Hover, 4, Hover, 1)·
+    // RB(Header, 4, Hover, 1), 비활성 없음, 여백 ButtonMargins 둘(CoreStyle.cpp 54행).
+    const ButtonStyle& button = GameButtonStyle();
+    const auto checkBrush = [](const StyleBrush& brush, LinearColor fill, LinearColor outline) {
+        CHECK(brush.mode == BrushMode::RoundedBox);
+        CHECK(brush.fill == ColorRef::Specified(fill));
+        CHECK(brush.outlineColor == ColorRef::Specified(outline));
+        CHECK(brush.outlineWidth == 1.0f);
+        CHECK(brush.cornerRadii == Vec4(4, 4, 4, 4));
+        CHECK(brush.imageSize == Vec2(32, 32));
+    };
+    checkBrush(button.normal, GameSecondaryColor, GameInputOutlineColor);
+    checkBrush(button.hovered, GameHoverColor, GameHoverColor);
+    checkBrush(button.pressed, GameHeaderColor, GameHoverColor);
+    CHECK(button.disabled.mode == BrushMode::None);
+    CHECK(button.normalPadding == Vec4(12, 1.5f, 12, 1.5f));
+    CHECK(button.pressedPadding == Vec4(12, 1.5f, 12, 1.5f));
+    CHECK(button.normalForeground == ColorRef::Specified(GameForegroundHoverColor));
+    CHECK(button.hoveredForeground == ColorRef::Specified(GameForegroundHoverColor));
+    CHECK(button.pressedForeground == ColorRef::Specified(GameForegroundHoverColor));
+    CHECK(button.disabledForeground == ColorRef::Specified(GameForegroundColor));
+    // 307–312행 NoBorder: brush 없음, 여백 (0,0,0,1)·(0,1,0,0), 전경 상속.
+    const ButtonStyle& noBorder = GameNoBorderButtonStyle();
+    CHECK(noBorder.normal.mode == BrushMode::None && noBorder.hovered.mode == BrushMode::None);
+    CHECK(noBorder.pressed.mode == BrushMode::None && noBorder.disabled.mode == BrushMode::None);
+    CHECK(noBorder.normalPadding == Vec4(0, 0, 0, 1));
+    CHECK(noBorder.pressedPadding == Vec4(0, 1, 0, 0));
+    CHECK(noBorder.normalForeground == ColorRef{ColorSource::Foreground});
+    // 238–243·266–267행 글자: Regular 10·8, 색 상속.
+    CHECK(GameNormalTextStyle().font == FontStyle{Typeface::Regular, 10});
+    CHECK(GameSmallTextStyle().font == FontStyle{Typeface::Regular, 8});
+    CHECK(GameNormalTextStyle().color == ColorRef{ColorSource::Foreground});
+    // 722–730행 Slider: 막대 흰색(비활성 Gray 0.5 — Color.cpp 18행), 두께 2, 손잡이 8×14.
+    const SliderStyle& slider = GameSliderStyle();
+    CHECK(slider.bar.mode == BrushMode::Box);
+    CHECK(slider.bar.fill == ColorRef::Specified({1, 1, 1, 1}));
+    CHECK(slider.barHovered == slider.bar);
+    CHECK(slider.barDisabled.fill == ColorRef::Specified({0.5f, 0.5f, 0.5f, 1}));
+    CHECK(slider.barThickness == 2.0f);
+    CHECK(slider.thumbSize == Vec2(8, 14));
+    // 손잡이 그림은 PNG라 코어 brush를 쓴다(20.11절 빈칸).
+    CHECK(slider.thumb == DefaultSliderStyle().thumb);
+}
+
+TEST(UiCore_GameWidgetStyleSetHasNoParentAndOnlyPortableKeys) {
+    SystemAllocator allocator;
+    StyleSet game(allocator);
+    REQUIRE(AddGameWidgetStyles(game));
+    CHECK(game.ParentName().IsEmpty());
+    CHECK(*game.Find<ButtonStyle>("Button") == GameButtonStyle());
+    CHECK(*game.Find<ButtonStyle>("NoBorder") == GameNoBorderButtonStyle());
+    CHECK(*game.Find<TextStyle>("NormalText") == GameNormalTextStyle());
+    CHECK(*game.Find<TextStyle>("SmallText") == GameSmallTextStyle());
+    CHECK(*game.Find<SliderStyle>("Slider") == GameSliderStyle());
+    // UMG에 없는 키(PrimaryButton)와 PNG로만 정의된 키는 없다.
+    CHECK(!game.Find<ButtonStyle>("PrimaryButton"));
+    CHECK(!game.Find<CheckBoxStyle>("Checkbox"));
+    CHECK(!game.Find<ProgressBarStyle>("ProgressBar"));
+    CHECK(!game.Find<ScrollBarStyle>("ScrollBar"));
+    CHECK(!game.Find<WindowStyle>("Window"));
+}
+
+TEST(UiCore_EditorStyleSetDefersEveryPortableKeyToCoreStyle) {
+    // StarshipStyle.cpp 205행 부모 CoreStyle, 3394–3395행 메뉴 레이블 여백. 다른 키는 다시 정하지
+    // 않는다(170–174행 SyncParentStyles는 읽기만).
+    SystemAllocator allocator;
+    StyleSet editor(allocator);
+    REQUIRE(AddEditorStyles(editor));
+    CHECK(editor.ParentName() == CoreStyleName);
+    CHECK(*editor.Find<Vec4>("Menu.Label.Padding") == Vec4(0, 0, 0, 0));
+    CHECK(*editor.Find<Vec4>("Menu.Label.ContentPadding") == Vec4(10, 2, 10, 2));
+    CHECK(!editor.Find<ButtonStyle>("Button"));
+    CHECK(!editor.Find<TextStyle>("NormalText"));
+    CHECK(!editor.Find<DockTabStyle>("Docking.Tab"));
 }

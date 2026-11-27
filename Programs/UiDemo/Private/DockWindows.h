@@ -7,6 +7,7 @@
 #include <UiFramework/Application/InputAdapter.h>
 #include <UiFramework/Window/WindowChrome.h>
 #include <UiCore/DrawBatch.h>
+#include <UiCore/StyleRegistry.h>
 #include <UiCore/Rendering/SurfaceRecorder.h>
 #include <UiRender/VectorImageAtlas.h>
 
@@ -85,6 +86,8 @@ private:
     TitleFactory makeTitle_;
     MainMenuFactory makeMenu_;
     SlotArray<UniquePtr<Surface>> windows_;
+    // 모든 창이 함께 쓰는 스타일 등록부다(첫 창을 만들 때 — 앱 스타일은 EditorStyle, 20.11절).
+    SharedPtr<StyleRegistry> styles_;
     SlotHandle primary_{};
 };
 

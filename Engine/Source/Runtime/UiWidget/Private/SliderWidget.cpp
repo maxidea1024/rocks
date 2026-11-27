@@ -1,5 +1,6 @@
 #include <UiWidget/SliderWidget.generated.h>
 #include "BindLiveWidgetEvent.h"
+#include <UiCore/Styles/GameWidgetStyles.h>
 #include <UiFramework/Controls/Slider.h>
 
 namespace rocks::ui {
@@ -142,7 +143,13 @@ Result<SharedPtr<Element>> SliderWidget::BuildElement(ObjectRegistry& objects) n
         return Result<SharedPtr<Element>>::Failure(slider.Error());
     }
 
-    auto ready = slider.Value()->SetRange(minimum_, maximum_);
+    // 게임 위젯 기본 스타일이다(UE USlider WidgetStyle = DefaultStyleCache의 UMGCoreStyle "Slider"
+    // — Docs/Design/UiToolkit 20.11절).
+    auto ready = slider.Value()->SetStyle(GameSliderStyle());
+    if (ready) {
+        ready = slider.Value()->SetRange(minimum_, maximum_);
+    }
+
     if (ready) {
         ready = slider.Value()->SetStep(step_);
     }

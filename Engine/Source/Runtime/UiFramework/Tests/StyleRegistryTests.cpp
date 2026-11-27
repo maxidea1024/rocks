@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 #include <UiCore/StyleRegistry.h>
 #include <UiCore/Styles/CoreStyles.h>
+#include <UiCore/Styles/GameWidgetStyles.h>
 #include <UiFramework/Application/Application.h>
 #include <UiFramework/Controls/Button.h>
 
@@ -12,8 +13,6 @@
 namespace rocks::ui {
 
 namespace {
-
-constexpr StringView EditorStyleName = "EditorStyle";
 
 struct StyleBench {
     explicit StyleBench(Allocator& allocator) noexcept : app(allocator) {
@@ -99,6 +98,41 @@ TEST(UiFramework_ButtonTakesTheActiveAppStyleUnlessExplicit) {
     REQUIRE(bench.editor->Set<ButtonStyle>("Button", editorButton));
     REQUIRE(bench.app.PrepareLayout(viewport, 1));
     CHECK(plain.Value()->GetStyle().normalPadding == Vec4(4, 4, 4, 4));
+}
+
+TEST(UiFramework_StandardStyleRegistryHoldsTheThreeUeSets) {
+    SystemAllocator allocator;
+    auto made = CreateStandardStyleRegistry(allocator);
+    REQUIRE(made);
+    const auto& registry = *made.Value();
+    auto core = registry.FindSet(CoreStyleName);
+    auto editor = registry.FindSet(EditorStyleName);
+    auto game = registry.FindSet(GameWidgetStyleName);
+    REQUIRE(core && editor && game);
+    // 에디터 집합은 코어 값을 부모에서 받는다(UE 에디터 스타일이 다시 정하지 않음 — 20.11절).
+    CHECK(*registry.FindStyle<ButtonStyle>(*editor, "Button") == DefaultButtonStyle());
+    CHECK(*registry.FindStyle<ButtonStyle>(*editor, "PrimaryButton") == PrimaryButtonStyle());
+    CHECK(*registry.FindStyle<Vec4>(*editor, "Menu.Label.ContentPadding") == Vec4(10, 2, 10, 2));
+    // 게임 집합은 부모가 없다 — UMG에 없는 키는 찾지 못하고 부품 기본값이 쓰인다.
+    CHECK(*registry.FindStyle<ButtonStyle>(*game, "Button") == GameButtonStyle());
+    CHECK(!registry.FindStyle<ButtonStyle>(*game, "PrimaryButton"));
+
+    // 앱 스타일이 게임 집합이면 명시하지 않은 버튼은 게임 값, 없는 키의 부품은 기본값이다.
+    Application app(allocator);
+    app.SetStyleRegistry(made.Value());
+    REQUIRE(app.SetAppStyle(GameWidgetStyleName));
+    auto root = SharedPtr<Element>::TryMake(allocator, allocator);
+    auto plain = SharedPtr<Button>::TryMake(allocator, allocator);
+    REQUIRE(root && plain);
+    REQUIRE(plain.Value()->Construct({}));
+    REQUIRE(root.Value()->TryAddChild(plain.Value()));
+    app.SetRoot(root.Value());
+    REQUIRE(app.PrepareLayout(Geometry::Root({200, 100}, {}), 1));
+    CHECK(plain.Value()->GetStyle() == GameButtonStyle());
+    // 에디터 집합으로 바꾸면 부모(코어)의 값이다.
+    REQUIRE(app.SetAppStyle(EditorStyleName));
+    REQUIRE(app.PrepareLayout(Geometry::Root({200, 100}, {}), 1));
+    CHECK(plain.Value()->GetStyle() == DefaultButtonStyle());
 }
 
 } // namespace rocks::ui

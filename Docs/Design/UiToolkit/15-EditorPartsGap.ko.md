@@ -175,7 +175,7 @@ UW4(9.1절)의 산출물 바탕이다. UE 5.8 에디터가 실제로 쓰는 부�
 
 | 영역 | UE 5.8 | Rocks 현재 | 빠진 것 |
 |---|---|---|---|
-| 스타일 집합 | `ISlateStyle`·`FSlateStyleSet`·`FSlateStyleRegistry`·`FAppStyle`, `FSlateWidgetStyle` 파생(`SlateTypes.h`), `FStarshipEditorStyle` | `ThemeColors`·`ThemeSlot`(StyleColors 대응, JSON 3단계)·`ColorRef`(`UC/`)만 있다. `StyleSet`·`ButtonStyle` 등은 헤더에 없다(grep 결과 0) | 이름으로 찾는 스타일 표, Element 스타일 구조체, 에디터 스타일 값(UW3). 지금은 Element가 색을 직접 박아 넣는다(예: `ProgressBar` fillColor 기본값) |
+| 스타일 집합 | `ISlateStyle`·`FSlateStyleSet`·`FSlateStyleRegistry`·`FAppStyle`, `FSlateWidgetStyle` 파생(`SlateTypes.h`), `FStarshipEditorStyle`, `FUMGCoreStyle`·`DefaultStyleCache` | `StyleSet`(형식별 표)·`StyleRegistry`(부모 사슬)·앱 스타일, 집합 `CoreStyle`·`EditorStyle`·`GameWidgetStyle`(UW8h — 20.11절) | UMG PNG 자원 키(`Checkbox`·`ProgressBar`·`Scrollbar`·`ToolTip.Background`·`Window`·`Docking.*`·`Menu.*`·`WindowMenuBar.*` — UE 콘텐츠 재배포 불가, 코어 값으로 대신), 슬라이더 손잡이 그림, 글자 그림자·강조색·강조 모양 칸, 에디터 위젯 구분(`EditorUtilityButton`), `Brushes.Title` tint |
 | Brush 종류 | `FSlateRoundedBoxBrush`(모서리 반경 4개·외곽선 색·두께, `SC/Brushes/SlateRoundedBoxBrush.h`), Box·Border·Color·Image | `Brush`: None·Image·Box·Border 모드, UV·margin·tint·반전. `PaintBox`에 `cornerRadius`(Vec4)는 있다 | Brush의 rounded box 모드, **외곽선(색·두께)**, 반경 방식. Starship 룩은 거의 전부가 rounded box와 외곽선이다 |
 | SVG·아이콘 | `FSlateVectorImageBrush`(`SC/Brushes/SlateImageBrush.h`, nanosvg로 래스터화), 아이콘 style 키 | 없다. 저장소에서 아이콘 자원도 찾지 못했다 | SVG 래스터화와 배율별 cache, 공개 라이선스 아이콘 세트 반입(UD10), 16·20 px 격자 |
 | 그리기 primitive | `FSlateDrawElement::MakeLines`·`MakeSpline`·`MakeGradient`·`MakeRotatedBox`·`MakeCustomVerts` | `PaintList`: 사각형(`PaintBox`), 글리프 run, brush, backdrop blur만 있다 | 선·폴리라인, 스플라인(그래프 선, 곡선 편집기), **그라디언트**(색 선택, slider 배경), 점선(선택 사각형). 선택 사각형(`MarqueeRect.h`)도 없다 |
