@@ -1,9 +1,10 @@
-#include "TextureBlockBptc.h"
+#include "TextureBlockBptcDecode.h"
 #include "TextureBlockBptcTables.h"
 
-// BC6H·BC7 기준 디코더다(Docs/Design/AssetSystem 12.17.6 5·9 — 시험·품질 측정용). D3D11 형식의 정수
-// 절차를 Microsoft DirectXTex BC6HBC7.cpp(D3DX_BC6H::Decode·D3DX_BC7::Decode, MIT)와 같은 순서로
-// 옮겼다. 표는 TextureBlockBptcTables.h다(인코더 커널의 표와 따로 — 디코더가 인코더와 독립이다).
+// BC6H·BC7 기준 디코더다(Docs/Design/AssetSystem 12.17.6 5·9·12.17.7 — 시험·품질 측정·CPU 대조용).
+// D3D11 형식의 정수 절차를 Microsoft DirectXTex BC6HBC7.cpp(D3DX_BC6H::Decode·D3DX_BC7::Decode,
+// MIT)와 같은 순서로 옮겼다. 표는 TextureBlockBptcTables.h다(인코더 커널의 표와 따로 — 디코더가
+// 인코더와 독립이다).
 namespace rocks::texture_block_detail {
 
 namespace {
