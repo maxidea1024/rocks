@@ -163,3 +163,15 @@ SH1 출력은 SH2 정규화(재배치·리플렉션·GLES 재작성) 전의 형�
 - 시험(EngineTests, 이 기계 Windows에서 통과): 워커 채널 시험 `ShaderWorkerChannel_CompilesRemainingFormats` — `D3D11_SM5` FXC 직접·`hlsl2021` 대체 경로·FXC가 받지 않는 `namespace` 원문의 대체 경로 성공(DXBC)·두 경로 모두 실패의 진단(`FXC: `와 대체 경로), `GLES31_ANDROID`·`GLES31_PC` ESSL(`#version 320 es`, Android VS만 `gl_Position.y = -gl_Position.y`), `r11g11b10f` storage image 거부, `METAL_SM5`는 도구가 없어 UnsupportedCapability(값 없음), 워커를 새로 띄운 같은 byte(DXBC·ESSL). 기존 시험의 `D3D11_SM5` job은 이제 DXBC 성공이다. `ShaderToolLoader_ParsesMetalVersion`(버전 줄·Target 줄·CR·경로 줄 제외·실패), `ShaderToolLoader_LocatesMetalToolchainConsistently`(이 기계는 도구 없음 — 빈 결과 확인 후 SKIP), 정의 조립 시험의 형식별 `ROCKS_FEATURE_*` 값, 형식 정의 시험의 `typedUavLoad`·장치 요구·`ImageFormatName`. `shader-compile`(Commandlet)로 `Engine-Windows` 다섯 형식(`D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`GLES31_PC`·`GLES31_ANDROID`)이 모두 성공하고 `--out`에 `dxil`·`dxbc`·`spv`·`essl`이 나온다.
 - **미확인**: Metal 실제 컴파일(`metal`·`metallib` 실행, metallib byte 결정성)과 macOS 쪽 코드(`xcrun --find`, `Private/Mac`)는 Mac이 없고 이 기계에 Metal Developer Tools for Windows가 없어 실행하지 못했다. macOS 빌드도 이 기계에서 하지 못했다(CI macOS 빌드가 첫 확인). Windows Metal Developer Tools의 설치 위치(`metal\32023\bin`)는 UE 5.8 코드에서 가져온 것이고 실제 설치로 확인하지 않았다.
 - 한계·후속: ESSL 원문의 GLSL 컴파일 검증은 SH2(GLES 재작성)와 함께. 대체 경로 HLSL의 의미 이름(`TEXCOORD<n>`)·상수 버퍼 배치는 SH2 정규화 전. macOS DXC(P3 macOS 산출물)가 없어 macOS에서는 아직 어떤 형식도 컴파일하지 못한다 — macOS 측정(E10)은 그 뒤다.
+
+### 11.2 손상 데이터 오류(`CorruptData`, 개정 59)
+
+[AssetSystem 19장](../AssetSystem/19-CorruptData.ko.md)의 규칙(읽은 byte 손상은 `CorruptData`, 호출자 인자 오용은 `InvalidArgument`, 한도 `CapacityExceeded`, 지원하지 않는 판 `Unsupported`)을 셰이더 도구가 소유한 읽기 경로에 적용한다. 직렬화 reader(Archive·Record)가 이미 `CorruptData`를 돌려주므로 위층이 그것을 `InvalidArgument`로 덮지 않고 전달한다.
+
+| 함수 | 바뀐 경우 | 전 → 후 |
+|---|---|---|
+| `DecodeShaderWorkerRequest`·`DecodeShaderWorkerResponse`(ShaderCompilerCommon) | magic·잘림·Record·필드 wire tag·값 범위·필드 끝 | `InvalidArgument` → `CorruptData`. 하부 reader의 `CapacityExceeded`·`OutOfMemory`는 그대로 전달하고, 목록 항목 수가 `MaxListItems`를 넘으면 `CapacityExceeded`다. 메시지 버전이 다르면 `Unsupported` 그대로 |
+| `ReadShaderWorkerMessageVersion` | 짧거나 magic이 다름 | `InvalidArgument` → `CorruptData` |
+| `MoveShaderValuesFromNugget`(ShaderCompiler, 10절) | 너겟 레코드의 값 번호가 모르는 번호·중복·오름차순 아님 | `InvalidArgument` → `CorruptData`(Code 없음 `NotFound` 그대로) |
+
+바꾸지 않은 것: `MoveShaderValuesToNugget`의 Code 없음(호출자 입력), 쓰기(encode) 함수의 잘못된 값, ShaderParameterLayout·바인딩 layout·GLES 머리의 encode·검증 함수(호출자 모델 검사), 라이브러리 만들기(`ShaderLibraryCook` — 만든 byte가 읽기 규칙을 어기면 만들기 결함), 쿠킹 단계의 환경·설정 오류. 워커 실행 파일은 decode 실패를 할당 실패와 그 밖(`BadInputFile` 종료 코드)으로만 가르므로 동작이 같다. 렌더 쪽 쿠킹 라이브러리 열기·텍스처 판정은 [RenderBase](../RenderBase/06-ResourceLifetime.ko.md) 6.6절이다.
