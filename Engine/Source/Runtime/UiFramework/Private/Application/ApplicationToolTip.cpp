@@ -371,7 +371,7 @@ Result<void> Application::AttachToolTip(const PopupRequest& popup) noexcept {
 
     root_ = host.Value();
     toolTipHost_ = WeakPtr<Element>(root_);
-    ApplyPopupWorkArea();
+    ApplyHostServices();
     cache_.Reset();
     hitGrid_.Reset();
     return Result<void>::Success();

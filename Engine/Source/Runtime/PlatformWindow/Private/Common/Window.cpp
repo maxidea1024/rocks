@@ -53,6 +53,21 @@ bool Window::ConsumeDpiChange(float&) noexcept {
     return false;
 }
 
+void Window::ActivateTextInput(TextInputClient&) noexcept {
+}
+
+void Window::DeactivateTextInput(TextInputClient&) noexcept {
+}
+
+void Window::CancelTextComposition(TextInputClient&) noexcept {
+}
+
+void Window::NotifyTextInputLayoutChanged(TextInputClient&) noexcept {
+}
+
+void Window::ProcessTextInput(uint32) noexcept {
+}
+
 bool Window::ConsumeRepaint() noexcept {
     return true;
 }

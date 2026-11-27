@@ -75,10 +75,14 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         return Result<bool>::Success(false);
     }
 
+    if (event.type == input::InputEventType::TextInputMethod) {
+        // IME 기록 표지다(Docs/Design/UiToolkit 19.2절). 이 자리에서 창의 기록을 문맥에 적용해 앞뒤
+        // 키·문자 이벤트와 순서를 지킨다(확정 "한" 뒤의 Left는 확정 뒤에 움직인다).
+        return Result<bool>::Success(application_.ProcessTextInput(event.textInputRecord));
+    }
+
     if (event.type == input::InputEventType::KeyDown ||
-        event.type == input::InputEventType::KeyUp || event.type == input::InputEventType::Text ||
-        event.type == input::InputEventType::TextComposition ||
-        event.type == input::InputEventType::TextCompositionCommit) {
+        event.type == input::InputEventType::KeyUp || event.type == input::InputEventType::Text) {
         auto routed = application_.RouteKeyWithin(event.userId, event, scope);
         if (!routed || routed.Value() || event.type != input::InputEventType::KeyDown) {
             return routed;

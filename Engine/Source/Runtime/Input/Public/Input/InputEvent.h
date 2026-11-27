@@ -33,10 +33,10 @@ enum class InputEventType : uint8 {
     TouchEnded,
     // 창이 입력 포커스를 잃음. 눌려 있던 키·버튼을 모두 놓은 것으로 처리한다.
     FocusLost,
-    // 조합 중 문자열과 UTF-8 커서 위치다. 빈 문자열은 기존 조합 표시를 취소한다.
-    TextComposition,
-    // IME가 확정한 한 덩어리다. 여러 코드 포인트도 편집 이력 하나를 만든다.
-    TextCompositionCommit,
+    // IME 처리 기록 표지다(textInputRecord — Docs/Design/UiToolkit 19.2절). IME 문자열은 이벤트가
+    // 아니라 활성 텍스트 입력 문맥으로 간다. 표지는 키·문자 이벤트와의 순서를 지킨다(UI 입력
+    // adapter가 이 자리에서 창의 기록을 처리한다).
+    TextInputMethod,
     MouseLeave,
     // 창 테두리(제목 막대·가장자리)를 눌렀거나 창 옮기기·크기 조절을 시작했다. UI는 열린 메뉴와
     // 툴팁을 닫는다(UE FSlateApplication::OnWindowAction ClickedNonClientArea → DismissAllMenus).
@@ -66,8 +66,8 @@ struct InputEvent {
     float y = 0.0f;
     float wheel = 0.0f;
     GamepadSnapshot gamepad;
-    SharedPtr<const String> composition;
-    usize compositionCaret = 0;
+    // TextInputMethod의 창 IME 기록 번호다.
+    uint32 textInputRecord = 0;
     uint8 touchIndex = 0;
     float force = 1.0f;
     bool hasForce = false;
@@ -97,13 +97,10 @@ struct InputEvent {
         return event;
     }
 
-    static InputEvent Composition(SharedPtr<const String> text = {}, usize caret = 0,
-                                  bool commit = false) noexcept {
+    static InputEvent TextInputMethod(uint32 record) noexcept {
         InputEvent event;
-        event.type =
-            commit ? InputEventType::TextCompositionCommit : InputEventType::TextComposition;
-        event.composition = Move(text);
-        event.compositionCaret = caret;
+        event.type = InputEventType::TextInputMethod;
+        event.textInputRecord = record;
         return event;
     }
 
@@ -212,6 +209,10 @@ struct InputEvent {
         return event;
     }
 };
+
+// 이벤트는 문자열을 들지 않는 값이다(IME 문자열은 텍스트 입력 문맥으로 간다 — 19.2절). 큐 복사가
+// 참조 계수를 건드리지 않는다.
+static_assert(IsTriviallyCopyableV<InputEvent>, "InputEvent must stay trivially copyable");
 
 // 한 프레임 동안 모은 입력 이벤트 큐다. 입력 backend가 Push하고 InputState::BeginFrame이 소비한 뒤
 // Clear한다. 용량은 생성 시 정하며 프레임 중 할당하지 않는다. 가득 차면 이벤트를 버리고

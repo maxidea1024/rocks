@@ -93,32 +93,42 @@
 - **snapshot·시험.** `--snapshot`·`--self-test`는 `EnableHighDpiAwareness`를 부르지 않고 s = 1로 고정한다(결정적, 회귀 기준이 배율 1). 배율 시험은 가짜 배율(s = 2)로 한다.
 
 **텍스트 입력 문맥(PW3, UE `ITextInputMethodContext`·`ITextInputMethodSystem`·`ITextInputMethodChangeNotifier`).**
-- **`ui::TextInputContext`(UiFramework, UE 대응).**
-  - 질의: `IsReadOnly`, `IsComposing`, `GetTextLength`, `GetSelection`, `GetText(범위)`, `GetCharacterIndexFromPoint`, `GetTextBounds(범위)`, `GetScreenBounds`, `GetWindow`
+- **`ui::TextInputContext`(UiCore, UE 대응).** 그래픽·플랫폼과 무관한 인터페이스라 UiCore에 둔다(UiWidget 편집 요소가 구현하고, UiFramework 입력 adapter가 서비스를 부른다).
+  - 질의: `IsReadOnly`, `AllowsInputMethod`(비밀번호·읽기 전용이면 false), `IsComposing`, `GetTextLength`, `GetSelection`, `GetText(범위)`, `GetCharacterIndexFromPoint`, `GetTextBounds(범위)`, `GetScreenBounds`
+  - UE의 `GetWindow`는 없다. 서비스가 창마다 하나라 문맥이 찾은 서비스가 곧 창이다.
   - 수정: `SetSelection`, `SetText(범위)`
   - 조합: `BeginComposition`·`UpdateCompositionRange`·`EndComposition`
   - 위치 공간은 UTF-16 code unit이고, 줄 끝은 `\n` 한 글자다(3.12절, UE와 같다). UTF-8 텍스트와의 변환은 context 구현이 한다.
   - `GetTextBounds`·`GetScreenBounds`는 UI 창 좌표(= client 픽셀)다. IMM은 그대로 쓰고, TSF는 `ClientToScreen`한다(UE의 `GetWindowRect` 빼기는 OS 테두리 창에서 틀린다 — WindowsTextInputMethodSystem.cpp 407–413행).
   - **조합 중 `SetText`는 context 안의 미리보기 층만 바꾼다.** `EndComposition`에서 한 번 커밋한다(편집 이력 하나, `TextChanged` 한 번). 조합 갱신마다 바인딩 쓰기·검증·최대 길이 판정이 일어나지 않게 하려는 것이다.
-- **변경 통지(`TextInputChangeNotifier`, UE 146–162행).** `CancelComposition`·`NotifyTextChanged`·`NotifySelectionChanged`·`NotifyLayoutChanged`. 앱이 조합 중에 글자를 바꾸면(Esc 되돌리기, 바인딩) 조합을 취소한다.
-- **`platform::TextInputSystem`(PlatformWindow, 창별).**
-  - `RegisterContext`·`UnregisterContext`·`ActivateContext(context)`·`DeactivateContext`. 창은 context가 준다(`GetWindow`). `thread_local` 대상 창은 없앤다.
-  - context는 플랫폼 중립 `platform::TextInputClient`로 받는다. UiFramework 어댑터가 `ui::TextInputContext`를 감싼다.
-  - system은 context를 원시 포인터가 아니라 id·세대로 든다. 해제된 context로 가는 미룬 기록은 버린다(CoreObjectInputDetailedPlan TextSessionId·늦은 commit 거부·정확히 한 번 commit과 맞춘다).
-  - Element는 자기 창의 system을 `Application`의 host 서비스로 찾는다(`SetPopupWorkArea`와 같은 방식). 소멸·가상화 행 재사용 때 Unregister한다.
-  - 비밀번호 입력란은 IME를 끈다(`ImmAssociateContext(nullptr)` — UE와 같다).
+- **`ui::TextInputService`(UiCore, 창별 — UE `ITextInputMethodSystem` + `ITextInputMethodChangeNotifier`).**
+  - `Activate(context)`·`Deactivate(context)`·`CancelComposition(context)`·`NotifyLayoutChanged(context)`·`Process(기록)`.
+  - UE는 등록(`RegisterContext`)과 활성을 나눈다. 여기서는 활성 문맥이 창마다 하나라 Activate가 등록을 겸한다. 초점을 받으면 Activate, 잃거나 소멸하면 Deactivate한다.
+  - UE 통지 중 `NotifyTextChanged`·`NotifySelectionChanged`는 IMM에 쓸 데가 없다(IMM은 조합 범위 밖 글자를 묻지 않는다). TSF(UW4f3)가 같은 인터페이스에 더한다.
+  - `CancelComposition`은 앱이 조합 중에 글자를 바꿀 때(Esc 되돌리기, 바인딩, 읽기 전용 전환) 문맥이 부른다. 문맥은 부르기 전에 스스로 미리보기를 버린다. 서비스는 OS 조합을 취소하고 남은 기록을 버린다.
+  - Element는 자기 창의 서비스를 루트로 올라가며 찾는다(`SetTextInputService`·`FindTextInputService` — `SetPopupWorkArea`와 같은 방식). `Application::SetTextInputService`가 루트에 둔다.
+  - 서비스 구현은 창 호스트가 한다. `ui::TextInputContext`를 `platform::TextInputClient`로 감싸 창에 넘기는 어댑터다(UiDemo `DemoTextInput`). UiCore·UiFramework는 PlatformWindow에 의존하지 않는다.
+- **`platform::TextInputClient`와 창 API(PlatformWindow, 창별).**
+  - `TextInputClient`는 플랫폼이 부르는 문맥의 부분이다: `AllowsInputMethod`·`GetSelection`·`SetSelection`·`SetText`·`GetTextBounds`·`BeginComposition`·`UpdateCompositionRange`·`EndComposition`.
+  - `Window::ActivateTextInput(client)`·`DeactivateTextInput(client)`·`CancelTextComposition(client)`·`NotifyTextInputLayoutChanged(client)`·`ProcessTextInput(기록)`. 모두 창 소유 스레드(게임 lane)에서 부른다. `thread_local` 대상 창은 없앤다.
+  - 기록은 일련번호로 든다. Activate·Deactivate·CancelComposition은 남은 기록을 지우고, 번호는 다시 쓰지 않는다. 그래서 큐에 남은 옛 표지가 새 문맥의 기록을 처리하는 일이 없다(UE id·세대 대신 — CoreObjectInputDetailedPlan TextSessionId·늦은 commit 거부와 같은 효과다).
+  - `ProcessTextInput(n)`은 번호 n 이하의 남은 기록을 순서대로 처리한다. 입력 큐가 넘쳐 표지 하나를 잃어도 다음 표지가 앞 기록까지 처리한다. 표지가 끝내 오지 않으면 Deactivate가 남은 기록을 먼저 처리한다.
+  - Deactivate는 OS 조합을 완료시키고(IMM `CPS_COMPLETE` — 초점을 옮기면 만들던 글자가 들어가는 Windows 관례), 그 확정을 처리한 뒤, 그래도 조합 중이면 미리보기를 그대로 확정한다.
+  - 기록을 문맥에 적용하는 규칙(조합 범위 추적, 시작 때 선택 영역을 조합으로 바꿈)은 플랫폼 공용 `TextInputSession`(Private/Common)이 맡는다. OS 호출이 없어 EngineTests로 시험한다.
+  - 비밀번호·읽기 전용 입력란은 IME를 끈다(`ImmAssociateContext(nullptr)` — UE와 같다). 이때 확정 문자는 `WM_CHAR` → `Text`로 온다.
 - **Win64 1차는 IMM이다. 순서 보장이 핵심이다.**
   - 활성 context가 있을 때:
-    - `WM_IME_*`를 받으면 문자열(확정·조합)과 커서를 메시지 시점에 읽어 system 버퍼에 기록한다. 처리 시점에 읽으면 한 펌프 안의 연속 확정 두 개 중 앞의 것을 `GCS_RESULTSTR`이 덮어 잃는다.
+    - `WM_IME_*`를 받으면 문자열(확정·조합)과 커서를 메시지 시점에 읽어 창 기록 버퍼에 기록한다. 처리 시점에 읽으면 한 펌프 안의 연속 확정 두 개 중 앞의 것을 `GCS_RESULTSTR`이 덮어 잃는다.
     - 그 창 입력 큐에 `TextInputMethod` 표지 이벤트(기록 번호, trivially copyable)를 넣는다.
-    - `InputAdapter`가 그 위치에서 `TextInputSystem::Process(기록)`을 불러 키·문자 이벤트와 순서를 지킨다. 예: [확정 "한", KeyDown(Left)]에서 확정이 먼저 들어간다. UE는 `WM_CHAR`·키·IME를 한 미룬 큐에 순서대로 넣는다(WindowsApplication.cpp 2310–2330행).
+    - `InputAdapter`가 그 위치에서 `TextInputService::Process(기록)`을 불러 키·문자 이벤트와 순서를 지킨다. 예: [확정 "한", KeyDown(Left)]에서 확정이 먼저 들어간다. UE는 `WM_CHAR`·키·IME를 한 미룬 큐에 순서대로 넣는다(WindowsApplication.cpp 2310–2330행).
     - `WM_IME_COMPOSITION`을 `DefWindowProc`에 넘기지 않거나 `WM_IME_CHAR`를 삼킨다(UE WindowsTextInputMethodSystem.cpp 1157–1161행). 그래야 확정 문자열이 `WM_CHAR`로 두 번 오지 않는다.
   - 활성 context가 없으면 `DefWindowProc` → `WM_IME_CHAR` → `WM_CHAR`로 `Text` 이벤트가 온다. 게임 문자 입력·`InputState`가 IME 글자를 계속 받는다.
   - 후보창 위치는 context의 `GetTextBounds`로 당겨 오고(pull), `CFS_EXCLUDE`로 줄을 가리지 않게 한다(UE).
-- **system 버퍼.** 기록 형식은 (종류, context id, 문자열 offset·길이, 커서)이고, 문자열은 UTF-16 그대로다.
-  - 용량은 기록 64개·문자 4096 code unit이다.
-  - 넘치면 조합 갱신은 마지막 것만 남기고, 확정은 버리지 않는다. 그래도 넘치면 조합을 취소하고 로그를 남긴다.
-  - 게임 lane이 `PumpMessages` 전에 필요하면 키운다(OS 콜백 안 할당 없음).
+- **기록 버퍼.** 기록 형식은 (일련번호, 종류 조합·확정·끝, 문자열 offset·길이, 커서)이고, 문자열은 UTF-16 그대로다.
+  - 용량은 기록 64개·문자 4096 code unit이고 창 객체 안 고정 배열이다(OS 콜백 안 할당 없음). 처리가 끝나 비면 처음부터 다시 쓴다.
+  - 넘치면 남은 조합 갱신을 지운다(뒤의 조합·확정이 미리보기를 어차피 덮는다). 확정은 지우지 않는다.
+  - 그래도 넘치면 남은 기록을 모두 버리고 '끝' 기록 하나를 넣는다. 창은 OS 조합을 취소하고(`CPS_CANCEL`) 경고 로그를 남긴다. 그 동안의 확정은 잃는다(한 프레임에 4096 code unit을 넘게 확정하는 IME는 없다고 본다).
+  - 처음 안의 "게임 lane이 필요하면 키운다"는 버렸다. 고정 용량에서 넘침 규칙이 정해져 있고, 키우는 시점을 펌프 앞에 따로 둘 이유가 없다.
 - **TSF.** 같은 인터페이스 위의 UW4f3(병합 뒤)이다. TSF의 동기 질의는 펌프 중에만 받고, lane 대기 펌프 중이면 잠금 거부(`TS_E_SYNCHRONOUS`)로 답한다.
 - **입력 이벤트에서 조합 문자열이 빠진다.**
   - `TextComposition`·`TextCompositionCommit` 이벤트와 `InputEvent::composition`을 지우고, `Text`(code point 하나)와 `TextInputMethod` 표지만 남긴다. UE도 IME 문자열은 이벤트가 아니라 context로 간다.
@@ -136,7 +146,7 @@
 | UW7e | 스레드 계약(문서, Release 밖 단언)<br>창 모드(`SetWindowMode`·`GetWindowMode`, 두 번 누르기 표지, 제목 줄 위젯의 전체 화면 해제, `ToggleFullscreen`·`FullscreenCaption`·backend 전환 제거)<br>펌프 수준 대기(`PumpMessages`·`TakeEvents`·`WaitForMessages`·`WakeMessageWait`, `Application::SecondsUntilNextTimer`, 창 단위 `WaitForEvents` 제거 — 50 ms 결함 수정)<br>UiDemo 루프 이관 | PlatformWindow 시험: 다른 창의 미룬 이벤트가 있으면 대기가 바로 돌아온다, `WakeMessageWait`·보낸 메시지로 대기가 풀린다, 모드 왕복(실제 모드)<br>UiFramework 시험: 타이머 마감<br>self-test |
 | UW7f | 영역 지도 게시(`WindowRegionMap`·`PublishRegionMap`·`BuildWindowRegionMap`, hit grid 항목 순회, `popupOpen`)<br>`RegionHitTest` delegate 제거 | 지도와 `QueryWindowRegion`의 점 격자 동치(메뉴 열림·최대화·툴팁·넘침·Reset 뒤)<br>판정 순서(가장자리가 Caption보다 먼저 — 기존 CustomFrameHitZones 이관)<br>Win64 판정 시험 |
 | UW7g | DPI(프로세스 PMv2, `DpiScale`·`ConsumeDpiChange`, `AdjustWindowRectExForDpi`·숨긴 생성, `WM_DPICHANGED` 배율 먼저, 호스트 루트 변환 배율, 글꼴·SVG 배율, snapshot·self-test 배율 1) | 가짜 배율 2에서 배치·hit·영역 지도·작업 영역 시험<br>`WM_DPICHANGED`를 숨긴 창에 보내 배율이 먼저 바뀌는지<br>실제 모니터는 사람 확인 |
-| UW7h | 텍스트 입력 문맥(UiFramework `TextInputContext`·변경 통지, PlatformWindow `TextInputSystem`·`TextInputClient`, Win64 IMM 기록·표지 이벤트·`WM_IME_CHAR` 삼키기, 후보창 `CFS_EXCLUDE`)<br>`EditableTextElement`가 context 구현(미리보기 층, 확정 1회)<br>조합 이벤트·`InputEvent::composition`·`ui::Platform` 조합 함수·`InlineComposition.h` 제거<br>이관 대상: InputEvent.h, InputState.cpp, Application.cpp, InputAdapter.cpp, EditableTextElement.cpp, EditableTextWidgetTests.cpp(가짜 system), GameHud.cpp, Win64·Android·Unsupported 구현 | context 시험: UTF-16 위치 변환·조합 범위·선택·확정 1회<br>IMM 기록 시험: 확정 + Left 순서, 연속 확정 두 개, context 해제 뒤 기록 버림, 넘침<br>`InputEvent` trivially copyable<br>한국어 IME 사람 확인 |
+| UW7h | 텍스트 입력 문맥(UiCore `TextInputContext`·`TextInputService`, PlatformWindow `TextInputClient`·창 API·`TextInputSession`, Win64 IMM 기록·표지 이벤트·`WM_IME_CHAR` 삼키기, 후보창 `CFS_EXCLUDE`)<br>`EditableTextElement`가 context 구현(미리보기 층, 확정 1회)<br>조합 이벤트·`InputEvent::composition`·`ui::Platform` 조합 함수·`InlineComposition.h` 제거<br>이관 대상: InputEvent.h, InputState.cpp, Application.cpp, InputAdapter.cpp, EditableTextElement.cpp, EditableTextWidgetTests.cpp(가짜 system), GameHud.cpp, Win64·Android·Unsupported 구현 | context 시험: UTF-16 위치 변환·조합 범위·선택·확정 1회<br>IMM 기록 시험: 확정 + Left 순서, 연속 확정 두 개, context 해제 뒤 기록 버림, 넘침<br>`InputEvent` trivially copyable<br>한국어 IME 사람 확인 |
 
 **Android·Mac 대조(완료 판정의 "구현 가능성").**
 

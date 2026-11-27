@@ -12,6 +12,7 @@
 #include <UiCore/FocusCause.h>
 #include <UiCore/PaintList.h>
 #include <UiCore/Styles/StyleBrush.h>
+#include <UiCore/TextInputService.h>
 
 namespace rocks::ui {
 
@@ -155,6 +156,16 @@ public:
     const SharedPtr<PopupWorkArea>& GetPopupWorkArea() const noexcept;
     // 자신부터 조상으로 올라가 가장 가까운 공급자에게 묻는다. 공급자가 없거나 모르면 false다.
     bool QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept;
+
+    // 창의 텍스트 입력 서비스다(Docs/Design/UiToolkit 19.2절). 창 호스트가
+    // Application::SetTextInputService로 등록하면 Application이 루트에 단다(빈 포인터면 뗀다).
+    // 편집 요소는 초점을 받을 때 FindTextInputService로 찾아 Activate한다.
+    //
+    // 사용 예:
+    //   if (auto service = FindTextInputService()) { service->Activate(*this); }
+    Result<void> SetTextInputService(const SharedPtr<TextInputService>& service) noexcept;
+    // 자신부터 조상으로 올라가 가장 가까운 서비스다(없으면 빈 포인터 — 헤드리스·서비스 없는 창).
+    SharedPtr<TextInputService> FindTextInputService() const noexcept;
 
     using ToolTipFactory = Delegate<Result<SharedPtr<Element>>()>;
     Result<void> SetToolTipFactory(ToolTipFactory&& factory, StringView description = {},

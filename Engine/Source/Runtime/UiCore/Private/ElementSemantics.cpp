@@ -18,6 +18,7 @@ public:
     uint64 tipRevision = 0;
     SharedPtr<Element::ToolTipFactory> tip;
     SharedPtr<Element::PopupWorkArea> popupWorkArea;
+    SharedPtr<TextInputService> textInput;
 };
 
 namespace {
@@ -52,6 +53,29 @@ bool Element::QueryPopupWorkArea(Vec2 window, Box2<float>& area) const noexcept 
     }
 
     return false;
+}
+
+Result<void> Element::SetTextInputService(const SharedPtr<TextInputService>& service) noexcept {
+    if (!semantics_ && !service) {
+        return Result<void>::Success();
+    }
+
+    auto ready = EnsureSemantics();
+    if (ready) {
+        semantics_->textInput = service;
+    }
+
+    return ready;
+}
+
+SharedPtr<TextInputService> Element::FindTextInputService() const noexcept {
+    for (const Element* current = this; current; current = current->parent_) {
+        if (current->semantics_ && current->semantics_->textInput) {
+            return current->semantics_->textInput;
+        }
+    }
+
+    return {};
 }
 
 Result<void> Element::EnsureSemantics() noexcept {

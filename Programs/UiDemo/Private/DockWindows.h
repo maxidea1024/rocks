@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DemoTextInput.h"
+
 #include <PlatformWindow/Window.h>
 #include <UiFramework/Docking/DockManager.h>
 #include <UiFramework/Application/InputAdapter.h>
@@ -55,6 +57,8 @@ private:
         input::WindowRegionMap regions;
         // 크기 조절 modal 루프 안의 실시간 그리기가 실패한 원인이다(Run이 다음 차례에 돌려준다).
         ErrorCode liveResizeError = ErrorCode::None;
+        // 창의 텍스트 입력 서비스다(19.2절 — 만들지 못하면 IME 글자가 Text 이벤트로 온다).
+        SharedPtr<DemoTextInput> textInput;
     };
     Result<SlotHandle> Add(UniquePtr<platform::Window> window, const SharedPtr<DockManager>& area,
                            StringView title) noexcept;

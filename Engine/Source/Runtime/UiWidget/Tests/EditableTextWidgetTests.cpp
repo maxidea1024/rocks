@@ -56,6 +56,44 @@ public:
 private:
     Allocator& allocator_;
 };
+
+// 창 호스트 대신 문맥 호출을 기록하는 서비스다(19.2절). 시험이 플랫폼 기록 세션처럼 문맥을 직접
+// 부른다.
+class FakeTextInput final : public TextInputService {
+public:
+    void Activate(TextInputContext& context) noexcept override {
+        active = &context;
+        ++activations;
+    }
+
+    void Deactivate(TextInputContext& context) noexcept override {
+        if (active == &context) {
+            active = nullptr;
+        }
+
+        ++deactivations;
+    }
+
+    void CancelComposition(TextInputContext&) noexcept override {
+        ++cancels;
+    }
+
+    void NotifyLayoutChanged(TextInputContext&) noexcept override {
+        ++layouts;
+    }
+
+    void Process(uint32 record) noexcept override {
+        processed = record;
+    }
+
+    TextInputContext* active = nullptr;
+    uint32 activations = 0;
+    uint32 deactivations = 0;
+    uint32 cancels = 0;
+    uint32 layouts = 0;
+    uint32 processed = 0;
+};
+
 } // namespace
 
 TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
@@ -104,10 +142,17 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
                     ++enters;
                 }
             }));
+        auto service = SharedPtr<FakeTextInput>::TryMake(allocator);
+        REQUIRE(service);
         Application app(allocator);
         app.SetRoot(live.Value());
+        REQUIRE(app.SetTextInputService(service.Value()));
         REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 50}, {}), 1));
         REQUIRE(app.SetFocus(0, live.Value()));
+        // 초점을 받은 편집 요소가 창의 텍스트 입력 문맥이 된다.
+        TextInputContext* context = service.Value()->active;
+        REQUIRE(context);
+        CHECK(service.Value()->activations == 1);
         InputAdapter inputAdapter(app);
         using input::InputEvent;
         using input::Key;
@@ -143,6 +188,9 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         REQUIRE(widget->SetText("🙂"));
 
         REQUIRE(widget->SetPassword(true));
+        // 비밀번호는 IME를 끈다 — 서비스에 다시 알린다.
+        CHECK(!context->AllowsInputMethod());
+        CHECK(service.Value()->activations == 2);
         auto& label = static_cast<TextLabel&>(*live.Value()->ChildAt(0));
         CHECK(label.ShapedClusters().Size() == 1);
         CHECK(label.ShapedClusters()[0].byteEnd == 4);
@@ -154,24 +202,88 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         REQUIRE(inputAdapter.Route(InputEvent::KeyDown(Key::Backspace)));
         REQUIRE(widget->SetPassword(false));
 
+        CHECK(context->AllowsInputMethod());
+
+        // 위치는 UTF-16이다: "🙂"는 surrogate 쌍 둘이다.
+        CHECK(context->GetTextLength() == 2);
+        uint32 selectionBegin = 0, selectionLength = 0;
+        context->GetSelection(selectionBegin, selectionLength);
+        CHECK(selectionBegin == 2);
+        CHECK(selectionLength == 0);
+
+        // 조합은 미리보기 층만 바꾼다(위젯 글자·변경 알림 없음). 조합 중 키는 IME 몫이다.
         const uint32 beforeComposition = changes;
-        auto preedit = SharedPtr<String>::TryMake(allocator, allocator);
-        REQUIRE(preedit);
-        REQUIRE(preedit.Value()->TryAssign("가"));
-        REQUIRE(inputAdapter.Route(InputEvent::Composition(preedit.Value(), 3)));
+        const char16_t ga[] = {0xAC00};
+        const char16_t gak[] = {0xAC01};
+        context->BeginComposition();
+        CHECK(context->IsComposing());
+        context->SetText(2, 0, ga);
+        context->UpdateCompositionRange(2, 1);
+        context->SetSelection(3, 0);
         CHECK(widget->GetText() == "🙂");
         CHECK(label.GetText() == "🙂가");
+        CHECK(context->GetTextLength() == 3);
         CHECK(changes == beforeComposition);
-        REQUIRE(inputAdapter.Route(InputEvent::Composition()));
+        REQUIRE(inputAdapter.Route(InputEvent::KeyDown(Key::Backspace)));
+        CHECK(label.GetText() == "🙂가");
+        context->SetText(2, 1, gak);
+        CHECK(label.GetText() == "🙂각");
+        // 다시 배치하면 후보 창 위치를 다시 당기게 알린다.
+        const uint32 layouts = service.Value()->layouts;
+        REQUIRE(app.UpdatePaintCache(Geometry::Root({100, 50}, {}), 1));
+        CHECK(service.Value()->layouts > layouts);
+        Box2<float> caret;
+        CHECK(context->GetTextBounds(3, 0, caret));
+        CHECK(caret.max.y > caret.min.y);
+        Box2<float> field;
+        CHECK(context->GetScreenBounds(field));
+        CHECK(field.min.x <= caret.min.x);
+
+        // 확정 없이 끝나면(취소) 조합 전과 같다 — 이력·알림 없음.
+        context->SetText(2, 1, {});
+        context->SetSelection(2, 0);
+        context->EndComposition();
+        CHECK(!context->IsComposing());
         CHECK(label.GetText() == "🙂");
-        REQUIRE(inputAdapter.Route(InputEvent::Composition(preedit.Value(), 3, true)));
+        CHECK(changes == beforeComposition);
+
+        // 확정은 한 번이다: 조합 갱신이 여럿이어도 변경 알림 하나, 편집 이력 하나.
+        context->BeginComposition();
+        context->SetText(2, 0, ga);
+        context->SetText(2, 1, gak);
+        context->SetText(2, 1, ga);
+        context->SetSelection(3, 0);
+        context->EndComposition();
         CHECK(widget->GetText() == "🙂가");
         CHECK(changes == beforeComposition + 1);
+        Array<char16_t> units(allocator);
+        REQUIRE(context->GetText(0, 3, units));
+        REQUIRE(units.Size() == 3);
+        CHECK(units[0] == 0xD83D);
+        CHECK(units[1] == 0xDE42);
+        CHECK(units[2] == 0xAC00);
+        CHECK(context->GetCharacterIndexFromPoint({1000, 10}).HasValue());
         REQUIRE(inputAdapter.Route(InputEvent::KeyDown(Key::LeftControl)));
         REQUIRE(inputAdapter.Route(InputEvent::KeyDown(Key::Z)));
         REQUIRE(inputAdapter.Route(InputEvent::KeyUp(Key::LeftControl)));
         CHECK(widget->GetText() == "🙂");
+
+        // IME 표지 이벤트는 그 자리에서 서비스로 간다.
+        REQUIRE(inputAdapter.Route(InputEvent::TextInputMethod(7)));
+        CHECK(service.Value()->processed == 7);
+
+        // 조합 중 앱이 글자를 바꾸면 미리보기를 버리고 IME 조합을 취소한다.
+        context->BeginComposition();
+        context->SetText(2, 0, ga);
+        const uint32 cancels = service.Value()->cancels;
+        REQUIRE(widget->SetText("x"));
+        CHECK(service.Value()->cancels == cancels + 1);
+        CHECK(!context->IsComposing());
+        CHECK(label.GetText() == "x");
+        REQUIRE(widget->SetText("🙂"));
         widget->SetReadOnly(true);
+        CHECK(!context->AllowsInputMethod());
+        CHECK(context->IsReadOnly());
         REQUIRE(inputAdapter.Route(InputEvent::KeyDown(Key::Backspace)));
         CHECK(widget->GetText() == "🙂");
         REQUIRE(app.UpdatePaintCache(Geometry::Root({80, 32}, {}), 1));

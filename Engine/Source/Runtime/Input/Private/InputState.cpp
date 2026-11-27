@@ -271,21 +271,9 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             keysDown_.Set(index, false);
             break;
         }
-        case InputEventType::TextComposition:
-            break;
-        case InputEventType::TextCompositionCommit:
-            if (event.composition) {
-                auto points = event.composition->View().TryCodePoints();
-                if (points) {
-                    for (auto point : points.Value()) {
-                        if (textCount_ == MaxTextPerFrame) {
-                            break;
-                        }
-
-                        text_[textCount_++] = point;
-                    }
-                }
-            }
+        case InputEventType::TextInputMethod:
+            // IME 문자열은 활성 텍스트 입력 문맥(UI 편집 요소)으로 간다. 문맥이 없으면 OS가 확정
+            // 문자를 Text로 보낸다(19.2절).
             break;
         case InputEventType::Text:
             if (textCount_ < MaxTextPerFrame) {

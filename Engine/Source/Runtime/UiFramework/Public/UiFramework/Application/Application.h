@@ -38,6 +38,13 @@ public:
     // 포함)에 단다. 빈 delegate면 뗀다(팝업은 창 경계만 지킨다).
     Result<void> SetPopupWorkArea(Element::PopupWorkArea&& provider) noexcept;
 
+    // 창의 텍스트 입력 서비스다(Docs/Design/UiToolkit 19.2절). 창 호스트가 한 번 부르고,
+    // Application은 지금과 이후의 루트에 단다. 편집 요소가 찾아 Activate하고, 입력 adapter가 IME
+    // 표지 이벤트에서 Process를 부른다. 빈 포인터면 뗀다(IME 문자는 Text 이벤트로만 온다).
+    Result<void> SetTextInputService(SharedPtr<TextInputService> service) noexcept;
+    // IME 기록 표지(TextInputMethod)를 서비스에 넘긴다. 서비스가 없으면 false다.
+    bool ProcessTextInput(uint32 record) noexcept;
+
     // 위젯 스타일 색을 풀 테마다(UW3b — 기본은 UE 다크 테마). 바꾸면 그리기 캐시를 모두 다시
     // 만든다. BuildPaintList에 넘긴 목록은 이 Application의 테마를 빌린다.
     void SetTheme(const ThemeColors& theme) noexcept;
@@ -283,8 +290,9 @@ private:
     Result<void> AttachToolTip(const PopupRequest& popup) noexcept;
     WeakPtr<Element> toolTipHost_;
     SharedPtr<Element::PopupWorkArea> popupWorkArea_;
+    SharedPtr<TextInputService> textInput_;
     // 지금 루트에 공급자를 단다. 할당에 실패하면 팝업이 창 경계만 지키는 것으로 물러난다.
-    void ApplyPopupWorkArea() noexcept;
+    void ApplyHostServices() noexcept;
     usize FindToolTip(uint32 user) const noexcept;
     double ToolTipTime() const noexcept;
     Array<ToolTipState> toolTips_;

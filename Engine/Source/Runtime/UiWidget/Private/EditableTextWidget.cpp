@@ -30,12 +30,17 @@ bool EditableTextWidget::IsReadOnly() const noexcept {
 void EditableTextWidget::SetReadOnly(bool readOnly) noexcept {
     if (readOnly) {
         if (auto live = CachedElement()) {
-            static_cast<EditableTextElement&>(*live).EndComposition(*this);
+            static_cast<EditableTextElement&>(*live).CancelComposition(*this);
         }
     }
 
     if (readOnly_ != readOnly) {
         readOnly_ = readOnly;
+        if (auto live = CachedElement()) {
+            // IME 허용이 바뀌었다(읽기 전용은 IME를 끈다 — 19.2절).
+            static_cast<EditableTextElement&>(*live).RefreshTextInput();
+        }
+
         NotifyPropertyChanged("readOnly");
     }
 }
@@ -103,6 +108,11 @@ Result<void> EditableTextWidget::SetPassword(bool password) noexcept {
         }
 
         password_ = password;
+        if (auto live = CachedElement()) {
+            // 비밀번호 입력란은 IME를 끈다(19.2절).
+            static_cast<EditableTextElement&>(*live).RefreshTextInput();
+        }
+
         NotifyPropertyChanged("password");
     }
 

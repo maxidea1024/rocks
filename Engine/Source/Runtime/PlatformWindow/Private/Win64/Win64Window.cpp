@@ -1,5 +1,7 @@
-#include "Win64InlineComposition.h"
 #include <Core/Assert.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Math/MathUtility.h>
+#include <Core/ScopeExit.h>
 #include <Platform/Clock.h>
 #include <Platform/Sync.h>
 #include <Platform/DynamicLibrary.h>
@@ -9,6 +11,7 @@
 
 #include "../Common/GamepadMotorMapping.h"
 #include "../Common/PointerTouchMapping.h"
+#include "../Common/TextInputSession.h"
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
@@ -37,6 +40,7 @@ constexpr WPARAM SysCommandMask = 0xFFF0;
 // SC_KEYMENU의 lParam이 이 글자면 Alt+Space(시스템 메뉴)다.
 constexpr LPARAM SystemMenuKey = ' ';
 constexpr usize MaxTitleCharacters = 256;
+inline constexpr LogCategory LogWin64Window{"Platform.Window"};
 
 // 스캔코드 set 1(make code) → Key. 확장 키(E0 접두)는 ExtendedKey가 처리한다.
 Key BaseKey(uint32 scanCode) noexcept {
@@ -278,8 +282,7 @@ constexpr uint8 DoubleClickCount = 2;
 
 class Win64Window final : public Window {
 public:
-    explicit Win64Window(Allocator& allocator) noexcept
-        : allocator_(allocator), pending_(allocator) {
+    explicit Win64Window(Allocator& allocator) noexcept : pending_(allocator) {
     }
 
     ~Win64Window() override {
@@ -558,6 +561,66 @@ public:
         }
     }
 
+    void ActivateTextInput(TextInputClient& client) noexcept override {
+        AssertOwnerThread();
+        TextInputClient* current = textInput_.Active();
+        if (current && current != &client) {
+            DeactivateTextInput(*current);
+        }
+
+        if (current != &client) {
+            textInput_.Activate(client);
+        }
+
+        AssociateInputMethod(client.AllowsInputMethod());
+        PositionInputMethodWindows();
+    }
+
+    void DeactivateTextInput(TextInputClient& client) noexcept override {
+        AssertOwnerThread();
+        if (textInput_.Active() != &client) {
+            return;
+        }
+
+        // 만들던 글자를 넣는다(초점을 옮기면 조합이 확정되는 Windows 관례). IMM이 확정을 이 호출
+        // 안에서 WM_IME_COMPOSITION으로 보내면 기록되고, Deactivate가 남은 기록을 먼저 처리한다.
+        NotifyInputMethod(CPS_COMPLETE);
+        (void)textInput_.Deactivate(client);
+        AssociateInputMethod(true);
+    }
+
+    void CancelTextComposition(TextInputClient& client) noexcept override {
+        AssertOwnerThread();
+        if (textInput_.Active() != &client) {
+            return;
+        }
+
+        // 취소가 이 호출 안에서 보내는 조합 메시지의 기록도 Cancel이 함께 버린다.
+        NotifyInputMethod(CPS_CANCEL);
+        (void)textInput_.Cancel(client);
+    }
+
+    void NotifyTextInputLayoutChanged(TextInputClient& client) noexcept override {
+        AssertOwnerThread();
+        if (textInput_.Active() == &client) {
+            PositionInputMethodWindows();
+        }
+    }
+
+    void ProcessTextInput(uint32 record) noexcept override {
+        AssertOwnerThread();
+        if (inputMethodOverflowed_) {
+            // 넘침은 OS 메시지 처리 밖(여기)에서 취소한다 — 메시지 처리 중 IMM을 다시 부르지
+            // 않는다.
+            inputMethodOverflowed_ = false;
+            NotifyInputMethod(CPS_CANCEL);
+        }
+
+        if (textInput_.Process(record)) {
+            PositionInputMethodWindows();
+        }
+    }
+
     bool HasFocus() const noexcept override {
         return focused_;
     }
@@ -738,6 +801,127 @@ private:
 
     void Push(const input::InputEvent& event) noexcept {
         pending_.Push(event);
+    }
+
+    // 활성 문맥이 IME를 허용하면 창 IME 문맥을 잇고, 아니면 뗀다(비밀번호 — UE와 같다). 떼면 IME가
+    // 켜지지 않아 확정 문자가 WM_CHAR로만 온다.
+    void AssociateInputMethod(bool allow) noexcept {
+        if (allow && inputMethodDetached_) {
+            (void)ImmAssociateContextEx(window_, nullptr, IACE_DEFAULT);
+            inputMethodDetached_ = false;
+        } else if (!allow && !inputMethodDetached_) {
+            NotifyInputMethod(CPS_CANCEL);
+            (void)ImmAssociateContext(window_, nullptr);
+            inputMethodDetached_ = true;
+        }
+    }
+
+    void NotifyInputMethod(DWORD action) noexcept {
+        if (HIMC context = ImmGetContext(window_)) {
+            (void)ImmNotifyIME(context, NI_COMPOSITIONSTR, action, 0);
+            ImmReleaseContext(window_, context);
+        }
+    }
+
+    // 조합 창·후보 창을 문맥 caret으로 옮긴다. 후보 창은 caret 사각형을 가리지 않게
+    // CFS_EXCLUDE로 둔다(UE FWindowsTextInputMethodSystem::UpdateIMMWindowPositions).
+    void PositionInputMethodWindows() noexcept {
+        TextInputClient* client = textInput_.Active();
+        if (!client || !client->AllowsInputMethod()) {
+            return;
+        }
+
+        uint32 begin = 0;
+        uint32 length = 0;
+        client->GetSelection(begin, length);
+        Box2<float> caret;
+        int32 left = 0, top = 0, right = 0, bottom = 0;
+        if (!client->GetTextBounds(begin, 0, caret) || !math::TryRoundToInt32(caret.min.x, left) ||
+            !math::TryRoundToInt32(caret.min.y, top) ||
+            !math::TryRoundToInt32(caret.max.x, right) ||
+            !math::TryRoundToInt32(caret.max.y, bottom)) {
+            return;
+        }
+
+        HIMC context = ImmGetContext(window_);
+        if (!context) {
+            return;
+        }
+
+        ROCKS_ON_SCOPE_EXIT {
+            ImmReleaseContext(window_, context);
+        };
+        COMPOSITIONFORM composition{};
+        composition.dwStyle = CFS_POINT;
+        composition.ptCurrentPos = {left, top};
+        (void)ImmSetCompositionWindow(context, &composition);
+        CANDIDATEFORM candidates{};
+        candidates.dwIndex = 0;
+        candidates.dwStyle = CFS_EXCLUDE;
+        candidates.ptCurrentPos = {left, bottom};
+        candidates.rcArea = {left, top, right, bottom};
+        (void)ImmSetCandidateWindow(context, &candidates);
+    }
+
+    // IME 문자열을 메시지 시점에 읽어 기록하고 표지를 큐에 넣는다(Docs/Design/UiToolkit 19.2절 —
+    // 처리 시점에 읽으면 한 펌프 안의 연속 확정 중 앞의 것을 GCS_RESULTSTR이 덮는다). 한 메시지가
+    // 앞 조합을 확정하고 새 조합을 시작할 수 있어 확정을 먼저 기록한다.
+    void RecordInputMethod(LPARAM flags) noexcept {
+        HIMC context = ImmGetContext(window_);
+        if (!context) {
+            return;
+        }
+
+        ROCKS_ON_SCOPE_EXIT {
+            ImmReleaseContext(window_, context);
+        };
+        if ((flags & GCS_RESULTSTR) != 0) {
+            RecordInputMethodString(context, GCS_RESULTSTR, TextInputRecordKind::Commit, 0);
+        }
+
+        if ((flags & (GCS_COMPSTR | GCS_CURSORPOS)) != 0) {
+            const LONG cursor = ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0);
+            RecordInputMethodString(context, GCS_COMPSTR, TextInputRecordKind::Composition,
+                                    cursor > 0 ? static_cast<uint32>(cursor) : 0);
+        } else if (flags == 0) {
+            // 조합 문자열이 비었다(일본어 IME Esc 등).
+            MarkInputMethod(textInput_.Record(TextInputRecordKind::Composition, {}, 0));
+        }
+    }
+
+    void RecordInputMethodString(HIMC context, DWORD kind, TextInputRecordKind record,
+                                 uint32 cursor) noexcept {
+        const LONG bytes = ImmGetCompositionStringW(context, kind, nullptr, 0);
+        if (bytes < 0 || bytes % sizeof(wchar_t) != 0) {
+            return;
+        }
+
+        const usize units = static_cast<usize>(bytes) / sizeof(wchar_t);
+        if (units > MaxTextInputCodeUnits) {
+            MarkInputMethod(textInput_.RecordOverflow());
+            return;
+        }
+
+        if (units != 0 && ImmGetCompositionStringW(context, kind, inputMethodText_,
+                                                   static_cast<DWORD>(bytes)) != bytes) {
+            return;
+        }
+
+        static_assert(sizeof(wchar_t) == sizeof(char16_t), "IMM strings are UTF-16");
+        MarkInputMethod(textInput_.Record(
+            record, {reinterpret_cast<const char16_t*>(inputMethodText_), units}, cursor));
+    }
+
+    void MarkInputMethod(const TextInputRecordResult& result) noexcept {
+        if (result.overflowed) {
+            inputMethodOverflowed_ = true;
+            Log::Warning(LogWin64Window,
+                         "IME records overflowed the window buffer; the composition was cancelled");
+        }
+
+        if (result.serial) {
+            Push(input::InputEvent::TextInputMethod(*result.serial));
+        }
     }
 
     // 창 객체는 만든 스레드(게임 lane)에서만 쓴다(Docs/Design/UiToolkit 19.2절 스레드 계약).
@@ -1235,20 +1419,36 @@ private:
             }
             break;
         }
+
+        // IME(Docs/Design/UiToolkit 19.2절). 활성 문맥이 IME를 받으면 조합을 UI가 그린다: 기본 조합
+        // 창을 숨기고, 조합 메시지를 DefWindowProc에 넘기지 않아 확정이 WM_IME_CHAR → WM_CHAR로 두
+        // 번 오지 않는다(UE WindowsTextInputMethodSystem). 문맥이 없으면 기본 처리 → WM_CHAR →
+        // Text다.
         case WM_IME_SETCONTEXT:
-            if (IsInlineCompositionWindow(window_)) {
+            if (textInput_.AcceptsInputMethod()) {
                 lParam &= ~static_cast<LPARAM>(ISC_SHOWUICOMPOSITIONWINDOW);
             }
             break;
+        case WM_IME_STARTCOMPOSITION:
+            if (textInput_.AcceptsInputMethod()) {
+                return 0;
+            }
+            break;
         case WM_IME_COMPOSITION:
-            if (IsInlineCompositionWindow(window_) &&
-                RouteInlineComposition(window_, lParam, allocator_, pending_)) {
+            if (textInput_.AcceptsInputMethod()) {
+                RecordInputMethod(lParam);
                 return 0;
             }
             break;
         case WM_IME_ENDCOMPOSITION:
-            if (IsInlineCompositionWindow(window_)) {
-                Push(input::InputEvent::Composition());
+            if (textInput_.AcceptsInputMethod()) {
+                MarkInputMethod(textInput_.Record(TextInputRecordKind::End, {}, 0));
+                return 0;
+            }
+            break;
+        case WM_IME_CHAR:
+            if (textInput_.AcceptsInputMethod()) {
+                return 0;
             }
             break;
         case WM_CHAR:
@@ -1411,7 +1611,6 @@ private:
         return self->Handle(message, wParam, lParam);
     }
 
-    Allocator& allocator_;
     HWND window_ = nullptr;
     HCURSOR cursor_ = nullptr;
     // UI가 게시한 영역 지도다(OS 질의가 다른 스레드에서 와도 읽도록 잠금 아래 둔다).
@@ -1431,6 +1630,11 @@ private:
     input::MouseCursor cursorShape_ = input::MouseCursor::Arrow;
     HINSTANCE instance_ = nullptr;
     input::InputQueue pending_;
+    TextInputSession textInput_;
+    // IME 문자열을 읽는 자리다(OS 메시지 처리 중 할당하지 않는다).
+    wchar_t inputMethodText_[MaxTextInputCodeUnits]{};
+    bool inputMethodDetached_ = false;
+    bool inputMethodOverflowed_ = false;
     // 이 스레드의 창 목록 다음 창과 만든 스레드다.
     Win64Window* next_ = nullptr;
     uint64 ownerThread_ = 0;

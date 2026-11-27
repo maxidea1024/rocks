@@ -76,7 +76,7 @@ void Application::SetRoot(const SharedPtr<Element>& root) noexcept {
     root_ = root;
     cache_.Reset();
     hitGrid_.Reset();
-    ApplyPopupWorkArea();
+    ApplyHostServices();
 }
 
 const SharedPtr<Element>& Application::GetRoot() const noexcept {
@@ -107,10 +107,29 @@ Result<void> Application::SetPopupWorkArea(Element::PopupWorkArea&& provider) no
     return Result<void>::Success();
 }
 
-void Application::ApplyPopupWorkArea() noexcept {
+Result<void> Application::SetTextInputService(SharedPtr<TextInputService> service) noexcept {
+    textInput_ = Move(service);
+    return root_ ? root_->SetTextInputService(textInput_) : Result<void>::Success();
+}
+
+bool Application::ProcessTextInput(uint32 record) noexcept {
+    if (!textInput_) {
+        return false;
+    }
+
+    textInput_->Process(record);
+    return true;
+}
+
+void Application::ApplyHostServices() noexcept {
     if (root_ && popupWorkArea_) {
         // 실패(메모리 부족)하면 팝업이 창 경계만 지킨다 — 화면 밖에 걸칠 수는 있어도 동작은 한다.
         (void)root_->SetPopupWorkArea(popupWorkArea_);
+    }
+
+    if (root_ && textInput_) {
+        // 실패(메모리 부족)하면 편집 요소가 서비스를 못 찾는다 — IME 글자가 Text 이벤트로 온다.
+        (void)root_->SetTextInputService(textInput_);
     }
 }
 
@@ -601,9 +620,7 @@ Result<bool> Application::RouteKey(uint32 userId, const input::InputEvent& event
 Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent& event,
                                          const SharedPtr<Element>& scope) noexcept {
     if (event.type != input::InputEventType::KeyDown &&
-        event.type != input::InputEventType::KeyUp && event.type != input::InputEventType::Text &&
-        event.type != input::InputEventType::TextComposition &&
-        event.type != input::InputEventType::TextCompositionCommit) {
+        event.type != input::InputEventType::KeyUp && event.type != input::InputEventType::Text) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
 

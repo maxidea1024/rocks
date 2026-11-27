@@ -1,11 +1,16 @@
 #include "EditableTextElement.h"
 
 #include <Core/Text/StringBuilder.h>
+#include <UiCore/TextInputPositions.h>
 #include <UiWidget/EditableTextWidget.generated.h>
 
 namespace rocks::ui {
 
 namespace {
+
+usize SmallerOffset(usize a, usize b) noexcept {
+    return a < b ? a : b;
+}
 
 // 상자형 편집 칸의 안쪽 여백, 되돌리기 기록 상한이다.
 constexpr float BoxedTextPadding = 4.0f;
@@ -21,8 +26,17 @@ EditableTextElement::EditableTextElement(Allocator& allocator, ObjectRegistry& r
                                          Platform platform, bool multiline, bool boxed) noexcept
     : Element(allocator), undo_(allocator), redo_(allocator), registry_(registry), owner_(owner),
       shaper_(Move(shaper)), focusText_(allocator), platform_(platform),
-      padding_(boxed ? BoxedTextPadding : 0.0f), multiline_(multiline) {
+      padding_(boxed ? BoxedTextPadding : 0.0f), preview_(allocator), multiline_(multiline) {
     SetClipToBounds(true);
+}
+
+EditableTextElement::~EditableTextElement() noexcept {
+    // 서비스가 남은 기록을 이 문맥에 적용하지 않게 조합을 먼저 버린 뒤 끈다(19.2절).
+    if (auto service = Move(textInput_)) {
+        composing_ = false;
+        service->CancelComposition(*this);
+        service->Deactivate(*this);
+    }
 }
 
 Result<void> EditableTextElement::Initialize(StringView text, float size, bool password) noexcept {
@@ -47,6 +61,26 @@ Result<void> EditableTextElement::Initialize(StringView text, float size, bool p
 }
 
 Result<void> EditableTextElement::Shape(StringView text, float size, bool password) noexcept {
+    // 확정 글자로 셰이핑한다. 조합 중이면 앱이 글자를 바꾼 것이다(바인딩·되돌리기 — 19.2절).
+    AbandonComposition();
+    return ShapeText(text, size, password);
+}
+
+void EditableTextElement::AbandonComposition() noexcept {
+    if (!composing_) {
+        return;
+    }
+
+    composing_ = false;
+    preview_.Clear();
+    anchor_ = preCompositionAnchor_;
+    caret_ = preCompositionCaret_;
+    if (textInput_) {
+        textInput_->CancelComposition(*this);
+    }
+}
+
+Result<void> EditableTextElement::ShapeText(StringView text, float size, bool password) noexcept {
     if (!text.IsEmpty() && !shaper_) {
         return Result<void>::Failure(ErrorCode::NotReady);
     }
@@ -82,7 +116,6 @@ Result<void> EditableTextElement::Shape(StringView text, float size, bool passwo
         hint_->SetVisibility(text.IsEmpty() ? Visibility::HitTestInvisible : Visibility::Collapsed);
     }
 
-    composing_ = false;
     fontSize_ = size;
     InvalidateLayout();
     InvalidatePaint();
@@ -195,7 +228,7 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
         return wrapped;
     }
 
-    const auto pos = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
+    const auto pos = label_->CaretPosition(caret_, false);
     if (pos) {
         scroll_.x =
             math::Max(0.0f, math::Clamp(scroll_.x, pos.Value().x + 1 - area.x, pos.Value().x));
@@ -207,28 +240,12 @@ Result<void> EditableTextElement::Arrange(const Geometry& geometry) noexcept {
 
     const AffineTransform2D offset{1, 0, 0, 1, padding_ - scroll_.x, padding_ - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
-    if (arranged && focused_) {
-        PositionCompositionWindow();
+    if (arranged && textInput_) {
+        // 글자 위치가 정해졌다 — 후보 창을 caret으로 옮긴다.
+        textInput_->NotifyLayoutChanged(*this);
     }
 
     return arranged;
-}
-
-void EditableTextElement::PositionCompositionWindow() const noexcept {
-    if (!platform_.moveCompositionWindow) {
-        return;
-    }
-
-    auto cursor = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
-    if (cursor) {
-        auto point = cursor.Value();
-        point.y += label_->LineHeight();
-        point = label_->GetGeometry().render.Apply(point);
-        int32 x = 0, y = 0;
-        if (math::TryRoundToInt32(point.x, x) && math::TryRoundToInt32(point.y, y)) {
-            platform_.moveCompositionWindow(x, y);
-        }
-    }
 }
 
 const StyleBrush* EditableTextElement::FocusOutlineBrush() const noexcept {
@@ -252,9 +269,9 @@ void EditableTextElement::OnFocusReceived(uint32 user) noexcept {
         }
     }
 
-    if (platform_.setInlineComposition) {
-        platform_.setInlineComposition(true);
-        PositionCompositionWindow();
+    textInput_ = FindTextInputService();
+    if (textInput_) {
+        textInput_->Activate(*this);
     }
 
     chord_ = {};
@@ -270,20 +287,27 @@ void EditableTextElement::OnFocusLost(uint32 user) noexcept {
     canRevert_ = false;
     focusText_.Clear();
     keepPointerSelection_ = false;
-    if (platform_.setInlineComposition) {
-        platform_.setInlineComposition(false);
-    }
-
     chord_ = {};
     dragging_ = false;
     InvalidatePaint();
+    // 서비스가 만들던 글자를 확정해 넣은 뒤 끈다(19.2절). Commit(FocusLost)이 그 글자를 본다.
+    if (auto service = Move(textInput_)) {
+        service->Deactivate(*this);
+    }
+
+    EndComposition();
     auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
     if (model) {
         auto* widget = model.Value().Get().Value();
         if (widget->CachedElement().Get() == this) {
-            EndComposition(*widget);
             widget->Commit(TextCommitReason::FocusLost);
         }
+    }
+}
+
+void EditableTextElement::RefreshTextInput() noexcept {
+    if (textInput_) {
+        textInput_->Activate(*this);
     }
 }
 
@@ -376,52 +400,21 @@ void EditableTextElement::Replace(EditableTextWidget& owner, usize begin, usize 
     owner.changed_.ExecuteIfBound(result.View());
 }
 
-void EditableTextElement::EndComposition(EditableTextWidget& owner) noexcept {
+void EditableTextElement::CancelComposition(EditableTextWidget& owner) noexcept {
     if (composing_) {
-        (void)Shape(owner.GetText(), fontSize_, owner.IsPassword());
+        AbandonComposition();
+        (void)ShapeText(owner.GetText(), fontSize_, owner.IsPassword());
     }
 }
 
-void EditableTextElement::UpdateComposition(EditableTextWidget& owner,
-                                            const input::InputEvent& event) noexcept {
-    const usize begin = (anchor_ < caret_ ? anchor_ : caret_);
-    const usize end = (anchor_ > caret_ ? anchor_ : caret_);
-    const auto text = event.composition ? event.composition->View() : StringView{};
-    if (owner.IsReadOnly() || text.IsEmpty()) {
-        EndComposition(owner);
-        return;
-    }
-
-    if (event.type == input::InputEventType::TextCompositionCommit) {
-        EndComposition(owner);
-        Paste(owner, begin, end, text);
-        return;
-    }
-
-    if (event.compositionCaret > text.ByteCount() || !text.TryLeftBytes(event.compositionCaret)) {
-        return;
-    }
-
-    StringBuilder<> preview(registry_.ObjectAllocator());
-    const auto original = owner.GetText();
-    if (preview.TryAppend(original.SliceBytes(0, begin)) && preview.TryAppend(text) &&
-        preview.TryAppend(original.SliceBytes(end, original.ByteCount() - end)) &&
-        Shape(preview.View(), fontSize_, owner.IsPassword())) {
-        composing_ = true;
-        compositionEnd_ = begin + text.ByteCount();
-        compositionCaret_ = begin + event.compositionCaret;
-    }
-}
-
-void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize end,
-                                StringView text) noexcept {
-    // 클립보드의 CRLF·CR을 내부 LF로 맞춘다. 한 줄 입력에서는 줄 경계가 공백이 된다.
+Result<void> EditableTextElement::AppendInsertion(StringView text,
+                                                  StringBuilder<>& out) const noexcept {
+    // 클립보드·IME의 CRLF·CR을 내부 LF로 맞춘다. 한 줄 입력에서는 줄 경계가 공백이 된다.
     auto points = text.TryCodePoints();
-    if (!points || text.IsEmpty()) {
-        return;
+    if (!points) {
+        return Result<void>::Failure(points.Error());
     }
 
-    StringBuilder<> clean(registry_.ObjectAllocator());
     bool carriageReturn = false;
     for (auto point : points.Value()) {
         if (point == '\n' && carriageReturn) {
@@ -434,12 +427,218 @@ void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize en
             point = multiline_ ? '\n' : ' ';
         }
 
-        if (!clean.TryAppendCodePoint(point)) {
-            return;
+        auto appended = out.TryAppendCodePoint(point);
+        if (!appended) {
+            return appended;
         }
     }
 
-    Replace(owner, begin, end, clean.View());
+    return Result<void>::Success();
+}
+
+void EditableTextElement::Paste(EditableTextWidget& owner, usize begin, usize end,
+                                StringView text) noexcept {
+    StringBuilder<> clean(registry_.ObjectAllocator());
+    if (!text.IsEmpty() && AppendInsertion(text, clean)) {
+        Replace(owner, begin, end, clean.View());
+    }
+}
+
+usize EditableTextElement::ByteOffset(uint32 index) const noexcept {
+    return text_input::ToByteOffset(label_->GetText(), index);
+}
+
+bool EditableTextElement::IsReadOnly() const noexcept {
+    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
+    return !model || model.Value().Get().Value()->IsReadOnly();
+}
+
+bool EditableTextElement::AllowsInputMethod() const noexcept {
+    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
+    if (!model) {
+        return false;
+    }
+
+    const auto* owner = model.Value().Get().Value();
+    return !owner->IsReadOnly() && !owner->IsPassword();
+}
+
+bool EditableTextElement::IsComposing() const noexcept {
+    return composing_;
+}
+
+uint32 EditableTextElement::GetTextLength() const noexcept {
+    return text_input::Utf16Length(label_->GetText());
+}
+
+void EditableTextElement::GetSelection(uint32& begin, uint32& length) const noexcept {
+    const StringView text = label_->GetText();
+    const uint32 first = text_input::ToUtf16Index(text, anchor_ < caret_ ? anchor_ : caret_);
+    const uint32 last = text_input::ToUtf16Index(text, anchor_ < caret_ ? caret_ : anchor_);
+    begin = first;
+    length = last - first;
+}
+
+void EditableTextElement::SetSelection(uint32 begin, uint32 length) noexcept {
+    const usize first = ByteOffset(begin);
+    const usize last = ByteOffset(begin + length);
+    MoveCaret(first, false);
+    MoveCaret(last, true);
+}
+
+Result<void> EditableTextElement::GetText(uint32 begin, uint32 length,
+                                          Array<char16_t>& out) const noexcept {
+    const StringView text = label_->GetText();
+    const usize first = ByteOffset(begin);
+    const usize last = ByteOffset(begin + length);
+    return text_input::AppendUtf16(text.SliceBytes(first, last - first), out);
+}
+
+void EditableTextElement::SetText(uint32 begin, uint32 length, Span<const char16_t> text) noexcept {
+    const usize first = ByteOffset(begin);
+    const usize last = ByteOffset(begin + length);
+    StringBuilder<> utf8(registry_.ObjectAllocator());
+    StringBuilder<> insertion(registry_.ObjectAllocator());
+    if (!text_input::AppendUtf8(text, utf8) || !AppendInsertion(utf8.View(), insertion)) {
+        return;
+    }
+
+    if (!composing_) {
+        // 조합 밖의 바꾸기(TSF 재변환 등)는 편집 하나다.
+        auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
+        if (model && model.Value().Get().Value()->CachedElement().Get() == this) {
+            Replace(*model.Value().Get().Value(), first, last, insertion.View());
+        }
+
+        return;
+    }
+
+    // 미리보기 층만 바꾼다(위젯 글자·이력·변경 알림 없음 — 19.2절).
+    const StringView current = preview_.View();
+    StringBuilder<> next(registry_.ObjectAllocator());
+    if (!next.TryAppend(current.SliceBytes(0, first)) || !next.TryAppend(insertion.View()) ||
+        !next.TryAppend(current.SliceBytes(last, current.ByteCount() - last)) ||
+        !preview_.TryAssign(next.View())) {
+        return;
+    }
+
+    auto model = registry_.Resolve<EditableTextWidget>(registry_.OwnerAccess(), owner_);
+    const bool password = model && model.Value().Get().Value()->IsPassword();
+    if (ShapeText(preview_.View(), fontSize_, password)) {
+        const usize end = preview_.ByteCount();
+        anchor_ = SmallerOffset(anchor_, end);
+        caret_ = SmallerOffset(caret_, end);
+        InvalidateArrangement();
+    }
+}
+
+Optional<uint32> EditableTextElement::GetCharacterIndexFromPoint(Vec2 window) const noexcept {
+    AffineTransform2D inverse;
+    if (!label_->GetGeometry().render.TryInverse(inverse)) {
+        return {};
+    }
+
+    return text_input::ToUtf16Index(label_->GetText(), label_->HitText(inverse.Apply(window)));
+}
+
+bool EditableTextElement::GetTextBounds(uint32 begin, uint32 length,
+                                        Box2<float>& window) const noexcept {
+    const auto first = label_->CaretPosition(ByteOffset(begin), false);
+    const auto last = label_->CaretPosition(ByteOffset(begin + length), false);
+    if (!first || !last) {
+        return false;
+    }
+
+    // 범위 끝 두 caret을 감싸는 상자다(여러 줄이면 두 줄을 걸친다).
+    const Vec2 low{math::Min(first.Value().x, last.Value().x),
+                   math::Min(first.Value().y, last.Value().y)};
+    const Vec2 high{math::Max(first.Value().x, last.Value().x),
+                    math::Max(first.Value().y, last.Value().y) + label_->LineHeight()};
+    const auto& render = label_->GetGeometry().render;
+    const Vec2 a = render.Apply(low);
+    const Vec2 b = render.Apply(high);
+    window = {{math::Min(a.x, b.x), math::Min(a.y, b.y)},
+              {math::Max(a.x, b.x), math::Max(a.y, b.y)}};
+    return true;
+}
+
+bool EditableTextElement::GetScreenBounds(Box2<float>& window) const noexcept {
+    const auto& geometry = GetGeometry();
+    const Vec2 a = geometry.render.Apply({0, 0});
+    const Vec2 b = geometry.render.Apply(geometry.size);
+    window = {{math::Min(a.x, b.x), math::Min(a.y, b.y)},
+              {math::Max(a.x, b.x), math::Max(a.y, b.y)}};
+    return true;
+}
+
+void EditableTextElement::BeginComposition() noexcept {
+    if (composing_ || !preview_.TryAssign(label_->GetText())) {
+        return;
+    }
+
+    composing_ = true;
+    preCompositionAnchor_ = anchor_;
+    preCompositionCaret_ = caret_;
+    compositionBegin_ = compositionEnd_ = anchor_ < caret_ ? anchor_ : caret_;
+}
+
+void EditableTextElement::UpdateCompositionRange(uint32 begin, uint32 length) noexcept {
+    compositionBegin_ = ByteOffset(begin);
+    compositionEnd_ = ByteOffset(begin + length);
+    InvalidatePaint();
+}
+
+void EditableTextElement::EndComposition() noexcept {
+    if (!composing_) {
+        return;
+    }
+
+    // 미리보기를 한 번 확정한다: 위젯 글자 교체, 편집 이력 하나(조합 전 선택), 변경 알림 한 번.
+    composing_ = false;
+    const usize anchor = anchor_;
+    const usize caret = caret_;
+    auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
+    auto* owner = model ? model.Value().Get().Value() : nullptr;
+    if (!owner || owner->CachedElement().Get() != this || owner->IsReadOnly() ||
+        preview_.View() == owner->GetText()) {
+        if (owner) {
+            (void)ShapeText(owner->GetText(), fontSize_, owner->IsPassword());
+            const usize end = owner->GetText().ByteCount();
+            MoveCaret(SmallerOffset(anchor, end), false);
+            MoveCaret(SmallerOffset(caret, end), true);
+        }
+
+        preview_.Clear();
+        return;
+    }
+
+    auto& allocator = registry_.ObjectAllocator();
+    String next(allocator);
+    auto snapshot = preview_.TryClone(allocator);
+    if (!snapshot || !next.TryAssign(preview_.View()) ||
+        (!owner->IsPassword() && !undo_.TryEnsureCapacity(undo_.Size() + 1)) ||
+        !owner->ExchangeText(next)) {
+        // 확정하지 못했다(메모리 부족) — 조합 전 글자로 돌린다.
+        (void)ShapeText(owner->GetText(), fontSize_, owner->IsPassword());
+        MoveCaret(SmallerOffset(preCompositionCaret_, owner->GetText().ByteCount()), false);
+        preview_.Clear();
+        return;
+    }
+
+    if (!owner->IsPassword()) {
+        if (undo_.Size() == MaxUndoSteps) {
+            (void)undo_.TryRemoveAt(0);
+        }
+
+        // ExchangeText가 바꾼 뒤 next는 조합 전 글자다.
+        (void)undo_.TryPushBack({Move(next), preCompositionAnchor_, preCompositionCaret_});
+        redo_.Reset();
+    }
+
+    preview_.Clear();
+    MoveCaret(anchor, false);
+    MoveCaret(caret, true);
+    owner->changed_.ExecuteIfBound(snapshot.Value().View());
 }
 
 void EditableTextElement::ClearHistory() noexcept {
@@ -496,14 +695,8 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
 
     const usize begin = anchor_ < caret_ ? anchor_ : caret_;
     const usize end = anchor_ < caret_ ? caret_ : anchor_;
-    if (event.type == input::InputEventType::TextComposition ||
-        event.type == input::InputEventType::TextCompositionCommit) {
-        UpdateComposition(*owner, event);
-        return true;
-    }
-
     if (composing_) {
-        // 조합 중의 방향키·삭제·Enter는 IME가 처리한다. 확정 문자열은 별도 이벤트로 받는다.
+        // 조합 중의 방향키·삭제·Enter는 IME가 처리한다. 확정은 텍스트 입력 문맥으로 온다.
         return true;
     }
 
@@ -693,7 +886,8 @@ Result<void> EditableTextElement::OnPaint(PaintList& list, int32 layer) const no
         return Result<void>::Success();
     }
 
-    const usize begin = caret_ < anchor_ ? caret_ : anchor_;
+    // 조합 중에는 조합 범위에 밑줄, 아니면 선택 영역을 칠한다.
+    const usize begin = composing_ ? compositionBegin_ : (caret_ < anchor_ ? caret_ : anchor_);
     const usize end = composing_ ? compositionEnd_ : (anchor_ > caret_ ? anchor_ : caret_);
     const auto& layout = label_->Layout();
     for (const auto& line : layout.Lines()) {
@@ -721,7 +915,7 @@ Result<void> EditableTextElement::OnPaintOverlay(PaintList& list, int32 layer) c
         return Result<void>::Success();
     }
 
-    const auto pos = label_->CaretPosition(composing_ ? compositionCaret_ : caret_, false);
+    const auto pos = label_->CaretPosition(caret_, false);
     const auto point = pos ? pos.Value() : Vec2{};
     const auto caret = label_->GetGeometry().MakeChild({1, label_->LineHeight()},
                                                        {1, 0, 0, 1, point.x, point.y}, {}, {});

@@ -35,7 +35,7 @@ public sealed class PlatformWindow : EngineModuleRules
             PrivateDependencies = android ? ["Launch"] : [],
             // XInput is loaded dynamically at run time (the SDK's xinput.lib makes lld-link warn about a DllMain import).
             // wtsapi32 answers the desktop session connect state (QueryDesktopSessionState), gdi32 builds the drag image
-            // window bitmap, imm32 drives the IME composition window (Win64DragImage, Win64InlineComposition) dwmapi keeps
+            // window bitmap, imm32 records IME composition for the text input context (Win64DragImage, Win64Window), dwmapi keeps
             // the drop shadow of custom-frame windows (WindowFrame::Custom) and shell32 finds auto-hide taskbars so a
             // maximized custom-frame window leaves them a pixel.
             // libandroid holds ANativeWindow, ALooper and AInputQueue.

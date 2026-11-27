@@ -75,8 +75,10 @@ Result<void> EditableTextElement::ResizeText(EditableTextWidget& model, float si
     }
 
     auto error = AddCaption(model.errorText_, size, true);
-    auto ready = error ? Shape(model.GetText(), size, model.IsPassword())
-                       : Result<void>::Failure(error.Error());
+    // 조합 중이면 미리보기를 새 크기로 셰이핑한다(조합을 끊지 않는다).
+    auto ready = !error       ? Result<void>::Failure(error.Error())
+                 : composing_ ? ShapeText(preview_.View(), size, model.IsPassword())
+                              : Shape(model.GetText(), size, model.IsPassword());
     if (!ready) {
         if (hint.Value()) {
             (void)RemoveChild(*hint.Value());

@@ -1,7 +1,6 @@
 #include "GameHud.h"
 
 #include <PlatformWindow/Clipboard.h>
-#include <PlatformWindow/InlineComposition.h>
 
 #include <UiWidget/WidgetAsset.h>
 #include <UiWidget/WidgetAsset.generated.h>
@@ -76,8 +75,7 @@ Result<GameHud> CreateGameHud(ObjectRegistry& objects) noexcept {
     }
 
     live.Value().Get().Value()->SetPlatform(
-        {platform::ReadClipboardText, platform::WriteClipboardText, platform::SetInlineComposition,
-         platform::MoveCompositionWindow});
+        {platform::ReadClipboardText, platform::WriteClipboardText});
     auto target = live.Value().Get().Value()->FindWidget(objects, id);
     if (!target) {
         return Result<GameHud>::Failure(target.Error());

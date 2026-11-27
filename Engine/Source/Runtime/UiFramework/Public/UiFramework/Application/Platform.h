@@ -9,8 +9,6 @@ namespace rocks::ui {
 struct Platform {
     Result<void> (*readClipboardText)(String& output) noexcept = nullptr;
     Result<void> (*writeClipboardText)(StringView text) noexcept = nullptr;
-    void (*setInlineComposition)(bool enabled) noexcept = nullptr;
-    void (*moveCompositionWindow)(int32 x, int32 y) noexcept = nullptr;
 };
 
 } // namespace rocks::ui

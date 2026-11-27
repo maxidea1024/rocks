@@ -65,11 +65,22 @@ DockWindows::Surface::Surface(Allocator& allocator, UiRenderer& uiRenderer,
                     {static_cast<float>(rect.max.x), static_cast<float>(rect.max.y)}};
             return true;
         }));
+    // 편집 칸은 이 창의 IME 문맥이 된다(Docs/Design/UiToolkit 19.2절).
+    auto service = SharedPtr<DemoTextInput>::TryMake(allocator, *window);
+    if (service) {
+        textInput = Move(service.Value());
+        (void)app.SetTextInputService(textInput);
+    }
 }
 
 DockWindows::Surface::~Surface() noexcept {
     // 창이 멤버 중 거의 마지막에 파괴되므로 그 전에 이 호스트를 가리키는 콜백을 먼저 끊는다.
     window->SetLiveResizeHandler({});
+    // 편집 요소가 서비스를 더 오래 쥘 수 있어 창과의 연결을 먼저 끊는다.
+    if (textInput) {
+        textInput->Detach();
+    }
+
     area->SetOnExternalDrop({});
     area->SetWindowHitTest({});
     // 창 표면 파괴는 그 창의 프레임이 모두 처리될 때까지 기다린다. 그 뒤 native 창이 부서진다
