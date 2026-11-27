@@ -503,6 +503,7 @@ internal static partial class SelfTests
         RegisterCVarRegistration(suite, options);
         RegisterForeignEngineBoundary(suite, options);
         RegisterUiRenderBoundary(suite, options);
+        RegisterUiElementCasts(suite, options);
         RegisterPluginPolicy(suite, options);
         suite.Add("Policy.RepositoryInitializerListDeductions",
             () => NoFailures(PolicyChecks.InitializerListDeductions(options.Root)));

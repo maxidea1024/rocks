@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Assert.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Input/InputEvent.h>
@@ -11,6 +12,7 @@
 #include <Core/Text/String.h>
 #include <Core/Optional.h>
 #include <UiCore/ColorRef.h>
+#include <UiCore/ElementType.h>
 #include <UiCore/FocusCause.h>
 #include <UiCore/PaintList.h>
 #include <UiCore/SlotPlacement.h>
@@ -101,6 +103,14 @@ struct PointerReply {
 // Geometry는 배치 호출자가 창 좌표 기준으로 설정한다.
 class ROCKS_UICORE_API Element {
 public:
+    using ThisClass = Element;
+    // 형식 정보다(Docs/Design/UiToolkit 20.10절 CB2). 파생 클래스는 ROCKS_UI_ELEMENT로 재정의한다.
+    static const ElementType& StaticType() noexcept;
+    virtual const ElementType& GetType() const noexcept;
+    // T(ROCKS_UI_ELEMENT를 쓴 형식)이거나 그 파생인지다.
+    template <typename T>
+    bool IsA() const noexcept;
+
     explicit Element(Allocator& allocator) noexcept;
 
     Element(const Element&) = delete;
@@ -468,5 +478,88 @@ private:
     // 초점 외곽선을 켠 사용자 수다.
     uint8 focusOutlines_ = 0;
 };
+
+// Element 하향 변환이다(Docs/Design/UiToolkit 20.10절 CB2 — UE StaticCastSharedRef + 형식 검사).
+// T가 ROCKS_UI_ELEMENT를 빠뜨리면(부모 형식 정보가 상속되어 잘못된 변환이 통과하는 일) 컴파일
+// 오류다.
+//   - ElementCast: 아니면 nullptr이다.
+//   - StaticElementCast: 형식이 맞다고 아는 곳이다. Release 밖에서 assert한다.
+//
+// 사용 예:
+//   if (auto* button = ElementCast<Button>(element)) { button->SetEnabled(false); }
+//   auto& editor = StaticElementCast<EditableTextElement>(*live);
+namespace detail {
+
+inline bool SameElementType(const ElementType& a, const ElementType& b) noexcept {
+    if (&a == &b) {
+        return true;
+    }
+
+    const char* x = a.name;
+    const char* y = b.name;
+    while (*x && *x == *y) {
+        ++x;
+        ++y;
+    }
+
+    return *x == *y;
+}
+
+} // namespace detail
+
+template <typename T>
+bool Element::IsA() const noexcept {
+    static_assert(IsSameV<typename T::ThisClass, T>, "Element type is missing ROCKS_UI_ELEMENT");
+    const ElementType& wanted = T::StaticType();
+    for (const ElementType* type = &GetType(); type; type = type->parent) {
+        if (detail::SameElementType(*type, wanted)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template <typename T>
+T* ElementCast(Element* element) noexcept {
+    return element && element->IsA<T>() ? static_cast<T*>(element) : nullptr;
+}
+
+template <typename T>
+const T* ElementCast(const Element* element) noexcept {
+    return element && element->IsA<T>() ? static_cast<const T*>(element) : nullptr;
+}
+
+template <typename T>
+T& StaticElementCast(Element& element) noexcept {
+#if !ROCKS_BUILD_RELEASE
+    ROCKS_ASSERT(element.IsA<T>());
+#endif
+    return static_cast<T&>(element);
+}
+
+template <typename T>
+const T& StaticElementCast(const Element& element) noexcept {
+#if !ROCKS_BUILD_RELEASE
+    ROCKS_ASSERT(element.IsA<T>());
+#endif
+    return static_cast<const T&>(element);
+}
+
+template <typename T>
+T* StaticElementCast(Element* element) noexcept {
+#if !ROCKS_BUILD_RELEASE
+    ROCKS_ASSERT(!element || element->IsA<T>());
+#endif
+    return static_cast<T*>(element);
+}
+
+template <typename T>
+const T* StaticElementCast(const Element* element) noexcept {
+#if !ROCKS_BUILD_RELEASE
+    ROCKS_ASSERT(!element || element->IsA<T>());
+#endif
+    return static_cast<const T*>(element);
+}
 
 } // namespace rocks::ui
