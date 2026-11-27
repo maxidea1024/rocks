@@ -125,14 +125,14 @@ Lane4 SplatLane(const Lane4& a, int lane) noexcept {
     return Splat(a.v[lane]);
 }
 
-// squish Vec3(스칼라)다.
-struct Vec3 {
+// squish Vec3(스칼라)다. 유니티 묶음에서 rocks::Vec3와 부딪히지 않게 이름을 바꿨다.
+struct SquishVec3 {
     float x;
     float y;
     float z;
 };
 
-float Dot(const Vec3& a, const Vec3& b) noexcept {
+float Dot(const SquishVec3& a, const SquishVec3& b) noexcept {
     const float xx = a.x * b.x;
     const float yy = a.y * b.y;
     const float zz = a.z * b.z;
@@ -143,7 +143,7 @@ float Dot(const Vec3& a, const Vec3& b) noexcept {
 // 블록 색 집합이다(squish ColourSet). 점은 (R, G, B) / 255, 가중치는 1 또는 (a + 1) / 256이다.
 struct ColourSet {
     int count = 0;
-    Vec3 points[TextureBlockTexels];
+    SquishVec3 points[TextureBlockTexels];
     float weights[TextureBlockTexels];
     int remap[TextureBlockTexels];
 };
@@ -175,9 +175,9 @@ void BuildColourSet(const uint8 (&texels)[TextureBlockRgbaBytes], bool minimalSe
             }
         }
 
-        set.points[set.count] = Vec3{static_cast<float>(texel[0]) / ByteMaxFloat,
-                                     static_cast<float>(texel[1]) / ByteMaxFloat,
-                                     static_cast<float>(texel[2]) / ByteMaxFloat};
+        set.points[set.count] = SquishVec3{static_cast<float>(texel[0]) / ByteMaxFloat,
+                                           static_cast<float>(texel[1]) / ByteMaxFloat,
+                                           static_cast<float>(texel[2]) / ByteMaxFloat};
         set.weights[set.count] = weight;
         set.remap[i] = set.count;
         ++set.count;
@@ -187,7 +187,7 @@ void BuildColourSet(const uint8 (&texels)[TextureBlockRgbaBytes], bool minimalSe
 // squish ComputeWeightedCovariance(maths.cpp 31–60, metric 1·1·1)다. 공분산 6칸이다.
 void WeightedCovariance(const ColourSet& set, float (&covariance)[6]) noexcept {
     float total = 0.0f;
-    Vec3 centroid{0.0f, 0.0f, 0.0f};
+    SquishVec3 centroid{0.0f, 0.0f, 0.0f};
     for (int i = 0; i < set.count; ++i) {
         const float w = set.weights[i];
         total += w;
@@ -196,7 +196,7 @@ void WeightedCovariance(const ColourSet& set, float (&covariance)[6]) noexcept {
         centroid.z += set.points[i].z * w;
     }
 
-    // Vec3::operator/=(float)는 역수를 곱한다(maths.h 107–113).
+    // SquishVec3::operator/=(float)는 역수를 곱한다(maths.h 107–113).
     const float inverse = 1.0f / total;
     centroid.x *= inverse;
     centroid.y *= inverse;
@@ -207,11 +207,11 @@ void WeightedCovariance(const ColourSet& set, float (&covariance)[6]) noexcept {
 
     constexpr float Metric = 1.0f;
     for (int i = 0; i < set.count; ++i) {
-        const Vec3 a{(set.points[i].x - centroid.x) * Metric,
-                     (set.points[i].y - centroid.y) * Metric,
-                     (set.points[i].z - centroid.z) * Metric};
+        const SquishVec3 a{(set.points[i].x - centroid.x) * Metric,
+                           (set.points[i].y - centroid.y) * Metric,
+                           (set.points[i].z - centroid.z) * Metric};
         const float w = set.weights[i];
-        const Vec3 b{a.x * w, a.y * w, a.z * w};
+        const SquishVec3 b{a.x * w, a.y * w, a.z * w};
         covariance[0] += a.x * b.x;
         covariance[1] += a.x * b.y;
         covariance[2] += a.x * b.z;
@@ -223,14 +223,14 @@ void WeightedCovariance(const ColourSet& set, float (&covariance)[6]) noexcept {
 
 // squish ComputePrincipleComponent SIMD판(maths.cpp 64–107)이다. 시작은 노름이 가장 큰 행, 정규화는
 // 세 성분의 max(0이면 NaN — 투영 정렬이 순서를 그대로 둔다, 12.17절 TD2).
-Vec3 PrincipalComponent(const float (&m)[6]) noexcept {
-    const Vec3 row0v{m[0], m[1], m[2]};
-    const Vec3 row1v{m[1], m[3], m[4]};
-    const Vec3 row2v{m[2], m[4], m[5]};
+SquishVec3 PrincipalComponent(const float (&m)[6]) noexcept {
+    const SquishVec3 row0v{m[0], m[1], m[2]};
+    const SquishVec3 row1v{m[1], m[3], m[4]};
+    const SquishVec3 row2v{m[2], m[4], m[5]};
     const float r0 = Dot(row0v, row0v);
     const float r1 = Dot(row1v, row1v);
     const float r2 = Dot(row2v, row2v);
-    const Vec3 start = (r0 > r1 && r0 > r2) ? row0v : (r1 > r2 ? row1v : row2v);
+    const SquishVec3 start = (r0 > r1 && r0 > r2) ? row0v : (r1 > r2 ? row1v : row2v);
     const Lane4 row0{{m[0], m[1], m[2], 0.0f}};
     const Lane4 row1{{m[1], m[3], m[4], 0.0f}};
     const Lane4 row2{{m[2], m[4], m[5], 0.0f}};
@@ -243,7 +243,7 @@ Vec3 PrincipalComponent(const float (&m)[6]) noexcept {
         v = Mul(w, Reciprocal(a));
     }
 
-    return Vec3{v.v[0], v.v[1], v.v[2]};
+    return SquishVec3{v.v[0], v.v[1], v.v[2]};
 }
 
 // squish WeightedClusterFit(SIMD판) 상태다.
@@ -261,7 +261,7 @@ void SetColourSet(const ColourSet& set, ClusterFit& fit) noexcept {
     fit.bestError = Splat(NumericLimits<float>::Max());
     float covariance[6];
     WeightedCovariance(set, covariance);
-    const Vec3 principle = PrincipalComponent(covariance);
+    const SquishVec3 principle = PrincipalComponent(covariance);
     float dps[TextureBlockTexels];
     for (int i = 0; i < set.count; ++i) {
         dps[i] = Dot(set.points[i], principle);
