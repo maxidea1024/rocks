@@ -46,6 +46,18 @@ public:
     // 켜면 one-shot도 voice를 잃을 때 끝나지 않고 남아 다시 경쟁한다(UE
     // bShouldRemainActiveIfDropped).
     ROCKS_PROPERTY() bool remainActiveIfDropped = false;
+    // 분류 값과 OR한다(UE bAlwaysPlay·bIsUISound — 3.43.4절).
+    ROCKS_PROPERTY() bool alwaysPlay = false;
+    ROCKS_PROPERTY() bool isUiSound = false;
+    // 재생 LPF·HPF다(UE bEnableLowPassFilter·LowPassFilterFrequency 20000,
+    // bEnableHighPassFilter·HighPassFilterFrequency 0 — 3.43.1절, [0, 20000] Hz).
+    ROCKS_PROPERTY() bool enableLowPassFilter = false;
+    ROCKS_PROPERTY() float lowPassFilterFrequency = MaxAttenuationFilterFrequency;
+    ROCKS_PROPERTY() bool enableHighPassFilter = false;
+    ROCKS_PROPERTY() float highPassFilterFrequency = 0.0f;
+    // 차폐 검사 간격(초 — UE OcclusionCheckInterval 0.1, [−1, 60])이다. 컴포넌트 재생은 늘 이 값을
+    // 쓴다.
+    ROCKS_PROPERTY() float occlusionCheckInterval = 0.1f;
 
     // 다음 Play부터 쓸 사운드다. 재생 중인 소리는 바꾸지 않는다(UE SetSound는 멈추고 다시
     // 재생하지만 여기서는 호출자가 Play를 부른다).
@@ -62,6 +74,12 @@ public:
     // MaxConcurrencyGroups보다 많으면 CapacityExceeded, 키 0·범위 밖 설정은 InvalidArgument.
     Result<void> SetConcurrency(Span<const SoundConcurrencyEntry> entries) noexcept;
 
+    // 다음 Play부터 사운드 분류 대신 쓸 분류 사슬이다(UE SoundClassOverride — 3.43.1절). 빈 ref면
+    // 사운드 것을 쓴다.
+    void SetCategory(SoundCategoryChainRef chain) noexcept {
+        category_ = Move(chain);
+    }
+
     // emitter에 붙여 재생한다. 재생 중이면 먼저 멈춘다(UE Play와 같다). 오류: 사운드 없음·범위 밖
     // 배수(InvalidArgument), 그 밖은 AudioWorldSubsystem::PlayAttached와 같다. 등록 전이거나
     // World에 AudioWorldSubsystem이 없으면 NotReady다.
@@ -75,6 +93,11 @@ public:
 
     // 배수를 바꾸고 재생 중이면 바로 반영한다. 범위 밖·비유한 값은 InvalidArgument다.
     Result<void> SetVolumeMultiplier(float value) noexcept;
+    // 재생 LPF·HPF를 켜고 끄거나 주파수를 바꾼다(UE SetLowPassFilterEnabled·Frequency,
+    // SetHighPassFilterEnabled·Frequency — 3.43.1절). 재생 중이면 바로 반영한다. 오류: [0, 20000]
+    // 밖은 InvalidArgument.
+    Result<void> SetLowPassFilter(bool enabled, float frequency) noexcept;
+    Result<void> SetHighPassFilter(bool enabled, float frequency) noexcept;
     Result<void> SetPitchMultiplier(float value) noexcept;
 
     PlaybackHandle Playback() const noexcept {
@@ -102,6 +125,7 @@ private:
     ROCKS_NATIVE() AudioEmitterId emitter_;
     ROCKS_NATIVE() uint32 concurrencyCount_ = 0;
     ROCKS_NATIVE() SoundConcurrencyEntry concurrency_[MaxConcurrencyGroups];
+    ROCKS_NATIVE() SoundCategoryChainRef category_;
 };
 
 } // namespace rocks

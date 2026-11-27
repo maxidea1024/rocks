@@ -1,4 +1,5 @@
 #include "BlockGoldenImages.h"
+#include "Speed.h"
 
 #include <Core/Containers/Array.h>
 #include <Core/Math/Float16.h>
@@ -22,6 +23,7 @@
 //
 // 사용: TextureCodecCompare --ue-dll <UE
 // 클론>/Engine/Binaries/ThirdParty/Intel/ISPCTexComp/Win64-Release/ispc_texcomp.dll
+// 속도 측정(12.17.9 6 — TC5b): TextureCodecCompare --speed [--judge-eac]
 using namespace rocks;
 
 namespace {
@@ -292,8 +294,15 @@ int Compare(const char* dllPath) noexcept {
 
 int RunMain(launch::ApplicationContext& context) noexcept {
     const Span<const StringView> arguments = context.Arguments();
+    if (arguments.Size() >= 1 && platform::CStringEquals(arguments[0].Data(), "--speed")) {
+        const bool judge =
+            arguments.Size() == 2 && platform::CStringEquals(arguments[1].Data(), "--judge-eac");
+        return texture_codec_speed::RunSpeed(judge);
+    }
+
     if (arguments.Size() != 2 || !platform::CStringEquals(arguments[0].Data(), "--ue-dll")) {
-        printf("usage: TextureCodecCompare --ue-dll <absolute path of ispc_texcomp.dll>\n");
+        printf("usage: TextureCodecCompare --ue-dll <absolute path of ispc_texcomp.dll>\n"
+               "       TextureCodecCompare --speed [--judge-eac]\n");
         return 1;
     }
 

@@ -297,8 +297,28 @@ struct DevelopmentShaderProvider::State {
 
         compilingTitle = Move(compiling.Value());
         recompilingTitle = Move(recompiling.Value());
-        return pendingWork.Initialize(progress, ShadersPendingWorkName, shaders.Value(),
-                                      Span<const StringView>(ShadersRunBefore));
+        if (auto initialized =
+                pendingWork.Initialize(progress, ShadersPendingWorkName, shaders.Value(),
+                                       Span<const StringView>(ShadersRunBefore));
+            !initialized) {
+            return initialized;
+        }
+
+        // 너겟 캐시의 비동기 I/O 스케줄러는 Start·Shutdown이 생성 스레드 전용이다
+        // (Task/WorkerScheduler.h). 생성(이 상태)과 Shutdown(모듈 Shutdown)이 모두 이 스레드이므로
+        // 여기서 시작한다. 첫 셰이더 요청은 렌더 lane에서 오므로 Prepare에서 시작하면 WrongThread다
+        // (Docs/Design/ShaderSystem 12.3.1절 SSD16 "너겟 캐시를 쓰지 못하던 결함"). 실패해도
+        // 공급자는 캐시 없이 동작한다.
+        if (auto started = scheduler.Start(); !started) {
+            Log::Warning(LogDevelopmentShaderProvider,
+                         "The shader nugget scheduler could not start ({Error}); shaders compile "
+                         "without the cache",
+                         ErrorCodeName(started.Error()));
+        } else {
+            schedulerStarted = true;
+        }
+
+        return Result<void>::Success();
     }
 
     void Shutdown() noexcept {
@@ -321,8 +341,12 @@ struct DevelopmentShaderProvider::State {
 
         if (cacheOpen) {
             cache.Shutdown(0);
-            (void)scheduler.Shutdown();
             cacheOpen = false;
+        }
+
+        if (schedulerStarted) {
+            (void)scheduler.Shutdown();
+            schedulerStarted = false;
         }
 
         shutDown = true;
@@ -404,12 +428,28 @@ struct DevelopmentShaderProvider::State {
 
         ShaderCompileManagerConfig config;
         NuggetSettingsFailure failure;
-        if (OpenShaderNuggetCache(cache, allocator, platform::PhysicalFileSystem(), root.View(),
-                                  &failure) &&
-            scheduler.Start()) {
-            cacheOpen = true;
-            config.cache = &cache;
-            config.scheduler = &scheduler;
+        // 캐시를 쓰지 못하면 매 시작이 엔진 셰이더를 모두 다시 컴파일하므로 원인을 남긴다
+        // (Docs/Design/ShaderSystem 12.3.1절 SSD16). 스케줄러는 Initialize가 이미 시작했다.
+        if (schedulerStarted) {
+            auto cacheOpened = OpenShaderNuggetCache(
+                cache, allocator, platform::PhysicalFileSystem(), root.View(), &failure);
+            if (!cacheOpened) {
+                Log::Warning(LogDevelopmentShaderProvider,
+                             "The shader nugget cache under {Root} could not be opened ({Error}); "
+                             "shaders compile without it",
+                             root.View(), ErrorCodeName(cacheOpened.Error()));
+            } else {
+                if (cache.OpenError() != ErrorCode::None) {
+                    Log::Warning(LogDevelopmentShaderProvider,
+                                 "The shader nugget cache under {Root} is off ({Error}); shaders "
+                                 "compile without it",
+                                 root.View(), ErrorCodeName(cache.OpenError()));
+                }
+
+                cacheOpen = true;
+                config.cache = &cache;
+                config.scheduler = &scheduler;
+            }
         }
 
         config.allocator = &allocator;
@@ -797,6 +837,8 @@ struct DevelopmentShaderProvider::State {
     char formats[ProviderPathBytes] = {};
     char prepareProblem[ProviderNoteBytes] = {};
     bool cacheOpen = false;
+    // Initialize가 스케줄러를 시작했는지다(Shutdown이 같은 스레드에서 닫는다).
+    bool schedulerStarted = false;
     bool prepareFailed = false;
     bool shutDown = false;
 };
@@ -849,6 +891,9 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
                              ProgressCancel::NotCancellable);
     state.diagnostics.Clear();
     ShaderLibraryReloader* libraries = nullptr;
+    // 시작 시간 진단(준비 = 원문 트리·너겟 캐시·워커 시작, 만들기 =
+    // 열거·전처리·키·조회·컴파일)이다.
+    const uint64 prepareStart = platform::MonotonicNanoseconds();
     if (state.Prepare()) {
         libraries = state.Published(request.library);
         if (libraries == nullptr) {
@@ -856,9 +901,26 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
         }
     }
 
+    const uint64 buildStart = platform::MonotonicNanoseconds();
+    const ShaderCompileProgress before =
+        state.manager != nullptr ? state.manager->Progress() : ShaderCompileProgress{};
     if (libraries != nullptr) {
         ShaderLibraryCookReport report(allocator_);
-        if (auto built = libraries->Build(request.formatId, report, progress.Control()); !built) {
+        auto built = libraries->Build(request.formatId, report, progress.Control());
+        if (built && state.manager != nullptr) {
+            const ShaderCompileProgress after = state.manager->Progress();
+            const uint64 end = platform::MonotonicNanoseconds();
+            Log::Info(LogDevelopmentShaderProvider,
+                      "The {Format} shader library was built in {BuildMs} ms after {PrepareMs} ms "
+                      "of preparation: {Jobs} jobs, {Hits} nugget hits, {Workers} workers started, "
+                      "{Batches} batches",
+                      request.formatId, (end - buildStart) / NanosecondsPerMillisecond,
+                      (buildStart - prepareStart) / NanosecondsPerMillisecond,
+                      after.total - before.total, after.cacheHits - before.cacheHits,
+                      after.workersStarted - before.workersStarted, after.batches - before.batches);
+        }
+
+        if (!built) {
             char line[ProviderNoteBytes];
             snprintf(line, sizeof(line), "shader library compile failed (%s)",
                      ErrorCodeName(built.Error()));

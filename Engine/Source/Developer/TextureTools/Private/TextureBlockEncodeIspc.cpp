@@ -1,8 +1,8 @@
 #include "TextureBlockBptc.h"
+#include "TextureBlockParallel.h"
 
 #include <Base/Compiler.h>
 #include <Platform/Cpu.h>
-#include <Platform/FloatingPointEnvironment.h>
 
 // ISPC 커널이 있는 대상(데스크톱)은 ThirdParty IspcTextureCompressor가 ROCKS_ISPC_IDENTITY를
 // 정의한다. 그 정의가 없으면(Android) BC6H·BC7은 Unsupported다(플랫폼 매크로 대신 커널 유무로
@@ -13,9 +13,10 @@
 
 // BC6H·BC7 인코더다(Docs/Design/AssetSystem 12.17.6 — UE 5.8 TextureFormatIntelISPCTexComp와 같은
 // 처리). ISPC Texture Compressor 커널(ThirdParty IspcTextureCompressor, 고정 ISPC로 결정적 빌드)을
-// 블록 행 strip마다 부른다. strip 버퍼는 스택에 두고, 복사하면서 가장자리 복제(UE
-// PadImageToBlockSize)와 BC6H 입력 정리(UE SanitizeFloat16AndSetAlphaOpaqueForBC6H)를 한다. 블록이
-// 서로 독립이므로 strip 경계는 출력에 영향이 없다.
+// 블록 행 strip마다 부른다(블록 행 단위로 병렬 — 12.17.9 2). strip 버퍼는 스택에 두고, 복사하면서
+// 가장자리 복제(UE PadImageToBlockSize)와 BC6H 입력 정리(UE
+// SanitizeFloat16AndSetAlphaOpaqueForBC6H)를 한다. 블록이 서로 독립이므로 strip 경계는 출력에
+// 영향이 없다.
 namespace rocks::texture_block_detail {
 
 #if defined(ROCKS_ISPC_IDENTITY)
@@ -66,80 +67,71 @@ struct Job {
     const uint8* base;
     uint32 sizeX;
     uint32 sizeY;
-    uint32 numSlices;
+    uint32 blocksX;
+    uint32 blocksY;
     uint64 rowPitch;
     uint64 slicePitch;
-    TextureBlockOptions options;
     uint8* out;
-};
-
-// 결정적 부동소수 환경 안에서 돈다(RunWithDeterministicFloatingPoint — 커널은 호출자의 FTZ·DAZ를
-// 따른다).
-void Run(void* context) noexcept {
-    Job& job = *static_cast<Job*>(context);
-    const bool bc6h = job.format == TextureBlockFormat::Bc6h;
     // UE와 같은 고정 프로필이다(CompressionQuality를 보지 않는다 — TD13). BC7은 알파가 있으면 alpha
     // 프로필이다.
-    bc7_enc_settings bc7{};
-    bc6h_enc_settings bc6hSettings{};
-    if (bc6h) {
-        GetProfile_bc6h_basic(&bc6hSettings);
-    } else if (job.options.alphaProfile) {
-        GetProfile_alpha_basic(&bc7);
-    } else {
-        GetProfile_basic(&bc7);
-    }
+    bc7_enc_settings bc7;
+    bc6h_enc_settings bc6h;
+};
 
+// 블록 행 [begin, end)를 압축한다(행 번호 = slice · blocksY + 블록 행 — 12.17.9 2). 결정적 부동소수
+// 환경 안에서 불린다(RunBlockRows — 커널은 호출 스레드의 FTZ·DAZ를 따른다). strip 버퍼는 batch마다
+// 스택에 둔다.
+void EncodeRows(void* context, uint64 begin, uint64 end) noexcept {
+    const Job& job = *static_cast<const Job*>(context);
+    const bool bc6h = job.format == TextureBlockFormat::Bc6h;
     const uint32 texelBytes = TextureBlockSourceTexelBytes(job.format);
-    // uint64로 센다(크기 상한 근처에서 + 3이 넘치지 않게 — TextureBlockOutputBytes와 같은 식).
-    const uint32 blocksX =
-        static_cast<uint32>((uint64{job.sizeX} + TextureBlockSize - 1) / TextureBlockSize);
-    const uint32 blocksY =
-        static_cast<uint32>((uint64{job.sizeY} + TextureBlockSize - 1) / TextureBlockSize);
     alignas(16) uint8 strip[StripBytes];
-    uint8* cursor = job.out;
-    for (uint32 slice = 0; slice < job.numSlices; ++slice) {
+    // 프로필은 batch마다 사본이다(커널 인자가 const가 아니다 — 스레드 사이에 공유하지 않는다).
+    bc7_enc_settings bc7 = job.bc7;
+    bc6h_enc_settings bc6hSettings = job.bc6h;
+    for (uint64 index = begin; index < end; ++index) {
+        const uint64 slice = index / job.blocksY;
+        const uint32 by = static_cast<uint32>(index % job.blocksY);
         const uint8* base = job.base + job.slicePitch * slice;
-        for (uint32 by = 0; by < blocksY; ++by) {
-            for (uint32 bx = 0; bx < blocksX; bx += StripBlocks) {
-                const uint32 blocks = Smaller(StripBlocks, blocksX - bx);
-                const uint32 width = blocks * TextureBlockSize;
-                for (uint32 row = 0; row < TextureBlockSize; ++row) {
-                    // 블록 배수가 아닌 크기는 마지막 열·행을 복제해 채운다(UE PadImageToBlockSize).
-                    const uint32 y = Smaller(by * TextureBlockSize + row, job.sizeY - 1);
-                    const uint8* line = base + job.rowPitch * y;
-                    for (uint32 column = 0; column < width; ++column) {
-                        const uint32 x = Smaller(bx * TextureBlockSize + column, job.sizeX - 1);
-                        const uint8* source = line + uint64{x} * texelBytes;
-                        uint8* target = strip + (uint64{row} * width + column) * texelBytes;
-                        if (bc6h) {
-                            for (uint32 channel = 0; channel < ColorChannels; ++channel) {
-                                StoreLe16(target + channel * HalfBytes,
-                                          SanitizeHalf(LoadLe16(source + channel * HalfBytes)));
-                            }
+        uint8* cursor = job.out + index * job.blocksX * BptcBlockBytes;
+        for (uint32 bx = 0; bx < job.blocksX; bx += StripBlocks) {
+            const uint32 blocks = Smaller(StripBlocks, job.blocksX - bx);
+            const uint32 width = blocks * TextureBlockSize;
+            for (uint32 row = 0; row < TextureBlockSize; ++row) {
+                // 블록 배수가 아닌 크기는 마지막 열·행을 복제해 채운다(UE PadImageToBlockSize).
+                const uint32 y = Smaller(by * TextureBlockSize + row, job.sizeY - 1);
+                const uint8* line = base + job.rowPitch * y;
+                for (uint32 column = 0; column < width; ++column) {
+                    const uint32 x = Smaller(bx * TextureBlockSize + column, job.sizeX - 1);
+                    const uint8* source = line + uint64{x} * texelBytes;
+                    uint8* target = strip + (uint64{row} * width + column) * texelBytes;
+                    if (bc6h) {
+                        for (uint32 channel = 0; channel < ColorChannels; ++channel) {
+                            StoreLe16(target + channel * HalfBytes,
+                                      SanitizeHalf(LoadLe16(source + channel * HalfBytes)));
+                        }
 
-                            StoreLe16(target + ColorChannels * HalfBytes, HalfOne);
-                        } else {
-                            for (uint32 k = 0; k < texelBytes; ++k) {
-                                target[k] = source[k];
-                            }
+                        StoreLe16(target + ColorChannels * HalfBytes, HalfOne);
+                    } else {
+                        for (uint32 k = 0; k < texelBytes; ++k) {
+                            target[k] = source[k];
                         }
                     }
                 }
-
-                rgba_surface surface{};
-                surface.ptr = strip;
-                surface.width = static_cast<int32_t>(width);
-                surface.height = static_cast<int32_t>(TextureBlockSize);
-                surface.stride = static_cast<int32_t>(width * texelBytes);
-                if (bc6h) {
-                    CompressBlocksBC6H(&surface, cursor, &bc6hSettings);
-                } else {
-                    CompressBlocksBC7(&surface, cursor, &bc7);
-                }
-
-                cursor += uint64{blocks} * BptcBlockBytes;
             }
+
+            rgba_surface surface{};
+            surface.ptr = strip;
+            surface.width = static_cast<int32_t>(width);
+            surface.height = static_cast<int32_t>(TextureBlockSize);
+            surface.stride = static_cast<int32_t>(width * texelBytes);
+            if (bc6h) {
+                CompressBlocksBC6H(&surface, cursor, &bc6hSettings);
+            } else {
+                CompressBlocksBC7(&surface, cursor, &bc7);
+            }
+
+            cursor += uint64{blocks} * BptcBlockBytes;
         }
     }
 }
@@ -173,10 +165,22 @@ Result<void> EncodeIspcBlocks(TextureBlockFormat format, const uint8* base, uint
     }
 #endif
 
-    ispc_encode::Job job{format,   base,       sizeX,   sizeY,     numSlices,
-                         rowPitch, slicePitch, options, out.Data()};
-    platform::RunWithDeterministicFloatingPoint(&ispc_encode::Run, &job);
-    return Result<void>::Success();
+    const uint32 blocksX =
+        static_cast<uint32>((uint64{sizeX} + TextureBlockSize - 1) / TextureBlockSize);
+    const uint32 blocksY =
+        static_cast<uint32>((uint64{sizeY} + TextureBlockSize - 1) / TextureBlockSize);
+    ispc_encode::Job job{format,   base,       sizeX,      sizeY, blocksX, blocksY,
+                         rowPitch, slicePitch, out.Data(), {},    {}};
+    if (format == TextureBlockFormat::Bc6h) {
+        GetProfile_bc6h_basic(&job.bc6h);
+    } else if (options.alphaProfile) {
+        GetProfile_alpha_basic(&job.bc7);
+    } else {
+        GetProfile_basic(&job.bc7);
+    }
+
+    return RunBlockRows(options, uint64{blocksY} * numSlices, blocksX, RowMinBatchBlocks, &job,
+                        &ispc_encode::EncodeRows);
 #endif
 }
 

@@ -137,13 +137,22 @@ ResolveTextureBuildSettings(const Texture& texture, TextureDimension dimension,
                             const TextureLodGroupValues& group, TextureBuildSettings& out,
                             TextureBuildResult& result) noexcept;
 
+// 빌드 실행 방법이다(12.17.9 4 — 설정이 아니라 결과가 같으므로 너겟 키에 넣지 않는다). scheduler가
+// 있으면 블록 압축을 나눠 실행하고 scratch(동시 Allocate·Deallocate 안전 — SystemAllocator)가
+// 필요하다. 둘 다 호출 동안만 쓴다.
+struct TextureBuildExecution {
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
+};
+
 // settings와 원본 정규 픽셀(TextureSource bulk raw byte)로 쿠킹 mip을 만든다(out — 앞 결과는
-// 지운다). 오류: 픽셀 byte 수·Cube 면 비정사각 InvalidArgument(InvalidSource), Resize가 Cube
-// 정사각을 깸·숨김 CompressionSettings InvalidArgument(InvalidSetting), 할당 실패 OutOfMemory(진단
-// None).
-ROCKS_TEXTURETOOLS_API Result<void> BuildTexture(Allocator& allocator,
-                                                 const TextureBuildSettings& settings,
-                                                 Span<const uint8> sourcePixels,
-                                                 TextureBuildResult& out) noexcept;
+// 지운다). 결과 byte는 execution과 무관하다. 오류: 픽셀 byte 수·Cube 면 비정사각
+// InvalidArgument(InvalidSource), Resize가 Cube 정사각을 깸·숨김 CompressionSettings
+// InvalidArgument(InvalidSetting), scheduler가 있는데 scratch 없음 InvalidArgument(진단 None), 할당
+// 실패 OutOfMemory(진단 None).
+ROCKS_TEXTURETOOLS_API Result<void>
+BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
+             Span<const uint8> sourcePixels, TextureBuildResult& out,
+             const TextureBuildExecution& execution = {}) noexcept;
 
 } // namespace rocks

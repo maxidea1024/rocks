@@ -51,9 +51,11 @@ void AudioDeviceContext::UpdateOcclusion(ControlBatch& batch, uint64 now) noexce
         // 첫 결과가 없으면 바로, 아니면 간격을 넘었을 때(> — UE AS 1592–1593). 간격이 음수면 첫
         // 검사만이다.
         bool due = !record.occlusionChecked;
-        if (!due && occlusion_.checkIntervalSeconds >= 0.0f) {
-            const uint64 interval =
-                SecondsToMixFrames(static_cast<double>(occlusion_.checkIntervalSeconds));
+        // 재생 재정의(UE 컴포넌트 OcclusionCheckInterval — 3.43.1절)가 있으면 그것을 쓴다.
+        const float intervalSeconds = record.hasOcclusionInterval ? record.occlusionInterval
+                                                                  : occlusion_.checkIntervalSeconds;
+        if (!due && intervalSeconds >= 0.0f) {
+            const uint64 interval = SecondsToMixFrames(static_cast<double>(intervalSeconds));
             due = now - record.occlusionCheckFrame > interval;
         }
 
