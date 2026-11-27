@@ -193,6 +193,8 @@ Result<void> CloseRecording(GraphState& state) noexcept {
         return Result<void>::Success();
     }
 
+    const bool presents = state.recordingPresents;
+    state.recordingPresents = false;
     // 열린 구간의 marker는 이 기록 안에서 닫는다(다음 기록이 다시 push한다).
     for (; state.scopeMarkers > 0; --state.scopeMarkers) {
         state.commands->PopMarker();
@@ -223,6 +225,10 @@ Result<void> CloseRecording(GraphState& state) noexcept {
         return Result<void>::Failure(RecordGraphError(state, submitted.Error(), false,
                                                       "graph recording submission failed ({})",
                                                       ErrorCodeName(submitted.Error())));
+    }
+
+    if (presents) {
+        ++state.stats.presents;
     }
 
     // compute 기록이면 그 run의 async pass들에 제출 지점을 적는다(join이 기다린다).
@@ -879,13 +885,14 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
 
         Result<graphics::CommandContext*> begun =
             Result<graphics::CommandContext*>::Failure(ErrorCode::InvalidArgument);
+        const auto loadOf = [](GraphLoadAction load) noexcept {
+            return load == GraphLoadAction::Load       ? graphics::LoadAction::Load
+                   : load == GraphLoadAction::DontCare ? graphics::LoadAction::DontCare
+                                                       : graphics::LoadAction::Clear;
+        };
+        bool presents = false;
         if (record.target.kind == GraphTargetKind::Texture) {
             // attachment는 장치 BeginPass로 붙인다(색 MRT·깊이·load·mip·slice, 전이는 장치가 낸다).
-            const auto loadOf = [](GraphLoadAction load) noexcept {
-                return load == GraphLoadAction::Load       ? graphics::LoadAction::Load
-                       : load == GraphLoadAction::DontCare ? graphics::LoadAction::DontCare
-                                                           : graphics::LoadAction::Clear;
-            };
             graphics::PassDesc desc;
             desc.colorCount = record.target.colorCount;
             for (uint32 index = 0; index < record.target.colorCount; ++index) {
@@ -938,7 +945,23 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
 
             begun = state.device->BeginPass(desc);
         } else {
-            begun = state.device->BeginFrame(record.target.swapChain, record.target.clear);
+            // 스왑체인 공유: 같은 스왑체인의 pass들은 백버퍼 하나에 그리고, Deferred는 그
+            // 스왑체인의 마지막 pass 기록에서 present한다. Immediate는 뒤 pass를 모르므로 그래프 끝
+            // present 기록에서 낸다(FinishGraph).
+            graphics::SwapChainPassDesc desc;
+            desc.swapChain = record.target.swapChain;
+            desc.load = loadOf(record.target.load);
+            desc.clear = record.target.clear;
+            desc.present = false;
+            if (state.mode == GraphMode::Deferred) {
+                for (const SwapChainUse& use : state.swapChains) {
+                    desc.present =
+                        desc.present || (use.swapChain == desc.swapChain && use.lastPass == pass);
+                }
+            }
+
+            presents = desc.present;
+            begun = state.device->BeginFrame(desc);
         }
 
         if (!begun) {
@@ -950,6 +973,7 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         state.commands = begun.Value();
         state.recordingQueue = graphics::QueueKind::Graphics;
         state.recordingPass = pass;
+        state.recordingPresents = presents;
         ++state.stats.recordings;
         BeginTraceFrame(state);
         RestoreScopeMarkers(state);
@@ -1115,6 +1139,33 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
     auto closed = CloseRecording(state);
     if (outcome && !closed) {
         outcome = Move(closed);
+    }
+
+    // Immediate 모드의 present(스왑체인 공유): 실행이 성공했으면 스왑체인마다(처음 쓴 순서) 그리기
+    // 없는 present 기록 하나로 낸다. 실패한 그래프는 present하지 않는다.
+    if (success && outcome && state.mode == GraphMode::Immediate) {
+        for (const SwapChainUse& use : state.swapChains) {
+            if (use.firstPass == GraphIndexNone || !outcome) {
+                continue;
+            }
+
+            graphics::SwapChainPassDesc desc;
+            desc.swapChain = use.swapChain;
+            desc.load = graphics::LoadAction::Load;
+            auto begun = state.device->BeginFrame(desc);
+            if (!begun) {
+                outcome = Result<void>::Failure(RecordGraphError(
+                    state, begun.Error(), false, "graph present could not begin a recording ({})",
+                    ErrorCodeName(begun.Error())));
+                continue;
+            }
+
+            state.commands = begun.Value();
+            state.recordingQueue = graphics::QueueKind::Graphics;
+            state.recordingPresents = true;
+            ++state.stats.recordings;
+            outcome = CloseRecording(state);
+        }
     }
 
     // 장치 view와 그래프 상수를 놓는다(장치 Retire는 마지막 사용 fence 뒤 해제다).
