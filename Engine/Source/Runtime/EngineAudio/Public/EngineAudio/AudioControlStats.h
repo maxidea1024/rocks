@@ -54,6 +54,8 @@ struct AudioControlStats {
     // (3.40.3절).
     uint32 activeStreams = 0;
     uint64 streamSlotRejects = 0;
+    // 지금 일시정지된 재생 수다(3.44.2절 — 현재값).
+    uint32 pausedPlaybacks = 0;
 };
 
 } // namespace rocks

@@ -178,7 +178,6 @@ struct MaterialVertexInputs {
 };
 
 struct MaterialInputs {
-    float4 svPosition;
     float4 interpolants[MATERIAL_MAX_INTERPOLANT_VECTORS];
     float3 cameraVector;
     float deltaTime;
@@ -376,7 +375,7 @@ struct MaterialInputs {
 #define MaterialContextViewSize(c) float2(0.0, 0.0)
 #define MaterialContextSceneTexelSize(c) float2(0.0, 0.0)
 #define MaterialContextScreenPosition(c) float4(0.0, 0.0, 0.0, 0.0)
-#define MaterialContextSvPosition(c) float4(0.0, 0.0, 0.0, 0.0)
+#define MaterialContextSvPosition(c) ((c).svPosition)
 #define MaterialContextStateFrameIndexMod8(c) ((uint)0)
 #define MaterialContextViewFieldOfView(c) float2(0.0, 0.0)
 #define MaterialContextPreviousViewFieldOfView(c) float2(0.0, 0.0)

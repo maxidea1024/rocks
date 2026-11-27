@@ -294,6 +294,16 @@ Result<void> Translator::ExpandCall(usize index, bool sample) noexcept {
                        outputIds.View(), nullptr);
 }
 
+Result<void> Translator::AddDependency(MaterialDependencyRole role, Guid asset) noexcept {
+    for (const MaterialTranslationDependency& dependency : out_.dependencies) {
+        if (dependency.role == role && dependency.asset == asset) {
+            return Result<void>::Success();
+        }
+    }
+
+    return out_.dependencies.TryPushBack(MaterialTranslationDependency{role, asset});
+}
+
 Result<const MaterialGraphSnapshot*> Translator::LoadSnapshot(Guid asset, bool sample,
                                                               const nodegraph::Graph*& graph,
                                                               uint32& index) noexcept {
@@ -332,17 +342,8 @@ Result<const MaterialGraphSnapshot*> Translator::LoadSnapshot(Guid asset, bool s
             return Result<const MaterialGraphSnapshot*>::Failure(added.Error());
         }
 
-        bool listed = false;
-        for (const MaterialTranslationDependency& dependency : out_.dependencies) {
-            listed = listed || (dependency.role == role && dependency.asset == asset);
-        }
-
-        if (!listed) {
-            if (auto added =
-                    out_.dependencies.TryPushBack(MaterialTranslationDependency{role, asset});
-                !added) {
-                return Result<const MaterialGraphSnapshot*>::Failure(added.Error());
-            }
+        if (auto added = AddDependency(role, asset); !added) {
+            return Result<const MaterialGraphSnapshot*>::Failure(added.Error());
         }
     }
 

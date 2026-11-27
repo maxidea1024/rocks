@@ -1,4 +1,4 @@
-#include <UiFramework/Controls/EditableText.h>
+#include <UiFramework/Controls/EditableTextBox.h>
 #include <UiWidget/EditableTextWidget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 
@@ -6,9 +6,23 @@ namespace rocks::ui {
 
 namespace {
 
+// 상자 위젯은 EditableTextBox를, 아니면 EditableText를 만든다(Docs/Design/UiToolkit 22.8절).
+EditableText& EditorOf(Element& element) noexcept {
+    if (auto* box = ElementCast<EditableTextBox>(&element)) {
+        return box->Editor();
+    }
+
+    return StaticElementCast<EditableText>(element);
+}
+
 EditableText* LiveEditor(const Widget& widget) noexcept {
     auto live = widget.CachedElement();
-    return live ? &StaticElementCast<EditableText>(*live) : nullptr;
+    return live ? &EditorOf(*live) : nullptr;
+}
+
+EditableTextBox* LiveBox(const Widget& widget) noexcept {
+    auto live = widget.CachedElement();
+    return live ? ElementCast<EditableTextBox>(live.Get()) : nullptr;
 }
 
 } // namespace
@@ -18,7 +32,7 @@ EditableTextWidget::EditableTextWidget(Allocator& allocator) noexcept
 }
 
 TextLabel& EditableTextWidget::ResolveTextLabel(Element& element) const noexcept {
-    return StaticElementCast<EditableText>(element).Label();
+    return EditorOf(element).Label();
 }
 
 bool EditableTextWidget::IsMultiline() const noexcept {
@@ -159,8 +173,15 @@ Result<void> EditableTextWidget::SetCaption(const Text& value, bool error) noexc
         copy.Value() = {};
     }
 
-    if (auto* editor = LiveEditor(*this)) {
-        auto ready = error ? editor->SetError(copy.Value()) : editor->SetHintText(copy.Value());
+    if (error) {
+        if (auto* box = LiveBox(*this)) {
+            auto ready = box->SetError(copy.Value());
+            if (!ready) {
+                return ready;
+            }
+        }
+    } else if (auto* editor = LiveEditor(*this)) {
+        auto ready = editor->SetHintText(copy.Value());
         if (!ready) {
             return ready;
         }
@@ -256,14 +277,40 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
     }
 
     auto& allocator = objects.ObjectAllocator();
-    auto made = SharedPtr<EditableText>::TryMake(
-        allocator, allocator, tree.Value().Get().Value()->GetTextShaper(),
-        tree.Value().Get().Value()->GetPlatform(), IsMultiline(), HasBox());
-    if (!made) {
-        return Result<SharedPtr<Element>>::Failure(made.Error());
+    auto shaper = tree.Value().Get().Value()->GetTextShaper();
+    const Platform platform = tree.Value().Get().Value()->GetPlatform();
+    SharedPtr<Element> made;
+    EditableText* built = nullptr;
+    EditableTextBox* box = nullptr;
+    if (HasBox()) {
+        // 상자는 Initialize가 안쪽 편집기를 만든다 — 속성은 그 뒤에 넣는다(글자는 Initialize가
+        // 넣는다).
+        auto boxed = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, Move(shaper),
+                                                         platform, IsMultiline());
+        if (!boxed) {
+            return Result<SharedPtr<Element>>::Failure(boxed.Error());
+        }
+
+        auto initialized = boxed.Value()->Initialize(text_.View(), fontSize_);
+        if (!initialized) {
+            return Result<SharedPtr<Element>>::Failure(initialized.Error());
+        }
+
+        box = boxed.Value().Get();
+        built = &box->Editor();
+        made = Move(boxed.Value());
+    } else {
+        auto plain = SharedPtr<EditableText>::TryMake(allocator, allocator, Move(shaper), platform,
+                                                      IsMultiline());
+        if (!plain) {
+            return Result<SharedPtr<Element>>::Failure(plain.Error());
+        }
+
+        built = plain.Value().Get();
+        made = Move(plain.Value());
     }
 
-    auto& editor = *made.Value();
+    auto& editor = *built;
     editor.SetReadOnly(readOnly_);
     editor.SetSelectAllTextWhenFocused(selectAllOnFocus_);
     editor.SetSelectAllTextOnCommit(selectAllOnCommit_);
@@ -278,10 +325,10 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
     }
 
     if (ready && errorText_.IsValid()) {
-        ready = editor.SetError(errorText_);
+        ready = box->SetError(errorText_);
     }
 
-    if (ready) {
+    if (ready && !box) {
         ready = editor.Initialize(text_.View(), fontSize_);
     }
 
@@ -296,7 +343,7 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
     // 해제된 Element가 뒤늦게 보낸 사건은 재구성된 Widget에 전달하지 않는다(BindLiveWidgetEvent와
     // 같은 확인).
     const auto owner = Handle();
-    const Element* native = made.Value().Get();
+    const Element* native = made.Get();
     editor.SetOnTextChanged(Delegate<void(StringView)>::CreateLambda(
         [&objects, owner, native](StringView text) noexcept {
             auto widget = objects.ResolveForWrite<EditableTextWidget>(objects.OwnerAccess(), owner);
@@ -311,7 +358,7 @@ Result<SharedPtr<Element>> EditableTextWidget::BuildElement(ObjectRegistry& obje
                 widget.Value().Get().Value()->OnCommittedText(objects, text, reason);
             }
         }));
-    return Result<SharedPtr<Element>>::Success(Move(made.Value()));
+    return Result<SharedPtr<Element>>::Success(Move(made));
 }
 
 } // namespace rocks::ui

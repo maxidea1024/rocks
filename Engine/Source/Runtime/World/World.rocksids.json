@@ -1004,6 +1004,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PathMoverComponent::pathReset",
+      "id": "b23c5fd76aca438094d9e1e9bad632a4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pathReversed",
+      "id": "1cb75461e5a446dd9d702390945d12d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PathMoverComponent::pathStopped",
+      "id": "8ad82ec24b9641e49f442de56110d9b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PathMoverComponent::pauseOnImpact_",
       "id": "399d48dedc4f4ffca31e4a61b8649dc9",
       "aliases": [],
@@ -1879,6 +1900,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PrimitiveComponent::ignoreRadialForce_",
+      "id": "dae1dd85682841bf9cde9ba4a075bbe9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::ignoreRadialImpulse_",
+      "id": "adfc32af59874065b90bb47901897806",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PrimitiveComponent::lightingChannels_",
       "id": "165915b85233497d8d7b9083a5f6a59c",
       "aliases": [],
@@ -2112,6 +2147,13 @@
       "kind": "field",
       "name": "rocks::ProjectileMovementComponent::projectileGravityScale_",
       "id": "dd1fdf68827e49b4bd8b46ac2e980c30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ProjectileMovementComponent::projectileStopped",
+      "id": "bafa48dc25cc45baa41ec9142dbd5d41",
       "aliases": [],
       "retired": false
     },
@@ -3183,6 +3225,13 @@
       "kind": "type",
       "name": "rocks::ProjectileMovementComponent",
       "id": "6d10c67ed1da42f0b39243ae193eb54e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RadialFalloff",
+      "id": "a53d50a97ed64b68989a69913c12635d",
       "aliases": [],
       "retired": false
     },

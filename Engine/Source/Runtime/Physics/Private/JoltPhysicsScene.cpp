@@ -163,8 +163,10 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
       jobs_(scheduler, JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers), activations_(allocator),
       contacts_(*this, allocator), slots_(allocator), freeSlots_(allocator),
       pendingResults_(allocator), kinematicTargets_(allocator), kinematicMoving_(allocator),
-      slept_(allocator), moved_(allocator), contactHits_(allocator), takenContactHits_(allocator),
+      pendingImpulses_(allocator), frameForces_(allocator), slept_(allocator), moved_(allocator),
+      contactHits_(allocator), takenContactHits_(allocator),
       minDeltaVelocityForHitEvents_(static_cast<double>(settings.minDeltaVelocityForHitEvents)),
+      maxAngularVelocityDegrees_(static_cast<double>(settings.maxAngularVelocity)),
       maxAngularVelocityRadians_(
           static_cast<float>(static_cast<double>(settings.maxAngularVelocity) * RadiansPerDegree)),
       maxLinearVelocityMeters_(static_cast<float>(
@@ -407,6 +409,7 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     slot.notifyContacts = false;
     slot.hasTarget = false;
     slot.movedLastStep = false;
+    DropPendingImpulse(slot);
     // 세대 0은 "없음"이라 건너뛴다.
     slot.generation = slot.generation + 1 == 0 ? 1 : slot.generation + 1;
     // CreateBody가 칸 수만큼 미리 잡았으므로 실패하지 않는다.
@@ -512,6 +515,10 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
         bodies.SetMotionType(slot.body, JPH::EMotionType::Kinematic,
                              JPH::EActivation::DontActivate);
         bodies.SetLinearAndAngularVelocity(slot.body, JPH::Vec3::sZero(), JPH::Vec3::sZero());
+        // 대기 충격량·프레임 힘을 버린다(Chaos Kinematic은 impulse velocity·힘을 적분하지 않는다 —
+        // 7.1.17절). Jolt 누적 힘은 SetMotionType(Kinematic)이 지운다(Body.cpp:62-65).
+        DropPendingImpulse(slot);
+
         // Kinematic은 자유도를 막지 않는다(7.1.16절 — Jolt 허용 자유도는 MoveKinematic 속도도
         // 막는다).
         ApplyDegreesOfFreedom(slot);
@@ -715,6 +722,12 @@ Result<BodyKinematics> JoltPhysicsScene::ReadKinematics(PhysicsBodyHandle body) 
     BodyKinematics kinematics;
     kinematics.location = FromJoltPosition(bodies.GetPosition(slot->body), origin_);
     kinematics.rotation = FromJoltRotation(bodies.GetRotation(slot->body));
+    kinematics.centerOfMass = FromJoltPosition(bodies.GetCenterOfMassPosition(slot->body), origin_);
+    // UE는 rigid body(Dynamic·Kinematic)만 질량·관성을 낸다(GetMass_AssumesLocked).
+    if (slot->motion != BodyMotion::Static) {
+        kinematics.mass = static_cast<double>(slot->massProperties.mMass);
+        kinematics.inertia = FromJoltInertiaDiagonal(slot->massProperties.mInertia);
+    }
     kinematics.linearVelocity = FromJoltLinearVelocity(bodies.GetLinearVelocity(slot->body));
     kinematics.angularVelocityRadians =
         FromJoltAngularVelocity(bodies.GetAngularVelocity(slot->body));
@@ -1135,7 +1148,8 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     if (platform::RunWithDeterministicFloatingPoint(
             [](void* context) noexcept {
                 auto& step = *static_cast<StepCall*>(context);
-                // MoveKinematic의 속도 계산도 같은 FP 환경에서 한다.
+                // 대기 충격량·MoveKinematic의 속도 계산도 같은 FP 환경에서 한다.
+                step.scene->ApplyPendingImpulses();
                 step.scene->ApplyKinematicTargets(step.seconds);
                 step.error = step.scene->system_.Update(step.seconds, CollisionStepsPerStep,
                                                         &step.scene->temp_, &step.scene->jobs_);

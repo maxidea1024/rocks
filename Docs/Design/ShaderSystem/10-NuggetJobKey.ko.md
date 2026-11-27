@@ -30,7 +30,7 @@ AssetSystem A3(9.1절, 구현 `Engine/Source/Developer/AssetNugget`)을 그대�
 | 2 | `GlesCopyTable` | GLES 바인딩 머리·상수 버퍼 복사 표(7.2절 4항) | SH2 |
 | 3 | `DebugSymbols` | 디버그 심볼(PDB·SPIR-V debug 등 — 배치 `ShaderDebugSymbols`, 16.3절 SSD73) | SH4 |
 
-- 진단은 Record에 넣지 않는다. 경고는 결정 7로 오류이므로 성공 job에는 진단이 없고, 진단 문자열은 작업 디렉터리·도구 버전 문구가 섞여 같은 키에서 digest를 흔들 수 있다(`Conflict`). 진단은 실패 job의 결과로만 돌려준다.
+- 진단은 Record에 넣지 않는다. 진단 문자열은 작업 디렉터리·도구 버전 문구가 섞여 같은 키에서 digest를 흔들 수 있다(`Conflict`). 진단은 그 job을 컴파일한 실행의 결과로만 돌려준다: 실패 job의 진단과, 성공 job의 경고(`warningsAsErrors` false인 job·D3D11 대체 경로 성공 — 개정 64, 16.4절 SSD79·SSD80). 적중 job의 진단은 비어 있다(UE는 진단을 함께 캐시한다 — UE와 다른 점).
 - 실패한 job(컴파일 오류·도구 오류)은 게시하지 않는다. 같은 입력을 다시 컴파일하면 같은 진단이 나오고, 실패를 캐시하면 도구·환경 문제의 회복이 늦어진다.
 - 조회: 값 선택을 비워 Record 전체를 청한다(값을 골라 청하면 없는 값 때문에 `Miss`가 되고 다시 만든 Put이 `Exists`가 되는 고리가 생긴다 — A3 Get은 청한 값이 하나라도 없으면 `PartialRecord` 없이 `Miss`다). 정책은 `Default`(`PartialRecord` 없음). 적중했는데 값 0이 없으면 손상으로 보고 진단·통계를 남긴 뒤 다시 컴파일한다.
 - 컴파일 묶음은 `NuggetGetRequest`로 모든 job을 한 번에 조회하고, 미적중만 워커에 보내고, 결과를 `NuggetPutRequest`로 게시한다(AssetSystem 9.1절 결정 12). 요청을 시작하고 기다리는 것은 관리자의 조정 스레드이며 그 scheduler의 worker가 아니다(같은 scheduler worker에서 진행 중 요청을 기다리거나 소멸하면 교착·Fatal — `NuggetRequest.h` 계약). 필요 시 컴파일(11.1절 결정 SC12) 한 건은 동기 `NuggetCache::Get`·`Put`이다.

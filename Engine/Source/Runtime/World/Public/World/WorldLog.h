@@ -47,6 +47,16 @@ inline constexpr char DiagCollisionProfileMissing[] = "CollisionProfileMissing";
 //   켜져 있어 Static body로 만들었다(Warning — Docs/Design/PhysicsModule 2.5절, UE
 //   BodyInstance.cpp:2697-2700).
 inline constexpr char DiagSimulateOnStaticBody[] = "SimulateOnStaticBody";
+// - PhysicsOperationWithoutSimulation: 시뮬레이션이 꺼진 PrimitiveComponent에 힘·충격량·토크를
+//   줬다. PhysicsOperationWithoutPhysicsCollision: 물리 충돌이 없는(NoCollision·QueryOnly)
+//   PrimitiveComponent에 줬다(둘 다 Warning — Release 빌드 밖, Docs/Design/PhysicsModule 7.1.17절,
+//   UE WarnInvalidPhysicsOperations).
+inline constexpr char DiagPhysicsOperationWithoutSimulation[] = "PhysicsOperationWithoutSimulation";
+inline constexpr char DiagPhysicsOperationWithoutPhysicsCollision[] =
+    "PhysicsOperationWithoutPhysicsCollision";
+// - InvalidBodyValue: body 값 setter(질량·질량 중심·감쇠·각속도 상한·자유도 방식)에 비유한 값·음수·
+//   모르는 값이 와서 값을 바꾸지 않았다(Warning — Docs/Design/PhysicsModule 7.1.18절).
+inline constexpr char DiagInvalidBodyValue[] = "InvalidBodyValue";
 // - BodyShapeUpdateFailed: 형상 값·scale이 바뀌었지만 body 형상을 다시 만들지 못해 이전 형상을
 //   두었다(Warning — Docs/Design/PhysicsModule 7.1.5절).
 inline constexpr char DiagBodyShapeUpdateFailed[] = "BodyShapeUpdateFailed";

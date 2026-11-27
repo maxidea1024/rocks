@@ -503,6 +503,9 @@ AudioSceneId AudioEngineSubsystem::RegisterScene() noexcept {
         scene.epoch = epoch;
         scene.listenerPosition = Vec3d();
         scene.listenerRotation = Quatd::Identity();
+        scene.worldPaused = false;
+        scene.codePaused = false;
+        scene.sentPaused = false;
         // 제어 쪽에 새 epoch를 알린다(다음 묶음 스냅숏).
         scene.listenerDirty = true;
         return AudioSceneId{index, epoch};
@@ -602,6 +605,21 @@ void AudioEngineSubsystem::UpdateEmitter(AudioEmitterId id, const Vec3d& positio
     emitter.position = position;
     emitter.rotation = normalized.Value();
     PushEmitterUpdate(id.slot);
+}
+
+Result<void> AudioEngineSubsystem::SetScenePaused(AudioSceneId scene, bool paused) noexcept {
+    if (!IsLiveScene(scene) || scene.index == EngineSceneIndex) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    scenes_[scene.index].codePaused = paused;
+    return Result<void>::Success();
+}
+
+void AudioEngineSubsystem::SetSceneWorldPaused(AudioSceneId scene, bool paused) noexcept {
+    if (IsLiveScene(scene) && scene.index != EngineSceneIndex) {
+        scenes_[scene.index].worldPaused = paused;
+    }
 }
 
 void AudioEngineSubsystem::SetSceneOcclusionQuery(AudioSceneId scene,
@@ -954,7 +972,8 @@ void AudioEngineSubsystem::SnapshotScenes() noexcept {
 
     for (uint32 index = 0; index < scenes_.Size(); ++index) {
         GameScene& scene = scenes_[index];
-        if (scene.epoch == 0 || !scene.listenerDirty) {
+        const bool paused = scene.Paused();
+        if (scene.epoch == 0 || (!scene.listenerDirty && paused == scene.sentPaused)) {
             continue;
         }
 
@@ -963,6 +982,7 @@ void AudioEngineSubsystem::SnapshotScenes() noexcept {
         update.epoch = scene.epoch;
         update.position = scene.listenerPosition;
         update.rotation = scene.listenerRotation;
+        update.paused = paused;
         // 묶음을 보내지 못한 프레임이 이어져도 scene마다 하나만 둔다.
         bool merged = false;
         for (SceneUpdate& existing : current_->scenes) {
@@ -975,6 +995,7 @@ void AudioEngineSubsystem::SnapshotScenes() noexcept {
 
         if (merged || current_->scenes.TryPushBack(update)) {
             scene.listenerDirty = false;
+            scene.sentPaused = paused;
         }
     }
 }

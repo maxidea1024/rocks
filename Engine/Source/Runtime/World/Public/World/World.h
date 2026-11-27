@@ -373,6 +373,13 @@ public:
         return physicsScene_;
     }
 
+    // Physics 단계의 고정 스텝 루프 안인지다(사용자 Fixed hook·PhysicsSimulate — 엔진 런타임
+    // 15.4절). 힘 API가 고정 스텝 하나에만 줄지(참) 프레임의 모든 고정 스텝에 줄지(거짓 — UE
+    // bAllowSubstepping, PhysicsModule 7.1.17절) 정할 때 쓴다.
+    bool InFixedSteps() const noexcept {
+        return inFixedSteps_;
+    }
+
     // 물리 장면 접점을 꽂거나(scene) 뗀다(nullptr). PhysicsWorldSubsystem만 부른다. World가
     // Initialized(Subsystem 초기화 중과 BeginPlay 전)·TearingDown(정리 중)일 때만 받고 다른 상태는
     // InvalidArgument, 이미 다른 장면이 꽂혀 있으면 AlreadyExists다(먼저 뗀다). 떼기는 body가 남아
@@ -1060,6 +1067,8 @@ private:
     config::ConfigContext* settings_ = nullptr;
     // 물리 장면 접점이다(빌림 — PhysicsWorldSubsystem이 소유).
     PhysicsScene* physicsScene_ = nullptr;
+    // Physics 단계의 고정 스텝 루프 안이다(InFixedSteps).
+    bool inFixedSteps_ = false;
     cvar::CVarScopeId cvarScope_{};
     CollisionProfileTable collisionProfiles_;
     StepPlan lastStep_;

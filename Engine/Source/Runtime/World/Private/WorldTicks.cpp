@@ -250,6 +250,7 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
             TickPhaseFrame fixed = frame;
             fixed.deltaSeconds = lastStep_.fixedStepSeconds;
             fixed.unscaledDeltaSeconds = lastStep_.fixedStepSeconds;
+            inFixedSteps_ = true;
             for (uint32 step = 0; step < lastStep_.fixedSteps; ++step) {
                 fixed.fixedStepIndex = lastStep_.firstFixedStepIndex + step;
                 auto ran = ticks_.RunPhase(phase, fixed, *this);
@@ -264,6 +265,7 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
                 }
             }
 
+            inFixedSteps_ = false;
             // Physics 끝 엔진 단계: 고정 스텝 수와 무관하게 프레임에 한 번(15.4절).
             for (EngineStage stage :
                  {EngineStage::PhysicsResults, EngineStage::SkeletalPhysicsFinalize}) {

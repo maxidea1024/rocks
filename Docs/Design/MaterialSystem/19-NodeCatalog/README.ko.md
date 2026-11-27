@@ -166,7 +166,6 @@ UE는 형식·플랫폼에 따라 갈리는 스위치를 플랫폼별 번역 때
 | `MPQ-VirtualTexture` | 가상 텍스처 page table 바인딩(RVT·메시 페인트·머티리얼 캐시 공용) | `RuntimeVirtualTextureSample`·`…SampleParameter`, `MeshPaintTextureObject`, `MaterialCacheOutput`, 속성 `relaxVirtualTextureRestrictions` | 가상 텍스처 단계(TextureStreaming 후속) |
 | `MPQ-ExternalTexture` | 외부(영상) 텍스처 자원 종류 | 핀 타입 `TextureExternal`(UE `MCT_TextureExternal`) | 미디어 단계 |
 | `MPQ-Font` | 미리 구운 Font 에셋·페이지 텍스처 | `FontSample`·`FontSampleParameter` | [글꼴](../../Font/07-Consumers.ko.md) FT7 |
-| `MPQ-CurveAsset` | 커브 atlas 에셋(커브 묶음을 굽는 텍스처) | `CurveAtlasRowParameter` | CurveData 에셋 층 |
 | `MPQ-MaterialAggregate` | aggregate 에셋(UE `UMaterialAggregate`, `RE/Public/Materials/MaterialAggregate.h:83`)과 IR aggregate 타입 | `Aggregate` 속성(UserDefined) | MS2e 뒤 |
 | `MPQ-SubsurfaceProfile` | subsurface profile 에셋(UE `RE/Classes/Engine/SubsurfaceProfile.h:177`) | `SurfaceSlab`·`SurfaceEye`·`SurfaceFromShadingModel`·`SurfaceFromAttributes` 속성 | Renderer SSS 단계(RS9) |
 | `MPQ-SpecularProfile` | specular profile 에셋(`SpecularProfile.h:73`) | `SurfaceSlab` 속성 | Renderer 단계 |
@@ -188,7 +187,7 @@ MaterialSourceProvider
   FindFunction(AssetId)     → MaterialGraphSnapshot | NotFound
   FindMaterial(AssetId)     → MaterialGraphSnapshot | NotFound   (MaterialSample)
   FindCollection(AssetId)   → ParameterCollectionLayout | NotFound
-  FindCurve(AssetId)        → LinearColorCurveSnapshot | NotFound (ColorRamp)
+  FindColorCurve(AssetId)   → MaterialColorCurveSnapshot | NotFound (ColorRamp — 6.13절 MS2f4)
 ```
 
 lowering(펼치기·layout 결합·커브 구간식)은 이 interface 위에서 구현한다. 시험은 메모리 provider로 한다. 컬렉션은 MS2c에서 번역 입력의 값 목록(`collections` — 6.10절)으로 구현했으므로 `FindCollection`은 두지 않는다(6.12절 MS2e2). 에셋 객체를 snapshot으로 바꾸는 쪽은 해당 에셋 클래스 단계에서 붙인다. 그래서 `src:` 노드는 "구현"이다.

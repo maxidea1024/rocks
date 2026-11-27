@@ -170,6 +170,7 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
 
 - `Light`(Abstract): root가 광원 컴포넌트다. `LightComponentHandle()`(root handle), `SetLightEnabled(bool)`·`IsLightEnabled()`(root 컴포넌트의 visible — UE `ALight::SetEnabled`·`bEnabled`가 컴포넌트 visibility로 간다, `E/Private/Light.cpp:88–120`). 복제(`bEnabled` replicated)는 네트워크 단계다.
 - 파생은 프레임워크 PreAwake(17.8절)에서 root를 만든다. `PlayerStart`와 같은 자리다(Spawn Transform이 root에 붙는다 — 17.3절). 엔진 Actor 클래스도 이 hook을 쓸 수 있게 Actor 주석을 고친다.
+  - **PF1에서 선언 subobject로 옮긴다**(2026-11-28 — [Prefab](../Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절): root를 `ROCKS_PROPERTY(Subobject, Root)` 필드로 선언하고 instancing이 만든다. 레벨 로드 재사용은 graph "선언 subobject" 노드가 대신하고, Mobility·회전 기본값은 `InitSubobjectDefaults`가 준다. PF1은 `Runtime` 출처 component를 저장하지 않으므로 `actor_root_setup::PrepareRoot`를 쓰는 엔진 Actor(광원·Trigger·StaticMeshActor 등) 모두를 같은 단계에서 옮긴다.
   - root가 이미 그 광원 타입(파생 포함)이면(레벨 로드로 영속 컴포넌트가 먼저 등록된 경우) 그대로 쓰고 다시 설정하지 않는다. 다른 타입 root가 있으면 Spawn이 `InvalidArgument`로 실패한다(옛 root를 떼어 둔 채 바꾸지 않는다 — UE 광원 Actor는 root를 생성자에서 정하므로 이 상태가 없다). root가 없으면 만들어 root로 둔다.
   - 만든 컴포넌트의 Mobility는 **Stationary**다(UE 각 Actor 생성자 — `Light.cpp:190`·`244`, `SpotLight.cpp:27`, `RectLight.cpp:12`).
   - `SpotLight`는 root 상대 회전 pitch −90°(아래), `DirectionalLight`는 pitch −46°다(UE `SpotLight.cpp:28`, `Light.cpp:245`). Spawn Transform은 이 값에 곱해진다(UE `RootRelative × UserSpawnTransform` — Rocks 17.3절과 같다).
@@ -183,7 +184,7 @@ UE 편집기는 Point·Spot·Rect Actor를 놓을 때 `r.DefaultFeature.LightUni
 | ERD34 | 데이터 먼저 | 렌더·물리 없이 정해지는 데이터·순수 계산을 먼저 넣고, 시스템 상태는 요청하지 않는다 | 사용자 결정 2026-11-24 |
 | ERD35 | 광원 수치 형식 | UE와 같은 `float` | 렌더 입력 정밀도, UE 값 대조 |
 | ERD36 | Static 광원 setter | 게임 World 초기화 뒤 `InvalidArgument` + `StaticComponentDataChanged` | 23.3절 이동 검사와 같은 규칙, UE는 조용히 무시 |
-| ERD37 | 광원 Actor root | 프레임워크 PreAwake에서 만들고 같은 타입이 이미 있으면 재사용, 다른 타입이면 거부 | Spawn Transform 적용 순서, 레벨 로드 |
+| ERD37 | 광원 Actor root | 프레임워크 PreAwake에서 만들고 같은 타입이 이미 있으면 재사용, 다른 타입이면 거부(PF1에서 선언 subobject `Root`로 이전 — Prefab 3.2절, 2026-11-28) | Spawn Transform 적용 순서, 레벨 로드 |
 | ERD38 | 이름 | UE 이름에서 접두만 뗀 업계 공용어 | Rocks 이름 규칙의 공용어 예외 |
 
 #### 24.2.7 시험

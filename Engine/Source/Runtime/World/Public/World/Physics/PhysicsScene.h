@@ -1,12 +1,15 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Collision/BodySettings.h>
 #include <Collision/CollisionShape.h>
 #include <Core/Containers/Array.h>
 #include <Core/Math/Transform.h>
 #include <Core/Result.h>
 #include <World/Physics/BodyCreateDesc.h>
+#include <World/Physics/BodyForce.h>
 #include <World/Physics/BodyKinematics.h>
+#include <World/Physics/BodySettingsChange.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MtdResult.h>
 #include <World/Physics/OverlapMode.h>
@@ -100,6 +103,41 @@ public:
 
     // body의 현재 운동 상태다. 오류: 없는 handle·옛 세대(StaleHandle).
     virtual Result<BodyKinematics> ReadKinematics(PhysicsBodyHandle body) const noexcept = 0;
+
+    // body에 힘·충격량·토크를 준다(PhysicsModule 2.6절·7.1.17절 — UE FBodyInstance::Add…). Dynamic
+    // body에만 효력이 있고(Static·Kinematic은 무시) 효력이 있으면 깨운다. 충격량은 다음 step에
+    // 속도에 더해지고(바로 읽으면 옛 속도 — UE), 힘·토크는 다음 step 동안(everyFixedStep이면 이번
+    // 프레임의 모든 고정 스텝 동안) 작용한다. 없는 handle·옛 세대는 무시하고, 비유한 값(Jolt
+    // float로 바꾼 뒤 포함)은 무시하고 Warning NonFiniteBodyInput이다. 사용 예는 BodyForce.h다.
+    virtual void ApplyBodyForce(PhysicsBodyHandle body, const BodyForce& force) noexcept = 0;
+
+    // Dynamic body의 선속도(cm/s)·각속도(rad/s, 월드 축)를 바꾼다(UE SetLinearVelocity·
+    // SetAngularVelocityInRadians — 7.1.17절). addToCurrent면 지금 속도에 더한다. 최종 속도는
+    // 허용 자유도로 거르고 상한으로 자른다. 잠든 body는 최종 속도가 거의 0이 아니면 깨운다.
+    // Static·Kinematic(UE와 다르다 — 7.1.17절)·없는 handle·옛 세대는 무시하고, 비유한 값은 무시하고
+    // Warning이다. 상한을 넘는 값은 바로 잘린다(UE는 다음 적분 때 자른다).
+    //
+    // 사용 예:
+    //   scene.SetBodyLinearVelocity(body, Vec3d(0.0, 0.0, 300.0), false);   // 위로 3 m/s
+    //   scene.SetBodyAngularVelocity(body, Vec3d(0.0, 0.0, 1.0), true);     // Z 둘레 1 rad/s 더함
+    virtual void SetBodyLinearVelocity(PhysicsBodyHandle body, const Vec3d& velocity,
+                                       bool addToCurrent) noexcept = 0;
+    virtual void SetBodyAngularVelocity(PhysicsBodyHandle body, const Vec3d& velocityRadians,
+                                        bool addToCurrent) noexcept = 0;
+
+    // 실행 중 바뀐 body 값 묶음 change를 settings에서 다시 넣는다(PhysicsModule 7.1.18절 — UE
+    // FBodyInstance의 값 setter). 값 검사는 부르는 쪽 몫이다(컴포넌트 setter가 거른다). Static
+    // body는 운동 값이 없어 질량 입력만 칸에 둔다. 없는 handle·옛 세대는 무시한다.
+    //
+    // 사용 예:
+    //   settings.enableGravity = false;
+    //   scene.UpdateBodySettings(body, settings, BodySettingsChange::Gravity);
+    virtual void UpdateBodySettings(PhysicsBodyHandle body, const BodySettings& settings,
+                                    BodySettingsChange change) noexcept = 0;
+
+    // 물리 설정의 기본 각속도 상한(도/s)이다(PhysicsSettings::maxAngularVelocity — body가
+    // overrideMaxAngularVelocity가 아니면 쓰는 값).
+    virtual double DefaultMaxAngularVelocityDegrees() const noexcept = 0;
 
     // start → end line trace다(4.4·4.5절, 7.1.7절). 끝점은 유한하고 길이가 0이 아니어야
     // 한다(World가 거른다). filter.kind는 Channel·ObjectTypes다(Profile은 World가 풀어 넘긴다).

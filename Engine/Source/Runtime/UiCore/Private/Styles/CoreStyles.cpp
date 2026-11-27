@@ -153,6 +153,36 @@ const ProgressBarStyle& DefaultProgressBarStyle() noexcept {
     return style;
 }
 
+const EditableTextStyle& DefaultEditableTextStyle() noexcept {
+    static const EditableTextStyle style{
+        NormalTextStyle(), ColorRef::FromTheme(ThemeSlot::Highlight),
+        ColorRef::FromTheme(ThemeSlot::White), ColorRef{ColorSource::Foreground}, 0.35f};
+    return style;
+}
+
+const EditableTextBoxStyle& DefaultEditableTextBoxStyle() noexcept {
+    static const EditableTextBoxStyle style = [] {
+        EditableTextBoxStyle box;
+        box.normal = StyleBrush::RoundedBox(ThemeSlot::Input, EditableTextBoxCornerRadius,
+                                            ThemeSlot::InputOutline, ControlOutlineThickness);
+        box.hovered = StyleBrush::RoundedBox(ThemeSlot::Input, EditableTextBoxCornerRadius,
+                                             ThemeSlot::Hover, ControlOutlineThickness);
+        box.focused = StyleBrush::RoundedBox(ThemeSlot::Input, EditableTextBoxCornerRadius,
+                                             ThemeSlot::Primary, ControlOutlineThickness);
+        box.readOnly = StyleBrush::RoundedBox(ThemeSlot::Header, EditableTextBoxCornerRadius,
+                                              ThemeSlot::InputOutline, ControlOutlineThickness);
+        box.padding = EditableTextBoxPadding;
+        box.foreground = ColorRef{ColorSource::Foreground};
+        box.focusedForeground = ColorRef::FromTheme(ThemeSlot::White);
+        box.readOnlyForeground = ColorRef{ColorSource::Foreground};
+        box.text = DefaultEditableTextStyle();
+        box.errorMarker = StyleBrush::RoundedBox(ThemeSlot::Error, EditableTextBoxCornerRadius);
+        box.errorText = NormalTextStyle();
+        return box;
+    }();
+    return style;
+}
+
 const ScrollBarStyle& DefaultScrollBarStyle() noexcept {
     static const ScrollBarStyle style{
         StyleBrush::None(), StyleBrush::RoundedBox(ThemeSlot::Hover, ButtonCornerRadius),

@@ -1,5 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
+#include <UiFramework/Controls/EditableTextBox.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Application/InputAdapter.h>
 #include <UiWidget/EditableTextBoxWidget.generated.h>
 #include <UiWidget/EditableTextWidget.generated.h>
@@ -207,7 +209,11 @@ TEST(UiWidget_EditableTextUsesClusterBoundariesAndPersistsInput) {
         // 비밀번호는 IME를 끈다 — 서비스에 다시 알린다.
         CHECK(!context->AllowsInputMethod());
         CHECK(service.Value()->activations == 2);
-        auto& label = StaticElementCast<TextLabel>(*live.Value()->ChildAt(0));
+        // 상자 위젯은 상자 → 편집기 → 레이블이다(22.2절).
+        Element* editorElement = ElementCast<EditableTextBox>(live.Value().Get())
+                                     ? live.Value()->ChildAt(0)
+                                     : live.Value().Get();
+        auto& label = StaticElementCast<TextLabel>(*editorElement->ChildAt(0));
         CHECK(label.ShapedClusters().Size() == 1);
         CHECK(label.ShapedClusters()[0].byteEnd == 4);
         REQUIRE(inputAdapter.Route(InputEvent::Text('x')));
@@ -446,17 +452,22 @@ TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {
     app.SetRoot(live);
     REQUIRE(app.UpdatePaintCache(Geometry::Root({120, 40}, {}), 1));
     CHECK(box->GetText().IsEmpty() && box->HasError());
-    REQUIRE(live->ChildCount() == 3);
-    CHECK(StaticElementCast<TextLabel>(live->ChildAt(1))->GetText() == "Hint");
-    CHECK(StaticElementCast<TextLabel>(live->ChildAt(2))->GetText() == "Invalid");
-    CHECK(live->ChildAt(2)->GetGeometry().layout.ty > live->ChildAt(0)->GetGeometry().layout.ty);
+    // 상자 Element(EditableTextBox)는 편집기와 오류 표지를, 편집기는 레이블과 힌트를 든다(22.2절).
+    auto& boxElement = StaticElementCast<EditableTextBox>(*live);
+    REQUIRE(boxElement.HasError() && live->ChildCount() == 2);
+    const auto editorRef = live->ChildRefAt(0);
+    REQUIRE(editorRef && editorRef.Get() == &boxElement.Editor());
+    REQUIRE(editorRef->ChildCount() == 2);
+    CHECK(StaticElementCast<TextLabel>(editorRef->ChildAt(1))->GetText() == "Hint");
+    REQUIRE(boxElement.ErrorMarker() != nullptr && live->ChildAt(1) == boxElement.ErrorMarker());
+    CHECK(StaticElementCast<TextLabel>(boxElement.ErrorMarker()->ChildAt(0))->GetText() == "!");
     CHECK(live->GetDesiredSize().x >= 68);
     REQUIRE(box->SetText("Before"));
-    CHECK(live->ChildAt(1)->GetVisibility() == Visibility::Collapsed);
+    CHECK(editorRef->ChildAt(1)->GetVisibility() == Visibility::Collapsed);
     box->SetRevertTextOnEscape(true);
     box->SetSelectAllTextWhenFocused(true);
     box->SetSelectAllTextOnCommit(true);
-    REQUIRE(app.SetFocus(0, live));
+    REQUIRE(app.SetFocus(0, editorRef));
     CHECK(box->SelectedText() == "Before");
     REQUIRE(app.RouteKey(0, input::InputEvent::Text('Z')));
     CHECK(box->GetText() == "Z");
@@ -465,9 +476,9 @@ TEST(UiWidget_EditableHintErrorAndFocusPoliciesUseTheModelText) {
     REQUIRE(app.RouteKey(0, input::InputEvent::KeyDown(input::Key::Enter)));
     CHECK(box->SelectedText() == "Before");
     REQUIRE(box->SetText(""));
-    CHECK(live->ChildAt(1)->GetVisibility() == Visibility::HitTestInvisible);
+    CHECK(editorRef->ChildAt(1)->GetVisibility() == Visibility::HitTestInvisible);
     REQUIRE(box->SetError({}));
-    CHECK(!box->HasError() && live->ChildCount() == 2);
+    CHECK(!box->HasError() && live->ChildCount() == 1);
     app.SetRoot({});
 }
 

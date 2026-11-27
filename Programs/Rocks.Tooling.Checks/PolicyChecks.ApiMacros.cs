@@ -53,6 +53,7 @@ public static partial class PolicyChecks
         "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadMotorMapping.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadSlotTable.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerTouchMapping.h",
+        "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputDocument.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputSession.h",
         "Engine/Source/Developer/MeshTools/Private/MeshBuildInternal.h",
         "Engine/Source/Developer/TextureTools/Private/TextureImportInternal.h"

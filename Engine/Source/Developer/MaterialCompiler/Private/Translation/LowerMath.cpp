@@ -303,6 +303,7 @@ Result<IrValueId> PowerValue(LoweringContext& context, IrValueId base, IrValueId
         return Result<IrValueId>::Failure(!e ? e.Error() : !floor ? floor.Error() : zero.Error());
     }
 
+    // pow는 UE 그대로다(FXC 음수 밑 경고 X3571도 UE처럼 경고로 남는다 — 6.8절 Power 행).
     auto small = context.Binary(IrOp::LessThanOrEquals, base, floor.Value(), NumberRule::FloatOnly);
     auto power = context.Binary(IrOp::Pow, base, e.Value(), NumberRule::FloatOnly);
     if (!small || !power) {

@@ -3,7 +3,9 @@
 #include <AssetNugget/NuggetRecord.h>
 #include <AssetNugget/NuggetRequest.h>
 #include <Base/PlacementNew.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Encoding/Sha256.h>
+#include <Core/FileError.h>
 #include <Platform/Atomics.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
@@ -21,8 +23,11 @@ namespace rocks::shader {
 
 namespace compile_manager_detail {
 
+constexpr LogCategory LogShaderCompileManager{"ShaderCompiler"};
 // 경로 버퍼 크기다.
 constexpr usize MaxManagerPathBytes = 4096;
+// 백분율 분모다.
+constexpr uint32 PercentDenominator = 100;
 // u32 10진 자릿수 상한이다.
 constexpr usize MaxPidDigits = 10;
 
@@ -223,6 +228,61 @@ ShaderNuggetAction ClassifyShaderNuggetGet(const NuggetCacheGetResult& result,
     return ShaderNuggetAction::Recompile;
 }
 
+uint32 DefaultShaderWorkerCount(uint32 logicalProcessors) noexcept {
+    if (logicalProcessors <= ShaderFewCoreThreshold) {
+        return logicalProcessors > 1 ? logicalProcessors - 1 : 1;
+    }
+
+    uint32 unused = ShaderUnusedWorkerThreads;
+    if (logicalProcessors > ShaderCompilerCoreCountThreshold) {
+        const uint64 reserved =
+            (static_cast<uint64>(logicalProcessors) * ShaderUnusedWorkerPercent +
+             compile_manager_detail::PercentDenominator - 1) /
+            compile_manager_detail::PercentDenominator;
+        unused = static_cast<uint32>(reserved);
+    }
+
+    return logicalProcessors > unused ? logicalProcessors - unused : 1;
+}
+
+Result<void> PlanShaderBatches(Span<const usize> sourceBytes, uint32 workers, uint32 maxBatchJobs,
+                               usize maxBatchSourceBytes, Array<uint32>& sizes) noexcept {
+    sizes.Clear();
+    if (workers == 0 || maxBatchJobs == 0 || maxBatchSourceBytes == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize total = sourceBytes.Size();
+    usize cursor = 0;
+    while (cursor < total) {
+        // 회차의 목표 크기다(UE NumJobsPerWorker = ceil(대기 / 워커), Min3).
+        const usize remaining = total - cursor;
+        const usize perWorker = (remaining + workers - 1) / workers;
+        const usize target = perWorker < maxBatchJobs ? perWorker : maxBatchJobs;
+        for (uint32 batch = 0; batch < workers && cursor < total; ++batch) {
+            usize jobs = 0;
+            usize bytes = 0;
+            while (cursor < total && jobs < target) {
+                const usize next = sourceBytes[cursor];
+                if (jobs != 0 &&
+                    (bytes >= maxBatchSourceBytes || next > maxBatchSourceBytes - bytes)) {
+                    break;
+                }
+
+                bytes += next;
+                ++jobs;
+                ++cursor;
+            }
+
+            if (!sizes.TryPushBack(static_cast<uint32>(jobs))) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 ShaderCompileProgressSink MakeShaderCompileCounterSink(ProgressCounter& counter) noexcept {
     ShaderCompileProgressSink sink;
     sink.added = [](void* context, uint64 jobs) noexcept {
@@ -283,8 +343,17 @@ Result<void> ShaderCompileManager::Start() noexcept {
         const int bytes = snprintf(
             path, sizeof(path), "%.*s/%.*s", static_cast<int>(config_.workRoot.ByteCount()),
             config_.workRoot.Data(), static_cast<int>(name.ByteCount()), name.Data());
-        if (bytes > 0 && static_cast<usize>(bytes) < sizeof(path)) {
-            (void)platform::DeleteDirectoryTree(files, path, static_cast<usize>(bytes));
+        if (bytes <= 0 || static_cast<usize>(bytes) >= sizeof(path)) {
+            continue;
+        }
+
+        // 남은 디렉터리는 다음 시작이 다시 지운다(이번 시작은 계속한다 — SC4).
+        if (const platform::FileStatus deleted =
+                platform::DeleteDirectoryTree(files, path, static_cast<usize>(bytes));
+            !deleted) {
+            Log::Warning(LogShaderCompileManager,
+                         "A stale shader worker directory could not be deleted ({Error}): {Path}",
+                         ErrorCodeName(FileErrorCode(deleted)), StringView(path));
         }
     }
 
@@ -301,12 +370,9 @@ Result<void> ShaderCompileManager::Start() noexcept {
 
     State* state = ::new (memory.Value()) State(allocator);
     state_ = state;
-    uint32 count = config_.workerCount;
-    if (count == 0) {
-        const uint32 logical = platform::LogicalProcessorCount();
-        count = logical > 1 ? logical - 1 : 1;
-        count = count < MaxDefaultShaderWorkers ? count : MaxDefaultShaderWorkers;
-    }
+    const uint32 count = config_.workerCount != 0
+                             ? config_.workerCount
+                             : DefaultShaderWorkerCount(platform::LogicalProcessorCount());
 
     for (uint32 index = 0; index < count; ++index) {
         char directory[MaxManagerPathBytes];
@@ -576,17 +642,24 @@ private:
             return;
         }
 
-        // 정점 입력 연결 하나와 레이아웃 표의 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체
-        // 정의는 바깥 원문 안에 있다)이다.
-        ShaderGeneratedInclude includes[MaxShaderParameterLayouts + 1];
+        // 정점 입력 연결 하나, 머티리얼 생성 원문 하나(MaterialSystem 7.8절 MSR3)와 레이아웃 표의
+        // 생성 원문(16.2절 SSD52 — 표마다 하나, 중첩 구조체 정의는 바깥 원문 안에 있다)이다.
+        constexpr usize FixedGeneratedIncludes = 2;
+        ShaderGeneratedInclude includes[MaxShaderParameterLayouts + FixedGeneratedIncludes];
         usize includeCount = 0;
         if (!job.vertexInputSource.IsEmpty()) {
             includes[includeCount++] = ShaderGeneratedInclude{
                 StringView(VertexInputGeneratedIncludePath), job.vertexInputSource, StringView()};
         }
 
+        if (!job.materialSource.IsEmpty()) {
+            includes[includeCount++] = ShaderGeneratedInclude{
+                StringView(MaterialGeneratedIncludePath), StringView(), job.materialSource};
+        }
+
         for (const ShaderParameterLayout& layout : job.parameterLayouts) {
-            if (!layout.source.IsEmpty() && includeCount < MaxShaderParameterLayouts + 1) {
+            if (!layout.source.IsEmpty() &&
+                includeCount < MaxShaderParameterLayouts + FixedGeneratedIncludes) {
                 includes[includeCount++] =
                     ShaderGeneratedInclude{layout.sourcePath, StringView(), layout.source};
             }
@@ -723,7 +796,7 @@ private:
         ShaderCompileJobResult& result = out_[index];
         if (!MoveShaderValuesFromNugget(values, result.values)) {
             (void)AtomicFetchAdd(&state_.corruptHits, 1u);
-            (void)pending_.TryPushBack(index);
+            Recompile(index);
             return;
         }
 
@@ -757,7 +830,15 @@ private:
                              "nugget cache unavailable; compiled without it\n");
         }
 
-        (void)pending_.TryPushBack(index);
+        Recompile(index);
+    }
+
+    // 다시 컴파일할 job으로 둔다. 할당 실패면 그 job을 실패로 끝낸다(값 없는 성공으로 남기지 않는다
+    // — 16.4절 SSD84).
+    void Recompile(usize index) noexcept {
+        if (!pending_.TryPushBack(index)) {
+            Fail(index, ShaderCompileStatus::ToolError, "out of memory");
+        }
     }
 
     // 너겟 일괄 조회다(값 선택 없이 Record 전체 — 10절).
@@ -814,11 +895,26 @@ private:
         return Result<void>::Success();
     }
 
-    // 미적중을 묶음으로 나눠 채널에 맡기고 기다린다.
+    // 미적중을 묶음으로 나눠(PlanShaderBatches — 16.4절 SSD82) 채널에 맡기고 기다린다.
     Result<void> CompileMisses() noexcept {
         Allocator& allocator = state_.allocator;
+        Array<usize> sourceBytes(allocator);
+        Array<uint32> sizes(allocator);
+        for (const usize index : pending_) {
+            if (!sourceBytes.TryPushBack(out_[index].preprocessed.text.ByteCount())) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+        }
+
+        if (auto planned =
+                PlanShaderBatches(sourceBytes.View(), static_cast<uint32>(state_.channels.Size()),
+                                  config_.maxBatchJobs, config_.maxBatchSourceBytes, sizes);
+            !planned) {
+            return planned;
+        }
+
         usize cursor = 0;
-        while (cursor < pending_.Size()) {
+        for (const uint32 size : sizes) {
             auto memory = allocator.Allocate(sizeof(Batch), alignof(Batch));
             if (!memory) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
@@ -830,20 +926,10 @@ private:
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
 
-            usize sourceBytes = 0;
-            while (cursor < pending_.Size() && batch->jobs.Size() < config_.maxBatchJobs) {
-                const usize index = pending_[cursor];
-                const usize bytes = out_[index].preprocessed.text.ByteCount();
-                if (!batch->jobs.IsEmpty() && sourceBytes + bytes > config_.maxBatchSourceBytes) {
-                    break;
-                }
-
-                sourceBytes += bytes;
-                if (!batch->jobs.TryPushBack(index)) {
+            for (uint32 item = 0; item < size; ++item) {
+                if (!batch->jobs.TryPushBack(pending_[cursor++])) {
                     return Result<void>::Failure(ErrorCode::OutOfMemory);
                 }
-
-                ++cursor;
             }
         }
 
@@ -919,6 +1005,7 @@ private:
             worker.options.optimization = static_cast<uint8>(job.options.optimization);
             worker.options.debugSymbols = job.options.debugSymbols;
             worker.options.matrixLayout = static_cast<uint8>(job.options.matrixLayout);
+            worker.options.warningsAsErrors = job.options.warningsAsErrors;
             if (!worker.formatId.TryAssign(job.format->definition.Id()) ||
                 !worker.entry.TryAssign(job.entryPoint) ||
                 !worker.source.TryAssign(out_[index].preprocessed.text.View())) {
@@ -994,12 +1081,35 @@ private:
                 continue;
             }
 
+            // 성공 job의 경고(16.4절 SSD79)를 너겟 메모 뒤에 둔다.
+            if (!AppendText(out.diagnostics, job.diagnostics.View())) {
+                Fail(index, ShaderCompileStatus::ToolError, "out of memory");
+                continue;
+            }
+
             if (!publish_.TryPushBack(index)) {
                 Fail(index, ShaderCompileStatus::ToolError, "out of memory");
                 continue;
             }
 
             Count(index);
+        }
+    }
+
+    // 게시하지 못한 결과를 알린다(16.4절 SSD84 — 다음 실행이 다시 컴파일한다): Warning 한 번과
+    // job마다 진단, required 캐시면 job 실패다.
+    void PublishFailed(ErrorCode error) noexcept {
+        Log::Warning(LogShaderCompileManager,
+                     "{Count} compiled shader(s) could not be stored in the nugget cache ({Error})",
+                     static_cast<uint64>(publish_.Size()), ErrorCodeName(error));
+        for (const usize index : publish_) {
+            if (config_.cache->IsRequired()) {
+                Fail(index, ShaderCompileStatus::CacheFailed,
+                     "the required nugget cache failed to store", ErrorCodeName(error));
+            } else {
+                (void)AppendText(out_[index].diagnostics,
+                                 "nugget cache store failed; the result is not cached\n");
+            }
         }
     }
 
@@ -1014,6 +1124,7 @@ private:
         for (const usize index : publish_) {
             auto item = items.TryEmplaceBack(allocator);
             if (!item) {
+                PublishFailed(ErrorCode::OutOfMemory);
                 return;
             }
 
@@ -1029,26 +1140,31 @@ private:
 
                 Array<uint8> bytes(allocator);
                 if (!bytes.TryAppend(values.Part(value).View())) {
+                    PublishFailed(ErrorCode::OutOfMemory);
                     return;
                 }
 
                 copy.Set(value, Move(bytes));
             }
 
-            if (!MoveShaderValuesToNugget(copy, item.Value()->values)) {
+            if (auto moved = MoveShaderValuesToNugget(copy, item.Value()->values); !moved) {
+                PublishFailed(moved.Error());
                 return;
             }
         }
 
         if (asynchronous_ && config_.scheduler != nullptr) {
             NuggetPutRequest request(allocator);
-            if (!request.Start(*config_.cache, items.View(), *config_.scheduler)) {
+            if (auto started = request.Start(*config_.cache, items.View(), *config_.scheduler);
+                !started) {
+                PublishFailed(started.Error());
                 return;
             }
 
             (void)request.Handle().Wait();
             auto results = request.Results();
             if (!results) {
+                PublishFailed(results.Error());
                 return;
             }
 

@@ -19,7 +19,9 @@ internal static class ModuleDescriptor
     // 7: 이벤트 필드(fieldKind "Event" — 키 EventFieldKeys, 인자 params — Docs/Design/EventReflection.ko.md ED18). 파생 모듈이 상속 이벤트를
     // schema·연산표에 다시 싣는다.
     // 8: 이벤트 필드 flag ScriptAssignable과 이벤트 필드 scriptName(노출 이벤트의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B25).
-    private const int DescriptorSchema = 8;
+    // 9: 필드 flag Notify와 함수 flag Notify(변경 통지 대상 — Docs/Design/ChangeNotification.ko.md CN-D1). 파생 모듈이 상속 필드를 schema에 다시
+    // 실을 때 flag를 잃지 않고, 통지 번호(등록 때 정한다)가 기반 체인의 Notify 함수를 센다.
+    private const int DescriptorSchema = 9;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -242,7 +244,7 @@ internal static class ModuleDescriptor
             foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
                 (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
                 (field.Spec.TextExportTransient, "TextExportTransient"), (field.Spec.TextMapMergeByKey, "TextMapMergeByKey"),
-                (field.Spec.ScriptReadOnly, "ScriptReadOnly"), (field.Spec.ScriptWritable, "ScriptWritable") })
+                (field.Spec.ScriptReadOnly, "ScriptReadOnly"), (field.Spec.ScriptWritable, "ScriptWritable"), (field.Spec.Notify, "Notify") })
             {
                 if (set)
                 {
@@ -368,7 +370,8 @@ internal static class ModuleDescriptor
             json.WriteString("toolName", function.EffectiveToolName);
             json.WriteStartArray("flags");
             foreach ((bool set, string flag) in new[] { (function.IsStatic, "Static"), (function.IsConst, "Const"), (function.Spec.Pure, "Pure"),
-                (function.Spec.EditorOnly, "EditorOnly"), (function.ReturnsResult, "ReturnsResult"), (function.Spec.ScriptCallable, "ScriptCallable") })
+                (function.Spec.EditorOnly, "EditorOnly"), (function.ReturnsResult, "ReturnsResult"), (function.Spec.ScriptCallable, "ScriptCallable"),
+                (function.Spec.Notify, "Notify") })
             {
                 if (set)
                 {
@@ -674,10 +677,17 @@ internal static class ModuleDescriptor
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
                 if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
-                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "ScriptReadOnly" or "ScriptWritable")) ||
+                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "ScriptReadOnly" or "ScriptWritable" or
+                        "Notify")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
+                }
+
+                // Notify는 클래스의 EditorOnly 아닌 필드에만 쓴다(원본 선언의 RMC2901과 같은 규칙).
+                if (fieldFlags.Contains("Notify", StringComparer.Ordinal) && (isStruct || fieldFlags.Contains("EditorOnly", StringComparer.Ordinal)))
+                {
+                    throw Invalid("Notify on a struct member or an EditorOnly field");
                 }
 
                 // Required는 성질 표가 허용하는 대상 종류(강한·소프트 참조 필드와 그 원소의 배열)에만 쓴다(원본 선언의 RMC2202와
@@ -744,7 +754,8 @@ internal static class ModuleDescriptor
                         AssetBundles = assetBundles,
                         ScriptReadOnly = fieldFlags.Contains("ScriptReadOnly"),
                         ScriptWritable = fieldFlags.Contains("ScriptWritable"),
-                        ScriptName = ScriptNameOf(field, fieldFlags, Invalid)
+                        ScriptName = ScriptNameOf(field, fieldFlags, Invalid),
+                        Notify = fieldFlags.Contains("Notify")
                     },
                     Kind = kind,
                     ElementKind = elementKind,
@@ -973,10 +984,17 @@ internal static class ModuleDescriptor
             }
 
             string[] flags = function.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            if (flags.Any(flag => flag is not ("Static" or "Const" or "Pure" or "EditorOnly" or "ReturnsResult" or "ScriptCallable")) ||
+            if (flags.Any(flag => flag is not ("Static" or "Const" or "Pure" or "EditorOnly" or "ReturnsResult" or "ScriptCallable" or "Notify")) ||
                 flags.Distinct(StringComparer.Ordinal).Count() != flags.Length || (flags.Contains("Static") && flags.Contains("Const")))
             {
                 throw Invalid($"unknown, duplicate or conflicting function flag in {owner}::{name}");
+            }
+
+            // Notify 함수는 Pure const 멤버이고 EditorOnly가 아니다(원본 선언의 RMC2902 — 매개변수·반환은 아래 칸으로 본다).
+            bool notify = flags.Contains("Notify");
+            if (notify && (!flags.Contains("Pure") || !flags.Contains("Const") || flags.Contains("EditorOnly")))
+            {
+                throw Invalid($"Notify on a function that is not a Pure const member in {owner}::{name}");
             }
 
             // 노출 함수는 최종 Sparks 이름(PascalCase)이 있고, 그 밖은 빈 글자다. EditorOnly 함수는 노출되지 않는다(원본 RMC2607).
@@ -1026,7 +1044,8 @@ internal static class ModuleDescriptor
                 Spec = new(flags.Contains("Pure"), flags.Contains("EditorOnly"), toolName == name ? "" : toolName)
                 {
                     ScriptCallable = flags.Contains("ScriptCallable"),
-                    ScriptName = scriptName
+                    ScriptName = scriptName,
+                    Notify = notify
                 },
                 IsStatic = flags.Contains("Static"),
                 IsConst = flags.Contains("Const"),
@@ -1061,6 +1080,12 @@ internal static class ModuleDescriptor
             else if (result.ValueKind != JsonValueKind.Null)
             {
                 throw Invalid($"result of {owner}::{name}");
+            }
+
+            // Notify 함수는 매개변수가 없다(원본 선언의 RMC2902 — 반환은 Pure 규칙이 아래에서 본다).
+            if (notify && model.Parameters.Count != 0)
+            {
+                throw Invalid($"Notify on a function with parameters in {owner}::{name}");
             }
 
             // Pure는 반환 값이 있어야 한다(원본 선언의 RMC2705).

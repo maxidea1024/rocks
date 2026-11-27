@@ -33,6 +33,34 @@ public:
         selectionLength = length;
     }
 
+    uint32 GetTextLength() const noexcept override {
+        return static_cast<uint32>(text.Size());
+    }
+
+    Result<void> GetText(uint32 begin, uint32 length,
+                         Array<char16_t>& out) const noexcept override {
+        if (begin + length > text.Size()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (uint32 i = 0; i < length; ++i) {
+            auto added = out.TryPushBack(text[begin + i]);
+            if (!added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    bool GetScreenBounds(Box2<float>&) const noexcept override {
+        return false;
+    }
+
+    Optional<uint32> GetCharacterIndexFromPoint(Vec2) const noexcept override {
+        return {};
+    }
+
     void SetText(uint32 begin, uint32 length, Span<const char16_t> value) noexcept override {
         Array<char16_t> next(allocator_);
         for (usize i = 0; i < begin; ++i) {
