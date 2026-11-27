@@ -647,6 +647,11 @@ struct RuntimeFunctionOps {
     uint32 errorOffset = 0;
 };
 
+// 이벤트 바인딩 나열의 방문 함수다(RuntimeEventOps::bindings — 바인딩 하나마다 대상·FunctionId).
+// 실패를 돌려주면 나열이 그 오류로 멈춘다.
+using EventBindingVisitor = Result<void> (*)(void* user, ObjectHandle target,
+                                             Guid functionId) noexcept;
+
 // 리플렉션 이벤트 필드 하나의 연산이다(Docs/Design/EventReflection.ko.md ED16 — 필드 형식
 // Event<Args...>). 모든 thunk는 publisher(이벤트 필드를 가진 객체 — Alive여야 한다)를 해석하고
 // 그 Registry 오류(WrongThread·WrongContext·StaleHandle·Destroyed·TypeMismatch·Busy·
@@ -667,6 +672,9 @@ struct RuntimeFunctionOps {
 //   (Event::UnbindAll(target)).
 // - clear: native 구독까지 모두 지운다(Event::Clear — 발행자 논리 파괴).
 // - compact: 죽은 대상의 바인딩을 지우고 그 수를 돌려준다(Event::Compact).
+// - bindings: 살아 있는 리플렉션 바인딩을 등록 순서로 visitor(user, target, functionId)에 넘긴다
+//   (Event::ForEachBinding — 읽기 Borrow라 저장의 encode 고정 중에도 된다, ED20). native 구독은
+//   나열하지 않는다. visitor의 실패는 그대로 돌려준다. visitor 안에서 이 이벤트를 바꾸지 않는다.
 // - broadcastFromFrame: construct로 만든 발행 frame의 인자로 발행한다(Event::TryBroadcast). 발행
 //   동안 발행자 Borrow를 쥔다(리플렉션 함수 thunk와 같다 — 구독자가 부른 Collect는 Busy다). frame은
 //   바꾸지 않고, 배치는 검사하지 않는다(호출자가 construct로 만든 frame — 안전 래퍼는 EV4 host).
@@ -691,6 +699,9 @@ struct RuntimeEventOps {
                           ObjectHandle publisher) noexcept = nullptr;
     Result<usize> (*compact)(ObjectRegistry& registry, const ObjectAccessContext& access,
                              ObjectHandle publisher) noexcept = nullptr;
+    Result<void> (*bindings)(ObjectRegistry& registry, const ObjectAccessContext& access,
+                             ObjectHandle publisher, EventBindingVisitor visitor,
+                             void* user) noexcept = nullptr;
     Result<void> (*broadcastFromFrame)(ObjectRegistry& registry, const ObjectAccessContext& access,
                                        ObjectHandle publisher, void* frame) noexcept = nullptr;
     Result<void> (*construct)(void* frame, Allocator& allocator) noexcept = nullptr;

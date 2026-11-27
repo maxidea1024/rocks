@@ -217,6 +217,9 @@ TEST(EventField_RejectsBadSchemas) {
             {"missing frame layout",
              [](CarrierTables& t, RuntimeTypeOps&) noexcept { t.events[2].frameLayout = nullptr; },
              ErrorCode::InvalidArgument},
+            {"missing bindings",
+             [](CarrierTables& t, RuntimeTypeOps&) noexcept { t.events[1].bindings = nullptr; },
+             ErrorCode::InvalidArgument},
             {"missing unbindFunction",
              [](CarrierTables& t, RuntimeTypeOps&) noexcept {
                  t.events[0].unbindFunction = nullptr;

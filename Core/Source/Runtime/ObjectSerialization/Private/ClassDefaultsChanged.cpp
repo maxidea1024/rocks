@@ -167,6 +167,12 @@ Result<void> CompareChangedRecords(Allocator& allocator, const TypeSchema& schem
 
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const FieldSchema& field = schema.fields[index];
+        // 이벤트 바인딩 기록은 값이 아니라 바뀐 필드 판정에 넣지 않는다(Docs/Design/
+        // EventReflection.ko.md ED23 — 이 문맥은 이벤트를 쓰지 않으므로 기록에도 없다).
+        if (IsEventField(field)) {
+            continue;
+        }
+
         auto left = now.Value().Find(field.id);
         auto right = base.Value().Find(field.id);
         const bool hasLeft = static_cast<bool>(left);

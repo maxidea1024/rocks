@@ -82,7 +82,7 @@ TEST(EventFieldGenerated_SchemaDescribesEvents) {
     constexpr usize ExpectedEvents = 4;
 #endif
     CHECK(events == ExpectedEvents && ops.events.Size() == ExpectedEvents);
-    CHECK(ops.fields.Size() == 2 && schema.fields.Size() == ExpectedEvents + 2);
+    CHECK(ops.fields.Size() == 3 && schema.fields.Size() == ExpectedEvents + 3);
     CHECK(ops.completeFieldLayout);
 
     // 값 인자·Transient·SaveGame·인자 없음.
@@ -206,7 +206,7 @@ TEST(EventFieldGenerated_VisitFieldsSkipsEvents) {
     EventPublisher publisher(allocator);
     NameCounter counter;
     GeneratedType<EventPublisher>::VisitFields(publisher, counter);
-    CHECK(counter.fields == 2 && counter.events == 0);
+    CHECK(counter.fields == 3 && counter.events == 0);
 }
 
 } // namespace event_field_generated_tests_file
