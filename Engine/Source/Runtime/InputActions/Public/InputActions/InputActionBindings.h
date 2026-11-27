@@ -66,7 +66,7 @@ public:
     //
     // 사용 예:
     //   // 이름은 길이를 준 Span이다(배열 생성자는 끝 NUL까지 센다).
-    //   auto jump = types.FindFunctionByName(TypeIdOf<MyPawn>(), Span<const char>("OnJump", 6));
+    //   auto jump = types.FindFunctionByName(TypeIdOf<MyPawn>(), "OnJump");
     //   if (jump) {
     //       (void)bindings.BindFunction(jumpId, ActionEvent::Started, world.Objects(),
     //                                   world.Access(), pawn, jump.Value().Schema().id);

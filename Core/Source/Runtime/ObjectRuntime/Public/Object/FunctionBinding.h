@@ -107,6 +107,14 @@ FrameLayout FrameLayoutOf() noexcept {
     return layout;
 }
 
+// Args 배치의 digest다(형식마다 한 번 계산해 둔다 — BindingFrame이 생성마다 다시 계산하지 않게.
+// 값은 image와 무관하다).
+template <class... Args>
+uint64 FrameLayoutDigestOf() noexcept {
+    static const uint64 digest = FrameLayoutOf<Args...>().digest;
+    return digest;
+}
+
 } // namespace detail
 
 template <class... Args>
@@ -181,7 +189,7 @@ class BindingFrame {
 
 public:
     explicit BindingFrame(Allocator& allocator) noexcept
-        : allocator_(&allocator), digest_(detail::FrameLayoutOf<Args...>().digest) {
+        : allocator_(&allocator), digest_(detail::FrameLayoutDigestOf<Args...>()) {
         Construct<0, Args...>();
         ::new (static_cast<void*>(storage_ + Shape::Value.errorOffset)) ErrorCode(ErrorCode::None);
     }

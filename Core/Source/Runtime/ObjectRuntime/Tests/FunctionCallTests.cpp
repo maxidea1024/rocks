@@ -375,11 +375,11 @@ TEST(FunctionCall_ManualTableCallsResultsAndAccessErrors) {
         const ObjectHandle self = counter.Value().Handle();
 
         // 이름 조회는 대소문자 무시, 도구 이름이 있으면 그 이름이다.
-        auto add = types.FindFunctionByName(CounterType, Text("add"));
+        auto add = types.FindFunctionByName(CounterType, "add");
         REQUIRE(add);
         CHECK(add.Value().Schema().id == AddId);
-        CHECK(!types.FindFunctionByName(CounterType, Text("Twice")));
-        CHECK(types.FindFunctionByName(CounterType, Text("double")));
+        CHECK(!types.FindFunctionByName(CounterType, "Twice"));
+        CHECK(types.FindFunctionByName(CounterType, "double"));
         CHECK(types.FindFunction(CounterType, ValueId));
         CHECK(types.FindFunction(CounterType, Guid{7, 7}).Error() == ErrorCode::NotFound);
         CHECK(types.FindFunction(TypeId{9, 9}, AddId).Error() == ErrorCode::NotFound);
@@ -430,7 +430,7 @@ TEST(FunctionCall_ManualTableCallsResultsAndAccessErrors) {
 
         {
             // static 함수는 대상 없이 부르고 handle을 주면 InvalidArgument다.
-            auto twice = types.FindFunctionByName(CounterType, Text("Double"));
+            auto twice = types.FindFunctionByName(CounterType, "Double");
             REQUIRE(twice);
             FunctionCall call(allocator, Move(twice.Value()));
             REQUIRE(call.Prepare());
@@ -564,7 +564,7 @@ TEST(FunctionCall_RegistrationRejectsBadTables) {
             RuntimeTypeOps plainOps = MakeRuntimeTypeOps<Derived>();
             plainOps.nativeBaseType = NativeTypeKey<Counter>();
             REQUIRE(types.Register(plain, Move(plainOps)));
-            auto inherited = types.FindFunctionByName(DerivedType, Text("Value"));
+            auto inherited = types.FindFunctionByName(DerivedType, "Value");
             REQUIRE(inherited);
             CHECK(inherited.Value().Owner().Schema().id == CounterType);
         }
