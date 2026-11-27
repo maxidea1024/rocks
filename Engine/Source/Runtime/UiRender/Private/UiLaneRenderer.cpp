@@ -376,6 +376,16 @@ void UiLaneRenderer::DestroyWindowSurface(UiWindowSurfaceId id, graphics::Device
     }
 }
 
+graphics::SwapChainHandle UiLaneRenderer::WindowSwapChain(UiWindowSurfaceId id) const noexcept {
+    for (const WindowSurface& window : windows_) {
+        if (window.id == id) {
+            return window.swapChain;
+        }
+    }
+
+    return {};
+}
+
 Result<void> UiLaneRenderer::ReserveSurfaceResult(UiWindowSurfaceId id) noexcept {
     platform::LockGuard lock(resultGate_);
     // 작업이 아직 돌지 않았다는 표지(NotReady)로 칸을 먼저 둔다. 작업은 이 칸을 덮어쓰기만 하므로
