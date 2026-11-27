@@ -7,6 +7,7 @@
 - [MS2b 구현 세부 — 문맥 값·평가 문맥·스위치·공급 노드](ContextAndSupply.ko.md)(6.9절)
 - [MS2c 구현 세부 — 파라미터·텍스처·scene·선행 진단](ParametersAndTextures.ko.md)(6.10절)
 - [MS2d 구현 세부 — 표면·대표 노멀·추가 출력](Surface.ko.md)(6.11절)
+- [MS2e 구현 세부 — 속성 집합·함수·레이어](FunctionsAttributes.ko.md)(6.12절)
 
 ### 6.1 UE 5.8 방식
 

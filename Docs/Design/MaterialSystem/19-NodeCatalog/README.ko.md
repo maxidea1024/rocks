@@ -190,7 +190,7 @@ MaterialSourceProvider
   FindCurve(AssetId)        → LinearColorCurveSnapshot | NotFound (ColorRamp)
 ```
 
-lowering(펼치기·layout 결합·커브 구간식)은 이 interface 위에서 구현한다. 시험은 메모리 provider로 한다. 에셋 객체를 snapshot으로 바꾸는 쪽은 해당 에셋 클래스 단계에서 붙인다. 그래서 `src:` 노드는 "구현"이다.
+lowering(펼치기·layout 결합·커브 구간식)은 이 interface 위에서 구현한다. 시험은 메모리 provider로 한다. 컬렉션은 MS2c에서 번역 입력의 값 목록(`collections` — 6.10절)으로 구현했으므로 `FindCollection`은 두지 않는다(6.12절 MS2e2). 에셋 객체를 snapshot으로 바꾸는 쪽은 해당 에셋 클래스 단계에서 붙인다. 그래서 `src:` 노드는 "구현"이다.
 
 #### 19.4.3 노드 속성의 에셋 참조 표현
 

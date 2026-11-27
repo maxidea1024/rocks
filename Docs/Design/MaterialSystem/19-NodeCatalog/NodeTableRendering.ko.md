@@ -136,7 +136,7 @@
 | `UMaterialExpressionSubstrateWeight` | `Material.SurfaceWeight` | 구현 | MS2d | — |  |
 | `UMaterialExpressionSubstrateSelect` | `Material.SurfaceSelect` | 구현 | MS2d | — |  |
 | `UMaterialExpressionSubstrateShadingModels` | `Material.SurfaceFromShadingModel` | 구현 | MS2d | `속성 TODO: MPQ-SubsurfaceProfile` | 고전 shading model 입력 → 표면(preset) |
-| `UMaterialExpressionSubstrateConvertMaterialAttributes` | `Material.SurfaceFromAttributes` | 구현 | MS2d | `속성 TODO: MPQ-SubsurfaceProfile` |  |
+| `UMaterialExpressionSubstrateConvertMaterialAttributes` | `Material.SurfaceFromAttributes` | 구현 | MS2e | `속성 TODO: MPQ-SubsurfaceProfile` |  |
 | `UMaterialExpressionSubstrateLightFunction` | `Material.SurfaceLightFunction` | 구현 | MS2d | — |  |
 | `UMaterialExpressionSubstratePostProcess` | `Material.SurfacePostProcess` | 구현 | MS2d | — |  |
 | `UMaterialExpressionSubstrateUI` | `Material.SurfaceUserInterface` | 구현 | MS2d | — |  |
