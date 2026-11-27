@@ -36,6 +36,9 @@ struct ControlCommand {
     float pitch = 1.0f;
     uint32 startFrame = 0;
     uint32 fadeInFrames = 0;
+    // 실효 우선순위(옵션 재정의 또는 사운드 값)와 voice를 잃어도 남을지다(3.41.1절).
+    float priority = DefaultSoundPriority;
+    bool remainActiveIfDropped = false;
     // Stop.
     uint32 fadeFrames = 0;
     // SetParameter.

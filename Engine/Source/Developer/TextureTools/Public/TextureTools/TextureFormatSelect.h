@@ -19,7 +19,7 @@
 //   request.topSizeX = 256;
 //   request.topSizeY = 256;
 //   TextureFormatTarget target;  // Windows, 검증 끔
-//   const bool alpha = TextureFormatDependsOnAlpha(request, target) && /* mip 0 알파 판정 */ false;
+//   const bool alpha = TextureFormatNeedsAlpha(request, target) && /* mip 0 알파 판정 */ false;
 //   TextureFormatChoice choice;
 //   if (auto chosen = SelectTextureFormat(request, target, alpha, choice); !chosen) { ... }
 //   // choice.pixelFormat == BC1UnormSrgb, choice.encoding == TextureFormatEncoding::Bc1
@@ -32,6 +32,10 @@ enum class TextureFormatEncoding : uint8 {
     Bc3,
     Bc4,
     Bc5,
+    // ISPC Texture Compressor(12.17.6 — 입력은 RGBA16F).
+    Bc6h,
+    // ISPC Texture Compressor(12.17.6 — 알파 프로필은 alphaProfile).
+    Bc7,
 };
 
 // 출력 전 채널 복제다(12.17절 TD6 — UE bReplicateRed·bReplicateAlpha).
@@ -77,7 +81,8 @@ struct TextureFormatRequest {
     uint32 topSizeY = 0;
 };
 
-// 형식 경고 수 상한이다(EncoderUnavailable, PlatformFormatFallback — 각 한 번).
+// 형식 경고 수 상한이다(EncoderUnavailable, PlatformFormatFallback — 각 한 번. TC3부터 형식 선택은
+// EncoderUnavailable을 내지 않는다 — 12.17.6 9).
 inline constexpr usize TextureFormatMaxWarnings = 2;
 
 struct TextureFormatWarning {
@@ -101,15 +106,17 @@ struct TextureFormatChoice {
     // G16 → R16F norm16 대체를 했는지다(빌드가 값을 0…1로 자른다 — 12.14절. 사용자가 고른 R16F인
     // HalfFloat는 자르지 않는다).
     bool norm16Remapped = false;
-    // BC6H 단계 사이 대체(RGBA16F — TD11)인지다. BC6H에는 알파가 없으므로 빌드가 알파를 1로 쓴다.
-    // HDR_Compressed의 다른 RGBA16F 대체(비압축 강제)는 UE처럼 원본 알파를 지킨다.
-    bool opaqueAlpha = false;
+    // BC7 인코더가 알파 프로필을 쓰는지다(12.17.6 4 — TD5 유효 알파: ForceNoAlpha면 거짓, 아니고
+    // ForceAlpha면 참, 아니면 원본 알파 판정. UE GetProfile_alpha_basic·GetProfile_basic). BC7 밖은
+    // 거짓이다.
+    bool alphaProfile = false;
     usize warningCount = 0;
     TextureFormatWarning warnings[TextureFormatMaxWarnings];
 };
 
-// request·target에서 형식을 고른다. alphaTransparent는 AutoDXT(Default·Masks)의 원본 알파 판정
-// 결과다(그 밖에는 보지 않는다 — TextureFormatDependsOnAlpha). out은 앞 값을 지운다.
+// request·target에서 형식을 고른다. alphaTransparent는 원본 알파 판정
+// 결과다(AutoDXT(Default·Masks)의 형식과 BC7 프로필만 본다 — TextureFormatNeedsAlpha). out은 앞
+// 값을 지운다.
 //
 // 오류(InvalidArgument): 원본 형식 Invalid, 상위 mip 크기 0, 숨김 CompressionSettings(LQ·
 // EncodedReflectionCapture — 12.8절), 범위 밖 enum, 대상 backend에 쿠킹 대상이 아닌 조합이 끼어
@@ -119,9 +126,10 @@ ROCKS_TEXTURETOOLS_API Result<void> SelectTextureFormat(const TextureFormatReque
                                                         bool alphaTransparent,
                                                         TextureFormatChoice& out) noexcept;
 
-// 알파 판정 결과에 따라 고른 형식이 달라지는지다(AutoDXT일 때만 참 — UE TextureCompressorModule
-// 4016–4036의 두 형식 비교). 빌드는 참일 때만 mip 0 알파를 잰다. 오류 입력이면 false다.
-ROCKS_TEXTURETOOLS_API bool TextureFormatDependsOnAlpha(const TextureFormatRequest& request,
-                                                        const TextureFormatTarget& target) noexcept;
+// 알파 판정 결과가 출력에 영향을 주는지다: 고른 형식이 달라지거나(AutoDXT — UE
+// TextureCompressorModule 4016–4036의 두 형식 비교) BC7 인코더 프로필이 달라질 때(12.17.6 4)
+// 참이다. 빌드는 참일 때만 원본 알파를 잰다. 오류 입력이면 false다.
+ROCKS_TEXTURETOOLS_API bool TextureFormatNeedsAlpha(const TextureFormatRequest& request,
+                                                    const TextureFormatTarget& target) noexcept;
 
 } // namespace rocks

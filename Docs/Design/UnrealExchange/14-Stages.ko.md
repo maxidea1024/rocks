@@ -14,12 +14,13 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX3b1 | Rocks | 정적 메시 순수 변환(5.5절 1–9번 — 기록 적재 `LoadExchangeMeshSource`·모드·LOD와 에셋 설정·슬롯·섹션·소켓·충돌 → `StaticMeshImportSpec`), 설정 번역 행의 `rocksKey`, 경고 `UnrealNameNormalized` | UX3a, UX2b, MeshAnimationAssets MA2b–MA3 |
 | UX3b2 | Rocks | 정적 메시 임포트(5.5절 10–12번 — A2f 임포터 `unreal_static_mesh`, 종류별 임포터 일반화 `ExchangeServiceKind`, 옵션 `meshNormals`, 제품 연결, 명령·C# 시험) | UX3b1, UXR11(complex collision 메시 순환은 계획이 `HardCycle`로 막는다) |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
-| UX4b | Rocks | 머티리얼 임포트: 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번(8.5절) | UX4a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10 |
-| UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b |
-| UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b |
+| UX4b1 | Rocks | 머티리얼 그래프 번역(8.7절 1–10번 — 카탈로그 기준 노드·핀·속성, 출력 `SurfaceFromShadingModel`, 설정, 파라미터 병합, 함수·컬렉션, 대체 규칙 3번). **명세**(2026-11-27, 8.7절) | UX4a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10, UXR12–UXR14·UXR16 |
+| UX4b2 | Rocks | 머티리얼 인스턴스(8.7절 11·12번 — override 키, trait override, 결과 따름, `resolved` 대조는 MS4 뒤) | UX4b1, MaterialSystem MS6(대조는 MS4) |
+| UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b1 |
+| UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b2, UXR15 |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
 | UX7a2 | UE | 스킨 메시 머티리얼 슬롯 `data.materials`(6.3절 13번 — transient `Materials`), 자기 시험, golden 다시 내보내기 | UX7a |
 | UX7b1 | Rocks | 스켈레톤·스킨 메시 순수 변환(6.4절 1–7번 — `ExchangeSkeleton`·`ExchangeSkeletalMesh`, 설정 행 `EnumMap`, 공용 `ExchangeMeshCommon`) | UX7a2, UX3b, MA4b–MA5 |
 | UX7b2 | Rocks | 스켈레톤·스킨 메시 임포트(6.4절 8–10번 — A2f `unreal_skeleton`·`unreal_skeletal_mesh`, 종류별 임포터·제품 연결, 명령·C# 시험) | UX7b1, UXR8–UXR10 |
 | UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
-| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6, UXR8–UXR10 |
+| UX8b | Rocks | 애니메이션 클립 임포트(7.2절 — `ExchangeAnimationClip`, 커브 열거·플래그 대응, 이벤트 속성 버림 경고, A2f `unreal_anim_sequence`) | UX8a, UX7b, MA6, UXR8–UXR10 |

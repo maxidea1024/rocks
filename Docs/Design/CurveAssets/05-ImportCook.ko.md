@@ -25,7 +25,7 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - 단일 커브: 모든 채널의 키를 비우고 다시 넣는다(UE `ResetCurve`).
   - 임포트가 정하지 않는 필드는 그대로 둔다(기본값·외삽·색 조정·`eventCurve`).
   - UE 팩터리는 단일 커브를 기존 객체 자리에 `NewObject`로 다시 만든다(`CSVImportFactory.cpp:383`). 그래서 임포트하지 않은 필드도 기본값으로 돌아갈 수 있다(확실치 않음 — 7.5절). Rocks는 제자리 갱신이라 그 필드를 지킨다(◇ 7.2절 13).
-- **텍스트 디코딩**: UE `LoadFileToString`처럼 BOM을 본다.
+- **텍스트 디코딩**: UE `LoadFileToString`처럼 BOM을 본다. UTF-16 변환은 Core `TryAppendUtf16AsUtf8`(`Core/Text/Utf16.h`)이다.
   - UTF-8 BOM이 있으면 뗀다. Excel "CSV UTF-8"이 BOM을 쓴다.
   - UTF-16 LE·BE BOM이 있으면 UTF-8로 바꾼다(Core 문자 변환).
   - BOM이 없으면 UTF-8로 읽는다.
@@ -37,15 +37,16 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - UE가 빈 표로 끝내는 경우도 실패이고, 기존 에셋을 지킨다(★ 7.2절 6). 시간 중복이나 행 부족이 그 예다. UE 팩터리는 임포트 전에 기존 표를 `EmptyTable()`한다(`CSVImportFactory.cpp:354-360`).
 - **위치(detail)**:
   - CSV는 그 행이 시작하는 원본의 물리 줄 번호(1부터)다. 빈 줄 건너뛰기나 따옴표 안 줄바꿈이 있어도 사람이 편집기에서 찾는 줄이다.
-  - JSON은 최상위 배열 원소 번호(1부터)다.
+  - JSON은 최상위 배열 원소 번호(1부터)다. 문서 오류(파싱 실패·배열 아님·빈 배열)는 0이다.
+  - 할당·용량 실패(이름 intern 포함)는 원본 탓이 아니라 진단 없이 그 오류를 돌려준다.
 - **숫자 칸**:
-  - 앞뒤 ASCII 공백·탭을 떼고 Core 엄격 float 파싱(`TryParseFloat` — 칸 전체 소비)을 한다. UE 파서는 칸을 trim하지 않지만 `Atof`가 앞 공백을 건너뛴다. 그래서 `1, 2`가 읽혀야 한다.
+  - 앞뒤 ASCII 공백·탭을 떼고 Core 엄격 파싱(`TryParseDouble` — 칸 전체 소비)으로 double을 읽어 float로 바꾼다(UE Windows `Atof` = `(float)_tstof` — 같은 이중 반올림, 7.2절 20). UE 파서는 칸을 trim하지 않지만 `Atof`가 앞 공백을 건너뛴다. 그래서 `1, 2`가 읽혀야 한다.
   - 비유한 값(`inf`·`nan`)은 시간·값 모두 실패다(★ 7.2절 5).
 - **표 모드**:
   - `interp`가 Cubic이면 Tangent 모드다. 행 커브의 키는 모두 보간 Cubic이다.
   - Linear·Constant면 Plain 모드다. 커브 하나에 보간 하나(`PlainCurveInterp`)다.
   - UE `:676`과 같다. Rich는 키마다 `SetKeyInterpMode`를 부르고, 이 함수가 자동 접선까지 계산한다(`RichCurve.cpp:520-531`).
-  - Rocks도 키를 넣을 때마다 보간을 정하고 `AutoSetTangents`를 부른다. 결과 접선이 UE와 같다.
+  - Rocks는 키를 넣을 때마다 보간을 정하고, 행의 키를 다 넣은 뒤 `AutoSetTangents`를 한 번 부른다. UE `AutoSetTangents`(`RichCurve.cpp:680-755`)는 첫 키의 도착·끝 키의 출발·Linear 안쪽 키의 접선을 옛 값으로 두지만, 임포트는 키를 더하기만 하고(시간 중복은 미리 거른다) 안쪽 키가 끝 키로 바뀌지 않으므로 키마다 부른 UE의 최종 접선과 같다.
 
 #### 5.1.2 CSV 표(`curve_table_csv`)
 
@@ -70,19 +71,21 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
   - 최상위가 배열이 아님
   - 빈 배열
   - 한 객체 안 중복 키: Core JSON이 문서 오류로 낸다(`Json.h:22, 175`). UE `FJsonObject`는 뒤의 값이 이긴다(◇ 7.2절 14).
+- **행 이름**: 멤버 키 `Name`을 대소문자 무시로 찾고(UE `FJsonObject` 키 비교), 여럿이면 뒤의 것이다(UE `TMap` 덮어쓰기). 값은 UE `GetStringField`(`AsString`)처럼 문자열 그대로, bool은 `true`·`false`, 숫자는 원문 토큰이다(UE `SanitizeFloat` 서식과 다를 수 있다 — 7.2절 18).
 - **원소 오류는 그 원소를 건너뛰고 경고를 남긴다.**
   - 원소가 객체가 아님
-  - `Name`이 없음
-  - 이름 중복
+  - `Name`이 없음(이름이 비거나 None)
+  - 이름 중복(대소문자 무시)
 - **항목 오류는 그 시간 항목만 건너뛰고 경고를 남긴다.** 행은 남는다(UE `:931-944` 안쪽 `continue`).
   - 시간 키가 float로 읽히지 않음
-  - 같은 시간이 둘
   - 값이 숫자로 읽히지 않음
+- **한 행 안에 같은 시간이 둘이면 그 행 전체를 건너뛰고 경고를 남긴다**(UE `FindDuplicateXValues` → 행 `continue` — `:962-985`).
 - **값으로 받는 것**은 UE `TryGetNumber`와 같다(`JsonValue.h:451-462`, `JsonValue.cpp:476-480`).
-  - 숫자
-  - 숫자로 읽히는 문자열
+  - 숫자(double을 거쳐 float)
+  - UE `FString::IsNumeric` 규칙의 문자열(`[+|-]` 뒤 숫자와 `.` 하나 — 지수·공백 없음, 숫자가 없는 `.`·`-`는 0)
   - bool(참 1, 거짓 0)
   - 비유한 값은 실패한다.
+- 시간 키는 숫자 칸 규칙(앞뒤 공백 trim·칸 전체)이다. UE `LexTryParseString`은 `Atof` 결과가 0이 아니면 뒤 쓰레기(`2abc`)도 받는다(★ 7.2절 17).
 - 키 순서는 객체 멤버 순서다.
 - UE는 시간 중복 행에서 커브를 지우지 않는 누수가 있다(`:982-985`). Rocks에는 해당하지 않는다.
 
@@ -99,13 +102,14 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
 ### 5.2 Core `CsvReader`(UE `FCsvParser`와 같은 규칙)
 
 - 위치는 `Core/Text/Csv.h`다.
-  - 서명: `Result<void> TryParseCsv(StringView text, Allocator&, CsvRows& out)`.
-  - `CsvRows`는 행마다 칸의 사본(따옴표 해제 결과)과 그 행이 시작하는 물리 줄 번호를 담는다.
+  - 서명: `Result<void> TryParseCsv(StringView text, Array<CsvRow>& out)`(out의 allocator로 만든다).
+  - `CsvRow`는 칸의 사본(`Array<String>` — 따옴표 해제 결과)과 그 행이 시작하는 물리 줄 번호를 담는다.
 - 파일을 UE와 같은 칸으로 나누려고 규칙을 UE `FCsvParser`(`Runtime/Core/Private/Serialization/Csv/CsvParser.cpp`)와 같게 둔다. RFC 4180보다 관대하다.
   - 빈 줄은 건너뛴다(`:40-45`). 공백만 있는 줄은 건너뛰지 않는다.
   - 따옴표는 칸 맨 앞에서만 인식한다(`:64`). `""`는 따옴표 하나로 해제한다(`:63-100`).
   - 닫는 따옴표 뒤 글자는 칸에 이어 붙인다. 예: `"ab"cd` → `abcd`(`:95-99, 125-131`).
   - 닫히지 않은 따옴표는 문자열 끝까지, 줄바꿈·쉼표를 포함해 한 칸으로 삼킨다. 오류로 보지 않는다(`:74-101, 135`).
+  - NUL byte는 문자열 끝이다. 비지 않은 입력은 첫 byte가 NUL이어도 빈 칸 하나짜리 행이 생긴다(UE와 같다).
   - 줄 끝은 `\r\n`·`\r`·`\n`이다(`:138-152`).
   - 끝 쉼표는 빈 칸 하나를 더한다(`:114-122`).
   - 칸을 trim하지 않는다. 숫자 칸 trim은 임포터가 한다(5.1.1절).

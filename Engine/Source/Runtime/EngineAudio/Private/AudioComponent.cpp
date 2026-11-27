@@ -31,6 +31,11 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     options.volume = volumeMultiplier;
     options.pitch = pitchMultiplier;
     options.startFrame = startFrame;
+    if (overridePriority) {
+        options.priority = priority;
+    }
+
+    options.remainActiveIfDropped = remainActiveIfDropped;
     // emitter를 잡지 못했으면(scene이 끝남·표 가득) 2D가 아니라 위치 재생으로 낸다.
     auto played = emitter_.IsValid() ? audio->PlayAttached(emitter_, sound_, Move(options))
                                      : audio->PlayAt(sound_, WorldLocation(), Move(options));

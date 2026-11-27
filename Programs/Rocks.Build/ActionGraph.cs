@@ -508,7 +508,10 @@ internal static class ActionGraph
             {
                 IspcTool tool = request.Ispc ?? throw new ArgumentException($"Module {module.Name} has ISPC sources, but the request has no ISPC " +
                     "compiler (NativeBuildRequest.Ispc — the build engine finds it with IspcTools.DiscoverAsync).");
-                IReadOnlyList<string> ispcArguments = IspcTools.Arguments(request.Toolchain.Platform, request.Toolchain.Architecture);
+                // 경고는 서드파티 원본이면 끄고(--woff) 엔진 원본이면 오류로 다룬다(--werror — C++ 경고 정책과 같다). 출력 byte와 무관한 진단
+                // 인자라 ISPC 신원(IspcTools.Identity)에는 넣지 않는다.
+                IReadOnlyList<string> ispcArguments = [.. IspcTools.Arguments(request.Toolchain.Platform, request.Toolchain.Architecture),
+                    module.ThirdParty ? "--woff" : "--werror"];
                 string[] ispcIncludes = ispcSources.Select(value => Path.GetDirectoryName(value)!).Distinct(NativeToolchains.PathComparer).ToArray();
                 // Windows ISPC는 비 ASCII 경로를 열지 못하므로 실행 때 넘기는 철자(stage 기준 상대 경로 — Executor)가 ASCII여야 한다. 실행 때
                 // 알 수 없는 ISPC 오류 대신 계획 때 알린다.
