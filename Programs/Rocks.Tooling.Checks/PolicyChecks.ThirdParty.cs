@@ -472,6 +472,12 @@ public static partial class PolicyChecks
             string upstreamPrefix = manifest.UpstreamDirectory + "/";
             foreach (string directory in manifest.IncludeDirectories)
             {
+                // 원본 폴더 밖 include 폴더(Rocks adapter 헤더 폴더)는 엔진 소유 파일이라 원본 대응표에 넣지 않는다.
+                if (directory != manifest.UpstreamDirectory && !directory.StartsWith(upstreamPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 string inside = directory == manifest.UpstreamDirectory ? "" : directory[upstreamPrefix.Length..] + "/";
                 foreach (string file in manifest.Files.Keys.Where(file => file.StartsWith(inside, StringComparison.Ordinal)))
                 {

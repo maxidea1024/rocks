@@ -10,19 +10,26 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialExpressionSubstrate.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "MeshDescription.h"
 #include "SkeletalMeshAttributes.h"
 #include "StaticMeshAttributes.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
+#include "IMaterialBakingModule.h"
+#include "Math/Float16Color.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "RocksBundleWriter.h"
 #include "RocksExportClosure.h"
+#include "RocksExportCommon.h"
 #include "RocksExportSelfTestTypes.h"
 #include "RocksExporter.h"
 #include "RocksJsonWriter.h"
+#include "RocksMaterialBaker.h"
 #include "RocksMeshDescriptionWriter.h"
 #include "RocksPropertyDumper.h"
 #include "RocksSha256.h"
@@ -35,6 +42,9 @@
 
 namespace RocksExportSelfTestPrivate
 {
+	// 이번 실행에서 돌지 않은 시험이다(MarkNotRun — 게임 스레드에서만 쓴다).
+	static TArray<FString> NotRun;
+
 	// 엔진 콘텐츠 시험 대상이다(12.2절 — 엔진 기본 도형).
 	static const TCHAR* const CubePath = TEXT("/Engine/BasicShapes/Cube.Cube");
 	static const TCHAR* const SpherePath = TEXT("/Engine/BasicShapes/Sphere.Sphere");
@@ -1155,6 +1165,367 @@ void RocksExportSelfTest::RunMaterialExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::MarkNotRun(const FString& Reason)
+{
+	UE_LOG(LogRocksExport, Display, TEXT("%s"), *Reason);
+	RocksExportSelfTestPrivate::NotRun.Add(Reason);
+}
+
+TArray<FString> RocksExportSelfTest::TakeNotRun()
+{
+	return MoveTemp(RocksExportSelfTestPrivate::NotRun);
+}
+
+void RocksExportSelfTest::RunSubstrateExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	// Substrate가 꺼진 프로젝트에서는 돌지 않음을 따로 기록한다(통과로 세지 않는다 — 8.8절 6번).
+	const IConsoleVariable* Substrate = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Substrate"));
+	if (Substrate == nullptr || Substrate->GetInt() == 0)
+	{
+		MarkNotRun(TEXT("SubstrateExtraction: not run: Substrate disabled"));
+		return;
+	}
+
+	static const TCHAR* const SubstratePath = TEXT("/Game/RxGoldenSubstrate/M_GoldenSubstrate.M_GoldenSubstrate");
+	static const TCHAR* const AttributesPath = TEXT("/Game/RxGoldenSubstrate/M_GoldenSubstrateAttributes.M_GoldenSubstrateAttributes");
+	static const TCHAR* const LegacyPath = TEXT("/Game/RxGoldenSubstrate/M_Golden.M_Golden");
+	static const TCHAR* const FrontMaterialPin = TEXT("FrontMaterial");
+	static const TCHAR* const BaseColorPin = TEXT("BaseColor");
+	// UE 5.8 Slab BSDF의 입력 수다(MaterialExpressionSubstrate.cpp:1098-1173 GetInputName 0–17).
+	static constexpr int32 SlabInputCount = 18;
+	// golden 개별 핀 머티리얼의 Slab 수다(make_golden_content.py substrate — 둘을 VerticalLayering으로 쌓는다).
+	static constexpr int32 GoldenSlabs = 2;
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UMaterial* Layered = LoadObject<UMaterial>(nullptr, SubstratePath);
+	UMaterial* Attributes = LoadObject<UMaterial>(nullptr, AttributesPath);
+	UMaterial* Legacy = LoadObject<UMaterial>(nullptr, LegacyPath);
+	const bool bLoaded = Layered != nullptr && Attributes != nullptr && Legacy != nullptr && Layered->GetEditorOnlyData() != nullptr
+		&& Attributes->GetEditorOnlyData() != nullptr && Legacy->GetEditorOnlyData() != nullptr;
+	Expect(Errors, bLoaded, TEXT("Substrate golden content missing (run make_golden_content.py substrate)"));
+	if (!bLoaded)
+	{
+		return;
+	}
+
+	// 5.8에는 숨은 그래프 재작성이 없다: FrontMaterial 없는 머티리얼은 로드 뒤에도 비어 있다(8.3절의 근거).
+	Expect(Errors, !Legacy->GetEditorOnlyData()->FrontMaterial.IsConnected(), TEXT("loading rewrote the legacy material into a Substrate graph"));
+	const UMaterialExpression* Front = Layered->GetEditorOnlyData()->FrontMaterial.Expression;
+	const UMaterialExpression* LayeredBaseColor = Layered->GetEditorOnlyData()->BaseColor.Expression;
+	const UMaterialExpression* AttributesFront = Attributes->GetEditorOnlyData()->FrontMaterial.Expression;
+	Expect(Errors, Front != nullptr && Front->IsA<UMaterialExpressionSubstrateVerticalLayering>() && LayeredBaseColor != nullptr && AttributesFront != nullptr
+		&& Attributes->bUseMaterialAttributes, TEXT("Substrate golden content has an unexpected FrontMaterial graph"));
+	if (Front == nullptr || LayeredBaseColor == nullptr || AttributesFront == nullptr)
+	{
+		return;
+	}
+
+	const FString Root = SelfTestDirectory() / TEXT("Substrate");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Substrate.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {SubstratePath, AttributesPath, LegacyPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("Substrate export: %s"), *Result.Error));
+
+	TArray<uint8> BundleJson;
+	const TSharedPtr<FJsonObject> BundleObject = LoadBytes(Output / TEXT("bundle.json"), BundleJson) ? ParseJson(BundleJson) : nullptr;
+	const TSharedPtr<FJsonObject>* Settings = nullptr;
+	bool bSubstrate = false;
+	Expect(Errors, BundleObject.IsValid() && BundleObject->TryGetObjectField(TEXT("projectSettings"), Settings) && (*Settings)->TryGetBoolField(TEXT("substrate"), bSubstrate)
+		&& bSubstrate, TEXT("bundle.json does not record projectSettings.substrate = true"));
+
+	const auto Load = [&Output](const TCHAR* Path, TArray<uint8>& Json)
+	{
+		return LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	};
+
+	// data의 배열 필드다(없으면 null — 모양이 틀린 JSON에서 멈추지 않는다).
+	const auto DataArray = [](const TSharedPtr<FJsonObject>& Asset, const TCHAR* Name)
+	{
+		const TSharedPtr<FJsonObject>* Data = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+		return Asset.IsValid() && Asset->TryGetObjectField(TEXT("data"), Data) && (*Data)->TryGetArrayField(Name, Items) ? Items : nullptr;
+	};
+
+	// 출력 핀 이름 목록과 핀마다 연결 대상 노드 이름(연결이 없으면 빈 문자열)이다.
+	const auto Pins = [&DataArray](const TSharedPtr<FJsonObject>& Asset, TArray<FString>& Names, TMap<FString, FString>& Links)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Outputs = DataArray(Asset, TEXT("outputs"));
+		for (int32 Index = 0; Outputs != nullptr && Index < Outputs->Num(); ++Index)
+		{
+			const TSharedPtr<FJsonObject> Item = (*Outputs)[Index]->AsObject();
+			FString Name;
+			const TSharedPtr<FJsonObject>* From = nullptr;
+			FString Node;
+			if (Item.IsValid() && Item->TryGetStringField(TEXT("name"), Name))
+			{
+				if (Item->TryGetObjectField(TEXT("from"), From))
+				{
+					(*From)->TryGetStringField(TEXT("node"), Node);
+				}
+
+				Names.Add(Name);
+				Links.Add(Name, Node);
+			}
+		}
+	};
+
+	TArray<uint8> LayeredJson;
+	TArray<uint8> AttributesJson;
+	TArray<uint8> LegacyJson;
+	const TSharedPtr<FJsonObject> LayeredAsset = Load(SubstratePath, LayeredJson);
+	const TSharedPtr<FJsonObject> AttributesAsset = Load(AttributesPath, AttributesJson);
+	const TSharedPtr<FJsonObject> LegacyAsset = Load(LegacyPath, LegacyJson);
+	Expect(Errors, LayeredAsset.IsValid() && AttributesAsset.IsValid() && LegacyAsset.IsValid(), TEXT("Substrate material JSON missing"));
+	if (!LayeredAsset.IsValid() || !AttributesAsset.IsValid() || !LegacyAsset.IsValid())
+	{
+		return;
+	}
+
+	// 개별 핀 머티리얼: FrontMaterial이 VerticalLayering 노드에, 읽지 않는 BaseColor가 UE 연결 노드에 이어진다.
+	TArray<FString> LayeredPins;
+	TMap<FString, FString> LayeredLinks;
+	Pins(LayeredAsset, LayeredPins, LayeredLinks);
+	Expect(Errors, LayeredLinks.FindRef(FrontMaterialPin) == Front->GetName() && LayeredLinks.FindRef(BaseColorPin) == LayeredBaseColor->GetName()
+		&& !LayeredPins.Contains(TEXT("MaterialAttributes")), TEXT("Substrate material output pins differ from the UE material"));
+
+	// 속성 집합 머티리얼: MaterialAttributes 다음 FrontMaterial 두 핀이다(8.8절 2번).
+	TArray<FString> AttributesPins;
+	TMap<FString, FString> AttributesLinks;
+	Pins(AttributesAsset, AttributesPins, AttributesLinks);
+	const TArray<FString> ExpectedAttributesPins = {TEXT("MaterialAttributes"), FrontMaterialPin};
+	Expect(Errors, AttributesPins == ExpectedAttributesPins && AttributesLinks.FindRef(FrontMaterialPin) == AttributesFront->GetName(),
+		FString::Printf(TEXT("attributes material pins are [%s], expected [MaterialAttributes, FrontMaterial] with the slab"), *FString::Join(AttributesPins, TEXT(", "))));
+
+	// 옛 핀 머티리얼: FrontMaterial 핀은 쓰지만 연결이 없다.
+	TArray<FString> LegacyPins;
+	TMap<FString, FString> LegacyLinks;
+	Pins(LegacyAsset, LegacyPins, LegacyLinks);
+	Expect(Errors, LegacyPins.Contains(FrontMaterialPin) && LegacyLinks.FindRef(FrontMaterialPin).IsEmpty(), TEXT("legacy material FrontMaterial pin"));
+
+	// Slab 노드: 입력이 18개이고 이름·순서가 UE GetInputName과 같다(Rocks 핀 별칭의 근거 — 8.8절 4번).
+	int32 Slabs = 0;
+	bool bSlabs = true;
+	const TArray<TSharedPtr<FJsonValue>>* Nodes = DataArray(LayeredAsset, TEXT("nodes"));
+	for (int32 NodeIndex = 0; Nodes != nullptr && NodeIndex < Nodes->Num(); ++NodeIndex)
+	{
+		const TSharedPtr<FJsonObject> Node = (*Nodes)[NodeIndex]->AsObject();
+		FString NodeName;
+		const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr;
+		if (!Node.IsValid() || !Node->TryGetStringField(TEXT("name"), NodeName) || !Node->TryGetArrayField(TEXT("inputs"), Inputs))
+		{
+			bSlabs = false;
+			continue;
+		}
+
+		UMaterialExpression* Expression = FindObject<UMaterialExpression>(Layered, *NodeName);
+		if (Expression == nullptr || !Expression->IsA<UMaterialExpressionSubstrateSlabBSDF>())
+		{
+			continue;
+		}
+
+		++Slabs;
+		bSlabs = bSlabs && Inputs->Num() == SlabInputCount && Expression->CountInputs() == SlabInputCount;
+		for (int32 Slot = 0; bSlabs && Slot < Inputs->Num(); ++Slot)
+		{
+			FString InputName;
+			bSlabs = (*Inputs)[Slot]->AsObject()->TryGetStringField(TEXT("name"), InputName) && InputName == Expression->GetInputName(Slot).ToString();
+		}
+	}
+
+	Expect(Errors, bSlabs && Slabs == GoldenSlabs, FString::Printf(TEXT("Substrate slab inputs differ from GetInputName (%d slabs)"), Slabs));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
+void RocksExportSelfTest::RunMaterialBaking(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	// 굽기는 렌더링이 되는 프로세스에서만 한다(8.9절 8번 — 통과로 세지 않는다).
+	if (!FRocksMaterialBaker::CanBake())
+	{
+		MarkNotRun(TEXT("MaterialBaking: not run: rendering unavailable (pass -AllowCommandletRendering without -nullrhi)"));
+		return;
+	}
+
+	static const TCHAR* const GoldenMaterialPath = TEXT("/Game/RxGolden/M_Golden.M_Golden");
+	static const TCHAR* const GoldenInstancePath = TEXT("/Game/RxGolden/MI_Golden.MI_Golden");
+	// 굽지 않는 영역의 엔진 머티리얼이다(LightFunction — BaseEngine.ini DefaultLightFunctionMaterialName).
+	static const TCHAR* const LightFunctionPath = TEXT("/Engine/EngineMaterials/DefaultLightFunctionMaterial.DefaultLightFunctionMaterial");
+	// 시험 굽기 크기다(작게 — HDR emissive는 줄지 않는다).
+	static constexpr int32 TestBakeSize = 16;
+	// 기대 8비트 값과의 허용 차다(GPU 반올림 — 8.9절 8번 ±1).
+	static constexpr int32 ChannelTolerance = 1;
+	static const TCHAR* const PropertyNames[] = {TEXT("BaseColor"), TEXT("Normal"), TEXT("Metallic"), TEXT("Roughness"), TEXT("Specular"),
+		TEXT("EmissiveColor"), TEXT("Opacity"), TEXT("OpacityMask"), TEXT("AmbientOcclusion")};
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UMaterial* Material = LoadObject<UMaterial>(nullptr, GoldenMaterialPath);
+	UMaterialInstanceConstant* Instance = LoadObject<UMaterialInstanceConstant>(nullptr, GoldenInstancePath);
+	Expect(Errors, Material != nullptr && Instance != nullptr, TEXT("golden material content missing (run make_golden_content.py content)"));
+	if (Material == nullptr || Instance == nullptr)
+	{
+		return;
+	}
+
+	const FString Root = SelfTestDirectory() / TEXT("Baking");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Baking.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.BakeSize = TestBakeSize;
+	Options.Selections = {GoldenMaterialPath, GoldenInstancePath, LightFunctionPath};
+	// 굽기 전후 모듈 linear 상태가 같다(굽기 전 값으로 되돌린다 — Metallic은 linear 모드에서만 linear다).
+	IMaterialBakingModule& Module = FModuleManager::Get().LoadModuleChecked<IMaterialBakingModule>("MaterialBaking");
+	const bool bLinearBefore = Module.IsLinearBake(FMaterialPropertyEx(MP_Metallic));
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("baking export: %s"), *Result.Error));
+	Expect(Errors, Module.IsLinearBake(FMaterialPropertyEx(MP_Metallic)) == bLinearBefore, TEXT("baking did not restore the module linear bake state"));
+
+	TArray<uint8> BundleJson;
+	const TSharedPtr<FJsonObject> BundleObject = LoadBytes(Output / TEXT("bundle.json"), BundleJson) ? ParseJson(BundleJson) : nullptr;
+	const TSharedPtr<FJsonObject>* Environment = nullptr;
+	FString Rhi;
+	Expect(Errors, BundleObject.IsValid() && BundleObject->TryGetObjectField(TEXT("environment"), Environment) && (*Environment)->TryGetStringField(TEXT("rhi"), Rhi)
+		&& !Rhi.IsEmpty() && (*Environment)->HasTypedField<EJson::String>(TEXT("gpu")) && (*Environment)->HasTypedField<EJson::String>(TEXT("driver")),
+		TEXT("bundle.json environment of a baked export"));
+
+	const auto Load = [&Output](const TCHAR* Path, TArray<uint8>& Json)
+	{
+		return LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	};
+
+	// baked.properties 항목을 속성 이름으로 찾는다(순서도 함께 본다 — Order).
+	struct FBaked
+	{
+		bool bLinear = false;
+		int32 SizeX = 0;
+		int32 SizeY = 0;
+		FString Format;
+		FString Gamma;
+		TArray<uint8> Pixels;
+	};
+
+	const auto ReadBaked = [&Output](const TSharedPtr<FJsonObject>& Asset, TArray<FBaked>& Out, FString& Problem)
+	{
+		const TSharedPtr<FJsonObject>* Data = nullptr;
+		const TSharedPtr<FJsonObject>* Baked = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Properties = nullptr;
+		int32 BakeSize = 0;
+		if (!Asset.IsValid() || !Asset->TryGetObjectField(TEXT("data"), Data) || !(*Data)->TryGetObjectField(TEXT("baked"), Baked)
+			|| !(*Baked)->TryGetNumberField(TEXT("bakeSize"), BakeSize) || BakeSize != TestBakeSize || !(*Baked)->TryGetArrayField(TEXT("properties"), Properties)
+			|| Properties->Num() != UE_ARRAY_COUNT(PropertyNames))
+		{
+			Problem = TEXT("baked shape");
+			return false;
+		}
+
+		for (int32 Index = 0; Index < Properties->Num(); ++Index)
+		{
+			const TSharedPtr<FJsonObject> Item = (*Properties)[Index]->AsObject();
+			FBaked Entry;
+			FString Name;
+			const TSharedPtr<FJsonObject>* Source = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Layers = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Blocks = nullptr;
+			if (!Item.IsValid() || !Item->TryGetStringField(TEXT("property"), Name) || Name != PropertyNames[Index] || !Item->TryGetBoolField(TEXT("linear"), Entry.bLinear)
+				|| !Item->TryGetObjectField(TEXT("source"), Source) || !(*Source)->TryGetStringField(TEXT("format"), Entry.Format)
+				|| !(*Source)->TryGetArrayField(TEXT("layers"), Layers) || Layers->Num() != 1 || !(*Source)->TryGetArrayField(TEXT("blocks"), Blocks) || Blocks->Num() != 1)
+			{
+				Problem = FString::Printf(TEXT("baked property %d"), Index);
+				return false;
+			}
+
+			const TSharedPtr<FJsonObject> Layer = (*Layers)[0]->AsObject();
+			const TSharedPtr<FJsonObject> Block = (*Blocks)[0]->AsObject();
+			const TArray<TSharedPtr<FJsonValue>>* Mips = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* MipPixels = nullptr;
+			const TSharedPtr<FJsonObject> Mip = Block.IsValid() && Block->TryGetArrayField(TEXT("mips"), Mips) && Mips->Num() == 1 ? (*Mips)[0]->AsObject() : nullptr;
+			const TSharedPtr<FJsonObject> Pixel = Mip.IsValid() && Mip->TryGetArrayField(TEXT("pixels"), MipPixels) && MipPixels->Num() == 1 ? (*MipPixels)[0]->AsObject() : nullptr;
+			FString Hex;
+			// Pixel이 있으면 Block도 있다.
+			if (!Layer.IsValid() || !Layer->TryGetStringField(TEXT("gammaSpace"), Entry.Gamma) || !Pixel.IsValid() || !Block->TryGetNumberField(TEXT("sizeX"), Entry.SizeX)
+				|| !Block->TryGetNumberField(TEXT("sizeY"), Entry.SizeY) || !Pixel->TryGetStringField(TEXT("blob"), Hex)
+				|| !FFileHelper::LoadFileToArray(Entry.Pixels, *(Output / FRocksBundleWriter::BlobFileForHex(Hex))))
+			{
+				Problem = FString::Printf(TEXT("baked property %s blob"), *Name);
+				return false;
+			}
+
+			Out.Add(MoveTemp(Entry));
+		}
+
+		return true;
+	};
+
+	// 첫 texel의 R·G·B다(BGRA8 — 4.5절 2번).
+	const auto FirstTexel = [](const FBaked& Entry)
+	{
+		return Entry.Pixels.Num() >= 4 ? FColor(Entry.Pixels[2], Entry.Pixels[1], Entry.Pixels[0], Entry.Pixels[3]) : FColor::Transparent;
+	};
+
+	const auto Near = [](uint8 Actual, uint8 Wanted)
+	{
+		return FMath::Abs(int32(Actual) - int32(Wanted)) <= ChannelTolerance;
+	};
+
+	// 기대 값: BaseColor는 sRGB 부호화(SetLinearBake(true)에서 BaseColor만 sRGB), 스칼라는 선형 8비트다.
+	const FColor BaseColor = FLinearColor(0.5f, 0.4f, 0.3f).ToFColor(true);
+	const uint8 MaterialRoughness = FLinearColor(0.6f, 0.0f, 0.0f).ToFColor(false).R;
+	const uint8 InstanceRoughness = FLinearColor(0.25f, 0.0f, 0.0f).ToFColor(false).R;
+	const auto CheckAsset = [&](const TCHAR* Path, uint8 Roughness)
+	{
+		TArray<uint8> Json;
+		TArray<FBaked> Baked;
+		FString Problem;
+		if (!ReadBaked(Load(Path, Json), Baked, Problem))
+		{
+			Expect(Errors, false, FString::Printf(TEXT("%s: %s"), Path, *Problem));
+			return;
+		}
+
+		const FBaked& Color = Baked[0];
+		const FBaked& Rough = Baked[3];
+		const FBaked& Emissive = Baked[5];
+		const FColor Texel = FirstTexel(Color);
+		Expect(Errors, Color.SizeX == 1 && Color.SizeY == 1 && !Color.bLinear && Color.Gamma == TEXT("sRGB") && Color.Format == TEXT("BGRA8")
+			&& Near(Texel.R, BaseColor.R) && Near(Texel.G, BaseColor.G) && Near(Texel.B, BaseColor.B) && Texel.A == 255,
+			FString::Printf(TEXT("%s: baked BaseColor %dx%d %s (%d, %d, %d), expected 1x1 sRGB (%d, %d, %d)"), Path, Color.SizeX, Color.SizeY, *Color.Gamma,
+				Texel.R, Texel.G, Texel.B, BaseColor.R, BaseColor.G, BaseColor.B));
+		Expect(Errors, Rough.SizeX == 1 && Rough.SizeY == 1 && Rough.bLinear && Near(FirstTexel(Rough).R, Roughness),
+			FString::Printf(TEXT("%s: baked Roughness %dx%d value %d, expected 1x1 linear %d"), Path, Rough.SizeX, Rough.SizeY, FirstTexel(Rough).R, Roughness));
+		Expect(Errors, Emissive.Format == TEXT("RGBA16F") && Emissive.bLinear && Emissive.SizeX == TestBakeSize && Emissive.SizeY == TestBakeSize
+			&& Emissive.Pixels.Num() == TestBakeSize * TestBakeSize * int32(sizeof(FFloat16Color)),
+			FString::Printf(TEXT("%s: baked EmissiveColor %s %dx%d"), Path, *Emissive.Format, Emissive.SizeX, Emissive.SizeY));
+	};
+
+	CheckAsset(GoldenMaterialPath, MaterialRoughness);
+	CheckAsset(GoldenInstancePath, InstanceRoughness);
+
+	// 굽지 않는 영역: baked 키가 없고 BakeSkipped info가 있다.
+	TArray<uint8> LightJson;
+	const TSharedPtr<FJsonObject> LightAsset = Load(LightFunctionPath, LightJson);
+	const TSharedPtr<FJsonObject>* LightData = nullptr;
+	const TArray<TSharedPtr<FJsonValue>>* Diagnostics = nullptr;
+	bool bSkipped = false;
+	if (LightAsset.IsValid() && LightAsset->TryGetArrayField(TEXT("diagnostics"), Diagnostics))
+	{
+		for (const TSharedPtr<FJsonValue>& Diagnostic : *Diagnostics)
+		{
+			FString Code;
+			bSkipped = bSkipped || (Diagnostic->AsObject()->TryGetStringField(TEXT("code"), Code) && Code == TEXT("BakeSkipped"));
+		}
+	}
+
+	Expect(Errors, LightAsset.IsValid() && LightAsset->TryGetObjectField(TEXT("data"), LightData) && !(*LightData)->HasField(TEXT("baked")) && bSkipped,
+		TEXT("light function material should not be baked and should carry BakeSkipped"));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 void RocksExportSelfTest::RunMeshWriterEdgeCases(TArray<FString>& Errors)
 {
 	using namespace RocksExportSelfTestPrivate;
@@ -1323,6 +1694,8 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunSkeletalExtraction(Errors);
 	RunAnimationExtraction(Errors);
 	RunMaterialExtraction(Errors);
+	RunSubstrateExtraction(Errors);
+	RunMaterialBaking(Errors);
 	RunMeshWriterEdgeCases(Errors);
 	return Errors.IsEmpty();
 }

@@ -576,7 +576,7 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
                 "struct element arrays take an empty value; set elements by path");
         }
 
-        // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 원소는 경로
+        // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData/README.ko.md D18 — 원소는 경로
         // `a[i]=v`로).
         if (::rocks::detail::IsByteArrayField(field)) {
             return detail::ParseByteList(context, field, text, source, pathText, out);

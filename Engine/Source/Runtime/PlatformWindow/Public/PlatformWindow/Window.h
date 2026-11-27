@@ -1,13 +1,54 @@
 #pragma once
 
+#include <Input/WindowRegionMap.h>
+
+#include <Core/Delegate.h>
 #include <Core/Diagnostics/LogCategory.h>
+#include <Core/Math/IntVector.h>
+#include <Core/Math/Rect.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
 #include <Core/Result.h>
 #include <Input/InputEvent.h>
 #include <Input/MotorValues.h>
+#include <PlatformWindow/TextInputClient.h>
 
 namespace rocks::platform {
+
+// 창 테두리를 누가 그리는지다(UE FGenericWindowDefinition::HasOSWindowBorder). System은 OS 제목
+// 막대·버튼(게임 기본), Custom은 테두리 없이 UI가 제목 막대와 최소화·최대화·닫기를 그린다(에디터 —
+// Docs/Design/UiToolkit 9.1절 UW7b). Custom에서도 OS 동작(시스템 메뉴 Alt+Space, Alt+F4, 화면
+// 가장자리 붙이기, Win11 최대화 버튼 스냅 레이아웃, 그림자, 크기 조절 가장자리)은 살아 있다.
+enum class WindowFrame : uint8 {
+    System,
+    Custom
+};
+
+// 직접 그린 창의 크기 조절 가장자리 두께(논리 단위 — 창 DPI 배율을 곱한다)다(UE SWindow
+// UserResizeBorder 5, SWindow.h 274행). 최대화 중에는 없다. 모서리는 가장자리 안에 들어온 축에서
+// 다른 축을 두께 + CustomFrameCornerExtension까지 넓혀 잡는다(UE SWindow::GetCurrentWindowZone —
+// SWindow.cpp 1949–1975행).
+inline constexpr int32 CustomFrameResizeBorder = 5;
+inline constexpr int32 CustomFrameCornerExtension = 5;
+
+// 창 안 한 점의 OS 판정 영역이다(UE EWindowZone — GenericApplicationMessageHandler.h 81행). 직접
+// 그린 창에서 창 계층이 OS에 돌려주는 판정과 같다.
+enum class WindowZone : uint8 {
+    Client,
+    Caption,
+    TopLeftBorder,
+    TopBorder,
+    TopRightBorder,
+    LeftBorder,
+    RightBorder,
+    BottomLeftBorder,
+    BottomBorder,
+    BottomRightBorder,
+    MinimizeButton,
+    MaximizeButton,
+    CloseButton,
+    SystemMenu
+};
 
 // 창 생성 설정이다.
 struct WindowDesc {
@@ -19,6 +60,12 @@ struct WindowDesc {
     uint32 height = 720;
     bool resizable = true;
     bool visible = true;
+    bool useDesktopPosition = false;
+    IntVec2 desktopPosition{};
+    bool positionClientOrigin = false;
+    // Custom은 Windows만 지원한다(다른 플랫폼은 Unsupported). Custom 창의 width·height는 창 전체
+    // 크기다(OS 테두리가 없어 client와 같다).
+    WindowFrame frame = WindowFrame::System;
 };
 
 // 창 계층의 로그 카테고리다(Docs/Design/LoggingSystem.ko.md 13절). 창 생성 실패는 창을 여는
@@ -52,24 +99,42 @@ struct NativeWindowHandle {
     void* instance = nullptr;
 };
 
-// OS 창 하나다. 이벤트 펌프가 창 이벤트(닫기·크기·포커스)를 상태로 기록하고, 키보드·마우스 입력은
-// input::InputEvent로 바꿔 큐에 넣는다.
+// 창 모드다(UE EWindowMode — GenericWindow.h 14–27행). Windows의 Fullscreen은 지금
+// WindowedFullscreen과 같다(독점 전체 화면은 렌더러 스왑 체인 몫 — Docs/Design/UiToolkit 19.2절).
+// 최대화·복원은 창 모드가 아니라 OS 창 상태다(IsMaximized·ToggleMaximize).
+enum class WindowMode : uint8 {
+    Windowed,
+    // 테두리 없이 모니터를 덮는 창이다.
+    WindowedFullscreen,
+    Fullscreen
+};
+
+// OS 창 하나다. 메시지 펌프가 창 이벤트(닫기·크기·포커스)를 상태로 기록하고, 키보드·마우스 입력은
+// input::InputEvent로 바꿔 창마다 대기 큐에 넣는다. 호스트는 TakeEvents로 가져간다.
 //
-// 사용 예:
+// 사용 예(창 하나):
 //   auto window = platform::Window::Create(allocator, {.title = "Sandbox"});
 //   if (!window) { ... }                          // Unsupported(창 backend 없는 플랫폼)·OS 오류
 //   input::InputQueue queue(allocator);
 //   queue.TryInitialize(256);
 //   while (!window.Value()->IsCloseRequested()) {
-//       window.Value()->PumpEvents(queue);        // 메시지 펌프 + 입력 이벤트 수집
+//       window.Value()->PumpEvents(queue);        // PumpMessages + TakeEvents
 //       uint32 width = 0, height = 0;
 //       if (window.Value()->ConsumeResize(width, height)) { swapChain.Resize(width, height); }
 //       inputState.BeginFrame(queue.Events());
 //       queue.Clear();
 //   }
 //
-// 계약:
-// - 생성한 스레드(메시지를 받는 스레드)에서만 사용한다. Windows의 메시지 큐는 스레드에 묶인다.
+// 사용 예(창 여럿 — 입력 구동 호스트):
+//   platform::PumpMessages();                     // 스레드의 OS 메시지를 창마다 나눈다
+//   for (auto& host : windows) { host.window->TakeEvents(host.queue); ... }
+//   if (!painted) { platform::WaitForMessages(timeoutMs); }   // 남은 이벤트가 있으면 바로 돈다
+//
+// 계약(Docs/Design/UiToolkit 19.2절 스레드 계약):
+// - 창 객체를 소유한 게임 lane(창을 만든 스레드)에서만 부른다. Windows의 메시지 큐는 스레드에
+//   묶인다. Release 밖 구성에서 단언한다. 예외는 live resize 콜백(같은 스레드, OS modal 루프 안
+//   동기 호출)뿐이고, 그 콜백·렌더 lane 대기 펌프 안에서는 PumpMessages·WaitForMessages를 부르지
+//   않는다.
 // - 닫기 버튼은 창을 파괴하지 않고 IsCloseRequested만 세운다. 실제 파괴는 Window 소멸이다.
 // - 포커스를 잃으면 FocusLost 이벤트를 넣는다(InputState가 눌린 키를 모두 놓는다).
 // - 키는 스캔코드(물리 위치) 기준 input::Key이고, 입력 문자는 Text 이벤트(UTF-32)로 따로 온다.
@@ -80,12 +145,21 @@ public:
     // 결과를 채운다(OS 실패면 실패한 호출과 GetLastError). 실패 로그는 호출자가 남긴다.
     static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc,
                                             WindowCreateReport* report = nullptr) noexcept;
+    // 이 플랫폼 backend가 frame 방식의 창을 만들 수 있는지다(직접 그린 테두리는 데스크톱
+    // Windows만). 지원하지 않는 방식으로 Create하면 Unsupported다. 호출자는 이것으로 System
+    // 테두리로 물러날지 미리 정한다.
+    static bool SupportsFrame(WindowFrame frame) noexcept;
 
     virtual ~Window() = default;
 
-    // 이 스레드의 OS 메시지를 처리하고 이 창의 입력 이벤트를 queue에 넣는다. 큐가 가득 차면
-    // 이벤트를 버린다(InputQueue::DroppedCount).
-    virtual void PumpEvents(input::InputQueue& queue) noexcept = 0;
+    // 이 창의 대기 큐에 쌓인 입력 이벤트를 queue로 옮긴다(OS를 부르지 않는다 — PumpMessages가
+    // 채운다). 큐가 가득 차면 버리고 버린 수를 DroppedCount로 넘긴다. 터치 프레임 경계도 여기다.
+    // 호스트는 매 루프 모든 창을 TakeEvents한다(남은 대기 이벤트가 있으면 WaitForMessages가 바로
+    // 돌아온다).
+    virtual void TakeEvents(input::InputQueue& queue) noexcept = 0;
+
+    // 창 하나짜리 호스트의 편의 함수다: PumpMessages 뒤 TakeEvents.
+    void PumpEvents(input::InputQueue& queue) noexcept;
 
     virtual bool IsCloseRequested() const noexcept = 0;
     virtual void ClearCloseRequest() noexcept = 0;
@@ -97,12 +171,116 @@ public:
     // 마지막 호출 이후 크기가 바뀌었으면 새 크기를 쓰고 true를 반환한다.
     virtual bool ConsumeResize(uint32& width, uint32& height) noexcept = 0;
 
+    // 노출·복원 등으로 표시 내용만 다시 제출할 필요가 있는지 소비한다.
+    virtual bool ConsumeRepaint() noexcept;
+    // UI가 그리기마다 만든 영역 지도를 게시한다(Docs/Design/UiToolkit 19.2절). OS 영역 질의(Windows
+    // WM_NCHITTEST)는 UI 트리 대신 이 지도만 읽는다 — OS 콜백이 UI 코드로 재진입하지 않고, 다른
+    // 스레드의 질의(Mac 메인 스레드, 다른 프로세스)도 안전하다. backend가 복사해 잠금 아래 둔다.
+    // 판정 순서는 Popup 항목 → 크기 조절 가장자리(popupOpen이면 끔) → 나머지 항목 → Client다. 게시
+    // 전에는 빈 지도(전부 Client)다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+    virtual void PublishRegionMap(const input::WindowRegionMap& map) noexcept;
+    // 창 테두리를 끄는 동안(Windows 크기·이동 modal 루프 — 그동안 호스트 프레임 루프가 멈춘다)
+    // 크기가 바뀌면 PumpMessages 안에서 동기로 부른다(UE FSlateApplication::OnSizeChanged가 그
+    // 자리에서 그리는 것과 같다, Docs/Design/UiToolkit 9.1절 UW7a). 호스트는 ConsumeResize로 새
+    // 크기를 받아 스왑 체인을 바꾸고 한 프레임을 그린다. 콜백 안에서 PumpMessages를 다시 부르지
+    // 않는다. 창은 콜백을 겹쳐 부르지 않는다. 최소화와 modal 루프 밖의 크기 변경은 부르지
+    // 않는다(다음 프레임에 처리). 크기 조절 중에도 프레임 루프가 도는 플랫폼은 부르지 않는다.
+    // 호스트를 파괴하기 전에 빈 콜백으로 해제한다.
+    //
+    // 사용 예:
+    //   window->SetLiveResizeHandler(Delegate<void()>::CreateLambda([&]() noexcept {
+    //       (void)RenderFrame(*window);   // 펌프 없이 크기 반영·배치·그리기·present
+    //   }));
+    using LiveResizeHandler = Delegate<void()>;
+    virtual void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept;
+    virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
+    // 이 창 client 영역 위의 커서를 보이거나 숨긴다(UE SetShowMouseCursor — Docs/Design/UiToolkit
+    // 21.3절). 창마다의 값이라 다른 창·OS 전체의 커서 계수를 바꾸지 않는다. 지원하지 않으면
+    // Unsupported다.
+    virtual Result<void> SetCursorVisible(bool visible) noexcept;
+    // 커서를 이 창 client 영역 안에 가둔다(UE LockMouseToWidget). 창이 초점을 잃거나 최소화되면
+    // 풀고, 초점을 다시 얻거나 옮기거나 크기가 바뀌면 다시 가둔다. 지원하지 않으면 Unsupported다.
+    virtual Result<void> SetMouseLocked(bool locked) noexcept;
+
+    // 이 창의 DPI 배율(유효 DPI / 96)이다(Docs/Design/UiToolkit 19.2절 DPI). 프로세스가 DPI를
+    // 인식하지 않으면(EnableHighDpiAwareness를 부르지 않음) 늘 1이고 OS가 늘려 그린다. 창은
+    // WindowDesc 논리 크기 × 배율로 만들어지고, 모니터를 옮기면(WM_DPICHANGED) 배율을 먼저 바꾼 뒤
+    // OS가 제안한 사각형으로 옮긴다. 호스트는 그릴 때마다 이것을 읽어 창 루트 변환에 넣는다(크기
+    // 조절 중 그리기 포함).
+    virtual float DpiScale() const noexcept;
+    // 마지막 호출 이후 DPI 배율이 바뀌었으면 새 배율을 쓰고 true다(글꼴 cache 비우기 같은 부수
+    // 처리용 — 배치는 DpiScale을 매번 읽는다).
+    virtual bool ConsumeDpiChange(float& scale) noexcept;
+
+    // 텍스트 입력 문맥이다(Docs/Design/UiToolkit 19.2절). 창마다 활성 문맥은 하나이고, 모두 창 소유
+    // 스레드(게임 lane)에서 부른다. client는 Deactivate 전까지 살아 있어야 한다.
+    //
+    // ActivateTextInput은 활성 문맥을 바꾼다(앞 문맥은 Deactivate한다). 문맥이 IME를 허용하지
+    // 않으면 IME를 끈다(확정 문자는 Text 이벤트로 온다).
+    //
+    // DeactivateTextInput은 OS 조합을 완료시키고 그 확정까지 처리한 뒤 끈다. client가 활성이
+    // 아니면 무시한다.
+    //
+    // CancelTextComposition은 앱이 조합 중에 글자를 바꿨다는 알림이다. 문맥은 미리보기를 이미
+    // 버렸고, 창은 OS 조합을 취소하고 남은 기록을 버린다.
+    //
+    // NotifyTextInputLayoutChanged는 글자 위치가 바뀌었다는 알림이다(후보 창을 옮긴다).
+    //
+    // ProcessTextInput은 입력 큐의 TextInputMethod 표지 자리에서 부른다. 그 번호 이하의 기록을
+    // 순서대로 문맥에 적용한다.
+    // 기본 구현은 아무것도 하지 않는다(IME 없는 backend — 확정 문자는 Text 이벤트로 온다).
+    //
+    // 사용 예(창 호스트의 서비스 어댑터):
+    //   window.ActivateTextInput(client);                     // 편집 요소가 초점을 받음
+    //   if (event.type == InputEventType::TextInputMethod) {   // UI 입력 adapter
+    //       window.ProcessTextInput(event.textInputRecord);
+    //   }
+    //   window.DeactivateTextInput(client);                   // 초점을 잃음·소멸
+    virtual void ActivateTextInput(TextInputClient& client) noexcept;
+    virtual void DeactivateTextInput(TextInputClient& client) noexcept;
+    virtual void CancelTextComposition(TextInputClient& client) noexcept;
+    virtual void NotifyTextInputLayoutChanged(TextInputClient& client) noexcept;
+    virtual void ProcessTextInput(uint32 record) noexcept;
+
     virtual bool HasFocus() const noexcept = 0;
 
     // 최소화되어 그릴 영역이 없는지다. 렌더러는 이때 present를 건너뛴다.
     virtual bool IsMinimized() const noexcept = 0;
 
     virtual NativeWindowHandle NativeHandle() const noexcept = 0;
+
+    // 부동 창의 드롭 위치를 정할 때 사용하는 화면 좌표 변환과 최상위 창 판정이다.
+    virtual Result<IntVec2> ClientToDesktop(IntVec2 point) const noexcept;
+    virtual Result<IntVec2> DesktopToClient(IntVec2 point) const noexcept;
+    virtual bool IsAtDesktopPoint(IntVec2 point) const noexcept;
+    // client 지점이 놓인(가장 가까운) 모니터에서 팝업이 쓸 수 있는 영역을 client 좌표로 돌려준다:
+    // 작업 영역(작업 표시줄 제외), 이 창이 전체 화면이면 모니터 전체(UE GetWorkArea — 팝업 위치
+    // 계산, Docs/Design/UiToolkit 9.1절 UW7d). 창 backend가 없으면 Unsupported, OS 실패는
+    // DependencyFailed다.
+    virtual Result<IntRect> WorkAreaAt(IntVec2 clientPoint) const noexcept;
+
+    // 창 동작이다(직접 그린 창 버튼이 부른다). Minimize는 작업 표시줄로 내리고, ToggleMaximize는
+    // 최대화와 복원을 바꾸며, RequestClose는 OS 닫기 요청(WM_CLOSE)을 보내 IsCloseRequested 경로를
+    // 그대로 탄다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+    virtual void Minimize() noexcept;
+    virtual void ToggleMaximize() noexcept;
+    virtual void RequestClose() noexcept;
+    virtual bool IsMaximized() const noexcept;
+    // 창 모드를 바꾼다(UE SWindow::SetWindowMode). 메뉴 "Enable Fullscreen"(Shift+F11 — UE
+    // MainFrame ToggleFullscreen)과 전체 화면 제목 줄 두 번 누르기가 부른다. backend는 스스로
+    // 모드를 바꾸지 않는다. 같은 모드면 아무것도 하지 않는다. 지원하지 않는 모드는 Unsupported다(창
+    // backend가 없는 플랫폼은 Windowed 외 전부).
+    virtual Result<void> SetWindowMode(WindowMode mode) noexcept;
+    // 실제 창 모드다(UE GetWindowMode — Windows에서 Fullscreen을 요청하면 WindowedFullscreen이다).
+    virtual WindowMode GetWindowMode() const noexcept;
+    // 크기를 바꿀 수 있는 창인지다(WindowDesc::resizable). 아니면 최대화도 할 수 없다.
+    virtual bool IsResizable() const noexcept;
+    // client 좌표 한 점의 판정 영역이다. 직접 그린 창이면 팝업 → 크기 조절 가장자리 → UI 영역
+    // 순으로 정하고, OS 테두리 창은 UI 영역만 본다(Caption 또는 Client). 시험과 진단에도 쓴다.
+    virtual WindowZone HitZone(IntVec2 clientPoint) const noexcept;
+    // 활성 창(제목 막대를 활성 색으로 그린다)인지다. 기본은 HasFocus와 같다.
+    virtual bool IsActive() const noexcept;
+    virtual WindowFrame Frame() const noexcept;
 
     // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
     // 제목은 그대로다. OS 실패는 DependencyFailed다.
@@ -136,6 +314,16 @@ public:
     // 부른다.
     virtual void PresentBlankFrame() noexcept {
     }
+};
+
+// 데스크톱 위를 따라다니는 드래그 이미지다. 입력과 포커스는 원래 창에 남는다.
+class ROCKS_PLATFORMWINDOW_API DragImage {
+public:
+    static Result<UniquePtr<DragImage>> Create(Allocator& allocator, const Window& owner,
+                                               IntVec2 position, IntVec2 size,
+                                               Span<const uint8> rgba, uint8 opacity) noexcept;
+    virtual ~DragImage() = default;
+    virtual void MoveTo(IntVec2 position) noexcept = 0;
 };
 
 // 게임패드 입력·진동 backend다. 폴링 결과를 GamepadState 이벤트로 큐에 넣는다. 상태가 바뀐
@@ -195,5 +383,38 @@ enum class DesktopSessionState : uint8 {
 //       // GDI 기반 창 출력 검사는 근거를 남기고 건너뛴다
 //   }
 ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept;
+
+// 이 스레드로 다른 스레드가 보낸(SendMessage) 메시지만 처리한다. 입력 같은 게시 메시지는 큐에 남아
+// 다음 PumpEvents가 처리하므로 창 콜백이 다시 불리지 않는다. 렌더 lane을 기다리는 동안의 펌프로
+// 쓴다 — 렌더 lane의 스왑 체인 크기 변경·present가 창 스레드로 보낸 메시지를 기다리다 교착하지 않게
+// 한다 (Docs/Design/UiToolkit 18.5절). Windows는 PeekMessage(PM_NOREMOVE | PM_QS_SENDMESSAGE)이고,
+// 보낸 메시지가 없는 플랫폼은 아무것도 하지 않는다. 창을 만든 스레드에서 부른다.
+ROCKS_PLATFORMWINDOW_API void PumpSentMessages() noexcept;
+
+// 프로세스를 모니터별 DPI 인식(Windows PER_MONITOR_AWARE_V2 — 비client 배율까지 OS가 한다)으로
+// 바꾼다(Docs/Design/UiToolkit 19.2절, UE SetHighDPIMode). 실행 파일 시작 때 창·스플래시를 만들기
+// 전에 한 번 부른다. 부르지 않은 앱은 DPI를 인식하지 않는 채로 OS가 늘려 그린다. 결정적이어야 하는
+// 시험·캡처 실행은 부르지 않는다(배율 1). 지원하지 않는 OS(Windows 10 1703 전)·플랫폼은 아무것도
+// 하지 않고 false다.
+ROCKS_PLATFORMWINDOW_API bool EnableHighDpiAwareness() noexcept;
+
+// 이 스레드의 OS 메시지를 모두 처리해 창마다 대기 큐로 나눈다(Docs/Design/UiToolkit 19.2절 펌프
+// 수준 대기). 창을 만든 게임 lane에서 부른다. 닫기 요청(WM_QUIT)은 모든 창에 IsCloseRequested를
+// 세운다. 창 backend가 없는 플랫폼은 아무것도 하지 않는다.
+ROCKS_PLATFORMWINDOW_API void PumpMessages() noexcept;
+
+// 어느 창의 대기 큐에 이벤트가 남았으면 바로 돌아오고, 아니면 OS 메시지·WakeMessageWait·제한
+// 시간(ms) 중 먼저 온 것까지 기다린다. 게임 lane에서 부른다. 창 backend가 없는 플랫폼은 바로
+// 돌아온다.
+ROCKS_PLATFORMWINDOW_API void WaitForMessages(uint32 milliseconds) noexcept;
+
+// 어느 창의 대기 큐에 아직 가져가지 않은 이벤트가 있는지다(WaitForMessages가 바로 돌아오는 조건 —
+// Android는 지난 대기 뒤 신호가 있었는지). 게임 lane에서 부른다.
+ROCKS_PLATFORMWINDOW_API bool HasPendingWindowEvents() noexcept;
+
+// 다른 스레드에서 WaitForMessages를 깨운다(비동기 작업 완료 — 다음 루프가 결과를 본다). 어느
+// 스레드에서나 부를 수 있다. 기다리는 스레드가 없으면 다음 대기가 바로 돌아온다(Windows는 펌프
+// 스레드에 빈 메시지를 게시한다).
+ROCKS_PLATFORMWINDOW_API void WakeMessageWait() noexcept;
 
 } // namespace rocks::platform

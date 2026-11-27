@@ -7,7 +7,7 @@
   "source": {
     "url": "https://raw.githubusercontent.com/google/fonts/06bfe0d62a98375cb09c942fa18e68bd32cff057/ofl/nanumgothic/NanumGothic-Regular.ttf",
     "sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31",
-    "verification": "Byte copy of ofl/nanumgothic/NanumGothic-Regular.ttf and OFL.txt at google/fonts commit 06bfe0d62a98375cb09c942fa18e68bd32cff057 (fetched 2026-11-24). NanumGothic is the Korean typeface UE 5.8 adds to the editor composite font (Docs/Design/UiToolkit.ko.md section 4.2)."
+    "verification": "Byte copy of ofl/nanumgothic/NanumGothic-Regular.ttf and OFL.txt at google/fonts commit 06bfe0d62a98375cb09c942fa18e68bd32cff057 (fetched 2026-11-24). NanumGothic is the Korean typeface UE 5.8 adds to the editor composite font (Docs/Design/UiToolkit section 4.2)."
   },
   "licenses": [
     {

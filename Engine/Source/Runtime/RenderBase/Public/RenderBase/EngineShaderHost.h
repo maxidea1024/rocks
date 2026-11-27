@@ -60,6 +60,15 @@ struct ShaderSourceDirectory {
     StringView directory;
 };
 
+// 엔진 셰이더 준비 진행을 받는 곳이다(9.12절 6항 — 진행 보고 PG5). added는 컴파일할 job 수,
+// finished는 끝난 job 수(너겟 적중 포함)이고 공급자의 아무 스레드에서 불린다. 받는 곳은 잠금 없는
+// 일만 한다(예: ProgressCounter의 AddTotal·Add).
+struct ShaderPreparationProgress {
+    void (*added)(void* context, uint64 jobs) noexcept = nullptr;
+    void (*finished)(void* context, uint64 jobs) noexcept = nullptr;
+    void* context = nullptr;
+};
+
 // 쿠킹 라이브러리 원천이다(9.12절 3항, ShaderSystem 16.1절 SSD47). 호스트가 AttachCookedLibraries로
 // 붙인다. 구현은 매니페스트 v2를 읽는 CookedManifestShaderLibraries다(시험은 가짜 원천).
 // EngineRenderResources::Open이 SelectCookedShaderFormat으로 장치 형식을 고를 때 쓴다. 모든 호출은
@@ -158,6 +167,21 @@ public:
     void DetachCookedLibraries(CookedShaderLibrarySource& source) noexcept;
     CookedShaderLibrarySource* CookedLibraries() const noexcept;
 
+    // 엔진 셰이더 준비 진행을 받는 곳을 건다(9.12절 6항 — 시작 화면 Shaders 단계 등). 빈 값이면
+    // 뗀다. 떼기가 돌아온 뒤에는 앞 받는 곳이 불리지 않는다(보고와 같은 잠금). 어느 스레드에서나
+    // 부를 수 있다.
+    //
+    // 사용 예(호스트):
+    //   host.SetPreparationProgress({&OnAdded, &OnFinished, &stepCounter});
+    //   ...                                       // 렌더 lane 시작 — 공급자가 컴파일
+    //   host.SetPreparationProgress({});
+    void SetPreparationProgress(const ShaderPreparationProgress& progress) noexcept;
+
+    // 공급자가 부른다(아무 스레드): 컴파일할 job 수·끝난 job 수를 받는 곳에 넘긴다. 받는 곳이
+    // 없으면 아무 일도 하지 않는다. 진행은 호스트 상태가 아니므로 const다.
+    void ReportPreparationAdded(uint64 jobs) const noexcept;
+    void ReportPreparationFinished(uint64 jobs) const noexcept;
+
 private:
     struct DirectoryStorage {
         explicit DirectoryStorage(Allocator& allocator) noexcept
@@ -177,6 +201,9 @@ private:
     mutable platform::Mutex gate_;
     ShaderProvider* provider_ = nullptr;
     CookedShaderLibrarySource* cooked_ = nullptr;
+    // 준비 진행 받는 곳과 그 잠금이다(공급자 컴파일 스레드가 보고하므로 gate_와 따로 둔다).
+    mutable platform::Mutex progressGate_;
+    ShaderPreparationProgress preparation_;
     bool attached_ = false;
 };
 

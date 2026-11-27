@@ -75,6 +75,9 @@ struct ShaderLibraryCookDesc {
     // Replace, 같은 byte면 쓰지 않는다). 이름은 값 3의 이름, 비면 "<job 키 hex>.<확장자>"다. 쓰기
     // 실패는 라이브러리 실패가 아니고 형식 줄의 symbolFailures에 센다.
     StringView symbolDirectory;
+    // 형식마다의 관리자 Compile에 넘기는 취소·진행이다(ShaderSystem 11.1절 PG5 메모). 취소면 그
+    // 형식을 쓰지 않고 Cancelled다.
+    ShaderCompileControl control{};
 };
 
 enum class ShaderLibraryCookOutcome : uint8 {
@@ -166,7 +169,8 @@ struct ShaderLibraryCookReport {
 // DependencyFailed, CorruptEntry AlreadyExists, BuildFailed InvalidArgument, WriteFailed 파일
 // 오류)다. 입력 오류: allocator·registry·manager가 null이거나 출력 디렉터리가 비었거나 정점 입력
 // 타입이 잘못됨(id 0·이름 해시 불일치·중복) InvalidArgument, 등록부가 Freeze되지 않았으면 NotReady.
-// 할당 실패는 OutOfMemory다. Compile 자체의 오류(관리자 미시작 등)는 그대로 돌려준다.
+// 할당 실패는 OutOfMemory다. Compile 자체의 오류(관리자 미시작 등)와 취소(Cancelled)는 그대로
+// 돌려준다.
 ROCKS_SHADERCOMPILER_API Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
                                                           ShaderLibraryCookReport& report) noexcept;
 

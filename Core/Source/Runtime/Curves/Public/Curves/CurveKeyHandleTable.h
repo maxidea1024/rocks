@@ -13,10 +13,11 @@
 #include <Curves/TangentCurve.h>
 #include <Platform/Memory.h>
 
-// 커브 키 핸들 표다(Docs/Design/CurveData.ko.md 8절, D3 — CV7, UE 5.8 FKeyHandle·FKeyHandleMap
-// 대응). 편집 도구·undo가 키를 index 대신 안정된 핸들로 가리키게 한다. 핸들은 커브 값의 일부가
-// 아니다 — 표는 값 밖의 편집 상태이고 커브를 쥐지 않는다(커브는 객체 필드·배열 원소 안에서 옮겨
-// 다니므로 주소를 붙잡을 수 없다). 표의 모든 함수가 커브를 인자로 받는다.
+// 커브 키 핸들 표다(Docs/Design/CurveData/README.ko.md 8절, D3 — CV7, UE 5.8
+// FKeyHandle·FKeyHandleMap 대응). 편집 도구·undo가 키를 index 대신 안정된 핸들로 가리키게 한다.
+// 핸들은 커브 값의 일부가 아니다 — 표는 값 밖의 편집 상태이고 커브를 쥐지 않는다(커브는 객체
+// 필드·배열 원소 안에서 옮겨 다니므로 주소를 붙잡을 수 없다). 표의 모든 함수가 커브를 인자로
+// 받는다.
 namespace rocks {
 
 // 키 하나를 가리키는 편집용 핸들이다(UE FKeyHandle). 값은 표마다 1부터 단조 증가하는 uint32이고 0은

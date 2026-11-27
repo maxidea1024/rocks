@@ -348,7 +348,7 @@ Result<void> Importer::ScalarAt(const TextSlot& slot, JsonValue value) noexcept 
 
 Result<void> Importer::Elements(const TextSlot& slot, JsonValue value) noexcept {
     const FieldSchema& field = *slot.field;
-    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 통째 교체).
+    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData/README.ko.md D18 — 통째 교체).
     if (::rocks::detail::IsByteArrayField(field)) {
         if (!value.IsString()) {
             return Report(TextDiagnosticCode::InvalidValue, value, "expected a Base64 string");

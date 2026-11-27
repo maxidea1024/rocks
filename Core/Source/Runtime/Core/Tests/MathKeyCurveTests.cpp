@@ -4,9 +4,9 @@
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
-// KeyCurveMath의 독립 고정 벡터와 경계 시험이다(Docs/Design/CurveData.ko.md 16절). 기대값은 UE 참조
-// 코드(MathKeyCurveGoldenTests.cpp)를 거치지 않고 손으로 계산했다. 계산 과정은 각 사례 옆 주석에
-// 있다. float 연산 결과의 비트까지 정한 값은 float 연산 하나하나를 double로 계산해 float로
+// KeyCurveMath의 독립 고정 벡터와 경계 시험이다(Docs/Design/CurveData/README.ko.md 16절). 기대값은
+// UE 참조 코드(MathKeyCurveGoldenTests.cpp)를 거치지 않고 손으로 계산했다. 계산 과정은 각 사례 옆
+// 주석에 있다. float 연산 결과의 비트까지 정한 값은 float 연산 하나하나를 double로 계산해 float로
 // 반올림하는 방식 (double은 float 연산 하나를 정확히 반올림한다)으로 계수를 대입해 얻었다.
 namespace rocks::test {
 

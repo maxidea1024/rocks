@@ -12,9 +12,9 @@
 
 namespace rocks {
 
-// 키마다 보간·접선·가중 접선을 갖는 스칼라 커브다(UE 5.8 FRichCurve — Docs/Design/CurveData.ko.md
-// 4–7절). 시간 오름차순으로 정렬된 TangentCurveKey 배열과 공통 칸(ScalarCurveBase: 기본값·앞·뒤
-// 외삽)으로 이뤄진다.
+// 키마다 보간·접선·가중 접선을 갖는 스칼라 커브다(UE 5.8 FRichCurve —
+// Docs/Design/CurveData/README.ko.md 4–7절). 시간 오름차순으로 정렬된 TangentCurveKey 배열과 공통
+// 칸(ScalarCurveBase: 기본값·앞·뒤 외삽)으로 이뤄진다.
 //
 // 불변식: 키 시간은 유한하고 오름차순이다(같은 시간 키는 허용한다). 키 배열은 private이라 C++
 // API가 이 불변식을 지키고, 리플렉션 경로(graph decode·JSON·명령행 import·대입 묶음·경로 쓰기

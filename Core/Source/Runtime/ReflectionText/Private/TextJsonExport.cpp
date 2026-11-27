@@ -307,7 +307,8 @@ Result<void> Exporter::WriteArray(const TextSlot& slot) noexcept {
         count = counted.Value();
     }
 
-    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 명령행과 같은 텍스트).
+    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData/README.ko.md D18 — 명령행과 같은
+    // 텍스트).
     if (::rocks::detail::IsByteArrayField(field)) {
         Array<uint8> bytes(allocator);
         if (auto reserved = bytes.TryReserve(count); !reserved) {

@@ -5,8 +5,8 @@
 #include <Core/Math/InterpCurveMath.h>
 #include <Core/Math/MathUtility.h>
 
-// 키 커브(TangentCurve·PlainCurve·PackedTangentCurve — Docs/Design/CurveData.ko.md)의 평가 핵심
-// 식이다. 두 키 사이 보간(EvalCurveSegment), Bezier(BezierCurveValue), 가중
+// 키 커브(TangentCurve·PlainCurve·PackedTangentCurve — Docs/Design/CurveData/README.ko.md)의 평가
+// 핵심 식이다. 두 키 사이 보간(EvalCurveSegment), Bezier(BezierCurveValue), 가중
 // 접선(WeightedCurveSegment)과 그 3차 방정식(SolveCurveCubic), 순환 외삽의 시간
 // 재배치(CycleCurveTime), 자동 접선(ComputeCurveTangent), 그리고 UE FMath::SinCos(float)
 // 다항식(CurveSinCos)이다.

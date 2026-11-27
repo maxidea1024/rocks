@@ -400,3 +400,5 @@ StringView PendingWorkRegistry::SourceNameAt(usize orderIndex) const noexcept {
 }
 
 } // namespace rocks
+
+ROCKS_DEFINE_HOST_SERVICE(rocks::PendingWorkRegistry)

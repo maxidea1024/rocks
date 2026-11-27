@@ -1,0 +1,5 @@
+#include <Core/Module/ModuleEntry.h>
+
+// UiWorld 모듈 진입점이다(수명 동작 없음 — Docs/Design/ModuleLoader 3.1절). 타입 등록은
+// RegisterUiWorldTypes다.
+ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, UiWorld)

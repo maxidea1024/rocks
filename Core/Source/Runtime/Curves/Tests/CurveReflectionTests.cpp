@@ -16,7 +16,7 @@
 #include <ReflectionText/TextJson.h>
 #include <TestSupport/Test.h>
 
-// 커브 값 타입의 리플렉션 시험이다(Docs/Design/CurveData.ko.md 9절·16절, fixture
+// 커브 값 타입의 리플렉션 시험이다(Docs/Design/CurveData/README.ko.md 9절·16절, fixture
 // CurvesTestFixtures/CurveFixture.h): 모든 자리(필드·Array 원소·Optional·Map 값·InstancedStruct
 // 내용)의 그래프 왕복과 다시 저장 byte 같음, 상속 필드 ID(base 소유)·private 키 배열의 도구 이름
 // keys·키 Atomic, JSON 왕복, 검증 hook(정렬·유한 시간)이 graph decode·대입 묶음·JSON import·경로

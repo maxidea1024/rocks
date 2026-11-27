@@ -2,8 +2,8 @@
 
 #include "CurveKeyEdit.h"
 
-// TangentCurve의 평가·자동 접선·키 편집이다(Docs/Design/CurveData.ko.md 5–7절). 중복 키 제거는
-// TangentCurveRedundant.cpp, 값 범위는 TangentCurveValueRange.cpp다.
+// TangentCurve의 평가·자동 접선·키 편집이다(Docs/Design/CurveData/README.ko.md 5–7절). 중복 키
+// 제거는 TangentCurveRedundant.cpp, 값 범위는 TangentCurveValueRange.cpp다.
 namespace rocks {
 
 namespace {

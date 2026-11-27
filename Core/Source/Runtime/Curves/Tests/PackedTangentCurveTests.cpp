@@ -9,7 +9,7 @@
 #include "../Private/PackedTangentCurveTestAccess.h"
 #include "CurvePackUeReference.h"
 
-// PackedTangentCurve 시험이다(Docs/Design/CurveData.ko.md 11절·16절 — CV8):
+// PackedTangentCurve 시험이다(Docs/Design/CurveData/README.ko.md 11절·16절 — CV8):
 // - UE 5.8 CompressCurve를 옮긴 참조(CurvePackUeReference.h — 머리 주석에 UE 줄 대조표)와 byte
 //   대조: 같은 형식·시간 형식이면 packed byte가 같고, 형식이 다르면 15절 수정(구간 단위 가중·비트
 //   같은 Constant)으로 설명되는 사례뿐이다.

@@ -6,6 +6,8 @@
 
 시간 운에 기대지 않는다. 시계는 주입하고(가짜 시계를 시험이 직접 전진), 스레드 순서는 명시 gate로 만든다. 단언은 결정적인 최종 상태와 사건 순서에 한다.
 
+PG5 시험 파일: `Progress/Tests/CommandProgressTests.cpp`(27), `Engine/Tests/CountedPendingWorkTests.cpp`(28, 등록소 호스트 서비스), `ShaderCompiler/Tests/ShaderCompileProgressTests.cpp`(29–31)·`ShaderWorkerChannelTests.cpp`(30의 채널 쪽), RenderBase `EngineShaderHostTests.cpp`(준비 진행), Sandbox `--self-test` 엔진 호스트 자식(32).
+
 PG4 시험 파일: `Engine/Tests/PendingWorkRegistryTests.cpp`(22–26, Engine 프레임·종료 연결).
 
 PG3 시험 파일: `Progress/Tests/ProgressOutputTests.cpp`(15·16·17, 제어 줄 처리)·`ProgressChildTests.cpp`(18–21 — 자식은 시험 실행 파일을 `--process-probe progress-child <시나리오>`로 다시 띄운다. 부모의 다음 동작은 자식이 쓴 줄·pipe EOF로 순서를 정한다), PlatformBase `StandardStream_TimedInputReportsNoProgressDataAndEof`. 17(원문 추출)은 JSONL 줄의 `title`·`titleId`·`msgId`로 본다.
@@ -38,3 +40,9 @@ PG2 시험 파일: `Core/Source/Runtime/Progress/Tests/ProgressScopeTests.cpp`(3
 24. `FinishAll`이 모든 source를 순서대로 부르고 끝에 남은 수 0, 할 일이 있을 때만 막는 진행 작업, 하위 작업에 바인딩된 source 구간, 처음 오류.
 25. `FinishFor`·`CancelFor`가 모든 source에 같은 목록(빈 목록은 no-op), `Shutdown`은 정방향·뒤 `Unregister`, 호출 중 `Register`·`Unregister`·재진입 → `Busy`.
 26. `ApplyCompleted` 매개변수 전달(시간 예산·Tryout 전용).
+27. 명령 연결: 인자 해석(네 인자·둘째 모드 `Invalid`·모르는 값·`NotProgress`), 켜져 있지 않은 hub를 켜고 끔·켜진 hub는 그대로, JSONL 모드의 begin·progress·end 줄(주입 writer), 주입 제어 읽기의 `cancel` → 최상위 작업 취소, `Stop` 두 번.
+28. `CountedPendingWork`: 남은 수(더한 수 − 끝난 수, 일 중이면 1 이상), 등록소를 거친 합계, `FinishAll`이 다른 스레드의 일 구간이 닫힐 때까지 막음(gate로 순서 고정)·하위 작업 계수, `Shutdown`이 token을 취소하고 기다림·두 번, `Shutdown` 뒤 일은 바로 취소, `FinishFor`·`CancelFor`·`ApplyCompleted` no-op, 엔진이 등록소를 호스트 서비스로 올리고 종료 뒤 뗌.
+29. 셰이더 관리자 계수: 실제 워커로 sink의 더한 수 = 끝난 수 = job 수(빈 캐시·찬 캐시·실패 job 포함), 관리자 `cancelled`, `MakeShaderCompileCounterSink`의 작업 계수 done = total.
+30. 셰이더 취소: 시작 전 취소 → 모든 job `Cancelled`·워커 0·`Cancelled` 반환. 진행 중 묶음 취소(held hook이 취소하고 `Keep`) → 워커와 손자 프로세스가 끝남(`WaitForProcessExit`)·묶음 `Cancelled`·대기 묶음은 워커 없이 `Cancelled`·sink 합계 일치.
+31. `shader-compile --progress=jsonl`: 표준 출력 줄이 모두 JSONL v1(`v`·`e`)이고 begin "Compiling shaders"·count 모양 progress(`done` = `total`)·end succeeded, 결과 줄은 표준 오류. 취소 대기(hub `RequestCancelAllTopLevel` 뒤 실행) → 종료 코드 130·end cancelled.
+32. Sandbox: 창 엔진 실행(`--engine --window --graphics=opengl` — 쿠킹하지 않는 형식이라 공급자가 만든다)이 `Shaders` 시작 단계에 들어가 준비 진행 "N of N"(N > 0)을 남긴다.

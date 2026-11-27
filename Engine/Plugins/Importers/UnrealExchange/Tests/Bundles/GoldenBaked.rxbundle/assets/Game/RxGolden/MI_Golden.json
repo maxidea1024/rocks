@@ -1,0 +1,597 @@
+{
+  "objectPath": "/Game/RxGolden/MI_Golden.MI_Golden",
+  "class": "MaterialInstanceConstant",
+  "ueClass": "/Script/Engine.MaterialInstanceConstant",
+  "dependencies": [
+    {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden",
+      "class": "Material",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "ParameterStateId": {
+      "A": 382124714,
+      "B": 1222152401,
+      "C": -408886087,
+      "D": -1165143731
+    },
+    "PhysMaterialMask": null,
+    "PhysMaterial": null,
+    "PhysicalMaterialMap": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "Parent": {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden"
+    },
+    "NaniteOverrideMaterial": {
+      "bEnableOverride": true,
+      "OverrideMaterialEditor": null,
+      "OverrideMaterial": null,
+      "OverrideMaterialRef": null
+    },
+    "SpecularProfileOverride": null,
+    "ToonProfileOverride": null,
+    "bHasStaticPermutationResource": false,
+    "bOverrideSubsurfaceProfile": false,
+    "bOverrideSpecularProfile": false,
+    "bOverrideToonProfile": false,
+    "bOverrideBlendableLocation": false,
+    "bOverrideBlendablePriority": false,
+    "bOverridePhysMaterial": false,
+    "BlendableLocationOverride": "BL_SceneColorAfterTonemapping",
+    "BlendablePriorityOverride": 0,
+    "ScalarParameterValues": [
+      {
+        "AtlasData": {
+          "bIsUsedAsAtlasPosition": false,
+          "Curve": null,
+          "Atlas": null
+        },
+        "ParameterInfo": {
+          "Name": "Roughness",
+          "Association": "GlobalParameter",
+          "Index": -1
+        },
+        "ParameterValue": 0.25,
+        "ExpressionGUID": {
+          "A": 771328588,
+          "B": 1203031128,
+          "C": -685321836,
+          "D": 613332944
+        }
+      }
+    ],
+    "VectorParameterValues": [],
+    "DoubleVectorParameterValues": [],
+    "TextureParameterValues": [],
+    "TextureCollectionParameterValues": [],
+    "ParameterCollectionParameterValues": [],
+    "RuntimeVirtualTextureParameterValues": [],
+    "SparseVolumeTextureParameterValues": [],
+    "FontParameterValues": [],
+    "UserSceneTextureOverrides": [],
+    "EnumerationObjects": [],
+    "BasePropertyOverrides": {
+      "bOverride_OpacityMaskClipValue": false,
+      "bOverride_BlendMode": false,
+      "bOverride_ShadingModel": false,
+      "bOverride_DitheredLODTransition": false,
+      "bOverride_CastDynamicShadowAsMasked": false,
+      "bOverride_TwoSided": false,
+      "bOverride_bIsThinSurface": false,
+      "bOverride_OutputTranslucentVelocity": false,
+      "bOverride_bHasPixelAnimation": false,
+      "bOverride_bEnableTessellation": false,
+      "bOverride_DisplacementScaling": false,
+      "bOverride_bEnableDisplacementFade": false,
+      "bOverride_DisplacementFadeRange": false,
+      "bOverride_MaxWorldPositionOffsetDisplacement": false,
+      "bOverride_CompatibleWithLumenCardSharing": false,
+      "bOverride_UsageFlags": 0,
+      "TwoSided": false,
+      "bIsThinSurface": false,
+      "DitheredLODTransition": false,
+      "bCastDynamicShadowAsMasked": false,
+      "bOutputTranslucentVelocity": false,
+      "bHasPixelAnimation": false,
+      "bEnableTessellation": false,
+      "bEnableDisplacementFade": false,
+      "bCompatibleWithLumenCardSharing": false,
+      "BlendMode": "BLEND_Opaque",
+      "ShadingModel": "MSM_DefaultLit",
+      "OpacityMaskClipValue": 0.333299994,
+      "DisplacementScaling": {
+        "Magnitude": 4,
+        "Center": 0.5
+      },
+      "DisplacementFadeRange": {
+        "StartSizePixels": 4,
+        "EndSizePixels": 1
+      },
+      "MaxWorldPositionOffsetDisplacement": 0,
+      "UsageFlags": 4194304
+    },
+    "StaticParametersRuntime": {
+      "StaticSwitchParameters": [],
+      "MaterialLayers": {
+        "Layers": [],
+        "Blends": []
+      },
+      "bHasMaterialLayers": false
+    },
+    "ReferencedTextureGuids": [],
+    "EditorOnlyData": {
+      "subobject": "MI_GoldenEditorOnlyData",
+      "class": "/Script/Engine.MaterialInstanceEditorOnlyData",
+      "properties": {
+        "StaticParameters": {
+          "StaticComponentMaskParameters": [],
+          "TerrainLayerWeightParameters": [],
+          "MaterialLayers": {
+            "LayerStates": [],
+            "LayerNames": [],
+            "RestrictToLayerRelatives": [],
+            "RestrictToBlendRelatives": [],
+            "LayerGuids": [],
+            "LayerLinkStates": [],
+            "DeletedParentLayerGuids": []
+          }
+        }
+      }
+    },
+    "SubsurfaceProfile": null,
+    "SubsurfaceProfiles": [],
+    "SpecularProfiles": [],
+    "ToonProfiles": [],
+    "NeuralProfile": null,
+    "LightmassSettings": {
+      "EmissiveBoost": 1,
+      "DiffuseBoost": 1,
+      "ExportResolutionScale": 1,
+      "bCastShadowAsMasked": false,
+      "bOverrideCastShadowAsMasked": false,
+      "bOverrideEmissiveBoost": false,
+      "bOverrideDiffuseBoost": false,
+      "bOverrideExportResolutionScale": false
+    },
+    "TextureStreamingDataVersion": 0,
+    "TextureStreamingData": [],
+    "ReferencedDefaultTextures": [],
+    "AssetUserData": [],
+    "bIncludedInBaseGame": false,
+    "PreviewMesh": null,
+    "ThumbnailInfo": null,
+    "LayerParameterExpansion": [],
+    "ParameterOverviewExpansion": [],
+    "AssetImportData": null,
+    "LightingGuid": {
+      "A": 64354395,
+      "B": 1283711782,
+      "C": 2119756421,
+      "D": -1014003464
+    }
+  },
+  "data": {
+    "resolved": [
+      {
+        "parameter": {
+          "Name": "Roughness",
+          "Association": "GlobalParameter",
+          "Index": -1
+        },
+        "type": "Scalar",
+        "value": 0.25
+      }
+    ],
+    "baked": {
+      "bakeSize": 16,
+      "properties": [
+        {
+          "property": "BaseColor",
+          "linear": false,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "sRGB"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "9d60e9d5e5c0ef2538b999c9aa79ed5b049aec8b402aa54955195190506c697f",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Normal",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "105680983eeda347bf443652e3534b3b9438fdbafcd548fbf2f09bd908268572",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Metallic",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "e3820096cb82366b860b8a4e668453a7aaaf423af03bdf289fa308ea03a79332",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Roughness",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "9628e815241cc05d54f579e472f651b255ff42ad8da0bf3b2a265818555169aa",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Specular",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "35c55b39e12bb820cea37dc9184b88488974b5e08c4f1c8a3817025c8cc05d33",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "EmissiveColor",
+          "linear": true,
+          "source": {
+            "format": "RGBA16F",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "RGBA16F",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 16,
+                "sizeY": 16,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 16,
+                    "sizeY": 16,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "200e874ea65e735b120e1790d4bef086f31872d375ee882e4e74341c6d4af7c7",
+                        "bytes": 2048,
+                        "layout": "f16",
+                        "components": 4,
+                        "count": 256
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "Opacity",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "OpacityMask",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "property": "AmbientOcclusion",
+          "linear": true,
+          "source": {
+            "format": "BGRA8",
+            "compression": "None",
+            "lossyOrigin": null,
+            "longLat": false,
+            "numLayers": 1,
+            "numBlocks": 1,
+            "layers": [
+              {
+                "format": "BGRA8",
+                "gammaSpace": "Linear"
+              }
+            ],
+            "blocks": [
+              {
+                "blockX": 0,
+                "blockY": 0,
+                "sizeX": 1,
+                "sizeY": 1,
+                "numSlices": 1,
+                "numMips": 1,
+                "mips": [
+                  {
+                    "sizeX": 1,
+                    "sizeY": 1,
+                    "numSlices": 1,
+                    "pixels": [
+                      {
+                        "blob": "ad95131bc0b799c0b1af477fb14fcf26a6a9f76079e48bf090acb7e8367bfd0e",
+                        "bytes": 4,
+                        "layout": "u8",
+                        "components": 4,
+                        "count": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

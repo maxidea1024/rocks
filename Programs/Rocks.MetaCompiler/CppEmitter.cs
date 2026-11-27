@@ -291,11 +291,15 @@ internal static partial class CppEmitter
         // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다. 클래스 대상(참조의 기대 타입·ClassRef의 Base)은
         // NativeTypeKey만 쓰므로 헤더에서는 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다 —
         // 그 키가 필요한 생성 소스가 따로 include한다).
+        // 이벤트 인자 칸(상속 이벤트 포함)의 enum·struct도 같다: Broadcast를 부르는 클래스 구현 TU는 클래스 생성 헤더만 include하는데,
+        // 그 TU의 FrameLayoutOf<Args...>가 enum을 Opaque로 보면 생성 연산표와 다른 배치가 링크된다(ODR — Docs/Design/EventReflection.ko.md ED18).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
-        IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
+        FieldModel[] valueSlots = own.SelectMany(type => type.Fields)
+            .Concat(own.SelectMany(type => type.Fields).SelectMany(field => field.EventParameters)).ToArray();
+        IEnumerable<string> valueHeaders = valueSlots
             .Where(field => field.TargetKind is "Enum" or "Struct" or "InstancedStruct" && field.Reference is not null)
             .Select(field => field.Reference!)
-            .Concat(own.SelectMany(type => type.Fields).Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
+            .Concat(valueSlots.Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
                 .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Concat(own.Where(type => type.IsStruct && type.Base.Length != 0).Select(type => type.Base))
@@ -1153,7 +1157,7 @@ internal static partial class CppEmitter
             Body($"ops.migrate = &{native}::Migrate;");
         }
 
-        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
+        // 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
         Body("if constexpr (HasValidateTree) {");
         Body($"ops.validateTree = +[](const void* value) noexcept -> Result<void> {{ return ValidateTree(*static_cast<const {native}*>(value)); }};");
         Body("}");
@@ -1183,7 +1187,7 @@ internal static partial class CppEmitter
         Line("};");
     }
 
-    // struct 값 트리의 검증이다(Docs/Design/CurveData.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
+    // struct 값 트리의 검증이다(Docs/Design/CurveData/README.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
     // PROPERTY 멤버 형식(detail::ValueValidate<멤버>::HasHook) 중 하나라도 hook을 담을 수 있는지다. ValidateTree는 base 하위 객체, PROPERTY
     // 멤버 순서(bitfield bool 제외 — hook이 없다), 마지막에 자기 Validate 순으로 안쪽부터 검증하고 첫 거부에서 멈춘다. NATIVE 멤버는
     // 리플렉션 경로가 바꾸지 않으므로 보지 않는다. 자기 Validate는 시그니처를 static_assert로 대조하고, hook struct는 통째로 복사할 수

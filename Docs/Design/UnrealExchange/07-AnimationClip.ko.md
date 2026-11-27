@@ -2,7 +2,7 @@
 
 - 데이터 모델(`GetDataModelInterface()`, E/Classes/Animation/AnimSequenceBase.h:243-291): `GetFrameRate()`, `GetNumberOfFrames()`, `GetNumberOfKeys()`(= 프레임 수 + 1).
 - 본 트랙: `GetBoneTrackNames()` 순으로 `GetBoneTrackTransforms(Name, Out)`(IAnimationDataModel.h:189-193)이 준 키 수만큼의 `FTransform`(double)을 float로 바꿔 이동·회전·크기 blob 세 개로 쓴다. 성분의 모든 키가 비트 단위로 같으면 키 1개로 쓴다.
-- 커브: `GetFloatCurves()`의 `FRichCurve` 키(`InterpMode`·`TangentMode`·`TangentWeightMode`·시간·값·접선·가중치, E/Classes/Curves/RichCurve.h:80-118)와 외삽·기본값, 플래그. Rocks `TangentCurve`가 같은 필드를 갖는다([커브 데이터](../CurveData.ko.md)). transform 커브는 9개 커브로 쓴다.
+- 커브: `GetFloatCurves()`의 `FRichCurve` 키(`InterpMode`·`TangentMode`·`TangentWeightMode`·시간·값·접선·가중치, E/Classes/Curves/RichCurve.h:80-118)와 외삽·기본값, 플래그. Rocks `TangentCurve`가 같은 필드를 갖는다([커브 데이터](../CurveData/README.ko.md)). transform 커브는 9개 커브로 쓴다.
 - 이벤트: `Notifies`의 `GetTriggerTime()`·`GetDuration()`, `TrackIndex`, `NotifyName`, notify 클래스 경로(`Notify` 또는 `NotifyStateClass`의 클래스), `NotifyTriggerChance`, 서버·follower 트리거 플래그. notify 객체의 프로퍼티도 `properties`로 덤프하지만 Rocks v1은 받지 않는다(버리고 경고 — MeshAnimationAssets 7.3절). `AnimNotifyTracks` 이름, `AuthoredSyncMarkers`.
 - 설정: MeshAnimationAssets 7.1절 표의 UE 프로퍼티(additive·root motion·interpolation·RateScale·bLoop·PlatformTargetFrameRate·RetargetSource). `RefPoseSeq`는 Hard 의존으로 기록한다.
 - animated bone attribute는 개수만 진단으로 남긴다.

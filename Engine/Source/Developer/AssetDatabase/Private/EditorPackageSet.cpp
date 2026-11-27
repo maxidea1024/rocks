@@ -840,6 +840,10 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         return oom(synced.Error());
     }
 
+    // 열 때 원본 재구성이 실패하면 이번 호출이 붙인 경고를 되돌린다(닫은 패키지의 경고가 남지
+    // 않게).
+    const usize warningsBefore = warnings != nullptr ? warnings->Size() : 0;
+
     // 닫힘을 너비 우선으로 넓힌다. seen은 넣은 id(id 순)다.
     Array<Pending> pending(allocator);
     Array<AssetId> seen(allocator);
@@ -1150,6 +1154,11 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
             // 오류가 우선이다(남은 패키지가 열린 채다 — CloseOpened 설명).
             if (auto closed = CloseOpened(before.View()); !closed) {
                 return oom(closed.Error());
+            }
+
+            if (warnings != nullptr) {
+                // 축소는 실패하지 않는다.
+                (void)warnings->TryResize(warningsBefore);
             }
 
             if (rebuildFailure.code == AssetDiagnosticCode::None) {
