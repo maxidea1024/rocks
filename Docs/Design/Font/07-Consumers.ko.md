@@ -28,7 +28,7 @@ Canvas(UE `UCanvas`·`FCanvas`·`FCanvasTextItem` — 디버그 표시·stat·�
 | `FontSampleParameter` | `UMaterialExpressionFontSampleParameter`(`ParameterName`·`Group`) | 위의 파라미터 판. 머티리얼 인스턴스에서 (Font, 페이지)를 바꾼다. **파라미터 종류 "font"는 이것 하나다** |
 | `FontSignedDistance` | `UMaterialExpressionFontSignedDistance` | 파라미터가 아닌 입력 노드. UI 거리장 글자 머티리얼에 거리장 데이터(`FontSignedDistanceData`)를 공급 |
 
-[머티리얼](../MaterialSystem.ko.md)의 파라미터 종류 표에서 "font — 후속"을 `FontSampleParameter`로 바꾼다(12장). 노드 구현은 머티리얼 단계의 FT7이다.
+[머티리얼](../MaterialSystem/README.ko.md)의 파라미터 종류 표에서 "font — 후속"을 `FontSampleParameter`로 바꾼다(12장). 노드 구현은 머티리얼 단계의 FT7이다.
 
 ### 7.5 기본 글꼴·마지막 fallback·내장 UI 글꼴
 

@@ -644,9 +644,24 @@ public:
     virtual Result<PipelineHandle>
     CreateComputePipeline(const ComputePipelineDesc& desc) noexcept = 0;
 
-    // 스왑체인의 다음 백버퍼에 그리기를 시작한다(clear 포함). 장치 손실 뒤에는 Destroyed다.
-    virtual Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
-                                               const ClearColor& clear) noexcept = 0;
+    // 스왑체인 백버퍼에 기록을 시작한다(SwapChainPassDesc). 시작 때 백버퍼를 RenderTarget으로
+    // 전이하고 load 동작을 한다. desc.present가 거짓이면 EndFrame이 present하지 않고 백버퍼를
+    // 그대로 두어 다음 BeginFrame이 이어 그린다(RenderBase 8절 "스왑체인 공유 설계").
+    //
+    // 실패: stale handle StaleHandle, load Load인데 그 스왑체인에 그리는 중인 프레임이
+    // 없으면(present 뒤·처음·크기 변경 뒤) InvalidArgument, 크기 변경 실패로 버퍼가 없으면
+    // DependencyFailed, 기록 중 Busy, 장치 손실 Destroyed.
+    virtual Result<CommandContext*> BeginFrame(const SwapChainPassDesc& desc) noexcept = 0;
+
+    // 스왑체인의 다음 백버퍼에 clear로 그리기를 시작하고 EndFrame에서 present한다(BeginFrame의
+    // 간단한 형태).
+    Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
+                                       const ClearColor& clear) noexcept {
+        SwapChainPassDesc desc;
+        desc.swapChain = swapChain;
+        desc.clear = clear;
+        return BeginFrame(desc);
+    }
 
     // attachment들(PassDesc)에 기록을 시작한다(GX4). 색 attachment는 RenderTarget, 깊이는
     // DepthStencil 텍스처이고 크기가 모두 같아야 한다. 시작 때 attachment를 RenderTarget·DepthWrite
@@ -666,10 +681,11 @@ public:
     }
 
     // 기록을 그 기록의 queue(PassDesc::queue)에 제출하고 그 완료 지점을 돌려준다.
-    // BeginFrame이었으면 present한다. compute queue 기록이면 쌓인 업로드를 먼저 graphics queue에
-    // 제출하고 compute 제출이 그것을 기다린다(업로드는 다음 제출 전에 실행된다). 진행 중인 프레임이
-    // 없으면 InvalidArgument다. 제출은 했지만 present가 실패하면 실패를 돌려주며 제출의 완료 지점은
-    // LastSubmittedFence로 읽는다. 장치 손실이 드러나면 Destroyed다.
+    // present를 요청한 BeginFrame(SwapChainPassDesc::present)이었으면 present한다. compute queue
+    // 기록이면 쌓인 업로드를 먼저 graphics queue에 제출하고 compute 제출이 그것을 기다린다(업로드는
+    // 다음 제출 전에 실행된다). 진행 중인 프레임이 없으면 InvalidArgument다. 제출은 했지만
+    // present가 실패하면 실패를 돌려주며 제출의 완료 지점은 LastSubmittedFence로 읽는다. 장치
+    // 손실이 드러나면 Destroyed다.
     virtual Result<GpuFencePoint> EndFrame() noexcept = 0;
 
     // 이 호출 뒤 queue에 내는 모든 제출이 point(다른 queue에 제출한 지점)가 끝난 뒤에 실행되게
@@ -870,6 +886,10 @@ public:
 
     // 회수 대기 중인 자원 수다(진단·시험: 해제 누락 0 확인).
     virtual usize PendingRetireCount() const noexcept = 0;
+
+    // EndFrame이 낸 present의 장치 수명 누적 수다(실패한 present는 세지 않는다). 시험이 "프레임당
+    // present 하나"를 확인할 때 쓴다(RenderBase 8절 "스왑체인 공유 설계").
+    virtual uint64 PresentCount() const noexcept = 0;
 };
 
 } // namespace rocks::graphics

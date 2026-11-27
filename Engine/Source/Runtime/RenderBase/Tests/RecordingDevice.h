@@ -26,6 +26,7 @@ public:
         CreateBuffer,
         CreateTexture,
         CreatePipeline,
+        // 스왑체인 기록 시작이다. value는 SwapChainPassValue(load, present)다.
         BeginFrame,
         BeginOffscreen,
         SetPipeline,
@@ -95,8 +96,15 @@ public:
         UpdateConstantBuffer,
         RetireConstantBuffer,
         SetConstantBuffer,
-        SetConstantData
+        SetConstantData,
+        // present한 스왑체인 기록의 present다(EndFrame 바로 뒤). value는 스왑체인 slot 번호다.
+        Present
     };
+
+    // Op::BeginFrame의 value다: 아래 bit가 present, 그 위가 load 동작 번호(graphics::LoadAction)다.
+    static constexpr uint64 SwapChainPassValue(graphics::LoadAction load, bool present) noexcept {
+        return (static_cast<uint64>(load) << 1) | (present ? 1u : 0u);
+    }
 
     // Op::SetConstantBuffer·SetConstantData의 value다.
     static constexpr uint64 ConstantValue(graphics::ShaderStage stage, uint32 slot,
@@ -329,9 +337,11 @@ public:
     // CreatedShaders·RetiredShaders로 센다.
     Result<graphics::ShaderHandle>
     CreateShader(const graphics::ShaderCodeDesc& desc) noexcept override;
+    using graphics::Device::BeginFrame;
+    // 스왑체인마다 그리는 중인 프레임(present하지 않은 기록)을 추적하고 load Load는 그때만 받는다
+    // (실제 backend와 같은 규칙). SetBeginFrameFailure로 실패를 주입한다.
     Result<graphics::CommandContext*>
-    BeginFrame(graphics::SwapChainHandle swapChain,
-               const graphics::ClearColor& clear) noexcept override;
+    BeginFrame(const graphics::SwapChainPassDesc& desc) noexcept override;
     Result<graphics::CommandContext*> BeginPass(const graphics::PassDesc& pass) noexcept override;
     Result<graphics::GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
@@ -400,6 +410,14 @@ public:
     uint64 NullTextureBindings() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+    uint64 PresentCount() const noexcept override;
+
+    // 성공한 BeginFrame이 succeeding번 나온 뒤의 BeginFrame이 error로 실패하게 한다(한 번, 스왑체인
+    // acquire 실패 경로 시험). error가 None이면 끈다. 장치를 쓰기 전에 부른다.
+    void SetBeginFrameFailure(uint32 succeeding, ErrorCode error) noexcept {
+        beginFrameSuccesses_ = succeeding;
+        beginFrameError_ = error;
+    }
 
     // CreateShader를 arrivals번째 호출이 들어올 때까지 붙잡는다(명시 gate — 경쟁하는 생성이 모두
     // 장치 생성까지 간 뒤에 게시하게 한다). 0이면 끈다.
@@ -630,6 +648,13 @@ private:
     graphics::DeviceCaps caps_;
     graphics::PixelFormatCaps pixelFormatCaps_ = graphics::PixelFormatCaps::None;
     ErrorCode createTextureError_ = ErrorCode::None;
+    // BeginFrame 실패 주입이다(SetBeginFrameFailure).
+    uint32 beginFrameSuccesses_ = 0;
+    ErrorCode beginFrameError_ = ErrorCode::None;
+    // 지금 기록의 스왑체인과 EndFrame이 present할지, 낸 present 수다.
+    graphics::SwapChainHandle frameSwapChain_;
+    bool presentOnEnd_ = false;
+    uint64 presents_ = 0;
     uint64 computeFenceValue_ = 0;
     // 지금 기록의 queue다.
     graphics::QueueKind recordingQueue_ = graphics::QueueKind::Graphics;
@@ -662,6 +687,7 @@ private:
     SlotArray<uint32> pipelines_;
     // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).
     graphics::PipelineHandle boundPipeline_;
+    // 스왑체인마다 그리는 중인 프레임이 있으면 1이다(SwapChainPassDesc 규칙).
     SlotArray<uint8> swapChains_;
     // 장치 셰이더(단계)다. shaderGate_가 지킨다.
     platform::Mutex shaderGate_;

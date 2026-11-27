@@ -117,7 +117,10 @@ enum class TextureInspectorDisplay : uint8 {
     // 노출 × filmic 곡선(HDR 텍스처 — TonemapPixel과 같은 식).
     Hdr,
     // 빨강 채널을 회색으로(깊이).
-    Depth
+    Depth,
+    // 노멀 맵(쿠킹 swizzle rg01 — Normalmap): 법선을 복원해 n × 0.5 + 0.5를 색으로(UE 텍스처 편집기
+    // 미리보기와 같은 표시 — MaterialTextureSampling.rsh DecodeTangentNormal).
+    Normal
 };
 
 // TextureInspector*Pixel의 그리기별 상수다(96 byte, 생성 HLSL

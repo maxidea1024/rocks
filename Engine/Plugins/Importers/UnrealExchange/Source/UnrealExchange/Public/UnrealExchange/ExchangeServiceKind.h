@@ -14,15 +14,16 @@
 //   unrealContext.kinds = {&RegisterExchangeServiceKinds, &services};
 namespace rocks {
 
-// 서비스 임포트로 들이는 교환 클래스 수와 순서다(텍스처 다섯 + 정적 메시 + 스켈레톤 + 스킨 메시).
-inline constexpr usize ExchangeServiceClassCount = 8;
+// 서비스 임포트로 들이는 교환 클래스 수와 순서다(텍스처 다섯 + 정적 메시 + 스켈레톤 + 스킨 메시 +
+// 애니메이션 클립).
+inline constexpr usize ExchangeServiceClassCount = 9;
 inline constexpr ExchangeClass ExchangeServiceClasses[ExchangeServiceClassCount] = {
     ExchangeClass::Texture2D,        ExchangeClass::TextureCube,   ExchangeClass::Texture2DArray,
     ExchangeClass::TextureCubeArray, ExchangeClass::VolumeTexture, ExchangeClass::StaticMesh,
-    ExchangeClass::Skeleton,         ExchangeClass::SkeletalMesh};
+    ExchangeClass::Skeleton,         ExchangeClass::SkeletalMesh,  ExchangeClass::AnimSequence};
 
-// 교환 클래스의 A2f 임포터 이름이다(4.6절 1번 표, 5.5절 10번, 6.4절 8번). 표에 없는 클래스는 빈
-// view다.
+// 교환 클래스의 A2f 임포터 이름이다(4.6절 1번 표, 5.5절 10번, 6.4절 8번, 7.2절 7번). 표에 없는
+// 클래스는 빈 view다.
 ROCKS_UNREALEXCHANGE_API StringView ExchangeServiceImporterName(ExchangeClass type) noexcept;
 
 class ROCKS_UNREALEXCHANGE_API ExchangeServiceKind final : public ExchangeKindImporter {

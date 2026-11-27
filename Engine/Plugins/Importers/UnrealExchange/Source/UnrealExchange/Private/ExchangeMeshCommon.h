@@ -40,6 +40,10 @@ inline StringView WithoutNone(StringView name) noexcept {
     return name == NoneName ? StringView() : name;
 }
 
+// 기록 안 blob 참조 객체({blob, bytes, layout, components, count} — 3.3절)가 가리키는
+// asset.blobs 번호다(digest·배치·components·count가 같은 항목). 없으면 asset.blobs 수다.
+usize FindAssetBlob(const ExchangeAsset& asset, JsonValue reference) noexcept;
+
 // 교환 실수(3.2절)다.
 bool Number(JsonValue value, double& out) noexcept;
 

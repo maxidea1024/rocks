@@ -74,6 +74,28 @@ inline constexpr uint32 DefaultProgressEventLogCapacity = 1024;
 // 사건 고리 용량의 상한이다(설정 검사).
 inline constexpr uint32 MaxProgressEventLogCapacity = 1u << 20;
 
+// ---- 받는 쪽·프로세스 경계(9·10장, PG3) ----
+
+// 명령줄 보고기의 진행 줄 간격(나노초, 2 s — 로그 양)이다.
+inline constexpr uint64 DefaultConsoleProgressIntervalNanoseconds = 2'000'000'000;
+// JSONL 진행 줄 간격(나노초, 0.2 s — UI 갱신 상한과 같음)이다.
+inline constexpr uint64 DefaultJsonlProgressIntervalNanoseconds = 200'000'000;
+// 자식 진행 읽기·부모 제어 수신이 한 번 기다리는 시간(밀리초, 0.1 s — 취소 전달 지연 상한)이다.
+inline constexpr uint32 ChildControlPollMilliseconds = 100;
+// JSONL 줄 하나의 상한(byte)이다. 문구 칸은 ProgressJsonlTextBytes까지 자른다.
+inline constexpr usize MaxProgressJsonlLineBytes = usize{64} * 1024;
+// JSONL 문구 칸 하나의 상한(byte, UTF-8 경계에서 자름)이다. 최악의 이스케이프(제어 문자 \u00xx,
+// 6배)여도 줄 상한 안에 든다.
+inline constexpr usize MaxProgressJsonlTextBytes = usize{8} * 1024;
+// JSONL 형식 버전이다(읽는 쪽은 다르면 Unsupported).
+inline constexpr uint64 ProgressJsonlVersion = 1;
+// 자식 작업 id → 부모 쪽 하위 작업 대응표 상한(MaxLiveProgressTasks와 같다)이다.
+inline constexpr uint32 MaxChildProgressTasks = 4096;
+// 취소로 끝난 명령의 종료 코드(사용자 중단, EngineImplementationPlan 28.4절)다.
+inline constexpr int ProgressCancelledExitCode = 130;
+// 부모가 cancel 줄을 보낸 뒤 자식이 끝나기를 기다리는 기본 시간(밀리초)이다. 넘으면 강제 종료한다.
+inline constexpr uint32 DefaultChildCancelGraceMilliseconds = 10'000;
+
 // 이번 구간 작업량이 남은 양을 넘는지 볼 때 허용하는 상대 오차다(0.1 + 0.2 같은 부동소수 합으로
 // 생기는 경고를 막는다).
 inline constexpr double ProgressWorkTolerance = 1e-9;

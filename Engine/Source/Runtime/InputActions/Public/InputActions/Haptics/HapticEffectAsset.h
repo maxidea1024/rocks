@@ -2,8 +2,10 @@
 
 #include <AssetRuntime/Package.h>
 #include <Core/Memory/Allocator.h>
+#include <CurveAssets/FloatCurveAsset.h>
 #include <InputActions/Haptics/HapticEffect.h>
 #include <Meta/Annotations.h>
+#include <Object/ObjectRefArray.h>
 
 namespace rocks::input {
 
@@ -20,7 +22,8 @@ class ROCKS_INPUTACTIONS_API HapticEffectAsset final : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit HapticEffectAsset(Allocator& allocator) noexcept : effect(allocator) {
+    explicit HapticEffectAsset(Allocator& allocator) noexcept
+        : effect(allocator), curveAssets(allocator) {
     }
 
     // 실효 효과 id다(2.8절): effect.id가 0이 아니면 그것, 0이면 대표 에셋의 AssetId 값이다.
@@ -30,6 +33,8 @@ public:
     }
 
     ROCKS_PROPERTY() HapticEffect effect;
+    // effect.channels의 curveAsset slot이 가리키는 커브 에셋이다(Hard — 2.9절 IA9).
+    ROCKS_PROPERTY(Required) ObjectRefArray<FloatCurveAsset> curveAssets;
 };
 
 } // namespace rocks::input

@@ -73,6 +73,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::HapticChannel::curveAsset",
+      "id": "d34b17309f8c4a36a3cfed8ae4322d3c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::HapticEffect::channels",
       "id": "c46b21e58d394c6bbcb59a8b2b5c017b",
       "aliases": [],
@@ -87,8 +94,22 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::HapticEffectAsset::curveAssets",
+      "id": "4ccee68eea914649ac4a3dee70244812",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::HapticEffectAsset::effect",
       "id": "01b52baefbac4baa9bec79808379e014",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputAction::curveAssets",
+      "id": "b7358889c34f46228cff5cda9791dae6",
       "aliases": [],
       "retired": false
     },
@@ -234,6 +255,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::InputContext::curveAssets",
+      "id": "91f8963415df41649817bb544b8a2b7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::InputContext::data",
       "id": "7f4c5cc89f374504a76ff0939dca2a21",
       "aliases": [],
@@ -339,6 +367,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::InputModifier::responseXAsset",
+      "id": "7c3f4d45e99e437181d610711c0ed21e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::InputModifier::responseY",
       "id": "71183c361c3f442399bcbd9173633be5",
       "aliases": [],
@@ -346,8 +381,22 @@
     },
     {
       "kind": "field",
+      "name": "rocks::input::InputModifier::responseYAsset",
+      "id": "c83da1ee92f7454ab7dd105360cab163",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::input::InputModifier::responseZ",
       "id": "d31934522b284271ab7e453c8adde951",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::input::InputModifier::responseZAsset",
+      "id": "b0e7831d2a9743efa6b9f28e4371f969",
       "aliases": [],
       "retired": false
     },

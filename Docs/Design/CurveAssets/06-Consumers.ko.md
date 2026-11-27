@@ -13,21 +13,13 @@
 
 **제약:** 두 자리 모두 `Array` 원소 안의 값 struct다. 그래서 참조 struct(`FloatCurveSource` — 3.1절)를 그대로 넣을 수 없다. InputActions 2.7절도 같은 이유로 값 데이터에 `ObjectRef`를 쓰지 않는다고 정했다. 값 struct는 코드로 만든 효과·사본(IAD10, 6.2절)에 필요하므로 바꾸지 않는다.
 
-**CA5 결정 후보.** 착수 때 하나로 정하고 이 절을 고친다.
+**CA5 결정(2026-11-27, 권장안 1을 다듬음):** 소유 에셋의 참조 목록과 값 struct의 slot 번호다. 세부는 [InputActions](../InputActions/02-DataModel.ko.md) 2.9절(IA9, IAD17)이다.
 
-1. 소유 에셋의 참조 표와 slot.
-   - 소유 에셋(`HapticEffectAsset`·`InputContext`·`InputAction`)이 `ObjectRefArray<FloatCurveAsset> curveAssets`를 갖는다.
-   - 값 struct의 커브 자리는 `{ TangentCurve curve; uint32 curveAsset = NoCurveAssetSlot; }`(값 — 복사 가능)다.
-   - 사본을 만드는 곳(`CopyHapticEffect`·`CollectInputContext`)이 slot을 풀어 인라인으로 만든다(평탄화).
-   - 코드로 만든 값은 slot이 비어 그대로 쓴다.
-   - 편집기(IA6c)가 slot을 관리한다.
-2. 소유 에셋 쪽 평행 구조.
-   - 에셋 클래스가 채널·모디파이어마다 `StructRefArray<FloatCurveSource>`를 따로 가진다.
-   - 구조가 두 번 생기고, 모디파이어는 중첩(RMC2304) 때문에 못 쓴다.
-3. 들이지 않음.
-   - 인라인만 둔다(◇ — UE 에셋 공유를 잃는다).
-
-권장안은 1이다. UE 하드 참조와 같은 로드·쿠킹 의미를 갖고, 평가 경로는 지금처럼 Registry 없이 돈다. 버린 대안은 값 struct 안 `SoftObjectRef`다. 복사는 되지만 소유 에셋과 함께 로드되지 않아 사본을 만들 때 대상이 없을 수 있다.
+- 소유 에셋(`InputAction`·`InputContext`·`HapticEffectAsset`)이 `ObjectRefArray<FloatCurveAsset> curveAssets`를 갖는다.
+- 값 struct는 기존 인라인 커브 옆에 `uint32` slot 필드를 더한다(`responseXAsset`·`responseYAsset`·`responseZAsset`, `curveAsset` — 기본 `NoCurveAssetSlot`). 커브를 감싸는 새 struct를 두지 않아 평가 코드가 그대로다.
+- 사본을 만드는 곳(`CollectInputContext`·`CopyHapticEffect`)이 공용 도우미 `TryResolveCurveSlot`(CurveAssets `CurveAssetSlot.h`)으로 평탄화한다(에셋 커브를 인라인에 복사, slot 비움).
+- 평탄화되지 않은 slot은 평가기 검증이 `UnresolvedCurveAsset`으로, 진동 재생이 `InvalidArgument`로 거부한다.
+- 버린 대안: 평행 `StructRefArray<FloatCurveSource>`(모디파이어 중첩 RMC2304), 인라인만(UE 에셋 공유를 잃는다), 값 struct 안 `SoftObjectRef`(함께 로드되지 않는다).
 
 ### 6.2 다른 세션의 소비자(알림만 — 그 세션이 연결한다)
 
@@ -40,4 +32,4 @@
 | 게임 수치(`FScalableFloat` 대응) | `FCurveTableRowHandle`(GameplayAbilities 플러그인) | 게임플레이 능력 플러그인을 들일 때 |
 | Niagara 커브 | 자체 `FRichCurve` + 편집기 전용 에셋 동기화 | VFX 단계 |
 
-- 알림은 CA1(클래스·원천·값 struct)이 push된 뒤에 한다. 6.1절의 참조 제약과 CA5에서 고른 방식을 함께 알린다.
+- 알림은 CA1(클래스·원천·값 struct)이 push된 뒤에 했다. CA5의 slot 방식(`TryResolveCurveSlot`)은 값 struct에 커브 에셋이 필요한 다른 소비자(소리 감쇠 등)도 같이 쓸 수 있다.

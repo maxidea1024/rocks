@@ -314,6 +314,16 @@ DisplayPixel ExpectedInspectorPixel(const screen::InspectorTexture& texture,
 
     case render::TextureInspectorDisplay::Depth:
         return DisplayPixel{{EncodeSrgb8(value[0]), EncodeSrgb8(value[0]), EncodeSrgb8(value[0])}};
+    case render::TextureInspectorDisplay::Normal: {
+        // MaterialTextureSampling.rsh DecodeTangentNormal: xy = 2 rg - 1, z = sqrt(saturate(1 -
+        // xy·xy)).
+        const double x = value[0] * 2.0 - 1.0;
+        const double y = value[1] * 2.0 - 1.0;
+        const double z = sqrt(Clamp01(1.0 - x * x - y * y));
+        return DisplayPixel{
+            {EncodeSrgb8(x * 0.5 + 0.5), EncodeSrgb8(y * 0.5 + 0.5), EncodeSrgb8(z * 0.5 + 0.5)}};
+    }
+
     case render::TextureInspectorDisplay::Ldr:
         break;
     }

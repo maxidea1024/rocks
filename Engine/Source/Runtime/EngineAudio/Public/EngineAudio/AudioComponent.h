@@ -2,6 +2,7 @@
 
 #include <EngineAudio/AudioPlayback.h>
 #include <AudioAssets/SoundSourceRef.h>
+#include <Core/Containers/Span.h>
 #include <World/SceneComponent.h>
 
 // 위치를 따라가는 사운드 컴포넌트다(Docs/Design/AudioSystem 3.8.3·3.35.8절, UE UAudioComponent
@@ -39,6 +40,12 @@ public:
     ROCKS_PROPERTY() bool autoActivate = true;
     // 꺼지면(OnDisable) 재생을 멈춘다.
     ROCKS_PROPERTY() bool stopOnDisable = true;
+    // 켜면 사운드 우선순위 대신 priority를 쓴다(UE bOverridePriority·Priority — 3.41.1절).
+    ROCKS_PROPERTY() bool overridePriority = false;
+    ROCKS_PROPERTY() float priority = DefaultSoundPriority;
+    // 켜면 one-shot도 voice를 잃을 때 끝나지 않고 남아 다시 경쟁한다(UE
+    // bShouldRemainActiveIfDropped).
+    ROCKS_PROPERTY() bool remainActiveIfDropped = false;
 
     // 다음 Play부터 쓸 사운드다. 재생 중인 소리는 바꾸지 않는다(UE SetSound는 멈추고 다시
     // 재생하지만 여기서는 호출자가 Play를 부른다).
@@ -49,6 +56,11 @@ public:
     const SoundSourceRef& Sound() const noexcept {
         return sound_;
     }
+
+    // 다음 Play부터 사운드의 동시 발음 그룹 대신 쓸 그룹이다(UE UAudioComponent::ConcurrencySet —
+    // 3.41.2절). 빈 목록이면 사운드 것을 쓴다. 항목은 ConcurrencyGroup::MakeEntry로 만든다. 오류:
+    // MaxConcurrencyGroups보다 많으면 CapacityExceeded, 키 0·범위 밖 설정은 InvalidArgument.
+    Result<void> SetConcurrency(Span<const SoundConcurrencyEntry> entries) noexcept;
 
     // emitter에 붙여 재생한다. 재생 중이면 먼저 멈춘다(UE Play와 같다). 오류: 사운드 없음·범위 밖
     // 배수(InvalidArgument), 그 밖은 AudioWorldSubsystem::PlayAttached와 같다. 등록 전이거나
@@ -88,6 +100,8 @@ private:
     ROCKS_NATIVE() SoundSourceRef sound_;
     ROCKS_NATIVE() PlaybackHandle playback_;
     ROCKS_NATIVE() AudioEmitterId emitter_;
+    ROCKS_NATIVE() uint32 concurrencyCount_ = 0;
+    ROCKS_NATIVE() SoundConcurrencyEntry concurrency_[MaxConcurrencyGroups];
 };
 
 } // namespace rocks

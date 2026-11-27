@@ -25,6 +25,8 @@ using namespace rocks;
 enum class SceneFamily : uint8 {
     // 색(빨강·초록·파랑·흰색, mip 1부터 절반 밝기)
     Ldr,
+    // 두 색(사분면 짝수·홀수 — 블록 하나에 색이 둘뿐이라 BC 끝점만 쓴다, mip 1부터 절반 밝기)
+    Duo,
     // HDR 색(배율 2 + mip)
     Hdr,
     // 회색 한 채널(.rrrr swizzle)
@@ -32,7 +34,9 @@ enum class SceneFamily : uint8 {
     // 부호 없는 정수(빨강 채널)
     Uint,
     // 부호 있는 정수(음수 포함)
-    Sint
+    Sint,
+    // 노멀 맵 x·y(쿠킹 swizzle rg01 — Normal sampler type, 표시는 복원 법선)
+    Normal
 };
 
 // 장면 하나다: 텍스처와 그릴 층·mip.
@@ -125,7 +129,69 @@ constexpr SceneDesc Scenes[] = {
     {"Volume R8Uint", TextureDimension::Volume, graphics::PixelFormat::R8Uint, SceneFamily::Uint,
      TextureSamplerFilter::Point, 2, 0},
     {"Volume RGBA16Sint", TextureDimension::Volume, graphics::PixelFormat::RGBA16Sint,
-     SceneFamily::Sint, TextureSamplerFilter::Point, 1, 1}};
+     SceneFamily::Sint, TextureSamplerFilter::Point, 1, 1},
+    // 쿠킹 형식(개정 63 — TC2): BGRA8 비압축 대체와 블록 압축. 색 BC 장면은 표본 texel이 끝점인
+    // 블록만 고른다(한 색 블록이나 두 색 계열 Duo): 끝점 사이 보간 색은 장치마다 다르다(sRGB 짝의
+    // 보간 공간 — WARP는 sRGB 값, 하드웨어 D3D·Vulkan은 선형 값 — 과 반올림, 첫 실행에서 4–5 단위
+    // 차이). 4보다 작은 mip(블록 하나)도 덮는다.
+    {"2D BGRA8UnormSrgb", TextureDimension::Texture2D, graphics::PixelFormat::BGRA8UnormSrgb,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 1},
+    {"2D BGRA8Unorm normal rg01", TextureDimension::Texture2D, graphics::PixelFormat::BGRA8Unorm,
+     SceneFamily::Normal, TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC1Unorm", TextureDimension::Texture2D, graphics::PixelFormat::BC1Unorm, SceneFamily::Ldr,
+     TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC1UnormSrgb mip 2 (tail, 2 x 2)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC1UnormSrgb, SceneFamily::Duo, TextureSamplerFilter::Point, 0, 2},
+    {"2D BC3UnormSrgb mip 1", TextureDimension::Texture2D, graphics::PixelFormat::BC3UnormSrgb,
+     SceneFamily::Duo, TextureSamplerFilter::Point, 0, 1},
+    {"2D BC4Unorm rrrr", TextureDimension::Texture2D, graphics::PixelFormat::BC4Unorm,
+     SceneFamily::Gray, TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC5Unorm normal rg01", TextureDimension::Texture2D, graphics::PixelFormat::BC5Unorm,
+     SceneFamily::Normal, TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC5Unorm normal mip 3 (tail, 1 x 1)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC5Unorm, SceneFamily::Normal, TextureSamplerFilter::Point, 0, 3},
+    {"2DArray BC1UnormSrgb mip 1 (2 x 2)", TextureDimension::Texture2DArray,
+     graphics::PixelFormat::BC1UnormSrgb, SceneFamily::Duo, TextureSamplerFilter::Point, 2, 1},
+    {"2DArray BC4Unorm rrrr", TextureDimension::Texture2DArray, graphics::PixelFormat::BC4Unorm,
+     SceneFamily::Gray, TextureSamplerFilter::Point, 1, 0},
+    {"Cube BC1Unorm", TextureDimension::TextureCube, graphics::PixelFormat::BC1Unorm,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 0},
+    {"Cube BC3UnormSrgb mip 1 (2 x 2)", TextureDimension::TextureCube,
+     graphics::PixelFormat::BC3UnormSrgb, SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 1},
+    {"CubeArray BC5Unorm normal rg01", TextureDimension::TextureCubeArray,
+     graphics::PixelFormat::BC5Unorm, SceneFamily::Normal, TextureSamplerFilter::Point, 1, 0},
+    {"Volume BC1UnormSrgb", TextureDimension::Volume, graphics::PixelFormat::BC1UnormSrgb,
+     SceneFamily::Duo, TextureSamplerFilter::Point, 1, 0},
+    {"Volume BC4Unorm rrrr mip 1 (2 x 2)", TextureDimension::Volume,
+     graphics::PixelFormat::BC4Unorm, SceneFamily::Gray, TextureSamplerFilter::Point, 0, 1},
+    // BC6H·BC7(개정 65 — TC3): 형식 명세가 정수 해석을 정해 장치 결과가 한 값이므로 끝점 사이
+    // 보간 texel도 고른다(블록 하나에 네 색인 4 × 4 mip). BC6H는 HDR 표시(노출 + filmic)다.
+    {"2D BC7Unorm", TextureDimension::Texture2D, graphics::PixelFormat::BC7Unorm, SceneFamily::Ldr,
+     TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC7UnormSrgb mip 1 (4 x 4 interpolated)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC7UnormSrgb, SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 1},
+    {"2D BC6HUfloat", TextureDimension::Texture2D, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC6HUfloat mip 1 (4 x 4 interpolated)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1},
+    {"2D BC6HUfloat mip 2 (tail, 2 x 2)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 2},
+    {"2DArray BC7UnormSrgb", TextureDimension::Texture2DArray, graphics::PixelFormat::BC7UnormSrgb,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"2DArray BC6HUfloat mip 1 (2 x 2)", TextureDimension::Texture2DArray,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 2, 1},
+    {"Cube BC7Unorm", TextureDimension::TextureCube, graphics::PixelFormat::BC7Unorm,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 0},
+    {"Cube BC6HUfloat mip 1 (2 x 2)", TextureDimension::TextureCube,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1},
+    {"CubeArray BC7UnormSrgb", TextureDimension::TextureCubeArray,
+     graphics::PixelFormat::BC7UnormSrgb, SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"CubeArray BC6HUfloat", TextureDimension::TextureCubeArray, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 0},
+    {"Volume BC7UnormSrgb", TextureDimension::Volume, graphics::PixelFormat::BC7UnormSrgb,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"Volume BC6HUfloat mip 1 (2 x 2)", TextureDimension::Volume, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1}};
 
 constexpr uint32 SceneCount = sizeof(Scenes) / sizeof(Scenes[0]);
 // 장면 뒤의 음성 장면 하나(장치 생성 실패 — typed 대체 표시)가 capture 자리 하나를 더 쓴다.
@@ -136,6 +202,9 @@ constexpr float Palette[4][4] = {{1.0f, 0.0f, 0.0f, 1.0f},
                                  {0.0f, 1.0f, 0.0f, 1.0f},
                                  {0.0f, 0.0f, 1.0f, 1.0f},
                                  {1.0f, 1.0f, 1.0f, 1.0f}};
+
+// 노멀 맵 계열의 x·y([0, 1] — 0.5가 0)다. 첫 값은 평평한 법선이다.
+constexpr float NormalPalette[4][2] = {{0.5f, 0.5f}, {0.8f, 0.5f}, {0.5f, 0.25f}, {0.3f, 0.65f}};
 
 // texel 채우기 문맥이다.
 struct FillContext {
@@ -159,11 +228,14 @@ void SceneTexel(void* raw, uint32 level, uint32 slice, uint32 x, uint32 y, uint3
     const uint32 key = quadrant + slice + 2 * level + z;
     const float* color = Palette[key % 4];
     switch (context.family) {
-    case SceneFamily::Ldr: {
+    case SceneFamily::Ldr:
+    case SceneFamily::Duo: {
+        // Duo는 key 짝수·홀수로 빨강·흰색 두 색만 쓴다(층·z마다 사분면 색이 뒤바뀐다).
+        const float* pick = context.family == SceneFamily::Duo ? Palette[(key % 2) * 3] : color;
         const float scale = level == 0 ? 1.0f : 0.5f;
-        value[0] = color[0] * scale;
-        value[1] = color[1] * scale;
-        value[2] = color[2] * scale;
+        value[0] = pick[0] * scale;
+        value[1] = pick[1] * scale;
+        value[2] = pick[2] * scale;
         value[3] = 1.0f;
         return;
     }
@@ -187,6 +259,12 @@ void SceneTexel(void* raw, uint32 level, uint32 slice, uint32 x, uint32 y, uint3
         value[0] = static_cast<float>(8000 * static_cast<int>(key % 4) - 4000);
         value[1] = static_cast<float>(30000 - 7000 * static_cast<int>(key % 4));
         value[2] = static_cast<float>(-300);
+        value[3] = 1.0f;
+        return;
+    case SceneFamily::Normal:
+        value[0] = NormalPalette[key % 4][0];
+        value[1] = NormalPalette[key % 4][1];
+        value[2] = 1.0f;
         value[3] = 1.0f;
         return;
     }
@@ -228,6 +306,12 @@ MemoryTextureSpec SpecOf(const SceneDesc& scene) noexcept {
         for (TextureSwizzle& swizzle : spec.swizzle) {
             swizzle = TextureSwizzle::R;
         }
+    }
+
+    if (scene.family == SceneFamily::Normal) {
+        // Normal sampler type 계약(Normalmap — 12.4.3절 rg01, 형식과 무관).
+        spec.swizzle[2] = TextureSwizzle::Zero;
+        spec.swizzle[3] = TextureSwizzle::One;
     }
 
     return spec;
@@ -288,7 +372,7 @@ void CheckRejections(screen::ScreenHost& screen, graphics::Device& device, Alloc
     render::CookedTextureIssue issue = render::CookedTextureIssue::None;
     auto truncated = screen.AddTexture("Negative/Truncated", plane.Data(), &ReadTruncated,
                                        &truncating, false, &issue);
-    Check(!truncated && truncated.Error() == ErrorCode::InvalidArgument &&
+    Check(!truncated && truncated.Error() == ErrorCode::CorruptData &&
               issue == render::CookedTextureIssue::BulkSize,
           name, "a truncated mip bulk is rejected as CorruptEntry (BulkSize)");
     // 잘린 꼬리 → TailRange.
@@ -301,7 +385,7 @@ void CheckRejections(screen::ScreenHost& screen, graphics::Device& device, Alloc
     plane.MutableData().mips[1].byteSize += 4;
     auto mismatch = screen.AddTexture("Negative/ByteSize", plane.Data(),
                                       &MemoryPlatformTexture::ReadBulk, &plane, false, &issue);
-    Check(!mismatch && mismatch.Error() == ErrorCode::InvalidArgument &&
+    Check(!mismatch && mismatch.Error() == ErrorCode::CorruptData &&
               issue == render::CookedTextureIssue::MipByteSize,
           name, "a mip byte size mismatch is rejected (MipByteSize)");
     // 장치 한도 초과(한 변 = 한도 + 1) → UnsupportedCapability(DeviceLimit).

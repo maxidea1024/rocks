@@ -1,6 +1,7 @@
 #include "InputAssetScene.h"
 
 #include <Base/InitializerList.h>
+#include <CurveAssets/FloatCurveAsset.generated.h>
 #include <InputActions/Haptics/HapticPlayer.h>
 #include <InputActions/InputAssetAccess.h>
 #include <InputActions/InputContextCollect.h>
@@ -35,6 +36,14 @@ constexpr float DeadZoneUpper = 0.9f;
 constexpr float CurveMiddle = 0.25f;
 constexpr double TickSeconds = 0.1;
 constexpr uint32 MaxAllocationAttempts = 512;
+
+// owner(Owner)의 curveAssets에 커브 에셋 참조를 더한다(owner Borrow를 쥔다 — 2.9절 IA9).
+template <class Owner>
+bool AddCurveRef(ObjectRegistry& source, ObjectHandle owner, ObjectHandle curve) noexcept {
+    return asset_test::WithBorrow<Owner>(source, owner, [&](Owner& value) {
+        return source.AddReference(source.OwnerAccess(), owner, value.curveAssets, curve).IsOk();
+    });
+}
 
 bool AddTrigger(Array<InputTrigger>& triggers, InputTriggerType type) noexcept {
     InputTrigger trigger;
@@ -299,7 +308,8 @@ void CollectOnOtherThread(void* context) noexcept {
 } // namespace
 
 // 2.8절: 입력 에셋 클래스는 Asset 파생이다. 필드는 기반 Asset의 assetId_(Transient) 하나에 자기
-// 필드(InputAction id·settings, InputContext id·actions·data, HapticEffectAsset effect)를 더한
+// 필드(InputAction id·settings·curveAssets, InputContext id·actions·data·curveAssets,
+// HapticEffectAsset effect·curveAssets)를 더한
 // 것이다. 코드로 만든 객체는 assetId가 null이라 실효 id가 id 그대로다.
 TEST(InputAssets_ReflectionShape) {
     asset_test::AssetEnv env;
@@ -315,13 +325,17 @@ TEST(InputAssets_ReflectionShape) {
     constexpr uint32 Missing = NumericLimits<uint32>::Max();
     usize count = 0;
     CHECK(SchemaFieldFlags(env.types, TypeIdOf<HapticEffectAsset>(), "effect", count) != Missing);
-    CHECK(count == 2);
+    CHECK(SchemaFieldFlags(env.types, TypeIdOf<HapticEffectAsset>(), "curveAssets", count) !=
+          Missing);
+    CHECK(count == 3);
     CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputAction>(), "id", count) != Missing);
     CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputAction>(), "settings", count) != Missing);
-    CHECK(count == 3);
+    CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputAction>(), "curveAssets", count) != Missing);
+    CHECK(count == 4);
     CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputContext>(), "actions", count) != Missing);
     CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputContext>(), "data", count) != Missing);
-    CHECK(count == 4);
+    CHECK(SchemaFieldFlags(env.types, TypeIdOf<InputContext>(), "curveAssets", count) != Missing);
+    CHECK(count == 5);
     const uint32 assetIdFlags = SchemaFieldFlags(env.types, asset, "assetId_", count);
     REQUIRE(assetIdFlags != Missing);
     CHECK(count == 1);
@@ -569,6 +583,137 @@ TEST(InputAssets_HapticCopyAndPlay) {
     tick.unscaledDeltaSeconds = TickSeconds;
     const MotorValues motors = player.Update(tick);
     CHECK(motors.leftLarge > 0.0f && motors.rightSmall > 0.0f);
+}
+
+// 2.9절 IA9: 커브 에셋 slot은 쿠킹 로드 뒤 모으기·진동 사본이 평탄화한다(액션 설정·기본 바인딩·
+// 프로필 override 모디파이어, 진동 채널). 평탄화한 값은 slot이 비고 검증·재생을 통과한다. 커브 에셋
+// 패키지는 소유 에셋의 Hard 참조라 함께 로드된다.
+TEST(InputAssets_CurveAssetSlotsFlatten) {
+    asset_test::AssetEnv env;
+    InputAssetScene scene(env);
+    REQUIRE(scene.Ready());
+    constexpr uint64 CurvePackage = 1;
+    constexpr uint64 ActionPackage = 2;
+    constexpr uint64 CurveContextPackage = 3;
+    constexpr uint64 CurveHapticPackage = 4;
+    ObjectRegistry& source = scene.Source();
+    const ObjectHandle curve = scene.AddAsset<FloatCurveAsset>(CurvePackage);
+    REQUIRE(!curve.IsNull());
+    FloatCurveAsset* curveValue = asset_test::Pointer<FloatCurveAsset>(source, curve);
+    REQUIRE(curveValue != nullptr);
+    REQUIRE(curveValue->curve.TryAddKey(0.0f, 0.0f));
+    REQUIRE(curveValue->curve.TryAddKey(1.0f, 0.5f));
+    REQUIRE(curveValue->curve.TryAddKey(2.0f, 3.0f));
+
+    // 액션: 설정 모디파이어 X 축 slot 0 → 액션의 curveAssets[0].
+    const ObjectHandle action = scene.AddAction(ActionPackage, Id(JumpLow), InputValueType::Axis2D);
+    REQUIRE(!action.IsNull());
+    REQUIRE(AddCurveRef<InputAction>(source, action, curve));
+    {
+        InputAction* value = asset_test::Pointer<InputAction>(source, action);
+        REQUIRE(value != nullptr);
+        InputModifier modifier(env.allocator);
+        modifier.kind = InputModifierKind::ResponseCurveUser;
+        modifier.responseXAsset = 0;
+        REQUIRE(value->settings.modifiers.TryPushBack(Move(modifier)));
+    }
+
+    // 컨텍스트: 기본 바인딩과 프로필 override 바인딩의 모디파이어 Y 축 slot 0.
+    const ObjectHandle context = scene.AddContext(CurveContextPackage, Id(ContextLow));
+    REQUIRE(!context.IsNull());
+    REQUIRE(scene.LinkAction(context, action));
+    REQUIRE(scene.AddBinding(context, Id(JumpLow), "Gamepad_Left2D"));
+    REQUIRE(AddCurveRef<InputContext>(source, context, curve));
+    {
+        InputContext* value = asset_test::Pointer<InputContext>(source, context);
+        REQUIRE(value != nullptr);
+        InputModifier modifier(env.allocator);
+        modifier.kind = InputModifierKind::ResponseCurveUser;
+        modifier.responseYAsset = 0;
+        InputModifier copy(env.allocator);
+        REQUIRE(copy.TryCopyFrom(modifier));
+        REQUIRE(value->data.bindings[0].modifiers.TryPushBack(Move(modifier)));
+        InputProfileBindings profile(env.allocator);
+        REQUIRE(profile.profile.TryAssign("Arcade"));
+        InputBinding binding(env.allocator);
+        binding.action = Id(JumpLow);
+        REQUIRE(binding.key.TryAssign("Gamepad_Right2D"));
+        REQUIRE(binding.modifiers.TryPushBack(Move(copy)));
+        REQUIRE(profile.bindings.TryPushBack(Move(binding)));
+        REQUIRE(value->data.profileOverrides.TryPushBack(Move(profile)));
+    }
+
+    // 진동: 채널 slot 0(인라인 커브는 남지만 에셋이 이긴다).
+    const ObjectHandle haptic = scene.AddHaptic(CurveHapticPackage, Id(EffectLow), 5.0f);
+    REQUIRE(!haptic.IsNull());
+    REQUIRE(AddCurveRef<HapticEffectAsset>(source, haptic, curve));
+    asset_test::Pointer<HapticEffectAsset>(source, haptic)->effect.channels[0].curveAsset = 0;
+    REQUIRE(scene.Start());
+
+    auto expectCurve = [&](const TangentCurve& value) noexcept {
+        return value.KeyCount() == 3 && value.Evaluate(2.0f) == 3.0f &&
+               value.Evaluate(1.0f) == 0.5f;
+    };
+
+    auto contextLease = scene.Load(CurveContextPackage);
+    auto hapticLease = scene.Load(CurveHapticPackage);
+    REQUIRE(contextLease && hapticLease);
+    // 커브 에셋 패키지는 Hard 참조로 함께 로드되었다.
+    CHECK(scene.IsLoaded(CurvePackage));
+    InputContextBundle bundle(env.allocator);
+    REQUIRE(CollectInputContext(*scene.manager, contextLease.Value(), bundle));
+    REQUIRE(bundle.actions.Size() == 1 && bundle.actions[0].settings.modifiers.Size() == 1);
+    const InputModifier& actionModifier = bundle.actions[0].settings.modifiers[0];
+    CHECK(actionModifier.responseXAsset == NoCurveAssetSlot &&
+          expectCurve(actionModifier.responseX));
+    REQUIRE(bundle.data.bindings.Size() == 1 && bundle.data.bindings[0].modifiers.Size() == 1);
+    const InputModifier& bindingModifier = bundle.data.bindings[0].modifiers[0];
+    CHECK(bindingModifier.responseYAsset == NoCurveAssetSlot &&
+          expectCurve(bindingModifier.responseY));
+    REQUIRE(bundle.data.profileOverrides.Size() == 1);
+    const InputModifier& profileModifier = bundle.data.profileOverrides[0].bindings[0].modifiers[0];
+    CHECK(profileModifier.responseYAsset == NoCurveAssetSlot &&
+          expectCurve(profileModifier.responseY));
+    CHECK(ValidateInputContextBundle(bundle));
+
+    HapticEffect effect(env.allocator);
+    REQUIRE(CopyHapticEffect(*scene.manager, hapticLease.Value(), effect));
+    REQUIRE(effect.channels.Size() == 1);
+    CHECK(effect.channels[0].curveAsset == NoCurveAssetSlot &&
+          expectCurve(effect.channels[0].curve));
+    HapticPlayer player(env.allocator);
+    CHECK(player.PlayHapticEffect(effect, HapticParams{}));
+
+    // 평탄화되지 않은 slot은 검증·재생이 거부한다(코드로 만든 값이 번호를 적은 경우).
+    InputContextBundle raw(env.allocator);
+    REQUIRE(CollectInputContext(*scene.manager, contextLease.Value(), raw));
+    raw.data.bindings[0].modifiers[0].responseZAsset = 3;
+    InputDataDiagnostic diagnostic;
+    CHECK(ValidateInputContextBundle(raw, &diagnostic).Error() == ErrorCode::InvalidArgument);
+    CHECK(diagnostic.issue == InputDataIssue::UnresolvedCurveAsset);
+    effect.channels[0].curveAsset = 0;
+    CHECK(player.PlayHapticEffect(effect, HapticParams{}).Error() == ErrorCode::InvalidArgument);
+}
+
+// 2.9절: 진동 사본의 커브 slot이 범위 밖이면 CopyHapticEffect가 InvalidArgument이고 out은
+// 그대로다(채널 수·커브·id).
+TEST(InputAssets_HapticCurveSlotErrorKeepsOutput) {
+    asset_test::AssetEnv env;
+    InputAssetScene scene(env);
+    REQUIRE(scene.Ready());
+    constexpr uint64 BadHapticPackage = 1;
+    const ObjectHandle haptic = scene.AddHaptic(BadHapticPackage, Id(EffectLow), 5.0f);
+    REQUIRE(!haptic.IsNull());
+    asset_test::Pointer<HapticEffectAsset>(scene.Source(), haptic)->effect.channels[0].curveAsset =
+        2;
+    REQUIRE(scene.Start());
+    auto lease = scene.Load(BadHapticPackage);
+    REQUIRE(lease);
+    HapticEffect out(env.allocator);
+    out.id = Id(UntouchedLow);
+    CHECK(CopyHapticEffect(*scene.manager, lease.Value(), out).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(out.id == Id(UntouchedLow) && out.channels.Size() == 0);
 }
 
 } // namespace input_asset_tests_file

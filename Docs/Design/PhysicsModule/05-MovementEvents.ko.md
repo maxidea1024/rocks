@@ -57,7 +57,7 @@ UE `UpdateOverlapsImpl`(`PrimitiveComponent.cpp:4464–4653`)과 같다. overlap
 | 시뮬레이션 접촉 | `notifyRigidBodyCollision`이 참인 body의 접촉 쌍마다 `ContactNotice` 하나(첫 접촉점 + 접촉점들 + 누적 충격량). step 안에서는 값만 복사하고 PhysicsResults에서 스텝 순서대로 발행. 상대도 켰으면 상대 쪽 항목이 따로 생긴다 | `PhysScene_Chaos.cpp:1043–1130`·`1195–1218`, `Actor.cpp:5690–5736` |
 
 - 시뮬레이션 hit의 `HitResult`는 첫 접촉으로 만들고 `normalImpulse`는 누적 충격량(N·s → kg·cm/s)이다. Jolt에서 solver 충격량을 읽는 방법은 6.4절.
-- 같은 쌍이 한 프레임의 여러 고정 스텝에 걸쳐 접촉하면 UE처럼 쌍마다 하나로 합친다(첫 스텝의 첫 접촉점, 충격량 합).
+- 한 스텝 안의 같은 쌍 접촉은 하나로 합친다(첫 접촉점, 충격량 합). 스텝이 다르면 따로 발행한다(UE key가 쌍과 solver 시간 — 7.1.12절).
 - 발행은 Actor·컴포넌트 이벤트(구독형 통지 — 컴포넌트 도입 CR7)가 있어야 한다. CR7 전에는 가상 hook(`Actor::NotifyHit`·`NotifyActorBeginOverlap` 등)만 부른다(7.1절 단계 선행).
 
 ## 5.5 게임 코드 접점

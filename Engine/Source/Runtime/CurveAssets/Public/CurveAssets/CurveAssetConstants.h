@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
+#include <Base/Types.h>
+
 // 커브 에셋 층의 이름 있는 상수다(Docs/Design/CurveAssets 2.4.2절).
 namespace rocks {
 
@@ -10,6 +13,10 @@ inline constexpr float ColorAdjustTolerance = 1.0e-4f;
 // 활기 조정의 계수와 채도 지수다(UE AdjustColorsOld — S += clamp(활기) × 계수 × (1 − S)^지수).
 inline constexpr float VibranceScale = 0.5f;
 inline constexpr float VibranceSaturationExponent = 5.0f;
+
+// 커브 에셋 slot의 "없음" 표지다(값 struct의 slot 번호 — Docs/Design/CurveAssets 6.1절,
+// InputActions 2.9절). 소유 에셋의 curveAssets 번호가 아니라는 뜻이고 인라인 커브를 쓴다.
+inline constexpr uint32 NoCurveAssetSlot = NumericLimits<uint32>::Max();
 
 // 색상(도)의 한 바퀴다(HSV 색상 감기).
 inline constexpr float HueDegreesPerTurn = 360.0f;

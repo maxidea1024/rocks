@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "type",
+      "name": "rocks::BlendMode",
+      "id": "d0e8aeb926b14a809254d3edfac92ef6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MaterialDomain",
+      "id": "1a0b145e0cc74246a625551f45dba043",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ShadingModel",
+      "id": "29cd07ca204f4ac786b4824c069bc782",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

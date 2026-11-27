@@ -1089,6 +1089,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "EncoderUnavailable";
     case AssetDiagnosticCode::PlatformFormatFallback:
         return "PlatformFormatFallback";
+    case AssetDiagnosticCode::CurveImportRowSkipped:
+        return "CurveImportRowSkipped";
+    case AssetDiagnosticCode::CurveTableUnusedRows:
+        return "CurveTableUnusedRows";
     }
 
     return "Unknown";
@@ -1107,6 +1111,8 @@ bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
     case AssetDiagnosticCode::IgnoredSourceChunks:
     case AssetDiagnosticCode::EncoderUnavailable:
     case AssetDiagnosticCode::PlatformFormatFallback:
+    case AssetDiagnosticCode::CurveImportRowSkipped:
+    case AssetDiagnosticCode::CurveTableUnusedRows:
     case AssetDiagnosticCode::NotDurable:
     case AssetDiagnosticCode::NonFiniteAttribute:
     case AssetDiagnosticCode::UvOutOfRange:

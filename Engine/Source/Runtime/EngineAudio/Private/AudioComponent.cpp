@@ -1,5 +1,6 @@
 #include "ValueRange.h"
 
+#include <AudioAssets/AudioObjectKey.h>
 #include <Core/Math/MathUtility.h>
 #include <EngineAudio/AudioComponent.generated.h>
 #include <EngineAudio/AudioWorldSubsystem.h>
@@ -31,6 +32,24 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     options.volume = volumeMultiplier;
     options.pitch = pitchMultiplier;
     options.startFrame = startFrame;
+    if (overridePriority) {
+        options.priority = priority;
+    }
+
+    options.remainActiveIfDropped = remainActiveIfDropped;
+    // 동시 발음 소유자는 소유 Actor다(UE owner — limitToOwner 그룹, 3.41.2절).
+    if (!GetOwner().IsNull()) {
+        options.owner = AudioObjectKey(GetOwner());
+    }
+
+    if (concurrencyCount_ != 0) {
+        options.overrideConcurrency = true;
+        options.concurrencyCount = concurrencyCount_;
+        for (uint32 index = 0; index < concurrencyCount_; ++index) {
+            options.concurrency[index] = concurrency_[index];
+        }
+    }
+
     // emitter를 잡지 못했으면(scene이 끝남·표 가득) 2D가 아니라 위치 재생으로 낸다.
     auto played = emitter_.IsValid() ? audio->PlayAttached(emitter_, sound_, Move(options))
                                      : audio->PlayAt(sound_, WorldLocation(), Move(options));
@@ -39,6 +58,19 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     }
 
     playback_ = played.Value();
+    return Result<void>::Success();
+}
+
+Result<void> AudioComponent::SetConcurrency(Span<const SoundConcurrencyEntry> entries) noexcept {
+    if (auto valid = ValidateSoundConcurrencyEntries(entries.Data(), entries.Size()); !valid) {
+        return valid;
+    }
+
+    concurrencyCount_ = static_cast<uint32>(entries.Size());
+    for (uint32 index = 0; index < concurrencyCount_; ++index) {
+        concurrency_[index] = entries[index];
+    }
+
     return Result<void>::Success();
 }
 

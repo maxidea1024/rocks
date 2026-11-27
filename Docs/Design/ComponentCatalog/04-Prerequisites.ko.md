@@ -35,7 +35,7 @@
 | CR11 | 카메라·view: `CameraComponent`(1.2절)와 `ViewDesc` 생성 | `CameraComponent` 구현(CM0c — ER 23.4절), `ViewDesc` 생성은 RS0 `WorldIntegration` | — | RN 5.1절, 별도 문서 |
 | CR12 | `WorldIntegration`·`RenderData`: 컴포넌트 변경 감지 → `SceneChangeList`(인스턴스·광원 추가·제거·변환·재질), `RenderNotices` 처리. 인스턴스 종류(정적 메시·인스턴스드·skinned·sprite) 등록 | 없음(모듈 없음) | RN 3.2·4.2절 | RN |
 | CR13 | 렌더러 단계 RS0(정적 메시·Unlit)·RS1(광원)·RS3(그림자)·RS5(투명·하늘·안개)·RS6(후처리)·RS7(capture·decal·bake 표본)·RS9(rect)·RS10(screen-space)·RS12(skinned) | 설계만(화면 마일스톤 뒤) | RN 17절 | RN |
-| CR14 | 머티리얼 런타임: section별 머티리얼 `RenderHandle`, 인스턴스 파라미터 override, 실행 중 머티리얼 인스턴스(UE `UMaterialInstanceDynamic` 대응) | MS3a 골격만 | 메모리 mesh-unreal-exchange-spec | [머티리얼 시스템](../MaterialSystem.ko.md) |
+| CR14 | 머티리얼 런타임: section별 머티리얼 `RenderHandle`, 인스턴스 파라미터 override, 실행 중 머티리얼 인스턴스(UE `UMaterialInstanceDynamic` 대응) | MS3a 골격만 | 메모리 mesh-unreal-exchange-spec | [머티리얼 시스템](../MaterialSystem/README.ko.md) |
 | CR14a | 텍스처 스트리밍 입력: 컴포넌트가 내는 텍스처 사용 기록(UV 밀도·화면 크기 — UE `FRenderAssetOwnerStreamingState`) | 설계만 | TextureStreaming 4.1절 | TextureStreaming |
 | CR15 | 추가 view와 render target 에셋(scene capture·planar reflection) | 없음 | — | RN 5절, AssetSystem 텍스처 계열 |
 | CR23 | 디버그·편집 표시: 선·도형·아이콘 billboard(EditorOnly 시각화 포함) | 결정(CD12), 설계 RN RS13 — 코드 없음 | `Sandbox` 샘플 렌더러뿐(ER 3절). UE는 line batch proxy가 프레임마다 동적 메시 요소를 내는 렌더러 경로다(`Engine/Private/Components/LineBatchComponent.cpp:60`) | RN 4.2절 "디버그·편집 표시", 11.2절 PC9a·PC9b, 17절 RS13 |

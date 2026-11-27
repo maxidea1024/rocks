@@ -100,7 +100,7 @@ struct GraphPass {
 
 // pass 종류다(UE ERDGPassFlags의 Raster·Compute·AsyncCompute·Copy). 종류가 허용하는 접근이 다르다:
 // - Raster: attachment(GraphPassAccesses::RenderTarget·ColorTarget·DepthTarget) 또는 스왑체인
-//   타깃(SwapChainTarget)이 있어야 한다. 셰이더
+//   타깃(SwapChainTarget, 같은 스왑체인의 pass들은 백버퍼 하나를 함께 쓴다)이 있어야 한다. 셰이더
 //   읽기는 SrvGraphics·Constant·VertexOrIndex·IndirectArgs. UAV는 검증 오류다(셰이더 시스템 7.2절
 //   4항: UAV는 compute만).
 // - Compute: SRV·UAV·Constant·IndirectArgs. 렌더 타깃 없음(열린 기록이 없으면 attachment 없는
@@ -279,6 +279,8 @@ struct GraphStats {
     uint32 attachmentTransitions = 0;
     // 연 장치 기록(BeginPass·BeginFrame) 수다.
     uint32 recordings = 0;
+    // present를 낸 스왑체인 기록 수다(EndFrame이 성공한 것만, 스왑체인마다 그래프당 하나).
+    uint32 presents = 0;
     // 풀에서 새로 만든·재사용한 자원 수다(풀에서 받은 장치 객체 기준).
     uint32 createdResources = 0;
     uint32 reusedResources = 0;

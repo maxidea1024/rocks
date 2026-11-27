@@ -6,6 +6,10 @@
 
 시간 운에 기대지 않는다. 시계는 주입하고(가짜 시계를 시험이 직접 전진), 스레드 순서는 명시 gate로 만든다. 단언은 결정적인 최종 상태와 사건 순서에 한다.
 
+PG4 시험 파일: `Engine/Tests/PendingWorkRegistryTests.cpp`(22–26, Engine 프레임·종료 연결).
+
+PG3 시험 파일: `Progress/Tests/ProgressOutputTests.cpp`(15·16·17, 제어 줄 처리)·`ProgressChildTests.cpp`(18–21 — 자식은 시험 실행 파일을 `--process-probe progress-child <시나리오>`로 다시 띄운다. 부모의 다음 동작은 자식이 쓴 줄·pipe EOF로 순서를 정한다), PlatformBase `StandardStream_TimedInputReportsNoProgressDataAndEof`. 17(원문 추출)은 JSONL 줄의 `title`·`titleId`·`msgId`로 본다.
+
 PG2 시험 파일: `Core/Source/Runtime/Progress/Tests/ProgressScopeTests.cpp`(3·4·5·6·8·14, 문구·`ProgressParallelFor`)·`ProgressHubTests.cpp`(7·9·10·11·12·13). 11의 `Text::Clone` 실패는 노드 참조 계수 넘침뿐이라 직접 만들지 않고, 할당 실패를 `NFailAllocator`로 `Begin`의 모든 할당 지점에서 본다. 11의 "켜기 전"은 header-only 시험 접근점(`Private/ProgressTestAccess.h`)이 닫힌 hub를 되돌려 본다.
 
 1. 연결 취소: 부모·자식·다단, 깊이 상한, 기본 부모 token, Source 쪽 조회도 사슬을 봄.
@@ -29,8 +33,8 @@ PG2 시험 파일: `Core/Source/Runtime/Progress/Tests/ProgressScopeTests.cpp`(3
 19. 자식 취소: 부모 취소 → `cancel` 줄 → 자식 `Cancelled`·종료 코드 130.
 20. `--parent-control`에서 stdin EOF → 취소, `--parent-control` 없으면 닫힌 stdin이어도 계속.
 21. 강제 종료 경로(hook로 자식이 취소를 무시).
-22. 등록소: 합계, `RunBefore` 순서, 순환 → 등록 수락·의존 무시·Error 로그, 없는 이름 무시.
-23. 소유 스레드 밖 호출 → `WrongThread`(`RemainingCount` 제외).
-24. `FinishAll`이 사이사이 `ApplyCompleted`를 끼우고 끝에 남은 수 0, 진행 작업과 하위 계수.
-25. `FinishFor`·`CancelFor`가 모든 source에 같은 목록, `Shutdown` 뒤 `Unregister`, 호출 중 `Unregister` → `Busy`.
+22. 등록소: 합계, `RunBefore` 순서, 순환 → 등록 수락·앞 source가 새 source를 가리키는 의존 무시·Error 로그, 없는 이름 무시, 할당 실패는 되돌림, `Unregister` 뒤 순서 유지.
+23. 소유 스레드 밖 호출 → `WrongThread`(`RemainingCount` 제외, `Shutdown`은 Error 로그·no-op), `AdoptCurrentThread`는 등록이 있으면 `Busy`.
+24. `FinishAll`이 모든 source를 순서대로 부르고 끝에 남은 수 0, 할 일이 있을 때만 막는 진행 작업, 하위 작업에 바인딩된 source 구간, 처음 오류.
+25. `FinishFor`·`CancelFor`가 모든 source에 같은 목록(빈 목록은 no-op), `Shutdown`은 정방향·뒤 `Unregister`, 호출 중 `Register`·`Unregister`·재진입 → `Busy`.
 26. `ApplyCompleted` 매개변수 전달(시간 예산·Tryout 전용).

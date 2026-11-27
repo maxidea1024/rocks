@@ -36,6 +36,13 @@ struct ControlCommand {
     float pitch = 1.0f;
     uint32 startFrame = 0;
     uint32 fadeInFrames = 0;
+    // 실효 우선순위(옵션 재정의 또는 사운드 값)와 voice를 잃어도 남을지다(3.41.1절).
+    float priority = DefaultSoundPriority;
+    bool remainActiveIfDropped = false;
+    // 동시 발음 소유자와 실효 그룹(옵션 재정의 또는 사운드 것 — 3.41.2절)이다.
+    uint64 owner = 0;
+    uint32 concurrencyCount = 0;
+    SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
     // Stop.
     uint32 fadeFrames = 0;
     // SetParameter.
@@ -69,6 +76,8 @@ struct ControlBatch {
     Array<EmitterUpdate> emitters;
     Array<ControlCommand> commands;
     float masterGain = 1.0f;
+    // audio.concurrency.mindistancedelta(cm — StopFarthest 동거리 폭, 3.41.2절)다.
+    float concurrencyMinDistanceDelta = 0.0f;
     // 제어 → 게임.
     Array<PlaybackEvent> events;
     AudioControlStats stats;

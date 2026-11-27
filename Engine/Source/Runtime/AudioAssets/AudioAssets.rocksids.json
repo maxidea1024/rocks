@@ -66,6 +66,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ConcurrencyGroup::settings",
+      "id": "c1f4cc28e8504a919dcde9df9a19c97f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClip::channelCount",
       "id": "47f1bc6683e5409f86e93d9bdf0cf250",
       "aliases": [],
@@ -234,6 +241,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::limitToOwner",
+      "id": "f23aea35708843e78f75617038e2893d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::maxCount",
+      "id": "985c8d801b764f1aa681886058184b5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::resolutionRule",
+      "id": "46d5b1f36f3b4c19b2f6b95ff228ebfc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::retriggerTime",
+      "id": "80876ed9cafa4b0db173d0c1794b1084",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::voiceStealReleaseTime",
+      "id": "25a079e1fefe4452826513fa36300467",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::volumeScale",
+      "id": "d72c58bd5bb741d884b4a9763a4895ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::volumeScaleAttackTime",
+      "id": "c7b7dd9b265f44058431f6c8212aff0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::volumeScaleCanRelease",
+      "id": "727ec7d8786b44968a65a607a1ea31f4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::volumeScaleMode",
+      "id": "721ef0661cb248bfb6dc2b623f49ba4f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundConcurrencySettings::volumeScaleReleaseTime",
+      "id": "7b323f56f4ff4f87bf3c14ec1df7ca23",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundCuePoint::frame",
       "id": "71d015cfa5ce41e4b8af71d3dcb10550",
       "aliases": [],
@@ -283,8 +360,50 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundSource::bypassVolumeScaleForPriority",
+      "id": "fe24738c26ba4941ba1c9f5e8cef2879",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::concurrency",
+      "id": "ebff21a978554d94945950fcd4aa2674",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::concurrencyOverrides",
+      "id": "b4eab15615ea409b88a1755c7af23714",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::overrideConcurrency",
+      "id": "182d1660f9104a96b2168dfd0457787e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundSource::pitch",
       "id": "596c573e5b4244cfa6c1d91d76f53b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::priority",
+      "id": "f35489aa1c404268a73b7fdfe2d3d174",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::virtualizationMode",
+      "id": "2ba429372ed440c8b0b8ca080aa389ce",
       "aliases": [],
       "retired": false
     },
@@ -299,6 +418,13 @@
       "kind": "type",
       "name": "rocks::AttenuationSettings",
       "id": "e09cbf1b74fe40a58c7b72bb3ccf1137",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ConcurrencyGroup",
+      "id": "2a7526a13c574539912d77dd6d840d42",
       "aliases": [],
       "retired": false
     },
@@ -327,6 +453,27 @@
       "kind": "type",
       "name": "rocks::SoundCompression",
       "id": "e1fefd6832c049bf9023ae9d551b9ae1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundConcurrencyRule",
+      "id": "f209ad0b359b41079a870558772b47d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundConcurrencySettings",
+      "id": "b7ae71eb9749404582d15a26c1213b67",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundConcurrencyVolumeScaleMode",
+      "id": "4f637dc5cfd74668b6e300d3452c9630",
       "aliases": [],
       "retired": false
     },
@@ -397,6 +544,13 @@
       "kind": "type",
       "name": "rocks::SoundSourceStorage",
       "id": "dd302658307b44c19c998c5a33ae19b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundVirtualizationMode",
+      "id": "c95e4ae97c2b47c2b3733be5bbfa70a3",
       "aliases": [],
       "retired": false
     }

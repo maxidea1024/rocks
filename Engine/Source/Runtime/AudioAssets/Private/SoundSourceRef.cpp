@@ -39,7 +39,10 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
     const bool hasStream = playable.stream.Get() != nullptr;
     if (hasPcm == hasStream || (hasPcm && !pcm->IsFinite()) ||
         !IsFiniteWithin(playable.volume, 0.0f, audio::MaxVoiceGain) ||
-        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch)) {
+        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch) ||
+        !IsFiniteWithin(playable.priority, MinSoundPriority, MaxSoundPriority) ||
+        static_cast<uint8>(playable.virtualizationMode) >
+            static_cast<uint8>(SoundVirtualizationMode::SeekRestart)) {
         return Created::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -53,6 +56,30 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
     if (playable.attenuation.HasValue()) {
         if (auto valid = ValidateSoundAttenuation(playable.attenuation.Value()); !valid) {
             return Created::Failure(valid.Error());
+        }
+    }
+
+    // 동시 발음 항목: 수 ≤ MaxConcurrencyGroups, 키가 있고, 설정이 범위 안이다(3.41.2절).
+    if (playable.concurrencyCount > MaxConcurrencyGroups) {
+        return Created::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (uint32 index = 0; index < playable.concurrencyCount; ++index) {
+        const SoundConcurrencyEntry& entry = playable.concurrency[index];
+        if (entry.key == 0) {
+            return Created::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto valid = ValidateSoundConcurrencySettings(entry.settings); !valid) {
+            return Created::Failure(valid.Error());
+        }
+
+        // 같은 그룹은 한 번만(UE ConcurrencySet은 집합 — 같은 키가 둘이면 자리를 둘 차지한다).
+        for (uint32 earlier = 0; earlier < index; ++earlier) {
+            if (playable.concurrency[earlier].key == entry.key &&
+                playable.concurrency[earlier].isOverride == entry.isOverride) {
+                return Created::Failure(ErrorCode::InvalidArgument);
+            }
         }
     }
 

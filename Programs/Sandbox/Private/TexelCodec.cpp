@@ -2,6 +2,7 @@
 
 #include <Core/Math/Float16.h>
 #include <Platform/Memory.h>
+#include <Texture/TextureBlockDecode.h>
 #include <math.h>
 
 namespace sandbox {
@@ -219,6 +220,93 @@ bool DecodeTexel(graphics::PixelFormat format, const uint8* in, float (&out)[4])
         }
 
         out[channel] = static_cast<float>(component);
+    }
+
+    return true;
+}
+
+bool TextureBlockFormatOf(graphics::PixelFormat format, TextureBlockFormat& out) noexcept {
+    switch (format) {
+    case graphics::PixelFormat::BC1Unorm:
+    case graphics::PixelFormat::BC1UnormSrgb:
+        out = TextureBlockFormat::Bc1;
+        return true;
+    case graphics::PixelFormat::BC3Unorm:
+    case graphics::PixelFormat::BC3UnormSrgb:
+        out = TextureBlockFormat::Bc3;
+        return true;
+    case graphics::PixelFormat::BC4Unorm:
+        out = TextureBlockFormat::Bc4;
+        return true;
+    case graphics::PixelFormat::BC5Unorm:
+        out = TextureBlockFormat::Bc5;
+        return true;
+    case graphics::PixelFormat::BC6HUfloat:
+        out = TextureBlockFormat::Bc6h;
+        return true;
+    case graphics::PixelFormat::BC7Unorm:
+    case graphics::PixelFormat::BC7UnormSrgb:
+        out = TextureBlockFormat::Bc7;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool DecodeImageTexel(graphics::PixelFormat format, Span<const uint8> bytes, uint32 width,
+                      uint32 height, uint32 plane, uint32 x, uint32 y, float (&out)[4]) noexcept {
+    if (x >= width || y >= height) {
+        return false;
+    }
+
+    if (IsTexelCodecFormat(format)) {
+        const usize texelBytes = graphics::GetPixelFormatInfo(format).blockBytes;
+        const usize index = (static_cast<usize>(plane) * height + y) * width + x;
+        if ((index + 1) * texelBytes > bytes.Size()) {
+            return false;
+        }
+
+        return DecodeTexel(format, bytes.Data() + index * texelBytes, out);
+    }
+
+    TextureBlockFormat block = TextureBlockFormat::Bc1;
+    if (!TextureBlockFormatOf(format, block)) {
+        return false;
+    }
+
+    const usize blockBytes = TextureBlockBytes(block);
+    const usize blocksX = (width + TextureBlockSize - 1) / TextureBlockSize;
+    const usize planeBytes =
+        static_cast<usize>(graphics::PixelFormatImageBytes(format, width, height));
+    const usize offset = static_cast<usize>(plane) * planeBytes +
+                         ((y / TextureBlockSize) * blocksX + x / TextureBlockSize) * blockBytes;
+    if (offset + blockBytes > bytes.Size()) {
+        return false;
+    }
+
+    const uint8* source = bytes.Data() + offset;
+    const uint32 texel = (y % TextureBlockSize) * TextureBlockSize + x % TextureBlockSize;
+    if (block == TextureBlockFormat::Bc6h) {
+        // BC6H Ufloat는 half로 풀린다(알파 1 — 형식에 알파가 없다).
+        uint16 halfs[TextureBlockTexels * 4];
+        DecodeTextureBlockHalf(source, halfs);
+        for (uint32 channel = 0; channel < 4; ++channel) {
+            out[channel] = Float16::FromBits(halfs[texel * 4 + channel]).ToFloat();
+        }
+
+        return true;
+    }
+
+    uint8 texels[TextureBlockRgbaBytes];
+    DecodeTextureBlock(block, source, texels);
+    const bool srgb = graphics::GetPixelFormatInfo(format).srgb;
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        double value = texels[texel * TextureBlockTexelBytes + channel] / Unorm8Max;
+        if (srgb && channel < 3) {
+            value = SrgbToLinear(value);
+        }
+
+        out[channel] = static_cast<float>(value);
     }
 
     return true;

@@ -14,6 +14,7 @@
 // clang-format off
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
 // clang-format on
 #include <Platform/Fatal.h>
 
@@ -30,6 +31,84 @@ constexpr int CollisionStepsPerStep = 1;
 // Jolt body 잠금 수다(0 = Jolt 기본값).
 constexpr JPH::uint BodyMutexCount = 0;
 
+// 접촉 listener 용량의 하한, 지난 step 대비 배수, 알림 body 하나당 잡는 수다(7.1.12절).
+constexpr usize MinContactNoticeCapacity = 64;
+constexpr usize ContactNoticeGrowth = 2;
+constexpr usize ContactNoticesPerNotifyBody = 4;
+
+// 세 값 가운데 가장 큰 것이다(math::Max는 실수 전용).
+constexpr usize LargestOf(usize a, usize b, usize c) noexcept {
+    const usize ab = a > b ? a : b;
+    return ab > c ? ab : c;
+}
+
+// CCD(LinearCast) body인지다 — 추정 충격량은 CCD로만 닿은 쌍에만 쓰인다(6.4절).
+bool UsesLinearCast(const JPH::Body& body) noexcept {
+    return !body.IsStatic() && body.GetMotionPropertiesUnchecked()->GetMotionQuality() ==
+                                   JPH::EMotionQuality::LinearCast;
+}
+
+// Jolt 벡터 둘의 사전식 비교다(-1·0·1).
+int CompareVectors(JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept {
+    for (int axis = 0; axis < 3; ++axis) {
+        if (a[axis] != b[axis]) {
+            return a[axis] < b[axis] ? -1 : 1;
+        }
+    }
+
+    return 0;
+}
+
+// probe 참여 표지가 있는 body인지다(그 접촉은 반작용이 없다 — 6.4절).
+bool IsProbeBody(const JPH::Body& body) noexcept {
+    return (ObjectLayerParticipation(body.GetObjectLayer()) & LayerParticipationProbe) != 0;
+}
+
+// 접촉 정렬 순서다(7.1.12절): 칸 번호가 작은 쪽·큰 쪽, 하위 형상 ID 둘, 깊이, 접촉점 좌표, 법선,
+// 추정 충격량(값이 모두 같으면 어느 쪽이 먼저여도 결과가 같다).
+template <class Notice>
+bool ContactNoticeBefore(const Notice& a, const Notice& b) noexcept {
+    const uint32 a1 = UserDataIndex(a.userData1);
+    const uint32 a2 = UserDataIndex(a.userData2);
+    const uint32 b1 = UserDataIndex(b.userData1);
+    const uint32 b2 = UserDataIndex(b.userData2);
+    const uint32 aLow = a1 < a2 ? a1 : a2;
+    const uint32 bLow = b1 < b2 ? b1 : b2;
+    if (aLow != bLow) {
+        return aLow < bLow;
+    }
+
+    const uint32 aHigh = a1 < a2 ? a2 : a1;
+    const uint32 bHigh = b1 < b2 ? b2 : b1;
+    if (aHigh != bHigh) {
+        return aHigh < bHigh;
+    }
+
+    if (a.subShape1.GetValue() != b.subShape1.GetValue()) {
+        return a.subShape1.GetValue() < b.subShape1.GetValue();
+    }
+
+    if (a.subShape2.GetValue() != b.subShape2.GetValue()) {
+        return a.subShape2.GetValue() < b.subShape2.GetValue();
+    }
+
+    if (a.depth != b.depth) {
+        return a.depth < b.depth;
+    }
+
+    for (int axis = 0; axis < 3; ++axis) {
+        if (a.point[axis] != b.point[axis]) {
+            return a.point[axis] < b.point[axis];
+        }
+    }
+
+    if (const int normal = CompareVectors(a.normal, b.normal); normal != 0) {
+        return normal < 0;
+    }
+
+    return CompareVectors(a.estimatedImpulse, b.estimatedImpulse) < 0;
+}
+
 } // namespace
 
 JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runtime,
@@ -38,13 +117,16 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
     : runtime_(Move(runtime)), responseSets_(allocator), layerPairs_(responseSets_),
       temp_(settings.tempAllocatorBytes),
       jobs_(scheduler, JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers), activations_(allocator),
-      slots_(allocator), freeSlots_(allocator), pendingResults_(allocator),
-      kinematicTargets_(allocator), kinematicMoving_(allocator), slept_(allocator),
-      moved_(allocator), queryHits_(allocator) {
+      contacts_(*this, allocator), slots_(allocator), freeSlots_(allocator),
+      pendingResults_(allocator), kinematicTargets_(allocator), kinematicMoving_(allocator),
+      slept_(allocator), moved_(allocator), contactHits_(allocator), takenContactHits_(allocator),
+      minDeltaVelocityForHitEvents_(static_cast<double>(settings.minDeltaVelocityForHitEvents)),
+      queryHits_(allocator) {
     system_.Init(settings.maxBodies, BodyMutexCount, settings.maxBodyPairs,
                  settings.maxContactConstraints, broadPhaseLayers_, objectVsBroadPhase_,
                  layerPairs_);
     system_.SetBodyActivationListener(&activations_);
+    system_.SetContactListener(&contacts_);
     system_.SetGravity(
         ToJoltAcceleration(Vec3d(0.0, 0.0, static_cast<double>(settings.defaultGravityZ))));
 }
@@ -152,6 +234,11 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         desc.settings != nullptr ? desc.settings->linearDamping : DefaultLinearDamping;
     settings.mAngularDamping = desc.settings != nullptr ? desc.settings->angularDamping : 0.0f;
 
+    // CCD(6.5절 — UE bUseCCD).
+    if (desc.settings != nullptr && desc.settings->continuousCollision) {
+        settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+    }
+
     settings.mUserData = PackUserData(index, slots_[index].generation);
 
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
@@ -177,6 +264,12 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     slot.updateMassOnShapeChange =
         desc.settings == nullptr || desc.settings->updateMassWhenScaleChanges;
     slot.pendingResult = false;
+    slot.notifyContacts = desc.settings != nullptr && desc.settings->notifyRigidBodyCollision;
+    slot.stepStartStamp = 0;
+    if (slot.notifyContacts) {
+        ++notifyBodies_;
+    }
+
     slot.queuedTarget = false;
     slot.hasTarget = false;
     slot.movedLastStep = false;
@@ -200,6 +293,11 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     slot.actor = {};
     slot.live = false;
     slot.pendingResult = false;
+    if (slot.notifyContacts) {
+        --notifyBodies_;
+    }
+
+    slot.notifyContacts = false;
     slot.hasTarget = false;
     slot.movedLastStep = false;
     // 세대 0은 "없음"이라 건너뛴다.
@@ -376,6 +474,26 @@ Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, const BodyGeometry& 
     return Result<void>::Success();
 }
 
+void JoltPhysicsScene::SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept {
+    AssertNotStepping();
+    if (FindSlot(body) == nullptr) {
+        return;
+    }
+
+    BodySlot& slot = slots_[body.index];
+    if (slot.notifyContacts != notify) {
+        notifyBodies_ = notify ? notifyBodies_ + 1 : notifyBodies_ - 1;
+    }
+
+    slot.notifyContacts = notify;
+}
+
+bool JoltPhysicsScene::WantsContacts(JPH::uint64 userData) const noexcept {
+    const BodySlot* slot =
+        FindSlot(PhysicsBodyHandle{UserDataIndex(userData), UserDataGeneration(userData)});
+    return slot != nullptr && slot->notifyContacts;
+}
+
 Result<BodyKinematics> JoltPhysicsScene::ReadKinematics(PhysicsBodyHandle body) const noexcept {
     const BodySlot* slot = FindSlot(body);
     if (slot == nullptr) {
@@ -421,6 +539,246 @@ uint64 JoltPhysicsScene::ActivationListener::TakeInto(Array<JPH::uint64>& out) n
     const uint64 dropped = dropped_;
     dropped_ = 0;
     return dropped;
+}
+
+void JoltPhysicsScene::ContactCollector::OnContactAdded(const JPH::Body& body1,
+                                                        const JPH::Body& body2,
+                                                        const JPH::ContactManifold& manifold,
+                                                        JPH::ContactSettings& settings) {
+    Record(body1, body2, manifold, settings);
+}
+
+void JoltPhysicsScene::ContactCollector::OnContactPersisted(const JPH::Body& body1,
+                                                            const JPH::Body& body2,
+                                                            const JPH::ContactManifold& manifold,
+                                                            JPH::ContactSettings& settings) {
+    Record(body1, body2, manifold, settings);
+}
+
+void JoltPhysicsScene::ContactCollector::Record(const JPH::Body& body1, const JPH::Body& body2,
+                                                const JPH::ContactManifold& manifold,
+                                                JPH::ContactSettings& settings) noexcept {
+    // probe는 접촉 데이터만 내고 밀어내지 않는다(Jolt는 콜백마다 설정을 새로 채운다 — 6.4절).
+    const bool probe = IsProbeBody(body1) || IsProbeBody(body2);
+    if (probe) {
+        settings.mIsSensor = true;
+    }
+
+    if (manifold.mRelativeContactPointsOn1.empty() ||
+        (!scene_.WantsContacts(body1.GetUserData()) &&
+         !scene_.WantsContacts(body2.GetUserData()))) {
+        return;
+    }
+
+    // probe 접촉은 실제로 겹친 것만 낸다: Jolt manifold는 speculative 거리 안의 떨어진 접촉도
+    // 주지만 UE는 probe를 거리 0으로 다시 검출한다(Chaos DetectProbeCollisions).
+    if (probe && manifold.mPenetrationDepth < 0.0f) {
+        return;
+    }
+
+    ContactNotice notice;
+    notice.userData1 = body1.GetUserData();
+    notice.userData2 = body2.GetUserData();
+    notice.subShape1 = manifold.mSubShapeID1;
+    notice.subShape2 = manifold.mSubShapeID2;
+    // 두 표면의 첫 점 가운데다(UE Chaos 접촉 위치 — 두 형상 접촉점의 평균).
+    notice.point = manifold.mBaseOffset + 0.5f * (manifold.mRelativeContactPointsOn1[0] +
+                                                  manifold.mRelativeContactPointsOn2[0]);
+    notice.normal = manifold.mWorldSpaceNormal;
+    notice.depth = manifold.mPenetrationDepth;
+    notice.probe = probe;
+    if (!probe && (UsesLinearCast(body1) || UsesLinearCast(body2))) {
+        // CCD로만 닿은 쌍은 solver 충격량이 없어 이 추정값을 쓴다(6.4절 — 알림 접촉마다 속도 반복을
+        // 돌지 않게 CCD body가 낀 접촉만 계산한다). 콜백의 속도는 해 풀기 전 값이다
+        // (ContactListener.h:104-106).
+        const JPH::PhysicsSettings& physics = scene_.system_.GetPhysicsSettings();
+        JPH::CollisionEstimationResult estimate;
+        JPH::EstimateCollisionResponse(body1, body2, manifold, estimate, settings,
+                                       physics.mMinVelocityForRestitution,
+                                       physics.mNumVelocitySteps);
+        float total = 0.0f;
+        for (float impulse : estimate.mContactImpulse) {
+            total += impulse;
+        }
+
+        notice.estimatedImpulse = total * manifold.mWorldSpaceNormal;
+    }
+
+    platform::LockGuard lock(mutex_);
+    // 할당하지 않는다(클래스 설명) — 용량이 모자라면 세기만 한다.
+    if (notices_.Size() < notices_.Capacity()) {
+        (void)notices_.TryPushBack(notice);
+    } else {
+        ++dropped_;
+    }
+}
+
+Result<void> JoltPhysicsScene::ContactCollector::Reserve(usize capacity) noexcept {
+    platform::LockGuard lock(mutex_);
+    return notices_.TryReserve(capacity);
+}
+
+uint64 JoltPhysicsScene::ContactCollector::TakeDropped() noexcept {
+    platform::LockGuard lock(mutex_);
+    const uint64 dropped = dropped_;
+    dropped_ = 0;
+    return dropped;
+}
+
+void JoltPhysicsScene::CollectContactHits() noexcept {
+    Array<ContactNotice>& notices = contacts_.Notices();
+    const uint64 dropped = contacts_.TakeDropped();
+    lastContactNotices_ = notices.Size() + static_cast<usize>(dropped);
+    if (dropped != 0) {
+        Log::Warning(LogPhysics,
+                     "Physics step {Step} lost {Count} contact notices; some contact hits were "
+                     "not reported",
+                     steps_, dropped);
+    }
+
+    if (notices.IsEmpty()) {
+        return;
+    }
+
+    algo::Sort(notices.View(), [](const ContactNotice& a, const ContactNotice& b) noexcept {
+        return ContactNoticeBefore(a, b);
+    });
+    usize begin = 0;
+    while (begin < notices.Size()) {
+        usize end = begin + 1;
+        while (end < notices.Size() && notices[end].userData1 == notices[begin].userData1 &&
+               notices[end].userData2 == notices[begin].userData2) {
+            ++end;
+        }
+
+        EmitContactPair(Span<const ContactNotice>(notices.Data() + begin, end - begin));
+        begin = end;
+    }
+
+    notices.Clear();
+    if (lostContactHits_ != 0) {
+        Log::Warning(LogPhysics,
+                     "Physics step {Step} could not store {Count} contact hits (out of memory)",
+                     steps_, lostContactHits_);
+        lostContactHits_ = 0;
+    }
+}
+
+void JoltPhysicsScene::RecordStepStartVelocities() noexcept {
+    system_.GetActiveBodies(JPH::EBodyType::RigidBody, activeBodies_);
+    const JPH::BodyInterface& bodies = system_.GetBodyInterfaceNoLock();
+    for (const JPH::BodyID& id : activeBodies_) {
+        const JPH::uint64 userData = bodies.GetUserData(id);
+        const PhysicsBodyHandle handle{UserDataIndex(userData), UserDataGeneration(userData)};
+        if (FindSlot(handle) == nullptr || slots_[handle.index].motion != BodyMotion::Dynamic) {
+            continue;
+        }
+
+        BodySlot& slot = slots_[handle.index];
+        slot.stepStartVelocity = bodies.GetLinearVelocity(id);
+        slot.stepStartStamp = steps_ + 1;
+    }
+}
+
+bool JoltPhysicsScene::IsVelocityChangeUnderThreshold(const BodySlot& slot) const noexcept {
+    // Dynamic만 본다(UE도 rigid 입자의 V − PreV만 계산한다). step 시작에 잠들어 있었으면 0에서
+    // 시작한다.
+    if (slot.motion != BodyMotion::Dynamic) {
+        return true;
+    }
+
+    const JPH::Vec3 before =
+        slot.stepStartStamp == steps_ + 1 ? slot.stepStartVelocity : JPH::Vec3::sZero();
+    const Vec3d change = FromJoltLinearVelocity(
+        system_.GetBodyInterfaceNoLock().GetLinearVelocity(slot.body) - before);
+    // UE FVector::IsNearlyZero(threshold)(cm/s, 성분마다)다.
+    const double threshold = minDeltaVelocityForHitEvents_;
+    return math::Abs(change.x) <= threshold && math::Abs(change.y) <= threshold &&
+           math::Abs(change.z) <= threshold;
+}
+
+void JoltPhysicsScene::EmitContactPair(Span<const ContactNotice> group) noexcept {
+    const ContactNotice& first = group[0];
+    const PhysicsBodyHandle handle1{UserDataIndex(first.userData1),
+                                    UserDataGeneration(first.userData1)};
+    const PhysicsBodyHandle handle2{UserDataIndex(first.userData2),
+                                    UserDataGeneration(first.userData2)};
+    const BodySlot* slot1 = FindSlot(handle1);
+    const BodySlot* slot2 = FindSlot(handle2);
+    if (slot1 == nullptr || slot2 == nullptr) {
+        return;
+    }
+
+    bool probe = false;
+    JPH::Vec3 estimated = JPH::Vec3::sZero();
+    for (const ContactNotice& notice : group) {
+        probe = probe || notice.probe;
+        estimated += notice.estimatedImpulse;
+    }
+
+    // body 2가 받은 충격량이다: probe는 0, 그 밖은 solver 값(CCD로만 닿았으면 추정값 — 6.4절).
+    JPH::Vec3 impulse = JPH::Vec3::sZero();
+    if (!probe) {
+        JPH::Vec3 applied = JPH::Vec3::sZero();
+        JPH::uint appliedPoints = 0;
+        const bool solved =
+            system_.GetAppliedContactImpulse(slot1->body, slot2->body, applied, appliedPoints);
+        impulse = solved && appliedPoints != 0 ? applied : estimated;
+        // UE는 누적 충격량이 정확히 0인 접촉(닿지 않은 speculative 접촉)을 내지 않는다.
+        if (impulse == JPH::Vec3::sZero()) {
+            return;
+        }
+    }
+
+    // probe는 반작용이 없어 속도 변화로 거르지 않는다.
+    if (!probe && minDeltaVelocityForHitEvents_ > 0.0 && IsVelocityChangeUnderThreshold(*slot1) &&
+        IsVelocityChangeUnderThreshold(*slot2)) {
+        return;
+    }
+
+    // sign은 Jolt 법선·충격량(body 2 기준)을 받는 쪽 기준으로 바꾼다(body 1이면 −1).
+    auto emit = [&](const BodySlot& me, const BodySlot& other, float sign) noexcept {
+        if (!me.notifyContacts) {
+            return;
+        }
+
+        PhysicsContactHit hit;
+        hit.myComponent = me.component;
+        hit.myActor = me.actor;
+        hit.otherComponent = other.component;
+        hit.otherActor = other.actor;
+        hit.normalImpulse = FromJoltLinearImpulse(sign * impulse);
+        hit.hit.location = FromJoltPosition(first.point, origin_);
+        hit.hit.impactPoint = hit.hit.location;
+        hit.hit.normal = FromJoltNormal(sign * first.normal);
+        hit.hit.impactNormal = hit.hit.normal;
+        hit.hit.penetrationDepth = math::Max(FromJoltLength(first.depth), 0.0);
+        hit.hit.blockingHit = true;
+        hit.hit.component = other.component;
+        hit.hit.actor = other.actor;
+        if (!contactHits_.TryPushBack(hit)) {
+            ++lostContactHits_;
+        }
+    };
+
+    // 칸 번호가 작은 쪽 먼저다.
+    if (handle1.index < handle2.index) {
+        emit(*slot1, *slot2, -1.0f);
+        emit(*slot2, *slot1, 1.0f);
+    } else {
+        emit(*slot2, *slot1, 1.0f);
+        emit(*slot1, *slot2, -1.0f);
+    }
+}
+
+Span<const PhysicsContactHit> JoltPhysicsScene::TakeContactHits() noexcept {
+    AssertNotStepping();
+    // 두 버퍼를 바꿔 쥐어 쌓는 쪽이 지난 프레임 용량을 다시 쓴다.
+    Array<PhysicsContactHit> previous = Move(takenContactHits_);
+    takenContactHits_ = Move(contactHits_);
+    contactHits_ = Move(previous);
+    contactHits_.Clear();
+    return takenContactHits_.View();
 }
 
 void JoltPhysicsScene::MarkMoved(JPH::uint64 userData) noexcept {
@@ -543,6 +901,15 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     };
 
     StepCall call{this, seconds, JPH::EPhysicsUpdateError::None};
+    // listener는 step 중 할당하지 않으므로 지난 step 수에 맞춰 미리 늘린다(실패하면 넘친 몫을
+    // 센다).
+    (void)contacts_.Reserve(LargestOf(MinContactNoticeCapacity,
+                                      ContactNoticeGrowth * lastContactNotices_,
+                                      ContactNoticesPerNotifyBody * notifyBodies_));
+    if (minDeltaVelocityForHitEvents_ > 0.0) {
+        RecordStepStartVelocities();
+    }
+
     stepping_ = true;
     if (platform::RunWithDeterministicFloatingPoint(
             [](void* context) noexcept {
@@ -562,6 +929,7 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     // 쓸 job 칸이 언제나 남게 한다(타이밍과 무관한 상한 — 7.1.1절).
     jobs_.WaitForOutstandingTasks();
     CollectMovedBodies();
+    CollectContactHits();
     ++steps_;
     if (error != JPH::EPhysicsUpdateError::None) {
         Log::Warning(LogPhysics,

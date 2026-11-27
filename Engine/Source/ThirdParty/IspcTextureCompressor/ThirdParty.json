@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "name": "IspcTextureCompressor",
+  "version": "79ddbc90334f (GameTechDev/ISPCTextureCompressor master, 2024-09-23)",
+  "upstreamDirectory": "IspcTextureCompressor-79ddbc90334f",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/GameTechDev/ISPCTextureCompressor/archive/79ddbc90334fc31edd438e68ccb0fe99b4e15aab.tar.gz",
+    "sha256": "506650f63f7a4a41237206083c8b3785a64daa94d4a896b3757d39581972f70b",
+    "verification": "GitHub HTTPS commit archive of the vendor repository (head of master = 79ddbc90334fc31edd438e68ccb0fe99b4e15aab, the archival notice of 2024-09-23), downloaded on 2026-11-27 and its SHA-256 recorded. Upstream publishes no releases, signatures or hashes, so it is pinned by the commit and the archive hash. kernel.ispc (before Rocks.patch), ispc_texcomp.cpp and ispc_texcomp.h are byte-identical to the copy UE 5.8 ships (Engine/Source/ThirdParty/Intel/ISPCTexComp/ISPCTextureCompressor-14d998c); the later upstream commits only change kernel_astc.ispc, readme.md and the license text. Imported files are license.txt and the BC6H/BC7 encoder sources ispc_texcomp/kernel.ispc, ispc_texcomp/ispc_texcomp.cpp and ispc_texcomp/ispc_texcomp.h (the ASTC sources, the sample application, project files and prebuilt ISPC compiler are not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "MIT",
+      "upstreamExpression": "license.txt (MIT, Copyright 2017 Intel Corporation); the source headers carry the same MIT text (Copyright (c) 2016-2019, Intel Corporation)",
+      "file": "IspcTextureCompressor-79ddbc90334f/license.txt",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "IspcTextureCompressor-79ddbc90334f/ispc_texcomp/ispc_texcomp.cpp"
+  ],
+  "ispcUnits": [
+    "IspcTextureCompressor-79ddbc90334f/ispc_texcomp/kernel.ispc"
+  ],
+  "includeDirectories": [
+    "IspcTextureCompressor-79ddbc90334f/ispc_texcomp"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "IspcTextureCompressor-79ddbc90334f/ispc_texcomp/ispc_texcomp.h"
+  ],
+  "files": {
+    "ispc_texcomp/ispc_texcomp.cpp": "dc79ef177d66f01034905019d296915ceaa5021b5d776ce668979523d92d79fe",
+    "ispc_texcomp/ispc_texcomp.h": "6cc6541b086aad4848b581da6deff7acad7e749fec4d3985759d3dbcb98018b9",
+    "ispc_texcomp/kernel.ispc": "74b2dee62542bf00f2eaeaa6912fb103d2159c969b569371c98f5b7a87f80931",
+    "license.txt": "c3b1335b5988cd4eb61994987f1f2b01002c88734c727d76a973b1722634757a"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "BC6H and BC7 encoder of the texture cook (Docs/Design/AssetSystem section 12.17.6, stage TC3b) — the encoder UE 5.8 TextureFormatIntelISPCTexComp uses. UE links a prebuilt DLL compiled with --target=sse2,sse4,avx,avx2 --opt=fast-math; Rocks compiles kernel.ispc with the pinned ISPC (Build/Toolchain.json ispc) for one target per architecture with FMA and fast-math off (Docs/Design/BuildTargets section 3.12), so the output bytes do not depend on the host CPU. Compared with UE by quality (PSNR), not bytes (TC3c).",
+    "Only the BC6H and BC7 entry points are used (TextureTools TextureBlockEncode; Programs/TextureCodecCompare uses the ispc_texcomp.h types to call the UE DLL). The BC1-BC5 and ETC1 entry points compile with the kernel but are not called (BC1-BC5 is the NVTT port, TC1). The ASTC declarations of ispc_texcomp.h have no definition here (ASTC is astc-encoder, TC4).",
+    "The x64 build runs the SSE4 target, so the caller checks SSE4.2 before the first call (TextureBlockEncode returns Unsupported without it). The kernel follows the caller's FTZ/DAZ state; the caller runs it in the deterministic floating point environment.",
+    "Android targets do not build this library (ISPC sources are desktop-only — BuildTargets BD46); TextureTools depends on it only for Windows and macOS."
+  ],
+  "modifications": [
+    {
+      "file": "ispc_texcomp/kernel.ispc",
+      "upstreamSha256": "9562c59daf23621917ce91f6fb2f100343f3fc64ea4036202f3c5258ece4f479",
+      "reason": "compute_axis restarts the power iteration from the covariance column with the largest diagonal when the result is provably not the principal axis (Rayleigh quotient below half of trace/channels — half so that an isotropic covariance, a solid block, never restarts on one ulp of rounding). Upstream starts from {1,1,1,1} only; with the exact IEEE build (no fast-math, no FMA — Docs/Design/BuildTargets section 3.12) a principal axis orthogonal to that vector, such as R rising and G falling by the same steps, stays orthogonal and BC7 quality drops (TC3c measured 37.7 dB against UE 49.9 dB on the negative-correlation test image; UE escapes only through fast-math or FMA rounding). Blocks that never restart keep the upstream bytes (Docs/Design/AssetSystem section 12.17.6 item 10)."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

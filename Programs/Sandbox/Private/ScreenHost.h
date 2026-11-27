@@ -133,9 +133,14 @@ struct InspectorEntry {
     bool cacheOwned = false;
 };
 
-// 형식의 표시 방식·성분 계열·정수 배율이다(float는 HDR이면 노출 + filmic, unorm·snorm은 그대로,
-// 정수는 형식 최대값으로 나눈다 — R8Uint 1/255).
-void DescribeInspectorFormat(graphics::PixelFormat format, InspectorTexture& out) noexcept;
+// 쿠킹 swizzle이 Normal sampler type 계약(rg01 — Normalmap, AssetSystem 12.4.3절)인가.
+bool IsNormalMapSwizzle(const graphics::ChannelSwizzle& swizzle) noexcept;
+
+// 형식·쿠킹 swizzle의 표시 값(swizzle·표시 방식·성분 계열·정수 배율)을 out에 쓴다. float는 HDR이면
+// 노출 + filmic, unorm·snorm은 그대로, 노멀 맵 swizzle(rg01)은 법선 복원 표시이고, 정수는 형식
+// 최대값으로 나눈다(R8Uint 1/255).
+void DescribeInspectorTexture(graphics::PixelFormat format, const graphics::ChannelSwizzle& swizzle,
+                              InspectorTexture& out) noexcept;
 
 class ScreenHost {
 public:

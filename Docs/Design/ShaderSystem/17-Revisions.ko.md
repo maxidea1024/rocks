@@ -53,7 +53,7 @@
   - 8항: 창 `GL_LOWER_LEFT` 규칙이 `GL_UPPER_LEFT` + offscreen 스왑체인 + Y 반전 blit으로 바뀌었다(SH2에서 P11로 앞당김). 앞면은 클립 공간 규약별(`GLES31_PC` `GL_CCW`, `GLES31_ANDROID` `GL_CW`).
   - S5·S12: GLES 미리보기 결과와 ES profile 측정을 더했다.
 - 개정 12(2026-11-18): 결정 4(파라미터 선언)를 권장안 MetaCompiler 방식으로 확정했다(사용자 지시 "결정사항들은 권장안대로 하면됨"). 15절 결정 4와 기한 문장, 서문의 남은 결정, 5.3절 P7 제목, 13절 서두, 14절 ReflectionFoundations 행의 "고를 때" 조건을 정리했다. 13절에 `ShaderParameterLayout` 데이터 형식 요구를 더해 머티리얼 동적 layout(머티리얼 시스템 결정 MD3·MSR4)과 연결했다.
-- 개정 13(2026-11-18): [렌더러](../Renderer.ko.md) RQ22·RQ23과 [머티리얼 시스템](../MaterialSystem.ko.md) MSR1·MSR12·MSR13(결정 RN13·MD4 개정, 사용자 결정 "형식별 상한")을 반영했다.
+- 개정 13(2026-11-18): [렌더러](../Renderer.ko.md) RQ22·RQ23과 [머티리얼 시스템](../MaterialSystem/README.ko.md) MSR1·MSR12·MSR13(결정 RN13·MD4 개정, 사용자 결정 "형식별 상한")을 반영했다.
   - 7.2절 4항: SRV 텍스처·샘플러 수는 프로필 공통 상한이 아니라 job 형식 상한으로 검사하고, 오류에 셰이더 타입·퍼뮤테이션·형식·머티리얼·pass를 담는다. 형식 정의 값(D3D12·Metal 128, D3D11·GLES 16, Vulkan은 GX1 뒤)과 Vulkan을 넓힐 때의 set·단계 합계 한도를 적었다.
   - 7.2절 9항: 짝 규칙의 예외로 공유 샘플러 `SharedWrapSampler`·`SharedClampSampler`(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`)를 후속에서 SH2로 앞당겼다. 텍스처마다 샘플러 출처 하나, 리플렉션 출처 필드, backend별 위치(GLES는 유닛마다 `glBindSampler`), 상태는 렌더러가 view마다 정한다. 정적 샘플러는 후속으로 남는다.
   - 7.3절 (b)·(h): job 형식 상한과 공유 샘플러 시험을 더했다.

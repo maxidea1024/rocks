@@ -31,6 +31,7 @@ Result<void> RegisterUnrealExchangeImporters(void* state, AssetImporterTable& ta
     all[UnrealTextureImporterCount] = &importers.StaticMeshImporter();
     all[UnrealTextureImporterCount + 1] = &importers.SkeletonImporter();
     all[UnrealTextureImporterCount + 2] = &importers.SkeletalMeshImporter();
+    all[UnrealTextureImporterCount + 3] = &importers.AnimSequenceImporter();
     for (AssetImporter* importer : all) {
         auto registered = table.Register(*importer);
         if (!registered) {

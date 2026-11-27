@@ -946,6 +946,30 @@ struct PassDesc {
     QueueKind queue = QueueKind::Graphics;
 };
 
+// 스왑체인 백버퍼 기록의 시작 설정이다(Device::BeginFrame, RenderBase 8절 "스왑체인 공유 설계").
+// 한 프레임을 기록 여러 개로 나눠 그릴 수 있다: present가 거짓인 기록은 제출만 하고 백버퍼를 그대로
+// 두며, 다음 BeginFrame이 같은 백버퍼에 이어 그린다(load Load). present가 참인 기록의 EndFrame이
+// 그 프레임을 present한다.
+//
+// 사용 예(장면 뒤 UI를 같은 백버퍼에):
+//   auto scene = device.BeginFrame({.swapChain = swapChain, .clear = background,
+//                                   .present = false});
+//   ... 장면 ...
+//   device.EndFrame();                              // 제출만 한다
+//   auto ui = device.BeginFrame({.swapChain = swapChain, .load = LoadAction::Load});
+//   ... UI ...
+//   device.EndFrame();                              // present한다
+//
+// 규칙: load Load는 그 스왑체인에 present하지 않은 기록이 있을 때만 받는다(그리는 중인 프레임).
+// present 뒤·처음·ResizeSwapChain 뒤의 백버퍼 내용은 정의되지 않으므로 InvalidArgument다. Clear·
+// DontCare는 늘 받는다(DontCare는 백버퍼 전체를 덮어 그릴 때).
+struct SwapChainPassDesc {
+    SwapChainHandle swapChain;
+    LoadAction load = LoadAction::Clear;
+    ClearColor clear;
+    bool present = true;
+};
+
 // viewport다(픽셀 단위, 원점은 대상 왼쪽 위). 깊이 범위 기본은 [0, 1]이다.
 struct Viewport {
     float x = 0.0f;

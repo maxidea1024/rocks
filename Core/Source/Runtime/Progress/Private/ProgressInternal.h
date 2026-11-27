@@ -176,6 +176,11 @@ struct ProgressHubState {
     // Warning 기록.
     platform::Atomic<uint32> warnedOnce{0};
     platform::Atomic<uint32> warningCounts[ProgressWarningCount]{};
+
+    // RequestCancelAllTopLevel을 받은 뒤다(hub 잠금). 그 뒤 시작하는 취소 가능한 최상위 작업도 바로
+    // 취소된다 — 취소(cancel 줄·EOF·Ctrl-C)가 명령의 첫 Begin보다 먼저 와도 사라지지 않게. 켜짐마다
+    // 지운다.
+    bool cancelAllPending = false;
 };
 
 extern constinit ProgressHubState ProgressHubGlobal;
