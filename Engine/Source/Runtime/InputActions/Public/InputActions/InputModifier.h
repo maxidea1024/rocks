@@ -4,6 +4,7 @@
 #include <Core/Math/Vector3.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <CurveAssets/CurveAssetConstants.h>
 #include <Curves/TangentCurve.h>
 #include <InputActions/InputModifierState.h>
 #include <InputActions/InputValue.h>
@@ -120,6 +121,12 @@ struct ROCKS_INPUTACTIONS_API InputModifier {
     ROCKS_PROPERTY() TangentCurve responseX;
     ROCKS_PROPERTY() TangentCurve responseY;
     ROCKS_PROPERTY() TangentCurve responseZ;
+    // 축마다 커브 에셋 slot이다(소유 InputAction·InputContext의 curveAssets 번호, 없으면
+    // NoCurveAssetSlot — 2.9절 IA9). 모으기가 에셋 커브를 response*에 복사하고 slot을
+    // 비운다(평가기는 비운 값만 받는다).
+    ROCKS_PROPERTY() uint32 responseXAsset = NoCurveAssetSlot;
+    ROCKS_PROPERTY() uint32 responseYAsset = NoCurveAssetSlot;
+    ROCKS_PROPERTY() uint32 responseZAsset = NoCurveAssetSlot;
     // FovScaling.
     ROCKS_PROPERTY() float fovScale = 1.0f;
     // SmoothDelta.

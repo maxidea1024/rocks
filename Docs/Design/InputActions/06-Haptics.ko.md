@@ -14,6 +14,7 @@
 `HapticChannel`:
 - `affectsLeftLarge`·`affectsLeftSmall`·`affectsRightLarge`·`affectsRightSmall`(모두 참)
 - `curve`: Curves 모듈 `TangentCurve`. UE `FRuntimeFloatCurve` = FRichCurve cubic이다. 시간(초) → 세기 0–1.
+- `curveAsset: uint32`(기본 `NoCurveAssetSlot`): 커브 에셋 slot이다(UE `FRuntimeFloatCurve::ExternalCurve`). `HapticEffectAsset::curveAssets` 번호이고, `CopyHapticEffect`가 그 에셋 커브를 `curve`로 평탄화하고 slot을 비운다(2.9절 IA9). 재생은 slot이 빈 값만 받는다.
 
 UE `PerDeviceOverrides`·`DeviceProperties`는 7.4절이다.
 

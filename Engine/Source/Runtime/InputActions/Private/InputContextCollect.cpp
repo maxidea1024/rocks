@@ -1,4 +1,6 @@
 #include <Core/Math/MathUtility.h>
+#include <CurveAssets/CurveAssetSlot.h>
+#include <CurveAssets/FloatCurveAsset.generated.h>
 #include <InputActions/InputAction.generated.h>
 #include <InputActions/InputAction.h>
 #include <InputActions/InputActionData.generated.h>
@@ -84,6 +86,12 @@ Result<void> CheckModifier(const InputModifier& modifier, DataCheck& check) noex
 
     if (!DataFinite(modifier.scalar) || !DataFinite(modifier.curveExponent)) {
         return check.Reject(InputDataIssue::NonFiniteParameter);
+    }
+
+    if (modifier.responseXAsset != NoCurveAssetSlot ||
+        modifier.responseYAsset != NoCurveAssetSlot ||
+        modifier.responseZAsset != NoCurveAssetSlot) {
+        return check.Reject(InputDataIssue::UnresolvedCurveAsset);
     }
 
     if (modifier.kind == InputModifierKind::DeadZone &&
@@ -180,6 +188,47 @@ Result<void> CheckBindings(const InputContextBundle& bundle, Span<const InputBin
     }
 
     check.location.binding = NoInputDataIndex;
+    return Result<void>::Success();
+}
+
+// 모디파이어들의 응답 커브 slot을 owner의 curveAssets로 평탄화한다(2.9절 IA9).
+Result<void> FlattenModifierCurves(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                   const ObjectRefArray<FloatCurveAsset>& curveAssets,
+                                   Array<InputModifier>& modifiers) noexcept {
+    for (InputModifier& modifier : modifiers) {
+        if (auto x = TryResolveCurveSlot(registry, access, curveAssets, modifier.responseXAsset,
+                                         modifier.responseX);
+            !x) {
+            return x;
+        }
+
+        if (auto y = TryResolveCurveSlot(registry, access, curveAssets, modifier.responseYAsset,
+                                         modifier.responseY);
+            !y) {
+            return y;
+        }
+
+        if (auto z = TryResolveCurveSlot(registry, access, curveAssets, modifier.responseZAsset,
+                                         modifier.responseZ);
+            !z) {
+            return z;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> FlattenBindingCurves(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                  const ObjectRefArray<FloatCurveAsset>& curveAssets,
+                                  Array<InputBinding>& bindings) noexcept {
+    for (InputBinding& binding : bindings) {
+        if (auto flattened =
+                FlattenModifierCurves(registry, access, curveAssets, binding.modifiers);
+            !flattened) {
+            return flattened;
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -299,6 +348,21 @@ Result<void> CollectInputContext(ObjectRegistry& registry, const ObjectAccessCon
         return copied;
     }
 
+    // 바인딩(기본·프로필 override) 모디파이어의 커브 slot은 이 컨텍스트의 curveAssets다.
+    if (auto flattened =
+            FlattenBindingCurves(registry, access, source.curveAssets, staged.data.bindings);
+        !flattened) {
+        return flattened;
+    }
+
+    for (InputProfileBindings& profile : staged.data.profileOverrides) {
+        if (auto flattened =
+                FlattenBindingCurves(registry, access, source.curveAssets, profile.bindings);
+            !flattened) {
+            return flattened;
+        }
+    }
+
     if (auto reserved = staged.actions.TryReserve(source.actions.Size()); !reserved) {
         return reserved;
     }
@@ -336,6 +400,13 @@ Result<void> CollectInputContext(ObjectRegistry& registry, const ObjectAccessCon
                 detail::TryCopyValue(data.settings, actionPointer.Value()->settings, allocator);
             !copied) {
             return copied;
+        }
+
+        // 액션 설정 모디파이어의 커브 slot은 그 액션의 curveAssets다.
+        if (auto flattened = FlattenModifierCurves(
+                registry, access, actionPointer.Value()->curveAssets, data.settings.modifiers);
+            !flattened) {
+            return flattened;
         }
 
         if (auto pushed = staged.actions.TryPushBack(Move(data)); !pushed) {

@@ -1,4 +1,6 @@
 #include <AssetRuntime/AssetManager.h>
+#include <CurveAssets/CurveAssetSlot.h>
+#include <CurveAssets/FloatCurveAsset.generated.h>
 #include <InputActions/Haptics/HapticEffectAsset.generated.h>
 #include <InputActions/Haptics/HapticEffectAsset.h>
 #include <InputActions/InputAssetAccess.h>
@@ -39,9 +41,18 @@ Result<void> CopyHapticEffect(AssetManager& assets, const AssetLease& effect,
         }
 
         const HapticEffectAsset& asset = *pointer.Value();
-        copied = out.TryCopyFrom(asset.effect);
+        // 사본에 다 만든 뒤(채널 커브 slot 평탄화 포함 — 2.9절 IA9) 옮긴다(실패면 out 그대로).
+        HapticEffect staged(out.channels.GetAllocator());
+        copied = staged.TryCopyFrom(asset.effect);
+        for (usize index = 0; copied && index < staged.channels.Size(); ++index) {
+            HapticChannel& channel = staged.channels[index];
+            copied = TryResolveCurveSlot(registry, registry.OwnerAccess(), asset.curveAssets,
+                                         channel.curveAsset, channel.curve);
+        }
+
         if (copied) {
-            out.id = asset.EffectiveId();
+            staged.id = asset.EffectiveId();
+            out = Move(staged);
         }
     });
     if (!opened) {

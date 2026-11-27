@@ -54,7 +54,7 @@
 | CA2 | `CurveTableAsset`·`CurveTableRowRef` | 3.2·3.3절 시험 |
 | CA3 | Core `CsvReader`, Developer `CurveAssetTools` 임포터 다섯, 진단 코드 `CurveImportRowSkipped`·`CurveTableUnusedRows`(에셋 세션 합의) | 5.1·5.2절 시험(UE 동작 대조표) |
 | CA4 | `CurveTableCookProcessor` | 쿠킹 결과 키·접선, 에디터 객체 불변, 쓰지 않는 맵 비우기 |
-| CA5 | InputActions 연결(6.1절 — 착수 때 방식 확정) | 입력 시험 갱신, slot 평탄화 시험 |
+| CA5 | InputActions 연결(6.1절 — 소유 에셋 `curveAssets` + slot 번호, InputActions 2.9절 IA9) | 입력 시험 갱신, slot 평탄화(액션·바인딩·프로필·채널)·검증 거부·오류(범위 밖·null·풀리지 않음)·출력 그대로 시험 |
 | CA6 | `ColorCurveAtlas`, 굽기, 쿠킹 처리기(4.3절 변경 목록 — 렌더·에셋 세션 합의) | 굽기 UE 대조, 쿠킹 텍스처 결과 |
 
 - 단계마다 리뷰어를 하나 두고, 바뀐 시험과 format·policy를 돌린다.

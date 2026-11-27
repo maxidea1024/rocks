@@ -3,6 +3,7 @@
 #include <AssetRuntime/Package.h>
 #include <Base/Guid.h>
 #include <Core/Memory/Allocator.h>
+#include <CurveAssets/FloatCurveAsset.h>
 #include <InputActions/InputAction.h>
 #include <InputActions/InputContextData.h>
 #include <Meta/Annotations.h>
@@ -25,7 +26,8 @@ class ROCKS_INPUTACTIONS_API InputContext final : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit InputContext(Allocator& allocator) noexcept : actions(allocator), data(allocator) {
+    explicit InputContext(Allocator& allocator) noexcept
+        : actions(allocator), data(allocator), curveAssets(allocator) {
     }
 
     // 실효 id다(Docs/Design/InputActions 2.8절): id가 0이 아니면 id, 0이면 대표 에셋의 AssetId
@@ -40,6 +42,9 @@ public:
     // 바인딩이 가리키는 액션이다(null 원소 없음). chord 대상은 넣어도 되고 안 넣어도 된다.
     ROCKS_PROPERTY(Required) ObjectRefArray<InputAction> actions;
     ROCKS_PROPERTY() InputContextData data;
+    // data의 바인딩(기본·프로필) 모디파이어의 응답 커브 slot이 가리키는 커브 에셋이다(Hard — 2.9절
+    // IA9).
+    ROCKS_PROPERTY(Required) ObjectRefArray<FloatCurveAsset> curveAssets;
 };
 
 } // namespace rocks::input
