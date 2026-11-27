@@ -645,6 +645,21 @@ TEST(UiFramework_EditableTextBoxErrorPopupFollowsSetErrorWithoutStealingFocus) {
     REQUIRE(bench.Layout());
     bench.Click(editor);
     CHECK(marker->IsOpen() && bench.app.GetFocus(EditUser).Get() == &editor);
+    // anchor가 숨으면(접힌 조상 — 고르지 않은 탭과 같다) 팝업 층을 접고, 다시 보이면 되돌린다.
+    Element* layer = bench.root->ChildAt(1);
+    REQUIRE(layer != nullptr);
+    const Visibility layerShown = layer->GetVisibility();
+    bench.canvas->SetVisibility(Visibility::Collapsed);
+    REQUIRE(bench.Layout());
+    CHECK(marker->IsOpen() && layer->GetVisibility() == Visibility::Collapsed);
+    bench.canvas->SetVisibility(Visibility::Visible);
+    REQUIRE(bench.Layout());
+    CHECK(marker->IsOpen() && layer->GetVisibility() == layerShown);
+    // 비활성 상자의 오류 팝업은 그대로 보인다.
+    bench.box->SetEnabled(false);
+    REQUIRE(bench.Layout());
+    CHECK(layer->GetVisibility() == layerShown);
+    bench.box->SetEnabled(true);
     // 표지를 누르면 닫히고 다시 누르면 열린다(초점을 옮기지 않는 Open).
     REQUIRE(bench.Layout());
     bench.Click(*marker);

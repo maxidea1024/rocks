@@ -80,7 +80,7 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | SSpacer | `SSpacer` | `SizeBox` | 있음 |
 | SSpinBox | `SSpinBox` | `SpinBox` | UW4b 스타일 |
 | SNumericEntryBox / No Spin | `SNumericEntryBox` | 없음 | UW4c |
-| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | Widget 층 `EditableTextWidget`·`EditableTextBoxWidget`·`MultiLineEditableText(Box)Widget`(Element는 UiFramework `EditableText` — UW9b) | UW4a2 Widget 호스트로 행(힌트·오류 caption·비밀번호·읽기 전용·Esc 되돌리기·IME·undo), Element 공개(모델 분리)와 UE 스타일은 UW4b |
+| SEditableText / Box, MultiLine / Box | `SEditableText(Box)` | UiFramework `EditableText`·`EditableTextBox`(여러 줄 포함 — Widget: `EditableTextWidget`·`EditableTextBoxWidget`·`MultiLineEditableText(Box)Widget`) | Widgets 탭 "Text Input" 행(UW4f2d — 22.9절): 힌트·값 레이블·읽기 전용·비밀번호·오류 팝업·여러 줄·스크롤 막대 |
 | SInlineEditableText | `SInlineEditableTextBlock` | 없음 | UW4c |
 | SSearchBox | `SSearchBox` | 없음 | UW4c |
 | Menu Bar / Toolbar / Toolbar 2 | `FMenuBarBuilder`·`FToolBarBuilder` | 없음 — Editor Parts 탭 16.7절 | UW4d1 |

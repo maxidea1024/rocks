@@ -44,8 +44,8 @@ Result<void> Overlay::AttachPopupLayer(const PopupRequest& popup) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto stored =
-        popups_.TryPushBack({WeakPtr<Element>(popup.anchor), popup.layer.Get(), popup.close});
+    auto stored = popups_.TryPushBack({WeakPtr<Element>(popup.anchor), popup.layer.Get(),
+                                       popup.close, popup.layer->GetVisibility()});
     if (!stored) {
         return stored;
     }
@@ -133,8 +133,20 @@ Vec2 Overlay::ComputeDesiredSize(float) const noexcept {
     return size;
 }
 
+void Overlay::SyncPopupVisibility() noexcept {
+    for (const OpenPopup& popup : popups_) {
+        // 키 경로(활성 자식 — 고르지 않은 탭은 빠진다)와 보이기만 본다. 비활성 anchor의 팝업은
+        // 그대로 보인다(비활성 상자의 오류도 보인다).
+        const SharedPtr<Element> anchor = popup.anchor.Lock();
+        const bool shown = anchor && anchor->IsInputPathActive(*this, false, false);
+        popup.layer->SetVisibility(shown ? popup.shown : Visibility::Collapsed);
+    }
+}
+
 Result<void> Overlay::Arrange(const Geometry& geometry) noexcept {
     SetGeometry(geometry);
+    // 배치는 트리 어디가 바뀌어도(탭 전환 포함) 루트까지 올라와 돈다 — 여기서 숨은 anchor를 본다.
+    SyncPopupVisibility();
     for (usize i = 0; i < ChildCount(); ++i) {
         Element* child = ChildAt(i);
         if (child->GetVisibility() == Visibility::Collapsed) {

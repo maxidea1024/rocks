@@ -228,6 +228,15 @@ Result<void> DemoText::SetText(TextLabel& label, StringView value, const FontSty
     return Shape(label, value, font.size, TypefaceName(font.typeface), font.letterSpacing);
 }
 
+Result<void> DemoText::FindWordBoundaries(StringView utf8, Array<usize>& out) noexcept {
+    out.Clear();
+    if (backend_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    return backend_->FindBoundaries(text::TextBoundaryKind::Word, utf8, "", out);
+}
+
 Result<void> DemoText::Shape(TextLabel& label, StringView value, float size, StringView typeface,
                              int32 letterSpacing) noexcept {
     if (font_.Get() == nullptr) {

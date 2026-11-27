@@ -76,6 +76,8 @@
   - 붙는 통지 안에서 바로 열지 않는다 — 통지는 트리 순회(루트 교체·목록 행 생성이 배치 중에 일어난다) 안에서 오므로 루트 Overlay 자식 목록을 바꾸면 순회가 깨진다. `UiHostServices::DeferFrameAction`에 넣어 다음 프레임 시작(`Application::StartFrame` — 해체 대기열 다음)에 연다.
   - 대기열 항목은 상자를 약하게 잡는다(그 사이 버려진 상자는 아무 일도 하지 않는다). 한 상자는 대기 항목을 하나만 둔다.
   - 상자가 화면에서 빠지면 팝업은 닫힌다(Overlay `OnDescendantDetached` — 팝업 층 규칙). 다시 붙으면 위 규칙으로 다시 연다.
+  - **숨은 anchor의 팝업(Rocks 보강 — 모든 `MenuAnchor` 팝업)**: 트리에는 남았지만 보이지 않는 anchor(고르지 않은 탭 — `ActiveChildren` 밖, 접히거나 숨은 조상)의 팝업은 팝업 호스트(Overlay)가 배치할 때 층을 접고(Collapsed), 다시 보이면 처음 보이기로 되돌린다. 판정은 anchor에서 호스트까지 `IsInputPathActive(host, 키 경로, 활성 무시)`다. 오류 팝업이 다른 탭 위에 떠 있지 않고 탭으로 돌아오면 다시 보인다. UE는 숨은 anchor가 Tick되지 않아 팝업 창이 옛 자리에 남는다(편집기는 탭 누름으로 메뉴를 닫아 가린다).
+  - 갤러리 self-test·스냅샷 루트도 실제 창처럼 Overlay(팝업 호스트)로 감싼다.
 - 문구 shaping은 호출자가 넘긴 `Text`를 상자가 `TextShaper`로 한다(지역화 — 지금 오류 캡션과 같다).
 - **`UiHostServices` 프레임 동작 대기열**(새 계약): `Result<void> DeferFrameAction(Delegate<void()>&&)`·`usize RunFrameActions()`·`PendingFrameActionCount()`. 해체 대기열(21.4절)과 같은 방식(넣은 순서, 도는 중 넣은 항목은 다음 프레임, 재진입 0)이지만 사용자 hook 해체가 아니라 "트리 순회 밖에서 할 일"이다. `Shutdown`에서는 돌리지 않고 버린다(닫는 앱에서 팝업을 열지 않는다). 빈 delegate는 `InvalidArgument`, 할당 실패는 `OutOfMemory`다.
 
@@ -100,7 +102,10 @@
 
 ### 22.9 갤러리(Widgets 탭 "Text Input" 묶음, 16장)
 
-Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝업), Multi-Line Box(스크롤 막대가 생기는 긴 글), 값 레이블(바뀐 값·확정 사유). 부품 이름은 Rocks 이름으로 적는다(16장 규칙 — UE 클래스 이름을 쓰지 않는다).
+Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝업), Multi-Line Editable Text(힌트 — UE 갤러리 행), Multi-Line Editable Text Box(스크롤 막대가 생기는 긴 글), 값 레이블(바뀐 값·확정 사유 — 힌트 상자 행 옆). 부품 이름은 Rocks 이름으로 적는다(16장 규칙 — UE 클래스 이름을 쓰지 않는다). 순서는 UE 갤러리대로 숫자 입력 다음이다(SStarshipGallery.cpp 1365–1405행).
+
+- 셰이퍼는 데모 `DemoTextShaper`(`ui::TextShaper` 구현 — DemoText 글꼴 조합, 크기는 96 DPI 포인트, 단어 경계는 ICU `FindBoundaries(Word)`)다. 클립보드는 창 세션(`platform::ReadClipboardText`·`WriteClipboardText`)이다.
+- self-test(`VerifyGallery`, 실패 번호 54–60): 오류 팝업이 열리고 안에 Error 바탕, 여러 줄 상자 막대 보임, 상자를 누르면 안쪽 편집기 초점·Primary 외곽선 바탕·흰 caret, "Hi" 타자가 값 레이블 "Changed: Hi", Enter가 "Committed (Enter): Hi".
 
 ### 22.10 시험
 
