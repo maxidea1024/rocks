@@ -163,7 +163,35 @@ constexpr SceneDesc Scenes[] = {
     {"Volume BC1UnormSrgb", TextureDimension::Volume, graphics::PixelFormat::BC1UnormSrgb,
      SceneFamily::Duo, TextureSamplerFilter::Point, 1, 0},
     {"Volume BC4Unorm rrrr mip 1 (2 x 2)", TextureDimension::Volume,
-     graphics::PixelFormat::BC4Unorm, SceneFamily::Gray, TextureSamplerFilter::Point, 0, 1}};
+     graphics::PixelFormat::BC4Unorm, SceneFamily::Gray, TextureSamplerFilter::Point, 0, 1},
+    // BC6H·BC7(개정 65 — TC3): 형식 명세가 정수 해석을 정해 장치 결과가 한 값이므로 끝점 사이
+    // 보간 texel도 고른다(블록 하나에 네 색인 4 × 4 mip). BC6H는 HDR 표시(노출 + filmic)다.
+    {"2D BC7Unorm", TextureDimension::Texture2D, graphics::PixelFormat::BC7Unorm, SceneFamily::Ldr,
+     TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC7UnormSrgb mip 1 (4 x 4 interpolated)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC7UnormSrgb, SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 1},
+    {"2D BC6HUfloat", TextureDimension::Texture2D, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Bilinear, 0, 0},
+    {"2D BC6HUfloat mip 1 (4 x 4 interpolated)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1},
+    {"2D BC6HUfloat mip 2 (tail, 2 x 2)", TextureDimension::Texture2D,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 2},
+    {"2DArray BC7UnormSrgb", TextureDimension::Texture2DArray, graphics::PixelFormat::BC7UnormSrgb,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"2DArray BC6HUfloat mip 1 (2 x 2)", TextureDimension::Texture2DArray,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 2, 1},
+    {"Cube BC7Unorm", TextureDimension::TextureCube, graphics::PixelFormat::BC7Unorm,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 0, 0},
+    {"Cube BC6HUfloat mip 1 (2 x 2)", TextureDimension::TextureCube,
+     graphics::PixelFormat::BC6HUfloat, SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1},
+    {"CubeArray BC7UnormSrgb", TextureDimension::TextureCubeArray,
+     graphics::PixelFormat::BC7UnormSrgb, SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"CubeArray BC6HUfloat", TextureDimension::TextureCubeArray, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 0},
+    {"Volume BC7UnormSrgb", TextureDimension::Volume, graphics::PixelFormat::BC7UnormSrgb,
+     SceneFamily::Ldr, TextureSamplerFilter::Point, 1, 0},
+    {"Volume BC6HUfloat mip 1 (2 x 2)", TextureDimension::Volume, graphics::PixelFormat::BC6HUfloat,
+     SceneFamily::Hdr, TextureSamplerFilter::Point, 0, 1}};
 
 constexpr uint32 SceneCount = sizeof(Scenes) / sizeof(Scenes[0]);
 // 장면 뒤의 음성 장면 하나(장치 생성 실패 — typed 대체 표시)가 capture 자리 하나를 더 쓴다.
