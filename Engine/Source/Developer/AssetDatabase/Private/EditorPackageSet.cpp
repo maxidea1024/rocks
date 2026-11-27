@@ -840,6 +840,10 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         return oom(synced.Error());
     }
 
+    // 열 때 원본 재구성이 실패하면 이번 호출이 붙인 경고를 되돌린다(닫은 패키지의 경고가 남지
+    // 않게).
+    const usize warningsBefore = warnings != nullptr ? warnings->Size() : 0;
+
     // 닫힘을 너비 우선으로 넓힌다. seen은 넣은 id(id 순)다.
     Array<Pending> pending(allocator);
     Array<AssetId> seen(allocator);
@@ -1069,6 +1073,19 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         return oom(reserved.Error());
     }
 
+    // 열 때 원본 재구성(A5j2c)이 실패하면 닫을 수 있게 이 일 전에 열린 id를 적어 둔다(id 순 — 열린
+    // 표 순서). hook 표가 없으면 부르지 않으므로 적지 않는다.
+    Array<AssetId> before(allocator);
+    if (config_.hooks != nullptr) {
+        if (auto reserved = before.TryReserve(open_.Size()); !reserved) {
+            return oom(reserved.Error());
+        }
+
+        for (const EditorPackageInfo& info : open_) {
+            (void)before.TryPushBack(info.id);
+        }
+    }
+
     if (warnings != nullptr) {
         if (auto reserved =
                 warnings->TryReserve(warnings->Size() + excluded.Size() + unresolved.Size() +
@@ -1130,7 +1147,75 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         }
     }
 
+    if (config_.hooks != nullptr) {
+        AssetDiagnostic rebuildFailure;
+        if (auto rebuilt = RebuildOpened(before.View(), warnings, &rebuildFailure); !rebuilt) {
+            // 이번에 연 패키지를 모두 닫는다(트랜잭션 실패와 같은 결과). 닫기가 실패하면 그
+            // 오류가 우선이다(남은 패키지가 열린 채다 — CloseOpened 설명).
+            if (auto closed = CloseOpened(before.View()); !closed) {
+                return oom(closed.Error());
+            }
+
+            if (warnings != nullptr) {
+                // 축소는 실패하지 않는다.
+                (void)warnings->TryResize(warningsBefore);
+            }
+
+            if (rebuildFailure.code == AssetDiagnosticCode::None) {
+                rebuildFailure = EditorDiagnostic(AssetDiagnosticCode::None, rebuilt.Error(), id);
+            }
+
+            return EditorFail<ObjectHandle>(failure, rebuildFailure);
+        }
+    }
+
     return Out::Success(handles[0]);
+}
+
+Result<void> EditorPackageSet::RebuildOpened(Span<const AssetId> before,
+                                             Array<EditorWarning>* warnings,
+                                             AssetDiagnostic* failure) noexcept {
+    // hook이 열린 표를 바꾸지 않는다(새 패키지를 열거나 닫지 않는다) — 번호로 돈다.
+    for (usize at = 0; at < open_.Size(); ++at) {
+        const AssetId asset = open_[at].id;
+        const usize found = algo::LowerBound(before, asset, [](AssetId left, AssetId key) noexcept {
+            return GuidLess(left.value, key.value);
+        });
+        if (found < before.Size() && before[found] == asset) {
+            continue;
+        }
+
+        // 저장할 수 없는 패키지(더 새 버전)·입력이 빠진 패키지(미해결 import)는 굽지 않는다.
+        if (open_[at].readOnly || !open_[at].unresolved.IsEmpty()) {
+            continue;
+        }
+
+        auto representative = registry_->FindChild(Access(), open_[at].package, "");
+        if (!representative) {
+            // 대표 에셋이 없는 패키지는 원본도 없다.
+            if (representative.Error() == ErrorCode::NotFound) {
+                continue;
+            }
+
+            return Result<void>::Failure(representative.Error());
+        }
+
+        bool rebuilt = false;
+        if (auto done =
+                RebuildSource(representative.Value(), asset, {}, AssetSourceRebuildCause::Open,
+                              ObjectHandle{}, warnings, failure, &rebuilt);
+            !done) {
+            return done;
+        }
+
+        if (rebuilt) {
+            if (auto marked = MarkDirty(asset); !marked) {
+                return marked;
+            }
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId type, AssetId id,

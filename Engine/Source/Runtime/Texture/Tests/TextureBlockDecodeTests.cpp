@@ -187,6 +187,22 @@ TEST(TextureBlockDecode_KnownBlocks) {
     CHECK(texels[0] == 0 && texels[3] == 0);
 }
 
+// BC3 색 블록은 c0 ≤ c1이어도 4색이다(D3D 명세 — BC1만 3색 + 투명 검정). 같은 색 블록을 BC1로 풀면
+// index 3이 투명 검정이다.
+TEST(TextureBlockDecode_Bc3ColorAlwaysFourColor) {
+    // 색 블록: c0 = 0x001F(파랑) < c1 = 0xF800(빨강), 모든 index 3. 알파 블록: alpha0 = alpha1 =
+    // 255, index 0.
+    const uint8 color[8] = {0x1F, 0x00, 0x00, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF};
+    uint8 bc3[Bptc] = {0xFF, 0xFF};
+    memcpy(bc3 + 8, color, sizeof(color));
+    uint8 texels[TextureBlockRgbaBytes];
+    DecodeTextureBlock(TextureBlockFormat::Bc3, bc3, texels);
+    // 4색 index 3 = (2·c1 + c0) / 3 = (170, 0, 85), 알파는 알파 블록(255).
+    CHECK(texels[0] == 170 && texels[1] == 0 && texels[2] == 85 && texels[3] == 255);
+    DecodeTextureBlock(TextureBlockFormat::Bc1, color, texels);
+    CHECK(texels[0] == 0 && texels[1] == 0 && texels[2] == 0 && texels[3] == 0);
+}
+
 // 크기 질의: 블록 byte와 출력 byte(블록보다 작은 mip도 블록 하나, 크기 0 거부).
 TEST(TextureBlockDecode_Sizes) {
     CHECK(TextureBlockBytes(TextureBlockFormat::Bc1) == 8 &&

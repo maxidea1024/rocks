@@ -40,7 +40,8 @@ public sealed class CommandletHost : ModuleRules
         // on every platform: Windows shipping targets do not have it, but the rule is a superset and Android and macOS shipping targets do.
         // AudioAssets is an asset type module of asset commands and AudioTools registers the SoundClipImporter (Docs/Design/AudioSystem section
         // 3.36.3). CurveAssets is an asset type module and CurveAssetTools registers the five curve asset importers and the curve table cook
-        // processor (Docs/Design/CurveAssets sections 5.1 and 5.3). Audio, AudioMiniaudio, AudioOpus and EngineAudio come from the Sandbox audio modes (sections 3.34.5, 3.35.11 and 3.37.1);
+        // processor (Docs/Design/CurveAssets sections 5.1 and 5.3); CurveAtlas is the color curve atlas texture class and CurveAtlasTools its type hooks
+        // (bake on asset-set, asset-new and package open — section 4.3). Audio, AudioMiniaudio, AudioOpus and EngineAudio come from the Sandbox audio modes (sections 3.34.5, 3.35.11 and 3.37.1);
         // without the AudioOutputBackendRegistry and AudioDecoderRegistry host services their module lifetime objects stay idle in the cooker. WorldIntegration (with Mesh
         // and Material) comes from the Sandbox texture render cache (Docs/Design/RenderBase section 18.5 item 8).
         // SplashScreen comes from the Sandbox window mode (Docs/Design/SplashScreen); it registers no shader types and only shows a window when a
@@ -48,7 +49,7 @@ public sealed class CommandletHost : ModuleRules
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
             "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "MeshTools", "AnimationTools", "Collision",
             "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
-            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio", "AudioAssets", "AudioTools", "CurveAssets", "CurveAssetTools", "WorldIntegration",
+            "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio", "AudioAssets", "AudioTools", "CurveAssets", "CurveAssetTools", "CurveAtlas", "CurveAtlasTools", "WorldIntegration",
             "SplashScreen"]
     };
 }

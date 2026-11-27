@@ -170,3 +170,88 @@ overlap은 질의 기반 장부다(5.3절 — 시뮬레이션 접촉이 아니�
 - CCD: 얇은 벽으로 빠르게 가는 구는 `continuousCollision`이면 막히며 hit(추정 충격량, 0 아님)를 받고, 아니면 지나간다.
 - hook에서 상대 Actor를 파괴해도 남은 hit 발행이 안전하다(파괴 대기 Actor는 받지 않는다).
 - 같은 스텝의 여러 쌍은 칸 번호 순이다. 문턱이 있어도 probe hit는 남는다. listener 용량이 넘친 step 뒤 다음 step은 모두 받는다(`PhysicsContactSceneTests.cpp`).
+
+### 7.1.13 PH4d 구현 세부(2026-11-27)
+
+침투 해소 도우미다(5.2절). UE `UPrimitiveComponent::ComputePenetration`(`PrimitiveComponent.cpp:3984–3992` → `FBodyInstance::OverlapTest` `BodyInstance.cpp:4331`), `GetCollisionShape`(`PrimitiveComponent.cpp:3243`, `SphereComponent.cpp:201`·`BoxComponent.cpp:251`·`CapsuleComponent.cpp:240`), `UMovementComponent::SafeMoveUpdatedComponent`·`GetPenetrationAdjustment`·`ResolvePenetrationImpl`·`OverlapTest`(`MovementComponent.cpp:398–699`)를 따른다.
+
+**자리.** UE처럼 `ComputePenetration`·`GetCollisionShape`는 `PrimitiveComponent`, `SafeMoveUpdatedComponent`·`GetPenetrationAdjustment`·`ResolvePenetration`은 `MovementComponent`(D4 — 엔진 런타임 26.3절)다. 5.2절의 "D4 이동 컴포넌트는 sweep 없이"는 그대로다: 이 단계는 도우미와 sweep 이동 overload만 더하고, 파생(투사체·경로 이동)을 sweep으로 바꾸는 일은 CM12다.
+
+**`ComputePenetration(MtdResult& out, shape, position, rotation) → bool`.** 주어진 형상을 rotation으로 position에 놓았을 때 이 컴포넌트 body와 겹치면 참이고, `out`에 형상을 밀어낼 단위 방향(`direction`)과 거리(`distance`, cm)를 쓴다(UE `FMTDResult`). body·물리 장면이 없거나 겹치지 않으면 거짓이다. 장면 접점 `PhysicsScene::ComputePenetration(body, shape, position, rotation, MtdResult&)`(새 — step 밖)는 body의 Jolt `TransformedShape::CollideShape`(분리 거리 0 — 닿기만 해도 겹침, 깊이 0)로 가장 깊은 결과를 고른다. Jolt `mPenetrationAxis`는 body 쪽(shape 2)을 밀어낼 방향이라 질의 형상 방향은 그 반대다. 축 길이가 0이거나 비유한이면(중심이 겹침) 방향은 +Z, 거리는 깊이다(sweep 시작 겹침 hit의 막음 법선과 같다 — 7.1.8절). 형상 값이 비유한이거나 Line·Cylinder(CY2 전)·0 회전이면 거짓이다. `MtdResult`는 `World/Physics/MtdResult.h`다.
+
+**`GetCollisionShape(inflation) → CollisionShape`.** 기본은 bounds 상자(`Bounds().boxExtent` — UE `Bounds.BoxExtent`)이고, 구·상자·캡슐이 자기 크기(scaled — `ScaledSphereRadius`·`ScaledBoxExtent`·`ScaledCapsuleRadius`·`ScaledCapsuleHalfHeight`)로 덮어쓴다. 부풀리기는 `CollisionShape::Inflate(inflation)`(새 — UE `FCollisionShape::Inflate`: 0이면 그대로, 상자 반폭·구 반경·캡슐 반경·반 높이에 더하고 0 아래로 내리지 않는다, Line·Cylinder는 그대로).
+
+**`MovementComponent::MoveUpdatedComponent(delta, rotation, sweep, HitResult* outHit, TeleportMode) → Result<bool>`**(새 overload — UE `MoveUpdatedComponentImpl`): 평면 제약한 delta로 갱신 대상이 `PrimitiveComponent`면 `MoveComponent(…, sweep, outHit, MoveOptions{teleport})`, 아니면 sweep 없이 옮긴다(UE `USceneComponent::MoveComponentImpl` — outHit는 trace 끝점만 채운 빈 hit). 기존 두 인자 판(sweep 없음)은 그대로다. 내부 판은 `MoveOptions`를 받아 아래 표지를 넘긴다(UE는 컴포넌트 멤버 `MoveComponentFlags`를 범위로 바꾼다 — Rocks는 인자라 hook에 새지 않는다).
+
+**`GetPenetrationAdjustment(hit) → Vec3d`**(가상): 시작 겹침이 아니면 0. 아니면 `ConstrainDirectionToPlane(hit.normal × ((깊이 > 0 ? 깊이 : DefaultPenetrationDepth 0.125) + |PenetrationPullbackDistance 0.125|))`다.
+
+**`ResolvePenetration(adjustment, hit, rotation) → Result<bool>`**(가상 — UE `ResolvePenetrationImpl`): 평면 제약한 adjustment가 0이 아니고 갱신 대상이 Primitive이며 소유 Actor가 있을 때만 시도한다(그 밖은 거짓).
+1. `hit.traceStart + adjustment`에 `GetCollisionShape(PenetrationOverlapCheckInflation 0.1)`을 rotation으로 놓고 막는 겹침을 본다(UE `OverlapTest` — 채널은 대상 object type, 응답은 대상 실효 응답 묶음, 소유 Actor와 이동 무시 목록 제외 — `InitCollisionParams` → `InitSweepCollisionParams`).
+2. 비었으면 sweep 없이 `TeleportPhysics`로 adjustment만큼 옮기고 참.
+3. 막혔으면 `neverIgnoreBlockingOverlaps` 없이(빠져나가는 시작 겹침은 무시 — 5.1절 5) adjustment를 sweep한다. 못 움직였고 그 hit가 시작 겹침이면 두 번째 조정량을 더한 방향(두 조정량이 다르고 합이 0이 아닐 때)으로 다시 sweep한다.
+4. 아직이면 adjustment + 원래 이동(`hit.traceEnd − hit.traceStart`, 평면 제약)으로 sweep하고, 그것도 안 되고 원래 이동이 adjustment와 같은 쪽(내적 > 0)이면 원래 이동만 sweep한다. 반환 값은 마지막으로 움직였는지다.
+
+**`SafeMoveUpdatedComponent(delta, rotation, sweep, HitResult& outHit, TeleportMode) → Result<bool>`**: `neverIgnoreBlockingOverlaps`·`disableBlockingOverlapDispatch`로 이동한다(UE CVar `p.MoveIgnoreFirstBlockingOverlap` 기본 0 — 먼저 밀어낸다). outHit가 시작 겹침이면 `ResolvePenetration(GetPenetrationAdjustment(outHit), outHit, rotation)`가 참일 때 원래 이동을 다시 한다(같은 표지가 아닌 기본 표지 — UE도 재시도는 범위 밖이다). 갱신 대상이 없으면 outHit를 `time` 1로 비우고 거짓이다.
+
+**상수.** `PenetrationPullbackDistance` 0.125 cm·`PenetrationOverlapCheckInflation` 0.1 cm(UE CVar `p.PenetrationPullbackDistance`·`p.PenetrationOverlapCheckInflation` 기본값)·`DefaultPenetrationDepth` 0.125 cm(UE 리터럴)는 이름 있는 상수다. CVar 연결은 쓰는 곳(CM12 캐릭터 이동)이 생길 때 한다.
+
+**한계.**
+- MTD는 body의 모든 하위 형상을 본다(UE는 `bTraceComplex` 거짓이면 simple 형상만 — `PhysInterface_Chaos.cpp:1114–1170`). 지금 body는 상자·구·캡슐뿐이라 같고, 메시 body(PH6 complex-as-simple)가 들어올 때 하위 형상 표지로 거른다.
+- Primitive가 아닌 갱신 대상의 sweep 없는 이동은 `TeleportMode`를 자식 body에 넘기지 않는다(teleport 범위가 PrimitiveComponent 안에만 있다 — UE `InternalSetWorldLocationAndRotation`은 넘긴다). `ResolvePenetration`은 이 경로를 쓰지 않는다.
+- 음수 scale 상자의 `GetCollisionShape`는 부호 있는 반폭을 부풀려 0으로 잘린다(UE `GetScaledBoxExtent` + `Inflate`와 같다). 비균일 scale 캡슐의 질의 반경(min)과 body 반경(max)도 UE처럼 다르다.
+- UE의 `SafeMoveUpdatedComponent`·`MoveUpdatedComponentImpl`·`OverlapTest`처럼 Rocks 판도 가상이다. `OverlapTest`는 무시 목록 버퍼를 재사용해 const가 아니다.
+- `CollisionShapeKind`가 Collision과 Mesh(`SimpleCollision.h` — 진단 형상 종류)에 같은 이름으로 따로 있어 한 번역 단위에서 만나면 컴파일 오류였다. Mesh 쪽이 `SimpleCollisionShapeKind`로 개명해 해결했다(rocks-cf 1ee15bfb6). `PrimitiveComponent.h`의 `CollisionShape` 앞 선언은 헤더를 가볍게 두려고 그대로 둔다.
+- `ResolvePenetration`의 "두 MTD 합산"·"조정량 + 원래 이동"·"원래 이동만" 분기는 시험 배치(쐐기 모서리)가 없어 시험하지 않았다(UE와 같은 순서 — 코드 대조만).
+
+**PH4d 리뷰 반영(2026-11-27).** 치명 0, 중요 1, 경미 9. 밀어낸 자리 겹침 시험이 질의를 마치지 못하면(대상을 빌리지 못함·충돌 해석 실패) "비었다"로 보고 teleport하던 것을 막힘으로 고쳤다(sweep으로 간다). 축 없는 MTD 방향(+Z), 가상 함수, 문서 식 괄호, 낡은 주석, include 순서를 고치고 한계를 적었다. 시험을 보강했다: 회전한 벽·회전한 캡슐 질의의 MTD, 장면 접점 오류 경로(옛 handle·0 회전·비유한 위치·Cylinder), 막힌 해소 뒤 재시도의 반환 값·hit, 이동 무시 Actor면 밀어낸 자리 겹침에서 빠짐, 평면 제약으로 조정량이 0이면 해소 안 함, 갱신 대상 없는 SafeMove.
+
+**시험**(`PhysicsPenetrationTests.cpp`):
+- `ComputePenetration`: 상자 body와 겹친 구의 방향(+X)·거리(겹친 깊이), 겹치지 않으면·body 없으면 거짓, 거의 닿으면 거리 ≈ 0.
+- `GetCollisionShape`: 구·상자·캡슐이 scale·부풀리기를 반영하고 0 아래로 줄지 않는다. `CollisionShape::Inflate` 경계.
+- `GetPenetrationAdjustment`: 시작 겹침 아님 → 0, 깊이 0 → 기본 깊이, 평면 제약.
+- `SafeMoveUpdatedComponent`: 벽에 5 cm 박힌 상자를 옆으로 옮기면 밀려나(teleport) 원래 이동을 마친다. 밀려날 자리가 다른 벽에 막히면 sweep으로 나온다. 박혀 있지 않으면 보통 sweep(벽에 막힘). 갱신 대상이 Primitive가 아니면 sweep 없이 옮긴다.
+
+### 7.1.14 PH4e 구현 세부(2026-11-27)
+
+hit·overlap의 컴포넌트·Actor 이벤트 필드다(5.5절). 리플렉션 이벤트(`Event<Args...>` — EventReflection ED1, EV2b)를 클래스 필드로 두고 PH4a–PH4c의 가상 hook 자리에서 같이 발행한다. UE `UPrimitiveComponent::OnComponentHit`·`OnComponentBeginOverlap`·`OnComponentEndOverlap`, `AActor::OnActorHit`·`OnActorBeginOverlap`·`OnActorEndOverlap`(`PrimitiveComponent.h`·`Actor.h` 동적 multicast delegate)를 따른다.
+
+**이벤트 필드**(이름은 Rocks식 — UE 이름은 1.3절 대응표에 더한다):
+
+| 클래스 | 필드 | 인자(`Params`) | UE |
+|---|---|---|---|
+| `PrimitiveComponent` | `componentHit` | `hitComponent, otherActor, otherComponent, normalImpulse, hit` — `WeakObjectRef<PrimitiveComponent>, WeakObjectRef<Actor>, WeakObjectRef<PrimitiveComponent>, Vec3d, const HitResult&` | `OnComponentHit` |
+| | `componentOverlapBegan` | `overlappedComponent, otherActor, otherComponent, fromSweep, sweepResult` — 위 셋 + `bool, const HitResult&` | `OnComponentBeginOverlap`(`OtherBodyIndex`는 body가 하나라 뺀다) |
+| | `componentOverlapEnded` | `overlappedComponent, otherActor, otherComponent` | `OnComponentEndOverlap` |
+| `Actor` | `actorHit` | `selfActor, otherActor, normalImpulse, hit` — `WeakObjectRef<Actor>×2, Vec3d, const HitResult&` | `OnActorHit` |
+| | `actorOverlapBegan`·`actorOverlapEnded` | `overlappedActor, otherActor` — `WeakObjectRef<Actor>×2` | `OnActorBeginOverlap`·`OnActorEndOverlap` |
+
+- Actor·컴포넌트 인자는 `WeakObjectRef<T>`다: Sparks는 `ObjectHandle`을 노출하지 못한다(SparksBinding B14 — RMC2602). UE도 타입 있는 포인터를 넘긴다. 나중에 바꾸면 frame digest가 달라져 저장된 바인딩이 미해결(EventReflection ED24)이 되므로 지금 정한다.
+
+- 저장한다(Transient 아님): 에디터·Sparks가 건 리플렉션 바인딩은 그래프에 남는다(EV3a1 — native 구독은 저장하지 않는다). UE도 블루프린트 바인딩은 클래스에 남는다.
+- 생성자가 이벤트마다 allocator를 넘긴다(EV2b).
+
+**HitResult 리플렉션.** 이벤트 인자는 리플렉션 값 형식이어야 한다(바인딩 frame — EventReflection ED5). `HitResult`를 `ROCKS_STRUCT`로 바꾸고 값 칸(`time`·`distance`·`location`·`impactPoint`·`normal`·`impactNormal`·`traceStart`·`traceEnd`·`penetrationDepth`·`faceIndex`·`blockingHit`·`startPenetrating`)을 `ROCKS_PROPERTY`로 둔다. `component`·`actor`는 `ObjectHandle`이라 리플렉션 struct 필드가 될 수 없어(함수·이벤트 인자 전용) `ROCKS_NATIVE`다. 스크립트는 상대를 이벤트 인자(`otherActor`·`otherComponent` — 약한 참조)로 받는다(UE delegate도 따로 넘긴다). 버린 대안: `WeakObjectRef<PrimitiveComponent>` 필드 — 질의·이동·시험 전체의 handle 비교가 바뀐다. 발행하는 파일은 `World/Physics/HitResult.generated.h`를 include한다.
+
+**발행 순서**(가상 hook과 같은 자리 — UE 순서):
+- 막는 sweep hit·시뮬레이션 hit(UE `InternalDispatchBlockingHit` `Actor.cpp:3525–3556`, `DispatchPhysicsCollisionHit` `:5690–5736`): 한쪽마다 Actor `OnHit` → `actorHit` → 그 쪽 컴포넌트 `componentHit`. 단계마다 다시 본다: Actor가 알림을 받을 수 있으면 hook, 그 뒤에도 받을 수 있으면 `actorHit`, 컴포넌트가 살아 있으면 `componentHit`다(hook이 자기를 파괴하면 이어지는 이벤트는 없다 — UE `IsActorValidToNotify` 재검사). sweep은 자기 쪽 → 상대 쪽(뒤집은 hit)이다. sweep hit의 `normalImpulse`는 0이다.
+- overlap 시작(UE `BeginComponentOverlap` `PrimitiveComponent.cpp:4130–4166`): World가 Playing일 때 자기 `componentOverlapBegan` → 상대 `componentOverlapBegan`(sweep이면 뒤집은 hit) → 새 Actor 쌍이면 자기·상대 Actor `OnBeginOverlap` → 자기·상대 `actorOverlapBegan`.
+- overlap 끝(UE `EndComponentOverlap` `:4174–4231`): World가 Playing이고 상대 Actor가 있으면 자기 `componentOverlapEnded` → 상대 `componentOverlapEnded` → 마지막 Actor 쌍 겹침이었으면 자기 Actor `OnEndOverlap`·`actorOverlapEnded` → 상대 Actor `OnEndOverlap`·`actorOverlapEnded`(UE는 끝만 Actor마다 hook과 이벤트를 붙여 부른다). PH4b 구현은 Actor 쌍이 아니면 일찍 돌아갔다 — 컴포넌트 이벤트를 그 앞에 둔다.
+- 파괴 대기(`ComponentState::PendingDestroy`·`ActorState::PendingDestroy`)는 UE의 `MarkAsGarbage` 뒤에 해당해 알림을 받지 않는다(UE `IsPrimCompValidAndAlive`·`IsActorValidToNotify`는 `IsValid`). 예외: 자기 `OnDestroy`가 겹침을 모두 끝내는 동안은 자기와 자기 Actor도 끝 hook·이벤트를 받는다. UE는 컴포넌트 `OnComponentDestroyed`(`ActorComponent.cpp:2201`)와 `UWorld::DestroyActor`의 `ClearComponentOverlaps`(`LevelActor.cpp:981`)가 `MarkAsGarbage`(`:2204`·`:1055`)보다 먼저라 파괴되는 쪽도 끝 알림을 받는다. 이때는 Registry 파괴 요청 전이라 `Event`가 발행자를 붙잡는다. `Event`는 파괴 대기를 스스로 거르지 않으므로 상태는 발행하는 쪽이 본다. PH4b의 "파괴 대기 Actor에는 끝 알림 없음"도 이 규칙으로 바꿨다. 알림 시작 때 본 상태 기준이다(끝의 Actor hook과 이벤트 사이에는 UE처럼 다시 보지 않는다).
+
+**sweep 결과(`fromSweep`·`sweepResult`).** UE `FOverlapInfo`처럼 대기 겹침이 sweep hit를 함께 쥔다: `MoveComponent`의 대기 목록을 (컴포넌트, hit) 쌍으로 바꾸고 `BeginComponentOverlap(other, fromSweep, sweepResult)`다. 끝 위치 갱신(`RefreshOverlaps`)이 찾은 겹침은 `fromSweep` 거짓, `sweepResult`는 상대 컴포넌트·Actor만 채운 hit다(UE `FOverlapInfo(Component)`). 상대 쪽에는 sweep이면 뒤집은 hit(법선 부호만 — UE `GetReversedHit`), 아니면 같은 hit다(UE가 `OtherOverlap.OverlapInfo`를 그대로 넘긴다 — 그 hit의 컴포넌트는 받는 쪽 자신이다).
+
+**메타 컴파일러 수정.** 생성 소스는 클래스 base·이벤트 인자 대상의 생성 헤더만 include했다. 물려받은 이벤트의 연산표(`MakeEventOps<&Owner::field>`)는 선언한 클래스의 `NativeTypeKey`(`ResolveForWrite<Owner>`)를 쓰므로, 이벤트를 선언한 조상이 바로 위 base가 아니면(`PointLight` ← `Light` ← `Actor`) 컴파일이 실패했다(EV2b 시험은 같은 헤더의 파생만 본다). 이벤트 필드의 선언 클래스 헤더도 include한다(`CppEmitter` — 이벤트 리플렉션 담당에 알린다).
+
+**미룬 것.** 깨움·잠듦(`OnComponentWake`·`OnComponentSleep` — `generateWakeEvents`)과 `OnComponentPhysicsStateChanged`는 body 깨움·잠듦 감지와 함께 PH5에서 한다(3.1절 PhysicsResults (3)).
+
+**시험**(`PhysicsEventFieldTests.cpp`):
+- sweep 막는 hit: 순서(자기 `OnHit` → `actorHit` → `componentHit` → 상대 셋), 인자, 상대 쪽 뒤집은 법선, 충격량 0.
+- 시뮬레이션 hit: `componentHit`·`actorHit` 인자와 충격량.
+- overlap 시작·끝: 컴포넌트 이벤트(같은 Actor 컴포넌트끼리도 난다 — Actor 이벤트는 없다), sweep이면 `fromSweep` 참·상대는 뒤집은 hit, 끝 위치 갱신은 거짓, Actor 이벤트는 쌍마다 한 번, 끝의 Actor hook·이벤트 순서.
+- World가 Playing이 아니면(EndPlay) overlap 이벤트가 없다. 컴포넌트·Actor 파괴는 파괴되는 쪽과 상대가 모두 끝 이벤트를 받는다. OnHit hook이 자기 Actor를 파괴하면 이어지는 hit 이벤트가 없다. 같은 Actor의 두 컴포넌트가 한 trigger와 겹치면 Actor 이벤트는 한 번이다.
+- `HitResult` 리플렉션: 생성 schema가 값 칸만 싣는다. 등록된 `componentHit` schema의 인자 종류(약한 참조 셋·struct).
+- 메타 컴파일러 회귀: `ReflectionTestFixtures`의 세 헤더 사슬(`EventPublisherChild` ← `EventRelay` ← `EventRelayLeaf`)이 컴파일되고 상속 이벤트 연산을 싣는다(`EventFieldGeneratedTests`).
+
+**한계.** 리플렉션 바인딩(`TryBind` — 리플렉션 함수 대상)으로 이 이벤트를 받는 시험은 없다(대상 함수를 가진 엔진 클래스가 없다 — Sparks 노출 EV4·EI 때 Sparks 함수로 본다). 바인딩 frame의 `HitResult` 복사는 일반 `ValueCopy`(plain copy)다.
+
+**PH4e 리뷰 반영(2026-11-27).** 치명 0, 중요 4, 경미 6. hook이 자기를 파괴한 뒤 `actorHit`가 나던 것(UE 재검사), 파괴되는 쪽의 끝 알림을 UE와 반대로 막던 것(PH4b Actor hook 포함 — UE를 따른다), 이벤트 인자 `ObjectHandle` → `WeakObjectRef`(Sparks 노출), 시험 보강(위 목록, sweep 법선 0이 아닌지)을 고쳤다. 메타 컴파일러 회귀 fixture, 주석 예(`PointLight ← Light ← Actor`), `NotifyActorOverlap`의 bool 세 인자를 hook·이벤트 함수와 `OverlapEdge`로 나눔, 빈 줄을 고쳤다.

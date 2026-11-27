@@ -365,6 +365,9 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
     current_->concurrencyMinDistanceDelta =
         engine.Settings() != nullptr ? engine_audio_detail::ConcurrencyMinDistanceDeltaVar.Get()
                                      : 0.0f;
+    current_->virtualization = engine.Settings() != nullptr
+                                   ? engine_audio_detail::VirtualizationFromSettings()
+                                   : VirtualizationSettings{};
     SnapshotScenes();
     SubmitCurrent();
 }

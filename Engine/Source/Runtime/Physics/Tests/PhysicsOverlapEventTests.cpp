@@ -588,8 +588,9 @@ TEST(PhysicsOverlapEvent_DestroyEndsOverlap) {
     scene.Settle();
     CHECK(scene.LedgerSize(other) == 0);
     CHECK(OverlapRecordingActor::Count(otherActor, secondActor, false) == 1);
-    // 파괴 대기 Actor에는 알리지 않는다.
-    CHECK(OverlapRecordingActor::Count(secondActor, otherActor, false) == 0);
+    // 파괴되는 Actor도 자기 정리 중에는 끝 알림을 받는다(UE DestroyActor는 겹침을 MarkAsGarbage
+    // 전에 끝낸다 — PhysicsModule 7.1.14절).
+    CHECK(OverlapRecordingActor::Count(secondActor, otherActor, false) == 1);
 }
 
 // generateOverlapEvents를 끄면 바로가 아니라 다음 갱신 때 끝난다.
@@ -782,7 +783,7 @@ TEST(PhysicsOverlapEvent_AttachedToOtherActorStartsOverlaps) {
     CHECK(OverlapRecordingActor::Count(scene.Owner(holder), scene.Owner(trigger), true) == 0);
 }
 
-// 시작 때 겹친 픽업이 시작 알림에서 자기를 파괴해도 남은 쪽 장부가 비고 끝 알림을 받는다.
+// 시작 때 겹친 픽업이 시작 알림에서 자기를 파괴해도 남은 쪽 장부가 비고 양쪽이 끝 알림을 받는다.
 TEST(PhysicsOverlapEvent_SelfDestroyOnStart) {
     OverlapWorld scene;
     REQUIRE(scene.started);
@@ -802,7 +803,8 @@ TEST(PhysicsOverlapEvent_SelfDestroyOnStart) {
     CHECK(scene.LedgerSize(trigger) == 0);
     CHECK(OverlapRecordingActor::Count(triggerActor, pickupActor, true) == 1);
     CHECK(OverlapRecordingActor::Count(triggerActor, pickupActor, false) == 1);
-    CHECK(OverlapRecordingActor::Count(pickupActor, triggerActor, false) == 0);
+    // 파괴되는 픽업도 자기 정리 중에는 끝 알림을 받는다(UE — PhysicsModule 7.1.14절).
+    CHECK(OverlapRecordingActor::Count(pickupActor, triggerActor, false) == 1);
     auto state = scene.fixture.world->GetActorState(pickupActor);
     CHECK((!state || state.Value() == ActorState::PendingDestroy));
 }

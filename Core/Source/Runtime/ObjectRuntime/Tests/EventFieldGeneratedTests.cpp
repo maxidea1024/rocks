@@ -1,4 +1,5 @@
 #include <ReflectionTestFixtures/EventFixture.generated.h>
+#include <ReflectionTestFixtures/EventRelayLeafFixture.generated.h>
 #include <ReflectionTestFixtures/FunctionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Base/Compiler.h>
@@ -128,6 +129,11 @@ TEST(EventFieldGenerated_SchemaDescribesEvents) {
     const FieldSchema* inherited = FieldNamed(child, "placed");
     REQUIRE(inherited != nullptr && inherited->id == placed->id);
     CHECK(inherited->eventParameters[2].flags == placed->eventParameters[2].flags);
+
+    // 이벤트를 선언한 조상이 바로 위 base와 다른 헤더에 있는 파생도 상속 이벤트 연산을 싣는다(생성
+    // 소스가 선언 클래스의 생성 헤더를 include한다 — PhysicsModule 7.1.14절 회귀).
+    CHECK(GeneratedType<reflection_fixture::EventRelayLeaf>::Ops().events.Size() ==
+          ExpectedEvents + 1);
 }
 
 // 생성 연산표로 바인딩·발행하고, 파생 객체에 상속 이벤트 연산을 쓴다.

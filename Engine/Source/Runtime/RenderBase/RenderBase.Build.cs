@@ -2,10 +2,11 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Device-bound render base (Docs/Design/RenderBase, part of UE RenderCore): render lane, frame
-// slots and frame packet transfer, render-transferable type registration, completion notices, and the
+// slots and frame packet transfer, completion notices, and the
 // RenderHandle reservation table. Sits on the Graphics device contract and does not know ObjectRuntime,
 // World or Engine (the executable and WorldIntegration connect the game side).
-// MetaSchema is used only for the Development check of Object reference fields in transferred types.
+// MetaSchema holds the lane transfer registration and its Development schema check (Meta/LaneTransfer.h, section 5.2) that
+// the render lane tasks require of the values they take.
 // TraceCapture is used by GPU instrumentation (RB7, GpuTrace). ModuleLoader gives the module lifetime object the host trace session
 // service, so Startup registers the GPU trace channel and types (Docs/Design/ModuleLoader section 3.12).
 // AssetRuntime: the cooked manifest v2 shader library source (CookedManifestShaderLibraries — artifact paths and file checks, Docs/Design/ShaderSystem

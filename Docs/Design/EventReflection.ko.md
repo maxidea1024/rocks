@@ -92,7 +92,7 @@ UE는 native multicast와 dynamic multicast를 다른 타입으로 둔다. Rocks
 | JSON·한 줄 텍스트 내보내기 | ReflectionText `TextJsonExport.cpp`·`TextLineExport.cpp`·`TextVisit.cpp` | 건너뛴다(지금은 Opaque라 객체 전체가 `Unsupported`) |
 | JSON 가져오기·읽기 전용 비교 | `TextJsonImport.cpp`(진단 "no JSON form")·`TextAssignReadOnly.cpp` | 지금대로(가져오기는 진단, 비교는 struct 멤버만 훑는다 — struct에는 이벤트가 없다) |
 | 에셋 bundle 태그 | AssetDatabase `AssetBundleTags.cpp`(TextVisit 경유) | 지금대로(Opaque는 bundle 없음) |
-| 렌더 전송 | RenderBase `RenderTransfer.cpp` | 거부한다(Development 전달 검사 `InvalidArgument` — 강한 참조는 아니지만 구독 대상·발행자를 붙잡아 렌더 lane이 게임 객체를 만지게 된다, RenderBase 5.2절 개정 61) |
+| 렌더 전송 | MetaSchema `Meta/LaneTransfer.h`(`detail::LaneTransferSchemaAllowed`) | 거부한다(Development 전달 검사 `InvalidArgument` — 강한 참조는 아니지만 구독 대상·발행자를 붙잡아 렌더 lane이 게임 객체를 만지게 된다, RenderBase 5.2절 개정 61) |
 | 그래프 적용 | `GraphApply.cpp` | 지금대로(로드가 담은 필드만 — 이벤트는 레코드에 없다, 있으면 로드가 `CorruptData`) |
 | 필드 쓰기·경로 실행 | `RuntimeTypeOps.cpp` 필드 ID 조회·`PropertyPathCursor`·`PropertyPathRunner` | 지금대로(값 연산표가 없어 쓰기 대상이 아니다) |
 | 네이티브 클래스 | `NativeClass.h` `RegisterNativeClass` | 리플렉션 조상의 `events`도 빌린다 |
