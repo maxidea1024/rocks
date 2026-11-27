@@ -57,6 +57,9 @@ struct SpirvCompileRequest {
     // -fspv-reflect(시맨틱·user type 장식 — 셰이더 워커 VULKAN_SM5가 리플렉션에 쓰고 고쳐 쓰기에서
     // 지운다, ShaderSystem 16.1절 SSD29)다.
     bool reflect = false;
+    // -Zi(OpSource·OpString·OpLine 디버그 정보 — 값 3 SPIR-V debug module, ShaderSystem 16.3절
+    // SSD73)다.
+    bool debugInfo = false;
 };
 
 // DXC로 SPIR-V(-spirv -fspv-target-env=vulkan1.1, -Zpr, -WX)를 만들고 spirv-val(Vulkan 1.1)로
@@ -176,15 +179,30 @@ struct FxcCompileRequest {
     StringView profile;
     // 0–3(D3DCOMPILE_OPTIMIZATION_LEVEL0–3)이다.
     uint32 optimization = ShaderOptimizationLevels - 1;
+    // D3DCOMPILE_DEBUG | D3DCOMPILE_DEBUG_NAME_FOR_BINARY로 컴파일해 PDB를 떼어 낸다(ShaderSystem
+    // 16.3절 SSD73). symbols가 null이면 무시한다.
+    bool debugSymbols = false;
+};
+
+// FXC 디버그 심볼이다: D3DGetBlobPart(D3D_BLOB_PDB)와 D3D_BLOB_DEBUG_NAME part의 파일 이름.
+struct FxcSymbols {
+    explicit FxcSymbols(Allocator& allocator) noexcept : pdb(allocator), name(allocator) {
+    }
+
+    Array<uint8> pdb;
+    String name;
 };
 
 // FXC로 DXBC를 만든다(행 우선 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 경고는 오류
 // D3DCOMPILE_WARNINGS_ARE_ERRORS, 원문 이름 없음 — 11.1절 E3). E_FAIL과 오류 blob이면
-// CompileError, 그 밖의 실패는 ToolError(진단에 HRESULT)다. Windows 구현만 있다(그 밖은
-// UnsupportedHost).
+// CompileError, 그 밖의 실패는 ToolError(진단에 HRESULT)다. request.debugSymbols이고 symbols가
+// null이 아니면 PDB·이름을 symbols에 두고 object는 D3DStripShader(D3DCOMPILER_STRIP_DEBUG_INFO)로
+// 디버그 정보를 뗀 DXBC다(디버그 이름 part는 남는다 — 디버거가 PDB를 이름으로 찾는다). PDB를 얻지
+// 못하면 ToolError다. Windows 구현만 있다(그 밖은 UnsupportedHost).
 ROCKS_SHADERTOOLLOADER_API ShaderToolOutcome CompileWithFxc(const FxcFunctions& fxc,
                                                             const FxcCompileRequest& request,
                                                             Array<uint8>& object,
-                                                            String& diagnostics) noexcept;
+                                                            String& diagnostics,
+                                                            FxcSymbols* symbols = nullptr) noexcept;
 
 } // namespace rocks::shader

@@ -6,6 +6,8 @@
 
 시간 운에 기대지 않는다. 시계는 주입하고(가짜 시계를 시험이 직접 전진), 스레드 순서는 명시 gate로 만든다. 단언은 결정적인 최종 상태와 사건 순서에 한다.
 
+PG2 시험 파일: `Core/Source/Runtime/Progress/Tests/ProgressScopeTests.cpp`(3·4·5·6·8·14, 문구·`ProgressParallelFor`)·`ProgressHubTests.cpp`(7·9·10·11·12·13). 11의 `Text::Clone` 실패는 노드 참조 계수 넘침뿐이라 직접 만들지 않고, 할당 실패를 `NFailAllocator`로 `Begin`의 모든 할당 지점에서 본다. 11의 "켜기 전"은 header-only 시험 접근점(`Private/ProgressTestAccess.h`)이 닫힌 hub를 되돌려 본다.
+
 1. 연결 취소: 부모·자식·다단, 깊이 상한, 기본 부모 token, Source 쪽 조회도 사슬을 봄.
 2. `CheckCancelled`가 `Cancelled`를 돌려줌.
 3. 중첩 구간 비율: 3단 중첩, 가중치 다른 구간, 총량 0 범위, 남은 양 채움 — UE `FSlowTaskStack` 곱셈 합성과 같은 값(손 계산 표).

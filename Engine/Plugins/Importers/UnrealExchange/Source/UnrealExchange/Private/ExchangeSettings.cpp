@@ -379,7 +379,8 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
             continue;
         }
 
-        if (auto keyed = state.writer.Key(RocksKey(key)); !keyed) {
+        const StringView outputKey = row->rocksKey.IsEmpty() ? RocksKey(key) : row->rocksKey;
+        if (auto keyed = state.writer.Key(outputKey); !keyed) {
             return keyed;
         }
 

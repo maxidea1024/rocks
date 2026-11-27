@@ -105,8 +105,8 @@ struct ShaderJobKeyInput {
 
 // 키 2–7행을 writer에 쓴다(공통 머리 뒤). 시험이 공통 머리를 고정값으로 쓰는 기록 경로에도 쓴다.
 // 오류: 형식이 null·자리만 둔 형식, 단계가 비트 하나가 아니거나 형식이 받지 않음, 엔트리·프로필
-// id가 빔, 옵션·리플렉션 문맥이 null은 InvalidArgument. 옵션을 이 단계가 받지 않으면(debugSymbols)
-// Unsupported. 이 호스트 파일이 없는 저장소 도구나 지문이 없는 system 도구는 UnsupportedCapability.
+// id가 빔, 옵션·리플렉션 문맥이 null, 옵션 값이 범위 밖은 InvalidArgument. 이 호스트 파일이 없는
+// 저장소 도구나 지문이 없는 system 도구는 UnsupportedCapability.
 // 리플렉션 기록의 오류(타입 미등록 NotFound 등)는 그대로다. 실패하면 writer도 그 오류 상태다.
 ROCKS_SHADERCOMPILER_API Result<void>
 WriteShaderJobKeyBody(NuggetKeyWriter& writer, const ShaderJobKeyInput& input) noexcept;

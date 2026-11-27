@@ -82,6 +82,12 @@ internal sealed class FieldModel
     // 필드와 import struct의 멤버를 생성·검사할 때 쓴다 — SchemaValidator.LinkImported).
     public string? Reference { get; set; }
 
+    // 리플렉션 이벤트 필드(rocks::Event<Args...> — Docs/Design/EventReflection.ko.md ED18)다. 값 종류(Kind)는 Opaque이고 인자는
+    // EventParameters(Params 이름·Args 형식의 합성 칸 — 함수 매개변수와 같은 칸 규칙)다. 값 연산표·Trace·로그 방문에서 빠진다.
+    public bool IsEvent { get; set; }
+
+    public List<FieldModel> EventParameters { get; } = [];
+
     // 참조 대상 타입 ID(32자리 16진, Object는 null, 배열이면 원소의 대상)다. import 필드는 descriptor에서 바로 온다.
     public string? ReferenceId { get; set; }
 
@@ -623,6 +629,75 @@ internal static class StructRules
         return depth == 0 && head.Length != 0 && (char.IsAsciiLetter(head[0]) || head[0] == '_') && !text.Contains(":::", StringComparison.Ordinal) &&
             !text.EndsWith(':') && text.Replace("::", "", StringComparison.Ordinal).IndexOf(':') < 0;
     }
+}
+
+// 리플렉션 이벤트 필드의 철자 규칙이다(Docs/Design/EventReflection.ko.md ED14·ED18).
+internal static class EventRules
+{
+    public const string Prefix = "rocks::Event<";
+
+    public const string Hint =
+        "Declare events as ROCKS_PROPERTY(Params = \"a,b\") rocks::Event<A, B> name; in a reflected class (not in structs, containers, " +
+        "Optional, static arrays, function parameters or event arguments).";
+
+    // 정규 철자 `rocks::Event<A, B>`의 인자 철자 목록이다(최상위 쉼표로 나눈다, 인자 없으면 빈 목록). 이벤트가 아니면 null이다.
+    public static List<string>? Arguments(string spelling)
+    {
+        string text = spelling.Trim();
+        text = text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+        if (!text.StartsWith(Prefix, StringComparison.Ordinal) || !text.EndsWith('>'))
+        {
+            return null;
+        }
+
+        string inner = text[Prefix.Length..^1].Trim();
+        List<string> arguments = [];
+        if (inner.Length == 0)
+        {
+            return arguments;
+        }
+
+        int depth = 0;
+        int start = 0;
+        for (int index = 0; index < inner.Length; ++index)
+        {
+            char c = inner[index];
+            if (c is '<' or '(' or '[')
+            {
+                ++depth;
+            }
+            else if (c is '>' or ')' or ']')
+            {
+                --depth;
+            }
+            else if (c == ',' && depth == 0)
+            {
+                arguments.Add(inner[start..index].Trim());
+                start = index + 1;
+            }
+        }
+
+        arguments.Add(inner[start..].Trim());
+        return arguments;
+    }
+
+    // 정규 철자 어딘가에 rocks::Event<…>가 있는지다(컨테이너·Optional·정적 배열 안 이벤트, NATIVE 이벤트 멤버 거부 — 정규 철자는 늘
+    // 한정되어 있어 다른 이름 공간의 Event 템플릿을 잡지 않는다). 이벤트를 가리키는 포인터·참조 NATIVE 멤버(비소유 관찰)도 거부한다 —
+    // 이벤트 상태의 주소는 발행자 밖에 두지 않는다.
+    public static bool Mentions(string spelling) => CanonicalMention.IsMatch(spelling);
+
+    // 지정자 없는 멤버의 쓴 철자(정규화 전 — 한정하지 않은 Event<…>도)에 이벤트가 있는지다(RMC2801 안내).
+    public static bool MentionsWritten(string spelling) => WrittenMention.IsMatch(spelling);
+
+    private static readonly System.Text.RegularExpressions.Regex CanonicalMention =
+        new(@"(?<![A-Za-z0-9_:])(?:::)?rocks::Event\s*<", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    private static readonly System.Text.RegularExpressions.Regex WrittenMention =
+        new(@"(?<![A-Za-z0-9_])Event\s*<", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    // 인자 이름 규칙이다: lowerCamel ASCII([a-z][A-Za-z0-9]*).
+    public static bool IsParameterName(string name) =>
+        name.Length != 0 && char.IsAsciiLetterLower(name[0]) && name.All(char.IsAsciiLetterOrDigit);
 }
 
 // 리플렉션 함수 칸 철자 규칙이다(Docs/Design/FunctionReflection.ko.md FD4·FD5).

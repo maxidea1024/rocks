@@ -401,6 +401,19 @@ void RenderScreen(render::RenderFrameContext& context, ScreenPacket& packet) noe
         return;
     }
 
+    // 감시 재컴파일의 셰이더 교체(ShaderSystem 16.3절 SSD76): 프레임 경계에서 새 집합으로 바꾸면
+    // 옛 집합의 파이프라인은 캐시에서 회수되었으므로 요청(집합·항목)을 다시 만든다.
+    if (renderer.resources_.ApplyShaderUpdates(renderer.cache_.Get())) {
+        if (auto prepared = renderer.PrepareRequests(); !prepared) {
+            ++renderer.stats_.graphFailures;
+            Log::Error(LogSandboxScreen,
+                       "The screen pipelines could not be prepared after a shader swap: {Error}",
+                       ErrorCodeName(prepared.Error()));
+            context.ReportFailure(prepared.Error());
+            return;
+        }
+    }
+
     if (packet.inspecting) {
         renderer.RenderInspector(context, packet);
         return;
