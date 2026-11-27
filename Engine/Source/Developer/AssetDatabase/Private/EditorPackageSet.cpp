@@ -1169,10 +1169,9 @@ Result<void> EditorPackageSet::RebuildOpened(Span<const AssetId> before,
     // hook이 열린 표를 바꾸지 않는다(새 패키지를 열거나 닫지 않는다) — 번호로 돈다.
     for (usize at = 0; at < open_.Size(); ++at) {
         const AssetId asset = open_[at].id;
-        const usize found =
-            algo::LowerBound(before, asset, [](AssetId left, AssetId key) noexcept {
-                return GuidLess(left.value, key.value);
-            });
+        const usize found = algo::LowerBound(before, asset, [](AssetId left, AssetId key) noexcept {
+            return GuidLess(left.value, key.value);
+        });
         if (found < before.Size() && before[found] == asset) {
             continue;
         }
@@ -1193,9 +1192,9 @@ Result<void> EditorPackageSet::RebuildOpened(Span<const AssetId> before,
         }
 
         bool rebuilt = false;
-        if (auto done = RebuildSource(representative.Value(), asset, {},
-                                      AssetSourceRebuildCause::Open, ObjectHandle{}, warnings,
-                                      failure, &rebuilt);
+        if (auto done =
+                RebuildSource(representative.Value(), asset, {}, AssetSourceRebuildCause::Open,
+                              ObjectHandle{}, warnings, failure, &rebuilt);
             !done) {
             return done;
         }
