@@ -647,7 +647,7 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 | `TextExportTransient` | 128 | 복사 텍스트에서 뺀다 | ReflectionText Copy |
 | `TextMapMergeByKey` | 256 | JSON import가 그 Map을 키별로 병합한다(옵션 Replace여도 — Map 필드만, 아니면 RMC2202) | ReflectionText ImportJson |
 
-- **복제 저장**: 복제 호출자가 `excludedFlags`를 정한다. 에셋 복제 = DuplicateTransient | NonTryoutDuplicateTransient, Tryout 복제 = DuplicateTransient. 복제본 로드는 정책 없이 읽는다(빠진 필드 = 기준). 전부 저장(RCM 65행)의 override 집합 기록에서도 이 필드들의 경로를 뺀다.
+- **복제 저장**: 복제 호출자가 `excludedFlags`를 정한다. 에셋 복제 = DuplicateTransient | NonTryoutDuplicateTransient, Tryout 복제 = DuplicateTransient. 복제본 로드는 정책 없이 읽는다(빠진 필드 = 기준). decode 정책은 지금 제외 필드가 Record에 있으면 거부한다. prefab은 원형 본문에 이 필드를 보존하고 spawn 복원이 건너뛰어야 하므로, PF2가 decode 정책 칸 `skippedFlags`(있으면 건너뛰고 생성자 값을 유지, Required 검사에서도 뺌)를 더한다([Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.3절 7항, D20 — 2026-11-28). 전부 저장(RCM 65행)의 override 집합 기록에서도 이 필드들의 경로를 뺀다.
 - **포함 필터** `includeFlags`(`FieldEncodePolicy`·`FieldDecodePolicy`, 0이면 끔): 0이 아니면 **필드·struct 멤버마다 자기 플래그**에 이 비트가 없으면 쓰지 않는다(UE처럼 멤버마다 표시 — 사용자 결정 U5, PR:1051-1055와 UT:543). SaveGame struct 필드의 멤버도 각각 SaveGame이어야 쓰인다. 배열 원소·Map 값·Optional 내부·InstancedStruct 내용의 struct 멤버에도 같은 규칙을 쓴다.
   - 예외: Atomic struct 안의 멤버에는 적용하지 않는다(통째). UE에서도 native Serializer 수학 타입은 멤버 플래그를 보지 않고(PR:53-68), immutable 수학 타입은 멤버가 모두 SaveGame이다(NET:2080-2088 등). 비Atomic `TransformBinding`은 멤버에 SaveGame을 단다(3.2절).
   - 로드 쪽 `includeFlags`: 포함 비트가 없는 필드·멤버가 파일에 있으면 InvalidArgument(excludedFlags와 대칭). 2c Required 검사도 포함 비트 밖의 최상위 필드·멤버를 뺀다(검사 문맥의 `IsExcluded`가 includeFlags를 멤버마다 적용한다 — GraphRequired.cpp:28 검사 정책에 includeFlags를 더한다).
@@ -695,7 +695,7 @@ enum class UnsaveablePolicy : uint8 {
 - A1 export 집합 구성은 `CollectInners` 결과를 `IsUnsaveableObject`로 걸러 저장 불가 객체와 그 부분 트리를 뺀다. `CollectInners`(ObjectRegistry 공개 API) 자체는 바꾸지 않는다. UE도 저장 불가 Outer의 inner를 함께 뺀다(SaveContext.cpp:95-110).
 - 로드: Transient·Deprecated 클래스 노드 모두 정상 로드하고 진단(`TransientType`·`DeprecatedType`)을 낸다. UE 로드 경고와 같다(LinkerLoad.cpp:6122-6131 Deprecated(편집기), 6146-6154 Transient(CDO·archetype 제외)). 그래서 클래스를 나중에 Transient로 바꿔도 기존 패키지를 열고 고칠 수 있다. Exclude로 다시 저장하면 그 객체와 그 참조는 빠진다. Keep으로 만든 스냅샷을 복원할 때도 같은 진단이 나며, 받을 hook이 없으면 하지 않는다.
 - 생성: Transient·Deprecated 클래스의 C++ `NewObject`는 막지 않는다(UE도 막지 않는다). ClassRef 쓰기·텍스트 대입·편집기 후보(RCM 5단계)는 Deprecated 클래스를 거부한다. 이미 저장된 ClassRef 값은 그대로 로드(진단)·저장한다(5.2절).
-- 나중에 A5 클래스 기본값·prefab(archetype)이 생기면 Transient 클래스의 템플릿 객체 예외(UE는 CDO·archetype을 뺀다 — UOG:3739-3743, LinkerLoad.cpp:6146)를 그 단계에서 다시 정한다.
+- A5 클래스 기본값·prefab(archetype)의 Transient 클래스 템플릿 객체 예외(UE는 CDO·archetype을 뺀다 — UOG:3739-3743, LinkerLoad.cpp:6146)는 생기지 않는다(2026-11-28 닫음): 클래스 기본값도 prefab 원형도 객체가 아니라 데이터다. Transient·Deprecated 클래스는 원형 노드가 될 수 없고(prefab 저장이 `PrefabUnsaveableNode`로 거부), Within은 노드 Outer 검사로 그대로다([Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.3절 7항).
 
 **MetaCompiler 규칙**
 
@@ -1423,6 +1423,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | (World) | 부착 계층 영속화 재검토(결정 21), 외부 객체 패키지의 weak import | B9d1 | RF 1023행 |
 | (Sparks) | `T?`(같은 저장 단위 안 weak)·`Map`·`Set`·`Class<T>`·`@tableRow`(`OrderedMap<Name, InstancedStruct<>>`), Tag → Name, TagSet → `OrderedSet<Name>`, `Row<T>` → Name(`Tag?`·`Row<T>?`는 None Name — Optional<Name>을 쓰지 않는다, SL 19절 SD19) | B9c·B9d·B9e·B9f·B9j | SL 311·481-484·495·1090·1115행 |
 | (UI) | CU4 map key 경로(인코딩 가능한 key 단계), CU8 Text(DeepClone) | B9f3·B9l | UI 7절 CU4·CU8 행 |
+| (Prefab) | override 단위 정규화(`OverridePaths` — Map·Set은 기록기가 key 단위를 직접 추출), 대입 묶음·분리 경로로 `ApplyPathWire`, decode 정책 `skippedFlags`(복제 제외 필드 건너뛰기) | B9i·B9h1 | [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.3·3.5절(PF2·PF4) |
 
 AS 514행 MinMagFilter·MipFilter는 닫힌 값 집합이므로 enum(B3)으로 충분하다(Name 소비자가 아니다). B9j·B9k·B9l·B9m은 A 단계 소비자가 없지만 사용자 결정대로 A0-G 앞에서 끝낸다.
 
@@ -1478,12 +1479,12 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 
 - weak import(로드를 강제하지 않는 외부 weak): World 외부 객체 패키지(UE OFPA 대응)를 만들 때 필수다. UE는 같은 outermost의 다른 패키지와 쿠킹에서 weak 대상을 import로 보존한다(PackageHarvester.cpp:1106-1115). 요구 주체는 World·Sparks다.
 - TextId 정체성: 복제 때 유지·재발급, 누가 발급하는가(UE는 편집기 저장 때 재발급 — TextHistory.cpp:868-893). 지역화 설계(gather 파이프라인)와 함께.
-- Map·Set·정적 배열의 key·원소 단위 차이 저장(A5·prefab).
+- Map·Set·정적 배열의 key·원소 단위 차이 저장(A5). prefab 몫은 닫았다(2026-11-28): prefab override에서 Map·Set은 key 단위(기록기가 `Publish`의 옛 값/새 값을 비교해 직접 뽑는다 — 10.2절 정규화는 그대로), 정적 배열은 통째다([Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.5절, D4·D5·D16). A5 패키지 차이 단위는 A5에 남는다.
 - 패키지 name 표(Name 문자열 중복 제거): A1이 크기를 재고 정한다.
 - struct 키(생성 해시·같음)·실수 키: 소비자가 생길 때.
 - InstancedStruct가 참조 struct를 담는 Registry 관리 변형, `TSubScriptStructOf` 대응(Sparks 데이터 테이블 단계), `SoftClassRef`(Sparks 단계).
 - Text의 문자열 표·Format 이력 영속.
-- A5 클래스 기본값·prefab의 Transient·Within 템플릿 예외(UE CDO·archetype 예외).
+- ~~A5 클래스 기본값·prefab의 Transient·Within 템플릿 예외(UE CDO·archetype 예외).~~ 닫음(2026-11-28 — 9.2절, 원형이 객체가 아니라 예외가 없다).
 - CU4의 소유형 경로(`OwnedPropertyPath`)와 Record 형식.
 - "Sparks 저장 가능 대응 ⊆ 성질 표" 대조 시험(Sparks 단계).
 - 타입 도구 이름 공간의 enum: B9d2는 클래스·struct만 넣었다. Sparks가 enum을 타입 이름으로 쓰므로 enum을 같은 이름 공간에 넣을지(넣으면 기존 클래스·struct 이름과 새 충돌이 생긴다)는 Sparks 바인딩 단계(CU8)가 정한다.

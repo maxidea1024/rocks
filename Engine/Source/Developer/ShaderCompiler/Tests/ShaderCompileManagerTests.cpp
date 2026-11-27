@@ -102,7 +102,214 @@ bool Contains(const String& text, const char* part) noexcept {
     return strstr(text.Data(), part) != nullptr;
 }
 
+// 경고 하나씩을 내는 원문이다(ShaderSystem 16.4절 SSD79·SSD80·SSD81 — 도구가 파일 전체를 보고
+// 경고하므로 파일을 나눈다): Truncation은 DXC·FXC 모두 경고하는 벡터 암묵 자르기, Pow는 FXC만
+// 경고하는 pow 음수 밑(X3571).
+constexpr char TruncationSource[] = "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
+                                    "    float2 value = position;\n"
+                                    "    return float4(value, 0.0, 1.0);\n"
+                                    "}\n";
+constexpr char PowSource[] = "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
+                             "    return float4(pow(position.x, position.y), 0.0, 0.0, 1.0);\n"
+                             "}\n";
+constexpr char TruncationEntry[] = "/Project/Truncation.rsf";
+constexpr char PowEntry[] = "/Project/Pow.rsf";
+constexpr char TruncationText[] = "truncation";
+constexpr char PowWarningCode[] = "X3571";
+constexpr char FallbackNote[] = "compiled through the fallback path";
+
+// 묶음 크기 목록이 expected와 같은가다(다르면 찍는다).
+bool SameSizes(const Array<uint32>& sizes, std::initializer_list<uint32> expected) noexcept {
+    bool same = sizes.Size() == expected.size();
+    usize index = 0;
+    for (const uint32 size : expected) {
+        same = same && index < sizes.Size() && sizes[index] == size;
+        ++index;
+    }
+
+    if (!same) {
+        fprintf(stderr, "batch sizes:");
+        for (const uint32 size : sizes) {
+            fprintf(stderr, " %u", size);
+        }
+
+        fprintf(stderr, "\n");
+    }
+
+    return same;
+}
+
 } // namespace
+
+// 기본 워커 수와 묶음 분배(16.4절 SSD82 — UE CalculateNumberOfCompilingThreads·NumJobsPerWorker)를
+// 시간 없이 결과로 본다.
+TEST(ShaderCompileManager_PlansWorkersAndBatchesLikeUe) {
+    // 코어 ≤ 4: 코어 - 1(최소 1), ≤ 12: 코어 - 3, 그 위: 코어 - ceil(코어 × 50%).
+    const uint32 cores[][2] = {{0, 1},  {1, 1},  {2, 1},  {4, 3},   {5, 2},  {8, 5},
+                               {12, 9}, {13, 6}, {16, 8}, {20, 10}, {64, 32}};
+    for (const auto& pair : cores) {
+        if (DefaultShaderWorkerCount(pair[0]) != pair[1]) {
+            fprintf(stderr, "workers for %u cores: %u (expected %u)\n", pair[0],
+                    DefaultShaderWorkerCount(pair[0]), pair[1]);
+        }
+
+        CHECK(DefaultShaderWorkerCount(pair[0]) == pair[1]);
+    }
+
+    constexpr usize SmallSource = 100;
+    constexpr usize LargeLimit = usize{4} * 1024 * 1024;
+    Array<usize> bytes(TestAllocator());
+    Array<uint32> sizes(TestAllocator());
+    const auto plan = [&](usize jobs, uint32 workers, uint32 maxJobs, usize maxBytes) noexcept {
+        bytes.Clear();
+        for (usize index = 0; index < jobs; ++index) {
+            REQUIRE(bytes.TryPushBack(SmallSource));
+        }
+
+        REQUIRE(PlanShaderBatches(bytes.View(), workers, maxJobs, maxBytes, sizes));
+    };
+
+    // 측정한 시작(118 job, 20 코어 → 워커 10): 1회차 10 × 10, 2회차 ceil(18 / 10) = 2 → 2 × 9.
+    plan(118, 10, DefaultShaderBatchJobs, LargeLimit);
+    CHECK(SameSizes(sizes, {10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 2, 2, 2, 2, 2, 2, 2, 2, 2}));
+    // 개정 64 전 상한 32·워커 8이어도 job은 워커마다 고르게 간다(ceil(118 / 8) = 15).
+    plan(118, 8, 32, LargeLimit);
+    CHECK(SameSizes(sizes, {15, 15, 15, 15, 15, 15, 15, 13}));
+    // 워커 하나는 상한까지 한 묶음, job이 워커보다 적으면 묶음마다 하나다.
+    plan(6, 1, DefaultShaderBatchJobs, LargeLimit);
+    CHECK(SameSizes(sizes, {6}));
+    plan(3, 10, DefaultShaderBatchJobs, LargeLimit);
+    CHECK(SameSizes(sizes, {1, 1, 1}));
+    plan(5, 4, DefaultShaderBatchJobs, LargeLimit);
+    CHECK(SameSizes(sizes, {2, 2, 1}));
+    plan(7, 3, 1, LargeLimit);
+    CHECK(SameSizes(sizes, {1, 1, 1, 1, 1, 1, 1}));
+    plan(0, 4, DefaultShaderBatchJobs, LargeLimit);
+    CHECK(sizes.IsEmpty());
+
+    // 원문 합 상한은 묶음을 일찍 닫고, 상한보다 큰 job도 혼자 들어간다.
+    bytes.Clear();
+    for (const usize size : {usize{3}, usize{3}, usize{3}, usize{3}}) {
+        REQUIRE(bytes.TryPushBack(size));
+    }
+
+    REQUIRE(PlanShaderBatches(bytes.View(), 1, DefaultShaderBatchJobs, 7, sizes));
+    CHECK(SameSizes(sizes, {2, 2}));
+    bytes.Clear();
+    for (const usize size : {usize{10}, usize{1}}) {
+        REQUIRE(bytes.TryPushBack(size));
+    }
+
+    REQUIRE(PlanShaderBatches(bytes.View(), 1, DefaultShaderBatchJobs, 5, sizes));
+    CHECK(SameSizes(sizes, {1, 1}));
+
+    // 0 인자는 거부한다.
+    CHECK(PlanShaderBatches(bytes.View(), 0, 1, 1, sizes).Error() == ErrorCode::InvalidArgument);
+    CHECK(PlanShaderBatches(bytes.View(), 1, 0, 1, sizes).Error() == ErrorCode::InvalidArgument);
+    CHECK(PlanShaderBatches(bytes.View(), 1, 1, 0, sizes).Error() == ErrorCode::InvalidArgument);
+}
+
+// warningsAsErrors(16.4절 SSD79)와 FXC 분류·대체 경로(SSD80·SSD81)를 실제 DXC·FXC로 본다.
+TEST(ShaderCompileManager_AppliesWarningsAsErrors) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("managerwarnings", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderCompileManager_AppliesWarningsAsErrors: %s\n", skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Project/Shaders/Truncation.rsf", TruncationSource));
+    REQUIRE(test.fixture.Write("Project/Shaders/Pow.rsf", PowSource));
+    ShaderFormatSnapshot d3d11(TestAllocator());
+    ShaderFormatSnapshot gles(TestAllocator());
+    REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, "D3D11_SM5", d3d11));
+    REQUIRE(LoadShaderFormatSnapshot(ShaderFormatDirectory, "GLES31_PC", gles));
+    const ShaderFormatSnapshot* formats[] = {&test.d3d12, &test.vulkan, &gles, &d3d11};
+    constexpr usize FormatCount = sizeof(formats) / sizeof(formats[0]);
+    constexpr usize D3D11Index = FormatCount - 1;
+    // job 배치: 형식마다 (자르기 true, 자르기 false, pow true, pow false).
+    constexpr usize JobsPerFormat = 4;
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    for (const ShaderFormatSnapshot* format : formats) {
+        for (usize variant = 0; variant < JobsPerFormat; ++variant) {
+            ShaderCompileJob job;
+            job.format = format;
+            job.entryPath = variant < 2 ? TruncationEntry : PowEntry;
+            job.entryPoint = "PSMain";
+            job.stage = ShaderStagePixel;
+            job.options = DefaultShaderCompileOptions(format->definition);
+            job.options.warningsAsErrors = variant % 2 == 0;
+            REQUIRE(jobs.TryPushBack(job));
+        }
+    }
+
+    ShaderCompileManagerConfig config = test.Config("Work");
+    ShaderCompileManager manager(config);
+    REQUIRE(manager.Start());
+    Array<ShaderCompileJobResult> results(TestAllocator());
+    REQUIRE(manager.Compile(jobs.View(), results));
+    REQUIRE(results.Size() == jobs.Size());
+    const bool fxc =
+        results[D3D11Index * JobsPerFormat].status != ShaderCompileStatus::UnsupportedCapability;
+    for (usize format = 0; format < FormatCount; ++format) {
+        if (format == D3D11Index && !fxc) {
+            printf("[SKIP] ShaderCompileManager_AppliesWarningsAsErrors: FXC is not available on "
+                   "this host (D3D11_SM5)\n");
+            continue;
+        }
+
+        const ShaderCompileJobResult* row = &results[format * JobsPerFormat];
+        const StringView idView = formats[format]->definition.Id();
+        char id[MaxShaderFormatIdBytes] = {};
+        snprintf(id, sizeof(id), "%.*s", static_cast<int>(idView.ByteCount()), idView.Data());
+        const bool fxcFormat = format == D3D11Index;
+        // 같은 원문·엔트리라도 옵션이 다르면 키가 다르다(키 6행).
+        CHECK(row[0].hasKey && row[1].hasKey && !(row[0].key == row[1].key));
+        CHECK(!(row[2].key == row[3].key));
+        // 자르기 경고: true는 CompileError(D3D11은 FXC → 대체 경로 DXC -WX까지 실패 — 도구
+        // 오류가 아니다), false는 성공이고 경고가 진단에 남는다.
+        if (row[0].status != ShaderCompileStatus::CompileError ||
+            row[1].status != ShaderCompileStatus::Success) {
+            fprintf(stderr, "%s truncation: %s / %s\n%s\n%s\n", id,
+                    ShaderCompileStatusName(row[0].status), ShaderCompileStatusName(row[1].status),
+                    row[0].diagnostics.Data(), row[1].diagnostics.Data());
+        }
+
+        CHECK(row[0].status == ShaderCompileStatus::CompileError &&
+              Contains(row[0].diagnostics, TruncationText));
+        CHECK(row[1].status == ShaderCompileStatus::Success &&
+              row[1].values.Has(ShaderNuggetValue::Code) &&
+              Contains(row[1].diagnostics, TruncationText) &&
+              Contains(row[1].diagnostics, fxcFormat ? "FXC: " : "DXC: "));
+        if (fxcFormat) {
+            CHECK(Contains(row[0].diagnostics, "FXC: ") &&
+                  Contains(row[0].diagnostics, "fallback"));
+        }
+
+        // pow: DXC는 경고하지 않는다. FXC 원문 경로는 X3571을 내고, true면 1차 FXC가 경고 오류로
+        // 실패해 대체 경로가 성공한다(중간 HLSL의 X3571은 꺼져 있다 — SSD81). 1차 진단은 남는다.
+        if (row[2].status != ShaderCompileStatus::Success ||
+            row[3].status != ShaderCompileStatus::Success) {
+            fprintf(stderr, "%s pow: %s / %s\n%s\n%s\n", id, ShaderCompileStatusName(row[2].status),
+                    ShaderCompileStatusName(row[3].status), row[2].diagnostics.Data(),
+                    row[3].diagnostics.Data());
+        }
+
+        CHECK(row[2].status == ShaderCompileStatus::Success &&
+              row[3].status == ShaderCompileStatus::Success);
+        if (fxcFormat) {
+            CHECK(Contains(row[2].diagnostics, PowWarningCode) &&
+                  Contains(row[2].diagnostics, FallbackNote));
+            CHECK(Contains(row[3].diagnostics, PowWarningCode) &&
+                  !Contains(row[3].diagnostics, FallbackNote));
+        } else {
+            CHECK(row[2].diagnostics.IsEmpty() && row[3].diagnostics.IsEmpty());
+        }
+    }
+}
 
 TEST(ShaderCompileManager_ClassifiesNuggetResults) {
     NuggetCacheGetResult hit(TestAllocator());

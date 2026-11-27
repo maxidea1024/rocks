@@ -4,7 +4,7 @@
 
 ## 4. 색 커브 atlas(UE `UCurveLinearColorAtlas`)
 
-머티리얼이 색 그라디언트를 텍스처 한 장에서 행 번호로 읽게 한다. 소비자는 머티리얼 노드 `Material.CurveAtlasRowParameter`(UE `UMaterialExpressionCurveAtlasRowParameter` — 머티리얼 세션 TODO MPQ-CurveAsset)다. 머티리얼은 atlas 에셋 참조와 행 번호로 번역한다.
+머티리얼이 색 그라디언트를 텍스처 한 장에서 행 번호로 읽게 한다. 소비자는 머티리얼 노드 `Material.CurveAtlasRowParameter`(UE `UMaterialExpressionCurveAtlasRowParameter` — 머티리얼 MS2c5에서 구현)다. 머티리얼은 atlas 에셋 참조와 행 번호로 번역한다.
 
 ### 4.1 UE 동작
 
