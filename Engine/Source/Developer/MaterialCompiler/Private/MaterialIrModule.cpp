@@ -385,4 +385,26 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
     return Result<void>::Success();
 }
 
+Result<void> IrModule::AddDefines(Span<const IrDefine> defines) noexcept {
+    if (defines.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    // 정의는 값·결과 hash 뒤에 섞는다(정의가 없는 모듈의 hash는 그대로다).
+    Sha256 hasher;
+    WriteU32(hasher, IrHashFormatVersion);
+    hasher.Update(Span<const uint8>(hash_.bytes, sizeof(hash_.bytes)));
+    for (const IrDefine& define : defines) {
+        if (auto added = defines_.TryPushBack(define); !added) {
+            return added;
+        }
+
+        WriteText(hasher, define.name);
+        WriteU32(hasher, define.value);
+    }
+
+    hash_ = hasher.Finish();
+    return Result<void>::Success();
+}
+
 } // namespace rocks::material

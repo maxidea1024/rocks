@@ -1,6 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <MaterialSchema/MaterialContextValue.h>
 
+#include "CustomOutputTable.h"
 #include "LoweringContext.h"
 #include "SurfaceExporter.h"
 #include "SurfaceShadingModels.h"
@@ -145,6 +146,9 @@ Result<void> Translator::TranslateSurface(LoweringContext& context) noexcept {
             return done ? Result<void>::Success() : Result<void>::Failure(done.Error());
         }
     }
+
+    // 추가 칸은 custom 출력이 쓴다(6.11절 MS2d3).
+    exportedSurface_ = exported;
 
     // 정해지지 않은 기저·shading model 칸을 채운다(연결이 없으면 정점 기저, DefaultLit).
     if (exported.Field(SurfaceField::Normal) == NoIrValue) {
@@ -323,8 +327,16 @@ Result<void> Translator::CheckNormalCycle() noexcept {
     }
 
     bool any = false;
+    // 노멀 계열 custom 출력(ClearCoatBottomNormal·TangentOutput·BentNormal — 19.3.3절)도 뿌리다.
     for (const IrResult& result : results_) {
-        if (result.entry == IrEntry::Normal) {
+        bool root = result.entry == IrEntry::Normal;
+        if (result.entry == IrEntry::CustomOutput) {
+            for (const CustomOutputKind& kind : CustomOutputKinds()) {
+                root = root || (kind.normalRoot && kind.inputs[0].slot == result.slot);
+            }
+        }
+
+        if (root) {
             reached[result.value] = true;
             any = true;
         }

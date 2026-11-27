@@ -167,6 +167,21 @@ const MaterialCollectionLayout* LoweringContext::FindCollection(Guid asset) cons
     return nullptr;
 }
 
+Result<IrValueId> LoweringContext::CoerceToWidth(IrValueId value, uint8 width,
+                                                 StringView pin) noexcept {
+    const MaterialPinType types[] = {MaterialPinType::Float1, MaterialPinType::Float2,
+                                     MaterialPinType::Float3, MaterialPinType::Float4};
+    if (width == 0 || width > MaxIrComponents) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Coerce(value, types[width - 1], pin);
+}
+
+bool LoweringContext::InVirtualTextureScope() const noexcept {
+    return translator_.VirtualTextureScope();
+}
+
 Result<IrValueId> LoweringContext::MakeSurface(SurfaceRecord record) noexcept {
     record.node = node_.id;
     return translator_.AddSurface(record);

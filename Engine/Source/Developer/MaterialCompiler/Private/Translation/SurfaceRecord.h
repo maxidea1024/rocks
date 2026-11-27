@@ -116,8 +116,13 @@ struct SurfaceRecord {
     // Slab의 subSurfaceType 속성(SlabSubsurface 번호, MFP가 연결된 때만 — 아니면 None)이다.
     uint32 subsurfaceType = 0;
     // 두 번째 노멀(SimpleClearCoat BottomNormal·Eye IrisNormal·고전 ClearCoatNormal — MS2d3
-    // ClearCoatBottomNormal 출력, 연결된 때만)이다.
+    // ClearCoatBottomNormal 출력, 연결된 때만, 입력 원값)이다.
     IrValueId secondNormal = NoIrValue;
+    // 고전 preset의 CustomTangent(MS2d3 TangentOutput 출력, 연결된 때만, 입력 원값)다.
+    IrValueId customTangent = NoIrValue;
+    // 물 계수(Scattering·Absorption·PhaseG·ColorScaleBehindWater — MS2d3
+    // SingleLayerWaterMaterialOutput 출력)다.
+    IrValueId water[4] = {NoIrValue, NoIrValue, NoIrValue, NoIrValue};
     // 고전 preset의 얇은 투과 입력(TransmittanceColor·ThinTranslucentSurfaceCoverage — slab 변환과
     // MS2d3 ThinTranslucentMaterialOutput 출력)이다.
     IrValueId thinTransmittance = NoIrValue;

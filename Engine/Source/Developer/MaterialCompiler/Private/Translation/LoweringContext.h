@@ -75,6 +75,9 @@ public:
     // 지금 번역 중인 평가 문맥이다(6.9절).
     EvaluationContext Context() const noexcept;
 
+    // RVT 출력 노드 입력을 번역하는 중인가(6.11절 MS2d3 RVT 범위).
+    bool InVirtualTextureScope() const noexcept;
+
     // 번역 중인 머티리얼의 기본 속성(영역·블렌드 모드)이다.
     const MaterialTraitsDesc& Traits() const noexcept;
 
@@ -210,6 +213,10 @@ public:
 
     // 출력 노드 핀처럼 타입이 정해진 자리로의 암묵 변환이다(5.3절). pin은 진단 위치다.
     Result<IrValueId> Coerce(IrValueId value, MaterialPinType type, StringView pin) noexcept;
+
+    // Float width 핀 자리로의 암묵 변환이다(Coerce — 스칼라 복제, 넓은 벡터는 앞 성분, 좁은 벡터는
+    // V1). UE Substrate·custom 출력 입력처럼 HLSL 암묵 변환을 따르는 자리에 쓴다(6.11절).
+    Result<IrValueId> CoerceToWidth(IrValueId value, uint8 width, StringView pin) noexcept;
 
     // values의 산술 공통 타입이다(폭: 같거나 스칼라, 수 종류: 6.8절). 맞지 않으면 V1을 진단하고
     // 빈 Optional이다. Bool은 모두 Bool일 때만 받는다.

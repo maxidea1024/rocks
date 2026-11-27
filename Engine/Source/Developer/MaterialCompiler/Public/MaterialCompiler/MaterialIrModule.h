@@ -8,6 +8,7 @@
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialIrCollection.h>
+#include <MaterialCompiler/MaterialIrDefine.h>
 #include <MaterialSchema/MaterialContextFeature.h>
 #include <MaterialSchema/MaterialContextValue.h>
 
@@ -34,11 +35,14 @@ enum class IrEntry : uint8 {
     CustomOutput = 6,
     Preview = 7,
     // 대표 노멀(6.11절 MS2d1 — EvaluateMaterialNormal, 픽셀).
-    Normal = 8
+    Normal = 8,
+    // 정점 빈도 custom 출력과 그 이전 프레임 값이다(6.11절 MS2d3 — FirstPersonOutput).
+    CustomOutputVertex = 9,
+    CustomOutputVertexPrevious = 10
 };
 
 // 진입점 수다(마지막 값 + 1).
-inline constexpr uint32 IrEntryCount = 9;
+inline constexpr uint32 IrEntryCount = 11;
 
 // 진입점 결과 칸 하나다. slot은 출력 핀 키(정적 원문 — 예: "WorldPositionOffset")다. 한 모듈 안에서
 // (entry, slot)은 유일하다.
@@ -52,7 +56,7 @@ class ROCKS_MATERIALCOMPILER_API IrModule {
 public:
     explicit IrModule(Allocator& allocator) noexcept
         : values_(allocator), results_(allocator), parameters_(allocator), textures_(allocator),
-          collections_(allocator) {
+          collections_(allocator), defines_(allocator) {
     }
 
     IrModule(const IrModule&) = delete;
@@ -104,6 +108,14 @@ public:
         shadingModels_ = mask;
     }
 
+    // 노드 속성이 정하는 생성 원문 정의다(6.11절 MS2d3 — 넣은 순서).
+    Span<const IrDefine> Defines() const noexcept {
+        return defines_.View();
+    }
+
+    // 정의를 더하고 IR hash에 섞는다(BuildIrModule 뒤에 부른다). 오류: 할당 실패.
+    Result<void> AddDefines(Span<const IrDefine> defines) noexcept;
+
     // 보간 값(Interpolate) 성분 수의 합이다(6.9절 MS2b4a — 보간 배정).
     uint32 InterpolantComponents() const noexcept {
         return interpolantComponents_;
@@ -121,6 +133,7 @@ public:
         parameters_.Clear();
         textures_.Clear();
         collections_.Clear();
+        defines_.Clear();
         hash_ = Sha256Digest{};
         shadingModels_ = 0;
         for (MaterialContextFeatureMask& features : entryFeatures_) {
@@ -140,6 +153,7 @@ private:
     Array<IrParameter> parameters_;
     Array<IrTexture> textures_;
     Array<IrCollection> collections_;
+    Array<IrDefine> defines_;
     Sha256Digest hash_{};
     uint32 shadingModels_ = 0;
     MaterialContextFeatureMask entryFeatures_[IrEntryCount] = {};

@@ -49,7 +49,7 @@ Result<IrValueId> HelperFloatOr(LoweringContext& context, StringView key, uint8 
             return input;
         }
 
-        return context.CoerceTo(input.Value(), IrFloat(width), key);
+        return context.CoerceToWidth(input.Value(), width, key);
     }
 
     float values[MaxIrComponents] = {fallback, fallback, fallback, fallback};

@@ -403,7 +403,7 @@ Result<void> LowerProxyBakePassSwitch(LoweringContext& context) noexcept {
 }
 
 // UE RuntimeVirtualTextureReplace(MaterialExpressions.cpp:3799–3807): RVT 출력 노드 입력 범위에서만
-// VirtualTextureOutput이다. RVT 출력 노드(MS2d) 전까지는 늘 Default다.
+// VirtualTextureOutput이다(6.11절 MS2d3 RVT 범위).
 Result<void> LowerRuntimeVirtualTexturePassSwitch(LoweringContext& context) noexcept {
     auto both =
         RequireBoth(context, "Default", "Missing RuntimeVirtualTextureReplace input 'Default'",
@@ -413,7 +413,9 @@ Result<void> LowerRuntimeVirtualTexturePassSwitch(LoweringContext& context) noex
         return both ? Result<void>::Success() : Result<void>::Failure(both.Error());
     }
 
-    return EmitSwitch(context, context.Input("Default"));
+    return EmitSwitch(context, context.Input(context.InVirtualTextureScope()
+                                                 ? StringView("VirtualTextureOutput")
+                                                 : StringView("Default")));
 }
 
 // 두 입력을 모두 번역하는 실행 중 값 스위치(UE GenericSwitch)다.

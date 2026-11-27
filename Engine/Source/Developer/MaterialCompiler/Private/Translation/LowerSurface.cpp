@@ -111,7 +111,7 @@ Result<IrValueId> FloatOr(LoweringContext& context, StringView key, uint8 width,
             return input;
         }
 
-        return context.CoerceTo(input.Value(), IrFloat(width), key);
+        return context.CoerceToWidth(input.Value(), width, key);
     }
 
     float values[MaxIrComponents] = {fallback, fallback, fallback, fallback};
@@ -135,7 +135,7 @@ Result<IrValueId> BasisOr(LoweringContext& context, StringView key, StringView v
         return input;
     }
 
-    auto vector = context.CoerceTo(input.Value(), IrFloat(3), key);
+    auto vector = context.CoerceToWidth(input.Value(), 3, key);
     if (!vector || vector.Value() == NoIrValue) {
         return vector;
     }
@@ -344,11 +344,8 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
     // 출력이 쓴다).
     auto transmittance = FloatOr(context, "TransmittanceColor", 3, 0.5f);
     auto thinCoverage = FloatOr(context, "ThinTranslucentSurfaceCoverage", 1, 1.0f);
-    auto coatConnected = context.IsConnected("ClearCoatNormal");
-    if (!transmittance || !thinCoverage || !coatConnected) {
-        return Result<void>::Failure(!transmittance  ? transmittance.Error()
-                                     : !thinCoverage ? thinCoverage.Error()
-                                                     : coatConnected.Error());
+    if (!transmittance || !thinCoverage) {
+        return Result<void>::Failure(!transmittance ? transmittance.Error() : thinCoverage.Error());
     }
 
     if (transmittance.Value() == NoIrValue || thinCoverage.Value() == NoIrValue) {
@@ -357,13 +354,51 @@ Result<void> LowerSurfaceFromShadingModel(LoweringContext& context) noexcept {
 
     record.thinTransmittance = transmittance.Value();
     record.thinCoverage = thinCoverage.Value();
-    if (coatConnected.Value()) {
-        auto coat = BasisOr(context, "ClearCoatNormal", "VertexNormal");
-        if (!coat || coat.Value() == NoIrValue) {
-            return coat ? Result<void>::Success() : Result<void>::Failure(coat.Error());
+    // clear coat 아래 노멀·custom tangent는 연결된 때만 입력 원값이다(MS2d3 출력 — UE 고전 경로).
+    const StringView basisKeys[] = {"ClearCoatNormal", "CustomTangent"};
+    IrValueId* basisOut[] = {&record.secondNormal, &record.customTangent};
+    for (usize index = 0; index < 2; ++index) {
+        auto connected = context.IsConnected(basisKeys[index]);
+        if (!connected) {
+            return Result<void>::Failure(connected.Error());
         }
 
-        record.secondNormal = coat.Value();
+        if (!connected.Value()) {
+            continue;
+        }
+
+        auto input = context.Input(basisKeys[index]);
+        if (!input || input.Value() == NoIrValue) {
+            return input ? Result<void>::Success() : Result<void>::Failure(input.Error());
+        }
+
+        auto vector = context.CoerceToWidth(input.Value(), 3, basisKeys[index]);
+        if (!vector || vector.Value() == NoIrValue) {
+            return vector ? Result<void>::Success() : Result<void>::Failure(vector.Error());
+        }
+
+        *basisOut[index] = vector.Value();
+    }
+
+    // 물 계수(UE CompileCommon 기본 0·0·0·1)다.
+    struct WaterInput {
+        StringView key;
+        uint8 width;
+        float fallback;
+    };
+
+    const WaterInput waters[] = {{"WaterScatteringCoefficients", 3, 0.0f},
+                                 {"WaterAbsorptionCoefficients", 3, 0.0f},
+                                 {"WaterPhaseG", 1, 0.0f},
+                                 {"ColorScaleBehindWater", 3, 1.0f}};
+    for (usize index = 0; index < 4; ++index) {
+        auto value =
+            FloatOr(context, waters[index].key, waters[index].width, waters[index].fallback);
+        if (!value || value.Value() == NoIrValue) {
+            return value ? Result<void>::Success() : Result<void>::Failure(value.Error());
+        }
+
+        record.water[index] = value.Value();
     }
 
     return EmitSurface(context, record);
@@ -630,13 +665,19 @@ Result<bool> ReadSecondNormal(LoweringContext& context, StringView key, IrValueI
         return Result<bool>::Success(true);
     }
 
-    auto normal = BasisOr(context, key, "VertexNormal");
-    if (!normal) {
-        return Result<bool>::Failure(normal.Error());
+    // custom 출력은 입력 원값이다(머티리얼 노멀 공간 — 6.11절 MS2d3).
+    auto normal = context.Input(key);
+    if (!normal || normal.Value() == NoIrValue) {
+        return normal ? Result<bool>::Success(false) : Result<bool>::Failure(normal.Error());
     }
 
-    out = normal.Value();
-    return Result<bool>::Success(normal.Value() != NoIrValue);
+    auto vector = context.CoerceToWidth(normal.Value(), 3, key);
+    if (!vector) {
+        return Result<bool>::Failure(vector.Error());
+    }
+
+    out = vector.Value();
+    return Result<bool>::Success(vector.Value() != NoIrValue);
 }
 
 // shading model 상수 칸이다.
@@ -950,6 +991,34 @@ Result<void> LowerSurfaceSingleLayerWater(LoweringContext& context) noexcept {
 
     record.Field(SurfaceField::Metallic) = zero.Value();
     record.Field(SurfaceField::ShadingModel) = model.Value();
+    // 물 계수는 고전 출력 형식으로 바꾼다(Scattering = Albedo·Extinction, Absorption =
+    // Extinction − Scattering — UE SLC의 역, MS2d3).
+    IrValueId albedo = NoIrValue;
+    IrValueId extinction = NoIrValue;
+    const SurfaceInput waters[] = {
+        {"WaterAlbedo", 3, 0.0f, &albedo},
+        {"WaterExtinction", 3, 0.0f, &extinction},
+        {"WaterPhaseG", 1, 0.0f, &record.water[2]},
+        {"ColorScaleBehindWater", 3, 1.0f, &record.water[3]},
+    };
+    auto water = ReadSurfaceInputs(context, waters);
+    if (!water || !water.Value()) {
+        return water ? Result<void>::Success() : Result<void>::Failure(water.Error());
+    }
+
+    auto scattering = context.Binary(IrOp::Multiply, albedo, extinction, NumberRule::FloatOnly);
+    if (!scattering) {
+        return Result<void>::Failure(scattering.Error());
+    }
+
+    auto absorption =
+        context.Binary(IrOp::Subtract, extinction, scattering.Value(), NumberRule::FloatOnly);
+    if (!absorption) {
+        return Result<void>::Failure(absorption.Error());
+    }
+
+    record.water[0] = scattering.Value();
+    record.water[1] = absorption.Value();
     return EmitSurface(context, record);
 }
 

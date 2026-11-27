@@ -9,6 +9,7 @@
 #include <MaterialSchema/NodePropertyReader.h>
 #include <NodeGraph/NodeTypeRegistry.h>
 
+#include "CustomOutputTable.h"
 #include "LoweringContext.h"
 
 // 그래프 → IR 번역기 본체다(Docs/Design/MaterialSystem 6.8절).
@@ -70,7 +71,8 @@ StringView DomainText(MaterialDomain domain) noexcept {
 
 // 진입점이 정점 문맥 둘 중 하나인가.
 bool IsVertexEntry(IrEntry entry) noexcept {
-    return entry == IrEntry::Vertex || entry == IrEntry::VertexPrevious;
+    return entry == IrEntry::Vertex || entry == IrEntry::VertexPrevious ||
+           entry == IrEntry::CustomOutputVertex || entry == IrEntry::CustomOutputVertexPrevious;
 }
 
 // 출력 슬롯 진입점이 문맥에 속하는가(정점 슬롯은 정점·이전 정점 문맥 둘 다 — 6.9절).
@@ -131,9 +133,10 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), nodes_(allocator),
       edges_(allocator), outputsVertex_(allocator), outputsPrevious_(allocator),
       outputsPixel_(allocator), statesVertex_(allocator), statesPrevious_(allocator),
-      statesPixel_(allocator), lowerings_(allocator), lazyNodes_(allocator),
-      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
-      collections_(allocator), samplers_(allocator), deferred_(allocator), surfaces_(allocator) {
+      statesPixel_(allocator), outputsVirtualTexture_(allocator), statesVirtualTexture_(allocator),
+      lowerings_(allocator), lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator),
+      cutInputs_(allocator), results_(allocator), collections_(allocator), samplers_(allocator),
+      deferred_(allocator), surfaces_(allocator), defines_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {
@@ -401,14 +404,15 @@ Result<void> Translator::BuildIndex() noexcept {
     }
 
     // 문서에 없는 종류 이름은 pool에 없으므로(TryFind NotFound) 표에 넣지 않는다.
-    const Span<const LoweringEntry> groups[] = {ConstantLowerings(),     MathLowerings(),
-                                                FlowLowerings(),         ContextValueLowerings(),
-                                                CoordinateLowerings(),   TransformLowerings(),
-                                                SwitchLowerings(),       InterpolatorLowerings(),
-                                                SupplyLowerings(),       ParameterLowerings(),
-                                                TextureLowerings(),      SceneLowerings(),
-                                                SurfaceLowerings(),      SurfaceOperatorLowerings(),
-                                                SurfaceHelperLowerings()};
+    const Span<const LoweringEntry> groups[] = {
+        ConstantLowerings(),      MathLowerings(),
+        FlowLowerings(),          ContextValueLowerings(),
+        CoordinateLowerings(),    TransformLowerings(),
+        SwitchLowerings(),        InterpolatorLowerings(),
+        SupplyLowerings(),        ParameterLowerings(),
+        TextureLowerings(),       SceneLowerings(),
+        SurfaceLowerings(),       SurfaceOperatorLowerings(),
+        SurfaceHelperLowerings(), OutputInputLowerings()};
     for (Span<const LoweringEntry> group : groups) {
         for (const LoweringEntry& entry : group) {
             auto name = input_.names.TryFind(entry.type);
@@ -1548,6 +1552,7 @@ Result<void> Translator::Run() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    outputNode_ = output;
     if (auto checked = CheckParameterNames(); !checked) {
         return checked;
     }
@@ -1596,6 +1601,10 @@ Result<void> Translator::Run() noexcept {
         }
     }
 
+    if (auto custom = TranslateCustomOutputs(); !custom) {
+        return custom;
+    }
+
     if (auto customized = TranslateCustomizedUvs(*output); !customized) {
         return customized;
     }
@@ -1626,6 +1635,31 @@ Result<void> Translator::Run() noexcept {
 
     out_.shadingModels = shadingModels_;
     out_.module.SetShadingModels(shadingModels_);
+    if (auto defined = out_.module.AddDefines(defines_.View()); !defined) {
+        return defined;
+    }
+
+    // 결과가 있는 custom 출력 이름이다(표 순서 — 6.11절 MS2d3).
+    out_.customOutputs.Clear();
+    for (const CustomOutputKind& kind : CustomOutputKinds()) {
+        for (const IrResult& result : out_.module.Results()) {
+            const bool custom = result.entry == IrEntry::CustomOutput ||
+                                result.entry == IrEntry::CustomOutputVertex ||
+                                result.entry == IrEntry::CustomOutputVertexPrevious;
+            bool owned = false;
+            for (const CustomOutputInput& input : kind.inputs) {
+                owned = owned || result.slot == input.slot;
+            }
+
+            if (custom && owned) {
+                if (auto added = out_.customOutputs.TryPushBack(kind.name); !added) {
+                    return added;
+                }
+
+                break;
+            }
+        }
+    }
 
     if (auto budget = CheckInterpolantBudget(); !budget) {
         return budget;

@@ -8,6 +8,7 @@
 #include <MaterialSchema/MaterialContextValue.h>
 #include <Platform/Memory.h>
 
+#include "../Translation/CustomOutputTable.h"
 #include "EntryDefineNames.h"
 #include "HlslFloatLiteral.h"
 
@@ -322,6 +323,10 @@ private:
     Result<void> WriteInterpolants() noexcept;
     Result<void> Vertex() noexcept;
     Result<void> Surface() noexcept;
+    // custom 출력의 존재 정의와 노드 속성 정의다(6.11절 MS2d3).
+    Result<void> CustomOutputDefines() noexcept;
+    // custom 출력 함수다(결과가 있는 번호만).
+    Result<void> CustomOutputFunctions() noexcept;
     Result<void> ScalarFunction(StringView signature, IrEntry entry, StringView slot,
                                 StringView fallback) noexcept;
     // 상수 블록·컬렉션 선언이다(6.10절 MS2c2).
@@ -1897,6 +1902,98 @@ Result<void> SourceWriter::ScalarFunction(StringView signature, IrEntry entry, S
     return Raw(";\n}\n");
 }
 
+Result<void> SourceWriter::CustomOutputDefines() noexcept {
+    for (const IrDefine& define : module_.Defines()) {
+        StringBuilder<> line(allocator_);
+        line << "#define " << define.name << " " << define.value << "\n";
+        if (auto status = line.Status(); !status) {
+            return status;
+        }
+
+        if (auto written = Raw(line.View()); !written) {
+            return written;
+        }
+    }
+
+    // 종류마다 출력 수(UE NUM_MATERIAL_OUTPUTS_), 결과가 있는 번호마다 존재(UE HAVE_)다.
+    for (const detail::CustomOutputKind& kind : detail::CustomOutputKinds()) {
+        const IrEntry entry = kind.frequency == detail::CustomOutputFrequency::Pixel
+                                  ? IrEntry::CustomOutput
+                                  : IrEntry::CustomOutputVertex;
+        bool any = false;
+        for (const detail::CustomOutputInput& input : kind.inputs) {
+            any = any || FindResult(entry, input.slot) != nullptr;
+        }
+
+        if (!any) {
+            continue;
+        }
+
+        StringBuilder<> count(allocator_);
+        count << "#define MATERIAL_CUSTOM_OUTPUT_" << kind.defineName << " "
+              << static_cast<uint32>(kind.inputs.Size()) << "\n";
+        for (usize index = 0; index < kind.inputs.Size(); ++index) {
+            if (FindResult(entry, kind.inputs[index].slot) != nullptr) {
+                count << "#define MATERIAL_HAS_CUSTOM_OUTPUT_" << kind.defineName
+                      << static_cast<uint32>(index) << " 1\n";
+            }
+        }
+
+        if (auto status = count.Status(); !status) {
+            return status;
+        }
+
+        if (auto written = Raw(count.View()); !written) {
+            return written;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> SourceWriter::CustomOutputFunctions() noexcept {
+    struct Variant {
+        IrEntry entry;
+        StringView prefix;
+        StringView inputs;
+    };
+
+    // 픽셀은 MaterialInputs, 정점은 MaterialVertexInputs와 이전 프레임 함수다(6.11절 MS2d3).
+    static constexpr Variant PixelVariants[] = {
+        {IrEntry::CustomOutput, "float4 EvaluateMaterialCustomOutput_", "(in MaterialInputs c)"}};
+    static constexpr Variant VertexVariants[] = {
+        {IrEntry::CustomOutputVertex, "float4 EvaluateMaterialCustomOutput_",
+         "(in MaterialVertexInputs c)"},
+        {IrEntry::CustomOutputVertexPrevious, "float4 EvaluateMaterialCustomOutputPrevious_",
+         "(in MaterialVertexInputs c)"}};
+    for (const detail::CustomOutputKind& kind : detail::CustomOutputKinds()) {
+        const Span<const Variant> variants = kind.frequency == detail::CustomOutputFrequency::Pixel
+                                                 ? Span<const Variant>(PixelVariants)
+                                                 : Span<const Variant>(VertexVariants);
+        for (const Variant& variant : variants) {
+            for (const detail::CustomOutputInput& input : kind.inputs) {
+                if (FindResult(variant.entry, input.slot) == nullptr) {
+                    continue;
+                }
+
+                StringBuilder<> signature(allocator_);
+                signature << variant.prefix << input.slot << variant.inputs;
+                if (auto status = signature.Status(); !status) {
+                    return status;
+                }
+
+                if (auto function = ScalarFunction(signature.View(), variant.entry, input.slot,
+                                                   "float4(0.0, 0.0, 0.0, 0.0)");
+                    !function) {
+                    return function;
+                }
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> SourceWriter::Run() noexcept {
     out_.text.Clear();
     out_.locations.Clear();
@@ -2099,6 +2196,10 @@ Result<void> SourceWriter::Run() noexcept {
         return usage;
     }
 
+    if (auto custom = CustomOutputDefines(); !custom) {
+        return custom;
+    }
+
     if (auto blocks = ConstantBlocks(); !blocks) {
         return blocks;
     }
@@ -2138,6 +2239,10 @@ Result<void> SourceWriter::Run() noexcept {
                                     IrEntry::PixelDepthOffset, "PixelDepthOffset", "0.0");
         !depth) {
         return depth;
+    }
+
+    if (auto custom = CustomOutputFunctions(); !custom) {
+        return custom;
     }
 
     if (auto preview = ScalarFunction("float4 EvaluateMaterialPreview(in MaterialInputs c)",

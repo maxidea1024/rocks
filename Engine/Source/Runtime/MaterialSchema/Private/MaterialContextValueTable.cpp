@@ -1250,6 +1250,16 @@ constexpr MaterialContextValue ContextValues[] = {
                  MaterialContextValueForm::Function, 2, MaterialContextFeature::PathTracing,
                  AllMaterialDomains, AllMaterialStages, MaterialCapabilityTier::Mobile,
                  MaterialDerivative::NotAware, {}, false),
+    // UE NeuralTextureOutput(Parameters, viewportUv)(신경망 후처리 — MS2d3).
+    ContextValue("NeuralTextureOutput", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Neural,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
+    // UE NeuralBufferOutput(Parameters, bufferIndices)(신경망 후처리 — MS2d3).
+    ContextValue("NeuralBufferOutput", "", MaterialPinType::Float4,
+                 MaterialContextValueForm::Function, 1, MaterialContextFeature::Neural,
+                 AllMaterialDomains, MaterialPixelStage, MaterialCapabilityTier::Mobile,
+                 MaterialDerivative::NotAware, {}, false),
 };
 
 } // namespace

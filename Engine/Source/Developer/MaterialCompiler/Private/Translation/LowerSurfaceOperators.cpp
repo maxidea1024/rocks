@@ -107,7 +107,7 @@ Result<IrValueId> OperatorOperand(LoweringContext& context, StringView key,
         return input;
     }
 
-    return context.CoerceTo(input.Value(), IrFloat(1), key);
+    return context.CoerceToWidth(input.Value(), 1, key);
 }
 
 Result<void> LowerSurfaceOperator(LoweringContext& context,

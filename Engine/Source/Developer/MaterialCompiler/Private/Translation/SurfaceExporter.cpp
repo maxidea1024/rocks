@@ -237,6 +237,24 @@ Result<bool> SurfaceExporter::ExportSurface(IrValueId surface, bool underOperato
         return Result<bool>::Failure(exported.Error());
     }
 
+    // 뿌리 BSDF의 추가 칸(MS2d3 출력)이다. 연산 아래의 추가 칸은 버린다(closure 하나).
+    if (record.kind == SurfaceKind::Slab) {
+        out.secondNormal = record.secondNormal;
+    }
+
+    // slab IsThin의 투과 색(고전 ThinTranslucent 변환의 역 — T = exp(−0.01/MFP))이다.
+    bool thin = false;
+    if (!math_.ConstantBool(slab[SlabValue::IsThin], thin) || thin) {
+        SurfaceMath& m = math_;
+        out.thinTransmittance =
+            m.Exp(m.Div(m.Scalar(-ExportDefaultThicknessCm),
+                        m.Max(m.Scalar(ExportEpsilon), slab[SlabValue::MeanFreePath])));
+        out.thinCoverage = m.Scalar(1.0f);
+        if (auto status = m.Status(); !status) {
+            return Result<bool>::Failure(status.Error());
+        }
+    }
+
     return Result<bool>::Success(true);
 }
 

@@ -9,8 +9,17 @@
 namespace rocks::material::detail {
 
 inline constexpr StringView EntryDefineNames[IrEntryCount] = {
-    "VERTEX",        "VERTEX_PREVIOUS", "SURFACE", "OPACITY", "OPACITY_MASK", "PIXEL_DEPTH_OFFSET",
-    "CUSTOM_OUTPUT", "PREVIEW",         "NORMAL",
+    "VERTEX",
+    "VERTEX_PREVIOUS",
+    "SURFACE",
+    "OPACITY",
+    "OPACITY_MASK",
+    "PIXEL_DEPTH_OFFSET",
+    "CUSTOM_OUTPUT",
+    "PREVIEW",
+    "NORMAL",
+    "CUSTOM_OUTPUT_VERTEX",
+    "CUSTOM_OUTPUT_VERTEX_PREVIOUS",
 };
 
 } // namespace rocks::material::detail

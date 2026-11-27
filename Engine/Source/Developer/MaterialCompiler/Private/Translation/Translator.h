@@ -13,6 +13,7 @@
 #include <MaterialCompiler/MaterialTranslationInput.h>
 #include <MaterialSchema/MaterialNodeDefinition.h>
 
+#include "CustomOutputKind.h"
 #include "LoweringTable.h"
 #include "SurfaceRecord.h"
 
@@ -115,6 +116,11 @@ public:
     }
 
     // 지금 번역 중인 평가 문맥이다.
+    // RVT 출력 노드 입력을 번역하는 중인가(6.11절 MS2d3 RVT 범위 — 픽셀 문맥, 결과 캐시는 따로).
+    bool VirtualTextureScope() const noexcept {
+        return virtualTextureScope_;
+    }
+
     EvaluationContext Context() const noexcept {
         return context_;
     }
@@ -207,6 +213,16 @@ private:
     Result<void> CheckInterpolantBudget() noexcept;
     // 출력 노드 Surface 핀의 표면을 접어 Surface·Normal 결과로 내보낸다(6.11절 MS2d1 — 픽셀 문맥).
     Result<void> TranslateSurface(LoweringContext& context) noexcept;
+    // custom 출력 노드와 표면이 주는 custom 출력의 결과·정의다(6.11절 MS2d3 — 출력 노드 번역 뒤).
+    Result<void> TranslateCustomOutputs() noexcept;
+    // 노드 하나의 custom 출력 결과다(빈도의 문맥마다 그 입력을 번역한다).
+    Result<void> TranslateCustomOutput(const nodegraph::GraphNode& node,
+                                       const CustomOutputKind& kind) noexcept;
+    // 노드가 없는 종류에 뿌리 표면이 주는 출력이다.
+    Result<void> SurfaceCustomOutputs(Span<const bool> present) noexcept;
+    // 노드 속성이 정하는 정의를 모은다(VolumetricAdvanced·EmptySpaceSkipping).
+    Result<void> CustomOutputDefines(const nodegraph::GraphNode& node,
+                                     const CustomOutputKind& kind) noexcept;
     // 대표 노멀 경로에 PixelNormal이 닿으면 순환 오류다(6.11절 — UE HT:11784–11787보다 넓다).
     Result<void> CheckNormalCycle() noexcept;
     // 결과에서 닿는 값에 묶인 지연 진단을 낸다(6.10절 MS2c4).
@@ -219,18 +235,21 @@ private:
     HashMap<PinKey, IrValueId, PinKeyHash>& Outputs() noexcept {
         return context_ == EvaluationContext::Vertex           ? outputsVertex_
                : context_ == EvaluationContext::VertexPrevious ? outputsPrevious_
+               : virtualTextureScope_                          ? outputsVirtualTexture_
                                                                : outputsPixel_;
     }
 
     HashMap<Guid, NodeState>& States() noexcept {
         return context_ == EvaluationContext::Vertex           ? statesVertex_
                : context_ == EvaluationContext::VertexPrevious ? statesPrevious_
+               : virtualTextureScope_                          ? statesVirtualTexture_
                                                                : statesPixel_;
     }
 
     const HashMap<Guid, NodeState>& States() const noexcept {
         return context_ == EvaluationContext::Vertex           ? statesVertex_
                : context_ == EvaluationContext::VertexPrevious ? statesPrevious_
+               : virtualTextureScope_                          ? statesVirtualTexture_
                                                                : statesPixel_;
     }
     // node가 기대는 노드들이다(들어오는 간선의 출발 노드, 이름 있는 재경유의 선언).
@@ -261,6 +280,10 @@ private:
     HashMap<Guid, NodeState> statesVertex_;
     HashMap<Guid, NodeState> statesPrevious_;
     HashMap<Guid, NodeState> statesPixel_;
+    // RVT 범위(픽셀 문맥)의 노드 결과·상태다(6.11절 MS2d3).
+    HashMap<PinKey, IrValueId, PinKeyHash> outputsVirtualTexture_;
+    HashMap<Guid, NodeState> statesVirtualTexture_;
+    bool virtualTextureScope_ = false;
     // 픽셀 문맥이 쓴 TexCoord의 최대 상수 색인 + 1이다(CustomizedUv 수 — 6.9절 MS2b4a).
     uint32 pixelTexCoords_ = 0;
     HashMap<Name, LoweringFn> lowerings_;
@@ -297,6 +320,12 @@ private:
     Array<SurfaceRecord> surfaces_;
     // 내보낸 shading model 집합 비트다(Renderer 14.2절 번호).
     uint32 shadingModels_ = 0;
+    // 내보낸 뿌리 표면이다(추가 칸 — 표면이 주는 custom 출력, 6.11절 MS2d3).
+    SurfaceRecord exportedSurface_;
+    // 노드 속성이 정하는 생성 원문 정의다.
+    Array<IrDefine> defines_;
+    // 출력 노드다(Run 동안).
+    const nodegraph::GraphNode* outputNode_ = nullptr;
     Name rerouteType_;
     Name rerouteIn_;
     Name rerouteOut_;

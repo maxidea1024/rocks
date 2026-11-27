@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/Name.h>
+#include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialIrModule.h>
 #include <MaterialCompiler/MaterialTargetField.h>
 #include <NodeGraph/GraphDiagnostic.h>
@@ -15,7 +16,8 @@ namespace rocks::material {
 
 struct MaterialTranslation {
     explicit MaterialTranslation(Allocator& allocator) noexcept
-        : module(allocator), diagnostics(allocator), userSceneTextures(allocator) {
+        : module(allocator), diagnostics(allocator), userSceneTextures(allocator),
+          customOutputs(allocator) {
     }
 
     MaterialTranslation(const MaterialTranslation&) = delete;
@@ -30,6 +32,9 @@ struct MaterialTranslation {
     Array<Name> userSceneTextures;
     // 내보낸 shading model 집합 비트다(Renderer 14.2절 번호 — 6.11절, 8.3절 MaterialShaderTraits).
     uint32 shadingModels = 0;
+    // 결과가 있는 custom 출력 이름이다(6.11절 MS2d3 표 순서 — 8.3절 MaterialShaderTraits 거르기).
+    // 정적 원문이다.
+    Array<StringView> customOutputs;
     bool succeeded = false;
 };
 

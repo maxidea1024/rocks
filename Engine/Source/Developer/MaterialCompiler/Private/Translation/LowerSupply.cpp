@@ -582,9 +582,14 @@ Result<void> LowerHairAttributes(LoweringContext& context) noexcept {
     return EmitSupply(context, "Tangent", context.ContextValue("HairTangent", arguments));
 }
 
-// UE RuntimeVirtualTextureCustomData(HT:8828–8837): RVT 출력 노드 입력 범위 밖은 상수 0이다(RVT
-// 출력 노드 — MS2d — 전까지 늘 0).
+// UE RuntimeVirtualTextureCustomData(HT:8828–8837): RVT 출력 노드 입력 범위 밖은 상수 0이다(6.11절
+// MS2d3 RVT 범위).
 Result<void> LowerRuntimeVirtualTextureCustomData(LoweringContext& context) noexcept {
+    if (context.InVirtualTextureScope()) {
+        return EmitSupply(context, "Result",
+                          context.ContextValue("RuntimeVirtualTextureCustomData"));
+    }
+
     const float zero[] = {0.0f, 0.0f, 0.0f, 0.0f};
     return EmitSupply(context, "Result", context.FloatConstant(zero, StringView()));
 }
