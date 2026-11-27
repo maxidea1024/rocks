@@ -99,6 +99,10 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public string ScriptName { get; init; } = "";
 
+    // 실행 중 변경 통지 대상이다(Docs/Design/ChangeNotification.ko.md CN-D1 — UE FieldNotify). 클래스의 이벤트가 아닌 EditorOnly 아닌 필드만
+    // (SchemaValidator RMC2901).
+    public bool Notify { get; init; }
+
     // 이벤트 필드의 Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B20 — UE BlueprintAssignable). 이벤트가 아닌 필드는
     // SchemaValidator가 RMC2603으로 거부한다.
     public bool ScriptAssignable { get; init; }
@@ -131,6 +135,10 @@ internal sealed record FunctionSpec(bool Pure, bool EditorOnly, string ToolName)
     public bool ScriptOneShot { get; init; }
 
     public IReadOnlyList<string> ScriptPerSecond { get; init; } = [];
+
+    // 계산 값의 변경 통지 대상이다(Docs/Design/ChangeNotification.ko.md CN-D1 — UE FieldNotify 함수). 매개변수가 없고 값을 돌려주는 Pure const
+    // 멤버만(SchemaValidator RMC2902).
+    public bool Notify { get; init; }
 }
 
 // ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
@@ -275,7 +283,7 @@ internal static class Specifiers
         {
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
-                "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable";
+                "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable" or "Notify";
             bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
@@ -372,6 +380,7 @@ internal static class Specifiers
             ScriptWritable = scriptWritable,
             ScriptName = scriptName,
             ScriptAssignable = scriptAssignable,
+            Notify = values.ContainsKey("Notify"),
             Params = values.GetValueOrDefault("Params")?.Text
         };
     }
@@ -383,12 +392,12 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Pure" or "EditorOnly" or "ScriptCallable" or "ScriptOneShot";
+            bool flag = key is "Pure" or "EditorOnly" or "ScriptCallable" or "ScriptOneShot" or "Notify";
             bool label = key is "Name" or "ScriptName" or "ScriptEffects" or "ScriptPerSecond";
             if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported FUNCTION specifier/value {key}",
-                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly, Name=\"<tool name>\" and the Sparks specifiers ScriptCallable, ScriptName, ScriptEffects, " +
+                    hint: "ROCKS_FUNCTION takes Pure, EditorOnly, Notify, Name=\"<tool name>\" and the Sparks specifiers ScriptCallable, ScriptName, ScriptEffects, " +
                         "ScriptOneShot and ScriptPerSecond (display metadata, script overrides and cheat specifiers come with later stages).");
             }
         }
@@ -452,7 +461,8 @@ internal static class Specifiers
             ScriptName = scriptName,
             ScriptEffects = [.. ScriptEffectNames.Where(name => effects.Contains(name, StringComparer.Ordinal))],
             ScriptOneShot = values.ContainsKey("ScriptOneShot"),
-            ScriptPerSecond = perSecond
+            ScriptPerSecond = perSecond,
+            Notify = values.ContainsKey("Notify")
         };
     }
 

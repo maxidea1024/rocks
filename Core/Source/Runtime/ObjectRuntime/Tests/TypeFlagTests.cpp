@@ -69,9 +69,9 @@ TEST(TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected) {
           ErrorCode::InvalidArgument);
     CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::Atomic)).Error() ==
           ErrorCode::InvalidArgument);
-    // 알려진 마지막 필드 플래그(TextMapMergeByKey 256 — AssetSystem 10.3.1절) 다음 비트다.
-    FieldSchema unknown[] = {
-        Field(1, "value", FieldKind::Value, Flag(FieldFlags::TextMapMergeByKey) << 1)};
+    // 알려진 마지막 필드 플래그(Notify 512 — Docs/Design/ChangeNotification.ko.md CN-D1) 다음
+    // 비트다.
+    FieldSchema unknown[] = {Field(1, "value", FieldKind::Value, Flag(FieldFlags::Notify) << 1)};
     CHECK(RegisterBase(types, Span<const FieldSchema>(unknown, 1)).Error() ==
           ErrorCode::InvalidArgument);
 
