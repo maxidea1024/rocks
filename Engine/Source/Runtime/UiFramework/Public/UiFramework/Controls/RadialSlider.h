@@ -34,7 +34,7 @@ public:
     void SetHandVisibility(bool showHandle, bool showHand) noexcept;
     void SetHandleColor(LinearColor color) noexcept;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
 
 protected:
     void UpdateFromPointer(Vec2 position, bool firstPoint) noexcept override;

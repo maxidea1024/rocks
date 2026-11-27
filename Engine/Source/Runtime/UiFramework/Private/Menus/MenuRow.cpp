@@ -363,16 +363,18 @@ void MenuRow::OnSubMenuOpenChanged(bool open) noexcept {
     }
 }
 
-bool MenuRow::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply MenuRow::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     // 오른쪽은 하위 메뉴를 열고 첫 항목으로 간다(키보드 — 외곽선을 잇는다).
     if (event.type == input::InputEventType::KeyDown && event.key == input::Key::Right &&
         hasSubMenu_ && IsEnabled()) {
         // 채우기 실패(빈 하위 메뉴)면 그대로 이 항목에 머문다.
         (void)OpenSubMenuFocused(user);
-        return true;
+        return KeyReply::Handled();
     }
 
-    return MenuAnchor::OnKeyEvent(user, event);
+    return MenuAnchor::OnKeyEvent(key);
 }
 
 void MenuRow::OnActivated() noexcept {

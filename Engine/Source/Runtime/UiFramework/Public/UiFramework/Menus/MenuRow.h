@@ -59,7 +59,7 @@ public:
     void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     void OnFocusReceived(uint32 user) noexcept override;
     void OnFocusLost(uint32 user) noexcept override;
     Optional<bool> OnQueryShowFocus(FocusCause cause) const noexcept override;

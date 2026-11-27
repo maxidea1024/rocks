@@ -47,10 +47,10 @@ TEST(UiFramework_ButtonPaintsStyleStates) {
     CHECK(list.Boxes()[0].outlineWidth == 1.0f);
     CHECK(list.Boxes()[0].cornerRadius == Vec4(4, 4, 4, 4));
     // 눌림: RB(Header) — 키보드로 눌러도 같다.
-    REQUIRE(button.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Enter)));
+    REQUIRE(button.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
     REQUIRE(paint());
     CHECK(list.Boxes()[0].color == Theme(ThemeSlot::Header));
-    REQUIRE(button.OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Enter)));
+    REQUIRE(button.SendKey(0, input::InputEvent::KeyUp(input::Key::Enter)).IsHandled());
     // 비활성: RB(Dropdown, 4, Recessed, 1).
     button.SetEnabled(false);
     REQUIRE(paint());
@@ -80,7 +80,7 @@ TEST(UiFramework_ButtonPaddingFollowsPressedState) {
     CHECK(content.Value()->GetGeometry().size == Vec2(80 - 26, 24 - 5));
     CHECK(content.Value()->GetGeometry().WindowBounds().Value().min == Vec2(13, 2.5f));
     // 눌림: PressedButtonPadding (12, 2.5, 12, 0.5) — 내용이 1만큼 내려간다.
-    REQUIRE(button.Value()->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
+    REQUIRE(button.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
     REQUIRE(button.Value()->Arrange(root));
     CHECK(content.Value()->GetGeometry().size == Vec2(80 - 26, 24 - 5));
     CHECK(content.Value()->GetGeometry().WindowBounds().Value().min == Vec2(13, 3.5f));

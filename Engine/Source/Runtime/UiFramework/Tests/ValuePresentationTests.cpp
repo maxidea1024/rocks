@@ -51,7 +51,11 @@ TEST(UiFramework_SliderLockPreservesProgrammaticChangesAndFinishesCapture) {
     CHECK(slider.OnPointerEvent({PointerEventType::Down, {27, 6}}).capture);
     CHECK(slider.GetNormalizedValue() == 0.25f);
     slider.SetLocked(true);
-    CHECK(!slider.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Right)));
+    // 잠긴 슬라이더는 값을 바꾸지 않고, 방향키는 기본 처리로 navigation이 된다(UE SSlider
+    // — 20.7절).
+    const KeyReply locked = slider.SendKey(0, input::InputEvent::KeyDown(input::Key::Right));
+    CHECK(locked.Navigation().HasValue());
+    CHECK(slider.GetNormalizedValue() == 0.25f);
     REQUIRE(slider.SetValue(0.5f));
     CHECK(slider.OnPointerEvent({PointerEventType::Up, {90, 6}}).releaseCapture);
     CHECK(slider.GetValue() == 0.5f && starts == 1 && ends == 1);
@@ -93,9 +97,9 @@ TEST(UiFramework_SpinBoxFormatsAndCommitsTypedValueWithDeltaSnap) {
         }));
     spin.SetOnDragBegin(Delegate<void()>::CreateLambda([&]() noexcept { ++begins; }));
     spin.SetOnDragEnd(Delegate<void(float)>::CreateLambda([&](float) noexcept { ++ends; }));
-    REQUIRE(spin.OnKeyEvent(0, input::InputEvent::Text('7')));
-    REQUIRE(spin.OnKeyEvent(0, input::InputEvent::Text('.')));
-    REQUIRE(spin.OnKeyEvent(0, input::InputEvent::Text('8')));
+    REQUIRE(spin.SendKey(0, input::InputEvent::Text('7')).IsHandled());
+    REQUIRE(spin.SendKey(0, input::InputEvent::Text('.')).IsHandled());
+    REQUIRE(spin.SendKey(0, input::InputEvent::Text('8')).IsHandled());
     spin.OnFocusLost(0);
     CHECK(commits == 1 && spin.Value() == 8 && display.View() == "8.0");
     REQUIRE(spin.Arrange(Geometry::Root({80, 20}, {})));

@@ -25,11 +25,11 @@ TEST(UiFramework_ButtonBalancesPressReleaseAndHonorsInputMethods) {
     REQUIRE(button.OnPointerEvent({PointerEventType::Move, {20, 5}, 1, 0, PointerSource::Touch})
                 .releaseCapture);
     CHECK(presses == 2 && releases == 2 && clicks == 1);
-    REQUIRE(button.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
+    REQUIRE(button.SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
     CHECK(clicks == 2 && presses == 3);
     button.SetFocusable(false);
     CHECK(releases == 3 && !button.SupportsKeyboardFocus());
-    CHECK(!button.OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Space)));
+    CHECK(!button.SendKey(0, input::InputEvent::KeyUp(input::Key::Space)).IsHandled());
     REQUIRE(button.SetInputMethods(ButtonClickMethod::Up, ButtonClickMethod::DownAndUp,
                                    ButtonPressMethod::Up));
     REQUIRE(button.OnPointerEvent({PointerEventType::Up, {5, 5}}).handled);

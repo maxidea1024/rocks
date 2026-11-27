@@ -38,7 +38,7 @@ public:
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     void OnFocusLost(uint32 user) noexcept override;
 
 protected:

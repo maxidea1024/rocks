@@ -55,7 +55,8 @@ public:
     void OnPointerCaptureLost(PointerSource source, uint32 user, uint32 pointer) noexcept override;
     void OnPointerReleaseInPath(const PointerEvent& event) noexcept override;
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
+    NavigationBoundary OnNavigation(uint32 user, FocusDirection direction) noexcept override;
     virtual void Refresh() noexcept;
     Result<void> Arrange(const Geometry& geometry) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
@@ -74,6 +75,9 @@ protected:
     Allocator& allocator_;
 
 private:
+    // 키 하나로 선택·초점을 옮긴다(Up·Down·Left·Right·Home·End·Ctrl+A). 이 목록에 해당 없으면 비어
+    // 있고(한 열의 Left·Right 등), 해당하면 옮겼는지다.
+    Optional<bool> ApplyNavigationKey(uint32 user, input::Key pressed) noexcept;
     Result<void> RequestIndex(uint32 index, Optional<uint32> focusUser,
                               bool updateSelection = true) noexcept;
     Result<void> ReplaceSelection(uint64 key) noexcept;

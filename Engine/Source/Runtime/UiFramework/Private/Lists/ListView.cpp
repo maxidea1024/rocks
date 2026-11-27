@@ -664,11 +664,54 @@ PointerReply ListView::OnPreviewPointerDown(const PointerEvent& event) noexcept 
     return {};
 }
 
-bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply ListView::OnKeyEvent(const KeyEvent& key) noexcept {
+    const input::InputEvent& event = key.input;
     if (event.type != input::InputEventType::KeyDown || ItemCount() == 0) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
+    // 방향키는 navigation으로 오고(OnNavigation), 여기서는 Home·End·Ctrl+A만 본다.
+    if (event.key == input::Key::Home || event.key == input::Key::End ||
+        event.key == input::Key::A) {
+        if (const auto moved = ApplyNavigationKey(key.user, event.key)) {
+            return KeyReply::FromHandled(*moved);
+        }
+    }
+
+    return Element::OnKeyEvent(key);
+}
+
+NavigationBoundary ListView::OnNavigation(uint32 user, FocusDirection direction) noexcept {
+    // 목록 안의 방향 이동은 목록이 처리한다(UE STableViewBase::OnNavigation). 다음·이전(Tab)은
+    // 목록을 떠난다.
+    input::Key mapped = input::Key::None;
+    switch (direction) {
+    case FocusDirection::Up:
+        mapped = input::Key::Up;
+        break;
+    case FocusDirection::Down:
+        mapped = input::Key::Down;
+        break;
+    case FocusDirection::Left:
+        mapped = input::Key::Left;
+        break;
+    case FocusDirection::Right:
+        mapped = input::Key::Right;
+        break;
+    default:
+        break;
+    }
+
+    if (mapped != input::Key::None && ItemCount() != 0) {
+        if (const auto moved = ApplyNavigationKey(user, mapped)) {
+            return NavigationBoundary::Handled();
+        }
+    }
+
+    return Element::OnNavigation(user, direction);
+}
+
+Optional<bool> ListView::ApplyNavigationKey(uint32 user, input::Key pressed) noexcept {
     const uint32 columns = Columns(GetGeometry().size.x);
     int64 index = navigationIndex_.ValueOr(first_);
     bool hasAnchor = navigationIndex_.HasValue();
@@ -685,12 +728,12 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
     }
 
     const bool multi = selectionMode_ == ListSelectionMode::Multi;
-    if (multi && event.key == input::Key::A && app_.IsControlDown(user)) {
-        return static_cast<bool>(SelectRange(0, ItemCount() - 1));
+    if (multi && pressed == input::Key::A && app_.IsControlDown(user)) {
+        return Optional<bool>(static_cast<bool>(SelectRange(0, ItemCount() - 1)));
     }
 
     const uint32 anchor = rangeAnchor_.ValueOr(static_cast<uint32>(index));
-    switch (event.key) {
+    switch (pressed) {
     case input::Key::Up:
         if (hasAnchor) {
             index -= columns;
@@ -704,11 +747,11 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
     case input::Key::Left:
     case input::Key::Right:
         if (columns == 1) {
-            return false;
+            return {};
         }
 
         if (hasAnchor) {
-            index += event.key == input::Key::Right ? 1 : -1;
+            index += pressed == input::Key::Right ? 1 : -1;
         }
         break;
     case input::Key::Home:
@@ -718,7 +761,7 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
         index = ItemCount() - 1;
         break;
     default:
-        return false;
+        return {};
     }
 
     if (index < 0) {
@@ -731,11 +774,12 @@ bool ListView::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
     if (multi && selectOnNavigation_ && app_.IsShiftDown(user)) {
         rangeAnchor_ = anchor;
         auto range = SelectRange(anchor, target);
-        return range && RequestIndex(target, user, false);
+        return Optional<bool>(range && RequestIndex(target, user, false));
     }
 
     rangeAnchor_ = target;
-    return static_cast<bool>(RequestIndex(target, user, !multi || !app_.IsControlDown(user)));
+    return Optional<bool>(
+        static_cast<bool>(RequestIndex(target, user, !multi || !app_.IsControlDown(user))));
 }
 
 PointerReply ListView::OnTouchPan(const PointerEvent& move, Vec2 origin) noexcept {

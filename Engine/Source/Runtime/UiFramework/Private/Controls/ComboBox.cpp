@@ -295,7 +295,9 @@ Result<SharedPtr<Element>> ComboBox::MakeMenu() noexcept {
     return Result<SharedPtr<Element>>::Success(Move(bounds.Value()));
 }
 
-bool ComboBox::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply ComboBox::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     if (event.type == input::InputEventType::KeyDown && count_) {
         const bool up = event.key == input::Key::Up;
         if (up || event.key == input::Key::Down) {
@@ -309,16 +311,16 @@ bool ComboBox::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept 
                 (void)Select(next);
             }
 
-            return true;
+            return KeyReply::Handled();
         }
 
         if (IsOpen() && event.key == input::Key::Enter) {
             (void)Select(highlighted_);
-            return true;
+            return KeyReply::Handled();
         }
     }
 
-    return MenuAnchor::OnKeyEvent(user, event);
+    return MenuAnchor::OnKeyEvent(key);
 }
 
 } // namespace rocks::ui

@@ -74,7 +74,7 @@ public:
     bool IsOpen() const noexcept;
 
     Result<void> Arrange(const Geometry& geometry) noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
 
 protected:
     void OnActivated() noexcept override;

@@ -22,7 +22,7 @@ Application::Application(Allocator& allocator) noexcept
     : allocator_(allocator), cache_(allocator), hitGrid_(allocator), timers_(allocator),
       toolTips_(allocator), hover_(allocator), captures_(allocator), focus_(allocator),
       modifiers_(allocator), commandScopes_(allocator), pressObservers_(allocator),
-      windowCommands_(allocator) {
+      windowCommands_(allocator), navigationConfigs_(allocator) {
     cache_.SetTheme(&theme_);
 }
 
@@ -730,6 +730,41 @@ bool Application::RouteGamepadButtons(uint32 user, uint32 pressed,
     return false;
 }
 
+Result<void> Application::SetNavigationConfig(uint32 userId,
+                                              const NavigationConfig& config) noexcept {
+    for (auto& entry : navigationConfigs_) {
+        if (entry.user == userId) {
+            entry.config = config;
+            return Result<void>::Success();
+        }
+    }
+
+    return navigationConfigs_.TryPushBack({userId, config});
+}
+
+const NavigationConfig& Application::GetNavigationConfig(uint32 userId) const noexcept {
+    for (const auto& entry : navigationConfigs_) {
+        if (entry.user == userId) {
+            return entry.config;
+        }
+    }
+
+    return NavigationConfig::Default();
+}
+
+Result<bool> Application::PerformNavigation(uint32 userId, FocusDirection direction,
+                                            const SharedPtr<Element>& scope) noexcept {
+    constexpr FocusCause cause = FocusCause::Navigation;
+    if (direction == FocusDirection::Next || direction == FocusDirection::Previous) {
+        const bool forward = direction == FocusDirection::Next;
+        // 팝업·modal 범위 안의 Tab은 범위 안에서 돈다.
+        return scope ? MoveFocusWithin(userId, scope, forward, true, cause)
+                     : MoveFocus(userId, forward, false, cause);
+    }
+
+    return Navigate(userId, direction, scope, cause);
+}
+
 Result<bool> Application::RouteKey(uint32 userId, const input::InputEvent& event) noexcept {
     return RouteKeyWithin(userId, event, {});
 }
@@ -789,9 +824,25 @@ Result<bool> Application::RouteKeyWithin(uint32 userId, const input::InputEvent&
         }
     }
 
+    // 키마다 navigation 방향·동작을 사용자의 대응으로 미리 계산한다(Element는 Application을
+    // 모른다).
+    const NavigationConfig& config = GetNavigationConfig(userId);
+    const KeyEvent key{userId, event, chord.Value(), config.DirectionFromKey(event, chord.Value()),
+                       config.ActionFromKey(event)};
     for (usize i = 0; i < path.Size(); ++i) {
-        if ((down && ProcessCommands(path[i].Get(), chord.Value(), event.repeat)) ||
-            path[i]->OnKeyEvent(userId, event)) {
+        if (down && ProcessCommands(path[i].Get(), chord.Value(), event.repeat)) {
+            return Result<bool>::Success(true);
+        }
+
+        const KeyReply reply = path[i]->OnKeyEvent(key);
+        if (const auto& direction = reply.Navigation()) {
+            // navigation 응답이면 라우팅을 멈추고(조상은 키를 받지 않는다) 탐색한다. 찾지 못해도
+            // 키는 처리된 것이다(UE FReply::SetNavigation).
+            auto navigated = PerformNavigation(userId, *direction, scope);
+            return navigated ? Result<bool>::Success(true) : Move(navigated);
+        }
+
+        if (reply.IsHandled()) {
             return Result<bool>::Success(true);
         }
     }

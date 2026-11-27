@@ -63,7 +63,8 @@ public:
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
     Result<void> OnPaintOverlay(PaintList& list, int32 layer) const noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
+    NavigationBoundary OnNavigation(uint32 user, FocusDirection direction) noexcept override;
 
 private:
     bool MoveFocus(uint32 user, int32 step, bool toEnd) noexcept;

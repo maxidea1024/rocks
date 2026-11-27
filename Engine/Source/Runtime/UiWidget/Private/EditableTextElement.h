@@ -42,7 +42,7 @@ public:
     void OnFocusLost(uint32 user) noexcept override;
     bool OnPreviewKeyChord(uint32 user, const input::InputEvent& event,
                            KeyChord chord) noexcept override;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnPointerCaptureLost(PointerSource source, uint32 user, uint32 pointer) noexcept override;
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;

@@ -678,26 +678,28 @@ bool EditableTextElement::OnPreviewKeyChord(uint32 user, const input::InputEvent
     return false;
 }
 
-bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply EditableTextElement::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     if (!focused_ || focusUser_ != user) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     auto model = registry_.ResolveForWrite<EditableTextWidget>(registry_.OwnerAccess(), owner_);
     if (!model) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     auto* owner = model.Value().Get().Value();
     if (owner->CachedElement().Get() != this) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     const usize begin = anchor_ < caret_ ? anchor_ : caret_;
     const usize end = anchor_ < caret_ ? caret_ : anchor_;
     if (composing_) {
         // 조합 중의 방향키·삭제·Enter는 IME가 처리한다. 확정은 텍스트 입력 문맥으로 온다.
-        return true;
+        return KeyReply::Handled();
     }
 
     if (event.type == input::InputEventType::Text) {
@@ -709,12 +711,12 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
             }
         }
 
-        return true;
+        return KeyReply::Handled();
     }
 
     using input::Key;
     if (event.type != input::InputEventType::KeyDown) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     const bool extend = chord_.shift;
@@ -724,7 +726,7 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
     case Key::X:
     case Key::V: {
         if (!command) {
-            return false;
+            return Element::OnKeyEvent(key);
         }
 
         if (event.key == Key::V) {
@@ -747,14 +749,14 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
     case Key::Z:
     case Key::Y:
         if (!command) {
-            return false;
+            return Element::OnKeyEvent(key);
         }
 
         RestoreHistory(*owner, event.key == Key::Y || extend);
         break;
     case Key::A:
         if (!command) {
-            return false;
+            return Element::OnKeyEvent(key);
         }
 
         anchor_ = 0;
@@ -773,13 +775,13 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
     case Key::Down: {
         auto pos = label_->CaretPosition(caret_, false);
         if (!pos) {
-            return true;
+            return KeyReply::Handled();
         }
 
         Vec2 point = pos.Value();
         if (event.key == Key::Up || event.key == Key::Down) {
             if (!multiline_) {
-                return false;
+                return Element::OnKeyEvent(key);
             }
 
             point.y += (event.key == Key::Up ? -0.5f : 1.5f) * label_->LineStride();
@@ -798,7 +800,7 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         Replace(*owner, begin, begin == end ? Adjacent(true) : end, {});
         break;
     case Key::Escape:
-        return RevertToFocusText(*owner);
+        return KeyReply::FromHandled(RevertToFocusText(*owner));
     case Key::Enter:
     case Key::NumpadEnter:
         if (multiline_) {
@@ -813,10 +815,10 @@ bool EditableTextElement::OnKeyEvent(uint32 user, const input::InputEvent& event
         }
         break;
     default:
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
-    return true;
+    return KeyReply::Handled();
 }
 
 usize EditableTextElement::PointerOffset(Vec2 point) const noexcept {

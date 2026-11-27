@@ -65,8 +65,8 @@ TEST(UiWidget_CheckBoxHandlesMixedStateAndPreservesBooleanAPI) {
     auto native = model.TakeElement(objects);
     REQUIRE(native);
     CHECK(static_cast<CheckBox&>(*native.Value()).GetState() == CheckState::Indeterminate);
-    CHECK(native.Value()->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
-    CHECK(native.Value()->OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Space)));
+    CHECK(native.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
+    CHECK(native.Value()->SendKey(0, input::InputEvent::KeyUp(input::Key::Space)).IsHandled());
     CHECK(model.GetState() == CheckState::Checked && model.IsChecked());
     model.SetChecked(false);
     CHECK(model.GetState() == CheckState::Unchecked);

@@ -59,9 +59,9 @@ TEST(UiWidget_ButtonEventsAndBorderImageStyleSurviveRebuilds) {
     CHECK(image.CachedElement()->GetGeometry().size == Vec2(50 - 24 - 6, 30 - 3 - 8));
     CHECK(static_cast<Button&>(*original.Value()).GetStyle() == PrimaryButtonStyle());
     CHECK(static_cast<Button&>(*original.Value()).GetColor() == LinearColor(1, 0.5f, 1, 1));
-    CHECK(original.Value()->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Enter)));
+    CHECK(original.Value()->SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
     CHECK(button.IsPressed() && presses == 1);
-    CHECK(original.Value()->OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Enter)));
+    CHECK(original.Value()->SendKey(0, input::InputEvent::KeyUp(input::Key::Enter)).IsHandled());
     CHECK(!button.IsPressed() && releases == 1);
     button.ReleaseElements();
     auto rebuilt = button.TakeElement(objects);

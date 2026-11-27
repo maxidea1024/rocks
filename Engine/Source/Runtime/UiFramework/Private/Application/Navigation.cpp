@@ -69,7 +69,8 @@ Result<bool> Application::NavigateInternal(uint32 userId, FocusDirection directi
     Element* boundary = root.Get();
     NavigationBoundary policy;
     for (auto* node = focus.Get(); node; node = node->Parent()) {
-        policy = node->GetNavigationRule(direction);
+        // 초점 경로의 OnNavigation이 경계 규칙을 정한다(UE AttemptNavigation — 20.7절).
+        policy = node->OnNavigation(userId, direction);
         if (policy.rule != NavigationRule::Escape) {
             boundary = node;
             break;

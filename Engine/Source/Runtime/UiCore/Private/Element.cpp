@@ -1,4 +1,5 @@
 #include <UiCore/Element.h>
+#include <UiCore/NavigationConfig.h>
 #include <UiCore/CacheRoot.h>
 #include <UiCore/Styles/CoreStyles.h>
 #include <Base/NumericLimits.h>
@@ -301,8 +302,27 @@ bool Element::OnPreviewKeyDown(uint32, const input::InputEvent&) noexcept {
     return false;
 }
 
-bool Element::OnKeyEvent(uint32, const input::InputEvent&) noexcept {
-    return false;
+KeyReply Element::OnKeyEvent(const KeyEvent& key) noexcept {
+    // UE SWidget::OnKeyDown(415–427행): 초점 받을 수 있는 요소는 navigation 키를 navigation으로
+    // 바꾼다.
+    if (key.input.type == input::InputEventType::KeyDown && key.navigation &&
+        SupportsKeyboardFocus()) {
+        return KeyReply::Navigate(*key.navigation);
+    }
+
+    return KeyReply::Unhandled();
+}
+
+NavigationBoundary Element::OnNavigation(uint32, FocusDirection direction) noexcept {
+    return GetNavigationRule(direction);
+}
+
+KeyReply Element::SendKey(uint32 user, const input::InputEvent& event,
+                          const KeyChord& chord) noexcept {
+    const auto& config = NavigationConfig::Default();
+    const KeyEvent key{user, event, chord, config.DirectionFromKey(event, chord),
+                       config.ActionFromKey(event)};
+    return OnKeyEvent(key);
 }
 
 void Element::OnKeyCancelled(uint32, input::Key) noexcept {

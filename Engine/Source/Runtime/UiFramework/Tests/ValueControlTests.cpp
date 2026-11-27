@@ -38,15 +38,15 @@ TEST(UiFramework_SpinBoxCommitsTextAndRejectsInvalidEntry) {
     REQUIRE(box.SetLimits(-10, 10, 2));
     uint32 changes = 0;
     box.SetOnChanged(Delegate<void(float)>::CreateLambda([&](float) noexcept { ++changes; }));
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Up)));
+    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Up)).IsHandled());
     CHECK(box.Value() == 2);
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::Text('-')));
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::Text('7')));
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Enter)));
+    REQUIRE(box.SendKey(0, input::InputEvent::Text('-')).IsHandled());
+    REQUIRE(box.SendKey(0, input::InputEvent::Text('7')).IsHandled());
+    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
     CHECK(box.Value() == -7 && changes == 2);
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::Text('1')));
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::Text('e')));
-    REQUIRE(box.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Enter)));
+    REQUIRE(box.SendKey(0, input::InputEvent::Text('1')).IsHandled());
+    REQUIRE(box.SendKey(0, input::InputEvent::Text('e')).IsHandled());
+    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
     CHECK(box.Value() == -7 && !box.IsEditing() && changes == 2);
     REQUIRE(box.Arrange(Geometry::Root({100, 30}, {})));
     CHECK(box.OnPointerEvent({PointerEventType::Down, {4, 4}}).capture);
@@ -166,7 +166,7 @@ TEST(UiFramework_VerticalSliderUsesTheSameTrackForPickingAndPaint) {
     // 위 끝 근처(아래에서 92)는 범위 밖이라 최대값이다.
     CHECK(slider.OnPointerEvent({PointerEventType::Up, {6, 4}}).releaseCapture);
     CHECK(slider.GetValue() == 6);
-    CHECK(slider.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Down)));
+    CHECK(slider.SendKey(0, input::InputEvent::KeyDown(input::Key::Down)).IsHandled());
     CHECK(slider.GetValue() == 4);
     PaintList list(allocator);
     REQUIRE(slider.OnPaint(list, 0));

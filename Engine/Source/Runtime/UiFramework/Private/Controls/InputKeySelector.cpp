@@ -185,13 +185,14 @@ bool InputKeySelector::OnGamepadButtonDown(uint32 user, input::GamepadButton but
     return false;
 }
 
-bool InputKeySelector::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply InputKeySelector::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
     if (selecting_) {
-        return true;
+        return KeyReply::Handled();
     }
 
     activationUser_ = user;
-    return Button::OnKeyEvent(user, event);
+    return Button::OnKeyEvent(key);
 }
 
 void InputKeySelector::OnFocusLost(uint32 user) noexcept {

@@ -115,21 +115,24 @@ void RadialSlider::SetHandleColor(LinearColor color) noexcept {
     }
 }
 
-bool RadialSlider::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply RadialSlider::OnKeyEvent(const KeyEvent& key) noexcept {
+    const input::InputEvent& event = key.input;
     if (event.type == input::InputEventType::KeyDown) {
         if (event.key == input::Key::Home || event.key == input::Key::End) {
             SetInteractiveValue(event.key == input::Key::Home ? Minimum() : Maximum());
-            return true;
+            return KeyReply::Handled();
         }
 
+        // 위·아래는 값 증감이다(오른쪽·왼쪽으로 바꿔 넘긴다).
         if (event.key == input::Key::Up || event.key == input::Key::Down) {
             auto mapped = event;
             mapped.key = event.key == input::Key::Up ? input::Key::Right : input::Key::Left;
-            return Slider::OnKeyEvent(user, mapped);
+            const KeyEvent remapped{key.user, mapped, key.chord, key.navigation, key.action};
+            return Slider::OnKeyEvent(remapped);
         }
     }
 
-    return Slider::OnKeyEvent(user, event);
+    return Slider::OnKeyEvent(key);
 }
 
 void RadialSlider::UpdateFromPointer(Vec2 position, bool firstPoint) noexcept {

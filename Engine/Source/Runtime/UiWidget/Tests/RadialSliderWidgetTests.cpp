@@ -51,7 +51,7 @@ TEST(UiWidget_RadialSliderUsesAnglesCaptureAndRebuildsSavedValues) {
     const auto release =
         native.OnPointerEvent({.type = PointerEventType::Up, .position = right, .pointerId = 7});
     CHECK(release.handled && release.releaseCapture);
-    CHECK(native.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Down)));
+    CHECK(native.SendKey(0, input::InputEvent::KeyDown(input::Key::Down)).IsHandled());
     CHECK(dial->Value() == 18 && changes == 2);
 
     dial->ReleaseElements();
@@ -65,7 +65,7 @@ TEST(UiWidget_RadialSliderUsesAnglesCaptureAndRebuildsSavedValues) {
     REQUIRE(paint.Boxes().Size() > 4);
     CHECK(paint.Boxes()[paint.Boxes().Size() - 1].color == LinearColor(1, 0, 0, 1));
     // 분리된 이전 요소의 입력은 재생성된 객체 값을 변경하지 않는다.
-    CHECK(native.OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::End)));
+    CHECK(native.SendKey(0, input::InputEvent::KeyDown(input::Key::End)).IsHandled());
     CHECK(dial->Value() == 18 && changes == 2);
 }
 

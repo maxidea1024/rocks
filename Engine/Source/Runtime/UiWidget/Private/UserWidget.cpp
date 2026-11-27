@@ -33,9 +33,13 @@ public:
         return owner && owner->OnPreviewKey(user, event);
     }
 
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override {
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override {
         auto* owner = LiveOwner();
-        return owner && owner->OnKey(user, event);
+        if (owner && owner->OnKey(key.user, key.input)) {
+            return KeyReply::Handled();
+        }
+
+        return Element::OnKeyEvent(key);
     }
 
     PointerReply OnPreviewPointerDown(const PointerEvent& event) noexcept override {

@@ -241,14 +241,16 @@ Result<void> MenuAnchor::Arrange(const Geometry& geometry) noexcept {
     return Button::Arrange(geometry);
 }
 
-bool MenuAnchor::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply MenuAnchor::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     if (IsOpen() && event.type == input::InputEventType::KeyDown &&
         event.key == input::Key::Escape) {
         Close();
-        return true;
+        return KeyReply::Handled();
     }
 
-    return Button::OnKeyEvent(user, event);
+    return Button::OnKeyEvent(key);
 }
 
 } // namespace rocks::ui

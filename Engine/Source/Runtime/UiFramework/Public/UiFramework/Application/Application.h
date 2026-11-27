@@ -7,6 +7,7 @@
 #include <UiFramework/Application/Commands.h>
 #include <UiFramework/Application/AccessibleNode.h>
 #include <UiCore/FocusCause.h>
+#include <UiCore/NavigationConfig.h>
 #include <UiFramework/Application/UiTimer.h>
 
 namespace rocks::ui {
@@ -84,6 +85,10 @@ public:
     // 본다). 비우면 단조 시계다. 시험·snapshot은 ManualClock을 준다. 바꾸면 열린 툴팁을 닫고 다음
     // BeginFrame을 첫 프레임(간격 0)으로 본다.
     void SetClock(ClockFunction&& clock) noexcept;
+    // 사용자의 키 → navigation 대응이다(Docs/Design/UiToolkit 20.7절 — UE 사용자별
+    // FNavigationConfig). 정하지 않은 사용자는 기본값(NavigationConfig::Default)이다.
+    Result<void> SetNavigationConfig(uint32 userId, const NavigationConfig& config) noexcept;
+    const NavigationConfig& GetNavigationConfig(uint32 userId) const noexcept;
     // 프레임을 시작한다: 시계를 한 번 읽어 프레임 시각을 정하고(간격은 MaxFrameDeltaSeconds로
     // 자른다 — UE TickTime) host 묶음에 싣는다. 호스트는 입력 처리 전에 부른다. 부르지 않은 채
     // PrepareLayout이 오면 그것이 먼저 부른다.
@@ -317,6 +322,14 @@ private:
     void StartFrame(const FrameTime& time, bool external) noexcept;
     // 옛 루트가 이 묶음을 들고 있으면 뗀다.
     void DetachHostServices() noexcept;
+    struct UserNavigation {
+        uint32 user;
+        NavigationConfig config;
+    };
+    Array<UserNavigation> navigationConfigs_;
+    // KeyDown의 navigation 응답을 실행한다(다음·이전은 tree 순서, 방향은 기하 — 20.7절).
+    Result<bool> PerformNavigation(uint32 userId, FocusDirection direction,
+                                   const SharedPtr<Element>& scope) noexcept;
     ClockFunction clock_;
     FrameTime frameTime_{};
     double lastClock_ = 0;

@@ -5,6 +5,8 @@
 #include <Input/InputEvent.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/KeyChord.h>
+#include <UiCore/KeyEvent.h>
+#include <UiCore/KeyReply.h>
 #include <UiCore/NavigationRule.h>
 #include <Core/Text/String.h>
 #include <Core/Optional.h>
@@ -228,7 +230,18 @@ public:
     virtual bool OnGamepadButtonDown(uint32 user, input::GamepadButton button) noexcept;
     virtual bool OnPreviewKeyDown(uint32, const input::InputEvent&) noexcept;
 
-    virtual bool OnKeyEvent(uint32, const input::InputEvent&) noexcept;
+    // 키 이벤트다(Docs/Design/UiToolkit 20.7절 — UE SWidget::OnKeyDown). 기본 처리는 초점 받을 수
+    // 있는 요소의 KeyDown이 navigation 방향을 가지면 navigation 응답이다. 키를 쓰는 override는
+    // KeyReply::Handled를, 아니면 Super::OnKeyEvent(key)를 돌려준다.
+    virtual KeyReply OnKeyEvent(const KeyEvent& key) noexcept;
+    // 초점 경로를 초점 요소에서 루트로 올라가며 navigation 방향마다 부른다(UE OnNavigation).
+    // Escape가 아니면 거기서 멈추고 그 규칙으로 탐색한다. 기본은 SetNavigationRule로 정한 규칙이다.
+    // 방향을 스스로 처리한 요소(메뉴·목록)는 NavigationBoundary::Handled()를 돌려준다.
+    virtual NavigationBoundary OnNavigation(uint32 user, FocusDirection direction) noexcept;
+    // 기본 키 대응(NavigationConfig::Default)으로 KeyEvent를 만들어 이 요소의 OnKeyEvent에 보낸다
+    // (시험·위젯 전달용 — 라우팅을 거치지 않는다).
+    KeyReply SendKey(uint32 user, const input::InputEvent& event,
+                     const KeyChord& chord = {}) noexcept;
 
     // 장치 연결이 끊기면 누른 키를 활성화 없이 해제한다.
     virtual void OnKeyCancelled(uint32 userId, input::Key key) noexcept;

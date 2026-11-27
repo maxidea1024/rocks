@@ -40,7 +40,7 @@ public:
     Result<void> Select(int32 index) noexcept;
     Result<void> SetMaxListHeight(float height) noexcept;
     int32 SelectedIndex() const noexcept;
-    bool OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     // 버튼 위 오른쪽에 아래 화살표를 그린다(UE SComboButton 오른쪽 칸 — 전경색 tint, 세로 가운데).
     // 화살표 자리는 내용 여백으로 비워 둔다.
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;

@@ -116,12 +116,12 @@ TEST(UiWidget_AssetEventSurvivesArchiveAndTargetsEachControllerInstance) {
     auto* toggle = host.Value()->ChildAt(0);
     REQUIRE(toggle);
     controller->SetEnabled(false);
-    REQUIRE(toggle->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
-    REQUIRE(toggle->OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Space)));
+    REQUIRE(toggle->SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
+    REQUIRE(toggle->SendKey(0, input::InputEvent::KeyUp(input::Key::Space)).IsHandled());
     CHECK(controller->IsEnabled());
     CHECK(controller->IsForceVolatile());
-    REQUIRE(toggle->OnKeyEvent(0, input::InputEvent::KeyDown(input::Key::Space)));
-    REQUIRE(toggle->OnKeyEvent(0, input::InputEvent::KeyUp(input::Key::Space)));
+    REQUIRE(toggle->SendKey(0, input::InputEvent::KeyDown(input::Key::Space)).IsHandled());
+    REQUIRE(toggle->SendKey(0, input::InputEvent::KeyUp(input::Key::Space)).IsHandled());
     CHECK(!controller->IsEnabled());
     CHECK(!controller->IsForceVolatile());
     CHECK(other.Value().Get().Value()->IsEnabled());

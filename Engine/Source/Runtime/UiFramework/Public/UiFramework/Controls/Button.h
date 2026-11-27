@@ -88,7 +88,7 @@ public:
 
     bool SupportsKeyboardFocus() const noexcept override;
 
-    bool OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
 
     void OnKeyCancelled(uint32 userId, input::Key key) noexcept override;
     void OnFocusLost(uint32 userId) noexcept override;

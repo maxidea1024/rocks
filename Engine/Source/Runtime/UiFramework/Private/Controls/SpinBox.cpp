@@ -227,7 +227,8 @@ void SpinBox::OnFocusLost(uint32) noexcept {
     Commit(SpinCommitReason::FocusLost);
 }
 
-bool SpinBox::OnKeyEvent(uint32, const input::InputEvent& event) noexcept {
+KeyReply SpinBox::OnKeyEvent(const KeyEvent& key) noexcept {
+    const input::InputEvent& event = key.input;
     using input::Key;
     if (event.type == input::InputEventType::Text) {
         const auto c = event.codePoint;
@@ -243,21 +244,21 @@ bool SpinBox::OnKeyEvent(uint32, const input::InputEvent& event) noexcept {
                 }
             }
 
-            return true;
+            return KeyReply::Handled();
         }
 
-        return editing_;
+        return KeyReply::FromHandled(editing_);
     }
 
     if (event.type != input::InputEventType::KeyDown) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     switch (event.key) {
     case Key::Enter:
     case Key::NumpadEnter:
         if (event.repeat) {
-            return true;
+            return KeyReply::Handled();
         }
 
         if (editing_) {
@@ -266,32 +267,32 @@ bool SpinBox::OnKeyEvent(uint32, const input::InputEvent& event) noexcept {
             BeginEdit();
         }
 
-        return true;
+        return KeyReply::Handled();
     case Key::Escape:
         if (editing_) {
             CancelEdit();
-            return true;
+            return KeyReply::Handled();
         }
 
-        return false;
+        return Element::OnKeyEvent(key);
     case Key::Backspace:
         if (editing_) {
             if (length_ && (!caption_ || caption_.Execute({buffer_, length_ - 1}))) {
                 --length_;
             }
 
-            return true;
+            return KeyReply::Handled();
         }
 
-        return false;
+        return Element::OnKeyEvent(key);
     case Key::Up:
     case Key::Down:
         Change(static_cast<float>(
             math::Clamp(static_cast<double>(value_) + (event.key == Key::Up ? step_ : -step_),
                         static_cast<double>(minimum_), static_cast<double>(maximum_))));
-        return true;
+        return KeyReply::Handled();
     default:
-        return false;
+        return Element::OnKeyEvent(key);
     }
 }
 

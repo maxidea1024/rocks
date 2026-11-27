@@ -48,7 +48,7 @@ public:
     void SetOnChanged(Delegate<void(float)>&& callback) noexcept;
 
     bool SupportsKeyboardFocus() const noexcept override;
-    bool OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept override;
+    KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnPointerCaptureLost(PointerSource source, uint32 userId,
                               uint32 pointerId) noexcept override;

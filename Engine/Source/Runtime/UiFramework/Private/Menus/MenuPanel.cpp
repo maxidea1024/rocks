@@ -355,7 +355,9 @@ bool MenuPanel::JumpToLetter(uint32 user, char letter) noexcept {
     return true;
 }
 
-bool MenuPanel::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply MenuPanel::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     // 글자 점프는 입력 문자 기준이다(물리 키가 아니라 — AZERTY·Dvorak에서도 그 글자). Ctrl·Alt
     // 조합은 단축키·막대 가속키로 남긴다.
     if (event.type == input::InputEventType::Text) {
@@ -366,45 +368,50 @@ bool MenuPanel::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept
         }
 
         if (code >= 'A' && code <= 'Z' && !app.IsControlDown(user) && !app.IsAltDown(user)) {
-            return JumpToLetter(user, static_cast<char>(code));
+            return KeyReply::FromHandled(JumpToLetter(user, static_cast<char>(code)));
         }
 
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
-    if (event.type != input::InputEventType::KeyDown) {
-        return false;
+    // 방향키·Tab은 초점 항목에서 navigation으로 바뀌어 OnNavigation으로 온다(20.7절).
+    if (event.type == input::InputEventType::KeyDown &&
+        (event.key == input::Key::Home || event.key == input::Key::End)) {
+        return KeyReply::FromHandled(MoveFocus(user, event.key == input::Key::Home ? -1 : 1, true));
     }
 
-    switch (event.key) {
-    case input::Key::Up:
-        return MoveFocus(user, -1, false);
-    case input::Key::Down:
-        return MoveFocus(user, 1, false);
-    case input::Key::Tab:
-        // 메뉴 안 Tab은 아래·위와 같다(초점이 메뉴 밖으로 빠지지 않는다).
-        return MoveFocus(user, context_->GetApplication().IsShiftDown(user) ? -1 : 1, false);
-    case input::Key::Home:
-        return MoveFocus(user, -1, true);
-    case input::Key::End:
-        return MoveFocus(user, 1, true);
-    case input::Key::Left:
+    return Element::OnKeyEvent(key);
+}
+
+NavigationBoundary MenuPanel::OnNavigation(uint32 user, FocusDirection direction) noexcept {
+    bool handled = false;
+    switch (direction) {
+    case FocusDirection::Up:
+    case FocusDirection::Previous:
+        // 메뉴 안 Tab·Shift+Tab은 아래·위와 같다(초점이 메뉴 밖으로 빠지지 않는다).
+        handled = MoveFocus(user, -1, false);
+        break;
+    case FocusDirection::Down:
+    case FocusDirection::Next:
+        handled = MoveFocus(user, 1, false);
+        break;
+    case FocusDirection::Left:
         // 하위 메뉴면 닫고 그 항목으로(항목이 초점을 되찾는다), 루트면 막대의 이전 메뉴로 간다.
         if (!IsRoot() && owner_) {
             owner_->Close();
-            return true;
+            handled = true;
+        } else {
+            handled = context_->NavigateRoot(-1);
         }
-
-        return context_->NavigateRoot(-1);
-    case input::Key::Right:
-        // 하위 메뉴 항목은 자기가 처리한다. 여기 오면(하위 메뉴 안의 일반 항목 포함) 막대의 다음
-        // 메뉴로 간다(Windows).
-        return context_->NavigateRoot(1);
-    default:
+        break;
+    case FocusDirection::Right:
+        // 하위 메뉴 항목은 키로 자기가 처리한다. 여기 오면(하위 메뉴 안의 일반 항목 포함) 막대의
+        // 다음 메뉴로 간다(Windows).
+        handled = context_->NavigateRoot(1);
         break;
     }
 
-    return false;
+    return handled ? NavigationBoundary::Handled() : Element::OnNavigation(user, direction);
 }
 
 Vec2 MenuPanel::ComputeDesiredSize(float) const noexcept {

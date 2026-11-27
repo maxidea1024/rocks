@@ -37,27 +37,29 @@ PointerReply MenuBarButton::OnPointerEvent(const PointerEvent& event) noexcept {
     return reply;
 }
 
-bool MenuBarButton::OnKeyEvent(uint32 user, const input::InputEvent& event) noexcept {
+KeyReply MenuBarButton::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 user = key.user;
+    const input::InputEvent& event = key.input;
     if (event.type == input::InputEventType::KeyDown && !IsOpen()) {
         switch (event.key) {
         case input::Key::Down:
             OnActivated();
-            return true;
+            return KeyReply::Handled();
         case input::Key::Left:
             bar_.FocusNeighbor(*this, -1);
-            return true;
+            return KeyReply::Handled();
         case input::Key::Right:
             bar_.FocusNeighbor(*this, 1);
-            return true;
+            return KeyReply::Handled();
         case input::Key::Escape:
             bar_.LeaveMenuMode();
-            return true;
+            return KeyReply::Handled();
         default:
             break;
         }
     }
 
-    return MenuAnchor::OnKeyEvent(user, event);
+    return MenuAnchor::OnKeyEvent(key);
 }
 
 void MenuBarButton::OnFocusReceived(uint32 user) noexcept {

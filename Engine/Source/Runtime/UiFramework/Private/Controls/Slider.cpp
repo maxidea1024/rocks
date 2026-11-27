@@ -241,22 +241,23 @@ bool Slider::SupportsKeyboardFocus() const noexcept {
     return true;
 }
 
-bool Slider::OnKeyEvent(uint32, const input::InputEvent& event) noexcept {
+KeyReply Slider::OnKeyEvent(const KeyEvent& key) noexcept {
+    const input::InputEvent& event = key.input;
     if (locked_ || event.type != input::InputEventType::KeyDown) {
-        return false;
+        return Element::OnKeyEvent(key);
     }
 
     if (event.key == (vertical_ ? input::Key::Down : input::Key::Left)) {
         SetInteractiveValue(value_ - step_);
-        return true;
+        return KeyReply::Handled();
     }
 
     if (event.key == (vertical_ ? input::Key::Up : input::Key::Right)) {
         SetInteractiveValue(value_ + step_);
-        return true;
+        return KeyReply::Handled();
     }
 
-    return false;
+    return Element::OnKeyEvent(key);
 }
 
 PointerReply Slider::OnPointerEvent(const PointerEvent& event) noexcept {

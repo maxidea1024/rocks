@@ -194,9 +194,13 @@ bool Button::SupportsKeyboardFocus() const noexcept {
     return focusable_;
 }
 
-bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept {
-    if (!focusable_ || (event.key != input::Key::Enter && event.key != input::Key::Space)) {
-        return false;
+KeyReply Button::OnKeyEvent(const KeyEvent& key) noexcept {
+    const uint32 userId = key.user;
+    const input::InputEvent& event = key.input;
+    // 확인 동작(Enter·Space·패드 확인)이 누름이다(UE SButton::OnKeyDown —
+    // GetNavigationActionFromKey).
+    if (!focusable_ || key.action != NavigationAction::Accept) {
+        return Element::OnKeyEvent(key);
     }
 
     if (event.type == input::InputEventType::KeyDown) {
@@ -213,7 +217,7 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
             }
         }
 
-        return true;
+        return KeyReply::Handled();
     }
 
     if (event.type == input::InputEventType::KeyUp && keyPressed_ && keyUserId_ == userId &&
@@ -227,16 +231,16 @@ bool Button::OnKeyEvent(uint32 userId, const input::InputEvent& event) noexcept 
             Activate();
         }
 
-        return true;
+        return KeyReply::Handled();
     }
 
     if (event.type == input::InputEventType::KeyUp && !keyPressed_ &&
         pressMethod_ == ButtonPressMethod::Up) {
         Activate();
-        return true;
+        return KeyReply::Handled();
     }
 
-    return false;
+    return Element::OnKeyEvent(key);
 }
 
 void Button::OnFocusLost(uint32 userId) noexcept {

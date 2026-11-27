@@ -82,7 +82,9 @@
 
 ### 20.7 키 응답과 navigation 이벤트(UW8e1)
 
-- **키 응답.** `Element::OnKeyEvent`는 `KeyReply`를 돌려준다: 처리 안 함 · 처리함 · 방향 navigation(방향, 원인 Keyboard·Controller). 인자는 `KeyEvent`(사용자, 입력 이벤트, 조합 키, 이 키의 navigation 방향·동작)다.
+- **키 응답.** `Element::OnKeyEvent`는 `KeyReply`를 돌려준다: 처리 안 함 · 처리함 · 방향 navigation. 인자는 `KeyEvent`(사용자, 입력 이벤트, 조합 키, 이 키의 navigation 방향·동작)다. UE의 원인 구분(`ENavigationGenesis` Keyboard·Controller)은 쓰는 곳이 생길 때 더한다(지금 초점 원인은 모두 Navigation).
+  - `NavigationConfig`는 입력 대응 규칙이라 그래픽·플랫폼과 무관해 UiCore에 둔다. Element 기본 처리와 시험용 `Element::SendKey`(사용자·입력으로 `KeyEvent`를 만들어 보냄)가 기본 대응을 쓴다.
+  - 처리했다는 `OnNavigation` 응답은 대상 없는 Explicit(`NavigationBoundary::Handled()`)다. 초점은 그 Element가 이미 옮겼다.
 - **기본 처리(UE `SWidget::OnKeyDown`).** 기본 구현은 Element가 초점을 받을 수 있고 KeyDown이며 `KeyEvent::navigation`이 있으면 navigation 응답이다. 키를 쓰고 싶은 override는 처리함을, 아니면 `Super::OnKeyEvent`를 돌려준다(UE 관례). override 13곳을 옮긴다.
 - **navigation 이벤트(UE `OnNavigation`).**
   - navigation 응답이 나오면 키 라우팅을 멈춘다(조상은 키를 받지 않는다).
@@ -94,7 +96,7 @@
     - `ScrollView`: 끝에서 경계 탈출
     - `Slider`: 값 변경
   - UE 근거: SListView.h 61–73행, SScrollBox.cpp 1285행, SSlider.cpp 193행.
-- **`NavigationConfig`(UiFramework, 사용자별 — UE `FNavigationConfig`).**
+- **`NavigationConfig`(UiCore, `Application`이 사용자별로 든다 — UE `FNavigationConfig`).**
   - 키 대응표 기본값은 UE와 같다: 방향키·게임패드 D-pad → 상하좌우(NavigationConfig.cpp 19–29행). 왼쪽 스틱은 아날로그 경로다(축 16–17행, 임계값 0.5 — 13–14행).
   - Tab → Next, Shift+Tab → Previous다. Ctrl·Alt·Command가 눌려 있으면 바꾸지 않는다(59–81행). Next·Previous는 지금처럼 tree 순서(`MoveFocus`)로 찾는다.
   - 동작 키: 확인은 Enter·Space·패드 확인, 뒤로는 Escape·패드 뒤로다(31–38행). 버튼류는 키 대신 동작으로 누름을 판정한다(UE `GetNavigationActionFromKey`).

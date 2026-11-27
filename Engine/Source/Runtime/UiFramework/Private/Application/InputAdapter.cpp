@@ -83,35 +83,20 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
 
     if (event.type == input::InputEventType::KeyDown ||
         event.type == input::InputEventType::KeyUp || event.type == input::InputEventType::Text) {
+        // 방향키·Tab은 초점 경로의 기본 키 처리가 navigation으로
+        // 바꾼다(Docs/Design/UiToolkit 20.7절 — 처리 안 된 키에 대체 navigation은 없다, UE와 같다).
         auto routed = application_.RouteKeyWithin(event.userId, event, scope);
         if (!routed || routed.Value() || event.type != input::InputEventType::KeyDown) {
             return routed;
         }
 
-        constexpr FocusCause navigation = FocusCause::Navigation;
-        switch (event.key) {
-        case input::Key::Left:
-            return application_.Navigate(event.userId, FocusDirection::Left, scope, navigation);
-        case input::Key::Right:
-            return application_.Navigate(event.userId, FocusDirection::Right, scope, navigation);
-        case input::Key::Up:
-            return application_.Navigate(event.userId, FocusDirection::Up, scope, navigation);
-        case input::Key::Down:
-            return application_.Navigate(event.userId, FocusDirection::Down, scope, navigation);
-        case input::Key::Tab: {
-            const bool forward = !application_.IsShiftDown(event.userId);
-            return scope ? application_.MoveFocusWithin(event.userId, scope, forward, true,
-                                                        navigation)
-                         : application_.MoveFocus(event.userId, forward, false, navigation);
-        }
-
         // 닫힌 툴팁을 키보드로 다시 연다(UE에 없음 — 9.1절 UW4t).
-        case input::Key::F1:
+        if (event.key == input::Key::F1) {
             return Result<bool>::Success(application_.IsControlDown(event.userId) &&
                                          application_.ShowFocusToolTip(event.userId));
-        default:
-            return routed;
         }
+
+        return routed;
     }
 
     if (event.type == input::InputEventType::MouseMove) {
