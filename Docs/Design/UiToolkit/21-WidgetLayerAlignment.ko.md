@@ -100,6 +100,23 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 - 결합 표·ID 검증 오류 진단 코드: 없는 속성, 형식 불일치, 같은 이름 둘.
 - 화면 입력 설정: 같은 설정은 적용 0회, ignore 해제는 설정 뒤에만, Menu 진입 때 키 풀기 1회.
 
+### 21.5a Widget 사건을 리플렉션 이벤트로(UW9f — 최종 동기화 뒤)
+
+- **지금.** UI Widget의 사건 33개가 `ROCKS_NATIVE() Delegate<…>`다(UiWidget·UiScreens 16개 헤더, 예: `ButtonWidget::clicked_`). C++ 콜백 하나에는 동작하지만 네 가지가 UE와 다르다.
+  - 구독자가 하나다. `SetOnClicked`가 앞 구독을 덮어쓴다(UE `OnClicked`는 multicast다).
+  - 리플렉션에 보이지 않는다. Sparks `on button.Clicked`와 WidgetAsset 바인딩 표(EventReflection EV3b — UE `UComponentDelegateBinding`)가 가리킬 수 없고, 에디터 이벤트 목록(EV5)에도 나오지 않는다.
+  - 저장되지 않는다.
+  - 대상이 파괴돼도 자동으로 풀리지 않는다. lambda가 잡은 대상이 먼저 죽으면 끊긴 참조가 남는다.
+- **UE.** `UButton::OnClicked`는 `UPROPERTY(BlueprintAssignable) FOnButtonClickedEvent`(dynamic multicast — Button.h 18·76행)다. UMG 위젯 사건은 모두 이 모양이다.
+- **바꿈.**
+  - 사건 필드를 `ROCKS_PROPERTY(Params = "…") Event<Args…>`(ObjectRuntime `Object/Event.h`, EventReflection ED1·ED14)로 바꾼다. Sparks 노출 지정자 `ScriptAssignable`은 EV4가 생기면 붙인다.
+  - 공개 API는 `Event<…>& OnClicked()` 접근자다. C++ 엔진 코드는 `TryAddLambda`로 native 구독, 에셋·Sparks는 `TryBind`로 리플렉션 바인딩한다. `SetOnX(Delegate)`는 없앤다(하위호환 없음).
+  - Element 사건에서의 발행은 `Broadcast({registry, access, Handle()}, …)`다. 발행자 수명은 Event가 root로 붙잡는다(ED6). 지금의 `BindLiveWidgetEvent` 생존 확인(재구성된 Element의 늦은 사건 버림)은 그대로 둔다.
+  - 인자 규칙(ED1)에 맞춘다. `StringView` 인자는 `const String&`로 바꾼다(편집 텍스트 `changed`·`committed` 등). 값 인자는 nothrow 복사, struct는 `const T&`다.
+  - 이벤트 필드를 가진 클래스는 `T(Allocator&)` 생성자가 있어야 한다(ED14). Widget은 이미 그렇다.
+- **시점.** `Event`는 engine-runtime에 있고(EV1b e12c17c5·EV2b 5778c89c) 이 브랜치에는 아직 없다. 최종 동기화 바로 뒤, 병합 전에 한다. 손으로 쓴 속성 표·descriptor 시험의 이벤트 필드 건너뛰기(EV2a `IsEventField`)를 같은 단계에서 점검한다.
+- **시험.** 구독 둘이 모두 불림, 대상 파괴 뒤 자동 해제, 재구성된 Element의 늦은 사건 버림. 바인딩 저장(EV3a1 — `Transient`가 아니면)은 그래프 저장 시험 하나로 본다.
+
 ### 21.6 단계
 
 | 단계 | 범위 | 완료 판정 |
@@ -109,3 +126,4 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 | UW9c | 화면 입력 설정 적용, `platform::Window` 커서·잠금(21.3절) | 적용 횟수 시험, UiDemo self-test |
 | UW9d | 소멸자 사용자 코드 제거, 해체 대기열, policy(21.4절) | UV7 수명 시험 |
 | UW9e | UV7 음성 시험 묶음(21.5절) | 21.5절 항목 전부 |
+| UW9f | Widget 사건 33개를 리플렉션 `Event`로(21.5a절 — 최종 동기화 뒤, 병합 전) | 구독 둘·자동 해제·늦은 사건 버림 시험, 옛 `SetOnX` 0 |
