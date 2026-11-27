@@ -40,7 +40,8 @@ Result<Span<const uint8>> MipBytes(const TexturePlatformData& data, PlatformBulk
                                    void* context, uint32 level) noexcept;
 
 // 텍스처 표시 한 프레임(layer·mip)의 표본점 기대값을 checks 끝에 붙인다. bytes는 그 mip의 byte(배치
-// 6.5절 — slice 다음 z 다음 행)이고 width·height·slices·depth는 그 mip의 크기다. CPU Availability와
+// 6.5절 — slice 다음 z 다음 행, 블록 형식은 블록 행 — TexelCodec DecodeImageTexel)이고
+// width·height·slices·depth는 그 mip의 크기다. CPU Availability와
 // 표시 엔트리가 없는 정수 cube는 검정 한 점이다.
 void AppendInspectorChecks(const screen::InspectorTexture& texture, uint32 layer, uint32 mip,
                            uint32 width, uint32 height, uint32 slices, uint32 depth,

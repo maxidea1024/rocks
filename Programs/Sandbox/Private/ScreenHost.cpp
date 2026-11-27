@@ -361,8 +361,17 @@ Span<const SceneObject> SandboxScene() noexcept {
     return Span<const SceneObject>(Scene);
 }
 
-void DescribeInspectorFormat(graphics::PixelFormat format, InspectorTexture& out) noexcept {
+bool IsNormalMapSwizzle(const graphics::ChannelSwizzle& swizzle) noexcept {
+    return swizzle.red == graphics::SwizzleSource::Red &&
+           swizzle.green == graphics::SwizzleSource::Green &&
+           swizzle.blue == graphics::SwizzleSource::Zero &&
+           swizzle.alpha == graphics::SwizzleSource::One;
+}
+
+void DescribeInspectorTexture(graphics::PixelFormat format, const graphics::ChannelSwizzle& swizzle,
+                              InspectorTexture& out) noexcept {
     const graphics::PixelFormatInfo& info = graphics::GetPixelFormatInfo(format);
+    out.swizzle = swizzle;
     out.integerScale = 1.0f;
     out.display = render::TextureInspectorDisplay::Ldr;
     switch (info.shaderType) {
@@ -388,8 +397,11 @@ void DescribeInspectorFormat(graphics::PixelFormat format, InspectorTexture& out
 
     default:
         out.component = InspectorComponent::Float;
-        if (info.componentType == graphics::PixelComponentType::Float ||
-            info.componentType == graphics::PixelComponentType::Ufloat) {
+        if (IsNormalMapSwizzle(swizzle)) {
+            // Normal sampler type 계약(쿠킹 swizzle rg01)은 형식과 무관하다(BC5·BGRA8·RGBA16F).
+            out.display = render::TextureInspectorDisplay::Normal;
+        } else if (info.componentType == graphics::PixelComponentType::Float ||
+                   info.componentType == graphics::PixelComponentType::Ufloat) {
             out.display = render::TextureInspectorDisplay::Hdr;
         }
 
@@ -660,7 +672,6 @@ Result<uint32> ScreenHost::AddTexture(StringView name, const TexturePlatformData
 
     texture.handle = handle.Value();
     texture.dimension = source.source.dimension;
-    texture.swizzle = source.swizzle;
     texture.width = source.source.width;
     texture.height = source.source.height;
     texture.depth = source.source.depth;
@@ -670,7 +681,7 @@ Result<uint32> ScreenHost::AddTexture(StringView name, const TexturePlatformData
                                 ? source.source.slices
                                 : 1u);
     texture.mips = static_cast<uint32>(source.source.mips.Size());
-    DescribeInspectorFormat(source.source.format, texture);
+    DescribeInspectorTexture(source.source.format, source.swizzle, texture);
     auto appended = AppendEntry(name, texture, InspectorEntryState::Pending);
     if (!appended) {
         (void)lane_.Retire(handle.Value());
@@ -718,7 +729,6 @@ Result<uint32> ScreenHost::AddCachedTexture(StringView name,
 
     texture.handle = info.handle;
     texture.dimension = info.dimension;
-    texture.swizzle = info.swizzle;
     texture.width = info.width;
     texture.height = info.height;
     texture.depth = info.depth;
@@ -727,7 +737,7 @@ Result<uint32> ScreenHost::AddCachedTexture(StringView name,
             ? info.slices / graphics::CubeFaceCount
             : (info.dimension == graphics::TextureDimension::Texture2DArray ? info.slices : 1u);
     texture.mips = info.mips;
-    DescribeInspectorFormat(info.format, texture);
+    DescribeInspectorTexture(info.format, info.swizzle, texture);
     auto appended = AppendEntry(name, texture, state);
     if (appended) {
         InspectorEntry& entry = inspectors_[appended.Value()];
