@@ -136,11 +136,12 @@ public:
 
         auto host = host_.Lock();
         if (!host) {
-            // 앱에 붙은 적이 없다 — 통지할 자리가 없다(명시 ReleaseElements를 쓴다). OnConstruct는
-            // TakeElement 때 돌았으므로 짝이 깨진다(경고).
+            // 앱에 붙은 적이 없거나 마지막 앱이 이미 부서졌다 — 통지할 자리가 없다(명시
+            // ReleaseElements를 쓴다). OnConstruct는 TakeElement 때 돌았으므로 짝이 깨진다(경고).
             Log::Warning(LogUiWidget,
-                         "A user widget element was dropped without ReleaseElements before it was "
-                         "attached to any application; OnDestruct is skipped");
+                         "A user widget element was dropped without ReleaseElements and no live "
+                         "application can deliver its OnDestruct (never attached, or its last "
+                         "application is gone); OnDestruct is skipped");
             owner_.Reset();
             return;
         }

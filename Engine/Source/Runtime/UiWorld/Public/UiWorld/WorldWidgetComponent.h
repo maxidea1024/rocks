@@ -44,7 +44,9 @@ public:
 private:
     Result<void> EnsureRoot() noexcept;
     void DetachLayer() noexcept;
-    void ResetWindow() noexcept;
+    // 창을 비운다. 가져온 Element는 owner 위젯의 명시 ReleaseElements로 푼다(UE
+    // UWidgetComponent::ReleaseResources — Docs/Design/UiToolkit 21.4절).
+    void ResetWindow(ObjectHandle owner) noexcept;
     ROCKS_PROPERTY(ReadOnly, Name = "widget") ObjectRef<UserWidget> widget_;
     ROCKS_PROPERTY(ReadOnly, Name = "drawSize") Vec2 drawSize_ { 500, 500 };
     ROCKS_PROPERTY(ReadOnly, Name = "pivot") Vec2 pivot_ { 0.5f, 0.5f };

@@ -51,7 +51,7 @@ private:
     ROCKS_PROPERTY(Transient, Name = "controllerCaptureEnd") Event<> controllerEnd_;
     ROCKS_PROPERTY(Transient, Name = "captureBegin") Event<> captureBegin_;
     ROCKS_PROPERTY(Transient, Name = "captureEnd") Event<> captureEnd_;
-    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
+    ROCKS_PROPERTY(Transient, Name = "valueChanged", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui

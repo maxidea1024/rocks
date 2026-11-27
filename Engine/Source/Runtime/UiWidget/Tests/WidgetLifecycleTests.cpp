@@ -1,3 +1,4 @@
+#include "WarningCapture.h"
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeClass.h>
 #include <Object/PropertyPath.h>
@@ -139,14 +140,35 @@ TEST(UiWidget_ElementDroppedBeforeAnyApplicationSkipsDestruct) {
     auto probe = bench.objects.ResolveForWrite<LifecycleProbe>(access, made.Value().Handle());
     REQUIRE(probe);
     auto& widget = *probe.Value().Get().Value();
+    test::WarningCapture warnings;
+    REQUIRE(warnings.started);
     {
         auto live = widget.TakeElement(bench.objects);
         REQUIRE(live);
         CHECK(widget.constructs == 1);
     }
 
-    // 측정된 적이 없어 통지할 자리가 없다 — 소멸자에서 부르지 않는다(경고 로그).
+    // 앱에 붙은 적이 없어 통지할 자리가 없다 — 소멸자에서 부르지 않는다(경고 한 번 — 21.4절).
     CHECK(widget.destructs == 0);
+    CHECK(warnings.UiWarnings() == 1);
+
+    // 마지막으로 붙었던 앱이 먼저 부서진 뒤에 버려도 통지할 곳이 없다(같은 경고).
+    {
+        SharedPtr<Element> kept;
+        {
+            Application app(allocator);
+            auto live = widget.TakeElement(bench.objects);
+            REQUIRE(live);
+            kept = live.Value();
+            app.SetRoot(kept);
+            app.SetRoot({});
+        }
+
+        CHECK(warnings.UiWarnings() == 1);
+    }
+
+    CHECK(widget.constructs == 2 && widget.destructs == 0);
+    CHECK(warnings.UiWarnings() == 2);
 }
 
 TEST(UiWidget_BindingTableRejectsMissingAndDuplicateFields) {

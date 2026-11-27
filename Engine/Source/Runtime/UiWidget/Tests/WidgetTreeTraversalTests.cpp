@@ -68,6 +68,9 @@ TEST(UiWidget_TreeTraversalHonorsSlotOrderNestedBoundariesAndLiveElements) {
     CHECK(!tree->FindWidget(objects, "sibling"));
     REQUIRE(tree->RemoveWidget(objects, panel.Value().Handle()));
     CHECK(tree->RootWidget().IsNull());
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    children->ReleaseElements();
 }
 
 } // namespace rocks::ui

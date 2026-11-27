@@ -93,10 +93,11 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - 소멸 때 남은 통지는 `DiscardDeferredTeardown`으로 버리고 개수를 경고로 남긴다. 소멸자는 루트를 먼저 놓아, 그때 넣어지는 통지까지 센다.
   - 소멸자는 부모 사슬이 이미 끊겼을 수 있어 묶음을 찾을 수 없다. 그래서 요소가 **붙을 때** 묶음을 기억한다. `Element::OnUiHostServicesChanged`는 요소가 묶음 있는 트리에 붙을 때 부르는 hook이다(묶음을 단 루트가 되거나, 묶음 있는 트리에 하위 트리로 들어갈 때 — 측정 여부와 무관). 그래서 비활성 Switcher 페이지·고르지 않은 탭도 받는다. `UserWidgetRoot`는 여기서 묶음의 약한 참조를 남긴다.
   - 붙을 때 그 하위 트리의 스타일 기억도 비운다. 다른 묶음이 같은 주소를 재사용해도 다시 받는다(20.11절 리뷰 반영 보강).
-  - 앱에 붙은 적 없이 버려진 `UserWidget` Element는 통지할 자리가 없다. `OnDestruct`를 건너뛰고 경고를 남긴다. `OnConstruct`는 `TakeElement` 때 돌았으므로 짝이 깨지는 유일한 경우다. 명시 `ReleaseElements`를 쓰라는 뜻이다.
+  - 앱에 붙은 적 없이, 또는 마지막으로 붙었던 앱이 부서진 뒤에 버려진 `UserWidget` Element는 통지할 자리가 없다(떨어질 때는 묶음 기억을 지우지 않으므로 앱이 살아 있으면 그 대기열로 간다). `OnDestruct`를 건너뛰고 경고를 남긴다. `OnConstruct`는 `TakeElement` 때 돌았으므로 짝이 깨지는 유일한 경우다. `TakeElement`를 부른 쪽이 명시 `ReleaseElements`를 쓰거나 앱을 끄기 전에 Element를 놓으라는 뜻이다(시험·데모도 이 규칙을 지켜 경고 없이 돈다 — 경고를 일부러 보는 시험 둘만 예외).
   - 미룬 해체는 루트 Widget의 `ReleaseElements`도 대기열에서 부른다. 중첩 UserWidget·목록 행 원본·화면 컨테이너의 사용자 hook이 소멸자 안에서 돌지 않게 하기 위해서다(`WidgetTree::DetachHostElements` — 엔진 정리 / `ReleaseRootWidget` — 사용자 hook). 소멸자에서는 엔진 정리만 한다.
   - `Application` 소멸은 루트에서 묶음을 먼저 떼고 트리를 놓는다. 밖에서 루트를 붙잡아도 죽은 앱의 묶음을 쥐지 않는다. 대기열 항목이 `RootRef`를 쥐므로 `ObjectRegistry`는 `Application`보다 오래 살아야 한다.
   - `ScreenContainer`는 생성 때 받은 `Application`의 대기열을 쓴다.
+  - `WorldWidgetComponent`(UiWorld)는 자기 창 `Application`을 갖는다. 창을 비울 때(위젯 교체·비활성·파괴) 가져온 Element를 위젯의 명시 `ReleaseElements`로 풀고(UE `UWidgetComponent::ReleaseResources` → `ReleaseSlateResources`) 파괴 때 창 `Application::Shutdown`을 부른다. 화면 공간 모드로 투영 전에 버린 Element도 이 경로라 경고 없이 `OnDestruct`가 짝을 맞춘다. 위젯을 바꿀 때는 참조를 바꾸기 전 위젯을 푼다.
   - 시험: `DeferredTeardownTests`가 Element·Application 수준을 본다(소멸자 안 0회 → 다음 프레임 1회, 중첩·재진입, Shutdown, 소멸 때 버림, 앱 사이 이동, ListView 명시 해제). `UserWidget`·`Screen` hook 횟수는 리플렉션 시험 클래스가 필요해 UW9e의 시험 fixture와 함께 본다.
 - **ListView.** 소멸자는 행 원본을 부르지 않는다. 행 Widget의 풀 반환은 `ReleaseAllRows`나 `WidgetPool` 소멸이 맡는다(UE `ResetPool`).
 - **policy.** UI 모듈 Element·Widget 소멸자 본문에서 사용자 hook 이름(`OnDestruct`·`OnDeactivated`·`ReleaseRow`·`Execute`)을 부르는 줄을 거부한다(`ui-destructor-user-code`). 엔진 내부 정리는 hook 이름을 쓰지 않으므로 걸리지 않는다.
@@ -144,6 +145,7 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
   - 편집 텍스트는 발행마다 `String` 사본을 넘긴다. 키 선택기는 `InputChordValue`로 바꿔 넘긴다.
   - 프로그램 setter의 발행을 없앴다(ComboBox 선택·지움, ExpandableArea 펼침). ExpandableArea는 머리 버튼을 누를 때 보낸다.
   - ID 명세에 이벤트 필드 31개, `InputChordValue`(필드 5개), Widget enum 셋을 등록했다.
+  - 도구 이름(`Name`)은 UE 이벤트 이름에서 `On`을 뗀 것이다(`checkStateChanged`·`textChanged`·`textCommitted`·`valueChanged`·`valueCommitted` — UE `OnCheckStateChanged`·`OnTextChanged`·`OnTextCommitted`·`OnValueChanged`·`OnValueCommitted`). 맨 이름 `changed`는 쓰지 않는다: Sparks 이벤트 이름은 도구 이름 첫 글자를 대문자로 쓰고 `Changed`는 예약 이름이다(EventReflection EV4·SparksBinding 9절). CheckBox의 세 상태 이벤트 `stateChanged`(`WidgetCheckState`)는 UE에 없는 확장이라 따로 둔다. Sparks 노출(`ScriptAssignable`)은 병합 뒤 정한다.
 - **시험.** 구독 둘이 모두 불림, 대상 파괴 뒤 자동 해제, 재구성된 Element의 늦은 사건 버림. 바인딩 저장(EV3a1 — `Transient`가 아니면)은 그래프 저장 시험 하나로 본다.
 
 ### 21.6 단계

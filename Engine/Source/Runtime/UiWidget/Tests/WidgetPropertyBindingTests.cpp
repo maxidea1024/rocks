@@ -102,6 +102,10 @@ TEST(UiWidget_AssetViewModelInitializesBeforePublicationAndTracksNativeSetters) 
     CHECK(!otherTarget->IsEnabled());
     actualModel->SetChecked(true);
     CHECK(target->IsEnabled());
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    screen->ReleaseElements();
+    other.Value().Get().Value()->ReleaseElements();
 }
 
 } // namespace rocks::ui

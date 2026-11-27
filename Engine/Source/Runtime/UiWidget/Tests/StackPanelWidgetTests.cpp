@@ -103,5 +103,8 @@ TEST(UiWidget_StackAndAlignedSlotsSurviveTemplateInstantiation) {
     REQUIRE(nativeStack.Value()->Arrange(Geometry::Root({100, 60}, {})));
     CHECK(live.Value()->GetGeometry().size.x == live.Value()->GetDesiredSize().x);
     CHECK(live.Value()->GetGeometry().layout.Apply({}).x == 100 - live.Value()->GetDesiredSize().x);
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    screen.Value().Get().Value()->ReleaseElements();
 }
 } // namespace rocks::ui

@@ -97,6 +97,9 @@ TEST(UiWidget_CanvasSlotSurvivesTemplateInstantiation) {
     REQUIRE(native.Value()->Prepass(1));
     REQUIRE(native.Value()->Arrange(Geometry::Root({100, 80}, {})));
     CHECK(low->GetGeometry().size == low->GetDesiredSize());
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    screen.Value().Get().Value()->ReleaseElements();
 }
 
 } // namespace rocks::ui

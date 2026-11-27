@@ -272,7 +272,11 @@ Result<void> PanelWidget::RemoveChild(ObjectRegistry& objects, ObjectHandle hand
     }
 
     if (auto panel = CachedElement()) {
-        if (auto element = child->CachedElement()) {
+        // 부모에서 뗀 Element의 마지막 참조일 수 있으므로 ReleaseElements가 끝날 때까지 붙잡는다 —
+        // 먼저 부서지면 UserWidget의 명시 해제(OnDestruct)를
+        // 건너뛴다(Docs/Design/UiToolkit 21.4절).
+        const SharedPtr<Element> element = child->CachedElement();
+        if (element) {
             // 슬롯이 배치용 컨테이너를 두는 패널에서는 실제 부모에서 자식을 분리한다.
             if (element->Parent() && element->IsWithin(*panel)) {
                 auto* owner = element->Parent();

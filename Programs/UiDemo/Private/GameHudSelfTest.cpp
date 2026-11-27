@@ -30,6 +30,13 @@ int RunGameHudSelfTest(Allocator& allocator, UiRenderer& renderer) noexcept {
     }
 
     Application app(allocator);
+    // 소멸 전에 루트를 떼고 HUD Element를 놓은 뒤 미룬 해체 통지를 돌린다(Docs/Design/UiToolkit
+    // 21.4절 — 앱이 먼저 부서지면 OnDestruct를 전할 곳이 없다).
+    ROCKS_ON_SCOPE_EXIT {
+        app.SetRoot({});
+        hud.Value().root = {};
+        app.Shutdown();
+    };
     app.SetRoot(hud.Value().root);
     auto target = renderer.CreateRenderTarget(64, 16, UiTextureSampling::Image);
     if (!target) {

@@ -85,6 +85,8 @@ DockWindows::Surface::~Surface() noexcept {
 
     area->SetOnExternalDrop({});
     area->SetWindowHitTest({});
+    // 루트를 떼고 미룬 해체 통지를 돌린다(Docs/Design/UiToolkit 21.4절 — Application 소멸 전).
+    app.Shutdown();
     // 창 표면 파괴는 그 창의 프레임이 모두 처리될 때까지 기다린다. 그 뒤 native 창이 부서진다
     // (window 멤버는 이 본문 뒤에 파괴된다 — Docs/Design/UiToolkit 18.4절).
     if (!surface.IsNull()) {

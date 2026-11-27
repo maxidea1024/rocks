@@ -41,11 +41,11 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "snapToStep") bool snapToStep_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "minFractionDigits") int32 minFractionDigits_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "maxFractionDigits") int32 maxFractionDigits_ = -1;
-    ROCKS_PROPERTY(Transient, Name = "committed", Params = "value,reason")
+    ROCKS_PROPERTY(Transient, Name = "valueCommitted", Params = "value,reason")
     Event<float, WidgetSpinCommitReason> committed_;
     ROCKS_PROPERTY(Transient, Name = "dragBegin") Event<> beginDrag_;
     ROCKS_PROPERTY(Transient, Name = "dragEnd", Params = "value") Event<float> endDrag_;
-    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
+    ROCKS_PROPERTY(Transient, Name = "valueChanged", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui

@@ -1,3 +1,4 @@
+#include "WarningCapture.h"
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiWidget/NamedSlotWidget.generated.h>
@@ -11,6 +12,8 @@
 namespace rocks::ui {
 
 TEST(UiWidget_NamedSlotsReplaceLiveContentAndKeepOwnershipOnFailure) {
+    test::WarningCapture warnings;
+    REQUIRE(warnings.started);
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     ModuleRegistration registration(types, allocator);
@@ -84,8 +87,12 @@ TEST(UiWidget_NamedSlotsReplaceLiveContentAndKeepOwnershipOnFailure) {
         CHECK(oldElement->Parent() == nullptr);
         REQUIRE(user.SetContentForSlot(objects, "Header", newId));
         user.ReleaseElements();
-        REQUIRE(user.TakeElement(objects));
+        auto retaken = user.TakeElement(objects);
+        REQUIRE(retaken);
         CHECK(user.GetContentForSlot(objects, "Header").Value() == newId);
+        // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+        // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+        user.ReleaseElements();
     }
 
     REQUIRE(objects.Collect(access));
@@ -101,6 +108,7 @@ TEST(UiWidget_NamedSlotsReplaceLiveContentAndKeepOwnershipOnFailure) {
 
     REQUIRE(objects.Collect(access));
     CHECK(!objects.Resolve<Widget>(access, newId));
+    CHECK(warnings.UiWarnings() == 0);
 }
 
 } // namespace rocks::ui

@@ -67,8 +67,8 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "fontSize") float fontSize_ = 16;
     ROCKS_PROPERTY(Name = "readOnly") bool readOnly_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "password") bool password_ = false;
-    ROCKS_PROPERTY(Transient, Name = "changed", Params = "text") Event<const String&> changed_;
-    ROCKS_PROPERTY(Transient, Name = "committed", Params = "text,reason")
+    ROCKS_PROPERTY(Transient, Name = "textChanged", Params = "text") Event<const String&> changed_;
+    ROCKS_PROPERTY(Transient, Name = "textCommitted", Params = "text,reason")
     Event<const String&, WidgetTextCommitReason> committed_;
 };
 

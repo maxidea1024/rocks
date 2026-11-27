@@ -1,3 +1,4 @@
+#include "WarningCapture.h"
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiWidget/DynamicEntryBoxWidget.generated.h>
@@ -10,6 +11,10 @@
 namespace rocks::ui {
 
 TEST(UiWidget_DynamicEntriesReuseObjectsInsideSafeZone) {
+    // 엔트리 제거(PanelWidget::RemoveChild)는 뗀 Element를 명시 해제가 끝날 때까지 붙잡는다 —
+    // 먼저 부서지면 수명 경고가 난다(Docs/Design/UiToolkit 21.4절).
+    test::WarningCapture warnings;
+    REQUIRE(warnings.started);
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     ModuleRegistration modules(types, allocator);
@@ -65,6 +70,10 @@ TEST(UiWidget_DynamicEntriesReuseObjectsInsideSafeZone) {
     auto reused = panel->CreateEntry(objects, type);
     REQUIRE(reused);
     CHECK(reused.Value() == first.Value());
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    parent->ReleaseElements();
+    CHECK(warnings.UiWarnings() == 0);
 }
 
 TEST(UiWidget_DynamicEntryLayoutsArrangeTheSameEntriesInSixModes) {

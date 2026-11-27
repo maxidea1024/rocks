@@ -125,6 +125,9 @@ TEST(UiWidget_AssetEventSurvivesArchiveAndTargetsEachControllerInstance) {
     CHECK(!controller->IsEnabled());
     CHECK(!controller->IsForceVolatile());
     CHECK(other.Value().Get().Value()->IsEnabled());
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    controller->ReleaseElements();
 }
 
 } // namespace rocks::ui

@@ -82,6 +82,13 @@ TEST(UiWorld_WidgetRayUsesPivotPlayerCaptureAndProjectedPlayerLayer) {
         auto culled = widget.ProjectToPlayer(2, Mat4d::Identity(), {100, 80}, layer.Value());
         REQUIRE(culled);
         CHECK(!culled.Value() && layer.Value()->ChildCount() == 0);
+        // 위젯을 바꾸면 옛 위젯의 Element를 명시 ReleaseElements로 푼다(UE
+        // UWidgetComponent::ReleaseResources — UiToolkit 21.4절). 미룬 해체 경고가 없다.
+        CHECK(user.Value().Get().Value()->CachedElement());
+        REQUIRE(widget.SetWidget({}));
+        CHECK(!user.Value().Get().Value()->CachedElement());
+        CHECK(!widget.WindowRoot());
+        CHECK(widget.WindowApplication().PendingTeardownCount() == 0);
     }
 
     REQUIRE(world.Shutdown());

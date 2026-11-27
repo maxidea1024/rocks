@@ -89,6 +89,9 @@ TEST(UiWidget_WrapSlotsReflowAfterTemplateInstantiation) {
     REQUIRE(host.Value()->Arrange(Geometry::Root({100, 60}, {})));
     CHECK(middle->GetGeometry().layout.Apply({0, 0}) == Vec2(87, 1));
     CHECK(last->GetGeometry().layout.Apply({0, 0}) == Vec2(0, 11));
+    // TakeElement를 부른 쪽이 명시 ReleaseElements로 OnDestruct 짝을 맞춘다(앱에 붙지 않은
+    // Element는 미룬 통지를 전할 곳이 없다 — Docs/Design/UiToolkit 21.4절).
+    screen.Value().Get().Value()->ReleaseElements();
 }
 
 } // namespace rocks::ui

@@ -71,6 +71,10 @@ int VerifyWidgetSurfaces(Allocator& allocator, LaneUiRenderer& renderer,
 
     viewport.Value()->SetSceneSource(scene.Value());
     Application app(allocator);
+    // 소멸 전에 루트를 떼고 미룬 해체 통지를 돌린다(Docs/Design/UiToolkit 21.4절).
+    ROCKS_ON_SCOPE_EXIT {
+        app.Shutdown();
+    };
     app.SetRoot(root.Value());
     if (!app.PrepareLayout(bounds, 1)) {
         return 62;

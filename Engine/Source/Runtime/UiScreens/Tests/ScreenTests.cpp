@@ -1,3 +1,4 @@
+#include <Core/ScopeExit.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiScreens/ScreenInputRouter.h>
@@ -19,6 +20,11 @@ TEST(UiScreens_StackQueuePoolAndBackArePlayerScoped) {
     ObjectRegistry objects(allocator, types, {0x534352, 1});
     ObjectAccessScope scope(objects.OwnerAccess());
     Application app(allocator);
+    // 뒤에 선언한 컨테이너가 부서지며 미룬 통지를 넣으므로, 앱보다 먼저 그 통지를 돌린다
+    // (Docs/Design/UiToolkit 21.4절).
+    ROCKS_ON_SCOPE_EXIT {
+        app.Shutdown();
+    };
     auto stack = SharedPtr<ScreenStack>::TryMake(allocator, objects, app, 7u);
     REQUIRE(stack);
     app.SetRoot(stack.Value());
@@ -115,6 +121,11 @@ TEST(UiScreens_AssetBindsIndependentInstancesAndRestoresFocus) {
         REQUIRE(slider.Value().Get().Value()->SetValue(0.25f));
         CHECK(other.Value().Get().Value()->Value() == 0.5f);
         Application app(allocator);
+        // 뒤에 선언한 컨테이너가 부서지며 미룬 통지를 넣으므로, 앱보다 먼저 그 통지를 돌린다
+        // (Docs/Design/UiToolkit 21.4절).
+        ROCKS_ON_SCOPE_EXIT {
+            app.Shutdown();
+        };
         auto stack = SharedPtr<ScreenStack>::TryMake(allocator, game, app, 3u);
         REQUIRE(stack);
         app.SetRoot(stack.Value());

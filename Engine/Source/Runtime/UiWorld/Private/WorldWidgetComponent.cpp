@@ -47,9 +47,10 @@ Result<void> WorldWidgetComponent::SetWidget(ObjectHandle widget) noexcept {
     }
 
     auto& objects = GetWorld().Objects();
+    const ObjectHandle previous = widget_.Handle();
     auto result = objects.SetReference(objects.OwnerAccess(), Handle(), widget_, widget);
     if (result) {
-        ResetWindow();
+        ResetWindow(previous);
     }
 
     return result;
@@ -141,18 +142,26 @@ Result<void> WorldWidgetComponent::PrepareWindow() noexcept {
     return window_.PrepareLayout(Geometry::Root(drawSize_, {}), 1);
 }
 
-void WorldWidgetComponent::ResetWindow() noexcept {
+void WorldWidgetComponent::ResetWindow(ObjectHandle owner) noexcept {
     DetachLayer();
     window_.SetRoot({});
+    if (root_ && !owner.IsNull() && HasWorld()) {
+        auto& objects = GetWorld().Objects();
+        if (auto widget = objects.ResolveForWrite<UserWidget>(objects.OwnerAccess(), owner)) {
+            widget.Value().Get().Value()->ReleaseElements();
+        }
+    }
+
     root_ = {};
 }
 
 void WorldWidgetComponent::OnDisable() noexcept {
-    ResetWindow();
+    ResetWindow(widget_.Handle());
 }
 
 void WorldWidgetComponent::OnDestroy(EndPlayReason) noexcept {
-    ResetWindow();
+    ResetWindow(widget_.Handle());
+    window_.Shutdown();
 }
 
 void WorldWidgetComponent::PlaneCorners(Vec3d& topLeft, Vec3d& topRight,

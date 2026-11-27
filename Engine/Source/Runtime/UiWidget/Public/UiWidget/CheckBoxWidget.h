@@ -33,7 +33,7 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "indeterminate") bool indeterminate_ = false;
     ROCKS_PROPERTY(Transient, Name = "stateChanged", Params = "state")
     Event<WidgetCheckState> stateChanged_;
-    ROCKS_PROPERTY(Transient, Name = "changed", Params = "checked") Event<bool> changed_;
+    ROCKS_PROPERTY(Transient, Name = "checkStateChanged", Params = "checked") Event<bool> changed_;
 };
 
 } // namespace rocks::ui

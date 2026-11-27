@@ -47,7 +47,7 @@ private:
     LinearColor progressColor_ = DefaultThemeColors().Get(ThemeSlot::Primary);
     ROCKS_PROPERTY(ReadOnly, Name = "handleColor")
     LinearColor handleColor_ = DefaultThemeColors().Get(ThemeSlot::Foreground);
-    ROCKS_PROPERTY(Transient, Name = "changed", Params = "value") Event<float> changed_;
+    ROCKS_PROPERTY(Transient, Name = "valueChanged", Params = "value") Event<float> changed_;
 };
 
 } // namespace rocks::ui
