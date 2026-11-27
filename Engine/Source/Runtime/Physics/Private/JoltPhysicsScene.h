@@ -88,6 +88,11 @@ public:
                                bool addToCurrent) noexcept override;
     void SetBodyAngularVelocity(PhysicsBodyHandle body, const Vec3d& velocityRadians,
                                 bool addToCurrent) noexcept override;
+    void UpdateBodySettings(PhysicsBodyHandle body, const BodySettings& settings,
+                            BodySettingsChange change) noexcept override;
+    double DefaultMaxAngularVelocityDegrees() const noexcept override {
+        return maxAngularVelocityDegrees_;
+    }
     Result<bool> TraceLine(const Vec3d& start, const Vec3d& end, const QueryFilter& filter,
                            const QueryParams& params, TraceMode mode, HitResult* first,
                            Array<HitResult>* all) const noexcept override;
@@ -372,6 +377,12 @@ private:
     // 힘) 준다(7.1.17절). body는 잠금 아래다.
     void AddStepForce(uint32 index, JPH::Body& body, JPH::Vec3Arg force, JPH::Vec3Arg torque,
                       bool everyFixedStep) noexcept;
+    // 새 질량 입력 mass로 질량 속성을 다시 넣는다(7.1.18절 — 깨우지 않는다). 질량 중심 이동이
+    // 바뀐 때만 형상(감싸기)을 바꾼다(UE UpdateMassProperties는 형상을 건드리지 않는다 — 접촉
+    // cache를 지키려고). 형상을 만들지 못하면 이전 값을 두고 Warning BodyMassUpdateFailed다.
+    void RebuildMass(BodySlot& slot, const BodyMassValues& mass) noexcept;
+    // 칸의 자유도와 gyroscopic 표지(gyroscopicTorque && 회전 bit 잠금 없음)를 body에 넣는다.
+    void ApplyGyroscopic(BodySlot& slot, bool requested) noexcept;
     // 칸의 대기 충격량 몫·프레임 힘을 버린다(body 삭제·Kinematic 전환).
     static void DropPendingImpulse(BodySlot& slot) noexcept;
     // step 직전 대기 충격량 몫을 Dynamic body 속도에 더하고 프레임 힘을 누적 힘에 넣는다(결정적 FP
@@ -439,6 +450,8 @@ private:
     // body 형상·값을 정하는 장면 설정이다(7.1.15절): 상자 margin, 각속도 상한(rad/s — body가
     // 덮어쓰지 않을 때), 선속도 상한(m/s).
     BodyShapeOptions shapeOptions_;
+    // 물리 설정 각속도 상한(도/s — DefaultMaxAngularVelocityDegrees가 그대로 돌려준다).
+    double maxAngularVelocityDegrees_ = 0.0;
     float maxAngularVelocityRadians_ = 0.0f;
     float maxLinearVelocityMeters_ = 0.0f;
     // 반발 문턱(cm/s² — 물리 설정)과 그 값을 Jolt에 넣은 step dt(초 — 0이면 아직)다.

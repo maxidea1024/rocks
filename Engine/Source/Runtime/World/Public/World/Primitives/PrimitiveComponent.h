@@ -10,6 +10,7 @@
 #include <World/Physics/BodyForce.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
+#include <World/Physics/BodySettingsChange.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
 #include <World/Physics/MtdResult.h>
@@ -19,6 +20,8 @@
 #include <World/Primitives/PrimitiveTypes.h>
 
 namespace rocks {
+
+struct BodyKinematics;
 
 // 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
 struct CollisionShape;
@@ -504,6 +507,75 @@ public:
     Vec3d GetPhysicsAngularVelocityInRadians() const noexcept;
     Vec3d GetPhysicsAngularVelocityInDegrees() const noexcept;
 
+    // --- 질량·body 값(PhysicsModule 2.6절·7.1.18절 — UE PrimitiveComponentPhysics.cpp) ---
+    //
+    // setter는 bodySettings(영속)를 바꾸고 body가 있으면 바로 넣는다(없으면 값만 — 다음 body가
+    // 쓴다). 비유한 값·음수 감쇠·음수 각속도 상한은 값을 바꾸지 않고 Warning InvalidBodyValue다.
+    //
+    // 사용 예:
+    //   crate.SetMassOverrideInKg(2.0f);        // 2 kg(다음 스텝부터 그 질량)
+    //   crate.SetCenterOfMass(Vec3d(0.0, 0.0, -10.0));
+    //   crate.SetEnableGravity(false);
+
+    // 질량(kg)이다(UE 규칙 — 7.1.15절). body가 없거나 Static이면 0이다. 시뮬레이션하지 않으면
+    // 경고한다(UE GetMass).
+    float GetMass() const noexcept;
+    // overrideMass면 질량을 massInKg로 둔다(아니면 형상 질량 규칙으로 돌아간다 — UE
+    // SetMassOverrideInKg). 질량·관성을 다시 계산하고 깨우지 않는다.
+    void SetMassOverrideInKg(float massInKg, bool overrideMass = true) noexcept;
+    // 형상 질량 배율(UE MassScale)이다.
+    void SetMassScale(float scale) noexcept;
+    float GetMassScale() const noexcept {
+        return bodySettings_.massScale;
+    }
+
+    // 월드 질량 중심(cm)이다(body가 없으면 0).
+    Vec3d GetCenterOfMass() const noexcept;
+    // 질량 중심 이동(body 공간 cm — UE COMNudge)을 바꾼다.
+    void SetCenterOfMass(const Vec3d& offset) noexcept;
+    // 관성(kg·cm², body 축 대각 — UE GetInertiaTensor)이다. body가 없거나 Static이면 0이다. 지금
+    // 형상(상자·구·캡슐)은 축이 정렬돼 UE 주값과 같다(비대각 형상은 PH6 — 7.1.18절).
+    Vec3d GetInertiaTensor() const noexcept;
+
+    // 각속도 상한을 덮어쓴다(UE SetPhysicsMaxAngularVelocity — overrideMaxAngularVelocity를 켠다).
+    // addToCurrent면 body의 지금 실효 상한에 더한다(body가 없으면 더하지 않는다 — UE).
+    void SetPhysicsMaxAngularVelocityInDegrees(float maxDegrees,
+                                               bool addToCurrent = false) noexcept;
+    void SetPhysicsMaxAngularVelocityInRadians(float maxRadians,
+                                               bool addToCurrent = false) noexcept;
+    // 실효 각속도 상한이다(덮어쓰기면 그 값, 아니면 물리 설정 — 장면이 없으면 Collision 기본).
+    float GetPhysicsMaxAngularVelocityInDegrees() const noexcept;
+    float GetPhysicsMaxAngularVelocityInRadians() const noexcept;
+
+    // 중력을 켜거나 끈다(켜면 Dynamic body를 깨운다 — UE SetEnableGravity).
+    void SetEnableGravity(bool enable) noexcept;
+    bool IsGravityEnabled() const noexcept {
+        return bodySettings_.enableGravity;
+    }
+
+    // 선형·각 감쇠(1/s — 음수 거부)다.
+    void SetLinearDamping(float damping) noexcept;
+    float GetLinearDamping() const noexcept {
+        return bodySettings_.linearDamping;
+    }
+
+    void SetAngularDamping(float damping) noexcept;
+    float GetAngularDamping() const noexcept {
+        return bodySettings_.angularDamping;
+    }
+
+    // CCD를 켜거나 끈다(UE SetUseCCD — Jolt LinearCast).
+    void SetUseCCD(bool useCcd) noexcept;
+    // gyroscopic 토크를 켜거나 끈다(회전 축을 잠근 body는 켜도 꺼진다 — 7.1.16절).
+    void SetGyroscopicTorqueEnabled(bool enable) noexcept;
+    bool GetGyroscopicTorqueEnabled() const noexcept {
+        return bodySettings_.gyroscopicTorque;
+    }
+
+    // 자유도 방식을 바꾸고 잠금을 다시 넣는다(UE SetConstraintMode → SetDOFLock — 잠금 표지는
+    // 그대로, 7.1.16절). 모르는 값은 Warning InvalidBodyValue다.
+    void SetConstraintMode(DofMode mode) noexcept;
+
     // 방사 충격량·힘을 무시하는지다(UE bIgnoreRadialImpulse·bIgnoreRadialForce — 영속, 기본 거짓).
     bool GetIgnoreRadialImpulse() const noexcept {
         return ignoreRadialImpulse_;
@@ -799,6 +871,15 @@ private:
 
     // 힘·충격량을 body에 넘긴다(body·장면이 없으면 무시 — 7.1.17절).
     void ApplyBodyForce(const BodyForce& force) noexcept;
+
+    // 바뀐 body 값 묶음을 body에 넣는다(body·장면이 없으면 무시 — 7.1.18절).
+    void PushBodySettings(BodySettingsChange change) noexcept;
+
+    // body 운동 상태를 읽는다(body·장면이 없으면 거짓).
+    bool ReadBodyKinematics(BodyKinematics& out) const noexcept;
+
+    // 잘못된 body 값을 경고한다(InvalidBodyValue — 7.1.18절).
+    void WarnInvalidBodyValue(const char* property) const noexcept;
 
     // 잘못된 물리 호출을 경고한다(UE WarnInvalidPhysicsOperations — 7.1.17절). checkBody가 거짓이면
     // Mobility만 본다(UE 속도 setter).

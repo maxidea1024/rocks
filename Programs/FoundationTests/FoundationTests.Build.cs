@@ -53,6 +53,7 @@ public abstract class TestsModule : ModuleRules
         "Programs/FoundationTests/Engine/ThirdPartyJoltTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsAdapterTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsBodyValueSceneTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsBodyValueSetterSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsContactSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsDofSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsForceSceneTests.cpp",

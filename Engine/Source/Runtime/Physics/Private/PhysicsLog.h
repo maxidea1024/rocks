@@ -17,5 +17,8 @@ inline constexpr char DiagResponseSetCapacity[] = "ResponseSetCapacity";
 // - NonFiniteBodyInput: body 힘·충격량·속도 입력에 비유한 값이 있어 무시했다(Warning — 7.1.17절,
 //   Jolt에 NaN을 넣지 않는다).
 inline constexpr char DiagNonFiniteBodyInput[] = "NonFiniteBodyInput";
+// - BodyMassUpdateFailed: 실행 중 질량 값을 바꿨지만 형상을 다시 만들지 못해 이전 질량을 두었다
+//   (Warning — 7.1.18절, 할당 실패).
+inline constexpr char DiagBodyMassUpdateFailed[] = "BodyMassUpdateFailed";
 
 } // namespace rocks::physics
