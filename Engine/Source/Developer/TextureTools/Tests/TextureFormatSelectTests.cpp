@@ -128,9 +128,9 @@ TEST(TextureFormatSelect_UeTable) {
         {C::Alpha, S::G8, true, false, F::BC4Unorm},
         {C::DistanceFieldFont, S::G8, false, false, F::R8Unorm},
         {C::DistanceFieldFont, S::RGBA8, true, false, F::BGRA8UnormSrgb},
-        {C::HDR_Compressed, S::RGBA16F, false, false, F::RGBA16Float},
-        {C::BC7, S::RGBA8, true, true, F::BGRA8UnormSrgb},
-        {C::BC7, S::RGBA8, false, false, F::BGRA8Unorm},
+        {C::HDR_Compressed, S::RGBA16F, false, false, F::BC6HUfloat},
+        {C::BC7, S::RGBA8, true, true, F::BC7UnormSrgb},
+        {C::BC7, S::RGBA8, false, false, F::BC7Unorm},
         {C::HalfFloat, S::R16F, false, false, F::R16Float},
         {C::SingleFloat, S::R32F, false, false, F::R32Float},
         {C::HDR_F32, S::RGBA32F, false, false, F::RGBA32Float},
@@ -156,15 +156,26 @@ TEST(TextureFormatSelect_UeTable) {
     CHECK(Choose(request, target, false) == F::BC1Unorm);
     request.compressionNoAlpha = false;
     CHECK(Choose(request, target, false) == F::BC3Unorm);
-    // TD11 경고(detail = 원래 형식).
+    // TC3(12.17.6 6·9): BC7·BC6H는 대체 없이 그 형식이고 경고가 없다. BC7 프로필은 유효 알파다
+    // (ForceNoAlpha가 ForceAlpha보다 먼저).
     TextureFormatChoice choice;
-    CHECK(Choose(Request(C::BC7, S::RGBA8, true), target, false, &choice) == F::BGRA8UnormSrgb);
-    CHECK(choice.warningCount == 1 &&
-          HasWarning(choice, AssetDiagnosticCode::EncoderUnavailable, F::BC7UnormSrgb));
-    CHECK(Choose(Request(C::HDR_Compressed, S::RGBA16F, false), target, false, &choice) ==
-          F::RGBA16Float);
-    CHECK(choice.warningCount == 1 &&
-          HasWarning(choice, AssetDiagnosticCode::EncoderUnavailable, F::BC6HUfloat));
+    CHECK(Choose(Request(C::BC7, S::RGBA8, true), target, false, &choice) == F::BC7UnormSrgb);
+    CHECK(choice.warningCount == 0 && choice.encoding == TextureFormatEncoding::Bc7 &&
+          !choice.alphaProfile);
+    CHECK(Choose(Request(C::BC7, S::RGBA8, true), target, true, &choice) == F::BC7UnormSrgb &&
+          choice.alphaProfile);
+    TextureFormatRequest bc7 = Request(C::BC7, S::RGBA8, false);
+    bc7.compressionForceAlpha = true;
+    CHECK(Choose(bc7, target, false, &choice) == F::BC7Unorm && choice.alphaProfile);
+    bc7.compressionNoAlpha = true;
+    CHECK(Choose(bc7, target, true, &choice) == F::BC7Unorm && !choice.alphaProfile);
+    CHECK(Choose(Request(C::HDR_Compressed, S::RGBA16F, false), target, true, &choice) ==
+          F::BC6HUfloat);
+    CHECK(choice.warningCount == 0 && choice.encoding == TextureFormatEncoding::Bc6h &&
+          !choice.alphaProfile);
+    // 알파 판정은 AutoDXT 형식과 BC7 프로필에만 쓴다.
+    CHECK(TextureFormatNeedsAlpha(Request(C::BC7, S::RGBA8, true), target));
+    CHECK(!TextureFormatNeedsAlpha(Request(C::HDR_Compressed, S::RGBA16F, false), target));
     // 비압축 강제의 HDR_Compressed는 경고가 없다(인코더를 고르지 않았다).
     CHECK(Choose(Request(C::HDR_Compressed, S::RGBA16F, false, 6), target, false, &choice) ==
           F::RGBA16Float);
@@ -305,11 +316,13 @@ TEST(TextureFormatSelect_Invariants) {
                         target.platform = platform;
                         const TextureFormatRequest request =
                             Request(compression, source, srgb, size);
-                        const bool depends = TextureFormatDependsOnAlpha(request, target);
-                        const bool autoDxt =
-                            (compression == C::Default || compression == C::Masks) && size == 256 &&
-                            platform == GraphicsPlatform::Windows;
-                        CHECK(depends == autoDxt);
+                        // AutoDXT는 형식이, BC7은 인코더 프로필이 알파에 달렸다(12.17.6 4).
+                        const bool depends = TextureFormatNeedsAlpha(request, target);
+                        const bool alphaDependent =
+                            (compression == C::Default || compression == C::Masks ||
+                             compression == C::BC7) &&
+                            size == 256 && platform == GraphicsPlatform::Windows;
+                        CHECK(depends == alphaDependent);
                         for (const bool alpha : {false, true}) {
                             TextureFormatChoice choice;
                             REQUIRE(SelectTextureFormat(request, target, alpha, choice));
@@ -391,7 +404,7 @@ TEST(TextureFormatSelect_ArgumentErrors) {
     CHECK(SelectTextureFormat(Request(C::Default, S::RGBA8, false), wrong, false, choice).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(choice.pixelFormat == F::Unknown);
-    CHECK(!TextureFormatDependsOnAlpha(Request(C::Default, S::Invalid, false), target));
+    CHECK(!TextureFormatNeedsAlpha(Request(C::Default, S::Invalid, false), target));
 }
 
 } // namespace texture_format_select_tests_file
