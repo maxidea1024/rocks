@@ -167,8 +167,37 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
   - 무늬 위상은 줄 왼쪽 끝 기준이다. 클러스터 경계에서 무늬가 끊기거나 겹치지 않는다.
   - 색은 `EditableTextStyle::composition`(전경)이다. UE 이미지는 클론에 없어 상자 조각으로 그린다(22.3절).
   - 시험: 조합 구간 폭 / 2개 조각, 위상, 색.
-- **UW4f3b: TSF**(19.2절 "TSF"). 상세는 착수 때 이 절 뒤에 쓴다. 지킬 것: 같은 `TextInputService`·`platform::TextInputClient` 인터페이스 위에 둔다. TSF가 없으면 IMM으로 돌아간다(UE `FWindowsTextInputMethodSystem`). TSF 동기 질의는 펌프 중에만 받고, lane 대기 펌프 중이면 `TS_E_SYNCHRONOUS`로 거부한다.
+- **UW4f3b: TSF**(19.2절 "TSF" — 세부는 22.13절).
 - 사람 확인 목록: 실제 한국어 IME(두벌식 조합·후보 창 위치·한자 변환·누름 확정), 일본어 IME 변환 구간.
+
+### 22.13 TSF(UW4f3b — UE `FWindowsTextInputMethodSystem`·`FTextStoreACP`)
+
+**왜.** 지금 Win64 IME는 IMM뿐이다. Windows 10·11의 기본 한국어·일본어·중국어 입력기는 TSF 입력기(TIP)이고, IMM 앱에는 CUAS 흉내로 붙는다. UE는 활성 입력기가 TIP이면 TSF로, 옛 IMM 입력기(키보드 배치 HKL)이면 IMM으로 받는다(WindowsTextInputMethodSystem.cpp `FTSFActivationProxy::OnActivated`). 재변환·음성·필기·이모지 패널 같은 TSF 기능은 TSF 문서가 있어야 제대로 된다.
+
+**구조 — 거울 문서(19.2절 Mac 설계와 같은 원칙).**
+- TSF는 문서를 동기로 읽고 고친다(`ITextStoreACP` — 잠금 안의 `GetText`·`SetText`·`GetSelection`·`InsertTextAtSelection`). 이 호출에 UI 문맥을 바로 고치면 입력 큐에 남은 키·문자와 순서가 어긋난다(IMM 기록이 지키는 19.2절 규칙).
+- 그래서 창이 문맥의 **거울 문서**(`TextInputDocument` — PlatformWindow Private/Common, OS 호출 없음, EngineTests로 시험)를 두고 TSF에 그것으로 답한다. TSF가 고친 내용은 잠금을 풀 때 기존 `TextInputSession` 기록(조합·확정·끝)으로 바꿔 입력 큐 표지에 싣는다. 게임 lane이 표지 자리에서 문맥에 적용한다(IMM과 같은 길).
+  - 거울은 OS 콜백 안에서 할당하지 않도록 고정 용량이다(`MaxTextInputDocumentCodeUnits` 16384 code unit). 문맥 글자가 더 길면 그 문맥에는 TSF 문서를 만들지 않고 IMM으로 받는다(경고 로그 한 번).
+  - 글자 위치(`GetTextExt`·`GetScreenExt`·`GetACPFromPoint`)는 문맥에 바로 묻는다(읽기만 — UI 상태를 바꾸지 않는다). 거울이 문맥보다 앞서 있으면(적용 전 기록이 있으면) 조합 시작 위치로 근사한다.
+  - 그래서 19.2절의 "TSF 동기 질의는 펌프 중에만, lane 대기 펌프면 `TS_E_SYNCHRONOUS`" 규칙은 필요 없다 — 거울과 읽기 전용 위치 질의는 언제 불려도 UI를 고치지 않는다. 19.2절을 이 절로 고친다. `TS_E_SYNCHRONOUS`는 잠금 안에서 다시 동기 잠금을 청할 때만 쓴다(`ITextStoreACP` 규약).
+- **거울 맞추기.** 게임 lane이 Activate·`NotifyTextInputLayoutChanged`(편집기가 배치할 때마다)·표지 처리 뒤에 문맥의 글자·선택을 읽어 거울과 비교한다. 다르면 거울을 바꾸고 TSF에 알린다(`ITextStoreACPSink::OnTextChange`·`OnSelectionChange` — UE `NotifyTextChanged`·`NotifySelectionChanged`). 배치가 바뀌면 `OnLayoutChange(TS_LC_CHANGE)`다. 적용 전 기록이 있으면(거울이 앞섬) 맞추지 않는다.
+  - `platform::TextInputClient`에 `GetTextLength`·`GetText(범위)`·`GetCharacterIndexFromPoint`·`GetScreenBounds`를 더한다(`ui::TextInputContext`에 이미 있다 — 데모 어댑터가 넘긴다).
+- **기록으로 바꾸기**(잠금을 풀 때 거울의 바뀐 것)
+  - 조합이 시작됐거나 진행 중이면: 조합 범위가 지금 선택과 다르면 `Selection` 기록(새 종류 — 문맥 `SetSelection`), 그다음 조합 범위 글자와 커서(선택 끝 − 조합 시작)로 `Composition` 기록.
+  - 조합이 끝났으면 남은 조합 범위 글자로 `Commit` 기록(빈 글자면 `End` — 취소).
+  - 조합 밖에서 글자가 바뀌었으면(조합 없는 `InsertTextAtSelection`·자동 고침·재변환 확정) 바뀐 범위로 `Selection` 기록, 그다음 새 글자로 `Commit` 기록.
+  - 조합 밖에서 선택만 바뀌었으면 `Selection` 기록.
+  - `TextInputSession`은 `Selection`을 조합 중이 아닐 때만 문맥에 적용한다(조합 중이면 무시 — 다음 조합 기록이 범위를 정한다).
+- **잠금**(`RequestLock`, UE FTextStoreACP::RequestLock): 잠겨 있지 않으면 바로 허락하고(`OnLockGranted`) 풀 때 기록을 낸다. 잠긴 채 동기 청은 `TS_E_SYNCHRONOUS`, 비동기 청은 허락 뒤에 한 번 더 준다(`TS_S_ASYNC`, 읽기 → 쓰기 올림 포함).
+- **TSF와 IMM 고르기**(UE와 같다)
+  - 창을 만드는 스레드(게임 lane)에서 COM STA를 연다(`CoInitializeEx(COINIT_APARTMENTTHREADED)`). 이미 다른 모드면(`RPC_E_CHANGED_MODE`) TSF 없이 IMM만 쓴다.
+  - 스레드마다 `ITfThreadMgr`(Activate)·입력기 프로필 sink(`ITfInputProcessorProfileActivationSink`)를 둔다. 활성 입력기가 TIP이면 TSF, 키보드 배치(옛 IMM 입력기)면 IMM이다.
+  - 문맥이 없을 때는 빈 문서 관리자(`disabled`)에 초점을 둔다. 그래서 TSF 입력기도 게임 문자 입력에 `WM_CHAR`를 보낸다(지금 IMM 경로와 같은 결과).
+  - TSF로 받는 동안 IMM 메시지(`WM_IME_COMPOSITION` 등)는 기록하지 않고 OS 기본 처리로 넘긴다.
+- **문맥마다**(Activate·Deactivate): `CreateDocumentMgr` → `CreateContext(store)` → `Push` → `SetFocus(문서)`. Deactivate는 조합을 확정하고(`ITfContextOwnerCompositionServices::TerminateComposition` — IMM `CPS_COMPLETE`와 같은 결과), 그 잠금이 낸 기록을 처리한 뒤 `Pop`·`SetFocus(disabled)`다. 비밀번호·읽기 전용 문맥은 TSF 문서를 만들지 않는다(IME 끔 — IMM과 같다). Cancel(앱이 조합 중에 글자를 바꿈)은 조합을 끝내고 남은 기록을 버린 뒤 거울을 다시 맞춘다.
+- **조합 sink**(`ITfContextOwnerCompositionSink`): `OnStartComposition`은 허락하고 조합 범위를 거울에 표시한다. `OnUpdateComposition`은 새 범위(`ITfRangeACP::GetExtent`), `OnEndComposition`은 끝 표시다. 셋 다 잠금 안에서 오므로 풀 때 기록이 된다.
+- **속성·embedded**: 지원 속성은 없음(`RequestSupportedAttrs` 등은 빈 결과), embedded는 `E_NOTIMPL`(UE와 같다).
+- **시험**: `TextInputDocument`(OS 없음) — 조합 시작·갱신·끝·취소, 조합 밖 삽입, 재변환(선택한 글자 위 조합), 선택만 바뀜이 기록 순서로 나오는지, 거울 맞추기 통지, 용량 넘침. `TextInputSession` `Selection` 기록. 실제 TSF(한국어·일본어 TIP, 재변환, 이모지 패널, IMM 입력기 전환)는 사람 확인 목록에 둔다.
 
 ### 22.11 단계
 
