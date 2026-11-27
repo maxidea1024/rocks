@@ -11,7 +11,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)다. UBT 경로는 `Engine/Source/Programs/UnrealBuildTool/`(약어 `UBT/`), UBA 경로는 `Engine/Source/Programs/UnrealBuildAccelerator/`(약어 `UBA/`) 기준이다. UE 이름은 아래 대응표와 근거에만 적는다.
 
-상태: **설계 초안 개정 2**(결정 BR1–BR30, 모두 권장안 — 2026-11-28 교차 검증 반영). 구현 단계는 MI0–MI4(메타 단계)와 SCS1–SCS6(공유 저장소)이고, 순서는 MI0 → MI1(+MI2, shadow mode) → SCS1 → MI3·MI4 → SCS2–SCS6이다(5장). 착수는 사용자가 정한다. 설계 중에는 native 빌드를 돌리지 않았다. 측정은 끝난 빌드의 기록·로그(읽기만)와 작은 clang-cl 탐침(7장)으로 했다.
+상태: **설계 초안 개정 3**(MI0·MI1 shadow·MI2 구현)(결정 BR1–BR30, 모두 권장안 — 2026-11-28 교차 검증 반영). 구현 단계는 MI0–MI4(메타 단계)와 SCS1–SCS6(공유 저장소)이고, 순서는 MI0 → MI1(+MI2, shadow mode) → SCS1 → MI3·MI4 → SCS2–SCS6이다(5장). 착수는 사용자가 정한다. 설계 중에는 native 빌드를 돌리지 않았다. 측정은 끝난 빌드의 기록·로그(읽기만)와 작은 clang-cl 탐침(7장)으로 했다.
 
 ## 우선순위와 기대 효과
 
@@ -26,6 +26,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)다. UBT
 | 2 | 정밀 include 검증(SCS1) | Core 공개 디렉터리에 헤더를 더한 origin 병합 뒤의 증분 빌드 | 거의 모든 TU 재컴파일 | 그 헤더를 연 TU만 | native 단계의 대부분 |
 
 - 기계 전체(1.3절): 최근 4일 빌드 805회(하루 약 200회) 중 107회가 처음부터 빌드다. 나머지 약 700회 대부분이 1순위의 대상이다. 그중 리플렉션 입력이 바뀌지 않은 빌드가 절반만 되어도 하루 약 70회 × 7분 ≈ 8시간의 세션 대기가 없어진다(추정).
+- MI1 shadow 확인(2.13절): 같은 조작(무관한 `.cpp` 하나)의 빌드가 655초이고 그중 메타 단계가 599초였으며, 28개 메타 action이 모두 would-hit·불일치 0이었다. 건너뛰기를 켜면 남는 것은 native 56초와 판정 비용이다.
 - 2순위만으로는 대부분의 빌드가 빨라지지 않는다. native 단계는 이미 증분이 잘 되고(무변경 빌드 200회가 `executed≤5`), 빌드 시간의 75–95%가 메타 단계다(1.2절).
 
 ## 목차
