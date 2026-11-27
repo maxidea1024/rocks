@@ -108,6 +108,12 @@ UE는 `SObjectWidget` 소멸자가 `NativeDestruct`를 부르지만, Rocks는 �
 - 결합 표·ID 검증 오류 진단 코드: 없는 속성, 형식 불일치, 같은 이름 둘.
 - 화면 입력 설정: 같은 설정은 적용 0회, ignore 해제는 설정 뒤에만, Menu 진입 때 키 풀기 1회.
 
+- **구현(UW9e).** 시험용 화면은 리플렉션 헤더 대신 native 클래스(`ROCKS_NATIVE_TYPE` + `RegisterNativeClass` — ObjectRuntime NativeClass.h)로 시험 파일 안에 둔다. 저장하지 않는 수명 hook 계수만 필요해서 fixture 모듈을 만들지 않는다.
+  - `WidgetLifecycleTests`: 명시 해제 짝·두 번 해제, 미룬 해체(소멸자 안 0회 → 다음 프레임 1회, 그동안 `Collect` 뒤에도 살아 있음), 측정 전 버림(OnDestruct 없음), 결합 표 진단(없는 필드 NotFound·bool 필드 TypeMismatch·같은 필드 둘 AlreadyExists·빈 값 InvalidArgument).
+  - `ScreenLifecycleTests`: 버려진 컨테이너의 OnDeactivated·OnDestruct가 다음 프레임에 그 순서로 한 번씩.
+  - `DeferredTeardownTests`(UW9d)·`ScreenInputConfigTests`(UW9c)와 이벤트 결합 진단(`WidgetEventBindingTests` — 중복·없는 메서드·서명 불일치)이 나머지 항목이다.
+  - 남은 UV7 항목(GC 결과·Widget 풀 재사용·Designer 미리보기 동일)은 각 기능 단계(UT5·Designer)에서 더한다.
+
 ### 21.5a Widget 사건을 리플렉션 이벤트로(UW9f — 최종 동기화 뒤)
 
 - **지금.** UI Widget의 사건 33개가 `ROCKS_NATIVE() Delegate<…>`다(UiWidget·UiScreens 16개 헤더, 예: `ButtonWidget::clicked_`). C++ 콜백 하나에는 동작하지만 네 가지가 UE와 다르다.
