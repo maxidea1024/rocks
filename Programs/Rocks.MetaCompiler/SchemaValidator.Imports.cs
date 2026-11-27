@@ -94,6 +94,22 @@ internal static partial class SchemaValidator
                 }
             }
 
+            // 이벤트 인자 칸의 대상도 같은 규칙으로 잇고 대조한다(EventReflection ED18 — 파생 모듈이 상속 이벤트를 다시 낸다).
+            foreach (FieldModel slot in external.Fields.Where(field => field.IsEvent).SelectMany(field => field.EventParameters))
+            {
+                if (slot.HasTargetType && slot.ReferenceId is not null &&
+                    LinkTarget(external, slot, slot.TargetKind, slot.ReferenceId, false) is string reference)
+                {
+                    slot.Reference = reference;
+                }
+
+                if (slot.IsMap && slot.KeyHasTargetType && slot.KeyReferenceId is not null &&
+                    LinkTarget(external, slot, slot.KeyKind!, slot.KeyReferenceId, true) is string keyReference)
+                {
+                    slot.KeyReference = keyReference;
+                }
+            }
+
             // Map 키의 대상(리플렉션 B9f2): Enum 키는 그 import enum으로 잇고(생성 헤더 include·native 키), ClassRef·Soft 키의 대상은 클래스다.
             foreach (FieldModel field in external.Fields.Where(field => field.IsMap && field.KeyHasTargetType && field.KeyReferenceId is not null))
             {

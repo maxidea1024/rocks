@@ -11,12 +11,14 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX2b1 | Rocks | 종류별 임포트 공통 틀(10.6절 — 에셋 문서 byte 읽기·blob 검사·계획의 묶음 밖 대상 id·옵션 struct·설정 번역 틀)과 텍스처 순수 변환(4.6절 2·3번 — 원본 형식 대응, 설정 표), 새 진단 `UnsupportedSourceLayout`·`GammaMismatch`. **구현(2026-11-26)**: 묶음 리더 공용화(동작 불변), `ExternalTarget`, 플러그인 첫 리플렉션 타입(옵션 struct·`UnrealExchange.rocksids.json`), 설정 번역 틀·텍스처 표 73행, 원본 변환, 엔진 콘텐츠 설정 fixture(`Tests/Settings/EngineTextureSettings.json` — `AssetImportData` 본문을 뺀 사본), 시험 21개, 리뷰 반영(실패 때 view 비우기, 감마 번호를 UE `EGammaSpace` 순서로, Guid는 Core 서식, PerPlatform 형식 판정) | UX2a, UX1c, A5, UXR8·UXR9 |
 | UX2b2 | Rocks | 텍스처 임포트(4.6절 — A2f 임포터 다섯, 종류별 임포터, 감마 대조, 제품 Commandlet 연결, 서비스·명령·C# 시험). **구현(2026-11-26)**: 선행 A2f5 태그 접두(AssetSystem 7.1절 21 — 교환 임포터들이 `UnrealExchange` 접두), `UnrealTextureImporter`(+Set)·`ExchangeTextureKind`, 명령의 상대 묶음 경로를 절대 경로로(공용 `AbsoluteCommandPath`), 제품 Commandlet 연결(호스트가 UnrealExchange 모듈을 시작해 옵션 타입 등록), Basic fixture 텍스처 둘을 4.5절 스키마로, 시험(명령 흐름·이름 바꾸기 세 번·차원 클래스·비ASCII·묶음 밖 참조·blob 교체·감마, A2f 임포터 거부·경고, C#), 리뷰 반영 — UX2b 완료 | UX2b1 |
 | UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
-| UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3, UXR8–UXR11(UXR11은 complex collision 메시 순환) |
+| UX3b1 | Rocks | 정적 메시 순수 변환(5.5절 1–9번 — 기록 적재 `LoadExchangeMeshSource`·모드·LOD와 에셋 설정·슬롯·섹션·소켓·충돌 → `StaticMeshImportSpec`), 설정 번역 행의 `rocksKey`, 경고 `UnrealNameNormalized` | UX3a, UX2b, MeshAnimationAssets MA2b–MA3 |
+| UX3b2 | Rocks | 정적 메시 임포트(5.5절 10–12번 — A2f 임포터 `unreal_static_mesh`, 종류별 임포터 일반화 `ExchangeServiceKind`, 옵션 `meshNormals`, 제품 연결, 명령·C# 시험) | UX3b1, UXR11(complex collision 메시 순환은 계획이 `HardCycle`로 막는다) |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
 | UX4b | Rocks | 머티리얼 임포트: 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번(8.5절) | UX4a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10 |
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
+| UX7a2 | UE | 스킨 메시 머티리얼 슬롯 `data.materials`(6.3절 13번 — transient `Materials`), 자기 시험, golden 다시 내보내기 | UX7a |
 | UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5, UXR8–UXR10 |
 | UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
 | UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6, UXR8–UXR10 |

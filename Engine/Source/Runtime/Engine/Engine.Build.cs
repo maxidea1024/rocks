@@ -12,6 +12,7 @@ public sealed class Engine : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader section 3.10).
-    protected override string[] PublicDependencies => ["World", "Config", "Task", "ModuleLoader"];
+    // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader section 3.10). Progress: Engine::Initialize
+    // and ModuleStartProgress open progress scopes for the startup splash (Docs/Design/SplashScreen section 8.1); they do nothing without a binding.
+    protected override string[] PublicDependencies => ["World", "Config", "Task", "ModuleLoader", "Progress"];
 }

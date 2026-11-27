@@ -65,6 +65,7 @@ Setup is complete. Open a new terminal (or restart your IDE) and run:
 | FXC SDK | 셰이더 시험용 Windows SDK 10.0.22621 | (해당 없음) |
 | LLVM | 검증 LLVM 22.1.8을 `%LOCALAPPDATA%\Rocks\toolchains`에 받고 사용자 PATH 맨 앞에 | (Apple clang을 쓴다) |
 | clang-format | 21.1.6을 같은 곳에 받고 `ROCKS_CLANG_FORMAT` 설정 | 같은 파일을 SHA-256으로 확인하고 `~/Library/Application Support/Rocks/toolchains`에, 시작 파일에 설정 |
+| ISPC | 1.32.0을 같은 곳에 받고 `ROCKS_ISPC` 설정(텍스처 압축기의 ISPC 원본 — `Build/InstallIspc.ps1`) | 같은 스크립트로 같은 곳에, 시작 파일에 설정 |
 
 - 기본은 IDE 없는 Build Tools(Windows)·Command Line Tools(macOS)다. IDE는 옵션이다(3절). macOS는 Homebrew 없이 끝난다(PowerShell 7도 고정 tar.gz를 `~/Library/Application Support/Rocks/toolchains/powershell-<판>`에 푼다).
 - 받는 파일의 URL과 해시는 `Build/Toolchain.json`이 고정한다.
@@ -234,6 +235,8 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
    pwsh Build/InstallLlvm.ps1 -ToolchainRoot "$env:LOCALAPPDATA\Rocks\toolchains"
    pwsh Build/InstallFormatter.ps1 -ToolchainRoot "$env:LOCALAPPDATA\Rocks\toolchains"
    [Environment]::SetEnvironmentVariable('ROCKS_CLANG_FORMAT', "$env:LOCALAPPDATA\Rocks\toolchains\clang-format-21.1.6\clang-format.exe", 'User')
+   pwsh Build/InstallIspc.ps1 -ToolchainRoot "$env:LOCALAPPDATA\Rocks\toolchains"
+   [Environment]::SetEnvironmentVariable('ROCKS_ISPC', "$env:LOCALAPPDATA\Rocks\toolchains\ispc-1.32.0\ispc.exe", 'User')
    ```
 4. 시작 메뉴 "계정의 환경 변수 편집" → 사용자 변수 `Path` → 새로 만들기에 `%LOCALAPPDATA%\Rocks\toolchains\llvm-22.1.8\bin`을 넣고
    "위로 이동"으로 맨 위에 둔다. Windows는 시스템 PATH 뒤에 사용자 PATH를 붙이므로, 시스템 `Path`에 다른 `clang-cl.exe`
@@ -246,6 +249,7 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
 | `where.exe clang-cl` | 첫 줄이 `...\AppData\Local\Rocks\toolchains\llvm-22.1.8\bin\clang-cl.exe` |
 | `clang-cl --version` | 첫 줄이 `clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)` |
 | `& $env:ROCKS_CLANG_FORMAT --version` | `clang-format version 21.1.6` |
+| `& $env:ROCKS_ISPC --version` | `Intel(r) Implicit SPMD Program Compiler (Intel(r) ISPC), 1.32.0 (...)` |
 | `& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath` | Visual Studio 또는 Build Tools 설치 경로 |
 
 `.\Setup.bat -Check`로도 같은 것을 확인할 수 있다.

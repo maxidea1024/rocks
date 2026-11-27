@@ -341,6 +341,8 @@ internal static partial class CppEmitter
         // 리플렉션 함수의 매개변수·반환 칸도 대상(enum·struct·참조의 클래스)의 생성 헤더가 필요하다(GeneratedType<E>::Id·NativeTypeKey).
         IEnumerable<FieldModel> ownFields = own.SelectMany(type => type.Fields)
             .Concat(own.SelectMany(type => type.Functions).SelectMany(function => function.Result is null ? function.Parameters : function.Parameters.Append(function.Result)))
+            // 이벤트 인자 칸의 대상도 같다(EventReflection ED18 — 상속 이벤트 포함).
+            .Concat(own.SelectMany(type => type.Fields).SelectMany(field => field.EventParameters))
             .ToArray();
         IEnumerable<string> targetHeaders = ownFields
             .SelectMany(field => new[] { field.Reference, field.KeyReference })
@@ -355,6 +357,12 @@ internal static partial class CppEmitter
         foreach (string targetHeader in targetHeaders)
         {
             Body($"#include <{CompilerOptions.GeneratedSpelling(targetHeader)}>");
+        }
+
+        // 이벤트 필드의 연산표 템플릿과 발행 frame 배치(Object/EventOps.h — Docs/Design/EventReflection.ko.md ED16·ED17)다.
+        if (own.Any(type => type.Fields.Any(field => field.IsEvent)))
+        {
+            Body("#include <Object/EventOps.h>");
         }
 
         // 리플렉션 함수의 frame·연산 도우미(Object/FunctionCall.h — offsetof는 <stddef.h> 대신 Base 매크로가 아니라 표준 offsetof를 쓴다).
@@ -461,7 +469,7 @@ internal static partial class CppEmitter
         EmitVerifyGenerated(self, checks, Line, Body);
         EmitFunctionDefinitions(schema, type, native, self, Body);
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
-        EmitFieldSchemas(type, Body);
+        EmitFieldSchemas(schema, type, Body);
         string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
         string functionSpan = EmitFunctionSchemas(type, Body);
         string editorOnlyIds = EditorOnlyIds(type);
@@ -521,18 +529,35 @@ internal static partial class CppEmitter
         Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept;");
         Body($"RuntimeTypeOps {self}::Ops(ModuleLease module) noexcept {{");
         Body($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
-        if (type.Fields.Count != 0)
+        // 이벤트 필드에는 값 연산표가 없고 RuntimeEventOps가 schema의 이벤트 필드와 같은 순서로 있다(EventReflection ED15·ED16).
+        FieldModel[] valueFields = [.. type.Fields.Where(field => !field.IsEvent)];
+        FieldModel[] eventFields = [.. type.Fields.Where(field => field.IsEvent)];
+        if (eventFields.Length != 0)
         {
-            OpenFieldTable(type.Fields, Body);
+            OpenFieldTable(eventFields, Body);
+            Body("static const RuntimeEventOps events[] = {");
+            foreach (FieldModel field in eventFields)
+            {
+                Body(Guard(field, $"detail::MakeEventOps<&::{field.Owner}::{field.Name}>({GuidValue(field.Id)}),"));
+            }
+
+            Body("};");
+            CloseFieldTable(eventFields, Body);
+            Body($"ops.events = {FieldSpan("RuntimeEventOps", "events", eventFields)};");
+        }
+
+        if (valueFields.Length != 0)
+        {
+            OpenFieldTable(valueFields, Body);
             Body("static const RuntimeFieldOps fields[] = {");
-            foreach (FieldModel field in type.Fields)
+            foreach (FieldModel field in valueFields)
             {
                 Guarded(field, Body, () => EmitFieldOps(field));
             }
 
             Body("};");
-            CloseFieldTable(type.Fields, Body);
-            Body($"ops.fields = {FieldSpan("RuntimeFieldOps", "fields", type.Fields)};");
+            CloseFieldTable(valueFields, Body);
+            Body($"ops.fields = {FieldSpan("RuntimeFieldOps", "fields", valueFields)};");
 
             // 필드 하나의 함수표 항목이다.
             void EmitFieldOps(FieldModel field)
@@ -639,15 +664,17 @@ internal static partial class CppEmitter
     // 필드의 Owner).
     private static void EmitVisitFields(SchemaModel schema, ClassModel type, string native, string ownerFormat, Action<string> Line)
     {
-        if (type.Fields.Count == 0)
+        // 이벤트 필드는 값이 아니라 로그에 나오지 않는다(EventReflection 3.1절).
+        FieldModel[] visited = [.. type.Fields.Where(field => !field.IsEvent)];
+        if (visited.Length == 0)
         {
             Line($"template <class Visitor> static constexpr void VisitFields(const {native}&, Visitor&) noexcept {{}}");
             return;
         }
 
         Line($"template <class Visitor> static constexpr void VisitFields(const {native}& value, Visitor& visitor) noexcept {{");
-        Unused(type.Fields, Line, "value", "visitor");
-        foreach (FieldModel field in DeclarationOrder(schema, type))
+        Unused(visited, Line, "value", "visitor");
+        foreach (FieldModel field in DeclarationOrder(schema, type).Where(field => !field.IsEvent))
         {
             // bitfield는 멤버 포인터를 만들 수 없어 헤더 안에서 직접 읽는다. Get_ 정의는 생성 소스에 있어(GS2) 다른 모듈이
             // VisitFields를 인스턴스화하면 export되지 않은 모듈 밖 함수를 부르게 된다. 상속한 bitfield는 선언 타입으로 바꿔
@@ -1051,7 +1078,7 @@ internal static partial class CppEmitter
         Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
         Line("static const TypeSchema& Schema() noexcept;");
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
-        EmitFieldSchemas(type, Body);
+        EmitFieldSchemas(schema, type, Body);
         string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
         string? structBaseId = type.Base.Length == 0 ? null : schema.Find(type.Base).Id;
         // struct는 Within이 없다(TypeId{}) — EditorOnly ID 목록이 있을 때만 그 칸까지 쓴다.
@@ -1308,17 +1335,50 @@ internal static partial class CppEmitter
     // {Optional, 0}이고 내부 형식 element와 maxElements 0을 싣는다(ReflectionExtensions.ko.md 6절). Map 필드는 value가 {Map, 0}이고
     // 값 형식 element·maxElements·키 형식 key를, Set 필드는 value가 {Set, 0}이고 원소 형식 element·maxElements를 싣는다(같은 문서
     // 7.2절).
-    private static void EmitFieldSchemas(ClassModel type, Action<string> Line)
+    private static void EmitFieldSchemas(SchemaModel schema, ClassModel type, Action<string> Line)
     {
+        const string NoType = "{ValueKind::Opaque, Guid{}}";
         if (type.Fields.Count == 0)
         {
             return;
         }
 
+        // 이벤트 필드의 인자 서술이다(이름·형식은 모델, offset은 발행 frame 배치 — decltype이라 상속 이벤트도 C++ 철자 없이 낸다, ED17·ED18).
+        for (int index = 0; index < type.Fields.Count; ++index)
+        {
+            FieldModel field = type.Fields[index];
+            if (!field.IsEvent || field.EventParameters.Count == 0)
+            {
+                continue;
+            }
+
+            // 강한 참조를 담는 struct 인자는 발행 frame(Registry 밖 버퍼)에 둘 수 없다(RMC2804 — struct 형질은 생성 코드가 안다).
+            foreach (FieldModel slot in field.EventParameters.Where(slot => slot.StructTarget && slot.Reference is not null))
+            {
+                string structure = "::" + schema.Find(slot.Reference!).NativeName;
+                Line(Guard(field, $"static_assert(!GeneratedType<{structure}>::ContainsStrongReference, \"{field.Owner}::{field.Name}: a struct holding object references cannot be an event argument (RMC2804)\");"));
+            }
+
+            string shape = $"detail::EventFrameShape<decltype(::{field.Owner}::{field.Name})>::Value";
+            Line(Guard(field, $"static const ParameterSchema rocksEventParameters{index}[] = {{" +
+                string.Join(", ", field.EventParameters.Select((slot, at) => SlotSchemaAt(slot, $"{shape}.offsets[{at}]"))) + "};"));
+        }
+
         OpenFieldTable(type.Fields, Line);
         Line("static const FieldSchema fields[] = {");
-        foreach (FieldModel field in type.Fields)
+        for (int fieldIndex = 0; fieldIndex < type.Fields.Count; ++fieldIndex)
         {
+            FieldModel field = type.Fields[fieldIndex];
+            if (field.IsEvent)
+            {
+                string parameters = field.EventParameters.Count == 0
+                    ? "{}"
+                    : $"Span<const ParameterSchema>(rocksEventParameters{fieldIndex}, {field.EventParameters.Count})";
+                Line(Guard(field, $"{{{GuidValue(field.Id)}, FieldKind::Event, {field.Flags}u, {View(field.Name)}, {{}}, {NoType}, " +
+                    $"{View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}, {NoType}, 0u, {NoType}, {{}}, {parameters}}},"));
+                continue;
+            }
+
             string? targetId = field.HasTargetType ? field.ReferenceId : null;
             string kind = field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value";
             string head = $"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ";
@@ -1326,7 +1386,6 @@ internal static partial class CppEmitter
             string? keyId = field.KeyHasTargetType ? field.KeyReferenceId : null;
             // bundle 목록(에셋 A4e2a)은 FieldSchema의 마지막 칸이라, 있으면 그 앞 칸(element·maxElements·key)을 빈 값으로라도 채운다.
             string bundles = field.Spec.AssetBundles.Length != 0 ? $", {View(field.Spec.AssetBundles)}" : "";
-            const string NoType = "{ValueKind::Opaque, Guid{}}";
             string key = field.IsMap ? $", {{ValueKind::{field.KeyKind}, {GuidValue(keyId)}}}" : bundles.Length != 0 ? ", " + NoType : "";
             Line(Guard(field, field.HasElement
                 ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u{key}{bundles}}},"

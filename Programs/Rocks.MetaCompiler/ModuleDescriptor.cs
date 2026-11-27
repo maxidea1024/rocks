@@ -16,7 +16,9 @@ internal static class ModuleDescriptor
     // 5: 클래스 functions(리플렉션 함수 — 이름·ID·도구 이름·flags·매개변수·반환, Docs/Design/FunctionReflection.ko.md FD10). 다른 모듈의 상속 함수
     // 이름 겹침 검사(RMC2703)와 Sparks binding이 쓴다.
     // 6: 함수 flag ScriptCallable과 함수 scriptName(노출 함수의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B15).
-    private const int DescriptorSchema = 6;
+    // 7: 이벤트 필드(fieldKind "Event" — 키 EventFieldKeys, 인자 params — Docs/Design/EventReflection.ko.md ED18). 파생 모듈이 상속 이벤트를
+    // schema·연산표에 다시 싣는다.
+    private const int DescriptorSchema = 7;
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
@@ -39,6 +41,12 @@ internal static class ModuleDescriptor
     private static readonly string[] FieldKeys =
         ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield", "assetBundles",
             "scriptName"];
+
+    // 이벤트 필드 항목이다(값 형식 칸 대신 인자 params — 칸마다 함수 매개변수 칸과 flags(ObjectHandle)). flags는 Transient →
+    // EditorOnly → DuplicateTransient → NonTryoutDuplicateTransient → SaveGame 순서다.
+    private static readonly string[] EventFieldKeys = ["owner", "name", "id", "fieldKind", "flags", "toolName", "category", "displayName", "params"];
+
+    private static readonly string[] EventParameterKeys = ["name", "value", "element", "key", "flags", "maxElements"];
 
     // 클래스의 자기 리플렉션 함수 항목이다(상속 함수는 기반 클래스 항목에 있다). flags는 Static → Const → Pure → EditorOnly → ReturnsResult →
     // ScriptCallable 순서다.
@@ -194,6 +202,12 @@ internal static class ModuleDescriptor
         json.WriteStartArray("fields");
         foreach (FieldModel field in type.Fields)
         {
+            if (field.IsEvent)
+            {
+                WriteEventField(json, field);
+                continue;
+            }
+
             json.WriteStartObject();
             json.WriteString("owner", field.Owner);
             json.WriteString("name", field.Name);
@@ -248,6 +262,50 @@ internal static class ModuleDescriptor
         }
 
         json.WriteEndArray();
+    }
+
+    // 이벤트 필드 항목이다(EventFieldKeys — ED18).
+    private static void WriteEventField(Utf8JsonWriter json, FieldModel field)
+    {
+        json.WriteStartObject();
+        json.WriteString("owner", field.Owner);
+        json.WriteString("name", field.Name);
+        json.WriteString("id", field.Id);
+        json.WriteString("fieldKind", "Event");
+        json.WriteStartArray("flags");
+        foreach ((bool set, string flag) in new[] { (field.Spec.Transient, "Transient"), (field.Spec.EditorOnly, "EditorOnly"),
+            (field.Spec.DuplicateTransient, "DuplicateTransient"), (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"),
+            (field.Spec.SaveGame, "SaveGame") })
+        {
+            if (set)
+            {
+                json.WriteStringValue(flag);
+            }
+        }
+
+        json.WriteEndArray();
+        json.WriteString("toolName", field.EffectiveToolName);
+        json.WriteString("category", field.Spec.Category);
+        json.WriteString("displayName", field.Spec.DisplayName);
+        json.WriteStartArray("params");
+        foreach (FieldModel slot in field.EventParameters)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", slot.Name);
+            WriteSlotType(json, slot);
+            json.WriteStartArray("flags");
+            if (slot.NativeSpelling == FunctionRules.ObjectHandleSpelling)
+            {
+                json.WriteStringValue("ObjectHandle");
+            }
+
+            json.WriteEndArray();
+            json.WriteNumber("maxElements", slot.IsCounted ? slot.MaxElements : 0);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
     }
 
     // 필드·함수 칸의 형식 칸 value·element·key다(maxElements는 부르는 쪽이 적는다).
@@ -576,6 +634,19 @@ internal static class ModuleDescriptor
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())
             {
+                if (field.ValueKind == JsonValueKind.Object && field.TryGetProperty("fieldKind", out JsonElement declaredKind) &&
+                    declaredKind.ValueKind == JsonValueKind.String && declaredKind.GetString() == "Event")
+                {
+                    // 이벤트 필드는 클래스에만 있다(원본 선언의 RMC2802).
+                    if (isStruct)
+                    {
+                        throw Invalid($"event field in struct {name}");
+                    }
+
+                    fields.Add(ReadEventField(field, descriptorPath, Invalid));
+                    continue;
+                }
+
                 RequireKeys(field, FieldKeys, Invalid);
                 bool reference = field.GetProperty("fieldKind").GetString() switch
                 {
@@ -998,6 +1069,98 @@ internal static class ModuleDescriptor
         }
 
         return functions;
+    }
+
+    // 이벤트 필드 항목이다(EventFieldKeys — 원본 선언의 ED14 규칙: flag, lowerCamel 인자 이름, 인자 칸은 함수 매개변수 칸 규칙). ObjectHandle
+    // 인자는 칸 철자를 rocks::ObjectHandle로 되살린다(생성 schema의 ParameterFlags::ObjectHandle).
+    private static FieldModel ReadEventField(JsonElement field, string descriptorPath, Func<string, MetadataException> invalid)
+    {
+        string Name(JsonElement element, Regex pattern, string what)
+        {
+            string text = element.GetString() ?? "";
+            return pattern.IsMatch(text) ? text : throw invalid($"invalid {what}: {text}");
+        }
+
+        RequireKeys(field, EventFieldKeys, invalid);
+        string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
+        string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
+        string owner = Name(field.GetProperty("owner"), QualifiedName, "field owner");
+        string[] flags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
+        if (flags.Any(flag => flag is not ("Transient" or "EditorOnly" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or "SaveGame")) ||
+            flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
+        {
+            throw invalid($"unknown or duplicate event field flag in {owner}::{fieldName}");
+        }
+
+        FieldModel model = new()
+        {
+            Id = Hex(field.GetProperty("id"), invalid),
+            Site = new(descriptorPath, 1),
+            Name = fieldName,
+            Owner = owner,
+            NativeSpelling = "",
+            Spec = new(flags.Contains("Transient"), false,
+                field.GetProperty("category").GetString() ?? throw invalid("category"),
+                field.GetProperty("displayName").GetString() ?? throw invalid("displayName"))
+            {
+                EditorOnly = flags.Contains("EditorOnly"),
+                DuplicateTransient = flags.Contains("DuplicateTransient"),
+                NonTryoutDuplicateTransient = flags.Contains("NonTryoutDuplicateTransient"),
+                SaveGame = flags.Contains("SaveGame"),
+                ToolName = toolName == fieldName ? "" : toolName
+            },
+            Kind = "Opaque",
+            IsEvent = true
+        };
+        JsonElement parameters = field.GetProperty("params");
+        if (parameters.ValueKind != JsonValueKind.Array || parameters.GetArrayLength() > FunctionRules.MaxParameters)
+        {
+            throw invalid($"params of {owner}::{fieldName}");
+        }
+
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach (JsonElement parameter in parameters.EnumerateArray())
+        {
+            RequireKeys(parameter, EventParameterKeys, invalid);
+            string parameterName = parameter.GetProperty("name").GetString() ?? "";
+            if (!EventRules.IsParameterName(parameterName) || !names.Add(parameterName))
+            {
+                throw invalid($"event argument name in {owner}::{fieldName}: {parameterName}");
+            }
+
+            string[] parameterFlags = parameter.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
+            bool objectHandle = parameterFlags.Length == 1 && parameterFlags[0] == "ObjectHandle";
+            if (parameterFlags.Length > 1 || (parameterFlags.Length == 1 && !objectHandle))
+            {
+                throw invalid($"event argument flags in {owner}::{fieldName}");
+            }
+
+            SlotType slotType = ReadSlotType(parameter, ValueKindProperty.Field, invalid);
+            if (slotType.Kind is StaticArrayRules.StaticArray or "InstancedStruct" or "ObjectReference" ||
+                slotType.TargetKind is "InstancedStruct" or "ObjectReference" || slotType.KeyKind == "ObjectReference" ||
+                (objectHandle && (slotType.Kind != "WeakObjectReference" || slotType.ReferenceId is not null)))
+            {
+                throw invalid($"event argument kind {slotType.Kind} in {owner}::{fieldName}");
+            }
+
+            model.EventParameters.Add(new FieldModel
+            {
+                Id = "",
+                Site = model.Site,
+                Name = parameterName,
+                Owner = owner,
+                NativeSpelling = objectHandle ? FunctionRules.ObjectHandleSpelling : "",
+                Spec = new(false, false, "", "") { MaxElements = slotType.MaxElements },
+                Kind = slotType.Kind,
+                ElementKind = slotType.ElementKind,
+                KeyKind = slotType.KeyKind,
+                KeyReferenceId = slotType.KeyReferenceId,
+                MaxElements = slotType.MaxElements,
+                ReferenceId = slotType.ReferenceId
+            });
+        }
+
+        return model;
     }
 
     // 필드 scriptName(Sparks 이름 지정 — 없으면 "")이다. 지정은 Sparks 노출 필드에만 있고 PascalCase ASCII다(원본 선언의 RMC2603·RMC2604와

@@ -4,6 +4,7 @@
 
 #include <Audio/AudioMixer.h>
 #include <Audio/AudioOutputDevice.h>
+#include <Audio/AudioStreamService.h>
 #include <Core/Containers/Array.h>
 #include <EngineAudio/AudioControlStats.h>
 #include <EngineAudio/AudioSpatialization.h>
@@ -19,7 +20,11 @@ namespace rocks {
 
 class AudioDeviceContext {
 public:
-    AudioDeviceContext(Allocator& allocator, audio::AudioOutputDevice& device) noexcept;
+    // streams·decoders는 스트림 재생(3.40.3절)에 쓴다(null이면 스트림 재생은 Failed). 둘 다
+    // context보다 오래 살아야 한다.
+    AudioDeviceContext(Allocator& allocator, audio::AudioOutputDevice& device,
+                       audio::AudioStreamService* streams,
+                       const audio::AudioDecoderTable* decoders) noexcept;
     AudioDeviceContext(const AudioDeviceContext&) = delete;
     AudioDeviceContext& operator=(const AudioDeviceContext&) = delete;
     ~AudioDeviceContext() noexcept;
@@ -37,10 +42,12 @@ public:
     // voice를 쥔 재생·놓기 대기 voice·등록 clip이 모두 없다.
     bool IsIdle() const noexcept;
 
-    // 장치를 닫은 뒤(AudioRT·콜백이 끝난 뒤) 모든 참조를 놓는다. 믹서는 부르지 않는다.
+    // 장치를 닫고 디코드 서비스를 멈춘 뒤(AudioRT·콜백·디코드 스레드가 끝난 뒤) 모든 참조를 놓는다.
+    // 믹서는 부르지 않는다.
     void Abandon() noexcept;
 
     AudioControlStats Stats() const noexcept;
+    AudioControlStats StatsWithoutStreams() const noexcept;
 
 private:
     enum class RecordState : uint8 {
@@ -101,6 +108,15 @@ private:
         audio::AudioClipId id;
         uint32 users = 0;
         bool registered = false;
+        // 스트림 clip(3.40.3절 — 재생마다 하나, 공유하지 않는다): 압축 데이터·청크 공급자·생산자와
+        // 서비스 슬롯이다. 디코더가 공급자·데이터를 가리키므로 ResetStream이 디코더부터 놓는다.
+        SharedPtr<const SoundStreamData> stream;
+        UniquePtr<audio::ResidentAudioChunkSource> chunks;
+        UniquePtr<audio::AudioStreamDecoder> decoder;
+        uint32 streamSlot = 0;
+        bool hasStreamSlot = false;
+        // 믹서 해제 뒤 서비스 반납을 기다린다.
+        bool draining = false;
     };
 
     struct ControlScene {
@@ -136,15 +152,22 @@ private:
 
     Record* FindRecord(PlaybackHandle handle) noexcept;
     audio::AudioVoiceParams ParamsFor(const Record& record, uint64 frame) const noexcept;
-    Result<uint32> AcquireClip(const SoundPlayable& playable) noexcept;
+    Result<uint32> AcquireClip(const SoundPlayable& playable, uint32 startFrame,
+                               bool& slotRejected) noexcept;
+    Result<uint32> AcquireStreamClip(const SoundPlayable& playable, uint32 startFrame,
+                                     bool& slotRejected) noexcept;
+    static void ResetStream(ClipEntry& entry) noexcept;
     void ReleaseClipUser(uint32 clip) noexcept;
     void RequestStop(Record& record, uint32 fadeFrames, PlaybackEndReason reason) noexcept;
     bool TrySubmitPlay(uint32 slot) noexcept;
     static void Emit(ControlBatch& batch, PlaybackHandle handle, PlaybackEventKind kind,
                      PlaybackEndReason reason, uint64 mixFrame) noexcept;
 
+    Allocator& allocator_;
     audio::AudioOutputDevice& device_;
     audio::AudioMixer& mixer_;
+    audio::AudioStreamService* streams_ = nullptr;
+    const audio::AudioDecoderTable* decoders_ = nullptr;
     uint32 maxActiveVoices_ = 0;
     // 게임 재생 슬롯과 같은 색인이다(MaxPlaybacks).
     Array<Record> records_;

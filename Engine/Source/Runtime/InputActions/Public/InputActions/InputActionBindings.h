@@ -108,6 +108,15 @@ public:
     // 부르면 아무것도 하지 않는다.
     void Dispatch(const PlayerActionInput& input) noexcept;
 
+    // 입력 스택의 한 층으로 전달한다(5.5절): consumed는 위층들이 이번 프레임에 소비한 액션이고, 이
+    // 층의 소비를 덧붙인다(호출자가 프레임마다 비운다). 용량이 모자라 덧붙이지 못한 소비는 아래층에
+    // 이어지지 않는다(호출자가 층의 BindingCount만큼 미리 잡는다).
+    void Dispatch(const PlayerActionInput& input, Array<Guid>& consumed) noexcept;
+
+    // 값 바인딩의 값을 모두 0으로 한다(타입은 그대로 — 막힌 층, 스택에서 뺀 층·꺼진 층. UE는 막힌
+    // 층만 0으로 한다 — Docs/Design/InputActions 5.5절).
+    void ClearValues() noexcept;
+
 private:
     struct EventBinding {
         uint32 id = 0;
@@ -135,6 +144,7 @@ private:
     // 함수 바인딩 하나를 부른다(대상이 사라졌으면 지움 표시, 그 밖의 실패는 Warning 한 번).
     void InvokeFunction(EventBinding& binding, const ActionEventData& data) noexcept;
     void PurgeRemoved() noexcept;
+    void DispatchWith(const PlayerActionInput& input, Array<Guid>& consumed) noexcept;
 
     Allocator* allocator_;
     // 바인딩마다 따로 할당한다(콜백 실행 중 추가가 실행 중인 콜백을 옮기지 않는다).

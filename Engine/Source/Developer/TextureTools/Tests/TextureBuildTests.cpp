@@ -10,8 +10,12 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
+#include <GraphicsTypes/GraphicsBackend.h>
+#include <GraphicsTypes/GraphicsPlatform.h>
+#include <TextureTools/TextureBlockEncode.h>
 #include <TextureTools/TextureBuild.h>
 
+#include <stdio.h>
 #include <string.h>
 
 // 텍스처 빌드 시험이다(Docs/Design/AssetSystem 12.13절 — 14.1.99절 대조표, 규칙은 UE 5.8에
@@ -26,9 +30,11 @@ using graphics::PixelFormat;
 
 namespace {
 
-// 선형 G8 원본(srgb off — 값 v / 255 그대로) 설정이다.
+// 선형 G8 원본(srgb off — 값 v / 255 그대로) 설정이다. Grayscale은 R8Unorm 비압축(12.17.5 2 — 원본
+// G8)이라 mip·재표본 값을 byte 그대로 본다.
 TextureBuildSettings Gray(uint32 x, uint32 y, uint32 slices = 1) noexcept {
     TextureBuildSettings settings;
+    settings.compression = TextureCompressionSettings::Grayscale;
     settings.format = TextureSourceFormat::G8;
     settings.sizeX = x;
     settings.sizeY = y;
@@ -68,7 +74,7 @@ uint16 Le16(const Array<uint8>& bytes, usize at) noexcept {
 } // namespace
 
 // SimpleAverage(12.5절 mip 규칙 — UE 2×2 상자): 4×4, 5×3(홀수 끝 열·행 버림), 1×7(길이 1 축은 같은
-// texel 둘), 사슬 끝 1×1, 출력 R8(Default G8 — swizzle rrr1).
+// texel 둘), 사슬 끝 1×1, 출력 R8(Grayscale G8 — swizzle rrrr).
 TEST(TextureBuild_SimpleAverage) {
     SystemAllocator allocator;
     {
@@ -78,7 +84,7 @@ TEST(TextureBuild_SimpleAverage) {
         REQUIRE(Build(allocator, Gray(4, 4), pixels, built));
         CHECK(built.result.pixelFormat == graphics::PixelFormat::R8Unorm && !built.result.srgb &&
               built.result.swizzle[1] == TextureSwizzle::R &&
-              built.result.swizzle[3] == TextureSwizzle::One);
+              built.result.swizzle[3] == TextureSwizzle::R);
         REQUIRE(built.result.mips.Size() == 3);
         CHECK(memcmp(built.result.mips[0].bytes.Data(), pixels, 16) == 0);
         const Array<uint8>& mip1 = built.result.mips[1].bytes;
@@ -192,7 +198,8 @@ TEST(TextureBuild_PowerOfTwoMode) {
         Built built(allocator);
         REQUIRE(Build(allocator, settings, pixels, built));
         REQUIRE(built.result.mips.Size() == 1);
-        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8UnormSrgb);
+        // Grayscale G8 + sRGB → BGRA8 sRGB(12.17.5 2 — 복제 뒤라 B·G·R = 회색).
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb);
         const Array<uint8>& top = built.result.mips[0].bytes;
         CHECK(built.result.mips[0].sizeX == 4 && built.result.mips[0].sizeY == 2);
         CHECK(top[0] == 10 && top[2 * 4] == 30 && top[3 * 4] == 200 && top[7 * 4] == 200);
@@ -441,9 +448,10 @@ TEST(TextureBuild_Linearization) {
     CHECK(HasWarning(built.result, AssetDiagnosticCode::SrgbIgnored));
 }
 
-// 출력(12.4.3절 표): 종류 × 원본의 형식·swizzle·채널 값, GA 원본의 RG = (회색, 알파), sRGB R8·RG8을
-// RGBA8 sRGB로 넓힘(swizzle 항등), RGBA8 sRGB, HDR_Compressed 알파 1, DistanceFieldFont는 늘 R8,
-// SrgbIgnored(선형 종류·float 출력 — 16비트 정수 출력은 경고 없음).
+// 출력 형식(12.17.5 2 — 1×1이라 블록 압축은 비압축 대체): 종류 × 원본의 형식·swizzle(sampler type
+// 계약), BGRA8 byte 순서, 회색 sRGB의 BGRA8 sRGB(복제 뒤 A = 선형 R), Displacementmap은 원본 A(알파
+// 복제), HDR_Compressed 알파 1, SrgbIgnored(막는 종류·float 출력 — Displacementmap은 sRGB를
+// 지킨다).
 TEST(TextureBuild_OutputFormats) {
     SystemAllocator allocator;
     struct Case {
@@ -453,50 +461,34 @@ TEST(TextureBuild_OutputFormats) {
         TextureSwizzle swizzleG;
         TextureSwizzle swizzleA;
     };
+    using C = TextureCompressionSettings;
+    using S = TextureSourceFormat;
+    using F = graphics::PixelFormat;
+    using W = TextureSwizzle;
     const Case cases[] = {
-        {TextureCompressionSettings::Default, TextureSourceFormat::G8,
-         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Default, TextureSourceFormat::GA8,
-         graphics::PixelFormat::RG8Unorm, TextureSwizzle::R, TextureSwizzle::G},
-        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Default, TextureSourceFormat::G16,
-         graphics::PixelFormat::R16Unorm, TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Default, TextureSourceFormat::RGBA16,
-         graphics::PixelFormat::RGBA16Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Default, TextureSourceFormat::R32F,
-         graphics::PixelFormat::R16Float, TextureSwizzle::R, TextureSwizzle::One},
-        {TextureCompressionSettings::Normalmap, TextureSourceFormat::G8,
-         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Masks, TextureSourceFormat::RGBA16,
-         graphics::PixelFormat::RGBA16Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        // Grayscale·Alpha·DistanceFieldFont는 UE sampler type 계약 .rrrr(12.16.4).
-        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
-        {TextureCompressionSettings::Grayscale, TextureSourceFormat::RGBA16F,
-         graphics::PixelFormat::R16Float, TextureSwizzle::R, TextureSwizzle::R},
-        {TextureCompressionSettings::Displacementmap, TextureSourceFormat::G16,
-         graphics::PixelFormat::R16Unorm, TextureSwizzle::Zero, TextureSwizzle::One},
-        {TextureCompressionSettings::VectorDisplacementmap, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::HDR, TextureSourceFormat::G8,
-         graphics::PixelFormat::RGBA16Float, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::EditorIcon, TextureSourceFormat::RGBA32F,
-         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::Alpha, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
-        {TextureCompressionSettings::DistanceFieldFont, TextureSourceFormat::G16,
-         graphics::PixelFormat::R8Unorm, TextureSwizzle::R, TextureSwizzle::R},
-        {TextureCompressionSettings::HDR_Compressed, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::RGBA16Float, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::BC7, TextureSourceFormat::G8,
-         graphics::PixelFormat::RGBA8Unorm, TextureSwizzle::G, TextureSwizzle::A},
-        {TextureCompressionSettings::HalfFloat, TextureSourceFormat::RGBA8,
-         graphics::PixelFormat::R16Float, TextureSwizzle::Zero, TextureSwizzle::One},
-        {TextureCompressionSettings::SingleFloat, TextureSourceFormat::G8,
-         graphics::PixelFormat::R32Float, TextureSwizzle::Zero, TextureSwizzle::One},
-        {TextureCompressionSettings::HDR_F32, TextureSourceFormat::RGBA16,
-         graphics::PixelFormat::RGBA32Float, TextureSwizzle::G, TextureSwizzle::A},
+        {C::Default, S::G8, F::BGRA8Unorm, W::G, W::A},
+        {C::Default, S::GA8, F::BGRA8Unorm, W::G, W::A},
+        {C::Default, S::RGBA8, F::BGRA8Unorm, W::G, W::A},
+        {C::Default, S::G16, F::BGRA8Unorm, W::G, W::A},
+        {C::Default, S::RGBA16, F::BGRA8Unorm, W::G, W::A},
+        {C::Default, S::R32F, F::RGBA16Float, W::G, W::A},
+        {C::Normalmap, S::G8, F::BGRA8Unorm, W::G, W::One},
+        {C::Masks, S::RGBA16, F::BGRA8Unorm, W::G, W::A},
+        {C::Grayscale, S::RGBA8, F::R8Unorm, W::R, W::R},
+        {C::Grayscale, S::RGBA16F, F::R8Unorm, W::R, W::R},
+        {C::Grayscale, S::G16, F::R16Unorm, W::R, W::R},
+        {C::Displacementmap, S::G16, F::R16Unorm, W::Zero, W::One},
+        {C::VectorDisplacementmap, S::RGBA8, F::BGRA8Unorm, W::G, W::A},
+        {C::HDR, S::G8, F::RGBA16Float, W::G, W::A},
+        {C::EditorIcon, S::RGBA32F, F::RGBA16Float, W::G, W::A},
+        {C::EditorIcon, S::RGBA8, F::BGRA8Unorm, W::G, W::A},
+        {C::Alpha, S::RGBA8, F::BGRA8Unorm, W::R, W::R},
+        {C::DistanceFieldFont, S::G16, F::R8Unorm, W::R, W::R},
+        {C::HDR_Compressed, S::RGBA8, F::RGBA16Float, W::G, W::A},
+        {C::BC7, S::G8, F::BGRA8Unorm, W::G, W::A},
+        {C::HalfFloat, S::RGBA8, F::R16Float, W::G, W::A},
+        {C::SingleFloat, S::G8, F::R32Float, W::G, W::A},
+        {C::HDR_F32, S::RGBA16, F::RGBA32Float, W::G, W::A},
     };
     uint8 source[16] = {};
     for (const Case& item : cases) {
@@ -506,40 +498,61 @@ TEST(TextureBuild_OutputFormats) {
         Built built(allocator);
         REQUIRE(Build(allocator, settings,
                       Span<const uint8>(source, TextureSourceTexelBytes(item.format)), built));
+        if (built.result.pixelFormat != item.expected) {
+            printf("  %u/%u: %s\n", static_cast<unsigned>(item.compression),
+                   static_cast<unsigned>(item.format),
+                   graphics::PixelFormatName(built.result.pixelFormat));
+        }
+
         CHECK(built.result.pixelFormat == item.expected &&
               built.result.swizzle[1] == item.swizzleG && built.result.swizzle[3] == item.swizzleA);
+        // 비압축 대체에는 형식 경고가 없다(인코더를 고르지 않았다).
+        CHECK(!HasWarning(built.result, AssetDiagnosticCode::EncoderUnavailable));
     }
 
-    // GA8 → RG8 = (회색, 알파).
-    const uint8 ga[2] = {77, 33};
+    // BGRA8 byte 순서(B, G, R, A).
+    const uint8 rgba[4] = {1, 2, 3, 4};
     TextureBuildSettings settings = Gray(1, 1);
-    settings.format = TextureSourceFormat::GA8;
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.compression = TextureCompressionSettings::Default;
     Built built(allocator);
-    REQUIRE(Build(allocator, settings, ga, built));
-    CHECK(built.result.mips[0].bytes[0] == 77 && built.result.mips[0].bytes[1] == 33);
-
-    // sRGB 확장: G8 Default srgb on → RGBA8 sRGB (128, 128, 128, 255), GA8 → (77, 77, 77, 33).
+    REQUIRE(Build(allocator, settings, rgba, built));
+    const uint8 bgra[4] = {3, 2, 1, 4};
+    CHECK(memcmp(built.result.mips[0].bytes.Data(), bgra, 4) == 0);
+    // 회색 sRGB: Grayscale G8 128 → BGRA8 sRGB (128, 128, 128, 선형 R 55 — UE ReplicateRed는 A도
+    // R).
     settings.format = TextureSourceFormat::G8;
+    settings.compression = TextureCompressionSettings::Grayscale;
     settings.srgb = true;
     const uint8 gray[1] = {128};
     REQUIRE(Build(allocator, settings, gray, built));
-    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8UnormSrgb && built.result.srgb &&
-          built.result.swizzle[1] == TextureSwizzle::G &&
-          built.result.swizzle[3] == TextureSwizzle::A);
-    const uint8 expandedGray[4] = {128, 128, 128, 255};
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb && built.result.srgb);
+    const uint8 expandedGray[4] = {128, 128, 128, 55};
     CHECK(memcmp(built.result.mips[0].bytes.Data(), expandedGray, 4) == 0);
-    settings.format = TextureSourceFormat::GA8;
-    REQUIRE(Build(allocator, settings, ga, built));
-    const uint8 expandedGa[4] = {77, 77, 77, 33};
-    CHECK(memcmp(built.result.mips[0].bytes.Data(), expandedGa, 4) == 0);
     CHECK(built.result.warnings.IsEmpty());
-
-    // SrgbIgnored: 선형 종류(Normalmap), float 출력(Default R32F). 16비트 정수 출력은 경고 없음.
+    // Displacementmap은 알파 복제(R8 = 원본 A) — GA8은 (회색, 알파)의 알파다.
+    settings.srgb = false;
+    settings.compression = TextureCompressionSettings::Displacementmap;
     settings.format = TextureSourceFormat::RGBA8;
+    const uint8 displaced[4] = {10, 20, 30, 200};
+    REQUIRE(Build(allocator, settings, displaced, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::R8Unorm &&
+          built.result.mips[0].bytes[0] == 200);
+    settings.format = TextureSourceFormat::GA8;
+    const uint8 ga[2] = {77, 33};
+    REQUIRE(Build(allocator, settings, ga, built));
+    CHECK(built.result.mips[0].bytes[0] == 33);
+    // Displacementmap은 sRGB를 지킨다(UE bPreventSRGB 밖 — 경고 없음, BGRA8 sRGB).
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.srgb = true;
+    REQUIRE(Build(allocator, settings, displaced, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb &&
+          built.result.warnings.IsEmpty());
+
+    // SrgbIgnored: 막는 종류(Normalmap), float 출력(Default R32F). 16비트 정수 출력은 경고 없음.
     settings.compression = TextureCompressionSettings::Normalmap;
-    const uint8 rgba[4] = {1, 2, 3, 4};
     REQUIRE(Build(allocator, settings, rgba, built));
-    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8Unorm &&
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8Unorm &&
           HasWarning(built.result, AssetDiagnosticCode::SrgbIgnored) &&
           built.result.warnings.Size() == 1);
     settings.format = TextureSourceFormat::R32F;
@@ -548,22 +561,318 @@ TEST(TextureBuild_OutputFormats) {
     REQUIRE(Build(allocator, settings, single, built));
     CHECK(HasWarning(built.result, AssetDiagnosticCode::SrgbIgnored));
     settings.format = TextureSourceFormat::G16;
+    settings.compression = TextureCompressionSettings::Grayscale;
     const uint8 wide[2] = {0xff, 0xff};
     REQUIRE(Build(allocator, settings, wide, built));
     CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Unorm && !built.result.srgb &&
           built.result.warnings.IsEmpty() && Le16(built.result.mips[0].bytes, 0) == 0xffff);
-    settings.format = TextureSourceFormat::RGBA16;
-    const uint8 wideColor[8] = {0x00, 0x80, 0, 0, 0, 0, 0xff, 0xff};
-    REQUIRE(Build(allocator, settings, wideColor, built));
-    CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Unorm &&
-          built.result.warnings.IsEmpty() && Le16(built.result.mips[0].bytes, 0) == 0x8000);
+    // norm16 대체: G16 → R16F(0…1로 자름).
+    settings.norm16Supported = false;
+    REQUIRE(Build(allocator, settings, wide, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
+          Le16(built.result.mips[0].bytes, 0) == 0x3c00);
+    settings.norm16Supported = true;
 
-    // HDR_Compressed는 알파 1(half 0x3c00).
+    // HDR_Compressed 1×1은 비압축 강제의 RGBA16F라 원본 알파를 지킨다(BC6H 대체만 알파 1 — UE
+    // TextureFormatUncompressed, 12.17.5 2).
     settings.format = TextureSourceFormat::RGBA8;
     settings.compression = TextureCompressionSettings::HDR_Compressed;
     settings.srgb = false;
     REQUIRE(Build(allocator, settings, rgba, built));
-    CHECK(Le16(built.result.mips[0].bytes, 6) == 0x3c00);
+    CHECK(Le16(built.result.mips[0].bytes, 6) == Float16::FromFloat(4.0f / 255.0f).bits);
+}
+
+// 블록 압축 출력(12.17.5 3): 4의 배수 상위 mip이면 BC다. AutoDXT는 사슬 mip 0의 알파(254 이하 —
+// UE 8비트 문턱)로 BC1·BC3을 고르고(compressionNoAlpha·ForceAlpha가 먼저), byte는 같은 RGBA8을
+// EncodeTextureBlocks로 압축한 값과 같다(sRGB 원본은 sRGB 왕복이 항등). Normalmap BC5·Alpha BC4(R
+// 복제). Array·Volume은 평면마다 블록이다. 쿠킹 편향으로 상위 mip이 4 미만이 되면 비압축이다.
+TEST(TextureBuild_BlockCompressedOutput) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 8;
+    uint8 pixels[Size * Size * 4];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = 255;
+    }
+
+    const auto expected = [&](TextureBlockFormat format, const uint8* rgba, uint32 x, uint32 y,
+                              uint32 slices, Array<uint8>& out) noexcept {
+        auto bytes = TextureBlockOutputBytes(format, x, y, slices);
+        if (!bytes || !out.TryResize(static_cast<usize>(bytes.Value()))) {
+            return false;
+        }
+
+        TextureBlockImage image;
+        image.rgba = Span<const uint8>(rgba, usize{x} * y * slices * 4);
+        image.sizeX = x;
+        image.sizeY = y;
+        image.numSlices = slices;
+        return static_cast<bool>(EncodeTextureBlocks(format, image, out.View()));
+    };
+    TextureBuildSettings settings = Gray(Size, Size);
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.compression = TextureCompressionSettings::Default;
+    settings.srgb = true;
+    settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+    Built built(allocator);
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC1UnormSrgb &&
+          !built.result.alphaTransparent);
+    Array<uint8> want(allocator);
+    REQUIRE(expected(TextureBlockFormat::Bc1, pixels, Size, Size, 1, want));
+    CHECK(built.result.mips[0].bytes.Size() == want.Size() &&
+          memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    // 알파 문턱: 255만이면 BC1, 254가 하나라도 있으면 BC3.
+    pixels[5 * 4 + 3] = 254;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC3UnormSrgb &&
+          built.result.alphaTransparent);
+    REQUIRE(expected(TextureBlockFormat::Bc3, pixels, Size, Size, 1, want));
+    CHECK(memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    settings.compressionNoAlpha = true;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC1UnormSrgb &&
+          !built.result.alphaTransparent);
+    settings.compressionNoAlpha = false;
+    pixels[5 * 4 + 3] = 255;
+    settings.compressionForceAlpha = true;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC3UnormSrgb);
+    settings.compressionForceAlpha = false;
+    // 쿠킹 편향 1(8 → 4)은 BC 그대로, 2(8 → 2)는 상위 mip이 4 미만이라 BGRA8이다.
+    settings.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    settings.lodBias = 1;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    uint32 topX = 0;
+    uint32 topY = 0;
+    REQUIRE(TextureBuildTopMipSize(settings, topX, topY));
+    CHECK(topX == 4 && topY == 4 && built.result.mips[0].sizeX == 4 &&
+          built.result.pixelFormat == graphics::PixelFormat::BC1UnormSrgb);
+    settings.lodBias = 2;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    REQUIRE(TextureBuildTopMipSize(settings, topX, topY));
+    CHECK(topX == 2 && topY == 2 && built.result.mips[0].sizeX == 2 &&
+          built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb);
+    settings.lodBias = 0;
+    settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+
+    // Normalmap BC5(선형 R·G), Alpha BC4(R 복제 — R 채널).
+    settings.srgb = false;
+    settings.compression = TextureCompressionSettings::Normalmap;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC5Unorm);
+    REQUIRE(expected(TextureBlockFormat::Bc5, pixels, Size, Size, 1, want));
+    CHECK(memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    settings.compression = TextureCompressionSettings::Alpha;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BC4Unorm);
+    REQUIRE(expected(TextureBlockFormat::Bc4, pixels, Size, Size, 1, want));
+    CHECK(memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+
+    // Array(slice 둘)·Volume(깊이 둘)은 평면마다 블록이다.
+    for (const TextureDimension dimension :
+         {TextureDimension::Texture2DArray, TextureDimension::Volume}) {
+        uint8 two[Size * Size * 4 * 2];
+        memcpy(two, pixels, sizeof(pixels));
+        memcpy(two + sizeof(pixels), pixels, sizeof(pixels));
+        two[sizeof(pixels)] = 9;
+        TextureBuildSettings layered = settings;
+        layered.compression = TextureCompressionSettings::Default;
+        layered.dimension = dimension;
+        layered.numSlices = 2;
+        REQUIRE(Build(allocator, layered, two, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::BC1Unorm);
+        REQUIRE(expected(TextureBlockFormat::Bc1, two, Size, Size, 2, want));
+        CHECK(built.result.mips[0].bytes.Size() == want.Size() &&
+              memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
+    }
+
+    // TD11: BC7은 BGRA8 대체 + EncoderUnavailable(detail = BC7 형식 번호).
+    settings.compression = TextureCompressionSettings::BC7;
+    settings.srgb = true;
+    REQUIRE(Build(allocator, settings, pixels, built));
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8UnormSrgb);
+    bool warned = false;
+    for (const TextureBuildWarning& warning : built.result.warnings) {
+        warned = warned || (warning.code == AssetDiagnosticCode::EncoderUnavailable &&
+                            warning.detail ==
+                                graphics::PixelFormatNumber(graphics::PixelFormat::BC7UnormSrgb));
+    }
+
+    CHECK(warned);
+}
+
+// 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 BC6H 대체(8×8)만 알파
+// 1이다. norm16 대체 G16 → R16F만 0…1로 자르고 HalfFloat의 R16F는 넘친 값을 지킨다. 알파 판정은
+// 원본(채움 전)이라 불투명 원본 + 반투명 채움 색은 BC1이다. Android(검증 끔)는 32F 필터를 못 해
+// RGBA16F, Android OpenGL의 RGBA8 대체는 R, G, B, A byte 순서다. CPU Availability는 비압축이다.
+TEST(TextureBuild_ReviewedFormatRules) {
+    SystemAllocator allocator;
+    // HDR_Compressed 알파.
+    {
+        uint8 pixels[8 * 8 * 4];
+        for (usize index = 0; index < sizeof(pixels); ++index) {
+            pixels[index] = index % 4 == 3 ? 51 : static_cast<uint8>(index);
+        }
+
+        TextureBuildSettings settings = Gray(6, 6);
+        settings.format = TextureSourceFormat::RGBA8;
+        settings.compression = TextureCompressionSettings::HDR_Compressed;
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, 6 * 6 * 4), built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
+              Le16(built.result.mips[0].bytes, 6) == 0x3266);
+        settings.sizeX = 8;
+        settings.sizeY = 8;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float &&
+              Le16(built.result.mips[0].bytes, 6) == 0x3c00);
+    }
+
+    // norm16 대체만 자른다(0·65535를 번갈아 둔 4×4를 8×8로 확대 — Catmull-Rom 넘침).
+    {
+        uint8 pixels[4 * 4 * 2];
+        for (usize index = 0; index < 16; ++index) {
+            const uint16 value = index % 2 != 0 ? 0xFFFF : 0;
+            pixels[index * 2] = static_cast<uint8>(value);
+            pixels[index * 2 + 1] = static_cast<uint8>(value >> 8);
+        }
+
+        TextureBuildSettings settings = Gray(4, 4);
+        settings.format = TextureSourceFormat::G16;
+        settings.norm16Supported = false;
+        settings.powerOfTwoMode = TexturePowerOfTwoSetting::ResizeToSpecificResolution;
+        settings.resizeX = 8;
+        settings.resizeY = 8;
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        const auto overshoots = [&](const Array<uint8>& bytes) noexcept {
+            bool over = false;
+            for (usize at = 0; at + 1 < bytes.Size(); at += 2) {
+                const uint16 half = static_cast<uint16>(bytes[at] | (bytes[at + 1] << 8));
+                over = over || half > 0x3C00;
+            }
+
+            return over;
+        };
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
+              !overshoots(built.result.mips[0].bytes));
+        settings.compression = TextureCompressionSettings::HalfFloat;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::R16Float &&
+              overshoots(built.result.mips[0].bytes));
+    }
+
+    // 알파 판정은 원본(채움 전): 불투명 6×4 + 반투명 채움 색 → 8×4 BC1.
+    {
+        uint8 pixels[6 * 4 * 4];
+        for (usize index = 0; index < sizeof(pixels); ++index) {
+            pixels[index] = index % 4 == 3 ? 255 : static_cast<uint8>(index * 5);
+        }
+
+        TextureBuildSettings settings = Gray(6, 4);
+        settings.format = TextureSourceFormat::RGBA8;
+        settings.compression = TextureCompressionSettings::Default;
+        settings.powerOfTwoMode = TexturePowerOfTwoSetting::PadToPowerOfTwo;
+        settings.paddingColor = Color(0, 0, 0, 128);
+        settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.mips[0].sizeX == 8 &&
+              built.result.pixelFormat == graphics::PixelFormat::BC1Unorm &&
+              !built.result.alphaTransparent);
+    }
+
+    // Android: 검증 끔이면 32F 필터를 못 하고, OpenGL 대상의 RGBA8 대체는 R, G, B, A 순서다.
+    {
+        const float texel[4] = {0.5f, 0.25f, 1.0f, 1.0f};
+        uint8 pixels[16];
+        platform::MemoryCopy(pixels, texel, sizeof(texel));
+        TextureBuildSettings settings = Gray(1, 1);
+        settings.format = TextureSourceFormat::RGBA32F;
+        settings.compression = TextureCompressionSettings::HDR_F32;
+        settings.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA16Float);
+        settings.samplerPointFilter = true;
+        REQUIRE(Build(allocator, settings, pixels, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA32Float);
+        const uint8 rgba[4] = {1, 2, 3, 4};
+        TextureBuildSettings color = Gray(1, 1);
+        color.format = TextureSourceFormat::RGBA8;
+        color.compression = TextureCompressionSettings::Default;
+        color.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+        color.cookBackends = uint32{1} << static_cast<uint32>(graphics::Backend::OpenGL);
+        REQUIRE(Build(allocator, color, rgba, built));
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::RGBA8Unorm &&
+              memcmp(built.result.mips[0].bytes.Data(), rgba, 4) == 0);
+        bool fallback = false;
+        for (const TextureBuildWarning& warning : built.result.warnings) {
+            fallback =
+                fallback ||
+                (warning.code == AssetDiagnosticCode::PlatformFormatFallback &&
+                 warning.detail == graphics::PixelFormatNumber(graphics::PixelFormat::BGRA8Unorm));
+        }
+
+        CHECK(fallback);
+    }
+}
+
+// 상위 mip 크기 함수(12.17.5 3)는 BuildTexture의 상위 mip과 같다: PowerOfTwoMode(Pad·Stretch·
+// Square)·Resize·MaxTextureSize·LODBias·NoMipmaps·Volume 조합.
+TEST(TextureBuild_TopMipSizeMatchesBuild) {
+    SystemAllocator allocator;
+    struct Case {
+        uint32 x;
+        uint32 y;
+        TexturePowerOfTwoSetting mode;
+        int32 maxSize;
+        int32 bias;
+        bool noMips;
+        bool volume;
+    };
+    using P = TexturePowerOfTwoSetting;
+    const Case cases[] = {
+        {12, 6, P::None, 0, 0, false, false},
+        {12, 6, P::PadToPowerOfTwo, 0, 1, false, false},
+        {5, 3, P::StretchToPowerOfTwo, 0, 0, false, false},
+        {5, 3, P::StretchToSquarePowerOfTwo, 0, 2, false, false},
+        {20, 20, P::None, 8, 0, false, false},
+        {20, 20, P::None, 8, 1, true, false},
+        {16, 16, P::ResizeToSpecificResolution, 0, 0, false, false},
+        {8, 8, P::None, 0, 3, false, true},
+        {16, 4, P::None, 4, 0, false, true},
+    };
+    for (const Case& item : cases) {
+        const uint32 depth = item.volume ? 2 : 1;
+        TextureBuildSettings settings = Gray(item.x, item.y, depth);
+        settings.dimension = item.volume ? TextureDimension::Volume : TextureDimension::Texture2D;
+        settings.powerOfTwoMode = item.mode;
+        settings.resizeX = 8;
+        settings.resizeY = 4;
+        settings.maxTextureSize = item.maxSize;
+        settings.lodBias = item.bias;
+        settings.mipGenSettings =
+            item.noMips ? TextureMipGenSettings::NoMipmaps : TextureMipGenSettings::SimpleAverage;
+        Array<uint8> pixels(allocator);
+        REQUIRE(pixels.TryResize(usize{item.x} * item.y * depth));
+        Built built(allocator);
+        REQUIRE(Build(allocator, settings, pixels.View(), built));
+        uint32 topX = 0;
+        uint32 topY = 0;
+        REQUIRE(TextureBuildTopMipSize(settings, topX, topY));
+        CHECK(built.result.mips[0].sizeX == topX && built.result.mips[0].sizeY == topY);
+    }
+
+    TextureBuildSettings invalid;
+    uint32 x = 0;
+    uint32 y = 0;
+    CHECK(TextureBuildTopMipSize(invalid, x, y).Error() == ErrorCode::InvalidArgument);
 }
 
 // 양자화(12.2절 5번): 정수는 [0, 1] 자름·round-half-up(0.5/255 경계), 16F는 NaN → 0·±Inf와 65504
@@ -589,20 +898,23 @@ TEST(TextureBuild_Quantization) {
     platform::MemoryCopy(stored, built.result.mips[0].bytes.Data(), sizeof(stored));
     CHECK(stored[0] == 0.0f && stored[1] == NumericLimits<float>::Max() && stored[2] == 70000.0f &&
           stored[3] == -NumericLimits<float>::Max());
-    settings.compression = TextureCompressionSettings::EditorIcon;
+    // 8비트(BGRA8 — VectorDisplacementmap은 늘 BGRA8): R NaN → 0, G +Inf → 255, B 70000 → 255,
+    // A −Inf → 0.
+    settings.compression = TextureCompressionSettings::VectorDisplacementmap;
     REQUIRE(Build(allocator, settings, pixels, built));
-    CHECK(built.result.mips[0].bytes[0] == 0 && built.result.mips[0].bytes[1] == 255 &&
-          built.result.mips[0].bytes[3] == 0);
+    CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8Unorm &&
+          built.result.mips[0].bytes[2] == 0 && built.result.mips[0].bytes[1] == 255 &&
+          built.result.mips[0].bytes[0] == 255 && built.result.mips[0].bytes[3] == 0);
 
     // UE float 식 (uint8)(0.5f + v × 255.0f): 0.5/255는 1, 그 바로 아래 float도 1(0.5 +
-    // 0.49999997이 float로 1.0 — UE와 같다), 0.49/255는 0. float 원본에서 8비트 출력(R8)을 내는
-    // 설정은 DistanceFieldFont다(Grayscale은 float 원본이면 R16F — 위 출력 규칙).
+    // 0.49999997이 float로 1.0 — UE와 같다), 0.49/255는 0. float 원본의 R8 출력은 Grayscale이다(UE
+    // G8 — 원본이 G16일 때만 G16, 12.17.5 2).
     const float half = static_cast<float>(0.5 / 255.0);
     uint8 edge[4];
     platform::MemoryCopy(edge, &half, sizeof(half));
     TextureBuildSettings gray = Gray(1, 1);
     gray.format = TextureSourceFormat::R32F;
-    gray.compression = TextureCompressionSettings::DistanceFieldFont;
+    gray.compression = TextureCompressionSettings::Grayscale;
     gray.srgb = false;
     REQUIRE(Build(allocator, gray, edge, built));
     CHECK(built.result.mips[0].bytes[0] == 1);
@@ -688,13 +1000,14 @@ TEST(TextureBuild_BorderAndNormals) {
         Built built(allocator);
         REQUIRE(Build(allocator, settings, normals, built));
         const Array<uint8>& mip1 = built.result.mips[1].bytes;
-        // (√½ + 1) / 2 ≈ 0.8536 → 218.
-        CHECK(mip1[0] == 218 && mip1[1] == 218 && mip1[2] < 130);
+        // (√½ + 1) / 2 ≈ 0.8536 → 218. 2×1은 BC5를 못 해 BGRA8(B, G, R, A — 12.17.5 2)이다.
+        CHECK(built.result.pixelFormat == graphics::PixelFormat::BGRA8Unorm);
+        CHECK(mip1[2] == 218 && mip1[1] == 218 && mip1[0] < 130);
         // 성분마다 합이 255인 둘의 평균은 정확히 0.5 → 길이 0 → (0, 0, 1) → (128, 128, 255).
         const uint8 opposite[8] = {255, 0, 255, 255, 0, 255, 0, 255};
         REQUIRE(Build(allocator, settings, opposite, built));
         const Array<uint8>& zero = built.result.mips[1].bytes;
-        CHECK(zero[0] == 128 && zero[1] == 128 && zero[2] == 255);
+        CHECK(zero[2] == 128 && zero[1] == 128 && zero[0] == 255);
         // mip 0도 정규화한다((255, 0, 255) → (1, −1, 1) / √3 → (201, 54, 201)).
         const Array<uint8>& top = built.result.mips[0].bytes;
         CHECK(top[0] == 201 && top[1] == 54 && top[2] == 201);
@@ -789,8 +1102,9 @@ TEST(TextureBuild_DiagnosticsAndResolve) {
         TextureBuildResult result(allocator);
         REQUIRE(ResolveTextureBuildSettings(texture, TextureDimension::Texture2D,
                                             TextureLodGroupValues{}, settings, result));
+        // CPU Availability는 mip이 없고 압축하지 않는다(12.17.5 2 — 플랫폼 데이터가 CPU 사본이다).
         CHECK(settings.mipGenSettings == TextureMipGenSettings::NoMipmaps &&
-              settings.addressY == TextureAddress::Mirror);
+              settings.addressY == TextureAddress::Mirror && settings.compressionNone);
         texture.source.format = TextureSourceFormat::Invalid;
         CHECK(!ResolveTextureBuildSettings(texture, TextureDimension::Texture2D,
                                            TextureLodGroupValues{}, settings, result) &&
@@ -863,6 +1177,8 @@ TEST(TextureBuild_FlipGreenOrder) {
         const uint8 pixels[4] = {10, 64, 30, 255};
         TextureBuildSettings settings = Gray(1, 1);
         settings.format = TextureSourceFormat::RGBA8;
+        // VectorDisplacementmap은 늘 BGRA8이다(G는 byte 1, A는 byte 3).
+        settings.compression = TextureCompressionSettings::VectorDisplacementmap;
         settings.flipGreenChannel = true;
         settings.powerOfTwoMode = TexturePowerOfTwoSetting::PadToSquarePowerOfTwo;
         settings.paddingColor = Color(0, 0, 0, 128);
