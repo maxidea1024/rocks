@@ -45,6 +45,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 - **예외.** (1) 표면 소실 handshake: Android가 surface를 거둘 때 앱 스레드는 렌더 lane의 surface 사용 중단(표면 작업 완료)을 동기로 기다려야 한다(P13). (2) 전체 비우기 `RenderLane::Drain`: 종료·장치 재생성·시험 전용이며 호출 이유(열거)를 인자로 받아 계측에 남긴다. 일반 자원 해제는 `Retire`로 하고 비우기를 쓰지 않는다. 자원 해제 뒤 비우기까지 하는 API는 두지 않는다.
 - 대기 시간 상한(UE 120초 hang 판정, 5.1절)은 진단 전용이다. 시간 초과는 hang 보고 후 실패로 끝내되 기능 판정에 쓰지 않고, 디버거 연결·명시 정지 계수가 있으면 끈다. 시험은 시간 초과에 기대지 않는다.
 - 렌더 설정(CP4)은 프레임 packet에 snapshot으로 담는다. 렌더 쪽 사본 주소에 쓰는 전파는 하지 않는다.
+- **프레임 packet 수명(개정 60).** packet은 그 slot의 프레임 arena를 가리킬 수 있으므로(가변 길이 목록) slot을 돌려주기 전에 끝나야 한다. `SubmitFrame`은 진입 직후 packet을 지역 값으로 옮겨 **모든 반환 경로에서 소비**한다(빈 함수·잘못된 ticket·종료 단계·전달 검사·게시 실패 — 실패 뒤 호출자의 packet은 옮겨진 원본이다). lane 작업은 `render(context, packet)` → **packet 파괴** → 지연 Retire 처리(`FinishDeferredRetires` — packet 소멸자가 요청한 Retire도 이 프레임에서 처리한다) → lane 처리 완료 표지(`FinishFrame`, slot 반환 시작) 순서다. 그래서 게임 lane이 다음 `BeginFrame`에서 그 slot의 arena를 비울 때 lane 스레드가 같은 arena를 읽지 않는다. 이전에는 packet이 lane 작업 객체에 담긴 채 작업이 끝난 뒤(`DedicatedLane` 작업 객체 해제) 파괴되어, Thread 모드에서 slot이 Free가 된 뒤 arena Reset과 경쟁할 수 있었다(UI 세션 보고). 자원·표면 작업의 값은 arena를 쓰지 않으므로 그대로다.
 
 ### 5.4 장치 스레드 모델(GX10·GX11)
 

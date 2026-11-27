@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompilerCommon/ShaderWorkerProtocol.h>
 #include <ShaderCore/ShaderParameterLayout.h>
@@ -59,6 +60,14 @@ ROCKS_SHADERCOMPILERCOMMON_API void SucceedShaderJob(ShaderWorkerJobResult& resu
                                                      Array<uint8>& code,
                                                      Array<uint8>& bindingLayout,
                                                      Array<uint8>& glesHeader) noexcept;
+
+// 성공한 result 끝에 값 3(DebugSymbols — ShaderSystem 16.3절 SSD73, 배치 ShaderDebugSymbols.h)을
+// 더한다(SucceedShaderJob 뒤에 부른다 — 값 id 오름차순). result가 성공이 아니면 아무 일도 하지
+// 않는다. 이름 규칙 위반·할당 실패는 ToolError로 job을 실패시킨다.
+ROCKS_SHADERCOMPILERCOMMON_API void AddShaderJobDebugSymbols(ShaderWorkerJobResult& result,
+                                                             ShaderDebugSymbolKind kind,
+                                                             StringView name,
+                                                             Span<const uint8> contents) noexcept;
 
 class ShaderFormatBackend {
 public:
