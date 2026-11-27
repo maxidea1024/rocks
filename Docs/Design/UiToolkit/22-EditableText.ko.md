@@ -148,6 +148,28 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 - 여러 줄 스크롤 막대: 넘칠 때만 보임(숨으면 편집 칸 폭 그대로), 막대 끌기 ↔ 편집기 스크롤 동기화, 표지와 함께일 때 순서.
 - Widget 층: 기존 `EditableTextWidgetTests` 전부와 상자 위젯 오류·스타일.
 
+### 22.12 IME(UW4f3 — 9.1절 UW4f3을 대신한다)
+
+9.1절 UW4f3 원안(2026-11-25)은 UW7h(19.2절) 전에 썼다. 그 뒤 바뀐 것과 남은 것은 아래와 같다.
+
+- **이미 된 것(UW7h — 19.2절).**
+  - 조합 창(`CFS_POINT`, caret 아래)·후보 창(`CFS_EXCLUDE`, caret 줄을 피함)은 `NotifyLayoutChanged` → 창이 문맥의 `GetTextBounds`를 당겨 놓는다(Win64Window `UpdateImmWindowPositions`). 원안의 `Platform::setCompositionArea`는 이 pull 방식으로 대신했다.
+  - 초점 잃음은 조합을 확정한다(Deactivate가 `CPS_COMPLETE` 뒤 확정을 처리하고, 그래도 조합 중이면 미리보기를 확정한다).
+  - 조합 글자는 본문에 끼워 그린다(미리보기 층 — 위젯 글자·이력·변경 알림 없음).
+  - 확정·취소·빈 갱신 순서는 `TextInputSession` 규칙이다.
+- **UW4f3a: 조합 중 포인터 누름 확정**(UE `FSlateEditableTextLayout::MoveCursor` 2386–2395행 — 마우스로 caret을 옮기면 문맥을 Deactivate·Activate)
+  - 조합 중 왼쪽·오른쪽 누름은 먼저 조합을 확정한다. 서비스를 Deactivate한 뒤 다시 Activate한다. Deactivate가 OS 조합을 완료하고(`CPS_COMPLETE`) 확정을 적용한다. 한국어에서 취소하면 쓰던 음절이 사라지므로 취소가 아니라 확정이다.
+  - 그다음 누름을 평소대로 처리한다(caret 이동·단어·줄 선택·문맥 메뉴). 지금은 조합 중 누름을 삼켜 아무 일도 하지 않는다.
+  - 서비스가 없거나 Deactivate 뒤에도 조합 중이면 미리보기를 그대로 확정한다(`EndComposition` — 19.2절 Deactivate 규칙과 같다).
+  - 휠은 지금처럼 조합 중에도 스크롤한다. 조합 중 키보드 caret 이동은 IME 몫이다(지금 규칙 — UE 2257행과 같다).
+- **UW4f3a: 조합 점선 밑줄**(UE `FTextCompositionHighlighter::OnPaint` — SlateEditableTextTypes.cpp 170–194행, brush는 `FEditableTextStyle::CompositionBackground` "Old/HyperlinkDotted", 색은 전경 × tint)
+  - 조합 구간의 글자 아래에 1 px 두께 점선을 긋는다(지금은 실선). 칠 1 px·빔 1 px를 되풀이한다(`CompositionDashLength`·`CompositionGapLength`).
+  - 무늬 위상은 줄 왼쪽 끝 기준이다. 클러스터 경계에서 무늬가 끊기거나 겹치지 않는다.
+  - 색은 `EditableTextStyle::composition`(전경)이다. UE 이미지는 클론에 없어 상자 조각으로 그린다(22.3절).
+  - 시험: 조합 구간 폭 / 2개 조각, 위상, 색.
+- **UW4f3b: TSF**(19.2절 "TSF"). 상세는 착수 때 이 절 뒤에 쓴다. 지킬 것: 같은 `TextInputService`·`platform::TextInputClient` 인터페이스 위에 둔다. TSF가 없으면 IMM으로 돌아간다(UE `FWindowsTextInputMethodSystem`). TSF 동기 질의는 펌프 중에만 받고, lane 대기 펌프 중이면 `TS_E_SYNCHRONOUS`로 거부한다.
+- 사람 확인 목록: 실제 한국어 IME(두벌식 조합·후보 창 위치·한자 변환·누름 확정), 일본어 IME 변환 구간.
+
 ### 22.11 단계
 
 - **UW4f2a**: 스타일 둘(UiCore)·`EditableTextBox` 나눔·힌트 불투명도·이력 99·caret 폭. Widget 층이 상자를 만든다.
@@ -155,5 +177,7 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 - **UW4f2c**: 오류 표지·팝업·여러 줄 스크롤 막대.
 - **UW4f2d**: 갤러리 "Text Input" 묶음·self-test 화소 확인.
 - **UW4f2e**: 편집 문맥 메뉴와 여러 줄 오른쪽 단추 끌기 스크롤(22.7a절), `Application::Find`.
+- **UW4f3a**: 조합 중 누름 확정·조합 점선 밑줄(22.12절).
+- **UW4f3b**: TSF(22.12절).
 
 리뷰어는 9.1절대로 UW4f(f2·f3) 끝에 한 번 둔다.
