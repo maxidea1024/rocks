@@ -6,8 +6,10 @@
 #include <Meta/GeneratedType.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Task/WorkerScheduler.h>
 #include <TestSupport/Test.h>
 #include <Texture/Texture.generated.h>
 #include <GraphicsTypes/GraphicsBackend.h>
@@ -732,6 +734,259 @@ TEST(TextureBuild_BlockCompressedOutput) {
     CHECK(built.result.mips[0].bytes.Size() == want.Size() &&
           memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0);
     pixels[5 * 4 + 3] = 255;
+}
+
+// Android ASTC·EAC 빌드 연결(12.17.8 5·6): 빌드 byte는 같은 입력을 EncodeTextureBlocks로 직접
+// 압축한 값과 같다 — 알파 있는 Default는 Rgba, 불투명은 Rgb(A = 1), sRGB는 sRGB profile,
+// Normalmap은 노멀 LA, Alpha는 EAC R11(16 bit 원본을 8 bit로 거치지 않고 R16), HDR_Compressed는 [0,
+// 1]로 자른 선형 RGBA8의 ASTC Rgb다.
+TEST(TextureBuild_AndroidAstcEacEncoding) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 8;
+    uint8 pixels[Size * Size * 4];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = static_cast<uint8>(index == 9 ? 100 : 255);
+    }
+
+    const auto expected = [&](TextureBlockFormat format, Span<const uint8> source,
+                              const TextureBlockOptions& options, Array<uint8>& out) noexcept {
+        auto bytes = TextureBlockOutputBytes(format, Size, Size, 1);
+        if (!bytes || !out.TryResize(static_cast<usize>(bytes.Value()))) {
+            return false;
+        }
+
+        TextureBlockImage image;
+        image.rgba = source;
+        image.sizeX = Size;
+        image.sizeY = Size;
+        return static_cast<bool>(EncodeTextureBlocks(format, image, options, out.View()));
+    };
+    const auto same = [](const Built& built, const Array<uint8>& want) noexcept {
+        return built.result.mips.Size() == 1 && built.result.mips[0].bytes.Size() == want.Size() &&
+               memcmp(built.result.mips[0].bytes.Data(), want.Data(), want.Size()) == 0;
+    };
+    TextureBuildSettings settings = Gray(Size, Size);
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.compression = TextureCompressionSettings::Default;
+    settings.srgb = true;
+    settings.mipGenSettings = TextureMipGenSettings::NoMipmaps;
+    settings.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+    Built built(allocator);
+    Array<uint8> want(allocator);
+    TextureBlockOptions options;
+    // 알파 있는 sRGB Default: ASTC 6×6 sRGB, Rgba.
+    REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::ASTC6x6UnormSrgb &&
+          built.result.alphaTransparent);
+    options.astcMode = TextureAstcMode::Rgba;
+    options.srgb = true;
+    REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(pixels, sizeof(pixels)),
+                     options, want));
+    CHECK(same(built, want));
+    // 불투명이면 Rgb(입력 알파를 보지 않는다).
+    pixels[9 * 4 + 3] = 255;
+    REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::ASTC6x6UnormSrgb &&
+          !built.result.alphaTransparent);
+    options.astcMode = TextureAstcMode::Rgb;
+    REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(pixels, sizeof(pixels)),
+                     options, want));
+    CHECK(same(built, want));
+    // 품질 Highest는 4×4다.
+    settings.compressionQuality = TextureCompressionQuality::Highest;
+    REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::ASTC4x4UnormSrgb);
+    REQUIRE(expected(TextureBlockFormat::Astc4x4, Span<const uint8>(pixels, sizeof(pixels)),
+                     options, want));
+    CHECK(same(built, want));
+    settings.compressionQuality = TextureCompressionQuality::Default;
+    // Normalmap: 선형 노멀 LA, swizzle (r, a, 0, 1).
+    settings.srgb = false;
+    settings.compression = TextureCompressionSettings::Normalmap;
+    REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::ASTC6x6Unorm);
+    CHECK(built.result.swizzle[1] == TextureSwizzle::A);
+    options.astcMode = TextureAstcMode::NormalLa;
+    options.srgb = false;
+    REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(pixels, sizeof(pixels)),
+                     options, want));
+    CHECK(same(built, want));
+    // Alpha + G16 원본: EAC R11은 16 bit 그대로 받는다(R 복제 — R16 little-endian).
+    uint8 gray16[Size * Size * 2];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        // 촘촘한 경사(11 bit로 약 1.2씩) — 8 bit로 양자화하면 블록 안 값이 두세 단계로 뭉친다.
+        const uint16 value = static_cast<uint16>(30000 + index * 37);
+        gray16[index * 2] = static_cast<uint8>(value & 0xFF);
+        gray16[index * 2 + 1] = static_cast<uint8>(value >> 8);
+    }
+
+    TextureBuildSettings alpha = settings;
+    alpha.format = TextureSourceFormat::G16;
+    alpha.compression = TextureCompressionSettings::Alpha;
+    REQUIRE(Build(allocator, alpha, Span<const uint8>(gray16, sizeof(gray16)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::EACR11Unorm);
+    REQUIRE(expected(TextureBlockFormat::EacR11, Span<const uint8>(gray16, sizeof(gray16)),
+                     TextureBlockOptions{}, want));
+    CHECK(same(built, want));
+    // 8 bit를 거치면 다른 byte다(16 bit 경로가 실제로 쓰임).
+    uint8 coarse[Size * Size * 2];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        const uint32 value = gray16[index * 2] | (gray16[index * 2 + 1] << 8);
+        const uint32 eight = (value * 255 + 32767) / 65535;
+        const uint32 wide = eight * 257;
+        coarse[index * 2] = static_cast<uint8>(wide & 0xFF);
+        coarse[index * 2 + 1] = static_cast<uint8>(wide >> 8);
+    }
+
+    Array<uint8> eight(allocator);
+    REQUIRE(expected(TextureBlockFormat::EacR11, Span<const uint8>(coarse, sizeof(coarse)),
+                     TextureBlockOptions{}, eight));
+    CHECK(memcmp(want.Data(), eight.Data(), want.Size()) != 0);
+    // HDR_Compressed + 1을 넘는 RGBA16F: ASTC Rgb 선형, [0, 1]로 자른 RGBA8 입력.
+    uint8 hdr[Size * Size * 8];
+    uint8 clamped[Size * Size * 4];
+    constexpr float Values[4] = {0.0f, 1.0f, 3.0f, 0.5f};
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        for (uint32 c = 0; c < 4; ++c) {
+            const float value = Values[(index + c) % 4];
+            const uint16 half = Float16::FromFloat(value).bits;
+            hdr[index * 8 + c * 2] = static_cast<uint8>(half & 0xFF);
+            hdr[index * 8 + c * 2 + 1] = static_cast<uint8>(half >> 8);
+            clamped[index * 4 + c] = value >= 1.0f   ? uint8{255}
+                                     : value == 0.5f ? uint8{128}
+                                                     : uint8{0};
+        }
+    }
+
+    TextureBuildSettings compressed = settings;
+    compressed.format = TextureSourceFormat::RGBA16F;
+    compressed.compression = TextureCompressionSettings::HDR_Compressed;
+    REQUIRE(Build(allocator, compressed, Span<const uint8>(hdr, sizeof(hdr)), built));
+    CHECK(built.result.pixelFormat == PixelFormat::ASTC6x6Unorm);
+    options.astcMode = TextureAstcMode::Rgb;
+    REQUIRE(expected(TextureBlockFormat::Astc6x6, Span<const uint8>(clamped, sizeof(clamped)),
+                     options, want));
+    CHECK(same(built, want));
+}
+
+// 결정적 부동소수 환경(12.17.9 6): 호출자가 FTZ·DAZ·0 쪽 반올림을 켜 두어도 빌드(sRGB 변환·mip
+// 생성·재표본· 인코딩) byte가 같다.
+TEST(TextureBuild_FloatingPointEnvironment) {
+    SystemAllocator allocator;
+    constexpr uint32 Size = 32;
+    uint8 pixels[Size * Size * 4];
+    for (uint32 index = 0; index < Size * Size; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = static_cast<uint8>(index % 3 == 0 ? 20 : 255);
+    }
+
+    TextureBuildSettings settings = Gray(Size, Size);
+    settings.format = TextureSourceFormat::RGBA8;
+    settings.compression = TextureCompressionSettings::Default;
+    settings.srgb = true;
+    settings.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    settings.resizeX = 24;
+    settings.resizeY = 20;
+    for (const graphics::GraphicsPlatform platform :
+         {graphics::GraphicsPlatform::Windows, graphics::GraphicsPlatform::Android}) {
+        settings.cookPlatform = static_cast<uint8>(platform);
+        Built plain(allocator);
+        REQUIRE(Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), plain));
+        const uint64 original = platform::detail::ReadFloatingPointControl();
+        platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit() |
+                                                    platform::detail::DenormalsAreZeroBit() |
+                                                    platform::detail::RoundTowardZeroBits());
+        Built disturbed(allocator);
+        const bool built =
+            Build(allocator, settings, Span<const uint8>(pixels, sizeof(pixels)), disturbed);
+        platform::detail::WriteFloatingPointControl(original);
+        REQUIRE(built);
+        REQUIRE(plain.result.mips.Size() == disturbed.result.mips.Size());
+        for (usize mip = 0; mip < plain.result.mips.Size(); ++mip) {
+            const Array<uint8>& left = plain.result.mips[mip].bytes;
+            const Array<uint8>& right = disturbed.result.mips[mip].bytes;
+            CHECK(left.Size() == right.Size() &&
+                  memcmp(left.Data(), right.Data(), left.Size()) == 0);
+        }
+    }
+}
+
+// 병렬 실행(12.17.9 4·5): TextureBuildExecution의 scheduler가 있어도 모든 mip byte가 직렬과
+// 같다(Android ASTC 배열 mip 사슬, Windows BC1 볼륨). scheduler가 있는데 scratch가 없으면 일을 하기
+// 전에 InvalidArgument다.
+TEST(TextureBuild_ParallelExecution) {
+    SystemAllocator allocator;
+    WorkerScheduler workers(allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 4;
+    REQUIRE(workers.Start(config));
+    constexpr uint32 Size = 32;
+    constexpr uint32 Layers = 3;
+    uint8 pixels[Size * Size * 4 * Layers];
+    for (uint32 index = 0; index < Size * Size * Layers; ++index) {
+        pixels[index * 4 + 0] = static_cast<uint8>(index * 7);
+        pixels[index * 4 + 1] = static_cast<uint8>(255 - index * 3);
+        pixels[index * 4 + 2] = static_cast<uint8>(index * 11);
+        pixels[index * 4 + 3] = static_cast<uint8>(index % 5 == 0 ? 90 : 255);
+    }
+
+    const auto same = [](const Built& a, const Built& b) noexcept {
+        if (a.result.mips.Size() != b.result.mips.Size() ||
+            a.result.pixelFormat != b.result.pixelFormat) {
+            return false;
+        }
+
+        for (usize mip = 0; mip < a.result.mips.Size(); ++mip) {
+            const Array<uint8>& left = a.result.mips[mip].bytes;
+            const Array<uint8>& right = b.result.mips[mip].bytes;
+            if (left.Size() != right.Size() ||
+                memcmp(left.Data(), right.Data(), left.Size()) != 0) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+    TextureBuildSettings array = Gray(Size, Size, Layers);
+    array.dimension = TextureDimension::Texture2DArray;
+    array.format = TextureSourceFormat::RGBA8;
+    array.compression = TextureCompressionSettings::Default;
+    array.srgb = true;
+    array.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+    array.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Android);
+    TextureBuildSettings volume = array;
+    volume.dimension = TextureDimension::Volume;
+    volume.numSlices = 4;
+    volume.sizeY = Size * Layers / 4;
+    volume.cookPlatform = static_cast<uint8>(graphics::GraphicsPlatform::Windows);
+    for (const TextureBuildSettings* settings : {&array, &volume}) {
+        const usize bytes = usize{settings->sizeX} * settings->sizeY * settings->numSlices * 4;
+        Built serial(allocator);
+        REQUIRE(Build(allocator, *settings, Span<const uint8>(pixels, bytes), serial));
+        TextureBuildExecution execution;
+        execution.scheduler = &workers;
+        execution.scratch = &allocator;
+        Built parallel(allocator);
+        parallel.ok = static_cast<bool>(BuildTexture(
+            allocator, *settings, Span<const uint8>(pixels, bytes), parallel.result, execution));
+        REQUIRE(parallel.ok);
+        CHECK(serial.result.mips.Size() > 1);
+        CHECK(same(serial, parallel));
+    }
+
+    TextureBuildExecution noScratch;
+    noScratch.scheduler = &workers;
+    Built rejected(allocator);
+    auto failed =
+        BuildTexture(allocator, array, Span<const uint8>(pixels, usize{Size} * Size * Layers * 4),
+                     rejected.result, noScratch);
+    CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(workers.Shutdown());
 }
 
 // 리뷰 반영(12.17.5): HDR_Compressed의 비압축 강제(6×6)는 원본 알파를 지키고 8×8은 BC6H(알파

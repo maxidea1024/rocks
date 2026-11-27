@@ -6,7 +6,7 @@
 namespace rocks::ui {
 
 // 장면 패스의 현재·직전 clip 좌표다. 카메라 jitter·해상도는 장면 렌더러 정책을 그대로 사용한다.
-struct WorldWidgetClipPlane {
+struct ROCKS_UIRENDER_API WorldWidgetClipPlane {
     Vec4 topLeft{};
     Vec4 topRight{};
     Vec4 bottomLeft{};

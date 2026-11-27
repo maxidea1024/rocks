@@ -475,6 +475,15 @@ Result<void> LowerCustomHlsl(LoweringContext& context) noexcept {
             if (!admitted || !admitted.Value()) {
                 return admitted ? Result<void>::Success() : Result<void>::Failure(admitted.Error());
             }
+
+            // Custom은 <이름>Sampler 인자로 자기 샘플러를 넘긴다(6.10절 텍스처 표 — 자기 출처
+            // slot).
+            auto sampled = context.Builder().SampledTexture(argument, IrSamplerSource::Own);
+            if (!sampled) {
+                return Result<void>::Failure(sampled.Error());
+            }
+
+            argument = sampled.Value();
         } else if (type.IsOpaque() || type.IsMatrix()) {
             SystemAllocator messageScratch;
             StringBuilder<> message(messageScratch);

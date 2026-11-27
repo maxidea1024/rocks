@@ -13,12 +13,14 @@
 #include <Material/MaterialInstance.h>
 #include <MaterialSchema/MaterialAssetReference.generated.h>
 #include <MaterialSchema/NodePropertyReader.h>
+#include <MaterialSchema/Nodes/Color/ColorRampProperties.generated.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallProperties.generated.h>
 #include <MaterialSchema/Nodes/Functions/MaterialSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/AttributeLayersProperties.generated.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/LayerStackDefaults.generated.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/LayerStackLayer.generated.h>
 #include <MaterialSchema/Nodes/MaterialAttributes/LayerStackProperties.generated.h>
+#include <MaterialSchema/Nodes/Parameters/CurveAtlasRowParameterProperties.generated.h>
 #include <Material/MaterialInstance.generated.h>
 
 // 머티리얼 에셋 타입 hook이다(Docs/Design/MaterialSystem 4.4·4.6.1절).
@@ -165,9 +167,10 @@ Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema&
     return Result<void>::Success();
 }
 
-// 그래프 안 함수 호출·MaterialSample·레이어 노드 참조를 Build 의존으로 더한다(Docs/Design/
-// MaterialSystem 6.12절 MS2e2·MS2e3 — 번역이 펼치는 그래프다, 4.6.1절). 자기 참조는 건너뛴다
-// (번역이 V3로 진단한다).
+// 그래프 안 함수 호출·MaterialSample·레이어 노드 참조와 ColorRamp 색 커브·CurveAtlasRowParameter
+// atlas를 Build 의존으로 더한다(Docs/Design/MaterialSystem 6.12절 MS2e2·MS2e3 — 번역이 펼치는
+// 그래프다, 6.13절 MS2f4 — 번역이 읽는 커브다, 6.10절 MS2c5 — 번역이 읽는 행 목록이다, 4.6.1절).
+// 자기 참조는 건너뛴다(번역이 그래프면 V3, 커브면 커브 없음으로 진단한다).
 Result<void> AddGraphReferences(const AssetTypeHookContext& context,
                                 const nodegraph::GraphDocument& document,
                                 AssetDependencySink& sink) noexcept {
@@ -180,6 +183,8 @@ Result<void> AddGraphReferences(const AssetTypeHookContext& context,
     auto sample = names->TryFind("Material.MaterialSample");
     auto layers = names->TryFind("Material.AttributeLayers");
     auto stack = names->TryFind("Material.LayerStack");
+    auto ramp = names->TryFind("Material.ColorRamp");
+    auto atlasRow = names->TryFind("Material.CurveAtlasRowParameter");
     SystemAllocator scratch;
     Array<AssetId> referenced(scratch);
     for (const nodegraph::Graph& graph : document.graphs) {
@@ -218,6 +223,13 @@ Result<void> AddGraphReferences(const AssetTypeHookContext& context,
                 asset = NodeAssetReference(
                     node, GeneratedType<material::MaterialSampleProperties>::Schema(),
                     "materialReference");
+            } else if (ramp && node.type == ramp.Value()) {
+                asset = NodeAssetReference(
+                    node, GeneratedType<material::ColorRampProperties>::Schema(), "colorCurve");
+            } else if (atlasRow && node.type == atlasRow.Value()) {
+                asset = NodeAssetReference(
+                    node, GeneratedType<material::CurveAtlasRowParameterProperties>::Schema(),
+                    "atlas");
             } else {
                 continue;
             }

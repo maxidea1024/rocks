@@ -6,6 +6,7 @@
 #include <GraphicsTypes/GraphicsPlatform.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <Texture/TextureEnums.h>
+#include <TextureTools/TextureBlockEncode.h>
 
 // 쿠킹 텍스처의 출력 형식 선택이다(Docs/Design/AssetSystem 12.17.5 2 — UE 5.8
 // GetDefaultTextureFormatName·TextureFormatDXT::GetEncodedPixelFormat 순서). 설정·원본 형식·상위
@@ -36,6 +37,10 @@ enum class TextureFormatEncoding : uint8 {
     Bc6h,
     // ISPC Texture Compressor(12.17.6 — 알파 프로필은 alphaProfile).
     Bc7,
+    // 자체 EAC R11 인코더(12.17.8 4 — 입력은 R16).
+    EacR11,
+    // astc-encoder(12.17.8 3 — 블록 크기는 pixelFormat, 채널 배치는 astcMode).
+    Astc,
 };
 
 // 출력 전 채널 복제다(12.17절 TD6 — UE bReplicateRed·bReplicateAlpha).
@@ -79,6 +84,8 @@ struct TextureFormatRequest {
     // 쿠킹된 상위 mip 크기다(TextureBuildTopMipSize — UE GetBuiltTextureSize).
     uint32 topSizeX = 0;
     uint32 topSizeY = 0;
+    // ASTC 블록 크기를 정하는 품질이다(12.16.2 — Android만 본다, UE GetQualityFormat).
+    TextureCompressionQuality compressionQuality = TextureCompressionQuality::Default;
 };
 
 // 형식 경고 수 상한이다(EncoderUnavailable, PlatformFormatFallback — 각 한 번. TC3부터 형식 선택은
@@ -110,6 +117,9 @@ struct TextureFormatChoice {
     // ForceAlpha면 참, 아니면 원본 알파 판정. UE GetProfile_alpha_basic·GetProfile_basic). BC7 밖은
     // 거짓이다.
     bool alphaProfile = false;
+    // ASTC 입력 채널 배치다(12.17.8 6 — 알파 없는 RGBA·RGBA HQ와 BC6H 대체는 Rgb, 노멀은 NormalLa).
+    // ASTC 밖은 Rgba(보지 않는다)다.
+    TextureAstcMode astcMode = TextureAstcMode::Rgba;
     usize warningCount = 0;
     TextureFormatWarning warnings[TextureFormatMaxWarnings];
 };
@@ -127,8 +137,8 @@ ROCKS_TEXTURETOOLS_API Result<void> SelectTextureFormat(const TextureFormatReque
                                                         TextureFormatChoice& out) noexcept;
 
 // 알파 판정 결과가 출력에 영향을 주는지다: 고른 형식이 달라지거나(AutoDXT — UE
-// TextureCompressorModule 4016–4036의 두 형식 비교) BC7 인코더 프로필이 달라질 때(12.17.6 4)
-// 참이다. 빌드는 참일 때만 원본 알파를 잰다. 오류 입력이면 false다.
+// TextureCompressorModule 4016–4036의 두 형식 비교) BC7 인코더 프로필이나 ASTC 채널 배치가 달라질
+// 때(12.17.6 4·12.17.8 6) 참이다. 빌드는 참일 때만 원본 알파를 잰다. 오류 입력이면 false다.
 ROCKS_TEXTURETOOLS_API bool TextureFormatNeedsAlpha(const TextureFormatRequest& request,
                                                     const TextureFormatTarget& target) noexcept;
 

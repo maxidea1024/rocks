@@ -1193,26 +1193,8 @@ Result<void> SourceWriter::TextureDeclarations() noexcept {
     }
 
     for (usize slot = 0; slot < table.Size(); ++slot) {
-        bool own = false;
-        for (const IrValue& value : module_.Values()) {
-            if (value.op == IrOp::CustomArguments) {
-                // Custom 인자 텍스처는 <이름>Sampler 인자로 자기 샘플러를 넘긴다(UE).
-                for (uint8 operand = 0; operand < value.operandCount; ++operand) {
-                    const IrValue& argument = module_.Values()[value.operands[operand]];
-                    own = own || (argument.op == IrOp::Texture && argument.immediate[3] == slot);
-                }
-
-                continue;
-            }
-
-            if (value.op != IrOp::TextureSample ||
-                value.immediate[2] != static_cast<uint64>(IrSamplerSource::Own)) {
-                continue;
-            }
-
-            const IrValue& texture = module_.Values()[value.operands[0]];
-            own = own || texture.immediate[3] == slot;
-        }
+        // slot마다 샘플러 출처 하나다(6.10절 텍스처 표 — Custom 인자 텍스처도 자기 출처 slot).
+        const bool own = table[slot].sampler == IrTextureSampler::Own;
 
         const StringView type = TextureTypeName(table[slot].kind);
         const StringView parts[] = {slot == 0 ? StringView("\n") : StringView(), type,

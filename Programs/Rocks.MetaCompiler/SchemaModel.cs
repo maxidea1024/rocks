@@ -179,10 +179,10 @@ internal sealed class FieldModel
     public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8, DuplicateTransient 16, NonTryoutDuplicateTransient 32, SaveGame 64,
-    // TextExportTransient 128(리플렉션 B9h1), TextMapMergeByKey 256(AssetSystem 10.3.1절).
+    // TextExportTransient 128(리플렉션 B9h1), TextMapMergeByKey 256(AssetSystem 10.3.1절), Notify 512(ChangeNotification CN-D1).
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u) |
         (Spec.DuplicateTransient ? 16u : 0u) | (Spec.NonTryoutDuplicateTransient ? 32u : 0u) | (Spec.SaveGame ? 64u : 0u) |
-        (Spec.TextExportTransient ? 128u : 0u) | (Spec.TextMapMergeByKey ? 256u : 0u);
+        (Spec.TextExportTransient ? 128u : 0u) | (Spec.TextMapMergeByKey ? 256u : 0u) | (Spec.Notify ? 512u : 0u);
 
     // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
@@ -756,9 +756,9 @@ internal sealed class FunctionModel
     // 실효 도구 이름이다(Name="…", 없으면 C++ 이름 — FD2).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
 
-    // 실행 schema의 FunctionFlags 비트다(Static 1, Const 2, Pure 4, EditorOnly 8, ReturnsResult 16).
+    // 실행 schema의 FunctionFlags 비트다(Static 1, Const 2, Pure 4, EditorOnly 8, ReturnsResult 16, Notify 32 — ChangeNotification CN-D1).
     public uint Flags => (IsStatic ? 1u : 0u) | (IsConst ? 2u : 0u) | (Spec.Pure ? 4u : 0u) | (Spec.EditorOnly ? 8u : 0u) |
-        (ReturnsResult ? 16u : 0u);
+        (ReturnsResult ? 16u : 0u) | (Spec.Notify ? 32u : 0u);
 }
 
 // 리플렉션 타입(ROCKS_CLASS 클래스, ROCKS_STRUCT struct, ROCKS_ENUM enum) 모델이다. enum은 IsEnum이고 Base는 "",
@@ -875,7 +875,7 @@ internal sealed class ClassModel
     // 첫 Migrate 선언 위치다(진단용).
     public SourceSite? MigrateSite { get; set; }
 
-    // struct가 검증 hook `static Result<void> Validate(const S&) noexcept`를 선언했다(Docs/Design/CurveData.ko.md 9.1절). 생성 Ops가
+    // struct가 검증 hook `static Result<void> Validate(const S&) noexcept`를 선언했다(Docs/Design/CurveData/README.ko.md 9.1절). 생성 Ops가
     // RuntimeStructOps::validate·validateTree에 잇는다. 모양 규칙(정적·시그니처·단일 선언·접근)은 ClangAstParser가, 참조 struct·Binds
     // 미러 금지는 SchemaValidator가 RMC2309로 본다.
     public bool HasValidate { get; set; }

@@ -1,4 +1,5 @@
 #include <AssetCooker/CookTargets.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <CurveAssetTools/CurveTableCook.h>
 #include <CurveAssets/CurveTableAsset.generated.h>
 #include <CurveAssets/CurveTableAsset.h>
@@ -152,9 +153,22 @@ Result<void> CurveTableCookProcessor::Cook(CookContext& context) const noexcept 
                         return Result<void>::Success();
                     }
 
-                    if (auto removed = curve.TryRemoveRedundantKeys(CookRedundantKeyTolerance);
-                        !removed) {
-                        return removed;
+                    // 결정적 판(CurveData 5.9절 D22 — 허용오차 0의 비교가 호스트마다 달라지지
+                    // 않게)을 기본 부동소수점 환경에서 부른다.
+                    struct Job {
+                        TangentCurve* curve;
+                        Result<void> result;
+                    };
+                    Job job{&curve, Result<void>::Success()};
+                    platform::RunWithDeterministicFloatingPoint(
+                        [](void* context) noexcept {
+                            Job& run = *static_cast<Job*>(context);
+                            run.result = run.curve->TryRemoveRedundantKeysDeterministic(
+                                CookRedundantKeyTolerance);
+                        },
+                        &job);
+                    if (!job.result) {
+                        return Result<void>::Failure(job.result.Error());
                     }
 
                     curve.AutoSetTangents();

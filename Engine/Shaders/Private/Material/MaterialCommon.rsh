@@ -14,6 +14,7 @@
 #include "/Engine/Private/Common/ShaderPrelude.rsh"
 #include "/Engine/Private/Shading/SurfaceAttributes.rsh"
 #include "/Engine/Private/Material/MaterialSelect.rsh"
+#include "/Engine/Private/Common/SharedSamplers.rsh"
 #include "/Engine/Private/Material/MaterialTexture.rsh"
 #include "/Engine/Private/Material/MaterialNoise.rsh"
 

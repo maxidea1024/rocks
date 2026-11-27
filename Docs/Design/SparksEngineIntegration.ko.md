@@ -24,7 +24,7 @@
 | SE-R4 | binding schema 출력: 메타 컴파일러가 모듈마다 `.sparkbind.json`을 생성한다(형식은 SL 10.2절 "binding schema 파일 형식", LC2a 확정 — 함수의 `overridable`(재정의 가능 가상 함수, SD65)은 LC2b, 문맥 이름의 타입 `World`·`PlaySession`·`InputSystem`·`Connection`(SL §3.10)은 LC2c, 효과·lane·자원 정책 key는 LC3 이후 더한다) | 일부 | 타입·필드·enum의 `.sparkbind.json` 생성은 있다(EI1a — `SparksBinding.cs`, `<out>/Metadata/<M>.sparkbind.json`, 시험 `Meta.SparksBinding*`·`SparksBinding_EngineSchemasCompile`). 함수·이벤트·계산 속성·`changed`는 EI1b–EI1d | EI1 | [SparksBinding](SparksBinding.ko.md) EI1a, SL 10.2절 |
 | SE-R5 | interface 표(CU9): `TypeInfo`의 interface 목록·slot 표, C++ `ROCKS_INTERFACE` | 없음 | 위 매크로 목록에 없다 | EI2 | SL 10.3절 |
 | SE-R6 | 편집 메타(CU1): 강제 범위(Min·Max), 편집 범위·단위·편집 조건 | 일부 | 필드 지정자 `Category`·`DisplayName`·`ReadOnly`·`MaxElements`는 있다(`Specifiers.cs`). 범위·단위·조건은 없다 | EI5 | UiToolkit CU1, SL 10.1절 |
-| SE-R7 | 변경 통지(CU5): native 필드의 `Changed`, 계산 속성(getter·setter 쌍) | 없음 | ObjectRuntime·MetaSchema 공개 헤더에 통지 API가 없다 | EI3 | UiToolkit CU5, SL 5.3·10.2절 |
+| SE-R7 | 변경 통지(CU5): native 필드의 `Changed`, 계산 속성(getter·setter 쌍) | 설계 | [변경 통지](ChangeNotification.ko.md) CN1–CN4(`Notify` 지정자·구독 API·생성 setter·schema `changed` — CN-D21·CN-D22). 구현 전 | EI3 | UiToolkit CU5, SL 5.3·10.2절 |
 | SE-R8 | 안정 ID 공유: Sparks 컴파일러를 `.rocksids.json`의 두 번째 발급자로 인정(모듈 경로 이름 키, subobject·function·rpc kind) | 파서 확장 완료(LC4d) | `StableIdManifest.cs`가 `subobject`·`function`·`rpc`·`enumCase` kind와 Sparks 이름 키 `<패키지>/<경로>.<선언>[.<멤버>]`(handler `on(<경로>)`)를 받는다(시험 `StableIds.SparksNamesAndKinds`). 컴파일러는 manifest를 읽어 발급 대기 목록·S1005를 내고, 발급(GUID 쓰기)은 CLI `sparks ids`(LC8)가 한다 | EI2(엔진 타입과 공유) | SL 12.2절, SparksBytecode 6.1절 |
 | SE-R9 | 엔진 공통 진단 코드 등록부(S·RMC·UI 코드 대역) | 있음(문서) | CompilerDiagnostics "진단 코드 등록부" 절(LC0에서 추가) | — | SL 8.1절 |
 
@@ -56,7 +56,7 @@ SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 LC4d에서 함께 했�
 | SE-W5 | 시작 뒤 Tick 설정 변경(reload 때 `TickSettings` 재등록) | 일부 | `Actor::SetTickEnabled`는 있다. 설정은 `OnStart` 때 한 번 등록한다 | EI6 | SL 12.4절 |
 | SE-W6 | UI 시계(`Clock.UI`) | 일부 | `Core/Time/GameClock.h`에 pause·배율과 무관한 `UnscaledTimeSeconds()`는 있다. 별도 UI 시계 타입은 없다 | EI5 | SL 6.1절 |
 | SE-W7 | 스트리밍 셀, `Teleport`의 prefetch, data layer, 셀 사이 영속 Actor 참조(SoftEntityId) | 없음 | World 공개 헤더에 없다 | EI4 | 전체 계획 10절, SL 7.6절 |
-| SE-W8 | 이벤트 slot 표: 이벤트 필드가 없는 확장 이벤트·native `Changed`·World 이벤트·Actor 물리 이벤트를 발행자 객체에 지연 할당해 저장 | 없음 | — | EI3 | SL 5.5절 |
+| SE-W8 | 이벤트 slot 표: 이벤트 필드가 없는 확장 이벤트·native `Changed`·World 이벤트·Actor 물리 이벤트를 발행자 객체에 지연 할당해 저장 | 설계 일부 | 표 자체와 native `Changed` 몫은 [변경 통지](ChangeNotification.ko.md) CN-D4(CN1), 확장·World·물리 이벤트 칸은 EI3 | EI3 | SL 5.5절 |
 
 ### 2.4 에셋·Prefab
 

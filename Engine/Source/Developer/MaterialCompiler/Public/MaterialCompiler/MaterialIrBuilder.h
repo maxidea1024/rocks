@@ -86,9 +86,15 @@ public:
     // 종류다(TextureObject 입력으로 받은 샘플이 쓴다). 빈도 Uniform. 오류: 같은 (출처, id)의 종류가
     // 다르거나 kind가 None이면 InvalidArgument.
     Result<IrValueId> Texture(const IrTexture& texture, uint8 samplerType) noexcept;
+    // texture(Texture 값)의 샘플러 출처 source 판이다(즉시값 [2] 샘플러 출처 — 모듈이 그 출처의
+    // slot에 매긴다, 6.10절 텍스처 표). TextureSample이 스스로 부르고, Custom 인자는 자기 샘플러로
+    // 부른다. Texture 값이 아니면(텍스처 형 다른 값) 그대로 돌려준다. 오류: 텍스처 형이 아니거나
+    // source가 범위 밖이면 InvalidArgument.
+    Result<IrValueId> SampledTexture(IrValueId texture, IrSamplerSource source) noexcept;
     // 텍스처 샘플이다. uv는 종류에 맞는 Float 폭(2D·External 2, Cube·2DArray·3D 3, CubeArray 4),
     // Level·Bias는 first가 Float 스칼라, Gradient는 first·second가 미분 폭(uv 폭 — 2DArray는 2,
-    // CubeArray는 3)의 Float다. 결과 Float4. 오류: 규칙 밖이면 InvalidArgument.
+    // CubeArray는 3)의 Float다. 텍스처 피연산자는 desc.samplerSource 판(SampledTexture)이다. 결과
+    // Float4. 오류: 규칙 밖이면 InvalidArgument.
     Result<IrValueId> TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
                                     IrValueId uv, IrValueId first, IrValueId second) noexcept;
     // 표면 값이다(6.11절 MS2d1 — record는 번역기 표면 기록 번호). 기록마다 다른 값이다.

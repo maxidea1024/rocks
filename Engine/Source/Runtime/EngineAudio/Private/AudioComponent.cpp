@@ -37,6 +37,18 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     }
 
     options.remainActiveIfDropped = remainActiveIfDropped;
+    options.category = category_;
+    options.alwaysPlay = alwaysPlay;
+    options.isUiSound = isUiSound;
+    if (enableLowPassFilter) {
+        options.lowPassFrequency = lowPassFilterFrequency;
+    }
+
+    if (enableHighPassFilter) {
+        options.highPassFrequency = highPassFilterFrequency;
+    }
+
+    options.occlusionCheckInterval = occlusionCheckInterval;
     // 동시 발음 소유자는 소유 Actor다(UE owner — limitToOwner 그룹, 3.41.2절).
     if (!GetOwner().IsNull()) {
         options.owner = AudioObjectKey(GetOwner());
@@ -51,8 +63,9 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     }
 
     // emitter를 잡지 못했으면(scene이 끝남·표 가득) 2D가 아니라 위치 재생으로 낸다.
-    auto played = emitter_.IsValid() ? audio->PlayAttached(emitter_, sound_, Move(options))
-                                     : audio->PlayAt(sound_, WorldLocation(), Move(options));
+    auto played = emitter_.IsValid()
+                      ? audio->PlayAttached(emitter_, sound_, Move(options))
+                      : audio->PlayAt(sound_, WorldLocation(), WorldQuaternion(), Move(options));
     if (!played) {
         return Result<void>::Failure(played.Error());
     }
@@ -113,6 +126,36 @@ Result<void> AudioComponent::SetVolumeMultiplier(float value) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> AudioComponent::SetLowPassFilter(bool enabled, float frequency) noexcept {
+    if (!engine_audio_detail::IsFiniteInRange(frequency, 0.0f, MaxAttenuationFilterFrequency)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    enableLowPassFilter = enabled;
+    lowPassFilterFrequency = frequency;
+    if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && playback_.IsValid()) {
+        return audio->SetParameter(playback_, PlaybackParameter::LowPassFrequency,
+                                   enabled ? frequency : MaxAttenuationFilterFrequency, 0);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> AudioComponent::SetHighPassFilter(bool enabled, float frequency) noexcept {
+    if (!engine_audio_detail::IsFiniteInRange(frequency, 0.0f, MaxAttenuationFilterFrequency)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    enableHighPassFilter = enabled;
+    highPassFilterFrequency = frequency;
+    if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && playback_.IsValid()) {
+        return audio->SetParameter(playback_, PlaybackParameter::HighPassFrequency,
+                                   enabled ? frequency : 0.0f, 0);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> AudioComponent::SetPitchMultiplier(float value) noexcept {
     if (!engine_audio_detail::IsFiniteInRange(value, audio::MinPitch, audio::MaxPitch)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -149,7 +192,7 @@ Result<void> AudioComponent::CreateSystemState(SystemStateKind kind) noexcept {
 
     // World에 오디오가 없거나 scene이 끝났으면 emitter 없이 등록한다(재생은 PlayAt·Ignored).
     if (AudioWorldSubsystem* audio = Subsystem()) {
-        auto registered = audio->RegisterEmitter(WorldLocation());
+        auto registered = audio->RegisterEmitter(WorldLocation(), WorldQuaternion());
         emitter_ = registered ? registered.Value() : AudioEmitterId{};
     }
 
@@ -177,7 +220,8 @@ void AudioComponent::OnTransformUpdated() noexcept {
     }
 
     if (AudioWorldSubsystem* audio = Subsystem()) {
-        audio->UpdateEmitter(emitter_, WorldLocation());
+        // 회전만 바뀐 때도 보낸다(상자·캡슐·원뿔 감쇠의 축 — 3.42.2절).
+        audio->UpdateEmitter(emitter_, WorldLocation(), WorldQuaternion());
     }
 }
 

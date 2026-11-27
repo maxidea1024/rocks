@@ -31,6 +31,21 @@ Result<void> PhysicsSettings::Validate(const PhysicsSettings& settings) noexcept
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    auto positive = [](float value) noexcept { return math::IsFinite(value) && value > 0.0f; };
+    auto nonNegative = [](float value) noexcept { return math::IsFinite(value) && value >= 0.0f; };
+    auto knownMode = [](CombineMode mode) noexcept {
+        return static_cast<uint8>(mode) <= static_cast<uint8>(CombineMode::Max);
+    };
+    if (!positive(settings.maxAngularVelocity) || !positive(settings.maxLinearVelocity) ||
+        !nonNegative(settings.restitutionThreshold) ||
+        !nonNegative(settings.collisionMarginFraction) ||
+        !nonNegative(settings.collisionMarginMax) || !knownMode(settings.frictionCombineMode) ||
+        !knownMode(settings.restitutionCombineMode) ||
+        static_cast<uint8>(settings.defaultDegreesOfFreedom) >
+            static_cast<uint8>(SettingsDof::XYPlane)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     return Result<void>::Success();
 }
 

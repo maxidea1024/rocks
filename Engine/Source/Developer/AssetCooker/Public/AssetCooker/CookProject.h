@@ -129,6 +129,11 @@ struct CookProjectRequest {
     // 참이면 처리기가 너겟 적중을 다시 만들어 대조한다(CookContext::verifyNuggets). 재사용하지
     // 않는다 (재사용 대상은 처리기를 거치지 않아 대조가 빈다 — 10.2절 "A4e 구현 세부").
     bool verifyNuggets = false;
+    // 처리기 안 병렬 실행이다(CookRunRequest로 넘긴다)(AssetSystem 12.17.9 4 — 텍스처 블록 압축).
+    // scheduler가 있으면 scratch는 동시 Allocate·Deallocate가 안전한 allocator여야 한다. 결과
+    // byte와 무관하다(너겟 키에 넣지 않는다).
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
     // 기존 매니페스트 크기 상한이다(넘으면 깨진 것으로 본다 — 시험이 낮춘다).
     uint64 manifestLimitBytes = CookedManifestMaxFileBytes;
     // 비에셋 산출물 단계 표다(null이면 빈 표 — asset-cook은 CookArtifactStages()). 셰이더 있는

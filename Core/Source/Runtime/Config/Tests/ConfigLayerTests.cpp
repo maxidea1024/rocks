@@ -244,7 +244,7 @@ TEST(Config_AssignmentTargets) {
 }
 
 // 설정 층 적용(struct 값 대상 대입 묶음)도 struct 검증 hook을 게시 전에
-// 부른다(Docs/Design/CurveData.ko.md 17.2절 — CV3 리뷰 1): low > high인 span은
+// 부른다(Docs/Design/CurveData/README.ko.md 17.2절 — CV3 리뷰 1): low > high인 span은
 // FieldValue(InvalidStructValue) 진단이고 값은 그대로다.
 TEST(Config_StructValidationHookRejectsLayerValue) {
     ConfigFixture fixture;

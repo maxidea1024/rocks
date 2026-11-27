@@ -3142,6 +3142,41 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyModel::health",
+      "id": "05c7decc427d474ab38e1e1de5607445",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyModel::label",
+      "id": "1dd9962a40cd4f3a98a3c0cd6048a702",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyModel::partner",
+      "id": "2eb33374e45a410d80b7a7f1411dd44f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyModel::plain",
+      "id": "3b61562cd8c042dba36d28eb7a1a3d31",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyModelChild::speed",
+      "id": "f3732e4641c842f38d03adb252b0e61a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::OptionalHolder::asset",
       "id": "90b8439166294dfc90a0c4062004ac0d",
       "aliases": [],
@@ -4373,6 +4408,27 @@
       "retired": false
     },
     {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::NotifyModel::Doubled",
+      "id": "b2e75184efd44acc9e9d5f4b18008680",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::NotifyModel::Plain",
+      "id": "72e92d7279904de887e374bb9d43c4c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::NotifyModelChild::Fast",
+      "id": "1f93717488aa47dbb29871fd4b97d328",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "identity_fixture::RenamedActor",
       "id": "c0100000000000000000000000000001",
@@ -5505,6 +5561,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::Node",
       "id": "ad100000000000000000000000000002",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyModel",
+      "id": "6cafbaba4f1242f2840676209bbf285e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyModelChild",
+      "id": "d4f82027e0d04ba5ba78ec48555a3b89",
       "aliases": [],
       "retired": false
     },

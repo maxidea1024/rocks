@@ -164,5 +164,22 @@ JSON에서 backend 값은 형식 목록을 한 층 감싼 struct(`ShaderFormatLi
 - **SSD15 런타임 형식 선택.** 매니페스트 머리의 `graphicsBackends` 순서대로 backend를 시도하고, backend마다 매니페스트 머리의 `shaderFormats[backend]` 앞에서부터 처음으로 다음을 모두 만족하는 형식을 고른다: (1) 그 형식의 `Engine` 라이브러리 항목이 있다, (2) 형식 사실의 `limits`가 장치 한도 안이다(7.2절 4항 대조 규칙), (3) 형식 사실의 `deviceRequirements`를 장치가 채운다. 없으면 그 backend는 `Unsupported`이고 다음 backend를 시도한다. (3)을 위해 Graphics `DeviceCaps`가 장치 요구 비트를 알아야 한다(RenderBase GX1 — 14절). 매니페스트 없이 공급자로 도는 실행은 호스트 플랫폼 TargetProfile(SSD24)의 순서로 같은 규칙을 쓰고 (1)은 공급자가 그 형식을 만들 수 있는지로 대신한다.
 - **SSD16 Development 필요 시 컴파일(SX14 공급자).** 쿠킹 라이브러리가 없는 형식(`GLES31_PC`, 개발 트리에서 쿠킹하지 않고 돌리는 실행)은 RenderBase 셰이더 공급자 interface를 Development 실행 파일이 `ShaderCompiler` 구현으로 채운다: 등록부 열거(12.2.1절 SSD6) → 관리자 `Compile`(일괄, 너겟 캐시) → **메모리 라이브러리**(12.2.1절 SSD7 v1 byte를 메모리에서 만든다 — 런타임 경로를 하나로 둔다) → 셰이더 집합 공급 완료. 같은 형식·같은 등록부·같은 `cookDevelopmentShaders`면 메모리 라이브러리 byte는 쿠킹 라이브러리 byte와 같다(완료 기준). 등록 뒤에 생긴 조합은 `CompileNow`(SC12). Release 실행 파일에는 공급자가 없다(9절). RenderBase SX14가 "SH1 산출물"로 적은 공급자 interface는 SH2e에서 만든다(14절).
   - **개발 전용 항목의 실패.** 완결성 검사는 개발 전용 항목을 빼고 한다(12.2.1절 SSD8). 개발 전용 항목을 공급자가 만들지 못하면(컴파일 실패·도구 없음·Release 구성) 그 항목 조회는 `Unsupported`이고 호출자는 진단 없는 퍼뮤테이션으로 대체한다(7.2절 12항). 시작은 실패하지 않는다.
+  - **너겟 캐시를 쓰지 못하던 결함과 처리(개정 63, 2026-11-28).**
+    - 증상: 쿠킹 엔진 셰이더 없이 Sandbox `--engine --window`(개발 공급자 경로)를 띄우면, 실행마다 엔진 셰이더 job 118개(D3D12_SM6)를 모두 다시 컴파일했다. 두 번째 실행도 같았다. 측정(GTX 1060, Debug)은 이랬다.
+      - 공급자 로그: `118 jobs, 0 nugget hits, 4 workers started, 4 batches`, 만들기 2223–2527 ms
+      - 시작 단계 Shaders: 2.5–3.7 s
+      - 워커 4개: 약 2 s 동안 CPU 약 7.4 s
+      - 같은 너겟 저장소(`Engine/Intermediate/AssetNuggets`)를 쓰는 `shader-compile`은 두 번 다 적중했다(`cache-hits 1`, `workers 0`). 그래서 캐시 자체가 아니라 공급자의 캐시 연결 문제였다.
+      - 쿠킹 엔진 셰이더 경로는 장치 생성 0.45 s, 화면 그리기 시작 0.58 s로 이 구간이 없다.
+    - 원인: `WorkerScheduler`는 Start·Shutdown을 생성 스레드 전용으로 정한다(`Task/WorkerScheduler.h`). 공급자 상태는 스케줄러를 모듈 Startup(주 스레드)에서 만들고 모듈 Shutdown(주 스레드)에서 닫았다. 그런데 `Start`는 첫 셰이더 요청을 받는 렌더 lane 스레드의 `Prepare`에서 불렀다. `Start`가 `WrongThread`로 실패하면 공급자는 로그 없이 캐시 없이 진행했다. 실패를 조용히 넘긴 탓에 SH2e부터 드러나지 않았다.
+    - 처리:
+      - 스케줄러를 생성과 같은 스레드(모듈 Startup의 `Initialize`)에서 시작해, 생성·시작·종료가 모두 주 스레드에 있게 했다. 기본 설정이 워커 스레드 하나라 미리 띄우는 비용은 작다. `Prepare`는 시작된 스케줄러가 있을 때만 너겟 캐시를 연다.
+      - 캐시 열기 실패, backend 꺼짐(`NuggetCache::OpenError`), 스케줄러 시작 실패를 각각 Warning으로 남긴다. 캐시 없이 컴파일하는 것은 그대로지만, 이제 이유가 보인다.
+      - 첫 만들기 뒤 준비·만들기 시간, job 수, 너겟 적중 수, 워커 시작 수, 묶음 수를 Info로 남긴다(시작 시간 진단).
+      - 스케줄러 시작 실패 때 열린 캐시를 닫지 않던 누수도 함께 고쳤다.
+    - 버린 대안:
+      - 스케줄러를 lane에서 만들고 닫기: 공급자 Shutdown은 모듈 Shutdown(주 스레드)에서 오므로 소유 스레드가 둘로 갈린다.
+      - `WorkerScheduler`의 스레드 규칙 풀기: 계약이 Shutdown의 Join 안전을 기대고 있어 Task 모듈 쪽 변경이 크고, 이 결함에는 필요 없다.
+    - 결과(같은 기계·Debug·D3D12_SM6, 수정 전 2223–3639 ms·`0 nugget hits`·워커 4): 수정 뒤 세 번 연속 `118 jobs, 118 nugget hits, 0 workers started, 0 batches`이고 만들기가 631–899 ms다. 남은 시간은 job 118개의 전처리·키 계산·너겟 읽기다(Debug). 처음 쓰는 키(캐시가 빈 상태)는 여전히 모두 컴파일하며, 그때의 병렬은 워커 묶음 분배(11.2절 SC4 — 묶음 32개 고정이라 118개가 워커 4개에만 간다)를 따로 고친다.
 - **SSD17 시험 루트.** `/Plugin/EngineShaderTests`(개정 29)는 쿠킹에 넣지 않으므로 그 셰이더 타입은 시험 runner가 자기 등록부에만 등록하고 공급자로 컴파일한다.
 - 완료 기준(위에 더한다): TargetProfile 새 칸의 검증 음성 대조(`shaderFormats` Replace 병합 포함), 쿠킹 → 매니페스트 v2(머리 순서 포함) → 런타임 열기 왕복(D3D12·D3D11·Vulkan, 프로젝트 루트와 엔진 전용 루트), 부분 쿠킹의 라이브러리 재사용과 cookKey 변화 시 재생성, 형식 선택(상한·장치 요구·없는 라이브러리·매니페스트 순서), 공급자 경로(`GLES31_PC` 공급 완료, Release 구성에서 `UnsupportedCapability`), **같은 형식에서 공급자 메모리 라이브러리 byte = 쿠킹 라이브러리 byte**, 매니페스트 v1 거부, `cookDevelopmentShaders` 거짓이면 개발 전용 항목이 없음, 개발 전용 항목 공급 실패 시 시작 성공·조회 `Unsupported`.

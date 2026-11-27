@@ -51,7 +51,7 @@ ClipSourceData {
 - **회전 원본에 관한 한계.** UE 5.8은 본 키를 FK 채널(이동·회전·크기 각 3개 float 채널)에 저장하고 회전은 Euler 각이다. 읽을 때 quaternion으로 바꾼다(AnimSequencerDataModel.cpp:1260-1293). 그래서 Rocks가 받는 원본은 "프레임별로 평가한 Transform"이다. float로 저장하는 이유는 UE의 원본 키 형식(`FRawAnimSequenceTrack`, AnimTypes.h:852-866)과 런타임 평가가 float이기 때문이다. quaternion의 연속 키 사이 부호 반전은 원본 그대로 둔다. 보간 때 최단 경로를 고르는 것은 평가 쪽 규칙이다.
 - **상수 트랙.** 성분 하나의 모든 키가 비트 단위로 같으면 키 1개로 줄인다(손실 없음).
 - 트랙은 본 이름으로 스켈레톤과 맞춘다. 가상 본 이름도 받는다(UE는 전체 계층 기준으로 검증한다 — AnimSequencerController.cpp:1496-1502). 스켈레톤에 없는 본의 트랙은 임포트 때 `UnknownBoneTrack` 경고를 내고 보존한다. 빌드는 무시한다.
-- 커브는 Curves 모듈 `TangentCurve`(UE `FRichCurve` 대응, [커브 데이터](../CurveData.ko.md))를 그대로 쓴다. 키 시간은 float 초다(UE도 시퀀서 채널에서 `FRichCurve`로 줄 때 float 초로 바꾼다 — AnimSequencerHelpers.cpp:13-28). `ClipCurveFlags`는 UE `AACF_*`(AnimCurveTypes.h:41-57) 가운데 `Editable`·`Metadata`·`Disabled`를 둔다.
+- 커브는 Curves 모듈 `TangentCurve`(UE `FRichCurve` 대응, [커브 데이터](../CurveData/README.ko.md))를 그대로 쓴다. 키 시간은 float 초다(UE도 시퀀서 채널에서 `FRichCurve`로 줄 때 float 초로 바꾼다 — AnimSequencerHelpers.cpp:13-28). `ClipCurveFlags`는 UE `AACF_*`(AnimCurveTypes.h:41-57) 가운데 `Editable`·`Metadata`·`Disabled`를 둔다.
 - animated bone attribute(UE `FAnimationAttributeIdentifier`)는 후속이다. 임포트 때 개수만 경고한다.
 
 ### 7.3 이벤트

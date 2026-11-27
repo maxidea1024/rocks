@@ -15,7 +15,7 @@
 #include <ReflectionText/TextJson.h>
 #include <TestSupport/Test.h>
 
-// 계단 커브 셋의 리플렉션 시험이다(Docs/Design/CurveData.ko.md 9절·16절 — CV6, fixture
+// 계단 커브 셋의 리플렉션 시험이다(Docs/Design/CurveData/README.ko.md 9절·16절 — CV6, fixture
 // CurvesTestFixtures/CurveFixture.h의 StepCurveHolder): 필드·Array 원소·Optional·Map 값·
 // InstancedStruct 내용 자리의 그래프 왕복(Name 표시 철자·대소문자만 다른 Name의 같음·String 값
 // 보존)과 다시 저장 byte 같음, 도구 이름 keys·키 Atomic, JSON 왕복, 검증 hook(정렬·유한 시간)이

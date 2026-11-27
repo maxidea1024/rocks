@@ -15,7 +15,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
-// InterpCurve 리플렉션 미러의 시험이다(Docs/Design/CurveData.ko.md 12.1절·16절 — CV9, 미러
+// InterpCurve 리플렉션 미러의 시험이다(Docs/Design/CurveData/README.ko.md 12.1절·16절 — CV9, 미러
 // CoreTypeBindings/InterpCurveTypes.h, fixture CurvesTestFixtures/CurveFixture.h의
 // InterpCurveHolder): 다섯 형식(float·Vec2d·Vec3d·Quatd·LinearColor)과 Array 원소·Optional 자리의
 // 그래프 왕복·다시 저장 byte 같음, private 멤버의 도구 이름(points·looped·loopKeyOffset)·키

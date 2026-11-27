@@ -32,7 +32,7 @@ struct FixturePoint {
 };
 
 // struct 검증 hook이 있는 값이다(low ≤ high — 설정 층 적용이 게시 전에 거부하는지, Docs/Design/
-// CurveData.ko.md 9.1·17.2절).
+// CurveData/README.ko.md 9.1·17.2절).
 ROCKS_STRUCT()
 struct FixtureSpan {
     ROCKS_GENERATED_BODY()
@@ -55,7 +55,7 @@ struct SpanSettings {
 };
 
 // InterpCurve 설정 섹션이다(CoreTypeBindings 미러 — 검증 hook이 키 정렬을 본다. 기본 fixture에
-// 등록하지 않는다 — 그 시험이 따로 등록한다. Docs/Design/CurveData.ko.md 17.8절).
+// 등록하지 않는다 — 그 시험이 따로 등록한다. Docs/Design/CurveData/README.ko.md 17.8절).
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "CurveCheck"))
 struct CurveSettings {
     ROCKS_GENERATED_BODY()
@@ -67,7 +67,8 @@ struct CurveSettings {
 };
 
 // byte 배열 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). 값은 Base64
-// 문자열이고 배열 연산 객체는 InvalidArrayOperation이다(Docs/Design/CurveData.ko.md 17.3절 B5).
+// 문자열이고 배열 연산 객체는 InvalidArrayOperation이다(Docs/Design/CurveData/README.ko.md 17.3절
+// B5).
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "BlobCheck"))
 struct BlobSettings {
     ROCKS_GENERATED_BODY()

@@ -8,6 +8,8 @@
 #include <Core/Text/StringView.h>
 #include <MaterialCompiler/MaterialDiagnosticCode.h>
 #include <MaterialCompiler/MaterialCollectionLayout.h>
+#include <MaterialCompiler/MaterialColorCurveSnapshot.h>
+#include <MaterialCompiler/MaterialSourceProvider.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>
 #include <MaterialCompiler/MaterialStaticParameterValue.h>
 #include <MaterialCompiler/MaterialTextureFacts.h>
@@ -133,6 +135,17 @@ public:
 
     // 번역 입력의 텍스처 사실이다(6.10절 MS2c3). 없으면 nullptr이다.
     const MaterialTextureFacts* FindTexture(Guid asset) const noexcept;
+
+    // 번역 입력의 원본 공급이다(없으면 nullptr).
+    const MaterialSourceProvider* Sources() const noexcept;
+
+    // 원본 공급의 색 커브 snapshot이다(6.13절 MS2f4 — 찾으면 번역 의존 ColorCurve로 기록한다).
+    // 없거나 공급이 없으면 nullptr이다. 오류: 할당 실패.
+    Result<const MaterialColorCurveSnapshot*> FindColorCurve(Guid asset) noexcept;
+
+    // 원본 공급의 색 커브 atlas snapshot이다(6.10절 MS2c5 — 찾으면 번역 의존 CurveAtlas로
+    // 기록한다). 없거나 공급이 없으면 nullptr이다. 오류: 할당 실패.
+    Result<const MaterialCurveAtlasSnapshot*> FindCurveAtlas(Guid asset) noexcept;
 
     // 자기 샘플러를 쓰는 텍스처 slot(출처, id)을 센다. 번역 대상 maxSamplers를 넘으면 이 노드
     // 위치에 V9를 진단하고 false다(6.10절 MS2c3).

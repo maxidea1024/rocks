@@ -133,6 +133,10 @@ struct ObjectStats {
     // 살아 있는 클러스터 수와 그 소속 객체 수의 합이다(클러스터를 켠 Registry만 0이 아니다).
     uint32 clusters = 0;
     uint32 clusterMembers = 0;
+    // 구독이 있는 객체 수(변경 통지 상태 — Docs/Design/ChangeNotification.ko.md CN-D4)와 깊이
+    // 상한을 넘어 버린 통지의 누계다(CN-D6).
+    uint32 notifiedObjects = 0;
+    uint32 droppedNotifications = 0;
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.

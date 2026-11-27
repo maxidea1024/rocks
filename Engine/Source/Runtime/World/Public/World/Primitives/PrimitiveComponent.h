@@ -7,8 +7,10 @@
 #include <Meta/Annotations.h>
 #include <Object/Event.h>
 #include <World/Lights/LightingChannels.h>
+#include <World/Physics/BodyForce.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
+#include <World/Physics/BodySettingsChange.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MoveOptions.h>
 #include <World/Physics/MtdResult.h>
@@ -18,6 +20,8 @@
 #include <World/Primitives/PrimitiveTypes.h>
 
 namespace rocks {
+
+struct BodyKinematics;
 
 // 질의 형상이다(Collision/CollisionShape.h — 헤더를 가볍게 두려고 구현 파일만 include한다).
 struct CollisionShape;
@@ -439,6 +443,156 @@ public:
     //   ball.SetNotifyRigidBodyCollision(true);   // 바닥에 닿으면 Actor::OnHit
     void SetNotifyRigidBodyCollision(bool notify) noexcept;
 
+    // --- 힘·충격량·속도(PhysicsModule 2.6절·7.1.17절 — UE PrimitiveComponentPhysics.cpp) ---
+    //
+    // 단위는 cm·kg·초이고 위치는 월드 cm다(…Local만 body 공간). 시뮬레이션하는 body(Dynamic)에만
+    // 효력이 있고 효력이 있으면 body를 깨운다. body가 없거나 Static·Kinematic이면 무시한다(UE와
+    // 같다 — 속도 setter의 Kinematic 무시만 다르다). 충격량은 다음 고정 스텝에 속도에 더해지고(바로
+    // 읽으면 옛 속도 — UE). 힘·토크는 고정 스텝 밖(Update 등)에서 주면 그 프레임의 모든 고정
+    // 스텝에, Fixed hook 안에서 주면 그 스텝에만 작용한다(UE bAllowSubstepping — 지속 힘은
+    // 프레임마다 다시 준다). 비유한 값은 무시한다(Warning NonFiniteBodyInput). 방사가 아닌 호출은
+    // UE처럼 잘못된 호출을 경고한다: Movable이 아님(StaticComponentMoved), 시뮬레이션
+    // 꺼짐(PhysicsOperationWithoutSimulation), 물리 충돌 없음
+    // (PhysicsOperationWithoutPhysicsCollision — 뒤 둘은 Release 빌드 밖).
+    //
+    // 사용 예:
+    //   ball.AddImpulse(Vec3d(0.0, 0.0, 200.0));            // 2 kg이면 다음 스텝에 +100 cm/s
+    //   ball.AddForce(Vec3d(0.0, 0.0, 980.0), true);        // 스텝마다 주면 중력 상쇄
+    //   ball.AddRadialImpulse(blast, 500.0, 1000.0, RadialFalloff::Linear, true);
+
+    // 질량 중심에 충격량(kg·cm/s)을 준다. velocityChange면 값이 속도 변화(cm/s)다.
+    void AddImpulse(const Vec3d& impulse, bool velocityChange = false) noexcept;
+    // 각충격량(kg·cm²/s — rad 기준, 월드 축)을 준다. velocityChange면 각속도 변화(rad/s)다.
+    void AddAngularImpulseInRadians(const Vec3d& impulse, bool velocityChange = false) noexcept;
+    // 각충격량을 도 기준으로 준다(rad로 바꿔 같은 경로).
+    void AddAngularImpulseInDegrees(const Vec3d& impulse, bool velocityChange = false) noexcept;
+    // location(월드 cm)에 충격량을 준다(선형 몫과 질량 중심 둘레 각 몫).
+    void AddImpulseAtLocation(const Vec3d& impulse, const Vec3d& location) noexcept;
+    // location에 속도 변화(cm/s)를 내는 충격량(질량 × 값)을 준다.
+    void AddVelocityChangeImpulseAtLocation(const Vec3d& velocityChange,
+                                            const Vec3d& location) noexcept;
+    // origin에서 radius(cm) 안의 이 body를 바깥으로 민다(질량 중심 기준, 거리 < radius). strength는
+    // 충격량 크기(kg·cm/s, velocityChange면 cm/s)다. ignoreRadialImpulse면 무시한다.
+    void AddRadialImpulse(const Vec3d& origin, double radius, double strength,
+                          RadialFalloff falloff, bool velocityChange = false) noexcept;
+    // 질량 중심에 힘(kg·cm/s²)을 준다. accelerationChange면 값이 가속도(cm/s²)다.
+    void AddForce(const Vec3d& force, bool accelerationChange = false) noexcept;
+    // location(월드 cm)에 힘을 준다.
+    void AddForceAtLocation(const Vec3d& force, const Vec3d& location) noexcept;
+    // body 공간 location·힘을 준다(body 원점 transform으로 월드로 바꾼다).
+    void AddForceAtLocationLocal(const Vec3d& force, const Vec3d& location) noexcept;
+    // origin에서 radius 안(거리 <= radius)의 이 body를 바깥으로 미는 힘이다. strength는 힘
+    // 크기(kg·cm/s², accelerationChange면 cm/s²)다. ignoreRadialForce면 무시한다.
+    void AddRadialForce(const Vec3d& origin, double radius, double strength, RadialFalloff falloff,
+                        bool accelerationChange = false) noexcept;
+    // 토크(kg·cm²/s² — rad 기준, 월드 축)를 준다. accelerationChange면 각가속도(rad/s²)다.
+    void AddTorqueInRadians(const Vec3d& torque, bool accelerationChange = false) noexcept;
+    // 토크를 도 기준으로 준다.
+    void AddTorqueInDegrees(const Vec3d& torque, bool accelerationChange = false) noexcept;
+
+    // 선속도(cm/s)를 바꾼다(addToCurrent면 더한다). 허용 자유도로 거르고 상한으로 자르며, 잠든
+    // body는 거의 0이 아닌 속도에 깨운다. Movable이 아니면 경고한다. Kinematic은 무시한다(UE는 값을
+    // 넣지만 Kinematic이 그 속도로 움직이지 않는다 — Jolt Kinematic은 움직이므로 다르게 둔다).
+    void SetPhysicsLinearVelocity(const Vec3d& velocity, bool addToCurrent = false) noexcept;
+    // 선속도(cm/s)다(body가 없으면 0).
+    Vec3d GetPhysicsLinearVelocity() const noexcept;
+    // 월드 점 point의 속도(cm/s)다: v + ω × (point − 질량 중심)(UE GetUnrealWorldVelocityAtPoint).
+    Vec3d GetPhysicsLinearVelocityAtPoint(const Vec3d& point) const noexcept;
+    // 각속도(월드 축)를 바꾼다(rad/s·도/s — 규칙은 SetPhysicsLinearVelocity와 같다).
+    void SetPhysicsAngularVelocityInRadians(const Vec3d& velocity,
+                                            bool addToCurrent = false) noexcept;
+    void SetPhysicsAngularVelocityInDegrees(const Vec3d& velocity,
+                                            bool addToCurrent = false) noexcept;
+    // 각속도(월드 축, rad/s·도/s)다(body가 없으면 0).
+    Vec3d GetPhysicsAngularVelocityInRadians() const noexcept;
+    Vec3d GetPhysicsAngularVelocityInDegrees() const noexcept;
+
+    // --- 질량·body 값(PhysicsModule 2.6절·7.1.18절 — UE PrimitiveComponentPhysics.cpp) ---
+    //
+    // setter는 bodySettings(영속)를 바꾸고 body가 있으면 바로 넣는다(없으면 값만 — 다음 body가
+    // 쓴다). 비유한 값·음수 감쇠·음수 각속도 상한은 값을 바꾸지 않고 Warning InvalidBodyValue다.
+    //
+    // 사용 예:
+    //   crate.SetMassOverrideInKg(2.0f);        // 2 kg(다음 스텝부터 그 질량)
+    //   crate.SetCenterOfMass(Vec3d(0.0, 0.0, -10.0));
+    //   crate.SetEnableGravity(false);
+
+    // 질량(kg)이다(UE 규칙 — 7.1.15절). body가 없거나 Static이면 0이다. 시뮬레이션하지 않으면
+    // 경고한다(UE GetMass).
+    float GetMass() const noexcept;
+    // overrideMass면 질량을 massInKg로 둔다(아니면 형상 질량 규칙으로 돌아간다 — UE
+    // SetMassOverrideInKg). 질량·관성을 다시 계산하고 깨우지 않는다.
+    void SetMassOverrideInKg(float massInKg, bool overrideMass = true) noexcept;
+    // 형상 질량 배율(UE MassScale)이다.
+    void SetMassScale(float scale) noexcept;
+    float GetMassScale() const noexcept {
+        return bodySettings_.massScale;
+    }
+
+    // 월드 질량 중심(cm)이다(body가 없으면 0).
+    Vec3d GetCenterOfMass() const noexcept;
+    // 질량 중심 이동(body 공간 cm — UE COMNudge)을 바꾼다.
+    void SetCenterOfMass(const Vec3d& offset) noexcept;
+    // 관성(kg·cm², body 축 대각 — UE GetInertiaTensor)이다. body가 없거나 Static이면 0이다. 지금
+    // 형상(상자·구·캡슐)은 축이 정렬돼 UE 주값과 같다(비대각 형상은 PH6 — 7.1.18절).
+    Vec3d GetInertiaTensor() const noexcept;
+
+    // 각속도 상한을 덮어쓴다(UE SetPhysicsMaxAngularVelocity — overrideMaxAngularVelocity를 켠다).
+    // addToCurrent면 body의 지금 실효 상한에 더한다(body가 없으면 더하지 않는다 — UE).
+    void SetPhysicsMaxAngularVelocityInDegrees(float maxDegrees,
+                                               bool addToCurrent = false) noexcept;
+    void SetPhysicsMaxAngularVelocityInRadians(float maxRadians,
+                                               bool addToCurrent = false) noexcept;
+    // 실효 각속도 상한이다(덮어쓰기면 그 값, 아니면 물리 설정 — 장면이 없으면 Collision 기본).
+    float GetPhysicsMaxAngularVelocityInDegrees() const noexcept;
+    float GetPhysicsMaxAngularVelocityInRadians() const noexcept;
+
+    // 중력을 켜거나 끈다(켜면 Dynamic body를 깨운다 — UE SetEnableGravity).
+    void SetEnableGravity(bool enable) noexcept;
+    bool IsGravityEnabled() const noexcept {
+        return bodySettings_.enableGravity;
+    }
+
+    // 선형·각 감쇠(1/s — 음수 거부)다.
+    void SetLinearDamping(float damping) noexcept;
+    float GetLinearDamping() const noexcept {
+        return bodySettings_.linearDamping;
+    }
+
+    void SetAngularDamping(float damping) noexcept;
+    float GetAngularDamping() const noexcept {
+        return bodySettings_.angularDamping;
+    }
+
+    // CCD를 켜거나 끈다(UE SetUseCCD — Jolt LinearCast).
+    void SetUseCCD(bool useCcd) noexcept;
+    // gyroscopic 토크를 켜거나 끈다(회전 축을 잠근 body는 켜도 꺼진다 — 7.1.16절).
+    void SetGyroscopicTorqueEnabled(bool enable) noexcept;
+    bool GetGyroscopicTorqueEnabled() const noexcept {
+        return bodySettings_.gyroscopicTorque;
+    }
+
+    // 자유도 방식을 바꾸고 잠금을 다시 넣는다(UE SetConstraintMode → SetDOFLock — 잠금 표지는
+    // 그대로, 7.1.16절). 모르는 값은 Warning InvalidBodyValue다.
+    void SetConstraintMode(DofMode mode) noexcept;
+
+    // 방사 충격량·힘을 무시하는지다(UE bIgnoreRadialImpulse·bIgnoreRadialForce — 영속, 기본 거짓).
+    bool GetIgnoreRadialImpulse() const noexcept {
+        return ignoreRadialImpulse_;
+    }
+
+    void SetIgnoreRadialImpulse(bool ignore) noexcept {
+        ignoreRadialImpulse_ = ignore;
+    }
+
+    bool GetIgnoreRadialForce() const noexcept {
+        return ignoreRadialForce_;
+    }
+
+    void SetIgnoreRadialForce(bool ignore) noexcept {
+        ignoreRadialForce_ = ignore;
+    }
+
     // 이 컴포넌트를 delta만큼 옮기고 rotation으로 돌린다(UE MoveComponent —
     // Docs/Design/PhysicsModule 5.1절·7.1.10절). sweep이면 자기 body 형상으로 쓸고 가(채널·응답은
     // 자기 것, 자기 Actor와 이동 무시 목록은 뺀다) 막는 hit 앞(pullback)에 멈추고 hit를
@@ -715,6 +869,22 @@ private:
     // body에 넘기는 월드 transform(위치·회전·scale 따로 — 행렬 분해 없음)이다.
     Transform BodyWorldTransform() const noexcept;
 
+    // 힘·충격량을 body에 넘긴다(body·장면이 없으면 무시 — 7.1.17절).
+    void ApplyBodyForce(const BodyForce& force) noexcept;
+
+    // 바뀐 body 값 묶음을 body에 넣는다(body·장면이 없으면 무시 — 7.1.18절).
+    void PushBodySettings(BodySettingsChange change) noexcept;
+
+    // body 운동 상태를 읽는다(body·장면이 없으면 거짓).
+    bool ReadBodyKinematics(BodyKinematics& out) const noexcept;
+
+    // 잘못된 body 값을 경고한다(InvalidBodyValue — 7.1.18절).
+    void WarnInvalidBodyValue(const char* property) const noexcept;
+
+    // 잘못된 물리 호출을 경고한다(UE WarnInvalidPhysicsOperations — 7.1.17절). checkBody가 거짓이면
+    // Mobility만 본다(UE 속도 setter).
+    void WarnInvalidPhysicsOperation(const char* action, bool checkBody) const noexcept;
+
     // 충돌 값이 바뀐 뒤 부른다(2.3.1절): NoCollision 경계를 넘으면 body를 그 자리에서 만들거나
     // 지우고 (RecreateSystemStateNow), 아니면 body 필터만 바꾼다.
     void UpdateBodyCollision() noexcept;
@@ -726,6 +896,8 @@ private:
     // 빈 값 = 클래스 기본(DefaultCollisionProfileName).
     ROCKS_PROPERTY(ReadOnly, Name = "collisionProfileName") String collisionProfileName_;
     ROCKS_PROPERTY(ReadOnly, Name = "bodySettings") BodySettings bodySettings_;
+    ROCKS_PROPERTY(ReadOnly, Name = "ignoreRadialImpulse") bool ignoreRadialImpulse_ = false;
+    ROCKS_PROPERTY(ReadOnly, Name = "ignoreRadialForce") bool ignoreRadialForce_ = false;
     // 물리 body다(실행 상태 — 저장하지 않는다).
     ROCKS_NATIVE() PhysicsBodyHandle bodyHandle_;
     // ApplyPhysicsTransform 안이다(OnTransformUpdated가 body로 되돌려 보내지 않는다).

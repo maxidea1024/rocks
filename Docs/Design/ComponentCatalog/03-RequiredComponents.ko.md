@@ -98,7 +98,7 @@ UE 근거: `UActorComponent`의 tick·태그·AssetUserData·자동 활성·Edit
 | UE | Rocks | 선행 | 묶음 |
 |---|---|---|---|
 | `UChildActorComponent` | `ChildActorComponent` | CR9a(Prefab PF1 — 템플릿 Actor) | CM5 |
-| `UTimelineComponent` | `TimelineComponent` | CR10(커브 에셋)·CR7(이벤트 slot 표) | CM5 |
+| `UTimelineComponent` | `TimelineComponent` | CR10(커브 에셋 — 구현), 이벤트는 `Event` 필드(CR7 해소) | CM5 |
 | `USplineComponent` | `SplineComponent` | Core 스플라인 수학(`InterpCurve` 있음) | CM5 |
 | `UInterpToMovementComponent` | `PathMoverComponent` | `MovementComponent`(8.4절)·CR16(sweep) | CM12(개정 4에서 CM5에서 옮김) |
 | `UTextRenderComponent` | `TextRenderComponent` | CR18(글꼴), CM1a(PrimitiveComponent 렌더 경로)·CR14(글자 머티리얼 — `EC/TextRenderComponent.h:44, 54`) | CM5 |

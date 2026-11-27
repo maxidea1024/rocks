@@ -341,20 +341,32 @@ namespace Rocks.Build.Cli
 
                 string[] buildRoots = layout.BuildRoots;
                 var plan = layout.Metadata;
+                // 메타 단계 세션: 입력 메모(native와 함께 쓴다)·판정 기록·보고(Docs/Design/BuildReuse 2장).
+                MetadataSession metaSession = MetadataSession.Create(context, toolchain);
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, buildRoots, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
-                evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata,
-                    System.Diagnostics.Stopwatch.GetElapsedTime(metaStart));
+                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, buildRoots, jobs: Jobs(options), verifySources: VerifyMetadataSources(options),
+                    session: metaSession);
+                TimeSpan metaElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(metaStart);
+                evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata, metaElapsed);
                 if (metadata != 0)
                 {
+                    metaSession.Finish(succeeded: false);
                     await evidence.FinishAsync("Metadata validation failed.");
                     return 1;
                 }
 
                 // 셰이더 파라미터 구조체 생성(Docs/Design/ShaderSystem 16.2절 SSD49)은 리플렉션 게시 뒤다(헤더가 리플렉션 생성 헤더를 include할 수 있다).
+                var shaderStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 int shaderParameters = await ShaderParameterRunner.GenerateAsync(context, toolchain, plan, rules.Target, HostTool(root, "Rocks.MetaCompiler"),
-                    cancellationToken);
+                    cancellationToken, session: metaSession);
+                TimeSpan shaderElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(shaderStart);
+                evidence.RecordStep("shader-parameters", ["Rocks.MetaCompiler", "shader-parameters", targetName], shaderParameters, shaderElapsed);
+                metaSession.Finish(shaderParameters == 0, new Dictionary<string, long>
+                {
+                    ["metadata"] = (long)metaElapsed.TotalMilliseconds,
+                    ["shader-parameters"] = (long)shaderElapsed.TotalMilliseconds
+                });
                 if (shaderParameters != 0)
                 {
                     await evidence.FinishAsync("Shader parameter generation failed.");
@@ -441,7 +453,8 @@ namespace Rocks.Build.Cli
                     Timing = Timing(options),
                     TimingLabel = targetName,
                     PlanOnly = planOnly,
-                    MeasureProcesses = profile?.Case is not null
+                    MeasureProcesses = profile?.Case is not null,
+                    InputMemo = metaSession.Memo
                 }, cancellationToken);
                 // 벽시계는 native 단계가 끝난 바로 이 자리에서 잡는다(뒤의 출력·보고서 쓰기를 넣지 않는다).
                 TimeSpan nativeElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart);

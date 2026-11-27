@@ -10,6 +10,7 @@
 #include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
+#include <DeterministicMath/DeterministicMath.h>
 #include <Physics/PhysicsSettings.h>
 #include <Platform/PlatformMath.h>
 #include <TestSupport/Test.h>
@@ -37,6 +38,11 @@ constexpr double SphereRadius = 20.0;
 constexpr double DropHeight = 200.0;
 constexpr int MaxFallSteps = 90;
 constexpr int RestingSteps = 5;
+// 내려앉기를 기다리는 스텝 수, 멈췄다고 보는 수직 속도(cm/s), 바닥 높이 허용 오차(cm)다.
+constexpr int MaxSettleSteps = 120;
+constexpr double RestVelocity = 2.0;
+constexpr int SettledSteps = 5;
+constexpr double RestHeightTolerance = 3.0;
 // 쉬는 접촉의 스텝당 속도 변화(g·dt ≈ 16 cm/s)보다 크고, 200 cm 낙하의 충돌 속도 변화(≈ 600
 // cm/s)보다 작은 문턱(cm/s)이다.
 constexpr float RestingFilterThreshold = 50.0f;
@@ -50,7 +56,7 @@ constexpr double WallHalfSize = 100.0;
 constexpr int BulletSteps = 2;
 constexpr double CentimetersPerMeter = 100.0;
 constexpr double JoltDefaultDensity = 1000.0; // kg/m³
-// 추정 충격량(m·v — 반발 0, 정적 벽)의 상대 허용 오차다.
+// 추정 충격량((1 + e)·m·v — 정적 벽)의 상대 허용 오차다.
 constexpr double EstimateTolerance = 0.1;
 
 // 가짜 handle 값이다: registry·세대(0이 아니면 null이 아니다), Actor handle 칸 번호의 offset.
@@ -146,9 +152,29 @@ struct ContactScene {
         return last.Size();
     }
 
+    // 구가 바닥에 내려앉을 때까지 간다: 기본 재질 반발(0.3 — 7.1.15절)로 몇 번 튄 뒤 반발 문턱(1000
+    // cm/s² × dt) 아래 충돌에서 멈춘다. 돌려주는 값은 내려앉았는지다.
+    bool SettleOnFloor() noexcept {
+        // 튀는 정점에서도 속도가 잠깐 0이므로 몇 스텝 연속으로 멈춰 있어야 내려앉은 것이다.
+        int still = 0;
+        for (int step = 0; step < MaxSettleSteps; ++step) {
+            (void)StepAndTake();
+            auto read = scene->ReadKinematics(ball);
+            const bool resting = read && math::Abs(read.Value().linearVelocity.z) < RestVelocity &&
+                                 read.Value().location.z <= SphereRadius + RestHeightTolerance;
+            still = resting ? still + 1 : 0;
+            if (still >= SettledSteps) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     SystemAllocator allocator;
     UniquePtr<physics::JoltPhysicsScene> scene;
     Span<const PhysicsContactHit> last;
+    PhysicsBodyHandle ball;
 };
 
 // 표지 켠 구를 바닥에 떨어뜨려 첫 hit 스텝까지 간다. 돌려주는 값은 첫 hit를 찾았는지다.
@@ -157,7 +183,7 @@ bool DropUntilFirstHit(ContactScene& scene) noexcept {
     BodySettings notify(scene.allocator);
     notify.notifyRigidBodyCollision = true;
     scene.Floor(plain);
-    scene.Sphere(2, SphereRadius, Vec3d(0.0, 0.0, DropHeight), notify);
+    scene.ball = scene.Sphere(2, SphereRadius, Vec3d(0.0, 0.0, DropHeight), notify);
     for (int step = 0; step < MaxFallSteps; ++step) {
         if (scene.StepAndTake() != 0) {
             return true;
@@ -183,6 +209,8 @@ TEST(Physics_ContactHitThresholdDropsRestingContacts) {
     REQUIRE(DropUntilFirstHit(filtered));
     REQUIRE(filtered.last.Size() == 1);
     CHECK(filtered.last[0].normalImpulse.z > 0.0);
+    REQUIRE(unfiltered.SettleOnFloor());
+    REQUIRE(filtered.SettleOnFloor());
 
     for (int step = 0; step < RestingSteps; ++step) {
         CHECK(unfiltered.StepAndTake() == 1);
@@ -191,7 +219,7 @@ TEST(Physics_ContactHitThresholdDropsRestingContacts) {
 }
 
 // CCD를 켠 빠른 구는 얇은 벽에 막혀 hit 하나를 받는다: CCD로만 닿아 solver 충격량이 없으므로 추정
-// 충격량(≈ m·v, 벽에서 구 쪽 −X)이다. CCD가 없으면 지나가고 hit가 없다.
+// 충격량(≈ (1 + e)·m·v, 벽에서 구 쪽 −X)이다. CCD가 없으면 지나가고 hit가 없다.
 TEST(Physics_ContactHitContinuousCollisionUsesEstimate) {
     for (const bool continuous : {true, false}) {
         ContactScene scene(TestSettings());
@@ -245,9 +273,14 @@ TEST(Physics_ContactHitContinuousCollisionUsesEstimate) {
         REQUIRE(hits >= 1);
         CHECK(firstStepHits == 1);
         const double radius = BulletRadius / CentimetersPerMeter;
-        const double mass =
-            4.0 / 3.0 * math::Pi<double> * radius * radius * radius * JoltDefaultDensity;
-        const double momentum = mass * BulletSpeed; // kg·cm/s
+        // body 질량은 균일 밀도 질량^0.75다(UE RaiseMassToPower — 7.1.15절).
+        const double mass = deterministic::Pow(4.0 / 3.0 * math::Pi<double> * radius * radius *
+                                                   radius * JoltDefaultDensity,
+                                               physics::DefaultPhysicalMaterialRaiseMassToPower);
+        // 기본 재질 반발 0.3(7.1.15절)이라 충격량은 (1 + e)·m·v다.
+        const double momentum =
+            (1.0 + static_cast<double>(physics::DefaultPhysicalMaterialRestitution)) * mass *
+            BulletSpeed; // kg·cm/s
         CHECK(other == FakeHandle(1));
         CHECK(math::Abs(impulse.x + momentum) <= momentum * EstimateTolerance);
         CHECK(normal.x < 0.0);

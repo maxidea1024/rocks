@@ -13,7 +13,7 @@
 
 namespace rocks::reflection_fixture {
 
-// struct 검증 hook fixture다(Docs/Design/CurveData.ko.md 9.1절 — ValidateHookGraphTests·
+// struct 검증 hook fixture다(Docs/Design/CurveData/README.ko.md 9.1절 — ValidateHookGraphTests·
 // ValidateHookPathTests·TextValidateHookTests). ValidRange(low ≤ high), ValidBox(ValidRange 멤버와
 // range.high ≤ limit — 중첩 순서), ValidDerived(base ValidRange의 hook을 물려받고 extra ≥ 0을
 // 더한다), ValidRefElement(강한 참조와 hook 멤버 — StructRefArray 원소)와 그것들을 모든 자리(struct

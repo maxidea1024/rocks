@@ -290,17 +290,18 @@ TEST(MaterialTranslator_GraphErrors) {
     {
         GraphFixture fixture(env);
         const Guid unknown = fixture.Add("Material.DoesNotExist");
-        // 아직 번역하지 않는 단계의 노드(MS2f4)다.
-        const Guid later = fixture.Add("Material.ColorRamp");
+        // 선행 작업을 기다리는 노드(MPQ-Font)다. MS2 끝에는 구현 노드가 모두 번역된다(구현
+        // 노드에 lowering이 있는지는 MaterialShaderCompileTests 모음이 본다).
+        const Guid later = fixture.Add("Material.FontSample");
         fixture.Connect(unknown, "Result", OutputNodeId, "AmbientOcclusion");
-        fixture.Connect(later, "Result", OutputNodeId, "PixelDepthOffset");
+        fixture.Connect(later, "R", OutputNodeId, "PixelDepthOffset");
         REQUIRE(fixture.ready);
         MaterialTranslation out(env.allocator);
         REQUIRE(Translate(fixture, Traits(), out));
         CHECK(!out.succeeded);
         CHECK(CountErrors(out) == 2);
         CHECK(HasErrorAt(out, MaterialDiagnosticCode::UnknownNode, unknown));
-        CHECK(HasErrorAt(out, MaterialDiagnosticCode::NotYetLowered, later));
+        CHECK(HasErrorAt(out, MaterialDiagnosticCode::PrerequisiteMissing, later));
     }
 
     {

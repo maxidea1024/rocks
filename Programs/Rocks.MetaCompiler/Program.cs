@@ -24,7 +24,24 @@ internal static class Program
 
             CompilerOptions options = CompilerOptions.Parse(ExpandResponseFile(arguments));
             input = options.Inputs[0].Path;
-            await CompilerDriver.RunAsync(options);
+            MetaRunRecorder recorder = MetaRunRecorder.Begin();
+            try
+            {
+                await CompilerDriver.RunAsync(options);
+                // 의존 기록은 성공한 실행만 낸다(Docs/Design/BuildReuse 2.4절 — 실패한 실행의 생성물은 게시되지 않는다).
+                if (options.DependencyRecord is not null)
+                {
+                    recorder.WriteDependencyRecord(options.DependencyRecord);
+                }
+            }
+            finally
+            {
+                if (options.PhaseReport is not null)
+                {
+                    recorder.WritePhaseReport(options.PhaseReport);
+                }
+            }
+
             return 0;
         }
         catch (MetadataException error)

@@ -4,7 +4,7 @@
 
 ## 4. 색 커브 atlas(UE `UCurveLinearColorAtlas`)
 
-머티리얼이 색 그라디언트를 텍스처 한 장에서 행 번호로 읽게 한다. 소비자는 머티리얼 노드 `Material.CurveAtlasRowParameter`(UE `UMaterialExpressionCurveAtlasRowParameter` — 머티리얼 세션 TODO MPQ-CurveAsset)다. 머티리얼은 atlas 에셋 참조와 행 번호로 번역한다.
+머티리얼이 색 그라디언트를 텍스처 한 장에서 행 번호로 읽게 한다. 소비자는 머티리얼 노드 `Material.CurveAtlasRowParameter`(UE `UMaterialExpressionCurveAtlasRowParameter` — 머티리얼 MS2c5에서 구현)다. 머티리얼은 atlas 에셋 참조와 행 번호로 번역한다.
 
 ### 4.1 UE 동작
 
@@ -54,7 +54,7 @@ UE처럼 **atlas가 자기 `TextureSource`에 구워 저장한다**. 쿠커에�
   - 크기: 너비 W = max(width, 2), 높이 = max(커브 수, 1). 둘 중 하나가 `MaxColorCurveAtlasDimension`(16384 — 텍스처 원본 임포트 상한 `ImageDecodeLimits::DefaultMaxDimension`과 같다)을 넘으면 `InvalidSetting`(detail = 넘은 값)이다. UE는 상한 없이 굽고 빌드가 최대 크기로 줄인다(AssetSystem 12.5절 4번) — 7.2절 22.
   - 표본 시간은 float x × (1 / (W − 1))이다(UE 식 그대로 — 나눗셈 한 번이 아니라 역수 곱이라 반올림이 다르다).
   - 값은 `ColorCurveAsset`의 조정 평가(2.3절, `disableAdjustments`면 원값)이고 null 커브는 흰색 (1, 1, 1, 1)이다.
-  - 조정 평가의 `powf`는 플랫폼 libm에 따라 비트가 다를 수 있다. 원본 byte 결정성은 CurveData D17과 같은 범위(Windows x64 기준)로 보장하고, 다른 호스트는 허용오차 대조다. 호스트가 달라 원본 byte가 다르면 Open이 dirty로 표시할 수 있다(저장하면 그 호스트 값이 된다).
+  - 평가는 결정적 색 평가(`EvaluateDeterministic`·`EvaluateUnadjustedDeterministic` — 2.4절, CurveData 5.9절 D22, CAD12)라 원본 byte가 호스트와 무관하다(CA7 전에는 플랫폼 libm에 기대 Windows x64 기준이었다). 결과 NaN은 고정 half NaN(0x7E00)이다. 그래서 다른 호스트에서 열어도 낡지 않은 atlas가 dirty가 되지 않는다.
   - float16 변환은 Core `Float16::FromFloat`(round-to-nearest-even — UE `FFloat16Color`의 `FFloat16::Set`과 같은 규칙)다.
 - 쿠커가 연 패키지가 dirty가 되어도 쿠킹은 에디터 패키지를 저장하지 않는다. 메모리 원본만 쓴다(CA6 시험이 본다). 쿠킹을 시작할 때 이미 열린 dirty 패키지가 있으면 쿠킹은 `Busy`다(CookRun — 오래 사는 집합이 낡은 atlas를 열면 저장해야 쿠킹할 수 있다). 명령행은 명령마다 새 집합이라 해당하지 않는다.
 - 실패:

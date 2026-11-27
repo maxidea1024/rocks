@@ -247,6 +247,7 @@
    - 첫 요청에서 준비한다: `/Engine` = `<engine>/Shaders`와 호스트 원문 디렉터리 mount, 형식 정의 `<engine>/Config/ShaderFormats`, 워커(실행 파일 옆, 없으면 같은 출력 뿌리의 ShaderCompileWorker 타깃 출력 — 출력 폴더 이름 `<도구>-<플랫폼>-<타깃>-<구성>`의 타깃 자리를 `shadercompileworker`로, 빌드 타깃 3.11절), 너겟 캐시, 관리자.
    - 형식마다 `CompileShaderLibrary`(개발 전용 타입 포함 — 셰이더 시스템 SSD16)를 한 번 하고 byte를 들고 있다가 같은 형식의 다음 집합에 복사한다. 요청은 잠금으로 직렬화한다(장치 소유 스레드와 lane 스레드가 모두 부른다).
 5. **Sandbox.** `--engine` 호스트는 다른 서비스와 함께 `EngineShaderHost`를 올리고 Sandbox 셰이더 타입과 `/Plugin/Sandbox` 원문 디렉터리를 등록한 뒤 `Engine::Initialize` 다음에 Freeze한다(장치가 아직 없으므로 여기까지 — 창 렌더 경로는 화면 마일스톤에서 lane과 잇는다). self-test는 같은 호스트를 엔진 묶음 사용자 하나와 함께 잡고, 장치마다 `EngineRenderResources`를 열며(직접 그리기 검사의 활성 집합·팩), 렌더 lane self-test 처리기는 `OnLaneStart`에서 연다.
+6. **엔진 셰이더 준비 진행(개정 68, 진행 보고 PG5).** `EngineShaderHost::SetPreparationProgress(ShaderPreparationProgress{added, finished, context})`로 호스트가 받는 곳을 건다(빈 값이면 뗀다). 공급자는 컴파일마다 `ReportPreparationAdded(job 수)`·`ReportPreparationFinished(n)`을 부른다(아무 스레드, `const` — 진행은 호스트 상태가 아니다). 호스트 쪽 작은 잠금이 거는 곳·떼기·보고를 직렬화하므로 떼기가 돌아온 뒤에는 받는 곳이 불리지 않는다(받는 곳 수명을 거는 쪽이 정한다). 쿠킹 라이브러리로 연 집합은 보고가 없다(컴파일하지 않는다). Sandbox는 시작 화면 `Shaders` 단계 계수에 잇는다([시작 화면](../SplashScreen/08-StartupWeights.ko.md) 8.3절). RenderBase는 Progress에 의존하지 않는다(받는 곳은 함수 포인터다).
 
 **버린 안.**
 - Engine 모듈이 셰이더 집합을 연다: Engine은 Graphics를 모른다(엔진 런타임 3절).

@@ -12,8 +12,8 @@ ROCKS_STRUCT()
 struct ColorRampProperties {
     ROCKS_GENERATED_BODY()
 
-    // TODO(MPQ-CurveAsset): 대상 에셋 클래스가 생기면 그 클래스로 검사한다(19.4.3절).
-    // 기대 클래스는 CurveLinearColor다(19.4.3절).
+    // 기대 클래스는 ColorCurveAsset(UE CurveLinearColor)이다(19.4.3절 — 번역은 원본 공급
+    // FindColorCurve로 찾는다, 6.13절 MS2f4).
     ROCKS_PROPERTY() MaterialAssetReference colorCurve;
 };
 

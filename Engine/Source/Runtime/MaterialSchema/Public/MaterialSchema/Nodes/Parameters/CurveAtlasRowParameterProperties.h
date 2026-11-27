@@ -32,11 +32,11 @@ struct CurveAtlasRowParameterProperties {
     ROCKS_PROPERTY() uint8 enumerationIndex = 0;
     ROCKS_PROPERTY() bool useCustomPrimitiveData = false;
     ROCKS_PROPERTY() uint8 primitiveDataIndex = 0;
-    // TODO(MPQ-CurveAsset): 대상 에셋 클래스가 생기면 그 클래스로 검사한다(19.4.3절).
-    // 기대 클래스는 CurveLinearColor다(19.4.3절).
+    // 기대 클래스는 ColorCurveAsset(UE CurveLinearColor)이다(19.4.3절 — 번역은 atlas snapshot의 행
+    // 목록에서 이 id를 찾는다, 6.10절 MS2c5).
     ROCKS_PROPERTY() MaterialAssetReference curve;
-    // TODO(MPQ-CurveAsset): 대상 에셋 클래스가 생기면 그 클래스로 검사한다(19.4.3절).
-    // 기대 클래스는 CurveLinearColorAtlas다(19.4.3절).
+    // 기대 클래스는 ColorCurveAtlas(UE CurveLinearColorAtlas)이다(19.4.3절 — 번역은 원본 공급
+    // FindCurveAtlas로 찾는다, 6.10절 MS2c5).
     ROCKS_PROPERTY() MaterialAssetReference atlas;
 };
 

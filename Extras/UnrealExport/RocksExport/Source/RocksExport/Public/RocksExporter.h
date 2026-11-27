@@ -44,7 +44,7 @@ public:
 	// 내보낸다. 실패하면 false이고 OutResult.Error에 이유가 있으며 출력 디렉터리는 바뀌지 않는다.
 	static bool Export(const FRocksExportOptions& Options, FRocksExportResult& OutResult);
 
-	// bundle.json bytes다(3.4절). CreatedUtc가 비면 createdUtc를 쓰지 않는다. bBaked면 environment(굽기 RHI·GPU·드라이버)를 쓴다.
+	// bundle.json bytes다(3.4절). CreatedUtc가 비면 createdUtc를 쓰지 않는다. bBaked(실제로 구운 에셋이 있음)면 environment(굽기 RHI·GPU·드라이버)를 쓴다.
 	static TArray<uint8> MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc,
 		bool bBaked = false);
 

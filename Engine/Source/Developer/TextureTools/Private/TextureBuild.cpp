@@ -1,6 +1,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
 #include <DeterministicMath/DeterministicMath.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include "TextureBuildInternal.h"
 #include "TextureImportInternal.h"
@@ -691,8 +692,44 @@ uint8 EncodeUnorm8(float value, bool srgb) noexcept {
     return srgb ? texture_import::LinearToSrgb8(value) : QuantizeUnorm8(value);
 }
 
-TextureBlockFormat BlockFormatOf(TextureFormatEncoding encoding) noexcept {
-    switch (encoding) {
+// ASTC 블록 크기는 PixelFormat이 정한다(12.17.8 5). 형식 선택이 다섯 크기의 LDR만 고르므로 그 밖은
+// 오지 않는다(오면 Astc6x6로 두지 않고 Unsupported — Encode가 거부한다).
+bool AstcBlockFormatOf(graphics::PixelFormat format, TextureBlockFormat& out) noexcept {
+    switch (format) {
+    case graphics::PixelFormat::ASTC4x4Unorm:
+    case graphics::PixelFormat::ASTC4x4UnormSrgb:
+        out = TextureBlockFormat::Astc4x4;
+        return true;
+    case graphics::PixelFormat::ASTC6x6Unorm:
+    case graphics::PixelFormat::ASTC6x6UnormSrgb:
+        out = TextureBlockFormat::Astc6x6;
+        return true;
+    case graphics::PixelFormat::ASTC8x8Unorm:
+    case graphics::PixelFormat::ASTC8x8UnormSrgb:
+        out = TextureBlockFormat::Astc8x8;
+        return true;
+    case graphics::PixelFormat::ASTC10x10Unorm:
+    case graphics::PixelFormat::ASTC10x10UnormSrgb:
+        out = TextureBlockFormat::Astc10x10;
+        return true;
+    case graphics::PixelFormat::ASTC12x12Unorm:
+    case graphics::PixelFormat::ASTC12x12UnormSrgb:
+        out = TextureBlockFormat::Astc12x12;
+        return true;
+    default:
+        return false;
+    }
+}
+
+TextureBlockFormat BlockFormatOf(const TextureFormatChoice& choice) noexcept {
+    switch (choice.encoding) {
+    case TextureFormatEncoding::EacR11:
+        return TextureBlockFormat::EacR11;
+    case TextureFormatEncoding::Astc: {
+        TextureBlockFormat format = TextureBlockFormat::Astc6x6;
+        (void)AstcBlockFormatOf(choice.pixelFormat, format);
+        return format;
+    }
     case TextureFormatEncoding::Bc3:
         return TextureBlockFormat::Bc3;
     case TextureFormatEncoding::Bc4:
@@ -712,19 +749,31 @@ TextureBlockFormat BlockFormatOf(TextureFormatEncoding encoding) noexcept {
 struct EncodeOptions {
     // BC7이 알파 프로필을 쓰는지다(12.17.6 4 — TextureFormatChoice::alphaProfile).
     bool alphaProfile = false;
+    // ASTC 채널 배치다(12.17.8 3 — TextureFormatChoice::astcMode).
+    TextureAstcMode astcMode = TextureAstcMode::Rgba;
+    // 블록 압축 실행 방법이다(12.17.9 4 — BuildTexture 인자 그대로).
+    TextureBuildExecution execution{};
     // norm16 대체(G16 → R16F)는 Unorm 규칙대로 [0, 1]로 자르고 NaN → 0이다(12.14절).
     bool clampUnit = false;
 };
 
-// level을 choice 형식으로 부호화한다(slice·깊이 평면을 차례로, 행 사이 패딩 없음). BC는 RGBA8(같은
-// sRGB 부호화 — BC6H는 선형 RGBA16F, 가장 가까운 짝수 반올림)을 만들어 EncodeTextureBlocks로
-// 압축한다.
+// level을 choice 형식으로 부호화한다(slice·깊이 평면을 차례로, 행 사이 패딩 없음). 블록 형식은
+// RGBA8(같은 sRGB 부호화 — BC6H는 선형 RGBA16F, 가장 가까운 짝수 반올림, EAC R11은 선형 R16)을
+// 만들어 EncodeTextureBlocks로 압축한다. ASTC의 BC6H 대체는 선형 RGBA8로 [0, 1]에 자른다(12.17.8
+// 6).
 Result<void> Encode(Allocator& allocator, const Level& level, const TextureFormatChoice& choice,
                     const EncodeOptions& options, Array<uint8>& out) noexcept {
     const usize texels = level.texels.Size() / Channels;
     const bool srgb = choice.srgb;
+    if (choice.encoding == TextureFormatEncoding::Astc) {
+        TextureBlockFormat unused = TextureBlockFormat::Astc6x6;
+        if (!AstcBlockFormatOf(choice.pixelFormat, unused)) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+    }
+
     if (choice.encoding != TextureFormatEncoding::Uncompressed) {
-        const TextureBlockFormat block = BlockFormatOf(choice.encoding);
+        const TextureBlockFormat block = BlockFormatOf(choice);
         const usize texelBytes = TextureBlockSourceTexelBytes(block);
         Array<uint8> rgba(allocator);
         if (auto sized = rgba.TryResize(texels * texelBytes); !sized) {
@@ -741,6 +790,12 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
                     StoreLe16(target + c * 2, QuantizeHalf(texel[c]));
                 }
 
+                continue;
+            }
+
+            if (block == TextureBlockFormat::EacR11) {
+                // UE는 RGBA32F를 넣는다 — 8 bit를 거치지 않게 16 bit로 넘긴다(12.17.8 4).
+                StoreLe16(target, QuantizeUnorm16(texel[Red]));
                 continue;
             }
 
@@ -767,6 +822,10 @@ Result<void> Encode(Allocator& allocator, const Level& level, const TextureForma
         image.numSlices = planes;
         TextureBlockOptions blockOptions;
         blockOptions.alphaProfile = options.alphaProfile;
+        blockOptions.astcMode = options.astcMode;
+        blockOptions.srgb = srgb;
+        blockOptions.scheduler = options.execution.scheduler;
+        blockOptions.scratch = options.execution.scratch;
         return EncodeTextureBlocks(block, image, blockOptions, out.View());
     }
 
@@ -1013,6 +1072,7 @@ TextureFormatRequest FormatRequest(const TextureBuildSettings& settings,
     request.pointFilter = settings.samplerPointFilter;
     request.topSizeX = plan.topX;
     request.topSizeY = plan.topY;
+    request.compressionQuality = settings.compressionQuality;
     return request;
 }
 
@@ -1045,6 +1105,7 @@ EncodeOptions EncodeOptionsFor(const TextureBuildSettings& settings,
     EncodeOptions options;
     (void)settings;
     options.alphaProfile = choice.alphaProfile;
+    options.astcMode = choice.astcMode;
     options.clampUnit = choice.norm16Remapped;
     return options;
 }
@@ -1123,6 +1184,7 @@ TextureBuildOutputInfo TextureBuildOutput(const TextureBuildSettings& settings,
 
     info.pixelFormat = choice.pixelFormat;
     info.srgb = choice.srgb;
+    info.encoding = choice.encoding;
     for (usize index = 0; index < 4; ++index) {
         info.swizzle[index] = choice.swizzle[index];
     }
@@ -1236,6 +1298,7 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     out.compressionNone = texture.compressionNone != 0 || cpuAvailable;
     out.compressionNoAlpha = texture.compressionNoAlpha != 0;
     out.compressionForceAlpha = texture.compressionForceAlpha != 0;
+    out.compressionQuality = texture.compressionQuality;
     out.lodGroup = texture.lodGroup;
     // 주소(12.4.2절): texture는 dimension의 클래스다(호출자 계약 — 쿠킹이 타입으로 정한다).
     switch (dimension) {
@@ -1270,12 +1333,18 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     return Result<void>::Success();
 }
 
-Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
-                          Span<const uint8> sourcePixels, TextureBuildResult& out) noexcept {
+// 빌드 본문이다(결정적 부동소수 환경 안에서 불린다 — BuildTexture).
+static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSettings& settings,
+                                     Span<const uint8> sourcePixels, TextureBuildResult& out,
+                                     const TextureBuildExecution& execution) noexcept {
     out.mips.Clear();
     out.warnings.Clear();
     out.failure = TextureBuildFailure{};
     out.pixelFormat = graphics::PixelFormat::Unknown;
+    // 병렬에는 helper 작업을 할당할 scratch가 필요하다(일을 하기 전에 거부한다 — 12.17.9 3).
+    if (execution.scheduler != nullptr && execution.scratch == nullptr) {
+        return Fail(out, AssetDiagnosticCode::None, ErrorCode::InvalidArgument, 0);
+    }
     out.srgb = false;
     const bool volume = settings.dimension == TextureDimension::Volume;
     const bool cube = settings.dimension == TextureDimension::TextureCube ||
@@ -1489,7 +1558,9 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     }
 
     // 7·8. 쿠킹 편향과 출력.
-    const EncodeOptions options = EncodeOptionsFor(settings, choice);
+    EncodeOptions options = EncodeOptionsFor(settings, choice);
+    options.execution = execution;
+
     for (uint32 mip = dropped; mip < chain; ++mip) {
         const Level& current = mips[mip];
         TextureBuiltMip built(allocator);
@@ -1512,6 +1583,41 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     out.alphaTransparent = alphaTransparent;
     out.numSlices = volume ? 1 : settings.numSlices;
     return Result<void>::Success();
+}
+
+namespace {
+
+// 유니티 빌드에서 같은 묶음의 이름과 부딪히지 않게 이름 있는 namespace에 둔다.
+namespace build_environment {
+
+struct Job {
+    Allocator* allocator;
+    const TextureBuildSettings* settings;
+    Span<const uint8> pixels;
+    TextureBuildResult* out;
+    const TextureBuildExecution* execution;
+    Result<void> result;
+};
+
+void Run(void* opaque) noexcept {
+    Job& job = *static_cast<Job*>(opaque);
+    job.result =
+        BuildTextureBody(*job.allocator, *job.settings, job.pixels, *job.out, *job.execution);
+}
+
+} // namespace build_environment
+
+} // namespace
+
+// 원본 decode·재표본·mip 생성·변환의 float·double 연산도 결정적 부동소수 환경 안에서 한다(12.17.9 6
+// — 호출자의 FTZ·DAZ·반올림 설정이 결과를 바꾸지 않게. 인코더 batch는 따로 같은 환경을 건다).
+Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
+                          Span<const uint8> sourcePixels, TextureBuildResult& out,
+                          const TextureBuildExecution& execution) noexcept {
+    build_environment::Job job{&allocator, &settings,  sourcePixels,
+                               &out,       &execution, Result<void>::Success()};
+    platform::RunWithDeterministicFloatingPoint(&build_environment::Run, &job);
+    return rocks::Move(job.result);
 }
 
 namespace texture_build_detail {

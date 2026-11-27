@@ -89,6 +89,10 @@ uint64 SubnormalDigest() noexcept {
 // 고정).
 constexpr uint64 AcosDigestValue = 0x9D39856476F69144ull;
 
+// Cos·Atan 표본의 출력 비트 digest다(DeterministicMath_CosAtanSpecialValuesAndDigest — Version과
+// 함께 고정).
+constexpr uint64 CosAtanDigestValue = 0x293DFB860FEF60FBull;
+
 // 기본 환경에서의 SubnormalDigest 값이다(Version과 함께 고정 — 비정규 결과 비트도 계약에 든다).
 constexpr uint64 SubnormalDigestValue = 0x05879A39715B3F0Dull;
 
@@ -177,6 +181,8 @@ TEST(DeterministicMath_AccuracyAgainstReferenceTables) {
     CheckReference("Gamma22ToLinear", reference::Gamma22Reference, 2,
                    [](double x, double) { return Gamma22ToLinear(x); });
     CheckReference("Acos", reference::AcosReference, 1, [](double x, double) { return Acos(x); });
+    CheckReference("Cos", reference::CosReference, 2, [](double x, double) { return Cos(x); });
+    CheckReference("Atan", reference::AtanReference, 2, [](double x, double) { return Atan(x); });
 }
 
 // Acos의 끝점·특수값·단조성과 결과 비트 고정(Docs/Design/CoreDataFoundations.ko.md 2.2절 —
@@ -222,6 +228,61 @@ TEST(DeterministicMath_AcosSpecialValuesAndDigest) {
            static_cast<unsigned long long>(hash));
     CHECK(Version == 1);
     CHECK(hash == AcosDigestValue);
+}
+
+// Cos·Atan의 특수값·대칭·단조성과 결과 비트 고정(Docs/Design/CoreDataFoundations.ko.md 2.2절 —
+// 커브 쿠킹 평가, CurveData D22). 기존 digest와 따로 고정한다(기존 함수의 비트는 그대로다).
+TEST(DeterministicMath_CosAtanSpecialValuesAndDigest) {
+    constexpr uint64 HalfPiBits = 0x3FF921FB54442D18ull;
+    const double payload = BitCast<double>(uint64{0xFFF8000000000ABC});
+    const double infinity = 1e300 * 1e300;
+    CHECK(Bits(Cos(0.0)) == Bits(1.0) && Bits(Cos(-0.0)) == Bits(1.0));
+    CHECK(Bits(Cos(payload)) == CanonicalNaN && Bits(Cos(infinity)) == CanonicalNaN &&
+          Bits(Cos(-infinity)) == CanonicalNaN);
+    CHECK(Bits(Atan(0.0)) == Bits(0.0) && Bits(Atan(-0.0)) == (Bits(0.0) | SignBit));
+    CHECK(Bits(Atan(infinity)) == HalfPiBits && Bits(Atan(-infinity)) == (HalfPiBits | SignBit));
+    CHECK(Bits(Atan(payload)) == CanonicalNaN);
+    // 큰 |x|(≥ 2^53)는 ±π/2다(1/x 나눗셈이 넘치지 않는다 — DBL_MAX 포함).
+    const double largest = 1.7976931348623157e308;
+    CHECK(Bits(Atan(largest)) == HalfPiBits && Bits(Atan(-largest)) == (HalfPiBits | SignBit));
+    CHECK(Bits(Atan(9007199254740992.0)) == HalfPiBits && Bits(Atan(1e305)) == HalfPiBits);
+    // 비정규 입력은 그대로다(atan(x)가 x로 반올림된다).
+    CHECK(Bits(Atan(BitCast<double>(uint64{1}))) == 1);
+    // 큰 |x|(n > 2^20): CosPi(|x|/π) — 결정적인 [−1, 1] 값(정확도는 보장하지 않는다).
+    const double bigs[] = {1647101.0, 1e7, 1e300, 1.7976931348623157e308};
+    for (double big : bigs) {
+        CHECK(Bits(Cos(big)) == Bits(CosPi(big / 3.141592653589793)));
+        CHECK(Cos(big) >= -1.0 && Cos(big) <= 1.0);
+    }
+
+    // Cos는 짝함수, Atan은 홀함수다. Atan은 단조 증가하고 1/x 분기(±1)를 지나도 이어진다.
+    double previous = Atan(-1e6);
+    for (int step = 1; step <= 4096; ++step) {
+        const double x = -4.0 + static_cast<double>(step) / 512.0;
+        CHECK(Bits(Cos(x)) == Bits(Cos(-x)));
+        CHECK(Bits(Atan(-x)) == (Bits(Atan(x)) ^ SignBit));
+        const double value = Atan(x);
+        CHECK(value >= previous);
+        previous = value;
+    }
+
+    uint64 hash = 0xCBF29CE484222325ull;
+    uint32 state = 2028;
+    for (int sample = 0; sample < 4096; ++sample) {
+        state = state * 1664525u + 1013904223u;
+        const double x = static_cast<double>(state) / 2147483648.0 - 1.0; // [−1, 1)
+        hash = Fnv(hash, Bits(Cos(x * 8.0)));
+        hash = Fnv(hash, Bits(Cos(x * 1e6)));
+        hash = Fnv(hash, Bits(Atan(x)));
+        hash = Fnv(hash, Bits(Atan(x * 1e3)));
+        hash = Fnv(hash, Bits(Atan(x * 1e-6)));
+    }
+
+    // 결과 비트가 바뀌면(Version을 올려야 하는 변경) 이 값과 Version을 함께 갱신한다.
+    printf("DeterministicMath Cos/Atan digest (Version %u): 0x%016llX\n", Version,
+           static_cast<unsigned long long>(hash));
+    CHECK(Version == 1);
+    CHECK(hash == CosAtanDigestValue);
 }
 
 TEST(DeterministicMath_SrgbByteTablesAreExact) {

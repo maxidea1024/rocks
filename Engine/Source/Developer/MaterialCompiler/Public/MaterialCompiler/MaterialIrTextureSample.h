@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <MaterialCompiler/MaterialIrTexture.h>
 
 // 머티리얼 IR TextureSample 값의 샘플 방식이다(Docs/Design/MaterialSystem 6.10절 MS2c3). lowering이
 // UE 규칙(정점 문맥 Level, view mip bias 조건, decal)을 적용한 뒤의 최종 방식이고, 생성 원문은 이
@@ -29,6 +30,12 @@ enum class IrSamplerSource : uint8 {
     SharedWrap = 1,
     SharedClamp = 2
 };
+
+// 샘플러 출처의 텍스처 slot 표지다(IrTextureSampler — None 다음부터 같은 순서).
+constexpr IrTextureSampler ToTextureSampler(IrSamplerSource source) noexcept {
+    return static_cast<IrTextureSampler>(static_cast<uint8>(source) +
+                                         static_cast<uint8>(IrTextureSampler::Own));
+}
 
 // gather 채널이다(UE ETextureGatherMode).
 enum class IrTextureGather : uint8 {

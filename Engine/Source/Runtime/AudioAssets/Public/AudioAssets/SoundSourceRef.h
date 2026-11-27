@@ -1,8 +1,12 @@
 #pragma once
 
 #include <Audio/DistanceAttenuation.h>
+#include <AudioAssets/AttenuationTypes.h>
+#include <Core/Math/Vector3.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
+#include <Curves/TangentCurve.h>
+#include <AudioAssets/SoundCategoryChain.h>
 #include <AudioAssets/SoundPcm.h>
 #include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundPlaybackSettings.h>
@@ -21,18 +25,69 @@
 //   (void)audio->Play2D(sound.Value());
 namespace rocks {
 
-// 감쇠 스냅숏이다(AttenuationSettings 값 — 3.13.1절). 거리는 cm다.
+// 감쇠 스냅숏이다(AttenuationSettings 값 — 3.13.1·3.42.1절). 거리는 cm, 각도는 도, 주파수는 Hz다.
+// 곡선은 에셋 커브를 깊이 복사한 공유 사본이다(제어 쪽이 Registry 없이 평가한다). 쓰이는 곡선(모델·
+// 방법이 Custom)은 null이면 안 된다(ValidateSoundAttenuation).
 struct SoundAttenuation {
     // 거리 감쇠를 한다(UE bAttenuate).
     bool attenuate = true;
     // 리스너 방향으로 패닝한다(UE bSpatialize). false면 Direct(2D) 출력이다.
     bool spatialize = true;
     audio::DistanceAttenuationSettings distance;
-    // 이 반경 안은 감쇠 1이다(UE AttenuationShapeExtents.X — 구 모양).
-    float innerRadius = 400.0f;
-    // UE NonSpatializedRadiusStart·End다(3.35.7절 식).
+    // 모양과 크기(3.42.2절 — 성분의 뜻은 SoundAttenuationShape)다.
+    SoundAttenuationShape shape = SoundAttenuationShape::Sphere;
+    Vec3 shapeExtents = Vec3(DefaultAttenuationShapeRadius, 0.0f, 0.0f);
+    float coneOffset = 0.0f;
+    float coneSphereRadius = 0.0f;
+    float coneSphereFalloffDistance = 0.0f;
+    // distance.model이 Custom일 때의 거리 곡선(X = falloff로 정규화한 거리)이다.
+    SharedPtr<const TangentCurve> customDistanceCurve;
+    // 공기 흡수(3.42.3절)다.
+    bool attenuateWithLowPass = false;
+    SoundAbsorptionMethod absorptionMethod = SoundAbsorptionMethod::Linear;
+    bool logFrequencyScaling = false;
+    float absorptionDistanceMin = DefaultAbsorptionDistanceMin;
+    float absorptionDistanceMax = DefaultAbsorptionDistanceMax;
+    float lowPassFrequencyAtMin = MaxAttenuationFilterFrequency;
+    float lowPassFrequencyAtMax = MaxAttenuationFilterFrequency;
+    float highPassFrequencyAtMin = 0.0f;
+    float highPassFrequencyAtMax = 0.0f;
+    SharedPtr<const TangentCurve> customLowPassAbsorptionCurve;
+    SharedPtr<const TangentCurve> customHighPassAbsorptionCurve;
+    // 우선순위 거리 감쇠(3.42.4절)다.
+    bool enablePriorityAttenuation = false;
+    SoundPriorityAttenuationMethod priorityAttenuationMethod =
+        SoundPriorityAttenuationMethod::Linear;
+    float priorityAttenuationMin = 1.0f;
+    float priorityAttenuationMax = 1.0f;
+    float priorityAttenuationDistanceMin = DefaultPriorityAttenuationDistanceMin;
+    float priorityAttenuationDistanceMax = DefaultPriorityAttenuationDistanceMax;
+    float manualPriorityAttenuation = 1.0f;
+    SharedPtr<const TangentCurve> customPriorityAttenuationCurve;
+    // 리스너 focus(3.42.5절)다.
+    bool enableListenerFocus = false;
+    bool enableFocusInterpolation = false;
+    float focusAzimuth = DefaultFocusAzimuth;
+    float nonFocusAzimuth = DefaultNonFocusAzimuth;
+    float focusDistanceScale = 1.0f;
+    float nonFocusDistanceScale = 1.0f;
+    float focusPriorityScale = 1.0f;
+    float nonFocusPriorityScale = 1.0f;
+    float focusVolumeAttenuation = 1.0f;
+    float nonFocusVolumeAttenuation = 1.0f;
+    float focusAttackInterpSpeed = 1.0f;
+    float focusReleaseInterpSpeed = 1.0f;
+    // 스테레오 원본의 좌우 간격(3.42.6절)이다.
+    float stereoSpread = DefaultStereoSpread;
+    // UE NonSpatializedRadiusStart·End·Mode다(3.35.7·3.42.6절).
     float nonSpatializedRadiusStart = 0.0f;
     float nonSpatializedRadiusEnd = 0.0f;
+    SoundNonSpatializedMode nonSpatializedMode = SoundNonSpatializedMode::OmniDirectional;
+    // 차폐(3.42.7절)다.
+    bool enableOcclusion = false;
+    float occlusionLowPassFrequency = MaxAttenuationFilterFrequency;
+    float occlusionVolumeAttenuation = 1.0f;
+    float occlusionInterpolationSeconds = DefaultOcclusionInterpolationSeconds;
 };
 
 // pcm(통째 PCM)과 stream(실시간 디코드할 압축 데이터 — 3.40.3절) 중 하나만 쓴다. 채널·rate·frame
@@ -55,6 +110,9 @@ struct SoundPlayable {
     bool bypassVolumeScaleForPriority = false;
     // loop 재생의 가상화 모드다(3.41.3절). voice를 잃었다 되찾을 때의 시작 위치도 정한다.
     SoundVirtualizationMode virtualizationMode = SoundVirtualizationMode::Restart;
+    // 분류 사슬이다(3.43.1절 — 없으면 엔진 기본 분류나 분류 없음)와 2채널 볼륨 ×0.5 여부다.
+    SoundCategoryChainRef category;
+    bool normalizeStereo = false;
     // 동시 발음 그룹이다(3.41.2절 — 앞 concurrencyCount개, 없으면 제한 없음).
     uint32 concurrencyCount = 0;
     SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];

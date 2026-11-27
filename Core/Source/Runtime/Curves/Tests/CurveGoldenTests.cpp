@@ -7,11 +7,12 @@
 #include "CurveUeReference.h"
 
 // TangentCurve·PlainCurve를 UE 5.8 FRichCurve·FSimpleCurve 식을 그대로 옮긴 참조(CurveUeReference.h
-// — 머리 주석에 참조 함수 ↔ UE 파일·줄 대조표)와 비트 단위로 대조한다(Docs/Design/CurveData.ko.md
-// 16절). 수정을 모두 켠 참조 = Rocks 의미이고 모든 사례에서 비트가 같아야 한다. 커브 층 수정 하나만
-// 끈 참조(curveLayerUe — 수학 층 수정(15절 1–3: Lerp 끝점·순환·근 2개)은 켠 채라 "UE 그대로"가
-// 아니다)는 그 수정의 경우(NaN 시간 15절 4, 범위판 중복 제거의 비교 기준 15절 8)에서만 다르다. UE
-// 그대로의 수학 층 차이는 CV1 golden(MathKeyCurveGoldenTests)이 본다. 접선을 다시 계산하는 UE 편집
+// — 머리 주석에 참조 함수 ↔ UE 파일·줄 대조표)와 비트 단위로
+// 대조한다(Docs/Design/CurveData/README.ko.md 16절). 수정을 모두 켠 참조 = Rocks 의미이고 모든
+// 사례에서 비트가 같아야 한다. 커브 층 수정 하나만 끈 참조(curveLayerUe — 수학 층 수정(15절 1–3:
+// Lerp 끝점·순환·근 2개)은 켠 채라 "UE 그대로"가 아니다)는 그 수정의 경우(NaN 시간 15절 4, 범위판
+// 중복 제거의 비교 기준 15절 8)에서만 다르다. UE 그대로의 수학 층 차이는 CV1
+// golden(MathKeyCurveGoldenTests)이 본다. 접선을 다시 계산하는 UE 편집
 // 연산(DeleteKey·SetKeyTime·RemoveRedundantKeys)은 Rocks 연산 뒤 같은 지점에서 AutoSetTangents를
 // 부르면 같다(D10). 순환 사례는 |주기 몫| < 2^29로 둔다(double 재배치는 CV1 손 계산 벡터가 본다).
 // 무작위 사례는 고정 seed다.

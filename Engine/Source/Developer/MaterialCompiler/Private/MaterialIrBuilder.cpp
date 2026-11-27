@@ -1238,6 +1238,23 @@ Result<IrValueId> IrBuilder::Texture(const IrTexture& texture, uint8 samplerType
     return Intern(value);
 }
 
+Result<IrValueId> IrBuilder::SampledTexture(IrValueId texture, IrSamplerSource source) noexcept {
+    if (!IsValid(texture) || !values_[texture].type.IsTexture() ||
+        static_cast<uint8>(source) > static_cast<uint8>(IrSamplerSource::SharedClamp)) {
+        return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (values_[texture].op != IrOp::Texture) {
+        return Result<IrValueId>::Success(texture);
+    }
+
+    IrValue value = values_[texture];
+    const uint64 sampler = static_cast<uint64>(ToTextureSampler(source));
+    value.immediate[2] = (value.immediate[2] & ~(IrTextureSamplerMask << IrTextureSamplerShift)) |
+                         (sampler << IrTextureSamplerShift);
+    return Intern(value);
+}
+
 Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrValueId texture,
                                            IrValueId uv, IrValueId first,
                                            IrValueId second) noexcept {
@@ -1253,6 +1270,14 @@ Result<IrValueId> IrBuilder::TextureSample(const IrTextureSampleDesc& desc, IrVa
     if (!(values_[uv].type == IrFloat(width))) {
         return Result<IrValueId>::Failure(ErrorCode::InvalidArgument);
     }
+
+    // slot마다 샘플러 출처 하나다(6.10절 텍스처 표).
+    auto sampled = SampledTexture(texture, desc.samplerSource);
+    if (!sampled) {
+        return sampled;
+    }
+
+    texture = sampled.Value();
 
     IrValue value;
     value.type = IrFloat(MaxIrComponents);

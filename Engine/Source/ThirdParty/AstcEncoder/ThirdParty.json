@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "name": "AstcEncoder",
+  "version": "5.1.0",
+  "upstreamDirectory": "astc-encoder-5.1.0",
+  "globalState": false,
+  "source": {
+    "url": "https://github.com/ARM-software/astc-encoder/archive/refs/tags/5.1.0.tar.gz",
+    "sha256": "2e60fc2917e0796bd62429242accdf71c784f99f21fcae6c69159c11332fba40",
+    "verification": "GitHub HTTPS tag archive of the vendor repository (tag 5.1.0 = commit 4a86301166014904afa8143a20f3b1223f7f392a, the commit id recorded in the archive pax header), downloaded on 2026-11-27 and its SHA-256 recorded. Upstream publishes release binaries but no source signatures or hashes, so the source is pinned by the tag commit and the archive hash. UE 5.8 lists astc-encoder 5.1.0 as a supported thunk version (Engine/Source/ThirdParty/astcenc). Imported files are LICENSE.txt and the library sources Source/astcenc*.h and Source/astcenc_*.cpp (the command line tool astcenccli_*, astcenc_diagnostic_trace.cpp, wuffs, unit tests, fuzzers, test images and documentation are not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "LICENSE.txt (Apache License 2.0); the source headers carry SPDX-License-Identifier: Apache-2.0 (Copyright 2011-2025 Arm Limited)",
+      "file": "astc-encoder-5.1.0/LICENSE.txt",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "astc-encoder-5.1.0/Source/astcenc_averages_and_directions.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_block_sizes.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_color_quantize.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_color_unquantize.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_compress_symbolic.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_compute_variance.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_decompress_symbolic.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_entry.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_find_best_partitioning.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_ideal_endpoints_and_weights.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_image.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_integer_sequence.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_mathlib.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_mathlib_softfloat.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_partition_tables.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_percentile_tables.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_pick_best_endpoint_format.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_quantization.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_symbolic_physical.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_weight_align.cpp",
+    "astc-encoder-5.1.0/Source/astcenc_weight_quant_xfer_tables.cpp"
+  ],
+  "includeDirectories": [
+    "astc-encoder-5.1.0/Source"
+  ],
+  "defines": [
+    "ASTCENC_AVX=0",
+    "ASTCENC_F16C=0",
+    "ASTCENC_POPCNT=0",
+    "ASTCENC_SVE=0"
+  ],
+  "platformDefines": {
+    "Windows.X64": [
+      "ASTCENC_SSE=20",
+      "ASTCENC_NEON=0",
+      "ASTCENC_X86_GATHERS=0"
+    ],
+    "Windows.Arm64": [
+      "ASTCENC_SSE=0",
+      "ASTCENC_NEON=1"
+    ],
+    "MacOS.X64": [
+      "ASTCENC_SSE=20",
+      "ASTCENC_NEON=0",
+      "ASTCENC_X86_GATHERS=0"
+    ],
+    "MacOS.Arm64": [
+      "ASTCENC_SSE=0",
+      "ASTCENC_NEON=1"
+    ],
+    "Android.X64": [
+      "ASTCENC_SSE=20",
+      "ASTCENC_NEON=0",
+      "ASTCENC_X86_GATHERS=0"
+    ],
+    "Android.Arm64": [
+      "ASTCENC_SSE=0",
+      "ASTCENC_NEON=1"
+    ]
+  },
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "astc-encoder-5.1.0/Source/astcenc.h"
+  ],
+  "files": {
+    "LICENSE.txt": "494accc32e50eb523a0e384d0ae6d4b702db867a89d6971216760e92b240ee12",
+    "Source/astcenc.h": "b976436694d86d8fe1aa109d7bd106b9760fc7bcd9ca5fffa5cb1894c68766fe",
+    "Source/astcenc_averages_and_directions.cpp": "457257fd9d8f073be147ed4fc3a6d319315f9a7386e5a27477ea7c2bd6fe7615",
+    "Source/astcenc_block_sizes.cpp": "52c2c522fb2c7ee5d2da9c4dc749a0adc5a32357b5bc7b9fcb144015697889cb",
+    "Source/astcenc_color_quantize.cpp": "eba701ab54ff208e0bc2e232b5fc67c38f6c971958b4c3090cf2680ec52a9f33",
+    "Source/astcenc_color_unquantize.cpp": "bfa0a34e69e8b1a9229823e6dc8ae5b78a150e21188160c024513a4abece5df0",
+    "Source/astcenc_compress_symbolic.cpp": "eaded692c9a585dfc2fa88621d63f62259799788241ae3db40fff01b5aa049ea",
+    "Source/astcenc_compute_variance.cpp": "bb8e5ec428284ba7b185020114fc59b4ba85ffad1bbb1198202a230636d03538",
+    "Source/astcenc_decompress_symbolic.cpp": "94115a33859346ce74ad2e98990672e2f30edbd5c09615cecdca4b251080ab0b",
+    "Source/astcenc_diagnostic_trace.h": "23fbc794086a8ac8f090523a544186cdf6c82575e3f6f78b361b4446a519a183",
+    "Source/astcenc_entry.cpp": "7a98164f729fa5bde24f19e5660e4b306a37cf8997749ffbe9ec404b167bb4c6",
+    "Source/astcenc_find_best_partitioning.cpp": "610892c284da753ac85c2107850c1dbd3a640ac7cf4b5b0438c9852b08491e72",
+    "Source/astcenc_ideal_endpoints_and_weights.cpp": "5f14d1e0b5188fcdae6357e5fe51368c1c6ab7d2be249b3a68d5059a643d2f69",
+    "Source/astcenc_image.cpp": "3a448c2ae5fece9fab7c24bdc5ac189e1cb832e87425aff92374ce511e155adf",
+    "Source/astcenc_integer_sequence.cpp": "23127ed919d38e1d13c7d32d6c6d93315ac0cbb1d71b9ca236d5c245e291fe4b",
+    "Source/astcenc_internal.h": "178884fdd656485d54d7339132377b9a0022a5c8c4a8a9dd2f3c12c627369874",
+    "Source/astcenc_internal_entry.h": "19d9313075eeb140dbb64d646e29b0277a10a5e8695114bb84397b3c9370cf58",
+    "Source/astcenc_mathlib.cpp": "9b207409e5026eb509c95ec31db70dd33183e5153ef9286e4ac18dc6eee39b6f",
+    "Source/astcenc_mathlib.h": "27cd50b34b9b1233baaed186dfeda22687b844acd221f251296ae4fefd461398",
+    "Source/astcenc_mathlib_softfloat.cpp": "f854596cde2c2a061ca52c1f10aeb789de60d2945d0658d26989e3b574270551",
+    "Source/astcenc_partition_tables.cpp": "1aff6ad32be5359973ea2a93dd0a0fee62cb9f0bbaf611f3b7920778b6180377",
+    "Source/astcenc_percentile_tables.cpp": "f689127e0b83b6c45ef7fa8625481818f1bdd6892e1eb2981844e3d9cfa04af0",
+    "Source/astcenc_pick_best_endpoint_format.cpp": "c720eba1ae46cf7b0eaf333b46fd3694d959b9ad2cd303d1e0dc60ba0dc52125",
+    "Source/astcenc_quantization.cpp": "266b513e5432f7e95ca44a3c36d4c51ab5ee0ffaeb9c1d8b1f1ed971f37aeb15",
+    "Source/astcenc_rocks_angular_tables.h": "aaef6620eb51a654e89b14a006ad4a310c2040e843a03e366c2a56e365572a50",
+    "Source/astcenc_rocks_log10_table.h": "217f8c7c2e608edda2e608c04ca6d7ebca1ac66ce047c37a640e5cd89208cb5d",
+    "Source/astcenc_symbolic_physical.cpp": "73526b9721f5a0ecde2e2ae5ad496883057391b914d3f5b74d36b5131b934b49",
+    "Source/astcenc_vecmathlib.h": "291341b4562dbdba73bf09377c70b2fb411843e7c7e26fe8b5451e64a53d76f3",
+    "Source/astcenc_vecmathlib_avx2_8.h": "c075089f1fd1d43fcf1cafd302a05c989bfea847643a6099a365dacd42ba272c",
+    "Source/astcenc_vecmathlib_common_4.h": "78ad45b47c1c1d4732fa1611d843433edcc153e281793fda0e2a399cdaa5d443",
+    "Source/astcenc_vecmathlib_neon_4.h": "a8381c77ce4e327bd00beb193a4967aeb9fd2cd92f6a10c2744f9e1565bdb40d",
+    "Source/astcenc_vecmathlib_none_4.h": "54372948556d11880773769e73fd82ce1f4ae352b9b84ae5d3278ab854187075",
+    "Source/astcenc_vecmathlib_sse_4.h": "531bb1a35cf0f41f10b60ec7cf0bc676236e6a4d05dd33b6f2a99ab934571c10",
+    "Source/astcenc_vecmathlib_sve_8.h": "4763871d53326ce5b87850703c3642e6d19525d85f74a7f913d7712cfc1bfbea",
+    "Source/astcenc_weight_align.cpp": "4a335f6f2287944749c2d34053dc9a0f7237d0e5b178109d72ecc419a1e54299",
+    "Source/astcenc_weight_quant_xfer_tables.cpp": "4799c8c99c540cd43a58cfab007a0654b88e6c4ec2d7b5b80cfd70fc188c4b9f"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "ASTC encoder of the Android texture cook (Docs/Design/AssetSystem section 12.17.8, stage TC4) with the settings UE 5.8 TextureFormatASTC uses (medium preset, LDR or LDR sRGB profile, normal LA mapping). The default invariant build (ASTCENC_NO_INVARIANCE not defined) keeps the SIMD paths bit-identical across ISAs (Docs/Building.md 'Non-invariant builds'); the Rocks profile already turns off floating point contraction like the upstream invariant build, and Rocks.patch removes the remaining C runtime dependence (sinf, cosf, logf).",
+    "The SIMD path is chosen explicitly per architecture: x64 is the upstream x86_64-sse2 preset (the Rocks build forbids ISA arguments, so SSE2 is the x64 baseline and no CPU check is needed), Arm64 is the NEON preset; AVX, F16C, POPCNT and SVE are off. ASTCENC_DIAGNOSTICS and ASTCENC_DECOMPRESS_ONLY are not defined.",
+    "The library allocates with the global operator new without a null check (an allocation failure terminates in a build without exceptions) and uses std::mutex, std::condition_variable and std::atomic for its block scheduler. TextureTools creates one context per call: serial calls use one thread and compress slice by slice, parallel calls (Docs/Design/AssetSystem section 12.17.9) use thread_count = participants and compress slice groups as one image (dim_z), each participant calling astcenc_compress_image with its thread index. After Rocks.patch the library has no global or function-local mutable state, so the output of a call does not depend on earlier calls in the process.",
+    "The angular and log10 tables of Rocks.patch are generated by Tools/AstcEncoderTables/generate.py (correctly rounded float values of the upstream expressions). The Windows UCRT sinf differs from the correctly rounded value in one of the 4096 angular entries, so Rocks output can differ from an upstream Windows build in rare blocks."
+  ],
+  "modifications": [
+    {
+      "file": "Source/astcenc_compress_symbolic.cpp",
+      "upstreamSha256": "589453d1e26bae55aee4e5dbebd2d3ca34e8ba23b3dab1ece63f52680f200fbe",
+      "reason": "compress_block's errorval_overshoot is no longer a function-local static: it was initialized once per process from the first context's tune_mse_overshoot (which depends on the block size), so every later context used the first context's value and the output depended on what the process compressed first (found by TC4 tests: the hash golden differed between a test run alone and after other ASTC tests). Upstream and the UE thunk keep this behavior."
+    },
+    {
+      "file": "Source/astcenc_entry.cpp",
+      "upstreamSha256": "01a4728ffecd80e2056df75175492de23c9d8757382ac4d8ef6837d30f3a6ef0",
+      "reason": "astcenc_config_init takes log10 of the block texel count from a constant table instead of logf (C runtime independent), and the preset table pointer is no longer static (a data race between concurrent calls with different block sizes)."
+    },
+    {
+      "file": "Source/astcenc_image.cpp",
+      "upstreamSha256": "34e06ccbd37ce265e7aab91fd14c24a6c4bd807cfb4aff1f387799154d857010",
+      "reason": "load_image_block_fast_ldr reads the block's own slice (img.data[zpos]) instead of slice 0. Upstream picks this fast path for U8 input with an identity swizzle and 2D blocks, so a multi-slice image (dim_z > 1) compressed slice 0's texels for every slice (found by TC5a: the parallel path passes all slices as one image and its RGBA output differed from per-slice compression). UE is not affected because its BGRA input needs a swizzle, which selects the generic load_image_block."
+    },
+    {
+      "file": "Source/astcenc_weight_align.cpp",
+      "upstreamSha256": "2452e2c0288158664391d453242fba7d010bc1b6b5974b772de9308d20f32ed7",
+      "reason": "The angular sin/cos tables are constant (astcenc_rocks_angular_tables.h) instead of being rewritten with sinf and cosf by every context allocation (a data race between concurrent contexts and a C runtime dependent result); prepare_angular_tables does nothing. compute_angular_offsets uses angle 0 when both angle sums are exactly zero (upstream atan2 gives 0/0 = NaN there, and NaN rounds and converts to int differently on SSE2 and NEON)."
+    },
+    {
+      "file": "Source/astcenc_rocks_angular_tables.h",
+      "upstreamSha256": null,
+      "reason": "Added: the constant angular tables, generated by Tools/AstcEncoderTables/generate.py."
+    },
+    {
+      "file": "Source/astcenc_rocks_log10_table.h",
+      "upstreamSha256": null,
+      "reason": "Added: log10 of every valid block texel count, generated by Tools/AstcEncoderTables/generate.py."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

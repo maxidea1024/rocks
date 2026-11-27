@@ -12,6 +12,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
+#include <Core/Text/NumberText.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <AssetRuntime/CookedManifest.h>
@@ -42,8 +43,10 @@
 #include <Progress/ProgressHub.h>
 #include <Localization/Text.h>
 #include <Core/Optional.h>
+#include <Platform/Atomics.h>
 #include <Platform/Thread.h>
 #include <PlatformWindow/Window.h>
+#include <Progress/ProgressCounter.h>
 #include <RenderBase/CookedManifestShaderLibraries.h>
 #include <SplashScreen/SplashScreen.h>
 #include <SplashScreen/StartupProgress.h>
@@ -148,6 +151,83 @@ constexpr uint64 ShowWindowAfterFrames = 1;
 constexpr uint32 WindowWidth = 1280;
 constexpr uint32 WindowHeight = 720;
 
+// 시작 화면 Shaders 단계다(Docs/Design/SplashScreen 8.3절 PG5 연결). 창 렌더 경로(장치 생성·렌더
+// lane 시작)를 이 단계로 보고하고, 엔진 셰이더 준비 진행(EngineShaderHost::SetPreparationProgress —
+// Development 공급자가 컴파일할 job 수·끝난 job 수를 보낸다)을 단계 계수에 잇는다. 첫 프레임을 낸
+// 뒤(lane 시작 작업이 끝나야 첫 프레임 slot이 나온다) FirstFrame으로 넘어간다. Begin·End는 호스트
+// 스레드, 받는 곳은 공급자의 아무 스레드다.
+class StartupShaderStep final {
+public:
+    StartupShaderStep(splash::StartupProgress* startup, render::EngineShaderHost& host) noexcept
+        : startup_(startup), host_(host) {
+    }
+
+    // 떼기만 한다(단계는 넘기지 않는다 — 시작이 이미 끝났을 수 있다).
+    ~StartupShaderStep() noexcept {
+        if (active_) {
+            host_.SetPreparationProgress({});
+        }
+    }
+
+    StartupShaderStep(const StartupShaderStep&) = delete;
+    StartupShaderStep& operator=(const StartupShaderStep&) = delete;
+
+    void Begin() noexcept {
+        if (startup_ == nullptr || active_) {
+            return;
+        }
+
+        startup_->Enter(splash::StartupStep::Shaders);
+        if (auto counter = startup_->MakeStepCounter(0)) {
+            counter_ = Move(counter.Value());
+        }
+
+        host_.SetPreparationProgress({&Added, &Finished, this});
+        active_ = true;
+    }
+
+    // 받는 곳을 떼고 준비 진행을 남긴 뒤 FirstFrame으로 넘어간다. Begin하지 않았으면 FirstFrame에만
+    // 들어간다. 두 번째부터는 아무 일도 하지 않는다.
+    void End() noexcept {
+        if (startup_ == nullptr || ended_) {
+            return;
+        }
+
+        ended_ = true;
+        if (active_) {
+            host_.SetPreparationProgress({});
+            active_ = false;
+            Log::Info(LogSandboxHost,
+                      "Startup shader preparation reported {Finished} of {Added} shader job(s)",
+                      finished_.Load<platform::MemoryOrder::Acquire>(),
+                      added_.Load<platform::MemoryOrder::Acquire>());
+        }
+
+        startup_->Enter(splash::StartupStep::FirstFrame);
+    }
+
+private:
+    static void Added(void* context, uint64 jobs) noexcept {
+        auto& self = *static_cast<StartupShaderStep*>(context);
+        (void)self.added_.FetchAdd<platform::MemoryOrder::AcquireRelease>(jobs);
+        self.counter_.AddTotal(jobs);
+    }
+
+    static void Finished(void* context, uint64 jobs) noexcept {
+        auto& self = *static_cast<StartupShaderStep*>(context);
+        (void)self.finished_.FetchAdd<platform::MemoryOrder::AcquireRelease>(jobs);
+        self.counter_.Add(jobs);
+    }
+
+    splash::StartupProgress* startup_;
+    render::EngineShaderHost& host_;
+    ProgressCounter counter_;
+    platform::Atomic<uint64> added_{0};
+    platform::Atomic<uint64> finished_{0};
+    bool active_ = false;
+    bool ended_ = false;
+};
+
 // 호스트 엔진 루프 hook이다(Docs/Design/EngineRuntime 21.5절). 프레임 첫 단계(PumpEvents)에서
 // 종료 요청 다리 → 창 펌프 → 게임패드 폴링 → 시험 주입 → InputState::BeginFrame 순으로 돈다.
 //
@@ -171,6 +251,9 @@ public:
         splash::SplashScreen* splash = nullptr;
         // 시작 진행(선택)이다. 스플래시를 숨기기 직전에 끝낸다(9.4절 4). hook보다 오래 산다.
         splash::StartupProgress* startup = nullptr;
+        // 시작 화면 Shaders 단계(선택)다. 첫 프레임을 낸 뒤 끝낸다(SplashScreen 8.3절). hook보다
+        // 오래 산다.
+        StartupShaderStep* shaderStep = nullptr;
     };
 
     HostLoopBridge(input::InputQueue& queue, const Options& options) noexcept
@@ -192,6 +275,11 @@ public:
     // 종료 계약 — AssetSystem 11.8절 6).
     void AttachTextures(CookedTextureLibrary* textures) noexcept {
         textures_ = textures;
+    }
+
+    // Shaders 단계를 hook 밖에서 닫았다(렌더 경로가 열리지 않음 — 첫 프레임을 기다리지 않는다).
+    void ForgetShaderStep() noexcept {
+        options_.shaderStep = nullptr;
     }
 
     // 렌더 lane slot 대기 중 창 메시지 펌프다(5.3절 — 펌프한 이벤트는 다음 PumpEvents가 모은다).
@@ -286,6 +374,12 @@ public:
 
             screen_->HandleInspectorInput(input_);
             screen_->SubmitFrame(options_.client);
+        }
+
+        // 첫 프레임을 냈다(lane 시작 작업 — 엔진 셰이더 준비 — 이 끝나야 첫 프레임 slot이 나온다).
+        if (options_.shaderStep != nullptr) {
+            options_.shaderStep->End();
+            options_.shaderStep = nullptr;
         }
 
         HandOffFromSplash();
@@ -626,6 +720,10 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     hookOptions.client = &client;
     hookOptions.splash = window ? splash : nullptr;
     hookOptions.startup = window && splash != nullptr ? startup : nullptr;
+    // 창 렌더 경로를 열면 Shaders 단계에 들어간다(SandboxStartupSteps와 같은 조건 — 8.1절).
+    const bool shaderStepDeclared = startup != nullptr && options.window && options.render;
+    StartupShaderStep shaderStep(shaderStepDeclared ? startup : nullptr, shaders::Host());
+    hookOptions.shaderStep = shaderStepDeclared ? &shaderStep : nullptr;
     HostLoopBridge bridge(queue, hookOptions);
     EngineConfig config;
     config.hooks = &bridge;
@@ -647,7 +745,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
         return 1;
     }
 
-    if (startup != nullptr) {
+    if (startup != nullptr && !shaderStepDeclared) {
         startup->Enter(splash::StartupStep::FirstFrame);
     }
 
@@ -663,7 +761,12 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     }
 
     // 창 모드면 장치와 렌더 lane을 시작한다. 엔진 셰이더를 열 원천이 없거나(Release·Android)
-    // 장치·lane을 만들지 못하면 렌더 없이 계속한다(빈 프레임 경로, 18.5절 1항).
+    // 장치·lane을 만들지 못하면 렌더 없이 계속한다(빈 프레임 경로, 18.5절 1항). 그 구간이 시작 화면
+    // Shaders 단계다(첫 프레임까지 — SplashScreen 8.3절).
+    if (shaderStepDeclared) {
+        shaderStep.Begin();
+    }
+
     if (window && options.render) {
         // 쿠킹 원천이 있으면 그 backend 순서로 장치를 고르고(auto), 셰이더 없는 쿠킹이면 장치를
         // 만들지 않는다(SSD48 — UE 전용 서버의 NullDrv 자리).
@@ -686,6 +789,11 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
             device = Move(created.Value());
             auto host = UniquePtr<screen::ScreenHost>::TryMake(allocator, allocator, *device,
                                                                shaders::Host());
+            // 창 화면에는 상태 패널(UI overlay)을 켠다(Docs/Design/RenderBase 18.5절 9항 — F1).
+            if (host) {
+                host.Value()->EnableOverlay();
+            }
+
             if (host &&
                 host.Value()->Start(*window, render::RenderLaneMode::Thread, bridge.LanePump())) {
                 screenHost = Move(host.Value());
@@ -704,6 +812,12 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
                 }
             }
         }
+    }
+
+    // 렌더 경로가 열리지 않았으면 첫 프레임을 기다리지 않고 Shaders 단계를 닫는다.
+    if (shaderStepDeclared && !screenHost) {
+        shaderStep.End();
+        bridge.ForgetShaderStep();
     }
 
     // 첫 LocalPlayer(DedicatedServer면 없다)의 입력 원천이다. bridge는 엔진 Shutdown 뒤까지 산다.
@@ -991,11 +1105,15 @@ Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noex
     return RegisterPhysicsTypes(registration);
 }
 
-// Sandbox가 들어가는 시작 단계다(Docs/Design/SplashScreen 8.1절 — 엔진 밖 에셋·셰이더 준비와
-// 콘텐츠 단계가 없다).
+// Sandbox가 들어가는 시작 단계다(Docs/Design/SplashScreen 8.1절 — 엔진 밖 에셋 준비와 콘텐츠 단계가
+// 없다). 창 렌더 경로를 열면 Shaders(장치·렌더 lane 시작 — 엔진 셰이더 준비, 8.3절 PG5 연결)가
+// 들어간다.
 constexpr splash::StartupStep SandboxStartupSteps[] = {splash::StartupStep::HostServices,
                                                        splash::StartupStep::Engine,
                                                        splash::StartupStep::FirstFrame};
+constexpr splash::StartupStep SandboxRenderStartupSteps[] = {
+    splash::StartupStep::HostServices, splash::StartupStep::Engine, splash::StartupStep::Shaders,
+    splash::StartupStep::FirstFrame};
 
 // 시작 단계 보정 프로필의 엔진 폴더 기준 경로·대상 이름·경로 칸 크기다(8.2절).
 constexpr StringView SandboxStartupProfileRelative = "Saved/Startup/StartupProfile.json";
@@ -1048,7 +1166,9 @@ SandboxSplash ShowSandboxSplash(Allocator& allocator, const EngineHostOptions& o
     if (auto appTitle = Text::Invariant(allocator, title)) {
         splash::StartupProgressDesc startupDesc;
         startupDesc.appTitle = &appTitle.Value();
-        startupDesc.steps = Span<const splash::StartupStep>(SandboxStartupSteps);
+        startupDesc.steps = options.render
+                                ? Span<const splash::StartupStep>(SandboxRenderStartupSteps)
+                                : Span<const splash::StartupStep>(SandboxStartupSteps);
         // 보정 프로필(Docs/Design/SplashScreen 8.2절): 프로젝트가 없는 엔진 프로그램이라 엔진
         // Saved 아래에 둔다(UE 엔진 프로그램과 같은 자리).
         char profilePath[SandboxStartupProfilePathBytes];
@@ -1291,6 +1411,62 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
     return exitCode;
 }
 
+// 시작 화면 Shaders 단계(SplashScreen 8.3절 PG5 연결): 창 엔진 실행을 OpenGL ES로 띄운다(Windows
+// 쿠킹 프로필에 없는 형식이라 Development 공급자가 만든다 — 너겟 적중도 job으로 센다). 자식이
+// 남기는 "Startup shader preparation reported N of M"이 N = M > 0이어야 한다. 스플래시를 띄울 수
+// 없는 데스크톱(세션 끊김)이면 판정 불가다. 반환: 0 통과, 1 실패, 2 판정 불가.
+uint32 CheckStartupShaderStep() noexcept {
+    if (platform::QueryDesktopSessionState() == platform::DesktopSessionState::Disconnected) {
+        return 2;
+    }
+
+    const platform::ProcessArgument arguments[] = {
+        {"--engine", 8}, {"--window", 8}, {"--frames", 8}, {"3", 1}, {"--graphics=opengl", 17}};
+    static char errorText[SelfTestOutputBytes];
+    const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
+    constexpr StringView Marker = "Startup shader preparation reported ";
+    uint64 finished = 0;
+    uint64 added = 0;
+    bool found = false;
+    // 줄 꼴: "<Marker><끝남> of <전체> shader job(s)".
+    StringView ignored;
+    StringView after;
+    if (child.stderrText.Split(Marker, ignored, after, StringComparison::CaseSensitive)) {
+        StringView left;
+        StringView rest;
+        StringView right;
+        StringView tail;
+        if (after.Split(" of ", left, rest, StringComparison::CaseSensitive) &&
+            rest.Split(" ", right, tail, StringComparison::CaseSensitive)) {
+            auto parsedLeft = TryParseUInt64(left);
+            auto parsedRight = TryParseUInt64(right);
+            found = parsedLeft && parsedRight;
+            finished = parsedLeft ? parsedLeft.Value() : 0;
+            added = parsedRight ? parsedRight.Value() : 0;
+        }
+    }
+
+    // 렌더 경로를 열지 못한 기기(OpenGL ES 장치·lane 실패)는 판정 불가다 — 그때 자식은 0 / 0을
+    // 남긴다.
+    const bool rendered =
+        child.stderrText.Contains("Screen rendering started", StringComparison::CaseSensitive);
+    if (child.exited && child.code == 0 && !rendered) {
+        printf("    the window run did not start screen rendering; the Shaders step is not "
+               "judged\n");
+        return 2;
+    }
+
+    const bool passed = child.exited && child.code == 0 && found && added != 0 && finished == added;
+    if (!passed) {
+        printf("    exit %u, shader preparation %s (%llu of %llu), stderr:\n%.*s\n", child.code,
+               found ? "reported" : "not reported", static_cast<unsigned long long>(finished),
+               static_cast<unsigned long long>(added),
+               static_cast<int>(child.stderrText.ByteCount()), child.stderrText.Data());
+    }
+
+    return passed ? 0u : 1u;
+}
+
 uint32 RunEngineHostSelfTest() noexcept {
     char frames[24];
     FixedStringBuilder framesText{Span<char>(frames)};
@@ -1343,8 +1519,14 @@ uint32 RunEngineHostSelfTest() noexcept {
     const bool input = CheckInjectedInputReachesPawn();
     printf("  [%s] engine host: a queued key reaches the possessed pawn through the local player\n",
            input ? "PASS" : "FAIL");
+    const uint32 shaderStep = CheckStartupShaderStep();
+    printf("  [%s] engine host: the window run reports shader preparation as the Shaders startup "
+           "step\n",
+           shaderStep == 0   ? "PASS"
+           : shaderStep == 2 ? "NOT RUN"
+                             : "FAIL");
     return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u) +
-           (terminated ? 0u : 1u) + (input ? 0u : 1u);
+           (terminated ? 0u : 1u) + (input ? 0u : 1u) + (shaderStep == 1 ? 1u : 0u);
 }
 
 } // namespace sandbox

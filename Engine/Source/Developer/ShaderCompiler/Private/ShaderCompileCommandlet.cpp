@@ -6,11 +6,14 @@
 #include <Base/InitializerList.h>
 #include <Core/Text/NumberText.h>
 #include <HostConfig/HostSettings.h>
+#include <Localization/Text.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <Progress/ProgressCounter.h>
+#include <Progress/ProgressHub.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <Task/WorkerScheduler.h>
@@ -26,7 +29,10 @@ constexpr char CommandName[] = "shader-compile";
 constexpr char Usage[] =
     "usage: shader-compile [--project=<dir>] --format=<id> [--format=<id>]... "
     "[--define=<NAME>=<VALUE>]... [--option=<name>=<value>]... [--out=<dir>] [--workers=<n>] "
-    "[--no-cache] [--keep-input] <virtual path>:<entry>:<vertex|pixel|compute>...\n";
+    "[--no-cache] [--keep-input] [--progress=console|jsonl] [--no-progress] [--parent-control] "
+    "<virtual path>:<entry>:<vertex|pixel|compute>...\n";
+// 진행 작업 제목이다(진행 보고 12장 — UE "Compiling Shaders" 알림 자리).
+constexpr StringView CompileTaskTitle = "Compiling shaders";
 // 경로 버퍼다.
 constexpr usize MaxCommandPathBytes = 4096;
 // 한 줄 출력 버퍼다(진단은 따로 나눠 쓴다).
@@ -90,6 +96,7 @@ struct Arguments {
     bool noCache = false;
     bool keepInput = false;
     bool help = false;
+    CommandProgressOptions progress;
     Array<StringView> formats;
     Array<ShaderDefine> defines;
     Array<StringView> options;
@@ -118,6 +125,17 @@ bool Parse(Span<const StringView> args, Arguments& out, const char*& reason) noe
     for (const StringView argument : args) {
         if (argument == "--help") {
             out.help = true;
+            continue;
+        }
+
+        const CommandProgressArgument progress =
+            ParseCommandProgressArgument(argument, out.progress);
+        if (progress == CommandProgressArgument::Invalid) {
+            reason = "invalid progress option (--progress=console|jsonl, --no-progress once)";
+            return false;
+        }
+
+        if (progress == CommandProgressArgument::Consumed) {
             continue;
         }
 
@@ -249,11 +267,31 @@ bool WriteFile(const char* path, Span<const uint8> bytes) noexcept {
 // 명령 전용 레지스트리 문맥 id다("SHCM").
 constexpr uint32 ShaderCompileCommandContextId = 0x5348434d;
 
+// JSONL 줄 하나를 명령 출력의 표준 출력에 한 번에 쓴다(펌프 스레드 — 버퍼는 그 스레드만 쓴다).
+struct JsonlOutput {
+    explicit JsonlOutput(Allocator& allocator, CommandletOutput& output) noexcept
+        : output(output), line(allocator) {
+    }
+
+    static void Write(void* context, StringView text) noexcept {
+        auto& self = *static_cast<JsonlOutput*>(context);
+        self.line.Clear();
+        if (self.line.TryAppend(text) && self.line.TryAppend("\n")) {
+            (void)self.output.write(self.output.context, CommandletStream::Output,
+                                    self.line.View());
+        }
+    }
+
+    CommandletOutput& output;
+    String line;
+};
+
 class Command final {
 public:
     Command(const ShaderCompileCommandContext& context, CommandletOutput& output) noexcept
         : context_(context), allocator_(*context.allocator), output_(output),
-          arguments_(allocator_), snapshots_(allocator_), root_(allocator_), workRoot_(allocator_) {
+          arguments_(allocator_), snapshots_(allocator_), root_(allocator_), workRoot_(allocator_),
+          jsonl_(allocator_, output) {
     }
 
     ~Command() noexcept {
@@ -297,7 +335,25 @@ public:
             return located;
         }
 
-        return Compile(workers);
+        // 진행 연결(진행 보고 9.5절): JSONL이면 표준 출력은 JSONL 전용이고 결과 줄은 표준 오류다.
+        CommandProgressDesc desc = context_.progress;
+        if (desc.jsonlWrite == nullptr) {
+            desc.jsonlWrite = &JsonlOutput::Write;
+            desc.jsonlContext = &jsonl_;
+        }
+
+        if (arguments_.progress.mode == CommandProgressMode::Jsonl) {
+            results_ = CommandletStream::Error;
+        }
+
+        if (auto started = progress_.Start(allocator_, arguments_.progress, desc); !started) {
+            return Fail(output_, ExitFailed, "%s: cannot start the progress output (%s)\n",
+                        CommandName, ErrorCodeName(started.Error()));
+        }
+
+        Result<int32> result = Compile(workers);
+        progress_.Stop();
+        return result;
     }
 
 private:
@@ -451,6 +507,21 @@ private:
         return result;
     }
 
+    // 최상위 진행 작업을 연다(hub가 켜져 있지 않으면 진행 없이 — 빈 handle).
+    ProgressTaskHandle BeginTask() noexcept {
+        auto title = Text::Invariant(allocator_, CompileTaskTitle);
+        if (!title) {
+            return ProgressTaskHandle();
+        }
+
+        ProgressTaskDesc desc;
+        desc.title = &title.Value();
+        desc.presentation = ProgressPresentation::Background;
+        desc.cancel = ProgressCancel::UserCancellable;
+        auto begun = ProgressHub::Get().Begin(desc);
+        return begun ? Move(begun.Value()) : ProgressTaskHandle();
+    }
+
     Result<int32> CompileJobs(ShaderCompileManager& manager) noexcept {
         // job은 형식 × 명령줄 job 순서다.
         Array<ShaderCompileJob> jobs(allocator_);
@@ -479,8 +550,28 @@ private:
             }
         }
 
+        // 작업 수준 계수를 관리자 sink로 채우고 작업 token으로 취소를 본다.
+        ProgressTaskHandle task = BeginTask();
+        ProgressCounter counter;
+        if (task.IsValid()) {
+            if (auto made = ProgressCounter::ForTask(task, 0)) {
+                counter = Move(made.Value());
+            }
+        }
+
+        const ShaderCompileProgressSink sinks[] = {MakeShaderCompileCounterSink(counter)};
+        ShaderCompileControl control;
+        control.cancel = task.IsValid() ? task.Token() : CancelToken();
+        control.sinks = Span<const ShaderCompileProgressSink>(sinks);
         Array<ShaderCompileJobResult> results(allocator_);
-        if (auto compiled = manager.Compile(jobs.View(), results); !compiled) {
+        const Result<void> compiled = manager.Compile(jobs.View(), results, control);
+        const bool cancelled = !compiled && compiled.Error() == ErrorCode::Cancelled;
+        progress_.Flush();
+        if (!compiled && !cancelled) {
+            if (task.IsValid()) {
+                (void)task.Finish(ProgressOutcome::Failed);
+            }
+
             return Result<int32>::Failure(compiled.Error());
         }
 
@@ -499,17 +590,28 @@ private:
         // 요약은 관리자 계수를 읽는다(진행 보고 12절 — 진행 줄은 Progress 모듈 몫).
         const ShaderCompileProgress progress = manager.Progress();
         if (auto written =
-                Line(output_, CommandletStream::Output,
-                     "%s: jobs %llu completed %llu failed %llu cache-hits %llu workers %llu "
-                     "batches %llu\n",
+                Line(output_, results_,
+                     "%s: jobs %llu completed %llu failed %llu cancelled %llu cache-hits %llu "
+                     "workers %llu batches %llu\n",
                      CommandName, static_cast<unsigned long long>(progress.total),
                      static_cast<unsigned long long>(progress.completed),
                      static_cast<unsigned long long>(progress.failed),
+                     static_cast<unsigned long long>(progress.cancelled),
                      static_cast<unsigned long long>(progress.cacheHits),
                      static_cast<unsigned long long>(progress.workersStarted),
                      static_cast<unsigned long long>(progress.batches));
             !written) {
             return Result<int32>::Failure(written.Error());
+        }
+
+        if (task.IsValid()) {
+            (void)task.Finish(cancelled ? ProgressOutcome::Cancelled
+                              : failed  ? ProgressOutcome::Failed
+                                        : ProgressOutcome::Succeeded);
+        }
+
+        if (cancelled) {
+            return Result<int32>::Success(ProgressCancelledExitCode);
         }
 
         return Result<int32>::Success(failed ? ExitFailed : ExitSucceeded);
@@ -533,11 +635,11 @@ private:
         const int pathBytes = static_cast<int>(spec.path.ByteCount());
         const int entryBytes = static_cast<int>(spec.entry.ByteCount());
         const int stageBytes = static_cast<int>(spec.stageName.ByteCount());
-        if (auto written = Line(
-                output_, CommandletStream::Output, "%s: %s %.*s:%.*s:%.*s %s %s %s%s%s\n",
-                CommandName, format.id, pathBytes, spec.path.Data(), entryBytes, spec.entry.Data(),
-                stageBytes, spec.stageName.Data(), key, result.cacheHit ? "hit" : "miss",
-                ShaderCompileStatusName(result.status), file[0] != 0 ? " " : "", file);
+        if (auto written =
+                Line(output_, results_, "%s: %s %.*s:%.*s:%.*s %s %s %s%s%s\n", CommandName,
+                     format.id, pathBytes, spec.path.Data(), entryBytes, spec.entry.Data(),
+                     stageBytes, spec.stageName.Data(), key, result.cacheHit ? "hit" : "miss",
+                     ShaderCompileStatusName(result.status), file[0] != 0 ? " " : "", file);
             !written) {
             return Result<bool>::Failure(written.Error());
         }
@@ -647,6 +749,10 @@ private:
     Array<ShaderFormatSnapshot*> snapshots_;
     String root_;
     String workRoot_;
+    // job 결과 줄·요약의 출력이다(JSONL 모드면 표준 오류 — 표준 출력은 JSONL 전용).
+    CommandletStream results_ = CommandletStream::Output;
+    JsonlOutput jsonl_;
+    CommandProgress progress_;
 };
 
 } // namespace compile_command_detail

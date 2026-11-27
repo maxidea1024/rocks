@@ -108,12 +108,12 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 
 | 묶음 | 메서드 |
 |---|---|
-| 힘·충격량 | `AddImpulse(impulse, velocityChange)`, `AddAngularImpulseInRadians/InDegrees`, `AddImpulseAtLocation`, `AddForce(force, accelerationChange)`, `AddForceAtLocation`, `AddForceAtLocationLocal`, `AddTorqueInRadians/InDegrees`, `AddRadialImpulse`, `AddRadialForce` |
-| 속도 | `SetPhysicsLinearVelocity(v, addToCurrent)`, `GetPhysicsLinearVelocity`, `SetPhysicsAngularVelocityInRadians/InDegrees`, `GetPhysicsAngularVelocity…`, `SetPhysicsMaxAngularVelocity…` |
-| 질량 | `GetMass`, `SetMassOverrideInKg(mass, override)`, `SetMassScale`, `GetCenterOfMass`, `SetCenterOfMass(offset)`, `GetInertiaTensor` |
-| 그 밖 | `SetSimulatePhysics`, `SetEnableGravity`, `SetLinearDamping`, `SetAngularDamping`, `SetUseCCD`, `SetNotifyRigidBodyCollision` |
+| 힘·충격량 | `AddImpulse(impulse, velocityChange)`, `AddAngularImpulseInRadians/InDegrees`, `AddImpulseAtLocation`, `AddVelocityChangeImpulseAtLocation`, `AddForce(force, accelerationChange)`, `AddForceAtLocation`, `AddForceAtLocationLocal`, `AddTorqueInRadians/InDegrees`, `AddRadialImpulse`, `AddRadialForce`(`ignoreRadialImpulse`·`ignoreRadialForce`) |
+| 속도 | `SetPhysicsLinearVelocity(v, addToCurrent)`, `GetPhysicsLinearVelocity`, `GetPhysicsLinearVelocityAtPoint`, `SetPhysicsAngularVelocityInRadians/InDegrees`, `GetPhysicsAngularVelocity…`, `SetPhysicsMaxAngularVelocity…` |
+| 질량 | `GetMass`, `SetMassOverrideInKg(mass, override)`, `SetMassScale`·`GetMassScale`, `GetCenterOfMass`, `SetCenterOfMass(offset)`, `GetInertiaTensor` |
+| 그 밖 | `SetSimulatePhysics`, `SetEnableGravity`·`IsGravityEnabled`, `SetLinearDamping`·`GetLinearDamping`, `SetAngularDamping`·`GetAngularDamping`, `SetUseCCD`, `SetGyroscopicTorqueEnabled`·`GetGyroscopicTorqueEnabled`, `SetConstraintMode`, `SetNotifyRigidBodyCollision` |
 
-- 힘·충격량은 Dynamic body에만 효력이 있다(UE와 같다 — Static·Kinematic이면 무시). 물리가 없거나 body가 없으면 무시하고 성공이다(UE와 같다).
+- 힘·충격량은 Dynamic body에만 효력이 있다(UE와 같다 — Static·Kinematic이면 무시). 물리가 없거나 body가 없으면 무시한다(UE와 같다). 충격량은 다음 step에 속도에 더한다(UE Chaos impulse velocity — 7.1.17절).
 - 값 setter는 `BodySettings`(영속)를 바꾸고 body가 있으면 즉시 반영한다.
 
 ## 2.7 잠듦·깨움

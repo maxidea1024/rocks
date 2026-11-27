@@ -8,6 +8,7 @@
 #include <GraphicsTypes/PixelFormat.h>
 #include <Texture/Texture.h>
 #include <Texture/TextureBuildSettings.h>
+#include <TextureTools/TextureFormatSelect.h>
 
 // 텍스처 빌드다(Docs/Design/AssetSystem 12.13절 — A5i, 규칙은 UE 5.8에 맞춘 12.5절·12.2절 1–5번,
 // 출력 형식은 12.17.5절): 원본 정규 픽셀을 선형화 → flipGreen → PowerOfTwoMode → 최대 크기 → mip
@@ -86,7 +87,8 @@ struct TextureBuildResult {
 
 // 빌드 규칙 버전이다(12.5·12.13·12.17절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
 // 3: 압축 형식 선택·채널 복제·BC 인코딩(12.17.5 — TC2).
-inline constexpr uint32 TextureBuildVersion = 3;
+// 4: 빌드 설정 compressionQuality(ASTC 블록 크기 — 12.17.8 7).
+inline constexpr uint32 TextureBuildVersion = 4;
 
 // 빌드 경고 수
 // 상한이다(SrgbIgnored·PreserveBorderWithWrap·EncoderUnavailable·PlatformFormatFallback).
@@ -98,6 +100,8 @@ struct TextureBuildOutputInfo {
     bool srgb = false;
     TextureSwizzle swizzle[4] = {TextureSwizzle::R, TextureSwizzle::G, TextureSwizzle::B,
                                  TextureSwizzle::A};
+    // 인코딩(인코더 종류 — 쿠킹 너겟 키의 인코더 버전·신원을 고른다, 12.17.8 8)이다.
+    TextureFormatEncoding encoding = TextureFormatEncoding::Uncompressed;
 };
 
 // settings와 알파 판정 결과의 빌드 경고를 out에 쓰고 수를 돌려준다(설정·알파만으로 정한다 — 너겟
@@ -133,13 +137,22 @@ ResolveTextureBuildSettings(const Texture& texture, TextureDimension dimension,
                             const TextureLodGroupValues& group, TextureBuildSettings& out,
                             TextureBuildResult& result) noexcept;
 
+// 빌드 실행 방법이다(12.17.9 4 — 설정이 아니라 결과가 같으므로 너겟 키에 넣지 않는다). scheduler가
+// 있으면 블록 압축을 나눠 실행하고 scratch(동시 Allocate·Deallocate 안전 — SystemAllocator)가
+// 필요하다. 둘 다 호출 동안만 쓴다.
+struct TextureBuildExecution {
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
+};
+
 // settings와 원본 정규 픽셀(TextureSource bulk raw byte)로 쿠킹 mip을 만든다(out — 앞 결과는
-// 지운다). 오류: 픽셀 byte 수·Cube 면 비정사각 InvalidArgument(InvalidSource), Resize가 Cube
-// 정사각을 깸·숨김 CompressionSettings InvalidArgument(InvalidSetting), 할당 실패 OutOfMemory(진단
-// None).
-ROCKS_TEXTURETOOLS_API Result<void> BuildTexture(Allocator& allocator,
-                                                 const TextureBuildSettings& settings,
-                                                 Span<const uint8> sourcePixels,
-                                                 TextureBuildResult& out) noexcept;
+// 지운다). 결과 byte는 execution과 무관하다. 오류: 픽셀 byte 수·Cube 면 비정사각
+// InvalidArgument(InvalidSource), Resize가 Cube 정사각을 깸·숨김 CompressionSettings
+// InvalidArgument(InvalidSetting), scheduler가 있는데 scratch 없음 InvalidArgument(진단 None), 할당
+// 실패 OutOfMemory(진단 None).
+ROCKS_TEXTURETOOLS_API Result<void>
+BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
+             Span<const uint8> sourcePixels, TextureBuildResult& out,
+             const TextureBuildExecution& execution = {}) noexcept;
 
 } // namespace rocks

@@ -4,6 +4,7 @@
 
 #include "LoweringContext.h"
 #include "LoweringTable.h"
+#include "ParameterValues.h"
 #include "Translator.h"
 
 // 텍스처 노드 lowering이다(Docs/Design/MaterialSystem 6.10절 MS2c3a). 텍스처는 IR Texture 값(slot —
@@ -762,7 +763,8 @@ Result<void> LowerTextureSample(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(value.immediate[2] >> IrTextureSamplerTypeShift);
+        samplerType = static_cast<uint8>((value.immediate[2] >> IrTextureSamplerTypeShift) &
+                                         IrTextureSamplerTypeMask);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
@@ -1224,8 +1226,9 @@ Result<void> LowerParticleSubUv(LoweringContext& context) noexcept {
         }
 
         texture = input.Value();
-        samplerType = static_cast<uint8>(context.Builder().Value(texture).immediate[2] >>
-                                         IrTextureSamplerTypeShift);
+        samplerType = static_cast<uint8>(
+            (context.Builder().Value(texture).immediate[2] >> IrTextureSamplerTypeShift) &
+            IrTextureSamplerTypeMask);
     } else {
         if (settings.texture == Guid{}) {
             return context.Error(MaterialDiagnosticCode::MissingInput, StringView(),
@@ -1503,6 +1506,217 @@ Result<void> LowerAntialiasedTextureMask(LoweringContext& context) noexcept {
     return context.Output("Result", result.Value());
 }
 
+// CurveAtlasRowParameter다(6.10절 MS2c5 — UE ME:20839–20933): 행 번호(atlas의 curve 행을 기본값으로
+// 하는 scalar 파라미터, 또는 custom primitive data)와 InputTime으로 atlas를 공유 Clamp 샘플러로
+// 샘플한다. uv = ((t × (W − 1) + 0.5) / W, (행 + 0.5) / H).
+Result<void> LowerCurveAtlasRowParameter(LoweringContext& context) noexcept {
+    Guid curve;
+    Guid atlas;
+    bool usesData = false;
+    if (auto read = context.ReadAssetReference("curve", curve); !read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    if (auto read = context.ReadAssetReference("atlas", atlas); !read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    if (auto read = context.ReadBool("useCustomPrimitiveData", false, usesData);
+        !read || !read.Value()) {
+        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
+    }
+
+    // UE 검사 순서·문구다(CPD면 curve가 없어도 된다).
+    const bool noCurve = curve == Guid{};
+    const bool noAtlas = atlas == Guid{};
+    StringView missing;
+    if (noAtlas && noCurve) {
+        missing = usesData ? StringView("The atlas are not currently set.")
+                           : StringView("The curve and atlas are not currently set.");
+    } else if (noCurve && !usesData) {
+        missing = "The curve is not currently set.";
+    } else if (noAtlas) {
+        missing = "The atlas is not currently set.";
+    }
+
+    if (!missing.IsEmpty()) {
+        return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), missing);
+    }
+
+    // atlas는 늘 번역 의존이다(UE GetTexturesForceMaterialRecompile). 행 목록은 CPD가 아닐 때만
+    // 쓴다(UE 순서: 검사 → CPD → 텍스처).
+    auto found = context.FindCurveAtlas(atlas);
+    if (!found) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    const MaterialCurveAtlasSnapshot* snapshot = found.Value();
+    if (snapshot == nullptr && !usesData) {
+        SystemAllocator scratch;
+        StringBuilder<> message(scratch);
+        message << "Could not resolve referenced curve atlas '";
+        if (auto appended = AppendAsset(message, atlas); !appended) {
+            return appended;
+        }
+
+        message << "'.";
+        if (auto status = message.Status(); !status) {
+            return status;
+        }
+
+        return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), message.View());
+    }
+
+    // 행 번호다: CPD 스칼라, 아니면 atlas의 첫 curve 행을 기본값으로 하는 scalar 파라미터(UE
+    // GetCurveIndex → ScalarParameter(ParameterName, (float)CurveIndex)).
+    IrValueId row = NoIrValue;
+    if (usesData) {
+        bool used = false;
+        auto data = CustomPrimitiveData(context, CustomPrimitiveDataScalar, used);
+        if (!data || data.Value() == NoIrValue) {
+            return data ? Result<void>::Success() : Result<void>::Failure(data.Error());
+        }
+
+        row = data.Value();
+    } else {
+        // 첫 행이다(UE GetCurveIndex — TArray::Find).
+        usize index = snapshot->curves.Size();
+        for (usize at = 0; at < snapshot->curves.Size(); ++at) {
+            if (snapshot->curves[at] == curve) {
+                index = at;
+                break;
+            }
+        }
+
+        if (index == snapshot->curves.Size()) {
+            return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                 "The curve is not contained within the atlas.");
+        }
+
+        const double defaults[MaxIrComponents] = {static_cast<double>(static_cast<float>(index)),
+                                                  0.0, 0.0, 0.0};
+        auto parameter = NumericParameter(context, IrParameterKind::Scalar, defaults);
+        if (!parameter || parameter.Value() == NoIrValue) {
+            return parameter ? Result<void>::Success() : Result<void>::Failure(parameter.Error());
+        }
+
+        row = parameter.Value();
+    }
+
+    // atlas 텍스처와 논리 크기다(UE Texture(Atlas, …, SAMPLERTYPE_LinearColor, SSM_Clamp…) →
+    // TextureProperty(TMTM_TextureSize)).
+    constexpr uint8 AtlasSamplerType = static_cast<uint8>(SamplerType::LinearColor);
+    auto texture = AssetTexture(context, atlas, AtlasSamplerType);
+    if (!texture || texture.Value() == NoIrValue) {
+        return texture ? Result<void>::Success() : Result<void>::Failure(texture.Error());
+    }
+
+    // atlas는 2D 텍스처다(UE는 클래스가 UTexture2D라 늘 참 — Rocks는 공급된 사실로 본다).
+    if (context.TypeOf(texture.Value()).texture != IrTextureKind::Texture2D) {
+        return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                             "The atlas is not a 2D texture.");
+    }
+
+    auto size = context.Builder().TextureSize(texture.Value(), false);
+    if (!size) {
+        return Result<void>::Failure(size.Error());
+    }
+
+    static constexpr uint8 WidthComponent[] = {0};
+    static constexpr uint8 HeightComponent[] = {1};
+    auto width = context.Swizzle(size.Value(), WidthComponent);
+    auto height = context.Swizzle(size.Value(), HeightComponent);
+    auto one = context.FloatScalar(1.0f);
+    auto half = context.FloatScalar(0.5f);
+    if (!width || !height || !one || !half) {
+        return Result<void>::Failure(!width    ? width.Error()
+                                     : !height ? height.Error()
+                                     : !one    ? one.Error()
+                                               : half.Error());
+    }
+
+    // t는 InputTime(없으면 UE Constant(0))이다.
+    auto connected = context.IsConnected("InputTime");
+    if (!connected) {
+        return Result<void>::Failure(connected.Error());
+    }
+
+    auto time = connected.Value() ? context.Input("InputTime") : context.FloatScalar(0.0f);
+    if (!time || time.Value() == NoIrValue) {
+        return time ? Result<void>::Success() : Result<void>::Failure(time.Error());
+    }
+
+    // U = (t × (W − 1) + 0.5) / W, V = (행 + 0.5) / H(UE 연산 순서 그대로).
+    constexpr NumberRule Rule = NumberRule::FloatOnly;
+    auto last = context.Binary(IrOp::Subtract, width.Value(), one.Value(), Rule);
+    if (!last) {
+        return Result<void>::Failure(last.Error());
+    }
+
+    auto scaled = context.Binary(IrOp::Multiply, time.Value(), last.Value(), Rule);
+    if (!scaled) {
+        return Result<void>::Failure(scaled.Error());
+    }
+
+    auto centered = context.Binary(IrOp::Add, scaled.Value(), half.Value(), Rule);
+    if (!centered) {
+        return Result<void>::Failure(centered.Error());
+    }
+
+    auto u = context.Binary(IrOp::Divide, centered.Value(), width.Value(), Rule);
+    auto rowCenter = context.Binary(IrOp::Add, row, half.Value(), Rule);
+    if (!u || !rowCenter) {
+        return Result<void>::Failure(!u ? u.Error() : rowCenter.Error());
+    }
+
+    auto v = context.Binary(IrOp::Divide, rowCenter.Value(), height.Value(), Rule);
+    if (!v) {
+        return Result<void>::Failure(v.Error());
+    }
+
+    auto uv = context.Append(u.Value(), v.Value());
+    if (!uv || uv.Value() == NoIrValue) {
+        return uv ? Result<void>::Success() : Result<void>::Failure(uv.Error());
+    }
+
+    // 공유 Clamp 샘플, mip 방식 없음, view mip bias 없음(UE TextureSample 마지막 인자 false).
+    SampleSettings settings;
+    settings.texture = atlas;
+    settings.samplerType = AtlasSamplerType;
+    settings.samplerSource = SamplerSourceMode::ClampWorldGroupSettings;
+    // 정점 문맥의 mip은 0이다(UE TextureSample — mip 값 INDEX_NONE이면 Constant(0), HT:7090–7094).
+    settings.constMipValue = 0;
+    auto sample = SampleAt(context, texture.Value(), uv.Value(), settings, AtlasSamplerType, false);
+    if (!sample || sample.Value() == NoIrValue) {
+        return sample ? Result<void>::Success() : Result<void>::Failure(sample.Error());
+    }
+
+    // 출력은 UE 마스크 순서(RGB·R·G·B·A)다.
+    static constexpr uint8 Rgb[] = {0, 1, 2};
+    auto rgb = context.Swizzle(sample.Value(), Rgb);
+    if (!rgb) {
+        return Result<void>::Failure(rgb.Error());
+    }
+
+    if (auto written = context.Output("Result", rgb.Value()); !written) {
+        return written;
+    }
+
+    static constexpr StringView Channels[MaxIrComponents] = {"R", "G", "B", "A"};
+    for (uint8 index = 0; index < MaxIrComponents; ++index) {
+        auto channel = context.Swizzle(sample.Value(), Span<const uint8>(&index, 1));
+        if (!channel) {
+            return Result<void>::Failure(channel.Error());
+        }
+
+        if (auto written = context.Output(Channels[index], channel.Value()); !written) {
+            return written;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 constexpr LoweringEntry TextureEntries[] = {
     {"Material.TextureObject", &LowerTextureObject},
     {"Material.TextureObjectParameter", &LowerTextureObjectParameter},
@@ -1517,6 +1731,7 @@ constexpr LoweringEntry TextureEntries[] = {
     {"Material.AntialiasedTextureMask", &LowerAntialiasedTextureMask},
     {"Material.RecordTextureStreamingInfo", &LowerRecordTextureStreamingInfo},
     {"Material.ParticleSubUv", &LowerParticleSubUv},
+    {"Material.CurveAtlasRowParameter", &LowerCurveAtlasRowParameter},
 };
 
 } // namespace

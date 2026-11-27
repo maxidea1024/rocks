@@ -112,7 +112,7 @@ public sealed class NativeBuildEngine
         string toolchainKey = Fingerprints.Toolchain(request.Toolchain);
         string initialInputs = InputSnapshot(request, plan, prepared.Digests);
         // 입력 메모는 첫 InputSnapshot이 읽은 값에서 시작한다(같은 파일을 action마다 다시 읽지 않는다 — BuildInputs).
-        var inputs = new BuildInputs(request.RootDirectory, request.OutputDirectory, request.Toolchain, plan, prepared.Digests);
+        var inputs = new BuildInputs(request.RootDirectory, request.OutputDirectory, request.Toolchain, plan, prepared.Digests, request.InputMemo);
         var tasks = new Dictionary<string, Task<NativeActionResult>>(StringComparer.Ordinal);
         using var slots = new SemaphoreSlim(request.MaxParallelism);
         foreach (var action in plan.Actions)

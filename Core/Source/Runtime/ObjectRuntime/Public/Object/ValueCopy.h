@@ -332,17 +332,17 @@ struct ValueSwap<E[N]> {
     }
 };
 
-// struct 검증 hook(RuntimeStructOps::validate — Docs/Design/CurveData.ko.md 9.1절)의 결과를 계약
-// 값으로 맞춘다: 성공은 그대로, 그 밖의 모든 오류는 InvalidArgument다.
+// struct 검증 hook(RuntimeStructOps::validate — Docs/Design/CurveData/README.ko.md 9.1절)의 결과를
+// 계약 값으로 맞춘다: 성공은 그대로, 그 밖의 모든 오류는 InvalidArgument다.
 inline Result<void> StructValidationResult(const Result<void>& result) noexcept {
     return result ? Result<void>::Success() : Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
-// T 값 트리 안의 검증 hook 방식이다(Docs/Design/CurveData.ko.md 9.1절). HasHook은 트리 어딘가에
-// hook 있는 struct가 있을 수 있는지(InstancedStruct는 담긴 타입이 정해지지 않으므로 늘 참)이고,
-// 거짓이면 Run을 부르지 않는다. Run은 안쪽부터 검증하고 첫 거부(InvalidArgument)에서 멈춘다. 생성
-// struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::ValidateTree로 잇는다. 그 밖의 타입은
-// hook이 없다.
+// T 값 트리 안의 검증 hook 방식이다(Docs/Design/CurveData/README.ko.md 9.1절). HasHook은 트리
+// 어딘가에 hook 있는 struct가 있을 수 있는지(InstancedStruct는 담긴 타입이 정해지지 않으므로 늘
+// 참)이고, 거짓이면 Run을 부르지 않는다. Run은 안쪽부터 검증하고 첫 거부(InvalidArgument)에서
+// 멈춘다. 생성 struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::ValidateTree로 잇는다. 그
+// 밖의 타입은 hook이 없다.
 template <class T>
 struct ValueValidate {
     // 생성 struct는 생성 헤더의 특수화가 받는다. 리플렉션 struct가 생성 헤더 없이 이 일반형으로

@@ -923,7 +923,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         model.MigrateSite ??= currentSite;
                     }
 
-                    // struct의 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 `static Result<void> Validate(const S&) noexcept` 한 개다.
+                    // struct의 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절)은 `static Result<void> Validate(const S&) noexcept` 한 개다.
                     // 모양이 다르면 조용히 hook 없이 등록되지 않게 RMC2309로 거부한다(정확한 형식은 생성 static_assert도 대조한다).
                     if (isStruct && memberName == "Validate" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
                     {

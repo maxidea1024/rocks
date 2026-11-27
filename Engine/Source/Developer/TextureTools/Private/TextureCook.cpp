@@ -182,6 +182,9 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
     keyed.samplerPointFilter = false;
     keyed.cookPlatform = 0;
     keyed.cookBackends = 0;
+    // 압축 품질은 ASTC 블록 크기로만 결과에 닿고 그 크기는 후보 형식이 담는다(12.17.8 7 —
+    // 데스크톱은 품질이 키를 바꾸지 않는다).
+    keyed.compressionQuality = TextureCompressionQuality::Default;
     // LOD 그룹은 형식 선택에서 ColorLookupTable·Bokeh·IESLightProfile만 본다(그룹 값은 이미 다른
     // 칸에 풀려 있다 — 12.17.5 2).
     if (keyed.lodGroup != TextureGroup::ColorLookupTable && keyed.lodGroup != TextureGroup::Bokeh &&
@@ -200,13 +203,21 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
         const bool block =
             graphics::GetPixelFormatInfo(format).compression != graphics::PixelCompression::None;
         writer.WriteU32(graphics::PixelFormatNumber(format));
-        // BC6H·BC7은 ISPC 감싸기 버전과 커널을 빌드한 ISPC 신원(판·타깃·인자 — 12.17.6 9)을 쓴다.
-        const bool ispc = format == graphics::PixelFormat::BC6HUfloat ||
-                          format == graphics::PixelFormat::BC7Unorm ||
-                          format == graphics::PixelFormat::BC7UnormSrgb;
-        writer.WriteU32(ispc ? IspcBcEncoderVersion : block ? RocksBcEncoderVersion : 0u);
+        // BC6H·BC7은 ISPC 감싸기 버전과 커널을 빌드한 ISPC 신원(판·타깃·인자 — 12.17.6 9), ASTC는
+        // 감싸기 버전과 astcenc 신원, EAC R11은 RocksEac 버전을 쓴다(12.17.8 8).
+        const TextureFormatEncoding encoding = TextureBuildOutput(settings, alpha).encoding;
+        const bool ispc =
+            encoding == TextureFormatEncoding::Bc6h || encoding == TextureFormatEncoding::Bc7;
+        const bool astc = encoding == TextureFormatEncoding::Astc;
+        writer.WriteU32(ispc                                        ? IspcBcEncoderVersion
+                        : astc                                      ? AstcEncoderVersion
+                        : encoding == TextureFormatEncoding::EacR11 ? RocksEacEncoderVersion
+                        : block                                     ? RocksBcEncoderVersion
+                                                                    : 0u);
         if (ispc) {
             writer.WriteString(IspcBcEncoderIdentity());
+        } else if (astc) {
+            writer.WriteString(AstcEncoderIdentity());
         }
     }
 
@@ -215,9 +226,10 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
 }
 
 // 적중 값을 받아들일 수 있으면 mips에 값 byte를 잇고 머리 형식에 맞는 알파 판정을 alpha에
-// 쓴다(형식이 알파로 갈리는 AutoDXT만 되살린다 — BC7은 두 후보 형식이 같아 늘 false다. alpha는 경고
-// 계산에만 쓰고 BC7 경고는 알파와 무관하다, 12.17.6 9) (12.14절 6번·12.17.5 4 — 머리 형식이 두 후보
-// 중 하나여야 한다, 아니면 false로 미적중으로 다룬다). 오류는 할당 실패뿐이다.
+// 쓴다(형식이 알파로 갈리는 AutoDXT만 되살린다 — BC7과 Android ASTC(Rgb·Rgba 배치)는 두 후보 형식이
+// 같아 늘 false다. alpha는 경고 계산에만 쓰고 그 경고는 알파와 무관하다, 12.17.6 9·12.17.8 6)
+// (12.14절 6번·12.17.5 4 — 머리 형식이 두 후보 중 하나여야 한다, 아니면 false로 미적중으로 다룬다).
+// 오류는 할당 실패뿐이다.
 Result<bool> CookAcceptHit(const NuggetCacheGetResult& got, const TextureBuildSettings& settings,
                            Allocator& allocator, Array<TextureCookMip>& mips,
                            bool& alpha) noexcept {
@@ -699,7 +711,9 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
         }
 
         ++builds_;
-        if (auto done = BuildTexture(allocator, settings, read.Value(), built); !done) {
+        // 블록 압축은 쿠킹의 scheduler로 나눠 실행한다(12.17.9 4 — 결과는 같다).
+        const TextureBuildExecution execution{context.scheduler, context.scratch};
+        if (auto done = BuildTexture(allocator, settings, read.Value(), built, execution); !done) {
             return CookFail(context, built.failure.code, done.Error(), built.failure.detail);
         }
 

@@ -79,6 +79,9 @@ struct MaterialContextValue {
     MaterialContextDefault defaultValue;
     // 이전 프레임 변형이 있다(UE 정의의 <PREV> — 19.3.5절).
     bool hasPrevious = false;
+    // pass가 늘 채우는 고정 칸이다(접근자가 공급 표지와 상관없이 칸을 읽는다 — SvPosition,
+    // Docs/Design/MaterialSystem 7.3절).
+    bool alwaysSupplied = false;
     // 0 이상이면 공급하지 않았을 때 그 번호의 인자를 그대로 돌려준다(defaultValue 대신 — UE
     // DynamicParameter의 노드 기본값, MaterialTemplate.ush:302–354). 아니면 NoDefaultArgument다.
     int8 defaultArgument = -1;

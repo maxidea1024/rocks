@@ -186,8 +186,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
         .TextDefaults(CurveAtlasRowParameterTextDefaults)
         .Pins(CurveAtlasRowParameterPins)
         .Menu("Curve Atlas Row Parameter", "Parameters", "Parameters", "Curve Atlas Row Parameter.")
-        .Flags(MaterialNodeFlags::Parameter)
-        .Missing(MaterialPrerequisite::CurveAsset),
+        .Flags(MaterialNodeFlags::Parameter),
 };
 
 } // namespace

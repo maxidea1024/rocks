@@ -1157,7 +1157,7 @@ internal static partial class CppEmitter
             Body($"ops.migrate = &{native}::Migrate;");
         }
 
-        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
+        // 검증 hook(Docs/Design/CurveData/README.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
         Body("if constexpr (HasValidateTree) {");
         Body($"ops.validateTree = +[](const void* value) noexcept -> Result<void> {{ return ValidateTree(*static_cast<const {native}*>(value)); }};");
         Body("}");
@@ -1187,7 +1187,7 @@ internal static partial class CppEmitter
         Line("};");
     }
 
-    // struct 값 트리의 검증이다(Docs/Design/CurveData.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
+    // struct 값 트리의 검증이다(Docs/Design/CurveData/README.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
     // PROPERTY 멤버 형식(detail::ValueValidate<멤버>::HasHook) 중 하나라도 hook을 담을 수 있는지다. ValidateTree는 base 하위 객체, PROPERTY
     // 멤버 순서(bitfield bool 제외 — hook이 없다), 마지막에 자기 Validate 순으로 안쪽부터 검증하고 첫 거부에서 멈춘다. NATIVE 멤버는
     // 리플렉션 경로가 바꾸지 않으므로 보지 않는다. 자기 Validate는 시그니처를 static_assert로 대조하고, hook struct는 통째로 복사할 수

@@ -1,4 +1,6 @@
 #include "TextureBlockBptc.h"
+#include "TextureBlockEacAstc.h"
+#include "TextureBlockParallel.h"
 #include "TextureBlockTables.h"
 
 #include <Base/NumericLimits.h>
@@ -21,7 +23,6 @@ using texture_block_detail::SingleColor6;
 
 // 블록 byte 수다.
 constexpr uint32 SmallBlockBytes = 8;
-constexpr uint32 LargeBlockBytes = 16;
 // 565 양자화 격자다.
 constexpr float Grid5 = 31.0f;
 constexpr float Grid6 = 63.0f;
@@ -784,18 +785,41 @@ void ChannelValues(const uint8 (&texels)[TextureBlockRgbaBytes], uint32 channel,
     }
 }
 
+// 블록 행 압축 작업이다(12.17.9 2 — 행 번호 = slice · blocksY + 블록 행).
+struct RowJob {
+    TextureBlockFormat format;
+    const uint8* base;
+    uint32 sizeX;
+    uint32 sizeY;
+    uint32 blocksX;
+    uint32 blocksY;
+    uint64 rowPitch;
+    uint64 slicePitch;
+    uint8* out;
+};
+
+void EncodeRows(void* context, uint64 begin, uint64 end) noexcept;
+
 } // namespace bc_encode
 
 using bc_encode::ChannelValues;
 using bc_encode::CompressAlpha;
 using bc_encode::CompressColour;
-using bc_encode::LargeBlockBytes;
 using bc_encode::SmallBlockBytes;
 
 } // namespace
 
 uint32 TextureBlockSourceTexelBytes(TextureBlockFormat format) noexcept {
-    return format == TextureBlockFormat::Bc6h ? TextureBlockHalfTexelBytes : TextureBlockTexelBytes;
+    // EAC R11 입력 R16 unorm texel 하나의 byte 수다.
+    constexpr uint32 R16TexelBytes = 2;
+    switch (format) {
+    case TextureBlockFormat::Bc6h:
+        return TextureBlockHalfTexelBytes;
+    case TextureBlockFormat::EacR11:
+        return R16TexelBytes;
+    default:
+        return TextureBlockTexelBytes;
+    }
 }
 
 StringView IspcBcEncoderIdentity() noexcept {
@@ -838,7 +862,13 @@ void EncodeTextureBlock(TextureBlockFormat format, const uint8 (&texels)[Texture
     }
     case TextureBlockFormat::Bc6h:
     case TextureBlockFormat::Bc7:
-        for (uint32 i = 0; i < LargeBlockBytes; ++i) {
+    case TextureBlockFormat::EacR11:
+    case TextureBlockFormat::Astc4x4:
+    case TextureBlockFormat::Astc6x6:
+    case TextureBlockFormat::Astc8x8:
+    case TextureBlockFormat::Astc10x10:
+    case TextureBlockFormat::Astc12x12:
+        for (uint32 i = 0; i < TextureBlockBytes(format); ++i) {
             out[i] = 0;
         }
 
@@ -895,47 +925,74 @@ Result<void> EncodeTextureBlocks(TextureBlockFormat format, const TextureBlockIm
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 병렬에는 helper 작업을 할당할 scratch가 필요하다(그림 크기와 무관하게 검사 — 12.17.9 3).
+    if (options.scheduler != nullptr && options.scratch == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (format == TextureBlockFormat::Bc6h || format == TextureBlockFormat::Bc7) {
         return texture_block_detail::EncodeIspcBlocks(format, image.rgba.Data(), image.sizeX,
                                                       image.sizeY, image.numSlices, rowPitch,
                                                       slicePitch, options, out);
     }
 
-    // NVTT ColorBlock::init의 가장자리 remainder 표(ColorBlock.cpp 63–68)다.
-    constexpr uint32 Remainder[TextureBlockSize][TextureBlockSize] = {
-        {0, 0, 0, 0}, {0, 1, 0, 1}, {0, 1, 2, 0}, {0, 1, 2, 3}};
-    const uint32 blockBytes = TextureBlockBytes(format);
-    uint8* cursor = out.Data();
-    for (uint32 slice = 0; slice < image.numSlices; ++slice) {
-        const uint8* base = image.rgba.Data() + slicePitch * slice;
-        for (uint32 y = 0; y < image.sizeY; y += TextureBlockSize) {
-            const uint32 bh =
-                image.sizeY - y < TextureBlockSize ? image.sizeY - y : TextureBlockSize;
-            for (uint32 x = 0; x < image.sizeX; x += TextureBlockSize) {
-                const uint32 bw =
-                    image.sizeX - x < TextureBlockSize ? image.sizeX - x : TextureBlockSize;
-                uint8 texels[TextureBlockRgbaBytes];
-                for (uint32 row = 0; row < TextureBlockSize; ++row) {
-                    const uint32 by = Remainder[bh - 1][row];
-                    const uint8* line = base + rowPitch * (y + by);
-                    for (uint32 column = 0; column < TextureBlockSize; ++column) {
-                        const uint32 bx = Remainder[bw - 1][column];
-                        const uint8* texel = line + uint64{x + bx} * TextureBlockTexelBytes;
-                        uint8* target =
-                            texels + (row * TextureBlockSize + column) * TextureBlockTexelBytes;
-                        for (uint32 k = 0; k < TextureBlockTexelBytes; ++k) {
-                            target[k] = texel[k];
-                        }
-                    }
-                }
-
-                EncodeTextureBlock(format, texels, cursor);
-                cursor += blockBytes;
-            }
-        }
+    if (format == TextureBlockFormat::EacR11) {
+        return texture_block_detail::EncodeEacBlocks(image.rgba.Data(), image.sizeX, image.sizeY,
+                                                     image.numSlices, rowPitch, slicePitch, options,
+                                                     out);
     }
 
-    return Result<void>::Success();
+    if (TextureBlockIsAstc(format)) {
+        return texture_block_detail::EncodeAstcBlocks(format, image.rgba.Data(), image.sizeX,
+                                                      image.sizeY, image.numSlices, rowPitch,
+                                                      slicePitch, options, out);
+    }
+
+    const uint32 blocksX =
+        static_cast<uint32>((uint64{image.sizeX} + TextureBlockSize - 1) / TextureBlockSize);
+    const uint32 blocksY =
+        static_cast<uint32>((uint64{image.sizeY} + TextureBlockSize - 1) / TextureBlockSize);
+    bc_encode::RowJob job{format,  image.rgba.Data(), image.sizeX, image.sizeY, blocksX,
+                          blocksY, rowPitch,          slicePitch,  out.Data()};
+    return texture_block_detail::RunBlockRows(options, uint64{blocksY} * image.numSlices, blocksX,
+                                              texture_block_detail::BcMinBatchBlocks, &job,
+                                              &bc_encode::EncodeRows);
+}
+
+// NVTT ColorBlock::init의 가장자리 remainder 표(ColorBlock.cpp 63–68)로 블록 행 [begin, end)를
+// 압축한다.
+void bc_encode::EncodeRows(void* context, uint64 begin, uint64 end) noexcept {
+    constexpr uint32 Remainder[TextureBlockSize][TextureBlockSize] = {
+        {0, 0, 0, 0}, {0, 1, 0, 1}, {0, 1, 2, 0}, {0, 1, 2, 3}};
+    const RowJob& job = *static_cast<const RowJob*>(context);
+    const uint32 blockBytes = TextureBlockBytes(job.format);
+    for (uint64 index = begin; index < end; ++index) {
+        const uint64 slice = index / job.blocksY;
+        const uint32 y = static_cast<uint32>(index % job.blocksY) * TextureBlockSize;
+        const uint8* base = job.base + job.slicePitch * slice;
+        uint8* cursor = job.out + index * job.blocksX * blockBytes;
+        const uint32 bh = job.sizeY - y < TextureBlockSize ? job.sizeY - y : TextureBlockSize;
+        for (uint32 x = 0; x < job.sizeX; x += TextureBlockSize) {
+            const uint32 bw = job.sizeX - x < TextureBlockSize ? job.sizeX - x : TextureBlockSize;
+            uint8 texels[TextureBlockRgbaBytes];
+            for (uint32 row = 0; row < TextureBlockSize; ++row) {
+                const uint32 by = Remainder[bh - 1][row];
+                const uint8* line = base + job.rowPitch * (y + by);
+                for (uint32 column = 0; column < TextureBlockSize; ++column) {
+                    const uint32 bx = Remainder[bw - 1][column];
+                    const uint8* texel = line + uint64{x + bx} * TextureBlockTexelBytes;
+                    uint8* target =
+                        texels + (row * TextureBlockSize + column) * TextureBlockTexelBytes;
+                    for (uint32 k = 0; k < TextureBlockTexelBytes; ++k) {
+                        target[k] = texel[k];
+                    }
+                }
+            }
+
+            EncodeTextureBlock(job.format, texels, cursor);
+            cursor += blockBytes;
+        }
+    }
 }
 
 } // namespace rocks

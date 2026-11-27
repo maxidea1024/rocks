@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/TypeKey.h>
+#include <EngineAudio/AudioOcclusionQuery.h>
 #include <EngineAudio/AudioPlayback.h>
 #include <AudioAssets/SoundSourceRef.h>
 #include <World/World.h>
@@ -47,6 +48,9 @@ public:
     Result<PlaybackHandle> Play2D(const SoundSourceRef& sound, PlayOptions options = {}) noexcept;
     Result<PlaybackHandle> PlayAt(const SoundSourceRef& sound, const Vec3d& position,
                                   PlayOptions options = {}) noexcept;
+    // 회전(UE PlaySoundAtLocation의 Rotation — 상자·캡슐·원뿔 감쇠 축)을 함께 준다.
+    Result<PlaybackHandle> PlayAt(const SoundSourceRef& sound, const Vec3d& position,
+                                  const Quatd& rotation, PlayOptions options = {}) noexcept;
     Result<PlaybackHandle> PlayAttached(AudioEmitterId emitter, const SoundSourceRef& sound,
                                         PlayOptions options = {}) noexcept;
 
@@ -65,9 +69,20 @@ public:
 
     // emitter 등록·이동·해제다(AudioComponent가 부른다). 오류는 AudioEngineSubsystem과 같고, 엔진
     // 오디오가 없거나 scene이 끝났으면 InvalidArgument다.
-    Result<AudioEmitterId> RegisterEmitter(const Vec3d& position) noexcept;
-    void UpdateEmitter(AudioEmitterId emitter, const Vec3d& position) noexcept;
+    Result<AudioEmitterId> RegisterEmitter(const Vec3d& position,
+                                           const Quatd& rotation = Quatd::Identity()) noexcept;
+    void UpdateEmitter(AudioEmitterId emitter, const Vec3d& position,
+                       const Quatd& rotation = Quatd::Identity()) noexcept;
     void UnregisterEmitter(AudioEmitterId emitter) noexcept;
+
+    // 이 World의 차폐 질의 공급자다(3.42.7절 — nullptr이면 차폐되지 않음). 수명은 호출자 책임이고
+    // World 해제(scene 해제)가 놓는다.
+    void SetOcclusionQuery(AudioOcclusionQuery* query) noexcept;
+
+    // 이 World의 base 믹스다(UE WorldSettings::DefaultBaseSoundMix — 3.43.5절). 지금 base로 걸고,
+    // World가 끝나면 엔진 기본 base 믹스로 돌아간다. 오류는 AudioEngineSubsystem::SetBaseMix와
+    // 같다.
+    Result<void> SetBaseMix(const MixSnapshotRef& mix) noexcept;
 
     // 이 World의 scene이다(놓은 뒤·엔진 오디오 없음이면 무효 id).
     AudioSceneId Scene() const noexcept {
@@ -78,6 +93,8 @@ private:
     void ReleaseScene() noexcept;
 
     AudioEngineSubsystem* engine_ = nullptr;
+    // 이 World가 base 믹스를 바꿨다(끝날 때 엔진 기본으로 되돌린다).
+    bool changedBaseMix_ = false;
     AudioSceneId scene_;
 };
 

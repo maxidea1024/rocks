@@ -157,6 +157,14 @@ TEST(CommandletArgumentsResultsAndFailureRecovery) {
     state.code = 126;
     auto badCode = registry.Run({arguments, 3}, output);
     CHECK(!badCode && badCode.Error() == ErrorCode::InvalidArgument);
+    state.code = 131;
+    auto aboveCancelled = registry.Run({arguments, 3}, output);
+    CHECK(!aboveCancelled && aboveCancelled.Error() == ErrorCode::InvalidArgument);
+    // 취소 종료 코드(130)는 받는다.
+    state.code = CommandletCancelledExitCode;
+    auto cancelled = registry.Run({arguments, 3}, output);
+    REQUIRE(cancelled);
+    CHECK(cancelled.Value() == CommandletCancelledExitCode);
     state.code = 125;
     auto recovered = registry.Run({arguments, 3}, output);
     REQUIRE(recovered);

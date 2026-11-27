@@ -53,6 +53,10 @@ public:
     IrValueId Max(IrValueId left, IrValueId right) noexcept;
     IrValueId Pow(IrValueId base, IrValueId exponent) noexcept;
     IrValueId Lerp(IrValueId from, IrValueId to, IrValueId alpha) noexcept;
+    // UE 노드 번역기의 Compiler->Lerp다: 두 끝이 같은 값이면 그
+    // 끝(HLSLMaterialTranslator.cpp:10378). UE가 노드 lowering에서 Lerp를 부르는
+    // 곳(Desaturation·ColorRamp)만 쓴다 — Substrate HLSL 이식의 lerp는 Lerp다.
+    IrValueId NodeLerp(IrValueId from, IrValueId to, IrValueId alpha) noexcept;
     IrValueId Clamp(IrValueId value, IrValueId low, IrValueId high) noexcept;
     IrValueId Saturate(IrValueId value) noexcept;
     IrValueId Sqrt(IrValueId value) noexcept;
