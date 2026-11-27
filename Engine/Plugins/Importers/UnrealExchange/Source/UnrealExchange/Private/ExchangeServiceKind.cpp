@@ -6,6 +6,7 @@
 #include <ReflectionText/TextValue.h>
 #include <UnrealExchange/ExchangeServiceKind.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
+#include <UnrealExchange/UnrealAnimSequenceImporter.h>
 #include <UnrealExchange/UnrealSkeletalMeshImporter.h>
 #include <UnrealExchange/UnrealSkeletonImporter.h>
 #include <UnrealExchange/UnrealStaticMeshImporter.h>
@@ -161,6 +162,8 @@ StringView ExchangeServiceImporterName(ExchangeClass type) noexcept {
         return UnrealSkeletonImporterName;
     case ExchangeClass::SkeletalMesh:
         return UnrealSkeletalMeshImporterName;
+    case ExchangeClass::AnimSequence:
+        return UnrealAnimSequenceImporterName;
     default:
         break;
     }

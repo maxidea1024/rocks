@@ -22,4 +22,4 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX7b1 | Rocks | 스켈레톤·스킨 메시 순수 변환(6.4절 1–7번 — `ExchangeSkeleton`·`ExchangeSkeletalMesh`, 설정 행 `EnumMap`, 공용 `ExchangeMeshCommon`) | UX7a2, UX3b, MA4b–MA5 |
 | UX7b2 | Rocks | 스켈레톤·스킨 메시 임포트(6.4절 8–10번 — A2f `unreal_skeleton`·`unreal_skeletal_mesh`, 종류별 임포터·제품 연결, 명령·C# 시험) | UX7b1, UXR8–UXR10 |
 | UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
-| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6, UXR8–UXR10 |
+| UX8b | Rocks | 애니메이션 클립 임포트(7.2절 — `ExchangeAnimationClip`, 커브 열거·플래그 대응, 이벤트 속성 버림 경고, A2f `unreal_anim_sequence`) | UX8a, UX7b, MA6, UXR8–UXR10 |
