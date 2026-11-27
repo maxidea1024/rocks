@@ -30,7 +30,9 @@ enum class GraphicsSelfTestScope : rocks::uint8 {
     CookedShaders,
     // 쿠킹 텍스처 장면 대조만(Sandbox --texture-self-test, RenderBase 18.5절 7항 — 메모리 플랫폼
     // 데이터 장면과 시험 콘텐츠 쿠킹 장면).
-    Textures
+    Textures,
+    // 감시 재컴파일만(Sandbox --shader-reload-self-test, ShaderSystem 16.3절 SSD78).
+    ShaderReload
 };
 
 int RunGraphicsSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules,

@@ -1,0 +1,8 @@
+// 감시 재컴파일 self-test 원문이다(Docs/Design/ShaderSystem 16.3절 SSD78). self-test가 실행마다 임시
+// 시험 루트(/Plugin/SandboxReload)에 복사하고 ReloadColor.rsh를 고쳐 써 include 변경의 재컴파일을
+// 확인한다. FullScreenVS와 짝을 이룬다.
+#include "ReloadColor.rsh"
+
+float4 ReloadColorPixel() : SV_Target0 {
+    return ReloadColor;
+}

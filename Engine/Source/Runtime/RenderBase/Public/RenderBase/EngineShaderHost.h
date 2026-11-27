@@ -12,6 +12,7 @@
 #include <Platform/Sync.h>
 #include <RenderBase/BuiltinResources.h>
 #include <RenderBase/ShaderSet.h>
+#include <RenderBase/ShaderSetSlot.h>
 #include <RenderBase/SharedConstantSlotTable.h>
 #include <ShaderCore/ShaderLibrary.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
@@ -190,7 +191,7 @@ ROCKS_RENDERBASE_API StringView EngineShaderFormat(graphics::Backend backend) no
 class ROCKS_RENDERBASE_API EngineRenderResources final {
 public:
     explicit EngineRenderResources(Allocator& allocator) noexcept;
-    // 집합을 파괴한다(Retire하지 않는다 — 주인이 종료 단계에서 Retire한다).
+    // 남은 집합을 파괴한다(Retire하지 않는다 — 주인이 종료 단계에서 Retire한다).
     ~EngineRenderResources() noexcept;
     EngineRenderResources(const EngineRenderResources&) = delete;
     EngineRenderResources& operator=(const EngineRenderResources&) = delete;
@@ -210,13 +211,37 @@ public:
     // 하지 않는다.
     void Retire(graphics::Device& device) noexcept;
 
+    // 감시 재컴파일의 셰이더 교체를 프레임 경계에서 적용한다(Docs/Design/RenderBase 9.8절 "SH4
+    // 연결", ShaderSystem 16.3절 SSD76). 주인(렌더 lane 처리기)이 프레임 작업 맨 앞에서 부른다:
+    // 공급자로 연 집합이고 공급자 revision이 지금 집합보다 크면 같은 형식의 새 집합을 열어
+    // ShaderSetSlot에 Propose하고(검사 실패면 거부 — Error 로그, 그 revision은 다시 열지 않는다),
+    // ApplyPending이 교체하면 옛 집합의 cache 항목을 회수하고 내장 자원 팩의 셰이더 항목을 새
+    // 집합에서 다시 찾는다. 교체했으면 true다 — 주인은 집합 포인터·항목 번호를 든 파이프라인 요청을
+    // 다시 만든다. 쿠킹 라이브러리로 열었거나 준비 전이면 아무 일도 하지 않는다. lease가 풀린 옛
+    // 집합은 이 자리에서 파괴한다. 장치 소유 스레드에서 부른다.
+    bool ApplyShaderUpdates(PipelineCache* cache) noexcept;
+
     bool IsReady() const noexcept {
         return ready_;
     }
 
-    // 연 집합이다(Ready일 때). 없으면 null이다.
+    // 연 집합(교체 뒤면 새 집합)이다(Ready일 때). 없으면 null이다. 다음 ApplyShaderUpdates까지
+    // 유효하다.
     ShaderSet* Shaders() noexcept {
-        return ready_ ? set_.Get() : nullptr;
+        return ready_ ? slot_.Current() : nullptr;
+    }
+
+    // 지금 집합의 공급자 revision(공급자 경로가 아니면 0)과 교체·거부 수다.
+    uint64 ShaderRevision() const noexcept {
+        return revision_;
+    }
+
+    uint64 ShaderSwaps() const noexcept {
+        return slot_.Swaps();
+    }
+
+    uint64 ShaderRejections() const noexcept {
+        return slot_.Rejections();
     }
 
     BuiltinResources& Builtins() noexcept {
@@ -247,8 +272,15 @@ private:
                       StringView detail) noexcept;
 
     Allocator& allocator_;
-    UniquePtr<ShaderSet> set_;
+    // 집합 교체 자리다(9.8절 — 첫 집합은 Install, 교체는 Propose·ApplyPending).
+    ShaderSetSlot slot_;
     BuiltinResources builtins_;
+    // Open이 쓴 호스트(공급자 조회)와 revision: 지금 집합, 마지막으로 열어 본 revision.
+    const EngineShaderHost* host_ = nullptr;
+    graphics::Device* device_ = nullptr;
+    uint64 revision_ = 0;
+    uint64 attemptedRevision_ = 0;
+    uint64 pendingRevision_ = 0;
     char problem_[512] = {};
     // 집합 desc가 가리키는 형식 id 저장소다(집합보다 오래 산다).
     char format_[shader::MaxShaderFormatIdBytes] = {};

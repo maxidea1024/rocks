@@ -172,6 +172,13 @@ inline constexpr ShaderTypeDesc ShadingFloatProbe = EngineShaderProbeType(
     "EngineShaderShadingFloatProbe", "/Plugin/EngineShaderTests/Shading/ShadingTestKernels.rsf",
     "ShadingFloatProbePixel");
 
+// 감시 재컴파일 self-test 타입이다(Docs/Design/ShaderSystem 16.3절 SSD78). 원문은 실행마다
+// Programs/Sandbox/ShaderReload를 복사한 임시 시험 루트(/Plugin/SandboxReload —
+// ReloadSourceDirectory)다.
+inline constexpr ShaderTypeDesc ReloadColorPS =
+    SandboxType("SandboxReloadColorPS", "/Plugin/SandboxReload/Reload.rsf", "ReloadColorPixel",
+                rocks::shader::ShaderStagePixel);
+
 // Sandbox가 등록하는 모든 셰이더 타입이다.
 rocks::Span<const ShaderTypeDesc* const> AllTypes() noexcept;
 
@@ -237,6 +244,18 @@ private:
     rocks::render::EngineRenderResources resources_;
     bool active_ = false;
 };
+
+// 감시 재컴파일 self-test 시험 루트의 디스크 디렉터리다(self-test 범위에서 호스트를 붙인 뒤 —
+// 없으면 빈 값). SelfTestShaderHost가 파괴될 때 지운다.
+StringView ReloadSourceDirectory() noexcept;
+
+// 활성 엔진 렌더 자원의 셰이더 교체를 프레임 경계로 적용한다(EngineRenderResources::
+// ApplyShaderUpdates — 파이프라인 캐시 없이). 교체했으면 true다. 활성 자원이 없으면 false다.
+bool ApplyShaderUpdates() noexcept;
+
+// 활성 집합의 형식 id와 공급자 revision(없으면 빈 값·0)이다.
+StringView ActiveFormat() noexcept;
+rocks::uint64 ActiveRevision() noexcept;
 
 // 활성 집합에 타입이 있는가(거르기로 빠진 타입은 없다).
 bool Has(const ShaderTypeDesc& type) noexcept;

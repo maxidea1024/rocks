@@ -304,7 +304,8 @@ void AiController::OnFrameworkEndPlay(EndPlayReason reason) noexcept {
 
 PlayerController::PlayerController(Allocator& allocator) noexcept
     : Controller(allocator), actionInput_(allocator), actionBindings_(allocator),
-      haptics_(allocator), inputAssets_(allocator) {
+      haptics_(allocator), inputAssets_(allocator), inputStack_(allocator), inputLayers_(allocator),
+      stackConsumed_(allocator), actorComponents_(allocator) {
     wantsPlayerState = true;
     // pause 중에도 Tick한다(UE PlayerController.cpp:204 — TickPlayerInput·Tick).
     PrimaryTick().tick = true;
@@ -360,7 +361,8 @@ void PlayerController::OnTick(const TickContext& context) noexcept {
 
     inputEvaluationFailing_ = !evaluated;
 
-    actionBindings_.Dispatch(actionInput_);
+    // 입력 스택을 쌓아 위층부터 전달한다(InputActions 5.5절).
+    DispatchInputStack();
     actionInput_.FinishDispatch();
 
     // 진동 합성(Docs/Design/InputActions 6.3절 — UE ProcessForceFeedbackAndHaptics). 전달 뒤라 이번
@@ -417,6 +419,8 @@ Result<void> PlayerController::OnPossess(ObjectHandle pawn) noexcept {
     auto targeted = GetWorld().With<CameraDirector>(
         cameraDirector_, [pawn](CameraDirector& camera) noexcept { camera.SetViewTarget(pawn); });
     (void)targeted;
+    // 플레이어 입력 컴포넌트(UE PawnClientRestart — Pawn.cpp:496–527, InputActions 5.5절).
+    SetupPawnInput(pawn);
     return Result<void>::Success();
 }
 
@@ -575,7 +579,14 @@ void Pawn::PossessedBy(ObjectHandle controller, ObjectHandle playerState) noexce
 }
 
 void Pawn::UnPossessed() noexcept {
-    // UE UnPossessed(Pawn.cpp:713–751).
+    // UE UnPossessed(Pawn.cpp:713–751). 플레이어 입력 컴포넌트를 파괴한다(UE
+    // DestroyPlayerInputComponent — :727, InputActions 5.5절).
+    if (!playerInputComponent_.IsNull()) {
+        auto destroyed = GetWorld().DestroyComponent(playerInputComponent_);
+        (void)destroyed;
+        playerInputComponent_ = {};
+    }
+
     const ObjectHandle previous = controller_;
     playerState_ = {};
     auto owned = SetOwner({});
