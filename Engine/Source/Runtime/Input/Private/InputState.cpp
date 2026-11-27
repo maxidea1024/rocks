@@ -164,6 +164,20 @@ Result<void> InputQueue::TryInitialize(usize capacity) noexcept {
     return Result<void>::Success();
 }
 
+void InputQueue::DrainTo(InputQueue& target) noexcept {
+    if (&target == this) {
+        return;
+    }
+
+    target.dropped_ += dropped_ - forwardedDropped_;
+    forwardedDropped_ = dropped_;
+    for (const auto& event : events_) {
+        target.Push(event);
+    }
+
+    Clear();
+}
+
 bool InputQueue::Push(const InputEvent& event) noexcept {
     // 초기화 전이거나 가득 찼으면 할당하지 않고 버린다.
     if (events_.Size() >= capacity_ || !events_.TryPushBack(event)) {
@@ -233,12 +247,14 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (event.key == Key::None || index >= KeyCount) {
                 break;
             }
+
             // 이미 눌린 키의 down(자동 반복 포함)은 edge를 만들지 않는다. 눌려 있지 않던 키는
             // repeat 표시가 있어도 눌림으로 본다: 키를 누른 채 포커스를 되찾으면 OS의 첫 down이
             // 반복으로 오며, 이를 무시하면 뗄 때 짝 없는 WasReleased만 생긴다.
             if (!keysDown_.Get(index)) {
                 keysPressed_.Set(index, true);
             }
+
             keysDown_.Set(index, true);
             break;
         }
@@ -247,12 +263,18 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (event.key == Key::None || index >= KeyCount) {
                 break;
             }
+
             if (keysDown_.Get(index)) {
                 keysReleased_.Set(index, true);
             }
+
             keysDown_.Set(index, false);
             break;
         }
+        case InputEventType::TextInputMethod:
+            // IME 문자열은 활성 텍스트 입력 문맥(UI 편집 요소)으로 간다. 문맥이 없으면 OS가 확정
+            // 문자를 Text로 보낸다(19.2절).
+            break;
         case InputEventType::Text:
             if (textCount_ < MaxTextPerFrame) {
                 text_[textCount_++] = event.codePoint;
@@ -266,10 +288,12 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             if (mouseTouchEmulation_ && touches_[EmulatedTouchIndex].down) {
                 ApplyTouch(InputEvent::TouchMoved(EmulatedTouchIndex, event.x, event.y));
             }
+
             if (mouseDeltaValid_) {
                 mouseDeltaX_ += event.x - mouseX_;
                 mouseDeltaY_ += event.y - mouseY_;
             }
+
             mouseX_ = event.x;
             mouseY_ = event.y;
             hasMousePosition_ = true;
@@ -285,9 +309,11 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
                 ApplyTouch(InputEvent::TouchBegan(EmulatedTouchIndex, mouseX_, mouseY_));
                 break;
             }
+
             if ((mouseDown_ & Bit(index)) == 0) {
                 mousePressed_ |= Bit(index);
             }
+
             mouseDown_ |= Bit(index);
             break;
         }
@@ -301,12 +327,20 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
                 ApplyTouch(InputEvent::TouchEnded(EmulatedTouchIndex, mouseX_, mouseY_));
                 break;
             }
+
             if ((mouseDown_ & Bit(index)) != 0) {
                 mouseReleased_ |= Bit(index);
             }
+
             mouseDown_ &= ~Bit(index);
             break;
         }
+        case InputEventType::PointerCaptureLost:
+            mouseReleased_ |= mouseDown_;
+            mouseDown_ = 0;
+            break;
+        case InputEventType::MouseLeave:
+            break;
         case InputEventType::MouseWheel:
             if (math::IsFinite(event.wheel)) {
                 wheel_ += event.wheel;
@@ -324,6 +358,8 @@ void InputState::BeginFrame(Span<const InputEvent> events, bool eventsLost) noex
             break;
         case InputEventType::FocusLost:
             ReleaseAll();
+            break;
+        case InputEventType::NonClientPressed:
             break;
         }
     }

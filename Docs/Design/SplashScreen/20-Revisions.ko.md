@@ -12,3 +12,4 @@
 - 개정 6(2026-11-27): 기본·템플릿 스플래시 그림을 사용자가 준 흑요석 배경(생성형 AI, `Obsidian.png`)으로 바꿨다. Studio와 게임 기본은 같은 그림(왼쪽 스택 로고, 사용자 의견으로 왼쪽으로 50 px 옮김), 템플릿은 띠 오른쪽 위 심볼. 생성기를 원본 합성 방식으로 줄이고 `template_art.py`를 지웠다(12절).
 - 개정 7(2026-11-27): SP2 구현. 들어갈 단계를 `StartupProgressDesc::steps`로 미리 밝힘(8.1절), 원천 비율은 자기 진행 `selfFraction`의 최댓값(7.2절), 퍼센트·99%는 모델 몫, `StartupProgress`는 이동 가능한 값(11절), `StartPhase` 구간은 로더 시작 관찰자 + Engine `ModuleStartProgress`(8.1절·ModuleLoader 3.16절), Sandbox 측정(8.3절).
 - 개정 8(2026-11-27): SP5 구현 — 8.2절에 구현 결정(준비 시점 `MarkReady`로 최소 표시 대기 제외, 파일 자리·형식, 저장값 없는 단계는 코드 기본값 비율, 바닥 두 번, 끝까지 간 시작만 쓰기·다른 대상 보존·임시 파일 뒤 Replace), API `profilePath`·`profileTarget`·`MarkReady`(11절), 시험 7.
+- 개정 9(2026-11-27): 진행 보고 PG5(렌더 세션) — Sandbox가 창 렌더 경로에서 `Shaders` 단계에 들어가고 엔진 셰이더 준비를 단계 계수로 보고한다(8.1절·8.3절 PG5 연결).

@@ -1,0 +1,32 @@
+diff --git a/nanosvg.h b/nanosvg.h
+index 291ecbf..4f42bdc 100644
+--- a/nanosvg.h
++++ b/nanosvg.h
+@@ -213,6 +213,7 @@ void nsvgDelete(NSVGimage* image);
+ #define NSVG_RGB(r, g, b) (((unsigned int)r) | ((unsigned int)g << 8) | ((unsigned int)b << 16))
+ 
+ #ifdef _MSC_VER
++	#pragma warning (push) /* Rocks modification: see ThirdParty.json modifications. */
+ 	#pragma warning (disable: 4996) // Switch off security warnings
+ 	#pragma warning (disable: 4100) // Switch off unreferenced formal parameter warnings
+ 	#ifdef __cplusplus
+@@ -3208,7 +3209,7 @@ NSVGimage* nsvgParseFromFile(const char* filename, const char* units, float dpi)
+ 	if (!fp) goto error;
+ 	if (fseek(fp, 0, SEEK_END)) goto error;
+ 	size = ftell(fp);
+-	if (size == -1l) goto error;
++	if (size == (size_t)-1l) goto error; /* Rocks modification: see ThirdParty.json modifications. */
+ 	if (fseek(fp, 0, SEEK_SET)) goto error;
+ 	data = (char*)malloc(size+1);
+ 	if (data == NULL) goto error;
+@@ -3273,6 +3274,10 @@ void nsvgDelete(NSVGimage* image)
+ 	free(image);
+ }
+ 
++#ifdef _MSC_VER
++	#pragma warning (pop) /* Rocks modification: see ThirdParty.json modifications. */
++#endif
++
+ #endif // NANOSVG_IMPLEMENTATION
+ 
+ #endif // NANOSVG_H

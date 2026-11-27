@@ -1,5 +1,6 @@
 #include "ShaderSourceTestSupport.h"
 
+#include <Core/CancelToken.h>
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
@@ -692,6 +693,91 @@ TEST(ShaderWorkerChannel_TerminatesHeldWorker) {
     REQUIRE(test.Run(empty));
     CHECK(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
     CHECK(test.result.workerProcessId != 0 && test.result.workerProcessId != terminated);
+}
+
+// held hook: 묶음 token을 취소하고 워커를 막힌 채 둔다(취소 gate — 다음 읽기에서 채널이 취소를
+// 본다).
+ShaderWorkerHeldAction CancelHeld(void* context, uint32, uint32, Span<const uint32>) noexcept {
+    static_cast<CancelSource*>(context)->Cancel();
+    return ShaderWorkerHeldAction::Keep;
+}
+
+// SC4 묶음 취소: 취소된 token의 대기 묶음은 워커를 띄우지 않고 Cancelled다. 진행 중 묶음(SpawnChild
+// — 손자 probe를 띄우고 held)은 hook이 token을 취소하면 채널이 워커와 손자를 끝내고 Cancelled로
+// 보고한다(남은 프로세스 없음). 다음 묶음은 새 워커가 처리한다.
+TEST(ShaderWorkerChannel_CancelsQueuedAndRunningBatches) {
+    auto source = CancelSource::Create(TestAllocator());
+    REQUIRE(source);
+    ShaderWorkerChannelHooks hooks;
+    hooks.held = &CancelHeld;
+    hooks.context = &source.Value();
+    ChannelCase test;
+    bool ready = false;
+    if (!test.Make("workercancel", true, ready, hooks) || !test::ProcessSpawnExpected()) {
+        printf("[SKIP] ShaderWorkerChannel_CancelsQueuedAndRunningBatches: ShaderCompileWorker is "
+               "not next to the test executable\n");
+        return;
+    }
+
+    REQUIRE(ready);
+    // 대기 묶음: 이미 취소된 token이다.
+    auto early = CancelSource::Create(TestAllocator());
+    REQUIRE(early);
+    early.Value().Cancel();
+    RequestBuilder empty;
+    Array<uint8> emptyBytes(TestAllocator());
+    REQUIRE(empty.Encode(emptyBytes));
+    {
+        ShaderWorkerTicket ticket;
+        ticket.request = emptyBytes.View();
+        ticket.out = &test.result;
+        ticket.cancel = early.Value().Token();
+        test.channel.Post(ticket);
+        ShaderWorkerChannel::Wait(ticket);
+    }
+
+    CHECK(test.result.outcome == ShaderWorkerBatchOutcome::Cancelled);
+    CHECK(test.channel.WorkersStarted() == 0);
+
+    // 진행 중 묶음: 손자 probe를 띄우고 held를 쓴 워커다.
+    char self[ChannelPathBytes];
+    usize selfBytes = 0;
+    REQUIRE(platform::GetExecutablePath(self, sizeof(self), selfBytes));
+    RequestBuilder spawn;
+    REQUIRE(spawn.AddJob(ShaderWorkerJobKind::SpawnChild, "", ShaderStageCompute, ""));
+    for (const char* argument :
+         {static_cast<const char*>(self), "--process-probe", "sleep", "600000"}) {
+        auto added = spawn.request.jobs[0].hookArguments.TryEmplaceBack(TestAllocator());
+        REQUIRE(added && added.Value()->TryAssign(argument));
+    }
+
+    Array<uint8> spawnBytes(TestAllocator());
+    REQUIRE(spawn.Encode(spawnBytes));
+    {
+        ShaderWorkerTicket ticket;
+        ticket.request = spawnBytes.View();
+        ticket.out = &test.result;
+        ticket.cancel = source.Value().Token();
+        test.channel.Post(ticket);
+        ShaderWorkerChannel::Wait(ticket);
+    }
+
+    CHECK(test.result.outcome == ShaderWorkerBatchOutcome::Cancelled);
+    CHECK(!test.result.diagnostics.IsEmpty());
+    REQUIRE(test.result.children.Size() == 1);
+    const uint32 worker = test.result.workerProcessId;
+    const uint32 child = test.result.children[0];
+    REQUIRE(worker != 0 && child != 0);
+    CHECK(platform::WaitForProcessExit(worker, ExitWaitMilliseconds) ==
+          platform::WaitResult::Signaled);
+    CHECK(platform::WaitForProcessExit(child, ExitWaitMilliseconds) ==
+          platform::WaitResult::Signaled);
+
+    // 취소될 수 없는 token의 다음 묶음은 새 워커가 처리한다.
+    REQUIRE(test.Run(empty));
+    CHECK(test.result.outcome == ShaderWorkerBatchOutcome::Completed);
+    CHECK(test.result.workerProcessId != 0 && test.result.workerProcessId != worker);
+    CHECK(test.channel.WorkersStarted() == 2);
 }
 
 TEST(ShaderWorkerChannel_ReportsCrashAndAssert) {

@@ -39,7 +39,7 @@ internal static class MetaProbeIdentity
     // 이벤트 필드 시험(MetaTests.Events)의 필드다.
     private static readonly string[] EventFields =
         ["probe::Value::changed", "probe::Value::named", "probe::Value::pinged", "probe::Value::placed", "probe::Value::edited",
-            "probe::Value::secret", "probe::Value::many", "probe::Holder::changed",
+            "probe::Value::secret", "probe::Value::many", "probe::Holder::changed", "probe::Root::changed",
             // Sparks 이벤트 시험(MetaTests.SparksEvents)의 이벤트·필드다.
             "probe::Thing::scored", "probe::Thing::pinged", "probe::Thing::place_it", "probe::Thing::hidden", "probe::Thing::quiet",
             "probe::Thing::value", "probe::Thing::was_hit", "probe::Thing::struck", "probe::Thing::changed",

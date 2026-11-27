@@ -291,11 +291,15 @@ internal static partial class CppEmitter
         // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다. 클래스 대상(참조의 기대 타입·ClassRef의 Base)은
         // NativeTypeKey만 쓰므로 헤더에서는 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다 —
         // 그 키가 필요한 생성 소스가 따로 include한다).
+        // 이벤트 인자 칸(상속 이벤트 포함)의 enum·struct도 같다: Broadcast를 부르는 클래스 구현 TU는 클래스 생성 헤더만 include하는데,
+        // 그 TU의 FrameLayoutOf<Args...>가 enum을 Opaque로 보면 생성 연산표와 다른 배치가 링크된다(ODR — Docs/Design/EventReflection.ko.md ED18).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
-        IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
+        FieldModel[] valueSlots = own.SelectMany(type => type.Fields)
+            .Concat(own.SelectMany(type => type.Fields).SelectMany(field => field.EventParameters)).ToArray();
+        IEnumerable<string> valueHeaders = valueSlots
             .Where(field => field.TargetKind is "Enum" or "Struct" or "InstancedStruct" && field.Reference is not null)
             .Select(field => field.Reference!)
-            .Concat(own.SelectMany(type => type.Fields).Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
+            .Concat(valueSlots.Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
                 .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Concat(own.Where(type => type.IsStruct && type.Base.Length != 0).Select(type => type.Base))

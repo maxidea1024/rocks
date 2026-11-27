@@ -10,5 +10,5 @@
 | PG2 | `Progress` 모듈: hub·작업·바인딩·구간·계수·스냅샷·사건 기록·UI 펌프 hook·`ProgressParallelFor` | 시험 3–14, 요구 9 비용 측정치 기록 — **완료**(2026-11-27, 시작 화면 세션. `Core/Source/Runtime/Progress`, 시험 `Progress_*` 21개, 비용 15.5절·`Programs/ProgressBench`) |
 | PG3 | `ConsoleProgressReporter`·`ProgressPumpThread`·`ProgressJsonlWriter`·`ChildProgressReader`·`ParentControlListener` | 시험 15–21 — **완료**(2026-11-27, 시작 화면 세션. `SetExternalProgress`, PlatformBase 시간 제한 표준 입력 읽기. 명령의 `--progress=jsonl`·`--no-progress`·`--parent-control` 연결은 PG5에서 각 명령이) |
 | PG4 | `PendingWorkRegistry`·`PendingWorkSource`(Engine) | 시험 22–26 — **완료**(2026-11-27, 시작 화면 세션. `Engine::PendingWork`, 매 프레임 `ApplyCompleted`) |
-| PG5 | 첫 적용: 셰이더 컴파일 관리자·`shader-compile`(렌더 세션), 쿠킹·임포트(에셋 세션) | 실제 명령의 진행 줄·JSONL·취소 확인 |
+| PG5 | 첫 적용: 셰이더 컴파일 관리자·`shader-compile`(렌더 세션), 쿠킹·임포트(에셋 세션) | 실제 명령의 진행 줄·JSONL·취소 확인 — **렌더 세션 몫 완료**(2026-11-27. 관리자 control·sink·취소, `CommandProgress`(9.5절), `shader-compile` 진행 인자, Engine `CountedPendingWork`·등록소 호스트 서비스(8장), Development 공급자 작업·대기 작업·시작 단계 계수, 시험 27–32). 에셋 세션 몫(쿠킹·임포트)은 남았다 — 명령 연결은 `CommandProgress`를 쓴다 |
 | PG6 | 에디터 표시(진행 창·알림·상태 표시줄) | 에디터 단계에서 — UiToolkit 스펙에 연결 |

@@ -10,6 +10,7 @@
 #include <Engine/EngineLog.h>
 #include <Engine/ModuleStartProgress.h>
 #include <Localization/Text.h>
+#include <ModuleLoader/HostServices.h>
 #include <Progress/ProgressScope.h>
 #include <World/DiagnosticText.h>
 #include <World/WorldLog.h>
@@ -1186,6 +1187,17 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     }
 
     attachedModules_ = loader;
+    // 엔진 묶음 모듈이 대기 작업 source를 등록하도록 등록소를 호스트 서비스로 올린다(Docs/Design/
+    // ProgressReporting 8장 PG5). 같은 로더의 다른 Engine이 이미 올렸으면 그것을 둔다.
+    if (auto registered = loader->Services().Register(pendingWork_); registered) {
+        pendingWorkService_ = true;
+    } else {
+        Log::Debug(LogEngine,
+                   "The pending work registry is not a host service of this engine ({Error}); "
+                   "another engine on the same module loader provides it",
+                   ErrorCodeName(registered.Error()));
+    }
+
     // 엔진 단계(PreDefault·Default·PostDefault) 모듈을 시작한다. 등록기가 붙어 있으므로 각 모듈의
     // 타입은 Startup 직전에 등록된다. 이미 다른 Engine이 시작했으면 사용자 수만 는다.
     ModuleLoadReport started;
@@ -1238,6 +1250,12 @@ void Engine::DetachModuleTypes() noexcept {
 
         if (moduleTypes_) {
             attachedModules_->DetachTypeRegistrar(*moduleTypes_);
+        }
+
+        // 엔진 묶음 모듈이 내려간 뒤(그 Shutdown이 source를 뗐다) 서비스를 뗀다.
+        if (pendingWorkService_) {
+            (void)attachedModules_->Services().Unregister(pendingWork_);
+            pendingWorkService_ = false;
         }
 
         attachedModules_ = nullptr;

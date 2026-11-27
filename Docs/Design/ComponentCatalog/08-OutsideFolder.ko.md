@@ -64,7 +64,7 @@
 
 **편집기 쪽**(9): `UGizmoBaseComponent`·`UGizmoArrowComponent`·`UGizmoBoxComponent`·`UGizmoCircleComponent`·`UGizmoLineHandleComponent`·`UGizmoRectangleComponent`·`UViewAdjustedStaticMeshGizmoComponent`(`RT/InteractiveToolsFramework/Public/BaseGizmos/`), `ULandscapeGizmoRenderComponent`, `ULevelInstanceComponent`(레벨 인스턴스의 편집용 인스턴스 Actor Transform을 맞추는 편집 도우미 — `RT/Engine/Public/LevelInstance/LevelInstanceComponent.h:15–30`). 런타임 카탈로그에 넣지 않고 에디터 문서(gizmo)와 [Prefab](../Prefab.ko.md) PF5·PF9(레벨 인스턴스)가 정한다(CD17). 그리는 경로는 편집 표시(CD12, RN PC9a)다.
 
-**컴포넌트 아님**(13): 시험 전용 3(`UAutoRTFMTestChildActorComponent`·`UAutoRTFMTestPrimitiveComponent`·`USSAMTestComponent`), `UObject` 파생 2(`UClientPilotComponent`·`UExternalRpcRegistrationComponent`), 인터페이스 2(`UPhysicsComponent`·`UToolFrameworkComponent`), UMG 위젯 확장 5(`UUIComponent`·`UMouseHoverComponent`·`UScaleBoxComponent`·`USizeBoxComponent`·`UNavigationUIComponent` — Actor가 아니라 위젯에 붙는 `UObject`, `RT/UMG/Public/Extensions/UIComponent.h`, [UI 툴킷](../UiToolkit.ko.md) 몫), 패킷 처리기 팩토리 1(`UEngineHandlerComponentFactory`).
+**컴포넌트 아님**(13): 시험 전용 3(`UAutoRTFMTestChildActorComponent`·`UAutoRTFMTestPrimitiveComponent`·`USSAMTestComponent`), `UObject` 파생 2(`UClientPilotComponent`·`UExternalRpcRegistrationComponent`), 인터페이스 2(`UPhysicsComponent`·`UToolFrameworkComponent`), UMG 위젯 확장 5(`UUIComponent`·`UMouseHoverComponent`·`UScaleBoxComponent`·`USizeBoxComponent`·`UNavigationUIComponent` — Actor가 아니라 위젯에 붙는 `UObject`, `RT/UMG/Public/Extensions/UIComponent.h`, [UI 툴킷](../UiToolkit/README.ko.md) 몫), 패킷 처리기 팩토리 1(`UEngineHandlerComponentFactory`).
 
 ### 8.4 필수 컴포넌트
 
@@ -176,7 +176,7 @@
 | CR29 | 카메라 시스템: `CameraDirector`(gameplay·spectator·cutscene control layer 합성, view target·blend·modifier — UE `APlayerCameraManager` 대응), camera shake 패턴 에셋, 시네마틱 렌즈·필름백·초점(DOF) | 이름·역할만 계획에 있음 | EIP 20.5절 "CameraDirector는 gameplay·spectator·cutscene control layer를 합성한다" | EIP 20.5절(정본), 25·26절 |
 | CR30 | 내비게이션: navmesh 생성(Recast·Detour — EIP 19절), 영역·modifier·link, 경로 질의, crowd, invoker 기반 동적 생성 | 없음 | — | 내비 문서(없음), EIP 19절 |
 | CR31 | AI 런타임: behavior tree·blackboard 에셋과 실행기, perception 감각(시각·청각·피해), gameplay task, gameplay debugger, EQS(확장) | 없음 | — | AI 문서(없음), EIP 19절 "초기에는 Behavior Tree와 Blackboard, 시각·청각 perception, async path following" |
-| CR32 | world-space UI: Widget 층을 render target에 그리기, world hit test·포인터 입력 라우팅 | 설계 있음(코드 없음) | UiToolkit 5.9절 "월드 공간 Widget", 3절 `WorldIntegration` 행의 `UWidgetComponent` 대응 | [UI 툴킷](../UiToolkit.ko.md) 5.9절·UT6, EIP 21.4절 |
+| CR32 | world-space UI: Widget 층을 render target에 그리기, world hit test·포인터 입력 라우팅 | 설계 있음(코드 없음) | UiToolkit 5.9절 "월드 공간 Widget", 3절 `WorldIntegration` 행의 `UWidgetComponent` 대응 | [UI 툴킷](../UiToolkit/README.ko.md) 5.9절·UT6, EIP 21.4절 |
 | CR33 | 미디어 재생: 영상 디코드·텍스처 출력·오디오 동기 | 없음 | — | 미디어 문서(없음) |
 | CR34 | 절차 오디오 source: 게임 코드가 PCM을 생성해 voice로 넣는 경로(`SoundGenerator`) — `USynthComponent` 대체 | 설계(AU10 단계) | AU 9.1절 "`USynthComponent`(procedural은 `SoundGenerator` source 입력으로 — AU10)" | AU |
 | CR35 | 지형·식생: heightfield·tile LOD·지형 머티리얼 layer·지형 충돌(Jolt heightfield)·spline, 식생 인스턴스·grass 자동 배치·절차 배치·바람 | 없음 | EIP 21절 "terrain heightfield/tile LOD, foliage instancing·wind … P2" | 환경 문서(없음) |

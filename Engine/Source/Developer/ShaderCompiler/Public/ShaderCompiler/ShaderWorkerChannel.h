@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/CancelToken.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
@@ -18,8 +19,12 @@
 // pipe에 `<seq>\n`을 쓴다. 출력 pipe에서 `done <seq>`를 받은 뒤에만 `output.<seq>`를 읽고 지운다
 // (파일 존재 polling이 없다). `held <seq>`(시험 hook)는 hook에 묻고(풀기·끝내기), `child <pid>`는
 // 결과에 모은다. 워커가 끝나면(EOF) 종료 종류·코드와 진단으로 그 묶음을 실패로 보고하고 다음
-// 묶음에서 워커를 다시 띄운다. 진행 중 묶음은 취소하지 않는다(워커 강제 종료는 채널 스레드가
-// hook으로만 한다).
+// 묶음에서 워커를 다시 띄운다.
+//
+// 취소(11.1절 SC4 묶음 취소, 진행 보고 PG5): ticket의 token이 꺼낼 때 취소면 워커를 띄우지 않고
+// Cancelled다. 진행 중이면 출력 pipe를 ShaderWorkerCancelPollMilliseconds 시간 제한으로 읽고
+// 사이사이 token을 보며, 취소면 워커(와 자손)를 강제 종료·회수하고 남은 입력·출력 파일을 지운 뒤
+// Cancelled로 보고한다(다음 묶음은 새 워커). 취소될 수 없는 token이면 시간 제한 없이 읽는다.
 //
 // 워커는 `--work-dir <dir> --parent-pid <이 프로세스> --worker <n>`으로 낮은 우선순위로 띄운다.
 // 표준 오류는 Null이다(읽지 않는 pipe가 차서 멈추는 교착을 막는다 — 워커 로그는 worker.log).
@@ -34,6 +39,10 @@
 //   channel.Run(requestBytes, result);         // result.outcome·response·exit·diagnostics
 //   channel.Shutdown();                         // 입력 pipe를 닫고 워커 종료를 기다린다
 namespace rocks::shader {
+
+// 취소될 수 있는 묶음을 기다릴 때 출력 pipe 읽기 시간 제한이다(이 간격마다 token을 본다 — 진행 보고
+// ChildControlPollMilliseconds와 같은 값).
+inline constexpr uint32 ShaderWorkerCancelPollMilliseconds = 100;
 
 struct ShaderWorkerLaunch {
     // 워커 실행 파일(UTF-8 절대 경로)이다.
@@ -55,7 +64,9 @@ enum class ShaderWorkerBatchOutcome : uint8 {
     // 채널 쪽 실패(작업 디렉터리·파일·pipe·손상된 출력 — diagnostics).
     ChannelFailed,
     // 채널이 닫혔다.
-    ShutDown
+    ShutDown,
+    // ticket token으로 취소됐다(워커를 띄우지 않았거나 강제 종료했다 — diagnostics).
+    Cancelled
 };
 
 ROCKS_SHADERCOMPILER_API const char*
@@ -92,6 +103,8 @@ struct ShaderWorkerTicket {
     Span<const uint8> request;
     ShaderWorkerBatchResult* out = nullptr;
     ShaderWorkerProgress progress;
+    // 이 묶음의 취소다(기본은 취소될 수 없는 token).
+    CancelToken cancel;
     platform::ManualResetEvent done;
 };
 
@@ -100,7 +113,10 @@ enum class ShaderWorkerHeldAction : uint8 {
     // 입력 pipe에 한 줄을 써서 풀어 준다.
     Release,
     // 채널 스레드가 워커를 강제 종료한다.
-    Terminate
+    Terminate,
+    // 아무것도 쓰지 않고 계속 읽는다(워커는 막힌 채다 — 취소 시험의 gate: hook이 ticket token을
+    // 취소하고 이것을 고르면 다음 읽기 시간 초과에서 채널이 취소를 본다).
+    Keep
 };
 
 // 채널 스레드가 부르는 시험 hook이다(제품 코드는 걸지 않는다).
