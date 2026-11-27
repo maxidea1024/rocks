@@ -1,6 +1,6 @@
 # 설치 마법사 설계
 
-기준일: 2026-11-21, 개정 2. 저장소를 받은 뒤 가장 먼저 실행하는 설치 마법사(`Setup.bat`·`Setup.sh`)를 정한다. 사용 순서는
+기준일: 2026-11-27, 개정 4. 저장소를 받은 뒤 가장 먼저 실행하는 설치 마법사(`Setup.bat`·`Setup.sh`)를 정한다. 사용 순서는
 [빌드 환경 설정](../Guides/BuildEnvironment.ko.md)에 있다.
 
 ## 1. 목표
@@ -47,6 +47,7 @@
 | Xcode 도구(macOS) | `xcode-select -p`, PATH 첫 `clang++`가 Apple clang 최소 이상. 검증 목록 밖이면 내용에 CI 검증 줄을 함께 보인다(빌드는 "미검증 도구 모음" 알림 뒤 진행) | `xcode-select --install`(창을 마친 뒤 다시 실행) |
 | LLVM(Windows) | 새 터미널 PATH의 첫 `clang-cl`이 `Build/Toolchain.json` 검증 목록에 있고, 고른 MSVC STL의 최소 Clang(`yvals_core.h` STL1000 두 형식) 이상 | 7-Zip이 없으면 winget `7zip.7zip`, `Build/InstallLlvm.ps1 -ToolchainRoot`, 사용자 PATH 맨 앞 |
 | clang-format | `ROCKS_CLANG_FORMAT`이 가리키는 파일이 `clangFormat.version` | Windows: `Build/InstallFormatter.ps1 -ToolchainRoot`. macOS·Linux: `Setup.sh`가 같은 wheel(`clangFormat.packages`)을 SHA-256으로 확인하고 실행 파일만 꺼낸다. 이어서 `ROCKS_CLANG_FORMAT` 설정 |
+| ISPC | `ROCKS_ISPC`가 가리키는 파일의 `--version`이 `ispc.version`([BuildTargets 3.12절](BuildTargets/03-Design/03.12-IspcSources.ko.md) BD45 — 텍스처 압축기의 ISPC 원본) | `Build/InstallIspc.ps1 -ToolchainRoot`(Windows·macOS — 고정 압축 파일 SHA-256 확인 뒤 실행 파일만), 이어서 `ROCKS_ISPC` 설정 |
 | Android NDK(`-Android`) | SDK의 `ndk/<android.ndk.version>`과 `ANDROID_NDK_HOME`이 그 경로 | `Build/SelectAndroidNdk.ps1`(sdkmanager), `ANDROID_NDK_HOME` 설정 |
 
 - **새 터미널 기준으로 본다.** Windows는 레지스트리의 시스템·사용자 환경(시스템 PATH 뒤 사용자 PATH)을, macOS·Linux는 현재 환경과 시작
@@ -94,7 +95,7 @@
     `REG_EXPAND_SZ` 보존과 두 번째 쓰기 무변경), 인자 인용.
   - 주 흐름(가짜 항목 주입): 모두 있으면 묻지 않고 0, 한 번 묻고 빠진 것만 설치, `-Check`·`n`·입력 없음은 설치하지 않고 1, 실패·수동 항목이
     다른 항목을 막지 않음, 앞 설치가 채운 항목은 설치하지 않음.
-- CI Windows는 이어서 고정 LLVM `bin`을 시스템 PATH 맨 앞에, `ROCKS_CLANG_FORMAT`을 사용자 환경에 넣고(러너는 job 뒤 버려진다)
+- CI Windows는 이어서 고정 LLVM `bin`을 시스템 PATH 맨 앞에, `ROCKS_CLANG_FORMAT`·`ROCKS_ISPC`를 사용자 환경에 넣고(러너는 job 뒤 버려진다)
   `Setup.ps1 -Check -Skip 'FXC SDK'`가 0인지 본다. 러너 이미지에 SDK 10.0.22621이 없어서 FXC SDK만 뺀다.
 - `Build/Setup.sh --self-test`: SDK 버전대, Clang 주 버전, JSON 값 읽기(실제 `global.json`·`Toolchain.json`, 고정 .NET SDK와 `global.json`
   일치, 플랫폼별 wheel·압축 파일 항목 형식), SHA 계산, 내려받기 실패의 `Next:`, 시작 파일 블록 쓰기(임시 파일). CI macOS는 이어서 실제
@@ -121,3 +122,4 @@
 | 1 | 2026-11-21 | 첫 판. `Setup.bat`·`Build/Setup.ps1`·`Setup.sh`·`Build/Setup.sh`·`.vsconfig`, CI 자체 시험. 기본은 Build Tools(Windows)·Command Line Tools(macOS)이고 IDE는 `-WithIde` |
 | 2 | 2026-11-21 | 리뷰 10건 반영. FXC SDK 항목과 SDK 22621(셰이더 시스템 개정 22), VS 17.8·MSVC 14.38.33130 하한, STL1000 두 형식, `-WithIde`가 IDE를 먼저 깔고 재사용·C++ 없는 설치는 modify, 설치 직전 재점검, macOS·Linux 내려받기 고정(.NET SDK SHA-512, clang-format wheel)과 Homebrew 없는 기본 흐름, Linux의 .NET·clang-format 설치, `Next:` 보강, 가짜 항목 주 흐름 시험과 CI Windows 실제 `-Check`(`-Skip`) |
 | 3 | 2026-11-22 | macOS 기본 단계에 PowerShell 7을 넣었다([프로젝트 파일](ProjectFiles.ko.md) PJ2 리뷰: `Rocks.proj` `BootstrapTools`가 `Build/Tools.ps1`을 부르므로 Android를 쓰지 않는 macOS도 `pwsh`가 필요하다). Homebrew 대신 `Build/Toolchain.json`의 공식 tar.gz(7.6.9, SHA-256)를 푼다. 자체 시험에 그 항목 모양 검사를 더했다 |
+| 4 | 2026-11-27 | ISPC 항목을 더했다([BuildTargets 3.12절](BuildTargets/03-Design/03.12-IspcSources.ko.md) BD45 — 텍스처 압축기 BC6H·BC7의 ISPC 원본). Windows·macOS 모두 `Build/InstallIspc.ps1`이 고정 압축 파일(`ispc.packages`, SHA-256)에서 실행 파일만 꺼내고 `ROCKS_ISPC`를 설정한다. CI는 `Install pinned ISPC` 단계를 둔다 |
