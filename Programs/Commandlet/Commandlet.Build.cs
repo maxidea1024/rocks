@@ -45,11 +45,12 @@ public sealed class CommandletHost : ModuleRules
         // without the AudioOutputBackendRegistry and AudioDecoderRegistry host services their module lifetime objects stay idle in the cooker. WorldIntegration (with Mesh
         // and Material) comes from the Sandbox texture render cache (Docs/Design/RenderBase section 18.5 item 8).
         // SplashScreen comes from the Sandbox window mode (Docs/Design/SplashScreen); it registers no shader types and only shows a window when a
-        // host calls SplashScreen::Show, which the cooker never does.
+        // host calls SplashScreen::Show, which the cooker never does. UiCore, UiFramework and UiRender come from the Sandbox window UI panel
+        // (Docs/Design/RenderBase section 18.5 item 9); UiRender's module lifetime object registers the UI shader types, so the engine cook carries them.
         PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
             "Texture", "UnrealExchange", "NodeGraphTools", "ShaderCompiler", "TextureTools", "MeshTools", "AnimationTools", "Collision",
             "Engine", "Gameplay", "Physics", "EngineAssets", "PlatformWindow", "RenderBase", "RenderGraph", "ShaderCore", "D3D12Graphics", "D3D11Graphics",
             "VulkanGraphics", "OpenGLGraphics", "Audio", "AudioMiniaudio", "AudioOpus", "EngineAudio", "AudioAssets", "AudioTools", "CurveAssets", "CurveAssetTools", "CurveAtlas", "CurveAtlasTools", "WorldIntegration",
-            "SplashScreen"]
+            "SplashScreen", "UiCore", "UiFramework", "UiRender"]
     };
 }

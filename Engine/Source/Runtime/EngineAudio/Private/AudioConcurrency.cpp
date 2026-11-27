@@ -539,8 +539,9 @@ void AudioDeviceContext::CullConcurrencyGroup(uint32 group, ControlBatch& batch,
                 return a.sequence > b.sequence;
             }
 
-            if (!NearlyEqual(a.priority, b.priority, ConcurrencyTieTolerance)) {
-                return a.priority < b.priority;
+            if (!NearlyEqual(a.concurrencyPriority, b.concurrencyPriority,
+                             ConcurrencyTieTolerance)) {
+                return a.concurrencyPriority < b.concurrencyPriority;
             }
 
             // StopLowestPriority는 오래된 쪽이, ThenPreventNew는 새 쪽이 먼저 멈춘다(SC 462–477).
@@ -576,8 +577,9 @@ void AudioDeviceContext::RankConcurrencyGroup(uint32 group, uint64 now) noexcept
                        if (!NearlyEqual(da, db, ConcurrencyTieTolerance)) {
                            return da > db;
                        }
-                   } else if (!NearlyEqual(a.priority, b.priority, ConcurrencyTieTolerance)) {
-                       return a.priority < b.priority;
+                   } else if (!NearlyEqual(a.concurrencyPriority, b.concurrencyPriority,
+                                           ConcurrencyTieTolerance)) {
+                       return a.concurrencyPriority < b.concurrencyPriority;
                    }
 
                    return a.sequence < b.sequence;

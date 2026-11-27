@@ -325,4 +325,39 @@ TEST(Audio_DSP1_DistanceRejectsInvalidSettings) {
     CHECK(EvaluateDistanceAttenuation(settings, 1.0f));
 }
 
+// omni 이득 행(3.42.6절, UE AudioMixerSource.cpp:2058–2160·2254–2310): OmniDirectional 1/N,
+// Direct2D mono는 FL·FR 0.5·stereo는 L → FL·R → FR, Surround2D는 5.1 측면·7.1 후면을 더한다.
+// LFE·FC는 0이다.
+TEST(Audio_Panner_OmniGains) {
+    float gains[MaxOutputChannels] = {};
+    REQUIRE(ComputeOmniGains(ChannelLayout::Stereo, AudioOmniMode::OmniDirectional, 0, 1,
+                             Span<float>(gains)));
+    CHECK(gains[0] == 0.5f && gains[1] == 0.5f);
+    REQUIRE(
+        ComputeOmniGains(ChannelLayout::Stereo, AudioOmniMode::Direct2D, 0, 1, Span<float>(gains)));
+    CHECK(gains[0] == MonoUpmixLinearGain && gains[1] == MonoUpmixLinearGain);
+    REQUIRE(
+        ComputeOmniGains(ChannelLayout::Stereo, AudioOmniMode::Direct2D, 1, 2, Span<float>(gains)));
+    CHECK(gains[0] == 0.0f && gains[1] == 1.0f);
+    // 5.1: FL FR FC LFE SL SR.
+    REQUIRE(ComputeOmniGains(ChannelLayout::Surround51, AudioOmniMode::Surround2D, 0, 2,
+                             Span<float>(gains)));
+    CHECK(gains[0] == 1.0f && gains[1] == 0.0f && gains[2] == 0.0f && gains[3] == 0.0f &&
+          gains[4] == 1.0f && gains[5] == 0.0f);
+    REQUIRE(ComputeOmniGains(ChannelLayout::Surround51, AudioOmniMode::Direct2D, 0, 2,
+                             Span<float>(gains)));
+    CHECK(gains[0] == 1.0f && gains[4] == 0.0f);
+    // 7.1은 후면이다.
+    REQUIRE(ComputeOmniGains(ChannelLayout::Surround71, AudioOmniMode::Surround2D, 1, 2,
+                             Span<float>(gains)));
+    CHECK(gains[1] == 1.0f && gains[5] == 0.0f && gains[7] == 1.0f && gains[6] == 0.0f);
+    REQUIRE(
+        ComputeOmniGains(ChannelLayout::Mono, AudioOmniMode::Direct2D, 0, 1, Span<float>(gains)));
+    CHECK(gains[0] == 1.0f);
+    CHECK(ComputeOmniGains(ChannelLayout::Stereo, AudioOmniMode::Direct2D, 2, 2, Span<float>(gains))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(ComputeOmniGains(ChannelLayout::Stereo, AudioOmniMode::Direct2D, 0, 3, Span<float>(gains))
+              .Error() == ErrorCode::InvalidArgument);
+}
+
 } // namespace audio_spatial_tests_file

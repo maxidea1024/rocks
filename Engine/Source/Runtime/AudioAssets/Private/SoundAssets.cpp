@@ -32,7 +32,31 @@ static_assert(static_cast<uint8>(SoundNaturalFalloffMode::Silent) ==
 static_assert(static_cast<uint8>(SoundNaturalFalloffMode::Continues) ==
               static_cast<uint8>(audio::NaturalSoundFalloffMode::Continues));
 
-Result<SoundAttenuation> AttenuationSettings::ToSnapshot() const noexcept {
+namespace {
+
+// 쓰이는 곡선을 깊이 복사해 공유 사본으로 둔다(3.42.1절 — 제어 쪽이 Registry 없이 평가).
+Result<void> FlattenCurve(const FloatCurveSource& source, Allocator& allocator,
+                          ObjectRegistry& registry, const ObjectAccessContext& access,
+                          SharedPtr<const TangentCurve>& out) noexcept {
+    auto made = SharedPtr<TangentCurve>::TryMake(allocator, allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    if (auto flattened = source.TryFlattenInto(registry, access, *made.Value().Get()); !flattened) {
+        return flattened;
+    }
+
+    out = made.Value();
+    return Result<void>::Success();
+}
+
+} // namespace
+
+Result<SoundAttenuation>
+AttenuationSettings::ToSnapshot(Allocator& allocator, ObjectRegistry& registry,
+                                const ObjectAccessContext& access) const noexcept {
+    using Made = Result<SoundAttenuation>;
     SoundAttenuation snapshot;
     snapshot.attenuate = attenuate;
     snapshot.spatialize = spatialize;
@@ -41,14 +65,80 @@ Result<SoundAttenuation> AttenuationSettings::ToSnapshot() const noexcept {
     snapshot.distance.naturalSoundAttenuationDb = naturalSoundAttenuationDb;
     snapshot.distance.naturalSoundFalloffMode =
         static_cast<audio::NaturalSoundFalloffMode>(naturalSoundFalloffMode);
-    snapshot.innerRadius = innerRadius;
+    snapshot.shape = shape;
+    snapshot.shapeExtents = shapeExtents;
+    snapshot.coneOffset = coneOffset;
+    snapshot.coneSphereRadius = coneSphereRadius;
+    snapshot.coneSphereFalloffDistance = coneSphereFalloffDistance;
+    snapshot.attenuateWithLowPass = attenuateWithLowPass;
+    snapshot.absorptionMethod = absorptionMethod;
+    snapshot.logFrequencyScaling = logFrequencyScaling;
+    snapshot.absorptionDistanceMin = absorptionDistanceMin;
+    snapshot.absorptionDistanceMax = absorptionDistanceMax;
+    snapshot.lowPassFrequencyAtMin = lowPassFrequencyAtMin;
+    snapshot.lowPassFrequencyAtMax = lowPassFrequencyAtMax;
+    snapshot.highPassFrequencyAtMin = highPassFrequencyAtMin;
+    snapshot.highPassFrequencyAtMax = highPassFrequencyAtMax;
+    snapshot.enablePriorityAttenuation = enablePriorityAttenuation;
+    snapshot.priorityAttenuationMethod = priorityAttenuationMethod;
+    snapshot.priorityAttenuationMin = priorityAttenuationMin;
+    snapshot.priorityAttenuationMax = priorityAttenuationMax;
+    snapshot.priorityAttenuationDistanceMin = priorityAttenuationDistanceMin;
+    snapshot.priorityAttenuationDistanceMax = priorityAttenuationDistanceMax;
+    snapshot.manualPriorityAttenuation = manualPriorityAttenuation;
+    snapshot.enableListenerFocus = enableListenerFocus;
+    snapshot.enableFocusInterpolation = enableFocusInterpolation;
+    snapshot.focusAzimuth = focusAzimuth;
+    snapshot.nonFocusAzimuth = nonFocusAzimuth;
+    snapshot.focusDistanceScale = focusDistanceScale;
+    snapshot.nonFocusDistanceScale = nonFocusDistanceScale;
+    snapshot.focusPriorityScale = focusPriorityScale;
+    snapshot.nonFocusPriorityScale = nonFocusPriorityScale;
+    snapshot.focusVolumeAttenuation = focusVolumeAttenuation;
+    snapshot.nonFocusVolumeAttenuation = nonFocusVolumeAttenuation;
+    snapshot.focusAttackInterpSpeed = focusAttackInterpSpeed;
+    snapshot.focusReleaseInterpSpeed = focusReleaseInterpSpeed;
+    snapshot.stereoSpread = stereoSpread;
     snapshot.nonSpatializedRadiusStart = nonSpatializedRadiusStart;
     snapshot.nonSpatializedRadiusEnd = nonSpatializedRadiusEnd;
-    if (auto valid = ValidateSoundAttenuation(snapshot); !valid) {
-        return Result<SoundAttenuation>::Failure(valid.Error());
+    snapshot.nonSpatializedMode = nonSpatializedRadiusMode;
+    snapshot.enableOcclusion = enableOcclusion;
+    snapshot.occlusionLowPassFrequency = occlusionLowPassFrequency;
+    snapshot.occlusionVolumeAttenuation = occlusionVolumeAttenuation;
+    snapshot.occlusionInterpolationSeconds = occlusionInterpolationSeconds;
+
+    // 쓰이는 곡선만 평탄화한다.
+    const bool absorptionCurves =
+        attenuateWithLowPass && absorptionMethod == SoundAbsorptionMethod::CustomCurve;
+    const struct {
+        bool used;
+        const FloatCurveSource* source;
+        SharedPtr<const TangentCurve>* out;
+    } curves[] = {
+        {model == SoundDistanceModel::Custom, &customDistanceCurve, &snapshot.customDistanceCurve},
+        {absorptionCurves, &customLowPassAbsorptionCurve, &snapshot.customLowPassAbsorptionCurve},
+        {absorptionCurves, &customHighPassAbsorptionCurve, &snapshot.customHighPassAbsorptionCurve},
+        {enablePriorityAttenuation &&
+             priorityAttenuationMethod == SoundPriorityAttenuationMethod::CustomCurve,
+         &customPriorityAttenuationCurve, &snapshot.customPriorityAttenuationCurve},
+    };
+
+    for (const auto& curve : curves) {
+        if (!curve.used) {
+            continue;
+        }
+
+        if (auto flattened = FlattenCurve(*curve.source, allocator, registry, access, *curve.out);
+            !flattened) {
+            return Made::Failure(flattened.Error());
+        }
     }
 
-    return Result<SoundAttenuation>::Success(snapshot);
+    if (auto valid = ValidateSoundAttenuation(snapshot); !valid) {
+        return Made::Failure(valid.Error());
+    }
+
+    return Made::Success(Move(snapshot));
 }
 
 Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectRegistry& registry,
@@ -76,12 +166,12 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
             return Made::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto snapshot = resolved.Value()->ToSnapshot();
+        auto snapshot = resolved.Value()->ToSnapshot(allocator, registry, access);
         if (!snapshot) {
             return Made::Failure(snapshot.Error());
         }
 
-        playable.attenuation = snapshot.Value();
+        playable.attenuation = Move(snapshot.Value());
     }
 
     // 동시 발음: 재정의면 이 사운드만의 그룹 하나(키는 이 객체), 아니면 참조한 그룹들(3.41.2절).

@@ -207,7 +207,7 @@ private:
 
     // seqlock 내용 word 수다: generation, 순번 하위·상위, 파라미터 7개(비트 패턴). AudioMixer.cpp의
     // SeqlockWord 열거와 static_assert로 묶는다.
-    static constexpr uint32 SeqlockWords = 10;
+    static constexpr uint32 SeqlockWords = 11;
 
     // 계수 스냅샷 word 수다. AudioMixerCounters의 uint64 필드 수와 static_assert로 묶는다.
     static constexpr uint32 CounterSnapshotWords = sizeof(AudioMixerCounters) / sizeof(uint64);

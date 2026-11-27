@@ -4,6 +4,7 @@
 #include "CpuDisplayColor.h"
 #include "SandboxGame.h"
 #include "ScreenHost.h"
+#include "ScreenOverlay.h"
 #include "SandboxShaders.h"
 #include "SelfTestEnvironment.h"
 
@@ -89,7 +90,7 @@ public:
         // 첫 프레임 끝에 capture를 요청한다(자원 작업이 그 프레임 packet보다 먼저 lane에 들어간다).
         const uint64 frame = engine.Time().frameIndex;
         if (frame == 1) {
-            captureRequested = screen_.RequestCapture(ScreenWidth, ScreenHeight).IsOk();
+            captureRequested = screen_.RequestCapture().IsOk();
         }
 
         if (frame >= 1 && frame <= ScreenFrames) {
@@ -237,6 +238,101 @@ void CheckInspector(const screen::ScreenRenderer& renderer, bool hasCubeArray, c
     }
 }
 
+// --- 상태 패널(UI overlay, 18.5절 9항) ---
+
+// 표본 자리는 배율 1을 가정한다(창 높이가 OverlayReferenceHeight의 두 배보다 작다).
+static_assert(ScreenHeight < 2 * screen::OverlayReferenceHeight, "overlay samples assume scale 1");
+
+// 패널 막대 하나의 표본 줄(가운데 y)과 막대 안 10%(채움 쪽)·90%(바탕 쪽) 자리 x다.
+struct BarSamples {
+    uint32 y;
+    uint32 fillX;
+    uint32 emptyX;
+};
+
+// 막대 안쪽 왼쪽 10%(값이 0.1보다 크면 채움)와 오른쪽 90%(값이 0.9보다 작으면 바탕) 자리다.
+constexpr float BarFillFraction = 0.1f;
+constexpr float BarEmptyFraction = 0.9f;
+
+BarSamples OverlayBarSamples(screen::OverlayBar bar) noexcept {
+    const float top = static_cast<float>(ScreenHeight) - screen::OverlayMargin -
+                      screen::OverlayHeight + screen::OverlayInset +
+                      static_cast<float>(bar) * (screen::OverlayBarHeight + screen::OverlayBarGap);
+    const float left = screen::OverlayMargin + screen::OverlayInset;
+    const float width = screen::OverlayWidth - screen::OverlayInset * 2.0f;
+    return BarSamples{static_cast<uint32>(top + screen::OverlayBarHeight / 2.0f),
+                      static_cast<uint32>(left + width * BarFillFraction),
+                      static_cast<uint32>(left + width * BarEmptyFraction)};
+}
+
+bool SamePixel(const Pixel& a, const Pixel& b) noexcept {
+    for (int channel = 0; channel < 3; ++channel) {
+        const int delta = a.rgb[channel] - b.rgb[channel];
+        if (delta > ChannelTolerance || delta < -ChannelTolerance) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void PrintPixel(const char* what, const Pixel& pixel) noexcept {
+    printf("    %s is (%d, %d, %d)\n", what, pixel.rgb[0], pixel.rgb[1], pixel.rgb[2]);
+}
+
+// 패널 픽셀을 단언한다: 장면 프레임(자리 0)의 패널 바탕 = 패널 색, 막대는 모두 바탕(값 0), 2D mip
+// 1/3 프레임(자리 2)의 mip 막대는 왼쪽이 채움(파란 쪽)·오른쪽이 바탕이다.
+void CheckOverlay(const screen::ScreenRenderer& renderer, const char* name,
+                  const char* mode) noexcept {
+    const Array<uint8>& scene = renderer.CapturedPixels(0);
+    const Array<uint8>& mip = renderer.CapturedPixels(2);
+    if (!HasCapture(scene) || !HasCapture(mip)) {
+        ScreenCheck(false, name, mode, "overlay frames are captured");
+        return;
+    }
+
+    // 패널 바탕은 패널 왼쪽 위 모서리 안쪽 한 픽셀이다(막대 밖 Frame 여백).
+    const uint32 panelX = static_cast<uint32>(screen::OverlayMargin) + 1;
+    const uint32 panelY = static_cast<uint32>(static_cast<float>(ScreenHeight) -
+                                              screen::OverlayMargin - screen::OverlayHeight) +
+                          1;
+    const Expected panel = {{EncodeSrgb8(screen::OverlayPanelColor[0]),
+                             EncodeSrgb8(screen::OverlayPanelColor[1]),
+                             EncodeSrgb8(screen::OverlayPanelColor[2])}};
+    CheckExpected(scene, panelX, panelY, panel, name, mode,
+                  "overlay panel pixel equals the panel color over the scene");
+    // 막대 사이 줄은 배경 흐림 영역 안이다. 고른 패널 색 위의 흐림이라 그대로 패널 색이다(UI 흐림
+    // 셰이더와 pass 안 배경 복사가 장치마다 돈다).
+    const uint32 gapX = static_cast<uint32>(screen::OverlayMargin + screen::OverlayWidth / 2.0f);
+    const uint32 gapY = static_cast<uint32>(static_cast<float>(ScreenHeight) -
+                                            screen::OverlayMargin - screen::OverlayHeight +
+                                            screen::OverlayInset + screen::OverlayBarHeight) +
+                        1;
+    CheckExpected(scene, gapX, gapY, panel, name, mode,
+                  "overlay background blur over the uniform panel keeps the panel color");
+    const BarSamples bar = OverlayBarSamples(screen::OverlayBar::Mip);
+    const Pixel sceneFill = PixelAt(scene, bar.fillX, bar.y);
+    const Pixel sceneEmpty = PixelAt(scene, bar.emptyX, bar.y);
+    const Pixel mipFill = PixelAt(mip, bar.fillX, bar.y);
+    const Pixel mipEmpty = PixelAt(mip, bar.emptyX, bar.y);
+    const bool emptyScene =
+        SamePixel(sceneFill, sceneEmpty) &&
+        !SamePixel(sceneFill, Pixel{{panel.rgb[0], panel.rgb[1], panel.rgb[2]}});
+    ScreenCheck(emptyScene, name, mode,
+                "overlay bars are empty in the scene frame (bar background, not the panel)");
+    const bool filled = !SamePixel(mipFill, sceneFill) && mipFill.rgb[2] > mipFill.rgb[0] &&
+                        SamePixel(mipEmpty, sceneEmpty);
+    ScreenCheck(
+        filled, name, mode,
+        "overlay mip bar fills 2/3 for mip 1 of 3 (left fill is blue, right is background)");
+    if (!emptyScene || !filled) {
+        PrintPixel("scene frame mip bar left", sceneFill);
+        PrintPixel("scene frame mip bar right", sceneEmpty);
+        PrintPixel("mip frame mip bar left", mipFill);
+        PrintPixel("mip frame mip bar right", mipEmpty);
+    }
+}
+
 // 한 모드를 돌리고 capture를 out에 남긴다. 돌리지 못했으면 false다.
 // host는 엔진 셰이더를 열 호스트다(시험 호스트 또는 쿠킹 호스트 — expectCooked면 쿠킹 라이브러리로
 // 열렸는지도 단언한다).
@@ -260,6 +356,8 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
     SandboxGame game;
     GameInstanceClient client(allocator, game.config);
     screen::ScreenHost screen(allocator, device, host);
+    // 상태 패널을 켠 채 돈다(장면 위 UI — 18.5절 9항).
+    screen.EnableOverlay();
     ScreenTestHooks hooks(screen, *window.Value(), queue, client);
     auto started = screen.Start(*window.Value(), mode, hooks.Pump());
     ScreenCheck(started.IsOk(), name, modeName, "render lane starts with the engine render path");
@@ -294,6 +392,23 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
                 name, modeName, "every engine frame is rendered and presented");
     ScreenCheck(hooks.captureRequested && rendered.captures != 0, name, modeName,
                 "tone map result is captured on the lane");
+    // 스왑체인 하나에 tone map(Clear)·UI(Load)·capture 복사(Load) pass가 있어도 프레임마다
+    // present는 한 번이다(RenderBase 8절 "스왑체인 공유 설계").
+    ScreenCheck(rendered.presents == rendered.framesRendered &&
+                    rendered.devicePresents == rendered.framesRendered,
+                name, modeName, "every frame presents exactly once (graph and device counts)");
+    ScreenCheck(rendered.uiFrames == ScreenFrames && rendered.uiFailures == 0, name, modeName,
+                "every frame draws the UI overlay over the scene on the same swap chain");
+    if (rendered.presents != rendered.framesRendered ||
+        rendered.devicePresents != rendered.framesRendered || rendered.uiFrames != ScreenFrames) {
+        printf("    frames %llu, graph presents %llu, device presents %llu, UI frames %llu, UI "
+               "failures %llu\n",
+               static_cast<unsigned long long>(rendered.framesRendered),
+               static_cast<unsigned long long>(rendered.presents),
+               static_cast<unsigned long long>(rendered.devicePresents),
+               static_cast<unsigned long long>(rendered.uiFrames),
+               static_cast<unsigned long long>(rendered.uiFailures));
+    }
     ScreenCheck(stats.tasksPosted == stats.tasksCompleted && !stats.running &&
                     screen.Lane().Handles().Count() == 0,
                 name, modeName, "lane drained with no remaining tasks or handles");
@@ -319,6 +434,7 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
                    screen.EngineEntry(screen::InspectorView::CubeArray) !=
                        screen::ScreenHost::NoInspectorEntry,
                    name, modeName);
+    CheckOverlay(screen.Renderer(), name, modeName);
 
     // 화면 가운데는 HDR cube(2, 1, 0.5), 오른쪽 cube(8, 8, 8)는 x = 80 + 80·250/450, 위 가운데는
     // Pending 텍스처 cube(흰 typed 대체 × 1), 왼쪽 위 모서리는 배경이다(카메라 원점, 수평 FOV 90°).

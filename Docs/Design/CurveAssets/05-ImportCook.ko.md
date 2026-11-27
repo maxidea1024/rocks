@@ -134,7 +134,8 @@ Developer `CurveAssetTools`가 다섯 임포터를 등록한다. UE `UCSVImportF
 - 한계: 되돌리기의 쓰기 borrow가 실패하면(앞의 두 borrow가 성공한 뒤라 Busy·ShuttingDown 정도) 에디터 객체에 쿠킹 사본이 남고 원래 맵을 잃는다. 그 오류를 돌려주고, 쓰기 오류와 겹치면 쓰기 오류를 돌려준다(되돌릴 객체에 닿을 다른 방법이 없다).
 - 중복 키 판정에서 비교 차가 NaN이면 Rocks는 키를 남기고 UE는 지운다(UE는 `>` 비교 — CurveData 15절). 비유한 키 값이 든 표는 쿠킹 키 수가 UE와 다를 수 있다(7.2절 21).
 - 제품 쿠커(`Programs/Commandlet` `ProductCookProcessors`)가 등록한다.
-- `ColorCurveAtlas`는 4.3절 처리기다(`Texture2D` 처리기를 감싼다).
+- `ColorCurveAtlas`는 보통 텍스처 처리기로 쿠킹한다(원본은 atlas가 굽고 저장한다 — 4.3절).
+- 결정성(2026-11-28 — CurveData 5.9절 D22): 중복 키 제거는 결정적 판 `TryRemoveRedundantKeysDeterministic`을 `RunWithDeterministicFloatingPoint` 안에서 부른다(허용오차 0의 비교가 가중 구간에서 호스트마다 다른 키를 남기지 않게). UE는 플랫폼 libm으로 비교한다.
 
 ### 5.4 새로 만들기·명령행
 

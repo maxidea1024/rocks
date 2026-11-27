@@ -75,6 +75,16 @@ Result<PlaybackHandle> AudioWorldSubsystem::PlayAt(const SoundSourceRef& sound,
     return engine_->PlayAtInScene(scene_, sound, position, Move(options));
 }
 
+Result<PlaybackHandle> AudioWorldSubsystem::PlayAt(const SoundSourceRef& sound,
+                                                   const Vec3d& position, const Quatd& rotation,
+                                                   PlayOptions options) noexcept {
+    if (engine_ == nullptr) {
+        return Result<PlaybackHandle>::Success(PlaybackHandle{});
+    }
+
+    return engine_->PlayAtInScene(scene_, sound, position, rotation, Move(options));
+}
+
 Result<PlaybackHandle> AudioWorldSubsystem::PlayAttached(AudioEmitterId emitter,
                                                          const SoundSourceRef& sound,
                                                          PlayOptions options) noexcept {
@@ -123,17 +133,25 @@ void AudioWorldSubsystem::SetListener(const Vec3d& position, const Quatd& rotati
     }
 }
 
-Result<AudioEmitterId> AudioWorldSubsystem::RegisterEmitter(const Vec3d& position) noexcept {
+Result<AudioEmitterId> AudioWorldSubsystem::RegisterEmitter(const Vec3d& position,
+                                                            const Quatd& rotation) noexcept {
     if (engine_ == nullptr) {
         return Result<AudioEmitterId>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return engine_->RegisterEmitter(scene_, position);
+    return engine_->RegisterEmitter(scene_, position, rotation);
 }
 
-void AudioWorldSubsystem::UpdateEmitter(AudioEmitterId emitter, const Vec3d& position) noexcept {
+void AudioWorldSubsystem::UpdateEmitter(AudioEmitterId emitter, const Vec3d& position,
+                                        const Quatd& rotation) noexcept {
     if (engine_ != nullptr) {
-        engine_->UpdateEmitter(emitter, position);
+        engine_->UpdateEmitter(emitter, position, rotation);
+    }
+}
+
+void AudioWorldSubsystem::SetOcclusionQuery(AudioOcclusionQuery* query) noexcept {
+    if (engine_ != nullptr) {
+        engine_->SetSceneOcclusionQuery(scene_, query);
     }
 }
 

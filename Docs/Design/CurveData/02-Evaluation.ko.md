@@ -156,14 +156,16 @@ Cbrt(x) = x > 0 ? pow(x, 1.0/3.0) : x < 0 ? -pow(-x, 1.0/3.0) : 0
 
 쿠킹 byte(쿠킹 패키지·너겟·에디터가 저장하는 구운 원본)에 들어가는 커브 값은 호스트와 무관해야 한다(CoreDataFoundations 2.1절). 런타임 평가(`Evaluate`)는 D17 그대로 UE와 같은 비트(Windows x64)이고, 쿠킹 경로만 결정적 평가를 쓴다(사용자 결정 2026-11-27 — 텍스처 빌드가 이미 결정적 수학을 쓰는 것과 같은 정책).
 
-- 가중 경로의 C 런타임 호출 다섯을 수학 정책 인자로 바꾼다: `math::CurveMathPlatform`(기본 — 지금 함수 그대로)과 `math::CurveMathDeterministic`(Curves 모듈 — DeterministicMath). 정책은 `float Atan(float)`, `double Acos(double)`, `double Cos(double)`, `double CubeRoot(double)` 네 함수다.
+- 가중 경로의 C 런타임 수학(atanf·acos·cos·pow — √는 IEEE 기본 연산이라 제외)을 수학 정책 인자로 바꾼다: `math::CurveMathPlatform`(Core — 지금 함수 그대로)과 `CurveMathDeterministic`(Curves 모듈 `Curves/CurveMathDeterministic.h` — DeterministicMath). 정책은 `float Atan(float)`, `double Acos(double)`, `double Cos(double)`, `double CubeRoot(double)` 네 함수다.
   - 결정적 정책: Atan은 `(float)deterministic::Atan(double)`, Acos·Cos는 `deterministic::Acos`·`Cos`, 세제곱근은 부호를 떼고 `deterministic::Pow(|x|, 1.0 / 3.0)`(UE와 같은 지수 상수, 0은 0)이다.
   - √는 IEEE 기본 연산이라 두 정책이 같다(정책에 넣지 않는다). `CurveSinCos`는 이미 다항식이다. Floor·fmod는 수학적으로 정확한 결과가 하나뿐이라 호스트와 무관하다(NaN 비트만 다를 수 있다 — 아래).
-  - `SolveCurveCubic`·`WeightedCurveControls`·`WeightedCurveSegment`·`EvalCurveSegment`와 커브 평가 진입이 정책 템플릿 인자(기본 `CurveMathPlatform`)를 받는다. 기본 경로의 코드·비트는 바뀌지 않는다.
-- 공개 API: `TangentCurve::EvaluateDeterministic(float time, float defaultValue = 0) const` — `Evaluate`와 같은 의미(외삽·순환·빈 커브·특수 입력 5.1–5.6절)이고 수학 정책만 결정적이다. 결과가 NaN이면 고정 quiet NaN(0x7FC00000)을 낸다(CPU마다 다른 NaN 비트를 쿠킹에 넣지 않는다).
+  - `SolveCurveCubic`·`WeightedCurveControls`·`WeightedCurveSegment`·`EvalCurveSegment`가 정책 템플릿 인자(기본 `CurveMathPlatform`)를 받는다. 커브 평가 틀(외삽·구간 선택)은 구간 평가를 람다로 받으므로 정책을 따로 받지 않는다. 기본 경로의 코드·비트는 바뀌지 않는다.
+- 공개 API: `TangentCurve::EvaluateDeterministic(float time, float fallback = 0) const` — `Evaluate`와 같은 의미(외삽·순환·빈 커브·특수 입력 5.1–5.6절)이고 수학 정책만 결정적이다. 결과가 NaN이면 고정 quiet NaN(0x7FC00000)을 낸다(CPU마다 다른 NaN 비트를 쿠킹에 넣지 않는다).
   - `PlainCurve`·계단 커브·`PackedTangentCurve`(Linear·Constant 구간)는 기본 연산뿐이라 따로 두지 않는다. `PackedTangentCurve`의 가중 구간은 쓰는 곳이 생길 때 같은 정책으로 넓힌다.
 - 정확도: 결정적 정책의 결과는 `Evaluate`와 비트가 다를 수 있다(가중 구간에서 Atan·Acos·Cos·Pow 각 2 ulp 이내의 차가 Cardano 근을 거쳐 퍼진다). 시험은 비가중 구간에서 두 평가가 비트까지 같고, 가중 구간에서 상대 오차 안임을 본다. UE와의 비트 대조는 `Evaluate`의 몫이다.
-- 쓰는 곳: 색 커브 atlas 굽기(CurveAssets 4.3절), 머티리얼 ColorRamp 상수(MaterialSystem 6.13절 MS2f4). 둘 다 CurveAssets의 결정적 색 평가(`ColorCurveAsset::EvaluateDeterministic` — 조정의 pow도 결정적, CurveAssets 2.4절)를 거친다.
+- 중복 키 제거의 결정적 판 `TangentCurve::TryRemoveRedundantKeysDeterministic(float tolerance, Optional<FrameRate> sampleRate = {})`: `TryRemoveRedundantKeys`(7.2절)와 같은 규칙이고 비교 평가만 결정적 정책이다. 허용오차 0의 비교는 마지막 비트로 키를 남길지 정하므로 쿠킹(커브 표 쿠킹 — CurveAssets 5.3절)은 이 판을 쓴다.
+- 부동소수점 환경: 결정성은 기본 환경(nearest, 비정규 수 보존)을 전제한다(CoreDataFoundations 2.1절). 쿠킹 호출자가 `platform::RunWithDeterministicFloatingPoint` 안에서 부른다(atlas 굽기 `BakeColorCurveAtlas`·커브 표 쿠킹이 그렇게 한다).
+- 쓰는 곳: 색 커브 atlas 굽기(CurveAssets 4.3절), 커브 표 쿠킹의 중복 키 제거(CurveAssets 5.3절), 머티리얼 ColorRamp 상수(MaterialSystem 6.13절 MS2f4). atlas와 ColorRamp는 CurveAssets의 결정적 색 평가(`ColorCurveAsset::EvaluateDeterministic` — 조정의 pow도 결정적, CurveAssets 2.4.5절)를 거친다.
 
 ## 6. 접선 자동 계산 — `TangentCurve::AutoSetTangents(float tension = 0)`(RC 680–755)
 

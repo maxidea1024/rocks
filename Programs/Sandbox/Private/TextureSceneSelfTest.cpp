@@ -490,8 +490,7 @@ bool RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
         return false;
     }
 
-    Check(screen.RequestCapture(SceneCaptureWidth, SceneCaptureHeight).IsOk(), name,
-          "capture texture is requested");
+    Check(screen.RequestCapture().IsOk(), name, "capture texture is requested");
     // 장면마다 텍스처를 올리고 표시 항목을 기억한다(못 올리면 그 장면은 NOT RUN).
     uint32 entries[SceneCount];
     for (uint32 index = 0; index < SceneCount; ++index) {

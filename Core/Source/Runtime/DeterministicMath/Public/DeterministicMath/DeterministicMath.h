@@ -51,10 +51,10 @@ ROCKS_DETERMINISTICMATH_API double Pow(double base, double exponent) noexcept;
 ROCKS_DETERMINISTICMATH_API double SinPi(double x) noexcept;
 ROCKS_DETERMINISTICMATH_API double CosPi(double x) noexcept;
 
-// cos(x)(라디안)다. 3단 Cody-Waite π/2 축소(|x| ≤ 2^20·π/2에서 정확 — 정확도 상한 2 ulp)로 sin·cos
-// 핵을 고른다. 그보다 큰 |x|는 CosPi(|x|/π)로 결정적인 [−1, 1] 값을 내지만 정확도는 보장하지
-// 않는다. ±Inf·NaN은 고정 NaN. 커브 쿠킹 평가의 Cardano 세 실근(Docs/Design/CurveData 5.9절 D22)이
-// 쓴다.
+// cos(x)(라디안)다. 3단 Cody-Waite π/2 축소(4분면 번호 n ≤ 2^20 — |x| ≲ 2^20·π/2 — 에서 정확 —
+// 정확도 상한 2 ulp)로 sin·cos 핵을 고른다. 그보다 큰 |x|는 CosPi(|x|/π)로 결정적인 [−1, 1] 값을
+// 내지만 정확도는 보장하지 않는다. ±Inf·NaN은 고정 NaN. 커브 쿠킹 평가의 Cardano 세
+// 실근(Docs/Design/CurveData 5.9절 D22)이 쓴다.
 ROCKS_DETERMINISTICMATH_API double Cos(double x) noexcept;
 
 // arctan(x)(라디안, [−π/2, π/2])다. 정확도 상한 2 ulp, ±Inf → ±π/2(가장 가까운 double), ±0 → ±0,
