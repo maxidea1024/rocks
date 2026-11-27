@@ -61,6 +61,25 @@ constexpr ComputeGroupCount GroupCountFor(uint32 threadsX, uint32 threadsY, uint
                              GroupsFor(threadsZ, groupSizeZ)};
 }
 
+// 큰 1D dispatch의 감싸는 폭(축당 그룹 수)이다. D3D12·Vulkan·GLES가 모두 보장하는 축당 그룹 수
+// 하한이고 셰이더 /Engine/Private/Common/ComputeDispatch.rsh MaxDispatchGroupsPerAxis와 같다
+// (Docs/Design/EngineShaders 14.2절 1항, 결정 SLD26).
+inline constexpr uint32 MaxWrappedGroupsPerAxis = 65535;
+
+// 1D 그룹 수 groups를 (min(g, 65535), ⌈g / 65535⌉, 1)로 감싼다. 셰이더는 UnwrapLinearGroupId(x + y
+// × 65535)로 선형 그룹 번호를 되돌리고 마지막 행의 남는 그룹을 원소 수로 거른다. groups가 0이면 (0,
+// 1, 1)(빈 dispatch)다.
+//
+// 사용 예(원소 count개, 셰이더 [numthreads(64, 1, 1)]):
+//   const render::ComputeGroupCount groups = render::WrapGroupCount(render::GroupsFor(count, 64));
+//   commands.Dispatch(groups.x, groups.y, groups.z);
+constexpr ComputeGroupCount WrapGroupCount(uint32 groups) noexcept {
+    return groups <= MaxWrappedGroupsPerAxis
+               ? ComputeGroupCount{groups, 1, 1}
+               : ComputeGroupCount{MaxWrappedGroupsPerAxis,
+                                   GroupsFor(groups, MaxWrappedGroupsPerAxis), 1};
+}
+
 // 그룹 수가 장치 한도(DeviceLimits::computeGroupCount, 축별) 안인지 본다. 넘으면 InvalidArgument다
 // (장치 Dispatch는 그런 dispatch를 무시하고 IgnoredDraws를 올린다). 빈 그룹 수는 통과한다.
 ROCKS_RENDERBASE_API Result<void> ValidateGroupCount(const graphics::DeviceLimits& limits,

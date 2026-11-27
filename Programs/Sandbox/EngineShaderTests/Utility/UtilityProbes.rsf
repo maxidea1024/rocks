@@ -1,0 +1,43 @@
+// A18 표본 보조·A03 LUT 표본 probe다(Docs/Design/EngineShaders 14.4절 1항·14.3절 1항·14.6절 2항). 사례
+// 하나가 픽셀 하나이고 기대값은 Sandbox EngineShaderComputeSelfTest.cpp(CPU)다. 텍스처는 C++가 만든 고정
+// 내용이다: SampleSource(RGBA16Float 16 × 16 — 표본 보조, bilinear·clamp 샘플러), UintSource(RGBA32Uint),
+// IntSource(R32Sint), UnwrappedLut(RGBA16Float 1024 × 32 항등 LUT), VolumeLut(RGBA16Float 32³ 항등 LUT).
+// parameters.xy는 표본 보조 원본 크기(texel)다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+#include "/Engine/Private/Color/LutCoordinates.rsh"
+#include "/Engine/Private/Utility/TextureSamplingHelpers.rsh"
+#include "/Plugin/EngineShaderTests/Common/ProbeCommon.rsh"
+
+Texture2D<float4> SampleSource;
+SamplerState SampleSourceSampler;
+Texture2D<uint4> UintSource;
+Texture2D<int4> IntSource;
+Texture2D<float4> UnwrappedLut;
+SamplerState UnwrappedLutSampler;
+Texture3D<float4> VolumeLut;
+SamplerState VolumeLutSampler;
+
+float4 UtilityProbePixel(float4 position : SV_Position) : SV_Target0 {
+    const uint f = ProbeFunction();
+    const uint c = ProbeCase(position);
+    // uv ∈ [-0.125, 1.125)(가장자리 clamp 포함 — 정확한 입력).
+    const float2 uv = float2(ProbeUnit(c, 0u), ProbeUnit(c, 1u)) * 1.25 - 0.125;
+    const float2 size = Probe.parameters.xy;
+    const float3 unit = float3(ProbeUnit(c, 0u), ProbeUnit(c, 1u), ProbeUnit(c, 2u));
+    float4 result = float4(0.0, 0.0, 0.0, 0.0);
+    if (f == ProbeCatmullRom) {
+        result = SampleCatmullRom5Tap(SampleSource, SampleSourceSampler, uv, size);
+    } else if (f == ProbeBilinearUint) {
+        result = LoadBilinearUint(UintSource, uv, uint2(size));
+    } else if (f == ProbeBilinearInt) {
+        result = LoadBilinearInt(IntSource, uv, uint2(size));
+    } else if (f == ProbeTexelCenter) {
+        result = float4(SnapUvToTexelCenter(uv, size), uv);
+    } else if (f == ProbeUnwrappedLut) {
+        result = SampleUnwrappedLut2D(UnwrappedLut, UnwrappedLutSampler, unit, (float)DefaultLutSize);
+    } else {
+        result = SampleLut3D(VolumeLut, VolumeLutSampler, unit, (float)DefaultLutSize);
+    }
+
+    return result;
+}
