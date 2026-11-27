@@ -59,6 +59,51 @@ Span<const ScreenActionMapping> ScreenInputRouter::Mappings() const noexcept {
     return mappings_.View();
 }
 
+void ScreenInputRouter::SetInputHost(ScreenInputHost* host) noexcept {
+    inputHost_ = host;
+    appliedConfig_ = {};
+}
+
+bool ScreenInputRouter::ApplyInputConfig() noexcept {
+    if (!inputHost_) {
+        return false;
+    }
+
+    const ScreenInputConfig next = screens_.InputConfig();
+    if (appliedConfig_ && *appliedConfig_ == next) {
+        return false;
+    }
+
+    // 앞선 값이 없으면 무시하지 않던 상태다 — true를 부른 적 없이 false를 부르지 않는다
+    // (1888–1899행).
+    const bool oldIgnoreMove = appliedConfig_ && appliedConfig_->ignoreMove;
+    const bool oldIgnoreLook = appliedConfig_ && appliedConfig_->ignoreLook;
+    // 앞선 값이 없으면 Game이다(UE GetActiveInputMode 기본값).
+    const ScreenInputMode oldMode = appliedConfig_ ? appliedConfig_->mode : ScreenInputMode::Game;
+    appliedConfig_ = next;
+    if (oldIgnoreMove != next.ignoreMove) {
+        inputHost_->SetIgnoreMoveInput(next.ignoreMove);
+    }
+
+    if (oldIgnoreLook != next.ignoreLook) {
+        inputHost_->SetIgnoreLookInput(next.ignoreLook);
+    }
+
+    // Menu로 들어가면 눌린 채 남은 게임 입력을 푼다(1901–1906행). 이 호출은 다음 입력을 처리하기
+    // 앞이다(Route 맨 앞 또는 호스트의 프레임 시작). 눌린 UI 패드 키·아날로그 반복도 푼다.
+    if (next.mode != oldMode) {
+        if (next.mode == ScreenInputMode::Menu) {
+            inputHost_->FlushPressedKeys();
+        }
+
+        app_.CancelGamepadKeys(screens_.UserId());
+    }
+
+    // 붙잡지 않으면 커서는 늘 보인다(1938–1949행), 붙잡으면 showCursor대로다(1918–1921행).
+    inputHost_->SetMouseCapture(next.captureMouse, next.captureMouse ? next.showCursor : true);
+    return true;
+}
+
 Result<SharedPtr<ScreenDeviceState>> ScreenInputRouter::ObserveDevice() noexcept {
     if (!deviceState_) {
         auto state = SharedPtr<ScreenDeviceState>::TryMake(mappings_.GetAllocator(),
@@ -189,6 +234,7 @@ Result<bool> ScreenInputRouter::Route(const input::InputEvent& event) noexcept {
     ROCKS_ON_SCOPE_EXIT {
         routing_ = false;
     };
+    (void)ApplyInputConfig();
     using input::InputEventType;
     const auto mode = screens_.InputConfig().mode;
     const bool allowUi = mode != ScreenInputMode::Game;

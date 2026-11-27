@@ -57,15 +57,16 @@ UD12 (2)는 UE 고유 합성어를 서술형 이름으로 바꾸라고 한다. (
   - 활성 화면의 설정이 바뀔 때만 적용한다(1868행). 다음 셋이 계기다: 화면 활성·비활성, 화면 스택 변화, 활성 화면의 `SetInputConfig`.
   - 적용은 호스트 인터페이스 `ScreenInputHost`로 넘긴다. UE에서 이 일은 PlayerController와 GameViewportClient가 한다. Rocks에서는 게임 쪽(World·Gameplay)이 구현하고, UiScreens는 Gameplay에 의존하지 않는다.
     - `SetIgnoreMoveInput(bool)`·`SetIgnoreLookInput(bool)`: 이전 값과 다를 때만 부른다. 이전에 true로 부른 적이 없으면 false를 부르지 않는다(1888–1899행).
-    - `SetCursorVisible(bool)`·`SetMouseCaptured(bool)`: 1908–1960행의 capture 방식을 Rocks의 두 값으로 줄인 것이다.
+    - `SetMouseCapture(captured, cursorVisible)`: 1908–1960행의 capture 방식을 Rocks의 두 값으로 줄인 것이다. 붙잡지 않으면 커서는 늘 보인다(NoCapture → `SetShowMouseCursor(true)`). 붙잡으면 `showCursor`대로다. 다시 보일 때 커서를 가운데로 옮기는 UE 동작(1957–1980행)은 하지 않는다 — 입력 장치 종류 설정이 생길 때 더한다.
     - `FlushPressedKeys()`: Menu로 바뀔 때 한 번 부른다(1901–1906행). 눌린 채 남은 게임 입력을 푼다. UE는 다음 tick으로 미루는데, Rocks는 라우터가 다음 입력 처리 앞에서 부른다(명시 순서 — 시간 경쟁 없음).
   - 게임패드 아날로그 반복과 눌린 UI 키는 Menu ↔ Game 전환 때 `Application::CancelGamepadKeys`로 푼다(20.8절).
 - **플랫폼(PW 보강).**
   - `platform::Window`에 `SetCursorVisible(bool)`·`SetMouseLocked(bool)`을 더한다(UE `FReply::LockMouseToWidget`·`SetShowMouseCursor`).
-  - Win64는 `ShowCursor` 계수와 `ClipCursor`(창 client 영역)로 한다. 다시 적용해야 하는 때가 있다: 창 이동·크기 변경·활성화. 잃는 때도 있다: 비활성·최소화.
+  - Win64 커서 숨김은 `WM_SETCURSOR`에서 빈 커서(`SetCursor(nullptr)`)를 둔다. `ShowCursor` 계수는 스레드 전체 값이라 쓰지 않는다. 잠금은 `ClipCursor`(창 client 영역, 화면 좌표)다. 창 이동·크기 변경·초점 얻음 때 다시 걸고, 초점 잃음·최소화·창 소멸 때 이 창이 건 잠금만 푼다.
   - 다른 backend는 기본 구현이 `Unsupported`다. Mac은 feature/platform-mac에서 맞춘다.
   - 고정밀 상대 이동(UE `UseHighPrecisionMouseMovement` — raw input)은 이번 범위 밖이다. 10장 위험 목록에 남긴다.
-- **UiDemo.** 게임 HUD 표본이 `ScreenInputHost`를 구현해 창에 적용한다. self-test가 적용 횟수를 단언한다.
+- **호출 시점.** `ScreenInputRouter::ApplyInputConfig`는 `Route` 맨 앞에서 돈다. 화면을 바꾼 프레임에는 호스트가 입력 전에 한 번 부른다. 마지막 적용 값과 같으면 아무것도 하지 않는다.
+- **시험.** `ScreenInputConfigTests`가 적용 횟수·순서를 단언한다. UiDemo 게임 HUD는 `ScreenInputRouter`를 쓰지 않으므로 표본 호스트는 Gameplay 연결 때 만든다. Win64 잠금·숨김은 사람 확인이다(창 초점이 필요하다).
 
 ### 21.4 Element 소멸자의 사용자 코드
 

@@ -11,4 +11,4 @@
 | UR7 | UE 코드·Epic 자원의 저작권 | 코드 복사 금지, Epic 아이콘·이미지 미포함, 수치 기본값만 대조. 리뷰에서 UE 원문 유사 코드 여부를 점검한다. |
 | UR8 | 지정자 어휘 확장에 따른 메타 컴파일러 복잡도, 생성 접근자 디버깅 | 어휘를 버전 있는 manifest로 고정하고 지정자마다 양성·음성 회귀 시험을 둔다. 생성 접근자는 생성 헤더에 있어 디버거로 단계 실행할 수 있다. |
 | UR9 | UV1·UV3·UV4의 UE 실행 기준값(UD6) 미확보 — UW8은 소스 근거 기준값만 둔다(20.12절) | UT1 판정 전에 UE 5.8 빌드 환경에서 독립 덤프 프로그램을 돌려 기준값을 한 번 받고, 소스 근거 기준값과 다른 항목을 차이 목록에 올린다. |
-| UR10 | 게임 화면의 고정밀 상대 마우스 이동(UE `UseHighPrecisionMouseMovement` — raw input) 없음. UW9c는 커서 숨김·창 잠금까지만 한다(21.3절) | 1인칭 시선 입력이 필요해지는 Gameplay 단계 전에 `platform::Window`에 raw input 상대 이동을 더하고, `ScreenInputHost::SetMouseCaptured`가 함께 켜게 한다. |
+| UR10 | 게임 화면의 고정밀 상대 마우스 이동(UE `UseHighPrecisionMouseMovement` — raw input) 없음. UW9c는 커서 숨김·창 잠금까지만 한다(21.3절) | 1인칭 시선 입력이 필요해지는 Gameplay 단계 전에 `platform::Window`에 raw input 상대 이동을 더하고, `ScreenInputHost::SetMouseCapture`가 함께 켜게 한다. |

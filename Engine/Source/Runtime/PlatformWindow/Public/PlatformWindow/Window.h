@@ -194,6 +194,13 @@ public:
     using LiveResizeHandler = Delegate<void()>;
     virtual void SetLiveResizeHandler(LiveResizeHandler&& handler) noexcept;
     virtual void SetMouseCursor(input::MouseCursor cursor) noexcept;
+    // 이 창 client 영역 위의 커서를 보이거나 숨긴다(UE SetShowMouseCursor — Docs/Design/UiToolkit
+    // 21.3절). 창마다의 값이라 다른 창·OS 전체의 커서 계수를 바꾸지 않는다. 지원하지 않으면
+    // Unsupported다.
+    virtual Result<void> SetCursorVisible(bool visible) noexcept;
+    // 커서를 이 창 client 영역 안에 가둔다(UE LockMouseToWidget). 창이 초점을 잃거나 최소화되면
+    // 풀고, 초점을 다시 얻거나 옮기거나 크기가 바뀌면 다시 가둔다. 지원하지 않으면 Unsupported다.
+    virtual Result<void> SetMouseLocked(bool locked) noexcept;
 
     // 이 창의 DPI 배율(유효 DPI / 96)이다(Docs/Design/UiToolkit 19.2절 DPI). 프로세스가 DPI를
     // 인식하지 않으면(EnableHighDpiAwareness를 부르지 않음) 늘 1이고 OS가 늘려 그린다. 창은

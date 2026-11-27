@@ -23,6 +23,8 @@ struct ScreenInputConfig {
     ROCKS_PROPERTY() bool captureMouse = false;
     ROCKS_PROPERTY() bool ignoreMove = true;
     ROCKS_PROPERTY() bool ignoreLook = true;
+
+    bool operator==(const ScreenInputConfig&) const noexcept = default;
 };
 
 ROCKS_CLASS()

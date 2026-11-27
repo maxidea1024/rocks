@@ -81,6 +81,14 @@ void Window::PublishRegionMap(const input::WindowRegionMap&) noexcept {
 void Window::SetMouseCursor(input::MouseCursor) noexcept {
 }
 
+Result<void> Window::SetCursorVisible(bool) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> Window::SetMouseLocked(bool) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
 Result<IntVec2> Window::ClientToDesktop(IntVec2) const noexcept {
     return Result<IntVec2>::Failure(ErrorCode::Unsupported);
 }

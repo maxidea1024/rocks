@@ -289,6 +289,7 @@ public:
 
     ~Win64Window() override {
         Unlink();
+        ReleaseMouseClip();
         if (window_ != nullptr) {
             SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
             DestroyWindow(window_);
@@ -563,8 +564,34 @@ public:
             (!captured && GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
              ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
              PtInRect(&client, point))) {
-            SetCursor(cursor_);
+            SetCursor(cursorHidden_ ? nullptr : cursor_);
         }
+    }
+
+    // 창마다의 값이다. ShowCursor 계수(스레드 전체)를 쓰지 않고 WM_SETCURSOR에서 빈 커서를 둔다.
+    Result<void> SetCursorVisible(bool visible) noexcept override {
+        AssertOwnerThread();
+        if (cursorHidden_ == !visible) {
+            return Result<void>::Success();
+        }
+
+        cursorHidden_ = !visible;
+        POINT point{};
+        RECT client{};
+        if (GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
+            ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
+            PtInRect(&client, point)) {
+            SetCursor(cursorHidden_ ? nullptr : cursor_);
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<void> SetMouseLocked(bool locked) noexcept override {
+        AssertOwnerThread();
+        mouseLocked_ = locked;
+        ApplyMouseClip();
+        return Result<void>::Success();
     }
 
     void ActivateTextInput(TextInputClient& client) noexcept override {
@@ -1410,10 +1437,14 @@ private:
             break;
         case WM_SETCURSOR:
             if (reinterpret_cast<HWND>(wParam) == window_ && LOWORD(lParam) == HTCLIENT &&
-                cursor_) {
-                SetCursor(cursor_);
+                (cursor_ || cursorHidden_)) {
+                SetCursor(cursorHidden_ ? nullptr : cursor_);
                 return TRUE;
             }
+            break;
+        case WM_MOVE:
+            // 잠근 영역은 화면 좌표라 창을 옮기면 다시 잡는다.
+            ApplyMouseClip();
             break;
         case WM_CLOSE:
             closeRequested_ = true;
@@ -1434,6 +1465,7 @@ private:
             width_ = LOWORD(lParam);
             height_ = HIWORD(lParam);
             resized_ = true;
+            ApplyMouseClip();
             // modal 루프 안에서는 호스트 루프가 멈춰 있으므로 여기서 바로 그리게 한다(UW7a).
             if (sizeMoveLoop_ && !minimized_ && !liveResizing_ && liveResize_.IsBound()) {
                 liveResizing_ = true;
@@ -1444,9 +1476,12 @@ private:
             return 0;
         case WM_SETFOCUS:
             focused_ = true;
+            ApplyMouseClip();
             return 0;
         case WM_KILLFOCUS: {
             focused_ = false;
+            // 초점이 없는 창이 커서를 가두지 않는다(다른 창·OS를 쓸 수 있게).
+            ReleaseMouseClip();
             capturedButtons_ = 0;
             if (GetCapture() == window_) {
                 ReleaseCapture();
@@ -1710,8 +1745,42 @@ private:
         return self->Handle(message, wParam, lParam);
     }
 
+    // 잠금이 켜져 있고 초점이 있으며 최소화되지 않았으면 client 영역(화면 좌표)에 가두고, 아니면
+    // 이 창이 건 잠금을 푼다(Docs/Design/UiToolkit 21.3절).
+    void ApplyMouseClip() noexcept {
+        RECT client{};
+        POINT corners[2]{};
+        if (mouseLocked_ && focused_ && !minimized_ && GetClientRect(window_, &client)) {
+            corners[0] = {client.left, client.top};
+            corners[1] = {client.right, client.bottom};
+            if (ClientToScreen(window_, &corners[0]) && ClientToScreen(window_, &corners[1])) {
+                const RECT area{corners[0].x, corners[0].y, corners[1].x, corners[1].y};
+                if (ClipCursor(&area)) {
+                    clipping_ = true;
+                }
+
+                return;
+            }
+        }
+
+        ReleaseMouseClip();
+    }
+
+    // 이 창이 건 잠금만 푼다(다른 프로그램의 ClipCursor를 지우지 않게).
+    void ReleaseMouseClip() noexcept {
+        if (clipping_) {
+            clipping_ = false;
+            ClipCursor(nullptr);
+        }
+    }
+
     HWND window_ = nullptr;
     HCURSOR cursor_ = nullptr;
+    // SetCursorVisible(false)이면 client 영역에서 빈 커서다.
+    bool cursorHidden_ = false;
+    // SetMouseLocked 값과 지금 이 창이 ClipCursor를 걸었는지다.
+    bool mouseLocked_ = false;
+    bool clipping_ = false;
     // UI가 게시한 영역 지도다(OS 질의가 다른 스레드에서 와도 읽도록 잠금 아래 둔다).
     mutable Mutex regionGate_;
     input::WindowRegionMap regionMap_;
