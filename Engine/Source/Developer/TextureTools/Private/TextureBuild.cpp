@@ -1,6 +1,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Math/Float16.h>
 #include <DeterministicMath/DeterministicMath.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include "TextureBuildInternal.h"
 #include "TextureImportInternal.h"
@@ -1332,9 +1333,10 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
     return Result<void>::Success();
 }
 
-Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
-                          Span<const uint8> sourcePixels, TextureBuildResult& out,
-                          const TextureBuildExecution& execution) noexcept {
+// 빌드 본문이다(결정적 부동소수 환경 안에서 불린다 — BuildTexture).
+static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSettings& settings,
+                                     Span<const uint8> sourcePixels, TextureBuildResult& out,
+                                     const TextureBuildExecution& execution) noexcept {
     out.mips.Clear();
     out.warnings.Clear();
     out.failure = TextureBuildFailure{};
@@ -1581,6 +1583,41 @@ Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& sett
     out.alphaTransparent = alphaTransparent;
     out.numSlices = volume ? 1 : settings.numSlices;
     return Result<void>::Success();
+}
+
+namespace {
+
+// 유니티 빌드에서 같은 묶음의 이름과 부딪히지 않게 이름 있는 namespace에 둔다.
+namespace build_environment {
+
+struct Job {
+    Allocator* allocator;
+    const TextureBuildSettings* settings;
+    Span<const uint8> pixels;
+    TextureBuildResult* out;
+    const TextureBuildExecution* execution;
+    Result<void> result;
+};
+
+void Run(void* opaque) noexcept {
+    Job& job = *static_cast<Job*>(opaque);
+    job.result =
+        BuildTextureBody(*job.allocator, *job.settings, job.pixels, *job.out, *job.execution);
+}
+
+} // namespace build_environment
+
+} // namespace
+
+// 원본 decode·재표본·mip 생성·변환의 float·double 연산도 결정적 부동소수 환경 안에서 한다(12.17.9 6
+// — 호출자의 FTZ·DAZ·반올림 설정이 결과를 바꾸지 않게. 인코더 batch는 따로 같은 환경을 건다).
+Result<void> BuildTexture(Allocator& allocator, const TextureBuildSettings& settings,
+                          Span<const uint8> sourcePixels, TextureBuildResult& out,
+                          const TextureBuildExecution& execution) noexcept {
+    build_environment::Job job{&allocator, &settings,  sourcePixels,
+                               &out,       &execution, Result<void>::Success()};
+    platform::RunWithDeterministicFloatingPoint(&build_environment::Run, &job);
+    return rocks::Move(job.result);
 }
 
 namespace texture_build_detail {

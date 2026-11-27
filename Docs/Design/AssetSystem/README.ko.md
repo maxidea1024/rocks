@@ -26,3 +26,4 @@
 - [17. 계획 문서 개정 사항](17-PlanRevisions.ko.md)
 - [18. 범위 밖과 후속](18-OutOfScope.ko.md)
 - [19. 손상 데이터 오류 CorruptData 이전](19-CorruptData.ko.md)
+- [20. 스트리밍 bulk(sidecar)와 범위 읽기 — PR12](20-StreamingBulk.ko.md)
