@@ -33,6 +33,15 @@ public sealed record MetadataModule(string Name, string Manifest, IReadOnlyList<
     /// </summary>
     public string BindingSchema => Descriptor[..^DescriptorSuffix.Length] + BindingSchemaSuffix;
 
+    /// <summary>identity inventory 파일 이름의 끝이다.</summary>
+    public const string InventorySuffix = ".inventory.json";
+
+    /// <summary>
+    /// identity inventory(&lt;out&gt;/Metadata/&lt;모듈&gt;.inventory.json)의 절대 경로다. descriptor 옆에 있고 메타 생성이 함께 게시한다
+    /// (Docs/Design/BuildReuse 2.2절 — 메타 action의 출력이다).
+    /// </summary>
+    public string Inventory => Descriptor[..^DescriptorSuffix.Length] + InventorySuffix;
+
     /// <summary>모듈 생성 소스의 파일 이름이다(MetaCompiler의 CompilerOptions.ModuleSourceName과 같다).</summary>
     public static string ModuleSourceName(string module) => module + ".module.generated.cpp";
 

@@ -50,6 +50,16 @@ internal sealed class CompilerOptions
     // include해 정의가 갈라지지 않는다. 없으면 강제 include하지 않는다.
     public string? DefinitionsHeader { get; init; }
 
+    // clang-format 실행 파일이다(--clang-format). 빌드가 한 번 풀어 넘기고 그 파일이 메타 key에 든다(Docs/Design/BuildReuse 2.3절). 없으면
+    // ROCKS_CLANG_FORMAT·PATH에서 찾는다(단독 실행).
+    public string? ClangFormat { get; init; }
+
+    // 의존 기록 출력 경로다(--dependency-record, Docs/Design/BuildReuse 2.4절). 성공한 실행만 쓴다.
+    public string? DependencyRecord { get; init; }
+
+    // 단계 보고 출력 경로다(--phase-report, Docs/Design/BuildReuse 2.8절). 실패한 실행에서도 쓴다.
+    public string? PhaseReport { get; init; }
+
     public List<string> Imports { get; } = [];
 
     public List<string> IncludeDirectories { get; } = [];
@@ -137,7 +147,8 @@ internal sealed class CompilerOptions
             int equals = argument.IndexOf('=');
             string key = equals < 0 ? argument : argument[..equals];
             if (key is not ("--module" or "--input" or "--include" or "--private" or "--output-root" or "--descriptor" or "--binding-schema" or "--import" or
-                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs" or "--definitions-header"))
+                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs" or "--definitions-header" or
+                "--clang-format" or "--dependency-record" or "--phase-report"))
             {
                 throw new MetadataException($"unknown option {key}", "RMC1000", "Use --module, paired --input/--include, --output-root, --descriptor and documented optional arguments.");
             }
@@ -346,9 +357,18 @@ internal sealed class CompilerOptions
             }
         }
 
+        string? clangFormat = single.TryGetValue("--clang-format", out string? formatText) ? Path.GetFullPath(formatText) : null;
+        if (clangFormat is not null && !File.Exists(clangFormat))
+        {
+            throw new MetadataException("clang-format not found: " + clangFormat, "RMC1000", "Pass the pinned clang-format executable the build resolved.");
+        }
+
         CompilerOptions options = new()
         {
             DefinitionsHeader = definitionsHeader,
+            ClangFormat = clangFormat,
+            DependencyRecord = single.TryGetValue("--dependency-record", out string? recordText) ? Path.GetFullPath(recordText) : null,
+            PhaseReport = single.TryGetValue("--phase-report", out string? reportText) ? Path.GetFullPath(reportText) : null,
             Module = module,
             Inputs = pairs,
             OutputRoot = outputRoot,

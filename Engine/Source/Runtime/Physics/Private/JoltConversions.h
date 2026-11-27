@@ -172,6 +172,14 @@ inline JPH::Mat44 ToJoltInertia(const Vec3d& principalKilogramSquareCentimeters,
     return rotation * diagonal * rotation.Transposed3x3();
 }
 
+// Jolt 관성 텐서(kg·m²)의 대각을 Rocks body 축 대각(kg·cm²)으로 바꾼다(축 A — Rocks X는 Jolt Z).
+// 주값이 아니라 텐서 대각이다: 축 정렬 형상(상자·구·캡슐)에서는 UE GetLocalInertiaTensor(주값)와
+// 같고, 비대각 형상(convex·compound — PH6)은 고유값으로 바꿔야 한다.
+inline Vec3d FromJoltInertiaDiagonal(const JPH::Mat44& inertia) noexcept {
+    const JPH::Vec3 diagonal(inertia(0, 0), inertia(1, 1), inertia(2, 2));
+    return math::KilogramSquareMetersToKilogramSquareCentimeters(AxisFromJolt(diagonal));
+}
+
 // 밀도 g/cm³ → kg/m³(×1000 — 어댑터 경계 3절 K1).
 inline float ToJoltDensity(double gramsPerCubicCentimeter) noexcept {
     return static_cast<float>(

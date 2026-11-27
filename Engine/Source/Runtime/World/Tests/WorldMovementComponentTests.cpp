@@ -19,6 +19,7 @@
 #include <World/SceneComponent.generated.h>
 #include <World/Camera/SpringArmComponent.generated.h>
 #include <World/Camera/SpringArmComponent.h>
+#include <World/Physics/HitResult.h>
 #include <World/World.h>
 #include <math.h>
 #include <stdio.h>
@@ -125,6 +126,57 @@ protected:
         ++resets;
     }
 };
+
+// 이동 컴포넌트 이벤트 기록이다(26.1절 — hook 뒤 Event 필드). afterHook은 이벤트가 올 때마다 hook
+// 수가 이미 같은지(hook이 먼저인지)다.
+struct MoveEvents {
+    int32 stops = 0;
+    int32 reverses = 0;
+    int32 resets = 0;
+    int32 projectileStops = 0;
+    float lastTime = -1.0f;
+    bool emptyHits = true;
+    bool afterHook = true;
+};
+
+MoveEvents moveEvents;
+const CountingPathMover* pathSelf = nullptr;
+const CountingProjectile* projectileSelf = nullptr;
+
+void RecordMoveEvent(const HitResult& hit) noexcept {
+    moveEvents.emptyHits = moveEvents.emptyHits && !hit.blockingHit && hit.time == 1.0;
+    if (pathSelf != nullptr) {
+        const int32 hooks = pathSelf->stops + pathSelf->reverses + pathSelf->resets;
+        const int32 events = moveEvents.stops + moveEvents.reverses + moveEvents.resets;
+        moveEvents.afterHook = moveEvents.afterHook && hooks == events;
+    }
+
+    if (projectileSelf != nullptr) {
+        moveEvents.afterHook =
+            moveEvents.afterHook && projectileSelf->stops == moveEvents.projectileStops;
+    }
+}
+
+void SubscribePathEvents(CountingPathMover& path) noexcept {
+    moveEvents = MoveEvents{};
+    pathSelf = &path;
+    projectileSelf = nullptr;
+    CHECK(path.pathStopped.TryAddLambda([](const HitResult& hit, float time) noexcept {
+        ++moveEvents.stops;
+        moveEvents.lastTime = time;
+        RecordMoveEvent(hit);
+    }));
+    CHECK(path.pathReversed.TryAddLambda([](const HitResult& hit, float time) noexcept {
+        ++moveEvents.reverses;
+        moveEvents.lastTime = time;
+        RecordMoveEvent(hit);
+    }));
+    CHECK(path.pathReset.TryAddLambda([](const HitResult& hit, float time) noexcept {
+        ++moveEvents.resets;
+        moveEvents.lastTime = time;
+        RecordMoveEvent(hit);
+    }));
+}
 
 // Tick 순서를 기록한다('a' Actor, 's' SceneComponent, 'm' 이동).
 char tickOrder[8] = {};
@@ -692,9 +744,18 @@ TEST(Movement_ProjectileTrajectory) {
     REQUIRE(fixture.TickTimes(1));
     CHECK(world.With<CountingProjectile>(shot.Value(), [](CountingProjectile& p) noexcept {
         CHECK(p.Velocity().y > 0.0);
-        // 정지: 대상 해제·hook 한 번.
+        // 정지: 대상 해제·hook 한 번, 그 뒤 projectileStopped(빈 충돌 결과 — 26.1절).
+        moveEvents = MoveEvents{};
+        pathSelf = nullptr;
+        projectileSelf = &p;
+        CHECK(p.projectileStopped.TryAddLambda([](const HitResult& hit) noexcept {
+            ++moveEvents.projectileStops;
+            RecordMoveEvent(hit);
+        }));
         p.StopSimulating();
         CHECK(p.HasStoppedSimulation() && p.stops == 1);
+        CHECK(moveEvents.projectileStops == 1 && moveEvents.afterHook && moveEvents.emptyHits);
+        projectileSelf = nullptr;
         CHECK(NearVector(p.Velocity(), 0.0, 0.0, 0.0));
         CHECK(ErrorOf(p.SetMaxSimulationIterations(0)) == ErrorCode::InvalidArgument);
         CHECK(ErrorOf(p.SetMaxSimulationTimeStep(0.01)) == ErrorCode::InvalidArgument);
@@ -738,6 +799,7 @@ TEST(Movement_PathMoverBehaviours) {
         auto mover = world.AddComponent<CountingPathMover>(actor);
         REQUIRE(mover);
         CHECK(world.With<CountingPathMover>(mover.Value(), [&](CountingPathMover& path) noexcept {
+            SubscribePathEvents(path);
             // 기본값(UE 생성자).
             CHECK(path.Duration() == 1.0f && path.Behaviour() == PathMoverBehaviour::OneShot);
             CHECK(path.SpeedMultiplier() == 0.0f && path.MaxSimulationIterations() == 8);
@@ -753,7 +815,12 @@ TEST(Movement_PathMoverBehaviours) {
             CHECK(path.IsStopped() == value.stopped);
             CHECK(path.stops == value.stops && path.reverses == value.reverses &&
                   path.resets == value.resets);
+            // 이벤트 필드(26.1절): hook과 같은 횟수, hook 뒤, 빈 충돌 결과.
+            CHECK(moveEvents.stops == value.stops && moveEvents.reverses == value.reverses &&
+                  moveEvents.resets == value.resets);
+            CHECK(moveEvents.afterHook && moveEvents.emptyHits);
         }));
+        pathSelf = nullptr;
         REQUIRE(world.Shutdown());
     }
 
@@ -771,6 +838,7 @@ TEST(Movement_PathMoverBehaviours) {
     auto mover = world.AddComponent<CountingPathMover>(actor);
     REQUIRE(mover);
     CHECK(world.With<CountingPathMover>(mover.Value(), [](CountingPathMover& path) noexcept {
+        SubscribePathEvents(path);
         CHECK(path.AddControlPoint(Vec3d(0.0, 0.0, 0.0), false));
         CHECK(path.AddControlPoint(Vec3d(0.0, 200.0, 0.0), false));
         CHECK(ErrorOf(path.SetDuration(0.05f)) == ErrorCode::InvalidArgument);
@@ -785,6 +853,7 @@ TEST(Movement_PathMoverBehaviours) {
         CHECK(Near(path.CurrentTime(), 0.5));
         path.StopMovementImmediately();
         CHECK(path.IsStopped() && path.stops == 1 && Near(path.lastStopTime, 0.5));
+        CHECK(moveEvents.stops == 1 && Near(moveEvents.lastTime, 0.5) && moveEvents.afterHook);
         path.RestartMovement();
         CHECK(!path.IsStopped() && path.CurrentTime() == 0.0f);
     }));
@@ -952,12 +1021,13 @@ TEST(Movement_ReflectionAndSaveRoundTrip) {
     };
 
     // 필드 수는 상속분 포함(Component 3, SceneComponent 12 — 태그 ER 31.4절 포함). Movement 9,
-    // Rotating 3, Projectile 20, PathMover 9, SpringArm 16.
+    // Rotating 3, Projectile 21(이벤트 projectileStopped 포함), PathMover 12(이벤트 셋 포함
+    // — 26.1절), SpringArm 16.
     const Expected expected[] = {
         {ObjectTypeIdOf<MovementComponent>(), ObjectTypeIdOf<Component>(), 12},
         {ObjectTypeIdOf<RotatingMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 15},
-        {ObjectTypeIdOf<ProjectileMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 32},
-        {ObjectTypeIdOf<PathMoverComponent>(), ObjectTypeIdOf<MovementComponent>(), 21},
+        {ObjectTypeIdOf<ProjectileMovementComponent>(), ObjectTypeIdOf<MovementComponent>(), 33},
+        {ObjectTypeIdOf<PathMoverComponent>(), ObjectTypeIdOf<MovementComponent>(), 24},
         {ObjectTypeIdOf<SpringArmComponent>(), ObjectTypeIdOf<SceneComponent>(), 28},
     };
     for (const Expected& entry : expected) {

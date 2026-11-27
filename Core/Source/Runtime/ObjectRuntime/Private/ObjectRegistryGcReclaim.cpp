@@ -206,6 +206,19 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
 }
 
 void ObjectRegistry::DestroyReclaimed(ReclaimWork& work) noexcept {
+    // 회수(GC로 Retire된 객체·Discard된 객체 포함)는 남은 변경 통지 상태를 반환한다(Docs/Design/
+    // ChangeNotification.ko.md CN-D11 — 잠금 밖, 회수는 소유 스레드).
+    if (work.slot->notified) {
+        // 통지 상태를 쓰는 동안(해제·비우기·발행 — 포획 소멸자 안의 Collect 등)의 회수는 슬롯을
+        // 다시 쓰게 해 옛 상태가 새 객체에 붙는다 — 계약 위반이다(발행은 Borrow로 막는다).
+        if (UniquePtr<NotifyState>* state = notifyStates_.Find(work.slot->index);
+            state && (*state)->active != 0) {
+            platform::Fatal("Object reclaimed while its change notification state is in use");
+        }
+
+        ReleaseNotifyState(work.slot->index);
+    }
+
     // 사용자 소멸자와 allocator 콜백은 Registry 잠금 밖에서만 부른다.
     work.type.Ops().destroy(work.object);
     auto released = allocator_.Deallocate(work.storage);

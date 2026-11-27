@@ -177,6 +177,14 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         void SetBodyAngularVelocity(PhysicsBodyHandle, const Vec3d&, bool) noexcept override {
         }
 
+        void UpdateBodySettings(PhysicsBodyHandle, const BodySettings&,
+                                BodySettingsChange) noexcept override {
+        }
+
+        double DefaultMaxAngularVelocityDegrees() const noexcept override {
+            return 0.0;
+        }
+
         Result<bool> TraceLine(const Vec3d&, const Vec3d&, const QueryFilter&, const QueryParams&,
                                TraceMode, HitResult*, Array<HitResult>*) const noexcept override {
             return Result<bool>::Success(false);

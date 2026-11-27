@@ -4,6 +4,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
+#include <World/Physics/BodyKinematics.h>
 #include <World/Physics/PhysicsScene.h>
 #include <World/Primitives/PrimitiveComponent.h>
 #include <World/World.h>
@@ -260,6 +261,197 @@ Vec3d PrimitiveComponent::GetPhysicsAngularVelocityInRadians() const noexcept {
 
 Vec3d PrimitiveComponent::GetPhysicsAngularVelocityInDegrees() const noexcept {
     return RadiansToDegrees(GetPhysicsAngularVelocityInRadians());
+}
+
+void PrimitiveComponent::PushBodySettings(BodySettingsChange change) noexcept {
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
+        scene->UpdateBodySettings(bodyHandle_, bodySettings_, change);
+    }
+}
+
+bool PrimitiveComponent::ReadBodyKinematics(BodyKinematics& out) const noexcept {
+    if (bodyHandle_.IsNull()) {
+        return false;
+    }
+
+    PhysicsScene* scene = GetWorld().GetPhysicsScene();
+    if (scene == nullptr) {
+        return false;
+    }
+
+    auto read = scene->ReadKinematics(bodyHandle_);
+    if (!read) {
+        return false;
+    }
+
+    out = read.Value();
+    return true;
+}
+
+void PrimitiveComponent::WarnInvalidBodyValue(const char* property) const noexcept {
+    const auto emit = [&]() noexcept {
+        Log::Warning(LogWorld,
+                     "Primitive component #{Slot} ignored an invalid {Property} value ({Code})",
+                     Handle().slot, StringView(property), DiagInvalidBodyValue);
+    };
+    if (!HasWorld()) {
+        emit();
+        return;
+    }
+
+    LogContextScope context("World", GetWorld().Name());
+    emit();
+}
+
+float PrimitiveComponent::GetMass() const noexcept {
+    WarnInvalidPhysicsOperation("GetMass", true);
+    BodyKinematics kinematics;
+    return ReadBodyKinematics(kinematics) ? static_cast<float>(kinematics.mass) : 0.0f;
+}
+
+void PrimitiveComponent::SetMassOverrideInKg(float massInKg, bool overrideMass) noexcept {
+    WarnInvalidPhysicsOperation("SetMassOverrideInKg", false);
+    if (!math::IsFinite(massInKg)) {
+        WarnInvalidBodyValue("massInKgOverride");
+        return;
+    }
+
+    bodySettings_.overrideMass = overrideMass;
+    bodySettings_.massInKgOverride = massInKg;
+    PushBodySettings(BodySettingsChange::Mass);
+}
+
+void PrimitiveComponent::SetMassScale(float scale) noexcept {
+    WarnInvalidPhysicsOperation("SetMassScale", false);
+    if (!math::IsFinite(scale)) {
+        WarnInvalidBodyValue("massScale");
+        return;
+    }
+
+    bodySettings_.massScale = scale;
+    PushBodySettings(BodySettingsChange::Mass);
+}
+
+Vec3d PrimitiveComponent::GetCenterOfMass() const noexcept {
+    BodyKinematics kinematics;
+    return ReadBodyKinematics(kinematics) ? kinematics.centerOfMass : Vec3d::Zero();
+}
+
+void PrimitiveComponent::SetCenterOfMass(const Vec3d& offset) noexcept {
+    WarnInvalidPhysicsOperation("SetCenterOfMass", false);
+    if (!math::IsFinite(offset.x) || !math::IsFinite(offset.y) || !math::IsFinite(offset.z)) {
+        WarnInvalidBodyValue("centerOfMassOffset");
+        return;
+    }
+
+    bodySettings_.centerOfMassOffset = offset;
+    PushBodySettings(BodySettingsChange::Mass);
+}
+
+Vec3d PrimitiveComponent::GetInertiaTensor() const noexcept {
+    BodyKinematics kinematics;
+    return ReadBodyKinematics(kinematics) ? kinematics.inertia : Vec3d::Zero();
+}
+
+void PrimitiveComponent::SetPhysicsMaxAngularVelocityInDegrees(float maxDegrees,
+                                                               bool addToCurrent) noexcept {
+    WarnInvalidPhysicsOperation("SetPhysicsMaxAngularVelocity", false);
+    // UE는 physics actor가 있을 때만 지금 값에 더한다(BodyInstance.cpp:3677-3686).
+    BodyKinematics kinematics;
+    const bool hasBody = ReadBodyKinematics(kinematics);
+    const float target =
+        addToCurrent && hasBody ? GetPhysicsMaxAngularVelocityInDegrees() + maxDegrees : maxDegrees;
+    // Jolt는 음수 상한을 assert한다(MotionProperties::SetMaxAngularVelocity).
+    if (!math::IsFinite(target) || target < 0.0f) {
+        WarnInvalidBodyValue("maxAngularVelocity");
+        return;
+    }
+
+    bodySettings_.maxAngularVelocity = target;
+    bodySettings_.overrideMaxAngularVelocity = true;
+    PushBodySettings(BodySettingsChange::MaxAngularVelocity);
+}
+
+void PrimitiveComponent::SetPhysicsMaxAngularVelocityInRadians(float maxRadians,
+                                                               bool addToCurrent) noexcept {
+    SetPhysicsMaxAngularVelocityInDegrees(math::RadiansToDegrees(maxRadians), addToCurrent);
+}
+
+float PrimitiveComponent::GetPhysicsMaxAngularVelocityInDegrees() const noexcept {
+    if (bodySettings_.overrideMaxAngularVelocity) {
+        return bodySettings_.maxAngularVelocity;
+    }
+
+    const PhysicsScene* scene = HasWorld() ? GetWorld().GetPhysicsScene() : nullptr;
+    return scene != nullptr ? static_cast<float>(scene->DefaultMaxAngularVelocityDegrees())
+                            : DefaultMaxAngularVelocityDegrees;
+}
+
+float PrimitiveComponent::GetPhysicsMaxAngularVelocityInRadians() const noexcept {
+    return math::DegreesToRadians(GetPhysicsMaxAngularVelocityInDegrees());
+}
+
+void PrimitiveComponent::SetEnableGravity(bool enable) noexcept {
+    // UE는 값이 같으면 아무것도 하지 않는다(깨우지도 않는다 — BodyInstance.cpp:3953).
+    if (bodySettings_.enableGravity == enable) {
+        return;
+    }
+
+    bodySettings_.enableGravity = enable;
+    PushBodySettings(BodySettingsChange::Gravity);
+}
+
+void PrimitiveComponent::SetLinearDamping(float damping) noexcept {
+    if (!math::IsFinite(damping) || damping < 0.0f) {
+        WarnInvalidBodyValue("linearDamping");
+        return;
+    }
+
+    bodySettings_.linearDamping = damping;
+    PushBodySettings(BodySettingsChange::Damping);
+}
+
+void PrimitiveComponent::SetAngularDamping(float damping) noexcept {
+    if (!math::IsFinite(damping) || damping < 0.0f) {
+        WarnInvalidBodyValue("angularDamping");
+        return;
+    }
+
+    bodySettings_.angularDamping = damping;
+    PushBodySettings(BodySettingsChange::Damping);
+}
+
+void PrimitiveComponent::SetUseCCD(bool useCcd) noexcept {
+    if (bodySettings_.continuousCollision == useCcd) {
+        return;
+    }
+
+    bodySettings_.continuousCollision = useCcd;
+    PushBodySettings(BodySettingsChange::ContinuousCollision);
+}
+
+void PrimitiveComponent::SetGyroscopicTorqueEnabled(bool enable) noexcept {
+    if (bodySettings_.gyroscopicTorque == enable) {
+        return;
+    }
+
+    bodySettings_.gyroscopicTorque = enable;
+    PushBodySettings(BodySettingsChange::GyroscopicTorque);
+}
+
+void PrimitiveComponent::SetConstraintMode(DofMode mode) noexcept {
+    if (static_cast<uint8>(mode) > static_cast<uint8>(DofMode::None)) {
+        WarnInvalidBodyValue("dofMode");
+        return;
+    }
+
+    // UE SetDOFLock은 같은 방식이어도 잠금을 다시 만든다(BodyInstance.cpp:849-853).
+    bodySettings_.dofMode = mode;
+    PushBodySettings(BodySettingsChange::DegreesOfFreedom);
 }
 
 } // namespace rocks

@@ -17,6 +17,10 @@ internal static class CompilerDriver
     {
         string? repository = FindRoot();
         string root = repository ?? Directory.GetCurrentDirectory();
+        MetaRunRecorder? recorder = MetaRunRecorder.Current;
+        recorder?.Mark("environment");
+        // 자기 출력은 입력이 아니다(Docs/Design/BuildReuse 2.4절 제외 규칙).
+        recorder?.Exclude(options.OutputRoot);
         foreach (ModuleInput input in options.Inputs)
         {
             if (!File.Exists(input.Path))
@@ -50,6 +54,8 @@ internal static class CompilerDriver
         }
         else
         {
+            // 단독 실행의 자동 탐색이다. 빌드는 늘 --include-dir를 넘기므로 이 열거는 의존 기록에 담지 않고 기록할 수 없다고 알린다.
+            recorder?.NoteUnrecordable("standalone include discovery (no --include-dir)");
             IEnumerable<string> engineModules = repository is null ? [] : Directory.EnumerateDirectories(Path.Combine(repository, "Core", "Source", "Runtime"));
             includes = engineModules.Select(path => Path.Combine(path, "Public")).Where(Directory.Exists)
                 .Order(StringComparer.Ordinal).Append(root).Concat(options.Inputs.Select(input => Path.GetDirectoryName(input.Path)!)).Distinct().ToList();
@@ -97,7 +103,8 @@ internal static class CompilerDriver
         arguments.Add("-");
         // 모듈의 리플렉션 헤더 전부를 한 번역 단위로 읽는다(같은 모듈 안 헤더 사이의 base·참조가 풀린다).
         string unit = string.Concat(options.Inputs.Select(input => $"#include \"{input.Path.Replace('\\', '/')}\"\n"));
-        ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)));
+        recorder?.Mark("ast");
+        ProcessResult compiled = await ClangInvocation.RunAsync(new(compiler, arguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)), clangCl);
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
         {
             if (compiled.ExitCode != 0 && ArrayElementFailure(compiled, options.Inputs, root) is MetadataException converted)
@@ -115,7 +122,9 @@ internal static class CompilerDriver
             foreach (string directory in includes)
             {
                 string candidate = Path.GetFullPath(Path.Combine(directory, spelling));
-                if (File.Exists(candidate))
+                bool exists = File.Exists(candidate);
+                recorder?.NoteExists(candidate, exists);
+                if (exists)
                 {
                     return CanonicalPath.Resolve(candidate);
                 }
@@ -128,6 +137,7 @@ internal static class CompilerDriver
         afterManifestRead?.Invoke();
         StableIdManifest? manifest = options.IdentityManifest is null ? null : StableIdManifest.Load(options.IdentityManifest);
         VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
+        recorder?.Mark("parse");
         var parser = new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader, options.RequireGeneratedBody, options.Module);
         SchemaModel schema;
         try
@@ -136,7 +146,8 @@ internal static class CompilerDriver
             // EditorOnly 필드와 #if ROCKS_WITH_EDITOR_DATA 블록의 양방향 일치(RMC2502)와 두 변형 비교(RMC2503 — 어휘 스캔을 빠져나간 조건을 잡는다).
             CheckEditorOnlyPlacement(declared, scan);
             List<string> gameArguments = [.. arguments.Select(argument => GameVariantArgument(argument, clangCl))];
-            ProcessResult gameCompiled = await ProcessRunner.RunAsync(new(compiler, gameArguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)));
+            recorder?.Mark("game-ast");
+            ProcessResult gameCompiled = await ClangInvocation.RunAsync(new(compiler, gameArguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)), clangCl);
             if (gameCompiled.ExitCode != 0 || gameCompiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             {
                 throw new MetadataException("Clang rejected reflection input without editor data (ROCKS_WITH_EDITOR=0, ROCKS_WITH_EDITOR_DATA=0):\n" +
@@ -150,17 +161,18 @@ internal static class CompilerDriver
             // (Docs/Design/ClangVersionSupport.ko.md 4절 — Clang 22는 한정 없이 쓴 비템플릿 레코드의 desugar 철자를 내지 않는다). 1단계는
             // PROPERTY·NATIVE 형식, C 배열 원소·크기, base이고, 레코드 닫힘은 NATIVE 멤버가 값으로 닿는 레코드를 따라가 강한 참조·WorldOnly
             // 형질 경로를 본다(검증보다 먼저 — WorldOnly 경로가 형질 계산에 들어간다).
+            recorder?.Mark("probes");
             List<string> canonicalArguments = [.. arguments.Take(arguments.Count - 1)];
             canonicalArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=" + CanonicalTypeProbe.Filter] : ["-w", "-Xclang", "-ast-dump-filter=" + CanonicalTypeProbe.Filter]);
             canonicalArguments.Add("-");
             await parser.CanonicalizeAsync(declared, new ClangProbe.Session<string>(options.Inputs.Count,
-                extra => ProcessRunner.RunAsync(new(compiler, canonicalArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))),
+                extra => ClangInvocation.RunAsync(new(compiler, canonicalArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2)), clangCl),
                 CanonicalTypeProbe.Read));
             List<string> closureArguments = [.. probeIncludeArguments];
             closureArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=" + CanonicalTypeProbe.Filter] : ["-w", "-Xclang", "-ast-dump-filter=" + CanonicalTypeProbe.Filter]);
             closureArguments.Add("-");
             await parser.VerifyNativeMembersAsync(declared, new ClangProbe.Session<string>(options.Inputs.Count,
-                extra => ProcessRunner.RunAsync(new(compiler, closureArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))),
+                extra => ClangInvocation.RunAsync(new(compiler, closureArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2)), clangCl),
                 CanonicalTypeProbe.Read), () => ModulePublicHeaders(options));
             // Binds 미러의 실제 타입 철자는 문자열로 비교하지 않고 같은 번역 단위에 별칭을 붙인 두 번째 Clang 실행으로
             // 정규화한다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 필드 형식 해석이 그 철자를 쓰므로 검증 전에 한다.
@@ -168,7 +180,7 @@ internal static class CompilerDriver
             bindsArguments.AddRange(clangCl ? ["/clang:-Xclang", "/clang:-ast-dump-filter=rocksBinds_"] : ["-Xclang", "-ast-dump-filter=rocksBinds_"]);
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
-                extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+                extra => ClangInvocation.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2)), clangCl));
             // Binds enum 미러는 실제 enum의 열거자 목록(첫 실행의 AST)과 1:1이어야 한다(RMC2401).
             parser.VerifyEnumMirrors(declared.Values);
             // Within="…" 철자도 Binds처럼 별칭을 붙인 Clang 실행으로 정규 이름을 얻는다(리플렉션 B9h2 — Within이 없으면 실행하지 않는다).
@@ -176,7 +188,7 @@ internal static class CompilerDriver
             withinArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksWithin_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksWithin_"]);
             withinArguments.Add("-");
             await ResolveWithinAsync(declared,
-                extra => ProcessRunner.RunAsync(new(compiler, withinArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+                extra => ClangInvocation.RunAsync(new(compiler, withinArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2)), clangCl));
             schema = SchemaValidator.Validate(declared, imported);
             CheckEditorOnlyStructMembers(schema);
         }
@@ -233,11 +245,12 @@ internal static class CompilerDriver
         // ROCKS_NATIVE 멤버의 직접 타입이 Object 파생 클래스를 가리키는지는 같은 번역 단위 끝에 탐침을 붙인 Clang 실행이
         // 판정한다(NativeMemberProbe — Binds 해석처럼 탐침 선언만 덤프한다). 탐침 실행은 경고를 끈다: 경고는 첫 실행과 실제
         // 빌드가 이미 강제하고, 탐침 코드의 경고가 판정을 막지 않게 한다. include는 첫 실행에서 이 모듈 출력 루트를 뺀 순서다.
+        recorder?.Mark("probes");
         List<string> probeArguments = [.. probeIncludeArguments];
         probeArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksProbe_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksProbe_"]);
         probeArguments.Add("-");
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
-            extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            extra => ClangInvocation.RunAsync(new(compiler, probeArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2)), clangCl));
 
         // 생성물: 입력 헤더마다 생성 헤더(선언·형질·inline Trace)와 생성 소스(본문) 한 쌍, public·private 모듈 생성 헤더(등록 함수
         // 선언), 모듈 생성 소스(등록 함수 정의), descriptor. 생성 소스는 출력 루트의 Source 아래이고 include 루트가 아니다
@@ -262,7 +275,10 @@ internal static class CompilerDriver
 
         outputs.Add((options.ModuleSourcePath, CppEmitter.EmitModuleSource(options.Module, schema, options.Inputs, importedModules), GeneratedRoot.Source));
 
-        string formatter = NativeEnvironment.FindExecutable(Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format", environment);
+        recorder?.Mark("format");
+        // 빌드는 clang-format 경로를 한 번 풀어 --clang-format으로 넘긴다(Docs/Design/BuildReuse 2.3절 — 그 실행 파일이 메타 key에 든다).
+        // 넘기지 않은 단독 실행만 스스로 찾는다.
+        string formatter = options.ClangFormat ?? NativeEnvironment.FindExecutable(Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format", environment);
         ProcessResult version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment, Timeout: TimeSpan.FromSeconds(20)));
         if (version.ExitCode != 0 || !ToolchainTable.IsClangFormatVersion(version.StdOut))
         {
@@ -295,7 +311,10 @@ internal static class CompilerDriver
         // 선언·형질·inline Trace까지다. --verify-sources를 주면 빌드 없이 쓰는 호출자(단독 실행·--check·도구 시험)를 위해 생성 소스도 같은
         // 인자로 구문 검사하고, 본문의 계약 위반(생성·소멸 noexcept, 접근 권한, 정적 검사)을 지금까지처럼 RMC3000으로 거부한다.
         // 검증 컴파일은 생성물마다 독립이므로 --jobs 수만큼 함께 돌린다. 실패는 끝난 순서가 아니라 생성물 순서에서 가장 앞선 것을 알린다.
+        recorder?.Mark("validate");
         string validationRoot = Path.Combine(Path.GetDirectoryName(options.OutputRoot)!, ".rocks-meta-validation-" + Guid.NewGuid().ToString("N"));
+        // 검증 임시 디렉터리(검증용 생성물 사본·check-*.cpp)는 의존 기록에 적지 않는다(Docs/Design/BuildReuse 2.4절).
+        recorder?.Exclude(validationRoot);
         string outputPublic = Path.Combine(options.OutputRoot, "Public");
         string outputPrivate = Path.Combine(options.OutputRoot, "Private");
         StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -351,7 +370,7 @@ internal static class CompilerDriver
                 await slots.WaitAsync();
                 try
                 {
-                    return await ProcessRunner.RunAsync(new(compiler, [.. validationArguments, source], root, environment, Timeout: TimeSpan.FromMinutes(2)));
+                    return await ClangInvocation.RunAsync(new(compiler, [.. validationArguments, source], root, environment, Timeout: TimeSpan.FromMinutes(2)), clangCl);
                 }
                 finally
                 {
@@ -377,6 +396,7 @@ internal static class CompilerDriver
             }
         }
 
+        recorder?.Mark("write");
         byte[] descriptor = ModuleDescriptor.Write(options.Module, schema.Ordered);
         byte[]? bindingSchema = options.BindingSchema is null ? null : SparksBinding.Write(options.Module, schema);
         beforeManifestVerification?.Invoke();
@@ -854,13 +874,10 @@ internal static class CompilerDriver
                 continue;
             }
 
-            EnumerationOptions enumeration = new()
-            {
-                RecurseSubdirectories = slash >= 0,
-                AttributesToSkip = FileAttributes.ReparsePoint,
-                IgnoreInaccessible = true
-            };
-            foreach (string file in Directory.EnumerateFiles(directory, "*.h", enumeration))
+            // 열거 규칙은 빌드의 재확인과 같아야 하므로 RecordedEnumeration을 쓴다(Docs/Design/BuildReuse 2.4절).
+            IReadOnlyList<string> found = RecordedEnumeration.Files(directory, "*.h", slash >= 0);
+            MetaRunRecorder.Current?.NoteEnumeration(directory, "*.h", slash >= 0, found);
+            foreach (string file in found)
             {
                 string full = Path.GetFullPath(file);
                 if (!full.EndsWith(".h", comparison) || full.EndsWith(".generated.h", comparison) || full.StartsWith(outputRoot, comparison) ||
@@ -882,6 +899,7 @@ internal static class CompilerDriver
     // 헤더가 이 모듈의 생성 헤더 철자(ownGenerated)를 직접 include하면 참이다. 읽을 수 없는 헤더도 참이다(탐침에 넣지 않는다).
     private static bool IncludesOwnGeneratedHeader(string path, HashSet<string> ownGenerated)
     {
+        MetaRunRecorder.Current?.NoteFile(path);
         try
         {
             return IncludeDirective.Matches(File.ReadAllText(path)).Any(match => ownGenerated.Contains(match.Groups["spelling"].Value.Replace('\\', '/')));
@@ -1213,8 +1231,12 @@ internal static class CompilerDriver
 
     internal static void ValidateIncludeBinding(string input, string include, IEnumerable<string> directories)
     {
-        string? target = directories.Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
-            .FirstOrDefault(File.Exists);
+        string? target = directories.Select(directory => Path.GetFullPath(Path.Combine(directory, include))).FirstOrDefault(candidate =>
+        {
+            bool exists = File.Exists(candidate);
+            MetaRunRecorder.Current?.NoteExists(candidate, exists);
+            return exists;
+        });
         string canonicalInput = CanonicalPath.Resolve(input);
         string? canonicalTarget = target is null ? null : CanonicalPath.Resolve(target);
         if (canonicalTarget is null || !string.Equals(canonicalInput, canonicalTarget,

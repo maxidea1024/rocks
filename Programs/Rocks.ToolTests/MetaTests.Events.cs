@@ -4,7 +4,7 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 // meta 시험 중 리플렉션 이벤트 필드(ROCKS_PROPERTY(Params = "…") rocks::Event<…> — Docs/Design/EventReflection.ko.md EV2b, ED14·ED18)
-// 시험이다: 받는 선언(인자 없음·값·const String&·struct·enum·ObjectHandle 인자, Transient·SaveGame·EditorOnly 블록)의 descriptor schema 8
+// 시험이다: 받는 선언(인자 없음·값·const String&·struct·enum·ObjectHandle 인자, Transient·SaveGame·EditorOnly 블록)의 descriptor schema 9
 // 항목·생성 schema·연산표와 두 조합 컴파일, 거부 사례마다 RMC2801–RMC2805 코드.
 internal static partial class MetaTests
 {
@@ -34,7 +34,7 @@ internal static partial class MetaTests
                 "changed(allocator), named(allocator), pinged(allocator), placed(allocator),\n" + EditorDataOpen + "edited(allocator),\n#endif\nsecret(allocator)"));
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor)))
             {
-                Verify.Equal(8, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 8");
+                Verify.Equal(9, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 9");
                 JsonElement[] fields = [.. DescriptorType(descriptor, "probe::Value").GetProperty("fields").EnumerateArray()];
                 JsonElement Field(string name) => fields.Single(field => field.GetProperty("name").GetString() == name);
                 Verify.Equal("Value", Field("count").GetProperty("fieldKind").GetString(), "value field kind");
