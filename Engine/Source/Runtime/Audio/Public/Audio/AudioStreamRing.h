@@ -37,6 +37,12 @@ enum class AudioStreamState : uint8 {
     Failed = 2
 };
 
+// 소비자가 한 번에 본 링 상태다(AudioStreamRing::Snapshot).
+struct AudioStreamSnapshot {
+    uint32 readable = 0;
+    AudioStreamState state = AudioStreamState::Running;
+};
+
 class ROCKS_AUDIO_API AudioStreamRing {
 public:
     // 링을 만든다. channels는 담을 수 있는 최대 채널 수(1–MaxClipChannels(2))이고 처음 쓰는 채널
@@ -79,6 +85,11 @@ public:
 
     // 상태다. Ended·Failed를 보았으면 그때까지 쓴 PCM은 ReadableFrames에 이미 들어 있다.
     AudioStreamState State() const noexcept;
+
+    // 읽을 frame 수와 상태를 쓰기 word 한 번의 Acquire로 함께 읽는다. 둘을 함께 판정하는
+    // 소비자(굶음·끝 판정)는 이것을 쓴다 — ReadableFrames와 State를 따로 읽으면 그 사이 생산자의
+    // 마지막 Write·MarkEnded가 끼어 "Ended인데 모자람"으로 잘못 볼 수 있다.
+    AudioStreamSnapshot Snapshot() const noexcept;
 
     // 앞 frames frame을 out(채널 수 = ChannelCount, frameCount ≥ frames)에 복사한다(소비하지 않음).
     // frames > ReadableFrames면 assert다.

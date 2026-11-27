@@ -232,7 +232,13 @@ TEST(Audio_Stream_RingProtocol) {
 
     CHECK(same);
     CHECK(ring->State() == AudioStreamState::Running);
+    // 스냅숏은 수와 상태를 한 word에서 읽는다(끝 상태를 본 스냅숏의 수에는 마지막 PCM까지 있다).
+    AudioStreamSnapshot snapshot = ring->Snapshot();
+    CHECK(snapshot.readable == Capacity && snapshot.state == AudioStreamState::Running);
+    ring->Consume(100);
     ring->MarkEnded();
+    snapshot = ring->Snapshot();
+    CHECK(snapshot.readable == Capacity - 100 && snapshot.state == AudioStreamState::Ended);
     CHECK(ring->State() == AudioStreamState::Ended && ring->WritableFrames() == 0);
     ring->MarkFailed();
     CHECK(ring->State() == AudioStreamState::Ended);

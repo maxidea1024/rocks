@@ -250,7 +250,7 @@ private:
     void AdvanceCursor(VoiceSlot& slot, uint32 consumed) noexcept;
     void PublishStart(uint32 index, VoiceSlot& slot, uint64 frame) noexcept;
     bool StreamReadyToStart(const VoiceSlot& slot) const noexcept;
-    uint32 StreamRenderableFrames(VoiceSlot& slot, uint32 chunk) const noexcept;
+    uint32 StreamRenderableFrames(VoiceSlot& slot, uint32 chunk, uint32 available) const noexcept;
     void SignalStreamRefill() noexcept;
     void FinishMaster(Span<float> interleavedOut) noexcept;
     void PublishBlockEnd() noexcept;

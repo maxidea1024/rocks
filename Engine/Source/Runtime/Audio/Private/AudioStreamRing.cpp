@@ -127,6 +127,15 @@ AudioStreamState AudioStreamRing::State() const noexcept {
     return StateOf(AtomicLoad<MemoryOrder::Acquire>(&write_.word));
 }
 
+AudioStreamSnapshot AudioStreamRing::Snapshot() const noexcept {
+    const uint64 word = AtomicLoad<MemoryOrder::Acquire>(&write_.word);
+    const uint64 read = AtomicLoad<MemoryOrder::Relaxed>(&read_.position);
+    AudioStreamSnapshot snapshot;
+    snapshot.readable = static_cast<uint32>(PositionOf(word) - read);
+    snapshot.state = StateOf(word);
+    return snapshot;
+}
+
 void AudioStreamRing::Peek(uint32 frames, const PlanarView& out) const noexcept {
     ROCKS_ASSERT(frames <= ReadableFrames() && out.channelCount == channels_ &&
                  out.frameCount >= frames);

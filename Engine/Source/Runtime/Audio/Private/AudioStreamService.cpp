@@ -18,10 +18,15 @@ namespace {
 // 작업 번호 0은 "작업 없음"이다.
 constexpr uint64 NoStreamJob = 0;
 
-// 큐 용량(2의 거듭제곱)이다: 슬롯마다 Start·Cancel이 하나씩만 대기한다.
+// 디코드 쪽이 큐를 비우는 사이 한 슬롯에 쌓일 수 있는 명령 수다(Docs/Design/AudioSystem 3.40.2절):
+// 앞 작업의 늦은 Cancel(반납 확인 전에 넣은 것), 새 Start, 새 Cancel. 새 작업은 앞 작업이 반납된
+// 뒤에만 시작하고 반납은 디코드 쪽이 그 Start를 꺼낸 뒤라, 그보다 앞 작업의 명령은 이미 꺼냈다.
+constexpr usize StreamCommandsPerSlot = 3;
+
+// 큐 용량(2의 거듭제곱)이다.
 usize StreamQueueCapacity(uint32 maxStreams) noexcept {
     usize capacity = 2;
-    while (capacity < static_cast<usize>(maxStreams) * 2) {
+    while (capacity < static_cast<usize>(maxStreams) * StreamCommandsPerSlot) {
         capacity *= 2;
     }
 
@@ -123,6 +128,7 @@ void AudioStreamService::Shutdown() noexcept {
 
     for (uint32 slot = 0; slot < active_.Size(); ++slot) {
         if (active_[slot].decoder != nullptr) {
+            active_[slot].decoder->ReleaseChunk();
             Publish(slot, active_[slot].job);
             active_[slot] = ActiveSlot{};
         }
@@ -189,16 +195,20 @@ void AudioStreamService::CancelJob(uint32 slot) noexcept {
     }
 
     ControlSlot& record = control_[slot];
+    record.cancelled = true;
+    // 이미 반납된 작업(끝까지 썼거나 실패)에는 보낼 것이 없다.
+    if (AtomicLoad<MemoryOrder::Acquire>(&returned_[slot]) == record.job) {
+        return;
+    }
+
     Command command;
     command.type = CommandType::Cancel;
     command.slot = slot;
     command.job = record.job;
-    // 큐는 슬롯마다 Start·Cancel 하나씩만 담으므로 넘치지 않는다.
+    // 큐는 슬롯마다 StreamCommandsPerSlot개까지 담으므로 넘치지 않는다.
     if (!Enqueue(command)) {
         platform::Fatal("AudioStreamService command queue overflowed");
     }
-
-    record.cancelled = true;
 }
 
 bool AudioStreamService::IsReturned(uint32 slot) const noexcept {
@@ -249,6 +259,8 @@ bool AudioStreamService::ServicePass() noexcept {
             active.decoder = command.decoder;
             active.job = command.job;
         } else if (active.job == command.job && active.decoder != nullptr) {
+            // 청크는 반납 전에 이 스레드가 놓는다(AudioChunkSource 스레드 계약).
+            active.decoder->ReleaseChunk();
             active = ActiveSlot{};
             Publish(command.slot, command.job);
         }

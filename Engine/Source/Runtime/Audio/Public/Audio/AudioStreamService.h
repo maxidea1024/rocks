@@ -69,6 +69,10 @@ public:
     // 된다. 제어 스레드가 부른다.
     void Shutdown() noexcept;
 
+    AudioStreamServiceMode Mode() const noexcept {
+        return config_.mode;
+    }
+
     // AudioRT·제어 쪽이 Signal하는 깨우기 신호다(대기자는 디코드 스레드 하나).
     platform::RealtimeWakeSignal& WakeSignal() noexcept {
         return wake_;

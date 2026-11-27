@@ -55,11 +55,13 @@ void AudioDeviceContext::ValueRamp::StartFrom(float current, float value, uint64
     frames = length;
 }
 
-AudioDeviceContext::AudioDeviceContext(Allocator& allocator,
-                                       audio::AudioOutputDevice& device) noexcept
-    : device_(device), mixer_(device.Mixer()), records_(allocator), voiceOwners_(allocator),
-      clips_(allocator), scenes_(allocator), emitters_(allocator), releasing_(allocator),
-      deferred_(allocator), awaitingStart_(allocator), terminalScratch_(allocator) {
+AudioDeviceContext::AudioDeviceContext(Allocator& allocator, audio::AudioOutputDevice& device,
+                                       audio::AudioStreamService* streams,
+                                       const audio::AudioDecoderTable* decoders) noexcept
+    : allocator_(allocator), device_(device), mixer_(device.Mixer()), streams_(streams),
+      decoders_(decoders), records_(allocator), voiceOwners_(allocator), clips_(allocator),
+      scenes_(allocator), emitters_(allocator), releasing_(allocator), deferred_(allocator),
+      awaitingStart_(allocator), terminalScratch_(allocator) {
 }
 
 AudioDeviceContext::~AudioDeviceContext() noexcept = default;
@@ -122,6 +124,12 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     CollectTerminals(batch);
     ReclaimVoices();
     ReclaimClips();
+    // Inline 서비스는 묶음마다 이 자리에서 링을 채운다(엔진 Inline 시험이 훅 없이 결정적
+    // — 3.40.2절).
+    if (streams_ != nullptr && streams_->Mode() == audio::AudioStreamServiceMode::Inline) {
+        streams_->PumpAll();
+    }
+
     // 게임 스레드가 원자값 없이 읽도록 사본을 묶음에 싣는다.
     batch.stats = Stats();
 }
@@ -137,7 +145,7 @@ bool AudioDeviceContext::IsIdle() const noexcept {
     }
 
     for (const ClipEntry& entry : clips_) {
-        if (entry.registered) {
+        if (entry.registered || entry.draining) {
             return false;
         }
     }
@@ -151,6 +159,7 @@ void AudioDeviceContext::Abandon() noexcept {
     }
 
     for (ClipEntry& entry : clips_) {
+        ResetStream(entry);
         entry = ClipEntry{};
     }
 
@@ -173,6 +182,12 @@ void AudioDeviceContext::Abandon() noexcept {
 }
 
 AudioControlStats AudioDeviceContext::Stats() const noexcept {
+    AudioControlStats stats = StatsWithoutStreams();
+    stats.activeStreams = streams_ != nullptr ? streams_->AcquiredSlots() : 0u;
+    return stats;
+}
+
+AudioControlStats AudioDeviceContext::StatsWithoutStreams() const noexcept {
     AudioControlStats stats = stats_;
     stats.releasingVoices = static_cast<uint32>(releasing_.Size());
     stats.pendingDeferred = static_cast<uint32>(deferred_.Size());
@@ -232,21 +247,32 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
         return;
     }
 
-    auto clip = AcquireClip(playable);
-    if (!clip) {
-        ++stats_.failedPlays;
-        Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::Failed,
+    // voice를 먼저 잡는다(3.40.3절 — voice가 없을 때 스트림 슬롯·디코더를 헛되이 열지 않는다).
+    auto voice = mixer_.AcquireVoice();
+    if (!voice) {
+        // 믹서 표는 상한의 MixerVoiceHeadroomFactor배라 놓기 대기가 그 여유를 다 쓴 경우다.
+        ++stats_.voiceLimitRejects;
+        Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::VoiceLimit,
              audio::UnsetMixFrame);
         return;
     }
 
-    auto voice = mixer_.AcquireVoice();
-    if (!voice) {
-        // 믹서 표는 상한의 MixerVoiceHeadroomFactor배라 놓기 대기가 그 여유를 다 쓴 경우다.
-        ReleaseClipUser(clip.Value());
-        ++stats_.voiceLimitRejects;
-        Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::VoiceLimit,
-             audio::UnsetMixFrame);
+    bool slotRejected = false;
+    auto clip = AcquireClip(playable, command.startFrame, slotRejected);
+    if (!clip) {
+        // Reserved voice는 바로 놓을 수 있다.
+        (void)mixer_.ReleaseVoice(voice.Value());
+        if (slotRejected) {
+            // 스트림 슬롯이 없다(3.40.3절 — Ignored는 장치 없음이라 따로 둔다).
+            ++stats_.streamSlotRejects;
+            Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::VoiceLimit,
+                 audio::UnsetMixFrame);
+        } else {
+            ++stats_.failedPlays;
+            Emit(batch, command.handle, PlaybackEventKind::Ended, PlaybackEndReason::Failed,
+                 audio::UnsetMixFrame);
+        }
+
         return;
     }
 
@@ -399,9 +425,8 @@ void AudioDeviceContext::UpdateSpatial(Record& record) noexcept {
         source = record.position;
     }
 
-    record.spatial =
-        ComputeSpatialParams(playable.attenuation.Value(), playable.pcm->ChannelCount(),
-                             scene.listenerPosition, scene.listenerRotation, source);
+    record.spatial = ComputeSpatialParams(playable.attenuation.Value(), playable.ChannelCount(),
+                                          scene.listenerPosition, scene.listenerRotation, source);
     record.paramsDirty = true;
 }
 
@@ -536,9 +561,32 @@ void AudioDeviceContext::ReclaimVoices() noexcept {
 void AudioDeviceContext::ReclaimClips() noexcept {
     for (ClipEntry& entry : clips_) {
         if (entry.registered && entry.users == 0 && mixer_.UnregisterClip(entry.id)) {
+            if (!entry.hasStreamSlot) {
+                entry = ClipEntry{};
+                continue;
+            }
+
+            // 스트림: 믹서가 더 읽지 않는다 → 작업 취소 → 서비스 반납을 기다린다(3.40.2절).
+            entry.registered = false;
+            entry.draining = true;
+            streams_->CancelJob(entry.streamSlot);
+        }
+
+        if (entry.draining && streams_->IsReturned(entry.streamSlot)) {
+            const bool released = streams_->ReleaseSlot(entry.streamSlot).IsOk();
+            ROCKS_ASSERT(released);
+            (void)released;
+            ResetStream(entry);
             entry = ClipEntry{};
         }
     }
+}
+
+void AudioDeviceContext::ResetStream(ClipEntry& entry) noexcept {
+    // 디코더가 공급자·데이터를 가리키므로 디코더부터 놓는다.
+    entry.decoder.Reset();
+    entry.chunks.Reset();
+    entry.stream = SharedPtr<const SoundStreamData>{};
 }
 
 AudioDeviceContext::Record* AudioDeviceContext::FindRecord(PlaybackHandle handle) noexcept {
@@ -572,16 +620,27 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     return params;
 }
 
-Result<uint32> AudioDeviceContext::AcquireClip(const SoundPlayable& playable) noexcept {
+Result<uint32> AudioDeviceContext::AcquireClip(const SoundPlayable& playable, uint32 startFrame,
+                                               bool& slotRejected) noexcept {
+    slotRejected = false;
+    if (playable.stream) {
+        return AcquireStreamClip(playable, startFrame, slotRejected);
+    }
+
     const SoundPcm* pcm = playable.pcm.Get();
     usize freeEntry = clips_.Size();
     for (usize index = 0; index < clips_.Size(); ++index) {
         ClipEntry& entry = clips_[index];
         if (!entry.registered) {
-            if (freeEntry == clips_.Size()) {
+            if (freeEntry == clips_.Size() && !entry.draining) {
                 freeEntry = index;
             }
 
+            continue;
+        }
+
+        // 스트림 clip은 공유하지 않는다(SPSC 링 — voice 하나).
+        if (entry.hasStreamSlot) {
             continue;
         }
 
@@ -624,6 +683,100 @@ Result<uint32> AudioDeviceContext::AcquireClip(const SoundPlayable& playable) no
     entry.users = 1;
     entry.registered = true;
     return Result<uint32>::Success(static_cast<uint32>(freeEntry));
+}
+
+Result<uint32> AudioDeviceContext::AcquireStreamClip(const SoundPlayable& playable,
+                                                     uint32 startFrame,
+                                                     bool& slotRejected) noexcept {
+    using Acquired = Result<uint32>;
+    if (streams_ == nullptr || decoders_ == nullptr) {
+        return Acquired::Failure(ErrorCode::NotReady);
+    }
+
+    usize freeEntry = clips_.Size();
+    for (usize index = 0; index < clips_.Size(); ++index) {
+        if (!clips_[index].registered && !clips_[index].draining) {
+            freeEntry = index;
+            break;
+        }
+    }
+
+    if (freeEntry == clips_.Size() && clips_.Size() >= clips_.Capacity()) {
+        return Acquired::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    const SoundStreamData& data = *playable.stream;
+    auto slot = streams_->AcquireSlot(data.ChannelCount());
+    if (!slot) {
+        slotRejected = slot.Error() == ErrorCode::CapacityExceeded;
+        return Acquired::Failure(slot.Error());
+    }
+
+    ClipEntry entry;
+    entry.stream = playable.stream;
+    entry.streamSlot = slot.Value();
+    entry.hasStreamSlot = true;
+    const auto fail = [&](ErrorCode error) noexcept {
+        ResetStream(entry);
+        (void)streams_->ReleaseSlot(slot.Value());
+        return Acquired::Failure(error);
+    };
+
+    auto chunks = UniquePtr<audio::ResidentAudioChunkSource>::TryMake(allocator_, data.View());
+    if (!chunks) {
+        return fail(chunks.Error());
+    }
+
+    entry.chunks = Move(chunks.Value());
+    auto codec = decoders_->Create(data.View().Header().codec, allocator_);
+    if (!codec) {
+        return fail(codec.Error());
+    }
+
+    audio::AudioStreamDecoderDesc desc;
+    desc.view = &entry.stream->View();
+    desc.chunks = entry.chunks.Get();
+    desc.startFrame = startFrame;
+    desc.loop = playable.looping;
+    desc.loopBegin = playable.loopBegin;
+    desc.loopEnd = playable.loopEnd;
+    auto decoder = audio::AudioStreamDecoder::TryCreate(allocator_, Move(codec.Value()), desc);
+    if (!decoder) {
+        return fail(decoder.Error());
+    }
+
+    entry.decoder = Move(decoder.Value());
+    audio::AudioStreamClipDesc clip;
+    clip.ring = &streams_->Ring(slot.Value());
+    clip.channelCount = data.ChannelCount();
+    clip.frameCount = static_cast<uint32>(data.FrameCount());
+    clip.sampleRate = data.SampleRate();
+    clip.loopBegin = playable.loopBegin;
+    clip.loopEnd = playable.loopEnd;
+    clip.startFrame = startFrame;
+    clip.loop = playable.looping;
+    auto registered = mixer_.RegisterStreamClip(clip);
+    if (!registered) {
+        return fail(registered.Error());
+    }
+
+    // 등록 뒤에 작업을 시작한다(시작 대기 중인 voice는 링이 찰 때까지 소리를 내지 않는다).
+    if (auto started = streams_->StartJob(slot.Value(), entry.decoder.Get()); !started) {
+        (void)mixer_.UnregisterClip(registered.Value());
+        return fail(started.Error());
+    }
+
+    entry.id = registered.Value();
+    entry.loopBegin = playable.loopBegin;
+    entry.loopEnd = playable.loopEnd;
+    entry.users = 1;
+    entry.registered = true;
+    if (freeEntry == clips_.Size()) {
+        (void)clips_.TryPushBack(ClipEntry{});
+    }
+
+    clips_[freeEntry] = Move(entry);
+    return Acquired::Success(static_cast<uint32>(freeEntry));
 }
 
 void AudioDeviceContext::ReleaseClipUser(uint32 clip) noexcept {

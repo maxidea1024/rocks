@@ -34,6 +34,9 @@ constexpr double TwoPi = 6.283185307179586;
 constexpr double ToneAmplitude = 0.3;
 // 청크를 여러 개로 나누는 목표 byte다.
 constexpr uint32 SmallChunkBytes = 4096;
+// 취소 뒤 비우는 frame 수와 취소 시험 반복 수다.
+constexpr uint32 CancelGapFrames = 256;
+constexpr uint32 CancelRounds = 4;
 // seek 근사의 SNR 하한(에너지 비 80 dB — 3.32.4절 측정 약 91 dB)이다.
 constexpr double MinimumSeekSignalToNoise = 1.0e8;
 constexpr double PerfectSignalToNoise = 1.0e30;
@@ -482,8 +485,9 @@ TEST(AudioStream_PendingChunkResumes) {
     CHECK(chunks.acquired == chunks.released);
 }
 
-// 서비스(Inline): 슬롯 잡기 → 시작 → PumpAll로 링이 찬다, 취소 뒤 반납 전 ReleaseSlot은 Busy, 반납
-// 뒤에는 회수되고 다시 잡은 슬롯의 링은 비어 있다. 슬롯이 다 차면 CapacityExceeded다.
+// 서비스(Inline): 슬롯 잡기 → 시작 → PumpAll로 링이 찬다, 취소 뒤 반납 전 ReleaseSlot은 Busy,
+// 취소한 작업은 빈 자리를 다시 채우지 않는다, 반납 뒤에는 회수되고 다시 잡은 슬롯의 링은 비어 있다.
+// 슬롯이 다 차면 CapacityExceeded다.
 TEST(AudioStream_ServiceInline) {
     SystemAllocator allocator;
     const AudioDecoderTable table = MakeTable();
@@ -507,8 +511,11 @@ TEST(AudioStream_ServiceInline) {
     CHECK(ring.ReadableFrames() == ring.CapacityFrames());
     service.CancelJob(slot.Value());
     CHECK(service.ReleaseSlot(slot.Value()).Error() == ErrorCode::Busy);
+    // 취소한 작업은 더 쓰지 않는다(빈 자리가 생겨도 다음 Pump가 채우지 않는다).
+    ring.Consume(CancelGapFrames);
     service.PumpAll();
     CHECK(service.IsReturned(slot.Value()));
+    CHECK(ring.ReadableFrames() == ring.CapacityFrames() - CancelGapFrames);
     REQUIRE(service.ReleaseSlot(slot.Value()));
     CHECK(service.AcquiredSlots() == 0);
     auto again = service.AcquireSlot(1);
@@ -521,6 +528,53 @@ TEST(AudioStream_ServiceInline) {
     // 작업 없이 잡은 슬롯은 바로 돌려줄 수 있다.
     CHECK(service.IsReturned(again.Value()));
     REQUIRE(service.ReleaseSlot(again.Value()));
+}
+
+// 서비스: 끝까지 써서 반납된 작업의 Cancel은 큐에 넣지 않는다 — 슬롯 하나(큐 용량 4)에서 "끝난
+// 작업 Cancel → 새 Start → 새 Cancel"을 비우지 않고 거듭해도 넘치지 않는다(3.40.2절 큐 상한). 열린
+// 청크는 반납 전에 디코드 쪽이 놓는다.
+TEST(AudioStream_ServiceCancelAfterReturn) {
+    SystemAllocator allocator;
+    const AudioDecoderTable table = MakeTable();
+    Encoded shortClip(allocator);
+    Encode(allocator, AudioCodecId::Pcm16, 1, StreamRingMinFrames / 2, shortClip, false);
+    Encoded longClip(allocator);
+    Encode(allocator, AudioCodecId::Opus, 1, Rate * 2, longClip);
+    AudioStreamServiceConfig config;
+    config.maxStreams = 1;
+    config.mode = AudioStreamServiceMode::Inline;
+    auto made = AudioStreamService::TryCreate(allocator, config);
+    REQUIRE(made);
+    AudioStreamService& service = *made.Value();
+    GatedChunkSource shortChunks(shortClip.view);
+    GatedChunkSource longChunks(longClip.view);
+    for (uint32 round = 0; round < CancelRounds; ++round) {
+        auto slot = service.AcquireSlot(1);
+        REQUIRE(slot);
+        UniquePtr<AudioStreamDecoder> done =
+            MakeStream(allocator, table, shortClip.view, shortChunks);
+        REQUIRE(service.StartJob(slot.Value(), done.Get()));
+        service.PumpAll();
+        REQUIRE(done->IsFinished() && service.IsReturned(slot.Value()));
+        // 반납된 작업 — 큐에 넣지 않는다.
+        service.CancelJob(slot.Value());
+        REQUIRE(service.ReleaseSlot(slot.Value()));
+        auto again = service.AcquireSlot(1);
+        REQUIRE(again);
+        UniquePtr<AudioStreamDecoder> running =
+            MakeStream(allocator, table, longClip.view, longChunks);
+        REQUIRE(service.StartJob(again.Value(), running.Get()));
+        service.PumpAll();
+        CHECK(longChunks.acquired == longChunks.released + 1);
+        service.CancelJob(again.Value());
+        service.PumpAll();
+        REQUIRE(service.IsReturned(again.Value()));
+        // 취소로 반납할 때 열린 청크를 디코드 쪽이 놓았다(디코더 파괴 전).
+        CHECK(longChunks.acquired == longChunks.released);
+        REQUIRE(service.ReleaseSlot(again.Value()));
+    }
+
+    CHECK(shortChunks.acquired == shortChunks.released);
 }
 
 // 서비스(Thread): Flush gate로만 순서를 만든다 — Flush 뒤 링이 차 있고, 소비 뒤 refill 신호와

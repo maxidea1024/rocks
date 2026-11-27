@@ -942,8 +942,8 @@ void AudioMixer::PublishStart(uint32 index, VoiceSlot& slot, uint64 frame) noexc
 
 bool AudioMixer::StreamReadyToStart(const VoiceSlot& slot) const noexcept {
     const ClipSlot& clip = clips_[slot.clipIndex];
-    const AudioStreamRing& ring = *clip.stream;
-    if (ring.State() != AudioStreamState::Running) {
+    const AudioStreamSnapshot snapshot = clip.stream->Snapshot();
+    if (snapshot.state != AudioStreamState::Running) {
         return true;
     }
 
@@ -953,10 +953,11 @@ bool AudioMixer::StreamReadyToStart(const VoiceSlot& slot) const noexcept {
         wanted = remaining < wanted ? remaining : wanted;
     }
 
-    return ring.ReadableFrames() >= wanted;
+    return snapshot.readable >= wanted;
 }
 
-uint32 AudioMixer::StreamRenderableFrames(VoiceSlot& slot, uint32 chunk) const noexcept {
+uint32 AudioMixer::StreamRenderableFrames(VoiceSlot& slot, uint32 chunk,
+                                          uint32 available) const noexcept {
     const ClipSlot& clip = clips_[slot.clipIndex];
     const uint32 needed = slot.resampler.InputFramesNeeded(chunk).Value();
     uint64 ringNeeded = needed;
@@ -970,7 +971,6 @@ uint32 AudioMixer::StreamRenderableFrames(VoiceSlot& slot, uint32 chunk) const n
                                                                     : needed);
     }
 
-    const uint32 available = clip.stream->ReadableFrames();
     if (available >= ringNeeded) {
         return chunk;
     }
@@ -1301,8 +1301,15 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
         }
 
         if (chunk > 0) {
-            // 스트림 원본은 링에 있는 만큼만 낸다(3.40.1절 굶음).
-            const uint32 rendered = stream != nullptr ? StreamRenderableFrames(slot, chunk) : chunk;
+            // 스트림 원본은 링에 있는 만큼만 낸다(3.40.1절 굶음). 수와 상태는 한 스냅숏에서 읽는다
+            // (끝 판정이 그 사이의 마지막 Write·MarkEnded를 "모자람"으로 보지 않게).
+            AudioStreamSnapshot snapshot;
+            if (stream != nullptr) {
+                snapshot = stream->Snapshot();
+            }
+
+            const uint32 rendered =
+                stream != nullptr ? StreamRenderableFrames(slot, chunk, snapshot.readable) : chunk;
             if (rendered > 0) {
                 needed = slot.resampler.InputFramesNeeded(rendered).Value();
                 FillInput(slot, needed);
@@ -1338,7 +1345,7 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                 }
 
                 if (ending == AudioVoiceEndReason::None &&
-                    stream->State() != AudioStreamState::Running) {
+                    snapshot.state != AudioStreamState::Running) {
                     ending = AudioVoiceEndReason::StreamFailed;
                 }
             }

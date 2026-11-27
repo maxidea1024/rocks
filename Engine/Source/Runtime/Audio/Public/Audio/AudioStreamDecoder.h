@@ -60,6 +60,11 @@ public:
     void Pump(AudioStreamRing& ring) noexcept;
 
     // 끝 상태를 출판했는지다(그 뒤 Pump는 아무것도 하지 않는다).
+    // 열린 청크를 공급자에 돌려준다(멱등). 서비스가 취소·종료로 작업을 반납하기 전에 디코드 쪽에서
+    // 부른다(공급자는 디코드 스레드 하나가 쓴다). 소멸자도 부르지만, 그때는 반납 뒤이거나 넘기기
+    // 전이라 디코드 쪽이 쓰지 않는다.
+    void ReleaseChunk() noexcept;
+
     bool IsFinished() const noexcept {
         return finished_;
     }
@@ -72,7 +77,6 @@ private:
     // 남은 단위 PCM(pending_)을 ring에 쓴다. 다 쓰면 true다.
     bool FlushPending(AudioStreamRing& ring) noexcept;
     void Fail(AudioStreamRing& ring) noexcept;
-    void ReleaseChunk() noexcept;
     // 지금 구간의 끝 유효 frame이다(loop면 loop 끝, 아니면 frames).
     uint64 SegmentEnd() const noexcept;
 

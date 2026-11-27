@@ -19,7 +19,8 @@
 //   if (got.status == AudioChunkStatus::Ready) { decoder.BeginChunk(chunk, got.payload, start); }
 //   ... 청크를 다 낸 뒤 source.Release(index);
 //
-// 스레드: 디코드 서비스 스레드 하나가 쓴다.
+// 스레드: 작업이 서비스에 있는 동안은 디코드 서비스 스레드 하나가 쓴다. 서비스는 작업을 반납하기
+// 전에 청크를 놓는다(AudioStreamDecoder::ReleaseChunk). 넘기기 전·반납 뒤에는 제어 쪽이 쓴다.
 namespace rocks::audio {
 
 enum class AudioChunkStatus : uint8 {
