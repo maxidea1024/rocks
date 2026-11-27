@@ -8,7 +8,7 @@
 - 힌트·오류 캡션의 색이 코드에 박혀 있다(힌트 회색, 오류 빨강). 스타일 구조체가 없다.
 - 편집 이력은 64단계다(UE 99).
 - 더블클릭 단어 선택, 세 번 클릭 줄 선택, caret 깜박임이 없다.
-- 여러 줄 상자에 세로 스크롤 막대가 없다. 휠·caret 따라가기 스크롤만 있다.
+- 여러 줄 상자에 세로 스크롤 막대와 휠 스크롤이 없다. caret 따라가기 스크롤만 있다 — 배치할 때마다 caret을 보이는 곳에 끌어온다(밖에서 스크롤을 옮길 수 없다).
 - 오류는 입력 칸 아래 빨간 글자 줄이다. UE는 오른쪽 "!" 표지와 오류 팝업이다.
 
 ### 22.2 나눔(UE `SEditableText`·`SMultiLineEditableText` ↔ `SEditableTextBox`·`SMultiLineEditableTextBox`)
@@ -66,13 +66,32 @@
 ### 22.6 오류 표지와 팝업(UE `SPopupErrorText`)
 
 - 오류가 있으면 상자 오른쪽 안쪽에 "!" 표지(정사각, `errorMarker` 바탕, 흰 "!")를 둔다. 편집 칸은 그만큼 줄어든다.
-- 오류 문구는 상자 아래에 붙는 팝업(MenuAnchor 팝업 층)으로 띄운다. 초점을 뺏지 않는다(`SetFocusOnOpen(false)` — UE `SMenuAnchor` `bFocusMenu = false`). 오류가 있는 동안 열려 있다(UE `SPopupErrorText::SetError`가 `SetIsOpen(HasError)`). 상자가 화면에서 빠지면 닫힌다(팝업 층 규칙).
+- 표지는 `MenuAnchor`다(UE `SPopupErrorText`가 `SComboButton`). 버튼 스타일은 모든 상태가 `errorMarker`이고 여백 0이다. 초점을 받지 않는다(`SetFocusable(false)` — UE `IsFocusable(false)`, Tab 정지가 아니다). 누르면 팝업을 여닫는다(`MenuAnchor::OnActivated` — 초점을 옮기지 않는 `Open`).
+- 오류 문구는 상자 아래(`MenuPlacement::Below` — UE `MenuPlacement_BelowAnchor`)에 붙는 팝업으로 띄운다.
+  - 팝업 내용은 상자 전용 Element(`EditableTextErrorPopup`, Private)다: `errorMarker` 바탕 위 `errorText` 글자, 여백 (3, 0, 3, 0)(UE `SErrorText`의 `FMargin(3, 0)`). 바탕은 그릴 때 테마로 푼다(테마가 바뀌어도 따라간다 — `Frame`은 푼 `Brush`만 받으므로 쓰지 않는다).
+  - 팝업 층은 바깥 누름을 받지 않는다(`SetCatchOutsidePresses(false)`) — 오류 팝업이 다른 입력을 막지 않는다.
+  - 초점을 뺏지 않는다(UE `SetIsOpen(bHasError, false)` — 둘째 인자 `bFocusMenu = false`).
+- 열고 닫는 때는 UE `SPopupErrorText::SetError`와 같다: `SetError`가 부를 때마다 오류가 있으면 열고 없으면 닫는다. 사용자가 표지를 눌러 닫으면 다음 `SetError`까지 닫혀 있다.
+- **트리에 붙기 전에 정한 오류(Rocks 보강)**: UE는 창에 붙기 전 `SetError`의 팝업을 열지 못하고 버린다(Widget 층은 속성을 붙기 전에 넣는다 — 갤러리·UMG에서 팝업이 안 뜬다). Rocks는 상자가 호스트 묶음이 있는 트리에 붙을 때(`OnUiHostServicesChanged`) 오류가 있으면 연다.
+  - 붙는 통지 안에서 바로 열지 않는다 — 통지는 트리 순회(루트 교체·목록 행 생성이 배치 중에 일어난다) 안에서 오므로 루트 Overlay 자식 목록을 바꾸면 순회가 깨진다. `UiHostServices::DeferFrameAction`에 넣어 다음 프레임 시작(`Application::StartFrame` — 해체 대기열 다음)에 연다.
+  - 대기열 항목은 상자를 약하게 잡는다(그 사이 버려진 상자는 아무 일도 하지 않는다). 한 상자는 대기 항목을 하나만 둔다.
+  - 상자가 화면에서 빠지면 팝업은 닫힌다(Overlay `OnDescendantDetached` — 팝업 층 규칙). 다시 붙으면 위 규칙으로 다시 연다.
 - 문구 shaping은 호출자가 넘긴 `Text`를 상자가 `TextShaper`로 한다(지역화 — 지금 오류 캡션과 같다).
+- **`UiHostServices` 프레임 동작 대기열**(새 계약): `Result<void> DeferFrameAction(Delegate<void()>&&)`·`usize RunFrameActions()`·`PendingFrameActionCount()`. 해체 대기열(21.4절)과 같은 방식(넣은 순서, 도는 중 넣은 항목은 다음 프레임, 재진입 0)이지만 사용자 hook 해체가 아니라 "트리 순회 밖에서 할 일"이다. `Shutdown`에서는 돌리지 않고 버린다(닫는 앱에서 팝업을 열지 않는다). 빈 delegate는 `InvalidArgument`, 할당 실패는 `OutOfMemory`다.
 
 ### 22.7 여러 줄
 
-- `EditableText`(multiline): Enter = 줄바꿈, Up·Down 줄 이동(지금 있음), caret 따라가기·휠 세로 스크롤(지금 있음). 스크롤 위치·내용 높이·보이는 높이를 읽는 API(`ScrollOffset`·`ContentHeight`·`ViewHeight`)와 `SetScrollOffset`을 공개한다.
-- `EditableTextBox`(multiline): 오른쪽에 세로 `ScrollBar`(UE `SMultiLineEditableTextBox`의 `VScrollBar`, 스타일 "Scrollbar")를 둔다. 내용이 보이는 높이를 넘을 때만 보인다(UE `AlwaysShowScrollbars` 기본 false). 막대를 끌면 `SetScrollOffset`, 편집기가 스크롤하면 막대를 맞춘다.
+- `EditableText`(multiline): Enter = 줄바꿈, Up·Down 줄 이동(지금 있음).
+- **caret 따라가기**는 UE `PositionToScrollIntoView`(SlateEditableTextLayout.cpp 3596–3631행) 규칙으로 바꾼다: caret이 움직이거나(이동·선택·타자·조합) 글자가 다시 셰이핑될 때만 다음 배치에서 한 번 따라간다. 가로는 caret 사각형(폭 = caret 폭), 세로는 caret이 있는 줄 전체를 보이게 한다. 지금처럼 배치마다 끌어오면 막대·휠로 옮긴 스크롤이 다음 배치에 되돌아간다.
+- **clamp**: 배치마다 스크롤을 [0, max(0, 내용 − 보이는 크기)]로 자른다(UE `SetScrollOffset` 848–849행·막대 갱신 3636–3659행). 내용 크기는 줄 배치 크기(가로는 caret 폭을 더한다)다. 내용이 보이는 크기보다 작으면 0이다.
+- **휠**: 여러 줄이고 넘칠 때만 `WheelScrollStep`(px, Rocks 공통 휠 거리 — UE `GetGlobalScrollAmount`)씩 세로로 옮긴다. 옮겼으면 처리하고, 끝이라 못 옮기면 처리하지 않는다(바깥 스크롤로 넘어간다 — UE 864–883행).
+- **API**(여러 줄·한 줄 모두, 세로 값): `float ScrollOffset() const`, `float ContentHeight() const`(줄 배치 높이), `float ViewHeight() const`(배치 높이 − 위·아래 내용 여백), `void SetScrollOffset(float)`(clamp, 비유한 값은 무시). 마지막 배치 기준이다(배치 전에는 0).
+- 오른쪽 단추 끌기 스크롤(UE `SMultiLineEditableText::OnMouseMove` 823–857행)은 편집 문맥 메뉴와 함께 둔다 — UE도 끈 양으로 문맥 메뉴와 가른다. 편집 문맥 메뉴는 아직 없다(UE `FSlateEditableTextLayout::BuildDefaultContextMenu` — 실행 취소·잘라내기·복사·붙여 넣기·지우기·전체 선택). 둘을 UW4f2e에서 같이 넣는다(22.11절).
+- `EditableTextBox`(multiline): 오른쪽에 세로 `ScrollBar`(UE `SMultiLineEditableTextBox`의 `VScrollBar`, 스타일 "Scrollbar")를 둔다.
+  - 내용이 보이는 높이를 넘을 때만 보인다(UE `AlwaysShowScrollbars` 기본 false, `IsNeeded`). 숨으면 자리를 차지하지 않는다(Collapsed).
+  - 놓는 순서는 편집 칸 | 막대 | 오류 표지다(UE `SMultiLineEditableTextBox` 가로 상자 순서). 막대 세로는 위·아래 여백 안이다.
+  - 배치: 편집기를 막대 없이 먼저 배치하고, 넘치면 막대 폭만큼 줄여 다시 배치한다(줄바꿈이 바뀌어도 더 넘칠 뿐이라 두 번이면 끝난다 — 결정적). UE는 다음 Tick에 막대를 보이고 한 프레임 흔들린다.
+  - 동기화: 상자 배치가 편집기 스크롤로 막대 `SetState(offset / 내용, 보이는 / 내용)`을 맞춘다(편집기 스크롤이 바뀌면 배치 무효화가 상자까지 올라온다). 막대를 끌면 `onScrolled(fraction)` → `SetScrollOffset(fraction × 내용)`.
 
 ### 22.8 Widget 층
 
@@ -91,8 +110,9 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 - 이력: 99단계에서 가장 오래된 것이 빠짐.
 - 힌트 색 = 전경 × 0.35.
 - caret: 폭(작은·큰 글꼴 clamp), 주입 시계로 0.1초 고정·0.25초 경계 켜짐·꺼짐(시각을 정해 두고 단언 — 시간 경쟁 없음), 초점 잃으면 volatile 해제.
-- 오류: 표지 유무·편집 칸 폭, 팝업 열림·닫힘, 팝업이 초점을 뺏지 않음.
-- 여러 줄 스크롤 막대: 넘칠 때만 보임, 막대 끌기 ↔ 편집기 스크롤 동기화.
+- 오류: 표지 유무·편집 칸 폭, 팝업 열림·닫힘(`SetError` 마다), 팝업이 초점을 뺏지 않음, 표지가 Tab 정지 아님, 표지 눌러 닫기, 붙기 전 오류는 다음 프레임에 열림, 떼면 닫히고 다시 붙이면 열림, 프레임 동작 대기열(순서·재진입·버린 상자·Shutdown 버림).
+- 스크롤: 막대·`SetScrollOffset`으로 옮긴 스크롤이 다음 배치에 유지됨, caret 이동이면 따라감, clamp, 휠(넘칠 때만·끝에서 미처리).
+- 여러 줄 스크롤 막대: 넘칠 때만 보임(숨으면 편집 칸 폭 그대로), 막대 끌기 ↔ 편집기 스크롤 동기화, 표지와 함께일 때 순서.
 - Widget 층: 기존 `EditableTextWidgetTests` 전부와 상자 위젯 오류·스타일.
 
 ### 22.11 단계
@@ -101,5 +121,6 @@ Editable Text, Editable Text Box(힌트), Read Only, Password, Error(표지·팝
 - **UW4f2b**: 더블·세 번 클릭 선택·caret 깜박임.
 - **UW4f2c**: 오류 표지·팝업·여러 줄 스크롤 막대.
 - **UW4f2d**: 갤러리 "Text Input" 묶음·self-test 화소 확인.
+- **UW4f2e**: 편집 문맥 메뉴(오른쪽 단추 — UE 기본 메뉴 항목·활성 조건)와 여러 줄 오른쪽 단추 끌기 스크롤(끈 양이 문턱 아래면 메뉴, 넘으면 스크롤 — UE 규칙). 상세는 착수 때 22.7절 뒤에 쓴다.
 
 리뷰어는 9.1절대로 UW4f(f2·f3) 끝에 한 번 둔다.
