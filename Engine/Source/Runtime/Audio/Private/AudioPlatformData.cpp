@@ -70,7 +70,7 @@ Result<void> CheckHeader(const AudioPlatformDataHeader& header) noexcept {
     if (header.channels == 0 || header.channels > MaxOutputChannels ||
         (header.channelMask & ~AudioChannelMaskAll) != 0 ||
         AudioChannelMaskCount(header.channelMask) != header.channels) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // rate 규칙은 아는 codec에만 둔다(표 범위 안의 다른 id는 rate > 0만 본다).
@@ -84,19 +84,19 @@ Result<void> CheckHeader(const AudioPlatformDataHeader& header) noexcept {
 
     if (!rateValid || header.frames == 0 || header.chunkCount == 0 ||
         header.codecHeaderBytes % AudioCodecHeaderAlignment != 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // delay + 유효 + padding이 넘치지 않아야 한다.
     if (header.frames > MaxUInt64 - header.encoderDelay - header.endPadding) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const bool loopValid =
         header.loopEnd == 0 ? header.loopStart == 0
                             : header.loopStart < header.loopEnd && header.loopEnd <= header.frames;
     if (!loopValid) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -173,27 +173,32 @@ usize AudioPlatformDataMetaBytes(uint32 codecHeaderBytes, uint32 chunkCount) noe
 Result<AudioPlatformDataView> AudioPlatformDataView::Parse(Span<const uint8> bytes) noexcept {
     using Failure = Result<AudioPlatformDataView>;
     if (bytes.Size() < AudioPlatformDataHeaderBytes) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Failure::Failure(ErrorCode::CorruptData);
     }
 
     const uint8* data = bytes.Data();
     for (usize index = 0; index < MagicBytes; ++index) {
         if (data[HeaderMagicOffset + index] != Magic[index]) {
-            return Failure::Failure(ErrorCode::InvalidArgument);
+            return Failure::Failure(ErrorCode::CorruptData);
         }
     }
 
-    if (LoadLittleEndian<uint16>(data + HeaderVersionOffset) != AudioPlatformDataVersion ||
-        LoadLittleEndian<uint32>(data + HeaderReserved32Offset) != 0 ||
+    // 판이 다르면 모르는 변형이다(새 쿠커의 데이터 — 손상이 아니다, 3.38절). 다른 규칙보다 먼저
+    // 본다.
+    if (LoadLittleEndian<uint16>(data + HeaderVersionOffset) != AudioPlatformDataVersion) {
+        return Failure::Failure(ErrorCode::Unsupported);
+    }
+
+    if (LoadLittleEndian<uint32>(data + HeaderReserved32Offset) != 0 ||
         LoadLittleEndian<uint64>(data + HeaderReserved64Offset) != 0) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Failure::Failure(ErrorCode::CorruptData);
     }
 
     // codec id 0은 형식 위반, 표 범위 밖은 이 판이 모르는 codec이다.
     const uint8 codec = data[HeaderCodecOffset];
     if (!CodecInTableRange(codec)) {
         return Failure::Failure(codec == static_cast<uint8>(AudioCodecId::None)
-                                    ? ErrorCode::InvalidArgument
+                                    ? ErrorCode::CorruptData
                                     : ErrorCode::Unsupported);
     }
 
@@ -219,7 +224,7 @@ Result<AudioPlatformDataView> AudioPlatformDataView::Parse(Span<const uint8> byt
     // 메타 크기와 정렬 채움(0)을 본다.
     const usize metaBytes = AudioPlatformDataMetaBytes(header.codecHeaderBytes, header.chunkCount);
     if (metaBytes == 0 || bytes.Size() < metaBytes) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Failure::Failure(ErrorCode::CorruptData);
     }
 
     const usize tableStart = AudioPlatformDataHeaderBytes + header.codecHeaderBytes;
@@ -227,13 +232,13 @@ Result<AudioPlatformDataView> AudioPlatformDataView::Parse(Span<const uint8> byt
         tableStart + static_cast<usize>(header.chunkCount) * AudioChunkEntryBytes;
     for (usize index = tableEnd; index < metaBytes; ++index) {
         if (data[index] != 0) {
-            return Failure::Failure(ErrorCode::InvalidArgument);
+            return Failure::Failure(ErrorCode::CorruptData);
         }
     }
 
     const uint64 present = bytes.Size() - metaBytes;
     if (present > header.payloadBytes) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Failure::Failure(ErrorCode::CorruptData);
     }
 
     // 청크: 첫 codec frame이 0부터 이어지고, 위치는 0에서 시작해 16 정렬로 증가하며 payload 영역
@@ -252,7 +257,7 @@ Result<AudioPlatformDataView> AudioPlatformDataView::Parse(Span<const uint8> byt
             chunk.payloadOffset > header.payloadBytes ||
             chunk.payloadBytes > header.payloadBytes - chunk.payloadOffset ||
             chunk.frameCount > MaxUInt64 - chunk.firstFrame) {
-            return Failure::Failure(ErrorCode::InvalidArgument);
+            return Failure::Failure(ErrorCode::CorruptData);
         }
 
         nextFrame = chunk.firstFrame + chunk.frameCount;
@@ -260,7 +265,7 @@ Result<AudioPlatformDataView> AudioPlatformDataView::Parse(Span<const uint8> byt
     }
 
     if (nextFrame != header.CodecFrames()) {
-        return Failure::Failure(ErrorCode::InvalidArgument);
+        return Failure::Failure(ErrorCode::CorruptData);
     }
 
     view.bytes_ = bytes;
@@ -294,15 +299,30 @@ Span<const uint8> AudioPlatformDataView::ChunkPayload(uint32 index) const noexce
                              chunk.payloadBytes);
 }
 
+Result<void> VerifyAllAudioChunks(const AudioPlatformDataView& view) noexcept {
+    if (!view.HasAllPayload()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (uint32 index = 0; index < view.Header().chunkCount; ++index) {
+        if (auto verified = VerifyAudioChunk(view.Chunk(index), view.ChunkPayload(index));
+            !verified) {
+            return verified;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> VerifyAudioChunk(const AudioChunkEntry& chunk, Span<const uint8> payload) noexcept {
     if (payload.Size() != chunk.payloadBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const Sha256Digest digest = Sha256::Hash(payload);
     for (usize index = 0; index < AudioChunkHashBytes; ++index) {
         if (digest.bytes[index] != chunk.sha256[index]) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
     }
 

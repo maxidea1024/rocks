@@ -32,17 +32,24 @@ Result<void> ValidateSoundAttenuation(const SoundAttenuation& value) noexcept {
 Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
                                                  const SoundPlayable& playable) noexcept {
     using Created = Result<SoundSourceRef>;
+    // pcm·stream 중 정확히 하나다. 유한성은 pcm만 본다(스트림은 생산자가 쓰기 전에 본다
+    // — 3.40.1절).
     const SoundPcm* pcm = playable.pcm.Get();
-    if (pcm == nullptr || !pcm->IsFinite() ||
+    const bool hasPcm = pcm != nullptr;
+    const bool hasStream = playable.stream.Get() != nullptr;
+    if (hasPcm == hasStream || (hasPcm && !pcm->IsFinite()) ||
         !IsFiniteWithin(playable.volume, 0.0f, audio::MaxVoiceGain) ||
-        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch)) {
+        !IsFiniteWithin(playable.pitch, audio::MinPitch, audio::MaxPitch) ||
+        !IsFiniteWithin(playable.priority, MinSoundPriority, MaxSoundPriority) ||
+        static_cast<uint8>(playable.virtualizationMode) >
+            static_cast<uint8>(SoundVirtualizationMode::SeekRestart)) {
         return Created::Failure(ErrorCode::InvalidArgument);
     }
 
     // 믹서 AudioClipDesc와 같은 규칙: 둘 다 0이면 전체, 아니면 시작 < 끝 ≤ frame 수.
     const bool wholeLoop = playable.loopBegin == 0 && playable.loopEnd == 0;
     if (!wholeLoop &&
-        (playable.loopEnd <= playable.loopBegin || playable.loopEnd > pcm->FrameCount())) {
+        (playable.loopEnd <= playable.loopBegin || playable.loopEnd > playable.FrameCount())) {
         return Created::Failure(ErrorCode::InvalidArgument);
     }
 

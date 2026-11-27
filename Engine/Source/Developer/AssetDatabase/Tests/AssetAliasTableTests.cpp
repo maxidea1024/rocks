@@ -187,45 +187,45 @@ TEST(AssetAliasTable_RejectsInvalidFile) {
     const uint64 none = AssetAliasNoEntry;
     Case cases[] = {
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "90,"), AssetAliasField::Json, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, GoodDays), AssetAliasField::Json, 0,
          ErrorCode::None},
-        {String(a), AssetAliasField::Root, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Root, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Root, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Version, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Version, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Version, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Aliases, none, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Entry, 0, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Entry, 0, ErrorCode::InvalidArgument},
-        {String(a), AssetAliasField::Entry, 0, ErrorCode::InvalidArgument},
+        {String(a), AssetAliasField::Root, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Root, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Root, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Version, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Version, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Version, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Aliases, none, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Entry, 0, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Entry, 0, ErrorCode::CorruptData},
+        {String(a), AssetAliasField::Entry, 0, ErrorCode::CorruptData},
         {Entry(a, "1", GoodAsset, GoodCreated, GoodDays), AssetAliasField::Path, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, "\"/Other/Hero\"", GoodAsset, GoodCreated, GoodDays), AssetAliasField::Path, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, "\"/Game/Bad Name\"", GoodAsset, GoodCreated, GoodDays), AssetAliasField::Path, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, "1", GoodCreated, GoodDays), AssetAliasField::Asset, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, "\"5E570000-A55E-7000-0000-000000000B01\"", GoodCreated, GoodDays),
-         AssetAliasField::Asset, 0, ErrorCode::InvalidArgument},
+         AssetAliasField::Asset, 0, ErrorCode::CorruptData},
         {Entry(a, GoodPath, "\"00000000-0000-0000-0000-000000000000\"", GoodCreated, GoodDays),
-         AssetAliasField::Asset, 0, ErrorCode::InvalidArgument},
+         AssetAliasField::Asset, 0, ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, "1", GoodDays), AssetAliasField::Created, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, "\"2026-13-01\"", GoodDays), AssetAliasField::Created, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "0"), AssetAliasField::Days, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "36501"), AssetAliasField::Days, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "\"90\""), AssetAliasField::Days, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "1.5"), AssetAliasField::Days, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
         {Entry(a, GoodPath, GoodAsset, GoodCreated, "-1"), AssetAliasField::Days, 0,
-         ErrorCode::InvalidArgument},
+         ErrorCode::CorruptData},
     };
     // 문법 위반: 끝 쉼표 뒤 닫힘(엄격 JSON). 두 번째는 올바른 파일(대조용 — 받는다).
     const StringView structural[] = {
@@ -826,7 +826,7 @@ TEST(AssetAliasTable_ServiceResolves) {
     REQUIRE(service.Info("/Game/Hero", AssetInfoOptions{}, out, &warnings));
     AssetDiagnostic failure;
     auto broken = service.Info("/Game/Old/Hero", AssetInfoOptions{}, out, &warnings, &failure);
-    CHECK(!broken && broken.Error() == ErrorCode::InvalidArgument &&
+    CHECK(!broken && broken.Error() == ErrorCode::CorruptData &&
           failure.code == AssetDiagnosticCode::CorruptAliasTable);
     // 경고 목록 없이도 같은 진단이다.
     failure = AssetDiagnostic{};

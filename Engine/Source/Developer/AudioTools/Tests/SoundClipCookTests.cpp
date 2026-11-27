@@ -11,9 +11,11 @@
 #include <Audio/AudioDecoder.h>
 #include <AudioAssets/AudioAssetsTypes.h>
 #include <AudioAssets/SoundClip.generated.h>
+#include <AudioAssets/SoundStreamData.h>
 #include <AudioOpus/OpusAudioDecoder.h>
 #include <AudioTools/CookResampler.h>
 #include <AudioTools/SoundClipCook.h>
+#include <Base/InitializerList.h>
 #include <Base/NumericLimits.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -47,6 +49,9 @@ constexpr double ToneAmplitude = 0.3;
 constexpr double MinimumSignalToNoise = 100.0;
 // 시작·끝 과도 응답을 빼는 frame 수다.
 constexpr uint32 EdgeFrames = 4800;
+// 플랫폼 데이터 머리의 형식 판·codec id 칸 위치다(3.30.1절 배치 — magic 4 byte 뒤 u16, 그 뒤 u8).
+constexpr usize PlatformDataVersionOffset = 4;
+constexpr usize PlatformDataCodecOffset = 6;
 constexpr double PerfectSignalToNoise = 1.0e30;
 // PCM16 왕복 허용오차(1 LSB)다.
 constexpr float Pcm16Lsb = 1.0f / 32768.0f;
@@ -405,6 +410,14 @@ struct NuggetScene {
     bool ready = false;
 };
 
+// 기본 재정의(UE 기본 — resampleForDevice 끔)의 인코딩 rate로 쿠킹 배치를 만든다.
+Result<void> DefaultLayout(const SoundClip& clip, AudioCodecId codec,
+                           SoundCookedLayout& layout) noexcept {
+    const uint32 rate =
+        SoundCookEncodingRate(codec, clip.sampleRate, clip.sampleRateQuality, AudioCookOverrides{});
+    return ComputeSoundCookedLayout(clip, codec, rate, layout);
+}
+
 bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
     if (left.Size() != right.Size()) {
         return false;
@@ -490,7 +503,7 @@ TEST(SoundClipCook_LayoutConvertsPositions) {
         SoundCuePoint cue(scene.allocator);
         cue.frame = 5;
         CHECK(clip.cues.TryPushBack(Move(cue)));
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     // 9 × 0.5 = 4.5 → 4(짝수). 파일 loop [1.5, 2) → [2, 2) → [2, 3). override [4, 4.5→4) → begin은
     // frames − 1 = 3, end 4. cue 2.5 → 2.
@@ -509,13 +522,13 @@ TEST(SoundClipCook_LayoutConvertsPositions) {
         clip.loopOverride.enabled = true;
         clip.loopOverride.begin = 0;
         clip.loopOverride.end = 1;
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     CHECK(layout.overrideBegin == 0 && layout.overrideEnd == 1);
     CHECK(layout.playLoopBegin == 0 && layout.playLoopEnd == 1);
     REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
         clip.loopOverride.end = 0;
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     CHECK(layout.overrideBegin == 0 && layout.overrideEnd == 0);
     CHECK(layout.playLoopBegin == 0 && layout.playLoopEnd == 0);
@@ -526,7 +539,7 @@ TEST(SoundClipCook_LayoutConvertsPositions) {
         SoundCuePoint cue(scene.allocator);
         cue.frame = 12345;
         CHECK(clip.cues.TryPushBack(Move(cue)));
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     auto frames = audio::CookResampledFrames(Rate44, Rate44, Rate48);
     auto cue = audio::CookResampledPosition(12345, Rate44, Rate48);
@@ -540,13 +553,13 @@ TEST(SoundClipCook_LayoutConvertsPositions) {
         clip.hasFileLoop = true;
         clip.fileLoopBegin = 10;
         clip.fileLoopEnd = 900;
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     CHECK(!layout.resampled && layout.frames == 1000 && layout.fileLoopBegin == 10 &&
           layout.fileLoopEnd == 900 && layout.playLoopEnd == 900);
     REQUIRE(scene.Make(4, 1, 1000, Rate44));
     REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Pcm16, layout).IsOk();
     }));
     CHECK(!layout.resampled && layout.sampleRate == Rate44 && layout.frames == 1000);
 
@@ -555,27 +568,27 @@ TEST(SoundClipCook_LayoutConvertsPositions) {
         clip.loopOverride.enabled = true;
         clip.loopOverride.begin = 5;
         clip.loopOverride.end = 5;
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
+        CHECK(DefaultLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
               ErrorCode::InvalidArgument);
         clip.loopOverride.end = 1001;
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
+        CHECK(DefaultLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
               ErrorCode::InvalidArgument);
         clip.loopOverride.begin = 0;
         clip.loopOverride.end = 0;
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).IsOk());
+        CHECK(DefaultLayout(clip, AudioCodecId::Pcm16, layout).IsOk());
         clip.hasFileLoop = true;
         clip.fileLoopBegin = 7;
         clip.fileLoopEnd = 3;
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
+        CHECK(DefaultLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
               ErrorCode::InvalidArgument);
         clip.hasFileLoop = false;
         SoundCuePoint late(scene.allocator);
         late.frame = 1001;
         CHECK(clip.cues.TryPushBack(Move(late)));
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
+        CHECK(DefaultLayout(clip, AudioCodecId::Pcm16, layout).Error() ==
               ErrorCode::InvalidArgument);
         clip.cues.Clear();
-        CHECK(ComputeSoundCookedLayout(clip, AudioCodecId::None, layout).Error() ==
+        CHECK(DefaultLayout(clip, AudioCodecId::None, layout).Error() ==
               ErrorCode::InvalidArgument);
         return true;
     }));
@@ -687,7 +700,7 @@ TEST(SoundClipCook_OpusResamplesAndConvertsPositions) {
     }));
     SoundCookedLayout layout(scene.allocator);
     REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
-        return ComputeSoundCookedLayout(clip, AudioCodecId::Opus, layout).IsOk();
+        return DefaultLayout(clip, AudioCodecId::Opus, layout).IsOk();
     }));
     SoundClipCookProcessor processor;
     CookOut out(scene.allocator);
@@ -1035,8 +1048,9 @@ TEST(SoundClipCook_FailuresLeaveEditorObject) {
     }));
 }
 
-// LoadCookedPcm 오류(3.37.4절): platformData 없음 NotReady, 손상 payload·머리와 필드 불일치
-// CorruptData, 디코더 없음 NotFound, 채널 셋 Unsupported. 실패는 앞 PCM을 그대로 둔다.
+// LoadCookedPcm 오류(3.37.4·3.38절): platformData 없음 NotReady, 손상 payload·형식 위반·잘림·머리와
+// 필드 불일치 CorruptData, 디코더 없음 NotFound, 채널 셋·다른 형식 판·표 밖 codec id Unsupported.
+// 실패는 앞 PCM을 그대로 둔다.
 TEST(SoundClipCook_LoadCookedPcmErrors) {
     CookScene scene;
     REQUIRE(scene.ready);
@@ -1069,6 +1083,21 @@ TEST(SoundClipCook_LoadCookedPcmErrors) {
     CHECK(
         cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &broken, scene.decoders).Error() ==
         ErrorCode::CorruptData);
+    // 잘린 데이터(payload 마지막 byte가 없다 — Parse는 받지만 전체가 아니다, 3.38절).
+    Array<uint8> truncated = scene.PlatformBytes(loaded);
+    REQUIRE(truncated.TryResize(truncated.Size() - 1));
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &truncated, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    // 다른 형식 판(새 쿠커의 데이터)은 손상이 아니라 Unsupported다(하부 값을 그대로 넘긴다).
+    Array<uint8> newer = scene.PlatformBytes(loaded);
+    newer[PlatformDataVersionOffset] = static_cast<uint8>(newer[PlatformDataVersionOffset] + 1);
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &newer, scene.decoders).Error() ==
+          ErrorCode::Unsupported);
+    Array<uint8> unknownCodec = scene.PlatformBytes(loaded);
+    unknownCodec[PlatformDataCodecOffset] = static_cast<uint8>(audio::MaxAudioCodecs);
+    CHECK(cooked->LoadCookedPcm(scene.allocator, &ReadFixedBytes, &unknownCodec, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    CHECK(!cooked->Pcm());
 
     // 정상 로드 뒤 머리와 필드가 다르면 CorruptData이고 앞 PCM을 둔다.
     REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
@@ -1091,6 +1120,424 @@ TEST(SoundClipCook_LoadCookedPcmErrors) {
     cooked->platformData = ref;
     REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
     CHECK(cooked->PcmRevision() == revision);
+}
+
+// 디코드 방식 결정(3.40.3절 표): UE 5.8처럼 로딩 동작과 길이에 상관없이 상주 압축 실시간 디코드다
+// (ForceInline = non-streaming DTYPE_RealTime). loop 길이가 1 s 미만이면 통째다(Rocks 비용 규칙 — 1
+// s 정확히는 실시간, loop 꺼짐은 길이를 보지 않는다). 한쪽으로 바꾸면 다른 쪽 원본을 놓는다. 실효
+// 동작은 Inherited면 옵션 값을 RetainOnLoad–LoadOnDemand로 clamp한다(UE
+// GetDefaultLoadingBehaviorCVar).
+TEST(SoundClipCook_LoadCookedChoosesDecodeMode) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    REQUIRE(scene.Make(71, 1, Rate48 * 2, Rate48));
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    REQUIRE(scene.Cook(processor, out) && scene.Load(out.sink.Bytes(), loaded));
+    SoundClip* cooked = scene.LoadedClip(loaded);
+    REQUIRE(cooked != nullptr);
+    Package* owner = const_cast<Package*>(scene.LoadedPackage(loaded));
+    REQUIRE(cooked->loadingBehavior == SoundLoadingBehavior::Inherited);
+    const SoundCookedLoadOptions defaults;
+    CHECK(defaults.defaultLoading == SoundLoadingBehavior::LoadOnDemand);
+    const auto load = [&](SoundLoadingBehavior behavior, bool& inlinePcm) noexcept {
+        cooked->loadingBehavior = behavior;
+        const bool loadedOk =
+            cooked->LoadCooked(scene.allocator, &ReadPackageBulk, owner, scene.decoders, defaults)
+                .IsOk();
+        CHECK(loadedOk);
+        // 정확히 한쪽만 있다.
+        CHECK(static_cast<bool>(cooked->Pcm()) != static_cast<bool>(cooked->Stream()));
+        inlinePcm = static_cast<bool>(cooked->Pcm());
+        return loadedOk;
+    };
+
+    bool inlinePcm = false;
+    for (SoundLoadingBehavior behavior :
+         {SoundLoadingBehavior::Inherited, SoundLoadingBehavior::RetainOnLoad,
+          SoundLoadingBehavior::PrimeOnLoad, SoundLoadingBehavior::LoadOnDemand,
+          SoundLoadingBehavior::ForceInline}) {
+        REQUIRE(load(behavior, inlinePcm));
+        CHECK(!inlinePcm);
+        CHECK(cooked->Stream()->FrameCount() == cooked->frameCount);
+    }
+
+    // 짧은 loop(1 s 미만 구간)는 동작과 상관없이 통째, 1 s 구간·loop 꺼짐·전체 loop(2 s)는
+    // 실시간이다.
+    cooked->looping = true;
+    cooked->loopOverride.enabled = true;
+    cooked->loopOverride.begin = Rate48 / 2;
+    cooked->loopOverride.end = Rate48 / 2 + Rate48 - 1;
+    for (SoundLoadingBehavior behavior :
+         {SoundLoadingBehavior::LoadOnDemand, SoundLoadingBehavior::ForceInline}) {
+        REQUIRE(load(behavior, inlinePcm));
+        CHECK(inlinePcm);
+    }
+
+    cooked->loopOverride.end = Rate48 / 2 + Rate48;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+    cooked->loopOverride.end = Rate48 / 2 + Rate48 - 1;
+    cooked->looping = false;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+    cooked->looping = true;
+    cooked->loopOverride.enabled = false;
+    REQUIRE(load(SoundLoadingBehavior::LoadOnDemand, inlinePcm));
+    CHECK(!inlinePcm);
+
+    // 실효 동작: clip 값이 먼저, Inherited면 옵션 값을 clamp한다.
+    SoundCookedLoadOptions options;
+    cooked->loadingBehavior = SoundLoadingBehavior::ForceInline;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::ForceInline);
+    cooked->loadingBehavior = SoundLoadingBehavior::Inherited;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::LoadOnDemand);
+    options.defaultLoading = SoundLoadingBehavior::PrimeOnLoad;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::PrimeOnLoad);
+    options.defaultLoading = SoundLoadingBehavior::ForceInline;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::LoadOnDemand);
+    options.defaultLoading = SoundLoadingBehavior::Inherited;
+    CHECK(cooked->EffectiveLoadingBehavior(options) == SoundLoadingBehavior::RetainOnLoad);
+}
+
+// LoadCookedStream 오류(3.40.3절): platformData 없음·reader null NotReady, 채널 셋 Unsupported,
+// 손상 청크(로드 때 모든 청크 SHA)·형식 위반·잘림·머리와 필드 불일치 CorruptData, 모르는 형식 판
+// Unsupported, codec 디코더 없음 NotFound. 실패는 앞 원본을 두고, 같은 키는 다시 올리지 않는다.
+// 재생 원본은 PCM이 아니다.
+TEST(SoundClipCook_LoadCookedStreamErrors) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    REQUIRE(scene.Make(72, 1, Rate48 * 2, Rate48));
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    REQUIRE(scene.Cook(processor, out) && scene.Load(out.sink.Bytes(), loaded));
+    SoundClip* cooked = scene.LoadedClip(loaded);
+    REQUIRE(cooked != nullptr);
+    Package* owner = const_cast<Package*>(scene.LoadedPackage(loaded));
+
+    // 청크 가운데 byte 하나(그 청크 SHA가 다르다 — 재생 전, 로드 때 잡는다).
+    Array<uint8> damaged = scene.PlatformBytes(loaded);
+    REQUIRE(!damaged.IsEmpty());
+    damaged[damaged.Size() / 2] ^= 0x5Au;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &damaged, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> broken = scene.PlatformBytes(loaded);
+    broken[0] ^= 0xFFu;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &broken, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> truncated = scene.PlatformBytes(loaded);
+    REQUIRE(truncated.TryResize(truncated.Size() - 1));
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &truncated, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> newer = scene.PlatformBytes(loaded);
+    newer[PlatformDataVersionOffset] = static_cast<uint8>(newer[PlatformDataVersionOffset] + 1);
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadFixedBytes, &newer, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    CHECK(!cooked->Stream() && !cooked->Pcm());
+    // 디코더 없음(Opus 없는 표): 재생 때마다 실패하지 않게 로드 때 NotFound다(LoadCookedPcm과
+    // 같다).
+    audio::AudioDecoderTable builtIn;
+    REQUIRE(audio::RegisterBuiltInAudioDecoders(builtIn));
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, builtIn).Error() ==
+          ErrorCode::NotFound);
+    CHECK(cooked
+              ->LoadCooked(scene.allocator, &ReadPackageBulk, owner, builtIn,
+                           SoundCookedLoadOptions{})
+              .Error() == ErrorCode::NotFound);
+    CHECK(!cooked->Stream() && !cooked->Pcm());
+
+    // 정상 로드: 원본 byte 크기의 사본이고 PCM은 없다. 같은 키는 다시 올리지 않는다.
+    REQUIRE(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    REQUIRE(cooked->Stream());
+    CHECK(!cooked->Pcm());
+    CHECK(cooked->Stream()->ByteCount() == scene.PlatformBytes(loaded).Size());
+    const uint64 revision = cooked->PcmRevision();
+    const SoundStreamData* first = cooked->Stream().Get();
+    REQUIRE(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    CHECK(cooked->PcmRevision() == revision && cooked->Stream().Get() == first);
+
+    // 머리와 필드가 다르면 CorruptData이고 앞 원본을 둔다.
+    cooked->sampleRate = Rate44;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    CHECK(cooked->PcmRevision() == revision && cooked->Stream().Get() == first);
+    cooked->sampleRate = Rate48;
+    cooked->frameCount = cooked->frameCount + 1;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::CorruptData);
+    cooked->frameCount = cooked->frameCount - 1;
+    cooked->channelCount = 3;
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::Unsupported);
+    cooked->channelCount = 1;
+    const BulkDataRef ref = cooked->platformData;
+    cooked->platformData = BulkDataRef{};
+    CHECK(cooked->LoadCookedStream(scene.allocator, &ReadPackageBulk, owner, scene.decoders)
+              .Error() == ErrorCode::NotReady);
+    cooked->platformData = ref;
+    CHECK(cooked->LoadCookedStream(scene.allocator, nullptr, owner, scene.decoders).Error() ==
+          ErrorCode::NotReady);
+    CHECK(cooked->Stream().Get() == first);
+
+    // 재생 스냅숏은 스트림 원본을 담는다(pcm 없음, 차원은 원본의 것).
+    auto sound = cooked->MakePlayable(scene.allocator, *scene.cooked, scene.cooked->OwnerAccess());
+    REQUIRE(sound);
+    const SoundPlayable* playable = sound.Value().Get();
+    CHECK(!playable->pcm && playable->stream.Get() == first);
+    CHECK(playable->FrameCount() == cooked->frameCount && playable->SampleRate() == Rate48 &&
+          playable->ChannelCount() == 1);
+    // 통째 PCM을 올리면 스트림 원본을 놓는다.
+    REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
+    CHECK(cooked->Pcm() && !cooked->Stream());
+}
+
+// 인코딩 rate·실효 품질(3.39.3절): 끔이면 원본, 켬이면 min(등급 rate, 원본)(원본보다 높이지 않는다,
+// 등급 rate 0은 원본), Opus는 늘 48 kHz. 실효 품질은 floor 뒤 [1, 100]이다.
+TEST(SoundClipCook_EncodingRateAndQuality) {
+    AudioCookOverrides off;
+    CHECK(SoundCookEncodingRate(AudioCodecId::Pcm16, Rate44, SoundSampleRateQuality::Min, off) ==
+          Rate44);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Opus, Rate44, SoundSampleRateQuality::Min, off) ==
+          Rate48);
+    AudioCookOverrides on;
+    on.resampleForDevice = true;
+    CHECK(SoundCookEncodingRate(AudioCodecId::Pcm16, Rate44, SoundSampleRateQuality::Max, on) ==
+          Rate44);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Pcm16, Rate44, SoundSampleRateQuality::High, on) ==
+          on.highSampleRate);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Adpcm, Rate44, SoundSampleRateQuality::Medium, on) ==
+          on.mediumSampleRate);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Adpcm, Rate44, SoundSampleRateQuality::Low, on) ==
+          on.lowSampleRate);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Pcm16, Rate44, SoundSampleRateQuality::Min, on) ==
+          on.minSampleRate);
+    CHECK(SoundCookEncodingRate(AudioCodecId::Opus, Rate44, SoundSampleRateQuality::Min, on) ==
+          Rate48);
+    on.lowSampleRate = 0;
+    CHECK(SoundCookEncodingRate(AudioCodecId::Pcm16, Rate44, SoundSampleRateQuality::Low, on) ==
+          Rate44);
+    CHECK(SoundCookEncodingRate(AudioCodecId::None, Rate44, SoundSampleRateQuality::Min, on) ==
+          Rate44);
+
+    CHECK(SoundCookEffectiveQuality(80, 1.0f) == 80);
+    CHECK(SoundCookEffectiveQuality(80, 0.5f) == 40);
+    CHECK(SoundCookEffectiveQuality(99, 0.999f) == 98);
+    CHECK(SoundCookEffectiveQuality(1, 0.5f) == audio::MinAudioCompressionQuality);
+    CHECK(SoundCookEffectiveQuality(80, 0.0f) == audio::MinAudioCompressionQuality);
+    CHECK(SoundCookEffectiveQuality(80, 2.0f) == audio::MaxAudioCompressionQuality);
+    CHECK(SoundCookEffectiveQuality(80, -1.0f) == 80);
+    // UE와 같은 float 곱: 0.7f × 10 = 7.0f(double이면 6.99…), 0.7f × 80 = 56.0f, 큰 배수는 inf →
+    // 100.
+    CHECK(SoundCookEffectiveQuality(10, 0.7f) == 7);
+    CHECK(SoundCookEffectiveQuality(80, 0.7f) == 56);
+    CHECK(SoundCookEffectiveQuality(80, 1.0e38f) == audio::MaxAudioCompressionQuality);
+}
+
+// clip 정규화(3.39.4절, UE Clip Normalize): Float32 원본의 최대 절댓값이 1을 넘으면 쿠킹 PCM은
+// 전체가 1/max로 낮아진다(PCM16 왕복 — 모양은 그대로, 최대값은 full scale). 1 이하면 그대로다.
+TEST(SoundClipCook_NormalizesClippedSource) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    constexpr uint32 Frames = 4800;
+    constexpr float Peak = 2.0f;
+    REQUIRE(scene.Make(90, 1, Frames, Rate48));
+    // 원본을 Float32 램프(-Peak..Peak)로 바꾼다.
+    Array<uint8> floats(scene.allocator);
+    REQUIRE(floats.TryResize(static_cast<usize>(Frames) * sizeof(float)));
+    for (uint32 frame = 0; frame < Frames; ++frame) {
+        const float value = -Peak + 2.0f * Peak * static_cast<float>(frame) / (Frames - 1);
+        platform::MemoryCopy(floats.Data() + static_cast<usize>(frame) * sizeof(float), &value,
+                             sizeof(float));
+    }
+
+    auto ref = scene.sourceBulk.AddCopy(floats.View());
+    REQUIRE(ref);
+    REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
+        clip.compression = SoundCompression::Pcm;
+        clip.source.format = SoundSourceStorage::Float32;
+        clip.source.bulk = ref.Value();
+        return true;
+    }));
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    SoundClip* cooked = scene.CookAndLoad(processor, out, loaded);
+    REQUIRE(cooked != nullptr && cooked->Pcm());
+    const Span<const float> samples = cooked->Pcm()->Channel(0);
+    float worst = 0.0f;
+    for (uint32 frame = 0; frame < Frames; ++frame) {
+        float original = 0.0f;
+        platform::MemoryCopy(&original, floats.Data() + static_cast<usize>(frame) * sizeof(float),
+                             sizeof(float));
+        worst = math::Max(worst, math::Abs(samples[frame] - original / Peak));
+    }
+
+    CHECK(worst <= Pcm16Lsb);
+    CHECK(math::Abs(samples[0] + 1.0f) <= Pcm16Lsb);
+}
+
+// ADPCM 리샘플 경로(3.39.4절): resampleForDevice + Low면 44.1 kHz ADPCM(2 s)이 12 kHz로 쿠킹된다
+// (블록 배치·위치는 12 kHz 기준, 디코드 SNR 20 dB 이상 — 가장자리를 빼도 비교 구간이 남는 길이).
+// 짧은 clip(0.5 s)은 플랫폼 rate와 무관하게 PlatformDefault가 ADPCM이다(판정은 원본 rate).
+TEST(SoundClipCook_AdpcmResampledForDevice) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    constexpr uint32 Frames = Rate44 * 2;
+    REQUIRE(scene.Make(91, 2, Frames, Rate44));
+    REQUIRE(scene.Edit([](SoundClip& clip) noexcept {
+        clip.compression = SoundCompression::Adpcm;
+        clip.sampleRateQuality = SoundSampleRateQuality::Low;
+        clip.hasFileLoop = true;
+        clip.fileLoopBegin = 441;
+        clip.fileLoopEnd = 11025;
+        return true;
+    }));
+    scene.profile.audioCook.resampleForDevice = true;
+    const uint32 low = scene.profile.audioCook.lowSampleRate;
+    SoundClipCookProcessor processor;
+    CookOut out(scene.allocator);
+    Loaded loaded;
+    SoundClip* cooked = scene.CookAndLoad(processor, out, loaded);
+    REQUIRE(cooked != nullptr && cooked->Pcm());
+    const Array<uint8> bytes = scene.PlatformBytes(loaded);
+    auto view = audio::AudioPlatformDataView::Parse(bytes.View());
+    REQUIRE(view);
+    auto frames = audio::CookResampledFrames(Frames, Rate44, low);
+    auto loopBegin = audio::CookResampledPosition(441, Rate44, low);
+    auto loopEnd = audio::CookResampledPosition(11025, Rate44, low);
+    REQUIRE(frames && loopBegin && loopEnd);
+    CHECK(view.Value().Header().codec == AudioCodecId::Adpcm &&
+          view.Value().Header().sampleRate == low &&
+          view.Value().Header().frames == frames.Value());
+    CHECK(cooked->sampleRate == low && cooked->frameCount == frames.Value() &&
+          cooked->fileLoopBegin == loopBegin.Value() && cooked->fileLoopEnd == loopEnd.Value());
+    const SharedPtr<SoundPcm> source = scene.SourcePcm(2, Frames, Rate44);
+    REQUIRE(source);
+    for (uint32 channel = 0; channel < 2; ++channel) {
+        audio::PlanarConstView input;
+        input.channelCount = 1;
+        input.frameCount = Frames;
+        input.channels[0] = source->Channel(channel).Data();
+        audio::DecodedAudioPcm reference(scene.allocator);
+        REQUIRE(audio::ResampleForCooking(input, Rate44, low, scene.allocator, reference));
+        CHECK(SignalToNoise(reference.Channel(0), cooked->Pcm()->Channel(channel).Data(),
+                            frames.Value()) >= MinimumSignalToNoise);
+    }
+
+    // 짧은 clip(원본 rate로 1초 미만)은 낮은 플랫폼 rate에서도 ADPCM이다.
+    REQUIRE(scene.Make(92, 1, Rate44 / 2, Rate44));
+    REQUIRE(scene.Edit([](SoundClip& clip) noexcept {
+        clip.sampleRateQuality = SoundSampleRateQuality::Low;
+        return true;
+    }));
+    CookOut shortOut(scene.allocator);
+    Loaded shortLoaded;
+    REQUIRE(scene.CookAndLoad(processor, shortOut, shortLoaded) != nullptr);
+    const Array<uint8> shortBytes = scene.PlatformBytes(shortLoaded);
+    auto shortView = audio::AudioPlatformDataView::Parse(shortBytes.View());
+    REQUIRE(shortView);
+    CHECK(shortView.Value().Header().codec == AudioCodecId::Adpcm &&
+          shortView.Value().Header().sampleRate == low);
+}
+
+// 플랫폼 재정의 적용(3.39.4절): resampleForDevice + High면 44.1 kHz PCM16이 32 kHz로 쿠킹되고
+// 필드·위치·머리가 32 kHz 기준이며 재생 PCM이 원본을 같은 리샘플러로 바꾼 것과 맞는다. 너겟 키에는
+// 실효 값만 든다: 등급 rate ≥ 원본이면 끈 것과 같은 키(적중), Opus 품질 80 × 0.5와 품질 40 × 1은
+// 같은 키다.
+TEST(SoundClipCook_PlatformOverridesApply) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    NuggetScene nuggets(scene.allocator, "sound-cook-overrides");
+    REQUIRE(nuggets.ready);
+    constexpr uint32 Frames = Rate44 * 2;
+    REQUIRE(scene.Make(80, 1, Frames, Rate44));
+    REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
+        clip.compression = SoundCompression::Pcm;
+        clip.sampleRateQuality = SoundSampleRateQuality::High;
+        clip.hasFileLoop = true;
+        clip.fileLoopBegin = 4410;
+        clip.fileLoopEnd = 44100;
+        SoundCuePoint cue(scene.allocator);
+        cue.frame = 22050;
+        CHECK(clip.cues.TryPushBack(Move(cue)));
+        return true;
+    }));
+    SoundClipCookProcessor processor;
+    CookOut off(scene.allocator);
+    REQUIRE(scene.Cook(processor, off, nuggets.cache.Get()));
+    const Sha256Digest offKey = processor.LastNuggetKey();
+
+    scene.profile.audioCook.resampleForDevice = true;
+    CookOut on(scene.allocator);
+    REQUIRE(scene.Cook(processor, on, nuggets.cache.Get()));
+    CHECK(processor.Builds() == 2 && !(processor.LastNuggetKey() == offKey));
+    Loaded loaded;
+    REQUIRE(scene.Load(on.sink.Bytes(), loaded));
+    SoundClip* cooked = scene.LoadedClip(loaded);
+    REQUIRE(cooked != nullptr);
+    const uint32 high = scene.profile.audioCook.highSampleRate;
+    auto frames = audio::CookResampledFrames(Frames, Rate44, high);
+    auto loopBegin = audio::CookResampledPosition(4410, Rate44, high);
+    auto loopEnd = audio::CookResampledPosition(44100, Rate44, high);
+    auto cueAt = audio::CookResampledPosition(22050, Rate44, high);
+    REQUIRE(frames && loopBegin && loopEnd && cueAt);
+    CHECK(cooked->sampleRate == high && cooked->frameCount == frames.Value());
+    CHECK(cooked->fileLoopBegin == loopBegin.Value() && cooked->fileLoopEnd == loopEnd.Value());
+    CHECK(cooked->cues[0].frame == cueAt.Value());
+    const Array<uint8> bytes = scene.PlatformBytes(loaded);
+    auto view = audio::AudioPlatformDataView::Parse(bytes.View());
+    REQUIRE(view);
+    CHECK(view.Value().Header().codec == AudioCodecId::Pcm16 &&
+          view.Value().Header().sampleRate == high &&
+          view.Value().Header().loopStart == loopBegin.Value() &&
+          view.Value().Header().loopEnd == loopEnd.Value());
+    const Package* owner = scene.LoadedPackage(loaded);
+    REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, const_cast<Package*>(owner),
+                                  scene.decoders));
+    const SharedPtr<SoundPcm> source = scene.SourcePcm(1, Frames, Rate44);
+    REQUIRE(source && cooked->Pcm());
+    audio::PlanarConstView input;
+    input.channelCount = 1;
+    input.frameCount = Frames;
+    input.channels[0] = source->Channel(0).Data();
+    audio::DecodedAudioPcm reference(scene.allocator);
+    REQUIRE(audio::ResampleForCooking(input, Rate44, high, scene.allocator, reference));
+    CHECK(SignalToNoise(reference.Channel(0), cooked->Pcm()->Channel(0).Data(), frames.Value()) >=
+          MinimumSignalToNoise);
+    CHECK(scene.EditorUntouched(Rate44, Frames));
+
+    // 등급 rate가 원본 이상이면 인코딩 rate는 원본이다 — 끈 것과 같은 키라 적중한다.
+    scene.profile.audioCook.highSampleRate = Rate48;
+    CookOut same(scene.allocator);
+    REQUIRE(scene.Cook(processor, same, nuggets.cache.Get()));
+    CHECK(processor.Builds() == 2 && processor.LastNuggetKey() == offKey);
+
+    // Opus 품질 배수: 80 × 0.5와 40 × 1.0은 실효 품질 40으로 같은 키다.
+    scene.profile.audioCook = AudioCookOverrides{};
+    REQUIRE(scene.Edit([](SoundClip& clip) noexcept {
+        clip.compression = SoundCompression::Opus;
+        clip.compressionQuality = 40;
+        return true;
+    }));
+    CookOut quality40(scene.allocator);
+    REQUIRE(scene.Cook(processor, quality40, nuggets.cache.Get()));
+    const Sha256Digest quality40Key = processor.LastNuggetKey();
+    const uint64 builds = processor.Builds();
+    scene.profile.audioCook.compressionQualityModifier = 0.5f;
+    REQUIRE(scene.Edit([](SoundClip& clip) noexcept {
+        clip.compressionQuality = 80;
+        return true;
+    }));
+    CookOut halved(scene.allocator);
+    REQUIRE(scene.Cook(processor, halved, nuggets.cache.Get()));
+    CHECK(processor.Builds() == builds && processor.LastNuggetKey() == quality40Key);
+    // 배수만 바뀌어 실효 품질이 달라지면 새 키다.
+    scene.profile.audioCook.compressionQualityModifier = 0.75f;
+    CookOut other(scene.allocator);
+    REQUIRE(scene.Cook(processor, other, nuggets.cache.Get()));
+    CHECK(processor.Builds() == builds + 1 && !(processor.LastNuggetKey() == quality40Key));
 }
 
 // 처리기 등록: null state InvalidArgument, SoundClip은 이 처리기, 두 번 AlreadyExists.

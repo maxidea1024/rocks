@@ -302,6 +302,15 @@ public static partial class PolicyChecks
             }
         }
 
+        // ISPC 원본(Docs/Design/BuildTargets 3.12절 BD46)은 고정 원본의 파일이어야 한다(Rocks 글루 ISPC는 두지 않는다).
+        foreach (string unit in manifest.IspcUnits)
+        {
+            if (!InUpstream(unit))
+            {
+                Fail($"{relativeLibrary}/{unit}", 0, "ISPC unit must be a listed upstream file");
+            }
+        }
+
         foreach (string header in manifest.AdapterHeaders)
         {
             if (!InUpstream(header))

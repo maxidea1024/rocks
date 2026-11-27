@@ -9,9 +9,10 @@
 #include <Texture/Texture.h>
 #include <Texture/TextureBuildSettings.h>
 
-// 텍스처 빌드다(Docs/Design/AssetSystem 12.13절 — A5i, 규칙은 UE 5.8에 맞춘 12.5절·12.2절 1–5번·
-// 12.4.3절): 원본 정규 픽셀을 선형화 → flipGreen → PowerOfTwoMode → 최대 크기 → mip 사슬 →
-// NormalizeNormals → 쿠킹 편향 → 출력 부호화해 쿠킹 mip으로 만든다. 순수
+// 텍스처 빌드다(Docs/Design/AssetSystem 12.13절 — A5i, 규칙은 UE 5.8에 맞춘 12.5절·12.2절 1–5번,
+// 출력 형식은 12.17.5절): 원본 정규 픽셀을 선형화 → flipGreen → PowerOfTwoMode → 최대 크기 → mip
+// 사슬 → NormalizeNormals → 채널 복제 → 알파 판정 → 형식 선택 → 쿠킹 편향 → 출력 부호화(BC 압축
+// 포함)해 쿠킹 mip으로 만든다. 순수
 // 함수다(패키지·Registry·프로파일을 모른다 — 쿠킹 A5j가 입력을 만들고 결과를 TexturePlatformData로
 // 옮긴다). 같은 입력이면 모든 호스트에서 같은 byte다(DeterministicMath만 쓴다).
 //
@@ -48,7 +49,8 @@ struct TextureBuiltMip {
     Array<uint8> bytes;
 };
 
-// 빌드 경고 하나다(SrgbIgnored·PreserveBorderWithWrap — 각 한 번).
+// 빌드 경고 하나다(SrgbIgnored·PreserveBorderWithWrap·EncoderUnavailable·PlatformFormatFallback —
+// 각 한 번, 형식 경고의 detail은 대체 전 PixelFormat 번호).
 struct TextureBuildWarning {
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
     uint64 detail = 0;
@@ -73,19 +75,24 @@ struct TextureBuildResult {
                                  TextureSwizzle::A};
     // Volume 1, 그 밖 원본 slice 수다.
     uint32 numSlices = 1;
+    // 원본 알파 판정 결과다(12.17.5 3 — AutoDXT 형식과 BC7 프로필이 쓴다, TextureFormatNeedsAlpha가
+    // 거짓이면 판정하지 않고 false). 쿠킹 적중 검증은 AutoDXT만 머리 형식으로 이 값을 되살린다.
+    bool alphaTransparent = false;
     // 상위 mip부터다.
     Array<TextureBuiltMip> mips;
     Array<TextureBuildWarning> warnings;
     TextureBuildFailure failure;
 };
 
-// 빌드 규칙 버전이다(12.5·12.13절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
-inline constexpr uint32 TextureBuildVersion = 2;
+// 빌드 규칙 버전이다(12.5·12.13·12.17절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
+// 3: 압축 형식 선택·채널 복제·BC 인코딩(12.17.5 — TC2).
+inline constexpr uint32 TextureBuildVersion = 3;
 
-// 빌드 경고 수 상한이다(SrgbIgnored·PreserveBorderWithWrap).
-inline constexpr usize TextureBuildMaxWarnings = 2;
+// 빌드 경고 수
+// 상한이다(SrgbIgnored·PreserveBorderWithWrap·EncoderUnavailable·PlatformFormatFallback).
+inline constexpr usize TextureBuildMaxWarnings = 4;
 
-// 출력 형식이다(12.4.3절 표·norm16 대체·sRGB 확장 — BuildTexture 결과와 같다).
+// 출력 형식이다(12.17.5 형식 선택 — BuildTexture 결과와 같다).
 struct TextureBuildOutputInfo {
     graphics::PixelFormat pixelFormat = graphics::PixelFormat::Unknown;
     bool srgb = false;
@@ -93,18 +100,26 @@ struct TextureBuildOutputInfo {
                                  TextureSwizzle::A};
 };
 
-// settings의 빌드 경고를 out에 쓰고 수를 돌려준다(설정만으로 정한다 — 너겟 적중·미적중이 같다,
-// 12.14절). 순서: SrgbIgnored, PreserveBorderWithWrap.
+// settings와 알파 판정 결과의 빌드 경고를 out에 쓰고 수를 돌려준다(설정·알파만으로 정한다 — 너겟
+// 적중은 머리의 형식이 맞는 알파로 다시 계산한다, 12.17.5 4). 순서: SrgbIgnored,
+// PreserveBorderWithWrap, EncoderUnavailable, PlatformFormatFallback.
 ROCKS_TEXTURETOOLS_API usize
-TextureBuildWarnings(const TextureBuildSettings& settings,
-                     AssetDiagnosticCode (&out)[TextureBuildMaxWarnings]) noexcept;
+TextureBuildWarnings(const TextureBuildSettings& settings, bool alphaTransparent,
+                     TextureBuildWarning (&out)[TextureBuildMaxWarnings]) noexcept;
 
-// settings의 출력 형식·sRGB·swizzle이다(BuildTexture가 내는 값 — 쿠킹 너겟 적중 검증이 쓴다).
+// settings와 알파 판정 결과의 출력 형식·sRGB·swizzle이다(BuildTexture가 내는 값 — 쿠킹 너겟 적중
+// 검증이 두 알파 값으로 부른다). 형식을 고를 수 없는 설정이면 pixelFormat이 Unknown이다.
 ROCKS_TEXTURETOOLS_API TextureBuildOutputInfo
-TextureBuildOutput(const TextureBuildSettings& settings) noexcept;
+TextureBuildOutput(const TextureBuildSettings& settings, bool alphaTransparent) noexcept;
 
-// 12.4.3절 SRGB 열이 "무시"인 종류인지다(Normalmap·Masks·Displacementmap·VectorDisplacementmap·
-// HDR·Alpha·DistanceFieldFont·HDR_Compressed·HalfFloat·SingleFloat·HDR_F32).
+// settings로 빌드했을 때의 쿠킹 상위 mip 크기다(PowerOfTwoMode·Resize·최대 크기·쿠킹 편향 뒤 —
+// UE GetBuiltTextureSize, 형식 선택의 4의 배수 판정이 쓴다). 오류: 원본 형식 Invalid·크기·slice 0
+// InvalidArgument.
+ROCKS_TEXTURETOOLS_API Result<void> TextureBuildTopMipSize(const TextureBuildSettings& settings,
+                                                           uint32& sizeX, uint32& sizeY) noexcept;
+
+// sRGB를 막는 CompressionSettings인지다(UE bPreventSRGB — Alpha·Normalmap·Masks·HDR·HDR_F32·
+// HDR_Compressed·HalfFloat·SingleFloat, 12.17.5 2).
 ROCKS_TEXTURETOOLS_API bool
 TextureCompressionIgnoresSrgb(TextureCompressionSettings compression) noexcept;
 

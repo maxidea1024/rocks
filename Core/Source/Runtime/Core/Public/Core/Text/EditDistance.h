@@ -5,7 +5,7 @@
 // 두 텍스트의 편집 거리(OSA — 제한된 Damerau-Levenshtein: 삽입·삭제·바꾸기·인접 두 글자 맞바꾸기
 // 하나가 1, 한 번 맞바꾼 글자는 다시 고치지 않는다)다. 이름 오타에 가까운 이름을 제안하는 데 쓰는
 // 공용 함수 하나다(CVar `ReportUnresolved`의 `did you mean` — Docs/Design/CVarSystem.ko.md 12절,
-// 명령줄 이름 제안 — Docs/Design/AppInfoCommandLine.ko.md). 문턱은 호출자가 이름 붙은 상수로 준다.
+// 명령줄 이름 제안 — Docs/Design/AppInfoCommandLine). 문턱은 호출자가 이름 붙은 상수로 준다.
 // UE 대응: Algo::LevenshteinDistance(Core/Public/Algo/LevenshteinDistance.h — 맞바꾸기 없음). UE는
 // 두 길이에 비례하는 행을 할당하지만, 여기서는 한도 안의 거리만 묻는 쓰임에 맞춰 할당 없이 한도
 // 폭의 띠만 계산한다.

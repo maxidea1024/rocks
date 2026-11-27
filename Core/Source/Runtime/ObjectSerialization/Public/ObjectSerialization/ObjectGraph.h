@@ -478,7 +478,8 @@ struct StageAccess;
 //
 // 수명: Stage는 입력 byte·노드 이름을 빌리고 노드 타입·기대 타입 lease를 쥔다(소멸 때 반환).
 // allocator·registry·types는 Stage보다 오래 살아야 한다. options가 가리키는 hooks·migrationUser
-// (와 그 사용자 데이터)는 Stage의 마지막 단계(CheckRequired)까지 살아야 한다 — worker 지역 hooks를
+// (와 그 사용자 데이터)는 Stage의 마지막 단계(Commit 뒤 BindEvents — 없으면 CheckRequired)까지
+// 살아야 한다 — worker 지역 hooks를
 // Validate 뒤에 버리면 안 된다(RequiredMissing이 CheckRequired에서 온다). allocator는 스레드 사이의
 // 할당·해제를 지원해야 한다(Validate가 worker에서 할당한 노드 상태를 소유 스레드가 2a–2c에서 쓰고
 // Stage 소멸 때 해제한다 — worker 전용 arena는 안 된다). 트랜잭션이 열려 있는 동안 GC가 진행하지
@@ -519,7 +520,12 @@ struct StageAccess;
 //   // prepare: 대표 에셋의 AssetId(Transient) 등을 Commit 전에 쓴다
 //   const ObjectHandle roots[] = {package.Value()};
 //   RootRef<Object> held[1];
-//   return transaction.Commit(roots, held);
+//   if (auto committed = transaction.Commit(roots, held); !committed) {
+//       return committed;
+//   }
+//
+//   (void)stage.BindEvents();   // 이벤트 바인딩을 게시된 객체에 다시 만든다(ED21)
+//   return Result<void>::Success();
 class ROCKS_OBJECTSERIALIZATION_API ObjectGraphStage {
 public:
     // Registry 정책을 사본으로 두고 options를 보관한다(baseOuter·prepare·prepareUser는 쓰지
@@ -641,6 +647,24 @@ public:
     // Busy).
     Result<void> CheckRequired(ConstructionContext& transaction) noexcept;
 
+    // Commit 뒤: 2b가 바인딩 기록에서 모은 이벤트 바인딩을 게시된 객체에 만든다(Docs/Design/
+    // EventReflection.ko.md ED21 — 공개 전 객체에는 바인딩할 수 없다). Stage를 쓰는 호출자는
+    // transaction.Commit()이 성공한 뒤 한 번 부른다(LoadObjectGraph는 스스로 부른다). 만들지 못한
+    // 바인딩(함수 없음·서명 다름·대상이 그 사이 사라짐·할당 실패)은 버리고 options.hooks에
+    // EventBindingDropped 진단을 낸다 — 로드는 이미 게시되어 되돌릴 수 없으므로 실패로 돌려주지
+    // 않는다. 발행자가 그 사이 살아 있지 않으면 그 바인딩은 진단 없이 건너뛴다.
+    //
+    // 순서와 오류: 호출 검사(CheckRequired 뒤가 아니면·이미 불렀으면 InvalidArgument), 노드가
+    // 게시되지 않았으면(Commit 전·rollback 뒤) InvalidArgument, 접근
+    // 오류(WrongThread·WrongContext). 반환: 만든 바인딩 수.
+    //
+    // 사용 예:
+    //   auto root = transaction.Commit();
+    //   if (root) {
+    //       (void)stage.BindEvents();
+    //   }
+    Result<usize> BindEvents() noexcept;
+
 private:
     friend struct graph_detail::StageAccess;
 
@@ -673,6 +697,8 @@ private:
     ErrorCode contextError_ = ErrorCode::None;
     Phase phase_ = Phase::Constructed;
     bool hasBase_ = false;
+    // BindEvents를 불렀다(두 번 부르지 않는다).
+    bool eventsBound_ = false;
     OuterSummary base_;
     uint64 transaction_ = 0;
     UniquePtr<graph_detail::StageData> data_;

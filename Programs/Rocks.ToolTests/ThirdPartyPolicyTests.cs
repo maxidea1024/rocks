@@ -572,6 +572,33 @@ internal static class ThirdPartyPolicyTests
                 Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).RuntimeTypeInformation, "rtti true parsed");
             }
 
+            // ISPC 원본(ispcUnits — Docs/Design/BuildTargets 3.12절 BD46)은 code 라이브러리의 고정 원본 .ispc다. 생략하면 빈 목록이다.
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).IspcUnits.Count == 0, "ispcUnits defaults to empty");
+                fixture.Write(Upstream + "/kernel.ispc", "export void Fake() {}\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"ispcUnits\": [\"fake-1.0/kernel.ispc\"], \"notes\":"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).IspcUnits.SequenceEqual(["fake-1.0/kernel.ispc"]), "ispcUnits parsed");
+            }
+
+            ExpectFailure("ispcUnits with a non-.ispc file", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"ispcUnits\": [\"fake-1.0/fake.c\"], \"notes\":")));
+            ExpectFailure("empty ispcUnits", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"ispcUnits\": [], \"notes\":")));
+            ExpectFailure("ispcUnits with the same file name twice", fixture =>
+            {
+                fixture.Write(Upstream + "/kernel.ispc", "export void Fake() {}\n");
+                fixture.Write(Upstream + "/sub/kernel.ispc", "export void Other() {}\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":",
+                    "\"ispcUnits\": [\"fake-1.0/kernel.ispc\", \"fake-1.0/sub/kernel.ispc\"], \"notes\":"));
+            });
+            ExpectFailure("ispcUnits outside the listed upstream files", fixture =>
+            {
+                fixture.Write(Library + "/Glue.ispc", "export void Glue() {}\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"ispcUnits\": [\"Glue.ispc\"], \"notes\":"));
+            });
             ExpectFailure("rtti without C++ translation units", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"rtti\": true, \"notes\":")));
             ExpectFailure("rtti false", fixture =>

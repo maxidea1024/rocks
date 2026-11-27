@@ -54,10 +54,14 @@ Result<void> NodeIdentityCheck::Check(const LoadNode& node, Budget& budget) noex
     const StringView name = node.name;
     OuterSummary summary;
     const OuterSummary* outer = OuterOf(node.outer, summary);
+    // 읽은 노드의 이름·대표 자식 규칙 위반은 손상이다(AssetSystem 19장 — 같은 함수가 실행 중
+    // 생성에서는 인자 오용 InvalidArgument를 낸다).
     if (auto identity =
             detail::CheckNewObjectIdentity(policy_, node.lease, outer, name, allocator_);
         !identity) {
-        return identity;
+        return Result<void>::Failure(identity.Error() == ErrorCode::InvalidArgument
+                                         ? ErrorCode::CorruptData
+                                         : identity.Error());
     }
 
     // 이름 형식·비교 키·해시 몫이다(이름 byte에 비례 — 규칙을 지난 이름은 64 byte 이하다).
@@ -82,7 +86,8 @@ Result<void> NodeIdentityCheck::Check(const LoadNode& node, Budget& budget) noex
     if (indexed) {
         StringBuilder<128> key(allocator_);
         if (auto made = TryMakeNameComponentKey(name, key); !made) {
-            return made;
+            return Result<void>::Failure(
+                made.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : made.Error());
         }
 
         hash = HashCombine(MixHash(uint64{node.outer}), HashStringBytes(key.View()));
@@ -96,7 +101,7 @@ Result<void> NodeIdentityCheck::Check(const LoadNode& node, Budget& budget) noex
                 if (sibling.outer == node.outer && sibling.keyBytes == key.ByteCount() &&
                     platform::MemoryCompare(keys_.Data() + sibling.keyOffset, key.View().Data(),
                                             key.ByteCount()) == 0) {
-                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                    return Result<void>::Failure(ErrorCode::CorruptData);
                 }
             }
 

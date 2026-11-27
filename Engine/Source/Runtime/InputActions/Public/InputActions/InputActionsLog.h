@@ -24,4 +24,7 @@ inline constexpr char DiagInputUserSettingsEntrySkipped[] = "InputUserSettingsEn
 //   바인딩을 리바인딩 행에 넣지 않았다(Warning — 5.2절).
 inline constexpr char DiagInputMappingSlotOverflow[] = "InputMappingSlotOverflow";
 
+// 함수 바인딩을 부르지 못했다(대상 사라짐·파괴 대기 밖의 오류 — 바인딩마다 한 번, 5.1절 IA7).
+inline constexpr char DiagInputFunctionBindingFailed[] = "InputFunctionBindingFailed";
+
 } // namespace rocks::input

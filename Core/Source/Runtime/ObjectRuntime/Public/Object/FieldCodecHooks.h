@@ -55,8 +55,19 @@ enum class FieldDiagnosticKind : uint8 {
     // UnknownStructTypePolicy::ReportAndClear대로 비웠다(valueType = 저장된 struct ID, path = 그
     // 값의 위치 — 배열·Map 값이면 [f[i]], Docs/Design/ReflectionExtensions.ko.md 11절). Reject
     // 정책(기본)은 진단 없이 NotFound다.
-    UnknownStructType
+    UnknownStructType,
+    // 복원이 Commit 뒤 이벤트 바인딩(Docs/Design/EventReflection.ko.md ED21·ED22)을 다시 만들지
+    // 못해 버렸다(objectIndex = 발행자 노드, field = 이벤트 필드, valueType = 바인딩의 FunctionId,
+    // value 1 = 대상 클래스에 함수 없음, 2 = 서명 다름, 3 = 대상이 그 사이 사라짐, 4 = 그 밖 — 할당
+    // 실패 등). 로드는 실패하지 않는다(게시 뒤라 되돌릴 수 없다).
+    EventBindingDropped
 };
+
+// EventBindingDropped 진단의 이유(FieldDiagnostic::value)다.
+inline constexpr int64 EventBindingDroppedFunctionMissing = 1;
+inline constexpr int64 EventBindingDroppedSignatureMismatch = 2;
+inline constexpr int64 EventBindingDroppedTargetGone = 3;
+inline constexpr int64 EventBindingDroppedOther = 4;
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는
 // 필드 경로(호출 동안만 유효)다.
@@ -131,11 +142,13 @@ enum class ExternalAdmission : uint8 {
 struct FieldCodecFrame;
 
 // 직렬화 관찰 hook 묶음이다. 기본 구현은 아무것도 하지 않는다. 실패를 돌려주면 그 저장·복원이
-// 실패한다(진단 유실로 읽기 전용 판정을 놓치지 않게). 저장·복원이 실패하면 그 호출에서 받은
+// 실패한다(진단 유실로 읽기 전용 판정을 놓치지 않게 — 단 Commit 뒤 이벤트 바인딩 단계의
+// EventBindingDropped는 게시 뒤라 결과를 보지 않는다). 저장·복원이 실패하면 그 호출에서 받은
 // 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로(복원의
 // Required 실효 값 진단은 staged 객체라 Borrow 없이 불리고 ConstructionContext의 검사 중 표시가
 // 값을 지킨다) Registry와 입력 byte를 바꾸지 않는다. 복원의 RequiredMissing은 적용 뒤 Required
-// 검사에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번 온다(Soft 수집은 파일 값만). 단계형
+// 검사에서 한 번, EventBindingDropped는 Commit 뒤 바인딩 단계(BindEvents — 소유 스레드, Borrow
+// 없이)에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번 온다(Soft 수집은 파일 값만). 단계형
 // 복원(ObjectGraphStage)의 1단계 hook(진단·Soft 수집·struct 관찰·ObservedStructs)은 Validate를 부른
 // 스레드(worker일 수 있다)에서, RequiredMissing은 소유 스레드에서 불린다 — worker 검증에 주는
 // hook은 그 스레드에서 안전해야 하고 다른 스레드와 동시에 쓰이면 스레드 안전해야 한다. struct

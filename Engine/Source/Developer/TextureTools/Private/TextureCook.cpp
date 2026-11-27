@@ -4,16 +4,21 @@
 #include <AssetNugget/NuggetReflected.h>
 #include <AssetNugget/NuggetScc.h>
 #include <AssetRuntime/BulkStore.h>
+#include <Base/InitializerList.h>
 #include <Base/NumericLimits.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
 #include <Core/Encoding/Sha256.h>
+#include <GraphicsTypes/GraphicsBackend.h>
+#include <GraphicsTypes/GraphicsPlatform.h>
 #include <Meta/GeneratedType.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Memory.h>
 #include <Texture/Texture.generated.h>
 #include <Texture/TextureBuildSettings.generated.h>
 #include <Texture/TextureSettingsCheck.h>
+#include <TextureTools/TextureBlockEncode.h>
+#include <TextureTools/TextureFormatSelect.h>
 
 // 텍스처 쿠킹 처리기다(Docs/Design/AssetSystem 12.14절 — A5j1).
 namespace rocks {
@@ -52,14 +57,18 @@ Result<void> CookFail(const CookContext& context, AssetDiagnosticCode code, Erro
     return Result<void>::Failure(error);
 }
 
-// 처리기 경고를 문맥에 둔다(없으면 버린다). 할당 실패는 OutOfMemory다.
-Result<void> CookWarn(const CookContext& context, AssetDiagnosticCode code) noexcept {
+// 처리기 경고를 문맥에 둔다(없으면 버린다). setting은 형식 경고의 대체 전 PixelFormat 번호다
+// (PlatformFormatFallback — 12.17.5 4, 그 밖 0. EncoderUnavailable은 TC3부터 형식 선택이 내지
+// 않는다). 할당 실패는 OutOfMemory다.
+Result<void> CookWarn(const CookContext& context, AssetDiagnosticCode code,
+                      uint32 setting = 0) noexcept {
     if (context.warnings == nullptr) {
         return Result<void>::Success();
     }
 
     const AssetId asset = context.entry != nullptr ? context.entry->id : AssetId{};
-    return context.warnings->TryPushBack(CookDiagnostic{code, true, asset, {}, 0, ErrorCode::None});
+    return context.warnings->TryPushBack(
+        CookDiagnostic{code, true, asset, {}, setting, ErrorCode::None});
 }
 
 // 객체 타입의 차원이다(Texture 파생 다섯 — 아니면 false).
@@ -94,9 +103,6 @@ struct CookTextureFacts {
     TextureMipLoadOptions mipLoadOptions = TextureMipLoadOptions::Default;
     TextureAvailability availability = TextureAvailability::GPU;
     bool neverStream = false;
-    bool compressionNoAlpha = false;
-    bool compressionForceAlpha = false;
-    bool compressionNone = false;
     Guid compressionCacheId{};
     TextureSamplerSettings sampler;
 };
@@ -165,15 +171,22 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
     writer.WriteU32(source.numMips);
     writer.WriteU32(source.numLayers);
     // 결과를 바꾸지 않는 칸은 사본에서 고정한다(12.14절 5번 — 주소는 mip 결과에 쓰이지 않고 경고는
-    // 너겟 밖에서 계산한다, norm16은 출력이 바뀔 때만).
+    // 너겟 밖에서 계산한다). 대상 칸(플랫폼·backend·norm16·샘플러 필터)은 형식으로만 결과에
+    // 닿으므로 고정하고, 두 후보 형식과 인코더 버전을 대신 쓴다(12.17.5 4 — 출력이 같은 프로필은
+    // 너겟을 같이 쓴다).
     TextureBuildSettings keyed = settings;
     keyed.addressX = TextureAddress::Wrap;
     keyed.addressY = TextureAddress::Wrap;
     keyed.addressZ = TextureAddress::Wrap;
-    TextureBuildSettings other = settings;
-    other.norm16Supported = !settings.norm16Supported;
-    if (TextureBuildOutput(settings).pixelFormat == TextureBuildOutput(other).pixelFormat) {
-        keyed.norm16Supported = true;
+    keyed.norm16Supported = true;
+    keyed.samplerPointFilter = false;
+    keyed.cookPlatform = 0;
+    keyed.cookBackends = 0;
+    // LOD 그룹은 형식 선택에서 ColorLookupTable·Bokeh·IESLightProfile만 본다(그룹 값은 이미 다른
+    // 칸에 풀려 있다 — 12.17.5 2).
+    if (keyed.lodGroup != TextureGroup::ColorLookupTable && keyed.lodGroup != TextureGroup::Bokeh &&
+        keyed.lodGroup != TextureGroup::IESLightProfile) {
+        keyed.lodGroup = TextureGroup::World;
     }
 
     const AssignmentTarget target = AssignmentTarget::Value(
@@ -182,17 +195,32 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
         return Result<Sha256Digest>::Failure(written.Error());
     }
 
-    writer.WriteBool(facts.compressionNoAlpha);
-    writer.WriteBool(facts.compressionForceAlpha);
-    writer.WriteBool(facts.compressionNone);
+    for (const bool alpha : {false, true}) {
+        const graphics::PixelFormat format = TextureBuildOutput(settings, alpha).pixelFormat;
+        const bool block =
+            graphics::GetPixelFormatInfo(format).compression != graphics::PixelCompression::None;
+        writer.WriteU32(graphics::PixelFormatNumber(format));
+        // BC6H·BC7은 ISPC 감싸기 버전과 커널을 빌드한 ISPC 신원(판·타깃·인자 — 12.17.6 9)을 쓴다.
+        const bool ispc = format == graphics::PixelFormat::BC6HUfloat ||
+                          format == graphics::PixelFormat::BC7Unorm ||
+                          format == graphics::PixelFormat::BC7UnormSrgb;
+        writer.WriteU32(ispc ? IspcBcEncoderVersion : block ? RocksBcEncoderVersion : 0u);
+        if (ispc) {
+            writer.WriteString(IspcBcEncoderIdentity());
+        }
+    }
+
     writer.WriteGuid(facts.compressionCacheId);
     return writer.Finish();
 }
 
-// 적중 값을 받아들일 수 있으면 mips에 값 byte를 잇는다(12.14절 6번 — 아니면 false, 미적중으로
-// 다룬다). 오류는 할당 실패뿐이다.
+// 적중 값을 받아들일 수 있으면 mips에 값 byte를 잇고 머리 형식에 맞는 알파 판정을 alpha에
+// 쓴다(형식이 알파로 갈리는 AutoDXT만 되살린다 — BC7은 두 후보 형식이 같아 늘 false다. alpha는 경고
+// 계산에만 쓰고 BC7 경고는 알파와 무관하다, 12.17.6 9) (12.14절 6번·12.17.5 4 — 머리 형식이 두 후보
+// 중 하나여야 한다, 아니면 false로 미적중으로 다룬다). 오류는 할당 실패뿐이다.
 Result<bool> CookAcceptHit(const NuggetCacheGetResult& got, const TextureBuildSettings& settings,
-                           Allocator& allocator, Array<TextureCookMip>& mips) noexcept {
+                           Allocator& allocator, Array<TextureCookMip>& mips,
+                           bool& alpha) noexcept {
     mips.Clear();
     if (got.values.IsEmpty() || got.values[0].id != NuggetSccValueId(0, 0)) {
         return Result<bool>::Success(false);
@@ -204,7 +232,11 @@ Result<bool> CookAcceptHit(const NuggetCacheGetResult& got, const TextureBuildSe
                                                       : Result<bool>::Success(false);
     }
 
-    const TextureBuildOutputInfo expected = TextureBuildOutput(settings);
+    const TextureBuildOutputInfo opaque = TextureBuildOutput(settings, false);
+    const TextureBuildOutputInfo transparent = TextureBuildOutput(settings, true);
+    alpha = header.output.pixelFormat != opaque.pixelFormat &&
+            header.output.pixelFormat == transparent.pixelFormat;
+    const TextureBuildOutputInfo& expected = alpha ? transparent : opaque;
     const bool volume = settings.dimension == TextureDimension::Volume;
     const uint32 slices = volume ? 1u : settings.numSlices;
     bool same = got.values.Size() == header.mips.Size() + 1 &&
@@ -556,9 +588,6 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
         facts.mipLoadOptions = texture.mipLoadOptions;
         facts.availability = texture.availability;
         facts.neverStream = texture.neverStream != 0;
-        facts.compressionNoAlpha = texture.compressionNoAlpha != 0;
-        facts.compressionForceAlpha = texture.compressionForceAlpha != 0;
-        facts.compressionNone = texture.compressionNone != 0;
         facts.compressionCacheId = texture.compressionCacheId;
         CookSamplerAddress(texture, dimension, facts.sampler);
         group = FindTextureLodGroup(*context.profile, facts.lodGroup);
@@ -576,19 +605,39 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
 
     settings.norm16Supported = context.profile->textureNorm16Supported;
     facts.sampler.filter = TextureCookSamplerFilter(facts.filter, group);
+    // 형식 선택 대상(12.17.5 4): 프로필 id의 플랫폼과 graphicsBackends. 프로필 검증을 거친 값이라
+    // 모르는 이름은 없다(있으면 InvalidSetting).
+    settings.samplerPointFilter = facts.sampler.filter == TextureSamplerFilter::Point;
+    {
+        auto platform = graphics::ParseGraphicsPlatformName(context.profile->id.View());
+        if (!platform) {
+            return CookFail(context, AssetDiagnosticCode::InvalidSetting,
+                            ErrorCode::InvalidArgument);
+        }
+
+        settings.cookPlatform = static_cast<uint8>(platform.Value());
+        settings.cookBackends = 0;
+        for (const String& name : context.profile->graphicsBackends) {
+            auto backend = graphics::ParseBackendName(name.View());
+            if (!backend) {
+                return CookFail(context, AssetDiagnosticCode::InvalidSetting,
+                                ErrorCode::InvalidArgument);
+            }
+
+            settings.cookBackends |= TextureFormatBackendBit(backend.Value());
+        }
+    }
+
     // 음수 maxAniso는 프로파일 검증이 거른다(0 = 전역 값).
     facts.sampler.maxAniso = group.maxAniso > 0 ? static_cast<uint32>(group.maxAniso) : 0u;
     if (facts.source.bulk.IsEmpty() || facts.source.bulk.rawBytes == 0) {
         return CookFail(context, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument);
     }
 
-    // 10. 경고(설정만으로 정한다 — 적중·미적중이 같다).
-    AssetDiagnosticCode warnings[TextureBuildMaxWarnings];
-    const usize warningCount = TextureBuildWarnings(settings, warnings);
-    for (usize index = 0; index < warningCount; ++index) {
-        if (auto warned = CookWarn(context, warnings[index]); !warned) {
-            return warned;
-        }
+    // 형식을 고를 수 없는 대상이면 쿠킹 전에 실패한다(TD12 — 보장 대체 없음).
+    if (TextureBuildOutput(settings, false).pixelFormat == graphics::PixelFormat::Unknown) {
+        return CookFail(context, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument,
+                        settings.cookBackends);
     }
 
     // 5–6. 너겟 조회.
@@ -597,6 +646,7 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
     NuggetCacheGetResult got(allocator);
     Array<TextureCookMip> hitMips(allocator);
     bool hit = false;
+    bool hitAlpha = false;
     if (nuggets != nullptr) {
         auto localKey = CookLocalKey(context, typeId, facts, settings);
         if (!localKey) {
@@ -618,7 +668,7 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
         }
 
         if (got.status == NuggetStatus::Hit) {
-            auto accepted = CookAcceptHit(got, settings, allocator, hitMips);
+            auto accepted = CookAcceptHit(got, settings, allocator, hitMips, hitAlpha);
             if (!accepted) {
                 return CookFail(context, AssetDiagnosticCode::None, accepted.Error());
             }
@@ -695,8 +745,23 @@ Result<void> TextureCookProcessor::Cook(CookContext& context) const noexcept {
 
         output.numSlices = built.numSlices;
     } else {
-        output.info = TextureBuildOutput(settings);
+        output.info = TextureBuildOutput(settings, hitAlpha);
         output.numSlices = dimension == TextureDimension::Volume ? 1u : settings.numSlices;
+    }
+
+    // 10. 경고(설정과 알파 판정으로 정한다 — 적중은 머리 형식에 맞는 알파라 미적중과 같다. BC7
+    // 적중의 알파는 되살리지 못하지만 BC7 경고는 알파에 달려 있지 않다).
+    {
+        const bool alpha = useBuilt ? built.alphaTransparent : hitAlpha;
+        TextureBuildWarning warnings[TextureBuildMaxWarnings];
+        const usize warningCount = TextureBuildWarnings(settings, alpha, warnings);
+        for (usize index = 0; index < warningCount; ++index) {
+            if (auto warned = CookWarn(context, warnings[index].code,
+                                       static_cast<uint32>(warnings[index].detail));
+                !warned) {
+                return warned;
+            }
+        }
     }
 
     const uint32 count = static_cast<uint32>(mips.Size());

@@ -611,6 +611,26 @@ public:
         }
     }
 
+    // --- 태그 찾기(Docs/Design/EngineRuntime 31.5절) ---
+
+    // tag를 가진 Actor를 out에 담는다(UE UGameplayStatics::GetAllActorsWithTag — 선형). out을 먼저
+    // 비운다. 순서는 정하지 않는다. 파괴 대기 Actor는 뺀다. None이면 빈 채 성공이다. 할당 실패는
+    // OutOfMemory이고 out은 빈다. 게임 스레드 전용이다.
+    //
+    // 사용 예:
+    //   Array<ObjectHandle> enemies(allocator);
+    //   (void)world.FindActorsWithTag(enemyTag, enemies);
+    Result<void> FindActorsWithTag(rocks::Name tag, Array<ObjectHandle>& out) noexcept;
+
+    // actor의 Component 중 type(또는 파생 — null이면 모두)이고 tag를 가진 것을 components 순서로
+    // 담는다(UE AActor::GetComponentsByTag). 파괴 대기 Component는 뺀다. None이면 빈 채 성공이다.
+    // 오류: 이 World의 Actor가 아니면 StaleHandle, 할당 실패 OutOfMemory(out은 빈다).
+    Result<void> FindComponentsByTag(ObjectHandle actor, TypeId type, rocks::Name tag,
+                                     Array<ObjectHandle>& out) noexcept;
+
+    // 위의 첫째다(UE AActor::FindComponentByTag). 없거나 이 World의 Actor가 아니면 null이다.
+    ObjectHandle FindComponentByTag(ObjectHandle actor, TypeId type, rocks::Name tag) noexcept;
+
     // actor의 Component 수와 handle(추가 순서)이다. out이 작으면 앞부분만 채우고 전체 수를
     // 반환한다.
     Result<uint32> GetComponents(ObjectHandle actor, Span<ObjectHandle> out) noexcept;
@@ -848,6 +868,8 @@ private:
     ActorRecord* FindActorRecord(ObjectHandle actor) noexcept;
     const ActorRecord* FindActorRecord(ObjectHandle actor) const noexcept;
     ComponentSlot ComponentSlotAt(ObjectHandle actor, usize index) noexcept;
+    // component가 파괴 대기가 아니고 type(null이면 모두)이며 tag를 가졌는지다(31.5절 찾기).
+    bool ComponentMatchesTag(ObjectHandle component, TypeId type, rocks::Name tag) noexcept;
     // actor의 index번째 Component다. 범위 밖이거나 Actor에 접근할 수 없으면 null handle이다.
     ObjectHandle ComponentAt(ObjectHandle actor, usize index) noexcept;
     usize ComponentCountOf(ObjectHandle actor) noexcept;

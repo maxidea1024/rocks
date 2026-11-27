@@ -351,7 +351,7 @@ public:
         }
 
         if (local.Value() != 0) {
-            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+            return Result<DecodedReference>::Failure(ErrorCode::CorruptData);
         }
 
         DecodedReference decoded;
@@ -632,7 +632,7 @@ Result<void> LoadStructRecord(Allocator& allocator, ObjectRegistry& registry,
     }
 
     if (record.IsEmpty()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (record.Size() > options.limits.maxValueBytes) {

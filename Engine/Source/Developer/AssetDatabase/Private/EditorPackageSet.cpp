@@ -782,8 +782,11 @@ Result<void> EditorPackageSet::PreparePending(Pending& pending,
     }
 
     if (!unknownRecord) {
+        // 읽은 패키지의 임포트 소유 대조 위반은 손상이다(같은 검사가 저장에서는 InvalidArgument).
         if (auto owner = CheckImportOwner(id, checked, contents.dependencies.View()); !owner) {
-            return fail(AssetDiagnosticCode::CorruptPackage, owner.Error(),
+            return fail(AssetDiagnosticCode::CorruptPackage,
+                        owner.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData
+                                                                    : owner.Error(),
                         static_cast<uint32>(PackageSectionKind::Dependencies));
         }
     }
@@ -1067,8 +1070,9 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
     }
 
     if (warnings != nullptr) {
-        if (auto reserved = warnings->TryReserve(warnings->Size() + excluded.Size() +
-                                                 unresolved.Size() + defaultsWarnings.Size());
+        if (auto reserved =
+                warnings->TryReserve(warnings->Size() + excluded.Size() + unresolved.Size() +
+                                     defaultsWarnings.Size() + count);
             !reserved) {
             return oom(reserved.Error());
         }
@@ -1076,6 +1080,21 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
 
     if (auto committed = transaction.Commit(handles.View(), roots.View()); !committed) {
         return oom(committed.Error());
+    }
+
+    // 게시한 객체에 이벤트 바인딩을 다시 만든다(Docs/Design/EventReflection.ko.md ED21). 버린
+    // 바인딩이 있으면 패키지마다 경고 하나(EV3a2 전에는 다시 저장하면 그 바인딩이 사라진다 — ED24).
+    for (usize slot = 0; slot < count; ++slot) {
+        (void)states[slot]->BindEvents();
+        const uint32 dropped = states[slot]->DroppedEventBindings();
+        if (warnings != nullptr && dropped != 0) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::DroppedEventBindings;
+            warning.diagnostic =
+                EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, infos[slot].id);
+            warning.diagnostic.detail = dropped;
+            (void)warnings->TryPushBack(warning);
+        }
     }
 
     for (usize slot = 0; slot < count; ++slot) {

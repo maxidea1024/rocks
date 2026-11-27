@@ -8,7 +8,7 @@
 // 형식: payload = u8 present. 0이면 unset이고 그 뒤에 byte가 없다. 1이면 u32 내부 wire tag + 내부
 // payload다. 내부 tag는 WireSlot::OptionalInner 자리의 것이다(Bool·U32·U64·I64·F32·F64·Guid·String·
 // Bytes·Record). 내부가 Record(값 struct)면 payload의 남은 byte 전부가 Record 하나다(길이 prefix
-// 없음). present가 0·1 밖이면 InvalidArgument다. 필드가 Record에 없는 것(누락 = 기준)과
+// 없음). present가 0·1 밖이면 CorruptData다. 필드가 Record에 없는 것(누락 = 기준)과
 // unset(present 0)은 다른 값이다.
 //
 // 사용 예(쓰기):
@@ -38,7 +38,7 @@
 //       // 실패를 확인한다
 //   }
 //
-//   return optional.Value().Finish(); // 남은 byte는 InvalidArgument
+//   return optional.Value().Finish(); // 남은 byte는 CorruptData
 namespace rocks {
 
 // Optional payload를 검증하고 내부 값을 읽게 한다. 열 때 할당하지 않는다. 넘겨받은 ArchiveReader의
@@ -48,8 +48,8 @@ class ROCKS_SERIALIZATION_API OptionalWireReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)를 검사한다. 검사 순서(모두 할당 전):
     // innerWire·shape가 Optional 내부 자리의 것이 아니거나 모순이면 InvalidArgument(이때는
-    // payload를 옮기지 않는다) → present byte가 없거나 0·1 밖이면 InvalidArgument → present 0인데
-    // byte가 남으면 InvalidArgument → 내부 tag가 잘렸거나 내부 자리의 tag가 아니면 InvalidArgument
+    // payload를 옮기지 않는다) → present byte가 없거나 0·1 밖이면 CorruptData → present 0인데
+    // byte가 남으면 CorruptData → 내부 tag가 잘렸거나 내부 자리의 tag가 아니면 CorruptData
     // → 내부 tag ≠ innerWire면 TypeMismatch → 내부 payload 크기: Record는 ReadRecordHeader 검사(그
     // 오류 — 남은 byte 전부가 Record 하나여야 한다), 그 밖은 남은 byte가 max(wire 최소, shape
     // 최소)보다 작거나 고정 폭·exact인데 정확히 같지 않거나 exact 가변 값의 길이 prefix가 맞지
@@ -94,7 +94,7 @@ public:
     // RecordReader::OpenNestedRecord로 같은 예산에서 연다). 그 밖은 빈 범위다.
     Span<const uint8> RecordBytes() const noexcept;
 
-    // 내부 값을 읽은 뒤 부른다. 남은 byte가 있으면 InvalidArgument다.
+    // 내부 값을 읽은 뒤 부른다. 남은 byte가 있으면 CorruptData다.
     Result<void> Finish() const noexcept;
 
 private:

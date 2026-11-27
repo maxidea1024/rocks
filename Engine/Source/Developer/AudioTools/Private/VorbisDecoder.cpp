@@ -62,10 +62,12 @@ public:
     // read callback만 주어 순차(non-seekable)로 연다. seekable로 열면 vorbisfile 1.3.7이
     // 연결(chained) stream의 첫 link를 건너뛰는 경우가 있다(3.28.2절). close callback은 두지
     // 않는다(메모리는 호출자 소유다).
-    bool Open(MemorySource& source) noexcept {
+    // vorbisfile 오류 값(0이면 성공)을 돌려준다.
+    int Open(MemorySource& source) noexcept {
         const ov_callbacks callbacks = {VorbisReadCallback, nullptr, nullptr, nullptr};
-        open_ = ov_open_callbacks(&source, &file_, nullptr, 0, callbacks) == 0;
-        return open_;
+        const int result = ov_open_callbacks(&source, &file_, nullptr, 0, callbacks);
+        open_ = result == 0;
+        return result;
     }
 
     OggVorbis_File* Get() noexcept {
@@ -77,9 +79,20 @@ private:
     bool open_ = false;
 };
 
+// ov_open_callbacks 오류를 Rocks 오류로 옮긴다(Docs/Design/AudioSystem 3.38절): 모르는 판·기능은
+// Unsupported, OV_EFAULT(콜백·내부 논리 오류 — 데이터와 무관)는 InvalidArgument, 그 밖(머리 손상·
+// Vorbis가 아님·읽기 오류)은 원본 손상이다.
+ErrorCode VorbisOpenErrorCode(int error) noexcept {
+    if (error == OV_EVERSION || error == OV_EIMPL) {
+        return ErrorCode::Unsupported;
+    }
+
+    return error == OV_EFAULT ? ErrorCode::InvalidArgument : ErrorCode::CorruptData;
+}
+
 Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
     if (file.Size() == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // vorbisfile은 CRC가 틀린 page와 빠진 link 끝·BOS page를 조용히 건너뛰므로 page 구조를 먼저
@@ -90,14 +103,14 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
 
     MemorySource source{file.Data(), file.Size(), 0};
     VorbisFileHandle vorbis;
-    if (!vorbis.Open(source)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    if (const int opened = vorbis.Open(source); opened != 0) {
+        return Result<void>::Failure(VorbisOpenErrorCode(opened));
     }
 
     OggVorbis_File* handle = vorbis.Get();
     const vorbis_info* first = ov_info(handle, CurrentLink);
     if (first == nullptr || first->channels <= 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     const int firstChannels = first->channels;
@@ -122,7 +135,7 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
         if (read == EndOfStream) {
             // 끝 앞의 OV_HOLE은 경계가 아니라 마지막 page 손상·누락이다.
             if (pendingHole) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
+                return Result<void>::Failure(ErrorCode::CorruptData);
             }
 
             break;
@@ -136,12 +149,12 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
         // 연이은 OV_HOLE과 그 밖 오류는 원본 손상이다. 손실 원본이라도 빠진 구간을 메우지 않고
         // 거부한다 (Ogg page는 CRC가 있어 손상을 정확히 안다).
         if (read < 0) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         // OV_HOLE 뒤에도 같은 link면 link 안의 page 손상·누락이다.
         if (pendingHole && link == currentLink) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         pendingHole = false;
@@ -169,7 +182,7 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
                 const float sample = buffers[channel][index];
                 // 손상된 setup·packet이 비유한 값을 낼 수 있다. 믹서까지 가지 않게 막는다.
                 if (!math::IsFinite(sample)) {
-                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                    return Result<void>::Failure(ErrorCode::CorruptData);
                 }
 
                 *target++ = sample;
@@ -179,7 +192,7 @@ Result<void> DecodeVorbisInto(Span<const uint8> file, DecodedSourceAudio& out) n
 
     const uint64 frames = interleaved.Size() / channels;
     if (frames == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(channels, static_cast<uint32>(rate), frames,

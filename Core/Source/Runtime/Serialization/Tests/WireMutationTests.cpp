@@ -35,10 +35,9 @@ constexpr uint32 Wire(WireType type) noexcept {
     return static_cast<uint32>(type);
 }
 
-// 값 하나를 다 읽었는지 본다(남은 byte는 InvalidArgument).
+// 값 하나를 다 읽었는지 본다(남은 byte는 CorruptData).
 Result<void> AtEnd(const ArchiveReader& reader) noexcept {
-    return reader.AtEnd() ? Result<void>::Success()
-                          : Result<void>::Failure(ErrorCode::InvalidArgument);
+    return reader.AtEnd() ? Result<void>::Success() : Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 // 안쪽 struct Record: Set<String>, Text(Localized), Optional<U32>.
@@ -396,10 +395,10 @@ ErrorCode ReadAll(Allocator& allocator, Span<const uint8> bytes, RecordLimits li
 }
 
 bool IsFormatError(ErrorCode code) noexcept {
-    return code == ErrorCode::None || code == ErrorCode::InvalidArgument ||
+    // 손상 입력은 CorruptData다(AssetSystem 19장 — 중복 id·키 포함).
+    return code == ErrorCode::None || code == ErrorCode::CorruptData ||
            code == ErrorCode::TypeMismatch || code == ErrorCode::CapacityExceeded ||
-           code == ErrorCode::Unsupported || code == ErrorCode::AlreadyExists ||
-           code == ErrorCode::NotFound;
+           code == ErrorCode::Unsupported || code == ErrorCode::NotFound;
 }
 
 } // namespace

@@ -170,14 +170,20 @@ internal static partial class CppEmitter
     }
 
     // 칸 하나의 ParameterSchema 초기화다({이름, 값, 원소, 키, flags, maxElements, offset}).
-    private static string SlotSchema(FieldModel slot, string frame, string member)
+    private static string SlotSchema(FieldModel slot, string frame, string member) =>
+        SlotSchemaAt(slot, $"static_cast<uint32>(offsetof(detail::generated_frames::{frame}, {member}))");
+
+    // 칸 하나의 ParameterSchema 초기화이고 offset 식을 받는다(함수 frame은 offsetof, 이벤트 frame은 EventFrameShape — EventReflection ED17).
+    private static string SlotSchemaAt(FieldModel slot, string offset)
     {
         string value = slot.HasElement
             ? $"{{ValueKind::{slot.Kind}, Guid{{}}}}"
             : $"{{ValueKind::{slot.Kind}, {(slot.HasTargetType ? GuidValue(slot.ReferenceId) : "Guid{}")}}}";
         string element = slot.HasElement ? $"{{ValueKind::{slot.ElementKind}, {(slot.HasTargetType ? GuidValue(slot.ReferenceId) : "Guid{}")}}}" : "{}";
         string key = slot.IsMap ? $"{{ValueKind::{slot.KeyKind}, {(slot.KeyHasTargetType ? GuidValue(slot.KeyReferenceId) : "Guid{}")}}}" : "{}";
-        return $"{{{View(slot.Name)}, {value}, {element}, {key}, 0u, {(slot.IsCounted ? slot.MaxElements : 0)}u, static_cast<uint32>(offsetof(detail::generated_frames::{frame}, {member}))}}";
+        // ObjectHandle 칸은 ParameterFlags::ObjectHandle(값 형식이 WeakObjectRef<Object>와 같아 바인딩 서명 비교가 이 flag로 가른다 — EventReflection ED5).
+        string flags = slot.NativeSpelling == FunctionRules.ObjectHandleSpelling ? "static_cast<uint32>(ParameterFlags::ObjectHandle)" : "0u";
+        return $"{{{View(slot.Name)}, {value}, {element}, {key}, {flags}, {(slot.IsCounted ? slot.MaxElements : 0)}u, {offset}}}";
     }
 
     // Schema() 안의 함수 서술 배열이다. 함수가 있으면 TypeSchema 초기화의 functions 칸 문자열을, 없으면 ""를 돌려준다.

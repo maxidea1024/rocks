@@ -53,14 +53,14 @@ void FixAllCrcs(Array<uint8>& file) noexcept {
 }
 
 bool AllowedReadError(ErrorCode error, AssetDiagnosticCode code) noexcept {
-    return (error == ErrorCode::InvalidArgument && code == AssetDiagnosticCode::CorruptPackage) ||
+    return (error == ErrorCode::CorruptData && code == AssetDiagnosticCode::CorruptPackage) ||
            (error == ErrorCode::Unsupported && (code == AssetDiagnosticCode::UnsupportedVersion ||
                                                 code == AssetDiagnosticCode::NewerVersion));
 }
 
 bool AllowedLoadError(ErrorCode error) noexcept {
     switch (error) {
-    case ErrorCode::InvalidArgument:
+    case ErrorCode::CorruptData: // 손상 입력(AssetSystem 19장 — InvalidArgument는 받지 않는다)
     case ErrorCode::Unsupported:
     case ErrorCode::NotFound:
     case ErrorCode::TypeMismatch:

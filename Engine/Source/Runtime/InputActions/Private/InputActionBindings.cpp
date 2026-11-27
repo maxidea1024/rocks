@@ -1,4 +1,9 @@
+#include <Core/Diagnostics/Log.h>
+#include <Core/Guid.h>
+#include <InputActions/ActionEventData.generated.h>
 #include <InputActions/InputActionBindings.h>
+#include <InputActions/InputActionsLog.h>
+#include <InputActions/InputValue.generated.h>
 
 // 액션 이벤트 전달이다(Docs/Design/InputActions 5.1절 — UE EnhancedPlayerInput.cpp:720-925
 // EvaluateInputComponentDelegates).
@@ -41,25 +46,7 @@ Result<ActionBindingHandle> InputActionBindings::BindAction(const Guid& actionId
         return Result<ActionBindingHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 전달 작업 배열까지 먼저 잡는다(실패면 그대로 — 전달은 할당하지 않는다).
-    const usize count = bindings_.Size() + 1;
-    if (auto reserved = bindings_.TryEnsureCapacity(count); !reserved) {
-        return Result<ActionBindingHandle>::Failure(reserved.Error());
-    }
-
-    if (auto reserved = runList_.TryEnsureCapacity(count); !reserved) {
-        return Result<ActionBindingHandle>::Failure(reserved.Error());
-    }
-
-    if (auto reserved = triggeredActions_.TryEnsureCapacity(count); !reserved) {
-        return Result<ActionBindingHandle>::Failure(reserved.Error());
-    }
-
-    if (auto reserved = consumedActions_.TryEnsureCapacity(count); !reserved) {
-        return Result<ActionBindingHandle>::Failure(reserved.Error());
-    }
-
-    auto binding = UniquePtr<EventBinding>::TryMake(*allocator_);
+    auto binding = PrepareBinding();
     if (!binding) {
         return Result<ActionBindingHandle>::Failure(binding.Error());
     }
@@ -73,6 +60,96 @@ Result<ActionBindingHandle> InputActionBindings::BindAction(const Guid& actionId
     const ActionBindingHandle handle{entry.id};
     (void)bindings_.TryPushBack(Move(binding.Value()));
     return Result<ActionBindingHandle>::Success(handle);
+}
+
+Result<ActionBindingHandle>
+InputActionBindings::BindFunction(const Guid& actionId, ActionEvent events,
+                                  ObjectRegistry& registry, const ObjectAccessContext& access,
+                                  ObjectHandle target, const Guid& functionId,
+                                  bool consumes) noexcept {
+    if (events == ActionEvent::None) {
+        return Result<ActionBindingHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto function =
+        FunctionBinding::Create<const ActionEventData&>(registry, access, target, functionId);
+    if (!function) {
+        return Result<ActionBindingHandle>::Failure(function.Error());
+    }
+
+    auto binding = PrepareBinding();
+    if (!binding) {
+        return Result<ActionBindingHandle>::Failure(binding.Error());
+    }
+
+    EventBinding& entry = *binding.Value();
+    entry.id = nextId_++;
+    entry.action = actionId;
+    entry.events = events;
+    entry.function = function.Value();
+    entry.registry = &registry;
+    entry.access = access;
+    entry.consumes = consumes;
+    const ActionBindingHandle handle{entry.id};
+    (void)bindings_.TryPushBack(Move(binding.Value()));
+    return Result<ActionBindingHandle>::Success(handle);
+}
+
+Result<UniquePtr<InputActionBindings::EventBinding>>
+InputActionBindings::PrepareBinding() noexcept {
+    using Prepared = Result<UniquePtr<EventBinding>>;
+    // 전달 작업 배열까지 먼저 잡는다(실패면 그대로 — 전달은 할당하지 않는다).
+    const usize count = bindings_.Size() + 1;
+    if (auto reserved = bindings_.TryEnsureCapacity(count); !reserved) {
+        return Prepared::Failure(reserved.Error());
+    }
+
+    if (auto reserved = runList_.TryEnsureCapacity(count); !reserved) {
+        return Prepared::Failure(reserved.Error());
+    }
+
+    if (auto reserved = triggeredActions_.TryEnsureCapacity(count); !reserved) {
+        return Prepared::Failure(reserved.Error());
+    }
+
+    if (auto reserved = consumedActions_.TryEnsureCapacity(count); !reserved) {
+        return Prepared::Failure(reserved.Error());
+    }
+
+    return UniquePtr<EventBinding>::TryMake(*allocator_);
+}
+
+void InputActionBindings::InvokeFunction(EventBinding& binding,
+                                         const ActionEventData& data) noexcept {
+    BindingFrame<const ActionEventData&> frame(*allocator_);
+    Result<void> invoked = frame.Assign(data);
+    if (invoked) {
+        invoked = binding.function.Invoke(*binding.registry, binding.access, frame);
+    }
+
+    if (invoked) {
+        return;
+    }
+
+    // 대상이 사라졌다 — 돌아오지 않으므로 전달 뒤 지운다(5.1절, UE는 남겨 두고 건너뛴다).
+    if (invoked.Error() == ErrorCode::StaleHandle) {
+        binding.removed = true;
+        return;
+    }
+
+    // 파괴 대기면 이번만 건너뛴다(회수되면 StaleHandle이 된다).
+    if (invoked.Error() == ErrorCode::Destroyed) {
+        return;
+    }
+
+    if (!binding.failureLogged) {
+        binding.failureLogged = true;
+        Log::Warning(LogInputActions,
+                     "Input function binding {Binding} (action {Action}, function {Function}) "
+                     "could not be called: {Error}; it is skipped ({Code})",
+                     binding.id, binding.action, binding.function.FunctionId(),
+                     ErrorCodeName(invoked.Error()), DiagInputFunctionBindingFailed);
+    }
 }
 
 Result<ActionValueHandle> InputActionBindings::BindActionValue(const Guid& actionId) noexcept {
@@ -149,6 +226,22 @@ void InputActionBindings::PurgeRemoved() noexcept {
 }
 
 void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
+    consumedActions_.Clear();
+    DispatchWith(input, consumedActions_);
+}
+
+void InputActionBindings::Dispatch(const PlayerActionInput& input, Array<Guid>& consumed) noexcept {
+    DispatchWith(input, consumed);
+}
+
+void InputActionBindings::ClearValues() noexcept {
+    for (ValueBinding& binding : values_) {
+        binding.value = InputValue(binding.value.type, Vec3d());
+    }
+}
+
+void InputActionBindings::DispatchWith(const PlayerActionInput& input,
+                                       Array<Guid>& consumedActions) noexcept {
     if (dispatching_) {
         return;
     }
@@ -157,7 +250,6 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
     const Span<const ActionEventRecord> events = input.Events();
     runList_.Clear();
     triggeredActions_.Clear();
-    consumedActions_.Clear();
     // 실행 목록: 등록 순, Started가 겹치면 앞에 끼워 넣는다(UE EmplaceAt(0) — :801-808).
     for (usize index = 0; index < bindings_.Size(); ++index) {
         const EventBinding& binding = *bindings_[index];
@@ -192,7 +284,7 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
         EventBinding& binding = *bindings_[runList_[at]];
         const Guid action = binding.action;
         // 앞선 소비 바인딩이 이 액션을 막았다(UE :838-844).
-        if (BindingsContain(consumedActions_.View(), action)) {
+        if (BindingsContain(consumedActions.View(), action)) {
             continue;
         }
 
@@ -218,12 +310,16 @@ void InputActionBindings::Dispatch(const PlayerActionInput& input) noexcept {
             data.value = record->value;
             data.elapsedSeconds = record->elapsedSeconds;
             data.triggeredSeconds = record->triggeredSeconds;
-            binding.callback(data);
+            if (binding.registry == nullptr) {
+                binding.callback(data);
+            } else {
+                InvokeFunction(binding, data);
+            }
         }
 
         // 소비는 억제되지 않은 바인딩만 건다(UE :863·900-905 — bCanTrigger 블록 안).
-        if (consumes && !BindingsContain(consumedActions_.View(), action)) {
-            (void)consumedActions_.TryPushBack(action);
+        if (consumes && !BindingsContain(consumedActions.View(), action)) {
+            (void)consumedActions.TryPushBack(action);
         }
     }
 

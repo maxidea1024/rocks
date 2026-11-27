@@ -287,6 +287,9 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     const uint64 sequence =
         platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&NextAssetContext, uint64{1});
     config.registryContext = ContextId{AssetContextHigh, sequence + 1};
+    // 엔진 이름 pool을 같이 쓴다(Docs/Design/AssetSystem 11.8절 4 — 에셋·World 사이 Name 값이
+    // 같다).
+    config.registryOptions.names = &engine.Names();
     auto manager = UniquePtr<AssetManager>::TryMake(allocator, config);
     if (!manager) {
         return fail("asset manager", manager.Error());

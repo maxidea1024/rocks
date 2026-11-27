@@ -289,7 +289,7 @@ TEST(UnrealExchange_TextureSourceSlices) {
                 CHECK(converted.result && converted.source.numSlices == item.slices);
             } else {
                 CHECK(Rejected(converted, AssetDiagnosticCode::InvalidSource,
-                               ErrorCode::InvalidArgument));
+                               ErrorCode::CorruptData));
             }
         }
     }
@@ -366,8 +366,8 @@ TEST(UnrealExchange_TextureSourceRejects) {
              {&unknownFormat, &layerDiffers, &badGamma, &blockOffset, &mipDiffers, &wrongLayout,
               &wrongComponents, &wrongCount, &noMips, &fewerMips, &extraLayer, &extraBlock,
               &extraPixels, &mipHeight, &mipSlices, &noLongLat, &textLongLat, &zeroWidth}) {
-            CHECK(rejects(*spec, eight, AssetDiagnosticCode::CorruptBundle,
-                          ErrorCode::InvalidArgument));
+            CHECK(
+                rejects(*spec, eight, AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData));
         }
 
         // 크기 상한(ImageDecodeLimits 기본 — 변환 전 판정이라 큰 픽셀을 만들지 않는다).
@@ -395,7 +395,7 @@ TEST(UnrealExchange_TextureSourceRejects) {
         CHECK(
             rejects(heavy, eight, AssetDiagnosticCode::InvalidSource, ErrorCode::CapacityExceeded));
 
-        // 텍스처가 아닌 클래스는 slice 규칙이 없다.
+        // 텍스처가 아닌 클래스는 호출 계약 위반이다.
         SourceSpec mesh;
         mesh.className = "StaticMesh";
         CHECK(rejects(mesh, eight, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument));
@@ -403,23 +403,24 @@ TEST(UnrealExchange_TextureSourceRejects) {
         // blob byte 수가 형식과 다름(참조 검사를 마친 byte라고 믿지 않는다).
         Converted shortBlob(allocator);
         Convert(allocator, SourceSpec{}, Span<const uint8>(pixels, 7), shortBlob);
-        CHECK(Rejected(shortBlob, AssetDiagnosticCode::CorruptBundle, ErrorCode::InvalidArgument));
+        CHECK(Rejected(shortBlob, AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData));
 
         // source가 없거나 data가 객체가 아니다.
         ExchangeAsset empty(allocator);
+        empty.exchangeClass = ExchangeClass::Texture2D;
         ExchangeTextureSource out(allocator);
         ExchangeTextureFailure failure;
         CHECK(ConvertExchangeTextureSource(empty, {}, out, failure).Error() ==
-                  ErrorCode::InvalidArgument &&
+                  ErrorCode::CorruptData &&
               failure.code == AssetDiagnosticCode::CorruptBundle);
 
-        // blob 목록이 비었다(번호가 범위 밖).
+        // blob 목록이 비었다(asset.blobs와 수가 다름 — 호출 계약 위반).
         Converted converted(allocator);
         Convert(allocator, SourceSpec{}, eight, converted);
         REQUIRE(converted.result);
         CHECK(ConvertExchangeTextureSource(converted.asset, {}, out, failure).Error() ==
                   ErrorCode::InvalidArgument &&
-              failure.code == AssetDiagnosticCode::CorruptBundle && out.pixels.IsEmpty());
+              failure.code == AssetDiagnosticCode::InvalidSource && out.pixels.IsEmpty());
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

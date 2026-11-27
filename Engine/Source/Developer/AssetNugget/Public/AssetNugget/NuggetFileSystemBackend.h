@@ -77,7 +77,7 @@ struct NuggetGetResult {
     }
 
     NuggetStatus status = NuggetStatus::Miss;
-    // 원인 오류다(Miss의 IO 오류·다른 버전 Unsupported·bucket 불일치 InvalidArgument, Corrupt의
+    // 원인 오류다(Miss의 IO 오류·다른 버전 Unsupported·bucket 불일치 CorruptData, Corrupt의
     // 손상 종류, 할당 실패 OutOfMemory). 정상 미적중·적중은 None이다.
     ErrorCode error = ErrorCode::None;
     Sha256Digest digest{};

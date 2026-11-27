@@ -77,13 +77,13 @@ UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 �
    | TextureCubeArray | `unreal_texture_cube_array` | `TextureCubeArray` | `a49f013e-97bc-4fe4-b46d-fb6b0f126a37` |
    | VolumeTexture | `unreal_volume_texture` | `VolumeTexture` | `babb45b2-7cbe-49c3-ac8a-9bad95195d23` |
 
-   종류별 임포터 하나(`ExchangeTextureKind`)가 다섯 클래스에 등록되고 클래스로 임포터 이름을 고른다.
+   종류별 임포터 하나(`ExchangeTextureKind` — UX3b에서 정적 메시까지 받는 `ExchangeServiceKind`로 일반화, 5.5절 11번)가 다섯 클래스에 등록되고 클래스로 임포터 이름을 고른다.
 2. **원본 변환(`ConvertExchangeTextureSource`).** `data.source`(4.5절 1번)에서 Rocks `TextureSource` 값과 픽셀 byte를 만든다. 검사 순서와 실패(코드 / 오류):
-   1. `source`가 null(플러그인 오류 진단이 있어 문서 읽기가 이미 거부한다)·형식 위반 → `CorruptBundle` / `InvalidArgument`.
+   1. `source`가 null(플러그인 오류 진단이 있어 문서 읽기가 이미 거부한다)·형식 위반 → `CorruptBundle` / `CorruptData`. 텍스처가 아닌 클래스·`asset.blobs`와 수가 다른 blob 목록은 호출 계약 위반 `InvalidSource` / `InvalidArgument`다.
    2. `numLayers` ≠ 1, `numBlocks` ≠ 1, `longLat` 참 → `UnsupportedSourceLayout` / `Unsupported`(4.1절 — 다층·UDIM·위도경도 큐브).
    3. 층 0의 `format`이 `source.format`과 같고 4.2절 9종 가운데 하나다 → 아니면 `CorruptBundle`.
    4. 블록 0의 `blockX`·`blockY`가 0이고 `mips`가 `numMips`개다. 첫 mip만 쓴다(Rocks 원본 mip은 1 — AssetSystem 12.4.4절 계약. 원본 mip을 쓰는 `LeaveExistingMips`는 계약 설정이라 설정 판정이 알린다). 첫 mip의 크기가 블록 크기와 같다 → 아니면 `CorruptBundle`.
-   5. slice 수가 클래스와 맞다: Texture2D 1, TextureCube 6, Texture2DArray 1 이상, TextureCubeArray 6의 배수(6 이상), VolumeTexture 1 이상 → 아니면 `InvalidSource` / `InvalidArgument`. 크기 상한은 파일 임포트와 같다(`image::ImageDecodeLimits` 기본 — 넘으면 `InvalidSource` / `CapacityExceeded`).
+   5. slice 수가 클래스와 맞다: Texture2D 1, TextureCube 6, Texture2DArray 1 이상, TextureCubeArray 6의 배수(6 이상), VolumeTexture 1 이상 → 아니면 `InvalidSource` / `CorruptData`. 크기 상한은 파일 임포트와 같다(`image::ImageDecodeLimits` 기본 — 넘으면 `InvalidSource` / `CapacityExceeded`).
    6. 첫 mip `pixels[0]` blob의 배치가 형식과 맞다(4.5절 2번 — `count` = sizeX × sizeY × numSlices) → 아니면 `CorruptBundle`.
    7. 형식 대응(4.2절 표): G8·RGBA16·RGBA16F·G16·RGBA32F·R16F·R32F는 byte 그대로, BGRA8 → RGBA8(texel마다 B·R 교환), BGRE8 → RGBA32F(UE `FColor::FromRGBE` — 지수 0이면 (0, 0, 0, 1), 아니면 성분마다 (값 + 0.5) · 2^(e − 136), 알파 1, float로 계산).
 3. **설정 표(10.6절 8번 — `ExchangeTextureSettingRows`).** 행 번호는 표 순서(0부터)이고 `UnsupportedSetting` detail이다. UE 기본값은 UE 5.8 생성자 값이다(Texture.cpp 148행 — Rocks 기본값과 같다, AssetSystem 12.8절).

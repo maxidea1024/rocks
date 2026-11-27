@@ -39,15 +39,15 @@ TEST(NameGraph_LoadRejectsInvalidNameText) {
         const Case cases[] = {{"Socket_7", ErrorCode::None},
                               {"\xC3\xA9t\xC3\xA9", ErrorCode::None},
                               {ViewOf(longest), ErrorCode::None},
-                              {ViewOf(tooLong), ErrorCode::InvalidArgument},
-                              {StringView("a\0b", 3), ErrorCode::InvalidArgument},
-                              {"e\xCC\x81", ErrorCode::InvalidArgument},
-                              {StringView("\xFF", 1), ErrorCode::InvalidArgument}};
+                              {ViewOf(tooLong), ErrorCode::CorruptData},
+                              {StringView("a\0b", 3), ErrorCode::CorruptData},
+                              {"e\xCC\x81", ErrorCode::CorruptData},
+                              {StringView("\xFF", 1), ErrorCode::CorruptData}};
         for (const Case& example : cases) {
             auto payload = StringPayload(allocator, example.text);
             auto graph = SingleFieldGraph(allocator, "label", WireType::String, payload.View());
             CHECK(LoadGraph(allocator, types, target, graph.View()) == example.expected);
-            if (example.expected == ErrorCode::InvalidArgument) {
+            if (example.expected == ErrorCode::CorruptData) {
                 auto elements = StringArrayPayload(allocator, example.text, 2);
                 auto array =
                     SingleFieldGraph(allocator, "names", WireType::ValueArray, elements.View());

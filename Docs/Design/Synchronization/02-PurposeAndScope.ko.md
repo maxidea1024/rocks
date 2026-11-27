@@ -6,7 +6,7 @@
 - 이미 계획된 작업이 기대는 기반을 미리 정한다.
   - GC 규모 작업 GC-S1·GC-S4는 `Atomic` 표식과 블록 work-stealing을 요구한다(`Docs/Design/GarbageCollectionScale.ko.md` 152–195행).
   - CVar·Config는 snapshot 포인터 게시와 다중 생산자 쓰기 큐를 쓴다(`CVarSystem.ko.md` 294·353–354행).
-  - 앱 정보 D4는 프레임마다 게시하는 refcount 묶음을 worker에 넘긴다(`AppInfoCommandLine.ko.md` 1307행).
+  - 앱 정보 D4는 프레임마다 게시하는 refcount 묶음을 worker에 넘긴다(`AppInfoCommandLine` 18절).
   - 렌더 기반은 완료 통지 큐와 lane 간 전달을 쓴다(`Docs/Design/RenderBase` 2·5.2절).
   - 에셋 lease 해제 큐는 "미리 할당한 큐 항목"을 요구한다(`AssetSystem` 337행). 이것은 호출자 소유 노드의 MPSC 큐다.
   - 텍스처 스트리밍은 IO 완료 worker가 단계를 넘긴다(`TextureStreaming.ko.md` 274–275행).

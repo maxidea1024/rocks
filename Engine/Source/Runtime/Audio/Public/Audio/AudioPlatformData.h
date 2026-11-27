@@ -129,8 +129,10 @@ ROCKS_AUDIO_API usize AudioPlatformDataMetaBytes(uint32 codecHeaderBytes,
 class ROCKS_AUDIO_API AudioPlatformDataView {
 public:
     // bytes = 메타 + payload 영역 앞부분(없어도 된다)을 검증한다(3.30.1절 검증 목록).
-    // - 형식·값 위반: InvalidArgument. codec id가 표 범위(MaxAudioCodecs) 밖이면
-    //   Unsupported(범위 안이면 형식만 보고, 디코더 유무는 AudioDecoderTable이 정한다 — NotFound).
+    // - 형식·값 위반(크기·magic·예약 칸·머리 규칙·청크 표): CorruptData(3.38절).
+    // - 형식 판이 AudioPlatformDataVersion과 다름(다른 규칙보다 먼저 본다), codec id가 표 범위
+    //   (MaxAudioCodecs) 밖: Unsupported(범위 안이면 형식만 보고, 디코더 유무는 AudioDecoderTable이
+    //   정한다 — NotFound).
     // - codec별 검사(codec 머리, 청크 byte와 frame 관계)는 디코더가 한다.
     static Result<AudioPlatformDataView> Parse(Span<const uint8> bytes) noexcept;
 
@@ -164,8 +166,13 @@ private:
     uint64 presentPayloadBytes_ = 0;
 };
 
-// 청크 payload의 SHA-256이 표와 같은지 본다. 다르거나 크기가 다르면 InvalidArgument다.
+// 청크 payload의 SHA-256이 표와 같은지 본다. 다르거나 크기가 다르면 CorruptData다.
 ROCKS_AUDIO_API Result<void> VerifyAudioChunk(const AudioChunkEntry& chunk,
                                               Span<const uint8> payload) noexcept;
+
+// 모든 청크의 크기·SHA-256을 확인한다(스트림 재생 로드 때 한 번 —
+// Docs/Design/AudioSystem 3.40.2절). view에 payload가 다 없으면 InvalidArgument(호출자가 일부만
+// 넘긴 보기), 청크 손상은 CorruptData다.
+ROCKS_AUDIO_API Result<void> VerifyAllAudioChunks(const AudioPlatformDataView& view) noexcept;
 
 } // namespace rocks::audio

@@ -158,7 +158,7 @@ TEST(WorldIntegration_PlatformTextureSourceDimensions) {
     CHECK(out.source.depth == 1 && out.source.slices == 12 && out.source.mips[0].depth == 1);
 }
 
-// 음성: 번호·enum 범위 밖, mip 수 불일치, 빈 bulk ref는 InvalidArgument이고 reader 오류는 그대로다.
+// 음성: 번호·enum 범위 밖, mip 수 불일치, 빈 bulk ref는 CorruptData이고 reader 오류는 그대로다.
 TEST(WorldIntegration_PlatformTextureSourceRejectsCorruptData) {
     TexturePlatformData data(Allocator_());
     MemoryBulk bulk;
@@ -172,23 +172,23 @@ TEST(WorldIntegration_PlatformTextureSourceRejectsCorruptData) {
 
     FillTwoDimensional(data);
     data.dimension = static_cast<TextureDimension>(0x7f);
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.pixelFormat = 0xff;
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.sampler.filter = static_cast<TextureSamplerFilter>(0x7f);
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.sampler.addressW = static_cast<TextureAddress>(0x7f);
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.sampler.borderColor = static_cast<TextureBorderColor>(0x7f);
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.swizzleA = static_cast<TextureSwizzle>(0x7f);
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.numMips = MipCount + 1;
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.mips[0].bulk = BulkDataRef{};
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     data.tailBulk = BulkDataRef{};
-    expect(ErrorCode::InvalidArgument);
+    expect(ErrorCode::CorruptData);
     bulk.failId = 1;
     bulk.failError = ErrorCode::IoError;
     expect(ErrorCode::IoError);

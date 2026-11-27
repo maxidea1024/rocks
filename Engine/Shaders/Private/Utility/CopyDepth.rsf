@@ -1,0 +1,20 @@
+// 깊이 복사 PS다(Docs/Design/EngineShaders 4.18절 A18·14.4절 3항, UE CopyDepthTexture.usf 역할).
+// FullscreenTriangleVertex와 짝이고 원본·대상 크기가 같다(픽셀 좌표로 Load한다). 단일 표본만이다(MSAA 깊이는
+// RS8 MsaaResolve).
+// - CopyDepthToColorPixel: 깊이 → 색 대상 (d, 0, 0, 1)(R32Float 등 — 시각화·readback).
+// - CopyDepthPixel: 깊이 → 깊이 대상(SV_Depth — 파이프라인 깊이 비교 Always·쓰기 켬).
+// 텍스처 이름은 C++ RenderBase/UtilityShaderTypes.h CopyDepthSourceName이다.
+
+Texture2D<float> SourceDepth;
+
+float LoadSourceDepth(float4 position) {
+    return SourceDepth.Load(int3(int2(position.xy), 0));
+}
+
+float4 CopyDepthToColorPixel(float4 position : SV_Position) : SV_Target0 {
+    return float4(LoadSourceDepth(position), 0.0, 0.0, 1.0);
+}
+
+float CopyDepthPixel(float4 position : SV_Position) : SV_Depth {
+    return LoadSourceDepth(position);
+}

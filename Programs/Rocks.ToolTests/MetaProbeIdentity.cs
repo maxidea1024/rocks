@@ -36,6 +36,11 @@ internal static class MetaProbeIdentity
 
     private static readonly string[] FunctionFields = ["probe::Root::a", "probe::Mixed::b", "probe::Mixed::c", "probe::Thing::time"];
 
+    // 이벤트 필드 시험(MetaTests.Events)의 필드다.
+    private static readonly string[] EventFields =
+        ["probe::Value::changed", "probe::Value::named", "probe::Value::pinged", "probe::Value::placed", "probe::Value::edited",
+            "probe::Value::secret", "probe::Value::many", "probe::Holder::changed"];
+
     public static void Create(string path)
     {
         StableIdManifest.Update(path, true, manifest =>
@@ -112,7 +117,7 @@ internal static class MetaProbeIdentity
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
                 "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
-                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields))
+                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields).Concat(EventFields))
             {
                 manifest.Register("field", name);
             }

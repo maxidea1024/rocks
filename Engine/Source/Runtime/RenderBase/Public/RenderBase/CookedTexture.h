@@ -22,7 +22,7 @@
 //   CookedTextureIssue issue = CookedTextureIssue::None;
 //   auto handle = lane.ReserveHandle(RenderResourceKind::Texture);
 //   auto upload = PrepareCookedTexture(allocator, source, device, handle.Value(), &issue);
-//   if (!upload) { /* CorruptEntry(InvalidArgument)·UnsupportedCapability, issue가 원인 */ }
+//   if (!upload) { /* CorruptEntry(CorruptData)·UnsupportedCapability, issue가 원인 */ }
 //   lane.PostResource(Move(upload.Value()), &CreateCookedTextureOnLane);
 //
 // 스레드: 검사·묶기는 어느 스레드에서나 부를 수 있다(장치 능력은 바뀌지 않는 값이다). 입력 byte는
@@ -72,11 +72,11 @@ struct CookedTextureSource {
     graphics::SamplerDesc sampler;
 };
 
-// 검사가 거부한 원인이다. Corrupt 계열(데이터가 6.5절 계약과 다름)은 InvalidArgument, Device
+// 검사가 거부한 원인이다. Corrupt 계열(데이터가 6.5절 계약과 다름)은 CorruptData(6.6절), Device
 // 계열(장치가 못 함)은 UnsupportedCapability로 돌려준다.
 enum class CookedTextureIssue : uint8 {
     None,
-    // --- CorruptEntry(InvalidArgument) ---
+    // --- CorruptEntry(CorruptData) ---
     // 모르는 차원
     InvalidDimension,
     // 모르는 형식(Unknown 포함)
@@ -127,7 +127,8 @@ CheckCookedTexture(const CookedTextureSource& source, const graphics::DeviceCaps
                    CookedTextureIssue* issue = nullptr) noexcept;
 
 // 검사를 마친 source의 mip을 장치 초기 픽셀 배치(TextureDesc 주석 — mip 0부터, 꼬리 정렬 패딩
-// 없음)로 묶어 렌더 lane 소유 byte로 복사한다. 검사하지 않은 입력이면 InvalidArgument일 수 있다.
+// 없음)로 묶어 렌더 lane 소유 byte로 복사한다. 검사하지 않은 입력이면 CorruptData일 수 있다
+// (상주 꼬리 수·bulk 크기·꼬리 범위가 맞지 않음).
 // 오류: 크기 넘침 Overflow, 할당 실패.
 ROCKS_RENDERBASE_API Result<RenderBlob>
 PackCookedTexturePixels(Allocator& allocator, const CookedTextureSource& source) noexcept;

@@ -41,16 +41,23 @@ enum class SplashState : uint8 {
     Hidden,   // Hide가 끝났다
 };
 
-// 글자 칸이다(6.1절). Custom 칸은 후속이다.
+// 글자 칸이다(6.1절). Custom 칸(UE User1–6)은 호스트가 배치(SplashTextPlacement)를 준 칸만 그린다
+// (6.5절).
 enum class SplashTextSlot : uint8 {
     Title,
     Version,
     Progress,
     Copyright,
+    Custom1,
+    Custom2,
+    Custom3,
+    Custom4,
+    Custom5,
+    Custom6,
 };
 
-// 글자 칸 수다.
-inline constexpr usize SplashTextSlotCount = 4;
+// 글자 칸 수다(기본 칸 넷 + Custom 칸 여섯).
+inline constexpr usize SplashTextSlotCount = 10;
 
 // 칸 한 줄의 최대 byte 수(UTF-8)다. 넘으면 UTF-8 문자 경계에서 자른다.
 inline constexpr usize MaxSplashLineBytes = 512;

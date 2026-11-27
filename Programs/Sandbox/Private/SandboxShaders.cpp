@@ -8,6 +8,8 @@
 #include <Graphics/ShaderBindings.h>
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/HostServices.h>
+#include <Platform/File.h>
+#include <Platform/Process.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,8 +29,11 @@ namespace {
 #define SANDBOX_PIXEL_DEV_IF(Variable, File, Entry, Filter) &Variable,
 const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
-    &MathFloatProbe,        &MathUintProbe,         &ColorFloatProbe,      &ShadingFloatProbe,
-    &GeneratedParametersVS, &GeneratedParametersPS, &GeneratedResourcesVS, &GeneratedResourcesPS};
+    &MathFloatProbe,       &MathUintProbe,         &ColorFloatProbe,
+    &ShadingFloatProbe,    &GeneratedParametersVS, &GeneratedParametersPS,
+    &GeneratedResourcesVS, &GeneratedResourcesPS,  &ReloadColorPS,
+    &ComputeDispatchProbe, &WrappedDispatchProbe,  &WriteDispatchArgumentsProbe,
+    &GroupOperationsProbe, &UtilityProbe,          &MipPatternProbe};
 #undef SANDBOX_VERTEX
 #undef SANDBOX_PIXEL
 #undef SANDBOX_COMPUTE
@@ -47,6 +52,37 @@ SystemAllocator& ProcessAllocator() noexcept {
 // 활성 자원이다(DeviceShaders가 연 동안).
 render::EngineRenderResources* active = nullptr;
 bool hostPrepared = false;
+// 감시 재컴파일 시험 루트(<engine>/Intermediate/SandboxShaderReload/<PID>)다.
+char reloadDirectory[PathBytes] = {};
+
+// 시험 원문(Programs/Sandbox/ShaderReload/<name>)을 시험 루트로 복사한다.
+bool CopyReloadSource(const char* engine, const char* name) noexcept {
+    char from[PathBytes];
+    char to[PathBytes];
+    snprintf(from, sizeof(from), "%s/../Programs/Sandbox/ShaderReload/%s", engine, name);
+    snprintf(to, sizeof(to), "%s/%s", reloadDirectory, name);
+    return static_cast<bool>(
+        platform::PhysicalFileSystem().Copy(from, strlen(from), to, strlen(to), true));
+}
+
+// 감시 재컴파일 시험 루트를 만들고 원문을 복사해 /Plugin/SandboxReload로 더한다(ShaderSystem
+// 16.3절 SSD78 — 실행마다 PID 폴더라 동시 실행과 겹치지 않는다).
+Result<void> PrepareReloadRoot(render::EngineShaderHost& host, const char* engine) noexcept {
+    snprintf(reloadDirectory, sizeof(reloadDirectory), "%s/Intermediate/SandboxShaderReload/%u",
+             engine, static_cast<unsigned>(platform::CurrentProcessId()));
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    (void)platform::DeleteDirectoryTree(files, reloadDirectory, strlen(reloadDirectory));
+    if (!platform::MakeDirectoryTree(files, reloadDirectory, strlen(reloadDirectory)) ||
+        !CopyReloadSource(engine, "Reload.rsf") || !CopyReloadSource(engine, "ReloadColor.rsh")) {
+        Log::Error(graphics::LogGraphics,
+                   "The shader reload test sources could not be copied to {Directory}",
+                   StringView(reloadDirectory));
+        reloadDirectory[0] = '\0';
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    return host.AddSourceDirectory("/Plugin/SandboxReload", StringView(reloadDirectory));
+}
 
 // self-test면 Sandbox 타입과 /Plugin/Sandbox 원문 디렉터리(엔진 폴더의 형제
 // Programs/Sandbox/Shaders)를 한 번 넣는다. 엔진 실행은 아무것도 넣지 않는다(SSD48).
@@ -89,6 +125,10 @@ Result<void> PrepareHost(render::EngineShaderHost& host, SandboxShaderScope scop
         Log::Error(graphics::LogGraphics, "Engine shader test sources could not be added: {Error}",
                    ErrorCodeName(added.Error()));
         return added;
+    }
+
+    if (auto reload = PrepareReloadRoot(host, engine); !reload) {
+        return reload;
     }
 
     hostPrepared = true;
@@ -153,6 +193,12 @@ SelfTestShaderHost::~SelfTestShaderHost() noexcept {
     if (attached_) {
         DetachHost(modules_);
     }
+
+    // 감시 재컴파일 시험 루트를 지운다(공급자의 감시는 엔진 묶음 종료에서 멈췄다).
+    if (reloadDirectory[0] != 0) {
+        (void)platform::DeleteDirectoryTree(platform::PhysicalFileSystem(), reloadDirectory,
+                                            strlen(reloadDirectory));
+    }
 }
 
 DeviceShaders::DeviceShaders(Allocator& allocator, graphics::Device& device) noexcept
@@ -177,6 +223,22 @@ bool DeviceShaders::IsReady() const noexcept {
 
 StringView DeviceShaders::Problem() const noexcept {
     return resources_.Problem();
+}
+
+StringView ReloadSourceDirectory() noexcept {
+    return StringView(reloadDirectory);
+}
+
+bool ApplyShaderUpdates() noexcept {
+    return active != nullptr && active->ApplyShaderUpdates(nullptr);
+}
+
+StringView ActiveFormat() noexcept {
+    return active != nullptr ? active->FormatId() : StringView();
+}
+
+uint64 ActiveRevision() noexcept {
+    return active != nullptr ? active->ShaderRevision() : 0;
 }
 
 bool Has(const ShaderTypeDesc& type) noexcept {

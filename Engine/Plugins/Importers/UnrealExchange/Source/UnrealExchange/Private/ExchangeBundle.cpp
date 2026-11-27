@@ -98,7 +98,7 @@ Result<bool> Reject(ReadScope& scope, AssetDiagnosticCode code, ErrorCode error,
 
 Result<bool> Corrupt(ReadScope& scope, ExchangeIssue issue, JsonPosition position,
                      StringView text) noexcept {
-    return Reject(scope, AssetDiagnosticCode::CorruptBundle, ErrorCode::InvalidArgument, issue,
+    return Reject(scope, AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData, issue,
                   position, text);
 }
 
@@ -235,7 +235,7 @@ Result<bool> ReadJsonFile(platform::FileSystem& files, StringView directory, Str
     }
 
     if (!regular) {
-        return Reject(scope, AssetDiagnosticCode::CorruptBundle, ErrorCode::InvalidArgument,
+        return Reject(scope, AssetDiagnosticCode::CorruptBundle, ErrorCode::CorruptData,
                       ExchangeIssue::NotRegularFile, {}, relative);
     }
 
@@ -1079,7 +1079,7 @@ Result<void> CheckBundleBlobs(platform::FileSystem& files, StringView directory,
         for (usize at = start; conflict && at < end; ++at) {
             if (auto failed = FailBlobAsset(diagnostics, assets[uses[at].asset], uses[at].asset,
                                             uses[at].blob, ExchangeIssue::BlobConflict,
-                                            ErrorCode::InvalidArgument);
+                                            ErrorCode::CorruptData);
                 !failed) {
                 return failed;
             }
@@ -1145,7 +1145,7 @@ Result<void> ResolveDependencies(const ExchangeBundle& bundle, Array<ExchangeAss
             if (dependency.className != assets[target].className) {
                 ExchangeDiagnosticInput input;
                 input.code = AssetDiagnosticCode::CorruptBundle;
-                input.error = ErrorCode::InvalidArgument;
+                input.error = ErrorCode::CorruptData;
                 input.issue = ExchangeIssue::ManifestMismatch;
                 input.file = ExchangeFile::AssetJson;
                 input.asset = static_cast<uint32>(index);
@@ -1446,7 +1446,7 @@ Result<void> ReadExchangeNumber(JsonValue value, double& out) noexcept {
         }
     }
 
-    return Result<void>::Failure(ErrorCode::InvalidArgument);
+    return Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 } // namespace rocks

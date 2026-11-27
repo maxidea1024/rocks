@@ -210,14 +210,14 @@ Result<Span<const uint8>> VerifyContentEnvelope(Allocator& allocator, Span<const
 
     if (envelope.Size() < ContentEnvelopeManifestOffset ||
         envelope.Size() > ContentEnvelopeMaxBytes) {
-        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage,
-                            ErrorCode::InvalidArgument, Field::File);
+        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
+                            Field::File);
     }
 
     const uint8* header = envelope.Data();
     if (memcmp(header, EnvelopeMagic, sizeof(EnvelopeMagic)) != 0) {
-        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage,
-                            ErrorCode::InvalidArgument, Field::Magic);
+        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
+                            Field::Magic);
     }
 
     if (header[VersionOffset] != ContentEnvelopeFormatVersion) {
@@ -233,7 +233,7 @@ Result<Span<const uint8>> VerifyContentEnvelope(Allocator& allocator, Span<const
     for (usize index = 0; index < ReservedBytes; ++index) {
         if (header[ReservedOffset + index] != 0) {
             return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage,
-                                ErrorCode::InvalidArgument, Field::Reserved);
+                                ErrorCode::CorruptData, Field::Reserved);
         }
     }
 
@@ -266,8 +266,8 @@ Result<Span<const uint8>> VerifyContentEnvelope(Allocator& allocator, Span<const
 
     const uint64 manifestBytes = LoadLe64(header + ManifestLengthOffset);
     if (manifestBytes != envelope.Size() - ContentEnvelopeManifestOffset) {
-        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage,
-                            ErrorCode::InvalidArgument, Field::ManifestLength);
+        return EnvelopeFail(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData,
+                            Field::ManifestLength);
     }
 
     const Span<const uint8> manifest(envelope.Data() + ContentEnvelopeManifestOffset,

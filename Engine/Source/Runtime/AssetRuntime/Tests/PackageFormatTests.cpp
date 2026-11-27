@@ -371,20 +371,20 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
     {
         Array<uint8> bytes = Copy(env.allocator, valid.View());
         bytes[0] = 'X';
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
         Array<uint8> bytes = Copy(env.allocator, valid.View());
         bytes[33] ^= 1; // assetId — headerCrc가 잡는다
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
         Array<uint8> bytes = Copy(env.allocator, valid.View());
         StoreLittleEndian<uint32>(bytes.Data() + 8, 3); // Editor | Cooked
         FixHeaderCrc(bytes);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -407,14 +407,14 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         // 잘린 파일(Stat 크기 ≠ fileBytes).
         Array<uint8> bytes = Copy(env.allocator, valid.View());
         (void)bytes.TryResize(bytes.Size() - 1);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
         // 섹션 표 CRC.
         Array<uint8> bytes = Copy(env.allocator, valid.View());
         bytes[bytes.Size() - 1] ^= 0x10;
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -425,7 +425,7 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         uint64 size = 0;
         REQUIRE(FindSection(bytes.View(), PackageSectionKind::Exports, row, offset, size));
         bytes[static_cast<usize>(offset)] ^= 1;
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -436,7 +436,7 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         uint64 size = 0;
         REQUIRE(FindSection(bytes.View(), PackageSectionKind::Bulk, row, offset, size));
         bytes[static_cast<usize>(offset) - 1] = 0xAA;
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -446,7 +446,7 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         StoreLittleEndian<uint32>(bytes.Data() + table, 2);
         StoreLittleEndian<uint32>(bytes.Data() + table + PackageSectionEntryBytes, 1);
         FixTableCrc(bytes);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -458,7 +458,7 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         REQUIRE(FindSection(bytes.View(), PackageSectionKind::Exports, row, offset, size));
         StoreLittleEndian<uint64>(bytes.Data() + row + 16, size + 64);
         FixTableCrc(bytes);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -469,7 +469,7 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         uint64 size = 0;
         REQUIRE(FindSection(bytes.View(), PackageSectionKind::Bulk, row, offset, size));
         bytes[static_cast<usize>(offset) + 10] ^= 0xFF;
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {
@@ -484,11 +484,11 @@ TEST(AssetPackage_CorruptionAndVersionChecks) {
         CHECK(LoadLittleEndian<uint32>(bytes.Data() + flags) == 1);
         StoreLittleEndian<uint32>(bytes.Data() + flags, 0);
         FixSectionCrc(bytes, PackageSectionKind::Exports);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
         // 정의되지 않은(v1 예약) EditorOnly 표시도 거부한다.
         StoreLittleEndian<uint32>(bytes.Data() + flags, 1 | 2);
         FixSectionCrc(bytes, PackageSectionKind::Exports);
-        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument);
+        expect(bytes, AssetDiagnosticCode::CorruptPackage, ErrorCode::CorruptData);
     }
 
     {

@@ -7,8 +7,9 @@ namespace {
 // 장치 차원 범위 밖 값이다(GraphicsTextureDimension의 모르는 차원 결과).
 inline constexpr uint8 InvalidGraphicsDimension = 0xff;
 
+// 쿠킹 데이터 손상이다(Docs/Design/RenderBase 6.6절 — 읽은 데이터라 CorruptData).
 Result<void> Corrupt() noexcept {
-    return Result<void>::Failure(ErrorCode::InvalidArgument);
+    return Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 bool ToFilter(TextureSamplerFilter filter, graphics::Filter& out) noexcept {

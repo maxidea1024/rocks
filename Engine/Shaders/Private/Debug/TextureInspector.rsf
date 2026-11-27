@@ -8,7 +8,8 @@
 // 표시한다(정수 형식은 필터 표본이 없고, HLSL TextureCube에는 Load가 없어 cube 계열은 두지 않는다).
 //
 // 표시 방식(selection.w): 0 그대로(LDR — 선형 값이 그대로 표시 색), 1 HDR(노출 × filmic 곡선 —
-// Color/FilmicToneCurve.rsh), 2 깊이(빨강 채널을 회색으로 — reversed-Z라 가까울수록 밝다).
+// Color/FilmicToneCurve.rsh), 2 깊이(빨강 채널을 회색으로 — reversed-Z라 가까울수록 밝다), 3 노멀
+// 맵(swizzle 뒤 법선을 복원해 n × 0.5 + 0.5를 색으로 — UE 텍스처 편집기 미리보기와 같은 표시).
 #include "/Engine/Private/Color/FilmicToneCurve.rsh"
 #include "/Engine/Private/Material/MaterialTextureSampling.rsh"
 
@@ -21,6 +22,7 @@
 
 static const float InspectorLdr = 0.0;
 static const float InspectorHdr = 1.0;
+static const float InspectorNormal = 3.0;
 
 float4 InspectorDisplay(float4 sampled) {
     const float4 value = ApplyCookedChannelSwizzle(sampled, Inspector.swizzle);
@@ -40,6 +42,10 @@ float4 InspectorDisplay(float4 sampled) {
         film.toneCurveAmount = Inspector.exposure.w;
         return float4(RocksFilmicDisplayColor(max(value.rgb * Inspector.exposure.x, 0.0), film),
                       1.0);
+    }
+
+    if (Inspector.selection.w == InspectorNormal) {
+        return float4(DecodeTangentNormal(value).xyz * 0.5 + 0.5, 1.0);
     }
 
     return float4(value.rrr, 1.0);

@@ -1186,7 +1186,7 @@ Result<bool> CompileRevision(Allocator& allocator, const CaseInput& input, const
 
     BytecodeRejection rejection;
     if (auto read = ReadBytecodeFile(bytes.View(), revision.module, rejection); !read) {
-        if (read.Error() != ErrorCode::InvalidArgument) {
+        if (read.Error() != ErrorCode::CorruptData) {
             return Result<bool>::Failure(read.Error());
         }
 
@@ -1418,7 +1418,7 @@ Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
 
         BytecodeRejection rejection;
         if (auto read = ReadBytecodeFile(bytes.View(), created.loaded, rejection); !read) {
-            if (read.Error() != ErrorCode::InvalidArgument) {
+            if (read.Error() != ErrorCode::CorruptData) {
                 return Result<bool>::Failure(read.Error());
             }
 
@@ -1518,7 +1518,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
 
         BytecodeRejection rejection;
         if (auto read = ReadBytecodeFile(file.View(), unit.loaded, rejection); !read) {
-            if (read.Error() != ErrorCode::InvalidArgument) {
+            if (read.Error() != ErrorCode::CorruptData) {
                 return read;
             }
 

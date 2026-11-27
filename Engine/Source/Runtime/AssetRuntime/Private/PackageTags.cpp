@@ -17,13 +17,13 @@ int ComparePair(StringView leftKey, StringView leftValue, StringView rightKey,
 }
 
 // Record 계층 오류를 Tags 읽기 오류로 바꾼다: 할당 실패는 그대로, 지원 범위 밖 버전은 Unsupported
-// (더 새 Tags — 색인은 UnsupportedVersion), 그 밖은 형식 위반 InvalidArgument다.
+// (더 새 Tags — 색인은 UnsupportedVersion), 그 밖은 형식 위반 CorruptData다(AssetSystem 19장).
 ErrorCode TagsError(ErrorCode error) noexcept {
     if (error == ErrorCode::OutOfMemory || error == ErrorCode::Unsupported) {
         return error;
     }
 
-    return ErrorCode::InvalidArgument;
+    return ErrorCode::CorruptData;
 }
 
 bool ValidKey(StringView key) noexcept {
@@ -122,7 +122,7 @@ Result<Array<PackageTag>> ReadPackageTags(Allocator& allocator, Span<const uint8
 
     auto header = ReadRecordHeader(bytes);
     if (!header) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     if (!(header.Value().schema == PackageTagsSchema)) {
@@ -137,7 +137,7 @@ Result<Array<PackageTag>> ReadPackageTags(Allocator& allocator, Span<const uint8
 
     auto listField = record.Value().Find(PackageTagsListField);
     if (!listField) {
-        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        return Result<Out>::Failure(ErrorCode::CorruptData);
     }
 
     auto list = RecordListReader::OpenField(record.Value(), listField.Value(), PackageTagItemSchema,
@@ -160,18 +160,18 @@ Result<Array<PackageTag>> ReadPackageTags(Allocator& allocator, Span<const uint8
         auto value = item.Value().Find(PackageTagValueField);
         if (!key || !value || key.Value().wireType != static_cast<uint32>(WireType::String) ||
             value.Value().wireType != static_cast<uint32>(WireType::String)) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         const StringView keyText = TextOf(key.Value());
         const StringView valueText = TextOf(value.Value());
         if (!ValidKey(keyText) || !ValidValue(valueText)) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         if (index != 0 && ComparePair(tags[index - 1].key.View(), tags[index - 1].value.View(),
                                       keyText, valueText) >= 0) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            return Result<Out>::Failure(ErrorCode::CorruptData);
         }
 
         PackageTag tag(allocator);

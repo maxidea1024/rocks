@@ -5,27 +5,31 @@
 #include <Base/Compiler.h>
 #include <AudioAssets/SoundPcm.h>
 #include <AudioAssets/SoundSource.h>
+#include <AudioAssets/SoundStreamData.h>
 #include <Core/Containers/Array.h>
 
 // PCM 사운드 에셋이다(Docs/Design/AudioSystem 3.9·3.36.2·3.37.2절, UE USoundWave 대응). 필드는
 // 넷이다.
 // - 임포트 결과(channelCount·sampleRate·frameCount·sourceCodec·파일 loop·cues): 임포터가 매번 전부
 //   쓴다.
-// - 사용자 설정(looping·loopOverride·compression·compressionQuality, SoundSource의 volume·pitch·
-//   attenuation): 임포터가 건드리지 않는다.
+// - 사용자 설정(looping·loopOverride·compression·compressionQuality·sampleRateQuality,
+// SoundSource의
+//   volume·pitch·attenuation): 임포터가 건드리지 않는다.
 // - 에디터 원본(source — EditorOnly): 디코드한 PCM bulk다. 쿠킹 패키지에 넣지 않는다.
 // - 쿠킹 결과(platformData): 쿠킹 처리기가 쓰는 플랫폼 데이터 bulk다. 에디터 패키지에서는 비어
 //   있다. 쿠킹 패키지의 sampleRate·frameCount·loop·cue는 인코딩 rate 기준이다(3.37.3절).
-// 재생 PCM(pcm_)은 실행 데이터다. 시험·Sandbox는 SetPcm으로 메모리에서 만들고, 에디터·Tryout은
-// LoadEditorPcm으로 원본 bulk에서, 쿠킹된 실행은 LoadCookedPcm으로 플랫폼 데이터에서 만든다(AD25 —
-// 3.36.4·3.37.4절). 청크 스트리밍은 AU6이다.
+// 재생 원본(pcm_ 또는 stream_)은 실행 데이터다. 시험·Sandbox는 SetPcm으로 메모리에서 만들고,
+// 에디터·Tryout은 LoadEditorPcm으로 원본 bulk에서, 쿠킹된 실행은 LoadCooked로 플랫폼 데이터에서
+// 만든다 (AD25 — 3.36.4·3.37.4·3.40.3절). LoadCooked는 상주 압축 실시간 디코드(LoadCookedStream)를
+// 쓰고, 1 s 미만 loop만 통째 디코드(LoadCookedPcm)한다. sidecar 청크 스트리밍은 AU6b다.
 //
 // 사용 예(에디터 재생):
 //   (void)clip.LoadEditorPcm(allocator, bulkSource);   // 같은 원본이면 다시 올리지 않는다
 //   auto sound = clip.MakePlayable(allocator, registry, registry.OwnerAccess());
 //
 // 사용 예(쿠킹된 실행 — reader는 Package::BulkBytes를 부른다):
-//   (void)clip.LoadCookedPcm(allocator, &ReadPackageBulk, &package, audio->DecoderTable());
+//   (void)clip.LoadCooked(allocator, &ReadPackageBulk, &package, audio->DecoderTable(),
+//                         audio->CookedLoadOptions());
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드(게임 스레드) 전용이다.
 namespace rocks {
@@ -43,8 +47,21 @@ enum class SoundPcmOrigin : uint8 {
     None = 0,
     // 에디터 원본 bulk(LoadEditorPcm).
     Editor = 1,
-    // 쿠킹 플랫폼 데이터(LoadCookedPcm).
-    Cooked = 2
+    // 쿠킹 플랫폼 데이터를 통째로 푼 PCM(LoadCookedPcm).
+    Cooked = 2,
+    // 쿠킹 플랫폼 데이터의 상주 압축 실시간 디코드(LoadCookedStream).
+    CookedStream = 3
+};
+
+// loop 길이가 이 초보다 짧으면 로드 때 통째로 푼다(3.40.2절 — 바퀴마다 디코더를 다시 여는 비용
+// 상한).
+inline constexpr uint32 StreamMinLoopSeconds = 1;
+
+// LoadCooked의 엔진 설정 값이다(AudioEngineSubsystem::CookedLoadOptions가 CVar에서 채운다).
+struct SoundCookedLoadOptions {
+    // loadingBehavior가 Inherited일 때 쓰는 값이다. UE처럼 RetainOnLoad–LoadOnDemand로 clamp한다
+    // (ForceInline은 clip에만 둘 수 있다 — UE GetDefaultLoadingBehaviorCVar).
+    SoundLoadingBehavior defaultLoading = SoundLoadingBehavior::LoadOnDemand;
 };
 
 // 마지막으로 올린 재생 PCM의 키다(재사용 판정 — 3.36.4·3.37.4절). 리플렉션 밖 실행 데이터다. 에디터
@@ -85,6 +102,12 @@ public:
     // 압축 품질 [MinAudioCompressionQuality, MaxAudioCompressionQuality]다(UE CompressionQuality —
     // Opus만 쓴다, 범위 밖이면 쿠킹이 InvalidSetting으로 실패한다).
     ROCKS_PROPERTY() uint32 compressionQuality = audio::DefaultAudioCompressionQuality;
+    // 플랫폼 rate 등급이다(UE SampleRateQuality — 대상 프로파일이 resampleForDevice를 켤 때만
+    // PCM16· ADPCM 인코딩 rate를 낮춘다, 3.39절).
+    ROCKS_PROPERTY() SoundSampleRateQuality sampleRateQuality = SoundSampleRateQuality::Max;
+    // 로딩 동작이다(UE LoadingBehavior — 3.40.3절). 쿠킹된 실행의 LoadCooked가 디코드 방식을 고를
+    // 때 쓴다.
+    ROCKS_PROPERTY() SoundLoadingBehavior loadingBehavior = SoundLoadingBehavior::Inherited;
 
     // --- 임포트 결과 ---
 
@@ -130,19 +153,52 @@ public:
     // PcmRevision을 올린다. 오류:
     // - platformData 없음·reader null: NotReady.
     // - 채널이 MaxClipChannels보다 많음: Unsupported(AU9).
-    // - 플랫폼 데이터 형식·청크 손상, 머리(채널·rate·frame)와 필드가 다름, 디코드 결과 차원이
-    // 머리와
-    //   다름: CorruptData.
+    // - 형식·청크 손상, payload 모자람(잘림), 머리(채널·rate·frame)와 필드 불일치, 디코드 결과
+    //   차원이 머리와 다름: CorruptData.
     // - decoders에 그 codec 디코더가 없음: NotFound(AudioOpus를 링크하지 않은 실행).
-    // - 디코더가 모르는 bitstream 판: Unsupported(더 새 쿠커의 데이터 — 손상이 아니다).
+    // - 형식 판·codec id·bitstream 판을 모름: Unsupported(새 쿠커의 데이터 — 손상이 아니다).
     // - reader 오류, 할당 실패.
+    // 하부(Parse·디코더)의 오류 값은 그대로 넘긴다(3.38절).
     // 실패하면 앞 PCM을 그대로 둔다. 게임 스레드에서 동기로 디코드한다(긴 clip은 로드 때 디코드
     // 비용이 든다 — 청크 스트리밍은 AU6).
     Result<void> LoadCookedPcm(Allocator& allocator, SoundBulkReader reader, void* context,
                                const audio::AudioDecoderTable& decoders) noexcept;
 
+    // 쿠킹 플랫폼 데이터 byte를 공유 불변 SoundStreamData로 복사해 실시간 디코드 원본으로 둔다
+    // (3.40.3절 — 재생 PCM은 만들지 않는다). 키(platformData 내용·채널·rate·frame)가 같으면
+    // 아무것도 하지 않는다. 오류: platformData 없음·reader null NotReady, 채널이
+    // MaxClipChannels보다 많음 Unsupported, 형식·청크 손상(모든 청크 SHA를 여기서 본다)·잘림·머리와
+    // 필드 불일치 CorruptData, 모르는 형식 판·codec Unsupported, decoders에 그 codec 디코더가 없음
+    // NotFound(LoadCookedPcm과 같다 — 재생 때마다 실패하지 않게 로드 때 거부한다), reader 오류,
+    // 할당 실패. 실패하면 앞 원본을 그대로 둔다.
+    Result<void> LoadCookedStream(Allocator& allocator, SoundBulkReader reader, void* context,
+                                  const audio::AudioDecoderTable& decoders) noexcept;
+
+    // 실제 로딩 동작이다: loadingBehavior, Inherited면 options.defaultLoading을 RetainOnLoad–
+    // LoadOnDemand로 clamp한 값(UE 우선순위에서 SoundClass 단계는 AU7에서 사이에 들어간다).
+    SoundLoadingBehavior
+    EffectiveLoadingBehavior(const SoundCookedLoadOptions& options) const noexcept;
+
+    // 디코드 방식을 골라 LoadCookedPcm 또는 LoadCookedStream을 부른다(3.40.3절 표):
+    // - looping이고 재생 loop 길이가 sampleRate × StreamMinLoopSeconds보다 짧으면 통째(바퀴마다
+    // 다시
+    //   여는 비용 상한 — UE에는 없는 Rocks 규칙).
+    // - 나머지는 로딩 동작과 상관없이 상주 압축 실시간 디코드다. UE 5.8도
+    // non-streaming(ForceInline)
+    //   경로는 길이와 상관없이 DTYPE_RealTime이다. 스트리밍 세 동작의 청크 캐시 차이는 AU6b에서
+    //   나뉜다(EffectiveLoadingBehavior).
+    // 오류는 고른 함수의 것이다.
+    Result<void> LoadCooked(Allocator& allocator, SoundBulkReader reader, void* context,
+                            const audio::AudioDecoderTable& decoders,
+                            const SoundCookedLoadOptions& options) noexcept;
+
     const SharedPtr<const SoundPcm>& Pcm() const noexcept {
         return pcm_;
+    }
+
+    // 실시간 디코드 원본이다(LoadCookedStream이 둔다 — 없으면 null).
+    const SharedPtr<const SoundStreamData>& Stream() const noexcept {
+        return stream_;
     }
 
     // 재생 PCM을 바꿀 때마다 올라간다(진단 — 스냅숏의 revision).
@@ -156,6 +212,7 @@ protected:
 
 private:
     ROCKS_NATIVE() SharedPtr<const SoundPcm> pcm_;
+    ROCKS_NATIVE() SharedPtr<const SoundStreamData> stream_;
     ROCKS_NATIVE() uint64 pcmRevision_ = 0;
     // 마지막으로 올린 PCM의 키다(SetPcm이 지운다). 쿠킹 데이터도 쓰므로 에디터 데이터 없는
     // 빌드에서도 읽힌다.

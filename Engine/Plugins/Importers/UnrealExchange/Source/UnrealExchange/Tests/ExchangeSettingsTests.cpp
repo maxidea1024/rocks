@@ -24,24 +24,24 @@ namespace {
 using Kind = ExchangeSettingKind;
 
 constexpr ExchangeSettingRow MemberRows[] = {
-    {"Mode", Kind::Enum, 0, nullptr, 0, {}},
-    {"bOn", Kind::Same, 0, nullptr, 0, {}},
+    {"Mode", Kind::Enum, 0, nullptr, 0, {}, {}},
+    {"bOn", Kind::Same, 0, nullptr, 0, {}, {}},
 };
 
 constexpr ExchangeSettingRow SampleRows[] = {
-    {"bFlag", Kind::Same, 0, nullptr, 0, {}},
-    {"Plain", Kind::Same, 0, nullptr, 0, {}},
-    {"Group", Kind::Enum, 0, nullptr, 0, {}},
-    {"Id", Kind::Guid, 0, nullptr, 0, {}},
-    {"Scale", Kind::PerPlatformFloat, 0, nullptr, 0, {}},
-    {"Ref", Kind::Reference, 0, nullptr, 0, {}},
-    {"Refs", Kind::ReferenceArray, 0, nullptr, 0, {}},
-    {"Color", Kind::Struct, 0, MemberRows, 2, {}},
-    {"Layers", Kind::StructArray, 0, MemberRows, 2, {}},
-    {"Lighting", Kind::Ignore, 0, nullptr, 0, {}},
-    {"UserData", Kind::Unsupported, 0, nullptr, 0, "[]"},
-    {"Only2D", Kind::Same, ExchangeClassBit(ExchangeClass::Texture2D), nullptr, 0, {}},
-    {"BadDefault", Kind::Unsupported, 0, nullptr, 0, "{"},
+    {"bFlag", Kind::Same, 0, nullptr, 0, {}, {}},
+    {"Plain", Kind::Same, 0, nullptr, 0, {}, {}},
+    {"Group", Kind::Enum, 0, nullptr, 0, {}, {}},
+    {"Id", Kind::Guid, 0, nullptr, 0, {}, {}},
+    {"Scale", Kind::PerPlatformFloat, 0, nullptr, 0, {}, {}},
+    {"Ref", Kind::Reference, 0, nullptr, 0, {}, {}},
+    {"Refs", Kind::ReferenceArray, 0, nullptr, 0, {}, {}},
+    {"Color", Kind::Struct, 0, MemberRows, 2, {}, {}},
+    {"Layers", Kind::StructArray, 0, MemberRows, 2, {}, {}},
+    {"Lighting", Kind::Ignore, 0, nullptr, 0, {}, {}},
+    {"UserData", Kind::Unsupported, 0, nullptr, 0, "[]", {}},
+    {"Only2D", Kind::Same, ExchangeClassBit(ExchangeClass::Texture2D), nullptr, 0, {}, {}},
+    {"BadDefault", Kind::Unsupported, 0, nullptr, 0, "{", {}},
 };
 
 // settings 원문을 rows로 compact 번역해 out에 쓴다.
@@ -52,7 +52,7 @@ Result<void> Translate(
     Span<const ExchangeSettingRow> rows = Span<const ExchangeSettingRow>(SampleRows)) noexcept {
     JsonDocument document(allocator);
     if (!document.Parse(settings).Succeeded()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     JsonWriterOptions options;
@@ -75,26 +75,6 @@ Result<void> Translate(
     }
 
     return writer.Finish();
-}
-
-bool ReadRepositoryFile(Allocator& allocator, StringView relative, Array<char>& out) noexcept {
-    constexpr usize PathCapacity = 4096;
-    char engine[PathCapacity];
-    auto found = FindEngineDirectory(Span<char>(engine, PathCapacity));
-    StringBuilder<512> path(allocator);
-    if (!found || !path.TryAppend(StringView(engine, found.Value())) || !path.TryAppend(relative)) {
-        return false;
-    }
-
-    platform::File file;
-    uint64 size = 0;
-    if (!file.Open(platform::PhysicalFileSystem(), path.CString(), path.ByteCount(),
-                   platform::FileOpenMode::ReadExisting) ||
-        !file.Size(size) || !out.TryResize(static_cast<usize>(size))) {
-        return false;
-    }
-
-    return static_cast<bool>(file.ReadExact(out.Data(), out.Size()).status);
 }
 
 TypeId TextureTypeOf(ExchangeClass type) noexcept {
@@ -198,7 +178,7 @@ TEST(UnrealExchange_SettingsTranslateKinds) {
 TEST(UnrealExchange_SettingsEnumPrefix) {
     SystemAllocator allocator;
     {
-        const ExchangeSettingRow rows[] = {{"E", Kind::Enum, 0, nullptr, 0, {}}};
+        const ExchangeSettingRow rows[] = {{"E", Kind::Enum, 0, nullptr, 0, {}, {}}};
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);
         struct Case {
@@ -223,7 +203,7 @@ TEST(UnrealExchange_SettingsEnumPrefix) {
         // 문자열·숫자가 아닌 enum 값은 거부한다.
         CHECK(Translate(allocator, R"({"E": true})", ExchangeClass::Texture2D, nullptr, out,
                         warnings, Span<const ExchangeSettingRow>(rows))
-                  .Error() == ErrorCode::InvalidArgument);
+                  .Error() == ErrorCode::CorruptData);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -292,14 +272,18 @@ TEST(UnrealExchange_SettingsRejects) {
             R"({"Layers": {}})",
             R"({"Layers": [1]})",
             R"({"Color": []})",
-            R"({"BadDefault": 1})",
         };
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);
         for (const StringView text : bad) {
             CHECK(Translate(allocator, text, ExchangeClass::Texture2D, nullptr, out, warnings)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
         }
+
+        // 행 표의 기본값 텍스트가 JSON이 아니면 표의 결함이다(덤프 내용이 아니다).
+        CHECK(Translate(allocator, R"({"BadDefault": 1})", ExchangeClass::Texture2D, nullptr, out,
+                        warnings)
+                  .Error() == ErrorCode::InvalidArgument);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -393,11 +377,11 @@ TEST(UnrealExchange_SettingsPrefixAndDefaults) {
     SystemAllocator allocator;
     {
         const ExchangeSettingRow rows[] = {
-            {"bake", Kind::Same, 0, nullptr, 0, {}},
-            {"b", Kind::Same, 0, nullptr, 0, {}},
-            {"bX", Kind::Same, 0, nullptr, 0, {}},
-            {"Bias", Kind::Unsupported, 0, nullptr, 0, "-1"},
-            {"Pair", Kind::Unsupported, 0, nullptr, 0, R"({"A": 1, "B": 2})"},
+            {"bake", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"b", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"bX", Kind::Same, 0, nullptr, 0, {}, {}},
+            {"Bias", Kind::Unsupported, 0, nullptr, 0, "-1", {}},
+            {"Pair", Kind::Unsupported, 0, nullptr, 0, R"({"A": 1, "B": 2})", {}},
         };
         StringBuilder<> out(allocator);
         Array<ExchangeSettingWarning> warnings(allocator);

@@ -118,7 +118,11 @@ enum class EditorWarningKind : uint8 {
     ClassDefaultsUnavailable,
     // 원본 재구성: 원본 묶음 hook의 경고다(진단 = 그 코드 — SourceCleared, asset = 그 에셋,
     // detail — Docs/Design/AssetSystem 12.14절 A5j2).
-    SourceRebuildWarning
+    SourceRebuildWarning,
+    // 열기: 이벤트 바인딩을 다시 만들지 못해 버렸다(진단 asset = 패키지, detail = 버린 수 — 함수
+    // 없음·서명 다름, Docs/Design/EventReflection.ko.md ED22). EV3a2 전에는 다시 저장하면 그
+    // 바인딩이 사라진다.
+    DroppedEventBindings
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).

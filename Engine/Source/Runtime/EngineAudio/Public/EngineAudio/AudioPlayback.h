@@ -3,6 +3,7 @@
 #include <Audio/AudioMixerTypes.h>
 #include <Base/Types.h>
 #include <Core/Function.h>
+#include <Core/Optional.h>
 
 // 재생 handle·상태·결과·옵션이다(Docs/Design/AudioSystem 3.4·3.35.4절).
 namespace rocks {
@@ -57,8 +58,15 @@ enum class PlaybackEndReason : uint8 {
     SceneRemoved,
     // 부착 emitter(AudioComponent)가 해제됐다.
     EmitterRemoved,
-    // 실제 voice 상한(audio.voices.max)에 걸렸다(동시 발음·steal은 AU7).
+    // 실제 voice 상한(audio.voices.max)에 걸렸다: 들리는 크기 × 우선순위가 낮아 시작하지 못했거나
+    // voice를 빼앗겼다(3.41.1절), 또는 스트림 슬롯이 없다(3.40.3절).
     VoiceLimit,
+    // 들리지 않아 끝냈다: 무음 컬링(들리는 크기 ≤ 1e-4) 또는 가청 거리 밖의 짧은 소리(3.41.1절).
+    Inaudible,
+    // 동시 발음 그룹이 빼앗았다(3.41.2절).
+    Stolen,
+    // 동시 발음 그룹이 받지 않아 시작하지 못했다(3.41.2절).
+    Concurrency,
     // 장치가 없다.
     Ignored,
     // 엔진 종료가 끊었다.
@@ -83,7 +91,7 @@ struct PlaybackEvent {
 
 using PlaybackEventCallback = Function<void(const PlaybackEvent&)>;
 
-// 재생 옵션이다(AU3). 시작 시각 지정·동시 발음 재정의는 AU7·AU10.
+// 재생 옵션이다(AU3, 우선순위 AU7a). 시작 시각 지정·동시 발음 재정의는 AU7b·AU10.
 struct PlayOptions {
     // 사운드 값에 곱하는 배수다. volume [0, MaxVoiceGain], pitch [MinPitch, MaxPitch](곱한 결과도
     // 같은 범위로 자른다).
@@ -94,6 +102,12 @@ struct PlayOptions {
     // 0에서 volume까지 올리는 길이(mix frame)다. 0이면 바로 volume이다. 제어 쪽이 묶음마다
     // 평가하므로 해상도는 게임 프레임 간격이다(3.35.6절).
     uint32 fadeInFrames = 0;
+    // 있으면 사운드 우선순위 대신 쓴다([MinSoundPriority, MaxSoundPriority] — UE
+    // bOverridePriority·Priority, 3.41.1절). 범위 밖은 InvalidArgument다.
+    Optional<float> priority;
+    // 켜면 one-shot도 voice 상한·무음 컬링으로 voice를 잃을 때 끝나지 않고 voice 없이 남아 다시
+    // 경쟁한다(UE bShouldRemainActiveIfDropped — 3.41.1절). loop는 언제나 그렇다.
+    bool remainActiveIfDropped = false;
     // 결과 콜백이다(게임 스레드의 OnFrameBegin — 비어도 된다). 잡은 대상의 수명은 호출자 책임이다.
     // 엔진 종료 뒤에는 부르지 않는다.
     PlaybackEventCallback onEvent;

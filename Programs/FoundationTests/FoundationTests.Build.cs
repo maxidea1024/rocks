@@ -12,7 +12,7 @@ public abstract class TestsModule : ModuleRules
     protected enum TestLayer { Core, Foundation, Engine }
 
     // Tests of runtime modules outside the Object family.
-    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture", "ModuleLoader"];
+    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture", "ModuleLoader", "Progress"];
 
     // Tests of Core layer development tool modules (Core/Source/Developer) (included in every test executable).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
@@ -24,7 +24,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/UiCore", "Runtime/UiFramework", "Runtime/UiRender", "Runtime/UiWidget", "Runtime/UiScreens", "Runtime/UiWorld", "Runtime/Input", "Runtime/InputActions", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/WorldIntegration", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Developer/AnimationTools", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Runtime/AudioMiniaudio", "Runtime/EngineAudio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend", "Runtime/SplashScreen"];
+    private static readonly string[] EngineTestModules = ["Runtime/UiCore", "Runtime/UiFramework", "Runtime/UiRender", "Runtime/UiWidget", "Runtime/UiScreens", "Runtime/UiWorld", "Runtime/Input", "Runtime/InputActions", "Runtime/CurveAssets", "Runtime/PlatformWindow", "Runtime/Collision", "Runtime/World", "Runtime/WorldIntegration", "Runtime/Physics", "Runtime/Engine", "Runtime/Gameplay", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetDatabase", "Developer/AssetCommandlets", "Developer/AssetNugget", "Developer/AssetCooker", "Developer/TargetProfiles", "Developer/AssetTools", "Runtime/Texture", "Developer/ImageCodec", "Developer/TextureTools", "Runtime/ShaderCore", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompilerCommon", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Developer/AnimationTools", "Runtime/Material", "Runtime/SparksVm", "Runtime/SparksCompiler", "Developer/SparksTestHost", "Developer/SparksTools", "Runtime/Audio", "Runtime/AudioMiniaudio", "Runtime/EngineAudio", "Developer/AudioTools", "Runtime/NodeGraph", "Developer/NodeGraphTools", "Runtime/TextLayout", "Runtime/TextLayoutBackend", "Runtime/SplashScreen"];
 
     // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
     // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
@@ -32,7 +32,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["UiCore", "UiFramework", "UiRender", "UiWidget", "UiScreens", "UiWorld", "PlatformWindow", "Physics", "InputActions", "Engine", "Gameplay", "WorldIntegration", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "AnimationTools", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioMiniaudio", "EngineAudio", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend", "SplashScreen"];
+    private static readonly string[] EngineTestDependencies = ["UiCore", "UiFramework", "UiRender", "UiWidget", "UiScreens", "UiWorld", "PlatformWindow", "Physics", "InputActions", "CurveAssets", "Engine", "Gameplay", "WorldIntegration", "Graphics", "RenderBase", "RenderGraph", "ShaderCore", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "Animation", "AnimationTools", "Material", "Texture", "ImageCodec", "TextureTools", "SparksTestHost", "SparksTools", "EngineAssets", "AssetDatabase", "AssetCommandlets", "AssetNugget", "AssetCooker", "TargetProfiles", "Audio", "AudioOpus", "AudioMiniaudio", "EngineAudio", "AudioTools", "NodeGraph", "NodeGraphTools", "TextLayoutBackend", "SplashScreen"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine), the MeshTools MikkTSpace reference
     // comparison test, the font library tests (Docs/Design/Font section 8.5, FT1), the Jolt physics link test (Docs/Design/PhysicsJoltAdapter.ko.md
@@ -118,16 +118,19 @@ public abstract class TestsModule : ModuleRules
         // The segment stream negative tests compress their payloads.
         ["Crypto"] = ["Compression"],
         ["Curves"] = ["CoreTypeBindings", "CurvesTestFixtures", "ObjectSerialization", "ReflectionText"],
+        // The curve source tests hold the sources in a reflected fixture asset (CurveAssetsTestFixtures — reference structs live only in owners).
+        ["CurveAssets"] = ["CurveAssetsTestFixtures"],
         ["Engine"] = ["ConfigTestFixtures", "WorldTestFixtures"],
         // Gameplay diagnostics tests drive the console commands through the Config test fixture context; the input asset tests
         // (InputActions IA6b) cook input context packages with the asset test scene support.
         ["Gameplay"] = ["AssetTestFixtures", "ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
         // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars).
-        ["EngineAudio"] = ["ConfigTestFixtures"],
+        ["EngineAudio"] = ["ConfigTestFixtures", "AudioTools", "AudioOpus"],
         ["ImageCodec"] = ["Compression"],
-        // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support.
-        ["InputActions"] = ["AssetTestFixtures"],
+        // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support; the function binding tests
+        // (IA7) bind to the reflected handlers of InputActionsTestFixtures.
+        ["InputActions"] = ["AssetTestFixtures", "InputActionsTestFixtures"],
         // MemoryFileSystem.h(AssetDatabase Tests — header only): the profile tests read layered JSON from memory.
         ["TargetProfiles"] = ["AssetDatabase"],
         ["Texture"] = ["ObjectSerialization"],
@@ -148,6 +151,9 @@ public abstract class TestsModule : ModuleRules
         // World render lane) and build resource maps from the generated shader parameter fixture structs (Docs/Design/ShaderSystem section 16.2 SSD64).
         ["RenderBase"] = ["Config", "ConfigTestFixtures", "CoreTypeBindings", "Engine", "ObjectRuntime", "ReflectionTestFixtures", "ReflectionText",
             "Serialization", "ShaderParameterTestFixtures", "TraceAnalysis", "World"],
+        // The render graph parameter collector tests add passes from the generated shader parameter fixture structs (Docs/Design/ShaderSystem section
+        // 16.2 SSD65).
+        ["RenderGraph"] = ["ShaderParameterTestFixtures"],
         // The ShaderToolLoader tests drive the loaded tools through their C headers.
         ["ShaderToolLoader"] = ["SpirvCross", "SpirvTools"],
         // The engine shader compile matrix (Docs/Design/EngineShaders section 7.6) compiles the engine shader types RenderBase registers; the shader
@@ -251,21 +257,24 @@ public abstract class TestsModule : ModuleRules
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));
         string[] dependencies = Layer switch
         {
-            TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules],
-            TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules],
-            _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules,
+            TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules],
+            TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules, .. ObjectDeveloperModules],
+            _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", "Progress", .. DeveloperTestModules, .. ObjectDeveloperModules,
                 .. EngineTestDependencies, .. (PluginTests ? PluginTestModules.Select(PluginModuleName).ToArray() : Array.Empty<string>())]
         };
 
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
         // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
         // test types that derive from World types), the asset fixture (AssetTestFixtures: test asset classes that derive from AssetRuntime's Asset) and the
-        // shader parameter fixture (ShaderParameterTestFixtures: generated shader parameter structs, Docs/Design/ShaderSystem section 16.2).
+        // shader parameter fixture (ShaderParameterTestFixtures: generated shader parameter structs, Docs/Design/ShaderSystem section 16.2) and the
+        // input actions fixture (InputActionsTestFixtures: reflected handlers for the function binding tests, Docs/Design/InputActions section 5.1) and the
+        // curve assets fixture (CurveAssetsTestFixtures: an asset holding the curve sources, Docs/Design/CurveAssets section 3.1).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
             TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures"],
-            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures", "ShaderParameterTestFixtures"]
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures", "ShaderParameterTestFixtures",
+                "InputActionsTestFixtures", "CurveAssetsTestFixtures"]
         };
         return new()
         {

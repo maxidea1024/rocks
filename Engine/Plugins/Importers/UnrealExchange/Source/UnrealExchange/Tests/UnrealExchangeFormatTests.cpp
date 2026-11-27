@@ -79,6 +79,8 @@ TEST(UnrealExchange_DiagnosticNamesAndSeverity) {
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnknownField) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedAsset) == ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::GammaMismatch) == ExchangeSeverity::Warning);
+    CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnrealNameNormalized) ==
+          ExchangeSeverity::Warning);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::UnsupportedSourceLayout) ==
           ExchangeSeverity::Error);
     CHECK(ExchangeSeverityOf(AssetDiagnosticCode::MissingUnrealDependency) ==
@@ -149,7 +151,7 @@ TEST(UnrealExchange_DiagnosticList) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 실수 읽기(3.2절): 숫자, "nan"·"inf"·"-inf" 문자열, 그 밖은 InvalidArgument.
+// 실수 읽기(3.2절): 숫자, "nan"·"inf"·"-inf" 문자열, 그 밖은 CorruptData.
 TEST(UnrealExchange_ReadNumber) {
     SystemAllocator allocator;
     {
@@ -174,11 +176,10 @@ TEST(UnrealExchange_ReadNumber) {
         REQUIRE(ReadExchangeNumber(root.Find("i"), value));
         CHECK(value > 1.0e19);
         value = 7.0;
-        CHECK(ReadExchangeNumber(root.Find("f"), value).Error() == ErrorCode::InvalidArgument);
-        CHECK(ReadExchangeNumber(root.Find("g"), value).Error() == ErrorCode::InvalidArgument);
-        CHECK(ReadExchangeNumber(root.Find("h"), value).Error() == ErrorCode::InvalidArgument);
-        CHECK(ReadExchangeNumber(root.Find("missing"), value).Error() ==
-              ErrorCode::InvalidArgument);
+        CHECK(ReadExchangeNumber(root.Find("f"), value).Error() == ErrorCode::CorruptData);
+        CHECK(ReadExchangeNumber(root.Find("g"), value).Error() == ErrorCode::CorruptData);
+        CHECK(ReadExchangeNumber(root.Find("h"), value).Error() == ErrorCode::CorruptData);
+        CHECK(ReadExchangeNumber(root.Find("missing"), value).Error() == ErrorCode::CorruptData);
         CHECK(value == 7.0);
     }
 

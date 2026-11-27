@@ -320,7 +320,7 @@ TEST(NuggetCache_MemoryLayer) {
     CHECK(big.status == NuggetStatus::Hit && big.source == NuggetSource::Local &&
           Matches(scene.allocator, big.values[0], specs[2]));
     NuggetCacheGetResult other = scene.cache.Get(NuggetCacheGet{NuggetBucketShader, Key(1)});
-    CHECK(other.status == NuggetStatus::Miss && other.error == ErrorCode::InvalidArgument &&
+    CHECK(other.status == NuggetStatus::Miss && other.error == ErrorCode::CorruptData &&
           other.failed);
     CHECK(scene.Get(Key(1), twice).error == ErrorCode::InvalidArgument);
 
@@ -737,7 +737,7 @@ TEST(NuggetCache_Scc) {
     }
 
     NuggetCacheGetResult badMeta = scene.cache.GetSccMember(NuggetBucketScc, Key(3), members[0]);
-    CHECK(badMeta.status == NuggetStatus::Miss && badMeta.error == ErrorCode::InvalidArgument);
+    CHECK(badMeta.status == NuggetStatus::Miss && badMeta.error == ErrorCode::CorruptData);
 }
 
 // backend 실패 표지: IO 실패의 Get Miss·Put Dropped는 failed, 다른 버전(Unsupported)·읽기 전용은

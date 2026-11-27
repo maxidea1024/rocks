@@ -28,6 +28,18 @@ bool ReturnsResult(const FunctionSchema& function) noexcept {
 
 } // namespace
 
+bool detail::SlotDescriptionMatches(const ParameterSchema& parameter, const RuntimeValueOps* value,
+                                    const FrameSlotLayout& expected) noexcept {
+    constexpr uint32 FormFlags = static_cast<uint32>(ParameterFlags::ObjectHandle);
+    auto same = [](const ValueType& first, const ValueType& second) noexcept {
+        return first.kind == second.kind && first.type == second.type;
+    };
+    return value != nullptr && same(parameter.value, expected.value) &&
+           same(parameter.element, expected.element) && same(parameter.key, expected.key) &&
+           (parameter.flags & FormFlags) == (expected.flags & FormFlags) &&
+           value->size == expected.size && value->alignment == expected.alignment;
+}
+
 Result<FunctionHandle> TypeRegistry::FindFunction(TypeId type, Guid functionId) noexcept {
     platform::LockGuard lock(gate_);
     if (closed_) {
@@ -60,8 +72,8 @@ Result<FunctionHandle> TypeRegistry::FindFunction(TypeId type, Guid functionId) 
     return Result<FunctionHandle>::Failure(ErrorCode::NotFound);
 }
 
-Result<FunctionHandle> TypeRegistry::FindFunctionByName(TypeId type,
-                                                        Span<const char> name) noexcept {
+Result<FunctionHandle> TypeRegistry::FindFunctionByName(TypeId type, StringView text) noexcept {
+    const Span<const char> name(text.Data(), text.ByteCount());
     platform::LockGuard lock(gate_);
     if (closed_) {
         return Result<FunctionHandle>::Failure(ErrorCode::ShuttingDown);
@@ -148,24 +160,24 @@ Result<void> FunctionCall::SetArgument(ObjectRegistry& registry, const ObjectAcc
                      *allocator_);
 }
 
-Result<void> FunctionCall::SetArgumentValue(usize index, const void* source,
-                                            const void* nativeType) noexcept {
+Result<void> FunctionCall::SetArgumentDescribed(usize index, const void* source,
+                                                const FrameSlotLayout& expected) noexcept {
     const FunctionSchema& schema = function_.Schema();
     if (frame_ == nullptr || index >= schema.parameters.Size() || source == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const RuntimeValueOps& value = *function_.Ops().parameters[index].value;
-    if (value.nativeType != nativeType) {
+    const RuntimeValueOps* value = function_.Ops().parameters[index].value;
+    if (!detail::SlotDescriptionMatches(schema.parameters[index], value, expected)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    if (value.copy == nullptr) {
+    if (value->copy == nullptr) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    return value.copy(static_cast<uint8*>(frame_) + schema.parameters[index].offset, source,
-                      *allocator_);
+    return value->copy(static_cast<uint8*>(frame_) + schema.parameters[index].offset, source,
+                       *allocator_);
 }
 
 Result<void> FunctionCall::Invoke(ObjectRegistry& registry, const ObjectAccessContext& access,
@@ -193,9 +205,10 @@ Result<void> FunctionCall::ReadResult(FieldValue& value) const noexcept {
         static_cast<const uint8*>(frame_) + function_.Schema().result.offset, value);
 }
 
-const void* FunctionCall::ResultValue(const void* nativeType) const noexcept {
+const void* FunctionCall::ResultDescribed(const FrameSlotLayout& expected) const noexcept {
     const RuntimeValueOps* value = function_.Ops().result.value;
-    if (frame_ == nullptr || value == nullptr || value->nativeType != nativeType) {
+    if (frame_ == nullptr || value == nullptr ||
+        !detail::SlotDescriptionMatches(function_.Schema().result, value, expected)) {
         return nullptr;
     }
 

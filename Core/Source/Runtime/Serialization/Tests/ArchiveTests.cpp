@@ -83,7 +83,7 @@ TEST(ArchiveU8RoundTripsEveryByteValueAndTruncationKeepsCursor) {
 
     CHECK(reader.Value().AtEnd());
     auto truncated = reader.Value().ReadU8();
-    CHECK(!truncated && truncated.Error() == ErrorCode::InvalidArgument);
+    CHECK(!truncated && truncated.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 256);
 
     // 한도: operation 한도에 이르면 쓰기·읽기 모두 CapacityExceeded이고 byte·cursor는 그대로다.
@@ -185,7 +185,7 @@ TEST(ArchiveStringValidationAndTruncationNeverAdvanceCursor) {
         REQUIRE(reader);
         auto invalid = reader.Value().ReadStringView();
         CHECK(!invalid);
-        CHECK(invalid.Error() == ErrorCode::InvalidArgument);
+        CHECK(invalid.Error() == ErrorCode::CorruptData);
         CHECK(reader.Value().Position() == 0);
         CHECK(reader.Value().WorkUsed() != 0);
         auto bytes = reader.Value().ReadBytes();
@@ -229,7 +229,7 @@ TEST(ArchiveCompoundGuidAndLengthPrefixFailuresAreAtomic) {
     REQUIRE(reader);
     auto value = reader.Value().ReadBytes();
     CHECK(!value);
-    CHECK(value.Error() == ErrorCode::InvalidArgument);
+    CHECK(value.Error() == ErrorCode::CorruptData);
     CHECK(reader.Value().Position() == 0);
     for (usize index = 0; index < 8; ++index) {
         bytes[index] = 0xff;

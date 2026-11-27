@@ -99,11 +99,11 @@ TEST(InstancedStructWire_MalformedContentIsRejectedWithoutMovingCursor) {
         ErrorCode expected;
     };
 
-    const Mutation mutations[] = {{0, 'r', ErrorCode::InvalidArgument},
+    const Mutation mutations[] = {{0, 'r', ErrorCode::CorruptData},
                                   {8, 9, ErrorCode::Unsupported},
                                   {12, 0, ErrorCode::None}, // schema high만 0(low가 남는다)
-                                  {28, 0, ErrorCode::InvalidArgument},
-                                  {36, 0, ErrorCode::InvalidArgument}};
+                                  {28, 0, ErrorCode::CorruptData},
+                                  {36, 0, ErrorCode::CorruptData}};
     for (const Mutation& mutation : mutations) {
         Array<uint8> bytes(allocator);
         AppendBytes(bytes, content.Value().View());
@@ -132,27 +132,27 @@ TEST(InstancedStructWire_MalformedContentIsRejectedWithoutMovingCursor) {
 
     auto zeroReader = ArchiveReader::Create(zeroSchema.View());
     REQUIRE(zeroReader);
-    CHECK(ReadInstancedStructField(zeroReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadInstancedStructField(zeroReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(zeroReader.Value().Position() == 0);
     Array<uint8> trailing(allocator);
     AppendBytes(trailing, content.Value().View());
     REQUIRE(trailing.TryPushBack(0));
     auto trailingReader = ArchiveReader::Create(trailing.View());
     REQUIRE(trailingReader);
-    CHECK(ReadInstancedStructField(trailingReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadInstancedStructField(trailingReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(trailingReader.Value().Position() == 0);
 
     // 원소 자리의 길이 잘림·남은 byte보다 큰 길이·maxValueBytes 초과.
     const uint8 shortPrefix[] = {1, 0, 0};
     auto shortReader = ArchiveReader::Create(shortPrefix);
     REQUIRE(shortReader);
-    CHECK(ReadInstancedStructElement(shortReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadInstancedStructElement(shortReader.Value()).Error() == ErrorCode::CorruptData);
     Array<uint8> overlong(allocator);
     AppendU64(overlong, content.Value().Size() + 1);
     AppendBytes(overlong, content.Value().View());
     auto overlongReader = ArchiveReader::Create(overlong.View());
     REQUIRE(overlongReader);
-    CHECK(ReadInstancedStructElement(overlongReader.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(ReadInstancedStructElement(overlongReader.Value()).Error() == ErrorCode::CorruptData);
     CHECK(overlongReader.Value().Position() == 0);
     ArchiveLimits small;
     small.maxValueBytes = content.Value().Size() - 1;

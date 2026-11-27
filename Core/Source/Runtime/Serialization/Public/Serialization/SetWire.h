@@ -11,7 +11,7 @@
 // String·Bytes·SoftObjectReference). 빈 집합도 count 0으로 기록한다.
 //
 // 이 계층은 형식(tag·count·길이·잘림)만 본다. 원소 중복은 codec 1단계가 종류 규칙으로
-// 판정한다(String은 byte, Name은 Core Name 규칙 — 중복은 InvalidArgument).
+// 판정한다(String은 byte, Name은 Core Name 규칙 — 중복은 CorruptData).
 //
 // 사용 예(쓰기 — 원소는 out에 바로 쓴다):
 //   auto set = SetWireWriter::Begin(out, static_cast<uint32>(WireType::String), count, maxBytes);
@@ -40,9 +40,9 @@
 //       }
 //   }
 //
-//   return set.Value().Finish(); // 남은 byte는 InvalidArgument
+//   return set.Value().Finish(); // 남은 byte는 CorruptData
 //
-// 오류는 ValueArray와 같다: 잘림·받지 않는 tag·크기 불일치·남은 byte는 InvalidArgument, 기대 원소
+// 오류는 ValueArray와 같다: 잘림·받지 않는 tag·크기 불일치·남은 byte는 CorruptData, 기대 원소
 // tag와 다른 저장 tag는 TypeMismatch, 개수·크기 한도 초과는 CapacityExceeded다.
 namespace rocks {
 
@@ -54,9 +54,9 @@ public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 검사한다. 검사 순서는
     // ValueArrayReader::Open과 같고 원소 tag 자리만 WireSlot::Key다: elementWire·shape가 키 자리의
     // 것이 아니거나 모순이면 InvalidArgument(이때는 payload를 옮기지 않는다) → 저장 tag가 키 tag가
-    // 아니면 InvalidArgument → 저장 tag ≠ elementWire면 TypeMismatch → count > maxCount면
+    // 아니면 CorruptData → 저장 tag ≠ elementWire면 TypeMismatch → count > maxCount면
     // CapacityExceeded → count × 원소 최소 크기가 남은 byte보다 크면(고정 폭·exact는 정확히 같지
-    // 않으면) InvalidArgument → count만큼 work 청구 → exact 가변 원소의 길이 prefix 검사.
+    // 않으면) CorruptData → count만큼 work 청구 → exact 가변 원소의 길이 prefix 검사.
     static Result<SetWireReader> Open(ArchiveReader&& payload, uint32 elementWire, uint32 maxCount,
                                       WireValueShape shape = {}) noexcept;
 
@@ -90,7 +90,7 @@ public:
     // (ValueArrayReader::Elements와 같다).
     ArchiveReader& Elements() noexcept;
 
-    // 모든 원소를 읽은 뒤 부른다. 남은 byte가 있으면 InvalidArgument다.
+    // 모든 원소를 읽은 뒤 부른다. 남은 byte가 있으면 CorruptData다.
     Result<void> Finish() const noexcept;
 
 private:

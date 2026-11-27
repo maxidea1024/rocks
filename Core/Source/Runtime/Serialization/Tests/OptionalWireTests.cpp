@@ -115,7 +115,7 @@ TEST(OptionalWire_UnsetScalarAndRecordMatchFormat) {
     REQUIRE(numberReader);
     auto readNumber = OptionalWireReader::Open(Move(numberReader.Value()), Wire(WireType::U32));
     REQUIRE(readNumber && readNumber.Value().IsSet());
-    CHECK(readNumber.Value().Finish().Error() == ErrorCode::InvalidArgument); // 아직 읽지 않았다
+    CHECK(readNumber.Value().Finish().Error() == ErrorCode::CorruptData); // 아직 읽지 않았다
     auto value = readNumber.Value().Inner().ReadU32();
     CHECK(value && value.Value() == 0x01020304u);
     CHECK(readNumber.Value().Finish());
@@ -189,28 +189,28 @@ TEST(OptionalWire_PresentByteAndInnerTagChecksRunInOrder) {
     CHECK(OpenError(unset, Wire(WireType::U32)) == ErrorCode::None);
 
     // present byte: 없으면·0·1 밖이면 InvalidArgument, unset 뒤에 byte가 남아도 InvalidArgument다.
-    CHECK(OpenError(Span<const uint8>(), Wire(WireType::U32)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(Span<const uint8>(), Wire(WireType::U32)) == ErrorCode::CorruptData);
     const uint8 presentValues[] = {2, 3, 0x80, 0xff};
     for (uint8 present : presentValues) {
         const uint8 bytes[] = {present, 2, 0, 0, 0, 1, 0, 0, 0};
-        CHECK(OpenError(bytes, Wire(WireType::U32)) == ErrorCode::InvalidArgument);
+        CHECK(OpenError(bytes, Wire(WireType::U32)) == ErrorCode::CorruptData);
     }
 
     const uint8 unsetTrailing[] = {0, 0};
-    CHECK(OpenError(unsetTrailing, Wire(WireType::U32)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(unsetTrailing, Wire(WireType::U32)) == ErrorCode::CorruptData);
 
     // 내부 tag 잘림(present 1 뒤 0–3 byte).
     for (usize length = 1; length < 5; ++length) {
         auto bytes = SetPayload(allocator, Wire(WireType::U32), 4);
         CHECK(OpenError(Span<const uint8>(bytes.Data(), length), Wire(WireType::U32)) ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // 저장 내부 tag가 내부 자리의 것이 아니면(기대 tag와 달라도) InvalidArgument, 내부 tag끼리
     // 다르면 TypeMismatch다(크기 검사보다 먼저).
     for (uint32 tag : notInner) {
         auto bytes = SetPayload(allocator, tag, 8);
-        CHECK(OpenError(bytes.View(), Wire(WireType::U64)) == ErrorCode::InvalidArgument);
+        CHECK(OpenError(bytes.View(), Wire(WireType::U64)) == ErrorCode::CorruptData);
     }
 
     auto other = SetPayload(allocator, Wire(WireType::I64), 8);
@@ -219,13 +219,13 @@ TEST(OptionalWire_PresentByteAndInnerTagChecksRunInOrder) {
 
     // 내부 크기: 고정 폭은 정확히, 가변은 최소 크기 이상, exact 가변은 길이 prefix까지.
     auto shortFixed = SetPayload(allocator, Wire(WireType::U64), 7);
-    CHECK(OpenError(shortFixed.View(), Wire(WireType::U64)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(shortFixed.View(), Wire(WireType::U64)) == ErrorCode::CorruptData);
     auto longFixed = SetPayload(allocator, Wire(WireType::U64), 9);
-    CHECK(OpenError(longFixed.View(), Wire(WireType::U64)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(longFixed.View(), Wire(WireType::U64)) == ErrorCode::CorruptData);
     auto noValue = SetPayload(allocator, Wire(WireType::Bool));
-    CHECK(OpenError(noValue.View(), Wire(WireType::Bool)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(noValue.View(), Wire(WireType::Bool)) == ErrorCode::CorruptData);
     auto shortString = SetPayload(allocator, Wire(WireType::String), 7);
-    CHECK(OpenError(shortString.View(), Wire(WireType::String)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(shortString.View(), Wire(WireType::String)) == ErrorCode::CorruptData);
     const WireValueShape digest{40, true};
     auto skewedDigest = SetPayload(allocator, Wire(WireType::Bytes));
     AppendU64(skewedDigest, 31); // 합계는 40이지만 길이 prefix가 32가 아니다
@@ -233,8 +233,7 @@ TEST(OptionalWire_PresentByteAndInnerTagChecksRunInOrder) {
         REQUIRE(skewedDigest.TryPushBack(0));
     }
 
-    CHECK(OpenError(skewedDigest.View(), Wire(WireType::Bytes), digest) ==
-          ErrorCode::InvalidArgument);
+    CHECK(OpenError(skewedDigest.View(), Wire(WireType::Bytes), digest) == ErrorCode::CorruptData);
     CHECK(OpenError(skewedDigest.View(), Wire(WireType::Bytes)) == ErrorCode::None);
 
     // 내용 검사는 내부 Read*가 한다: bool 2는 Open이 아니라 ReadBool이 거부한다.
@@ -244,7 +243,7 @@ TEST(OptionalWire_PresentByteAndInnerTagChecksRunInOrder) {
     REQUIRE(archive);
     auto boolReader = OptionalWireReader::Open(Move(archive.Value()), Wire(WireType::Bool));
     REQUIRE(boolReader);
-    CHECK(boolReader.Value().Inner().ReadBool().Error() == ErrorCode::InvalidArgument);
+    CHECK(boolReader.Value().Inner().ReadBool().Error() == ErrorCode::CorruptData);
 }
 
 TEST(OptionalWire_RecordInnerMustBeExactlyOneRecord) {
@@ -257,10 +256,10 @@ TEST(OptionalWire_RecordInnerMustBeExactlyOneRecord) {
         ErrorCode expected;
     };
 
-    const Mutation mutations[] = {{0, 'Q', ErrorCode::InvalidArgument},
+    const Mutation mutations[] = {{0, 'Q', ErrorCode::CorruptData},
                                   {8, 3, ErrorCode::Unsupported},
-                                  {28, 0, ErrorCode::InvalidArgument},
-                                  {36, 1, ErrorCode::InvalidArgument}};
+                                  {28, 0, ErrorCode::CorruptData},
+                                  {36, 1, ErrorCode::CorruptData}};
     for (const Mutation& mutation : mutations) {
         auto bytes = SetPayload(allocator, Wire(WireType::Record));
         AppendBytes(bytes, inner.Value().View());
@@ -272,12 +271,12 @@ TEST(OptionalWire_RecordInnerMustBeExactlyOneRecord) {
     auto trailing = SetPayload(allocator, Wire(WireType::Record));
     AppendBytes(trailing, inner.Value().View());
     REQUIRE(trailing.TryPushBack(0));
-    CHECK(OpenError(trailing.View(), Wire(WireType::Record)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(trailing.View(), Wire(WireType::Record)) == ErrorCode::CorruptData);
     auto truncated = SetPayload(allocator, Wire(WireType::Record));
     AppendBytes(truncated, Span<const uint8>(inner.Value().Data(), inner.Value().Size() - 1));
-    CHECK(OpenError(truncated.View(), Wire(WireType::Record)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(truncated.View(), Wire(WireType::Record)) == ErrorCode::CorruptData);
     auto missing = SetPayload(allocator, Wire(WireType::Record));
-    CHECK(OpenError(missing.View(), Wire(WireType::Record)) == ErrorCode::InvalidArgument);
+    CHECK(OpenError(missing.View(), Wire(WireType::Record)) == ErrorCode::CorruptData);
 }
 
 TEST(OptionalWire_WriterChecksInnerPayload) {

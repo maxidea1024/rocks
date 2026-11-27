@@ -277,7 +277,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
 
-            return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Json,
+            return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Json,
                                    (static_cast<uint64>(error.position.line) << 32) |
                                        error.position.column);
         }
@@ -285,20 +285,20 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
         const JsonValue root = document.Root();
         const StringView rootKeys[] = {AliasVersionKey, AliasListKey};
         if (!HasExactKeys(root, rootKeys)) {
-            return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Root,
+            return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Root,
                                    AssetAliasNoEntry);
         }
 
         auto version = root.Find(AliasVersionKey).TryGetInt64();
         if (!root.Find(AliasVersionKey).IsNumber() || !version ||
             version.Value() != AssetAliasFormatVersion) {
-            return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Version,
+            return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Version,
                                    AssetAliasNoEntry);
         }
 
         const JsonValue list = root.Find(AliasListKey);
         if (!list.IsArray()) {
-            return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Aliases,
+            return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Aliases,
                                    AssetAliasNoEntry);
         }
 
@@ -315,22 +315,20 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
         for (usize at = 0; at < list.Size(); ++at) {
             const JsonValue item = list.At(at);
             if (!HasExactKeys(item, entryKeys)) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Entry,
-                                       at);
+                return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Entry, at);
             }
 
             const JsonValue pathValue = item.Find(AliasPathKey);
             if (!pathValue.IsString()) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Path,
-                                       at);
+                return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Path, at);
             }
 
             auto logical = ParseLogicalPath(*allocator_, pathValue.GetString());
             if (!logical) {
                 return logical.Error() == ErrorCode::OutOfMemory
                            ? Result<void>::Failure(logical.Error())
-                           : FailAlias<void>(failure, ErrorCode::InvalidArgument,
-                                             AssetAliasField::Path, at);
+                           : FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Path,
+                                             at);
             }
 
             const JsonValue assetValue = item.Find(AliasAssetKey);
@@ -338,8 +336,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                              ? AssetId::TryParse(assetValue.GetString())
                              : Result<AssetId>::Failure(ErrorCode::InvalidArgument);
             if (!asset || asset.Value().IsNull()) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Asset,
-                                       at);
+                return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Asset, at);
             }
 
             const JsonValue createdValue = item.Find(AliasCreatedKey);
@@ -347,16 +344,15 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                                ? TryParseIso8601(createdValue.GetString())
                                : Result<DateTime>::Failure(ErrorCode::InvalidArgument);
             if (!created) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument,
-                                       AssetAliasField::Created, at);
+                return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Created,
+                                       at);
             }
 
             const JsonValue daysValue = item.Find(AliasDaysKey);
             auto days = daysValue.IsNumber() ? daysValue.TryGetInt64()
                                              : Result<int64>::Failure(ErrorCode::InvalidArgument);
             if (!days || days.Value() < 1 || days.Value() > AssetAliasMaxDays) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Days,
-                                       at);
+                return FailAlias<void>(failure, ErrorCode::CorruptData, AssetAliasField::Days, at);
             }
 
             AssetAlias alias(*allocator_);
@@ -392,7 +388,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
         });
         for (usize at = 1; at < order.Size(); ++at) {
             if (entries[order[at]].key.View() == entries[order[at - 1]].key.View()) {
-                return FailAlias<void>(failure, ErrorCode::InvalidArgument,
+                return FailAlias<void>(failure, ErrorCode::CorruptData,
                                        AssetAliasField::DuplicatePath, order[at]);
             }
         }

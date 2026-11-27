@@ -80,6 +80,11 @@ ENGINE_SHADER_PROBE(Transfer, 206u)
 ENGINE_SHADER_PROBE(SrgbRoundTrip, 207u)
 ENGINE_SHADER_PROBE(PqStandard, 208u)
 ENGINE_SHADER_PROBE(Filmic, 209u)
+// SL1 A03(Docs/Design/EngineShaders 14.3절)
+ENGINE_SHADER_PROBE(LutCoordinates, 210u)
+ENGINE_SHADER_PROBE(DisplayEncoding, 211u)
+ENGINE_SHADER_PROBE(ColorMaps, 212u)
+ENGINE_SHADER_PROBE(DistinctColor, 213u)
 
 // --- Shading(ShadingFloatProbePixel) ---
 ENGINE_SHADER_PROBE(Distributions, 300u)
@@ -94,6 +99,19 @@ ENGINE_SHADER_PROBE(SurfaceDefaults, 308u)
 ENGINE_SHADER_PROBE(ShadingParameters, 309u)
 ENGINE_SHADER_PROBE(VndfSample, 310u)
 ENGINE_SHADER_PROBE(VndfPdfGrid, 311u)
+
+// --- Compute(ComputeProbes.rsf, Docs/Design/EngineShaders 14.2절) ---
+ENGINE_SHADER_PROBE(DivideRoundUp, 400u)
+ENGINE_SHADER_PROBE(GroupCoordinates, 401u)
+ENGINE_SHADER_PROBE(DispatchArguments, 402u)
+
+// --- Utility(UtilityProbes.rsf, Docs/Design/EngineShaders 14.4절 1항) ---
+ENGINE_SHADER_PROBE(CatmullRom, 420u)
+ENGINE_SHADER_PROBE(BilinearUint, 421u)
+ENGINE_SHADER_PROBE(BilinearInt, 422u)
+ENGINE_SHADER_PROBE(TexelCenter, 423u)
+ENGINE_SHADER_PROBE(UnwrappedLut, 424u)
+ENGINE_SHADER_PROBE(VolumeLut, 425u)
 
 // 행렬 번호(ColorMatrix·ColorMatrixRows 선택자)다.
 ENGINE_SHADER_PROBE(MatrixRec709ToXyz, 0u)

@@ -12,7 +12,8 @@ class Health : public rocks::Component {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit Health(rocks::Allocator& allocator) noexcept : Died(allocator) {}
+    explicit Health(rocks::Allocator& allocator) noexcept
+        : rocks::Component(allocator), Died(allocator) {}
 
     ROCKS_PROPERTY(Edit, SaveGame, ScriptWritable)  // Edit: CU1 편집 메타(신설), SaveGame: 현재 지정자
     rocks::int32 maxHealth_ = 100;

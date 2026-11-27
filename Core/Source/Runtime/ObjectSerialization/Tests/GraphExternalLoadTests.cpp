@@ -218,7 +218,7 @@ TEST(GraphExternalLoad_ValidateChecksImportTypesAndValueRange) {
                 const Array<uint8> bad = LinkRecord(allocator, 7, value);
                 const Array<uint8> badGraph = SingleGraph(allocator, bad.View(), 2);
                 CHECK(ValidateOnly(allocator, registry, types, badGraph.View(), items) ==
-                      ErrorCode::InvalidArgument);
+                      ErrorCode::CorruptData);
             }
 
             CHECK(Item::Constructed == constructed);

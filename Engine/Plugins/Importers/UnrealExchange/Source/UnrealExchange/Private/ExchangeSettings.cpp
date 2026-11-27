@@ -27,7 +27,7 @@ struct TranslateState {
 };
 
 Result<void> Invalid() noexcept {
-    return Result<void>::Failure(ErrorCode::InvalidArgument);
+    return Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 bool IsUpper(char value) noexcept {
@@ -318,12 +318,23 @@ Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row,
 
         return state.writer.EndArray();
     }
+    case ExchangeSettingKind::EnumMap:
+        if (value.IsString()) {
+            for (const ExchangeSettingRow& mapped : members) {
+                if (mapped.ueKey == value.GetString()) {
+                    return state.writer.String(mapped.rocksKey);
+                }
+            }
+        }
+
+        return Invalid();
     case ExchangeSettingKind::Ignore:
     case ExchangeSettingKind::Unsupported:
         break;
     }
 
-    return Invalid();
+    // 여기 오면 행 종류 표의 결함이다(덤프 내용이 아니다).
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
 // object를 rows로 번역해 객체 하나를 쓴다. top이면 최상위 표(경고 detail = 행 번호)이고, 아니면
@@ -378,7 +389,8 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
             continue;
         }
 
-        if (auto keyed = state.writer.Key(RocksKey(key)); !keyed) {
+        const StringView outputKey = row->rocksKey.IsEmpty() ? RocksKey(key) : row->rocksKey;
+        if (auto keyed = state.writer.Key(outputKey); !keyed) {
             return keyed;
         }
 

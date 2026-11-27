@@ -144,9 +144,12 @@ Result<void> IndexImportRecord(Allocator& allocator, Span<const uint8> bytes,
         }
     }
 
+    // 읽은 패키지의 임포트 소유 대조 위반은 손상이다(같은 검사가 저장에서는 InvalidArgument).
     if (auto owner = CheckImportOwner(entry.id, checked, entry.dependencies.View()); !owner) {
-        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::CorruptPackage,
-                                       owner.Error(), entry.fileName.View());
+        const ErrorCode error =
+            owner.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : owner.Error();
+        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::CorruptPackage, error,
+                                       entry.fileName.View());
             !added) {
             return added;
         }

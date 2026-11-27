@@ -28,6 +28,31 @@ enum class SoundCompression : uint8 {
     Opus = 3
 };
 
+// 플랫폼 rate 등급이다(3.39.2절, UE ESoundwaveSampleRateSettings). 대상 프로파일
+// audioCook.resampleForDevice가 켜지면 PCM16·ADPCM을 그 등급의 rate 이하로 쿠킹한다.
+ROCKS_ENUM()
+enum class SoundSampleRateQuality : uint8 {
+    Max = 0,
+    High = 1,
+    Medium = 2,
+    Low = 3,
+    Min = 4
+};
+
+// 로딩 동작이다(3.12.1·3.40.3절, UE ESoundWaveLoadingBehavior와 같은 다섯 값). ForceInline은
+// 스트리밍하지 않는다(UE처럼 길이와 상관없이 상주 압축 실시간 디코드). 나머지 셋은
+// 스트리밍한다(AU6a는 셋 다 상주 압축 실시간 디코드 — 첫 청크를 붙잡는 차이는 청크 캐시가 생기는
+// AU6b). Inherited는 엔진 설정 audio.stream.defaultloading(1–3)을 따른다. ForceInline은 clip에만 둘
+// 수 있다.
+ROCKS_ENUM()
+enum class SoundLoadingBehavior : uint8 {
+    Inherited = 0,
+    RetainOnLoad = 1,
+    PrimeOnLoad = 2,
+    LoadOnDemand = 3,
+    ForceInline = 4
+};
+
 // 원본 bulk의 표본 저장 형식이다(3.10.1절 저장 규칙). planar, little-endian, 헤더 없음.
 ROCKS_ENUM()
 enum class SoundSourceStorage : uint8 {

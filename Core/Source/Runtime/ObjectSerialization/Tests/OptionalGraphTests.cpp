@@ -222,16 +222,16 @@ TEST(OptionalGraph_WireErrorsAreRejected) {
         };
 
         const uint8 presentTwo[] = {2};
-        CHECK(load("count", optionalWire, presentTwo) == ErrorCode::InvalidArgument);
+        CHECK(load("count", optionalWire, presentTwo) == ErrorCode::CorruptData);
         const uint8 unsetTrailing[] = {0, 1};
-        CHECK(load("count", optionalWire, unsetTrailing) == ErrorCode::InvalidArgument);
+        CHECK(load("count", optionalWire, unsetTrailing) == ErrorCode::CorruptData);
         auto wrongInner =
             OptionalPayload(allocator, true, WireType::I64,
                             [](ArchiveWriter& out) noexcept { return out.WriteI64(1).IsOk(); });
         CHECK(load("count", optionalWire, wrongInner.View()) == ErrorCode::TypeMismatch);
         // ValueArray(13)는 Optional 내부 자리의 tag가 아니다(present 1 + u32 13 + 0 byte).
         const uint8 arrayInner[] = {1, 13, 0, 0, 0};
-        CHECK(load("count", optionalWire, arrayInner) == ErrorCode::InvalidArgument);
+        CHECK(load("count", optionalWire, arrayInner) == ErrorCode::CorruptData);
         ArchiveWriter plain(allocator);
         REQUIRE(plain.WriteU32(5));
         CHECK(load("count", static_cast<uint32>(WireType::U32), plain.View()) ==
@@ -251,12 +251,12 @@ TEST(OptionalGraph_WireErrorsAreRejected) {
         REQUIRE(trailing.WriteU32(static_cast<uint32>(WireType::Record)));
         REQUIRE(trailing.WriteRaw(own.View()));
         REQUIRE(trailing.WriteBool(false));
-        CHECK(load("point", optionalWire, trailing.View()) == ErrorCode::InvalidArgument);
+        CHECK(load("point", optionalWire, trailing.View()) == ErrorCode::CorruptData);
 
         auto undeclared =
             OptionalPayload(allocator, true, WireType::I64,
                             [](ArchiveWriter& out) noexcept { return out.WriteI64(0).IsOk(); });
-        CHECK(load("mode", optionalWire, undeclared.View()) == ErrorCode::InvalidArgument);
+        CHECK(load("mode", optionalWire, undeclared.View()) == ErrorCode::CorruptData);
         auto wide =
             OptionalPayload(allocator, true, WireType::I64,
                             [](ArchiveWriter& out) noexcept { return out.WriteI64(200).IsOk(); });

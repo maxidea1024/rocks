@@ -278,7 +278,7 @@ TEST(SetWire_HeaderChecksRejectNonKeyTagsInOrder) {
     // 저장 tag가 키 tag가 아니면 InvalidArgument(기대 tag와 달라도 — 형식 오류가 먼저)다.
     for (uint32 tag : NotKeyTags) {
         auto bytes = SetHeader(allocator, tag, 1, 8);
-        CHECK(SetError(bytes.View(), Wire(WireType::U64), 1) == ErrorCode::InvalidArgument);
+        CHECK(SetError(bytes.View(), Wire(WireType::U64), 1) == ErrorCode::CorruptData);
     }
 
     // 키 tag끼리 다르면 TypeMismatch다(크기 검사보다 먼저).
@@ -288,20 +288,20 @@ TEST(SetWire_HeaderChecksRejectNonKeyTagsInOrder) {
     // count > maxCount는 크기 검사보다 먼저 CapacityExceeded다.
     auto many = SetHeader(allocator, Wire(WireType::U32), 3);
     CHECK(SetError(many.View(), Wire(WireType::U32), 2) == ErrorCode::CapacityExceeded);
-    CHECK(SetError(many.View(), Wire(WireType::U32), 3) == ErrorCode::InvalidArgument);
+    CHECK(SetError(many.View(), Wire(WireType::U32), 3) == ErrorCode::CorruptData);
 
     // count 사전 검사: 고정 폭은 정확히, 가변은 최소 크기(String 8·Soft 24) 이상.
     auto extra = SetHeader(allocator, Wire(WireType::U32), 2, 9);
-    CHECK(SetError(extra.View(), Wire(WireType::U32), 10) == ErrorCode::InvalidArgument);
+    CHECK(SetError(extra.View(), Wire(WireType::U32), 10) == ErrorCode::CorruptData);
     auto shortSoft = SetHeader(allocator, Wire(WireType::SoftObjectReference), 2, 47);
     CHECK(SetError(shortSoft.View(), Wire(WireType::SoftObjectReference), 10) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 
     // header 잘림.
     const uint8 truncated[] = {2, 0, 0, 0, 1, 0, 0};
     for (usize length = 0; length < sizeof(truncated); ++length) {
         CHECK(SetError(Span<const uint8>(truncated, length), Wire(WireType::U32), 1) ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // count만큼의 work를 원소 읽기 전에 청구한다.
@@ -320,8 +320,7 @@ TEST(SetWire_HeaderChecksRejectNonKeyTagsInOrder) {
         REQUIRE(digests.TryPushBack(0));
     }
 
-    CHECK(SetError(digests.View(), Wire(WireType::Bytes), 2, {40, true}) ==
-          ErrorCode::InvalidArgument);
+    CHECK(SetError(digests.View(), Wire(WireType::Bytes), 2, {40, true}) == ErrorCode::CorruptData);
     CHECK(SetError(digests.View(), Wire(WireType::Bytes), 2) == ErrorCode::None);
 }
 
@@ -560,14 +559,14 @@ TEST(MapWire_HeaderChecksRunInOrder) {
         auto bytes = MapHeader(allocator, u32, tag, 0);
         CHECK(MapError(bytes.View(), u32, tag, 1) == ErrorCode::None);
         auto swapped = MapHeader(allocator, tag, u32, 0);
-        CHECK(MapError(swapped.View(), u32, u32, 1) == ErrorCode::InvalidArgument);
+        CHECK(MapError(swapped.View(), u32, u32, 1) == ErrorCode::CorruptData);
     }
 
     // 저장 tag가 그 자리의 것이 아니면 InvalidArgument가 TypeMismatch보다 먼저다(키는 맞고 값이
     // 형식 밖이어도, 키가 달라도).
     for (uint32 tag : notValueTags) {
         auto bytes = MapHeader(allocator, Wire(WireType::I64), tag, 1, 12);
-        CHECK(MapError(bytes.View(), u32, u64, 1) == ErrorCode::InvalidArgument);
+        CHECK(MapError(bytes.View(), u32, u64, 1) == ErrorCode::CorruptData);
     }
 
     // 키·값 tag가 다르면 TypeMismatch다.
@@ -579,16 +578,16 @@ TEST(MapWire_HeaderChecksRunInOrder) {
     // count > maxCount는 크기보다 먼저 CapacityExceeded, count × (키 + 값) 사전 검사.
     auto many = MapHeader(allocator, u32, u64, 3);
     CHECK(MapError(many.View(), u32, u64, 2) == ErrorCode::CapacityExceeded);
-    CHECK(MapError(many.View(), u32, u64, 3) == ErrorCode::InvalidArgument);
+    CHECK(MapError(many.View(), u32, u64, 3) == ErrorCode::CorruptData);
     auto fixedExtra = MapHeader(allocator, u32, u64, 2, 25);
-    CHECK(MapError(fixedExtra.View(), u32, u64, 10) == ErrorCode::InvalidArgument);
+    CHECK(MapError(fixedExtra.View(), u32, u64, 10) == ErrorCode::CorruptData);
     auto fixedExact = MapHeader(allocator, u32, u64, 2, 24);
     CHECK(MapError(fixedExact.View(), u32, u64, 10) == ErrorCode::None);
     // 가변이 섞이면 하한만 본다: String 키 8 + Record 값 52 = 60, 두 항목이면 정확히 120이 경계다.
     auto shortRecords =
         MapHeader(allocator, Wire(WireType::String), Wire(WireType::Record), 2, 119);
     CHECK(MapError(shortRecords.View(), Wire(WireType::String), Wire(WireType::Record), 10) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     auto exactRecords =
         MapHeader(allocator, Wire(WireType::String), Wire(WireType::Record), 2, 120);
     CHECK(MapError(exactRecords.View(), Wire(WireType::String), Wire(WireType::Record), 10) ==
@@ -601,7 +600,7 @@ TEST(MapWire_HeaderChecksRunInOrder) {
     // header 잘림(키 tag·값 tag·count의 모든 접두).
     for (usize length = 0; length < 12; ++length) {
         CHECK(MapError(Span<const uint8>(valid.Data(), length), u32, u64, 1) ==
-              ErrorCode::InvalidArgument);
+              ErrorCode::CorruptData);
     }
 
     // count만큼의 work를 항목 읽기 전에 청구한다.
@@ -627,7 +626,7 @@ TEST(MapWire_HeaderChecksRunInOrder) {
 
     AppendU32(digests, 2);
     CHECK(MapError(digests.View(), Wire(WireType::Bytes), u32, 2, digest) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
     CHECK(MapError(digests.View(), Wire(WireType::Bytes), u32, 2) == ErrorCode::None);
     digests[12 + 44 + 0] = 32;
     CHECK(MapError(digests.View(), Wire(WireType::Bytes), u32, 2, digest) == ErrorCode::None);
@@ -656,11 +655,11 @@ TEST(MapWire_SizePrecheckRunsBeforeAnyAllocation) {
     counting.FailOnAttempt(1);
     auto opened = MapWireReader::OpenField(parent.Value(), field.Value(), Wire(WireType::String),
                                            Wire(WireType::Record), NumericLimits<uint32>::Max());
-    CHECK(!opened && opened.Error() == ErrorCode::InvalidArgument);
+    CHECK(!opened && opened.Error() == ErrorCode::CorruptData);
     CHECK(counting.Attempts() == 0);
     auto set = SetHeader(backing, Wire(WireType::Guid), NumericLimits<uint32>::Max(), 16);
     CHECK(SetError(set.View(), Wire(WireType::Guid), NumericLimits<uint32>::Max()) ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CorruptData);
 }
 
 TEST(MapWire_WriterLimitsAndMisuse) {

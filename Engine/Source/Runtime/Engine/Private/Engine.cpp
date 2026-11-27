@@ -8,6 +8,9 @@
 #include <Core/ScopeExit.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <Engine/ModuleStartProgress.h>
+#include <Localization/Text.h>
+#include <Progress/ProgressScope.h>
 #include <World/DiagnosticText.h>
 #include <World/WorldLog.h>
 #include <Platform/Atomics.h>
@@ -64,6 +67,33 @@ const char* InitStageName(InitStage stage) noexcept {
     return InitStageNames[static_cast<usize>(stage)];
 }
 
+// Engine::Initialize 진행 구간의 몫이다(Docs/Design/SplashScreen 8.1절 — 엔진 단계 모듈 60,
+// Registry·EngineSubsystem 30, PostEngineInit 10). 바인딩 없는 실행에서는 구간이 아무 일도 하지
+// 않는다.
+constexpr double EngineInitTotalWork = 100.0;
+constexpr double EngineInitModulesWork = 60.0;
+constexpr double EngineInitSubsystemsWork = 30.0;
+constexpr double EngineInitFinishWork = 10.0;
+static_assert(EngineInitModulesWork + EngineInitSubsystemsWork + EngineInitFinishWork ==
+                  EngineInitTotalWork,
+              "Engine::Initialize progress steps must fill the scope");
+
+// 진행 단계에 들어간다. 문구는 보고가 쓰일 때만 만든다(할당).
+void EnterEngineInitStep(ProgressScope& scope, Allocator& allocator, double work,
+                         StringView message) noexcept {
+    if (!scope.IsReporting()) {
+        scope.EnterStep(work);
+        return;
+    }
+
+    auto text = Text::Invariant(allocator, message);
+    if (text) {
+        scope.EnterStep(work, text.Value());
+    } else {
+        scope.EnterStep(work);
+    }
+}
+
 // 초기화 단계 하나 동안 "Stage" 로그 문맥을 건다.
 class InitStageContext {
 public:
@@ -86,9 +116,11 @@ void KeepFirst(Result<void>& outcome, const char*& failedStage, Result<void>&& s
 
 // 엔진 Registry는 서브시스템 초기화 동안 영구 창을 연다(Docs/Design/GarbageCollectionScale.ko.md
 // 13.7절).
-RegistryOptions EngineRegistryOptions() noexcept {
+RegistryOptions EngineRegistryOptions(NamePool& names) noexcept {
     RegistryOptions options;
     options.permanentRegion = true;
+    // 엔진 이름 pool이다(31.2절).
+    options.names = &names;
     return options;
 }
 
@@ -209,6 +241,14 @@ ObjectRegistry& Engine::Objects() noexcept {
     return *objects_;
 }
 
+NamePool& Engine::Names() noexcept {
+    if (!names_) {
+        Log::Fatal(LogEngine, "Engine::Names called before initialization");
+    }
+
+    return *names_;
+}
+
 Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     // 호출 순서 오류는 호출자가 다룬다(로그를 남기지 않는다).
     if (state_ != EngineState::Uninitialized) {
@@ -233,6 +273,9 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         return Result<void>::Failure(error);
     };
 
+    // 시작 화면 진행(Docs/Design/SplashScreen 8.1절): 엔진 단계 모듈 → Registry·Subsystem → 마무리.
+    ProgressScope progress(EngineInitTotalWork);
+    EnterEngineInitStep(progress, allocator_, EngineInitModulesWork, "Starting engine modules");
     {
         InitStageContext stage(InitStage::TypeRegistry);
         auto types = UniquePtr<TypeRegistry>::TryMake(allocator_, allocator_);
@@ -274,12 +317,25 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         initializedSteps_ = StepTypesRegistered;
     }
 
+    EnterEngineInitStep(progress, allocator_, EngineInitSubsystemsWork,
+                        "Creating engine subsystems");
     {
         InitStageContext stage(InitStage::ObjectRegistry);
+        // 엔진 이름 pool을 Registry보다 먼저 연다(31.2절 — Registry·World가 빌린다).
+        auto names = UniquePtr<NamePool>::TryMake(allocator_, allocator_);
+        if (!names) {
+            return fail(InitStage::ObjectRegistry, names.Error());
+        }
+
+        if (auto opened = names.Value()->Initialize(config_.names); !opened) {
+            return fail(InitStage::ObjectRegistry, opened.Error());
+        }
+
+        names_ = Move(names.Value());
         // 서브시스템 초기화 동안 만든 객체는 영구 영역에 둔다(GC 표식·sweep 비용 없음 — GC 설계
         // 13.7절, Docs/Design/GarbageCollectionScale.ko.md). 초기화 뒤 닫는다.
-        auto objects = UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_,
-                                                          config_.context, EngineRegistryOptions());
+        auto objects = UniquePtr<ObjectRegistry>::TryMake(
+            allocator_, allocator_, *types_, config_.context, EngineRegistryOptions(*names_));
         if (!objects) {
             return fail(InitStage::ObjectRegistry, objects.Error());
         }
@@ -373,6 +429,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     {
         // 클라이언트 시작 뒤 첫 프레임 전 단계다(UE PostEngineInit). 실패하면 시작한 클라이언트를
         // 먼저 멈춘 뒤 초기화 실패 정리를 한다.
+        EnterEngineInitStep(progress, allocator_, EngineInitFinishWork, "Finishing engine startup");
         InitStageContext stage(InitStage::PostEngineInit);
         if (auto started = StartPostEngineInitModules(); !started) {
             if (config_.client != nullptr) {
@@ -467,6 +524,18 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
         }
 
         types_.Reset();
+    }
+
+    // 엔진 이름 pool은 마지막에 닫는다(Registry가 모두 닫혔다 — 남은 lease는 수명 위반).
+    if (names_) {
+        if (auto closed = names_->Shutdown(); !closed) {
+            Log::Fatal(LogEngine,
+                       "Engine {Registry} could not shut down after initialization failure at "
+                       "{Stage}: {Error}",
+                       "NamePool", stage, ErrorCodeName(closed.Error()));
+        }
+
+        names_.Reset();
     }
 
     initializedSteps_ = 0;
@@ -583,6 +652,10 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.context = {WorldContextHigh, nextWorldContext_++};
     worldDesc.timeStep = desc.timeStep;
     worldDesc.objects = desc.objects;
+    // 호출자가 pool을 주지 않으면 엔진 이름 pool이다(31.2절).
+    if (worldDesc.objects.names == nullptr) {
+        worldDesc.objects.names = names_.Get();
+    }
     worldDesc.gcBudget = desc.gcBudget;
     worldDesc.gcSchedule = desc.gcSchedule;
     worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
@@ -1054,6 +1127,16 @@ Result<void> Engine::Shutdown() noexcept {
         types_.Reset();
     }
 
+    // 엔진 이름 pool은 마지막에 닫는다(31.2절 — Registry·World가 모두 닫혔다).
+    if (names_) {
+        if (auto closed = names_->Shutdown(); !closed) {
+            LogShutdownFailure("NamePool", closed.Error());
+            return closed;
+        }
+
+        names_.Reset();
+    }
+
     initializedSteps_ = 0;
     shutdownProgress_ = ShutdownNotStarted;
     state_ = EngineState::Stopped;
@@ -1092,7 +1175,12 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     attachedModules_ = loader;
     // 엔진 단계(PreDefault·Default·PostDefault) 모듈을 시작한다. 등록기가 붙어 있으므로 각 모듈의
     // 타입은 Startup 직전에 등록된다. 이미 다른 Engine이 시작했으면 사용자 수만 는다.
-    const ModuleLoadReport started = loader->StartEngineGroup();
+    ModuleLoadReport started;
+    {
+        ModuleStartProgress progress(*loader, allocator_);
+        started = loader->StartEngineGroup();
+    }
+
     if (!started.IsOk()) {
         Log::Error(LogEngine,
                    "Engine modules could not start ({Code}): {Module} failed at {Stage}: {Message}",
@@ -1107,7 +1195,12 @@ Result<void> Engine::AttachModuleTypes() noexcept {
 }
 
 Result<void> Engine::StartPostEngineInitModules() noexcept {
-    const ModuleLoadReport started = attachedModules_->StartPhase(LoadingPhase::PostEngineInit);
+    ModuleLoadReport started;
+    {
+        ModuleStartProgress progress(*attachedModules_, allocator_);
+        started = attachedModules_->StartPhase(LoadingPhase::PostEngineInit);
+    }
+
     if (!started.IsOk()) {
         Log::Error(LogEngine,
                    "PostEngineInit modules could not start ({Code}): {Module} failed at {Stage}: "

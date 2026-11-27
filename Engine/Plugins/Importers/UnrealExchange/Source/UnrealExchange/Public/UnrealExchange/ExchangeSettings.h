@@ -48,6 +48,9 @@ enum class ExchangeSettingKind : uint8 {
     Struct,
     // 값 struct 배열 — 원소마다 members 표로 재귀한다.
     StructArray,
+    // 값 이름이 Rocks와 다른 enum — members 표의 ueKey(UE 값 이름) → rocksKey(Rocks 열거자 이름)로
+    // 바꾼다(UnrealExchange 6.4절 3번). 표에 없는 값·문자열이 아닌 값은 CorruptData다.
+    EnumMap,
     // 설정이 아닌 UE 멤버 — 버린다.
     Ignore,
     // Rocks 필드가 없는 UE 설정 — 값이 defaultValue와 다르면 UnsupportedSetting 경고 뒤 버린다.
@@ -69,11 +72,14 @@ struct ExchangeSettingRow {
     // 이 행을 쓰는 출력 클래스 집합이다(ExchangeClassBit의 합 — 0이면 모든 클래스). 집합 밖
     // 클래스의 출력이면 경고 없이 버린다(다른 차원 클래스의 주소 키 등).
     uint32 classes = 0;
-    // Struct·StructArray의 멤버 표다.
+    // Struct·StructArray의 멤버 표, EnumMap의 값 대응 표다.
     const ExchangeSettingRow* members = nullptr;
     usize memberCount = 0;
     // Unsupported의 UE 기본값(JSON 텍스트)이다.
     StringView defaultValue;
+    // 출력 키다(UnrealExchange 5.5절 4번). 비면 UE 키에서 bool 접두 b만 뗀 이름이다(대소문자는
+    // ImportJson이 무시한다 — 이름이 다른 행만 채운다, 예: BuildScale3D → buildScale).
+    StringView rocksKey;
 };
 
 // 경고 하나다. key는 settings 문서를 가리킨다(문서가 살아 있는 동안 유효).
@@ -99,9 +105,9 @@ struct ExchangeSettingInput {
 // 더한다(설정 순서). 키 순서는 settings 순서다.
 //
 // 오류: settings가 객체가 아님·행 종류와 맞지 않는 값(Guid가 int32 넷 객체가 아님, 참조가 null도
-// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음, Unsupported
-// 기본값 텍스트가 JSON이 아님) InvalidArgument, writer 오류(중복 키·깊이 등 — writer는 실패 상태),
-// 할당 실패. 실패하면 writer·warnings 결과를 버린다.
+// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음 — 덤프 내용)
+// CorruptData, Unsupported 기본값 텍스트가 JSON이 아님(행 표의 결함) InvalidArgument, writer
+// 오류(중복 키·깊이 등 — writer는 실패 상태), 할당 실패. 실패하면 writer·warnings 결과를 버린다.
 ROCKS_UNREALEXCHANGE_API Result<void>
 TranslateExchangeSettings(const ExchangeSettingInput& input, JsonWriter& writer,
                           Array<ExchangeSettingWarning>& warnings) noexcept;

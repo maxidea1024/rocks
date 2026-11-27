@@ -10,6 +10,7 @@
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
 #include <Windows.h>
+#include <ShObjIdl.h>
 #include <ShellScalingApi.h>
 #include <dwmapi.h>
 #include <wincodec.h>
@@ -41,6 +42,16 @@ constexpr DWORD DwmCornerRound = 2;
 // WIC 이미징 factory의 CLSID다(CLSID_WICImagingFactory — uuid 라이브러리 없이 쓰려고 값으로 둔다).
 constexpr CLSID WicImagingFactoryClsid = {
     0xcacaf262, 0x9370, 0x4615, {0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}};
+
+// 작업 표시줄 진행(CLSID_TaskbarList — uuid.lib 없이 쓰려고 값을 둔다, 설계 7.3절)이다.
+constexpr CLSID TaskbarListClsid = {
+    0x56fdf344, 0xfd6d, 0x11d0, {0x95, 0x8a, 0x00, 0x60, 0x97, 0xc9, 0xa0, 0x90}};
+
+// 작업 표시줄 단추가 생겼음을 알리는 등록 메시지 이름이다.
+constexpr const wchar_t* TaskbarButtonCreatedMessageName = L"TaskbarButtonCreated";
+
+// 작업 표시줄 진행 값의 분모다(막대 값 × 이 값).
+constexpr ULONGLONG TaskbarProgressScale = 1000;
 
 // 미리 곱한 alpha BGRA 32bpp 형식(GUID_WICPixelFormat32bppPBGRA)이다.
 constexpr GUID WicPixelFormat32bppPbgra = {
@@ -90,6 +101,10 @@ public:
 
     T* operator->() const noexcept {
         return pointer_;
+    }
+
+    bool IsValid() const noexcept {
+        return pointer_ != nullptr;
     }
 
     void Reset() noexcept {
@@ -221,10 +236,22 @@ public:
         const LONG y = work.top + ((work.bottom - work.top) - height) / 2;
         const DWORD extendedStyle =
             setup.kind == SplashKind::Studio ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW;
+        // Studio만 작업 표시줄 진행을 보인다(게임 스플래시는 작업 표시줄에 없다). 단추가 생긴 뒤
+        // 등록 메시지가 오면 ITaskbarList3을 만든다(그 전 값은 들고 있다가 적용한다).
+        if (setup.kind == SplashKind::Studio) {
+            taskbarButtonMessage_ = RegisterWindowMessageW(TaskbarButtonCreatedMessageName);
+        }
+
         window_ = CreateWindowExW(extendedStyle, SplashWindowClassName, title, WS_POPUP, x, y,
                                   width, height, nullptr, nullptr, instance, this);
         if (window_ == nullptr) {
             return fail(SplashSkipReason::WindowFailed, "CreateWindowExW", GetLastError());
+        }
+
+        // 관리자 권한으로 돌면 UIPI가 explorer의 등록 메시지를 막으므로 이 창에만 허용한다.
+        if (taskbarButtonMessage_ != 0) {
+            (void)ChangeWindowMessageFilterEx(window_, taskbarButtonMessage_, MSGFLT_ALLOW,
+                                              nullptr);
         }
 
         const DWORD corner = DwmCornerRound;
@@ -245,6 +272,12 @@ public:
         DrawBar(model);
         DrawTexts(model);
         InvalidateRect(window_, nullptr, FALSE);
+        if (kind_ == SplashKind::Studio) {
+            taskbarMode_ = model.BarMode();
+            taskbarValue_ = static_cast<ULONGLONG>(
+                platform::PlatformMath::Round(model.BarValue() * TaskbarProgressScale));
+            ApplyTaskbar();
+        }
     }
 
     void SetSuspended(bool suspended) noexcept override {
@@ -335,7 +368,7 @@ private:
         const SplashImageVariant variant =
             ChooseSplashVariant(scale, !setup.standardPath.IsEmpty(), !setup.doublePath.IsEmpty());
         const usize chosen = variant == SplashImageVariant::Double ? 1 : 0;
-        layout_ = ComputeSplashLayout(logical.Value(), scale);
+        layout_ = ComputeSplashLayout(logical.Value(), scale, setup.placements, setup.bar);
 
         ComRef<IWICFormatConverter> converter;
         result = factory->CreateFormatConverter(converter.Out());
@@ -455,6 +488,10 @@ private:
 
     void CreateFonts() noexcept {
         for (usize index = 0; index < SplashTextSlotCount; ++index) {
+            if (!layout_.placed[index]) {
+                continue;
+            }
+
             const SplashTextStyle& style = layout_.style[index];
             fonts_[index] = CreateFontW(
                 -style.fontPixels, 0, 0, 0, style.semibold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE,
@@ -485,14 +522,14 @@ private:
         }
 
         auto* pixels = static_cast<uint32*>(backBits_);
-        const uint32 fill = ToPixel(SplashBarFillColor);
+        const uint32 fill = ToPixel(layout_.barFillColor);
         for (int32 y = bar.top; y < bar.bottom; ++y) {
             uint32* row = pixels + static_cast<usize>(y) * layout_.window.width;
             for (int32 x = 0; x < width; ++x) {
                 uint32& pixel = row[bar.left + x];
                 pixel = (x >= fillStart && x < fillEnd)
                             ? fill
-                            : BlendPixel(pixel, SplashBarTrackColor, SplashBarTrackAlpha);
+                            : BlendPixel(pixel, layout_.barTrackColor, layout_.barTrackAlpha);
             }
         }
     }
@@ -503,7 +540,7 @@ private:
         for (usize index = 0; index < SplashTextSlotCount; ++index) {
             const auto slot = static_cast<SplashTextSlot>(index);
             const StringView utf8 = model.Text(slot);
-            if (!model.IsVisible(slot) || utf8.IsEmpty()) {
+            if (!layout_.placed[index] || !model.IsVisible(slot) || utf8.IsEmpty()) {
                 continue;
             }
 
@@ -531,7 +568,55 @@ private:
         GdiFlush();
     }
 
+    // 작업 표시줄 진행을 지금 막대에 맞춘다(단추가 생기기 전이면 아무 일도 하지 않는다).
+    void ApplyTaskbar() noexcept {
+        if (!taskbar_.IsValid() || window_ == nullptr) {
+            return;
+        }
+
+        // 프로세스 간 호출이라 바뀔 때만 부른다(보간·불확정 표시 중 Present는 60 Hz다).
+        if (taskbarApplied_ && taskbarMode_ == appliedTaskbarMode_ &&
+            (taskbarMode_ != SplashBarMode::Determinate || taskbarValue_ == appliedTaskbarValue_)) {
+            return;
+        }
+
+        taskbarApplied_ = true;
+        appliedTaskbarMode_ = taskbarMode_;
+        appliedTaskbarValue_ = taskbarValue_;
+
+        switch (taskbarMode_) {
+        case SplashBarMode::Hidden:
+            (void)taskbar_->SetProgressState(window_, TBPF_NOPROGRESS);
+            break;
+        case SplashBarMode::Indeterminate:
+            (void)taskbar_->SetProgressState(window_, TBPF_INDETERMINATE);
+            break;
+        case SplashBarMode::Determinate:
+            (void)taskbar_->SetProgressState(window_, TBPF_NORMAL);
+            (void)taskbar_->SetProgressValue(window_, taskbarValue_, TaskbarProgressScale);
+            break;
+        }
+    }
+
+    // 작업 표시줄 단추가 생겼다(등록 메시지). 실패하면 작업 표시줄 진행 없이 계속한다.
+    void OnTaskbarButtonCreated() noexcept {
+        if (FAILED(CoCreateInstance(TaskbarListClsid, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(taskbar_.Out()))) ||
+            FAILED(taskbar_->HrInit())) {
+            taskbar_.Reset();
+            return;
+        }
+
+        taskbarApplied_ = false;
+        ApplyTaskbar();
+    }
+
     void ReleaseResources() noexcept {
+        if (taskbar_.IsValid() && window_ != nullptr) {
+            (void)taskbar_->SetProgressState(window_, TBPF_NOPROGRESS);
+        }
+
+        taskbar_.Reset();
         if (window_ != nullptr) {
             HWND expected = window_;
             (void)ActiveSplashWindow.CompareExchangeStrong<platform::MemoryOrder::AcquireRelease,
@@ -595,6 +680,11 @@ private:
             return DefWindowProcW(window, message, wParam, lParam);
         }
 
+        if (self->taskbarButtonMessage_ != 0 && message == self->taskbarButtonMessage_) {
+            self->OnTaskbarButtonCreated();
+            return 0;
+        }
+
         switch (message) {
         case WM_PAINT: {
             PAINTSTRUCT paint;
@@ -637,6 +727,14 @@ private:
     SplashLayout layout_{};
     RECT workArea_{};
     SplashKind kind_ = SplashKind::Game;
+    // 작업 표시줄 진행(Studio만)이다.
+    UINT taskbarButtonMessage_ = 0;
+    ComRef<ITaskbarList3> taskbar_;
+    SplashBarMode taskbarMode_ = SplashBarMode::Indeterminate;
+    ULONGLONG taskbarValue_ = 0;
+    bool taskbarApplied_ = false;
+    SplashBarMode appliedTaskbarMode_ = SplashBarMode::Indeterminate;
+    ULONGLONG appliedTaskbarValue_ = 0;
     bool comInitialized_ = false;
     bool classRegistered_ = false;
     bool dialogHidden_ = false;

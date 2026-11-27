@@ -53,7 +53,7 @@ inline Result<Text> MakeParsedText(Allocator& allocator, const ParsedValue& pars
         return Text::Localized(allocator, parsed.guid, parsed.textRevision, parsed.text);
     }
 
-    return Result<Text>::Failure(ErrorCode::InvalidArgument);
+    return Result<Text>::Failure(ErrorCode::CorruptData);
 }
 
 // 읽은 ClassRef 값 하나(out.guid — 0이면 null)를 판정한다(리플렉션 B9d2 — Docs/Design/
@@ -96,7 +96,7 @@ inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId ba
     auto found = context.AcquireClassReference(out.guid, base);
     if (found) {
         if (!found.Value().IsNativeA(staticNative)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         out.deprecatedClass = HasFlag(found.Value().Schema().flags, TypeFlags::Deprecated);
@@ -127,10 +127,10 @@ inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId ba
 // reader에서 값 하나(type 종류)를 읽어 검증한다(단일 값 필드와 배열 원소 공용, 5.6절). 진단·청구는
 // 하지 않는다(강한 참조는 문맥의 ReadReference, weak 참조는 ReadWeakReference — 1단계는 token을
 // 남긴다, ClassRef는 ResolveClassReference가 조회 몫을 Spend하고 판정한다). 검증: 잘림·bool·UTF-8은
-// reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙 InvalidArgument, enum은
-// enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는 스키마로 판정해
+// reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙 CorruptData(AssetSystem 19장),
+// enum은 enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는 스키마로 판정해
 // out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는 단계(복원 1단계)면 그
-// 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, InvalidArgument)을
+// 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, CorruptData)을
 // 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다. Struct·Array·Opaque는 Unsupported다.
 // keyed는 Map 키·Set 원소 자리다(리플렉션 B9f2 — ClassRef 미등록은 정책과 무관하게 NotFound,
 // ResolveClassReference). 미선언 enum은 여기서 표시만 하므로 키 자리의 거부는 호출자가 한다.
@@ -250,8 +250,11 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
                 return spent;
             }
 
+            // 읽은 Name의 내용 규칙 위반은 손상이다(AssetSystem 19장 — 할당 실패는 그대로).
             if (auto valid = ValidateNameFieldText(decoded.Value(), context.Scratch()); !valid) {
-                return valid;
+                return Result<void>::Failure(valid.Error() == ErrorCode::InvalidArgument
+                                                 ? ErrorCode::CorruptData
+                                                 : valid.Error());
             }
         }
 
@@ -265,7 +268,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         }
 
         if (decoded.Value().Size() != Sha256Digest::Bytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         for (usize index = 0; index < Sha256Digest::Bytes; ++index) {
@@ -286,7 +289,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         }
 
         if (!SoftObjectRef<>::Validate(AssetId{asset.Value()}, path.Value())) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         out.guid = asset.Value();
@@ -375,7 +378,7 @@ inline Result<void> ResolveUndeclaredEnum(FieldDecodeContext& context, const Enu
 
     // 진단 없이 값을 바꾸지 않는다(직렬화기가 hook 없이 ReportAndDefault를 주면 거부).
     if (context.Policy().undeclaredEnum == UndeclaredEnumPolicy::Reject || !context.CanReport()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     if (auto spent = context.Spend(set ? set->LookupWork() : schema.values.Size()); !spent) {
@@ -474,7 +477,7 @@ inline Result<void> ParseValuePayload(ArchiveReader& reader, FieldDecodeContext&
     }
 
     if (!reader.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 진단·수집은 필드 검증이 끝난 뒤 보고한다(복원 2단계에서는 문맥이 버린다).
@@ -731,11 +734,11 @@ const void* StaticReferenceNative() noexcept {
     }
 }
 
-// 스키마에 없는 저장 필드다: unknownField 정책이 Reject면 InvalidArgument, 아니면 진단(경로는 지금
+// 스키마에 없는 저장 필드다: unknownField 정책이 Reject면 CorruptData, 아니면 진단(경로는 지금
 // 위치 — struct 안이면 감싼 필드까지) 뒤 건너뛴다. 객체 Record와 struct Record가 같이 쓴다.
 inline Result<void> SkipUnknownField(FieldDecodeContext& context, Guid fieldId) noexcept {
     if (context.Policy().unknownField == UnknownFieldPolicy::Reject) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return context.ReportUnknownField(fieldId);

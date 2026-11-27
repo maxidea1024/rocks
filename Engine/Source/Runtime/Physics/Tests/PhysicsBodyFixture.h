@@ -119,7 +119,13 @@ struct BodyWorldFixture {
     // 형상 컴포넌트 하나를 가진 Actor를 만든다. configure는 등록(body 생성) 전에 부른다.
     template <class T, class Configure>
     ObjectHandle SpawnShape(Configure&& configure) noexcept {
-        auto actor = world->SpawnActorDeferred<PhysicsTestActor>();
+        return SpawnShapeOn<PhysicsTestActor, T>(static_cast<Configure&&>(configure));
+    }
+
+    // SpawnShape와 같지만 Actor 클래스를 고른다(ActorT는 시험이 등록한 native 클래스).
+    template <class ActorT, class T, class Configure>
+    ObjectHandle SpawnShapeOn(Configure&& configure) noexcept {
+        auto actor = world->SpawnActorDeferred<ActorT>();
         if (!actor) {
             return {};
         }

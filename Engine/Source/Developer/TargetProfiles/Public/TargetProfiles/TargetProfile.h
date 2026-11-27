@@ -94,7 +94,47 @@ struct ShaderFormatList {
     ROCKS_PROPERTY() Array<String> formats;
 };
 
-// 대상 프로파일이다(10.2절 결정 2). 텍스처 칸은 12.14절(A5j), 셰이더 칸은 10.3절 1항(A4f1)이다.
+// 오디오 쿠킹 rate 칸이 받는 범위다(0은 재정의 없음 — Docs/Design/AudioSystem 3.39.1절). Audio
+// 모듈의 MinPlatformSampleRate·MaxPlatformSampleRate와 같다(AudioTools가 static_assert로 맞춘다 —
+// TargetProfiles는 Audio를 링크하지 않는다).
+inline constexpr uint32 AudioCookMinSampleRate = 8000;
+inline constexpr uint32 AudioCookMaxSampleRate = 192000;
+
+// 플랫폼 오디오 쿠킹 재정의다(Docs/Design/AudioSystem 3.39.1절, UE FPlatformAudioCookOverrides —
+// 기본값은 UE 멤버 기본값·BaseEngine.ini 플랫폼 절). rate는 0(재정의 없음)이거나
+// [AudioCookMinSampleRate, AudioCookMaxSampleRate]이고, 배수는 유한하고 0 이상이다.
+ROCKS_STRUCT()
+struct AudioCookOverrides {
+    ROCKS_GENERATED_BODY()
+
+    // 켜면 PCM16·ADPCM을 SoundClip sampleRateQuality의 rate로 낮춰 쿠킹한다(UE bResampleForDevice —
+    // Opus는 늘 48 kHz).
+    ROCKS_PROPERTY() bool resampleForDevice = false;
+    // sampleRateQuality(Max·High·Medium·Low·Min)별 rate 상한이다(UE PlatformSampleRates).
+    ROCKS_PROPERTY() uint32 maxSampleRate = 48000;
+    ROCKS_PROPERTY() uint32 highSampleRate = 32000;
+    ROCKS_PROPERTY() uint32 mediumSampleRate = 24000;
+    ROCKS_PROPERTY() uint32 lowSampleRate = 12000;
+    ROCKS_PROPERTY() uint32 minSampleRate = 8000;
+    // 모든 압축 품질에 곱한다(UE CompressionQualityModifier — floor 뒤 [1, 100]으로 자른다).
+    ROCKS_PROPERTY() float compressionQualityModifier = 1.0f;
+};
+
+// AudioCookOverrides 칸 번호다(TargetProfileField::AudioCook의 index — 검증·명령 메시지가 같이
+// 쓴다).
+enum class AudioCookFieldIndex : uint32 {
+    ResampleForDevice = 0,
+    MaxSampleRate = 1,
+    HighSampleRate = 2,
+    MediumSampleRate = 3,
+    LowSampleRate = 4,
+    MinSampleRate = 5,
+    CompressionQualityModifier = 6,
+    Count = 7
+};
+
+// 대상 프로파일이다(10.2절 결정 2). 텍스처 칸은 12.14절(A5j), 셰이더 칸은 10.3절 1항(A4f1), 오디오
+// 칸은 Docs/Design/AudioSystem 3.39절(AU5d)이다.
 ROCKS_STRUCT()
 struct TargetProfile {
     ROCKS_GENERATED_BODY()
@@ -118,6 +158,8 @@ struct TargetProfile {
     OrderedMap<TextureGroup, TextureLodGroup> textureLodGroups;
     // R16·RG16·RGBA16 Unorm 텍스처를 표본할 수 있는지다(false면 같은 채널 수의 16F — Android).
     ROCKS_PROPERTY() bool textureNorm16Supported = true;
+    // 오디오 쿠킹 재정의다(JSON은 칸별 병합 — 프로젝트 파일이 칸 하나만 덮는다).
+    ROCKS_PROPERTY() AudioCookOverrides audioCook;
 };
 
 // group의 그룹 값이다(표에 없으면 기본값).
@@ -199,7 +241,10 @@ enum class TargetProfileField : uint8 {
     // shaderFormats(index = backend 번호 — 형식 목록 없음·빔·형식 수 상한·형식 id 문법·전역 중복,
     // 단 목록에 없는 키는 Map 순서 번호, 셰이더 없는 프로파일의 빈 Map 아님은 0 — 판정
     // 순서는 10.3.1절).
-    ShaderFormats
+    ShaderFormats,
+    // audioCook(index = AudioCookFieldIndex — ResampleForDevice는 검사하지 않는다, Docs/Design/
+    // AudioSystem 3.39.1절).
+    AudioCook
 };
 
 struct TargetProfileFailure {
@@ -218,8 +263,8 @@ struct TargetProfileFailure {
 // 기본값에서 시작한다(id는 미리 채운다). 오류(InvalidArgument — failure의 code InvalidSetting): id
 // 형식(`[A-Za-z0-9_]`, 1–64 byte), 엔진 파일 없음(error NotFound도 InvalidSetting), JSON 문법, 대입
 // 진단(diagnostics), 파일의 id가 다름, bulkAlignment, 텍스처 LOD 그룹(12.14절), 셰이더 칸(10.3절
-// 1항 구조 검증). 파일 크기 상한 초과 CapacityExceeded, 읽기 오류는 그 오류, 할당 실패. 실패하면
-// out은 정해지지 않는다.
+// 1항 구조 검증), 오디오 쿠킹 칸(rate 범위·배수 — AudioSystem 3.39.1절). 파일 크기 상한 초과
+// CapacityExceeded, 읽기 오류는 그 오류, 할당 실패. 실패하면 out은 정해지지 않는다.
 ROCKS_TARGETPROFILES_API Result<void>
 ReadTargetProfile(const TargetProfileContext& context, StringView id, TargetProfile& out,
                   reflection_text::TextDiagnostics& diagnostics,

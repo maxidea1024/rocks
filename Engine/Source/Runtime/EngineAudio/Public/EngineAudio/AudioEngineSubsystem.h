@@ -2,6 +2,8 @@
 
 #include <Audio/AudioDecoder.h>
 #include <Audio/AudioOutputDevice.h>
+#include <Audio/AudioStreamService.h>
+#include <AudioAssets/SoundClip.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/BoundedSpscQueue.h>
 #include <Core/Math/Quaternion.h>
@@ -139,6 +141,15 @@ public:
         return decoders_;
     }
 
+    // 쿠킹 clip 로드(SoundClip::LoadCooked)의 엔진 설정 값이다(audio.stream.defaultloading —
+    // 3.40.3절). 설정 문맥이 없으면 기본값이다.
+    SoundCookedLoadOptions CookedLoadOptions() const noexcept;
+
+    // 스트림 디코드 서비스다(장치가 없으면 null — 진단·시험).
+    audio::AudioStreamService* StreamService() noexcept {
+        return streams_.Get();
+    }
+
     // 초기화 때 정한 실행 판정이다.
     const AudioRunTraits& RunTraits() const noexcept {
         return traits_;
@@ -221,6 +232,8 @@ private:
     AudioRunTraits traits_;
     AudioEngineHostOptions options_;
     audio::AudioDecoderTable decoders_;
+    // 장치보다 먼저 선언한다(믹서가 서비스의 깨우기 신호를 쥐므로 장치가 먼저 파괴된다).
+    UniquePtr<audio::AudioStreamService> streams_;
     UniquePtr<audio::AudioOutputDevice> device_;
     UniquePtr<AudioDeviceContext> context_;
     // DedicatedLane은 Task 모듈(Private 의존)이라 불투명하게 둔다.
@@ -244,6 +257,8 @@ private:
     AudioControlStats lastControlStats_;
     bool foreground_ = true;
     bool accepting_ = false;
+    // 엔진에 설정 문맥이 있었는지다(CVar를 읽을 수 있다).
+    bool hasSettings_ = false;
     bool drained_ = true;
     AudioEngineStats stats_;
 };

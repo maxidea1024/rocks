@@ -357,7 +357,7 @@ TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndKeepDefaults) {
                 const uint32 constructed = StructOwner::constructed;
                 CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       editor.Value().View(), load)
-                          .Error() == ErrorCode::InvalidArgument);
+                          .Error() == ErrorCode::CorruptData);
                 CHECK(StructOwner::constructed == constructed);
             }
 

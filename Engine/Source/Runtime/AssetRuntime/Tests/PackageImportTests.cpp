@@ -92,7 +92,7 @@ bool CorruptOnPrepare(AssetEnv& env, Array<uint8>&& bytes, PackageKind kind,
     bool prepared = false;
     const AssetDiagnostic failure = PrepareFailure(env, Move(bytes), kind, prepared);
     return !prepared && failure.code == AssetDiagnosticCode::CorruptPackage &&
-           failure.error == ErrorCode::InvalidArgument &&
+           failure.error == ErrorCode::CorruptData &&
            failure.section == static_cast<uint32>(section);
 }
 

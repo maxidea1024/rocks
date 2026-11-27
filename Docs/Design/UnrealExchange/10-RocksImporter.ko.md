@@ -34,6 +34,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 | `UnsupportedAsset` | 경고 | 범위 밖 클래스(2절) |
 | `UnsupportedSourceLayout` | 오류 | UDIM·다층·위도경도 큐브 |
 | `GammaMismatch` | 경고 | 4.2절 |
+| `UnrealNameNormalized` | 경고 | 메시 원본 속성 이름·Name 값을 NFC로 바꿈(5.5절 1번) |
 | `GeneratedLodBaked` / `BakedColorQuantized` | 정보 | 5.1·6.2절 |
 | `UnrealPathRenamed` | 정보 | 9.1절 |
 | `UnrealPathTooLong` / `UnrealPathCollision` | 오류 | 9.1절 |
@@ -43,13 +44,15 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 
 메시·애니메이션 데이터 검증 진단은 MeshAnimationAssets 11절, 텍스처는 AssetSystem 4.6절 코드를 그대로 쓴다.
 
+오류 값(2026-11-27 — AssetSystem 19장 `CorruptData` 이전): 묶음은 도구(RocksExport)가 쓰고 도구가 읽는 파일이므로 `CorruptBundle` 진단의 형식 위반(JSON 구문·필수 키·종류·값·정렬·blob 크기·SHA-256·가변 배치·일반 파일 아님·목록 대조)은 `CorruptData`다. 상한은 `CapacityExceeded`, 판은 `Unsupported`, 파일 IO는 그 파일 오류 그대로다. 종류별 단계도 같다 — 텍스처 원본 형식 위반(4.6절 2번 — `CorruptBundle`과 클래스 slice 규칙 `InvalidSource`)과 설정 덤프 번역·`ImportJson` 거부(10.6절 8번)는 `CorruptData`다. `InvalidArgument`로 두는 것: 명령 인자·`--root`·`--only`(사람의 입력), 호출 계약 위반(선택이 Hard 닫힘이 아님 등), 임포터 선택·옵션 대입(`--importer`·`objectPath` 불일치·쓰지 않는 blob 원본 — 호출자가 준 원본 목록), 플러그인 error 진단(`InvalidSource` — 손상이 아니라 내보내기가 실패를 알린 것).
+
 ### 10.4 구현에서 정한 점(UX1a)
 
 UX1a 구현(플러그인 모듈 `UnrealExchange`의 묶음 리더·검증, 경로 대응, 임포트 순서) 중 3·9·10.3절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. 에셋 DB에 쓰는 부분(임포트 서비스 연결, 기존 에셋 찾기, `--only` 닫힘, 명령 등록)은 UX1b다.
 
 1. **파일과 의존.** 공개 헤더는 `UnrealExchange/UnrealExchangeFormat.h`(상수), `ExchangeDiagnostic.h`(진단), `ExchangeBundle.h`(리더·메모리 형태·blob 읽기), `ExchangePaths.h`(경로 대응), `ExchangeImportOrder.h`(임포트 순서)다. 모듈 공개 의존은 Core·AssetRuntime(`AssetDiagnosticCode`)·MeshSource(가변 배치 상한 `MeshMaxSourceInfluences`, Name 길이 상한 `MaxNameFieldBytes`)다. 10.1절 표의 나머지 의존은 그것을 쓰는 단계(UX1b–UX8)에서 더한다. 파일 접근은 `platform::FileSystem`을 인자로 받는다(시험은 메모리 파일 시스템을 쓴다).
 2. **실패 범위.** 묶음 수준 오류(`bundle.json`을 읽지 못함·구문 오류·필수 키 누락·`formatVersion` 불일치·목록 정렬 위반)는 읽기 전체를 실패시킨다. 에셋 수준 오류(에셋 JSON 손상, blob 크기·SHA-256·배치 불일치, 목록과 다른 `objectPath`·`class`)는 그 에셋만 `Failed` 상태로 두고 나머지를 계속 읽는다(9.3절 "부분 결과" 원칙). 실패한 에셋을 Hard로 참조하는 에셋은 순서 계산(15번)에서 `MissingDependency`로 실패한다. 파일을 열거나 읽지 못하면(없음 포함) `CorruptBundle`(세부 규칙 `ReadFailed`)이고 원래 파일 오류를 `error`에 그대로 남긴다. 할당 실패는 진단 없이 그 오류 그대로 전체 실패다.
-3. **진단 형태.** `ExchangeDiagnostic`은 AssetSystem 4.6절 코드, 수준(오류·경고·정보 — 코드마다 고정, 10.3절 표), 원본 `ErrorCode`, 세부 규칙 `ExchangeIssue`, 에셋 번호, 관련 번호(의존 대상 에셋·의존 순번), 파일 종류(`bundle.json`·에셋 JSON·blob), JSON 위치(줄·열·byte), 짧은 텍스트(키 이름·objectPath·blob hex)를 담는다. 묶음 하나의 진단은 `UnrealExchangeMaxDiagnostics`(= 4096)개까지 담고 넘는 것은 개수만 센다(조작된 묶음이 모르는 키 수백만 개로 메모리를 쓰지 못하게). 이 단계에서 등록하는 코드는 리더·경로·순서가 내는 8개(`CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`)다. `UnsupportedCycle`·`MissingDependency`·`InvalidPath`는 기존 코드를 쓴다. 나머지 10.3절 코드는 그것을 내는 단계에서 등록한다. 원본 `ErrorCode`는 손상 `InvalidArgument`(상한 초과는 `CapacityExceeded`), 버전 `Unsupported`, `UnrealPathTooLong` `CapacityExceeded`, `UnrealPathCollision` `AlreadyExists`, `UnsupportedCycle` `CycleDetected`, `MissingDependency` `NotFound`, `InvalidPath` `InvalidArgument`이고 경고·정보는 `None`이다.
+3. **진단 형태.** `ExchangeDiagnostic`은 AssetSystem 4.6절 코드, 수준(오류·경고·정보 — 코드마다 고정, 10.3절 표), 원본 `ErrorCode`, 세부 규칙 `ExchangeIssue`, 에셋 번호, 관련 번호(의존 대상 에셋·의존 순번), 파일 종류(`bundle.json`·에셋 JSON·blob), JSON 위치(줄·열·byte), 짧은 텍스트(키 이름·objectPath·blob hex)를 담는다. 묶음 하나의 진단은 `UnrealExchangeMaxDiagnostics`(= 4096)개까지 담고 넘는 것은 개수만 센다(조작된 묶음이 모르는 키 수백만 개로 메모리를 쓰지 못하게). 이 단계에서 등록하는 코드는 리더·경로·순서가 내는 8개(`CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`)다. `UnsupportedCycle`·`MissingDependency`·`InvalidPath`는 기존 코드를 쓴다. 나머지 10.3절 코드는 그것을 내는 단계에서 등록한다. 원본 `ErrorCode`는 손상 `CorruptData`(상한 초과는 `CapacityExceeded` — 10.3절 오류 값), 버전 `Unsupported`, `UnrealPathTooLong` `CapacityExceeded`, `UnrealPathCollision` `AlreadyExists`, `UnsupportedCycle` `CycleDetected`, `MissingDependency` `NotFound`, `InvalidPath` `InvalidArgument`이고 경고·정보는 `None`이다.
 4. **JSON 읽기.** Core JSON Strict 읽기에 상한 `UnrealExchangeMaxJsonBytes`(= 64 MiB, 파일 하나)를 준다. 깊이·문자열·노드 상한은 Core 기본값이다. BOM은 Core가 경고로 건너뛰지만 3.2절이 BOM 없음을 정하므로 `CorruptBundle`이다. 중복 키는 Core가 구문 오류로 거부한다. 정수 키(`formatVersion`·`bytes`·`components`·`count`)는 JSON 정수여야 한다(`1.0`·지수 표기는 타입 오류). 실수 값은 숫자 또는 문자열 `"nan"`·`"inf"`·`"-inf"`만 받는 공용 함수(`ReadExchangeNumber`)로 읽는다. 종류별 단계가 `settings`·`data`를 읽을 때 쓴다.
 5. **필수 키와 모르는 키.** 필수: `bundle.json`의 `formatVersion`·`exporter`(문자열 4개)·`projectSettings`(bool 2개)·`assets`·`redirects`, 에셋 JSON의 7개 키 전부, 목록·의존·진단·blob 참조 항목의 모든 키. 선택: `environment`(정보, 객체, 내용은 보지 않는다)·`createdUtc`(정보, 문자열). `formatVersion`을 가장 먼저 보므로 다른 버전의 묶음은 스키마 차이와 무관하게 `UnsupportedBundleVersion`이다. 모르는 키 검사(`UnknownField` 경고)는 이 절의 고정 스키마 객체에만 한다. `settings`·`data`·`environment`는 종류별 단계가 본다.
 6. **정렬과 유일성.** `assets`는 `objectPath`의 UTF-8 byte 순으로 엄격 증가(같은 경로 둘은 손상), `redirects`는 `from` 순 엄격 증가, 에셋의 `dependencies`는 `objectPath` 순 엄격 증가다(같은 객체를 두 번 적지 않는다 — Hard·Soft로 모두 참조하면 Hard 하나). 내보내는 쪽이 결정적으로 쓰는 규칙(3.2절)을 리더가 확인해 같은 묶음의 해석이 하나로 정해지게 한다. 3.4·3.5절 표에 반영했다.
@@ -72,7 +75,7 @@ UX1a 구현(플러그인 모듈 `UnrealExchange`의 묶음 리더·검증, 경�
 - 사유를 남기고 닿지 않는 분기: 없음.
 
 18. **묶음 JSON 합 상한(개정 15).** 리더는 bundle.json과 모든 에셋 JSON 문서를 메모리에 둔다. 그래서 파일 하나 상한(`UnrealExchangeMaxJsonBytes`, 64 MiB)에 더해 읽은 JSON 파일 크기 합 상한 `UnrealExchangeMaxBundleJsonBytes`(1 GiB, `ExchangeReadOptions::maxBundleJsonBytes` — 시험이 줄여 쓴다)를 둔다. 넘는 파일부터는 읽지 않는다: bundle.json이면 묶음 수준, 에셋 JSON이면 그 에셋이 `LimitExceeded`(`CorruptBundle`, `CapacityExceeded`)로 실패한다. 상한은 파싱 전 원문 크기 기준이다.
-19. **일반 파일만 읽는다(개정 15).** JSON과 blob을 열기 전에 Core `FileSystem::Stat`으로 link가 아닌 일반 파일인지 본다(장치·FIFO는 열기·읽기가 막힐 수 있고 link는 묶음 밖을 가리킬 수 있다). 아니면 새 세부 규칙 `NotRegularFile`(`CorruptBundle`, `InvalidArgument`)이고 Stat 실패는 `ReadFailed`(파일 오류 보존)다. Stat과 Open 사이의 교체는 막지 않는다(로컬 작업 디렉터리 전제).
+19. **일반 파일만 읽는다(개정 15).** JSON과 blob을 열기 전에 Core `FileSystem::Stat`으로 link가 아닌 일반 파일인지 본다(장치·FIFO는 열기·읽기가 막힐 수 있고 link는 묶음 밖을 가리킬 수 있다). 아니면 새 세부 규칙 `NotRegularFile`(`CorruptBundle`, `CorruptData`)이고 Stat 실패는 `ReadFailed`(파일 오류 보존)다. Stat과 Open 사이의 교체는 막지 않는다(로컬 작업 디렉터리 전제).
 20. **플러그인 error 진단(개정 15).** 에셋 JSON `diagnostics`에 `severity: error`가 하나라도 있으면 그 에셋은 Ready가 아니다: 첫 error 진단의 `code`를 text로 `InvalidSource`(새 세부 규칙 `ExporterError`, `InvalidArgument`)를 내고 Failed로 둔다. 기존 진단 코드 `InvalidSource`(임포트 원본이 쓸 수 없음 — AssetSystem 4.6절)를 그대로 써 AssetRuntime 진단 표를 늘리지 않는다. Hard 의존자는 임포트 순서 계산이 `FailedDependency`로 실패시킨다(15번).
 21. **blob 참조 수집(개정 15).** 한 에셋의 blob 사용 목록(처음 나온 순서, 같은 사용은 한 번, 같은 hex의 다른 bytes는 `BlobConflict`)을 만들 때 이미 모은 것과의 비교를 digest 앞 8 byte 키의 사슬로 한다(키별 마지막 번호 표 + 같은 키의 앞 번호). 전에는 참조마다 목록 전체를 훑어 참조 수의 제곱이었다. 결과 순서·진단은 같다.
 22. **의존 class 대조 범위(개정 15).** 의존 항목의 `class`는 대상이 묶음 안에 있을 때만 대상 에셋의 `class`와 대조한다(9번 — 다르면 손상). 묶음 밖(범위 밖 클래스·닫힘 밖) 대상은 대조할 것이 없어 그대로 둔다. 플러그인은 옛 경로(redirector) 참조를 대상 경로·클래스로 바꿔 의존에 적으므로(11.7절 21번) 묶음 안 대상의 대조를 늦추지 않는다(권장안 — 대조를 완화하면 실제 손상을 놓친다).
@@ -136,7 +139,7 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
    2. 문서 교환 클래스가 임포터의 클래스와 같다: 아니면 `InvalidSource` / `InvalidArgument`.
    3. 옵션 `objectPath`가 문서 objectPath와 같다: 아니면 `InvalidImportOption` / `InvalidArgument`.
    4. 문서 blob 참조마다 역할 `blob:<hex>` 원본이 있다: 없으면 `MissingSource` / `NotFound`(detail = blob 번호). 참조하지 않는 blob 역할 원본이 있으면 `InvalidImportOption` / `InvalidArgument`(detail = 원본 번호).
-   5. blob마다 `VerifyExchangeBlob`: 실패 `CorruptBundle` / `InvalidArgument`(detail = blob 번호).
+   5. blob마다 `VerifyExchangeBlob`: 실패 `CorruptBundle` / `CorruptData`(detail = blob 번호).
 7. **태그(UXR8 — A2f3a `AddTag`).** 교환 임포터는 모두 태그 접두 `UnrealExchange`(AssetSystem 7.1절 21 A2f5 `tagPrefix` — 임포터 이름과 다른 접두)를 쓴다. `UnrealExchange.ObjectPath` = 옵션 objectPath. `UnrealExchange.FormerPaths` = 옵션 formerPaths ∪ 옛 기록의 FormerPaths ∪ 옛 기록의 ObjectPath에서 지금 objectPath를 뺀 것(이름을 되돌린 경우 — 지금 이름은 옛 경로가 아니다) — 값마다 한 쌍, 같은 값은 한 번(문맥이 byte 순으로 쌓는다). 그래서 UE에서 두 번 이름을 바꾸고 redirector를 하나 지워도 앞 경로로 다시 찾는다(9.2절). 태그 수가 `MaxImportTags`를 넘으면 `AddTag` 오류로 실패한다(옛 경로가 255개 쌓이는 경우 — 한계).
 8. **설정 번역.** UE 설정 덤프(`settings`)를 Rocks 리플렉션 JSON(ReflectionText `ImportJson` 표기)으로 바꿔 출력 객체에 `ImportJson`하고 게시한다. 클래스마다 행 표(UE 키 → 처리)를 두고(텍스처는 4.6절 3번), 키 짝맞추기는 `ImportJson`의 대소문자 무시를 그대로 쓴다. 처리 종류:
    - `Same`: 키의 bool 접두 `b`(뒤가 대문자)만 떼고 값 그대로(`bFlipGreenChannel` → `FlipGreenChannel` → 필드 `flipGreenChannel`).
@@ -145,8 +148,9 @@ UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks �
    - `PerPlatformFloat`: `Default` → `defaultValue`. `PerPlatform`이 비어 있지 않으면 버리고 `UnsupportedSetting` 경고(UE 플랫폼 이름과 TargetProfile 이름의 대응은 후속).
    - `Reference`·`ReferenceArray`: `{ "objectPath" }`를 resolver 텍스트(objectPath 그대로)로 바꾼다. resolver는 옵션 `references`에서 id를 찾아 `context.OpenAsset(id)`로 Hard 참조를 건다(대상 타입은 codec이 필드 타입으로 확인). `references`에 없는 objectPath(묶음에도 기존 에셋에도 없는 대상 — 계획이 `MissingUnrealDependency`를 이미 냈다)는 null로 둔다. 배열은 null 원소를 뺀다.
    - `Struct`: 멤버 행 표로 재귀한다(값 struct — `SourceColorSettings`의 enum 멤버 접두 떼기).
+   - `EnumMap`(UX7b — 6.4절 3번): 값 이름이 Rocks와 다른 enum이다. 멤버 표(`members`)의 행마다 `ueKey`(UE 값 이름) → `rocksKey`(Rocks 열거자 이름)이고 표에 없는 값·문자열이 아닌 값은 `CorruptData`다(스킨 메시 축소 `SMTC_*`·`SMOT_*`).
    - `Ignore`: 설정이 아닌 UE 멤버(`LightingGuid`·`AssetImportData` 등 — 버림).
    - `Unsupported`: Rocks 필드가 없는 UE 설정이다. 값이 UE 기본값과 다르면 `UnsupportedSetting` 경고를 내고 버린다.
-   표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `InvalidArgument` 실패다(번역 표의 오류 — 시험이 엔진 콘텐츠 묶음으로 막는다).
+   표에 없는 키는 `UnsupportedSetting` 경고(detail = `ExchangeUnknownSettingDetail`)로 버린다(UE 버전이 늘린 프로퍼티). `UnsupportedSetting` 경고의 detail은 그 클래스 표의 행 번호다(공개 표 — 도구가 UE 이름으로 바꿔 보여 줄 수 있다). `ImportJson` 진단(값 형식·범위·모르는 키)은 `InvalidSource` / `CorruptData` 실패다(덤프 내용이 필드와 맞지 않음 — 표가 맞는지는 시험이 엔진 콘텐츠 묶음으로 막는다). 진단이 없는 `ImportJson` 오류는 그대로 전한다. 번역의 `CorruptData`(값이 행 종류와 맞지 않음)만 `InvalidSource`이고 행 표 결함(`InvalidArgument`)·writer 오류·writer 원문의 다시 읽기 실패는 코드 결함이라 진단 코드 없이 그 오류다(UX3b에서 정적 메시와 맞춤 — 5.5절 4번).
 9. **모듈 의존.** UnrealExchange가 ReflectionText(`ImportJson`), Texture(출력 타입)에 공개 의존한다. 제품 Commandlet은 A2f 임포터 등록(`AssetImporterSetup`)과 종류별 임포터 등록(`ExchangeKindSetup`)을 `ProductAssetSetup`(MeshAnimationAssets 13.1절 1)에 더한다.
 10. **새 진단.** 코드 `UnsupportedSourceLayout`(오류)·`GammaMismatch`(경고)를 AssetRuntime 진단 표에 더한다(AssetSystem 4.6절 표에 이미 있다 — 10.3절). 세부 규칙 `ServiceFailure`(2번)를 더한다.

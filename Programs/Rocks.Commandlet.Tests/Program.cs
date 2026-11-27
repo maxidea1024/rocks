@@ -543,7 +543,7 @@ try
         "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)",
         $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'",
         $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'",
-        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, CorruptData)",
         "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
         $"MissingDependency: Content/Copy/Hero2.rasset: dependency {missingId} is not in the index",
         $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index",
@@ -2039,7 +2039,7 @@ if (OperatingSystem.IsWindows())
 
 // asset-import-unreal(UnrealExchange 10.5절, 텍스처 10.6절·4.6절 — UX2b): 저장소 fixture 묶음의 dry run(텍스처 하나 계획), 실행
 // (텍스처 임포터 연결 — 새로 만듦, 다시 실행하면 재임포트, 일반 asset-reimport도 교환 원본을 다시 읽는다), 임포터 없는 클래스(건너뜀
-// 경고), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+// 경고), golden 묶음의 정적 메시(새로 만듦·--mesh-normals=rocks 재임포트 — UX3b)·스킨 메시와 스켈레톤(UX7b)·애니메이션 클립(UX8b), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
 string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");
 try
 {
@@ -2102,6 +2102,36 @@ try
         ReportUnreal($"asset-import-unreal usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption && argument != bundle))}",
             usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-import-unreal", StringComparison.Ordinal), usage);
     }
+
+    // 정적 메시(UnrealExchange 5.5절 — UX3b): golden 묶음의 엔진 정적 메시(Cube)를 만들고 다시 실행하면 재임포트다.
+    string golden = Path.Combine(FindRepositoryRoot(executable).FullName, "Engine", "Plugins", "Importers", "UnrealExchange", "Tests",
+        "Bundles", "Golden.rxbundle");
+    const string cubeOnly = "--only=/Engine/BasicShapes/Cube.Cube";
+    ProcessResult meshCreated = await RunUnreal("asset-import-unreal", golden, cubeOnly, projectOption);
+    ReportUnreal("asset-import-unreal static mesh created", meshCreated.ExitCode == 0 &&
+        meshCreated.StdOut.Contains("asset-import-unreal: created /Engine/BasicShapes/Cube.Cube /Game/Unreal/Engine/BasicShapes/Cube ",
+            StringComparison.Ordinal) &&
+        meshCreated.StdOut.Contains("asset-import-unreal: 1 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        meshCreated);
+    ProcessResult meshReimported = await RunUnreal("asset-import-unreal", golden, cubeOnly, "--mesh-normals=rocks", projectOption);
+    ReportUnreal("asset-import-unreal static mesh reimported", meshReimported.ExitCode == 0 &&
+        meshReimported.StdOut.Contains("asset-import-unreal: 0 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        meshReimported);
+
+    // 스킨 메시(UnrealExchange 6.4절 — UX7b): golden SK_Column은 Hard 닫힘의 스켈레톤과 함께 둘이 만들어진다.
+    ProcessResult skinnedCreated = await RunUnreal("asset-import-unreal", golden,
+        "--only=/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column", projectOption);
+    ReportUnreal("asset-import-unreal skeletal mesh and skeleton created", skinnedCreated.ExitCode == 0 &&
+        skinnedCreated.StdOut.Contains("asset-import-unreal: 2 created, 0 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        skinnedCreated);
+
+    // 애니메이션 클립(UnrealExchange 7.2절 — UX8b): golden 기둥 클립은 Hard 닫힘의 스켈레톤과 함께 만들어진다(스켈레톤은
+    // 앞 경우가 이미 만들었으므로 재임포트).
+    ProcessResult clipCreated = await RunUnreal("asset-import-unreal", golden,
+        "--only=/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.SK_Column_Anim", projectOption);
+    ReportUnreal("asset-import-unreal animation clip created", clipCreated.ExitCode == 0 &&
+        clipCreated.StdOut.Contains("asset-import-unreal: 1 created, 1 reimported, 0 failed, 0 skipped", StringComparison.Ordinal),
+        clipCreated);
 
     ProcessResult unrealHelp = await RunUnreal("asset-import-unreal", "--help");
     ReportUnreal("asset-import-unreal help", unrealHelp.ExitCode == 0 &&

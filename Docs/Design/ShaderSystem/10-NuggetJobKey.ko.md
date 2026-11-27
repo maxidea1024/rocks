@@ -28,7 +28,7 @@ AssetSystem A3(9.1절, 구현 `Engine/Source/Developer/AssetNugget`)을 그대�
 | 0 | `Code` | 형식 산출물: DXIL·DXBC·SPIR-V byte, ESSL·MSL UTF-8 텍스트, metallib byte | SH1 |
 | 1 | `BindingLayout` | 정규화된 바인딩 layout(7.2절) | SH2 |
 | 2 | `GlesCopyTable` | GLES 바인딩 머리·상수 버퍼 복사 표(7.2절 4항) | SH2 |
-| 3 | `DebugSymbols` | 디버그 심볼(PDB·SPIR-V debug 등) | SH4 |
+| 3 | `DebugSymbols` | 디버그 심볼(PDB·SPIR-V debug 등 — 배치 `ShaderDebugSymbols`, 16.3절 SSD73) | SH4 |
 
 - 진단은 Record에 넣지 않는다. 경고는 결정 7로 오류이므로 성공 job에는 진단이 없고, 진단 문자열은 작업 디렉터리·도구 버전 문구가 섞여 같은 키에서 digest를 흔들 수 있다(`Conflict`). 진단은 실패 job의 결과로만 돌려준다.
 - 실패한 job(컴파일 오류·도구 오류)은 게시하지 않는다. 같은 입력을 다시 컴파일하면 같은 진단이 나오고, 실패를 캐시하면 도구·환경 문제의 회복이 늦어진다.

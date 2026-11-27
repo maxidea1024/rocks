@@ -151,7 +151,8 @@ public:
     ArchiveReader& operator=(const ArchiveReader&) = delete;
 
     // 실패는 cursor를 전혀 이동하지 않는다. 예산은 실패 시에도 이미 소비한 비용을 유지한다.
-    // truncation/잘못된 bool/UTF-8은 InvalidArgument, 크기·작업 한도는 CapacityExceeded다.
+    // truncation/잘못된 bool/UTF-8은 CorruptData(읽은 데이터 손상 — AssetSystem 19장), 크기·작업
+    // 한도는 CapacityExceeded다.
     Result<bool> ReadBool() noexcept;
     // byte 하나를 그대로 읽는다(값 범위는 호출자가 본다 — ReadBool과 달리 0·1로 제한하지 않는다).
     Result<uint8> ReadU8() noexcept;

@@ -339,4 +339,52 @@ ShaderSourceStatus ShaderSourceTree::Load(StringView virtualPath, Array<uint8>& 
     return ShaderSourceStatus{};
 }
 
+Result<void> ShaderSourceTree::ResolveDiskPath(StringView virtualPath, String& out) const noexcept {
+    using namespace source_tree_detail;
+    out.Clear();
+    if (!ValidateShaderVirtualPath(virtualPath)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const MountEntry* mount = FindMount(virtualPath);
+    if (mount == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    const StringView relative(virtualPath.Data() + mount->virtualDirectory.ByteCount() + 1,
+                              virtualPath.ByteCount() - mount->virtualDirectory.ByteCount() - 1);
+    const StringView generatedPrefix(GeneratedShaderDirectoryName);
+    if (relative.StartsWith(generatedPrefix, StringComparison::CaseSensitive) &&
+        relative.ByteCount() > generatedPrefix.ByteCount() &&
+        relative.Data()[generatedPrefix.ByteCount()] == '/') {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    const StringView root = mount->realDirectory.View();
+    if (!out.TryAssign(root) || (!EndsWithSeparator(root) && !out.TryAppend(StringView("/"))) ||
+        !out.TryAppend(relative)) {
+        out.Clear();
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return Result<void>::Success();
+}
+
+bool MakeWatchedShaderPath(StringView virtualRoot, StringView relative, String& out) noexcept {
+    out.Clear();
+    const StringView extensions[] = {".rsf", ".rsh", ".h"};
+    bool source = false;
+    for (const StringView extension : extensions) {
+        source = source || relative.EndsWith(extension, StringComparison::CaseSensitive);
+    }
+
+    if (!source || relative.IsEmpty() || !out.TryAssign(virtualRoot) || !out.TryAppend("/") ||
+        !out.TryAppend(relative) || !ValidateShaderVirtualPath(out.View())) {
+        out.Clear();
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace rocks::shader

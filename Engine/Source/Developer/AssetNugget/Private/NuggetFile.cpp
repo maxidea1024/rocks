@@ -189,7 +189,7 @@ Result<void> AppendNuggetFile(const NuggetFilePlan& plan, Span<const NuggetStore
 
 Result<NuggetFileView> OpenNuggetFile(Allocator& allocator, NuggetRangeReader& reader) noexcept {
     using Out = NuggetFileView;
-    auto corrupt = [] { return Result<Out>::Failure(ErrorCode::InvalidArgument); };
+    auto corrupt = [] { return Result<Out>::Failure(ErrorCode::CorruptData); };
     const uint64 size = reader.Size();
     if (size < NuggetFileHeadBytes) {
         return corrupt();
@@ -241,7 +241,7 @@ Result<NuggetFileView> OpenNuggetFile(Allocator& allocator, NuggetRangeReader& r
         return Result<Out>::Failure(error == ErrorCode::OutOfMemory ||
                                             error == ErrorCode::Unsupported
                                         ? error
-                                        : ErrorCode::InvalidArgument);
+                                        : ErrorCode::CorruptData);
     }
 
     NuggetFileView view(allocator);
@@ -315,7 +315,7 @@ Result<void> ReadNuggetValue(const NuggetFileView& view, NuggetRangeReader& read
     }
 
     if (!(Sha256::Hash(Span<const uint8>(target.Data(), target.Size())) == row.contentHash)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -343,7 +343,7 @@ Result<void> VerifyNuggetValue(const NuggetFileView& view, NuggetRangeReader& re
     }
 
     if (!(hasher.Finish() == row.contentHash)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -351,7 +351,7 @@ Result<void> VerifyNuggetValue(const NuggetFileView& view, NuggetRangeReader& re
 
 Result<void> DecodeNuggetValue(Allocator& allocator, const NuggetValueRow& row,
                                Span<const uint8> stored, Array<uint8>& out) noexcept {
-    auto corrupt = [] { return Result<void>::Failure(ErrorCode::InvalidArgument); };
+    auto corrupt = [] { return Result<void>::Failure(ErrorCode::CorruptData); };
     // 검증되지 않은 행도 받는 공개 함수다 — 정규 형식 행 검사를 먼저 한다.
     if (!IsValidNuggetValueRow(row) || stored.Size() != row.storedSize) {
         return corrupt();

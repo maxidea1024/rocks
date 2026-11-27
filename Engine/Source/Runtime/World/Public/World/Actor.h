@@ -1,11 +1,14 @@
 #pragma once
 
+#include <Core/Containers/Span.h>
 #include <Core/Math/Rotator.h>
+#include <Core/Text/Name.h>
 #include <Meta/Annotations.h>
 #include <Object/NativeClass.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <World/Component.h>
+#include <World/Physics/HitResult.h>
 #include <World/WorldTypes.h>
 
 namespace rocks {
@@ -83,7 +86,7 @@ class ROCKS_WORLD_API Actor : public Object {
 
 public:
     // allocator는 Registry allocator다(Object 생성 시 주입). 파생 클래스 생성자도 받아서 넘긴다.
-    explicit Actor(Allocator& allocator) noexcept : components_(allocator) {
+    explicit Actor(Allocator& allocator) noexcept : components_(allocator), tags_(allocator) {
     }
 
     virtual ~Actor() noexcept = default;
@@ -148,6 +151,38 @@ public:
     // InvalidArgument다.
     Result<void> SetLifeSpan(double seconds) noexcept;
 
+    // ---- 태그(Docs/Design/EngineRuntime 31.4절 — UE AActor::Tags) ----
+
+    // tag가 들어 있는지다. None은 늘 거짓이다(UE ActorHasTag).
+    bool HasTag(Name tag) const noexcept;
+
+    // 태그 목록이다(순서·중복 그대로). 바꾸면 무효다.
+    Span<const Name> Tags() const noexcept {
+        return tags_.View();
+    }
+
+    // tag를 더한다(이미 있으면 아무것도 하지 않고 성공). tag는 이 객체 Registry의 이름 pool에서
+    // 발급한 토큰이어야 한다(엔진 World는 Engine::Names()).
+    //
+    // 사용 예:
+    //   auto enemy = engine.Names().TryIntern("Enemy");
+    //   if (enemy) {
+    //       (void)value.AddTag(enemy.Value());
+    //   }
+    //
+    // 오류(값 그대로): World 장부 밖 객체 InvalidArgument, 파괴 대기 Destroyed, None·다른 pool·옛
+    // 토큰 InvalidArgument, Registry에 이름 pool이 없으면 Unsupported, 할당 실패 OutOfMemory다.
+    // 스레드: World의 게임 스레드다.
+    Result<void> AddTag(Name tag) noexcept;
+
+    // 같은 tag를 모두 뺀다(없으면 아무것도 하지 않고 성공). 오류: 장부 밖 InvalidArgument, 파괴
+    // 대기 Destroyed, None InvalidArgument다.
+    Result<void> RemoveTag(Name tag) noexcept;
+
+    // 태그 목록을 통째로 바꾼다(중복은 그대로 둔다). 원소마다 AddTag와 같은 검사를 하고, 하나라도
+    // 거부하면 값 그대로다. 오류는 AddTag와 같다.
+    Result<void> SetTags(Span<const Name> tags) noexcept;
+
     // 대표 SceneComponent다. 없으면 null handle이다.
     ObjectHandle RootComponent() const noexcept {
         return rootComponent_.Handle();
@@ -206,6 +241,35 @@ public:
     virtual void OnDisable() noexcept {
     }
 
+    // 막는 hit hook이다(UE NotifyHit — Docs/Design/PhysicsModule 5.4절·7.1.10절). myComponent는 이
+    // Actor의 맞은(또는 움직인) 컴포넌트, otherActor·otherComponent는 상대다. selfMoved는 이
+    // Actor의 컴포넌트가 움직여 생긴 hit인지다. 상대가 움직인 hit(selfMoved 거짓)는 hit의
+    // normal·impactNormal이 뒤집혀 상대가 이 Actor를 미는 방향이다(UE GetReversedHit).
+    // normalImpulse는 시뮬레이션 접촉의 solver 충격량(kg·cm/s — PH4c)이고 sweep 이동 hit는 0이다.
+    // 파괴 대기 Actor에는 부르지 않는다.
+    virtual void OnHit(ObjectHandle myComponent, ObjectHandle otherActor,
+                       ObjectHandle otherComponent, bool selfMoved, const Vec3d& normalImpulse,
+                       const HitResult& hit) noexcept {
+        (void)myComponent;
+        (void)otherActor;
+        (void)otherComponent;
+        (void)selfMoved;
+        (void)normalImpulse;
+        (void)hit;
+    }
+
+    // Actor 단위 overlap 시작·끝 hook이다(UE NotifyActorBeginOverlap·NotifyActorEndOverlap —
+    // Docs/Design/PhysicsModule 5.3절·7.1.11절). 이 Actor의 컴포넌트 중 하나가 otherActor의
+    // 컴포넌트와 처음 겹칠 때 시작, 마지막 겹침이 끝날 때 끝이다(같은 Actor 컴포넌트끼리는 부르지
+    // 않는다). World가 Playing일 때만 부르고 파괴 대기 Actor에는 부르지 않는다.
+    virtual void OnBeginOverlap(ObjectHandle otherActor) noexcept {
+        (void)otherActor;
+    }
+
+    virtual void OnEndOverlap(ObjectHandle otherActor) noexcept {
+        (void)otherActor;
+    }
+
     // 정리 hook이다. 다른 Actor 파괴·Spawn 요청은 허용한다(같은 프레임 정리 단계에서 처리된다).
     // reason은 정리 이유다(17.2절). OnStart를 받지 못했어도 OnAwake가 성공했으면 받는다.
     virtual void OnDestroy(EndPlayReason) noexcept {
@@ -258,6 +322,8 @@ private:
     // 값을 생략하므로 기본값 변경이 인스턴스에 반영된다. 9.1절).
     ROCKS_PROPERTY(Name = "tickSettings") TickSettings tickSettings_;
     ROCKS_PROPERTY(ReadOnly, Name = "enabled", ScriptReadOnly) bool enabled_ = true;
+    // 태그다(31.4절 — 바꾸기는 AddTag·RemoveTag·SetTags).
+    ROCKS_PROPERTY(ReadOnly, Name = "tags") Array<Name> tags_;
     ROCKS_NATIVE() bool tickEnabled_ = true;
     // 게임 논리 참조다(17.3절). 저장 여부는 Prefab·저장 단계가 정한다(지금은 실행 중 값).
     ROCKS_NATIVE() ObjectHandle owner_;

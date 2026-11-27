@@ -6,6 +6,7 @@
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/File.h>
+#include <Platform/PlatformMath.h>
 #include <Platform/SystemDialog.h>
 #include <Platform/Thread.h>
 #include <SplashScreen/SplashImage.h>
@@ -25,6 +26,10 @@ namespace {
 constexpr uint64 Millisecond = 1'000'000;
 
 // 모든 조건이 띄우기를 허락하는 입력이다(각 시험이 칸 하나씩 바꾼다).
+constexpr usize SlotIndexForTest(SplashTextSlot slot) noexcept {
+    return static_cast<usize>(slot);
+}
+
 SplashVisibilityInput AllowedInput() noexcept {
     SplashVisibilityInput input;
     input.platformSupported = true;
@@ -712,6 +717,128 @@ TEST(SplashScreen_MinimumDisplayTimeGatesCanHide) {
               .Error() == ErrorCode::InvalidArgument);
     CHECK(unused.creates.Load<platform::MemoryOrder::Acquire>() == 0);
     CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 배치 덮어쓰기(6.5절): 네 기준 모서리, 폭 0, 배율, Custom 칸은 배치가 있을 때만, 막대 덮어쓰기.
+TEST(SplashScreen_PlacementsOverrideTheLayout) {
+    SplashTextPlacement placements[4];
+    placements[0].slot = SplashTextSlot::Title; // 아래 왼쪽, 폭 0 → 오른쪽 여백까지
+    placements[0].x = 40;
+    placements[0].y = 100;
+    placements[0].height = 30;
+    placements[0].fontPixels = 24.0;
+    placements[0].semibold = true;
+    placements[1].slot = SplashTextSlot::Custom1; // 위 오른쪽, 폭 200
+    placements[1].anchor = SplashTextAnchor::TopRight;
+    placements[1].x = 16;
+    placements[1].y = 12;
+    placements[1].width = 200;
+    placements[1].height = 16;
+    placements[1].align = SplashTextAlign::Right;
+    placements[1].color = 0x123456;
+    placements[2].slot = SplashTextSlot::Custom2; // 아래 오른쪽
+    placements[2].anchor = SplashTextAnchor::BottomRight;
+    placements[2].x = 32;
+    placements[2].y = 60;
+    placements[2].width = 100;
+    placements[2].height = 18;
+    placements[3].slot = SplashTextSlot::Custom3; // 위 왼쪽
+    placements[3].anchor = SplashTextAnchor::TopLeft;
+    placements[3].x = 10;
+    placements[3].y = 20;
+    placements[3].width = 50;
+    placements[3].height = 14;
+    SplashBarPlacement bar;
+    bar.margin = 0;
+    bar.fromBottom = 4;
+    bar.height = 4;
+    bar.fillColor = 0xFF0000;
+    REQUIRE(ValidateSplashPlacements(placements, &bar));
+    const SplashLayout one = ComputeSplashLayout({768, 384}, 1.0, placements, &bar);
+    CHECK((one.text[0] == SplashRect{40, 284, 736, 314}));
+    CHECK(one.style[0].fontPixels == 24 && one.style[0].semibold);
+    CHECK((one.text[4] == SplashRect{552, 12, 752, 28}));
+    CHECK(one.style[4].align == SplashTextAlign::Right && one.style[4].color == 0x123456);
+    CHECK((one.text[5] == SplashRect{636, 324, 736, 342}));
+    CHECK((one.text[6] == SplashRect{10, 20, 60, 34}));
+    CHECK(one.placed[0] && one.placed[4] && one.placed[5] && one.placed[6]);
+    CHECK(!one.placed[7] && !one.placed[9]);               // 배치 없는 Custom 칸은 그리지 않는다
+    CHECK((one.text[1] == SplashRect{32, 329, 736, 347})); // 덮어쓰지 않은 기본 칸은 그대로
+    CHECK((one.bar == SplashRect{0, 380, 768, 384}));
+    CHECK(one.barFillColor == 0xFF0000 && one.barTrackColor == SplashBarTrackColor);
+    const SplashLayout two = ComputeSplashLayout({768, 384}, 2.0, placements, &bar);
+    CHECK((two.text[4] == SplashRect{1104, 24, 1504, 56}));
+    CHECK(two.style[0].fontPixels == 48);
+    // 덮어쓰기가 없으면 Custom 칸은 모두 배치가 없다.
+    const SplashLayout plain = ComputeSplashLayout({768, 384}, 1.0);
+    for (usize index = SlotIndexForTest(SplashTextSlot::Custom1); index < SplashTextSlotCount;
+         ++index) {
+        CHECK(!plain.placed[index]);
+    }
+}
+
+// 덮어쓰기 검사: 범위 밖·NaN·중복 칸은 InvalidArgument이고, Show도 같은 이유로 거부한다(원천은
+// release).
+TEST(SplashScreen_PlacementValidation) {
+    auto rejected = [](void (*change)(SplashTextPlacement&) noexcept) noexcept {
+        SplashTextPlacement placement;
+        change(placement);
+        return ValidateSplashPlacements(Span<const SplashTextPlacement>(&placement, 1), nullptr)
+                   .Error() == ErrorCode::InvalidArgument;
+    };
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.x = -1; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept {
+        p.y = static_cast<int32>(MaxSplashImageDimension) + 1;
+    }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.width = -5; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.height = 0; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.height = MaxSplashTextHeight + 1; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.fontPixels = 7.5; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.fontPixels = 49.0; }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept {
+        p.fontPixels = platform::PlatformMath::QuietNaN<double>();
+    }));
+    CHECK(rejected([](SplashTextPlacement& p) noexcept { p.color = 0x1000000; }));
+    SplashTextPlacement edge;
+    edge.x = static_cast<int32>(MaxSplashImageDimension);
+    edge.height = MaxSplashTextHeight;
+    edge.fontPixels = MaxSplashFontPixels;
+    edge.color = MaxSplashColor;
+    CHECK(ValidateSplashPlacements(Span<const SplashTextPlacement>(&edge, 1), nullptr));
+    SplashTextPlacement twice[2];
+    twice[1].slot = twice[0].slot;
+    CHECK(ValidateSplashPlacements(twice, nullptr).Error() == ErrorCode::InvalidArgument);
+    SplashBarPlacement bar;
+    bar.height = MaxSplashBarHeight + 1;
+    CHECK(ValidateSplashPlacements({}, &bar).Error() == ErrorCode::InvalidArgument);
+    bar.height = 2;
+    bar.trackAlpha = 1.5;
+    CHECK(ValidateSplashPlacements({}, &bar).Error() == ErrorCode::InvalidArgument);
+    bar.trackAlpha = 0.5;
+    CHECK(ValidateSplashPlacements({}, &bar));
+
+    SystemAllocator allocator;
+    ShowEnvironment environment;
+    REQUIRE(environment.ready);
+    FakeRecord record;
+    ReleaseCounter counter;
+    SplashShowDesc desc = environment.Desc();
+    desc.source = CountingSource(counter);
+    desc.placements = twice;
+    CHECK(
+        SplashScreenTestAccess::Show(allocator, desc, SplashPresenterFactory{&CreateFake, &record})
+            .Error() == ErrorCode::InvalidArgument);
+    CHECK(counter.releases.Load<platform::MemoryOrder::Acquire>() == 1);
+    CHECK(record.creates.Load<platform::MemoryOrder::Acquire>() == 0);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Custom 칸 글자는 SetText로 들어가고 기본으로 보인다.
+TEST(SplashScreen_CustomSlotTextIsVisibleByDefault) {
+    SplashModel model(0);
+    model.SetText(SplashTextSlot::Custom6, "Build 1234");
+    CHECK(model.IsVisible(SplashTextSlot::Custom6));
+    CHECK(model.Text(SplashTextSlot::Custom6) == "Build 1234");
 }
 
 // 떠 있는 동안 스플래시가 대화상자 hook을 갖고, Hide가 푼다(hook은 하나 — 9.5절).

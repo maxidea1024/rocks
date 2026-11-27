@@ -124,7 +124,7 @@ Result<void> ScanFrames(const uint8* data, usize size, Mp3Scan& scan) noexcept {
     }
 
     if (first || scan.frames == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     return Result<void>::Success();
@@ -153,7 +153,7 @@ void TrimRange(const Mp3Scan& scan, uint64 decoded, uint64& skip, uint64& frames
 
 Result<void> DecodeMp3Into(Span<const uint8> file, DecodedSourceAudio& out) noexcept {
     if (file.Size() == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     usize begin = 0;
@@ -203,7 +203,7 @@ Result<void> DecodeMp3Into(Span<const uint8> file, DecodedSourceAudio& out) noex
         // 형식이 1차 값과 다르면 원본이 손상된 것이다.
         if (info.layer != LayerIII || static_cast<uint32>(info.channels) != scan.channels ||
             static_cast<uint32>(info.hz) != scan.sampleRate) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<void>::Failure(ErrorCode::CorruptData);
         }
 
         // main data가 깨지거나 bit reservoir가 모자라 표본을 내지 못한 frame은 길이를 지키려고
@@ -222,7 +222,7 @@ Result<void> DecodeMp3Into(Span<const uint8> file, DecodedSourceAudio& out) noex
     uint64 frames = 0;
     TrimRange(scan, interleaved.Size() / scan.channels, skip, frames);
     if (frames == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     auto pcm = out.TryAllocatePcm(scan.channels, scan.sampleRate, frames, SourceSampleFormat::Lossy,

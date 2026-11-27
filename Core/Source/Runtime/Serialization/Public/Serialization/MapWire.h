@@ -12,7 +12,7 @@
 // wire의 Archive 표현이다. 빈 맵도 count 0으로 기록한다.
 //
 // 이 계층은 형식(tag·count·길이·잘림)만 본다. 키 중복은 codec 1단계가 종류 규칙으로
-// 판정한다(String은 byte, Name은 Core Name 규칙 — 중복은 InvalidArgument).
+// 판정한다(String은 byte, Name은 Core Name 규칙 — 중복은 CorruptData).
 //
 // 사용 예(쓰기 — Map<String, struct>):
 //   auto map = MapWireWriter::Begin(out, stringWire, recordWire, count, maxBytes);
@@ -46,9 +46,9 @@
 //       // 실패를 확인하고 값 Record는 parent.OpenNestedRecord로 연다
 //   }
 //
-//   return map.Value().Finish(); // 남은 byte는 InvalidArgument
+//   return map.Value().Finish(); // 남은 byte는 CorruptData
 //
-// 오류는 ValueArray와 같다: 잘림·받지 않는 tag·크기 불일치·남은 byte는 InvalidArgument, 기대 tag와
+// 오류는 ValueArray와 같다: 잘림·받지 않는 tag·크기 불일치·남은 byte는 CorruptData, 기대 tag와
 // 다른 저장 tag는 TypeMismatch, 개수·크기 한도 초과는 CapacityExceeded다.
 namespace rocks {
 
@@ -60,12 +60,12 @@ public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 검사한다. 검사 순서(모두 할당 전):
     // keyWire·keyShape가 키 자리의 것이 아니거나 valueWire·valueShape가 값 자리의 것이 아니거나
     // 모순이거나 키·값 최소 크기 합이 usize를 넘으면 InvalidArgument(이때는 payload를 옮기지
-    // 않는다) → 저장 키 tag·값 tag가 그 자리의 tag가 아니면 InvalidArgument → 저장 키 tag ≠ keyWire
+    // 않는다) → 저장 키 tag·값 tag가 그 자리의 tag가 아니면 CorruptData → 저장 키 tag ≠ keyWire
     // 또는 저장 값 tag ≠ valueWire면 TypeMismatch → count > maxCount면 CapacityExceeded → count ×
-    // (키 최소 크기 + 값 최소 크기)가 남은 byte보다 크면 InvalidArgument(키·값이 모두 고정 폭이거나
+    // (키 최소 크기 + 값 최소 크기)가 남은 byte보다 크면 CorruptData(키·값이 모두 고정 폭이거나
     // exact면 남은 byte가 정확히 그 값이 아닐 때도) → count만큼 work를 청구(한도면
     // CapacityExceeded) → 키·값이 모두 exact면 항목마다 가변 칸의 길이 prefix가 그 크기를 만드는지
-    // 본다(InvalidArgument). 한쪽이 exact가 아닌 가변이면 항목 간격이 정해지지 않으므로 합계 하한만
+    // 본다(CorruptData). 한쪽이 exact가 아닌 가변이면 항목 간격이 정해지지 않으므로 합계 하한만
     // 보고, 원소 경계·exact 길이는 항목 Read와 호출자가 본다(예: Digest 키는 ReadBytes 뒤 길이 32
     // 확인).
     static Result<MapWireReader> Open(ArchiveReader&& payload, uint32 keyWire, uint32 valueWire,
@@ -108,7 +108,7 @@ public:
     // ReadTextWire). 내용은 그 Read*가 검사한다.
     ArchiveReader& Entries() noexcept;
 
-    // 모든 항목을 읽은 뒤 부른다. 남은 byte가 있으면 InvalidArgument다.
+    // 모든 항목을 읽은 뒤 부른다. 남은 byte가 있으면 CorruptData다.
     Result<void> Finish() const noexcept;
 
 private:

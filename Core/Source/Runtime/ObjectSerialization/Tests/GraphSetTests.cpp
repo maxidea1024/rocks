@@ -265,7 +265,7 @@ TEST(GraphSet_CallerOrderIsLocalIdAndOrphansAreSaved) {
             // 노드 1(c)에서 a·b에 닿지 않는다 — 생성자 전에 거부한다.
             const uint32 constructed = ConstructedLinks;
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), bytes).Error() ==
-                  ErrorCode::InvalidArgument);
+                  ErrorCode::CorruptData);
             CHECK(ConstructedLinks == constructed);
             CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
 
@@ -783,7 +783,7 @@ TEST(GraphSet_NodeTableOuterOrderAndBaseOuterRules) {
                 REQUIRE(graph);
                 CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       graph.Value().View())
-                          .Error() == ErrorCode::InvalidArgument);
+                          .Error() == ErrorCode::CorruptData);
             }
 
             CHECK(ConstructedLinks == constructed);
@@ -796,7 +796,7 @@ TEST(GraphSet_NodeTableOuterOrderAndBaseOuterRules) {
             REQUIRE(invalid);
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   invalid.Value().View())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             CHECK(ConstructedLinks == constructed);
             CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
         }
@@ -865,7 +865,7 @@ TEST(GraphSet_ReachabilityFollowsOuterEdgesAndPackageRetention) {
             plainLoad.baseOuter = plainBase.Value();
             CHECK(LoadObjectGraph(allocator, plain, types, plain.OwnerAccess(),
                                   underBase.Value().Bytes(), plainLoad)
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             // 패키지 정책: 기준 Outer(새 패키지의 대표 자식) 아래 노드는 붙잡힌다.
             auto newPkg = New(packaged, packageRoots, {}, {}, PackType);
             REQUIRE(newPkg);
@@ -891,7 +891,7 @@ TEST(GraphSet_ReachabilityFollowsOuterEdgesAndPackageRetention) {
                   test::graph::NodeTableFlag);
             CHECK(LoadObjectGraph(allocator, plain, types, plain.OwnerAccess(),
                                   package.Value().Bytes())
-                      .Error() == ErrorCode::InvalidArgument);
+                      .Error() == ErrorCode::CorruptData);
             // 기준 Outer 없는 패키지 정책 복원은 노드 1의 패키지 하나만 공개한다: 참조로 닿아도
             // 다른 패키지(노드 1이 아닌 outer 0 노드)는 root 없이 공개되므로 생성 전에 거부한다.
             auto otherPkg = New(packaged, packageRoots, {}, {}, PackType);

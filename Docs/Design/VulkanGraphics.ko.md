@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-25, 개정 9(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-26, 개정 10(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem/README.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime/10-Graphics.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -70,7 +70,12 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 순서: 외장 → 내장 → 가상 → CPU. `preferSoftware`면 CPU 장치만 고르고 없으면 `Unsupported`다(가짜 대체 없음). 하드웨어가 하나도 없으면 CPU 장치로 내려가고 `DeviceInfo::software`를 참으로 둔다(D3D12의 WARP 대체와 같은 규칙).
 - 이름은 `deviceName`(UTF-8)이다.
 
-**장치 기능과 확장.** 1.1 core만 요구한다. 선택 항목은 있을 때만 켜고 `DeviceInfo`나 동작으로 공개한다.
+**장치 기능과 확장.** 1.1 core만 요구한다. 선택 항목은 있을 때만 켜고 `DeviceInfo`나 동작으로 공개한다. 예외는 형식 능력의 엔진 요구다(아래 "쿠킹 보장 샘플링").
+
+**쿠킹 보장 샘플링(개정 10, [PixelFormat](PixelFormat/07-FormatCaps.ko.md) 7.1절).** 형식 능력을 질의한 직후 쿠킹 보장 샘플링 표(`FindMissingCookSampling(Backend::Vulkan, HostGraphicsPlatform(), …)`)와 대조한다. 보장 칸의 능력이 없는 장치는 `Unsupported`(stage `CookSamplingGuarantee`, detail에 형식·플랫폼)로 받지 않는다. 1.1 필수 형식 표 밖이라 실제로 장치를 거르는 엔진 요구는 다음이다.
+- Windows(데스크톱): BC 전부(`textureCompressionBC` 형식 — UE `SupportsBCTextureFormats()`가 데스크톱에서 참), R16·RG16·RGBA16 unorm의 샘플 + 선형 필터, R32·RG32·RGBA32 float의 선형 필터.
+- Android: ASTC LDR 전부(`textureCompressionASTC_LDR`)와 ETC2·EAC 전부(`textureCompressionETC2`).
+- 이 기계의 GTX 1060·lavapipe는 모두 통과한다(PixelFormat 14.4절).
 
 | 항목 | 종류 | 없을 때 |
 |---|---|---|
@@ -305,3 +310,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 7(2026-11-18): GX1·GX2 리뷰 반영(업로드 묶음 RAW barrier, descriptor pool 두 배 증가·경고, `atomic64`의 `shaderInt64`, `apiVersion` 실효 판, ray tracing 확장 공개, VS layer·viewport 출력과 `multiViewport`·viewport 수)과 RenderBase GX3·GX4(10.1절): render pass 열쇠·framebuffer 캐시·깊이 attachment view, 파이프라인 고정 기능 상태, compute 파이프라인과 쓰기 view, 간접 그리기·dispatch, 버퍼 쓰기 명령 barrier, 복사·UAV clear.
 - 개정 8(2026-11-25): SH2e2 반영. 셰이더는 쿠킹된 SPIR-V를 장치 셰이더(`CreateShader`)로 받고 파이프라인 layout·셰이더 입력 대조는 값 1과 slot 이름 표에서 얻는다(1·6·7·10.1·11·13·14·15·16·18절). 개발용 컴파일 훅(`ShaderSourceCompiler`·`DeviceDesc::shaderCompiler`) 서술을 지웠다.
 - 개정 9(2026-11-25): RenderBase GX6 반영 — 상수 버퍼 binding(`UNIFORM_BUFFER_DYNAMIC` 우선, 같은 버퍼면 동적 offset만 다시 묶기), 진단 버퍼 파이프라인은 SL2까지 `Unsupported`(6·18절).
+- 개정 10(2026-11-26): 장치 생성이 쿠킹 보장 샘플링 표(PixelFormat 7.1절)와 형식 능력을 대조한다(3절). 데스크톱은 BC·16비트 unorm·32F 필터, Android는 ASTC LDR·ETC2를 엔진 요구로 두고 없으면 `Unsupported`다.

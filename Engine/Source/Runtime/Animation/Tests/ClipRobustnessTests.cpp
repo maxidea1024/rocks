@@ -261,6 +261,10 @@ TEST(Clip_LoadRejectsSourceBytes) {
         }
 
         CHECK(!result && result.Error() != ErrorCode::NotFound);
+        // 읽은 byte의 위반은 손상이다(bulk를 못 읽으면 패키지의 오류 그대로 — 11.1절).
+        CHECK(
+            item.issue == ClipIssue::BulkUnreadable ||
+            (result.Error() == ErrorCode::CorruptData && failure.error == ErrorCode::CorruptData));
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage && failure.issue == item.issue &&
               failure.index == item.index);
     }
@@ -379,8 +383,12 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
         data.tracks = item.ref;
         REQUIRE(data.trackToBone.TryResize(item.bones));
         ClipDiagnostic failure;
-        CHECK(!LoadClipPlayback(data, *raw, out, &failure));
+        const Result<void> loaded = LoadClipPlayback(data, *raw, out, &failure);
+        CHECK(!loaded);
         CHECK(failure.code == AssetDiagnosticCode::CorruptPackage && failure.issue == item.issue);
+        CHECK(
+            item.issue == ClipIssue::BulkUnreadable ||
+            (loaded.Error() == ErrorCode::CorruptData && failure.error == ErrorCode::CorruptData));
         CHECK(out.tracks.Size() == 1);
     }
 
@@ -390,7 +398,7 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
     rate.tracks = good;
     rate.sampleCount = 1;
     ClipDiagnostic failure;
-    CHECK(!LoadClipPlayback(rate, *raw, out, &failure));
+    CHECK(LoadClipPlayback(rate, *raw, out, &failure).Error() == ErrorCode::CorruptData);
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
           failure.issue == ClipIssue::FrameRateTooHigh);
     // 저장 쪽 인자 오류.
@@ -821,7 +829,9 @@ TEST(Clip_CookedValidationRotation) {
         const Result<void> validated =
             ValidateCookedAnimationClip(*read, *raw, skeleton, out, &failure);
         if (broken) {
-            CHECK(!validated && failure.code == AssetDiagnosticCode::CorruptPackage &&
+            CHECK(!validated && validated.Error() == ErrorCode::CorruptData &&
+                  failure.code == AssetDiagnosticCode::CorruptPackage &&
+                  failure.error == ErrorCode::CorruptData &&
                   failure.issue == ClipIssue::RotationNotNormalized && failure.index == 0);
             CHECK(out.sampleCount == 77 && out.tracks.IsEmpty());
         } else {

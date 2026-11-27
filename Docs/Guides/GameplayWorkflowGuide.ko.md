@@ -131,7 +131,8 @@ class Health : public rocks::Component {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit Health(rocks::Allocator& allocator) noexcept : Died(allocator) {
+    explicit Health(rocks::Allocator& allocator) noexcept
+        : rocks::Component(allocator), Died(allocator) {
     }
 
     rocks::Result<void> OnAwake() noexcept override {

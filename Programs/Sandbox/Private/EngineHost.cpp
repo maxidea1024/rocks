@@ -16,6 +16,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <AssetRuntime/CookedManifest.h>
 #include <Engine/Engine.h>
+#include <Engine/ModuleStartProgress.h>
 #include <Engine/SplashSettings.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
 #include <EngineAudio/AudioEngineSubsystem.h>
@@ -38,10 +39,14 @@
 #include <ModuleLoader/HostServices.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <Progress/ProgressHub.h>
+#include <Localization/Text.h>
+#include <Core/Optional.h>
 #include <Platform/Thread.h>
 #include <PlatformWindow/Window.h>
 #include <RenderBase/CookedManifestShaderLibraries.h>
 #include <SplashScreen/SplashScreen.h>
+#include <SplashScreen/StartupProgress.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -164,6 +169,8 @@ public:
         // 시작 화면(선택)이다. 주 창은 숨긴 채 만들어져 있고, 첫 프레임이 끝나면 보이고 한 프레임을
         // 더 그린 뒤 스플래시를 숨긴다(Docs/Design/SplashScreen 9.4절). hook보다 오래 산다.
         splash::SplashScreen* splash = nullptr;
+        // 시작 진행(선택)이다. 스플래시를 숨기기 직전에 끝낸다(9.4절 4). hook보다 오래 산다.
+        splash::StartupProgress* startup = nullptr;
     };
 
     HostLoopBridge(input::InputQueue& queue, const Options& options) noexcept
@@ -307,7 +314,18 @@ public:
         }
 
         ++handOffFrames_;
+        // 첫 프레임을 냈다 — 시작 일은 여기까지다(그 뒤 최소 표시 대기는 단계 시간에 넣지 않는다,
+        // Docs/Design/SplashScreen 8.2절).
+        if (options_.startup != nullptr) {
+            options_.startup->MarkReady();
+        }
+
         if (windowShown_) {
+            if (options_.startup != nullptr) {
+                options_.startup->Finish();
+                options_.startup = nullptr;
+            }
+
             options_.splash->Hide();
             options_.splash = nullptr;
         } else if (handOffFrames_ >= ShowWindowAfterFrames && options_.splash->CanHide()) {
@@ -559,7 +577,7 @@ private:
 // 원천으로 건다. 엔진 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지 않는다).
 int RunEngine(Allocator& allocator, const EngineHostOptions& options,
               config::ConfigContext& settings, ModuleLoader& modules, StringView engineDirectory,
-              splash::SplashScreen* splash) noexcept {
+              splash::SplashScreen* splash, splash::StartupProgress* startup) noexcept {
     LogApkProbe();
     // 엔진 전용 실행의 쿠킹 루트(SSD48 — EngineAssets 10.3.1절 A4f4 5번)다. 엔진 쿠킹 매니페스트가
     // 있을 때만 EngineAssets Subsystem을 넣는다(없으면 그 초기화가 NotFound로 엔진 시작을 막는다 —
@@ -607,6 +625,7 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
     hookOptions.gamepads = gamepads.Get();
     hookOptions.client = &client;
     hookOptions.splash = window ? splash : nullptr;
+    hookOptions.startup = window && splash != nullptr ? startup : nullptr;
     HostLoopBridge bridge(queue, hookOptions);
     EngineConfig config;
     config.hooks = &bridge;
@@ -620,8 +639,16 @@ int RunEngine(Allocator& allocator, const EngineHostOptions& options,
                                    : Span<const EngineSubsystemType>(audioOnly);
 
     Engine engine(allocator);
+    if (startup != nullptr) {
+        startup->Enter(splash::StartupStep::Engine);
+    }
+
     if (!engine.Initialize(config)) {
         return 1;
+    }
+
+    if (startup != nullptr) {
+        startup->Enter(splash::StartupStep::FirstFrame);
     }
 
     if (const EngineAssetsSubsystem* assets = engine.GetSubsystem<EngineAssetsSubsystem>()) {
@@ -964,12 +991,30 @@ Result<void> RegisterSandboxSettingsTypes(ModuleRegistration& registration) noex
     return RegisterPhysicsTypes(registration);
 }
 
-// 창 모드의 시작 화면을 띄운다(Docs/Design/SplashScreen 4·10절). 띄우지 않기로 했으면
-// Unsupported(사유는 Debug 로그), 띄우지 못했으면 Warning을 남기고 그 오류를 돌려준다. 설정은 부팅
-// 값(ui.splash.*)이고, 제목이 비면 "Rocks Sandbox"다.
-Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
-                                               const EngineHostOptions& options,
-                                               StringView engineDirectory) noexcept {
+// Sandbox가 들어가는 시작 단계다(Docs/Design/SplashScreen 8.1절 — 엔진 밖 에셋·셰이더 준비와
+// 콘텐츠 단계가 없다).
+constexpr splash::StartupStep SandboxStartupSteps[] = {splash::StartupStep::HostServices,
+                                                       splash::StartupStep::Engine,
+                                                       splash::StartupStep::FirstFrame};
+
+// 시작 단계 보정 프로필의 엔진 폴더 기준 경로·대상 이름·경로 칸 크기다(8.2절).
+constexpr StringView SandboxStartupProfileRelative = "Saved/Startup/StartupProfile.json";
+constexpr StringView SandboxStartupProfileTarget = "Sandbox";
+constexpr usize SandboxStartupProfilePathBytes = 4096;
+
+// 띄운 시작 화면과 그 진행이다. 진행은 스플래시가 뜰 때만 있다.
+struct SandboxSplash {
+    Optional<splash::SplashScreen> screen;
+    Optional<splash::StartupProgress> startup;
+};
+
+// 창 모드의 시작 화면을 띄운다(Docs/Design/SplashScreen 4·7·10절). 띄우지 않기로 했거나 띄우지
+// 못했으면 빈 값이다(못 띄웠으면 Warning, 안 띄우는 사유는 Debug 로그). 설정은 부팅 값
+// (ui.splash.*)이고, 제목이 비면 "Rocks Sandbox"다. 시작 진행(시작 작업·단계 구간)을 열어 그 상태
+// 원천을 스플래시에 준다 — ProgressHub가 켜져 있지 않으면 진행 없이(막대 불확정) 띄운다.
+SandboxSplash ShowSandboxSplash(Allocator& allocator, const EngineHostOptions& options,
+                                StringView engineDirectory) noexcept {
+    SandboxSplash result;
     const SplashSettingValues values = ReadSplashSettings();
     splash::SplashVisibilityInput input = splash::MakeSplashVisibilityInput();
     input.interactiveHost = true;
@@ -981,12 +1026,14 @@ Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
     if (reason != splash::SplashSkipReason::None) {
         Log::Debug(LogSandboxHost, "The splash screen is not shown ({Reason})",
                    splash::SplashSkipReasonName(reason));
-        return Result<splash::SplashScreen>::Failure(ErrorCode::Unsupported);
+        return result;
     }
 
+    const StringView title =
+        values.gameTitle.IsEmpty() ? StringView("Rocks Sandbox") : values.gameTitle;
+
     const splash::SplashTextValue texts[] = {
-        {splash::SplashTextSlot::Title,
-         values.gameTitle.IsEmpty() ? StringView("Rocks Sandbox") : values.gameTitle},
+        {splash::SplashTextSlot::Title, title},
         {splash::SplashTextSlot::Copyright, values.gameCopyright},
     };
     splash::SplashShowDesc desc;
@@ -998,13 +1045,54 @@ Result<splash::SplashScreen> ShowSandboxSplash(Allocator& allocator,
     desc.showProgressText = values.gameShowProgressText;
     desc.showProgressBar = values.gameShowProgressBar;
     desc.minimumDisplaySeconds = values.minimumSeconds;
+    if (auto appTitle = Text::Invariant(allocator, title)) {
+        splash::StartupProgressDesc startupDesc;
+        startupDesc.appTitle = &appTitle.Value();
+        startupDesc.steps = Span<const splash::StartupStep>(SandboxStartupSteps);
+        // 보정 프로필(Docs/Design/SplashScreen 8.2절): 프로젝트가 없는 엔진 프로그램이라 엔진
+        // Saved 아래에 둔다(UE 엔진 프로그램과 같은 자리).
+        char profilePath[SandboxStartupProfilePathBytes];
+        FixedStringBuilder profile{Span<char>(profilePath)};
+        if (!engineDirectory.IsEmpty() &&
+            profile.TryAppendFormat("{}/{}", engineDirectory, SandboxStartupProfileRelative)) {
+            startupDesc.profilePath = profile.View();
+            startupDesc.profileTarget = SandboxStartupProfileTarget;
+        } else if (!engineDirectory.IsEmpty()) {
+            Log::Debug(LogSandboxHost,
+                       "The startup profile path is too long; step weights are not calibrated");
+        }
+
+        if (auto begun = splash::StartupProgress::Begin(allocator, startupDesc)) {
+            if (auto source = begun.Value().MakeSplashSource(allocator, nullptr)) {
+                desc.source = source.Value();
+            }
+
+            result.startup = Move(begun.Value());
+        } else {
+            Log::Debug(LogSandboxHost, "Startup progress is not reported: {Error}",
+                       ErrorCodeName(begun.Error()));
+        }
+    }
+
     auto shown = splash::SplashScreen::Show(allocator, desc);
     if (!shown) {
         Log::Warning(LogSandboxHost, "The splash screen could not be shown: {Error}",
                      ErrorCodeName(shown.Error()));
+        // 진행을 보일 곳이 없으니 시작 작업을 닫는다(끝까지 간 시작이 아니다).
+        if (result.startup) {
+            result.startup.Value().Finish(ProgressOutcome::Abandoned);
+            result.startup = NullOpt;
+        }
+
+        return result;
     }
 
-    return shown;
+    result.screen = Move(shown.Value());
+    if (result.startup) {
+        result.startup.Value().Enter(splash::StartupStep::HostServices);
+    }
+
+    return result;
 }
 
 } // namespace
@@ -1089,8 +1177,22 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
         // 시작 화면(Docs/Design/SplashScreen 10.3절): 설정·로그 뒤, trace·호스트 단계 모듈·엔진
         // 전에 띄우고 주 창 첫 프레임 뒤 숨긴다(HostLoopBridge). 띄우지 못해도 시작은 계속한다.
         // 엔진이 일찍 끝나면 이 범위가 끝날 때 숨긴다.
-        Result<splash::SplashScreen> shownSplash =
-            ShowSandboxSplash(allocator, options, boot.engineDir);
+        // 진행 중계(Docs/Design/ProgressReporting 7.1절)를 켠다. 스플래시보다 먼저 켜고 나중에
+        // 끈다.
+        const bool progressReady = static_cast<bool>(ProgressHub::Get().Initialize(allocator, {}));
+        struct ProgressScopeExit {
+            bool ready;
+            ~ProgressScopeExit() noexcept {
+                if (ready) {
+                    ProgressHub::Get().Shutdown();
+                }
+            }
+        } progressExit{progressReady};
+        SandboxSplash shownSplash = ShowSandboxSplash(allocator, options, boot.engineDir);
+        splash::SplashScreen* splashScreen =
+            shownSplash.screen ? &shownSplash.screen.Value() : nullptr;
+        splash::StartupProgress* startup =
+            shownSplash.startup ? &shownSplash.startup.Value() : nullptr;
         // 7) trace 세션(trace.* 설정 — 5)에서 고정됐다)·콘솔 명령·--trace. 세션을 열지 못해도
         // 엔진은 돈다.
         TraceSession trace;
@@ -1137,16 +1239,28 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
             // 실패하면 Error를 남기고 모듈은 등록부 없이 시작한다.
             (void)shaders::AttachHost(modules, shaders::SandboxShaderScope::Engine);
 
-            const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
+            ModuleLoadReport hostModules;
+            {
+                ModuleStartProgress moduleProgress(modules, allocator);
+                hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
+            }
+
             if (hostModules.IsOk()) {
                 exitCode = RunEngine(allocator, options, settings.Context(), modules,
-                                     boot.engineDir, shownSplash ? &shownSplash.Value() : nullptr);
+                                     boot.engineDir, splashScreen, startup);
             } else {
                 Log::Error(LogSandboxHost,
                            "Host module {Module} failed to start ({Code}) at {Stage}: {Message}",
                            StringView(hostModules.failed), ModuleLoadCodeName(hostModules.code),
                            StringView(hostModules.stage), StringView(hostModules.message));
                 exitCode = 1;
+            }
+
+            // 주 창으로 넘기기 전에 엔진이 끝났으면(시작 중 창 닫기·짧은 --frames·실패) 시작 작업을
+            // 결과대로 닫는다. 넘겼으면 이미 끝나 아무 일도 하지 않는다.
+            if (startup != nullptr) {
+                startup->Finish(exitCode == 0 ? ProgressOutcome::Abandoned
+                                              : ProgressOutcome::Failed);
             }
 
             modules.ShutdownGroup(ModuleGroup::Host);

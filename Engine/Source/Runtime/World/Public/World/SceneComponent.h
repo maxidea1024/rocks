@@ -140,7 +140,7 @@ public:
     static constexpr uint32 MaxHierarchyDepth = 4096;
 
     explicit SceneComponent(Allocator& allocator) noexcept
-        : children_(allocator), attachSocket_(allocator) {
+        : Component(allocator), children_(allocator), attachSocket_(allocator) {
     }
 
     const Transform& RelativeTransform() const noexcept {
@@ -259,6 +259,12 @@ public:
     // 바뀐다).
     ROCKS_FUNCTION(ScriptCallable) void SetMobility(ComponentMobility mobility) noexcept;
 
+    // overlap을 다시 계산한다(UE USceneComponent::UpdateOverlaps — Docs/Design/PhysicsModule 5.3절·
+    // 7.1.11절). 이 클래스는 자식만 갱신하고(복사본으로 돈다), PrimitiveComponent는 자기 장부를
+    // 갱신한 뒤 자식으로 내려간다. 소유 Actor가 Playing이 아니면 하지 않는다. transform을 바꾸는
+    // setter는 루트 통지 끝에 이것을 부른다.
+    virtual void UpdateOverlaps() noexcept;
+
     // --- 가시성(23.3절) ---
 
     // visible을 바꾼다(UE SetVisibility). propagateToChildren이면 자손에도 같은 값을 쓴다.
@@ -360,11 +366,22 @@ protected:
     // affectsWorld). 막으면 InvalidArgument와 Warning 진단 ComponentDataLockedInGame이다.
     Result<void> CheckChangeBeforeGameInitialization(const char* property) const noexcept;
 
-private:
-    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다.
+    // 게임 World에서 초기화 뒤 Static·Stationary면 InvalidArgument(Warning 진단)다. action은 진단
+    // 문구의 동작 이름이다.
     Result<void> CheckMovable(const char* action) const noexcept;
-    // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한다.
+
+    // 참이면 루트 transform 통지 뒤의 overlap 갱신을 하지 않고 overlapUpdateSkipped_를 켠다
+    // (MoveComponent·ApplyPhysicsTransform이 옮기기를 끝낸 뒤 직접 갱신하는 동안 — PhysicsModule
+    // 7.1.11절).
+    ROCKS_NATIVE() bool overlapUpdateDeferred_ = false;
+    ROCKS_NATIVE() bool overlapUpdateSkipped_ = false;
+
+private:
+    // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한 뒤 overlap을
+    // 갱신한다(루트 통지 — 7.1.11절).
     void NotifyTransformUpdated() noexcept;
+    // NotifyTransformUpdated의 전파 몫이다(자식 전파는 overlap을 갱신하지 않는다).
+    void PropagateTransformUpdated() noexcept;
     // 링크만 바꾼다(검사·규칙 계산 뒤).
     Result<void> LinkParent(ObjectHandle parent, StringView socket) noexcept;
     void ApplyVisibility(bool visible, bool hidden, bool setVisible, bool propagate) noexcept;

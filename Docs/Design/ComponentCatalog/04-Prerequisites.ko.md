@@ -14,7 +14,7 @@
 | CR2 | SceneComponent 보강: 부착 규칙(KeepRelative·KeepWorld·SnapToTarget — UE `EE/EngineTypes.h:62`), socket 이름 부착과 `GetSocketTransform`, 절대 location·rotation·scale, Mobility(Static·Stationary·Movable), 가시성(visible 자식 전파·hiddenInGame), 속도, bounds 계산 가상 함수와 bounds 갱신, Transform 변경 통지(구독형 — CR7) | 없음 | `World/SceneComponent.h`는 상대 Transform·계층·월드 행렬만 있다 | ER 7.3절, 추가 요구 |
 | CR3 | 부착 계층 영속(부모 WeakObjectRef PROPERTY) | 없음(자리) | ER 14절 "부착 계층은 저장되지 않고" | PF 5.1절 World 단계, 리플렉션 B9d1 |
 | CR4 | Component 시작 준비 hook(`IsReadyToStart`) — 메시·텍스처 로드 대기 | 구현(ER S9b — 17.4절) | SE-W2 | ER 7.2절, SE-W2 |
-| CR5 | EditorOnly 컴포넌트와 쿠킹 제외, 태그(`TagSet`) | 없음 | `World/Component.h`에 없다. A0-B `EditorOnly` 지정자는 필드 단위다. 객체 단위 EditorOnly는 패키지 Exports 플래그로 예약만 됐고 클래스 지정자가 없으며 reader는 그 비트를 `CorruptPackage`로 거부한다(AssetSystem 243행 — 켜려면 schemaVersion을 올린다). 태그 사전은 계획만 있다 | EIP 20.1절(태그), AssetSystem 패키지 형식 개정, MetaCompiler 클래스 지정자 |
+| CR5 | EditorOnly 컴포넌트와 쿠킹 제외, 태그(`TagSet`) | 일부(런타임 EditorOnly — CM0, Name 태그 — ER 31장) | 런타임 EditorOnly 규칙은 CM0(ER 23.2절), Name 배열 태그(UE `Tags`·`ComponentTags`)는 ER 31장이다. 계층 태그 사전과 쿠킹 쪽이 남는다. 처음 조사: `World/Component.h`에 없었다. A0-B `EditorOnly` 지정자는 필드 단위다. 객체 단위 EditorOnly는 패키지 Exports 플래그로 예약만 됐고 클래스 지정자가 없으며 reader는 그 비트를 `CorruptPackage`로 거부한다(AssetSystem 243행 — 켜려면 schemaVersion을 올린다). 태그 사전은 계획만 있다 | EIP 20.1절(태그), AssetSystem 패키지 형식 개정, MetaCompiler 클래스 지정자 |
 | CR6 | 컴포넌트 타입 규칙(Actor당 하나·필수 동반·상호 배타)을 타입 메타로 | 구현(CM0a — `Component::TypeRules`, ER 23.2절) | — | EIP 20.2절 |
 | CR7 | 이벤트 slot 표(overlap·hit·타임라인·재생 끝 등 컴포넌트 이벤트를 구독이 있을 때만 저장) | 없음 | SE-W8 | SE-W8, EIP 20.2절 |
 | CR8 | World 필드 편집 setter·통지(CU5) — 속성을 바꾸면 CR1의 "다시 보내기" 표시 | 없음 | ER 14절 "World 필드는 ReadOnly" | ReflectionExtensions CU5 |
@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | CR9 | 에셋 런타임 A1–A5: 패키지·로더·`AssetLease`(WorldOnly 클래스 멤버 허용 — A0-B), 클래스 기본값 레코드(A5). 컴포넌트가 메시·머티리얼·사운드를 필드로 잡는 전제 | A1–A3 완료, A4 진행(A4c2까지) | 메모리·AssetSystem 1절 | [에셋 시스템](../AssetSystem/README.ko.md) |
 | CR9a | Prefab PF1(클래스 원형·default subobject) — 컴포넌트를 클래스 원형으로 선언하고 `ChildActorComponent`가 템플릿 Actor를 갖는 전제 | 설계만 | PF 5.2절 | PF |
-| CR10 | 커브 에셋(Curve 에셋 층 — 타임라인·햅틱 효과·감쇠 커브) | 값 타입 층 완료(CV1–CV10), 에셋 층은 A1 뒤 | 메모리 curve-data-spec | CurveData |
+| CR10 | 커브 에셋(Curve 에셋 층 — 타임라인·햅틱 효과·감쇠 커브) | 값 타입 층 완료(CV1–CV10), 에셋 층 설계 완료(2026-11-27 — CA1–CA6) | — | CurveData, [커브 에셋](../CurveAssets/README.ko.md) |
 
 ### 4.3 렌더
 
@@ -46,7 +46,7 @@
 | ID | 요구 | 상태 | 확인 근거 | 정본 |
 |---|---|---|---|---|
 | CR16 | 물리 모듈(Jolt): body(UE `FBodyInstance` 대응), 충돌 채널·응답·프로필, overlap·hit 이벤트, sweep 이동(UE `MoveComponent`), scene query, simulate physics, ragdoll용 physics asset | 설계·데이터 있음(2026-11-25) | Jolt 5.7.0 반입(JL1), 충돌 데이터 `Collision` 모듈(CD1)·`PrimitiveComponent` 연결(CD2) 구현. Physics 모듈은 상세 설계만([물리 모듈](../PhysicsModule/README.ko.md) PH0 — 구현은 M4 PH1–PH6). 어댑터 경계는 Jolt 사실 확인 완료(개정 3) | EIP 16절, PhysicsJoltAdapter, CollisionData, PhysicsModule, CylinderShape CY2 |
-| CR17 | 영역 형상 `VolumeShape`(상자·구·캡슐·볼록체)와 물리 없는 내부 판정 — brush volume 대체(CD1). 후처리 볼륨·리버브 존·트리거 아닌 영역이 같은 형상과 판정을 쓴다 | 오디오 문서에만 있음 | AU 3.15.2절 "영역 형상(상자·구·볼록체)… 물리 엔진은 쓰지 않는다" | 추가 요구(공용화) |
+| CR17 | 영역 형상 `VolumeShape`(상자·구·캡슐·볼록체)와 물리 없는 내부 판정 — brush volume 대체(CD1). 후처리 볼륨·리버브 존·트리거 아닌 영역이 같은 형상과 판정을 쓴다 | 구현(041c356de — Core `VolumeShape`·`ConvexHull`, Shape 컴포넌트 월드 형상, 후처리 볼륨 모으기·혼합). 남은 것: 볼록체 출처(메시 단순 충돌)를 컴포넌트에 잇기 — 메시 컴포넌트 뒤, 리버브 존 연결은 오디오 AU3 | `Core/Math/VolumeShape.h`, `World/PostProcess/PostProcessVolumeBlending.h` | [ER 28장](../EngineRuntime/28-VolumeShape.ko.md), AU 3.15.2절 |
 
 ### 4.5 애니메이션·오디오·입력·큰 월드
 
@@ -54,9 +54,9 @@
 |---|---|---|---|---|
 | CR19 | 애니메이션 런타임: pose 평가·blend·본 transform·소켓·root motion·LOD별 본 맵, skinning 데이터 전달 | 에셋만(`Animation` 모듈은 Skeleton·Clip 에셋) | `Engine/Source/Runtime/Animation/Public` | EIP 15절, MA 6·7절 |
 | CR20 | 오디오 엔진 연결 AU3(`AudioWorldSubsystem`·emitter 등록) | 설계만 | AU 3.8절 | AU |
-| CR21 | 입력 액션·매핑 컨텍스트·리바인딩, 햅틱 출력(XInput 진동 등) | 없음(프레임 입력 상태만) | ER 9절 "액션 매핑… 이번 범위가 아니다" | EIP 20.4절 |
+| CR21 | 입력 액션·매핑 컨텍스트·리바인딩, 햅틱 출력(XInput 진동 등) | 구현(InputActions IA1–IA8 — 에셋 감싸기 IA6a·IA6b, 함수 바인딩 IA7, 입력 스택 IA8). 남은 것: 편집기 IA6c(Studio), Mac 진동 | `Engine/Source/Runtime/InputActions` | [InputActions](../InputActions/README.ko.md), EIP 20.4절 |
 | CR22 | World Partition(셀·streaming source·data layer) | 없음 | SE-W7 | EIP 10.2절 |
-| CR26 | 게임 프레임워크: PlayerController·LocalPlayer(입력 컴포넌트 스택, 햅틱 효과 관리, 주 리스너·view 소유) | 골격 구현(ER S10–S14 — `Gameplay` 모듈), 입력 컴포넌트 스택·햅틱은 CR21과 함께 | ER 3절 표에 `Gameplay` 모듈이 있으나 `Engine/Source/Runtime`에 없다(ER 1절 S10–S12 미착수) | ER 1절 S10–S12, EIP 20.4·20.5절 |
+| CR26 | 게임 프레임워크: PlayerController·LocalPlayer(입력 컴포넌트 스택, 햅틱 효과 관리, 주 리스너·view 소유) | 골격 구현(ER S10–S14 — `Gameplay` 모듈), 햅틱 구현(InputActions IA5), 입력 컴포넌트 스택·`InputComponent` 구현(InputActions 5.5절 IA8 — 2026-11-27 사용자 결정으로 당김) | `Engine/Source/Runtime/Gameplay` | ER 1절 S10–S12, EIP 20.4·20.5절 |
 | CR24 | 복제(컴포넌트 복제·서브오브젝트) | 없음 | — | EIP 17절. 컴포넌트 도입을 막지 않는다 — 필드에 복제 표지를 둘 자리만 남긴다 |
 | CR25 | Sparks 바인딩(컴포넌트 API 노출) | 없음 | SE 3절 EI 단계 | SE. C++ 구현을 막지 않는다 |
 

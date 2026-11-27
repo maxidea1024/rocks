@@ -58,6 +58,9 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
 
     playable.volume = volume;
     playable.pitch = pitch;
+    playable.priority = priority;
+    playable.bypassVolumeScaleForPriority = bypassVolumeScaleForPriority;
+    playable.virtualizationMode = virtualizationMode;
     playable.asset = Id();
     if (!attenuation.Handle().IsNull()) {
         auto settings = registry.Resolve<AttenuationSettings>(access, attenuation.Handle());
@@ -118,6 +121,7 @@ Result<void> SoundClip::SetPcm(SharedPtr<const SoundPcm> pcm) noexcept {
     sampleRate = pcm ? pcm->SampleRate() : 0;
     frameCount = pcm ? pcm->FrameCount() : 0;
     pcm_ = Move(pcm);
+    stream_ = SharedPtr<const SoundStreamData>{};
     ++pcmRevision_;
     pcmKey_ = SoundPcmKey{};
     return Result<void>::Success();
@@ -126,12 +130,23 @@ Result<void> SoundClip::SetPcm(SharedPtr<const SoundPcm> pcm) noexcept {
 Result<void> SoundClip::FillPlayable(SoundPlayable& playable) const noexcept {
     // 재임포트 직후(LoadEditorPcm 전)에는 형식 필드가 새 값이고 PCM은 옛 것이다. 새 loop 구간이 옛
     // PCM과 섞이지 않게 차원이 다르면 준비되지 않은 것으로 본다(3.36.2절).
-    if (!pcm_ || pcm_->ChannelCount() != channelCount || pcm_->SampleRate() != sampleRate ||
-        pcm_->FrameCount() != frameCount) {
-        return Result<void>::Failure(ErrorCode::NotReady);
+    if (stream_) {
+        // 실시간 디코드 원본도 같은 차원 검사를 한다(3.40.3절).
+        if (stream_->ChannelCount() != channelCount || stream_->SampleRate() != sampleRate ||
+            stream_->FrameCount() != frameCount) {
+            return Result<void>::Failure(ErrorCode::NotReady);
+        }
+
+        playable.stream = stream_;
+    } else {
+        if (!pcm_ || pcm_->ChannelCount() != channelCount || pcm_->SampleRate() != sampleRate ||
+            pcm_->FrameCount() != frameCount) {
+            return Result<void>::Failure(ErrorCode::NotReady);
+        }
+
+        playable.pcm = pcm_;
     }
 
-    playable.pcm = pcm_;
     playable.looping = looping;
     EffectiveLoop(playable.loopBegin, playable.loopEnd);
     playable.revision = pcmRevision_;
@@ -249,6 +264,7 @@ Result<void> SoundClip::LoadEditorPcm(Allocator& allocator, PackageBulkSource& b
     }
 
     pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
+    stream_ = SharedPtr<const SoundStreamData>{};
     ++pcmRevision_;
     pcmKey_ = SoundPcmKey{SoundPcmOrigin::Editor, source.bulk, source.format,
                           channelCount,           sampleRate,  frameCount};
@@ -277,13 +293,16 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
         return Result<void>::Failure(read.Error());
     }
 
-    // 형식 위반·모르는 codec id는 손상이다(쿠커가 쓴 byte가 아니다).
+    // 형식 위반은 Parse가 CorruptData로, 모르는 판·codec은 Unsupported로 알린다(3.38절 — 그대로
+    // 넘긴다).
     auto view = audio::AudioPlatformDataView::Parse(read.Value());
     if (!view) {
-        return Result<void>::Failure(view.Error() == ErrorCode::InvalidArgument ||
-                                             view.Error() == ErrorCode::Unsupported
-                                         ? ErrorCode::CorruptData
-                                         : view.Error());
+        return Result<void>::Failure(view.Error());
+    }
+
+    // reader가 준 byte는 플랫폼 데이터 전체여야 한다(payload가 모자라면 잘린 데이터다).
+    if (!view.Value().HasAllPayload()) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
     // 머리와 필드가 다르면(필드가 다른 쿠킹의 것) 재생 PCM 차원 검사가 원인 없이 NotReady를 내므로
@@ -297,8 +316,7 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
     audio::DecodedAudioPcm decoded(allocator);
     if (auto done = audio::DecodeAudioPlatformData(view.Value(), decoders, allocator, decoded);
         !done) {
-        return Result<void>::Failure(
-            done.Error() == ErrorCode::InvalidArgument ? ErrorCode::CorruptData : done.Error());
+        return done;
     }
 
     // 디코드 결과가 머리 차원과 같아야 복사할 수 있다(디코더 결함이 범위 밖 읽기가 되지 않게).
@@ -323,10 +341,94 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
     }
 
     pcm_ = SharedPtr<const SoundPcm>(Move(made.Value()));
+    stream_ = SharedPtr<const SoundStreamData>{};
     ++pcmRevision_;
     pcmKey_ = SoundPcmKey{SoundPcmOrigin::Cooked, platformData, SoundSourceStorage::None,
                           channelCount,           sampleRate,   frameCount};
     return Result<void>::Success();
+}
+
+Result<void> SoundClip::LoadCookedStream(Allocator& allocator, SoundBulkReader reader,
+                                         void* context,
+                                         const audio::AudioDecoderTable& decoders) noexcept {
+    if (platformData.IsEmpty() || reader == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    if (SameKey(pcmKey_, SoundPcmOrigin::CookedStream, platformData, SoundSourceStorage::None,
+                channelCount, sampleRate, frameCount)) {
+        return Result<void>::Success();
+    }
+
+    if (channelCount > audio::MaxClipChannels) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto read = reader(context, platformData);
+    if (!read) {
+        return Result<void>::Failure(read.Error());
+    }
+
+    // 복사·해석·모든 청크 검증(3.40.2절 — 공급자의 "검증된 payload" 계약을 여기서 만든다).
+    auto made = SoundStreamData::TryCreate(allocator, read.Value());
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    const SoundStreamData& data = *made.Value();
+    if (data.ChannelCount() != channelCount || data.SampleRate() != sampleRate ||
+        data.FrameCount() != frameCount) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    if (!decoders.Contains(data.View().Header().codec)) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    stream_ = SharedPtr<const SoundStreamData>(Move(made.Value()));
+    pcm_ = SharedPtr<const SoundPcm>{};
+    ++pcmRevision_;
+    pcmKey_ = SoundPcmKey{SoundPcmOrigin::CookedStream,
+                          platformData,
+                          SoundSourceStorage::None,
+                          channelCount,
+                          sampleRate,
+                          frameCount};
+    return Result<void>::Success();
+}
+
+SoundLoadingBehavior
+SoundClip::EffectiveLoadingBehavior(const SoundCookedLoadOptions& options) const noexcept {
+    if (loadingBehavior != SoundLoadingBehavior::Inherited) {
+        return loadingBehavior;
+    }
+
+    if (options.defaultLoading < SoundLoadingBehavior::RetainOnLoad) {
+        return SoundLoadingBehavior::RetainOnLoad;
+    }
+
+    return options.defaultLoading > SoundLoadingBehavior::LoadOnDemand
+               ? SoundLoadingBehavior::LoadOnDemand
+               : options.defaultLoading;
+}
+
+Result<void> SoundClip::LoadCooked(Allocator& allocator, SoundBulkReader reader, void* context,
+                                   const audio::AudioDecoderTable& decoders,
+                                   const SoundCookedLoadOptions& options) noexcept {
+    // AU6a는 동작마다 디코드 방식이 같다(AU6b의 청크 캐시가 동작을 쓴다).
+    (void)options;
+    // 짧은 loop는 바퀴마다 디코더를 다시 여는 비용이 커서 통째로 푼다(3.40.2절).
+    uint32 loopBegin = 0;
+    uint32 loopEnd = 0;
+    EffectiveLoop(loopBegin, loopEnd);
+    const uint64 loopLength = loopBegin == 0 && loopEnd == 0 ? frameCount : loopEnd - loopBegin;
+    const bool shortLoop =
+        looping && loopLength < static_cast<uint64>(sampleRate) * StreamMinLoopSeconds;
+    if (shortLoop) {
+        return LoadCookedPcm(allocator, reader, context, decoders);
+    }
+
+    return LoadCookedStream(allocator, reader, context, decoders);
 }
 
 } // namespace rocks

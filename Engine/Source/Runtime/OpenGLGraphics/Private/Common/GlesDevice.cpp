@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include <GraphicsTypes/CookSampling.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -191,6 +192,18 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
             IsValidPixelFormat(pixelFormat) ? FindTextureFormat(pixelFormat) : nullptr;
         formatCaps_[number] =
             entry != nullptr ? TextureFormatCaps(*entry, features_) : PixelFormatCaps::None;
+    }
+
+    // 쿠킹 보장 샘플링(Docs/Design/PixelFormat 7.1절): Android는 ES 3.2 core 형식(ETC2·EAC·ASTC
+    // LDR 포함)이 표의 보장 칸이다. Windows 미리보기는 쿠킹 대상이 아니라 대조하지 않는다.
+    const PixelFormat missing = FindMissingCookSampling(Backend::OpenGL, HostGraphicsPlatform(),
+                                                        Span<const PixelFormatCaps>(formatCaps_));
+    if (missing != PixelFormat::Unknown) {
+        char detail[sizeof(DeviceCreateReport{}.detail)];
+        WriteCookSamplingRejection(Span<char>(detail), Backend::OpenGL, HostGraphicsPlatform(),
+                                   missing);
+        failure.Set(ErrorCode::Unsupported, "CookSamplingGuarantee", 0, detail);
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     // 장치 능력(GX1)과 MSAA 표본 수(Multisample 능력)를 채운다.

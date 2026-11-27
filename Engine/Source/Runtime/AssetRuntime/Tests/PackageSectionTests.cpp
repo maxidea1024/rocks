@@ -92,7 +92,7 @@ struct Reader {
         bool readOnly = false;
         const AssetDiagnostic failure = Read(bytes, kind, ok, readOnly);
         return !ok && failure.code == AssetDiagnosticCode::CorruptPackage &&
-               failure.error == ErrorCode::InvalidArgument &&
+               failure.error == ErrorCode::CorruptData &&
                failure.section == static_cast<uint32>(section);
     }
 
@@ -806,7 +806,7 @@ TEST(AssetPackage_DecodeBulk) {
         AssetDiagnostic diagnostic;
         auto decoded =
             DecodePackageBulk(changed, out, slots, NumericLimits<uint64>::Max(), &diagnostic);
-        return !decoded && decoded.Error() == ErrorCode::InvalidArgument &&
+        return !decoded && decoded.Error() == ErrorCode::CorruptData &&
                diagnostic.code == AssetDiagnosticCode::CorruptPackage && out.Size() == before &&
                slots.Size() == slotsBefore;
     };

@@ -59,6 +59,28 @@ graphics::ShaderStage StageOf(uint32 stage) noexcept {
     }
 }
 
+// 문제의 오류 값이다(Docs/Design/RenderBase 6.6절): 공급자 없음 UnsupportedCapability,
+// 라이브러리·항목 byte 손상 CorruptData, 그 밖의 검사 실패 DependencyFailed.
+ErrorCode ShaderSetProblemError(ShaderSetProblem problem) noexcept {
+    switch (problem) {
+    case ShaderSetProblem::NoProvider:
+        return ErrorCode::UnsupportedCapability;
+    case ShaderSetProblem::CorruptLibrary:
+    case ShaderSetProblem::CorruptEntry:
+        return ErrorCode::CorruptData;
+    case ShaderSetProblem::None:
+    case ShaderSetProblem::UnsupportedLibraryVersion:
+    case ShaderSetProblem::WrongFormat:
+    case ShaderSetProblem::TypeSetMismatch:
+    case ShaderSetProblem::MissingEntry:
+    case ShaderSetProblem::SignatureMismatch:
+    case ShaderSetProblem::ProviderFailed:
+        return ErrorCode::DependencyFailed;
+    }
+
+    return ErrorCode::DependencyFailed;
+}
+
 } // namespace shader_set_detail
 
 using namespace shader_set_detail;
@@ -122,12 +144,7 @@ Result<void> ShaderSet::FailWith(ShaderSetProblem problem, const char* detail) n
     snprintf(detail_, sizeof(detail_), "%s", detail);
     entries_.Clear();
     view_.Close();
-    ErrorCode code = ErrorCode::DependencyFailed;
-    if (problem == ShaderSetProblem::NoProvider) {
-        code = ErrorCode::UnsupportedCapability;
-    }
-
-    return Result<void>::Failure(code);
+    return Result<void>::Failure(ShaderSetProblemError(problem));
 }
 
 void ShaderSet::Settle() noexcept {
@@ -179,9 +196,7 @@ Result<void> ShaderSet::OpenFromProvider(ShaderProvider* provider) noexcept {
 
     platform::LockGuard lock(gate_);
     if (state_ == ShaderSetState::Failed) {
-        return Result<void>::Failure(problem_ == ShaderSetProblem::NoProvider
-                                         ? ErrorCode::UnsupportedCapability
-                                         : ErrorCode::DependencyFailed);
+        return Result<void>::Failure(ShaderSetProblemError(problem_));
     }
 
     return Result<void>::Success();
@@ -270,7 +285,9 @@ Result<void> ShaderSet::Validate() noexcept {
     // 항목 표와 바인딩 layout이다.
     entries_.Clear();
     if (!entries_.TryReserve(view_.EntryCount())) {
-        return FailWith(ShaderSetProblem::CorruptLibrary, "out of memory");
+        auto failed = FailWith(ShaderSetProblem::CorruptLibrary, "out of memory");
+        (void)failed;
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
     for (uint32 index = 0; index < view_.EntryCount(); ++index) {

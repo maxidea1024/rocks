@@ -996,6 +996,12 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         continue;
                     }
 
+                    // 리플렉션 클래스의 이벤트는 ROCKS_PROPERTY로만 둔다(EventReflection ED14 — 지정자 없는 멤버의 일반 진단보다 먼저 알린다).
+                    if (Annotation(member, "rocks.field.arguments") is null && EventRules.MentionsWritten(TypeSpelling(member)))
+                    {
+                        throw new MetadataException($"{symbol}: an Event member must be declared with ROCKS_PROPERTY", "RMC2801", EventRules.Hint);
+                    }
+
                     string fieldSpecifiers = FieldArguments(member, symbol);
                     if (memberName.Length == 0)
                     {

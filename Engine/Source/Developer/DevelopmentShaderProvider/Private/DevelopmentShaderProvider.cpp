@@ -6,18 +6,25 @@
 #include <Base/PlacementNew.h>
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/FileError.h>
 #include <Core/Move.h>
 #include <Core/Text/String.h>
 #include <HostConfig/HostSettings.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
+#include <Platform/Atomics.h>
+#include <Platform/Clock.h>
+#include <Platform/DirectoryWatch.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Sync.h>
+#include <Platform/Thread.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
+#include <ShaderCompiler/ShaderDiagnostics.h>
 #include <ShaderCompiler/ShaderJobKey.h>
 #include <ShaderCompiler/ShaderLibraryCook.h>
+#include <ShaderCompiler/ShaderLibraryReloader.h>
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCompiler/ShaderSourceTree.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
@@ -26,8 +33,8 @@
 #include <stdio.h>
 #include <string.h>
 
-// Development 셰이더 공급자(Docs/Design/RenderBase 9.12절 4항, ShaderSystem 12.3.1절 SSD16)다.
-// 규칙은 공개 헤더 주석을 따른다.
+// Development 셰이더 공급자(Docs/Design/RenderBase 9.12절 4항, ShaderSystem 12.3.1절 SSD16·16.3절
+// SH4)다. 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace {
@@ -37,16 +44,34 @@ constexpr LogCategory LogDevelopmentShaderProvider{"DevelopmentShaderProvider"};
 // 경로 버퍼 byte 수다.
 constexpr usize ProviderPathBytes = 1024;
 
-// 진단 한 줄 버퍼와 job 진단을 잘라 넣는 최대 byte 수다.
+// 진단 한 줄 버퍼 byte 수다.
 constexpr usize ProviderNoteBytes = 256;
-constexpr usize JobDiagnosticBytes = 400;
 
 // 공급자 옵션 리플렉션 레지스트리 문맥 id다("DSPV").
 constexpr uint32 ProviderReflectionContextId = 0x44535056;
 
+// 라이브러리 종류 수(Engine·Project)다.
+constexpr usize LibraryKindCount = 2;
+
+// 감시 스레드가 바뀐 원문이 없을 때 정지 event를 기다리는 시간(ms)이다(반응 지연 상한 — 판정에
+// 쓰지 않는다, ShaderSystem 16.3절 SSD77).
+constexpr uint32 WatchIdleMilliseconds = 100;
+
+// 한 번의 재컴파일에 모으는 바뀐 원문 수의 상한이다(넘으면 모두 바뀐 것으로 본다).
+constexpr usize MaxPendingSources = 256;
+
+// 실패 로그에 남기는 진단 수의 상한이다(나머지는 수만 센다).
+constexpr usize MaxLoggedDiagnostics = 32;
+
+// 나노초 → 밀리초다.
+constexpr uint64 NanosecondsPerMillisecond = 1'000'000;
+
 // 실행 파일 출력 폴더의 이름 규칙(<도구>-<플랫폼>-<타깃>-<구성>)에서 바꿔 넣는 워커 타깃 이름이다
 // (Docs/Design/BuildTargets 3.11절 선행 타깃 출력).
 constexpr char WorkerTargetName[] = "shadercompileworker";
+
+// 심볼 파일 디렉터리(<너겟 root> 아래 — UE <ProjectSaved>/ShaderSymbols, 16.3절 SSD74)다.
+constexpr char SymbolDirectoryName[] = "Saved/ShaderSymbols";
 
 bool IsSeparator(char c) noexcept {
     return c == '/' || c == '\\';
@@ -74,22 +99,75 @@ struct Reflection {
     bool registered = false;
 };
 
-// 형식 하나의 만든 라이브러리다.
-struct BuiltLibrary {
-    explicit BuiltLibrary(Allocator& allocator) noexcept : bytes(allocator) {
+void CopyText(char* out, usize capacity, StringView text) noexcept {
+    (void)snprintf(out, capacity, "%.*s", static_cast<int>(text.ByteCount()), text.Data());
+}
+
+// 감시 루트 하나다(mount 하나 — 같은 스레드에서만 쓴다).
+struct WatchRoot {
+    explicit WatchRoot(Allocator& allocator) noexcept : virtualRoot(allocator) {
     }
 
-    char formatId[MaxShaderFormatIdBytes] = {};
-    Array<uint8> bytes;
+    String virtualRoot;
+    platform::DirectoryWatcher watcher;
 };
+
+// Poll visitor 문맥이다.
+struct WatchVisit {
+    const WatchRoot* root = nullptr;
+    Array<String>* pending = nullptr;
+    bool everything = false;
+    bool rootRemoved = false;
+};
+
+bool AddPending(WatchVisit& visit, StringView relative) noexcept {
+    String path(visit.pending->GetAllocator());
+    if (!MakeWatchedShaderPath(visit.root->virtualRoot.View(), relative, path)) {
+        return true;
+    }
+
+    for (const String& existing : *visit.pending) {
+        if (existing.View() == path.View()) {
+            return true;
+        }
+    }
+
+    if (visit.pending->Size() >= MaxPendingSources || !visit.pending->TryPushBack(Move(path))) {
+        visit.everything = true;
+    }
+
+    return true;
+}
+
+bool VisitChange(const platform::DirectoryChange& change, void* context) noexcept {
+    auto& visit = *static_cast<WatchVisit*>(context);
+    switch (change.kind) {
+    case platform::DirectoryChangeKind::Overflow:
+        visit.everything = true;
+        return true;
+    case platform::DirectoryChangeKind::RootRemoved:
+        visit.rootRemoved = true;
+        return true;
+    case platform::DirectoryChangeKind::Renamed:
+        (void)AddPending(visit, StringView(change.oldPath, change.oldPathBytes));
+        return AddPending(visit, StringView(change.path, change.pathBytes));
+    case platform::DirectoryChangeKind::Added:
+    case platform::DirectoryChangeKind::Removed:
+    case platform::DirectoryChangeKind::Modified:
+        return AddPending(visit, StringView(change.path, change.pathBytes));
+    }
+
+    return true;
+}
 
 } // namespace
 
 struct DevelopmentShaderProvider::State {
-    State(Allocator& allocator, const render::EngineShaderHost& shaderHost) noexcept
-        : allocator(allocator), host(shaderHost), tree(allocator), reflection(allocator),
-          cache(allocator, platform::PhysicalFileSystem(), clock), scheduler(allocator),
-          root(allocator), workRoot(allocator), snapshots(allocator), libraries(allocator),
+    State(Allocator& allocator, const render::EngineShaderHost& shaderHost,
+          const DevelopmentShaderProviderOptions& providerOptions) noexcept
+        : allocator(allocator), host(shaderHost), options(providerOptions), tree(allocator),
+          reflection(allocator), cache(allocator, platform::PhysicalFileSystem(), clock),
+          scheduler(allocator), root(allocator), workRoot(allocator), symbolRoot(allocator),
           diagnostics(allocator) {
     }
 
@@ -97,7 +175,25 @@ struct DevelopmentShaderProvider::State {
         Shutdown();
     }
 
+    void StopWatch() noexcept {
+        if (!watchStarted) {
+            return;
+        }
+
+        stopWatch.Signal();
+        (void)watchThread.Join();
+        watchStarted = false;
+    }
+
     void Shutdown() noexcept {
+        // 감시 스레드가 재컴파일 중이면 끝날 때까지 기다린다(그 뒤 관리자를 멈춘다).
+        StopWatch();
+        for (usize kind = 0; kind < LibraryKindCount; ++kind) {
+            platform::AtomicStore<platform::MemoryOrder::Release>(
+                &published[kind], static_cast<ShaderLibraryReloader*>(nullptr));
+            libraries[kind].Reset();
+        }
+
         if (manager != nullptr) {
             manager->Shutdown();
             manager->~ShaderCompileManager();
@@ -111,12 +207,6 @@ struct DevelopmentShaderProvider::State {
             cacheOpen = false;
         }
 
-        for (ShaderFormatSnapshot* snapshot : snapshots) {
-            snapshot->~ShaderFormatSnapshot();
-            (void)allocator.Deallocate(snapshot);
-        }
-
-        snapshots.Clear();
         shutDown = true;
     }
 
@@ -124,7 +214,7 @@ struct DevelopmentShaderProvider::State {
         (void)diagnostics.TryAppend(text);
     }
 
-    // 원문·워커·너겟 캐시·관리자를 처음 한 번 준비한다.
+    // 원문·워커·너겟 캐시·관리자·라이브러리를 처음 한 번 준비한다(gate 아래).
     bool Prepare() noexcept {
         if (manager != nullptr) {
             return true;
@@ -138,8 +228,7 @@ struct DevelopmentShaderProvider::State {
 
         prepareFailed = true;
         if (!PrepareSteps()) {
-            snprintf(prepareProblem, sizeof(prepareProblem), "%.*s",
-                     static_cast<int>(diagnostics.View().ByteCount()), diagnostics.View().Data());
+            CopyText(prepareProblem, sizeof(prepareProblem), diagnostics.View());
             Log::Error(LogDevelopmentShaderProvider,
                        "The development shader provider could not "
                        "start: {Problem}",
@@ -189,7 +278,8 @@ struct DevelopmentShaderProvider::State {
 
         if (!reflection.registered || !ResolveShaderNuggetRoot(StringView(), root) ||
             !workRoot.TryAssign(root.View()) || !workRoot.TryAppend("/") ||
-            !workRoot.TryAppend(ShaderWorkerDirectoryName)) {
+            !workRoot.TryAppend(ShaderWorkerDirectoryName) || !symbolRoot.TryAssign(root.View()) ||
+            !symbolRoot.TryAppend("/") || !symbolRoot.TryAppend(SymbolDirectoryName)) {
             Note("cannot prepare the shader compile workspace");
             return false;
         }
@@ -224,6 +314,28 @@ struct DevelopmentShaderProvider::State {
             (void)allocator.Deallocate(manager);
             manager = nullptr;
             return false;
+        }
+
+        for (usize kind = 0; kind < LibraryKindCount; ++kind) {
+            ShaderLibraryReloaderDesc desc;
+            desc.allocator = &allocator;
+            desc.registry = &host.Registry();
+            desc.library = static_cast<ShaderLibraryKind>(kind);
+            // 개발 전용 타입도 만든다(진단 버퍼 퍼뮤테이션 — ShaderSystem 7.2절 12항, SSD16).
+            desc.includeDevelopment = true;
+            desc.manager = manager;
+            desc.formatDirectory = StringView(formats);
+            desc.debugSymbols = options.debugSymbols;
+            desc.symbolDirectory = options.debugSymbols ? symbolRoot.View() : StringView();
+            auto created = UniquePtr<ShaderLibraryReloader>::TryMake(allocator, desc);
+            if (!created) {
+                Note("out of memory");
+                return false;
+            }
+
+            libraries[kind] = Move(created.Value());
+            platform::AtomicStore<platform::MemoryOrder::Release>(&published[kind],
+                                                                  libraries[kind].Get());
         }
 
         return true;
@@ -306,78 +418,223 @@ struct DevelopmentShaderProvider::State {
         return false;
     }
 
-    const BuiltLibrary* Build(const render::ShaderProvisionRequest& request) noexcept {
-        for (const BuiltLibrary& library : libraries) {
-            if (StringView(library.formatId) == request.formatId) {
-                return &library;
-            }
-        }
+    ShaderLibraryReloader* Published(ShaderLibraryKind kind) const noexcept {
+        const usize index = static_cast<usize>(kind);
+        return index < LibraryKindCount
+                   ? platform::AtomicLoad<platform::MemoryOrder::Acquire>(&published[index])
+                   : nullptr;
+    }
 
-        if (!Prepare()) {
-            return nullptr;
-        }
-
-        auto memory =
-            allocator.Allocate(sizeof(ShaderFormatSnapshot), alignof(ShaderFormatSnapshot));
-        if (!memory) {
-            Note("out of memory");
-            return nullptr;
-        }
-
-        auto* snapshot = ::new (memory.Value()) ShaderFormatSnapshot(allocator);
-        if (!snapshots.TryPushBack(snapshot)) {
-            snapshot->~ShaderFormatSnapshot();
-            (void)allocator.Deallocate(snapshot);
-            Note("out of memory");
-            return nullptr;
-        }
-
-        if (!LoadShaderFormatSnapshot(formats, request.formatId, *snapshot)) {
-            Note("cannot load the shader format definition");
-            return nullptr;
-        }
-
-        const ShaderFormatSnapshot* formatSnapshots[] = {snapshot};
-        ShaderLibraryCookDesc desc;
-        desc.allocator = &allocator;
-        desc.registry = request.registry;
-        desc.formats = formatSnapshots;
-        desc.library = request.library;
-        // 개발 전용 타입도 만든다(진단 버퍼 퍼뮤테이션 — ShaderSystem 7.2절 12항, SSD16).
-        desc.includeDevelopment = true;
-        desc.manager = manager;
-        ShaderLibraryCookReport report(allocator);
-        if (!libraries.TryReserve(libraries.Size() + 1)) {
-            Note("out of memory");
-            return nullptr;
-        }
-
-        BuiltLibrary built(allocator);
-        if (!CompileShaderLibrary(desc, report, built.bytes)) {
-            Note("shader library compile failed");
-            for (const ShaderLibraryCookJobFailure& job : report.failures) {
-                char line[ProviderNoteBytes];
-                snprintf(line, sizeof(line), "; %s permutation %u: ", job.typeName,
-                         job.permutationId);
-                Note(StringView(line));
-                Note(job.diagnostics.View().LeftBytesAtCodePoint(JobDiagnosticBytes));
+    // 진단을 편집기에서 눌러 이동하는 꼴로 남긴다(SSD72 — 디스크 경로가 없으면 가상 경로).
+    void LogDiagnostics(const Array<ShaderDiagnostic>& list) noexcept {
+        String disk(allocator);
+        String line(allocator);
+        usize logged = 0;
+        for (const ShaderDiagnostic& diagnostic : list) {
+            if (logged == MaxLoggedDiagnostics) {
                 Log::Error(LogDevelopmentShaderProvider,
-                           "Shader {Type} ({Format}) failed: {Diagnostics}", job.typeName,
-                           job.formatId, job.diagnostics.CStr());
+                           "... {Count} more shader diagnostic(s) not shown",
+                           static_cast<uint64>(list.Size() - logged));
+                return;
             }
 
-            return nullptr;
+            ++logged;
+            if (diagnostic.virtualPath.IsEmpty() ||
+                !tree.ResolveDiskPath(diagnostic.virtualPath.View(), disk)) {
+                disk.Clear();
+            }
+
+            if (!FormatShaderDiagnostic(diagnostic, disk.View(), line)) {
+                continue;
+            }
+
+            if (diagnostic.context.IsEmpty()) {
+                Log::Error(LogDevelopmentShaderProvider, "{Diagnostic}", line.View());
+            } else {
+                Log::Error(LogDevelopmentShaderProvider, "{Diagnostic}\n{Context}", line.View(),
+                           diagnostic.context.View());
+            }
+        }
+    }
+
+    // 통지를 낸다(순번을 올리고 기다리는 쪽을 깨운다).
+    void Publish(render::ShaderReloadNotice notice) noexcept {
+        {
+            platform::LockGuard lock(noticeGate);
+            notice.sequence = latest.sequence + 1;
+            latest = notice;
         }
 
-        snprintf(built.formatId, sizeof(built.formatId), "%.*s",
-                 static_cast<int>(request.formatId.ByteCount()), request.formatId.Data());
-        (void)libraries.TryPushBack(Move(built));
-        return &libraries[libraries.Size() - 1];
+        noticeChanged.NotifyAll();
+    }
+
+    // 첫 라이브러리를 만든 뒤 감시 스레드를 띄운다(gate 아래).
+    void StartWatch() noexcept {
+        if (!options.watchSources || watchStarted || shutDown) {
+            return;
+        }
+
+        platform::ThreadOptions threadOptions;
+        threadOptions.name = "ShaderSourceWatch";
+        stopWatch.Reset();
+        if (watchThread.Start(&State::WatchEntry, this, threadOptions) !=
+            platform::ThreadStatus::Success) {
+            Log::Warning(LogDevelopmentShaderProvider,
+                         "The shader source watch thread could not start; shaders are not "
+                         "recompiled on save");
+            return;
+        }
+
+        watchStarted = true;
+    }
+
+    static void WatchEntry(void* context) noexcept {
+        static_cast<State*>(context)->WatchLoop();
+    }
+
+    // 감시 스레드 본체다(SSD77): mount마다 감시기를 열고, 기다리지 않는 Poll로 모은 변경을 한 번의
+    // 재컴파일로 넘기고, 변경이 없으면 정지 event를 WatchIdleMilliseconds까지 기다린다.
+    void WatchLoop() noexcept {
+        Array<UniquePtr<WatchRoot>> roots(allocator);
+        for (usize index = 0; index < tree.MountCount(); ++index) {
+            auto created = UniquePtr<WatchRoot>::TryMake(allocator, allocator);
+            if (!created || !created.Value()->virtualRoot.TryAssign(tree.MountedDirectory(index))) {
+                continue;
+            }
+
+            const StringView directory = tree.MountedRealDirectory(index);
+            if (const platform::FileStatus opened =
+                    created.Value()->watcher.Open(directory.Data(), directory.ByteCount());
+                !opened) {
+                Log::Warning(LogDevelopmentShaderProvider,
+                             "Shader sources under {Root} ({Directory}) are not watched: {Error}",
+                             tree.MountedDirectory(index), directory,
+                             ErrorCodeName(FileErrorCode(opened)));
+                continue;
+            }
+
+            if (!roots.TryPushBack(Move(created.Value()))) {
+                continue;
+            }
+
+            Log::Info(LogDevelopmentShaderProvider, "Watching shader sources {Root} -> {Directory}",
+                      tree.MountedDirectory(index), directory);
+        }
+
+        Array<String> pending(allocator);
+        Array<StringView> views(allocator);
+        while (stopWatch.Wait(0) != platform::WaitResult::Signaled) {
+            bool everything = false;
+            for (UniquePtr<WatchRoot>& root : roots) {
+                if (!root->watcher.IsOpen()) {
+                    continue;
+                }
+
+                WatchVisit visit;
+                visit.root = root.Get();
+                visit.pending = &pending;
+                (void)root->watcher.Poll(&VisitChange, &visit);
+                everything = everything || visit.everything;
+                if (visit.rootRemoved) {
+                    Log::Error(LogDevelopmentShaderProvider,
+                               "The watched shader source root {Root} was removed; it is no "
+                               "longer watched",
+                               root->virtualRoot.View());
+                    root->watcher.Close();
+                }
+            }
+
+            if (pending.IsEmpty() && !everything) {
+                (void)stopWatch.Wait(WatchIdleMilliseconds);
+                continue;
+            }
+
+            views.Clear();
+            for (const String& path : pending) {
+                (void)views.TryPushBack(path.View());
+            }
+
+            (void)Reload(views.View(), everything);
+            pending.Clear();
+        }
+
+        for (UniquePtr<WatchRoot>& root : roots) {
+            root->watcher.Close();
+        }
+    }
+
+    // 바뀐 원문으로 만든 라이브러리를 다시 만들고 로그·통지를 낸다(SSD70·SSD71).
+    Result<void> Reload(Span<const StringView> changed, bool everything) noexcept {
+        platform::LockGuard lock(reloadGate);
+        const uint64 started = platform::MonotonicNanoseconds();
+        render::ShaderReloadNotice notice;
+        notice.succeeded = true;
+        Result<void> outcome = Result<void>::Success();
+        bool rebuilt = false;
+        uint32 affected = 0;
+        uint32 formatsRebuilt = 0;
+        ShaderReloadReport report(allocator);
+        for (usize kind = 0; kind < LibraryKindCount && outcome; ++kind) {
+            ShaderLibraryReloader* libraries = Published(static_cast<ShaderLibraryKind>(kind));
+            if (libraries == nullptr || libraries->FormatCount() == 0) {
+                continue;
+            }
+
+            if (auto reloaded = libraries->Reload(changed, everything, report); !reloaded) {
+                outcome = Result<void>::Failure(reloaded.Error());
+                notice.succeeded = false;
+                CopyText(notice.message, sizeof(notice.message),
+                         StringView(ErrorCodeName(reloaded.Error())));
+                break;
+            }
+
+            affected += report.affectedTypes;
+            formatsRebuilt += report.formats;
+            notice.changedFormats += report.changedFormats;
+            notice.failedJobs += report.failedJobs;
+            rebuilt = rebuilt || report.outcome != ShaderReloadOutcome::NoShaderAffected;
+            if (report.outcome == ShaderReloadOutcome::Failed) {
+                notice.succeeded = false;
+                if (!report.diagnostics.IsEmpty() && notice.path[0] == '\0' &&
+                    notice.message[0] == '\0') {
+                    const ShaderDiagnostic& first = report.diagnostics[0];
+                    CopyText(notice.path, sizeof(notice.path), first.virtualPath.View());
+                    CopyText(notice.message, sizeof(notice.message), first.message.View());
+                    notice.line = first.line;
+                    notice.column = first.column;
+                }
+
+                LogDiagnostics(report.diagnostics);
+                Log::Error(LogDevelopmentShaderProvider,
+                           "Shader recompile failed: {Jobs} job(s) failed (first {Type} for "
+                           "{Format}); the previous shaders stay",
+                           static_cast<uint64>(report.failedJobs), report.failedType.View(),
+                           report.failedFormat.View());
+            }
+        }
+
+        notice.elapsedMilliseconds =
+            (platform::MonotonicNanoseconds() - started) / NanosecondsPerMillisecond;
+        if (rebuilt && notice.succeeded) {
+            Log::Info(LogDevelopmentShaderProvider,
+                      "Shader recompile finished in {Milliseconds} ms: {Types} shader type(s) "
+                      "affected, {Changed} of {Formats} format librar(ies) changed",
+                      notice.elapsedMilliseconds, static_cast<uint64>(affected),
+                      static_cast<uint64>(notice.changedFormats),
+                      static_cast<uint64>(formatsRebuilt));
+        }
+
+        Publish(notice);
+        return outcome;
     }
 
     Allocator& allocator;
     const render::EngineShaderHost& host;
+    DevelopmentShaderProviderOptions options;
+    // 준비와 첫 만들기를 차례로 돌린다(이미 만든 형식의 요청은 잡지 않는다).
     platform::Mutex gate;
+    // 재컴파일(감시 스레드·NotifySourcesChanged)을 차례로 돌린다.
+    platform::Mutex reloadGate;
     ShaderSourceTree tree;
     Reflection reflection;
     NuggetSystemClock clock;
@@ -385,10 +642,21 @@ struct DevelopmentShaderProvider::State {
     WorkerScheduler scheduler;
     String root;
     String workRoot;
-    Array<ShaderFormatSnapshot*> snapshots;
-    Array<BuiltLibrary> libraries;
+    String symbolRoot;
     String diagnostics;
     ShaderCompileManager* manager = nullptr;
+    // 종류(Engine·Project)마다의 라이브러리와 그 게시 포인터(준비가 끝나면 Release로 게시 — 빠른
+    // 요청 경로가 gate 없이 읽는다)다.
+    UniquePtr<ShaderLibraryReloader> libraries[LibraryKindCount];
+    ShaderLibraryReloader* published[LibraryKindCount] = {};
+    // 통지다.
+    mutable platform::Mutex noticeGate;
+    platform::ConditionVariable noticeChanged;
+    render::ShaderReloadNotice latest;
+    // 감시 스레드다.
+    platform::Thread watchThread;
+    platform::ManualResetEvent stopWatch;
+    bool watchStarted = false;
     char worker[ProviderPathBytes] = {};
     char formats[ProviderPathBytes] = {};
     char prepareProblem[ProviderNoteBytes] = {};
@@ -398,9 +666,9 @@ struct DevelopmentShaderProvider::State {
 };
 
 Result<UniquePtr<DevelopmentShaderProvider>>
-DevelopmentShaderProvider::TryCreate(Allocator& allocator,
-                                     const render::EngineShaderHost& host) noexcept {
-    auto state = UniquePtr<State>::TryMake(allocator, allocator, host);
+DevelopmentShaderProvider::TryCreate(Allocator& allocator, const render::EngineShaderHost& host,
+                                     const DevelopmentShaderProviderOptions& options) noexcept {
+    auto state = UniquePtr<State>::TryMake(allocator, allocator, host, options);
     if (!state) {
         return Result<UniquePtr<DevelopmentShaderProvider>>::Failure(state.Error());
     }
@@ -418,32 +686,126 @@ DevelopmentShaderProvider::~DevelopmentShaderProvider() noexcept = default;
 Result<void>
 DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& request,
                                           render::ShaderSet& set) noexcept {
-    platform::LockGuard lock(state_->gate);
-    state_->diagnostics.Clear();
-    const BuiltLibrary* built = state_->Build(request);
-    if (built == nullptr) {
+    State& state = *state_;
+    Array<uint8> copy(allocator_);
+    // 이미 만든 형식은 잠금 없이 사본을 넘긴다(다시 만드는 동안에도 짧은 잠금만 — SSD76).
+    if (ShaderLibraryReloader* libraries = state.Published(request.library)) {
+        auto copied = libraries->CopyLibrary(request.formatId, copy);
+        if (copied) {
+            set.CompleteProvision(Result<void>::Success(), Move(copy), StringView());
+            return Result<void>::Success();
+        }
+
+        if (copied.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    platform::LockGuard lock(state.gate);
+    state.diagnostics.Clear();
+    ShaderLibraryReloader* libraries = nullptr;
+    if (state.Prepare()) {
+        libraries = state.Published(request.library);
+        if (libraries == nullptr) {
+            state.Note("unknown shader library kind");
+        }
+    }
+
+    if (libraries != nullptr) {
+        ShaderLibraryCookReport report(allocator_);
+        if (auto built = libraries->Build(request.formatId, report); !built) {
+            char line[ProviderNoteBytes];
+            snprintf(line, sizeof(line), "shader library compile failed (%s)",
+                     ErrorCodeName(built.Error()));
+            state.Note(StringView(line));
+            Array<ShaderDiagnostic> diagnostics(allocator_);
+            if (CollectShaderLibraryDiagnostics(report, diagnostics)) {
+                state.LogDiagnostics(diagnostics);
+                if (!diagnostics.IsEmpty()) {
+                    String first(allocator_);
+                    if (FormatShaderDiagnostic(diagnostics[0], StringView(), first)) {
+                        state.Note("; ");
+                        state.Note(first.View());
+                    }
+                }
+            }
+
+            Log::Error(LogDevelopmentShaderProvider,
+                       "The {Format} shader library could not be built: {Problem}",
+                       request.formatId, state.diagnostics.View());
+            libraries = nullptr;
+        }
+    }
+
+    if (libraries == nullptr) {
         set.CompleteProvision(Result<void>::Failure(ErrorCode::DependencyFailed),
-                              Array<uint8>(allocator_), state_->diagnostics.View());
+                              Array<uint8>(allocator_), state.diagnostics.View());
         return Result<void>::Success();
     }
 
-    Array<uint8> copy(allocator_);
-    if (!copy.TryAppend(built->bytes.View())) {
-        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    if (auto copied = libraries->CopyLibrary(request.formatId, copy); !copied) {
+        return Result<void>::Failure(copied.Error());
     }
 
+    state.StartWatch();
     set.CompleteProvision(Result<void>::Success(), Move(copy), StringView());
     return Result<void>::Success();
 }
 
+uint64 DevelopmentShaderProvider::LibraryRevision(StringView formatId,
+                                                  ShaderLibraryKind library) const noexcept {
+    ShaderLibraryReloader* libraries = state_->Published(library);
+    return libraries != nullptr ? libraries->Revision(formatId) : 0;
+}
+
+bool DevelopmentShaderProvider::WaitForReload(uint64 afterSequence, uint32 timeoutMilliseconds,
+                                              render::ShaderReloadNotice& out) noexcept {
+    State& state = *state_;
+    const uint64 deadline = platform::MonotonicNanoseconds() +
+                            static_cast<uint64>(timeoutMilliseconds) * NanosecondsPerMillisecond;
+    platform::LockGuard lock(state.noticeGate);
+    while (state.latest.sequence <= afterSequence) {
+        const uint64 now = platform::MonotonicNanoseconds();
+        if (now >= deadline) {
+            return false;
+        }
+
+        const uint64 remaining =
+            (deadline - now + NanosecondsPerMillisecond - 1) / NanosecondsPerMillisecond;
+        (void)state.noticeChanged.Wait(state.noticeGate, static_cast<uint32>(remaining));
+    }
+
+    out = state.latest;
+    return true;
+}
+
+Result<void> DevelopmentShaderProvider::NotifySourcesChanged(Span<const StringView> virtualPaths,
+                                                             bool everything) noexcept {
+    return state_->Reload(virtualPaths, everything);
+}
+
+bool DevelopmentShaderProvider::IsWatching() const noexcept {
+    platform::LockGuard lock(state_->gate);
+    return state_->watchStarted;
+}
+
 void DevelopmentShaderProvider::Shutdown() noexcept {
+    // 감시 스레드는 gate 밖에서 멈춘다(그 재컴파일은 gate를 잡지 않지만 Shutdown은 둘 다 정리한다).
+    state_->StopWatch();
     platform::LockGuard lock(state_->gate);
     state_->Shutdown();
 }
 
 usize DevelopmentShaderProvider::BuiltLibraryCount() const noexcept {
-    platform::LockGuard lock(state_->gate);
-    return state_->libraries.Size();
+    usize count = 0;
+    for (usize kind = 0; kind < LibraryKindCount; ++kind) {
+        if (ShaderLibraryReloader* libraries =
+                state_->Published(static_cast<ShaderLibraryKind>(kind))) {
+            count += libraries->FormatCount();
+        }
+    }
+
+    return count;
 }
 
 } // namespace rocks::shader

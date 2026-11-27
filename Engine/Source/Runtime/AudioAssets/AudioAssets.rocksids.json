@@ -122,6 +122,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundClip::loadingBehavior",
+      "id": "58ea0abf7bea40d897959f62c76416b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClip::loopBegin",
       "id": "67dbb88c928a4b799cc16666628f46ca",
       "aliases": [],
@@ -159,6 +166,13 @@
       "kind": "field",
       "name": "rocks::SoundClip::sampleRate",
       "id": "54b2fd8da5254b589235d003bc3eef9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundClip::sampleRateQuality",
+      "id": "688d128c5ee74636b3385bf18ba89d3e",
       "aliases": [],
       "retired": false
     },
@@ -269,8 +283,29 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundSource::bypassVolumeScaleForPriority",
+      "id": "fe24738c26ba4941ba1c9f5e8cef2879",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundSource::pitch",
       "id": "596c573e5b4244cfa6c1d91d76f53b01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::priority",
+      "id": "f35489aa1c404268a73b7fdfe2d3d174",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::virtualizationMode",
+      "id": "2ba429372ed440c8b0b8ca080aa389ce",
       "aliases": [],
       "retired": false
     },
@@ -339,6 +374,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::SoundLoadingBehavior",
+      "id": "3e8b9d441573451ab50365c7cb53237d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::SoundLoopOverride",
       "id": "2f8d9fb256de4debbaba5479eeed38e6",
       "aliases": [],
@@ -348,6 +390,13 @@
       "kind": "type",
       "name": "rocks::SoundNaturalFalloffMode",
       "id": "3dd09f5d6a33484e82f8fac30414e090",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundSampleRateQuality",
+      "id": "0d3c37dabf584eccb06760fd97fb5926",
       "aliases": [],
       "retired": false
     },
@@ -369,6 +418,13 @@
       "kind": "type",
       "name": "rocks::SoundSourceStorage",
       "id": "dd302658307b44c19c998c5a33ae19b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SoundVirtualizationMode",
+      "id": "c95e4ae97c2b47c2b3733be5bbfa70a3",
       "aliases": [],
       "retired": false
     }
