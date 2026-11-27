@@ -13,7 +13,6 @@ constexpr StringView PrerequisiteIds[MaterialPrerequisiteCount] = {
     "MPQ-VirtualTexture",
     "MPQ-ExternalTexture",
     "MPQ-Font",
-    "MPQ-CurveAsset",
     "MPQ-MaterialAggregate",
     "MPQ-SubsurfaceProfile",
     "MPQ-SpecularProfile",

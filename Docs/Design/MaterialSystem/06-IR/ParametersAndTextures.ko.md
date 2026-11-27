@@ -12,6 +12,7 @@ MS2c는 네 묶음으로 나눈다. 묶음마다 시험을 함께 넣고, 리뷰
 | MS2c2 | 파라미터: scalar·vector·double vector·channel mask·static bool·static switch·static component mask 파라미터, 파라미터 컬렉션 값·변환, IR 파라미터 값(`Uniform` 빈도), static 값 입력, 상수 식 프로그램(9.4절)·상수 블록 layout, V8 |
 | MS2c3 | 텍스처: IR 자원 타입, 텍스처 객체·파라미터, TextureSample과 파라미터 샘플 노드, TextureProperty, AntialiasedTextureMask, RecordTextureStreamingInfo, ParticleSubUv, V9(텍스처 예산)·V10 |
 | MS2c4 | scene·깊이·버퍼: SceneTexture·SceneColor·UserSceneTexture·SceneDepth·DepthFade·SceneDepthWithoutWater·DecalBufferTexture·PathTracingBufferTexture(영역·블렌드 모드 검사 V6) |
+| MS2c5 | CurveAtlasRowParameter(선행이던 커브 atlas 에셋 — CurveAssets CA6 `ColorCurveAtlas`가 생겨 연다, 19.4.1절 표에서 그 행을 지운다, 아래 MS2c5 절) |
 
 **MS2c1 늦은 진단.**
 - **자리 값.** 번역기는 TODO 노드(정의 상태 `PrerequisiteMissing`)와 카탈로그에 없는 노드를 만나면 바로 진단하지 않는다. 대신 받는 쪽이 요청한 출력 핀마다 IR 자리 값 `Pending`(번호 84)을 낸다. 즉시값 [0]은 종류(0 모르는 노드, 1 선행 없음), [1]은 선행 ID 번호(`MaterialPrerequisite`), [2]·[3]은 노드 NodeId다. NodeId를 키에 넣어 서로 다른 노드의 자리가 hash-consing으로 합쳐지지 않는다(진단 위치가 사라지지 않는다). 타입은 정의 출력 핀의 수 타입이고, `Numeric`·`Any`·모르는 노드는 Float4다.
@@ -120,3 +121,18 @@ MS2c는 네 묶음으로 나눈다. 묶음마다 시험을 함께 넣고, 리뷰
 | SceneDepthWithoutWater | 정점 문맥이면 "Cannot read scene depth without water from the vertex shader.", PostProcess가 아니면 셰이딩 모델(위)·영역 Surface·반투명 아님 검사(UE 문구 셋). SceneDepthWithoutWaterAt(화면 uv, fallbackDepth) | ME:21805–21831, HT:12424–12466 |
 | DecalBufferTexture | Surface·불투명·Masked만("DBuffer scene textures are only available on opaque or masked surfaces."). uv: 연결이면 DBufferUvFromViewportUv, 아니면 SceneTextureDefaultUv(0). DBufferTextureLookup(uv, id). RGBA·RGB·A | ME:10832–10842, HT:8388–8412 |
 | PathTracingBufferTexture | PostProcess만("Path tracing buffer textures are only available on post process material."). uv: 연결이면 그대로, 아니면 PathTracingBufferDefaultUv. PathTracingBufferTextureLookup(uv, id). RGBA·RGB·A | ME:17933–17943, HT:8414–8434 |
+
+**MS2c5 CurveAtlasRowParameter**(UE ME:20839–20933, MaterialExpressionCurveAtlasRowParameter.h — CurveAssets 4장).
+- **atlas 공급.** 번역은 atlas 객체가 아니라 snapshot을 본다(19.4.3절): `MaterialSourceProvider::FindCurveAtlas(AssetId)` → `MaterialCurveAtlasSnapshot { curves : Span<const Guid> }`(atlas의 행마다 커브 AssetId — `ColorCurveAtlas::curves` 순서, null 원소는 `Guid{}`. 기본 구현 nullptr). atlas는 Texture2D이기도 하므로 텍스처 사실(`MaterialTextureFacts` — 종류 2D)은 다른 텍스처처럼 `input.textures`로 받는다. 찾은 atlas는 번역 의존 `MaterialDependencyRole::CurveAtlas`로 남는다(UE `GetTexturesForceMaterialRecompile` — 커브 목록이 바뀌면 행 번호가 바뀐다, 쿠킹 키 12.2절). 커브 자체는 번역에 들어가지 않는다(커브 값은 atlas 텍스처가 굽는다 — 커브 변경은 atlas 원본 재굽기, CurveAssets 4.3절). 에셋 Build 의존 hook이 노드의 `atlas` 참조를 더한다(4.6.1절 — ColorRamp `colorCurve`와 같은 자리). atlas는 샘플하는 텍스처이기도 해서 쿠킹 결과의 텍스처 참조(Hard)에도 든다.
+- **검사(UE 순서·문구).** atlas·curve 둘 다 없으면 `useCustomPrimitiveData`면 "The atlas are not currently set.", 아니면 "The curve and atlas are not currently set.". curve만 없고 CPD가 아니면 "The curve is not currently set.". atlas가 없으면 "The atlas is not currently set.". atlas 참조가 있는데 공급이 atlas snapshot을 주지 않으면(atlas가 아니거나 없다) "Could not resolve referenced curve atlas '<id>'."(Rocks — UE는 대입 때 클래스로 막는다, 19.4.3절). 셋 다 InvalidProperty.
+- **행 번호.** `useCustomPrimitiveData`면 custom primitive data 스칼라(UE `CustomPrimitiveData(PrimitiveDataIndex, MCT_Float)` — UI 영역이면 UE 문구, MS2c2 ScalarParameter와 같은 함수)다. 아니면 atlas에서 curve의 첫 행 번호(UE `GetCurveIndex`)를 기본값으로 하는 scalar 파라미터(UE `ScalarParameter(ParameterName, (float)CurveIndex)` — `parameterId`로, 인스턴스가 행을 덮을 수 있다)다. 노드 속성 `defaultValue`는 쓰지 않는다(UE도 번역 때 행 번호로 덮는다). curve가 atlas에 없으면 "The curve is not contained within the atlas."다(UE는 이때 Slot이 INDEX_NONE로 남아 뒤 연산이 조용히 실패한다 — Rocks는 UE가 이 경우에 두려던 문구로 진단한다).
+- **샘플.** atlas 텍스처 값(샘플 종류 LinearColor, 공유 Clamp 샘플러 — UE `SSM_Clamp_WorldGroupSettings`, mip 방식 없음)과 논리 크기 `TextureSize`(W, H)에서 uv = ((t × (W − 1) + 0.5) / W, (행 + 0.5) / H)다(t는 InputTime — 없으면 0, UE `Constant(0)`). 연산 순서는 UE 그대로(Mul·Sub·Add·Div, Add·Div, Append). 샘플은 view mip bias를 쓰지 않는다(UE 마지막 인자 false). 결과 float4의 RGB·R·G·B·A 출력이다(UE 출력 마스크 순서). 공유 Clamp라 샘플러 예산에 들지 않는다.
+- **atlas 종류.** 공급된 atlas 텍스처 사실이 2D가 아니면 "The atlas is not a 2D texture."(InvalidProperty — UE는 클래스가 `UTexture2D`라 생기지 않는다). 사실이 없으면 다른 텍스처처럼 "Could not resolve referenced texture …"다.
+- **CPD 순서.** `useCustomPrimitiveData`면 행 목록을 쓰지 않으므로 공급이 atlas snapshot을 주지 않아도 된다(UE 순서: 위 검사 → CPD(UI 영역 오류) → 텍스처). atlas 번역 의존은 CPD여도 기록한다.
+- **정점 문맥.** mip 방식이 없으므로 정점 문맥은 Level 0이다(UE `MipValue0Index == INDEX_NONE`이면 `Constant(0)` — HT:7090–7094).
+- **InputTime 폭.** UE 기본(classic) 번역기 그대로 폭을 맞추지 않는다(6.8절 의미 기준 — Float2 이상이면 uv가 넓어지고 샘플이 UE ForceCast처럼 앞 두 성분을 쓴다. UE MIR은 `CastToFloat(…, 1)`로 스칼라로 자른다).
+- **편차.**
+  - 진단 문구 둘: 공급에 없는 atlas("Could not resolve referenced curve atlas '<id>'." — UE는 대입 때 클래스로 막는다)와 atlas에 없는 커브("The curve is not contained within the atlas." — UE는 Slot이 INDEX_NONE로 남아 뒤 연산이 조용히 실패한다).
+  - Double InputTime: Rocks 산술(`FloatOnly`)이 먼저 낮춘다. UE는 LWC로 셈하고 샘플 때 주소 모드로 낮춘다(시간 값이라 큰 좌표가 아니다 — 결과 차이는 float 반올림 안이다).
+- **후속(MS6 인스턴스).** UE `GetParameterValue`의 파라미터 메타데이터(`bUsedAsAtlasPosition`·`ScalarCurve`·`ScalarAtlas`·group·sortPriority)와 `SetParameterValue`(인스턴스가 커브를 골라 행으로 바꾼다)는 파라미터 메타데이터 표가 생기는 MS6(9장)에서 싣는다 — 지금 IR 파라미터는 id·기본값뿐이라 인스턴스는 행 번호 값만 덮는다.
+- **후속(MS3 쿠킹).** 쿠킹·에디터의 실제 provider가 `FindCurveAtlas`(ColorCurveAtlas의 `curves` AssetId 목록)를 채운다(`FindColorCurve`와 같은 자리).

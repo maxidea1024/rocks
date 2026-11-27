@@ -54,6 +54,9 @@ inline constexpr char DiagSimulateOnStaticBody[] = "SimulateOnStaticBody";
 inline constexpr char DiagPhysicsOperationWithoutSimulation[] = "PhysicsOperationWithoutSimulation";
 inline constexpr char DiagPhysicsOperationWithoutPhysicsCollision[] =
     "PhysicsOperationWithoutPhysicsCollision";
+// - InvalidBodyValue: body 값 setter(질량·질량 중심·감쇠·각속도 상한·자유도 방식)에 비유한 값·음수·
+//   모르는 값이 와서 값을 바꾸지 않았다(Warning — Docs/Design/PhysicsModule 7.1.18절).
+inline constexpr char DiagInvalidBodyValue[] = "InvalidBodyValue";
 // - BodyShapeUpdateFailed: 형상 값·scale이 바뀌었지만 body 형상을 다시 만들지 못해 이전 형상을
 //   두었다(Warning — Docs/Design/PhysicsModule 7.1.5절).
 inline constexpr char DiagBodyShapeUpdateFailed[] = "BodyShapeUpdateFailed";

@@ -12,7 +12,9 @@ enum class MaterialDependencyRole : uint8 {
     Function = 0,
     Material = 1,
     // ColorRamp의 색 커브다(6.13절 MS2f4).
-    ColorCurve = 2
+    ColorCurve = 2,
+    // CurveAtlasRowParameter의 색 커브 atlas다(6.10절 MS2c5 — 커브 목록이 행 번호를 정한다).
+    CurveAtlas = 3
 };
 
 struct MaterialTranslationDependency {
