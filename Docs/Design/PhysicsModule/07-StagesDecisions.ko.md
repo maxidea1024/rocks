@@ -64,10 +64,11 @@ PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1
 | PMD20 | job은 World가 빌려주는 worker pool(`GcScheduler`), 없으면 제출 thread 실행 | 엔진이 World에 주는 pool이 지금 그것뿐이다. 물리 전용 pool은 계획 16.1절이 금지한다(7.1.1절) |
 | PMD21 | Jolt 공유 자원은 장면마다 참조 수로 쥔다(모듈 수명 객체는 쥐지 않는다) | 장면이 없으면 Jolt 전역 상태가 비어 있고, 모듈 로더 없이 World를 만드는 시험·도구도 같은 경로를 쓴다(7.1.1절) |
 | PMD22 | `PhysicsScene` 접점은 단계마다 그 동작과 함께 넓힌다(PH1은 `Stats`만) | 구현 없는 순수 가상을 미리 두지 않는다(2.2절 목록이 목표) |
-| PMD19 | DOF 잠금은 `mAllowedDOFs`(월드 축, 속도 성분 제거), CustomPlane만 `SixDOFConstraint` | UE도 월드 축·생성 시점 기준이다(6.5절). 한계 둘: (1) UE는 joint라 잠긴 축으로 teleport하면 생성 시점 값으로 끌려 돌아가지만(joint frame을 갱신하지 않는다) Rocks는 teleport한 값을 유지한다 — UE의 부작용으로 보고 따르지 않는다. (2) UE `SixDOF`의 회전 잠금은 twist·swing 분해 각을 잠그고 Jolt는 월드 축 각속도 성분을 없앤다. 회전 축 하나만 잠그고 나머지 둘로 크게 돌면 결과 자세가 다를 수 있다(두 축 이상 잠금·평면 방식은 같다) |
+| PMD19 | DOF 잠금은 `mAllowedDOFs`(월드 축, 속도 성분 제거), CustomPlane만 `SixDOFConstraint` | UE도 월드 축·생성 시점 기준이다(6.5절). 한계 둘: (1) UE는 joint라 잠긴 축으로 teleport하면 생성 시점 값으로 끌려 돌아가지만(joint frame을 갱신하지 않는다) Rocks는 teleport한 값을 유지한다 — UE의 부작용으로 보고 따르지 않는다. (2) UE `SixDOF`의 회전 잠금은 twist·swing 분해 각을 잠그고 Jolt는 월드 축 각속도 성분을 없앤다. 회전 축 하나만 잠그고 나머지 둘로 크게 돌면 결과 자세가 다를 수 있다(두 축 이상 잠금·평면 방식은 같다). 비스듬한 CustomPlane·모두 잠금의 구속도 teleport·형상 변경 때 새 자세로 다시 붙여 (1)과 같게 한다(7.1.16절) |
 
 ## 7.6 개정 이력
 
+- 개정 21(2026-11-28): PH5a 완료(f389040ac — 리뷰 반영: 반발 문턱은 Chaos 가속도 문턱 × dt), PH5b 구현 세부(7.1.16절 — DOF).
 - 개정 20(2026-11-27): PH4e 완료(6a83ef764 — PH4 끝), PH5 하위 단계 PH5a–PH5d와 PH5a 구현 세부(7.1.15절, 07c-StageDetailsPH5.ko.md).
 - 개정 19(2026-11-27): PH4d 완료(5162526b3 — 리뷰 반영), PH4e 구현 세부(7.1.14절 — 이벤트 필드 여섯, HitResult 리플렉션, 대기 겹침의 sweep 결과, 깨움·잠듦은 PH5).
 - 개정 18(2026-11-27): PH4c 완료(1430bbac0 — 리뷰 반영), PH4d 구현 세부(7.1.13절 — 침투 해소는 UE처럼 MovementComponent, ComputePenetration·GetCollisionShape는 PrimitiveComponent).

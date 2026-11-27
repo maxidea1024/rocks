@@ -37,6 +37,16 @@ public:
     static constexpr float SilentVolumeThreshold = 1.0e-4f;
     // 들리지 않는 재생의 볼륨 가중 우선순위 offset이다(UE GetVolumeWeightedPriority의 P − 201).
     static constexpr float InaudibleWeightOffset = 201.0f;
+    // always-play의 볼륨 가중 우선순위(UE FLT_MAX / MAX_VOLUME — SoundWave.cpp:3846–3850)와 동시
+    // 발음 우선순위 offset(UE MAX_SOUND_PRIORITY + 1 — ActiveSound.cpp:435–437)이다(3.43.4절).
+    static constexpr float AlwaysPlayWeight = NumericLimits<float>::Max() / 4.0f;
+    static constexpr float AlwaysPlayConcurrencyOffset = MaxSoundPriority + 1.0f;
+    // 스테레오 정규화 배수(UE bApplyNormalizationToStereoSounds ×0.5)다.
+    static constexpr float StereoNormalizationGain = 0.5f;
+    // 믹스 표·override·분류 거리 배수 표 용량이다(3.43.6·3.43.7절 — 차면 무시하고 센다).
+    static constexpr uint32 MaxActiveMixes = 64;
+    static constexpr uint32 MaxMixOverrides = 128;
+    static constexpr uint32 MaxCategoryDistanceScales = 256;
     // voice를 되찾을 때(SeekRestart 위치) 거는 fade-in 길이(mix frame)다.
     static constexpr uint32 ResumeFadeFrames = audio::DefaultParamRampFrames;
     // 여유가 없을 때 정지 fade 중 voice를 끊는 fade(mix frame)다(UE StopNow 대신 짧은 fade — 끊김
@@ -172,6 +182,82 @@ private:
         void StartFrom(float current, float value, uint64 frame, uint32 length) noexcept;
     };
 
+    // 분류 실효값이다(3.43.2절 — 분류 없음이면 기본값).
+    struct CategoryValues {
+        float volume = 1.0f;
+        float pitch = 1.0f;
+        float lowPassFrequency = MaxAttenuationFilterFrequency;
+        float distanceScale = 1.0f;
+        bool alwaysPlay = false;
+        bool isUiSound = false;
+        bool isMusic = false;
+    };
+
+    enum class MixPhase : uint8 {
+        Inactive,
+        FadingIn,
+        Active,
+        FadingOut,
+        AwaitingRemoval
+    };
+
+    // 활성 믹스 하나다(3.43.7절, UE FSoundMixState). 시각은 mix frame이다.
+    struct MixState {
+        MixSnapshotRef ref;
+        uint32 activeRefs = 0;
+        uint32 passiveRefs = 0;
+        bool base = false;
+        bool remove = false;
+        bool hasFadeOut = false;
+        MixPhase phase = MixPhase::Inactive;
+        float t = 0.0f;
+        uint64 fadeInStart = 0;
+        uint64 fadeInEnd = 0;
+        uint64 fadeOutStart = 0;
+        uint64 end = 0;
+    };
+
+    // 분류 override 하나다(3.43.6절 — UE FSoundMixClassOverride).
+    struct MixOverride {
+        uint64 mixKey = 0;
+        uint64 categoryKey = 0;
+        float targetVolume = 1.0f;
+        float targetPitch = 1.0f;
+        uint32 fadeFrames = 0;
+        bool applyToChildren = false;
+        bool applied = false;
+        bool clearing = false;
+        bool remove = false;
+        ValueRamp volume;
+        ValueRamp pitch;
+    };
+
+    // 이번 묶음 믹스 조정 하나다(보간·override가 반영된 배수).
+    struct MixAdjustment {
+        uint64 categoryKey = 0;
+        float volume = 1.0f;
+        float pitch = 1.0f;
+        float lowPassFrequency = MaxAttenuationFilterFrequency;
+        bool applyToChildren = false;
+    };
+
+    // 걸린 분류 감쇠 거리 배수다(3.43.6절 — 장치 수명 동안 남는다).
+    struct CategoryScale {
+        uint64 key = 0;
+        ValueRamp ramp;
+    };
+
+    struct CategoryCache {
+        const SoundCategoryChain* chain = nullptr;
+        CategoryValues values;
+    };
+
+    // 지난 묶음에 passive로 건 믹스다.
+    struct PassiveMix {
+        uint64 mixKey = 0;
+        bool seen = false;
+    };
+
     struct Record {
         uint32 generation = 0;
         RecordState state = RecordState::Inactive;
@@ -198,6 +284,19 @@ private:
         bool focusInitialized = false;
         uint64 focusMixFrame = 0;
         FocusScales focus;
+        // 분류(3.43절): 수락 때의 사슬, 이번 묶음 실효값, 옵션 always-play·UI와 실효값, 재생
+        // LPF·HPF, 차폐 간격 재정의, 처음 배정됐는지(passive 다시 걸기).
+        SoundCategoryChainRef category;
+        CategoryValues categoryValues;
+        bool optionAlwaysPlay = false;
+        bool optionUiSound = false;
+        bool alwaysPlay = false;
+        bool isUiSound = false;
+        float playbackLowPass = MaxAttenuationFilterFrequency;
+        float playbackHighPass = 0.0f;
+        bool hasOcclusionInterval = false;
+        float occlusionInterval = 0.0f;
+        bool everAssigned = false;
         // 차폐(3.42.7절): 응답 대기, 첫 결과를 받음, 마지막 요청 mix frame, LPF·볼륨 보간(목표는
         // ramp target)이다.
         bool occlusionPending = false;
@@ -360,6 +459,35 @@ private:
     // 공간 갱신(3.42.8절 — UE 순서: 우선순위 감쇠 → focus → 거리 감쇠 → 공기 흡수). accepting이면
     // UE 수락 때 규칙(focus 계수는 spatialize·focus일 때만, H = 1 — 3.42.5절)이다.
     void UpdateSpatial(Record& record, uint64 now, bool accepting) noexcept;
+    // 분류(AudioCategories.cpp — 3.43.2·3.43.6절).
+    CategoryValues ComputeCategory(const SoundCategoryChain* chain, uint64 now) noexcept;
+    float CategoryDistanceScale(uint64 key, const SoundCategoryProperties& properties,
+                                uint64 now) const noexcept;
+    void UpdateCategories(uint64 now) noexcept;
+    void ApplySetCategoryDistanceScale(const ControlCommand& command, uint64 now) noexcept;
+    // 믹스(AudioMixes.cpp — 3.43.6·3.43.7절).
+    uint64 MixFrames(float seconds) const noexcept;
+    MixState* FindMix(uint64 key) noexcept;
+    void StartMix(MixState& state, uint64 now) noexcept;
+    void RetriggerMix(MixState& state, uint64 now) noexcept;
+    void PushMixState(const MixSnapshotRef& ref, bool passive, bool retrigger, uint64 now) noexcept;
+    void PopMixState(uint64 key, bool passive, uint64 now) noexcept;
+    void TryClearMix(MixState& state, uint64 now) noexcept;
+    void ApplyMixCommand(const ControlCommand& command, uint64 now) noexcept;
+    void ApplyBaseMix(const MixSnapshotRef& mix, uint64 now) noexcept;
+    // 믹스·분류 명령인지다(묶음 앞에서 따로 적용한다 — 3.43.8절).
+    static bool IsMixCommand(ControlCommandType type) noexcept;
+    MixOverride* FindOverride(uint64 mixKey, uint64 categoryKey) noexcept;
+    float AdjusterValueOf(uint64 mixKey, uint64 categoryKey, bool pitch,
+                          bool interpolated) noexcept;
+    void ApplySetMixOverride(const ControlCommand& command, uint64 now) noexcept;
+    void ApplyClearMixOverride(const ControlCommand& command, uint64 now) noexcept;
+    void UpdateMixes(uint64 now) noexcept;
+    void UpdatePassiveMixes(uint64 now) noexcept;
+    // 실효 pitch(사용자 × 사운드 × 분류, 자름 — 3.43.2절)와 동시 발음 우선순위(always-play면 +101 —
+    // 3.43.4절)다.
+    float EffectivePitch(const Record& record, uint64 frame) const noexcept;
+    static float ConcurrencyPriorityOf(const Record& record) noexcept;
     // 차폐(3.42.7절): 간격이 된 재생의 질의를 묶음에 싣고, 응답·첫 검사 결과로 목표를 정한다.
     void UpdateOcclusion(ControlBatch& batch, uint64 now) noexcept;
     void ApplySetOcclusion(const ControlCommand& command, uint64 now) noexcept;
@@ -471,6 +599,17 @@ private:
     GlobalFocusSettings focus_;
     bool focusInitializeOnFirstUpdate_ = true;
     OcclusionSettings occlusion_;
+    UserVolumeSettings userVolume_;
+    // 믹스 표(MaxActiveMixes)·override(MaxMixOverrides)·이번 묶음 조정·분류 거리 배수·사슬
+    // 캐시·passive 집합이다(3.43절 — 모두 미리 잡는다).
+    Array<MixState> mixes_;
+    Array<MixOverride> overrides_;
+    Array<MixAdjustment> adjustments_;
+    Array<CategoryScale> categoryScales_;
+    Array<CategoryCache> categoryCache_;
+    Array<PassiveMix> passive_;
+    // 믹스 fade·override ramp가 움직인다(분류 있는 재생을 묶음마다 다시 게시).
+    bool mixesChanging_ = false;
     // 차폐 요청 순회 시작 slot이다(요청 칸이 찰 때 뒤 slot이 늘 밀리지 않게 묶음마다 이어 간다).
     uint32 occlusionCursor_ = 0;
     AudioControlStats stats_;

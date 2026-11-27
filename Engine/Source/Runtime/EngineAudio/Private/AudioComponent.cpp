@@ -37,6 +37,18 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     }
 
     options.remainActiveIfDropped = remainActiveIfDropped;
+    options.category = category_;
+    options.alwaysPlay = alwaysPlay;
+    options.isUiSound = isUiSound;
+    if (enableLowPassFilter) {
+        options.lowPassFrequency = lowPassFilterFrequency;
+    }
+
+    if (enableHighPassFilter) {
+        options.highPassFrequency = highPassFilterFrequency;
+    }
+
+    options.occlusionCheckInterval = occlusionCheckInterval;
     // 동시 발음 소유자는 소유 Actor다(UE owner — limitToOwner 그룹, 3.41.2절).
     if (!GetOwner().IsNull()) {
         options.owner = AudioObjectKey(GetOwner());
@@ -109,6 +121,36 @@ Result<void> AudioComponent::SetVolumeMultiplier(float value) noexcept {
     volumeMultiplier = value;
     if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && playback_.IsValid()) {
         return audio->SetParameter(playback_, PlaybackParameter::Volume, value);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> AudioComponent::SetLowPassFilter(bool enabled, float frequency) noexcept {
+    if (!engine_audio_detail::IsFiniteInRange(frequency, 0.0f, MaxAttenuationFilterFrequency)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    enableLowPassFilter = enabled;
+    lowPassFilterFrequency = frequency;
+    if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && playback_.IsValid()) {
+        return audio->SetParameter(playback_, PlaybackParameter::LowPassFrequency,
+                                   enabled ? frequency : MaxAttenuationFilterFrequency, 0);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> AudioComponent::SetHighPassFilter(bool enabled, float frequency) noexcept {
+    if (!engine_audio_detail::IsFiniteInRange(frequency, 0.0f, MaxAttenuationFilterFrequency)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    enableHighPassFilter = enabled;
+    highPassFilterFrequency = frequency;
+    if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && playback_.IsValid()) {
+        return audio->SetParameter(playback_, PlaybackParameter::HighPassFrequency,
+                                   enabled ? frequency : 0.0f, 0);
     }
 
     return Result<void>::Success();

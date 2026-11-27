@@ -291,7 +291,9 @@ void load_image_block_fast_ldr(
 	vmask4 grayscalev(true);
 	int idx = 0;
 
-	const uint8_t* plane = static_cast<const uint8_t*>(img.data[0]);
+	// Rocks: read the block's own slice. Upstream reads data[0] for every zpos, so a multi-slice image with 2D blocks and
+	// an identity swizzle compressed slice 0 for every slice (load_image_block reads data[zpos]).
+	const uint8_t* plane = static_cast<const uint8_t*>(img.data[zpos]);
 	for (unsigned int y = ypos; y < ypos + bsd.ydim; y++)
 	{
 		unsigned int yi = astc::min(y, ysize - 1);

@@ -759,6 +759,11 @@ Result<int32> RunAssetCookCommand(void* context, Span<const StringView> args,
     }
 
     request.cookLock = &cookLock;
+    // 처리기 안 병렬(텍스처 블록 압축)은 쿠킹 전용 scheduler로 한다(12.17.9 4 — 잠금을 잡은 뒤에
+    // 띄운다). scratch는 명령의 allocator(프로세스 기본 — 여러 스레드 동시 호출 안전)다.
+    CookWorkScheduler cookWork(allocator);
+    request.scheduler = cookWork.Get();
+    request.scratch = &allocator;
     const Result<void> cooked = CookProject(allocator, request, result);
     return WriteCookOutcome(output, allocator, files, &session.service->Index(),
                             parsed.paths.View(), root.View(), profile.id.View(), parsed.json,

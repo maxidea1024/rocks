@@ -3,14 +3,15 @@
 #include <AssetRuntime/Package.h>
 #include <AudioAssets/AttenuationSettings.h>
 #include <AudioAssets/ConcurrencyGroup.h>
+#include <AudioAssets/SoundCategory.h>
 #include <AudioAssets/SoundSourceRef.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 
 // 재생할 수 있는 사운드 에셋의 기반이다(Docs/Design/AudioSystem 3.9·3.35.3절, UE USoundBase 대응).
-// volume·pitch·감쇠 참조와 재생 관리(우선순위·가상화·동시 발음 — 3.41절)를 가진다(분류·버스는 AU7
-// 뒤 단계).
+// volume·pitch·감쇠·분류 참조와 재생 관리(우선순위·가상화·동시 발음 — 3.41절)를 가진다(버스는
+// AU7f).
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드(게임 스레드) 전용이다.
 namespace rocks {
@@ -31,6 +32,10 @@ public:
     ROCKS_PROPERTY() float pitch = 1.0f;
     // 비었으면 2D다. 같은 에셋 Registry 안의 간선이다(값은 ObjectRegistry::SetReference로 바꾼다).
     ROCKS_PROPERTY() ObjectRef<AttenuationSettings> attenuation;
+    // 분류다(UE SoundClassObject — 3.43.1절). 비었으면 엔진 기본 분류나 분류 없음이다.
+    ROCKS_PROPERTY() ObjectRef<SoundCategory> category;
+    // 켜면 2채널 원본의 볼륨이 ×0.5다(UE bApplyNormalizationToStereoSounds — 3.43.1절).
+    ROCKS_PROPERTY() bool normalizeStereo = false;
     // 재생 우선순위다([MinSoundPriority, MaxSoundPriority], UE Priority 기본 1). voice 상한을
     // 넘으면 들리는 크기 × 우선순위가 낮은 재생부터 voice를 잃는다(3.41.1절).
     ROCKS_PROPERTY() float priority = DefaultSoundPriority;
@@ -53,6 +58,13 @@ public:
     // 못함 (InvalidArgument), 그룹이 MaxConcurrencyGroups보다 많음(CapacityExceeded), 할당 실패.
     Result<SoundSourceRef> MakePlayable(Allocator& allocator, ObjectRegistry& registry,
                                         const ObjectAccessContext& access) const noexcept;
+
+    // 분류 계층이 정하는 clip 로딩 동작이다(3.12절 Inherited — 분류부터 부모 쪽으로 처음 만난
+    // Inherited 아닌 값, 없으면 Inherited). SoundCookedLoadOptions::categoryLoading에 넣는다. 오류:
+    // 분류 참조를 찾지 못함 InvalidArgument, 깊이 초과(순환 포함) CapacityExceeded.
+    Result<SoundLoadingBehavior>
+    CategoryLoadingBehavior(ObjectRegistry& registry,
+                            const ObjectAccessContext& access) const noexcept;
 
 protected:
     // 파생 클래스가 PCM·loop를 채운다. 없으면 NotReady다.

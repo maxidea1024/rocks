@@ -38,6 +38,16 @@ inline constexpr float DefaultPhysicsRestitutionThreshold = 1000.0f;
 inline constexpr float DefaultPhysicsCollisionMarginFraction = 0.05f;
 inline constexpr float DefaultPhysicsCollisionMarginMax = 10.0f;
 
+// 프로젝트 기본 자유도다(UE ESettingsDOF — PhysicsSettings.h:73-78, PhysicsModule 6.8절·7.1.16절):
+// body dofMode가 Default면 이 값이다(Full3D는 잠금 없음, 평면은 그 평면에 가둔다).
+ROCKS_ENUM()
+enum class SettingsDof : uint8 {
+    Full3D,
+    YZPlane,
+    XZPlane,
+    XYPlane
+};
+
 // 접촉 마찰·반발의 두 body 값 결합 방식이다(UE EFrictionCombineMode — PhysicsSettingsEnums.h:14-19,
 // PhysicsModule 6.6절).
 ROCKS_ENUM()
@@ -85,6 +95,8 @@ struct PhysicsSettings {
     // CollisionMarginMax).
     ROCKS_PROPERTY() float collisionMarginFraction = DefaultPhysicsCollisionMarginFraction;
     ROCKS_PROPERTY() float collisionMarginMax = DefaultPhysicsCollisionMarginMax;
+    // body dofMode Default의 자유도다(UE DefaultDegreesOfFreedom — 기본 Full3D).
+    ROCKS_PROPERTY() SettingsDof defaultDegreesOfFreedom = SettingsDof::Full3D;
 };
 
 // Physics 모듈의 리플렉션 타입(PhysicsSettings)을 registration에 등록한다

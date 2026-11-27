@@ -17,7 +17,7 @@
 이미 된 것과 이번에 하지 않는 것:
 - CR4(`IsReadyToStart`)는 S9b에서 끝났다(17.4절).
 - CR8a는 결정(CD11)이고 구현은 물리·애니메이션 컴포넌트와 함께다. Tick 단계 대응표는 8절, 엔진 단계 자리는 15.4절에 있다.
-- CR7(이벤트 slot 표)과 CR8(World 필드 setter·통지 CU5)은 아직 없다. CM0은 이 둘이 없는 자리에서 동작한다(23.4절 Transform 변경 통지는 virtual hook으로 시작한다).
+- CR7(이벤트 slot 표)과 CR8(World 필드 setter·통지 CU5)은 아직 없다(설계: [변경 통지](../ChangeNotification.ko.md) — slot 표는 CN-D4, World 필드 setter는 CN-D14·CN5. 참조 필드 `actors`·`components`·`rootComponent`에는 setter를 두지 않는다). CM0은 이 둘이 없는 자리에서 동작한다(23.4절 Transform 변경 통지는 virtual hook으로 시작한다).
 - CR5의 쿠킹 쪽은 에셋 세션 일이다: 클래스 지정자, 패키지 Exports의 EditorOnly 비트, 쿠킹 제외. CM0은 런타임 규칙만 한다(23.2절).
 - CR11의 `ViewDesc`는 `RenderData` 모듈의 타입이다([렌더러](../Renderer.ko.md) 3절). 그 모듈은 RS0에서 생긴다. CM0은 `CameraView`까지만 만들고, `ViewDesc`로 바꾸는 일은 RS0의 `WorldIntegration`이 맡는다.
 

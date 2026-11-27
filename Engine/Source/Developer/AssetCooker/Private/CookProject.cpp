@@ -761,6 +761,8 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
     runRequest.reuse = reuse.reuse.View();
     runRequest.nuggets = request.nuggets;
     runRequest.verifyNuggets = request.verifyNuggets;
+    runRequest.scheduler = request.scheduler;
+    runRequest.scratch = request.scratch;
     runRequest.output = &publisher;
     CookRunResult run(allocator);
     if (auto cooked = CookPackages(allocator, runRequest, run); !cooked) {

@@ -110,6 +110,16 @@ public:
     Result<void> ResizeWindowSurface(UiWindowSurfaceId id, uint32 width, uint32 height,
                                      graphics::Device& device) noexcept;
     void DestroyWindowSurface(UiWindowSurfaceId id, graphics::Device& device) noexcept;
+    // 창 표면의 스왑 체인이다(렌더 lane). 같은 창에 장면을 먼저 그리는 처리기가 자기 pass의
+    // SwapChainTarget에 쓴다(Sandbox ScreenRenderer — 창 스왑 체인은 UI 창 표면이 가진다,
+    // Docs/Design/RenderBase 18.5절 9항). 크기는 마지막 ResizeWindowSurface 값이다. 모르는 id는
+    // 빈 handle이다. 돌려준 handle은 그 창 표면을 파괴하거나 Close할 때까지 유효하다.
+    //
+    // 사용 예(장면 pass를 선언하기 전):
+    //   ui.ResizeWindowSurface(window, width, height, device);
+    //   const graphics::SwapChainHandle swapChain = ui.WindowSwapChain(window);
+    //   accesses.SwapChainTarget(swapChain, render::GraphLoadAction::Clear, clear);
+    graphics::SwapChainHandle WindowSwapChain(UiWindowSurfaceId id) const noexcept;
 
     // 표면 작업의 결과다(어느 스레드에서나). 게임 lane은 PostSurfaceAndWait 뒤에 읽는다. 읽으면
     // 지운다. 작업이 없었으면 None이다.

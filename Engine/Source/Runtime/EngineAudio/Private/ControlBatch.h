@@ -23,7 +23,18 @@ enum class ControlCommandType : uint8 {
     // emitter 해제: 붙은 재생을 EmitterRemoved로 끝낸다(emitter).
     RemoveEmitter,
     // 차폐 질의 응답(3.42.7절 — handle·occluded).
-    SetOcclusion
+    SetOcclusion,
+    // 믹스 스냅숏(3.43.7절 — mix): push·pop·clear·전부 clear·base.
+    PushMix,
+    PopMix,
+    ClearMix,
+    ClearAllMixes,
+    SetBaseMix,
+    // 분류 override(3.43.6절 — mix·categoryKey·value(volume)·pitch·seconds·applyToChildren)와 해제.
+    SetMixCategoryOverride,
+    ClearMixCategoryOverride,
+    // 분류 감쇠 거리 배수(3.43.6절 — categoryKey·assetValue·value·seconds).
+    SetCategoryDistanceScale
 };
 
 struct ControlCommand {
@@ -45,6 +56,21 @@ struct ControlCommand {
     // 실효 우선순위(옵션 재정의 또는 사운드 값)와 voice를 잃어도 남을지다(3.41.1절).
     float priority = DefaultSoundPriority;
     bool remainActiveIfDropped = false;
+    // Play: 분류 사슬과 재생 옵션(3.43.1절 — 사슬은 옵션 > 사운드 > 엔진 기본).
+    SoundCategoryChainRef category;
+    bool alwaysPlay = false;
+    bool isUiSound = false;
+    float lowPassFrequency = MaxAttenuationFilterFrequency;
+    float highPassFrequency = 0.0f;
+    bool hasOcclusionInterval = false;
+    float occlusionInterval = 0.0f;
+    // 믹스·분류 명령(3.43.6·3.43.7절).
+    MixSnapshotRef mix;
+    uint64 categoryKey = 0;
+    float overridePitch = 1.0f;
+    float seconds = 0.0f;
+    float assetValue = 1.0f;
+    bool applyToChildren = false;
     // Play: 게임 쪽 첫 차폐 검사 결과(occlusionChecked면 occluded — 3.42.7절). SetOcclusion: 응답.
     bool occlusionChecked = false;
     bool occluded = false;
@@ -117,6 +143,11 @@ struct OcclusionRequest {
     uint64 owner = 0;
 };
 
+// 사용자 볼륨 CVar 값이다(3.43.3절 — SoundUserVolume 색인, None은 1).
+struct UserVolumeSettings {
+    float values[SoundUserVolumeCount] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 // scene 리스너 스냅숏이다(바뀐 프레임에만).
 struct SceneUpdate {
     uint32 index = 0;
@@ -152,6 +183,7 @@ struct ControlBatch {
     GlobalFocusSettings focus;
     bool focusInitializeOnFirstUpdate = true;
     OcclusionSettings occlusion;
+    UserVolumeSettings userVolume;
     // 제어 → 게임.
     Array<PlaybackEvent> events;
     // 차폐 질의 요청이다(용량은 미리 잡고 넘치면 다음 묶음에 다시 낸다).
