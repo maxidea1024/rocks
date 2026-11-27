@@ -63,13 +63,14 @@ UE 근거: `RE/Classes/Components/TimelineComponent.h`(이하 `TH`), `RE/Private
 - `IsPlaying()`, `IsReversing()` = `playing && reversePlayback`.
 - `SetPlaybackPosition(newPosition, fireEvents, fireUpdate = true)`(`TL:274–500`):
   1. `old = position`, `position = newPosition`.
-  2. 벡터 → float → 색 순서로, 커브가 있는 트랙(인라인 또는 로드 사본)을 `position`에서 평가해 그 이벤트를 발행한다(트랙 순서대로). UE는 delegate나 속성 이름이 있을 때만 평가한다 — Rocks는 해당 이벤트에 구독이 있을 때만 평가한다(`Event::IsBound`, 결과 동작 같음). 색은 조정 적용 값(UE `GetLinearColorValue`)이다.
+  2. 벡터 → float → 색 순서로, 커브가 있는 트랙(인라인 또는 로드 사본)을 `position`에서 평가해 그 이벤트를 발행한다(트랙 순서대로). UE는 delegate나 속성 이름이 있을 때만 평가한다 — Rocks는 해당 이벤트에 구독이 있을 때만 평가한다(`Event::IsBound`, 결과 동작 같음). 색은 늘 조정 적용 식이다(UE `GetLinearColorValue` — 인라인 트랙은 그 `ColorCurveValue`의 조정 필드, 기본 항등 조정이어도 HSV 왕복과 LDR 명도 자르기를 거친다. `adjusted` 플래그는 보지 않는다).
   3. fireEvents면 이벤트 키를 본다. 앞으로: 구간 [old, position), position이 타임라인 길이와 정확히 같으면 끝을 `KindaSmallNumber`(1e-4 — UE `UE_KINDA_SMALL_NUMBER`) 넓힌다. 뒤로: (position, old], position이 0이면 시작을 1e-4 넓힌다. 키 시간이 구간 안이면 `eventKeyReached(eventName)`을 키 순서대로 발행한다.
   4. fireUpdate면 `updated()`.
 - `TickTimeline(delta)`(`TL:516–599`): 재생 중이면 `effective = delta × (reversePlayback ? −playRate : playRate)`, `newPosition = position + effective`.
   - `effective > 0`이고 `newPosition > length`(지금 길이): loop면 `SetPlaybackPosition(length, true, false)` → `SetPlaybackPosition(0, false, false)` → 길이 > 0이면 `newPosition`에서 길이를 뺀다(32.6절 3 — 반복 상한), 아니면 0. loop가 아니면 `newPosition = length`, `Stop()`, 끝남 표시.
   - `effective ≤ 0`이고 `newPosition < 0`: loop면 `SetPlaybackPosition(0, true, false)` → `SetPlaybackPosition(length, false, false)` → 길이 > 0이면 더한다, 아니면 0. 아니면 0, `Stop()`, 끝남 표시.
   - `SetPlaybackPosition(newPosition, true)`. 끝남 표시면 `finished()`.
+- 컴포넌트 `OnStart`: 저장된 `playing`이 참이면 Tick을 켠다(Tick 켜짐은 저장하지 않는다 — 로드·복제한 재생 중 타임라인이 멈춰 있지 않게. UE는 `bIsActive`가 transient라 멈춘다 — 32.6절 8).
 - 컴포넌트 `OnTick`(`TL:786–814`): delta는 `ignoreTimeDilation`이면 `TickContext::unscaledDeltaSeconds`, 아니면 `deltaSeconds`(float로). `TickTimeline` 뒤 재생 중이 아니면 Tick을 끈다(UE `Deactivate` — 복제 시뮬레이션 예외는 CR24).
 - `SetNewTime(t)`: `t`를 [0, `length`]로 자른 뒤 `SetPlaybackPosition(t, false)`(UE는 `LengthMode`와 무관하게 `Length`로 자른다 — 그대로).
 - `GetTimelineLength()`: `TimelineLength`면 `length`, `LastKeyFrame`면 마지막 키 시간 = max(0, 이벤트 키 시간들, 각 트랙 커브의 마지막 키 시간)(`TL:676–709` — 빈 커브는 0, 커브 없는 트랙은 0 — UE는 null 커브 트랙에서 null 역참조).
@@ -78,7 +79,7 @@ UE 근거: `RE/Classes/Components/TimelineComponent.h`(이하 `TH`), `RE/Private
 - `SetTimelineLengthMode`, `SetLooping`/`IsLooping`, `SetPlayRate`/`GetPlayRate`, `GetPlaybackPosition`, `SetIgnoreTimeDilation`/`GetIgnoreTimeDilation`.
 - 트랙 편집(UE `AddInterpFloat`·`SetFloatCurve` 대응, 실패 Result):
   - `TryAddFloatTrack(trackName, curve)`·`TryAddVectorTrack`·`TryAddColorTrack`(인라인 커브 사본), `TryAddEventKey(time, eventName)`. 오류: 할당 실패, 시간 비유한 `InvalidArgument`.
-  - `SetFloatTrackCurveAsset(trackName, asset)`(벡터·색 같은 꼴 — UE `SetFloatCurve(curve, trackName)`): 이름이 같은 첫 트랙의 `curveAsset`을 바꾸고 로드 사본을 지운다. 이름이 비었거나 없으면 `NotFound`(UE는 Log만).
+  - `SetFloatTrackCurveAsset(trackName, asset)`(벡터·색 같은 꼴 — UE `SetFloatCurve(curve, trackName)`): 이름이 같은 첫 트랙의 `curveAsset`을 바꾸고 로드 사본을 지운다. 같은 값이면 아무것도 하지 않는다(사본 유지 — 30.3절 `SetStaticMesh`와 같다). 이름이 비었거나 없으면 `NotFound`(UE는 Log만).
   - UE `AddInterp*`는 null 커브를 거부한다(Warning). Rocks 인라인 트랙은 늘 커브가 있다(빈 커브는 0).
 
 ### 32.4 시험(`WorldIntegration/Tests/TimelineComponentTests.cpp`, `Timeline_` 접두)
@@ -93,7 +94,8 @@ UE 근거: `RE/Classes/Components/TimelineComponent.h`(이하 `TH`), `RE/Private
 8. `ignoreTimeDilation`: World 시간 배율 0.5에서 delta 차이.
 9. 로드 사본: 에셋 트랙은 사본 전 평가하지 않음, `ApplyLoaded*` 뒤 평가, 요청 참조 불일치 `InvalidArgument`, `SetFloatTrackCurveAsset`이 사본을 지움, 이름 없음 `NotFound`.
 10. 구독 없는 트랙은 평가하지 않음(구독이 생기면 평가 — 결과 같음), NaN·Inf delta, 큰 delta loop 반복 상한(32.6절 3).
-11. 리플렉션 왕복(트랙·키·설정 저장, 로드 사본은 저장하지 않음)과 이벤트 바인딩 저장(ED19).
+11. 리플렉션 왕복(설정·재생 상태·float·벡터·색 트랙과 색 조정·에셋 경로·키 저장, 로드 사본은 저장하지 않음), 재생 중 저장한 것을 시작하면 Tick이 켜짐. 이벤트 필드의 바인딩 저장(ED19)은 이벤트 필드 공용 경로라 EventReflection EV3a1 시험이 맡는다(여기서는 이벤트 필드 여섯이 schema에 있음만 본다).
+12. 트랙 값 struct `TryCopyFrom`, 재진입(`finished` 구독자가 `Play`를 부르면 재생이 이어지고 Tick이 켜진 채, 구독자가 발행 중 트랙·키를 더해도 안전), `TryAddEventKey` 비유한 거부.
 
 ### 32.5 결정
 
@@ -108,8 +110,11 @@ UE 근거: `RE/Classes/Components/TimelineComponent.h`(이하 `TH`), `RE/Private
 
 1. 트랙 출력은 컴포넌트 이벤트 하나에 트랙 이름 인자로 온다(ERD72). 이름 기반 속성 쓰기와 방향 속성은 없다(ERD73).
 2. UE `Activate`·`Deactivate`(컴포넌트 활성 bit + Tick)는 Tick 켜기·끄기만이다. Rocks 컴포넌트 활성(`SetEnabled`)은 사용자 몫이다(꺼진 컴포넌트는 Tick이 없어 재생이 멈춘다).
-3. loop에서 남은 위치를 구하는 뺄셈 반복은 `MaxTimelineLoopWraps`(1024)번까지이고 넘으면 정확한 나머지(`math::Fmod`)로 줄인다. UE는 상한 없는 `while`이라 길이에 비해 아주 큰 delta에서 오래 돌고, float에서 `newPosition − length == newPosition`이면 끝나지 않는다. 비유한 delta·`playRate`(effective가 NaN·±Inf)는 그 Tick을 건너뛴다(UE는 위치가 NaN이 된다).
-4. `GetScaledTimelineLength`의 `playRate` 0과 알 수 없는 길이 모드는 로그 없이 0이다(UE Error 로그). 커브 없는 트랙(로드 전 에셋 트랙)은 마지막 키 시간 계산에서 0이다(UE는 null 역참조).
-5. `SetFloatTrackCurveAsset` 등은 이름이 없으면 `NotFound`이다(UE Log). 트랙 추가는 인라인 커브라 null 거부가 없다.
+3. 위치·delta가 비유한이 되는 Tick(비유한 delta·`playRate`, `SetPlaybackPosition(±Inf)` 뒤·합의 넘침)은 건너뛴다. loop에서 남은 위치를 구하는 뺄셈 반복은 `MaxTimelineLoopWraps`(1024)번까지이고 넘으면 정확한 나머지(`math::Fmod`)로 줄인다. UE는 상한 없는 `while`이라 길이에 비해 아주 큰 delta에서 오래 돌고, float에서 `newPosition − length == newPosition`이면 끝나지 않는다. UE는 이런 Tick에서 위치가 NaN이 된다.
+4. `GetScaledTimelineLength`의 `playRate` 0은 로그 없이 0이다(UE Error 로그). 알 수 없는 길이 모드 값은 `LastKeyFrame`처럼 계산한다(UE는 Error 로그와 0 — enum 밖 값은 리플렉션이 막는다). 커브 없는 트랙(로드 전 에셋 트랙)은 마지막 키 시간 계산에서 0이다(UE는 null 역참조).
+5. `SetFloatTrackCurveAsset` 등은 이름이 없으면 `NotFound`이다(UE Log). null 에셋은 받아서 인라인 커브로 돌아간다(UE는 Warning 뒤 설정하지 않는다 — `TL:209–212`). 트랙 추가는 인라인 커브라 null 거부가 없다. `TryAddEventKey`는 비유한 시간을 거부한다(UE `AddEvent`는 무조건 더한다). UE `GetAllCurves`(편집기·쿠킹 의존 수집)는 에셋 참조 수집 단계(로드 시스템 연결)에서 붙인다.
 6. 복제(`ReplicatedUsing=OnRep_Timeline`, `PlayingStateTracker`의 dirty 수, 시뮬레이션 클라이언트의 Deactivate 예외)는 CR24 복제 단계다.
 7. UE `IsReadyForOwnerToAutoDestroy`(재생 중이 아니면 참)는 Rocks에 소유 자동 파괴가 생길 때 붙인다.
+8. 저장된 재생 상태(`playing`)로 시작하면 Tick을 켠다(32.3절 `OnStart`). UE는 활성 bit가 transient라 로드한 재생 중 타임라인이 다시 `Play`할 때까지 멈춰 있다.
+9. 에셋 트랙의 로드 사본이 없는 동안(로드 전·에셋 교체 직후) 그 트랙은 평가되지 않고 `LastKeyFrame` 길이에서 빠진다 — 그 사이 재생하면 길이가 짧아져 일찍 끝날 수 있다. UE는 hard 커브라 이런 틈이 없다. 로드 시스템 연결(CR4) 때 시작 준비 hook(`IsReadyToStart`)이 사본을 기다리게 한다.
+10. World 밖(장부 밖 객체)에서는 아무 이벤트도 발행하지 않는다(발행 문맥이 없다). `ignoreTimeDilation`과 Tick `intervalSeconds`를 함께 쓰면 누적 delta가 아니라 프레임 unscaled delta다(UE `FApp::GetDeltaTime`도 같다).
