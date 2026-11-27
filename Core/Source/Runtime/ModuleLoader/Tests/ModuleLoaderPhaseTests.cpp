@@ -241,4 +241,91 @@ TEST(ModuleLoaderStopsAPhaseOnFailure) {
     loader->ShutdownGroup(ModuleGroup::Process);
 }
 
+// 시작 관찰자 시험(Docs/Design/ModuleLoader 3.16절)의 표다. Main(Default)이 뒤 단계
+// Post(PostDefault)에 의존하므로 Post는 Default 단계에서 의존으로 먼저 시작한다. Probe는 요청 시
+// 적재 행이다.
+constexpr const char* PostOnly[] = {"Post"};
+constexpr ModuleTableRow ObserverRows[] = {
+    {"Boot", &PhaseEntry<0>, nullptr, 0, LoadingPhase::EarliestPossible, false},
+    {"Post", &PhaseEntry<4>, nullptr, 0, LoadingPhase::PostDefault, false},
+    {"Main", &PhaseEntry<3>, PostOnly, 1, LoadingPhase::Default, false},
+    {"Probe", &PhaseEntry<7>, nullptr, 0, LoadingPhase::Default, true},
+};
+
+void ObservePhaseBegin(void* context, usize moduleCount) noexcept {
+    (void)context;
+    char event[EventBytes];
+    snprintf(event, sizeof(event), "%zu", moduleCount);
+    Note("begin", event);
+}
+
+void ObserveModuleStarting(void* context, StringView moduleName) noexcept {
+    (void)context;
+    char name[EventBytes];
+    snprintf(name, sizeof(name), "%.*s", static_cast<int>(moduleName.ByteCount()),
+             moduleName.Data());
+    Note("module", name);
+}
+
+void ObservePhaseEnd(void* context) noexcept {
+    (void)context;
+    Note("end", "phase");
+}
+
+ModuleStartObserver JournalObserver() noexcept {
+    ModuleStartObserver observer;
+    observer.phaseBegin = &ObservePhaseBegin;
+    observer.moduleStarting = &ObserveModuleStarting;
+    observer.phaseEnd = &ObservePhaseEnd;
+    return observer;
+}
+
+// 관찰자는 실제로 단계를 도는 StartPhase에서 모듈 수(요청 시 적재 행·이미 시작한 행 제외) → 행마다
+// 시작 직전 → 끝을 받는다. 의존으로 먼저 시작한 행은 그 단계에서 다시 알리지 않고, 이미 돈 단계만
+// 부른 호출은 아무것도 받지 않는다. SetStartObserver는 이전 관찰자를 돌려준다.
+TEST(ModuleLoaderStartObserverSeesCountsAndModules) {
+    Reset();
+    SystemAllocator allocator;
+    auto created = ModuleLoader::TryCreate(allocator, ModuleTable(ObserverRows));
+    REQUIRE(created);
+    ModuleLoader& loader = *created.Value();
+    const ModuleStartObserver none = loader.SetStartObserver(JournalObserver());
+    CHECK(none.phaseBegin == nullptr);
+    CHECK(loader.StartPhase(LoadingPhase::EarliestPossible).IsOk());
+    CHECK(loader.StartPhase(LoadingPhase::EarliestPossible).IsOk());
+    const char* const boot[] = {"begin:1", "module:Boot", "start:Boot", "end:phase"};
+    CHECK(JournalIs(boot));
+
+    ClearJournal();
+    CHECK(loader.StartPhase(LoadingPhase::PostDefault).IsOk());
+    const char* const engine[] = {"begin:2", "module:Main", "start:Post", "start:Main",
+                                  "end:phase"};
+    CHECK(JournalIs(engine));
+
+    // 겹쳐 걸고 되돌린다.
+    const ModuleStartObserver previous = loader.SetStartObserver({});
+    CHECK(previous.phaseBegin == &ObservePhaseBegin);
+    CHECK(loader.SetStartObserver(previous).phaseBegin == nullptr);
+    (void)loader.SetStartObserver({});
+    loader.ShutdownGroup(ModuleGroup::Process);
+}
+
+// 단계가 실패해도 끝(phaseEnd)을 받는다.
+TEST(ModuleLoaderStartObserverSeesTheEndOfAFailedPhase) {
+    Reset();
+    SystemAllocator allocator;
+    auto created = ModuleLoader::TryCreate(allocator, ModuleTable(ObserverRows));
+    REQUIRE(created);
+    ModuleLoader& loader = *created.Value();
+    (void)loader.SetStartObserver(JournalObserver());
+    startupErrors[3] = ErrorCode::OutOfMemory;
+    CHECK(loader.StartPhase(LoadingPhase::Default).code == ModuleLoadCode::StartupFailed);
+    const char* const failed[] = {"begin:2",     "module:Boot", "start:Boot",
+                                  "module:Main", "start:Post",  "end:phase"};
+    CHECK(JournalIs(failed));
+    startupErrors[3] = ErrorCode::None;
+    (void)loader.SetStartObserver({});
+    loader.ShutdownGroup(ModuleGroup::Process);
+}
+
 } // namespace module_loader_phase_tests_file

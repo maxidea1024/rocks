@@ -18,6 +18,16 @@
       "linux-X64": { "url": "https://files.pythonhosted.org/packages/01/75/e7d82087df0922054f08351ce5e3528d0b0ce64dcc140c00ec1df016a0c6/clang_format-21.1.6-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "sha256": "8a9d82d1d67ffdc491a0a1ce04d7740b6e7ccb1d9b6d2ab90b009040614030e9" }
     }
   },
+  "ispc": {
+    "version": "1.32.0",
+    "packages": {
+      "windows-X64": { "url": "https://github.com/ispc/ispc/releases/download/v1.32.0/ispc-v1.32.0-windows.zip", "sha256": "148d5cd96abe7501c730d5fbd00f1f0c893b96bfeada38d1811c9b6251e86a5c" },
+      "macos-Arm64": { "url": "https://github.com/ispc/ispc/releases/download/v1.32.0/ispc-v1.32.0-macOS.arm64.tar.gz", "sha256": "efc5180095554628c01022507329ba7a2141c7ba97cf1bccc2df85dc47874e02" },
+      "macos-X64": { "url": "https://github.com/ispc/ispc/releases/download/v1.32.0/ispc-v1.32.0-macOS.x86_64.tar.gz", "sha256": "dc66396d45c73e2c6596d84dc82765e18631f9ebd34533adae400a0a137f9906" },
+      "linux-X64": { "url": "https://github.com/ispc/ispc/releases/download/v1.32.0/ispc-v1.32.0-linux.tar.gz", "sha256": "faf266bda2b702d68976ffd26bbd36c1ddba43424cc3c44f25b092cd1aa1f64a" },
+      "linux-Arm64": { "url": "https://github.com/ispc/ispc/releases/download/v1.32.0/ispc-v1.32.0-linux.aarch64.tar.gz", "sha256": "ddb892a25ffb2f212a63c59540262556e50cc72b1b0c89bed7735d66da69626d" }
+    }
+  },
   "dotnet": {
     "sdk": {
       "version": "10.0.302",

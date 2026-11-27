@@ -546,6 +546,26 @@
         "generated": false,
         "baked": null
       }
+    ],
+    "materials": [
+      {
+        "MaterialInterface": {
+          "objectPath": "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+        },
+        "MaterialSlotName": "-1",
+        "ImportedMaterialSlotName": "-1",
+        "UVChannelData": {
+          "bInitialized": true,
+          "bOverrideDensities": false,
+          "LocalUVDensities": [
+            99.622345,
+            0,
+            0,
+            0
+          ]
+        },
+        "OverlayMaterialInterface": null
+      }
     ]
   }
 }

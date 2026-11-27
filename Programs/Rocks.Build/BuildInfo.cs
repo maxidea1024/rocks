@@ -437,10 +437,11 @@ internal static class BuildInfoGenerator
         var reached = closure.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var produced = plan.Actions.SelectMany(action => action.Outputs).ToHashSet(NativeToolchains.PathComparer);
         // object마다 그 번역 단위를 이루는 원본 소스다(단독 TU면 하나, 묶음이면 구성원 전부).
-        var objectSources = plan.Actions.Where(action => action.Kind == "Compile")
+        // ISPC object도 원본 소스 키로 적는다(Docs/Design/BuildTargets 3.12절 BD50 — object 경로는 절대 경로 해시다).
+        var objectSources = plan.Actions.Where(action => action.Kind is "Compile" or "Ispc")
             .ToDictionary(action => action.Outputs[0], action => action.SourceMembers, NativeToolchains.PathComparer);
         NativeAction[] actions = plan.Actions.Where(action => reached.Contains(action.Module) &&
-            action.Kind is "Compile" or "Archive" or "Link").ToArray();
+            action.Kind is "Compile" or "Archive" or "Link" or "Ispc").ToArray();
         // 외부 include 루트 순번은 도달 집합 순서(실행 파일, 그다음 의존 순서)와 각 액션의 header 디렉터리 순서로 정한다.
         foreach (string name in closure)
         {
@@ -522,6 +523,13 @@ internal static class BuildInfoGenerator
                 RemoveSubsequence(arguments, 0, toolchain.LinkArguments, action.Id);
             }
 
+            // Ispc action(BD50)은 원본 키로 줄을 세우고, 도구는 경로가 아니라 고정 버전으로 적는다(설치 경로는 호스트마다 다르다).
+            if (action.Kind == "Ispc")
+            {
+                AddBlock(action.Kind, action.Id, paths.Key(action.Source!), module, ["ispc-version=" + action.Identity[1], .. arguments]);
+                continue;
+            }
+
             AddBlock(action.Kind, action.Id, module.Name, module, arguments);
         }
 
@@ -568,7 +576,9 @@ internal static class BuildInfoGenerator
                 Add(input);
             }
 
-            foreach (string declared in action.DeclaredInputs)
+            // 다른 action의 산출물인 선언 입력(ISPC 생성 헤더 — Docs/Design/BuildTargets 3.12절 BD48)은 빌드 전이라 없을 수 있고, 그 내용은
+            // 산출한 action의 입력이 대신한다.
+            foreach (string declared in action.DeclaredInputs.Where(value => !produced.Contains(Path.GetFullPath(value))))
             {
                 if (File.Exists(declared))
                 {

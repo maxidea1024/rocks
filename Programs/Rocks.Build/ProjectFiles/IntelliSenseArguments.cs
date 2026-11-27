@@ -54,7 +54,7 @@ public static class IntelliSenseArguments
     // 소스에서 막는다.
     private static readonly HashSet<string> DroppedExact = new(StringComparer.Ordinal)
     {
-        "--no-default-config", "/nologo", "/c", "/W4", "/WX", "-Wunique-object-duplication", "/Z7", "/Od", "/O2",
+        "--no-default-config", "/nologo", "/c", "/W4", "/WX", "-Wunique-object-duplication", "-Wthread-safety", "/Z7", "/Od", "/O2",
         "/clang:-ffp-contract=off", "-fno-strict-aliasing", "-fno-strict-overflow", "-flto=thin", "-fprofile-instr-generate", "-fcoverage-mapping"
     };
 

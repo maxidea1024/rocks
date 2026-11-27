@@ -1,5 +1,7 @@
 #pragma once
 
+#include "GraphEvents.h"
+
 #include <Core/Containers/HashMap.h>
 #include <Object/GeneratedFieldCodec.h>
 #include <ObjectSerialization/ObjectGraph.h>
@@ -198,6 +200,9 @@ struct StoredField {
     usize schemaIndex = 0;
     const RuntimeFieldOps* ops = nullptr;
     FieldView view;
+    // 이벤트 필드의 바인딩 기록이면 그 이벤트 연산표다(ops는 nullptr — Docs/Design/
+    // EventReflection.ko.md ED21).
+    const RuntimeEventOps* events = nullptr;
 };
 
 // 1단계가 모은 참조 하나다. target은 저장 값 그대로다 — local ID(1부터) 또는 외부 참조
@@ -307,7 +312,8 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
 struct StageData {
     StageData(Allocator& allocator, Budget&& graphBudget, Envelope&& graphEnvelope) noexcept
         : budget(Move(graphBudget)), envelope(Move(graphEnvelope)), expectedLeases(allocator),
-          importLeases(allocator), externalUses(allocator), importChecks(allocator) {
+          importLeases(allocator), externalUses(allocator), importChecks(allocator),
+          pendingEvents(allocator) {
     }
 
     Budget budget;
@@ -317,6 +323,9 @@ struct StageData {
     Array<TypeLease> importLeases;
     Array<GraphExternalUse> externalUses;
     Array<ImportExpectation> importChecks;
+    // 2b가 바인딩 기록에서 모은, Commit 뒤에 만들 이벤트 바인딩이다(Docs/Design/
+    // EventReflection.ko.md ED21 — BindEvents가 쓰고 비운다).
+    Array<PendingEventBinding> pendingEvents;
 };
 
 // ObjectGraphStage 내부 통로다(편의 복원의 도달 검사가 1단계 결과를 읽는다).
@@ -446,7 +455,8 @@ Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> act
 // 부른다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
                              Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
-                             Span<const ObjectHandle> imports) noexcept;
+                             Span<const ObjectHandle> imports,
+                             Array<PendingEventBinding>& pendingEvents) noexcept;
 
 // 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절
 // — 2c 단계, GraphRequired.cpp). Required를 품은 최상위 필드(필드 자신이 Required이거나 struct

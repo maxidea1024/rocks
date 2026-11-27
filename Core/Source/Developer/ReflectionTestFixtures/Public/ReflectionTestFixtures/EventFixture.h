@@ -31,6 +31,8 @@ public:
 
     ROCKS_PROPERTY() int32 count = 0;
     ROCKS_PROPERTY() String label;
+    // 강한 참조로 닿는 listener다(LoadObjectGraph 왕복·Include 지연 덮어쓰기 시험 — EV3a1).
+    ROCKS_PROPERTY() ObjectRef<CallTarget> partner;
     ROCKS_PROPERTY(Params = "amount") Event<int32> changed;
     ROCKS_PROPERTY(Params = "text,times", Transient) Event<const String&, int32> named;
     ROCKS_PROPERTY(SaveGame) Event<> pinged;
@@ -41,7 +43,8 @@ public:
 #endif
 };
 
-// 기반 이벤트를 물려받고 이벤트 하나를 더한다(파생 schema가 상속 이벤트를 다시 싣는다).
+// 기반 이벤트를 물려받고 Transient 이벤트 하나를 더한다(파생 schema가 상속 이벤트를 다시 싣는다 —
+// Transient 이벤트의 바인딩은 저장하지 않는다).
 ROCKS_CLASS()
 class EventPublisherChild : public EventPublisher {
     ROCKS_GENERATED_BODY()
@@ -51,7 +54,7 @@ public:
         : EventPublisher(allocator), extra(allocator) {
     }
 
-    ROCKS_PROPERTY(Params = "amount") Event<int32> extra;
+    ROCKS_PROPERTY(Params = "amount", Transient) Event<int32> extra;
 };
 
 } // namespace rocks::reflection_fixture

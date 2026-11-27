@@ -31,7 +31,9 @@ const ShaderTypeDesc* const Types[] = {
 #include "SandboxShaderTypes.inl"
     &MathFloatProbe,       &MathUintProbe,         &ColorFloatProbe,
     &ShadingFloatProbe,    &GeneratedParametersVS, &GeneratedParametersPS,
-    &GeneratedResourcesVS, &GeneratedResourcesPS,  &ReloadColorPS};
+    &GeneratedResourcesVS, &GeneratedResourcesPS,  &ReloadColorPS,
+    &ComputeDispatchProbe, &WrappedDispatchProbe,  &WriteDispatchArgumentsProbe,
+    &GroupOperationsProbe, &UtilityProbe,          &MipPatternProbe};
 #undef SANDBOX_VERTEX
 #undef SANDBOX_PIXEL
 #undef SANDBOX_COMPUTE

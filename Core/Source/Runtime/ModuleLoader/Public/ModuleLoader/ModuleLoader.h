@@ -79,6 +79,24 @@ constexpr ModuleGroup LoadingPhaseGroup(LoadingPhase phase) noexcept {
     return ModuleGroup::Process;
 }
 
+// 모듈 시작 관찰자다(Docs/Design/ModuleLoader 3.16절). 시작 진행
+// 표시(Docs/Design/SplashScreen 8.1절)가 StartPhase의 모듈 수와 지금 시작하는 모듈 이름을 받는다.
+// 로더는 진행 보고(Progress 모듈)를 모른다 — 로더는 Launch 부트 묶음이라 의존을 늘리면 모든
+// 프로그램의 부트 묶음이 커진다. Progress 구간은 관찰자를 건 쪽(Engine의 ModuleStartProgress)이
+// 연다.
+//
+// 불리는 때(로더 스레드, StartPhase 하나 안에서 이 순서): phaseBegin(이번 호출이 시작할 모듈 수 —
+// 요청 시 적재 행과 이미 시작한 모듈은 빼고 센다) → 단계 행 하나를 시작하기 직전마다
+// moduleStarting(이름) → 끝날 때(실패 포함) phaseEnd. 이미 돈 단계만 부른 호출은 아무것도 부르지
+// 않는다. 의존으로 함께 시작한 모듈은 따로 알리지 않는다(그 행의 시작 안에 든다). 관찰자 안에서
+// 로더를 부르지 않는다. 모두 null일 수 있다.
+struct ModuleStartObserver {
+    void (*phaseBegin)(void* context, usize moduleCount) noexcept = nullptr;
+    void (*moduleStarting)(void* context, StringView moduleName) noexcept = nullptr;
+    void (*phaseEnd)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+};
+
 // 모듈 로더다(UE FModuleManager 대응, 3.4절). 빌드가 만든 모듈 표(Monolithic GeneratedModuleTable,
 // Modular 모듈 manifest — TryCreateFromManifest)로 모듈을
 // 단계(StartPhase)나 이름(Load)으로 의존 순서대로 시작하고, 묶음마다 시작 역순으로 내린다.
@@ -199,6 +217,20 @@ public:
     // - 계약 위반은 Fatal이다: phase가 None이거나, 지금 묶음보다 앞 묶음의 단계를 부르거나(UE는
     //   Error 로그), Load 진행 중이거나 묶음 종료 콜백 안에서 부른다.
     ModuleLoadReport StartPhase(LoadingPhase phase) noexcept;
+
+    // 모듈 시작 관찰자를 건다(빈 관찰자는 푼다). 이전 관찰자를 돌려주므로 거는 쪽이 끝날 때 되돌려
+    // 놓는다(중첩 가능). 로더 스레드에서만 부르고 StartPhase 안(관찰자 콜백 포함)에서 부르지
+    // 않는다.
+    //
+    // 사용 예:
+    //   const ModuleStartObserver previous = loader.SetStartObserver(observer);
+    //   loader.StartPhase(LoadingPhase::PostConfigInit);
+    //   (void)loader.SetStartObserver(previous);
+    ModuleStartObserver SetStartObserver(const ModuleStartObserver& observer) noexcept {
+        const ModuleStartObserver previous = startObserver_;
+        startObserver_ = observer;
+        return previous;
+    }
 
     // phase를 다 돌았는지다(ShutdownGroup이 그 묶음을 내리면 다시 false다). None은 false다.
     bool PhaseStarted(LoadingPhase phase) const noexcept;
@@ -359,6 +391,8 @@ private:
     bool StartRecord(usize index, ModuleLoadReport& report) noexcept;
     void ShutdownRecords(ModuleGroup group) noexcept;
     bool RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexcept;
+    // [nextPhase_, phase] 단계에서 StartPhase가 시작할 모듈 수다(관찰자 phaseBegin).
+    usize CountPhaseStarts(LoadingPhase phase) const noexcept;
     bool RejectStart(ModuleLoadReport& report, StringView requested, bool phase) const noexcept;
     void CheckShutdownCall(bool engineGroup) const noexcept;
     bool RegisterRecordTypes(usize index, usize slot, ModuleLoadReport& report) noexcept;
@@ -390,6 +424,8 @@ private:
     uint64 nextStartOrder_ = 1;
     // 진행 중인 Load 호출 수(Startup 안의 중첩 Load 포함)다. 0이 아니면 ShutdownGroup은 Fatal이다.
     usize loadDepth_ = 0;
+    // 모듈 시작 관찰자다(SetStartObserver).
+    ModuleStartObserver startObserver_;
     bool shutdownInProgress_ = false;
     bool processShutdown_ = false;
 };

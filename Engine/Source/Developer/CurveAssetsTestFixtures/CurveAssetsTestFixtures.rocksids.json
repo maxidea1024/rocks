@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::curve_fixture::CurveSourceHolder::colorSource",
+      "id": "95ef2c61fbcb4d789778ed856fe4a0ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curve_fixture::CurveSourceHolder::floatSource",
+      "id": "1fbc678fe508474984859657c5ebecb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curve_fixture::CurveSourceHolder::tableRow",
+      "id": "2a94370cc241477e89b49c2f4bccb40a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curve_fixture::CurveSourceHolder::vectorSource",
+      "id": "7417dd551ba94687a504e63dee974aac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::curve_fixture::CurveSourceHolder",
+      "id": "9fa93ec418ab48aeba2cc3bc2c82c6f3",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

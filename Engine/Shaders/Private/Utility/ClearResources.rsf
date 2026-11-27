@@ -1,0 +1,186 @@
+// 자원 clear 셰이더다(Docs/Design/EngineShaders 4.18절 A18·14.4절 4항, RenderBase RR17, UE
+// ClearReplacementShaders.usf·ClearQuad 역할). C++ 도우미는 RenderBase/ClearResources.h다.
+// - ClearWritableCompute: 쓰기 view의 [minBounds, maxBounds) 범위를 값 하나로 채운다. 퍼뮤테이션은 차원
+//   CLEAR_DIMENSION(0 버퍼·1 2D·2 2D 배열·3 3D) × image 형식 CLEAR_FORMAT(아래 표 — SPIR-V·GLES storage
+//   image는 형식이 필요하다)이다. GLES 형식은 앞 여덟 형식만 컴파일한다(GLES 3.2 core image 형식).
+// - ClearRegionVertex·ClearRegionPixel: 활성 raster pass 안 사각형 부분 clear(C++가 viewport·scissor를
+//   사각형으로 둔다). VS는 상수 깊이를 z로 내고 PS는 값 계열 CLEAR_VALUE_TYPE(0 float·1 uint·2 sint)으로 색
+//   타깃 0에 값을 쓴다.
+// - InitializeDispatchArgumentsCompute: 간접 인자 버퍼에 같은 DispatchIndirectArguments 기록 여러 개를 쓴다.
+#include "/Engine/Private/Common/ShaderPrelude.rsh"
+
+#if defined(ROCKS_COMPUTE_SHADER)
+#include "/Engine/Private/Common/ComputeDispatch.rsh"
+#endif
+
+// 차원·형식 번호다(C++ RenderBase/UtilityShaderTypes.h ClearDimension·StorageImageFormat과 같은 순서).
+#define CLEAR_DIMENSION_BUFFER 0
+#define CLEAR_DIMENSION_TEXTURE2D 1
+#define CLEAR_DIMENSION_TEXTURE2D_ARRAY 2
+#define CLEAR_DIMENSION_TEXTURE3D 3
+
+// 2D·배열·3D와 버퍼의 그룹 크기다.
+#define CLEAR_BUFFER_GROUP_THREADS 64
+#define CLEAR_TEXTURE2D_GROUP_SIDE 8
+#define CLEAR_VOLUME_GROUP_SIDE 4
+
+// ROCKS_IMAGE_FORMAT은 인자를 문자열로 만들므로 형식 매크로를 한 번 펼친 뒤 넘긴다.
+#define CLEAR_IMAGE_FORMAT_ATTRIBUTE(Format) ROCKS_IMAGE_FORMAT(Format)
+
+#if defined(CLEAR_DIMENSION) && defined(CLEAR_FORMAT)
+
+#include "/Engine/Generated/RenderBase/ClearWritableConstants.rsh"
+
+#if CLEAR_FORMAT == 0
+#define CLEAR_IMAGE_FORMAT rgba8
+#define CLEAR_ELEMENT float4
+#define CLEAR_VALUE asfloat(ClearWritable.value)
+#elif CLEAR_FORMAT == 1
+#define CLEAR_IMAGE_FORMAT rgba8snorm
+#define CLEAR_ELEMENT float4
+#define CLEAR_VALUE asfloat(ClearWritable.value)
+#elif CLEAR_FORMAT == 2
+#define CLEAR_IMAGE_FORMAT rgba16f
+#define CLEAR_ELEMENT float4
+#define CLEAR_VALUE asfloat(ClearWritable.value)
+#elif CLEAR_FORMAT == 3
+#define CLEAR_IMAGE_FORMAT rgba32f
+#define CLEAR_ELEMENT float4
+#define CLEAR_VALUE asfloat(ClearWritable.value)
+#elif CLEAR_FORMAT == 4
+#define CLEAR_IMAGE_FORMAT r32f
+#define CLEAR_ELEMENT float
+#define CLEAR_VALUE asfloat(ClearWritable.value.x)
+#elif CLEAR_FORMAT == 5
+#define CLEAR_IMAGE_FORMAT r32ui
+#define CLEAR_ELEMENT uint
+#define CLEAR_VALUE ClearWritable.value.x
+#elif CLEAR_FORMAT == 6
+#define CLEAR_IMAGE_FORMAT r32i
+#define CLEAR_ELEMENT int
+#define CLEAR_VALUE asint(ClearWritable.value.x)
+#elif CLEAR_FORMAT == 7
+#define CLEAR_IMAGE_FORMAT rgba32ui
+#define CLEAR_ELEMENT uint4
+#define CLEAR_VALUE ClearWritable.value
+#elif CLEAR_FORMAT == 8
+#define CLEAR_IMAGE_FORMAT rg16f
+#define CLEAR_ELEMENT float2
+#define CLEAR_VALUE asfloat(ClearWritable.value.xy)
+#elif CLEAR_FORMAT == 9
+#define CLEAR_IMAGE_FORMAT r16f
+#define CLEAR_ELEMENT float
+#define CLEAR_VALUE asfloat(ClearWritable.value.x)
+#elif CLEAR_FORMAT == 10
+#define CLEAR_IMAGE_FORMAT rg32f
+#define CLEAR_ELEMENT float2
+#define CLEAR_VALUE asfloat(ClearWritable.value.xy)
+#else
+#define CLEAR_IMAGE_FORMAT r11g11b10f
+#define CLEAR_ELEMENT float3
+#define CLEAR_VALUE asfloat(ClearWritable.value.xyz)
+#endif
+
+#if CLEAR_DIMENSION == CLEAR_DIMENSION_BUFFER
+CLEAR_IMAGE_FORMAT_ATTRIBUTE(CLEAR_IMAGE_FORMAT) RWBuffer<CLEAR_ELEMENT> ClearTarget;
+#define CLEAR_GROUP_X CLEAR_BUFFER_GROUP_THREADS
+#define CLEAR_GROUP_Y 1
+#define CLEAR_GROUP_Z 1
+#elif CLEAR_DIMENSION == CLEAR_DIMENSION_TEXTURE2D
+CLEAR_IMAGE_FORMAT_ATTRIBUTE(CLEAR_IMAGE_FORMAT) RWTexture2D<CLEAR_ELEMENT> ClearTarget;
+#define CLEAR_GROUP_X CLEAR_TEXTURE2D_GROUP_SIDE
+#define CLEAR_GROUP_Y CLEAR_TEXTURE2D_GROUP_SIDE
+#define CLEAR_GROUP_Z 1
+#elif CLEAR_DIMENSION == CLEAR_DIMENSION_TEXTURE2D_ARRAY
+CLEAR_IMAGE_FORMAT_ATTRIBUTE(CLEAR_IMAGE_FORMAT) RWTexture2DArray<CLEAR_ELEMENT> ClearTarget;
+#define CLEAR_GROUP_X CLEAR_VOLUME_GROUP_SIDE
+#define CLEAR_GROUP_Y CLEAR_VOLUME_GROUP_SIDE
+#define CLEAR_GROUP_Z CLEAR_VOLUME_GROUP_SIDE
+#else
+CLEAR_IMAGE_FORMAT_ATTRIBUTE(CLEAR_IMAGE_FORMAT) RWTexture3D<CLEAR_ELEMENT> ClearTarget;
+#define CLEAR_GROUP_X CLEAR_VOLUME_GROUP_SIDE
+#define CLEAR_GROUP_Y CLEAR_VOLUME_GROUP_SIDE
+#define CLEAR_GROUP_Z CLEAR_VOLUME_GROUP_SIDE
+#endif
+
+// 그리기별 상수 ClearWritable(48 byte): value(값 bit — float 형식은 asfloat, 정수 형식은 그대로), minBounds·
+// maxBounds(버퍼는 x 원소 번호, 텍스처는 xyz texel·층 — 끝은 포함하지 않는다). 버퍼는 큰 1D dispatch를
+// 감싸 낸다(ComputeDispatch.rsh).
+[numthreads(CLEAR_GROUP_X, CLEAR_GROUP_Y, CLEAR_GROUP_Z)]
+void ClearWritableCompute(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex,
+                          uint3 dispatchThreadId : SV_DispatchThreadID) {
+#if CLEAR_DIMENSION == CLEAR_DIMENSION_BUFFER
+    const uint index = UnwrapDispatchThreadId(groupId, groupIndex, CLEAR_BUFFER_GROUP_THREADS) + ClearWritable.minBounds.x;
+    if (index < ClearWritable.maxBounds.x) {
+        ClearTarget[index] = CLEAR_VALUE;
+    }
+#else
+    const uint3 position = dispatchThreadId + ClearWritable.minBounds.xyz;
+    if (all(position < ClearWritable.maxBounds.xyz)) {
+#if CLEAR_DIMENSION == CLEAR_DIMENSION_TEXTURE2D
+        ClearTarget[position.xy] = CLEAR_VALUE;
+#else
+        ClearTarget[position] = CLEAR_VALUE;
+#endif
+    }
+#endif
+}
+
+#endif
+
+#if defined(ROCKS_VERTEX_SHADER) || defined(CLEAR_VALUE_TYPE)
+
+// 그리기별 상수 ClearRegion(32 byte): value(값 bit), depth(x 깊이 — reversed-Z 원평면 0).
+#include "/Engine/Generated/RenderBase/ClearRegionConstants.rsh"
+
+#endif
+
+#if defined(ROCKS_VERTEX_SHADER)
+
+// 정점 번호 0·1·2 → clip (-1,-1)·(3,-1)·(-1,3)(FullscreenTriangleVertex와 같은 감김), z = 상수 깊이다.
+float4 ClearRegionVertex(uint vertexId : SV_VertexID) : SV_Position {
+    const float2 uv = float2((vertexId << 1) & 2, vertexId & 2);
+    return float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, ClearRegion.depth.x, 1.0);
+}
+
+#endif
+
+#if defined(CLEAR_VALUE_TYPE)
+
+#if CLEAR_VALUE_TYPE == 0
+float4 ClearRegionPixel(float4 position : SV_Position) : SV_Target0 {
+    return asfloat(ClearRegion.value);
+}
+#elif CLEAR_VALUE_TYPE == 1
+uint4 ClearRegionPixel(float4 position : SV_Position) : SV_Target0 {
+    return ClearRegion.value;
+}
+#else
+int4 ClearRegionPixel(float4 position : SV_Position) : SV_Target0 {
+    return asint(ClearRegion.value);
+}
+#endif
+
+#endif
+
+#if defined(ROCKS_COMPUTE_SHADER) && !defined(CLEAR_DIMENSION)
+
+// 그리기별 상수 DispatchArgumentsInit(32 byte): arguments(xyz 그룹 수), range(x 첫 기록 byte 위치 — 4 byte
+// 배수, y 기록 수).
+#include "/Engine/Generated/RenderBase/DispatchArgumentsInitConstants.rsh"
+
+// 간접 인자 기록 하나의 byte 수(DispatchIndirectArguments)와 그룹 크기다.
+static const uint DispatchArgumentsRecordBytes = 12u;
+#define DISPATCH_ARGUMENTS_GROUP_THREADS 64
+
+RWByteAddressBuffer Arguments;
+
+[numthreads(DISPATCH_ARGUMENTS_GROUP_THREADS, 1, 1)]
+void InitializeDispatchArgumentsCompute(uint3 dispatchThreadId : SV_DispatchThreadID) {
+    if (dispatchThreadId.x < DispatchArgumentsInit.range.y) {
+        WriteDispatchArguments(Arguments, DispatchArgumentsInit.range.x + dispatchThreadId.x * DispatchArgumentsRecordBytes,
+                               DispatchArgumentsInit.arguments.xyz);
+    }
+}
+
+#endif

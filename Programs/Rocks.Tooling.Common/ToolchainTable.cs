@@ -24,6 +24,12 @@ public static class ToolchainTable
     public static string ClangFormatVersion => Document.Value.RootElement.GetProperty("clangFormat").GetProperty("version").GetString()!;
 
     /// <summary>
+    /// 고정한 ISPC 컴파일러 버전이다(<c>ispc.version</c>, 예: <c>1.32.0</c> — Docs/Design/BuildTargets 3.12절 BD45). ISPC 원본을 빌드하는
+    /// 모듈은 이 버전만 받는다(Rocks.Build IspcTools).
+    /// </summary>
+    public static string IspcVersion => Document.Value.RootElement.GetProperty("ispc").GetProperty("version").GetString()!;
+
+    /// <summary>
     /// 받는 Visual Studio(Build Tools 포함)의 최소 버전이다(<c>visualStudio.minimumVersion</c>, 예: <c>17.8</c>). vswhere 조회에
     /// <c>-version [17.8,)</c>로 준다. UE 5.8 <c>Windows_SDK.json</c>의 최소값과 같다(Docs/Design/ClangVersionSupport.ko.md 6.2절).
     /// </summary>

@@ -18,6 +18,8 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
-| UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5, UXR8–UXR10 |
+| UX7a2 | UE | 스킨 메시 머티리얼 슬롯 `data.materials`(6.3절 13번 — transient `Materials`), 자기 시험, golden 다시 내보내기 | UX7a |
+| UX7b1 | Rocks | 스켈레톤·스킨 메시 순수 변환(6.4절 1–7번 — `ExchangeSkeleton`·`ExchangeSkeletalMesh`, 설정 행 `EnumMap`, 공용 `ExchangeMeshCommon`) | UX7a2, UX3b, MA4b–MA5 |
+| UX7b2 | Rocks | 스켈레톤·스킨 메시 임포트(6.4절 8–10번 — A2f `unreal_skeleton`·`unreal_skeletal_mesh`, 종류별 임포터·제품 연결, 명령·C# 시험) | UX7b1, UXR8–UXR10 |
 | UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
 | UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6, UXR8–UXR10 |

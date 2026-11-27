@@ -137,6 +137,9 @@ try
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
                 break;
+            case "ispc":
+                await IspcTests.RunAsync(request, root, Pass);
+                break;
             case "plugins":
                 await PluginModuleLinkTests.RunAsync(request, root, Pass);
                 break;
@@ -173,7 +176,7 @@ try
                 break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, ispc, descriptors, plugins, unity-profile, windows-headers, ide-plan, android-package.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -412,6 +415,9 @@ try
 
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);
+
+    // ISPC 원본(Docs/Design/BuildTargets 3.12절 BS12): 계획 모양·검증·탐색·실제 빌드·증분·생성 헤더 결정성·도구 빌드 ID.
+    await IspcTests.RunAsync(request, root, Pass);
 
     // 긴 명령줄의 response file과 드라이브 루트 경로 포함 판정. 하위 묶음마다 PASS를 센다.
     await ResponseFileTests.RunAsync(request, root, Pass);
