@@ -7,6 +7,8 @@
 #include <UiWidget/Widget.generated.h>
 #include <UiWidget/WidgetTree.generated.h>
 
+#include <Core/Memory/UniquePtr.h>
+
 namespace rocks::ui {
 
 WidgetTemplate::WidgetTemplate(Allocator& allocator) noexcept
@@ -64,9 +66,21 @@ Result<RootRef<UserWidget>> WidgetTemplate::Instantiate(ObjectRegistry& objects,
     }
 
     Array<ObjectHandle> clips(allocator);
+    // 클립 stage는 Commit 뒤 BindEvents까지 산다(EventReflection ED21).
+    Array<UniquePtr<ObjectGraphStage>> clipStages(allocator);
     if (!animations_.IsEmpty()) {
         for (const auto& bytes : animations_) {
-            ObjectGraphStage clip(allocator, objects, objects.Types(), access);
+            auto made = UniquePtr<ObjectGraphStage>::TryMake(allocator, allocator, objects,
+                                                             objects.Types(), access);
+            if (!made) {
+                return Result<RootRef<UserWidget>>::Failure(made.Error());
+            }
+
+            ObjectGraphStage& clip = *made.Value();
+            if (auto kept = clipStages.TryPushBack(Move(made.Value())); !kept) {
+                return Result<RootRef<UserWidget>>::Failure(kept.Error());
+            }
+
             input.bytes = bytes.View();
             auto restored = clip.Validate(input);
             if (restored) {
@@ -153,6 +167,13 @@ Result<RootRef<UserWidget>> WidgetTemplate::Instantiate(ObjectRegistry& objects,
     auto root = transaction.Commit();
     if (!root) {
         return Result<RootRef<UserWidget>>::Failure(root.Error());
+    }
+
+    // 게시된 객체에 저장된 이벤트 바인딩을 다시 만든다(EventReflection ED21 — 만들지 못한 바인딩은
+    // 진단만 내고 실패가 아니다).
+    (void)graph.BindEvents();
+    for (const auto& clip : clipStages) {
+        (void)clip->BindEvents();
     }
 
     return objects.TryPin<UserWidget>(access, root.Value().Handle());

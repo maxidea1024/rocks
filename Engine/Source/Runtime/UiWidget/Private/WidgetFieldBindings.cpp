@@ -162,6 +162,11 @@ Result<void> WidgetFieldBindings::NotifyNamed(ObjectHandle source, StringView fi
     }
 
     for (const auto& field : type.Value().Schema().fields) {
+        // 이벤트 필드는 값 속성이 아니다(EventReflection ED9 — 변경 통지 대상이 아니다).
+        if (IsEventField(field)) {
+            continue;
+        }
+
         auto name = field.toolName.IsEmpty() ? field.name : field.toolName;
         if (StringView(name.Data(), name.Size()) == fieldName) {
             return Notify(source, field.id);
