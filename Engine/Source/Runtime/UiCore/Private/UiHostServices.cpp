@@ -80,6 +80,15 @@ usize UiHostServices::DiscardFrameActions() noexcept {
     return count;
 }
 
+void UiHostServices::SetOwner(const void* kind, void* owner) noexcept {
+    ownerKind_ = owner ? kind : nullptr;
+    owner_ = kind ? owner : nullptr;
+}
+
+void* UiHostServices::FindOwner(const void* kind) const noexcept {
+    return kind && kind == ownerKind_ ? owner_ : nullptr;
+}
+
 void UiHostServices::SetPopupWorkArea(PopupWorkArea&& provider) noexcept {
     popupWorkArea_ = Move(provider);
 }

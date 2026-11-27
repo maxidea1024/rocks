@@ -7,6 +7,8 @@
 #include <UiFramework/Controls/EditableTextBox.h>
 #include <UiFramework/Layout/AnchorCanvas.h>
 #include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Menus/MenuHeading.h>
+#include <UiFramework/Menus/MenuRow.h>
 #include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Scrolling/ScrollBar.h>
 
@@ -14,7 +16,8 @@
 // 등록부 없이 Element가 글자·이력·사건을 스스로 드는지 본다: 사용자 편집만 onTextChanged, 프로그램
 // 교체는 통지·이력 없음, Enter·초점 잃음 확정, 비밀번호 선택 막기, Initialize 전에 정한 힌트,
 // 이력 99단계·힌트 불투명도·caret 폭(22.5절), 상자의 상태별 바탕·전경·여백·오류 표지와
-// 팝업(22.2·22.6절), 스크롤 유지·휠·여러 줄 상자의 스크롤 막대(22.7절).
+// 팝업(22.2·22.6절), 스크롤 유지·휠·여러 줄 상자의 스크롤 막대(22.7절), 편집 문맥 메뉴·오른쪽
+// 끌기 스크롤·Application::Find(22.7a절).
 
 namespace rocks::ui {
 
@@ -521,7 +524,7 @@ struct BoxBench {
     explicit BoxBench(Allocator& allocator) noexcept : app(allocator) {
     }
 
-    bool Make(Allocator& allocator, bool multiline) noexcept {
+    bool Make(Allocator& allocator, bool multiline, Platform platform = {}) noexcept {
         auto shaper = SharedPtr<FixedAdvanceShaper>::TryMake(allocator, allocator);
         auto overlay = SharedPtr<Overlay>::TryMake(allocator, allocator);
         auto made = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
@@ -530,7 +533,7 @@ struct BoxBench {
         }
 
         auto made2 = SharedPtr<EditableTextBox>::TryMake(allocator, allocator, shaper.Value(),
-                                                         Platform{}, multiline);
+                                                         platform, multiline);
         if (!made2) {
             return false;
         }
@@ -546,7 +549,8 @@ struct BoxBench {
     }
 
     bool Layout() noexcept {
-        return app.UpdatePaintCache(Geometry::Root({200, 120}, {}), 1).IsOk();
+        // 메뉴가 창 맞춤으로 밀리지 않을 만큼 넉넉한 창이다.
+        return app.UpdatePaintCache(Geometry::Root({400, 400}, {}), 1).IsOk();
     }
 
     void Click(const Element& target) noexcept {
@@ -857,6 +861,323 @@ TEST(UiFramework_EditableTextBoxShowsScrollBarOnlyWhenOverflowing) {
     REQUIRE(single && single.Value()->Initialize("a", EditFontSize));
     CHECK(single.Value()->VerticalScrollBar() == nullptr);
     app.Shutdown();
+}
+
+namespace {
+
+// 시험 클립보드다. Platform hook이 함수 포인터라 상태는 이 파일의 정적 변수에 둔다(시험은 차례로
+// 돈다 — 각 시험이 먼저 정한다).
+constexpr usize FakeClipboardCapacity = 64;
+
+struct FakeClipboard {
+    char data[FakeClipboardCapacity] = {};
+    usize size = 0;
+};
+
+FakeClipboard clipboard;
+
+Result<void> ReadFakeClipboard(String& out) noexcept {
+    return out.TryAssign(StringView(clipboard.data, clipboard.size));
+}
+
+Result<void> WriteFakeClipboard(StringView text) noexcept {
+    if (text.ByteCount() > FakeClipboardCapacity) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (usize i = 0; i < text.ByteCount(); ++i) {
+        clipboard.data[i] = text.Data()[i];
+    }
+
+    clipboard.size = text.ByteCount();
+    return Result<void>::Success();
+}
+
+void SetFakeClipboard(StringView text) noexcept {
+    (void)WriteFakeClipboard(text);
+}
+
+Platform FakeClipboardPlatform() noexcept {
+    return Platform{.readClipboardText = &ReadFakeClipboard,
+                    .writeClipboardText = &WriteFakeClipboard};
+}
+
+// 열린 메뉴 안의 항목(MenuRow)을 차례로 모은다.
+void CollectRows(Element& element, Array<MenuRow*>& rows) noexcept {
+    if (auto* row = ElementCast<MenuRow>(&element)) {
+        (void)rows.TryPushBack(row);
+    }
+
+    for (usize i = 0; i < element.ChildCount(); ++i) {
+        CollectRows(*element.ChildAt(i), rows);
+    }
+}
+
+usize CountHeadings(Element& element) noexcept {
+    usize count = ElementCast<MenuHeading>(&element) ? 1 : 0;
+    for (usize i = 0; i < element.ChildCount(); ++i) {
+        count += CountHeadings(*element.ChildAt(i));
+    }
+
+    return count;
+}
+
+// 편집기 레이블의 index번째 글자(고정 폭 8 px) 왼쪽 가장자리 안(+1 px)의 창 좌표다 — 그 글자 앞
+// 위치로 잡힌다.
+Vec2 GlyphPoint(EditableText& editor, usize index, float line = 0) noexcept {
+    return editor.Label().GetGeometry().render.Apply(
+        {static_cast<float>(index) * 8 + 1, line * EditFontSize + 2});
+}
+
+bool RightClick(Application& app, Vec2 point) noexcept {
+    auto down = app.RoutePointer(
+        {.type = PointerEventType::Down, .position = point, .button = input::MouseButton::Right});
+    auto up = app.RoutePointer(
+        {.type = PointerEventType::Up, .position = point, .button = input::MouseButton::Right});
+    return down && down.Value() && up && up.Value();
+}
+
+bool LeftClick(Application& app, Vec2 point) noexcept {
+    auto down = app.RoutePointer({PointerEventType::Down, point, 0});
+    auto up = app.RoutePointer({PointerEventType::Up, point, 0});
+    return down && up;
+}
+
+// 문맥 메뉴 anchor(편집기의 마지막 자식 — 열린 동안만 붙는다)다.
+MenuAnchor* ContextAnchor(EditableText& editor) noexcept {
+    Element* last = editor.ChildCount() > 0 ? editor.ChildAt(editor.ChildCount() - 1) : nullptr;
+    return last ? ElementCast<MenuAnchor>(last) : nullptr;
+}
+
+// 열린 문맥 메뉴의 항목이다(Undo·Cut·Copy·Paste·Delete·Select All 순서).
+bool MenuRows(EditableText& editor, Array<MenuRow*>& rows) noexcept {
+    rows.Clear();
+    MenuAnchor* anchor = ContextAnchor(editor);
+    Element* menu = anchor ? anchor->MenuContent() : nullptr;
+    if (menu) {
+        CollectRows(*menu, rows);
+    }
+
+    return rows.Size() == 6;
+}
+
+// 항목 여섯의 사용 가능 여부를 "UCXPDA" 꼴로 적는다(꺼지면 '-').
+StringView EnabledRows(Span<MenuRow* const> rows, char (&out)[7]) noexcept {
+    constexpr char Names[] = "UCXPDA";
+    for (usize i = 0; i < 6; ++i) {
+        out[i] = i < rows.Size() && rows[i]->IsEnabled() ? Names[i] : '-';
+    }
+
+    out[6] = '\0';
+    return StringView(out, 6);
+}
+
+} // namespace
+
+TEST(UiFramework_ApplicationFindsTheTreeApplication) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false) && bench.Place());
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    // 붙기 전에는 없고, 루트로 단 Application을 찾고, 떼면 다시 없다(22.7a절).
+    CHECK(Application::Find(bench.box->Editor()) == nullptr);
+    bench.app.SetRoot(bench.root);
+    CHECK(Application::Find(bench.box->Editor()) == &bench.app);
+    CHECK(Application::Find(*bench.root) == &bench.app);
+    bench.app.SetRoot({});
+    CHECK(Application::Find(bench.box->Editor()) == nullptr);
+}
+
+TEST(UiFramework_EditableTextContextMenuFollowsUeItemsAndFocus) {
+    SystemAllocator allocator;
+    SetFakeClipboard("paste");
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false, FakeClipboardPlatform()) && bench.Place());
+    REQUIRE(bench.box->Initialize("one two", EditFontSize));
+    EditableText& editor = bench.box->Editor();
+    usize commits = 0;
+    usize changes = 0;
+    editor.SetOnTextCommitted(Delegate<void(StringView, TextCommitReason)>::CreateLambda(
+        [&commits](StringView, TextCommitReason) noexcept { ++commits; }));
+    editor.SetOnTextChanged(
+        Delegate<void(StringView)>::CreateLambda([&changes](StringView) noexcept { ++changes; }));
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    REQUIRE(bench.app.SetFocus(EditUser, bench.box));
+    Array<MenuRow*> rows(allocator);
+    char enabled[7];
+    // 선택 안을 오른쪽 누르면 선택을 두고 놓은 자리에 메뉴가 열린다. 초점은 메뉴로 가지만 편집기는
+    // 확정하지 않는다(UE ActiveContextMenu).
+    editor.SelectAllText();
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 1)));
+    REQUIRE(editor.IsContextMenuOpen());
+    CHECK(editor.SelectedText() == "one two");
+    CHECK(bench.app.GetFocus(EditUser).Get() != &editor && editor.IsFocused());
+    CHECK(commits == 0);
+    REQUIRE(MenuRows(editor, rows));
+    CHECK(CountHeadings(*ContextAnchor(editor)->MenuContent()) == 1);
+    CHECK(EnabledRows(rows.View(), enabled) == "UCXPDA");
+    REQUIRE(bench.Layout());
+    const Vec2 opened = GlyphPoint(editor, 1);
+    REQUIRE(ContextAnchor(editor)->MenuPosition());
+    CHECK(ContextAnchor(editor)->MenuPosition().Value() == opened);
+    // Copy(세 번째 항목 — Undo·Cut 다음)를 누르면 메뉴가 닫히고 초점이 편집기로 돌아온다.
+    const Element* copy = rows[2];
+    REQUIRE(
+        LeftClick(bench.app, copy->GetGeometry().render.Apply(copy->GetGeometry().size * 0.5f)));
+    CHECK(!editor.IsContextMenuOpen() && ContextAnchor(editor) == nullptr);
+    CHECK(bench.app.GetFocus(EditUser).Get() == &editor && commits == 0);
+    CHECK(StringView(clipboard.data, clipboard.size) == "one two");
+    // 선택 밖을 오른쪽 누르면 선택을 풀고 caret을 그 자리로 옮긴다 — 잘라내기·복사·지우기는 꺼진다.
+    editor.SetSelection(0, 3);
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 5)));
+    CHECK(editor.SelectedText().IsEmpty());
+    REQUIRE(MenuRows(editor, rows));
+    CHECK(EnabledRows(rows.View(), enabled) == "U--P-A");
+    // Escape로 닫고, Paste를 고르면 caret 자리에 넣는다(사용자 편집 — 통지).
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    CHECK(!editor.IsContextMenuOpen() && bench.app.GetFocus(EditUser).Get() == &editor);
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 5)));
+    REQUIRE(MenuRows(editor, rows));
+    const Element* paste = rows[3];
+    REQUIRE(bench.Layout());
+    REQUIRE(
+        LeftClick(bench.app, paste->GetGeometry().render.Apply(paste->GetGeometry().size * 0.5f)));
+    // 클립보드는 앞의 Copy가 넣은 글자다.
+    CHECK(editor.GetText() == "one tone twowo");
+    CHECK(changes == 1 && commits == 0);
+    // Undo 항목은 되돌린다.
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 1)));
+    REQUIRE(MenuRows(editor, rows));
+    const Element* undo = rows[0];
+    REQUIRE(bench.Layout());
+    REQUIRE(
+        LeftClick(bench.app, undo->GetGeometry().render.Apply(undo->GetGeometry().size * 0.5f)));
+    CHECK(editor.GetText() == "one two");
+    // 읽기 전용: Undo·Cut·Paste·Delete가 꺼진다. 비밀번호: 복사·잘라내기가 꺼진다.
+    editor.SetReadOnly(true);
+    editor.SelectAllText();
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 1)));
+    REQUIRE(MenuRows(editor, rows));
+    CHECK(EnabledRows(rows.View(), enabled) == "--X--A");
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    editor.SetReadOnly(false);
+    REQUIRE(editor.SetPassword(true));
+    editor.SelectAllText();
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 1)));
+    REQUIRE(MenuRows(editor, rows));
+    CHECK(EnabledRows(rows.View(), enabled) == "U--PDA");
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    REQUIRE(editor.SetPassword(false));
+    // 빈 클립보드면 붙여 넣기가 꺼진다(열 때 읽는다).
+    SetFakeClipboard({});
+    editor.MoveCaret(0, false);
+    REQUIRE(bench.Layout());
+    REQUIRE(RightClick(bench.app, GlyphPoint(editor, 1)));
+    REQUIRE(MenuRows(editor, rows));
+    CHECK(EnabledRows(rows.View(), enabled) == "U----A");
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    // Shift+F10은 caret 줄 아래에 연다(Windows 관례).
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::LeftShift)));
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::F10)));
+    (void)bench.app.RouteKey(EditUser, input::InputEvent::KeyUp(input::Key::LeftShift));
+    CHECK(editor.IsContextMenuOpen());
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    CHECK(!editor.IsContextMenuOpen() && commits == 0);
+    // 메뉴가 닫힌 뒤의 초점 잃음은 평소대로 확정한다.
+    REQUIRE(bench.app.SetFocus(EditUser, {}));
+    CHECK(commits == 1);
+    bench.app.Shutdown();
+}
+
+TEST(UiFramework_EditableTextRightDragScrollsInsteadOfOpeningTheMenu) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, true) && bench.Place());
+    const String text = Lines(allocator, 20);
+    REQUIRE(bench.box->Initialize(text.View(), EditFontSize));
+    EditableText& editor = bench.box->Editor();
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    REQUIRE(editor.ContentHeight() > editor.ViewHeight());
+    editor.SetScrollOffset(0);
+    REQUIRE(bench.Layout());
+    const Vec2 at = editor.GetGeometry().render.Apply(editor.GetGeometry().size * 0.5f);
+    const auto press = [&](PointerEventType type, Vec2 point) noexcept {
+        return bench.app.RoutePointer(
+            {.type = type, .position = point, .button = input::MouseButton::Right});
+    };
+    const auto move = [&](Vec2 point) noexcept {
+        return bench.app.RoutePointer({.type = PointerEventType::Move, .position = point});
+    };
+    // 문턱(5 px) 아래로 끌면 스크롤하지 않고 놓을 때 메뉴가 열린다.
+    REQUIRE(press(PointerEventType::Down, at));
+    REQUIRE(move(at + Vec2{0, -4}));
+    REQUIRE(press(PointerEventType::Up, at + Vec2{0, -4}));
+    CHECK(editor.IsContextMenuOpen() && editor.ScrollOffset() == 0);
+    REQUIRE(bench.app.RouteKey(EditUser, input::InputEvent::KeyDown(input::Key::Escape)));
+    // 문턱을 넘으면 내용을 잡아 끄는 방향으로 스크롤하고 메뉴는 열지 않는다(UE
+    // IsRightClickScrolling).
+    REQUIRE(press(PointerEventType::Down, at));
+    REQUIRE(move(at + Vec2{0, -3}));
+    CHECK(editor.ScrollOffset() == 0);
+    REQUIRE(move(at + Vec2{0, -6}));
+    CHECK(editor.ScrollOffset() == 3);
+    REQUIRE(move(at + Vec2{0, -16}));
+    CHECK(editor.ScrollOffset() == 13);
+    REQUIRE(press(PointerEventType::Up, at + Vec2{0, -16}));
+    CHECK(!editor.IsContextMenuOpen() && editor.ScrollOffset() == 13);
+    bench.app.Shutdown();
+    // 한 줄 상자는 끌어도 메뉴다.
+    BoxBench single(allocator);
+    REQUIRE(single.Make(allocator, false) && single.Place());
+    REQUIRE(single.box->Initialize("abc", EditFontSize));
+    single.app.SetRoot(single.root);
+    REQUIRE(single.Layout());
+    EditableText& line = single.box->Editor();
+    const Vec2 middle = line.GetGeometry().render.Apply(line.GetGeometry().size * 0.5f);
+    REQUIRE(single.app.RoutePointer(
+        {.type = PointerEventType::Down, .position = middle, .button = input::MouseButton::Right}));
+    REQUIRE(single.app.RoutePointer(
+        {.type = PointerEventType::Move, .position = middle + Vec2{0, 20}}));
+    REQUIRE(single.app.RoutePointer({.type = PointerEventType::Up,
+                                     .position = middle + Vec2{0, 20},
+                                     .button = input::MouseButton::Right}));
+    // 놓은 자리가 편집기 밖이면 열지 않는다.
+    CHECK(!line.IsContextMenuOpen());
+    REQUIRE(single.app.RoutePointer(
+        {.type = PointerEventType::Down, .position = middle, .button = input::MouseButton::Right}));
+    REQUIRE(
+        single.app.RoutePointer({.type = PointerEventType::Move, .position = middle + Vec2{0, 2}}));
+    REQUIRE(single.app.RoutePointer({.type = PointerEventType::Up,
+                                     .position = middle + Vec2{0, 2},
+                                     .button = input::MouseButton::Right}));
+    CHECK(line.IsContextMenuOpen());
+    single.app.Shutdown();
+}
+
+TEST(UiFramework_EditableTextFocusSelectAllDoesNotScroll) {
+    SystemAllocator allocator;
+    PointerBench pointer(allocator);
+    const String text = Lines(allocator, 20);
+    REQUIRE(pointer.Start(allocator, text.View(), true, false));
+    EditableText& editor = *pointer.bench.editor;
+    Application& app = pointer.app;
+    const Geometry area = Geometry::Root({100, 40}, {});
+    editor.MoveCaret(0, false);
+    REQUIRE(app.PrepareLayout(area, 1));
+    REQUIRE(app.SetFocus(EditUser, {}));
+    // 초점 받음의 전체 선택은 caret을 끝으로 옮기지만 스크롤하지 않는다(UE HandleFocusReceived).
+    editor.SetSelectAllTextWhenFocused(true);
+    REQUIRE(app.SetFocus(EditUser, pointer.bench.editor));
+    REQUIRE(app.PrepareLayout(area, 1));
+    CHECK(editor.SelectedText() == text.View());
+    CHECK(editor.ScrollOffset() == 0);
 }
 
 } // namespace rocks::ui

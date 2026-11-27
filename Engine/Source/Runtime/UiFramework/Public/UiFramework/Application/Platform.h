@@ -9,6 +9,9 @@ namespace rocks::ui {
 struct Platform {
     Result<void> (*readClipboardText)(String& output) noexcept = nullptr;
     Result<void> (*writeClipboardText)(StringView text) noexcept = nullptr;
+    // 명령 수정 키가 Cmd(super)인지다(macOS 호스트는 참, 그 밖은 Ctrl). 편집 문맥 메뉴의 단축키
+    // 표시가 쓴다(Docs/Design/UiToolkit 22.7a절). 키 처리는 둘 다 받는다.
+    bool commandIsSuper = false;
 };
 
 } // namespace rocks::ui

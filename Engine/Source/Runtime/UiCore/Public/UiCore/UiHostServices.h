@@ -80,6 +80,12 @@ public:
     // 돌리지 않고 버린다. 버린 수다.
     usize DiscardFrameActions() noexcept;
 
+    // 이 묶음을 가진 상위 층 객체다(Docs/Design/UiToolkit 22.7a절 — UiFramework Application이
+    // 자기를 달고 Application::Find가 찾는다). UiCore는 형식을 모르므로 표지 kind(형식마다 하나인
+    // 주소)가 같을 때만 돌려준다. 소유자가 사라지기 전에 SetOwner(nullptr, nullptr)로 뗀다.
+    void SetOwner(const void* kind, void* owner) noexcept;
+    void* FindOwner(const void* kind) const noexcept;
+
     // 스타일이 바뀐 횟수다(등록부·집합 값·활성 집합). 0이 아니고 늘어나기만 한다(처음 측정에서 한
     // 번 적용하게, 등록부를 바꿔도 줄지 않게).
     uint64 StyleRevision() const noexcept;
@@ -92,6 +98,8 @@ private:
     String appStyle_;
     Array<Delegate<void()>> teardown_;
     Array<Delegate<void()>> frameActions_;
+    const void* ownerKind_ = nullptr;
+    void* owner_ = nullptr;
     bool runningTeardown_ = false;
     bool runningFrameActions_ = false;
     uint64 styleChanges_ = 1;

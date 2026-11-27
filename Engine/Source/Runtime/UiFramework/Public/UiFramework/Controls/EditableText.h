@@ -14,6 +14,8 @@
 
 namespace rocks::ui {
 
+class MenuAnchor;
+
 // 한 줄·여러 줄 글자 편집 Element다(UE SEditableText·SMultiLineEditableText — Docs/Design/UiToolkit
 // 21.2절). 글자·선택·IME 조합·편집 이력을 스스로 든다. 셰이핑 결과의 UTF-8 클러스터 경계에서만
 // 커서와 선택 끝을 움직인다.
@@ -70,6 +72,9 @@ public:
     bool IsMultiline() const noexcept;
     // 지금 초점을 가진 사용자가 있는지다(상자 바탕 선택용).
     bool IsFocused() const noexcept;
+    // 편집 문맥 메뉴가 열려 있는지다(Docs/Design/UiToolkit 22.7a절 — 오른쪽 놓기·Shift+F10으로
+    // 연다).
+    bool IsContextMenuOpen() const noexcept;
     // 글자 영역 둘레의 내용 여백(왼쪽, 위, 오른쪽, 아래)이다. 여백도 이 Element의 영역이라 누르면
     // 편집기가 초점을 받는다 — EditableTextBox가 상자 여백을 여기로 넘긴다(22.2절). 음수·NaN은
     // InvalidArgument다.
@@ -201,6 +206,22 @@ private:
     void RequestCaretInView() noexcept;
     // 스크롤을 [0, 내용 - 보이는 크기]로 자른다.
     void ClampScroll() noexcept;
+    // 초점 잃음 처리다(문맥 메뉴가 열린 동안은 미룬다 — 22.7a절).
+    void HandleFocusLost(uint32 user) noexcept;
+    // 편집 명령이다(키와 문맥 메뉴가 함께 쓴다 — 사용자 편집이라 통지·이력이 있다).
+    void CopySelection(bool cut) noexcept;
+    void PasteClipboard() noexcept;
+    void DeleteSelection() noexcept;
+    void UndoEdit() noexcept;
+    // 문맥 메뉴(22.7a절)를 편집기 안 local 자리에 연다. Application이 없거나 셰이퍼가 없으면 열지
+    // 않는다.
+    Result<void> OpenContextMenu(Vec2 local, FocusCause cause) noexcept;
+    Result<SharedPtr<Element>> MakeContextMenu() noexcept;
+    void OnContextMenuOpenChanged(bool open) noexcept;
+    // 창 좌표를 이 요소의 local 좌표로 바꾼다. 바꿀 수 없으면 거짓이다.
+    bool ToLocal(Vec2 window, Vec2& local) const noexcept;
+    // 오른쪽 단추 누름·끌기·놓기다(22.7a절).
+    PointerReply OnRightPointer(const PointerEvent& event) noexcept;
 
     Allocator& allocator_;
     Array<Snapshot> undo_;
@@ -257,6 +278,18 @@ private:
     usize unitEnd_ = 0;
     // 마지막 상호작용(타자·caret 이동·포인터 누름·초점) 프레임 시각(초)이다.
     double lastInteraction_ = 0;
+    // 문맥 메뉴 자리 anchor(열린 동안만 자식)와 그 local 자리, 열 때 읽은 붙여 넣기 가능 여부다.
+    SharedPtr<MenuAnchor> contextAnchor_;
+    Vec2 contextPoint_{};
+    bool contextMenuOpen_ = false;
+    bool canPaste_ = false;
+    // 오른쪽 단추 누름 상태다: 끈 양(세로 절댓값 누적)과 마지막 local 세로 위치, 스크롤 중인지.
+    bool rightPressed_ = false;
+    bool rightScrolling_ = false;
+    float rightTravel_ = 0;
+    float rightLastY_ = 0;
+    uint32 rightPointer_ = 0;
+    uint32 rightUser_ = 0;
 };
 
 } // namespace rocks::ui

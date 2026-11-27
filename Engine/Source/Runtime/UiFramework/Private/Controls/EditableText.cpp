@@ -4,6 +4,7 @@
 
 #include <UiCore/InputMetrics.h>
 #include <UiCore/TextInputPositions.h>
+#include <UiFramework/Popups/MenuAnchor.h>
 
 namespace rocks::ui {
 
@@ -44,6 +45,11 @@ EditableText::EditableText(Allocator& allocator, SharedPtr<TextShaper> shaper, P
 }
 
 EditableText::~EditableText() noexcept {
+    // 열린 문맥 메뉴를 닫고 메뉴 생성기·통지가 사라진 편집기를 부르지 않게 한다(엔진 정리).
+    if (contextAnchor_) {
+        contextAnchor_->DisconnectMenu();
+    }
+
     // 서비스가 남은 기록을 이 문맥에 적용하지 않게 조합을 먼저 버린 뒤 끈다(19.2절).
     if (auto service = Move(textInput_)) {
         composing_ = false;
@@ -541,6 +547,12 @@ Result<void> EditableText::Arrange(const Geometry& geometry) noexcept {
 
     const AffineTransform2D offset{1, 0, 0, 1, padding_.x - scroll_.x, padding_.y - scroll_.y};
     auto arranged = label_->ArrangeIfNeeded(GetGeometry().MakeChild(area, offset, {}, {}));
+    if (arranged && contextAnchor_ && contextAnchor_->Parent() == this) {
+        // 메뉴 왼쪽 위가 연 자리다(UE PushMenu 커서 자리 — 22.7a절).
+        arranged = contextAnchor_->ArrangeIfNeeded(
+            GetGeometry().MakeChild({}, {1, 0, 0, 1, contextPoint_.x, contextPoint_.y}, {}, {}));
+    }
+
     if (arranged && textInput_) {
         // 글자 위치가 정해졌다 — 후보 창을 caret으로 옮긴다.
         textInput_->NotifyLayoutChanged(*this);
@@ -558,6 +570,12 @@ bool EditableText::SupportsKeyboardFocus() const noexcept {
 }
 
 void EditableText::OnFocusReceived(uint32 user) noexcept {
+    // 문맥 메뉴에서 돌아오는 초점이다 — 초점을 잃은 적이 없는 것처럼 둔다(UE HandleFocusReceived
+    // ActiveContextMenu 검사, 22.7a절).
+    if (contextMenuOpen_ && focused_) {
+        return;
+    }
+
     focused_ = true;
     focusUser_ = user;
     // 초점 동안 caret이 깜박이므로 매 프레임 다시 기록한다(22.5절 — volatile은 이 요소만 무효화).
@@ -567,6 +585,8 @@ void EditableText::OnFocusReceived(uint32 user) noexcept {
     if (selectAllOnFocus_) {
         keepPointerSelection_ = dragging_;
         SelectAllText();
+        // 초점 받음의 전체 선택은 스크롤하지 않는다(UE HandleFocusReceived 912–917행 — 22.7a절).
+        followCaret_ = false;
     }
 
     textInput_ = FindTextInputService();
@@ -580,6 +600,16 @@ void EditableText::OnFocusReceived(uint32 user) noexcept {
 }
 
 void EditableText::OnFocusLost(uint32 user) noexcept {
+    // 초점이 문맥 메뉴로 갔다 — 확정·선택 해제·IME 끄기를 하지 않는다(UE HandleFocusLost
+    // 934–937행). 메뉴가 닫힐 때 초점이 돌아오지 않았으면 그때 처리한다(OnContextMenuOpenChanged).
+    if (contextMenuOpen_) {
+        return;
+    }
+
+    HandleFocusLost(user);
+}
+
+void EditableText::HandleFocusLost(uint32 user) noexcept {
     if (!focused_ || user != focusUser_) {
         return;
     }
@@ -1042,21 +1072,28 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
         }
 
         if (event.key == Key::V) {
-            if (!readOnly_) {
-                String clipboard(allocator_);
-                if (platform_.readClipboardText && platform_.readClipboardText(clipboard)) {
-                    Paste(begin, end, clipboard.View());
-                }
-            }
-        } else if (!password_ && begin != end && (event.key == Key::C || !readOnly_)) {
-            const auto selection = text_.View().SliceBytes(begin, end - begin);
-            if (platform_.writeClipboardText && platform_.writeClipboardText(selection) &&
-                event.key == Key::X) {
-                Replace(begin, end, {});
-            }
+            PasteClipboard();
+        } else {
+            CopySelection(event.key == Key::X);
         }
+
         break;
     }
+    case Key::F10:
+        // Shift+F10은 caret 자리에 문맥 메뉴를 연다(Windows 관례 — 22.7a절).
+        if (!chord_.shift || command || chord_.alt) {
+            return Element::OnKeyEvent(key);
+        }
+
+        if (label_) {
+            const auto at = label_->CaretPosition(caret_, false);
+            const Vec2 point = at ? at.Value() : Vec2{};
+            (void)OpenContextMenu({padding_.x - scroll_.x + point.x,
+                                   padding_.y - scroll_.y + point.y + label_->LineHeight()},
+                                  FocusCause::Navigation);
+        }
+
+        break;
     case Key::Z:
     case Key::Y:
         if (!command) {
@@ -1070,9 +1107,7 @@ KeyReply EditableText::OnKeyEvent(const KeyEvent& key) noexcept {
             return Element::OnKeyEvent(key);
         }
 
-        anchor_ = 0;
-        MoveCaret(text_.ByteCount(), true);
-        InvalidatePaint();
+        SelectAllText();
         break;
     case Key::Left:
     case Key::Right: {
@@ -1147,6 +1182,12 @@ usize EditableText::PointerOffset(Vec2 point) const noexcept {
 }
 
 PointerReply EditableText::OnPointerEvent(const PointerEvent& event) noexcept {
+    if ((event.source == PointerSource::Mouse && event.button == input::MouseButton::Right &&
+         event.type != PointerEventType::Wheel) ||
+        (rightPressed_ && event.pointerId == rightPointer_ && event.userId == rightUser_)) {
+        return OnRightPointer(event);
+    }
+
     if (event.type == PointerEventType::Wheel) {
         // 여러 줄이 넘칠 때만 세로로 옮긴다. 끝이라 못 옮기면 바깥 스크롤로 넘긴다(UE
         // SMultiLineEditableText::OnMouseWheel 862–884행). 조합 중에도 스크롤은 된다.
@@ -1342,6 +1383,14 @@ void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
     if (source == dragSource_ && user == dragUser_ && pointer == dragPointer_) {
         dragging_ = false;
     }
+
+    // 오른쪽 누름을 잃으면 메뉴를 열지 않는다(놓기가 오지 않는다).
+    if (rightPressed_ && source == PointerSource::Mouse && user == rightUser_ &&
+        pointer == rightPointer_) {
+        rightPressed_ = false;
+        rightScrolling_ = false;
+        rightTravel_ = 0;
+    }
 }
 
 Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept {
@@ -1380,7 +1429,8 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
 }
 
 Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
-    if (!focused_ || !IsCaretVisible()) {
+    // 문맥 메뉴가 열린 동안은 caret을 그리지 않는다(초점이 메뉴에 있다 — 22.7a절).
+    if (!focused_ || contextMenuOpen_ || !IsCaretVisible()) {
         return Result<void>::Success();
     }
 

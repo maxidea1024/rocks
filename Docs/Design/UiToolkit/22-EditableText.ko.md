@@ -104,7 +104,7 @@
   - 커서: UE는 숨기고 놓을 때 누른 자리로 되돌린다(high precision mouse, software cursor). Rocks에는 Platform 커서 숨김·위치 hook이 아직 없어 커서를 그대로 둔다. hook은 UW4n(숫자 입력 끌기 — 같은 요구)에서 생기면 이 규칙에도 넣는다.
 - **오른쪽 놓기**(UE `HandleMouseButtonUp` 1436–1470행, `SMultiLineEditableText::OnMouseButtonUp` 803–821행): capture를 놓는다. 스크롤 중이었으면 메뉴를 열지 않는다. 아니고 놓은 자리가 편집기 안이면 문맥 메뉴를 놓은 자리에 연다.
 - **키보드로 열기(Rocks 보강)**: Shift+F10이면 caret 자리(caret 줄 아래)에 연다(Windows 관례 — UE 편집 텍스트에는 없다). 메뉴 키(Apps)는 `input::Key`에 없어 넣지 않는다.
-- **메뉴 항목**(UE `BuildDefaultContextMenu` 3808–3852행): 묶음 "Modify Text"(제목 — ASCII 대문자로 보임)에 Undo, 다음 묶음 Cut·Copy·Paste·Delete, 다음 묶음 Select All. 단축키 표시는 Ctrl+Z·Ctrl+X·Ctrl+C·Ctrl+V·Delete·Ctrl+A다(macOS는 Ctrl 대신 Cmd — 키 처리의 command 규칙과 같다).
+- **메뉴 항목**(UE `BuildDefaultContextMenu` 3808–3852행): 묶음 "Modify Text"(제목 — ASCII 대문자로 보임)에 Undo, 다음 묶음 Cut·Copy·Paste·Delete, 다음 묶음 Select All. 단축키 표시는 Ctrl+Z·Ctrl+X·Ctrl+C·Ctrl+V·Delete·Ctrl+A다(macOS는 Ctrl 대신 Cmd — 호스트가 `Platform::commandIsSuper`로 알린다. UiFramework는 플랫폼 매크로를 쓰지 않는다. 키 처리는 Ctrl·Cmd 둘 다 받는다).
 - **사용 조건**(UE `CanExecute*`)
   - Undo: 읽기 전용이 아니고 조합 중이 아니다(3359–3367행 — 이력이 비어도 켜져 있고, 실행은 이력이 있을 때만 한다).
   - Cut: 읽기 전용·비밀번호가 아니고 선택이 있다(1960–1983행).

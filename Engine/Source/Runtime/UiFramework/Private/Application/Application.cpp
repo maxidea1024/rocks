@@ -8,6 +8,8 @@ namespace rocks::ui {
 namespace {
 
 constexpr LogCategory LogUiApplication{"UiFramework"};
+// 호스트 묶음에 다는 Application 소유자 표지다(주소만 쓴다 — 22.7a절).
+constexpr char ApplicationOwnerKind = 0;
 // 초점 위임(Element::FocusDelegate)을 따라가는 최대 횟수다(상자 안 상자 같은 중첩 — 순환 방어).
 constexpr uint32 MaxFocusDelegateDepth = 8;
 
@@ -86,6 +88,8 @@ Application::~Application() noexcept {
     }
 
     if (host_) {
+        // 요소가 묶음을 붙잡아 이 Application보다 오래 살 수 있다 — 소유자를 뗀다.
+        host_->SetOwner(nullptr, nullptr);
         (void)host_->DiscardFrameActions();
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
         host_->SetPopupWorkArea({});
@@ -114,6 +118,11 @@ const SharedPtr<Element>& Application::GetRoot() const noexcept {
     return root_;
 }
 
+Application* Application::Find(const Element& element) noexcept {
+    const UiHostServices* host = element.FindUiHostServices();
+    return host ? static_cast<Application*>(host->FindOwner(&ApplicationOwnerKind)) : nullptr;
+}
+
 UiHostServices* Application::EnsureHostServices() noexcept {
     if (!host_) {
         auto made = SharedPtr<UiHostServices>::TryMake(allocator_, allocator_);
@@ -122,6 +131,7 @@ UiHostServices* Application::EnsureHostServices() noexcept {
         }
 
         host_ = Move(made.Value());
+        host_->SetOwner(&ApplicationOwnerKind, this);
         host_->SetFrameTime(frameTime_);
         ApplyHostServices();
     }
