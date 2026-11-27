@@ -126,6 +126,8 @@ UI 코드 일부가 9절 순서(UT0·CB2 선행)보다 먼저, 글꼴 시스템�
 
 병합 우선(사용자 결정 2026-11-26): 지금 묶음(UW7c·UW7d 2차 리뷰 반영 R16, UW4o)을 끝낸 뒤 engine-runtime 동기화(그사이 들어온 API 변경 반영) → UW5 → UW6 → UW7 계약 → UW8 → UW9 → 리뷰어 판정 → engine-runtime 병합·push를 먼저 하고, 아래 UW4 순서의 나머지(UW4f2 이후)는 병합 뒤에 잇는다(UW4f2 중 상태 소유 이동과 셰이퍼 경계는 UW9b에서 한다 — 나머지는 병합 뒤 UW4f2, 21.2절).
 
+**병합 완료(2026-11-27).** 위 병합 우선 묶음을 끝냈다: 최종 빌드·전체 시험(EngineTests 6666건)·UiDemo self-test(두 lane)·갤러리 스냅샷(두 lane byte 동일, UW6 기준과 개명 한 줄 외 동일)·policy·format·메타 시험, 리뷰어 판정 두 번(브랜치 커밋 15개 — 12건, 동기화 적응 — 7건, 모두 반영), engine-runtime 동기화 두 번 뒤 병합·push(8eb015b73). 다음은 아래 순서의 UW4f2부터다. 사람 확인으로 남은 것: 메뉴 강조(19.5절), `--frame-stats`, 한국어 IME, 커서 숨김·잠금.
+
 순서: UW4a3 → UW4t → UW7b → UW7c 주 메뉴 → UW7d 팝업 허용 영역 → UW4o → UW4f2 → UW4f3 → UW4b 2차(UW4n 숫자 입력·UW4v 스크롤 막대 포함 — 편집 텍스트가 필요해 UW4f 바로 뒤) → UW4p 색 선택 → UW4r → UW4m → UW4g → UW4h 설계·구현 → UW4c.
 
 **UW3c 비활성 효과(설계, 리뷰 반영 2026-11-25).** UE 5.8은 비활성 위젯을 `ESlateDrawEffect::DisabledEffect`로 그리고, 픽셀 셰이더가 알파에 0.45를 곱한다(SlateElementPixelShader.usf 645행 — 탈색하는 레거시 효과는 32행에서 끔). 판정은 `ShouldBeEnabled(bParentEnabled)`라 조상이 비활성이면 자손도 효과를 받는다.
