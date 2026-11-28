@@ -670,6 +670,12 @@ CollisionShape PrimitiveComponent::GetCollisionShape(double inflation) const noe
 
 void PrimitiveComponent::SetNotifyRigidBodyCollision(bool notify) noexcept {
     bodySettings_.notifyRigidBodyCollision = notify;
+    // weld면 루트 body의 부분 표지를 바꾼다(UE UpdatePhysicsFilterData → WeldParent — 7.1.24절).
+    if (IsWelded()) {
+        ReweldToRoot();
+        return;
+    }
+
     if (bodyHandle_.IsNull()) {
         return;
     }
