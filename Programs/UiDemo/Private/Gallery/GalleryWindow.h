@@ -47,6 +47,7 @@ public:
 
     // 탭의 행 격자와 배치 탭의 도킹 영역이다(Create 뒤에만 유효하다 — self-test가 쓴다).
     const GalleryGrid* Widgets() const noexcept;
+    const TextInputSamples& TextInput() const noexcept;
     const GalleryGrid* Layout() const noexcept;
     const SharedPtr<DockManager>& LayoutDocking() const noexcept;
 

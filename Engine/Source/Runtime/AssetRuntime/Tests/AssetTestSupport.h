@@ -117,6 +117,7 @@ struct TestBulkSource final : PackageBulkSource {
     struct Entry {
         BulkDataRef ref{};
         Span<const uint8> bytes{};
+        PackageBulkPlacement placement = PackageBulkPlacement::Package;
     };
 
     Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override {
@@ -129,13 +130,24 @@ struct TestBulkSource final : PackageBulkSource {
         return Result<Span<const uint8>>::Failure(ErrorCode::NotFound);
     }
 
-    // bytes를 id로 등록하고 그 ref를 돌려준다.
-    BulkDataRef Add(uint32 id, Span<const uint8> bytes) noexcept {
+    PackageBulkPlacement Placement(const BulkDataRef& ref) const noexcept override {
+        for (usize index = 0; index < count; ++index) {
+            if (entries[index].ref.bulkId == ref.bulkId) {
+                return entries[index].placement;
+            }
+        }
+
+        return PackageBulkPlacement::Package;
+    }
+
+    // bytes를 id로 등록하고 그 ref를 돌려준다(placement는 쓰기의 배치 — AS 20.1 6).
+    BulkDataRef Add(uint32 id, Span<const uint8> bytes,
+                    PackageBulkPlacement placement = PackageBulkPlacement::Package) noexcept {
         BulkDataRef ref;
         ref.bulkId = id;
         ref.rawBytes = bytes.Size();
         ref.sha256 = Sha256::Hash(bytes);
-        entries[count++] = Entry{ref, bytes};
+        entries[count++] = Entry{ref, bytes, placement};
         return ref;
     }
 
@@ -338,6 +350,36 @@ inline void FixTableCrc(Array<uint8>& file) noexcept {
     const usize bytes = PackageSectionEntryBytes * LoadLittleEndian<uint32>(file.Data() + 12);
     StoreLittleEndian<uint32>(file.Data() + table + bytes,
                               Crc32(Span<const uint8>(file.Data() + table, bytes)));
+}
+
+// 헤더·섹션 표·비-Bulk 섹션 CRC를 모두 다시 맞춘다(구조가 망가져 위치를 읽을 수 없으면 그대로
+// 둔다).
+inline void FixAllCrcs(Array<uint8>& file) noexcept {
+    if (file.Size() < PackageHeaderBytes) {
+        return;
+    }
+
+    const uint64 table = LoadLittleEndian<uint64>(file.Data() + 16);
+    const uint32 count = LoadLittleEndian<uint32>(file.Data() + 12);
+    if (count <= PackageMaxSections && table <= file.Size() &&
+        uint64{PackageSectionEntryBytes} * count + 4 <= file.Size() - table) {
+        for (uint32 index = 0; index < count; ++index) {
+            uint8* row = file.Data() + table + PackageSectionEntryBytes * index;
+            const uint64 offset = LoadLittleEndian<uint64>(row + 8);
+            const uint64 bytes = LoadLittleEndian<uint64>(row + 16);
+            const uint32 flags = LoadLittleEndian<uint32>(row + 4);
+            if ((flags & static_cast<uint32>(PackageSectionFlags::PerEntryChecksum)) == 0 &&
+                offset <= file.Size() && bytes <= file.Size() - offset) {
+                StoreLittleEndian<uint32>(
+                    row + 24,
+                    Crc32(Span<const uint8>(file.Data() + offset, static_cast<usize>(bytes))));
+            }
+        }
+
+        FixTableCrc(file);
+    }
+
+    FixHeaderCrc(file);
 }
 
 // kind 섹션의 CRC 칸과 표 CRC를 다시 계산한다(내용을 고친 뒤 — 손상이 CRC가 아닌 내용 검증에

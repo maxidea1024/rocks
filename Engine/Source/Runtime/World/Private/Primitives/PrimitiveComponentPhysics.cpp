@@ -263,6 +263,35 @@ Vec3d PrimitiveComponent::GetPhysicsAngularVelocityInDegrees() const noexcept {
     return RadiansToDegrees(GetPhysicsAngularVelocityInRadians());
 }
 
+void PrimitiveComponent::WakeRigidBody() noexcept {
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
+        scene->SetBodyAwake(bodyHandle_, true);
+    }
+}
+
+void PrimitiveComponent::PutRigidBodyToSleep() noexcept {
+    if (bodyHandle_.IsNull()) {
+        return;
+    }
+
+    if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
+        scene->SetBodyAwake(bodyHandle_, false);
+    }
+}
+
+bool PrimitiveComponent::RigidBodyIsAwake() const noexcept {
+    if (PhysicsBodyMotion() != BodyMotion::Dynamic) {
+        return false;
+    }
+
+    BodyKinematics kinematics;
+    return ReadBodyKinematics(kinematics) && kinematics.awake;
+}
+
 void PrimitiveComponent::PushBodySettings(BodySettingsChange change) noexcept {
     if (bodyHandle_.IsNull()) {
         return;

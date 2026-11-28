@@ -87,9 +87,10 @@ Result<void> MenuAnchor::Open() noexcept {
 
     auto added = layer.Value()->TryAddChild(menu.Value());
     if (added) {
-        added = AttachPopupLayer({layer.Value(), self, [](Element& owner) noexcept {
-                                      StaticElementCast<MenuAnchor>(owner).Close();
-                                  }});
+        added = AttachPopupLayer(
+            {layer.Value(), self,
+             [](Element& owner) noexcept { StaticElementCast<MenuAnchor>(owner).Close(); },
+             keepWhileHidden_});
     }
 
     if (added) {
@@ -159,6 +160,10 @@ void MenuAnchor::SetPlacement(MenuPlacement placement) noexcept {
 
 void MenuAnchor::SetCatchOutsidePresses(bool catchOutside) noexcept {
     catchOutside_ = catchOutside;
+}
+
+void MenuAnchor::SetKeepOpenWhileHidden(bool keep) noexcept {
+    keepWhileHidden_ = keep;
 }
 
 void MenuAnchor::SetFitInWindow(bool fit) noexcept {

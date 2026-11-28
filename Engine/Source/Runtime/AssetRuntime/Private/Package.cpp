@@ -27,6 +27,10 @@ Result<Span<const uint8>> Package::BulkBytes(const BulkDataRef& ref,
         return Result<Span<const uint8>>::Failure(ErrorCode::TypeMismatch);
     }
 
+    if (slot.streamed) {
+        return Result<Span<const uint8>>::Failure(ErrorCode::Unsupported);
+    }
+
     return Result<Span<const uint8>>::Success(
         Span<const uint8>(bulkBytes_.Data() + slot.offset, static_cast<usize>(slot.rawBytes)));
 }

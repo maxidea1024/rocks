@@ -48,7 +48,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
 | `UiTextureDesc` | (대응 없음 — 초기 픽셀이 `FSlateTextureData`) | 너비·높이·형식(`UiTextureFormat`: `Rgba8Srgb`·`Bgra8Srgb`·`Rgba8`·`R8`)·용도(정적·갱신·렌더 타깃)·sampling 종류(`UiTextureSampling`: `Image` 직선 알파 색, `Mask` R을 덮임률로, `Premultiplied` 미리 곱한 알파 — 보관 표면 합성)를 담는다. 셰이더는 명령의 둥근 상자 여부와 이 sampling 종류로 정해진다. brush가 pipeline을 들지 않는다 |
 | `UiDrawBuffer` | `FSlateDrawBuffer` | 한 번 그리기의 대상 목록이다. 대상마다 `UiDrawTarget`(창 표면 id 또는 렌더 타깃 id, 크기, clear 색, `DrawBatch` 참조, 그 대상의 표면·장면 pass 목록)을 담는다. 다시 그릴 대상만 넣는다. 최소화·크기 0 창은 넣지 않는다. 모든 창이 그대로면 `DrawWindows`를 부르지 않는다. `DrawWindows`가 내용을 프레임 arena로 복사하고 돌아온 뒤에는 버퍼를 다시 써도 되므로 버퍼는 하나다. UE가 3개를 돌리는 이유(render thread가 버퍼를 직접 읽고 나중에 놓는다 — SlateRHIRenderer.cpp 685–718행)가 없고, 흐름 조절은 `BeginFrame` slot이 한다 |
 | `SurfaceRecorder` | `SRetainerWidget`의 `FWidgetRenderer` 갱신(창보다 먼저 같은 RDG에 기록, SlateRHIRenderer.cpp 1478–1483·2124–2131행)·`SViewport` 그리기 | 지금 `WidgetSurfaceHost`의 Element 순회·갱신 판정(Discover·Update)을 그래픽 없이 옮긴 것이다. 대상을 그리기 전에 트리의 보관 표면·post buffer·viewport를 자식 먼저 찾아, 종류 태그가 붙은 pass 한 목록(`UiSurfacePass`: 보관 내용 `DrawBatch` 또는 장면 packet, 대상 렌더 타깃 id, 크기, clear)을 안쪽부터 쌓는다. RetainedPanel 안의 viewport는 장면 pass가 보관 pass보다 앞에 온다. 보관 표면·viewport·post buffer의 렌더 타깃은 이 객체가 `UiRenderer::CreateRenderTarget`·`ResizeRenderTarget`으로 게임 lane에서 만들고, post buffer는 채널별 id를 위젯에 준다(`SetPostBuffer`). 창에서 떨어진 표면의 타깃은 다음 기록이나 소멸 때 돌려준다 |
-| `ViewportSource` | `ISlateViewport` | `WidgetSurfaceScene`을 대체한다. `Advance(frame)`(게임 lane, World tick), `Background()`, `Extract(UiSceneExtract&, ViewportTarget)`. 그래픽 타입이 없다. 장면을 다른 처리기가 그린 렌더 타깃을 그대로 쓰는 경로(Sandbox)는 지금 viewport Element의 외부 장면 텍스처(`scene` 속성)로 대신한다. source가 그 id를 직접 돌려주는 형태는 게임 UI를 Sandbox에 붙일 때(UT5) 정한다 |
+| `ViewportSource` | `ISlateViewport` | `WidgetSurfaceScene`을 대체한다. `Advance(frame)`(게임 lane, World tick), `Background()`, `Extract(UiSceneExtract&, ViewportTarget)`. 그래픽 타입이 없다. 장면을 다른 처리기가 그린 렌더 타깃을 그대로 쓰는 경로(Sandbox)는 지금 viewport Element의 외부 장면 텍스처(`scene` 속성)로 대신한다. UT5(aee670668, RenderBase 18.5절 9항)는 장면을 UI 창 표면의 스왑 체인에 먼저 그리고 UI를 `AddPasses(..., Load)`로 얹어 Sandbox에는 source가 그 id를 돌려주는 형태가 필요 없었다. 외부 텍스처를 돌려주는 source는 UI 배치 안에 장면을 두는 viewport(에디터)에서 필요해질 때 정한다 |
 | `UiSceneExtract` | `FSceneViewport::Draw`가 넣는 render command | 장면 source가 이번 프레임의 장면 pass를 게시하는 통로다. 형태는 `template <LaneTransferable T> Result<void> Post(T&& packet, UiScenePassFunction<T> record)`(packet은 성공·실패와 상관없이 이 호출 안에서 소비된다). `UiScenePassFunction<T>`는 `void (*)(UiScenePassContext&, T&) noexcept`(캡처 없는 함수 — `RenderLane`과 같은 이유)다. `UiScenePassContext`는 UiCore에서 불완전 타입이고 UiRender가 정의한다(그래프·대상 그래프 텍스처·크기·장치). 기록 함수를 정의하는 앱 TU만 UiRender를 포함한다. `T`는 렌더 lane packet과 같은 전달 조건이다(`ROCKS_LANE_TRANSFERABLE` 등록 — `LaneTransferable`, Development 스키마 검사 `CheckLaneTransfer`, `Meta/LaneTransfer.h` — RenderBase 5.2절). |
 | `NullUiRenderer` | `FSlateNullRenderer` | headless 실행·CPU 시험용이다. id를 발급하고 기록만 센다(그리지 않는다) |
 
@@ -109,7 +109,7 @@ ui::Application ── Paint ──► PaintList ──► DrawBatch
   - 현재 집합이 내 집합과 다르면 `ReloadShaders`가 새 집합에 lease를 잡고 파이프라인·텍스처 slot을 모두 만든다. 다 만든 뒤에만 옛 파이프라인을 Retire하고 옛 lease를 놓는다.
   - 실패하면 옛 파이프라인으로 계속 그린다(계획 14.1절 "hot reload 실패 시 이전 검증 버전 유지" — 프레임을 버리지 않는다). Error 로그를 한 번 남기고, 그 집합은 다음 교체까지 다시 시도하지 않는다.
   - 장면 pass 기록(`UiScenePassContext`)에는 이번 프레임의 현재 집합을 넘긴다. UI 재빌드에 실패해 옛 집합을 붙잡고 있어도 장면 렌더러가 Retire된 집합으로 새 파이프라인을 만들지 않는다.
-  - 처리기가 자기 그래프에 `AddPasses`로 UI를 더하면서 교체를 스스로 받는 경우는 `ShaderSet` 판 `Open`과 `ReloadShaders`를 쓴다(지금 쓰는 곳은 없다 — Sandbox `ScreenRenderer`는 UT5에서 UI를 붙일 때 정한다).
+  - 처리기가 자기 그래프에 `AddPasses`로 UI를 더하면서 교체를 스스로 받는 경우는 `ShaderSet` 판 `Open`과 `ReloadShaders`를 쓴다(Sandbox `ScreenRenderer`가 이 경로다 — UT5, aee670668: `ReloadShaders(device, shaders)`·`AddPasses(..., Load)`).
   - 시험: UiDemo self-test가 실제 장치(D3D11 WARP)에서 같은 집합 다시 만들기(변화 없음), Ready가 아닌 집합으로 다시 만들기(`NotReady` — 옛 파이프라인·lease 유지, 그 뒤 프레임이 그려짐)를 본다.
   - UiDemo `DemoLaneProcessor`는 집합 원천 판으로 연다.
 
@@ -144,7 +144,7 @@ Sandbox `ScreenRenderer`는 렌더 세션(지금 rocks-80 — 전 이름 rocks-6
 3. `RenderLane::SubmitFrame`이 프레임 함수 값을 `FinishFrame` 전에 부순다. — 반영됨(829719a3e, RenderBase 5.3절 개정 60). UI의 `ReleaseScenes` 우회를 지웠다.
 4. lane 전달 등록 표지를 RenderBase 아래로 옮긴다. — 반영됨(9e1a92adc, RenderBase 5.2절 개정 66): `Meta/LaneTransfer.h`의 `ROCKS_LANE_TRANSFERABLE`·`LaneTransferable`·`CheckLaneTransfer`. `UiSceneExtract::Post<T>`가 같은 개념과 Development 스키마 검사를 건다(UiCore가 MetaSchema에 공개 의존).
 
-UW6 구현 범위는 UiDemo까지다. Sandbox 연결은 게임 UI 단계(UT5)에서 한다. 요청은 UW6b 병합 때 보낸다.
+UW6 구현 범위는 UiDemo까지였다. Sandbox 연결은 UT5에서 렌더 세션이 했다(aee670668 — RenderBase 18.5절 9항, 개정 69·70).
 
 ### 18.7 시험(UW6d)
 

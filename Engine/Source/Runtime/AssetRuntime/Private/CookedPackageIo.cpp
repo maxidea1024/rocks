@@ -2,6 +2,7 @@
 
 #include <Core/FileError.h>
 #include <Core/Move.h>
+#include <Platform/File.h>
 
 namespace rocks {
 
@@ -24,6 +25,16 @@ void FinishAsyncPackageRead(AsyncPackageReadState& state, ErrorCode error,
     CookedPackageReadResult result;
     result.error = error;
     result.fileBytes = fileBytes;
+    // 패키지를 다 읽었을 때만 sidecar를 잰다(지금 스레드 — 마지막 조각의 IO 완료 스레드다).
+    if (error == ErrorCode::None && fileBytes == read.expectedBytes &&
+        read.sidecarPath != nullptr) {
+        platform::FileInfo info;
+        const platform::FileStatus stat =
+            platform::PhysicalFileSystem().Stat(read.sidecarPath, read.sidecarPathBytes, info);
+        result.sidecarError = stat ? ErrorCode::None : FileErrorCode(stat);
+        result.sidecarFileBytes = stat && info.type == platform::FileType::File ? info.size : 0;
+    }
+
     // complete가 마지막 접근이다(그 뒤 로더가 Release로 이 상태를 지울 수 있다).
     read.complete(read, result);
 }
@@ -40,8 +51,8 @@ void OnAsyncPackageChunk(const platform::AsyncIoResult& result, void* context) n
     }
 
     if (result.bytes != expected) {
-        // 크기를 본 뒤 파일이 줄었다.
-        FinishAsyncPackageRead(state, ErrorCode::InvalidArgument, state.read->expectedBytes);
+        // 크기를 본 뒤 파일이 줄었다(읽은 byte가 약속과 다르다).
+        FinishAsyncPackageRead(state, ErrorCode::CorruptData, state.read->expectedBytes);
         return;
     }
 

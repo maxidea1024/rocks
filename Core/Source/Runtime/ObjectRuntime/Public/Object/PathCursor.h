@@ -484,6 +484,10 @@ private:
     // 끝 단계가 Set 원소(키 단계)인지다. 상자 경로가 InsertKey의 "바뀐 것 없음"(이미 있는 Set
     // 원소)과 Map 값 초기화(이미 있는 키를 기본 값으로)를 가른다.
     bool setElement_ = false;
+    // Run이 게시된 객체의 최상위 단일 값을 등록된 read·write로 다뤘는지다. 그 쓰기는
+    // FieldWriteOperation이 알리므로(값 같음 포함) 경로 진입점이 최상위 필드를 다시 알리지 않는다
+    // (Docs/Design/ChangeNotification.ko.md CN-D10).
+    bool topValue_ = false;
 };
 
 } // namespace rocks::detail

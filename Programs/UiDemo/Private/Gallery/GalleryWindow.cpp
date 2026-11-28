@@ -49,6 +49,10 @@ const GalleryGrid* GalleryWindow::Widgets() const noexcept {
     return widgets_.grid.Get();
 }
 
+const TextInputSamples& GalleryWindow::TextInput() const noexcept {
+    return widgets_.textInput;
+}
+
 const GalleryGrid* GalleryWindow::Layout() const noexcept {
     return layout_.grid.Get();
 }

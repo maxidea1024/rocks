@@ -135,6 +135,15 @@ public:
     virtual void UpdateBodySettings(PhysicsBodyHandle body, const BodySettings& settings,
                                     BodySettingsChange change) noexcept = 0;
 
+    // Dynamic body를 깨우거나(awake) 재운다(PhysicsModule 7.1.19절 — UE WakeInstance·
+    // PutInstanceToSleep). 깨움·잠듦 이벤트를 내지 않고, 깨우면 쌓인 이벤트도 지운다(UE
+    // WakeUp_AssumesLocked의 ClearEvents). 재우면 속도가 0이고 대기 충격량·누적 힘을 버린다.
+    // Static·Kinematic·없는 handle·옛 세대는 무시한다.
+    //
+    // 사용 예:
+    //   scene.SetBodyAwake(body, false);   // 쌓인 상자를 재운다
+    virtual void SetBodyAwake(PhysicsBodyHandle body, bool awake) noexcept = 0;
+
     // 물리 설정의 기본 각속도 상한(도/s)이다(PhysicsSettings::maxAngularVelocity — body가
     // overrideMaxAngularVelocity가 아니면 쓰는 값).
     virtual double DefaultMaxAngularVelocityDegrees() const noexcept = 0;

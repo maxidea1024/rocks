@@ -890,6 +890,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     // 검증(5·6단계)을 previous read·할당보다 먼저 거친다 — 오류 순서상 ValidateFieldWrite가
     // OutOfMemory보다 먼저다(등록된 write는 같은 검증을 다시 한다).
     if (topValue) {
+        cursor.topValue_ = true;
         return operation == PathOperation::Read ? RunTopRead(cursor) : RunTopWrite(cursor);
     }
 
@@ -1019,8 +1020,8 @@ using detail::PathRunner;
 Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, usize hook,
                                PathOperation operation, const FieldValue* input, FieldValue* output,
-                               PropertyPathFailure* failure, usize* length,
-                               TypeId instancedRequest) noexcept {
+                               PropertyPathFailure* failure, usize* length, TypeId instancedRequest,
+                               bool* published) noexcept {
     PathStep unitSteps[MaxPropertyPathSteps];
     for (usize index = 0; index <= hook; ++index) {
         unitSteps[index] = path.steps[index];
@@ -1082,6 +1083,7 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
     // 이미 있는 Set 원소의 InsertKey만 바뀐 것이 없다(게시·변경 표지·관찰자 알림 없음). Map의 이미
     // 있는 키는 값을 기본 값으로 바꾸므로(길이 0이어도) 게시하고 검증한다.
     const bool changed = !(operation == PathOperation::InsertKey && produced == 0 && setElement);
+    *published = changed;
     if (changed) {
         if (!live && transaction && transaction->WriteCount() != writes) {
             return Result<void>::Failure(ErrorCode::Busy);
@@ -1125,10 +1127,30 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
     return Result<void>::Success();
 }
 
+// 게시된 객체의 경로 변경이 끝난 뒤 최상위 필드를 알린다(Docs/Design/ChangeNotification.ko.md
+// CN-D10 — 하위 경로·컨테이너 변경은 비교 없이). 변경은 이미 성공했으므로 통지의 실패는 결과를
+// 바꾸지 않는다(접근·종료는 변경이 먼저 보았다).
+void NotifyPathField(ObjectRegistry& registry, const ObjectAccessContext& access,
+                     const PathTarget& target, PropertyPath path) noexcept {
+    (void)registry.NotifyIfTarget(access, target.Object(), path.steps[0].fieldId);
+}
+
 Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& access,
                           const PathTarget& target, PropertyPath path, PathOperation operation,
                           const FieldValue* input, FieldValue* output, PropertyPathFailure* failure,
                           usize* length, TypeId instancedRequest = {}) noexcept {
+    // 게시된 객체의 변경은 통지 묶음 안에서 한다(CN-D10): 안에서 부르는 Registry 참조·컨테이너
+    // API와 등록된 write의 통지와 이 진입점의 최상위 필드 통지를 (객체, 대상)마다 한 번으로 합친다.
+    // 묶음을 열지 못하는 경우(접근·종료)는 아래 변경이 같은 오류로 실패한다.
+    const bool notifies = target.GetKind() == PathTarget::Kind::Object &&
+                          detail::IsMutation(operation) && !path.steps.IsEmpty();
+    NotifyGroup group;
+    if (notifies) {
+        if (auto opened = registry.BeginNotifyGroup(access); opened) {
+            group = Move(opened.Value());
+        }
+    }
+
     usize hook = IndexNone;
     {
         detail::PathCursor cursor =
@@ -1149,12 +1171,24 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
                 *length = PathRunner::Length(cursor);
             }
 
+            if (notifies && !PathRunner::RanTopValue(cursor)) {
+                NotifyPathField(registry, access, target, path);
+            }
+
             return result;
         }
     }
 
-    return RunThroughHookBox(registry, access, target, path, hook, operation, input, output,
-                             failure, length, instancedRequest);
+    // 상자 경로의 게시는 묶음 게시라 통지하지 않으므로 여기서 알린다(바뀐 것이 없어 게시하지 않은
+    // 연산 — 이미 있는 Set 원소의 InsertKey — 은 알리지 않는다).
+    bool published = false;
+    auto boxed = RunThroughHookBox(registry, access, target, path, hook, operation, input, output,
+                                   failure, length, instancedRequest, &published);
+    if (boxed && notifies && published) {
+        NotifyPathField(registry, access, target, path);
+    }
+
+    return boxed;
 }
 
 // 결과가 Length 칸의 0·1인 연산(PathContains·PathInsertKey·PathIsOptionalSet)이다.

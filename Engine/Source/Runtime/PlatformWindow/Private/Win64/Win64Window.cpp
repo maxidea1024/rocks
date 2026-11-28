@@ -12,6 +12,7 @@
 #include "../Common/GamepadMotorMapping.h"
 #include "../Common/PointerTouchMapping.h"
 #include "../Common/TextInputSession.h"
+#include "Win64TextServices.h"
 
 #include <Platform/Win64/WindowsHeadersBegin.h>
 
@@ -284,12 +285,15 @@ constexpr uint8 DoubleClickCount = 2;
 
 class Win64Window final : public Window {
 public:
-    explicit Win64Window(Allocator& allocator) noexcept : pending_(allocator) {
+    explicit Win64Window(Allocator& allocator) noexcept
+        : pending_(allocator), textServices_(allocator, textInput_) {
     }
 
     ~Win64Window() override {
         Unlink();
         ReleaseMouseClip();
+        // TSF 문서를 창보다 먼저 뗀다(창 문서 연결을 되돌린다).
+        textServices_.Shutdown();
         if (window_ != nullptr) {
             SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
             DestroyWindow(window_);
@@ -387,6 +391,18 @@ public:
 
         width_ = desc.width;
         height_ = desc.height;
+        // TSF 연결(Docs/Design/UiToolkit 22.13절). 실패하면 IME는 IMM만 쓴다. 입력기 바뀜은 OS 콜백
+        // 안에서 오므로 표시만 하고 TakeEvents에서 문맥을 다시 붙인다.
+        (void)textServices_.Initialize(window_,
+                                       Win64TextServices::MarkerSink::CreateLambda(
+                                           [this](const TextInputRecordResult& result) noexcept {
+                                               textServicesOverflowed_ =
+                                                   textServicesOverflowed_ || result.overflowed;
+                                               MarkInputMethod(result);
+                                           }),
+                                       Delegate<void()>::CreateLambda([this]() noexcept {
+                                           textServicesProfileChanged_ = true;
+                                       }));
         // 창이 놓인 모니터의 DPI로 크기를 다시 맞춘다(프로세스가 DPI를 인식할 때만 96이 아니다 —
         // WindowDesc 크기는 논리 크기, desktopPosition은 물리 픽셀이다). 아직 보이지 않으므로
         // 깜빡이지 않는다.
@@ -442,6 +458,13 @@ public:
 
     void TakeEvents(input::InputQueue& queue) noexcept override {
         AssertOwnerThread();
+        // 입력기 종류(TSF·IMM)가 바뀌었으면 활성 문맥의 길을 바꾼다. 남은 기록을 지금 적용하지
+        // 않고(앞선 키보다 먼저 들어가지 않게) 확정 기록은 표지로 큐 순서를 지킨다(22.13절).
+        if (textServicesProfileChanged_) {
+            textServicesProfileChanged_ = false;
+            SwitchInputMethodPath();
+        }
+
         pending_.DrainTo(queue);
         if (hasMissedMarker_ && queue.Push(input::InputEvent::TextInputMethod(missedMarker_))) {
             hasMissedMarker_ = false;
@@ -603,7 +626,16 @@ public:
 
         if (textInput_.Active() != &client) {
             inputMethodOverflowed_ = false;
+            textServicesOverflowed_ = false;
             textInput_.Activate(client);
+            // 활성 입력기가 TIP이면 TSF 문서로 받는다(아니면 IMM — 22.13절).
+            (void)textServices_.Attach(client);
+        } else if (textServices_.HasDocument() && !client.AllowsInputMethod()) {
+            // 같은 문맥이 비밀번호·읽기 전용이 됐다 — 문서를 뗀다(TIP 조합·평문 거울이 남지 않게).
+            textServices_.Detach(true);
+        } else if (!textServices_.HasDocument() && client.AllowsInputMethod()) {
+            // IME를 다시 허용했다 — TIP이면 문서를 붙인다.
+            (void)textServices_.Attach(client);
         }
 
         AssociateInputMethod(client.AllowsInputMethod());
@@ -617,13 +649,23 @@ public:
             return;
         }
 
-        // 만들던 글자를 넣는다(초점을 옮기면 조합이 확정되는 Windows 관례). IMM이 확정을 이 호출
-        // 안에서 WM_IME_COMPOSITION으로 보내면 기록되고, Deactivate가 남은 기록을 먼저 처리한다.
-        NotifyInputMethod(CPS_COMPLETE);
-        // 확정을 늦게 보내는 IME(TSF·CUAS 계열)는 아직 조합 문자열이 남아 있다. 미리보기를 그대로
-        // 확정하고, 늦은 확정은 배출 상태에서 삼킨다(19.2절 — 새 초점에 두 번 들어가지 않게).
-        inputMethodDraining_ = HasInputMethodComposition();
+        if (textServices_.HasDocument()) {
+            // TSF: 조합을 확정하고(그 잠금이 기록을 낸다) 문서를 뗀다. Deactivate가 그 기록을
+            // 처리한다.
+            textServices_.Detach(true);
+        } else {
+            // 만들던 글자를 넣는다(초점을 옮기면 조합이 확정되는 Windows 관례). IMM이 확정을 이
+            // 호출 안에서 WM_IME_COMPOSITION으로 보내면 기록되고, Deactivate가 남은 기록을 먼저
+            // 처리한다.
+            NotifyInputMethod(CPS_COMPLETE);
+            // 확정을 늦게 보내는 IME(TSF·CUAS 계열)는 아직 조합 문자열이 남아 있다. 미리보기를
+            // 그대로 확정하고, 늦은 확정은 배출 상태에서 삼킨다(19.2절 — 새 초점에 두 번 들어가지
+            // 않게).
+            inputMethodDraining_ = HasInputMethodComposition();
+        }
+
         inputMethodOverflowed_ = false;
+        textServicesOverflowed_ = false;
         (void)textInput_.Deactivate(client);
         AssociateInputMethod(true);
         RefreshInputMethodContext();
@@ -635,6 +677,14 @@ public:
             return;
         }
 
+        if (textServices_.HasDocument()) {
+            // TSF 조합을 끝내고 그 기록을 버린 뒤 거울을 문맥(미리보기를 버린 글자)으로 맞춘다.
+            textServices_.TerminateComposition();
+            (void)textInput_.Cancel(client);
+            textServices_.Sync(false);
+            return;
+        }
+
         // 취소가 이 호출 안에서 보내는 조합 메시지의 기록도 Cancel이 함께 버린다.
         NotifyInputMethod(CPS_CANCEL);
         (void)textInput_.Cancel(client);
@@ -642,7 +692,16 @@ public:
 
     void NotifyTextInputLayoutChanged(TextInputClient& client) noexcept override {
         AssertOwnerThread();
-        if (textInput_.Active() == &client) {
+        if (textInput_.Active() != &client) {
+            return;
+        }
+
+        // TSF는 거울을 맞추고 배치 바뀜을 알린다(후보 창은 TSF가 GetTextExt로 당긴다). 글자가
+        // 거울 용량을 넘으면 Sync가 문서를 떼므로 IMM 문맥을 다시 맞춘다.
+        if (textServices_.HasDocument()) {
+            textServices_.Sync(true);
+            RefreshInputMethodContext();
+        } else {
             PositionInputMethodWindows();
         }
     }
@@ -656,9 +715,44 @@ public:
             NotifyInputMethod(CPS_CANCEL);
         }
 
-        if (textInput_.Process(record)) {
+        const bool applied = textInput_.Process(record);
+        if (textServicesOverflowed_ && textInput_.PendingCount() == 0) {
+            // TSF 기록이 넘쳤다. 넘침 '끝'이 문맥 조합(세션이 따라간 범위)을 지웠다. TSF 조합도
+            // 끝내고, 그 잠금이 낸 기록(버려진 기록을 전제로 한 위치)은 버린 뒤 거울을 문맥으로
+            // 다시 맞춘다(22.13절 넘침).
+            textServicesOverflowed_ = false;
+            textServices_.TerminateComposition();
+            if (TextInputClient* client = textInput_.Active()) {
+                (void)textInput_.Cancel(*client);
+            }
+        }
+
+        if (textServices_.HasDocument()) {
+            textServices_.Sync(applied);
+            RefreshInputMethodContext();
+        } else if (applied) {
             PositionInputMethodWindows();
         }
+    }
+
+    // 입력기 종류가 바뀐 뒤 활성 문맥의 길을 바꾼다(22.13절). TSF → IMM: 문서를 뗀다(확정 기록은
+    // 표지로). IMM → TSF: IMM 조합을 확정(기록·표지)한 뒤 문서를 붙인다(거울은 그 기록을 적용한 뒤
+    // 표지 처리에서 다시 맞춘다).
+    void SwitchInputMethodPath() noexcept {
+        TextInputClient* client = textInput_.Active();
+        if (client == nullptr) {
+            return;
+        }
+
+        if (textServices_.HasDocument() && !textServices_.IsInputProcessorActive()) {
+            textServices_.Detach(true);
+        } else if (!textServices_.HasDocument() && textServices_.IsInputProcessorActive() &&
+                   client->AllowsInputMethod()) {
+            NotifyInputMethod(CPS_COMPLETE);
+            (void)textServices_.Attach(*client);
+        }
+
+        RefreshInputMethodContext();
     }
 
     bool HasFocus() const noexcept override {
@@ -843,6 +937,11 @@ private:
         pending_.Push(event);
     }
 
+    // IMM 메시지를 기록하는지다(활성 문맥이 IME를 받고 TSF 문서로 받지 않을 때 — 22.13절).
+    bool RecordsInputMethodMessages() const noexcept {
+        return textInput_.AcceptsInputMethod() && !textServices_.HasDocument();
+    }
+
     bool HasInputMethodComposition() noexcept {
         HIMC context = ImmGetContext(window_);
         if (!context) {
@@ -857,13 +956,16 @@ private:
     // 기본 조합 창 표시(ISC_SHOWUICOMPOSITIONWINDOW)는 WM_IME_SETCONTEXT 때 정해진다. 문맥 수락이
     // 바뀌면 초점이 있을 때 다시 받는다(19.2절 — 문맥 밖 게임 문자 입력은 OS 조합 창을 쓴다).
     void RefreshInputMethodContext() noexcept {
-        const bool accepts = textInput_.AcceptsInputMethod();
+        const bool accepts = RecordsInputMethodMessages();
         if (accepts == inputMethodAccepted_) {
             return;
         }
 
         inputMethodAccepted_ = accepts;
-        if (GetFocus() == window_) {
+        // TSF 문서가 붙은 동안은 다시 받지 않는다 — IMM 문맥 활성이 CUAS 문서로 TSF 초점을 옮길 수
+        // 있다. 문서를 뗀 뒤에는 다시 받아 CUAS가 IMM 문맥 문서로 초점을 옮기게 한다(22.13절 —
+        // 문맥 밖 게임 문자 입력).
+        if (GetFocus() == window_ && !textServices_.HasDocument()) {
             (void)SendMessageW(window_, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
         }
     }
@@ -1548,14 +1650,14 @@ private:
         // 번 오지 않는다(UE WindowsTextInputMethodSystem). 문맥이 없으면 기본 처리 → WM_CHAR →
         // Text다.
         case WM_IME_SETCONTEXT:
-            if (textInput_.AcceptsInputMethod()) {
+            if (RecordsInputMethodMessages()) {
                 lParam &= ~static_cast<LPARAM>(ISC_SHOWUICOMPOSITIONWINDOW);
             }
             break;
         case WM_IME_STARTCOMPOSITION:
             // 새 조합이 시작되면 앞 문맥의 늦은 확정 배출은 끝났다.
             inputMethodDraining_ = false;
-            if (textInput_.AcceptsInputMethod()) {
+            if (RecordsInputMethodMessages()) {
                 return 0;
             }
             break;
@@ -1564,7 +1666,7 @@ private:
                 return 0;
             }
 
-            if (textInput_.AcceptsInputMethod()) {
+            if (RecordsInputMethodMessages()) {
                 RecordInputMethod(lParam);
                 return 0;
             }
@@ -1575,13 +1677,13 @@ private:
                 return 0;
             }
 
-            if (textInput_.AcceptsInputMethod()) {
+            if (RecordsInputMethodMessages()) {
                 MarkInputMethod(textInput_.Record(TextInputRecordKind::End, {}, 0));
                 return 0;
             }
             break;
         case WM_IME_CHAR:
-            if (inputMethodDraining_ || textInput_.AcceptsInputMethod()) {
+            if (inputMethodDraining_ || RecordsInputMethodMessages()) {
                 return 0;
             }
             break;
@@ -1799,6 +1901,12 @@ private:
     HINSTANCE instance_ = nullptr;
     input::InputQueue pending_;
     TextInputSession textInput_;
+    // TSF 연결이다(22.13절 — textInput_ 뒤에 둔다: 그 기록 세션을 쓴다).
+    Win64TextServices textServices_;
+    // TSF 기록이 넘쳤다(다음 ProcessTextInput이 TSF 조합을 끝낸다).
+    bool textServicesOverflowed_ = false;
+    // 활성 입력기 종류가 바뀌었다(다음 TakeEvents가 문맥을 다시 붙인다).
+    bool textServicesProfileChanged_ = false;
     // IME 문자열을 읽는 자리다(OS 메시지 처리 중 할당하지 않는다).
     wchar_t inputMethodText_[MaxTextInputCodeUnits]{};
     bool inputMethodDetached_ = false;
