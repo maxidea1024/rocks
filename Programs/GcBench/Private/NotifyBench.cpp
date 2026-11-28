@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
 #include <Object/FieldNotifications.h>
+#include <Object/GeneratedPathAccess.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Atomics.h>
@@ -21,6 +22,8 @@ using namespace rocks;
 constexpr TypeId NotifyNodeTypeId{0x4763424e4f544659ULL, 1};
 constexpr Guid FirstFieldId{0x4763424e4f544631ULL, 1};
 constexpr Guid SecondFieldId{0x4763424e4f544632ULL, 1};
+// setter 경유 write(CN-D14)를 재는 통지 없는 필드다.
+constexpr Guid ThirdFieldId{0x4763424e4f544633ULL, 1};
 constexpr uint32 FirstTarget = 0;
 constexpr uint32 SubscriberCounts[] = {1, 8, 64};
 
@@ -32,6 +35,7 @@ public:
 
     int32 first = 0;
     int32 second = 0;
+    int32 third = 0;
 };
 
 // 할당 수를 세는 allocator다(측정 구간의 할당 0을 확인한다).
@@ -69,6 +73,12 @@ const FieldSchema NotifyFields[] = {
      FieldKind::Value,
      static_cast<uint32>(FieldFlags::Notify),
      Span<const char>("second", 6),
+     {},
+     ValueType{ValueKind::Int32, TypeId{}}},
+    {ThirdFieldId,
+     FieldKind::Value,
+     0,
+     Span<const char>("third", 5),
      {},
      ValueType{ValueKind::Int32, TypeId{}}},
 };
@@ -118,6 +128,23 @@ RuntimeFieldOps NodeFieldOps(Guid id) noexcept {
     return ops;
 }
 
+// setter 있는 측정 필드의 수동 함수표다(Docs/Design/ChangeNotification.ko.md CN-D14 — 등록된
+// write가 상자 경유로 setter에 넘긴다. 상자 분리·연산이 path thunk를 쓴다). setter는 같은 값이면
+// 아무것도 하지 않고 다르면 넣는다(통지 없는 필드).
+template <int32 NotifyNode::* Member>
+RuntimeFieldOps SetterFieldOps(Guid id) noexcept {
+    RuntimeFieldOps ops = NodeFieldOps<Member>(id);
+    ops.path = +[](const RuntimeFieldOps&, detail::PathCursor& cursor) noexcept -> Result<void> {
+        return detail::PathClassField<NotifyNode, ValueKind::Int32>(cursor, Member);
+    };
+    ops.setter = +[](Object& object, void* value) noexcept -> Result<void> {
+        int32& field = static_cast<NotifyNode&>(object).*Member;
+        field = *static_cast<const int32*>(value);
+        return Result<void>::Success();
+    };
+    return ops;
+}
+
 // 한 측정 결과를 출력한다(ns/연산, 구간의 할당 수).
 void Report(const char* label, uint64 nanoseconds, uint64 operations, uint64 allocations) noexcept {
     const double perOperation =
@@ -136,7 +163,8 @@ int RunNotifyBench(uint64 iterations, uint32 objects) noexcept {
     ops.hasStrongReferences = false;
     // 등록은 함수표를 복사한다(지역 배열이어도 된다).
     const RuntimeFieldOps fieldOps[] = {NodeFieldOps<&NotifyNode::first>(FirstFieldId),
-                                        NodeFieldOps<&NotifyNode::second>(SecondFieldId)};
+                                        NodeFieldOps<&NotifyNode::second>(SecondFieldId),
+                                        SetterFieldOps<&NotifyNode::third>(ThirdFieldId)};
     ops.fields = Span<const RuntimeFieldOps>(fieldOps);
     TypeSchema schema{NotifyNodeTypeId, 1, {}, {}};
     schema.fields = Span<const FieldSchema>(NotifyFields);
@@ -324,6 +352,38 @@ int RunNotifyBench(uint64 iterations, uint32 objects) noexcept {
             }
 
             (void)registry.Unsubscribe(access, subscribed.Value());
+        }
+
+        // 5b. setter 경유 등록된 write(CN-D14): 상자 분리(할당 하나)·상자 위 쓰기·검증·변경 표지
+        // 대조· setter. 바뀐 값과 같은 값을 잰다.
+        {
+            auto lease = types.Acquire(NotifyNodeTypeId);
+            const RuntimeFieldOps* third = lease ? lease.Value().FieldOps(2) : nullptr;
+            if (!third || !third->write || !third->setter) {
+                printf("notify bench: setter field operation lookup failed\n");
+                return 1;
+            }
+
+            FieldValue value(allocator);
+            value.kind = ValueKind::Int32;
+            const ObjectHandle target = nodes[0].Handle();
+            allocated = allocator.Allocations();
+            started = platform::MonotonicNanoseconds();
+            for (uint64 index = 0; index < iterations; ++index) {
+                value.signedInteger = static_cast<int64>(index & 1);
+                failures += third->write(registry, access, target, value) ? 0 : 1;
+            }
+
+            Report("setter write, changed", platform::MonotonicNanoseconds() - started, iterations,
+                   allocator.Allocations() - allocated);
+            allocated = allocator.Allocations();
+            started = platform::MonotonicNanoseconds();
+            for (uint64 index = 0; index < iterations; ++index) {
+                failures += third->write(registry, access, target, value) ? 0 : 1;
+            }
+
+            Report("setter write, same", platform::MonotonicNanoseconds() - started, iterations,
+                   allocator.Allocations() - allocated);
         }
 
         // 6. 통지 묶음 열고 닫기(경로 변경 연산마다 드는 비용 — 모은 통지 없음).

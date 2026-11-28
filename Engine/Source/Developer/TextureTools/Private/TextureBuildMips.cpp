@@ -1,5 +1,7 @@
 #include "TextureBuildSteps.h"
 
+#include "TextureBlockParallel.h"
+
 #include <Base/NumericLimits.h>
 #include <Platform/Memory.h>
 
@@ -29,8 +31,50 @@ constexpr float LuminanceGreen = 0.59f;
 constexpr float LuminanceBlue = 0.11f;
 constexpr float LuminanceMinimum = 0.001f;
 
-struct Rgba {
-    float c[Channels];
+// 행 batch의 최소 texel 수다(12.18 TP1b — UE NormalizeMipChain이 작은 mip을 한 작업으로 묶는 기준,
+// TCM 4670–4677).
+constexpr uint64 MipMinBatchTexels = 16384;
+
+// 행 rows개를 batch로 나눈 계획이다(batch마다 최소 MipMinBatchTexels texel).
+struct RowPlan {
+    uint64 rows = 0;
+    uint64 texelsPerRow = 1;
+    uint64 rowsPerBatch = 1;
+    uint64 batches = 0;
+};
+
+RowPlan PlanRows(uint64 rows, uint64 texelsPerRow) noexcept {
+    RowPlan plan;
+    plan.rows = rows;
+    plan.texelsPerRow = texelsPerRow == 0 ? 1 : texelsPerRow;
+    plan.rowsPerBatch = (MipMinBatchTexels + plan.texelsPerRow - 1) / plan.texelsPerRow;
+    plan.rowsPerBatch = plan.rowsPerBatch == 0 ? 1 : plan.rowsPerBatch;
+    plan.batches = (rows + plan.rowsPerBatch - 1) / plan.rowsPerBatch;
+    return plan;
+}
+
+// 계획대로 행 [begin, end)를 body로 실행한다(압축 단계 RunBlockRows — batch마다 결정적 FP,
+// scheduler가 없으면 호출 스레드 혼자). batch 번호는 begin / rowsPerBatch다.
+Result<void> RunRows(const TextureBuildExecution& execution, const RowPlan& plan, void* context,
+                     texture_block_detail::BlockRowBody body) noexcept {
+    TextureBlockOptions options;
+    options.scheduler = execution.scheduler;
+    options.scratch = execution.scratch;
+    options.minBatchBlocks = static_cast<uint32>(plan.rowsPerBatch * plan.texelsPerRow);
+    return texture_block_detail::RunBlockRows(options, plan.rows, plan.texelsPerRow, 0, context,
+                                              body);
+}
+
+// 한 사슬이 되풀이해 쓰는 작업 버퍼다(batch별 분리 커널 행 버퍼·coverage 개수, Volume 두 번째 slice
+// 결과 평면 — 미리 할당해 worker 안에서는 할당하지 않는다).
+struct MipScratch {
+    explicit MipScratch(Allocator& allocator) noexcept
+        : rows(allocator), counts(allocator), second(allocator) {
+    }
+
+    Array<float> rows;
+    Array<int64> counts;
+    Array<float> second;
 };
 
 // 한 평면의 보기다(UE FImageView2D).
@@ -149,9 +193,32 @@ float ScaledThreshold(float threshold, float scale) noexcept {
     return scaled;
 }
 
+struct CoverageJob {
+    const PlaneView* view;
+    const float* scaled;
+    bool alphaOnly;
+    int64* counts;
+    uint64 rowsPerBatch;
+};
+
+void CoverageRows(void* context, uint64 begin, uint64 end) noexcept {
+    const CoverageJob& job = *static_cast<const CoverageJob*>(context);
+    int64* counts = job.counts + (begin / job.rowsPerBatch) * Channels;
+    for (int64 y = static_cast<int64>(begin); y < static_cast<int64>(end); ++y) {
+        for (int64 x = 0; x < job.view->width; ++x) {
+            const float* texel = job.view->At(x, y);
+            for (usize channel = job.alphaOnly ? Alpha : 0; channel < Channels; ++channel) {
+                counts[channel] += texel[channel] >= job.scaled[channel] ? 1 : 0;
+            }
+        }
+    }
+}
+
 // UE ComputeAlphaCoverage(TCM 449–548): 채널마다 값 ≥ 비교 임계값인 texel 비율(임계값 0 채널은 0).
-void AlphaCoverage(const float* thresholds, const float* scales, const PlaneView& view,
-                   float* coverage) noexcept {
+// 행 batch마다 센 정수를 batch 순서로 더한다(분할과 무관).
+Result<void> AlphaCoverage(const float* thresholds, const float* scales, const PlaneView& view,
+                           const TextureBuildExecution& execution, MipScratch& scratch,
+                           float* coverage) noexcept {
     float scaled[Channels];
     for (usize channel = 0; channel < Channels; ++channel) {
         scaled[channel] = thresholds[channel] == 0.0f
@@ -162,13 +229,26 @@ void AlphaCoverage(const float* thresholds, const float* scales, const PlaneView
     // 알파 임계값만 있으면 UE는 알파만 센다(TCM 461–486 — 다른 채널은 0, 무한대 texel도 세지 않음).
     const bool alphaOnly =
         thresholds[Red] == 0.0f && thresholds[Green] == 0.0f && thresholds[Blue] == 0.0f;
+    const RowPlan plan =
+        PlanRows(static_cast<uint64>(view.height), static_cast<uint64>(view.width));
+    if (auto sized = scratch.counts.TryResize(static_cast<usize>(plan.batches) * Channels);
+        !sized) {
+        return sized;
+    }
+
+    for (int64& count : scratch.counts) {
+        count = 0;
+    }
+
+    CoverageJob job{&view, scaled, alphaOnly, scratch.counts.Data(), plan.rowsPerBatch};
+    if (auto ran = RunRows(execution, plan, &job, &CoverageRows); !ran) {
+        return ran;
+    }
+
     int64 counts[Channels] = {};
-    for (int64 y = 0; y < view.height; ++y) {
-        for (int64 x = 0; x < view.width; ++x) {
-            const float* texel = view.At(x, y);
-            for (usize channel = alphaOnly ? Alpha : 0; channel < Channels; ++channel) {
-                counts[channel] += texel[channel] >= scaled[channel] ? 1 : 0;
-            }
+    for (usize batch = 0; batch < plan.batches; ++batch) {
+        for (usize channel = 0; channel < Channels; ++channel) {
+            counts[channel] += scratch.counts[batch * Channels + channel];
         }
     }
 
@@ -176,11 +256,14 @@ void AlphaCoverage(const float* thresholds, const float* scales, const PlaneView
     for (usize channel = 0; channel < Channels; ++channel) {
         coverage[channel] = static_cast<float>(counts[channel]) / texels;
     }
+
+    return Result<void>::Success();
 }
 
 // UE ComputeAlphaScale(TCM 550–605): 8단계 이분 탐색(채널별 건너뜀은 엄격 <, 끝 판정은 Equals <=).
-void AlphaScale(const float* coverages, const float* thresholds, const PlaneView& view,
-                float* scales) noexcept {
+Result<void> AlphaScale(const float* coverages, const float* thresholds, const PlaneView& view,
+                        const TextureBuildExecution& execution, MipScratch& scratch,
+                        float* scales) noexcept {
     float minimum[Channels] = {0.0f, 0.0f, 0.0f, 0.0f};
     float maximum[Channels] = {AlphaScaleMaximum, AlphaScaleMaximum, AlphaScaleMaximum,
                                AlphaScaleMaximum};
@@ -190,7 +273,11 @@ void AlphaScale(const float* coverages, const float* thresholds, const PlaneView
 
     for (uint32 step = 0; step < AlphaScaleSteps; ++step) {
         float computed[Channels];
-        AlphaCoverage(thresholds, scales, view, computed);
+        if (auto counted = AlphaCoverage(thresholds, scales, view, execution, scratch, computed);
+            !counted) {
+            return counted;
+        }
+
         for (usize channel = 0; channel < Channels; ++channel) {
             const float difference = computed[channel] - coverages[channel];
             if (thresholds[channel] == 0.0f || fabsf(difference) < KindaSmallNumber) {
@@ -217,6 +304,8 @@ void AlphaScale(const float* coverages, const float* thresholds, const PlaneView
             break;
         }
     }
+
+    return Result<void>::Success();
 }
 
 void Scale(float* color, const float* scales) noexcept {
@@ -239,10 +328,10 @@ struct MipStep {
 
 // 분리 커널 mip(UE GenerateMipSharpenedSeparable — TCM 855–935). row는 원본 너비의 행 버퍼다.
 void SeparableMip(const PlaneView& source, const MutablePlane& dest, const MipStep& step,
-                  const float* scales, float* row) noexcept {
+                  const float* scales, float* row, int64 rowBegin, int64 rowEnd) noexcept {
     const int64 size = step.kernel->size;
     const int64 center = (size - 1) / 2;
-    for (int64 destY = 0; destY < dest.height; ++destY) {
+    for (int64 destY = rowBegin; destY < rowEnd; ++destY) {
         const int64 sourceY = destY * MipScaleFactor;
         for (int64 sourceX = 0; sourceX < source.width; ++sourceX) {
             float color[Channels] = {};
@@ -285,10 +374,10 @@ float Luminance(const float* color) noexcept {
 
 // 2D 커널 mip(UE GenerateMipSharpened — TCM 763–852), 색 이동 보정 포함.
 void SharpenedMip(const PlaneView& source, const MutablePlane& dest, const MipStep& step,
-                  const float* scales) noexcept {
+                  const float* scales, int64 rowBegin, int64 rowEnd) noexcept {
     const int64 size = step.kernel->size;
     const int64 center = (size - 1) / 2;
-    for (int64 destY = 0; destY < dest.height; ++destY) {
+    for (int64 destY = rowBegin; destY < rowEnd; ++destY) {
         for (int64 destX = 0; destX < dest.width; ++destX) {
             const int64 sourceX = destX * MipScaleFactor;
             const int64 sourceY = destY * MipScaleFactor;
@@ -332,14 +421,20 @@ void SharpenedMip(const PlaneView& source, const MutablePlane& dest, const MipSt
     }
 }
 
-// 한 평면 생성(UE GenerateSharpenedMipB8G8R8A8Templ).
-void GenerateStep(const PlaneView& source, const MutablePlane& dest, const MipStep& step,
-                  float* row) noexcept {
+// 2×2 Simple 경로인지다(UE GenerateSharpenedMipB8G8R8A8Templ 966–975 — alpha scale을 구하기 전).
+bool IsSimple(const PlaneView& source, const MutablePlane& dest, const MipStep& step) noexcept {
+    return step.kernel->size == 2 && dest.width * 2 == source.width &&
+           dest.height * 2 == source.height && !step.coverage && !step.unfiltered;
+}
+
+// 한 평면의 대상 행 [rowBegin, rowEnd)를 만든다(UE GenerateSharpenedMipB8G8R8A8Templ — scales는
+// 미리 구했다).
+void GenerateRows(const PlaneView& source, const MutablePlane& dest, const MipStep& step,
+                  const float* scales, float* row, int64 rowBegin, int64 rowEnd) noexcept {
     const uint32 size = step.kernel->size;
-    if (size == 2 && dest.width * 2 == source.width && dest.height * 2 == source.height &&
-        !step.coverage && !step.unfiltered) {
+    if (IsSimple(source, dest, step)) {
         // UE GenerateMip2x2Simple(색 이동 보정 무시).
-        for (int64 y = 0; y < dest.height; ++y) {
+        for (int64 y = rowBegin; y < rowEnd; ++y) {
             for (int64 x = 0; x < dest.width; ++x) {
                 Average4(source.At(2 * x, 2 * y), source.At(2 * x + 1, 2 * y),
                          source.At(2 * x, 2 * y + 1), source.At(2 * x + 1, 2 * y + 1),
@@ -350,14 +445,9 @@ void GenerateStep(const PlaneView& source, const MutablePlane& dest, const MipSt
         return;
     }
 
-    float scales[Channels] = {1.0f, 1.0f, 1.0f, 1.0f};
-    if (step.coverage) {
-        AlphaScale(step.coverages, step.thresholds, source, scales);
-    }
-
     if (step.unfiltered) {
         // UE GenerateMipUnfiltered.
-        for (int64 y = 0; y < dest.height; ++y) {
+        for (int64 y = rowBegin; y < rowEnd; ++y) {
             for (int64 x = 0; x < dest.width; ++x) {
                 const float* sample =
                     Lookup(source, step.address, x * MipScaleFactor, y * MipScaleFactor);
@@ -373,7 +463,7 @@ void GenerateStep(const PlaneView& source, const MutablePlane& dest, const MipSt
 
     if (size == 2) {
         // UE GenerateMip2x2.
-        for (int64 y = 0; y < dest.height; ++y) {
+        for (int64 y = rowBegin; y < rowEnd; ++y) {
             for (int64 x = 0; x < dest.width; ++x) {
                 const int64 sx = x * MipScaleFactor;
                 const int64 sy = y * MipScaleFactor;
@@ -390,10 +480,59 @@ void GenerateStep(const PlaneView& source, const MutablePlane& dest, const MipSt
     }
 
     if (step.useNewMipFilter) {
-        SeparableMip(source, dest, step, scales, row);
+        SeparableMip(source, dest, step, scales, row, rowBegin, rowEnd);
     } else {
-        SharpenedMip(source, dest, step, scales);
+        SharpenedMip(source, dest, step, scales, rowBegin, rowEnd);
     }
+}
+
+struct StepJob {
+    PlaneView source;
+    MutablePlane dest;
+    const MipStep* step;
+    const float* scales;
+    float* rows;
+    usize rowFloats;
+    uint64 rowsPerBatch;
+};
+
+void StepRows(void* context, uint64 begin, uint64 end) noexcept {
+    const StepJob& job = *static_cast<const StepJob*>(context);
+    float* row =
+        job.rows == nullptr ? nullptr : job.rows + (begin / job.rowsPerBatch) * job.rowFloats;
+    GenerateRows(job.source, job.dest, *job.step, job.scales, row, static_cast<int64>(begin),
+                 static_cast<int64>(end));
+}
+
+// 한 평면 생성(UE GenerateSharpenedMipB8G8R8A8Templ): alpha scale을 구한 뒤 대상 행을 batch로 나눠
+// 만든다(12.18 TP1b). 오류: 할당 실패, 병렬 실행 오류.
+Result<void> GenerateStep(const PlaneView& source, const MutablePlane& dest, const MipStep& step,
+                          const TextureBuildExecution& execution, MipScratch& scratch) noexcept {
+    float scales[Channels] = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (!IsSimple(source, dest, step) && step.coverage) {
+        if (auto scaled =
+                AlphaScale(step.coverages, step.thresholds, source, execution, scratch, scales);
+            !scaled) {
+            return scaled;
+        }
+    }
+
+    const RowPlan plan =
+        PlanRows(static_cast<uint64>(dest.height), static_cast<uint64>(dest.width));
+    const bool separable = !IsSimple(source, dest, step) && !step.unfiltered &&
+                           step.kernel->size != 2 && step.useNewMipFilter;
+    const usize rowFloats = static_cast<usize>(source.width) * Channels;
+    if (separable) {
+        if (auto sized = scratch.rows.TryResize(static_cast<usize>(plan.batches) * rowFloats);
+            !sized) {
+            return sized;
+        }
+    }
+
+    StepJob job{
+        source,           dest, &step, scales, separable ? scratch.rows.Data() : nullptr, rowFloats,
+        plan.rowsPerBatch};
+    return RunRows(execution, plan, &job, &StepRows);
 }
 
 // UE GenerateMipBorder(TCM 1110–1178): 테두리 texel을 직전 mip 2×2 발자국 안의 원본 테두리 texel
@@ -498,7 +637,8 @@ uint32 MipChainLength(const MipChainParams& params, uint32 width, uint32 height,
 }
 
 Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params, const Level& base,
-                              uint32 depth, Array<Level>& out) noexcept {
+                              uint32 depth, Array<Level>& out,
+                              const TextureBuildExecution& execution) noexcept {
     const uint32 basePlanes = static_cast<uint32>(PlaneCount(base));
     uint32 remaining = MipChainLength(params, base.width, base.height, basePlanes);
     remaining = remaining < depth ? remaining : depth;
@@ -519,11 +659,16 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
     const MipAddress address = MipAddressFor(params, base.width, base.height);
     const bool redrawBorder = params.preserveBorder && !params.filter.borderColorBlack;
 
+    MipScratch scratch(allocator);
     // 목표 coverage는 base의 평면 0에서 한 번 구한다(UE 1898–1907).
     float coverages[Channels] = {};
     if (params.alphaCoverage) {
         const float ones[Channels] = {1.0f, 1.0f, 1.0f, 1.0f};
-        AlphaCoverage(params.thresholds, ones, ViewOf(base, 0), coverages);
+        if (auto counted = AlphaCoverage(params.thresholds, ones, ViewOf(base, 0), execution,
+                                         scratch, coverages);
+            !counted) {
+            return counted;
+        }
     }
 
     MipStep step;
@@ -535,13 +680,6 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
     step.unfiltered = params.unfiltered;
     step.useNewMipFilter = params.useNewMipFilter;
 
-    // 분리 커널 행 버퍼(원본 너비 — 첫 단계가 가장 넓다)와 Volume 두 번째 slice 결과 평면이다.
-    Array<float> row(allocator);
-    if (auto sized = row.TryResize(usize{base.width} * Channels); !sized) {
-        return sized;
-    }
-
-    Array<float> second(allocator);
     Level averages[2] = {Level(allocator), Level(allocator)};
     usize nextAverage = 0;
     const Level* source = &base;
@@ -565,7 +703,7 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
         }
 
         if (params.volume) {
-            if (auto sized = second.TryResize(usize{width} * height * Channels); !sized) {
+            if (auto sized = scratch.second.TryResize(usize{width} * height * Channels); !sized) {
                 return sized;
             }
         }
@@ -573,19 +711,27 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
         for (uint32 plane = 0; plane < destPlanes; ++plane) {
             const usize sourcePlane = params.volume ? usize{plane} * 2 : plane;
             const PlaneView view = ViewOf(*source, sourcePlane);
-            auto make = [&](Level& target, const MipKernel& kernel) noexcept {
+            auto make = [&](Level& target, const MipKernel& kernel) noexcept -> Result<void> {
                 MipStep current = step;
                 current.kernel = &kernel;
                 const MutablePlane destView = MutableViewOf(target, plane);
-                GenerateStep(view, destView, current, row.Data());
+                if (auto made = GenerateStep(view, destView, current, execution, scratch); !made) {
+                    return made;
+                }
+
                 if (params.volume && !params.unfiltered) {
                     const usize nextPlane =
                         sourcePlane + 1 < planes ? sourcePlane + 1 : usize{planes} - 1;
-                    const MutablePlane other{second.Data(), width, height};
-                    GenerateStep(ViewOf(*source, nextPlane), other, current, row.Data());
+                    const MutablePlane other{scratch.second.Data(), width, height};
+                    if (auto made = GenerateStep(ViewOf(*source, nextPlane), other, current,
+                                                 execution, scratch);
+                        !made) {
+                        return made;
+                    }
+
                     const usize count = usize{width} * height * Channels;
                     for (usize index = 0; index < count; ++index) {
-                        const float sum = destView.texels[index] + second[index];
+                        const float sum = destView.texels[index] + scratch.second[index];
                         destView.texels[index] = sum * 0.5f;
                     }
                 }
@@ -593,10 +739,17 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
                 if (redrawBorder) {
                     RedrawBorder(view, destView);
                 }
+
+                return Result<void>::Success();
             };
-            make(dest, downsample);
+            if (auto made = make(dest, downsample); !made) {
+                return made;
+            }
+
             if (averageDest != nullptr) {
-                make(*averageDest, average);
+                if (auto made = make(*averageDest, average); !made) {
+                    return made;
+                }
             }
         }
 
@@ -616,10 +769,11 @@ Result<void> GenerateMipChain(Allocator& allocator, const MipChainParams& params
 // (0, 0, 1), 그 밖 1 / sqrt(제곱합)을 곱해 float(v × 0.5 + 0.5)로, 알파는 그대로).
 constexpr double NormalSmallNumber = 1.0e-8;
 
-void NormalizeNormals(Level& level) noexcept {
-    const usize texels = level.texels.Size() / Channels;
-    for (usize index = 0; index < texels; ++index) {
-        float* texel = level.texels.Data() + index * Channels;
+namespace {
+
+void NormalizeTexels(float* texels, usize count) noexcept {
+    for (usize index = 0; index < count; ++index) {
+        float* texel = texels + index * Channels;
         double v[3];
         for (usize channel = 0; channel < 3; ++channel) {
             const float scaled = texel[channel] * 2.0f;
@@ -648,6 +802,26 @@ void NormalizeNormals(Level& level) noexcept {
             texel[channel] = static_cast<float>(halved + 0.5);
         }
     }
+}
+
+struct NormalizeJob {
+    float* texels;
+    usize width;
+};
+
+void NormalizeRows(void* context, uint64 begin, uint64 end) noexcept {
+    const NormalizeJob& job = *static_cast<const NormalizeJob*>(context);
+    NormalizeTexels(job.texels + static_cast<usize>(begin) * job.width * Channels,
+                    static_cast<usize>(end - begin) * job.width);
+}
+
+} // namespace
+
+Result<void> NormalizeNormals(Level& level, const TextureBuildExecution& execution) noexcept {
+    // (평면, 행) 단위 batch다(텍스셀마다 독립 — 12.18 TP1b).
+    const RowPlan plan = PlanRows(uint64{level.layers} * level.depth * level.height, level.width);
+    NormalizeJob job{level.texels.Data(), level.width};
+    return RunRows(execution, plan, &job, &NormalizeRows);
 }
 
 } // namespace build_mips
