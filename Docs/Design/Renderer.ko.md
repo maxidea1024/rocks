@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-28, 개정 14(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-28, 개정 15(초안 — 17절 RS0을 RS0a 렌더 단독·RS0b 머티리얼 사용으로 나누고 머티리얼 최소 선행을 적음, 머티리얼 세션 질문 2026-11-28). 개정 14(2026-11-28). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -842,17 +842,18 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | GX4 | RenderBase 4.4절 | MRT·깊이 attachment·dispatch·indirect(RQ3) |
 | RB2–RB6 | RenderBase 6·9–11절 | 자원 수명·셰이더 집합·상수 블록·공유 slot·정점 입력 타입·그리기 유틸리티 |
 | RG2 | RenderBase 8절 | 프레임 안 풀 재사용·그래프 안 업로드 |
-| 머티리얼 | 머티리얼 시스템 15.2절 | RS0 전: MS1–MS3(스키마·번역·쿠킹, SF1 `Unlit`)과 MS4의 렌더 상태·상수 블록·기본 머티리얼 부분. MS4의 두 경로 기준 영상(MS-T6)은 RS2 완료 기준 (a)와 함께 본다. 고급 shading model은 MS8(SF3)이 RS9와 함께 간다 |
+| 머티리얼 | 머티리얼 시스템 15.2절 | RS0b 전 최소(개정 15): (1) MS3d4 묶음 원천·asset-cook 연결과 MS3f 라이브러리 항목 — RS0a pass 타입으로 머티리얼 셰이더가 Project 라이브러리에 실제로 들어간다, (2) MS4 최소 — 머티리얼(인스턴스 재정의는 뒤)의 런타임 렌더 상태(`BlendMode` Opaque·Masked, 양면, `ShadingModel` Unlit·DefaultLit), 상수 식 실행으로 만든 상수 블록 byte, 텍스처·샘플러 바인딩, (3) 엔진 기본 머티리얼(고정 AssetId, /Engine 쿠킹). RS2 전까지 필요 없는 것: MS3e 보고, MS3g 사용 대상 유도(RS0–RS2는 정적 메시 정점 입력 하나), MS5 에디터. MS7(반투명)은 RS5, MS8(SF3)은 RS9와 함께 간다. MS4의 두 경로 기준 영상(MS-T6)은 RS2 완료 기준 (a)와 함께 본다 |
 | 메시 에셋 | AssetSystem(메시 단계) | 정적 메시(위치·패킹 법선·UV·section·bounds·LOD) |
 | WorldIntegration | 계획 3.1절 | 렌더 컴포넌트 → `SceneChangeList`·`ViewDesc` |
 
 ### 17.2 단계
 
-화면 마일스톤 다음 첫 단계는 RS0이고, 그다음은 Forward+(RS1)가 Deferred(RS2)보다 먼저다(결정 RN7). 이유: GLES·모바일 기본 경로가 Forward+이고(계획 11.1절) light grid·조명 함수가 Deferred의 기반이기 때문이다.
+화면 마일스톤 다음 첫 단계는 RS0이고(개정 15부터 RS0a·RS0b — RS0a는 머티리얼을 기다리지 않는다), 그다음은 Forward+(RS1)가 Deferred(RS2)보다 먼저다(결정 RN7). 이유: GLES·모바일 기본 경로가 Forward+이고(계획 11.1절) light grid·조명 함수가 Deferred의 기반이기 때문이다.
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
-| RS0 | `RenderData`·`RendererShaders`·`Renderer` 모듈, `RenderScene`(변경 목록 적용), `RenderView`·`ViewHistory`, 가시성 V1, 그리기 항목 캐시·상태 묶음, `GpuScene`, depth prepass·velocity, HZB 생성, Unlit·emissive base pass, 최소 tone map | 17.1절 전체 | (a) 기록 backend: 같은 변경 목록 열 → 같은 장치 호출 열(결정적), 적용 순서(제거→추가→갱신) 단언 (b) 가시 집합 = CPU 참조(bounds 전수) (c) GPU Scene 영역 재사용이 slot GPU 완료 gate 전에는 없음 (d) D3D12·Vulkan·GLES 미리보기 Unlit 장면 기준 영상(채널 ±8, 2%, RenderBase 8절 기준) (e) reversed-Z·앞면·velocity 부호 시험(정지 카메라 0, 알려진 이동의 velocity 값) |
+| RS0a | 렌더 단독(머티리얼 결과 없이): `RenderData`·`RendererShaders`·`Renderer` 모듈. **`RendererShaders` pass 셰이더 타입을 먼저 낸다**: depth prepass(위치만)·Unlit·emissive base pass의 머티리얼 pass 타입(`ShaderTypeMaterialShader`), `MaterialShaderTraits` 해석기(`materialShouldCompile`, 셰이더 시스템 SSD86), 정적 메시 정점 입력 타입. 이어서 `RenderScene`(변경 목록 적용), `RenderView`·`ViewHistory`, 가시성 V1, 그리기 항목 캐시·상태 묶음, `GpuScene`, depth prepass(불투명, 머티리얼 없이 위치만)·velocity, HZB 생성, 최소 tone map, 공유 상수 slot 등록(화면 마일스톤 SM10 남은 부분), 런타임 Project 셰이더 라이브러리 열기(RR9) | 17.1절에서 머티리얼 행을 뺀 것 | (a) 기록 backend: 같은 변경 목록 열 → 같은 장치 호출 열(결정적), 적용 순서(제거→추가→갱신) 단언 (b) 가시 집합 = CPU 참조(bounds 전수) (c) GPU Scene 영역 재사용이 slot GPU 완료 gate 전에는 없음 (e) reversed-Z·앞면·velocity 부호 시험(정지 카메라 0, 알려진 이동의 velocity 값) (f) pass 타입 등록과 traits 거르기 시험(머티리얼 쿠킹이 이 타입으로 묶음을 컴파일한다 — MS3f의 선행) |
+| RS0b | Unlit·emissive base pass를 머티리얼로 그린다(그리기 항목이 머티리얼의 셰이더 집합·렌더 상태·상수 블록·텍스처를 쓴다), 엔진 기본 머티리얼로 머티리얼 없는 메시를 그린다 | RS0a, 머티리얼(17.1절 머티리얼 행 — 개정 15에서 최소 항목을 적었다) | (d) D3D12·Vulkan·GLES 미리보기 Unlit 장면 기준 영상(채널 ±8, 2%, RenderBase 8절 기준) |
 | RS1 | Forward+ 직접광: 광원 장면, light grid CS, `ForwardOpaque`(DefaultLit), directional·point·spot, sky light 상수 | RS0, GX2 typed buffer UAV | (a) grid 셀 목록 ⊇ CPU 참조 판정(보수), overflow 계수 정확 (b) 광원 0개 view의 grid 생략 (c) 기준 영상 3 backend (d) GLES texel buffer 경로 픽셀 = D3D12 경로(허용 오차) |
 | RS2 | Deferred: GBuffer 기본 layout, `DeferredLightingPass`(7.3절) | RS1 | (a) **계획 API02**: 같은 머티리얼·메시·광원 장면의 Deferred·Forward+ 영상 대조(채널 ±8·2%로 시작, 14.7절 MRD10, 머티리얼 MS-T6과 같은 시험), 깊이·법선·velocity 일치(Forward+는 보조 출력과 GBufferA 대조) (b) GBuffer 인코딩 왕복 CPU 시험(법선·shading model bit) (c) GLES 4 MRT 다중 pass 영상 |
 | RS3 | 그림자: CSM·spot atlas·point 6면, PCF, caster 판정 V5 | RS1 | (a) 두 경로 그림자 영상 대조 (b) atlas overflow 시 강등·생략 계수와 표시 (c) caster 집합 ⊇ CPU 참조 (d) 직교 깊이 clamp 미지원 backend의 공개 대체 확인 |
