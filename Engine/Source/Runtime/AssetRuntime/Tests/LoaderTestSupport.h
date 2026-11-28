@@ -4,6 +4,7 @@
 
 #include <AssetRuntime/AssetLoader.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/File.h>
 
 // 로더 시험 도구다(Docs/Design/AssetSystem 11.6절): 쿠킹 패키지 장면(A1a writer로 쓴 패키지와
 // 그 결과로 만든 매니페스트), 완료를 명시 gate로 내보내는 IO, 손으로 돌리는 worker, 단계마다 정해진
@@ -839,5 +840,32 @@ struct LoaderRig {
     AssetLoaderConfig config;
     UniquePtr<AssetLoader> loader;
 };
+
+// path에 bytes를 통째로 쓴다(있으면 덮는다 — 디스크 IO 시험).
+inline bool WriteWholeFile(StringView path, Span<const uint8> bytes) noexcept {
+    platform::File file;
+    if (!file.Open(platform::PhysicalFileSystem(), path.Data(), path.ByteCount(),
+                   platform::FileOpenMode::CreateAlways)) {
+        return false;
+    }
+
+    auto written = file.WriteAll(bytes.Data(), bytes.Size());
+    return written.status && written.bytes == bytes.Size() && file.Close();
+}
+
+// path의 부모 디렉터리를 만든다.
+inline bool MakeParent(StringView path) noexcept {
+    usize slash = path.ByteCount();
+    while (slash > 0 && path.Data()[slash - 1] != '/') {
+        --slash;
+    }
+
+    if (slash <= 1) {
+        return true;
+    }
+
+    return static_cast<bool>(
+        platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.Data(), slash - 1));
+}
 
 } // namespace rocks::asset_test

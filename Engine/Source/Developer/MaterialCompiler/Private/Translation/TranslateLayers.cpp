@@ -143,6 +143,11 @@ Result<Guid> Translator::AddLayerCall(Guid owner, Guid layerId, uint32 role, Gui
         return Result<Guid>::Failure(recorded.Error());
     }
 
+    if (auto recorded = syntheticLayers_.Insert(id, SyntheticLayer{layerId, role == BlendCallRole});
+        !recorded) {
+        return Result<Guid>::Failure(recorded.Error());
+    }
+
     if (auto expanded = ExpandAsset(id, asset, false, parentSampled, {}, {}, &signature);
         !expanded) {
         return Result<Guid>::Failure(expanded.Error());

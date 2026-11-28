@@ -353,7 +353,7 @@ Result<bool> ComponentOverlapAll(World& world, ObjectHandle component, const Vec
     }
 
     auto overlapped =
-        scene->OverlapBody(query.body, position, rotation, query.filter, params, overlaps);
+        scene->OverlapBody(query.body, {}, position, rotation, query.filter, params, overlaps);
     if (!overlapped) {
         overlaps.Clear();
         return overlapped;

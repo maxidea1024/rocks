@@ -1,5 +1,6 @@
 #pragma once
 
+#include <MaterialSchema/MaterialConstantSlotKind.h>
 #include <Base/Types.h>
 #include <MaterialCompiler/MaterialIrValue.h>
 
@@ -11,13 +12,6 @@
 //       Write(member.vector, member.firstComponent, member.components);
 //   }
 namespace rocks::material {
-
-// 상수 블록 칸의 내용이다(Double 출력은 tile·offset 두 칸 — 5.3절 LWC 표현).
-enum class MaterialConstantSlotKind : uint8 {
-    Value = 0,
-    DoubleTile = 1,
-    DoubleOffset = 2
-};
 
 // 상수 블록 멤버 하나(출력 하나의 칸)다.
 struct MaterialConstantMember {

@@ -78,6 +78,8 @@
 | submix 부모 변경 | 다음 처리부터 바로 옮김 | 같다 — 채택 블록에서 바로 옮김, 교차 fade 없음(3.45.8절) | (기록용) |
 | 스냅숏 사이 부모 순환 | 에디터가 막음 | 바뀐 키의 옛 부모 유지 + Warning·계수(3.45.8절) | 실행 중 게시가 막히지 않게 |
 | 감쇠 send의 Pre 단계 | 구조체에 단계가 없음(늘 post) | 같은 `MixBusSend`를 쓰고 Pre면 Warning + post(3.45.7절) | 구조체 하나로 통일 |
+| 버스가 null인 send | 건너뜀(`AudioMixerSource.cpp` `SendInfo.SoundSubmix != nullptr`) | 에셋 검사에서 `MakePlayable` InvalidArgument(3.45.7절) | 잘못된 에셋을 검사에서 막는다 |
+| background mute 조건의 장치 mute | `PrimaryVolume`만 봄(장치 mute는 따로) | 마스터 gain에 장치 mute도 들어가 함께 본다(3.45.8절) | 마스터 gain 한 값으로 판정 |
 | send 변화 | `SetSubmixSendInfo`의 level을 다음 버퍼에 바로 씀 | `DefaultParamRampFrames` ramp, 새 send는 0에서, 빠진 send는 0으로(3.45.5절) | 클릭 방지 |
 | pause 중 가상 loop의 재생 시간 | device delta로 진행(`AudioVirtualLoop.cpp:302–337`) | 멈춤(3.44.3절) | voice 있는 재생과 같은 시계, 풀린 뒤 이어 듣는다 |
 | 스트림 디코드 지연 | 렌더 스레드가 디코드 작업 완료를 기다림(`AudioMixerSourceBuffer.cpp:550` `EnsureCompletion`) — 늦으면 렌더가 멈춤 | AudioRT는 기다리지 않음 — 링이 모자라면 그 voice만 무음(굶음)이고 이어 재생(3.40.1절) | AudioRT 무대기 계약(3.2절), 한 스트림의 지연이 전체 출력을 멈추지 않게 |

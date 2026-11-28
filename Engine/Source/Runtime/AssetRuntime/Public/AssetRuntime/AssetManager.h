@@ -1,6 +1,8 @@
 #pragma once
 
 #include <AssetRuntime/AssetLoader.h>
+#include <AssetRuntime/BulkData.h>
+#include <AssetRuntime/StreamedBulk.h>
 #include <Base/NumericLimits.h>
 #include <Core/Function.h>
 #include <Object/ObjectRegistry.h>
@@ -269,6 +271,11 @@ struct AssetManagerConfig {
     // 관찰자 키 상한이다(ReferenceObserver::DefaultMaxKeys).
     usize observerMaxKeys = ReferenceObserver::DefaultMaxKeys;
     uint32 maxDeferredCommands = DefaultMaxDeferredCommands;
+    // 스트리밍 bulk 범위 IO다(AS 20.6 1 — null이면 OpenStreamedBulk가 Unsupported). 쓰려면 로더
+    // worker(loader.worker)가 있어야 한다. 이 객체보다 오래 살아야 한다.
+    StreamedBulkIo* streamedIo = nullptr;
+    // 진행 IO 수 상한이다(0은 InvalidArgument).
+    uint32 streamedMaxInFlight = StreamedBulkMaxInFlight;
 };
 
 struct AssetManagerPumpBudget {
@@ -396,6 +403,20 @@ public:
     // 그 오류다.
     Result<AssetFootprint> EstimatePrimaryAsset(AssetId asset,
                                                 Span<const StringView> bundles) const noexcept;
+
+    // lease가 가리키는 에셋 패키지의 스트리밍 bulk(sidecar) 하나를 연다(AS 20.6 3 — IO 없음, 첫
+    // Read가 worker에서 파일을 연다). 손잡이는 패키지가 아니라 계수된 sidecar 파일을 쥐어 lease
+    // 반납 뒤에도 읽는다. AssetManager 파괴 전에 놓아야 한다.
+    //
+    // 사용 예:
+    //   auto bulk = manager.OpenStreamedBulk(lease, clip->payload);
+    //   if (bulk) { auto handle = bulk.Value().Read(0, buffer.View(), BulkReadPriority::Normal,
+    //                                               OnLoaded, &state); }
+    //
+    // 오류(검사 순서): WrongThread, Shutdown 뒤 ShuttingDown, 범위 IO 없음 Unsupported, 회수·무효
+    // lease StaleHandle, 빈 ref InvalidArgument, 없는 bulkId NotFound, 다른 값 TypeMismatch, 패키지
+    // 안 bulk Unsupported, 할당 실패.
+    Result<StreamedBulk> OpenStreamedBulk(const AssetLease& lease, const BulkDataRef& ref) noexcept;
 
     // 보류 명령을 취소한다(fail에 Cancelled를 다음 Pump에서 한 번). 이미 끝났으면 무동작.
     // 오류: WrongThread, 무효 handle StaleHandle.

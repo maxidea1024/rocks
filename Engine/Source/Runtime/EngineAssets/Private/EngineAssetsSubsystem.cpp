@@ -250,6 +250,12 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     }
 
     files_ = Move(files.Value());
+    auto streamedFiles = UniquePtr<AsyncStreamedBulkIo>::TryMake(allocator, allocator, io_);
+    if (!streamedFiles) {
+        return fail("streamed bulk io", streamedFiles.Error());
+    }
+
+    streamedFiles_ = Move(streamedFiles.Value());
     auto scheduler = UniquePtr<WorkerScheduler>::TryMake(allocator, allocator);
     if (!scheduler) {
         return fail("loader scheduler", scheduler.Error());
@@ -280,6 +286,7 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     config.loader.runtimeProfile = profile_.View();
     config.loader.io = files_.Get();
     config.loader.worker = worker_.Get();
+    config.streamedIo = streamedFiles_.Get();
     config.loader.limits.maxPackagesInFlight = static_cast<uint32>(MaxPackagesInFlightVar.Get());
     config.loader.limits.maxTempBytes = static_cast<uint64>(MaxTempBytesVar.Get());
     config.loader.inFrame = &FrameRunning;
@@ -417,6 +424,7 @@ void EngineAssetsSubsystem::Teardown() noexcept {
         scheduler_.Reset();
     }
 
+    streamedFiles_.Reset();
     files_.Reset();
     if (ioStarted_) {
         if (auto stopped = io_.Shutdown(); !stopped) {

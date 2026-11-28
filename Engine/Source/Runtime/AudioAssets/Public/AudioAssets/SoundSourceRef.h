@@ -2,6 +2,7 @@
 
 #include <Audio/DistanceAttenuation.h>
 #include <AudioAssets/AttenuationTypes.h>
+#include <AudioAssets/MixBusData.h>
 #include <Core/Math/Vector3.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Optional.h>
@@ -88,6 +89,10 @@ struct SoundAttenuation {
     float occlusionLowPassFrequency = MaxAttenuationFilterFrequency;
     float occlusionVolumeAttenuation = 1.0f;
     float occlusionInterpolationSeconds = DefaultOcclusionInterpolationSeconds;
+    // 버스 send(3.45.7절 — 켰을 때 앞 busSendCount개, 모두 post)다.
+    bool enableBusSends = false;
+    uint32 busSendCount = 0;
+    MixBusSendValue busSends[MaxMixBusSends];
 };
 
 // pcm(통째 PCM)과 stream(실시간 디코드할 압축 데이터 — 3.40.3절) 중 하나만 쓴다. 채널·rate·frame
@@ -116,6 +121,12 @@ struct SoundPlayable {
     // 동시 발음 그룹이다(3.41.2절 — 앞 concurrencyCount개, 없으면 제한 없음).
     uint32 concurrencyCount = 0;
     SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
+    // 버스(3.45.7절): 기본 버스(없으면 분류·엔진 기본·Master)와 그 send 켜기, 버스 send와 켜기다.
+    MixBusRef bus;
+    bool enableBaseBus = true;
+    bool enableBusSends = true;
+    uint32 busSendCount = 0;
+    MixBusSendValue busSends[MaxMixBusSends];
     // 진단용 원본 에셋과 revision이다(메모리 생성이면 빈 값).
     AssetId asset;
     uint64 revision = 0;

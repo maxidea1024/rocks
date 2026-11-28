@@ -80,6 +80,11 @@ public:
         category_ = Move(chain);
     }
 
+    // 버스 send(UE SetSubmixSend — 3.45.9절)다. 재생 중이면 그 재생에만 내고, 아니면 다음 Play
+    // 한 번에 쓸 send로 둔다(같은 버스면 level만 바꾼다 — UE PendingSubmixSends). 빈 ref·음수·
+    // 비유한은 InvalidArgument, 서로 다른 버스가 MaxVoiceSends를 넘으면 CapacityExceeded다.
+    Result<void> SetBusSend(const MixBusRef& bus, float level) noexcept;
+
     // emitter에 붙여 재생한다. 재생 중이면 먼저 멈춘다(UE Play와 같다). 오류: 사운드 없음·범위 밖
     // 배수(InvalidArgument), 그 밖은 AudioWorldSubsystem::PlayAttached와 같다. 등록 전이거나
     // World에 AudioWorldSubsystem이 없으면 NotReady다.
@@ -126,6 +131,9 @@ private:
     ROCKS_NATIVE() uint32 concurrencyCount_ = 0;
     ROCKS_NATIVE() SoundConcurrencyEntry concurrency_[MaxConcurrencyGroups];
     ROCKS_NATIVE() SoundCategoryChainRef category_;
+    // 다음 Play에 쓸 버스 send다(UE PendingSubmixSends).
+    ROCKS_NATIVE() uint32 busSendCount_ = 0;
+    ROCKS_NATIVE() PlayBusSend busSends_[audio::MaxVoiceSends];
 };
 
 } // namespace rocks

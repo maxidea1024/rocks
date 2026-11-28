@@ -1,6 +1,8 @@
 #include "AssetManagerInternal.h"
 
+#include <AssetRuntime/CookedManifest.h>
 #include <AssetRuntime/Package.generated.h>
+#include <Core/Text/StringBuilder.h>
 #include <Core/Move.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -75,7 +77,9 @@ Result<void> AssetManager::Initialize(AssetDiagnostic* failure) noexcept {
     const AssetLoaderConfig& loader = config_.loader;
     if (impl_ != nullptr || loader.allocator == nullptr || loader.types == nullptr ||
         loader.manifest == nullptr || loader.registry != nullptr || config_.observerMaxKeys == 0 ||
-        config_.maxDeferredCommands == 0) {
+        config_.maxDeferredCommands == 0 ||
+        (config_.streamedIo != nullptr &&
+         (loader.worker == nullptr || config_.streamedMaxInFlight == 0))) {
         return fail(ErrorCode::InvalidArgument);
     }
 
@@ -135,6 +139,17 @@ Result<void> AssetManager::Initialize(AssetDiagnostic* failure) noexcept {
 
     for (usize index = 0; index < entries; ++index) {
         impl.entryPackage[index] = ManagerNoIndex;
+    }
+
+    if (config_.streamedIo != nullptr) {
+        auto streamed = UniquePtr<detail::StreamedBulkSystem>::TryMake(
+            allocator, allocator, *config_.streamedIo, *loader.worker, config_.streamedMaxInFlight);
+        if (!streamed) {
+            discard();
+            return fail(streamed.Error());
+        }
+
+        impl.streamed = Move(streamed.Value());
     }
 
     return Result<void>::Success();
@@ -597,8 +612,89 @@ Result<void> AssetManager::Shutdown() noexcept {
     (void)impl.DeliverPrimary();
     (void)impl.RunDeferred();
     impl.DrainReleases();
+    // 범위 읽기를 먼저 끝낸다(worker가 아직 산다 — AS 20.6 10).
+    if (impl.streamed.Get() != nullptr) {
+        impl.streamed->Shutdown();
+    }
+
     (void)impl.loader->Shutdown();
     return Result<void>::Success();
+}
+
+Result<StreamedBulk> AssetManager::OpenStreamedBulk(const AssetLease& lease,
+                                                    const BulkDataRef& ref) noexcept {
+    using Out = StreamedBulk;
+    if (impl_ == nullptr) {
+        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Impl& impl = *impl_;
+    if (!impl.OnOwnerThread()) {
+        return Result<Out>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.shutDown) {
+        return Result<Out>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    if (impl.streamed.Get() == nullptr) {
+        return Result<Out>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (lease.manager_ != this ||
+        !impl.ValidSlot(lease.slot_, lease.generation_, ManagerSlotKind::Lease) ||
+        impl.Slot(lease.slot_).revoked) {
+        return Result<Out>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (ref.IsEmpty()) {
+        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const ManagerSlot& slot = impl.Slot(lease.slot_);
+    auto borrow = impl.registry->Resolve<Package>(impl.access, slot.packageHandle);
+    if (!borrow) {
+        return Result<Out>::Failure(borrow.Error());
+    }
+
+    auto package = borrow.Value().Get();
+    if (!package) {
+        return Result<Out>::Failure(package.Error());
+    }
+
+    auto bulkSlot = package.Value()->BulkSlot(ref);
+    if (!bulkSlot) {
+        return Result<Out>::Failure(bulkSlot.Error());
+    }
+
+    const PackageSidecarState* sidecar = package.Value()->Sidecar();
+    const CookedManifestEntry* entry = config_.loader.manifest->Find(slot.asset);
+    if (!bulkSlot.Value().streamed || sidecar == nullptr || entry == nullptr) {
+        return Result<Out>::Failure(ErrorCode::Unsupported);
+    }
+
+    // sidecar 경로 = 쿠킹 루트 + "/" + 내용 주소 이름(AS 20.1 3).
+    StringBuilder<256> path(impl.allocator);
+    Result<void> built = path.TryAppend(impl.loaderConfig.cookedRoot);
+    if (built) {
+        built = path.TryAppendAscii('/');
+    }
+
+    if (built) {
+        built = AppendCookedSidecarPath(path, entry->asset, entry->sidecarSha256);
+    }
+
+    if (!built) {
+        return Result<Out>::Failure(built.Error());
+    }
+
+    auto file = impl.streamed->Acquire(path.View(), *sidecar);
+    if (!file) {
+        return Result<Out>::Failure(file.Error());
+    }
+
+    return Result<Out>::Success(
+        StreamedBulk(file.Value(), bulkSlot.Value().offset, bulkSlot.Value().rawBytes));
 }
 
 // ---- handle 클래스 ----

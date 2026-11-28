@@ -58,6 +58,14 @@ struct AudioControlStats {
     uint32 pausedPlaybacks = 0;
     // 믹서의 읽지 않은 누적을 읽지 못해 커서 진행을 다음 묶음으로 미룬 수다(누계 — 3.44.6절).
     uint64 cursorUnreadRetries = 0;
+    // 버스(3.45.8절): 지금 plan에 든 버스 수(Master 제외), plan 게시 수·미채택이 차서 미룬 수,
+    // 칸 부족 대체 수, 스냅숏 사이 부모 순환 수, send 수 초과로 버린 재생 수(누계)다.
+    uint32 liveBuses = 0;
+    uint64 busPlanPublishes = 0;
+    uint64 busPlanRetries = 0;
+    uint64 busCapacityFallbacks = 0;
+    uint64 busParentCycles = 0;
+    uint64 droppedBusSends = 0;
 };
 
 } // namespace rocks

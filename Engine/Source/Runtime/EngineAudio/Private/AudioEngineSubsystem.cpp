@@ -77,7 +77,7 @@ struct AudioEngineSubsystem::Control {
 AudioEngineSubsystem::AudioEngineSubsystem(Allocator& allocator) noexcept
     : allocator_(allocator), playbacks_(allocator), freeSlots_(allocator), ignored_(allocator),
       delivering_(allocator), scenes_(allocator), sceneEpochs_(allocator), emitters_(allocator),
-      deferredOcclusionAnswers_(allocator), freeEmitters_(allocator),
+      busModifiers_(allocator), deferredOcclusionAnswers_(allocator), freeEmitters_(allocator),
       pendingSceneRemovals_(allocator), freeBatches_(allocator) {
 }
 
@@ -157,11 +157,13 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
     int32 bufferSetting = 0;
     int32 rateSetting = 0;
     int32 voicesSetting = int32{DefaultMaxActiveVoices};
+    int32 busesSetting = int32{audio::DefaultMaxBuses};
     if (engine.Settings() != nullptr) {
         blockSetting = MixerBlockFramesVar.Get();
         bufferSetting = MixerBufferCountVar.Get();
         rateSetting = MixerSampleRateVar.Get();
         voicesSetting = MaxVoicesVar.Get();
+        busesSetting = MixerMaxBusesVar.Get();
     }
 
     const uint32 blockFrames = NearestBlockFrames(blockSetting);
@@ -187,6 +189,8 @@ Result<void> AudioEngineSubsystem::OpenDevice(Engine& engine) noexcept {
     mixerConfig.sampleRate = sampleRate != 0 ? sampleRate : audio::DefaultMixSampleRate;
     mixerConfig.blockFrames = blockFrames;
     mixerConfig.maxVoices = maxVoices * MixerVoiceHeadroomFactor;
+    // 버스 칸(Master 포함 — 3.45.3절)이다. CVar 범위가 [1, MaxMixerBuses]다.
+    mixerConfig.maxBuses = static_cast<uint32>(busesSetting < 1 ? 1 : busesSetting);
 
     // 스트림 디코드 서비스(3.40.2절): 제어가 Inline이면 서비스도 Inline이다(제어 묶음이 펌프한다).
     int32 ringSetting = int32{audio::StreamRingMinFrames};
@@ -323,6 +327,14 @@ Result<void> AudioEngineSubsystem::StartControl() noexcept {
         (void)SetBaseMix(defaultBaseMix_);
     }
 
+    // 제어가 서기 전에 건 버스 실행 배수도 첫 묶음에 싣는다(3.45.8절 — 버스가 없어도 남는다).
+    for (const GameBusModifier& modifier : busModifiers_) {
+        if (!current_->busModifiers.TryPushBack(
+                BusModifierUpdate{modifier.key, modifier.volume, modifier.wet, modifier.dry})) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -377,6 +389,13 @@ void AudioEngineSubsystem::OnFrameEnd(Engine& engine) noexcept {
     }
 
     current_->masterGain = MasterGainTarget(engine);
+    if (busSettingsDirty_) {
+        current_->busSettingsChanged = true;
+        current_->masterBus = masterBus_;
+        current_->baseDefaultBus = baseDefaultBus_;
+        busSettingsDirty_ = false;
+    }
+
     current_->concurrencyMinDistanceDelta =
         engine.Settings() != nullptr ? engine_audio_detail::ConcurrencyMinDistanceDeltaVar.Get()
                                      : 0.0f;
@@ -734,6 +753,140 @@ Result<void> CheckMix(const MixSnapshotRef& mix) noexcept {
 }
 
 } // namespace
+
+Result<void> AudioEngineSubsystem::SetMasterBus(MixBusRef bus) noexcept {
+    if (bus) {
+        if (auto valid = ValidateMixBusChain(*bus.Get()); !valid) {
+            return valid;
+        }
+
+        // Master는 루트다(UE Main submix에는 부모가 없다).
+        if (bus.Get()->depth != 1) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    masterBus_ = Move(bus);
+    busSettingsDirty_ = true;
+    return Result<void>::Success();
+}
+
+Result<void> AudioEngineSubsystem::SetBaseDefaultBus(MixBusRef bus) noexcept {
+    if (bus) {
+        if (auto valid = ValidateMixBusChain(*bus.Get()); !valid) {
+            return valid;
+        }
+    }
+
+    baseDefaultBus_ = Move(bus);
+    busSettingsDirty_ = true;
+    return Result<void>::Success();
+}
+
+Result<void> AudioEngineSubsystem::SetBusModifier(const MixBusRef& bus, BusModifierKind kind,
+                                                  float value) noexcept {
+    if (!bus || !engine_audio_detail::IsFiniteInRange(value, 0.0f, NumericLimits<float>::Max())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto valid = ValidateMixBusChain(*bus.Get()); !valid) {
+        return valid;
+    }
+
+    const uint64 key = bus.Get()->Key();
+    GameBusModifier* found = nullptr;
+    for (GameBusModifier& modifier : busModifiers_) {
+        if (modifier.key == key) {
+            found = &modifier;
+            break;
+        }
+    }
+
+    if (found == nullptr) {
+        if (busModifiers_.Size() >= AudioBusModifierCapacity) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        if (!busModifiers_.TryPushBack(GameBusModifier{key})) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        found = &busModifiers_[busModifiers_.Size() - 1];
+    }
+
+    switch (kind) {
+    case BusModifierKind::Volume:
+        found->volume = value;
+        break;
+    case BusModifierKind::Wet:
+        found->wet = value;
+        break;
+    case BusModifierKind::Dry:
+        found->dry = value;
+        break;
+    }
+
+    // 장치가 없거나 아직 열리지 않았으면 표에만 둔다(OpenDevice가 첫 묶음에 모두 싣는다).
+    if (current_ == nullptr || drained_) {
+        return Result<void>::Success();
+    }
+
+    // 같은 묶음 안의 같은 버스는 최신값 하나로 합친다.
+    BusModifierUpdate update{found->key, found->volume, found->wet, found->dry};
+    for (BusModifierUpdate& pending : current_->busModifiers) {
+        if (pending.key == key) {
+            pending = update;
+            return Result<void>::Success();
+        }
+    }
+
+    if (!current_->busModifiers.TryPushBack(update)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> AudioEngineSubsystem::SetBusOutputVolume(const MixBusRef& bus, float volume) noexcept {
+    return SetBusModifier(bus, BusModifierKind::Volume, volume);
+}
+
+Result<void> AudioEngineSubsystem::SetBusWetLevel(const MixBusRef& bus, float level) noexcept {
+    return SetBusModifier(bus, BusModifierKind::Wet, level);
+}
+
+Result<void> AudioEngineSubsystem::SetBusDryLevel(const MixBusRef& bus, float level) noexcept {
+    return SetBusModifier(bus, BusModifierKind::Dry, level);
+}
+
+Result<void> AudioEngineSubsystem::SetBusSend(PlaybackHandle handle, const MixBusRef& bus,
+                                              float level) noexcept {
+    if (!handle.IsValid() || !bus ||
+        !engine_audio_detail::IsFiniteInRange(level, 0.0f, NumericLimits<float>::Max())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto valid = ValidateMixBusChain(*bus.Get()); !valid) {
+        return valid;
+    }
+
+    GamePlayback* playback = FindLive(handle);
+    if (playback == nullptr || playback->status == PlaybackStatus::Ignored ||
+        playback->status == PlaybackStatus::Finished || drained_) {
+        return Result<void>::Success();
+    }
+
+    ControlCommand command;
+    command.type = ControlCommandType::SetBusSend;
+    command.handle = handle;
+    command.busSendCount = 1;
+    command.busSends[0] = PlayBusSend{bus, level};
+    if (!current_->commands.TryPushBack(Move(command))) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return Result<void>::Success();
+}
 
 Result<void> AudioEngineSubsystem::SetDefaultCategory(SoundCategoryChainRef chain) noexcept {
     if (chain) {
@@ -1156,6 +1309,23 @@ Result<void> AudioEngineSubsystem::ValidateOptions(const SoundSourceRef& sound,
         }
     }
 
+    // 재생 단위 버스 send(3.45.7절).
+    if (options.busSendCount > audio::MaxVoiceSends) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (uint32 index = 0; index < options.busSendCount; ++index) {
+        const PlayBusSend& send = options.busSends[index];
+        if (!send.bus ||
+            !engine_audio_detail::IsFiniteInRange(send.level, 0.0f, NumericLimits<float>::Max())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto valid = ValidateMixBusChain(*send.bus.Get()); !valid) {
+            return valid;
+        }
+    }
+
     if (playable->looping && playable->loopEnd != 0 && options.startFrame >= playable->loopEnd) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -1234,6 +1404,11 @@ Result<PlaybackHandle> AudioEngineSubsystem::Accept(const SoundSourceRef& sound,
             options.overrideConcurrency ? options.concurrencyCount : playable.concurrencyCount;
         for (uint32 index = 0; index < command.concurrencyCount; ++index) {
             command.concurrency[index] = entries[index];
+        }
+
+        command.busSendCount = options.busSendCount;
+        for (uint32 index = 0; index < options.busSendCount; ++index) {
+            command.busSends[index] = Move(options.busSends[index]);
         }
 
         if (!current_->commands.TryPushBack(Move(command))) {

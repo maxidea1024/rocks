@@ -3,15 +3,18 @@
 #include <AssetRuntime/Package.h>
 #include <AudioAssets/AttenuationSettings.h>
 #include <AudioAssets/ConcurrencyGroup.h>
+#include <AudioAssets/MixBus.h>
+#include <AudioAssets/MixBusSend.h>
 #include <AudioAssets/SoundCategory.h>
 #include <AudioAssets/SoundSourceRef.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
+#include <Object/StructRefArray.h>
 
 // 재생할 수 있는 사운드 에셋의 기반이다(Docs/Design/AudioSystem 3.9·3.35.3절, UE USoundBase 대응).
-// volume·pitch·감쇠·분류 참조와 재생 관리(우선순위·가상화·동시 발음 — 3.41절)를 가진다(버스는
-// AU7f).
+// volume·pitch·감쇠·분류 참조, 재생 관리(우선순위·가상화·동시 발음 — 3.41절), 버스
+// 라우팅(3.45.7절)을 가진다.
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드(게임 스레드) 전용이다.
 namespace rocks {
@@ -23,7 +26,8 @@ class ROCKS_AUDIOASSETS_API SoundSource : public Asset {
     ROCKS_GENERATED_BODY()
 
 public:
-    explicit SoundSource(Allocator& allocator) noexcept : concurrency(allocator) {
+    explicit SoundSource(Allocator& allocator) noexcept
+        : concurrency(allocator), busSends(allocator) {
     }
 
     // [0, MaxVoiceGain]다.
@@ -51,6 +55,14 @@ public:
     ROCKS_PROPERTY() ObjectRefArray<ConcurrencyGroup> concurrency;
     ROCKS_PROPERTY() bool overrideConcurrency = false;
     ROCKS_PROPERTY() SoundConcurrencySettings concurrencyOverrides;
+    // 기본 출력 버스다(UE SoundSubmixObject — 3.45.7절). 비었으면 분류의 defaultBus, 엔진
+    // BaseDefaultBus, Master 순이다. enableBaseBus를 끄면 기본 버스 send level이 0이다(UE
+    // bEnableBaseSubmix).
+    ROCKS_PROPERTY() ObjectRef<MixBus> bus;
+    ROCKS_PROPERTY() bool enableBaseBus = true;
+    // 버스 send다(UE SoundSubmixSends·bEnableSubmixSends — 최대 MaxMixBusSends).
+    ROCKS_PROPERTY() StructRefArray<MixBusSend> busSends;
+    ROCKS_PROPERTY() bool enableBusSends = true;
 
     // 재생 스냅숏을 만든다(3.35.3절): 파생 클래스의 PCM·loop와 이 클래스의 volume·pitch, 감쇠
     // 참조·동시 발음 그룹이 가리키는 값을 복사한다. registry·access는 이 객체와 감쇠·그룹 객체를
