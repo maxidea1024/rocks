@@ -461,6 +461,8 @@ void AudioDeviceContext::UpdateConcurrency(ControlBatch& batch, uint64 now) noex
         }
 
         if (now >= detached.fadeEnd) {
+            // 정지 꼬리 동안 일시정지 전환이 다시 낼 값은 fader 끝값을 곱한 것이다.
+            detached.params.gain *= detached.fader.At(now);
             detached.fading = false;
             (void)mixer_.RequestStop(detached.voice, audio::DefaultStopFadeFrames);
             continue;

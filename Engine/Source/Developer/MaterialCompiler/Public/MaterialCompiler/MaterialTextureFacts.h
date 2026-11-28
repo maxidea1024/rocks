@@ -6,8 +6,8 @@
 
 // 번역 입력의 텍스처 에셋 사실 하나다(Docs/Design/MaterialSystem 6.10절 MS2c3, 16절 MAS3). 쿠킹·
 // 에디터가 텍스처 에셋에서 채운다. 번역은 참조 해석, 샘플 종류 검사(V10 — UE
-// GetSamplerTypeForTexture·VerifySamplerType), 큰 좌표 uv 주소 모드에만 쓰고 IR·키에 넣지 않는다
-// (5장 V10).
+// GetSamplerTypeForTexture·VerifySamplerType), 큰 좌표 uv 주소 모드에 쓰고 IR에는 넣지 않는다.
+// 번역 너겟 키는 참조 텍스처의 사실을 담는다(12.8절 — 사실이 바뀌면 번역 결과가 바뀔 수 있다).
 //
 // 사용 예:
 //   MaterialTextureFacts facts;

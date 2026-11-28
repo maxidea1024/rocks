@@ -33,5 +33,6 @@
   },
   "features": ["compute"],
   "deviceRequirements": ["OPENGL_4_3", "GL_ARB_ES3_2_compatibility", "GL_ARB_clip_control"],
+  "platformClass": ["Pc", "Mobile"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

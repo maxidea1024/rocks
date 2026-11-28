@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/HashMap.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Fatal.h>
 
@@ -156,6 +156,8 @@ struct ObjectRegistry::SlotCold {
     uint16 pathBytes = 0;
     bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
     bool destroyListed = false; // 파괴 요청 목록에 있다(아직 TakeDestroyRequests가 꺼내지 않았다)
+    // 생성 출처다(Object/ObjectOrigin.h — 생성 때마다 CreatePending이 정한다).
+    ObjectOrigin origin = ObjectOrigin::Default;
 };
 
 struct ObjectRegistry::Chunk {

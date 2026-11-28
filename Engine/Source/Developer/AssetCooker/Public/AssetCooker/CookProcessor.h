@@ -21,6 +21,25 @@ namespace rocks {
 
 class WorkerScheduler;
 
+// 쿠킹 대상의 의존 패키지를 여는 길이다(Docs/Design/MaterialSystem 16절 MAS7 — 머티리얼 번역이
+// 함수·커브·atlas 같은 Build 의존을 읽는다. 패키지 열기는 Hard·EditorOnly 닫힘만 연다). 실행기가
+// 쿠킹 문맥에 준다. 연 패키지는 실행기가 대상 쿠킹이 끝난 뒤 닫는다(Release — 처리기는 닫지
+// 않는다). 열 때 원본 재구성 hook이 패키지를 dirty로 만들어도 쿠킹은 메모리 값을 쓴다(저장하지
+// 않는다).
+//
+// 스레드: 쿠킹 실행기 스레드(Registry 소유 스레드) 전용이다. 한 번 열기 뒤에는 그 전에 얻은 다른
+// 패키지 정보 참조를 다시 쓰지 않는다(열린 집합이 커지며 옮겨질 수 있다 — handle은 그대로다).
+class CookDependencyOpener {
+public:
+    // id 패키지를 열어 그 Package handle을 돌려준다(이미 열렸으면 그 handle — 대표 에셋은
+    // Registry FindChild(access, package, "")). 오류: EditorPackageSet::Open과 같다(failure 진단 —
+    // 색인에 없음 NotFound 등), 할당 실패.
+    virtual Result<ObjectHandle> Open(AssetId id, AssetDiagnostic* failure) noexcept = 0;
+
+protected:
+    ~CookDependencyOpener() = default;
+};
+
 // 처리기 하나의 쿠킹 문맥이다(실행기가 채운다 — A4c2). 포인터는 Cook 동안만 유효하다.
 struct CookContext {
     Allocator* allocator = nullptr;
@@ -42,12 +61,17 @@ struct CookContext {
     bool verifyNuggets = false;
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
+    // sidecar 파일 byte를 받는 곳이다(AssetSystem 20.5 2 — 빈 출력). null이면 Sidecar 배치를 패키지
+    // 안으로 돌린다(서버 프로필은 sidecar를 만들지 않는다).
+    PackageSink* sidecar = nullptr;
     AssetDiagnostic* failure = nullptr;
     // 처리기 안 병렬 실행이다(AssetSystem 12.17.9 4 — 텍스처 블록 압축). scheduler가 있으면
     // scratch는 동시 Allocate·Deallocate가 안전한 allocator여야 한다. 결과 byte와 무관하다(너겟
     // 키에 넣지 않는다).
     WorkerScheduler* scheduler = nullptr;
     Allocator* scratch = nullptr;
+    // 의존 패키지 열기다(MAS7 — null이면 처리기는 Build 의존을 열 수 없다).
+    CookDependencyOpener* dependencies = nullptr;
     // 처리기 경고를 받는 곳이다(null이면 버린다 — 12.14절 10번). 처리기는 warning = true·asset =
     // 대상 id로 넣고, 실행기가 실행 진단으로 옮긴다(게시를 막지 않는다). push의 할당 실패는
     // OutOfMemory로 돌려준다.
@@ -74,7 +98,8 @@ public:
 
     // 쿠킹 패키지를 context.sink에 쓴다. 기본: WritePackage(kind Cooked, profileId·profileSettings·
     // cookerVersion, 프로파일 bulkCodec·bulkAlignment(0이면 PackageDefaultCookedBulkAlignment),
-    // bulkSource). 오류: WritePackage의 오류(진단은 context.failure).
+    // bulkSource, sidecar — null이면 bulkSource의 Sidecar 배치를 Package로 바꿔 쓴다). 오류:
+    // WritePackage의 오류(진단은 context.failure).
     virtual Result<void> Cook(CookContext& context) const noexcept;
 
 protected:

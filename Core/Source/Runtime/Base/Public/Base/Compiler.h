@@ -283,6 +283,21 @@
 #define ROCKS_TARGET_ARM64_AES __attribute__((target("neon,aes,fuse-aes")))
 #endif
 
+// SHA-256 명령 경로를 함수 하나에만 켜는 target 속성이다(Docs/Design/CoreDataFoundations.ko.md
+// 6절). 규칙은 위 AES 매크로와 같다.
+//   ROCKS_TARGET_X64_SHA     SHA-NI(SHA256RNDS2·SHA256MSG1·SHA256MSG2)와 SSE4.1(SSSE3 포함 —
+//                            PSHUFB·PALIGNR·PBLENDW). 감지 조건: sha && ssse3 && sse41.
+//                            ROCKS_ARCH_X64에서만 정의한다.
+//   ROCKS_TARGET_ARM64_SHA2  NEON·SHA2(SHA256H·SHA256H2·SHA256SU0·SHA256SU1). 감지 조건: armSha2.
+//                            ROCKS_ARCH_ARM64에서만 정의한다.
+// - 정책 검사 target-intrinsics: 이 매크로와 SHA 계열 intrinsics는 Core/Private/Hash/에서만
+// 쓴다.
+#if ROCKS_ARCH_X64
+#define ROCKS_TARGET_X64_SHA __attribute__((target("sha,sse4.1")))
+#elif ROCKS_ARCH_ARM64
+#define ROCKS_TARGET_ARM64_SHA2 __attribute__((target("neon,sha2")))
+#endif
+
 // Clang thread safety analysis 주석이다(Docs/Design/Synchronization 13.1절, D20). 빌드는 Rocks
 // 모듈에 -Wthread-safety를 켜고 경고를 오류로 둔다. 컴파일 때 도는 유일한 경쟁 검사라 실행 운에
 // 기대지 않는다.

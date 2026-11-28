@@ -4,7 +4,7 @@
 #include <AssetNugget/NuggetRequest.h>
 #include <Base/PlacementNew.h>
 #include <Core/Diagnostics/Log.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/FileError.h>
 #include <Platform/Atomics.h>
 #include <Platform/File.h>

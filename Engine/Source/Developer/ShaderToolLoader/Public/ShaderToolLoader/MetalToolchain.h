@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/StringView.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 

@@ -1,9 +1,9 @@
-#include <Core/Encoding/Sha256File.h>
+#include <Core/Hash/Sha256File.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Process.h>
 #include <TestSupport/Test.h>
 
-// 연 파일의 SHA-256 시험이다(Core/Encoding/Sha256File.h — Docs/Design/AssetSystem 10.2절 "A4d
+// 연 파일의 SHA-256 시험이다(Core/Hash/Sha256File.h — Docs/Design/AssetSystem 10.2절 "A4d
 // 구현 세부"): 조각보다 큰 파일(여러 조각 + 끝 조각)·빈 파일은 한 번에 구한 SHA-256·크기와 같고,
 // 읽던 위치부터 끝까지만 본다, 빈 buffer는 InvalidArgument다. 읽기 실패는 메모리 파일 시스템
 // 고장으로 EngineTests(`AssetIndex_ContentHashRejects`)가 본다.

@@ -1,17 +1,18 @@
 #include <AssetCooker/CookBulkSource.h>
 #include <AssetRuntime/BulkStore.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 
 // 쿠킹 처리기의 연쇄 bulk 원본이다(Docs/Design/AssetSystem 12.14절 9번).
 namespace rocks {
 
-Result<BulkDataRef> CookChainedBulkSource::Add(Span<const uint8> bytes) noexcept {
+Result<BulkDataRef> CookChainedBulkSource::Add(Span<const uint8> bytes,
+                                               PackageBulkPlacement placement) noexcept {
     // 내려가는 id가 저장하지 않은 bulk의 최상위 bit 범위로 내려오지 않게 한다.
     if (entries_.Size() >= CookBulkIdFirst - UnsavedBulkIdBit) {
         return Result<BulkDataRef>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    if (auto pushed = entries_.TryPushBack(bytes); !pushed) {
+    if (auto pushed = entries_.TryPushBack(Entry{bytes, placement}); !pushed) {
         return Result<BulkDataRef>::Failure(pushed.Error());
     }
 
@@ -23,8 +24,8 @@ Result<BulkDataRef> CookChainedBulkSource::Add(Span<const uint8> bytes) noexcept
 }
 
 Result<Span<const uint8>> CookChainedBulkSource::ReadBulk(const BulkDataRef& ref) noexcept {
-    if (const Span<const uint8>* own = Find(ref.bulkId)) {
-        return Result<Span<const uint8>>::Success(*own);
+    if (const Entry* own = Find(ref.bulkId)) {
+        return Result<Span<const uint8>>::Success(own->bytes);
     }
 
     if (next_ == nullptr) {
@@ -42,7 +43,15 @@ Result<PackageStoredBulk> CookChainedBulkSource::ReadStoredBulk(const BulkDataRe
     return next_->ReadStoredBulk(ref);
 }
 
-const Span<const uint8>* CookChainedBulkSource::Find(uint32 bulkId) const noexcept {
+PackageBulkPlacement CookChainedBulkSource::Placement(const BulkDataRef& ref) const noexcept {
+    if (const Entry* own = Find(ref.bulkId)) {
+        return own->placement;
+    }
+
+    return next_ != nullptr ? next_->Placement(ref) : PackageBulkPlacement::Package;
+}
+
+const CookChainedBulkSource::Entry* CookChainedBulkSource::Find(uint32 bulkId) const noexcept {
     if (bulkId == 0) {
         return nullptr;
     }

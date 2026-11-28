@@ -11,7 +11,10 @@
 namespace rocks::platform {
 
 struct CpuFeatures {
-    // x64
+    // x64. ssse3·sse41·sse42는 CPUID에서 서로 독립 bit다(실제 CPU는 함께 갖추지만 가상 머신이
+    // 일부만 가릴 수 있다).
+    bool ssse3 = false;
+    bool sse41 = false;
     bool sse42 = false;
     bool popcnt = false;
     // AVX 계열은 CPU 지원과 OS의 YMM 상태 저장 지원(XGETBV)이 모두 있을 때만 true다.

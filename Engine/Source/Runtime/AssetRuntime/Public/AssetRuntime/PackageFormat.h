@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <Meta/TypeSchema.h>
 #include <Object/AssetId.h>

@@ -390,7 +390,7 @@ internal static partial class ModuleMetaTests
         {
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
-                "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Encoding/Sha256.h>\nnamespace probe {\n" +
+                "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Hash/Sha256.h>\nnamespace probe {\n" +
                 "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : icon(allocator), any(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::AssetId source;\nROCKS_PROPERTY() rocks::Sha256Digest hash;\n" +
@@ -561,7 +561,7 @@ internal static partial class ModuleMetaTests
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module with an exported base");
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower"))))
             {
-                Verify.Equal(9, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 9");
+                Verify.Equal(10, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 10");
                 Verify.That(Type(descriptor, "probe::Parent").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "Exported"),
                     "the exported class carries the Exported flag");
             }
@@ -599,11 +599,11 @@ internal static partial class ModuleMetaTests
 
             layout.ApiValues.Clear();
 
-            // 이전 schema descriptor(schema 8 — Notify flag 이전)는 거부한다.
+            // 이전 schema descriptor(schema 9 — subobjects 이전)는 거부한다.
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module again");
             string mutated = layout.Generated("Mutated", "schema1.rocksmeta.json");
             Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
-            File.WriteAllText(mutated, File.ReadAllText(layout.Descriptor("Lower")).Replace("\"schema\": 9", "\"schema\": 8", StringComparison.Ordinal));
+            File.WriteAllText(mutated, File.ReadAllText(layout.Descriptor("Lower")).Replace("\"schema\": 10", "\"schema\": 9", StringComparison.Ordinal));
             await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "schema");
         });
 

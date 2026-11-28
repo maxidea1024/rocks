@@ -3,7 +3,7 @@
 #include <Base/Endian.h>
 #include <Base/NumericLimits.h>
 #include <Core/Assert.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Platform/Memory.h>
 
 namespace rocks::audio {

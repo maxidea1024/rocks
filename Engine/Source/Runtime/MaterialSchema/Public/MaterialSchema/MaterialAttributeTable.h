@@ -50,6 +50,11 @@ public:
         return entries_.Size();
     }
 
+    // index번째 등록 정의다(등록 순 — 번역 키가 id 순으로 다시 고른다, 12.8절). index < Size().
+    const MaterialAttributeDefinition& At(usize index) const noexcept {
+        return *entries_[index].definition;
+    }
+
 private:
     struct Entry {
         const MaterialAttributeDefinition* definition = nullptr;

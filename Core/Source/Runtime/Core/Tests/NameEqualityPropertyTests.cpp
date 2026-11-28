@@ -1,4 +1,4 @@
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/Name.h>
 #include <TestSupport/Test.h>
 

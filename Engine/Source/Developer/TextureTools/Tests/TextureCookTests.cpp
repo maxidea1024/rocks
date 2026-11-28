@@ -8,7 +8,7 @@
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageLoad.h>
 #include <AssetRuntime/PackageReader.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/NamePool.h>

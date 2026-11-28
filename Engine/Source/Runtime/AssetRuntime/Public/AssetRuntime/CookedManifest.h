@@ -6,7 +6,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Build/EngineVersion.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
@@ -350,8 +350,9 @@ ROCKS_ASSETRUNTIME_API Result<void> CheckCookedPackage(const CookedManifest& man
 
 // 파일 쪽 대조다(AS 11.6절 3 — 로더가 해석 전에 부른다): file 길이 = packageBytes(PackageBytes),
 // SHA-256 = packageSha256(PackageSha256). 오류는 CheckCookedPackage와 같다.
-Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
-                                    AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
+                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // 내용 쪽 대조다(AS 11.6절 3 — 로더가 Prepare 뒤에 부른다): contents의 종류(PackageKind)·
 // assetId(AssetId)·대표 에셋 타입(TypeId)·패키지 안 BulkIndex rawBytes 합(BulkRawBytes — sidecar
@@ -359,10 +360,10 @@ Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const
 // — 섹션이 없으면 sidecarBytes 0)·Summary 프로파일
 // 칸(PackageProfile)·Dependencies(PackageDependencies — (asset, kind) 순서 배열이 같아야 한다)를
 // manifest·entry와 본다. 오류는 CheckCookedPackage와 같다.
-Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
-                                        const CookedManifestEntry& entry,
-                                        const PackageContents& contents,
-                                        AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedPackageContents(const CookedManifest& manifest, const CookedManifestEntry& entry,
+                           const PackageContents& contents,
+                           AssetDiagnostic* failure = nullptr) noexcept;
 
 // 쿠킹 루트 기준 패키지 파일 경로(AS 4.2절 `Packages/<a>/<A>-<h>.rpkg`)를 out 뒤에 붙인다.
 //

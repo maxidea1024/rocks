@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-23, 개정 13(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-28, 개정 14(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -58,7 +58,7 @@
 |---|---|---|
 | `Renderer`(모듈) | Renderer 모듈 | 장면·view·pass 조립 |
 | `RenderData`(모듈, 계획 3.1) | `FPrimitiveSceneDesc`·`FLightSceneProxy` 생성 입력 일부 | 장치 없는 장면 기술 값 타입과 ID |
-| `RendererShaders`(모듈) | Renderer 모듈의 셰이더 타입 등록부(`IMPLEMENT_MATERIAL_SHADER_TYPE`, `R/BasePassRendering.cpp:180–192`) | pass 셰이더 타입·퍼뮤테이션·거르기 함수. 쿠커가 링크한다 |
+| `RendererShaders`(모듈) | Renderer 모듈의 셰이더 타입 등록부(`IMPLEMENT_MATERIAL_SHADER_TYPE`, `R/BasePassRendering.cpp:180–192`) | pass 셰이더 타입·퍼뮤테이션·거르기 함수. 쿠커가 셰이더 타입 등록부 원천으로 시작하는 엔진 모듈이다(MaterialCook은 링크하지 않는다 — 3.2절) |
 | 렌더 장면 `RenderScene` | `FScene`(`R/ScenePrivate.h:1624`) | 렌더 lane이 소유하는 장면 표(SoA) |
 | 렌더 인스턴스 `RenderInstanceId`·`RenderInstanceDesc` | `FPrimitiveSceneInfo`·`FPrimitiveSceneProxy`(`RPub/PrimitiveSceneInfo.h:269`, `EN/Public/PrimitiveSceneProxy.h:291`) | 그려지는 물체 하나와 그 기술 값 |
 | 장면 변경 목록 `SceneChangeList` | `FScenePrimitiveUpdates`·`FSceneUpdateChangeSet`(`R/ScenePrimitiveUpdates.h:54`, `R/RendererScene.cpp:5325`) | 프레임 packet에 담는 추가·제거·갱신 명령 |
@@ -119,12 +119,14 @@ Renderer ──▶ RendererShaders ──▶ MaterialSchema ──┘      │
    │   ├──▶ TextureStreaming ──▶ RenderBase              │
    │   └──▶ RenderGraph ──▶ RenderBase ──▶ Graphics      │
    └─────────────────────────────────────────────────────┘
-MaterialCook(Host) ──▶ RendererShaders(pass 셰이더 타입 목록)
+MaterialCook(Host) ──▶ ShaderCore 셰이더 타입 등록부(등록부 원천 — RendererShaders가 등록한 ShaderTypeMaterialShader 타입)
 ```
+
+- **MaterialCook과 `RendererShaders`(개정 14, 머티리얼 시스템 MRD18·셰이더 시스템 16.5절 SSD92).** MaterialCook은 `RendererShaders`를 링크하지 않는다. 쿠킹할 pass 셰이더 타입은 ShaderCore 셰이더 타입 등록부에서 `ShaderTypeMaterialShader` 표지를 단 타입이고, 등록부는 셰이더 라이브러리 쿠킹 단계와 같은 원천(`ShaderCookRegistrySource`)에서 받는다. `RendererShaders`는 그 원천이 시작하는 엔진 모듈 집합에 들어가 자기 타입을 등록한다. pass 타입 거르기는 `MaterialShaderTraits`를 정규 바이트로 받아(`ShaderMaterialShouldCompileFunction`, 셰이더 시스템 SSD86) `RendererShaders`가 MaterialSchema로 해석한다.
 
 - **번호표 위치(결정 RN5, 머티리얼 시스템 10.4절 D2).** 번호표의 정의 권한은 이 문서(14.2절)에 있다. 코드는 두 곳에 둔다: C++ 열거는 `RenderData`, HLSL 상수는 `/Engine/Shared/`의 C++·HLSL 공용 `.h`(셰이더 시스템 3절)다. C++ 열거는 공용 헤더의 값과 `static_assert`로 맞춘다. MaterialSchema는 `RenderData`만 참조하므로 `RendererShaders` → MaterialSchema 의존과 순환이 생기지 않는다. GBuffer 인코딩 의미(GBufferB.a 4 bit 등)는 `RendererShaders`에 남는다. UE도 C++·셰이더 공용 정의를 `Engine/Shaders/Shared/`에 둔다(예 `Engine/Shaders/Shared/SubstrateDefinitions.h`).
 
-- `RendererShaders`를 따로 두는 이유: 머티리얼 쿠킹은 "이 머티리얼로 컴파일할 pass 셰이더 타입 전체"를 알아야 한다. UE는 그 목록이 Renderer 모듈의 정적 등록이고 에디터·쿠커가 Renderer를 링크한다(`R/BasePassRendering.cpp:180–192`). Rocks 쿠커(Host)는 장치 모듈을 링크하지 않으므로 장치 없는 등록부를 분리한다(결정 RN11).
+- `RendererShaders`를 따로 두는 이유: 머티리얼 쿠킹은 "이 머티리얼로 컴파일할 pass 셰이더 타입 전체"를 알아야 한다. UE는 그 목록이 Renderer 모듈의 정적 등록이고 에디터·쿠커가 Renderer를 링크한다(`R/BasePassRendering.cpp:180–192`). Rocks 쿠커(Host)는 장치 모듈을 링크하지 않으므로 장치 없는 등록부를 분리한다(결정 RN11). 쿠커 안에서도 MaterialCook이 직접 링크하지 않고 등록부 원천으로 본다(개정 14).
 - RenderBase 14절이 "Renderer 설계"로 미룬 항목(`GBufferInfo`·`RendererInterface`·`SceneRenderingAllocator`·`ReadOnlyCVARCache`, MSAA resolve)은 이 배치를 따른다: GBuffer 메타는 `RendererShaders`, 장면 할당은 RenderBase CP3 프레임 arena, 설정은 ConfigSystem snapshot(RenderBase 12절), MSAA resolve는 RenderBase 그리기 유틸리티(18절 RQ16).
 - MaterialRuntime은 Renderer에 의존하지 않는다. Renderer가 MaterialRuntime의 셰이더 집합·파라미터 묶음을 소비한다(14절). 계획 14.6절 MaterialRuntime 의존(Core·RenderData·RHI 계약)과 같은 방향이고, 머티리얼 시스템 3.2절이 그 의존을 MaterialSchema·RenderBase·ShaderCore로 구체화했다.
 
@@ -990,3 +992,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
 - 개정 12(2026-11-23): [컴포넌트 도입](ComponentCatalog/11-Revisions.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).
 - 개정 13(2026-11-23): 디버그·편집 표시 결정(컴포넌트 도입 CD12, 권장안) — 4.2절을 UE와 같은 세 경로(디버그 합성·편집 합성·Shipping base pass)로 고침(개정 12의 "Shipping 처리기 미등록"은 UE와 달라 버림), 11.2절 PC9a·PC9b와 자리, 17절 RS13.
+- 개정 14(2026-11-28): 3.2절 — MaterialCook은 `RendererShaders`를 링크하지 않고 ShaderCore 셰이더 타입 등록부 원천에서 `ShaderTypeMaterialShader` 타입을 본다(머티리얼 시스템 MRD18, 셰이더 시스템 16.5절 SSD92). 2절 용어 표 `RendererShaders` 행과 의존 그림을 고쳤다. pass 타입 거르기는 traits 정규 바이트(셰이더 시스템 SSD86).

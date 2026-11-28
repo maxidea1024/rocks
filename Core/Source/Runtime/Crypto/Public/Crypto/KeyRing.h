@@ -5,7 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Delegate.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Move.h>

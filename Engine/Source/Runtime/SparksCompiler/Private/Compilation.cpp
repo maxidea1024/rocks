@@ -1,6 +1,6 @@
 #include <SparksCompiler/Compilation.h>
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"

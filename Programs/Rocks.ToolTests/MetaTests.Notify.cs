@@ -29,7 +29,7 @@ internal static partial class MetaTests
                 "ROCKS_FUNCTION(Pure) rocks::int32 Count() const noexcept { return count; }"));
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor)))
             {
-                Verify.Equal(9, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 9");
+                Verify.Equal(10, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 10");
                 JsonElement value = DescriptorType(descriptor, "probe::Value");
                 JsonElement Field(string name) => value.GetProperty("fields").EnumerateArray().Single(field => field.GetProperty("name").GetString() == name);
                 JsonElement Function(string name) =>

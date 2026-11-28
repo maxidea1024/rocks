@@ -55,7 +55,7 @@ auto runtimeName = type.Name();
 | `WeakObjectRef<T>` | `ValueKind::WeakObjectReference`(리플렉션 B9d1, `FieldKind::Value`); GC가 추적하지 않는 handle 값(`Object/ObjectRefs.h` — 대상이 죽으면 TryPin이 실패한다). `value.type`이 기대 타입(Object면 0)이고 대상은 리플렉션 클래스여야 한다(RMC2003). 쓰기는 같은 Registry의 생존 객체·기대 타입의 파생만 받고(null 허용) 쓰기 장벽·관찰자 기록이 없다. 저장 wire는 강한 참조와 같은 graph v2 U32이고 같은 그래프 안 노드만 보존한다(밖은 정책별 null + 진단 값 2, 죽은 대상은 진단 없이 null — `Docs/Design/ReflectionExtensions.ko.md` 5.1절). 생성 Trace는 방문하지 않는다. Required는 받지 않는다(RMC2202) |
 | `ClassRef<Base>` | `ValueKind::ClassReference`(리플렉션 B9d2, `FieldKind::Value`); 클래스 TypeId 하나(`Object/ClassRef.h`, 0 = null — UE `TSubclassOf` 대응). `value.type`이 Base 클래스 ID(필수 — Base는 리플렉션 클래스여야 하고 `rocks::Object` 자체·struct·enum은 RMC2003). Base는 의존으로 붙잡지 않으므로 `ClassRef<Self>`와 아직 등록되지 않은 파생 클래스를 Base로 둘 수 있고, 생성 코드는 Base의 생성 헤더를 include하지 않는다(판정은 `NativeTypeKey<Base>`). 쓰기·저장·복원이 등록된 클래스이고 Base의 파생인지 본다(미등록 NotFound, 그 밖 InvalidArgument, 추상 클래스 허용 — 복원의 미등록 클래스는 decode 정책 `FieldDecodePolicy::unknownClass`). 저장 wire는 Guid. Required를 받는다(non-null) |
 | `AssetId` | `ValueKind::AssetId`; 에셋 ID(`Object/AssetId.h`, Guid, 0 = null). 저장 wire는 Guid |
-| `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Encoding/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
+| `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Hash/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
 | `SoftObjectRef<T>` | `ValueKind::SoftObjectReference`; 에셋 ID와 패키지 안 객체 경로(`Object/SoftObjectRef.h`). GC 간선이 아니며 `value.type`이 기대 타입(Object면 0). 저장 wire는 `SoftObjectReference`(12) |
 | `ROCKS_ENUM` enum class | `ValueKind::Enum`; `value.type`이 enum ID. 값은 선언된 값(Flags enum은 선언 값의 OR)만 유효하다. 저장 wire는 I64 (아래 "리플렉션 enum") |
 | `ROCKS_STRUCT` struct | `ValueKind::Struct`(`FieldKind::Value`); `value.type`이 struct ID. 저장 wire는 중첩 Record(10) (아래 "리플렉션 struct") |
@@ -129,6 +129,8 @@ public:
 | `ScriptExtensible`·`NotScriptExtensible` | CLASS | Sparks class가 상속할 수 있다(`ScriptType`을 함께 뜻한다, 상속된다) / 그 상속을 끊는다 |
 | `ScriptReadOnly`·`ScriptWritable` | PROPERTY | 필드가 Sparks에 읽기 전용·읽기 쓰기로 보인다(둘 중 하나, `ReadOnly` 필드에 `ScriptWritable`은 RMC2603) |
 | `Notify` | PROPERTY·FUNCTION | 실행 중 변경 통지 대상(UE `FieldNotify` — [변경 통지](../Design/ChangeNotification.ko.md) CN-D1). 필드는 클래스의 이벤트·EditorOnly 아닌 필드만(RMC2901), 함수는 매개변수 없이 값을 돌려주는 `Pure` const 멤버만(RMC2902) |
+| `Subobject`·`Root`·`AttachParent="…"` | PROPERTY | 선언 default subobject(UE `CreateDefaultSubobject` — [Prefab](../Design/Prefab/07-Pf1ClassSubobjects.ko.md) 10.2절). `ObjectRef<T>` 필드, protected 이상, 암묵 ReadOnly, ID kind `subobject`. 조합 위반 RMC3001, 소유·타입·상속·이름 규칙 RMC3002 |
+| `SubobjectList`·`SubobjectRoot`·`SubobjectAttach="…"` | CLASS | 선언 subobject 소유 구조(소유 목록·Root 필드·부착 부모 필드 — 도구 이름, 상속되고 다시 지정 불가, RMC3001·RMC3002). `static Result<void> InitSubobjectDefaults(SubobjectDefaultsContext&) noexcept`는 기본값 덮기 hook(RMC3003) |
 | `ScriptAssignable` | PROPERTY(이벤트 필드) | 이벤트가 Sparks `on`·`await`에 보인다(UE `BlueprintAssignable` — 노출 타입의 object 종류만, `EditorOnly` 불가, 이름은 필드 규칙이고 `Changed`는 예약 — SparksBinding B20–B22). 값 필드에 쓰거나 `ScriptReadOnly`·`ScriptWritable`과 함께 쓰면 RMC2603 |
 | `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자(`ScriptReadOnly`·`ScriptWritable`·이벤트의 `ScriptAssignable`)와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
 | `ScriptCallable` | FUNCTION | Sparks에서 부를 수 있다(UE `BlueprintCallable` — 노출 타입의 함수만, `EditorOnly` 불가). 입력 오류로 Fatal하지 않고 Game lane에서 부른다는 계약이다(파괴 대기 대상의 비 const 호출은 실행 host가 건너뛴다). 이름이 예약 이름(prelude·핵심 엔진 타입·문맥 이름 등)이면 RMC2606이다. 리플렉션 `Pure`가 schema `pure`다 |

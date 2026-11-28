@@ -1,4 +1,4 @@
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Move.h>
 #include <DeterministicMath/DeterministicMath.h>
 #include <MaterialCompiler/MaterialIrBuilder.h>

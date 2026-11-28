@@ -6,7 +6,8 @@
 #include <Compression/Compression.h>
 #include <Core/Algorithms.h>
 #include <Core/Assert.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/NameComponent.h>
 #include <Object/ObjectIdentity.h>
 #include <Object/TypeRegistry.h>
@@ -1212,6 +1213,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "CurveImportRowSkipped";
     case AssetDiagnosticCode::CurveTableUnusedRows:
         return "CurveTableUnusedRows";
+    case AssetDiagnosticCode::MaterialTranslationFailed:
+        return "MaterialTranslationFailed";
     }
 
     return "Unknown";
@@ -2130,6 +2133,68 @@ Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
         }
 
         entryEnd = entry.offset + entry.storedBytes;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> VerifySidecarFile(PackageRangeReader& reader, const PackageContents& contents,
+                               Span<uint8> scratch, AssetDiagnostic* failure) noexcept {
+    if (scratch.IsEmpty() || !contents.sidecarPresent) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const AssetId asset = contents.header.assetId;
+    const uint32 section = SectionKindValue(PackageSectionKind::Sidecar);
+    const PackageSidecarInfo& sidecar = contents.sidecar;
+    if (reader.FileBytes() != sidecar.fileBytes) {
+        return Corrupt<void>(failure, asset, section, 0);
+    }
+
+    // 머리(크기 > 64는 섹션 규칙이 보장한다).
+    uint8 header[SidecarHeaderBytes];
+    if (auto read = reader.ReadAt(0, Span<uint8>(header, SidecarHeaderBytes)); !read) {
+        return Resource<void>(failure, read.Error(), asset, section);
+    }
+
+    if (!ReadSidecarHeader(Span<const uint8>(header, SidecarHeaderBytes),
+                           ExpectedSidecarHeader(contents))) {
+        return Corrupt<void>(failure, asset, section, 0);
+    }
+
+    // 전체와 블록 SHA-256을 함께 흘려 잰다(조각은 블록 경계를 넘지 않는다).
+    Sha256 whole;
+    Sha256 block;
+    uint64 offset = 0;
+    uint64 blockIndex = 0;
+    uint64 blockFill = 0;
+    while (offset < sidecar.fileBytes) {
+        const uint64 blockRoom = sidecar.hashBlockBytes - blockFill;
+        const uint64 remaining = sidecar.fileBytes - offset;
+        uint64 piece = remaining < blockRoom ? remaining : blockRoom;
+        piece = piece < scratch.Size() ? piece : scratch.Size();
+        const Span<uint8> chunk(scratch.Data(), static_cast<usize>(piece));
+        if (auto read = reader.ReadAt(offset, chunk); !read) {
+            return Resource<void>(failure, read.Error(), asset, section);
+        }
+
+        const Span<const uint8> view(chunk.Data(), chunk.Size());
+        whole.Update(view);
+        block.Update(view);
+        offset += piece;
+        blockFill += piece;
+        if (blockFill == sidecar.hashBlockBytes || offset == sidecar.fileBytes) {
+            if (!(block.Finish() == sidecar.blockHashes[static_cast<usize>(blockIndex)])) {
+                return Corrupt<void>(failure, asset, section, blockIndex);
+            }
+
+            ++blockIndex;
+            blockFill = 0;
+        }
+    }
+
+    if (!(whole.Finish() == sidecar.sha256)) {
+        return Corrupt<void>(failure, asset, section, 0);
     }
 
     return Result<void>::Success();

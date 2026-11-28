@@ -1,5 +1,5 @@
 #include <Core/Text/NamePool.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Base/Checked.h>
 #include <Platform/Memory.h>
 

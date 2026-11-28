@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
@@ -11,8 +11,8 @@
 #include <ShaderCore/ShaderReadStatus.h>
 #include <ShaderCore/ShaderType.h>
 
-// 셰이더 라이브러리 파일 형식 v1(.rshl)이다(Docs/Design/ShaderSystem 12.2.1절 SSD7·SSD8, UE
-// FSerializedShaderArchive 대응).
+// 셰이더 라이브러리 파일 형식 v2(.rshl)이다(Docs/Design/ShaderSystem 12.2.1절 SSD7·SSD8, 16.5절
+// SSD85·SSD90, UE FSerializedShaderArchive 대응).
 //
 // 형식 하나·라이브러리(Engine·Project) 하나의 쿠킹된 셰이더 전부다. 쿠커(CookShaderLibraries)와
 // Development 공급자(메모리 라이브러리, SSD16)가 BuildShaderLibrary로 같은 byte를 만들고, 런타임
@@ -24,7 +24,7 @@
 //     8   u8 라이브러리(0 Engine·1 Project), 0 × 7
 //     16  형식 id(MaxShaderFormatIdBytes, NUL 종료·남는 byte 0)
 //     48  형식 정의 SHA-256               80  셰이더 타입 집합 SHA-256(SSD3)
-//     112 형식 사실: u8 backend, u8 셰이더 모델 major, u8 minor, 0, u32 features,
+//     112 형식 사실: u8 backend, u8 셰이더 모델 major, u8 minor, u8 플랫폼 분류 비트, u32 features,
 //         u32 deviceRequirements, u32 상한 13개(constantBuffers, sampledTextures, storageBuffers,
 //         storageImages, samplers, uavTotal, uavStages, renderTargets, interStageVectors,
 //         rootConstantBytes, uniformVectors VS·PS·CS)
@@ -44,6 +44,9 @@
 // 이름 표(CP7): 이름이 정체성이고 nameHash는 조회용이다. 열 때 이름에서 ShaderTypeNameHash를 다시
 // 계산해 저장된 해시와 다르면 CorruptPackage다.
 //
+// 묶음 id(16.5절 SSD85): 엔진 셰이더는 0, 머티리얼 셰이더는 MaterialShaderBundleId(셰이더 집합
+// id)다. Engine 라이브러리 항목은 늘 0이고 묶음 id가 0이 아닌 항목은 Project 라이브러리에만 있다.
+//
 // 사용 예(런타임 — bytes가 view보다 오래 살아야 한다):
 //   ShaderLibraryView library;
 //   if (const ShaderReadStatus opened = library.Open(bytes); !opened) { ... }
@@ -55,7 +58,7 @@
 namespace rocks::shader {
 
 inline constexpr char ShaderLibraryMagic[4] = {'R', 'S', 'H', 'L'};
-inline constexpr uint32 ShaderLibraryVersion = 1;
+inline constexpr uint32 ShaderLibraryVersion = 2;
 // 파일 확장자다(점 없이).
 inline constexpr char ShaderLibraryExtension[] = "rshl";
 
@@ -86,16 +89,41 @@ enum class ShaderLibraryKind : uint8 {
 // 라이브러리 이름("Engine"·"Project", 정적 수명)이다. 범위 밖이면 "unknown".
 ROCKS_SHADERCORE_API const char* ShaderLibraryKindName(ShaderLibraryKind kind) noexcept;
 
-// 소속이 담기는 라이브러리다.
-constexpr ShaderLibraryKind ShaderLibraryKindOf(ShaderTypeOwner owner) noexcept {
+// 엔진 셰이더의 묶음 id다(RenderBase SX5).
+inline constexpr uint64 EngineShaderBundleId = 0;
+
+// 항목이 담기는 라이브러리다(16.5절 SSD85): 묶음 id가 0이 아니면(머티리얼 셰이더) Project, 0이면
+// 소속으로 정한다 — Engine·EnginePlugin → Engine, Project·ProjectPlugin → Project(SSD3, UE와 같다).
+// 머티리얼 pass 타입은 엔진 모듈의 Engine 소속이어도 묶음 id로 Project에 간다.
+constexpr ShaderLibraryKind ShaderLibraryKindOf(uint64 bundleId, ShaderTypeOwner owner) noexcept {
+    if (bundleId != EngineShaderBundleId) {
+        return ShaderLibraryKind::Project;
+    }
+
     return owner == ShaderTypeOwner::Project || owner == ShaderTypeOwner::ProjectPlugin
                ? ShaderLibraryKind::Project
                : ShaderLibraryKind::Engine;
 }
 
+// 머티리얼 셰이더 집합 id(SHA-256 — Docs/Design/MaterialSystem 8.6절)의 라이브러리 묶음 id다: 앞
+// 8 byte를 little-endian u64로 읽고, 0이면 1로 둔다(0은 엔진 셰이더 묶음). 쿠커와 런타임
+// MaterialRuntime이 같은 값을 쓴다. 서로 다른 집합 id가 같은 묶음 id면 쿠킹 오류다(SSD88).
+//
+// 사용 예:
+//   const uint64 bundle = MaterialShaderBundleId(artifact.shaderSetId);
+//   library.Find(ShaderLibraryKey{bundle, BasePassPS.hash, vertexInput, permutation}, entry);
+constexpr uint64 MaterialShaderBundleId(const Sha256Digest& shaderSetId) noexcept {
+    uint64 value = 0;
+    for (usize index = 0; index < sizeof(uint64); ++index) {
+        value |= static_cast<uint64>(shaderSetId.bytes[index]) << (index * 8);
+    }
+
+    return value == EngineShaderBundleId ? EngineShaderBundleId + 1 : value;
+}
+
 // 항목 키다(정렬 순서: bundleId → nameHash → vertexInputType → permutationId).
 struct ShaderLibraryKey {
-    // 묶음 id(엔진 셰이더 0, 머티리얼은 셰이더 집합 id — RenderBase SX5)다.
+    // 묶음 id(엔진 셰이더 0, 머티리얼은 MaterialShaderBundleId — RenderBase SX5)다.
     uint64 bundleId = 0;
     uint64 nameHash = 0;
     VertexInputTypeId vertexInputType = NoVertexInputType;
@@ -152,10 +180,10 @@ struct ShaderLibraryBuildDesc {
 
 // desc로 v1 byte를 만들어 out을 채운다(기존 내용은 지운다). 같은 입력(순서 무관)이면 같은 byte다.
 // 같은 코드(값 byte가 모두 같음)는 한 번만 담는다. 오류(InvalidArgument — reason에 영어 정적 문구):
-// 형식 id·backend·라이브러리가 잘못됨, 항목 수 상한 초과, 같은 키 둘, 타입 이름이 식별자가 아니거나
-// 해시가 맞지 않음, 같은 해시의 다른 이름, 단계가 한 비트가 아님, runtimeFeatures가 런타임 확인
-// 기능 밖, 값이 오름차순이 아니거나 0이 없거나 0·1·2 밖, 값 byte가 u32를 넘음. 할당 실패는
-// OutOfMemory다.
+// 형식 id·backend·라이브러리·플랫폼 분류가 잘못됨, Engine 라이브러리 항목의 묶음 id가 0이 아님,
+// 항목 수 상한 초과, 같은 키 둘, 타입 이름이 식별자가 아니거나 해시가 맞지 않음, 같은 해시의 다른
+// 이름, 단계가 한 비트가 아님, runtimeFeatures가 런타임 확인 기능 밖, 값이 오름차순이 아니거나 0이
+// 없거나 0·1·2 밖, 값 byte가 u32를 넘음. 할당 실패는 OutOfMemory다.
 ROCKS_SHADERCORE_API Result<void> BuildShaderLibrary(const ShaderLibraryBuildDesc& desc,
                                                      Allocator& allocator, Array<uint8>& out,
                                                      const char** reason = nullptr) noexcept;
@@ -175,11 +203,13 @@ struct ShaderLibraryEntry {
 class ROCKS_SHADERCORE_API ShaderLibraryView final {
 public:
     // bytes를 검사하고 연다. 검사(실패하면 view는 닫힌 상태):
-    // - 길이·magic(CorruptPackage), 형식 버전(1이 아니면 UnsupportedVersion — SHA보다 먼저 본다),
-    //   파일 SHA-256.
-    // - 머리: 라이브러리·backend 범위, 형식 id 철자, 빈 byte 0, 섹션 오프셋이 정규 값, 파일 길이.
+    // - 길이·magic(CorruptPackage), 형식 버전(ShaderLibraryVersion이 아니면 UnsupportedVersion —
+    // SHA보다
+    //   먼저 본다), 파일 SHA-256.
+    // - 머리: 라이브러리·backend·플랫폼 분류 범위, 형식 id 철자, 빈 byte 0, 섹션 오프셋이 정규 값,
+    //   파일 길이.
     // - 항목: 키 순증가, 단계 한 비트, 개발 전용 0·1, 런타임 기능 범위, 코드 색인 범위, nameHash가
-    //   이름 표에 있음.
+    //   이름 표에 있음, Engine 라이브러리면 묶음 id 0.
     // - 코드: SHA 순증가, 오프셋 정규 값, 코드 SHA = 내용 SHA, 값 틀(오름차순·0 있음·0·1·2만·길이
     //   정확), 빈 byte 0.
     // - 이름: 해시 순증가, 이름이 셰이더 타입 이름 규칙, 해시 = ShaderTypeNameHash(이름), 빈 byte

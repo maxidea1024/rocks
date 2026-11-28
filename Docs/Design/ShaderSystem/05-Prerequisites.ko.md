@@ -39,7 +39,7 @@
 
 **구현된 것.** 셰이더 시스템은 아래를 그대로 쓰고 같은 기능을 따로 만들지 않는다.
 
-- A0-C: SHA-256(`Core/Source/Runtime/Core/Public/Core/Encoding/Sha256.h:23,40`), JSON(`Core/Text/Json.h`, 결정적 출력), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`, 결과 비트가 바뀌면 올리며 너겟 키·cookKey에 들어간다).
+- A0-C: SHA-256(`Core/Source/Runtime/Core/Public/Core/Hash/Sha256.h:23,40`), JSON(`Core/Text/Json.h`, 결정적 출력), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`, 결과 비트가 바뀌면 올리며 너겟 키·cookKey에 들어간다).
 - B7: 툴체인 지문·도구 빌드 ID `rocks::build::ToolchainFingerprint()`·`ToolBuildId()`(`Core/Build/BuildInfo.h:24,30`). 정규 텍스트는 컴파일러 버전·컴파일러와 링커 SHA-256·대상 triple·FP 모델이다(ReflectionFoundations 8.1절).
 - B4·B5: `ROCKS_STRUCT`(struct 스키마는 클래스와 같은 `TypeSchema`, ReflectionFoundations 4.2절)·identity 명세(`<Module>.rocksids.json`)·배열 필드. P7의 바탕이다.
 - A0-P: `Platform/DirectoryWatch.h:88`(SH4), `File::Flush`·`FileSystem::Replace`·no-replace `Move`·`SetModifiedTime`(너겟 기록·GC, 워커 출력).

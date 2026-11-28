@@ -24,7 +24,7 @@ asset-orphans-list
 asset-orphans-delete <path>
 asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote] [--json]
 asset-cook --engine --profile=<id> [--verify-nuggets] [--json] [--wait=<초>]   (A4f — 프로젝트 없이 엔진 셰이더 라이브러리만, 쿠킹 루트 Engine/Saved/Cooked/<id>, 잠금은 Engine/Saved/Locks/Cooked-<id>.lock, --project·경로 인자와 함께 쓰면 사용법 오류 — 10.3절 7항)
-asset-load-cooked --profile=<id> <AssetId|경로 힌트>
+asset-load-cooked --profile=<id> [<AssetId|경로 힌트>] [--verify-sidecars]
 nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`로 위임 — --max-bytes → maxBytes, --unused-days → maxUnusedDays)
 공통 옵션: --project=<dir>(기본: 현재 디렉터리에서 위로 *.rocksproject 탐색), --wait=<초>(쓰기 잠금 대기, 기본 0)
 ```
@@ -48,7 +48,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`
 
 A6은 남은 명령 둘(`asset-load-cooked`·`nugget-gc`)과 문서다. 검증 보고(14절 결과 기록)는 빌드·시험 체인을 돌 수 있을 때(화면 마일스톤 뒤 — 사용자 결정 2026-11-23) 한다. 그때까지 14절에는 시나리오별 시험 이름만 대조표(14.1.x)로 둔다.
 
-**`asset-load-cooked --profile=<id> <AssetId|경로 힌트> [--project=<dir>]`**(쿠킹 결과 확인 도구 — UE `-cookonthefly`가 아닌 단발 로드):
+**`asset-load-cooked --profile=<id> [<AssetId|경로 힌트>] [--project=<dir>] [--verify-sidecars]`**(쿠킹 결과 확인 도구 — UE `-cookonthefly`가 아닌 단발 로드. 대상은 `--verify-sidecars`가 없으면 필수, sidecar 검증은 20.5 7):
 1. 프로젝트를 연다. 잠금은 없다(읽기만 — 다른 쿠커의 게시와 겹치면 로드가 패키지 대조 `CorruptPackage`로 실패할 수 있다, 한계).
 2. 쿠킹 루트는 `<Saved>/Cooked/<id>`다. 매니페스트는 `CookedManifest.rman`을 읽는다. 서명 봉투는 있어도 무시한다(있는지도 보지 않는다) — 도구는 신뢰 목록이 없고, 서명 검증은 `content-sign`·EngineAssets 몫이다. 한계: EngineAssets Release는 봉투가 필수라 이 도구의 성공이 Release 로드 성공을 뜻하지 않는다(2026-11-25 교차 검증 1).
 3. 로더 구성은 EngineAssets와 같다(11.8절 4):

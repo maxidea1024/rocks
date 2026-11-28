@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
 #include <Object/TypeRegistry.h>

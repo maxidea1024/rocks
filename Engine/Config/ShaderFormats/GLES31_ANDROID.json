@@ -33,5 +33,6 @@
   },
   "features": ["compute"],
   "deviceRequirements": ["OPENGL_ES_3_2"],
+  "platformClass": ["Mobile"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

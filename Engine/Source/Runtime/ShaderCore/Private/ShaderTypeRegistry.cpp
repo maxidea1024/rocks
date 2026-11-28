@@ -187,6 +187,16 @@ bool ShaderTypeRegistry::Check(const ShaderTypeDesc* desc, Span<const ShaderType
         return false;
     }
 
+    // 타입마다 거르기는 하나다(16.5절 SSD86): 머티리얼 셰이더는 traits를 받는 거르기만 쓴다.
+    const bool material = (desc->flags & ShaderTypeMaterialShader) != 0;
+    if ((material && desc->shouldCompile != nullptr) ||
+        (!material && desc->materialShouldCompile != nullptr)) {
+        Fail(ErrorCode::InvalidArgument, name,
+             "a material shader type filters with materialShouldCompile only and other shader "
+             "types with shouldCompile only");
+        return false;
+    }
+
     const char* layoutReason = "";
     if (!ValidateShaderParameterLayouts(desc->parameterLayouts, &layoutReason)) {
         Fail(ErrorCode::InvalidArgument, name, layoutReason);

@@ -1,4 +1,4 @@
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Object/ReferenceObserver.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>

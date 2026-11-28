@@ -644,6 +644,8 @@ void AudioMixer::ReadUnread(uint32 index, uint32 generation,
 
         return;
     }
+
+    status.unreadReadFailed = true;
 }
 
 uint32 AudioMixer::CollectFinished(Span<AudioVoiceTerminal> out) noexcept {
@@ -1519,6 +1521,7 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                 if (pauseRamping) {
                     slot.pauseGain.Apply(voice);
                 }
+
                 for (uint32 source = 0; source < sourceChannels; ++source) {
                     for (uint32 output = 0; output < outputs; ++output) {
                         slot.channelGains[source][output].MixAdd(

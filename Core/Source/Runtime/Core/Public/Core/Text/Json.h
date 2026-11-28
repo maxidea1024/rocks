@@ -3,7 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/Span.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Result.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>

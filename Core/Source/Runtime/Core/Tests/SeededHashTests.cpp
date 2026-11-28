@@ -1,5 +1,5 @@
 #include <Base/Types.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <Core/Text/String.h>

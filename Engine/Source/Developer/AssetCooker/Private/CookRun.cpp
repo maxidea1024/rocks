@@ -22,6 +22,27 @@ struct TargetOrder {
     }
 };
 
+// 처리기의 의존 패키지 열기다(MAS7 — 연 수를 실행 결과에 센다, 닫기는 CookWalk::Release).
+class DependencyOpener final : public CookDependencyOpener {
+public:
+    DependencyOpener(EditorPackageSet& packages, uint64& opens) noexcept
+        : packages_(packages), opens_(opens) {
+    }
+
+    Result<ObjectHandle> Open(AssetId id, AssetDiagnostic* failure) noexcept override {
+        if (const EditorPackageInfo* opened = packages_.Find(id)) {
+            return Result<ObjectHandle>::Success(opened->package);
+        }
+
+        ++opens_;
+        return packages_.Open(id, nullptr, failure);
+    }
+
+private:
+    EditorPackageSet& packages_;
+    uint64& opens_;
+};
+
 // 실행 상태다. 진단 push의 할당 실패는 error_에 두고 끝에서 돌려준다(CookTargets와 같은 방식).
 class CookWalk {
 public:
@@ -190,6 +211,7 @@ private:
         }
 
         MemoryPackageSink sink(allocator_);
+        MemoryPackageSink sidecar(allocator_);
         AssetDiagnostic failure;
         warnings_.Clear();
         CookContext context;
@@ -207,8 +229,11 @@ private:
         context.scheduler = request_.scheduler;
         context.scratch = request_.scratch;
         context.sink = &sink;
+        context.sidecar = &sidecar;
         context.failure = &failure;
         context.warnings = &warnings_;
+        DependencyOpener dependencies(packages, result_.opens);
+        context.dependencies = &dependencies;
         auto cooked = processor.Value()->Cook(context);
         if (!cooked && cooked.Error() == ErrorCode::OutOfMemory) {
             return cooked;
@@ -269,6 +294,11 @@ private:
         checkEntry_.packageSha256 = sha256;
         checkEntry_.packageBytes = sink.Bytes().Size();
         checkEntry_.bulkRawBytes = bulkRawBytes;
+        // sidecar 칸은 처리기가 쓴 sidecar byte에서 잰다(AssetSystem 20.5 3).
+        const Span<const uint8> sidecarBytes = sidecar.Bytes();
+        checkEntry_.sidecarBytes = sidecarBytes.Size();
+        checkEntry_.sidecarSha256 =
+            sidecarBytes.IsEmpty() ? Sha256Digest{} : Sha256::Hash(sidecarBytes);
         AssetDiagnostic mismatch;
         if (auto checked =
                 CheckCookedPackage(check_, checkEntry_, sink.Bytes(), contents.Value(), &mismatch);
@@ -289,6 +319,8 @@ private:
         package.bytes = sink.Bytes();
         package.sha256 = sha256;
         package.bulkRawBytes = bulkRawBytes;
+        package.sidecar = sidecarBytes;
+        package.sidecarSha256 = checkEntry_.sidecarSha256;
         package.cookKey = key.cookKey;
         if (auto put = request_.output->Put(package); !put) {
             return put;

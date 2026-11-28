@@ -1,11 +1,34 @@
 #include <AssetCooker/CookProcessor.h>
 #include <AssetRuntime/PackageFormat.h>
+#include <Core/Optional.h>
 
 namespace rocks {
 
 Result<void> CookProcessor::Cook(CookContext& context) const noexcept {
     return WriteCookedPackage(context, 0);
 }
+
+namespace {
+
+// 배치만 Package로 바꾸는 bulk 원본이다(sidecar 출력이 없는 쿠킹 — AssetSystem 20.5 2).
+class PackagePlacementOnly final : public PackageBulkSource {
+public:
+    explicit PackagePlacementOnly(PackageBulkSource& next) noexcept : next_(next) {
+    }
+
+    Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override {
+        return next_.ReadBulk(ref);
+    }
+
+    Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override {
+        return next_.ReadStoredBulk(ref);
+    }
+
+private:
+    PackageBulkSource& next_;
+};
+
+} // namespace
 
 Result<void> CookProcessor::WriteCookedPackage(CookContext& context,
                                                uint32 minimumBulkAlignment) noexcept {
@@ -22,6 +45,13 @@ Result<void> CookProcessor::WriteCookedPackage(CookContext& context,
     options.bulkAlignment =
         profileAlignment < minimumBulkAlignment ? minimumBulkAlignment : profileAlignment;
     options.bulkSource = context.bulkSource;
+    options.sidecar = context.sidecar;
+    Optional<PackagePlacementOnly> packaged;
+    if (context.sidecar == nullptr && context.bulkSource != nullptr) {
+        packaged.Emplace(*context.bulkSource);
+        options.bulkSource = &packaged.Value();
+    }
+
     auto written = WritePackage(*context.allocator, *context.registry, context.access,
                                 context.package, options, *context.sink, context.failure);
     return written ? Result<void>::Success() : Result<void>::Failure(written.Error());

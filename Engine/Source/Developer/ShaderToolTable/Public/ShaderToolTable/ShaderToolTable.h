@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/StringView.h>
 
 // 셰이더 도구 표다(Docs/Design/ShaderSystem 9절). 빌드가 Engine 루트의 kind: binary manifest

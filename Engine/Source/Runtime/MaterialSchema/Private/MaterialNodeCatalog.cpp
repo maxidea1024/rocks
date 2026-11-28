@@ -1,4 +1,5 @@
 #include <Core/Move.h>
+#include <MaterialSchema/MaterialAssetReference.generated.h>
 #include <MaterialSchema/MaterialGraphSchema.h>
 #include <MaterialSchema/MaterialNodeCatalog.h>
 #include <Meta/TypeSchema.h>
@@ -56,6 +57,18 @@ bool IsTextField(const TypeSchema& schema, StringView name) noexcept {
     for (const FieldSchema& field : schema.fields) {
         if (SameText(field.name, name)) {
             return field.value.kind == ValueKind::Utf8String || field.value.kind == ValueKind::Name;
+        }
+    }
+
+    return false;
+}
+
+// 에셋 참조 선언의 대상 필드인가: 최상위 MaterialAssetReference struct 필드다.
+bool IsAssetReferenceField(const TypeSchema& schema, StringView name) noexcept {
+    for (const FieldSchema& field : schema.fields) {
+        if (SameText(field.name, name)) {
+            return field.value.kind == ValueKind::Struct &&
+                   field.value.type == GeneratedType<MaterialAssetReference>::Schema().id;
         }
     }
 
@@ -151,6 +164,33 @@ Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexce
 
             for (usize earlier = 0; earlier < index; ++earlier) {
                 if (entries[earlier].field == entries[index].field) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+        }
+    }
+
+    if (definition.loweringVersion == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 에셋 참조 선언은 속성의 최상위 MaterialAssetReference 필드이고 같은 필드는 한 번이다.
+    if (!definition.assetReferences.IsEmpty()) {
+        if (definition.propertiesSchema == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const TypeSchema& schema = definition.propertiesSchema();
+        const Span<const MaterialAssetReferenceField> references = definition.assetReferences;
+        for (usize index = 0; index < references.Size(); ++index) {
+            if (!IsAssetReferenceField(schema, references[index].field) ||
+                static_cast<uint8>(references[index].role) >
+                    static_cast<uint8>(MaterialAssetReferenceRole::Collection)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            for (usize earlier = 0; earlier < index; ++earlier) {
+                if (references[earlier].field == references[index].field) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);
                 }
             }

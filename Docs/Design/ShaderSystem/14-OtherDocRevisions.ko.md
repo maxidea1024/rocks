@@ -53,3 +53,6 @@
 | [엔진 구현 계획](../EngineImplementationPlan.ko.md) | 9.6절 | 엔진 내장 셰이더 라이브러리를 만드는 단계(설치물 → 쿠킹, SSD11) |
 | [빌드 타깃](../BuildTargets/README.ko.md) | Commandlet 타깃 | 쿠커가 셰이더 타입 Runtime 모듈을 링크(SSD3), 프로젝트·플러그인 타입 쿠킹은 BS4 뒤 |
 | [모듈 로더](../ModuleLoader/README.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |
+| [에셋 시스템](../AssetSystem/10-Cooker/10.3.1-A4fDetails.ko.md) | A4f3 요청 `CookArtifactRequest` 칸 목록 | (개정 65, 16.5절 SSD87) `packages` — 이번 게시가 담을 매니페스트 항목(새로 쿠킹·재사용·부분 쿠킹의 이전 항목, AssetId 순, 엔진 전용은 빈다). 구현은 렌더 세션이 했다(`CookPublisher::Entries`·`RunArtifactStages`). 에셋 세션 문서 반영 대기 |
+| [머티리얼 시스템](../MaterialSystem/16-OtherDocRevisions.ko.md) | 16절 MSR17·MSR18·MSR19·MRD18 | (개정 65) 16.5절 SSD85–SSD92로 반영. `platformClass`는 하나를 고르는 열거가 아니라 집합(UE 세 bool 독립 — SSD89). 머티리얼 세션 문서 반영 대기 |
+| [렌더러](../Renderer.ko.md) | 3.2절 배치·의존도 | (개정 65, SSD92) MaterialCook은 `RendererShaders`를 링크하지 않고 등록부 원천에서 `ShaderTypeMaterialShader` 타입을 본다. **반영(Renderer 개정 14)** |

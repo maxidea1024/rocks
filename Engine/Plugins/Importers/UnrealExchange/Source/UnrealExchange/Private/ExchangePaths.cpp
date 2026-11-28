@@ -1,6 +1,6 @@
 #include <UnrealExchange/ExchangePaths.h>
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/Unicode.h>
 #include <Platform/Memory.h>

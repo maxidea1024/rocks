@@ -172,7 +172,8 @@ Result<void> ConstructionContext::JoinCluster(ObjectHandle object, ObjectHandle 
 }
 
 Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* nativeType,
-                                                     ObjectHandle outer, StringView name) noexcept {
+                                                     ObjectHandle outer, StringView name,
+                                                     ObjectOrigin origin) noexcept {
     if (auto state = CheckOpen(); !state) {
         return Result<ObjectHandle>::Failure(state.Error());
     }
@@ -197,7 +198,8 @@ Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* na
         }
     }
 
-    auto object = registry_.CreatePending(access_, type, transaction_, nativeType, outer, name);
+    auto object =
+        registry_.CreatePending(access_, type, transaction_, nativeType, outer, name, origin);
     if (!object) {
         error_ = object.Error();
         return Result<ObjectHandle>::Failure(error_);

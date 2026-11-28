@@ -29,5 +29,6 @@
   },
   "features": ["compute", "vertexViewportLayerOutput"],
   "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0"],
+  "platformClass": ["Pc"],
   "producers": [{ "host": "windows-x64" }]
 }

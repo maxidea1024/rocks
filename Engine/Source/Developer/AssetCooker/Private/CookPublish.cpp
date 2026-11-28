@@ -1,7 +1,7 @@
 #include <AssetCooker/CookPublish.h>
 #include <AssetDatabase/AtomicFileWrite.h>
 #include <Core/Algorithms.h>
-#include <Core/Encoding/Sha256File.h>
+#include <Core/Hash/Sha256File.h>
 #include <Core/FileError.h>
 
 namespace rocks {
@@ -69,6 +69,8 @@ Result<void> CopyEntry(const CookedManifestEntry& source, CookedManifestEntry& o
     out.packageSha256 = source.packageSha256;
     out.packageBytes = source.packageBytes;
     out.bulkRawBytes = source.bulkRawBytes;
+    out.sidecarBytes = source.sidecarBytes;
+    out.sidecarSha256 = source.sidecarSha256;
     out.cookKey = source.cookKey;
     out.flags = source.flags;
     if (auto assigned = out.pathHint.TryAssign(source.pathHint.View()); !assigned) {
@@ -369,6 +371,8 @@ Result<void> CookPublisher::AddEntry(const CookedPackage& package) noexcept {
     entry.packageSha256 = package.sha256;
     entry.packageBytes = package.bytes.Size();
     entry.bulkRawBytes = package.bulkRawBytes;
+    entry.sidecarBytes = package.sidecar.Size();
+    entry.sidecarSha256 = package.sidecarSha256;
     entry.cookKey = package.cookKey;
     entry.flags = package.flags;
     if (auto assigned = entry.pathHint.TryAssign(package.pathHint); !assigned) {
@@ -404,15 +408,40 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    platform::FileSystem& files = *config_.files;
-    PathBuilder target(*allocator_);
-    const StringView targetPieces[] = {root_.View(), "/"};
-    Result<void> built = AppendAll(target, targetPieces);
-    if (built) {
-        built = AppendCookedPackagePath(target, package.asset, package.sha256);
+    // sidecar를 먼저 둔다(AS 20.5 4 — 패키지가 가리키기 전에 있어야 한다, 매니페스트는 Finish에서
+    // 마지막에 바뀐다).
+    if (!package.sidecar.IsEmpty()) {
+        PathBuilder sidecar(*allocator_);
+        if (auto built = AppendCookedSidecarPath(sidecar, package.asset, package.sidecarSha256);
+            !built) {
+            return built;
+        }
+
+        if (auto put =
+                PutFile(sidecar.View(), package.sidecar, package.sidecarSha256, package.asset);
+            !put) {
+            return put;
+        }
     }
 
-    if (!built) {
+    PathBuilder relative(*allocator_);
+    if (auto built = AppendCookedPackagePath(relative, package.asset, package.sha256); !built) {
+        return built;
+    }
+
+    if (auto put = PutFile(relative.View(), package.bytes, package.sha256, package.asset); !put) {
+        return put;
+    }
+
+    return AddEntry(package);
+}
+
+Result<void> CookPublisher::PutFile(StringView relative, Span<const uint8> bytes,
+                                    const Sha256Digest& digest, AssetId asset) noexcept {
+    platform::FileSystem& files = *config_.files;
+    PathBuilder target(*allocator_);
+    const StringView targetPieces[] = {root_.View(), "/", relative};
+    if (auto built = AppendAll(target, targetPieces); !built) {
         return built;
     }
 
@@ -424,7 +453,7 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
     }
 
     // 임시 이름은 `.staging/<대상 파일 이름>.tmp`다(`.staging`은 잠금을 쥔 쿠커만 쓰고 Begin이
-    // 비운다 — 한 쿠킹에 같은 패키지는 한 번만 넣는다).
+    // 비운다 — 한 쿠킹에 같은 파일은 한 번만 넣는다).
     const StringView fileName(targetView.Data() + slash, targetView.ByteCount() - slash);
     PathBuilder temp(*allocator_);
     const StringView tempPieces[] = {root_.View(), "/",      CookStagingDirectoryName,
@@ -445,8 +474,7 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
             return Result<void>::Failure(FileErrorCode(opened));
         }
 
-        const platform::FileTransfer written =
-            file.WriteAll(package.bytes.Data(), package.bytes.Size());
+        const platform::FileTransfer written = file.WriteAll(bytes.Data(), bytes.Size());
         platform::FileStatus finished = written.status;
         if (finished) {
             finished = file.Flush();
@@ -464,22 +492,17 @@ Result<void> CookPublisher::Put(const CookedPackage& package) noexcept {
     }
 
     bool wrote = false;
-    if (auto placed = PlaceStaged(temp.View(), targetView, slash - 1, package.bytes.Size(),
-                                  package.sha256, package.asset, wrote);
+    if (auto placed =
+            PlaceStaged(temp.View(), targetView, slash - 1, bytes.Size(), digest, asset, wrote);
         !placed) {
         return placed;
     }
 
     if (wrote) {
-        bytesWritten_ += package.bytes.Size();
+        bytesWritten_ += bytes.Size();
     }
 
-    if (auto remembered = RememberDirectory(StringView(targetView.Data(), slash - 1));
-        !remembered) {
-        return remembered;
-    }
-
-    return AddEntry(package);
+    return RememberDirectory(StringView(targetView.Data(), slash - 1));
 }
 
 Result<void> CookPublisher::PlaceStaged(StringView temp, StringView target, usize directoryBytes,
@@ -671,6 +694,8 @@ Result<void> CookPublisher::Reuse(const CookedManifestEntry& existing, const Coo
     entry.packageSha256 = existing.packageSha256;
     entry.packageBytes = existing.packageBytes;
     entry.bulkRawBytes = existing.bulkRawBytes;
+    entry.sidecarBytes = existing.sidecarBytes;
+    entry.sidecarSha256 = existing.sidecarSha256;
     entry.cookKey = existing.cookKey;
     entry.flags = target.primary ? static_cast<uint32>(CookedManifestFlags::PrimaryAsset) : 0u;
     if (auto assigned = entry.pathHint.TryAssign(pathHint); !assigned) {
@@ -754,7 +779,29 @@ Result<void> CookPublisher::RemoveUnreferenced(const CookedManifest& manifest) n
             return assigned;
         }
 
-        (void)referenced.TryPushBack(Move(copy));
+        if (auto pushed = referenced.TryPushBack(Move(copy)); !pushed) {
+            return pushed;
+        }
+
+        // sidecar도 남긴다(AS 20.5 6 — 낡은 `.rbsc`만 지운다).
+        if (entry.sidecarBytes == 0) {
+            continue;
+        }
+
+        PathBuilder sidecar(*allocator_);
+        if (auto built = AppendCookedSidecarPath(sidecar, entry.asset, entry.sidecarSha256);
+            !built) {
+            return built;
+        }
+
+        String sidecarCopy(*allocator_);
+        if (auto assigned = sidecarCopy.TryAssign(sidecar.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto pushed = referenced.TryPushBack(Move(sidecarCopy)); !pushed) {
+            return pushed;
+        }
     }
 
     algo::Sort(referenced.View(), [](const String& left, const String& right) noexcept {
@@ -1046,7 +1093,32 @@ Result<void> PlanCookReuse(Allocator& allocator, const CookReuseRequest& request
         }
 
         // 없거나 읽을 수 없거나 다르면 다시 쿠킹한다(시나리오 27).
-        if (hashed && bytes == entry->packageBytes && digest == entry->packageSha256) {
+        bool same = hashed && bytes == entry->packageBytes && digest == entry->packageSha256;
+        // sidecar도 같아야 한다(AS 20.5 5 — sidecar만 지워지거나 바뀌어도 다시 쿠킹).
+        if (same && entry->sidecarBytes != 0) {
+            PathBuilder sidecar(allocator);
+            Result<void> sidecarBuilt = AppendAll(sidecar, pieces);
+            if (sidecarBuilt) {
+                sidecarBuilt = AppendCookedSidecarPath(sidecar, entry->asset, entry->sidecarSha256);
+            }
+
+            if (!sidecarBuilt) {
+                return sidecarBuilt;
+            }
+
+            Sha256Digest sidecarDigest;
+            uint64 sidecarBytes = 0;
+            auto sidecarHashed =
+                HashPath(*request.files, sidecar.View(), allocator, sidecarDigest, sidecarBytes);
+            if (!sidecarHashed && sidecarHashed.Error() == ErrorCode::OutOfMemory) {
+                return sidecarHashed;
+            }
+
+            same = sidecarHashed && sidecarBytes == entry->sidecarBytes &&
+                   sidecarDigest == entry->sidecarSha256;
+        }
+
+        if (same) {
             out.reuse[at] = 1;
             out.entries[at] = entry;
             ++out.count;

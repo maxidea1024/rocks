@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 #include <MaterialCompiler/MaterialBindlessMode.h>
-#include <MaterialCompiler/MaterialQualityLevel.h>
+#include <MaterialSchema/MaterialQualityLevel.h>
 
 // 번역 대상이다(Docs/Design/MaterialSystem 6.9절 MS2b3, 19.3.4절). 번역 때 고르는 스위치(품질·형식
 // 사실·샘플러 예산·bindless·프로필 기능·컴파일러 종류)가 읽는 값이다. 기본값은 UE 기본(품질 없음,

@@ -56,6 +56,10 @@ namespace rocks::material::detail {
 
 namespace {
 
+// 속성 에셋 참조 선언이다(Docs/Design/MaterialSystem 19.4.3절 "참조 선언").
+constexpr MaterialAssetReferenceField TextureReference[] = {
+    {"texture", MaterialAssetReferenceRole::Texture}};
+
 constexpr StringView TextureObjectParameterNonSemantic[] = {"texture", "channelNames", "group",
                                                             "sortPriority"};
 constexpr MaterialPinDefinition TextureSamplePins[] = {
@@ -284,10 +288,12 @@ constexpr MaterialPinDefinition PathTracingBufferTexturePins[] = {
 
 constexpr MaterialNodeDefinition TextureDefinitions[] = {
     MaterialNode("Material.TextureObject")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureObjectProperties>::Schema)
         .DynamicPins(&TextureObjectOutputPins<TextureObjectProperties>)
         .Menu("Texture Object", "Texture", "Texture Functions", "Texture Object."),
     MaterialNode("Material.TextureObjectParameter")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureObjectParameterProperties>::Schema,
                     TextureObjectParameterNonSemantic)
         .DynamicPins(&TextureObjectOutputPins<TextureObjectParameterProperties>)
@@ -298,11 +304,13 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
             "texture parameters without actually putting the parameter in the function.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSample")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleProperties>::Schema)
         .Pins(TextureSamplePins)
         .DynamicPins(&TextureSampleMipPins<TextureSampleProperties>)
         .Menu("Texture Sample", "Texture", "Texture", "Texture Sample."),
     MaterialNode("Material.TextureSampleParameter2D")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameter2DProperties>::Schema,
                     TextureSampleParameter2DNonSemantic)
         .Pins(TextureSampleParameter2DPins)
@@ -310,6 +318,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("Param2D", "Texture", "Texture Parameters", "Param2D.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameter2DArray")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameter2DArrayProperties>::Schema,
                     TextureSampleParameter2DArrayNonSemantic)
         .Pins(TextureSampleParameter2DArrayPins)
@@ -317,6 +326,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("Param2DArray", "Texture", "Texture Parameters", "Param2DArray.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterCube")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterCubeProperties>::Schema,
                     TextureSampleParameterCubeNonSemantic)
         .Pins(TextureSampleParameterCubePins)
@@ -324,6 +334,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamCube", "Texture", "Texture Parameters", "ParamCube.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterCubeArray")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterCubeArrayProperties>::Schema,
                     TextureSampleParameterCubeArrayNonSemantic)
         .Pins(TextureSampleParameterCubeArrayPins)
@@ -331,6 +342,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamCubeArray", "Texture", "Texture Parameters", "ParamCubeArray.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterVolume")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterVolumeProperties>::Schema,
                     TextureSampleParameterVolumeNonSemantic)
         .Pins(TextureSampleParameterVolumePins)
@@ -338,6 +350,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamVolume", "Texture", "Texture Parameters", "ParamVolume.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterSubUv")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterSubUvProperties>::Schema,
                     TextureSampleParameterSubUvNonSemantic)
         .Pins(TextureSampleParameterSubUvPins)
@@ -352,6 +365,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Pins(TexturePropertyPins)
         .Menu("Texture Property", "Texture", "Texture", "Texture Property."),
     MaterialNode("Material.AntialiasedTextureMask")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<AntialiasedTextureMaskProperties>::Schema,
                     AntialiasedTextureMaskNonSemantic)
         .Pins(AntialiasedTextureMaskPins)
@@ -384,6 +398,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
               "Texture Object From Collection.")
         .Missing(MaterialPrerequisite::TextureCollection),
     MaterialNode("Material.ParticleSubUv")
+        .AssetReferences(TextureReference)
         .Properties(&GeneratedType<ParticleSubUvProperties>::Schema)
         .Pins(ParticleSubUvPins)
         .DynamicPins(&TextureSampleMipPins<ParticleSubUvProperties>)

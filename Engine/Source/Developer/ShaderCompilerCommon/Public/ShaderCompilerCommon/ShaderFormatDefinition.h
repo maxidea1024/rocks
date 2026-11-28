@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderFormatFacts.h>
 #include <ShaderCore/ShaderFormatTypes.h>
@@ -13,8 +13,9 @@
 // 형식 정의(Engine/Config/ShaderFormats/<id>.json)는 한 셰이더 형식(D3D12_SM6 등)을 만드는 데
 // 필요한 모든 값의 단일 출처다: 쓰는 도구 목록(job 키 3항의 정적 목록), HLSL 2021 기본값(결정 2),
 // 컴파일 경로와 셰이더 모델·target env·ESSL·MSL 버전(결정 3), 바인딩 규약 버전, ShaderFormat 처리기
-// 버전, 상한(7.2절 4항)·지원 기능·장치 요구, 생산 호스트 규칙(결정 5). 파일 byte의 SHA-256이 job 키
-// 3항에 들어가므로(10절) 파일의 어떤 byte가 바뀌어도 그 형식의 키가 바뀐다(.gitattributes가
+// 버전, 상한(7.2절 4항)·지원 기능·장치 요구, 플랫폼 분류(16.5절 SSD89), 생산 호스트 규칙(결정 5).
+// 파일 byte의 SHA-256이 job 키 3항에 들어가므로(10절) 파일의 어떤 byte가 바뀌어도 그 형식의 키가
+// 바뀐다(.gitattributes가
 // *.json을 LF로 고정한다).
 //
 // 형식 목록과 순서는 TargetProfile이 정한다(엔진 컴파일 프로필은 개정 32에서 없앴다 — 12.3.1절
@@ -154,6 +155,9 @@ struct ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatDefinition {
     ShaderFormatLimits limits;
     uint32 features = 0;
     uint32 deviceRequirements = 0;
+    // 플랫폼 분류 비트(ShaderPlatformClassBits — "platformClass", 16.5절 SSD89)다. OpenGL backend는
+    // Mobile을 담아야 한다.
+    uint32 platformClasses = 0;
     ShaderFormatProducer producers[MaxShaderFormatProducers] = {};
     usize producerCount = 0;
     // 파일 byte의 SHA-256(job 키 3항).
@@ -223,8 +227,8 @@ ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatStatus LoadShaderFormatDefinition(
     const char* directory, StringView id, ShaderFormatDefinition& out) noexcept;
 
 // 형식 정의의 형식 사실이다(12.2.1절 SSD25 — 셰이더 타입 거르기와 라이브러리 머리가 쓴다).
-// id·backend· compiler.shaderModel·limits·features·deviceRequirements를 옮긴다. 정의는 읽기를
-// 통과한 값이어야 한다(id 철자가 형식 사실 규칙과 같다).
+// id·backend· compiler.shaderModel·limits·features·deviceRequirements·platformClasses를 옮긴다.
+// 정의는 읽기를 통과한 값이어야 한다(id 철자가 형식 사실 규칙과 같다).
 ROCKS_SHADERCOMPILERCOMMON_API ShaderFormatFacts
 MakeShaderFormatFacts(const ShaderFormatDefinition& definition) noexcept;
 
