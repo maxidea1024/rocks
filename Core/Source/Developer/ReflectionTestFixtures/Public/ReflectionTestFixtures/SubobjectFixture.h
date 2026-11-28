@@ -55,6 +55,11 @@ public:
         return plain.Handle();
     }
 
+    // 시험이 선언 subobject 소유 필드를 Registry API로 바꾼다(파괴 상태 저장 시험).
+    ObjectRef<SubobjectScenePart>& ArmField() noexcept {
+        return arm;
+    }
+
     // 소유 클래스가 subobject에 주는 기본값 덮기다(값은 SubobjectFixture.cpp).
     ROCKS_REFLECTIONTESTFIXTURES_API static Result<void>
     InitSubobjectDefaults(SubobjectDefaultsContext& context) noexcept;

@@ -60,6 +60,9 @@ inline constexpr char DiagInvalidBodyValue[] = "InvalidBodyValue";
 // - BodyShapeUpdateFailed: 형상 값·scale이 바뀌었지만 body 형상을 다시 만들지 못해 이전 형상을
 //   두었다(Warning — Docs/Design/PhysicsModule 7.1.5절).
 inline constexpr char DiagBodyShapeUpdateFailed[] = "BodyShapeUpdateFailed";
+// - WeldFailed: 물리 body를 루트 body에 합치지(weld) 못했거나 weld를 푼 뒤 자기 body를 다시 만들지
+//   못했다(Warning — Docs/Design/PhysicsModule 7.1.23절). 합치기 실패면 자기 body로 남는다.
+inline constexpr char DiagWeldFailed[] = "WeldFailed";
 // - QueryProfileMissing: Profile 필터 장면 질의의 profile이 World 표에 없어 WorldStatic 채널과
 //   모두 Block 응답으로 질의했다(Warning — Docs/Design/PhysicsModule 4.2절, UE
 //   World.cpp:2052-2063).
