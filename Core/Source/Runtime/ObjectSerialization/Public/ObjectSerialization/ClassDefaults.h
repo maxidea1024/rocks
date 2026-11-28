@@ -75,6 +75,22 @@ struct ClassDefaultsStatus {
     ClassDefaultsDiagnostic diagnostic{};
 };
 
+// 소유 클래스 lease의 선언 subobject 기본값 레코드다(펼친 subobject 표와 같은 수·순서 —
+// Docs/Design/ Prefab 10.6절). 항목 k = subobject 타입의 생성자 값 위에 소유 클래스 base 사슬의
+// InitSubobjectDefaults를 기록 모드로 적용한 값의 Record다(두 벌을 만들어 대조 — 결정성). 타입
+// 레코드에 게시·기억한다(ResolveClassDefaults와 같은 규칙). 표가 없으면 빈 span이다. 소유 클래스나
+// subobject 타입이 추상·불완전 배치·손 함수표면 diagnostic의 이유와 Unsupported다(그 노드는 전부
+// 저장한다).
+//
+// 사용 예:
+//   auto entries = AcquireSubobjectDefaults(ownerLease, allocator, &why);
+//   if (entries) {
+//       Span<const uint8> base = entries.Value()[k].Record(ClassDefaultsConfiguration::Editor);
+//   }
+ROCKS_OBJECTSERIALIZATION_API Result<Span<const ClassDefaults>>
+AcquireSubobjectDefaults(const TypeLease& lease, Allocator& scratch,
+                         ClassDefaultsDiagnostic* diagnostic = nullptr) noexcept;
+
 // lease 클래스를 AcquireClassDefaults로 분류한다. 패키지 writer(Summary ClassDefaults 행)·
 // reader(지문 판정)·쿠커(cookKey 상태)·class-defaults-dump가 같은 분류를 쓴다.
 //

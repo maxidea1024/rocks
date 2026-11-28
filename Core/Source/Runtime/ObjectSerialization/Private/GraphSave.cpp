@@ -593,6 +593,77 @@ private:
 };
 
 // 노드 하나의 필드를 encode해 Record를 만든다. fileBytes는 지금까지의 출력 byte 누계이고 이 노드의
+// 노드 하나의 차이 쓰기 기준 byte다(opened 거짓이면 기준 없이 전부 쓴다).
+struct NodeBaseline {
+    bool opened = false;
+    Span<const uint8> bytes{};
+};
+
+// 노드의 차이 쓰기 기준을 고른다(Docs/Design/Prefab 10.6절 — 노드별 기준): 생성 출처가
+// ClassSubobject이고 Outer가 집합 안 소유 노드(종류 1로 쓰일 노드)면 소유 클래스의 subobject 기본값
+// 레코드(이름 = 소유 필드 도구 이름인 항목), 그 밖은 그 구체 클래스의 레코드다. 레코드가 없는
+// 타입(불완전 배치·손 함수표 — 소유 클래스·subobject 타입 포함)은 기준 없이 전부 쓴다.
+Result<NodeBaseline> NodeBaselineRecord(Allocator& allocator, ObjectRegistry& registry,
+                                        const ObjectAccessContext& access, Array<SaveNode>& nodes,
+                                        usize nodeIndex, GraphEncodeContext& context,
+                                        ClassDefaultsConfiguration configuration) noexcept {
+    using Out = Result<NodeBaseline>;
+    const ObjectHandle handle = nodes[nodeIndex].handle;
+    const uint32 owner =
+        nodes[nodeIndex].outer != ObjectHandle{} ? context.LocalOf(nodes[nodeIndex].outer) : 0;
+    if (owner != 0 && nodes[owner - 1].lease.Schema().subobjects.Size() != 0) {
+        auto origin = registry.GetOrigin(access, handle);
+        if (!origin) {
+            return Out::Failure(origin.Error());
+        }
+
+        if (origin.Value() == ObjectOrigin::ClassSubobject) {
+            String name(allocator);
+            if (auto named = registry.GetName(access, handle, name); !named) {
+                return Out::Failure(named.Error());
+            }
+
+            const TypeLease& ownerLease = nodes[owner - 1].lease;
+            const TypeSchema& ownerSchema = ownerLease.Schema();
+            for (usize index = 0; index < ownerSchema.subobjects.Size(); ++index) {
+                const Guid id = ownerSchema.subobjects[index].id;
+                for (const FieldSchema& field : ownerSchema.fields) {
+                    const Span<const char> fieldName = EffectiveToolName(field);
+                    if (field.id != id ||
+                        StringView(fieldName.Data(), fieldName.Size()) != name.View()) {
+                        continue;
+                    }
+
+                    ClassDefaultsDiagnostic why;
+                    auto entries = AcquireSubobjectDefaults(ownerLease, allocator, &why);
+                    if (!entries) {
+                        if (IsClassWithoutDefaults(why.reason)) {
+                            return Out::Success({});
+                        }
+
+                        return Out::Failure(entries.Error());
+                    }
+
+                    return Out::Success({true, entries.Value()[index].Record(configuration)});
+                }
+            }
+        }
+    }
+
+    ClassDefaultsDiagnostic why;
+    auto defaults = AcquireClassDefaults(nodes[nodeIndex].lease, allocator, &why);
+    if (defaults) {
+        return Out::Success({true, defaults.Value()->Record(configuration)});
+    }
+
+    if (why.reason != ClassDefaultsReason::IncompleteLayout &&
+        why.reason != ClassDefaultsReason::ManualFields) {
+        return Out::Failure(defaults.Error());
+    }
+
+    return Out::Success({});
+}
+
 // Bytes(Record)와(NodeTable이면) 노드 항목, 외부 참조 위치 표 메모리를 더해 maxBytes와 비교한다.
 // 필드마다 외부 참조 위치를 필드 writer offset에서 Record offset으로 바꾼다.
 Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
@@ -644,21 +715,22 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     context.BeginObject(schema.id, static_cast<uint32>(nodeIndex), fileBytes);
     // 차이 쓰기(A5b): 그 구체 클래스의 기준 레코드를 연다. 레코드가 없는 타입은 전부 쓴다.
     if (baseline != GraphBaseline::None) {
-        ClassDefaultsDiagnostic why;
-        auto defaults = AcquireClassDefaults(nodes[nodeIndex].lease, allocator, &why);
-        if (defaults) {
-            const ClassDefaultsConfiguration configuration =
-                baseline == GraphBaseline::Editor ? ClassDefaultsConfiguration::Editor
-                                                  : ClassDefaultsConfiguration::Cooked;
+        const ClassDefaultsConfiguration configuration = baseline == GraphBaseline::Editor
+                                                             ? ClassDefaultsConfiguration::Editor
+                                                             : ClassDefaultsConfiguration::Cooked;
+        auto record = NodeBaselineRecord(allocator, registry, access, nodes, nodeIndex, context,
+                                         configuration);
+        if (!record) {
+            return Result<void>::Failure(record.Error());
+        }
+
+        if (record.Value().opened) {
             if (auto opened =
-                    context.BeginBaseline(schema, defaults.Value()->Record(configuration),
+                    context.BeginBaseline(schema, record.Value().bytes,
                                           overrides != nullptr ? overrides->Find(handle) : nullptr);
                 !opened) {
                 return opened;
             }
-        } else if (why.reason != ClassDefaultsReason::IncompleteLayout &&
-                   why.reason != ClassDefaultsReason::ManualFields) {
-            return Result<void>::Failure(defaults.Error());
         }
 
         // 선언 subobject의 소유 구조 필드는 기준과 같아도 쓴다: 소유 객체의 Root 필드, 선언

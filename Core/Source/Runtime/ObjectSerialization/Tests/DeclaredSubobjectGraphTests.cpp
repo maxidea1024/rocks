@@ -4,6 +4,7 @@
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
+#include <ObjectSerialization/ClassDefaults.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Serialization/Archive.h>
 #include <TestSupport/Test.h>
@@ -346,6 +347,91 @@ TEST(DefaultSubobject_MalformedNodesRejected) {
     const ObjectHandle set[] = {owner.Handle()};
     auto saved = SaveObjectGraphSet(allocator, fixture.registry, fixture.access, set, options);
     CHECK(!saved && saved.Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(DefaultSubobject_RecordIsDeterministic) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    auto owner = fixture.types.Acquire(TypeIdOf<SubobjectOwner>());
+    auto scene = fixture.types.Acquire(TypeIdOf<SubobjectScenePart>());
+    auto part = fixture.types.Acquire(TypeIdOf<SubobjectPart>());
+    REQUIRE(owner && scene && part);
+    // 소유 클래스 표와 같은 수의 레코드를 두 벌 대조로 만들고 타입 레코드에 게시한다(두 번째 조회는
+    // 같은 byte).
+    auto entries = AcquireSubobjectDefaults(owner.Value(), allocator);
+    REQUIRE(entries);
+    REQUIRE(entries.Value().Size() == 3);
+    auto again = AcquireSubobjectDefaults(owner.Value(), allocator);
+    REQUIRE(again);
+    CHECK(entries.Value().Data() == again.Value().Data());
+    auto sceneDefaults = AcquireClassDefaults(scene.Value(), allocator);
+    auto partDefaults = AcquireClassDefaults(part.Value(), allocator);
+    REQUIRE(sceneDefaults && partDefaults);
+    const auto same = [](Span<const uint8> left, Span<const uint8> right) noexcept {
+        return test::graph::SameBytes(left, right);
+    };
+    // body·arm은 hook이 덮어 클래스 레코드와 다르고, 덮지 않은 plain은 클래스 레코드와 같다.
+    const auto editor = ClassDefaultsConfiguration::Editor;
+    CHECK(!same(entries.Value()[0].Record(editor), sceneDefaults.Value()->Record(editor)));
+    CHECK(!same(entries.Value()[1].Record(editor), sceneDefaults.Value()->Record(editor)));
+    CHECK(same(entries.Value()[2].Record(editor), partDefaults.Value()->Record(editor)));
+}
+
+TEST(DefaultSubobject_TableReferencesEqualBaseline) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    RootRef<Object> owner = fixture.SpawnOwner();
+    REQUIRE(!owner.Handle().IsNull());
+    const Fixture::View before = fixture.Read(owner.Handle());
+    // body를 클래스 기본값(0)으로 되돌린다 — subobject 기본값(1)과 다르므로 차이 쓰기가 남겨야 한다
+    // (클래스 레코드를 기준으로 쓰면 생략되어 복원이 hook 값 1을 다시 준다).
+    {
+        auto body = fixture.registry.ResolveForWrite<SubobjectPart>(fixture.access, before.body);
+        REQUIRE(body);
+        body.Value().Get().Value()->count = 0;
+    }
+
+    ObjectGraphSaveOptions options;
+    options.baseline = GraphBaseline::Editor;
+    auto bytes =
+        SaveObjectGraph(allocator, fixture.registry, fixture.access, owner.Handle(), options);
+    REQUIRE(bytes);
+    auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                  bytes.Value().View());
+    REQUIRE(loaded);
+    const Fixture::View after = fixture.Read(loaded.Value().Handle());
+    CHECK(fixture.CountOf(after.body) == 0);
+    CHECK(fixture.CountOf(after.arm) == 2);
+}
+
+TEST(DefaultSubobject_NewClassSubobjectAppearsOnLoad) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    // 클래스에 plain이 생기기 전에 저장한 것처럼 body·arm 항목만 있는 그래프다.
+    const TypeSchema& ownerSchema = GeneratedType<SubobjectOwner>::Schema();
+    RecordBuilder ownerBuilder(allocator, ownerSchema.id, ownerSchema.version);
+    RecordBuilder sceneBuilder(allocator, GeneratedType<SubobjectScenePart>::Schema().id,
+                               GeneratedType<SubobjectScenePart>::Schema().version);
+    auto ownerRecord = ownerBuilder.Build();
+    auto sceneRecord = sceneBuilder.Build();
+    REQUIRE(ownerRecord && sceneRecord);
+    test::graph::Node nodes[] = {{ownerSchema.id, 0, {}, ownerRecord.Value().View()},
+                                 {ownerSchema.subobjects[0].id, 1, {}, sceneRecord.Value().View()},
+                                 {ownerSchema.subobjects[1].id, 1, {}, sceneRecord.Value().View()}};
+    nodes[1].kind = test::graph::NodeKindDeclaredSubobject;
+    nodes[2].kind = test::graph::NodeKindDeclaredSubobject;
+    auto bytes = test::graph::Build(allocator, nodes);
+    REQUIRE(bytes);
+    auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                  bytes.Value().View());
+    REQUIRE(loaded);
+    const Fixture::View after = fixture.Read(loaded.Value().Handle());
+    // 그래프에 없던 plain도 만들어져 목록에 든다.
+    CHECK(!after.plain.IsNull() && fixture.IsClassSubobject(after.plain));
+    CHECK(after.parts == 3 && after.root == after.body);
 }
 
 } // namespace declared_subobject_graph_tests_file

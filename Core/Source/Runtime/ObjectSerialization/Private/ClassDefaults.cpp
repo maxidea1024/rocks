@@ -2,6 +2,7 @@
 
 #include <Core/Hash/Sha256.h>
 #include <Object/ClassRef.h>
+#include <Object/SubobjectDefaultsContext.h>
 #include <Object/TypeRegistry.h>
 #include <ObjectSerialization/ClassDefaults.h>
 #include <Platform/Fatal.h>
@@ -190,6 +191,11 @@ public:
         return *object_;
     }
 
+    // 기록 모드의 기본값 덮기(InitSubobjectDefaults)가 값을 쓴다.
+    Object& GetMutable() noexcept {
+        return *object_;
+    }
+
 private:
     Allocator& allocator_;
     const RuntimeTypeOps& ops_;
@@ -373,7 +379,173 @@ Result<void> BuildDefaults(void* user, const TypeLease& lease, TypeRegistry& typ
     return Result<void>::Success();
 }
 
+// 선언 subobject 기본값 레코드의 입력이다(초안 byte는 항목마다 editor·cooked 배열 — 게시가
+// 복사한다).
+struct SubobjectBuildInput {
+    Allocator* scratch = nullptr;
+    Array<Array<uint8>>* records = nullptr;
+};
+
+// 소유 객체와 펼친 표의 subobject를 Registry 밖 임시 인스턴스로 만들고 기본값 덮기를 기록 모드로
+// 적용한 한 벌이다(Docs/Design/Prefab 10.6절).
+class TemporarySubobjectSet {
+public:
+    TemporarySubobjectSet(Allocator& allocator, const TypeLease& owner,
+                          Span<const TypeLease> types) noexcept
+        : allocator_(allocator), owner_(allocator, owner.Ops()), types_(types) {
+    }
+
+    TemporarySubobjectSet(const TemporarySubobjectSet&) = delete;
+    TemporarySubobjectSet& operator=(const TemporarySubobjectSet&) = delete;
+
+    ~TemporarySubobjectSet() {
+        for (usize index = 0; index < created_; ++index) {
+            types_[index].Ops().destroy(objects_[index]);
+            if (!allocator_.Deallocate(memory_[index])) {
+                platform::Fatal("Subobject defaults instance storage ownership mismatch");
+            }
+        }
+    }
+
+    Result<void> Create(TypeRegistry& types, const TypeLease& ownerType) noexcept {
+        if (auto made = owner_.Create(); !made) {
+            return made;
+        }
+
+        for (usize index = 0; index < types_.Size(); ++index) {
+            const RuntimeTypeOps& ops = types_[index].Ops();
+            auto memory = allocator_.Allocate(ops.size, ops.alignment);
+            if (!memory) {
+                return Result<void>::Failure(memory.Error());
+            }
+
+            memory_[index] = memory.Value();
+            objects_[index] = ops.construct(memory_[index], allocator_);
+            created_ = index + 1;
+        }
+
+        return ApplySubobjectDefaults(types, ownerType, owner_.GetMutable(),
+                                      Span<Object* const>(objects_, created_));
+    }
+
+    const Object& Get(usize index) const noexcept {
+        return *objects_[index];
+    }
+
+private:
+    Allocator& allocator_;
+    TemporaryInstance owner_;
+    Span<const TypeLease> types_;
+    Object* objects_[MaxClassSubobjects]{};
+    void* memory_[MaxClassSubobjects]{};
+    usize created_ = 0;
+};
+
+Result<void> BuildSubobjectDefaults(void* user, const TypeLease& lease, TypeRegistry& types,
+                                    Span<ClassDefaultsDraft> drafts,
+                                    ClassDefaultsDiagnostic& diagnostic) noexcept {
+    SubobjectBuildInput& input = *static_cast<SubobjectBuildInput*>(user);
+    Allocator& scratch = *input.scratch;
+    if (lease.Ops().construct == nullptr) {
+        diagnostic.reason = ClassDefaultsReason::Abstract;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // subobject 타입마다 클래스 레코드와 같은 조건(구체·완전한 필드 배치·생성 코덱)을 요구한다.
+    const Span<const SubobjectSchema> table = lease.Schema().subobjects;
+    TypeLease leases[MaxClassSubobjects];
+    for (usize index = 0; index < table.Size(); ++index) {
+        auto acquired = types.Acquire(table[index].type);
+        if (!acquired) {
+            return Result<void>::Failure(acquired.Error());
+        }
+
+        leases[index] = Move(acquired.Value());
+        const RuntimeTypeOps& ops = leases[index].Ops();
+        diagnostic.reason = ops.construct == nullptr   ? ClassDefaultsReason::Abstract
+                            : !ops.completeFieldLayout ? ClassDefaultsReason::IncompleteLayout
+                            : !leases[index].HasGeneratedFieldCodecs()
+                                ? ClassDefaultsReason::ManualFields
+                                : ClassDefaultsReason::None;
+        if (diagnostic.reason != ClassDefaultsReason::None) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+    }
+
+    // 두 벌을 동시에 산 채로 둔다(주소에 기대는 값이 저장소 재사용으로 가려지지 않게 — 클래스
+    // 레코드와 같다).
+    const Span<const TypeLease> typeSpan(leases, table.Size());
+    TemporarySubobjectSet first(scratch, lease, typeSpan);
+    TemporarySubobjectSet second(scratch, lease, typeSpan);
+    if (auto created = first.Create(types, lease); !created) {
+        return created;
+    }
+
+    if (auto created = second.Create(types, lease); !created) {
+        return created;
+    }
+
+    Array<Array<uint8>>& records = *input.records;
+    if (auto reserved = records.TryReserve(2 * table.Size()); !reserved) {
+        return reserved;
+    }
+
+    const FieldEncodePolicy editorPolicy{};
+    FieldEncodePolicy cookedPolicy;
+    cookedPolicy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+    for (usize index = 0; index < table.Size(); ++index) {
+        auto editor = EncodeDefaults(scratch, leases[index], types, first.Get(index), editorPolicy,
+                                     diagnostic);
+        if (!editor) {
+            return Result<void>::Failure(editor.Error());
+        }
+
+        auto again = EncodeDefaults(scratch, leases[index], types, second.Get(index), editorPolicy,
+                                    diagnostic);
+        if (!again) {
+            return Result<void>::Failure(again.Error());
+        }
+
+        if (!SameBytes(editor.Value().View(), again.Value().View())) {
+            diagnostic.reason = ClassDefaultsReason::NonDeterministic;
+            const PathStep step{FirstDifferentField(scratch, leases[index].Schema(),
+                                                    editor.Value().View(), again.Value().View())};
+            diagnostic.SetFieldPath(Span<const PathStep>(&step, 1));
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto cooked = EncodeDefaults(scratch, leases[index], types, first.Get(index), cookedPolicy,
+                                     diagnostic);
+        if (!cooked) {
+            return Result<void>::Failure(cooked.Error());
+        }
+
+        (void)records.TryPushBack(Move(editor.Value()));
+        (void)records.TryPushBack(Move(cooked.Value()));
+        drafts[index].editorRecord = records[records.Size() - 2].View();
+        drafts[index].cookedRecord = records[records.Size() - 1].View();
+        drafts[index].editorFingerprint =
+            Fingerprint(ClassDefaultsConfiguration::Editor, drafts[index].editorRecord);
+        drafts[index].cookedFingerprint =
+            Fingerprint(ClassDefaultsConfiguration::Cooked, drafts[index].cookedRecord);
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace
+
+Result<Span<const ClassDefaults>>
+AcquireSubobjectDefaults(const TypeLease& lease, Allocator& scratch,
+                         ClassDefaultsDiagnostic* diagnostic) noexcept {
+    if (!lease.IsValid()) {
+        return Result<Span<const ClassDefaults>>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Array<Array<uint8>> records(scratch);
+    SubobjectBuildInput input{&scratch, &records};
+    return lease.ResolveSubobjectDefaults(&BuildSubobjectDefaults, &input, diagnostic);
+}
 
 Result<const ClassDefaults*> AcquireClassDefaults(const TypeLease& lease, Allocator& scratch,
                                                   ClassDefaultsDiagnostic* diagnostic) noexcept {

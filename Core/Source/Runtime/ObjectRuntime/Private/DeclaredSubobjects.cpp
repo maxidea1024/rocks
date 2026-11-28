@@ -82,6 +82,37 @@ StringView SubobjectName(const TypeSchema& schema, Guid id) noexcept {
 
 } // namespace
 
+Result<void> ApplySubobjectDefaults(TypeRegistry& types, const TypeLease& ownerType, Object& owner,
+                                    Span<Object* const> subobjects) noexcept {
+    TypeLease chain[MaxSubobjectOwnerDepth];
+    usize depth = 0;
+    TypeId current = ownerType.Schema().id;
+    while (current != TypeId{}) {
+        if (depth == MaxSubobjectOwnerDepth) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        auto acquired = types.Acquire(current);
+        if (!acquired) {
+            return Result<void>::Failure(acquired.Error());
+        }
+
+        current = acquired.Value().Schema().baseType;
+        chain[depth++] = Move(acquired.Value());
+    }
+
+    SubobjectDefaultsContext context(owner, ownerType, subobjects);
+    for (usize index = depth; index > 0; --index) {
+        if (auto hook = chain[index - 1].Ops().initSubobjectDefaults) {
+            if (auto applied = hook(context); !applied) {
+                return applied;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 SubobjectDefaultsContext::SubobjectDefaultsContext(Object& owner, const TypeLease& ownerType,
                                                    Span<Object* const> subobjects) noexcept
     : owner_(owner), ownerType_(ownerType), subobjects_(subobjects) {
@@ -257,31 +288,10 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
     }
 
     // 3. 기본값 덮기: base 사슬의 hook을 가장 먼 base부터 부른다.
-    TypeLease chain[MaxSubobjectOwnerDepth];
-    usize depth = 0;
-    TypeId current = schema.id;
-    while (current != TypeId{}) {
-        if (depth == MaxSubobjectOwnerDepth) {
-            return failWith(ErrorCode::CapacityExceeded);
-        }
-
-        auto acquired = types.Acquire(current);
-        if (!acquired) {
-            return failWith(acquired.Error());
-        }
-
-        current = acquired.Value().Schema().baseType;
-        chain[depth++] = Move(acquired.Value());
-    }
-
-    SubobjectDefaultsContext context(*ownerObject.Value(), lease,
-                                     Span<Object* const>(objects, count));
-    for (usize index = depth; index > 0; --index) {
-        if (auto hook = chain[index - 1].Ops().initSubobjectDefaults) {
-            if (auto applied = hook(context); !applied) {
-                return failWith(applied.Error());
-            }
-        }
+    if (auto applied = ApplySubobjectDefaults(types, lease, *ownerObject.Value(),
+                                              Span<Object* const>(objects, count));
+        !applied) {
+        return failWith(applied.Error());
     }
 
     return Result<usize>::Success(count);
@@ -289,6 +299,10 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
 
 Result<ObjectHandle> ConstructionContext::DeclaredSubobject(ObjectHandle owner,
                                                             usize index) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return Result<ObjectHandle>::Failure(state.Error());
+    }
+
     auto ownerObject = Get<Object>(owner);
     if (!ownerObject) {
         return Result<ObjectHandle>::Failure(ownerObject.Error());

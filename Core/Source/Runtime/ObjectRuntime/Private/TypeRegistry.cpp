@@ -291,6 +291,14 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
 
     // 클래스 기본값 상태(성공이면 byte도 같은 블록)를 해제한다. lease가 모두 반환된 뒤라 읽는 쪽이
     // 없다.
+    if (SubobjectDefaultsState* subobjectDefaults = record->subobjectDefaults) {
+        record->subobjectDefaults = nullptr;
+        subobjectDefaults->~SubobjectDefaultsState();
+        if (!allocator_.Deallocate(subobjectDefaults)) {
+            platform::Fatal("TypeRegistry subobject defaults ownership mismatch");
+        }
+    }
+
     if (ClassDefaultsState* defaults = record->defaults) {
         record->defaults = nullptr;
         defaults->~ClassDefaultsState();

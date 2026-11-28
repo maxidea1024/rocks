@@ -479,6 +479,129 @@ TypeLease::ResolveClassDefaults(ClassDefaultsBuilder builder, void* user,
     return Out::Success(&state->defaults);
 }
 
+Result<Span<const ClassDefaults>>
+TypeLease::ResolveSubobjectDefaults(SubobjectDefaultsBuilder builder, void* user,
+                                    ClassDefaultsDiagnostic* diagnostic) const noexcept {
+    using Out = Result<Span<const ClassDefaults>>;
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+
+    auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (record->kind != TypeKind::Class || builder == nullptr) {
+        return Out::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize count = record->schema.subobjects.Size();
+    if (count == 0) {
+        return Out::Success({});
+    }
+
+    auto settled = [&](const SubobjectDefaultsState& state) noexcept {
+        if (!state.failed) {
+            return Out::Success(Span<const ClassDefaults>(state.entries, state.count));
+        }
+
+        if (diagnostic != nullptr) {
+            *diagnostic = state.diagnostic;
+        }
+
+        return Out::Failure(state.diagnostic.error);
+    };
+    if (const SubobjectDefaultsState* state =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&record->subobjectDefaults)) {
+        return settled(*state);
+    }
+
+    TypeRegistry& owner = *owner_;
+    const uint64 self = platform::CurrentThreadId();
+    if (platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_) == self) {
+        platform::Fatal("Subobject defaults builder re-entered on the same thread");
+    }
+
+    platform::LockGuard lock(owner.defaultsGate_);
+    if (const SubobjectDefaultsState* state =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&record->subobjectDefaults)) {
+        return settled(*state);
+    }
+
+    ClassDefaultsDraft drafts[MaxClassSubobjects];
+    ClassDefaultsDiagnostic local;
+    local.type = record->schema.id;
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, self);
+    auto built = builder(user, *this, owner, Span<ClassDefaultsDraft>(drafts, count), local);
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, uint64{0});
+    if (!built) {
+        local.error = built.Error();
+        if (local.reason == ClassDefaultsReason::None) {
+            local.reason = ClassDefaultsReason::EncodeFailed;
+        }
+
+        if (diagnostic != nullptr) {
+            *diagnostic = local;
+        }
+
+        if (!IsRememberedClassDefaultsFailure(local)) {
+            return Out::Failure(built.Error());
+        }
+
+        auto memory = owner.allocator_.Allocate(sizeof(SubobjectDefaultsState),
+                                                alignof(SubobjectDefaultsState));
+        if (!memory) {
+            return Out::Failure(built.Error());
+        }
+
+        auto* state = ::new (memory.Value()) SubobjectDefaultsState();
+        state->failed = true;
+        state->diagnostic = local;
+        platform::AtomicStore<platform::MemoryOrder::Release>(&record->subobjectDefaults, state);
+        return Out::Failure(built.Error());
+    }
+
+    // 상태 → ClassDefaults[count] → 항목마다 editor·cooked byte를 한 블록에 둔다.
+    const usize entriesOffset = (sizeof(SubobjectDefaultsState) + alignof(ClassDefaults) - 1) &
+                                ~(alignof(ClassDefaults) - 1);
+    usize total = entriesOffset + count * sizeof(ClassDefaults);
+    for (usize index = 0; index < count; ++index) {
+        if (!TryAdd(total, drafts[index].editorRecord.Size(), total) ||
+            !TryAdd(total, drafts[index].cookedRecord.Size(), total)) {
+            return Out::Failure(ErrorCode::Overflow);
+        }
+    }
+
+    auto memory = owner.allocator_.Allocate(total, alignof(SubobjectDefaultsState));
+    if (!memory) {
+        if (diagnostic != nullptr) {
+            *diagnostic = local;
+            diagnostic->error = memory.Error();
+        }
+
+        return Out::Failure(memory.Error());
+    }
+
+    auto* base = static_cast<uint8*>(memory.Value());
+    auto* state = ::new (base) SubobjectDefaultsState();
+    auto* entries = reinterpret_cast<ClassDefaults*>(base + entriesOffset);
+    uint8* bytes = base + entriesOffset + count * sizeof(ClassDefaults);
+    for (usize index = 0; index < count; ++index) {
+        ClassDefaults& entry = *::new (entries + index) ClassDefaults();
+        const ClassDefaultsDraft& draft = drafts[index];
+        platform::MemoryCopy(bytes, draft.editorRecord.Data(), draft.editorRecord.Size());
+        entry.editor_ = Span<const uint8>(bytes, draft.editorRecord.Size());
+        bytes += draft.editorRecord.Size();
+        platform::MemoryCopy(bytes, draft.cookedRecord.Data(), draft.cookedRecord.Size());
+        entry.cooked_ = Span<const uint8>(bytes, draft.cookedRecord.Size());
+        bytes += draft.cookedRecord.Size();
+        entry.editorFingerprint_ = draft.editorFingerprint;
+        entry.cookedFingerprint_ = draft.cookedFingerprint;
+    }
+
+    state->count = count;
+    state->entries = entries;
+    platform::AtomicStore<platform::MemoryOrder::Release>(&record->subobjectDefaults, state);
+    return Out::Success(Span<const ClassDefaults>(entries, count));
+}
+
 bool TypeLease::HasGeneratedFieldCodecs() const noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");

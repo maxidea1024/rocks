@@ -16,6 +16,16 @@ struct ClassDefaultsState {
     ClassDefaults defaults;
 };
 
+// 선언 subobject 기본값 슬롯의 게시 상태다(Docs/Design/Prefab 10.6절). 성공이면 entries가 펼친
+// subobject 표와 같은 수·순서의 레코드(같은 블록 뒤 — 상태 → ClassDefaults[count] → byte)이고, 실패
+// 기억이면 diagnostic만 쓴다. TypeRegistry allocator의 한 블록이며 DestroyRecord가 해제한다.
+struct SubobjectDefaultsState {
+    bool failed = false;
+    ClassDefaultsDiagnostic diagnostic;
+    usize count = 0;
+    ClassDefaults* entries = nullptr;
+};
+
 // 클래스·enum·struct 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
 // ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. struct 레코드는 schema(id·version·
 // name·fields)와 ops(size·alignment·nativeType·module)를 채우고 structOps에 멤버 함수표(스키마
@@ -66,6 +76,9 @@ struct TypeRegistry::Record {
     // 클래스 기본값 슬롯이다(null = 아직 없음). acquire로 읽고 생성 잠금(defaultsGate_) 안에서
     // release로 한 번만 게시한다(TypeLease::ResolveClassDefaults).
     ClassDefaultsState* defaults = nullptr;
+    // 선언 subobject 기본값 슬롯이다(null = 아직 없음 — defaults와 같은 게시 규칙,
+    // TypeLease::ResolveSubobjectDefaults).
+    SubobjectDefaultsState* subobjectDefaults = nullptr;
 };
 
 // 등록 한 번의 색인 준비물이다(잠금 밖에서 할당한 새 색인과, 바꾼 뒤 잠금 밖에서 반환할 옛 색인).

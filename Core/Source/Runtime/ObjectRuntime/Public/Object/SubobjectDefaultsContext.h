@@ -77,4 +77,14 @@ private:
     Span<Object* const> subobjects_;
 };
 
+class TypeRegistry;
+
+// ownerType 소유 클래스의 base 사슬 InitSubobjectDefaults를 가장 먼 base부터 부른다(Docs/Design/
+// Prefab 10.2절 — instancing·기록 두 모드가 쓴다). subobjects는 펼친 표 순서의 subobject 객체다.
+// 오류: 사슬이 MaxSubobjectOwnerDepth보다 깊음 CapacityExceeded, base 타입 조회 오류, hook이 돌려준
+// 오류.
+ROCKS_OBJECTRUNTIME_API Result<void>
+ApplySubobjectDefaults(TypeRegistry& types, const TypeLease& ownerType, Object& owner,
+                       Span<Object* const> subobjects) noexcept;
+
 } // namespace rocks

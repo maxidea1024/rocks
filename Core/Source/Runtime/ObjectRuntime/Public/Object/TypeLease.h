@@ -191,6 +191,16 @@ public:
     ResolveClassDefaults(ClassDefaultsBuilder builder, void* user,
                          ClassDefaultsDiagnostic* diagnostic = nullptr) const noexcept;
 
+    // 이 소유 클래스의 선언 subobject 기본값 레코드다(펼친 subobject 표와 같은 수·순서 —
+    // Docs/Design/ Prefab 10.6절). 게시·실패 기억·잠금·재진입 규칙은 ResolveClassDefaults와
+    // 같다(같은 생성 잠금을 쓴다). 표가 없는 클래스는 빈 span 성공이다(builder를 부르지 않는다).
+    // 반환 span은 이 lease가 사는 동안 유효하다.
+    //
+    // 오류: 클래스가 아닌 lease·null builder InvalidArgument, builder의 오류, 게시 할당 실패.
+    Result<Span<const ClassDefaults>>
+    ResolveSubobjectDefaults(SubobjectDefaultsBuilder builder, void* user,
+                             ClassDefaultsDiagnostic* diagnostic = nullptr) const noexcept;
+
     // base 사슬의 모든 클래스 레코드에 생성 코덱 표지(RuntimeTypeOps::generatedFieldCodecs)가
     // 있는지다(클래스 기본값 레코드의 원본 모드 인코딩 조건). 빈 lease는 Fatal이다.
     bool HasGeneratedFieldCodecs() const noexcept;

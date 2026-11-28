@@ -101,6 +101,14 @@ using ClassDefaultsBuilder = Result<void> (*)(void* user, const TypeLease& lease
                                               TypeRegistry& types, ClassDefaultsDraft& draft,
                                               ClassDefaultsDiagnostic& diagnostic) noexcept;
 
+// 소유 클래스의 선언 subobject 기본값 레코드를 만드는 함수다(Docs/Design/Prefab 10.6절 —
+// TypeLease::ResolveSubobjectDefaults가 부른다). lease는 소유 클래스, drafts는 펼친 subobject 표와
+// 같은 수·순서의 초안이다(초안 byte는 user가 가진 저장소를 빌리고 게시가 복사한다).
+using SubobjectDefaultsBuilder = Result<void> (*)(void* user, const TypeLease& lease,
+                                                  TypeRegistry& types,
+                                                  Span<ClassDefaultsDraft> drafts,
+                                                  ClassDefaultsDiagnostic& diagnostic) noexcept;
+
 // 이유의 영어 이름이다(진단·경고 출력 — "None"·"Abstract"·…·"EncodeFailed").
 constexpr const char* ClassDefaultsReasonName(ClassDefaultsReason reason) noexcept {
     switch (reason) {
