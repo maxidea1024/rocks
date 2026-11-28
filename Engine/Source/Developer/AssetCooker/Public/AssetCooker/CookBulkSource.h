@@ -18,6 +18,7 @@ inline constexpr uint32 CookBulkIdFirst = NumericLimits<uint32>::Max();
 // 사용 예(처리기 Cook — 쓰기 동안 byte를 살려 둔다):
 //   CookChainedBulkSource bulk(allocator, context.bulkSource);
 //   auto ref = bulk.Add(lodBytes.View());   // renderData.lods[i].data = ref.Value();
+//   auto streamed = bulk.Add(payload.View(), PackageBulkPlacement::Sidecar);  // 스트리밍 bulk
 //   CookContext write = context;
 //   write.bulkSource = &bulk;
 //
@@ -30,8 +31,12 @@ public:
     }
 
     // bytes를 새 entry로 두고 그 ref(id는 CookBulkIdFirst부터 내려감, 크기·SHA-256)를 돌려준다. 0
-    // byte도 entry다. 오류: id가 저장하지 않은 bulk 범위로 내려옴 CapacityExceeded, 할당 실패.
-    Result<BulkDataRef> Add(Span<const uint8> bytes) noexcept;
+    // byte도 entry다. placement는 쓰기의 배치다(AssetSystem 20.5 1 — Sidecar면 sidecar 파일,
+    // sidecar 출력이 없는 쿠킹·0 byte는 패키지 안). 오류: id가 저장하지 않은 bulk 범위로 내려옴
+    // CapacityExceeded, 할당 실패.
+    Result<BulkDataRef>
+    Add(Span<const uint8> bytes,
+        PackageBulkPlacement placement = PackageBulkPlacement::Package) noexcept;
 
     // 새 bulk는 이 객체가, 그 밖은 next가 준다(next가 없으면 NotFound).
     Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override;
@@ -39,10 +44,18 @@ public:
     // 새 bulk는 저장 byte가 없다(writer가 raw를 부호화한다 — NotFound). 그 밖은 next다.
     Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override;
 
-private:
-    const Span<const uint8>* Find(uint32 bulkId) const noexcept;
+    // 새 bulk는 Add가 받은 배치, 그 밖은 next(없으면 Package)다.
+    PackageBulkPlacement Placement(const BulkDataRef& ref) const noexcept override;
 
-    Array<Span<const uint8>> entries_;
+private:
+    struct Entry {
+        Span<const uint8> bytes;
+        PackageBulkPlacement placement = PackageBulkPlacement::Package;
+    };
+
+    const Entry* Find(uint32 bulkId) const noexcept;
+
+    Array<Entry> entries_;
     PackageBulkSource* next_;
 };
 

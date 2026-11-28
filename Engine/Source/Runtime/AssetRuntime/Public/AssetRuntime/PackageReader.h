@@ -285,6 +285,27 @@ ExpectedSidecarHeader(const PackageContents& contents) noexcept;
 ROCKS_ASSETRUNTIME_API Result<void>
 ReadSidecarHeader(Span<const uint8> header, const SidecarHeaderExpectation& expected) noexcept;
 
+// sidecar 파일 전체를 검증한다(AS 20.5 8 — 검증 명령 `asset-load-cooked --verify-sidecars`):
+// reader의 파일을 scratch 크기 조각으로 흘려 읽어 파일 크기 = contents.sidecar.fileBytes, 머리
+// (ReadSidecarHeader — ExpectedSidecarHeader(contents)), 블록 SHA-256 전부, 전체 SHA-256 =
+// contents.sidecar.sha256을 본다. contents는 ReadPackage·ReadPackageForEdit 결과(BulkIndex를 읽은
+// 것)여야 한다.
+//
+// 사용 예:
+//   FilePackageRangeReader sidecar;
+//   sidecar.Open(files, sidecarPath);
+//   if (auto verified = VerifySidecarFile(sidecar, contents, scratch.View(), &failure);
+//       !verified) { ... }
+//
+// 오류: 빈 scratch·sidecar 없는 contents InvalidArgument(진단 없음), 크기·머리 다름은
+// CorruptPackage / CorruptData(section = Sidecar, detail 0), 블록 해시 다름은 같은 진단(detail = 첫
+// 다른 블록 번호), 전체 SHA-256 다름은 detail 0, 범위 읽기 오류는 그 오류(진단 None, section =
+// Sidecar).
+ROCKS_ASSETRUNTIME_API Result<void> VerifySidecarFile(PackageRangeReader& reader,
+                                                      const PackageContents& contents,
+                                                      Span<uint8> scratch,
+                                                      AssetDiagnostic* failure = nullptr) noexcept;
+
 // 저장한 패키지 파일의 재검증이다(AS 5.5절 5, 7.1절 15 — A2c1). 에디터 패키지로 헤더·섹션 표·
 // 모든 섹션 CRC·섹션 사이 패딩 0·BulkIndex 배치·entry 사이 패딩 0·entry 저장 CRC를 scratch 크기
 // 조각으로 훑는다(버전 축은 보지 않는다, 압축 해제·SHA-256·그래프 해석은 하지 않는다). 같은

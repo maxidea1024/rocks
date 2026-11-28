@@ -723,6 +723,107 @@ TEST(AssetSidecar_LoadSkipsSidecar) {
     CHECK(SameBytes(bytes.Value(), scene.part.View()));
 }
 
+// sidecar 파일 전체 검증(AS 20.5 8 VerifySidecarFile): 큰 sidecar(블록 넷)는 조각 크기마다
+// 통과한다. 크기 다름·머리 손상은 detail 0, 블록 1·마지막 블록의 byte 손상은 그 블록 번호, 섹션
+// 전체 SHA-256만 다르면 detail 0의 CorruptPackage(Sidecar 섹션)다. 읽기 오류는 그 오류(진단 None),
+// 빈 scratch·sidecar 없는 패키지는 InvalidArgument다.
+TEST(AssetSidecar_VerifyFile) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Scene scene(env.allocator);
+    REQUIRE(BuildScene(*env.source, scene, PackageBulkPlacement::Sidecar,
+                       PackageBulkPlacement::Package));
+    constexpr usize BigBytes = 200000;
+    Array<uint8> big(env.allocator);
+    FillIncompressible(big, BigBytes, 17);
+    TestAsset* asset = Pointer<TestAsset>(*env.source, scene.asset);
+    REQUIRE(asset != nullptr);
+    asset->pixels = scene.bulk.Add(9, big.View(), PackageBulkPlacement::Sidecar);
+    Written written = WriteScene(env, scene, CookedOptions());
+    REQUIRE(written.error == ErrorCode::None);
+    auto contents = Read(env, written.package.View());
+    REQUIRE(contents);
+    const uint64 blocks = contents.Value().sidecar.blockHashes.Size();
+    REQUIRE(blocks == 4);
+    const usize scratchSizes[] = {
+        1, 7, 4096, SidecarHashBlockBytes, SidecarHashBlockBytes + 3, BigBytes * 2};
+    Array<uint8> scratch(env.allocator);
+    for (usize size : scratchSizes) {
+        REQUIRE(scratch.TryResize(size));
+        MemoryPackageRangeReader reader(written.sidecar.View());
+        CHECK(VerifySidecarFile(reader, contents.Value(), scratch.View()));
+    }
+
+    REQUIRE(scratch.TryResize(4096));
+    auto expect = [&](const Array<uint8>& file, const PackageContents& c, uint64 detail) noexcept {
+        MemoryPackageRangeReader reader(file.View());
+        AssetDiagnostic failure;
+        auto verified = VerifySidecarFile(reader, c, scratch.View(), &failure);
+        return !verified && verified.Error() == ErrorCode::CorruptData &&
+               failure.code == AssetDiagnosticCode::CorruptPackage &&
+               failure.section == static_cast<uint32>(PackageSectionKind::Sidecar) &&
+               failure.detail == detail && failure.asset == FixedId(SceneId);
+    };
+    Array<uint8> longer = Copy(env.allocator, written.sidecar.View());
+    REQUIRE(longer.TryPushBack(0));
+    CHECK(expect(longer, contents.Value(), 0));
+    Array<uint8> header = Copy(env.allocator, written.sidecar.View());
+    header[12] ^= 1;
+    CHECK(expect(header, contents.Value(), 0));
+    const usize offsets[] = {SidecarHashBlockBytes + 5, written.sidecar.Size() - 1};
+    const uint64 details[] = {1, blocks - 1};
+    for (usize index = 0; index < 2; ++index) {
+        Array<uint8> flipped = Copy(env.allocator, written.sidecar.View());
+        flipped[offsets[index]] ^= 0x40;
+        CHECK(expect(flipped, contents.Value(), details[index]));
+    }
+
+    auto other = Read(env, written.package.View());
+    REQUIRE(other);
+    other.Value().sidecar.sha256.bytes[0] ^= 1;
+    CHECK(expect(written.sidecar, other.Value(), 0));
+
+    // 읽기 오류: 블록 2 안에서 실패하는 reader.
+    struct FailingReader final : PackageRangeReader {
+        explicit FailingReader(Span<const uint8> bytes) noexcept : inner(bytes) {
+        }
+
+        uint64 FileBytes() const noexcept override {
+            return inner.FileBytes();
+        }
+
+        Result<void> ReadAt(uint64 offset, Span<uint8> out) noexcept override {
+            if (offset + out.Size() > failFrom) {
+                return Result<void>::Failure(ErrorCode::IoError);
+            }
+
+            return inner.ReadAt(offset, out);
+        }
+
+        MemoryPackageRangeReader inner;
+        uint64 failFrom = 2 * uint64{SidecarHashBlockBytes} + 1;
+    };
+    FailingReader failing(written.sidecar.View());
+    AssetDiagnostic failure;
+    auto failed = VerifySidecarFile(failing, contents.Value(), scratch.View(), &failure);
+    CHECK(!failed && failed.Error() == ErrorCode::IoError &&
+          failure.code == AssetDiagnosticCode::None &&
+          failure.section == static_cast<uint32>(PackageSectionKind::Sidecar));
+
+    MemoryPackageRangeReader reader(written.sidecar.View());
+    CHECK(VerifySidecarFile(reader, contents.Value(), Span<uint8>()).Error() ==
+          ErrorCode::InvalidArgument);
+    Scene plain(env.allocator);
+    REQUIRE(BuildScene(*env.source, plain, PackageBulkPlacement::Package,
+                       PackageBulkPlacement::Package, SceneId + 1));
+    Written packaged = WriteScene(env, plain, CookedOptions());
+    REQUIRE(packaged.error == ErrorCode::None);
+    auto plainContents = Read(env, packaged.package.View());
+    REQUIRE(plainContents);
+    CHECK(VerifySidecarFile(reader, plainContents.Value(), scratch.View()).Error() ==
+          ErrorCode::InvalidArgument);
+}
+
 // 매니페스트 v3(AS 20.1 5): sidecarBytes·sidecarSha256이 왕복한다. sidecarBytes 0인데 SHA-256이 0이
 // 아니면 모델 검증·쓰기는 InvalidArgument, 읽기는 CorruptData(둘 다 SidecarSha256 칸·항목 번호)다.
 // sidecarBytes가 있으면 SHA-256 값은 칸 규칙이 아니다(패키지 대조가 본다).
