@@ -48,10 +48,11 @@ public static partial class PolicyChecks
                     "|\\b__builtin_neon_v(?:aes[a-z]*q_u8|mull_p64)\\b"),
             ["Core/Source/Runtime/Crypto/Private/Aes/"]),
         // SHA 계열 해시 명령(SHA-NI SHA-1·SHA-256·SHA-512, SM3·SM4, ARMv8 SHA1·SHA2·SHA512·SHA3·SM3·SM4)과 그 builtin 형태다.
-        // 쓰는 곳은 Core SHA-256 하드웨어 경로뿐이다(Docs/Design/Rockpile.ko.md R0). 그 경로가 target 매크로를 Compiler.h에
-        // 더하면 여기에 넣는다.
+        // 쓰는 곳은 Core SHA-256 하드웨어 경로뿐이고, 그 target 매크로 ROCKS_TARGET_X64_SHA·ROCKS_TARGET_ARM64_SHA2도 이 계열이다
+        // (Docs/Design/CoreDataFoundations.ko.md 6절).
         new("SHA",
-            Pattern("\\b_mm(?:256|512)?_(?:sha|sm3|sm4)[a-z0-9_]*\\b|\\bv(?:sha1|sha256|sha512|sm3|sm4)[a-z0-9_]*\\b" +
+            Pattern("\\bROCKS_TARGET_(?:X64_SHA|ARM64_SHA2)\\b" +
+                    "|\\b_mm(?:256|512)?_(?:sha|sm3|sm4)[a-z0-9_]*\\b|\\bv(?:sha1|sha256|sha512|sm3|sm4)[a-z0-9_]*\\b" +
                     "|\\b(?:veor3q|vrax1q|vxarq|vbcaxq)_[a-z0-9]+\\b|\\b__builtin_ia32_(?:sha|vsha512|vsm3|vsm4)[a-z0-9_]*\\b" +
                     "|\\b__builtin_neon_v(?:sha1|sha256|sha512|sm3|sm4|eor3q|rax1q|xarq|bcaxq)[a-z0-9_]*\\b"),
             ["Core/Source/Runtime/Core/Private/Encoding/"]),

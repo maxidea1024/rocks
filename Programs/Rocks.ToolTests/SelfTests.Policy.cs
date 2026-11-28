@@ -1382,7 +1382,8 @@ internal static partial class SelfTests
                 "x = _mm_encodekey256_u32(c, a, b, h);", "x = vaeseq_u8(a, k);", "x = vaesdq_u8(a, k);", "x = vaesimcq_u8(a);",
                 "x = vmull_p64(a, b);", "x = vmull_high_p64(a, b);", "x = __builtin_ia32_aesenc128(a, k);",
                 "x = __builtin_ia32_pclmulqdq128(a, b, 0);", "x = __builtin_neon_vaeseq_u8(a, k);"];
-            string[] shaFamily = ["x = _mm_sha256rnds2_epu32(a, b, k);", "x = _mm_sha1msg1_epu32(a, b);", "x = vsha256hq_u32(a, b, w);",
+            string[] shaFamily = ["ROCKS_TARGET_X64_SHA void G();", "ROCKS_TARGET_ARM64_SHA2 void G();",
+                "x = _mm_sha256rnds2_epu32(a, b, k);", "x = _mm_sha1msg1_epu32(a, b);", "x = vsha256hq_u32(a, b, w);",
                 "x = vsha1cq_u32(a, e, w);", "x = vsha512hq_u64(a, b, c);", "x = veor3q_u8(a, b, c);", "x = vrax1q_u64(a, b);",
                 "x = vsm3ss1q_u32(a, b, c);", "x = __builtin_ia32_sha256rnds2(a, b, k);", "x = __builtin_neon_vsha256hq_u32(a, b, w);"];
             string lookalike = "Core/Source/Runtime/Crypto/Private/AesExtra/Probe.cpp";
@@ -1404,7 +1405,7 @@ internal static partial class SelfTests
             }
 
             // 어느 계열에도 속하지 않은 ROCKS_TARGET_* 매크로는 정의(Compiler.h)·사용 모두 거부한다(계열 디렉터리 안에서도).
-            foreach (string source in new[] { "ROCKS_TARGET_X64_SHA void G();", "ROCKS_TARGET_X64_AES_VAES void F();" })
+            foreach (string source in new[] { "ROCKS_TARGET_X64_SHA512 void G();", "ROCKS_TARGET_X64_AES_VAES void F();" })
             {
                 foreach (string file in new[] { probe, aes, sha })
                 {
@@ -1419,7 +1420,7 @@ internal static partial class SelfTests
             }
 
             string definitions = File.ReadAllText(temporary.FilePath(compiler));
-            temporary.Write(compiler, definitions + "#define ROCKS_TARGET_X64_SHA __attribute__((target(\"sha\")))\n");
+            temporary.Write(compiler, definitions + "#define ROCKS_TARGET_X64_SHA512 __attribute__((target(\"sha512\")))\n");
             var unassigned = PolicyChecks.TargetIntrinsics(temporary.Root);
             Verify.That(unassigned.Count == 1 && unassigned[0].Rule == "target-intrinsics" && unassigned[0].Line == 3,
                 "unassigned target macro definition accepted in Compiler.h\n" + string.Join('\n', unassigned));
