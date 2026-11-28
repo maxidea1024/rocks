@@ -1,4 +1,5 @@
 #include "ShaderPreprocessorInternal.h"
+#include <ShaderCompiler/ShaderSourceCache.h>
 
 #include <Core/Hash/Sha256.h>
 #include <Platform/Memory.h>
@@ -309,7 +310,27 @@ private:
             }
         }
 
-        if (memory != nullptr) {
+        // 트리 파일은 캐시가 있으면 캐시로 읽는다(16.6절 SSD98 — 읽기·SHA-256·정규화를 한 번만).
+        const ShaderSourceCacheEntry* cached = nullptr;
+        if (memory == nullptr && context_.cache != nullptr) {
+            cached = context_.cache->Get(path);
+            if (cached == nullptr) {
+                return context_.OutOfMemory(includeLine);
+            }
+
+            if (!cached->loadStatus) {
+                if (includeLine == 0) {
+                    context_.status = cached->loadStatus;
+                    return false;
+                }
+
+                return context_.Fail(cached->loadStatus.code, includeLine,
+                                     StringView(cached->loadStatus.message), path);
+            }
+        }
+
+        // 캐시로 읽었으면(cached) 아래 두 갈래를 건너뛴다.
+        if (cached == nullptr && memory != nullptr) {
             // 메모리 원문이다(16.2절 SSD52 — 트리의 <루트>/Generated/ 자리).
             if (memory->contents.ByteCount() > context_.limits.fileBytes ||
                 !bytes.TryResize(memory->contents.ByteCount())) {
@@ -320,28 +341,41 @@ private:
             if (!bytes.IsEmpty()) {
                 platform::MemoryCopy(bytes.Data(), memory->contents.Data(), bytes.Size());
             }
-        } else if (const ShaderSourceStatus loaded =
-                       context_.tree.Load(path, bytes, context_.limits.fileBytes);
-                   !loaded) {
-            if (includeLine == 0) {
-                context_.status = loaded;
-                return false;
-            }
+        } else if (cached == nullptr) {
+            if (const ShaderSourceStatus loaded =
+                    context_.tree.Load(path, bytes, context_.limits.fileBytes);
+                !loaded) {
+                if (includeLine == 0) {
+                    context_.status = loaded;
+                    return false;
+                }
 
-            return context_.Fail(loaded.code, includeLine, StringView(loaded.message), path);
+                return context_.Fail(loaded.code, includeLine, StringView(loaded.message), path);
+            }
         }
 
         SourceFile file;
-        file.sha256 = Sha256::Hash(bytes.View());
         if (!context_.persistent.Copy(path, file.path)) {
             return context_.OutOfMemory(includeLine);
         }
 
-        if (const ShaderSourceStatus normalized =
-                NormalizeSource(bytes.View(), file.path, context_.persistent, file.text);
-            !normalized) {
-            context_.status = normalized;
-            return false;
+        if (cached != nullptr) {
+            // 캐시 원문은 캐시가 사는 동안 그대로다(전처리는 캐시보다 먼저 끝난다).
+            if (!cached->normalizeStatus) {
+                context_.status = cached->normalizeStatus;
+                return false;
+            }
+
+            file.sha256 = cached->sha256;
+            file.text = cached->text;
+        } else {
+            file.sha256 = Sha256::Hash(bytes.View());
+            if (const ShaderSourceStatus normalized =
+                    NormalizeSource(bytes.View(), file.path, context_.persistent, file.text);
+                !normalized) {
+                context_.status = normalized;
+                return false;
+            }
         }
 
         index = files_.Size();
@@ -854,11 +888,19 @@ bool Run(Context& context, StringView entryPath, Span<const ShaderDefine> define
 ShaderSourceStatus PreprocessShader(const ShaderSourceTree& tree, StringView entryPath,
                                     Span<const ShaderDefine> defines, PreprocessedShader& out,
                                     const ShaderPreprocessLimits& limits,
-                                    Span<const ShaderGeneratedInclude> generated) noexcept {
+                                    Span<const ShaderGeneratedInclude> generated,
+                                    ShaderSourceCache* cache) noexcept {
     using namespace preprocess_detail;
     out.Reset();
+    if (cache != nullptr && (&cache->Tree() != &tree || cache->FileBytes() != limits.fileBytes)) {
+        return source_detail::MakeSourceStatus(
+            ShaderSourceError::InvalidArgument, entryPath, 0,
+            "the shader source cache belongs to another tree or file size limit");
+    }
+
     Context context(out.text.GetAllocator(), tree, limits);
     context.generated = generated;
+    context.cache = cache;
     context.path = entryPath;
     if (!preprocess_driver_detail::Run(context, entryPath, defines, out)) {
         out.Reset();

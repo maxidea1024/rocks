@@ -5,7 +5,10 @@
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Math/MathUtility.h>
 #include <World/Physics/BodyKinematics.h>
+#include <World/Component.generated.h>
 #include <World/Physics/PhysicsScene.h>
+#include <World/Primitives/PrimitiveComponent.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <World/Primitives/PrimitiveComponent.h>
 #include <World/World.h>
 #include <World/WorldLog.h>
@@ -26,6 +29,18 @@ Vec3d RadiansToDegrees(const Vec3d& radians) noexcept {
 
 } // namespace
 
+template <class Call>
+bool PrimitiveComponent::ForwardToWeldRoot(Call&& call) const noexcept {
+    if (!IsWelded()) {
+        return false;
+    }
+
+    // 루트를 빌리지 못하면(파괴 중) 아무것도 하지 않는다 — weld 상태는 루트 상태 파괴가 먼저 푼다.
+    (void)GetWorld().With<PrimitiveComponent>(
+        weldRoot_, [&](PrimitiveComponent& root) noexcept { call(root); });
+    return true;
+}
+
 void PrimitiveComponent::WarnInvalidPhysicsOperation(const char* action,
                                                      bool checkBody) const noexcept {
     // 모든 물리 호출은 Movable이어야 한다(UE CheckStaticMobilityAndWarn — 경고는 CheckMovable).
@@ -38,7 +53,15 @@ void PrimitiveComponent::WarnInvalidPhysicsOperation(const char* action,
         return;
     }
 
-    if (!bodySettings_.simulatePhysics) {
+    // body 검사는 weld면 루트 것이고 경고는 부른 컴포넌트로 남긴다(UE
+    // WarnInvalidPhysicsOperations_Internal — GetBodyInstance(BoneName), 7.1.23절).
+    bool simulating = bodySettings_.simulatePhysics;
+    auto resolved = TryResolveCollision();
+    (void)ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+        simulating = root.bodySettings_.simulatePhysics;
+        resolved = root.TryResolveCollision();
+    });
+    if (!simulating) {
         LogContextScope context("World", GetWorld().Name());
         Log::Warning(LogWorld,
                      "Primitive component #{Slot} must simulate physics to {Action} ({Code})",
@@ -46,7 +69,6 @@ void PrimitiveComponent::WarnInvalidPhysicsOperation(const char* action,
         return;
     }
 
-    auto resolved = TryResolveCollision();
     if (resolved && (resolved.Value().collisionEnabled == CollisionEnabled::NoCollision ||
                      resolved.Value().collisionEnabled == CollisionEnabled::QueryOnly)) {
         LogContextScope context("World", GetWorld().Name());
@@ -58,7 +80,7 @@ void PrimitiveComponent::WarnInvalidPhysicsOperation(const char* action,
 }
 
 void PrimitiveComponent::ApplyBodyForce(const BodyForce& force) noexcept {
-    if (bodyHandle_.IsNull()) {
+    if (PhysicsBody().IsNull()) {
         return;
     }
 
@@ -68,7 +90,7 @@ void PrimitiveComponent::ApplyBodyForce(const BodyForce& force) noexcept {
         // — 7.1.17절). Fixed hook 안이면 그 스텝에만 준다.
         BodyForce command = force;
         command.everyFixedStep = !world.InFixedSteps();
-        scene->ApplyBodyForce(bodyHandle_, command);
+        scene->ApplyBodyForce(PhysicsBody(), command);
     }
 }
 
@@ -193,6 +215,13 @@ void PrimitiveComponent::AddTorqueInDegrees(const Vec3d& torque, bool accelerati
 
 void PrimitiveComponent::SetPhysicsLinearVelocity(const Vec3d& velocity,
                                                   bool addToCurrent) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            root.SetPhysicsLinearVelocity(velocity, addToCurrent);
+        })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetPhysicsLinearVelocity", false);
     if (bodyHandle_.IsNull()) {
         return;
@@ -204,6 +233,14 @@ void PrimitiveComponent::SetPhysicsLinearVelocity(const Vec3d& velocity,
 }
 
 Vec3d PrimitiveComponent::GetPhysicsLinearVelocity() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    Vec3d forwarded = Vec3d::Zero();
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            forwarded = root.GetPhysicsLinearVelocity();
+        })) {
+        return forwarded;
+    }
+
     if (bodyHandle_.IsNull()) {
         return Vec3d::Zero();
     }
@@ -215,6 +252,14 @@ Vec3d PrimitiveComponent::GetPhysicsLinearVelocity() const noexcept {
 }
 
 Vec3d PrimitiveComponent::GetPhysicsLinearVelocityAtPoint(const Vec3d& point) const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    Vec3d forwarded = Vec3d::Zero();
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            forwarded = root.GetPhysicsLinearVelocityAtPoint(point);
+        })) {
+        return forwarded;
+    }
+
     if (bodyHandle_.IsNull()) {
         return Vec3d::Zero();
     }
@@ -233,6 +278,13 @@ Vec3d PrimitiveComponent::GetPhysicsLinearVelocityAtPoint(const Vec3d& point) co
 
 void PrimitiveComponent::SetPhysicsAngularVelocityInRadians(const Vec3d& velocity,
                                                             bool addToCurrent) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            root.SetPhysicsAngularVelocityInRadians(velocity, addToCurrent);
+        })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetPhysicsAngularVelocity", false);
     if (bodyHandle_.IsNull()) {
         return;
@@ -249,6 +301,14 @@ void PrimitiveComponent::SetPhysicsAngularVelocityInDegrees(const Vec3d& velocit
 }
 
 Vec3d PrimitiveComponent::GetPhysicsAngularVelocityInRadians() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    Vec3d forwarded = Vec3d::Zero();
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            forwarded = root.GetPhysicsAngularVelocityInRadians();
+        })) {
+        return forwarded;
+    }
+
     if (bodyHandle_.IsNull()) {
         return Vec3d::Zero();
     }
@@ -264,6 +324,11 @@ Vec3d PrimitiveComponent::GetPhysicsAngularVelocityInDegrees() const noexcept {
 }
 
 void PrimitiveComponent::WakeRigidBody() noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept { root.WakeRigidBody(); })) {
+        return;
+    }
+
     if (bodyHandle_.IsNull()) {
         return;
     }
@@ -274,6 +339,11 @@ void PrimitiveComponent::WakeRigidBody() noexcept {
 }
 
 void PrimitiveComponent::PutRigidBodyToSleep() noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept { root.PutRigidBodyToSleep(); })) {
+        return;
+    }
+
     if (bodyHandle_.IsNull()) {
         return;
     }
@@ -284,6 +354,13 @@ void PrimitiveComponent::PutRigidBodyToSleep() noexcept {
 }
 
 bool PrimitiveComponent::RigidBodyIsAwake() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    bool forwarded = false;
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.RigidBodyIsAwake(); })) {
+        return forwarded;
+    }
+
     if (PhysicsBodyMotion() != BodyMotion::Dynamic) {
         return false;
     }
@@ -337,12 +414,25 @@ void PrimitiveComponent::WarnInvalidBodyValue(const char* property) const noexce
 }
 
 float PrimitiveComponent::GetMass() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    float forwarded = 0.0f;
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept { forwarded = root.GetMass(); })) {
+        return forwarded;
+    }
+
     WarnInvalidPhysicsOperation("GetMass", true);
     BodyKinematics kinematics;
     return ReadBodyKinematics(kinematics) ? static_cast<float>(kinematics.mass) : 0.0f;
 }
 
 void PrimitiveComponent::SetMassOverrideInKg(float massInKg, bool overrideMass) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            root.SetMassOverrideInKg(massInKg, overrideMass);
+        })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetMassOverrideInKg", false);
     if (!math::IsFinite(massInKg)) {
         WarnInvalidBodyValue("massInKgOverride");
@@ -355,6 +445,11 @@ void PrimitiveComponent::SetMassOverrideInKg(float massInKg, bool overrideMass) 
 }
 
 void PrimitiveComponent::SetMassScale(float scale) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept { root.SetMassScale(scale); })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetMassScale", false);
     if (!math::IsFinite(scale)) {
         WarnInvalidBodyValue("massScale");
@@ -366,11 +461,24 @@ void PrimitiveComponent::SetMassScale(float scale) noexcept {
 }
 
 Vec3d PrimitiveComponent::GetCenterOfMass() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    Vec3d forwarded = Vec3d::Zero();
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.GetCenterOfMass(); })) {
+        return forwarded;
+    }
+
     BodyKinematics kinematics;
     return ReadBodyKinematics(kinematics) ? kinematics.centerOfMass : Vec3d::Zero();
 }
 
 void PrimitiveComponent::SetCenterOfMass(const Vec3d& offset) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { root.SetCenterOfMass(offset); })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetCenterOfMass", false);
     if (!math::IsFinite(offset.x) || !math::IsFinite(offset.y) || !math::IsFinite(offset.z)) {
         WarnInvalidBodyValue("centerOfMassOffset");
@@ -382,12 +490,26 @@ void PrimitiveComponent::SetCenterOfMass(const Vec3d& offset) noexcept {
 }
 
 Vec3d PrimitiveComponent::GetInertiaTensor() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    Vec3d forwarded = Vec3d::Zero();
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.GetInertiaTensor(); })) {
+        return forwarded;
+    }
+
     BodyKinematics kinematics;
     return ReadBodyKinematics(kinematics) ? kinematics.inertia : Vec3d::Zero();
 }
 
 void PrimitiveComponent::SetPhysicsMaxAngularVelocityInDegrees(float maxDegrees,
                                                                bool addToCurrent) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            root.SetPhysicsMaxAngularVelocityInDegrees(maxDegrees, addToCurrent);
+        })) {
+        return;
+    }
+
     WarnInvalidPhysicsOperation("SetPhysicsMaxAngularVelocity", false);
     // UE는 physics actor가 있을 때만 지금 값에 더한다(BodyInstance.cpp:3677-3686).
     BodyKinematics kinematics;
@@ -411,6 +533,14 @@ void PrimitiveComponent::SetPhysicsMaxAngularVelocityInRadians(float maxRadians,
 }
 
 float PrimitiveComponent::GetPhysicsMaxAngularVelocityInDegrees() const noexcept {
+    // weld면 루트 body 값이다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    float forwarded = 0.0f;
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            forwarded = root.GetPhysicsMaxAngularVelocityInDegrees();
+        })) {
+        return forwarded;
+    }
+
     if (bodySettings_.overrideMaxAngularVelocity) {
         return bodySettings_.maxAngularVelocity;
     }
@@ -425,6 +555,12 @@ float PrimitiveComponent::GetPhysicsMaxAngularVelocityInRadians() const noexcept
 }
 
 void PrimitiveComponent::SetEnableGravity(bool enable) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { root.SetEnableGravity(enable); })) {
+        return;
+    }
+
     // UE는 값이 같으면 아무것도 하지 않는다(깨우지도 않는다 — BodyInstance.cpp:3953).
     if (bodySettings_.enableGravity == enable) {
         return;
@@ -435,6 +571,12 @@ void PrimitiveComponent::SetEnableGravity(bool enable) noexcept {
 }
 
 void PrimitiveComponent::SetLinearDamping(float damping) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { root.SetLinearDamping(damping); })) {
+        return;
+    }
+
     if (!math::IsFinite(damping) || damping < 0.0f) {
         WarnInvalidBodyValue("linearDamping");
         return;
@@ -445,6 +587,12 @@ void PrimitiveComponent::SetLinearDamping(float damping) noexcept {
 }
 
 void PrimitiveComponent::SetAngularDamping(float damping) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { root.SetAngularDamping(damping); })) {
+        return;
+    }
+
     if (!math::IsFinite(damping) || damping < 0.0f) {
         WarnInvalidBodyValue("angularDamping");
         return;
@@ -455,6 +603,11 @@ void PrimitiveComponent::SetAngularDamping(float damping) noexcept {
 }
 
 void PrimitiveComponent::SetUseCCD(bool useCcd) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept { root.SetUseCCD(useCcd); })) {
+        return;
+    }
+
     if (bodySettings_.continuousCollision == useCcd) {
         return;
     }
@@ -464,6 +617,12 @@ void PrimitiveComponent::SetUseCCD(bool useCcd) noexcept {
 }
 
 void PrimitiveComponent::SetGyroscopicTorqueEnabled(bool enable) noexcept {
+    // weld면 루트 body에 한다(UE GetBodyInstance() 기본 weld — 7.1.23절).
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { root.SetGyroscopicTorqueEnabled(enable); })) {
+        return;
+    }
+
     if (bodySettings_.gyroscopicTorque == enable) {
         return;
     }
@@ -481,6 +640,57 @@ void PrimitiveComponent::SetConstraintMode(DofMode mode) noexcept {
     // UE SetDOFLock은 같은 방식이어도 잠금을 다시 만든다(BodyInstance.cpp:849-853).
     bodySettings_.dofMode = mode;
     PushBodySettings(BodySettingsChange::DegreesOfFreedom);
+}
+
+float PrimitiveComponent::GetMassScale() const noexcept {
+    float forwarded = 0.0f;
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.GetMassScale(); })) {
+        return forwarded;
+    }
+
+    return bodySettings_.massScale;
+}
+
+bool PrimitiveComponent::IsGravityEnabled() const noexcept {
+    bool forwarded = false;
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.IsGravityEnabled(); })) {
+        return forwarded;
+    }
+
+    return bodySettings_.enableGravity;
+}
+
+float PrimitiveComponent::GetLinearDamping() const noexcept {
+    float forwarded = 0.0f;
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.GetLinearDamping(); })) {
+        return forwarded;
+    }
+
+    return bodySettings_.linearDamping;
+}
+
+float PrimitiveComponent::GetAngularDamping() const noexcept {
+    float forwarded = 0.0f;
+    if (ForwardToWeldRoot(
+            [&](PrimitiveComponent& root) noexcept { forwarded = root.GetAngularDamping(); })) {
+        return forwarded;
+    }
+
+    return bodySettings_.angularDamping;
+}
+
+bool PrimitiveComponent::GetGyroscopicTorqueEnabled() const noexcept {
+    bool forwarded = false;
+    if (ForwardToWeldRoot([&](PrimitiveComponent& root) noexcept {
+            forwarded = root.GetGyroscopicTorqueEnabled();
+        })) {
+        return forwarded;
+    }
+
+    return bodySettings_.gyroscopicTorque;
 }
 
 } // namespace rocks

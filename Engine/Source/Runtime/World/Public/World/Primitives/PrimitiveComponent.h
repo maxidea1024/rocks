@@ -422,9 +422,58 @@ public:
     virtual bool IsZeroExtent() const noexcept;
 
     // 물리 body handle이다. World에 물리 장면이 있고 형상과 충돌이 있으면 등록 때 생기고 등록 해제
-    // 때 없어진다(없으면 IsNull).
+    // 때 없어진다(없으면 IsNull). weld된 컴포넌트는 자기 body가 없다(PhysicsBody가 루트 body).
     PhysicsBodyHandle BodyHandle() const noexcept {
         return bodyHandle_;
+    }
+
+    // --- weld(PhysicsModule 2.8절·7.1.23절 — UE WeldTo·UnWeldFromParent) ---
+    //
+    // weld된 컴포넌트는 자기 원소를 루트 컴포넌트의 body에 합쳐 함께 시뮬레이션한다(자기 body
+    // 없음). autoWeld이면 물리 상태를 만들 때, weldSimulatedBodies 부착이면 붙인 뒤 weld하고,
+    // 떼기·상태 파괴 때 푼다. 힘·속도·질량·잠듦·body 값 API는 루트로 간다(UE GetBodyInstance() 기본
+    // weld).
+    //
+    // 사용 예:
+    //   wheel.WeldTo(chassis);   // 붙이고 chassis body에 합친다
+    //   wheel.AddImpulse(kick);  // chassis body에 준다
+
+    bool IsWelded() const noexcept {
+        return !weldRoot_.IsNull();
+    }
+
+    // 내 원소를 가진 루트 컴포넌트다(weld가 아니면 null).
+    ObjectHandle WeldRoot() const noexcept {
+        return weldRoot_;
+    }
+
+    // weld면 루트 body, 아니면 자기 body다(UE GetBodyInstance() 기본 bGetWelded).
+    PhysicsBodyHandle PhysicsBody() const noexcept {
+        return IsWelded() ? weldBody_ : bodyHandle_;
+    }
+
+    // parent의 socket에 붙어 있지 않으면 월드 transform을 유지하며 붙이고 weld한다(UE WeldTo).
+    // weldToKinematicParent면 시뮬레이션하지 않는 루트에도 합친다. 루트가 없거나 합칠 수 없으면
+    // 자기 body로 남는다.
+    void WeldTo(ObjectHandle parent, StringView socket = {},
+                bool weldToKinematicParent = false) noexcept;
+
+    // 루트 body에서 빠지고 자기 body를 다시 만든다(UE UnWeldFromParent). 같은 루트에 이 컴포넌트를
+    // 거쳐 weld된 자손도 빠져 자기 body를 만든다. 이 컴포넌트가 시뮬레이션하면 그 자손을 다시 자기
+    // body에 합친다.
+    void UnWeldFromParent() noexcept;
+
+    // 직접 자식마다 UnWeldFromParent다(UE UnWeldChildren).
+    void UnWeldChildren() noexcept;
+
+    // 부모 쪽 루트 body에 합칠지다(UE FBodyInstance::bAutoWeld — 영속, 기본 거짓). 물리 상태를 만들
+    // 때와 루트가 시뮬레이션으로 바뀔 때(ApplyWeldOnChildren) 본다.
+    void SetAutoWeld(bool autoWeld) noexcept {
+        bodySettings_.autoWeld = autoWeld;
+    }
+
+    bool GetAutoWeld() const noexcept {
+        return bodySettings_.autoWeld;
     }
 
     // body 운동 종류다(2.5절): Mobility가 Movable이 아니면 Static, Movable이고 simulatePhysics면
@@ -532,9 +581,7 @@ public:
     void SetMassOverrideInKg(float massInKg, bool overrideMass = true) noexcept;
     // 형상 질량 배율(UE MassScale)이다.
     void SetMassScale(float scale) noexcept;
-    float GetMassScale() const noexcept {
-        return bodySettings_.massScale;
-    }
+    float GetMassScale() const noexcept;
 
     // 월드 질량 중심(cm)이다(body가 없으면 0).
     Vec3d GetCenterOfMass() const noexcept;
@@ -556,28 +603,20 @@ public:
 
     // 중력을 켜거나 끈다(켜면 Dynamic body를 깨운다 — UE SetEnableGravity).
     void SetEnableGravity(bool enable) noexcept;
-    bool IsGravityEnabled() const noexcept {
-        return bodySettings_.enableGravity;
-    }
+    bool IsGravityEnabled() const noexcept;
 
     // 선형·각 감쇠(1/s — 음수 거부)다.
     void SetLinearDamping(float damping) noexcept;
-    float GetLinearDamping() const noexcept {
-        return bodySettings_.linearDamping;
-    }
+    float GetLinearDamping() const noexcept;
 
     void SetAngularDamping(float damping) noexcept;
-    float GetAngularDamping() const noexcept {
-        return bodySettings_.angularDamping;
-    }
+    float GetAngularDamping() const noexcept;
 
     // CCD를 켜거나 끈다(UE SetUseCCD — Jolt LinearCast).
     void SetUseCCD(bool useCcd) noexcept;
     // gyroscopic 토크를 켜거나 끈다(회전 축을 잠근 body는 켜도 꺼진다 — 7.1.16절).
     void SetGyroscopicTorqueEnabled(bool enable) noexcept;
-    bool GetGyroscopicTorqueEnabled() const noexcept {
-        return bodySettings_.gyroscopicTorque;
-    }
+    bool GetGyroscopicTorqueEnabled() const noexcept;
 
     // 자유도 방식을 바꾸고 잠금을 다시 넣는다(UE SetConstraintMode → SetDOFLock — 잠금 표지는
     // 그대로, 7.1.16절). 모르는 값은 Warning InvalidBodyValue다.
@@ -607,7 +646,8 @@ public:
     }
 
     // 깨움(awake)·잠듦 이벤트를 발행한다(UE DispatchWakeEvents — Physics의 PhysicsResults만 부른다,
-    // 7.1.19절). generateWakeEvents가 거짓이거나 파괴 대기면 하지 않는다. weld 자식 전파는 PH6이다.
+    // 7.1.19절). generateWakeEvents가 거짓이거나 파괴 대기면 자기 발행은 하지 않는다. 그다음 이
+    // 컴포넌트에 직접 weld된 자식에 재귀로 전한다(7.1.23절).
     void DispatchWakeEvents(bool awake) noexcept;
 
     // 방사 충격량·힘을 무시하는지다(UE bIgnoreRadialImpulse·bIgnoreRadialForce — 영속, 기본 거짓).
@@ -882,13 +922,49 @@ protected:
     // OnComponentDestroyed, 7.1.11절). 파생이 재정의하면 이것을 부른다.
     void OnDestroy(EndPlayReason reason) noexcept override;
 
-    // 형상 값이 바뀐 뒤 파생 setter가 부른다(UE UpdateBodyScale(scale, true) — 7.1.5절). body가
+    // 부모에서 떼기 전 weld를 푼다(UE DetachFromComponent → UnWeldFromParent — 7.1.23절).
+    void OnDetachingFromParent() noexcept override;
+
+    // weldSimulatedBodies 부착이면 weld한다(UE AttachToComponent — 7.1.23절).
+    void OnAttachedToParent(const AttachmentRules& rules) noexcept override;
+
+    // 형상 값이 바뀐 뒤 파생 setter가 부른다(UE UpdateBodyScale(scale, true) — 7.1.5절). weld면 새
+    // 형상으로 다시 weld한다(7.1.23절). body가
     // 있으면 BuildBodyGeometry의 새 값으로 형상을 바꾼다. 실패하면 이전 형상을 두고 Warning
     // BodyShapeUpdateFailed다. 그다음 overlap을 갱신한다(UE 형상 setter의 bUpdateOverlaps —
     // 7.1.11절).
     void UpdateBodyGeometry() noexcept;
 
 private:
+    // weld(7.1.23절)다. WeldToImplementation은 UE 같은 이름(부모가 지금 부모일 때 루트를 찾아 합침
+    // — 합쳤으면 참). WeldInto는 root(그 body·월드 transform)에 바로 합친다(자기 body를 지움).
+    // 실패하면 Warning WeldFailed와 자기 body를 다시 만든다. UnWeldInternal은 recreateBody면 자기
+    // body를 만든다(상태 파괴 중에는 거짓).
+    bool WeldToImplementation(ObjectHandle parent, bool weldSimulatedChild,
+                              bool weldToKinematicParent) noexcept;
+    bool WeldInto(ObjectHandle root, PhysicsBodyHandle rootBody,
+                  const Transform& rootWorld) noexcept;
+    void UnWeldInternal(bool recreateBody) noexcept;
+    // 지금 루트에 지금 형상·자리로 다시 합친다(UE SetWeldedBodyTransform — 7.1.23절).
+    void ReweldToRoot() noexcept;
+    // 자기 body가 있고 Dynamic이면 weld됐거나 autoWeld인 자식을 따라 물리 충돌이 있는 자손을 합친다
+    // (UE ApplyWeldOnChildren — 대상을 먼저 모은다).
+    void ApplyWeldOnChildren() noexcept;
+    // weld됐거나 autoWeld인 자식을 따라 내려가며 targets 끝에 더한다(UE GetWeldedBodies(…, true)).
+    void CollectWeldTargets(Array<ObjectHandle>& targets) noexcept;
+    // 내 body에 weld된 자손을 모두 푼다(상태 파괴 — body 없는 중간 컴포넌트를 거친 자손 포함).
+    void UnWeldFromThis() noexcept;
+    // 자기 body를 다시 만들어도 되는지다(등록·물리 상태 있음, 파괴 대기·World 정리 아님).
+    bool CanRecreateBody() const noexcept;
+    // weld가 아니고 body가 없으면 자기 body를 만든다(실패는 Warning WeldFailed).
+    void EnsureOwnBody() noexcept;
+    // 자기 body를 만든다(CreateSystemState의 body 몫).
+    Result<void> CreateOwnBody() noexcept;
+    // weld면 루트 컴포넌트로 call(PrimitiveComponent&)을 부르고 참이다(루트를 빌리지 못하면 call
+    // 없이 참). weld가 아니면 거짓이다.
+    template <class Call>
+    bool ForwardToWeldRoot(Call&& call) const noexcept;
+
     // 막는 hit를 자기 Actor와 상대 Actor에 발행한다(UE DispatchBlockingHit — 7.1.10절).
     void DispatchBlockingHit(const HitResult& hit) noexcept;
 
@@ -948,6 +1024,9 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "ignoreRadialForce") bool ignoreRadialForce_ = false;
     // 물리 body다(실행 상태 — 저장하지 않는다).
     ROCKS_NATIVE() PhysicsBodyHandle bodyHandle_;
+    // weld 루트 컴포넌트와 그 body다(7.1.23절 — 실행 상태).
+    ROCKS_NATIVE() ObjectHandle weldRoot_;
+    ROCKS_NATIVE() PhysicsBodyHandle weldBody_;
     // ApplyPhysicsTransform 안이다(OnTransformUpdated가 body로 되돌려 보내지 않는다).
     ROCKS_NATIVE() bool applyingPhysicsResult_ = false;
     // 이동 sweep 무시 목록이다(UE MoveIgnoreActors·MoveIgnoreComponents — Transient).
