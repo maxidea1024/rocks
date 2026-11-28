@@ -485,6 +485,23 @@ Result<void> PrimitiveComponent::CreateSystemState(SystemStateKind kind) noexcep
         return SceneComponent::CreateSystemState(kind);
     }
 
+    // 자동 weld(UE InitBody — BodyInstance.cpp:1525-1541, 7.1.23절): 게임 World에서 Movable이고
+    // 질의 전용이 아니면 부모 쪽 루트 body에 합쳐 본다. 합쳤으면 자기 body를 만들지 않는다.
+    if (bodySettings_.autoWeld && PhysicsBodyMotion() != BodyMotion::Static && !Parent().IsNull()) {
+        const WorldKind worldKind = GetWorld().Kind();
+        auto resolved = TryResolveCollision();
+        const bool gameWorld = worldKind == WorldKind::Game || worldKind == WorldKind::Tryout;
+        if (gameWorld && resolved &&
+            resolved.Value().collisionEnabled != CollisionEnabled::QueryOnly &&
+            WeldToImplementation(Parent(), false, false)) {
+            return Result<void>::Success();
+        }
+    }
+
+    return CreateOwnBody();
+}
+
+Result<void> PrimitiveComponent::CreateOwnBody() noexcept {
     PhysicsScene* scene = GetWorld().GetPhysicsScene();
     auto resolved = TryResolveCollision();
     if (scene == nullptr || !resolved) {
@@ -536,6 +553,10 @@ void PrimitiveComponent::DestroySystemState(SystemStateKind kind) noexcept {
         return;
     }
 
+    // weld를 푼다(UE OnDestroyPhysicsState — PrimitiveComponent.cpp:1148-1150): 자기는 body를 다시
+    // 만들지 않고, 내 body에 weld된 자손은 자기 body를 다시 만든다(7.1.23절).
+    UnWeldInternal(false);
+    UnWeldFromThis();
     if (!bodyHandle_.IsNull()) {
         if (PhysicsScene* scene = GetWorld().GetPhysicsScene(); scene != nullptr) {
             scene->DestroyBody(bodyHandle_);
@@ -559,21 +580,31 @@ void PrimitiveComponent::OnSystemStateChanged(SystemStateKind kind, bool created
 }
 
 void PrimitiveComponent::DispatchWakeEvents(bool awake) noexcept {
-    // UE ShouldDispatchWakeEvents — 발행 때의 bGenerateWakeEvents(PrimitiveComponent.cpp:3652).
-    if (!bodySettings_.generateWakeEvents) {
-        return;
-    }
-
     World& world = GetWorld();
-    if (!CanNotifyComponent(world, Handle(), false)) {
+    // UE ShouldDispatchWakeEvents — 발행 때의 bGenerateWakeEvents(PrimitiveComponent.cpp:3652).
+    if (bodySettings_.generateWakeEvents && CanNotifyComponent(world, Handle(), false)) {
+        const EventContext context{world.Objects(), world.Access(), Handle()};
+        if (awake) {
+            componentWake.Broadcast(context, PrimitiveRef(Handle()));
+        } else {
+            componentSleep.Broadcast(context, PrimitiveRef(Handle()));
+        }
+    }
+
+    // 이 컴포넌트에 직접 weld된 자식에 전한다(UE DispatchWakeEvents — :3623-3637, 7.1.23절).
+    // handler가 계층을 바꿀 수 있어 하나씩 다시 읽는다.
+    if (!HasWorld()) {
         return;
     }
 
-    const EventContext context{world.Objects(), world.Access(), Handle()};
-    if (awake) {
-        componentWake.Broadcast(context, PrimitiveRef(Handle()));
-    } else {
-        componentSleep.Broadcast(context, PrimitiveRef(Handle()));
+    const ObjectHandle self = Handle();
+    for (usize index = 0; index < Children().Size(); ++index) {
+        (void)world.With<PrimitiveComponent>(Children()[index],
+                                             [&](PrimitiveComponent& child) noexcept {
+                                                 if (child.weldRoot_ == self) {
+                                                     child.DispatchWakeEvents(awake);
+                                                 }
+                                             });
     }
 }
 
@@ -612,6 +643,11 @@ void PrimitiveComponent::SetSimulatePhysics(bool simulate) noexcept {
 
     // 다시 만들지 않고 바꾼다(UE UpdateInstanceSimulatePhysics — 켜면 startAwake일 때 깨운다).
     scene->SetBodyMotion(bodyHandle_, motion, bodySettings_.startAwake);
+    // Kinematic → 시뮬레이션이면 자손을 합친다(UE SetInstanceSimulatePhysics →
+    // ApplyWeldOnChildren — BodyInstance.cpp:2681-2685, 7.1.23절).
+    if (simulate && !wasSimulating) {
+        ApplyWeldOnChildren();
+    }
 }
 
 bool PrimitiveComponent::ComputePenetration(MtdResult& out, const CollisionShape& shape,
@@ -652,6 +688,12 @@ void PrimitiveComponent::UpdateBodyCollision() noexcept {
     // 1376-1393). 실패는 RecreateSystemStateNow가 Warning으로 남기고 값은 바뀐 채 둔다(ERD25).
     if (WantsSystemState(SystemStateKind::Physics) != HasSystemState(SystemStateKind::Physics)) {
         (void)RecreateSystemStateNow(SystemStateKind::Physics);
+        // 다시 만든 루트는 풀렸던 자손을 합친다(UE SetCollisionEnabled → ApplyWeldOnChildren —
+        // PrimitiveComponentPhysics.cpp:1386-1391, 7.1.23절).
+        ApplyWeldOnChildren();
+    } else if (IsWelded()) {
+        // weld 부분의 충돌 켬을 바꾼다(UE UpdatePhysicsFilterData → WeldParent — 7.1.23절).
+        ReweldToRoot();
     } else if (!bodyHandle_.IsNull()) {
         PhysicsScene* scene = GetWorld().GetPhysicsScene();
         auto resolved = TryResolveCollision();
@@ -666,6 +708,13 @@ void PrimitiveComponent::UpdateBodyCollision() noexcept {
 }
 
 void PrimitiveComponent::UpdateBodyGeometry() noexcept {
+    // weld면 새 형상으로 다시 합친다(7.1.23절).
+    if (IsWelded()) {
+        ReweldToRoot();
+        UpdateOverlaps();
+        return;
+    }
+
     PhysicsScene* scene = bodyHandle_.IsNull() ? nullptr : GetWorld().GetPhysicsScene();
     BodyGeometry geometry(overlappingComponents_.GetAllocator());
     if (scene != nullptr) {
@@ -1272,6 +1321,16 @@ Result<void> PrimitiveComponent::ApplyPhysicsTransform(const Vec3d& location,
 
 void PrimitiveComponent::OnTransformUpdated() noexcept {
     SceneComponent::OnTransformUpdated();
+    // weld면 직접 바뀐 변경만 루트에 다시 합친다(UE OnUpdateTransform의 PropagateFromParent·
+    // SetWeldedBodyTransform — 7.1.23절). 부모에서 전해진 변경은 루트 body가 이미 옮긴다.
+    if (IsWelded()) {
+        if (!IsTransformUpdateFromParent() && !applyingPhysicsResult_) {
+            ReweldToRoot();
+        }
+
+        return;
+    }
+
     if (bodyHandle_.IsNull() || applyingPhysicsResult_) {
         return;
     }

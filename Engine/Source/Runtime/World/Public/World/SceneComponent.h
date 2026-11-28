@@ -24,11 +24,14 @@ enum class AttachmentRule : uint8 {
     SnapToTarget
 };
 
-// 위치·회전·scale 성분마다의 부착 규칙이다(UE FAttachmentTransformRules).
+// 위치·회전·scale 성분마다의 부착 규칙이다(UE FAttachmentTransformRules). weldSimulatedBodies면
+// 붙인 뒤 물리 body를 부모 body에 합친다(UE bWeldSimulatedBodies — 기본 거짓, Docs/Design/
+// PhysicsModule 7.1.23절).
 struct AttachmentRules {
     AttachmentRule location = AttachmentRule::KeepRelative;
     AttachmentRule rotation = AttachmentRule::KeepRelative;
     AttachmentRule scale = AttachmentRule::KeepRelative;
+    bool weldSimulatedBodies = false;
 
     static constexpr AttachmentRules KeepRelativeTransform() noexcept {
         return {};
@@ -321,6 +324,21 @@ protected:
     virtual void OnVisibilityChanged() noexcept {
     }
 
+    // 부모에서 떼기 직전(Detach, 다른 부모에 붙이기 — 링크를 바꾸기 전)에 불린다(UE
+    // DetachFromComponent의 UnWeldFromParent — PhysicsModule 7.1.23절).
+    virtual void OnDetachingFromParent() noexcept {
+    }
+
+    // 붙인 뒤(transform 통지 다음) 불린다(UE AttachToComponent의 weld — 7.1.23절).
+    virtual void OnAttachedToParent(const AttachmentRules&) noexcept {
+    }
+
+    // 지금 OnTransformUpdated가 부모의 변경에서 전해진 것인지다(UE EUpdateTransformFlags::
+    // PropagateFromParent — 7.1.23절). OnTransformUpdated 안에서만 의미가 있다.
+    bool IsTransformUpdateFromParent() const noexcept {
+        return transformFromParent_;
+    }
+
     // Render 시스템 상태가 있으면 다시 보내기를 표시한다(실패는 무시 — 다음 변경이 다시 표시한다).
     // 데이터 컴포넌트 setter가 값이 바뀐 뒤 부른다(Docs/Design/EngineRuntime 24.1절).
     void MarkRenderStateDirtyIfPresent() noexcept;
@@ -375,6 +393,8 @@ protected:
     // 7.1.11절).
     ROCKS_NATIVE() bool overlapUpdateDeferred_ = false;
     ROCKS_NATIVE() bool overlapUpdateSkipped_ = false;
+    // 부모의 변경을 전해 받는 중이다(IsTransformUpdateFromParent).
+    ROCKS_NATIVE() bool transformFromParent_ = false;
 
 private:
     // 자신과 자손에 OnTransformUpdated를 부르고 bounds·Render 상태를 표시한 뒤 overlap을
