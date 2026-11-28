@@ -10,6 +10,7 @@
 #include <Platform/Memory.h>
 #include <Platform/Process.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Task/WorkerScheduler.h>
 #include <TestSupport/Test.h>
 #include <TextureTools/TextureBuild.h>
 
@@ -186,8 +187,8 @@ TextureBuildSettings SettingsFor(const pg::MipCase& one) noexcept {
 
 // UE probe BuildChain과 같은 순서다: 최대 크기 단계 경로(GenerateMipChain(…, 1) 반복) → mip 0 →
 // 나머지 사슬.
-Result<void> BuildChain(Allocator& allocator, const pg::MipCase& one,
-                        Array<Level>& chain) noexcept {
+Result<void> BuildChain(Allocator& allocator, const pg::MipCase& one, Array<Level>& chain,
+                        const TextureBuildExecution& execution = {}) noexcept {
     const TextureBuildSettings settings = SettingsFor(one);
     const MipChainParams params = MipChainParamsFor(settings);
     const bool volume = settings.dimension == TextureDimension::Volume;
@@ -206,7 +207,7 @@ Result<void> BuildChain(Allocator& allocator, const pg::MipCase& one,
                 return reserved;
             }
 
-            if (auto made = GenerateMipChain(allocator, params, top, 1, next); !made) {
+            if (auto made = GenerateMipChain(allocator, params, top, 1, next, execution); !made) {
                 return made;
             }
 
@@ -223,7 +224,7 @@ Result<void> BuildChain(Allocator& allocator, const pg::MipCase& one,
     }
 
     (void)chain.TryPushBack(rocks::Move(top));
-    return GenerateMipChain(allocator, params, chain[0], count - 1, chain);
+    return GenerateMipChain(allocator, params, chain[0], count - 1, chain, execution);
 }
 
 } // namespace
@@ -406,6 +407,37 @@ TEST(TextureBuild_MipFilterThroughBuildTexture) {
 
             CHECK(same);
         }
+    }
+}
+
+// 행 단위 병렬(12.18 TP1b): scheduler 참여자 1(없음)·2·5에서 모든 경우의 사슬이 byte까지 같다
+// (대상 행·coverage 행 batch — 분할과 무관). 100×100 경우는 batch가 여럿이다.
+TEST(TextureBuild_MipChainParallelMatchesSerial) {
+    SystemAllocator allocator;
+    const uint32 workerCounts[] = {1, 4};
+    for (uint32 workers : workerCounts) {
+        WorkerScheduler scheduler(allocator);
+        WorkerSchedulerConfig config;
+        config.workerCount = workers;
+        REQUIRE(scheduler.Start(config));
+        TextureBuildExecution execution;
+        execution.scheduler = &scheduler;
+        execution.scratch = &allocator;
+        for (const pg::MipCase& one : pg::MipCases) {
+            Array<Level> serial(allocator);
+            Array<Level> parallel(allocator);
+            REQUIRE(BuildChain(allocator, one, serial));
+            REQUIRE(BuildChain(allocator, one, parallel, execution));
+            REQUIRE(serial.Size() == parallel.Size());
+            for (usize mip = 0; mip < serial.Size(); ++mip) {
+                const bool same = serial[mip].texels.Size() == parallel[mip].texels.Size() &&
+                                  memcmp(serial[mip].texels.Data(), parallel[mip].texels.Data(),
+                                         serial[mip].texels.Size() * sizeof(float)) == 0;
+                CHECK(same);
+            }
+        }
+
+        REQUIRE(scheduler.Shutdown());
     }
 }
 
