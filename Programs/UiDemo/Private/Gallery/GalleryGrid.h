@@ -18,9 +18,12 @@ namespace rocks::ui::gallery {
 
 class GalleryGrid {
 public:
-    // UE NextSlot의 RowCount·Cols다.
+    // UE NextSlot의 RowCount·Cols다. 묶음(체크·이름·위젯 세 칸)은 가로로 MaxBands개까지만 둔다 —
+    // 더 두면 창(1280) 오른쪽 밖으로 나가 세로 스크롤로 닿을 수 없다. 행이 많으면 묶음마다 행 수를
+    // 늘린다(최소 RowsPerColumn). 그래서 칸 배치는 Finish에서 한다.
     static constexpr uint32 RowsPerColumn = 15;
     static constexpr uint32 ColumnsPerRow = 3;
+    static constexpr uint32 MaxBands = 2;
     // 위젯 줄 안에서 위젯 사이 기본 간격이다.
     static constexpr float WidgetSpacing = 8;
 
@@ -47,6 +50,7 @@ private:
     SharedPtr<Grid> grid_;
     Array<SharedPtr<Element>> contents_;
     Array<SharedPtr<Element>> toggles_;
+    Array<SharedPtr<Element>> names_;
     uint32 count_ = 0;
     Result<void> status_ = Result<void>::Success();
 };

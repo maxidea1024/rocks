@@ -61,6 +61,29 @@ ROCKS_UICORE_API const ButtonStyle& SimpleButtonStyle() noexcept;
 // ForegroundHover).
 ROCKS_UICORE_API const CheckBoxStyle& DefaultCheckBoxStyle() noexcept;
 
+// 토글 버튼 여백(UE ToggleButtonMargins (16, 2) — CoreStyle.cpp 57행), 라디오 여백(UE "RadioButton"
+// 4)과 라디오 상자 크기(UE radio SVG 16 — 바탕 없음)다.
+inline constexpr Vec4 ToggleButtonMargins{16.0f, 2.0f, 16.0f, 2.0f};
+inline constexpr Vec4 RadioButtonPadding{4.0f, 4.0f, 4.0f, 4.0f};
+inline constexpr Vec2 RadioButtonBoxSize{16.0f, 16.0f};
+// 토글 버튼 바탕 반경이다(UE FSlateRoundedBoxBrush(…, 4.0f) — StarshipCoreStyle.cpp 1712–1745행).
+inline constexpr float ToggleButtonCornerRadius = 4.0f;
+
+// 토글 버튼 체크 상자다(UE "ToggleButtonCheckbox" — 1709–1726행: 체크 RB(Primary, 4)·올림
+// PrimaryHover·눌림 Dropdown, 해제 없음·올림·눌림 RB(Dropdown, 4), 전경 Foreground·나머지
+// ForegroundHover, 여백 (16, 2)).
+ROCKS_UICORE_API const CheckBoxStyle& DefaultToggleButtonCheckBoxStyle() noexcept;
+// 다른 토글 버튼이다(UE "ToggleButtonCheckboxAlt" — 1729–1745행: 체크 RB(Input, 4)·올림 RB(Hover,
+// 4)·눌림 RB(Input, 4), 해제 없음·올림 RB(Hover, 4)·눌림 RB(Input, 4), 체크 전경 White).
+ROCKS_UICORE_API const CheckBoxStyle& DefaultToggleButtonCheckBoxAltStyle() noexcept;
+// 투명 토글이다(UE "TransparentCheckBox" — 1688–1706행: 이미지 없음, 전경 Foreground·나머지
+// ForegroundHover).
+ROCKS_UICORE_API const CheckBoxStyle& DefaultTransparentCheckBoxStyle() noexcept;
+// 라디오 버튼이다(UE "RadioButton" — 1818–1840행: 체크 상자 형식, 바탕 없음, 해제 RadioOff
+// Dropdown·올림 Hover·눌림 Dropdown, 체크 RadioOn Primary·올림 PrimaryHover·눌림 Primary, 미정
+// RadioOff White25·올림·눌림 ForegroundHover, 전경 White, 여백 4).
+ROCKS_UICORE_API const CheckBoxStyle& DefaultRadioButtonStyle() noexcept;
+
 // 패널 탭 스타일이다(UE "Docking.Tab" — StarshipCoreStyle.cpp 1876–1899행: 선택 탭 Panel, 올림
 // Panel 80%, 내용 Panel, 탭 줄 Background, 여백 (4, 3, 10, 4), 간격 2, 전경 Foreground·올림
 // ForegroundHover).

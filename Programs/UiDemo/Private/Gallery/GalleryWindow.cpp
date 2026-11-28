@@ -53,6 +53,10 @@ const TextInputSamples& GalleryWindow::TextInput() const noexcept {
     return widgets_.textInput;
 }
 
+const CheckSamples& GalleryWindow::Checks() const noexcept {
+    return widgets_.checks;
+}
+
 const GalleryGrid* GalleryWindow::Layout() const noexcept {
     return layout_.grid.Get();
 }

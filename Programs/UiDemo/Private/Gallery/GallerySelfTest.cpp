@@ -39,7 +39,10 @@ enum Failure : int {
     TextBoxNotFocused = 57,
     TextBoxFocusMissing = 58,
     TextTypingFailed = 59,
-    TextCommitFailed = 60
+    TextCommitFailed = 60,
+    CheckSamplesMissing = 61,
+    ToggleBackgroundMissing = 62,
+    RadioGroupBroken = 63
 };
 
 Optional<Vec2> Center(const Element* element) noexcept {
@@ -340,6 +343,32 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     if (!app.RouteKey(0, input::InputEvent::KeyDown(input::Key::Enter)) ||
         samples.value->GetText() != "Committed (Enter): Hi") {
         return TextCommitFailed;
+    }
+
+    // 체크 상자 형식(23.3절): 켠 토글은 Primary 바탕이고, 라디오 묶음은 누른 것 하나만 체크된다.
+    const CheckSamples& checks = gallery.Checks();
+    if (!checks.toggle || !checks.radios[0] || !checks.radios[1] || !checks.radios[2]) {
+        return CheckSamplesMissing;
+    }
+
+    if (!Reveal(app, *checks.toggle, viewport)) {
+        return ToggleBackgroundMissing;
+    }
+
+    cache = app.UpdatePaintCache(viewport, 1);
+    if (!cache || !HasBox(*cache.Value(), *checks.toggle, theme.Get(ThemeSlot::Primary))) {
+        return ToggleBackgroundMissing;
+    }
+
+    if (!Reveal(app, *checks.radios[2], viewport)) {
+        return RadioGroupBroken;
+    }
+
+    const auto third = Center(checks.radios[2].Get());
+    if (!third || !Click(app, *third) || checks.radios[2]->GetState() != CheckState::Checked ||
+        checks.radios[0]->GetState() != CheckState::Unchecked ||
+        checks.radios[1]->GetState() != CheckState::Unchecked) {
+        return RadioGroupBroken;
     }
 
     // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다.

@@ -22,11 +22,20 @@ struct TextInputSamples {
     SharedPtr<EditableTextBox> multiLine;
 };
 
+// 체크 상자 형식 견본이다(23.3절 — self-test가 토글 바탕·라디오 묶음을 본다).
+inline constexpr usize RadioSampleCount = 3;
+
+struct CheckSamples {
+    SharedPtr<CheckBox> toggle;
+    SharedPtr<CheckBox> radios[RadioSampleCount];
+};
+
 struct WidgetsPage {
     SharedPtr<Element> root;
     // self-test가 행의 활성 상태를 바꿔 본다.
     UniquePtr<GalleryGrid> grid;
     TextInputSamples textInput;
+    CheckSamples checks;
 };
 
 Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept;

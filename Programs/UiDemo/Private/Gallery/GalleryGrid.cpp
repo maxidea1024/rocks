@@ -17,7 +17,8 @@ constexpr Vec4 WidgetPadding{12, 16, 12, 16};
 } // namespace
 
 GalleryGrid::GalleryGrid(GalleryContext& context) noexcept
-    : context_(context), contents_(context.allocator), toggles_(context.allocator) {
+    : context_(context), contents_(context.allocator), toggles_(context.allocator),
+      names_(context.allocator) {
     auto grid = SharedPtr<Grid>::TryMake(context.allocator, context.allocator);
     if (!grid) {
         status_ = Result<void>::Failure(grid.Error());
@@ -87,35 +88,16 @@ Result<void> GalleryGrid::TryAddRow(StringView name, StringView usage,
             }
         }));
 
-    const uint32 column = (count_ / RowsPerColumn) * ColumnsPerRow;
-    const uint32 line = count_ % RowsPerColumn;
-    added = grid_->TryAddSlot(toggle.Value(), {.column = column,
-                                               .row = line,
-                                               .padding = TogglePadding,
-                                               .horizontal = StackAlignment::Start,
-                                               .vertical = StackAlignment::Center});
-    if (added) {
-        added = grid_->TryAddSlot(names.Value(), {.column = column + 1,
-                                                  .row = line,
-                                                  .padding = NamePadding,
-                                                  .horizontal = StackAlignment::End,
-                                                  .vertical = StackAlignment::Center});
-    }
-
-    if (added) {
-        added = grid_->TryAddSlot(row.Value(), {.column = column + 2,
-                                                .row = line,
-                                                .padding = WidgetPadding,
-                                                .horizontal = StackAlignment::Start,
-                                                .vertical = StackAlignment::Center});
-    }
-
     if (added) {
         added = contents_.TryPushBack(row.Value());
     }
 
     if (added) {
         added = toggles_.TryPushBack(toggle.Value());
+    }
+
+    if (added) {
+        added = names_.TryPushBack(names.Value());
     }
 
     if (!added) {
@@ -129,6 +111,38 @@ Result<void> GalleryGrid::TryAddRow(StringView name, StringView usage,
 Result<SharedPtr<Element>> GalleryGrid::Finish() noexcept {
     if (!status_) {
         return Result<SharedPtr<Element>>::Failure(status_.Error());
+    }
+
+    // 묶음은 MaxBands개까지다 — 행이 많으면 묶음마다 행 수를 늘린다(최소 RowsPerColumn).
+    const uint32 perBand =
+        count_ > RowsPerColumn * MaxBands ? (count_ + MaxBands - 1) / MaxBands : RowsPerColumn;
+    for (uint32 i = 0; i < count_; ++i) {
+        const uint32 column = (i / perBand) * ColumnsPerRow;
+        const uint32 line = i % perBand;
+        auto placed = grid_->TryAddSlot(toggles_[i], {.column = column,
+                                                      .row = line,
+                                                      .padding = TogglePadding,
+                                                      .horizontal = StackAlignment::Start,
+                                                      .vertical = StackAlignment::Center});
+        if (placed) {
+            placed = grid_->TryAddSlot(names_[i], {.column = column + 1,
+                                                   .row = line,
+                                                   .padding = NamePadding,
+                                                   .horizontal = StackAlignment::End,
+                                                   .vertical = StackAlignment::Center});
+        }
+
+        if (placed) {
+            placed = grid_->TryAddSlot(contents_[i], {.column = column + 2,
+                                                      .row = line,
+                                                      .padding = WidgetPadding,
+                                                      .horizontal = StackAlignment::Start,
+                                                      .vertical = StackAlignment::Center});
+        }
+
+        if (!placed) {
+            return Result<SharedPtr<Element>>::Failure(placed.Error());
+        }
     }
 
     auto scroll = SharedPtr<ScrollView>::TryMake(context_.allocator, context_.allocator);

@@ -1,5 +1,7 @@
 #include <UiFramework/Controls/CheckBox.h>
 
+#include <UiCore/UiHostServices.h>
+
 namespace rocks::ui {
 
 CheckBox::CheckBox(Allocator& allocator) noexcept : Button(allocator) {
@@ -11,6 +13,23 @@ CheckBox::CheckBox(Allocator& allocator) noexcept : Button(allocator) {
 }
 
 Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
+    auto applied = ApplyCheckBoxStyle(style);
+    if (applied) {
+        checkStyleExplicit_ = true;
+    }
+
+    return applied;
+}
+
+void CheckBox::ApplyStyles(const UiHostServices& host) noexcept {
+    // 활성 집합에 키가 없으면 내장 기본값이다(20.11절).
+    if (!checkStyleExplicit_) {
+        const CheckBoxStyle* style = host.FindStyle<CheckBoxStyle>("Checkbox");
+        (void)ApplyCheckBoxStyle(style ? *style : DefaultCheckBoxStyle());
+    }
+}
+
+Result<void> CheckBox::ApplyCheckBoxStyle(const CheckBoxStyle& style) noexcept {
     const auto validSize = [](Vec2 size) noexcept {
         return size.IsFinite() && size.x > 0 && size.y > 0;
     };
@@ -24,7 +43,8 @@ Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
                                style.checkedForeground,
                                style.checkedHoveredForeground,
                                style.checkedPressedForeground,
-                               style.undeterminedForeground};
+                               style.undeterminedForeground,
+                               style.borderBackgroundColor};
     for (const ColorRef& color : colors) {
         if (!color.IsValid()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -33,6 +53,7 @@ Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
 
     const StyleBrush* brushes[] = {
         &style.background,        &style.backgroundHovered,        &style.backgroundPressed,
+        &style.uncheckedImage,    &style.uncheckedHoveredImage,    &style.uncheckedPressedImage,
         &style.checkedImage,      &style.checkedHoveredImage,      &style.checkedPressedImage,
         &style.undeterminedImage, &style.undeterminedHoveredImage, &style.undeterminedPressedImage};
     for (const StyleBrush* brush : brushes) {
@@ -41,7 +62,8 @@ Result<void> CheckBox::SetCheckBoxStyle(const CheckBoxStyle& style) noexcept {
         }
     }
 
-    if (!validSize(style.boxSize) || !validPadding(style.padding)) {
+    if (!validSize(style.boxSize) || !validPadding(style.padding) ||
+        (style.type != CheckBoxType::CheckBox && style.type != CheckBoxType::ToggleButton)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -60,8 +82,35 @@ const CheckBoxStyle& CheckBox::GetCheckBoxStyle() const noexcept {
 
 void CheckBox::UpdateContentPadding() noexcept {
     const Vec4 padding = checkStyle_.padding;
+    if (checkStyle_.type == CheckBoxType::ToggleButton) {
+        // 토글: 상태 이미지가 바탕이고 내용은 사방 여백 안이다(UE SBorder Padding).
+        (void)SetContentPadding(padding);
+        SetDesiredSize({});
+        return;
+    }
+
     (void)SetContentPadding({checkStyle_.boxSize.x + padding.x, padding.y, padding.z, padding.w});
     SetDesiredSize(checkStyle_.boxSize);
+}
+
+const StyleBrush& CheckBox::CurrentStateImage() const noexcept {
+    // UE SCheckBox::OnGetCheckImage(335–356행): 상태 × 눌림 > 올림 > 보통.
+    const bool pressed = IsPressed();
+    const bool hovered = IsHovered();
+    switch (state_) {
+    case CheckState::Checked:
+        return pressed   ? checkStyle_.checkedPressedImage
+               : hovered ? checkStyle_.checkedHoveredImage
+                         : checkStyle_.checkedImage;
+    case CheckState::Unchecked:
+        return pressed   ? checkStyle_.uncheckedPressedImage
+               : hovered ? checkStyle_.uncheckedHoveredImage
+                         : checkStyle_.uncheckedImage;
+    default:
+        return pressed   ? checkStyle_.undeterminedPressedImage
+               : hovered ? checkStyle_.undeterminedHoveredImage
+                         : checkStyle_.undeterminedImage;
+    }
 }
 
 ColorRef CheckBox::GetForegroundColor() const noexcept {
@@ -113,13 +162,26 @@ void CheckBox::SetOnChanged(Delegate<void(CheckState)>&& callback) noexcept {
 
 Result<void> CheckBox::OnPaint(PaintList& list, int32 layer) const noexcept {
     const auto& geometry = GetGeometry();
+    const StyleColorContext context = list.ColorContext();
+    if (checkStyle_.type == CheckBoxType::ToggleButton) {
+        // 토글: 상태 이미지를 요소 전체(버튼 바탕)에 바탕 tint로 그린다(UE SBorder BorderImage·
+        // BorderBackgroundColor — SCheckBox.cpp 578–585행).
+        const StyleBrush& image = CurrentStateImage();
+        if (image.mode == BrushMode::None) {
+            return Result<void>::Success();
+        }
+
+        const LinearColor tint =
+            checkStyle_.borderBackgroundColor.Resolve(list.Theme(), context) * CurrentColor();
+        return list.TryAddBrush(geometry, image.Resolve(list.Theme(), context), tint, layer);
+    }
+
     const Vec2 boxSize = checkStyle_.boxSize;
     const float top = (geometry.size.y - boxSize.y) * 0.5f;
     const auto box = geometry.MakeChild(boxSize, {1, 0, 0, 1, 0, top}, {}, {});
     const StyleBrush& background = IsPressed()   ? checkStyle_.backgroundPressed
                                    : IsHovered() ? checkStyle_.backgroundHovered
                                                  : checkStyle_.background;
-    const StyleColorContext context = list.ColorContext();
     if (background.mode != BrushMode::None) {
         auto painted =
             list.TryAddBrush(box, background.Resolve(list.Theme(), context), CurrentColor(), layer);
@@ -128,19 +190,10 @@ Result<void> CheckBox::OnPaint(PaintList& list, int32 layer) const noexcept {
         }
     }
 
-    if (state_ == CheckState::Unchecked) {
-        return Result<void>::Success();
-    }
-
-    // 표시는 상태별 이미지(UE CheckedImage 등)를 상자 전체에 그리고, 색은 이미지 tint x 전경색이다
-    // (UE 표시 SImage ColorAndOpacity(UseForeground()) — SCheckBox.cpp 556행).
-    const bool checked = state_ == CheckState::Checked;
-    const StyleBrush& mark =
-        IsPressed()
-            ? (checked ? checkStyle_.checkedPressedImage : checkStyle_.undeterminedPressedImage)
-        : IsHovered()
-            ? (checked ? checkStyle_.checkedHoveredImage : checkStyle_.undeterminedHoveredImage)
-            : (checked ? checkStyle_.checkedImage : checkStyle_.undeterminedImage);
+    // 표시는 상태별 이미지(UE CheckedImage 등 — 해제 이미지도, 라디오 RadioOff)를 상자 전체에
+    // 그리고, 색은 이미지 tint x 전경색이다(UE 표시 SImage ColorAndOpacity(UseForeground()) —
+    // SCheckBox.cpp 556행).
+    const StyleBrush& mark = CurrentStateImage();
     if (mark.mode == BrushMode::None) {
         return Result<void>::Success();
     }

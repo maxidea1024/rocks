@@ -160,6 +160,107 @@ const EditableTextStyle& DefaultEditableTextStyle() noexcept {
     return style;
 }
 
+namespace {
+
+// 상태별 전경색을 한 번에 정한다(보통만 따로).
+void SetForegrounds(CheckBoxStyle& style, ColorRef normal, ColorRef others) noexcept {
+    style.foreground = normal;
+    style.hoveredForeground = others;
+    style.pressedForeground = others;
+    style.checkedForeground = others;
+    style.checkedHoveredForeground = others;
+    style.checkedPressedForeground = others;
+    style.undeterminedForeground = others;
+}
+
+} // namespace
+
+const CheckBoxStyle& DefaultToggleButtonCheckBoxStyle() noexcept {
+    static const CheckBoxStyle style = [] {
+        CheckBoxStyle toggle;
+        toggle.type = CheckBoxType::ToggleButton;
+        toggle.checkedImage = StyleBrush::RoundedBox(ThemeSlot::Primary, ToggleButtonCornerRadius);
+        toggle.checkedHoveredImage =
+            StyleBrush::RoundedBox(ThemeSlot::PrimaryHover, ToggleButtonCornerRadius);
+        toggle.checkedPressedImage =
+            StyleBrush::RoundedBox(ThemeSlot::Dropdown, ToggleButtonCornerRadius);
+        toggle.uncheckedImage = StyleBrush::None();
+        toggle.uncheckedHoveredImage =
+            StyleBrush::RoundedBox(ThemeSlot::Dropdown, ToggleButtonCornerRadius);
+        toggle.uncheckedPressedImage = toggle.uncheckedHoveredImage;
+        SetForegrounds(toggle, ColorRef::FromTheme(ThemeSlot::Foreground),
+                       ColorRef::FromTheme(ThemeSlot::ForegroundHover));
+        // UE 토글은 미정 전경을 정하지 않는다(UseForeground).
+        toggle.undeterminedForeground = ColorRef{ColorSource::Foreground};
+        toggle.padding = ToggleButtonMargins;
+        return toggle;
+    }();
+    return style;
+}
+
+const CheckBoxStyle& DefaultToggleButtonCheckBoxAltStyle() noexcept {
+    static const CheckBoxStyle style = [] {
+        CheckBoxStyle toggle;
+        toggle.type = CheckBoxType::ToggleButton;
+        toggle.checkedImage = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius);
+        toggle.checkedHoveredImage = StyleBrush::RoundedBox(ThemeSlot::Hover, ComboCornerRadius);
+        toggle.checkedPressedImage = toggle.checkedImage;
+        toggle.uncheckedImage = StyleBrush::None();
+        toggle.uncheckedHoveredImage = toggle.checkedHoveredImage;
+        toggle.uncheckedPressedImage = toggle.checkedImage;
+        const ColorRef hover = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        toggle.foreground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        toggle.hoveredForeground = hover;
+        toggle.pressedForeground = hover;
+        toggle.checkedForeground = ColorRef::FromTheme(ThemeSlot::White);
+        toggle.checkedHoveredForeground = ColorRef::FromTheme(ThemeSlot::White);
+        // UE Alt는 체크 눌림·미정 전경을 정하지 않는다(UseForeground).
+        toggle.checkedPressedForeground = ColorRef{ColorSource::Foreground};
+        toggle.undeterminedForeground = ColorRef{ColorSource::Foreground};
+        toggle.padding = ToggleButtonMargins;
+        return toggle;
+    }();
+    return style;
+}
+
+const CheckBoxStyle& DefaultTransparentCheckBoxStyle() noexcept {
+    static const CheckBoxStyle style = [] {
+        CheckBoxStyle toggle;
+        toggle.type = CheckBoxType::ToggleButton;
+        SetForegrounds(toggle, ColorRef::FromTheme(ThemeSlot::Foreground),
+                       ColorRef::FromTheme(ThemeSlot::ForegroundHover));
+        toggle.undeterminedForeground = ColorRef{ColorSource::Foreground};
+        return toggle;
+    }();
+    return style;
+}
+
+const CheckBoxStyle& DefaultRadioButtonStyle() noexcept {
+    static const CheckBoxStyle style = [] {
+        CheckBoxStyle radio;
+        radio.type = CheckBoxType::CheckBox;
+        radio.uncheckedImage = StyleBrush::Svg(icons::RadioOff, icons::Icon16, ThemeSlot::Dropdown);
+        radio.uncheckedHoveredImage =
+            StyleBrush::Svg(icons::RadioOff, icons::Icon16, ThemeSlot::Hover);
+        radio.uncheckedPressedImage = radio.uncheckedImage;
+        radio.checkedImage = StyleBrush::Svg(icons::RadioOn, icons::Icon16, ThemeSlot::Primary);
+        radio.checkedHoveredImage =
+            StyleBrush::Svg(icons::RadioOn, icons::Icon16, ThemeSlot::PrimaryHover);
+        radio.checkedPressedImage = radio.checkedImage;
+        radio.undeterminedImage =
+            StyleBrush::Svg(icons::RadioOff, icons::Icon16, ThemeSlot::White25);
+        radio.undeterminedHoveredImage =
+            StyleBrush::Svg(icons::RadioOff, icons::Icon16, ThemeSlot::ForegroundHover);
+        radio.undeterminedPressedImage = radio.undeterminedHoveredImage;
+        const ColorRef white = ColorRef::FromTheme(ThemeSlot::White);
+        SetForegrounds(radio, white, white);
+        radio.boxSize = RadioButtonBoxSize;
+        radio.padding = RadioButtonPadding;
+        return radio;
+    }();
+    return style;
+}
+
 const ComboButtonStyle& DefaultComboButtonStyle() noexcept {
     static const ComboButtonStyle style = [] {
         const ColorRef foreground = ColorRef::FromTheme(ThemeSlot::Foreground);

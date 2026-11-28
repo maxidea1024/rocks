@@ -11,6 +11,7 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 
 - 견본은 실제 부품이다. 갤러리 전용 그리기 코드로 모양만 비슷하게 만들지 않는다. 에디터가 같은 클래스·스타일을 그대로 쓸 수 있어야 한다.
 - 모든 위젯 행에 활성 체크 상자를 둔다(UE `NextSlot`). 끄면 그 행을 `SetEnabled(false)`로 바꿔 UE 비활성 효과(알파 0.45, 비활성 전용 brush)를 보인다.
+- 행 묶음(체크·이름·위젯)은 가로로 둘까지만 둔다. 셋째 묶음은 창 오른쪽 밖이라 세로 스크롤로 닿지 않는다. 행이 30개를 넘으면 묶음마다 행 수를 늘린다(`GalleryGrid::MaxBands`, 배치는 `Finish`).
 - 이름 열은 위에 부품 이름(사람이 읽는 Rocks 이름 — "Horizontal Stack", "Spin Box"), 아래에 쓰는 법(클래스·스타일 함수·설정, 작은 글꼴, 흰색 25%)을 둔다. 예: "Primary Button" / `Button + PrimaryButtonStyle()`, "Fit Box" / `FitBox (Fit, Cover, Fill)`.
 - 상태가 있는 부품은 상태를 나란히 보인다(체크 상자 해제·체크·미정, 진행 막대 값·marquee).
 - 동작은 실제로 된다. 누르면 눌리고, 고르면 바뀌고, 끌면 움직인다. 값이 있는 부품(슬라이더·숫자 입력·체크 상자·원형 슬라이더·타임라인·키 선택·콤보)은 바뀐 값을 옆 레이블에 보인다(UE 갤러리의 콤보 레이블처럼).
@@ -64,10 +65,10 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | Primary Button | `SButton` "PrimaryButton" | `Button` + `PrimaryButtonStyle()` | 있음 |
 | Default/Secondary Button | "Button" | `Button` + `DefaultButtonStyle()` | 있음 |
 | Simple Button | "SimpleButton" | `Button` + `SimpleButtonStyle()` | 있음 |
-| Toggle Button | `SCheckBox` "ToggleButtonCheckbox" | `CheckBox` + 토글 스타일 | UW4b |
+| Toggle Button | `SCheckBox` "ToggleButtonCheckbox"·"ToggleButtonCheckboxAlt"·"TransparentCheckBox" | `CheckBox` + `DefaultToggleButtonCheckBoxStyle()`·`...AltStyle()`·`DefaultTransparentCheckBoxStyle()` | 있음(UW4b2b) |
 | SegmentedControl / Alt | `SSegmentedControl` | 없음 | UW4c |
 | Check Box | `SCheckBox` "Checkbox" | `CheckBox` + `DefaultCheckBoxStyle()` | 있음 |
-| Radio Button | "RadioButton" | `CheckBox` + 라디오 스타일 | UW4b |
+| Radio Button | "RadioButton" | `CheckBox` + `DefaultRadioButtonStyle()`(묶음은 호출자) | 있음(UW4b2b) |
 | SimpleComboBox / ComboBox | `SComboBox`·`STextComboBox` | `ComboBox`, Widget: `ComboBoxStringWidget`·`ComboBoxKeyWidget` | UW4b 스타일 |
 | SHeader | `SHeader` | 없음 | UW4c |
 | SHyperlink | `SHyperlink` | 없음 | UW4c |

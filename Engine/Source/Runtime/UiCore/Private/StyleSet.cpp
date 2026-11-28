@@ -268,6 +268,24 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
     }
 
     if (added) {
+        added =
+            styles.Set<CheckBoxStyle>("ToggleButtonCheckbox", DefaultToggleButtonCheckBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<CheckBoxStyle>("ToggleButtonCheckboxAlt",
+                                          DefaultToggleButtonCheckBoxAltStyle());
+    }
+
+    if (added) {
+        added = styles.Set<CheckBoxStyle>("TransparentCheckBox", DefaultTransparentCheckBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<CheckBoxStyle>("RadioButton", DefaultRadioButtonStyle());
+    }
+
+    if (added) {
         added = styles.Set<DockTabStyle>("Docking.Tab", DefaultDockTabStyle());
     }
 

@@ -137,6 +137,103 @@ StringView CommitPrefix(TextCommitReason reason) noexcept {
                                              : StringView("Committed (focus lost)");
 }
 
+// 레이블이 붙은 체크 상자를 style로 만든다.
+Result<SharedPtr<CheckBox>> MakeStyledCheckBox(GalleryContext& context, const CheckBoxStyle& style,
+                                               CheckState state, StringView label) noexcept {
+    auto check = SharedPtr<CheckBox>::TryMake(context.allocator, context.allocator);
+    if (!check) {
+        return check;
+    }
+
+    auto result = check.Value()->SetCheckBoxStyle(style);
+    if (result) {
+        result = check.Value()->SetState(state);
+    }
+
+    if (result && !label.IsEmpty()) {
+        auto text = MakeText(context, label);
+        result =
+            text ? check.Value()->TryAddChild(text.Value()) : Result<void>::Failure(text.Error());
+    }
+
+    if (!result) {
+        return Result<SharedPtr<CheckBox>>::Failure(result.Error());
+    }
+
+    return check;
+}
+
+// 체크 상자 형식 행이다(23.3절 — UE "ToggleButtonCheckbox"·"ToggleButtonCheckboxAlt"·
+// "TransparentCheckBox"·"RadioButton"). 라디오 셋은 묶음 하나다(하나를 체크하면 나머지를 푼다 —
+// UE처럼 호출자가 묶는다).
+void AddCheckTypeRows(GalleryContext& context, GalleryGrid& rows, BuildStatus& status,
+                      CheckSamples& samples) noexcept {
+    auto toggle =
+        MakeStyledCheckBox(context, DefaultToggleButtonCheckBoxStyle(), CheckState::Checked, "On");
+    auto toggleOff = MakeStyledCheckBox(context, DefaultToggleButtonCheckBoxStyle(),
+                                        CheckState::Unchecked, "Off");
+    auto alt = MakeStyledCheckBox(context, DefaultToggleButtonCheckBoxAltStyle(),
+                                  CheckState::Checked, "On");
+    auto altOff = MakeStyledCheckBox(context, DefaultToggleButtonCheckBoxAltStyle(),
+                                     CheckState::Unchecked, "Off");
+    auto transparent = MakeStyledCheckBox(context, DefaultTransparentCheckBoxStyle(),
+                                          CheckState::Checked, "Transparent");
+    if (!status.Take(toggle, "Toggle Button") || !status.Take(toggleOff) || !status.Take(alt) ||
+        !status.Take(altOff) || !status.Take(transparent)) {
+        return;
+    }
+
+    const SharedPtr<Element> toggles[] = {toggle.Value(), toggleOff.Value()};
+    rows.AddRow("Toggle Button", "CheckBox + DefaultToggleButtonCheckBoxStyle()", toggles);
+    const SharedPtr<Element> alts[] = {alt.Value(), altOff.Value()};
+    rows.AddRow("Toggle Button (alt)", "CheckBox + DefaultToggleButtonCheckBoxAltStyle()", alts);
+    rows.AddRow("Transparent Check Box", "CheckBox + DefaultTransparentCheckBoxStyle()",
+                transparent.Value());
+    samples.toggle = toggle.Value();
+    constexpr const char* RadioLabels[RadioSampleCount] = {"One", "Two", "Three"};
+    SharedPtr<Element> radios[RadioSampleCount];
+    for (usize i = 0; i < RadioSampleCount; ++i) {
+        auto radio = MakeStyledCheckBox(context, DefaultRadioButtonStyle(),
+                                        i == 0 ? CheckState::Checked : CheckState::Unchecked,
+                                        RadioLabels[i]);
+        if (!status.Take(radio, "Radio Button")) {
+            return;
+        }
+
+        samples.radios[i] = radio.Value();
+        radios[i] = radio.Value();
+    }
+
+    // 묶음: 하나를 체크하면 나머지를 푼다. 체크된 것을 다시 누르면 그대로 둔다(라디오 관례). 묶음은
+    // 공유 객체 하나로 잡고(delegate 안 저장 크기), 견본은 약한 참조다.
+    struct RadioGroup {
+        WeakPtr<CheckBox> members[RadioSampleCount];
+    };
+
+    auto group = SharedPtr<RadioGroup>::TryMake(context.allocator);
+    if (!status.Take(group, "Radio Button group")) {
+        return;
+    }
+
+    for (usize i = 0; i < RadioSampleCount; ++i) {
+        group.Value()->members[i] = WeakPtr<CheckBox>(samples.radios[i]);
+    }
+
+    for (usize i = 0; i < RadioSampleCount; ++i) {
+        samples.radios[i]->SetOnChanged(Delegate<void(CheckState)>::CreateLambda(
+            [shared = group.Value(), i](CheckState) noexcept {
+                for (usize j = 0; j < RadioSampleCount; ++j) {
+                    if (auto member = shared->members[j].Lock()) {
+                        (void)member->SetState(j == i ? CheckState::Checked
+                                                      : CheckState::Unchecked);
+                    }
+                }
+            }));
+    }
+
+    rows.AddRow("Radio Button", "CheckBox + DefaultRadioButtonStyle()", radios);
+}
+
 // "Text Input" 묶음(UE 갤러리 1365–1405행 — SEditableText·SEditableTextBox·여러 줄)과 Rocks가 더한
 // 읽기 전용·비밀번호·오류·값 레이블 행이다(22.9절).
 void AddTextInputRows(GalleryContext& context, GalleryGrid& rows, BuildStatus& status,
@@ -341,6 +438,10 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         auto labeled = MakeCheckBox(context, CheckState::Checked, "Label");
         one("Check Box (label)", "CheckBox + TextLabel", Move(labeled));
     }
+
+    // 체크 상자 형식(토글·라디오 — 23.3절).
+    CheckSamples checks;
+    AddCheckTypeRows(context, rows, status, checks);
 
     // 콤보 상자(UE 1095–1120행): 고른 항목을 옆 레이블에 보인다.
     {
@@ -563,7 +664,8 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         return Result<WidgetsPage>::Failure(root.Error());
     }
 
-    return Result<WidgetsPage>::Success({root.Value(), Move(grid.Value()), Move(textInput)});
+    return Result<WidgetsPage>::Success(
+        {root.Value(), Move(grid.Value()), Move(textInput), Move(checks)});
 }
 
 } // namespace rocks::ui::gallery
