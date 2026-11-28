@@ -472,6 +472,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::TextureBuildSettings::alphaCoverage",
+      "id": "690ffa5295e544628fc50a968d5b1451",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::alphaCoverageThresholds",
+      "id": "1ba1c3b909c6429ba40b09157f6b42b9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::TextureBuildSettings::compression",
       "id": "44d864fc8c8242e399c4f9bce6d8f207",
       "aliases": [],
@@ -684,6 +698,13 @@
       "kind": "field",
       "name": "rocks::TextureBuildSettings::useLegacyGamma",
       "id": "b14778de78e44fc3afe5e8e0753851ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TextureBuildSettings::useNewMipFilter",
+      "id": "829849950f2a41a3b7bc6278fe943ca9",
       "aliases": [],
       "retired": false
     },

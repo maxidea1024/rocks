@@ -170,14 +170,11 @@ Result<Sha256Digest> CookLocalKey(const CookContext& context, TypeId type,
     writer.WriteU32(source.numSlices);
     writer.WriteU32(source.numMips);
     writer.WriteU32(source.numLayers);
-    // 결과를 바꾸지 않는 칸은 사본에서 고정한다(12.14절 5번 — 주소는 mip 결과에 쓰이지 않고 경고는
-    // 너겟 밖에서 계산한다). 대상 칸(플랫폼·backend·norm16·샘플러 필터)은 형식으로만 결과에
-    // 닿으므로 고정하고, 두 후보 형식과 인코더 버전을 대신 쓴다(12.17.5 4 — 출력이 같은 프로필은
-    // 너겟을 같이 쓴다).
+    // 결과를 바꾸지 않는 칸은 사본에서 고정한다(12.14절 5번 — 경고는 너겟 밖에서 계산한다). 주소는
+    // 커널 mip의 원본 밖 처리를 바꾸므로 고정하지 않는다(12.18 TP1). 대상 칸(플랫폼·backend·
+    // norm16·샘플러 필터)은 형식으로만 결과에 닿으므로 고정하고, 두 후보 형식과 인코더 버전을 대신
+    // 쓴다(12.17.5 4 — 출력이 같은 프로필은 너겟을 같이 쓴다).
     TextureBuildSettings keyed = settings;
-    keyed.addressX = TextureAddress::Wrap;
-    keyed.addressY = TextureAddress::Wrap;
-    keyed.addressZ = TextureAddress::Wrap;
     keyed.norm16Supported = true;
     keyed.samplerPointFilter = false;
     keyed.cookPlatform = 0;

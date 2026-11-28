@@ -68,9 +68,12 @@ Result<void> CheckLodGroups(const TargetProfile& profile, TargetProfileFailure* 
         const TextureMipGenSettings mipGen = group.mipGenSettings;
         const bool valid = group.minLodSize >= 0 && group.maxLodSize >= 0 && group.maxAniso >= 0 &&
                            group.minLodSize <= group.maxLodSize &&
-                           (mipGen == TextureMipGenSettings::SimpleAverage ||
-                            mipGen == TextureMipGenSettings::NoMipmaps ||
-                            mipGen == TextureMipGenSettings::Unfiltered) &&
+                           // 그룹 값은 FromTextureGroup이 될 수 없고, LeaveExistingMips는
+                           // 계약이다(12.18 TP5). Sharpen·Blur는 구현, Angular는 Cube가 아니면
+                           // 빌드가 SimpleAverage로 바꾸고 Cube는 빌드 해석이 계약으로
+                           // 거부한다(12.18 TP1 — UE TextureLODSettings.cpp 409–417).
+                           mipGen != TextureMipGenSettings::FromTextureGroup &&
+                           mipGen != TextureMipGenSettings::LeaveExistingMips &&
                            group.mipLoadOptions != TextureMipLoadOptions::OnlyFirstMip;
         if (!valid) {
             return ProfileFail(failure, TargetProfileFile::None,

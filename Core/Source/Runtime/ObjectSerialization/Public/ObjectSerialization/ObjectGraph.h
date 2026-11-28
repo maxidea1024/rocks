@@ -5,7 +5,8 @@
 #include <Object/FieldCodec.h>
 #include <Serialization/Record.h>
 
-// 객체 그래프 저장·복원이다(graph v2 — Docs/Design/ObjectFoundations.ko.md 5절). 저장은 호출자가
+// 객체 그래프 저장·복원이다(graph 형식 3 — Docs/Design/ObjectFoundations.ko.md 5절, 선언 subobject
+// 노드는 Docs/Design/Prefab 10.4절). 저장은 호출자가
 // 고른 노드 집합(순서 = local ID)을 쓰고, 복원은 단계형(ObjectGraphStage — 검증은 어느 스레드나,
 // 생성·적용·Required 검사는 소유 스레드, Commit은 호출자)과 그 위의 편의 API(LoadObjectGraph —
 // NodeTable이 있는 그래프를 한 트랜잭션으로 공개)다.
@@ -14,7 +15,9 @@ namespace rocks {
 // graph 형식 버전이다(Docs/Design/ObjectFoundations.ko.md 5.1절 graph v2). 클래스 기본값 지문의
 // "codec wire 버전"이 이것이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 바꾸면 모든
 // 지문이 바뀐다).
-inline constexpr uint32 ObjectGraphFormatVersion = 2;
+// 3(2026-11-28 — Docs/Design/Prefab 10.4절): NodeTable 항목 앞에 노드 종류 byte(0 객체, 1 선언
+// subobject)를 둔다.
+inline constexpr uint32 ObjectGraphFormatVersion = 3;
 
 // byte 한도는 파일/필드와 migration 결과 누계다. peak RAM은 소유 index·필드 색인·참조 token·output
 // 복사도 포함한다. work는 codec의 반복/복사 비용이며 신뢰된 ctor/accessor/migration/hook의 임의
