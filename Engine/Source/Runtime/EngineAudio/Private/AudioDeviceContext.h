@@ -484,7 +484,8 @@ private:
     // 아니면 record 시계로 진행한다.
     void AdvanceCursor(Record& record, uint64 now, bool voiced) noexcept;
     // voice의 now 시점 읽지 않은 누적 frame이다(게시값이 없으면 0).
-    uint64 VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now) const noexcept;
+    // 읽지 못했으면 false다(값을 모른다 — 커서를 진행하지 않는다).
+    bool VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now, uint64& unread) const noexcept;
     // 공간 갱신(3.42.8절 — UE 순서: 우선순위 감쇠 → focus → 거리 감쇠 → 공기 흡수). accepting이면
     // UE 수락 때 규칙(focus 계수는 spatialize·focus일 때만, H = 1 — 3.42.5절)이다.
     void UpdateSpatial(Record& record, uint64 now, bool accepting) noexcept;

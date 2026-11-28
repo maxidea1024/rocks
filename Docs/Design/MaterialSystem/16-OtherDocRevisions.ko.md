@@ -23,7 +23,10 @@
 | MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: 예약 이름 `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나, SH2와 함께 구현 |
 | MSR14 | 13절(`ShaderParameterLayout`) | (개정 10) 이름을 소유하는 동적 layout builder, 텍스처·샘플러 자원 slot 표(7.4절 서명의 자원 순번), 머티리얼별 layout을 job 키 8행·라이브러리 항목 레이아웃 서명에 넣는 경로. 지금 형식은 cbuffer 멤버·정적 수명뿐이다 |
 | MSR15 | 12.2절(셰이더 타입·거르기) | (개정 10) 셰이더 타입의 문맥 공급 기능 선언과 `MaterialShaderTraits`를 받는 거르기 서명(MSR5의 실제 서명). 지금 `ShaderType.h:87–89`에는 traits가 없다 |
+| MSR17 | 12.3절(프로젝트 셰이더 라이브러리) | 프로젝트 라이브러리 쿠킹 단계가 머티리얼 셰이더 묶음(묶음 id = 셰이더 집합 id 앞 8 byte, 생성 원문·layout·job 목록)을 받아 형식마다 항목으로 넣는 길(12.8절 MS3f). 필요한 것: (a) 처리기가 넘긴 묶음을 단계가 받는 통로(`CookArtifactRequest`에 칸, 또는 단계가 쿠킹 패키지의 셰이더 집합 id로 번역 너겟을 다시 조회 — 재사용된 대상은 Cook이 불리지 않는다), (b) 엔진 라이브러리 열거가 `ShaderTypeMaterialShader` 타입을 건너뛰기(`ShaderLibraryContents.cpp`), (c) `ShaderLibraryKindOf`가 소유자가 아니라 묶음 id로 머티리얼 항목을 프로젝트 라이브러리로 보내기, (d) 묶음 id 충돌 진단. 머티리얼 job은 `warningsAsErrors = false`(7.8절). **반영(d0e9e7ebb — 셰이더 시스템 16.5절 SSD85–SSD92, 개정 65·66, Renderer 개정 14)**: (a)는 등록부 원천 `MaterialShaderBundleSource::Collect(CookArtifactRequest, sink)` — `CookArtifactRequest::packages`가 이번 게시의 패키지 전부(새로 쿠킹·재사용·부분 쿠킹 이전 항목, AssetId 순)다. (b) 엔진 열거가 머티리얼 타입을 건너뛴다. (c) `ShaderLibraryKindOf(bundleId, owner)` — 묶음 id ≠ 0이면 Project. (d) Collision·Inconsistent·UnknownVertexInput 진단. 묶음 id는 `shader::MaterialShaderBundleId` |
 | MSR16 | 7.2절 9항(공유 샘플러 선언) | 공유 샘플러 헤더 경로를 `/Engine/Private/Common/SharedSamplers.rsh`로(7.8절 — `/Engine/Shared`는 C++·HLSL 공용 `.h`만 받는다). 렌더 세션이 정본으로 받아 고치기로 함(2026-11-28) |
+| MSR18 | 형식 정의(12.1절 JSON) | `platformClass`(Mobile·Pc·Console — UE DDSPI IsMobile·IsPC·IsConsole)를 형식 정의에 더한다(머티리얼 번역 대상의 형식 사실, 12.8절 MS3c). 그 전에는 MaterialCook이 형식 id로 임시 판정한다. **반영(d0e9e7ebb — 셰이더 시스템 16.5절 SSD85–SSD92, 개정 65·66, Renderer 개정 14)**: 하나를 고르는 열거가 아니라 집합 `ShaderFormatFacts::platformClasses`(`ShaderPlatformClassBits` Mobile·Pc·Console — UE bIsMobile·bIsPC·bIsConsole이 서로 독립). 데스크톱 넷은 [Pc], `GLES31_ANDROID`는 [Mobile], `GLES31_PC`는 [Pc, Mobile]. 임시 판정은 두지 않는다 |
+| MSR19 | 12.2절(거르기 서명, MSR15 세부) | 머티리얼 pass 타입 거르기는 `MaterialShaderTraits`를 정규 바이트(`Span<const uint8>`)로 받는다(ShaderCore는 MaterialSchema를 모른다 — pass 타입이 MaterialSchema로 해석, 12.8절 MS3e). **반영(d0e9e7ebb — 셰이더 시스템 16.5절 SSD85–SSD92, 개정 65·66, Renderer 개정 14)**: `ShaderTypeDesc::materialShouldCompile(traits, VertexInputTypeId, permutation, facts)`(머티리얼 타입은 이것만 — 어긋나면 등록 거부), 조합 열거 `EnumerateMaterialShaderCombinations`. traits 해석기는 RendererShaders RS0 |
 
 **렌더 기반(RenderBase/README.ko.md)**
 
@@ -60,6 +63,7 @@
 | MRD15 | (개정 10) MS3b가 `RenderData` 모듈을 번호표 세 열거(`MaterialDomain`·`BlendMode`·`ShadingModel`)만으로 먼저 만든다(4.6절). 리플렉션 열거라 의존이 Core·MetaSchema에 ObjectRuntime이 더해진다. `BlendMode`에 `TranslucentColoredTransmittance`를 TODO 값으로 끝에 둔다(UE 값 전부 — 사용자 지시). Renderer 3.2절 의존과 14.2절 목록을 이에 맞춰 고친다 | 미처리(Renderer 담당) |
 | MRD17 | (개정 25) `SurfaceAttributes`(14.1절)에 `subsurfaceColor`(float3, 기본 1 — UE `MP_SubsurfaceColor`)를 더하고, 칸을 UE 고전 픽셀 속성(`FPixelMaterialInputs`)과 같게 둔다(6.11절 — GBuffer 배치는 렌더러가 UE `SetGBufferForShadingModel` 규칙으로). customData0·1은 고전 MP_CustomData0·1 뜻(ClearCoat 강도·거칠기, Cloth fuzz 양, Eye IrisMask·IrisDistance, Hair Backlit), Subsurface·TwoSidedFoliage·SubsurfaceProfile은 opacity가 SSS 값이다. 대표 노멀 진입점 `EvaluateMaterialNormal`을 pass가 먼저 부른다(7.3절) | 미처리(Renderer 담당) |
 | MRD16 | (개정 18) `SurfaceAttributes`(14.1절)에 굴절(`refraction` float3)·표면 두께(`surfaceThickness` float, cm) 칸을 더한다. 머티리얼 번역은 MS2a부터 두 값을 IR로 내지만(6.8절) 칸이 없어 생성 원문에 쓰지 않는다(7.7절). UE 기본값은 굴절 (1, 0, 0)·두께 0.01 cm다 | 미처리(Renderer 담당) |
+| MRD18 | 3절 모듈 배치(61·106·122·127행 "MaterialCook → RendererShaders") | MaterialCook은 `RendererShaders`를 링크하지 않고 ShaderCore 셰이더 타입 등록부(등록부 원천)에서 `ShaderTypeMaterialShader` 타입을 본다(머티리얼 12.8절). 거르기는 traits 정규 바이트를 받는다(MSR19). **반영(d0e9e7ebb — Renderer 개정 14)** |
 
 **에셋 시스템(AssetSystem)**
 
@@ -70,7 +74,9 @@
 | MAS3 | 12절(텍스처) | 텍스처 샘플 종류 검사(V10)용 메타데이터 조회 API. 노멀맵 쿠킹 형식(채널 수)을 프로필마다 고정해 머티리얼의 노멀 해석이 static이 되게 함(UE의 노멀맵 Z 복원 규칙은 미확인) |
 | MAS4 | 10절(TargetProfile) | 쿠킹 머티리얼 품질 수준 목록 필드 |
 | MAS5 | 10절(cookKey 지역 입력·부분 쿠킹) | 처리기가 AssetIndex 역방향 Hard 의존에서 유도한 값(머티리얼 사용 대상, 8.4절)을 cookKey 지역 입력으로 넣는 규칙. 그러면 메시 추가가 머티리얼 cookKey를 바꿔 부분 쿠킹 대상에 든다 |
-| MAS6 | 9절(의존 입력 튜플) | 의존 튜플의 세 번째 값이 "같은 처리기 build key"가 아닌 "의존 에셋 종류가 정한 의존 키"(함수 키·컬렉션 layout 서명, 12.2절)일 수 있다는 일반화 |
+| MAS7 | 10.2절(쿠킹 처리기 문맥) | 처리기가 쿠킹 대상의 Build 의존 패키지를 전이로 열어 읽는 길: `CookContext`에 좁은 인터페이스(예 `CookDependencyOpener* dependencies` — `Open(AssetId, AssetDiagnostic*)` 하나, CookRun이 `EditorPackageSet::Open`으로 구현, 닫기는 지금 Release·CloseOpened). 소유 스레드 전용, Open 뒤 이전 `EditorPackageInfo` 참조는 무효, 열기가 의존 패키지를 dirty로 만들어도 메모리 값을 쓴다(12.8절 MS3c). **구현**: 머티리얼 세션이 `CookDependencyOpener`(CookProcessor.h)·`CookContext::dependencies`를 더했다(2026-11-28) |
+| MAS6 | 9절(의존 입력 튜플) | 의존 튜플의 세 번째 값이 "같은 처리기 build key"가 아닌 "의존 에셋 종류가 정한 의존 키"(함수 키·컬렉션 layout 서명, 12.2절)일 수 있다는 일반화. 머티리얼 번역 너겟은 AssetId 없는 평평한 키(셰이더 job 너겟과 같은 Record 키 — 에셋 처리기 SCC 식의 예외, static 변형 공유 8.5절)이고 bucket은 `material_translation`이다 |
+| MAS8 | 쿠킹 진단 코드 | `AssetDiagnosticCode::MaterialTranslationFailed`(detail = MaterialDiagnosticCode, related = 진단 asset) — 노드·문구는 쿠킹 보고서(12.8절 MS3c) |
 
 **엔진 구현 계획(EngineImplementationPlan.ko.md)**
 

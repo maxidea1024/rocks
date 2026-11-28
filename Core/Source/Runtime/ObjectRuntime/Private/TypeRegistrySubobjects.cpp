@@ -98,6 +98,14 @@ Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,
         }
     }
 
+    // 지정자 필드 접근자는 지정자가 있는 타입에만 있다(선언 클래스가 싣는다 — 상속한 지정자면
+    // 없다).
+    if ((ops.subobjectListAccess != nullptr && schema.subobjectListField == Guid{}) ||
+        (ops.subobjectRootAccess != nullptr && schema.subobjectRootField == Guid{}) ||
+        (ops.subobjectAttachAccess != nullptr && schema.subobjectAttachField == Guid{})) {
+        return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (layout.count != 0 && list == nullptr) {
         return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
     }
@@ -116,8 +124,11 @@ Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,
 
         roots += rootEntry ? 1 : 0;
         const FieldSchema* field = FindField(schema.fields, entry.id);
+        // 표 타입은 소유 필드의 T 그 자체다(SubobjectDefaultsContext::With의 static_cast와 생성
+        // 쓰기의 타입 생략이 이 전제에 기댄다).
         if (field == nullptr || !IsSingleObjectReference(*field) || field == list ||
-            field == root || !HasFlag(field->flags, FieldFlags::ReadOnly) ||
+            field->value.type != entry.type || field == root ||
+            !HasFlag(field->flags, FieldFlags::ReadOnly) ||
             (field->flags & ForbiddenSubobjectFieldFlags) != 0) {
             return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
         }

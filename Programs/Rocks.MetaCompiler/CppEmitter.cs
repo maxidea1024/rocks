@@ -465,6 +465,24 @@ internal static partial class CppEmitter
             Body($"ops.subobjects = Span<const RuntimeSubobjectOps>(subobjects, {type.Subobjects.Count});");
         }
 
+        // 소유 구조 지정자 필드 접근자는 그 지정자를 선언한 클래스만 싣는다(필드가 private일 수 있다 — 런타임이 base 사슬을 걷는다).
+        foreach ((string spelling, string? id, string slot) in new[]
+                 {
+                     (type.SubobjectListSpelling, type.SubobjectListId, "subobjectListAccess"),
+                     (type.SubobjectRootSpelling, type.SubobjectRootId, "subobjectRootAccess"),
+                     (type.SubobjectAttachSpelling, type.SubobjectAttachId, "subobjectAttachAccess")
+                 })
+        {
+            if (spelling.Length == 0 || id is null)
+            {
+                continue;
+            }
+
+            FieldModel field = type.Fields.First(candidate => candidate.Id == id);
+            string declaring = "::" + schema.Find(field.Owner).NativeName;
+            Body($"ops.{slot} = [](Object& owner) noexcept -> void* {{ return &static_cast<{native}&>(owner).{declaring}::{field.Name}; }};");
+        }
+
         if (type.HasInitSubobjectDefaults)
         {
             // 서명 대조다(Ops 본문 안 — GeneratedType은 friend라 private hook도 본다).

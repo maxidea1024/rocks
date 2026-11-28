@@ -23,7 +23,7 @@
 | `ROCKS_CLASS(SubobjectRoot = "rootComponent")` | `Actor` | `Root` subobject를 넣는 필드(`ObjectRef<T>`) |
 | `ROCKS_CLASS(SubobjectAttach = "attachParent")` | `SceneComponent` | subobject 타입의 부착 부모 필드(`WeakObjectRef<T>`) |
 
-- 값은 필드의 실효 도구 이름(`Name=` 또는 C++ 이름)이고, MetaCompiler가 FieldId로 풀어 스키마에 Guid로 싣는다. base에서 상속되고 파생이 다시 지정할 수 없다. 이름이 그 클래스 필드가 아니거나 종류가 다르면 오류다.
+- 값은 **그 클래스가 선언한** 필드의 실효 도구 이름(`Name=` 또는 C++ 이름 — base 필드는 private일 수 있어 받지 않는다)이고, MetaCompiler가 FieldId로 풀어 스키마에 Guid로 싣는다. base에서 상속되고 파생이 다시 지정할 수 없다. 이름이 그 클래스 필드가 아니거나 종류가 다르면 오류다.
 
 **필드 지정자**:
 
@@ -39,7 +39,7 @@ protected:
 - 접근 지정은 protected 이상이다(private이면 오류 — 파생 클래스가 `InitSubobjectDefaults`에서 `&Base::field_`로 상속 subobject를 덮을 수 있어야 한다).
 - **객체 이름 = 필드의 실효 도구 이름**(`Name=` 또는 C++ 이름). MetaCompiler가 `ValidateNameComponent` 규칙(첫 글자·64 byte·예약어)으로 검사한다.
 - `Root`: `SubobjectRoot`가 있어야 하고 `T`는 그 필드 타입의 파생이다. 클래스 계층 전체에서 하나뿐이다. `Root`와 `AttachParent`를 함께 쓰면 오류다.
-- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
+- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 부착 부모 타입은 subobject 타입 부착 필드(`WeakObjectRef<T>`)의 `T` 또는 그 파생이어야 한다(MetaCompiler RMC3002, 런타임도 `TypeMismatch`로 다시 본다). 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`이거나 Root 타입이 부착 필드 타입의 파생이 아니면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
 - `Transient`·`EditorOnly`·`Required`·`Notify`·Sparks 지정자와 함께 쓰면 오류다.
 - 진단 번호는 MetaCompiler 다음 빈 RMC 번호를 쓴다(구현 때 정한다).
 
@@ -79,6 +79,11 @@ struct RuntimeSubobjectOps {
 // RuntimeTypeOps에 더한다:
 Span<const RuntimeSubobjectOps> subobjects{};
 Result<void> (*initSubobjectDefaults)(SubobjectDefaultsContext&) noexcept = nullptr;  // 자기 선언만
+// 소유 구조 지정자 필드 주소(PF1b 구현 결정): 그 지정자를 선언한 클래스만 싣는다(Actor components_처럼
+// private일 수 있어 파생 GeneratedType이 접근하지 못한다). ObjectRuntime이 base 사슬을 걸어 찾는다.
+void* (*subobjectListAccess)(Object&) noexcept = nullptr;
+void* (*subobjectRootAccess)(Object&) noexcept = nullptr;
+void* (*subobjectAttachAccess)(Object&) noexcept = nullptr;
 ```
 
 ObjectRuntime 안에 타입을 지운 `ObjectRefArray` staged 대입(목록 앞에 넣기·다시 짜기)을 더한다.
@@ -103,15 +108,15 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 ### 10.3 생성(ObjectRuntime)
 
-`Result<void> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner, Span<ObjectHandle> out)`가 모든 경로(SpawnActor·graph 복원·prefab spawn)의 생성 규칙이다. `out`은 펼친 표 크기이고 만든 handle을 표 순서로 받는다(호출자가 클러스터 가입·장부에 쓴다).
+`Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner, Span<ObjectHandle> out)`가 모든 경로(SpawnActor·graph 복원·prefab spawn)의 생성 규칙이다. `out`은 펼친 표 크기이고 만든 handle을 표 순서로 받는다(호출자가 클러스터 가입·장부에 쓴다).
 
 1. owner 타입의 펼친 표를 얻는다(비면 성공·무동작).
 2. 표 순서로 subobject를 staged로 만든다 — `Create(type, outer = owner, name = 필드 도구 이름)`.
-3. 슬롯 생성 출처를 `ClassSubobject`로 표시한다(10.5절).
+3. 슬롯 생성 출처를 `ClassSubobject`로 표시한다(10.5절 — 생성 인자로 넘겨 별도 잠금이 없다).
 4. 배선(staged 쓰기): 소유 필드 ← subobject, `SubobjectList` 목록 ← 표 순서로 앞에(타입을 지운 대입), `Root`면 `SubobjectRoot` 필드 ← subobject, `SubobjectAttach` 필드 ← 표의 부착 부모.
 5. `InitSubobjectDefaults` 체인을 instancing 모드로 부른다.
 
-실패는 트랜잭션 실패다(Commit 전이라 전부 rollback).
+실패는 트랜잭션 실패다(Commit 전이라 전부 rollback). 소유 목록은 소유 객체를 막 만든 직후라 비어 있어야 한다(아니면 `InvalidArgument`). 필드 주소는 연산표 접근자로 얻고, `ObjectRef`·`WeakObjectRef`·`ObjectRefArray`가 standard-layout이라 첫 멤버(handle·배열 저장소)와 주소가 같다는 점(포인터 상호 변환 — 정적 검사)으로 handle 칸에 쓴다. weak 부착 부모는 GC 간선이 아니라 staged 객체에 바로 쓴다. 구현은 `ObjectRuntime/Private/DeclaredSubobjects.cpp`, 시험은 `DeclaredSubobjectTests`다.
 
 ### 10.4 graph 형식 3(ObjectSerialization)
 
@@ -173,7 +178,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 | 단계 | 내용 | 시험 |
 |---|---|---|
 | PF1a(끝 — 2026-11-28) | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경), 등록 검사(`SubobjectSchemaTests`), `DefaultSubobject_TableGeneratedWithStableGuid`. 모듈 경계 상속은 PF1e의 StaticMeshActor(WorldIntegration)가 실제 빌드로 덮는다 |
-| PF1b | ObjectRuntime `ObjectOrigin` 슬롯 표지, 타입을 지운 목록 staged 대입, `CreateDeclaredSubobjects`, `SubobjectDefaultsContext` 두 모드 | `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_TableReferencesResolve`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_NoSharedMutableComponent`, 실패 rollback |
+| PF1b(끝 — 2026-11-28) | ObjectRuntime `ObjectOrigin` 슬롯 표지, 타입을 지운 목록 staged 대입, `CreateDeclaredSubobjects`, `SubobjectDefaultsContext` 두 모드 | `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_TableReferencesResolve`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_NoSharedMutableComponent`, 실패 rollback |
 | PF1c | ObjectSerialization graph 형식 3(종류 1 노드·Include·도달 간선·목록 걸러내기·root/attach 비교·1단계 거부·2b 재짜기), subobject 기본값 레코드·노드별 기준 | `GraphV3_DeclaredSubobjectNodeRoundTrip`, `DefaultSubobject_RecordIsDeterministic`, `DefaultSubobject_TableReferencesEqualBaseline`, `DefaultSubobject_ClearedRootIsSaved`(null 강제 쓰기), `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `DefaultSubobject_NewClassSubobjectAppearsOnLoad`, `DefaultSubobject_MissingSubobjectRejected`, `DefaultSubobject_NameConflictRejected`, `DefaultSubobject_RenameKeepsGuidAndOverride`, golden 재고정 |
 | PF1d | World SpawnActor 한 트랜잭션·Component Outer·이름 규칙·subobject 장부·부착 함수 추출·Subobject 필드 비우기·편입 Outer 검사 | `DefaultSubobject_SpawnActorSingleTransaction`, `DefaultSubobject_ComponentOuterIsActor`, `AddComponent_NamesAreSmallestFreeNumber`, 기존 World 시험 |
 | PF1e | ERD37 이전(15종), `PrepareRoot` 삭제, Actor 예시, 기존 시험 갱신(`WorldLightComponentTests.cpp:840-865` root 재사용·거부, `StaticMeshComponentTests.cpp:559-608`, `WorldEnvironmentComponentTests.cpp:1068` 부근, `WorldPrimitiveComponentTests.cpp:478-500`, 리플렉션 필드 수), 에셋 재쿠킹 | `DefaultSubobject_EngineActorRootSavedAsSubobject`, 광원·Trigger·환경 기존 시험 |

@@ -52,6 +52,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::Material::referencedTextures",
+      "id": "316cb610ffa04504afe319ec6241b51e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Material::renderTracePhysicalMaterials",
       "id": "bd43a1c050ef4b0f973147ea6698fa55",
       "aliases": [],

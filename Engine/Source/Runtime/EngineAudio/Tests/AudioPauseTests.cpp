@@ -31,6 +31,9 @@ constexpr uint32 VoiceLimit = 32;
 constexpr float FillerPriority = 10.0f;
 constexpr float FillerVolume = 0.5f;
 constexpr uint32 CaptureFrames = 48;
+// 명령 링 2칸에 낸 재생 수다(뒤 둘이 Deferred로 남는다).
+constexpr uint32 RingCapacity = 2;
+constexpr uint32 DeferredPlays = 4;
 // 복귀 fade-in이 끝나는 데 걸리는 상한(mix frame — 묶음 2개 + 믹서 ramp)이다.
 constexpr uint64 ResumeSettleFrames = uint64{PumpFrames} * 2 + audio::DefaultParamRampFrames;
 // 시험용 분류·믹스 키다.
@@ -273,6 +276,50 @@ TEST(EngineAudio_PauseDefersStartAndStopsSilently) {
     REQUIRE(fixture.Frames(StartFrames));
     CHECK(CountFor(log, waiting, PlaybackEventKind::Started) == 1);
     CHECK(Near(Peak(fixture), DirectLevel));
+}
+
+// 명령 링이 차서 Deferred인 재생이 일시정지되면 voice를 놓고 자리를 지킨다. 보내기 전에 정지
+// 요청을 받은 Deferred는 Started 없이 끝난다(3.44.4절 PauseRecord).
+TEST(EngineAudio_PauseReleasesDeferredPlays) {
+    AudioEngineHostOptions options = DeterministicOptions(true);
+    options.commandCapacity = RingCapacity;
+    AudioEngine fixture(options);
+    REQUIRE(fixture.initialized);
+    const AudioSceneId scene = fixture.audio->RegisterScene();
+    EventLog log(fixture.allocator);
+    const SharedPtr<const SoundPcm> pcm = MakeConstantPcm(fixture.allocator, 0.2f, OneSecond);
+    const SoundSourceRef loop = MakeSound(fixture.allocator, pcm, true);
+    PlaybackHandle handles[DeferredPlays] = {};
+    for (PlaybackHandle& handle : handles) {
+        handle = PlayIn(fixture, log, scene, loop);
+    }
+
+    // 렌더 없이 묶음만 돌려 링을 비우지 않는다. 마지막 재생은 Deferred인 채로 정지 요청을 받는다.
+    REQUIRE(fixture.engine.RunFrame());
+    REQUIRE(fixture.audio->ControlStats().pendingDeferred == DeferredPlays - RingCapacity);
+    REQUIRE(fixture.audio->Stop(handles[DeferredPlays - 1]));
+    REQUIRE(fixture.engine.RunFrame());
+    REQUIRE(fixture.audio->ControlStats().pendingDeferred == DeferredPlays - RingCapacity);
+
+    REQUIRE(fixture.audio->SetScenePaused(scene, true));
+    REQUIRE(fixture.engine.RunFrame());
+    CHECK(fixture.audio->ControlStats().pendingDeferred == 0);
+    REQUIRE(fixture.Frames(StartFrames));
+    const PlaybackHandle stopped = handles[DeferredPlays - 1];
+    const PlaybackHandle waiting = handles[DeferredPlays - 2];
+    CHECK(EndOf(log, stopped) == PlaybackEndReason::Stopped);
+    CHECK(CountFor(log, stopped, PlaybackEventKind::Started) == 0);
+    CHECK(CountFor(log, waiting, PlaybackEventKind::Started) == 0);
+    CHECK(fixture.audio->ControlStats().pausedPlaybacks == DeferredPlays - 1);
+
+    REQUIRE(fixture.audio->SetScenePaused(scene, false));
+    REQUIRE(fixture.Frames(StartFrames));
+    CHECK(CountFor(log, waiting, PlaybackEventKind::Started) == 1);
+    for (uint32 index = 0; index + 1 < DeferredPlays; ++index) {
+        REQUIRE(fixture.audio->Stop(handles[index], 0));
+    }
+
+    REQUIRE(fixture.Frames(StartFrames));
 }
 
 // record 시계: 사용자 fade-in은 일시정지 동안 멈췄다가 그 값에서 이어진다(UE 컴포넌트 fader).

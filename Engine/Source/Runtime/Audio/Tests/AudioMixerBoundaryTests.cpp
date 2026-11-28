@@ -30,6 +30,11 @@ public:
         mixer.seqlockReadHook_ = hook;
     }
 
+    // 읽지 않은 누적 seqlock version이다(홀수 = 쓰는 중으로 보인다).
+    static void SetUnreadVersion(AudioMixer& mixer, uint32 voice, uint32 version) noexcept {
+        platform::AtomicStore(&mixer.sharedVoices_[voice].unreadVersion, version);
+    }
+
     static void SetMailbox(AudioMixer& mixer, uint32 voice, uint64 value) noexcept {
         platform::AtomicStore(&mixer.sharedVoices_[voice].mailbox, value);
     }
@@ -629,6 +634,34 @@ TEST(Audio_Mixer2_ControlRejectsAndClipRelease) {
 // 보내지 않은 Play 버리기(3.41.1절 — 명령 링이 차서 미뤘던 Play를 제어 쪽이 거둘 때): voice는
 // Reserved로 돌아가 바로 놓이고 clip 사용 수가 내려가 해제된다. Reserved·정지 요청 뒤·낡은 handle은
 // 거부한다. 버린 Play의 순번 틈은 다른 voice 재생에 영향이 없다.
+// 읽지 않은 누적 seqlock이 계속 쓰는 중으로 보이면 조회는 읽기 실패를 알리고 값을 0으로 두지
+// 않는다(제어 쪽이 커서를 진행하지 않게 — 3.44.6절). 다시 짝수면 정상으로 읽는다.
+TEST(Audio_Mixer2_UnreadTornReadReported) {
+    constexpr uint32 OddVersion = 1;
+    constexpr uint32 EvenVersion = 2;
+    SystemAllocator allocator;
+    OfflineAudioRender rig = MakeRig(ConfigOf(), allocator);
+    const float ones[1024] = {1.0f};
+    const AudioClipId clip = RegisterOnes(rig.Mixer(), ones, 1024);
+    AudioVoiceParams paused;
+    paused.paused = true;
+    const AudioVoiceHandle voice = PlayAt(rig, clip, 0);
+    (void)RenderBlocks(rig, 1, allocator);
+    REQUIRE(rig.Mixer().PublishParams(voice, paused));
+    (void)RenderBlocks(rig, 1, allocator);
+    const AudioVoiceStatus published = StatusOf(rig.Mixer(), voice);
+    CHECK(!published.unreadReadFailed);
+    REQUIRE(published.unreadAsOfFrame != UnsetMixFrame);
+
+    AudioMixerTestAccess::SetUnreadVersion(rig.Mixer(), voice.index, OddVersion);
+    const AudioVoiceStatus torn = StatusOf(rig.Mixer(), voice);
+    CHECK(torn.unreadReadFailed);
+    CHECK(torn.unreadAsOfFrame == UnsetMixFrame);
+
+    AudioMixerTestAccess::SetUnreadVersion(rig.Mixer(), voice.index, EvenVersion);
+    CHECK(!StatusOf(rig.Mixer(), voice).unreadReadFailed);
+}
+
 TEST(Audio_Mixer2_AbandonPreparedPlay) {
     SystemAllocator allocator;
     float ones[2048];
