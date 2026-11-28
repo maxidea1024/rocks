@@ -82,6 +82,7 @@
     - 보통 팝업(메뉴·콤보·문맥 메뉴 — 초점을 받는다)은 닫는다(UE는 탭을 누르면 메뉴 stack을 닫는다). 접기만 하면 초점이 빈 층에 남아 사라지고, 돌아와도 복원되지 않는다(리뷰 2026-11-28).
     - 숨어도 남는 팝업(`PopupRequest::keepWhileHidden` — `MenuAnchor::SetKeepOpenWhileHidden`, 오류 팝업만 켠다)은 층을 접고(Collapsed), 다시 보이면 붙일 때의 보이기로 되돌린다. 오류 팝업이 다른 탭 위에 떠 있지 않고 탭으로 돌아오면 다시 보인다. 이런 팝업은 초점을 받지 않는다.
     - UE는 숨은 anchor가 Tick되지 않아 팝업 창이 옛 자리에 남는다.
+    - 배치를 대신하는 Overlay 파생(창 루트 `WindowChrome`)도 배치 처음에 같은 처리를 한다(`Overlay::SyncPopupVisibility` — protected). 2026-11-28 사용자 보고: 실제 UiDemo 창(루트 `WindowChrome`)에서 오류 팝업이 다른 탭에도 남았다. self-test는 일반 Overlay 루트라 놓쳤다 — `WindowChrome` 루트 시험을 더했다.
   - 갤러리 self-test·스냅샷 루트도 실제 창처럼 Overlay(팝업 호스트)로 감싼다.
 - 문구 shaping은 호출자가 넘긴 `Text`를 상자가 `TextShaper`로 한다(지역화 — 지금 오류 캡션과 같다).
 - **`UiHostServices` 프레임 동작 대기열**(새 계약): `Result<void> DeferFrameAction(Delegate<void()>&&)`·`usize RunFrameActions()`·`PendingFrameActionCount()`. 해체 대기열(21.4절)과 같은 방식(넣은 순서, 도는 중 넣은 항목은 다음 프레임, 재진입 0)이지만 사용자 hook 해체가 아니라 "트리 순회 밖에서 할 일"이다. `Shutdown`에서는 돌리지 않고 버린다(닫는 앱에서 팝업을 열지 않는다). 빈 delegate는 `InvalidArgument`, 할당 실패는 `OutOfMemory`다.

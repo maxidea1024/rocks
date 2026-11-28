@@ -79,6 +79,9 @@ Vec2 WindowChrome::ComputeDesiredSize(float) const noexcept {
 
 Result<void> WindowChrome::Arrange(const Geometry& geometry) noexcept {
     SetGeometry(geometry);
+    // 숨은 anchor의 팝업을 먼저 정리한다(Overlay::Arrange와 같다 — 22.6절). 창 루트라 탭 전환이
+    // 여기까지 올라온다(2026-11-28 사용자 보고: 오류 팝업이 다른 탭에서도 남음).
+    SyncPopupVisibility();
     const Vec4 inset = Inset();
     const float width = math::Max(0.0f, geometry.size.x - inset.x - inset.z);
     const float height = math::Max(0.0f, geometry.size.y - inset.y - inset.w);
